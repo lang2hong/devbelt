@@ -3,5 +3,7 @@ packages:
 
 allowBuilds:
   '@vscode/vsce-sign': true
+  cpu-features: set this to true or false
   esbuild: true
   keytar: false
+  ssh2: set this to true or false

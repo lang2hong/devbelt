@@ -22,8 +22,8 @@ const options = {
   target: 'node18',
   sourcemap: 'inline',
   minify: false,
-  // 仅 external 掉 vscode（运行时由扩展 host 提供），其余全部打入 bundle
-  external: ['vscode'],
+  // external: vscode 由扩展 host 提供；ssh2 含可选原生模块，运行时加载
+  external: ['vscode', 'ssh2', 'cpu-features'],
   // db-core 是 ESM 源码，经由 workspace 链接解析，需声明为可打包依赖
   mainFields: ['module', 'main'],
   logLevel: 'info',

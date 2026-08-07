@@ -580,9 +580,12 @@
     "test": "vitest run",
     "package": "@vscode/vsce package"
   },
-  "dependencies": {},
+  "dependencies": {
+    "ssh2": "^1.16.1"
+  },
   "devDependencies": {
     "@db-client/core": "workspace:*",
+    "@types/ssh2": "^1.15.0",
     "@types/vscode": "^1.85.0",
     "@types/node": "^20.0.0",
     "@vitejs/plugin-vue": "^5.2.1",
@@ -591,6 +594,7 @@
     "mysql2": "^3.23.2",
     "pg": "^8.22.0",
     "sql-formatter": "^15.8.2",
+    "ssh2": "^1.16.1",
     "typescript": "^5.9.3",
     "vite": "^6.0.7",
     "vitest": "^4.1.10",

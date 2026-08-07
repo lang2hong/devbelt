@@ -1,6 +1,7 @@
 import { ConnectionFactory, QueryService, MetadataService, DataService, TableService } from '@db-client/core';
 import type { DatabaseType } from '@db-client/core';
 import type { SavedConnection } from './connectionStore';
+import { SshTunnel } from './sshTunnel';
 
 /**
  * 连接会话：连接 + 查询/元数据/数据编辑/表操作服务的组合。
@@ -33,11 +34,22 @@ export class ConnectionManager {
     const existing = this.sessions.get(conn.id);
     if (existing) return existing;
 
+    // SSH 隧道：如有配置则建隧道，用本地端口替换远程 host:port
+    let host = conn.host;
+    let port = conn.port;
+    if (conn.sshHost) {
+      const localPort = await SshTunnel.create(conn);
+      if (localPort) {
+        host = '127.0.0.1';
+        port = localPort;
+      }
+    }
+
     const { connection, dialect } = ConnectionFactory.createWithDialect(
       conn.dbType as DatabaseType,
       {
-        host: conn.host,
-        port: conn.port,
+        host,
+        port,
         user: conn.user,
         password: conn.password,
         database: conn.database,
@@ -60,6 +72,7 @@ export class ConnectionManager {
       close: () => {
         connection.end();
         this.sessions.delete(conn.id);
+        if (conn.sshHost) SshTunnel.close(conn.id);
       },
     };
     this.sessions.set(conn.id, session);
@@ -80,5 +93,6 @@ export class ConnectionManager {
       session.close();
     }
     this.sessions.clear();
+    SshTunnel.closeAll();
   }
 }

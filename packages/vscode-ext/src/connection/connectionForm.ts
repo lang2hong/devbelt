@@ -131,6 +131,12 @@ function decodeConnection(payload: any): SavedConnection {
     password: payload.password,
     database: payload.database,
     dbPath: payload.dbPath,
+    sshHost: payload.sshHost || undefined,
+    sshPort: payload.sshPort ? Number(payload.sshPort) : undefined,
+    sshUser: payload.sshUser || undefined,
+    sshPassword: payload.sshPassword || undefined,
+    sshPrivateKeyPath: payload.sshPrivateKeyPath || undefined,
+    sshPassphrase: payload.sshPassphrase || undefined,
   };
 }
 
@@ -250,14 +256,23 @@ function connectionFormHtml(groups: ConnectionGroup[]): string {
     <select id="group">
       <option value="" selected data-i18n="noGroup">No group</option>
       ${groupOptions}
-    </select>
-  </div>
-  <div class="actions">
-    <button id="btnTest" class="secondary" data-i18n="test">Test Connection</button>
-    <button id="btnSave" data-i18n="save">Save</button>
-  </div>
-  <div id="status"></div>
-  </div>
+     </select>
+   </div>
+   <details class="ssh-section">
+     <summary data-i18n="ssh">SSH Tunnel (optional)</summary>
+     <div class="field"><label data-i18n="sshHost">SSH Host</label><input id="sshHost" type="text" placeholder="192.168.1.1"></div>
+     <div class="field"><label data-i18n="sshPort">SSH Port</label><input id="sshPort" type="number" value="22"></div>
+     <div class="field"><label data-i18n="sshUser">SSH User</label><input id="sshUser" type="text" placeholder="root"></div>
+     <div class="field"><label data-i18n="sshPass">SSH Password</label><input id="sshPassword" type="password"></div>
+     <div class="field"><label data-i18n="sshKey">SSH Private Key Path</label><input id="sshPrivateKeyPath" type="text" placeholder="~/.ssh/id_rsa"></div>
+     <div class="field"><label data-i18n="sshPhrase">SSH Key Passphrase</label><input id="sshPassphrase" type="password"></div>
+   </details>
+   <div class="actions">
+     <button id="btnTest" class="secondary" data-i18n="test">Test Connection</button>
+     <button id="btnSave" data-i18n="save">Save</button>
+   </div>
+   <div id="status"></div>
+   </div>
 
 <script>
   const vscode = acquireVsCodeApi();
@@ -342,6 +357,12 @@ function connectionFormHtml(groups: ConnectionGroup[]): string {
       database: document.getElementById('database').value,
       dbPath: document.getElementById('dbPath').value,
       groupId: document.getElementById('group').value,
+      sshHost: document.getElementById('sshHost').value,
+      sshPort: document.getElementById('sshPort').value,
+      sshUser: document.getElementById('sshUser').value,
+      sshPassword: document.getElementById('sshPassword').value,
+      sshPrivateKeyPath: document.getElementById('sshPrivateKeyPath').value,
+      sshPassphrase: document.getElementById('sshPassphrase').value,
     };
   }
 

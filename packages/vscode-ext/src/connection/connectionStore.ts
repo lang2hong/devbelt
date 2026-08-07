@@ -14,6 +14,18 @@ export interface SavedConnection extends ConnectionConfig {
   dbType: DatabaseType;
   /** 所属分组 id；未分组为 undefined */
   groupId?: string;
+  /** SSH 隧道主机（为空表示不使用 SSH） */
+  sshHost?: string;
+  /** SSH 端口（默认 22） */
+  sshPort?: number;
+  /** SSH 用户名 */
+  sshUser?: string;
+  /** SSH 密码认证 */
+  sshPassword?: string;
+  /** SSH 私钥路径 */
+  sshPrivateKeyPath?: string;
+  /** SSH 私钥密码 */
+  sshPassphrase?: string;
 }
 
 /**
