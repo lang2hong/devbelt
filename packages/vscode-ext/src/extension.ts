@@ -6,6 +6,7 @@ import { QueryExecutor } from './result/queryExecutor';
 import { TableQueryView } from './result/tableQueryView';
 import { TableDesignView } from './result/tableDesignView';
 import { StatusView } from './result/statusView';
+import { ERDiagramView } from './result/erDiagramView';
 import { HistoryStore } from './history/historyStore';
 import { AuthService } from './sync/authService';
 import { SyncManager } from './sync/syncManager';
@@ -26,6 +27,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   TableQueryView.init(context.extensionUri);
   TableDesignView.init(context.extensionUri);
   StatusView.init(context.extensionUri);
+  ERDiagramView.init(context.extensionUri);
 
   // 同步服务
   const serverUrl = AuthService.getServerUrl(vscode.workspace.getConfiguration());
@@ -62,6 +64,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('dbclient.serverStatus', (node: any) => {
       if (node?.conn) {
         StatusView.open(node.conn, manager);
+      }
+    }),
+    // ER 图
+    vscode.commands.registerCommand('dbclient.showERDiagram', (node: any) => {
+      if (node?.conn && node?.database) {
+        ERDiagramView.open(node.conn, node.database, manager);
       }
     }),
   );

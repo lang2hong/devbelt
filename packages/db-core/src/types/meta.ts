@@ -86,6 +86,14 @@ export interface UserMeta {
   host?: string;
 }
 
+/** 外键关系 */
+export interface ForeignKeyMeta {
+  tableName: string;
+  columnName: string;
+  refTable: string;
+  refColumn: string;
+}
+
 /** 本地保存的查询（Navicat Queries 分类的本地存储） */
 export interface SavedQuery {
   id: string;

@@ -1,5 +1,5 @@
 import { DatabaseType } from '../types/connection';
-import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta } from '../types/meta';
+import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
 
 /**
@@ -53,6 +53,13 @@ export class SqliteDialect implements SqlDialect {
     return '';
   }
 
+  getForeignKeysSql(): string {
+    return `SELECT m.name AS tableName, fk."from" AS columnName, fk."table" AS refTable, fk."to" AS refColumn
+      FROM sqlite_master m
+      JOIN pragma_foreign_key_list(m.name) fk
+      WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%'`;
+  }
+
   getColumnsSql(table: string): string {
     return `PRAGMA table_info(${this.wrap(table)})`;
   }
@@ -84,5 +91,14 @@ export class SqliteDialect implements SqlDialect {
 
   parseUserList(): UserMeta[] {
     return [];
+  }
+
+  parseForeignKeys(rows: any[]): ForeignKeyMeta[] {
+    return rows.map((row) => ({
+      tableName: row.tableName || row.tableName,
+      columnName: row.columnName || row.columnName,
+      refTable: row.refTable || row.refTable,
+      refColumn: row.refColumn || row.refColumn,
+    }));
   }
 }

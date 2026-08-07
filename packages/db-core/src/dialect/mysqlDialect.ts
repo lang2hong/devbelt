@@ -1,5 +1,5 @@
 import { DatabaseType } from '../types/connection';
-import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta } from '../types/meta';
+import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
 
 /**
@@ -71,6 +71,11 @@ export class MysqlDialect implements SqlDialect {
     return `SELECT user AS name, host AS host FROM mysql.user ORDER BY user`;
   }
 
+  getForeignKeysSql(database?: string): string {
+    const where = database ? `table_schema = '${database}'` : `table_schema = database()`;
+    return `SELECT table_name AS tableName, column_name AS columnName, referenced_table_name AS refTable, referenced_column_name AS refColumn FROM information_schema.key_column_usage WHERE referenced_table_name IS NOT NULL AND ${where}`;
+  }
+
   getColumnsSql(table: string, database?: string): string {
     return database
       ? `SHOW FULL COLUMNS FROM ${this.wrap(table)} FROM ${this.wrap(database)}`
@@ -128,5 +133,14 @@ export class MysqlDialect implements SqlDialect {
 
   parseUserList(rows: any[]): UserMeta[] {
     return rows.map((row) => ({ name: row.name, host: row.host || '%' }));
+  }
+
+  parseForeignKeys(rows: any[]): ForeignKeyMeta[] {
+    return rows.map((row) => ({
+      tableName: row.tableName,
+      columnName: row.columnName,
+      refTable: row.refTable,
+      refColumn: row.refColumn,
+    }));
   }
 }

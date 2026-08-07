@@ -31,4 +31,4 @@ export { DataService } from './query/dataService';
 export { TableService } from './query/tableService';
 export { SchemaDiffService } from './query/schemaDiffService';
 export type { TableDiff, ColumnDiff } from './query/schemaDiffService';
-export type { RoutineMeta, EventMeta, SavedQuery, IndexMeta, UserMeta } from './types/meta';
+export type { RoutineMeta, EventMeta, SavedQuery, IndexMeta, UserMeta, ForeignKeyMeta } from './types/meta';

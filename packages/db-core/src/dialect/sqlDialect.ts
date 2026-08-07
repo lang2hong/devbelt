@@ -1,5 +1,5 @@
 import type { DatabaseType } from '../types/connection';
-import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta } from '../types/meta';
+import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta } from '../types/meta';
 
 /**
  * 方言行为抽象（策略模式）。
@@ -56,6 +56,9 @@ export interface SqlDialect {
   /** 查询用户列表 SQL（空字符串表示不支持） */
   getUserListSql(): string;
 
+  /** 查询外键关系 SQL（空字符串表示不支持） */
+  getForeignKeysSql(database?: string): string;
+
   /** 查询表的列元数据 SQL */
   getColumnsSql(table: string, database?: string): string;
 
@@ -76,4 +79,7 @@ export interface SqlDialect {
 
   /** 解析用户列表查询结果 */
   parseUserList(rows: any[]): UserMeta[];
+
+  /** 解析外键关系查询结果 */
+  parseForeignKeys(rows: any[]): ForeignKeyMeta[];
 }

@@ -232,6 +232,11 @@
         "category": "DB Client"
       },
       {
+        "command": "dbclient.showERDiagram",
+        "title": "Show ER Diagram",
+        "category": "DB Client"
+      },
+      {
         "command": "dbclient.viewTableSource",
         "title": "View DDL",
         "category": "DB Client"
@@ -397,6 +402,11 @@
         },
         {
           "command": "dbclient.compareSchema",
+          "when": "view == dbclient.explorer && viewItem == database",
+          "group": "1_db"
+        },
+        {
+          "command": "dbclient.showERDiagram",
           "when": "view == dbclient.explorer && viewItem == database",
           "group": "1_db"
         },

@@ -1,5 +1,5 @@
 import { DatabaseType } from '../types/connection';
-import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta } from '../types/meta';
+import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
 
 /**
@@ -72,6 +72,15 @@ export class PostgreSqlDialect implements SqlDialect {
     return `SELECT usename AS name FROM pg_user ORDER BY usename`;
   }
 
+  getForeignKeysSql(): string {
+    return `SELECT tc.table_name AS "tableName", kcu.column_name AS "columnName",
+      ccu.table_name AS "refTable", ccu.column_name AS "refColumn"
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
+      JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name
+      WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = current_schema()`;
+  }
+
   getColumnsSql(table: string): string {
     return `SELECT column_name AS name,
         data_type AS simple_type,
@@ -117,5 +126,14 @@ export class PostgreSqlDialect implements SqlDialect {
 
   parseUserList(rows: any[]): UserMeta[] {
     return rows.map((row) => ({ name: row.name }));
+  }
+
+  parseForeignKeys(rows: any[]): ForeignKeyMeta[] {
+    return rows.map((row) => ({
+      tableName: row.tableName || row.tablename,
+      columnName: row.columnName || row.column_name,
+      refTable: row.refTable || row.reftable,
+      refColumn: row.refColumn || row.refcolumn,
+    }));
   }
 }

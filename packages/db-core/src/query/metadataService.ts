@@ -1,5 +1,5 @@
 import { QueryService } from './queryService';
-import type { ColumnMeta, TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta } from '../types/meta';
+import type { ColumnMeta, TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta } from '../types/meta';
 
 /**
  * 元数据服务（复用查询服务 + 方言）。
@@ -126,6 +126,14 @@ export class MetadataService {
       return r.rows;
     }
     return [];
+  }
+
+  /** 查询外键关系 */
+  async getForeignKeys(database?: string): Promise<ForeignKeyMeta[]> {
+    const sql = this.queryService.dialect.getForeignKeysSql(database);
+    if (!sql) return [];
+    const result = await this.queryService.query(sql);
+    return this.queryService.dialect.parseForeignKeys(result.rows);
   }
 
   /** 将各方言列元数据行归一化为统一结构 */
