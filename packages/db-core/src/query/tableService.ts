@@ -74,6 +74,35 @@ export class TableService {
     return this.ddl(`CREATE ${isUnique ? 'UNIQUE ' : ''}INDEX ${this.wrap(indexName)} ON ${qualifiedTable} (${colList})`);
   }
 
+  // ── 用户管理 ──
+
+  /** 创建用户 */
+  async createUser(name: string, password: string, host = '%'): Promise<QueryResult> {
+    return this.ddl(`CREATE USER '${name}'@'${host}' IDENTIFIED BY '${password.replace(/'/g, "''")}'`);
+  }
+
+  /** 删除用户 */
+  async dropUser(name: string, host = '%'): Promise<QueryResult> {
+    return this.ddl(`DROP USER IF EXISTS '${name}'@'${host}'`);
+  }
+
+  /** 修改用户密码 */
+  async alterUserPassword(name: string, password: string, host = '%'): Promise<QueryResult> {
+    return this.ddl(`ALTER USER '${name}'@'${host}' IDENTIFIED BY '${password.replace(/'/g, "''")}'`);
+  }
+
+  /** 授予权限 */
+  async grantPrivilege(name: string, privilege: string, database?: string, host = '%'): Promise<QueryResult> {
+    const target = database ? `${this.wrap(database)}.*` : '*.*';
+    return this.ddl(`GRANT ${privilege} ON ${target} TO '${name}'@'${host}'`);
+  }
+
+  /** 撤销权限 */
+  async revokePrivilege(name: string, privilege: string, database?: string, host = '%'): Promise<QueryResult> {
+    const target = database ? `${this.wrap(database)}.*` : '*.*';
+    return this.ddl(`REVOKE ${privilege} ON ${target} FROM '${name}'@'${host}'`);
+  }
+
   /**
    * 导出表结构 + 数据（mysqldump 风格 SQL）。
    * 生成：DROP TABLE IF EXISTS + CREATE TABLE + INSERT 语句。

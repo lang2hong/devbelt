@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { SchemaDiffService } from '@db-client/core';
 import type { SavedConnection } from './connection/connectionStore';
 import { ConnectionStore } from './connection/connectionStore';
 import { ConnectionManager } from './connection/connectionManager';
@@ -285,6 +286,88 @@ export function registerCommands(deps: Deps): void {
     await session.query.query(`DROP DATABASE ${wrapIdent(node.conn, node.label)}`);
     manager.disposeConn(node.conn.id);
     treeProvider.refresh();
+  });
+
+  // 结构差异/同步：比对两个数据库结构，生成 ALTER SQL
+  sub('dbclient.compareSchema', async (node: DbTreeNode) => {
+    if (!node?.conn || !node?.database) return;
+    const session = await manager.connect(node.conn);
+    // 选目标库
+    const targetDbs = (await session.metadata.getDatabases()).filter((d) => d !== node.database);
+    if (!targetDbs.length) {
+      vscode.window.showWarningMessage('No other databases to compare.');
+      return;
+    }
+    const target = await vscode.window.showQuickPick(
+      targetDbs.map((d) => ({ label: d, value: d })),
+      { placeHolder: `Compare "${node.database}" with which database?` },
+    );
+    if (!target) return;
+
+    const diffs = await SchemaDiffService.diff(
+      session.metadata, node.database,
+      session.metadata, target.value,
+    );
+    const syncSql = await SchemaDiffService.generateSyncSql(
+      diffs, target.value, session.table, node.database,
+    );
+
+    // 统计差异
+    const added = diffs.filter((d) => d.status === 'added').length;
+    const removed = diffs.filter((d) => d.status === 'removed').length;
+    const changed = diffs.filter((d) => d.status === 'changed').length;
+    const header = `-- Diff: ${node.database} → ${target.value} (${added} added, ${removed} removed, ${changed} changed)\n\n`;
+
+    await openSqlDoc(header + syncSql);
+  });
+
+  // ── 用户管理 ──
+  sub('dbclient.createUser', async (node: DbTreeNode) => {
+    if (!node?.conn) return;
+    const name = await vscode.window.showInputBox({ prompt: l10n('user.namePrompt') });
+    if (!name) return;
+    const password = await vscode.window.showInputBox({ prompt: l10n('user.passwordPrompt'), password: true });
+    if (password === undefined) return;
+    const host = await vscode.window.showInputBox({ prompt: l10n('user.hostPrompt'), value: '%' }) || '%';
+    const session = await manager.connect(node.conn);
+    await session.table.createUser(name, password, host);
+    treeProvider.refresh();
+    vscode.window.showInformationMessage(l10n('user.created', { name }));
+  });
+  sub('dbclient.dropUser', async (node: DbTreeNode) => {
+    if (!node?.conn) return;
+    if (!(await confirm('user.dropConfirm', 'user.drop', node.label))) return;
+    const session = await manager.connect(node.conn);
+    const parts = node.label.split('@');
+    await session.table.dropUser(parts[0], parts[1] || '%');
+    treeProvider.refresh();
+  });
+  sub('dbclient.changePassword', async (node: DbTreeNode) => {
+    if (!node?.conn) return;
+    const password = await vscode.window.showInputBox({ prompt: l10n('user.passwordPrompt'), password: true });
+    if (!password) return;
+    const session = await manager.connect(node.conn);
+    const parts = node.label.split('@');
+    await session.table.alterUserPassword(parts[0], password, parts[1] || '%');
+    vscode.window.showInformationMessage(l10n('user.passwordChanged', { name: node.label }));
+  });
+  sub('dbclient.grantPrivilege', async (node: DbTreeNode) => {
+    if (!node?.conn) return;
+    const priv = await vscode.window.showInputBox({ prompt: l10n('user.privPrompt'), value: 'ALL PRIVILEGES' });
+    if (!priv) return;
+    const session = await manager.connect(node.conn);
+    const parts = node.label.split('@');
+    await session.table.grantPrivilege(parts[0], priv, node.database, parts[1] || '%');
+    vscode.window.showInformationMessage(l10n('user.granted', { priv, name: node.label }));
+  });
+  sub('dbclient.revokePrivilege', async (node: DbTreeNode) => {
+    if (!node?.conn) return;
+    const priv = await vscode.window.showInputBox({ prompt: l10n('user.privPrompt'), value: 'ALL PRIVILEGES' });
+    if (!priv) return;
+    const session = await manager.connect(node.conn);
+    const parts = node.label.split('@');
+    await session.table.revokePrivilege(parts[0], priv, node.database, parts[1] || '%');
+    vscode.window.showInformationMessage(l10n('user.revoked', { priv, name: node.label }));
   });
 
   // ── 保存的查询 ──

@@ -222,6 +222,16 @@
         "category": "DB Client"
       },
       {
+        "command": "dbclient.serverStatus",
+        "title": "Server Status",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.compareSchema",
+        "title": "Compare Schema",
+        "category": "DB Client"
+      },
+      {
         "command": "dbclient.viewTableSource",
         "title": "View DDL",
         "category": "DB Client"
@@ -234,6 +244,31 @@
       {
         "command": "dbclient.mockData",
         "title": "Generate Mock Data",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.createUser",
+        "title": "Create User",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.dropUser",
+        "title": "Delete User",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.changePassword",
+        "title": "Change Password",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.grantPrivilege",
+        "title": "Grant Privilege",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.revokePrivilege",
+        "title": "Revoke Privilege",
         "category": "DB Client"
       },
       {
@@ -321,6 +356,11 @@
           "group": "1_conn"
         },
         {
+          "command": "dbclient.serverStatus",
+          "when": "view == dbclient.explorer && viewItem == connection",
+          "group": "1_conn"
+        },
+        {
           "command": "dbclient.newTable",
           "when": "view == dbclient.explorer && viewItem == category_table",
           "group": "inline"
@@ -356,6 +396,11 @@
           "group": "2_danger"
         },
         {
+          "command": "dbclient.compareSchema",
+          "when": "view == dbclient.explorer && viewItem == database",
+          "group": "1_db"
+        },
+        {
           "command": "dbclient.previewView",
           "when": "view == dbclient.explorer && viewItem == view",
           "group": "inline"
@@ -389,6 +434,31 @@
           "command": "dbclient.newQuery",
           "when": "view == dbclient.explorer && viewItem == category_query",
           "group": "inline"
+        },
+        {
+          "command": "dbclient.createUser",
+          "when": "view == dbclient.explorer && viewItem == category_user",
+          "group": "inline"
+        },
+        {
+          "command": "dbclient.changePassword",
+          "when": "view == dbclient.explorer && viewItem == user",
+          "group": "1_user"
+        },
+        {
+          "command": "dbclient.grantPrivilege",
+          "when": "view == dbclient.explorer && viewItem == user",
+          "group": "1_user"
+        },
+        {
+          "command": "dbclient.revokePrivilege",
+          "when": "view == dbclient.explorer && viewItem == user",
+          "group": "1_user"
+        },
+        {
+          "command": "dbclient.dropUser",
+          "when": "view == dbclient.explorer && viewItem == user",
+          "group": "2_danger"
         },
         {
           "command": "dbclient.openQuery",

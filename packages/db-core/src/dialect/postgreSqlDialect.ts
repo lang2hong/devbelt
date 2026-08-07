@@ -1,5 +1,5 @@
 import { DatabaseType } from '../types/connection';
-import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta } from '../types/meta';
+import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
 
 /**
@@ -68,6 +68,10 @@ export class PostgreSqlDialect implements SqlDialect {
       WHERE schemaname = current_schema() AND tablename = '${table}'`;
   }
 
+  getUserListSql(): string {
+    return `SELECT usename AS name FROM pg_user ORDER BY usename`;
+  }
+
   getColumnsSql(table: string): string {
     return `SELECT column_name AS name,
         data_type AS simple_type,
@@ -109,5 +113,9 @@ export class PostgreSqlDialect implements SqlDialect {
       isPrimary: row.is_primary || false,
       type: row.definition || '',
     }));
+  }
+
+  parseUserList(rows: any[]): UserMeta[] {
+    return rows.map((row) => ({ name: row.name }));
   }
 }

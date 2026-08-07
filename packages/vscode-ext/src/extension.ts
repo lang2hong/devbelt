@@ -5,6 +5,7 @@ import { DbTreeDataProvider } from './tree/dbTreeDataProvider';
 import { QueryExecutor } from './result/queryExecutor';
 import { TableQueryView } from './result/tableQueryView';
 import { TableDesignView } from './result/tableDesignView';
+import { StatusView } from './result/statusView';
 import { HistoryStore } from './history/historyStore';
 import { AuthService } from './sync/authService';
 import { SyncManager } from './sync/syncManager';
@@ -24,6 +25,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Vue webview 初始化
   TableQueryView.init(context.extensionUri);
   TableDesignView.init(context.extensionUri);
+  StatusView.init(context.extensionUri);
 
   // 同步服务
   const serverUrl = AuthService.getServerUrl(vscode.workspace.getConfiguration());
@@ -54,6 +56,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('dbclient.designTable', (node: any) => {
       if (node?.conn && node?.database) {
         void TableDesignView.open(node.conn, node.label, node.database, manager);
+      }
+    }),
+    // Server 状态面板
+    vscode.commands.registerCommand('dbclient.serverStatus', (node: any) => {
+      if (node?.conn) {
+        StatusView.open(node.conn, manager);
       }
     }),
   );

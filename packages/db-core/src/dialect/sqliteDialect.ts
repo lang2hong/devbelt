@@ -1,5 +1,5 @@
 import { DatabaseType } from '../types/connection';
-import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta } from '../types/meta';
+import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
 
 /**
@@ -49,6 +49,10 @@ export class SqliteDialect implements SqlDialect {
     return `SELECT name AS name, 0 AS is_unique, name LIKE 'sqlite_autoindex%' AS is_primary FROM sqlite_master WHERE type = 'index' AND tbl_name = '${table}'`;
   }
 
+  getUserListSql(): string {
+    return '';
+  }
+
   getColumnsSql(table: string): string {
     return `PRAGMA table_info(${this.wrap(table)})`;
   }
@@ -76,5 +80,9 @@ export class SqliteDialect implements SqlDialect {
       isUnique: row.is_unique || false,
       isPrimary: row.is_primary || false,
     }));
+  }
+
+  parseUserList(): UserMeta[] {
+    return [];
   }
 }

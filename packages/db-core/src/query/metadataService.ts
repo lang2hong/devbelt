@@ -1,5 +1,5 @@
 import { QueryService } from './queryService';
-import type { ColumnMeta, TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta } from '../types/meta';
+import type { ColumnMeta, TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta } from '../types/meta';
 
 /**
  * 元数据服务（复用查询服务 + 方言）。
@@ -81,6 +81,51 @@ export class MetadataService {
     if (!sql) return [];
     const result = await this.queryService.query(sql);
     return this.queryService.dialect.parseIndexList(result.rows);
+  }
+
+  /** 查询用户列表 */
+  async getUsers(): Promise<UserMeta[]> {
+    const sql = this.queryService.dialect.getUserListSql();
+    if (!sql) return [];
+    const result = await this.queryService.query(sql);
+    return this.queryService.dialect.parseUserList(result.rows);
+  }
+
+  /** 查询进程列表（MySQL: SHOW PROCESSLIST, PG: pg_stat_activity） */
+  async getProcessList(): Promise<any[]> {
+    const dbType = this.queryService.dialect.dbType;
+    if (dbType === 'MYSQL') {
+      const r = await this.queryService.query('SHOW PROCESSLIST');
+      return r.rows;
+    }
+    if (dbType === 'PG') {
+      const r = await this.queryService.query(
+        'SELECT pid, usename, datname, client_addr AS host, state, query FROM pg_stat_activity ORDER BY pid',
+      );
+      return r.rows;
+    }
+    return [];
+  }
+
+  /** 查询状态变量（MySQL only: SHOW STATUS） */
+  async getStatusVariables(): Promise<any[]> {
+    if (this.queryService.dialect.dbType !== 'MYSQL') return [];
+    const r = await this.queryService.query('SHOW GLOBAL STATUS');
+    return r.rows;
+  }
+
+  /** 查询服务器变量（MySQL: SHOW VARIABLES, PG: pg_settings） */
+  async getServerVariables(): Promise<any[]> {
+    const dbType = this.queryService.dialect.dbType;
+    if (dbType === 'MYSQL') {
+      const r = await this.queryService.query('SHOW VARIABLES');
+      return r.rows;
+    }
+    if (dbType === 'PG') {
+      const r = await this.queryService.query('SELECT name, setting, short_desc AS description FROM pg_settings ORDER BY name');
+      return r.rows;
+    }
+    return [];
   }
 
   /** 将各方言列元数据行归一化为统一结构 */

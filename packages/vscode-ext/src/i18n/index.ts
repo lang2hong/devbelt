@@ -125,6 +125,21 @@ const en: MessageCatalog = {
   'event.delete': 'Delete Event',
   'event.deleteConfirm': 'Delete event "{name}"?',
 
+  // 用户操作
+  'user.namePrompt': 'User name:',
+  'user.passwordPrompt': 'Password:',
+  'user.hostPrompt': 'Host (default %):',
+  'user.privPrompt': 'Privilege (e.g. ALL PRIVILEGES, SELECT, INSERT):',
+  'user.created': 'User "{name}" created.',
+  'user.drop': 'Delete User',
+  'user.dropConfirm': 'Delete user "{name}"?',
+  'user.passwordChanged': 'Password changed for "{name}".',
+  'user.granted': 'Granted {priv} to "{name}".',
+  'user.revoked': 'Revoked {priv} from "{name}".',
+
+  // 用户分类
+  'cat.users': 'Users',
+
   // 数据库操作
   'db.create': 'New Database',
   'db.createPrompt': 'Database name:',
@@ -241,6 +256,21 @@ const zh: MessageCatalog = {
   'event.open': '查看定义',
   'event.delete': '删除事件',
   'event.deleteConfirm': '删除事件 "{name}"？',
+
+  // 用户操作
+  'user.namePrompt': '用户名：',
+  'user.passwordPrompt': '密码：',
+  'user.hostPrompt': '主机（默认 %）：',
+  'user.privPrompt': '权限（如 ALL PRIVILEGES, SELECT, INSERT）：',
+  'user.created': '用户 "{name}" 已创建。',
+  'user.drop': '删除用户',
+  'user.dropConfirm': '删除用户 "{name}"？',
+  'user.passwordChanged': '"{name}" 密码已修改。',
+  'user.granted': '已授予 "{name}" {priv} 权限。',
+  'user.revoked': '已撤销 "{name}" 的 {priv} 权限。',
+
+  // 用户分类
+  'cat.users': '用户',
 
   // 数据库操作
   'db.create': '新建数据库',

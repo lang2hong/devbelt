@@ -13,10 +13,11 @@ export enum NodeKind {
   Event = 'event',
   SavedQuery = 'savedQuery',
   Column = 'column',
+  User = 'user',
 }
 
 /** 分类子类型 */
-export type CategoryType = 'table' | 'view' | 'function' | 'event' | 'query';
+export type CategoryType = 'table' | 'view' | 'function' | 'event' | 'query' | 'user';
 
 /** 各节点类型的 ThemeIcon id（参考 database-client 图标体系） */
 const ICON_MAP: Record<string, string> = {
@@ -29,6 +30,7 @@ const ICON_MAP: Record<string, string> = {
   [NodeKind.Event]: 'zap',
   [NodeKind.SavedQuery]: 'code',
   [NodeKind.Column]: 'symbol-field',
+  [NodeKind.User]: 'person',
 };
 
 /** 分类节点的图标 id（按 categoryType 区分） */
@@ -38,6 +40,7 @@ const CATEGORY_ICON: Record<CategoryType, string> = {
   function: 'symbol-function',
   event: 'zap',
   query: 'code',
+  user: 'account',
 };
 
 /**

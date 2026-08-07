@@ -1,5 +1,5 @@
 import type { DatabaseType } from '../types/connection';
-import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta } from '../types/meta';
+import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta } from '../types/meta';
 
 /**
  * 方言行为抽象（策略模式）。
@@ -53,6 +53,9 @@ export interface SqlDialect {
   /** 查询表索引列表 SQL */
   getIndexListSql(table: string, database?: string): string;
 
+  /** 查询用户列表 SQL（空字符串表示不支持） */
+  getUserListSql(): string;
+
   /** 查询表的列元数据 SQL */
   getColumnsSql(table: string, database?: string): string;
 
@@ -70,4 +73,7 @@ export interface SqlDialect {
 
   /** 解析索引列表查询结果 */
   parseIndexList(rows: any[]): IndexMeta[];
+
+  /** 解析用户列表查询结果 */
+  parseUserList(rows: any[]): UserMeta[];
 }

@@ -1,5 +1,5 @@
 import { DatabaseType } from '../types/connection';
-import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta } from '../types/meta';
+import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
 
 /**
@@ -67,6 +67,10 @@ export class MysqlDialect implements SqlDialect {
     return `SELECT index_name AS name, column_name AS column, non_unique = 0 AS is_unique, index_name = 'PRIMARY' AS is_primary FROM information_schema.statistics WHERE ${where} ORDER BY index_name, seq_in_index`;
   }
 
+  getUserListSql(): string {
+    return `SELECT user AS name, host AS host FROM mysql.user ORDER BY user`;
+  }
+
   getColumnsSql(table: string, database?: string): string {
     return database
       ? `SHOW FULL COLUMNS FROM ${this.wrap(table)} FROM ${this.wrap(database)}`
@@ -120,5 +124,9 @@ export class MysqlDialect implements SqlDialect {
       isUnique: v.isUnique,
       isPrimary: v.isPrimary,
     }));
+  }
+
+  parseUserList(rows: any[]): UserMeta[] {
+    return rows.map((row) => ({ name: row.name, host: row.host || '%' }));
   }
 }

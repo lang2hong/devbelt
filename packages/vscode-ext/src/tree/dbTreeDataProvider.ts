@@ -94,6 +94,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       { type: 'function', label: l10n('cat.functions') },
       { type: 'event', label: l10n('cat.events') },
       { type: 'query', label: l10n('cat.queries') },
+      { type: 'user', label: l10n('cat.users') },
     ];
     return categories.map(
       (c) =>
@@ -212,6 +213,23 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
             db,
           );
           node.command = { command: 'dbclient.openEvent', title: 'Open', arguments: [node] };
+          items.push(node);
+        }
+        break;
+      }
+      case 'user': {
+        const users = await session.metadata.getUsers();
+        for (const u of users) {
+          const node = new DbTreeNode(
+            u.host ? `${u.name}@${u.host}` : u.name,
+            TreeItemCollapsibleState.None,
+            NodeKind.User,
+            conn,
+            undefined,
+            element,
+            undefined,
+            db,
+          );
           items.push(node);
         }
         break;

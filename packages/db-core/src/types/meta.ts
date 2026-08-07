@@ -80,6 +80,12 @@ export interface IndexMeta {
   type?: string;
 }
 
+/** 用户元信息 */
+export interface UserMeta {
+  name: string;
+  host?: string;
+}
+
 /** 本地保存的查询（Navicat Queries 分类的本地存储） */
 export interface SavedQuery {
   id: string;

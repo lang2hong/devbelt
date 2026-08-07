@@ -3,26 +3,22 @@ import { ref, onMounted, onUnmounted } from 'vue';
 import { useVsCode } from './composables/useVsCode';
 import QueryView from './views/QueryView.vue';
 import DesignView from './views/DesignView.vue';
+import StatusView from './views/StatusView.vue';
 
-const { onMessage, off } = useMessageHandler();
-const mode = ref<'query' | 'design'>('query');
+const { onMessage } = useVsCode();
+const mode = ref<'query' | 'design' | 'status'>('query');
 
-function useMessageHandler() {
-  const { onMessage } = useVsCode();
-  let off: () => void;
-  onMounted(() => {
-    off = onMessage((msg: any) => {
-      if (msg.type === 'init') {
-        mode.value = msg.mode || 'query';
-      }
-    });
+onMounted(() => {
+  onMessage((msg: any) => {
+    if (msg.type === 'init') {
+      mode.value = msg.mode || 'query';
+    }
   });
-  onUnmounted(() => off?.());
-  return { onMessage, off: () => off?.() };
-}
+});
 </script>
 
 <template>
   <QueryView v-if="mode === 'query'" />
-  <DesignView v-else />
+  <DesignView v-else-if="mode === 'design'" />
+  <StatusView v-else />
 </template>
