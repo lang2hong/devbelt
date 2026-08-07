@@ -22,11 +22,13 @@ export class DataService {
     rowId: any,
     column: string,
     value: any,
+    database?: string,
   ): Promise<QueryResult> {
     const w = this.queryService.dialect.wrap.bind(this.queryService.dialect);
+    const qualified = database ? `${w(database)}.${w(table)}` : w(table);
     const setValue = value === null ? 'NULL' : this.literal(value);
     const idLiteral = this.literal(rowId);
-    const sql = `UPDATE ${w(table)} SET ${w(column)} = ${setValue} WHERE ${w(primaryKey)} = ${idLiteral}`;
+    const sql = `UPDATE ${qualified} SET ${w(column)} = ${setValue} WHERE ${w(primaryKey)} = ${idLiteral}`;
     return this.queryService.query(sql);
   }
 

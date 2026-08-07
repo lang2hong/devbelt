@@ -28,3 +28,5 @@ export { ConnectionFactory } from './factory/connectionFactory';
 export { QueryService, QueryError } from './query/queryService';
 export { MetadataService } from './query/metadataService';
 export { DataService } from './query/dataService';
+export { TableService } from './query/tableService';
+export type { RoutineMeta, EventMeta, SavedQuery, IndexMeta } from './types/meta';

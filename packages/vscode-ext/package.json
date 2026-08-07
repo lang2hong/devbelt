@@ -21,7 +21,8 @@
       {
         "command": "dbclient.addConnection",
         "title": "%cmd.addConnection%",
-        "category": "DB Client"
+        "category": "DB Client",
+        "icon": "$(add)"
       },
       {
         "command": "dbclient.refresh",
@@ -32,6 +33,16 @@
       {
         "command": "dbclient.runQuery",
         "title": "%cmd.runQuery%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.runStatement",
+        "title": "Run SQL Statement",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.runSqlFile",
+        "title": "Run SQL File",
         "category": "DB Client"
       },
       {
@@ -95,10 +106,145 @@
         "category": "DB Client"
       },
       {
+        "command": "dbclient.newTable",
+        "title": "New Table",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.dropTable",
+        "title": "Delete Table",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.renameTable",
+        "title": "Rename Table",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.truncateTable",
+        "title": "Truncate Table",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.dupTable",
+        "title": "Duplicate Table",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.viewTableStructure",
+        "title": "View Table Structure",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.editConnection",
+        "title": "Edit Connection",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.deleteConnection",
+        "title": "Delete Connection",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.closeConnection",
+        "title": "Close Connection",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.openConnection",
+        "title": "Open Connection",
+        "category": "DB Client"
+      },
+      {
         "command": "dbclient.explorerMenu",
         "title": "%cmd.explorerMenu%",
         "category": "DB Client",
         "icon": "$(kebab-horizontal)"
+      },
+      {
+        "command": "dbclient.previewView",
+        "title": "View Data",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.dropView",
+        "title": "Delete View",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.openRoutine",
+        "title": "View Definition",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.dropRoutine",
+        "title": "Delete Routine",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.openEvent",
+        "title": "View Definition",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.dropEvent",
+        "title": "Delete Event",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.newQuery",
+        "title": "New Query",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.openQuery",
+        "title": "Open Query",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.editQuery",
+        "title": "Edit Query",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.runStatement",
+        "title": "Run SQL Statement",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.designTable",
+        "title": "Design Table",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.openTerminal",
+        "title": "Open Terminal",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.viewTableSource",
+        "title": "View DDL",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.dumpTable",
+        "title": "Export Table Dump",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.mockData",
+        "title": "Generate Mock Data",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.createDatabase",
+        "title": "New Database",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.dropDatabase",
+        "title": "Drop Database",
+        "category": "DB Client"
       }
     ],
     "menus": {
@@ -112,6 +258,20 @@
           "command": "dbclient.explorerMenu",
           "when": "view == dbclient.explorer",
           "group": "navigation"
+        }
+      ],
+      "editor/title/run": [
+        {
+          "command": "dbclient.runSqlFile",
+          "when": "resourceLangId == sql",
+          "group": "navigation"
+        }
+      ],
+      "resourceContext": [
+        {
+          "command": "dbclient.runSqlFile",
+          "when": "resourceLangId == sql",
+          "group": "1_dbclient"
         }
       ],
       "commandPalette": [
@@ -131,9 +291,129 @@
           "group": "inline"
         },
         {
+          "command": "dbclient.viewTableStructure",
+          "when": "view == dbclient.explorer && viewItem == table",
+          "group": "1_table"
+        },
+        {
+          "command": "dbclient.viewTableSource",
+          "when": "view == dbclient.explorer && viewItem == table",
+          "group": "1_table"
+        },
+        {
+          "command": "dbclient.designTable",
+          "when": "view == dbclient.explorer && viewItem == table",
+          "group": "1_table"
+        },
+        {
+          "command": "dbclient.dumpTable",
+          "when": "view == dbclient.explorer && viewItem == table",
+          "group": "1_table"
+        },
+        {
+          "command": "dbclient.mockData",
+          "when": "view == dbclient.explorer && viewItem == table",
+          "group": "1_table"
+        },
+        {
+          "command": "dbclient.openTerminal",
+          "when": "view == dbclient.explorer && viewItem == connection",
+          "group": "1_conn"
+        },
+        {
+          "command": "dbclient.newTable",
+          "when": "view == dbclient.explorer && viewItem == category_table",
+          "group": "inline"
+        },
+        {
+          "command": "dbclient.renameTable",
+          "when": "view == dbclient.explorer && viewItem == table",
+          "group": "1_table"
+        },
+        {
+          "command": "dbclient.dupTable",
+          "when": "view == dbclient.explorer && viewItem == table",
+          "group": "1_table"
+        },
+        {
+          "command": "dbclient.truncateTable",
+          "when": "view == dbclient.explorer && viewItem == table",
+          "group": "2_danger"
+        },
+        {
+          "command": "dbclient.dropTable",
+          "when": "view == dbclient.explorer && viewItem == table",
+          "group": "2_danger"
+        },
+        {
+          "command": "dbclient.createDatabase",
+          "when": "view == dbclient.explorer && viewItem == connection",
+          "group": "1_conn"
+        },
+        {
+          "command": "dbclient.dropDatabase",
+          "when": "view == dbclient.explorer && viewItem == database",
+          "group": "2_danger"
+        },
+        {
+          "command": "dbclient.previewView",
+          "when": "view == dbclient.explorer && viewItem == view",
+          "group": "inline"
+        },
+        {
+          "command": "dbclient.dropView",
+          "when": "view == dbclient.explorer && viewItem == view",
+          "group": "2_danger"
+        },
+        {
+          "command": "dbclient.openRoutine",
+          "when": "view == dbclient.explorer && viewItem == routine",
+          "group": "inline"
+        },
+        {
+          "command": "dbclient.dropRoutine",
+          "when": "view == dbclient.explorer && viewItem == routine",
+          "group": "2_danger"
+        },
+        {
+          "command": "dbclient.openEvent",
+          "when": "view == dbclient.explorer && viewItem == event",
+          "group": "inline"
+        },
+        {
+          "command": "dbclient.dropEvent",
+          "when": "view == dbclient.explorer && viewItem == event",
+          "group": "2_danger"
+        },
+        {
+          "command": "dbclient.newQuery",
+          "when": "view == dbclient.explorer && viewItem == category_query",
+          "group": "inline"
+        },
+        {
+          "command": "dbclient.openQuery",
+          "when": "view == dbclient.explorer && viewItem == savedQuery",
+          "group": "inline"
+        },
+        {
+          "command": "dbclient.editQuery",
+          "when": "view == dbclient.explorer && viewItem == savedQuery",
+          "group": "1_query"
+        },
+        {
+          "command": "dbclient.deleteQuery",
+          "when": "view == dbclient.explorer && viewItem == savedQuery",
+          "group": "2_danger"
+        },
+        {
           "command": "dbclient.addGroup",
           "when": "view == dbclient.explorer && viewItem == group",
           "group": "inline"
+        },
+        {
+          "command": "dbclient.addConnection",
+          "when": "view == dbclient.explorer && viewItem == group",
+          "group": "1_group"
         },
         {
           "command": "dbclient.renameGroup",
@@ -149,6 +429,21 @@
           "command": "dbclient.moveToGroup",
           "when": "view == dbclient.explorer && viewItem == connection",
           "group": "1_conn"
+        },
+        {
+          "command": "dbclient.editConnection",
+          "when": "view == dbclient.explorer && viewItem == connection",
+          "group": "1_conn"
+        },
+        {
+          "command": "dbclient.closeConnection",
+          "when": "view == dbclient.explorer && viewItem == connection",
+          "group": "1_conn"
+        },
+        {
+          "command": "dbclient.deleteConnection",
+          "when": "view == dbclient.explorer && viewItem == connection",
+          "group": "2_danger"
         }
       ]
     },
@@ -196,8 +491,11 @@
     ]
   },
   "scripts": {
-    "build": "node esbuild.js",
+    "build": "node esbuild.js && cd webview && npx vite build",
+    "build:ext": "node esbuild.js",
+    "build:webview": "cd webview && npx vite build",
     "dev": "node esbuild.js --watch",
+    "dev:webview": "cd webview && npx vite build --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "package": "@vscode/vsce package"
@@ -207,12 +505,15 @@
     "@db-client/core": "workspace:*",
     "@types/vscode": "^1.85.0",
     "@types/node": "^20.0.0",
+    "@vitejs/plugin-vue": "^5.2.1",
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.24.0",
     "mysql2": "^3.23.2",
     "pg": "^8.22.0",
     "sql-formatter": "^15.8.2",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.10"
+    "vite": "^6.0.7",
+    "vitest": "^4.1.10",
+    "vue": "^3.5.13"
   }
 }

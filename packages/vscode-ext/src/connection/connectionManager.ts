@@ -1,9 +1,9 @@
-import { ConnectionFactory, QueryService, MetadataService, DataService } from '@db-client/core';
+import { ConnectionFactory, QueryService, MetadataService, DataService, TableService } from '@db-client/core';
 import type { DatabaseType } from '@db-client/core';
 import type { SavedConnection } from './connectionStore';
 
 /**
- * 连接会话：连接 + 查询服务 + 元数据服务 + 数据编辑服务的组合。
+ * 连接会话：连接 + 查询/元数据/数据编辑/表操作服务的组合。
  */
 export interface ConnectionSession {
   /** 查询服务（复用 db-core） */
@@ -12,6 +12,8 @@ export interface ConnectionSession {
   metadata: MetadataService;
   /** 数据编辑服务（复用 db-core） */
   data: DataService;
+  /** 表操作服务（复用 db-core） */
+  table: TableService;
   /** 关闭连接 */
   close: () => void;
 }
@@ -54,6 +56,7 @@ export class ConnectionManager {
       query,
       metadata: new MetadataService(query),
       data: new DataService(query),
+      table: new TableService(query),
       close: () => {
         connection.end();
         this.sessions.delete(conn.id);
@@ -61,6 +64,14 @@ export class ConnectionManager {
     };
     this.sessions.set(conn.id, session);
     return session;
+  }
+
+  /** 关闭指定连接会话 */
+  disposeConn(id: string): void {
+    const session = this.sessions.get(id);
+    if (session) {
+      session.close();
+    }
   }
 
   /** 关闭全部连接（扩展退出时调用） */

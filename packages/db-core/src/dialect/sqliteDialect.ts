@@ -1,5 +1,5 @@
 import { DatabaseType } from '../types/connection';
-import type { TableMeta, ViewMeta } from '../types/meta';
+import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
 
 /**
@@ -29,6 +29,26 @@ export class SqliteDialect implements SqlDialect {
     return `SELECT name AS name, '' AS comment FROM sqlite_master WHERE type = 'view' ORDER BY name`;
   }
 
+  getFunctionListSql(): string {
+    return '';
+  }
+
+  getEventListSql(): string {
+    return '';
+  }
+
+  getRoutineDefinitionSql(): string {
+    return '';
+  }
+
+  getEventDefinitionSql(): string {
+    return '';
+  }
+
+  getIndexListSql(table: string): string {
+    return `SELECT name AS name, 0 AS is_unique, name LIKE 'sqlite_autoindex%' AS is_primary FROM sqlite_master WHERE type = 'index' AND tbl_name = '${table}'`;
+  }
+
   getColumnsSql(table: string): string {
     return `PRAGMA table_info(${this.wrap(table)})`;
   }
@@ -39,5 +59,22 @@ export class SqliteDialect implements SqlDialect {
 
   parseViewList(rows: any[]): ViewMeta[] {
     return rows.map((row) => ({ name: row.name, comment: row.comment || '' }));
+  }
+
+  parseFunctionList(): RoutineMeta[] {
+    return [];
+  }
+
+  parseEventList(): EventMeta[] {
+    return [];
+  }
+
+  parseIndexList(rows: any[]): IndexMeta[] {
+    return rows.map((row) => ({
+      name: row.name,
+      columns: [],
+      isUnique: row.is_unique || false,
+      isPrimary: row.is_primary || false,
+    }));
   }
 }

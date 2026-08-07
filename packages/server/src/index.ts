@@ -4,10 +4,10 @@ import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import mysql from '@fastify/mysql';
 import sensible from '@fastify/sensible';
-import { config } from './config';
-import { initDatabase } from './db';
-import { authRoutes } from './routes/auth';
-import { syncRoutes } from './routes/sync';
+import { config } from './config.js';
+import { initDatabase } from './db.js';
+import { authRoutes } from './routes/auth.js';
+import { syncRoutes } from './routes/sync.js';
 
 /**
  * 同步服务主入口。
@@ -19,10 +19,13 @@ async function main(): Promise<void> {
   app.register(cors, { origin: true });
   app.register(sensible);
   app.register(jwt, { secret: config.jwtSecret, sign: { expiresIn: config.jwtExpiresIn } });
-  app.register(mysql, { connectionString: authString() });
+  await app.register(mysql, { connectionString: authString() });
 
   // 暴露 jwtSecret 供密码哈希复用
   app.decorate('jwtSecret', config.jwtSecret);
+
+  // 等待全部插件就绪
+  await app.ready();
 
   // 初始化表结构
   await initDatabase(app);

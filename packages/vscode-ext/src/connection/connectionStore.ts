@@ -1,4 +1,5 @@
 import type { ConnectionConfig, DatabaseType } from '@db-client/core';
+import type { SavedQuery } from '@db-client/core';
 
 /**
  * 已保存的连接（持久化到 VSCode 全局状态）。
@@ -59,6 +60,11 @@ export class ConnectionStore {
   /** 读取完整树数据 */
   getTreeData(): ConnectionTreeData {
     return this.memento.get<ConnectionTreeData>(ConnectionStore.KEY) || emptyTreeData();
+  }
+
+  /** 读取全部分组 */
+  getGroups(): ConnectionGroup[] {
+    return this.getTreeData().groups;
   }
 
   /** 读取全部已保存连接 */
@@ -136,5 +142,43 @@ export class ConnectionStore {
   /** 整体覆写树数据（同步用） */
   async replaceAll(data: ConnectionTreeData): Promise<void> {
     await this.memento.update(ConnectionStore.KEY, data);
+  }
+
+  // ─── 本地查询存储（Navicat Queries 分类） ───
+
+  private static readonly QKEY = 'dbclient.queries';
+
+  /** 读取指定连接+数据库下的保存查询 */
+  getQueries(connId: string, database?: string): SavedQuery[] {
+    const all = this.memento.get<SavedQuery[]>(ConnectionStore.QKEY) || [];
+    return all.filter((q) => q.connId === connId && (!database || q.database === database));
+  }
+
+  /** 新增保存查询，返回其 id */
+  async saveQuery(q: Omit<SavedQuery, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
+    const all = this.memento.get<SavedQuery[]>(ConnectionStore.QKEY) || [];
+    const now = Date.now();
+    const query: SavedQuery = { ...q, id: `q-${now}`, createdAt: now, updatedAt: now };
+    all.push(query);
+    await this.memento.update(ConnectionStore.QKEY, all);
+    return query.id;
+  }
+
+  /** 更新保存查询 */
+  async updateQuery(id: string, patch: Partial<Pick<SavedQuery, 'name' | 'sql'>>): Promise<void> {
+    const all = this.memento.get<SavedQuery[]>(ConnectionStore.QKEY) || [];
+    const idx = all.findIndex((q) => q.id === id);
+    if (idx < 0) return;
+    all[idx] = { ...all[idx], ...patch, updatedAt: Date.now() };
+    await this.memento.update(ConnectionStore.QKEY, all);
+  }
+
+  /** 删除保存查询 */
+  async removeQuery(id: string): Promise<void> {
+    const all = this.memento.get<SavedQuery[]>(ConnectionStore.QKEY) || [];
+    await this.memento.update(
+      ConnectionStore.QKEY,
+      all.filter((q) => q.id !== id),
+    );
   }
 }

@@ -1,5 +1,5 @@
 import { DatabaseType } from '../types/connection';
-import type { TableMeta, ViewMeta } from '../types/meta';
+import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
 
 /**
@@ -32,6 +32,41 @@ export class MysqlDialect implements SqlDialect {
       : `SELECT TABLE_NAME AS name, TABLE_COMMENT AS comment FROM information_schema.views`;
   }
 
+  getFunctionListSql(database?: string): string {
+    const where = database
+      ? `routine_schema = '${database}'`
+      : `routine_schema = database()`;
+    return `SELECT routine_name AS name, routine_type AS type FROM information_schema.routines WHERE ${where} ORDER BY routine_name`;
+  }
+
+  getEventListSql(database?: string): string {
+    const where = database
+      ? `event_schema = '${database}'`
+      : `event_schema = database()`;
+    return `SELECT event_name AS name, definer, event_type FROM information_schema.events WHERE ${where} ORDER BY event_name`;
+  }
+
+  getRoutineDefinitionSql(name: string, routineType: string, database?: string): string {
+    const qualified = database
+      ? `${this.wrap(database)}.${this.wrap(name)}`
+      : this.wrap(name);
+    return `SHOW CREATE ${routineType} ${qualified}`;
+  }
+
+  getEventDefinitionSql(name: string, database?: string): string {
+    const qualified = database
+      ? `${this.wrap(database)}.${this.wrap(name)}`
+      : this.wrap(name);
+    return `SHOW CREATE EVENT ${qualified}`;
+  }
+
+  getIndexListSql(table: string, database?: string): string {
+    const where = database
+      ? `table_schema = '${database}' AND table_name = '${table}'`
+      : `table_schema = database() AND table_name = '${table}'`;
+    return `SELECT index_name AS name, column_name AS column, non_unique = 0 AS is_unique, index_name = 'PRIMARY' AS is_primary FROM information_schema.statistics WHERE ${where} ORDER BY index_name, seq_in_index`;
+  }
+
   getColumnsSql(table: string, database?: string): string {
     return database
       ? `SHOW FULL COLUMNS FROM ${this.wrap(table)} FROM ${this.wrap(database)}`
@@ -51,5 +86,39 @@ export class MysqlDialect implements SqlDialect {
 
   parseViewList(rows: any[]): ViewMeta[] {
     return rows.map((row) => ({ name: row.name, comment: row.comment || '' }));
+  }
+
+  parseFunctionList(rows: any[]): RoutineMeta[] {
+    return rows.map((row) => ({
+      name: row.name,
+      type: row.type || 'FUNCTION',
+      comment: '',
+    }));
+  }
+
+  parseEventList(rows: any[]): EventMeta[] {
+    return rows.map((row) => ({
+      name: row.name,
+      definer: row.definer || '',
+      eventType: row.event_type || '',
+      comment: '',
+    }));
+  }
+
+  parseIndexList(rows: any[]): IndexMeta[] {
+    const map = new Map<string, { columns: string[]; isUnique: boolean; isPrimary: boolean }>();
+    for (const row of rows) {
+      const name = row.name;
+      if (!map.has(name)) {
+        map.set(name, { columns: [], isUnique: row.is_unique, isPrimary: row.is_primary });
+      }
+      map.get(name)!.columns.push(row.column);
+    }
+    return Array.from(map.entries()).map(([name, v]) => ({
+      name,
+      columns: v.columns,
+      isUnique: v.isUnique,
+      isPrimary: v.isPrimary,
+    }));
   }
 }

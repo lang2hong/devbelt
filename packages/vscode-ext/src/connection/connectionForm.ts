@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { DatabaseType } from '@db-client/core';
 import { ConnectionFactory } from '@db-client/core';
-import type { SavedConnection } from './connectionStore';
+import type { SavedConnection, ConnectionGroup } from './connectionStore';
 import { isZh, l10n } from '../i18n';
 
 /**
@@ -9,7 +9,7 @@ import { isZh, l10n } from '../i18n';
  *
  * 提供类似 Navicat / database-client 的连接编辑界面：
  *  - 顶部选择数据库类型
- *  - 表单字段：名称、主机、端口、用户、密码、数据库
+ *  - 表单字段：名称、主机、端口、用户、密码、数据库、分组
  *  - 底部：测试连接、保存
  *
  * 通过 postMessage 与扩展通信：
@@ -22,16 +22,24 @@ export class ConnectionForm {
 
   private constructor(
     private readonly store: ConnectionStorage,
+    groups: ConnectionGroup[],
+    private onSaved?: () => void,
+    editing?: SavedConnection,
   ) {
+    const title = editing ? 'Edit Connection' : 'New Connection';
     this.panel = vscode.window.createWebviewPanel(
       'dbclient.connectionForm',
-      'New Connection',
+      title,
       vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true },
     );
-    this.panel.webview.html = connectionFormHtml();
+    this.panel.webview.html = connectionFormHtml(groups);
     // 告知 webview 当前语言，用于文案切换
     void this.panel.webview.postMessage({ type: 'locale', isZh: isZh() });
+    // 编辑模式：预填已有连接配置
+    if (editing) {
+      void this.panel.webview.postMessage({ type: 'prefill', conn: editing });
+    }
 
     // 处理 webview 发来的消息
     this.panel.webview.onDidReceiveMessage((msg) => {
@@ -43,13 +51,22 @@ export class ConnectionForm {
     });
   }
 
-  /** 打开连接表单（单例复用） */
-  static open(store: ConnectionStorage): void {
+  /** 打开连接表单（单例复用），可预设分组或编辑已有连接 */
+  static open(
+    store: ConnectionStorage,
+    onSaved?: () => void,
+    presetGroupId?: string,
+    editing?: SavedConnection,
+  ): void {
     if (ConnectionForm.current) {
       ConnectionForm.current.panel.reveal(vscode.ViewColumn.Active);
+      ConnectionForm.current.onSaved = onSaved;
       return;
     }
-    ConnectionForm.current = new ConnectionForm(store);
+    ConnectionForm.current = new ConnectionForm(store, store.getGroups(), onSaved, editing);
+    if (presetGroupId) {
+      void ConnectionForm.current.panel.webview.postMessage({ type: 'presetGroup', groupId: presetGroupId });
+    }
   }
 
   private async handleMessage(msg: any): Promise<void> {
@@ -63,10 +80,15 @@ export class ConnectionForm {
       case 'save': {
         const conn = decodeConnection(msg.payload);
         const id = msg.payload.id || `${Date.now()}`;
-        await this.store.save({ ...conn, id, groupId: msg.payload.groupId });
+        await this.store.save({
+          ...conn,
+          id,
+          groupId: msg.payload.groupId || undefined,
+        });
         vscode.window.showInformationMessage(
           l10n('form.saved', { name: conn.name || conn.host || '' }),
         );
+        this.onSaved?.();
         this.panel.dispose();
         break;
       }
@@ -94,6 +116,7 @@ export class ConnectionForm {
 /** 连接存储接口（避免循环依赖具体类） */
 interface ConnectionStorage {
   save(conn: SavedConnection): Promise<void>;
+  getGroups(): ConnectionGroup[];
 }
 
 /** 将 webview 表单负载解码为 SavedConnection */
@@ -111,38 +134,76 @@ function decodeConnection(payload: any): SavedConnection {
   };
 }
 
+/**
+ * 将分组构建为带层级缩进的下拉选项，模拟树形结构。
+ * 顶层分组无前缀，子分组按深度用 "· " 缩进。
+ */
+function buildGroupOptions(groups: ConnectionGroup[]): string {
+  const byParent = new Map<string | undefined, ConnectionGroup[]>();
+  for (const g of groups) {
+    const key = g.parentId;
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key)!.push(g);
+  }
+  const options: string[] = [];
+  const walk = (parentId: string | undefined, depth: number) => {
+    const children = byParent.get(parentId) || [];
+    for (const g of children) {
+      const indent = depth === 0 ? '' : '· '.repeat(depth);
+      options.push(`<option value="${g.id}">${indent}${g.name}</option>`);
+      walk(g.id, depth + 1);
+    }
+  };
+  walk(undefined, 0);
+  return options.join('');
+}
+
 /** 生成连接表单 HTML */
-function connectionFormHtml(): string {
+function connectionFormHtml(groups: ConnectionGroup[]): string {
+  const groupOptions = buildGroupOptions(groups);
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-  body { font-family: var(--vscode-font-family); padding: 16px 20px; color: var(--vscode-foreground); }
-  h2 { margin: 0 0 16px; font-size: 16px; }
-  .field { margin-bottom: 12px; }
-  label { display: block; font-size: 12px; margin-bottom: 4px; color: var(--vscode-descriptionForeground); }
-  input, select {
-    width: 100%; box-sizing: border-box; padding: 6px 8px;
-    background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-    border: 1px solid var(--vscode-input-border, transparent); border-radius: 3px;
+  body { font-family: var(--vscode-font-family); margin: 0; padding: 0; color: var(--vscode-foreground); }
+  .container {
+    max-width: 480px; margin: 40px auto; padding: 24px 28px;
+    background: var(--vscode-editorWidget-background);
+    border: 1px solid var(--vscode-panel-border, rgba(255,255,255,0.1));
+    border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
   }
+  h2 { margin: 0 0 20px; font-size: 18px; font-weight: 600; }
+  .field { margin-bottom: 14px; }
+  label { display: block; font-size: 12px; margin-bottom: 5px; color: var(--vscode-descriptionForeground); font-weight: 500; }
+  input, select {
+    width: 100%; box-sizing: border-box; padding: 7px 10px; font-size: 13px;
+    background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, rgba(255,255,255,0.15)); border-radius: 4px;
+    transition: border-color 0.15s;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--vscode-focusBorder); }
   .row { display: flex; gap: 12px; }
   .row .field { flex: 1; }
-  .actions { margin-top: 20px; display: flex; gap: 8px; }
+  .actions { margin-top: 24px; display: flex; gap: 10px; }
   button {
-    padding: 6px 16px; border: none; border-radius: 3px; cursor: pointer;
+    flex: 1; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer;
+    font-size: 13px; font-weight: 500;
     background: var(--vscode-button-background); color: var(--vscode-button-foreground);
   }
+  button:hover { background: var(--vscode-button-hoverBackground); }
   button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
-  #status { margin-top: 12px; font-size: 12px; min-height: 16px; }
+  button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
+  #status { margin-top: 14px; font-size: 12px; min-height: 18px; }
   #status.ok { color: var(--vscode-gitDecoration-untrackedResourceForeground); }
   #status.err { color: var(--vscode-errorForeground); }
   #dbPathRow { display: none; }
 </style>
 </head>
 <body>
+  <div class="container">
+  <span id="editorMode" style="display:none"></span>
   <h2 data-i18n="title">New Connection</h2>
   <div class="field">
     <label data-i18n="dbType">Database Type</label>
@@ -184,11 +245,19 @@ function connectionFormHtml(): string {
     <label data-i18n="sqlitePath">SQLite File Path</label>
     <input id="dbPath" placeholder="/path/to/db.sqlite">
   </div>
+  <div class="field">
+    <label data-i18n="group">Group</label>
+    <select id="group">
+      <option value="" selected data-i18n="noGroup">No group</option>
+      ${groupOptions}
+    </select>
+  </div>
   <div class="actions">
     <button id="btnTest" class="secondary" data-i18n="test">Test Connection</button>
     <button id="btnSave" data-i18n="save">Save</button>
   </div>
   <div id="status"></div>
+  </div>
 
 <script>
   const vscode = acquireVsCodeApi();
@@ -203,6 +272,8 @@ function connectionFormHtml(): string {
     password: { en: 'Password', zh: '密码' },
     database: { en: 'Database', zh: '数据库' },
     sqlitePath: { en: 'SQLite File Path', zh: 'SQLite 文件路径' },
+    group: { en: 'Group', zh: '分组' },
+    noGroup: { en: 'No group', zh: '无分组' },
     test: { en: 'Test Connection', zh: '测试连接' },
     save: { en: 'Save', zh: '保存' },
     testing: { en: 'Testing...', zh: '测试中...' },
@@ -218,6 +289,24 @@ function connectionFormHtml(): string {
   window.addEventListener('message', (e) => {
     const msg = e.data;
     if (msg.type === 'locale') { isZh = msg.isZh; applyLocale(); }
+    if (msg.type === 'presetGroup' && msg.groupId) {
+      document.getElementById('group').value = msg.groupId;
+    }
+    if (msg.type === 'prefill' && msg.conn) {
+      const c = msg.conn;
+      document.getElementById('name').value = c.name || '';
+      document.getElementById('host').value = c.host || '';
+      document.getElementById('port').value = c.port || '';
+      document.getElementById('user').value = c.user || '';
+      document.getElementById('password').value = c.password || '';
+      document.getElementById('database').value = c.database || '';
+      document.getElementById('dbPath').value = c.dbPath || '';
+      if (c.dbType) document.getElementById('dbType').value = c.dbType;
+      if (c.groupId) document.getElementById('group').value = c.groupId;
+      // 编辑模式标记，保存时携带原 id
+      document.getElementById('editorMode').dataset.connId = c.id || '';
+      document.querySelector('h2').textContent = isZh ? '编辑连接' : 'Edit Connection';
+    }
     if (msg.type === 'testResult') {
       const status = document.getElementById('status');
       status.className = msg.ok ? 'ok' : 'err';
@@ -241,7 +330,9 @@ function connectionFormHtml(): string {
   syncType();
 
   function collect() {
+    const editorEl = document.getElementById('editorMode');
     return {
+      id: editorEl ? editorEl.dataset.connId || '' : '',
       dbType: dbType.value,
       name: document.getElementById('name').value,
       host: document.getElementById('host').value,
@@ -250,6 +341,7 @@ function connectionFormHtml(): string {
       password: document.getElementById('password').value,
       database: document.getElementById('database').value,
       dbPath: document.getElementById('dbPath').value,
+      groupId: document.getElementById('group').value,
     };
   }
 

@@ -1,5 +1,5 @@
 import type { DatabaseType } from '../types/connection';
-import type { TableMeta, ViewMeta } from '../types/meta';
+import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta } from '../types/meta';
 
 /**
  * 方言行为抽象（策略模式）。
@@ -38,6 +38,21 @@ export interface SqlDialect {
   /** 查询库内所有视图的 SQL */
   getViewListSql(database?: string): string;
 
+  /** 查询库内所有函数/存储过程的 SQL（空字符串表示不支持） */
+  getFunctionListSql(database?: string): string;
+
+  /** 查询库内所有事件的 SQL（空字符串表示不支持） */
+  getEventListSql(database?: string): string;
+
+  /** 查询函数/存储过程定义的 SQL */
+  getRoutineDefinitionSql(name: string, routineType: string, database?: string): string;
+
+  /** 查询事件定义的 SQL */
+  getEventDefinitionSql(name: string, database?: string): string;
+
+  /** 查询表索引列表 SQL */
+  getIndexListSql(table: string, database?: string): string;
+
   /** 查询表的列元数据 SQL */
   getColumnsSql(table: string, database?: string): string;
 
@@ -46,4 +61,13 @@ export interface SqlDialect {
 
   /** 解析视图列表查询结果行为对象 */
   parseViewList(rows: any[]): ViewMeta[];
+
+  /** 解析函数列表查询结果 */
+  parseFunctionList(rows: any[]): RoutineMeta[];
+
+  /** 解析事件列表查询结果 */
+  parseEventList(rows: any[]): EventMeta[];
+
+  /** 解析索引列表查询结果 */
+  parseIndexList(rows: any[]): IndexMeta[];
 }

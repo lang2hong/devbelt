@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { hashPassword } from '../db';
+import { hashPassword } from '../db.js';
 
 /**
  * 认证路由：注册 / 登录。

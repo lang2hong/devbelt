@@ -1,5 +1,5 @@
 import { QueryService } from './queryService';
-import type { ColumnMeta, TableMeta, ViewMeta } from '../types/meta';
+import type { ColumnMeta, TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta } from '../types/meta';
 
 /**
  * 元数据服务（复用查询服务 + 方言）。
@@ -32,11 +32,55 @@ export class MetadataService {
     return this.queryService.dialect.parseViewList(result.rows);
   }
 
+  /** 查询函数/存储过程列表 */
+  async getFunctions(database?: string): Promise<RoutineMeta[]> {
+    const sql = this.queryService.dialect.getFunctionListSql(database);
+    if (!sql) return [];
+    const result = await this.queryService.query(sql);
+    return this.queryService.dialect.parseFunctionList(result.rows);
+  }
+
+  /** 查询事件列表 */
+  async getEvents(database?: string): Promise<EventMeta[]> {
+    const sql = this.queryService.dialect.getEventListSql(database);
+    if (!sql) return [];
+    const result = await this.queryService.query(sql);
+    return this.queryService.dialect.parseEventList(result.rows);
+  }
+
+  /** 查询函数/存储过程定义 */
+  async getRoutineDefinition(name: string, routineType: string, database?: string): Promise<string> {
+    const sql = this.queryService.dialect.getRoutineDefinitionSql(name, routineType, database);
+    if (!sql) return '';
+    const result = await this.queryService.query(sql);
+    const row = result.rows[0];
+    if (!row) return '';
+    return row['Create Procedure'] || row['Create Function'] || row.definition || row.Create || '';
+  }
+
+  /** 查询事件定义 */
+  async getEventDefinition(name: string, database?: string): Promise<string> {
+    const sql = this.queryService.dialect.getEventDefinitionSql(name, database);
+    if (!sql) return '';
+    const result = await this.queryService.query(sql);
+    const row = result.rows[0];
+    if (!row) return '';
+    return row['Create Event'] || row.definition || row.Create || '';
+  }
+
   /** 查询表的列元数据 */
   async getColumns(table: string, database?: string): Promise<ColumnMeta[]> {
     const sql = this.queryService.dialect.getColumnsSql(table, database);
     const result = await this.queryService.query(sql);
     return result.rows.map((row: any) => this.normalizeColumn(row));
+  }
+
+  /** 查询表索引列表 */
+  async getIndexes(table: string, database?: string): Promise<IndexMeta[]> {
+    const sql = this.queryService.dialect.getIndexListSql(table, database);
+    if (!sql) return [];
+    const result = await this.queryService.query(sql);
+    return this.queryService.dialect.parseIndexList(result.rows);
   }
 
   /** 将各方言列元数据行归一化为统一结构 */

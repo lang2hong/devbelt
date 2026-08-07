@@ -1,13 +1,17 @@
 import { ConnectionManager } from '../connection/connectionManager';
 import type { SavedConnection } from '../connection/connectionStore';
-import { ResultPanel, resultHtml } from './resultPanel';
+import { TableQueryView } from './tableQueryView';
 import { HistoryStore } from '../history/historyStore';
 
 /**
- * 查询执行器：绑定到某个连接会话，执行 SQL、渲染结果并记录历史。
+ * 查询执行器：创建查询视图并记录历史。
+ *
+ * 职责分离：
+ *  - 本类：创建视图 + 记录历史（通过回调接收执行结果）
+ *  - TableQueryView：在 Vue 应用 ready 后执行 SQL + 渲染结果
  */
 export class QueryExecutor {
-  private panel?: ResultPanel;
+  private view?: TableQueryView;
 
   constructor(
     private readonly manager: ConnectionManager,
@@ -15,42 +19,32 @@ export class QueryExecutor {
   ) {}
 
   /**
-   * 对指定连接执行 SQL。
-   * @param conn 目标连接
-   * @param sql SQL 语句
+   * 对指定连接执行 SQL（通过 TableQueryView 查询模式）。
+   * SQL 实际执行发生在 Vue 应用 mount 后的 ready 回调中。
    */
   async run(conn: SavedConnection, sql: string): Promise<void> {
-    const session = await this.manager.connect(conn);
-    const panel = this.getPanel();
     const start = Date.now();
-    try {
-      const result = await session.query.query(sql);
-      panel.render(result);
-      await this.history?.add({
-        sql,
-        connection: conn.name || conn.host,
-        costTime: Date.now() - start,
-        rowCount: result.rows.length,
-      });
-    } catch (err) {
-      panel.showError((err as Error).message);
-      await this.history?.add({
-        sql,
-        connection: conn.name || conn.host,
-        costTime: Date.now() - start,
-      });
-    }
+    this.view = TableQueryView.openForQuery(conn, this.manager, sql, async (result, error) => {
+      // 历史记录回调
+      if (result) {
+        await this.history?.add({
+          sql,
+          connection: conn.name || conn.host,
+          costTime: Date.now() - start,
+          rowCount: result.rows?.length ?? 0,
+        });
+      } else if (error) {
+        await this.history?.add({
+          sql,
+          connection: conn.name || conn.host,
+          costTime: Date.now() - start,
+        });
+      }
+    });
   }
 
-  /** 获取（首次创建并初始化）结果面板 */
-  private getPanel(): ResultPanel {
-    if (!this.panel) {
-      const panel = ResultPanel.show();
-      panel.bindHtml(resultHtml());
-      this.panel = panel;
-    } else {
-      ResultPanel.show();
-    }
-    return this.panel;
+  /** 渲染外部结果（表结构元数据等）到当前视图 */
+  renderExternal(result: import('@db-client/core').QueryResult): void {
+    this.view?.renderExternal(result);
   }
 }

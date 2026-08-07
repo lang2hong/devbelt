@@ -54,3 +54,39 @@ export interface ViewMeta extends TableMeta {
   /** pg only, material: material view */
   type?: string;
 }
+
+/** 函数/存储过程元信息 */
+export interface RoutineMeta {
+  name: string;
+  /** FUNCTION | PROCEDURE */
+  type: string;
+  comment?: string;
+}
+
+/** 事件元信息（MySQL EVENT SCHEDULE） */
+export interface EventMeta {
+  name: string;
+  definer?: string;
+  eventType?: string;
+  comment?: string;
+}
+
+/** 索引元信息 */
+export interface IndexMeta {
+  name: string;
+  columns: string[];
+  isUnique: boolean;
+  isPrimary: boolean;
+  type?: string;
+}
+
+/** 本地保存的查询（Navicat Queries 分类的本地存储） */
+export interface SavedQuery {
+  id: string;
+  name: string;
+  sql: string;
+  connId: string;
+  database?: string;
+  createdAt: number;
+  updatedAt: number;
+}
