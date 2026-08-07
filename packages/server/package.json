@@ -1,0 +1,27 @@
+{
+  "name": "@db-client/server",
+  "version": "0.1.0",
+  "description": "Sync server for DB Client (Fastify + MySQL + JWT)",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@fastify/jwt": "^10.2.1",
+    "@fastify/mysql": "^5.0.2",
+    "@fastify/sensible": "^6.0.3",
+    "dotenv": "^17.4.2",
+    "fastify": "^5.11.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.3"
+  }
+}

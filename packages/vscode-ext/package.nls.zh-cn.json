@@ -1,0 +1,19 @@
+{
+  "cmd.addConnection": "添加连接",
+  "cmd.refresh": "刷新",
+  "cmd.runQuery": "运行查询",
+  "cmd.previewTable": "预览表",
+  "cmd.addGroup": "新建分组",
+  "cmd.renameGroup": "重命名分组",
+  "cmd.removeGroup": "删除分组",
+  "cmd.moveToGroup": "移动到分组",
+  "cmd.login": "登录 / 注册",
+  "cmd.logout": "登出",
+  "cmd.syncPull": "从云端拉取",
+  "cmd.syncPush": "推送到云端",
+  "cmd.formatSql": "格式化 SQL",
+  "cmd.showHistory": "查看查询历史",
+  "cmd.updateCell": "更新单元格",
+  "cmd.explorerMenu": "更多操作",
+  "view.explorer": "连接"
+}

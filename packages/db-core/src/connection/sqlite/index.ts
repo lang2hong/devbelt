@@ -1,0 +1,89 @@
+import * as child_process from 'child_process';
+import { EOL } from 'os';
+import { StreamParser } from './streamParser';
+import { ResultSetParser } from './resultSetParser';
+import { validateSqliteCommand } from './sqliteCommandValidation';
+import type { Result, ResultNew, ResultSet } from './common';
+
+/**
+ * SQLite 驱动封装：通过 sqlite3 CLI 子进程执行查询。
+ * 原样复用自原项目查询逻辑，二进制命令路径由外部注入，保持解耦。
+ */
+class SQLite {
+  public readonly dbPath: string;
+  private sqliteCommand?: string;
+
+  constructor(dbPath: string, sqliteCommand?: string) {
+    this.dbPath = dbPath;
+    this.sqliteCommand = sqliteCommand ? validateSqliteCommand(sqliteCommand) : undefined;
+  }
+
+  query(query: string): Promise<ResultNew | ResultNew[]> {
+    if (!this.sqliteCommand) {
+      return Promise.resolve({ sql: query, fields: [], rows: [] });
+    }
+    return new Promise((res, rej) => {
+      let resultSet: ResultSet | undefined;
+      let errorMessage = '';
+      const streamParser = new StreamParser(new ResultSetParser());
+
+      const args = [
+        '-header',
+        '-nullvalue',
+        'NULL',
+        '-cmd',
+        '.mode tcl',
+      ];
+
+      const proc = child_process.spawn(this.sqliteCommand as string, args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      // 写入 stdin 规避 unicode 路径问题（见 issues #32, #37）
+      proc.stdin!.write(`.open '${this.dbPath}'${EOL}`);
+      proc.stdin!.write(`.echo on${EOL}`);
+      proc.stdin!.end(query);
+
+      proc.stdout.pipe(streamParser).once('done', (data: ResultSet) => {
+        resultSet = data;
+      });
+
+      proc.stderr.on('data', (data) => {
+        errorMessage += data.toString().trim();
+      });
+
+      proc.once('error', (data) => {
+        errorMessage += data;
+      });
+
+      proc.once('close', () => {
+        if (errorMessage) {
+          rej(new Error(errorMessage));
+          return;
+        }
+        if (!resultSet) {
+          resultSet = [{ stmt: query, rows: [], header: [] }];
+        }
+        const newResult: ResultNew[] = resultSet.map((result) => ({
+          sql: result.stmt,
+          fields: result.header.map((head) => ({ name: head })),
+          rows: result.rows.map((row) => {
+            const obj: Record<string, string> = {};
+            for (let i = 0; i < result.header.length; i++) {
+              obj[result.header[i]] = row[i];
+            }
+            return obj;
+          }),
+        }));
+        if (newResult.length === 1) {
+          res(newResult[0]);
+        } else {
+          res(newResult);
+        }
+      });
+    });
+  }
+}
+
+export { SQLite, validateSqliteCommand };
+export type { Result, ResultNew, ResultSet };
+export default SQLite;

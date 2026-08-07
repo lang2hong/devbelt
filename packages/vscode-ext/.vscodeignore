@@ -1,0 +1,6 @@
+# 发布打包时排除的路径（vsce 使用）
+src/
+tsconfig.json
+esbuild.js
+node_modules/
+.pnpm/**

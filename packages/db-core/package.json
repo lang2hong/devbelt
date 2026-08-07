@@ -1,0 +1,26 @@
+{
+  "name": "@db-client/core",
+  "version": "0.1.0",
+  "description": "Pure database connection/query core (no vscode dependency)",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "command-exists": "^1.2.9",
+    "mysql2": "^3.23.2",
+    "pg": "^8.22.0",
+    "sqlstring": "^2.3.3"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.4",
+    "@types/sqlstring": "^2.3.2",
+    "vitest": "^4.1.10",
+    "typescript": "^5.9.3"
+  }
+}

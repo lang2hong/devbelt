@@ -1,0 +1,19 @@
+{
+  "cmd.addConnection": "Add Connection",
+  "cmd.refresh": "Refresh",
+  "cmd.runQuery": "Run Query",
+  "cmd.previewTable": "Preview Table",
+  "cmd.addGroup": "New Group",
+  "cmd.renameGroup": "Rename Group",
+  "cmd.removeGroup": "Delete Group",
+  "cmd.moveToGroup": "Move to Group",
+  "cmd.login": "Login / Register",
+  "cmd.logout": "Logout",
+  "cmd.syncPull": "Pull from Cloud",
+  "cmd.syncPush": "Push to Cloud",
+  "cmd.formatSql": "Format SQL",
+  "cmd.showHistory": "Show Query History",
+  "cmd.updateCell": "Update Cell",
+  "cmd.explorerMenu": "More Actions",
+  "view.explorer": "Connections"
+}

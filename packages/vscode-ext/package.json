@@ -1,0 +1,218 @@
+{
+  "name": "vscode-db-client",
+  "displayName": "DB Client",
+  "description": "All-in-one Database Client for VS Code",
+  "version": "0.1.0",
+  "publisher": "local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "dbclient.addConnection",
+        "title": "%cmd.addConnection%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.refresh",
+        "title": "%cmd.refresh%",
+        "category": "DB Client",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "dbclient.runQuery",
+        "title": "%cmd.runQuery%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.previewTable",
+        "title": "%cmd.previewTable%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.addGroup",
+        "title": "%cmd.addGroup%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.renameGroup",
+        "title": "%cmd.renameGroup%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.removeGroup",
+        "title": "%cmd.removeGroup%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.moveToGroup",
+        "title": "%cmd.moveToGroup%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.login",
+        "title": "%cmd.login%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.logout",
+        "title": "%cmd.logout%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.syncPull",
+        "title": "%cmd.syncPull%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.syncPush",
+        "title": "%cmd.syncPush%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.formatSql",
+        "title": "%cmd.formatSql%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.showHistory",
+        "title": "%cmd.showHistory%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.updateCell",
+        "title": "%cmd.updateCell%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.explorerMenu",
+        "title": "%cmd.explorerMenu%",
+        "category": "DB Client",
+        "icon": "$(kebab-horizontal)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "dbclient.addConnection",
+          "when": "view == dbclient.explorer",
+          "group": "navigation"
+        },
+        {
+          "command": "dbclient.explorerMenu",
+          "when": "view == dbclient.explorer",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "dbclient.login",
+          "when": "!dbclient.loggedIn"
+        },
+        {
+          "command": "dbclient.logout",
+          "when": "dbclient.loggedIn"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "dbclient.previewTable",
+          "when": "view == dbclient.explorer && viewItem == table",
+          "group": "inline"
+        },
+        {
+          "command": "dbclient.addGroup",
+          "when": "view == dbclient.explorer && viewItem == group",
+          "group": "inline"
+        },
+        {
+          "command": "dbclient.renameGroup",
+          "when": "view == dbclient.explorer && viewItem == group",
+          "group": "1_group"
+        },
+        {
+          "command": "dbclient.removeGroup",
+          "when": "view == dbclient.explorer && viewItem == group",
+          "group": "1_group"
+        },
+        {
+          "command": "dbclient.moveToGroup",
+          "when": "view == dbclient.explorer && viewItem == connection",
+          "group": "1_conn"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "DB Client",
+      "properties": {
+        "dbclient.sync.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:3000",
+          "description": "DB Client sync server URL"
+        },
+        "dbclient.language": {
+          "type": "string",
+          "enum": ["auto", "zh", "en"],
+          "default": "auto",
+          "description": "Extension language. auto follows VS Code display language.",
+          "markdownDescription": "扩展语言。`auto` 跟随 VS Code 显示语言。"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "dbclient",
+          "title": "DB Client",
+          "icon": "resources/logo.svg"
+        }
+      ]
+    },
+    "views": {
+      "dbclient": [
+        {
+          "id": "dbclient.explorer",
+          "name": "%view.explorer%"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "dbclient.runQuery",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "editorTextFocus"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node esbuild.js",
+    "dev": "node esbuild.js --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "package": "@vscode/vsce package"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@db-client/core": "workspace:*",
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.24.0",
+    "mysql2": "^3.23.2",
+    "pg": "^8.22.0",
+    "sql-formatter": "^15.8.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}
