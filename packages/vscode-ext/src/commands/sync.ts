@@ -1,0 +1,47 @@
+import * as vscode from 'vscode';
+import { LoginForm } from '../sync/loginForm';
+import { l10n } from '../i18n';
+import type { Deps, Sub } from './shared';
+import { promptMasterPassword } from './shared';
+
+export function registerSyncCommands(deps: Deps, sub: Sub): void {
+  const { auth, sync, syncBar, treeProvider } = deps;
+
+  sub('dbclient.login', () => LoginForm.open(auth, () => syncBar.update()));
+
+  sub('dbclient.logout', async () => {
+    await auth.logout();
+    syncBar.update();
+    vscode.window.showInformationMessage(l10n('cmd.loggedOut'));
+  });
+
+  sub('dbclient.syncPull', async () => {
+    const mp = await promptMasterPassword();
+    if (!mp) return;
+    await sync.pull(mp);
+    treeProvider.refresh();
+    vscode.window.showInformationMessage(l10n('cmd.pullDone'));
+  });
+
+  sub('dbclient.syncPush', async () => {
+    const mp = await promptMasterPassword();
+    if (!mp) return;
+    await sync.push(mp);
+    vscode.window.showInformationMessage(l10n('cmd.pushDone'));
+  });
+
+  sub('dbclient.explorerMenu', async () => {
+    const loggedIn = auth.isLoggedIn();
+    const items: (vscode.QuickPickItem & { value: string })[] = [
+      { label: '$(add) New Group', description: 'Create a connection group', value: 'addGroup' },
+      { label: '$(history) Query History', description: 'View recent queries', value: 'showHistory' },
+      { label: '$(cloud-download) Pull from Cloud', description: 'Download & merge', value: 'syncPull' },
+      { label: '$(cloud-upload) Push to Cloud', description: 'Upload local data', value: 'syncPush' },
+      loggedIn
+        ? { label: '$(sign-out) Logout', value: 'logout' }
+        : { label: '$(sign-in) Login', value: 'login' },
+    ];
+    const picked = await vscode.window.showQuickPick(items, { placeHolder: 'DB Client actions' });
+    if (picked) await vscode.commands.executeCommand(`dbclient.${picked.value}`);
+  });
+}
