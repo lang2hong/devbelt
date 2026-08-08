@@ -1,4 +1,5 @@
 import { DatabaseType } from '../types/connection';
+import { validateIdent } from '../utils/validate';
 import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
 
@@ -21,48 +22,56 @@ export class MysqlDialect implements SqlDialect {
   }
 
   getTableListSql(database?: string): string {
-    return database
-      ? `SELECT TABLE_NAME AS name, TABLE_ROWS AS table_rows FROM information_schema.tables WHERE table_schema = '${database}' AND table_type = 'BASE TABLE'`
-      : `SELECT TABLE_NAME AS name, TABLE_ROWS AS table_rows FROM information_schema.tables WHERE table_type = 'BASE TABLE'`;
+    if (database) {
+      validateIdent(database);
+      return `SELECT TABLE_NAME AS name, TABLE_ROWS AS table_rows FROM information_schema.tables WHERE table_schema = '${database}' AND table_type = 'BASE TABLE'`;
+    }
+    return `SELECT TABLE_NAME AS name, TABLE_ROWS AS table_rows FROM information_schema.tables WHERE table_type = 'BASE TABLE'`;
   }
 
   getViewListSql(database?: string): string {
-    return database
-      ? `SELECT TABLE_NAME AS name FROM information_schema.views WHERE table_schema = '${database}'`
-      : `SELECT TABLE_NAME AS name FROM information_schema.views`;
+    if (database) {
+      validateIdent(database);
+      return `SELECT TABLE_NAME AS name FROM information_schema.views WHERE table_schema = '${database}'`;
+    }
+    return `SELECT TABLE_NAME AS name FROM information_schema.views`;
   }
 
   getFunctionListSql(database?: string): string {
     const where = database
-      ? `routine_schema = '${database}'`
+      ? `routine_schema = '${validateIdent(database)}'`
       : `routine_schema = database()`;
     return `SELECT routine_name AS name, routine_type AS type FROM information_schema.routines WHERE ${where} ORDER BY routine_name`;
   }
 
   getEventListSql(database?: string): string {
     const where = database
-      ? `event_schema = '${database}'`
+      ? `event_schema = '${validateIdent(database)}'`
       : `event_schema = database()`;
     return `SELECT event_name AS name, definer, event_type FROM information_schema.events WHERE ${where} ORDER BY event_name`;
   }
 
   getRoutineDefinitionSql(name: string, routineType: string, database?: string): string {
+    const validType = routineType === 'FUNCTION' || routineType === 'PROCEDURE'
+      ? routineType
+      : 'FUNCTION';
     const qualified = database
-      ? `${this.wrap(database)}.${this.wrap(name)}`
-      : this.wrap(name);
-    return `SHOW CREATE ${routineType} ${qualified}`;
+      ? `${this.wrap(validateIdent(database))}.${this.wrap(validateIdent(name))}`
+      : this.wrap(validateIdent(name));
+    return `SHOW CREATE ${validType} ${qualified}`;
   }
 
   getEventDefinitionSql(name: string, database?: string): string {
     const qualified = database
-      ? `${this.wrap(database)}.${this.wrap(name)}`
-      : this.wrap(name);
+      ? `${this.wrap(validateIdent(database))}.${this.wrap(validateIdent(name))}`
+      : this.wrap(validateIdent(name));
     return `SHOW CREATE EVENT ${qualified}`;
   }
 
   getIndexListSql(table: string, database?: string): string {
+    validateIdent(table);
     const where = database
-      ? `table_schema = '${database}' AND table_name = '${table}'`
+      ? `table_schema = '${validateIdent(database)}' AND table_name = '${table}'`
       : `table_schema = database() AND table_name = '${table}'`;
     return `SELECT index_name AS name, column_name AS column, non_unique = 0 AS is_unique, index_name = 'PRIMARY' AS is_primary FROM information_schema.statistics WHERE ${where} ORDER BY index_name, seq_in_index`;
   }
@@ -72,13 +81,14 @@ export class MysqlDialect implements SqlDialect {
   }
 
   getForeignKeysSql(database?: string): string {
-    const where = database ? `table_schema = '${database}'` : `table_schema = database()`;
+    const where = database ? `table_schema = '${validateIdent(database)}'` : `table_schema = database()`;
     return `SELECT table_name AS tableName, column_name AS columnName, referenced_table_name AS refTable, referenced_column_name AS refColumn FROM information_schema.key_column_usage WHERE referenced_table_name IS NOT NULL AND ${where}`;
   }
 
   getColumnsSql(table: string, database?: string): string {
+    validateIdent(table);
     return database
-      ? `SHOW FULL COLUMNS FROM ${this.wrap(table)} FROM ${this.wrap(database)}`
+      ? `SHOW FULL COLUMNS FROM ${this.wrap(table)} FROM ${this.wrap(validateIdent(database))}`
       : `SHOW FULL COLUMNS FROM ${this.wrap(table)}`;
   }
 

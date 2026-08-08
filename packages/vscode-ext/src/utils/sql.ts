@@ -18,7 +18,7 @@ export function wrapQualified(conn: SavedConnection, name: string, database?: st
   return wrapIdent(conn, name);
 }
 
-/** 转义 SQL 字符串字面量值（防注入） */
+/** 转义 SQL 字符串字面量值（防注入，处理反斜杠） */
 export function escapeSqlValue(value: string): string {
-  return value.replace(/'/g, "''");
+  return "'" + value.replace(/\\/g, '\\\\').replace(/'/g, "''") + "'";
 }

@@ -1,3 +1,5 @@
+import * as sqlstring from 'sqlstring';
+import { validateIdent } from '../utils/validate';
 import { QueryService } from './queryService';
 import type { QueryResult } from '../types/query';
 import type { ColumnMeta } from '../types/meta';
@@ -78,29 +80,33 @@ export class TableService {
 
   /** 创建用户 */
   async createUser(name: string, password: string, host = '%'): Promise<QueryResult> {
-    return this.ddl(`CREATE USER '${name}'@'${host}' IDENTIFIED BY '${password.replace(/'/g, "''")}'`);
+    return this.ddl(`CREATE USER ${sqlstring.escape(name)}@${sqlstring.escape(host)} IDENTIFIED BY ${sqlstring.escape(password)}`);
   }
 
-  /** 删除用户 */
   async dropUser(name: string, host = '%'): Promise<QueryResult> {
-    return this.ddl(`DROP USER IF EXISTS '${name}'@'${host}'`);
+    return this.ddl(`DROP USER IF EXISTS ${sqlstring.escape(name)}@${sqlstring.escape(host)}`);
   }
 
-  /** 修改用户密码 */
   async alterUserPassword(name: string, password: string, host = '%'): Promise<QueryResult> {
-    return this.ddl(`ALTER USER '${name}'@'${host}' IDENTIFIED BY '${password.replace(/'/g, "''")}'`);
+    return this.ddl(`ALTER USER ${sqlstring.escape(name)}@${sqlstring.escape(host)} IDENTIFIED BY ${sqlstring.escape(password)}`);
   }
 
-  /** 授予权限 */
   async grantPrivilege(name: string, privilege: string, database?: string, host = '%'): Promise<QueryResult> {
-    const target = database ? `${this.wrap(database)}.*` : '*.*';
-    return this.ddl(`GRANT ${privilege} ON ${target} TO '${name}'@'${host}'`);
+    const PRIV_WHITELIST = /^(ALL(\s+PRIVILEGES)?|SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|INDEX|REFERENCES|TRIGGER|EXECUTE|USAGE|RELOAD|PROCESS|REPLICATION\s+CLIENT|REPLICATION\s+SLAVE|SHOW\s+DATABASES|SHUTDOWN|SUPER)$/i;
+    if (!PRIV_WHITELIST.test(privilege.trim())) {
+      throw new Error(`Invalid privilege: "${privilege}"`);
+    }
+    const target = database ? `${this.wrap(validateIdent(database))}.*` : '*.*';
+    return this.ddl(`GRANT ${privilege} ON ${target} TO ${sqlstring.escape(name)}@${sqlstring.escape(host)}`);
   }
 
-  /** 撤销权限 */
   async revokePrivilege(name: string, privilege: string, database?: string, host = '%'): Promise<QueryResult> {
-    const target = database ? `${this.wrap(database)}.*` : '*.*';
-    return this.ddl(`REVOKE ${privilege} ON ${target} FROM '${name}'@'${host}'`);
+    const PRIV_WHITELIST = /^(ALL(\s+PRIVILEGES)?|SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|INDEX|REFERENCES|TRIGGER|EXECUTE|USAGE|RELOAD|PROCESS|REPLICATION\s+CLIENT|REPLICATION\s+SLAVE|SHOW\s+DATABASES|SHUTDOWN|SUPER)$/i;
+    if (!PRIV_WHITELIST.test(privilege.trim())) {
+      throw new Error(`Invalid privilege: "${privilege}"`);
+    }
+    const target = database ? `${this.wrap(validateIdent(database))}.*` : '*.*';
+    return this.ddl(`REVOKE ${privilege} ON ${target} FROM ${sqlstring.escape(name)}@${sqlstring.escape(host)}`);
   }
 
   /**
@@ -123,8 +129,7 @@ export class TableService {
           const values = fields.map((f: string) => {
             const v = row[f];
             if (v === null || v === undefined) return 'NULL';
-            if (typeof v === 'number') return String(v);
-            return "'" + String(v).replace(/'/g, "''") + "'";
+            return sqlstring.escape(v);
           }).join(', ');
           parts.push(`INSERT INTO ${this.wrapQualified(table, database)} (${colList}) VALUES (${values});`);
         }

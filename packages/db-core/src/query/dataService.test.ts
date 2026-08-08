@@ -38,7 +38,7 @@ describe('DataService（数据编辑）', () => {
     const svc = new DataService(new QueryService(conn, new MysqlDialect()));
     await svc.updateCell('users', 'id', 5, 'name', "O'Brien");
     expect(conn.sqls[0]).toBe(
-      "UPDATE `users` SET `name` = 'O''Brien' WHERE `id` = 5",
+      "UPDATE `users` SET `name` = 'O\\'Brien' WHERE `id` = 5",
     );
   });
 

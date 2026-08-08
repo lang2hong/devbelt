@@ -73,6 +73,12 @@ export class TableQueryView {
 
   private get _extensionUri(): vscode.Uri { return TableQueryView._extensionUri; }
 
+  /** 安全转义 LIKE 值：处理 `'` `\` `%` `_` */
+  private escapeLike(val: string): string {
+    const escaped = val.replace(/\\/g, '\\\\').replace(/'/g, "''").replace(/%/g, '\\%').replace(/_/g, '\\_');
+    return `'${escaped}%'`;
+  }
+
   private async sendInit(): Promise<void> {
     void this.panel.webview.postMessage({
       type: 'init',
@@ -87,9 +93,12 @@ export class TableQueryView {
   private buildSelect(): string {
     if (!this.hasTable || !this.table) return '';
     const w = this.conn.dbType === 'MYSQL' ? '`' : '"';
-    let sql = `SELECT * FROM ${this.database ? `${w}${this.database}${w}.${w}${this.table}${w}` : `${w}${this.table}${w}`}`;
+    const tbl = this.database
+      ? `${w}${this.database}${w}.${w}${this.table}${w}`
+      : `${w}${this.table}${w}`;
+    let sql = `SELECT * FROM ${tbl}`;
     if (this.filterCol && this.filterVal) {
-      sql += ` WHERE ${w}${this.filterCol}${w} LIKE '%${this.filterVal.replace(/'/g, "''")}%'`;
+      sql += ` WHERE ${w}${this.filterCol}${w} LIKE ${this.escapeLike(this.filterVal)}`;
     }
     if (this.sortCol && this.sortDir) {
       sql += ` ORDER BY ${w}${this.sortCol}${w} ${this.sortDir}`;
@@ -186,7 +195,8 @@ export class TableQueryView {
         ? `${w}${this.database}${w}.${w}${this.table}${w}`
         : `${w}${this.table}${w}`;
       for (const r of rows) {
-        await session.query.query(`DELETE FROM ${table} WHERE ${w}${r.pkColumn}${w} = '${String(r.pkValue).replace(/'/g, "''")}'`);
+        const valEsc = r.pkValue === null ? 'NULL' : `'${String(r.pkValue).replace(/'/g, "''").replace(/\\/g, '\\\\')}'`;
+        await session.query.query(`DELETE FROM ${table} WHERE ${w}${r.pkColumn}${w} = ${valEsc}`);
       }
       void this.panel.webview.postMessage({ type: 'rowsDeleted', count: rows.length });
       await this.execute(this.buildSelect());

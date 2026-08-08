@@ -24,6 +24,9 @@ export { DialectRegistry } from './dialect/dialectRegistry';
 // 工厂
 export { ConnectionFactory } from './factory/connectionFactory';
 
+// 工具
+export { validateIdent } from './utils/validate';
+
 // 查询层
 export { QueryService, QueryError } from './query/queryService';
 export { MetadataService } from './query/metadataService';
@@ -31,4 +34,3 @@ export { DataService } from './query/dataService';
 export { TableService } from './query/tableService';
 export { SchemaDiffService } from './query/schemaDiffService';
 export type { TableDiff, ColumnDiff } from './query/schemaDiffService';
-export type { RoutineMeta, EventMeta, SavedQuery, IndexMeta, UserMeta, ForeignKeyMeta } from './types/meta';

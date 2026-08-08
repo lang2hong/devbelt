@@ -26,17 +26,14 @@ export abstract class IConnection {
   abstract end(): void;
   abstract isAlive(): boolean;
 
-  /** 将行数据转为 dump 格式（NULL / 转义字符串） */
+  /** 将行数据转为 dump 格式（NULL / 转义字符串），不修改原始行 */
   convertToDump(row: any): any {
+    const out: any = {};
     for (const key in row) {
       const element = row[key];
-      if (element == null) {
-        row[key] = 'NULL';
-      } else {
-        row[key] = sqlstring.escape(element);
-      }
+      out[key] = element == null ? 'NULL' : sqlstring.escape(element);
     }
-    return row;
+    return out;
   }
 }
 

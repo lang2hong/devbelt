@@ -1,4 +1,5 @@
 import { DatabaseType } from '../types/connection';
+import { validateIdent } from '../utils/validate';
 import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
 
@@ -50,6 +51,7 @@ export class PostgreSqlDialect implements SqlDialect {
   }
 
   getRoutineDefinitionSql(name: string, _routineType: string): string {
+    validateIdent(name);
     return `SELECT pg_get_functiondef(p.oid) AS definition
       FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -61,6 +63,7 @@ export class PostgreSqlDialect implements SqlDialect {
   }
 
   getIndexListSql(table: string): string {
+    validateIdent(table);
     return `SELECT indexname AS name, indexdef AS definition, 
       CASE WHEN indexdef LIKE '%UNIQUE%' THEN true ELSE false END AS is_unique,
       CASE WHEN indexname = '${table}_pkey' THEN true ELSE false END AS is_primary
@@ -82,6 +85,7 @@ export class PostgreSqlDialect implements SqlDialect {
   }
 
   getColumnsSql(table: string): string {
+    validateIdent(table);
     return `SELECT column_name AS name,
         data_type AS simple_type,
         data_type AS type,

@@ -1,4 +1,5 @@
 import { DatabaseType } from '../types/connection';
+import { validateIdent } from '../utils/validate';
 import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
 
@@ -46,6 +47,7 @@ export class SqliteDialect implements SqlDialect {
   }
 
   getIndexListSql(table: string): string {
+    validateIdent(table);
     return `SELECT name AS name, 0 AS is_unique, name LIKE 'sqlite_autoindex%' AS is_primary FROM sqlite_master WHERE type = 'index' AND tbl_name = '${table}'`;
   }
 
@@ -61,6 +63,7 @@ export class SqliteDialect implements SqlDialect {
   }
 
   getColumnsSql(table: string): string {
+    validateIdent(table);
     return `PRAGMA table_info(${this.wrap(table)})`;
   }
 
