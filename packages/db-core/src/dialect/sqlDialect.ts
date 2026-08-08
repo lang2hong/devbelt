@@ -62,6 +62,15 @@ export interface SqlDialect {
   /** 查询表的列元数据 SQL */
   getColumnsSql(table: string, database?: string): string;
 
+  /** 查询进程列表 SQL（空字符串表示不支持） */
+  getProcessListSql(): string;
+
+  /** 查询状态变量 SQL（空字符串表示不支持） */
+  getStatusVariablesSql(): string;
+
+  /** 查询服务器变量 SQL（空字符串表示不支持） */
+  getServerVariablesSql(): string;
+
   /** 解析表列表查询结果行为对象 */
   parseTableList(rows: any[]): TableMeta[];
 

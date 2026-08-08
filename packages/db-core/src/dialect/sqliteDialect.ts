@@ -51,9 +51,10 @@ export class SqliteDialect implements SqlDialect {
     return `SELECT name AS name, 0 AS is_unique, name LIKE 'sqlite_autoindex%' AS is_primary FROM sqlite_master WHERE type = 'index' AND tbl_name = '${table}'`;
   }
 
-  getUserListSql(): string {
-    return '';
-  }
+  getUserListSql(): string { return ''; }
+  getProcessListSql(): string { return ''; }
+  getStatusVariablesSql(): string { return ''; }
+  getServerVariablesSql(): string { return ''; }
 
   getForeignKeysSql(): string {
     return `SELECT m.name AS tableName, fk."from" AS columnName, fk."table" AS refTable, fk."to" AS refColumn

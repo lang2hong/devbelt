@@ -85,6 +85,10 @@ export class MysqlDialect implements SqlDialect {
     return `SELECT table_name AS tableName, column_name AS columnName, referenced_table_name AS refTable, referenced_column_name AS refColumn FROM information_schema.key_column_usage WHERE referenced_table_name IS NOT NULL AND ${where}`;
   }
 
+  getProcessListSql(): string { return 'SHOW PROCESSLIST'; }
+  getStatusVariablesSql(): string { return 'SHOW GLOBAL STATUS'; }
+  getServerVariablesSql(): string { return 'SHOW VARIABLES'; }
+
   getColumnsSql(table: string, database?: string): string {
     validateIdent(table);
     return database

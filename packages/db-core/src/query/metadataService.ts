@@ -92,41 +92,25 @@ export class MetadataService {
     return this.queryService.dialect.parseUserList(result.rows);
   }
 
-  /** 查询进程列表（MySQL: SHOW PROCESSLIST, PG: pg_stat_activity） */
   async getProcessList(): Promise<any[]> {
-    const dbType = this.queryService.dialect.dbType;
-    if (dbType === 'MYSQL') {
-      const r = await this.queryService.query('SHOW PROCESSLIST');
-      return r.rows;
-    }
-    if (dbType === 'PG') {
-      const r = await this.queryService.query(
-        'SELECT pid, usename, datname, client_addr AS host, state, query FROM pg_stat_activity ORDER BY pid',
-      );
-      return r.rows;
-    }
-    return [];
-  }
-
-  /** 查询状态变量（MySQL only: SHOW STATUS） */
-  async getStatusVariables(): Promise<any[]> {
-    if (this.queryService.dialect.dbType !== 'MYSQL') return [];
-    const r = await this.queryService.query('SHOW GLOBAL STATUS');
+    const sql = this.queryService.dialect.getProcessListSql();
+    if (!sql) return [];
+    const r = await this.queryService.query(sql);
     return r.rows;
   }
 
-  /** 查询服务器变量（MySQL: SHOW VARIABLES, PG: pg_settings） */
+  async getStatusVariables(): Promise<any[]> {
+    const sql = this.queryService.dialect.getStatusVariablesSql();
+    if (!sql) return [];
+    const r = await this.queryService.query(sql);
+    return r.rows;
+  }
+
   async getServerVariables(): Promise<any[]> {
-    const dbType = this.queryService.dialect.dbType;
-    if (dbType === 'MYSQL') {
-      const r = await this.queryService.query('SHOW VARIABLES');
-      return r.rows;
-    }
-    if (dbType === 'PG') {
-      const r = await this.queryService.query('SELECT name, setting, short_desc AS description FROM pg_settings ORDER BY name');
-      return r.rows;
-    }
-    return [];
+    const sql = this.queryService.dialect.getServerVariablesSql();
+    if (!sql) return [];
+    const r = await this.queryService.query(sql);
+    return r.rows;
   }
 
   /** 查询外键关系 */

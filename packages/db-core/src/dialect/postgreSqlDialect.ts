@@ -84,6 +84,14 @@ export class PostgreSqlDialect implements SqlDialect {
       WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = current_schema()`;
   }
 
+  getProcessListSql(): string {
+    return 'SELECT pid, usename, datname, client_addr AS host, state, query FROM pg_stat_activity ORDER BY pid';
+  }
+  getStatusVariablesSql(): string { return ''; }
+  getServerVariablesSql(): string {
+    return 'SELECT name, setting, short_desc AS description FROM pg_settings ORDER BY name';
+  }
+
   getColumnsSql(table: string): string {
     validateIdent(table);
     return `SELECT column_name AS name,

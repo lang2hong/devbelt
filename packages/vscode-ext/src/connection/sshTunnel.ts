@@ -30,9 +30,16 @@ export class SshTunnel {
 
     return new Promise<number>((resolve, reject) => {
       const ssh = new Client();
+      let settled = false;
+      const fail = (err: Error): void => {
+        if (settled) return;
+        settled = true;
+        try { ssh.end(); } catch {}
+        reject(err);
+      };
 
       ssh.on('ready', () => {
-        // 创建本地 TCP 服务器
+        if (settled) return;
         const server = net.createServer((socket) => {
           ssh.forwardOut(
             socket.remoteAddress || '127.0.0.1',
@@ -40,10 +47,7 @@ export class SshTunnel {
             conn.host,
             conn.port,
             (err, stream) => {
-              if (err) {
-                socket.destroy();
-                return;
-              }
+              if (err) { socket.destroy(); return; }
               socket.pipe(stream);
               stream.pipe(socket);
               socket.on('error', () => stream.destroy());
@@ -52,20 +56,22 @@ export class SshTunnel {
           );
         });
 
-        server.on('error', (err) => reject(err));
+        server.on('error', fail);
         server.listen(0, '127.0.0.1', () => {
+          if (settled) { server.close(); return; }
           const addr = server.address();
           const port = typeof addr === 'object' && addr ? addr.port : 0;
           if (port === 0) {
-            reject(new Error('Failed to get local port'));
+            fail(new Error('Failed to get local port'));
             return;
           }
+          settled = true;
           this.tunnels.set(conn.id, { ssh, server, port });
           resolve(port);
         });
       });
 
-      ssh.on('error', (err) => reject(err));
+      ssh.on('error', fail);
 
       // SSH 连接配置
       const config: any = {
