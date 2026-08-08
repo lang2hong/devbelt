@@ -305,6 +305,11 @@
         "command": "dbclient.exportConnection",
         "title": "Export",
         "category": "DB Client"
+      },
+      {
+        "command": "dbclient.deleteQuery",
+        "title": "Delete Query",
+        "category": "DB Client"
       }
     ],
     "menus": {
@@ -399,6 +404,26 @@
           "command": "dbclient.dropTable",
           "when": "view == dbclient.explorer && viewItem == table",
           "group": "2_danger"
+        },
+        {
+          "command": "dbclient.newQueryFromConn",
+          "when": "view == dbclient.explorer && viewItem == database",
+          "group": "1_db"
+        },
+        {
+          "command": "dbclient.openTerminal",
+          "when": "view == dbclient.explorer && viewItem == database",
+          "group": "1_db"
+        },
+        {
+          "command": "dbclient.importData",
+          "when": "view == dbclient.explorer && viewItem == database",
+          "group": "1_db"
+        },
+        {
+          "command": "dbclient.exportConnection",
+          "when": "view == dbclient.explorer && viewItem == database",
+          "group": "1_db"
         },
         {
           "command": "dbclient.dropDatabase",

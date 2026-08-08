@@ -11,8 +11,9 @@ import type { SavedConnection } from '../connection/connectionStore';
  */
 export class TerminalService {
   /** 打开数据库 CLI 终端 */
-  static open(conn: SavedConnection): void {
-    const cmd = TerminalService.buildCommand(conn);
+  static open(conn: SavedConnection, database?: string): void {
+    const db = database || conn.database;
+    const cmd = TerminalService.buildCommand(conn, db);
     if (!cmd) {
       vscode.window.showWarningMessage(`Terminal not supported for ${conn.dbType}`);
       return;
@@ -26,17 +27,16 @@ export class TerminalService {
     terminal.sendText(cmd.cmd);
   }
 
-  /** 构造 CLI 命令 + 环境变量 */
-  private static buildCommand(conn: SavedConnection): { cmd: string; env: Record<string, string> } | undefined {
+  private static buildCommand(conn: SavedConnection, database?: string): { cmd: string; env: Record<string, string> } | undefined {
     switch (conn.dbType) {
       case DatabaseType.MYSQL:
         return {
-          cmd: `mysql -u ${conn.user} -h ${conn.host} -P ${conn.port} ${conn.database ? conn.database : ''}`,
+          cmd: `mysql -u ${conn.user} -h ${conn.host} -P ${conn.port} ${database ? database : ''}`,
           env: conn.password ? { MYSQL_PWD: conn.password } : {},
         };
       case DatabaseType.PG:
         return {
-          cmd: `psql -U ${conn.user} -h ${conn.host} -p ${conn.port} ${conn.database ? conn.database : ''}`,
+          cmd: `psql -U ${conn.user} -h ${conn.host} -p ${conn.port} ${database ? database : ''}`,
           env: conn.password ? { PGPASSWORD: conn.password } : {},
         };
       case DatabaseType.SQLITE:

@@ -54,7 +54,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     ),
     // Terminal 集成
     vscode.commands.registerCommand('dbclient.openTerminal', (node: any) => {
-      if (node?.conn) TerminalService.open(node.conn);
+      if (node?.conn) TerminalService.open(node.conn, node.database);
     }),
     // 表设计视图
     vscode.commands.registerCommand('dbclient.designTable', (node: any) => {

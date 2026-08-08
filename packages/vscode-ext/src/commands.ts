@@ -299,12 +299,16 @@ export function registerCommands(deps: Deps): void {
     treeProvider.refresh();
   });
 
-  // 从连接打开空 SQL 编辑器（带连接上下文）
+  // 从连接/数据库打开空 SQL 编辑器（带连接上下文），并保存为查询
   sub('dbclient.newQueryFromConn', async (node: DbTreeNode) => {
     if (!node?.conn) return;
-    connCtx.setLast(node.conn);
+    const name = await vscode.window.showInputBox({ prompt: l10n('query.namePrompt') });
+    if (!name) return;
+    connCtx.setLast(node.conn, node.database);
     const editor = await openSqlDocEditor('');
-    if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn);
+    if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
+    await store.saveQuery({ name, sql: '', connId: node.conn.id, database: node.database });
+    treeProvider.refresh();
   });
 
   // 导入：选择 SQL/CSV 文件 → 执行
@@ -333,10 +337,10 @@ export function registerCommands(deps: Deps): void {
     treeProvider.refresh();
   });
 
-  // 导出：导出连接下所有库的结构（或结构+数据）
+  // 导出：从连接导出全库 / 从数据库节点导出单库
   sub('dbclient.exportConnection', async (node: DbTreeNode) => {
     if (!node?.conn) return;
-    connCtx.setLast(node.conn);
+    connCtx.setLast(node.conn, node.database);
     const choice = await vscode.window.showQuickPick(
       [
         { label: l10n('export.structureOnly'), value: false as boolean },
@@ -346,13 +350,23 @@ export function registerCommands(deps: Deps): void {
     );
     if (!choice) return;
     const session = await manager.connect(node.conn);
-    const dbs = await session.metadata.getDatabases();
     const parts: string[] = [];
-    for (const db of dbs) {
-      const tables = await session.metadata.getTables(db);
+    if (node.database) {
+      // 数据库节点：仅导出该库
+      const tables = await session.metadata.getTables(node.database);
       for (const t of tables) {
-        const dump = await session.table.dumpSql(t.name, db, choice.value);
+        const dump = await session.table.dumpSql(t.name, node.database, choice.value);
         parts.push(dump);
+      }
+    } else {
+      // 连接节点：导出所有库
+      const dbs = await session.metadata.getDatabases();
+      for (const db of dbs) {
+        const tables = await session.metadata.getTables(db);
+        for (const t of tables) {
+          const dump = await session.table.dumpSql(t.name, db, choice.value);
+          parts.push(dump);
+        }
       }
     }
     await openSqlDoc(parts.join('\n\n'));
