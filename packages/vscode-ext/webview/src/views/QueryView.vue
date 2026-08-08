@@ -26,8 +26,6 @@ onMounted(() => {
       hasTable.value = msg.hasTable || false;
       tableName.value = msg.tableName || '';
       dbName.value = msg.dbName || '';
-      (window as any).__tableName = tableName.value;
-      (window as any).__dbName = dbName.value;
     } else if (msg.type === 'result') {
       rows.value = msg.result.rows || [];
       fields.value = msg.result.fields || [];
@@ -109,6 +107,8 @@ function onKeydown(e: KeyboardEvent) {
       :has-table="hasTable"
       :sort-col="sortCol"
       :sort-dir="sortDir"
+      :table-name="tableName"
+      :db-name="dbName"
       @sort="handleSort"
       @filter="handleFilter"
       @update-cell="handleUpdateCell"

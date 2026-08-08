@@ -4,7 +4,7 @@ import { ConnectionManager } from './connection/connectionManager';
 import { ConnectionContext } from './connection/connectionContext';
 import { DbTreeDataProvider } from './tree/dbTreeDataProvider';
 import { QueryExecutor } from './result/queryExecutor';
-import { TableQueryView } from './result/tableQueryView';
+import { BaseWebView } from './result/baseWebView';
 import { TableDesignView } from './result/tableDesignView';
 import { StatusView } from './result/statusView';
 import { ERDiagramView } from './result/erDiagramView';
@@ -25,11 +25,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const executor = new QueryExecutor(manager, history);
   const connCtx = new ConnectionContext(context, store);
 
-  // Vue webview 初始化
-  TableQueryView.init(context.extensionUri);
-  TableDesignView.init(context.extensionUri);
-  StatusView.init(context.extensionUri);
-  ERDiagramView.init(context.extensionUri);
+  BaseWebView.init(context.extensionUri);
 
   // 同步服务
   const serverUrl = AuthService.getServerUrl(vscode.workspace.getConfiguration());

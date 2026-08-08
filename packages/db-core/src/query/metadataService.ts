@@ -1,4 +1,5 @@
 import { QueryService } from './queryService';
+import { normalizeColumnMeta } from './normalize';
 import type { ColumnMeta, TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta } from '../types/meta';
 
 /**
@@ -72,7 +73,7 @@ export class MetadataService {
   async getColumns(table: string, database?: string): Promise<ColumnMeta[]> {
     const sql = this.queryService.dialect.getColumnsSql(table, database);
     const result = await this.queryService.query(sql);
-    return result.rows.map((row: any) => this.normalizeColumn(row));
+    return result.rows.map((row: any) => normalizeColumnMeta(row));
   }
 
   /** 查询表索引列表 */
@@ -134,29 +135,5 @@ export class MetadataService {
     if (!sql) return [];
     const result = await this.queryService.query(sql);
     return this.queryService.dialect.parseForeignKeys(result.rows);
-  }
-
-  /** 将各方言列元数据行归一化为统一结构 */
-  private normalizeColumn(row: any): ColumnMeta {
-    const name = row.name ?? row.Field ?? row.column_name ?? row['name'];
-    const type = row.type ?? row.Type ?? row.data_type ?? row['type'];
-    const simpleType = row.simple_type ?? row.simpleType ?? String(type).split('(')[0];
-    const isPrimary = row.key === 'PRI' || row.Key === 'PRI';
-    return {
-      name,
-      simpleType,
-      type,
-      comment: row.comment ?? row.Comment ?? row['comment'] ?? '',
-      key: row.key ?? row.Key ?? row['key'] ?? '',
-      nullable: row.nullable ?? row.Null ?? row.is_nullable ?? '',
-      maxLength: row.maxLength ?? '',
-      defaultValue: row.defaultValue ?? row.Default ?? row.column_default ?? '',
-      extra: row.extra ?? row.Extra ?? '',
-      isNotNull: row.isNotNull ?? false,
-      isAutoIncrement: false,
-      isUnique: false,
-      isPrimary,
-      pk: isPrimary ? 'PRI' : '',
-    };
   }
 }

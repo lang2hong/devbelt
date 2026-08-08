@@ -2,7 +2,6 @@ import * as fs from 'fs';
 import * as mysql from 'mysql2';
 import type { TypeCastField } from 'mysql2';
 import { IConnection } from './connection';
-import { dumpTypeCast } from './convert/mysqlTypeCast';
 import type { ConnectionConfig } from '../types/connection';
 import type { QueryCallback } from '../types/query';
 
@@ -29,7 +28,6 @@ export class MysqlConnection extends IConnection {
       connectTimeout: config.connectTimeout || 5000,
       socketPath: config.socketPath,
       typeCast: (field: TypeCastField, _next: () => unknown) => {
-        if (this.dumpMode) return dumpTypeCast(field);
         const buf = field.buffer();
         if (field.type === 'BIT') {
           return this.bitToBoolean(buf);

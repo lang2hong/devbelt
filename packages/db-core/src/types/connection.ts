@@ -6,8 +6,6 @@ export enum DatabaseType {
   MYSQL = 'MYSQL',
   PG = 'PG',
   SQLITE = 'SQLITE',
-  REDIS = 'REDIS',
-  ES = 'ES',
 }
 
 /**

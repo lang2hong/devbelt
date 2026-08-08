@@ -19,9 +19,3 @@ export type QueryCallback = (
   fields?: FieldInfo[],
   total?: number,
 ) => void;
-
-/** 查询功能签名 */
-export interface QueryFunction {
-  (sql: string, callback?: QueryCallback): unknown;
-  (sql: string, values: any, callback?: QueryCallback): unknown;
-}

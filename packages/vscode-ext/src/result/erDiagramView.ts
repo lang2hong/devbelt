@@ -1,45 +1,27 @@
-import * as vscode from 'vscode';
 import type { SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
-import { getWebviewHtml } from '../webview/html';
+import { BaseWebView } from './baseWebView';
 
-/**
- * ER 图视图：展示表关系图（SVG 渲染）。
- * 查询表+列+外键，推送到 Vue 组件渲染。
- */
-export class ERDiagramView {
+export class ERDiagramView extends BaseWebView {
   private static current?: ERDiagramView;
-  private readonly panel: vscode.WebviewPanel;
-  private static _extensionUri: vscode.Uri;
 
   private constructor(
     private readonly conn: SavedConnection,
     private readonly database: string,
     private readonly manager: ConnectionManager,
   ) {
-    this.panel = vscode.window.createWebviewPanel(
-      'dbclient.erDiagram',
-      `ER Diagram @ ${database}`,
-      vscode.ViewColumn.Active,
-      { enableScripts: true, retainContextWhenHidden: true },
-    );
-    this.panel.webview.html = getWebviewHtml(this.panel.webview, ERDiagramView._extensionUri);
-    const msgDisp = this.panel.webview.onDidReceiveMessage((msg) => void this.handleMessage(msg));
-    this.panel.onDidDispose(() => {
-      msgDisp.dispose();
-      if (ERDiagramView.current === this) ERDiagramView.current = undefined;
-    });
+    super('dbclient.erDiagram', `ER Diagram @ ${database}`);
   }
 
-  static init(extensionUri: vscode.Uri): void { ERDiagramView._extensionUri = extensionUri; }
+  static init(extensionUri: import('vscode').Uri): void { BaseWebView.init(extensionUri); }
 
   static open(conn: SavedConnection, database: string, manager: ConnectionManager): void {
-    if (ERDiagramView.current) ERDiagramView.current.panel.dispose();
+    if (ERDiagramView.current) ERDiagramView.current.dispose();
     const view = new ERDiagramView(conn, database, manager);
     ERDiagramView.current = view;
   }
 
-  private async handleMessage(msg: any): Promise<void> {
+  protected async handleMessage(msg: any): Promise<void> {
     if (msg.type !== 'ready') return;
     try {
       const session = await this.manager.connect(this.conn);
@@ -57,9 +39,14 @@ export class ERDiagramView {
           })),
         })),
       );
-      void this.panel.webview.postMessage({ type: 'data', tables: tableData, foreignKeys });
+      this.post({ type: 'data', tables: tableData, foreignKeys });
     } catch (err) {
-      void this.panel.webview.postMessage({ type: 'error', message: (err as Error).message });
+      this.post({ type: 'error', message: (err as Error).message });
     }
+  }
+
+  protected onDispose(): void {
+    super.onDispose();
+    if (ERDiagramView.current === this) ERDiagramView.current = undefined;
   }
 }

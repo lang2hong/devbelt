@@ -1,9 +1,5 @@
-import type { TypeCastField } from 'mysql2';
-import * as sqlstring from 'sqlstring';
-import { bitTypes, geometryTypes, hexTypes, numberTypes } from './resolveType';
-
 // adapted from https://github.com/mysqljs/mysql/blob/master/lib/protocol/Parser.js
-function parseGeometryValue(buffer: Buffer): string {
+export function parseGeometryValue(buffer: Buffer): string {
   let offset = 4;
 
   const geomConstructors: Record<number, string> = {
@@ -99,21 +95,4 @@ function parseGeometryValue(buffer: Buffer): string {
   }
 
   return `GeomFromText('${parseGeometry()}')`;
-}
-
-export function dumpTypeCast(field: TypeCastField): string | null {
-  if (geometryTypes.has(field.type)) {
-    const buf = field.buffer();
-    return buf ? parseGeometryValue(buf) : null;
-  } else if (numberTypes.has(field.type)) {
-    const result = field.string();
-    return result == null ? 'NULL' : result;
-  } else if (bitTypes.has(field.type)) {
-    const buf = field.buffer();
-    return buf ? `${buf[0]}` : null;
-  } else if (hexTypes.has(field.type)) {
-    return sqlstring.escape(field.buffer());
-  } else {
-    return sqlstring.escape(field.string());
-  }
 }

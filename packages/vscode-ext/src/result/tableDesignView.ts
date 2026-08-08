@@ -1,16 +1,9 @@
-import * as vscode from 'vscode';
 import type { SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
-import { getWebviewHtml } from '../webview/html';
+import { BaseWebView } from './baseWebView';
 
-/**
- * 表设计视图：Vue 3 webview 模式。
- * 三 Tab：Columns / Indexes / DDL。
- */
-export class TableDesignView {
+export class TableDesignView extends BaseWebView {
   private static current?: TableDesignView;
-  private readonly panel: vscode.WebviewPanel;
-  private static _extensionUri: vscode.Uri;
 
   private constructor(
     private readonly conn: SavedConnection,
@@ -18,31 +11,20 @@ export class TableDesignView {
     private readonly database: string,
     private readonly manager: ConnectionManager,
   ) {
-    this.panel = vscode.window.createWebviewPanel(
-      'dbclient.tableDesign',
-      `Design: ${conn.name || conn.host} › ${database} › ${table}`,
-      vscode.ViewColumn.Active,
-      { enableScripts: true, retainContextWhenHidden: true },
-    );
-    this.panel.webview.html = getWebviewHtml(this.panel.webview, TableDesignView._extensionUri);
-    const msgDisp = this.panel.webview.onDidReceiveMessage((msg) => void this.handleMessage(msg));
-    this.panel.onDidDispose(() => {
-      msgDisp.dispose();
-      if (TableDesignView.current === this) TableDesignView.current = undefined;
-    });
+    super('dbclient.tableDesign', `Design: ${conn.name || conn.host} › ${database} › ${table}`);
   }
 
-  static init(extensionUri: vscode.Uri): void { TableDesignView._extensionUri = extensionUri; }
+  static init(extensionUri: import('vscode').Uri): void { BaseWebView.init(extensionUri); }
 
   static async open(conn: SavedConnection, table: string, database: string, manager: ConnectionManager): Promise<void> {
-    if (TableDesignView.current) TableDesignView.current.panel.dispose();
+    if (TableDesignView.current) TableDesignView.current.dispose();
     const view = new TableDesignView(conn, table, database, manager);
     TableDesignView.current = view;
   }
 
-  private async handleMessage(msg: any): Promise<void> {
+  protected async handleMessage(msg: any): Promise<void> {
     if (msg.type !== 'ready') return;
-    void this.panel.webview.postMessage({ type: 'init', mode: 'design' });
+    this.post({ type: 'init', mode: 'design' });
     try {
       const session = await this.manager.connect(this.conn);
       const [columns, indexes, ddl] = await Promise.all([
@@ -50,9 +32,14 @@ export class TableDesignView {
         session.metadata.getIndexes(this.table, this.database),
         session.table.getCreateSql(this.table, this.database),
       ]);
-      void this.panel.webview.postMessage({ type: 'data', columns, indexes, ddl });
+      this.post({ type: 'data', columns, indexes, ddl });
     } catch (err) {
-      void this.panel.webview.postMessage({ type: 'error', message: (err as Error).message });
+      this.post({ type: 'error', message: (err as Error).message });
     }
+  }
+
+  protected onDispose(): void {
+    super.onDispose();
+    if (TableDesignView.current === this) TableDesignView.current = undefined;
   }
 }

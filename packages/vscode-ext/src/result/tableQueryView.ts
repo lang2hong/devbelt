@@ -1,18 +1,14 @@
 import * as vscode from 'vscode';
 import type { SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
-import { getWebviewHtml } from '../webview/html';
+import { BaseWebView } from './baseWebView';
 import { splitSqlStatements } from '../utils/sql';
 
 /**
  * 表/查询视图：Vue 3 webview 模式。
- *
- * 扩展侧职责：SQL 执行、分页/排序/过滤 SQL 构建、内联 UPDATE、批量 DELETE。
- * Vue 侧职责：UI 渲染、用户交互（postMessage 通信）。
  */
-export class TableQueryView {
+export class TableQueryView extends BaseWebView {
   private static current?: TableQueryView;
-  private readonly panel: vscode.WebviewPanel;
   private offset = 0;
   private readonly limit = 100;
   private sortCol = '';
@@ -30,26 +26,18 @@ export class TableQueryView {
     private readonly initialSql: string | undefined,
     viewColumn: vscode.ViewColumn,
   ) {
-    this.hasTable = !!table;
-    this.panel = vscode.window.createWebviewPanel(
+    super(
       'dbclient.tableQuery',
       table ? `${conn.name || conn.host} › ${database || ''} › ${table}` : `Query @ ${conn.name || conn.host}`,
       viewColumn,
-      { enableScripts: true, retainContextWhenHidden: true },
     );
-    this.panel.webview.html = getWebviewHtml(this.panel.webview, this._extensionUri);
-    const msgDisp = this.panel.webview.onDidReceiveMessage((msg) => void this.handleMessage(msg));
-    this.panel.onDidDispose(() => {
-      msgDisp.dispose();
-      if (TableQueryView.current === this) TableQueryView.current = undefined;
-    });
+    this.hasTable = !!table;
   }
 
-  private static _extensionUri: vscode.Uri;
-  static init(extensionUri: vscode.Uri): void { TableQueryView._extensionUri = extensionUri; }
+  static init(extensionUri: vscode.Uri): void { BaseWebView.init(extensionUri); }
 
   static open(conn: SavedConnection, table: string, database: string, manager: ConnectionManager): void {
-    if (TableQueryView.current) TableQueryView.current.panel.dispose();
+    if (TableQueryView.current) TableQueryView.current.dispose();
     const view = new TableQueryView(conn, manager, table, database, undefined, vscode.ViewColumn.Active);
     TableQueryView.current = view;
   }
@@ -60,7 +48,7 @@ export class TableQueryView {
     sql: string,
     onExecuted?: (result: any, error?: Error) => void,
   ): TableQueryView {
-    if (TableQueryView.current) TableQueryView.current.panel.dispose();
+    if (TableQueryView.current) TableQueryView.current.dispose();
     const view = new TableQueryView(conn, manager, undefined, undefined, sql, vscode.ViewColumn.Beside);
     view.onExecuted = onExecuted;
     TableQueryView.current = view;
@@ -68,56 +56,10 @@ export class TableQueryView {
   }
 
   renderExternal(result: any): void {
-    void this.panel.webview.postMessage({ type: 'result', result, pkColumns: [] });
+    this.post({ type: 'result', result, pkColumns: [] });
   }
 
-  showError(message: string): void {
-    void this.panel.webview.postMessage({ type: 'error', message });
-  }
-
-  private get _extensionUri(): vscode.Uri { return TableQueryView._extensionUri; }
-
-  /** 安全转义 LIKE 值：处理 `'` `\` `%` `_` */
-  private escapeLike(val: string): string {
-    const escaped = val.replace(/\\/g, '\\\\').replace(/'/g, "''").replace(/%/g, '\\%').replace(/_/g, '\\_');
-    return `'${escaped}%'`;
-  }
-
-  private async sendInit(): Promise<void> {
-    void this.panel.webview.postMessage({
-      type: 'init',
-      mode: 'query',
-      initialSql: this.initialSql || this.buildSelect(),
-      hasTable: this.hasTable,
-      tableName: this.table || '',
-      dbName: this.database || '',
-    });
-  }
-
-  private buildSelect(): string {
-    if (!this.hasTable || !this.table) return '';
-    const w = this.conn.dbType === 'MYSQL' ? '`' : '"';
-    const tbl = this.database
-      ? `${w}${this.database}${w}.${w}${this.table}${w}`
-      : `${w}${this.table}${w}`;
-    let sql = `SELECT * FROM ${tbl}`;
-    if (this.filterCol && this.filterVal) {
-      sql += ` WHERE ${w}${this.filterCol}${w} LIKE ${this.escapeLike(this.filterVal)}`;
-    }
-    if (this.sortCol && this.sortDir) {
-      sql += ` ORDER BY ${w}${this.sortCol}${w} ${this.sortDir}`;
-    }
-    sql += ` LIMIT ${this.limit} OFFSET ${this.offset}`;
-    return sql;
-  }
-
-  private async runInitial(): Promise<void> {
-    if (!this.hasTable) return;
-    const sql = this.buildSelect();
-    if (sql) await this.execute(sql);
-  }
-
-  private async handleMessage(msg: any): Promise<void> {
+  protected async handleMessage(msg: any): Promise<void> {
     switch (msg.type) {
       case 'ready':
         await this.sendInit();
@@ -160,6 +102,50 @@ export class TableQueryView {
     }
   }
 
+  protected onDispose(): void {
+    super.onDispose();
+    if (TableQueryView.current === this) TableQueryView.current = undefined;
+  }
+
+  private async sendInit(): Promise<void> {
+    this.post({
+      type: 'init',
+      mode: 'query',
+      initialSql: this.initialSql || this.buildSelect(),
+      hasTable: this.hasTable,
+      tableName: this.table || '',
+      dbName: this.database || '',
+    });
+  }
+
+  private buildSelect(): string {
+    if (!this.hasTable || !this.table) return '';
+    const w = this.conn.dbType === 'MYSQL' ? '`' : '"';
+    const tbl = this.database
+      ? `${w}${this.database}${w}.${w}${this.table}${w}`
+      : `${w}${this.table}${w}`;
+    let sql = `SELECT * FROM ${tbl}`;
+    if (this.filterCol && this.filterVal) {
+      sql += ` WHERE ${w}${this.filterCol}${w} LIKE ${this.escapeLike(this.filterVal)}`;
+    }
+    if (this.sortCol && this.sortDir) {
+      sql += ` ORDER BY ${w}${this.sortCol}${w} ${this.sortDir}`;
+    }
+    sql += ` LIMIT ${this.limit} OFFSET ${this.offset}`;
+    return sql;
+  }
+
+  private escapeLike(val: string): string {
+    const escaped = val.replace(/\\/g, '\\\\').replace(/'/g, "''").replace(/%/g, '\\%').replace(/_/g, '\\_');
+    return `'${escaped}%'`;
+  }
+
+  private async runInitial(): Promise<void> {
+    if (!this.hasTable) return;
+    const sql = this.buildSelect();
+    if (sql) await this.execute(sql);
+  }
+
   private async execute(sql: string): Promise<void> {
     try {
       const session = await this.manager.connect(this.conn);
@@ -173,10 +159,10 @@ export class TableQueryView {
           pkCols = cols.filter((c) => c.isPrimary).map((c) => c.name);
         } catch {}
       }
-      void this.panel.webview.postMessage({ type: 'result', result, pkColumns: pkCols });
+      this.post({ type: 'result', result, pkColumns: pkCols });
       this.onExecuted?.(result);
     } catch (err) {
-      void this.panel.webview.postMessage({ type: 'error', message: (err as Error).message });
+      this.post({ type: 'error', message: (err as Error).message });
       this.onExecuted?.(undefined, err as Error);
     }
   }
@@ -185,9 +171,9 @@ export class TableQueryView {
     try {
       const session = await this.manager.connect(this.conn);
       await session.data.updateCell(this.table!, pkCol, rowId, col, val === '' ? null : val, this.database);
-      void this.panel.webview.postMessage({ type: 'cellUpdated' });
+      this.post({ type: 'cellUpdated' });
     } catch (err) {
-      void this.panel.webview.postMessage({ type: 'error', message: (err as Error).message });
+      this.post({ type: 'error', message: (err as Error).message });
     }
   }
 
@@ -202,10 +188,10 @@ export class TableQueryView {
         const valEsc = r.pkValue === null ? 'NULL' : `'${String(r.pkValue).replace(/'/g, "''").replace(/\\/g, '\\\\')}'`;
         await session.query.query(`DELETE FROM ${table} WHERE ${w}${r.pkColumn}${w} = ${valEsc}`);
       }
-      void this.panel.webview.postMessage({ type: 'rowsDeleted', count: rows.length });
+      this.post({ type: 'rowsDeleted', count: rows.length });
       await this.execute(this.buildSelect());
     } catch (err) {
-      void this.panel.webview.postMessage({ type: 'error', message: (err as Error).message });
+      this.post({ type: 'error', message: (err as Error).message });
     }
   }
 }

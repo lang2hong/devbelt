@@ -12,6 +12,8 @@ const props = defineProps<{
   hasTable: boolean;
   sortCol?: string;
   sortDir?: string;
+  tableName?: string;
+  dbName?: string;
 }>();
 
 const emit = defineEmits<{
@@ -82,8 +84,8 @@ function applyFilter() {
 }
 
 function exportData(format: 'json' | 'csv' | 'sql') {
-  const tableName = (window as any).__tableName || '';
-  const dbName = (window as any).__dbName || '';
+  const tableName = props.tableName || '';
+  const dbName = props.dbName || '';
   if (!props.rows.length) return;
   let content = '';
   let mime = 'text/plain';

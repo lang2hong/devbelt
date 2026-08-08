@@ -9,7 +9,6 @@ import type { QueryCallback } from '../types/query';
  * 从原项目 IConnection 剥离 Node/TreeItem 依赖，仅依赖纯 ConnectionConfig。
  */
 export abstract class IConnection {
-  public dumpMode: boolean = false;
   public config: ConnectionConfig;
   public dead: boolean = false;
 

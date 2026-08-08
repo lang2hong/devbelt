@@ -1,6 +1,7 @@
 import * as sqlstring from 'sqlstring';
 import { validateIdent } from '../utils/validate';
 import { QueryService } from './queryService';
+import { normalizeColumnMeta } from './normalize';
 import type { QueryResult } from '../types/query';
 import type { ColumnMeta } from '../types/meta';
 
@@ -182,7 +183,7 @@ export class TableService {
       const result = await this.queryService.query(
         this.queryService.dialect.getColumnsSql(table, database),
       );
-      cols = result.rows.map((r: any) => this.normalizeCol(r));
+      cols = result.rows.map((r: any) => normalizeColumnMeta(r));
     }
 
     const insertCols = cols.filter((c) => !c.isAutoIncrement && c.extra !== 'auto_increment');
@@ -260,29 +261,6 @@ export class TableService {
     return s;
   }
 
-  /** 归一化列元数据（兼容各方言返回格式） */
-  private normalizeCol(row: any): ColumnMeta {
-    const name = row.name ?? row.Field ?? row.column_name ?? row['name'];
-    const type = row.type ?? row.Type ?? row.data_type ?? row['type'];
-    return {
-      name,
-      simpleType: row.simple_type ?? String(type).split('(')[0],
-      type,
-      comment: row.comment ?? row.Comment ?? row['comment'] ?? '',
-      key: row.key ?? row.Key ?? row['key'] ?? '',
-      nullable: row.nullable ?? row.Null ?? row.is_nullable ?? '',
-      maxLength: row.maxLength ?? '',
-      defaultValue: row.defaultValue ?? row.Default ?? row.column_default ?? '',
-      extra: row.extra ?? row.Extra ?? '',
-      isNotNull: row.isNotNull ?? false,
-      isAutoIncrement: String(row.extra ?? row.Extra ?? '').includes('auto_increment'),
-      isUnique: false,
-      isPrimary: row.key === 'PRI' || row.Key === 'PRI',
-      pk: '',
-    };
-  }
-
-  /** 执行 DDL */
   private async ddl(sql: string): Promise<QueryResult> {
     return this.queryService.query(sql);
   }
