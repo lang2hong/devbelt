@@ -3,6 +3,7 @@ import { SchemaDiffService } from '@db-client/core';
 import type { SavedConnection } from './connection/connectionStore';
 import { ConnectionStore } from './connection/connectionStore';
 import { ConnectionManager } from './connection/connectionManager';
+import { ConnectionContext } from './connection/connectionContext';
 import { ConnectionForm } from './connection/connectionForm';
 import { DbTreeDataProvider } from './tree/dbTreeDataProvider';
 import { DbTreeNode, NodeKind } from './tree/dbTreeNode';
@@ -26,19 +27,11 @@ interface Deps {
   auth: AuthService;
   sync: SyncManager;
   syncBar: SyncStatusBar;
-}
-
-/** 最后活跃的连接（用于 SQL 编辑器执行时自动选择） */
-// eslint-disable-next-line prefer-const
-let lastConn: SavedConnection | undefined;
-
-/** 记录活跃连接上下文 */
-function setContext(conn: SavedConnection): void {
-  lastConn = conn;
+  connCtx: ConnectionContext;
 }
 
 export function registerCommands(deps: Deps): void {
-  const { context, store, manager, treeProvider, executor, history, auth, sync, syncBar } = deps;
+  const { context, store, manager, treeProvider, executor, history, auth, sync, syncBar, connCtx } = deps;
   const sub = (cmd: string, handler: (...args: any[]) => any): void => {
     context.subscriptions.push(vscode.commands.registerCommand(cmd, handler));
   };
@@ -64,6 +57,7 @@ export function registerCommands(deps: Deps): void {
   sub('dbclient.openConnection', (conn: SavedConnection) => {
     if (!conn?.id) return;
     treeProvider.markOpen(conn.id);
+    connCtx.setLast(conn);
     treeProvider.refresh();
   });
   sub('dbclient.closeConnection', (node: DbTreeNode) => {
@@ -73,12 +67,18 @@ export function registerCommands(deps: Deps): void {
     treeProvider.refresh();
     vscode.window.showInformationMessage(l10n('conn.closed', { name: node.conn.name || node.conn.host }));
   });
+  sub('dbclient.refreshConnection', (node: DbTreeNode) => {
+    if (node?.conn) manager.disposeConn(node.conn.id);
+    treeProvider.refresh();
+  });
   sub('dbclient.refresh', () => treeProvider.refresh());
 
   // Code Lens: 运行单条 SQL 语句
   sub('dbclient.runStatement', async (sql: string) => {
     if (!sql) return;
-    const conn = await pickConnection(store);
+    const editor = vscode.window.activeTextEditor;
+    const ctx = editor ? connCtx.getForDoc(editor.document.uri.toString()) : undefined;
+    const conn = ctx?.conn || await pickConnection(store);
     if (!conn) return;
     await executor.run(conn, sql);
   });
@@ -90,8 +90,8 @@ export function registerCommands(deps: Deps): void {
       vscode.window.showInformationMessage(l10n('cmd.openEditorFirst'));
       return;
     }
-    // 优先使用最后活跃的连接，否则弹出选择
-    const conn = lastConn || await pickConnection(store);
+    const ctx = connCtx.getForDoc(editor.document.uri.toString());
+    const conn = ctx?.conn || await pickConnection(store);
     if (!conn) return;
     const sql = editor.selection.isEmpty
       ? editor.document.getText()
@@ -108,13 +108,13 @@ export function registerCommands(deps: Deps): void {
   });
   sub('dbclient.previewTable', (node: DbTreeNode) => {
     if (node?.conn && node?.database) {
-      setContext(node.conn);
+      connCtx.setLast(node.conn, node.database);
       TableQueryView.open(node.conn, node.label, node.database, manager);
     }
   });
   sub('dbclient.previewView', (node: DbTreeNode) => {
     if (node?.conn && node?.database) {
-      setContext(node.conn);
+      connCtx.setLast(node.conn, node.database);
       TableQueryView.open(node.conn, node.label, node.database, manager);
     }
   });
@@ -159,10 +159,11 @@ export function registerCommands(deps: Deps): void {
   // ── 表 ──
   sub('dbclient.newTable', async (node: DbTreeNode) => {
     if (!node?.conn) return;
-    setContext(node.conn);
+    connCtx.setLast(node.conn, node.database);
     const useDb = node.database ? `USE ${wrapIdent(node.conn, node.database)};\n` : '';
     const tpl = useDb + `CREATE TABLE IF NOT EXISTS ${wrapIdent(node.conn, 'new_table')} (\n  id INT AUTO_INCREMENT PRIMARY KEY,\n  name VARCHAR(255)\n);`;
-    await openSqlDoc(tpl);
+    const editor = await openSqlDocEditor(tpl);
+    if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
   });
   sub('dbclient.dropTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
@@ -283,6 +284,7 @@ export function registerCommands(deps: Deps): void {
     if (!node?.conn) return;
     const name = await vscode.window.showInputBox({ prompt: l10n('db.createPrompt') });
     if (!name) return;
+    connCtx.setLast(node.conn);
     const session = await manager.connect(node.conn);
     await session.query.query(`CREATE DATABASE ${wrapIdent(node.conn, name)}`);
     treeProvider.refresh();
@@ -295,6 +297,65 @@ export function registerCommands(deps: Deps): void {
     await session.query.query(`DROP DATABASE ${wrapIdent(node.conn, node.label)}`);
     manager.disposeConn(node.conn.id);
     treeProvider.refresh();
+  });
+
+  // 从连接打开空 SQL 编辑器（带连接上下文）
+  sub('dbclient.newQueryFromConn', async (node: DbTreeNode) => {
+    if (!node?.conn) return;
+    connCtx.setLast(node.conn);
+    const editor = await openSqlDocEditor('');
+    if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn);
+  });
+
+  // 导入：选择 SQL/CSV 文件 → 执行
+  sub('dbclient.importData', async (node: DbTreeNode) => {
+    if (!node?.conn) return;
+    connCtx.setLast(node.conn);
+    const uri = await vscode.window.showOpenDialog({
+      filters: { 'SQL files': ['sql'], 'CSV files': ['csv'] },
+      canSelectMany: false,
+    });
+    if (!uri?.[0]) return;
+    const doc = await vscode.workspace.openTextDocument(uri[0]);
+    const sql = doc.getText();
+    const session = await manager.connect(node.conn);
+    const db = node.database;
+    if (db) {
+      try { await session.query.query(`USE ${wrapIdent(node.conn, db)}`); } catch { /* ignore */ }
+    }
+    const stmts = sql.split(/;\s*\n/).filter((s) => s.trim());
+    let done = 0;
+    for (const stmt of stmts) {
+      await session.query.query(stmt);
+      done++;
+    }
+    vscode.window.showInformationMessage(l10n('import.done', { count: done }));
+    treeProvider.refresh();
+  });
+
+  // 导出：导出连接下所有库的结构（或结构+数据）
+  sub('dbclient.exportConnection', async (node: DbTreeNode) => {
+    if (!node?.conn) return;
+    connCtx.setLast(node.conn);
+    const choice = await vscode.window.showQuickPick(
+      [
+        { label: l10n('export.structureOnly'), value: false as boolean },
+        { label: l10n('export.structureData'), value: true as boolean },
+      ],
+      { placeHolder: l10n('export.choose') },
+    );
+    if (!choice) return;
+    const session = await manager.connect(node.conn);
+    const dbs = await session.metadata.getDatabases();
+    const parts: string[] = [];
+    for (const db of dbs) {
+      const tables = await session.metadata.getTables(db);
+      for (const t of tables) {
+        const dump = await session.table.dumpSql(t.name, db, choice.value);
+        parts.push(dump);
+      }
+    }
+    await openSqlDoc(parts.join('\n\n'));
   });
 
   // 结构差异/同步：比对两个数据库结构，生成 ALTER SQL
@@ -496,6 +557,11 @@ async function confirm(msgKey: string, btnKey: string, name: string): Promise<bo
 async function openSqlDoc(content: string): Promise<void> {
   const doc = await vscode.workspace.openTextDocument({ content, language: 'sql' });
   await vscode.window.showTextDocument(doc);
+}
+
+async function openSqlDocEditor(content: string): Promise<vscode.TextEditor | undefined> {
+  const doc = await vscode.workspace.openTextDocument({ content, language: 'sql' });
+  return vscode.window.showTextDocument(doc);
 }
 
 async function pickConnection(store: ConnectionStore): Promise<SavedConnection | undefined> {

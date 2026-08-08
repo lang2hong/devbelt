@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { ConnectionStore } from './connection/connectionStore';
 import { ConnectionManager } from './connection/connectionManager';
+import { ConnectionContext } from './connection/connectionContext';
 import { DbTreeDataProvider } from './tree/dbTreeDataProvider';
 import { QueryExecutor } from './result/queryExecutor';
 import { TableQueryView } from './result/tableQueryView';
@@ -22,6 +23,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const treeProvider = new DbTreeDataProvider(store, manager);
   const history = new HistoryStore(context.globalState);
   const executor = new QueryExecutor(manager, history);
+  const connCtx = new ConnectionContext(context, store);
 
   // Vue webview 初始化
   TableQueryView.init(context.extensionUri);
@@ -74,7 +76,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  registerCommands({ context, store, manager, treeProvider, executor, history, auth, sync, syncBar });
+  registerCommands({ context, store, manager, treeProvider, executor, history, auth, sync, syncBar, connCtx });
 }
 
 export function deactivate(): void {}

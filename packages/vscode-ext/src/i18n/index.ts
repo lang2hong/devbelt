@@ -92,6 +92,8 @@ const en: MessageCatalog = {
   'conn.close': 'Close Connection',
   'conn.closed': 'Connection "{name}" closed.',
   'conn.open': 'Open Connection',
+  'conn.refresh': 'Refresh Connection',
+  'conn.newQuery': 'New Query',
 
   // 分类节点
   'cat.tables': 'Tables',
@@ -154,6 +156,12 @@ const en: MessageCatalog = {
   'mock.prompt': 'Number of rows to generate:',
   'mock.invalid': 'Please enter a valid number',
   'mock.done': '{count} row(s) of mock data inserted.',
+
+  // 导入/导出
+  'export.structureOnly': 'Structure Only',
+  'export.structureData': 'Structure + Data',
+  'export.choose': 'Choose export type',
+  'import.done': 'Imported {count} statement(s).',
 };
 
 /** 中文词条 */
@@ -224,6 +232,8 @@ const zh: MessageCatalog = {
   'conn.close': '关闭连接',
   'conn.closed': '连接 "{name}" 已关闭。',
   'conn.open': '打开连接',
+  'conn.refresh': '刷新连接',
+  'conn.newQuery': '新建查询',
 
   // 分类节点
   'cat.tables': '表',
@@ -286,6 +296,12 @@ const zh: MessageCatalog = {
   'mock.prompt': '生成行数：',
   'mock.invalid': '请输入有效数字',
   'mock.done': '已插入 {count} 行 Mock 数据。',
+
+  // 导入/导出
+  'export.structureOnly': '仅结构',
+  'export.structureData': '结构+数据',
+  'export.choose': '选择导出类型',
+  'import.done': '已导入 {count} 条语句。',
 };
 
 /** 当前语言目录（惰性解析） */

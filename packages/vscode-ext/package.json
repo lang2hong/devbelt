@@ -285,6 +285,26 @@
         "command": "dbclient.dropDatabase",
         "title": "Drop Database",
         "category": "DB Client"
+      },
+      {
+        "command": "dbclient.refreshConnection",
+        "title": "Refresh Connection",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.newQueryFromConn",
+        "title": "New Query",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.importData",
+        "title": "Import",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.exportConnection",
+        "title": "Export",
+        "category": "DB Client"
       }
     ],
     "menus": {
@@ -356,16 +376,6 @@
           "group": "1_table"
         },
         {
-          "command": "dbclient.openTerminal",
-          "when": "view == dbclient.explorer && viewItem == connection",
-          "group": "1_conn"
-        },
-        {
-          "command": "dbclient.serverStatus",
-          "when": "view == dbclient.explorer && viewItem == connection",
-          "group": "1_conn"
-        },
-        {
           "command": "dbclient.newTable",
           "when": "view == dbclient.explorer && viewItem == category_table",
           "group": "inline"
@@ -389,11 +399,6 @@
           "command": "dbclient.dropTable",
           "when": "view == dbclient.explorer && viewItem == table",
           "group": "2_danger"
-        },
-        {
-          "command": "dbclient.createDatabase",
-          "when": "view == dbclient.explorer && viewItem == connection",
-          "group": "1_conn"
         },
         {
           "command": "dbclient.dropDatabase",
@@ -506,23 +511,63 @@
           "group": "1_group"
         },
         {
-          "command": "dbclient.moveToGroup",
-          "when": "view == dbclient.explorer && viewItem == connection",
-          "group": "1_conn"
-        },
-        {
-          "command": "dbclient.editConnection",
-          "when": "view == dbclient.explorer && viewItem == connection",
+          "command": "dbclient.openConnection",
+          "when": "view == dbclient.explorer && viewItem == connectionClosed",
           "group": "1_conn"
         },
         {
           "command": "dbclient.closeConnection",
-          "when": "view == dbclient.explorer && viewItem == connection",
+          "when": "view == dbclient.explorer && viewItem == connectionOpen",
+          "group": "1_conn"
+        },
+        {
+          "command": "dbclient.refreshConnection",
+          "when": "view == dbclient.explorer && viewItem == connectionOpen",
+          "group": "1_conn"
+        },
+        {
+          "command": "dbclient.editConnection",
+          "when": "view == dbclient.explorer && viewItem =~ /^connection/",
+          "group": "1_conn"
+        },
+        {
+          "command": "dbclient.newQueryFromConn",
+          "when": "view == dbclient.explorer && viewItem == connectionOpen",
+          "group": "1_conn"
+        },
+        {
+          "command": "dbclient.createDatabase",
+          "when": "view == dbclient.explorer && viewItem == connectionOpen",
+          "group": "1_conn"
+        },
+        {
+          "command": "dbclient.openTerminal",
+          "when": "view == dbclient.explorer && viewItem == connectionOpen",
+          "group": "1_conn"
+        },
+        {
+          "command": "dbclient.serverStatus",
+          "when": "view == dbclient.explorer && viewItem == connectionOpen",
+          "group": "1_conn"
+        },
+        {
+          "command": "dbclient.importData",
+          "when": "view == dbclient.explorer && viewItem == connectionOpen",
+          "group": "1_conn"
+        },
+        {
+          "command": "dbclient.exportConnection",
+          "when": "view == dbclient.explorer && viewItem == connectionOpen",
+          "group": "1_conn"
+        },
+        {
+          "command": "dbclient.moveToGroup",
+          "when": "view == dbclient.explorer && viewItem =~ /^connection/",
           "group": "1_conn"
         },
         {
           "command": "dbclient.deleteConnection",
-          "when": "view == dbclient.explorer && viewItem == connection",
+          "when": "view == dbclient.explorer && viewItem =~ /^connection/",
           "group": "2_danger"
         }
       ]

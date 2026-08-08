@@ -68,9 +68,15 @@ export class DbTreeNode extends TreeItem {
     public readonly routineType?: string,
   ) {
     super(label, collapsible);
-    this.contextValue = kind === NodeKind.Category && categoryType
-      ? `${kind}_${categoryType}`
-      : kind;
+    if (kind === NodeKind.Connection) {
+      this.contextValue = collapsible === TreeItemCollapsibleState.None
+        ? 'connectionClosed'
+        : 'connectionOpen';
+    } else if (kind === NodeKind.Category && categoryType) {
+      this.contextValue = `${kind}_${categoryType}`;
+    } else {
+      this.contextValue = kind;
+    }
     // 图标：Category 按 categoryType 选，其余按 kind 选
     const iconId = kind === NodeKind.Category && categoryType
       ? CATEGORY_ICON[categoryType]
