@@ -43,9 +43,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (e.affectsConfiguration(LANGUAGE_CONFIG_KEY)) invalidateLanguage();
     }),
     vscode.window.registerTreeDataProvider('dbclient.explorer', treeProvider),
+  );
+  const completionProvider = new SqlCompletionProvider(store, manager);
+  context.subscriptions.push(
     vscode.languages.registerCompletionItemProvider(
       { language: 'sql' },
-      new SqlCompletionProvider(store, manager),
+      completionProvider,
       '.', ' ',
     ),
     vscode.languages.registerCodeLensProvider(
@@ -75,6 +78,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
   );
+
+  // 表结构变更时清除补全缓存
+  const origRefresh = treeProvider.refresh.bind(treeProvider);
+  treeProvider.refresh = () => {
+    completionProvider.invalidate();
+    origRefresh();
+  };
 
   registerCommands({ context, store, manager, treeProvider, executor, history, auth, sync, syncBar, connCtx });
 }

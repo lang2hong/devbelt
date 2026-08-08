@@ -23,8 +23,11 @@ export class StatusView {
       { enableScripts: true, retainContextWhenHidden: true },
     );
     this.panel.webview.html = getWebviewHtml(this.panel.webview, StatusView._extensionUri);
-    this.panel.webview.onDidReceiveMessage((msg) => void this.handleMessage(msg));
-    this.panel.onDidDispose(() => { if (StatusView.current === this) StatusView.current = undefined; });
+    const msgDisp = this.panel.webview.onDidReceiveMessage((msg) => void this.handleMessage(msg));
+    this.panel.onDidDispose(() => {
+      msgDisp.dispose();
+      if (StatusView.current === this) StatusView.current = undefined;
+    });
   }
 
   static init(extensionUri: vscode.Uri): void { StatusView._extensionUri = extensionUri; }

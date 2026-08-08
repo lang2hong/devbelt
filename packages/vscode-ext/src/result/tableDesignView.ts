@@ -25,8 +25,11 @@ export class TableDesignView {
       { enableScripts: true, retainContextWhenHidden: true },
     );
     this.panel.webview.html = getWebviewHtml(this.panel.webview, TableDesignView._extensionUri);
-    this.panel.webview.onDidReceiveMessage((msg) => void this.handleMessage(msg));
-    this.panel.onDidDispose(() => { if (TableDesignView.current === this) TableDesignView.current = undefined; });
+    const msgDisp = this.panel.webview.onDidReceiveMessage((msg) => void this.handleMessage(msg));
+    this.panel.onDidDispose(() => {
+      msgDisp.dispose();
+      if (TableDesignView.current === this) TableDesignView.current = undefined;
+    });
   }
 
   static init(extensionUri: vscode.Uri): void { TableDesignView._extensionUri = extensionUri; }

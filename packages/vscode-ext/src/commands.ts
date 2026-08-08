@@ -15,7 +15,7 @@ import { SyncManager } from './sync/syncManager';
 import { HistoryStore } from './history/historyStore';
 import { formatSql } from './format/sqlFormatter';
 import { l10n } from './i18n';
-import { wrapIdent } from './utils/sql';
+import { wrapIdent, splitSqlStatements } from './utils/sql';
 
 interface Deps {
   context: vscode.ExtensionContext;
@@ -327,7 +327,7 @@ export function registerCommands(deps: Deps): void {
     if (db) {
       try { await session.query.query(`USE ${wrapIdent(node.conn, db)}`); } catch { /* ignore */ }
     }
-    const stmts = sql.split(/;\s*\n/).filter((s) => s.trim());
+    const stmts = splitSqlStatements(sql);
     let done = 0;
     for (const stmt of stmts) {
       await session.query.query(stmt);
@@ -352,22 +352,22 @@ export function registerCommands(deps: Deps): void {
     const session = await manager.connect(node.conn);
     const parts: string[] = [];
     if (node.database) {
-      // 数据库节点：仅导出该库
       const tables = await session.metadata.getTables(node.database);
-      for (const t of tables) {
-        const dump = await session.table.dumpSql(t.name, node.database, choice.value);
-        parts.push(dump);
-      }
+      const dumps = await Promise.all(
+        tables.map((t) => session.table.dumpSql(t.name, node.database, choice.value)),
+      );
+      parts.push(...dumps);
     } else {
-      // 连接节点：导出所有库
       const dbs = await session.metadata.getDatabases();
-      for (const db of dbs) {
-        const tables = await session.metadata.getTables(db);
-        for (const t of tables) {
-          const dump = await session.table.dumpSql(t.name, db, choice.value);
-          parts.push(dump);
-        }
-      }
+      const dumps = await Promise.all(
+        dbs.map(async (db) => {
+          const tables = await session.metadata.getTables(db);
+          return Promise.all(
+            tables.map((t) => session.table.dumpSql(t.name, db, choice.value)),
+          );
+        }),
+      );
+      parts.push(...dumps.flat());
     }
     await openSqlDoc(parts.join('\n\n'));
   });

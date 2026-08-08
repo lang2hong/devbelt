@@ -7,6 +7,7 @@ import type { QueryCallback } from '../types/query';
 
 export class PostgreSqlConnection extends IConnection {
   private client: Client;
+  private connected = false;
 
   constructor(config: ConnectionConfig) {
     super(config);
@@ -35,8 +36,7 @@ export class PostgreSqlConnection extends IConnection {
   }
 
   isAlive(): boolean {
-    const temp = this.client as any;
-    return !this.dead && temp._connected && !temp._ending && temp._queryable;
+    return !this.dead && this.connected;
   }
 
   query(sql: string, callback?: QueryCallback): void;
@@ -80,6 +80,7 @@ export class PostgreSqlConnection extends IConnection {
     this.client.connect((err: any) => {
       callback(err);
       if (!err) {
+        this.connected = true;
         this.client.on('error', () => this.end());
         this.client.on('end', () => this.end());
       }
@@ -99,7 +100,9 @@ export class PostgreSqlConnection extends IConnection {
   }
 
   end(): void {
+    if (this.dead) return;
     this.dead = true;
+    this.connected = false;
     this.client.end();
   }
 }

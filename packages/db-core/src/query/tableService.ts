@@ -114,6 +114,7 @@ export class TableService {
    * 生成：DROP TABLE IF EXISTS + CREATE TABLE + INSERT 语句。
    */
   async dumpSql(table: string, database?: string, includeData = true): Promise<string> {
+    validateIdent(table);
     const parts: string[] = [];
     const ddl = await this.getCreateSql(table, database);
     parts.push(`-- Table: ${database ? database + '.' : ''}${table}`);
@@ -121,19 +122,36 @@ export class TableService {
     parts.push(ddl + ';');
     parts.push('');
     if (includeData) {
-      const selectResult = await this.queryService.query(`SELECT * FROM ${this.wrapQualified(table, database)}`);
-      if (selectResult.rows.length > 0) {
-        const fields = selectResult.fields.map((f: any) => f.name);
-        const colList = fields.map((f: string) => this.wrap(f)).join(', ');
-        for (const row of selectResult.rows) {
+      const DUMP_BATCH = 1000;
+      let offset = 0;
+      let totalRows = 0;
+      const qualified = this.wrapQualified(table, database);
+      for (;;) {
+        const page = await this.queryService.query(
+          `SELECT * FROM ${qualified} LIMIT ${DUMP_BATCH} OFFSET ${offset}`,
+        );
+        if (page.rows.length === 0) break;
+        if (totalRows === 0) {
+          const fields = page.fields.map((f: any) => f.name);
+          const colList = fields.map((f: string) => this.wrap(f)).join(', ');
+          parts.push(`INSERT INTO ${qualified} (${colList}) VALUES`);
+        }
+        const fields = page.fields.map((f: any) => f.name);
+        for (const row of page.rows) {
           const values = fields.map((f: string) => {
             const v = row[f];
             if (v === null || v === undefined) return 'NULL';
             return sqlstring.escape(v);
           }).join(', ');
-          parts.push(`INSERT INTO ${this.wrapQualified(table, database)} (${colList}) VALUES (${values});`);
+          parts.push(`(${values}),`);
         }
-        parts.push(`-- ${selectResult.rows.length} row(s) dumped`);
+        totalRows += page.rows.length;
+        if (page.rows.length < DUMP_BATCH) break;
+        offset += DUMP_BATCH;
+      }
+      if (totalRows > 0) {
+        parts[parts.length - 1] = parts[parts.length - 1].replace(/,$/, ';');
+        parts.push(`-- ${totalRows} row(s) dumped`);
       }
     }
     return parts.join('\n');

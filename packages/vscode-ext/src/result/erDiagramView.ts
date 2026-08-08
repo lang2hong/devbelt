@@ -24,8 +24,11 @@ export class ERDiagramView {
       { enableScripts: true, retainContextWhenHidden: true },
     );
     this.panel.webview.html = getWebviewHtml(this.panel.webview, ERDiagramView._extensionUri);
-    this.panel.webview.onDidReceiveMessage((msg) => void this.handleMessage(msg));
-    this.panel.onDidDispose(() => { if (ERDiagramView.current === this) ERDiagramView.current = undefined; });
+    const msgDisp = this.panel.webview.onDidReceiveMessage((msg) => void this.handleMessage(msg));
+    this.panel.onDidDispose(() => {
+      msgDisp.dispose();
+      if (ERDiagramView.current === this) ERDiagramView.current = undefined;
+    });
   }
 
   static init(extensionUri: vscode.Uri): void { ERDiagramView._extensionUri = extensionUri; }

@@ -34,19 +34,13 @@ export class ConnectionForm {
       { enableScripts: true, retainContextWhenHidden: true },
     );
     this.panel.webview.html = connectionFormHtml(groups);
-    // 告知 webview 当前语言，用于文案切换
     void this.panel.webview.postMessage({ type: 'locale', isZh: isZh() });
-    // 编辑模式：预填已有连接配置
     if (editing) {
       void this.panel.webview.postMessage({ type: 'prefill', conn: editing });
     }
-
-    // 处理 webview 发来的消息
-    this.panel.webview.onDidReceiveMessage((msg) => {
-      void this.handleMessage(msg);
-    });
-
+    const msgDisp = this.panel.webview.onDidReceiveMessage((msg) => void this.handleMessage(msg));
     this.panel.onDidDispose(() => {
+      msgDisp.dispose();
       if (ConnectionForm.current === this) ConnectionForm.current = undefined;
     });
   }

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { getWebviewHtml } from '../webview/html';
+import { splitSqlStatements } from '../utils/sql';
 
 /**
  * 表/查询视图：Vue 3 webview 模式。
@@ -37,8 +38,11 @@ export class TableQueryView {
       { enableScripts: true, retainContextWhenHidden: true },
     );
     this.panel.webview.html = getWebviewHtml(this.panel.webview, this._extensionUri);
-    this.panel.webview.onDidReceiveMessage((msg) => void this.handleMessage(msg));
-    this.panel.onDidDispose(() => { if (TableQueryView.current === this) TableQueryView.current = undefined; });
+    const msgDisp = this.panel.webview.onDidReceiveMessage((msg) => void this.handleMessage(msg));
+    this.panel.onDidDispose(() => {
+      msgDisp.dispose();
+      if (TableQueryView.current === this) TableQueryView.current = undefined;
+    });
   }
 
   private static _extensionUri: vscode.Uri;
@@ -159,7 +163,7 @@ export class TableQueryView {
   private async execute(sql: string): Promise<void> {
     try {
       const session = await this.manager.connect(this.conn);
-      const stmts = sql.split(';').map((s) => s.trim()).filter((s) => s.length > 0);
+      const stmts = splitSqlStatements(sql);
       let result: any;
       for (const stmt of stmts) result = await session.query.query(stmt);
       let pkCols: string[] = [];

@@ -41,10 +41,25 @@ export class QueryService {
    * @param sql 查询语句
    * @param values 可选参数（预编译/占位符）
    */
+  /** 默认查询超时（ms），0 = 不超时 */
+  static queryTimeout = 30_000;
+
   async query(sql: string, values?: any): Promise<QueryResult> {
     const start = Date.now();
     return new Promise<QueryResult>((resolve, reject) => {
+      let settled = false;
+      const timer = QueryService.queryTimeout > 0
+        ? setTimeout(() => {
+            if (!settled) {
+              settled = true;
+              reject(new QueryError(`Query timeout (${QueryService.queryTimeout}ms)`, sql, Date.now() - start));
+            }
+          }, QueryService.queryTimeout)
+        : null;
       const callback: QueryCallback = (err, results, fields) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
         const costTime = Date.now() - start;
         if (err) {
           reject(new QueryError(err.message, sql, costTime));
