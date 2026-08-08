@@ -28,6 +28,15 @@ interface Deps {
   syncBar: SyncStatusBar;
 }
 
+/** 最后活跃的连接（用于 SQL 编辑器执行时自动选择） */
+// eslint-disable-next-line prefer-const
+let lastConn: SavedConnection | undefined;
+
+/** 记录活跃连接上下文 */
+function setContext(conn: SavedConnection): void {
+  lastConn = conn;
+}
+
 export function registerCommands(deps: Deps): void {
   const { context, store, manager, treeProvider, executor, history, auth, sync, syncBar } = deps;
   const sub = (cmd: string, handler: (...args: any[]) => any): void => {
@@ -52,17 +61,17 @@ export function registerCommands(deps: Deps): void {
     manager.disposeConn(node.conn.id);
     treeProvider.refresh();
   });
+  sub('dbclient.openConnection', (conn: SavedConnection) => {
+    if (!conn?.id) return;
+    treeProvider.markOpen(conn.id);
+    treeProvider.refresh();
+  });
   sub('dbclient.closeConnection', (node: DbTreeNode) => {
     if (!node?.conn) return;
     manager.disposeConn(node.conn.id);
     treeProvider.markClosed(node.conn.id);
     treeProvider.refresh();
     vscode.window.showInformationMessage(l10n('conn.closed', { name: node.conn.name || node.conn.host }));
-  });
-  sub('dbclient.openConnection', (conn: SavedConnection) => {
-    if (!conn?.id) return;
-    treeProvider.markOpen(conn.id);
-    treeProvider.refresh();
   });
   sub('dbclient.refresh', () => treeProvider.refresh());
 
@@ -81,7 +90,8 @@ export function registerCommands(deps: Deps): void {
       vscode.window.showInformationMessage(l10n('cmd.openEditorFirst'));
       return;
     }
-    const conn = await pickConnection(store);
+    // 优先使用最后活跃的连接，否则弹出选择
+    const conn = lastConn || await pickConnection(store);
     if (!conn) return;
     const sql = editor.selection.isEmpty
       ? editor.document.getText()
@@ -98,11 +108,13 @@ export function registerCommands(deps: Deps): void {
   });
   sub('dbclient.previewTable', (node: DbTreeNode) => {
     if (node?.conn && node?.database) {
+      setContext(node.conn);
       TableQueryView.open(node.conn, node.label, node.database, manager);
     }
   });
   sub('dbclient.previewView', (node: DbTreeNode) => {
     if (node?.conn && node?.database) {
+      setContext(node.conn);
       TableQueryView.open(node.conn, node.label, node.database, manager);
     }
   });
@@ -147,12 +159,9 @@ export function registerCommands(deps: Deps): void {
   // ── 表 ──
   sub('dbclient.newTable', async (node: DbTreeNode) => {
     if (!node?.conn) return;
-    const tpl = [
-      `CREATE TABLE IF NOT EXISTS ${wrapIdent(node.conn, 'new_table')} (`,
-      '  id INT AUTO_INCREMENT PRIMARY KEY,',
-      '  name VARCHAR(255)',
-      ');',
-    ].join('\n');
+    setContext(node.conn);
+    const useDb = node.database ? `USE ${wrapIdent(node.conn, node.database)};\n` : '';
+    const tpl = useDb + `CREATE TABLE IF NOT EXISTS ${wrapIdent(node.conn, 'new_table')} (\n  id INT AUTO_INCREMENT PRIMARY KEY,\n  name VARCHAR(255)\n);`;
     await openSqlDoc(tpl);
   });
   sub('dbclient.dropTable', async (node: DbTreeNode) => {

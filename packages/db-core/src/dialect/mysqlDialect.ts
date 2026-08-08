@@ -22,14 +22,14 @@ export class MysqlDialect implements SqlDialect {
 
   getTableListSql(database?: string): string {
     return database
-      ? `SELECT TABLE_NAME AS name, TABLE_COMMENT AS comment, TABLE_ROWS AS table_rows, AUTO_INCREMENT AS auto_increment, DATA_LENGTH AS data_length, INDEX_LENGTH AS index_length FROM information_schema.tables WHERE table_schema = '${database}' AND table_type = 'BASE TABLE'`
-      : `SELECT TABLE_NAME AS name, TABLE_COMMENT AS comment, TABLE_ROWS AS table_rows, AUTO_INCREMENT AS auto_increment, DATA_LENGTH AS data_length, INDEX_LENGTH AS index_length FROM information_schema.tables WHERE table_type = 'BASE TABLE'`;
+      ? `SELECT TABLE_NAME AS name, TABLE_ROWS AS table_rows FROM information_schema.tables WHERE table_schema = '${database}' AND table_type = 'BASE TABLE'`
+      : `SELECT TABLE_NAME AS name, TABLE_ROWS AS table_rows FROM information_schema.tables WHERE table_type = 'BASE TABLE'`;
   }
 
   getViewListSql(database?: string): string {
     return database
-      ? `SELECT TABLE_NAME AS name, TABLE_COMMENT AS comment FROM information_schema.views WHERE table_schema = '${database}'`
-      : `SELECT TABLE_NAME AS name, TABLE_COMMENT AS comment FROM information_schema.views`;
+      ? `SELECT TABLE_NAME AS name FROM information_schema.views WHERE table_schema = '${database}'`
+      : `SELECT TABLE_NAME AS name FROM information_schema.views`;
   }
 
   getFunctionListSql(database?: string): string {
@@ -87,9 +87,6 @@ export class MysqlDialect implements SqlDialect {
       name: row.name,
       comment: row.comment || '',
       table_rows: row.table_rows,
-      auto_increment: row.auto_increment,
-      data_length: row.data_length,
-      index_length: row.index_length,
     }));
   }
 

@@ -1,4 +1,8 @@
 /** VSCode webview API 封装（composable）。 */
+
+// 缓存 acquireVsCodeApi 结果，防止多次调用报错
+let _vscode: ReturnType<typeof acquireVsCodeApi> | null = null;
+
 declare function acquireVsCodeApi(): {
   postMessage(msg: any): void;
   getState<T>(): T | undefined;
@@ -6,10 +10,12 @@ declare function acquireVsCodeApi(): {
 };
 
 export function useVsCode() {
-  const vscode = acquireVsCodeApi();
+  if (!_vscode) {
+    _vscode = acquireVsCodeApi();
+  }
 
   function post(msg: any): void {
-    vscode.postMessage(msg);
+    _vscode!.postMessage(msg);
   }
 
   function onMessage(handler: (msg: any) => void): () => void {
@@ -18,5 +24,5 @@ export function useVsCode() {
     return () => window.removeEventListener('message', listener);
   }
 
-  return { vscode, post, onMessage };
+  return { vscode: _vscode!, post, onMessage };
 }

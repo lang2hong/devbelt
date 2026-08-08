@@ -21,8 +21,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   readonly onDidChangeTreeData: Event<DbTreeNode | undefined> =
     this.onDidChangeTreeDataEmitter.event;
 
-  /** 已关闭的连接 id 集合（关闭后子节点消失，再次展开重新连接） */
-  private readonly closedConns = new Set<string>();
+  /** 已打开的连接 id 集合（默认全部未打开，需右键"打开连接"） */
+  private readonly openConns = new Set<string>();
 
   constructor(
     private readonly store: ConnectionStore,
@@ -34,14 +34,14 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     this.onDidChangeTreeDataEmitter.fire(undefined);
   }
 
-  /** 标记连接已关闭（子节点将消失） */
-  markClosed(connId: string): void {
-    this.closedConns.add(connId);
+  /** 标记连接已打开（可展开） */
+  markOpen(connId: string): void {
+    this.openConns.add(connId);
   }
 
-  /** 标记连接已打开（恢复可展开） */
-  markOpen(connId: string): void {
-    this.closedConns.delete(connId);
+  /** 标记连接已关闭（不可展开） */
+  markClosed(connId: string): void {
+    this.openConns.delete(connId);
   }
 
   getTreeItem(element: DbTreeNode): TreeItem {
@@ -304,23 +304,26 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     return [...gNodes, ...cNodes];
   }
 
-  /** 创建连接节点：关闭时不可展开（无箭头），双击触发重连 */
+  /** 创建连接节点：未打开时无箭头+双击触发打开；已打开时可展开 */
   private makeConnectionNode(conn: SavedConnection, parent?: DbTreeNode): DbTreeNode {
-    const isClosed = this.closedConns.has(conn.id);
+    const isOpen = this.openConns.has(conn.id);
     const node = new DbTreeNode(
       conn.name || conn.host,
-      isClosed ? TreeItemCollapsibleState.None : TreeItemCollapsibleState.Collapsed,
+      isOpen ? TreeItemCollapsibleState.Collapsed : TreeItemCollapsibleState.None,
       NodeKind.Connection,
       conn,
       undefined,
       parent,
     );
-    if (isClosed) {
+    if (!isOpen) {
+      node.id = `closed_${conn.id}`;
       node.command = {
         command: 'dbclient.openConnection',
         title: 'Open',
         arguments: [conn],
       };
+    } else {
+      node.id = conn.id;
     }
     return node;
   }

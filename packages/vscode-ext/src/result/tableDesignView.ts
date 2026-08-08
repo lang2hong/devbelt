@@ -20,7 +20,7 @@ export class TableDesignView {
   ) {
     this.panel = vscode.window.createWebviewPanel(
       'dbclient.tableDesign',
-      `Design: ${table} @ ${conn.name || conn.host}`,
+      `Design: ${conn.name || conn.host} › ${database} › ${table}`,
       vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true },
     );

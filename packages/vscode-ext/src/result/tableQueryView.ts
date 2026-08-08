@@ -32,7 +32,7 @@ export class TableQueryView {
     this.hasTable = !!table;
     this.panel = vscode.window.createWebviewPanel(
       'dbclient.tableQuery',
-      table ? `${table} @ ${conn.name || conn.host}` : `Query @ ${conn.name || conn.host}`,
+      table ? `${conn.name || conn.host} › ${database || ''} › ${table}` : `Query @ ${conn.name || conn.host}`,
       viewColumn,
       { enableScripts: true, retainContextWhenHidden: true },
     );
