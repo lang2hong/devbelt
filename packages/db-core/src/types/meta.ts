@@ -101,6 +101,8 @@ export interface SavedQuery {
   sql: string;
   connId: string;
   database?: string;
+  /** 保存查询所属文件夹 id；未分组为 undefined */
+  folderId?: string;
   createdAt: number;
   updatedAt: number;
 }

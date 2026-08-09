@@ -36,6 +36,11 @@
         "category": "DB Client"
       },
       {
+        "command": "dbclient.runQueryInNewPanel",
+        "title": "Run Query in New Panel",
+        "category": "DB Client"
+      },
+      {
         "command": "dbclient.runStatement",
         "title": "Run SQL Statement",
         "category": "DB Client"
@@ -310,6 +315,21 @@
         "command": "dbclient.deleteQuery",
         "title": "Delete Query",
         "category": "DB Client"
+      },
+      {
+        "command": "dbclient.newQueryFolder",
+        "title": "New Query Folder",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.renameQueryFolder",
+        "title": "Rename Query Folder",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.deleteQueryFolder",
+        "title": "Delete Query Folder",
+        "category": "DB Client"
       }
     ],
     "menus": {
@@ -516,6 +536,26 @@
           "group": "2_danger"
         },
         {
+          "command": "dbclient.newQueryFolder",
+          "when": "view == dbclient.explorer && viewItem == category_query",
+          "group": "1_query_folder"
+        },
+        {
+          "command": "dbclient.newQuery",
+          "when": "view == dbclient.explorer && viewItem == queryFolder",
+          "group": "inline"
+        },
+        {
+          "command": "dbclient.renameQueryFolder",
+          "when": "view == dbclient.explorer && viewItem == queryFolder",
+          "group": "1_query"
+        },
+        {
+          "command": "dbclient.deleteQueryFolder",
+          "when": "view == dbclient.explorer && viewItem == queryFolder",
+          "group": "2_danger"
+        },
+        {
           "command": "dbclient.addGroup",
           "when": "view == dbclient.explorer && viewItem == group",
           "group": "inline"
@@ -636,6 +676,12 @@
         "command": "dbclient.runQuery",
         "key": "ctrl+enter",
         "mac": "cmd+enter",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "dbclient.runQueryInNewPanel",
+        "key": "ctrl+alt+enter",
+        "mac": "cmd+ctrl+enter",
         "when": "editorTextFocus"
       }
     ]

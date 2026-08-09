@@ -62,6 +62,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         return this.buildDatabaseChildren(element);
       case NodeKind.Category:
         return this.buildCategoryChildren(element);
+      case NodeKind.QueryFolder:
+        return this.buildQueryFolderChildren(element);
       case NodeKind.Table:
         return this.buildColumnChildren(element);
       default:
@@ -72,6 +74,18 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   /** 连接节点子节点：数据库列表 */
   private async buildConnectionChildren(element: DbTreeNode): Promise<DbTreeNode[]> {
     const session = await this.manager.connect(element.conn!);
+    if (!session.capabilities.multiDatabaseExplorer) {
+      return [
+        new DbTreeNode(
+          element.conn!.database || (element.conn!.dbType === 'PG' ? 'public' : 'main'),
+          TreeItemCollapsibleState.Collapsed,
+          NodeKind.Database,
+          element.conn,
+          undefined,
+          element,
+        ),
+      ];
+    }
     const dbs = await session.metadata.getDatabases();
     return dbs.map(
       (db) =>
@@ -118,8 +132,23 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const catType = element.categoryType!;
 
     if (catType === 'query') {
-      const queries = this.store.getQueries(conn.id, db);
-      return queries.map(
+      const folderNodes = this.store.getQueryFolders().map(
+        (folder) =>
+          new DbTreeNode(
+            folder.name,
+            TreeItemCollapsibleState.Collapsed,
+            NodeKind.QueryFolder,
+            conn,
+            undefined,
+            element,
+            undefined,
+            db,
+            undefined,
+            undefined,
+            folder.id,
+          ),
+      );
+      const queryNodes = this.store.getQueriesInFolder(conn.id, db).map(
         (q) =>
           new DbTreeNode(
             q.name,
@@ -130,8 +159,11 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
             element,
             undefined,
             db,
+            undefined,
+            q.id,
           ),
       );
+      return [...folderNodes, ...queryNodes];
     }
 
     const session = await this.manager.connect(conn);
@@ -237,6 +269,27 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     }
 
     return items;
+  }
+
+  /** 查询文件夹子节点：文件夹内保存的查询 */
+  private buildQueryFolderChildren(element: DbTreeNode): DbTreeNode[] {
+    const conn = element.conn!;
+    const db = element.database;
+    return this.store.getQueriesInFolder(conn.id, db, element.queryFolderId).map(
+      (q) =>
+        new DbTreeNode(
+          q.name,
+          TreeItemCollapsibleState.None,
+          NodeKind.SavedQuery,
+          conn,
+          undefined,
+          element,
+          undefined,
+          db,
+          undefined,
+          q.id,
+        ),
+    );
   }
 
   /** 表节点子节点：列列表（PK 用 key 图标） */

@@ -12,6 +12,7 @@ export enum NodeKind {
   Routine = 'routine',
   Event = 'event',
   SavedQuery = 'savedQuery',
+  QueryFolder = 'queryFolder',
   Column = 'column',
   User = 'user',
 }
@@ -29,6 +30,7 @@ const ICON_MAP: Record<string, string> = {
   [NodeKind.Routine]: 'symbol-function',
   [NodeKind.Event]: 'zap',
   [NodeKind.SavedQuery]: 'code',
+  [NodeKind.QueryFolder]: 'folder',
   [NodeKind.Column]: 'symbol-field',
   [NodeKind.User]: 'person',
 };
@@ -66,6 +68,10 @@ export class DbTreeNode extends TreeItem {
     public readonly database?: string,
     /** 函数/存储过程类型（仅 Routine 节点：FUNCTION/PROCEDURE） */
     public readonly routineType?: string,
+    /** 保存查询 id（仅 SavedQuery 节点） */
+    public readonly queryId?: string,
+    /** 保存查询文件夹 id（QueryFolder 节点） */
+    public readonly queryFolderId?: string,
   ) {
     super(label, collapsible);
     if (kind === NodeKind.Connection) {

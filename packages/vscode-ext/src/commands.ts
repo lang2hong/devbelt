@@ -7,7 +7,7 @@ import { registerQueryCommands } from './commands/query';
 import { registerTableCommands } from './commands/table';
 import { registerDatabaseCommands } from './commands/database';
 import { registerUserCommands } from './commands/user';
-import { registerSavedQueryCommands, registerGroupCommands } from './commands/group';
+import { registerSavedQueryCommands, registerGroupCommands, registerQueryFolderCommands } from './commands/group';
 import { registerSyncCommands } from './commands/sync';
 
 export function registerCommands(deps: Deps): void {
@@ -18,6 +18,7 @@ export function registerCommands(deps: Deps): void {
   registerDatabaseCommands(deps, sub);
   registerUserCommands(deps, sub);
   registerSavedQueryCommands(deps, sub);
+  registerQueryFolderCommands(deps, sub);
   registerGroupCommands(deps, sub);
   registerSyncCommands(deps, sub);
   deps.context.subscriptions.push({ dispose: () => deps.manager.disposeAll() });
