@@ -2,12 +2,25 @@ import { DatabaseType } from '../types/connection';
 import { validateIdent } from '../utils/validate';
 import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
+import type { DatabaseCapabilities } from './capabilities';
 
 /**
  * PostgreSQL 方言实现。
  */
 export class PostgreSqlDialect implements SqlDialect {
   readonly dbType = DatabaseType.PG;
+  readonly capabilities: DatabaseCapabilities = {
+    multiDatabaseExplorer: false,
+    databases: true,
+    views: true,
+    routines: true,
+    events: false,
+    users: true,
+    operations: [
+      'createDatabase', 'dropDatabase', 'renameTable', 'truncateTable',
+      'manageIndexes', 'manageRoutines',
+    ],
+  };
 
   wrap(identifier: string): string {
     return `"${identifier}"`;
@@ -147,5 +160,32 @@ export class PostgreSqlDialect implements SqlDialect {
       refTable: row.refTable || row.reftable,
       refColumn: row.refColumn || row.refcolumn,
     }));
+  }
+
+  buildInsertSql(rows: Record<string, any>[], columns: string[], table: string, database?: string): string {
+    const validTable = validateIdent(table);
+    const qualified = database
+      ? `${this.wrap(validateIdent(database))}.${this.wrap(validTable)}`
+      : this.wrap(validTable);
+    const colList = columns.map((c) => this.wrap(validateIdent(c))).join(', ');
+    let out = '';
+    for (const row of rows) {
+      const values = columns.map((c) => this.formatValue(row[c])).join(', ');
+      out += `INSERT INTO ${qualified} (${colList}) VALUES (${values});\n`;
+    }
+    return out;
+  }
+
+  /** PostgreSQL 标准字符串：仅单引号翻倍，不转义反斜杠。 */
+  private formatValue(value: any): string {
+    if (value === null || value === undefined) return 'NULL';
+    if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NULL';
+    if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
+    if (value instanceof Date) return `'${value.toISOString().replace(/'/g, "''")}'`;
+    if (typeof value === 'object') {
+      const json = JSON.stringify(value).replace(/'/g, "''");
+      return `'${json}'`;
+    }
+    return `'${String(value).replace(/'/g, "''")}'`;
   }
 }

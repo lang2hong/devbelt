@@ -20,6 +20,8 @@ export { MysqlDialect } from './dialect/mysqlDialect';
 export { PostgreSqlDialect } from './dialect/postgreSqlDialect';
 export { SqliteDialect } from './dialect/sqliteDialect';
 export { DialectRegistry } from './dialect/dialectRegistry';
+export { supportsOperation, unsupportedOperationMessage } from './dialect/capabilities';
+export type { DatabaseCapabilities, DatabaseOperation } from './dialect/capabilities';
 
 // 工厂
 export { ConnectionFactory } from './factory/connectionFactory';

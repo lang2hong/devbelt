@@ -3,6 +3,8 @@ import { TableService } from './tableService';
 import { QueryService } from './queryService';
 import { IConnection } from '../connection/connection';
 import { MysqlDialect } from '../dialect/mysqlDialect';
+import { PostgreSqlDialect } from '../dialect/postgreSqlDialect';
+import { SqliteDialect } from '../dialect/sqliteDialect';
 import type { QueryCallback } from '../types/query';
 
 /** 内存假连接捕获 SQL */
@@ -59,5 +61,18 @@ describe('TableService（表操作）', () => {
     const svc = new TableService(new QueryService(conn, new MysqlDialect()));
     await svc.getCreateSql('users');
     expect(conn.sqls[0]).toBe('SHOW CREATE TABLE `users`');
+  });
+
+  it('PostgreSQL 使用 ALTER TABLE 重命名', async () => {
+    const conn = new CaptureConnection();
+    const svc = new TableService(new QueryService(conn, new PostgreSqlDialect()));
+    await svc.renameTable('users', 'accounts');
+    expect(conn.sqls[0]).toBe('ALTER TABLE "users" RENAME TO "accounts"');
+  });
+
+  it('SQLite 不暴露 TRUNCATE TABLE', async () => {
+    const conn = new CaptureConnection();
+    const svc = new TableService(new QueryService(conn, new SqliteDialect()));
+    await expect(svc.truncateTable('users')).rejects.toThrow(/does not support truncateTable/);
   });
 });

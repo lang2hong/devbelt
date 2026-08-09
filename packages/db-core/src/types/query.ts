@@ -10,6 +10,8 @@ export interface QueryResult {
   affectedRows?: number;
   /** 总行数（分页用） */
   total?: number;
+  /** Result rows were clipped to the configured client-side limit. */
+  truncated?: boolean;
 }
 
 /** 查询响应回调 */

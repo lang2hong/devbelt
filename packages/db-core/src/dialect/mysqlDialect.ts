@@ -2,12 +2,26 @@ import { DatabaseType } from '../types/connection';
 import { validateIdent } from '../utils/validate';
 import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
+import type { DatabaseCapabilities } from './capabilities';
 
 /**
  * MySQL 方言实现。
  */
 export class MysqlDialect implements SqlDialect {
   readonly dbType = DatabaseType.MYSQL;
+  readonly capabilities: DatabaseCapabilities = {
+    multiDatabaseExplorer: true,
+    databases: true,
+    views: true,
+    routines: true,
+    events: true,
+    users: true,
+    operations: [
+      'createDatabase', 'dropDatabase', 'renameTable', 'duplicateTable',
+      'truncateTable', 'getTableDefinition', 'manageIndexes', 'manageRoutines',
+      'manageEvents', 'manageUsers', 'dumpTable', 'schemaSync',
+    ],
+  };
 
   wrap(identifier: string): string {
     return `\`${identifier}\``;
@@ -153,5 +167,32 @@ export class MysqlDialect implements SqlDialect {
       refTable: row.refTable,
       refColumn: row.refColumn,
     }));
+  }
+
+  buildInsertSql(rows: Record<string, any>[], columns: string[], table: string, database?: string): string {
+    const validTable = validateIdent(table);
+    const qualified = database
+      ? `${this.wrap(validateIdent(database))}.${this.wrap(validTable)}`
+      : this.wrap(validTable);
+    const colList = columns.map((c) => this.wrap(validateIdent(c))).join(', ');
+    let out = '';
+    for (const row of rows) {
+      const values = columns.map((c) => this.formatValue(row[c])).join(', ');
+      out += `INSERT INTO ${qualified} (${colList}) VALUES (${values});\n`;
+    }
+    return out;
+  }
+
+  /** MySQL 字符串字面量：反斜杠与单引号都需转义。 */
+  private formatValue(value: any): string {
+    if (value === null || value === undefined) return 'NULL';
+    if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NULL';
+    if (typeof value === 'boolean') return value ? '1' : '0';
+    if (value instanceof Date) return `'${value.toISOString().replace(/'/g, "''").replace(/\\/g, '\\\\')}'`;
+    if (typeof value === 'object') {
+      const json = JSON.stringify(value).replace(/\\/g, '\\\\').replace(/'/g, "''");
+      return `'${json}'`;
+    }
+    return `'${String(value).replace(/\\/g, '\\\\').replace(/'/g, "''").replace(/\0/g, '\\0')}'`;
   }
 }

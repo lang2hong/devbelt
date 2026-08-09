@@ -2,12 +2,22 @@ import { DatabaseType } from '../types/connection';
 import { validateIdent } from '../utils/validate';
 import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
+import type { DatabaseCapabilities } from './capabilities';
 
 /**
  * SQLite 方言实现。
  */
 export class SqliteDialect implements SqlDialect {
   readonly dbType = DatabaseType.SQLITE;
+  readonly capabilities: DatabaseCapabilities = {
+    multiDatabaseExplorer: false,
+    databases: false,
+    views: true,
+    routines: false,
+    events: false,
+    users: false,
+    operations: ['renameTable', 'getTableDefinition', 'manageIndexes', 'dumpTable'],
+  };
 
   wrap(identifier: string): string {
     return `"${identifier}"`;
@@ -104,5 +114,31 @@ export class SqliteDialect implements SqlDialect {
       refTable: row.refTable || row.refTable,
       refColumn: row.refColumn || row.refColumn,
     }));
+  }
+
+  buildInsertSql(rows: Record<string, any>[], columns: string[], table: string, _database?: string): string {
+    // SQLite 单文件数据库，database 限定无意义，始终只限定表名。
+    const validTable = validateIdent(table);
+    const qualified = this.wrap(validTable);
+    const colList = columns.map((c) => this.wrap(validateIdent(c))).join(', ');
+    let out = '';
+    for (const row of rows) {
+      const values = columns.map((c) => this.formatValue(row[c])).join(', ');
+      out += `INSERT INTO ${qualified} (${colList}) VALUES (${values});\n`;
+    }
+    return out;
+  }
+
+  /** SQLite 标准字符串：仅单引号翻倍。 */
+  private formatValue(value: any): string {
+    if (value === null || value === undefined) return 'NULL';
+    if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NULL';
+    if (typeof value === 'boolean') return value ? '1' : '0';
+    if (value instanceof Date) return `'${value.toISOString().replace(/'/g, "''")}'`;
+    if (typeof value === 'object') {
+      const json = JSON.stringify(value).replace(/'/g, "''");
+      return `'${json}'`;
+    }
+    return `'${String(value).replace(/'/g, "''")}'`;
   }
 }

@@ -1,5 +1,6 @@
 import type { DatabaseType } from '../types/connection';
 import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta } from '../types/meta';
+import type { DatabaseCapabilities } from './capabilities';
 
 /**
  * 方言行为抽象（策略模式）。
@@ -14,6 +15,8 @@ import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, 
 export interface SqlDialect {
   /** 数据库类型标识 */
   readonly dbType: DatabaseType;
+  /** Explicitly declared database and object-management capabilities. */
+  readonly capabilities: DatabaseCapabilities;
 
   /**
    * 包裹标识符（表名/列名），防止 SQL 注入与关键字冲突。
@@ -91,4 +94,14 @@ export interface SqlDialect {
 
   /** 解析外键关系查询结果 */
   parseForeignKeys(rows: any[]): ForeignKeyMeta[];
+
+  /**
+   * 生成本方言正确的 INSERT 语句（用于数据导出）。
+   * 标识符包裹与 schema/database 限定由各方言自行决定。
+   * @param rows 数据行
+   * @param columns 要导出的列名
+   * @param table 目标表
+   * @param database 数据库/schema 限定（当且仅当该方言支持时才前置）
+   */
+  buildInsertSql(rows: Record<string, any>[], columns: string[], table: string, database?: string): string;
 }

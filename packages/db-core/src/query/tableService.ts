@@ -1,6 +1,8 @@
 import * as sqlstring from 'sqlstring';
 import { validateIdent } from '../utils/validate';
 import { QueryService } from './queryService';
+import { supportsOperation, unsupportedOperationMessage } from '../dialect/capabilities';
+import type { DatabaseOperation } from '../dialect/capabilities';
 import { normalizeColumnMeta } from './normalize';
 import type { QueryResult } from '../types/query';
 import type { ColumnMeta } from '../types/meta';
@@ -21,18 +23,24 @@ export class TableService {
 
   /** 重命名表 */
   async renameTable(table: string, newName: string, database?: string): Promise<QueryResult> {
-    return this.ddl(
-      `RENAME TABLE ${this.wrapQualified(table, database)} TO ${this.wrapQualified(newName, database)}`,
-    );
+    this.require('renameTable');
+    if (this.queryService.dialect.dbType === 'MYSQL') {
+      return this.ddl(
+        `RENAME TABLE ${this.wrapQualified(table, database)} TO ${this.wrapQualified(newName, database)}`,
+      );
+    }
+    return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} RENAME TO ${this.wrap(newName)}`);
   }
 
   /** 清空表（危险操作） */
   async truncateTable(table: string, database?: string): Promise<QueryResult> {
+    this.require('truncateTable');
     return this.ddl(`TRUNCATE TABLE ${this.wrapQualified(table, database)}`);
   }
 
   /** 复制表结构（含数据） */
   async dupTable(table: string, newName: string, database?: string): Promise<QueryResult> {
+    this.require('duplicateTable');
     return this.ddl(
       `CREATE TABLE ${this.wrapQualified(newName, database)} LIKE ${this.wrapQualified(table, database)}`,
     );
@@ -40,6 +48,7 @@ export class TableService {
 
   /** 查询建表语句（各方言实现不同，返回首行首列） */
   async getCreateSql(table: string, database?: string): Promise<string> {
+    this.require('getTableDefinition');
     const sql = this.getCreateSqlForDialect(table, database);
     const result = await this.queryService.query(sql);
     const row = result.rows[0] as Record<string, any> | undefined;
@@ -54,24 +63,28 @@ export class TableService {
 
   /** 删除函数/存储过程 */
   async dropRoutine(name: string, routineType: string, database?: string): Promise<QueryResult> {
+    this.require('manageRoutines');
     const qualified = this.wrapQualified(name, database);
     return this.ddl(`DROP ${routineType} IF EXISTS ${qualified}`);
   }
 
   /** 删除事件 */
   async dropEvent(name: string, database?: string): Promise<QueryResult> {
+    this.require('manageEvents');
     const qualified = this.wrapQualified(name, database);
     return this.ddl(`DROP EVENT IF EXISTS ${qualified}`);
   }
 
   /** 删除索引 */
   async dropIndex(indexName: string, table: string, database?: string): Promise<QueryResult> {
+    this.require('manageIndexes');
     const qualifiedTable = this.wrapQualified(table, database);
     return this.ddl(`DROP INDEX ${this.wrap(indexName)} ON ${qualifiedTable}`);
   }
 
   /** 创建索引 */
   async createIndex(indexName: string, table: string, columns: string[], database?: string, isUnique = false): Promise<QueryResult> {
+    this.require('manageIndexes');
     const qualifiedTable = this.wrapQualified(table, database);
     const colList = columns.map((c) => this.wrap(c)).join(', ');
     return this.ddl(`CREATE ${isUnique ? 'UNIQUE ' : ''}INDEX ${this.wrap(indexName)} ON ${qualifiedTable} (${colList})`);
@@ -81,18 +94,22 @@ export class TableService {
 
   /** 创建用户 */
   async createUser(name: string, password: string, host = '%'): Promise<QueryResult> {
+    this.require('manageUsers');
     return this.ddl(`CREATE USER ${sqlstring.escape(name)}@${sqlstring.escape(host)} IDENTIFIED BY ${sqlstring.escape(password)}`);
   }
 
   async dropUser(name: string, host = '%'): Promise<QueryResult> {
+    this.require('manageUsers');
     return this.ddl(`DROP USER IF EXISTS ${sqlstring.escape(name)}@${sqlstring.escape(host)}`);
   }
 
   async alterUserPassword(name: string, password: string, host = '%'): Promise<QueryResult> {
+    this.require('manageUsers');
     return this.ddl(`ALTER USER ${sqlstring.escape(name)}@${sqlstring.escape(host)} IDENTIFIED BY ${sqlstring.escape(password)}`);
   }
 
   async grantPrivilege(name: string, privilege: string, database?: string, host = '%'): Promise<QueryResult> {
+    this.require('manageUsers');
     const PRIV_WHITELIST = /^(ALL(\s+PRIVILEGES)?|SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|INDEX|REFERENCES|TRIGGER|EXECUTE|USAGE|RELOAD|PROCESS|REPLICATION\s+CLIENT|REPLICATION\s+SLAVE|SHOW\s+DATABASES|SHUTDOWN|SUPER)$/i;
     if (!PRIV_WHITELIST.test(privilege.trim())) {
       throw new Error(`Invalid privilege: "${privilege}"`);
@@ -102,6 +119,7 @@ export class TableService {
   }
 
   async revokePrivilege(name: string, privilege: string, database?: string, host = '%'): Promise<QueryResult> {
+    this.require('manageUsers');
     const PRIV_WHITELIST = /^(ALL(\s+PRIVILEGES)?|SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|INDEX|REFERENCES|TRIGGER|EXECUTE|USAGE|RELOAD|PROCESS|REPLICATION\s+CLIENT|REPLICATION\s+SLAVE|SHOW\s+DATABASES|SHUTDOWN|SUPER)$/i;
     if (!PRIV_WHITELIST.test(privilege.trim())) {
       throw new Error(`Invalid privilege: "${privilege}"`);
@@ -115,6 +133,7 @@ export class TableService {
    * 生成：DROP TABLE IF EXISTS + CREATE TABLE + INSERT 语句。
    */
   async dumpSql(table: string, database?: string, includeData = true): Promise<string> {
+    this.require('dumpTable');
     validateIdent(table);
     const parts: string[] = [];
     const ddl = await this.getCreateSql(table, database);
@@ -265,6 +284,16 @@ export class TableService {
     return this.queryService.query(sql);
   }
 
+  supports(operation: DatabaseOperation): boolean {
+    return supportsOperation(this.queryService.dialect.capabilities, operation);
+  }
+
+  private require(operation: DatabaseOperation): void {
+    if (!this.supports(operation)) {
+      throw new Error(unsupportedOperationMessage(this.queryService.dialect.dbType, operation));
+    }
+  }
+
   /** 包裹标识符 */
   private wrap(identifier: string): string {
     return this.queryService.dialect.wrap(identifier);
@@ -283,8 +312,6 @@ export class TableService {
     switch (dbType) {
       case 'MYSQL':
         return `SHOW CREATE TABLE ${qualified}`;
-      case 'PG':
-        return `SELECT pg_get_tabledef('${table}'::regclass)`;
       default:
         return `SELECT sql FROM sqlite_master WHERE name = '${table}'`;
     }

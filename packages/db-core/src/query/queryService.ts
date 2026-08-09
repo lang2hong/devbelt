@@ -28,6 +28,7 @@ export class QueryError extends Error {
  */
 export class QueryService {
   readonly dialect: SqlDialect;
+  private cancelActive?: () => void;
 
   constructor(
     private readonly connection: IConnection,
@@ -43,15 +44,29 @@ export class QueryService {
    */
   /** 默认查询超时（ms），0 = 不超时 */
   static queryTimeout = 30_000;
+  /** Maximum number of rows retained in an arbitrary query result. */
+  static maxResultRows = 10_000;
 
   async query(sql: string, values?: any): Promise<QueryResult> {
     const start = Date.now();
     return new Promise<QueryResult>((resolve, reject) => {
       let settled = false;
+      const finish = (): void => {
+        if (this.cancelActive === cancel) this.cancelActive = undefined;
+        if (timer) clearTimeout(timer);
+      };
+      const cancel = (): void => {
+        if (settled) return;
+        settled = true;
+        finish();
+        reject(new QueryError('Query cancelled', sql, Date.now() - start));
+      };
+      this.cancelActive = cancel;
       const timer = QueryService.queryTimeout > 0
         ? setTimeout(() => {
             if (!settled) {
               settled = true;
+              finish();
               reject(new QueryError(`Query timeout (${QueryService.queryTimeout}ms)`, sql, Date.now() - start));
             }
           }, QueryService.queryTimeout)
@@ -59,7 +74,7 @@ export class QueryService {
       const callback: QueryCallback = (err, results, fields) => {
         if (settled) return;
         settled = true;
-        if (timer) clearTimeout(timer);
+        finish();
         const costTime = Date.now() - start;
         if (err) {
           reject(new QueryError(err.message, sql, costTime));
@@ -73,6 +88,13 @@ export class QueryService {
         this.connection.query(sql, callback);
       }
     });
+  }
+
+  /** Stops delivery of the current result and lets the caller close its session. */
+  cancel(): boolean {
+    if (!this.cancelActive) return false;
+    this.cancelActive();
+    return true;
   }
 
   /** 执行分页查询 */
@@ -117,6 +139,8 @@ export class QueryService {
       }
     }
 
-    return { sql, costTime, rows, fields: fields || [], affectedRows, total };
+    const truncated = rows.length > QueryService.maxResultRows;
+    if (truncated) rows = rows.slice(0, QueryService.maxResultRows);
+    return { sql, costTime, rows, fields: fields || [], affectedRows, total, truncated };
   }
 }

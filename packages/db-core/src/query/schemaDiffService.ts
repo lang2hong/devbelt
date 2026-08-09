@@ -113,6 +113,9 @@ export class SchemaDiffService {
     sourceTableService: TableService,
     sourceDb: string,
   ): Promise<string> {
+    if (!sourceTableService.supports('schemaSync')) {
+      throw new Error('Schema sync SQL is currently supported for MySQL only');
+    }
     const parts: string[] = [];
     parts.push(`-- Schema sync: ${sourceDb} → ${targetDb}`);
     parts.push('');
