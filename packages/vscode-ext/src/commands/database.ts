@@ -2,9 +2,10 @@ import * as vscode from 'vscode';
 import { SchemaDiffService } from '@db-client/core';
 import { DbTreeNode } from '../tree/dbTreeNode';
 import { wrapIdent, splitSqlStatements } from '../utils/sql';
+import { confirmSqlExecution } from '../utils/sqlSafety';
 import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
-import { confirm, openSqlDoc } from './shared';
+import { confirm, openSqlDoc, requireCapability } from './shared';
 
 export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
   const { manager, treeProvider, connCtx } = deps;
@@ -15,6 +16,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (!name) return;
     connCtx.setLast(node.conn);
     const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'createDatabase')) return;
     await session.query.query(`CREATE DATABASE ${wrapIdent(node.conn, name)}`);
     treeProvider.refresh();
     vscode.window.showInformationMessage(l10n('db.created', { name }));
@@ -24,6 +26,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (!node?.conn) return;
     if (!(await confirm('db.dropConfirm', 'db.drop', node.label))) return;
     const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'dropDatabase')) return;
     await session.query.query(`DROP DATABASE ${wrapIdent(node.conn, node.label)}`);
     manager.disposeConn(node.conn.id);
     treeProvider.refresh();
@@ -33,12 +36,14 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (!node?.conn) return;
     connCtx.setLast(node.conn, node.database);
     const uri = await vscode.window.showOpenDialog({
-      filters: { 'SQL files': ['sql'], 'CSV files': ['csv'] },
+      filters: { 'SQL scripts': ['sql'] },
       canSelectMany: false,
+      openLabel: 'Import SQL Script',
     });
     if (!uri?.[0]) return;
     const doc = await vscode.workspace.openTextDocument(uri[0]);
     const sql = doc.getText();
+    if (!(await confirmSqlExecution(node.conn, sql))) return;
     const session = await manager.connect(node.conn);
     if (node.database) {
       try { await session.query.query(`USE ${wrapIdent(node.conn, node.database)}`); } catch { /* ignore */ }
@@ -62,6 +67,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     );
     if (!choice) return;
     const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'dumpTable')) return;
     const parts: string[] = [];
     if (node.database) {
       const tables = await session.metadata.getTables(node.database);
@@ -85,6 +91,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
   sub('dbclient.compareSchema', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'schemaSync')) return;
     const targetDbs = (await session.metadata.getDatabases()).filter((d) => d !== node.database);
     if (!targetDbs.length) {
       vscode.window.showWarningMessage('No other databases to compare.');
