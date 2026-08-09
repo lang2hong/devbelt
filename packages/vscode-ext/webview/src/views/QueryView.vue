@@ -14,10 +14,16 @@ const error = ref('');
 const meta = ref('');
 const sortCol = ref('');
 const sortDir = ref('');
+const filterCol = ref('');
+const filterVal = ref('');
+const hiddenColumns = ref<string[]>([]);
+const columnOrder = ref<string[]>([]);
+const columnWidths = ref<Record<string, number>>({});
 const offset = ref(0);
 const limit = 100;
 const tableName = ref('');
 const dbName = ref('');
+const running = ref(false);
 
 onMounted(() => {
   onMessage((msg: any) => {
@@ -26,12 +32,42 @@ onMounted(() => {
       hasTable.value = msg.hasTable || false;
       tableName.value = msg.tableName || '';
       dbName.value = msg.dbName || '';
+      sortCol.value = msg.sortCol || '';
+      sortDir.value = msg.sortDir || '';
+      filterCol.value = msg.filterCol || '';
+      filterVal.value = msg.filterVal || '';
+      hiddenColumns.value = msg.hiddenColumns || [];
+      columnOrder.value = msg.columnOrder || [];
+      columnWidths.value = msg.columnWidths || {};
+    } else if (msg.type === 'querySql') {
+      sql.value = msg.sql || '';
+      dbName.value = msg.dbName || '';
+      error.value = '';
+      offset.value = 0;
     } else if (msg.type === 'result') {
       rows.value = msg.result.rows || [];
       fields.value = msg.result.fields || [];
       pkColumns.value = msg.pkColumns || [];
+      if (msg.hiddenColumns) hiddenColumns.value = msg.hiddenColumns;
+      if (msg.columnOrder) columnOrder.value = msg.columnOrder;
+      if (msg.columnWidths) columnWidths.value = msg.columnWidths;
       error.value = '';
-      meta.value = rows.value.length + ' row(s) in ' + (msg.result.costTime / 1000).toFixed(3) + 's';
+      meta.value = rows.value.length + ' row(s) in ' + (msg.result.costTime / 1000).toFixed(3) + 's' + (msg.result.truncated ? ' (truncated)' : '');
+    } else if (msg.type === 'hiddenColumns') {
+      hiddenColumns.value = msg.hiddenColumns || [];
+    } else if (msg.type === 'layout') {
+      columnOrder.value = msg.columnOrder || [];
+      columnWidths.value = msg.columnWidths || {};
+    } else if (msg.type === 'profileReset') {
+      sortCol.value = '';
+      sortDir.value = '';
+      filterCol.value = '';
+      filterVal.value = '';
+      hiddenColumns.value = [];
+      columnOrder.value = [];
+      columnWidths.value = {};
+    } else if (msg.type === 'exported') {
+      meta.value = msg.message;
     } else if (msg.type === 'error') {
       error.value = msg.message;
       rows.value = [];
@@ -41,6 +77,10 @@ onMounted(() => {
       meta.value = 'Cell updated.';
     } else if (msg.type === 'rowsDeleted') {
       meta.value = msg.count + ' row(s) deleted.';
+    } else if (msg.type === 'running') {
+      running.value = true;
+    } else if (msg.type === 'finished') {
+      running.value = false;
     }
   });
   post({ type: 'ready' });
@@ -52,6 +92,10 @@ function run() {
   sortDir.value = '';
   offset.value = 0;
   post({ type: 'run', sql: sql.value });
+}
+
+function cancel() {
+  post({ type: 'cancel' });
 }
 
 function nextPage() {
@@ -82,6 +126,18 @@ function handleDeleteRows(rows: { pkColumn: string; pkValue: any }[]) {
   post({ type: 'deleteRows', rows });
 }
 
+function handleToggleColumn(column: string, hidden: boolean) {
+  post({ type: 'toggleColumn', column, hidden });
+}
+
+function handleSaveLayout(order: string[], widths: Record<string, number>) {
+  post({ type: 'saveLayout', columnOrder: order, columnWidths: widths });
+}
+
+function resetProfile() {
+  post({ type: 'resetProfile' });
+}
+
 function onKeydown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
     e.preventDefault();
@@ -94,7 +150,8 @@ function onKeydown(e: KeyboardEvent) {
   <div class="app">
     <textarea v-model="sql" class="editor" @keydown="onKeydown" placeholder="Enter SQL..."></textarea>
     <div class="action-bar">
-      <button class="btn primary" @click="run">Run</button>
+      <button class="btn primary" :disabled="running" @click="run">Run</button>
+      <button v-if="running" class="btn" @click="cancel">Cancel</button>
       <button v-if="hasTable" class="btn" @click="prevPage">◀ Prev</button>
       <button v-if="hasTable" class="btn" @click="nextPage">Next ▶</button>
     </div>
@@ -107,12 +164,20 @@ function onKeydown(e: KeyboardEvent) {
       :has-table="hasTable"
       :sort-col="sortCol"
       :sort-dir="sortDir"
+      :filter-col="filterCol"
+      :filter-val="filterVal"
+      :column-order="columnOrder"
+      :column-widths="columnWidths"
       :table-name="tableName"
       :db-name="dbName"
+      :hidden-columns="hiddenColumns"
       @sort="handleSort"
       @filter="handleFilter"
       @update-cell="handleUpdateCell"
       @delete-rows="handleDeleteRows"
+      @toggle-column="handleToggleColumn"
+      @save-layout="handleSaveLayout"
+      @reset-profile="resetProfile"
     />
   </div>
 </template>
