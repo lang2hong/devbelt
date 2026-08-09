@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import type { ConnectionManager } from '../connection/connectionManager';
-import type { ConnectionStore, SavedConnection } from '../connection/connectionStore';
+import type { SavedConnection } from '../connection/connectionStore';
+import type { ConnectionContext } from '../connection/connectionContext';
+import { SQL_SNIPPETS } from './sqlSnippets';
 
 /**
  * SQL 自动补全提供者。
@@ -17,7 +19,7 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
   private columnCache = new Map<string, string[]>();
 
   constructor(
-    private readonly store: ConnectionStore,
+    private readonly context: ConnectionContext,
     private readonly manager: ConnectionManager,
   ) {}
 
@@ -25,45 +27,59 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
     document: vscode.TextDocument,
     position: vscode.Position,
   ): Promise<vscode.CompletionItem[]> {
-    const conn = this.guessConnection(document);
+    const context = this.context.getForDoc(document.uri.toString());
+    const conn = context?.conn;
     if (!conn) return this.keywordItems();
 
     const text = document.getText();
     const line = text.split('\n')[position.line] || '';
     const before = line.slice(0, position.character);
 
+    // 触发词匹配 snippet（如 sel/del/ins/upd/joi）
+    const snippetMatch = before.match(/(\w+)$/);
+    if (snippetMatch) {
+      const snippets = SQL_SNIPPETS.filter((s) =>
+        s.trigger.startsWith(snippetMatch[1].toLowerCase()),
+      );
+      if (snippets.length) {
+        return snippets.map((s) => {
+          const item = new vscode.CompletionItem(s.trigger, vscode.CompletionItemKind.Snippet);
+          item.label = `${s.trigger} (${s.label})`;
+          item.insertText = new vscode.SnippetString(s.body);
+          item.detail = s.description;
+          item.documentation = s.description;
+          return item;
+        });
+      }
+    }
+
     // FROM/JOIN/UPDATE/INTO 后面补表名
     if (/\b(FROM|JOIN|UPDATE|INTO)\s+\w*$/i.test(before)) {
-      const tables = await this.getTables(conn);
+      const tables = await this.getTables(conn, context?.db);
       return tables.map((t) => this.makeItem(t, vscode.CompletionItemKind.Class));
     }
 
     // 表名后跟 . 补列名（如 `table.`）
     const colMatch = before.match(/(\w+)\.\w*$/);
     if (colMatch) {
-      const cols = await this.getColumns(conn, colMatch[1]);
+      const cols = await this.getColumns(conn, colMatch[1], context?.db);
       return cols.map((c) => this.makeItem(c, vscode.CompletionItemKind.Field));
     }
 
     // 默认：关键字 + 表名
-    return [...this.keywordItems(), ...(await this.tableItems(conn))];
-  }
-
-  /** 从文档内容猜测当前使用的连接（匹配 use/database 语句或回退到第一个） */
-  private guessConnection(_doc: vscode.TextDocument): SavedConnection | undefined {
-    // 简化：返回第一个已保存连接（后续可解析 USE 语句）
-    return this.store.list()[0];
+    return [...this.keywordItems(), ...(await this.tableItems(conn, context?.db))];
   }
 
   /** 获取表名列表（带缓存） */
-  private async getTables(conn: SavedConnection): Promise<string[]> {
-    const cached = this.tableCache.get(conn.id);
+  private async getTables(conn: SavedConnection, database?: string): Promise<string[]> {
+    const key = `${conn.id}:${database || ''}`;
+    const cached = this.tableCache.get(key);
     if (cached) return cached;
     try {
       const session = await this.manager.connect(conn);
-      const tables = await session.metadata.getTables();
+      const tables = await session.metadata.getTables(database);
       const names = tables.map((t) => t.name);
-      this.tableCache.set(conn.id, names);
+      this.tableCache.set(key, names);
       return names;
     } catch {
       return [];
@@ -71,13 +87,13 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
   }
 
   /** 获取列名列表（带缓存） */
-  private async getColumns(conn: SavedConnection, table: string): Promise<string[]> {
-    const key = `${conn.id}:${table}`;
+  private async getColumns(conn: SavedConnection, table: string, database?: string): Promise<string[]> {
+    const key = `${conn.id}:${database || ''}:${table}`;
     const cached = this.columnCache.get(key);
     if (cached) return cached;
     try {
       const session = await this.manager.connect(conn);
-      const columns = await session.metadata.getColumns(table);
+      const columns = await session.metadata.getColumns(table, database);
       const names = columns.map((c) => c.name);
       this.columnCache.set(key, names);
       return names;
@@ -86,8 +102,8 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
     }
   }
 
-  private async tableItems(conn: SavedConnection): Promise<vscode.CompletionItem[]> {
-    const tables = await this.getTables(conn);
+  private async tableItems(conn: SavedConnection, database?: string): Promise<vscode.CompletionItem[]> {
+    const tables = await this.getTables(conn, database);
     return tables.map((t) => this.makeItem(t, vscode.CompletionItemKind.Class));
   }
 
@@ -113,7 +129,9 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
   /** 清除缓存（连接变更时调用） */
   invalidate(connId?: string): void {
     if (connId) {
-      this.tableCache.delete(connId);
+      for (const key of this.tableCache.keys()) {
+        if (key.startsWith(connId + ':')) this.tableCache.delete(key);
+      }
       for (const key of this.columnCache.keys()) {
         if (key.startsWith(connId + ':')) this.columnCache.delete(key);
       }
