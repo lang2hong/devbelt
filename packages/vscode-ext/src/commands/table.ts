@@ -3,7 +3,7 @@ import { DbTreeNode } from '../tree/dbTreeNode';
 import { wrapIdent } from '../utils/sql';
 import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
-import { confirm, openSqlDoc, openSqlDocEditor } from './shared';
+import { confirm, openSqlDoc, openSqlDocEditor, requireCapability } from './shared';
 
 export function registerTableCommands(deps: Deps, sub: Sub): void {
   const { manager, treeProvider, executor, connCtx } = deps;
@@ -31,6 +31,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     const newName = await vscode.window.showInputBox({ prompt: l10n('table.renamePrompt'), value: node.label });
     if (!newName || newName === node.label) return;
     const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'renameTable')) return;
     await session.table.renameTable(node.label, newName, node.database);
     treeProvider.refresh();
   });
@@ -39,6 +40,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (!node?.conn || !node?.database) return;
     if (!(await confirm('table.truncateConfirm', 'table.truncate', node.label))) return;
     const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'truncateTable')) return;
     await session.table.truncateTable(node.label, node.database);
   });
 
@@ -47,6 +49,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     const newName = await vscode.window.showInputBox({ prompt: l10n('table.dupPrompt', { name: node.label }), value: `${node.label}_copy` });
     if (!newName) return;
     const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'duplicateTable')) return;
     await session.table.dupTable(node.label, newName, node.database);
     treeProvider.refresh();
   });
@@ -65,6 +68,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
   sub('dbclient.viewTableSource', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'getTableDefinition')) return;
     const ddl = await session.table.getCreateSql(node.label, node.database);
     await openSqlDoc(ddl || '-- No DDL found');
   });
@@ -77,6 +81,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     );
     if (!choice) return;
     const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'dumpTable')) return;
     const dump = await session.table.dumpSql(node.label, node.database, choice.value);
     await openSqlDoc(dump);
   });
@@ -115,6 +120,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (!node?.conn || !node?.database) return;
     if (!(await confirm('routine.deleteConfirm', 'routine.delete', node.label))) return;
     const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'manageRoutines')) return;
     await session.table.dropRoutine(node.label, node.routineType || 'FUNCTION', node.database);
     treeProvider.refresh();
   });
@@ -130,6 +136,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (!node?.conn || !node?.database) return;
     if (!(await confirm('event.deleteConfirm', 'event.delete', node.label))) return;
     const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'manageEvents')) return;
     await session.table.dropEvent(node.label, node.database);
     treeProvider.refresh();
   });

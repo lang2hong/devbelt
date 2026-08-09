@@ -9,6 +9,8 @@ import { HistoryStore } from '../history/historyStore';
 import { AuthService } from '../sync/authService';
 import { SyncManager } from '../sync/syncManager';
 import { l10n } from '../i18n';
+import type { DatabaseOperation } from '@db-client/core';
+import type { ConnectionSession } from '../connection/connectionManager';
 
 export interface Deps {
   context: vscode.ExtensionContext;
@@ -35,6 +37,12 @@ export function makeSub(context: vscode.ExtensionContext): Sub {
 
 export async function confirm(msgKey: string, btnKey: string, name: string): Promise<boolean> {
   return (await vscode.window.showWarningMessage(l10n(msgKey, { name }), { modal: true }, l10n(btnKey))) === l10n(btnKey);
+}
+
+export function requireCapability(session: ConnectionSession, operation: DatabaseOperation): boolean {
+  if (session.capabilities.operations.includes(operation)) return true;
+  vscode.window.showWarningMessage(`${session.capabilities ? 'This database' : 'Connection'} does not support ${operation}.`);
+  return false;
 }
 
 export async function openSqlDoc(content: string): Promise<void> {
