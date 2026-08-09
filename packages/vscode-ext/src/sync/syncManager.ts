@@ -29,7 +29,7 @@ export class SyncManager {
 
   /** 推送本地数据到远端 */
   async push(masterPassword: string): Promise<void> {
-    const local = this.store.getTreeData();
+    const local = this.store.getSyncTreeData();
     const encrypted = Encryption.encrypt(local, masterPassword);
     const { version } = await this.auth.client.push(encrypted, this.version);
     this.version = version;

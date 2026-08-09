@@ -1,5 +1,6 @@
 import { ConnectionFactory, QueryService, MetadataService, DataService, TableService } from '@db-client/core';
 import type { DatabaseType } from '@db-client/core';
+import type { DatabaseCapabilities } from '@db-client/core';
 import type { SavedConnection } from './connectionStore';
 import { SshTunnel } from './sshTunnel';
 
@@ -7,6 +8,7 @@ import { SshTunnel } from './sshTunnel';
  * 连接会话：连接 + 查询/元数据/数据编辑/表操作服务的组合。
  */
 export interface ConnectionSession {
+  capabilities: DatabaseCapabilities;
   /** 查询服务（复用 db-core） */
   query: QueryService;
   /** 元数据服务（复用 db-core） */
@@ -53,9 +55,18 @@ export class ConnectionManager {
         user: conn.user,
         password: conn.password,
         database: conn.database,
+        schema: conn.schema,
+        timezone: conn.timezone,
+        connectTimeout: conn.connectTimeout,
+        requestTimeout: conn.requestTimeout,
         dbPath: conn.dbPath,
         useConnectionString: conn.useConnectionString,
         connectionUrl: conn.connectionUrl,
+        useSSL: conn.useSSL,
+        caPath: conn.caPath,
+        clientCertPath: conn.clientCertPath,
+        clientKeyPath: conn.clientKeyPath,
+        socketPath: conn.socketPath,
       },
     );
 
@@ -65,6 +76,7 @@ export class ConnectionManager {
 
     const query = new QueryService(connection, dialect);
     const session: ConnectionSession = {
+      capabilities: dialect.capabilities,
       query,
       metadata: new MetadataService(query),
       data: new DataService(query),

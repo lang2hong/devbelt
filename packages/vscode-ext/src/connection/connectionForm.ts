@@ -125,6 +125,17 @@ function decodeConnection(payload: any): SavedConnection {
     password: payload.password,
     database: payload.database,
     dbPath: payload.dbPath,
+    environment: payload.environment || 'development',
+    readOnly: Boolean(payload.readOnly),
+    useConnectionString: Boolean(payload.useConnectionString),
+    connectionUrl: payload.connectionUrl || undefined,
+    useSSL: Boolean(payload.useSSL),
+    caPath: payload.caPath || undefined,
+    clientCertPath: payload.clientCertPath || undefined,
+    clientKeyPath: payload.clientKeyPath || undefined,
+    socketPath: payload.socketPath || undefined,
+    connectTimeout: payload.connectTimeout ? Number(payload.connectTimeout) : undefined,
+    requestTimeout: payload.requestTimeout ? Number(payload.requestTimeout) : undefined,
     sshHost: payload.sshHost || undefined,
     sshPort: payload.sshPort ? Number(payload.sshPort) : undefined,
     sshUser: payload.sshUser || undefined,
@@ -261,6 +272,25 @@ function connectionFormHtml(groups: ConnectionGroup[]): string {
      <div class="field"><label data-i18n="sshKey">SSH Private Key Path</label><input id="sshPrivateKeyPath" type="text" placeholder="~/.ssh/id_rsa"></div>
      <div class="field"><label data-i18n="sshPhrase">SSH Key Passphrase</label><input id="sshPassphrase" type="password"></div>
    </details>
+   <details class="ssh-section">
+     <summary>Advanced Connection Settings</summary>
+     <div class="row">
+       <div class="field"><label>Environment</label><select id="environment"><option value="development">Development</option><option value="test">Test</option><option value="staging">Staging</option><option value="production">Production</option></select></div>
+       <div class="field"><label>Access</label><label><input id="readOnly" type="checkbox" style="width:auto"> Read-only</label></div>
+     </div>
+     <div class="field"><label><input id="useConnectionString" type="checkbox" style="width:auto"> Use connection URL</label><input id="connectionUrl" placeholder="mysql://user:password@host:3306/database"></div>
+     <div class="field"><label><input id="useSSL" type="checkbox" style="width:auto"> Use SSL/TLS</label></div>
+     <div class="field"><label>CA certificate path</label><input id="caPath" placeholder="/path/to/ca.pem"></div>
+     <div class="row">
+       <div class="field"><label>Client certificate path</label><input id="clientCertPath" placeholder="/path/to/client.crt"></div>
+       <div class="field"><label>Client key path</label><input id="clientKeyPath" placeholder="/path/to/client.key"></div>
+     </div>
+     <div class="row">
+       <div class="field"><label>Connect timeout (ms)</label><input id="connectTimeout" type="number" value="5000"></div>
+       <div class="field"><label>Request timeout (ms)</label><input id="requestTimeout" type="number" value="30000"></div>
+     </div>
+     <div class="field"><label>Socket path</label><input id="socketPath" placeholder="/var/run/mysqld/mysqld.sock"></div>
+   </details>
    <div class="actions">
      <button id="btnTest" class="secondary" data-i18n="test">Test Connection</button>
      <button id="btnSave" data-i18n="save">Save</button>
@@ -311,7 +341,18 @@ function connectionFormHtml(groups: ConnectionGroup[]): string {
       document.getElementById('database').value = c.database || '';
       document.getElementById('dbPath').value = c.dbPath || '';
       if (c.dbType) document.getElementById('dbType').value = c.dbType;
-      if (c.groupId) document.getElementById('group').value = c.groupId;
+       if (c.groupId) document.getElementById('group').value = c.groupId;
+       document.getElementById('environment').value = c.environment || 'development';
+       document.getElementById('readOnly').checked = !!c.readOnly;
+       document.getElementById('useConnectionString').checked = !!c.useConnectionString;
+       document.getElementById('connectionUrl').value = c.connectionUrl || '';
+       document.getElementById('useSSL').checked = !!c.useSSL;
+       document.getElementById('caPath').value = c.caPath || '';
+       document.getElementById('clientCertPath').value = c.clientCertPath || '';
+       document.getElementById('clientKeyPath').value = c.clientKeyPath || '';
+       document.getElementById('connectTimeout').value = c.connectTimeout || 5000;
+       document.getElementById('requestTimeout').value = c.requestTimeout || 30000;
+       document.getElementById('socketPath').value = c.socketPath || '';
       // 编辑模式标记，保存时携带原 id
       document.getElementById('editorMode').dataset.connId = c.id || '';
       document.querySelector('h2').textContent = isZh ? '编辑连接' : 'Edit Connection';
@@ -350,7 +391,18 @@ function connectionFormHtml(groups: ConnectionGroup[]): string {
       password: document.getElementById('password').value,
       database: document.getElementById('database').value,
       dbPath: document.getElementById('dbPath').value,
-      groupId: document.getElementById('group').value,
+       groupId: document.getElementById('group').value,
+       environment: document.getElementById('environment').value,
+       readOnly: document.getElementById('readOnly').checked,
+       useConnectionString: document.getElementById('useConnectionString').checked,
+       connectionUrl: document.getElementById('connectionUrl').value,
+       useSSL: document.getElementById('useSSL').checked,
+       caPath: document.getElementById('caPath').value,
+       clientCertPath: document.getElementById('clientCertPath').value,
+       clientKeyPath: document.getElementById('clientKeyPath').value,
+       connectTimeout: document.getElementById('connectTimeout').value,
+       requestTimeout: document.getElementById('requestTimeout').value,
+       socketPath: document.getElementById('socketPath').value,
       sshHost: document.getElementById('sshHost').value,
       sshPort: document.getElementById('sshPort').value,
       sshUser: document.getElementById('sshUser').value,
