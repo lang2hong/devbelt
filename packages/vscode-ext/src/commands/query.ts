@@ -4,21 +4,12 @@ import { TableQueryView } from '../result/tableQueryView';
 import { formatSql } from '../format/sqlFormatter';
 import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
-import { openSqlDoc, openSqlDocEditor, pickConnection } from './shared';
+import { openSqlDocEditor, pickConnection } from './shared';
 
 export function registerQueryCommands(deps: Deps, sub: Sub): void {
   const { store, manager, executor, history, connCtx, treeProvider } = deps;
 
-  sub('dbclient.runStatement', async (sql: string) => {
-    if (!sql) return;
-    const editor = vscode.window.activeTextEditor;
-    const ctx = editor ? connCtx.getForDoc(editor.document.uri.toString()) : undefined;
-    const conn = ctx?.conn || await pickConnection(store);
-    if (!conn) return;
-    await executor.run(conn, sql);
-  });
-
-  sub('dbclient.runQuery', async () => {
+  const runActiveQuery = async (mode: import('../result/queryExecutor').QueryExecutionMode) => {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       vscode.window.showInformationMessage(l10n('cmd.openEditorFirst'));
@@ -27,10 +18,28 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
     const ctx = connCtx.getForDoc(editor.document.uri.toString());
     const conn = ctx?.conn || await pickConnection(store);
     if (!conn) return;
+    if (!ctx) connCtx.setForDoc(editor.document.uri.toString(), conn);
     const sql = editor.selection.isEmpty
       ? editor.document.getText()
       : editor.document.getText(editor.selection);
-    await executor.run(conn, sql);
+    await executor.run(conn, sql, ctx?.db, mode);
+  };
+
+  sub('dbclient.runStatement', async (sql: string) => {
+    if (!sql) return;
+    const editor = vscode.window.activeTextEditor;
+    const ctx = editor ? connCtx.getForDoc(editor.document.uri.toString()) : undefined;
+    const conn = ctx?.conn || await pickConnection(store);
+    if (!conn) return;
+    await executor.run(conn, sql, ctx?.db);
+  });
+
+  sub('dbclient.runQuery', async () => {
+    await runActiveQuery('reuse');
+  });
+
+  sub('dbclient.runQueryInNewPanel', async () => {
+    await runActiveQuery('new');
   });
 
   sub('dbclient.runSqlFile', async (uri: vscode.Uri) => {
@@ -38,6 +47,7 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
     const conn = await pickConnection(store);
     if (!conn) return;
     const doc = await vscode.workspace.openTextDocument(uri);
+    connCtx.setForDoc(doc.uri.toString(), conn);
     await executor.run(conn, doc.getText());
   });
 
@@ -78,7 +88,13 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
       })),
       { placeHolder: 'Query history' },
     );
-    if (picked) await openSqlDoc(picked.value.sql);
+    if (picked) {
+      const doc = await openSqlDocEditor(picked.value.sql);
+      if (doc && picked.value.connectionId) {
+        const conn = store.get(picked.value.connectionId);
+        if (conn) connCtx.setForDoc(doc.document.uri.toString(), conn, picked.value.database);
+      }
+    }
   });
 
   sub('dbclient.updateCell', async (args: {
@@ -101,7 +117,8 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
     connCtx.setLast(node.conn, node.database);
     const editor = await openSqlDocEditor('');
     if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
-    await store.saveQuery({ name, sql: '', connId: node.conn.id, database: node.database });
+    const queryId = await store.saveQuery({ name, sql: '', connId: node.conn.id, database: node.database });
+    if (editor) connCtx.setSavedQueryForDoc(editor.document, queryId);
     treeProvider.refresh();
   });
 }

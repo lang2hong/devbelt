@@ -5,7 +5,7 @@ import type { Deps, Sub } from './shared';
 import { confirm } from './shared';
 
 export function registerSavedQueryCommands(deps: Deps, sub: Sub): void {
-  const { store, treeProvider } = deps;
+  const { store, treeProvider, connCtx } = deps;
 
   sub('dbclient.newQuery', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
@@ -13,22 +13,27 @@ export function registerSavedQueryCommands(deps: Deps, sub: Sub): void {
     if (!name) return;
     const sql = await vscode.window.showInputBox({ prompt: l10n('query.sqlPrompt') });
     if (sql === undefined) return;
-    await store.saveQuery({ name, sql: sql || '', connId: node.conn.id, database: node.database });
+    await store.saveQuery({
+      name, sql: sql || '', connId: node.conn.id, database: node.database,
+      folderId: node.kind === NodeKind.QueryFolder ? node.queryFolderId : undefined,
+    });
     treeProvider.refresh();
   });
 
   sub('dbclient.openQuery', async (node: DbTreeNode) => {
-    if (!node?.conn) return;
-    const q = store.getQueries(node.conn.id, node.database).find((x) => x.name === node.label);
+    if (!node?.conn || !node?.queryId) return;
+    const q = store.getQueries(node.conn.id, node.database).find((x) => x.id === node.queryId);
     if (q) {
       const doc = await vscode.workspace.openTextDocument({ content: q.sql, language: 'sql' });
-      await vscode.window.showTextDocument(doc);
+      const editor = await vscode.window.showTextDocument(doc);
+      connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
+      connCtx.setSavedQueryForDoc(editor.document, q.id);
     }
   });
 
   sub('dbclient.editQuery', async (node: DbTreeNode) => {
-    if (!node?.conn) return;
-    const q = store.getQueries(node.conn.id, node.database).find((x) => x.name === node.label);
+    if (!node?.conn || !node?.queryId) return;
+    const q = store.getQueries(node.conn.id, node.database).find((x) => x.id === node.queryId);
     if (!q) return;
     const name = await vscode.window.showInputBox({ prompt: l10n('query.namePrompt'), value: q.name });
     if (!name) return;
@@ -39,11 +44,37 @@ export function registerSavedQueryCommands(deps: Deps, sub: Sub): void {
   });
 
   sub('dbclient.deleteQuery', async (node: DbTreeNode) => {
-    if (!node?.conn) return;
-    const q = store.getQueries(node.conn.id, node.database).find((x) => x.name === node.label);
+    if (!node?.conn || !node?.queryId) return;
+    const q = store.getQueries(node.conn.id, node.database).find((x) => x.id === node.queryId);
     if (!q) return;
     if (!(await confirm('query.deleteConfirm', 'query.delete', q.name))) return;
     await store.removeQuery(q.id);
+    treeProvider.refresh();
+  });
+}
+
+export function registerQueryFolderCommands(deps: Deps, sub: Sub): void {
+  const { store, treeProvider } = deps;
+
+  sub('dbclient.newQueryFolder', async () => {
+    const name = await vscode.window.showInputBox({ prompt: 'Query folder name' });
+    if (!name) return;
+    await store.addQueryFolder(name);
+    treeProvider.refresh();
+  });
+
+  sub('dbclient.renameQueryFolder', async (node: DbTreeNode) => {
+    if (!node?.queryFolderId) return;
+    const name = await vscode.window.showInputBox({ prompt: 'Query folder name', value: node.label });
+    if (!name || name === node.label) return;
+    await store.renameQueryFolder(node.queryFolderId, name);
+    treeProvider.refresh();
+  });
+
+  sub('dbclient.deleteQueryFolder', async (node: DbTreeNode) => {
+    if (!node?.queryFolderId) return;
+    if (!(await confirm('query.deleteFolderConfirm', 'query.delete', node.label))) return;
+    await store.removeQueryFolder(node.queryFolderId);
     treeProvider.refresh();
   });
 }

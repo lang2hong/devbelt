@@ -8,10 +8,11 @@ import { ConnectionStore } from './connectionStore';
  * 策略：
  *  1. per-editor Map：SQL 编辑器按 URI 关联连接+数据库
  *  2. workspaceState：持久化最后活跃连接（跨重启）
- *  3. getForDoc(uri)：per-editor → workspaceState → undefined
+ *  3. getForDoc(uri)：仅返回文档显式绑定的连接，避免多连接时串库
  */
 export class ConnectionContext {
   private readonly editorMap = new Map<string, { connId: string; db?: string }>();
+  private readonly savedQueryMap = new WeakMap<vscode.TextDocument, string>();
   private readonly wsKey = 'dbclient.lastConn';
 
   constructor(
@@ -30,14 +31,28 @@ export class ConnectionContext {
     void this.context.workspaceState.update(this.wsKey, { connId: conn.id, db });
   }
 
-  /** 获取文档关联的连接：per-editor → workspaceState → undefined */
+  /** 获取文档关联的连接。未绑定的文档必须由调用方要求用户选择连接。 */
   getForDoc(uri: string): { conn: SavedConnection; db?: string } | undefined {
     const entry = this.editorMap.get(uri);
     if (entry) {
       const conn = this.store.get(entry.connId);
       if (conn) return { conn, db: entry.db };
     }
-    return this.getLast();
+    return undefined;
+  }
+
+  clearForDoc(uri: string): void {
+    this.editorMap.delete(uri);
+  }
+
+  /** Associate an open document with the saved query it edits. */
+  setSavedQueryForDoc(document: vscode.TextDocument, queryId: string): void {
+    this.savedQueryMap.set(document, queryId);
+  }
+
+  /** Return the saved query edited by this document, if any. */
+  getSavedQueryForDoc(document: vscode.TextDocument): string | undefined {
+    return this.savedQueryMap.get(document);
   }
 
   /** 获取 workspace 级别最后活跃连接 */

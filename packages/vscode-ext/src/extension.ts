@@ -5,10 +5,12 @@ import { ConnectionContext } from './connection/connectionContext';
 import { DbTreeDataProvider } from './tree/dbTreeDataProvider';
 import { QueryExecutor } from './result/queryExecutor';
 import { BaseWebView } from './result/baseWebView';
+import { TableQueryView } from './result/tableQueryView';
 import { TableDesignView } from './result/tableDesignView';
 import { StatusView } from './result/statusView';
 import { ERDiagramView } from './result/erDiagramView';
 import { HistoryStore } from './history/historyStore';
+import { TableProfileStore } from './result/tableProfileStore';
 import { AuthService } from './sync/authService';
 import { SyncManager } from './sync/syncManager';
 import { invalidateLanguage, LANGUAGE_CONFIG_KEY } from './i18n';
@@ -18,7 +20,8 @@ import { SqlCodeLensProvider } from './completion/sqlCodeLensProvider';
 import { TerminalService } from './terminal/terminalService';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-  const store = new ConnectionStore(context.globalState);
+  const store = new ConnectionStore(context.globalState, context.secrets);
+  await store.init();
   const manager = new ConnectionManager();
   const treeProvider = new DbTreeDataProvider(store, manager);
   const history = new HistoryStore(context.globalState);
@@ -26,6 +29,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const connCtx = new ConnectionContext(context, store);
 
   BaseWebView.init(context.extensionUri);
+  const tableProfileStore = new TableProfileStore(context.globalState);
+  TableQueryView.init(context.extensionUri, tableProfileStore);
 
   // 同步服务
   const serverUrl = AuthService.getServerUrl(vscode.workspace.getConfiguration());
@@ -38,9 +43,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration(LANGUAGE_CONFIG_KEY)) invalidateLanguage();
     }),
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      const queryId = connCtx.getSavedQueryForDoc(document);
+      if (!queryId) return;
+      void store.updateQuery(queryId, { sql: document.getText() });
+    }),
+    vscode.workspace.onDidCloseTextDocument((document) => connCtx.clearForDoc(document.uri.toString())),
     vscode.window.registerTreeDataProvider('dbclient.explorer', treeProvider),
   );
-  const completionProvider = new SqlCompletionProvider(store, manager);
+  const completionProvider = new SqlCompletionProvider(connCtx, manager);
   context.subscriptions.push(
     vscode.languages.registerCompletionItemProvider(
       { language: 'sql' },
@@ -56,8 +67,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (node?.conn) TerminalService.open(node.conn, node.database);
     }),
     // 表设计视图
-    vscode.commands.registerCommand('dbclient.designTable', (node: any) => {
+    vscode.commands.registerCommand('dbclient.designTable', async (node: any) => {
       if (node?.conn && node?.database) {
+        const session = await manager.connect(node.conn);
+        if (!session.capabilities.operations.includes('getTableDefinition')) {
+          vscode.window.showWarningMessage('Table design is not supported for this database yet.');
+          return;
+        }
         void TableDesignView.open(node.conn, node.label, node.database, manager);
       }
     }),

@@ -6,6 +6,10 @@ export interface QueryHistoryEntry {
   sql: string;
   /** 连接名 */
   connection: string;
+  /** 连接唯一标识（用于恢复执行上下文） */
+  connectionId?: string;
+  /** 执行时的数据库/schema */
+  database?: string;
   /** 执行时间戳 */
   time: number;
   /** 耗时 ms */
