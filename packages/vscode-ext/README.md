@@ -12,11 +12,13 @@ VSCode 数据库客户端扩展，对标 Navicat / database-client.com。
 
 ### 数据查询（Vue3 webview）
 - SQL 编辑器 + 结果网格
+- 默认复用同连接结果面板；`Ctrl+Alt+Enter` / `Cmd+Ctrl+Enter` 在新面板运行
 - 排序（点击表头 ASC/DESC/取消）
 - 过滤（列下拉 + 输入 → WHERE LIKE）
+- 表 Profile：按连接/数据库/表记忆排序、筛选、隐藏列、列顺序和列宽，可重置为默认布局
 - 内联编辑（双击单元格 → UPDATE）
 - 行删除（checkbox → DELETE FROM）
-- 导出 CSV / SQL INSERT / JSON
+- 表预览导出当前加载行：CSV / JSON / 方言 SQL INSERT
 - 多条 SQL 分号拆分执行
 - 分页（Prev / Next，每页 100 行）
 
@@ -27,10 +29,12 @@ VSCode 数据库客户端扩展，对标 Navicat / database-client.com。
 
 ### SQL 编辑器集成
 - 自动补全（表名/列名/关键字，FROM/JOIN 后补表名，`table.` 后补列名）
+- SQL snippets（`sel`、`del`、`ins`、`upd`、`joi`）插入占位符模板，不自动执行
 - Code Lens（每段 SQL 上方显示 ▶ Run 按钮）
 - SQL 格式化
 - Run SQL File（右键 .sql 文件 → 选连接执行）
 - 查询历史
+- 保存查询（可放入查询文件夹组织）
 
 ### 表操作
 - 新建/删除/重命名/清空/复制表
@@ -45,7 +49,7 @@ VSCode 数据库客户端扩展，对标 Navicat / database-client.com。
 
 ### 数据库操作
 - 新建数据库 / 删除数据库
-- 结构差异同步（比对两个 DB → 生成 ALTER/CREATE/DROP SQL）
+- MySQL 结构差异同步（比对两个 DB → 生成 ALTER/CREATE/DROP SQL）
 
 ### 用户管理
 - 创建用户（CREATE USER）
@@ -76,13 +80,13 @@ VSCode 数据库客户端扩展，对标 Navicat / database-client.com。
 
 ### 云同步
 - 登录 / 注册 / 登出
-- 推送本地连接配置到云端（AES-256-GCM 加密）
+- 推送不含数据库/SSH 凭据的连接配置到云端（AES-256-GCM 加密）
 - 从云端拉取并合并
 
 ### 其他
 - i18n：中文 / 英文双语，跟随 VSCode 显示语言
 - 架构：Vue3 + Vite（webview UI）+ esbuild（扩展主体）双管线构建
-- db-core：方言策略模式（MySQL / PostgreSQL / SQLite），17 个单元测试
+- db-core：方言策略模式（MySQL / PostgreSQL / SQLite）；扩展层覆盖凭据、历史、Profile 与 SQL 安全测试
 
 ## 支持的数据库
 - MySQL（含 SSH 隧道）

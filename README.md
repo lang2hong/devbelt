@@ -6,8 +6,8 @@ All-in-one Database Client for VS Code，对标 Navicat / [database-client](http
 
 - **多数据库**：MySQL、PostgreSQL、SQLite（Redis、ElasticSearch 规划中）
 - **连接管理**：层级分组、连接表单、测试连接
-- **SQL 查询**：运行查询、查询历史、SQL 格式化、结果表格、单元格编辑
-- **云同步**：账号登录、AES-256 加密、跨设备同步连接配置/历史/偏好
+- **SQL 查询**：复用当前结果或在新面板运行、查询历史、SQL 格式化、结果表格、单元格编辑
+- **云同步**：账号登录、AES-256 加密、跨设备同步不含凭据的连接配置
 - **国际化**：中英双语，默认跟随 VSCode 界面语言，可手动覆盖
 
 ## Monorepo 结构
