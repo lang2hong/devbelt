@@ -1,34 +1,41 @@
 import * as vscode from 'vscode';
 import { DbTreeNode, NodeKind } from '../tree/dbTreeNode';
 import { l10n } from '../i18n';
+import type { SavedConnection } from '../connection/connectionStore';
 import type { Deps, Sub } from './shared';
 import { confirm } from './shared';
 
 export function registerSavedQueryCommands(deps: Deps, sub: Sub): void {
   const { store, treeProvider, connCtx } = deps;
 
+  const openQueryFile = async (conn: SavedConnection, database: string | undefined, queryId: string) => {
+    const q = store.getQueries(conn.id, database).find((x) => x.id === queryId);
+    if (!q) return;
+    const dir = vscode.Uri.joinPath(deps.context.globalStorageUri, 'queries');
+    await vscode.workspace.fs.createDirectory(dir);
+    const file = vscode.Uri.joinPath(dir, `${queryId}.sql`);
+    await vscode.workspace.fs.writeFile(file, Buffer.from(q.sql || '', 'utf8'));
+    const doc = await vscode.workspace.openTextDocument(file);
+    const editor = await vscode.window.showTextDocument(doc);
+    connCtx.setForDoc(editor.document.uri.toString(), conn, database);
+    connCtx.setSavedQueryForDoc(editor.document, queryId);
+  };
+
   sub('dbclient.newQuery', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     const name = await vscode.window.showInputBox({ prompt: l10n('query.namePrompt') });
     if (!name) return;
-    const sql = await vscode.window.showInputBox({ prompt: l10n('query.sqlPrompt') });
-    if (sql === undefined) return;
-    await store.saveQuery({
-      name, sql: sql || '', connId: node.conn.id, database: node.database,
+    const id = await store.saveQuery({
+      name, sql: '', connId: node.conn.id, database: node.database,
       folderId: node.kind === NodeKind.QueryFolder ? node.queryFolderId : undefined,
     });
     treeProvider.refresh();
+    await openQueryFile(node.conn, node.database, id);
   });
 
   sub('dbclient.openQuery', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.queryId) return;
-    const q = store.getQueries(node.conn.id, node.database).find((x) => x.id === node.queryId);
-    if (q) {
-      const doc = await vscode.workspace.openTextDocument({ content: q.sql, language: 'sql' });
-      const editor = await vscode.window.showTextDocument(doc);
-      connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
-      connCtx.setSavedQueryForDoc(editor.document, q.id);
-    }
+    await openQueryFile(node.conn, node.database, node.queryId);
   });
 
   sub('dbclient.editQuery', async (node: DbTreeNode) => {
