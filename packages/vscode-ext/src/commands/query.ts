@@ -42,6 +42,18 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
     await runActiveQuery('new');
   });
 
+  sub('dbclient.explainQuery', async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) return;
+    const ctx = connCtx.getForDoc(editor.document.uri.toString());
+    const conn = ctx?.conn || await pickConnection(store);
+    if (!conn) return;
+    const sql = editor.selection.isEmpty
+      ? editor.document.getText()
+      : editor.document.getText(editor.selection);
+    await executor.explain(conn, sql, ctx?.db);
+  });
+
   sub('dbclient.runSqlFile', async (uri: vscode.Uri) => {
     if (!uri) return;
     const conn = await pickConnection(store);

@@ -27,6 +27,7 @@ export class TableQueryView extends BaseWebView {
   private lastFields: string[] = [];
   private editablePkColumn?: string;
   private readonly hasTable: boolean;
+  private pinned = false;
   private runningQuery?: QueryService;
   private ready = false;
   private executingPendingQuery = false;
@@ -34,6 +35,7 @@ export class TableQueryView extends BaseWebView {
     sql: string;
     database?: string;
     onExecuted?: (result: any, error?: Error) => void;
+    explain?: boolean;
   };
 
   private constructor(
@@ -82,12 +84,12 @@ export class TableQueryView extends BaseWebView {
     mode: 'reuse' | 'new' = 'reuse',
   ): TableQueryView {
     const existing = mode === 'reuse' ? TableQueryView.queryViews.get(conn.id) : undefined;
-    if (existing) {
+    if (existing && !existing.pinned) {
       existing.queueQuery(sql, database, onExecuted);
       return existing;
     }
     const view = new TableQueryView(conn, manager, undefined, database, vscode.ViewColumn.Beside);
-    TableQueryView.queryViews.set(conn.id, view);
+    if (!existing || !existing.pinned) TableQueryView.queryViews.set(conn.id, view);
     view.queueQuery(sql, database, onExecuted);
     return view;
   }
@@ -110,11 +112,17 @@ export class TableQueryView extends BaseWebView {
       case 'run':
         this.offset = 0;
         if (this.hasTable) {
-          // 表模式下 Run 用当前筛选/排序重建 SQL 执行，保留 filter 状态
           await this.execute(this.buildSelect());
         } else {
           await this.execute(msg.sql);
         }
+        break;
+      case 'explain':
+        await this.explain(msg.sql);
+        break;
+      case 'togglePin':
+        this.pinned = !this.pinned;
+        this.post({ type: 'pinChanged', pinned: this.pinned });
         break;
       case 'nextPage':
         this.offset += this.limit; await this.execute(this.buildSelect());
@@ -203,6 +211,14 @@ export class TableQueryView extends BaseWebView {
     }
   }
 
+  /** 覆盖待执行查询为 explain 模式。 */
+  public queueQueryExplain(sql: string, database?: string): void {
+    this.pendingQuery = { sql, database, explain: true };
+    if (this.ready) {
+      void this.executePendingQueries();
+    }
+  }
+
   private async executePendingQueries(): Promise<void> {
     if (this.executingPendingQuery) return;
     this.executingPendingQuery = true;
@@ -212,7 +228,11 @@ export class TableQueryView extends BaseWebView {
         this.pendingQuery = undefined;
         this.database = query.database;
         this.post({ type: 'querySql', sql: query.sql, dbName: query.database || '' });
-        await this.execute(query.sql, query.onExecuted, query.database);
+        if (query.explain) {
+          await this.explain(query.sql);
+        } else {
+          await this.execute(query.sql, query.onExecuted, query.database);
+        }
       }
     } finally {
       this.executingPendingQuery = false;
@@ -333,8 +353,20 @@ export class TableQueryView extends BaseWebView {
         await session.query.query(`USE ${session.query.wrap(validateIdent(database))}`);
       }
       const stmts = splitSqlStatements(sql);
-      let result: any;
-      for (const stmt of stmts) result = await session.query.query(stmt);
+      const results: any[] = [];
+      let transactionState: 'active' | 'committed' | 'rolledback' | undefined;
+      for (const stmt of stmts) {
+        const upper = stmt.toUpperCase().trim();
+        if (upper === 'BEGIN' || upper.startsWith('START TRANSACTION')) {
+          await session.query.query(stmt);
+          transactionState = 'active';
+          continue;
+        }
+        if (upper === 'COMMIT') { await session.query.query(stmt); transactionState = 'committed'; continue; }
+        if (upper === 'ROLLBACK') { await session.query.query(stmt); transactionState = 'rolledback'; continue; }
+        results.push(await session.query.query(stmt));
+      }
+      const result = results[results.length - 1];
       let pkCols: string[] = [];
       this.editablePkColumn = undefined;
       if (this.hasTable && this.table) {
@@ -357,15 +389,47 @@ export class TableQueryView extends BaseWebView {
         }
       }
       this.lastFields = (result?.fields || []).map((f: any) => f.name);
-      this.post({
-        type: 'result', result, pkColumns: pkCols, total, sql: this.buildSelect(),
-        hiddenColumns: this.reconciledHiddenColumns(),
-        columnOrder: this.reconciledColumnOrder(), columnWidths: this.reconciledColumnWidths(),
-      });
+      if (transactionState) this.post({ type: 'transaction', state: transactionState });
+      if (this.hasTable) {
+        // 表预览模式保持单结果兼容
+        this.post({
+          type: 'result', result, pkColumns: pkCols, total, sql: this.buildSelect(),
+          hiddenColumns: this.reconciledHiddenColumns(),
+          columnOrder: this.reconciledColumnOrder(), columnWidths: this.reconciledColumnWidths(),
+        });
+      } else {
+        // 查询模式发送所有结果集
+        this.post({
+          type: 'results', results, sql, transactionState,
+        });
+      }
       onExecuted?.(result);
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
       onExecuted?.(undefined, err as Error);
+    } finally {
+      this.runningQuery = undefined;
+      this.post({ type: 'finished' });
+    }
+  }
+
+  /** 执行 EXPLAIN 并展示查询计划。 */
+  private async explain(sql: string): Promise<void> {
+    try {
+      if (!(await confirmSqlExecution(this.conn, sql))) return;
+      this.post({ type: 'running' });
+      const session = await this.manager.connect(this.conn);
+      this.runningQuery = session.query;
+      const prefix = this.conn.dbType === 'PG' ? 'EXPLAIN ANALYZE ' : 'EXPLAIN ';
+      const stmts = splitSqlStatements(sql);
+      const results: any[] = [];
+      for (const stmt of stmts) {
+        const explainSql = `${prefix}${stmt}`;
+        results.push(await session.query.query(explainSql));
+      }
+      this.post({ type: 'results', results, sql: `${prefix}${sql}`, transactionState: undefined });
+    } catch (err) {
+      this.post({ type: 'error', message: (err as Error).message });
     } finally {
       this.runningQuery = undefined;
       this.post({ type: 'finished' });

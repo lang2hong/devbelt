@@ -41,6 +41,11 @@
         "category": "DB Client"
       },
       {
+        "command": "dbclient.explainQuery",
+        "title": "Explain Query",
+        "category": "DB Client"
+      },
+      {
         "command": "dbclient.runStatement",
         "title": "Run SQL Statement",
         "category": "DB Client"
@@ -702,6 +707,12 @@
         "command": "dbclient.runQueryInNewPanel",
         "key": "ctrl+alt+enter",
         "mac": "cmd+ctrl+enter",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "dbclient.explainQuery",
+        "key": "ctrl+shift+e",
+        "mac": "cmd+shift+e",
         "when": "editorTextFocus"
       }
     ]

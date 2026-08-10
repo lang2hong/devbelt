@@ -58,4 +58,11 @@ export class QueryExecutor {
   renderExternal(result: import('@db-client/core').QueryResult): void {
     this.view?.renderExternal(result);
   }
+
+  /** 执行 EXPLAIN 查询计划。 */
+  async explain(conn: SavedConnection, sql: string, database?: string): Promise<void> {
+    this.view = TableQueryView.openForQuery(conn, this.manager, sql, database, undefined, 'reuse');
+    // openForQuery 已 queueQuery（正常 execute）；这里覆盖为 explain 模式
+    (this.view as any).queueQueryExplain(sql, database);
+  }
 }

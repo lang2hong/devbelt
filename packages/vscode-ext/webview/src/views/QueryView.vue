@@ -9,6 +9,10 @@ const sql = ref('');
 const hasTable = ref(false);
 const rows = ref<any[]>([]);
 const fields = ref<{ name: string }[]>([]);
+const results = ref<{ sql: string; rows: any[]; fields: { name: string }[]; costTime: number; truncated?: boolean }[]>([]);
+const activeResultIndex = ref(0);
+const transactionState = ref<'active' | 'committed' | 'rolledback' | ''>('');
+const pinned = ref(false);
 const pkColumns = ref<string[]>([]);
 const error = ref('');
 const meta = ref('');
@@ -47,6 +51,7 @@ onMounted(() => {
       error.value = '';
       offset.value = 0;
     } else if (msg.type === 'result') {
+      results.value = [];
       rows.value = msg.result.rows || [];
       fields.value = msg.result.fields || [];
       pkColumns.value = msg.pkColumns || [];
@@ -57,7 +62,28 @@ onMounted(() => {
       if (msg.columnWidths) columnWidths.value = msg.columnWidths;
       error.value = '';
       meta.value = rows.value.length + ' row(s) in ' + (msg.result.costTime / 1000).toFixed(3) + 's' + (msg.result.truncated ? ' (truncated)' : '');
-    } else if (msg.type === 'hiddenColumns') {
+    } else if (msg.type === 'results') {
+      const list = msg.results || [];
+      results.value = list.map((r: any) => ({
+        sql: r.sql || '', rows: r.rows || [], fields: r.fields || [],
+        costTime: r.costTime || 0, truncated: r.truncated,
+      }));
+      activeResultIndex.value = 0;
+      const first = results.value[0];
+      if (first) {
+        rows.value = first.rows;
+        fields.value = first.fields;
+        meta.value = first.rows.length + ' row(s) in ' + (first.costTime / 1000).toFixed(3) + 's';
+      }
+      if (msg.sql) sql.value = msg.sql;
+      if (msg.transactionState) transactionState.value = msg.transactionState;
+      else transactionState.value = '';
+      error.value = '';
+      pkColumns.value = [];
+    } else if (msg.type === 'transaction') {
+      transactionState.value = msg.state || '';
+    } else if (msg.type === 'pinChanged') {
+      pinned.value = msg.pinned || false;
       hiddenColumns.value = msg.hiddenColumns || [];
     } else if (msg.type === 'layout') {
       columnOrder.value = msg.columnOrder || [];
@@ -96,6 +122,24 @@ function run() {
   sortDir.value = '';
   offset.value = 0;
   post({ type: 'run', sql: sql.value });
+}
+
+function selectResult(index: number) {
+  activeResultIndex.value = index;
+  const r = results.value[index];
+  if (r) {
+    rows.value = r.rows;
+    fields.value = r.fields;
+    meta.value = r.rows.length + ' row(s) in ' + (r.costTime / 1000).toFixed(3) + 's';
+  }
+}
+
+function togglePin() {
+  post({ type: 'togglePin' });
+}
+
+function explain() {
+  post({ type: 'explain', sql: sql.value });
 }
 
 function cancel() {
@@ -156,13 +200,21 @@ function onKeydown(e: KeyboardEvent) {
     <textarea v-model="sql" class="editor" @keydown="onKeydown" placeholder="Enter SQL..."></textarea>
     <div class="action-bar">
       <button class="btn primary" :disabled="running" @click="run">Run</button>
+      <button class="btn" :disabled="running" @click="explain">Explain</button>
       <button v-if="running" class="btn" @click="cancel">Cancel</button>
+      <button class="btn" :class="{ active: pinned }" @click="togglePin">📌 Pin</button>
+      <span v-if="transactionState" class="txn-badge" :class="transactionState">TX: {{ transactionState }}</span>
       <div class="spacer"></div>
       <span v-if="hasTable && total !== undefined" class="page-info">
         Page {{ currentPage }} / {{ totalPages }} · {{ total }} row(s)
       </span>
       <button v-if="hasTable" class="btn" :disabled="currentPage <= 1" @click="prevPage">◀ Prev</button>
       <button v-if="hasTable" class="btn" :disabled="currentPage >= totalPages" @click="nextPage">Next ▶</button>
+    </div>
+    <div v-if="results.length > 1" class="result-tabs">
+      <button v-for="(r, i) in results" :key="i" class="result-tab" :class="{ active: i === activeResultIndex }" @click="selectResult(i)">
+        Result {{ i + 1 }} ({{ r.rows.length }})
+      </button>
     </div>
     <div class="meta" v-if="meta">{{ meta }}</div>
     <div class="error" v-if="error">{{ error }}</div>
@@ -202,6 +254,15 @@ function onKeydown(e: KeyboardEvent) {
 .btn { padding: 3px 10px; font-size: 12px; cursor: pointer; border: none; border-radius: 3px;
   background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
 .btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+  .btn.active { border: 1px solid var(--vscode-focusBorder); }
+  .txn-badge { font-size: 11px; padding: 2px 6px; border-radius: 3px; }
+  .txn-badge.active { background: var(--vscode-inputOption-activeBorder); color: var(--vscode-foreground); }
+  .txn-badge.committed { color: var(--vscode-gitDecoration-untrackedResourceForeground); }
+  .txn-badge.rolledback { color: var(--vscode-errorForeground); }
+  .result-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--vscode-panel-border); padding: 0 8px; overflow-x: auto; }
+  .result-tab { padding: 4px 12px; font-size: 11px; cursor: pointer; border: none; background: none;
+    color: var(--vscode-descriptionForeground); border-bottom: 2px solid transparent; white-space: nowrap; }
+  .result-tab.active { color: var(--vscode-textLink-foreground); border-bottom-color: var(--vscode-focusBorder); }
 .meta { padding: 4px 8px; font-size: 12px; color: var(--vscode-descriptionForeground); }
 .error { padding: 8px; color: var(--vscode-errorForeground); white-space: pre-wrap; }
 </style>
