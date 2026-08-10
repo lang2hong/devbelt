@@ -3,7 +3,7 @@
   "displayName": "DB Client Pro",
   "description": "All-in-one database client for MySQL, PostgreSQL and SQLite — query, import/export, sync and design.",
   "version": "0.1.0",
-  "publisher": "lang2hong",
+  "publisher": "local",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
