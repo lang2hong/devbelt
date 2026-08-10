@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { DbTreeNode } from '../tree/dbTreeNode';
-import { wrapIdent } from '../utils/sql';
+import { wrapIdentForConn } from '../utils/sql';
 import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
 import { confirm, openSqlDoc, openSqlDocEditor, requireCapability } from './shared';
@@ -13,8 +13,8 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
   sub('dbclient.newTable', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     connCtx.setLast(node.conn, node.database);
-    const useDb = node.database ? `USE ${wrapIdent(node.conn, node.database)};\n` : '';
-    const tpl = useDb + `CREATE TABLE IF NOT EXISTS ${wrapIdent(node.conn, 'new_table')} (\n  id INT AUTO_INCREMENT PRIMARY KEY,\n  name VARCHAR(255)\n);`;
+    const useDb = node.database ? `USE ${wrapIdentForConn(node.conn, node.database)};\n` : '';
+    const tpl = useDb + `CREATE TABLE IF NOT EXISTS ${wrapIdentForConn(node.conn, 'new_table')} (\n  id INT AUTO_INCREMENT PRIMARY KEY,\n  name VARCHAR(255)\n);`;
     const editor = await openSqlDocEditor(tpl);
     if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
   });
@@ -61,13 +61,13 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     const session = await manager.connect(node.conn);
     const columns = await session.metadata.getColumns(node.label, node.database);
     const result = {
-      sql: `DESCRIBE ${wrapIdent(node.conn, node.label)}`,
+      sql: `DESCRIBE ${wrapIdentForConn(node.conn, node.label)}`,
       costTime: 0,
       rows: columns as any[],
       fields: Object.keys(columns[0] || {}).map((name) => ({ name })),
       truncated: false,
     } as any;
-    await executor.run(node.conn, `DESCRIBE ${wrapIdent(node.conn, node.label)};`, node.database);
+    await executor.run(node.conn, `DESCRIBE ${wrapIdentForConn(node.conn, node.label)};`, node.database);
     // run 创建视图后，在 ready 回调中由 execute 渲染；这里用 renderExternal 直接推送结构结果
     executor.renderExternal(result);
   });

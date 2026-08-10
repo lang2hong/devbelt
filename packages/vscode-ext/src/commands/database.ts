@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
-import { SchemaDiffService } from '@db-client/core';
+import { SchemaDiffService, DatabaseType } from '@db-client/core';
 import { DbTreeNode } from '../tree/dbTreeNode';
-import { wrapIdent, splitSqlStatements } from '../utils/sql';
+import { wrapIdentForConn, splitSqlStatements } from '../utils/sql';
 import { confirmSqlExecution } from '../utils/sqlSafety';
 import { parseCsv } from '../data/transfer/csv';
 import { parseJson } from '../data/transfer/json';
@@ -22,7 +22,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     connCtx.setLast(node.conn);
     const session = await manager.connect(node.conn);
     if (!requireCapability(session, 'createDatabase')) return;
-    await session.query.query(`CREATE DATABASE ${wrapIdent(node.conn, name)}`);
+    await session.query.query(`CREATE DATABASE ${wrapIdentForConn(node.conn, name)}`);
     treeProvider.refresh();
     vscode.window.showInformationMessage(l10n('db.created', { name }));
   });
@@ -32,7 +32,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (!(await confirm('db.dropConfirm', 'db.drop', node.label))) return;
     const session = await manager.connect(node.conn);
     if (!requireCapability(session, 'dropDatabase')) return;
-    await session.query.query(`DROP DATABASE ${wrapIdent(node.conn, node.label)}`);
+    await session.query.query(`DROP DATABASE ${wrapIdentForConn(node.conn, node.label)}`);
     manager.disposeConn(node.conn.id);
     treeProvider.refresh();
   });
@@ -97,7 +97,7 @@ export async function runExportWizard(
   const session = await manager.connect(node.conn);
   if (!requireCapability(session, 'dumpTable')) return;
   const database = await pickExportDatabase(node, session.metadata.getDatabases.bind(session.metadata));
-  if (database === undefined && node.conn.dbType === 'MYSQL' && !node.database) return;
+  if (database === undefined && node.conn.dbType === DatabaseType.MYSQL && !node.database) return;
   const tables = fixedTable ? [fixedTable] : await pickTables(session.metadata.getTables.bind(session.metadata), database);
   if (!tables?.length) return;
   const exportContents = format === 'sql'
@@ -120,7 +120,7 @@ export async function runExportWizard(
   const conn = node.conn;
   let version: string | undefined;
   try {
-    const versionSql = conn.dbType === 'MYSQL' ? 'SELECT VERSION()' : conn.dbType === 'PG' ? 'SELECT version()' : 'select sqlite_version()';
+    const versionSql = conn.dbType === DatabaseType.MYSQL ? 'SELECT VERSION()' : conn.dbType === DatabaseType.PG ? 'SELECT version()' : 'select sqlite_version()';
     const vr = await session.query.query(versionSql);
     version = Object.values(vr.rows[0] ?? {})[0] as string | undefined;
   } catch { version = undefined; }
@@ -171,7 +171,7 @@ async function importSqlScript(
   const database = node.database;
   connCtx.setLast(node.conn!, database);
   if (database) {
-    try { await session.query.query(`USE ${wrapIdent(node.conn!, database)}`); } catch { /* PostgreSQL/SQLite do not support USE. */ }
+    try { await session.query.query(`USE ${wrapIdentForConn(node.conn!, database)}`); } catch { /* PostgreSQL/SQLite do not support USE. */ }
   }
   const statements = splitSqlStatements(sql);
   let done = 0;
@@ -222,7 +222,7 @@ async function importStructuredData(
   }
   const session = await manager.connect(node.conn!);
   const database = await pickImportDatabase(node, session.metadata.getDatabases.bind(session.metadata));
-  if (database === undefined && node.conn!.dbType === 'MYSQL' && !node.database) return;
+  if (database === undefined && node.conn!.dbType === DatabaseType.MYSQL && !node.database) return;
   const tables = await session.metadata.getTables(database);
   const table = await vscode.window.showQuickPick(tables.map((item) => ({ label: item.name })), { placeHolder: l10n('import.selectTable') });
   if (!table) return;
@@ -242,7 +242,7 @@ async function importStructuredData(
       database,
       rows: source.rows,
       mappings,
-      batchWrites: node.conn!.dbType === 'SQLITE',
+      batchWrites: node.conn!.dbType === DatabaseType.SQLITE,
       isCancelled: () => token.isCancellationRequested,
       onProgress: ({ completed, total }) => progress.report({ message: `${completed}/${total}`, increment: total ? 100 / total : 0 }),
     }));

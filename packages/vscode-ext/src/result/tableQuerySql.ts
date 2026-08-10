@@ -1,15 +1,10 @@
 import type { DatabaseType } from '@db-client/core';
-
-export type FilterOp =
-  | 'eq' | 'ne'
-  | 'contains' | 'notContains'
-  | 'startsWith' | 'notStartsWith'
-  | 'endsWith' | 'notEndsWith'
-  | 'gt' | 'gte' | 'lt' | 'lte'
-  | 'between' | 'notBetween'
-  | 'isNull' | 'notNull'
-  | 'isEmpty' | 'notEmpty'
-  | 'in' | 'notIn';
+import {
+  BETWEEN, EQ, GTE, GT, IN, IS_NULL, IS_NOT_NULL, LIKE, LTE, LT, NE,
+  NOT_BETWEEN, NOT_IN, NOT_LIKE,
+} from '../utils/sqlOperators';
+import { FILTER_OP, type FilterOp } from '../utils/filterOps';
+import { escapeSqlString, wrapIdent } from '../utils/sql';
 
 export interface FilterCondition {
   column: string;
@@ -18,22 +13,22 @@ export interface FilterCondition {
   value2?: string;
 }
 
-/** 纯函数：构建表预览的 SELECT / COUNT SQL，供扩展与单测复用。 */
-export function wrapIdent(dbType: DatabaseType, name: string): string {
-  return dbType === 'MYSQL' ? '`' + name + '`' : '"' + name + '"';
-}
-
 function qualifiedTable(dbType: DatabaseType, table: string, database?: string): string {
   const tbl = wrapIdent(dbType, table);
   return database ? `${wrapIdent(dbType, database)}.${tbl}` : tbl;
 }
 
-function escapeString(val: string): string {
-  return String(val).replace(/\\/g, '\\\\').replace(/'/g, "''");
+function escapeLike(val: string): string {
+  return escapeSqlString(val).replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
-function escapeLike(val: string): string {
-  return escapeString(val).replace(/%/g, '\\%').replace(/_/g, '\\_');
+/** 逗号分隔值 → 引号包裹的元素列表（过滤空项）。 */
+function commaList(val: string): string {
+  return val
+    .split(',')
+    .map((s) => `'${escapeSqlString(s.trim())}'`)
+    .filter((s) => s !== "''")
+    .join(', ');
 }
 
 /** 构建单个过滤条件的 SQL 片段。 */
@@ -42,31 +37,31 @@ export function buildCondition(dbType: DatabaseType, condition: FilterCondition)
   const v = condition.value ?? '';
   const v2 = condition.value2 ?? '';
   switch (condition.op) {
-    case 'eq': return `${w} = '${escapeString(v)}'`;
-    case 'ne': return `${w} <> '${escapeString(v)}'`;
-    case 'contains': return `${w} LIKE '%${escapeLike(v)}%'`;
-    case 'notContains': return `${w} NOT LIKE '%${escapeLike(v)}%'`;
-    case 'startsWith': return `${w} LIKE '${escapeLike(v)}%'`;
-    case 'notStartsWith': return `${w} NOT LIKE '${escapeLike(v)}%'`;
-    case 'endsWith': return `${w} LIKE '%${escapeLike(v)}'`;
-    case 'notEndsWith': return `${w} NOT LIKE '%${escapeLike(v)}'`;
-    case 'gt': return `${w} > '${escapeString(v)}'`;
-    case 'gte': return `${w} >= '${escapeString(v)}'`;
-    case 'lt': return `${w} < '${escapeString(v)}'`;
-    case 'lte': return `${w} <= '${escapeString(v)}'`;
-    case 'between': return `${w} BETWEEN '${escapeString(v)}' AND '${escapeString(v2)}'`;
-    case 'notBetween': return `${w} NOT BETWEEN '${escapeString(v)}' AND '${escapeString(v2)}'`;
-    case 'isNull': return `${w} IS NULL`;
-    case 'notNull': return `${w} IS NOT NULL`;
-    case 'isEmpty': return `${w} = ''`;
-    case 'notEmpty': return `${w} <> ''`;
-    case 'in': {
-      const items = v.split(',').map((s) => `'${escapeString(s.trim())}'`).filter((s) => s !== "''");
-      return items.length ? `${w} IN (${items.join(', ')})` : '';
+    case FILTER_OP.eq: return `${w} ${EQ} '${escapeSqlString(v)}'`;
+    case FILTER_OP.ne: return `${w} ${NE} '${escapeSqlString(v)}'`;
+    case FILTER_OP.contains: return `${w} ${LIKE} '%${escapeLike(v)}%'`;
+    case FILTER_OP.notContains: return `${w} ${NOT_LIKE} '%${escapeLike(v)}%'`;
+    case FILTER_OP.startsWith: return `${w} ${LIKE} '${escapeLike(v)}%'`;
+    case FILTER_OP.notStartsWith: return `${w} ${NOT_LIKE} '${escapeLike(v)}%'`;
+    case FILTER_OP.endsWith: return `${w} ${LIKE} '%${escapeLike(v)}'`;
+    case FILTER_OP.notEndsWith: return `${w} ${NOT_LIKE} '%${escapeLike(v)}'`;
+    case FILTER_OP.gt: return `${w} ${GT} '${escapeSqlString(v)}'`;
+    case FILTER_OP.gte: return `${w} ${GTE} '${escapeSqlString(v)}'`;
+    case FILTER_OP.lt: return `${w} ${LT} '${escapeSqlString(v)}'`;
+    case FILTER_OP.lte: return `${w} ${LTE} '${escapeSqlString(v)}'`;
+    case FILTER_OP.between: return `${w} ${BETWEEN} '${escapeSqlString(v)}' AND '${escapeSqlString(v2)}'`;
+    case FILTER_OP.notBetween: return `${w} ${NOT_BETWEEN} '${escapeSqlString(v)}' AND '${escapeSqlString(v2)}'`;
+    case FILTER_OP.isNull: return `${w} ${IS_NULL}`;
+    case FILTER_OP.notNull: return `${w} ${IS_NOT_NULL}`;
+    case FILTER_OP.isEmpty: return `${w} ${EQ} ''`;
+    case FILTER_OP.notEmpty: return `${w} ${NE} ''`;
+    case FILTER_OP.in: {
+      const items = commaList(v);
+      return items ? `${w} ${IN} (${items})` : '';
     }
-    case 'notIn': {
-      const items = v.split(',').map((s) => `'${escapeString(s.trim())}'`).filter((s) => s !== "''");
-      return items.length ? `${w} NOT IN (${items.join(', ')})` : '';
+    case FILTER_OP.notIn: {
+      const items = commaList(v);
+      return items ? `${w} ${NOT_IN} (${items})` : '';
     }
     default: return '';
   }

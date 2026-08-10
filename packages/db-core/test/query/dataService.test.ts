@@ -50,4 +50,22 @@ describe('DataService（数据编辑）', () => {
       'UPDATE `users` SET `deleted_at` = NULL WHERE `id` = 5',
     );
   });
+
+  it('insertRow 生成合法的 INSERT 并转义值', async () => {
+    const conn = new CaptureConnection();
+    const svc = new DataService(new QueryService(conn, new MysqlDialect()));
+    await svc.insertRow('users', ['id', 'name', 'email'], [null, "O'Brien", 'a@b.com'], 'test');
+    expect(conn.sqls[0]).toBe(
+      "INSERT INTO `test`.`users` (`id`, `name`, `email`) VALUES (NULL, 'O\\'Brien', 'a@b.com')",
+    );
+  });
+
+  it('deleteRows 生成原子 IN 删除', async () => {
+    const conn = new CaptureConnection();
+    const svc = new DataService(new QueryService(conn, new MysqlDialect()));
+    await svc.deleteRows('users', 'id', [1, 2, 3], 'test');
+    expect(conn.sqls[0]).toBe(
+      'DELETE FROM `test`.`users` WHERE `id` IN (1, 2, 3)',
+    );
+  });
 });

@@ -1,4 +1,5 @@
 import { Event, EventEmitter, TreeDataProvider, TreeItem, TreeItemCollapsibleState, ThemeIcon, ThemeColor } from 'vscode';
+import { DatabaseType } from '@db-client/core';
 import { ConnectionStore, type SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { DbTreeNode, NodeKind, type CategoryType } from './dbTreeNode';
@@ -86,7 +87,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     if (!session.capabilities.multiDatabaseExplorer) {
       return [
         new DbTreeNode(
-          element.conn!.database || (element.conn!.dbType === 'PG' ? 'public' : 'main'),
+          element.conn!.database || (element.conn!.dbType === DatabaseType.PG ? 'public' : 'main'),
           TreeItemCollapsibleState.Collapsed,
           NodeKind.Database,
           element.conn,

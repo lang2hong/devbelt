@@ -6,6 +6,8 @@
  * 元数据（表/列）由调用方注入，引擎本身不访问数据库。
  */
 
+import { SQL_OPERATORS } from '../utils/sqlOperators';
+
 export type CompKind = 'keyword' | 'table' | 'column' | 'function' | 'operator';
 
 export interface CompletionCandidate {
@@ -25,6 +27,8 @@ export type SqlContext =
   | 'from_table_typing'
   | 'after_table'
   | 'where_condition'
+  | 'where_operator'
+  | 'where_value'
   | 'order_clause'
   | 'set_clause'
   | 'dot_column'
@@ -79,16 +83,22 @@ export function detectContext(before: string): SqlContext {
   // 4. ORDER BY / GROUP BY 后
   if (/\b(?:ORDER|GROUP)\s+BY\s+\w*$/i.test(before)) return 'order_clause';
 
-  // 5. WHERE / HAVING / AND / OR 后（条件左侧）
+  // 5. WHERE 字段后等待比较操作符：WHERE age ␣
+  if (/\b(?:WHERE|HAVING|AND|OR)\s+\w+\s+$/.test(before)) return 'where_operator';
+
+  // 6. WHERE 比较操作符后等待值：WHERE age > ␣ / WHERE age LIKE ␣
+  if (/\b(?:WHERE|HAVING|AND|OR)\s+\w+\s+(?:[<>=!]+|\b(?:LIKE|NOT\s+LIKE|IN|BETWEEN|IS|NOT\s+IN)\b)\s*$/.test(before)) return 'where_value';
+
+  // 7. WHERE / HAVING / AND / OR 后（条件左侧，输入字段名）
   if (/\b(?:WHERE|HAVING|AND|OR)\s+\w*$/i.test(before)) return 'where_condition';
 
-  // 6. SET 后（UPDATE ... SET col=...）
+  // 8. SET 后（UPDATE ... SET col=...）
   if (/\bSET\s+\w*$/i.test(before)) return 'set_clause';
 
-  // 7. SELECT 子句（SELECT 后、当前语句未到 FROM）
+  // 9. SELECT 子句（SELECT 后、当前语句未到 FROM）
   if (/\bSELECT\b/i.test(before) && !/\bFROM\b/i.test(before)) return 'select_clause';
 
-  // 8. 语句起始（空或分号后空白）
+  // 10. 语句起始（空或分号后空白）
   if (before.trim() === '' || /;\s*$/.test(before)) return 'statement_start';
 
   return 'default';
@@ -130,7 +140,6 @@ export function buildCandidates(ctx: SqlContext, meta: CompletionMeta): Completi
     case 'after_table':
       return [
         ...SQL_KEYWORDS.clause.map(kw),
-        ...SQL_KEYWORDS.statement.map(kw),
         ...columns,
       ];
 
@@ -139,6 +148,18 @@ export function buildCandidates(ctx: SqlContext, meta: CompletionMeta): Completi
         ...columns,
         ...functions,
         ...SQL_KEYWORDS.operator.map(op),
+      ];
+
+    case 'where_operator':
+      return SQL_OPERATORS.map(op);
+
+    case 'where_value':
+      return [
+        ...functions,
+        ...columns,
+        ...SQL_KEYWORDS.operator.map(op),
+        kw('SELECT'),
+        kw('NULL'),
       ];
 
     case 'order_clause':

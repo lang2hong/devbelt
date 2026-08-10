@@ -5,7 +5,7 @@ import { BaseWebView } from './baseWebView';
 import { splitSqlStatements } from '../utils/sql';
 import { confirmSqlExecution } from '../utils/sqlSafety';
 import type { QueryService } from '@db-client/core';
-import { validateIdent } from '@db-client/core';
+import { validateIdent, DatabaseType } from '@db-client/core';
 import { TableProfileStore } from './tableProfileStore';
 import { exportRows, type TransferFormat } from '../data/transfer/exportService';
 import { buildCountSql, buildTableSelect, type FilterCondition } from './tableQuerySql';
@@ -69,11 +69,7 @@ export class TableQueryView extends BaseWebView {
     if (this.hasTable) {
       const saved = TableQueryView.profileStore?.get(conn.id, database, table!);
       if (saved) {
-        this.sortCol = saved.sortCol || '';
-        this.sortDir = saved.sortDir || '';
-        this.filterConditions = Array.isArray(saved.filterConditions)
-          ? (saved.filterConditions as FilterCondition[]).filter((c) => c && typeof c.column === 'string')
-          : [];
+        // 仅保留列布局；filter/sort 为临时查询状态，每次打开重置为干净视图。
         this.hiddenColumns = saved.hiddenColumns || [];
         this.columnOrder = saved.columnOrder || [];
         this.columnWidths = saved.columnWidths || {};
@@ -165,6 +161,19 @@ export class TableQueryView extends BaseWebView {
         if (!this.hasTable) return;
         await this.deleteRows(msg.rows);
         break;
+      case 'insertRow': {
+        if (!this.hasTable) return;
+        if (!(await confirmSqlExecution(this.conn, `INSERT INTO ${this.table} ...`))) return;
+        const session = await this.manager.connect(this.conn);
+        await session.data.insertRow(
+          this.table!,
+          Array.isArray(msg.columns) ? msg.columns : [],
+          Array.isArray(msg.values) ? msg.values : [],
+          this.database,
+        );
+        await this.execute(this.buildSelect());
+        break;
+      }
       case 'toggleColumn':
         if (!this.hasTable) return;
         await this.toggleColumn(msg.column, !!msg.hidden);
@@ -315,10 +324,8 @@ export class TableQueryView extends BaseWebView {
   /** Persist current sort/filter/hiddenColumns for this connection+database+table. */
   private async persistProfile(): Promise<void> {
     if (!this.hasTable || !this.table || !TableQueryView.profileStore) return;
+    // 仅持久化列布局；filter/sort 为临时状态，下次打开重置为干净视图。
     await TableQueryView.profileStore.save(this.conn.id, this.database, this.table, {
-      sortCol: this.sortCol,
-      sortDir: this.sortDir,
-      filterConditions: this.filterConditions,
       hiddenColumns: this.hiddenColumns,
       columnOrder: this.columnOrder,
       columnWidths: this.columnWidths,
@@ -431,7 +438,7 @@ export class TableQueryView extends BaseWebView {
       this.post({ type: 'running' });
       const session = await this.manager.connect(this.conn);
       this.runningQuery = session.query;
-      if (database && this.conn.dbType === 'MYSQL') {
+      if (database && this.conn.dbType === DatabaseType.MYSQL) {
         await session.query.query(`USE ${session.query.wrap(validateIdent(database))}`);
       }
       const stmts = splitSqlStatements(sql);
@@ -508,7 +515,7 @@ export class TableQueryView extends BaseWebView {
       this.post({ type: 'running' });
       const session = await this.manager.connect(this.conn);
       this.runningQuery = session.query;
-      const prefix = this.conn.dbType === 'PG' ? 'EXPLAIN ANALYZE ' : 'EXPLAIN ';
+      const prefix = this.conn.dbType === DatabaseType.PG ? 'EXPLAIN ANALYZE ' : 'EXPLAIN ';
       const stmts = splitSqlStatements(sql);
       const results: any[] = [];
       for (const stmt of stmts) {

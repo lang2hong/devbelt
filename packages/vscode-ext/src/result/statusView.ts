@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { DatabaseType } from '@db-client/core';
 import type { SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from './baseWebView';
@@ -44,9 +45,9 @@ export class StatusView extends BaseWebView {
       try {
         const session = await this.manager.connect(this.conn);
         const dbType = session.query.dialect.dbType;
-        if (dbType === 'PG') {
+        if (dbType === DatabaseType.PG) {
           await session.query.query(`SELECT pg_terminate_backend(${id}::int)`);
-        } else if (dbType === 'MYSQL') {
+        } else if (dbType === DatabaseType.MYSQL) {
           await session.query.query(`KILL ${id}`);
         }
         const processList = await session.metadata.getProcessList();
@@ -84,11 +85,11 @@ export class StatusView extends BaseWebView {
     const conn = this.conn;
     const summary: ServerSummary = { dbType, host: conn.host, port: conn.port, user: conn.user, database: conn.database };
     try {
-      if (dbType === 'MYSQL') {
+      if (dbType === DatabaseType.MYSQL) {
         const r = await session.query.query('SELECT VERSION() AS v, DATABASE() AS d, CURRENT_USER() AS u');
         const row = r.rows[0] as any;
         summary.version = row?.v; summary.database = row?.d ?? conn.database; summary.currentUser = row?.u;
-      } else if (dbType === 'PG') {
+      } else if (dbType === DatabaseType.PG) {
         const r = await session.query.query('SELECT version() AS v, current_user AS u, current_database() AS d');
         const row = r.rows[0] as any;
         summary.version = row?.v; summary.database = row?.d ?? conn.database; summary.currentUser = row?.u;

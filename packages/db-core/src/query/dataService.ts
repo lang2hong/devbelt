@@ -50,4 +50,27 @@ export class DataService {
     const sql = `DELETE FROM ${qualified} WHERE ${w(primaryKey)} IN (${ids})`;
     return this.queryService.query(sql);
   }
+
+  /**
+   * 插入一行。列名经 validateIdent 校验，值经 sqlstring.escape 转义。
+   * @param columns 列名数组（与 values 对齐）
+   * @param values 各列值（null/undefined 写成 NULL）
+   */
+  async insertRow(
+    table: string,
+    columns: string[],
+    values: unknown[],
+    database?: string,
+  ): Promise<QueryResult> {
+    if (!columns.length) throw new Error('At least one column is required to insert a row.');
+    validateIdent(table);
+    const w = this.queryService.dialect.wrap.bind(this.queryService.dialect);
+    const qualified = database ? `${w(validateIdent(database))}.${w(table)}` : w(table);
+    const cols = columns.map((c) => w(validateIdent(c))).join(', ');
+    const vals = (columns.length ? values : []).map((v) =>
+      v === null || v === undefined ? 'NULL' : sqlstring.escape(v),
+    ).join(', ');
+    const sql = `INSERT INTO ${qualified} (${cols}) VALUES (${vals})`;
+    return this.queryService.query(sql);
+  }
 }

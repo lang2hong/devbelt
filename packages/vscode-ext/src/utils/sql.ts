@@ -6,21 +6,20 @@ import type { SavedConnection } from '../connection/connectionStore';
  *
  * MySQL/SQLite 用反引号，PostgreSQL 用双引号。
  */
-export function wrapIdent(conn: SavedConnection, name: string): string {
-  return conn.dbType === DatabaseType.MYSQL ? '`' + name + '`' : '"' + name + '"';
+
+/** 包裹标识符（基于方言类型）。 */
+export function wrapIdent(dbType: DatabaseType, name: string): string {
+  return dbType === DatabaseType.MYSQL ? '`' + name + '`' : '"' + name + '"';
 }
 
-/** 包裹限定名：`db`.`table` */
-export function wrapQualified(conn: SavedConnection, name: string, database?: string): string {
-  if (database) {
-    return wrapIdent(conn, database) + '.' + wrapIdent(conn, name);
-  }
-  return wrapIdent(conn, name);
+/** 便捷版：基于已保存连接。 */
+export function wrapIdentForConn(conn: SavedConnection, name: string): string {
+  return wrapIdent(conn.dbType, name);
 }
 
-/** 转义 SQL 字符串字面量值（防注入，处理反斜杠） */
-export function escapeSqlValue(value: string): string {
-  return "'" + value.replace(/\\/g, '\\\\').replace(/'/g, "''") + "'";
+/** 转义 SQL 字符串字面量内容（不含外层引号，防注入）。 */
+export function escapeSqlString(value: string): string {
+  return String(value).replace(/\\/g, '\\\\').replace(/'/g, "''");
 }
 
 /**

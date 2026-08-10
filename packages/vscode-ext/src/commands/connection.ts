@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { DatabaseType } from '@db-client/core';
 import { DbTreeNode, NodeKind } from '../tree/dbTreeNode';
 import { ConnectionForm } from '../connection/connectionForm';
 import type { SavedConnection } from '../connection/connectionStore';
@@ -8,11 +9,11 @@ import { confirm } from './shared';
 
 async function queryServerVersion(session: any, dbType: string): Promise<string> {
   try {
-    if (dbType === 'PG') {
+    if (dbType === DatabaseType.PG) {
       const r = await session.query.query('SHOW server_version');
       return String((r.rows[0] && Object.values(r.rows[0])[0]) ?? '').trim();
     }
-    if (dbType === 'SQLITE') {
+    if (dbType === DatabaseType.SQLITE) {
       const r = await session.query.query('select sqlite_version() AS v');
       return String((r.rows[0] && Object.values(r.rows[0])[0]) ?? '').trim();
     }

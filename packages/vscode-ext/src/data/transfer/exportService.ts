@@ -1,4 +1,5 @@
-import type { ColumnMeta, DatabaseType, QueryService } from '@db-client/core';
+import type { ColumnMeta, QueryService } from '@db-client/core';
+import { DatabaseType } from '@db-client/core';
 import { serializeCsv } from './csv';
 import { serializeJson } from './json';
 
@@ -155,18 +156,18 @@ function buildDumpHeader(info: ServerInfo, database: string | undefined, dbType:
 
 function sqlPrelude(dbType: DatabaseType): string {
   switch (dbType) {
-    case 'MYSQL': return 'SET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS = 0;';
-    case 'PG': return "SET client_encoding = 'UTF8';\nSET session_replication_role = 'replica';";
-    case 'SQLITE': return 'PRAGMA foreign_keys = OFF;';
+    case DatabaseType.MYSQL: return 'SET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS = 0;';
+    case DatabaseType.PG: return "SET client_encoding = 'UTF8';\nSET session_replication_role = 'replica';";
+    case DatabaseType.SQLITE: return 'PRAGMA foreign_keys = OFF;';
     default: return '';
   }
 }
 
 function sqlEpilogue(dbType: DatabaseType): string {
   switch (dbType) {
-    case 'MYSQL': return 'SET FOREIGN_KEY_CHECKS = 1;';
-    case 'PG': return "SET session_replication_role = 'origin';";
-    case 'SQLITE': return 'PRAGMA foreign_keys = ON;';
+    case DatabaseType.MYSQL: return 'SET FOREIGN_KEY_CHECKS = 1;';
+    case DatabaseType.PG: return "SET session_replication_role = 'origin';";
+    case DatabaseType.SQLITE: return 'PRAGMA foreign_keys = ON;';
     default: return '';
   }
 }

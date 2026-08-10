@@ -3,6 +3,7 @@ import { ref, watch, computed } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import { VueDatePicker } from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css';
+import { FILTER_OP } from '../../../src/utils/filterOps';
 
 interface Field { name: string; simpleType?: string; type?: string }
 interface Row { [key: string]: any }
@@ -28,6 +29,7 @@ const emit = defineEmits<{
   filter: [conditions: Cond[]];
   updateCell: [pkColumn: string, pkValue: any, column: string, value: string];
   deleteRows: [rows: { pkColumn: string; pkValue: any }[]];
+  insertRow: [columns: string[], values: (string | null)[]];
   toggleColumn: [column: string, hidden: boolean];
   saveLayout: [columnOrder: string[], columnWidths: Record<string, number>];
   resetProfile: [];
@@ -40,6 +42,8 @@ const showExport = ref(false);
 const selectedRows = ref<Set<string>>(new Set());
 const editingCell = ref<string | null>(null);
 const editValue = ref('');
+const inserting = ref(false);
+const newRow = ref<Record<string, string>>({});
 const showColumnMenu = ref(false);
 const displayedOrder = ref<string[]>([]);
 const localColumnWidths = ref<Record<string, number>>({});
@@ -178,31 +182,31 @@ function deleteSelected() {
 }
 
 const FILTER_OPS = [
-  { value: 'eq', label: '=' },
-  { value: 'ne', label: '!=' },
-  { value: 'contains', label: 'contains' },
-  { value: 'notContains', label: 'not contains' },
-  { value: 'startsWith', label: 'starts with' },
-  { value: 'endsWith', label: 'ends with' },
-  { value: 'notStartsWith', label: 'not starts with' },
-  { value: 'notEndsWith', label: 'not ends with' },
-  { value: 'gt', label: '>' },
-  { value: 'gte', label: '>=' },
-  { value: 'lt', label: '<' },
-  { value: 'lte', label: '<=' },
-  { value: 'between', label: 'between' },
-  { value: 'notBetween', label: 'not between' },
-  { value: 'in', label: 'in list' },
-  { value: 'notIn', label: 'not in list' },
-  { value: 'isNull', label: 'is null' },
-  { value: 'notNull', label: 'is not null' },
-  { value: 'isEmpty', label: "is empty ('')" },
-  { value: 'notEmpty', label: 'is not empty' },
+  { value: FILTER_OP.eq, label: '=' },
+  { value: FILTER_OP.ne, label: '!=' },
+  { value: FILTER_OP.contains, label: 'contains' },
+  { value: FILTER_OP.notContains, label: 'not contains' },
+  { value: FILTER_OP.startsWith, label: 'starts with' },
+  { value: FILTER_OP.endsWith, label: 'ends with' },
+  { value: FILTER_OP.notStartsWith, label: 'not starts with' },
+  { value: FILTER_OP.notEndsWith, label: 'not ends with' },
+  { value: FILTER_OP.gt, label: '>' },
+  { value: FILTER_OP.gte, label: '>=' },
+  { value: FILTER_OP.lt, label: '<' },
+  { value: FILTER_OP.lte, label: '<=' },
+  { value: FILTER_OP.between, label: 'between' },
+  { value: FILTER_OP.notBetween, label: 'not between' },
+  { value: FILTER_OP.in, label: 'in list' },
+  { value: FILTER_OP.notIn, label: 'not in list' },
+  { value: FILTER_OP.isNull, label: 'is null' },
+  { value: FILTER_OP.notNull, label: 'is not null' },
+  { value: FILTER_OP.isEmpty, label: "is empty ('')" },
+  { value: FILTER_OP.notEmpty, label: 'is not empty' },
 ];
 
-const NO_VALUE_OPS = ['isNull', 'notNull', 'isEmpty', 'notEmpty'];
-const DUAL_VALUE_OPS = ['between', 'notBetween'];
-const MULTI_VALUE_OPS = ['in', 'notIn'];
+const NO_VALUE_OPS = [FILTER_OP.isNull, FILTER_OP.notNull, FILTER_OP.isEmpty, FILTER_OP.notEmpty];
+const DUAL_VALUE_OPS = [FILTER_OP.between, FILTER_OP.notBetween];
+const MULTI_VALUE_OPS = [FILTER_OP.in, FILTER_OP.notIn];
 const NUMBER_TYPES = new Set(['int', 'integer', 'bigint', 'smallint', 'mediumint', 'tinyint', 'decimal', 'numeric', 'float', 'double', 'real']);
 
 function fieldOf(name: string): Field | undefined {
@@ -242,13 +246,13 @@ function isNumberColumn(name: string): boolean {
 }
 
 function addCondition() {
-  conditions.value.push({ column: '', op: 'contains', value: '', value2: '' });
+  conditions.value.push({ column: '', op: FILTER_OP.contains, value: '', value2: '' });
 }
 
 function toggleFilterPanel() {
   showFilter.value = !showFilter.value;
   if (showFilter.value && conditions.value.length === 0) {
-    conditions.value.push({ column: '', op: 'contains', value: '', value2: '' });
+    conditions.value.push({ column: '', op: FILTER_OP.contains, value: '', value2: '' });
   }
 }
 
@@ -284,6 +288,38 @@ function startExport(format?: 'csv' | 'json' | 'sql') {
   exportData(format);
 }
 
+function startInsert() {
+  newRow.value = {};
+  inserting.value = true;
+}
+
+function cancelInsert() {
+  inserting.value = false;
+}
+
+function saveInsert() {
+  const cols = visibleFields.value.map((f) => f.name);
+  const values = cols.map((c) => {
+    const v = newRow.value[c];
+    return v === undefined || v === '' ? null : v;
+  });
+  emit('insertRow', cols, values);
+  inserting.value = false;
+}
+
+function copyAsInsert() {
+  if (!props.tableName || !props.rows.length) return;
+  const cols = visibleFields.value.map((f) => f.name);
+  const esc = (v: any): string => (v === null || v === undefined) ? 'NULL' : `'${String(v).replace(/'/g, "''")}'`;
+  const q = (name: string) => `\`${name}\``;
+  const target = props.dbName ? `${q(props.dbName)}.${q(props.tableName)}` : q(props.tableName);
+  const sql = props.rows.map((row) => {
+    const vals = cols.map((c) => esc(row[c])).join(', ');
+    return `INSERT INTO ${target} (${cols.map(q).join(', ')}) VALUES (${vals});`;
+  }).join('\n');
+  void navigator.clipboard.writeText(sql);
+}
+
 watch([() => props.fields, () => props.columnOrder], () => {
   displayedOrder.value = normalizedOrder();
   selectedRows.value.clear();
@@ -303,6 +339,8 @@ watch(() => props.filterConditions, (conds) => {
     <button v-if="canModifyRows" class="btn danger" :disabled="!selectedRows.size" @click="deleteSelected">
       Delete ({{ selectedRows.size }})
     </button>
+    <button v-if="canModifyRows" class="btn" @click="startInsert">Insert Row</button>
+    <button v-if="hasTable" class="btn" :disabled="!rows.length" @click="copyAsInsert">Copy INSERT</button>
     <template v-if="hasTable">
       <div class="filter-wrap">
         <button class="btn" @click="toggleFilterPanel">Filter</button>
@@ -398,6 +436,16 @@ watch(() => props.filterConditions, (conds) => {
         </tr>
       </thead>
       <tbody>
+        <tr v-if="inserting" class="insert-row">
+          <td v-if="canModifyRows"></td>
+          <td v-for="f in visibleFields" :key="f.name" :style="columnStyle(f.name)">
+            <input v-model="newRow[f.name]" class="cell-edit" placeholder="NULL" />
+          </td>
+          <td>
+            <button class="btn primary" @click="saveInsert">Save</button>
+            <button class="btn" @click="cancelInsert">Cancel</button>
+          </td>
+        </tr>
         <tr v-for="(row, idx) in rows" :key="idx">
           <td v-if="canModifyRows">
             <input type="checkbox"

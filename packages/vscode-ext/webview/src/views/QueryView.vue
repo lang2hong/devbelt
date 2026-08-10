@@ -199,6 +199,10 @@ function handleDeleteRows(rows: { pkColumn: string; pkValue: any }[]) {
   post({ type: 'deleteRows', rows });
 }
 
+function handleInsertRow(columns: string[], values: (string | null)[]) {
+  post({ type: 'insertRow', columns, values });
+}
+
 function handleToggleColumn(column: string, hidden: boolean) {
   post({ type: 'toggleColumn', column, hidden });
 }
@@ -320,6 +324,7 @@ function onKeydown(e: KeyboardEvent) {
       @filter="handleFilter"
       @update-cell="handleUpdateCell"
       @delete-rows="handleDeleteRows"
+      @insert-row="handleInsertRow"
       @toggle-column="handleToggleColumn"
       @save-layout="handleSaveLayout"
       @reset-profile="resetProfile"

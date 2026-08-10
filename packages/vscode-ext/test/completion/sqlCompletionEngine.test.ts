@@ -43,6 +43,17 @@ describe('detectContext', () => {
     expect(detectContext('SELECT * FROM users WHERE age > 18 AND ')).toBe('where_condition');
   });
 
+  it('detects where_operator after a field (waiting for a comparison operator)', () => {
+    expect(detectContext('SELECT * FROM users WHERE age ')).toBe('where_operator');
+    expect(detectContext('SELECT * FROM users WHERE age > 18 AND id ')).toBe('where_operator');
+  });
+
+  it('detects where_value after a comparison operator', () => {
+    expect(detectContext('SELECT * FROM users WHERE age > ')).toBe('where_value');
+    expect(detectContext('SELECT * FROM users WHERE name LIKE ')).toBe('where_value');
+    expect(detectContext('SELECT * FROM users WHERE id IN ')).toBe('where_value');
+  });
+
   it('detects set_clause after UPDATE ... SET', () => {
     expect(detectContext('UPDATE users SET ')).toBe('set_clause');
     expect(detectContext('UPDATE users SET na')).toBe('set_clause');
