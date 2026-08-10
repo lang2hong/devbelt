@@ -197,6 +197,10 @@ function connectionFormHtml(groups: ConnectionGroup[]): string {
   input:focus, select:focus { outline: none; border-color: var(--vscode-focusBorder); }
   .row { display: flex; gap: 12px; }
   .row .field { flex: 1; }
+  .pw { display: flex; gap: 6px; align-items: center; }
+  .pw input { flex: 1; }
+  .pw .toggle { flex: 0 0 auto; padding: 7px 10px; cursor: pointer; border: 1px solid var(--vscode-input-border, rgba(255,255,255,0.15)); border-radius: 4px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); font-size: 12px; }
+  .pw .toggle:hover { background: var(--vscode-button-secondaryHoverBackground); }
   .actions { margin-top: 24px; display: flex; gap: 10px; }
   button {
     flex: 1; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer;
@@ -245,7 +249,10 @@ function connectionFormHtml(groups: ConnectionGroup[]): string {
     </div>
     <div class="field">
       <label data-i18n="password">Password</label>
-      <input id="password" type="password">
+      <div class="pw">
+        <input id="password" type="password">
+        <button type="button" class="toggle" data-target="password" data-i18n="show">Show</button>
+      </div>
     </div>
   </div>
   <div class="field">
@@ -268,9 +275,9 @@ function connectionFormHtml(groups: ConnectionGroup[]): string {
      <div class="field"><label data-i18n="sshHost">SSH Host</label><input id="sshHost" type="text" placeholder="192.168.1.1"></div>
      <div class="field"><label data-i18n="sshPort">SSH Port</label><input id="sshPort" type="number" value="22"></div>
      <div class="field"><label data-i18n="sshUser">SSH User</label><input id="sshUser" type="text" placeholder="root"></div>
-     <div class="field"><label data-i18n="sshPass">SSH Password</label><input id="sshPassword" type="password"></div>
+     <div class="field"><label data-i18n="sshPass">SSH Password</label><div class="pw"><input id="sshPassword" type="password"><button type="button" class="toggle" data-target="sshPassword" data-i18n="show">Show</button></div></div>
      <div class="field"><label data-i18n="sshKey">SSH Private Key Path</label><input id="sshPrivateKeyPath" type="text" placeholder="~/.ssh/id_rsa"></div>
-     <div class="field"><label data-i18n="sshPhrase">SSH Key Passphrase</label><input id="sshPassphrase" type="password"></div>
+     <div class="field"><label data-i18n="sshPhrase">SSH Key Passphrase</label><div class="pw"><input id="sshPassphrase" type="password"><button type="button" class="toggle" data-target="sshPassphrase" data-i18n="show">Show</button></div></div>
    </details>
    <details class="ssh-section">
      <summary>Advanced Connection Settings</summary>
@@ -316,6 +323,8 @@ function connectionFormHtml(groups: ConnectionGroup[]): string {
     test: { en: 'Test Connection', zh: '测试连接' },
     save: { en: 'Save', zh: '保存' },
     testing: { en: 'Testing...', zh: '测试中...' },
+    show: { en: 'Show', zh: '显示' },
+    hide: { en: 'Hide', zh: '隐藏' },
   };
   let isZh = false;
   function applyLocale() {
@@ -378,6 +387,18 @@ function connectionFormHtml(groups: ConnectionGroup[]): string {
   }
   dbType.addEventListener('change', syncType);
   syncType();
+
+  // 显示/隐藏密码切换
+  document.querySelectorAll('.toggle').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const target = document.getElementById(btn.dataset.target || '');
+      if (!target) return;
+      const showing = target.type === 'text';
+      target.type = showing ? 'password' : 'text';
+      btn.textContent = isZh ? (showing ? I18N.show.zh : I18N.hide.zh) : (showing ? I18N.show.en : I18N.hide.en);
+      applyLocale();
+    });
+  });
 
   function collect() {
     const editorEl = document.getElementById('editorMode');

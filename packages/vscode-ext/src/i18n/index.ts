@@ -194,6 +194,17 @@ const en: MessageCatalog = {
   'export.done': 'Exported {count} table(s).',
   'export.failed': 'Export failed: {message}',
   'transfer.cancelled': 'Transfer cancelled.',
+  'conn.exportNone': 'No connections to export.',
+  'conn.exportPick': 'Select connections to export',
+  'conn.exportNoSecrets': 'Without passwords',
+  'conn.exportWithSecrets': 'Include passwords',
+  'conn.exportSecretsPrompt': 'Include passwords in the export file?',
+  'conn.exportSecretsWarning': 'The export file will contain plaintext passwords. Store it securely.',
+  'conn.exportContinue': 'Export with passwords',
+  'conn.exportDone': 'Exported {count} connection(s).',
+  'conn.importOpen': 'Select connection file',
+  'conn.importInvalid': 'Invalid connection file.',
+  'conn.importDone': 'Imported {count} connection(s).',
 };
 
 /** 中文词条 */
@@ -366,6 +377,17 @@ const zh: MessageCatalog = {
   'export.done': '已导出 {count} 张表。',
   'export.failed': '导出失败：{message}',
   'transfer.cancelled': '传输已取消。',
+  'conn.exportNone': '没有可导出的连接。',
+  'conn.exportPick': '选择要导出的连接',
+  'conn.exportNoSecrets': '不含密码',
+  'conn.exportWithSecrets': '包含密码',
+  'conn.exportSecretsPrompt': '导出文件中是否包含密码？',
+  'conn.exportSecretsWarning': '导出文件将包含明文密码，请妥善保管。',
+  'conn.exportContinue': '导出并包含密码',
+  'conn.exportDone': '已导出 {count} 个连接。',
+  'conn.importOpen': '选择连接文件',
+  'conn.importInvalid': '连接文件无效。',
+  'conn.importDone': '已导入 {count} 个连接。',
 };
 
 /** 当前语言目录（惰性解析） */

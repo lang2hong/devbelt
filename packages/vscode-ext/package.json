@@ -330,12 +330,27 @@
         "command": "dbclient.deleteQueryFolder",
         "title": "Delete Query Folder",
         "category": "DB Client"
+      },
+      {
+        "command": "dbclient.exportConnections",
+        "title": "Export Connections",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.importConnections",
+        "title": "Import Connections",
+        "category": "DB Client"
       }
     ],
     "menus": {
       "view/title": [
         {
           "command": "dbclient.addConnection",
+          "when": "view == dbclient.explorer",
+          "group": "navigation"
+        },
+        {
+          "command": "dbclient.importConnections",
           "when": "view == dbclient.explorer",
           "group": "navigation"
         },
@@ -627,6 +642,11 @@
         },
         {
           "command": "dbclient.moveToGroup",
+          "when": "view == dbclient.explorer && viewItem =~ /^connection/",
+          "group": "1_conn"
+        },
+        {
+          "command": "dbclient.exportConnections",
           "when": "view == dbclient.explorer && viewItem =~ /^connection/",
           "group": "1_conn"
         },
