@@ -19,6 +19,9 @@ onMounted(() => {
       serverVars.value = msg.serverVars || [];
       summary.value = msg.summary || null;
       error.value = '';
+    } else if (msg.type === 'processList') {
+      processList.value = msg.processList || [];
+      error.value = '';
     } else if (msg.type === 'error') {
       error.value = msg.message;
     }
@@ -34,6 +37,30 @@ const filteredVars = computed(() => {
   if (!search.value) return serverVars.value;
   return serverVars.value.filter(r => JSON.stringify(r).toLowerCase().includes(search.value.toLowerCase()));
 });
+
+const processRows = computed(() => {
+  if (!search.value) return processList.value;
+  const s = search.value.toLowerCase();
+  return processList.value.filter(r => {
+    for (const [k, v] of Object.entries(r)) {
+      if (/user|host|db|usename|client|datname|id|pid/i.test(k) && String(v).toLowerCase().includes(s)) return true;
+    }
+    return false;
+  });
+});
+
+function processIdOf(row: any): number | undefined {
+  const v = row.Id ?? row.id ?? row.pid ?? row.PID ?? row.ID;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function killProcess(row: any) {
+  const id = processIdOf(row);
+  if (id === undefined) return;
+  if (!window.confirm(`Kill process ${id}?`)) return;
+  post({ type: 'killProcess', id });
+}
 
 function flatten(rows: any[]): Map<string, string> {
   const m = new Map<string, string>();
@@ -91,17 +118,23 @@ const keyVars = computed(() => {
       <button :class="{ active: tab === 'status' }" @click="tab = 'status'">Status ({{ statusVars.length }})</button>
       <button :class="{ active: tab === 'vars' }" @click="tab = 'vars'">Variables ({{ serverVars.length }})</button>
     </div>
-    <div class="search" v-if="tab !== 'process'">
-      <input v-model="search" placeholder="Filter..." class="input" />
+    <div class="search">
+      <input v-model="search" :placeholder="tab === 'process' ? 'Filter user/host/db/id...' : 'Filter...'" class="input" />
     </div>
     <div class="error" v-if="error">{{ error }}</div>
     <div class="content" v-else>
       <!-- Process List -->
-      <table v-if="tab === 'process' && processList.length">
-        <thead><tr><th v-for="k in Object.keys(processList[0])" :key="k">{{ k }}</th></tr></thead>
+      <table v-if="tab === 'process' && processRows.length">
+        <thead>
+          <tr>
+            <th v-for="k in Object.keys(processRows[0])" :key="k">{{ k }}</th>
+            <th class="act-col">Action</th>
+          </tr>
+        </thead>
         <tbody>
-          <tr v-for="(row, i) in processList" :key="i">
-            <td v-for="k in Object.keys(processList[0])" :key="k">{{ row[k] }}</td>
+          <tr v-for="(row, i) in processRows" :key="i">
+            <td v-for="k in Object.keys(processRows[0])" :key="k">{{ row[k] }}</td>
+            <td><button v-if="processIdOf(row) !== undefined" class="btn-kill" @click="killProcess(row)">Kill</button></td>
           </tr>
         </tbody>
       </table>
@@ -152,6 +185,10 @@ const keyVars = computed(() => {
 table { border-collapse: collapse; font-size: 13px; width: 100%; }
 th, td { border: 1px solid var(--vscode-panel-border); padding: 4px 10px; text-align: left; white-space: nowrap; }
 th { background: var(--vscode-editor-background); position: sticky; top: 0; }
+.act-col { width: 60px; text-align: center; }
+.btn-kill { cursor: pointer; font-size: 11px; padding: 2px 8px;
+  background: var(--vscode-errorBackground, rgba(204,0,0,0.1)); color: var(--vscode-errorForeground);
+  border: 1px solid var(--vscode-input-border); border-radius: 3px; }
 p { padding: 12px; color: var(--vscode-descriptionForeground); }
 .error { padding: 12px; color: var(--vscode-errorForeground); }
 </style>

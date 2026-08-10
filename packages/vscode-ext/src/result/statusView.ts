@@ -33,6 +33,24 @@ export class StatusView extends BaseWebView {
   private initSent = false;
 
   protected async handleMessage(msg: any): Promise<void> {
+    if (msg.type === 'killProcess') {
+      const id = Number(msg.id);
+      if (!Number.isFinite(id)) return;
+      try {
+        const session = await this.manager.connect(this.conn);
+        const dbType = session.query.dialect.dbType;
+        if (dbType === 'PG') {
+          await session.query.query(`SELECT pg_terminate_backend(${id}::int)`);
+        } else if (dbType === 'MYSQL') {
+          await session.query.query(`KILL ${id}`);
+        }
+        const processList = await session.metadata.getProcessList();
+        this.post({ type: 'processList', processList });
+      } catch (err) {
+        this.post({ type: 'error', message: (err as Error).message });
+      }
+      return;
+    }
     if (msg.type !== 'ready') return;
     if (!this.initSent) {
       // 第一次 ready 来自 App.vue 默认 QueryView：仅发 init 切到 status 模式，
