@@ -53,10 +53,10 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
       }
     }
 
-    // FROM/JOIN/UPDATE/INTO 后面补表名
+    // FROM/JOIN/UPDATE/INTO 后面补表名（带库名限定）
     if (/\b(FROM|JOIN|UPDATE|INTO)\s+\w*$/i.test(before)) {
       const tables = await this.getTables(conn, context?.db);
-      return tables.map((t) => this.makeItem(t, vscode.CompletionItemKind.Class));
+      return tables.map((t) => this.makeTableItem(t, context?.db));
     }
 
     // 表名后跟 . 补列名（如 `table.`）
@@ -64,6 +64,15 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
     if (colMatch) {
       const cols = await this.getColumns(conn, colMatch[1], context?.db);
       return cols.map((c) => this.makeItem(c, vscode.CompletionItemKind.Field));
+    }
+
+    // SELECT/WHERE/ORDER/GROUP/HAVING/AND/OR/ON/SET 后或逗号后补列名（基于 FROM 表）
+    if (/\b(SELECT|WHERE|ORDER|GROUP|HAVING|AND|OR|ON|SET)\s+\w*$/i.test(before) || /,\s*\w*$/.test(before)) {
+      const fromTable = this.extractFromTable(text);
+      if (fromTable) {
+        const cols = await this.getColumns(conn, fromTable, context?.db);
+        if (cols.length) return cols.map((c) => this.makeItem(c, vscode.CompletionItemKind.Field));
+      }
     }
 
     // 默认：关键字 + 表名
@@ -104,7 +113,7 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
 
   private async tableItems(conn: SavedConnection, database?: string): Promise<vscode.CompletionItem[]> {
     const tables = await this.getTables(conn, database);
-    return tables.map((t) => this.makeItem(t, vscode.CompletionItemKind.Class));
+    return tables.map((t) => this.makeTableItem(t, database));
   }
 
   /** SQL 关键字补全 */
@@ -117,6 +126,10 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
       'OFFSET', 'AS', 'DISTINCT', 'COUNT', 'SUM', 'AVG', 'MAX', 'MIN', 'IF', 'EXISTS',
       'PRIMARY', 'KEY', 'FOREIGN', 'REFERENCES', 'DEFAULT', 'AUTO_INCREMENT',
       'PROCEDURE', 'FUNCTION', 'EVENT', 'TRIGGER', 'SHOW', 'DESCRIBE', 'EXPLAIN',
+      'CONCAT', 'NOW', 'CURDATE', 'CURTIME', 'UNIX_TIMESTAMP', 'FROM_UNIXTIME',
+      'DATE_FORMAT', 'STR_TO_DATE', 'IFNULL', 'COALESCE', 'NULLIF', 'CAST', 'CONVERT',
+      'SUBSTRING', 'LENGTH', 'TRIM', 'LOWER', 'UPPER', 'REPLACE', 'LEFT', 'RIGHT',
+      'ROUND', 'CEIL', 'FLOOR', 'ABS', 'MOD', 'GREATEST', 'LEAST', 'DATE', 'DATEDIFF',
     ];
     return keywords.map((kw) => this.makeItem(kw, vscode.CompletionItemKind.Keyword));
   }
@@ -124,6 +137,20 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
   private makeItem(label: string, kind: vscode.CompletionItemKind): vscode.CompletionItem {
     const item = new vscode.CompletionItem(label, kind);
     return item;
+  }
+
+  private makeTableItem(table: string, database?: string): vscode.CompletionItem {
+    const label = database ? `${database}.${table}` : table;
+    const item = new vscode.CompletionItem(label, vscode.CompletionItemKind.Class);
+    item.detail = 'table';
+    return item;
+  }
+
+  /** 从 SQL 文本提取 FROM 后的表名（取最后一段，去掉库名前缀） */
+  private extractFromTable(text: string): string | undefined {
+    const m = text.match(/\bFROM\s+([\w.]+)/i);
+    if (!m) return undefined;
+    return m[1].split('.').pop();
   }
 
   /** 清除缓存（连接变更时调用） */

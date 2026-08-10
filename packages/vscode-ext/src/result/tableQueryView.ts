@@ -319,7 +319,7 @@ export class TableQueryView extends BaseWebView {
   private buildSelect(): string {
     if (!this.hasTable || !this.table) return '';
     return buildTableSelect(
-      this.conn.dbType, this.table, this.database, this.filterConditions,
+      this.conn.dbType, this.table, this.database || this.conn.database, this.filterConditions,
       this.sortCol, this.sortDir, this.offset, this.limit,
     );
   }
