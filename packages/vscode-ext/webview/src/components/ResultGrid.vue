@@ -211,6 +211,7 @@ const DUAL_VALUE_OPS = ['between', 'notBetween'];
 const MULTI_VALUE_OPS = ['in', 'notIn'];
 const DATE_TYPES = new Set(['date']);
 const DATETIME_TYPES = new Set(['datetime', 'timestamp']);
+const TIME_TYPES = new Set(['time']);
 const NUMBER_TYPES = new Set(['int', 'integer', 'bigint', 'smallint', 'mediumint', 'tinyint', 'decimal', 'numeric', 'float', 'double', 'real']);
 
 function fieldOf(name: string): Field | undefined {
@@ -231,6 +232,9 @@ function isEnumColumn(name: string): boolean {
 }
 function isDateColumn(name: string): boolean {
   return DATE_TYPES.has((fieldOf(name)?.simpleType || '').toLowerCase());
+}
+function isTimeColumn(name: string): boolean {
+  return TIME_TYPES.has((fieldOf(name)?.simpleType || '').toLowerCase());
 }
 function isDateTimeColumn(name: string): boolean {
   return DATETIME_TYPES.has((fieldOf(name)?.simpleType || '').toLowerCase());
@@ -326,6 +330,7 @@ watch(() => props.filterConditions, (conds) => {
                 <option v-for="ev in enumValuesOf(cond.column)" :key="ev" :value="ev">{{ ev }}</option>
               </select>
               <input v-else-if="isDateColumn(cond.column)" v-model="cond.value" class="input" type="date" />
+              <input v-else-if="isTimeColumn(cond.column)" v-model="cond.value" class="input" type="time" />
               <input v-else-if="isDateTimeColumn(cond.column)" v-model="cond.value" class="input" type="datetime-local" />
               <input v-else-if="isNumberColumn(cond.column)" v-model="cond.value" class="input" type="number" />
               <input v-else v-model="cond.value" class="input" :placeholder="MULTI_VALUE_OPS.includes(cond.op) ? 'v1, v2, v3' : 'value...'" />

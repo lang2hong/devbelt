@@ -30,8 +30,18 @@ export class StatusView extends BaseWebView {
     StatusView.current = view;
   }
 
+  private initSent = false;
+
   protected async handleMessage(msg: any): Promise<void> {
     if (msg.type !== 'ready') return;
+    if (!this.initSent) {
+      // 第一次 ready 来自 App.vue 默认 QueryView：仅发 init 切到 status 模式，
+      // 等 StatusView.vue 挂载后再查数据，避免 data 在监听器注册前发送丢失。
+      this.initSent = true;
+      this.post({ type: 'init', mode: 'status' });
+      return;
+    }
+    // 第二次 ready 来自 StatusView.vue 挂载：查询并推送数据
     try {
       const session = await this.manager.connect(this.conn);
       const [processList, statusVars, serverVars, summary] = await Promise.all([
