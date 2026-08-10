@@ -53,7 +53,12 @@ export class TableService {
     const result = await this.queryService.query(sql);
     const row = result.rows[0] as Record<string, any> | undefined;
     if (!row) return '';
-    return Object.values(row)[0] as string;
+    // MySQL SHOW CREATE TABLE 返回 { Table: ..., 'Create Table': ... }，取 DDL 列
+    const createCol = Object.keys(row).find((k) => k.toLowerCase().includes('create'));
+    if (createCol) return row[createCol];
+    // SQLite/PG 返回单列 sql，取首值
+    const values = Object.values(row);
+    return values[values.length - 1] as string;
   }
 
   /** 删除视图 */
