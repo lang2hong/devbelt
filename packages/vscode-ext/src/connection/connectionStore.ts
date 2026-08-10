@@ -1,4 +1,5 @@
-import type { ConnectionConfig, DatabaseType } from '@db-client/core';
+import type { ConnectionConfig } from '@db-client/core';
+import { DatabaseType } from '@db-client/core';
 import type { SavedQuery } from '@db-client/core';
 import type { SecretStorage } from 'vscode';
 
@@ -232,6 +233,7 @@ export class ConnectionStore {
       const value = this.secretCache.get(this.secretKey(connection.id, field));
       if (value !== undefined) resolved[field] = value;
     }
+    if (!resolved.dbType) resolved.dbType = DatabaseType.MYSQL;
     return resolved as unknown as SavedConnection;
   }
 

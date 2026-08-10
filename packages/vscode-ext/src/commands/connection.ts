@@ -2,10 +2,24 @@ import * as vscode from 'vscode';
 import { DbTreeNode, NodeKind } from '../tree/dbTreeNode';
 import { ConnectionForm } from '../connection/connectionForm';
 import type { SavedConnection } from '../connection/connectionStore';
-import { StatusView } from '../result/statusView';
 import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
 import { confirm } from './shared';
+
+async function queryServerVersion(session: any, dbType: string): Promise<string> {
+  try {
+    if (dbType === 'PG') {
+      const r = await session.query.query('SHOW server_version');
+      return String((r.rows[0] && Object.values(r.rows[0])[0]) ?? '').trim();
+    }
+    if (dbType === 'SQLITE') {
+      const r = await session.query.query('select sqlite_version() AS v');
+      return String((r.rows[0] && Object.values(r.rows[0])[0]) ?? '').trim();
+    }
+    const r = await session.query.query('SELECT VERSION() AS v');
+    return String((r.rows[0] && Object.values(r.rows[0])[0]) ?? '').trim();
+  } catch { return ''; }
+}
 
 export function registerConnectionCommands(deps: Deps, sub: Sub): void {
   const { store, manager, treeProvider, connCtx } = deps;
@@ -27,12 +41,19 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     treeProvider.refresh();
   });
 
-  sub('dbclient.openConnection', (conn: SavedConnection) => {
+  sub('dbclient.openConnection', async (conn: SavedConnection) => {
     if (!conn?.id) return;
     treeProvider.markOpen(conn.id);
     connCtx.setLast(conn);
     treeProvider.refresh();
-    StatusView.open(conn, manager);
+    try {
+      const session = await manager.connect(conn);
+      const ver = await queryServerVersion(session, conn.dbType);
+      treeProvider.setConnVersion(conn.id, `${conn.dbType} ${ver}`.trim());
+      treeProvider.refresh();
+    } catch (err) {
+      vscode.window.showErrorMessage(`Open connection failed: ${(err as Error).message}`);
+    }
   });
 
   sub('dbclient.closeConnection', (node: DbTreeNode) => {

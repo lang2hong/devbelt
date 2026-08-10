@@ -24,6 +24,9 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   /** 已打开的连接 id 集合（默认全部未打开，需右键"打开连接"） */
   private readonly openConns = new Set<string>();
 
+  /** 已打开连接的服务器类型+版本摘要（连接名右侧 description） */
+  private readonly connVersions = new Map<string, string>();
+
   constructor(
     private readonly store: ConnectionStore,
     private readonly manager: ConnectionManager,
@@ -39,9 +42,15 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     this.openConns.add(connId);
   }
 
+  /** 设置连接的服务器摘要（类型+版本），显示在连接名右侧 */
+  setConnVersion(connId: string, desc: string): void {
+    this.connVersions.set(connId, desc);
+  }
+
   /** 标记连接已关闭（不可展开） */
   markClosed(connId: string): void {
     this.openConns.delete(connId);
+    this.connVersions.delete(connId);
   }
 
   getTreeItem(element: DbTreeNode): TreeItem {
@@ -382,6 +391,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       };
     } else {
       node.id = conn.id;
+      node.description = this.connVersions.get(conn.id) || '';
     }
     return node;
   }
