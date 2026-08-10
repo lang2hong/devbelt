@@ -28,7 +28,9 @@ export class QueryError extends Error {
  */
 export class QueryService {
   readonly dialect: SqlDialect;
-  private cancelActive?: () => void;
+  /** 在途查询的取消句柄（多槽，支持并发查询各自取消）。 */
+  private readonly activeCancels = new Map<number, () => void>();
+  private nextQueryId = 1;
 
   constructor(
     private readonly connection: IConnection,
@@ -49,10 +51,11 @@ export class QueryService {
 
   async query(sql: string, values?: any): Promise<QueryResult> {
     const start = Date.now();
+    const id = this.nextQueryId++;
     return new Promise<QueryResult>((resolve, reject) => {
       let settled = false;
       const finish = (): void => {
-        if (this.cancelActive === cancel) this.cancelActive = undefined;
+        if (this.activeCancels.get(id) === cancel) this.activeCancels.delete(id);
         if (timer) clearTimeout(timer);
       };
       const cancel = (): void => {
@@ -61,7 +64,7 @@ export class QueryService {
         finish();
         reject(new QueryError('Query cancelled', sql, Date.now() - start));
       };
-      this.cancelActive = cancel;
+      this.activeCancels.set(id, cancel);
       const timer = QueryService.queryTimeout > 0
         ? setTimeout(() => {
             if (!settled) {
@@ -92,8 +95,9 @@ export class QueryService {
 
   /** Stops delivery of the current result and lets the caller close its session. */
   cancel(): boolean {
-    if (!this.cancelActive) return false;
-    this.cancelActive();
+    if (this.activeCancels.size === 0) return false;
+    for (const cancelFn of this.activeCancels.values()) cancelFn();
+    this.activeCancels.clear();
     return true;
   }
 

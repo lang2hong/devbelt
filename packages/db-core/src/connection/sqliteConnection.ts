@@ -62,7 +62,10 @@ export class SqliteConnection extends IConnection {
 
   commit(): void {}
 
-  end(): void {}
+  end(): void {
+    this.connected = false;
+    this.sqlite.killAll();
+  }
 
   isAlive(): boolean {
     return this.connected;

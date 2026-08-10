@@ -12,10 +12,20 @@ import type { Result, ResultNew, ResultSet } from './common';
 class SQLite {
   public readonly dbPath: string;
   private sqliteCommand?: string;
+  /** 所有在途 sqlite3 子进程，供连接关闭/取消时统一清理。 */
+  private readonly activeProcs = new Set<child_process.ChildProcess>();
 
   constructor(dbPath: string, sqliteCommand?: string) {
     this.dbPath = dbPath;
     this.sqliteCommand = sqliteCommand ? validateSqliteCommand(sqliteCommand) : undefined;
+  }
+
+  /** 终止所有在途子进程（连接关闭时调用，避免进程悬空）。 */
+  killAll(): void {
+    for (const proc of this.activeProcs) {
+      if (!proc.killed) proc.kill('SIGKILL');
+    }
+    this.activeProcs.clear();
   }
 
   query(query: string): Promise<ResultNew | ResultNew[]> {
@@ -23,6 +33,7 @@ class SQLite {
       return Promise.resolve({ sql: query, fields: [], rows: [] });
     }
     return new Promise((res, rej) => {
+      let settled = false;
       let resultSet: ResultSet | undefined;
       let errorMessage = '';
       const streamParser = new StreamParser(new ResultSetParser());
@@ -38,6 +49,8 @@ class SQLite {
       const proc = child_process.spawn(this.sqliteCommand as string, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
+      this.activeProcs.add(proc);
+      const cleanup = (): void => { this.activeProcs.delete(proc); };
       // 写入 stdin 规避 unicode 路径问题（见 issues #32, #37）
       proc.stdin!.write(`.open '${this.dbPath}'${EOL}`);
       proc.stdin!.write(`.echo on${EOL}`);
@@ -56,6 +69,13 @@ class SQLite {
       });
 
       proc.once('close', () => {
+        cleanup();
+        if (settled) return;
+        settled = true;
+        if (proc.killed) {
+          rej(new Error('sqlite query cancelled'));
+          return;
+        }
         if (errorMessage) {
           rej(new Error(errorMessage));
           return;

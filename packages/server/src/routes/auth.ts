@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { hashPassword } from '../db.js';
+import { hashPassword, verifyPassword } from '../db.js';
 
 /**
  * 认证路由：注册 / 登录。
@@ -24,7 +24,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(409).send({ message: 'email already registered' });
     }
 
-    const passwordHash = hashPassword(password, app.jwtSecret);
+    const passwordHash = hashPassword(password);
     const result = await app.mysql.query(
       'INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)',
       [email, passwordHash, 'user'],
@@ -41,13 +41,12 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ message: 'email and password required' });
     }
 
-    const passwordHash = hashPassword(password, app.jwtSecret);
     const rows = await app.mysql.query(
-      'SELECT id, role FROM users WHERE email = ? AND password_hash = ?',
-      [email, passwordHash],
+      'SELECT id, role, password_hash FROM users WHERE email = ?',
+      [email],
     );
     const user = (rows as any[])[0];
-    if (!user) {
+    if (!user || !verifyPassword(password, user.password_hash, app.jwtSecret)) {
       return reply.code(401).send({ message: 'invalid credentials' });
     }
 

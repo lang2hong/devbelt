@@ -1,117 +1,64 @@
-# vscode-db-client
+# DB Client Pro
 
-VSCode 数据库客户端扩展，对标 Navicat / database-client.com。
+**All-in-one Database Client for VS Code** — MySQL, PostgreSQL and SQLite. Query, edit, import/export, design, sync — all in one extension.
 
-## 功能
+## Features
 
-### 树视图（参考 Navicat 层级）
-- 连接 → 数据库 → 表/视图/函数/事件/查询/用户 6 分类
-- 表可展开显示列（PK 用 🔑 图标，显示行数和类型）
-- 连接关闭：无箭头 → 双击重连
-- 全部使用 VSCode 内置 ThemeIcon（无需 SVG 资源）
+- **Multi-database** — MySQL, PostgreSQL, SQLite (Redis, ElasticSearch planned)
+- **Connection management** — hierarchical groups, connection form, test connection, SSH tunnel
+- **SQL querying** — run in the current panel or a new one, query history, SQL formatting, result grid with inline cell editing, pagination
+- **SQL intelligence** — context-aware autocomplete in the built-in query editor *and* `.sql` files (tables, columns, functions, keywords), snippets, EXPLAIN, run-statement
+- **Table tools** — data preview, sort/filter, inline edit, insert/delete, mock data, duplicate, dump/export
+- **Schema & design** — visual table designer, view DDL, ER diagram, schema compare
+- **Data transfer** — CSV/JSON import & export with field mapping
+- **Cloud sync** — account login, AES-256-GCM encrypted config sync across devices (credentials never leave the client)
+- **Users & privileges** — create users, grant/revoke, change password
+- **Internationalization** — 中文 / English, follows VS Code display language by default
 
-### 数据查询（Vue3 webview）
-- SQL 编辑器 + 结果网格
-- 默认复用同连接结果面板；`Ctrl+Alt+Enter` / `Cmd+Ctrl+Enter` 在新面板运行
-- 排序（点击表头 ASC/DESC/取消）
-- 过滤（列下拉 + 输入 → WHERE LIKE）
-- 表 Profile：按连接/数据库/表记忆排序、筛选、隐藏列、列顺序和列宽，可重置为默认布局
-- 内联编辑（双击单元格 → UPDATE）
-- 行删除（checkbox → DELETE FROM）
-- 表预览导出当前加载行：CSV / JSON / 方言 SQL INSERT
-- 多条 SQL 分号拆分执行
-- 分页（Prev / Next，每页 100 行）
+## Requirements
 
-### 表设计（Vue3 webview）
-- Columns Tab：列名/类型/可空/主键/默认值/Extra
-- Indexes Tab：索引名/列/唯一/主键
-- DDL Tab：SHOW CREATE TABLE 原文
+- VS Code `^1.85.0`
 
-### SQL 编辑器集成
-- 自动补全（表名/列名/关键字，FROM/JOIN 后补表名，`table.` 后补列名）
-- SQL snippets（`sel`、`del`、`ins`、`upd`、`joi`）插入占位符模板，不自动执行
-- Code Lens（每段 SQL 上方显示 ▶ Run 按钮）
-- SQL 格式化
-- Run SQL File（右键 .sql 文件 → 选连接执行）
-- 查询历史
-- 保存查询（可放入查询文件夹组织）
+## Quick Start
 
-### 表操作
-- 新建/删除/重命名/清空/复制表
-- 查看 DDL（SHOW CREATE TABLE）
-- 结构导出 dump（DDL + INSERT 语句）
-- Mock 数据生成（按列名/类型智能生成：email/name/phone/address/IP/date 等）
+1. Open the **DB Client** activity bar.
+2. Click **+** to add a connection (MySQL / PostgreSQL / SQLite).
+3. For SQLite, you can use the bundled `sqlite3` CLI or point to your own binary.
+4. Right-click a table → **View Data** to preview, or **New Query** to run SQL.
 
-### 视图/函数/事件
-- 视图：查看数据 / 删除
-- 函数：查看定义（SHOW CREATE FUNCTION/PROCEDURE）/ 删除
-- 事件：查看定义（SHOW CREATE EVENT）/ 删除
+## Usage Tips
 
-### 数据库操作
-- 新建数据库 / 删除数据库
-- MySQL 结构差异同步（比对两个 DB → 生成 ALTER/CREATE/DROP SQL）
+- **Ctrl+Enter** (macOS `Cmd+Enter`) — run query / active statement
+- **Ctrl+Alt+Enter** (macOS `Cmd+Ctrl+Enter`) — run in a new panel
+- **Ctrl+Shift+E** (macOS `Cmd+Shift+E`) — EXPLAIN
+- Autocomplete in the query editor: tables, columns, functions, keywords — select with **Enter**, dismiss with **Esc**.
+- Destructive statements (DELETE without WHERE / DDL) ask for confirmation; read-only connections are enforced.
 
-### 用户管理
-- 创建用户（CREATE USER）
-- 删除用户（DROP USER）
-- 修改密码（ALTER USER）
-- 授权 / 撤销（GRANT / REVOKE）
+## Commands
 
-### Server 状态面板（Vue3 webview）
-- Process List（MySQL: SHOW PROCESSLIST / PG: pg_stat_activity）
-- Status Variables（MySQL: SHOW GLOBAL STATUS）
-- Server Variables（MySQL: SHOW VARIABLES / PG: pg_settings）
-- 内置搜索过滤
+| Command | Description |
+|---|---|
+| Add Connection / Edit / Delete | Manage saved connections |
+| Open / Close Connection | Explicitly open or release a connection |
+| New Query / Run Query | Run SQL in current or new panel |
+| View Data / View DDL / Design Table | Inspect and edit table schema |
+| Import / Export | CSV, JSON transfer with mapping |
+| Compare Schema / ER Diagram | Schema analysis |
+| Sync Pull / Sync Push | Cloud sync of non-credential config |
 
-### ER 图（Vue3 webview）
-- SVG 渲染表关系图
-- 外键连线（虚线 + 端点圆圈）
-- PK 列用黄色 🔑 标识
-- 网格布局
+## Cloud Sync
 
-### SSH 隧道
-- 支持 SSH 密码认证和私钥认证
-- 本地端口转发（local:random → ssh → remote DB）
-- 连接表单可折叠 SSH 配置区
+1. Run **DB Client: Login** (`dbclient.login`) and register.
+2. Configure the sync server URL: `dbclient.sync.serverUrl` (default `http://localhost:3000`).
+3. **Sync Push** encrypts your connection config (excluding passwords) with your master password and uploads; **Sync Pull** restores it.
 
-### Terminal 集成
-- 右键连接 → 打开数据库 CLI（mysql / psql / sqlite3）
-- 密码通过环境变量传递（MYSQL_PWD / PGPASSWORD），不在命令行暴露
+## Configuration
 
-### 云同步
-- 登录 / 注册 / 登出
-- 推送不含数据库/SSH 凭据的连接配置到云端（AES-256-GCM 加密）
-- 从云端拉取并合并
+| Setting | Default | Description |
+|---|---|---|
+| `dbclient.sync.serverUrl` | `http://localhost:3000` | Cloud sync server URL |
+| `dbclient.language` | `auto` | Extension language: `auto` / `zh` / `en` |
 
-### 其他
-- i18n：中文 / 英文双语，跟随 VSCode 显示语言
-- 架构：Vue3 + Vite（webview UI）+ esbuild（扩展主体）双管线构建
-- db-core：方言策略模式（MySQL / PostgreSQL / SQLite）；扩展层覆盖凭据、历史、Profile 与 SQL 安全测试
+## License
 
-## 支持的数据库
-- MySQL（含 SSH 隧道）
-- PostgreSQL
-- SQLite
-
-## 构建
-```bash
-# 安装依赖
-pnpm install
-
-# 构建 db-core
-cd packages/db-core && pnpm build
-
-# 构建扩展（esbuild + Vite 双管线）
-cd packages/vscode-ext && pnpm build
-
-# 打包 .vsix
-cd packages/vscode-ext && npx @vscode/vsce package --no-yarn
-```
-
-## 调试
-```bash
-# F5 启动调试
-cd packages/vscode-ext && pnpm dev   # esbuild watch
-# 另一个终端：
-cd packages/vscode-ext/webview && npx vite build --watch  # Vite watch
-```
+MIT

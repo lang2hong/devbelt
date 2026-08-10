@@ -27,6 +27,18 @@ export interface ConnectionSession {
  */
 export class ConnectionManager {
   private readonly sessions = new Map<string, ConnectionSession>();
+  /** 用户显式“打开连接”的 id（树中打开），不受查询视图关闭时的自动释放影响。 */
+  private readonly explicit = new Set<string>();
+
+  /** 标记该连接为用户显式打开，关闭查询/预览面板时不做自动释放。 */
+  markExplicit(id: string): void {
+    this.explicit.add(id);
+  }
+
+  /** 该连接是否为用户显式打开。 */
+  isExplicit(id: string): boolean {
+    return this.explicit.has(id);
+  }
 
   /**
    * 建立连接会话并缓存。
@@ -93,6 +105,7 @@ export class ConnectionManager {
 
   /** 关闭指定连接会话 */
   disposeConn(id: string): void {
+    this.explicit.delete(id);
     const session = this.sessions.get(id);
     if (session) {
       session.close();
@@ -105,6 +118,7 @@ export class ConnectionManager {
       session.close();
     }
     this.sessions.clear();
+    this.explicit.clear();
     SshTunnel.closeAll();
   }
 }

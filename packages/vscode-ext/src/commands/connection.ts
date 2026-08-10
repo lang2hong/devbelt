@@ -48,6 +48,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     treeProvider.refresh();
     try {
       const session = await manager.connect(conn);
+      manager.markExplicit(conn.id);
       const ver = await queryServerVersion(session, conn.dbType);
       treeProvider.setConnVersion(conn.id, `${conn.dbType} ${ver}`.trim());
       treeProvider.refresh();

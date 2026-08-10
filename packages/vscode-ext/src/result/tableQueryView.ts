@@ -16,6 +16,7 @@ import { buildCandidates, detectContext, extractFromTable } from '../completion/
  */
 export class TableQueryView extends BaseWebView {
   private static readonly queryViews = new Map<string, TableQueryView>();
+  private static readonly connRefs = new Map<string, number>();
   private static profileStore?: TableProfileStore;
   private offset = 0;
   private readonly limit = 100;
@@ -31,6 +32,18 @@ export class TableQueryView extends BaseWebView {
   private runningQuery?: QueryService;
   private ready = false;
   private executingPendingQuery = false;
+  /** 补全元数据缓存（db → 表名；db:table → 列名），随视图销毁自动释放。 */
+  private readonly completionTableCache = new Map<string, string[]>();
+  private readonly completionColumnCache = new Map<string, string[]>();
+  /** 查询串行队列：同一视图/会话的查询按序执行，避免并发污染 USE/事务状态并防止取消句柄被覆盖。 */
+  private execQueue: Promise<unknown> = Promise.resolve();
+  private disposed = false;
+
+  private enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.execQueue.then(fn, fn);
+    this.execQueue = run.catch(() => {});
+    return run;
+  }
   private pendingQuery?: {
     sql: string;
     database?: string;
@@ -51,6 +64,8 @@ export class TableQueryView extends BaseWebView {
       viewColumn,
     );
     this.hasTable = !!table;
+    // 引用计数：同一连接被多个视图共享，最后一个视图关闭时才释放连接。
+    TableQueryView.connRefs.set(this.conn.id, (TableQueryView.connRefs.get(this.conn.id) ?? 0) + 1);
     if (this.hasTable) {
       const saved = TableQueryView.profileStore?.get(conn.id, database, table!);
       if (saved) {
@@ -174,15 +189,15 @@ export class TableQueryView extends BaseWebView {
           const before = String(msg.before || '');
           const text = String(msg.text || '');
           const db = this.database || this.conn.database;
-          const tables = (await session.metadata.getTables(db)).map((t: any) => t.name);
+          const tables = await this.getCompletionTables(session, db);
           const fromTable = extractFromTable(text);
           const ctx = detectContext(before);
           let columns: string[] = [];
           if (ctx === 'dot_column') {
             const m = before.match(/(\w+)\.\w*$/);
-            if (m) columns = (await session.metadata.getColumns(m[1], db)).map((c: any) => c.name);
+            if (m) columns = await this.getCompletionColumns(session, m[1], db);
           } else if (fromTable) {
-            columns = (await session.metadata.getColumns(fromTable, db)).map((c: any) => c.name);
+            columns = await this.getCompletionColumns(session, fromTable, db);
           }
           const items = buildCandidates(ctx, { tables, columns, fromTable });
           this.post({ type: 'completionItems', items });
@@ -196,8 +211,45 @@ export class TableQueryView extends BaseWebView {
 
   protected onDispose(): void {
     super.onDispose();
+    this.disposed = true;
     if (!this.hasTable && TableQueryView.queryViews.get(this.conn.id) === this) {
       TableQueryView.queryViews.delete(this.conn.id);
+    }
+    // 引用计数归零：最后一个该连接的视图关闭时，释放底层连接（除非用户显式打开了该连接）。
+    const refs = TableQueryView.connRefs.get(this.conn.id) ?? 0;
+    if (refs <= 1) {
+      TableQueryView.connRefs.delete(this.conn.id);
+      if (!this.manager.isExplicit(this.conn.id)) {
+        this.manager.disposeConn(this.conn.id);
+      }
+    } else {
+      TableQueryView.connRefs.set(this.conn.id, refs - 1);
+    }
+  }
+
+  private async getCompletionTables(session: any, db?: string): Promise<string[]> {
+    const key = db || '';
+    const cached = this.completionTableCache.get(key);
+    if (cached) return cached;
+    try {
+      const tables = (await session.metadata.getTables(db)).map((t: any) => t.name);
+      this.completionTableCache.set(key, tables);
+      return tables;
+    } catch {
+      return [];
+    }
+  }
+
+  private async getCompletionColumns(session: any, table: string, db?: string): Promise<string[]> {
+    const key = `${db || ''}:${table}`;
+    const cached = this.completionColumnCache.get(key);
+    if (cached) return cached;
+    try {
+      const columns = (await session.metadata.getColumns(table, db)).map((c: any) => c.name);
+      this.completionColumnCache.set(key, columns);
+      return columns;
+    } catch {
+      return [];
     }
   }
 
@@ -360,11 +412,20 @@ export class TableQueryView extends BaseWebView {
     if (sql) await this.execute(sql);
   }
 
-  private async execute(
+  private execute(
     sql: string,
     onExecuted?: (result: any, error?: Error) => void,
     database = this.database || this.conn.database,
   ): Promise<void> {
+    return this.enqueue(() => this.doExecute(sql, onExecuted, database));
+  }
+
+  private async doExecute(
+    sql: string,
+    onExecuted?: (result: any, error?: Error) => void,
+    database = this.database || this.conn.database,
+  ): Promise<void> {
+    if (this.disposed) return;
     try {
       if (!(await confirmSqlExecution(this.conn, sql))) return;
       this.post({ type: 'running' });
@@ -486,14 +547,12 @@ export class TableQueryView extends BaseWebView {
       }
       if (!(await confirmSqlExecution(this.conn, `DELETE FROM ${this.table} WHERE ${rows[0]?.pkColumn || 'id'} = ?`))) return;
       const session = await this.manager.connect(this.conn);
-      const w = this.conn.dbType === 'MYSQL' ? '`' : '"';
-      const table = this.database
-        ? `${w}${this.database}${w}.${w}${this.table}${w}`
-        : `${w}${this.table}${w}`;
-      for (const r of rows) {
-        const valEsc = r.pkValue === null ? 'NULL' : `'${String(r.pkValue).replace(/'/g, "''").replace(/\\/g, '\\\\')}'`;
-        await session.query.query(`DELETE FROM ${table} WHERE ${w}${r.pkColumn}${w} = ${valEsc}`);
-      }
+      await session.data.deleteRows(
+        this.table!,
+        this.editablePkColumn,
+        rows.map((r) => r.pkValue),
+        this.database,
+      );
       this.post({ type: 'rowsDeleted', count: rows.length });
       await this.execute(this.buildSelect());
     } catch (err) {

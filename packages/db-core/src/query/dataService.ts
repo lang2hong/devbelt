@@ -28,4 +28,26 @@ export class DataService {
     const sql = `UPDATE ${qualified} SET ${w(column)} = ${setValue} WHERE ${w(primaryKey)} = ${idLiteral}`;
     return this.queryService.query(sql);
   }
+
+  /**
+   * 按主键批量删除（单条 DELETE ... IN，原子）。
+   * 主键与表名经 validateIdent 校验，值经 sqlstring.escape 转义。
+   */
+  async deleteRows(
+    table: string,
+    primaryKey: string,
+    rowIds: unknown[],
+    database?: string,
+  ): Promise<QueryResult> {
+    if (!rowIds.length) return this.queryService.query('SELECT 1 WHERE 1 = 0');
+    validateIdent(table);
+    validateIdent(primaryKey);
+    const w = this.queryService.dialect.wrap.bind(this.queryService.dialect);
+    const qualified = database ? `${w(validateIdent(database))}.${w(table)}` : w(table);
+    const ids = rowIds
+      .map((id) => (id === null || id === undefined ? 'NULL' : sqlstring.escape(id)))
+      .join(', ');
+    const sql = `DELETE FROM ${qualified} WHERE ${w(primaryKey)} IN (${ids})`;
+    return this.queryService.query(sql);
+  }
 }

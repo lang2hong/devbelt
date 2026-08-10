@@ -21,7 +21,7 @@ export class MysqlConnection extends IConnection {
       password: config.password,
       database: config.database,
       timezone: config.timezone,
-      multipleStatements: true,
+      multipleStatements: false,
       dateStrings: true,
       supportBigNumbers: true,
       bigNumberStrings: true,
