@@ -158,8 +158,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
           ),
       );
       const queryNodes = this.store.getQueriesInFolder(conn.id, db).map(
-        (q) =>
-          new DbTreeNode(
+        (q) => {
+          const n = new DbTreeNode(
             q.name,
             TreeItemCollapsibleState.None,
             NodeKind.SavedQuery,
@@ -170,7 +170,10 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
             db,
             undefined,
             q.id,
-          ),
+          );
+          n.command = { command: 'dbclient.openQuery', title: 'Open', arguments: [n] };
+          return n;
+        },
       );
       return [...folderNodes, ...queryNodes];
     }
@@ -285,8 +288,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const conn = element.conn!;
     const db = element.database;
     return this.store.getQueriesInFolder(conn.id, db, element.queryFolderId).map(
-      (q) =>
-        new DbTreeNode(
+      (q) => {
+        const n = new DbTreeNode(
           q.name,
           TreeItemCollapsibleState.None,
           NodeKind.SavedQuery,
@@ -297,7 +300,10 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
           db,
           undefined,
           q.id,
-        ),
+        );
+        n.command = { command: 'dbclient.openQuery', title: 'Open', arguments: [n] };
+        return n;
+      },
     );
   }
 
