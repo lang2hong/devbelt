@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DatabaseType } from '@db-client/core';
-import { buildCountSql, buildTableSelect, buildCondition } from './tableQuerySql';
-import type { FilterCondition } from './tableQuerySql';
+import { buildCountSql, buildTableSelect, buildCondition } from '../../src/result/tableQuerySql';
+import type { FilterCondition } from '../../src/result/tableQuerySql';
 
 describe('tableQuerySql', () => {
   it('builds a paginated SELECT with MySQL identifiers', () => {

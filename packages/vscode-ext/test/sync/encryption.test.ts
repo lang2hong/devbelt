@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Encryption } from './encryption';
+import { Encryption } from '../../src/sync/encryption';
 
 describe('Encryption（同步加密）', () => {
   it('加密后可解密还原原始数据', () => {

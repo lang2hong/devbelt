@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ConnectionStore, type ConnectionTreeData } from './connectionStore';
+import { ConnectionStore, type ConnectionTreeData } from '../../src/connection/connectionStore';
 
 function createMemento(data: ConnectionTreeData) {
   const values = new Map<string, unknown>([['dbclient.connectionsV2', data]]);

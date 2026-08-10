@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { autoMapFields, mapRows, validateMappings } from './fieldMapper';
+import { autoMapFields, mapRows, validateMappings } from '../../../src/data/transfer/fieldMapper';
 
 describe('field mapping', () => {
   it('prefers exact names then case-insensitive unused targets', () => {

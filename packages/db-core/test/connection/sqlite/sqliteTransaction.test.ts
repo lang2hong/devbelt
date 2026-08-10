@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
-import * as fs from 'fs';
-import { SQLite } from './index';
+import { SQLite } from '../../../src/connection/sqlite/index';
 
 /**
  * Real CLI integration: the SQLite driver spawns one sqlite3 process per query().

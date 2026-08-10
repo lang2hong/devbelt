@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { DataService } from './dataService';
-import { QueryService } from './queryService';
-import { IConnection } from '../connection/connection';
-import { MysqlDialect } from '../dialect/mysqlDialect';
-import type { QueryCallback } from '../types/query';
+import { DataService } from '../../src/query/dataService';
+import { QueryService } from '../../src/query/queryService';
+import { IConnection } from '../../src/connection/connection';
+import { MysqlDialect } from '../../src/dialect/mysqlDialect';
+import type { QueryCallback } from '../../src/types/query';
 
 /** 内存假连接捕获生成的 SQL */
 class CaptureConnection extends IConnection {

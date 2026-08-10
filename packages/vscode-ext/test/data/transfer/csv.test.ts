@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseCsv, serializeCsv } from './csv';
+import { parseCsv, serializeCsv } from '../../../src/data/transfer/csv';
 
 describe('CSV transfer codec', () => {
   it('round-trips commas, quotes, newlines, and typed display values', () => {

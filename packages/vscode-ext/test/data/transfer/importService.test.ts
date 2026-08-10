@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { importRows } from './importService';
+import { importRows } from '../../../src/data/transfer/importService';
 
 function makeQuery(failSql?: string) {
   const statements: string[] = [];

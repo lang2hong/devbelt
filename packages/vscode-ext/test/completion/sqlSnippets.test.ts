@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SQL_SNIPPETS, getSqlSnippet } from './sqlSnippets';
+import { SQL_SNIPPETS, getSqlSnippet } from '../../src/completion/sqlSnippets';
 
 describe('SQL snippets', () => {
   it('provides the expected set of triggers', () => {

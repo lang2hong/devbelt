@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { QueryService } from './queryService';
-import { IConnection } from '../connection/connection';
-import { MysqlDialect } from '../dialect/mysqlDialect';
-import type { QueryCallback } from '../types/query';
+import { QueryService } from '../../src/query/queryService';
+import { IConnection } from '../../src/connection/connection';
+import { MysqlDialect } from '../../src/dialect/mysqlDialect';
+import type { QueryCallback } from '../../src/types/query';
 
 /** 内存假连接，用于不依赖真实数据库测试查询服务 */
 class FakeConnection extends IConnection {

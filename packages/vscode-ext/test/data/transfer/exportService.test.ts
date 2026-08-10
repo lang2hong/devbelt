@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { exportRows, exportTable } from './exportService';
+import { exportRows, exportTable } from '../../../src/data/transfer/exportService';
 
 describe('exportRows', () => {
   const rows = [{ id: 1, name: 'Ada' }];

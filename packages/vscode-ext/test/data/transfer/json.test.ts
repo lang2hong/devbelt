@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseJson, serializeJson } from './json';
+import { parseJson, serializeJson } from '../../../src/data/transfer/json';
 
 describe('JSON transfer codec', () => {
   it('projects the requested columns and represents missing values as null', () => {

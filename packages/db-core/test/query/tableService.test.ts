@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { TableService } from './tableService';
-import { QueryService } from './queryService';
-import { IConnection } from '../connection/connection';
-import { MysqlDialect } from '../dialect/mysqlDialect';
-import { PostgreSqlDialect } from '../dialect/postgreSqlDialect';
-import { SqliteDialect } from '../dialect/sqliteDialect';
-import type { QueryCallback } from '../types/query';
+import { TableService } from '../../src/query/tableService';
+import { QueryService } from '../../src/query/queryService';
+import { IConnection } from '../../src/connection/connection';
+import { MysqlDialect } from '../../src/dialect/mysqlDialect';
+import { PostgreSqlDialect } from '../../src/dialect/postgreSqlDialect';
+import { SqliteDialect } from '../../src/dialect/sqliteDialect';
+import type { QueryCallback } from '../../src/types/query';
 
 /** 内存假连接捕获 SQL */
 class CaptureConnection extends IConnection {

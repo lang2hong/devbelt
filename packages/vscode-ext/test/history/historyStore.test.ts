@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { HistoryStore, QueryHistoryEntry } from './historyStore';
+import { HistoryStore, QueryHistoryEntry } from '../../src/history/historyStore';
 
 function makeMemento(initial: QueryHistoryEntry[] = []) {
   let data: QueryHistoryEntry[] = initial;

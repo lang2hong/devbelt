@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { MysqlDialect } from './mysqlDialect';
-import { PostgreSqlDialect } from './postgreSqlDialect';
-import { SqliteDialect } from './sqliteDialect';
-import { DialectRegistry } from './dialectRegistry';
-import { DatabaseType } from '../types/connection';
+import { MysqlDialect } from '../../src/dialect/mysqlDialect';
+import { PostgreSqlDialect } from '../../src/dialect/postgreSqlDialect';
+import { SqliteDialect } from '../../src/dialect/sqliteDialect';
+import { DialectRegistry } from '../../src/dialect/dialectRegistry';
+import { DatabaseType } from '../../src/types/connection';
 
 describe('方言策略（策略模式）', () => {
   it('MySQL 包裹标识符用反引号', () => {
@@ -31,7 +31,7 @@ describe('方言策略（策略模式）', () => {
   it('注册表可解析已注册方言，未注册抛错', () => {
     expect(DialectRegistry.get(DatabaseType.MYSQL)).toBeInstanceOf(MysqlDialect);
     expect(DialectRegistry.has(DatabaseType.PG)).toBe(true);
-    expect(() => DialectRegistry.get(DatabaseType.ES as any)).toThrowError(
+    expect(() => DialectRegistry.get('ES' as unknown as DatabaseType)).toThrowError(
       /Unsupported database type/,
     );
   });

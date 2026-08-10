@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeSqlRisk } from './sqlRisk';
+import { analyzeSqlRisk } from '../../src/utils/sqlRisk';
 
 describe('analyzeSqlRisk', () => {
   it('allows read-only statements', () => {

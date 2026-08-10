@@ -723,7 +723,7 @@
     "build:webview": "cd webview && npx vite build",
     "dev": "node esbuild.js --watch",
     "dev:webview": "cd webview && npx vite build --watch",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "package": "@vscode/vsce package"
   },

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { TableProfileStore } from './tableProfileStore';
+import { TableProfileStore } from '../../src/result/tableProfileStore';
 
 function makeMemento(initial: Record<string, unknown> = {}) {
   let data: Record<string, unknown> = { ...initial };

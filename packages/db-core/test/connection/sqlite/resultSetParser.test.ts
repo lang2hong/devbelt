@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ResultSetParser } from './resultSetParser';
+import { ResultSetParser } from '../../../src/connection/sqlite/resultSetParser';
 
 describe('SQLite 结果流解析器（纯逻辑）', () => {
   it('解析 TCL 模式单结果集', () => {
