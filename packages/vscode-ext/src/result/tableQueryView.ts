@@ -112,11 +112,11 @@ export class TableQueryView extends BaseWebView {
         break;
       case 'run':
         this.offset = 0;
-        if (this.hasTable) {
-          await this.execute(this.buildSelect());
-        } else {
-          await this.execute(msg.sql);
-        }
+      if (this.hasTable) {
+        await this.execute(msg.sql || this.buildSelect());
+      } else {
+        await this.execute(msg.sql);
+      }
         break;
       case 'explain':
         await this.explain(msg.sql);
