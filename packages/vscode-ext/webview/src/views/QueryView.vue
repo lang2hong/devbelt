@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch, nextTick } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import ResultGrid from '../components/ResultGrid.vue';
 
@@ -202,6 +202,26 @@ function resetProfile() {
   post({ type: 'resetProfile' });
 }
 
+function positionCompletion() {
+  const ta = document.querySelector('.editor') as HTMLTextAreaElement | null;
+  const comp = document.querySelector('.completion') as HTMLElement | null;
+  if (!ta || !comp) return;
+  const caret = ta.selectionStart ?? 0;
+  const lines = ta.value.slice(0, caret).split('\n');
+  const line = lines.length - 1;
+  const col = lines[lines.length - 1].length;
+  const style = getComputedStyle(ta);
+  const lineHeight = parseFloat(style.lineHeight) || 16;
+  const charWidth = (parseFloat(style.fontSize) || 13) * 0.6;
+  const r = ta.getBoundingClientRect();
+  comp.style.top = (r.top + (line + 1) * lineHeight + 2) + 'px';
+  comp.style.left = (r.left + col * charWidth + 6) + 'px';
+}
+
+watch(showCompletion, async (v) => {
+  if (v) { await nextTick(); positionCompletion(); }
+});
+
 function onSqlInput(e: Event) {
   const ta = e.target as HTMLTextAreaElement;
   const caret = ta.selectionStart ?? 0;
@@ -302,7 +322,7 @@ function onKeydown(e: KeyboardEvent) {
   background: var(--vscode-input-background); color: var(--vscode-input-foreground);
   border: none; border-bottom: 1px solid var(--vscode-panel-border);
   font-family: var(--vscode-editor-font-family); font-size: 13px; }
-.completion { position: absolute; z-index: 50; max-height: 200px; overflow-y: auto;
+.completion { position: fixed; z-index: 50; max-height: 200px; overflow-y: auto;
   background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-input-border);
   border-radius: 3px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); min-width: 160px; }
 .comp-item { padding: 3px 10px; font-size: 12px; cursor: pointer; white-space: nowrap;
