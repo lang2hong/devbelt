@@ -233,6 +233,7 @@ async function importStructuredData(
       database,
       rows: source.rows,
       mappings,
+      batchWrites: node.conn!.dbType === 'SQLITE',
       isCancelled: () => token.isCancellationRequested,
       onProgress: ({ completed, total }) => progress.report({ message: `${completed}/${total}`, increment: total ? 100 / total : 0 }),
     }));

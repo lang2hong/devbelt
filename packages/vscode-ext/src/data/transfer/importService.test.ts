@@ -52,3 +52,39 @@ describe('importRows', () => {
     expect(query.statements).toEqual(['BEGIN', 'INSERT 1', 'INSERT 2', 'ROLLBACK']);
   });
 });
+
+describe('importRows (batchWrites)', () => {
+  const mappings = [{ source: 'source_id', target: 'id' }];
+
+  it('sends the whole import as a single query when the driver is per-query (SQLite)', async () => {
+    const query = makeQuery();
+    const result = await importRows({
+      query: query as any,
+      table: 'users',
+      rows: [{ source_id: 1 }, { source_id: 2 }],
+      mappings,
+      batchWrites: true,
+    });
+
+    expect(result).toEqual({ imported: 2, rolledBack: false, errors: [] });
+    expect(query.statements).toEqual(['BEGIN; INSERT 1\nINSERT 2 COMMIT;']);
+  });
+
+  it('rolls back a failed batch and reports the error', async () => {
+    const query = makeQuery('BEGIN; INSERT 1\nINSERT 2 COMMIT;');
+    const result = await importRows({
+      query: query as any,
+      table: 'users',
+      rows: [{ source_id: 1 }, { source_id: 2 }],
+      mappings,
+      batchWrites: true,
+    });
+
+    expect(result).toEqual({
+      imported: 0,
+      rolledBack: true,
+      errors: [{ row: 1, message: 'duplicate key' }],
+    });
+    expect(query.statements).toEqual(['BEGIN; INSERT 1\nINSERT 2 COMMIT;', 'BEGIN; ROLLBACK;']);
+  });
+});
