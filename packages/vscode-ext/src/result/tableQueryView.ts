@@ -7,6 +7,7 @@ import { confirmSqlExecution } from '../utils/sqlSafety';
 import type { QueryService } from '@db-client/core';
 import { validateIdent } from '@db-client/core';
 import { TableProfileStore } from './tableProfileStore';
+import { exportRows, type TransferFormat } from '../data/transfer/exportService';
 
 /**
  * 表/查询视图：Vue 3 webview 模式。
@@ -152,8 +153,8 @@ export class TableQueryView extends BaseWebView {
       case 'cancel':
         this.cancelRunningQuery();
         break;
-      case 'exportSql':
-        await this.exportSql(msg.columns || [], msg.rows || []);
+      case 'exportData':
+        await this.exportData(msg.format, msg.columns || [], msg.rows || []);
         break;
     }
   }
@@ -408,19 +409,22 @@ export class TableQueryView extends BaseWebView {
     this.manager.disposeConn(this.conn.id);
   }
 
-  private async exportSql(columns: string[], rows: Record<string, any>[]): Promise<void> {
+  private async exportData(format: TransferFormat, columns: string[], rows: Record<string, any>[]): Promise<void> {
     try {
-      if (!this.table) {
+      if (format === 'sql' && !this.table) {
         this.post({ type: 'error', message: 'SQL export requires a target table.' });
         return;
       }
       const { DialectRegistry } = await import('@db-client/core');
       const dialect = DialectRegistry.get(this.conn.dbType as any);
-      const sql = dialect.buildInsertSql(rows, columns, this.table, this.database);
-      const defaultName = `${this.table}_export.sql`;
-      const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(defaultName), filters: { 'SQL': ['sql'] } });
+      const content = exportRows({ format, columns, rows, table: this.table, database: this.database, dialect });
+      const baseName = this.table || 'result';
+      const uri = await vscode.window.showSaveDialog({
+        defaultUri: vscode.Uri.file(`${baseName}_export.${format}`),
+        filters: { [format.toUpperCase()]: [format] },
+      });
       if (!uri) return;
-      await vscode.workspace.fs.writeFile(uri, Buffer.from(sql, 'utf8'));
+      await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
       this.post({ type: 'exported', message: `Exported ${rows.length} row(s) to ${uri.fsPath}.` });
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });

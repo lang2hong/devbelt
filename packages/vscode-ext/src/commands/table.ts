@@ -4,6 +4,7 @@ import { wrapIdent } from '../utils/sql';
 import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
 import { confirm, openSqlDoc, openSqlDocEditor, requireCapability } from './shared';
+import { runExportWizard } from './database';
 
 export function registerTableCommands(deps: Deps, sub: Sub): void {
   const { manager, treeProvider, executor, connCtx } = deps;
@@ -75,15 +76,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.dumpTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
-    const choice = await vscode.window.showQuickPick(
-      [{ label: 'Structure + Data', value: true }, { label: 'Structure Only', value: false }],
-      { placeHolder: 'Export table dump' },
-    );
-    if (!choice) return;
-    const session = await manager.connect(node.conn);
-    if (!requireCapability(session, 'dumpTable')) return;
-    const dump = await session.table.dumpSql(node.label, node.database, choice.value);
-    await openSqlDoc(dump);
+    await runExportWizard(node, manager, deps.connCtx, node.label);
   });
 
   sub('dbclient.mockData', async (node: DbTreeNode) => {

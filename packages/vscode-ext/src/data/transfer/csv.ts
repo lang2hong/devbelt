@@ -1,0 +1,87 @@
+export interface CsvData {
+  columns: string[];
+  rows: Record<string, string>[];
+}
+
+function formatValue(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+function escapeCell(value: unknown): string {
+  const text = formatValue(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+/** Serializes tabular data as RFC 4180-compatible UTF-8 CSV. */
+export function serializeCsv(columns: string[], rows: Record<string, unknown>[]): string {
+  const lines = [columns.map(escapeCell).join(',')];
+  for (const row of rows) lines.push(columns.map((column) => escapeCell(row[column])).join(','));
+  return lines.join('\r\n') + '\r\n';
+}
+
+/**
+ * Parses comma-separated text with quoted fields, escaped quotes, and CRLF/LF
+ * line endings. Empty cells remain empty strings so users can decide whether
+ * they represent an empty value or NULL in the destination table.
+ */
+export function parseCsv(text: string, hasHeader = true): CsvData {
+  const records: string[][] = [];
+  let row: string[] = [];
+  let value = '';
+  let quoted = false;
+
+  for (let index = 0; index < text.length; index++) {
+    const ch = text[index];
+    if (quoted) {
+      if (ch === '"' && text[index + 1] === '"') {
+        value += '"';
+        index++;
+      } else if (ch === '"') {
+        quoted = false;
+      } else {
+        value += ch;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      if (value) throw new Error('Invalid CSV: quote must start a field.');
+      quoted = true;
+    } else if (ch === ',') {
+      row.push(value);
+      value = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[index + 1] === '\n') index++;
+      row.push(value);
+      records.push(row);
+      row = [];
+      value = '';
+    } else {
+      value += ch;
+    }
+  }
+  if (quoted) throw new Error('Invalid CSV: unterminated quoted field.');
+  if (value || row.length) {
+    row.push(value);
+    records.push(row);
+  }
+  if (records.length && records[0].length === 1 && records[0][0] === '') records.shift();
+  if (!records.length) return { columns: [], rows: [] };
+
+  const first = records[0].map((cell, index) => index === 0 ? cell.replace(/^\uFEFF/, '') : cell);
+  const columns = hasHeader ? first : first.map((_, index) => `Column ${index + 1}`);
+  if (columns.some((column) => !column.trim())) throw new Error('CSV headers cannot be empty.');
+  if (new Set(columns).size !== columns.length) throw new Error('CSV headers must be unique.');
+
+  const values = hasHeader ? records.slice(1) : records;
+  return {
+    columns,
+    rows: values.filter((record) => record.some((cell) => cell !== '')).map((record) => {
+      const out: Record<string, string> = {};
+      columns.forEach((column, index) => { out[column] = record[index] ?? ''; });
+      return out;
+    }),
+  };
+}

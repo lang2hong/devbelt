@@ -179,43 +179,8 @@ function applyFilter() {
 }
 
 function exportData(format: 'json' | 'csv' | 'sql') {
-  const tableName = props.tableName || '';
-  const dbName = props.dbName || '';
   if (!props.rows.length) return;
-  let content = '';
-  let mime = 'text/plain';
-  let filename = 'result.' + format;
-  if (format === 'json') {
-    const headers = visibleFields.value.map(f => f.name);
-    const projected = props.rows.map((row) => {
-      const out: Row = {};
-      headers.forEach((h) => { out[h] = row[h]; });
-      return out;
-    });
-    content = JSON.stringify(projected, null, 2);
-    mime = 'application/json';
-  } else if (format === 'csv') {
-    const headers = visibleFields.value.map(f => f.name);
-    const lines = [headers.join(',')];
-    props.rows.forEach(row => {
-      lines.push(headers.map(h => {
-        let v = row[h];
-        if (v == null) v = '';
-        return '"' + String(v).replace(/"/g, '""') + '"';
-      }).join(','));
-    });
-    content = lines.join('\n');
-    mime = 'text/csv';
-  } else if (format === 'sql') {
-    // SQL 导出由扩展端按当前连接方言生成，确保标识符与限定名正确。
-    post({ type: 'exportSql', columns: visibleFields.value.map(f => f.name), rows: props.rows });
-    return;
-  }
-  const blob = new Blob([content], { type: mime });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
+  post({ type: 'exportData', format, columns: visibleFields.value.map(f => f.name), rows: props.rows });
 }
 
 watch([() => props.fields, () => props.columnOrder], () => {
