@@ -148,7 +148,7 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
 
   /** 从 SQL 文本提取 FROM 后的表名（取最后一段，去掉库名前缀） */
   private extractFromTable(text: string): string | undefined {
-    const m = text.match(/\bFROM\s+([\w.]+)/i);
+    const m = text.match(/\bFROM\s+`?([\w.]+)`?/i);
     if (!m) return undefined;
     return m[1].split('.').pop();
   }
