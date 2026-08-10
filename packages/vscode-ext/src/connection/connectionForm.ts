@@ -228,9 +228,18 @@ function connectionFormHtml(groups: ConnectionGroup[]): string {
       <option value="SQLITE">SQLite</option>
     </select>
   </div>
-  <div class="field">
-    <label data-i18n="name">Name</label>
-    <input id="name" placeholder="My Database">
+  <div class="row">
+    <div class="field">
+      <label data-i18n="name">Name</label>
+      <input id="name" placeholder="My Database">
+    </div>
+    <div class="field">
+      <label data-i18n="group">Group</label>
+      <select id="group">
+        <option value="" selected data-i18n="noGroup">No group</option>
+        ${groupOptions}
+      </select>
+    </div>
   </div>
   <div class="row">
     <div class="field">
@@ -263,14 +272,7 @@ function connectionFormHtml(groups: ConnectionGroup[]): string {
     <label data-i18n="sqlitePath">SQLite File Path</label>
     <input id="dbPath" placeholder="/path/to/db.sqlite">
   </div>
-  <div class="field">
-    <label data-i18n="group">Group</label>
-    <select id="group">
-      <option value="" selected data-i18n="noGroup">No group</option>
-      ${groupOptions}
-     </select>
-   </div>
-   <details class="ssh-section">
+  <details class="ssh-section">
      <summary data-i18n="ssh">SSH Tunnel (optional)</summary>
      <div class="field"><label data-i18n="sshHost">SSH Host</label><input id="sshHost" type="text" placeholder="192.168.1.1"></div>
      <div class="field"><label data-i18n="sshPort">SSH Port</label><input id="sshPort" type="number" value="22"></div>
