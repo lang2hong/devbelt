@@ -282,10 +282,11 @@ export class TableService {
       val = this.randomString(10);
     }
 
-    // 字符串类型按 varchar(N) 截断，避免 Data too long
-    if (!isNumeric && !isTemporal) {
+    // 字符串类型按 varchar(N) 截断，避免 Data too long（text/blob/json 不限长）
+    if (!isNumeric && !isTemporal && !/text|blob|json/i.test(type)) {
       const m = fullType.match(/\((\d+)\)/);
-      const max = m ? parseInt(m[1], 10) : 0;
+      let max = m ? parseInt(m[1], 10) : 0;
+      if (max === 0 && /char/i.test(type)) max = 1; // char 无长度默认 1
       if (max > 0 && val.length > max) val = val.slice(0, max);
     }
 

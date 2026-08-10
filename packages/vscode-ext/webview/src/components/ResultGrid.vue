@@ -454,7 +454,7 @@ td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
   box-shadow: 0 4px 12px rgba(0,0,0,0.25); }
 .filter-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
 .filter-row .col-select { flex: 0 0 150px; }
-.filter-row .op-select { flex: 0 0 140px; }
+.filter-row .op-select { flex: 0 0 100px; }
 .filter-row .input { flex: 1; min-width: 0; }
 .filter-row .sep { flex: 0 0 auto; color: var(--vscode-descriptionForeground); font-size: 12px; }
 .filter-row .dp-input { flex: 1; min-width: 0; }
