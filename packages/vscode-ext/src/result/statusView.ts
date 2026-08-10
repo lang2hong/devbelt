@@ -1,3 +1,4 @@
+import * as vscode from 'vscode';
 import type { SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from './baseWebView';
@@ -36,6 +37,10 @@ export class StatusView extends BaseWebView {
     if (msg.type === 'killProcess') {
       const id = Number(msg.id);
       if (!Number.isFinite(id)) return;
+      const confirmed = await vscode.window.showWarningMessage(
+        `Kill process ${id}?`, { modal: true }, 'Kill',
+      );
+      if (confirmed !== 'Kill') return;
       try {
         const session = await this.manager.connect(this.conn);
         const dbType = session.query.dialect.dbType;

@@ -58,7 +58,6 @@ function processIdOf(row: any): number | undefined {
 function killProcess(row: any) {
   const id = processIdOf(row);
   if (id === undefined) return;
-  if (!window.confirm(`Kill process ${id}?`)) return;
   post({ type: 'killProcess', id });
 }
 
