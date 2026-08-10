@@ -3,22 +3,14 @@ import { DbTreeNode } from '../tree/dbTreeNode';
 import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
 import { confirm, requireCapability } from './shared';
+import { UserForm } from './userForm';
 
 export function registerUserCommands(deps: Deps, sub: Sub): void {
   const { manager, treeProvider } = deps;
 
   sub('dbclient.createUser', async (node: DbTreeNode) => {
     if (!node?.conn) return;
-    const name = await vscode.window.showInputBox({ prompt: l10n('user.namePrompt') });
-    if (!name) return;
-    const password = await vscode.window.showInputBox({ prompt: l10n('user.passwordPrompt'), password: true });
-    if (password === undefined) return;
-    const host = await vscode.window.showInputBox({ prompt: l10n('user.hostPrompt'), value: '%' }) || '%';
-    const session = await manager.connect(node.conn);
-    if (!requireCapability(session, 'manageUsers')) return;
-    await session.table.createUser(name, password, host);
-    treeProvider.refresh();
-    vscode.window.showInformationMessage(l10n('user.created', { name }));
+    UserForm.openCreate(deps, node);
   });
 
   sub('dbclient.dropUser', async (node: DbTreeNode) => {
@@ -44,13 +36,7 @@ export function registerUserCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.grantPrivilege', async (node: DbTreeNode) => {
     if (!node?.conn) return;
-    const priv = await vscode.window.showInputBox({ prompt: l10n('user.privPrompt'), value: 'ALL PRIVILEGES' });
-    if (!priv) return;
-    const session = await manager.connect(node.conn);
-    if (!requireCapability(session, 'manageUsers')) return;
-    const parts = node.label.split('@');
-    await session.table.grantPrivilege(parts[0], priv, node.database, parts[1] || '%');
-    vscode.window.showInformationMessage(l10n('user.granted', { priv, name: node.label }));
+    UserForm.openGrant(deps, node);
   });
 
   sub('dbclient.revokePrivilege', async (node: DbTreeNode) => {
