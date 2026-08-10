@@ -167,6 +167,33 @@ export class TableQueryView extends BaseWebView {
       case 'exportData':
         await this.exportData(msg.format, msg.columns || [], msg.rows || []);
         break;
+      case 'completion': {
+        try {
+          const session = await this.manager.connect(this.conn);
+          const before = String(msg.before || '');
+          const text = String(msg.text || '');
+          const db = this.database || this.conn.database;
+          let items: string[] = [];
+          if (/\b(FROM|JOIN|UPDATE|INTO)\s+\w*$/i.test(before)) {
+            items = (await session.metadata.getTables(db)).map((t: any) => t.name);
+          } else {
+            const colMatch = before.match(/(\w+)\.\w*$/);
+            if (colMatch) {
+              items = (await session.metadata.getColumns(colMatch[1], db)).map((c: any) => c.name);
+            } else if (/\b(SELECT|WHERE|ORDER|GROUP|HAVING|AND|OR|ON|SET)\s+\w*$/i.test(before) || /,\s*\w*$/.test(before)) {
+              const fm = text.match(/\bFROM\s+`?([\w.]+)`?/i);
+              const ft = fm ? fm[1].split('.').pop() : undefined;
+              if (ft) items = (await session.metadata.getColumns(ft, db)).map((c: any) => c.name);
+            } else {
+              items = (await session.metadata.getTables(db)).map((t: any) => t.name);
+            }
+          }
+          this.post({ type: 'completionItems', items });
+        } catch {
+          this.post({ type: 'completionItems', items: [] });
+        }
+        break;
+      }
     }
   }
 

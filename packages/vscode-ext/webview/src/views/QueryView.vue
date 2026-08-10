@@ -6,6 +6,10 @@ import ResultGrid from '../components/ResultGrid.vue';
 const { post, onMessage } = useVsCode();
 
 const sql = ref('');
+const completionItems = ref<string[]>([]);
+const completionIndex = ref(0);
+const showCompletion = ref(false);
+let completionTimer: any;
 const hasTable = ref(false);
 const rows = ref<any[]>([]);
 const fields = ref<{ name: string }[]>([]);
@@ -95,6 +99,10 @@ onMounted(() => {
       columnWidths.value = {};
     } else if (msg.type === 'exported') {
       meta.value = msg.message;
+    } else if (msg.type === 'completionItems') {
+      completionItems.value = msg.items || [];
+      completionIndex.value = 0;
+      showCompletion.value = completionItems.value.length > 0;
     } else if (msg.type === 'error') {
       error.value = msg.message;
       rows.value = [];
@@ -194,7 +202,43 @@ function resetProfile() {
   post({ type: 'resetProfile' });
 }
 
+function onSqlInput(e: Event) {
+  const ta = e.target as HTMLTextAreaElement;
+  const caret = ta.selectionStart ?? 0;
+  const before = ta.value.slice(0, caret);
+  clearTimeout(completionTimer);
+  completionTimer = setTimeout(() => {
+    post({ type: 'completion', before, text: ta.value });
+  }, 200);
+}
+
+function acceptCompletion() {
+  const item = completionItems.value[completionIndex.value];
+  showCompletion.value = false;
+  if (!item) return;
+  const ta = document.querySelector('.editor') as HTMLTextAreaElement | null;
+  if (!ta) return;
+  const caret = ta.selectionStart ?? 0;
+  const before = sql.value.slice(0, caret);
+  const m = before.match(/(\w+)$/);
+  const start = m ? caret - m[1].length : caret;
+  sql.value = sql.value.slice(0, start) + item + sql.value.slice(caret);
+  const pos = start + item.length;
+  setTimeout(() => { ta.focus(); ta.setSelectionRange(pos, pos); }, 0);
+}
+
+function selectCompletion(i: number) {
+  completionIndex.value = i;
+  acceptCompletion();
+}
+
 function onKeydown(e: KeyboardEvent) {
+  if (showCompletion.value && completionItems.value.length) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); completionIndex.value = (completionIndex.value + 1) % completionItems.value.length; return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); completionIndex.value = (completionIndex.value - 1 + completionItems.value.length) % completionItems.value.length; return; }
+    if (e.key === 'Enter') { e.preventDefault(); acceptCompletion(); return; }
+    if (e.key === 'Escape') { e.preventDefault(); showCompletion.value = false; return; }
+  }
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
     e.preventDefault();
     run();
@@ -204,7 +248,10 @@ function onKeydown(e: KeyboardEvent) {
 
 <template>
   <div class="app">
-    <textarea v-model="sql" class="editor" @keydown="onKeydown" placeholder="Enter SQL..."></textarea>
+    <textarea v-model="sql" class="editor" @input="onSqlInput" @keydown="onKeydown" placeholder="Enter SQL..."></textarea>
+    <div v-if="showCompletion" class="completion">
+      <div v-for="(it, i) in completionItems" :key="it" :class="['comp-item', { sel: i === completionIndex }]" @mousedown.prevent="selectCompletion(i)">{{ it }}</div>
+    </div>
     <div class="action-bar">
       <button class="btn primary" :disabled="running" @click="run">Run</button>
       <button class="btn" :disabled="running" @click="explain">Explain</button>
@@ -255,6 +302,12 @@ function onKeydown(e: KeyboardEvent) {
   background: var(--vscode-input-background); color: var(--vscode-input-foreground);
   border: none; border-bottom: 1px solid var(--vscode-panel-border);
   font-family: var(--vscode-editor-font-family); font-size: 13px; }
+.completion { position: absolute; z-index: 50; max-height: 200px; overflow-y: auto;
+  background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-input-border);
+  border-radius: 3px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); min-width: 160px; }
+.comp-item { padding: 3px 10px; font-size: 12px; cursor: pointer; white-space: nowrap;
+  color: var(--vscode-foreground); }
+.comp-item.sel { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
 .action-bar { padding: 4px 8px; display: flex; gap: 6px; align-items: center; border-bottom: 1px solid var(--vscode-panel-border); }
   .spacer { flex: 1; }
   .page-info { font-size: 12px; color: var(--vscode-descriptionForeground); white-space: nowrap; }
