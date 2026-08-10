@@ -31,7 +31,7 @@ export class QueryExecutor {
     mode: QueryExecutionMode = 'reuse',
   ): Promise<void> {
     const start = Date.now();
-    this.view = TableQueryView.openForQuery(conn, this.manager, sql, database, async (result, error) => {
+    this.view = await TableQueryView.openForQuery(conn, this.manager, sql, database, async (result, error) => {
       // 历史记录回调
       if (result) {
         await this.history?.add({
@@ -61,7 +61,7 @@ export class QueryExecutor {
 
   /** 执行 EXPLAIN 查询计划。 */
   async explain(conn: SavedConnection, sql: string, database?: string): Promise<void> {
-    this.view = TableQueryView.openForQuery(conn, this.manager, sql, database, undefined, 'reuse');
+    this.view = await TableQueryView.openForQuery(conn, this.manager, sql, database, undefined, 'reuse');
     // openForQuery 已 queueQuery（正常 execute）；这里覆盖为 explain 模式
     (this.view as any).queueQueryExplain(sql, database);
   }

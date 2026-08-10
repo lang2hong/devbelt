@@ -74,20 +74,22 @@ export class TableQueryView extends BaseWebView {
     new TableQueryView(conn, manager, table, database, vscode.ViewColumn.Active);
   }
 
-  static openForQuery(
+  static async openForQuery(
     conn: SavedConnection,
     manager: ConnectionManager,
     sql: string,
     database?: string,
     onExecuted?: (result: any, error?: Error) => void,
     mode: 'reuse' | 'new' = 'reuse',
-  ): TableQueryView {
+  ): Promise<TableQueryView> {
     const existing = mode === 'reuse' ? TableQueryView.queryViews.get(conn.id) : undefined;
     if (existing) {
       existing.queueQuery(sql, database, onExecuted);
       return existing;
     }
-    const view = new TableQueryView(conn, manager, undefined, database, vscode.ViewColumn.Beside);
+    // 结果面板放在 SQL 编辑器下方：先 split down，再在下方活动组创建 webview
+    await vscode.commands.executeCommand('workbench.action.splitEditorDown');
+    const view = new TableQueryView(conn, manager, undefined, database, vscode.ViewColumn.Active);
     TableQueryView.queryViews.set(conn.id, view);
     view.queueQuery(sql, database, onExecuted);
     return view;
