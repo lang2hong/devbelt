@@ -4,7 +4,7 @@ import { TableQueryView } from '../result/tableQueryView';
 import { formatSql } from '../format/sqlFormatter';
 import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
-import { openSqlDocEditor, pickConnection } from './shared';
+import { openQueryFile, openSqlDocEditor, pickConnection } from './shared';
 
 export function registerQueryCommands(deps: Deps, sub: Sub): void {
   const { store, manager, executor, history, connCtx, treeProvider } = deps;
@@ -127,10 +127,8 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
     const name = await vscode.window.showInputBox({ prompt: l10n('query.namePrompt') });
     if (!name) return;
     connCtx.setLast(node.conn, node.database);
-    const editor = await openSqlDocEditor('');
-    if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
     const queryId = await store.saveQuery({ name, sql: '', connId: node.conn.id, database: node.database });
-    if (editor) connCtx.setSavedQueryForDoc(editor.document, queryId);
     treeProvider.refresh();
+    await openQueryFile(deps, node.conn, node.database, queryId);
   });
 }

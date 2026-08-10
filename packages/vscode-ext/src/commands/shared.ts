@@ -55,6 +55,19 @@ export async function openSqlDocEditor(content: string): Promise<vscode.TextEdit
   return vscode.window.showTextDocument(doc);
 }
 
+export async function openQueryFile(deps: Deps, conn: SavedConnection, database: string | undefined, queryId: string): Promise<void> {
+  const q = deps.store.getQueries(conn.id, database).find((x) => x.id === queryId);
+  if (!q) return;
+  const dir = vscode.Uri.joinPath(deps.context.globalStorageUri, 'queries');
+  await vscode.workspace.fs.createDirectory(dir);
+  const file = vscode.Uri.joinPath(dir, `${queryId}.sql`);
+  await vscode.workspace.fs.writeFile(file, Buffer.from(q.sql || '', 'utf8'));
+  const doc = await vscode.workspace.openTextDocument(file);
+  const editor = await vscode.window.showTextDocument(doc);
+  deps.connCtx.setForDoc(editor.document.uri.toString(), conn, database);
+  deps.connCtx.setSavedQueryForDoc(editor.document, queryId);
+}
+
 export async function pickConnection(store: ConnectionStore): Promise<SavedConnection | undefined> {
   const list = store.list();
   if (!list.length) {
