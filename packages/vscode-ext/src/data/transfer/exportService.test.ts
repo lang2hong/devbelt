@@ -15,6 +15,7 @@ describe('exportRows', () => {
 
   it('does not query table rows for a structure-only SQL export', async () => {
     const query = { query: async () => { throw new Error('data should not be queried'); }, dialect: {
+      dbType: 'MYSQL' as const,
       wrap: (name: string) => `\`${name}\``,
       getPagedSql: (sql: string) => sql,
       buildInsertSql: () => '',
@@ -33,6 +34,9 @@ describe('exportRows', () => {
 
     expect(content).toContain('DROP TABLE IF EXISTS `users`;');
     expect(content).toContain('CREATE TABLE `users` (`id` INT);');
+    expect(content).toContain('SET FOREIGN_KEY_CHECKS = 0;');
+    expect(content).toContain('SET FOREIGN_KEY_CHECKS = 1;');
+    expect(content).not.toContain('BEGIN;');
   });
 
   it('exports only the selected columns', async () => {
@@ -40,6 +44,7 @@ describe('exportRows', () => {
     const query = {
       query: async (sql: string) => { seen.push(sql); return { rows: [{ id: 1, name: 'Ada', email: 'a@b.c' }], fields: [], sql, costTime: 0 }; },
       dialect: {
+        dbType: 'MYSQL' as const,
         wrap: (name: string) => `\`${name}\``,
         getPagedSql: (sql: string, offset: number, limit: number) => `${sql} LIMIT ${limit} OFFSET ${offset}`,
         buildInsertSql: (_rows: Record<string, unknown>[], cols: string[]) => `INSERT ${cols.join(',')}`,
@@ -60,5 +65,7 @@ describe('exportRows', () => {
     expect(seen[0]).toContain('`id`, `name`');
     expect(seen[0]).not.toContain('`email`');
     expect(content).toContain('INSERT id,name');
+    expect(content).toContain('BEGIN;');
+    expect(content).toContain('COMMIT;');
   });
 });

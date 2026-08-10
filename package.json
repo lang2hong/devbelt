@@ -13,6 +13,7 @@
     "typecheck": "pnpm -r run typecheck"
   },
   "devDependencies": {
+    "@vscode/vsce": "^3.9.2",
     "typescript": "^5.9.3"
   }
 }

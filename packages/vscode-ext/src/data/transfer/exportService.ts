@@ -1,9 +1,16 @@
-import type { ColumnMeta } from '@db-client/core';
-import type { QueryService } from '@db-client/core';
+import type { ColumnMeta, DatabaseType, QueryService } from '@db-client/core';
 import { serializeCsv } from './csv';
 import { serializeJson } from './json';
 
 export type TransferFormat = 'sql' | 'csv' | 'json';
+
+export interface ServerInfo {
+  name: string;
+  dbType: DatabaseType;
+  host?: string;
+  port?: number;
+  version?: string;
+}
 
 export interface ExportProgress {
   rows: number;
@@ -27,6 +34,7 @@ export interface ExportTableOptions {
   pageSize?: number;
   onProgress?: (progress: ExportProgress) => void;
   isCancelled?: () => boolean;
+  serverInfo?: ServerInfo;
 }
 
 export interface ExportRowsOptions {
@@ -55,7 +63,7 @@ export function exportRows(options: ExportRowsOptions): string {
 
 /** Reads a full table in bounded pages instead of inheriting the result-view row limit. */
 export async function exportTable(options: ExportTableOptions): Promise<string> {
-  const { source, format, table, database, includeStructure = false, includeData = true, columns: selectedColumns, pageSize = 1000, onProgress, isCancelled } = options;
+  const { source, format, table, database, includeStructure = false, includeData = true, columns: selectedColumns, pageSize = 1000, onProgress, isCancelled, serverInfo } = options;
   const dialect = source.query.dialect;
   const qualified = database ? `${dialect.wrap(database)}.${dialect.wrap(table)}` : dialect.wrap(table);
   const allColumns = includeData ? (await source.metadata.getColumns(table, database)).map((column) => column.name) : [];
@@ -74,10 +82,91 @@ export async function exportTable(options: ExportTableOptions): Promise<string> 
       if (page.rows.length < pageSize) break;
     }
   }
-  let content = includeData ? exportRows({ format, columns, rows, table, database, dialect }) : '';
-  if (format === 'sql' && includeStructure) {
-    const ddl = await source.table.getCreateSql(table, database);
-    content = `-- Table: ${database ? `${database}.` : ''}${table}\nDROP TABLE IF EXISTS ${qualified};\n${ddl};\n${content ? `\n${content}` : ''}`;
+  const data = includeData ? exportRows({ format, columns, rows, table, database, dialect }) : '';
+  if (format !== 'sql') return data;
+  const ddl = includeStructure ? (await source.table.getCreateSql(table, database)) : '';
+  return buildSqlDump({ serverInfo, dialect, database, table, qualified, ddl, data, includeStructure, includeData });
+}
+
+interface SqlDumpParams {
+  serverInfo?: ServerInfo;
+  dialect: QueryService['dialect'];
+  database?: string;
+  table: string;
+  qualified: string;
+  ddl: string;
+  data: string;
+  includeStructure: boolean;
+  includeData: boolean;
+}
+
+function buildSqlDump(params: SqlDumpParams): string {
+  const { serverInfo, dialect, database, table, qualified, ddl, data, includeStructure, includeData } = params;
+  const dbType = dialect.dbType;
+  const parts: string[] = [];
+
+  if (serverInfo) {
+    parts.push(buildDumpHeader(serverInfo, database, dbType));
   }
-  return content;
+  const prelude = sqlPrelude(dbType);
+  if (prelude) parts.push(prelude);
+
+  if (includeStructure) {
+    parts.push('-- ----------------------------');
+    parts.push(`-- Table structure for ${table}`);
+    parts.push('-- ----------------------------');
+    parts.push(`DROP TABLE IF EXISTS ${qualified};`);
+    parts.push(`${ddl.replace(/;\s*$/, '')};`);
+  }
+
+  if (includeData && data) {
+    parts.push('-- ----------------------------');
+    parts.push(`-- Records of ${table}`);
+    parts.push('-- ----------------------------');
+    parts.push('BEGIN;');
+    parts.push(data.replace(/\n$/, ''));
+    parts.push('COMMIT;');
+  }
+
+  const epilogue = sqlEpilogue(dbType);
+  if (epilogue) parts.push(epilogue);
+
+  return parts.join('\n\n') + '\n';
+}
+
+function buildDumpHeader(info: ServerInfo, database: string | undefined, dbType: DatabaseType): string {
+  const lines: string[] = ['/*', ' DB Client Pro Dump SQL', ''];
+  lines.push(` Source Server         : ${info.name || ''}`);
+  lines.push(` Source Server Type    : ${dbType}`);
+  if (info.version) lines.push(` Source Server Version : ${info.version}`);
+  if (info.host) lines.push(` Source Host           : ${info.host}${info.port ? `:${info.port}` : ''}`);
+  if (database) lines.push(` Source Schema         : ${database}`);
+  lines.push('');
+  lines.push(` Target Server Type    : ${dbType}`);
+  lines.push(' File Encoding         : 65001');
+  lines.push('');
+  const date = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const dateStr = `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  lines.push(` Date: ${dateStr}`);
+  lines.push('*/');
+  return lines.join('\n');
+}
+
+function sqlPrelude(dbType: DatabaseType): string {
+  switch (dbType) {
+    case 'MYSQL': return 'SET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS = 0;';
+    case 'PG': return "SET client_encoding = 'UTF8';\nSET session_replication_role = 'replica';";
+    case 'SQLITE': return 'PRAGMA foreign_keys = OFF;';
+    default: return '';
+  }
+}
+
+function sqlEpilogue(dbType: DatabaseType): string {
+  switch (dbType) {
+    case 'MYSQL': return 'SET FOREIGN_KEY_CHECKS = 1;';
+    case 'PG': return "SET session_replication_role = 'origin';";
+    case 'SQLITE': return 'PRAGMA foreign_keys = ON;';
+    default: return '';
+  }
 }

@@ -117,6 +117,14 @@ export async function runExportWizard(
     : (await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, openLabel: l10n('export.selectFolder') }))?.[0];
   if (!destination) return;
   connCtx.setLast(node.conn, database);
+  const conn = node.conn;
+  let version: string | undefined;
+  try {
+    const versionSql = conn.dbType === 'MYSQL' ? 'SELECT VERSION()' : conn.dbType === 'PG' ? 'SELECT version()' : 'select sqlite_version()';
+    const vr = await session.query.query(versionSql);
+    version = Object.values(vr.rows[0] ?? {})[0] as string | undefined;
+  } catch { version = undefined; }
+  const serverInfo = { name: conn.name, dbType: conn.dbType, host: conn.host, port: conn.port, version };
   try {
     await vscode.window.withProgress({
       location: vscode.ProgressLocation.Notification,
@@ -133,6 +141,7 @@ export async function runExportWizard(
           database,
           includeStructure: exportContents.includeStructure,
           includeData: exportContents.includeData,
+          serverInfo,
           isCancelled: () => token.isCancellationRequested,
           onProgress: ({ rows }) => progress.report({ message: `${table}: ${rows} row(s)` }),
         });

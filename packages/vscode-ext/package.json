@@ -1,9 +1,9 @@
 {
   "name": "vscode-db-client",
-  "displayName": "DB Client",
-  "description": "All-in-one Database Client for VS Code",
+  "displayName": "DB Client Pro",
+  "description": "All-in-one database client for MySQL, PostgreSQL and SQLite — query, import/export, sync and design.",
   "version": "0.1.0",
-  "publisher": "local",
+  "publisher": "lang2hong",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
