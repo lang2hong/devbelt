@@ -27,7 +27,6 @@ export class TableQueryView extends BaseWebView {
   private lastFields: string[] = [];
   private editablePkColumn?: string;
   private readonly hasTable: boolean;
-  private pinned = false;
   private runningQuery?: QueryService;
   private ready = false;
   private executingPendingQuery = false;
@@ -84,12 +83,12 @@ export class TableQueryView extends BaseWebView {
     mode: 'reuse' | 'new' = 'reuse',
   ): TableQueryView {
     const existing = mode === 'reuse' ? TableQueryView.queryViews.get(conn.id) : undefined;
-    if (existing && !existing.pinned) {
+    if (existing) {
       existing.queueQuery(sql, database, onExecuted);
       return existing;
     }
     const view = new TableQueryView(conn, manager, undefined, database, vscode.ViewColumn.Beside);
-    if (!existing || !existing.pinned) TableQueryView.queryViews.set(conn.id, view);
+    TableQueryView.queryViews.set(conn.id, view);
     view.queueQuery(sql, database, onExecuted);
     return view;
   }
@@ -119,10 +118,6 @@ export class TableQueryView extends BaseWebView {
         break;
       case 'explain':
         await this.explain(msg.sql);
-        break;
-      case 'togglePin':
-        this.pinned = !this.pinned;
-        this.post({ type: 'pinChanged', pinned: this.pinned });
         break;
       case 'nextPage':
         this.offset += this.limit; await this.execute(this.buildSelect());
@@ -368,10 +363,11 @@ export class TableQueryView extends BaseWebView {
       }
       const result = results[results.length - 1];
       let pkCols: string[] = [];
+      let cols: any[] = [];
       this.editablePkColumn = undefined;
       if (this.hasTable && this.table) {
         try {
-          const cols = await session.metadata.getColumns(this.table, this.database);
+          cols = await session.metadata.getColumns(this.table, this.database);
           pkCols = cols.filter((c) => c.isPrimary).map((c) => c.name);
           if (pkCols.length === 1) this.editablePkColumn = pkCols[0];
         } catch {}
@@ -391,9 +387,14 @@ export class TableQueryView extends BaseWebView {
       this.lastFields = (result?.fields || []).map((f: any) => f.name);
       if (transactionState) this.post({ type: 'transaction', state: transactionState });
       if (this.hasTable) {
-        // 表预览模式保持单结果兼容
+        // 表预览模式：给 fields 补列类型，供 filter 智能控件
+        const colMap = new Map(cols.map((c: any) => [c.name, c]));
+        const fieldsWithType = (result?.fields || []).map((f: any) => {
+          const c = colMap.get(f.name);
+          return { name: f.name, simpleType: c?.simpleType, type: c?.type };
+        });
         this.post({
-          type: 'result', result, pkColumns: pkCols, total, sql: this.buildSelect(),
+          type: 'result', result: { ...result, fields: fieldsWithType }, pkColumns: pkCols, total, sql: this.buildSelect(),
           hiddenColumns: this.reconciledHiddenColumns(),
           columnOrder: this.reconciledColumnOrder(), columnWidths: this.reconciledColumnWidths(),
         });

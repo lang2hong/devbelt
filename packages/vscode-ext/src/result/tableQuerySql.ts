@@ -3,14 +3,19 @@ import type { DatabaseType } from '@db-client/core';
 export type FilterOp =
   | 'eq' | 'ne'
   | 'contains' | 'notContains'
-  | 'startsWith' | 'endsWith'
+  | 'startsWith' | 'notStartsWith'
+  | 'endsWith' | 'notEndsWith'
   | 'gt' | 'gte' | 'lt' | 'lte'
-  | 'isNull' | 'notNull';
+  | 'between' | 'notBetween'
+  | 'isNull' | 'notNull'
+  | 'isEmpty' | 'notEmpty'
+  | 'in' | 'notIn';
 
 export interface FilterCondition {
   column: string;
   op: FilterOp;
   value?: string;
+  value2?: string;
 }
 
 /** 纯函数：构建表预览的 SELECT / COUNT SQL，供扩展与单测复用。 */
@@ -34,19 +39,35 @@ function escapeLike(val: string): string {
 /** 构建单个过滤条件的 SQL 片段。 */
 export function buildCondition(dbType: DatabaseType, condition: FilterCondition): string {
   const w = wrapIdent(dbType, condition.column);
+  const v = condition.value ?? '';
+  const v2 = condition.value2 ?? '';
   switch (condition.op) {
-    case 'eq': return `${w} = '${escapeString(condition.value ?? '')}'`;
-    case 'ne': return `${w} <> '${escapeString(condition.value ?? '')}'`;
-    case 'contains': return `${w} LIKE '%${escapeLike(condition.value ?? '')}%'`;
-    case 'notContains': return `${w} NOT LIKE '%${escapeLike(condition.value ?? '')}%'`;
-    case 'startsWith': return `${w} LIKE '${escapeLike(condition.value ?? '')}%'`;
-    case 'endsWith': return `${w} LIKE '%${escapeLike(condition.value ?? '')}'`;
-    case 'gt': return `${w} > '${escapeString(condition.value ?? '')}'`;
-    case 'gte': return `${w} >= '${escapeString(condition.value ?? '')}'`;
-    case 'lt': return `${w} < '${escapeString(condition.value ?? '')}'`;
-    case 'lte': return `${w} <= '${escapeString(condition.value ?? '')}'`;
+    case 'eq': return `${w} = '${escapeString(v)}'`;
+    case 'ne': return `${w} <> '${escapeString(v)}'`;
+    case 'contains': return `${w} LIKE '%${escapeLike(v)}%'`;
+    case 'notContains': return `${w} NOT LIKE '%${escapeLike(v)}%'`;
+    case 'startsWith': return `${w} LIKE '${escapeLike(v)}%'`;
+    case 'notStartsWith': return `${w} NOT LIKE '${escapeLike(v)}%'`;
+    case 'endsWith': return `${w} LIKE '%${escapeLike(v)}'`;
+    case 'notEndsWith': return `${w} NOT LIKE '%${escapeLike(v)}'`;
+    case 'gt': return `${w} > '${escapeString(v)}'`;
+    case 'gte': return `${w} >= '${escapeString(v)}'`;
+    case 'lt': return `${w} < '${escapeString(v)}'`;
+    case 'lte': return `${w} <= '${escapeString(v)}'`;
+    case 'between': return `${w} BETWEEN '${escapeString(v)}' AND '${escapeString(v2)}'`;
+    case 'notBetween': return `${w} NOT BETWEEN '${escapeString(v)}' AND '${escapeString(v2)}'`;
     case 'isNull': return `${w} IS NULL`;
     case 'notNull': return `${w} IS NOT NULL`;
+    case 'isEmpty': return `${w} = ''`;
+    case 'notEmpty': return `${w} <> ''`;
+    case 'in': {
+      const items = v.split(',').map((s) => `'${escapeString(s.trim())}'`).filter((s) => s !== "''");
+      return items.length ? `${w} IN (${items.join(', ')})` : '';
+    }
+    case 'notIn': {
+      const items = v.split(',').map((s) => `'${escapeString(s.trim())}'`).filter((s) => s !== "''");
+      return items.length ? `${w} NOT IN (${items.join(', ')})` : '';
+    }
     default: return '';
   }
 }

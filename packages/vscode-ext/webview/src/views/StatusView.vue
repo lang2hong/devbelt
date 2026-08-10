@@ -7,6 +7,7 @@ const tab = ref<'process' | 'status' | 'vars'>('process');
 const processList = ref<any[]>([]);
 const statusVars = ref<any[]>([]);
 const serverVars = ref<any[]>([]);
+const summary = ref<any>(null);
 const error = ref('');
 const search = ref('');
 
@@ -16,6 +17,7 @@ onMounted(() => {
       processList.value = msg.processList || [];
       statusVars.value = msg.statusVars || [];
       serverVars.value = msg.serverVars || [];
+      summary.value = msg.summary || null;
       error.value = '';
     } else if (msg.type === 'error') {
       error.value = msg.message;
@@ -36,6 +38,13 @@ const filteredVars = computed(() => {
 
 <template>
   <div class="app">
+    <div class="summary" v-if="summary">
+      <span class="badge">{{ summary.dbType }}</span>
+      <span v-if="summary.version" class="kv"><b>Version</b> {{ summary.version }}</span>
+      <span v-if="summary.host" class="kv"><b>Host</b> {{ summary.host }}<template v-if="summary.port">:{{ summary.port }}</template></span>
+      <span v-if="summary.currentUser" class="kv"><b>User</b> {{ summary.currentUser }}</span>
+      <span v-if="summary.database" class="kv"><b>Database</b> {{ summary.database }}</span>
+    </div>
     <div class="tabs">
       <button :class="{ active: tab === 'process' }" @click="tab = 'process'">Process ({{ processList.length }})</button>
       <button :class="{ active: tab === 'status' }" @click="tab = 'status'">Status ({{ statusVars.length }})</button>
@@ -82,6 +91,9 @@ const filteredVars = computed(() => {
 
 <style scoped>
 .app { display: flex; flex-direction: column; height: 100vh; font-family: var(--vscode-font-family); }
+.summary { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border); font-size: 12px; align-items: center; }
+.summary .badge { background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); padding: 2px 8px; border-radius: 3px; font-weight: 600; }
+.summary .kv b { color: var(--vscode-descriptionForeground); margin-right: 4px; font-weight: 500; }
 .tabs { display: flex; border-bottom: 1px solid var(--vscode-panel-border); }
 .tabs button { padding: 6px 16px; font-size: 12px; cursor: pointer; border: none; background: none;
   color: var(--vscode-foreground); border-bottom: 2px solid transparent; }

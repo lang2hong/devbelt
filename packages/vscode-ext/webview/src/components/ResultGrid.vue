@@ -2,8 +2,9 @@
 import { ref, watch, computed } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 
-interface Field { name: string }
+interface Field { name: string; simpleType?: string; type?: string }
 interface Row { [key: string]: any }
+interface Cond { column: string; op: string; value?: string; value2?: string }
 
 const props = defineProps<{
   rows: Row[];
@@ -12,7 +13,7 @@ const props = defineProps<{
   hasTable: boolean;
   sortCol?: string;
   sortDir?: string;
-  filterConditions?: { column: string; op: string; value?: string }[];
+  filterConditions?: Cond[];
   columnOrder?: string[];
   columnWidths?: Record<string, number>;
   tableName?: string;
@@ -22,7 +23,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   sort: [column: string];
-  filter: [conditions: { column: string; op: string; value?: string }[]];
+  filter: [conditions: Cond[]];
   updateCell: [pkColumn: string, pkValue: any, column: string, value: string];
   deleteRows: [rows: { pkColumn: string; pkValue: any }[]];
   toggleColumn: [column: string, hidden: boolean];
@@ -31,7 +32,7 @@ const emit = defineEmits<{
 }>();
 
 const { post } = useVsCode();
-const conditions = ref<{ column: string; op: string; value?: string }[]>([]);
+const conditions = ref<Cond[]>([]);
 const showFilter = ref(false);
 const showExport = ref(false);
 const selectedRows = ref<Set<string>>(new Set());
@@ -174,29 +175,78 @@ function deleteSelected() {
   }
 }
 
-const FILTER_OPS = [
-  { value: 'eq', label: 'equals' },
-  { value: 'ne', label: 'not equals' },
-  { value: 'contains', label: 'contains' },
-  { value: 'notContains', label: 'not contains' },
-  { value: 'startsWith', label: 'starts with' },
-  { value: 'endsWith', label: 'ends with' },
-  { value: 'gt', label: 'greater than' },
-  { value: 'gte', label: '≥' },
-  { value: 'lt', label: 'less than' },
-  { value: 'lte', label: '≤' },
-  { value: 'isNull', label: 'is null' },
-  { value: 'notNull', label: 'is not null' },
+const FILTER_GROUPS = [
+  { label: 'Numeric', ops: [
+    { value: 'eq', label: '=' },
+    { value: 'ne', label: '!=' },
+    { value: 'lt', label: '<' },
+    { value: 'lte', label: '<=' },
+    { value: 'gt', label: '>' },
+    { value: 'gte', label: '>=' },
+    { value: 'between', label: 'between' },
+    { value: 'notBetween', label: 'not between' },
+  ]},
+  { label: 'String', ops: [
+    { value: 'contains', label: 'contains' },
+    { value: 'notContains', label: 'not contains' },
+    { value: 'startsWith', label: 'starts with' },
+    { value: 'notStartsWith', label: 'not starts with' },
+    { value: 'endsWith', label: 'ends with' },
+    { value: 'notEndsWith', label: 'not ends with' },
+  ]},
+  { label: 'Null/Empty', ops: [
+    { value: 'isNull', label: 'is null' },
+    { value: 'notNull', label: 'is not null' },
+    { value: 'isEmpty', label: 'is empty (\'\')' },
+    { value: 'notEmpty', label: 'is not empty' },
+  ]},
+  { label: 'Set', ops: [
+    { value: 'in', label: 'in list' },
+    { value: 'notIn', label: 'not in list' },
+  ]},
 ];
 
+const NO_VALUE_OPS = ['isNull', 'notNull', 'isEmpty', 'notEmpty'];
+const DUAL_VALUE_OPS = ['between', 'notBetween'];
+const MULTI_VALUE_OPS = ['in', 'notIn'];
+const DATE_TYPES = new Set(['date']);
+const DATETIME_TYPES = new Set(['datetime', 'timestamp']);
+const NUMBER_TYPES = new Set(['int', 'integer', 'bigint', 'smallint', 'mediumint', 'tinyint', 'decimal', 'numeric', 'float', 'double', 'real']);
+
+function fieldOf(name: string): Field | undefined {
+  return props.fields.find((f) => f.name === name);
+}
+function parseEnumValues(type?: string): string[] {
+  if (!type) return [];
+  const m = type.match(/(?:enum|set)\s*\((.*)\)/i);
+  if (!m) return [];
+  return m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean);
+}
+function enumValuesOf(name: string): string[] {
+  return parseEnumValues(fieldOf(name)?.type);
+}
+function isEnumColumn(name: string): boolean {
+  const f = fieldOf(name);
+  return !!(f && /^(enum|set)/i.test(f.simpleType || '') && enumValuesOf(name).length);
+}
+function isDateColumn(name: string): boolean {
+  return DATE_TYPES.has((fieldOf(name)?.simpleType || '').toLowerCase());
+}
+function isDateTimeColumn(name: string): boolean {
+  return DATETIME_TYPES.has((fieldOf(name)?.simpleType || '').toLowerCase());
+}
+function isNumberColumn(name: string): boolean {
+  return NUMBER_TYPES.has((fieldOf(name)?.simpleType || '').toLowerCase());
+}
+
 function addCondition() {
-  conditions.value.push({ column: '', op: 'contains', value: '' });
+  conditions.value.push({ column: '', op: 'contains', value: '', value2: '' });
 }
 
 function toggleFilterPanel() {
   showFilter.value = !showFilter.value;
   if (showFilter.value && conditions.value.length === 0) {
-    conditions.value.push({ column: '', op: 'contains', value: '' });
+    conditions.value.push({ column: '', op: 'contains', value: '', value2: '' });
   }
 }
 
@@ -256,14 +306,30 @@ watch(() => props.filterConditions, (conds) => {
         <span v-if="activeFilterSummary" class="filter-summary" @click="toggleFilterPanel">{{ activeFilterSummary }}</span>
         <div v-if="showFilter" class="filter-panel">
           <div v-for="(cond, index) in conditions" :key="index" class="filter-row">
-            <select v-model="cond.column" class="input">
-              <option value="">--</option>
+            <select v-model="cond.column" class="input col-select">
+              <option value="">-- column --</option>
               <option v-for="f in fields" :key="f.name" :value="f.name">{{ f.name }}</option>
             </select>
-            <select v-model="cond.op" class="input">
-              <option v-for="op in FILTER_OPS" :key="op.value" :value="op.value">{{ op.label }}</option>
+            <select v-model="cond.op" class="input op-select">
+              <optgroup v-for="g in FILTER_GROUPS" :key="g.label" :label="g.label">
+                <option v-for="op in g.ops" :key="op.value" :value="op.value">{{ op.label }}</option>
+              </optgroup>
             </select>
-            <input v-if="cond.op !== 'isNull' && cond.op !== 'notNull'" v-model="cond.value" class="input" placeholder="value..." />
+            <template v-if="!NO_VALUE_OPS.includes(cond.op)">
+              <template v-if="DUAL_VALUE_OPS.includes(cond.op)">
+                <input v-model="cond.value" class="input" placeholder="from" />
+                <span class="sep">~</span>
+                <input v-model="cond.value2" class="input" placeholder="to" />
+              </template>
+              <select v-else-if="isEnumColumn(cond.column)" v-model="cond.value" class="input">
+                <option value="">-- value --</option>
+                <option v-for="ev in enumValuesOf(cond.column)" :key="ev" :value="ev">{{ ev }}</option>
+              </select>
+              <input v-else-if="isDateColumn(cond.column)" v-model="cond.value" class="input" type="date" />
+              <input v-else-if="isDateTimeColumn(cond.column)" v-model="cond.value" class="input" type="datetime-local" />
+              <input v-else-if="isNumberColumn(cond.column)" v-model="cond.value" class="input" type="number" />
+              <input v-else v-model="cond.value" class="input" :placeholder="MULTI_VALUE_OPS.includes(cond.op) ? 'v1, v2, v3' : 'value...'" />
+            </template>
             <button class="btn" @click="removeCondition(index)">✕</button>
           </div>
           <div class="filter-actions">
@@ -273,14 +339,6 @@ watch(() => props.filterConditions, (conds) => {
         </div>
       </div>
     </template>
-    <div class="export-wrap">
-      <button class="btn" :disabled="!rows.length" @click="startExport()">Export ▾</button>
-      <div v-if="showExport" class="export-menu">
-        <button class="menu-item" @click="startExport('csv')">CSV</button>
-        <button class="menu-item" @click="startExport('json')">JSON</button>
-        <button class="menu-item" @click="startExport('sql')">SQL</button>
-      </div>
-    </div>
     <button v-if="hasTable" class="btn" @click="$emit('resetProfile')">Reset Layout</button>
     <div v-if="hasTable" class="col-menu-wrap">
       <button class="btn" @click="showColumnMenu = !showColumnMenu">Columns</button>
@@ -289,6 +347,14 @@ watch(() => props.filterConditions, (conds) => {
           <input type="checkbox" :checked="!isHidden(f.name)" @change="toggleColumnVisibility(f.name)" />
           {{ f.name }}
         </label>
+      </div>
+    </div>
+    <div class="export-wrap">
+      <button class="btn" :disabled="!rows.length" @click="startExport()">Export ▾</button>
+      <div v-if="showExport" class="export-menu">
+        <button class="menu-item" @click="startExport('csv')">CSV</button>
+        <button class="menu-item" @click="startExport('json')">JSON</button>
+        <button class="menu-item" @click="startExport('sql')">SQL</button>
       </div>
     </div>
   </div>
@@ -361,10 +427,14 @@ td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
 .col-menu-item { display: flex; align-items: center; gap: 6px; padding: 3px 6px; font-size: 12px; cursor: pointer; white-space: nowrap; }
 .col-menu-item:hover { background: var(--vscode-list-hoverBackground); }
 .filter-wrap, .export-wrap { position: relative; }
-.filter-panel { position: absolute; top: 100%; left: 0; z-index: 10; margin-top: 2px; min-width: 420px;
-  background: var(--vscode-editor-background); border: 1px solid var(--vscode-panel-border); border-radius: 3px; padding: 6px; }
-.filter-row { display: flex; gap: 4px; align-items: center; margin-bottom: 4px; }
-.filter-row .input { flex: 1; }
+.filter-panel { position: absolute; top: 100%; left: 0; z-index: 10; margin-top: 2px; min-width: 540px; max-width: 640px;
+  background: var(--vscode-editor-background); border: 1px solid var(--vscode-input-border); border-radius: 4px; padding: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25); }
+.filter-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.filter-row .col-select { flex: 0 0 150px; }
+.filter-row .op-select { flex: 0 0 140px; }
+.filter-row .input { flex: 1; min-width: 0; }
+.filter-row .sep { flex: 0 0 auto; color: var(--vscode-descriptionForeground); font-size: 12px; }
 .filter-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
 .filter-summary { font-size: 11px; color: var(--vscode-descriptionForeground); cursor: pointer; max-width: 300px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

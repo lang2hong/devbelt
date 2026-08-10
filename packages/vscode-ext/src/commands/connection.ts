@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { DbTreeNode, NodeKind } from '../tree/dbTreeNode';
 import { ConnectionForm } from '../connection/connectionForm';
 import type { SavedConnection } from '../connection/connectionStore';
+import { StatusView } from '../result/statusView';
 import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
 import { confirm } from './shared';
@@ -31,6 +32,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     treeProvider.markOpen(conn.id);
     connCtx.setLast(conn);
     treeProvider.refresh();
+    StatusView.open(conn, manager);
   });
 
   sub('dbclient.closeConnection', (node: DbTreeNode) => {

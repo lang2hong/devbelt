@@ -2,6 +2,16 @@ import type { SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from './baseWebView';
 
+export interface ServerSummary {
+  dbType: string;
+  version?: string;
+  host?: string;
+  port?: number;
+  user?: string;
+  database?: string;
+  currentUser?: string;
+}
+
 export class StatusView extends BaseWebView {
   private static current?: StatusView;
 
@@ -24,15 +34,37 @@ export class StatusView extends BaseWebView {
     if (msg.type !== 'ready') return;
     try {
       const session = await this.manager.connect(this.conn);
-      const [processList, statusVars, serverVars] = await Promise.all([
+      const [processList, statusVars, serverVars, summary] = await Promise.all([
         session.metadata.getProcessList(),
         session.metadata.getStatusVariables(),
         session.metadata.getServerVariables(),
+        this.querySummary(session as any),
       ]);
-      this.post({ type: 'data', processList, statusVars, serverVars });
+      this.post({ type: 'data', processList, statusVars, serverVars, summary });
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
     }
+  }
+
+  private async querySummary(session: any): Promise<ServerSummary> {
+    const dbType = session.query.dialect.dbType;
+    const conn = this.conn;
+    const summary: ServerSummary = { dbType, host: conn.host, port: conn.port, user: conn.user, database: conn.database };
+    try {
+      if (dbType === 'MYSQL') {
+        const r = await session.query.query('SELECT VERSION() AS v, DATABASE() AS d, CURRENT_USER() AS u');
+        const row = r.rows[0] as any;
+        summary.version = row?.v; summary.database = row?.d ?? conn.database; summary.currentUser = row?.u;
+      } else if (dbType === 'PG') {
+        const r = await session.query.query('SELECT version() AS v, current_user AS u, current_database() AS d');
+        const row = r.rows[0] as any;
+        summary.version = row?.v; summary.database = row?.d ?? conn.database; summary.currentUser = row?.u;
+      } else {
+        const r = await session.query.query('select sqlite_version() AS v');
+        summary.version = (r.rows[0] as any)?.v;
+      }
+    } catch { /* 省略，概要可选 */ }
+    return summary;
   }
 
   protected onDispose(): void {

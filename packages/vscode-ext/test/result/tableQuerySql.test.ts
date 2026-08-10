@@ -40,10 +40,22 @@ describe('tableQuerySql', () => {
       [{ column: 'a', op: 'lte', value: 'x' }, '`a` <= \'x\''],
       [{ column: 'a', op: 'isNull' }, '`a` IS NULL'],
       [{ column: 'a', op: 'notNull' }, '`a` IS NOT NULL'],
+      [{ column: 'a', op: 'notStartsWith', value: 'x' }, '`a` NOT LIKE \'x%\''],
+      [{ column: 'a', op: 'notEndsWith', value: 'x' }, '`a` NOT LIKE \'%x\''],
+      [{ column: 'a', op: 'isEmpty' }, "`a` = ''"],
+      [{ column: 'a', op: 'notEmpty' }, "`a` <> ''"],
+      [{ column: 'a', op: 'between', value: '1', value2: '10' }, "`a` BETWEEN '1' AND '10'"],
+      [{ column: 'a', op: 'notBetween', value: '1', value2: '10' }, "`a` NOT BETWEEN '1' AND '10'"],
+      [{ column: 'a', op: 'in', value: '1, 2, 3' }, "`a` IN ('1', '2', '3')"],
+      [{ column: 'a', op: 'notIn', value: '1, 2' }, "`a` NOT IN ('1', '2')"],
     ];
     for (const [condition, expected] of cases) {
       expect(buildCondition(DatabaseType.MYSQL, condition)).toBe(expected);
     }
+  });
+
+  it('returns empty IN clause when no values', () => {
+    expect(buildCondition(DatabaseType.MYSQL, { column: 'a', op: 'in', value: '' })).toBe('');
   });
 
   it('escapes quotes and wildcards in values', () => {
