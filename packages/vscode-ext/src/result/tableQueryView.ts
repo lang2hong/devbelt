@@ -319,7 +319,7 @@ export class TableQueryView extends BaseWebView {
   private buildSelect(): string {
     if (!this.hasTable || !this.table) return '';
     return buildTableSelect(
-      this.conn.dbType, this.table, this.database || this.conn.database, this.filterConditions,
+      this.conn.dbType, this.table, undefined, this.filterConditions,
       this.sortCol, this.sortDir, this.offset, this.limit,
     );
   }
@@ -327,7 +327,7 @@ export class TableQueryView extends BaseWebView {
   /** 构建 COUNT 查询（用于分页总条数）。 */
   private getCountSql(): string {
     if (!this.hasTable || !this.table) return '';
-    return buildCountSql(this.conn.dbType, this.table, this.database, this.filterConditions);
+    return buildCountSql(this.conn.dbType, this.table, undefined, this.filterConditions);
   }
 
   private async runInitial(): Promise<void> {
@@ -339,14 +339,14 @@ export class TableQueryView extends BaseWebView {
   private async execute(
     sql: string,
     onExecuted?: (result: any, error?: Error) => void,
-    database = this.database,
+    database = this.database || this.conn.database,
   ): Promise<void> {
     try {
       if (!(await confirmSqlExecution(this.conn, sql))) return;
       this.post({ type: 'running' });
       const session = await this.manager.connect(this.conn);
       this.runningQuery = session.query;
-      if (!this.hasTable && database && this.conn.dbType === 'MYSQL') {
+      if (database && this.conn.dbType === 'MYSQL') {
         await session.query.query(`USE ${session.query.wrap(validateIdent(database))}`);
       }
       const stmts = splitSqlStatements(sql);
