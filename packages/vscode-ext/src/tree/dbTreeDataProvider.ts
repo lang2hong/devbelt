@@ -392,7 +392,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     } else {
       node.id = conn.id;
       node.description = this.connVersions.get(conn.id) || '';
-      node.iconPath = new ThemeIcon('server', new ThemeColor('gitDecoration.addedForeground'));
+      node.iconPath = new ThemeIcon('server', new ThemeColor('gitDecoration.untrackedResourceForeground'));
     }
     return node;
   }
