@@ -213,7 +213,7 @@ export class ConnectionStore {
     for (const field of ConnectionStore.SENSITIVE_FIELDS) {
       const key = this.secretKey(connection.id, field);
       const value = sanitized[field];
-      if (typeof value === 'string') {
+      if (typeof value === 'string' && value.length > 0) {
         await this.secrets.store(key, value);
         this.secretCache.set(key, value);
         delete sanitized[field];

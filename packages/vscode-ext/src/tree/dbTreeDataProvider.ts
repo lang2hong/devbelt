@@ -334,7 +334,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
           g.id,
         ),
     );
-    const cNodes = ungrouped.map((c) => this.makeConnectionNode(c));
+    const cNodes = ungrouped.map((c) => this.makeConnectionNode(this.withCredentials(c)));
     return [...gNodes, ...cNodes];
   }
 
@@ -353,8 +353,13 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
           g.id,
         ),
     );
-    const cNodes = conns.map((c) => this.makeConnectionNode(c));
+    const cNodes = conns.map((c) => this.makeConnectionNode(this.withCredentials(c)));
     return [...gNodes, ...cNodes];
+  }
+
+  /** 用 store 中 materialize 的连接替换原始（无凭据）连接，确保树节点携带密码。 */
+  private withCredentials(conn: SavedConnection): SavedConnection {
+    return this.store.get(conn.id) || conn;
   }
 
   /** 创建连接节点：未打开时无箭头+双击触发打开；已打开时可展开 */

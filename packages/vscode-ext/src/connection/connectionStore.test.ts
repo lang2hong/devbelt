@@ -131,4 +131,35 @@ describe('ConnectionStore credential handling', () => {
 
     expect(store.get('primary')!.password).toBe('legacy-password');
   });
+
+  it('materializes a saved password back into the connection', async () => {
+    const memento = createMemento({ groups: [], connections: [] });
+    const secrets = createSecrets();
+    const store = new ConnectionStore(memento, secrets as any);
+    await store.save({
+      id: 'primary', name: 'Primary', dbType: 'MYSQL' as any,
+      host: 'localhost', port: 3306, user: 'root', password: 'db-secret',
+    });
+
+    expect(store.get('primary')!.password).toBe('db-secret');
+    expect(store.list()[0].password).toBe('db-secret');
+  });
+
+  it('does not overwrite an existing password when saving an empty value', async () => {
+    const memento = createMemento({ groups: [], connections: [] });
+    const secrets = createSecrets();
+    const store = new ConnectionStore(memento, secrets as any);
+    await store.save({
+      id: 'primary', name: 'Primary', dbType: 'MYSQL' as any,
+      host: 'localhost', port: 3306, user: 'root', password: 'db-secret',
+    });
+
+    await store.save({
+      id: 'primary', name: 'Primary', dbType: 'MYSQL' as any,
+      host: 'localhost', port: 3306, user: 'root', password: '',
+    });
+
+    expect(await secrets.get('dbclient.connection.primary.password')).toBe('db-secret');
+    expect(store.get('primary')!.password).toBe('db-secret');
+  });
 });
