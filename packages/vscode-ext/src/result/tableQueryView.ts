@@ -168,25 +168,35 @@ export class TableQueryView extends BaseWebView {
         await this.exportData(msg.format, msg.columns || [], msg.rows || []);
         break;
       case 'completion': {
+        const KW_DEFAULT = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER', 'SHOW', 'USE', 'TRUNCATE', 'WITH'];
+        const FUNCTIONS = ['COUNT', 'SUM', 'AVG', 'MAX', 'MIN', 'CONCAT', 'NOW', 'CURDATE', 'DATE_FORMAT', 'IFNULL', 'COALESCE', 'SUBSTRING', 'LEFT', 'RIGHT', 'UPPER', 'LOWER', 'TRIM', 'ROUND', 'ABS', 'DATEDIFF'];
+        const OPS = ['AND', 'OR', 'NOT', 'IN', 'LIKE', 'BETWEEN', 'IS', 'NULL', 'EXISTS'];
         try {
           const session = await this.manager.connect(this.conn);
           const before = String(msg.before || '');
           const text = String(msg.text || '');
           const db = this.database || this.conn.database;
+          const tablesOf = async () => (await session.metadata.getTables(db)).map((t: any) => t.name);
+          const colsOfFrom = async () => {
+            const fm = text.match(/\bFROM\s+`?([\w.]+)`?/i);
+            const ft = fm ? fm[1].split('.').pop() : undefined;
+            return ft ? (await session.metadata.getColumns(ft, db)).map((c: any) => c.name) : [];
+          };
           let items: string[] = [];
+          const inSelect = /\bSELECT\b/i.test(before) && !/\bFROM\b/i.test(before);
           if (/\b(FROM|JOIN|UPDATE|INTO)\s+\w*$/i.test(before)) {
-            items = (await session.metadata.getTables(db)).map((t: any) => t.name);
+            items = await tablesOf();
+          } else if (/\.\w*$/.test(before)) {
+            const m = before.match(/(\w+)\.\w*$/);
+            if (m) items = (await session.metadata.getColumns(m[1], db)).map((c: any) => c.name);
+          } else if (inSelect) {
+            items = [...(await colsOfFrom()), ...FUNCTIONS, 'DISTINCT', '*'];
+          } else if (/\b(WHERE|HAVING|AND|OR)\s+\w*$/i.test(before)) {
+            items = [...(await colsOfFrom()), ...FUNCTIONS, ...OPS];
+          } else if (/\b(ORDER|GROUP)\s+BY\s+\w*$/i.test(before)) {
+            items = [...(await colsOfFrom()), 'ASC', 'DESC'];
           } else {
-            const colMatch = before.match(/(\w+)\.\w*$/);
-            if (colMatch) {
-              items = (await session.metadata.getColumns(colMatch[1], db)).map((c: any) => c.name);
-            } else if (/\b(SELECT|WHERE|ORDER|GROUP|HAVING|AND|OR|ON|SET)\s+\w*$/i.test(before) || /,\s*\w*$/.test(before)) {
-              const fm = text.match(/\bFROM\s+`?([\w.]+)`?/i);
-              const ft = fm ? fm[1].split('.').pop() : undefined;
-              if (ft) items = (await session.metadata.getColumns(ft, db)).map((c: any) => c.name);
-            } else {
-              items = (await session.metadata.getTables(db)).map((t: any) => t.name);
-            }
+            items = [...KW_DEFAULT, ...(await tablesOf())];
           }
           this.post({ type: 'completionItems', items });
         } catch {
