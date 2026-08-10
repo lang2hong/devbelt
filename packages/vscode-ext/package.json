@@ -672,7 +672,11 @@
         },
         "dbclient.language": {
           "type": "string",
-          "enum": ["auto", "zh", "en"],
+          "enum": [
+            "auto",
+            "zh",
+            "en"
+          ],
           "default": "auto",
           "description": "Extension language. auto follows VS Code display language.",
           "markdownDescription": "扩展语言。`auto` 跟随 VS Code 显示语言。"
@@ -728,13 +732,14 @@
     "package": "@vscode/vsce package"
   },
   "dependencies": {
+    "@vuepic/vue-datepicker": "^14.0.0",
     "ssh2": "^1.16.1"
   },
   "devDependencies": {
     "@db-client/core": "workspace:*",
+    "@types/node": "^20.0.0",
     "@types/ssh2": "^1.15.0",
     "@types/vscode": "^1.85.0",
-    "@types/node": "^20.0.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.24.0",

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
+import { VueDatePicker } from '@vuepic/vue-datepicker';
+import '@vuepic/vue-datepicker/dist/main.css';
 
 interface Field { name: string; simpleType?: string; type?: string }
 interface Row { [key: string]: any }
@@ -175,43 +177,32 @@ function deleteSelected() {
   }
 }
 
-const FILTER_GROUPS = [
-  { label: 'Numeric', ops: [
-    { value: 'eq', label: '=' },
-    { value: 'ne', label: '!=' },
-    { value: 'lt', label: '<' },
-    { value: 'lte', label: '<=' },
-    { value: 'gt', label: '>' },
-    { value: 'gte', label: '>=' },
-    { value: 'between', label: 'between' },
-    { value: 'notBetween', label: 'not between' },
-  ]},
-  { label: 'String', ops: [
-    { value: 'contains', label: 'contains' },
-    { value: 'notContains', label: 'not contains' },
-    { value: 'startsWith', label: 'starts with' },
-    { value: 'notStartsWith', label: 'not starts with' },
-    { value: 'endsWith', label: 'ends with' },
-    { value: 'notEndsWith', label: 'not ends with' },
-  ]},
-  { label: 'Null/Empty', ops: [
-    { value: 'isNull', label: 'is null' },
-    { value: 'notNull', label: 'is not null' },
-    { value: 'isEmpty', label: 'is empty (\'\')' },
-    { value: 'notEmpty', label: 'is not empty' },
-  ]},
-  { label: 'Set', ops: [
-    { value: 'in', label: 'in list' },
-    { value: 'notIn', label: 'not in list' },
-  ]},
+const FILTER_OPS = [
+  { value: 'eq', label: '=' },
+  { value: 'ne', label: '!=' },
+  { value: 'contains', label: 'contains' },
+  { value: 'notContains', label: 'not contains' },
+  { value: 'startsWith', label: 'starts with' },
+  { value: 'endsWith', label: 'ends with' },
+  { value: 'notStartsWith', label: 'not starts with' },
+  { value: 'notEndsWith', label: 'not ends with' },
+  { value: 'gt', label: '>' },
+  { value: 'gte', label: '>=' },
+  { value: 'lt', label: '<' },
+  { value: 'lte', label: '<=' },
+  { value: 'between', label: 'between' },
+  { value: 'notBetween', label: 'not between' },
+  { value: 'in', label: 'in list' },
+  { value: 'notIn', label: 'not in list' },
+  { value: 'isNull', label: 'is null' },
+  { value: 'notNull', label: 'is not null' },
+  { value: 'isEmpty', label: "is empty ('')" },
+  { value: 'notEmpty', label: 'is not empty' },
 ];
 
 const NO_VALUE_OPS = ['isNull', 'notNull', 'isEmpty', 'notEmpty'];
 const DUAL_VALUE_OPS = ['between', 'notBetween'];
 const MULTI_VALUE_OPS = ['in', 'notIn'];
-const DATE_TYPES = new Set(['date']);
-const DATETIME_TYPES = new Set(['datetime', 'timestamp']);
-const TIME_TYPES = new Set(['time']);
 const NUMBER_TYPES = new Set(['int', 'integer', 'bigint', 'smallint', 'mediumint', 'tinyint', 'decimal', 'numeric', 'float', 'double', 'real']);
 
 function fieldOf(name: string): Field | undefined {
@@ -226,21 +217,28 @@ function parseEnumValues(type?: string): string[] {
 function enumValuesOf(name: string): string[] {
   return parseEnumValues(fieldOf(name)?.type);
 }
+function typeStrOf(name: string): string {
+  const f = fieldOf(name);
+  return (f?.simpleType || f?.type || '').toLowerCase();
+}
 function isEnumColumn(name: string): boolean {
   const f = fieldOf(name);
-  return !!(f && /^(enum|set)/i.test(f.simpleType || '') && enumValuesOf(name).length);
-}
-function isDateColumn(name: string): boolean {
-  return DATE_TYPES.has((fieldOf(name)?.simpleType || '').toLowerCase());
-}
-function isTimeColumn(name: string): boolean {
-  return TIME_TYPES.has((fieldOf(name)?.simpleType || '').toLowerCase());
+  return !!(f && /^(enum|set)/i.test(f.simpleType || f.type || '') && enumValuesOf(name).length);
 }
 function isDateTimeColumn(name: string): boolean {
-  return DATETIME_TYPES.has((fieldOf(name)?.simpleType || '').toLowerCase());
+  const t = typeStrOf(name);
+  return t.includes('datetime') || t.includes('timestamp');
+}
+function isDateColumn(name: string): boolean {
+  const t = typeStrOf(name);
+  return t === 'date' || (t.includes('date') && !t.includes('time'));
+}
+function isTimeColumn(name: string): boolean {
+  const t = typeStrOf(name);
+  return t === 'time' || (t.includes('time') && !t.includes('date'));
 }
 function isNumberColumn(name: string): boolean {
-  return NUMBER_TYPES.has((fieldOf(name)?.simpleType || '').toLowerCase());
+  return NUMBER_TYPES.has(typeStrOf(name));
 }
 
 function addCondition() {
@@ -260,6 +258,7 @@ function removeCondition(index: number) {
 
 function applyFilter() {
   emit('filter', conditions.value.filter((c) => c.column));
+  showFilter.value = false;
 }
 
 const activeFilterSummary = computed(() => {
@@ -315,9 +314,7 @@ watch(() => props.filterConditions, (conds) => {
               <option v-for="f in fields" :key="f.name" :value="f.name">{{ f.name }}</option>
             </select>
             <select v-model="cond.op" class="input op-select">
-              <optgroup v-for="g in FILTER_GROUPS" :key="g.label" :label="g.label">
-                <option v-for="op in g.ops" :key="op.value" :value="op.value">{{ op.label }}</option>
-              </optgroup>
+              <option v-for="op in FILTER_OPS" :key="op.value" :value="op.value">{{ op.label }}</option>
             </select>
             <template v-if="!NO_VALUE_OPS.includes(cond.op)">
               <template v-if="DUAL_VALUE_OPS.includes(cond.op)">
@@ -329,9 +326,29 @@ watch(() => props.filterConditions, (conds) => {
                 <option value="">-- value --</option>
                 <option v-for="ev in enumValuesOf(cond.column)" :key="ev" :value="ev">{{ ev }}</option>
               </select>
-              <input v-else-if="isDateColumn(cond.column)" v-model="cond.value" class="input" type="date" />
+              <VueDatePicker
+                v-else-if="isDateTimeColumn(cond.column)"
+                v-model="cond.value"
+                :enable-time-picker="true"
+                format="yyyy-MM-dd HH:mm"
+                model-type="yyyy-MM-dd HH:mm"
+                auto-apply
+                teleport-to="body"
+                :placeholder="'datetime...'"
+                class="dp-input"
+              />
+              <VueDatePicker
+                v-else-if="isDateColumn(cond.column)"
+                v-model="cond.value"
+                :enable-time-picker="false"
+                format="yyyy-MM-dd"
+                model-type="yyyy-MM-dd"
+                auto-apply
+                teleport-to="body"
+                :placeholder="'date...'"
+                class="dp-input"
+              />
               <input v-else-if="isTimeColumn(cond.column)" v-model="cond.value" class="input" type="time" />
-              <input v-else-if="isDateTimeColumn(cond.column)" v-model="cond.value" class="input" type="datetime-local" />
               <input v-else-if="isNumberColumn(cond.column)" v-model="cond.value" class="input" type="number" />
               <input v-else v-model="cond.value" class="input" :placeholder="MULTI_VALUE_OPS.includes(cond.op) ? 'v1, v2, v3' : 'value...'" />
             </template>
@@ -440,6 +457,10 @@ td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
 .filter-row .op-select { flex: 0 0 140px; }
 .filter-row .input { flex: 1; min-width: 0; }
 .filter-row .sep { flex: 0 0 auto; color: var(--vscode-descriptionForeground); font-size: 12px; }
+.filter-row .dp-input { flex: 1; min-width: 0; }
+.filter-row .dp-input :deep(input) { width: 100%; font-size: 12px; padding: 4px 8px;
+  background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border); border-radius: 3px; box-sizing: border-box; }
 .filter-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
 .filter-summary { font-size: 11px; color: var(--vscode-descriptionForeground); cursor: pointer; max-width: 300px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

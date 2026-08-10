@@ -15,5 +15,8 @@
   "devDependencies": {
     "@vscode/vsce": "^3.9.2",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@vuepic/vue-datepicker": "^14.0.0"
   }
 }
