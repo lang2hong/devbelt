@@ -9,6 +9,7 @@ import { validateIdent } from '@db-client/core';
 import { TableProfileStore } from './tableProfileStore';
 import { exportRows, type TransferFormat } from '../data/transfer/exportService';
 import { buildCountSql, buildTableSelect, type FilterCondition } from './tableQuerySql';
+import { buildCandidates, detectContext, extractFromTable } from '../completion/sqlCompletionEngine';
 
 /**
  * 表/查询视图：Vue 3 webview 模式。
@@ -168,36 +169,22 @@ export class TableQueryView extends BaseWebView {
         await this.exportData(msg.format, msg.columns || [], msg.rows || []);
         break;
       case 'completion': {
-        const KW_DEFAULT = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER', 'SHOW', 'USE', 'TRUNCATE', 'WITH'];
-        const FUNCTIONS = ['COUNT', 'SUM', 'AVG', 'MAX', 'MIN', 'CONCAT', 'NOW', 'CURDATE', 'DATE_FORMAT', 'IFNULL', 'COALESCE', 'SUBSTRING', 'LEFT', 'RIGHT', 'UPPER', 'LOWER', 'TRIM', 'ROUND', 'ABS', 'DATEDIFF'];
-        const OPS = ['AND', 'OR', 'NOT', 'IN', 'LIKE', 'BETWEEN', 'IS', 'NULL', 'EXISTS'];
         try {
           const session = await this.manager.connect(this.conn);
           const before = String(msg.before || '');
           const text = String(msg.text || '');
           const db = this.database || this.conn.database;
-          const tablesOf = async () => (await session.metadata.getTables(db)).map((t: any) => t.name);
-          const colsOfFrom = async () => {
-            const fm = text.match(/\bFROM\s+`?([\w.]+)`?/i);
-            const ft = fm ? fm[1].split('.').pop() : undefined;
-            return ft ? (await session.metadata.getColumns(ft, db)).map((c: any) => c.name) : [];
-          };
-          let items: string[] = [];
-          const inSelect = /\bSELECT\b/i.test(before) && !/\bFROM\b/i.test(before);
-          if (/\b(FROM|JOIN|UPDATE|INTO)\s+\w*$/i.test(before)) {
-            items = await tablesOf();
-          } else if (/\.\w*$/.test(before)) {
+          const tables = (await session.metadata.getTables(db)).map((t: any) => t.name);
+          const fromTable = extractFromTable(text);
+          const ctx = detectContext(before);
+          let columns: string[] = [];
+          if (ctx === 'dot_column') {
             const m = before.match(/(\w+)\.\w*$/);
-            if (m) items = (await session.metadata.getColumns(m[1], db)).map((c: any) => c.name);
-          } else if (inSelect) {
-            items = [...(await colsOfFrom()), ...FUNCTIONS, 'DISTINCT', '*'];
-          } else if (/\b(WHERE|HAVING|AND|OR)\s+\w*$/i.test(before)) {
-            items = [...(await colsOfFrom()), ...FUNCTIONS, ...OPS];
-          } else if (/\b(ORDER|GROUP)\s+BY\s+\w*$/i.test(before)) {
-            items = [...(await colsOfFrom()), 'ASC', 'DESC'];
-          } else {
-            items = [...KW_DEFAULT, ...(await tablesOf())];
+            if (m) columns = (await session.metadata.getColumns(m[1], db)).map((c: any) => c.name);
+          } else if (fromTable) {
+            columns = (await session.metadata.getColumns(fromTable, db)).map((c: any) => c.name);
           }
+          const items = buildCandidates(ctx, { tables, columns, fromTable });
           this.post({ type: 'completionItems', items });
         } catch {
           this.post({ type: 'completionItems', items: [] });

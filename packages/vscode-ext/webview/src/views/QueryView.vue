@@ -6,7 +6,8 @@ import ResultGrid from '../components/ResultGrid.vue';
 const { post, onMessage } = useVsCode();
 
 const sql = ref('');
-const completionItems = ref<string[]>([]);
+const completionItems = ref<{ label: string; kind: string }[]>([]);
+let lastPrefix = '';
 const completionIndex = ref(0);
 const showCompletion = ref(false);
 let completionTimer: any;
@@ -34,6 +35,14 @@ const running = ref(false);
 
 const totalPages = computed(() => total.value === undefined ? 0 : Math.max(1, Math.ceil(total.value / limit)));
 const currentPage = computed(() => total.value === undefined ? 0 : Math.floor(offset.value / limit) + 1);
+
+function filterByPrefix(items: { label: string; kind: string }[], prefix: string) {
+  if (!prefix) return items;
+  const p = prefix.toLowerCase();
+  return items.filter((c) => c.label.toLowerCase().startsWith(p));
+}
+const filteredCandidates = computed(() => filterByPrefix(completionItems.value, lastPrefix));
+watch(filteredCandidates, () => { completionIndex.value = 0; });
 
 onMounted(() => {
   onMessage((msg: any) => {
@@ -102,7 +111,7 @@ onMounted(() => {
     } else if (msg.type === 'completionItems') {
       completionItems.value = msg.items || [];
       completionIndex.value = 0;
-      showCompletion.value = completionItems.value.length > 0;
+      showCompletion.value = filteredCandidates.value.length > 0;
     } else if (msg.type === 'error') {
       error.value = msg.message;
       rows.value = [];
@@ -226,6 +235,7 @@ function onSqlInput(e: Event) {
   const ta = e.target as HTMLTextAreaElement;
   const caret = ta.selectionStart ?? 0;
   const before = ta.value.slice(0, caret);
+  lastPrefix = (before.match(/(\w*)$/)?.[1] || '');
   clearTimeout(completionTimer);
   completionTimer = setTimeout(() => {
     post({ type: 'completion', before, text: ta.value });
@@ -233,7 +243,8 @@ function onSqlInput(e: Event) {
 }
 
 function acceptCompletion() {
-  const item = completionItems.value[completionIndex.value];
+  const list = filteredCandidates.value;
+  const item = list[completionIndex.value];
   showCompletion.value = false;
   if (!item) return;
   const ta = document.querySelector('.editor') as HTMLTextAreaElement | null;
@@ -242,8 +253,8 @@ function acceptCompletion() {
   const before = sql.value.slice(0, caret);
   const m = before.match(/(\w+)$/);
   const start = m ? caret - m[1].length : caret;
-  sql.value = sql.value.slice(0, start) + item + sql.value.slice(caret);
-  const pos = start + item.length;
+  sql.value = sql.value.slice(0, start) + item.label + sql.value.slice(caret);
+  const pos = start + item.label.length;
   setTimeout(() => { ta.focus(); ta.setSelectionRange(pos, pos); }, 0);
 }
 
@@ -253,9 +264,9 @@ function selectCompletion(i: number) {
 }
 
 function onKeydown(e: KeyboardEvent) {
-  if (showCompletion.value && completionItems.value.length) {
-    if (e.key === 'ArrowDown') { e.preventDefault(); completionIndex.value = (completionIndex.value + 1) % completionItems.value.length; return; }
-    if (e.key === 'ArrowUp') { e.preventDefault(); completionIndex.value = (completionIndex.value - 1 + completionItems.value.length) % completionItems.value.length; return; }
+  if (showCompletion.value && filteredCandidates.value.length) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); completionIndex.value = (completionIndex.value + 1) % filteredCandidates.value.length; return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); completionIndex.value = (completionIndex.value - 1 + filteredCandidates.value.length) % filteredCandidates.value.length; return; }
     if (e.key === 'Enter') { e.preventDefault(); acceptCompletion(); return; }
     if (e.key === 'Escape') { e.preventDefault(); showCompletion.value = false; return; }
   }
@@ -270,7 +281,7 @@ function onKeydown(e: KeyboardEvent) {
   <div class="app">
     <textarea v-model="sql" class="editor" @input="onSqlInput" @keydown="onKeydown" placeholder="Enter SQL..."></textarea>
     <div v-if="showCompletion" class="completion">
-      <div v-for="(it, i) in completionItems" :key="it" :class="['comp-item', { sel: i === completionIndex }]" @mousedown.prevent="selectCompletion(i)">{{ it }}</div>
+      <div v-for="(c, i) in filteredCandidates" :key="c.label" :class="['comp-item', 'kind-' + c.kind, { sel: i === completionIndex }]" @mousedown.prevent="selectCompletion(i)">{{ c.label }}</div>
     </div>
     <div class="action-bar">
       <button class="btn primary" :disabled="running" @click="run">Run</button>
@@ -328,6 +339,11 @@ function onKeydown(e: KeyboardEvent) {
 .comp-item { padding: 3px 10px; font-size: 12px; cursor: pointer; white-space: nowrap;
   color: var(--vscode-foreground); }
 .comp-item.sel { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+.comp-item.kind-keyword { color: var(--vscode-symbolIcon-keywordForeground, #569cd6); }
+.comp-item.kind-table { color: var(--vscode-symbolIcon-classForeground, #dcdcaa); }
+.comp-item.kind-column { color: var(--vscode-symbolIcon-fieldForeground, #9cdcfe); }
+.comp-item.kind-function { color: var(--vscode-symbolIcon-functionForeground, #dcdcaa); }
+.comp-item.kind-operator { color: var(--vscode-symbolIcon-operatorForeground, #d4d4d4); }
 .action-bar { padding: 4px 8px; display: flex; gap: 6px; align-items: center; border-bottom: 1px solid var(--vscode-panel-border); }
   .spacer { flex: 1; }
   .page-info { font-size: 12px; color: var(--vscode-descriptionForeground); white-space: nowrap; }
