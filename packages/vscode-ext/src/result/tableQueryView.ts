@@ -8,6 +8,7 @@ import type { QueryService } from '@db-client/core';
 import { validateIdent } from '@db-client/core';
 import { TableProfileStore } from './tableProfileStore';
 import { exportRows, type TransferFormat } from '../data/transfer/exportService';
+import { buildCountSql, buildTableSelect, type FilterCondition } from './tableQuerySql';
 
 /**
  * 表/查询视图：Vue 3 webview 模式。
@@ -19,8 +20,7 @@ export class TableQueryView extends BaseWebView {
   private readonly limit = 100;
   private sortCol = '';
   private sortDir = '';
-  private filterCol = '';
-  private filterVal = '';
+  private filterConditions: FilterCondition[] = [];
   private hiddenColumns: string[] = [];
   private columnOrder: string[] = [];
   private columnWidths: Record<string, number> = {};
@@ -54,8 +54,9 @@ export class TableQueryView extends BaseWebView {
       if (saved) {
         this.sortCol = saved.sortCol || '';
         this.sortDir = saved.sortDir || '';
-        this.filterCol = saved.filterCol || '';
-        this.filterVal = saved.filterVal || '';
+        this.filterConditions = Array.isArray(saved.filterConditions)
+          ? (saved.filterConditions as FilterCondition[]).filter((c) => c && typeof c.column === 'string')
+          : [];
         this.hiddenColumns = saved.hiddenColumns || [];
         this.columnOrder = saved.columnOrder || [];
         this.columnWidths = saved.columnWidths || {};
@@ -107,8 +108,13 @@ export class TableQueryView extends BaseWebView {
         }
         break;
       case 'run':
-        this.sortCol = ''; this.sortDir = ''; this.filterCol = ''; this.filterVal = ''; this.offset = 0;
-        await this.execute(msg.sql);
+        this.offset = 0;
+        if (this.hasTable) {
+          // 表模式下 Run 用当前筛选/排序重建 SQL 执行，保留 filter 状态
+          await this.execute(this.buildSelect());
+        } else {
+          await this.execute(msg.sql);
+        }
         break;
       case 'nextPage':
         this.offset += this.limit; await this.execute(this.buildSelect());
@@ -126,7 +132,7 @@ export class TableQueryView extends BaseWebView {
         break;
       case 'filter':
         if (!this.hasTable) return;
-        this.filterCol = msg.column || ''; this.filterVal = msg.value || '';
+        this.filterConditions = Array.isArray(msg.conditions) ? msg.conditions : [];
         this.offset = 0; await this.execute(this.buildSelect());
         await this.persistProfile();
         break;
@@ -176,8 +182,7 @@ export class TableQueryView extends BaseWebView {
       dbName: this.database || '',
       sortCol: this.sortCol,
       sortDir: this.sortDir,
-      filterCol: this.filterCol,
-      filterVal: this.filterVal,
+      filterConditions: this.filterConditions,
       hiddenColumns: this.hiddenColumns,
       columnOrder: this.reconciledColumnOrder(),
       columnWidths: this.reconciledColumnWidths(),
@@ -220,8 +225,7 @@ export class TableQueryView extends BaseWebView {
     await TableQueryView.profileStore.save(this.conn.id, this.database, this.table, {
       sortCol: this.sortCol,
       sortDir: this.sortDir,
-      filterCol: this.filterCol,
-      filterVal: this.filterVal,
+      filterConditions: this.filterConditions,
       hiddenColumns: this.hiddenColumns,
       columnOrder: this.columnOrder,
       columnWidths: this.columnWidths,
@@ -264,8 +268,7 @@ export class TableQueryView extends BaseWebView {
     if (!this.table || !TableQueryView.profileStore) return;
     this.sortCol = '';
     this.sortDir = '';
-    this.filterCol = '';
-    this.filterVal = '';
+    this.filterConditions = [];
     this.hiddenColumns = [];
     this.columnOrder = [];
     this.columnWidths = {};
@@ -298,24 +301,16 @@ export class TableQueryView extends BaseWebView {
 
   private buildSelect(): string {
     if (!this.hasTable || !this.table) return '';
-    const w = this.conn.dbType === 'MYSQL' ? '`' : '"';
-    const tbl = this.database
-      ? `${w}${this.database}${w}.${w}${this.table}${w}`
-      : `${w}${this.table}${w}`;
-    let sql = `SELECT * FROM ${tbl}`;
-    if (this.filterCol && this.filterVal) {
-      sql += ` WHERE ${w}${this.filterCol}${w} LIKE ${this.escapeLike(this.filterVal)}`;
-    }
-    if (this.sortCol && this.sortDir) {
-      sql += ` ORDER BY ${w}${this.sortCol}${w} ${this.sortDir}`;
-    }
-    sql += ` LIMIT ${this.limit} OFFSET ${this.offset}`;
-    return sql;
+    return buildTableSelect(
+      this.conn.dbType, this.table, this.database, this.filterConditions,
+      this.sortCol, this.sortDir, this.offset, this.limit,
+    );
   }
 
-  private escapeLike(val: string): string {
-    const escaped = val.replace(/\\/g, '\\\\').replace(/'/g, "''").replace(/%/g, '\\%').replace(/_/g, '\\_');
-    return `'${escaped}%'`;
+  /** 构建 COUNT 查询（用于分页总条数）。 */
+  private getCountSql(): string {
+    if (!this.hasTable || !this.table) return '';
+    return buildCountSql(this.conn.dbType, this.table, this.database, this.filterConditions);
   }
 
   private async runInitial(): Promise<void> {
@@ -349,9 +344,22 @@ export class TableQueryView extends BaseWebView {
           if (pkCols.length === 1) this.editablePkColumn = pkCols[0];
         } catch {}
       }
+      // 表预览时并行查询过滤后总条数，用于分页信息
+      let total: number | undefined;
+      if (this.hasTable) {
+        const countSql = this.getCountSql();
+        if (countSql) {
+          try {
+            const countResult = await session.query.query(countSql);
+            const countRow = countResult?.rows?.[0];
+            total = countRow ? Number(countRow.total ?? countRow.count ?? countRow.COUNT) : undefined;
+          } catch { /* COUNT 失败不阻塞结果展示 */ }
+        }
+      }
       this.lastFields = (result?.fields || []).map((f: any) => f.name);
       this.post({
-        type: 'result', result, pkColumns: pkCols, hiddenColumns: this.reconciledHiddenColumns(),
+        type: 'result', result, pkColumns: pkCols, total, sql: this.buildSelect(),
+        hiddenColumns: this.reconciledHiddenColumns(),
         columnOrder: this.reconciledColumnOrder(), columnWidths: this.reconciledColumnWidths(),
       });
       onExecuted?.(result);
@@ -417,7 +425,57 @@ export class TableQueryView extends BaseWebView {
       }
       const { DialectRegistry } = await import('@db-client/core');
       const dialect = DialectRegistry.get(this.conn.dbType as any);
-      const content = exportRows({ format, columns, rows, table: this.table, database: this.database, dialect });
+
+      // 范围选择：当前页 / 全表 / 当前 SQL
+      const rangeOptions: { label: string; value: 'page' | 'all' }[] = [
+        { label: vscode.l10n.t('Current page') + ` (${rows.length} rows)`, value: 'page' },
+      ];
+      if (this.hasTable && this.table) rangeOptions.unshift({ label: vscode.l10n.t('Entire table'), value: 'all' as const });
+      const range = rangeOptions.length > 1
+        ? (await vscode.window.showQuickPick(rangeOptions, { placeHolder: vscode.l10n.t('Export range') }))?.value
+        : 'page';
+      if (!range) return;
+
+      let exportColumns = columns;
+      if (range === 'all' && this.table) {
+        const session = await this.manager.connect(this.conn);
+        const { exportTable } = await import('../data/transfer/exportService');
+        const allColumns = (await session.metadata.getColumns(this.table, this.database)).map((c: any) => c.name);
+        // 字段勾选
+        const picked = await vscode.window.showQuickPick(
+          allColumns.map((c: string) => ({ label: c, picked: true })),
+          { canPickMany: true, placeHolder: vscode.l10n.t('Select columns to export') },
+        );
+        if (!picked?.length) return;
+        exportColumns = picked.map((p) => p.label);
+        const content = await exportTable({
+          source: { query: session.query, metadata: session.metadata, table: session.table },
+          format, table: this.table, database: this.database,
+          columns: exportColumns,
+        });
+        const uri = await vscode.window.showSaveDialog({
+          defaultUri: vscode.Uri.file(`${this.table}_export.${format}`),
+          filters: { [format.toUpperCase()]: [format] },
+        });
+        if (!uri) return;
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
+        this.post({ type: 'exported', message: vscode.l10n.t('Exported to {path}', { path: uri.fsPath }) });
+        return;
+      }
+
+      // 当前页：字段勾选
+      const picked = await vscode.window.showQuickPick(
+        columns.map((c) => ({ label: c, picked: true })),
+        { canPickMany: true, placeHolder: vscode.l10n.t('Select columns to export') },
+      );
+      if (!picked?.length) return;
+      exportColumns = picked.map((p) => p.label);
+      const projectedRows = rows.map((row) => {
+        const out: Record<string, any> = {};
+        for (const c of exportColumns) out[c] = row[c];
+        return out;
+      });
+      const content = exportRows({ format, columns: exportColumns, rows: projectedRows, table: this.table, database: this.database, dialect });
       const baseName = this.table || 'result';
       const uri = await vscode.window.showSaveDialog({
         defaultUri: vscode.Uri.file(`${baseName}_export.${format}`),
@@ -425,7 +483,7 @@ export class TableQueryView extends BaseWebView {
       });
       if (!uri) return;
       await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
-      this.post({ type: 'exported', message: `Exported ${rows.length} row(s) to ${uri.fsPath}.` });
+      this.post({ type: 'exported', message: vscode.l10n.t('Exported {count} row(s) to {path}', { count: projectedRows.length, path: uri.fsPath }) });
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
     }

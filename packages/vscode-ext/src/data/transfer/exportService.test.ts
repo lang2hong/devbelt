@@ -34,4 +34,31 @@ describe('exportRows', () => {
     expect(content).toContain('DROP TABLE IF EXISTS `users`;');
     expect(content).toContain('CREATE TABLE `users` (`id` INT);');
   });
+
+  it('exports only the selected columns', async () => {
+    const seen: string[] = [];
+    const query = {
+      query: async (sql: string) => { seen.push(sql); return { rows: [{ id: 1, name: 'Ada', email: 'a@b.c' }], fields: [], sql, costTime: 0 }; },
+      dialect: {
+        wrap: (name: string) => `\`${name}\``,
+        getPagedSql: (sql: string, offset: number, limit: number) => `${sql} LIMIT ${limit} OFFSET ${offset}`,
+        buildInsertSql: (_rows: Record<string, unknown>[], cols: string[]) => `INSERT ${cols.join(',')}`,
+      },
+    };
+    const content = await exportTable({
+      source: {
+        query: query as any,
+        metadata: { getColumns: async () => [{ name: 'id' }, { name: 'name' }, { name: 'email' }] as any },
+        table: { getCreateSql: async () => '' },
+      },
+      format: 'sql',
+      table: 'users',
+      columns: ['id', 'name'],
+      pageSize: 100,
+    });
+
+    expect(seen[0]).toContain('`id`, `name`');
+    expect(seen[0]).not.toContain('`email`');
+    expect(content).toContain('INSERT id,name');
+  });
 });

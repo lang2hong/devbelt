@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import ResultGrid from '../components/ResultGrid.vue';
 
@@ -14,16 +14,19 @@ const error = ref('');
 const meta = ref('');
 const sortCol = ref('');
 const sortDir = ref('');
-const filterCol = ref('');
-const filterVal = ref('');
+const filterConditions = ref<{ column: string; op: string; value?: string }[]>([]);
 const hiddenColumns = ref<string[]>([]);
 const columnOrder = ref<string[]>([]);
 const columnWidths = ref<Record<string, number>>({});
 const offset = ref(0);
 const limit = 100;
+const total = ref<number | undefined>(undefined);
 const tableName = ref('');
 const dbName = ref('');
 const running = ref(false);
+
+const totalPages = computed(() => total.value === undefined ? 0 : Math.max(1, Math.ceil(total.value / limit)));
+const currentPage = computed(() => total.value === undefined ? 0 : Math.floor(offset.value / limit) + 1);
 
 onMounted(() => {
   onMessage((msg: any) => {
@@ -34,8 +37,7 @@ onMounted(() => {
       dbName.value = msg.dbName || '';
       sortCol.value = msg.sortCol || '';
       sortDir.value = msg.sortDir || '';
-      filterCol.value = msg.filterCol || '';
-      filterVal.value = msg.filterVal || '';
+      filterConditions.value = Array.isArray(msg.filterConditions) ? msg.filterConditions : [];
       hiddenColumns.value = msg.hiddenColumns || [];
       columnOrder.value = msg.columnOrder || [];
       columnWidths.value = msg.columnWidths || {};
@@ -48,6 +50,8 @@ onMounted(() => {
       rows.value = msg.result.rows || [];
       fields.value = msg.result.fields || [];
       pkColumns.value = msg.pkColumns || [];
+      total.value = msg.total;
+      if (msg.sql) sql.value = msg.sql;
       if (msg.hiddenColumns) hiddenColumns.value = msg.hiddenColumns;
       if (msg.columnOrder) columnOrder.value = msg.columnOrder;
       if (msg.columnWidths) columnWidths.value = msg.columnWidths;
@@ -61,8 +65,7 @@ onMounted(() => {
     } else if (msg.type === 'profileReset') {
       sortCol.value = '';
       sortDir.value = '';
-      filterCol.value = '';
-      filterVal.value = '';
+      filterConditions.value = [];
       hiddenColumns.value = [];
       columnOrder.value = [];
       columnWidths.value = {};
@@ -72,6 +75,7 @@ onMounted(() => {
       error.value = msg.message;
       rows.value = [];
       fields.value = [];
+      total.value = undefined;
       meta.value = '';
     } else if (msg.type === 'cellUpdated') {
       meta.value = 'Cell updated.';
@@ -113,9 +117,10 @@ function handleSort(col: string) {
   post({ type: 'sort', column: col });
 }
 
-function handleFilter(col: string, val: string) {
+function handleFilter(conditions: { column: string; op: string; value?: string }[]) {
   if (!hasTable.value) return;
-  post({ type: 'filter', column: col, value: val });
+  filterConditions.value = conditions;
+  post({ type: 'filter', conditions });
 }
 
 function handleUpdateCell(pkCol: string, pkVal: any, col: string, val: string) {
@@ -152,8 +157,12 @@ function onKeydown(e: KeyboardEvent) {
     <div class="action-bar">
       <button class="btn primary" :disabled="running" @click="run">Run</button>
       <button v-if="running" class="btn" @click="cancel">Cancel</button>
-      <button v-if="hasTable" class="btn" @click="prevPage">◀ Prev</button>
-      <button v-if="hasTable" class="btn" @click="nextPage">Next ▶</button>
+      <div class="spacer"></div>
+      <span v-if="hasTable && total !== undefined" class="page-info">
+        Page {{ currentPage }} / {{ totalPages }} · {{ total }} row(s)
+      </span>
+      <button v-if="hasTable" class="btn" :disabled="currentPage <= 1" @click="prevPage">◀ Prev</button>
+      <button v-if="hasTable" class="btn" :disabled="currentPage >= totalPages" @click="nextPage">Next ▶</button>
     </div>
     <div class="meta" v-if="meta">{{ meta }}</div>
     <div class="error" v-if="error">{{ error }}</div>
@@ -164,8 +173,7 @@ function onKeydown(e: KeyboardEvent) {
       :has-table="hasTable"
       :sort-col="sortCol"
       :sort-dir="sortDir"
-      :filter-col="filterCol"
-      :filter-val="filterVal"
+      :filter-conditions="filterConditions"
       :column-order="columnOrder"
       :column-widths="columnWidths"
       :table-name="tableName"
@@ -189,6 +197,8 @@ function onKeydown(e: KeyboardEvent) {
   border: none; border-bottom: 1px solid var(--vscode-panel-border);
   font-family: var(--vscode-editor-font-family); font-size: 13px; }
 .action-bar { padding: 4px 8px; display: flex; gap: 6px; align-items: center; border-bottom: 1px solid var(--vscode-panel-border); }
+  .spacer { flex: 1; }
+  .page-info { font-size: 12px; color: var(--vscode-descriptionForeground); white-space: nowrap; }
 .btn { padding: 3px 10px; font-size: 12px; cursor: pointer; border: none; border-radius: 3px;
   background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
 .btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }

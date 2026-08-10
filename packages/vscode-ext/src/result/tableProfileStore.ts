@@ -5,8 +5,7 @@
 export interface TableProfile {
   sortCol?: string;
   sortDir?: string;
-  filterCol?: string;
-  filterVal?: string;
+  filterConditions?: { column: string; op: string; value?: string }[];
   /** 被隐藏的列名（按当前字段列表求交集后使用） */
   hiddenColumns?: string[];
   /** 用户调整后的列显示顺序（按当前字段列表求交集后使用） */

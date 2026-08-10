@@ -22,6 +22,8 @@ export interface ExportTableOptions {
   database?: string;
   includeStructure?: boolean;
   includeData?: boolean;
+  /** Only export these columns; omit for all columns. */
+  columns?: string[];
   pageSize?: number;
   onProgress?: (progress: ExportProgress) => void;
   isCancelled?: () => boolean;
@@ -53,15 +55,20 @@ export function exportRows(options: ExportRowsOptions): string {
 
 /** Reads a full table in bounded pages instead of inheriting the result-view row limit. */
 export async function exportTable(options: ExportTableOptions): Promise<string> {
-  const { source, format, table, database, includeStructure = false, includeData = true, pageSize = 1000, onProgress, isCancelled } = options;
+  const { source, format, table, database, includeStructure = false, includeData = true, columns: selectedColumns, pageSize = 1000, onProgress, isCancelled } = options;
   const dialect = source.query.dialect;
   const qualified = database ? `${dialect.wrap(database)}.${dialect.wrap(table)}` : dialect.wrap(table);
-  const columns = includeData ? (await source.metadata.getColumns(table, database)).map((column) => column.name) : [];
+  const allColumns = includeData ? (await source.metadata.getColumns(table, database)).map((column) => column.name) : [];
+  const columns = includeData
+    ? (selectedColumns && selectedColumns.length ? selectedColumns.filter((c) => allColumns.includes(c)) : allColumns)
+    : [];
+  const colList = columns.map((c) => dialect.wrap(c)).join(', ');
+  const selectCols = colList || '*';
   const rows: Record<string, unknown>[] = [];
   if (includeData) {
     for (let offset = 0;; offset += pageSize) {
       if (isCancelled?.()) throw new TransferCancelledError();
-      const page = await source.query.query(dialect.getPagedSql(`SELECT * FROM ${qualified}`, offset, pageSize));
+      const page = await source.query.query(dialect.getPagedSql(`SELECT ${selectCols} FROM ${qualified}`, offset, pageSize));
       rows.push(...page.rows);
       onProgress?.({ rows: rows.length });
       if (page.rows.length < pageSize) break;

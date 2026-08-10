@@ -15,7 +15,8 @@ export function useVsCode() {
   }
 
   function post(msg: any): void {
-    _vscode!.postMessage(msg);
+    // Vue reactive proxy 无法被 structured clone 序列化，必须先转为纯对象。
+    _vscode!.postMessage(JSON.parse(JSON.stringify(msg)));
   }
 
   function onMessage(handler: (msg: any) => void): () => void {

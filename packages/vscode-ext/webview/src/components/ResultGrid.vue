@@ -12,8 +12,7 @@ const props = defineProps<{
   hasTable: boolean;
   sortCol?: string;
   sortDir?: string;
-  filterCol?: string;
-  filterVal?: string;
+  filterConditions?: { column: string; op: string; value?: string }[];
   columnOrder?: string[];
   columnWidths?: Record<string, number>;
   tableName?: string;
@@ -23,7 +22,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   sort: [column: string];
-  filter: [column: string, value: string];
+  filter: [conditions: { column: string; op: string; value?: string }[]];
   updateCell: [pkColumn: string, pkValue: any, column: string, value: string];
   deleteRows: [rows: { pkColumn: string; pkValue: any }[]];
   toggleColumn: [column: string, hidden: boolean];
@@ -32,8 +31,9 @@ const emit = defineEmits<{
 }>();
 
 const { post } = useVsCode();
-const filterCol = ref('');
-const filterVal = ref('');
+const conditions = ref<{ column: string; op: string; value?: string }[]>([]);
+const showFilter = ref(false);
+const showExport = ref(false);
 const selectedRows = ref<Set<string>>(new Set());
 const editingCell = ref<string | null>(null);
 const editValue = ref('');
@@ -174,21 +174,65 @@ function deleteSelected() {
   }
 }
 
-function applyFilter() {
-  post({ type: 'filter', column: filterCol.value, value: filterVal.value });
+const FILTER_OPS = [
+  { value: 'eq', label: 'equals' },
+  { value: 'ne', label: 'not equals' },
+  { value: 'contains', label: 'contains' },
+  { value: 'notContains', label: 'not contains' },
+  { value: 'startsWith', label: 'starts with' },
+  { value: 'endsWith', label: 'ends with' },
+  { value: 'gt', label: 'greater than' },
+  { value: 'gte', label: '≥' },
+  { value: 'lt', label: 'less than' },
+  { value: 'lte', label: '≤' },
+  { value: 'isNull', label: 'is null' },
+  { value: 'notNull', label: 'is not null' },
+];
+
+function addCondition() {
+  conditions.value.push({ column: '', op: 'contains', value: '' });
 }
 
-function exportData(format: 'json' | 'csv' | 'sql') {
+function toggleFilterPanel() {
+  showFilter.value = !showFilter.value;
+  if (showFilter.value && conditions.value.length === 0) {
+    conditions.value.push({ column: '', op: 'contains', value: '' });
+  }
+}
+
+function removeCondition(index: number) {
+  conditions.value.splice(index, 1);
+}
+
+function applyFilter() {
+  emit('filter', conditions.value.filter((c) => c.column));
+}
+
+const activeFilterSummary = computed(() => {
+  const active = conditions.value.filter((c) => c.column);
+  if (!active.length) return '';
+  return active.map((c) => {
+    const val = c.op === 'isNull' || c.op === 'notNull' ? '' : ` ${c.value ?? ''}`;
+    return `${c.column} ${c.op}${val}`.trim();
+  }).join(' AND ');
+});
+
+function exportData(format: 'csv' | 'json' | 'sql') {
   if (!props.rows.length) return;
   post({ type: 'exportData', format, columns: visibleFields.value.map(f => f.name), rows: props.rows });
 }
 
+function startExport(format?: 'csv' | 'json' | 'sql') {
+  if (!format) {
+    showExport.value = !showExport.value;
+    return;
+  }
+  showExport.value = false;
+  exportData(format);
+}
+
 watch([() => props.fields, () => props.columnOrder], () => {
   displayedOrder.value = normalizedOrder();
-  if (!props.fields.some((field) => field.name === filterCol.value)) {
-    filterCol.value = '';
-    filterVal.value = '';
-  }
   selectedRows.value.clear();
 }, { immediate: true });
 
@@ -196,9 +240,8 @@ watch(() => props.columnWidths, (widths) => {
   localColumnWidths.value = { ...(widths || {}) };
 }, { immediate: true });
 
-watch(() => [props.filterCol, props.filterVal], ([column, value]) => {
-  filterCol.value = column || '';
-  filterVal.value = value || '';
+watch(() => props.filterConditions, (conds) => {
+  conditions.value = (conds || []).map((c) => ({ ...c }));
 }, { immediate: true });
 </script>
 
@@ -208,16 +251,36 @@ watch(() => [props.filterCol, props.filterVal], ([column, value]) => {
       Delete ({{ selectedRows.size }})
     </button>
     <template v-if="hasTable">
-      <span>Filter:</span>
-      <select v-model="filterCol" class="input">
-        <option value="">--</option>
-        <option v-for="f in fields" :key="f.name" :value="f.name">{{ f.name }}</option>
-      </select>
-      <input v-model="filterVal" class="input" placeholder="value..." @keydown.enter="applyFilter" />
+      <div class="filter-wrap">
+        <button class="btn" @click="toggleFilterPanel">Filter</button>
+        <span v-if="activeFilterSummary" class="filter-summary" @click="toggleFilterPanel">{{ activeFilterSummary }}</span>
+        <div v-if="showFilter" class="filter-panel">
+          <div v-for="(cond, index) in conditions" :key="index" class="filter-row">
+            <select v-model="cond.column" class="input">
+              <option value="">--</option>
+              <option v-for="f in fields" :key="f.name" :value="f.name">{{ f.name }}</option>
+            </select>
+            <select v-model="cond.op" class="input">
+              <option v-for="op in FILTER_OPS" :key="op.value" :value="op.value">{{ op.label }}</option>
+            </select>
+            <input v-if="cond.op !== 'isNull' && cond.op !== 'notNull'" v-model="cond.value" class="input" placeholder="value..." />
+            <button class="btn" @click="removeCondition(index)">✕</button>
+          </div>
+          <div class="filter-actions">
+            <button class="btn" @click="addCondition">+ Add</button>
+            <button class="btn primary" @click="applyFilter">Apply</button>
+          </div>
+        </div>
+      </div>
     </template>
-    <button class="btn" @click="exportData('csv')">CSV</button>
-    <button class="btn" @click="exportData('sql')">SQL</button>
-    <button class="btn" @click="exportData('json')">JSON</button>
+    <div class="export-wrap">
+      <button class="btn" :disabled="!rows.length" @click="startExport()">Export ▾</button>
+      <div v-if="showExport" class="export-menu">
+        <button class="menu-item" @click="startExport('csv')">CSV</button>
+        <button class="menu-item" @click="startExport('json')">JSON</button>
+        <button class="menu-item" @click="startExport('sql')">SQL</button>
+      </div>
+    </div>
     <button v-if="hasTable" class="btn" @click="$emit('resetProfile')">Reset Layout</button>
     <div v-if="hasTable" class="col-menu-wrap">
       <button class="btn" @click="showColumnMenu = !showColumnMenu">Columns</button>
@@ -297,4 +360,17 @@ td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
   background: var(--vscode-editor-background); border: 1px solid var(--vscode-panel-border); border-radius: 3px; padding: 4px; }
 .col-menu-item { display: flex; align-items: center; gap: 6px; padding: 3px 6px; font-size: 12px; cursor: pointer; white-space: nowrap; }
 .col-menu-item:hover { background: var(--vscode-list-hoverBackground); }
+.filter-wrap, .export-wrap { position: relative; }
+.filter-panel { position: absolute; top: 100%; left: 0; z-index: 10; margin-top: 2px; min-width: 420px;
+  background: var(--vscode-editor-background); border: 1px solid var(--vscode-panel-border); border-radius: 3px; padding: 6px; }
+.filter-row { display: flex; gap: 4px; align-items: center; margin-bottom: 4px; }
+.filter-row .input { flex: 1; }
+.filter-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
+.filter-summary { font-size: 11px; color: var(--vscode-descriptionForeground); cursor: pointer; max-width: 300px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.export-menu { position: absolute; top: 100%; right: 0; z-index: 10; margin-top: 2px; min-width: 120px;
+  background: var(--vscode-editor-background); border: 1px solid var(--vscode-panel-border); border-radius: 3px; padding: 4px; }
+.menu-item { display: block; width: 100%; text-align: left; padding: 4px 8px; font-size: 12px; cursor: pointer;
+  background: transparent; border: none; color: var(--vscode-foreground); }
+.menu-item:hover { background: var(--vscode-list-hoverBackground); }
 </style>

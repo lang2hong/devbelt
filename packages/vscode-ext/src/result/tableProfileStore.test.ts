@@ -18,14 +18,13 @@ describe('TableProfileStore', () => {
   it('saves and reads back table display preferences', async () => {
     const store = new TableProfileStore(makeMemento());
     await store.save('c1', 'app', 'users', {
-      sortCol: 'id', sortDir: 'DESC', filterCol: 'name', filterVal: 'a', hiddenColumns: ['secret'],
+      sortCol: 'id', sortDir: 'DESC', filterConditions: [{ column: 'name', op: 'contains', value: 'a' }], hiddenColumns: ['secret'],
       columnOrder: ['name', 'id'], columnWidths: { name: 280 },
     });
     const profile = store.get('c1', 'app', 'users');
     expect(profile?.sortCol).toBe('id');
     expect(profile?.sortDir).toBe('DESC');
-    expect(profile?.filterCol).toBe('name');
-    expect(profile?.filterVal).toBe('a');
+    expect(profile?.filterConditions).toEqual([{ column: 'name', op: 'contains', value: 'a' }]);
     expect(profile?.hiddenColumns).toEqual(['secret']);
     expect(profile?.columnOrder).toEqual(['name', 'id']);
     expect(profile?.columnWidths).toEqual({ name: 280 });
@@ -34,11 +33,10 @@ describe('TableProfileStore', () => {
   it('merges successive saves instead of overwriting unrelated fields', async () => {
     const store = new TableProfileStore(makeMemento());
     await store.save('c1', 'app', 'users', { sortCol: 'id', sortDir: 'ASC' });
-    await store.save('c1', 'app', 'users', { filterCol: 'name', filterVal: 'a' });
+    await store.save('c1', 'app', 'users', { filterConditions: [{ column: 'name', op: 'eq', value: 'a' }] });
     const profile = store.get('c1', 'app', 'users');
     expect(profile?.sortCol).toBe('id');
-    expect(profile?.filterCol).toBe('name');
-    expect(profile?.filterVal).toBe('a');
+    expect(profile?.filterConditions).toEqual([{ column: 'name', op: 'eq', value: 'a' }]);
   });
 
   it('isolates profiles by connection, database, and table', async () => {

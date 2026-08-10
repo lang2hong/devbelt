@@ -57,13 +57,19 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.viewTableStructure', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    connCtx.setLast(node.conn, node.database);
     const session = await manager.connect(node.conn);
     const columns = await session.metadata.getColumns(node.label, node.database);
-    executor.renderExternal({
+    const result = {
       sql: `DESCRIBE ${wrapIdent(node.conn, node.label)}`,
-      costTime: 0, rows: columns,
+      costTime: 0,
+      rows: columns as any[],
       fields: Object.keys(columns[0] || {}).map((name) => ({ name })),
-    } as any);
+      truncated: false,
+    } as any;
+    await executor.run(node.conn, `DESCRIBE ${wrapIdent(node.conn, node.label)};`, node.database);
+    // run 创建视图后，在 ready 回调中由 execute 渲染；这里用 renderExternal 直接推送结构结果
+    executor.renderExternal(result);
   });
 
   sub('dbclient.viewTableSource', async (node: DbTreeNode) => {
