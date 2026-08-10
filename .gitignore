@@ -6,4 +6,5 @@ out/
 .vscode/
 *.tsbuildinfo
 .env
-.env.local*.vsix
+.env.local
+*.vsix
