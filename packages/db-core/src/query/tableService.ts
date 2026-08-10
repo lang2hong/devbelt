@@ -229,38 +229,75 @@ export class TableService {
     return inserted;
   }
 
-  /** 按列名/类型生成 Mock 值 */
+  /** 按列名/类型生成 Mock 值（感知 enum 合法值与 varchar 长度） */
   private mockValue(col: ColumnMeta, seq: number): string {
     const name = (col.name || '').toLowerCase();
     const type = (col.simpleType || col.type || '').toLowerCase();
+    const fullType = col.type || '';
+    const isNumeric = /int|bigint|serial|decimal|float|double|bool|bit/.test(type);
+    const isTemporal = /date|time|year/.test(type);
 
-    // 语义匹配
-    if (name.includes('email')) return `'user${seq}@example.com'`;
-    if (name.includes('phone') || name.includes('mobile')) return `'1${String(Math.floor(Math.random() * 9e9)).padStart(9, '0')}'`;
-    if (name.includes('name')) return `'${this.randomName()}'`;
-    if (name.includes('address')) return `'${this.randomAddress()}'`;
-    if (name.includes('city')) return `'${this.randomCity()}'`;
-    if (name.includes('url') || name.includes('website')) return `'https://example.com/${seq}'`;
-    if (name.includes('avatar') || name.includes('image')) return `'https://example.com/avatar/${seq}.png'`;
-    if (name.includes('password')) return `'${this.randomString(12)}'`;
-    if (name.includes('token')) return `'${this.randomString(32)}'`;
-    if (name.includes('ip')) return `'${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}'`;
-    if (name.includes('status')) return `'${['active', 'inactive', 'pending'][seq % 3]}'`;
-    if (name.includes('code')) return `'${this.randomString(8).toUpperCase()}'`;
-    if (name.includes('desc') || name.includes('content') || name.includes('comment')) return `'Mock data ${seq}'`;
-
-    // 类型匹配
-    if (type.includes('int') || type.includes('bigint') || type.includes('serial')) return String(seq + 1);
-    if (type.includes('bool') || type.includes('bit')) return seq % 2 === 0 ? '1' : '0';
-    if (type.includes('decimal') || type.includes('float') || type.includes('double')) return (Math.random() * 10000).toFixed(2);
-    if (type.includes('date') || type.includes('time') || type.includes('year')) {
+    let val: string;
+    const enumVals = this.parseEnum(fullType);
+    if (enumVals.length) {
+      val = enumVals[seq % enumVals.length];
+    } else if (name.includes('email')) {
+      val = `user${seq}@example.com`;
+    } else if (name.includes('phone') || name.includes('mobile')) {
+      val = `1${String(Math.floor(Math.random() * 9e9)).padStart(9, '0')}`;
+    } else if (name.includes('name')) {
+      val = this.randomName();
+    } else if (name.includes('address')) {
+      val = this.randomAddress();
+    } else if (name.includes('city')) {
+      val = this.randomCity();
+    } else if (name.includes('url') || name.includes('website')) {
+      val = `https://example.com/${seq}`;
+    } else if (name.includes('avatar') || name.includes('image')) {
+      val = `https://example.com/avatar/${seq}.png`;
+    } else if (name.includes('password')) {
+      val = this.randomString(12);
+    } else if (name.includes('token')) {
+      val = this.randomString(32);
+    } else if (name.includes('ip')) {
+      val = `${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
+    } else if (name.includes('status')) {
+      val = ['active', 'inactive', 'pending'][seq % 3];
+    } else if (name.includes('code')) {
+      val = this.randomString(8).toUpperCase();
+    } else if (name.includes('desc') || name.includes('content') || name.includes('comment')) {
+      val = `Mock data ${seq}`;
+    } else if (type.includes('int') || type.includes('bigint') || type.includes('serial')) {
+      val = String(seq + 1);
+    } else if (type.includes('bool') || type.includes('bit')) {
+      val = seq % 2 === 0 ? '1' : '0';
+    } else if (type.includes('decimal') || type.includes('float') || type.includes('double')) {
+      val = (Math.random() * 10000).toFixed(2);
+    } else if (isTemporal) {
       const d = new Date(Date.now() - Math.floor(Math.random() * 365 * 86400000));
-      return `'${d.toISOString().slice(0, 19).replace('T', ' ')}'`;
+      val = d.toISOString().slice(0, 19).replace('T', ' ');
+    } else if (type.includes('text') || type.includes('blob')) {
+      val = `Mock ${seq}`;
+    } else {
+      val = this.randomString(10);
     }
-    if (type.includes('text') || type.includes('blob')) return `'Mock ${seq}'`;
 
-    // 默认：随机字符串
-    return `'${this.randomString(10)}'`;
+    // 字符串类型按 varchar(N) 截断，避免 Data too long
+    if (!isNumeric && !isTemporal) {
+      const m = fullType.match(/\((\d+)\)/);
+      const max = m ? parseInt(m[1], 10) : 0;
+      if (max > 0 && val.length > max) val = val.slice(0, max);
+    }
+
+    return isNumeric ? val : `'${val.replace(/'/g, "''")}'`;
+  }
+
+  /** 解析 enum/set 列的合法值 */
+  private parseEnum(type?: string): string[] {
+    if (!type) return [];
+    const m = type.match(/(?:enum|set)\s*\((.*)\)/i);
+    if (!m) return [];
+    return m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean);
   }
 
   private randomName(): string {
