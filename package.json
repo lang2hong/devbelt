@@ -10,7 +10,8 @@
   "scripts": {
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",
-    "typecheck": "pnpm -r run typecheck"
+    "typecheck": "pnpm -r run typecheck",
+    "dev": "pnpm --filter ./packages/vscode-ext run dev"
   },
   "devDependencies": {
     "@vscode/vsce": "^3.9.2",

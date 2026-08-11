@@ -22,7 +22,7 @@ describe('RowEditor', () => {
     const { editor, posted, refreshes } = makeEditor(manager, { pk: 'id' });
     await editor.updateCell('id', 5, 'name', 'x');
     expect(posted).toContainEqual({ type: 'cellUpdated' });
-    expect(refreshes.count).toBe(0);
+    expect(refreshes.count).toBe(1);
   });
 
   it('无可编辑主键时不执行更新并报错', async () => {

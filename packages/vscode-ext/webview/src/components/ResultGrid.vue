@@ -50,6 +50,9 @@ const displayedOrder = ref<string[]>([]);
 const localColumnWidths = ref<Record<string, number>>({});
 const draggedColumn = ref('');
 const suppressSort = ref(false);
+const pendingDelete = ref<{ pkColumn: string; pkValue: any }[]>([]);
+const toast = ref('');
+let toastTimer: any;
 
 const canModifyRows = computed(() => props.hasTable && props.pkColumns.length === 1);
 const hiddenSet = computed(() => new Set(props.hiddenColumns || []));
@@ -204,10 +207,19 @@ function deleteSelected() {
     if (pk) rows.push({ pkColumn: pk.col, pkValue: pk.val });
   }
   if (!rows.length) return;
-  if (confirm(`Delete ${rows.length} row(s)?`)) {
-    post({ type: 'deleteRows', rows });
-    selectedRows.value = [];
-  }
+  pendingDelete.value = rows;
+}
+
+function confirmDelete() {
+  const rows = pendingDelete.value;
+  if (!rows.length) return;
+  pendingDelete.value = [];
+  post({ type: 'deleteRows', rows });
+  selectedRows.value = [];
+}
+
+function cancelDelete() {
+  pendingDelete.value = [];
 }
 
 const FILTER_OPS = [
@@ -347,7 +359,15 @@ function copyAsInsert() {
     const vals = cols.map((c) => esc(row[c])).join(', ');
     return `INSERT INTO ${target} (${cols.map(q).join(', ')}) VALUES (${vals});`;
   }).join('\n');
-  void navigator.clipboard.writeText(sql);
+  void navigator.clipboard.writeText(sql).then(() => {
+    showToast(`Copied ${targets.length} INSERT statement(s)`);
+  });
+}
+
+function showToast(msg: string) {
+  toast.value = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toast.value = ''; }, 2000);
 }
 
 watch([() => props.fields, () => props.columnOrder], () => {
@@ -498,6 +518,17 @@ watch(() => props.filterConditions, (conds) => {
       </tbody>
     </table>
   </div>
+  <div v-if="pendingDelete.length" class="modal-mask" @click.self="cancelDelete">
+    <div class="modal">
+      <div class="modal-title">Delete rows</div>
+      <div class="modal-body">Delete {{ pendingDelete.length }} selected row(s)? This cannot be undone.</div>
+      <div class="modal-actions">
+        <button class="btn" @click="cancelDelete">Cancel</button>
+        <button class="btn danger" @click="confirmDelete">Delete</button>
+      </div>
+    </div>
+  </div>
+  <div v-if="toast" class="toast">{{ toast }}</div>
 </template>
 
 <style scoped>
@@ -547,4 +578,12 @@ td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
 .menu-item { display: block; width: 100%; text-align: left; padding: 4px 8px; font-size: 12px; cursor: pointer;
   background: transparent; border: none; color: var(--vscode-foreground); }
 .menu-item:hover { background: var(--vscode-list-hoverBackground); }
+.modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modal { background: var(--vscode-editor-background); border: 1px solid var(--vscode-panel-border); border-radius: 4px; padding: 16px; min-width: 320px; }
+.modal-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.modal-body { font-size: 12px; color: var(--vscode-foreground); margin-bottom: 14px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 200; padding: 8px 16px; font-size: 12px;
+  background: var(--vscode-notifications-background, var(--vscode-editor-background)); color: var(--vscode-foreground);
+  border: 1px solid var(--vscode-panel-border); border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
 </style>

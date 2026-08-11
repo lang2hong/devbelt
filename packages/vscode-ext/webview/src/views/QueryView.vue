@@ -74,6 +74,7 @@ onMounted(() => {
       if (msg.hiddenColumns) hiddenColumns.value = msg.hiddenColumns;
       if (msg.columnOrder) columnOrder.value = msg.columnOrder;
       if (msg.columnWidths) columnWidths.value = msg.columnWidths;
+      syncLimitFromSql(msg.sql);
       error.value = '';
       meta.value = rows.value.length + ' row(s) in ' + (msg.result.costTime / 1000).toFixed(3) + 's' + (msg.result.truncated ? ' (truncated)' : '');
     } else if (msg.type === 'results') {
@@ -185,12 +186,36 @@ function prevPage() {
   post({ type: 'prevPage' });
 }
 
-function setLimit() {
-  const n = Number(limit.value);
-  if (Number.isFinite(n) && n > 0) {
-    limit.value = Math.min(100000, Math.floor(n));
-    offset.value = 0;
-    post({ type: 'setLimit', limit: limit.value });
+function setLimit(noRun = false) {
+  const n = toLimit(limit.value);
+  limit.value = n;
+  offset.value = 0;
+  sql.value = applyLimitToSql(sql.value, n);
+  if (!noRun) post({ type: 'setLimit', limit: n });
+  else post({ type: 'setLimit', limit: n, noRun: true });
+}
+
+function toLimit(v: any): number {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return 100;
+  return Math.min(100000, Math.floor(n));
+}
+
+function applyLimitToSql(sqlText: string, n: number): string {
+  if (!sqlText) return sqlText;
+  const re = /\bLIMIT\s+\d+(?:\s+OFFSET\s+\d+)?/i;
+  if (re.test(sqlText)) return sqlText.replace(re, `LIMIT ${n}`);
+  return `${sqlText.trim()} LIMIT ${n}`;
+}
+
+function syncLimitFromSql(sqlText?: string) {
+  if (!sqlText) return;
+  const m = sqlText.match(/\bLIMIT\s+(\d+)/i);
+  if (!m) return;
+  const n = toLimit(m[1]);
+  if (n !== limit.value) {
+    limit.value = n;
+    setLimit(true);
   }
 }
 
@@ -316,7 +341,7 @@ function onKeydown(e: KeyboardEvent) {
         · Page {{ currentPage }} / {{ totalPages }} · {{ total }} row(s)
       </span>
       <span v-if="hasTable" class="page-info">Limit</span>
-      <input v-if="hasTable" type="number" v-model.number="limit" class="limit-input" min="1" @change="setLimit" />
+      <input v-if="hasTable" type="number" v-model.number="limit" class="limit-input" min="1" @change="setLimit()" />
       <button v-if="hasTable" class="btn" :disabled="currentPage <= 1" @click="prevPage">◀ Prev</button>
       <button v-if="hasTable" class="btn" :disabled="currentPage >= totalPages" @click="nextPage">Next ▶</button>
     </div>

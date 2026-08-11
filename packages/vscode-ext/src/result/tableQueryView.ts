@@ -131,7 +131,9 @@ export class TableQueryView extends BaseWebView {
         if (Number.isFinite(n) && n > 0) {
           this.runner.limit = Math.min(100000, Math.floor(n));
           this.runner.offset = 0;
-          await this.runner.execute(this.runner.buildSelect());
+          if (!msg.noRun) {
+            await this.runner.execute(this.runner.buildSelect());
+          }
         }
         break;
       }

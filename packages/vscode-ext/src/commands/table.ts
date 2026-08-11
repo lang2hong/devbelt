@@ -141,37 +141,34 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
   });
 
   // ── 列（字段） ──
+  const columnSqlEditor = async (conn: import('../connection/connectionStore').SavedConnection, database: string | undefined, sql: string) => {
+    const useDb = database ? `USE ${wrapIdentForConn(conn, database)};\n\n` : '';
+    const editor = await openSqlDocEditor(useDb + sql);
+    if (editor) connCtx.setForDoc(editor.document.uri.toString(), conn, database);
+    treeProvider.refresh();
+  };
+
   sub('dbclient.addColumn', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     const parent = node.kind === NodeKind.Column ? node.parent : node;
     const table = parent?.label;
     if (!table) return;
-    const name = await vscode.window.showInputBox({ prompt: 'New column name' });
-    if (!name) return;
-    const definition = await vscode.window.showInputBox({ prompt: `Column definition (e.g. VARCHAR(255) NOT NULL)`, value: 'VARCHAR(255)' });
-    if (!definition) return;
-    const session = await manager.connect(node.conn);
-    if (!requireCapability(session, 'alterTable')) return;
-    await session.table.addColumn(table, name, definition, node.database);
-    treeProvider.refresh();
+    await columnSqlEditor(node.conn, node.database, `ALTER TABLE ${wrapIdentForConn(node.conn, table)}\n  ADD COLUMN new_column VARCHAR(255) NOT NULL;`);
   });
 
   sub('dbclient.modifyColumn', async (node: DbTreeNode) => {
     if (!node?.conn || node.kind !== NodeKind.Column || !node.parent) return;
-    const definition = await vscode.window.showInputBox({ prompt: `New definition for "${node.label}"` });
-    if (!definition) return;
-    const session = await manager.connect(node.conn);
-    if (!requireCapability(session, 'alterTable')) return;
-    await session.table.modifyColumn(node.parent.label, node.label, definition, node.database);
-    treeProvider.refresh();
+    await columnSqlEditor(node.conn, node.database, `ALTER TABLE ${wrapIdentForConn(node.conn, node.parent.label)}\n  MODIFY COLUMN ${wrapIdentForConn(node.conn, node.label)} VARCHAR(255) NOT NULL;`);
   });
 
   sub('dbclient.dropColumn', async (node: DbTreeNode) => {
     if (!node?.conn || node.kind !== NodeKind.Column || !node.parent) return;
-    if (!(await confirm('table.dropConfirm', 'table.delete', node.label))) return;
-    const session = await manager.connect(node.conn);
-    if (!requireCapability(session, 'alterTable')) return;
-    await session.table.dropColumn(node.parent.label, node.label, node.database);
-    treeProvider.refresh();
+    await columnSqlEditor(node.conn, node.database, `ALTER TABLE ${wrapIdentForConn(node.conn, node.parent.label)}\n  DROP COLUMN ${wrapIdentForConn(node.conn, node.label)};`);
+  });
+
+  sub('dbclient.copyNodeName', async (node: DbTreeNode) => {
+    if (!node?.label) return;
+    await vscode.env.clipboard.writeText(node.label);
+    vscode.window.showInformationMessage(`Copied "${node.label}"`);
   });
 }

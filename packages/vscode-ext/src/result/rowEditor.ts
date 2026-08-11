@@ -35,6 +35,7 @@ export class RowEditor {
       const session = await this.manager.connect(this.conn);
       await session.data.updateCell(this.table, pkCol, rowId, col, val === '' ? null : val, this.database);
       this.post({ type: 'cellUpdated' });
+      await this.opts.refresh();
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
     }

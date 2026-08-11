@@ -14,6 +14,7 @@ const showAdd = ref(false);
 const addName = ref('');
 const addDef = ref('');
 const editingCol = ref<{ name: string; definition: string } | null>(null);
+const confirmDrop = ref<{ name: string } | null>(null);
 
 let cleanup: (() => void) | undefined;
 onMounted(() => {
@@ -55,7 +56,12 @@ function saveAdd() {
 }
 
 function startEdit(col: any) {
-  editingCol.value = { name: col.name, definition: col.simpleType || col.type || '' };
+  const parts: string[] = [];
+  const type = col.simpleType || col.type || '';
+  if (type) parts.push(type);
+  if (col.isNotNull) parts.push('NOT NULL');
+  if (col.isAutoIncrement) parts.push('AUTO_INCREMENT');
+  editingCol.value = { name: col.name, definition: parts.join(' ') || 'VARCHAR(255)' };
 }
 
 function cancelEdit() {
@@ -70,8 +76,17 @@ function saveEdit() {
 }
 
 function dropCol(col: any) {
-  if (!confirm(`Delete column "${col.name}"? This cannot be undone.`)) return;
-  post({ type: 'dropColumn', column: col.name });
+  confirmDrop.value = { name: col.name };
+}
+
+function confirmDropCol() {
+  if (!confirmDrop.value) return;
+  post({ type: 'dropColumn', column: confirmDrop.value.name });
+  confirmDrop.value = null;
+}
+
+function cancelDrop() {
+  confirmDrop.value = null;
 }
 </script>
 
@@ -139,6 +154,16 @@ function dropCol(col: any) {
       <!-- DDL -->
       <pre v-else>{{ ddl }}</pre>
     </div>
+    <div v-if="confirmDrop" class="modal-mask" @click.self="cancelDrop">
+      <div class="modal">
+        <div class="modal-title">Delete column</div>
+        <div class="modal-body">Delete column "{{ confirmDrop.name }}"? This cannot be undone.</div>
+        <div class="modal-actions">
+          <button class="btn" @click="cancelDrop">Cancel</button>
+          <button class="btn danger" @click="confirmDropCol">Delete</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -165,4 +190,9 @@ th { background: var(--vscode-editor-background); position: sticky; top: 0; }
 .act-col { width: 120px; }
 pre { white-space: pre-wrap; font-family: var(--vscode-editor-font-family); font-size: 13px; }
 .error { padding: 12px; color: var(--vscode-errorForeground); }
+.modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modal { background: var(--vscode-editor-background); border: 1px solid var(--vscode-panel-border); border-radius: 4px; padding: 16px; min-width: 320px; }
+.modal-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.modal-body { font-size: 12px; color: var(--vscode-foreground); margin-bottom: 14px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
 </style>

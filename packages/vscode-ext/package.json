@@ -347,6 +347,11 @@
         "category": "DB Client"
       },
       {
+        "command": "dbclient.copyNodeName",
+        "title": "Copy Name",
+        "category": "DB Client"
+      },
+      {
         "command": "dbclient.deleteQuery",
         "title": "Delete Query",
         "category": "DB Client"
@@ -496,6 +501,12 @@
           "group": "2_danger"
         },
         {
+          "command": "dbclient.copyNodeName",
+          "title": "Copy Table Name",
+          "when": "view == dbclient.explorer && viewItem == table",
+          "group": "9_cpy"
+        },
+        {
           "command": "dbclient.addColumn",
           "when": "view == dbclient.explorer && viewItem == column",
           "group": "2_col"
@@ -509,6 +520,12 @@
           "command": "dbclient.dropColumn",
           "when": "view == dbclient.explorer && viewItem == column",
           "group": "3_danger"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "title": "Copy Column Name",
+          "when": "view == dbclient.explorer && viewItem == column",
+          "group": "9_cpy"
         },
         {
           "command": "dbclient.newQueryFromConn",
