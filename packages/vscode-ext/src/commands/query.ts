@@ -70,6 +70,10 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
     }
   });
 
+  sub('dbclient.refreshNode', (node: DbTreeNode) => {
+    if (node) treeProvider.refreshNode(node);
+  });
+
   sub('dbclient.previewView', (node: DbTreeNode) => {
     if (node?.conn && node?.database) {
       connCtx.setLast(node.conn, node.database);

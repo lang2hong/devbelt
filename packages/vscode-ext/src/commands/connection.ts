@@ -110,6 +110,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
       version: 1,
       exportedAt: new Date().toISOString(),
       includeSecrets: includeSecrets.value,
+      groups: store.getGroups(),
       connections: selected.map((c) => {
         const out: Record<string, unknown> = { ...c };
         if (!includeSecrets.value) {
@@ -132,7 +133,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     });
     if (!uri?.[0]) return;
     const text = Buffer.from(await vscode.workspace.fs.readFile(uri[0])).toString('utf8');
-    let payload: { version?: number; includeSecrets?: boolean; connections?: SavedConnection[] };
+    let payload: { version?: number; includeSecrets?: boolean; groups?: { id: string; name: string; parentId?: string }[]; connections?: SavedConnection[] };
     try {
       payload = JSON.parse(text);
     } catch {
@@ -142,6 +143,14 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     if (!Array.isArray(payload.connections)) {
       vscode.window.showErrorMessage(l10n('conn.importInvalid'));
       return;
+    }
+    // 重建分组（保留原 id 与父级，维持连接归属）；旧文件无 groups 字段则跳过
+    if (Array.isArray(payload.groups)) {
+      for (const g of payload.groups) {
+        if (g?.id && typeof g.name === 'string') {
+          await store.addGroupRaw(g.id, g.name, g.parentId);
+        }
+      }
     }
     let imported = 0;
     for (const conn of payload.connections) {

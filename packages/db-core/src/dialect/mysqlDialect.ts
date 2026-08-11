@@ -82,6 +82,13 @@ export class MysqlDialect implements SqlDialect {
     return `SHOW CREATE EVENT ${qualified}`;
   }
 
+  getViewDefinitionSql(name: string, database?: string): string {
+    const qualified = database
+      ? `${this.wrap(validateIdent(database))}.${this.wrap(validateIdent(name))}`
+      : this.wrap(validateIdent(name));
+    return `SHOW CREATE VIEW ${qualified}`;
+  }
+
   getIndexListSql(table: string, database?: string): string {
     validateIdent(table);
     const where = database

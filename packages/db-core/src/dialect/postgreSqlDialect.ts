@@ -75,6 +75,11 @@ export class PostgreSqlDialect implements SqlDialect {
     return '';
   }
 
+  getViewDefinitionSql(name: string): string {
+    validateIdent(name);
+    return `SELECT pg_get_viewdef(current_schema() || '.' || '${name}', true) AS definition`;
+  }
+
   getIndexListSql(table: string): string {
     validateIdent(table);
     return `SELECT indexname AS name, indexdef AS definition, 

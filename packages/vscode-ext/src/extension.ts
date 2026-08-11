@@ -74,7 +74,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           vscode.window.showWarningMessage('Table design is not supported for this database yet.');
           return;
         }
-        void TableDesignView.open(node.conn, node.label, node.database, manager);
+        void TableDesignView.open(node.conn, node.label, node.database, manager, () => treeProvider.refreshNode(node));
       }
     }),
     // Server 状态面板

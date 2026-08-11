@@ -108,6 +108,22 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     treeProvider.refresh();
   });
 
+  sub('dbclient.newView', async (node: DbTreeNode) => {
+    if (!node?.conn) return;
+    connCtx.setLast(node.conn, node.database);
+    const useDb = node.database ? `USE ${wrapIdentForConn(node.conn, node.database)};\n\n` : '';
+    const tpl = useDb + `CREATE VIEW new_view AS\n  SELECT * FROM some_table;`;
+    const editor = await openSqlDocEditor(tpl);
+    if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
+  });
+
+  sub('dbclient.modifyView', async (node: DbTreeNode) => {
+    if (!node?.conn || !node?.database) return;
+    const session = await manager.connect(node.conn);
+    const def = await session.metadata.getViewDefinition(node.label, node.database);
+    await openSqlDoc(def || '-- No definition found');
+  });
+
   sub('dbclient.openRoutine', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     const session = await manager.connect(node.conn);

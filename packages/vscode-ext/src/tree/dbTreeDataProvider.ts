@@ -39,6 +39,11 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     this.onDidChangeTreeDataEmitter.fire(undefined);
   }
 
+  /** 刷新单个节点（重新拉取其子节点） */
+  refreshNode(node: DbTreeNode): void {
+    this.onDidChangeTreeDataEmitter.fire(node);
+  }
+
   /** 标记连接已打开（可展开） */
   markOpen(connId: string): void {
     this.openConns.add(connId);

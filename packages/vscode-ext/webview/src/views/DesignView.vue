@@ -15,11 +15,14 @@ const addName = ref('');
 const addDef = ref('');
 const editingCol = ref<{ name: string; definition: string } | null>(null);
 const confirmDrop = ref<{ name: string } | null>(null);
+const canReorder = ref(false);
 
 let cleanup: (() => void) | undefined;
 onMounted(() => {
   cleanup = onMessage((msg: any) => {
-    if (msg.type === 'data') {
+    if (msg.type === 'init') {
+      canReorder.value = msg.dbType === 'MYSQL';
+    } else if (msg.type === 'data') {
       columns.value = msg.columns || [];
       indexes.value = msg.indexes || [];
       ddl.value = msg.ddl || '-- No DDL';
@@ -56,12 +59,33 @@ function saveAdd() {
 }
 
 function startEdit(col: any) {
+  editingCol.value = { name: col.name, definition: columnDefinition(col) || 'VARCHAR(255)' };
+}
+
+function columnDefinition(col: any): string {
   const parts: string[] = [];
   const type = col.simpleType || col.type || '';
   if (type) parts.push(type);
   if (col.isNotNull) parts.push('NOT NULL');
   if (col.isAutoIncrement) parts.push('AUTO_INCREMENT');
-  editingCol.value = { name: col.name, definition: parts.join(' ') || 'VARCHAR(255)' };
+  if (col.defaultValue !== '' && col.defaultValue != null) {
+    const dv = String(col.defaultValue);
+    const raw = /^-?\d+(\.\d+)?$/.test(dv) || /^(CURRENT_TIMESTAMP|CURRENT_DATE|CURRENT_TIME|NULL)$/i.test(dv);
+    parts.push(`DEFAULT ${raw ? dv : `'${dv.replace(/'/g, "''")}'`}`);
+  }
+  if (col.comment) parts.push(`COMMENT '${String(col.comment).replace(/'/g, "''")}'`);
+  return parts.join(' ');
+}
+
+function moveColumn(col: any, dir: 'up' | 'down') {
+  if (!canReorder.value) return;
+  const idx = columns.value.findIndex((c: any) => c.name === col.name);
+  if (idx < 0) return;
+  const len = columns.value.length;
+  if (dir === 'up' && idx === 0) return;
+  if (dir === 'down' && idx >= len - 1) return;
+  const afterColumn = dir === 'up' ? (idx - 1 <= 0 ? null : columns.value[idx - 2].name) : columns.value[idx + 1].name;
+  post({ type: 'reorderColumn', column: col.name, definition: columnDefinition(col), afterColumn });
 }
 
 function cancelEdit() {
@@ -113,7 +137,7 @@ function cancelDrop() {
         <table>
           <thead><tr><th>Name</th><th>Type</th><th>Nullable</th><th>Key</th><th>Default</th><th>Extra</th><th class="act-col">Actions</th></tr></thead>
           <tbody>
-            <tr v-for="c in columns" :key="c.name">
+            <tr v-for="(c, idx) in columns" :key="c.name">
               <template v-if="editingCol && editingCol.name === c.name">
                 <td>{{ c.name }}</td>
                 <td><input v-model="editingCol.definition" class="input" placeholder="VARCHAR(255)" /></td>
@@ -131,6 +155,8 @@ function cancelDrop() {
                 <td>{{ c.defaultValue ?? '' }}</td>
                 <td>{{ c.extra ?? '' }}</td>
                 <td>
+                  <button v-if="canReorder" class="btn" :disabled="idx === 0" @click="moveColumn(c, 'up')">▲</button>
+                  <button v-if="canReorder" class="btn" :disabled="idx === columns.length - 1" @click="moveColumn(c, 'down')">▼</button>
                   <button class="btn" @click="startEdit(c)">Edit</button>
                   <button class="btn danger" @click="dropCol(c)">Del</button>
                 </td>

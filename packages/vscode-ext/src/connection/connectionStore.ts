@@ -164,6 +164,15 @@ export class ConnectionStore {
     return group.id;
   }
 
+  /** 以指定 id 创建分组（导入用，保留原 id 以维持连接归属） */
+  async addGroupRaw(id: string, name: string, parentId?: string): Promise<void> {
+    if (!id) return;
+    const data = this.getTreeData();
+    if (data.groups.some((g) => g.id === id)) return;
+    data.groups.push({ id, name, parentId });
+    await this.memento.update(ConnectionStore.KEY, data);
+  }
+
   /** 重命名分组 */
   async renameGroup(id: string, name: string): Promise<void> {
     const data = this.getTreeData();

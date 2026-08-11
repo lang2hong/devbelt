@@ -34,6 +34,7 @@ export function registerSyncCommands(deps: Deps, sub: Sub): void {
     const loggedIn = auth.isLoggedIn();
     const items: (vscode.QuickPickItem & { value: string })[] = [
       { label: '$(add) New Group', description: 'Create a connection group', value: 'addGroup' },
+      { label: '$(export) Export Connections', description: 'Export selected connections', value: 'exportConnections' },
       { label: '$(history) Query History', description: 'View recent queries', value: 'showHistory' },
       { label: '$(cloud-download) Pull from Cloud', description: 'Download & merge', value: 'syncPull' },
       { label: '$(cloud-upload) Push to Cloud', description: 'Upload local data', value: 'syncPush' },

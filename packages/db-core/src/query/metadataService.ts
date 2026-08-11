@@ -69,6 +69,16 @@ export class MetadataService {
     return row['Create Event'] || row.definition || row.Create || '';
   }
 
+  /** 查询视图定义 */
+  async getViewDefinition(name: string, database?: string): Promise<string> {
+    const sql = this.queryService.dialect.getViewDefinitionSql(name, database);
+    if (!sql) return '';
+    const result = await this.queryService.query(sql);
+    const row = result.rows[0];
+    if (!row) return '';
+    return row['Create View'] || row.definition || row.sql || row.Create || '';
+  }
+
   /** 查询表的列元数据 */
   async getColumns(table: string, database?: string): Promise<ColumnMeta[]> {
     const sql = this.queryService.dialect.getColumnsSql(table, database);

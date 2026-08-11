@@ -130,6 +130,21 @@ export class TableService {
     throw new Error(`${dbType} does not support altering a column type.`);
   }
 
+  /** 调整列位置（仅 MySQL：MODIFY COLUMN ... AFTER/FIRST）。afterColumn 为 null 表示移到最前(FIRST)。 */
+  async reorderColumn(table: string, column: string, definition: string, afterColumn: string | null, database?: string): Promise<QueryResult> {
+    this.require('alterTable');
+    validateIdent(table);
+    validateIdent(column);
+    const def = definition.trim();
+    if (!def) throw new Error('Column definition is required.');
+    const dbType = this.queryService.dialect.dbType;
+    if (dbType !== 'MYSQL') {
+      throw new Error(`${dbType} does not support reordering columns.`);
+    }
+    const position = afterColumn ? ` AFTER ${this.wrap(afterColumn)}` : ' FIRST';
+    return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} MODIFY COLUMN ${this.wrap(column)} ${def}${position}`);
+  }
+
   // ── 用户管理 ──
 
   /** 创建用户 */

@@ -158,12 +158,15 @@ function startEdit(row: Row, field: Field) {
   editingField = field;
   editingCell.value = `${pk.col}:${pk.val}:${field.name}`;
   editValue.value = String(row[field.name] ?? '');
-  const isDate = isDateTimeColumn(field.name) || isDateColumn(field.name);
-  if (isDate) {
-    setTimeout(() => (editDateRef.value as any)?.openPicker(), 0);
-  } else {
-    setTimeout(() => editInput.value?.focus(), 0);
-  }
+  setTimeout(() => {
+    const dp = editContainer.value?.querySelector('.dp__input') as HTMLInputElement | undefined;
+    if (dp) dp.focus();
+    else editInput.value?.focus();
+  }, 0);
+}
+
+function openDatePicker() {
+  (editDateRef.value as any)?.openPicker();
 }
 
 function cancelEdit() {
@@ -521,12 +524,14 @@ watch(() => props.filterConditions, (conds) => {
                   @keydown.enter="commitEdit(row, f)"
                   @keydown.esc="cancelEdit" />
                 <VueDatePicker v-else-if="isDateTimeColumn(f.name)" ref="editDateRef" v-model="editValue"
-                  :enable-time-picker="true" format="yyyy-MM-dd HH:mm" model-type="yyyy-MM-dd HH:mm"
-                  auto-apply teleport-to="body" placeholder="yyyy-MM-dd HH:mm" class="dp-input cell-edit"
+                  :enable-time-picker="true" time-picker-inline format="yyyy-MM-dd HH:mm:ss" model-type="yyyy-MM-dd HH:mm:ss"
+                  auto-apply teleport-to="body" placeholder="yyyy-MM-dd HH:mm:ss" class="dp-input cell-edit"
+                  @contextmenu.prevent="openDatePicker"
                   @closed="commitEdit(row, f)" />
                 <VueDatePicker v-else-if="isDateColumn(f.name)" ref="editDateRef" v-model="editValue"
                   :enable-time-picker="false" format="yyyy-MM-dd" model-type="yyyy-MM-dd"
                   auto-apply teleport-to="body" placeholder="yyyy-MM-dd" class="dp-input cell-edit"
+                  @contextmenu.prevent="openDatePicker"
                   @closed="commitEdit(row, f)" />
                 <input v-else ref="editInput" v-model="editValue" class="cell-edit" type="time"
                   @keydown.enter="commitEdit(row, f)"

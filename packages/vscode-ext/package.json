@@ -182,6 +182,16 @@
         "category": "DB Client"
       },
       {
+        "command": "dbclient.newView",
+        "title": "New View",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.modifyView",
+        "title": "Modify View",
+        "category": "DB Client"
+      },
+      {
         "command": "dbclient.openRoutine",
         "title": "View Definition",
         "category": "DB Client"
@@ -573,6 +583,16 @@
           "group": "inline"
         },
         {
+          "command": "dbclient.modifyView",
+          "when": "view == dbclient.explorer && viewItem == view",
+          "group": "1_view"
+        },
+        {
+          "command": "dbclient.newView",
+          "when": "view == dbclient.explorer && viewItem == category_view",
+          "group": "inline"
+        },
+        {
           "command": "dbclient.dropView",
           "when": "view == dbclient.explorer && viewItem == view",
           "group": "2_danger"
@@ -734,11 +754,6 @@
         },
         {
           "command": "dbclient.moveToGroup",
-          "when": "view == dbclient.explorer && viewItem =~ /^connection/",
-          "group": "1_conn"
-        },
-        {
-          "command": "dbclient.exportConnections",
           "when": "view == dbclient.explorer && viewItem =~ /^connection/",
           "group": "1_conn"
         },

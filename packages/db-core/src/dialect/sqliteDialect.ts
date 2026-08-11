@@ -56,6 +56,11 @@ export class SqliteDialect implements SqlDialect {
     return '';
   }
 
+  getViewDefinitionSql(name: string): string {
+    validateIdent(name);
+    return `SELECT sql AS definition FROM sqlite_master WHERE type = 'view' AND name = '${name}'`;
+  }
+
   getIndexListSql(table: string): string {
     validateIdent(table);
     return `SELECT name AS name, 0 AS is_unique, name LIKE 'sqlite_autoindex%' AS is_primary FROM sqlite_master WHERE type = 'index' AND tbl_name = '${table}'`;

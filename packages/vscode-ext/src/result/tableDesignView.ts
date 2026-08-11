@@ -10,21 +10,22 @@ export class TableDesignView extends BaseWebView {
     private readonly table: string,
     private readonly database: string,
     private readonly manager: ConnectionManager,
+    private readonly onMutate?: () => void,
   ) {
     super('dbclient.tableDesign', `Design: ${conn.name || conn.host} › ${database} › ${table}`);
   }
 
   static init(extensionUri: import('vscode').Uri): void { BaseWebView.init(extensionUri); }
 
-  static async open(conn: SavedConnection, table: string, database: string, manager: ConnectionManager): Promise<void> {
+  static async open(conn: SavedConnection, table: string, database: string, manager: ConnectionManager, onMutate?: () => void): Promise<void> {
     if (TableDesignView.current) TableDesignView.current.dispose();
-    const view = new TableDesignView(conn, table, database, manager);
+    const view = new TableDesignView(conn, table, database, manager, onMutate);
     TableDesignView.current = view;
   }
 
   protected async handleMessage(msg: any): Promise<void> {
     if (msg.type === 'ready') {
-      this.post({ type: 'init', mode: 'design' });
+      this.post({ type: 'init', mode: 'design', dbType: this.conn.dbType });
       await this.loadData();
       return;
     }
@@ -49,6 +50,13 @@ export class TableDesignView extends BaseWebView {
       });
       return;
     }
+    if (msg.type === 'reorderColumn') {
+      await this.mutate(async () => {
+        const session = await this.session();
+        await session.table.reorderColumn(this.table, msg.column, msg.definition, msg.afterColumn ?? null, this.database);
+      });
+      return;
+    }
   }
 
   private async session() {
@@ -59,6 +67,7 @@ export class TableDesignView extends BaseWebView {
     try {
       await fn();
       await this.loadData();
+      this.onMutate?.();
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
     }

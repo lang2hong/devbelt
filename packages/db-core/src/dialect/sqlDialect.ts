@@ -53,6 +53,9 @@ export interface SqlDialect {
   /** 查询事件定义的 SQL */
   getEventDefinitionSql(name: string, database?: string): string;
 
+  /** 查询视图定义的 SQL（空字符串表示不支持） */
+  getViewDefinitionSql(name: string, database?: string): string;
+
   /** 查询表索引列表 SQL */
   getIndexListSql(table: string, database?: string): string;
 
