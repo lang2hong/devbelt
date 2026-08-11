@@ -57,6 +57,28 @@ export class TableDesignView extends BaseWebView {
       });
       return;
     }
+    if (msg.type === 'addIndex') {
+      await this.mutate(async () => {
+        const session = await this.session();
+        await session.table.createIndex(msg.name, this.table, Array.isArray(msg.columns) ? msg.columns : [], this.database, !!msg.isUnique);
+      });
+      return;
+    }
+    if (msg.type === 'editIndex') {
+      await this.mutate(async () => {
+        const session = await this.session();
+        await session.table.createIndex(msg.name, this.table, Array.isArray(msg.columns) ? msg.columns : [], this.database, !!msg.isUnique);
+        await session.table.dropIndex(msg.oldName, this.table, this.database);
+      });
+      return;
+    }
+    if (msg.type === 'dropIndex') {
+      await this.mutate(async () => {
+        const session = await this.session();
+        await session.table.dropIndex(msg.name, this.table, this.database);
+      });
+      return;
+    }
   }
 
   private async session() {

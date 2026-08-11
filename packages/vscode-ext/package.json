@@ -31,6 +31,12 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "dbclient.refreshNode",
+        "title": "Refresh",
+        "category": "DB Client",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "dbclient.runQuery",
         "title": "%cmd.runQuery%",
         "category": "DB Client"
@@ -441,6 +447,12 @@
           "group": "inline"
         },
         {
+          "command": "dbclient.refreshNode",
+          "title": "Refresh",
+          "when": "view == dbclient.explorer && viewItem == table",
+          "group": "0_refresh"
+        },
+        {
           "command": "dbclient.viewTableStructure",
           "when": "view == dbclient.explorer && viewItem == table",
           "group": "1_view"
@@ -479,6 +491,12 @@
           "command": "dbclient.newTable",
           "when": "view == dbclient.explorer && viewItem == category_table",
           "group": "inline"
+        },
+        {
+          "command": "dbclient.refreshNode",
+          "title": "Refresh",
+          "when": "view == dbclient.explorer && viewItem == category_table",
+          "group": "0_refresh"
         },
         {
           "command": "dbclient.importData",
@@ -541,6 +559,12 @@
           "command": "dbclient.newQueryFromConn",
           "when": "view == dbclient.explorer && viewItem == database",
           "group": "1_db"
+        },
+        {
+          "command": "dbclient.refreshNode",
+          "title": "Refresh",
+          "when": "view == dbclient.explorer && viewItem == database",
+          "group": "0_refresh"
         },
         {
           "command": "dbclient.newQueryForDb",

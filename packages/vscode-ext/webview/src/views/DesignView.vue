@@ -16,6 +16,12 @@ const addDef = ref('');
 const editingCol = ref<{ name: string; definition: string } | null>(null);
 const confirmDrop = ref<{ name: string } | null>(null);
 const canReorder = ref(false);
+const showAddIdx = ref(false);
+const addIdxName = ref('');
+const selIdxCols = ref<string[]>([]);
+const addIdxUnique = ref(false);
+const editingIdx = ref<{ oldName: string } | null>(null);
+const confirmDropIdx = ref<{ name: string } | null>(null);
 
 let cleanup: (() => void) | undefined;
 onMounted(() => {
@@ -112,6 +118,53 @@ function confirmDropCol() {
 function cancelDrop() {
   confirmDrop.value = null;
 }
+
+function startAddIdx() {
+  showAddIdx.value = true;
+  editingIdx.value = null;
+  addIdxName.value = '';
+  selIdxCols.value = [];
+  addIdxUnique.value = false;
+}
+
+function startEditIdx(i: any) {
+  showAddIdx.value = true;
+  editingIdx.value = { oldName: i.name };
+  addIdxName.value = i.name;
+  selIdxCols.value = [...(i.columns || [])];
+  addIdxUnique.value = !!i.isUnique;
+}
+
+function cancelAddIdx() {
+  showAddIdx.value = false;
+  editingIdx.value = null;
+}
+
+function saveAddIdx() {
+  const name = addIdxName.value.trim();
+  if (!name || !selIdxCols.value.length) return;
+  if (editingIdx.value) {
+    post({ type: 'editIndex', oldName: editingIdx.value.oldName, name, columns: selIdxCols.value, isUnique: addIdxUnique.value });
+  } else {
+    post({ type: 'addIndex', name, columns: selIdxCols.value, isUnique: addIdxUnique.value });
+  }
+  showAddIdx.value = false;
+  editingIdx.value = null;
+}
+
+function dropIdx(i: any) {
+  confirmDropIdx.value = { name: i.name };
+}
+
+function confirmDropIdxHandler() {
+  if (!confirmDropIdx.value) return;
+  post({ type: 'dropIndex', name: confirmDropIdx.value.name });
+  confirmDropIdx.value = null;
+}
+
+function cancelDropIdx() {
+  confirmDropIdx.value = null;
+}
 </script>
 
 <template>
@@ -166,17 +219,35 @@ function cancelDrop() {
         </table>
       </div>
       <!-- Indexes -->
-      <table v-else-if="tab === 'idx'">
-        <thead><tr><th>Name</th><th>Columns</th><th>Unique</th><th>Primary</th></tr></thead>
-        <tbody>
-          <tr v-for="i in indexes" :key="i.name">
-            <td>{{ i.name }}</td>
-            <td>{{ (i.columns || []).join(', ') }}</td>
-            <td>{{ i.isUnique ? 'YES' : 'NO' }}</td>
-            <td>{{ i.isPrimary ? 'YES' : 'NO' }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <div v-else-if="tab === 'idx'">
+        <div class="toolbar">
+          <button class="btn" @click="startAddIdx">+ Add Index</button>
+        </div>
+        <div v-if="showAddIdx" class="add-row idx-form">
+          <input v-model="addIdxName" class="input" placeholder="index name" />
+          <label class="chk"><input type="checkbox" v-model="addIdxUnique" /> Unique</label>
+          <select v-model="selIdxCols" class="input col-select" multiple>
+            <option v-for="col in columns" :key="col.name" :value="col.name">{{ col.name }}</option>
+          </select>
+          <button class="btn primary" @click="saveAddIdx">{{ editingIdx ? 'Save' : 'Add' }}</button>
+          <button class="btn" @click="cancelAddIdx">Cancel</button>
+        </div>
+        <table>
+          <thead><tr><th>Name</th><th>Columns</th><th>Unique</th><th>Primary</th><th class="act-col">Actions</th></tr></thead>
+          <tbody>
+            <tr v-for="i in indexes" :key="i.name">
+              <td>{{ i.name }}</td>
+              <td>{{ (i.columns || []).join(', ') }}</td>
+              <td>{{ i.isUnique ? 'YES' : 'NO' }}</td>
+              <td>{{ i.isPrimary ? 'YES' : 'NO' }}</td>
+              <td>
+                <button class="btn" @click="startEditIdx(i)">Edit</button>
+                <button class="btn danger" :disabled="!!i.isPrimary" @click="dropIdx(i)">Del</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <!-- DDL -->
       <pre v-else>{{ ddl }}</pre>
     </div>
@@ -187,6 +258,16 @@ function cancelDrop() {
         <div class="modal-actions">
           <button class="btn" @click="cancelDrop">Cancel</button>
           <button class="btn danger" @click="confirmDropCol">Delete</button>
+        </div>
+      </div>
+    </div>
+    <div v-if="confirmDropIdx" class="modal-mask" @click.self="cancelDropIdx">
+      <div class="modal">
+        <div class="modal-title">Delete index</div>
+        <div class="modal-body">Delete index "{{ confirmDropIdx.name }}"? This cannot be undone.</div>
+        <div class="modal-actions">
+          <button class="btn" @click="cancelDropIdx">Cancel</button>
+          <button class="btn danger" @click="confirmDropIdxHandler">Delete</button>
         </div>
       </div>
     </div>
@@ -210,6 +291,9 @@ function cancelDrop() {
 .input.wide { width: 280px; }
 .add-row { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
 .add-row .input { flex: 1; }
+.idx-form { flex-wrap: wrap; }
+.chk { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; }
+.col-select { width: 220px; height: 90px; }
 table { border-collapse: collapse; font-size: 13px; width: 100%; }
 th, td { border: 1px solid var(--vscode-panel-border); padding: 4px 10px; text-align: left; white-space: nowrap; }
 th { background: var(--vscode-editor-background); position: sticky; top: 0; }
