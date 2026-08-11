@@ -9,6 +9,7 @@ import { validateIdent, DatabaseType } from '@db-client/core';
 import { TableProfileStore } from './tableProfileStore';
 import { exportRows, type TransferFormat } from '../data/transfer/exportService';
 import { buildCountSql, buildTableSelect, type FilterCondition } from './tableQuerySql';
+import { reconcileColumnOrder, reconcileColumnWidths, reconcileHiddenColumns } from './tableLayout';
 import { buildCandidates, detectContext, extractFromTable } from '../completion/sqlCompletionEngine';
 
 /**
@@ -380,23 +381,15 @@ export class TableQueryView extends BaseWebView {
 
   /** Intersects saved hiddenColumns with the last known field list so stale names never leak to the UI. */
   private reconciledHiddenColumns(): string[] {
-    if (!this.lastFields.length) return this.hiddenColumns;
-    const known = new Set(this.lastFields);
-    return this.hiddenColumns.filter((c) => known.has(c));
+    return reconcileHiddenColumns(this.hiddenColumns, this.lastFields);
   }
 
   private reconciledColumnOrder(): string[] {
-    if (!this.lastFields.length) return this.columnOrder;
-    const known = new Set(this.lastFields);
-    const ordered = this.columnOrder.filter((column) => known.has(column));
-    const remaining = this.lastFields.filter((column) => !ordered.includes(column));
-    return [...ordered, ...remaining];
+    return reconcileColumnOrder(this.columnOrder, this.lastFields);
   }
 
   private reconciledColumnWidths(): Record<string, number> {
-    if (!this.lastFields.length) return this.columnWidths;
-    const known = new Set(this.lastFields);
-    return Object.fromEntries(Object.entries(this.columnWidths).filter(([column]) => known.has(column)));
+    return reconcileColumnWidths(this.columnWidths, this.lastFields);
   }
 
   private buildSelect(): string {
