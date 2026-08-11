@@ -3,6 +3,11 @@ webview/src/**
 webview/vite.config.ts
 webview/node_modules
 tsconfig.json
+tsconfig.test.json
+vitest.config.ts
+esbuild.js
+out/**/*.map
+*.tsbuildinfo
 **/*.test.ts
 **/*.test.js
 .gitignore
