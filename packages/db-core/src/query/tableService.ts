@@ -115,7 +115,7 @@ export class TableService {
 
   async grantPrivilege(name: string, privilege: string, database?: string, host = '%'): Promise<QueryResult> {
     this.require('manageUsers');
-    const PRIV_WHITELIST = /^(ALL(\s+PRIVILEGES)?|SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|INDEX|REFERENCES|TRIGGER|EXECUTE|USAGE|RELOAD|PROCESS|REPLICATION\s+CLIENT|REPLICATION\s+SLAVE|SHOW\s+DATABASES|SHUTDOWN|SUPER)$/i;
+    const PRIV_WHITELIST = /^(ALL(\s+PRIVILEGES)?|SELECT|INSERT|UPDATE|DELETE|CREATE(\s+VIEW)?|DROP|ALTER|INDEX|REFERENCES|TRIGGER|EXECUTE|USAGE|RELOAD|PROCESS|REPLICATION\s+CLIENT|REPLICATION\s+SLAVE|SHOW\s+(VIEW|DATABASES)|SHUTDOWN|SUPER)$/i;
     if (!PRIV_WHITELIST.test(privilege.trim())) {
       throw new Error(`Invalid privilege: "${privilege}"`);
     }
@@ -125,7 +125,7 @@ export class TableService {
 
   async revokePrivilege(name: string, privilege: string, database?: string, host = '%'): Promise<QueryResult> {
     this.require('manageUsers');
-    const PRIV_WHITELIST = /^(ALL(\s+PRIVILEGES)?|SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|INDEX|REFERENCES|TRIGGER|EXECUTE|USAGE|RELOAD|PROCESS|REPLICATION\s+CLIENT|REPLICATION\s+SLAVE|SHOW\s+DATABASES|SHUTDOWN|SUPER)$/i;
+    const PRIV_WHITELIST = /^(ALL(\s+PRIVILEGES)?|SELECT|INSERT|UPDATE|DELETE|CREATE(\s+VIEW)?|DROP|ALTER|INDEX|REFERENCES|TRIGGER|EXECUTE|USAGE|RELOAD|PROCESS|REPLICATION\s+CLIENT|REPLICATION\s+SLAVE|SHOW\s+(VIEW|DATABASES)|SHUTDOWN|SUPER)$/i;
     if (!PRIV_WHITELIST.test(privilege.trim())) {
       throw new Error(`Invalid privilege: "${privilege}"`);
     }

@@ -43,7 +43,7 @@ describe('RowEditor', () => {
   });
 
   it('deleteRows 委托原子删除并触发刷新', async () => {
-    const data = { deleteRows: async (t: string, pk: string, ids: unknown[]) => { expect(ids).toEqual([1, 2]); } };
+    const data = { deleteRows: async (_t: string, _pk: string, ids: unknown[]) => { expect(ids).toEqual([1, 2]); } };
     const manager: any = { connect: async () => ({ data }) };
     const { editor, posted, refreshes } = makeEditor(manager, { pk: 'id' });
     await editor.deleteRows([{ pkColumn: 'id', pkValue: 1 }, { pkColumn: 'id', pkValue: 2 }]);

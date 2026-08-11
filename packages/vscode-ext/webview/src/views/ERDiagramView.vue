@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 
 const { post, onMessage } = useVsCode();
@@ -7,8 +7,9 @@ const tables = ref<{ name: string; columns: { name: string; type: string; isPK: 
 const foreignKeys = ref<{ tableName: string; columnName: string; refTable: string; refColumn: string }[]>([]);
 const error = ref('');
 
+let cleanup: (() => void) | undefined;
 onMounted(() => {
-  onMessage((msg: any) => {
+  cleanup = onMessage((msg: any) => {
     if (msg.type === 'data') {
       tables.value = msg.tables || [];
       foreignKeys.value = msg.foreignKeys || [];
@@ -19,6 +20,7 @@ onMounted(() => {
   });
   post({ type: 'ready' });
 });
+onUnmounted(() => cleanup?.());
 
 // 简单网格布局：每列最多 4 个表，间距 220x200
 const COLS = 3;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 
 const { post, onMessage } = useVsCode();
@@ -11,8 +11,9 @@ const summary = ref<any>(null);
 const error = ref('');
 const search = ref('');
 
+let cleanup: (() => void) | undefined;
 onMounted(() => {
-  onMessage((msg: any) => {
+  cleanup = onMessage((msg: any) => {
     if (msg.type === 'data') {
       processList.value = msg.processList || [];
       statusVars.value = msg.statusVars || [];
@@ -28,6 +29,7 @@ onMounted(() => {
   });
   post({ type: 'ready' });
 });
+onUnmounted(() => cleanup?.());
 
 const filteredStatus = computed(() => {
   if (!search.value) return statusVars.value;

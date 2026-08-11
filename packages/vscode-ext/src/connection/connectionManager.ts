@@ -84,6 +84,9 @@ export class ConnectionManager {
 
     await new Promise<void>((resolve, reject) => {
       connection.connect((err) => (err ? reject(err) : resolve()));
+    }).catch((err) => {
+      if (conn.sshHost) SshTunnel.close(conn.id);
+      throw err;
     });
 
     const query = new QueryService(connection, dialect);

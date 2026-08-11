@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import ResultGrid from '../components/ResultGrid.vue';
 
@@ -44,8 +44,9 @@ function filterByPrefix(items: { label: string; kind: string }[], prefix: string
 const filteredCandidates = computed(() => filterByPrefix(completionItems.value, lastPrefix));
 watch(filteredCandidates, () => { completionIndex.value = 0; });
 
+let cleanup: (() => void) | undefined;
 onMounted(() => {
-  onMessage((msg: any) => {
+  cleanup = onMessage((msg: any) => {
     if (msg.type === 'init') {
       sql.value = msg.initialSql || '';
       hasTable.value = msg.hasTable || false;
@@ -130,6 +131,7 @@ onMounted(() => {
   });
   post({ type: 'ready' });
 });
+onUnmounted(() => cleanup?.());
 
 function run() {
   error.value = '';

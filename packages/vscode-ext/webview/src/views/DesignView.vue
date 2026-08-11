@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 
 const { post, onMessage } = useVsCode();
@@ -10,8 +10,9 @@ const indexes = ref<any[]>([]);
 const ddl = ref('');
 const error = ref('');
 
+let cleanup: (() => void) | undefined;
 onMounted(() => {
-  onMessage((msg: any) => {
+  cleanup = onMessage((msg: any) => {
     if (msg.type === 'data') {
       columns.value = msg.columns || [];
       indexes.value = msg.indexes || [];
@@ -23,6 +24,7 @@ onMounted(() => {
   });
   post({ type: 'ready' });
 });
+onUnmounted(() => cleanup?.());
 
 function esc(s: any): string {
   if (s == null) return '';
