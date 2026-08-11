@@ -3,11 +3,11 @@ import type { SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from './baseWebView';
 import { TableProfileStore } from './tableProfileStore';
-import { exportRows, type TransferFormat } from '../data/transfer/exportService';
 import { reconcileColumnOrder, reconcileColumnWidths, reconcileHiddenColumns } from './tableLayout';
 import { CompletionService } from './completionService';
 import { RowEditor } from './rowEditor';
 import { QueryRunner } from './queryRunner';
+import { ExportHandler } from './exportHandler';
 
 /**
  * 表/查询视图：Vue 3 webview 模式。
@@ -24,6 +24,7 @@ export class TableQueryView extends BaseWebView {
   private executingPendingQuery = false;
   private readonly completionService: CompletionService;
   private readonly rowEditor: RowEditor;
+  private readonly exporter: ExportHandler;
   private pendingQuery?: {
     sql: string;
     database?: string;
@@ -51,6 +52,7 @@ export class TableQueryView extends BaseWebView {
       editablePkColumn: () => this.runner.editablePkColumn,
       refresh: () => this.runner.execute(this.runner.buildSelect()),
     });
+    this.exporter = new ExportHandler(conn, manager, table, database, (msg) => this.post(msg));
     if (this.table) {
       const saved = TableQueryView.profileStore?.get(conn.id, database, table!);
       if (saved) {
@@ -169,7 +171,7 @@ export class TableQueryView extends BaseWebView {
         this.runner.cancel();
         break;
       case 'exportData':
-        await this.exportData(msg.format, msg.columns || [], msg.rows || []);
+        await this.exporter.exportData(msg.format, msg.columns || [], msg.rows || []);
         break;
       case 'completion':
         await this.completionService.handle(String(msg.before || ''), String(msg.text || ''));
@@ -322,75 +324,4 @@ export class TableQueryView extends BaseWebView {
     return reconcileColumnWidths(this.columnWidths, this.runner.lastFields);
   }
 
-  private async exportData(format: TransferFormat, columns: string[], rows: Record<string, any>[]): Promise<void> {
-    try {
-      if (format === 'sql' && !this.table) {
-        this.post({ type: 'error', message: 'SQL export requires a target table.' });
-        return;
-      }
-      const { DialectRegistry } = await import('@db-client/core');
-      const dialect = DialectRegistry.get(this.conn.dbType as any);
-
-      // 范围选择：当前页 / 全表 / 当前 SQL
-      const rangeOptions: { label: string; value: 'page' | 'all' }[] = [
-        { label: vscode.l10n.t('Current page') + ` (${rows.length} rows)`, value: 'page' },
-      ];
-      if (this.hasTable && this.table) rangeOptions.unshift({ label: vscode.l10n.t('Entire table'), value: 'all' as const });
-      const range = rangeOptions.length > 1
-        ? (await vscode.window.showQuickPick(rangeOptions, { placeHolder: vscode.l10n.t('Export range') }))?.value
-        : 'page';
-      if (!range) return;
-
-      let exportColumns = columns;
-      if (range === 'all' && this.table) {
-        const session = await this.manager.connect(this.conn);
-        const { exportTable } = await import('../data/transfer/exportService');
-        const allColumns = (await session.metadata.getColumns(this.table, this.database)).map((c: any) => c.name);
-        // 字段勾选
-        const picked = await vscode.window.showQuickPick(
-          allColumns.map((c: string) => ({ label: c, picked: true })),
-          { canPickMany: true, placeHolder: vscode.l10n.t('Select columns to export') },
-        );
-        if (!picked?.length) return;
-        exportColumns = picked.map((p) => p.label);
-        const content = await exportTable({
-          source: { query: session.query, metadata: session.metadata, table: session.table },
-          format, table: this.table, database: this.database,
-          columns: exportColumns,
-        });
-        const uri = await vscode.window.showSaveDialog({
-          defaultUri: vscode.Uri.file(`${this.table}_export.${format}`),
-          filters: { [format.toUpperCase()]: [format] },
-        });
-        if (!uri) return;
-        await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
-        this.post({ type: 'exported', message: vscode.l10n.t('Exported to {path}', { path: uri.fsPath }) });
-        return;
-      }
-
-      // 当前页：字段勾选
-      const picked = await vscode.window.showQuickPick(
-        columns.map((c) => ({ label: c, picked: true })),
-        { canPickMany: true, placeHolder: vscode.l10n.t('Select columns to export') },
-      );
-      if (!picked?.length) return;
-      exportColumns = picked.map((p) => p.label);
-      const projectedRows = rows.map((row) => {
-        const out: Record<string, any> = {};
-        for (const c of exportColumns) out[c] = row[c];
-        return out;
-      });
-      const content = exportRows({ format, columns: exportColumns, rows: projectedRows, table: this.table, database: this.database, dialect });
-      const baseName = this.table || 'result';
-      const uri = await vscode.window.showSaveDialog({
-        defaultUri: vscode.Uri.file(`${baseName}_export.${format}`),
-        filters: { [format.toUpperCase()]: [format] },
-      });
-      if (!uri) return;
-      await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
-      this.post({ type: 'exported', message: vscode.l10n.t('Exported {count} row(s) to {path}', { count: projectedRows.length, path: uri.fsPath }) });
-    } catch (err) {
-      this.post({ type: 'error', message: (err as Error).message });
-    }
-  }
 }
