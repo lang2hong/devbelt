@@ -3,6 +3,7 @@ import { DatabaseType } from '@db-client/core';
 import { ConnectionStore, type SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { DbTreeNode, NodeKind, type CategoryType } from './dbTreeNode';
+import { MetadataNodeBuilder } from './metadataNodeBuilder';
 import { l10n } from '../i18n';
 
 /**
@@ -180,108 +181,18 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     }
 
     const session = await this.manager.connect(conn);
-    const items: DbTreeNode[] = [];
+    const builder = new MetadataNodeBuilder(session.metadata);
 
     switch (catType) {
-      case 'table': {
-        const tables = await session.metadata.getTables(db);
-        for (const t of tables) {
-          const node = new DbTreeNode(
-            t.name,
-            TreeItemCollapsibleState.Collapsed,
-            NodeKind.Table,
-            conn,
-            undefined,
-            element,
-            undefined,
-            db,
-          );
-          // 显示行数（MySQL 从 information_schema 直接返回）
-          if (t.table_rows !== undefined) {
-            node.description = String(t.table_rows) + ' rows';
-          } else if (t.comment) {
-            node.description = t.comment;
-          }
-          node.command = { command: 'dbclient.previewTable', title: 'Preview', arguments: [node] };
-          items.push(node);
-        }
-        break;
-      }
-      case 'view': {
-        const views = await session.metadata.getViews(db);
-        for (const v of views) {
-          const node = new DbTreeNode(
-            v.name,
-            TreeItemCollapsibleState.None,
-            NodeKind.View,
-            conn,
-            undefined,
-            element,
-            undefined,
-            db,
-          );
-          node.command = { command: 'dbclient.previewView', title: 'Preview', arguments: [node] };
-          items.push(node);
-        }
-        break;
-      }
-      case 'function': {
-        const routines = await session.metadata.getFunctions(db);
-        for (const r of routines) {
-          const node = new DbTreeNode(
-            r.name,
-            TreeItemCollapsibleState.None,
-            NodeKind.Routine,
-            conn,
-            undefined,
-            element,
-            undefined,
-            db,
-            r.type,
-          );
-          node.command = { command: 'dbclient.openRoutine', title: 'Open', arguments: [node] };
-          items.push(node);
-        }
-        break;
-      }
-      case 'event': {
-        const events = await session.metadata.getEvents(db);
-        for (const e of events) {
-          const node = new DbTreeNode(
-            e.name,
-            TreeItemCollapsibleState.None,
-            NodeKind.Event,
-            conn,
-            undefined,
-            element,
-            undefined,
-            db,
-          );
-          node.command = { command: 'dbclient.openEvent', title: 'Open', arguments: [node] };
-          items.push(node);
-        }
-        break;
-      }
-      case 'user': {
-        const users = await session.metadata.getUsers();
-        for (const u of users) {
-          const node = new DbTreeNode(
-            u.host ? `${u.name}@${u.host}` : u.name,
-            TreeItemCollapsibleState.None,
-            NodeKind.User,
-            conn,
-            undefined,
-            element,
-            undefined,
-            db,
-          );
-          items.push(node);
-        }
-        break;
-      }
+      case 'table':
+      case 'view':
+      case 'function':
+      case 'event':
+      case 'user':
+        return builder.build(catType, conn, db, element);
+      default:
+        return [];
     }
-
-    return items;
   }
 
   /** 查询文件夹子节点：文件夹内保存的查询 */
