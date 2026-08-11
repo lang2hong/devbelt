@@ -23,8 +23,48 @@ export class TableDesignView extends BaseWebView {
   }
 
   protected async handleMessage(msg: any): Promise<void> {
-    if (msg.type !== 'ready') return;
-    this.post({ type: 'init', mode: 'design' });
+    if (msg.type === 'ready') {
+      this.post({ type: 'init', mode: 'design' });
+      await this.loadData();
+      return;
+    }
+    if (msg.type === 'addColumn') {
+      await this.mutate(async () => {
+        const session = await this.session();
+        await session.table.addColumn(this.table, msg.column, msg.definition, this.database);
+      });
+      return;
+    }
+    if (msg.type === 'dropColumn') {
+      await this.mutate(async () => {
+        const session = await this.session();
+        await session.table.dropColumn(this.table, msg.column, this.database);
+      });
+      return;
+    }
+    if (msg.type === 'modifyColumn') {
+      await this.mutate(async () => {
+        const session = await this.session();
+        await session.table.modifyColumn(this.table, msg.column, msg.definition, this.database);
+      });
+      return;
+    }
+  }
+
+  private async session() {
+    return this.manager.connect(this.conn);
+  }
+
+  private async mutate(fn: () => Promise<unknown>): Promise<void> {
+    try {
+      await fn();
+      await this.loadData();
+    } catch (err) {
+      this.post({ type: 'error', message: (err as Error).message });
+    }
+  }
+
+  private async loadData(): Promise<void> {
     try {
       const session = await this.manager.connect(this.conn);
       const [columns, indexes, ddl] = await Promise.all([

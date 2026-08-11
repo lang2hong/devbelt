@@ -10,6 +10,11 @@ const indexes = ref<any[]>([]);
 const ddl = ref('');
 const error = ref('');
 
+const showAdd = ref(false);
+const addName = ref('');
+const addDef = ref('');
+const editingCol = ref<{ name: string; definition: string } | null>(null);
+
 let cleanup: (() => void) | undefined;
 onMounted(() => {
   cleanup = onMessage((msg: any) => {
@@ -32,6 +37,42 @@ function esc(s: any): string {
   d.textContent = String(s);
   return d.innerHTML;
 }
+
+function startAdd() {
+  showAdd.value = true;
+  addName.value = '';
+  addDef.value = '';
+}
+
+function cancelAdd() {
+  showAdd.value = false;
+}
+
+function saveAdd() {
+  if (!addName.value.trim() || !addDef.value.trim()) return;
+  post({ type: 'addColumn', column: addName.value.trim(), definition: addDef.value.trim() });
+  showAdd.value = false;
+}
+
+function startEdit(col: any) {
+  editingCol.value = { name: col.name, definition: col.simpleType || col.type || '' };
+}
+
+function cancelEdit() {
+  editingCol.value = null;
+}
+
+function saveEdit() {
+  if (!editingCol.value) return;
+  if (!editingCol.value.definition.trim()) return;
+  post({ type: 'modifyColumn', column: editingCol.value.name, definition: editingCol.value.definition.trim() });
+  editingCol.value = null;
+}
+
+function dropCol(col: any) {
+  if (!confirm(`Delete column "${col.name}"? This cannot be undone.`)) return;
+  post({ type: 'dropColumn', column: col.name });
+}
 </script>
 
 <template>
@@ -44,19 +85,45 @@ function esc(s: any): string {
     <div class="error" v-if="error">{{ error }}</div>
     <div class="content" v-else>
       <!-- Columns -->
-      <table v-if="tab === 'cols'">
-        <thead><tr><th>Name</th><th>Type</th><th>Nullable</th><th>Key</th><th>Default</th><th>Extra</th></tr></thead>
-        <tbody>
-          <tr v-for="c in columns" :key="c.name">
-            <td>{{ c.name }}</td>
-            <td>{{ c.simpleType || c.type }}</td>
-            <td>{{ c.nullable === 'NO' || c.isNotNull ? 'NO' : 'YES' }}</td>
-            <td>{{ c.isPrimary ? 'PK' : (c.key || '') }}</td>
-            <td>{{ c.defaultValue ?? '' }}</td>
-            <td>{{ c.extra ?? '' }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <div v-if="tab === 'cols'">
+        <div class="toolbar">
+          <button class="btn" @click="startAdd">+ Add Column</button>
+        </div>
+        <div v-if="showAdd" class="add-row">
+          <input v-model="addName" class="input" placeholder="column name" />
+          <input v-model="addDef" class="input wide" placeholder="VARCHAR(255) NOT NULL" />
+          <button class="btn primary" @click="saveAdd">Add</button>
+          <button class="btn" @click="cancelAdd">Cancel</button>
+        </div>
+        <table>
+          <thead><tr><th>Name</th><th>Type</th><th>Nullable</th><th>Key</th><th>Default</th><th>Extra</th><th class="act-col">Actions</th></tr></thead>
+          <tbody>
+            <tr v-for="c in columns" :key="c.name">
+              <template v-if="editingCol && editingCol.name === c.name">
+                <td>{{ c.name }}</td>
+                <td><input v-model="editingCol.definition" class="input" placeholder="VARCHAR(255)" /></td>
+                <td colspan="4"></td>
+                <td>
+                  <button class="btn primary" @click="saveEdit">Save</button>
+                  <button class="btn" @click="cancelEdit">Cancel</button>
+                </td>
+              </template>
+              <template v-else>
+                <td>{{ c.name }}</td>
+                <td>{{ c.simpleType || c.type }}</td>
+                <td>{{ c.nullable === 'NO' || c.isNotNull ? 'NO' : 'YES' }}</td>
+                <td>{{ c.isPrimary ? 'PK' : (c.key || '') }}</td>
+                <td>{{ c.defaultValue ?? '' }}</td>
+                <td>{{ c.extra ?? '' }}</td>
+                <td>
+                  <button class="btn" @click="startEdit(c)">Edit</button>
+                  <button class="btn danger" @click="dropCol(c)">Del</button>
+                </td>
+              </template>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <!-- Indexes -->
       <table v-else-if="tab === 'idx'">
         <thead><tr><th>Name</th><th>Columns</th><th>Unique</th><th>Primary</th></tr></thead>
@@ -82,9 +149,20 @@ function esc(s: any): string {
   color: var(--vscode-foreground); border-bottom: 2px solid transparent; }
 .tabs button.active { border-bottom-color: var(--vscode-focusBorder); color: var(--vscode-textLink-foreground); }
 .content { flex: 1; overflow: auto; padding: 8px; }
+.toolbar { margin-bottom: 8px; }
+.btn { padding: 3px 10px; font-size: 12px; cursor: pointer; border: none; border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
+.btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.btn.danger { background: var(--vscode-errorForeground); color: #fff; }
+.input { font-size: 12px; padding: 3px 6px; background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border); border-radius: 3px; }
+.input.wide { width: 280px; }
+.add-row { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+.add-row .input { flex: 1; }
 table { border-collapse: collapse; font-size: 13px; width: 100%; }
 th, td { border: 1px solid var(--vscode-panel-border); padding: 4px 10px; text-align: left; white-space: nowrap; }
 th { background: var(--vscode-editor-background); position: sticky; top: 0; }
+.act-col { width: 120px; }
 pre { white-space: pre-wrap; font-family: var(--vscode-editor-font-family); font-size: 13px; }
 .error { padding: 12px; color: var(--vscode-errorForeground); }
 </style>

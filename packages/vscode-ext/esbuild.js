@@ -22,8 +22,9 @@ const options = {
   target: 'node18',
   sourcemap: 'inline',
   minify: false,
-  // external: vscode 由扩展 host 提供；ssh2 含可选原生模块，运行时加载
-  external: ['vscode', 'ssh2', 'cpu-features'],
+  // external: vscode 由扩展 host 提供；cpu-features 为 ssh2 的可选原生加速
+  // （缺失时 ssh2 内部 try/catch 自动降级），ssh2 本身打包进 bundle 使 VSIX 自包含
+  external: ['vscode', 'cpu-features'],
   // db-core 是 ESM 源码，经由 workspace 链接解析，需声明为可打包依赖
   mainFields: ['module', 'main'],
   logLevel: 'info',

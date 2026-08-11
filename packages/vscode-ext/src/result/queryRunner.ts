@@ -151,7 +151,7 @@ export class QueryRunner {
           return { name: f.name, simpleType: c?.simpleType, type: c?.type };
         });
         this.post({
-          type: 'result', result: { ...result, fields: fieldsWithType }, pkColumns: pkCols, total, sql: this.buildSelect(),
+          type: 'result', result: { ...result, fields: fieldsWithType }, pkColumns: pkCols, total, sql,
         });
       } else {
         // 查询模式发送所有结果集
@@ -183,7 +183,7 @@ export class QueryRunner {
         const explainSql = `${prefix}${stmt}`;
         results.push(await session.query.query(explainSql));
       }
-      this.post({ type: 'results', results, sql: `${prefix}${sql}`, transactionState: undefined });
+      this.post({ type: 'results', results, sql: `${prefix}${sql}`, transactionState: undefined, explain: true });
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
     } finally {

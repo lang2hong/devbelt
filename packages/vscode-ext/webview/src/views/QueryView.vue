@@ -90,13 +90,15 @@ onMounted(() => {
         fields.value = cur.fields;
         meta.value = cur.rows.length + ' row(s) in ' + (cur.costTime / 1000).toFixed(3) + 's' + (cur.truncated ? ' (truncated)' : '');
       }
-      if (msg.sql) sql.value = msg.sql;
+      if (msg.sql && !msg.explain) sql.value = msg.sql;
       if (msg.transactionState) transactionState.value = msg.transactionState;
       else transactionState.value = '';
       error.value = '';
       pkColumns.value = [];
     } else if (msg.type === 'transaction') {
       transactionState.value = msg.state || '';
+    } else if (msg.type === 'hiddenColumns') {
+      hiddenColumns.value = msg.hiddenColumns || [];
     } else if (msg.type === 'layout') {
       columnOrder.value = msg.columnOrder || [];
       columnWidths.value = msg.columnWidths || {};
@@ -243,6 +245,10 @@ function onSqlInput(e: Event) {
   const before = ta.value.slice(0, caret);
   lastPrefix = (before.match(/(\w*)$/)?.[1] || '');
   clearTimeout(completionTimer);
+  if (!lastPrefix) {
+    showCompletion.value = false;
+    return;
+  }
   completionTimer = setTimeout(() => {
     post({ type: 'completion', before, text: ta.value });
   }, 200);
@@ -295,8 +301,9 @@ function onKeydown(e: KeyboardEvent) {
       <button v-if="running" class="btn" @click="cancel">Cancel</button>
       <span v-if="transactionState" class="txn-badge" :class="transactionState">TX: {{ transactionState }}</span>
       <div class="spacer"></div>
+      <span v-if="meta" class="page-info">{{ meta }}</span>
       <span v-if="hasTable && total !== undefined" class="page-info">
-        Page {{ currentPage }} / {{ totalPages }} · {{ total }} row(s)
+        · Page {{ currentPage }} / {{ totalPages }} · {{ total }} row(s)
       </span>
       <button v-if="hasTable" class="btn" :disabled="currentPage <= 1" @click="prevPage">◀ Prev</button>
       <button v-if="hasTable" class="btn" :disabled="currentPage >= totalPages" @click="nextPage">Next ▶</button>
@@ -307,7 +314,6 @@ function onKeydown(e: KeyboardEvent) {
         <span class="tab-close" @click.stop="closeResult(i)">×</span>
       </button>
     </div>
-    <div class="meta" v-if="meta">{{ meta }}</div>
     <div class="error" v-if="error">{{ error }}</div>
     <ResultGrid
       :rows="rows"

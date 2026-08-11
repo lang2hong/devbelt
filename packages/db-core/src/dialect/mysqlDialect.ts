@@ -18,7 +18,7 @@ export class MysqlDialect implements SqlDialect {
     users: true,
     operations: [
       'createDatabase', 'dropDatabase', 'renameTable', 'duplicateTable',
-      'truncateTable', 'getTableDefinition', 'manageIndexes', 'manageRoutines',
+      'truncateTable', 'getTableDefinition', 'alterTable', 'manageIndexes', 'manageRoutines',
       'manageEvents', 'manageUsers', 'dumpTable', 'schemaSync',
     ],
   };
@@ -87,7 +87,7 @@ export class MysqlDialect implements SqlDialect {
     const where = database
       ? `table_schema = '${validateIdent(database)}' AND table_name = '${table}'`
       : `table_schema = database() AND table_name = '${table}'`;
-    return `SELECT index_name AS name, column_name AS column, non_unique = 0 AS is_unique, index_name = 'PRIMARY' AS is_primary FROM information_schema.statistics WHERE ${where} ORDER BY index_name, seq_in_index`;
+    return `SELECT index_name AS name, column_name AS col, non_unique = 0 AS is_unique, index_name = 'PRIMARY' AS is_primary FROM information_schema.statistics WHERE ${where} ORDER BY index_name, seq_in_index`;
   }
 
   getUserListSql(): string {
@@ -146,7 +146,7 @@ export class MysqlDialect implements SqlDialect {
       if (!map.has(name)) {
         map.set(name, { columns: [], isUnique: row.is_unique, isPrimary: row.is_primary });
       }
-      map.get(name)!.columns.push(row.column);
+      map.get(name)!.columns.push(row.col);
     }
     return Array.from(map.entries()).map(([name, v]) => ({
       name,

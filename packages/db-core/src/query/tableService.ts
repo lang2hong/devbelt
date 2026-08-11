@@ -95,6 +95,41 @@ export class TableService {
     return this.ddl(`CREATE ${isUnique ? 'UNIQUE ' : ''}INDEX ${this.wrap(indexName)} ON ${qualifiedTable} (${colList})`);
   }
 
+  /** 新增列 */
+  async addColumn(table: string, column: string, definition: string, database?: string): Promise<QueryResult> {
+    this.require('alterTable');
+    validateIdent(table);
+    validateIdent(column);
+    const def = definition.trim();
+    if (!def) throw new Error('Column definition is required.');
+    return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} ADD COLUMN ${this.wrap(column)} ${def}`);
+  }
+
+  /** 删除列（危险操作，需二次确认） */
+  async dropColumn(table: string, column: string, database?: string): Promise<QueryResult> {
+    this.require('alterTable');
+    validateIdent(table);
+    validateIdent(column);
+    return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} DROP COLUMN ${this.wrap(column)}`);
+  }
+
+  /** 修改列定义。MySQL 用 MODIFY COLUMN；PG 用 ALTER COLUMN TYPE；SQLite 不支持改类型 */
+  async modifyColumn(table: string, column: string, definition: string, database?: string): Promise<QueryResult> {
+    this.require('alterTable');
+    validateIdent(table);
+    validateIdent(column);
+    const def = definition.trim();
+    if (!def) throw new Error('Column definition is required.');
+    const dbType = this.queryService.dialect.dbType;
+    if (dbType === 'MYSQL') {
+      return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} MODIFY COLUMN ${this.wrap(column)} ${def}`);
+    }
+    if (dbType === 'PG') {
+      return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} ALTER COLUMN ${this.wrap(column)} TYPE ${def}`);
+    }
+    throw new Error(`${dbType} does not support altering a column type.`);
+  }
+
   // ── 用户管理 ──
 
   /** 创建用户 */
@@ -355,6 +390,24 @@ export class TableService {
     switch (dbType) {
       case 'MYSQL':
         return `SHOW CREATE TABLE ${qualified}`;
+      case 'PG': {
+        validateIdent(table);
+        const schema = database ? `quote_literal(${this.wrap(database)})` : 'current_schema()';
+        return `SELECT
+            'CREATE TABLE ' || quote_ident(c.relname) || ' (' || chr(10) ||
+            string_agg(
+              '  ' || quote_ident(a.attname) || ' ' || format_type(a.atttypid, a.atttypmod)
+                || CASE WHEN a.attnotnull THEN ' NOT NULL' ELSE '' END
+                || CASE WHEN ad.adsrc IS NOT NULL THEN ' DEFAULT ' || ad.adsrc ELSE '' END,
+              ',' || chr(10)
+            ) || chr(10) || ');' AS create_sql
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+          LEFT JOIN pg_attrdef ad ON ad.adrelid = c.oid AND ad.adnum = a.attnum
+          WHERE c.relname = '${table}' AND n.nspname = ${schema}
+          GROUP BY c.relname`;
+      }
       default:
         return `SELECT sql FROM sqlite_master WHERE name = '${table}'`;
     }

@@ -16,7 +16,7 @@ export class SqliteDialect implements SqlDialect {
     routines: false,
     events: false,
     users: false,
-    operations: ['renameTable', 'getTableDefinition', 'manageIndexes', 'dumpTable'],
+    operations: ['renameTable', 'getTableDefinition', 'alterTable', 'manageIndexes', 'dumpTable'],
   };
 
   wrap(identifier: string): string {

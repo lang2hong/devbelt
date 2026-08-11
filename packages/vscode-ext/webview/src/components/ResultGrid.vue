@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
+import { ref, watch, computed, nextTick } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import { VueDatePicker } from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css';
@@ -39,9 +39,10 @@ const { post } = useVsCode();
 const conditions = ref<Cond[]>([]);
 const showFilter = ref(false);
 const showExport = ref(false);
-const selectedRows = ref<Set<string>>(new Set());
+const selectedRows = ref<Row[]>([]);
 const editingCell = ref<string | null>(null);
 const editValue = ref('');
+const editInput = ref<HTMLInputElement | null>(null);
 const inserting = ref(false);
 const newRow = ref<Record<string, string>>({});
 const showColumnMenu = ref(false);
@@ -148,6 +149,7 @@ function startEdit(row: Row, field: Field) {
   const key = `${pk.col}:${pk.val}:${field.name}`;
   editingCell.value = key;
   editValue.value = String(row[field.name] ?? '');
+  nextTick(() => editInput.value?.focus());
 }
 
 function commitEdit(row: Row, field: Field) {
@@ -161,23 +163,27 @@ function commitEdit(row: Row, field: Field) {
 }
 
 function toggleRow(row: Row, checked: boolean) {
-  const pk = getPk(row);
-  if (!pk) return;
-  const key = `${pk.col}:${pk.val}`;
-  if (checked) selectedRows.value.add(key);
-  else selectedRows.value.delete(key);
+  if (checked) {
+    if (!selectedRows.value.includes(row)) selectedRows.value.push(row);
+  } else {
+    selectedRows.value = selectedRows.value.filter((r) => r !== row);
+  }
+}
+
+function isRowSelected(row: Row): boolean {
+  return selectedRows.value.includes(row);
 }
 
 function deleteSelected() {
   const rows: { pkColumn: string; pkValue: any }[] = [];
-  selectedRows.value.forEach(key => {
-    const [col, ...valParts] = key.split(':');
-    rows.push({ pkColumn: col, pkValue: valParts.join(':') });
-  });
+  for (const row of selectedRows.value) {
+    const pk = getPk(row);
+    if (pk) rows.push({ pkColumn: pk.col, pkValue: pk.val });
+  }
   if (!rows.length) return;
   if (confirm(`Delete ${rows.length} row(s)?`)) {
     post({ type: 'deleteRows', rows });
-    selectedRows.value.clear();
+    selectedRows.value = [];
   }
 }
 
@@ -309,11 +315,12 @@ function saveInsert() {
 
 function copyAsInsert() {
   if (!props.tableName || !props.rows.length) return;
+  const targets = selectedRows.value.length ? selectedRows.value : props.rows;
   const cols = visibleFields.value.map((f) => f.name);
   const esc = (v: any): string => (v === null || v === undefined) ? 'NULL' : `'${String(v).replace(/'/g, "''")}'`;
   const q = (name: string) => `\`${name}\``;
   const target = props.dbName ? `${q(props.dbName)}.${q(props.tableName)}` : q(props.tableName);
-  const sql = props.rows.map((row) => {
+  const sql = targets.map((row) => {
     const vals = cols.map((c) => esc(row[c])).join(', ');
     return `INSERT INTO ${target} (${cols.map(q).join(', ')}) VALUES (${vals});`;
   }).join('\n');
@@ -322,7 +329,7 @@ function copyAsInsert() {
 
 watch([() => props.fields, () => props.columnOrder], () => {
   displayedOrder.value = normalizedOrder();
-  selectedRows.value.clear();
+  selectedRows.value = [];
 }, { immediate: true });
 
 watch(() => props.columnWidths, (widths) => {
@@ -336,11 +343,9 @@ watch(() => props.filterConditions, (conds) => {
 
 <template>
   <div class="toolbar">
-    <button v-if="canModifyRows" class="btn danger" :disabled="!selectedRows.size" @click="deleteSelected">
-      Delete ({{ selectedRows.size }})
+    <button v-if="canModifyRows" class="btn danger" :disabled="!selectedRows.length" @click="deleteSelected">
+      Delete ({{ selectedRows.length }})
     </button>
-    <button v-if="canModifyRows" class="btn" @click="startInsert">Insert Row</button>
-    <button v-if="hasTable" class="btn" :disabled="!rows.length" @click="copyAsInsert">Copy INSERT</button>
     <template v-if="hasTable">
       <div class="filter-wrap">
         <button class="btn" @click="toggleFilterPanel">Filter</button>
@@ -390,7 +395,7 @@ watch(() => props.filterConditions, (conds) => {
               <input v-else-if="isNumberColumn(cond.column)" v-model="cond.value" class="input" type="number" />
               <input v-else v-model="cond.value" class="input" :placeholder="MULTI_VALUE_OPS.includes(cond.op) ? 'v1, v2, v3' : 'value...'" />
             </template>
-            <button class="btn" @click="removeCondition(index)">✕</button>
+            <button class="btn" :disabled="conditions.length <= 1" @click="removeCondition(index)">✕</button>
           </div>
           <div class="filter-actions">
             <button class="btn" @click="addCondition">+ Add</button>
@@ -417,6 +422,8 @@ watch(() => props.filterConditions, (conds) => {
         <button class="menu-item" @click="startExport('sql')">SQL</button>
       </div>
     </div>
+    <button v-if="canModifyRows" class="btn" @click="startInsert">Insert Row</button>
+    <button v-if="hasTable" class="btn" :disabled="!rows.length" @click="copyAsInsert">Copy INSERT</button>
   </div>
   <div class="grid-wrap">
     <table>
@@ -449,14 +456,14 @@ watch(() => props.filterConditions, (conds) => {
         <tr v-for="(row, idx) in rows" :key="idx">
           <td v-if="canModifyRows">
             <input type="checkbox"
-              :checked="selectedRows.has((getPk(row)?.col || '') + ':' + (getPk(row)?.val || ''))"
+              :checked="isRowSelected(row)"
               @change="e => toggleRow(row, (e.target as HTMLInputElement).checked)" />
           </td>
           <td v-for="f in visibleFields" :key="f.name" :style="columnStyle(f.name)"
             @dblclick="canModifyRows && startEdit(row, f)"
             :title="canModifyRows && getPk(row) ? 'Double-click to edit' : ''">
             <template v-if="editingCell === `${getPk(row)?.col}:${getPk(row)?.val}:${f.name}`">
-              <input v-model="editValue" class="cell-edit"
+              <input ref="editInput" v-model="editValue" class="cell-edit"
                 @blur="commitEdit(row, f)"
                 @keydown.enter="commitEdit(row, f)" />
             </template>

@@ -8,6 +8,7 @@ export type DatabaseOperation =
   | 'duplicateTable'
   | 'truncateTable'
   | 'getTableDefinition'
+  | 'alterTable'
   | 'manageIndexes'
   | 'manageRoutines'
   | 'manageEvents'

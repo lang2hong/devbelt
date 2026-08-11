@@ -18,7 +18,7 @@ export class PostgreSqlDialect implements SqlDialect {
     users: true,
     operations: [
       'createDatabase', 'dropDatabase', 'renameTable', 'truncateTable',
-      'manageIndexes', 'manageRoutines',
+      'getTableDefinition', 'alterTable', 'manageIndexes', 'manageRoutines',
     ],
   };
 

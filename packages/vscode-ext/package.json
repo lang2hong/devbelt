@@ -317,6 +317,21 @@
         "category": "DB Client"
       },
       {
+        "command": "dbclient.importTable",
+        "title": "Import",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.exportTable",
+        "title": "Export",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.newQueryForDb",
+        "title": "Run SQL",
+        "category": "DB Client"
+      },
+      {
         "command": "dbclient.deleteQuery",
         "title": "Delete Query",
         "category": "DB Client"
@@ -416,6 +431,16 @@
           "group": "1_table"
         },
         {
+          "command": "dbclient.importTable",
+          "when": "view == dbclient.explorer && viewItem == table",
+          "group": "1_table"
+        },
+        {
+          "command": "dbclient.exportTable",
+          "when": "view == dbclient.explorer && viewItem == table",
+          "group": "1_table"
+        },
+        {
           "command": "dbclient.mockData",
           "when": "view == dbclient.explorer && viewItem == table",
           "group": "1_table"
@@ -447,6 +472,11 @@
         },
         {
           "command": "dbclient.newQueryFromConn",
+          "when": "view == dbclient.explorer && viewItem == database",
+          "group": "1_db"
+        },
+        {
+          "command": "dbclient.newQueryForDb",
           "when": "view == dbclient.explorer && viewItem == database",
           "group": "1_db"
         },

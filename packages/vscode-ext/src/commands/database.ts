@@ -60,6 +60,29 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     await runExportWizard(node, manager, connCtx);
   });
 
+  sub('dbclient.importTable', async (node: DbTreeNode) => {
+    if (!node?.conn) return;
+    const format = await pickFormat('import');
+    if (!format) return;
+    const uri = await vscode.window.showOpenDialog({
+      filters: importFilters(format),
+      canSelectMany: false,
+      openLabel: l10n('import.selectFile'),
+    });
+    if (!uri?.[0]) return;
+    const text = Buffer.from(await vscode.workspace.fs.readFile(uri[0])).toString('utf8');
+    if (format === 'sql') {
+      await importSqlScript(node, text, manager, treeProvider, connCtx);
+      return;
+    }
+    await importStructuredData(node, format, text, manager, treeProvider, connCtx, node.label);
+  });
+
+  sub('dbclient.exportTable', async (node: DbTreeNode) => {
+    if (!node?.conn) return;
+    await runExportWizard(node, manager, connCtx, node.label);
+  });
+
   sub('dbclient.compareSchema', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     const session = await manager.connect(node.conn);
@@ -175,16 +198,28 @@ async function importSqlScript(
   }
   const statements = splitSqlStatements(sql);
   let done = 0;
+  let insertedRows = 0;
+  let hasAffectedInfo = false;
   try {
     await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: l10n('import.progress'), cancellable: true }, async (progress, token) => {
       for (const statement of statements) {
         if (token.isCancellationRequested) throw new TransferCancelledError();
-        await session.query.query(statement);
+        const result = await session.query.query(statement);
         done++;
+        const upper = statement.trimStart().toUpperCase();
+        if (upper.startsWith('INSERT') || upper.startsWith('REPLACE')) {
+          if (typeof result.affectedRows === 'number') {
+            hasAffectedInfo = true;
+            insertedRows += result.affectedRows;
+          } else {
+            // SQLite 等无法从结果取 affectedRows 的驱动：按 INSERT 语句计数（近似）
+            insertedRows++;
+          }
+        }
         progress.report({ message: `${done}/${statements.length}` });
       }
     });
-    vscode.window.showInformationMessage(l10n('import.done', { count: done }));
+    vscode.window.showInformationMessage(l10n('import.rowsDone', { count: hasAffectedInfo ? insertedRows : done }));
     treeProvider.refresh();
   } catch (error) {
     if (error instanceof TransferCancelledError) vscode.window.showInformationMessage(l10n('transfer.cancelled'));
@@ -199,6 +234,7 @@ async function importStructuredData(
   manager: Deps['manager'],
   treeProvider: Deps['treeProvider'],
   connCtx: Deps['connCtx'],
+  fixedTable?: string,
 ): Promise<void> {
   let source: { columns: string[]; rows: Record<string, unknown>[] };
   try {
@@ -224,7 +260,9 @@ async function importStructuredData(
   const database = await pickImportDatabase(node, session.metadata.getDatabases.bind(session.metadata));
   if (database === undefined && node.conn!.dbType === DatabaseType.MYSQL && !node.database) return;
   const tables = await session.metadata.getTables(database);
-  const table = await vscode.window.showQuickPick(tables.map((item) => ({ label: item.name })), { placeHolder: l10n('import.selectTable') });
+  const table = fixedTable
+    ? { label: fixedTable }
+    : await vscode.window.showQuickPick(tables.map((item) => ({ label: item.name })), { placeHolder: l10n('import.selectTable') });
   if (!table) return;
   const mappings = await configureMappings(source.columns, (await session.metadata.getColumns(table.label, database)).map((column) => column.name));
   if (!mappings) return;

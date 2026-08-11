@@ -131,4 +131,11 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
     treeProvider.refresh();
     await openQueryFile(deps, node.conn, node.database, queryId);
   });
+
+  sub('dbclient.newQueryForDb', async (node: DbTreeNode) => {
+    if (!node?.conn || !node?.database) return;
+    connCtx.setLast(node.conn, node.database);
+    const editor = await openSqlDocEditor('');
+    if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
+  });
 }
