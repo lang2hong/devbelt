@@ -27,14 +27,14 @@ const hiddenColumns = ref<string[]>([]);
 const columnOrder = ref<string[]>([]);
 const columnWidths = ref<Record<string, number>>({});
 const offset = ref(0);
-const limit = 100;
+const limit = ref(100);
 const total = ref<number | undefined>(undefined);
 const tableName = ref('');
 const dbName = ref('');
 const running = ref(false);
 
-const totalPages = computed(() => total.value === undefined ? 0 : Math.max(1, Math.ceil(total.value / limit)));
-const currentPage = computed(() => total.value === undefined ? 0 : Math.floor(offset.value / limit) + 1);
+const totalPages = computed(() => total.value === undefined ? 0 : Math.max(1, Math.ceil(total.value / limit.value)));
+const currentPage = computed(() => total.value === undefined ? 0 : Math.floor(offset.value / limit.value) + 1);
 
 function filterByPrefix(items: { label: string; kind: string }[], prefix: string) {
   if (!prefix) return items;
@@ -58,6 +58,7 @@ onMounted(() => {
       hiddenColumns.value = msg.hiddenColumns || [];
       columnOrder.value = msg.columnOrder || [];
       columnWidths.value = msg.columnWidths || {};
+      limit.value = msg.limit || 100;
     } else if (msg.type === 'querySql') {
       sql.value = msg.sql || '';
       dbName.value = msg.dbName || '';
@@ -175,13 +176,22 @@ function cancel() {
 }
 
 function nextPage() {
-  offset.value += limit;
+  offset.value += limit.value;
   post({ type: 'nextPage' });
 }
 
 function prevPage() {
-  offset.value = Math.max(0, offset.value - limit);
+  offset.value = Math.max(0, offset.value - limit.value);
   post({ type: 'prevPage' });
+}
+
+function setLimit() {
+  const n = Number(limit.value);
+  if (Number.isFinite(n) && n > 0) {
+    limit.value = Math.min(100000, Math.floor(n));
+    offset.value = 0;
+    post({ type: 'setLimit', limit: limit.value });
+  }
 }
 
 function handleSort(col: string) {
@@ -305,6 +315,8 @@ function onKeydown(e: KeyboardEvent) {
       <span v-if="hasTable && total !== undefined" class="page-info">
         · Page {{ currentPage }} / {{ totalPages }} · {{ total }} row(s)
       </span>
+      <span v-if="hasTable" class="page-info">Limit</span>
+      <input v-if="hasTable" type="number" v-model.number="limit" class="limit-input" min="1" @change="setLimit" />
       <button v-if="hasTable" class="btn" :disabled="currentPage <= 1" @click="prevPage">◀ Prev</button>
       <button v-if="hasTable" class="btn" :disabled="currentPage >= totalPages" @click="nextPage">Next ▶</button>
     </div>
@@ -360,6 +372,8 @@ function onKeydown(e: KeyboardEvent) {
 .action-bar { padding: 4px 8px; display: flex; gap: 6px; align-items: center; border-bottom: 1px solid var(--vscode-panel-border); }
   .spacer { flex: 1; }
   .page-info { font-size: 12px; color: var(--vscode-descriptionForeground); white-space: nowrap; }
+  .limit-input { width: 64px; font-size: 12px; padding: 2px 6px; background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 3px; }
 .btn { padding: 3px 10px; font-size: 12px; cursor: pointer; border: none; border-radius: 3px;
   background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
 .btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }

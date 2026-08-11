@@ -121,11 +121,20 @@ export class TableQueryView extends BaseWebView {
         await this.runner.explain(msg.sql);
         break;
       case 'nextPage':
-        this.runner.offset += 100; await this.runner.execute(this.runner.buildSelect());
+        this.runner.offset += this.runner.limit; await this.runner.execute(this.runner.buildSelect());
         break;
       case 'prevPage':
-        this.runner.offset = Math.max(0, this.runner.offset - 100); await this.runner.execute(this.runner.buildSelect());
+        this.runner.offset = Math.max(0, this.runner.offset - this.runner.limit); await this.runner.execute(this.runner.buildSelect());
         break;
+      case 'setLimit': {
+        const n = Number(msg.limit);
+        if (Number.isFinite(n) && n > 0) {
+          this.runner.limit = Math.min(100000, Math.floor(n));
+          this.runner.offset = 0;
+          await this.runner.execute(this.runner.buildSelect());
+        }
+        break;
+      }
       case 'sort':
         if (!this.hasTable) return;
         if (this.runner.sortCol === msg.column && this.runner.sortDir === 'ASC') this.runner.sortDir = 'DESC';
@@ -212,6 +221,7 @@ export class TableQueryView extends BaseWebView {
       hiddenColumns: this.hiddenColumns,
       columnOrder: this.reconciledColumnOrder(),
       columnWidths: this.reconciledColumnWidths(),
+      limit: this.runner.limit,
     });
   }
 

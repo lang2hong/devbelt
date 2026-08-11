@@ -153,6 +153,13 @@ function startEdit(row: Row, field: Field) {
   editingField = field;
   editingCell.value = `${pk.col}:${pk.val}:${field.name}`;
   editValue.value = String(row[field.name] ?? '');
+  setTimeout(() => editInput.value?.focus(), 0);
+}
+
+function cancelEdit() {
+  editingCell.value = null;
+  editingRow = null;
+  editingField = null;
 }
 
 function commitEdit(row: Row, field: Field) {
@@ -411,7 +418,7 @@ watch(() => props.filterConditions, (conds) => {
               <input v-else-if="isNumberColumn(cond.column)" v-model="cond.value" class="input" type="number" />
               <input v-else v-model="cond.value" class="input" :placeholder="MULTI_VALUE_OPS.includes(cond.op) ? 'v1, v2, v3' : 'value...'" />
             </template>
-            <button class="btn" :disabled="conditions.length <= 1" @click="removeCondition(index)">✕</button>
+            <button class="btn" @click="removeCondition(index)">✕</button>
           </div>
           <div class="filter-actions">
             <button class="btn" @click="addCondition">+ Add</button>
@@ -480,8 +487,8 @@ watch(() => props.filterConditions, (conds) => {
             :title="canModifyRows && getPk(row) ? 'Double-click to edit' : ''">
             <template v-if="editingCell === `${getPk(row)?.col}:${getPk(row)?.val}:${f.name}`">
               <input ref="editInput" v-model="editValue" class="cell-edit"
-                @blur="commitEdit(row, f)"
-                @keydown.enter="commitEdit(row, f)" />
+                @keydown.enter="commitEdit(row, f)"
+                @keydown.esc="cancelEdit" />
             </template>
             <template v-else>
               {{ row[f.name] === null || row[f.name] === undefined ? 'NULL' : typeof row[f.name] === 'object' ? JSON.stringify(row[f.name]) : row[f.name] }}

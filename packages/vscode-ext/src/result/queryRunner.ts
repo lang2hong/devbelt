@@ -20,6 +20,7 @@ export class QueryRunner {
   filterConditions: FilterCondition[] = [];
   lastFields: string[] = [];
   editablePkColumn?: string;
+  limit = 100;
   private runningQuery?: QueryService;
   private execQueue: Promise<unknown> = Promise.resolve();
   private disposed = false;
@@ -47,10 +48,6 @@ export class QueryRunner {
   getCountSql(): string {
     if (!this.table) return '';
     return buildCountSql(this.conn.dbType, this.table, undefined, this.filterConditions);
-  }
-
-  private get limit(): number {
-    return 100;
   }
 
   execute(
