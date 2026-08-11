@@ -10,7 +10,8 @@ import { TableProfileStore } from './tableProfileStore';
 import { exportRows, type TransferFormat } from '../data/transfer/exportService';
 import { buildCountSql, buildTableSelect, type FilterCondition } from './tableQuerySql';
 import { reconcileColumnOrder, reconcileColumnWidths, reconcileHiddenColumns } from './tableLayout';
-import { buildCandidates, detectContext, extractFromTable } from '../completion/sqlCompletionEngine';
+import { CompletionService } from './completionService';
+import { RowEditor } from './rowEditor';
 
 /**
  * 表/查询视图：Vue 3 webview 模式。
@@ -33,9 +34,8 @@ export class TableQueryView extends BaseWebView {
   private runningQuery?: QueryService;
   private ready = false;
   private executingPendingQuery = false;
-  /** 补全元数据缓存（db → 表名；db:table → 列名），随视图销毁自动释放。 */
-  private readonly completionTableCache = new Map<string, string[]>();
-  private readonly completionColumnCache = new Map<string, string[]>();
+  private readonly completionService: CompletionService;
+  private readonly rowEditor: RowEditor;
   /** 查询串行队列：同一视图/会话的查询按序执行，避免并发污染 USE/事务状态并防止取消句柄被覆盖。 */
   private execQueue: Promise<unknown> = Promise.resolve();
   private disposed = false;
@@ -67,6 +67,11 @@ export class TableQueryView extends BaseWebView {
     this.hasTable = !!table;
     // 引用计数：同一连接被多个视图共享，最后一个视图关闭时才释放连接。
     TableQueryView.connRefs.set(this.conn.id, (TableQueryView.connRefs.get(this.conn.id) ?? 0) + 1);
+    this.completionService = new CompletionService(manager, conn, database, (msg) => this.post(msg));
+    this.rowEditor = new RowEditor(manager, conn, table!, database, (msg) => this.post(msg), {
+      editablePkColumn: () => this.editablePkColumn,
+      refresh: () => this.execute(this.buildSelect()),
+    });
     if (this.hasTable) {
       const saved = TableQueryView.profileStore?.get(conn.id, database, table!);
       if (saved) {
@@ -156,25 +161,19 @@ export class TableQueryView extends BaseWebView {
         break;
       case 'updateCell':
         if (!this.hasTable) return;
-        await this.updateCell(msg.pkColumn, msg.rowId, msg.column, msg.value);
+        await this.rowEditor.updateCell(msg.pkColumn, msg.rowId, msg.column, msg.value);
         break;
       case 'deleteRows':
         if (!this.hasTable) return;
-        await this.deleteRows(msg.rows);
+        await this.rowEditor.deleteRows(msg.rows);
         break;
-      case 'insertRow': {
+      case 'insertRow':
         if (!this.hasTable) return;
-        if (!(await confirmSqlExecution(this.conn, `INSERT INTO ${this.table} ...`))) return;
-        const session = await this.manager.connect(this.conn);
-        await session.data.insertRow(
-          this.table!,
+        await this.rowEditor.insertRow(
           Array.isArray(msg.columns) ? msg.columns : [],
           Array.isArray(msg.values) ? msg.values : [],
-          this.database,
         );
-        await this.execute(this.buildSelect());
         break;
-      }
       case 'toggleColumn':
         if (!this.hasTable) return;
         await this.toggleColumn(msg.column, !!msg.hidden);
@@ -193,29 +192,9 @@ export class TableQueryView extends BaseWebView {
       case 'exportData':
         await this.exportData(msg.format, msg.columns || [], msg.rows || []);
         break;
-      case 'completion': {
-        try {
-          const session = await this.manager.connect(this.conn);
-          const before = String(msg.before || '');
-          const text = String(msg.text || '');
-          const db = this.database || this.conn.database;
-          const tables = await this.getCompletionTables(session, db);
-          const fromTable = extractFromTable(text);
-          const ctx = detectContext(before);
-          let columns: string[] = [];
-          if (ctx === 'dot_column') {
-            const m = before.match(/(\w+)\.\w*$/);
-            if (m) columns = await this.getCompletionColumns(session, m[1], db);
-          } else if (fromTable) {
-            columns = await this.getCompletionColumns(session, fromTable, db);
-          }
-          const items = buildCandidates(ctx, { tables, columns, fromTable });
-          this.post({ type: 'completionItems', items });
-        } catch {
-          this.post({ type: 'completionItems', items: [] });
-        }
+      case 'completion':
+        await this.completionService.handle(String(msg.before || ''), String(msg.text || ''));
         break;
-      }
     }
   }
 
@@ -234,32 +213,6 @@ export class TableQueryView extends BaseWebView {
       }
     } else {
       TableQueryView.connRefs.set(this.conn.id, refs - 1);
-    }
-  }
-
-  private async getCompletionTables(session: any, db?: string): Promise<string[]> {
-    const key = db || '';
-    const cached = this.completionTableCache.get(key);
-    if (cached) return cached;
-    try {
-      const tables = (await session.metadata.getTables(db)).map((t: any) => t.name);
-      this.completionTableCache.set(key, tables);
-      return tables;
-    } catch {
-      return [];
-    }
-  }
-
-  private async getCompletionColumns(session: any, table: string, db?: string): Promise<string[]> {
-    const key = `${db || ''}:${table}`;
-    const cached = this.completionColumnCache.get(key);
-    if (cached) return cached;
-    try {
-      const columns = (await session.metadata.getColumns(table, db)).map((c: any) => c.name);
-      this.completionColumnCache.set(key, columns);
-      return columns;
-    } catch {
-      return [];
     }
   }
 
@@ -521,42 +474,6 @@ export class TableQueryView extends BaseWebView {
     } finally {
       this.runningQuery = undefined;
       this.post({ type: 'finished' });
-    }
-  }
-
-  private async updateCell(pkCol: string, rowId: any, col: string, val: string): Promise<void> {
-    try {
-      if (!this.editablePkColumn || pkCol !== this.editablePkColumn) {
-        this.post({ type: 'error', message: 'Inline editing requires a single-column primary key.' });
-        return;
-      }
-      if (!(await confirmSqlExecution(this.conn, `UPDATE ${this.table} SET ${col} = ? WHERE ${pkCol} = ?`))) return;
-      const session = await this.manager.connect(this.conn);
-      await session.data.updateCell(this.table!, pkCol, rowId, col, val === '' ? null : val, this.database);
-      this.post({ type: 'cellUpdated' });
-    } catch (err) {
-      this.post({ type: 'error', message: (err as Error).message });
-    }
-  }
-
-  private async deleteRows(rows: { pkColumn: string; pkValue: any }[]): Promise<void> {
-    try {
-      if (!rows.length || !this.editablePkColumn || rows.some((row) => row.pkColumn !== this.editablePkColumn)) {
-        this.post({ type: 'error', message: 'Row deletion requires a single-column primary key.' });
-        return;
-      }
-      if (!(await confirmSqlExecution(this.conn, `DELETE FROM ${this.table} WHERE ${rows[0]?.pkColumn || 'id'} = ?`))) return;
-      const session = await this.manager.connect(this.conn);
-      await session.data.deleteRows(
-        this.table!,
-        this.editablePkColumn,
-        rows.map((r) => r.pkValue),
-        this.database,
-      );
-      this.post({ type: 'rowsDeleted', count: rows.length });
-      await this.execute(this.buildSelect());
-    } catch (err) {
-      this.post({ type: 'error', message: (err as Error).message });
     }
   }
 
