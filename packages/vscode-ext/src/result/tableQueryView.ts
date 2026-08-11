@@ -2,16 +2,12 @@ import * as vscode from 'vscode';
 import type { SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from './baseWebView';
-import { splitSqlStatements } from '../utils/sql';
-import { confirmSqlExecution } from '../utils/sqlSafety';
-import type { QueryService } from '@db-client/core';
-import { validateIdent, DatabaseType } from '@db-client/core';
 import { TableProfileStore } from './tableProfileStore';
 import { exportRows, type TransferFormat } from '../data/transfer/exportService';
-import { buildCountSql, buildTableSelect, type FilterCondition } from './tableQuerySql';
 import { reconcileColumnOrder, reconcileColumnWidths, reconcileHiddenColumns } from './tableLayout';
 import { CompletionService } from './completionService';
 import { RowEditor } from './rowEditor';
+import { QueryRunner } from './queryRunner';
 
 /**
  * 表/查询视图：Vue 3 webview 模式。
@@ -20,31 +16,14 @@ export class TableQueryView extends BaseWebView {
   private static readonly queryViews = new Map<string, TableQueryView>();
   private static readonly connRefs = new Map<string, number>();
   private static profileStore?: TableProfileStore;
-  private offset = 0;
-  private readonly limit = 100;
-  private sortCol = '';
-  private sortDir = '';
-  private filterConditions: FilterCondition[] = [];
+  private readonly runner: QueryRunner;
   private hiddenColumns: string[] = [];
   private columnOrder: string[] = [];
   private columnWidths: Record<string, number> = {};
-  private lastFields: string[] = [];
-  private editablePkColumn?: string;
-  private readonly hasTable: boolean;
-  private runningQuery?: QueryService;
   private ready = false;
   private executingPendingQuery = false;
   private readonly completionService: CompletionService;
   private readonly rowEditor: RowEditor;
-  /** 查询串行队列：同一视图/会话的查询按序执行，避免并发污染 USE/事务状态并防止取消句柄被覆盖。 */
-  private execQueue: Promise<unknown> = Promise.resolve();
-  private disposed = false;
-
-  private enqueue<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.execQueue.then(fn, fn);
-    this.execQueue = run.catch(() => {});
-    return run;
-  }
   private pendingQuery?: {
     sql: string;
     database?: string;
@@ -64,15 +43,15 @@ export class TableQueryView extends BaseWebView {
       table ? `${conn.name || conn.host} › ${database || ''} › ${table}` : `Query @ ${conn.name || conn.host}`,
       viewColumn,
     );
-    this.hasTable = !!table;
     // 引用计数：同一连接被多个视图共享，最后一个视图关闭时才释放连接。
     TableQueryView.connRefs.set(this.conn.id, (TableQueryView.connRefs.get(this.conn.id) ?? 0) + 1);
+    this.runner = new QueryRunner(conn, manager, table, database, (msg) => this.post(msg));
     this.completionService = new CompletionService(manager, conn, database, (msg) => this.post(msg));
     this.rowEditor = new RowEditor(manager, conn, table!, database, (msg) => this.post(msg), {
-      editablePkColumn: () => this.editablePkColumn,
-      refresh: () => this.execute(this.buildSelect()),
+      editablePkColumn: () => this.runner.editablePkColumn,
+      refresh: () => this.runner.execute(this.runner.buildSelect()),
     });
-    if (this.hasTable) {
+    if (this.table) {
       const saved = TableQueryView.profileStore?.get(conn.id, database, table!);
       if (saved) {
         // 仅保留列布局；filter/sort 为临时查询状态，每次打开重置为干净视图。
@@ -81,6 +60,10 @@ export class TableQueryView extends BaseWebView {
         this.columnWidths = saved.columnWidths || {};
       }
     }
+  }
+
+  private get hasTable(): boolean {
+    return this.runner.hasTable;
   }
 
   static init(extensionUri: vscode.Uri, profileStore?: TableProfileStore): void {
@@ -125,38 +108,34 @@ export class TableQueryView extends BaseWebView {
         if (this.pendingQuery) {
           await this.executePendingQueries();
         } else if (this.hasTable) {
-          await this.runInitial();
+          await this.runner.execute(this.runner.buildSelect());
         }
         break;
       case 'run':
-        this.offset = 0;
-      if (this.hasTable) {
-        await this.execute(msg.sql || this.buildSelect());
-      } else {
-        await this.execute(msg.sql);
-      }
+        this.runner.offset = 0;
+        await this.runner.execute(msg.sql || this.runner.buildSelect());
         break;
       case 'explain':
-        await this.explain(msg.sql);
+        await this.runner.explain(msg.sql);
         break;
       case 'nextPage':
-        this.offset += this.limit; await this.execute(this.buildSelect());
+        this.runner.offset += 100; await this.runner.execute(this.runner.buildSelect());
         break;
       case 'prevPage':
-        this.offset = Math.max(0, this.offset - this.limit); await this.execute(this.buildSelect());
+        this.runner.offset = Math.max(0, this.runner.offset - 100); await this.runner.execute(this.runner.buildSelect());
         break;
       case 'sort':
         if (!this.hasTable) return;
-        if (this.sortCol === msg.column && this.sortDir === 'ASC') this.sortDir = 'DESC';
-        else if (this.sortCol === msg.column && this.sortDir === 'DESC') { this.sortCol = ''; this.sortDir = ''; }
-        else { this.sortCol = msg.column; this.sortDir = 'ASC'; }
-        this.offset = 0; await this.execute(this.buildSelect());
+        if (this.runner.sortCol === msg.column && this.runner.sortDir === 'ASC') this.runner.sortDir = 'DESC';
+        else if (this.runner.sortCol === msg.column && this.runner.sortDir === 'DESC') { this.runner.sortCol = ''; this.runner.sortDir = ''; }
+        else { this.runner.sortCol = msg.column; this.runner.sortDir = 'ASC'; }
+        this.runner.offset = 0; await this.runner.execute(this.runner.buildSelect());
         await this.persistProfile();
         break;
       case 'filter':
         if (!this.hasTable) return;
-        this.filterConditions = Array.isArray(msg.conditions) ? msg.conditions : [];
-        this.offset = 0; await this.execute(this.buildSelect());
+        this.runner.filterConditions = Array.isArray(msg.conditions) ? msg.conditions : [];
+        this.runner.offset = 0; await this.runner.execute(this.runner.buildSelect());
         await this.persistProfile();
         break;
       case 'updateCell':
@@ -187,7 +166,7 @@ export class TableQueryView extends BaseWebView {
         await this.resetProfile();
         break;
       case 'cancel':
-        this.cancelRunningQuery();
+        this.runner.cancel();
         break;
       case 'exportData':
         await this.exportData(msg.format, msg.columns || [], msg.rows || []);
@@ -200,7 +179,8 @@ export class TableQueryView extends BaseWebView {
 
   protected onDispose(): void {
     super.onDispose();
-    this.disposed = true;
+    this.ready = false;
+    this.runner.dispose();
     if (!this.hasTable && TableQueryView.queryViews.get(this.conn.id) === this) {
       TableQueryView.queryViews.delete(this.conn.id);
     }
@@ -220,13 +200,13 @@ export class TableQueryView extends BaseWebView {
     this.post({
       type: 'init',
       mode: 'query',
-      initialSql: this.pendingQuery?.sql || this.buildSelect(),
+      initialSql: this.pendingQuery?.sql || this.runner.buildSelect(),
       hasTable: this.hasTable,
       tableName: this.table || '',
       dbName: this.database || '',
-      sortCol: this.sortCol,
-      sortDir: this.sortDir,
-      filterConditions: this.filterConditions,
+      sortCol: this.runner.sortCol,
+      sortDir: this.runner.sortDir,
+      filterConditions: this.runner.filterConditions,
       hiddenColumns: this.hiddenColumns,
       columnOrder: this.reconciledColumnOrder(),
       columnWidths: this.reconciledColumnWidths(),
@@ -265,9 +245,9 @@ export class TableQueryView extends BaseWebView {
         this.database = query.database;
         this.post({ type: 'querySql', sql: query.sql, dbName: query.database || '' });
         if (query.explain) {
-          await this.explain(query.sql);
+          await this.runner.explain(query.sql);
         } else {
-          await this.execute(query.sql, query.onExecuted, query.database);
+          await this.runner.execute(query.sql, query.onExecuted, query.database);
         }
       }
     } finally {
@@ -320,168 +300,26 @@ export class TableQueryView extends BaseWebView {
 
   private async resetProfile(): Promise<void> {
     if (!this.table || !TableQueryView.profileStore) return;
-    this.sortCol = '';
-    this.sortDir = '';
-    this.filterConditions = [];
+    this.runner.reset();
     this.hiddenColumns = [];
     this.columnOrder = [];
     this.columnWidths = {};
-    this.offset = 0;
     await TableQueryView.profileStore.remove(this.conn.id, this.database, this.table);
     this.post({ type: 'profileReset' });
-    await this.runInitial();
+    await this.runner.execute(this.runner.buildSelect());
   }
 
   /** Intersects saved hiddenColumns with the last known field list so stale names never leak to the UI. */
   private reconciledHiddenColumns(): string[] {
-    return reconcileHiddenColumns(this.hiddenColumns, this.lastFields);
+    return reconcileHiddenColumns(this.hiddenColumns, this.runner.lastFields);
   }
 
   private reconciledColumnOrder(): string[] {
-    return reconcileColumnOrder(this.columnOrder, this.lastFields);
+    return reconcileColumnOrder(this.columnOrder, this.runner.lastFields);
   }
 
   private reconciledColumnWidths(): Record<string, number> {
-    return reconcileColumnWidths(this.columnWidths, this.lastFields);
-  }
-
-  private buildSelect(): string {
-    if (!this.hasTable || !this.table) return '';
-    return buildTableSelect(
-      this.conn.dbType, this.table, undefined, this.filterConditions,
-      this.sortCol, this.sortDir, this.offset, this.limit,
-    );
-  }
-
-  /** 构建 COUNT 查询（用于分页总条数）。 */
-  private getCountSql(): string {
-    if (!this.hasTable || !this.table) return '';
-    return buildCountSql(this.conn.dbType, this.table, undefined, this.filterConditions);
-  }
-
-  private async runInitial(): Promise<void> {
-    if (!this.hasTable) return;
-    const sql = this.buildSelect();
-    if (sql) await this.execute(sql);
-  }
-
-  private execute(
-    sql: string,
-    onExecuted?: (result: any, error?: Error) => void,
-    database = this.database || this.conn.database,
-  ): Promise<void> {
-    return this.enqueue(() => this.doExecute(sql, onExecuted, database));
-  }
-
-  private async doExecute(
-    sql: string,
-    onExecuted?: (result: any, error?: Error) => void,
-    database = this.database || this.conn.database,
-  ): Promise<void> {
-    if (this.disposed) return;
-    try {
-      if (!(await confirmSqlExecution(this.conn, sql))) return;
-      this.post({ type: 'running' });
-      const session = await this.manager.connect(this.conn);
-      this.runningQuery = session.query;
-      if (database && this.conn.dbType === DatabaseType.MYSQL) {
-        await session.query.query(`USE ${session.query.wrap(validateIdent(database))}`);
-      }
-      const stmts = splitSqlStatements(sql);
-      const results: any[] = [];
-      let transactionState: 'active' | 'committed' | 'rolledback' | undefined;
-      for (const stmt of stmts) {
-        const upper = stmt.toUpperCase().trim();
-        if (upper === 'BEGIN' || upper.startsWith('START TRANSACTION')) {
-          await session.query.query(stmt);
-          transactionState = 'active';
-          continue;
-        }
-        if (upper === 'COMMIT') { await session.query.query(stmt); transactionState = 'committed'; continue; }
-        if (upper === 'ROLLBACK') { await session.query.query(stmt); transactionState = 'rolledback'; continue; }
-        results.push(await session.query.query(stmt));
-      }
-      const result = results[results.length - 1];
-      let pkCols: string[] = [];
-      let cols: any[] = [];
-      this.editablePkColumn = undefined;
-      if (this.hasTable && this.table) {
-        try {
-          cols = await session.metadata.getColumns(this.table, this.database);
-          pkCols = cols.filter((c) => c.isPrimary).map((c) => c.name);
-          if (pkCols.length === 1) this.editablePkColumn = pkCols[0];
-        } catch {}
-      }
-      // 表预览时并行查询过滤后总条数，用于分页信息
-      let total: number | undefined;
-      if (this.hasTable) {
-        const countSql = this.getCountSql();
-        if (countSql) {
-          try {
-            const countResult = await session.query.query(countSql);
-            const countRow = countResult?.rows?.[0];
-            total = countRow ? Number(countRow.total ?? countRow.count ?? countRow.COUNT) : undefined;
-          } catch { /* COUNT 失败不阻塞结果展示 */ }
-        }
-      }
-      this.lastFields = (result?.fields || []).map((f: any) => f.name);
-      if (transactionState) this.post({ type: 'transaction', state: transactionState });
-      if (this.hasTable) {
-        // 表预览模式：给 fields 补列类型，供 filter 智能控件
-        const colMap = new Map(cols.map((c: any) => [c.name, c]));
-        const fieldsWithType = (result?.fields || []).map((f: any) => {
-          const c = colMap.get(f.name);
-          return { name: f.name, simpleType: c?.simpleType, type: c?.type };
-        });
-        this.post({
-          type: 'result', result: { ...result, fields: fieldsWithType }, pkColumns: pkCols, total, sql: this.buildSelect(),
-          hiddenColumns: this.reconciledHiddenColumns(),
-          columnOrder: this.reconciledColumnOrder(), columnWidths: this.reconciledColumnWidths(),
-        });
-      } else {
-        // 查询模式发送所有结果集
-        this.post({
-          type: 'results', results, sql, transactionState,
-        });
-      }
-      onExecuted?.(result);
-    } catch (err) {
-      this.post({ type: 'error', message: (err as Error).message });
-      onExecuted?.(undefined, err as Error);
-    } finally {
-      this.runningQuery = undefined;
-      this.post({ type: 'finished' });
-    }
-  }
-
-  /** 执行 EXPLAIN 并展示查询计划。 */
-  private async explain(sql: string): Promise<void> {
-    try {
-      if (!(await confirmSqlExecution(this.conn, sql))) return;
-      this.post({ type: 'running' });
-      const session = await this.manager.connect(this.conn);
-      this.runningQuery = session.query;
-      const prefix = this.conn.dbType === DatabaseType.PG ? 'EXPLAIN ANALYZE ' : 'EXPLAIN ';
-      const stmts = splitSqlStatements(sql);
-      const results: any[] = [];
-      for (const stmt of stmts) {
-        const explainSql = `${prefix}${stmt}`;
-        results.push(await session.query.query(explainSql));
-      }
-      this.post({ type: 'results', results, sql: `${prefix}${sql}`, transactionState: undefined });
-    } catch (err) {
-      this.post({ type: 'error', message: (err as Error).message });
-    } finally {
-      this.runningQuery = undefined;
-      this.post({ type: 'finished' });
-    }
-  }
-
-  private cancelRunningQuery(): void {
-    if (!this.runningQuery?.cancel()) return;
-    // Closing the driver session interrupts MySQL and PostgreSQL requests; the
-    // next command transparently creates a fresh session.
-    this.manager.disposeConn(this.conn.id);
+    return reconcileColumnWidths(this.columnWidths, this.runner.lastFields);
   }
 
   private async exportData(format: TransferFormat, columns: string[], rows: Record<string, any>[]): Promise<void> {
