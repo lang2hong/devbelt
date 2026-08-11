@@ -433,37 +433,37 @@
         {
           "command": "dbclient.viewTableStructure",
           "when": "view == dbclient.explorer && viewItem == table",
-          "group": "1_table"
+          "group": "1_view"
         },
         {
           "command": "dbclient.viewTableSource",
           "when": "view == dbclient.explorer && viewItem == table",
-          "group": "1_table"
+          "group": "1_view"
         },
         {
           "command": "dbclient.designTable",
           "when": "view == dbclient.explorer && viewItem == table",
-          "group": "1_table"
+          "group": "1_view"
         },
         {
           "command": "dbclient.dumpTable",
           "when": "view == dbclient.explorer && viewItem == table",
-          "group": "1_table"
+          "group": "2_data"
         },
         {
           "command": "dbclient.importTable",
           "when": "view == dbclient.explorer && viewItem == table",
-          "group": "1_table"
+          "group": "2_data"
         },
         {
           "command": "dbclient.exportTable",
           "when": "view == dbclient.explorer && viewItem == table",
-          "group": "1_table"
+          "group": "2_data"
         },
         {
           "command": "dbclient.mockData",
           "when": "view == dbclient.explorer && viewItem == table",
-          "group": "1_table"
+          "group": "2_data"
         },
         {
           "command": "dbclient.newTable",
@@ -483,12 +483,12 @@
         {
           "command": "dbclient.renameTable",
           "when": "view == dbclient.explorer && viewItem == table",
-          "group": "1_table"
+          "group": "3_edit"
         },
         {
           "command": "dbclient.dupTable",
           "when": "view == dbclient.explorer && viewItem == table",
-          "group": "1_table"
+          "group": "3_edit"
         },
         {
           "command": "dbclient.truncateTable",
