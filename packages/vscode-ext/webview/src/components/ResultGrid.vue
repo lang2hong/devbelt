@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, nextTick } from 'vue';
+import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import { VueDatePicker } from '@vuepic/vue-datepicker';
 import '@vuepic/vue-datepicker/dist/main.css';
@@ -142,25 +142,41 @@ function getPk(row: Row): { col: string; val: any } | null {
   return null;
 }
 
+let editingRow: Row | null = null;
+let editingField: Field | null = null;
+
 function startEdit(row: Row, field: Field) {
   if (!props.hasTable) return;
   const pk = getPk(row);
   if (!pk) return;
-  const key = `${pk.col}:${pk.val}:${field.name}`;
-  editingCell.value = key;
+  editingRow = row;
+  editingField = field;
+  editingCell.value = `${pk.col}:${pk.val}:${field.name}`;
   editValue.value = String(row[field.name] ?? '');
-  nextTick(() => editInput.value?.focus());
 }
 
 function commitEdit(row: Row, field: Field) {
   const pk = getPk(row);
-  if (!pk) { editingCell.value = null; return; }
+  if (!pk) { editingCell.value = null; editingRow = null; editingField = null; return; }
   const oldVal = String(row[field.name] ?? 'NULL');
   if (editValue.value !== oldVal && editValue.value !== 'NULL') {
     post({ type: 'updateCell', pkColumn: pk.col, rowId: pk.val, column: field.name, value: editValue.value });
   }
   editingCell.value = null;
+  editingRow = null;
+  editingField = null;
 }
+
+function onDocMouseDown(e: MouseEvent) {
+  if (!editingCell.value) return;
+  const target = e.target as HTMLElement;
+  if (editInput.value && target && !editInput.value.contains(target) && editingRow && editingField) {
+    commitEdit(editingRow, editingField);
+  }
+}
+
+onMounted(() => document.addEventListener('mousedown', onDocMouseDown));
+onUnmounted(() => document.removeEventListener('mousedown', onDocMouseDown));
 
 function toggleRow(row: Row, checked: boolean) {
   if (checked) {

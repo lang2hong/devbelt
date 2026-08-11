@@ -332,6 +332,21 @@
         "category": "DB Client"
       },
       {
+        "command": "dbclient.addColumn",
+        "title": "Add Column",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.modifyColumn",
+        "title": "Modify Column",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.dropColumn",
+        "title": "Drop Column",
+        "category": "DB Client"
+      },
+      {
         "command": "dbclient.deleteQuery",
         "title": "Delete Query",
         "category": "DB Client"
@@ -451,6 +466,16 @@
           "group": "inline"
         },
         {
+          "command": "dbclient.importData",
+          "when": "view == dbclient.explorer && viewItem == category_table",
+          "group": "1_cattbl"
+        },
+        {
+          "command": "dbclient.exportConnection",
+          "when": "view == dbclient.explorer && viewItem == category_table",
+          "group": "1_cattbl"
+        },
+        {
           "command": "dbclient.renameTable",
           "when": "view == dbclient.explorer && viewItem == table",
           "group": "1_table"
@@ -469,6 +494,21 @@
           "command": "dbclient.dropTable",
           "when": "view == dbclient.explorer && viewItem == table",
           "group": "2_danger"
+        },
+        {
+          "command": "dbclient.addColumn",
+          "when": "view == dbclient.explorer && viewItem == column",
+          "group": "2_col"
+        },
+        {
+          "command": "dbclient.modifyColumn",
+          "when": "view == dbclient.explorer && viewItem == column",
+          "group": "2_col"
+        },
+        {
+          "command": "dbclient.dropColumn",
+          "when": "view == dbclient.explorer && viewItem == column",
+          "group": "3_danger"
         },
         {
           "command": "dbclient.newQueryFromConn",

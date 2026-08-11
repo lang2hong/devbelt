@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { DbTreeNode } from '../tree/dbTreeNode';
+import { DbTreeNode, NodeKind } from '../tree/dbTreeNode';
 import { wrapIdentForConn } from '../utils/sql';
 import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
@@ -137,6 +137,41 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     const session = await manager.connect(node.conn);
     if (!requireCapability(session, 'manageEvents')) return;
     await session.table.dropEvent(node.label, node.database);
+    treeProvider.refresh();
+  });
+
+  // ── 列（字段） ──
+  sub('dbclient.addColumn', async (node: DbTreeNode) => {
+    if (!node?.conn) return;
+    const parent = node.kind === NodeKind.Column ? node.parent : node;
+    const table = parent?.label;
+    if (!table) return;
+    const name = await vscode.window.showInputBox({ prompt: 'New column name' });
+    if (!name) return;
+    const definition = await vscode.window.showInputBox({ prompt: `Column definition (e.g. VARCHAR(255) NOT NULL)`, value: 'VARCHAR(255)' });
+    if (!definition) return;
+    const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'alterTable')) return;
+    await session.table.addColumn(table, name, definition, node.database);
+    treeProvider.refresh();
+  });
+
+  sub('dbclient.modifyColumn', async (node: DbTreeNode) => {
+    if (!node?.conn || node.kind !== NodeKind.Column || !node.parent) return;
+    const definition = await vscode.window.showInputBox({ prompt: `New definition for "${node.label}"` });
+    if (!definition) return;
+    const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'alterTable')) return;
+    await session.table.modifyColumn(node.parent.label, node.label, definition, node.database);
+    treeProvider.refresh();
+  });
+
+  sub('dbclient.dropColumn', async (node: DbTreeNode) => {
+    if (!node?.conn || node.kind !== NodeKind.Column || !node.parent) return;
+    if (!(await confirm('table.dropConfirm', 'table.delete', node.label))) return;
+    const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'alterTable')) return;
+    await session.table.dropColumn(node.parent.label, node.label, node.database);
     treeProvider.refresh();
   });
 }
