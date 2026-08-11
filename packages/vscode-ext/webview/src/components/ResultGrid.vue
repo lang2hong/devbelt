@@ -43,6 +43,8 @@ const selectedRows = ref<Row[]>([]);
 const editingCell = ref<string | null>(null);
 const editValue = ref('');
 const editInput = ref<HTMLInputElement | null>(null);
+const editContainer = ref<HTMLElement | null>(null);
+const editDateRef = ref<any>(null);
 const inserting = ref(false);
 const newRow = ref<Record<string, string>>({});
 const showColumnMenu = ref(false);
@@ -156,7 +158,12 @@ function startEdit(row: Row, field: Field) {
   editingField = field;
   editingCell.value = `${pk.col}:${pk.val}:${field.name}`;
   editValue.value = String(row[field.name] ?? '');
-  setTimeout(() => editInput.value?.focus(), 0);
+  const isDate = isDateTimeColumn(field.name) || isDateColumn(field.name);
+  if (isDate) {
+    setTimeout(() => (editDateRef.value as any)?.openPicker(), 0);
+  } else {
+    setTimeout(() => editInput.value?.focus(), 0);
+  }
 }
 
 function cancelEdit() {
@@ -180,7 +187,9 @@ function commitEdit(row: Row, field: Field) {
 function onDocMouseDown(e: MouseEvent) {
   if (!editingCell.value) return;
   const target = e.target as HTMLElement;
-  if (editInput.value && target && !editInput.value.contains(target) && editingRow && editingField) {
+  if (!target) return;
+  if (target.closest('.dp__menu')) return;
+  if (editContainer.value && !editContainer.value.contains(target) && editingRow && editingField) {
     commitEdit(editingRow, editingField);
   }
 }
@@ -506,9 +515,23 @@ watch(() => props.filterConditions, (conds) => {
             @dblclick="canModifyRows && startEdit(row, f)"
             :title="canModifyRows && getPk(row) ? 'Double-click to edit' : ''">
             <template v-if="editingCell === `${getPk(row)?.col}:${getPk(row)?.val}:${f.name}`">
-              <input ref="editInput" v-model="editValue" class="cell-edit"
-                @keydown.enter="commitEdit(row, f)"
-                @keydown.esc="cancelEdit" />
+              <div ref="editContainer" class="cell-edit-wrap">
+                <input v-if="!isDateTimeColumn(f.name) && !isDateColumn(f.name) && !isTimeColumn(f.name)"
+                  ref="editInput" v-model="editValue" class="cell-edit"
+                  @keydown.enter="commitEdit(row, f)"
+                  @keydown.esc="cancelEdit" />
+                <VueDatePicker v-else-if="isDateTimeColumn(f.name)" ref="editDateRef" v-model="editValue"
+                  :enable-time-picker="true" format="yyyy-MM-dd HH:mm" model-type="yyyy-MM-dd HH:mm"
+                  auto-apply teleport-to="body" placeholder="yyyy-MM-dd HH:mm" class="dp-input cell-edit"
+                  @closed="commitEdit(row, f)" />
+                <VueDatePicker v-else-if="isDateColumn(f.name)" ref="editDateRef" v-model="editValue"
+                  :enable-time-picker="false" format="yyyy-MM-dd" model-type="yyyy-MM-dd"
+                  auto-apply teleport-to="body" placeholder="yyyy-MM-dd" class="dp-input cell-edit"
+                  @closed="commitEdit(row, f)" />
+                <input v-else ref="editInput" v-model="editValue" class="cell-edit" type="time"
+                  @keydown.enter="commitEdit(row, f)"
+                  @keydown.esc="cancelEdit" />
+              </div>
             </template>
             <template v-else>
               {{ row[f.name] === null || row[f.name] === undefined ? 'NULL' : typeof row[f.name] === 'object' ? JSON.stringify(row[f.name]) : row[f.name] }}
@@ -586,4 +609,83 @@ td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
 .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 200; padding: 8px 16px; font-size: 12px;
   background: var(--vscode-notifications-background, var(--vscode-editor-background)); color: var(--vscode-foreground);
   border: 1px solid var(--vscode-panel-border); border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+.cell-edit-wrap { display: inline-flex; min-width: 140px; }
+</style>
+
+<style>
+/* VueDatePicker 主题对齐 VS Code 深色界面（菜单 teleport 到 body，需全局覆盖） */
+.dp__menu {
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background)) !important;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)) !important;
+  border-radius: 4px !important;
+  color: var(--vscode-foreground) !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.35) !important;
+}
+.dp__calendar,
+.dp__calendar_header,
+.dp__calendar_header_separator,
+.dp__month_year_select,
+.dp__month_year_wrap,
+.dp__overlay,
+.dp__time_col,
+.dp__time_row,
+.dp__time_controls {
+  background: transparent !important;
+  color: var(--vscode-foreground) !important;
+}
+.dp__month_year_select,
+.dp__button,
+.dp__action_button,
+.dp__arrow_button {
+  color: var(--vscode-foreground) !important;
+}
+.dp__month_year_select:hover,
+.dp__button:hover,
+.dp__arrow_button:hover,
+.dp__overlay_cell:hover,
+.dp__month_year_select:hover .dp__overlay_cell {
+  background: var(--vscode-list-hoverBackground) !important;
+}
+.dp__cell_inner {
+  color: var(--vscode-foreground) !important;
+  border-radius: 3px !important;
+}
+.dp__cell_inner:hover {
+  background: var(--vscode-list-hoverBackground) !important;
+}
+.dp__today {
+  border-color: var(--vscode-focusBorder) !important;
+  color: var(--vscode-textLink-foreground, var(--vscode-focusBorder)) !important;
+}
+.dp__active_date,
+.dp__range_end,
+.dp__range_start,
+.dp__range_between {
+  background: var(--vscode-button-background) !important;
+  color: var(--vscode-button-foreground) !important;
+}
+.dp__now_invalid,
+.dp__cell_disabled,
+.dp__cell_outside {
+  color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground)) !important;
+}
+.dp__svg {
+  fill: var(--vscode-foreground) !important;
+}
+.dp__input {
+  background: var(--vscode-input-background) !important;
+  color: var(--vscode-input-foreground) !important;
+  border: 1px solid var(--vscode-input-border) !important;
+  border-radius: 3px !important;
+  font-size: 13px !important;
+  padding: 2px 6px !important;
+}
+.dp__input_focus,
+.dp__input:hover {
+  border-color: var(--vscode-focusBorder) !important;
+}
+.dp__overlay_cell_active {
+  background: var(--vscode-button-background) !important;
+  color: var(--vscode-button-foreground) !important;
+}
 </style>
