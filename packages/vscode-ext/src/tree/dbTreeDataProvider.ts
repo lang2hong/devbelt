@@ -1,4 +1,4 @@
-import { Event, EventEmitter, TreeDataProvider, TreeItem, TreeItemCollapsibleState, ThemeIcon, ThemeColor } from 'vscode';
+import { Event, EventEmitter, TreeDataProvider, TreeItem, TreeItemCollapsibleState, ThemeIcon, ThemeColor, window } from 'vscode';
 import { DatabaseType } from '@db-client/core';
 import { ConnectionStore, type SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
@@ -69,21 +69,28 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       return this.buildRootChildren();
     }
 
-    switch (element.kind) {
-      case NodeKind.Group:
-        return this.buildGroupChildren(element.groupId!);
-      case NodeKind.Connection:
-        return this.buildConnectionChildren(element);
-      case NodeKind.Database:
-        return this.buildDatabaseChildren(element);
-      case NodeKind.Category:
-        return this.buildCategoryChildren(element);
-      case NodeKind.QueryFolder:
-        return this.buildQueryFolderChildren(element);
-      case NodeKind.Table:
-        return this.buildColumnChildren(element);
-      default:
-        return [];
+    try {
+      switch (element.kind) {
+        case NodeKind.Group:
+          return this.buildGroupChildren(element.groupId!);
+        case NodeKind.Connection:
+          return this.buildConnectionChildren(element);
+        case NodeKind.Database:
+          return this.buildDatabaseChildren(element);
+        case NodeKind.Category:
+          return this.buildCategoryChildren(element);
+        case NodeKind.QueryFolder:
+          return this.buildQueryFolderChildren(element);
+        case NodeKind.Table:
+          return this.buildColumnChildren(element);
+        default:
+          return [];
+      }
+    } catch (error) {
+      window.showErrorMessage(
+        l10n('tree.loadFailed', { label: element.label, message: (error as Error).message }),
+      );
+      return [];
     }
   }
 

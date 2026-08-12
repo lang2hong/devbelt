@@ -17,6 +17,8 @@ export interface ConnectionSession {
   data: DataService;
   /** 表操作服务（复用 db-core） */
   table: TableService;
+  /** 底层连接是否存活（数据库重启/断线后为 false） */
+  isAlive: () => boolean;
   /** 关闭连接 */
   close: () => void;
 }
@@ -46,7 +48,12 @@ export class ConnectionManager {
    */
   async connect(conn: SavedConnection): Promise<ConnectionSession> {
     const existing = this.sessions.get(conn.id);
-    if (existing) return existing;
+    if (existing) {
+      if (existing.isAlive()) return existing;
+      // 底层连接已死（数据库重启/断线），淘汰旧会话并重建。
+      // 不调用 disposeConn，避免清掉用户的显式打开标记。
+      existing.close();
+    }
 
     // SSH 隧道：如有配置则建隧道，用本地端口替换远程 host:port
     let host = conn.host;
@@ -96,6 +103,7 @@ export class ConnectionManager {
       metadata: new MetadataService(query),
       data: new DataService(query),
       table: new TableService(query),
+      isAlive: () => connection.isAlive(),
       close: () => {
         connection.end();
         this.sessions.delete(conn.id);

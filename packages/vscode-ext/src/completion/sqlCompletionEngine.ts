@@ -74,20 +74,20 @@ export function detectContext(before: string): SqlContext {
   if (/(\w+)\.\w*$/.test(before)) return 'dot_column';
 
   // 2. 表名完整 + 尾空格（FROM/JOIN/UPDATE/INTO table 后空格）→ 子句关键字
-  if (/\b(?:FROM|JOIN)\s+\w+\s+$/.test(before)) return 'after_table';
-  if (/\b(?:UPDATE|INTO)\s+\w+\s+$/.test(before)) return 'after_table';
+  if (/\b(?:FROM|JOIN)\s+\w+\s+$/i.test(before)) return 'after_table';
+  if (/\b(?:UPDATE|INTO)\s+\w+\s+$/i.test(before)) return 'after_table';
 
   // 3. 正在输入表名（FROM/JOIN/UPDATE/INTO 后空格+部分词，含 FROM 空格起态）
-  if (/\b(?:FROM|JOIN|UPDATE|INTO)\s+\w*$/.test(before)) return 'from_table_typing';
+  if (/\b(?:FROM|JOIN|UPDATE|INTO)\s+\w*$/i.test(before)) return 'from_table_typing';
 
   // 4. ORDER BY / GROUP BY 后
   if (/\b(?:ORDER|GROUP)\s+BY\s+\w*$/i.test(before)) return 'order_clause';
 
   // 5. WHERE 字段后等待比较操作符：WHERE age ␣
-  if (/\b(?:WHERE|HAVING|AND|OR)\s+\w+\s+$/.test(before)) return 'where_operator';
+  if (/\b(?:WHERE|HAVING|AND|OR)\s+\w+\s+$/i.test(before)) return 'where_operator';
 
   // 6. WHERE 比较操作符后等待值：WHERE age > ␣ / WHERE age LIKE ␣
-  if (/\b(?:WHERE|HAVING|AND|OR)\s+\w+\s+(?:[<>=!]+|\b(?:LIKE|NOT\s+LIKE|IN|BETWEEN|IS|NOT\s+IN)\b)\s*$/.test(before)) return 'where_value';
+  if (/\b(?:WHERE|HAVING|AND|OR)\s+\w+\s+(?:[<>=!]+|\b(?:LIKE|NOT\s+LIKE|IN|BETWEEN|IS|NOT\s+IN)\b)\s*$/i.test(before)) return 'where_value';
 
   // 7. WHERE / HAVING / AND / OR 后（条件左侧，输入字段名）
   if (/\b(?:WHERE|HAVING|AND|OR)\s+\w*$/i.test(before)) return 'where_condition';

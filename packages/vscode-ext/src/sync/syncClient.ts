@@ -35,7 +35,8 @@ export class SyncClient {
       body: JSON.stringify({ data, baseVersion }),
     });
     if (res.status === 409) {
-      throw new SyncConflictError(await res.text());
+      const body = (await res.json().catch(() => ({}))) as { version?: number };
+      throw new SyncConflictError('conflict', body.version ?? 0);
     }
     if (!res.ok) throw new Error(`Push failed: ${res.status}`);
     return res.json() as Promise<{ version: number }>;
@@ -73,9 +74,9 @@ export interface SyncData {
   version: number;
 }
 
-/** 冲突错误：远端版本已变化，需手动合并或重新拉取 */
+/** 冲突错误：远端版本已变化，latestVersion 为服务端当前版本，供用户选择处置。 */
 export class SyncConflictError extends Error {
-  constructor(message: string) {
+  constructor(message: string, public readonly latestVersion: number) {
     super(message);
     this.name = 'SyncConflictError';
   }

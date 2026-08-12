@@ -3,6 +3,9 @@ import * as fs from 'fs';
 import { Client } from 'ssh2';
 import type { SavedConnection } from './connectionStore';
 
+/** SSH 隧道建立超时（ms），避免连接既不 ready 也不 error 时永久挂起。 */
+const SSH_TUNNEL_TIMEOUT = 15_000;
+
 /**
  * SSH 隧道管理器。
  *
@@ -31,9 +34,11 @@ export class SshTunnel {
     return new Promise<number>((resolve, reject) => {
       const ssh = new Client();
       let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       const fail = (err: Error): void => {
         if (settled) return;
         settled = true;
+        if (timer) clearTimeout(timer);
         try { ssh.end(); } catch {}
         reject(err);
       };
@@ -66,12 +71,18 @@ export class SshTunnel {
             return;
           }
           settled = true;
+          if (timer) clearTimeout(timer);
           this.tunnels.set(conn.id, { ssh, server, port });
           resolve(port);
         });
       });
 
       ssh.on('error', fail);
+
+      // 超时保护：SSH 连接既不 ready 也不 error 时，中止并反馈明确错误
+      timer = setTimeout(() => {
+        fail(new Error('SSH tunnel connection timed out'));
+      }, SSH_TUNNEL_TIMEOUT);
 
       // SSH 连接配置
       const config: any = {

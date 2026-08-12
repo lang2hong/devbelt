@@ -58,13 +58,17 @@ export async function importRows(options: ImportRowsOptions): Promise<ImportResu
     await query.query('COMMIT');
     return { imported: completed, rolledBack: false, errors: [] };
   } catch (error) {
+    let rollbackSucceeded = false;
     if (started) {
-      try { await query.query('ROLLBACK'); } catch { /* Preserve the original failure. */ }
+      try {
+        await query.query('ROLLBACK');
+        rollbackSucceeded = true;
+      } catch { /* Preserve the original failure. */ }
     }
     if (error instanceof TransferCancelledError) throw error;
     return {
       imported: 0,
-      rolledBack: started,
+      rolledBack: rollbackSucceeded,
       errors: [{ row: completed + 1, message: (error as Error).message }],
     };
   }
@@ -88,12 +92,14 @@ async function importRowsBatched(
     return { imported: dataRows.length, rolledBack: false, errors: [] };
   } catch (error) {
     if (error instanceof TransferCancelledError) throw error;
+    let rollbackSucceeded = false;
     try {
       await query.query(`BEGIN; ROLLBACK;`);
+      rollbackSucceeded = true;
     } catch { /* Preserve the original failure. */ }
     return {
       imported: 0,
-      rolledBack: true,
+      rolledBack: rollbackSucceeded,
       errors: [{ row: 1, message: (error as Error).message }],
     };
   }

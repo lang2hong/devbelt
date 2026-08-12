@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { LoginForm } from '../sync/loginForm';
+import { SyncConflictError } from '../sync/syncClient';
 import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
 import { promptMasterPassword } from './shared';
@@ -26,8 +27,37 @@ export function registerSyncCommands(deps: Deps, sub: Sub): void {
   sub('dbclient.syncPush', async () => {
     const mp = await promptMasterPassword();
     if (!mp) return;
-    await sync.push(mp);
-    vscode.window.showInformationMessage(l10n('cmd.pushDone'));
+    try {
+      await sync.push(mp);
+      vscode.window.showInformationMessage(l10n('cmd.pushDone'));
+    } catch (error) {
+      if (error instanceof SyncConflictError) {
+        const choice = await vscode.window.showWarningMessage(
+          l10n('cmd.syncConflict', { version: error.latestVersion }),
+          { modal: true },
+          l10n('cmd.syncPullOverwrite'),
+          l10n('cmd.syncPushOverwrite'),
+        );
+        if (choice === l10n('cmd.syncPullOverwrite')) {
+          try {
+            await sync.pull(mp);
+            treeProvider.refresh();
+            vscode.window.showInformationMessage(l10n('cmd.pullDone'));
+          } catch (e) {
+            vscode.window.showErrorMessage(l10n('cmd.pullFailed', { message: (e as Error).message }));
+          }
+        } else if (choice === l10n('cmd.syncPushOverwrite')) {
+          try {
+            await sync.forcePush(mp, error.latestVersion);
+            vscode.window.showInformationMessage(l10n('cmd.pushDone'));
+          } catch (e) {
+            vscode.window.showErrorMessage(l10n('cmd.pushFailed', { message: (e as Error).message }));
+          }
+        }
+        return;
+      }
+      vscode.window.showErrorMessage(l10n('cmd.pushFailed', { message: (error as Error).message }));
+    }
   });
 
   sub('dbclient.explorerMenu', async () => {

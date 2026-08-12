@@ -35,6 +35,14 @@ export class SyncManager {
     this.version = version;
   }
 
+  /** 强制推送：以指定远端版本为基准重推本地数据（显式覆盖远端）。 */
+  async forcePush(masterPassword: string, baseVersion: number): Promise<void> {
+    const local = this.store.getSyncTreeData();
+    const encrypted = Encryption.encrypt(local, masterPassword);
+    const { version } = await this.auth.client.push(encrypted, baseVersion);
+    this.version = version;
+  }
+
   /** 当前同步版本（冲突检测用） */
   getVersion(): number {
     return this.version;

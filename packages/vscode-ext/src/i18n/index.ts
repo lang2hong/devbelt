@@ -57,6 +57,11 @@ const en: MessageCatalog = {
   'cmd.noHistory': 'No query history.',
   'cmd.pullDone': 'Data pulled and merged.',
   'cmd.pushDone': 'Data pushed.',
+  'cmd.pullFailed': 'Pull failed: {message}',
+  'cmd.syncConflict': 'Remote data has been updated (version {version}). How do you want to proceed?',
+  'cmd.syncPullOverwrite': 'Pull and overwrite local',
+  'cmd.syncPushOverwrite': 'Keep local and overwrite remote',
+  'cmd.pushFailed': 'Push failed: {message}',
   'cmd.loggedOut': 'Logged out.',
   'cmd.loggedIn': 'Logged in.',
   'cmd.registered': 'Registered and logged in.',
@@ -69,6 +74,9 @@ const en: MessageCatalog = {
   'cmd.masterPassword': 'Master password (used to encrypt/decrypt synced data)',
   'cmd.updated': 'Updated {table}.{column}',
   'cmd.groups': 'New Group',
+
+  // 树视图
+  'tree.loadFailed': 'Failed to load {label}: {message}',
 
   // 表操作
   'table.dropConfirm': 'Delete table "{name}"? This cannot be undone.',
@@ -243,6 +251,11 @@ const zh: MessageCatalog = {
   'cmd.noHistory': '暂无查询历史。',
   'cmd.pullDone': '已拉取并合并数据。',
   'cmd.pushDone': '已推送数据。',
+  'cmd.pullFailed': '拉取失败：{message}',
+  'cmd.syncConflict': '远端数据已更新（版本 {version}）。如何处理？',
+  'cmd.syncPullOverwrite': '拉取并覆盖本地',
+  'cmd.syncPushOverwrite': '保留本地并覆盖远端',
+  'cmd.pushFailed': '推送失败：{message}',
   'cmd.loggedOut': '已登出。',
   'cmd.loggedIn': '已登录。',
   'cmd.registered': '已注册并登录。',
@@ -255,6 +268,9 @@ const zh: MessageCatalog = {
   'cmd.masterPassword': '主密码（用于加密/解密同步数据）',
   'cmd.updated': '已更新 {table}.{column}',
   'cmd.groups': '新建分组',
+
+  // 树视图
+  'tree.loadFailed': '加载 {label} 失败：{message}',
 
   'table.dropConfirm': '删除表 "{name}"？此操作不可恢复。',
   'table.delete': '删除',
