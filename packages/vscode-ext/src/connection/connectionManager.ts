@@ -44,6 +44,7 @@ export class ConnectionManager {
   private readonly sessions = new Map<string, ConnectionSession>();
   private readonly sessionEntries = new Map<string, SessionEntry>();
   private readonly explicit = new Set<string>();
+  private readonly connecting = new Map<string, Promise<ConnectionSession>>();
   private readonly config: PoolConfig;
   private healthCheckTimer?: ReturnType<typeof setInterval>;
 
@@ -74,6 +75,19 @@ export class ConnectionManager {
       existing.close();
     }
 
+    const inflight = this.connecting.get(conn.id);
+    if (inflight) return inflight;
+
+    const promise = this.doConnect(conn);
+    this.connecting.set(conn.id, promise);
+    try {
+      return await promise;
+    } finally {
+      this.connecting.delete(conn.id);
+    }
+  }
+
+  private async doConnect(conn: SavedConnection): Promise<ConnectionSession> {
     this.evictIfNeeded();
 
     let host = conn.host;

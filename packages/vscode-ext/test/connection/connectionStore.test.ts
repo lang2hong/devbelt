@@ -1,5 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ConnectionStore, type ConnectionTreeData, type SavedConnection } from '../../src/connection/connectionStore';
+
+vi.mock('vscode', () => ({
+  window: {
+    showErrorMessage: () => {},
+    showInformationMessage: () => {},
+    createOutputChannel: () => ({ info: () => {}, warn: () => {}, error: () => {}, dispose: () => {} }),
+  },
+}));
 
 function createMemento(data: ConnectionTreeData) {
   const values = new Map<string, unknown>([['dbclient.connectionsV2', data]]);

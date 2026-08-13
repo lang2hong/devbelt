@@ -33,7 +33,7 @@ export class RowEditor {
       }
       if (!(await confirmSqlExecution(this.conn, `UPDATE ${this.table} SET ${col} = ? WHERE ${pkColumns.join(', ')} = ?`))) return;
       const session = await this.manager.connect(this.conn);
-      await session.data.updateCell(this.table, pkColumns, pkValues, col, val === '' ? null : val, this.database);
+      await session.data.updateCell(this.table, pkColumns, pkValues, col, val, this.database);
       this.post({ type: 'cellUpdated' });
       await this.opts.refresh();
     } catch (err) {

@@ -44,6 +44,8 @@ export class AutoSyncService {
   /** 配置变更后重启（重建定时器） */
   restart(): void {
     this.clearTimers();
+    this.disposables.forEach((d) => d.dispose());
+    this.disposables.length = 0;
     this.start();
   }
 

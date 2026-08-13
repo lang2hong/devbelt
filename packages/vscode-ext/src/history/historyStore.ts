@@ -1,4 +1,4 @@
-import { EventEmitter, type Event } from '../utils/event';
+import { EventEmitter, type Event, eventBus, HistoryChangedEvent } from '../utils/event';
 
 /**
  * 查询历史记录。
@@ -52,12 +52,14 @@ export class HistoryStore {
     }
     await this.memento.update(HistoryStore.KEY, list);
     this.changedEmitter.fire();
+    void eventBus.publish(new HistoryChangedEvent('add'));
   }
 
   /** 清空历史 */
   async clear(): Promise<void> {
     await this.memento.update(HistoryStore.KEY, []);
     this.changedEmitter.fire();
+    void eventBus.publish(new HistoryChangedEvent('clear'));
   }
 
   // ─── 同步 ───
@@ -83,5 +85,6 @@ export class HistoryStore {
     if (merged.length > HistoryStore.MAX_ENTRIES) merged.length = HistoryStore.MAX_ENTRIES;
     await this.memento.update(HistoryStore.KEY, merged);
     this.changedEmitter.fire();
+    void eventBus.publish(new HistoryChangedEvent('merge'));
   }
 }

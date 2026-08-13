@@ -21,14 +21,14 @@ export class TableQueryView extends BaseWebView {
   private ready = false;
   private executingPendingQuery = false;
   private readonly completionService: CompletionService;
-  private readonly rowEditor: RowEditor;
-  private readonly exporter: ExportHandler;
-  private pendingQuery?: {
+  private readonly rowEditor?: RowEditor;
+  private readonly exporter?: ExportHandler;
+  private pendingQueries: Array<{
     sql: string;
     database?: string;
     onExecuted?: (result: any, error?: Error) => void;
     explain?: boolean;
-  };
+  }> = [];
 
   private constructor(
     private readonly conn: SavedConnection,
@@ -46,10 +46,12 @@ export class TableQueryView extends BaseWebView {
     TableQueryView.connRefs.set(this.conn.id, (TableQueryView.connRefs.get(this.conn.id) ?? 0) + 1);
     this.runner = new QueryRunner(conn, manager, table, database, (msg) => this.post(msg));
     this.completionService = new CompletionService(manager, conn, database, (msg) => this.post(msg));
-    this.rowEditor = new RowEditor(manager, conn, table!, database, (msg) => this.post(msg), {
-      refresh: () => this.runner.execute(this.runner.buildSelect()),
-    });
-    this.exporter = new ExportHandler(conn, manager, table, database, (msg) => this.post(msg));
+    if (table) {
+      this.rowEditor = new RowEditor(manager, conn, table, database, (msg) => this.post(msg), {
+        refresh: () => this.runner.execute(this.runner.buildSelect()),
+      });
+      this.exporter = new ExportHandler(conn, manager, table, database, (msg) => this.post(msg));
+    }
   }
 
   private get hasTable(): boolean {
@@ -94,7 +96,7 @@ export class TableQueryView extends BaseWebView {
       case 'ready':
         this.ready = true;
         await this.sendInit();
-        if (this.pendingQuery) {
+        if (this.pendingQueries.length > 0) {
           await this.executePendingQueries();
         } else if (this.hasTable) {
           await this.runner.execute(this.runner.buildSelect());
@@ -138,15 +140,15 @@ export class TableQueryView extends BaseWebView {
         break;
       case 'updateCell':
         if (!this.hasTable) return;
-        await this.rowEditor.updateCell(msg.pkColumns, msg.pkValues, msg.column, msg.value);
+        await this.rowEditor?.updateCell(msg.pkColumns, msg.pkValues, msg.column, msg.value);
         break;
       case 'deleteRows':
         if (!this.hasTable) return;
-        await this.rowEditor.deleteRows(msg.rows);
+        await this.rowEditor?.deleteRows(msg.rows);
         break;
       case 'insertRow':
         if (!this.hasTable) return;
-        await this.rowEditor.insertRow(
+        await this.rowEditor?.insertRow(
           Array.isArray(msg.columns) ? msg.columns : [],
           Array.isArray(msg.values) ? msg.values : [],
         );
@@ -167,7 +169,7 @@ export class TableQueryView extends BaseWebView {
         this.runner.cancel();
         break;
       case 'exportData':
-        await this.exporter.exportData(msg.format, msg.columns || [], msg.rows || []);
+        await this.exporter?.exportData(msg.format, msg.columns || [], msg.rows || []);
         break;
       case 'completion':
         await this.completionService.handle(String(msg.before || ''), String(msg.text || ''));
@@ -179,7 +181,7 @@ export class TableQueryView extends BaseWebView {
     super.onDispose();
     this.ready = false;
     this.runner.dispose();
-    if (!this.hasTable && TableQueryView.queryViews.get(this.conn.id) === this) {
+    if (TableQueryView.queryViews.get(this.conn.id) === this) {
       TableQueryView.queryViews.delete(this.conn.id);
     }
     // 引用计数归零：最后一个该连接的视图关闭时，释放底层连接（除非用户显式打开了该连接）。
@@ -198,7 +200,7 @@ export class TableQueryView extends BaseWebView {
     this.post({
       type: 'init',
       mode: 'query',
-      initialSql: this.pendingQuery?.sql || this.runner.buildSelect(),
+      initialSql: this.pendingQueries[0]?.sql || this.runner.buildSelect(),
       hasTable: this.hasTable,
       tableName: this.table || '',
       dbName: this.database || '',
@@ -219,16 +221,16 @@ export class TableQueryView extends BaseWebView {
     onExecuted?: (result: any, error?: Error) => void,
   ): void {
     this.panel.title = `Query @ ${this.conn.name || this.conn.host}`;
-    this.pendingQuery = { sql, database, onExecuted };
+    this.pendingQueries.push({ sql, database, onExecuted });
     this.panel.reveal(undefined, false);
     if (this.ready) {
       void this.executePendingQueries();
     }
   }
 
-  /** 覆盖待执行查询为 explain 模式。 */
+  /** 覆盖待执行队列为 explain 模式。 */
   public queueQueryExplain(sql: string, database?: string): void {
-    this.pendingQuery = { sql, database, explain: true };
+    this.pendingQueries = [{ sql, database, explain: true }];
     if (this.ready) {
       void this.executePendingQueries();
     }
@@ -238,9 +240,8 @@ export class TableQueryView extends BaseWebView {
     if (this.executingPendingQuery) return;
     this.executingPendingQuery = true;
     try {
-      while (this.pendingQuery) {
-        const query = this.pendingQuery;
-        this.pendingQuery = undefined;
+      while (this.pendingQueries.length > 0) {
+        const query = this.pendingQueries.shift()!;
         this.database = query.database;
         this.post({ type: 'querySql', sql: query.sql, dbName: query.database || '' });
         if (query.explain) {

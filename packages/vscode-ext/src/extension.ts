@@ -18,6 +18,7 @@ import { SyncManager } from './sync/syncManager';
 import { MasterPasswordStore } from './sync/masterPasswordStore';
 import { AutoSyncService, type AutoSyncMode } from './sync/autoSyncService';
 import type { Event } from './utils/event';
+import { eventBus, ConnectionChangedEvent } from './utils/event';
 import { invalidateLanguage, LANGUAGE_CONFIG_KEY, l10n } from './i18n';
 import { registerCommands, SyncStatusBar } from './commands';
 import { DialectRegistry } from '@db-client/core';
@@ -68,6 +69,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
   autoSync.start();
   context.subscriptions.push(autoSync);
+
+  // 事件总线：连接/分组变更时自动刷新树（同步 pull 等无命令处理器的场景）
+  context.subscriptions.push(
+    eventBus.subscribe(ConnectionChangedEvent, () => treeProvider.refresh()),
+  );
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('dbclient.sync')) autoSync.restart();

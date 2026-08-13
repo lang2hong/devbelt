@@ -93,6 +93,7 @@ export class QueryRunner {
     database = this.database || this.conn.database,
   ): Promise<void> {
     if (this.disposed) return;
+    let transactionState: 'active' | 'committed' | 'rolledback' | undefined;
     try {
       if (!(await confirmSqlExecution(this.conn, sql))) return;
       this.post({ type: 'running' });
@@ -103,7 +104,6 @@ export class QueryRunner {
       }
       const stmts = splitSqlStatements(sql);
       const results: any[] = [];
-      let transactionState: 'active' | 'committed' | 'rolledback' | undefined;
       for (const stmt of stmts) {
         const upper = stmt.toUpperCase().trim();
         if (upper === 'BEGIN' || upper.startsWith('START TRANSACTION')) {
@@ -161,6 +161,13 @@ export class QueryRunner {
       diagError('query failed', (err as Error).message);
       this.post({ type: 'error', message: (err as Error).message });
       onExecuted?.(undefined, err as Error);
+      // 事务未提交：回滚防止状态泄漏到后续查询
+      if (transactionState === 'active') {
+        try {
+          const s = await this.manager.connect(this.conn);
+          await s.query.query('ROLLBACK');
+        } catch { /* best-effort rollback */ }
+      }
     } finally {
       this.runningQuery = undefined;
       this.post({ type: 'finished' });

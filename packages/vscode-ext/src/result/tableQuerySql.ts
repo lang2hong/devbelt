@@ -1,4 +1,5 @@
 import type { DatabaseType } from '@db-client/core';
+import { validateIdent } from '@db-client/core';
 import {
   BETWEEN, EQ, GTE, GT, IN, IS_NULL, IS_NOT_NULL, LIKE, LTE, LT, NE,
   NOT_BETWEEN, NOT_IN, NOT_LIKE,
@@ -33,6 +34,11 @@ function commaList(val: string): string {
 
 /** 构建单个过滤条件的 SQL 片段。 */
 export function buildCondition(dbType: DatabaseType, condition: FilterCondition): string {
+  try {
+    validateIdent(condition.column);
+  } catch {
+    return '';
+  }
   const w = wrapIdent(dbType, condition.column);
   const v = condition.value ?? '';
   const v2 = condition.value2 ?? '';
@@ -90,7 +96,11 @@ export function buildTableSelect(
   const where = buildWhereAll(dbType, conditions);
   if (where) sql += ` WHERE ${where}`;
   if (sortCol && sortDir) {
-    sql += ` ORDER BY ${wrapIdent(dbType, sortCol)} ${sortDir}`;
+    const dir = sortDir.toUpperCase();
+    if (dir !== 'ASC' && dir !== 'DESC') {
+      throw new Error(`Invalid sort direction: ${sortDir}`);
+    }
+    sql += ` ORDER BY ${wrapIdent(dbType, sortCol)} ${dir}`;
   }
   sql += ` LIMIT ${limit} OFFSET ${offset}`;
   return sql;

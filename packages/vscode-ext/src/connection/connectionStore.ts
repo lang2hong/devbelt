@@ -4,7 +4,8 @@ import type { SavedQuery } from '@db-client/core';
 import type { SecretStorage } from 'vscode';
 import { QueryStore, type QueryFolder } from './queryStore';
 import { mergeById } from '../utils/merge';
-import { EventEmitter, type Event } from '../utils/event';
+import { EventEmitter, type Event, eventBus, ConnectionChangedEvent } from '../utils/event';
+import { diagWarn } from '../utils/diagnostics';
 
 /**
  * 已保存的连接（持久化到 VSCode 全局状态）。
@@ -103,7 +104,10 @@ export class ConnectionStore {
     private readonly secrets: SecretStorage,
   ) {
     this.queryStore = new QueryStore(memento);
-    this.queryStore.onChanged(() => this.changedEmitter.fire());
+    this.queryStore.onChanged(() => {
+      this.changedEmitter.fire();
+      void eventBus.publish(new ConnectionChangedEvent('connection', 'update'));
+    });
   }
 
   /**
@@ -164,6 +168,7 @@ export class ConnectionStore {
     const { connection } = await this.sanitize(conn);
     const now = Date.now();
     const idx = data.connections.findIndex((c) => c.id === connection.id);
+    const isNew = idx < 0;
     if (idx >= 0) {
       connection.createTime = connection.createTime ?? data.connections[idx].createTime ?? now;
       connection.updateTime = now;
@@ -176,6 +181,7 @@ export class ConnectionStore {
     }
     await this.memento.update(ConnectionStore.KEY, data);
     this.changedEmitter.fire();
+    void eventBus.publish(new ConnectionChangedEvent('connection', isNew ? 'create' : 'update', connection.id));
   }
 
   /** 删除连接（软删除：置墓碑，记录保留；清理凭据以避免墓碑携带密码） */
@@ -188,6 +194,7 @@ export class ConnectionStore {
     await this.memento.update(ConnectionStore.KEY, data);
     await this.clearSecrets(id);
     this.changedEmitter.fire();
+    void eventBus.publish(new ConnectionChangedEvent('connection', 'delete', id));
   }
 
   /** 移动连接到指定分组 */
@@ -199,6 +206,7 @@ export class ConnectionStore {
     conn.updateTime = Date.now();
     await this.memento.update(ConnectionStore.KEY, data);
     this.changedEmitter.fire();
+    void eventBus.publish(new ConnectionChangedEvent('connection', 'move', connId));
   }
 
   /** 新建分组，返回其 id */
@@ -209,6 +217,7 @@ export class ConnectionStore {
     data.groups.push(group);
     await this.memento.update(ConnectionStore.KEY, data);
     this.changedEmitter.fire();
+    void eventBus.publish(new ConnectionChangedEvent('group', 'create', group.id));
     return group.id;
   }
 
@@ -221,6 +230,7 @@ export class ConnectionStore {
     data.groups.push({ id, name, parentId, createTime: now, updateTime: now, deleted: false });
     await this.memento.update(ConnectionStore.KEY, data);
     this.changedEmitter.fire();
+    void eventBus.publish(new ConnectionChangedEvent('group', 'create', id));
   }
 
   /** 重命名分组 */
@@ -232,6 +242,7 @@ export class ConnectionStore {
       g.updateTime = Date.now();
       await this.memento.update(ConnectionStore.KEY, data);
       this.changedEmitter.fire();
+      void eventBus.publish(new ConnectionChangedEvent('group', 'update', id));
     }
   }
 
@@ -249,11 +260,16 @@ export class ConnectionStore {
       if (toDelete.has(g.id)) { g.deleted = true; g.updateTime = now; }
     });
     // 被删分组内的连接移回未分组
+    const movedConnIds: string[] = [];
     data.connections.forEach((c) => {
-      if (c.groupId && toDelete.has(c.groupId)) { c.groupId = undefined; c.updateTime = now; }
+      if (c.groupId && toDelete.has(c.groupId)) { c.groupId = undefined; c.updateTime = now; movedConnIds.push(c.id); }
     });
     await this.memento.update(ConnectionStore.KEY, data);
     this.changedEmitter.fire();
+    void eventBus.publish(new ConnectionChangedEvent('group', 'delete', id));
+    for (const connId of movedConnIds) {
+      void eventBus.publish(new ConnectionChangedEvent('connection', 'move', connId));
+    }
   }
 
   /**
@@ -268,9 +284,34 @@ export class ConnectionStore {
     const localConns = await Promise.all(local.connections.map((c) => this.materializeAsync(c)));
     const mergedGroups = mergeById(local.groups, remote.groups);
     const mergedConns = mergeById(localConns, remote.connections);
+
+    // 计算 diff：对比合并前后状态，发布精确事件
+    const oldConnMap = new Map(localConns.map((c) => [c.id, c]));
+    const oldGroupMap = new Map(local.groups.map((g) => [g.id, g]));
+    const newConnMap = new Map(mergedConns.map((c) => [c.id, c]));
+    const newGroupMap = new Map(mergedGroups.map((g) => [g.id, g]));
+
     const sanitized = await Promise.all(mergedConns.map(async (c) => this.reconcileSecrets(c)));
     await this.memento.update(ConnectionStore.KEY, { groups: mergedGroups, connections: sanitized });
     this.changedEmitter.fire();
+
+    // 发布精确变更事件
+    for (const [id, conn] of newConnMap) {
+      const old = oldConnMap.get(id);
+      if (!old) {
+        void eventBus.publish(new ConnectionChangedEvent('connection', 'create', id));
+      } else if (conn.deleted !== old.deleted || conn.updateTime !== old.updateTime) {
+        void eventBus.publish(new ConnectionChangedEvent('connection', conn.deleted ? 'delete' : 'update', id));
+      }
+    }
+    for (const [id, g] of newGroupMap) {
+      const old = oldGroupMap.get(id);
+      if (!old) {
+        void eventBus.publish(new ConnectionChangedEvent('group', 'create', id));
+      } else if (g.deleted !== old.deleted || g.updateTime !== old.updateTime) {
+        void eventBus.publish(new ConnectionChangedEvent('group', g.deleted ? 'delete' : 'update', id));
+      }
+    }
   }
 
   /**
@@ -333,7 +374,10 @@ export class ConnectionStore {
       const value = this.secretCache.get(this.secretKey(connection.id, field));
       if (value !== undefined) resolved[field] = value;
     }
-    if (!resolved.dbType) resolved.dbType = DatabaseType.MYSQL;
+    if (!resolved.dbType) {
+      diagWarn(`connection ${connection.id} missing dbType, defaulting to MySQL`);
+      resolved.dbType = DatabaseType.MYSQL;
+    }
     return resolved as unknown as SavedConnection;
   }
 
@@ -352,7 +396,10 @@ export class ConnectionStore {
       }
       if (value !== undefined) resolved[field] = value;
     }
-    if (!resolved.dbType) resolved.dbType = DatabaseType.MYSQL;
+    if (!resolved.dbType) {
+      diagWarn(`connection ${connection.id} missing dbType, defaulting to MySQL`);
+      resolved.dbType = DatabaseType.MYSQL;
+    }
     return resolved as unknown as SavedConnection;
   }
 

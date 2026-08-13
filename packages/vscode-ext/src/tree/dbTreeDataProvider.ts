@@ -158,9 +158,10 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
 
   /** 分类节点子节点：根据分类类型查询具体对象 */
   private async buildCategoryChildren(element: DbTreeNode): Promise<DbTreeNode[]> {
-    const db = element.database!;
-    const conn = element.conn!;
-    const catType = element.categoryType!;
+    const db = element.database;
+    const conn = element.conn;
+    const catType = element.categoryType;
+    if (!db || !conn || !catType) return [];
 
     if (catType === 'query') {
       const folderNodes = this.store.getQueryFolders().map(

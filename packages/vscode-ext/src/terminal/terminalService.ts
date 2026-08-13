@@ -31,8 +31,8 @@ export class TerminalService {
     switch (conn.dbType) {
       case DatabaseType.MYSQL:
         return {
-          cmd: `mysql -u ${conn.user} -h ${conn.host} -P ${conn.port} ${database ? database : ''}`,
-          env: conn.password ? { MYSQL_PWD: conn.password } : {},
+          cmd: `mysql -u ${conn.user} -h ${conn.host} -P ${conn.port}${conn.password ? ' -p' : ''} ${database ? database : ''}`,
+          env: {},
         };
       case DatabaseType.PG:
         return {

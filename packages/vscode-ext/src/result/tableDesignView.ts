@@ -1,6 +1,7 @@
 import type { SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from './baseWebView';
+import { confirmSqlExecution } from '../utils/sqlSafety';
 
 export class TableDesignView extends BaseWebView {
   private static current?: TableDesignView;
@@ -30,42 +31,42 @@ export class TableDesignView extends BaseWebView {
       return;
     }
     if (msg.type === 'addColumn') {
-      await this.mutate(async () => {
+      await this.mutate(`ALTER TABLE ${this.table} ADD COLUMN ${msg.column}`, async () => {
         const session = await this.session();
         await session.table.addColumn(this.table, msg.column, msg.definition, this.database);
       });
       return;
     }
     if (msg.type === 'dropColumn') {
-      await this.mutate(async () => {
+      await this.mutate(`ALTER TABLE ${this.table} DROP COLUMN ${msg.column}`, async () => {
         const session = await this.session();
         await session.table.dropColumn(this.table, msg.column, this.database);
       });
       return;
     }
     if (msg.type === 'modifyColumn') {
-      await this.mutate(async () => {
+      await this.mutate(`ALTER TABLE ${this.table} MODIFY COLUMN ${msg.column}`, async () => {
         const session = await this.session();
         await session.table.modifyColumn(this.table, msg.column, msg.definition, this.database);
       });
       return;
     }
     if (msg.type === 'reorderColumn') {
-      await this.mutate(async () => {
+      await this.mutate(`ALTER TABLE ${this.table} REORDER COLUMN ${msg.column}`, async () => {
         const session = await this.session();
         await session.table.reorderColumn(this.table, msg.column, msg.afterColumn ?? null, this.database);
       });
       return;
     }
     if (msg.type === 'addIndex') {
-      await this.mutate(async () => {
+      await this.mutate(`CREATE INDEX ${msg.name} ON ${this.table}`, async () => {
         const session = await this.session();
         await session.table.createIndex(msg.name, this.table, Array.isArray(msg.columns) ? msg.columns : [], this.database, !!msg.isUnique);
       });
       return;
     }
     if (msg.type === 'editIndex') {
-      await this.mutate(async () => {
+      await this.mutate(`ALTER INDEX ${msg.oldName} ON ${this.table}`, async () => {
         const session = await this.session();
         const cols = Array.isArray(msg.columns) ? msg.columns : [];
         if (String(msg.oldName).toUpperCase() === 'PRIMARY') {
@@ -78,7 +79,7 @@ export class TableDesignView extends BaseWebView {
       return;
     }
     if (msg.type === 'dropIndex') {
-      await this.mutate(async () => {
+      await this.mutate(`DROP INDEX ${msg.name} ON ${this.table}`, async () => {
         const session = await this.session();
         await session.table.dropIndex(msg.name, this.table, this.database);
       });
@@ -90,8 +91,9 @@ export class TableDesignView extends BaseWebView {
     return this.manager.connect(this.conn);
   }
 
-  private async mutate(fn: () => Promise<unknown>): Promise<void> {
+  private async mutate(op: string, fn: () => Promise<unknown>): Promise<void> {
     try {
+      if (!(await confirmSqlExecution(this.conn, op))) return;
       await fn();
       await this.loadData();
       this.onMutate?.();

@@ -3,7 +3,7 @@ import type { SavedConnection } from '../connection/connectionStore';
 import { buildCandidates, detectContext, extractFromTable, type SqlContext } from '../completion/sqlCompletionEngine';
 import { diagWarn } from '../utils/diagnostics';
 
-const CONTEXTS_NEEDING_TABLES: SqlContext[] = ['statement_start', 'default', 'from_table_typing'];
+const CONTEXTS_NEEDING_TABLES: SqlContext[] = ['statement_start', 'from_table_typing'];
 const CONTEXTS_NEEDING_COLUMNS: SqlContext[] = [
   'dot_column', 'select_clause', 'after_table', 'where_condition',
   'where_value', 'order_clause', 'set_clause',

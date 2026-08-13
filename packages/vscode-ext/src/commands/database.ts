@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { SchemaDiffService, BackupService, DataTransferService, DatabaseType } from '@db-client/core';
+import { SchemaDiffService, BackupService, DataTransferService, DatabaseType, validateIdent } from '@db-client/core';
 import { DbTreeNode } from '../tree/dbTreeNode';
 import { wrapIdentForConn, splitSqlStatements } from '../utils/sql';
 import { confirmSqlExecution } from '../utils/sqlSafety';
@@ -24,7 +24,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     connCtx.setLast(node.conn);
     const session = await manager.connect(node.conn);
     if (!requireCapability(session, 'createDatabase')) return;
-    await session.query.query(`CREATE DATABASE ${wrapIdentForConn(node.conn, name)}`);
+    await session.query.query(`CREATE DATABASE ${wrapIdentForConn(node.conn, validateIdent(name))}`);
     treeProvider.refresh();
     vscode.window.showInformationMessage(l10n('db.created', { name }));
   });
@@ -34,7 +34,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (!(await confirm('db.dropConfirm', 'db.drop', node.label))) return;
     const session = await manager.connect(node.conn);
     if (!requireCapability(session, 'dropDatabase')) return;
-    await session.query.query(`DROP DATABASE ${wrapIdentForConn(node.conn, node.label)}`);
+    await session.query.query(`DROP DATABASE ${wrapIdentForConn(node.conn, validateIdent(node.label))}`);
     manager.disposeConn(node.conn.id);
     treeProvider.refresh();
   });
@@ -283,8 +283,8 @@ async function importSqlScript(
   const session = await manager.connect(node.conn!);
   const database = node.database;
   connCtx.setLast(node.conn!, database);
-  if (database) {
-    try { await session.query.query(`USE ${wrapIdentForConn(node.conn!, database)}`); } catch { /* PostgreSQL/SQLite do not support USE. */ }
+  if (database && node.conn!.dbType === DatabaseType.MYSQL) {
+    await session.query.query(`USE ${wrapIdentForConn(node.conn!, validateIdent(database))}`);
   }
   const statements = splitSqlStatements(sql);
   let done = 0;
