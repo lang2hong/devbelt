@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { randomBytes } from 'crypto';
 
 /**
  * 生成 VSCode webview HTML（加载 Vite 构建的 Vue 应用）。
@@ -33,12 +34,12 @@ export function getWebviewHtml(
 </html>`;
 }
 
-/** 生成随机 nonce（CSP 安全令牌） */
-function getNonce(): string {
-  let text = '';
-  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  for (let i = 0; i < 32; i++) {
-    text += possible.charAt(Math.floor(Math.random() * possible.length));
-  }
-  return text;
+/**
+ * 生成 CSP nonce。
+ *
+ * 必须用密码学随机源：`Math.random()` 是可预测的 PRNG，攻击者猜到 nonce
+ * 即可让注入的 <script> 通过 CSP。base64 里的 `+/=` 对 CSP nonce 合法，无需替换。
+ */
+export function getNonce(): string {
+  return randomBytes(16).toString('base64');
 }

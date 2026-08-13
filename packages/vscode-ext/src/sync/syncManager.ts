@@ -84,7 +84,8 @@ export class SyncManager {
     const payload = await this.buildLocalPayload();
     for (const section of SECTION_TYPES) {
       const data = sectionDataOf(payload, section);
-      const enc = Encryption.encrypt(data, masterPassword);
+      // 异步派生：600k 轮 PBKDF2 × 5 个 section，同步版会冻结扩展主进程数秒
+      const enc = await Encryption.encryptAsync(data, masterPassword);
       const base = this.sectionVersions[section] ?? 0;
       const { version } = await this.auth.client.pushSection(section, enc, base);
       this.sectionVersions[section] = version;
@@ -176,7 +177,8 @@ export class SyncManager {
   private async decryptSections(sections: Array<{ section: string; encryptedData: string; version: number }>, masterPassword: string): Promise<SyncPayload> {
     const payload: any = { version: 1, groups: [], connections: [], queries: [], queryFolders: [], history: [] };
     for (const sec of sections) {
-      const obj = Encryption.decrypt(sec.encryptedData, masterPassword);
+      // 异步派生：同 push，避免解密多个 section 时冻结扩展主进程
+      const obj = await Encryption.decryptAsync(sec.encryptedData, masterPassword);
       assignSection(payload, sec.section, obj);
       this.sectionVersions[sec.section as SectionType] = sec.version;
     }

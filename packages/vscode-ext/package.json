@@ -519,6 +519,21 @@
         "command": "dbclient.compareData",
         "title": "Compare Data",
         "category": "DB Client"
+      },
+      {
+        "command": "dbclient.showAuditLog",
+        "title": "Show Audit Log",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.showPoolStatus",
+        "title": "Show Connection Pool Status",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.scheduleBackup",
+        "title": "Schedule Backup",
+        "category": "DB Client"
       }
     ],
     "menus": {
@@ -578,6 +593,10 @@
         {
           "command": "dbclient.pats",
           "when": "dbclient.dbType != SQLITE"
+        },
+        {
+          "command": "dbclient.scheduleBackup",
+          "when": "false"
         }
       ],
       "view/item/context": [
@@ -749,6 +768,11 @@
         {
           "command": "dbclient.syncDatabase",
           "when": "view == dbclient.explorer && viewItem == database && dbclient.dbType == MYSQL",
+          "group": "3_transfer"
+        },
+        {
+          "command": "dbclient.scheduleBackup",
+          "when": "view == dbclient.explorer && viewItem == database && dbclient.dbType != SQLITE",
           "group": "3_transfer"
         },
         {
@@ -1130,7 +1154,7 @@
     "dev:webview": "cd webview && npx vite build --watch",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "test": "cd webview && npx vite build && cd .. && vitest run",
-    "package": "@vscode/vsce package --no-dependencies --allow-missing-repository"
+    "package": "vsce package --no-dependencies --allow-missing-repository"
   },
   "dependencies": {
     "@vuepic/vue-datepicker": "^14.0.0",

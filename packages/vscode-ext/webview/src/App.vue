@@ -10,9 +10,11 @@ import UserFormView from './views/UserFormView.vue';
 import SyncDiffView from './views/SyncDiffView.vue';
 import DataDiffView from './views/DataDiffView.vue';
 import DashboardView from './views/DashboardView.vue';
+import AuditLogView from './views/AuditLogView.vue';
+import PoolStatusView from './views/PoolStatusView.vue';
 
 const { onMessage } = useVsCode();
-const mode = ref<'query' | 'design' | 'status' | 'er' | 'connectionForm' | 'userForm' | 'syncDiff' | 'dataDiff' | 'dashboard'>('query');
+const mode = ref<'query' | 'design' | 'status' | 'er' | 'connectionForm' | 'userForm' | 'syncDiff' | 'dataDiff' | 'dashboard' | 'auditLog' | 'poolStatus'>('query');
 
 let cleanup: (() => void) | undefined;
 onMounted(() => {
@@ -34,5 +36,7 @@ onUnmounted(() => cleanup?.());
   <SyncDiffView v-else-if="mode === 'syncDiff'" />
   <DataDiffView v-else-if="mode === 'dataDiff'" />
   <DashboardView v-else-if="mode === 'dashboard'" />
+  <AuditLogView v-else-if="mode === 'auditLog'" />
+  <PoolStatusView v-else-if="mode === 'poolStatus'" />
   <ERDiagramView v-else />
 </template>

@@ -27,6 +27,18 @@ export interface RestoreProgress {
 export interface RestoreOptions {
   onProgress?: (progress: RestoreProgress) => void;
   isCancelled?: () => boolean;
+  /**
+   * 把整个 dump 作为**一条** `BEGIN; …; COMMIT;` 发送，而不是逐句执行。
+   *
+   * SQLite 必须开启：CLI 驱动每次 query 起独立子进程，逐句执行时 `BEGIN`
+   * 随进程退出即失效，`ROLLBACK` 落在另一个进程上什么也撤销不了。代价是
+   * 失去逐句进度。
+   *
+   * 注意：单进程只是原子性的**必要**条件。sqlite3 CLI 从 stdin 读 SQL 时默认
+   * 不在报错处中止（需 `-bail`），一条失败后仍会执行到 `COMMIT;`。补齐 `-bail`
+   * 前，本选项只能保证事务不被进程边界切断，不能保证失败即全撤。
+   */
+  singleStatement?: boolean;
 }
 
 export class BackupService {
@@ -124,7 +136,11 @@ export class BackupService {
     statements: string[],
     options: RestoreOptions = {},
   ): Promise<RestoreProgress> {
-    const { onProgress, isCancelled } = options;
+    const { onProgress, isCancelled, singleStatement = false } = options;
+    if (singleStatement) {
+      return BackupService.restoreAsSingleStatement(query, statements, options);
+    }
+
     const total = statements.length;
     let completed = 0;
     const last: RestoreProgress = { statement: '', completed, total };
@@ -160,5 +176,52 @@ export class BackupService {
     }
 
     return last;
+  }
+
+  /**
+   * 单条语句恢复：整个 dump 拼成一条 `BEGIN; …; COMMIT;`，交由驱动一次执行。
+   *
+   * 供 SQLite 使用 —— 其 CLI 驱动每次 query 起独立进程，逐句执行时 `BEGIN`
+   * 会随进程退出而失效。代价是只能在开始与结束各报一次进度。
+   * 完整原子性还需驱动侧 `-bail`（见 RestoreOptions.singleStatement 注释）。
+   */
+  private static async restoreAsSingleStatement(
+    query: QueryService,
+    statements: string[],
+    options: RestoreOptions,
+  ): Promise<RestoreProgress> {
+    const { onProgress, isCancelled } = options;
+    const trimmed = statements.map((s) => s.trim()).filter((s) => s.length > 0);
+    const total = trimmed.length;
+
+    if (isCancelled?.()) throw new Error('Restore cancelled.');
+    if (!total) return { statement: '', completed: 0, total: 0 };
+
+    const withSemicolons = trimmed.map((s) => (s.endsWith(';') ? s : `${s};`));
+    const batch = `BEGIN;\n${withSemicolons.join('\n')}\nCOMMIT;`;
+
+    try {
+      await query.query(batch);
+    } catch (err) {
+      // 不补发 ROLLBACK：批处理报错后驱动进程未走到 COMMIT 就退出，事务已被隐式
+      // 回滚。在新进程里发 ROLLBACK 只会得到 "no transaction is active"，正是
+      // singleStatement 要避免的那类错误。
+      const progress: RestoreProgress = {
+        statement: trimmed[0].slice(0, 100),
+        completed: 0,
+        total,
+        error: (err as Error).message,
+      };
+      onProgress?.(progress);
+      throw err;
+    }
+
+    const done: RestoreProgress = {
+      statement: trimmed[total - 1].slice(0, 100),
+      completed: total,
+      total,
+    };
+    onProgress?.(done);
+    return done;
   }
 }

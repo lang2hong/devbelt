@@ -2,8 +2,12 @@ import { ConnectionManager } from '../connection/connectionManager';
 import type { SavedConnection } from '../connection/connectionStore';
 import { TableQueryView } from './tableQueryView';
 import { HistoryStore } from '../history/historyStore';
+import type { AuditLogger } from '../utils/auditLogger';
 
 export type QueryExecutionMode = 'reuse' | 'new';
+
+/** 审计里保留的 SQL 长度上限：避免超长语句撑爆 globalState */
+const AUDIT_SQL_MAX = 2000;
 
 /**
  * 查询执行器：创建查询视图并记录历史。
@@ -18,6 +22,7 @@ export class QueryExecutor {
   constructor(
     private readonly manager: ConnectionManager,
     private readonly history?: HistoryStore,
+    private readonly audit?: AuditLogger,
   ) {}
 
   /**
@@ -34,13 +39,23 @@ export class QueryExecutor {
     this.view = await TableQueryView.openForQuery(conn, this.manager, sql, database, async (result, error) => {
       // 历史记录回调
       if (result) {
+        const costTime = Date.now() - start;
+        const rowCount = result.rows?.length ?? 0;
         await this.history?.add({
           sql,
           connection: conn.name || conn.host,
           connectionId: conn.id,
           database,
-          costTime: Date.now() - start,
-          rowCount: result.rows?.length ?? 0,
+          costTime,
+          rowCount,
+        });
+        this.audit?.log({
+          action: 'query_execute',
+          connName: conn.name || conn.host,
+          database,
+          sql: sql.length > AUDIT_SQL_MAX ? `${sql.slice(0, AUDIT_SQL_MAX)}…` : sql,
+          rowCount,
+          costTime,
         });
       } else if (error) {
         await this.history?.add({

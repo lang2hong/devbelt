@@ -11,6 +11,10 @@ import { StatusView } from './result/statusView';
 import { ERDiagramView } from './result/erDiagramView';
 import { DataDiffView } from './result/dataDiffView';
 import { DashboardView } from './result/dashboardView';
+import { AuditLogView } from './result/auditLogView';
+import { PoolStatusView } from './result/poolStatusView';
+import { AuditLogger } from './utils/auditLogger';
+import { BackupScheduler } from './schedule/backupScheduler';
 import { HistoryStore } from './history/historyStore';
 import { AuthService } from './sync/authService';
 import { requireFeature, Feature } from './sync/features';
@@ -32,8 +36,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const manager = new ConnectionManager();
   const treeProvider = new DbTreeDataProvider(store, manager);
   const history = new HistoryStore(context.globalState);
-  const executor = new QueryExecutor(manager, history);
+  const auditLogger = AuditLogger.init(context.globalState);
+  const executor = new QueryExecutor(manager, history, auditLogger);
   const connCtx = new ConnectionContext(context, store);
+
+  // 定时备份：从 globalState 恢复已保存的计划
+  const backupScheduler = new BackupScheduler(manager, store, context.globalState);
+  backupScheduler.start();
+  context.subscriptions.push(backupScheduler);
 
   BaseWebView.init(context.extensionUri);
   TableQueryView.init(context.extensionUri);
@@ -175,6 +185,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         DashboardView.open(node.conn, manager);
       }
     }),
+    // 审计日志
+    vscode.commands.registerCommand('dbclient.showAuditLog', () => {
+      AuditLogView.open(auditLogger);
+    }),
+    // 连接池状态
+    vscode.commands.registerCommand('dbclient.showPoolStatus', () => {
+      PoolStatusView.open(manager);
+    }),
+    // 定时备份
+    vscode.commands.registerCommand('dbclient.scheduleBackup', async (node: any) => {
+      if (!node?.conn || !node?.database) return;
+      await configureBackupSchedule(backupScheduler, node.conn.id, node.database);
+    }),
   );
 
   // 表结构变更时清除补全缓存
@@ -185,6 +208,69 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
 
   registerCommands({ context, store, manager, treeProvider, executor, history, auth, sync, syncBar, connCtx });
+}
+
+/** 定时备份配置向导：已有计划则提供运行/修改/删除，否则询问周期与输出目录 */
+async function configureBackupSchedule(
+  scheduler: BackupScheduler,
+  connId: string,
+  database: string,
+): Promise<void> {
+  const existing = scheduler.getSchedules().find((s) => s.connId === connId && s.database === database);
+  if (existing) {
+    const action = await vscode.window.showQuickPick(
+      [
+        { label: 'Run Backup Now', value: 'run' },
+        { label: 'Change Schedule', value: 'change' },
+        { label: 'Remove Schedule', value: 'remove' },
+      ],
+      { placeHolder: `"${database}" backs up every ${Math.round(existing.intervalMs / 3600000)}h to ${existing.outputDir}` },
+    );
+    if (!action) return;
+    if (action.value === 'run') {
+      await scheduler.runNow(connId, database);
+      return;
+    }
+    if (action.value === 'remove') {
+      scheduler.removeSchedule(connId, database);
+      vscode.window.showInformationMessage(`Backup schedule removed for "${database}".`);
+      return;
+    }
+  }
+
+  const interval = await vscode.window.showQuickPick(
+    [
+      { label: 'Every hour', value: 3600000 },
+      { label: 'Every 6 hours', value: 6 * 3600000 },
+      { label: 'Every day', value: 24 * 3600000 },
+      { label: 'Every week', value: 7 * 24 * 3600000 },
+    ],
+    { placeHolder: `How often should "${database}" be backed up?` },
+  );
+  if (!interval) return;
+
+  const folders = await vscode.window.showOpenDialog({
+    canSelectFiles: false,
+    canSelectFolders: true,
+    canSelectMany: false,
+    openLabel: 'Select backup folder',
+    defaultUri: existing ? vscode.Uri.file(existing.outputDir) : undefined,
+  });
+  if (!folders?.length) return;
+
+  const includeData = await vscode.window.showQuickPick(
+    [
+      { label: 'Schema and data', value: true },
+      { label: 'Schema only', value: false },
+    ],
+    { placeHolder: 'What should the dump contain?' },
+  );
+  if (!includeData) return;
+
+  scheduler.addSchedule(connId, database, interval.value, folders[0].fsPath, includeData.value);
+  vscode.window.showInformationMessage(
+    `"${database}" will be backed up ${interval.label.toLowerCase()} to ${folders[0].fsPath}.`,
+  );
 }
 
 export function deactivate(): void {

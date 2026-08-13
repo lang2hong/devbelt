@@ -72,6 +72,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.restoreDatabase', async (node: DbTreeNode) => {
     if (!node?.conn) return;
+    const conn = node.conn;
     const uri = await vscode.window.showOpenDialog({
       filters: { 'SQL Files': ['sql'] },
       canSelectMany: false,
@@ -98,6 +99,8 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
               progress.report({ message: `${p.completed}/${p.total}`, increment: 0 });
             },
             isCancelled: () => token.isCancellationRequested,
+            // SQLite 的 CLI 驱动每查询独立进程，逐句执行时 BEGIN 会失效
+            singleStatement: conn.dbType === DatabaseType.SQLITE,
           });
           vscode.window.showInformationMessage(`Restore complete: ${completed} statements executed.`);
           treeProvider.refresh();

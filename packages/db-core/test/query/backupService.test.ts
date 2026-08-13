@@ -12,6 +12,10 @@ import type { QueryCallback } from '../../src/types/query';
 class FakeConnection extends IConnection {
   private responses: any[] = [];
   private idx = 0;
+  /** 收到的全部 SQL，供 restore 用例断言批处理拼装 */
+  readonly executed: string[] = [];
+  /** 命中该子串的 SQL 会失败，模拟 dump 中途报错 */
+  failOn?: string;
   constructor() {
     super({ host: 'localhost', port: 3306, user: 'root', database: 'test' });
   }
@@ -21,8 +25,13 @@ class FakeConnection extends IConnection {
   }
   query(_sql: string, callback?: QueryCallback): void;
   query(_sql: string, values: any, callback?: QueryCallback): void;
-  query(_sql: string, values?: any, callback?: any): void {
+  query(sql: string, values?: any, callback?: any): void {
     const cb = callback || values;
+    this.executed.push(sql);
+    if (this.failOn && sql.includes(this.failOn)) {
+      cb(new Error(`syntax error near "${this.failOn}"`));
+      return;
+    }
     const r = this.responses[this.idx] || { rows: [] };
     this.idx++;
     cb(null, r, []);
@@ -145,5 +154,181 @@ describe('BackupService', () => {
     expect(progress.length).toBeGreaterThanOrEqual(1);
     const last = progress[progress.length - 1];
     expect(last.completed).toBe(last.total);
+  });
+});
+
+describe('BackupService.restore — 逐句路径（默认）', () => {
+  const statements = ['INSERT INTO a VALUES (1)', 'INSERT INTO a VALUES (2)'];
+
+  it('用 BEGIN/COMMIT 包裹并逐条执行', async () => {
+    const conn = new FakeConnection();
+    const query = makeQueryService(conn, new MysqlDialect());
+
+    const res = await BackupService.restore(query, statements);
+
+    expect(conn.executed).toEqual([
+      'BEGIN',
+      'INSERT INTO a VALUES (1)',
+      'INSERT INTO a VALUES (2)',
+      'COMMIT',
+    ]);
+    expect(res.completed).toBe(2);
+    expect(res.total).toBe(2);
+  });
+
+  it('逐条上报进度', async () => {
+    const conn = new FakeConnection();
+    const query = makeQueryService(conn, new MysqlDialect());
+    const seen: number[] = [];
+
+    await BackupService.restore(query, statements, { onProgress: (p) => seen.push(p.completed) });
+
+    expect(seen).toEqual([1, 2]);
+  });
+
+  it('中途失败时回滚并抛错，进度里带 error', async () => {
+    const conn = new FakeConnection();
+    conn.failOn = 'VALUES (2)';
+    const query = makeQueryService(conn, new MysqlDialect());
+    const errors: (string | undefined)[] = [];
+
+    await expect(
+      BackupService.restore(query, statements, { onProgress: (p) => errors.push(p.error) }),
+    ).rejects.toThrow('syntax error');
+
+    expect(conn.executed).toContain('ROLLBACK');
+    expect(errors.filter(Boolean)).toHaveLength(1);
+  });
+
+  it('取消回调中止并回滚', async () => {
+    const conn = new FakeConnection();
+    const query = makeQueryService(conn, new MysqlDialect());
+
+    await expect(
+      BackupService.restore(query, statements, { isCancelled: () => true }),
+    ).rejects.toThrow('Restore cancelled');
+
+    expect(conn.executed).toEqual(['BEGIN', 'ROLLBACK']);
+  });
+
+  it('跳过空白语句', async () => {
+    const conn = new FakeConnection();
+    const query = makeQueryService(conn, new MysqlDialect());
+
+    await BackupService.restore(query, ['INSERT INTO a VALUES (1)', '   ', '']);
+
+    expect(conn.executed).toEqual(['BEGIN', 'INSERT INTO a VALUES (1)', 'COMMIT']);
+  });
+});
+
+describe('BackupService.restore — singleStatement 路径（SQLite）', () => {
+  it('把整批拼成一条 BEGIN; …; COMMIT; 只发一次', async () => {
+    const conn = new FakeConnection();
+    const query = makeQueryService(conn, new SqliteDialect());
+
+    const res = await BackupService.restore(
+      query,
+      ['INSERT INTO a VALUES (1)', 'INSERT INTO a VALUES (2)'],
+      { singleStatement: true },
+    );
+
+    expect(conn.executed).toHaveLength(1);
+    expect(conn.executed[0]).toBe(
+      'BEGIN;\nINSERT INTO a VALUES (1);\nINSERT INTO a VALUES (2);\nCOMMIT;',
+    );
+    expect(res.completed).toBe(2);
+    expect(res.total).toBe(2);
+  });
+
+  it('不重复已有的分号', async () => {
+    const conn = new FakeConnection();
+    const query = makeQueryService(conn, new SqliteDialect());
+
+    await BackupService.restore(query, ['INSERT INTO a VALUES (1);'], { singleStatement: true });
+
+    expect(conn.executed[0]).toBe('BEGIN;\nINSERT INTO a VALUES (1);\nCOMMIT;');
+    expect(conn.executed[0]).not.toContain(';;');
+  });
+
+  it('过滤空白语句后再计数', async () => {
+    const conn = new FakeConnection();
+    const query = makeQueryService(conn, new SqliteDialect());
+
+    const res = await BackupService.restore(
+      query,
+      ['  INSERT INTO a VALUES (1)  ', '', '   ', '\n'],
+      { singleStatement: true },
+    );
+
+    expect(res.total).toBe(1);
+    expect(conn.executed[0]).toBe('BEGIN;\nINSERT INTO a VALUES (1);\nCOMMIT;');
+  });
+
+  it('全空输入时不发任何 SQL', async () => {
+    const conn = new FakeConnection();
+    const query = makeQueryService(conn, new SqliteDialect());
+
+    const res = await BackupService.restore(query, ['', '  '], { singleStatement: true });
+
+    expect(conn.executed).toEqual([]);
+    expect(res).toEqual({ statement: '', completed: 0, total: 0 });
+  });
+
+  it('失败时抛出原始错误，且不补发 ROLLBACK（进程退出已隐式回滚）', async () => {
+    const conn = new FakeConnection();
+    conn.failOn = 'BEGIN;';
+    const query = makeQueryService(conn, new SqliteDialect());
+
+    await expect(
+      BackupService.restore(query, ['INSERT INTO a VALUES (1)'], { singleStatement: true }),
+    ).rejects.toThrow('syntax error');
+
+    // 只发了那一条批处理；补发的 ROLLBACK 会落在新进程上，只能得到
+    // "no transaction is active"
+    expect(conn.executed).toHaveLength(1);
+    expect(conn.executed[0]).toContain('BEGIN;');
+  });
+
+  it('失败时上报带 error 的进度', async () => {
+    const conn = new FakeConnection();
+    conn.failOn = 'BEGIN;';
+    const query = makeQueryService(conn, new SqliteDialect());
+    const seen: (string | undefined)[] = [];
+
+    await expect(
+      BackupService.restore(query, ['INSERT INTO a VALUES (1)'], {
+        singleStatement: true,
+        onProgress: (p) => seen.push(p.error),
+      }),
+    ).rejects.toThrow();
+
+    expect(seen.filter(Boolean)).toHaveLength(1);
+  });
+
+  it('取消回调在发送前生效', async () => {
+    const conn = new FakeConnection();
+    const query = makeQueryService(conn, new SqliteDialect());
+
+    await expect(
+      BackupService.restore(query, ['INSERT INTO a VALUES (1)'], {
+        singleStatement: true,
+        isCancelled: () => true,
+      }),
+    ).rejects.toThrow('Restore cancelled');
+
+    expect(conn.executed).toEqual([]);
+  });
+
+  it('成功后上报一次终态进度', async () => {
+    const conn = new FakeConnection();
+    const query = makeQueryService(conn, new SqliteDialect());
+    const seen: Array<{ completed: number; total: number }> = [];
+
+    await BackupService.restore(query, ['A', 'B', 'C'], {
+      singleStatement: true,
+      onProgress: (p) => seen.push({ completed: p.completed, total: p.total }),
+    });
+
+    expect(seen).toEqual([{ completed: 3, total: 3 }]);
   });
 });

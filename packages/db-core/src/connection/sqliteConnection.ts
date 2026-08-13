@@ -59,16 +59,31 @@ export class SqliteConnection extends IConnection {
     });
   }
 
+  /**
+   * SQLite 不支持跨语句事务：每次 query 起一个独立的 sqlite3 CLI 子进程，
+   * 进程退出即隐式提交，随后的 ROLLBACK 落在另一个进程上，什么也回滚不了。
+   *
+   * 原实现执行 `BEGIN` 后回调 `null`，让调用方以为事务已开启 —— 失败时静默
+   * 产生部分写入。这里改为显式失败：需要原子性的调用方必须把整批语句拼成
+   * 单条 `BEGIN; …; COMMIT;` 交给一个进程执行（见 importRowsBatched 与
+   * BackupService.restore 的 singleStatement 选项）。
+   */
   beginTransaction(callback: (err: any) => void): void {
-    this.sqlite.query('BEGIN').then(() => callback(null)).catch(callback);
+    callback(new Error(
+      'SQLite does not support multi-statement transactions through the CLI driver: '
+      + 'each query runs in its own process. Send the whole batch as a single '
+      + '"BEGIN; ...; COMMIT;" statement instead.',
+    ));
   }
 
+  /** no-op：无跨语句事务可回滚（见 beginTransaction） */
   rollback(): void {
-    this.sqlite.query('ROLLBACK').catch(() => {});
+    /* intentionally empty */
   }
 
+  /** no-op：无跨语句事务可提交（见 beginTransaction） */
   commit(): void {
-    this.sqlite.query('COMMIT').catch(() => {});
+    /* intentionally empty */
   }
 
   end(): void {
