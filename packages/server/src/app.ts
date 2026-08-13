@@ -40,7 +40,7 @@ import { webhookRoutes } from './route/webhook.js';
 export async function createApp() {
   const app = Fastify({ logger: true });
 
-  app.register(cors, { origin: true });
+  app.register(cors, { origin: process.env.NODE_ENV === 'production' ? (process.env.CORS_ORIGIN || false) : true });
   app.register(sensible);
   app.register(jwt, { secret: config.jwtSecret, sign: { expiresIn: config.accessTokenExpiresIn } });
   await app.register(mysql, { connectionString: authString(), promise: true });
@@ -89,5 +89,5 @@ export async function createApp() {
 /** 构造 MySQL 连接串（不含 database，由 initSchema 执行 USE） */
 function authString(): string {
   const { mysql: m } = config;
-  return `mysql://${m.user}:${encodeURIComponent(m.password)}@${m.host}:${m.port}`;
+  return `mysql://${encodeURIComponent(m.user)}:${encodeURIComponent(m.password)}@${m.host}:${m.port}`;
 }

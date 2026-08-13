@@ -29,7 +29,6 @@ export class MysqlConnection extends IConnection {
       socketPath: config.socketPath,
       typeCast: (field: TypeCastField, next: () => unknown) => {
         const t = field.type;
-        // 日期时间类型走 mysql2 默认(dateStrings:true → 完整 'YYYY-MM-DD HH:MM:SS')
         if (t === 'DATETIME' || t === 'TIMESTAMP' || t === 'DATE' || t === 'TIME' || t === 'NEWDATE' || t === 'DATETIME2') {
           return next();
         }
@@ -42,14 +41,21 @@ export class MysqlConnection extends IConnection {
     } as mysql.ConnectionConfig;
     if (config.useSSL) {
       conf.ssl = {
-        rejectUnauthorized: false,
-        ca: config.caPath ? fs.readFileSync(config.caPath) : undefined,
-        cert: config.clientCertPath ? fs.readFileSync(config.clientCertPath) : undefined,
-        key: config.clientKeyPath ? fs.readFileSync(config.clientKeyPath) : undefined,
+        ca: config.caPath ? this.readFileSafe(config.caPath) : undefined,
+        cert: config.clientCertPath ? this.readFileSafe(config.clientCertPath) : undefined,
+        key: config.clientKeyPath ? this.readFileSafe(config.clientKeyPath) : undefined,
         minVersion: 'TLSv1',
       };
     }
     this.con = mysql.createConnection(conf);
+  }
+
+  private readFileSafe(path: string): Buffer | undefined {
+    try {
+      return fs.readFileSync(path);
+    } catch {
+      return undefined;
+    }
   }
 
   isAlive(): boolean {
@@ -63,13 +69,13 @@ export class MysqlConnection extends IConnection {
   }
 
   connect(callback: (err: any) => void): void {
-    this.con.connect(callback);
     this.con.on('error', () => {
       this.dead = true;
     });
     this.con.on('end', () => {
       this.dead = true;
     });
+    this.con.connect(callback);
   }
 
   beginTransaction(callback: (err: any) => void): void {
@@ -77,11 +83,15 @@ export class MysqlConnection extends IConnection {
   }
 
   rollback(): void {
-    this.con.rollback(() => {});
+    this.con.rollback((err) => {
+      if (err) this.dead = true;
+    });
   }
 
   commit(): void {
-    this.con.commit();
+    this.con.commit((err) => {
+      if (err) this.dead = true;
+    });
   }
 
   end(): void {
@@ -90,7 +100,6 @@ export class MysqlConnection extends IConnection {
   }
 
   abortQuery(): void {
-    this.dead = true;
     this.con.destroy();
   }
 

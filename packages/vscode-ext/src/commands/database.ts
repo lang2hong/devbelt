@@ -279,12 +279,14 @@ async function importSqlScript(
   treeProvider: Deps['treeProvider'],
   connCtx: Deps['connCtx'],
 ): Promise<void> {
-  if (!(await confirmSqlExecution(node.conn!, sql))) return;
-  const session = await manager.connect(node.conn!);
+  const conn = node.conn;
+  if (!conn) return;
+  if (!(await confirmSqlExecution(conn, sql))) return;
+  const session = await manager.connect(conn);
   const database = node.database;
-  connCtx.setLast(node.conn!, database);
-  if (database && node.conn!.dbType === DatabaseType.MYSQL) {
-    await session.query.query(`USE ${wrapIdentForConn(node.conn!, validateIdent(database))}`);
+  connCtx.setLast(conn, database);
+  if (database && conn.dbType === DatabaseType.MYSQL) {
+    await session.query.query(`USE ${wrapIdentForConn(conn, validateIdent(database))}`);
   }
   const statements = splitSqlStatements(sql);
   let done = 0;
@@ -326,6 +328,8 @@ async function importStructuredData(
   connCtx: Deps['connCtx'],
   fixedTable?: string,
 ): Promise<void> {
+  const conn = node.conn;
+  if (!conn) return;
   let source: { columns: string[]; rows: Record<string, unknown>[] };
   try {
     if (format === 'csv') {
@@ -353,9 +357,9 @@ async function importStructuredData(
     vscode.window.showWarningMessage(l10n('import.noRows'));
     return;
   }
-  const session = await manager.connect(node.conn!);
+  const session = await manager.connect(conn);
   const database = await pickImportDatabase(node, session.metadata.getDatabases.bind(session.metadata));
-  if (database === undefined && node.conn!.dbType === DatabaseType.MYSQL && !node.database) return;
+  if (database === undefined && conn.dbType === DatabaseType.MYSQL && !node.database) return;
   const tables = await session.metadata.getTables(database);
   const table = fixedTable
     ? { label: fixedTable }
@@ -364,12 +368,15 @@ async function importStructuredData(
   const mappings = await configureMappings(source.columns, (await session.metadata.getColumns(table.label, database)).map((column) => column.name));
   if (!mappings) return;
   const selected = mappings.filter((mapping) => mapping.target);
+  if (!selected.length) return;
   const preview = l10n('import.preview', { rows: source.rows.length, fields: selected.map((mapping) => `${mapping.source} -> ${mapping.target}`).join(', ') });
   const run = await vscode.window.showWarningMessage(preview, { modal: true }, l10n('import.run'));
   if (run !== l10n('import.run')) return;
-  const insertPreview = session.query.dialect.buildInsertSql([{ [selected[0].target!]: source.rows[0][selected[0].source] }], [selected[0].target!], table.label, database);
-  if (!(await confirmSqlExecution(node.conn!, insertPreview))) return;
-  connCtx.setLast(node.conn!, database);
+  const firstTarget = selected[0].target;
+  if (!firstTarget) return;
+  const insertPreview = session.query.dialect.buildInsertSql([{ [firstTarget]: source.rows[0][selected[0].source] }], [firstTarget], table.label, database);
+  if (!(await confirmSqlExecution(conn, insertPreview))) return;
+  connCtx.setLast(conn, database);
   try {
     const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: l10n('import.progress'), cancellable: true }, (progress, token) => importRows({
       query: session.query,
@@ -377,7 +384,7 @@ async function importStructuredData(
       database,
       rows: source.rows,
       mappings,
-      batchWrites: node.conn!.dbType === DatabaseType.SQLITE,
+      batchWrites: conn.dbType === DatabaseType.SQLITE,
       isCancelled: () => token.isCancellationRequested,
       onProgress: ({ completed, total }) => progress.report({ message: `${completed}/${total}`, increment: total ? 100 / total : 0 }),
     }));

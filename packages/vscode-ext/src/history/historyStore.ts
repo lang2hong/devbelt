@@ -26,6 +26,7 @@ export interface QueryHistoryEntry {
 export class HistoryStore {
   private static readonly KEY = 'dbclient.history';
   private static readonly MAX_ENTRIES = 100;
+  private static idCounter = 0;
 
   private readonly changedEmitter = new EventEmitter<void>();
   /** 数据变更事件（新增/清空/合并），供自动同步订阅。 */
@@ -46,7 +47,7 @@ export class HistoryStore {
   /** 记录一条历史（超出上限丢弃最旧） */
   async add(entry: Omit<QueryHistoryEntry, 'id' | 'time'>): Promise<void> {
     const list = this.list();
-    list.unshift({ ...entry, id: `${Date.now()}`, time: Date.now() });
+    list.unshift({ ...entry, id: `${Date.now()}_${++HistoryStore.idCounter}`, time: Date.now() });
     if (list.length > HistoryStore.MAX_ENTRIES) {
       list.length = HistoryStore.MAX_ENTRIES;
     }

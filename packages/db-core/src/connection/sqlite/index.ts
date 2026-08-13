@@ -52,7 +52,8 @@ class SQLite {
       this.activeProcs.add(proc);
       const cleanup = (): void => { this.activeProcs.delete(proc); };
       // 写入 stdin 规避 unicode 路径问题（见 issues #32, #37）
-      proc.stdin!.write(`.open '${this.dbPath}'${EOL}`);
+      const escapedPath = this.dbPath.replace(/'/g, "''");
+      proc.stdin!.write(`.open '${escapedPath}'${EOL}`);
       proc.stdin!.write(`.echo on${EOL}`);
       proc.stdin!.end(query);
 

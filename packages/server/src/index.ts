@@ -1,12 +1,11 @@
 import 'dotenv/config';
 import { createApp } from './app.js';
 
-/**
- * 同步服务入口。
- * createApp 完成插件注册 + schema 初始化 + 路由装配（组合根 DI）。
- */
+let server: Awaited<ReturnType<typeof createApp>> | undefined;
+
 async function main(): Promise<void> {
   const app = await createApp();
+  server = app;
   const port = Number(process.env.PORT || 3000);
   try {
     await app.listen({ port, host: '0.0.0.0' });
@@ -17,4 +16,17 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+const signals = ['SIGTERM', 'SIGINT'] as const;
+for (const sig of signals) {
+  process.on(sig, async () => {
+    if (server) {
+      try { await server.close(); } catch {}
+    }
+    process.exit(0);
+  });
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

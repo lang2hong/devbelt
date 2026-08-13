@@ -1,5 +1,5 @@
 import * as net from 'net';
-import * as fs from 'fs';
+import * as fs from 'fs/promises';
 import { Client } from 'ssh2';
 import type { SavedConnection } from './connectionStore';
 
@@ -20,6 +20,16 @@ export class SshTunnel {
   /** connId → 隧道信息 */
   private static readonly tunnels = new Map<string, { ssh: Client; server: net.Server; port: number }>();
 
+  private static closeTunnel(tunnel: { ssh: Client; server: net.Server }, connId: string): void {
+    try {
+      tunnel.server.close();
+    } catch {}
+    try {
+      tunnel.ssh.end();
+    } catch {}
+    this.tunnels.delete(connId);
+  }
+
   /**
    * 创建或复用 SSH 隧道，返回本地端口。
    * 如果连接无 SSH 配置，直接返回 undefined。
@@ -31,6 +41,15 @@ export class SshTunnel {
     const existing = this.tunnels.get(conn.id);
     if (existing) return existing.port;
 
+    let privateKey: Buffer | undefined;
+    if (conn.sshPrivateKeyPath) {
+      try {
+        privateKey = await fs.readFile(conn.sshPrivateKeyPath);
+      } catch {
+        throw new Error(`SSH private key file not readable: ${conn.sshPrivateKeyPath}`);
+      }
+    }
+
     return new Promise<number>((resolve, reject) => {
       const ssh = new Client();
       let settled = false;
@@ -39,12 +58,14 @@ export class SshTunnel {
         if (settled) return;
         settled = true;
         if (timer) clearTimeout(timer);
+        ssh.removeAllListeners();
         try { ssh.end(); } catch {}
         reject(err);
       };
 
       ssh.on('ready', () => {
         if (settled) return;
+        ssh.removeListener('error', fail);
         const server = net.createServer((socket) => {
           ssh.forwardOut(
             socket.remoteAddress || '127.0.0.1',
@@ -90,8 +111,8 @@ export class SshTunnel {
         port: conn.sshPort || 22,
         username: conn.sshUser || '',
       };
-      if (conn.sshPrivateKeyPath) {
-        config.privateKey = fs.readFileSync(conn.sshPrivateKeyPath);
+      if (privateKey) {
+        config.privateKey = privateKey;
         if (conn.sshPassphrase) {
           config.passphrase = conn.sshPassphrase;
         }
@@ -107,9 +128,7 @@ export class SshTunnel {
   static close(connId: string): void {
     const tunnel = this.tunnels.get(connId);
     if (!tunnel) return;
-    tunnel.server.close();
-    tunnel.ssh.end();
-    this.tunnels.delete(connId);
+    this.closeTunnel(tunnel, connId);
   }
 
   /** 关闭所有隧道 */

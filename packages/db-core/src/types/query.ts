@@ -12,6 +12,8 @@ export interface QueryResult {
   total?: number;
   /** Result rows were clipped to the configured client-side limit. */
   truncated?: boolean;
+  /** User-facing informational message (e.g. truncation notice). */
+  message?: string;
 }
 
 /** 查询响应回调 */

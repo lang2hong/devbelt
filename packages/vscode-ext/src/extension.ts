@@ -96,19 +96,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     treeDataProvider: treeProvider,
     showCollapseAll: true,
   });
-  treeView.onDidChangeSelection((e) => {
+  const disposables = treeView.onDidChangeSelection((e) => {
     const node = e.selection[0];
     const dbType = node?.conn?.dbType;
     if (dbType) {
       void vscode.commands.executeCommand('setContext', 'dbclient.dbType', dbType);
-      const caps = DialectRegistry.get(dbType).capabilities;
-      void vscode.commands.executeCommand('setContext', 'dbclient.hasRoutines', caps.routines);
-      void vscode.commands.executeCommand('setContext', 'dbclient.hasEvents', caps.events);
-      void vscode.commands.executeCommand('setContext', 'dbclient.hasUsers', caps.users);
-      void vscode.commands.executeCommand('setContext', 'dbclient.hasViews', caps.views);
-      void vscode.commands.executeCommand('setContext', 'dbclient.hasMultiDatabase', caps.multiDatabaseExplorer);
+      const dialect = DialectRegistry.get(dbType);
+      if (dialect) {
+        const caps = dialect.capabilities;
+        void vscode.commands.executeCommand('setContext', 'dbclient.hasRoutines', caps.routines);
+        void vscode.commands.executeCommand('setContext', 'dbclient.hasEvents', caps.events);
+        void vscode.commands.executeCommand('setContext', 'dbclient.hasUsers', caps.users);
+        void vscode.commands.executeCommand('setContext', 'dbclient.hasViews', caps.views);
+        void vscode.commands.executeCommand('setContext', 'dbclient.hasMultiDatabase', caps.multiDatabaseExplorer);
+      }
     }
   });
+  context.subscriptions.push(disposables);
   context.subscriptions.push(treeView);
   const completionProvider = new SqlCompletionProvider(connCtx, manager);
   context.subscriptions.push(
@@ -183,4 +187,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   registerCommands({ context, store, manager, treeProvider, executor, history, auth, sync, syncBar, connCtx });
 }
 
-export function deactivate(): void {}
+export function deactivate(): void {
+  // cleanup handled by context.subscriptions; empty body is safe
+}

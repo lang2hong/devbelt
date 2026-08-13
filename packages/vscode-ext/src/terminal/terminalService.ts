@@ -2,6 +2,10 @@ import * as vscode from 'vscode';
 import { DatabaseType } from '@db-client/core';
 import type { SavedConnection } from '../connection/connectionStore';
 
+function shellQuote(s: string): string {
+  return `'${String(s).replace(/'/g, "'\\''")}'`;
+}
+
 /**
  * 终端集成：按数据库类型打开 CLI。
  *
@@ -31,17 +35,17 @@ export class TerminalService {
     switch (conn.dbType) {
       case DatabaseType.MYSQL:
         return {
-          cmd: `mysql -u ${conn.user} -h ${conn.host} -P ${conn.port}${conn.password ? ' -p' : ''} ${database ? database : ''}`,
-          env: {},
+          cmd: `mysql -u ${shellQuote(conn.user)} -h ${shellQuote(conn.host)} -P ${conn.port} ${database ? shellQuote(database) : ''}`,
+          env: conn.password ? { MYSQL_PWD: conn.password } : {},
         };
       case DatabaseType.PG:
         return {
-          cmd: `psql -U ${conn.user} -h ${conn.host} -p ${conn.port} ${database ? database : ''}`,
+          cmd: `psql -U ${shellQuote(conn.user)} -h ${shellQuote(conn.host)} -p ${conn.port} ${database ? shellQuote(database) : ''}`,
           env: conn.password ? { PGPASSWORD: conn.password } : {},
         };
       case DatabaseType.SQLITE:
         return {
-          cmd: `sqlite3 ${conn.dbPath || ''}`,
+          cmd: `sqlite3 ${shellQuote(conn.dbPath || '')}`,
           env: {},
         };
       default:

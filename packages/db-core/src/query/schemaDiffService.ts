@@ -125,7 +125,7 @@ export class SchemaDiffService {
         const ddl = await sourceTableService.getCreateSql(d.tableName, sourceDb);
         parts.push(`-- Add table: ${d.tableName}`);
         parts.push(`DROP TABLE IF EXISTS \`${targetDb}\`.\`${d.tableName}\`;`);
-        parts.push(ddl.replace(/`(\w+)`/, `\`${targetDb}\`.\`$1\``) + ';');
+        parts.push(ddl.replace(/`(\w+)`/g, `\`${targetDb}\`.\`$1\``) + ';');
         parts.push('');
       } else if (d.status === 'removed') {
         parts.push(`-- Drop table: ${d.tableName}`);

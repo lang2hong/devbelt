@@ -75,7 +75,9 @@ export class SyncManager {
     const result = await this.auth.client.fetchSections();
     const payload = await this.decryptSections(result.sections, masterPassword);
     await this.applyRemote(payload);
-    await this.updateLastSyncHash();
+    if (!force) {
+      await this.updateLastSyncHash();
+    }
   }
 
   async push(masterPassword: string): Promise<void> {
@@ -203,7 +205,8 @@ export class SyncManager {
 
   private async computeLocalHash(): Promise<string> {
     const payload = await this.buildLocalPayload();
-    return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+    const sorted = JSON.stringify(payload, Object.keys(payload).sort());
+    return crypto.createHash('sha256').update(sorted).digest('hex');
   }
 
   private async updateLastSyncHash(): Promise<void> {

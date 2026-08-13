@@ -5,7 +5,6 @@ import type { SecretStorage } from 'vscode';
 import { QueryStore, type QueryFolder } from './queryStore';
 import { mergeById } from '../utils/merge';
 import { EventEmitter, type Event, eventBus, ConnectionChangedEvent } from '../utils/event';
-import { diagWarn } from '../utils/diagnostics';
 
 /**
  * 已保存的连接（持久化到 VSCode 全局状态）。
@@ -259,7 +258,6 @@ export class ConnectionStore {
     data.groups.forEach((g) => {
       if (toDelete.has(g.id)) { g.deleted = true; g.updateTime = now; }
     });
-    // 被删分组内的连接移回未分组
     const movedConnIds: string[] = [];
     data.connections.forEach((c) => {
       if (c.groupId && toDelete.has(c.groupId)) { c.groupId = undefined; c.updateTime = now; movedConnIds.push(c.id); }
@@ -280,22 +278,20 @@ export class ConnectionStore {
    */
   async replaceAllMerge(remote: ConnectionTreeData): Promise<void> {
     const local = this.getTreeData();
-    // materialize 本地连接（注入凭据）以与远端公平合并
     const localConns = await Promise.all(local.connections.map((c) => this.materializeAsync(c)));
     const mergedGroups = mergeById(local.groups, remote.groups);
     const mergedConns = mergeById(localConns, remote.connections);
 
-    // 计算 diff：对比合并前后状态，发布精确事件
     const oldConnMap = new Map(localConns.map((c) => [c.id, c]));
     const oldGroupMap = new Map(local.groups.map((g) => [g.id, g]));
     const newConnMap = new Map(mergedConns.map((c) => [c.id, c]));
     const newGroupMap = new Map(mergedGroups.map((g) => [g.id, g]));
 
     const sanitized = await Promise.all(mergedConns.map(async (c) => this.reconcileSecrets(c)));
-    await this.memento.update(ConnectionStore.KEY, { groups: mergedGroups, connections: sanitized });
+    const merged = { groups: mergedGroups, connections: sanitized };
+    await this.memento.update(ConnectionStore.KEY, merged);
     this.changedEmitter.fire();
 
-    // 发布精确变更事件
     for (const [id, conn] of newConnMap) {
       const old = oldConnMap.get(id);
       if (!old) {
@@ -333,6 +329,11 @@ export class ConnectionStore {
       if (typeof value === 'string' && value.length > 0) {
         await this.secrets.store(key, value);
         this.secretCache.set(key, value);
+        delete sanitized[field];
+        changed = true;
+      } else if (sanitized[field] === '') {
+        this.secretCache.delete(key);
+        await this.secrets.delete(key);
         delete sanitized[field];
         changed = true;
       } else {
@@ -374,10 +375,6 @@ export class ConnectionStore {
       const value = this.secretCache.get(this.secretKey(connection.id, field));
       if (value !== undefined) resolved[field] = value;
     }
-    if (!resolved.dbType) {
-      diagWarn(`connection ${connection.id} missing dbType, defaulting to MySQL`);
-      resolved.dbType = DatabaseType.MYSQL;
-    }
     return resolved as unknown as SavedConnection;
   }
 
@@ -395,10 +392,6 @@ export class ConnectionStore {
         }
       }
       if (value !== undefined) resolved[field] = value;
-    }
-    if (!resolved.dbType) {
-      diagWarn(`connection ${connection.id} missing dbType, defaulting to MySQL`);
-      resolved.dbType = DatabaseType.MYSQL;
     }
     return resolved as unknown as SavedConnection;
   }

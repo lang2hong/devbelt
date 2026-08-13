@@ -22,6 +22,7 @@ export class SqliteConnection extends IConnection {
   query(sql: string, values?: any, callback?: any) {
     if (!callback && values instanceof Function) {
       callback = values;
+      values = undefined;
     }
     const event = new EventEmitter();
     this.sqlite
@@ -50,17 +51,25 @@ export class SqliteConnection extends IConnection {
       callback(new Error('Sqlite db path cannot be null!'));
       return;
     }
-    callback(null);
-    this.connected = true;
+    this.sqlite.query('SELECT 1').then(() => {
+      this.connected = true;
+      callback(null);
+    }).catch((err) => {
+      callback(new Error(`Failed to open SQLite database: ${err.message}`));
+    });
   }
 
   beginTransaction(callback: (err: any) => void): void {
-    callback(null);
+    this.sqlite.query('BEGIN').then(() => callback(null)).catch(callback);
   }
 
-  rollback(): void {}
+  rollback(): void {
+    this.sqlite.query('ROLLBACK').catch(() => {});
+  }
 
-  commit(): void {}
+  commit(): void {
+    this.sqlite.query('COMMIT').catch(() => {});
+  }
 
   end(): void {
     this.connected = false;
@@ -69,5 +78,21 @@ export class SqliteConnection extends IConnection {
 
   isAlive(): boolean {
     return this.connected;
+  }
+
+  /** Override base class to use SQLite-compatible escaping. */
+  convertToDump(row: any): any {
+    const out: any = {};
+    for (const key in row) {
+      const element = row[key];
+      if (element == null) {
+        out[key] = 'NULL';
+      } else if (typeof element === 'string') {
+        out[key] = `'${element.replace(/'/g, "''")}'`;
+      } else {
+        out[key] = String(element);
+      }
+    }
+    return out;
   }
 }

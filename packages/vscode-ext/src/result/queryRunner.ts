@@ -40,14 +40,14 @@ export class QueryRunner {
   buildSelect(): string {
     if (!this.table) return '';
     return buildTableSelect(
-      this.conn.dbType, this.table, undefined, this.filterConditions,
+      this.conn.dbType, this.table, this.database, this.filterConditions,
       this.sortCol, this.sortDir, this.offset, this.limit,
     );
   }
 
   getCountSql(): string {
     if (!this.table) return '';
-    return buildCountSql(this.conn.dbType, this.table, undefined, this.filterConditions);
+    return buildCountSql(this.conn.dbType, this.table, this.database, this.filterConditions);
   }
 
   execute(
@@ -63,10 +63,7 @@ export class QueryRunner {
   }
 
   cancel(): void {
-    if (!this.runningQuery?.cancel()) return;
-    // Closing the driver session interrupts MySQL and PostgreSQL requests; the
-    // next command transparently creates a fresh session.
-    this.manager.disposeConn(this.conn.id);
+    this.runningQuery?.cancel();
   }
 
   reset(): void {
@@ -76,9 +73,15 @@ export class QueryRunner {
     this.offset = 0;
   }
 
-  /** 视图销毁时调用，阻止后续在途执行。 */
+  /** 视图销毁时调用，取消在途查询并阻止后续执行。 */
   dispose(): void {
     this.disposed = true;
+    this.runningQuery?.cancel();
+    if (this.table) {
+      this.manager.connect(this.conn).then((s) => {
+        s.query.query('ROLLBACK').catch(() => {});
+      }).catch(() => {});
+    }
   }
 
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
@@ -94,10 +97,11 @@ export class QueryRunner {
   ): Promise<void> {
     if (this.disposed) return;
     let transactionState: 'active' | 'committed' | 'rolledback' | undefined;
+    let session: any = undefined;
     try {
       if (!(await confirmSqlExecution(this.conn, sql))) return;
       this.post({ type: 'running' });
-      const session = await this.manager.connect(this.conn);
+      session = await this.manager.connect(this.conn);
       this.runningQuery = session.query;
       if (database && this.conn.dbType === DatabaseType.MYSQL) {
         await session.query.query(`USE ${session.query.wrap(validateIdent(database))}`);
@@ -105,7 +109,7 @@ export class QueryRunner {
       const stmts = splitSqlStatements(sql);
       const results: any[] = [];
       for (const stmt of stmts) {
-        const upper = stmt.toUpperCase().trim();
+        const upper = stmt.trim().replace(/--.*$/gm, '').replace(/#.*$/gm, '').toUpperCase().trim();
         if (upper === 'BEGIN' || upper.startsWith('START TRANSACTION')) {
           await session.query.query(stmt);
           transactionState = 'active';
@@ -113,6 +117,11 @@ export class QueryRunner {
         }
         if (upper === 'COMMIT') { await session.query.query(stmt); transactionState = 'committed'; continue; }
         if (upper === 'ROLLBACK') { await session.query.query(stmt); transactionState = 'rolledback'; continue; }
+        if (upper.startsWith('SET AUTOCOMMIT')) {
+          await session.query.query(stmt);
+          if (upper.includes('= 0') || upper.includes('=0')) transactionState = 'active';
+          continue;
+        }
         results.push(await session.query.query(stmt));
       }
       const result = results[results.length - 1];
@@ -122,11 +131,9 @@ export class QueryRunner {
         try {
           cols = await session.metadata.getColumns(this.table, this.database);
           pkCols = cols.filter((c: any) => c.isPrimary).map((c: any) => c.name);
-          // 无主键时用所有列作为定位列（编辑/删除可用，可能影响多行）
           if (pkCols.length === 0) pkCols = cols.map((c: any) => c.name);
         } catch {}
       }
-      // 表预览时并行查询过滤后总条数，用于分页信息
       let total: number | undefined;
       if (this.table) {
         const countSql = this.getCountSql();
@@ -141,7 +148,6 @@ export class QueryRunner {
       this.lastFields = (result?.fields || []).map((f: any) => f.name);
       if (transactionState) this.post({ type: 'transaction', state: transactionState });
       if (this.table) {
-        // 表预览模式：给 fields 补列类型，供 filter 智能控件
         const colMap = new Map(cols.map((c: any) => [c.name, c]));
         const fieldsWithType = (result?.fields || []).map((f: any) => {
           const c = colMap.get(f.name);
@@ -151,7 +157,6 @@ export class QueryRunner {
           type: 'result', result: { ...result, fields: fieldsWithType }, pkColumns: pkCols, total, sql,
         });
       } else {
-        // 查询模式发送所有结果集
         this.post({
           type: 'results', results, sql, transactionState,
         });
@@ -161,11 +166,9 @@ export class QueryRunner {
       diagError('query failed', (err as Error).message);
       this.post({ type: 'error', message: (err as Error).message });
       onExecuted?.(undefined, err as Error);
-      // 事务未提交：回滚防止状态泄漏到后续查询
-      if (transactionState === 'active') {
+      if (transactionState === 'active' && session) {
         try {
-          const s = await this.manager.connect(this.conn);
-          await s.query.query('ROLLBACK');
+          await session.query.query('ROLLBACK');
         } catch { /* best-effort rollback */ }
       }
     } finally {
@@ -181,6 +184,10 @@ export class QueryRunner {
       this.post({ type: 'running' });
       const session = await this.manager.connect(this.conn);
       this.runningQuery = session.query;
+      const database = this.database || this.conn.database;
+      if (database && this.conn.dbType === DatabaseType.MYSQL) {
+        await session.query.query(`USE ${session.query.wrap(validateIdent(database))}`);
+      }
       const prefix = this.conn.dbType === DatabaseType.PG ? 'EXPLAIN ANALYZE ' : 'EXPLAIN ';
       const stmts = splitSqlStatements(sql);
       const results: any[] = [];

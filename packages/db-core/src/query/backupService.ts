@@ -1,3 +1,4 @@
+import { DatabaseType } from '../types/connection';
 import type { MetadataService } from './metadataService';
 import type { TableService } from './tableService';
 import type { QueryService } from './queryService';
@@ -57,7 +58,10 @@ export class BackupService {
 
       const ddl = await tableService.getCreateSql(table, database);
       parts.push('');
-      parts.push(`DROP TABLE IF EXISTS ${query.dialect.wrap(database)}.${query.dialect.wrap(table)};`);
+      const qualifiedDrop = dbType === DatabaseType.SQLITE
+        ? query.dialect.wrap(table)
+        : `${query.dialect.wrap(database)}.${query.dialect.wrap(table)}`;
+      parts.push(`DROP TABLE IF EXISTS ${qualifiedDrop};`);
       parts.push(ddl.replace(/;\s*$/, '') + ';');
 
       if (includeData) {
@@ -102,16 +106,16 @@ export class BackupService {
   }
 
   private static sqlPrelude(dbType: string): string {
-    if (dbType === 'MYSQL') return 'SET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS = 0';
-    if (dbType === 'PG') return "SET client_encoding = 'UTF8';\nSET session_replication_role = 'replica'";
-    if (dbType === 'SQLITE') return 'PRAGMA foreign_keys = OFF';
+    if (dbType === DatabaseType.MYSQL) return 'SET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS = 0';
+    if (dbType === DatabaseType.PG) return "SET client_encoding = 'UTF8';\nSET session_replication_role = 'replica'";
+    if (dbType === DatabaseType.SQLITE) return 'PRAGMA foreign_keys = OFF';
     return '';
   }
 
   private static sqlEpilogue(dbType: string): string {
-    if (dbType === 'MYSQL') return 'SET FOREIGN_KEY_CHECKS = 1';
-    if (dbType === 'PG') return "SET session_replication_role = 'origin'";
-    if (dbType === 'SQLITE') return 'PRAGMA foreign_keys = ON';
+    if (dbType === DatabaseType.MYSQL) return 'SET FOREIGN_KEY_CHECKS = 1';
+    if (dbType === DatabaseType.PG) return "SET session_replication_role = 'origin'";
+    if (dbType === DatabaseType.SQLITE) return 'PRAGMA foreign_keys = ON';
     return '';
   }
 
@@ -125,27 +129,34 @@ export class BackupService {
     let completed = 0;
     const last: RestoreProgress = { statement: '', completed, total };
 
-    for (const stmt of statements) {
-      if (isCancelled?.()) throw new Error('Restore cancelled.');
-      const trimmed = stmt.trim();
-      if (!trimmed) continue;
-      try {
-        await query.query(trimmed);
-        completed++;
-        const progress: RestoreProgress = { statement: trimmed.slice(0, 100), completed, total };
-        onProgress?.(progress);
-        last.statement = progress.statement;
-        last.completed = completed;
-      } catch (err) {
-        const progress: RestoreProgress = {
-          statement: trimmed.slice(0, 100),
-          completed,
-          total,
-          error: (err as Error).message,
-        };
-        onProgress?.(progress);
-        throw err;
+    try {
+      await query.query('BEGIN');
+      for (const stmt of statements) {
+        if (isCancelled?.()) throw new Error('Restore cancelled.');
+        const trimmed = stmt.trim();
+        if (!trimmed) continue;
+        try {
+          await query.query(trimmed);
+          completed++;
+          const progress: RestoreProgress = { statement: trimmed.slice(0, 100), completed, total };
+          onProgress?.(progress);
+          last.statement = progress.statement;
+          last.completed = completed;
+        } catch (err) {
+          const progress: RestoreProgress = {
+            statement: trimmed.slice(0, 100),
+            completed,
+            total,
+            error: (err as Error).message,
+          };
+          onProgress?.(progress);
+          throw err;
+        }
       }
+      await query.query('COMMIT');
+    } catch (err) {
+      try { await query.query('ROLLBACK'); } catch {}
+      throw err;
     }
 
     return last;

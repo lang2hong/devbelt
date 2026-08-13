@@ -61,10 +61,11 @@ export class Encryption {
       data: string;
       iterations?: number;
     };
+    const safeIterations = Math.max(iterations ?? Encryption.LEGACY_ITERATIONS, Encryption.LEGACY_ITERATIONS);
     const key = Encryption.deriveKey(
       masterPassword,
       salt,
-      iterations ?? Encryption.LEGACY_ITERATIONS,
+      safeIterations,
     );
     const decipher = crypto.createDecipheriv(
       'aes-256-gcm',

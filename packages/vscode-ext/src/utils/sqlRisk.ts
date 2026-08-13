@@ -24,5 +24,6 @@ export function analyzeSqlRisk(sql: string): SqlRisk {
   if (updateOrDelete && !/\bWHERE\b/.test(normalized)) {
     return { level: 'critical', isWrite: true, reason: 'UPDATE or DELETE without WHERE' };
   }
+  // INSERT/DELETE/UPDATE even with WHERE is still a write operation
   return { level: 'write', isWrite: true };
 }

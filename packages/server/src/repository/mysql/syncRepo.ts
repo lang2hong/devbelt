@@ -46,6 +46,25 @@ export class MysqlSyncRepo implements ISyncRepo {
     return version;
   }
 
+  /** 原子乐观锁写入：仅当当前版本匹配 baseVersion 时才更新，返回新版本号或 null */
+  async putSectionIfVersion(userId: number, section: SectionType, encryptedData: string, baseVersion: number): Promise<number | null> {
+    const newVersion = baseVersion + 1;
+    await this.db().query<any>(
+      `INSERT INTO sync_sections (user_id, section, encrypted_data, version)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         encrypted_data = IF(version = ?, VALUES(encrypted_data), encrypted_data),
+         version = IF(version = ?, ?, version),
+         update_time = IF(version = ?, CURRENT_TIMESTAMP, update_time)`,
+      [userId, section, encryptedData, newVersion, baseVersion, baseVersion, newVersion, baseVersion],
+    );
+    const [rows] = await this.db().query<any[]>(
+      'SELECT version FROM sync_sections WHERE user_id = ? AND section = ?',
+      [userId, section],
+    );
+    return rows[0]?.version === newVersion ? newVersion : null;
+  }
+
   /** 记录历史版本快照（回滚用） */
   async recordVersion(userId: number, section: SectionType, version: number, encryptedData: string, dataBytes: number): Promise<void> {
     await this.db().query(

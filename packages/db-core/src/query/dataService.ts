@@ -19,6 +19,7 @@ export class DataService {
     database?: string,
   ): Promise<QueryResult> {
     if (!pkColumns.length) throw new Error('updateCell requires at least one primary key column.');
+    if (pkValues.length < pkColumns.length) throw new Error('updateCell: pkValues length mismatch');
     validateIdent(table);
     for (const pk of pkColumns) validateIdent(pk);
     validateIdent(column);
@@ -77,11 +78,12 @@ export class DataService {
     database?: string,
   ): Promise<QueryResult> {
     if (!columns.length) throw new Error('At least one column is required to insert a row.');
+    if (!values || values.length !== columns.length) throw new Error(`insertRow: columns/values length mismatch (${columns.length} vs ${values?.length ?? 0})`);
     validateIdent(table);
     const w = this.queryService.dialect.wrap.bind(this.queryService.dialect);
     const qualified = database ? `${w(validateIdent(database))}.${w(table)}` : w(table);
     const cols = columns.map((c) => w(validateIdent(c))).join(', ');
-    const vals = (columns.length ? values : []).map((v) =>
+    const vals = values.map((v) =>
       v === null || v === undefined ? 'NULL' : sqlstring.escape(v),
     ).join(', ');
     const sql = `INSERT INTO ${qualified} (${cols}) VALUES (${vals})`;

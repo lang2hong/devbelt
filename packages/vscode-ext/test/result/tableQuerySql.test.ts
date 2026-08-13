@@ -22,7 +22,7 @@ describe('tableQuerySql', () => {
       { column: 'age', op: 'gte', value: '18' },
     ];
     expect(buildTableSelect(DatabaseType.MYSQL, 'users', 'app', conditions, '', '', 0, 100)).toBe(
-      'SELECT * FROM `app`.`users` WHERE `status` = \'active\' AND `age` >= \'18\' LIMIT 100 OFFSET 0',
+      'SELECT * FROM `app`.`users` WHERE `status` = \'active\' AND `age` >= 18 LIMIT 100 OFFSET 0',
     );
   });
 
@@ -44,8 +44,8 @@ describe('tableQuerySql', () => {
       [{ column: 'a', op: 'notEndsWith', value: 'x' }, '`a` NOT LIKE \'%x\''],
       [{ column: 'a', op: 'isEmpty' }, "`a` = ''"],
       [{ column: 'a', op: 'notEmpty' }, "`a` <> ''"],
-      [{ column: 'a', op: 'between', value: '1', value2: '10' }, "`a` BETWEEN '1' AND '10'"],
-      [{ column: 'a', op: 'notBetween', value: '1', value2: '10' }, "`a` NOT BETWEEN '1' AND '10'"],
+      [{ column: 'a', op: 'between', value: '1', value2: '10' }, "`a` BETWEEN 1 AND 10"],
+      [{ column: 'a', op: 'notBetween', value: '1', value2: '10' }, "`a` NOT BETWEEN 1 AND 10"],
       [{ column: 'a', op: 'in', value: '1, 2, 3' }, "`a` IN ('1', '2', '3')"],
       [{ column: 'a', op: 'notIn', value: '1, 2' }, "`a` NOT IN ('1', '2')"],
     ];

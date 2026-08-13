@@ -109,7 +109,7 @@ describe('ConnectionStore sync model', () => {
     expect(store.list()[0].password).toBe('db-secret');
   });
 
-  it('does not overwrite an existing password when saving an empty value', async () => {
+it('clears an existing password when saving an empty value', async () => {
     const memento = createMemento({ groups: [], connections: [] });
     const secrets = createSecrets();
     const store = new ConnectionStore(memento, secrets as any);
@@ -117,7 +117,7 @@ describe('ConnectionStore sync model', () => {
 
     await store.save(conn({ password: '' }));
 
-    expect(await secrets.get('dbclient.connection.primary.password')).toBe('db-secret');
-    expect(store.get('primary')!.password).toBe('db-secret');
+    expect(await secrets.get('dbclient.connection.primary.password')).toBeUndefined();
+    expect(store.get('primary')!.password).toBeUndefined();
   });
 });

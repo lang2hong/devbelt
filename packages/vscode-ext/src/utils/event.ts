@@ -154,15 +154,20 @@ export class EventBus {
     const list = this.handlers.get(event.constructor as new (...args: any[]) => T);
     if (!list || list.length === 0) return;
 
-    // 快照遍历，避免 handler 内 dispose 修改正在遍历的数组
     for (const { handler } of [...list]) {
       try {
-        await Promise.race([
-          Promise.resolve(handler(event)),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error(`Handler timeout after ${HANDLER_TIMEOUT_MS}ms`)), HANDLER_TIMEOUT_MS),
-          ),
-        ]);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`Handler timeout after ${HANDLER_TIMEOUT_MS}ms`)), HANDLER_TIMEOUT_MS);
+        });
+        try {
+          await Promise.race([
+            Promise.resolve(handler(event)),
+            timeoutPromise,
+          ]);
+        } finally {
+          if (timer !== undefined) clearTimeout(timer);
+        }
       } catch {
         // 忽略单个 handler 的异常/超时，继续执行后续 handler
       }

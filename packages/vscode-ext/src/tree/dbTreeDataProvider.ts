@@ -78,7 +78,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     try {
       switch (element.kind) {
         case NodeKind.Group:
-          return this.buildGroupChildren(element.groupId!);
+          if (!element.groupId) return [];
+          return this.buildGroupChildren(element.groupId);
         case NodeKind.Connection:
           return this.buildConnectionChildren(element);
         case NodeKind.Database:
@@ -103,11 +104,12 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
 
   /** 连接节点子节点：数据库列表 */
   private async buildConnectionChildren(element: DbTreeNode): Promise<DbTreeNode[]> {
-    const session = await this.manager.connect(element.conn!);
+    if (!element.conn) return [];
+    const session = await this.manager.connect(element.conn);
     if (!session.capabilities.multiDatabaseExplorer) {
       return [
         new DbTreeNode(
-          element.conn!.database || (element.conn!.dbType === DatabaseType.PG ? 'public' : 'main'),
+          element.conn.database || (element.conn.dbType === DatabaseType.PG ? 'public' : 'main'),
           TreeItemCollapsibleState.Collapsed,
           NodeKind.Database,
           element.conn,
@@ -132,7 +134,10 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
 
   /** 数据库节点子节点：按方言能力过滤分类（表/视图始终显示） */
   private buildDatabaseChildren(element: DbTreeNode): DbTreeNode[] {
-    const caps = DialectRegistry.get(element.conn!.dbType).capabilities;
+    if (!element.conn) return [];
+    const dialect = DialectRegistry.get(element.conn.dbType);
+    if (!dialect) return [];
+    const caps = dialect.capabilities;
     const categories: { type: CategoryType; label: string }[] = [
       { type: 'table', label: l10n('cat.tables') },
       { type: 'view', label: l10n('cat.views') },
@@ -278,7 +283,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
 
   /** 查询文件夹子节点：文件夹内保存的查询 */
   private buildQueryFolderChildren(element: DbTreeNode): DbTreeNode[] {
-    const conn = element.conn!;
+    const conn = element.conn;
+    if (!conn) return [];
     const db = element.database;
     return this.store.getQueriesInFolder(conn.id, db, element.queryFolderId).map(
       (q) => {
@@ -302,7 +308,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
 
   /** 表节点子节点：列列表 + 索引/触发器/外键子分类 */
   private async buildTableChildren(element: DbTreeNode): Promise<DbTreeNode[]> {
-    const session = await this.manager.connect(element.conn!);
+    if (!element.conn) return [];
+    const session = await this.manager.connect(element.conn);
     const columns = await session.metadata.getColumns(element.label, element.database);
     const colNodes = columns.map((col) => {
       const node = new DbTreeNode(
@@ -379,7 +386,10 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
 
   /** 用 store 中 materialize 的连接替换原始（无凭据）连接，确保树节点携带密码。 */
   private withCredentials(conn: SavedConnection): SavedConnection {
-    return this.store.get(conn.id) || conn;
+    const stored = this.store.get(conn.id);
+    if (!stored) return conn;
+    if (!stored.password && conn.password) return conn;
+    return stored;
   }
 
   /** 创建连接节点：未打开时无箭头+双击触发打开；已打开时可展开 */

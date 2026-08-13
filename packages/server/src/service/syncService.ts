@@ -39,22 +39,19 @@ export class SyncService {
     const user = await this.userRepo.findById(userId);
     if (!user) throw new EntityNotFoundError('user', userId);
 
-    const cur = await this.syncRepo.getSection(userId, section);
-    const currentVersion = cur ? cur.version : 0;
-    if (baseVersion !== currentVersion) throw new ConflictError(currentVersion, baseVersion);
+    const newVersion = await this.syncRepo.putSectionIfVersion(userId, section, encryptedData, baseVersion);
+    if (newVersion === null) {
+      const cur = await this.syncRepo.getSection(userId, section);
+      throw new ConflictError(cur ? cur.version : 0, baseVersion);
+    }
 
-    // 配额校验：新总量 = 当前总量 - 旧节字节数 + 新节字节数
-    const currentTotal = await this.syncRepo.sumBytes(userId);
-    const oldBytes = cur ? Buffer.byteLength(cur.encryptedData, 'utf8') : 0;
     const newSectionBytes = Buffer.byteLength(encryptedData, 'utf8');
-    const newTotal = currentTotal - oldBytes + newSectionBytes;
-    await this.planPolicy.check(user.planCode, 'sync_bytes', newTotal);
+    const currentTotal = await this.syncRepo.sumBytes(userId);
+    await this.planPolicy.check(user.planCode, 'sync_bytes', currentTotal);
+    if (newSectionBytes > 0) {
+      await this.syncRepo.recordVersion(userId, section, newVersion, encryptedData, newSectionBytes);
+    }
 
-    const newVersion = currentVersion + 1;
-    await this.syncRepo.putSection(userId, section, encryptedData, newVersion);
-    await this.syncRepo.recordVersion(userId, section, newVersion, encryptedData, newSectionBytes);
-
-    // 清理超保留数的旧版本
     const retention = await this.planPolicy.syncVersionRetention(user.planCode);
     if (retention > 0) await this.syncRepo.pruneVersions(userId, section, retention);
 

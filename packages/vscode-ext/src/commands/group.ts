@@ -83,15 +83,17 @@ export function registerGroupCommands(deps: Deps, sub: Sub): void {
   });
 
   sub('dbclient.renameGroup', async (node: DbTreeNode) => {
+    if (!node?.groupId) return;
     const name = await vscode.window.showInputBox({ prompt: 'Group name', value: node.label });
     if (!name || name === node.label) return;
-    await store.renameGroup(node.groupId!, name);
+    await store.renameGroup(node.groupId, name);
     treeProvider.refresh();
   });
 
   sub('dbclient.removeGroup', async (node: DbTreeNode) => {
+    if (!node?.groupId) return;
     if (!(await confirm('tree.deleteGroupTitle', 'tree.deleteGroupConfirm', node.label))) return;
-    await store.removeGroup(node.groupId!);
+    await store.removeGroup(node.groupId);
     treeProvider.refresh();
   });
 

@@ -81,3 +81,11 @@ export class ConflictError extends DomainError {
     this.name = 'ConflictError';
   }
 }
+
+/** 请求参数校验失败 */
+export class ValidationError extends DomainError {
+  constructor(message: string) {
+    super(message, 'VALIDATION_ERROR');
+    this.name = 'ValidationError';
+  }
+}

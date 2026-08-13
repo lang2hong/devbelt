@@ -34,6 +34,7 @@ const COLLECT_INTERVAL_MS = 5000;
 export class DashboardView extends BaseWebView {
   private static current?: DashboardView;
   private collectTimer?: ReturnType<typeof setInterval>;
+  private disposed = false;
   private history: DashboardData['metrics'] = {
     activeConnections: [],
     questions: [],
@@ -78,6 +79,7 @@ export class DashboardView extends BaseWebView {
   }
 
   private async collectAndSend(): Promise<void> {
+    if (this.disposed) return;
     try {
       const session = await this.manager.connect(this.conn);
       const [processList, statusVars, serverVars, summary] = await Promise.all([
@@ -174,7 +176,11 @@ export class DashboardView extends BaseWebView {
 
   protected onDispose(): void {
     super.onDispose();
+    this.disposed = true;
     if (this.collectTimer) { clearInterval(this.collectTimer); this.collectTimer = undefined; }
     if (DashboardView.current === this) DashboardView.current = undefined;
+    if (!this.manager.isExplicit(this.conn.id)) {
+      this.manager.disposeConn(this.conn.id);
+    }
   }
 }

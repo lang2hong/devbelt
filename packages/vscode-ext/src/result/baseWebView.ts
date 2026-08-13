@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { getWebviewHtml } from '../webview/html';
+import { diagError } from '../utils/diagnostics';
 
 /**
  * Webview 面板基类：统一处理 panel 创建、HTML 注入、消息监听器 dispose。
@@ -13,6 +14,7 @@ export abstract class BaseWebView {
   protected static _extensionUri: vscode.Uri;
   protected readonly panel: vscode.WebviewPanel;
   private readonly msgDisp: vscode.Disposable;
+  private readonly panelDisp: vscode.Disposable;
 
   constructor(
     viewType: string,
@@ -25,8 +27,10 @@ export abstract class BaseWebView {
       { enableScripts: true, retainContextWhenHidden: true, ...options },
     );
     this.panel.webview.html = getWebviewHtml(this.panel.webview, BaseWebView._extensionUri);
-    this.msgDisp = this.panel.webview.onDidReceiveMessage((msg) => void this.handleMessage(msg));
-    this.panel.onDidDispose(() => this.onDispose());
+    this.msgDisp = this.panel.webview.onDidReceiveMessage((msg) =>
+      void this.handleMessage(msg).catch((e) => diagError('webview message handler', String(e))),
+    );
+    this.panelDisp = this.panel.onDidDispose(() => this.onDispose());
   }
 
   static init(extensionUri: vscode.Uri): void {
@@ -49,5 +53,6 @@ export abstract class BaseWebView {
   /** 面板销毁回调（子类可 override 做清理） */
   protected onDispose(): void {
     this.msgDisp.dispose();
+    this.panelDisp.dispose();
   }
 }

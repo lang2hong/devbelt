@@ -2,6 +2,7 @@ import type { SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from './baseWebView';
 import { confirmSqlExecution } from '../utils/sqlSafety';
+import { validateIdent } from '@db-client/core';
 
 export class TableDesignView extends BaseWebView {
   private static current?: TableDesignView;
@@ -31,6 +32,8 @@ export class TableDesignView extends BaseWebView {
       return;
     }
     if (msg.type === 'addColumn') {
+      this.validateDesignIdent(msg.column, 'column');
+      this.validateDefinition(msg.definition, 'column');
       await this.mutate(`ALTER TABLE ${this.table} ADD COLUMN ${msg.column}`, async () => {
         const session = await this.session();
         await session.table.addColumn(this.table, msg.column, msg.definition, this.database);
@@ -38,6 +41,7 @@ export class TableDesignView extends BaseWebView {
       return;
     }
     if (msg.type === 'dropColumn') {
+      this.validateDesignIdent(msg.column, 'column');
       await this.mutate(`ALTER TABLE ${this.table} DROP COLUMN ${msg.column}`, async () => {
         const session = await this.session();
         await session.table.dropColumn(this.table, msg.column, this.database);
@@ -45,6 +49,8 @@ export class TableDesignView extends BaseWebView {
       return;
     }
     if (msg.type === 'modifyColumn') {
+      this.validateDesignIdent(msg.column, 'column');
+      this.validateDefinition(msg.definition, 'column');
       await this.mutate(`ALTER TABLE ${this.table} MODIFY COLUMN ${msg.column}`, async () => {
         const session = await this.session();
         await session.table.modifyColumn(this.table, msg.column, msg.definition, this.database);
@@ -52,6 +58,7 @@ export class TableDesignView extends BaseWebView {
       return;
     }
     if (msg.type === 'reorderColumn') {
+      this.validateDesignIdent(msg.column, 'column');
       await this.mutate(`ALTER TABLE ${this.table} REORDER COLUMN ${msg.column}`, async () => {
         const session = await this.session();
         await session.table.reorderColumn(this.table, msg.column, msg.afterColumn ?? null, this.database);
@@ -59,6 +66,7 @@ export class TableDesignView extends BaseWebView {
       return;
     }
     if (msg.type === 'addIndex') {
+      this.validateDesignIdent(msg.name, 'index');
       await this.mutate(`CREATE INDEX ${msg.name} ON ${this.table}`, async () => {
         const session = await this.session();
         await session.table.createIndex(msg.name, this.table, Array.isArray(msg.columns) ? msg.columns : [], this.database, !!msg.isUnique);
@@ -66,6 +74,8 @@ export class TableDesignView extends BaseWebView {
       return;
     }
     if (msg.type === 'editIndex') {
+      this.validateDesignIdent(msg.oldName, 'index');
+      if (msg.name) this.validateDesignIdent(msg.name, 'index');
       await this.mutate(`ALTER INDEX ${msg.oldName} ON ${this.table}`, async () => {
         const session = await this.session();
         const cols = Array.isArray(msg.columns) ? msg.columns : [];
@@ -79,6 +89,7 @@ export class TableDesignView extends BaseWebView {
       return;
     }
     if (msg.type === 'dropIndex') {
+      this.validateDesignIdent(msg.name, 'index');
       await this.mutate(`DROP INDEX ${msg.name} ON ${this.table}`, async () => {
         const session = await this.session();
         await session.table.dropIndex(msg.name, this.table, this.database);
@@ -102,6 +113,22 @@ export class TableDesignView extends BaseWebView {
     }
   }
 
+  private validateDesignIdent(name: string, context: string): void {
+    if (!name || typeof name !== 'string') {
+      throw new Error(`Invalid ${context} name`);
+    }
+    validateIdent(name);
+  }
+
+  private validateDefinition(def: string, context: string): void {
+    if (!def || typeof def !== 'string' || def.length > 500) {
+      throw new Error(`Invalid ${context} definition`);
+    }
+    if (/[;']/.test(def)) {
+      throw new Error(`${context} definition contains invalid characters`);
+    }
+  }
+
   private async loadData(): Promise<void> {
     try {
       const session = await this.manager.connect(this.conn);
@@ -119,5 +146,8 @@ export class TableDesignView extends BaseWebView {
   protected onDispose(): void {
     super.onDispose();
     if (TableDesignView.current === this) TableDesignView.current = undefined;
+    if (!this.manager.isExplicit(this.conn.id)) {
+      this.manager.disposeConn(this.conn.id);
+    }
   }
 }

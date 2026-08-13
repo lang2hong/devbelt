@@ -48,5 +48,8 @@ export class ERDiagramView extends BaseWebView {
   protected onDispose(): void {
     super.onDispose();
     if (ERDiagramView.current === this) ERDiagramView.current = undefined;
+    if (!this.manager.isExplicit(this.conn.id)) {
+      this.manager.disposeConn(this.conn.id);
+    }
   }
 }

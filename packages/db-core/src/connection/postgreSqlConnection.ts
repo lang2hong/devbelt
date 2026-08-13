@@ -1,18 +1,18 @@
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
-import { Client, ClientConfig, QueryArrayResult, types } from 'pg';
+import * as pg from 'pg';
 import { IConnection } from './connection';
 import type { ConnectionConfig } from '../types/connection';
 import type { QueryCallback } from '../types/query';
 
 export class PostgreSqlConnection extends IConnection {
-  private client: Client;
+  private client: pg.Client;
   private connected = false;
 
   constructor(config: ConnectionConfig) {
     super(config);
     if (config.useConnectionString && config.connectionUrl) {
-      this.client = new Client(config.connectionUrl);
+      this.client = new pg.Client(config.connectionUrl);
       return;
     }
     const conf = {
@@ -23,16 +23,23 @@ export class PostgreSqlConnection extends IConnection {
       database: config.database,
       connectionTimeoutMillis: config.connectTimeout || 5000,
       statement_timeout: config.requestTimeout || undefined,
-    } as ClientConfig;
+    } as pg.ClientConfig;
     if (config.useSSL) {
       conf.ssl = {
-        rejectUnauthorized: false,
-        ca: config.caPath ? fs.readFileSync(config.caPath) : undefined,
-        cert: config.clientCertPath ? fs.readFileSync(config.clientCertPath) : undefined,
-        key: config.clientKeyPath ? fs.readFileSync(config.clientKeyPath) : undefined,
+        ca: config.caPath ? this.readFileSafe(config.caPath) : undefined,
+        cert: config.clientCertPath ? this.readFileSafe(config.clientCertPath) : undefined,
+        key: config.clientKeyPath ? this.readFileSafe(config.clientKeyPath) : undefined,
       };
     }
-    this.client = new Client(conf);
+    this.client = new pg.Client(conf);
+  }
+
+  private readFileSafe(path: string): string | undefined {
+    try {
+      return fs.readFileSync(path, 'utf8');
+    } catch {
+      return undefined;
+    }
   }
 
   isAlive(): boolean {
@@ -44,9 +51,12 @@ export class PostgreSqlConnection extends IConnection {
   query(sql: any, values?: any, callback?: any) {
     if (!callback && values instanceof Function) {
       callback = values;
+      values = undefined;
     }
     const event = new EventEmitter();
-    this.client.query(sql, (err: any, res) => {
+    const queryArgs: any[] = [sql];
+    if (Array.isArray(values)) queryArgs.push(values);
+    queryArgs.push((err: any, res: any) => {
       if (err) {
         if (callback) callback(err);
         event.emit('error', err.message);
@@ -66,10 +76,11 @@ export class PostgreSqlConnection extends IConnection {
         }
       }
     });
+    (this.client.query as any)(...queryArgs);
     return event;
   }
 
-  adaptResult(res: QueryArrayResult<any>) {
+  adaptResult(res: pg.QueryArrayResult<any>) {
     if (res.command === 'DELETE' || res.command === 'UPDATE' || res.command === 'INSERT') {
       return { affectedRows: res.rowCount };
     }
@@ -77,13 +88,12 @@ export class PostgreSqlConnection extends IConnection {
   }
 
   connect(callback: (err: any) => void): void {
+    this.client.on('error', () => this.end());
+    this.client.on('end', () => this.end());
     this.client.connect((err: any) => {
-      callback(err);
-      if (!err) {
-        this.connected = true;
-        this.client.on('error', () => this.end());
-        this.client.on('end', () => this.end());
-      }
+      if (err) { callback(err); return; }
+      this.connected = true;
+      callback(null);
     });
   }
 
@@ -103,13 +113,31 @@ export class PostgreSqlConnection extends IConnection {
     if (this.dead) return;
     this.dead = true;
     this.connected = false;
-    this.client.end();
+    this.client.end().catch(() => {});
+  }
+
+  /** Override base class to use PG-compatible escaping instead of MySQL-specific sqlstring.escape */
+  convertToDump(row: any): any {
+    const out: any = {};
+    for (const key in row) {
+      const element = row[key];
+      if (element == null) {
+        out[key] = 'NULL';
+      } else if (typeof element === 'string') {
+        out[key] = `'${element.replace(/\\/g, '\\\\').replace(/'/g, "''")}'`;
+      } else {
+        out[key] = String(element);
+      }
+    }
+    return out;
   }
 }
 
-// 保持日期/JSON 原样返回，避免 driver 转换
-types.setTypeParser(1114, (val) => val); // TIMESTAMP
-types.setTypeParser(1184, (val) => val); // TIMESTAMPTZ
-types.setTypeParser(1082, (val) => val); // DATE
-types.setTypeParser(114, (val) => val); // JSON
-types.setTypeParser(3802, (val) => val); // JSONB
+/**
+ * 将日期/JSON 原样返回，避免 driver 转换
+ */
+pg.types.setTypeParser(1114, (val) => val); // TIMESTAMP
+pg.types.setTypeParser(1184, (val) => val); // TIMESTAMPTZ
+pg.types.setTypeParser(1082, (val) => val); // DATE
+pg.types.setTypeParser(114, (val) => val); // JSON
+pg.types.setTypeParser(3802, (val) => val); // JSONB

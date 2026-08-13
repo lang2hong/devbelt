@@ -85,6 +85,6 @@ describe('importRows (batchWrites)', () => {
       rolledBack: true,
       errors: [{ row: 1, message: 'duplicate key' }],
     });
-    expect(query.statements).toEqual(['BEGIN; INSERT 1\nINSERT 2 COMMIT;', 'BEGIN; ROLLBACK;']);
+    expect(query.statements).toEqual(['BEGIN; INSERT 1\nINSERT 2 COMMIT;', 'ROLLBACK']);
   });
 });

@@ -78,5 +78,11 @@ export class DataDiffView extends BaseWebView {
   protected onDispose(): void {
     super.onDispose();
     if (DataDiffView.current === this) DataDiffView.current = undefined;
+    if (!this.manager.isExplicit(this.sourceConn.id)) {
+      this.manager.disposeConn(this.sourceConn.id);
+    }
+    if (!this.manager.isExplicit(this.targetConn.id)) {
+      this.manager.disposeConn(this.targetConn.id);
+    }
   }
 }

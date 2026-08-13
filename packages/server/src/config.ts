@@ -5,7 +5,16 @@ export const config = {
   /** 服务端口 */
   port: Number(process.env.PORT || 3000),
   /** JWT 签名密钥（生产必须通过环境变量注入） */
-  jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-me',
+  jwtSecret: (() => {
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('JWT_SECRET must be set in production');
+      }
+      return 'dev-secret-change-me';
+    }
+    return secret;
+  })(),
   /** Access token 过期时间（短期） */
   accessTokenExpiresIn: process.env.ACCESS_TOKEN_EXPIRES_IN || '15m',
   /** Refresh token 过期时间（长期，可撤销） */

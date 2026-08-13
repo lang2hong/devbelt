@@ -205,6 +205,13 @@ function escapeValue(v: unknown): string {
   if (v === null || v === undefined) return 'NULL';
   if (typeof v === 'number') return String(v);
   if (typeof v === 'boolean') return v ? '1' : '0';
+  if (typeof v === 'object') {
+    try {
+      return `'${JSON.stringify(v).replace(/'/g, "''")}'`;
+    } catch {
+      return 'NULL';
+    }
+  }
   const s = String(v);
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return `'${s.replace(/'/g, "''")}'`;
   return `'${s.replace(/'/g, "''")}'`;

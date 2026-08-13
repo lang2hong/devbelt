@@ -50,6 +50,9 @@ export class QueryService {
   static maxResultRows = 10_000;
 
   async query(sql: string, values?: any): Promise<QueryResult> {
+    if (!sql || typeof sql !== 'string' || sql.trim().length === 0) {
+      throw new QueryError('SQL statement cannot be empty');
+    }
     const start = Date.now();
     const id = this.nextQueryId++;
     return new Promise<QueryResult>((resolve, reject) => {
@@ -62,6 +65,7 @@ export class QueryService {
         if (settled) return;
         settled = true;
         finish();
+        this.connection.abortQuery();
         reject(new QueryError('Query cancelled', sql, Date.now() - start));
       };
       this.activeCancels.set(id, cancel);
@@ -70,6 +74,7 @@ export class QueryService {
             if (!settled) {
               settled = true;
               finish();
+              this.connection.abortQuery();
               reject(new QueryError(`Query timeout (${QueryService.queryTimeout}ms)`, sql, Date.now() - start));
             }
           }, QueryService.queryTimeout)
@@ -96,8 +101,9 @@ export class QueryService {
   /** Stops delivery of the current result and lets the caller close its session. */
   cancel(): boolean {
     if (this.activeCancels.size === 0) return false;
-    for (const cancelFn of this.activeCancels.values()) cancelFn();
+    const cancels = [...this.activeCancels.values()];
     this.activeCancels.clear();
+    for (const cancelFn of cancels) cancelFn();
     this.connection.abortQuery();
     return true;
   }
@@ -146,6 +152,6 @@ export class QueryService {
 
     const truncated = rows.length > QueryService.maxResultRows;
     if (truncated) rows = rows.slice(0, QueryService.maxResultRows);
-    return { sql, costTime, rows, fields: fields || [], affectedRows, total, truncated };
+    return { sql, costTime, rows, fields: fields || [], affectedRows, total, truncated, message: truncated ? `Results truncated to ${QueryService.maxResultRows} rows` : undefined };
   }
 }

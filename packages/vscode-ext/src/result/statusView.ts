@@ -104,5 +104,8 @@ export class StatusView extends BaseWebView {
   protected onDispose(): void {
     super.onDispose();
     if (StatusView.current === this) StatusView.current = undefined;
+    if (!this.manager.isExplicit(this.conn.id)) {
+      this.manager.disposeConn(this.conn.id);
+    }
   }
 }

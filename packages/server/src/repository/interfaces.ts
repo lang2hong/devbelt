@@ -45,8 +45,9 @@ export interface ISubscriptionRepo {
 }
 
 export interface IRefreshTokenRepo {
-  findByHash(hash: string): Promise<RefreshToken | undefined>;
   create(token: Omit<RefreshToken, 'id' | 'createTime'>): Promise<RefreshToken>;
+  findByHash(hash: string): Promise<RefreshToken | undefined>;
+  findById(id: number): Promise<RefreshToken | undefined>;
   revoke(id: number): Promise<void>;
   /** 撤销某用户全部会话（token 重用时强制下线所有设备） */
   revokeAllForUser(userId: number): Promise<void>;
@@ -76,6 +77,8 @@ export interface ISyncRepo {
   listSections(userId: number): Promise<SyncSection[]>;
   /** 写当前版本（不存在则插入）；返回新 version */
   putSection(userId: number, section: SectionType, encryptedData: string, version: number): Promise<number>;
+  /** 原子乐观锁写入：仅当当前版本匹配 baseVersion 时更新，返回新版本号或 null */
+  putSectionIfVersion(userId: number, section: SectionType, encryptedData: string, baseVersion: number): Promise<number | null>;
   /** 记录历史版本快照 */
   recordVersion(userId: number, section: SectionType, version: number, encryptedData: string, dataBytes: number): Promise<void>;
   listVersions(userId: number, section: SectionType, limit: number): Promise<SyncVersionSummary[]>;

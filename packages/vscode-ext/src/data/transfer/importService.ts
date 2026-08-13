@@ -94,7 +94,7 @@ async function importRowsBatched(
     if (error instanceof TransferCancelledError) throw error;
     let rollbackSucceeded = false;
     try {
-      await query.query(`BEGIN; ROLLBACK;`);
+      await query.query('ROLLBACK');
       rollbackSucceeded = true;
     } catch { /* Preserve the original failure. */ }
     return {

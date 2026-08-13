@@ -63,24 +63,28 @@ export class ConnectionForm extends BaseWebView {
       this.sendInit();
       return;
     }
-    switch (msg.type) {
-      case 'test': {
-        const conn = decodeConnection(msg.payload);
-        const okMsg = await this.testConnection(conn);
-        this.post({ type: 'testResult', ...okMsg });
-        break;
+    try {
+      switch (msg.type) {
+        case 'test': {
+          const conn = decodeConnection(msg.payload);
+          const okMsg = await this.testConnection(conn);
+          this.post({ type: 'testResult', ...okMsg });
+          break;
+        }
+        case 'save': {
+          const conn = decodeConnection(msg.payload);
+          const id = conn.id || `${Date.now()}`;
+          await this.store.save({ ...conn, id });
+          vscode.window.showInformationMessage(
+            l10n('form.saved', { name: conn.name || conn.host || '' }),
+          );
+          this.onSaved?.();
+          this.panel.dispose();
+          break;
+        }
       }
-      case 'save': {
-        const conn = decodeConnection(msg.payload);
-        const id = conn.id || `${Date.now()}`;
-        await this.store.save({ ...conn, id });
-        vscode.window.showInformationMessage(
-          l10n('form.saved', { name: conn.name || conn.host || '' }),
-        );
-        this.onSaved?.();
-        this.panel.dispose();
-        break;
-      }
+    } catch (err) {
+      this.post({ type: 'error', message: (err as Error).message });
     }
   }
 
@@ -101,11 +105,13 @@ export class ConnectionForm extends BaseWebView {
     }
   }
 
+  private static testIdCounter = 0;
+
   /** 测试连接：用 db-core 工厂建连验证；SSH 配置时建临时隧道 */
   private async testConnection(conn: SavedConnection): Promise<{ ok: boolean; message: string }> {
     const dbType = conn.dbType as DatabaseType;
     const start = Date.now();
-    const testId = `test-${Date.now()}`;
+    const testId = `test-${Date.now()}-${++ConnectionForm.testIdCounter}`;
     let connection: IConnection | undefined;
     try {
       let host = conn.host;
@@ -140,14 +146,22 @@ interface ConnectionStorage {
   getGroups(): ConnectionGroup[];
 }
 
+function defaultPort(dbType: DatabaseType): number {
+  switch (dbType) {
+    case DatabaseType.PG: return 5432;
+    case DatabaseType.SQLITE: return 0;
+    default: return 3306;
+  }
+}
+
 /** 将 webview 表单负载解码为 SavedConnection */
 function decodeConnection(payload: any): SavedConnection {
   return {
-    id: payload.id || '',
+    id: payload.id ?? '',
     name: payload.name,
     dbType: payload.dbType as DatabaseType,
     host: payload.host,
-    port: Number(payload.port),
+    port: Number.isFinite(Number(payload.port)) ? Number(payload.port) : defaultPort(payload.dbType as DatabaseType),
     user: payload.user,
     password: payload.password,
     database: payload.database,

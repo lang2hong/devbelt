@@ -15,7 +15,9 @@ export interface FilterCondition {
 }
 
 function qualifiedTable(dbType: DatabaseType, table: string, database?: string): string {
+  validateIdent(table);
   const tbl = wrapIdent(dbType, table);
+  if (database) validateIdent(database);
   return database ? `${wrapIdent(dbType, database)}.${tbl}` : tbl;
 }
 
@@ -32,6 +34,11 @@ function commaList(val: string): string {
     .join(', ');
 }
 
+/** 判断值看起来像数字，数字比较不包裹引号。 */
+function isNumericVal(v: string): boolean {
+  return /^-?\d+(\.\d+)?$/.test(v);
+}
+
 /** 构建单个过滤条件的 SQL 片段。 */
 export function buildCondition(dbType: DatabaseType, condition: FilterCondition): string {
   try {
@@ -42,21 +49,22 @@ export function buildCondition(dbType: DatabaseType, condition: FilterCondition)
   const w = wrapIdent(dbType, condition.column);
   const v = condition.value ?? '';
   const v2 = condition.value2 ?? '';
+  const quoteVal = (raw: string) => isNumericVal(raw) ? raw : `'${escapeSqlString(raw)}'`;
   switch (condition.op) {
-    case FILTER_OP.eq: return `${w} ${EQ} '${escapeSqlString(v)}'`;
-    case FILTER_OP.ne: return `${w} ${NE} '${escapeSqlString(v)}'`;
+    case FILTER_OP.eq: return `${w} ${EQ} ${quoteVal(v)}`;
+    case FILTER_OP.ne: return `${w} ${NE} ${quoteVal(v)}`;
     case FILTER_OP.contains: return `${w} ${LIKE} '%${escapeLike(v)}%'`;
     case FILTER_OP.notContains: return `${w} ${NOT_LIKE} '%${escapeLike(v)}%'`;
     case FILTER_OP.startsWith: return `${w} ${LIKE} '${escapeLike(v)}%'`;
     case FILTER_OP.notStartsWith: return `${w} ${NOT_LIKE} '${escapeLike(v)}%'`;
     case FILTER_OP.endsWith: return `${w} ${LIKE} '%${escapeLike(v)}'`;
     case FILTER_OP.notEndsWith: return `${w} ${NOT_LIKE} '%${escapeLike(v)}'`;
-    case FILTER_OP.gt: return `${w} ${GT} '${escapeSqlString(v)}'`;
-    case FILTER_OP.gte: return `${w} ${GTE} '${escapeSqlString(v)}'`;
-    case FILTER_OP.lt: return `${w} ${LT} '${escapeSqlString(v)}'`;
-    case FILTER_OP.lte: return `${w} ${LTE} '${escapeSqlString(v)}'`;
-    case FILTER_OP.between: return `${w} ${BETWEEN} '${escapeSqlString(v)}' AND '${escapeSqlString(v2)}'`;
-    case FILTER_OP.notBetween: return `${w} ${NOT_BETWEEN} '${escapeSqlString(v)}' AND '${escapeSqlString(v2)}'`;
+    case FILTER_OP.gt: return `${w} ${GT} ${quoteVal(v)}`;
+    case FILTER_OP.gte: return `${w} ${GTE} ${quoteVal(v)}`;
+    case FILTER_OP.lt: return `${w} ${LT} ${quoteVal(v)}`;
+    case FILTER_OP.lte: return `${w} ${LTE} ${quoteVal(v)}`;
+    case FILTER_OP.between: return `${w} ${BETWEEN} ${quoteVal(v)} AND ${quoteVal(v2)}`;
+    case FILTER_OP.notBetween: return `${w} ${NOT_BETWEEN} ${quoteVal(v)} AND ${quoteVal(v2)}`;
     case FILTER_OP.isNull: return `${w} ${IS_NULL}`;
     case FILTER_OP.notNull: return `${w} ${IS_NOT_NULL}`;
     case FILTER_OP.isEmpty: return `${w} ${EQ} ''`;
@@ -92,17 +100,20 @@ export function buildTableSelect(
   offset: number,
   limit: number,
 ): string {
+  const safeOffset = Math.max(0, Math.min(offset, 1_000_000));
+  const safeLimit = Math.max(1, Math.min(limit, 100_000));
   let sql = `SELECT * FROM ${qualifiedTable(dbType, table, database)}`;
   const where = buildWhereAll(dbType, conditions);
   if (where) sql += ` WHERE ${where}`;
   if (sortCol && sortDir) {
+    validateIdent(sortCol);
     const dir = sortDir.toUpperCase();
     if (dir !== 'ASC' && dir !== 'DESC') {
       throw new Error(`Invalid sort direction: ${sortDir}`);
     }
     sql += ` ORDER BY ${wrapIdent(dbType, sortCol)} ${dir}`;
   }
-  sql += ` LIMIT ${limit} OFFSET ${offset}`;
+  sql += ` LIMIT ${safeLimit} OFFSET ${safeOffset}`;
   return sql;
 }
 

@@ -1,12 +1,12 @@
 import type { FastifyReply } from 'fastify';
 import { DomainError } from '../domain/errors.js';
 
-/** 统一错误响应：DomainError 按 code 映射 HTTP 状态，其他默认 400 */
+/** 统一错误响应：DomainError 按 code 映射 HTTP 状态，其他默认 500 */
 export function sendError(reply: FastifyReply, e: unknown): void {
   if (e instanceof DomainError) {
     reply.code(errorStatus(e.code)).send({ message: (e as Error).message, code: (e as DomainError).code });
   } else {
-    reply.code(400).send({ message: (e as Error).message });
+    reply.code(500).send({ message: 'Internal server error' });
   }
 }
 

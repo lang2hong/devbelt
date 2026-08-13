@@ -47,6 +47,7 @@ export class ConnectionManager {
   private readonly connecting = new Map<string, Promise<ConnectionSession>>();
   private readonly config: PoolConfig;
   private healthCheckTimer?: ReturnType<typeof setInterval>;
+  private disposing = false;
 
   constructor(config?: Partial<PoolConfig>) {
     this.config = { ...DEFAULT_POOL_CONFIG, ...config };
@@ -81,7 +82,9 @@ export class ConnectionManager {
     const promise = this.doConnect(conn);
     this.connecting.set(conn.id, promise);
     try {
-      return await promise;
+      const session = await promise;
+      if (!this.healthCheckTimer) this.startHealthCheck();
+      return session;
     } finally {
       this.connecting.delete(conn.id);
     }
@@ -147,28 +150,38 @@ export class ConnectionManager {
     };
     this.sessions.set(conn.id, session);
     this.sessionEntries.set(conn.id, { session, lastUsed: Date.now(), connId: conn.id });
+    if (this.disposing) {
+      session.close();
+      throw new Error('ConnectionManager is disposing');
+    }
     return session;
   }
 
   /** 关闭指定连接会话 */
   disposeConn(id: string): void {
     this.explicit.delete(id);
+    this.connecting.delete(id);
     const session = this.sessions.get(id);
     if (session) {
       session.close();
+    }
+    if (this.sessions.size === 0) {
+      this.stopHealthCheck();
     }
   }
 
   /** 关闭全部连接（扩展退出时调用） */
   disposeAll(): void {
-    if (this.healthCheckTimer) { clearInterval(this.healthCheckTimer); this.healthCheckTimer = undefined; }
-    for (const session of this.sessions.values()) {
-      session.close();
-    }
+    this.disposing = true;
+    this.stopHealthCheck();
+    this.connecting.clear();
+    this.explicit.clear();
+    const all = [...this.sessions.values()];
     this.sessions.clear();
     this.sessionEntries.clear();
-    this.explicit.clear();
-    SshTunnel.closeAll();
+    for (const session of all) {
+      session.close();
+    }
   }
 
   /** 获取当前活跃连接数 */
@@ -230,16 +243,26 @@ export class ConnectionManager {
     return oldest;
   }
 
+  private stopHealthCheck(): void {
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer);
+      this.healthCheckTimer = undefined;
+    }
+  }
+
   private startHealthCheck(): void {
     this.healthCheckTimer = setInterval(() => {
+      if (this.disposing) return;
       const now = Date.now();
+      const toDispose: string[] = [];
       for (const [id, entry] of this.sessionEntries) {
         if (this.explicit.has(id)) continue;
-        if (now - entry.lastUsed > this.config.idleTimeoutMs) {
-          this.disposeConn(id);
-        } else if (!entry.session.isAlive()) {
-          this.disposeConn(id);
+        if (now - entry.lastUsed > this.config.idleTimeoutMs || !entry.session.isAlive()) {
+          toDispose.push(id);
         }
+      }
+      for (const id of toDispose) {
+        this.disposeConn(id);
       }
     }, this.config.healthCheckIntervalMs);
   }

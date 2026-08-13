@@ -2,7 +2,7 @@ import type { IUserRepo, IPlanRepo, ISubscriptionRepo, IRefreshTokenRepo } from 
 import type { TokenService } from './tokenService.js';
 import type { Subscription, User, SessionInfo } from '../domain/entities.js';
 import { hashPassword, verifyPassword } from './password.js';
-import { InvalidCredentialsError, UserDisabledError, DeviceLimitError, TokenReuseError } from '../domain/errors.js';
+import { InvalidCredentialsError, DeviceLimitError, TokenReuseError, ValidationError } from '../domain/errors.js';
 
 /** 设备信息（登录/刷新时记录到 refresh_tokens） */
 export interface DeviceInfo {
@@ -46,10 +46,11 @@ export class AuthService {
   /** 注册：建 user(free) + 试用订阅(14d) + 签双 token */
   async register(email: string, password: string, device?: DeviceInfo): Promise<AuthResponse> {
     if (!email || !password) throw new InvalidCredentialsError();
-    if (password.length < 8) throw new Error('password must be at least 8 chars');
+    if (typeof email !== 'string' || !email.includes('@')) throw new ValidationError('invalid email format');
+    if (password.length < 8) throw new ValidationError('password must be at least 8 chars');
 
     const exist = await this.userRepo.findByEmail(email);
-    if (exist) throw new Error('email already registered');
+    if (exist) throw new InvalidCredentialsError();
 
     const hash = hashPassword(password);
     const user = await this.userRepo.create(email, hash, 'user', 'free');
@@ -73,7 +74,7 @@ export class AuthService {
     if (!email || !password) throw new InvalidCredentialsError();
     const user = await this.userRepo.findByEmail(email);
     if (!user || !verifyPassword(password, user.passwordHash, this.jwtSecret)) throw new InvalidCredentialsError();
-    if (user.status !== 'active') throw new UserDisabledError(user.id);
+    if (user.status !== 'active') throw new InvalidCredentialsError();
 
     const plan = await this.planRepo.findByCode(user.planCode);
     const now = new Date();
@@ -107,8 +108,8 @@ export class AuthService {
     }
     if (rt.expiresTime <= now) throw new InvalidCredentialsError();
 
-    await this.refreshTokenRepo.revoke(rt.id);
     await this.refreshTokenRepo.updateLastUsed(rt.id, now);
+    await this.refreshTokenRepo.revoke(rt.id);
     const { token, hash: rtHash, expiresAt } = this.tokenService.generateRefreshToken();
     await this.refreshTokenRepo.create({ userId: rt.userId, tokenHash: rtHash, ...device, expiresTime: expiresAt });
 
@@ -131,7 +132,9 @@ export class AuthService {
   }
 
   /** 踢出指定设备会话 */
-  async revokeSession(_userId: number, sessionId: number): Promise<void> {
+  async revokeSession(userId: number, sessionId: number): Promise<void> {
+    const session = await this.refreshTokenRepo.findById(sessionId);
+    if (!session || session.userId !== userId) throw new InvalidCredentialsError();
     await this.refreshTokenRepo.revoke(sessionId);
   }
 
@@ -140,7 +143,7 @@ export class AuthService {
     const user = await this.userRepo.findById(userId);
     if (!user) throw new InvalidCredentialsError();
     if (!verifyPassword(oldPassword, user.passwordHash, this.jwtSecret)) throw new InvalidCredentialsError();
-    if (!newPassword || newPassword.length < 8) throw new Error('password must be at least 8 chars');
+    if (!newPassword || newPassword.length < 8) throw new ValidationError('password must be at least 8 chars');
     const hash = hashPassword(newPassword);
     await this.userRepo.updatePassword(userId, hash);
     await this.refreshTokenRepo.revokeAllForUser(userId);
