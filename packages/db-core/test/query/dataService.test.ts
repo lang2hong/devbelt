@@ -3,6 +3,7 @@ import { DataService } from '../../src/query/dataService';
 import { QueryService } from '../../src/query/queryService';
 import { IConnection } from '../../src/connection/connection';
 import { MysqlDialect } from '../../src/dialect/mysqlDialect';
+import { PostgreSqlDialect } from '../../src/dialect/postgreSqlDialect';
 import type { QueryCallback } from '../../src/types/query';
 
 /** 内存假连接捕获生成的 SQL */
@@ -33,13 +34,32 @@ class CaptureConnection extends IConnection {
 }
 
 describe('DataService（数据编辑）', () => {
+  /**
+   * 值转义改由方言 escapeValue 负责（原先固定走 sqlstring，即 MySQL 规则）。
+   * MySQL 下单引号由 `\'` 改为等价的 `''`，两种写法都合法；
+   * 换取的是 PG/SQLite 不再被套用 MySQL 的反斜杠转义规则。
+   */
   it('生成合法的 UPDATE 语句并转义标识符', async () => {
     const conn = new CaptureConnection();
     const svc = new DataService(new QueryService(conn, new MysqlDialect()));
     await svc.updateCell('users', ['id'], [5], 'name', "O'Brien");
     expect(conn.sqls[0]).toBe(
-      "UPDATE `users` SET `name` = 'O\\'Brien' WHERE `id` = 5",
+      "UPDATE `users` SET `name` = 'O''Brien' WHERE `id` = 5",
     );
+  });
+
+  it('PG 方言不转义反斜杠（避免提前闭合字符串）', async () => {
+    const conn = new CaptureConnection();
+    const svc = new DataService(new QueryService(conn, new PostgreSqlDialect()));
+    await svc.updateCell('users', ['id'], [5], 'path', 'C:\\tmp');
+    expect(conn.sqls[0]).toBe(`UPDATE "users" SET "path" = 'C:\\tmp' WHERE "id" = 5`);
+  });
+
+  it('PG 方言下反斜杠注入串不逃出字面量', async () => {
+    const conn = new CaptureConnection();
+    const svc = new DataService(new QueryService(conn, new PostgreSqlDialect()));
+    await svc.updateCell('users', ['id'], [5], 'name', "x\\' OR 1=1 -- ");
+    expect(conn.sqls[0]).toBe(`UPDATE "users" SET "name" = 'x\\'' OR 1=1 -- ' WHERE "id" = 5`);
   });
 
   it('NULL 值生成 NULL 字面量', async () => {
@@ -56,7 +76,7 @@ describe('DataService（数据编辑）', () => {
     const svc = new DataService(new QueryService(conn, new MysqlDialect()));
     await svc.insertRow('users', ['id', 'name', 'email'], [null, "O'Brien", 'a@b.com'], 'test');
     expect(conn.sqls[0]).toBe(
-      "INSERT INTO `test`.`users` (`id`, `name`, `email`) VALUES (NULL, 'O\\'Brien', 'a@b.com')",
+      "INSERT INTO `test`.`users` (`id`, `name`, `email`) VALUES (NULL, 'O''Brien', 'a@b.com')",
     );
   });
 

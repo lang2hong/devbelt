@@ -1,5 +1,4 @@
-import type { DatabaseType } from '@db-client/core';
-import { validateIdent } from '@db-client/core';
+import { DatabaseType, validateIdent } from '@db-client/core';
 import {
   BETWEEN, EQ, GTE, GT, IN, IS_NULL, IS_NOT_NULL, LIKE, LTE, LT, NE,
   NOT_BETWEEN, NOT_IN, NOT_LIKE,
@@ -21,15 +20,30 @@ function qualifiedTable(dbType: DatabaseType, table: string, database?: string):
   return database ? `${wrapIdent(dbType, database)}.${tbl}` : tbl;
 }
 
-function escapeLike(val: string): string {
-  return escapeSqlString(val).replace(/%/g, '\\%').replace(/_/g, '\\_');
+/**
+ * 转义 LIKE 模式：先按方言转义字面量，再把通配符 `%`/`_` 前缀反斜杠。
+ * 反斜杠只有在配套 ESCAPE 子句下才生效，见 likeEscapeClause。
+ */
+function escapeLike(val: string, dbType: DatabaseType): string {
+  return escapeSqlString(val, dbType).replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
+/**
+ * LIKE 的 ESCAPE 子句。
+ *
+ * SQLite 的 LIKE 没有默认转义字符，不显式声明则 `\%` 中的 `%` 仍按通配符解释；
+ * MySQL/PG 虽有默认 `\`，显式声明可去掉对默认值的隐式依赖。
+ * MySQL 字符串字面量内反斜杠需翻倍。
+ */
+function likeEscapeClause(dbType: DatabaseType): string {
+  return dbType === DatabaseType.MYSQL ? " ESCAPE '\\\\'" : " ESCAPE '\\'";
 }
 
 /** 逗号分隔值 → 引号包裹的元素列表（过滤空项）。 */
-function commaList(val: string): string {
+function commaList(val: string, dbType: DatabaseType): string {
   return val
     .split(',')
-    .map((s) => `'${escapeSqlString(s.trim())}'`)
+    .map((s) => `'${escapeSqlString(s.trim(), dbType)}'`)
     .filter((s) => s !== "''")
     .join(', ');
 }
@@ -49,16 +63,17 @@ export function buildCondition(dbType: DatabaseType, condition: FilterCondition)
   const w = wrapIdent(dbType, condition.column);
   const v = condition.value ?? '';
   const v2 = condition.value2 ?? '';
-  const quoteVal = (raw: string) => isNumericVal(raw) ? raw : `'${escapeSqlString(raw)}'`;
+  const quoteVal = (raw: string) => isNumericVal(raw) ? raw : `'${escapeSqlString(raw, dbType)}'`;
+  const esc = likeEscapeClause(dbType);
   switch (condition.op) {
     case FILTER_OP.eq: return `${w} ${EQ} ${quoteVal(v)}`;
     case FILTER_OP.ne: return `${w} ${NE} ${quoteVal(v)}`;
-    case FILTER_OP.contains: return `${w} ${LIKE} '%${escapeLike(v)}%'`;
-    case FILTER_OP.notContains: return `${w} ${NOT_LIKE} '%${escapeLike(v)}%'`;
-    case FILTER_OP.startsWith: return `${w} ${LIKE} '${escapeLike(v)}%'`;
-    case FILTER_OP.notStartsWith: return `${w} ${NOT_LIKE} '${escapeLike(v)}%'`;
-    case FILTER_OP.endsWith: return `${w} ${LIKE} '%${escapeLike(v)}'`;
-    case FILTER_OP.notEndsWith: return `${w} ${NOT_LIKE} '%${escapeLike(v)}'`;
+    case FILTER_OP.contains: return `${w} ${LIKE} '%${escapeLike(v, dbType)}%'${esc}`;
+    case FILTER_OP.notContains: return `${w} ${NOT_LIKE} '%${escapeLike(v, dbType)}%'${esc}`;
+    case FILTER_OP.startsWith: return `${w} ${LIKE} '${escapeLike(v, dbType)}%'${esc}`;
+    case FILTER_OP.notStartsWith: return `${w} ${NOT_LIKE} '${escapeLike(v, dbType)}%'${esc}`;
+    case FILTER_OP.endsWith: return `${w} ${LIKE} '%${escapeLike(v, dbType)}'${esc}`;
+    case FILTER_OP.notEndsWith: return `${w} ${NOT_LIKE} '%${escapeLike(v, dbType)}'${esc}`;
     case FILTER_OP.gt: return `${w} ${GT} ${quoteVal(v)}`;
     case FILTER_OP.gte: return `${w} ${GTE} ${quoteVal(v)}`;
     case FILTER_OP.lt: return `${w} ${LT} ${quoteVal(v)}`;
@@ -70,11 +85,11 @@ export function buildCondition(dbType: DatabaseType, condition: FilterCondition)
     case FILTER_OP.isEmpty: return `${w} ${EQ} ''`;
     case FILTER_OP.notEmpty: return `${w} ${NE} ''`;
     case FILTER_OP.in: {
-      const items = commaList(v);
+      const items = commaList(v, dbType);
       return items ? `${w} ${IN} (${items})` : '';
     }
     case FILTER_OP.notIn: {
-      const items = commaList(v);
+      const items = commaList(v, dbType);
       return items ? `${w} ${NOT_IN} (${items})` : '';
     }
     default: return '';

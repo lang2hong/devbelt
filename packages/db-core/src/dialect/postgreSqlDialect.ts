@@ -224,14 +224,14 @@ export class PostgreSqlDialect implements SqlDialect {
     const colList = columns.map((c) => this.wrap(validateIdent(c))).join(', ');
     let out = '';
     for (const row of rows) {
-      const values = columns.map((c) => this.formatValue(row[c])).join(', ');
+      const values = columns.map((c) => this.escapeValue(row[c])).join(', ');
       out += `INSERT INTO ${qualified} (${colList}) VALUES (${values});\n`;
     }
     return out;
   }
 
   /** PostgreSQL 标准字符串：仅单引号翻倍，不转义反斜杠。 */
-  private formatValue(value: any): string {
+  escapeValue(value: any): string {
     if (value === null || value === undefined) return 'NULL';
     if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NULL';
     if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';

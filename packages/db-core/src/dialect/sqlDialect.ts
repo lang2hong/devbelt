@@ -25,6 +25,19 @@ export interface SqlDialect {
   wrap(identifier: string): string;
 
   /**
+   * 将值转为本方言合法的 SQL 字面量（含外层引号）。
+   *
+   * 各方言字符串转义规则不同，必须由方言决定，不能统一用某一家的规则：
+   *  - MySQL 默认开启反斜杠转义，`\` 与 `'` 均需处理
+   *  - PostgreSQL 默认 `standard_conforming_strings=on`，`\` 无转义语义，
+   *    若按 MySQL 规则写出 `\'` 会提前闭合字符串，形成注入点
+   *  - SQLite 同 PostgreSQL，仅单引号翻倍
+   *
+   * @param value 任意值（null/undefined → NULL）
+   */
+  escapeValue(value: any): string;
+
+  /**
    * 生成分页 SQL。
    * @param sql 原始查询 SQL
    * @param offset 偏移量

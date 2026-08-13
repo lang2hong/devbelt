@@ -17,9 +17,20 @@ export function wrapIdentForConn(conn: SavedConnection, name: string): string {
   return wrapIdent(conn.dbType, name);
 }
 
-/** 转义 SQL 字符串字面量内容（不含外层引号，防注入）。 */
-export function escapeSqlString(value: string): string {
-  return String(value).replace(/\\/g, '\\\\').replace(/'/g, "''");
+/**
+ * 转义 SQL 字符串字面量内容（不含外层引号，防注入）。
+ *
+ * 转义规则按方言分流：MySQL 默认开启反斜杠转义，`\` 需翻倍；
+ * PostgreSQL（standard_conforming_strings=on）与 SQLite 中反斜杠无转义语义，
+ * 若照 MySQL 规则翻倍会把一个反斜杠写成两个字面反斜杠，导致匹配错误行。
+ *
+ * @param dbType 目标方言；省略时按 MySQL 规则（向后兼容）
+ */
+export function escapeSqlString(value: string, dbType?: DatabaseType): string {
+  const escaped = String(value).replace(/'/g, "''");
+  return dbType === undefined || dbType === DatabaseType.MYSQL
+    ? escaped.replace(/\\/g, '\\\\')
+    : escaped;
 }
 
 /**

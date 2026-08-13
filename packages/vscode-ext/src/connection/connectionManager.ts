@@ -59,6 +59,16 @@ export class ConnectionManager {
     this.explicit.add(id);
   }
 
+  /**
+   * 取已缓存会话，不存在则返回 undefined（绝不建立新连接）。
+   *
+   * 用于 dispose 路径：此时调用 connect() 会在会话被释放后又建一条无人持有的
+   * 新连接（连同 SSH 隧道）而泄漏。
+   */
+  peek(id: string): ConnectionSession | undefined {
+    return this.sessions.get(id);
+  }
+
   /** 该连接是否为用户显式打开。 */
   isExplicit(id: string): boolean {
     return this.explicit.has(id);

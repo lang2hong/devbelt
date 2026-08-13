@@ -1,14 +1,19 @@
-import * as sqlstring from 'sqlstring';
 import { validateIdent } from '../utils/validate';
 import { QueryService } from './queryService';
 import type { QueryResult } from '../types/query';
 
 /**
  * 数据编辑服务：基于主键构造 UPDATE 语句更新单元格。
- * 标识符经 validateIdent 验证 + 方言包裹，值经 sqlstring.escape 转义。
+ * 标识符经 validateIdent 验证 + 方言包裹，值经方言 escapeValue 转义
+ * （各库字符串转义规则不同，不可统一用 MySQL 规则）。
  */
 export class DataService {
   constructor(private readonly queryService: QueryService) {}
+
+  /** 方言值转义（含外层引号）。 */
+  private esc(value: any): string {
+    return this.queryService.dialect.escapeValue(value);
+  }
 
   async updateCell(
     table: string,
@@ -25,11 +30,11 @@ export class DataService {
     validateIdent(column);
     const w = this.queryService.dialect.wrap.bind(this.queryService.dialect);
     const qualified = database ? `${w(validateIdent(database))}.${w(table)}` : w(table);
-    const setValue = value === null ? 'NULL' : sqlstring.escape(value);
+    const setValue = value === null ? 'NULL' : this.esc(value);
     const where = pkColumns
       .map((pk, i) => {
         const v = pkValues[i];
-        return v === null || v === undefined ? `${w(pk)} IS NULL` : `${w(pk)} = ${sqlstring.escape(v)}`;
+        return v === null || v === undefined ? `${w(pk)} IS NULL` : `${w(pk)} = ${this.esc(v)}`;
       })
       .join(' AND ');
     const sql = `UPDATE ${qualified} SET ${w(column)} = ${setValue} WHERE ${where}`;
@@ -38,7 +43,7 @@ export class DataService {
 
   /**
    * 按主键批量删除（每行 AND 条件，多行 OR 连接，原子单语句）。
-   * 复合主键退化为单列时等价于 IN。值经 sqlstring.escape 转义。
+   * 复合主键退化为单列时等价于 IN。值经方言 escapeValue 转义。
    */
   async deleteRows(
     table: string,
@@ -57,7 +62,7 @@ export class DataService {
           `(${pkColumns
             .map((pk, i) => {
               const v = row[i];
-              return v === null || v === undefined ? `${w(pk)} IS NULL` : `${w(pk)} = ${sqlstring.escape(v)}`;
+              return v === null || v === undefined ? `${w(pk)} IS NULL` : `${w(pk)} = ${this.esc(v)}`;
             })
             .join(' AND ')})`,
       )
@@ -67,7 +72,7 @@ export class DataService {
   }
 
   /**
-   * 插入一行。列名经 validateIdent 校验，值经 sqlstring.escape 转义。
+   * 插入一行。列名经 validateIdent 校验，值经方言 escapeValue 转义。
    * @param columns 列名数组（与 values 对齐）
    * @param values 各列值（null/undefined 写成 NULL）
    */
@@ -84,7 +89,7 @@ export class DataService {
     const qualified = database ? `${w(validateIdent(database))}.${w(table)}` : w(table);
     const cols = columns.map((c) => w(validateIdent(c))).join(', ');
     const vals = values.map((v) =>
-      v === null || v === undefined ? 'NULL' : sqlstring.escape(v),
+      v === null || v === undefined ? 'NULL' : this.esc(v),
     ).join(', ');
     const sql = `INSERT INTO ${qualified} (${cols}) VALUES (${vals})`;
     return this.queryService.query(sql);

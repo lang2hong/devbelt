@@ -1,4 +1,3 @@
-import * as sqlstring from 'sqlstring';
 import { validateIdent } from '../utils/validate';
 import { QueryService } from './queryService';
 import { supportsOperation, unsupportedOperationMessage } from '../dialect/capabilities';
@@ -198,29 +197,38 @@ export class TableService {
 
   // ── 用户管理 ──
 
-  /** 创建用户 */
+  /** 方言值转义（含外层引号）；各库字符串规则不同，不可统一用 MySQL 规则。 */
+  private esc(value: any): string {
+    return this.queryService.dialect.escapeValue(value);
+  }
+
+  /**
+   * 创建用户。
+   * PG 的角色名是标识符（不能用字符串字面量），密码才是字符串字面量；
+   * MySQL 的用户名/主机是字符串字面量。
+   */
   async createUser(name: string, password: string, host = '%'): Promise<QueryResult> {
     this.require('manageUsers');
     if (this.queryService.dialect.dbType === 'PG') {
-      return this.ddl(`CREATE ROLE ${sqlstring.escape(name)} WITH LOGIN PASSWORD ${sqlstring.escape(password)}`);
+      return this.ddl(`CREATE ROLE ${this.wrap(validateIdent(name))} WITH LOGIN PASSWORD ${this.esc(password)}`);
     }
-    return this.ddl(`CREATE USER ${sqlstring.escape(name)}@${sqlstring.escape(host)} IDENTIFIED BY ${sqlstring.escape(password)}`);
+    return this.ddl(`CREATE USER ${this.esc(name)}@${this.esc(host)} IDENTIFIED BY ${this.esc(password)}`);
   }
 
   async dropUser(name: string, host = '%'): Promise<QueryResult> {
     this.require('manageUsers');
     if (this.queryService.dialect.dbType === 'PG') {
-      return this.ddl(`DROP ROLE IF EXISTS ${sqlstring.escape(name)}`);
+      return this.ddl(`DROP ROLE IF EXISTS ${this.wrap(validateIdent(name))}`);
     }
-    return this.ddl(`DROP USER IF EXISTS ${sqlstring.escape(name)}@${sqlstring.escape(host)}`);
+    return this.ddl(`DROP USER IF EXISTS ${this.esc(name)}@${this.esc(host)}`);
   }
 
   async alterUserPassword(name: string, password: string, host = '%'): Promise<QueryResult> {
     this.require('manageUsers');
     if (this.queryService.dialect.dbType === 'PG') {
-      return this.ddl(`ALTER ROLE ${sqlstring.escape(name)} WITH PASSWORD ${sqlstring.escape(password)}`);
+      return this.ddl(`ALTER ROLE ${this.wrap(validateIdent(name))} WITH PASSWORD ${this.esc(password)}`);
     }
-    return this.ddl(`ALTER USER ${sqlstring.escape(name)}@${sqlstring.escape(host)} IDENTIFIED BY ${sqlstring.escape(password)}`);
+    return this.ddl(`ALTER USER ${this.esc(name)}@${this.esc(host)} IDENTIFIED BY ${this.esc(password)}`);
   }
 
   async grantPrivilege(name: string, privilege: string, database?: string, host = '%'): Promise<QueryResult> {
@@ -231,10 +239,10 @@ export class TableService {
     }
     if (this.queryService.dialect.dbType === 'PG') {
       if (!database) throw new Error('PostgreSQL requires a schema name for grant.');
-      return this.ddl(`GRANT ${privilege} ON ALL TABLES IN SCHEMA ${this.wrap(validateIdent(database))} TO ${sqlstring.escape(name)}`);
+      return this.ddl(`GRANT ${privilege} ON ALL TABLES IN SCHEMA ${this.wrap(validateIdent(database))} TO ${this.wrap(validateIdent(name))}`);
     }
     const target = database ? `${this.wrap(validateIdent(database))}.*` : '*.*';
-    return this.ddl(`GRANT ${privilege} ON ${target} TO ${sqlstring.escape(name)}@${sqlstring.escape(host)}`);
+    return this.ddl(`GRANT ${privilege} ON ${target} TO ${this.esc(name)}@${this.esc(host)}`);
   }
 
   async revokePrivilege(name: string, privilege: string, database?: string, host = '%'): Promise<QueryResult> {
@@ -245,10 +253,10 @@ export class TableService {
     }
     if (this.queryService.dialect.dbType === 'PG') {
       if (!database) throw new Error('PostgreSQL requires a schema name for revoke.');
-      return this.ddl(`REVOKE ${privilege} ON ALL TABLES IN SCHEMA ${this.wrap(validateIdent(database))} FROM ${sqlstring.escape(name)}`);
+      return this.ddl(`REVOKE ${privilege} ON ALL TABLES IN SCHEMA ${this.wrap(validateIdent(database))} FROM ${this.wrap(validateIdent(name))}`);
     }
     const target = database ? `${this.wrap(validateIdent(database))}.*` : '*.*';
-    return this.ddl(`REVOKE ${privilege} ON ${target} FROM ${sqlstring.escape(name)}@${sqlstring.escape(host)}`);
+    return this.ddl(`REVOKE ${privilege} ON ${target} FROM ${this.esc(name)}@${this.esc(host)}`);
   }
 
   /**
@@ -284,7 +292,7 @@ export class TableService {
           const values = fields.map((f: string) => {
             const v = row[f];
             if (v === null || v === undefined) return 'NULL';
-            return sqlstring.escape(v);
+            return this.esc(v);
           }).join(', ');
           parts.push(`(${values}),`);
         }

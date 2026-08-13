@@ -73,14 +73,18 @@ export class QueryRunner {
     this.offset = 0;
   }
 
-  /** 视图销毁时调用，取消在途查询并阻止后续执行。 */
+  /**
+   * 视图销毁时调用，取消在途查询并阻止后续执行。
+   *
+   * ROLLBACK 只对**已存在**的会话发送：此处不能用 `connect()`，否则视图关闭时
+   * 会话已被释放，connect 又会新建一条无人持有的连接（连同 SSH 隧道）而泄漏。
+   */
   dispose(): void {
     this.disposed = true;
     this.runningQuery?.cancel();
     if (this.table) {
-      this.manager.connect(this.conn).then((s) => {
-        s.query.query('ROLLBACK').catch(() => {});
-      }).catch(() => {});
+      const session = this.manager.peek(this.conn.id);
+      session?.query.query('ROLLBACK').catch(() => {});
     }
   }
 
