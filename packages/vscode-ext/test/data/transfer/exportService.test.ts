@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { exportRows, exportTable } from '../../../src/data/transfer/exportService';
+import {
+  exportFileName,
+  exportFilters,
+  exportRows,
+  exportTable,
+  isBinaryFormat,
+  toFileBytes,
+} from '../../../src/data/transfer/exportService';
+
+const mysqlDialect = {
+  dbType: 'MYSQL' as const,
+  wrap: (name: string) => `\`${name}\``,
+  getPagedSql: (sql: string, offset: number, limit: number) => `${sql} LIMIT ${limit} OFFSET ${offset}`,
+  buildInsertSql: (rows: Record<string, unknown>[], cols: string[], table: string) =>
+    rows.map(() => `INSERT INTO \`${table}\` (${cols.join(',')}) VALUES (...);`).join('\n'),
+};
 
 describe('exportRows', () => {
   const rows = [{ id: 1, name: 'Ada' }];
@@ -12,6 +27,93 @@ describe('exportRows', () => {
   it('requires table context for dialect-specific SQL', () => {
     expect(() => exportRows({ format: 'sql', columns: ['id'], rows })).toThrow('target table');
   });
+
+  /**
+   * xlsx 曾返回 base64 字符串，调用方一律 `Buffer.from(content, 'utf8')` 写盘，
+   * 产出的 .xlsx 内容是 base64 文本，Excel 无法打开。
+   */
+  it('xlsx 返回二进制 Buffer 而非 base64 文本', () => {
+    let content: string | Buffer;
+    try {
+      content = exportRows({ format: 'xlsx', columns: ['id', 'name'], rows });
+    } catch (err) {
+      // xlsx 是可选依赖，未安装时跳过（错误信息应明确指向依赖缺失）
+      expect((err as Error).message).toContain('xlsx');
+      return;
+    }
+    expect(Buffer.isBuffer(content)).toBe(true);
+    // xlsx 是 zip 容器，魔数为 PK\x03\x04
+    expect((content as Buffer).subarray(0, 2).toString('latin1')).toBe('PK');
+  });
+
+  it('isBinaryFormat 仅对 xlsx 为真', () => {
+    expect(isBinaryFormat('xlsx')).toBe(true);
+    for (const f of ['sql', 'csv', 'json', 'xml'] as const) {
+      expect(isBinaryFormat(f)).toBe(false);
+    }
+  });
+
+  it('toFileBytes 对文本与 Buffer 均产出字节', () => {
+    expect(Buffer.from(toFileBytes('abc')).toString('utf8')).toBe('abc');
+    const buf = Buffer.from([0x50, 0x4b]);
+    expect(Buffer.from(toFileBytes(buf)).equals(buf)).toBe(true);
+  });
+
+  /**
+   * 结果面板导出与表导出此前 SQL 产物结构不同：前者只有裸 INSERT，
+   * 后者带 dump 头 / SET / 事务包裹。sqlDump 选项让两端一致。
+   */
+  it('SQL 导出可附加 dump 头与事务包裹，与表导出结构一致', () => {
+    const content = exportRows({
+      format: 'sql',
+      columns: ['id', 'name'],
+      rows,
+      table: 'users',
+      database: 'app',
+      dialect: mysqlDialect as any,
+      sqlDump: { serverInfo: { name: 'local', dbType: 'MYSQL' as any, host: 'h', port: 3306 } },
+    }) as string;
+
+    expect(content).toContain('DB Client Pro Dump SQL');
+    expect(content).toContain('SET FOREIGN_KEY_CHECKS = 0;');
+    expect(content).toContain('BEGIN;');
+    expect(content).toContain('INSERT INTO `users`');
+    expect(content).toContain('COMMIT;');
+    expect(content).toContain('SET FOREIGN_KEY_CHECKS = 1;');
+  });
+
+  it('不传 sqlDump 时保持裸 INSERT（供 diff/剪贴板等场景）', () => {
+    const content = exportRows({
+      format: 'sql', columns: ['id'], rows, table: 'users', dialect: mysqlDialect as any,
+    }) as string;
+    expect(content).not.toContain('BEGIN;');
+    expect(content).toContain('INSERT INTO `users`');
+  });
+});
+
+describe('导出文件名与过滤器（两端共用）', () => {
+  it('文件名为 <base>.<format>', () => {
+    expect(exportFileName('users', 'csv')).toBe('users.csv');
+    expect(exportFileName('result', 'xlsx')).toBe('result.xlsx');
+  });
+
+  it('过滤器扩展名与格式一致', () => {
+    expect(exportFilters('csv')).toEqual({ CSV: ['csv'] });
+    expect(exportFilters('json')).toEqual({ JSON: ['json'] });
+    expect(exportFilters('xlsx')).toEqual({ Excel: ['xlsx'] });
+    expect(exportFilters('xml')).toEqual({ XML: ['xml'] });
+    expect(exportFilters('sql')).toEqual({ SQL: ['sql'] });
+  });
+
+  it('每个格式的过滤器扩展名与 exportFileName 后缀相同', () => {
+    for (const format of ['sql', 'csv', 'json', 'xlsx', 'xml'] as const) {
+      const ext = Object.values(exportFilters(format))[0][0];
+      expect(exportFileName('t', format).endsWith(`.${ext}`)).toBe(true);
+    }
+  });
+});
+
+describe('exportTable', () => {
 
   it('does not query table rows for a structure-only SQL export', async () => {
     const query = { query: async () => { throw new Error('data should not be queried'); }, dialect: {
@@ -67,5 +169,31 @@ describe('exportRows', () => {
     expect(content).toContain('INSERT id,name');
     expect(content).toContain('BEGIN;');
     expect(content).toContain('COMMIT;');
+  });
+
+  it('xlsx 全表导出返回 Buffer（不能按 utf8 写盘）', async () => {
+    // 只有第一页有数据，第二页为空以终止分页循环
+    let call = 0;
+    const query = {
+      query: async (sql: string) => ({ rows: call++ === 0 ? [{ id: 1 }, { id: 2 }] : [], fields: [], sql, costTime: 0 }),
+      dialect: mysqlDialect,
+    };
+    let content: string | Buffer;
+    try {
+      content = await exportTable({
+        source: {
+          query: query as any,
+          metadata: { getColumns: async () => [{ name: 'id' }] as any },
+          table: { getCreateSql: async () => '' },
+        },
+        format: 'xlsx',
+        table: 'users',
+        pageSize: 2,
+      });
+    } catch (err) {
+      expect((err as Error).message).toContain('xlsx');
+      return;
+    }
+    expect(Buffer.isBuffer(content)).toBe(true);
   });
 });

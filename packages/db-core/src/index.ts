@@ -28,6 +28,8 @@ export { ConnectionFactory } from './factory/connectionFactory';
 
 // 工具
 export { validateIdent } from './utils/validate';
+export { toBool } from './utils/coerce';
+export { columnTypesFor } from './dialect/typeCatalog';
 
 // 查询层
 export { QueryService, QueryError } from './query/queryService';

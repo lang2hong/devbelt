@@ -1,14 +1,17 @@
 import { DatabaseType } from '../types/connection';
 import { validateIdent } from '../utils/validate';
+import { toBool } from '../utils/coerce';
 import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
 import type { DatabaseCapabilities } from './capabilities';
+import { columnTypesFor } from './typeCatalog';
 
 /**
  * PostgreSQL 方言实现。
  */
 export class PostgreSqlDialect implements SqlDialect {
   readonly dbType = DatabaseType.PG;
+  readonly columnTypes = columnTypesFor(DatabaseType.PG);
   readonly capabilities: DatabaseCapabilities = {
     multiDatabaseExplorer: false,
     databases: true,
@@ -183,12 +186,16 @@ export class PostgreSqlDialect implements SqlDialect {
     return [];
   }
 
+  /**
+   * 解析索引列表。列名从 `pg_get_indexdef` 的定义串中提取——PG 的
+   * `pg_indexes` 不直接给列清单，此前返回空数组导致索引编辑弹窗勾选项全空。
+   */
   parseIndexList(rows: any[]): IndexMeta[] {
     return rows.map((row) => ({
       name: row.name,
-      columns: [],
-      isUnique: row.is_unique || false,
-      isPrimary: row.is_primary || false,
+      columns: parseIndexDefColumns(row.definition),
+      isUnique: toBool(row.is_unique) || /\bCREATE\s+UNIQUE\s+INDEX\b/i.test(String(row.definition ?? '')),
+      isPrimary: toBool(row.is_primary),
       type: row.definition || '',
     }));
   }
@@ -242,4 +249,49 @@ export class PostgreSqlDialect implements SqlDialect {
     }
     return `'${String(value).replace(/'/g, "''")}'`;
   }
+}
+
+/**
+ * 从 `CREATE [UNIQUE] INDEX name ON tbl USING btree (a, b DESC, lower(c))`
+ * 中提取列名列表。
+ *
+ * 只取最外层括号内以逗号分隔的项，去掉排序/NULLS/操作符类修饰与引号；
+ * 表达式索引（如 `lower(c)`）原样保留，便于 UI 展示。
+ */
+function parseIndexDefColumns(definition: unknown): string[] {
+  const def = String(definition ?? '');
+  const start = def.indexOf('(');
+  if (start < 0) return [];
+  let depth = 0;
+  let end = -1;
+  for (let i = start; i < def.length; i++) {
+    if (def[i] === '(') depth++;
+    else if (def[i] === ')') {
+      depth--;
+      if (depth === 0) { end = i; break; }
+    }
+  }
+  if (end < 0) return [];
+
+  const parts: string[] = [];
+  let buf = '';
+  let nested = 0;
+  for (const ch of def.slice(start + 1, end)) {
+    if (ch === '(') nested++;
+    else if (ch === ')') nested--;
+    if (ch === ',' && nested === 0) { parts.push(buf); buf = ''; continue; }
+    buf += ch;
+  }
+  parts.push(buf);
+
+  return parts
+    .map((part) => part
+      .trim()
+      .replace(/\s+(ASC|DESC)\b/i, '')
+      .replace(/\s+NULLS\s+(FIRST|LAST)\b/i, '')
+      .replace(/\s+COLLATE\s+\S+/i, '')
+      .replace(/\s+\S*_ops\b/i, '')
+      .trim()
+      .replace(/^"(.*)"$/, '$1'))
+    .filter((part) => part.length > 0);
 }

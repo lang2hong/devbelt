@@ -12,12 +12,52 @@ const error = ref('');
 
 const canReorder = ref(false);
 const dbType = ref('');
+/** 列类型候选，由扩展端按方言注入（MySQL/PG/SQLite 各不相同）。 */
+const columnTypes = ref<string[]>([]);
+
+/**
+ * 类型下拉状态。
+ *
+ * 不用原生 `<input list>`：datalist 会按输入框当前值做前缀过滤，编辑已有列时
+ * 值已是 `varchar(50)`，没有候选以它开头，下拉恒为空。这里自建浮层，
+ * 有值时也能看到完整候选，并额外提供子串匹配。
+ */
+const typePicker = ref<'edit' | 'new' | null>(null);
+const typeFilter = ref('');
+
+const filteredTypes = computed(() => {
+  const kw = typeFilter.value.trim().toLowerCase();
+  if (!kw) return columnTypes.value;
+  return columnTypes.value.filter((t) => t.toLowerCase().includes(kw));
+});
+
+function openTypePicker(which: 'edit' | 'new') {
+  typePicker.value = which;
+  typeFilter.value = '';
+}
+
+function closeTypePicker() {
+  typePicker.value = null;
+  typeFilter.value = '';
+}
+
+function chooseType(t: string) {
+  if (typePicker.value === 'edit' && editingCol.value) editingCol.value.type = t;
+  else if (typePicker.value === 'new') newRow.value.type = t;
+  closeTypePicker();
+}
+
+/** 新列的建议类型：取方言候选里第一个字符串类型，无候选时留空。 */
+const defaultType = computed(() => {
+  const preferred = columnTypes.value.find((t) => /^(VARCHAR|CHARACTER VARYING|TEXT)/i.test(t));
+  return preferred ?? columnTypes.value[0] ?? '';
+});
 
 // 列编辑/新增状态
 interface ColForm { name: string; type: string; notNull: boolean; defaultVal: string; comment: string; }
 const editingCol = ref<ColForm | null>(null);
 const editingName = ref('');
-const newRow = ref<ColForm>({ name: '', type: 'VARCHAR(255)', notNull: false, defaultVal: '', comment: '' });
+const newRow = ref<ColForm>({ name: '', type: '', notNull: false, defaultVal: '', comment: '' });
 const confirmDrop = ref<{ name: string } | null>(null);
 
 // 索引编辑/新增状态
@@ -32,6 +72,7 @@ onMounted(() => {
     if (msg.type === 'init') {
       dbType.value = msg.dbType;
       canReorder.value = msg.dbType === 'MYSQL';
+      columnTypes.value = Array.isArray(msg.columnTypes) ? msg.columnTypes : [];
     } else if (msg.type === 'data') {
       columns.value = msg.columns || [];
       indexes.value = msg.indexes || [];
@@ -49,7 +90,7 @@ function startEdit(col: any) {
   editingName.value = col.name;
   editingCol.value = {
     name: col.name,
-    type: col.type || col.simpleType || 'VARCHAR(255)',
+    type: col.type || col.simpleType || defaultType.value,
     notNull: !!col.isNotNull || col.nullable === 'NO',
     defaultVal: col.defaultValue ?? '',
     comment: col.comment ?? '',
@@ -71,9 +112,10 @@ function saveEdit() {
 
 function saveAdd() {
   const f = newRow.value;
-  if (!f.name.trim() || !f.type.trim()) return;
-  post({ type: 'addColumn', column: f.name.trim(), definition: buildDef(f) });
-  newRow.value = { name: '', type: 'VARCHAR(255)', notNull: false, defaultVal: '', comment: '' };
+  const type = (f.type || defaultType.value).trim();
+  if (!f.name.trim() || !type) return;
+  post({ type: 'addColumn', column: f.name.trim(), definition: buildDef({ ...f, type }) });
+  newRow.value = { name: '', type: '', notNull: false, defaultVal: '', comment: '' };
 }
 
 function moveColumn(col: any, dir: 'up' | 'down') {
@@ -106,7 +148,10 @@ function buildDef(f: ColForm): string {
     const raw = /^-?\d+(\.\d+)?$/.test(dv) || /^(CURRENT_TIMESTAMP|CURRENT_DATE|CURRENT_TIME|NULL)$/i.test(dv);
     s += ` DEFAULT ${raw ? dv : `'${dv.replace(/'/g, "''")}'`}`;
   }
-  if (f.comment.trim()) s += ` COMMENT '${f.comment.trim().replace(/'/g, "''")}'`;
+  // 列内联 COMMENT 是 MySQL 语法；PG/SQLite 的 ALTER TABLE 不接受，附加会导致语法错误。
+  if (f.comment.trim() && dbType.value === 'MYSQL') {
+    s += ` COMMENT '${f.comment.trim().replace(/'/g, "''")}'`;
+  }
   return s;
 }
 
@@ -153,6 +198,18 @@ function confirmDropIdxHandler() {
 }
 
 const idxSelectedCols = computed(() => Object.keys(idxForm.value.cols).filter((c) => idxForm.value.cols[c]));
+
+/**
+ * 把驱动返回的"布尔"值归一化。
+ *
+ * MySQL 驱动会把 `information_schema` 的布尔表达式字符串化为 `"0"`/`"1"`，
+ * 而 JS 中 `!!"0"` 为真——这曾让每个索引的编辑/删除按钮都被禁用。
+ * db-core 侧已归一，这里对直接透传的字段再兜一层。
+ */
+function truthy(v: unknown): boolean {
+  if (typeof v === 'string') return !['0', '', 'false', 'no'].includes(v.trim().toLowerCase());
+  return !!v;
+}
 </script>
 
 <template>
@@ -181,7 +238,13 @@ const idxSelectedCols = computed(() => Object.keys(idxForm.value.cols).filter((c
             <tr v-for="(c, idx) in columns" :key="c.name">
               <template v-if="editingName === c.name && editingCol">
                 <td class="mono">{{ c.name }}</td>
-                <td><input v-model="editingCol.type" class="input" list="mysqlTypes" placeholder="VARCHAR(255)" /></td>
+                <td>
+                  <div class="type-cell">
+                    <input v-model="editingCol.type" class="input" :placeholder="defaultType" />
+                    <button class="btn sm type-toggle" :disabled="!columnTypes.length"
+                      title="Pick type" @click="openTypePicker('edit')">▾</button>
+                  </div>
+                </td>
                 <td><input type="checkbox" v-model="editingCol.notNull" /></td>
                 <td><input v-model="editingCol.defaultVal" class="input" placeholder="NULL" /></td>
                 <td><input v-model="editingCol.comment" class="input" /></td>
@@ -206,7 +269,13 @@ const idxSelectedCols = computed(() => Object.keys(idxForm.value.cols).filter((c
             </tr>
             <tr class="new-row">
               <td><input v-model="newRow.name" class="input" placeholder="new column" /></td>
-              <td><input v-model="newRow.type" class="input" list="mysqlTypes" placeholder="VARCHAR(255)" /></td>
+              <td>
+                <div class="type-cell">
+                  <input v-model="newRow.type" class="input" :placeholder="defaultType" />
+                  <button class="btn sm type-toggle" :disabled="!columnTypes.length"
+                    title="Pick type" @click="openTypePicker('new')">▾</button>
+                </div>
+              </td>
               <td><input type="checkbox" v-model="newRow.notNull" /></td>
               <td><input v-model="newRow.defaultVal" class="input" placeholder="NULL" /></td>
               <td><input v-model="newRow.comment" class="input" /></td>
@@ -226,11 +295,13 @@ const idxSelectedCols = computed(() => Object.keys(idxForm.value.cols).filter((c
             <tr v-for="i in indexes" :key="i.name">
               <td class="mono">{{ i.name }}</td>
               <td class="mono">{{ (i.columns || []).join(', ') }}</td>
-              <td>{{ i.isUnique ? 'YES' : 'NO' }}</td>
-              <td>{{ i.isPrimary ? 'YES' : 'NO' }}</td>
+              <td>{{ truthy(i.isUnique) ? 'YES' : 'NO' }}</td>
+              <td>{{ truthy(i.isPrimary) ? 'YES' : 'NO' }}</td>
                 <td>
-                  <button class="btn" :disabled="!!i.isPrimary" @click="startEditIdx(i)">Edit</button>
-                  <button class="btn danger" :disabled="!!i.isPrimary" @click="dropIdx(i)">Del</button>
+                  <button class="btn" @click="startEditIdx(i)">Edit</button>
+                  <button class="btn danger" :disabled="truthy(i.isPrimary)"
+                    :title="truthy(i.isPrimary) ? 'Primary key cannot be dropped as an index' : 'Drop index'"
+                    @click="dropIdx(i)">Del</button>
                 </td>
             </tr>
           </tbody>
@@ -239,34 +310,20 @@ const idxSelectedCols = computed(() => Object.keys(idxForm.value.cols).filter((c
       <!-- DDL -->
       <pre v-else>{{ ddl }}</pre>
     </div>
-    <datalist id="mysqlTypes">
-      <option value="INT"></option>
-      <option value="BIGINT"></option>
-      <option value="SMALLINT"></option>
-      <option value="TINYINT"></option>
-      <option value="MEDIUMINT"></option>
-      <option value="INT UNSIGNED"></option>
-      <option value="BIGINT UNSIGNED"></option>
-      <option value="DECIMAL(10,2)"></option>
-      <option value="FLOAT"></option>
-      <option value="DOUBLE"></option>
-      <option value="VARCHAR(255)"></option>
-      <option value="CHAR(36)"></option>
-      <option value="TEXT"></option>
-      <option value="MEDIUMTEXT"></option>
-      <option value="LONGTEXT"></option>
-      <option value="TINYTEXT"></option>
-      <option value="JSON"></option>
-      <option value="BLOB"></option>
-      <option value="MEDIUMBLOB"></option>
-      <option value="LONGBLOB"></option>
-      <option value="DATE"></option>
-      <option value="DATETIME"></option>
-      <option value="TIMESTAMP"></option>
-      <option value="TIME"></option>
-      <option value="YEAR"></option>
-      <option value="ENUM('a','b')"></option>
-    </datalist>
+    <!-- 类型选择浮层：候选来自方言，有值时也展示全量（原生 datalist 会按前缀过滤而空掉） -->
+    <div v-if="typePicker" class="modal-mask" @click.self="closeTypePicker">
+      <div class="modal type-modal">
+        <div class="modal-title">Column type · {{ dbType }}</div>
+        <input v-model="typeFilter" class="input" placeholder="Filter types" autofocus />
+        <div class="type-list">
+          <button v-for="t in filteredTypes" :key="t" class="type-item mono" @click="chooseType(t)">{{ t }}</button>
+          <div v-if="!filteredTypes.length" class="type-empty">No matching type</div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn" @click="closeTypePicker">Cancel</button>
+        </div>
+      </div>
+    </div>
 
     <!-- 索引编辑/新增弹窗 -->
     <div v-if="showIdxForm" class="modal-mask" @click.self="cancelIdxForm">
@@ -349,6 +406,16 @@ th { background: var(--vscode-editor-background, #1e1e1e); position: sticky; top
 .modal-body { font-size: 12px; color: var(--vscode-foreground, #cccccc); margin-bottom: 14px; }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
 .idx-modal { min-width: 360px; }
+.type-cell { display: flex; gap: 4px; align-items: center; }
+.type-cell .input { flex: 1; min-width: 0; }
+.type-toggle { flex: 0 0 auto; }
+.type-modal { min-width: 320px; max-width: 420px; }
+.type-list { margin-top: 8px; max-height: 260px; overflow-y: auto; display: flex; flex-direction: column;
+  border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); border-radius: 3px; }
+.type-item { text-align: left; padding: 4px 8px; font-size: 12px; cursor: pointer; border: none; background: none;
+  color: var(--vscode-foreground, #cccccc); }
+.type-item:hover { background: var(--vscode-list-hoverBackground, rgba(128,128,128,0.12)); }
+.type-empty { padding: 8px; font-size: 12px; color: var(--vscode-descriptionForeground, #999); }
 .form-row { margin-bottom: 10px; }
 .form-row label { display: block; font-size: 12px; margin-bottom: 4px; color: var(--vscode-foreground, #cccccc); }
 .chk { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }

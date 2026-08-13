@@ -45,6 +45,14 @@ export interface ExportRowsOptions {
   table?: string;
   database?: string;
   dialect?: QueryService['dialect'];
+  /** SQL 格式：附加 dump 头 / DDL / 事务包裹，与表导出产物保持一致。 */
+  sqlDump?: SqlDumpOptions;
+}
+
+export interface SqlDumpOptions {
+  serverInfo?: ServerInfo;
+  ddl?: string;
+  includeStructure?: boolean;
 }
 
 export class TransferCancelledError extends Error {
@@ -54,24 +62,70 @@ export class TransferCancelledError extends Error {
   }
 }
 
-export function exportRows(options: ExportRowsOptions): string {
-  const { format, columns, rows, table, database, dialect } = options;
+/** xlsx 是二进制格式，不能当文本写盘。 */
+export function isBinaryFormat(format: TransferFormat): boolean {
+  return format === 'xlsx';
+}
+
+/**
+ * 序列化行数据。
+ *
+ * 返回 Buffer（二进制格式）或 string（文本格式）。此前 xlsx 返回 base64
+ * **字符串**，调用方一律 `Buffer.from(content, 'utf8')` 写盘，产出的 .xlsx
+ * 内容是 base64 文本，Excel 无法打开。
+ */
+export function exportRows(options: ExportRowsOptions): string | Buffer {
+  const { format, columns, rows, table, database, dialect, sqlDump } = options;
   if (format === 'csv') return serializeCsv(columns, rows);
   if (format === 'json') return serializeJson(columns, rows);
   if (format === 'xlsx') {
     const { serializeXlsx } = require('./xlsx');
-    return serializeXlsx(columns, rows).toString('base64');
+    return serializeXlsx(columns, rows) as Buffer;
   }
   if (format === 'xml') {
     const { serializeXml } = require('./xml');
     return serializeXml(columns, rows);
   }
   if (!table || !dialect) throw new Error('SQL export requires a target table and database dialect.');
-  return dialect.buildInsertSql(rows, columns, table, database);
+  const inserts = dialect.buildInsertSql(rows, columns, table, database);
+  if (!sqlDump) return inserts;
+  const qualified = database ? `${dialect.wrap(database)}.${dialect.wrap(table)}` : dialect.wrap(table);
+  return buildSqlDump({
+    serverInfo: sqlDump.serverInfo,
+    dialect,
+    database,
+    table,
+    qualified,
+    ddl: sqlDump.ddl ?? '',
+    data: inserts,
+    includeStructure: !!sqlDump.includeStructure && !!sqlDump.ddl,
+    includeData: true,
+  });
+}
+
+/** 导出内容统一转字节，供 `workspace.fs.writeFile` 使用。 */
+export function toFileBytes(content: string | Buffer): Uint8Array {
+  return Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8');
+}
+
+/** 导出文件名（两端共用，避免结果导出与表导出命名不一致）。 */
+export function exportFileName(baseName: string, format: TransferFormat): string {
+  return `${baseName}.${format}`;
+}
+
+/** 保存对话框的文件类型过滤器（两端共用）。 */
+export function exportFilters(format: TransferFormat): Record<string, string[]> {
+  switch (format) {
+    case 'csv': return { CSV: ['csv'] };
+    case 'json': return { JSON: ['json'] };
+    case 'xlsx': return { Excel: ['xlsx'] };
+    case 'xml': return { XML: ['xml'] };
+    default: return { SQL: ['sql'] };
+  }
 }
 
 /** Reads a full table in bounded pages instead of inheriting the result-view row limit. */
-export async function exportTable(options: ExportTableOptions): Promise<string> {
+export async function exportTable(options: ExportTableOptions): Promise<string | Buffer> {
   const { source, format, table, database, includeStructure = false, includeData = true, columns: selectedColumns, pageSize = 1000, onProgress, isCancelled, serverInfo } = options;
   const dialect = source.query.dialect;
   const qualified = database ? `${dialect.wrap(database)}.${dialect.wrap(table)}` : dialect.wrap(table);
@@ -94,7 +148,7 @@ export async function exportTable(options: ExportTableOptions): Promise<string> 
   const data = includeData ? exportRows({ format, columns, rows, table, database, dialect }) : '';
   if (format !== 'sql') return data;
   const ddl = includeStructure ? (await source.table.getCreateSql(table, database)) : '';
-  return buildSqlDump({ serverInfo, dialect, database, table, qualified, ddl, data, includeStructure, includeData });
+  return buildSqlDump({ serverInfo, dialect, database, table, qualified, ddl, data: String(data), includeStructure, includeData });
 }
 
 interface SqlDumpParams {

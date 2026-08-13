@@ -1,13 +1,22 @@
 import * as vscode from 'vscode';
 import type { ConnectionManager } from '../connection/connectionManager';
 import type { SavedConnection } from '../connection/connectionStore';
-import { exportRows, type TransferFormat } from '../data/transfer/exportService';
+import {
+  exportFileName,
+  exportFilters,
+  exportRows,
+  toFileBytes,
+  type TransferFormat,
+} from '../data/transfer/exportService';
 
 /**
- * 数据导出处理器：把当前页 / 全表导出为 CSV/JSON/SQL。
+ * 数据导出处理器：把当前页 / 全表导出为 CSV/JSON/SQL/Excel/XML。
  *
  * 与视图解耦：注入连接、管理器、表信息与消息回调。
  * 依赖 vscode UI（列选择、保存对话框），故以扩展进程内使用为主。
+ *
+ * 产物与表导出（commands/database.ts 的 runExportWizard）保持一致：
+ * 共用文件名、过滤器与序列化实现，SQL 同样带 dump 头与事务包裹。
  */
 export class ExportHandler {
   constructor(
@@ -27,7 +36,7 @@ export class ExportHandler {
       const { DialectRegistry } = await import('@db-client/core');
       const dialect = DialectRegistry.get(this.conn.dbType as any);
 
-      // 范围选择：当前页 / 全表 / 当前 SQL
+      // 范围选择：当前页 / 全表
       const rangeOptions: { label: string; value: 'page' | 'all' }[] = [
         { label: vscode.l10n.t('Current page') + ` (${rows.length} rows)`, value: 'page' },
       ];
@@ -37,29 +46,8 @@ export class ExportHandler {
         : 'page';
       if (!range) return;
 
-      let exportColumns = columns;
       if (range === 'all' && this.table) {
-        const session = await this.manager.connect(this.conn);
-        const { exportTable } = await import('../data/transfer/exportService');
-        const allColumns = (await session.metadata.getColumns(this.table, this.database)).map((c: any) => c.name);
-        const picked = await vscode.window.showQuickPick(
-          allColumns.map((c: string) => ({ label: c, picked: true })),
-          { canPickMany: true, placeHolder: vscode.l10n.t('Select columns to export') },
-        );
-        if (!picked?.length) return;
-        exportColumns = picked.map((p) => p.label);
-        const content = await exportTable({
-          source: { query: session.query, metadata: session.metadata, table: session.table },
-          format, table: this.table, database: this.database,
-          columns: exportColumns,
-        });
-        const uri = await vscode.window.showSaveDialog({
-          defaultUri: vscode.Uri.file(`${this.table}_export.${format}`),
-          filters: { [format.toUpperCase()]: [format] },
-        });
-        if (!uri) return;
-        await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
-        this.post({ type: 'exported', message: vscode.l10n.t('Exported to {path}', { path: uri.fsPath }) });
+        await this.exportEntireTable(format);
         return;
       }
 
@@ -69,23 +57,72 @@ export class ExportHandler {
         { canPickMany: true, placeHolder: vscode.l10n.t('Select columns to export') },
       );
       if (!picked?.length) return;
-      exportColumns = picked.map((p) => p.label);
+      const exportColumns = picked.map((p) => p.label);
       const projectedRows = rows.map((row) => {
         const out: Record<string, any> = {};
         for (const c of exportColumns) out[c] = row[c];
         return out;
       });
-      const content = exportRows({ format, columns: exportColumns, rows: projectedRows, table: this.table, database: this.database, dialect });
-      const baseName = this.table || 'result';
-      const uri = await vscode.window.showSaveDialog({
-        defaultUri: vscode.Uri.file(`${baseName}_export.${format}`),
-        filters: { [format.toUpperCase()]: [format] },
+      const content = exportRows({
+        format,
+        columns: exportColumns,
+        rows: projectedRows,
+        table: this.table,
+        database: this.database,
+        dialect,
+        sqlDump: format === 'sql' ? { serverInfo: this.serverInfo() } : undefined,
       });
+      const uri = await this.askDestination(format);
       if (!uri) return;
-      await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
-      this.post({ type: 'exported', message: vscode.l10n.t('Exported {count} row(s) to {path}', { count: projectedRows.length, path: uri.fsPath }) });
+      await vscode.workspace.fs.writeFile(uri, toFileBytes(content));
+      this.post({
+        type: 'exported',
+        message: vscode.l10n.t('Exported {count} row(s) to {path}', { count: projectedRows.length, path: uri.fsPath }),
+      });
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
     }
+  }
+
+  /** 全表导出：分页读取，不受结果面板行数上限约束。 */
+  private async exportEntireTable(format: TransferFormat): Promise<void> {
+    const table = this.table!;
+    const session = await this.manager.connect(this.conn);
+    const { exportTable } = await import('../data/transfer/exportService');
+    const allColumns = (await session.metadata.getColumns(table, this.database)).map((c: any) => c.name);
+    const picked = await vscode.window.showQuickPick(
+      allColumns.map((c: string) => ({ label: c, picked: true })),
+      { canPickMany: true, placeHolder: vscode.l10n.t('Select columns to export') },
+    );
+    if (!picked?.length) return;
+    const uri = await this.askDestination(format);
+    if (!uri) return;
+    const content = await exportTable({
+      source: { query: session.query, metadata: session.metadata, table: session.table },
+      format,
+      table,
+      database: this.database,
+      columns: picked.map((p) => p.label),
+      includeStructure: format === 'sql',
+      serverInfo: this.serverInfo(),
+    });
+    await vscode.workspace.fs.writeFile(uri, toFileBytes(content));
+    this.post({ type: 'exported', message: vscode.l10n.t('Exported to {path}', { path: uri.fsPath }) });
+  }
+
+  private async askDestination(format: TransferFormat): Promise<vscode.Uri | undefined> {
+    return vscode.window.showSaveDialog({
+      defaultUri: vscode.Uri.file(exportFileName(this.table || 'result', format)),
+      filters: exportFilters(format),
+    });
+  }
+
+  private serverInfo() {
+    return {
+      name: this.conn.name,
+      dbType: this.conn.dbType,
+      host: this.conn.host,
+      port: this.conn.port,
+    };
   }
 }

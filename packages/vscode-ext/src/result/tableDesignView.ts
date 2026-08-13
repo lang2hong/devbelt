@@ -2,7 +2,7 @@ import type { SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from './baseWebView';
 import { confirmSqlExecution } from '../utils/sqlSafety';
-import { validateIdent } from '@db-client/core';
+import { DialectRegistry, validateIdent } from '@db-client/core';
 
 export class TableDesignView extends BaseWebView {
   private static current?: TableDesignView;
@@ -27,7 +27,13 @@ export class TableDesignView extends BaseWebView {
 
   protected async handleMessage(msg: any): Promise<void> {
     if (msg.type === 'ready') {
-      this.post({ type: 'init', mode: 'design', dbType: this.conn.dbType });
+      // 列类型候选由方言提供，避免前端硬编码 MySQL 类型集合。
+      this.post({
+        type: 'init',
+        mode: 'design',
+        dbType: this.conn.dbType,
+        columnTypes: this.columnTypes(),
+      });
       await this.loadData();
       return;
     }
@@ -102,6 +108,15 @@ export class TableDesignView extends BaseWebView {
     return this.manager.connect(this.conn);
   }
 
+  /** 取本连接方言的列类型候选；方言未注册时返回空列表（前端退化为纯文本输入）。 */
+  private columnTypes(): readonly string[] {
+    try {
+      return DialectRegistry.get(this.conn.dbType).columnTypes;
+    } catch {
+      return [];
+    }
+  }
+
   private async mutate(op: string, fn: () => Promise<unknown>): Promise<void> {
     try {
       if (!(await confirmSqlExecution(this.conn, op))) return;
@@ -120,12 +135,27 @@ export class TableDesignView extends BaseWebView {
     validateIdent(name);
   }
 
+  /**
+   * 校验列定义片段。
+   *
+   * 定义串由本视图自行拼装（类型 + NOT NULL + DEFAULT + COMMENT），其中
+   * DEFAULT 与 COMMENT 的字符串字面量必然带单引号。此前一律拒绝 `'`，
+   * 导致任何字符串默认值或列注释都无法保存。
+   *
+   * 改为拒绝语句分隔符与注释起始符，并要求单引号成对闭合（内部 `''` 为转义），
+   * 从而在允许合法字面量的同时阻止跳出定义上下文。
+   */
   private validateDefinition(def: string, context: string): void {
     if (!def || typeof def !== 'string' || def.length > 500) {
       throw new Error(`Invalid ${context} definition`);
     }
-    if (/[;']/.test(def)) {
+    if (/;|--|\/\*|\*\//.test(def)) {
       throw new Error(`${context} definition contains invalid characters`);
+    }
+    // 去掉转义的 '' 后，剩余单引号数量必须为偶数（全部成对闭合）
+    const quotes = def.replace(/''/g, '').match(/'/g)?.length ?? 0;
+    if (quotes % 2 !== 0) {
+      throw new Error(`${context} definition has an unterminated string literal`);
     }
   }
 

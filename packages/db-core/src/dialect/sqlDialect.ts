@@ -19,6 +19,12 @@ export interface SqlDialect {
   readonly capabilities: DatabaseCapabilities;
 
   /**
+   * 本方言的列类型候选（表设计器类型下拉用）。
+   * 由方言提供而非 UI 硬编码，避免把 MySQL 类型集合套给 PG/SQLite。
+   */
+  readonly columnTypes: readonly string[];
+
+  /**
    * 包裹标识符（表名/列名），防止 SQL 注入与关键字冲突。
    * @param identifier 原始标识符
    */

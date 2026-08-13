@@ -509,6 +509,16 @@
         "command": "dbclient.dashboard",
         "title": "Performance Dashboard",
         "category": "DB Client"
+      },
+      {
+        "command": "dbclient.pats",
+        "title": "Personal Access Tokens",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.compareData",
+        "title": "Compare Data",
+        "category": "DB Client"
       }
     ],
     "menus": {
@@ -631,12 +641,17 @@
         {
           "command": "dbclient.importData",
           "when": "view == dbclient.explorer && viewItem == category_table",
-          "group": "1_cattbl"
+          "group": "1_transfer"
         },
         {
           "command": "dbclient.exportConnection",
           "when": "view == dbclient.explorer && viewItem == category_table",
-          "group": "1_cattbl"
+          "group": "1_transfer"
+        },
+        {
+          "command": "dbclient.restoreDatabase",
+          "when": "view == dbclient.explorer && viewItem == category_table && dbclient.dbType != SQLITE",
+          "group": "1_transfer"
         },
         {
           "command": "dbclient.renameTable",
@@ -686,65 +701,65 @@
           "group": "9_cpy"
         },
         {
-          "command": "dbclient.newQueryFromConn",
-          "when": "view == dbclient.explorer && viewItem == database",
-          "group": "1_db"
-        },
-        {
           "command": "dbclient.refreshNode",
           "title": "Refresh",
           "when": "view == dbclient.explorer && viewItem == database",
           "group": "0_refresh"
         },
         {
+          "command": "dbclient.newQueryFromConn",
+          "when": "view == dbclient.explorer && viewItem == database",
+          "group": "1_query"
+        },
+        {
           "command": "dbclient.newQueryForDb",
           "when": "view == dbclient.explorer && viewItem == database",
-          "group": "1_db"
+          "group": "1_query"
         },
         {
           "command": "dbclient.openTerminal",
           "when": "view == dbclient.explorer && viewItem == database",
-          "group": "1_db"
+          "group": "2_tools"
+        },
+        {
+          "command": "dbclient.showERDiagram",
+          "when": "view == dbclient.explorer && viewItem == database",
+          "group": "2_tools"
+        },
+        {
+          "command": "dbclient.compareData",
+          "when": "view == dbclient.explorer && viewItem == database && dbclient.hasMultiDatabase",
+          "group": "2_tools"
         },
         {
           "command": "dbclient.importData",
           "when": "view == dbclient.explorer && viewItem == database",
-          "group": "1_db"
+          "group": "3_transfer"
         },
         {
           "command": "dbclient.exportConnection",
           "when": "view == dbclient.explorer && viewItem == database",
-          "group": "1_db"
-        },
-        {
-          "command": "dbclient.dropDatabase",
-          "when": "view == dbclient.explorer && viewItem == database && dbclient.dbType != SQLITE",
-          "group": "2_danger"
+          "group": "3_transfer"
         },
         {
           "command": "dbclient.restoreDatabase",
           "when": "view == dbclient.explorer && viewItem == database && dbclient.dbType != SQLITE",
-          "group": "1_db"
-        },
-        {
-          "command": "dbclient.restoreDatabase",
-          "when": "view == dbclient.explorer && viewItem == category_table",
-          "group": "1_cattbl"
+          "group": "3_transfer"
         },
         {
           "command": "dbclient.syncDatabase",
           "when": "view == dbclient.explorer && viewItem == database && dbclient.dbType == MYSQL",
-          "group": "1_db"
+          "group": "3_transfer"
+        },
+        {
+          "command": "dbclient.dropDatabase",
+          "when": "view == dbclient.explorer && viewItem == database && dbclient.dbType != SQLITE",
+          "group": "9_danger"
         },
         {
           "command": "dbclient.dashboard",
           "when": "view == dbclient.explorer && viewItem == connectionOpen",
           "group": "1_conn"
-        },
-        {
-          "command": "dbclient.showERDiagram",
-          "when": "view == dbclient.explorer && viewItem == database",
-          "group": "1_db"
         },
         {
           "command": "dbclient.previewView",

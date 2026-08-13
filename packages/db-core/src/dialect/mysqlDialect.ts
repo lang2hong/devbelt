@@ -1,14 +1,17 @@
 import { DatabaseType } from '../types/connection';
 import { validateIdent } from '../utils/validate';
+import { toBool } from '../utils/coerce';
 import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
 import type { DatabaseCapabilities } from './capabilities';
+import { columnTypesFor } from './typeCatalog';
 
 /**
  * MySQL 方言实现。
  */
 export class MysqlDialect implements SqlDialect {
   readonly dbType = DatabaseType.MYSQL;
+  readonly columnTypes = columnTypesFor(DatabaseType.MYSQL);
   readonly capabilities: DatabaseCapabilities = {
     multiDatabaseExplorer: true,
     databases: true,
@@ -202,12 +205,18 @@ export class MysqlDialect implements SqlDialect {
     }));
   }
 
+  /**
+   * 解析索引列表。
+   *
+   * `is_unique`/`is_primary` 来自 SQL 布尔表达式，经 MySQL typeCast 后是字符串
+   * `"0"`/`"1"`，必须过 toBool——直接使用会让 `!!"0"` 判为真。
+   */
   parseIndexList(rows: any[]): IndexMeta[] {
     const map = new Map<string, { columns: string[]; isUnique: boolean; isPrimary: boolean }>();
     for (const row of rows) {
       const name = row.name;
       if (!map.has(name)) {
-        map.set(name, { columns: [], isUnique: row.is_unique, isPrimary: row.is_primary });
+        map.set(name, { columns: [], isUnique: toBool(row.is_unique), isPrimary: toBool(row.is_primary) });
       }
       map.get(name)!.columns.push(row.col);
     }

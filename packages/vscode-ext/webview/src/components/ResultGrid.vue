@@ -337,12 +337,23 @@ const activeFilterSummary = computed(() => {
   }).join(' AND ');
 });
 
-function exportData(format: 'csv' | 'json' | 'sql') {
+/** 与表导出（commands/database.ts）保持同一格式集合。 */
+type ExportFormat = 'sql' | 'csv' | 'json' | 'xlsx' | 'xml';
+
+const EXPORT_FORMATS: { format: ExportFormat; label: string }[] = [
+  { format: 'sql', label: 'SQL' },
+  { format: 'csv', label: 'CSV' },
+  { format: 'json', label: 'JSON' },
+  { format: 'xlsx', label: 'Excel' },
+  { format: 'xml', label: 'XML' },
+];
+
+function exportData(format: ExportFormat) {
   if (!props.rows.length) return;
   post({ type: 'exportData', format, columns: visibleFields.value.map(f => f.name), rows: props.rows });
 }
 
-function startExport(format?: 'csv' | 'json' | 'sql') {
+function startExport(format?: ExportFormat) {
   if (!format) {
     showExport.value = !showExport.value;
     return;
@@ -491,9 +502,8 @@ watch(() => props.filterConditions, (conds) => {
     <div class="export-wrap">
       <button class="btn" :disabled="!rows.length" @click="startExport()">Export ▾</button>
       <div v-if="showExport" class="export-menu">
-        <button class="menu-item" @click="startExport('csv')">CSV</button>
-        <button class="menu-item" @click="startExport('json')">JSON</button>
-        <button class="menu-item" @click="startExport('sql')">SQL</button>
+        <button v-for="f in EXPORT_FORMATS" :key="f.format" class="menu-item"
+          @click="startExport(f.format)">{{ f.label }}</button>
       </div>
     </div>
     <button v-if="canModifyRows" class="btn" @click="startInsert">Insert Row</button>

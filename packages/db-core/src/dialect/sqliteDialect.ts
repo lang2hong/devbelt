@@ -1,14 +1,17 @@
 import { DatabaseType } from '../types/connection';
 import { validateIdent } from '../utils/validate';
+import { toBool } from '../utils/coerce';
 import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
 import type { DatabaseCapabilities } from './capabilities';
+import { columnTypesFor } from './typeCatalog';
 
 /**
  * SQLite 方言实现。
  */
 export class SqliteDialect implements SqlDialect {
   readonly dbType = DatabaseType.SQLITE;
+  readonly columnTypes = columnTypesFor(DatabaseType.SQLITE);
   readonly capabilities: DatabaseCapabilities = {
     multiDatabaseExplorer: false,
     databases: false,
@@ -130,12 +133,13 @@ export class SqliteDialect implements SqlDialect {
     return [];
   }
 
+  /** 解析索引列表；标志位过 toBool，避免字符串 `"0"` 被判为真。 */
   parseIndexList(rows: any[]): IndexMeta[] {
     return rows.map((row) => ({
       name: row.name,
       columns: [],
-      isUnique: row.is_unique || false,
-      isPrimary: row.is_primary || false,
+      isUnique: toBool(row.is_unique),
+      isPrimary: toBool(row.is_primary),
     }));
   }
 

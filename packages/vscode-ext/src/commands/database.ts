@@ -8,7 +8,14 @@ import { parseJson } from '../data/transfer/json';
 import { parseXlsx } from '../data/transfer/xlsx';
 import { parseXml } from '../data/transfer/xml';
 import { autoMapFields, type FieldMapping } from '../data/transfer/fieldMapper';
-import { exportTable, TransferCancelledError, type TransferFormat } from '../data/transfer/exportService';
+import {
+  exportFileName,
+  exportFilters,
+  exportTable,
+  toFileBytes,
+  TransferCancelledError,
+  type TransferFormat,
+} from '../data/transfer/exportService';
 import { importRows } from '../data/transfer/importService';
 import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
@@ -224,9 +231,8 @@ export async function runExportWizard(
     ))?.value
     : { includeStructure: false, includeData: true };
   if (!exportContents) return;
-  const extension = format;
   const destination = tables.length === 1
-    ? await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(`${tables[0]}.${extension}`), filters: exportFilters(format) })
+    ? await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(exportFileName(tables[0], format)), filters: exportFilters(format) })
     : (await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, openLabel: l10n('export.selectFolder') }))?.[0];
   if (!destination) return;
   connCtx.setLast(node.conn, database);
@@ -258,8 +264,9 @@ export async function runExportWizard(
           isCancelled: () => token.isCancellationRequested,
           onProgress: ({ rows }) => progress.report({ message: `${table}: ${rows} row(s)` }),
         });
-        const target = tables.length === 1 ? destination : vscode.Uri.joinPath(destination, `${table}.${extension}`);
-        await vscode.workspace.fs.writeFile(target, Buffer.from(content, 'utf8'));
+        const target = tables.length === 1 ? destination : vscode.Uri.joinPath(destination, exportFileName(table, format));
+        // xlsx 是二进制，必须按字节写；此前统一按 utf8 写会产出无法打开的文件。
+        await vscode.workspace.fs.writeFile(target, toFileBytes(content));
       }
     });
     vscode.window.showInformationMessage(l10n('export.done', { count: tables.length }));
@@ -447,14 +454,6 @@ function importFilters(format: TransferFormat): Record<string, string[]> {
   if (format === 'xlsx') return { Excel: ['xlsx'] };
   if (format === 'xml') return { XML: ['xml'] };
   return { 'SQL scripts': ['sql'] };
-}
-
-function exportFilters(format: TransferFormat): Record<string, string[]> {
-  if (format === 'csv') return { CSV: ['csv'] };
-  if (format === 'json') return { JSON: ['json'] };
-  if (format === 'xlsx') return { Excel: ['xlsx'] };
-  if (format === 'xml') return { XML: ['xml'] };
-  return { SQL: ['sql'] };
 }
 
 async function pickFormat(action: 'import' | 'export'): Promise<TransferFormat | undefined> {
