@@ -15,5 +15,12 @@
   "cmd.showHistory": "查看查询历史",
   "cmd.updateCell": "更新单元格",
   "cmd.explorerMenu": "更多操作",
+  "cmd.searchObjects": "搜索对象",
+  "cmd.jumpToRefTable": "打开关联表",
+  "cmd.searchConnections": "搜索连接",
+  "cmd.cloneConnection": "克隆连接",
+  "cmd.renameView": "重命名视图",
+  "cmd.sessions": "管理会话",
+  "cmd.pats": "管理访问令牌",
   "view.explorer": "连接"
 }

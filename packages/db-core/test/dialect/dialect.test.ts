@@ -99,4 +99,35 @@ describe('方言策略（策略模式）', () => {
       expect(new MysqlDialect().buildInsertSql([], columns, 'users', 'app')).toBe('');
     });
   });
+
+  describe('索引与触发器 DDL', () => {
+    it('MySQL 生成建/删索引与触发器删除 SQL', () => {
+      const d = new MysqlDialect();
+      expect(d.createIndexSql('idx', 'users', ['id', 'name'], true, 'app')).toBe(
+        'CREATE UNIQUE INDEX `idx` ON `app`.`users` (`id`, `name`)',
+      );
+      expect(d.dropIndexSql('idx', 'users', 'app')).toBe('DROP INDEX `idx` ON `app`.`users`');
+      expect(d.dropTriggerSql('trg', 'users', 'app')).toBe('DROP TRIGGER IF EXISTS `app`.`trg`');
+    });
+
+    it('PostgreSQL 生成建/删索引与触发器删除 SQL', () => {
+      const d = new PostgreSqlDialect();
+      expect(d.createIndexSql('idx', 'users', ['id'], false)).toBe('CREATE INDEX "idx" ON "users" ("id")');
+      expect(d.dropIndexSql('idx', 'users')).toBe('DROP INDEX IF EXISTS "idx"');
+      expect(d.dropTriggerSql('trg', 'users')).toBe('DROP TRIGGER IF EXISTS "trg" ON "users"');
+    });
+
+    it('SQLite 生成建/删索引与触发器删除 SQL', () => {
+      const d = new SqliteDialect();
+      expect(d.createIndexSql('idx', 'users', ['id'], true)).toBe('CREATE UNIQUE INDEX "idx" ON "users" ("id")');
+      expect(d.dropIndexSql('idx', 'users')).toBe('DROP INDEX IF EXISTS "idx"');
+      expect(d.dropTriggerSql('trg', 'users')).toBe('DROP TRIGGER IF EXISTS "trg"');
+    });
+
+    it('触发器列表 SQL 非空', () => {
+      expect(new MysqlDialect().getTriggerListSql('users', 'app')).toContain('TRIGGERS');
+      expect(new PostgreSqlDialect().getTriggerListSql('users')).toContain('pg_trigger');
+      expect(new SqliteDialect().getTriggerListSql('users')).toContain("type = 'trigger'");
+    });
+  });
 });

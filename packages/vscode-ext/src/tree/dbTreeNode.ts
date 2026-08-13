@@ -15,10 +15,13 @@ export enum NodeKind {
   QueryFolder = 'queryFolder',
   Column = 'column',
   User = 'user',
+  Index = 'index',
+  Trigger = 'trigger',
+  ForeignKey = 'foreignKey',
 }
 
 /** 分类子类型 */
-export type CategoryType = 'table' | 'view' | 'function' | 'event' | 'query' | 'user';
+export type CategoryType = 'table' | 'view' | 'function' | 'event' | 'query' | 'user' | 'index' | 'trigger' | 'foreignKey';
 
 /** 各节点类型的 ThemeIcon id（参考 database-client 图标体系） */
 const ICON_MAP: Record<string, string> = {
@@ -33,6 +36,9 @@ const ICON_MAP: Record<string, string> = {
   [NodeKind.QueryFolder]: 'folder',
   [NodeKind.Column]: 'symbol-field',
   [NodeKind.User]: 'person',
+  [NodeKind.Index]: 'list-selection',
+  [NodeKind.Trigger]: 'zap',
+  [NodeKind.ForeignKey]: 'link',
 };
 
 /** 分类节点的图标 id（按 categoryType 区分） */
@@ -43,6 +49,9 @@ const CATEGORY_ICON: Record<CategoryType, string> = {
   event: 'zap',
   query: 'code',
   user: 'account',
+  index: 'list-selection',
+  trigger: 'zap',
+  foreignKey: 'link',
 };
 
 /**
@@ -90,5 +99,24 @@ export class DbTreeNode extends TreeItem {
     if (iconId) {
       this.iconPath = new ThemeIcon(iconId);
     }
+  }
+
+  /** 外键关联表（仅 ForeignKey 节点，构造后赋值） */
+  public refTable?: string;
+  /** 外键关联列（仅 ForeignKey 节点，构造后赋值） */
+  public refColumn?: string;
+  /** 外键约束名（仅 ForeignKey 节点，DROP FOREIGN KEY 需要） */
+  public constraintName?: string;
+
+  /**
+   * 向上查找所属 Table 节点，返回表名/库/连接（供 Index/Trigger/FK 等表级子节点命令使用）。
+   */
+  static tableContext(node: DbTreeNode): { table: string; database?: string; conn?: SavedConnection } | undefined {
+    let n: DbTreeNode | undefined = node;
+    while (n) {
+      if (n.kind === NodeKind.Table) return { table: n.label, database: n.database, conn: n.conn };
+      n = n.parent;
+    }
+    return undefined;
   }
 }

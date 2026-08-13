@@ -80,6 +80,17 @@ export interface IndexMeta {
   type?: string;
 }
 
+/** 触发器元信息 */
+export interface TriggerMeta {
+  name: string;
+  /** 触发时机：BEFORE / AFTER / INSTEAD OF */
+  timing?: string;
+  /** 触发事件：INSERT / UPDATE / DELETE */
+  event?: string;
+  /** 关联表 */
+  table?: string;
+}
+
 /** 用户元信息 */
 export interface UserMeta {
   name: string;
@@ -92,6 +103,8 @@ export interface ForeignKeyMeta {
   columnName: string;
   refTable: string;
   refColumn: string;
+  /** 外键约束名（DROP FOREIGN KEY 需要） */
+  constraintName?: string;
 }
 
 /** 本地保存的查询（Navicat Queries 分类的本地存储） */
@@ -103,6 +116,10 @@ export interface SavedQuery {
   database?: string;
   /** 保存查询所属文件夹 id；未分组为 undefined */
   folderId?: string;
-  createdAt: number;
-  updatedAt: number;
+  /** 创建时间戳（ms） */
+  createTime: number;
+  /** 最近更新时间戳（ms），合并同步按此判定先后 */
+  updateTime: number;
+  /** 软删除墓碑：true 表示已删除，记录保留以跨端传播删除语义 */
+  deleted?: boolean;
 }

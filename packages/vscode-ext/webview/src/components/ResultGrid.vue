@@ -27,8 +27,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   sort: [column: string];
   filter: [conditions: Cond[]];
-  updateCell: [pkColumn: string, pkValue: any, column: string, value: string];
-  deleteRows: [rows: { pkColumn: string; pkValue: any }[]];
+  updateCell: [pkColumns: string[], pkValues: any[], column: string, value: string];
+  deleteRows: [rows: { pkColumns: string[]; pkValues: any[] }[]];
   insertRow: [columns: string[], values: (string | null)[]];
   toggleColumn: [column: string, hidden: boolean];
   saveLayout: [columnOrder: string[], columnWidths: Record<string, number>];
@@ -52,11 +52,12 @@ const displayedOrder = ref<string[]>([]);
 const localColumnWidths = ref<Record<string, number>>({});
 const draggedColumn = ref('');
 const suppressSort = ref(false);
-const pendingDelete = ref<{ pkColumn: string; pkValue: any }[]>([]);
+const pendingDelete = ref<{ pkColumns: string[]; pkValues: any[] }[]>([]);
 const toast = ref('');
 let toastTimer: any;
 
-const canModifyRows = computed(() => props.hasTable && props.pkColumns.length === 1);
+const canModifyRows = computed(() => props.hasTable);
+const canSelectRows = computed(() => props.hasTable);
 const hiddenSet = computed(() => new Set(props.hiddenColumns || []));
 const fieldByName = computed(() => new Map(props.fields.map((field) => [field.name, field])));
 const visibleFields = computed(() => displayedOrder.value
@@ -140,11 +141,19 @@ function startColumnResize(name: string, event: PointerEvent) {
   window.addEventListener('pointerup', onUp);
 }
 
-function getPk(row: Row): { col: string; val: any } | null {
-  for (const c of props.pkColumns) {
-    if (row[c] !== undefined && row[c] !== null) return { col: c, val: row[c] };
-  }
-  return null;
+function getPk(row: Row): { columns: string[]; values: any[] } | null {
+  // 无主键时用所有可见列作为定位列（编辑/删除可用，可能影响多行）
+  const cols = props.pkColumns.length ? props.pkColumns : visibleFields.value.map((f) => f.name);
+  if (!cols.length) return null;
+  const values = cols.map((c) => row[c]);
+  if (values.some((v) => v === undefined)) return null;
+  return { columns: cols, values };
+}
+
+function pkKey(row: Row): string {
+  const pk = getPk(row);
+  if (!pk) return '';
+  return pk.values.map((v) => (v === null ? '\0' : String(v))).join('\t');
 }
 
 let editingRow: Row | null = null;
@@ -156,7 +165,7 @@ function startEdit(row: Row, field: Field) {
   if (!pk) return;
   editingRow = row;
   editingField = field;
-  editingCell.value = `${pk.col}:${pk.val}:${field.name}`;
+  editingCell.value = `${pkKey(row)}:${field.name}`;
   editValue.value = String(row[field.name] ?? '');
   setTimeout(() => {
     const dp = editContainer.value?.querySelector('.dp__input') as HTMLInputElement | undefined;
@@ -180,7 +189,7 @@ function commitEdit(row: Row, field: Field) {
   if (!pk) { editingCell.value = null; editingRow = null; editingField = null; return; }
   const oldVal = String(row[field.name] ?? 'NULL');
   if (editValue.value !== oldVal && editValue.value !== 'NULL') {
-    post({ type: 'updateCell', pkColumn: pk.col, rowId: pk.val, column: field.name, value: editValue.value });
+    post({ type: 'updateCell', pkColumns: pk.columns, pkValues: pk.values, column: field.name, value: editValue.value });
   }
   editingCell.value = null;
   editingRow = null;
@@ -213,10 +222,10 @@ function isRowSelected(row: Row): boolean {
 }
 
 function deleteSelected() {
-  const rows: { pkColumn: string; pkValue: any }[] = [];
+  const rows: { pkColumns: string[]; pkValues: any[] }[] = [];
   for (const row of selectedRows.value) {
     const pk = getPk(row);
-    if (pk) rows.push({ pkColumn: pk.col, pkValue: pk.val });
+    if (pk) rows.push({ pkColumns: pk.columns, pkValues: pk.values });
   }
   if (!rows.length) return;
   pendingDelete.value = rows;
@@ -311,6 +320,7 @@ function toggleFilterPanel() {
 
 function removeCondition(index: number) {
   conditions.value.splice(index, 1);
+  if (conditions.value.length === 0) showFilter.value = false;
 }
 
 function applyFilter() {
@@ -380,6 +390,15 @@ function showToast(msg: string) {
   toast.value = msg;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { toast.value = ''; }, 2000);
+}
+
+function formatCell(v: any): string {
+  if (v === null || v === undefined) return 'NULL';
+  if (typeof v === 'object') {
+    if (v && v.type === 'Buffer' && Array.isArray(v.data)) return `[BLOB ${v.data.length}B]`;
+    return JSON.stringify(v);
+  }
+  return String(v);
 }
 
 watch([() => props.fields, () => props.columnOrder], () => {
@@ -484,7 +503,7 @@ watch(() => props.filterConditions, (conds) => {
     <table>
       <thead>
         <tr>
-          <th v-if="canModifyRows" style="width: 30px"></th>
+          <th v-if="canSelectRows" style="width: 30px"></th>
           <th v-for="f in visibleFields" :key="f.name" :style="columnStyle(f.name)"
             :draggable="hasTable"
             @click="sortColumn(f.name)"
@@ -499,7 +518,7 @@ watch(() => props.filterConditions, (conds) => {
       </thead>
       <tbody>
         <tr v-if="inserting" class="insert-row">
-          <td v-if="canModifyRows"></td>
+          <td v-if="canSelectRows"></td>
           <td v-for="f in visibleFields" :key="f.name" :style="columnStyle(f.name)">
             <input v-model="newRow[f.name]" class="cell-edit" placeholder="NULL" />
           </td>
@@ -508,8 +527,8 @@ watch(() => props.filterConditions, (conds) => {
             <button class="btn" @click="cancelInsert">Cancel</button>
           </td>
         </tr>
-        <tr v-for="(row, idx) in rows" :key="idx">
-          <td v-if="canModifyRows">
+        <tr v-for="(row, idx) in rows" :key="idx" :class="{ 'row-selected': isRowSelected(row) }">
+          <td v-if="canSelectRows">
             <input type="checkbox"
               :checked="isRowSelected(row)"
               @change="e => toggleRow(row, (e.target as HTMLInputElement).checked)" />
@@ -517,7 +536,7 @@ watch(() => props.filterConditions, (conds) => {
           <td v-for="f in visibleFields" :key="f.name" :style="columnStyle(f.name)"
             @dblclick="canModifyRows && startEdit(row, f)"
             :title="canModifyRows && getPk(row) ? 'Double-click to edit' : ''">
-            <template v-if="editingCell === `${getPk(row)?.col}:${getPk(row)?.val}:${f.name}`">
+            <template v-if="editingCell === `${pkKey(row)}:${f.name}`">
               <div ref="editContainer" class="cell-edit-wrap">
                 <input v-if="!isDateTimeColumn(f.name) && !isDateColumn(f.name) && !isTimeColumn(f.name)"
                   ref="editInput" v-model="editValue" class="cell-edit"
@@ -539,7 +558,7 @@ watch(() => props.filterConditions, (conds) => {
               </div>
             </template>
             <template v-else>
-              {{ row[f.name] === null || row[f.name] === undefined ? 'NULL' : typeof row[f.name] === 'object' ? JSON.stringify(row[f.name]) : row[f.name] }}
+              {{ formatCell(row[f.name]) }}
             </template>
           </td>
         </tr>
@@ -560,60 +579,61 @@ watch(() => props.filterConditions, (conds) => {
 </template>
 
 <style scoped>
-.toolbar { padding: 4px 8px; display: flex; gap: 6px; align-items: center; border-bottom: 1px solid var(--vscode-panel-border); flex-wrap: wrap; }
+.toolbar { padding: 4px 8px; display: flex; gap: 6px; align-items: center; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); flex-wrap: wrap; }
 .btn { padding: 3px 10px; font-size: 12px; cursor: pointer; border: none; border-radius: 3px;
-  background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
-.btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
-.btn.danger { background: var(--vscode-errorForeground); color: #fff; }
+  background: var(--vscode-button-secondaryBackground, #3a3d41); color: var(--vscode-button-secondaryForeground, #ffffff); }
+.btn.primary { background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #ffffff); }
+.btn.danger { background: var(--vscode-errorForeground, #f48771); color: #fff; }
 .btn:disabled { opacity: 0.5; cursor: default; }
-.input { font-size: 12px; padding: 2px 6px; background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-  border: 1px solid var(--vscode-input-border); border-radius: 3px; }
+.input { font-size: 12px; padding: 2px 6px; background: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #d4d4d4);
+  border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 3px; }
 .grid-wrap { flex: 1; overflow: auto; }
 table { border-collapse: collapse; font-size: 13px; }
-th, td { border: 1px solid var(--vscode-panel-border); padding: 4px 10px; text-align: left; white-space: nowrap; }
-th { position: sticky; top: 0; background: var(--vscode-editor-background); cursor: pointer; user-select: none; }
-th:hover { background: var(--vscode-list-hoverBackground); }
+th, td { border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); padding: 4px 10px; text-align: left; white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--vscode-editor-background, #1e1e1e); cursor: pointer; user-select: none; }
+th:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
 th.sort-asc::after { content: " ▲"; }
 th.sort-desc::after { content: " ▼"; }
 td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
-.cell-edit { outline: 2px solid var(--vscode-focusBorder); background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+.row-selected, .row-selected td { background: var(--vscode-list-activeSelectionBackground, #094771); color: var(--vscode-list-activeSelectionForeground, #fff); }
+.cell-edit { outline: 2px solid var(--vscode-focusBorder, #007fd4); background: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #d4d4d4);
   border: none; font-size: 13px; padding: 2px 4px; }
 .resize-handle { position: absolute; top: 0; right: -3px; bottom: 0; width: 6px; cursor: col-resize; z-index: 2; }
-.resize-handle:hover { background: var(--vscode-focusBorder); }
+.resize-handle:hover { background: var(--vscode-focusBorder, #007fd4); }
 .col-menu-wrap { position: relative; }
 .col-menu { position: absolute; top: 100%; right: 0; z-index: 10; margin-top: 2px; min-width: 160px; max-height: 240px; overflow: auto;
-  background: var(--vscode-editor-background); border: 1px solid var(--vscode-panel-border); border-radius: 3px; padding: 4px; }
+  background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); border-radius: 3px; padding: 4px; }
 .col-menu-item { display: flex; align-items: center; gap: 6px; padding: 3px 6px; font-size: 12px; cursor: pointer; white-space: nowrap; }
-.col-menu-item:hover { background: var(--vscode-list-hoverBackground); }
+.col-menu-item:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
 .filter-wrap, .export-wrap { position: relative; }
 .filter-panel { position: absolute; top: 100%; left: 0; z-index: 10; margin-top: 2px; min-width: 540px; max-width: 640px;
-  background: var(--vscode-editor-background); border: 1px solid var(--vscode-input-border); border-radius: 4px; padding: 8px;
+  background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 4px; padding: 8px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.25); }
 .filter-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
 .filter-row .col-select { flex: 0 0 150px; }
 .filter-row .op-select { flex: 0 0 100px; }
 .filter-row .input { flex: 1; min-width: 0; }
-.filter-row .sep { flex: 0 0 auto; color: var(--vscode-descriptionForeground); font-size: 12px; }
+.filter-row .sep { flex: 0 0 auto; color: var(--vscode-descriptionForeground, #808080); font-size: 12px; }
 .filter-row .dp-input { flex: 1; min-width: 0; }
 .filter-row .dp-input :deep(input) { width: 100%; font-size: 12px; padding: 4px 8px;
-  background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-  border: 1px solid var(--vscode-input-border); border-radius: 3px; box-sizing: border-box; }
+  background: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #d4d4d4);
+  border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 3px; box-sizing: border-box; }
 .filter-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
-.filter-summary { font-size: 11px; color: var(--vscode-descriptionForeground); cursor: pointer; max-width: 300px;
+.filter-summary { font-size: 11px; color: var(--vscode-descriptionForeground, #808080); cursor: pointer; max-width: 300px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .export-menu { position: absolute; top: 100%; right: 0; z-index: 10; margin-top: 2px; min-width: 120px;
-  background: var(--vscode-editor-background); border: 1px solid var(--vscode-panel-border); border-radius: 3px; padding: 4px; }
+  background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); border-radius: 3px; padding: 4px; }
 .menu-item { display: block; width: 100%; text-align: left; padding: 4px 8px; font-size: 12px; cursor: pointer;
-  background: transparent; border: none; color: var(--vscode-foreground); }
-.menu-item:hover { background: var(--vscode-list-hoverBackground); }
+  background: transparent; border: none; color: var(--vscode-foreground, #cccccc); }
+.menu-item:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
 .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
-.modal { background: var(--vscode-editor-background); border: 1px solid var(--vscode-panel-border); border-radius: 4px; padding: 16px; min-width: 320px; }
+.modal { background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); border-radius: 4px; padding: 16px; min-width: 320px; }
 .modal-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
-.modal-body { font-size: 12px; color: var(--vscode-foreground); margin-bottom: 14px; }
+.modal-body { font-size: 12px; color: var(--vscode-foreground, #cccccc); margin-bottom: 14px; }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 200; padding: 8px 16px; font-size: 12px;
-  background: var(--vscode-notifications-background, var(--vscode-editor-background)); color: var(--vscode-foreground);
-  border: 1px solid var(--vscode-panel-border); border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+  background: var(--vscode-notifications-background, var(--vscode-editor-background)); color: var(--vscode-foreground, #cccccc);
+  border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
 .cell-edit-wrap { display: inline-flex; min-width: 140px; }
 </style>
 
@@ -623,7 +643,7 @@ td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
   background: var(--vscode-editorWidget-background, var(--vscode-editor-background)) !important;
   border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)) !important;
   border-radius: 4px !important;
-  color: var(--vscode-foreground) !important;
+  color: var(--vscode-foreground, #cccccc) !important;
   box-shadow: 0 4px 12px rgba(0,0,0,0.35) !important;
 }
 .dp__calendar,
@@ -636,38 +656,38 @@ td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
 .dp__time_row,
 .dp__time_controls {
   background: transparent !important;
-  color: var(--vscode-foreground) !important;
+  color: var(--vscode-foreground, #cccccc) !important;
 }
 .dp__month_year_select,
 .dp__button,
 .dp__action_button,
 .dp__arrow_button {
-  color: var(--vscode-foreground) !important;
+  color: var(--vscode-foreground, #cccccc) !important;
 }
 .dp__month_year_select:hover,
 .dp__button:hover,
 .dp__arrow_button:hover,
 .dp__overlay_cell:hover,
 .dp__month_year_select:hover .dp__overlay_cell {
-  background: var(--vscode-list-hoverBackground) !important;
+  background: var(--vscode-list-hoverBackground, #2a2d2e) !important;
 }
 .dp__cell_inner {
-  color: var(--vscode-foreground) !important;
+  color: var(--vscode-foreground, #cccccc) !important;
   border-radius: 3px !important;
 }
 .dp__cell_inner:hover {
-  background: var(--vscode-list-hoverBackground) !important;
+  background: var(--vscode-list-hoverBackground, #2a2d2e) !important;
 }
 .dp__today {
-  border-color: var(--vscode-focusBorder) !important;
+  border-color: var(--vscode-focusBorder, #007fd4) !important;
   color: var(--vscode-textLink-foreground, var(--vscode-focusBorder)) !important;
 }
 .dp__active_date,
 .dp__range_end,
 .dp__range_start,
 .dp__range_between {
-  background: var(--vscode-button-background) !important;
-  color: var(--vscode-button-foreground) !important;
+  background: var(--vscode-button-background, #0e639c) !important;
+  color: var(--vscode-button-foreground, #ffffff) !important;
 }
 .dp__now_invalid,
 .dp__cell_disabled,
@@ -675,22 +695,22 @@ td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
   color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground)) !important;
 }
 .dp__svg {
-  fill: var(--vscode-foreground) !important;
+  fill: var(--vscode-foreground, #cccccc) !important;
 }
 .dp__input {
-  background: var(--vscode-input-background) !important;
-  color: var(--vscode-input-foreground) !important;
-  border: 1px solid var(--vscode-input-border) !important;
+  background: var(--vscode-input-background, #3c3c3c) !important;
+  color: var(--vscode-input-foreground, #d4d4d4) !important;
+  border: 1px solid var(--vscode-input-border, #3c3c3c) !important;
   border-radius: 3px !important;
   font-size: 13px !important;
   padding: 2px 6px !important;
 }
 .dp__input_focus,
 .dp__input:hover {
-  border-color: var(--vscode-focusBorder) !important;
+  border-color: var(--vscode-focusBorder, #007fd4) !important;
 }
 .dp__overlay_cell_active {
-  background: var(--vscode-button-background) !important;
-  color: var(--vscode-button-foreground) !important;
+  background: var(--vscode-button-background, #0e639c) !important;
+  color: var(--vscode-button-foreground, #ffffff) !important;
 }
 </style>

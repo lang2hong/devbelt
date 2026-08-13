@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ConnectionStore, type ConnectionTreeData } from '../../src/connection/connectionStore';
+import { ConnectionStore, type ConnectionTreeData, type SavedConnection } from '../../src/connection/connectionStore';
 
 function createMemento(data: ConnectionTreeData) {
   const values = new Map<string, unknown>([['dbclient.connectionsV2', data]]);
@@ -22,16 +22,17 @@ function createSecrets() {
   };
 }
 
-describe('ConnectionStore credential handling', () => {
-  it('migrates legacy credentials to SecretStorage and excludes them from sync', async () => {
-    const memento = createMemento({
-      groups: [],
-      connections: [{
-        id: 'primary', name: 'Primary', dbType: 'MYSQL' as any,
-        host: 'localhost', port: 3306, user: 'root', password: 'db-secret',
-        sshPassword: 'ssh-secret',
-      }],
-    });
+function conn(over: Partial<SavedConnection>): SavedConnection {
+  return {
+    id: 'primary', name: 'Primary', dbType: 'MYSQL' as any,
+    host: 'localhost', port: 3306, user: 'root',
+    ...over,
+  } as SavedConnection;
+}
+
+describe('ConnectionStore sync model', () => {
+  it('migrates legacy credentials to SecretStorage and includes them in sync payload', async () => {
+    const memento = createMemento({ groups: [], connections: [conn({ password: 'db-secret', sshPassword: 'ssh-secret' })] });
     const secrets = createSecrets();
     const store = new ConnectionStore(memento, secrets as any);
 
@@ -40,64 +41,61 @@ describe('ConnectionStore credential handling', () => {
     expect(memento.get<ConnectionTreeData>('dbclient.connectionsV2')!.connections[0]).not.toHaveProperty('password');
     expect(await secrets.get('dbclient.connection.primary.password')).toBe('db-secret');
     expect(store.get('primary')!.password).toBe('db-secret');
-    expect(store.getSyncTreeData().connections[0]).not.toHaveProperty('sshPassword');
+
+    const syncData = await store.getSyncData();
+    expect(syncData.connections[0].password).toBe('db-secret');
+    expect(syncData.connections[0].sshPassword).toBe('ssh-secret');
   });
 
-  it('clears local credentials when synchronized connection targets change', async () => {
-    const memento = createMemento({
+  it('replaceAllMerge stores the remote password to SecretStorage when remote wins', async () => {
+    const memento = createMemento({ groups: [], connections: [] });
+    const secrets = createSecrets();
+    const store = new ConnectionStore(memento, secrets as any);
+
+    await store.replaceAllMerge({
       groups: [],
-      connections: [{
-        id: 'primary', name: 'Primary', dbType: 'MYSQL' as any,
-        host: 'db.internal', port: 3306, user: 'app', password: 'legacy-password',
-      }],
+      connections: [conn({ name: 'Remote', host: 'db.internal', user: 'app', password: 'remote-password', updateTime: 100 })],
     });
+
+    expect(store.get('primary')!.password).toBe('remote-password');
+    expect(await secrets.get('dbclient.connection.primary.password')).toBe('remote-password');
+  });
+
+  it('replaceAllMerge keeps the local connection when it is newer', async () => {
+    const memento = createMemento({ groups: [], connections: [conn({ name: 'Local', host: 'db.internal', user: 'app', password: 'local-password', updateTime: 200 })] });
     const secrets = createSecrets();
     const store = new ConnectionStore(memento, secrets as any);
     await store.init();
 
-    await store.replaceAll({
+    await store.replaceAllMerge({
       groups: [],
-      connections: [{
-        id: 'primary', name: 'Primary', dbType: 'MYSQL' as any,
-        host: 'replica.internal', port: 3306, user: 'app', password: 'remote-password',
-      }],
+      connections: [conn({ name: 'Remote', host: 'db.internal', user: 'app', password: 'remote-password', updateTime: 100 })],
     });
 
-    expect(store.get('primary')!.password).toBeUndefined();
-    expect(await secrets.get('dbclient.connection.primary.password')).toBeUndefined();
+    expect(store.get('primary')!.name).toBe('Local');
+    expect(store.get('primary')!.password).toBe('local-password');
   });
 
-  it('preserves local credentials when synchronized connection targets match', async () => {
-    const memento = createMemento({
-      groups: [],
-      connections: [{
-        id: 'primary', name: 'Primary', dbType: 'MYSQL' as any,
-        host: 'db.internal', port: 3306, user: 'app', password: 'legacy-password',
-      }],
-    });
+  it('delete wins on merge: remote tombstone hides the local connection', async () => {
+    const memento = createMemento({ groups: [], connections: [conn({ name: 'Primary', host: 'db.internal', user: 'app', password: 'local-password', updateTime: 200 })] });
     const secrets = createSecrets();
     const store = new ConnectionStore(memento, secrets as any);
     await store.init();
 
-    await store.replaceAll({
+    await store.replaceAllMerge({
       groups: [],
-      connections: [{
-        id: 'primary', name: 'Renamed', dbType: 'MYSQL' as any,
-        host: 'db.internal', port: 3306, user: 'app',
-      }],
+      connections: [conn({ name: 'Primary', host: 'db.internal', user: 'app', deleted: true, updateTime: 100 })],
     });
 
-    expect(store.get('primary')!.password).toBe('legacy-password');
+    expect(store.list()).toHaveLength(0);
+    expect(store.get('primary')).toBeUndefined();
   });
 
   it('materializes a saved password back into the connection', async () => {
     const memento = createMemento({ groups: [], connections: [] });
     const secrets = createSecrets();
     const store = new ConnectionStore(memento, secrets as any);
-    await store.save({
-      id: 'primary', name: 'Primary', dbType: 'MYSQL' as any,
-      host: 'localhost', port: 3306, user: 'root', password: 'db-secret',
-    });
+    await store.save(conn({ password: 'db-secret' }));
 
     expect(store.get('primary')!.password).toBe('db-secret');
     expect(store.list()[0].password).toBe('db-secret');
@@ -107,15 +105,9 @@ describe('ConnectionStore credential handling', () => {
     const memento = createMemento({ groups: [], connections: [] });
     const secrets = createSecrets();
     const store = new ConnectionStore(memento, secrets as any);
-    await store.save({
-      id: 'primary', name: 'Primary', dbType: 'MYSQL' as any,
-      host: 'localhost', port: 3306, user: 'root', password: 'db-secret',
-    });
+    await store.save(conn({ password: 'db-secret' }));
 
-    await store.save({
-      id: 'primary', name: 'Primary', dbType: 'MYSQL' as any,
-      host: 'localhost', port: 3306, user: 'root', password: '',
-    });
+    await store.save(conn({ password: '' }));
 
     expect(await secrets.get('dbclient.connection.primary.password')).toBe('db-secret');
     expect(store.get('primary')!.password).toBe('db-secret');

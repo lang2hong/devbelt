@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import type { SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from './baseWebView';
-import { TableProfileStore } from './tableProfileStore';
 import { reconcileColumnOrder, reconcileColumnWidths, reconcileHiddenColumns } from './tableLayout';
 import { CompletionService } from './completionService';
 import { RowEditor } from './rowEditor';
@@ -15,7 +14,6 @@ import { ExportHandler } from './exportHandler';
 export class TableQueryView extends BaseWebView {
   private static readonly queryViews = new Map<string, TableQueryView>();
   private static readonly connRefs = new Map<string, number>();
-  private static profileStore?: TableProfileStore;
   private readonly runner: QueryRunner;
   private hiddenColumns: string[] = [];
   private columnOrder: string[] = [];
@@ -49,28 +47,17 @@ export class TableQueryView extends BaseWebView {
     this.runner = new QueryRunner(conn, manager, table, database, (msg) => this.post(msg));
     this.completionService = new CompletionService(manager, conn, database, (msg) => this.post(msg));
     this.rowEditor = new RowEditor(manager, conn, table!, database, (msg) => this.post(msg), {
-      editablePkColumn: () => this.runner.editablePkColumn,
       refresh: () => this.runner.execute(this.runner.buildSelect()),
     });
     this.exporter = new ExportHandler(conn, manager, table, database, (msg) => this.post(msg));
-    if (this.table) {
-      const saved = TableQueryView.profileStore?.get(conn.id, database, table!);
-      if (saved) {
-        // 仅保留列布局；filter/sort 为临时查询状态，每次打开重置为干净视图。
-        this.hiddenColumns = saved.hiddenColumns || [];
-        this.columnOrder = saved.columnOrder || [];
-        this.columnWidths = saved.columnWidths || {};
-      }
-    }
   }
 
   private get hasTable(): boolean {
     return this.runner.hasTable;
   }
 
-  static init(extensionUri: vscode.Uri, profileStore?: TableProfileStore): void {
+  static init(extensionUri: vscode.Uri): void {
     BaseWebView.init(extensionUri);
-    TableQueryView.profileStore = profileStore;
   }
 
   static open(conn: SavedConnection, table: string, database: string, manager: ConnectionManager): void {
@@ -143,17 +130,15 @@ export class TableQueryView extends BaseWebView {
         else if (this.runner.sortCol === msg.column && this.runner.sortDir === 'DESC') { this.runner.sortCol = ''; this.runner.sortDir = ''; }
         else { this.runner.sortCol = msg.column; this.runner.sortDir = 'ASC'; }
         this.runner.offset = 0; await this.runner.execute(this.runner.buildSelect());
-        await this.persistProfile();
         break;
       case 'filter':
         if (!this.hasTable) return;
         this.runner.filterConditions = Array.isArray(msg.conditions) ? msg.conditions : [];
         this.runner.offset = 0; await this.runner.execute(this.runner.buildSelect());
-        await this.persistProfile();
         break;
       case 'updateCell':
         if (!this.hasTable) return;
-        await this.rowEditor.updateCell(msg.pkColumn, msg.rowId, msg.column, msg.value);
+        await this.rowEditor.updateCell(msg.pkColumns, msg.pkValues, msg.column, msg.value);
         break;
       case 'deleteRows':
         if (!this.hasTable) return;
@@ -269,23 +254,12 @@ export class TableQueryView extends BaseWebView {
     }
   }
 
-  /** Persist current sort/filter/hiddenColumns for this connection+database+table. */
-  private async persistProfile(): Promise<void> {
-    if (!this.hasTable || !this.table || !TableQueryView.profileStore) return;
-    // 仅持久化列布局；filter/sort 为临时状态，下次打开重置为干净视图。
-    await TableQueryView.profileStore.save(this.conn.id, this.database, this.table, {
-      hiddenColumns: this.hiddenColumns,
-      columnOrder: this.columnOrder,
-      columnWidths: this.columnWidths,
-    });
-  }
-
+  /** 切换列显隐（仅 session 内，不持久化）。 */
   private async toggleColumn(column: string, hidden: boolean): Promise<void> {
     const set = new Set(this.hiddenColumns);
     if (hidden) set.add(column);
     else set.delete(column);
     this.hiddenColumns = Array.from(set);
-    await this.persistProfile();
     this.post({ type: 'hiddenColumns', hiddenColumns: this.reconciledHiddenColumns() });
   }
 
@@ -304,7 +278,6 @@ export class TableQueryView extends BaseWebView {
         )),
       );
     }
-    await this.persistProfile();
     this.post({
       type: 'layout',
       columnOrder: this.reconciledColumnOrder(),
@@ -313,12 +286,11 @@ export class TableQueryView extends BaseWebView {
   }
 
   private async resetProfile(): Promise<void> {
-    if (!this.table || !TableQueryView.profileStore) return;
+    if (!this.table) return;
     this.runner.reset();
     this.hiddenColumns = [];
     this.columnOrder = [];
     this.columnWidths = {};
-    await TableQueryView.profileStore.remove(this.conn.id, this.database, this.table);
     this.post({ type: 'profileReset' });
     await this.runner.execute(this.runner.buildSelect());
   }

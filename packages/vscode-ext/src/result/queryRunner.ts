@@ -5,6 +5,7 @@ import type { SavedConnection } from '../connection/connectionStore';
 import { splitSqlStatements } from '../utils/sql';
 import { confirmSqlExecution } from '../utils/sqlSafety';
 import { buildCountSql, buildTableSelect, type FilterCondition } from './tableQuerySql';
+import { diagError } from '../utils/diagnostics';
 
 /**
  * 查询执行器：持有表/查询的查询状态（分页、排序、筛选、运行句柄），
@@ -19,7 +20,6 @@ export class QueryRunner {
   sortDir = '';
   filterConditions: FilterCondition[] = [];
   lastFields: string[] = [];
-  editablePkColumn?: string;
   limit = 100;
   private runningQuery?: QueryService;
   private execQueue: Promise<unknown> = Promise.resolve();
@@ -118,12 +118,12 @@ export class QueryRunner {
       const result = results[results.length - 1];
       let pkCols: string[] = [];
       let cols: any[] = [];
-      this.editablePkColumn = undefined;
       if (this.table) {
         try {
           cols = await session.metadata.getColumns(this.table, this.database);
           pkCols = cols.filter((c: any) => c.isPrimary).map((c: any) => c.name);
-          if (pkCols.length === 1) this.editablePkColumn = pkCols[0];
+          // 无主键时用所有列作为定位列（编辑/删除可用，可能影响多行）
+          if (pkCols.length === 0) pkCols = cols.map((c: any) => c.name);
         } catch {}
       }
       // 表预览时并行查询过滤后总条数，用于分页信息
@@ -158,6 +158,7 @@ export class QueryRunner {
       }
       onExecuted?.(result);
     } catch (err) {
+      diagError('query failed', (err as Error).message);
       this.post({ type: 'error', message: (err as Error).message });
       onExecuted?.(undefined, err as Error);
     } finally {
@@ -182,6 +183,7 @@ export class QueryRunner {
       }
       this.post({ type: 'results', results, sql: `${prefix}${sql}`, transactionState: undefined, explain: true });
     } catch (err) {
+      diagError('explain failed', (err as Error).message);
       this.post({ type: 'error', message: (err as Error).message });
     } finally {
       this.runningQuery = undefined;

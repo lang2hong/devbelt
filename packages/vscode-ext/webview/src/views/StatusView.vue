@@ -165,31 +165,31 @@ const keyVars = computed(() => {
 </template>
 
 <style scoped>
-.app { display: flex; flex-direction: column; height: 100vh; font-family: var(--vscode-font-family); }
-.summary { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border); font-size: 12px; align-items: center; }
-.summary .badge { background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); padding: 2px 8px; border-radius: 3px; font-weight: 600; }
-.summary .kv b { color: var(--vscode-descriptionForeground); margin-right: 4px; font-weight: 500; }
+.app { display: flex; flex-direction: column; height: 100vh; font-family: var(--vscode-font-family, sans-serif); }
+.summary { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); font-size: 12px; align-items: center; }
+.summary .badge { background: var(--vscode-badge-background, #4d4d4d); color: var(--vscode-badge-foreground, #ffffff); padding: 2px 8px; border-radius: 3px; font-weight: 600; }
+.summary .kv b { color: var(--vscode-descriptionForeground, #808080); margin-right: 4px; font-weight: 500; }
 .dashboard { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px 16px;
-  padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border); }
+  padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); }
 .kv-cell { display: flex; flex-direction: column; gap: 2px; font-size: 12px; min-width: 0; }
-.kv-label { color: var(--vscode-descriptionForeground); }
-.kv-val { color: var(--vscode-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tabs { display: flex; border-bottom: 1px solid var(--vscode-panel-border); }
+.kv-label { color: var(--vscode-descriptionForeground, #808080); }
+.kv-val { color: var(--vscode-foreground, #cccccc); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tabs { display: flex; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); }
 .tabs button { padding: 6px 16px; font-size: 12px; cursor: pointer; border: none; background: none;
-  color: var(--vscode-foreground); border-bottom: 2px solid transparent; }
-.tabs button.active { border-bottom-color: var(--vscode-focusBorder); color: var(--vscode-textLink-foreground); }
-.search { padding: 6px 8px; border-bottom: 1px solid var(--vscode-panel-border); }
+  color: var(--vscode-foreground, #cccccc); border-bottom: 2px solid transparent; }
+.tabs button.active { border-bottom-color: var(--vscode-focusBorder, #007fd4); color: var(--vscode-textLink-foreground, #4daafc); }
+.search { padding: 6px 8px; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); }
 .input { width: 100%; box-sizing: border-box; font-size: 12px; padding: 4px 8px;
-  background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-  border: 1px solid var(--vscode-input-border); border-radius: 3px; }
+  background: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #d4d4d4);
+  border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 3px; }
 .content { flex: 1; overflow: auto; }
 table { border-collapse: collapse; font-size: 13px; width: 100%; }
-th, td { border: 1px solid var(--vscode-panel-border); padding: 4px 10px; text-align: left; white-space: nowrap; }
-th { background: var(--vscode-editor-background); position: sticky; top: 0; }
+th, td { border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); padding: 4px 10px; text-align: left; white-space: nowrap; }
+th { background: var(--vscode-editor-background, #1e1e1e); position: sticky; top: 0; }
 .act-col { width: 60px; text-align: center; }
 .btn-kill { cursor: pointer; font-size: 11px; padding: 2px 8px;
-  background: var(--vscode-errorBackground, rgba(204,0,0,0.1)); color: var(--vscode-errorForeground);
-  border: 1px solid var(--vscode-input-border); border-radius: 3px; }
-p { padding: 12px; color: var(--vscode-descriptionForeground); }
-.error { padding: 12px; color: var(--vscode-errorForeground); }
+  background: var(--vscode-errorBackground, rgba(204,0,0,0.1)); color: var(--vscode-errorForeground, #f48771);
+  border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 3px; }
+p { padding: 12px; color: var(--vscode-descriptionForeground, #808080); }
+.error { padding: 12px; color: var(--vscode-errorForeground, #f48771); }
 </style>

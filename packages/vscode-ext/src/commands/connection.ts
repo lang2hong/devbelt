@@ -34,6 +34,27 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     if (node?.conn) ConnectionForm.open(store, () => treeProvider.refresh(), undefined, node.conn);
   });
 
+  sub('dbclient.cloneConnection', (node: DbTreeNode) => {
+    if (!node?.conn) return;
+    const src = node.conn;
+    const cloned: SavedConnection = { ...src, id: '', name: `${src.name || src.host} (copy)` };
+    ConnectionForm.open(store, () => treeProvider.refresh(), undefined, cloned);
+  });
+
+  sub('dbclient.searchConnections', async () => {
+    const list = store.list();
+    if (!list.length) {
+      vscode.window.showInformationMessage(l10n('cmd.noConnection'));
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(
+      list.map((c) => ({ label: c.name || c.host, description: `${c.dbType} · ${c.host}:${c.port}`, conn: c })),
+      { placeHolder: l10n('search.connectionsPlaceholder'), matchOnDescription: true },
+    );
+    if (!picked) return;
+    vscode.commands.executeCommand('dbclient.openConnection', picked.conn);
+  });
+
   sub('dbclient.deleteConnection', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     if (!(await confirm('conn.deleteConfirm', 'table.delete', node.conn.name || node.conn.host))) return;

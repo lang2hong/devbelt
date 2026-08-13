@@ -1,6 +1,6 @@
 import { QueryService } from './queryService';
 import { normalizeColumnMeta } from './normalize';
-import type { ColumnMeta, TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta } from '../types/meta';
+import type { ColumnMeta, TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta } from '../types/meta';
 
 /**
  * 元数据服务（复用查询服务 + 方言）。
@@ -92,6 +92,49 @@ export class MetadataService {
     if (!sql) return [];
     const result = await this.queryService.query(sql);
     return this.queryService.dialect.parseIndexList(result.rows);
+  }
+
+  /** 查询表触发器列表 */
+  async getTriggers(table: string, database?: string): Promise<TriggerMeta[]> {
+    const sql = this.queryService.dialect.getTriggerListSql(table, database);
+    if (!sql) return [];
+    const result = await this.queryService.query(sql);
+    return this.queryService.dialect.parseTriggerList(result.rows);
+  }
+
+  /** 查询触发器定义 */
+  async getTriggerDefinition(name: string, database?: string): Promise<string> {
+    const sql = this.queryService.dialect.getTriggerDefinitionSql(name, database);
+    if (!sql) return '';
+    const result = await this.queryService.query(sql);
+    const row = result.rows[0];
+    if (!row) return '';
+    return row['SQL Original Statement'] || row.definition || row.Trigger || row.Create || '';
+  }
+
+  /** 生成创建索引 SQL */
+  createIndexSql(name: string, table: string, columns: string[], unique: boolean, database?: string): string {
+    return this.queryService.dialect.createIndexSql(name, table, columns, unique, database);
+  }
+
+  /** 生成删除索引 SQL */
+  dropIndexSql(name: string, table: string, database?: string): string {
+    return this.queryService.dialect.dropIndexSql(name, table, database);
+  }
+
+  /** 生成删除触发器 SQL */
+  dropTriggerSql(name: string, table: string, database?: string): string {
+    return this.queryService.dialect.dropTriggerSql(name, table, database);
+  }
+
+  /** 生成创建外键 SQL */
+  createForeignKeySql(name: string, table: string, columns: string[], refTable: string, refColumns: string[], database?: string): string {
+    return this.queryService.dialect.createForeignKeySql(name, table, columns, refTable, refColumns, database);
+  }
+
+  /** 生成删除外键 SQL */
+  dropForeignKeySql(name: string, table: string, database?: string): string {
+    return this.queryService.dialect.dropForeignKeySql(name, table, database);
   }
 
   /** 查询用户列表 */

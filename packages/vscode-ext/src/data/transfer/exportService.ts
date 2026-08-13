@@ -3,7 +3,7 @@ import { DatabaseType } from '@db-client/core';
 import { serializeCsv } from './csv';
 import { serializeJson } from './json';
 
-export type TransferFormat = 'sql' | 'csv' | 'json';
+export type TransferFormat = 'sql' | 'csv' | 'json' | 'xlsx' | 'xml';
 
 export interface ServerInfo {
   name: string;
@@ -58,6 +58,14 @@ export function exportRows(options: ExportRowsOptions): string {
   const { format, columns, rows, table, database, dialect } = options;
   if (format === 'csv') return serializeCsv(columns, rows);
   if (format === 'json') return serializeJson(columns, rows);
+  if (format === 'xlsx') {
+    const { serializeXlsx } = require('./xlsx');
+    return serializeXlsx(columns, rows).toString('base64');
+  }
+  if (format === 'xml') {
+    const { serializeXml } = require('./xml');
+    return serializeXml(columns, rows);
+  }
   if (!table || !dialect) throw new Error('SQL export requires a target table and database dialect.');
   return dialect.buildInsertSql(rows, columns, table, database);
 }

@@ -3,6 +3,8 @@ import { DatabaseType } from '@db-client/core';
 import type { SavedQuery } from '@db-client/core';
 import type { SecretStorage } from 'vscode';
 import { QueryStore, type QueryFolder } from './queryStore';
+import { mergeById } from '../utils/merge';
+import { EventEmitter, type Event } from '../utils/event';
 
 /**
  * 已保存的连接（持久化到 VSCode 全局状态）。
@@ -33,6 +35,12 @@ export interface SavedConnection extends ConnectionConfig {
   environment?: 'development' | 'test' | 'staging' | 'production';
   /** Reject write statements before they are sent to the database. */
   readOnly?: boolean;
+  /** 创建时间戳（ms） */
+  createTime?: number;
+  /** 最近更新时间戳（ms），合并同步按此判定先后 */
+  updateTime?: number;
+  /** 软删除墓碑：true 表示已删除，记录保留以跨端传播删除语义 */
+  deleted?: boolean;
 }
 
 /**
@@ -45,6 +53,12 @@ export interface ConnectionGroup {
   name: string;
   /** 父分组 id；顶层分组为 undefined */
   parentId?: string;
+  /** 创建时间戳（ms） */
+  createTime?: number;
+  /** 最近更新时间戳（ms） */
+  updateTime?: number;
+  /** 软删除墓碑 */
+  deleted?: boolean;
 }
 
 /**
@@ -69,12 +83,17 @@ export type { QueryFolder } from './queryStore';
  * 连接存储：负责分组与连接的增删改查。
  * 使用 VSCode 全局状态（Memento）持久化，跨窗口共享。
  * 保存查询与文件夹委托给内部的 QueryStore。
+ * 删除为软删除（置 `deleted` 墓碑），记录保留以支持跨端同步传播删除语义。
+ * 密码存于 SecretStorage，同步时随 E2EE payload 一并materialize/还原。
  */
 export class ConnectionStore {
   private static readonly KEY = 'dbclient.connectionsV2';
   private static readonly SENSITIVE_FIELDS = ['password', 'sshPassword', 'sshPassphrase'] as const;
   private readonly secretCache = new Map<string, string>();
   private readonly queryStore: QueryStore;
+  private readonly changedEmitter = new EventEmitter<void>();
+  /** 数据变更事件（连接/分组/查询，含子 QueryStore 转发），供自动同步订阅。 */
+  readonly onChanged: Event<void> = this.changedEmitter.event;
 
   constructor(
     private readonly memento: {
@@ -84,21 +103,38 @@ export class ConnectionStore {
     private readonly secrets: SecretStorage,
   ) {
     this.queryStore = new QueryStore(memento);
+    this.queryStore.onChanged(() => this.changedEmitter.fire());
   }
 
   /**
-   * Moves legacy plaintext credentials out of Memento before the explorer is
-   * initialized. Sync payloads only ever use the sanitized tree afterwards.
+   * 初始化：迁移历史明文凭据到 SecretStorage，并为连接/分组补全
+   * `createTime`/`updateTime`/`deleted` 默认值；同时迁移保存查询字段名。幂等。
    */
   async init(): Promise<void> {
     const data = this.getTreeData();
     let changed = false;
+
+    // 分组字段补全
+    data.groups.forEach((g: ConnectionGroup) => {
+      if (g.createTime === undefined) { g.createTime = 0; changed = true; }
+      if (g.updateTime === undefined) { g.updateTime = 0; changed = true; }
+      if (g.deleted === undefined) { g.deleted = false; changed = true; }
+    });
+
+    // 连接：历史凭据迁移 + 字段补全
+    let connChanged = false;
     data.connections = await Promise.all(data.connections.map(async (connection) => {
-      const { connection: sanitized, changed: connectionChanged } = await this.sanitize(connection);
-      changed ||= connectionChanged;
+      const { connection: sanitized, changed: sanitizeChanged } = await this.sanitize(connection);
+      connChanged ||= sanitizeChanged;
+      if (sanitized.createTime === undefined) { sanitized.createTime = 0; connChanged = true; }
+      if (sanitized.updateTime === undefined) { sanitized.updateTime = 0; connChanged = true; }
+      if (sanitized.deleted === undefined) { sanitized.deleted = false; connChanged = true; }
       return sanitized;
     }));
+    changed ||= connChanged;
     if (changed) await this.memento.update(ConnectionStore.KEY, data);
+
+    await this.queryStore.migrate();
   }
 
   /** 读取完整树数据 */
@@ -106,19 +142,19 @@ export class ConnectionStore {
     return this.memento.get<ConnectionTreeData>(ConnectionStore.KEY) || emptyTreeData();
   }
 
-  /** 读取全部分组 */
+  /** 读取全部分组（已过滤软删除墓碑） */
   getGroups(): ConnectionGroup[] {
-    return this.getTreeData().groups;
+    return this.getTreeData().groups.filter((g) => !g.deleted);
   }
 
-  /** 读取全部已保存连接 */
+  /** 读取全部已保存连接（已过滤软删除墓碑） */
   list(): SavedConnection[] {
-    return this.getTreeData().connections.map((connection) => this.materialize(connection));
+    return this.getTreeData().connections.filter((c) => !c.deleted).map((connection) => this.materialize(connection));
   }
 
-  /** 按 id 查找连接，未找到返回 undefined */
+  /** 按 id 查找连接（跳过软删除），未找到返回 undefined */
   get(id: string): SavedConnection | undefined {
-    const connection = this.getTreeData().connections.find((c) => c.id === id);
+    const connection = this.getTreeData().connections.find((c) => c.id === id && !c.deleted);
     return connection ? this.materialize(connection) : undefined;
   }
 
@@ -126,24 +162,32 @@ export class ConnectionStore {
   async save(conn: SavedConnection): Promise<void> {
     const data = this.getTreeData();
     const { connection } = await this.sanitize(conn);
+    const now = Date.now();
     const idx = data.connections.findIndex((c) => c.id === connection.id);
     if (idx >= 0) {
+      connection.createTime = connection.createTime ?? data.connections[idx].createTime ?? now;
+      connection.updateTime = now;
       data.connections[idx] = connection;
     } else {
+      connection.createTime = connection.createTime ?? now;
+      connection.updateTime = now;
+      if (connection.deleted === undefined) connection.deleted = false;
       data.connections.push(connection);
     }
     await this.memento.update(ConnectionStore.KEY, data);
+    this.changedEmitter.fire();
   }
 
-  /** 删除连接 */
+  /** 删除连接（软删除：置墓碑，记录保留；清理凭据以避免墓碑携带密码） */
   async remove(id: string): Promise<void> {
     const data = this.getTreeData();
-    data.connections = data.connections.filter((c) => c.id !== id);
+    const conn = data.connections.find((c) => c.id === id);
+    if (!conn) return;
+    conn.deleted = true;
+    conn.updateTime = Date.now();
     await this.memento.update(ConnectionStore.KEY, data);
-    await Promise.all(ConnectionStore.SENSITIVE_FIELDS.map(async (field) => {
-      this.secretCache.delete(this.secretKey(id, field));
-      await this.secrets.delete(this.secretKey(id, field));
-    }));
+    await this.clearSecrets(id);
+    this.changedEmitter.fire();
   }
 
   /** 移动连接到指定分组 */
@@ -152,15 +196,19 @@ export class ConnectionStore {
     const conn = data.connections.find((c) => c.id === connId);
     if (!conn) return;
     conn.groupId = groupId;
+    conn.updateTime = Date.now();
     await this.memento.update(ConnectionStore.KEY, data);
+    this.changedEmitter.fire();
   }
 
   /** 新建分组，返回其 id */
   async addGroup(name: string, parentId?: string): Promise<string> {
     const data = this.getTreeData();
-    const group: ConnectionGroup = { id: `g-${Date.now()}`, name, parentId };
+    const now = Date.now();
+    const group: ConnectionGroup = { id: `g-${now}`, name, parentId, createTime: now, updateTime: now, deleted: false };
     data.groups.push(group);
     await this.memento.update(ConnectionStore.KEY, data);
+    this.changedEmitter.fire();
     return group.id;
   }
 
@@ -169,19 +217,25 @@ export class ConnectionStore {
     if (!id) return;
     const data = this.getTreeData();
     if (data.groups.some((g) => g.id === id)) return;
-    data.groups.push({ id, name, parentId });
+    const now = Date.now();
+    data.groups.push({ id, name, parentId, createTime: now, updateTime: now, deleted: false });
     await this.memento.update(ConnectionStore.KEY, data);
+    this.changedEmitter.fire();
   }
 
   /** 重命名分组 */
   async renameGroup(id: string, name: string): Promise<void> {
     const data = this.getTreeData();
     const g = data.groups.find((x) => x.id === id);
-    if (g) g.name = name;
-    await this.memento.update(ConnectionStore.KEY, data);
+    if (g) {
+      g.name = name;
+      g.updateTime = Date.now();
+      await this.memento.update(ConnectionStore.KEY, data);
+      this.changedEmitter.fire();
+    }
   }
 
-  /** 删除分组（递归删除子分组，组内连接移回未分组） */
+  /** 删除分组（递归软删除子分组，组内连接移回未分组） */
   async removeGroup(id: string): Promise<void> {
     const data = this.getTreeData();
     const toDelete = new Set<string>();
@@ -190,33 +244,43 @@ export class ConnectionStore {
       data.groups.filter((x) => x.parentId === gid).forEach((child) => collect(child.id));
     };
     collect(id);
-    data.groups = data.groups.filter((g) => !toDelete.has(g.id));
+    const now = Date.now();
+    data.groups.forEach((g) => {
+      if (toDelete.has(g.id)) { g.deleted = true; g.updateTime = now; }
+    });
     // 被删分组内的连接移回未分组
     data.connections.forEach((c) => {
-      if (c.groupId && toDelete.has(c.groupId)) c.groupId = undefined;
+      if (c.groupId && toDelete.has(c.groupId)) { c.groupId = undefined; c.updateTime = now; }
     });
     await this.memento.update(ConnectionStore.KEY, data);
+    this.changedEmitter.fire();
   }
 
-  /** 整体覆写树数据（同步用） */
-  async replaceAll(data: ConnectionTreeData): Promise<void> {
-    const existing = new Map(this.getTreeData().connections.map((connection) => [connection.id, connection]));
-    const connections = await Promise.all(data.connections.map(async (connection) => {
-      const previous = existing.get(connection.id);
-      if (previous && !this.hasSameTarget(previous, connection)) {
-        await this.clearSecrets(connection.id);
-      }
-      // Remote sync is metadata-only; never import credentials even from a legacy payload.
-      const remote = { ...connection };
-      for (const field of ConnectionStore.SENSITIVE_FIELDS) delete remote[field];
-      return (await this.sanitize(remote)).connection;
-    }));
-    await this.memento.update(ConnectionStore.KEY, { ...data, connections });
+  /**
+   * 合并远端树数据到本地（同步 pull 用）。
+   *  - 分组与连接按 id 并集合并：删除优先，否则最新 `updateTime` 胜。
+   *  - 连接密码（敏感字段）随胜出记录处理：有值则写回 SecretStorage，无值则清理本地残留凭据。
+   *  - memento 始终存储剥离凭据的版本。
+   */
+  async replaceAllMerge(remote: ConnectionTreeData): Promise<void> {
+    const local = this.getTreeData();
+    // materialize 本地连接（注入凭据）以与远端公平合并
+    const localConns = await Promise.all(local.connections.map((c) => this.materializeAsync(c)));
+    const mergedGroups = mergeById(local.groups, remote.groups);
+    const mergedConns = mergeById(localConns, remote.connections);
+    const sanitized = await Promise.all(mergedConns.map(async (c) => this.reconcileSecrets(c)));
+    await this.memento.update(ConnectionStore.KEY, { groups: mergedGroups, connections: sanitized });
+    this.changedEmitter.fire();
   }
 
-  /** Returns a credential-free snapshot suitable for encrypted remote sync. */
-  getSyncTreeData(): ConnectionTreeData {
-    return JSON.parse(JSON.stringify(this.getTreeData())) as ConnectionTreeData;
+  /**
+   * 读取同步用全量数据：连接 materialize 含密码（含墓碑），分组原样。
+   * 该结果经 SyncManager 加密后上传；服务端只见密文。
+   */
+  async getSyncData(): Promise<ConnectionTreeData> {
+    const tree = this.getTreeData();
+    const connections = await Promise.all(tree.connections.map((c) => this.materializeAsync(c)));
+    return { groups: tree.groups, connections };
   }
 
   private async sanitize(connection: SavedConnection): Promise<{ connection: SavedConnection; changed: boolean }> {
@@ -238,6 +302,31 @@ export class ConnectionStore {
     return { connection: sanitized as unknown as SavedConnection, changed };
   }
 
+  /**
+   * 合并后凭据对账：胜出记录的敏感字段为权威值——有值写回 SecretStorage，
+   * 无值则清理本地残留凭据（远端权威地表示该连接无此密码）。
+   * 返回剥离敏感字段的版本供 memento 存储。
+   */
+  private async reconcileSecrets(connection: SavedConnection): Promise<SavedConnection> {
+    const out = { ...connection } as Record<string, unknown>;
+    for (const field of ConnectionStore.SENSITIVE_FIELDS) {
+      const key = this.secretKey(connection.id, field);
+      const value = out[field];
+      if (typeof value === 'string' && value.length > 0) {
+        await this.secrets.store(key, value);
+        this.secretCache.set(key, value);
+      } else {
+        this.secretCache.delete(key);
+        await this.secrets.delete(key);
+      }
+      delete out[field];
+    }
+    if (out.createTime === undefined) out.createTime = 0;
+    if (out.updateTime === undefined) out.updateTime = 0;
+    if (out.deleted === undefined) out.deleted = false;
+    return out as unknown as SavedConnection;
+  }
+
   private materialize(connection: SavedConnection): SavedConnection {
     const resolved = { ...connection } as Record<string, unknown>;
     for (const field of ConnectionStore.SENSITIVE_FIELDS) {
@@ -248,29 +337,27 @@ export class ConnectionStore {
     return resolved as unknown as SavedConnection;
   }
 
-  private secretKey(id: string, field: typeof ConnectionStore.SENSITIVE_FIELDS[number]): string {
-    return `dbclient.connection.${id}.${field}`;
+  /** materialize 但从 SecretStorage 异步读取未缓存凭据（同步 push 用） */
+  private async materializeAsync(connection: SavedConnection): Promise<SavedConnection> {
+    const resolved = { ...connection } as Record<string, unknown>;
+    for (const field of ConnectionStore.SENSITIVE_FIELDS) {
+      const key = this.secretKey(connection.id, field);
+      let value = this.secretCache.get(key);
+      if (value === undefined) {
+        const stored = await this.secrets.get(key);
+        if (stored !== undefined) {
+          this.secretCache.set(key, stored);
+          value = stored;
+        }
+      }
+      if (value !== undefined) resolved[field] = value;
+    }
+    if (!resolved.dbType) resolved.dbType = DatabaseType.MYSQL;
+    return resolved as unknown as SavedConnection;
   }
 
-  /** Credentials never follow a synchronized connection to a changed endpoint. */
-  private hasSameTarget(a: SavedConnection, b: SavedConnection): boolean {
-    const target = (connection: SavedConnection) => [
-      connection.dbType,
-      connection.host,
-      connection.port,
-      connection.user,
-      connection.database,
-      connection.schema,
-      connection.dbPath,
-      connection.socketPath,
-      connection.useConnectionString,
-      connection.connectionUrl,
-      connection.sshHost,
-      connection.sshPort,
-      connection.sshUser,
-      connection.sshPrivateKeyPath,
-    ];
-    return JSON.stringify(target(a)) === JSON.stringify(target(b));
+  private secretKey(id: string, field: typeof ConnectionStore.SENSITIVE_FIELDS[number]): string {
+    return `dbclient.connection.${id}.${field}`;
   }
 
   private async clearSecrets(id: string): Promise<void> {
@@ -293,7 +380,7 @@ export class ConnectionStore {
   }
 
   /** 新增保存查询，返回其 id */
-  saveQuery(q: Omit<SavedQuery, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
+  saveQuery(q: Omit<SavedQuery, 'id' | 'createTime' | 'updateTime'>): Promise<string> {
     return this.queryStore.saveQuery(q);
   }
 
@@ -327,5 +414,15 @@ export class ConnectionStore {
   /** 删除保存查询文件夹，内部查询移回根级 */
   removeQueryFolder(id: string): Promise<void> {
     return this.queryStore.removeQueryFolder(id);
+  }
+
+  /** 同步：读取保存查询原始数据（含墓碑） */
+  getQueriesForSync(): { queries: SavedQuery[]; folders: QueryFolder[] } {
+    return this.queryStore.getSyncData();
+  }
+
+  /** 同步：合并远端保存查询数据 */
+  replaceQueriesForSync(remote: { queries: SavedQuery[]; folders: QueryFolder[] }): Promise<void> {
+    return this.queryStore.replaceAllMerge(remote);
   }
 }

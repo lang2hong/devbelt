@@ -5,6 +5,7 @@ export type DatabaseOperation =
   | 'createDatabase'
   | 'dropDatabase'
   | 'renameTable'
+  | 'renameView'
   | 'duplicateTable'
   | 'truncateTable'
   | 'getTableDefinition'

@@ -3,8 +3,6 @@ import type { SavedConnection } from '../connection/connectionStore';
 import { confirmSqlExecution } from '../utils/sqlSafety';
 
 export interface RowEditorOptions {
-  /** 当前可编辑主键列（由视图在查询后根据元数据设置）。 */
-  editablePkColumn: () => string | undefined;
   /** 数据变更后刷新结果（视图负责重新执行查询）。 */
   refresh: () => Promise<void>;
 }
@@ -12,8 +10,10 @@ export interface RowEditorOptions {
 /**
  * 行编辑器：单元格更新 / 删除行 / 插入行。
  *
- * 与视图解耦：经回调读取可编辑主键状态、触发结果刷新。
+ * 与视图解耦：经回调触发结果刷新。
  * SQL 生成与转义委托给 db-core 的 DataService。
+ *
+ * 无主键表使用所有列作为定位列（WHERE），可能影响多行（与 Navicat 行为一致）。
  */
 export class RowEditor {
   constructor(
@@ -25,15 +25,15 @@ export class RowEditor {
     private readonly opts: RowEditorOptions,
   ) {}
 
-  async updateCell(pkCol: string, rowId: any, col: string, val: string): Promise<void> {
+  async updateCell(pkColumns: string[], pkValues: any[], col: string, val: string): Promise<void> {
     try {
-      if (!this.opts.editablePkColumn() || pkCol !== this.opts.editablePkColumn()) {
-        this.post({ type: 'error', message: 'Inline editing requires a single-column primary key.' });
+      if (!pkColumns.length) {
+        this.post({ type: 'error', message: 'No identifying columns for this row.' });
         return;
       }
-      if (!(await confirmSqlExecution(this.conn, `UPDATE ${this.table} SET ${col} = ? WHERE ${pkCol} = ?`))) return;
+      if (!(await confirmSqlExecution(this.conn, `UPDATE ${this.table} SET ${col} = ? WHERE ${pkColumns.join(', ')} = ?`))) return;
       const session = await this.manager.connect(this.conn);
-      await session.data.updateCell(this.table, pkCol, rowId, col, val === '' ? null : val, this.database);
+      await session.data.updateCell(this.table, pkColumns, pkValues, col, val === '' ? null : val, this.database);
       this.post({ type: 'cellUpdated' });
       await this.opts.refresh();
     } catch (err) {
@@ -41,18 +41,20 @@ export class RowEditor {
     }
   }
 
-  async deleteRows(rows: { pkColumn: string; pkValue: any }[]): Promise<void> {
+  async deleteRows(rows: { pkColumns: string[]; pkValues: any[] }[]): Promise<void> {
     try {
-      if (!rows.length || !this.opts.editablePkColumn() || rows.some((row) => row.pkColumn !== this.opts.editablePkColumn())) {
-        this.post({ type: 'error', message: 'Row deletion requires a single-column primary key.' });
+      if (!rows.length) return;
+      const cols = rows[0].pkColumns;
+      if (!cols.length) {
+        this.post({ type: 'error', message: 'No identifying columns for row deletion.' });
         return;
       }
-      if (!(await confirmSqlExecution(this.conn, `DELETE FROM ${this.table} WHERE ${rows[0]?.pkColumn || 'id'} = ?`))) return;
+      if (!(await confirmSqlExecution(this.conn, `DELETE FROM ${this.table} WHERE ${cols.join(', ')} = ?`))) return;
       const session = await this.manager.connect(this.conn);
       await session.data.deleteRows(
         this.table,
-        this.opts.editablePkColumn()!,
-        rows.map((r) => r.pkValue),
+        cols,
+        rows.map((r) => r.pkValues),
         this.database,
       );
       this.post({ type: 'rowsDeleted', count: rows.length });

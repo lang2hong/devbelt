@@ -9,7 +9,7 @@ import { DbTreeNode, NodeKind, type CategoryType } from './dbTreeNode';
  * 与树的结构（根/分组/连接/数据库）解耦，便于独立测试。
  */
 export interface MetadataSource {
-  getTables(db: string): Promise<{ name: string; table_rows?: string; comment?: string }[]>;
+  getTables(db: string): Promise<{ name: string; table_rows?: string; comment?: string; data_length?: string; index_length?: string; auto_increment?: string }[]>;
   getViews(db: string): Promise<{ name: string }[]>;
   getFunctions(db: string): Promise<{ name: string; type?: string }[]>;
   getEvents(db: string): Promise<{ name: string }[]>;
@@ -52,11 +52,13 @@ export class MetadataNodeBuilder {
         undefined,
         database,
       );
-      if (t.table_rows !== undefined) {
-        node.description = String(t.table_rows) + ' rows';
+      const rows = t.table_rows !== undefined ? String(t.table_rows) + ' rows' : '';
+      if (rows) {
+        node.description = rows;
       } else if (t.comment) {
         node.description = t.comment;
       }
+      node.tooltip = formatTableTooltip(t);
       node.command = { command: 'dbclient.previewTable', title: 'Preview', arguments: [node] };
       return node;
     });
@@ -133,4 +135,21 @@ export class MetadataNodeBuilder {
       return node;
     });
   }
+}
+
+function formatTableTooltip(t: { table_rows?: string; comment?: string; data_length?: string; index_length?: string; auto_increment?: string }): string {
+  const parts: string[] = [];
+  if (t.table_rows !== undefined) parts.push(`Rows: ${t.table_rows}`);
+  const total = (Number(t.data_length) || 0) + (Number(t.index_length) || 0);
+  if (total > 0) parts.push(`Size: ${formatSize(total)}`);
+  if (t.auto_increment) parts.push(`Auto Increment: ${t.auto_increment}`);
+  if (t.comment) parts.push(`Comment: ${t.comment}`);
+  return parts.join('\n');
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+  return (bytes / 1073741824).toFixed(1) + ' GB';
 }

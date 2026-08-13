@@ -98,6 +98,7 @@ export class QueryService {
     if (this.activeCancels.size === 0) return false;
     for (const cancelFn of this.activeCancels.values()) cancelFn();
     this.activeCancels.clear();
+    this.connection.abortQuery();
     return true;
   }
 

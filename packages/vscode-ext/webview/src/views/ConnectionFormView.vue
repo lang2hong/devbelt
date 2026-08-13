@@ -280,35 +280,35 @@ function save(): void {
 <style scoped>
 .container {
   max-width: 480px; margin: 40px auto; padding: 24px 28px;
-  background: var(--vscode-editorWidget-background);
+  background: var(--vscode-editorWidget-background, #252526);
   border: 1px solid var(--vscode-panel-border, rgba(255,255,255,0.1));
   border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 h2 { margin: 0 0 20px; font-size: 18px; font-weight: 600; }
 .field { margin-bottom: 14px; }
-label { display: block; font-size: 12px; margin-bottom: 5px; color: var(--vscode-descriptionForeground); font-weight: 500; }
+label { display: block; font-size: 12px; margin-bottom: 5px; color: var(--vscode-descriptionForeground, #808080); font-weight: 500; }
 input, select {
   width: 100%; box-sizing: border-box; padding: 7px 10px; font-size: 13px;
-  background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #d4d4d4);
   border: 1px solid var(--vscode-input-border, rgba(255,255,255,0.15)); border-radius: 4px;
 }
-input:focus, select:focus { outline: none; border-color: var(--vscode-focusBorder); }
+input:focus, select:focus { outline: none; border-color: var(--vscode-focusBorder, #007fd4); }
 .row { display: flex; gap: 12px; }
 .row .field { flex: 1; }
 .pw { display: flex; gap: 6px; align-items: center; }
 .pw input { flex: 1; }
-.pw .toggle { flex: 0 0 auto; padding: 7px 10px; cursor: pointer; border: 1px solid var(--vscode-input-border, rgba(255,255,255,0.15)); border-radius: 4px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); font-size: 12px; }
-.pw .toggle:hover { background: var(--vscode-button-secondaryHoverBackground); }
+.pw .toggle { flex: 0 0 auto; padding: 7px 10px; cursor: pointer; border: 1px solid var(--vscode-input-border, rgba(255,255,255,0.15)); border-radius: 4px; background: var(--vscode-button-secondaryBackground, #3a3d41); color: var(--vscode-button-secondaryForeground, #ffffff); font-size: 12px; }
+.pw .toggle:hover { background: var(--vscode-button-secondaryHoverBackground, #45494e); }
 .actions { margin-top: 24px; display: flex; gap: 10px; }
 button {
   flex: 1; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer;
   font-size: 13px; font-weight: 500;
-  background: var(--vscode-button-background); color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #ffffff);
 }
-button:hover { background: var(--vscode-button-hoverBackground); }
-button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
-button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
+button:hover { background: var(--vscode-button-hoverBackground, #1177bb); }
+button.secondary { background: var(--vscode-button-secondaryBackground, #3a3d41); color: var(--vscode-button-secondaryForeground, #ffffff); }
+button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground, #45494e); }
 #status { margin-top: 14px; font-size: 12px; min-height: 18px; }
-#status.ok { color: var(--vscode-gitDecoration-untrackedResourceForeground); }
-#status.err { color: var(--vscode-errorForeground); }
+#status.ok { color: var(--vscode-gitDecoration-untrackedResourceForeground, #73c991); }
+#status.err { color: var(--vscode-errorForeground, #f48771); }
 </style>

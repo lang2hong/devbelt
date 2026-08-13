@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
-import { SchemaDiffService, DatabaseType } from '@db-client/core';
+import { SchemaDiffService, BackupService, DataTransferService, DatabaseType } from '@db-client/core';
 import { DbTreeNode } from '../tree/dbTreeNode';
 import { wrapIdentForConn, splitSqlStatements } from '../utils/sql';
 import { confirmSqlExecution } from '../utils/sqlSafety';
 import { parseCsv } from '../data/transfer/csv';
 import { parseJson } from '../data/transfer/json';
+import { parseXlsx } from '../data/transfer/xlsx';
+import { parseXml } from '../data/transfer/xml';
 import { autoMapFields, type FieldMapping } from '../data/transfer/fieldMapper';
 import { exportTable, TransferCancelledError, type TransferFormat } from '../data/transfer/exportService';
 import { importRows } from '../data/transfer/importService';
@@ -47,7 +49,8 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
       openLabel: l10n('import.selectFile'),
     });
     if (!uri?.[0]) return;
-    const text = Buffer.from(await vscode.workspace.fs.readFile(uri[0])).toString('utf8');
+    const raw = await vscode.workspace.fs.readFile(uri[0]);
+    const text = format === 'xlsx' ? Buffer.from(raw).toString('base64') : Buffer.from(raw).toString('utf8');
     if (format === 'sql') {
       await importSqlScript(node, text, manager, treeProvider, connCtx);
       return;
@@ -60,6 +63,44 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     await runExportWizard(node, manager, connCtx);
   });
 
+  sub('dbclient.restoreDatabase', async (node: DbTreeNode) => {
+    if (!node?.conn) return;
+    const uri = await vscode.window.showOpenDialog({
+      filters: { 'SQL Files': ['sql'] },
+      canSelectMany: false,
+      openLabel: 'Select SQL Dump File',
+    });
+    if (!uri?.length) return;
+    const confirmed = await vscode.window.showWarningMessage(
+      `Restore SQL dump to "${node.database || node.conn.database}"? This will overwrite existing data.`,
+      { modal: true },
+      'Restore',
+    );
+    if (confirmed !== 'Restore') return;
+    const session = await manager.connect(node.conn);
+    const content = Buffer.from(await vscode.workspace.fs.readFile(uri[0])).toString('utf8');
+    const statements = splitSqlStatements(content);
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'Restoring database...', cancellable: true },
+      async (progress, token) => {
+        try {
+          let completed = 0;
+          await BackupService.restore(session.query, statements, {
+            onProgress: (p: any) => {
+              completed = p.completed;
+              progress.report({ message: `${p.completed}/${p.total}`, increment: 0 });
+            },
+            isCancelled: () => token.isCancellationRequested,
+          });
+          vscode.window.showInformationMessage(`Restore complete: ${completed} statements executed.`);
+          treeProvider.refresh();
+        } catch (err) {
+          vscode.window.showErrorMessage(`Restore failed: ${(err as Error).message}`);
+        }
+      },
+    );
+  });
+
   sub('dbclient.importTable', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     const format = await pickFormat('import');
@@ -70,7 +111,8 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
       openLabel: l10n('import.selectFile'),
     });
     if (!uri?.[0]) return;
-    const text = Buffer.from(await vscode.workspace.fs.readFile(uri[0])).toString('utf8');
+    const raw = await vscode.workspace.fs.readFile(uri[0]);
+    const text = format === 'xlsx' ? Buffer.from(raw).toString('base64') : Buffer.from(raw).toString('utf8');
     if (format === 'sql') {
       await importSqlScript(node, text, manager, treeProvider, connCtx);
       return;
@@ -106,6 +148,55 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     const header = `-- Diff: ${node.database} -> ${target.value} (${added} added, ${removed} removed, ${changed} changed)\n\n`;
     await openSqlDoc(header + syncSql);
   });
+
+  sub('dbclient.syncDatabase', async (node: DbTreeNode) => {
+    if (!node?.conn || !node?.database) return;
+    const conns = deps.store.getTreeData().connections.filter((c) => c.id !== node.conn!.id);
+    if (!conns.length) {
+      vscode.window.showWarningMessage('No other connections to sync to.');
+      return;
+    }
+    const target = await vscode.window.showQuickPick(
+      conns.map((c) => ({ label: c.name || c.host, description: c.dbType, value: c })),
+      { placeHolder: `Sync "${node.database}" to which connection?` },
+    );
+    if (!target) return;
+    const targetSession = await manager.connect(target.value);
+    const targetDbs = await targetSession.metadata.getDatabases();
+    const targetDb = await vscode.window.showQuickPick(
+      targetDbs.map((d: string) => ({ label: d, value: d })),
+      { placeHolder: `Sync to which database?` },
+    );
+    if (!targetDb) return;
+    const confirmed = await vscode.window.showWarningMessage(
+      `Sync "${node.database}" → "${targetDb.value}" on "${target.value.name || target.value.host}"? This will modify target database.`,
+      { modal: true },
+      'Sync',
+    );
+    if (confirmed !== 'Sync') return;
+    const sourceSession = await manager.connect(node.conn);
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'Syncing database...', cancellable: true },
+      async (progress, token) => {
+        const result = await DataTransferService.transferDatabase(
+          sourceSession.query, sourceSession.metadata, sourceSession.table, node.database!,
+          targetSession.query, targetSession.metadata, targetDb.value,
+          {
+            onProgress: (p: { table: string; phase: string }) => progress.report({ message: `${p.table} (${p.phase})` }),
+            isCancelled: () => token.isCancellationRequested,
+          },
+        );
+        if (result.errors.length) {
+          vscode.window.showWarningMessage(
+            `Sync complete with ${result.errors.length} errors. ${result.tablesSynced} tables synced.`,
+          );
+        } else {
+          vscode.window.showInformationMessage(`Sync complete: ${result.tablesSynced} tables synced.`);
+        }
+        treeProvider.refresh();
+      },
+    );
+  });
 }
 
 export async function runExportWizard(
@@ -118,7 +209,6 @@ export async function runExportWizard(
   const format = await pickFormat('export');
   if (!format) return;
   const session = await manager.connect(node.conn);
-  if (!requireCapability(session, 'dumpTable')) return;
   const database = await pickExportDatabase(node, session.metadata.getDatabases.bind(session.metadata));
   if (database === undefined && node.conn.dbType === DatabaseType.MYSQL && !node.database) return;
   const tables = fixedTable ? [fixedTable] : await pickTables(session.metadata.getTables.bind(session.metadata), database);
@@ -245,8 +335,15 @@ async function importStructuredData(
       );
       if (!header) return;
       source = parseCsv(text, header.value);
-    } else {
+    } else if (format === 'json') {
       source = parseJson(text);
+    } else if (format === 'xlsx') {
+      const buffer = Buffer.from(text, 'base64');
+      source = { columns: parseXlsx(buffer).length ? Object.keys(parseXlsx(buffer)[0]) : [], rows: parseXlsx(buffer) };
+    } else if (format === 'xml') {
+      source = { columns: parseXml(text).length ? Object.keys(parseXml(text)[0]) : [], rows: parseXml(text) };
+    } else {
+      throw new Error(`Unsupported format: ${format}`);
     }
   } catch (error) {
     vscode.window.showErrorMessage(l10n('import.parseFailed', { message: (error as Error).message }));
@@ -338,11 +435,19 @@ async function pickTables(getTables: (database?: string) => Promise<{ name: stri
 }
 
 function importFilters(format: TransferFormat): Record<string, string[]> {
-  return format === 'csv' ? { CSV: ['csv'] } : format === 'json' ? { JSON: ['json'] } : { 'SQL scripts': ['sql'] };
+  if (format === 'csv') return { CSV: ['csv'] };
+  if (format === 'json') return { JSON: ['json'] };
+  if (format === 'xlsx') return { Excel: ['xlsx'] };
+  if (format === 'xml') return { XML: ['xml'] };
+  return { 'SQL scripts': ['sql'] };
 }
 
 function exportFilters(format: TransferFormat): Record<string, string[]> {
-  return format === 'csv' ? { CSV: ['csv'] } : format === 'json' ? { JSON: ['json'] } : { SQL: ['sql'] };
+  if (format === 'csv') return { CSV: ['csv'] };
+  if (format === 'json') return { JSON: ['json'] };
+  if (format === 'xlsx') return { Excel: ['xlsx'] };
+  if (format === 'xml') return { XML: ['xml'] };
+  return { SQL: ['sql'] };
 }
 
 async function pickFormat(action: 'import' | 'export'): Promise<TransferFormat | undefined> {
@@ -351,6 +456,8 @@ async function pickFormat(action: 'import' | 'export'): Promise<TransferFormat |
       { label: 'SQL', description: action === 'import' ? l10n('import.formatSql') : l10n('export.formatSql'), value: 'sql' as const },
       { label: 'CSV', description: action === 'import' ? l10n('import.formatCsv') : l10n('export.formatCsv'), value: 'csv' as const },
       { label: 'JSON', description: action === 'import' ? l10n('import.formatJson') : l10n('export.formatJson'), value: 'json' as const },
+      { label: 'Excel', description: '.xlsx', value: 'xlsx' as const },
+      { label: 'XML', description: '.xml', value: 'xml' as const },
     ],
     { placeHolder: action === 'import' ? l10n('import.chooseFormat') : l10n('export.chooseFormat') },
   ))?.value;

@@ -72,18 +72,18 @@ const fkLines = computed(() => {
         <!-- Foreign key lines -->
         <g v-for="(line, i) in fkLines" :key="'fk'+i">
           <line :x1="line.x1" :y1="line.y1" :x2="line.x2" :y2="line.y2"
-            stroke="var(--vscode-textLink-foreground)" stroke-width="1.5" stroke-dasharray="4 2" />
-          <circle :cx="line.x2" :cy="line.y2" r="3" fill="var(--vscode-textLink-foreground)" />
+            stroke="var(--vscode-textLink-foreground, #4daafc)" stroke-width="1.5" stroke-dasharray="4 2" />
+          <circle :cx="line.x2" :cy="line.y2" r="3" fill="var(--vscode-textLink-foreground, #4daafc)" />
         </g>
         <!-- Tables -->
         <g v-for="t in tables" :key="t.name" :transform="`translate(${layout.get(t.name)?.x || 0}, ${layout.get(t.name)?.y || 0})`">
           <rect :width="TABLE_W" :height="TABLE_H" rx="4"
-            fill="var(--vscode-editor-background)" stroke="var(--vscode-focusBorder)" stroke-width="1.5" />
-          <rect width="TABLE_W" height="28" rx="4" fill="var(--vscode-titleBar-activeBackground)" />
+            fill="var(--vscode-editor-background, #1e1e1e)" stroke="var(--vscode-focusBorder, #007fd4)" stroke-width="1.5" />
+          <rect width="TABLE_W" height="28" rx="4" fill="var(--vscode-titleBar-activeBackground, #3c3c3c)" />
           <text x="10" y="18" class="table-title">{{ t.name }}</text>
           <text v-for="(c, i) in t.columns.slice(0, 6)" :key="c.name"
             :x="10" :y="44 + i * 16" class="col-name">
-            <tspan v-if="c.isPK" fill="var(--vscode-charts-yellow)" font-weight="bold">🔑 </tspan>
+            <tspan v-if="c.isPK" fill="var(--vscode-charts-yellow, #e2c08d)" font-weight="bold">🔑 </tspan>
             {{ c.name }}: {{ c.type }}
           </text>
           <text v-if="t.columns.length > 6" x="10" :y="44 + 6 * 16 + 4" class="more" :data="t.columns.length">
@@ -96,11 +96,11 @@ const fkLines = computed(() => {
 </template>
 
 <style scoped>
-.app { font-family: var(--vscode-font-family); height: 100vh; overflow: auto; }
+.app { font-family: var(--vscode-font-family, sans-serif); height: 100vh; overflow: auto; }
 .canvas { padding: 8px; }
 .er-svg { display: block; }
-.table-title { font-size: 13px; font-weight: bold; fill: var(--vscode-foreground); }
-.col-name { font-size: 11px; fill: var(--vscode-descriptionForeground); }
-.more { font-size: 11px; fill: var(--vscode-descriptionForeground); font-style: italic; }
-.error { padding: 12px; color: var(--vscode-errorForeground); }
+.table-title { font-size: 13px; font-weight: bold; fill: var(--vscode-foreground, #cccccc); }
+.col-name { font-size: 11px; fill: var(--vscode-descriptionForeground, #808080); }
+.more { font-size: 11px; fill: var(--vscode-descriptionForeground, #808080); font-style: italic; }
+.error { padding: 12px; color: var(--vscode-errorForeground, #f48771); }
 </style>

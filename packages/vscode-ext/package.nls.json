@@ -15,5 +15,12 @@
   "cmd.showHistory": "Show Query History",
   "cmd.updateCell": "Update Cell",
   "cmd.explorerMenu": "More Actions",
+  "cmd.searchObjects": "Search Objects",
+  "cmd.jumpToRefTable": "Open Referenced Table",
+  "cmd.searchConnections": "Search Connections",
+  "cmd.cloneConnection": "Clone Connection",
+  "cmd.renameView": "Rename View",
+  "cmd.sessions": "Manage Sessions",
+  "cmd.pats": "Manage Access Tokens",
   "view.explorer": "Connections"
 }

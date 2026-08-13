@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import ResultGrid from '../components/ResultGrid.vue';
+import ResultChart from '../components/ResultChart.vue';
 
 const { post, onMessage } = useVsCode();
 
@@ -32,6 +33,7 @@ const total = ref<number | undefined>(undefined);
 const tableName = ref('');
 const dbName = ref('');
 const running = ref(false);
+const viewMode = ref<'table' | 'chart'>('table');
 
 const totalPages = computed(() => total.value === undefined ? 0 : Math.max(1, Math.ceil(total.value / limit.value)));
 const currentPage = computed(() => total.value === undefined ? 0 : Math.floor(offset.value / limit.value) + 1);
@@ -352,7 +354,12 @@ function onKeydown(e: KeyboardEvent) {
       </button>
     </div>
     <div class="error" v-if="error">{{ error }}</div>
-    <ResultGrid
+    <div v-if="rows.length > 0" class="view-toggle">
+      <button class="btn" :class="{ active: viewMode === 'table' }" @click="viewMode = 'table'">Table</button>
+      <button class="btn" :class="{ active: viewMode === 'chart' }" @click="viewMode = 'chart'">Chart</button>
+    </div>
+    <template v-if="viewMode === 'table'">
+      <ResultGrid
       :rows="rows"
       :fields="fields"
       :pk-columns="pkColumns"
@@ -374,45 +381,47 @@ function onKeydown(e: KeyboardEvent) {
       @save-layout="handleSaveLayout"
       @reset-profile="resetProfile"
     />
+    </template>
+    <ResultChart v-else :rows="rows" :fields="fields" />
   </div>
 </template>
 
 <style scoped>
-.app { display: flex; flex-direction: column; height: 100vh; font-family: var(--vscode-font-family); }
+.app { display: flex; flex-direction: column; height: 100vh; font-family: var(--vscode-font-family, sans-serif); }
 .editor { width: 100%; box-sizing: border-box; padding: 8px; min-height: 80px; resize: vertical;
-  background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-  border: none; border-bottom: 1px solid var(--vscode-panel-border);
-  font-family: var(--vscode-editor-font-family); font-size: 13px; }
+  background: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #d4d4d4);
+  border: none; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18));
+  font-family: var(--vscode-editor-font-family, monospace); font-size: 13px; }
 .completion { position: fixed; z-index: 50; max-height: 200px; overflow-y: auto;
-  background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-input-border);
+  background: var(--vscode-editorWidget-background, #252526); border: 1px solid var(--vscode-input-border, #3c3c3c);
   border-radius: 3px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); min-width: 160px; }
 .comp-item { padding: 3px 10px; font-size: 12px; cursor: pointer; white-space: nowrap;
-  color: var(--vscode-foreground); }
-.comp-item.sel { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+  color: var(--vscode-foreground, #cccccc); }
+.comp-item.sel { background: var(--vscode-list-activeSelectionBackground, #094771); color: var(--vscode-list-activeSelectionForeground, #ffffff); }
 .comp-item.kind-keyword { color: var(--vscode-symbolIcon-keywordForeground, #569cd6); }
 .comp-item.kind-table { color: var(--vscode-symbolIcon-classForeground, #dcdcaa); }
 .comp-item.kind-column { color: var(--vscode-symbolIcon-fieldForeground, #9cdcfe); }
 .comp-item.kind-function { color: var(--vscode-symbolIcon-functionForeground, #dcdcaa); }
 .comp-item.kind-operator { color: var(--vscode-symbolIcon-operatorForeground, #d4d4d4); }
-.action-bar { padding: 4px 8px; display: flex; gap: 6px; align-items: center; border-bottom: 1px solid var(--vscode-panel-border); }
+.action-bar { padding: 4px 8px; display: flex; gap: 6px; align-items: center; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); }
   .spacer { flex: 1; }
-  .page-info { font-size: 12px; color: var(--vscode-descriptionForeground); white-space: nowrap; }
-  .limit-input { width: 64px; font-size: 12px; padding: 2px 6px; background: var(--vscode-input-background);
-    color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 3px; }
+  .page-info { font-size: 12px; color: var(--vscode-descriptionForeground, #808080); white-space: nowrap; }
+  .limit-input { width: 64px; font-size: 12px; padding: 2px 6px; background: var(--vscode-input-background, #3c3c3c);
+    color: var(--vscode-input-foreground, #d4d4d4); border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 3px; }
 .btn { padding: 3px 10px; font-size: 12px; cursor: pointer; border: none; border-radius: 3px;
-  background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
-.btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
-  .btn.active { border: 1px solid var(--vscode-focusBorder); }
+  background: var(--vscode-button-secondaryBackground, #3a3d41); color: var(--vscode-button-secondaryForeground, #ffffff); }
+.btn.primary { background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #ffffff); }
+  .btn.active { border: 1px solid var(--vscode-focusBorder, #007fd4); }
   .txn-badge { font-size: 11px; padding: 2px 6px; border-radius: 3px; }
-  .txn-badge.active { background: var(--vscode-inputOption-activeBorder); color: var(--vscode-foreground); }
-  .txn-badge.committed { color: var(--vscode-gitDecoration-untrackedResourceForeground); }
-  .txn-badge.rolledback { color: var(--vscode-errorForeground); }
-  .result-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--vscode-panel-border); padding: 0 8px; overflow-x: auto; }
+  .txn-badge.active { background: var(--vscode-inputOption-activeBorder, #007fd4); color: var(--vscode-foreground, #cccccc); }
+  .txn-badge.committed { color: var(--vscode-gitDecoration-untrackedResourceForeground, #73c991); }
+  .txn-badge.rolledback { color: var(--vscode-errorForeground, #f48771); }
+  .result-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); padding: 0 8px; overflow-x: auto; }
   .result-tab { padding: 4px 12px; font-size: 11px; cursor: pointer; border: none; background: none;
-    color: var(--vscode-descriptionForeground); border-bottom: 2px solid transparent; white-space: nowrap; }
-  .result-tab.active { color: var(--vscode-textLink-foreground); border-bottom-color: var(--vscode-focusBorder); }
+    color: var(--vscode-descriptionForeground, #808080); border-bottom: 2px solid transparent; white-space: nowrap; }
+  .result-tab.active { color: var(--vscode-textLink-foreground, #4daafc); border-bottom-color: var(--vscode-focusBorder, #007fd4); }
   .tab-close { margin-left: 6px; opacity: 0.6; font-size: 13px; line-height: 1; }
-  .tab-close:hover { opacity: 1; color: var(--vscode-errorForeground); }
-.meta { padding: 4px 8px; font-size: 12px; color: var(--vscode-descriptionForeground); }
-.error { padding: 8px; color: var(--vscode-errorForeground); white-space: pre-wrap; }
+  .tab-close:hover { opacity: 1; color: var(--vscode-errorForeground, #f48771); }
+.meta { padding: 4px 8px; font-size: 12px; color: var(--vscode-descriptionForeground, #808080); }
+.error { padding: 8px; color: var(--vscode-errorForeground, #f48771); white-space: pre-wrap; }
 </style>

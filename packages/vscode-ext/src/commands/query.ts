@@ -102,7 +102,7 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
         detail: `${h.connection} · ${h.rowCount ?? 0} rows · ${h.costTime}ms`,
         value: h,
       })),
-      { placeHolder: 'Query history' },
+      { placeHolder: l10n('query.historyPlaceholder'), matchOnDetail: true },
     );
     if (picked) {
       const doc = await openSqlDocEditor(picked.value.sql);
@@ -115,11 +115,11 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.updateCell', async (args: {
     conn: import('../connection/connectionStore').SavedConnection;
-    table: string; primaryKey: string; rowId: any; column: string; value: any;
+    table: string; pkColumns: string[]; pkValues: any[]; column: string; value: any;
   }) => {
     try {
       const session = await manager.connect(args.conn);
-      await session.data.updateCell(args.table, args.primaryKey, args.rowId, args.column, args.value);
+      await session.data.updateCell(args.table, args.pkColumns, args.pkValues, args.column, args.value);
       vscode.window.showInformationMessage(l10n('cmd.updated', { table: args.table, column: args.column }));
     } catch (err) {
       vscode.window.showErrorMessage((err as Error).message);

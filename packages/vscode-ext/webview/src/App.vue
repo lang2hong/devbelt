@@ -7,9 +7,12 @@ import StatusView from './views/StatusView.vue';
 import ERDiagramView from './views/ERDiagramView.vue';
 import ConnectionFormView from './views/ConnectionFormView.vue';
 import UserFormView from './views/UserFormView.vue';
+import SyncDiffView from './views/SyncDiffView.vue';
+import DataDiffView from './views/DataDiffView.vue';
+import DashboardView from './views/DashboardView.vue';
 
 const { onMessage } = useVsCode();
-const mode = ref<'query' | 'design' | 'status' | 'er' | 'connectionForm' | 'userForm'>('query');
+const mode = ref<'query' | 'design' | 'status' | 'er' | 'connectionForm' | 'userForm' | 'syncDiff' | 'dataDiff' | 'dashboard'>('query');
 
 let cleanup: (() => void) | undefined;
 onMounted(() => {
@@ -28,5 +31,8 @@ onUnmounted(() => cleanup?.());
   <StatusView v-else-if="mode === 'status'" />
   <ConnectionFormView v-else-if="mode === 'connectionForm'" />
   <UserFormView v-else-if="mode === 'userForm'" />
+  <SyncDiffView v-else-if="mode === 'syncDiff'" />
+  <DataDiffView v-else-if="mode === 'dataDiff'" />
+  <DashboardView v-else-if="mode === 'dashboard'" />
   <ERDiagramView v-else />
 </template>

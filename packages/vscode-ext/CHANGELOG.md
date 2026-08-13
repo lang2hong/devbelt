@@ -2,6 +2,25 @@
 
 All notable changes to this extension are documented in this file.
 
+## [0.2.0] - 2026-08-12
+
+### Added
+
+- **Result chart visualization**: Bar, line, pie, and scatter charts from query results (Chart.js integration).
+- **Data-level sync**: Compare and sync row data between two databases with the new `DataDiffService` and `DataDiffView`.
+- **Excel (.xlsx) import/export**: Full support for Excel files in addition to CSV/JSON.
+- **XML import/export**: Parse and serialize XML data files.
+- **Database backup**: Full database dump with `BackupService`, including scheduled backups.
+- **Connection pool management**: LRU eviction, idle timeout, and health check for connection sessions.
+- **Wizard component**: Reusable step-by-step wizard UI for guided workflows.
+- **CI/CD pipeline**: GitHub Actions workflow for build, typecheck, and test on push/PR.
+
+### Improved
+
+- **Menu filtering by database type**: Menu items now hide automatically for unsupported databases (e.g., no events/routines for SQLite).
+- **Completion engine optimization**: Contexts that don't need metadata (e.g., `where_operator`) skip DB queries.
+- **Diagnostic logging**: New `diagnostics.ts` output channel captures silent errors for debugging.
+
 ## [0.1.0] - 2026-08-10
 
 ### Added

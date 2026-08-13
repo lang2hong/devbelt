@@ -1,4 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('vscode', () => ({
+  window: {
+    createOutputChannel: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), dispose: vi.fn() }),
+  },
+  LogOutputChannel: class {},
+}));
+
 import { CompletionService } from '../../src/result/completionService';
 
 const conn: any = { id: 'c1', database: 'test', dbType: 'MYSQL', host: 'h', name: 'n' };

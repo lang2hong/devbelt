@@ -2,7 +2,7 @@
   "name": "vscode-db-client",
   "displayName": "DB Client Pro",
   "description": "All-in-one database client for MySQL, PostgreSQL and SQLite — query, import/export, sync and design.",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "publisher": "local",
   "license": "MIT",
   "engines": {
@@ -104,6 +104,76 @@
       {
         "command": "dbclient.syncPush",
         "title": "%cmd.syncPush%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.changeSyncPassword",
+        "title": "Change Sync Password",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.addIndex",
+        "title": "Add Index",
+        "category": "DB Client",
+        "icon": "$(add)"
+      },
+      {
+        "command": "dbclient.dropIndex",
+        "title": "Drop Index",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.viewTrigger",
+        "title": "View Trigger",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.dropTrigger",
+        "title": "Drop Trigger",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.addTrigger",
+        "title": "Add Trigger",
+        "category": "DB Client",
+        "icon": "$(add)"
+      },
+      {
+        "command": "dbclient.modifyTrigger",
+        "title": "Modify Trigger",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.addForeignKey",
+        "title": "Add Foreign Key",
+        "category": "DB Client",
+        "icon": "$(add)"
+      },
+      {
+        "command": "dbclient.dropForeignKey",
+        "title": "Drop Foreign Key",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.newRoutine",
+        "title": "New Routine",
+        "category": "DB Client",
+        "icon": "$(add)"
+      },
+      {
+        "command": "dbclient.modifyRoutine",
+        "title": "Modify Routine",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.newEvent",
+        "title": "New Event",
+        "category": "DB Client",
+        "icon": "$(add)"
+      },
+      {
+        "command": "dbclient.modifyEvent",
+        "title": "Modify Event",
         "category": "DB Client"
       },
       {
@@ -230,11 +300,6 @@
       {
         "command": "dbclient.editQuery",
         "title": "Edit Query",
-        "category": "DB Client"
-      },
-      {
-        "command": "dbclient.runStatement",
-        "title": "Run SQL Statement",
         "category": "DB Client"
       },
       {
@@ -396,6 +461,54 @@
         "command": "dbclient.importConnections",
         "title": "Import Connections",
         "category": "DB Client"
+      },
+      {
+        "command": "dbclient.searchObjects",
+        "title": "%cmd.searchObjects%",
+        "category": "DB Client",
+        "icon": "$(search)"
+      },
+      {
+        "command": "dbclient.jumpToRefTable",
+        "title": "%cmd.jumpToRefTable%",
+        "category": "DB Client",
+        "icon": "$(link)"
+      },
+      {
+        "command": "dbclient.searchConnections",
+        "title": "%cmd.searchConnections%",
+        "category": "DB Client",
+        "icon": "$(search)"
+      },
+      {
+        "command": "dbclient.cloneConnection",
+        "title": "%cmd.cloneConnection%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.renameView",
+        "title": "%cmd.renameView%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.sessions",
+        "title": "%cmd.sessions%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.syncDatabase",
+        "title": "Sync Database",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.restoreDatabase",
+        "title": "Restore from SQL Dump",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.dashboard",
+        "title": "Performance Dashboard",
+        "category": "DB Client"
       }
     ],
     "menus": {
@@ -407,6 +520,11 @@
         },
         {
           "command": "dbclient.importConnections",
+          "when": "view == dbclient.explorer",
+          "group": "navigation"
+        },
+        {
+          "command": "dbclient.searchObjects",
           "when": "view == dbclient.explorer",
           "group": "navigation"
         },
@@ -438,6 +556,18 @@
         {
           "command": "dbclient.logout",
           "when": "dbclient.loggedIn"
+        },
+        {
+          "command": "dbclient.changeSyncPassword",
+          "when": "dbclient.loggedIn"
+        },
+        {
+          "command": "dbclient.sessions",
+          "when": "dbclient.dbType != SQLITE"
+        },
+        {
+          "command": "dbclient.pats",
+          "when": "dbclient.dbType != SQLITE"
         }
       ],
       "view/item/context": [
@@ -469,7 +599,7 @@
         },
         {
           "command": "dbclient.dumpTable",
-          "when": "view == dbclient.explorer && viewItem == table",
+          "when": "view == dbclient.explorer && viewItem == table && dbclient.dbType != PG",
           "group": "2_data"
         },
         {
@@ -515,12 +645,12 @@
         },
         {
           "command": "dbclient.dupTable",
-          "when": "view == dbclient.explorer && viewItem == table",
+          "when": "view == dbclient.explorer && viewItem == table && dbclient.dbType == MYSQL",
           "group": "3_edit"
         },
         {
           "command": "dbclient.truncateTable",
-          "when": "view == dbclient.explorer && viewItem == table",
+          "when": "view == dbclient.explorer && viewItem == table && dbclient.dbType != SQLITE",
           "group": "2_danger"
         },
         {
@@ -588,13 +718,28 @@
         },
         {
           "command": "dbclient.dropDatabase",
-          "when": "view == dbclient.explorer && viewItem == database",
+          "when": "view == dbclient.explorer && viewItem == database && dbclient.dbType != SQLITE",
           "group": "2_danger"
         },
         {
-          "command": "dbclient.compareSchema",
-          "when": "view == dbclient.explorer && viewItem == database",
+          "command": "dbclient.restoreDatabase",
+          "when": "view == dbclient.explorer && viewItem == database && dbclient.dbType != SQLITE",
           "group": "1_db"
+        },
+        {
+          "command": "dbclient.restoreDatabase",
+          "when": "view == dbclient.explorer && viewItem == category_table",
+          "group": "1_cattbl"
+        },
+        {
+          "command": "dbclient.syncDatabase",
+          "when": "view == dbclient.explorer && viewItem == database && dbclient.dbType == MYSQL",
+          "group": "1_db"
+        },
+        {
+          "command": "dbclient.dashboard",
+          "when": "view == dbclient.explorer && viewItem == connectionOpen",
+          "group": "1_conn"
         },
         {
           "command": "dbclient.showERDiagram",
@@ -612,6 +757,11 @@
           "group": "1_view"
         },
         {
+          "command": "dbclient.renameView",
+          "when": "view == dbclient.explorer && viewItem == view && dbclient.dbType != SQLITE",
+          "group": "1_view"
+        },
+        {
           "command": "dbclient.newView",
           "when": "view == dbclient.explorer && viewItem == category_view",
           "group": "inline"
@@ -623,22 +773,82 @@
         },
         {
           "command": "dbclient.openRoutine",
-          "when": "view == dbclient.explorer && viewItem == routine",
+          "when": "view == dbclient.explorer && viewItem == routine && dbclient.dbType != SQLITE",
           "group": "inline"
         },
         {
           "command": "dbclient.dropRoutine",
-          "when": "view == dbclient.explorer && viewItem == routine",
+          "when": "view == dbclient.explorer && viewItem == routine && dbclient.dbType != SQLITE",
           "group": "2_danger"
         },
         {
           "command": "dbclient.openEvent",
-          "when": "view == dbclient.explorer && viewItem == event",
+          "when": "view == dbclient.explorer && viewItem == event && dbclient.dbType == MYSQL",
           "group": "inline"
         },
         {
           "command": "dbclient.dropEvent",
-          "when": "view == dbclient.explorer && viewItem == event",
+          "when": "view == dbclient.explorer && viewItem == event && dbclient.dbType == MYSQL",
+          "group": "2_danger"
+        },
+        {
+          "command": "dbclient.modifyEvent",
+          "when": "view == dbclient.explorer && viewItem == event && dbclient.dbType == MYSQL",
+          "group": "1_view"
+        },
+        {
+          "command": "dbclient.modifyRoutine",
+          "when": "view == dbclient.explorer && viewItem == routine && dbclient.dbType != SQLITE",
+          "group": "1_view"
+        },
+        {
+          "command": "dbclient.newRoutine",
+          "when": "view == dbclient.explorer && viewItem == category_function && dbclient.dbType != SQLITE",
+          "group": "inline"
+        },
+        {
+          "command": "dbclient.newEvent",
+          "when": "view == dbclient.explorer && viewItem == category_event && dbclient.dbType == MYSQL",
+          "group": "inline"
+        },
+        {
+          "command": "dbclient.addIndex",
+          "when": "view == dbclient.explorer && viewItem == category_index && dbclient.dbType != SQLITE",
+          "group": "inline"
+        },
+        {
+          "command": "dbclient.addTrigger",
+          "when": "view == dbclient.explorer && viewItem == category_trigger && dbclient.dbType != SQLITE",
+          "group": "inline"
+        },
+        {
+          "command": "dbclient.modifyTrigger",
+          "when": "view == dbclient.explorer && viewItem == trigger && dbclient.dbType != SQLITE",
+          "group": "1_view"
+        },
+        {
+          "command": "dbclient.addForeignKey",
+          "when": "view == dbclient.explorer && viewItem == category_foreignKey && dbclient.dbType != SQLITE",
+          "group": "inline"
+        },
+        {
+          "command": "dbclient.dropIndex",
+          "when": "view == dbclient.explorer && viewItem == index && dbclient.dbType != SQLITE",
+          "group": "2_danger"
+        },
+        {
+          "command": "dbclient.dropTrigger",
+          "when": "view == dbclient.explorer && viewItem == trigger && dbclient.dbType != SQLITE",
+          "group": "2_danger"
+        },
+        {
+          "command": "dbclient.jumpToRefTable",
+          "when": "view == dbclient.explorer && viewItem == foreignKey",
+          "group": "1_fk"
+        },
+        {
+          "command": "dbclient.dropForeignKey",
+          "when": "view == dbclient.explorer && viewItem == foreignKey",
           "group": "2_danger"
         },
         {
@@ -648,27 +858,27 @@
         },
         {
           "command": "dbclient.createUser",
-          "when": "view == dbclient.explorer && viewItem == category_user",
+          "when": "view == dbclient.explorer && viewItem == category_user && dbclient.dbType != SQLITE",
           "group": "inline"
         },
         {
           "command": "dbclient.changePassword",
-          "when": "view == dbclient.explorer && viewItem == user",
+          "when": "view == dbclient.explorer && viewItem == user && dbclient.dbType != SQLITE",
           "group": "1_user"
         },
         {
           "command": "dbclient.grantPrivilege",
-          "when": "view == dbclient.explorer && viewItem == user",
+          "when": "view == dbclient.explorer && viewItem == user && dbclient.dbType != SQLITE",
           "group": "1_user"
         },
         {
           "command": "dbclient.revokePrivilege",
-          "when": "view == dbclient.explorer && viewItem == user",
+          "when": "view == dbclient.explorer && viewItem == user && dbclient.dbType != SQLITE",
           "group": "1_user"
         },
         {
           "command": "dbclient.dropUser",
-          "when": "view == dbclient.explorer && viewItem == user",
+          "when": "view == dbclient.explorer && viewItem == user && dbclient.dbType != SQLITE",
           "group": "2_danger"
         },
         {
@@ -747,6 +957,11 @@
           "group": "1_conn"
         },
         {
+          "command": "dbclient.cloneConnection",
+          "when": "view == dbclient.explorer && viewItem =~ /^connection/",
+          "group": "1_conn"
+        },
+        {
           "command": "dbclient.newQueryFromConn",
           "when": "view == dbclient.explorer && viewItem == connectionOpen",
           "group": "1_conn"
@@ -796,6 +1011,26 @@
           "default": "http://localhost:3000",
           "description": "DB Client sync server URL"
         },
+        "dbclient.sync.auto": {
+          "type": "string",
+          "enum": ["off", "reminder", "silent"],
+          "default": "off",
+          "description": "Automatic cloud sync mode. 'reminder' notifies on changes; 'silent' runs background sync (requires remembering the master password).",
+          "markdownDescription": "自动云同步模式：`reminder` 变更时提示；`silent` 后台静默同步（需记住主密码）。"
+        },
+        "dbclient.sync.intervalMin": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Automatic sync interval in minutes. 0 disables the periodic timer.",
+          "markdownDescription": "自动同步周期（分钟）。0 表示关闭定时同步。"
+        },
+        "dbclient.sync.rememberMaster": {
+          "type": "boolean",
+          "default": false,
+          "description": "Remember the sync master password in OS secure storage to enable silent background sync.",
+          "markdownDescription": "在本机安全存储中记住同步主密码，以启用后台静默同步（主密码从不上传）。"
+        },
         "dbclient.language": {
           "type": "string",
           "enum": [
@@ -806,6 +1041,21 @@
           "default": "auto",
           "description": "Extension language. auto follows VS Code display language.",
           "markdownDescription": "扩展语言。`auto` 跟随 VS Code 显示语言。"
+        },
+        "dbclient.format.indent": {
+          "type": "number",
+          "default": 2,
+          "minimum": 0,
+          "maximum": 8,
+          "description": "SQL formatting indent width (spaces).",
+          "markdownDescription": "SQL 格式化缩进宽度（空格数）。"
+        },
+        "dbclient.format.keywordCase": {
+          "type": "string",
+          "enum": ["preserve", "upper", "lower"],
+          "default": "upper",
+          "description": "SQL formatting keyword case.",
+          "markdownDescription": "SQL 格式化关键字大小写。"
         }
       }
     },
@@ -844,6 +1094,16 @@
         "key": "ctrl+shift+e",
         "mac": "cmd+shift+e",
         "when": "editorTextFocus"
+      },
+      {
+        "command": "dbclient.searchObjects",
+        "key": "ctrl+alt+f",
+        "mac": "cmd+alt+f"
+      },
+      {
+        "command": "dbclient.searchConnections",
+        "key": "ctrl+alt+c",
+        "mac": "cmd+alt+c"
       }
     ]
   },
@@ -854,11 +1114,12 @@
     "dev": "node esbuild.js --watch",
     "dev:webview": "cd webview && npx vite build --watch",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
-    "test": "vitest run",
+    "test": "cd webview && npx vite build && cd .. && vitest run",
     "package": "@vscode/vsce package --no-dependencies --allow-missing-repository"
   },
   "dependencies": {
     "@vuepic/vue-datepicker": "^14.0.0",
+    "chart.js": "^4.4.0",
     "ssh2": "^1.16.1"
   },
   "devDependencies": {

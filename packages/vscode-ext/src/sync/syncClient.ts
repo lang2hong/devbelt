@@ -1,53 +1,206 @@
 /**
  * 同步客户端：封装与后端同步服务的 HTTP 通信。
- * 使用 Node 18+ 全局 fetch，无需额外依赖。
+ * 双 token：access(短期) + refresh(长期)；401 自动用 refresh 换新 access 并重试一次。
+ * 分节同步：fetchSections/pushSection/listVersions/rollback（方案 A）。
+ * 网络错误与 5xx 指数退避重试（最多 3 次）；4xx 业务错误不重试。
  */
+
+export interface AuthResult {
+  accessToken: string;
+  refreshToken: string;
+  userId: number;
+  role: string;
+  user?: { id: number; email: string; role: string; planCode?: string };
+  subscription?: { planCode: string; status: string; periodEndTime?: string };
+  /** 兼容旧字段 */
+  token: string;
+}
+
+export interface SectionData {
+  section: string;
+  encryptedData: string;
+  version: number;
+  updateTime: string;
+}
+
+export interface PullResult {
+  sections: SectionData[];
+}
+
+export interface PushResult {
+  version: number;
+}
+
+export interface VersionSummary {
+  version: number;
+  dataBytes: number;
+  createTime: string;
+}
+
+export interface MeResponse {
+  user: { id: number; email: string; role: string; planCode: string; status: string };
+  plan: {
+    code: string; name: string;
+    maxDevices: number; maxConnections: number;
+    syncQuotaBytes: number; syncVersionRetention: number;
+    historyRetentionCount: number; maxPats: number; features: number;
+  };
+  subscription?: { planCode: string; status: string; periodEndTime: string };
+  usage: { devices: number; connections: number; syncBytes: number; pats: number; history: number };
+}
+
+export interface SessionInfo {
+  id: number;
+  deviceName?: string;
+  ip?: string;
+  createTime: string;
+  lastUsedTime?: string;
+  current: boolean;
+}
+
+export interface PatInfo {
+  id: number;
+  name: string;
+  scopes: string;
+  createTime: string;
+  lastUsedTime?: string;
+  expiresTime?: string;
+}
+
+/** 冲突错误：某 section 远端 version 已变化 */
+export class SyncConflictError extends Error {
+  constructor(public readonly section: string, public readonly latestVersion: number) {
+    super(`sync conflict on section ${section}: remote version ${latestVersion}`);
+    this.name = 'SyncConflictError';
+  }
+}
+
 export class SyncClient {
+  private static readonly MAX_ATTEMPTS = 3;
+
   constructor(
     private readonly baseUrl: string,
-    private getToken: () => string | undefined,
+    private readonly getAccessToken: () => string | undefined,
+    private readonly getRefreshToken: () => string | undefined,
+    private readonly onTokensRefreshed?: (access: string, refresh: string) => void,
   ) {}
 
-  /** 注册新账号，返回 token 与用户信息 */
+  /** 注册 */
   async register(email: string, password: string): Promise<AuthResult> {
     return this.postForm('/api/auth/register', { email, password });
   }
 
-  /** 登录，返回 token 与用户信息 */
+  /** 登录 */
   async login(email: string, password: string): Promise<AuthResult> {
     return this.postForm('/api/auth/login', { email, password });
   }
 
-  /** 拉取当前用户同步数据 */
-  async fetch(): Promise<SyncData> {
-    const res = await fetch(`${this.baseUrl}/api/sync`, {
-      headers: this.authHeaders(),
+  /** 用 refresh token 换新 access + 轮换 refresh */
+  async refresh(): Promise<{ accessToken: string; refreshToken: string }> {
+    const rt = this.getRefreshToken();
+    if (!rt) throw new Error('no refresh token');
+    const res = await this.fetchWithRetry(`${this.baseUrl}/api/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: rt }),
     });
-    if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-    return res.json() as Promise<SyncData>;
+    if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
+    const body = (await res.json()) as { accessToken: string; refreshToken: string };
+    this.onTokensRefreshed?.(body.accessToken, body.refreshToken);
+    return body;
   }
 
-  /** 推送当前用户同步数据（带乐观锁 version） */
-  async push(data: string, baseVersion: number): Promise<{ version: number }> {
-    const res = await fetch(`${this.baseUrl}/api/sync`, {
-      method: 'PUT',
-      headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data, baseVersion }),
-    });
+  /** 登出（撤销当前 refresh token） */
+  async logout(): Promise<void> {
+    const rt = this.getRefreshToken();
+    if (rt) await this.request('POST', '/api/auth/logout', { refreshToken: rt }, true);
+  }
+
+  /** 修改密码（兼容旧；server 新流暂未实现，会 501） */
+  async changePassword(oldPassword: string, newPassword: string): Promise<void> {
+    const res = await this.request('POST', '/api/auth/change-password', { oldPassword, newPassword }, true);
+    if (!res.ok) {
+      const errBody = (await res.json().catch(() => ({}))) as { message?: string };
+      throw new Error(errBody.message || `Change password failed: ${res.status}`);
+    }
+  }
+
+  /** 当前用户 + 套餐 + 订阅 + 配额用量 */
+  async getMe(): Promise<MeResponse> {
+    const res = await this.request('GET', '/api/me', undefined, true);
+    if (!res.ok) throw new Error(`Get me failed: ${res.status}`);
+    return res.json() as Promise<MeResponse>;
+  }
+
+  /** 拉取同步分节（section 可选，无则全节） */
+  async fetchSections(section?: string): Promise<PullResult> {
+    const path = section ? `/api/sync?section=${encodeURIComponent(section)}` : '/api/sync';
+    const res = await this.request('GET', path, undefined, true);
+    if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
+    return res.json() as Promise<PullResult>;
+  }
+
+  /** 推送单节（乐观锁 baseVersion） */
+  async pushSection(section: string, encryptedData: string, baseVersion: number): Promise<PushResult> {
+    const res = await this.request('PUT', '/api/sync', { section, encryptedData, baseVersion }, true);
     if (res.status === 409) {
       const body = (await res.json().catch(() => ({}))) as { version?: number };
-      throw new SyncConflictError('conflict', body.version ?? 0);
+      throw new SyncConflictError(section, body.version ?? 0);
     }
     if (!res.ok) throw new Error(`Push failed: ${res.status}`);
-    return res.json() as Promise<{ version: number }>;
+    return res.json() as Promise<PushResult>;
+  }
+
+  /** 列历史版本 */
+  async listVersions(section: string): Promise<VersionSummary[]> {
+    const res = await this.request('GET', `/api/sync/versions?section=${encodeURIComponent(section)}`, undefined, true);
+    if (!res.ok) throw new Error(`List versions failed: ${res.status}`);
+    const body = (await res.json()) as { versions: VersionSummary[] };
+    return body.versions;
+  }
+
+  /** 回滚到指定版本 */
+  async rollback(section: string, toVersion: number): Promise<PushResult> {
+    const res = await this.request('POST', '/api/sync/rollback', { section, toVersion }, true);
+    if (!res.ok) throw new Error(`Rollback failed: ${res.status}`);
+    return res.json() as Promise<PushResult>;
+  }
+
+  /** 列设备会话 */
+  async listSessions(): Promise<SessionInfo[]> {
+    const res = await this.request('GET', '/api/auth/sessions', undefined, true);
+    if (!res.ok) throw new Error(`List sessions failed: ${res.status}`);
+    const body = (await res.json()) as { sessions: SessionInfo[] };
+    return body.sessions;
+  }
+
+  /** 踢出设备会话 */
+  async revokeSession(id: number): Promise<void> {
+    await this.request('DELETE', `/api/auth/sessions/${id}`, undefined, true);
+  }
+
+  /** 列 PAT */
+  async listPats(): Promise<PatInfo[]> {
+    const res = await this.request('GET', '/api/auth/tokens', undefined, true);
+    if (!res.ok) throw new Error(`List PATs failed: ${res.status}`);
+    const body = (await res.json()) as { pats: PatInfo[] };
+    return body.pats;
+  }
+
+  /** 创建 PAT（返回明文 token，仅此次） */
+  async createPat(name: string, scopes: string): Promise<{ pat: PatInfo; token: string }> {
+    const res = await this.request('POST', '/api/auth/tokens', { name, scopes }, true);
+    if (!res.ok) throw new Error(`Create PAT failed: ${res.status}`);
+    return res.json() as Promise<{ pat: PatInfo; token: string }>;
+  }
+
+  /** 撤销 PAT */
+  async revokePat(id: number): Promise<void> {
+    await this.request('DELETE', `/api/auth/tokens/${id}`, undefined, true);
   }
 
   private async postForm(path: string, body: object): Promise<AuthResult> {
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    const res = await this.request('POST', path, body, false);
     if (!res.ok) {
       const errBody = (await res.json().catch(() => ({}))) as { message?: string };
       throw new Error(errBody.message || `Request failed: ${res.status}`);
@@ -55,29 +208,60 @@ export class SyncClient {
     return res.json() as Promise<AuthResult>;
   }
 
-  private authHeaders(): Record<string, string> {
-    const token = this.getToken();
-    return token ? { Authorization: `Bearer ${token}` } : {};
+  /**
+   * 带重试 + 401 自动刷新的 HTTP 请求。
+   * 401 且 needsAuth：尝试 refresh 换新 access，成功则重试一次。
+   */
+  private async request(method: string, path: string, body: unknown, needsAuth: boolean): Promise<Response> {
+    const url = `${this.baseUrl}${path}`;
+    const init: RequestInit = { method, headers: { 'Content-Type': 'application/json' } };
+    if (needsAuth) {
+      const token = this.getAccessToken();
+      if (token) (init.headers as Record<string, string>).Authorization = `Bearer ${token}`;
+    }
+    if (body !== undefined) init.body = JSON.stringify(body);
+
+    let res = await this.fetchWithRetry(url, init);
+    if (res.status === 401 && needsAuth) {
+      const ok = await this.tryRefresh();
+      if (ok) {
+        const newToken = this.getAccessToken();
+        if (newToken) (init.headers as Record<string, string>).Authorization = `Bearer ${newToken}`;
+        res = await this.fetchWithRetry(url, init);
+      }
+    }
+    return res;
   }
-}
 
-/** 认证/登录结果 */
-export interface AuthResult {
-  token: string;
-  userId: number;
-  role: string;
-}
+  /** 尝试刷新 token；失败返回 false（不抛，由调用方处理 401） */
+  private async tryRefresh(): Promise<boolean> {
+    try {
+      await this.refresh();
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
-/** 同步数据响应 */
-export interface SyncData {
-  data: string | null;
-  version: number;
-}
+  /** fetch + 5xx 指数退避重试（1s/2s）；4xx 立即返回 */
+  private async fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < SyncClient.MAX_ATTEMPTS; attempt++) {
+      try {
+        const res = await fetch(url, init);
+        if (res.status >= 500) throw new Error(`server error ${res.status}`);
+        return res;
+      } catch (e) {
+        lastErr = e;
+        if (attempt < SyncClient.MAX_ATTEMPTS - 1) {
+          await this.delay(1000 * 2 ** attempt);
+        }
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error('request failed after retries');
+  }
 
-/** 冲突错误：远端版本已变化，latestVersion 为服务端当前版本，供用户选择处置。 */
-export class SyncConflictError extends Error {
-  constructor(message: string, public readonly latestVersion: number) {
-    super(message);
-    this.name = 'SyncConflictError';
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

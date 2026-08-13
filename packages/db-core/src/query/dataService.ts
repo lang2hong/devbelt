@@ -12,42 +12,56 @@ export class DataService {
 
   async updateCell(
     table: string,
-    primaryKey: string,
-    rowId: any,
+    pkColumns: string[],
+    pkValues: any[],
     column: string,
     value: any,
     database?: string,
   ): Promise<QueryResult> {
+    if (!pkColumns.length) throw new Error('updateCell requires at least one primary key column.');
     validateIdent(table);
-    validateIdent(primaryKey);
+    for (const pk of pkColumns) validateIdent(pk);
     validateIdent(column);
     const w = this.queryService.dialect.wrap.bind(this.queryService.dialect);
     const qualified = database ? `${w(validateIdent(database))}.${w(table)}` : w(table);
     const setValue = value === null ? 'NULL' : sqlstring.escape(value);
-    const idLiteral = sqlstring.escape(rowId);
-    const sql = `UPDATE ${qualified} SET ${w(column)} = ${setValue} WHERE ${w(primaryKey)} = ${idLiteral}`;
+    const where = pkColumns
+      .map((pk, i) => {
+        const v = pkValues[i];
+        return v === null || v === undefined ? `${w(pk)} IS NULL` : `${w(pk)} = ${sqlstring.escape(v)}`;
+      })
+      .join(' AND ');
+    const sql = `UPDATE ${qualified} SET ${w(column)} = ${setValue} WHERE ${where}`;
     return this.queryService.query(sql);
   }
 
   /**
-   * 按主键批量删除（单条 DELETE ... IN，原子）。
-   * 主键与表名经 validateIdent 校验，值经 sqlstring.escape 转义。
+   * 按主键批量删除（每行 AND 条件，多行 OR 连接，原子单语句）。
+   * 复合主键退化为单列时等价于 IN。值经 sqlstring.escape 转义。
    */
   async deleteRows(
     table: string,
-    primaryKey: string,
-    rowIds: unknown[],
+    pkColumns: string[],
+    rows: any[][],
     database?: string,
   ): Promise<QueryResult> {
-    if (!rowIds.length) return this.queryService.query('SELECT 1 WHERE 1 = 0');
+    if (!rows.length) return this.queryService.query('SELECT 1 WHERE 1 = 0');
     validateIdent(table);
-    validateIdent(primaryKey);
+    for (const pk of pkColumns) validateIdent(pk);
     const w = this.queryService.dialect.wrap.bind(this.queryService.dialect);
     const qualified = database ? `${w(validateIdent(database))}.${w(table)}` : w(table);
-    const ids = rowIds
-      .map((id) => (id === null || id === undefined ? 'NULL' : sqlstring.escape(id)))
-      .join(', ');
-    const sql = `DELETE FROM ${qualified} WHERE ${w(primaryKey)} IN (${ids})`;
+    const where = rows
+      .map(
+        (row) =>
+          `(${pkColumns
+            .map((pk, i) => {
+              const v = row[i];
+              return v === null || v === undefined ? `${w(pk)} IS NULL` : `${w(pk)} = ${sqlstring.escape(v)}`;
+            })
+            .join(' AND ')})`,
+      )
+      .join(' OR ');
+    const sql = `DELETE FROM ${qualified} WHERE ${where}`;
     return this.queryService.query(sql);
   }
 

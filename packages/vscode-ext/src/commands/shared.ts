@@ -84,3 +84,12 @@ export async function pickConnection(store: ConnectionStore): Promise<SavedConne
 export async function promptMasterPassword(): Promise<string | undefined> {
   return vscode.window.showInputBox({ prompt: l10n('cmd.masterPassword'), password: true });
 }
+
+/** 优先用已记住的主密码；未记住则提示输入，并按需记住 */
+export async function resolveMasterPassword(sync: SyncManager, remember: boolean): Promise<string | undefined> {
+  const remembered = await sync.getRememberedMasterPassword();
+  if (remembered) return remembered;
+  const mp = await promptMasterPassword();
+  if (mp && remember) await sync.rememberMasterPassword(mp);
+  return mp;
+}

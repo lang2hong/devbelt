@@ -1,5 +1,5 @@
 import type { DatabaseType } from '../types/connection';
-import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta } from '../types/meta';
+import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta } from '../types/meta';
 import type { DatabaseCapabilities } from './capabilities';
 
 /**
@@ -59,6 +59,27 @@ export interface SqlDialect {
   /** 查询表索引列表 SQL */
   getIndexListSql(table: string, database?: string): string;
 
+  /** 查询表触发器列表 SQL（空字符串表示不支持） */
+  getTriggerListSql(table: string, database?: string): string;
+
+  /** 查询触发器定义 SQL（空字符串表示不支持） */
+  getTriggerDefinitionSql(name: string, database?: string): string;
+
+  /** 生成创建索引 SQL */
+  createIndexSql(name: string, table: string, columns: string[], unique: boolean, database?: string): string;
+
+  /** 生成删除索引 SQL */
+  dropIndexSql(name: string, table: string, database?: string): string;
+
+  /** 生成删除触发器 SQL */
+  dropTriggerSql(name: string, table: string, database?: string): string;
+
+  /** 生成创建外键 SQL（空字符串表示不支持） */
+  createForeignKeySql(name: string, table: string, columns: string[], refTable: string, refColumns: string[], database?: string): string;
+
+  /** 生成删除外键 SQL（空字符串表示不支持） */
+  dropForeignKeySql(name: string, table: string, database?: string): string;
+
   /** 查询用户列表 SQL（空字符串表示不支持） */
   getUserListSql(): string;
 
@@ -91,6 +112,9 @@ export interface SqlDialect {
 
   /** 解析索引列表查询结果 */
   parseIndexList(rows: any[]): IndexMeta[];
+
+  /** 解析触发器列表查询结果 */
+  parseTriggerList(rows: any[]): TriggerMeta[];
 
   /** 解析用户列表查询结果 */
   parseUserList(rows: any[]): UserMeta[];

@@ -1,3 +1,5 @@
+import { EventEmitter, type Event } from '../utils/event';
+
 /**
  * 查询历史记录。
  */
@@ -25,6 +27,10 @@ export class HistoryStore {
   private static readonly KEY = 'dbclient.history';
   private static readonly MAX_ENTRIES = 100;
 
+  private readonly changedEmitter = new EventEmitter<void>();
+  /** 数据变更事件（新增/清空/合并），供自动同步订阅。 */
+  readonly onChanged: Event<void> = this.changedEmitter.event;
+
   constructor(
     private readonly memento: {
       get<T>(key: string): T | undefined;
@@ -45,10 +51,37 @@ export class HistoryStore {
       list.length = HistoryStore.MAX_ENTRIES;
     }
     await this.memento.update(HistoryStore.KEY, list);
+    this.changedEmitter.fire();
   }
 
   /** 清空历史 */
   async clear(): Promise<void> {
     await this.memento.update(HistoryStore.KEY, []);
+    this.changedEmitter.fire();
+  }
+
+  // ─── 同步 ───
+
+  /** 读取同步用原始历史数据 */
+  getSyncData(): QueryHistoryEntry[] {
+    return this.list();
+  }
+
+  /**
+   * 合并远端历史到本地：按 id 并集去重，按 time 倒序后截断至上限。
+   * 历史为日志型数据，不做软删除墓碑；清空操作不跨端传播。
+   */
+  async replaceAllMerge(remote: QueryHistoryEntry[]): Promise<void> {
+    const local = this.list();
+    const map = new Map<string, QueryHistoryEntry>();
+    for (const entry of local) map.set(entry.id, entry);
+    for (const entry of remote) {
+      const prev = map.get(entry.id);
+      if (!prev || (entry.time ?? 0) >= (prev.time ?? 0)) map.set(entry.id, entry);
+    }
+    const merged = [...map.values()].sort((a, b) => (b.time ?? 0) - (a.time ?? 0));
+    if (merged.length > HistoryStore.MAX_ENTRIES) merged.length = HistoryStore.MAX_ENTRIES;
+    await this.memento.update(HistoryStore.KEY, merged);
+    this.changedEmitter.fire();
   }
 }

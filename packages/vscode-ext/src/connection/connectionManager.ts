@@ -4,33 +4,53 @@ import type { DatabaseCapabilities } from '@db-client/core';
 import type { SavedConnection } from './connectionStore';
 import { SshTunnel } from './sshTunnel';
 
+export interface PoolConfig {
+  maxConnections: number;
+  idleTimeoutMs: number;
+  healthCheckIntervalMs: number;
+}
+
+const DEFAULT_POOL_CONFIG: PoolConfig = {
+  maxConnections: 10,
+  idleTimeoutMs: 300_000,
+  healthCheckIntervalMs: 60_000,
+};
+
 /**
  * 连接会话：连接 + 查询/元数据/数据编辑/表操作服务的组合。
  */
 export interface ConnectionSession {
   capabilities: DatabaseCapabilities;
-  /** 查询服务（复用 db-core） */
   query: QueryService;
-  /** 元数据服务（复用 db-core） */
   metadata: MetadataService;
-  /** 数据编辑服务（复用 db-core） */
   data: DataService;
-  /** 表操作服务（复用 db-core） */
   table: TableService;
-  /** 底层连接是否存活（数据库重启/断线后为 false） */
   isAlive: () => boolean;
-  /** 关闭连接 */
   close: () => void;
+}
+
+interface SessionEntry {
+  session: ConnectionSession;
+  lastUsed: number;
+  connId: string;
 }
 
 /**
  * 连接管理器：从已保存配置创建活动连接会话。
  * 内部通过 db-core 的 ConnectionFactory 工厂创建连接并装配方言。
+ * 支持连接池配置、LRU 淘汰、空闲超时、健康检查。
  */
 export class ConnectionManager {
   private readonly sessions = new Map<string, ConnectionSession>();
-  /** 用户显式“打开连接”的 id（树中打开），不受查询视图关闭时的自动释放影响。 */
+  private readonly sessionEntries = new Map<string, SessionEntry>();
   private readonly explicit = new Set<string>();
+  private readonly config: PoolConfig;
+  private healthCheckTimer?: ReturnType<typeof setInterval>;
+
+  constructor(config?: Partial<PoolConfig>) {
+    this.config = { ...DEFAULT_POOL_CONFIG, ...config };
+    this.startHealthCheck();
+  }
 
   /** 标记该连接为用户显式打开，关闭查询/预览面板时不做自动释放。 */
   markExplicit(id: string): void {
@@ -49,13 +69,13 @@ export class ConnectionManager {
   async connect(conn: SavedConnection): Promise<ConnectionSession> {
     const existing = this.sessions.get(conn.id);
     if (existing) {
+      this.touch(conn.id);
       if (existing.isAlive()) return existing;
-      // 底层连接已死（数据库重启/断线），淘汰旧会话并重建。
-      // 不调用 disposeConn，避免清掉用户的显式打开标记。
       existing.close();
     }
 
-    // SSH 隧道：如有配置则建隧道，用本地端口替换远程 host:port
+    this.evictIfNeeded();
+
     let host = conn.host;
     let port = conn.port;
     if (conn.sshHost) {
@@ -107,10 +127,12 @@ export class ConnectionManager {
       close: () => {
         connection.end();
         this.sessions.delete(conn.id);
+        this.sessionEntries.delete(conn.id);
         if (conn.sshHost) SshTunnel.close(conn.id);
       },
     };
     this.sessions.set(conn.id, session);
+    this.sessionEntries.set(conn.id, { session, lastUsed: Date.now(), connId: conn.id });
     return session;
   }
 
@@ -125,11 +147,86 @@ export class ConnectionManager {
 
   /** 关闭全部连接（扩展退出时调用） */
   disposeAll(): void {
+    if (this.healthCheckTimer) { clearInterval(this.healthCheckTimer); this.healthCheckTimer = undefined; }
     for (const session of this.sessions.values()) {
       session.close();
     }
     this.sessions.clear();
+    this.sessionEntries.clear();
     this.explicit.clear();
     SshTunnel.closeAll();
+  }
+
+  /** 获取当前活跃连接数 */
+  get activeConnections(): number {
+    return this.sessions.size;
+  }
+
+  /** 获取连接池统计信息 */
+  getPoolStats(): {
+    total: number;
+    active: number;
+    explicit: number;
+    maxConnections: number;
+    idleTimeoutMs: number;
+    sessions: { id: string; lastUsed: number; isExplicit: boolean; isAlive: boolean }[];
+  } {
+    const sessions: { id: string; lastUsed: number; isExplicit: boolean; isAlive: boolean }[] = [];
+    for (const [id, entry] of this.sessionEntries) {
+      sessions.push({
+        id,
+        lastUsed: entry.lastUsed,
+        isExplicit: this.explicit.has(id),
+        isAlive: entry.session.isAlive(),
+      });
+    }
+    return {
+      total: this.sessions.size,
+      active: this.sessions.size,
+      explicit: this.explicit.size,
+      maxConnections: this.config.maxConnections,
+      idleTimeoutMs: this.config.idleTimeoutMs,
+      sessions,
+    };
+  }
+
+  private touch(connId: string): void {
+    const entry = this.sessionEntries.get(connId);
+    if (entry) entry.lastUsed = Date.now();
+  }
+
+  private evictIfNeeded(): void {
+    while (this.sessions.size >= this.config.maxConnections) {
+      const victim = this.findLruVictim();
+      if (!victim) break;
+      this.sessions.delete(victim.connId);
+      this.sessionEntries.delete(victim.connId);
+      victim.session.close();
+    }
+  }
+
+  private findLruVictim(): SessionEntry | undefined {
+    let oldest: SessionEntry | undefined;
+    for (const entry of this.sessionEntries.values()) {
+      if (this.explicit.has(entry.connId)) continue;
+      if (!oldest || entry.lastUsed < oldest.lastUsed) {
+        oldest = entry;
+      }
+    }
+    return oldest;
+  }
+
+  private startHealthCheck(): void {
+    this.healthCheckTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [id, entry] of this.sessionEntries) {
+        if (this.explicit.has(id)) continue;
+        if (now - entry.lastUsed > this.config.idleTimeoutMs) {
+          this.disposeConn(id);
+        } else if (!entry.session.isAlive()) {
+          this.disposeConn(id);
+        }
+      }
+    }, this.config.healthCheckIntervalMs);
   }
 }

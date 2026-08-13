@@ -53,7 +53,7 @@ export class TableDesignView extends BaseWebView {
     if (msg.type === 'reorderColumn') {
       await this.mutate(async () => {
         const session = await this.session();
-        await session.table.reorderColumn(this.table, msg.column, msg.definition, msg.afterColumn ?? null, this.database);
+        await session.table.reorderColumn(this.table, msg.column, msg.afterColumn ?? null, this.database);
       });
       return;
     }
@@ -67,8 +67,13 @@ export class TableDesignView extends BaseWebView {
     if (msg.type === 'editIndex') {
       await this.mutate(async () => {
         const session = await this.session();
-        await session.table.createIndex(msg.name, this.table, Array.isArray(msg.columns) ? msg.columns : [], this.database, !!msg.isUnique);
-        await session.table.dropIndex(msg.oldName, this.table, this.database);
+        const cols = Array.isArray(msg.columns) ? msg.columns : [];
+        if (String(msg.oldName).toUpperCase() === 'PRIMARY') {
+          await session.table.recreatePrimaryKey(this.table, cols, this.database);
+        } else {
+          await session.table.dropIndex(msg.oldName, this.table, this.database);
+          await session.table.createIndex(msg.name, this.table, cols, this.database, !!msg.isUnique);
+        }
       });
       return;
     }

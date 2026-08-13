@@ -1,6 +1,6 @@
 import { DatabaseType } from '../types/connection';
 import { validateIdent } from '../utils/validate';
-import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta } from '../types/meta';
+import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
 import type { DatabaseCapabilities } from './capabilities';
 
@@ -17,8 +17,8 @@ export class PostgreSqlDialect implements SqlDialect {
     events: false,
     users: true,
     operations: [
-      'createDatabase', 'dropDatabase', 'renameTable', 'truncateTable',
-      'getTableDefinition', 'alterTable', 'manageIndexes', 'manageRoutines',
+      'createDatabase', 'dropDatabase', 'renameTable', 'renameView', 'truncateTable',
+      'getTableDefinition', 'alterTable', 'manageIndexes', 'manageRoutines', 'manageUsers',
     ],
   };
 
@@ -95,11 +95,50 @@ export class PostgreSqlDialect implements SqlDialect {
 
   getForeignKeysSql(): string {
     return `SELECT tc.table_name AS "tableName", kcu.column_name AS "columnName",
-      ccu.table_name AS "refTable", ccu.column_name AS "refColumn"
+      ccu.table_name AS "refTable", ccu.column_name AS "refColumn", tc.constraint_name AS "constraintName"
       FROM information_schema.table_constraints tc
       JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
       JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name
       WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = current_schema()`;
+  }
+
+  getTriggerListSql(table: string): string {
+    validateIdent(table);
+    return `SELECT t.tgname AS name, pg_get_triggerdef(t.oid, true) AS definition
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      WHERE NOT t.tgisinternal AND c.relname = '${table}'`;
+  }
+
+  getTriggerDefinitionSql(name: string): string {
+    validateIdent(name);
+    return `SELECT pg_get_triggerdef(t.oid, true) AS definition
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      WHERE t.tgname = '${name}'`;
+  }
+
+  createIndexSql(name: string, table: string, columns: string[], unique: boolean): string {
+    const cols = columns.map((c) => this.wrap(validateIdent(c))).join(', ');
+    return `CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${this.wrap(validateIdent(name))} ON ${this.wrap(validateIdent(table))} (${cols})`;
+  }
+
+  dropIndexSql(name: string, _table?: string, _database?: string): string {
+    return `DROP INDEX IF EXISTS ${this.wrap(validateIdent(name))}`;
+  }
+
+  dropTriggerSql(name: string, table: string): string {
+    return `DROP TRIGGER IF EXISTS ${this.wrap(validateIdent(name))} ON ${this.wrap(validateIdent(table))}`;
+  }
+
+  createForeignKeySql(name: string, table: string, columns: string[], refTable: string, refColumns: string[]): string {
+    const cols = columns.map((c) => this.wrap(validateIdent(c))).join(', ');
+    const refCols = refColumns.map((c) => this.wrap(validateIdent(c))).join(', ');
+    return `ALTER TABLE ${this.wrap(validateIdent(table))} ADD CONSTRAINT ${this.wrap(validateIdent(name))} FOREIGN KEY (${cols}) REFERENCES ${this.wrap(validateIdent(refTable))} (${refCols})`;
+  }
+
+  dropForeignKeySql(name: string, table: string): string {
+    return `ALTER TABLE ${this.wrap(validateIdent(table))} DROP CONSTRAINT ${this.wrap(validateIdent(name))}`;
   }
 
   getProcessListSql(): string {
@@ -154,6 +193,15 @@ export class PostgreSqlDialect implements SqlDialect {
     }));
   }
 
+  parseTriggerList(rows: any[]): TriggerMeta[] {
+    return rows.map((row) => {
+      const def: string = row.definition || '';
+      const timing = (def.match(/\b(BEFORE|AFTER|INSTEAD OF)\b/i) || [])[1]?.toUpperCase();
+      const event = (def.match(/\b(INSERT|UPDATE|DELETE)\b/i) || [])[1]?.toUpperCase();
+      return { name: row.name, timing, event };
+    });
+  }
+
   parseUserList(rows: any[]): UserMeta[] {
     return rows.map((row) => ({ name: row.name }));
   }
@@ -164,6 +212,7 @@ export class PostgreSqlDialect implements SqlDialect {
       columnName: row.columnName || row.column_name,
       refTable: row.refTable || row.reftable,
       refColumn: row.refColumn || row.refcolumn,
+      constraintName: row.constraintName || row.constraint_name,
     }));
   }
 

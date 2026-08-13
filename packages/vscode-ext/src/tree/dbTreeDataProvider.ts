@@ -1,10 +1,11 @@
 import { Event, EventEmitter, TreeDataProvider, TreeItem, TreeItemCollapsibleState, ThemeIcon, ThemeColor, window } from 'vscode';
-import { DatabaseType } from '@db-client/core';
+import { DatabaseType, DialectRegistry } from '@db-client/core';
 import { ConnectionStore, type SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { DbTreeNode, NodeKind, type CategoryType } from './dbTreeNode';
 import { MetadataNodeBuilder } from './metadataNodeBuilder';
 import { l10n } from '../i18n';
+import { diagError } from '../utils/diagnostics';
 
 /**
  * 连接树数据提供者。
@@ -60,6 +61,11 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     this.connVersions.delete(connId);
   }
 
+  /** 返回当前已打开连接的 id 列表（供全局对象搜索等使用） */
+  getOpenConnIds(): string[] {
+    return Array.from(this.openConns);
+  }
+
   getTreeItem(element: DbTreeNode): TreeItem {
     return element;
   }
@@ -82,11 +88,12 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         case NodeKind.QueryFolder:
           return this.buildQueryFolderChildren(element);
         case NodeKind.Table:
-          return this.buildColumnChildren(element);
+          return this.buildTableChildren(element);
         default:
           return [];
       }
     } catch (error) {
+      diagError('tree load failed', (error as Error).message);
       window.showErrorMessage(
         l10n('tree.loadFailed', { label: element.label, message: (error as Error).message }),
       );
@@ -123,16 +130,17 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     );
   }
 
-  /** 数据库节点子节点：5 个分类（表/视图/函数/事件/查询） */
+  /** 数据库节点子节点：按方言能力过滤分类（表/视图始终显示） */
   private buildDatabaseChildren(element: DbTreeNode): DbTreeNode[] {
+    const caps = DialectRegistry.get(element.conn!.dbType).capabilities;
     const categories: { type: CategoryType; label: string }[] = [
       { type: 'table', label: l10n('cat.tables') },
       { type: 'view', label: l10n('cat.views') },
-      { type: 'function', label: l10n('cat.functions') },
-      { type: 'event', label: l10n('cat.events') },
-      { type: 'query', label: l10n('cat.queries') },
-      { type: 'user', label: l10n('cat.users') },
     ];
+    if (caps.routines) categories.push({ type: 'function', label: l10n('cat.functions') });
+    if (caps.events) categories.push({ type: 'event', label: l10n('cat.events') });
+    categories.push({ type: 'query', label: l10n('cat.queries') });
+    if (caps.users) categories.push({ type: 'user', label: l10n('cat.users') });
     return categories.map(
       (c) =>
         new DbTreeNode(
@@ -202,9 +210,69 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       case 'event':
       case 'user':
         return builder.build(catType, conn, db, element);
+      case 'index':
+        return this.buildIndexChildren(session, conn, db, element);
+      case 'trigger':
+        return this.buildTriggerChildren(session, conn, db, element);
+      case 'foreignKey':
+        return this.buildForeignKeyChildren(session, conn, db, element);
       default:
         return [];
     }
+  }
+
+  /** 索引分类子节点 */
+  private async buildIndexChildren(session: any, conn: SavedConnection, db: string, element: DbTreeNode): Promise<DbTreeNode[]> {
+    const table = element.parent?.label;
+    if (!table) return [];
+    const indexes = await session.metadata.getIndexes(table, db);
+    return indexes.map((idx: any) => {
+      const node = new DbTreeNode(idx.name, TreeItemCollapsibleState.None, NodeKind.Index, conn, undefined, element, undefined, db);
+      node.description = [
+        idx.columns?.join(', '),
+        idx.isPrimary ? 'PK' : idx.isUnique ? 'UNIQUE' : '',
+      ].filter(Boolean).join(' ');
+      return node;
+    });
+  }
+
+  /** 触发器分类子节点 */
+  private async buildTriggerChildren(session: any, conn: SavedConnection, db: string, element: DbTreeNode): Promise<DbTreeNode[]> {
+    const table = element.parent?.label;
+    if (!table) return [];
+    const triggers = await session.metadata.getTriggers(table, db);
+    return triggers.map((t: any) => {
+      const node = new DbTreeNode(t.name, TreeItemCollapsibleState.None, NodeKind.Trigger, conn, undefined, element, undefined, db);
+      node.description = [t.timing, t.event].filter(Boolean).join(' ');
+      node.command = { command: 'dbclient.viewTrigger', title: 'View', arguments: [node] };
+      return node;
+    });
+  }
+
+  /** 外键分类子节点（只读展示，按当前表过滤） */
+  private async buildForeignKeyChildren(session: any, conn: SavedConnection, db: string, element: DbTreeNode): Promise<DbTreeNode[]> {
+    const table = element.parent?.label;
+    if (!table) return [];
+    const fks = await session.metadata.getForeignKeys(db);
+    return fks
+      .filter((f: any) => f.tableName === table)
+      .map((f: any) => {
+        const node = new DbTreeNode(
+          `${f.columnName} → ${f.refTable}.${f.refColumn}`,
+          TreeItemCollapsibleState.None,
+          NodeKind.ForeignKey,
+          conn,
+          undefined,
+          element,
+          undefined,
+          db,
+        );
+        node.refTable = f.refTable;
+        node.refColumn = f.refColumn;
+        node.constraintName = f.constraintName;
+        node.command = { command: 'dbclient.jumpToRefTable', title: 'Open', arguments: [node] };
+        return node;
+      });
   }
 
   /** 查询文件夹子节点：文件夹内保存的查询 */
@@ -231,11 +299,11 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     );
   }
 
-  /** 表节点子节点：列列表（PK 用 key 图标） */
-  private async buildColumnChildren(element: DbTreeNode): Promise<DbTreeNode[]> {
+  /** 表节点子节点：列列表 + 索引/触发器/外键子分类 */
+  private async buildTableChildren(element: DbTreeNode): Promise<DbTreeNode[]> {
     const session = await this.manager.connect(element.conn!);
     const columns = await session.metadata.getColumns(element.label, element.database);
-    return columns.map((col) => {
+    const colNodes = columns.map((col) => {
       const node = new DbTreeNode(
         col.name,
         TreeItemCollapsibleState.None,
@@ -256,6 +324,18 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       }
       return node;
     });
+
+    const caps = session.capabilities;
+    const subCategories: DbTreeNode[] = [];
+    const mkCat = (type: CategoryType, label: string) => new DbTreeNode(
+      label, TreeItemCollapsibleState.Collapsed, NodeKind.Category, element.conn, undefined, element, type, element.database,
+    );
+    if (caps.operations.includes('manageIndexes')) {
+      subCategories.push(mkCat('index', l10n('cat.indexes')));
+      subCategories.push(mkCat('trigger', l10n('cat.triggers')));
+    }
+    subCategories.push(mkCat('foreignKey', l10n('cat.foreignKeys')));
+    return [...colNodes, ...subCategories];
   }
 
   /** 根节点：顶层分组 + 未分组连接 */
@@ -322,7 +402,12 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     } else {
       node.id = conn.id;
       node.description = this.connVersions.get(conn.id) || '';
-      node.iconPath = new ThemeIcon('server', new ThemeColor('gitDecoration.untrackedResourceForeground'));
+      const envColor = conn.environment === 'production'
+        ? 'errorForeground'
+        : conn.environment === 'staging'
+          ? 'editorWarning.foreground'
+          : 'gitDecoration.untrackedResourceForeground';
+      node.iconPath = new ThemeIcon('server', new ThemeColor(envColor));
     }
     return node;
   }

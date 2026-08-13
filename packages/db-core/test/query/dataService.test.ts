@@ -36,7 +36,7 @@ describe('DataService（数据编辑）', () => {
   it('生成合法的 UPDATE 语句并转义标识符', async () => {
     const conn = new CaptureConnection();
     const svc = new DataService(new QueryService(conn, new MysqlDialect()));
-    await svc.updateCell('users', 'id', 5, 'name', "O'Brien");
+    await svc.updateCell('users', ['id'], [5], 'name', "O'Brien");
     expect(conn.sqls[0]).toBe(
       "UPDATE `users` SET `name` = 'O\\'Brien' WHERE `id` = 5",
     );
@@ -45,7 +45,7 @@ describe('DataService（数据编辑）', () => {
   it('NULL 值生成 NULL 字面量', async () => {
     const conn = new CaptureConnection();
     const svc = new DataService(new QueryService(conn, new MysqlDialect()));
-    await svc.updateCell('users', 'id', 5, 'deleted_at', null);
+    await svc.updateCell('users', ['id'], [5], 'deleted_at', null);
     expect(conn.sqls[0]).toBe(
       'UPDATE `users` SET `deleted_at` = NULL WHERE `id` = 5',
     );
@@ -60,12 +60,30 @@ describe('DataService（数据编辑）', () => {
     );
   });
 
-  it('deleteRows 生成原子 IN 删除', async () => {
+  it('deleteRows 生成多行 OR 删除', async () => {
     const conn = new CaptureConnection();
     const svc = new DataService(new QueryService(conn, new MysqlDialect()));
-    await svc.deleteRows('users', 'id', [1, 2, 3], 'test');
+    await svc.deleteRows('users', ['id'], [[1], [2], [3]], 'test');
     expect(conn.sqls[0]).toBe(
-      'DELETE FROM `test`.`users` WHERE `id` IN (1, 2, 3)',
+      'DELETE FROM `test`.`users` WHERE (`id` = 1) OR (`id` = 2) OR (`id` = 3)',
+    );
+  });
+
+  it('复合主键 updateCell 生成 AND 条件', async () => {
+    const conn = new CaptureConnection();
+    const svc = new DataService(new QueryService(conn, new MysqlDialect()));
+    await svc.updateCell('orders', ['tenant_id', 'order_no'], [7, 'A123'], 'status', 'paid');
+    expect(conn.sqls[0]).toBe(
+      "UPDATE `orders` SET `status` = 'paid' WHERE `tenant_id` = 7 AND `order_no` = 'A123'",
+    );
+  });
+
+  it('复合主键 deleteRows 生成 AND+OR 条件', async () => {
+    const conn = new CaptureConnection();
+    const svc = new DataService(new QueryService(conn, new MysqlDialect()));
+    await svc.deleteRows('orders', ['tenant_id', 'order_no'], [[7, 'A123'], [7, 'B456']]);
+    expect(conn.sqls[0]).toBe(
+      "DELETE FROM `orders` WHERE (`tenant_id` = 7 AND `order_no` = 'A123') OR (`tenant_id` = 7 AND `order_no` = 'B456')",
     );
   });
 });

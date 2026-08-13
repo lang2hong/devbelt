@@ -1,6 +1,6 @@
 import { DatabaseType } from '../types/connection';
 import { validateIdent } from '../utils/validate';
-import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta } from '../types/meta';
+import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
 import type { DatabaseCapabilities } from './capabilities';
 
@@ -17,7 +17,7 @@ export class MysqlDialect implements SqlDialect {
     events: true,
     users: true,
     operations: [
-      'createDatabase', 'dropDatabase', 'renameTable', 'duplicateTable',
+      'createDatabase', 'dropDatabase', 'renameTable', 'renameView', 'duplicateTable',
       'truncateTable', 'getTableDefinition', 'alterTable', 'manageIndexes', 'manageRoutines',
       'manageEvents', 'manageUsers', 'dumpTable', 'schemaSync',
     ],
@@ -101,9 +101,65 @@ export class MysqlDialect implements SqlDialect {
     return `SELECT user AS name, host AS host FROM mysql.user ORDER BY user`;
   }
 
+  getTriggerListSql(table: string, database?: string): string {
+    validateIdent(table);
+    const where = database
+      ? `TRIGGER_SCHEMA = '${validateIdent(database)}' AND EVENT_OBJECT_TABLE = '${table}'`
+      : `TRIGGER_SCHEMA = database() AND EVENT_OBJECT_TABLE = '${table}'`;
+    return `SELECT TRIGGER_NAME AS name, ACTION_TIMING AS timing, EVENT_MANIPULATION AS event, EVENT_OBJECT_TABLE AS \`table\` FROM information_schema.TRIGGERS WHERE ${where} ORDER BY TRIGGER_NAME`;
+  }
+
+  getTriggerDefinitionSql(name: string, database?: string): string {
+    const qualified = database
+      ? `${this.wrap(validateIdent(database))}.${this.wrap(validateIdent(name))}`
+      : this.wrap(validateIdent(name));
+    return `SHOW CREATE TRIGGER ${qualified}`;
+  }
+
+  createIndexSql(name: string, table: string, columns: string[], unique: boolean, database?: string): string {
+    const qualified = database
+      ? `${this.wrap(validateIdent(database))}.${this.wrap(validateIdent(table))}`
+      : this.wrap(validateIdent(table));
+    const cols = columns.map((c) => this.wrap(validateIdent(c))).join(', ');
+    return `CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${this.wrap(validateIdent(name))} ON ${qualified} (${cols})`;
+  }
+
+  dropIndexSql(name: string, table: string, database?: string): string {
+    const qualified = database
+      ? `${this.wrap(validateIdent(database))}.${this.wrap(validateIdent(table))}`
+      : this.wrap(validateIdent(table));
+    return `DROP INDEX ${this.wrap(validateIdent(name))} ON ${qualified}`;
+  }
+
+  dropTriggerSql(name: string, _table: string, database?: string): string {
+    const qualified = database
+      ? `${this.wrap(validateIdent(database))}.${this.wrap(validateIdent(name))}`
+      : this.wrap(validateIdent(name));
+    return `DROP TRIGGER IF EXISTS ${qualified}`;
+  }
+
+  createForeignKeySql(name: string, table: string, columns: string[], refTable: string, refColumns: string[], database?: string): string {
+    const qualified = database
+      ? `${this.wrap(validateIdent(database))}.${this.wrap(validateIdent(table))}`
+      : this.wrap(validateIdent(table));
+    const refQualified = database
+      ? `${this.wrap(validateIdent(database))}.${this.wrap(validateIdent(refTable))}`
+      : this.wrap(validateIdent(refTable));
+    const cols = columns.map((c) => this.wrap(validateIdent(c))).join(', ');
+    const refCols = refColumns.map((c) => this.wrap(validateIdent(c))).join(', ');
+    return `ALTER TABLE ${qualified} ADD CONSTRAINT ${this.wrap(validateIdent(name))} FOREIGN KEY (${cols}) REFERENCES ${refQualified} (${refCols})`;
+  }
+
+  dropForeignKeySql(name: string, table: string, database?: string): string {
+    const qualified = database
+      ? `${this.wrap(validateIdent(database))}.${this.wrap(validateIdent(table))}`
+      : this.wrap(validateIdent(table));
+    return `ALTER TABLE ${qualified} DROP FOREIGN KEY ${this.wrap(validateIdent(name))}`;
+  }
+
   getForeignKeysSql(database?: string): string {
     const where = database ? `table_schema = '${validateIdent(database)}'` : `table_schema = database()`;
-    return `SELECT table_name AS tableName, column_name AS columnName, referenced_table_name AS refTable, referenced_column_name AS refColumn FROM information_schema.key_column_usage WHERE referenced_table_name IS NOT NULL AND ${where}`;
+    return `SELECT table_name AS tableName, column_name AS columnName, referenced_table_name AS refTable, referenced_column_name AS refColumn, constraint_name AS constraintName FROM information_schema.key_column_usage WHERE referenced_table_name IS NOT NULL AND ${where}`;
   }
 
   getProcessListSql(): string { return 'SHOW PROCESSLIST'; }
@@ -163,6 +219,15 @@ export class MysqlDialect implements SqlDialect {
     }));
   }
 
+  parseTriggerList(rows: any[]): TriggerMeta[] {
+    return rows.map((row) => ({
+      name: row.name,
+      timing: row.timing,
+      event: row.event,
+      table: row.table,
+    }));
+  }
+
   parseUserList(rows: any[]): UserMeta[] {
     return rows.map((row) => ({ name: row.name, host: row.host || '%' }));
   }
@@ -173,6 +238,7 @@ export class MysqlDialect implements SqlDialect {
       columnName: row.columnName,
       refTable: row.refTable,
       refColumn: row.refColumn,
+      constraintName: row.constraintName || row.constraint_name,
     }));
   }
 

@@ -27,7 +27,12 @@ export class MysqlConnection extends IConnection {
       bigNumberStrings: true,
       connectTimeout: config.connectTimeout || 5000,
       socketPath: config.socketPath,
-      typeCast: (field: TypeCastField, _next: () => unknown) => {
+      typeCast: (field: TypeCastField, next: () => unknown) => {
+        const t = field.type;
+        // 日期时间类型走 mysql2 默认(dateStrings:true → 完整 'YYYY-MM-DD HH:MM:SS')
+        if (t === 'DATETIME' || t === 'TIMESTAMP' || t === 'DATE' || t === 'TIME' || t === 'NEWDATE' || t === 'DATETIME2') {
+          return next();
+        }
         const buf = field.buffer();
         if (field.type === 'BIT') {
           return this.bitToBoolean(buf);
@@ -82,6 +87,11 @@ export class MysqlConnection extends IConnection {
   end(): void {
     this.dead = true;
     this.con.end(() => {});
+  }
+
+  abortQuery(): void {
+    this.dead = true;
+    this.con.destroy();
   }
 
   bitToBoolean(buf: Buffer | null): any {

@@ -6,8 +6,10 @@ export const config = {
   port: Number(process.env.PORT || 3000),
   /** JWT 签名密钥（生产必须通过环境变量注入） */
   jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-me',
-  /** JWT 过期时间 */
-  jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
+  /** Access token 过期时间（短期） */
+  accessTokenExpiresIn: process.env.ACCESS_TOKEN_EXPIRES_IN || '15m',
+  /** Refresh token 过期时间（长期，可撤销） */
+  refreshTokenExpiresIn: process.env.REFRESH_TOKEN_EXPIRES_IN || '30d',
   /** MySQL 连接配置 */
   mysql: {
     host: process.env.MYSQL_HOST || '127.0.0.1',

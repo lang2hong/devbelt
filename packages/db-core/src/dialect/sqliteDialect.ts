@@ -1,6 +1,6 @@
 import { DatabaseType } from '../types/connection';
 import { validateIdent } from '../utils/validate';
-import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta } from '../types/meta';
+import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta } from '../types/meta';
 import type { SqlDialect } from './sqlDialect';
 import type { DatabaseCapabilities } from './capabilities';
 
@@ -78,6 +78,37 @@ export class SqliteDialect implements SqlDialect {
       WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%'`;
   }
 
+  getTriggerListSql(table: string): string {
+    validateIdent(table);
+    return `SELECT name AS name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = '${table}' ORDER BY name`;
+  }
+
+  getTriggerDefinitionSql(name: string): string {
+    validateIdent(name);
+    return `SELECT sql AS definition FROM sqlite_master WHERE type = 'trigger' AND name = '${name}'`;
+  }
+
+  createIndexSql(name: string, table: string, columns: string[], unique: boolean): string {
+    const cols = columns.map((c) => this.wrap(validateIdent(c))).join(', ');
+    return `CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${this.wrap(validateIdent(name))} ON ${this.wrap(validateIdent(table))} (${cols})`;
+  }
+
+  dropIndexSql(name: string, _table?: string, _database?: string): string {
+    return `DROP INDEX IF EXISTS ${this.wrap(validateIdent(name))}`;
+  }
+
+  dropTriggerSql(name: string, _table?: string, _database?: string): string {
+    return `DROP TRIGGER IF EXISTS ${this.wrap(validateIdent(name))}`;
+  }
+
+  createForeignKeySql(): string {
+    return '';
+  }
+
+  dropForeignKeySql(): string {
+    return '';
+  }
+
   getColumnsSql(table: string): string {
     validateIdent(table);
     return `PRAGMA table_info(${this.wrap(table)})`;
@@ -108,16 +139,21 @@ export class SqliteDialect implements SqlDialect {
     }));
   }
 
+  parseTriggerList(rows: any[]): TriggerMeta[] {
+    return rows.map((row) => ({ name: row.name }));
+  }
+
   parseUserList(): UserMeta[] {
     return [];
   }
 
   parseForeignKeys(rows: any[]): ForeignKeyMeta[] {
     return rows.map((row) => ({
-      tableName: row.tableName || row.tableName,
-      columnName: row.columnName || row.columnName,
-      refTable: row.refTable || row.refTable,
-      refColumn: row.refColumn || row.refColumn,
+      tableName: row.tableName,
+      columnName: row.columnName,
+      refTable: row.refTable,
+      refColumn: row.refColumn,
+      constraintName: row.constraintName,
     }));
   }
 

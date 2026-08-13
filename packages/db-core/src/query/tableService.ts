@@ -32,6 +32,15 @@ export class TableService {
     return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} RENAME TO ${this.wrap(newName)}`);
   }
 
+  /** 重命名视图 */
+  async renameView(view: string, newName: string, database?: string): Promise<QueryResult> {
+    this.require('renameView');
+    if (this.queryService.dialect.dbType === 'MYSQL') {
+      return this.ddl(`RENAME TABLE ${this.wrapQualified(view, database)} TO ${this.wrapQualified(newName, database)}`);
+    }
+    return this.ddl(`ALTER VIEW ${this.wrapQualified(view, database)} RENAME TO ${this.wrap(newName)}`);
+  }
+
   /** 清空表（危险操作） */
   async truncateTable(table: string, database?: string): Promise<QueryResult> {
     this.require('truncateTable');
@@ -80,19 +89,49 @@ export class TableService {
     return this.ddl(`DROP EVENT IF EXISTS ${qualified}`);
   }
 
-  /** 删除索引 */
+  /** 删除索引（主键索引走 ALTER TABLE DROP PRIMARY KEY） */
   async dropIndex(indexName: string, table: string, database?: string): Promise<QueryResult> {
     this.require('manageIndexes');
     const qualifiedTable = this.wrapQualified(table, database);
+    if (indexName.toUpperCase() === 'PRIMARY') {
+      return this.ddl(`ALTER TABLE ${qualifiedTable} DROP PRIMARY KEY`);
+    }
     return this.ddl(`DROP INDEX ${this.wrap(indexName)} ON ${qualifiedTable}`);
   }
 
-  /** 创建索引 */
+  /** 创建索引（主键走 ALTER TABLE ADD PRIMARY KEY） */
   async createIndex(indexName: string, table: string, columns: string[], database?: string, isUnique = false): Promise<QueryResult> {
     this.require('manageIndexes');
     const qualifiedTable = this.wrapQualified(table, database);
     const colList = columns.map((c) => this.wrap(c)).join(', ');
+    if (indexName.toUpperCase() === 'PRIMARY') {
+      return this.ddl(`ALTER TABLE ${qualifiedTable} ADD PRIMARY KEY (${colList})`);
+    }
     return this.ddl(`CREATE ${isUnique ? 'UNIQUE ' : ''}INDEX ${this.wrap(indexName)} ON ${qualifiedTable} (${colList})`);
+  }
+
+  /** 重建主键（编辑主键索引时：DROP + ADD 单语句） */
+  async recreatePrimaryKey(table: string, columns: string[], database?: string): Promise<QueryResult> {
+    this.require('manageIndexes');
+    const qualifiedTable = this.wrapQualified(table, database);
+    const colList = columns.map((c) => this.wrap(c)).join(', ');
+    return this.ddl(`ALTER TABLE ${qualifiedTable} DROP PRIMARY KEY, ADD PRIMARY KEY (${colList})`);
+  }
+
+  /** 新增外键 */
+  async addForeignKey(table: string, name: string, columns: string[], refTable: string, refColumns: string[], database?: string): Promise<QueryResult> {
+    this.require('alterTable');
+    const sql = this.queryService.dialect.createForeignKeySql(name, table, columns, refTable, refColumns, database);
+    if (!sql) throw new Error(`${this.queryService.dialect.dbType} does not support adding foreign keys.`);
+    return this.ddl(sql);
+  }
+
+  /** 删除外键 */
+  async dropForeignKey(name: string, table: string, database?: string): Promise<QueryResult> {
+    this.require('alterTable');
+    const sql = this.queryService.dialect.dropForeignKeySql(name, table, database);
+    if (!sql) throw new Error(`${this.queryService.dialect.dbType} does not support dropping foreign keys.`);
+    return this.ddl(sql);
   }
 
   /** 新增列 */
@@ -130,19 +169,31 @@ export class TableService {
     throw new Error(`${dbType} does not support altering a column type.`);
   }
 
-  /** 调整列位置（仅 MySQL：MODIFY COLUMN ... AFTER/FIRST）。afterColumn 为 null 表示移到最前(FIRST)。 */
-  async reorderColumn(table: string, column: string, definition: string, afterColumn: string | null, database?: string): Promise<QueryResult> {
+  /** 调整列位置（仅 MySQL：CHANGE COLUMN ... AFTER/FIRST）。afterColumn 为 null 表示移到最前(FIRST)。 */
+  async reorderColumn(table: string, column: string, afterColumn: string | null, database?: string): Promise<QueryResult> {
     this.require('alterTable');
     validateIdent(table);
     validateIdent(column);
-    const def = definition.trim();
-    if (!def) throw new Error('Column definition is required.');
     const dbType = this.queryService.dialect.dbType;
     if (dbType !== 'MYSQL') {
       throw new Error(`${dbType} does not support reordering columns.`);
     }
+    const def = await this.getFullColumnDef(table, column, database);
     const position = afterColumn ? ` AFTER ${this.wrap(afterColumn)}` : ' FIRST';
-    return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} MODIFY COLUMN ${this.wrap(column)} ${def}${position}`);
+    return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} CHANGE COLUMN ${this.wrap(column)} ${this.wrap(column)} ${def}${position}`);
+  }
+
+  /** 从 SHOW CREATE TABLE 解析指定列的完整定义（含 NOT NULL/DEFAULT/charset/ON UPDATE 等所有属性）。 */
+  private async getFullColumnDef(table: string, column: string, database?: string): Promise<string> {
+    const ddl = await this.getCreateSql(table, database);
+    for (const raw of ddl.split('\n')) {
+      const line = raw.trimEnd();
+      const m = line.match(/^\s*`([^`]+)`\s+(.+?)\s*,?\s*$/);
+      if (m && m[1] === column && !m[2].startsWith('(')) {
+        return m[2].replace(/,\s*$/, '');
+      }
+    }
+    throw new Error(`Column "${column}" not found in table DDL`);
   }
 
   // ── 用户管理 ──
@@ -150,16 +201,25 @@ export class TableService {
   /** 创建用户 */
   async createUser(name: string, password: string, host = '%'): Promise<QueryResult> {
     this.require('manageUsers');
+    if (this.queryService.dialect.dbType === 'PG') {
+      return this.ddl(`CREATE ROLE ${sqlstring.escape(name)} WITH LOGIN PASSWORD ${sqlstring.escape(password)}`);
+    }
     return this.ddl(`CREATE USER ${sqlstring.escape(name)}@${sqlstring.escape(host)} IDENTIFIED BY ${sqlstring.escape(password)}`);
   }
 
   async dropUser(name: string, host = '%'): Promise<QueryResult> {
     this.require('manageUsers');
+    if (this.queryService.dialect.dbType === 'PG') {
+      return this.ddl(`DROP ROLE IF EXISTS ${sqlstring.escape(name)}`);
+    }
     return this.ddl(`DROP USER IF EXISTS ${sqlstring.escape(name)}@${sqlstring.escape(host)}`);
   }
 
   async alterUserPassword(name: string, password: string, host = '%'): Promise<QueryResult> {
     this.require('manageUsers');
+    if (this.queryService.dialect.dbType === 'PG') {
+      return this.ddl(`ALTER ROLE ${sqlstring.escape(name)} WITH PASSWORD ${sqlstring.escape(password)}`);
+    }
     return this.ddl(`ALTER USER ${sqlstring.escape(name)}@${sqlstring.escape(host)} IDENTIFIED BY ${sqlstring.escape(password)}`);
   }
 
@@ -168,6 +228,10 @@ export class TableService {
     const PRIV_WHITELIST = /^(ALL(\s+PRIVILEGES)?|SELECT|INSERT|UPDATE|DELETE|CREATE(\s+VIEW)?|DROP|ALTER|INDEX|REFERENCES|TRIGGER|EXECUTE|USAGE|RELOAD|PROCESS|REPLICATION\s+CLIENT|REPLICATION\s+SLAVE|SHOW\s+(VIEW|DATABASES)|SHUTDOWN|SUPER)$/i;
     if (!PRIV_WHITELIST.test(privilege.trim())) {
       throw new Error(`Invalid privilege: "${privilege}"`);
+    }
+    if (this.queryService.dialect.dbType === 'PG') {
+      if (!database) throw new Error('PostgreSQL requires a schema name for grant.');
+      return this.ddl(`GRANT ${privilege} ON ALL TABLES IN SCHEMA ${this.wrap(validateIdent(database))} TO ${sqlstring.escape(name)}`);
     }
     const target = database ? `${this.wrap(validateIdent(database))}.*` : '*.*';
     return this.ddl(`GRANT ${privilege} ON ${target} TO ${sqlstring.escape(name)}@${sqlstring.escape(host)}`);
@@ -178,6 +242,10 @@ export class TableService {
     const PRIV_WHITELIST = /^(ALL(\s+PRIVILEGES)?|SELECT|INSERT|UPDATE|DELETE|CREATE(\s+VIEW)?|DROP|ALTER|INDEX|REFERENCES|TRIGGER|EXECUTE|USAGE|RELOAD|PROCESS|REPLICATION\s+CLIENT|REPLICATION\s+SLAVE|SHOW\s+(VIEW|DATABASES)|SHUTDOWN|SUPER)$/i;
     if (!PRIV_WHITELIST.test(privilege.trim())) {
       throw new Error(`Invalid privilege: "${privilege}"`);
+    }
+    if (this.queryService.dialect.dbType === 'PG') {
+      if (!database) throw new Error('PostgreSQL requires a schema name for revoke.');
+      return this.ddl(`REVOKE ${privilege} ON ALL TABLES IN SCHEMA ${this.wrap(validateIdent(database))} FROM ${sqlstring.escape(name)}`);
     }
     const target = database ? `${this.wrap(validateIdent(database))}.*` : '*.*';
     return this.ddl(`REVOKE ${privilege} ON ${target} FROM ${sqlstring.escape(name)}@${sqlstring.escape(host)}`);

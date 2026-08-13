@@ -111,17 +111,17 @@ h3 { margin: 0 0 12px; }
 .field label { display: block; margin-bottom: 4px; }
 input {
   width: 100%; box-sizing: border-box; padding: 6px;
-  background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-  border: 1px solid var(--vscode-input-border); border-radius: 3px;
+  background: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #d4d4d4);
+  border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 3px;
 }
 .privs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
 .priv { display: flex; gap: 6px; align-items: center; }
-.error { color: var(--vscode-errorForeground); margin-bottom: 12px; font-size: 12px; }
+.error { color: var(--vscode-errorForeground, #f48771); margin-bottom: 12px; font-size: 12px; }
 .actions { margin-top: 12px; }
 .btn {
   padding: 6px 16px; cursor: pointer; margin-right: 8px;
-  background: var(--vscode-button-background); color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #ffffff);
   border: none; border-radius: 3px;
 }
-.btn.sec { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
+.btn.sec { background: var(--vscode-button-secondaryBackground, #3a3d41); color: var(--vscode-button-secondaryForeground, #ffffff); }
 </style>

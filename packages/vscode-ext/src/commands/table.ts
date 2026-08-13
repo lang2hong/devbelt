@@ -5,9 +5,16 @@ import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
 import { confirm, openSqlDoc, openSqlDocEditor, requireCapability } from './shared';
 import { runExportWizard } from './database';
+import { TableQueryView } from '../result/tableQueryView';
 
 export function registerTableCommands(deps: Deps, sub: Sub): void {
   const { manager, treeProvider, executor, connCtx } = deps;
+
+  // ── 外键跳转 ──
+  sub('dbclient.jumpToRefTable', async (node: DbTreeNode) => {
+    if (!node?.conn || !node.refTable) return;
+    TableQueryView.open(node.conn, node.refTable, node.database ?? node.conn.database ?? '', manager);
+  });
 
   // ── 表 ──
   sub('dbclient.newTable', async (node: DbTreeNode) => {
@@ -34,6 +41,16 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     const session = await manager.connect(node.conn);
     if (!requireCapability(session, 'renameTable')) return;
     await session.table.renameTable(node.label, newName, node.database);
+    treeProvider.refresh();
+  });
+
+  sub('dbclient.renameView', async (node: DbTreeNode) => {
+    if (!node?.conn || !node?.database) return;
+    const newName = await vscode.window.showInputBox({ prompt: l10n('view.renamePrompt'), value: node.label });
+    if (!newName || newName === node.label) return;
+    const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'renameView')) return;
+    await session.table.renameView(node.label, newName, node.database);
     treeProvider.refresh();
   });
 
@@ -154,6 +171,43 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (!requireCapability(session, 'manageEvents')) return;
     await session.table.dropEvent(node.label, node.database);
     treeProvider.refresh();
+  });
+
+  // ── 函数/事件 新建与修改（SQL 编辑器模板，可编辑可运行） ──
+  sub('dbclient.newRoutine', async (node: DbTreeNode) => {
+    if (!node?.conn) return;
+    connCtx.setLast(node.conn, node.database);
+    const useDb = node.database ? `USE ${wrapIdentForConn(node.conn, node.database)};\n\n` : '';
+    const tpl = useDb + `DELIMITER $$\nCREATE PROCEDURE new_routine()\nBEGIN\n  -- routine body\nEND$$\nDELIMITER ;`;
+    const editor = await openSqlDocEditor(tpl);
+    if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
+  });
+
+  sub('dbclient.modifyRoutine', async (node: DbTreeNode) => {
+    if (!node?.conn || !node?.database) return;
+    const session = await manager.connect(node.conn);
+    const def = await session.metadata.getRoutineDefinition(node.label, node.routineType || 'FUNCTION', node.database);
+    const useDb = `USE ${wrapIdentForConn(node.conn, node.database)};\n\n`;
+    const editor = await openSqlDocEditor(useDb + (def || '-- No definition found'));
+    if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
+  });
+
+  sub('dbclient.newEvent', async (node: DbTreeNode) => {
+    if (!node?.conn) return;
+    connCtx.setLast(node.conn, node.database);
+    const useDb = node.database ? `USE ${wrapIdentForConn(node.conn, node.database)};\n\n` : '';
+    const tpl = useDb + `CREATE EVENT new_event\n  ON SCHEDULE EVERY 1 DAY\n  DO\n    -- event action`;
+    const editor = await openSqlDocEditor(tpl);
+    if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
+  });
+
+  sub('dbclient.modifyEvent', async (node: DbTreeNode) => {
+    if (!node?.conn || !node?.database) return;
+    const session = await manager.connect(node.conn);
+    const def = await session.metadata.getEventDefinition(node.label, node.database);
+    const useDb = `USE ${wrapIdentForConn(node.conn, node.database)};\n\n`;
+    const editor = await openSqlDocEditor(useDb + (def || '-- No definition found'));
+    if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
   });
 
   // ── 列（字段） ──

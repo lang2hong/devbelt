@@ -25,6 +25,9 @@ export abstract class IConnection {
   abstract end(): void;
   abstract isAlive(): boolean;
 
+  /** 中断在途查询（默认 no-op；支持取消的连接 override） */
+  abortQuery(): void {}
+
   /** 将行数据转为 dump 格式（NULL / 转义字符串），不修改原始行 */
   convertToDump(row: any): any {
     const out: any = {};

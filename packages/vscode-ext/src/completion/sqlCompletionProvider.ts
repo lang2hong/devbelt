@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { ConnectionManager } from '../connection/connectionManager';
 import type { SavedConnection } from '../connection/connectionStore';
 import type { ConnectionContext } from '../connection/connectionContext';
+import { diagError } from '../utils/diagnostics';
 import { SQL_SNIPPETS } from './sqlSnippets';
 import {
   buildCandidates,
@@ -112,7 +113,8 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
       const names = tables.map((t) => t.name);
       this.tableCache.set(key, names);
       return names;
-    } catch {
+    } catch (err) {
+      diagError('Completion: getTables failed', { connId: conn.id, database, error: (err as Error).message });
       return [];
     }
   }
@@ -128,7 +130,8 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
       const names = columns.map((c) => c.name);
       this.columnCache.set(key, names);
       return names;
-    } catch {
+    } catch (err) {
+      diagError('Completion: getColumns failed', { connId: conn.id, table, database, error: (err as Error).message });
       return [];
     }
   }
