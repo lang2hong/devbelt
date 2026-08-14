@@ -1,10 +1,25 @@
 import { validateIdent } from '../utils/validate';
 import { QueryService } from './queryService';
+import type { QueryOptions } from './queryService';
 import { supportsOperation, unsupportedOperationMessage } from '../dialect/capabilities';
 import type { DatabaseOperation } from '../dialect/capabilities';
 import { normalizeColumnMeta } from './normalize';
 import type { QueryResult } from '../types/query';
 import type { ColumnMeta } from '../types/meta';
+
+/** 建表时的单列定义（由设计器逐项填写，SQL 由方言合成）。 */
+export interface NewColumnSpec {
+  name: string;
+  /** 列类型原文，如 `VARCHAR(255)`、`INT`。 */
+  type: string;
+  notNull?: boolean;
+  isPrimary?: boolean;
+  autoIncrement?: boolean;
+  /** 默认值原文；数字与 CURRENT_TIMESTAMP 等关键字原样写入，其余按字符串转义。 */
+  defaultValue?: string;
+  /** 列注释（仅 MySQL 支持列内联 COMMENT，其余方言忽略）。 */
+  comment?: string;
+}
 
 /**
  * 表结构操作服务：创建/删除/重命名/清空/复制/查看建表语句。
@@ -14,6 +29,72 @@ import type { ColumnMeta } from '../types/meta';
  */
 export class TableService {
   constructor(private readonly queryService: QueryService) {}
+
+  /**
+   * 建表。
+   *
+   * 自增列的写法三家完全不同，必须在这里分流，否则设计器只能产出 MySQL 语法：
+   *  - MySQL：`INT NOT NULL AUTO_INCREMENT` + 独立 `PRIMARY KEY`
+   *  - PG：类型换成 `SERIAL` / `BIGSERIAL`
+   *  - SQLite：只能写成 `INTEGER PRIMARY KEY AUTOINCREMENT`（内联，且必须是唯一主键）
+   */
+  async createTable(table: string, columns: NewColumnSpec[], database?: string): Promise<QueryResult> {
+    validateIdent(table);
+    if (!columns.length) throw new Error('At least one column is required to create a table.');
+    const dbType = this.queryService.dialect.dbType;
+    const primary = columns.filter((c) => c.isPrimary).map((c) => c.name);
+    const autoIncrement = columns.filter((c) => c.autoIncrement);
+    if (autoIncrement.length > 1) throw new Error('Only one auto-increment column is supported.');
+
+    // SQLite 的 AUTOINCREMENT 只能内联在唯一主键列上，写成独立 PRIMARY KEY 会报错
+    const sqliteInlinePk = dbType === 'SQLITE' && autoIncrement.length === 1;
+    if (sqliteInlinePk && (primary.length !== 1 || primary[0] !== autoIncrement[0].name)) {
+      throw new Error('SQLite requires the auto-increment column to be the only primary key column.');
+    }
+
+    const defs = columns.map((c) => this.columnDefinition(c, dbType, sqliteInlinePk));
+    if (primary.length && !sqliteInlinePk) {
+      defs.push(`PRIMARY KEY (${primary.map((c) => this.wrap(validateIdent(c))).join(', ')})`);
+    }
+    return this.ddl(`CREATE TABLE ${this.wrapQualified(table, database)} (\n  ${defs.join(',\n  ')}\n)`);
+  }
+
+  private columnDefinition(col: NewColumnSpec, dbType: string, sqliteInlinePk: boolean): string {
+    validateIdent(col.name);
+    const type = (col.type || '').trim();
+    if (!type) throw new Error(`Column "${col.name}" requires a type.`);
+    const parts: string[] = [this.wrap(col.name)];
+
+    if (col.autoIncrement && dbType === 'PG') {
+      parts.push(/big/i.test(type) ? 'BIGSERIAL' : 'SERIAL');
+    } else if (col.autoIncrement && dbType === 'SQLITE') {
+      parts.push('INTEGER');
+    } else {
+      parts.push(type);
+    }
+
+    if (sqliteInlinePk && col.autoIncrement) {
+      parts.push('PRIMARY KEY AUTOINCREMENT');
+      return parts.join(' ');
+    }
+    // PG 的 SERIAL 已隐含 NOT NULL，再写一遍合法但冗余
+    if ((col.notNull || col.isPrimary) && !(col.autoIncrement && dbType === 'PG')) {
+      parts.push('NOT NULL');
+    }
+    if (col.autoIncrement && dbType === 'MYSQL') parts.push('AUTO_INCREMENT');
+    if (col.defaultValue !== undefined && col.defaultValue !== '' && !col.autoIncrement) {
+      parts.push(`DEFAULT ${this.defaultLiteral(col.defaultValue)}`);
+    }
+    // 列内联 COMMENT 是 MySQL 语法，PG/SQLite 的 CREATE TABLE 不接受
+    if (col.comment && dbType === 'MYSQL') parts.push(`COMMENT ${this.esc(col.comment)}`);
+    return parts.join(' ');
+  }
+
+  /** 默认值字面量：数字与时间关键字原样写入，其余按方言规则转义为字符串。 */
+  private defaultLiteral(value: string): string {
+    const keyword = /^(CURRENT_TIMESTAMP(\(\d*\))?|CURRENT_DATE|CURRENT_TIME|NULL|TRUE|FALSE)$/i;
+    return /^-?\d+(\.\d+)?$/.test(value) || keyword.test(value) ? value : this.esc(value);
+  }
 
   /** 删除表（危险操作） */
   async dropTable(table: string, database?: string): Promise<QueryResult> {
@@ -46,12 +127,35 @@ export class TableService {
     return this.ddl(`TRUNCATE TABLE ${this.wrapQualified(table, database)}`);
   }
 
-  /** 复制表结构（含数据） */
-  async dupTable(table: string, newName: string, database?: string): Promise<QueryResult> {
+  /**
+   * 复制表。
+   *
+   * `includeData` 为 false 时只复制结构。方言差异：
+   *  - MySQL：`CREATE TABLE ... LIKE`（保留索引/默认值/自增），再 `INSERT SELECT` 灌数据
+   *  - PG：`CREATE TABLE ... (LIKE ... INCLUDING ALL)`，同样再灌数据
+   *  - SQLite：只有 `CREATE TABLE AS SELECT`，**不保留主键/索引/约束**
+   *
+   * 注意：此前该方法注释写「含数据」，实际只发了 `LIKE`，一行数据都不会复制。
+   */
+  async dupTable(table: string, newName: string, database?: string, includeData = false): Promise<QueryResult> {
     this.require('duplicateTable');
-    return this.ddl(
-      `CREATE TABLE ${this.wrapQualified(newName, database)} LIKE ${this.wrapQualified(table, database)}`,
-    );
+    validateIdent(table);
+    validateIdent(newName);
+    const source = this.wrapQualified(table, database);
+    const target = this.wrapQualified(newName, database);
+    const dbType = this.queryService.dialect.dbType;
+
+    if (dbType === 'SQLITE') {
+      // SQLite 无 LIKE 语法；WHERE 0 用于「只要结构」
+      return this.ddl(`CREATE TABLE ${target} AS SELECT * FROM ${source}${includeData ? '' : ' WHERE 0'}`);
+    }
+
+    const structure = dbType === 'PG'
+      ? `CREATE TABLE ${target} (LIKE ${source} INCLUDING ALL)`
+      : `CREATE TABLE ${target} LIKE ${source}`;
+    const created = await this.ddl(structure);
+    if (!includeData) return created;
+    return this.ddl(`INSERT INTO ${target} SELECT * FROM ${source}`);
   }
 
   /** 查询建表语句（各方言实现不同，返回首行首列） */
@@ -151,6 +255,58 @@ export class TableService {
     return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} DROP COLUMN ${this.wrap(column)}`);
   }
 
+  /**
+   * 改列（可同时改名）。
+   *
+   * MySQL 走 `CHANGE COLUMN old new def` —— `MODIFY COLUMN` 改不了列名，
+   * 而树上的「Modify」需要覆盖改名这个最常见的诉求。
+   * PG 没有一条语句能同时改名与改类型，因此拆成 RENAME + ALTER TYPE 两步；
+   * SQLite 只能改名。
+   */
+  async changeColumn(
+    table: string,
+    column: string,
+    newName: string,
+    definition: string,
+    database?: string,
+  ): Promise<QueryResult> {
+    this.require('alterTable');
+    validateIdent(table);
+    validateIdent(column);
+    validateIdent(newName);
+    const def = definition.trim();
+    if (!def) throw new Error('Column definition is required.');
+    const qualified = this.wrapQualified(table, database);
+    const dbType = this.queryService.dialect.dbType;
+
+    if (dbType === 'MYSQL') {
+      return this.ddl(
+        `ALTER TABLE ${qualified} CHANGE COLUMN ${this.wrap(column)} ${this.wrap(newName)} ${def}`,
+      );
+    }
+    if (dbType === 'PG') {
+      if (newName !== column) {
+        await this.ddl(`ALTER TABLE ${qualified} RENAME COLUMN ${this.wrap(column)} TO ${this.wrap(newName)}`);
+      }
+      return this.ddl(`ALTER TABLE ${qualified} ALTER COLUMN ${this.wrap(newName)} TYPE ${def}`);
+    }
+    if (newName === column) {
+      throw new Error(`${dbType} does not support altering a column type.`);
+    }
+    return this.renameColumn(table, column, newName, database);
+  }
+
+  /** 仅改列名（三家方言都支持 `RENAME COLUMN`，MySQL 8.0+ 亦可）。 */
+  async renameColumn(table: string, column: string, newName: string, database?: string): Promise<QueryResult> {
+    this.require('alterTable');
+    validateIdent(table);
+    validateIdent(column);
+    validateIdent(newName);
+    return this.ddl(
+      `ALTER TABLE ${this.wrapQualified(table, database)} RENAME COLUMN ${this.wrap(column)} TO ${this.wrap(newName)}`,
+    );
+  }
+
   /** 修改列定义。MySQL 用 MODIFY COLUMN；PG 用 ALTER COLUMN TYPE；SQLite 不支持改类型 */
   async modifyColumn(table: string, column: string, definition: string, database?: string): Promise<QueryResult> {
     this.require('alterTable');
@@ -182,6 +338,21 @@ export class TableService {
     return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} CHANGE COLUMN ${this.wrap(column)} ${this.wrap(column)} ${def}${position}`);
   }
 
+  /**
+   * 读取列的完整定义（MySQL）。
+   *
+   * 供「改列」预填当前定义用：只给类型会把 NOT NULL / DEFAULT / 注释 / 自增
+   * 全部抹掉，这在 `CHANGE COLUMN` 里是静默的数据/约束丢失。
+   */
+  async getColumnDefinition(table: string, column: string, database?: string): Promise<string> {
+    validateIdent(table);
+    validateIdent(column);
+    if (this.queryService.dialect.dbType !== 'MYSQL') {
+      throw new Error(`${this.queryService.dialect.dbType} does not expose a full column definition.`);
+    }
+    return this.getFullColumnDef(table, column, database);
+  }
+
   /** 从 SHOW CREATE TABLE 解析指定列的完整定义（含 NOT NULL/DEFAULT/charset/ON UPDATE 等所有属性）。 */
   private async getFullColumnDef(table: string, column: string, database?: string): Promise<string> {
     const ddl = await this.getCreateSql(table, database);
@@ -210,9 +381,9 @@ export class TableService {
   async createUser(name: string, password: string, host = '%'): Promise<QueryResult> {
     this.require('manageUsers');
     if (this.queryService.dialect.dbType === 'PG') {
-      return this.ddl(`CREATE ROLE ${this.wrap(validateIdent(name))} WITH LOGIN PASSWORD ${this.esc(password)}`);
+      return this.secretDdl(`CREATE ROLE ${this.wrap(validateIdent(name))} WITH LOGIN PASSWORD ${this.esc(password)}`);
     }
-    return this.ddl(`CREATE USER ${this.esc(name)}@${this.esc(host)} IDENTIFIED BY ${this.esc(password)}`);
+    return this.secretDdl(`CREATE USER ${this.esc(name)}@${this.esc(host)} IDENTIFIED BY ${this.esc(password)}`);
   }
 
   async dropUser(name: string, host = '%'): Promise<QueryResult> {
@@ -226,9 +397,9 @@ export class TableService {
   async alterUserPassword(name: string, password: string, host = '%'): Promise<QueryResult> {
     this.require('manageUsers');
     if (this.queryService.dialect.dbType === 'PG') {
-      return this.ddl(`ALTER ROLE ${this.wrap(validateIdent(name))} WITH PASSWORD ${this.esc(password)}`);
+      return this.secretDdl(`ALTER ROLE ${this.wrap(validateIdent(name))} WITH PASSWORD ${this.esc(password)}`);
     }
-    return this.ddl(`ALTER USER ${this.esc(name)}@${this.esc(host)} IDENTIFIED BY ${this.esc(password)}`);
+    return this.secretDdl(`ALTER USER ${this.esc(name)}@${this.esc(host)} IDENTIFIED BY ${this.esc(password)}`);
   }
 
   async grantPrivilege(name: string, privilege: string, database?: string, host = '%'): Promise<QueryResult> {
@@ -349,7 +520,9 @@ export class TableService {
         valuesList.push(`(${values})`);
       }
       const sql = `INSERT INTO ${this.wrapQualified(table, database)} (${colList}) VALUES ${valuesList.join(', ')}`;
-      await this.queryService.query(sql);
+      // 批量循环不逐条进历史，否则百万行 mock 会把上限 100 条的历史冲干；
+      // 命令层会补一条汇总记录。
+      await this.queryService.query(sql, undefined, { skipHistory: true });
       inserted += batchCount;
     }
     return inserted;
@@ -451,8 +624,18 @@ export class TableService {
     return s;
   }
 
-  private async ddl(sql: string): Promise<QueryResult> {
-    return this.queryService.query(sql);
+  private async ddl(sql: string, options?: QueryOptions): Promise<QueryResult> {
+    return this.queryService.query(sql, undefined, options);
+  }
+
+  /**
+   * 执行含明文密码的语句。
+   *
+   * 这类 SQL 绝不能进查询历史：历史会持久化到 globalState 并参与云同步，
+   * 密码一旦写进去就会离开本机。命令层负责补一条脱敏摘要。
+   */
+  private async secretDdl(sql: string): Promise<QueryResult> {
+    return this.ddl(sql, { skipHistory: true });
   }
 
   supports(operation: DatabaseOperation): boolean {

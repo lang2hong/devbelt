@@ -66,7 +66,7 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
   sub('dbclient.previewTable', (node: DbTreeNode) => {
     if (node?.conn && node?.database) {
       connCtx.setLast(node.conn, node.database);
-      TableQueryView.open(node.conn, node.label, node.database, manager);
+      TableQueryView.open(node.conn, node.label, node.database, manager, { objectType: 'table' });
     }
   });
 
@@ -77,7 +77,8 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
   sub('dbclient.previewView', (node: DbTreeNode) => {
     if (node?.conn && node?.database) {
       connCtx.setLast(node.conn, node.database);
-      TableQueryView.open(node.conn, node.label, node.database, manager);
+      // 视图只读：objectType 'view' 会关闭单元格编辑、插入行与复制 INSERT
+      TableQueryView.open(node.conn, node.label, node.database, manager, { objectType: 'view' });
     }
   });
 

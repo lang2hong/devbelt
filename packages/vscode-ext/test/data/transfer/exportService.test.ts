@@ -33,14 +33,8 @@ describe('exportRows', () => {
    * 产出的 .xlsx 内容是 base64 文本，Excel 无法打开。
    */
   it('xlsx 返回二进制 Buffer 而非 base64 文本', () => {
-    let content: string | Buffer;
-    try {
-      content = exportRows({ format: 'xlsx', columns: ['id', 'name'], rows });
-    } catch (err) {
-      // xlsx 是可选依赖，未安装时跳过（错误信息应明确指向依赖缺失）
-      expect((err as Error).message).toContain('xlsx');
-      return;
-    }
+    // xlsx 现由包内实现（Node zlib），不再是「可能缺失的可选依赖」
+    const content = exportRows({ format: 'xlsx', columns: ['id', 'name'], rows });
     expect(Buffer.isBuffer(content)).toBe(true);
     // xlsx 是 zip 容器，魔数为 PK\x03\x04
     expect((content as Buffer).subarray(0, 2).toString('latin1')).toBe('PK');
@@ -178,22 +172,16 @@ describe('exportTable', () => {
       query: async (sql: string) => ({ rows: call++ === 0 ? [{ id: 1 }, { id: 2 }] : [], fields: [], sql, costTime: 0 }),
       dialect: mysqlDialect,
     };
-    let content: string | Buffer;
-    try {
-      content = await exportTable({
-        source: {
-          query: query as any,
-          metadata: { getColumns: async () => [{ name: 'id' }] as any },
-          table: { getCreateSql: async () => '' },
-        },
-        format: 'xlsx',
-        table: 'users',
-        pageSize: 2,
-      });
-    } catch (err) {
-      expect((err as Error).message).toContain('xlsx');
-      return;
-    }
+    const content = await exportTable({
+      source: {
+        query: query as any,
+        metadata: { getColumns: async () => [{ name: 'id' }] as any },
+        table: { getCreateSql: async () => '' },
+      },
+      format: 'xlsx',
+      table: 'users',
+      pageSize: 2,
+    });
     expect(Buffer.isBuffer(content)).toBe(true);
   });
 });

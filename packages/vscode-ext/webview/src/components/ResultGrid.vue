@@ -25,8 +25,13 @@ const props = defineProps<{
   tableName?: string;
   dbName?: string;
   hiddenColumns?: string[];
-  /** Excel 依赖（可选包 xlsx）是否可用；不可用时隐藏该导出格式 */
-  xlsxAvailable?: boolean;
+  /**
+   * 结果是否可写。视图（VIEW）结果为 false：单元格不可编辑、不提供插入行与
+   * 复制 INSERT —— 视图没有可靠的定位列，INSERT 语义也不成立。
+   */
+  canEdit?: boolean;
+  /** 是否提供导出。表结构面板为 false（导出走表节点的 Export）。 */
+  allowExport?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -63,8 +68,9 @@ const pendingDelete = ref<{ pkColumns: string[]; pkValues: any[] }[]>([]);
 const toast = ref('');
 let toastTimer: any;
 
-const canModifyRows = computed(() => props.hasTable);
-const canSelectRows = computed(() => props.hasTable);
+const canModifyRows = computed(() => props.hasTable && props.canEdit !== false);
+// 选择行的唯一用途是删除/复制，两者对只读结果都不可用
+const canSelectRows = computed(() => canModifyRows.value);
 const hiddenSet = computed(() => new Set(props.hiddenColumns || []));
 const fieldByName = computed(() => new Map(props.fields.map((field) => [field.name, field])));
 const visibleFields = computed(() => displayedOrder.value
@@ -157,23 +163,24 @@ function getPk(row: Row): { columns: string[]; values: any[] } | null {
   return { columns: cols, values };
 }
 
-function pkKey(row: Row): string {
-  const pk = getPk(row);
-  if (!pk) return '';
-  return pk.values.map((v) => (v === null ? '\0' : String(v))).join('\t');
-}
-
 let editingRow: Row | null = null;
 let editingField: Field | null = null;
 
-function startEdit(row: Row, field: Field) {
-  if (!props.hasTable) return;
+/**
+ * 进入单元格编辑。
+ *
+ * 编辑态的键用**行下标**而非主键值：无主键表退化为「全部可见列」做定位列，
+ * 于是内容相同的两行会算出同一个 key，双击一个格子会让所有同值行一起进入
+ * 编辑态（看起来像"改一个全都改了"）。行下标在当前结果集内天然唯一。
+ */
+function startEdit(row: Row, field: Field, index: number) {
+  if (!canModifyRows.value) return;
   const pk = getPk(row);
   // 无定位列时双击过去毫无反应，用户无从知晓原因
   if (!pk) return showToast(t('wv.grid.cannotEditNoPk'));
   editingRow = row;
   editingField = field;
-  editingCell.value = `${pkKey(row)}:${field.name}`;
+  editingCell.value = `${index}:${field.name}`;
   const raw = row[field.name];
   const kind = pickerKindFor(field.name, raw);
   editKind.value = kind;
@@ -202,15 +209,23 @@ function commitEdit(row: Row, field: Field) {
   cancelEdit();
 }
 
+/**
+ * 点击编辑框之外。
+ *
+ * 文本单元格沿用「失焦即提交」；**时间单元格改为放弃**：日期控件要点日历、
+ * 翻月份、点年份，任何一次落在编辑框外的点击都会变成一条真实 UPDATE。
+ * 时间值改由编辑框内的 ✓ / ✕ 显式确认。
+ */
 function onDocMouseDown(e: MouseEvent) {
   if (!editingCell.value) return;
   const target = e.target as HTMLElement;
   if (!target) return;
-  // 原生选择器的弹层由浏览器渲染在页面之外，不会产生落在文档里的 mousedown，
-  // 因此不再需要旧方案针对自绘弹层（.dp__menu）的例外判断
-  if (editContainer.value && !editContainer.value.contains(target) && editingRow && editingField) {
-    commitEdit(editingRow, editingField);
+  if (!editContainer.value || editContainer.value.contains(target)) return;
+  if (editKind.value) {
+    cancelEdit();
+    return;
   }
+  if (editingRow && editingField) commitEdit(editingRow, editingField);
 }
 
 onMounted(() => document.addEventListener('mousedown', onDocMouseDown));
@@ -424,21 +439,17 @@ const activeFilterSummary = computed(() => {
 /** 与表导出（commands/database.ts）保持同一格式集合。 */
 type ExportFormat = 'sql' | 'csv' | 'json' | 'xlsx' | 'xml';
 
-const ALL_EXPORT_FORMATS: { format: ExportFormat; label: string }[] = [
+/**
+ * 可用导出格式。Excel 由扩展端自实现 xlsx 写入（无第三方依赖），
+ * 因此始终可用 —— 过去它挂在可选包 xlsx 上，包没装就整项消失。
+ */
+const EXPORT_FORMATS: { format: ExportFormat; label: string }[] = [
   { format: 'sql', label: 'SQL' },
   { format: 'csv', label: 'CSV' },
   { format: 'json', label: 'JSON' },
   { format: 'xlsx', label: 'Excel' },
   { format: 'xml', label: 'XML' },
 ];
-
-/**
- * 可用导出格式。Excel 走可选依赖 xlsx，未安装时必须从菜单里去掉 ——
- * 否则用户点了才在扩展端撞上 'xlsx library not available'。
- */
-const EXPORT_FORMATS = computed(() => ALL_EXPORT_FORMATS.filter(
-  (f) => f.format !== 'xlsx' || props.xlsxAvailable,
-));
 
 function exportData(format: ExportFormat) {
   if (!props.rows.length) return showToast(t('wv.grid.nothingToExport'));
@@ -589,7 +600,7 @@ watch(() => props.filterConditions, (conds) => {
         </label>
       </div>
     </div>
-    <div class="export-wrap">
+    <div v-if="allowExport !== false" class="export-wrap">
       <button class="btn" :disabled="!rows.length" @click="startExport()">{{ t('wv.grid.export') }} ▾</button>
       <div v-if="showExport" class="export-menu">
         <button v-for="f in EXPORT_FORMATS" :key="f.format" class="menu-item"
@@ -597,7 +608,7 @@ watch(() => props.filterConditions, (conds) => {
       </div>
     </div>
     <button v-if="canModifyRows" class="btn" @click="startInsert">{{ t('wv.grid.insertRow') }}</button>
-    <button v-if="hasTable" class="btn" :disabled="!rows.length" @click="copyAsInsert">{{ t('wv.grid.copyInsert') }}</button>
+    <button v-if="canModifyRows" class="btn" :disabled="!rows.length" @click="copyAsInsert">{{ t('wv.grid.copyInsert') }}</button>
   </div>
   <div class="grid-wrap">
     <table>
@@ -645,9 +656,9 @@ watch(() => props.filterConditions, (conds) => {
               @change="e => toggleRow(row, (e.target as HTMLInputElement).checked)" />
           </td>
           <td v-for="f in visibleFields" :key="f.name" :style="columnStyle(f.name)"
-            @dblclick="canModifyRows && startEdit(row, f)"
+            @dblclick="startEdit(row, f, idx)"
             :title="canModifyRows && getPk(row) ? t('wv.grid.doubleClickToEdit') : ''">
-            <template v-if="editingCell === `${pkKey(row)}:${f.name}`">
+            <template v-if="editingCell === `${idx}:${f.name}`">
               <div ref="editContainer" class="cell-edit-wrap">
                 <!--
                   时间列走原生 date / time / datetime-local；step=1 是关键，
@@ -655,10 +666,17 @@ watch(() => props.filterConditions, (conds) => {
                   editKind 为 null 时（超范围 TIME、带时区 timestamptz、零日期、
                   非零小数秒，以及所有非时间列）退化为纯文本输入。
                 -->
-                <input v-if="editKind" ref="editInput" v-model="editValue" class="cell-edit"
-                  :type="inputTypeFor(editKind)" step="1" :placeholder="formatHintFor(editKind)"
-                  @keydown.enter="commitEdit(row, f)"
-                  @keydown.esc="cancelEdit" />
+                <template v-if="editKind">
+                  <input ref="editInput" v-model="editValue" class="cell-edit"
+                    :type="inputTypeFor(editKind)" step="1" :placeholder="formatHintFor(editKind)"
+                    @keydown.enter="commitEdit(row, f)"
+                    @keydown.esc="cancelEdit" />
+                  <!-- 时间值需显式确认：点日历翻月份都会落在编辑框外，不能当作提交 -->
+                  <button class="cell-edit-btn ok" :title="t('wv.common.confirm')"
+                    @click="commitEdit(row, f)">✓</button>
+                  <button class="cell-edit-btn" :title="t('wv.common.cancel')"
+                    @click="cancelEdit">✕</button>
+                </template>
                 <input v-else ref="editInput" v-model="editValue" class="cell-edit"
                   @keydown.enter="commitEdit(row, f)"
                   @keydown.esc="cancelEdit" />
@@ -737,7 +755,11 @@ td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
 .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 200; padding: 8px 16px; font-size: 12px;
   background: var(--vscode-notifications-background, var(--vscode-editor-background)); color: var(--vscode-foreground, #cccccc);
   border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
-.cell-edit-wrap { display: inline-flex; min-width: 140px; }
+.cell-edit-wrap { display: inline-flex; align-items: center; gap: 2px; min-width: 140px; }
+.cell-edit-btn { flex: 0 0 auto; padding: 2px 6px; font-size: 12px; line-height: 1; cursor: pointer;
+  border: none; border-radius: 3px; background: var(--vscode-button-secondaryBackground, #3a3d41);
+  color: var(--vscode-button-secondaryForeground, #ffffff); }
+.cell-edit-btn.ok { background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #ffffff); }
 </style>
 
 <style>

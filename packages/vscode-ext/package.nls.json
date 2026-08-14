@@ -21,6 +21,7 @@
   "cmd.cloneConnection": "Clone Connection",
   "cmd.renameView": "Rename View",
   "cmd.sessions": "Manage Sessions",
+  "cmd.manageUsers": "Manage Users",
   "cmd.pats": "Manage Access Tokens",
   "view.explorer": "Connections"
 }

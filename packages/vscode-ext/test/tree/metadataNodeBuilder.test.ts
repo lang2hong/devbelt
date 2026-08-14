@@ -33,7 +33,6 @@ const metadata: any = {
   getViews: async () => [{ name: 'v_active' }],
   getFunctions: async () => [{ name: 'proc_x', type: 'PROCEDURE' }],
   getEvents: async () => [{ name: 'daily_job' }],
-  getUsers: async () => [{ name: 'root', host: '%' }, { name: 'app' }],
   getColumns: async () => [],
 };
 
@@ -74,12 +73,13 @@ describe('MetadataNodeBuilder', () => {
     expect(nodes[0].command?.command).toBe('dbclient.openEvent');
   });
 
-  it('user 节点：有 host 时显示 name@host', async () => {
-    const nodes = await builder.build('user', conn, 'test', parent);
-    expect(nodes).toHaveLength(2);
-    expect(nodes[0].kind).toBe(NodeKind.User);
-    expect(nodes[0].label).toBe('root@%');
-    expect(nodes[1].label).toBe('app');
+  /**
+   * 用户不再是树节点：`getUsers()` 与库无关，挂在库下会让 MySQL 的每个库
+   * 各显示一份相同的用户列表。改由连接右键的用户管理面板承载。
+   */
+  it('user 分类不再构建节点', async () => {
+    const nodes = await builder.build('user' as any, conn, 'test', parent);
+    expect(nodes).toEqual([]);
   });
 
   it('不支持的分类返回空列表', async () => {

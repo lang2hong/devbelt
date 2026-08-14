@@ -4,8 +4,8 @@ import { DbTreeNode, NodeKind } from '../tree/dbTreeNode';
 import { wrapIdentForConn } from '../utils/sql';
 import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
-import { confirm, openSqlDoc, openSqlDocEditor, requireCapability } from './shared';
-import { runExportWizard } from './database';
+import { confirm, openSqlDoc, openSqlDocEditor, recordBulkHistory, requireCapability } from './shared';
+import { ensureWritable } from '../utils/sqlSafety';
 import { TableQueryView } from '../result/tableQueryView';
 
 export function registerTableCommands(deps: Deps, sub: Sub): void {
@@ -14,7 +14,9 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
   // ── 外键跳转 ──
   sub('dbclient.jumpToRefTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node.refTable) return;
-    TableQueryView.open(node.conn, node.refTable, node.database ?? node.conn.database ?? '', manager);
+    TableQueryView.open(node.conn, node.refTable, node.database ?? node.conn.database ?? '', manager, {
+      objectType: 'table',
+    });
   });
 
   // ── 表 ──
@@ -82,21 +84,54 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     treeProvider.refresh();
   });
 
+  /**
+   * 复制表：先问「只要结构」还是「结构 + 数据」。
+   *
+   * 与 Duplicate Table 的区别就在这个选择上 —— 后者只复制结构。
+   * SQLite 走 `CREATE TABLE AS SELECT`，不保留主键/索引/约束，需要提前说明。
+   */
+  sub('dbclient.copyTable', async (node: DbTreeNode) => {
+    if (!node?.conn || !node?.database) return;
+    const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'duplicateTable') || !ensureWritable(node.conn)) return;
+    const isSqlite = node.conn.dbType === 'SQLITE';
+    const scope = await vscode.window.showQuickPick(
+      [
+        {
+          label: l10n('table.copyStructureData'),
+          description: isSqlite ? l10n('table.copySqliteCaveat') : undefined,
+          value: true,
+        },
+        {
+          label: l10n('table.copyStructureOnly'),
+          description: isSqlite ? l10n('table.copySqliteCaveat') : undefined,
+          value: false,
+        },
+      ],
+      { placeHolder: l10n('table.copyScope', { name: node.label }) },
+    );
+    if (!scope) return;
+    const newName = await vscode.window.showInputBox({
+      prompt: l10n('table.copyPrompt', { name: node.label }),
+      value: `${node.label}_copy`,
+    });
+    if (!newName) return;
+    try {
+      await session.table.dupTable(node.label, newName, node.database, scope.value);
+      treeProvider.refresh();
+      vscode.window.showInformationMessage(l10n('table.copyDone', { name: newName }));
+    } catch (err) {
+      vscode.window.showErrorMessage((err as Error).message);
+    }
+  });
+
   sub('dbclient.viewTableStructure', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     connCtx.setLast(node.conn, node.database);
     const session = await manager.connect(node.conn);
     const columns = await session.metadata.getColumns(node.label, node.database);
-    const result = {
-      sql: `DESCRIBE ${wrapIdentForConn(node.conn, node.label)}`,
-      costTime: 0,
-      rows: columns as any[],
-      fields: Object.keys(columns[0] || {}).map((name) => ({ name })),
-      truncated: false,
-    } as any;
-    await executor.run(node.conn, `DESCRIBE ${wrapIdentForConn(node.conn, node.label)};`, node.database);
-    // run 创建视图后，在 ready 回调中由 execute 渲染；这里用 renderExternal 直接推送结构结果
-    executor.renderExternal(result);
+    // 直接展示元数据，不再执行 `DESCRIBE`（MySQL 专有语句，PG/SQLite 会报语法错）
+    executor.openStructure(node.conn, node.label, node.database, columns as any[]);
   });
 
   sub('dbclient.viewTableSource', async (node: DbTreeNode) => {
@@ -105,11 +140,6 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (!requireCapability(session, 'getTableDefinition')) return;
     const ddl = await session.table.getCreateSql(node.label, node.database);
     await openSqlDoc(ddl || '-- No DDL found');
-  });
-
-  sub('dbclient.dumpTable', async (node: DbTreeNode) => {
-    if (!node?.conn || !node?.database) return;
-    await runExportWizard(node, manager, deps.connCtx, node.label);
   });
 
   sub('dbclient.mockData', async (node: DbTreeNode) => {
@@ -122,6 +152,11 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     const count = parseInt(input, 10);
     const session = await manager.connect(node.conn);
     const inserted = await session.table.generateMockData(node.label, node.database, count);
+    await recordBulkHistory(
+      deps, node.conn,
+      l10n('history.mockData', { table: node.label, count: inserted }),
+      node.database, inserted,
+    );
     vscode.window.showInformationMessage(l10n('mock.done', { count: inserted }));
     treeProvider.refresh();
   });
@@ -231,29 +266,145 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
   });
 
   // ── 列（字段） ──
-  const columnSqlEditor = async (conn: import('../connection/connectionStore').SavedConnection, database: string | undefined, sql: string) => {
-    const useDb = database ? `USE ${wrapIdentForConn(conn, database)};\n\n` : '';
-    const editor = await openSqlDocEditor(useDb + sql);
-    if (editor) connCtx.setForDoc(editor.document.uri.toString(), conn, database);
-    treeProvider.refresh();
+
+  /**
+   * 列所属的表节点。
+   *
+   * 「添加字段」既挂在字段节点上，也挂在表节点上（两处行为一致），
+   * 因此不能假定 node 一定是 Column。
+   */
+  const columnTable = (node: DbTreeNode): string | undefined => (
+    node.kind === NodeKind.Column ? node.parent?.label : node.label
+  );
+
+  /** 列类型输入：候选来自方言，也允许手输（长度/精度千变万化）。 */
+  const askColumnType = async (
+    conn: import('../connection/connectionStore').SavedConnection,
+    value?: string,
+  ): Promise<string | undefined> => {
+    const dialect = DialectRegistry.get(conn.dbType as DatabaseType);
+    const types = dialect ? [...dialect.columnTypes] : [];
+    const input = await vscode.window.showInputBox({
+      prompt: l10n('column.typePrompt'),
+      value: value ?? types.find((t) => /^(VARCHAR|CHARACTER VARYING|TEXT)/i.test(t)) ?? '',
+      placeHolder: types.slice(0, 6).join(', '),
+      validateInput: (v) => (v.trim() ? undefined : l10n('column.typeRequired')),
+    });
+    return input?.trim() || undefined;
+  };
+
+  /** 刷新列所在的表节点，而不是整棵树（整树刷新会把所有节点折叠回去）。 */
+  const refreshColumnParent = (node: DbTreeNode): void => {
+    const target = node.kind === NodeKind.Column ? node.parent : node;
+    if (target) treeProvider.refreshNode(target);
+    else treeProvider.refresh();
   };
 
   sub('dbclient.addColumn', async (node: DbTreeNode) => {
     if (!node?.conn) return;
-    const parent = node.kind === NodeKind.Column ? node.parent : node;
-    const table = parent?.label;
+    const table = columnTable(node);
     if (!table) return;
-    await columnSqlEditor(node.conn, node.database, `ALTER TABLE ${wrapIdentForConn(node.conn, table)}\n  ADD COLUMN new_column VARCHAR(255) NOT NULL;`);
+    const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'alterTable') || !ensureWritable(node.conn)) return;
+    const name = await vscode.window.showInputBox({
+      prompt: l10n('column.namePrompt'),
+      validateInput: (v) => (v.trim() ? undefined : l10n('column.nameRequired')),
+    });
+    if (!name?.trim()) return;
+    const type = await askColumnType(node.conn);
+    if (!type) return;
+    const nullable = await vscode.window.showQuickPick(
+      [{ label: l10n('column.nullable'), value: false }, { label: l10n('column.notNull'), value: true }],
+      { placeHolder: l10n('column.nullPrompt') },
+    );
+    if (!nullable) return;
+    try {
+      await session.table.addColumn(
+        table, name.trim(), `${type}${nullable.value ? ' NOT NULL' : ' NULL'}`, node.database,
+      );
+      refreshColumnParent(node);
+      vscode.window.showInformationMessage(l10n('column.added', { name: name.trim() }));
+    } catch (err) {
+      vscode.window.showErrorMessage((err as Error).message);
+    }
   });
 
+  /**
+   * 改字段。
+   *
+   * MySQL 必须用 `CHANGE COLUMN`：`MODIFY COLUMN` 改不了列名，而改名是最常见的诉求。
+   * 当前定义会预填进输入框（MySQL 从 DDL 解析全量定义），
+   * 否则 NOT NULL / DEFAULT / 注释会在一次「改类型」里被静默抹掉。
+   */
   sub('dbclient.modifyColumn', async (node: DbTreeNode) => {
     if (!node?.conn || node.kind !== NodeKind.Column || !node.parent) return;
-    await columnSqlEditor(node.conn, node.database, `ALTER TABLE ${wrapIdentForConn(node.conn, node.parent.label)}\n  MODIFY COLUMN ${wrapIdentForConn(node.conn, node.label)} VARCHAR(255) NOT NULL;`);
+    const table = node.parent.label;
+    const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'alterTable') || !ensureWritable(node.conn)) return;
+    const newName = await vscode.window.showInputBox({
+      prompt: l10n('column.renamePrompt'),
+      value: node.label,
+      validateInput: (v) => (v.trim() ? undefined : l10n('column.nameRequired')),
+    });
+    if (!newName?.trim()) return;
+
+    let current: string | undefined;
+    try {
+      current = await session.table.getColumnDefinition(table, node.label, node.database);
+    } catch {
+      // 非 MySQL 或解析失败：退回列元数据里的类型
+      const cols = await session.metadata.getColumns(table, node.database);
+      const col = cols.find((c: any) => c.name === node.label);
+      current = col?.type || col?.simpleType;
+    }
+    const definition = await askColumnType(node.conn, current);
+    if (!definition) return;
+    try {
+      await session.table.changeColumn(table, node.label, newName.trim(), definition, node.database);
+      refreshColumnParent(node);
+      vscode.window.showInformationMessage(l10n('column.modified', { name: newName.trim() }));
+    } catch (err) {
+      vscode.window.showErrorMessage((err as Error).message);
+    }
   });
 
+  sub('dbclient.renameColumn', async (node: DbTreeNode) => {
+    if (!node?.conn || node.kind !== NodeKind.Column || !node.parent) return;
+    const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'alterTable') || !ensureWritable(node.conn)) return;
+    const newName = await vscode.window.showInputBox({
+      prompt: l10n('column.renamePrompt'),
+      value: node.label,
+      validateInput: (v) => (v.trim() ? undefined : l10n('column.nameRequired')),
+    });
+    if (!newName?.trim() || newName.trim() === node.label) return;
+    try {
+      await session.table.renameColumn(node.parent.label, node.label, newName.trim(), node.database);
+      refreshColumnParent(node);
+      vscode.window.showInformationMessage(l10n('column.renamed', { name: newName.trim() }));
+    } catch (err) {
+      vscode.window.showErrorMessage((err as Error).message);
+    }
+  });
+
+  /**
+   * 删字段：确认后**直接执行**。
+   *
+   * 过去只是把 `ALTER TABLE ... DROP COLUMN` 丢到编辑器里，用户还得自己去点运行，
+   * 而树已经先刷新了一遍，看起来像「删了但没删掉」。
+   */
   sub('dbclient.dropColumn', async (node: DbTreeNode) => {
     if (!node?.conn || node.kind !== NodeKind.Column || !node.parent) return;
-    await columnSqlEditor(node.conn, node.database, `ALTER TABLE ${wrapIdentForConn(node.conn, node.parent.label)}\n  DROP COLUMN ${wrapIdentForConn(node.conn, node.label)};`);
+    const session = await manager.connect(node.conn);
+    if (!requireCapability(session, 'alterTable') || !ensureWritable(node.conn)) return;
+    if (!(await confirm('column.dropConfirm', 'common.delete', node.label))) return;
+    try {
+      await session.table.dropColumn(node.parent.label, node.label, node.database);
+      refreshColumnParent(node);
+      vscode.window.showInformationMessage(l10n('column.dropped', { name: node.label }));
+    } catch (err) {
+      vscode.window.showErrorMessage((err as Error).message);
+    }
   });
 
   sub('dbclient.copyNodeName', async (node: DbTreeNode) => {

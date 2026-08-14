@@ -7,7 +7,7 @@ import DesignView from './views/DesignView.vue';
 import StatusView from './views/StatusView.vue';
 import ERDiagramView from './views/ERDiagramView.vue';
 import ConnectionFormView from './views/ConnectionFormView.vue';
-import UserFormView from './views/UserFormView.vue';
+import UserManageView from './views/UserManageView.vue';
 import SyncDiffView from './views/SyncDiffView.vue';
 import DataDiffView from './views/DataDiffView.vue';
 import DashboardView from './views/DashboardView.vue';
@@ -15,7 +15,7 @@ import AuditLogView from './views/AuditLogView.vue';
 import PoolStatusView from './views/PoolStatusView.vue';
 
 const { onMessage } = useVsCode();
-const mode = ref<'query' | 'design' | 'status' | 'er' | 'connectionForm' | 'userForm' | 'syncDiff' | 'dataDiff' | 'dashboard' | 'auditLog' | 'poolStatus'>('query');
+const mode = ref<'query' | 'design' | 'status' | 'er' | 'connectionForm' | 'userManage' | 'syncDiff' | 'dataDiff' | 'dashboard' | 'auditLog' | 'poolStatus'>('query');
 
 let cleanup: (() => void) | undefined;
 onMounted(() => {
@@ -36,7 +36,7 @@ onUnmounted(() => cleanup?.());
   <DesignView v-else-if="mode === 'design'" />
   <StatusView v-else-if="mode === 'status'" />
   <ConnectionFormView v-else-if="mode === 'connectionForm'" />
-  <UserFormView v-else-if="mode === 'userForm'" />
+  <UserManageView v-else-if="mode === 'userManage'" />
   <SyncDiffView v-else-if="mode === 'syncDiff'" />
   <DataDiffView v-else-if="mode === 'dataDiff'" />
   <DashboardView v-else-if="mode === 'dashboard'" />

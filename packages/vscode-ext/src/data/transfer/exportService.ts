@@ -2,6 +2,8 @@ import type { ColumnMeta, QueryService } from '@db-client/core';
 import { DatabaseType } from '@db-client/core';
 import { serializeCsv } from './csv';
 import { serializeJson } from './json';
+import { serializeXlsx } from './xlsx';
+import { serializeXml } from './xml';
 
 export type TransferFormat = 'sql' | 'csv' | 'json' | 'xlsx' | 'xml';
 
@@ -73,19 +75,16 @@ export function isBinaryFormat(format: TransferFormat): boolean {
  * 返回 Buffer（二进制格式）或 string（文本格式）。此前 xlsx 返回 base64
  * **字符串**，调用方一律 `Buffer.from(content, 'utf8')` 写盘，产出的 .xlsx
  * 内容是 base64 文本，Excel 无法打开。
+ *
+ * xlsx / xml 改为静态 import：xlsx 曾是可选依赖，才需要 `require` 延迟到
+ * 运行时；现在两者都在包内实现，静态导入让缺失在编译期就暴露。
  */
 export function exportRows(options: ExportRowsOptions): string | Buffer {
   const { format, columns, rows, table, database, dialect, sqlDump } = options;
   if (format === 'csv') return serializeCsv(columns, rows);
   if (format === 'json') return serializeJson(columns, rows);
-  if (format === 'xlsx') {
-    const { serializeXlsx } = require('./xlsx');
-    return serializeXlsx(columns, rows) as Buffer;
-  }
-  if (format === 'xml') {
-    const { serializeXml } = require('./xml');
-    return serializeXml(columns, rows);
-  }
+  if (format === 'xlsx') return serializeXlsx(columns, rows);
+  if (format === 'xml') return serializeXml(columns, rows);
   if (!table || !dialect) throw new Error('SQL export requires a target table and database dialect.');
   const inserts = dialect.buildInsertSql(rows, columns, table, database);
   if (!sqlDump) return inserts;

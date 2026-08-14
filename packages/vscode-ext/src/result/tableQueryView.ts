@@ -7,7 +7,16 @@ import { CompletionService } from './completionService';
 import { RowEditor } from './rowEditor';
 import { QueryRunner } from './queryRunner';
 import { ExportHandler } from './exportHandler';
-import { isXlsxAvailable } from '../data/transfer/xlsx';
+
+/** 结果面板承载的数据库对象类型。视图（VIEW）不可写。 */
+export type ResultObjectType = 'table' | 'view';
+
+export interface TableQueryViewOptions {
+  /** 表 / 视图；视图不提供单元格编辑、插入行与复制 INSERT。 */
+  objectType?: ResultObjectType;
+  /** 表结构清单面板：无 SQL 可跑，不提供 EXPLAIN / 图表 / 导出。 */
+  structure?: boolean;
+}
 
 /**
  * 表/查询视图：Vue 3 webview 模式。
@@ -16,6 +25,8 @@ export class TableQueryView extends BaseWebView {
   private static readonly queryViews = new Map<string, TableQueryView>();
   private static readonly connRefs = new Map<string, number>();
   private readonly runner: QueryRunner;
+  /** 结构面板要展示的现成结果（不经 SQL 执行）。 */
+  private structurePayload?: { rows: any[]; fields: { name: string }[] };
   private hiddenColumns: string[] = [];
   private columnOrder: string[] = [];
   private columnWidths: Record<string, number> = {};
@@ -37,10 +48,14 @@ export class TableQueryView extends BaseWebView {
     private readonly table: string | undefined,
     private database: string | undefined,
     viewColumn: vscode.ViewColumn,
+    private readonly opts: TableQueryViewOptions = {},
+    title?: string,
   ) {
     super(
       'dbclient.tableQuery',
-      table ? `${conn.name || conn.host} › ${database || ''} › ${table}` : `Query @ ${conn.name || conn.host}`,
+      title ?? (table
+        ? `${conn.name || conn.host} › ${database || ''} › ${table}`
+        : `Query @ ${conn.name || conn.host}`),
       viewColumn,
     );
     // 引用计数：同一连接被多个视图共享，最后一个视图关闭时才释放连接。
@@ -48,9 +63,13 @@ export class TableQueryView extends BaseWebView {
     this.runner = new QueryRunner(conn, manager, table, database, (msg) => this.post(msg));
     this.completionService = new CompletionService(manager, conn, database, (msg) => this.post(msg));
     if (table) {
-      this.rowEditor = new RowEditor(manager, conn, table, database, (msg) => this.post(msg), {
-        refresh: () => this.runner.execute(this.runner.buildSelect()),
-      });
+      // 视图不建 RowEditor：编辑入口在前端已隐藏，这里再断一次链路，
+      // 保证即使消息被伪造也不会对视图发出 UPDATE/INSERT/DELETE。
+      if (opts.objectType !== 'view') {
+        this.rowEditor = new RowEditor(manager, conn, table, database, (msg) => this.post(msg), {
+          refresh: () => this.runner.execute(this.runner.buildSelect()),
+        });
+      }
       this.exporter = new ExportHandler(conn, manager, table, database, (msg) => this.post(msg));
     }
   }
@@ -63,8 +82,42 @@ export class TableQueryView extends BaseWebView {
     BaseWebView.init(extensionUri);
   }
 
-  static open(conn: SavedConnection, table: string, database: string, manager: ConnectionManager): void {
-    new TableQueryView(conn, manager, table, database, vscode.ViewColumn.Active);
+  static open(
+    conn: SavedConnection,
+    table: string,
+    database: string,
+    manager: ConnectionManager,
+    opts: TableQueryViewOptions = {},
+  ): void {
+    new TableQueryView(conn, manager, table, database, vscode.ViewColumn.Active, {
+      objectType: 'table',
+      ...opts,
+    });
+  }
+
+  /**
+   * 表结构清单面板。
+   *
+   * 结构数据由调用方用元数据接口取好后直接投递，不再执行 `DESCRIBE`：
+   * 那是 MySQL 专有语句，过去对 PG / SQLite 一律报语法错。
+   */
+  static openForStructure(
+    conn: SavedConnection,
+    manager: ConnectionManager,
+    table: string,
+    database: string | undefined,
+    rows: any[],
+  ): TableQueryView {
+    const view = new TableQueryView(
+      conn, manager, undefined, database, vscode.ViewColumn.Active,
+      { structure: true },
+      `Structure: ${conn.name || conn.host} › ${database || ''} › ${table}`,
+    );
+    view.structurePayload = {
+      rows,
+      fields: Object.keys(rows[0] || {}).map((name) => ({ name })),
+    };
+    return view;
   }
 
   static async openForQuery(
@@ -122,16 +175,18 @@ export class TableQueryView extends BaseWebView {
     return view;
   }
 
-  renderExternal(result: any): void {
-    this.post({ type: 'result', result, pkColumns: [] });
-  }
-
   protected async handleMessage(msg: any): Promise<void> {
     switch (msg.type) {
       case 'ready':
         this.ready = true;
         await this.sendInit();
-        if (this.pendingQueries.length > 0) {
+        if (this.structurePayload) {
+          this.post({
+            type: 'result',
+            result: { ...this.structurePayload, costTime: 0, truncated: false },
+            pkColumns: [],
+          });
+        } else if (this.pendingQueries.length > 0) {
           await this.executePendingQueries();
         } else if (this.hasTable) {
           await this.runner.execute(this.runner.buildSelect());
@@ -246,8 +301,10 @@ export class TableQueryView extends BaseWebView {
       columnOrder: this.reconciledColumnOrder(),
       columnWidths: this.reconciledColumnWidths(),
       limit: this.runner.limit,
-      // Excel 依赖可选包 xlsx；未安装时前端隐藏该导出选项
-      xlsxAvailable: isXlsxAvailable(),
+      viewKind: this.opts.structure ? 'structure' : 'query',
+      objectType: this.opts.objectType ?? '',
+      // 视图与结构面板均不可写；前端据此隐藏编辑/插入/复制 INSERT
+      canEdit: !!this.rowEditor,
     });
   }
 

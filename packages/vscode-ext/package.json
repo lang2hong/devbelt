@@ -193,8 +193,14 @@
       },
       {
         "command": "dbclient.newTable",
-        "title": "New Table",
+        "title": "New Table (SQL)",
         "category": "DB Client"
+      },
+      {
+        "command": "dbclient.newTableDesigner",
+        "title": "New Table",
+        "category": "DB Client",
+        "icon": "$(add)"
       },
       {
         "command": "dbclient.dropTable",
@@ -333,8 +339,8 @@
         "category": "DB Client"
       },
       {
-        "command": "dbclient.dumpTable",
-        "title": "Export Table Dump",
+        "command": "dbclient.copyTable",
+        "title": "Copy Table",
         "category": "DB Client"
       },
       {
@@ -343,29 +349,10 @@
         "category": "DB Client"
       },
       {
-        "command": "dbclient.createUser",
-        "title": "Create User",
-        "category": "DB Client"
-      },
-      {
-        "command": "dbclient.dropUser",
-        "title": "Delete User",
-        "category": "DB Client"
-      },
-      {
-        "command": "dbclient.changePassword",
-        "title": "Change Password",
-        "category": "DB Client"
-      },
-      {
-        "command": "dbclient.grantPrivilege",
-        "title": "Grant Privilege",
-        "category": "DB Client"
-      },
-      {
-        "command": "dbclient.revokePrivilege",
-        "title": "Revoke Privilege",
-        "category": "DB Client"
+        "command": "dbclient.manageUsers",
+        "title": "%cmd.manageUsers%",
+        "category": "DB Client",
+        "icon": "$(organization)"
       },
       {
         "command": "dbclient.createDatabase",
@@ -420,6 +407,16 @@
       {
         "command": "dbclient.modifyColumn",
         "title": "Modify Column",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.renameColumn",
+        "title": "Rename Column",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.modifyIndex",
+        "title": "Modify Index",
         "category": "DB Client"
       },
       {
@@ -588,11 +585,11 @@
         },
         {
           "command": "dbclient.sessions",
-          "when": "dbclient.dbType != SQLITE"
+          "when": "dbclient.loggedIn"
         },
         {
           "command": "dbclient.pats",
-          "when": "dbclient.dbType != SQLITE"
+          "when": "dbclient.loggedIn"
         },
         {
           "command": "dbclient.scheduleBackup",
@@ -602,392 +599,397 @@
       "view/item/context": [
         {
           "command": "dbclient.previewTable",
-          "when": "view == dbclient.explorer && viewItem == table",
+          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
           "group": "inline"
         },
         {
           "command": "dbclient.refreshNode",
           "title": "Refresh",
-          "when": "view == dbclient.explorer && viewItem == table",
+          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
           "group": "0_refresh"
         },
         {
           "command": "dbclient.viewTableStructure",
-          "when": "view == dbclient.explorer && viewItem == table",
+          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
           "group": "1_view"
         },
         {
           "command": "dbclient.viewTableSource",
-          "when": "view == dbclient.explorer && viewItem == table",
+          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
           "group": "1_view"
         },
         {
           "command": "dbclient.designTable",
-          "when": "view == dbclient.explorer && viewItem == table",
+          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
           "group": "1_view"
         },
         {
-          "command": "dbclient.dumpTable",
-          "when": "view == dbclient.explorer && viewItem == table && dbclient.dbType != PG",
-          "group": "2_data"
-        },
-        {
           "command": "dbclient.importTable",
-          "when": "view == dbclient.explorer && viewItem == table",
+          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
           "group": "2_data"
         },
         {
           "command": "dbclient.exportTable",
-          "when": "view == dbclient.explorer && viewItem == table",
+          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
           "group": "2_data"
         },
         {
           "command": "dbclient.mockData",
-          "when": "view == dbclient.explorer && viewItem == table",
+          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
           "group": "2_data"
         },
         {
-          "command": "dbclient.newTable",
-          "when": "view == dbclient.explorer && viewItem == category_table",
+          "command": "dbclient.newTableDesigner",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_table\\./",
           "group": "inline"
+        },
+        {
+          "command": "dbclient.newTableDesigner",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_table\\./",
+          "group": "1_new@1"
+        },
+        {
+          "command": "dbclient.newTable",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_table\\./",
+          "group": "1_new@2"
         },
         {
           "command": "dbclient.refreshNode",
           "title": "Refresh",
-          "when": "view == dbclient.explorer && viewItem == category_table",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_table\\./",
           "group": "0_refresh"
         },
         {
           "command": "dbclient.importData",
-          "when": "view == dbclient.explorer && viewItem == category_table",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_table\\./",
           "group": "1_transfer"
         },
         {
           "command": "dbclient.exportConnection",
-          "when": "view == dbclient.explorer && viewItem == category_table",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_table\\./",
           "group": "1_transfer"
         },
         {
           "command": "dbclient.restoreDatabase",
-          "when": "view == dbclient.explorer && viewItem == category_table && dbclient.dbType != SQLITE",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_table\\.(MYSQL|PG)$/",
           "group": "1_transfer"
         },
         {
           "command": "dbclient.renameTable",
-          "when": "view == dbclient.explorer && viewItem == table",
+          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
+          "group": "3_edit"
+        },
+        {
+          "command": "dbclient.copyTable",
+          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
           "group": "3_edit"
         },
         {
           "command": "dbclient.dupTable",
-          "when": "view == dbclient.explorer && viewItem == table && dbclient.dbType == MYSQL",
+          "when": "view == dbclient.explorer && viewItem == table.MYSQL",
+          "group": "3_edit"
+        },
+        {
+          "command": "dbclient.addColumn",
+          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
           "group": "3_edit"
         },
         {
           "command": "dbclient.truncateTable",
-          "when": "view == dbclient.explorer && viewItem == table && dbclient.dbType != SQLITE",
+          "when": "view == dbclient.explorer && viewItem =~ /^table\\.(MYSQL|PG)$/",
           "group": "2_danger"
         },
         {
           "command": "dbclient.dropTable",
-          "when": "view == dbclient.explorer && viewItem == table",
+          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
           "group": "2_danger"
         },
         {
           "command": "dbclient.copyNodeName",
           "title": "Copy Table Name",
-          "when": "view == dbclient.explorer && viewItem == table",
+          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
           "group": "9_cpy"
         },
         {
           "command": "dbclient.addColumn",
-          "when": "view == dbclient.explorer && viewItem == column",
+          "when": "view == dbclient.explorer && viewItem =~ /^column\\./",
           "group": "2_col"
         },
         {
           "command": "dbclient.modifyColumn",
-          "when": "view == dbclient.explorer && viewItem == column",
+          "when": "view == dbclient.explorer && viewItem =~ /^column\\./",
+          "group": "2_col"
+        },
+        {
+          "command": "dbclient.renameColumn",
+          "when": "view == dbclient.explorer && viewItem =~ /^column\\./",
           "group": "2_col"
         },
         {
           "command": "dbclient.dropColumn",
-          "when": "view == dbclient.explorer && viewItem == column",
+          "when": "view == dbclient.explorer && viewItem =~ /^column\\./",
           "group": "3_danger"
         },
         {
           "command": "dbclient.copyNodeName",
           "title": "Copy Column Name",
-          "when": "view == dbclient.explorer && viewItem == column",
+          "when": "view == dbclient.explorer && viewItem =~ /^column\\./",
           "group": "9_cpy"
         },
         {
           "command": "dbclient.refreshNode",
           "title": "Refresh",
-          "when": "view == dbclient.explorer && viewItem == database",
+          "when": "view == dbclient.explorer && viewItem =~ /^database\\./",
           "group": "0_refresh"
         },
         {
           "command": "dbclient.newQueryFromConn",
-          "when": "view == dbclient.explorer && viewItem == database",
+          "when": "view == dbclient.explorer && viewItem =~ /^database\\./",
           "group": "1_query"
         },
         {
           "command": "dbclient.newQueryForDb",
-          "when": "view == dbclient.explorer && viewItem == database",
+          "when": "view == dbclient.explorer && viewItem =~ /^database\\./",
           "group": "1_query"
         },
         {
           "command": "dbclient.openTerminal",
-          "when": "view == dbclient.explorer && viewItem == database",
+          "when": "view == dbclient.explorer && viewItem =~ /^database\\./",
           "group": "2_tools"
         },
         {
           "command": "dbclient.showERDiagram",
-          "when": "view == dbclient.explorer && viewItem == database",
+          "when": "view == dbclient.explorer && viewItem =~ /^database\\./",
           "group": "2_tools"
         },
         {
           "command": "dbclient.compareData",
-          "when": "view == dbclient.explorer && viewItem == database && dbclient.hasMultiDatabase",
+          "when": "view == dbclient.explorer && viewItem == database.MYSQL",
           "group": "2_tools"
         },
         {
           "command": "dbclient.importData",
-          "when": "view == dbclient.explorer && viewItem == database",
+          "when": "view == dbclient.explorer && viewItem =~ /^database\\./",
           "group": "3_transfer"
         },
         {
           "command": "dbclient.exportConnection",
-          "when": "view == dbclient.explorer && viewItem == database",
+          "when": "view == dbclient.explorer && viewItem =~ /^database\\./",
           "group": "3_transfer"
         },
         {
           "command": "dbclient.restoreDatabase",
-          "when": "view == dbclient.explorer && viewItem == database && dbclient.dbType != SQLITE",
+          "when": "view == dbclient.explorer && viewItem =~ /^database\\.(MYSQL|PG)$/",
           "group": "3_transfer"
         },
         {
           "command": "dbclient.syncDatabase",
-          "when": "view == dbclient.explorer && viewItem == database && dbclient.dbType == MYSQL",
+          "when": "view == dbclient.explorer && viewItem == database.MYSQL",
           "group": "3_transfer"
         },
         {
           "command": "dbclient.scheduleBackup",
-          "when": "view == dbclient.explorer && viewItem == database && dbclient.dbType != SQLITE",
+          "when": "view == dbclient.explorer && viewItem =~ /^database\\.(MYSQL|PG)$/",
           "group": "3_transfer"
         },
         {
           "command": "dbclient.dropDatabase",
-          "when": "view == dbclient.explorer && viewItem == database && dbclient.dbType != SQLITE",
+          "when": "view == dbclient.explorer && viewItem =~ /^database\\.(MYSQL|PG)$/",
           "group": "9_danger"
         },
         {
           "command": "dbclient.dashboard",
-          "when": "view == dbclient.explorer && viewItem == connectionOpen",
+          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\./",
           "group": "1_conn"
         },
         {
           "command": "dbclient.previewView",
-          "when": "view == dbclient.explorer && viewItem == view",
+          "when": "view == dbclient.explorer && viewItem =~ /^view\\./",
           "group": "inline"
         },
         {
           "command": "dbclient.modifyView",
-          "when": "view == dbclient.explorer && viewItem == view",
+          "when": "view == dbclient.explorer && viewItem =~ /^view\\./",
           "group": "1_view"
         },
         {
           "command": "dbclient.renameView",
-          "when": "view == dbclient.explorer && viewItem == view && dbclient.dbType != SQLITE",
+          "when": "view == dbclient.explorer && viewItem =~ /^view\\.(MYSQL|PG)$/",
           "group": "1_view"
         },
         {
           "command": "dbclient.newView",
-          "when": "view == dbclient.explorer && viewItem == category_view",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_view\\./",
           "group": "inline"
         },
         {
           "command": "dbclient.dropView",
-          "when": "view == dbclient.explorer && viewItem == view",
+          "when": "view == dbclient.explorer && viewItem =~ /^view\\./",
           "group": "2_danger"
         },
         {
           "command": "dbclient.openRoutine",
-          "when": "view == dbclient.explorer && viewItem == routine && dbclient.dbType != SQLITE",
+          "when": "view == dbclient.explorer && viewItem =~ /^routine\\.(MYSQL|PG)$/",
           "group": "inline"
         },
         {
           "command": "dbclient.dropRoutine",
-          "when": "view == dbclient.explorer && viewItem == routine && dbclient.dbType != SQLITE",
+          "when": "view == dbclient.explorer && viewItem =~ /^routine\\.(MYSQL|PG)$/",
           "group": "2_danger"
         },
         {
           "command": "dbclient.openEvent",
-          "when": "view == dbclient.explorer && viewItem == event && dbclient.dbType == MYSQL",
+          "when": "view == dbclient.explorer && viewItem == event.MYSQL",
           "group": "inline"
         },
         {
           "command": "dbclient.dropEvent",
-          "when": "view == dbclient.explorer && viewItem == event && dbclient.dbType == MYSQL",
+          "when": "view == dbclient.explorer && viewItem == event.MYSQL",
           "group": "2_danger"
         },
         {
           "command": "dbclient.modifyEvent",
-          "when": "view == dbclient.explorer && viewItem == event && dbclient.dbType == MYSQL",
+          "when": "view == dbclient.explorer && viewItem == event.MYSQL",
           "group": "1_view"
         },
         {
           "command": "dbclient.modifyRoutine",
-          "when": "view == dbclient.explorer && viewItem == routine && dbclient.dbType != SQLITE",
+          "when": "view == dbclient.explorer && viewItem =~ /^routine\\.(MYSQL|PG)$/",
           "group": "1_view"
         },
         {
           "command": "dbclient.newRoutine",
-          "when": "view == dbclient.explorer && viewItem == category_function && dbclient.dbType != SQLITE",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_function\\.(MYSQL|PG)$/",
           "group": "inline"
         },
         {
           "command": "dbclient.newEvent",
-          "when": "view == dbclient.explorer && viewItem == category_event && dbclient.dbType == MYSQL",
+          "when": "view == dbclient.explorer && viewItem == category_event.MYSQL",
           "group": "inline"
         },
         {
           "command": "dbclient.addIndex",
-          "when": "view == dbclient.explorer && viewItem == category_index && dbclient.dbType != SQLITE",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_index\\./",
           "group": "inline"
         },
         {
           "command": "dbclient.addTrigger",
-          "when": "view == dbclient.explorer && viewItem == category_trigger && dbclient.dbType != SQLITE",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_trigger\\.(MYSQL|PG)$/",
           "group": "inline"
         },
         {
           "command": "dbclient.modifyTrigger",
-          "when": "view == dbclient.explorer && viewItem == trigger && dbclient.dbType != SQLITE",
+          "when": "view == dbclient.explorer && viewItem =~ /^trigger\\.(MYSQL|PG)$/",
           "group": "1_view"
         },
         {
           "command": "dbclient.addForeignKey",
-          "when": "view == dbclient.explorer && viewItem == category_foreignKey && dbclient.dbType != SQLITE",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_foreignKey\\.(MYSQL|PG)$/",
           "group": "inline"
         },
         {
+          "command": "dbclient.modifyIndex",
+          "when": "view == dbclient.explorer && viewItem =~ /^index\\./",
+          "group": "1_index"
+        },
+        {
           "command": "dbclient.dropIndex",
-          "when": "view == dbclient.explorer && viewItem == index && dbclient.dbType != SQLITE",
+          "when": "view == dbclient.explorer && viewItem =~ /^index\\./",
           "group": "2_danger"
         },
         {
           "command": "dbclient.dropTrigger",
-          "when": "view == dbclient.explorer && viewItem == trigger && dbclient.dbType != SQLITE",
+          "when": "view == dbclient.explorer && viewItem =~ /^trigger\\.(MYSQL|PG)$/",
           "group": "2_danger"
         },
         {
           "command": "dbclient.jumpToRefTable",
-          "when": "view == dbclient.explorer && viewItem == foreignKey",
+          "when": "view == dbclient.explorer && viewItem =~ /^foreignKey\\./",
           "group": "1_fk"
         },
         {
           "command": "dbclient.dropForeignKey",
-          "when": "view == dbclient.explorer && viewItem == foreignKey",
+          "when": "view == dbclient.explorer && viewItem =~ /^foreignKey\\./",
           "group": "2_danger"
         },
         {
           "command": "dbclient.newQuery",
-          "when": "view == dbclient.explorer && viewItem == category_query",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_query\\./",
           "group": "inline"
         },
         {
-          "command": "dbclient.createUser",
-          "when": "view == dbclient.explorer && viewItem == category_user && dbclient.dbType != SQLITE",
-          "group": "inline"
-        },
-        {
-          "command": "dbclient.changePassword",
-          "when": "view == dbclient.explorer && viewItem == user && dbclient.dbType != SQLITE",
-          "group": "1_user"
-        },
-        {
-          "command": "dbclient.grantPrivilege",
-          "when": "view == dbclient.explorer && viewItem == user && dbclient.dbType != SQLITE",
-          "group": "1_user"
-        },
-        {
-          "command": "dbclient.revokePrivilege",
-          "when": "view == dbclient.explorer && viewItem == user && dbclient.dbType != SQLITE",
-          "group": "1_user"
-        },
-        {
-          "command": "dbclient.dropUser",
-          "when": "view == dbclient.explorer && viewItem == user && dbclient.dbType != SQLITE",
-          "group": "2_danger"
+          "command": "dbclient.manageUsers",
+          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG)$/",
+          "group": "3_admin"
         },
         {
           "command": "dbclient.openQuery",
-          "when": "view == dbclient.explorer && viewItem == savedQuery",
+          "when": "view == dbclient.explorer && viewItem =~ /^savedQuery\\./",
           "group": "inline"
         },
         {
           "command": "dbclient.editQuery",
-          "when": "view == dbclient.explorer && viewItem == savedQuery",
+          "when": "view == dbclient.explorer && viewItem =~ /^savedQuery\\./",
           "group": "1_query"
         },
         {
           "command": "dbclient.deleteQuery",
-          "when": "view == dbclient.explorer && viewItem == savedQuery",
+          "when": "view == dbclient.explorer && viewItem =~ /^savedQuery\\./",
           "group": "2_danger"
         },
         {
           "command": "dbclient.newQueryFolder",
-          "when": "view == dbclient.explorer && viewItem == category_query",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_query\\./",
           "group": "1_query_folder"
         },
         {
           "command": "dbclient.newQuery",
-          "when": "view == dbclient.explorer && viewItem == queryFolder",
+          "when": "view == dbclient.explorer && viewItem =~ /^queryFolder\\./",
           "group": "inline"
         },
         {
           "command": "dbclient.renameQueryFolder",
-          "when": "view == dbclient.explorer && viewItem == queryFolder",
+          "when": "view == dbclient.explorer && viewItem =~ /^queryFolder\\./",
           "group": "1_query"
         },
         {
           "command": "dbclient.deleteQueryFolder",
-          "when": "view == dbclient.explorer && viewItem == queryFolder",
+          "when": "view == dbclient.explorer && viewItem =~ /^queryFolder\\./",
           "group": "2_danger"
         },
         {
           "command": "dbclient.addGroup",
-          "when": "view == dbclient.explorer && viewItem == group",
+          "when": "view == dbclient.explorer && viewItem =~ /^group\\./",
           "group": "inline"
         },
         {
           "command": "dbclient.addConnection",
-          "when": "view == dbclient.explorer && viewItem == group",
+          "when": "view == dbclient.explorer && viewItem =~ /^group\\./",
           "group": "1_group"
         },
         {
           "command": "dbclient.renameGroup",
-          "when": "view == dbclient.explorer && viewItem == group",
+          "when": "view == dbclient.explorer && viewItem =~ /^group\\./",
           "group": "1_group"
         },
         {
           "command": "dbclient.removeGroup",
-          "when": "view == dbclient.explorer && viewItem == group",
+          "when": "view == dbclient.explorer && viewItem =~ /^group\\./",
           "group": "1_group"
         },
         {
           "command": "dbclient.openConnection",
-          "when": "view == dbclient.explorer && viewItem == connectionClosed",
+          "when": "view == dbclient.explorer && viewItem =~ /^connectionClosed\\./",
           "group": "1_conn"
         },
         {
           "command": "dbclient.closeConnection",
-          "when": "view == dbclient.explorer && viewItem == connectionOpen",
+          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\./",
           "group": "1_conn"
         },
         {
           "command": "dbclient.refreshConnection",
-          "when": "view == dbclient.explorer && viewItem == connectionOpen",
+          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\./",
           "group": "1_conn"
         },
         {
@@ -1002,32 +1004,32 @@
         },
         {
           "command": "dbclient.newQueryFromConn",
-          "when": "view == dbclient.explorer && viewItem == connectionOpen",
+          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\./",
           "group": "1_conn"
         },
         {
           "command": "dbclient.createDatabase",
-          "when": "view == dbclient.explorer && viewItem == connectionOpen",
+          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\./",
           "group": "1_conn"
         },
         {
           "command": "dbclient.openTerminal",
-          "when": "view == dbclient.explorer && viewItem == connectionOpen",
+          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\./",
           "group": "1_conn"
         },
         {
           "command": "dbclient.serverStatus",
-          "when": "view == dbclient.explorer && viewItem == connectionOpen",
+          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\./",
           "group": "1_conn"
         },
         {
           "command": "dbclient.importData",
-          "when": "view == dbclient.explorer && viewItem == connectionOpen",
+          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\./",
           "group": "1_conn"
         },
         {
           "command": "dbclient.exportConnection",
-          "when": "view == dbclient.explorer && viewItem == connectionOpen",
+          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\./",
           "group": "1_conn"
         },
         {

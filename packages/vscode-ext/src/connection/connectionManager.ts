@@ -2,6 +2,8 @@ import { ConnectionFactory, QueryService, MetadataService, DataService, TableSer
 import type { DatabaseType } from '@db-client/core';
 import type { DatabaseCapabilities } from '@db-client/core';
 import type { SavedConnection } from './connectionStore';
+import type { HistoryStore } from '../history/historyStore';
+import { QueryHistoryRecorder } from '../history/queryHistoryRecorder';
 import { SshTunnel } from './sshTunnel';
 
 export interface PoolConfig {
@@ -49,7 +51,14 @@ export class ConnectionManager {
   private healthCheckTimer?: ReturnType<typeof setInterval>;
   private disposing = false;
 
-  constructor(config?: Partial<PoolConfig>) {
+  constructor(
+    config?: Partial<PoolConfig>,
+    /**
+     * 查询历史。可选：测试与不需要历史的场景（如同步）可以不传。
+     * 传入后，本管理器建立的每个会话都会把修改性语句写进历史。
+     */
+    private readonly history?: HistoryStore,
+  ) {
     this.config = { ...DEFAULT_POOL_CONFIG, ...config };
     this.startHealthCheck();
   }
@@ -165,7 +174,10 @@ export class ConnectionManager {
       connection.connect((err) => (err ? reject(err) : resolve()));
     });
 
-    const query = new QueryService(connection, dialect);
+    // 观察者挂在 QueryService 上，于是这条会话上**任何**修改性语句都会进历史，
+    // 无论它来自编辑器、结果网格、表设计器还是树右键命令。
+    const recorder = this.history ? new QueryHistoryRecorder(conn, this.history) : undefined;
+    const query = new QueryService(connection, dialect, recorder?.observer());
     const session: ConnectionSession = {
       capabilities: dialect.capabilities,
       query,

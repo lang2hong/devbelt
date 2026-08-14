@@ -13,7 +13,6 @@ export interface MetadataSource {
   getViews(db: string): Promise<{ name: string }[]>;
   getFunctions(db: string): Promise<{ name: string; type?: string }[]>;
   getEvents(db: string): Promise<{ name: string }[]>;
-  getUsers(): Promise<{ name: string; host?: string }[]>;
   getColumns(table: string, database?: string): Promise<{
     name: string;
     type?: string;
@@ -34,7 +33,6 @@ export class MetadataNodeBuilder {
       case 'view': return this.buildViews(conn, database, parent);
       case 'function': return this.buildFunctions(conn, database, parent);
       case 'event': return this.buildEvents(conn, database, parent);
-      case 'user': return this.buildUsers(conn, database, parent);
       default: return [];
     }
   }
@@ -119,22 +117,6 @@ export class MetadataNodeBuilder {
     });
   }
 
-  private async buildUsers(conn: SavedConnection, database: string, parent: DbTreeNode): Promise<DbTreeNode[]> {
-    const users = await this.metadata.getUsers();
-    return users.map((u) => {
-      const node = new DbTreeNode(
-        u.host ? `${u.name}@${u.host}` : u.name,
-        TreeItemCollapsibleState.None,
-        NodeKind.User,
-        conn,
-        undefined,
-        parent,
-        undefined,
-        database,
-      );
-      return node;
-    });
-  }
 }
 
 function formatTableTooltip(t: { table_rows?: string; comment?: string; data_length?: string; index_length?: string; auto_increment?: string }): string {

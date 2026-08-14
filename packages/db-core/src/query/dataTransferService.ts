@@ -1,8 +1,16 @@
 import { SchemaDiffService } from './schemaDiffService';
 import { DataDiffService } from './dataDiffService';
-import type { QueryService } from './queryService';
+import type { QueryService, QueryOptions } from './queryService';
 import type { MetadataService } from './metadataService';
 import type { TableService } from './tableService';
+
+/**
+ * 库间传输的每条语句都不进查询历史。
+ *
+ * 一次传输可能包含成百上千条 DDL/INSERT，逐条上报会冲干历史。
+ * 命令层负责补一条汇总记录。
+ */
+const SKIP: QueryOptions = { skipHistory: true };
 
 export interface TransferProgress {
   table: string;
@@ -55,7 +63,7 @@ export class DataTransferService {
           );
           const statements = splitSql(syncSql);
           for (const stmt of statements) {
-            if (stmt.trim()) await targetQuery.query(stmt.trim());
+            if (stmt.trim()) await targetQuery.query(stmt.trim(), undefined, SKIP);
           }
         } catch (err) {
           errors.push(`${table}: schema sync failed - ${(err as Error).message}`);
@@ -110,11 +118,11 @@ export class DataTransferService {
 
     const ddl = await sourceTable.getCreateSql(sourceTableName, sourceDb);
     const qualifiedTarget = targetDb ? `${wrap(targetDb)}.${wrap(sourceTableName)}` : wrap(sourceTableName);
-    await targetQuery.query(`DROP TABLE IF EXISTS ${qualifiedTarget}`);
+    await targetQuery.query(`DROP TABLE IF EXISTS ${qualifiedTarget}`, undefined, SKIP);
     const adaptedDdl = ddl
       .replace(/`(\w+)`/g, (_, name) => `\`${targetDb}\`.\`${name}\``)
       .replace(/;\s*$/, '');
-    await targetQuery.query(adaptedDdl + ';');
+    await targetQuery.query(adaptedDdl + ';', undefined, SKIP);
 
     if (!includeData) return;
 
@@ -138,7 +146,7 @@ export class DataTransferService {
         return `(${vals})`;
       }).join(',\n');
 
-      await targetQuery.query(`INSERT INTO ${qualifiedTarget} (${colList}) VALUES\n${values}`);
+      await targetQuery.query(`INSERT INTO ${qualifiedTarget} (${colList}) VALUES\n${values}`, undefined, SKIP);
     }
   }
 
@@ -167,7 +175,7 @@ export class DataTransferService {
       if (options.isCancelled?.()) throw new Error('Transfer cancelled.');
       const trimmed = stmt.trim();
       if (trimmed && !trimmed.startsWith('--')) {
-        await targetQuery.query(trimmed);
+        await targetQuery.query(trimmed, undefined, SKIP);
       }
     }
   }

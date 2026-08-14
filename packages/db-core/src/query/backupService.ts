@@ -1,7 +1,15 @@
 import { DatabaseType } from '../types/connection';
 import type { MetadataService } from './metadataService';
 import type { TableService } from './tableService';
-import type { QueryService } from './queryService';
+import type { QueryService, QueryOptions } from './queryService';
+
+/**
+ * 恢复过程中的每条语句都不进查询历史。
+ *
+ * 一个 dump 动辄上千条语句，逐条上报会把上限 100 条的历史整段冲干，
+ * 真正有价值的手工操作记录反而丢失。命令层负责补一条汇总记录。
+ */
+const SKIP: QueryOptions = { skipHistory: true };
 
 export interface BackupProgress {
   table: string;
@@ -144,13 +152,13 @@ export class BackupService {
     const last: RestoreProgress = { statement: '', completed, total };
 
     try {
-      await query.query('BEGIN');
+      await query.query('BEGIN', undefined, SKIP);
       for (const stmt of statements) {
         if (isCancelled?.()) throw new Error('Restore cancelled.');
         const trimmed = stmt.trim();
         if (!trimmed) continue;
         try {
-          await query.query(trimmed);
+          await query.query(trimmed, undefined, SKIP);
           completed++;
           const progress: RestoreProgress = { statement: trimmed.slice(0, 100), completed, total };
           onProgress?.(progress);
@@ -167,9 +175,9 @@ export class BackupService {
           throw err;
         }
       }
-      await query.query('COMMIT');
+      await query.query('COMMIT', undefined, SKIP);
     } catch (err) {
-      try { await query.query('ROLLBACK'); } catch {}
+      try { await query.query('ROLLBACK', undefined, SKIP); } catch {}
       throw err;
     }
 
@@ -199,7 +207,7 @@ export class BackupService {
     const batch = `BEGIN;\n${withSemicolons.join('\n')}\nCOMMIT;`;
 
     try {
-      await query.query(batch);
+      await query.query(batch, undefined, SKIP);
     } catch (err) {
       // 不补发 ROLLBACK：批处理报错后驱动进程未走到 COMMIT 就退出，事务已被隐式
       // 回滚。在新进程里发 ROLLBACK 只会得到 "no transaction is active"，正是

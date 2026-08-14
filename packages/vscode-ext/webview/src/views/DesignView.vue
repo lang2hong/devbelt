@@ -14,6 +14,10 @@ const error = ref('');
 
 const canReorder = ref(false);
 const dbType = ref('');
+/** 建表模式：表还不存在，先填表名与初始列。 */
+const creating = ref(false);
+const tableName = ref('');
+const dbName = ref('');
 
 /**
  * 表单校验提示。
@@ -81,13 +85,67 @@ interface ColForm { name: string; type: string; notNull: boolean; defaultVal: st
 const editingCol = ref<ColForm | null>(null);
 const editingName = ref('');
 const newRow = ref<ColForm>({ name: '', type: '', notNull: false, defaultVal: '', comment: '' });
-const confirmDrop = ref<{ name: string } | null>(null);
 
 // 索引编辑/新增状态
 interface IdxForm { oldName?: string; name: string; cols: Record<string, boolean>; unique: boolean; }
 const showIdxForm = ref(false);
 const idxForm = ref<IdxForm>({ name: '', cols: {}, unique: false });
-const confirmDropIdx = ref<{ name: string } | null>(null);
+
+// 建表表单：列比设计器已有列多两个开关（主键 / 自增）
+interface DraftColumn {
+  name: string; type: string; notNull: boolean; isPrimary: boolean;
+  autoIncrement: boolean; defaultVal: string; comment: string;
+}
+const draftName = ref('');
+const draftColumns = ref<DraftColumn[]>([]);
+const draftTypePicker = ref<number | null>(null);
+
+function emptyDraftColumn(): DraftColumn {
+  return { name: '', type: '', notNull: false, isPrimary: false, autoIncrement: false, defaultVal: '', comment: '' };
+}
+
+function addDraftColumn() {
+  draftColumns.value.push(emptyDraftColumn());
+}
+
+function removeDraftColumn(index: number) {
+  draftColumns.value.splice(index, 1);
+  if (!draftColumns.value.length) addDraftColumn();
+}
+
+/** 自增列必然是主键；勾自增顺带把主键勾上，省一次误报。 */
+function onDraftAutoIncrement(col: DraftColumn) {
+  if (col.autoIncrement) {
+    col.isPrimary = true;
+    col.notNull = true;
+  }
+}
+
+function submitCreate() {
+  const name = draftName.value.trim();
+  if (!name) return notify(t('wv.design.tableNameRequired'));
+  const cols = draftColumns.value
+    .map((c) => ({ ...c, name: c.name.trim(), type: (c.type || defaultType.value).trim() }))
+    .filter((c) => c.name !== '');
+  if (!cols.length) return notify(t('wv.design.columnNameRequired'));
+  if (cols.some((c) => !c.type)) return notify(t('wv.design.columnTypeRequired'));
+  const names = cols.map((c) => c.name.toLowerCase());
+  if (new Set(names).size !== names.length) return notify(t('wv.design.duplicateColumn'));
+  clearNotice();
+  post({
+    type: 'createTable',
+    table: name,
+    columns: cols.map((c) => ({
+      name: c.name,
+      type: c.type,
+      notNull: c.notNull,
+      isPrimary: c.isPrimary,
+      autoIncrement: c.autoIncrement,
+      defaultValue: c.defaultVal,
+      comment: c.comment,
+    })),
+  });
+}
 
 let cleanup: (() => void) | undefined;
 onMounted(() => {
@@ -96,13 +154,24 @@ onMounted(() => {
       dbType.value = msg.dbType;
       canReorder.value = msg.dbType === 'MYSQL';
       columnTypes.value = Array.isArray(msg.columnTypes) ? msg.columnTypes : [];
+      creating.value = !!msg.creating;
+      tableName.value = msg.tableName || '';
+      dbName.value = msg.dbName || '';
+      if (creating.value && !draftColumns.value.length) addDraftColumn();
+    } else if (msg.type === 'created') {
+      // 建表成功：切到该表的设计视图，可继续加列/加索引
+      creating.value = false;
+      tableName.value = msg.tableName || draftName.value.trim();
+      clearNotice();
     } else if (msg.type === 'data') {
       columns.value = msg.columns || [];
       indexes.value = msg.indexes || [];
       ddl.value = msg.ddl || t('wv.design.noDdl');
       error.value = '';
     } else if (msg.type === 'error') {
-      error.value = msg.message;
+      // 界面上已有内容（表单/列表）时用行内横幅：整块替换会让用户丢掉填了一半的输入
+      if (creating.value || columns.value.length) notify(msg.message);
+      else error.value = msg.message;
     }
   });
   post({ type: 'ready' });
@@ -161,13 +230,14 @@ function moveColumn(col: any, dir: 'up' | 'down') {
   post({ type: 'reorderColumn', column: col.name, afterColumn });
 }
 
+/**
+ * 删除列 / 删除索引直接下发。
+ *
+ * 设计器内不再二次确认：用户是在结构编辑界面按下的删除按钮，
+ * 每次都弹模态框只是噪音。真正的护栏（只读连接）在扩展端。
+ */
 function dropCol(col: any) {
-  confirmDrop.value = { name: col.name };
-}
-function confirmDropCol() {
-  if (!confirmDrop.value) return;
-  post({ type: 'dropColumn', column: confirmDrop.value.name });
-  confirmDrop.value = null;
+  post({ type: 'dropColumn', column: col.name });
 }
 
 function buildDef(f: ColForm): string {
@@ -221,12 +291,7 @@ function saveIdxForm() {
 }
 
 function dropIdx(i: any) {
-  confirmDropIdx.value = { name: i.name };
-}
-function confirmDropIdxHandler() {
-  if (!confirmDropIdx.value) return;
-  post({ type: 'dropIndex', name: confirmDropIdx.value.name });
-  confirmDropIdx.value = null;
+  post({ type: 'dropIndex', name: i.name });
 }
 
 const idxSelectedCols = computed(() => Object.keys(idxForm.value.cols).filter((c) => idxForm.value.cols[c]));
@@ -246,7 +311,7 @@ function truthy(v: unknown): boolean {
 
 <template>
   <div class="app">
-    <div class="tabs">
+    <div class="tabs" v-if="!creating">
       <button :class="{ active: tab === 'cols' }" @click="tab = 'cols'">{{ t('wv.design.tabColumns') }}</button>
       <button :class="{ active: tab === 'idx' }" @click="tab = 'idx'">{{ t('wv.design.tabIndexes') }}</button>
       <button :class="{ active: tab === 'ddl' }" @click="tab = 'ddl'">{{ t('wv.design.tabDdl') }}</button>
@@ -257,8 +322,55 @@ function truthy(v: unknown): boolean {
         <span>{{ notice }}</span>
         <button class="notice-close" :title="t('wv.common.dismiss')" @click="clearNotice">✕</button>
       </div>
+      <!-- 建表：与设计器同一个界面，建完直接切到该表的结构视图 -->
+      <div v-if="creating">
+        <div class="create-head">
+          <label>{{ t('wv.design.tableName') }}</label>
+          <input v-model="draftName" class="input name-input" :placeholder="t('wv.design.tableNamePlaceholder')" />
+          <span class="hint">{{ dbName }}</span>
+        </div>
+        <table class="grid">
+          <thead>
+            <tr>
+              <th class="c-name">{{ t('wv.common.name') }}</th>
+              <th class="c-type">{{ t('wv.common.type') }}</th>
+              <th class="c-chk">{{ t('wv.design.notNull') }}</th>
+              <th class="c-chk">{{ t('wv.design.primary') }}</th>
+              <th class="c-chk">{{ t('wv.design.autoIncrement') }}</th>
+              <th class="c-def">{{ t('wv.design.default') }}</th>
+              <th class="c-cmt">{{ t('wv.design.comment') }}</th>
+              <th class="c-act"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(c, i) in draftColumns" :key="i">
+              <td><input v-model="c.name" class="input" :placeholder="t('wv.design.newColumn')" /></td>
+              <td>
+                <div class="type-cell">
+                  <input v-model="c.type" class="input" :placeholder="defaultType" />
+                  <button class="btn sm type-toggle" :disabled="!columnTypes.length"
+                    :title="t('wv.design.pickType')" @click="draftTypePicker = i">▾</button>
+                </div>
+              </td>
+              <td><input type="checkbox" v-model="c.notNull" /></td>
+              <td><input type="checkbox" v-model="c.isPrimary" /></td>
+              <td><input type="checkbox" v-model="c.autoIncrement" @change="onDraftAutoIncrement(c)" /></td>
+              <td><input v-model="c.defaultVal" class="input" :placeholder="t('wv.common.null')" /></td>
+              <td><input v-model="c.comment" class="input" /></td>
+              <td>
+                <button class="btn danger sm" :disabled="draftColumns.length <= 1"
+                  @click="removeDraftColumn(i)">✕</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="create-actions">
+          <button class="btn" @click="addDraftColumn">{{ t('wv.design.addColumn') }}</button>
+          <button class="btn primary" @click="submitCreate">{{ t('wv.design.createTable') }}</button>
+        </div>
+      </div>
       <!-- Columns -->
-      <div v-if="tab === 'cols'">
+      <div v-else-if="tab === 'cols'">
         <table class="grid">
           <thead>
             <tr>
@@ -321,7 +433,7 @@ function truthy(v: unknown): boolean {
         </table>
       </div>
       <!-- Indexes -->
-      <div v-else-if="tab === 'idx'">
+      <div v-else-if="tab === 'idx' && !creating">
         <div class="toolbar">
           <button class="btn" @click="startAddIdx">{{ t('wv.design.addIndex') }}</button>
         </div>
@@ -387,23 +499,18 @@ function truthy(v: unknown): boolean {
       </div>
     </div>
 
-    <div v-if="confirmDrop" class="modal-mask" @click.self="confirmDrop = null">
-      <div class="modal">
-        <div class="modal-title">{{ t('wv.design.deleteColumn') }}</div>
-        <div class="modal-body">{{ t('wv.design.confirmDropColumn', { name: confirmDrop.name }) }}</div>
-        <div class="modal-actions">
-          <button class="btn" @click="confirmDrop = null">{{ t('wv.common.cancel') }}</button>
-          <button class="btn danger" @click="confirmDropCol">{{ t('wv.common.delete') }}</button>
+    <!-- 建表表单的类型选择浮层（与已有列共用候选列表） -->
+    <div v-if="draftTypePicker !== null" class="modal-mask" @click.self="draftTypePicker = null">
+      <div class="modal type-modal">
+        <div class="modal-title">{{ t('wv.common.type') }} · {{ dbType }}</div>
+        <input v-model="typeFilter" class="input" :placeholder="t('wv.design.filterTypes')" />
+        <div class="type-list">
+          <button v-for="ct in filteredTypes" :key="ct" class="type-item mono"
+            @click="draftColumns[draftTypePicker!].type = ct; draftTypePicker = null; typeFilter = ''">{{ ct }}</button>
+          <div v-if="!filteredTypes.length" class="type-empty">{{ t('wv.design.noMatchingType') }}</div>
         </div>
-      </div>
-    </div>
-    <div v-if="confirmDropIdx" class="modal-mask" @click.self="confirmDropIdx = null">
-      <div class="modal">
-        <div class="modal-title">{{ t('wv.design.deleteIndex') }}</div>
-        <div class="modal-body">{{ t('wv.design.confirmDropIndex', { name: confirmDropIdx.name }) }}</div>
         <div class="modal-actions">
-          <button class="btn" @click="confirmDropIdx = null">{{ t('wv.common.cancel') }}</button>
-          <button class="btn danger" @click="confirmDropIdxHandler">{{ t('wv.common.delete') }}</button>
+          <button class="btn" @click="draftTypePicker = null">{{ t('wv.common.cancel') }}</button>
         </div>
       </div>
     </div>
@@ -436,6 +543,11 @@ th { background: var(--vscode-editor-background, #1e1e1e); position: sticky; top
 .c-cmt { width: 20%; }
 .c-act { width: 15%; white-space: nowrap; }
 .new-row { background: var(--vscode-list-hoverBackground, rgba(128,128,128,0.08)); }
+.create-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.create-head label { font-size: 12px; white-space: nowrap; color: var(--vscode-foreground, #cccccc); }
+.create-head .name-input { flex: 0 1 260px; }
+.create-head .hint { font-size: 11px; color: var(--vscode-descriptionForeground, #999); }
+.create-actions { display: flex; gap: 8px; margin-top: 10px; }
 .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal { background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); border-radius: 4px; padding: 16px; min-width: 320px; }
 .modal-title { font-size: 13px; font-weight: 600; margin-bottom: 12px; }

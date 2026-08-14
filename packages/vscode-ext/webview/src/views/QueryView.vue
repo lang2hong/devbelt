@@ -15,11 +15,20 @@ const completionIndex = ref(0);
 const showCompletion = ref(false);
 let completionTimer: any;
 const hasTable = ref(false);
-/** Excel 依赖（可选包 xlsx）是否可用，由扩展端在 init 时告知 */
-const xlsxAvailable = ref(false);
+/**
+ * 面板形态：query = 普通查询/表数据；structure = 表结构清单。
+ * 结构面板只是一份列清单，没有 SQL 可跑，也不该提供导出/图表/EXPLAIN。
+ */
+const viewKind = ref<'query' | 'structure'>('query');
+/** 结果对象类型：视图不可编辑（无主键可定位，且 INSERT 语义不成立）。 */
+const objectType = ref<'table' | 'view' | ''>('');
+const canEdit = ref(false);
 const rows = ref<any[]>([]);
 const fields = ref<{ name: string }[]>([]);
-const results = ref<{ sql: string; rows: any[]; fields: { name: string }[]; costTime: number; truncated?: boolean }[]>([]);
+const results = ref<{
+  sql: string; rows: any[]; fields: { name: string }[]; costTime: number;
+  truncated?: boolean; affectedRows?: number;
+}[]>([]);
 const activeResultIndex = ref(0);
 const transactionState = ref<'active' | 'committed' | 'rolledback' | ''>('');
 const pkColumns = ref<string[]>([]);
@@ -42,6 +51,28 @@ const viewMode = ref<'table' | 'chart'>('table');
 const totalPages = computed(() => total.value === undefined ? 0 : Math.max(1, Math.ceil(total.value / limit.value)));
 const currentPage = computed(() => total.value === undefined ? 0 : Math.floor(offset.value / limit.value) + 1);
 
+/** 结果集？没有字段的结果来自 UPDATE/INSERT/DELETE/DDL，只有受影响行数可报。 */
+function isResultSet(r: { fields?: { name: string }[] }): boolean {
+  return Array.isArray(r.fields) && r.fields.length > 0;
+}
+
+/**
+ * 结果摘要文案。写语句必须报「受影响行数」——过去一律按 rows.length 算，
+ * 表面板里执行 UPDATE 只会看到 `0 row(s)`，像是没生效。
+ */
+function describeResult(r: { rows: any[]; fields?: { name: string }[]; costTime: number; truncated?: boolean; affectedRows?: number }): string {
+  const secs = ((r.costTime || 0) / 1000).toFixed(3);
+  if (!isResultSet(r)) {
+    return `${r.affectedRows ?? 0} ${t('wv.query.rowsAffected')} · ${secs}s`;
+  }
+  return `${r.rows.length} row(s) in ${secs}s${r.truncated ? ' (truncated)' : ''}`;
+}
+
+/** 结果标签页文案：写语句显示受影响行数而不是 0。 */
+function resultTabLabel(r: { rows: any[]; fields?: { name: string }[]; affectedRows?: number }): string {
+  return String(isResultSet(r) ? r.rows.length : (r.affectedRows ?? 0));
+}
+
 function filterByPrefix(items: { label: string; kind: string }[], prefix: string) {
   if (!prefix) return items;
   const p = prefix.toLowerCase();
@@ -56,7 +87,9 @@ onMounted(() => {
     if (msg.type === 'init') {
       sql.value = msg.initialSql || '';
       hasTable.value = msg.hasTable || false;
-      xlsxAvailable.value = !!msg.xlsxAvailable;
+      viewKind.value = msg.viewKind === 'structure' ? 'structure' : 'query';
+      objectType.value = msg.objectType || '';
+      canEdit.value = !!msg.canEdit;
       tableName.value = msg.tableName || '';
       dbName.value = msg.dbName || '';
       sortCol.value = msg.sortCol || '';
@@ -83,12 +116,12 @@ onMounted(() => {
       if (msg.columnWidths) columnWidths.value = msg.columnWidths;
       syncLimitFromSql(msg.sql);
       error.value = '';
-      meta.value = rows.value.length + ' row(s) in ' + (msg.result.costTime / 1000).toFixed(3) + 's' + (msg.result.truncated ? ' (truncated)' : '');
+      meta.value = describeResult(msg.result);
     } else if (msg.type === 'results') {
       const list = msg.results || [];
       const batch = list.map((r: any) => ({
         sql: r.sql || msg.sql || '', rows: r.rows || [], fields: r.fields || [],
-        costTime: r.costTime || 0, truncated: r.truncated,
+        costTime: r.costTime || 0, truncated: r.truncated, affectedRows: r.affectedRows,
       }));
       results.value = results.value.concat(batch);
       if (results.value.length > 20) results.value = results.value.slice(-20);
@@ -97,7 +130,7 @@ onMounted(() => {
       if (cur) {
         rows.value = cur.rows;
         fields.value = cur.fields;
-        meta.value = cur.rows.length + ' row(s) in ' + (cur.costTime / 1000).toFixed(3) + 's' + (cur.truncated ? ' (truncated)' : '');
+        meta.value = describeResult(cur);
       }
       if (msg.sql && !msg.explain) sql.value = msg.sql;
       if (msg.transactionState) transactionState.value = msg.transactionState;
@@ -158,7 +191,7 @@ function selectResult(index: number) {
   if (r) {
     rows.value = r.rows;
     fields.value = r.fields;
-    meta.value = r.rows.length + ' row(s) in ' + (r.costTime / 1000).toFixed(3) + 's';
+    meta.value = describeResult(r);
   }
 }
 
@@ -171,7 +204,11 @@ function closeResult(index: number) {
   if (cur) {
     rows.value = cur.rows;
     fields.value = cur.fields;
-    meta.value = cur.rows.length + ' row(s) in ' + (cur.costTime / 1000).toFixed(3) + 's';
+    meta.value = describeResult(cur);
+  } else {
+    rows.value = [];
+    fields.value = [];
+    meta.value = '';
   }
 }
 
@@ -333,13 +370,17 @@ function onKeydown(e: KeyboardEvent) {
 
 <template>
   <div class="app">
-    <textarea v-model="sql" class="editor" @input="onSqlInput" @keydown="onKeydown" :placeholder="t('wv.query.sqlPlaceholder')"></textarea>
+    <!--
+      结构面板没有可执行的 SQL：既不提供编辑器与 Run，也不提供 EXPLAIN /
+      图表 / 导出（导出走表节点的 Export，语义更清楚）。
+    -->
+    <textarea v-if="viewKind !== 'structure'" v-model="sql" class="editor" @input="onSqlInput" @keydown="onKeydown" :placeholder="t('wv.query.sqlPlaceholder')"></textarea>
     <div v-if="showCompletion" class="completion">
       <div v-for="(c, i) in filteredCandidates" :key="c.label" :class="['comp-item', 'kind-' + c.kind, { sel: i === completionIndex }]" @mousedown.prevent="selectCompletion(i)">{{ c.label }}</div>
     </div>
     <div class="action-bar">
-      <button class="btn primary" :disabled="running" @click="run">{{ t('wv.query.run') }}</button>
-      <button class="btn" :disabled="running" @click="explain">{{ t('wv.query.explain') }}</button>
+      <button v-if="viewKind !== 'structure'" class="btn primary" :disabled="running" @click="run">{{ t('wv.query.run') }}</button>
+      <button v-if="viewKind !== 'structure'" class="btn" :disabled="running" @click="explain">{{ t('wv.query.explain') }}</button>
       <button v-if="running" class="btn" @click="cancel">{{ t('wv.query.cancel') }}</button>
       <span v-if="transactionState" class="txn-badge" :class="transactionState">TX: {{ transactionState }}</span>
       <div class="spacer"></div>
@@ -352,14 +393,18 @@ function onKeydown(e: KeyboardEvent) {
       <button v-if="hasTable" class="btn" :disabled="currentPage <= 1" @click="prevPage">◀ Prev</button>
       <button v-if="hasTable" class="btn" :disabled="currentPage >= totalPages" @click="nextPage">Next ▶</button>
     </div>
-    <div v-if="!hasTable && results.length >= 1" class="result-tabs">
+    <!--
+      结果标签页对表面板同样生效：表面板里执行写语句会走多结果分支，
+      过去被 `!hasTable` 挡掉，执行结果无处可看。
+    -->
+    <div v-if="results.length >= 1" class="result-tabs">
       <button v-for="(r, i) in results" :key="i" class="result-tab" :class="{ active: i === activeResultIndex }" @click="selectResult(i)">
-        Result {{ i + 1 }} ({{ r.rows.length }})
+        {{ t('wv.query.resultTab', { n: i + 1 }) }} ({{ resultTabLabel(r) }})
         <span class="tab-close" @click.stop="closeResult(i)">×</span>
       </button>
     </div>
     <div class="error" v-if="error">{{ error }}</div>
-    <div v-if="rows.length > 0" class="view-toggle">
+    <div v-if="rows.length > 0 && viewKind !== 'structure'" class="view-toggle">
       <button class="btn" :class="{ active: viewMode === 'table' }" @click="viewMode = 'table'">{{ t('wv.query.tabTable') }}</button>
       <button class="btn" :class="{ active: viewMode === 'chart' }" @click="viewMode = 'chart'">{{ t('wv.query.tabChart') }}</button>
     </div>
@@ -377,7 +422,8 @@ function onKeydown(e: KeyboardEvent) {
       :table-name="tableName"
       :db-name="dbName"
       :hidden-columns="hiddenColumns"
-      :xlsx-available="xlsxAvailable"
+      :can-edit="canEdit"
+      :allow-export="viewKind !== 'structure'"
       @sort="handleSort"
       @filter="handleFilter"
       @update-cell="handleUpdateCell"

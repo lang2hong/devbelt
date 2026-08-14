@@ -18,8 +18,6 @@ const AUDIT_SQL_MAX = 2000;
  *  - TableQueryView：在 Vue 应用 ready 后执行 SQL + 渲染结果
  */
 export class QueryExecutor {
-  private view?: TableQueryView;
-
   constructor(
     private readonly manager: ConnectionManager,
     private readonly history?: HistoryStore,
@@ -37,7 +35,7 @@ export class QueryExecutor {
     mode: QueryExecutionMode = 'reuse',
   ): Promise<void> {
     const start = Date.now();
-    this.view = await TableQueryView.openForQuery(conn, this.manager, sql, database, async (result, error) => {
+    await TableQueryView.openForQuery(conn, this.manager, sql, database, async (result, error) => {
       // 历史记录回调
       if (result) {
         const costTime = Date.now() - start;
@@ -74,9 +72,19 @@ export class QueryExecutor {
     }, mode);
   }
 
-  /** 渲染外部结果（表结构元数据等）到当前视图 */
-  renderExternal(result: import('@db-client/core').QueryResult): void {
-    this.view?.renderExternal(result);
+  /**
+   * 打开表结构清单面板。
+   *
+   * 与查询面板分开：结构面板没有可执行的 SQL，也不该提供 EXPLAIN / 图表 / 导出。
+   * 结构数据由调用方经元数据接口取好后传入，不再对所有方言发 `DESCRIBE`。
+   */
+  openStructure(
+    conn: SavedConnection,
+    table: string,
+    database: string | undefined,
+    columns: Record<string, unknown>[],
+  ): void {
+    TableQueryView.openForStructure(conn, this.manager, table, database, columns);
   }
 
   /**
@@ -86,7 +94,7 @@ export class QueryExecutor {
    * explain，复用面板时原语句已经开跑，写语句会产生一次真实副作用。
    */
   async explain(conn: SavedConnection, sql: string, database?: string): Promise<void> {
-    this.view = await TableQueryView.openForExplain(conn, this.manager, sql, database, 'reuse');
+    await TableQueryView.openForExplain(conn, this.manager, sql, database, 'reuse');
     this.audit?.log({
       action: 'query_explain',
       connName: conn.name || conn.host,

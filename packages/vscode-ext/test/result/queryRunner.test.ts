@@ -45,6 +45,49 @@ describe('QueryRunner', () => {
     expect(runner.buildSelect()).toContain('WHERE `name` =');
   });
 
+  /**
+   * 回归：表面板里执行写语句/DDL。
+   *
+   * 这类语句没有结果集，过去仍被塞进单结果分支渲染为「0 row(s)」，
+   * 用户以为没生效；还会白跑一条 COUNT。
+   */
+  it('表模式执行写语句时走 results 分支并带 affectedRows', async () => {
+    const executed: string[] = [];
+    const query = {
+      query: async (sql: string) => {
+        executed.push(sql);
+        return { rows: [], fields: [], affectedRows: 3, costTime: 5, sql };
+      },
+      wrap: (id: string) => `\`${id}\``,
+      cancel: () => true,
+    };
+    const manager: any = { connect: async () => ({ query, metadata: { getColumns: async () => [] } }), disposeConn: () => {} };
+    const { runner, posted } = makeRunner(manager);
+    await runner.execute("UPDATE users SET name = 'x' WHERE id = 1");
+
+    const results = posted.find((m) => m.type === 'results');
+    expect(results).toBeDefined();
+    expect(results.results[0].affectedRows).toBe(3);
+    expect(posted.some((m) => m.type === 'result')).toBe(false);
+    expect(executed.some((sql) => /COUNT/i.test(sql))).toBe(false);
+  });
+
+  it('表模式执行写语句不覆盖 lastFields（列布局不该被判定过期）', async () => {
+    const query = {
+      query: async (sql: string) => (/^SELECT/i.test(sql.trim())
+        ? { rows: [{ id: 1 }], fields: [{ name: 'id' }], costTime: 1, sql }
+        : { rows: [], fields: [], affectedRows: 1, costTime: 1, sql }),
+      wrap: (id: string) => `\`${id}\``,
+      cancel: () => true,
+    };
+    const manager: any = { connect: async () => ({ query, metadata: { getColumns: async () => [{ name: 'id' }] } }), disposeConn: () => {} };
+    const { runner } = makeRunner(manager);
+    await runner.execute('SELECT * FROM users');
+    expect(runner.lastFields).toEqual(['id']);
+    await runner.execute('DELETE FROM users WHERE id = 1');
+    expect(runner.lastFields).toEqual(['id']);
+  });
+
   it('cancel 在无运行查询时安全返回', () => {
     const manager: any = { connect: async () => ({}), disposeConn: vi.fn() };
     const { runner } = makeRunner(manager);

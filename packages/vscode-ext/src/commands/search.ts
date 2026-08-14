@@ -53,7 +53,9 @@ export function registerSearchCommands(deps: Deps, sub: Sub): void {
 
     const conn = deps.store.get(picked.hit.connId);
     if (conn) {
-      TableQueryView.open(conn, picked.hit.name, picked.hit.database, deps.manager);
+      TableQueryView.open(conn, picked.hit.name, picked.hit.database, deps.manager, {
+        objectType: picked.hit.type === 'view' ? 'view' : 'table',
+      });
     }
   });
 }

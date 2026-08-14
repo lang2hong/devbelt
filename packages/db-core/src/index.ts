@@ -33,6 +33,7 @@ export { columnTypesFor } from './dialect/typeCatalog';
 
 // 查询层
 export { QueryService, QueryError } from './query/queryService';
+export type { QueryOptions, ExecutedStatement, QueryObserver } from './query/queryService';
 export { MetadataService } from './query/metadataService';
 export { DataService } from './query/dataService';
 export { TableService } from './query/tableService';

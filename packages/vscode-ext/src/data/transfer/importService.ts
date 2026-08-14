@@ -1,6 +1,14 @@
-import type { QueryService } from '@db-client/core';
+import type { QueryOptions, QueryService } from '@db-client/core';
 import { mapRows, type FieldMapping } from './fieldMapper';
 import { TransferCancelledError } from './exportService';
+
+/**
+ * 导入的每条语句都不进查询历史。
+ *
+ * 导入十万行就是十万条 INSERT，逐条上报会把上限 100 条的历史整段冲干，
+ * 且每条都触发一次持久化写入。命令层负责补一条汇总记录。
+ */
+const SKIP: QueryOptions = { skipHistory: true };
 
 export interface ImportProgress {
   completed: number;
@@ -46,22 +54,22 @@ export async function importRows(options: ImportRowsOptions): Promise<ImportResu
   let started = false;
   let completed = 0;
   try {
-    await query.query('BEGIN');
+    await query.query('BEGIN', undefined, SKIP);
     started = true;
     for (const row of mapped.rows) {
       if (isCancelled?.()) throw new TransferCancelledError();
       const sql = query.dialect.buildInsertSql([row], mapped.columns, table, database);
-      await query.query(sql);
+      await query.query(sql, undefined, SKIP);
       completed++;
       onProgress?.({ completed, total: mapped.rows.length });
     }
-    await query.query('COMMIT');
+    await query.query('COMMIT', undefined, SKIP);
     return { imported: completed, rolledBack: false, errors: [] };
   } catch (error) {
     let rollbackSucceeded = false;
     if (started) {
       try {
-        await query.query('ROLLBACK');
+        await query.query('ROLLBACK', undefined, SKIP);
         rollbackSucceeded = true;
       } catch { /* Preserve the original failure. */ }
     }
@@ -87,14 +95,14 @@ async function importRowsBatched(
   const inserts = dataRows.map((row) => query.dialect.buildInsertSql([row], columns, table, database).trim());
   const sql = `BEGIN; ${inserts.join('\n')} COMMIT;`;
   try {
-    await query.query(sql);
+    await query.query(sql, undefined, SKIP);
     onProgress?.({ completed: dataRows.length, total: dataRows.length });
     return { imported: dataRows.length, rolledBack: false, errors: [] };
   } catch (error) {
     if (error instanceof TransferCancelledError) throw error;
     let rollbackSucceeded = false;
     try {
-      await query.query('ROLLBACK');
+      await query.query('ROLLBACK', undefined, SKIP);
       rollbackSucceeded = true;
     } catch { /* Preserve the original failure. */ }
     return {

@@ -24,7 +24,41 @@ export interface QueryOptions {
    * 仅用于元数据读取——截断元数据会造成功能缺项（表/列清单少项）而非单纯展示问题。
    */
   noTruncate?: boolean;
+  /**
+   * 不通知 `QueryObserver`。
+   *
+   * 两种必须跳过的场合：
+   *  - **含密码的语句**（CREATE USER / ALTER USER ... IDENTIFIED BY）。历史会被
+   *    持久化并参与云同步，明文密码绝不能进去。
+   *  - **批量循环**（导入每行 INSERT、恢复 dump、库间传输）。逐条上报会把
+   *    上限 100 条的历史瞬间冲干，还会带来每条一次的持久化写入。
+   *    这类操作由命令层补一条汇总记录。
+   */
+  skipHistory?: boolean;
 }
+
+/** 一条已执行语句的观测信息。 */
+export interface ExecutedStatement {
+  /** 实际下发给驱动的 SQL 原文。 */
+  sql: string;
+  /** 驱动实测耗时（ms）。 */
+  costTime: number;
+  /** 写语句的影响行数（读语句为 undefined）。 */
+  affectedRows?: number;
+  /** 读语句返回的行数（写语句为 0）。 */
+  rowCount: number;
+  /** 失败时的错误信息；成功为 undefined。 */
+  error?: string;
+}
+
+/**
+ * 语句执行观察者。
+ *
+ * db-core 不依赖 vscode，无法自己写查询历史；由 vscode-ext 在构造
+ * `QueryService` 时注入，从而让**所有**经过本服务的语句（不止编辑器执行的那些）
+ * 都能被记录，而不必在几十个 DDL 调用点逐个补写。
+ */
+export type QueryObserver = (info: ExecutedStatement) => void;
 
 /**
  * 查询服务（复用连接 + 方言）。
@@ -44,8 +78,23 @@ export class QueryService {
   constructor(
     private readonly connection: IConnection,
     dialect: SqlDialect,
+    /** 可选语句观察者（vscode-ext 用它写查询历史）。 */
+    private readonly observer?: QueryObserver,
   ) {
     this.dialect = dialect;
+  }
+
+  /**
+   * 通知观察者，并吞掉它抛出的任何异常。
+   *
+   * 观察者是旁路设施（写历史），它出错绝不能影响一条已经成功执行的语句 ——
+   * 否则用户会看到「DDL 报错」而库里其实已经改完了。
+   */
+  private notifyObserver(info: ExecutedStatement, options?: QueryOptions): void {
+    if (!this.observer || options?.skipHistory) return;
+    try {
+      this.observer(info);
+    } catch { /* best-effort observation */ }
   }
 
   /**
@@ -94,10 +143,16 @@ export class QueryService {
         finish();
         const costTime = Date.now() - start;
         if (err) {
+          this.notifyObserver({ sql, costTime, rowCount: 0, error: err.message }, options);
           reject(new QueryError(err.message, sql, costTime));
           return;
         }
-        resolve(this.normalizeResult(sql, results, fields || [], costTime, options));
+        const result = this.normalizeResult(sql, results, fields || [], costTime, options);
+        this.notifyObserver(
+          { sql, costTime, rowCount: result.rows.length, affectedRows: result.affectedRows },
+          options,
+        );
+        resolve(result);
       };
       if (values !== undefined) {
         this.connection.query(sql, values, callback);
@@ -129,12 +184,14 @@ export class QueryService {
    * 被截断会导致功能性缺项而非展示问题，因此单独开一条不截断的路径。
    */
   async queryAll(sql: string, values?: any): Promise<QueryResult> {
-    return this.query(sql, values, { noTruncate: true });
+    // 元数据读取不进历史：它们由树展开/补全自动触发，量大且对用户无意义。
+    return this.query(sql, values, { noTruncate: true, skipHistory: true });
   }
 
   /** 执行分页查询 */
   async queryPage(sql: string, offset: number, limit: number): Promise<QueryResult> {
-    return this.query(this.dialect.getPagedSql(sql, offset, limit));
+    // 分页读取（导出、备份、数据对比）同样不进历史。
+    return this.query(this.dialect.getPagedSql(sql, offset, limit), undefined, { skipHistory: true });
   }
 
   /** 包裹标识符（复用方言规则） */

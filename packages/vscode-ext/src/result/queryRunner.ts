@@ -120,27 +120,36 @@ export class QueryRunner {
         await session.query.query(`USE ${session.query.wrap(validateIdent(database))}`);
       }
       const stmts = splitSqlStatements(sql);
+      // 有 onExecuted 时由 QueryExecutor 记一条「整段 SQL」的历史，这里逐条上报会重复；
+      // 没有 onExecuted 时（结果面板内改 SQL 再运行）交给观察者逐条记录 ——
+      // 那条路径过去完全不进历史。
+      const stmtOpts = onExecuted ? { skipHistory: true } : undefined;
       const results: any[] = [];
       for (const stmt of stmts) {
         const upper = stmt.trim().replace(/--.*$/gm, '').replace(/#.*$/gm, '').toUpperCase().trim();
         if (upper === 'BEGIN' || upper.startsWith('START TRANSACTION')) {
-          await session.query.query(stmt);
+          await session.query.query(stmt, undefined, stmtOpts);
           transactionState = 'active';
           continue;
         }
-        if (upper === 'COMMIT') { await session.query.query(stmt); transactionState = 'committed'; continue; }
-        if (upper === 'ROLLBACK') { await session.query.query(stmt); transactionState = 'rolledback'; continue; }
+        if (upper === 'COMMIT') { await session.query.query(stmt, undefined, stmtOpts); transactionState = 'committed'; continue; }
+        if (upper === 'ROLLBACK') { await session.query.query(stmt, undefined, stmtOpts); transactionState = 'rolledback'; continue; }
         if (upper.startsWith('SET AUTOCOMMIT')) {
-          await session.query.query(stmt);
+          await session.query.query(stmt, undefined, stmtOpts);
           if (upper.includes('= 0') || upper.includes('=0')) transactionState = 'active';
           continue;
         }
-        results.push(await session.query.query(stmt));
+        results.push(await session.query.query(stmt, undefined, stmtOpts));
       }
       const result = results[results.length - 1];
+      // 表面板里也会执行 UPDATE/INSERT/DELETE/DDL。这类语句没有结果集，
+      // 过去仍被塞进单结果分支渲染成「0 row(s)」，用户完全看不到执行结果。
+      // 判定依据是「有没有字段」而不是语句前缀：不必解析 SQL，
+      // 且 SHOW/DESCRIBE 之类返回结果集的语句自然落在结果集一侧。
+      const isResultSet = Array.isArray(result?.fields) && result.fields.length > 0;
       let pkCols: string[] = [];
       let cols: any[] = [];
-      if (this.table) {
+      if (this.table && isResultSet) {
         try {
           cols = await session.metadata.getColumns(this.table, this.database);
           pkCols = cols.filter((c: any) => c.isPrimary).map((c: any) => c.name);
@@ -154,7 +163,8 @@ export class QueryRunner {
         } catch {}
       }
       let total: number | undefined;
-      if (this.table) {
+      // 写语句后不查 COUNT：既无意义，又会白跑一条查询。
+      if (this.table && isResultSet) {
         const countSql = this.getCountSql();
         if (countSql) {
           try {
@@ -164,9 +174,9 @@ export class QueryRunner {
           } catch { /* COUNT 失败不阻塞结果展示 */ }
         }
       }
-      this.lastFields = (result?.fields || []).map((f: any) => f.name);
       if (transactionState) this.post({ type: 'transaction', state: transactionState });
-      if (this.table) {
+      if (this.table && isResultSet) {
+        this.lastFields = (result?.fields || []).map((f: any) => f.name);
         const colMap = new Map(cols.map((c: any) => [c.name, c]));
         const fieldsWithType = (result?.fields || []).map((f: any) => {
           const c = colMap.get(f.name);
@@ -176,6 +186,9 @@ export class QueryRunner {
           type: 'result', result: { ...result, fields: fieldsWithType }, pkColumns: pkCols, total, sql,
         });
       } else {
+        // 写语句/DDL：交给多结果分支展示受影响行数，并保留上一次的列布局
+        // （lastFields 不覆盖，否则重新查询后列宽/列序会被判定为过期而丢弃）。
+        if (!this.table) this.lastFields = (result?.fields || []).map((f: any) => f.name);
         this.post({
           type: 'results', results, sql, transactionState,
         });

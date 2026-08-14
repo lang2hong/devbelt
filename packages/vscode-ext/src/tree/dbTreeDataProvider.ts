@@ -145,7 +145,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     if (caps.routines) categories.push({ type: 'function', label: l10n('cat.functions') });
     if (caps.events) categories.push({ type: 'event', label: l10n('cat.events') });
     categories.push({ type: 'query', label: l10n('cat.queries') });
-    if (caps.users) categories.push({ type: 'user', label: l10n('cat.users') });
+    // 用户不是库级对象：`getUsers()` 与库无关，挂在库下会让 MySQL 的 20 个库
+    // 各显示一份完全相同的用户列表。改为连接右键打开专门的用户管理面板。
     return categories.map(
       (c) =>
         new DbTreeNode(
@@ -214,7 +215,6 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       case 'view':
       case 'function':
       case 'event':
-      case 'user':
         return builder.build(catType, conn, db, element);
       case 'index':
         return this.buildIndexChildren(session, conn, db, element);

@@ -5,7 +5,7 @@ import { wrapIdentForConn, splitSqlStatements } from '../utils/sql';
 import { confirmSqlExecution } from '../utils/sqlSafety';
 import { parseCsv } from '../data/transfer/csv';
 import { parseJson } from '../data/transfer/json';
-import { parseXlsx, isXlsxAvailable } from '../data/transfer/xlsx';
+import { parseXlsx } from '../data/transfer/xlsx';
 import { parseXml } from '../data/transfer/xml';
 import { autoMapFields, type FieldMapping } from '../data/transfer/fieldMapper';
 import {
@@ -20,7 +20,7 @@ import { importRows } from '../data/transfer/importService';
 import { AuditLogger } from '../utils/auditLogger';
 import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
-import { confirm, openSqlDoc, requireCapability } from './shared';
+import { confirm, openSqlDoc, recordBulkHistory, requireCapability } from './shared';
 
 export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
   const { manager, treeProvider, connCtx } = deps;
@@ -60,10 +60,10 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     const raw = await vscode.workspace.fs.readFile(uri[0]);
     const text = format === 'xlsx' ? Buffer.from(raw).toString('base64') : Buffer.from(raw).toString('utf8');
     if (format === 'sql') {
-      await importSqlScript(node, text, manager, treeProvider, connCtx);
+      await importSqlScript(node, text, deps);
       return;
     }
-    await importStructuredData(node, format, text, manager, treeProvider, connCtx);
+    await importStructuredData(node, format, text, deps);
   });
 
   sub('dbclient.exportConnection', async (node: DbTreeNode) => {
@@ -103,6 +103,11 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
             // SQLite 的 CLI 驱动每查询独立进程，逐句执行时 BEGIN 会失效
             singleStatement: conn.dbType === DatabaseType.SQLITE,
           });
+          await recordBulkHistory(
+            deps, node.conn!,
+            l10n('history.restore', { count: completed }),
+            node.database || node.conn!.database,
+          );
           vscode.window.showInformationMessage(`Restore complete: ${completed} statements executed.`);
           treeProvider.refresh();
         } catch (err) {
@@ -125,10 +130,10 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     const raw = await vscode.workspace.fs.readFile(uri[0]);
     const text = format === 'xlsx' ? Buffer.from(raw).toString('base64') : Buffer.from(raw).toString('utf8');
     if (format === 'sql') {
-      await importSqlScript(node, text, manager, treeProvider, connCtx);
+      await importSqlScript(node, text, deps);
       return;
     }
-    await importStructuredData(node, format, text, manager, treeProvider, connCtx, node.label);
+    await importStructuredData(node, format, text, deps, node.label);
   });
 
   sub('dbclient.exportTable', async (node: DbTreeNode) => {
@@ -204,6 +209,15 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
         } else {
           vscode.window.showInformationMessage(`Sync complete: ${result.tablesSynced} tables synced.`);
         }
+        await recordBulkHistory(
+          deps, node.conn!,
+          l10n('history.transfer', {
+            source: node.database!,
+            target: targetDb.value,
+            count: result.tablesSynced,
+          }),
+          node.database!,
+        );
         treeProvider.refresh();
       },
     );
@@ -293,10 +307,9 @@ export async function runExportWizard(
 async function importSqlScript(
   node: DbTreeNode,
   sql: string,
-  manager: Deps['manager'],
-  treeProvider: Deps['treeProvider'],
-  connCtx: Deps['connCtx'],
+  deps: Deps,
 ): Promise<void> {
+  const { manager, treeProvider, connCtx } = deps;
   const conn = node.conn;
   if (!conn) return;
   if (!(await confirmSqlExecution(conn, sql))) return;
@@ -329,7 +342,13 @@ async function importSqlScript(
         progress.report({ message: `${done}/${statements.length}` });
       }
     });
-    vscode.window.showInformationMessage(l10n('import.rowsDone', { count: hasAffectedInfo ? insertedRows : done }));
+    const importedCount = hasAffectedInfo ? insertedRows : done;
+    await recordBulkHistory(
+      deps, conn,
+      l10n('history.importScript', { count: done }),
+      database, importedCount,
+    );
+    vscode.window.showInformationMessage(l10n('import.rowsDone', { count: importedCount }));
     treeProvider.refresh();
   } catch (error) {
     if (error instanceof TransferCancelledError) vscode.window.showInformationMessage(l10n('transfer.cancelled'));
@@ -341,11 +360,10 @@ async function importStructuredData(
   node: DbTreeNode,
   format: Exclude<TransferFormat, 'sql'>,
   text: string,
-  manager: Deps['manager'],
-  treeProvider: Deps['treeProvider'],
-  connCtx: Deps['connCtx'],
+  deps: Deps,
   fixedTable?: string,
 ): Promise<void> {
+  const { manager, treeProvider, connCtx } = deps;
   const conn = node.conn;
   if (!conn) return;
   let source: { columns: string[]; rows: Record<string, unknown>[] };
@@ -360,10 +378,12 @@ async function importStructuredData(
     } else if (format === 'json') {
       source = parseJson(text);
     } else if (format === 'xlsx') {
-      const buffer = Buffer.from(text, 'base64');
-      source = { columns: parseXlsx(buffer).length ? Object.keys(parseXlsx(buffer)[0]) : [], rows: parseXlsx(buffer) };
+      // 解析一次即可：此前同一份 buffer 被解了三遍
+      const parsed = parseXlsx(Buffer.from(text, 'base64'));
+      source = { columns: parsed.length ? Object.keys(parsed[0]) : [], rows: parsed };
     } else if (format === 'xml') {
-      source = { columns: parseXml(text).length ? Object.keys(parseXml(text)[0]) : [], rows: parseXml(text) };
+      const parsed = parseXml(text);
+      source = { columns: parsed.length ? Object.keys(parsed[0]) : [], rows: parsed };
     } else {
       throw new Error(`Unsupported format: ${format}`);
     }
@@ -418,6 +438,11 @@ async function importStructuredData(
       sql: `IMPORT INTO ${table.label} (${result.imported} row(s))`,
       rowCount: result.imported,
     });
+    await recordBulkHistory(
+      deps, conn,
+      l10n('history.importRows', { table: table.label, count: result.imported }),
+      database, result.imported,
+    );
     treeProvider.refresh();
     vscode.window.showInformationMessage(l10n('import.rowsDone', { count: result.imported }));
   } catch (error) {
@@ -475,17 +500,15 @@ function importFilters(format: TransferFormat): Record<string, string[]> {
 }
 
 async function pickFormat(action: 'import' | 'export'): Promise<TransferFormat | undefined> {
-  const items = [
-    { label: 'SQL', description: action === 'import' ? l10n('import.formatSql') : l10n('export.formatSql'), value: 'sql' as const },
-    { label: 'CSV', description: action === 'import' ? l10n('import.formatCsv') : l10n('export.formatCsv'), value: 'csv' as const },
-    { label: 'JSON', description: action === 'import' ? l10n('import.formatJson') : l10n('export.formatJson'), value: 'json' as const },
-    { label: 'XML', description: '.xml', value: 'xml' as const },
+  // Excel 由 data/transfer/xlsx.ts 自行读写（Node 内置 zlib），不再依赖可选包，
+  // 因此恒定提供 —— 过去该选项挂在未安装的 `xlsx` 包上，实际永远不出现。
+  const items: { label: string; description: string; value: TransferFormat }[] = [
+    { label: 'SQL', description: action === 'import' ? l10n('import.formatSql') : l10n('export.formatSql'), value: 'sql' },
+    { label: 'CSV', description: action === 'import' ? l10n('import.formatCsv') : l10n('export.formatCsv'), value: 'csv' },
+    { label: 'JSON', description: action === 'import' ? l10n('import.formatJson') : l10n('export.formatJson'), value: 'json' },
+    { label: 'Excel', description: '.xlsx', value: 'xlsx' },
+    { label: 'XML', description: '.xml', value: 'xml' },
   ];
-  // Excel 依赖可选包 xlsx，未安装时不提供该选项 ——
-  // 否则用户选完才在读写阶段撞上 'xlsx library not available'。
-  if (isXlsxAvailable()) {
-    items.splice(3, 0, { label: 'Excel', description: '.xlsx', value: 'xlsx' as const } as any);
-  }
   return (await vscode.window.showQuickPick(
     items,
     { placeHolder: action === 'import' ? l10n('import.chooseFormat') : l10n('export.chooseFormat') },

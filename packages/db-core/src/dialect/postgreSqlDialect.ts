@@ -30,6 +30,9 @@ export class PostgreSqlDialect implements SqlDialect {
     users: true,
     operations: [
       'createDatabase', 'dropDatabase', 'renameTable', 'renameView', 'truncateTable',
+      // 复制表用 `CREATE TABLE ... (LIKE ... INCLUDING ALL)`；此前未声明该能力，
+      // 于是「复制表」在 PG 上被一路拒到底
+      'duplicateTable',
       'getTableDefinition', 'alterTable', 'manageIndexes', 'manageRoutines', 'manageUsers',
     ],
   };

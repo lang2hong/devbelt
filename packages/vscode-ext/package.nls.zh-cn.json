@@ -21,6 +21,7 @@
   "cmd.cloneConnection": "克隆连接",
   "cmd.renameView": "重命名视图",
   "cmd.sessions": "管理会话",
+  "cmd.manageUsers": "管理用户",
   "cmd.pats": "管理访问令牌",
   "view.explorer": "连接"
 }

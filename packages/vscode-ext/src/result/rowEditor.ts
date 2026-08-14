@@ -1,3 +1,4 @@
+import type { QueryResult } from '@db-client/core';
 import type { ConnectionManager } from '../connection/connectionManager';
 import type { SavedConnection } from '../connection/connectionStore';
 import { confirmSqlExecution } from '../utils/sqlSafety';
@@ -35,9 +36,9 @@ export class RowEditor {
       }
       if (!(await confirmSqlExecution(this.conn, `UPDATE ${this.table} SET ${col} = ? WHERE ${pkColumns.join(', ')} = ?`))) return;
       const session = await this.manager.connect(this.conn);
-      await session.data.updateCell(this.table, pkColumns, pkValues, col, val, this.database);
+      const result = await session.data.updateCell(this.table, pkColumns, pkValues, col, val, this.database);
       this.post({ type: 'cellUpdated' });
-      this.notify('update', `UPDATE ${this.table} SET ${col} WHERE ${pkColumns.join(', ')}`, 1);
+      this.notify('update', result, `UPDATE ${this.table} SET ${col} WHERE ${pkColumns.join(', ')}`, 1);
       await this.opts.refresh();
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
@@ -54,14 +55,14 @@ export class RowEditor {
       }
       if (!(await confirmSqlExecution(this.conn, `DELETE FROM ${this.table} WHERE ${cols.join(', ')} = ?`))) return;
       const session = await this.manager.connect(this.conn);
-      await session.data.deleteRows(
+      const result = await session.data.deleteRows(
         this.table,
         cols,
         rows.map((r) => r.pkValues),
         this.database,
       );
       this.post({ type: 'rowsDeleted', count: rows.length });
-      this.notify('delete', `DELETE FROM ${this.table} WHERE ${cols.join(', ')}`, rows.length);
+      this.notify('delete', result, `DELETE FROM ${this.table} WHERE ${cols.join(', ')}`, rows.length);
       await this.opts.refresh();
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
@@ -72,8 +73,8 @@ export class RowEditor {
     try {
       if (!(await confirmSqlExecution(this.conn, `INSERT INTO ${this.table} ...`))) return;
       const session = await this.manager.connect(this.conn);
-      await session.data.insertRow(this.table, columns, values, this.database);
-      this.notify('insert', `INSERT INTO ${this.table} (${columns.join(', ')})`, 1);
+      const result = await session.data.insertRow(this.table, columns, values, this.database);
+      this.notify('insert', result, `INSERT INTO ${this.table} (${columns.join(', ')})`, 1);
       await this.opts.refresh();
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
@@ -85,12 +86,20 @@ export class RowEditor {
    *
    * DataChangeEvent 此前只有类型定义、从无发布点；审计日志也只记录查询执行，
    * 数据编辑不留痕 —— 审计面板看不到谁改了哪一行。
+   *
+   * 查询历史**不在这里写**：它由 `QueryHistoryRecorder` 挂在 QueryService 观察者位
+   * 上统一记录，那里拿到的是驱动实际收到的语句，比这里的摘要串更准确，
+   * 也不会与其它执行路径重复。
+   *
+   * SQL 优先取执行结果里的真实语句（含转义后的值），取不到时回退到摘要串。
    */
   private notify(
     operation: 'insert' | 'update' | 'delete',
-    sql: string,
+    result: QueryResult | undefined,
+    fallbackSql: string,
     rowCount: number,
   ): void {
+    const sql = result?.sql || fallbackSql;
     void eventBus.publish(new DataChangeEvent(this.conn.id, this.database ?? '', this.table, operation));
     AuditLogger.tryLog({
       action: operation === 'insert' ? 'data_insert' : operation === 'update' ? 'data_edit' : 'data_delete',
@@ -98,6 +107,7 @@ export class RowEditor {
       database: this.database,
       sql,
       rowCount,
+      costTime: result?.costTime,
     });
   }
 }

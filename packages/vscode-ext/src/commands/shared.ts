@@ -39,6 +39,35 @@ export async function confirm(msgKey: string, btnKey: string, name: string): Pro
   return (await vscode.window.showWarningMessage(l10n(msgKey, { name }), { modal: true }, l10n(btnKey))) === l10n(btnKey);
 }
 
+/**
+ * 为批量操作写一条汇总历史。
+ *
+ * 导入/恢复/库间传输/Mock 会执行成百上千条语句，逐条进历史会把上限 100 条的
+ * 历史整段冲干（所以那些语句都带 `skipHistory`）。这里补一条人类可读的摘要，
+ * 让「我什么时候往这张表导过数据」仍然查得到。
+ *
+ * 写入失败静默吞掉：历史是旁路设施，不能让它把一次已经成功的导入报成失败。
+ */
+export async function recordBulkHistory(
+  deps: Deps,
+  conn: SavedConnection,
+  summary: string,
+  database?: string,
+  rowCount?: number,
+  costTime = 0,
+): Promise<void> {
+  try {
+    await deps.history.add({
+      sql: summary,
+      connection: conn.name || conn.host,
+      connectionId: conn.id,
+      database,
+      costTime,
+      rowCount,
+    });
+  } catch { /* best-effort history */ }
+}
+
 export function requireCapability(session: ConnectionSession, operation: DatabaseOperation): boolean {
   if (session.capabilities.operations.includes(operation)) return true;
   vscode.window.showWarningMessage(`${session.capabilities ? 'This database' : 'Connection'} does not support ${operation}.`);

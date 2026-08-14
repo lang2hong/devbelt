@@ -25,7 +25,6 @@ import type { Event } from './utils/event';
 import { eventBus, ConnectionChangedEvent } from './utils/event';
 import { invalidateLanguage, LANGUAGE_CONFIG_KEY, l10n } from './i18n';
 import { registerCommands, SyncStatusBar } from './commands';
-import { DialectRegistry } from '@db-client/core';
 import { SqlCompletionProvider } from './completion/sqlCompletionProvider';
 import { SqlCodeLensProvider } from './completion/sqlCodeLensProvider';
 import { TerminalService } from './terminal/terminalService';
@@ -33,9 +32,11 @@ import { TerminalService } from './terminal/terminalService';
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const store = new ConnectionStore(context.globalState, context.secrets);
   await store.init();
-  const manager = new ConnectionManager();
-  const treeProvider = new DbTreeDataProvider(store, manager);
   const history = new HistoryStore(context.globalState);
+  // history 注入管理器：所有会话的修改性语句由此自动进历史，
+  // 不再依赖各命令自行调用 history.add（漏一个就少一段痕迹）。
+  const manager = new ConnectionManager(undefined, history);
+  const treeProvider = new DbTreeDataProvider(store, manager);
   const auditLogger = AuditLogger.init(context.globalState);
   const executor = new QueryExecutor(manager, history, auditLogger);
   const connCtx = new ConnectionContext(context, store);
@@ -110,23 +111,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     treeDataProvider: treeProvider,
     showCollapseAll: true,
   });
-  const disposables = treeView.onDidChangeSelection((e) => {
-    const node = e.selection[0];
-    const dbType = node?.conn?.dbType;
-    if (dbType) {
-      void vscode.commands.executeCommand('setContext', 'dbclient.dbType', dbType);
-      const dialect = DialectRegistry.get(dbType);
-      if (dialect) {
-        const caps = dialect.capabilities;
-        void vscode.commands.executeCommand('setContext', 'dbclient.hasRoutines', caps.routines);
-        void vscode.commands.executeCommand('setContext', 'dbclient.hasEvents', caps.events);
-        void vscode.commands.executeCommand('setContext', 'dbclient.hasUsers', caps.users);
-        void vscode.commands.executeCommand('setContext', 'dbclient.hasViews', caps.views);
-        void vscode.commands.executeCommand('setContext', 'dbclient.hasMultiDatabase', caps.multiDatabaseExplorer);
-      }
-    }
-  });
-  context.subscriptions.push(disposables);
+  // 这里原先用 onDidChangeSelection 往 `dbclient.dbType` / `dbclient.has*` 写
+  // context key，供菜单 when 判断数据库类型。那是竞态的：右键未选中项、或右键
+  // 与当前选中项不同时，键里还是上一个节点的值 —— 在 SQLite 表上会看到 MySQL
+  // 专属命令，该出现的命令反而不出现。
+  // 现在数据库类型编码进节点自己的 contextValue（`<base>.<DBTYPE>`，见
+  // DbTreeNode），菜单 when 直接匹配 viewItem，不再有任何时序依赖。
   context.subscriptions.push(treeView);
   const completionProvider = new SqlCompletionProvider(connCtx, manager);
   context.subscriptions.push(
@@ -153,6 +143,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
         void TableDesignView.open(node.conn, node.label, node.database, manager, () => treeProvider.refreshNode(node));
       }
+    }),
+    // 新建表（webview 表单）：比丢一段 CREATE TABLE 模板到编辑器更直接，
+    // 且建完可以接着在同一面板里加列/加索引。
+    vscode.commands.registerCommand('dbclient.newTableDesigner', async (node: any) => {
+      const database = node?.database ?? node?.conn?.database;
+      if (!node?.conn || !database) return;
+      void TableDesignView.openNew(node.conn, database, manager, () => treeProvider.refreshNode(node));
     }),
     // Server 状态面板
     vscode.commands.registerCommand('dbclient.serverStatus', (node: any) => {
