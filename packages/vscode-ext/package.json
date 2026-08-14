@@ -426,7 +426,7 @@
       },
       {
         "command": "dbclient.copyNodeName",
-        "title": "Copy Name",
+        "title": "%cmd.copyName%",
         "category": "DB Client"
       },
       {
@@ -1061,6 +1061,166 @@
           "command": "dbclient.deleteConnection",
           "when": "view == dbclient.explorer && viewItem =~ /^connection/",
           "group": "2_danger"
+        },
+        {
+          "command": "dbclient.refreshNode",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_index\\./",
+          "group": "2_refresh"
+        },
+        {
+          "command": "dbclient.refreshNode",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_trigger\\./",
+          "group": "2_refresh"
+        },
+        {
+          "command": "dbclient.refreshNode",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_foreignKey\\./",
+          "group": "2_refresh"
+        },
+        {
+          "command": "dbclient.refreshNode",
+          "when": "view == dbclient.explorer && viewItem =~ /^view\\./",
+          "group": "2_refresh"
+        },
+        {
+          "command": "dbclient.refreshNode",
+          "when": "view == dbclient.explorer && viewItem =~ /^column\\./",
+          "group": "2_refresh"
+        },
+        {
+          "command": "dbclient.refreshNode",
+          "when": "view == dbclient.explorer && viewItem =~ /^index\\./",
+          "group": "2_refresh"
+        },
+        {
+          "command": "dbclient.refreshNode",
+          "when": "view == dbclient.explorer && viewItem =~ /^trigger\\./",
+          "group": "2_refresh"
+        },
+        {
+          "command": "dbclient.refreshNode",
+          "when": "view == dbclient.explorer && viewItem =~ /^foreignKey\\./",
+          "group": "2_refresh"
+        },
+        {
+          "command": "dbclient.refreshNode",
+          "when": "view == dbclient.explorer && viewItem =~ /^routine\\./",
+          "group": "2_refresh"
+        },
+        {
+          "command": "dbclient.refreshNode",
+          "when": "view == dbclient.explorer && viewItem =~ /^event\\./",
+          "group": "2_refresh"
+        },
+        {
+          "command": "dbclient.refreshNode",
+          "when": "view == dbclient.explorer && viewItem =~ /^savedQuery\\./",
+          "group": "2_refresh"
+        },
+        {
+          "command": "dbclient.refreshNode",
+          "when": "view == dbclient.explorer && viewItem =~ /^queryFolder\\./",
+          "group": "2_refresh"
+        },
+        {
+          "command": "dbclient.refreshNode",
+          "when": "view == dbclient.explorer && viewItem =~ /^group\\./",
+          "group": "2_refresh"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "when": "view == dbclient.explorer && viewItem =~ /^connection/",
+          "group": "3_copy"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "when": "view == dbclient.explorer && viewItem =~ /^database\\./",
+          "group": "3_copy"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_table\\./",
+          "group": "3_copy"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_view\\./",
+          "group": "3_copy"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_function\\./",
+          "group": "3_copy"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_event\\./",
+          "group": "3_copy"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_query\\./",
+          "group": "3_copy"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_index\\./",
+          "group": "3_copy"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_trigger\\./",
+          "group": "3_copy"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_foreignKey\\./",
+          "group": "3_copy"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "when": "view == dbclient.explorer && viewItem =~ /^view\\./",
+          "group": "3_copy"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "when": "view == dbclient.explorer && viewItem =~ /^index\\./",
+          "group": "3_copy"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "when": "view == dbclient.explorer && viewItem =~ /^trigger\\./",
+          "group": "3_copy"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "when": "view == dbclient.explorer && viewItem =~ /^foreignKey\\./",
+          "group": "3_copy"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "when": "view == dbclient.explorer && viewItem =~ /^routine\\./",
+          "group": "3_copy"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "when": "view == dbclient.explorer && viewItem =~ /^event\\./",
+          "group": "3_copy"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "when": "view == dbclient.explorer && viewItem =~ /^savedQuery\\./",
+          "group": "3_copy"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "when": "view == dbclient.explorer && viewItem =~ /^queryFolder\\./",
+          "group": "3_copy"
+        },
+        {
+          "command": "dbclient.copyNodeName",
+          "when": "view == dbclient.explorer && viewItem =~ /^group\\./",
+          "group": "3_copy"
         }
       ]
     },
@@ -1074,7 +1234,11 @@
         },
         "dbclient.sync.auto": {
           "type": "string",
-          "enum": ["off", "reminder", "silent"],
+          "enum": [
+            "off",
+            "reminder",
+            "silent"
+          ],
           "default": "off",
           "description": "Automatic cloud sync mode. 'reminder' notifies on changes; 'silent' runs background sync (requires remembering the master password).",
           "markdownDescription": "自动云同步模式：`reminder` 变更时提示；`silent` 后台静默同步（需记住主密码）。"
@@ -1113,7 +1277,11 @@
         },
         "dbclient.format.keywordCase": {
           "type": "string",
-          "enum": ["preserve", "upper", "lower"],
+          "enum": [
+            "preserve",
+            "upper",
+            "lower"
+          ],
           "default": "upper",
           "description": "SQL formatting keyword case.",
           "markdownDescription": "SQL 格式化关键字大小写。"

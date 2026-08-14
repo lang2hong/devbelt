@@ -410,6 +410,6 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
   sub('dbclient.copyNodeName', async (node: DbTreeNode) => {
     if (!node?.label) return;
     await vscode.env.clipboard.writeText(node.label);
-    vscode.window.showInformationMessage(`Copied "${node.label}"`);
+    vscode.window.showInformationMessage(l10n('common.copied', { name: node.label }));
   });
 }

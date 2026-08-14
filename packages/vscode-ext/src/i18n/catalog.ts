@@ -19,6 +19,7 @@ export type MessageCatalog = Record<string, string>;
 export const en: MessageCatalog = {
   // 通用
   'common.loading': 'Loading...',
+  'common.copied': 'Copied "{name}".',
   'common.save': 'Save',
   'common.cancel': 'Cancel',
   'common.test': 'Test Connection',
@@ -540,6 +541,7 @@ export const en: MessageCatalog = {
 /** 中文词条 */
 export const zh: MessageCatalog = {
   'common.loading': '加载中...',
+  'common.copied': '已复制「{name}」。',
   'common.save': '保存',
   'common.cancel': '取消',
   'common.test': '测试连接',

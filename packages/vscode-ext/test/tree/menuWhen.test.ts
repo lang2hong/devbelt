@@ -136,4 +136,31 @@ describe('树右键菜单 when 表达式', () => {
       expect(sqliteValues.filter(match), `${entry.command} 在 SQLite 上可见`).toEqual([]);
     }
   });
+
+  /**
+   * 每个非连接节点都应能刷新与复制名称。
+   * 连接节点用 refreshConnection / openConnection（作 refresh 等价），不强制 refreshNode。
+   */
+  it('每个非连接节点都有 refresh 与 copy 菜单', () => {
+    const NON_CONN = [
+      'database', 'category_table', 'category_view', 'category_function', 'category_event',
+      'category_query', 'category_index', 'category_trigger', 'category_foreignKey',
+      'table', 'view', 'column', 'index', 'trigger', 'foreignKey',
+      'routine', 'event', 'savedQuery', 'queryFolder', 'group',
+    ];
+    const values = allContextValues();
+    const menus = contextMenus();
+
+    for (const base of NON_CONN) {
+      const belongs = (v: string) => v.startsWith(base + '.');
+      const applicable = [...values].filter(belongs);
+      if (!applicable.length) continue; // 该 base 在任何 dbType 都不存在（如 category_function 无 SQLITE）
+
+      const has = (cmd: string): boolean =>
+        menus.some((e) => e.command === cmd && viewItemMatcher(e.when || '')?.(applicable[0]));
+
+      expect(has('dbclient.refreshNode'), `${base} 缺 refresh`).toBe(true);
+      expect(has('dbclient.copyNodeName'), `${base} 缺 copy`).toBe(true);
+    }
+  });
 });
