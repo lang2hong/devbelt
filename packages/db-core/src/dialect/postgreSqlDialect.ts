@@ -108,6 +108,11 @@ export class PostgreSqlDialect implements SqlDialect {
     return `SELECT usename AS name FROM pg_user ORDER BY usename`;
   }
 
+  /** pg_user 公开但保险起见提供降级（current_user 恒可用，无 host）。 */
+  getCurrentUserSql(): string {
+    return `SELECT current_user AS ident`;
+  }
+
   getForeignKeysSql(): string {
     return `SELECT tc.table_name AS "tableName", kcu.column_name AS "columnName",
       ccu.table_name AS "refTable", ccu.column_name AS "refColumn", tc.constraint_name AS "constraintName"

@@ -123,6 +123,15 @@ export interface SqlDialect {
   /** 查询用户列表 SQL（空字符串表示不支持） */
   getUserListSql(): string;
 
+  /**
+   * 查询当前用户标识 SQL（降级用）。
+   *
+   * 受限账号（云数据库、非 DBA）无权 SELECT `mysql.user` / `pg_user`，
+   * `getUsers()` 全量查询会失败。此时降级到「当前用户」，至少让用户管理面板
+   * 能打开、能对自己改密码。可选：不实现则降级返回空。
+   */
+  getCurrentUserSql?(): string;
+
   /** 查询外键关系 SQL（空字符串表示不支持） */
   getForeignKeysSql(database?: string): string;
 

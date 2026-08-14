@@ -141,12 +141,36 @@ export class MetadataService {
     return this.queryService.dialect.dropForeignKeySql(name, table, database);
   }
 
-  /** 查询用户列表 */
+  /**
+   * 查询用户列表。
+   *
+   * 全量查询（`mysql.user` / `pg_user`）需要系统表 SELECT 权限；受限账号
+   * （云数据库、非 DBA）会被拒。此时降级到「当前用户」，让用户管理面板至少
+   * 能打开、能对自己改密码 —— 否则面板一打开就报错，什么都做不了。
+   */
   async getUsers(): Promise<UserMeta[]> {
-    const sql = this.queryService.dialect.getUserListSql();
+    const dialect = this.queryService.dialect;
+    const sql = dialect.getUserListSql();
     if (!sql) return [];
-    const result = await this.queryService.queryAll(sql);
-    return this.queryService.dialect.parseUserList(result.rows);
+    try {
+      const result = await this.queryService.queryAll(sql);
+      return dialect.parseUserList(result.rows);
+    } catch {
+      // 全量查询被拒：降级到当前用户。
+      const cur = dialect.getCurrentUserSql?.();
+      if (!cur) return [];
+      try {
+        const r = await this.queryService.queryAll(cur);
+        const ident = String(r.rows[0]?.ident ?? r.rows[0]?.name ?? '');
+        if (!ident) return [];
+        // MySQL 的 CURRENT_USER() 形如 'name'@'host'（带引号）；PG 的 current_user 是裸名。
+        const at = ident.lastIndexOf('@');
+        if (at <= 0) return [{ name: ident.replace(/^'(.*)'$/, '$1'), host: '%' }];
+        const name = ident.slice(0, at).replace(/^'(.*)'$/, '$1');
+        const host = ident.slice(at + 1).replace(/^'(.*)'$/, '$1') || '%';
+        return [{ name, host }];
+      } catch { return []; }
+    }
   }
 
   async getProcessList(): Promise<any[]> {

@@ -118,6 +118,11 @@ export class MysqlDialect implements SqlDialect {
     return `SELECT user AS name, host AS host FROM mysql.user ORDER BY user`;
   }
 
+  /** 受限账号无权 SELECT mysql.user 时降级（CURRENT_USER() 恒可用）。 */
+  getCurrentUserSql(): string {
+    return `SELECT CURRENT_USER() AS ident`;
+  }
+
   getTriggerListSql(table: string, database?: string): string {
     validateIdent(table);
     const where = database

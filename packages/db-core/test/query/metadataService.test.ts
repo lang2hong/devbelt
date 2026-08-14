@@ -162,4 +162,49 @@ describe('MetadataService', () => {
     expect(users[0].name).toBe('root');
     expect(users[0].host).toBe('localhost');
   });
+
+  /**
+   * 回归：受限账号（云数据库、非 DBA）无权 SELECT mysql.user。
+   * F 批用户管理面板一打开就触发全量查询，低权账号直接报错打不开。
+   * 降级到 CURRENT_USER()：面板至少能打开、能对自己改密码。
+   */
+  it('getUsers 全量被拒时降级到当前用户', async () => {
+    const conn = new (class extends FakeConnection {
+      query(sql: string, callback?: QueryCallback): void;
+      query(sql: string, values: any, callback?: QueryCallback): void;
+      query(sql: string, values?: any, callback?: any): void {
+        this.sqls.push(sql);
+        const cb = callback || values;
+        if (/FROM\s+mysql\.user/i.test(sql)) {
+          cb(new Error("SELECT command denied to user 'dbclient'@'1.2.3.4' for table 'user'"));
+          return;
+        }
+        // CURRENT_USER() 形如 'name'@'host'（带引号）
+        cb(null, { rows: [{ ident: "'dbclient'@'101.200.138.204'" }] }, []);
+      }
+    })();
+    const svc = new MetadataService(new QueryService(conn, new MysqlDialect()));
+    const users = await svc.getUsers();
+    expect(users).toHaveLength(1);
+    expect(users[0].name).toBe('dbclient');
+    expect(users[0].host).toBe('101.200.138.204');
+    // 第二条查询应是降级的 CURRENT_USER()
+    expect(conn.sqls[1]).toContain('CURRENT_USER()');
+  });
+
+  it('getUsers 降级对裸名（无 @host）也安全', async () => {
+    const conn = new (class extends FakeConnection {
+      query(sql: string, callback?: QueryCallback): void;
+      query(sql: string, values: any, callback?: QueryCallback): void;
+      query(sql: string, values?: any, callback?: any): void {
+        this.sqls.push(sql);
+        const cb = callback || values;
+        if (/FROM\s+mysql\.user/i.test(sql)) { cb(new Error('denied')); return; }
+        cb(null, { rows: [{ ident: 'appuser' }] }, []);
+      }
+    })();
+    const svc = new MetadataService(new QueryService(conn, new MysqlDialect()));
+    const users = await svc.getUsers();
+    expect(users).toEqual([{ name: 'appuser', host: '%' }]);
+  });
 });
