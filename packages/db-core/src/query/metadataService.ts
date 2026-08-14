@@ -173,6 +173,25 @@ export class MetadataService {
     }
   }
 
+  /**
+   * 查询指定用户已有权限（白名单字符串列表）。
+   *
+   * 用户管理面板选中用户时回显其已有权限（默认勾选），否则每次都要空白重选。
+   * 查询/解析失败（低权账号查别人会被拒）降级返回空，不阻塞面板。
+   * database 指定时只返回该库上的权限。
+   */
+  async getUserGrants(name: string, host?: string, database?: string): Promise<string[]> {
+    const dialect = this.queryService.dialect;
+    const sql = dialect.getUserGrantsSql?.(name, host, database);
+    if (!sql) return [];
+    try {
+      const result = await this.queryService.queryAll(sql);
+      return dialect.parseGrants?.(result.rows, database) ?? [];
+    } catch {
+      return [];
+    }
+  }
+
   async getProcessList(): Promise<any[]> {
     const sql = this.queryService.dialect.getProcessListSql();
     if (!sql) return [];

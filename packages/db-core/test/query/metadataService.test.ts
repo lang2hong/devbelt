@@ -207,4 +207,50 @@ describe('MetadataService', () => {
     const users = await svc.getUsers();
     expect(users).toEqual([{ name: 'appuser', host: '%' }]);
   });
+
+  /**
+   * 权限回显：选中用户时已有权限应默认勾选，而非每次空白重选。
+   */
+  it('getUserGrants 解析 SHOW GRANTS 并去重、跳过 USAGE', async () => {
+    const conn = new FakeConnection();
+    conn.result = {
+      rows: [
+        { 'Grants for u@h': 'GRANT SELECT, INSERT ON `db`.* TO `u`@`h`' },
+        { 'Grants for u@h': 'GRANT ALL PRIVILEGES ON *.* TO `u`@`h`' },
+        { 'Grants for u@h': 'GRANT USAGE ON *.* TO `u`@`h`' },
+        { 'Grants for u@h': 'GRANT SELECT ON `db`.`t` TO `u`@`h`' },
+      ],
+    };
+    const svc = new MetadataService(new QueryService(conn, new MysqlDialect()));
+    const grants = await svc.getUserGrants('u', 'h');
+    expect(grants.sort()).toEqual(['ALL PRIVILEGES', 'INSERT', 'SELECT']);
+  });
+
+  it('getUserGrants 按 database 过滤（库级权限匹配，全局也算）', async () => {
+    const conn = new FakeConnection();
+    conn.result = {
+      rows: [
+        { g: 'GRANT SELECT ON `db`.* TO `u`@`h`' },
+        { g: 'GRANT INSERT ON `other`.* TO `u`@`h`' },
+        { g: 'GRANT ALL PRIVILEGES ON *.* TO `u`@`h`' },
+      ],
+    };
+    const svc = new MetadataService(new QueryService(conn, new MysqlDialect()));
+    const grants = await svc.getUserGrants('u', 'h', 'db');
+    expect(grants.sort()).toEqual(['ALL PRIVILEGES', 'SELECT']);
+  });
+
+  it('getUserGrants 查询被拒时降级返回空', async () => {
+    const conn = new (class extends FakeConnection {
+      query(sql: string, callback?: QueryCallback): void;
+      query(sql: string, values: any, callback?: QueryCallback): void;
+      query(sql: string, values?: any, callback?: any): void {
+        const cb = callback || values;
+        cb(new Error('Access denied for user'));
+      }
+    })();
+    const svc = new MetadataService(new QueryService(conn, new MysqlDialect()));
+    const grants = await svc.getUserGrants('u', 'h');
+    expect(grants).toEqual([]);
+  });
 });

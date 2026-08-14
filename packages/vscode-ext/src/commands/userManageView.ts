@@ -13,11 +13,18 @@ import { ensureWritable } from '../utils/sqlSafety';
  *
  * 与 db-core `TableService` 里的校验正则对应；前端只提供选择，
  * 真正的合法性判断仍在 db-core 内（前端列表不是安全边界）。
+ *
+ * 顺序按「数据 → 结构 → 管理」分组，常用权限在前。
  */
 const PRIVILEGES = [
-  'ALL PRIVILEGES', 'SELECT', 'INSERT', 'UPDATE', 'DELETE',
+  // 数据
+  'SELECT', 'INSERT', 'UPDATE', 'DELETE',
+  // 结构
   'CREATE', 'CREATE VIEW', 'SHOW VIEW', 'ALTER', 'DROP', 'INDEX',
   'REFERENCES', 'TRIGGER', 'EXECUTE',
+  // 管理
+  'ALL PRIVILEGES', 'USAGE', 'SHOW DATABASES', 'PROCESS', 'RELOAD',
+  'REPLICATION CLIENT', 'REPLICATION SLAVE', 'SHUTDOWN', 'SUPER',
 ];
 
 /**
@@ -81,6 +88,9 @@ export class UserManageView extends BaseWebView {
       case 'refresh':
         await this.loadUsers();
         return;
+      case 'selectUser':
+        await this.loadGrants(msg);
+        return;
       case 'createUser':
         await this.createUser(msg);
         return;
@@ -113,6 +123,24 @@ export class UserManageView extends BaseWebView {
       this.post({ type: 'users', users, databases });
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
+    }
+  }
+
+  /**
+   * 查询选中用户的已有权限并下发，用于前端默认勾选。
+   *
+   * 选中用户时前端发 selectUser；切库时带 database 重发以回显该库权限。
+   * 查询被拒（低权账号查别人）降级返回空，不阻塞面板。
+   */
+  private async loadGrants(msg: any): Promise<void> {
+    const { name, host } = splitUser(msg.user);
+    const database = msg.database || undefined;
+    try {
+      const session = await this.deps.manager.connect(this.conn);
+      const grants = await session.metadata.getUserGrants(name, host, database);
+      this.post({ type: 'grants', grants });
+    } catch {
+      this.post({ type: 'grants', grants: [] });
     }
   }
 

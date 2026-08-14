@@ -132,6 +132,20 @@ export interface SqlDialect {
    */
   getCurrentUserSql?(): string;
 
+  /**
+   * 查询指定用户已有权限 SQL（空字符串/不实现表示不支持）。
+   *
+   * 用户管理面板选中用户时回显其已有权限（默认勾选），而不是每次都空白。
+   * MySQL 用 `SHOW GRANTS FOR`；PG 角色权限查询复杂，第一版不实现（返回空）。
+   */
+  getUserGrantsSql?(name: string, host?: string, database?: string): string;
+
+  /**
+   * 解析权限查询结果为白名单权限字符串列表。
+   * 调用方拿到的列表直接用于多选回显，故应去重并跳过 `USAGE`（无权限占位）。
+   */
+  parseGrants?(rows: any[], database?: string): string[];
+
   /** 查询外键关系 SQL（空字符串表示不支持） */
   getForeignKeysSql(database?: string): string;
 

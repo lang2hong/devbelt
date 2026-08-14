@@ -123,6 +123,41 @@ export class MysqlDialect implements SqlDialect {
     return `SELECT CURRENT_USER() AS ident`;
   }
 
+  /** `SHOW GRANTS FOR` 返回该用户全部 GRANT 语句；解析时按库过滤。 */
+  getUserGrantsSql(name: string, host?: string): string {
+    return `SHOW GRANTS FOR ${this.escapeValue(name)}@${this.escapeValue(host || '%')}`;
+  }
+
+  /**
+   * 解析 SHOW GRANTS 结果为白名单权限列表。
+   *
+   * 每行形如 `GRANT SELECT, INSERT ON db.* TO 'u'@'h'` 或 `GRANT ALL PRIVILEGES ON *.* TO ...`。
+   * 列名不稳定（`Grants for 'u'@'h'`），故取行第一个值。
+   * database 指定时只取目标库上的权限；`*.*`（全局）与指定库的 `db.*`/`db.table` 都算。
+   * USAGE 表示「无权限占位」，跳过。
+   */
+  parseGrants(rows: any[], database?: string): string[] {
+    const out = new Set<string>();
+    for (const row of rows) {
+      const stmt = String(Object.values(row)[0] ?? '');
+      const m = stmt.match(/^GRANT\s+(.+?)\s+ON\s+(\S+)\s+TO\s+/i);
+      if (!m) continue;
+      const privs = m[1];
+      const target = m[2];
+      if (/^USAGE$/i.test(privs.trim())) continue;
+      if (database) {
+        // db.* / db.table / *.*
+        const dbPart = target.split('.')[0];
+        if (dbPart !== '*' && dbPart.replace(/[`]/g, '') !== database) continue;
+      }
+      for (const p of privs.split(',')) {
+        const t = p.trim();
+        if (t && !/^USAGE$/i.test(t)) out.add(t);
+      }
+    }
+    return [...out];
+  }
+
   getTriggerListSql(table: string, database?: string): string {
     validateIdent(table);
     const where = database

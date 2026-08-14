@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import { useI18n } from '../composables/useI18n';
 
@@ -66,10 +66,17 @@ onMounted(() => {
       error.value = '';
       return;
     }
+    if (msg.type === 'grants') {
+      // 回显已有权限：选中用户时把其当前权限默认勾上。
+      checkedPrivs.value = Array.isArray(msg.grants) ? msg.grants : [];
+      return;
+    }
     if (msg.type === 'done') {
       notice.value = msg.message || '';
       error.value = '';
       resetForms();
+      // grant/revoke 后权限已变，若仍选中该用户则重查回显。
+      if (selected.value) post({ type: 'selectUser', user: selected.value, database: grantDatabase.value });
       return;
     }
     if (msg.type === 'error') {
@@ -102,10 +109,17 @@ function refresh(): void {
 function select(u: UserRow): void {
   selected.value = userLabel(u);
   notice.value = '';
+  // 清空待回显：收到 grants 后会填上已有权限。先清避免看到上一位用户的勾选。
   checkedPrivs.value = [];
   showPassword.value = false;
   pendingDrop.value = '';
+  post({ type: 'selectUser', user: selected.value, database: grantDatabase.value });
 }
+
+/** 切库后重查该用户在该库上的已有权限并回显。 */
+watch(grantDatabase, (db) => {
+  if (selected.value) post({ type: 'selectUser', user: selected.value, database: db });
+});
 
 function submitCreate(): void {
   error.value = '';
