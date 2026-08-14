@@ -660,6 +660,26 @@
           "group": "0_refresh"
         },
         {
+          "command": "dbclient.refreshNode",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_view\\./",
+          "group": "0_refresh"
+        },
+        {
+          "command": "dbclient.refreshNode",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_function\\./",
+          "group": "0_refresh"
+        },
+        {
+          "command": "dbclient.refreshNode",
+          "when": "view == dbclient.explorer && viewItem == category_event.MYSQL",
+          "group": "0_refresh"
+        },
+        {
+          "command": "dbclient.refreshNode",
+          "when": "view == dbclient.explorer && viewItem =~ /^category_query\\./",
+          "group": "0_refresh"
+        },
+        {
           "command": "dbclient.importData",
           "when": "view == dbclient.explorer && viewItem =~ /^category_table\\./",
           "group": "1_transfer"
