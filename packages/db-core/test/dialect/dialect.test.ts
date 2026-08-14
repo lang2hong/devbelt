@@ -131,3 +131,47 @@ describe('方言策略（策略模式）', () => {
     });
   });
 });
+describe('方言模板（建表 / 例程）', () => {
+  /**
+   * 回归：建表模板必须按方言给。命令层曾统一发 MySQL 语法
+   * （`INT AUTO_INCREMENT PRIMARY KEY`），PG/SQLite 用户拿到的模板不可执行。
+   */
+  it('建表模板各方言自增主键写法不同', () => {
+    expect(new MysqlDialect().createTableTemplate('`t`')).toContain('AUTO_INCREMENT PRIMARY KEY');
+    expect(new PostgreSqlDialect().createTableTemplate('"t"')).toContain('SERIAL PRIMARY KEY');
+    expect(new SqliteDialect().createTableTemplate('"t"')).toContain('INTEGER PRIMARY KEY AUTOINCREMENT');
+  });
+
+  it('建表模板包含传入的表标识符', () => {
+    expect(new MysqlDialect().createTableTemplate('`db`.`t`')).toContain('`db`.`t`');
+    expect(new PostgreSqlDialect().createTableTemplate('"s"."t"')).toContain('"s"."t"');
+  });
+
+  it('建表模板不互相串方言语法', () => {
+    expect(new PostgreSqlDialect().createTableTemplate('"t"')).not.toContain('AUTO_INCREMENT');
+    expect(new SqliteDialect().createTableTemplate('"t"')).not.toContain('AUTO_INCREMENT PRIMARY KEY');
+    expect(new MysqlDialect().createTableTemplate('`t`')).not.toContain('SERIAL');
+  });
+
+  /** DELIMITER 是 MySQL 客户端命令，PG 不认；SQLite 无例程概念。 */
+  it('例程模板：MySQL 用 DELIMITER，PG 用 $$ LANGUAGE，SQLite 返回空', () => {
+    const mysql = new MysqlDialect().createRoutineTemplate('r');
+    expect(mysql).toContain('DELIMITER');
+    expect(mysql).toContain('CREATE PROCEDURE r()');
+
+    const pg = new PostgreSqlDialect().createRoutineTemplate('r');
+    expect(pg).toContain('LANGUAGE plpgsql');
+    expect(pg).not.toContain('DELIMITER');
+
+    expect(new SqliteDialect().createRoutineTemplate('r')).toBe('');
+  });
+
+  it('方言注册表取到的实例带模板方法', () => {
+    for (const dbType of [DatabaseType.MYSQL, DatabaseType.PG, DatabaseType.SQLITE]) {
+      const d = DialectRegistry.get(dbType)!;
+      expect(typeof d.createTableTemplate).toBe('function');
+      expect(typeof d.createRoutineTemplate).toBe('function');
+      expect(d.createTableTemplate('"x"')).toContain('CREATE TABLE');
+    }
+  });
+});

@@ -6,6 +6,7 @@ import { Encryption } from './encryption';
 import { parseSyncPayload, type SyncPayload } from './syncPayload';
 import { computeMergePlan, totalLocalOnly, type MergePlan } from './mergePlan';
 import { MasterPasswordStore } from './masterPasswordStore';
+import { SyncEvent, eventBus } from '../utils/event';
 
 interface MementoLike {
   get<T>(key: string): T | undefined;
@@ -32,6 +33,31 @@ function sectionDataOf(payload: SyncPayload, section: SectionType): unknown {
     case 'folders': return payload.queryFolders;
     case 'history': return payload.history;
   }
+}
+
+/**
+ * 递归键排序序列化，用于内容指纹。
+ *
+ * 不能用 `JSON.stringify(payload, Object.keys(payload).sort())`：第二参数是
+ * **replacer 白名单**而非排序器，只有顶层键（version/groups/connections…）在名单里，
+ * 嵌套字段（name/host/password/sql…）会被整体剔除，序列化结果退化成
+ * `{"connections":[{}],…}` —— 改任何连接内容指纹都不变，`isLocalDirty()` 恒为 false，
+ * pull 的「本地有未推送变更」保护随之失效。
+ *
+ * 这里显式递归并对对象键排序，保证「同内容同指纹、异内容异指纹」。
+ */
+export function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const entries = Object.keys(value as Record<string, unknown>)
+    .sort()
+    .map((key) => {
+      const v = (value as Record<string, unknown>)[key];
+      // 与 JSON.stringify 对齐：undefined 值的键整体省略
+      return v === undefined ? undefined : `${JSON.stringify(key)}:${stableStringify(v)}`;
+    })
+    .filter((s): s is string => s !== undefined);
+  return `{${entries.join(',')}}`;
 }
 
 /** 将某节解析结果写回 payload 对应字段 */
@@ -72,25 +98,38 @@ export class SyncManager {
     if (!force) {
       if (await this.isLocalDirty()) throw new SyncLocalDirtyError();
     }
-    const result = await this.auth.client.fetchSections();
-    const payload = await this.decryptSections(result.sections, masterPassword);
-    await this.applyRemote(payload);
-    if (!force) {
-      await this.updateLastSyncHash();
+    try {
+      const result = await this.auth.client.fetchSections();
+      const payload = await this.decryptSections(result.sections, masterPassword);
+      await this.applyRemote(payload);
+      if (!force) {
+        await this.updateLastSyncHash();
+      }
+      // SyncEvent 此前只有类型定义、从无发布点
+      void eventBus.publish(new SyncEvent('pull', `${result.sections.length} section(s)`));
+    } catch (err) {
+      void eventBus.publish(new SyncEvent('error', `pull failed: ${(err as Error).message}`));
+      throw err;
     }
   }
 
   async push(masterPassword: string): Promise<void> {
-    const payload = await this.buildLocalPayload();
-    for (const section of SECTION_TYPES) {
-      const data = sectionDataOf(payload, section);
-      // 异步派生：600k 轮 PBKDF2 × 5 个 section，同步版会冻结扩展主进程数秒
-      const enc = await Encryption.encryptAsync(data, masterPassword);
-      const base = this.sectionVersions[section] ?? 0;
-      const { version } = await this.auth.client.pushSection(section, enc, base);
-      this.sectionVersions[section] = version;
+    try {
+      const payload = await this.buildLocalPayload();
+      for (const section of SECTION_TYPES) {
+        const data = sectionDataOf(payload, section);
+        // 异步派生：600k 轮 PBKDF2 × 5 个 section，同步版会冻结扩展主进程数秒
+        const enc = await Encryption.encryptAsync(data, masterPassword);
+        const base = this.sectionVersions[section] ?? 0;
+        const { version } = await this.auth.client.pushSection(section, enc, base);
+        this.sectionVersions[section] = version;
+      }
+      await this.updateLastSyncHash();
+      void eventBus.publish(new SyncEvent('push', `${SECTION_TYPES.length} section(s)`));
+    } catch (err) {
+      void eventBus.publish(new SyncEvent('error', `push failed: ${(err as Error).message}`));
+      throw err;
     }
-    await this.updateLastSyncHash();
   }
 
   /** 强制推送：先拉远端 versions 作 base，避免冲突，再推本地 */
@@ -123,6 +162,7 @@ export class SyncManager {
     await this.applyRemote(this.pendingRemote);
     this.pendingRemote = undefined;
     await this.updateLastSyncHash();
+    void eventBus.publish(new SyncEvent('applied', 'previewed pull applied'));
   }
 
   /** 列某节历史版本 */
@@ -207,8 +247,7 @@ export class SyncManager {
 
   private async computeLocalHash(): Promise<string> {
     const payload = await this.buildLocalPayload();
-    const sorted = JSON.stringify(payload, Object.keys(payload).sort());
-    return crypto.createHash('sha256').update(sorted).digest('hex');
+    return crypto.createHash('sha256').update(stableStringify(payload)).digest('hex');
   }
 
   private async updateLastSyncHash(): Promise<void> {

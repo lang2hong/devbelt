@@ -6,13 +6,61 @@ export interface SqlRisk {
   reason?: string;
 }
 
+/**
+ * 剥离 SQL 中的注释与字符串/标识符字面量，只留下语法骨架用于关键字分类。
+ *
+ * 必须剥离字面量：分类是全文 `\b关键字\b` 匹配，不做语法分析。若把
+ * `SELECT 'DROP TABLE users'` 里的字面量一起看，会判成 DDL/critical，
+ * 而 `confirmSqlExecution` 在 `isWrite` 为真时**不会早退**，只读连接会直接
+ * 报错拦截 —— 一条纯 SELECT 因为字符串里有 DROP 字样就被禁止执行。
+ *
+ * 被剥离的部分替换为空格而非删除，避免 `a'x'b` 粘连成新词。
+ * 反斜杠转义按 MySQL 语义处理（`\'` 不结束字面量），PG/SQLite 用双写 `''`
+ * 结束再立即开始，本函数把它看作两段字面量，结果相同。
+ */
+function stripLiteralsAndComments(sql: string): string {
+  let out = '';
+  let i = 0;
+  while (i < sql.length) {
+    const ch = sql[i];
+    const next = sql[i + 1];
+
+    // 块注释
+    if (ch === '/' && next === '*') {
+      const end = sql.indexOf('*/', i + 2);
+      out += ' ';
+      i = end === -1 ? sql.length : end + 2;
+      continue;
+    }
+    // 行注释（-- 与 MySQL 的 #）
+    if ((ch === '-' && next === '-') || ch === '#') {
+      const nl = sql.indexOf('\n', i);
+      out += ' ';
+      i = nl === -1 ? sql.length : nl;
+      continue;
+    }
+    // 字符串 / 引号标识符字面量
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const quote = ch;
+      i++;
+      while (i < sql.length) {
+        // MySQL 风格反斜杠转义：跳过被转义的下一个字符
+        if (sql[i] === '\\' && quote !== '`') { i += 2; continue; }
+        if (sql[i] === quote) { i++; break; }
+        i++;
+      }
+      out += ' ';
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
 /** A conservative, dependency-free classifier used by every execution surface. */
 export function analyzeSqlRisk(sql: string): SqlRisk {
-  const normalized = sql
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/--[^\n]*/g, ' ')
-    .trim()
-    .toUpperCase();
+  const normalized = stripLiteralsAndComments(sql).trim().toUpperCase();
   if (!normalized) return { level: 'none', isWrite: false };
 
   const isDdl = /\b(CREATE|ALTER|DROP|TRUNCATE|RENAME|GRANT|REVOKE)\b/.test(normalized);

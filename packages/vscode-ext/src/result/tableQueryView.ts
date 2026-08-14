@@ -7,6 +7,7 @@ import { CompletionService } from './completionService';
 import { RowEditor } from './rowEditor';
 import { QueryRunner } from './queryRunner';
 import { ExportHandler } from './exportHandler';
+import { isXlsxAvailable } from '../data/transfer/xlsx';
 
 /**
  * 表/查询视图：Vue 3 webview 模式。
@@ -74,16 +75,50 @@ export class TableQueryView extends BaseWebView {
     onExecuted?: (result: any, error?: Error) => void,
     mode: 'reuse' | 'new' = 'reuse',
   ): Promise<TableQueryView> {
+    return TableQueryView.openWith(conn, manager, sql, database, onExecuted, mode, 'execute');
+  }
+
+  /**
+   * 打开面板并直接以 EXPLAIN 模式执行，**不会先跑一遍原语句**。
+   *
+   * 原先 explain 是「openForQuery 排一条普通执行 + 再 queueQueryExplain 覆盖队列」。
+   * 复用已有面板时 `queueQuery` 在 ready 状态下会同步启动执行，等 explain 覆盖
+   * 队列时原语句已经开跑 —— 对写语句意味着一次真实副作用。
+   */
+  static async openForExplain(
+    conn: SavedConnection,
+    manager: ConnectionManager,
+    sql: string,
+    database?: string,
+    mode: 'reuse' | 'new' = 'reuse',
+  ): Promise<TableQueryView> {
+    return TableQueryView.openWith(conn, manager, sql, database, undefined, mode, 'explain');
+  }
+
+  private static async openWith(
+    conn: SavedConnection,
+    manager: ConnectionManager,
+    sql: string,
+    database: string | undefined,
+    onExecuted: ((result: any, error?: Error) => void) | undefined,
+    mode: 'reuse' | 'new',
+    kind: 'execute' | 'explain',
+  ): Promise<TableQueryView> {
+    const enqueue = (view: TableQueryView): void => {
+      if (kind === 'explain') view.queueQueryExplain(sql, database);
+      else view.queueQuery(sql, database, onExecuted);
+    };
+
     const existing = mode === 'reuse' ? TableQueryView.queryViews.get(conn.id) : undefined;
     if (existing) {
-      existing.queueQuery(sql, database, onExecuted);
+      enqueue(existing);
       return existing;
     }
     // 结果面板放在 SQL 编辑器下方：先 split down，再在下方活动组创建 webview
     await vscode.commands.executeCommand('workbench.action.splitEditorDown');
     const view = new TableQueryView(conn, manager, undefined, database, vscode.ViewColumn.Active);
     TableQueryView.queryViews.set(conn.id, view);
-    view.queueQuery(sql, database, onExecuted);
+    enqueue(view);
     return view;
   }
 
@@ -211,6 +246,8 @@ export class TableQueryView extends BaseWebView {
       columnOrder: this.reconciledColumnOrder(),
       columnWidths: this.reconciledColumnWidths(),
       limit: this.runner.limit,
+      // Excel 依赖可选包 xlsx；未安装时前端隐藏该导出选项
+      xlsxAvailable: isXlsxAvailable(),
     });
   }
 

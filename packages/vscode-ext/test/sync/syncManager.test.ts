@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Encryption } from '../../src/sync/encryption';
-import { SyncManager, SyncLocalDirtyError } from '../../src/sync/syncManager';
+import { SyncManager, SyncLocalDirtyError, stableStringify } from '../../src/sync/syncManager';
 import type { SyncPayload } from '../../src/sync/syncPayload';
 import type { ConnectionTreeData, SavedConnection } from '../../src/connection/connectionStore';
 import type { QueryFolder } from '../../src/connection/queryStore';
@@ -182,5 +182,96 @@ describe('SyncManager', () => {
 
     await sync.push('master-pass');
     expect(await sync.isLocalDirty()).toBe(false);
+  });
+
+  /**
+   * 回归：指纹必须对**嵌套字段**敏感。
+   * 曾用 `JSON.stringify(payload, Object.keys(payload).sort())`，第二参数被当成
+   * replacer 白名单，嵌套字段全被剔除 → 改连接名/主机/密码后 isLocalDirty 恒 false，
+   * pull 会静默覆盖本地未推送的改动。
+   */
+  describe('isLocalDirty 对嵌套内容变更敏感', () => {
+    const nestedEdits: Array<[string, (c: SavedConnection) => void]> = [
+      ['连接名', (c) => { c.name = 'Renamed'; }],
+      ['主机', (c) => { c.host = '10.0.0.1'; }],
+      ['密码', (c) => { c.password = 'rotated-secret'; }],
+      ['端口', (c) => { c.port = 3307; }],
+    ];
+
+    for (const [label, mutate] of nestedEdits) {
+      it(`改${label}后判定为脏`, async () => {
+        const payload = makePayload();
+        const auth = makeAuth();
+        const store = makeStore(payload);
+        const history = makeHistory(payload);
+        const hashStore = makeHashStore();
+        const sync = new SyncManager(auth as any, store as any, history as any, hashStore as any, masterStore as any);
+
+        await sync.push('master-pass');
+        expect(await sync.isLocalDirty()).toBe(false);
+
+        mutate(payload.connections[0]);
+        expect(await sync.isLocalDirty()).toBe(true);
+      });
+    }
+
+    it('改查询 SQL 后判定为脏', async () => {
+      const payload = makePayload();
+      const auth = makeAuth();
+      const store = makeStore(payload);
+      const history = makeHistory(payload);
+      const hashStore = makeHashStore();
+      const sync = new SyncManager(auth as any, store as any, history as any, hashStore as any, masterStore as any);
+
+      await sync.push('master-pass');
+      payload.queries[0].sql = 'SELECT 2';
+      expect(await sync.isLocalDirty()).toBe(true);
+    });
+
+    it('新增连接后判定为脏', async () => {
+      const payload = makePayload();
+      const auth = makeAuth();
+      const store = makeStore(payload);
+      const history = makeHistory(payload);
+      const hashStore = makeHashStore();
+      const sync = new SyncManager(auth as any, store as any, history as any, hashStore as any, masterStore as any);
+
+      await sync.push('master-pass');
+      payload.connections.push({ ...sampleConn, id: 'second', name: 'Second' });
+      expect(await sync.isLocalDirty()).toBe(true);
+    });
+  });
+});
+
+describe('stableStringify', () => {
+  it('键序无关：同内容不同键序产出相同字符串', () => {
+    expect(stableStringify({ b: 1, a: 2 })).toBe(stableStringify({ a: 2, b: 1 }));
+    expect(stableStringify({ b: 1, a: 2 })).toBe('{"a":2,"b":1}');
+  });
+
+  it('递归进入嵌套对象与数组', () => {
+    const a = stableStringify({ list: [{ y: 1, x: 2 }] });
+    const b = stableStringify({ list: [{ x: 2, y: 1 }] });
+    expect(a).toBe(b);
+    expect(a).toBe('{"list":[{"x":2,"y":1}]}');
+  });
+
+  it('数组顺序敏感', () => {
+    expect(stableStringify([1, 2])).not.toBe(stableStringify([2, 1]));
+  });
+
+  it('嵌套字段变化必然改变输出', () => {
+    const base = { connections: [{ id: 'a', host: 'localhost', password: 'p1' }] };
+    const changed = { connections: [{ id: 'a', host: 'localhost', password: 'p2' }] };
+    expect(stableStringify(base)).not.toBe(stableStringify(changed));
+  });
+
+  it('处理 null / 原始值 / undefined 键', () => {
+    expect(stableStringify(null)).toBe('null');
+    expect(stableStringify(1)).toBe('1');
+    expect(stableStringify('s')).toBe('"s"');
+    expect(stableStringify(true)).toBe('true');
+    expect(stableStringify({ a: undefined, b: 1 })).toBe('{"b":1}');
+    expect(stableStringify(undefined)).toBe('null');
   });
 });

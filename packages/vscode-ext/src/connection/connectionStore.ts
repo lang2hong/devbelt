@@ -4,6 +4,7 @@ import type { SavedQuery } from '@db-client/core';
 import type { SecretStorage } from 'vscode';
 import { QueryStore, type QueryFolder } from './queryStore';
 import { mergeById } from '../utils/merge';
+import { uniqueId } from '../utils/id';
 import { EventEmitter, type Event, eventBus, ConnectionChangedEvent } from '../utils/event';
 
 /**
@@ -140,9 +141,28 @@ export class ConnectionStore {
     await this.queryStore.migrate();
   }
 
-  /** 读取完整树数据 */
+  /**
+   * 读取完整树数据（**含软删除墓碑**）。
+   *
+   * 墓碑是同步合并的依据（删除必须能传播到其他设备），所以持久层保留它们。
+   * 面向 UI 的读取一律用 `getVisibleTreeData()`，否则已删除的连接/分组仍会显示。
+   */
   getTreeData(): ConnectionTreeData {
     return this.memento.get<ConnectionTreeData>(ConnectionStore.KEY) || emptyTreeData();
+  }
+
+  /**
+   * 读取树数据并剔除软删除墓碑，供树视图与各类选择器使用。
+   *
+   * 与 `list()`/`getGroups()` 过滤规则一致，但保留 `{groups, connections}` 结构，
+   * 让调用方能按 `groupId`/`parentId` 做层级组装。
+   */
+  getVisibleTreeData(): ConnectionTreeData {
+    const data = this.getTreeData();
+    return {
+      groups: data.groups.filter((g) => !g.deleted),
+      connections: data.connections.filter((c) => !c.deleted),
+    };
   }
 
   /** 读取全部分组（已过滤软删除墓碑） */
@@ -212,7 +232,7 @@ export class ConnectionStore {
   async addGroup(name: string, parentId?: string): Promise<string> {
     const data = this.getTreeData();
     const now = Date.now();
-    const group: ConnectionGroup = { id: `g-${now}`, name, parentId, createTime: now, updateTime: now, deleted: false };
+    const group: ConnectionGroup = { id: uniqueId('g'), name, parentId, createTime: now, updateTime: now, deleted: false };
     data.groups.push(group);
     await this.memento.update(ConnectionStore.KEY, data);
     this.changedEmitter.fire();

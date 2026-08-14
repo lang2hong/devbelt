@@ -82,6 +82,43 @@ describe('BackupService', () => {
     expect(dump).toContain('SET FOREIGN_KEY_CHECKS = 1');
   });
 
+  /**
+   * 回归：dump 的值必须走方言转义。
+   * 曾自建 `'${String(v).replace(/'/g,"''")}'`，只处理单引号漏掉反斜杠 ——
+   * MySQL 恢复该 dump 时 `C:\tmp` 会变成含制表符的字符串（实测 92,116 → 9）。
+   */
+  it('databaseDump 按方言转义值（MySQL 反斜杠翻倍、单引号、NULL、Date）', async () => {
+    const conn = new FakeConnection();
+    conn.setResponses([
+      { rows: [{ id: 1, name: 'C:\\tmp' }] },
+    ]);
+    const query = makeQueryService(conn, new MysqlDialect());
+    const dump = await BackupService.databaseDump(query, makeMetadataService(), makeTableService(), 'test', { includeData: true });
+    expect(dump).toContain("'C:\\\\tmp'");
+  });
+
+  it('databaseDump 转义单引号与 NULL', async () => {
+    const conn = new FakeConnection();
+    conn.setResponses([
+      { rows: [{ id: 1, name: "O'Brien" }, { id: 2, name: null }] },
+    ]);
+    const query = makeQueryService(conn, new MysqlDialect());
+    const dump = await BackupService.databaseDump(query, makeMetadataService(), makeTableService(), 'test', { includeData: true });
+    expect(dump).toContain("'O''Brien'");
+    expect(dump).toContain('NULL');
+  });
+
+  it('databaseDump 在 PG/SQLite 下不翻倍反斜杠（无转义语义）', async () => {
+    for (const dialect of [new PostgreSqlDialect(), new SqliteDialect()]) {
+      const conn = new FakeConnection();
+      conn.setResponses([{ rows: [{ id: 1, name: 'C:\\tmp' }] }]);
+      const query = makeQueryService(conn, dialect);
+      const dump = await BackupService.databaseDump(query, makeMetadataService(), makeTableService(), 'test', { includeData: true });
+      expect(dump).toContain("'C:\\tmp'");
+      expect(dump).not.toContain("'C:\\\\tmp'");
+    }
+  });
+
   it('databaseDump 生成完整 PG dump', async () => {
     const conn = new FakeConnection();
     conn.setResponses([{ rows: [] }]);

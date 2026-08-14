@@ -121,3 +121,73 @@ it('clears an existing password when saving an empty value', async () => {
     expect(store.get('primary')!.password).toBeUndefined();
   });
 });
+
+/**
+ * 墓碑必须留在持久层（删除要能同步到其他设备），但不能出现在 UI。
+ * 树视图与各类选择器过去直接用 getTreeData()，导致删掉的连接/分组仍然渲染。
+ */
+describe('ConnectionStore.getVisibleTreeData', () => {
+  function storeWith(data: ConnectionTreeData) {
+    return new ConnectionStore(createMemento(data), createSecrets() as any);
+  }
+
+  it('剔除软删除的连接，保留存活的', () => {
+    const store = storeWith({
+      groups: [],
+      connections: [
+        conn({ id: 'alive', name: 'Alive' }),
+        conn({ id: 'gone', name: 'Gone', deleted: true }),
+      ],
+    });
+
+    const visible = store.getVisibleTreeData();
+    expect(visible.connections.map((c) => c.id)).toEqual(['alive']);
+  });
+
+  it('剔除软删除的分组，保留存活的', () => {
+    const store = storeWith({
+      groups: [
+        { id: 'g-alive', name: 'Alive', createTime: 1, updateTime: 1, deleted: false },
+        { id: 'g-gone', name: 'Gone', createTime: 1, updateTime: 1, deleted: true },
+      ],
+      connections: [],
+    });
+
+    expect(store.getVisibleTreeData().groups.map((g) => g.id)).toEqual(['g-alive']);
+  });
+
+  it('getTreeData 仍然返回墓碑（同步合并依赖）', () => {
+    const store = storeWith({
+      groups: [{ id: 'g-gone', name: 'Gone', createTime: 1, updateTime: 1, deleted: true }],
+      connections: [conn({ id: 'gone', deleted: true })],
+    });
+
+    expect(store.getTreeData().connections).toHaveLength(1);
+    expect(store.getTreeData().groups).toHaveLength(1);
+    expect(store.getVisibleTreeData().connections).toHaveLength(0);
+    expect(store.getVisibleTreeData().groups).toHaveLength(0);
+  });
+
+  it('保留 groupId/parentId 以便层级组装', () => {
+    const store = storeWith({
+      groups: [
+        { id: 'root', name: 'Root', createTime: 1, updateTime: 1, deleted: false },
+        { id: 'child', name: 'Child', parentId: 'root', createTime: 1, updateTime: 1, deleted: false },
+      ],
+      connections: [conn({ id: 'in-group', groupId: 'child' })],
+    });
+
+    const visible = store.getVisibleTreeData();
+    expect(visible.groups.find((g) => g.id === 'child')!.parentId).toBe('root');
+    expect(visible.connections[0].groupId).toBe('child');
+  });
+
+  it('与 remove() 联动：删除后不再可见但墓碑仍在', async () => {
+    const store = storeWith({ groups: [], connections: [conn({ id: 'primary' })] });
+
+    await store.remove('primary');
+
+    expect(store.getVisibleTreeData().connections).toHaveLength(0);
+    expect(store.getTreeData().connections.find((c) => c.id === 'primary')!.deleted).toBe(true);
+  });
+});

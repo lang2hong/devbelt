@@ -5,7 +5,7 @@ import { wrapIdentForConn, splitSqlStatements } from '../utils/sql';
 import { confirmSqlExecution } from '../utils/sqlSafety';
 import { parseCsv } from '../data/transfer/csv';
 import { parseJson } from '../data/transfer/json';
-import { parseXlsx } from '../data/transfer/xlsx';
+import { parseXlsx, isXlsxAvailable } from '../data/transfer/xlsx';
 import { parseXml } from '../data/transfer/xml';
 import { autoMapFields, type FieldMapping } from '../data/transfer/fieldMapper';
 import {
@@ -17,6 +17,7 @@ import {
   type TransferFormat,
 } from '../data/transfer/exportService';
 import { importRows } from '../data/transfer/importService';
+import { AuditLogger } from '../utils/auditLogger';
 import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
 import { confirm, openSqlDoc, requireCapability } from './shared';
@@ -161,7 +162,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.syncDatabase', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
-    const conns = deps.store.getTreeData().connections.filter((c) => c.id !== node.conn!.id);
+    const conns = deps.store.getVisibleTreeData().connections.filter((c) => c.id !== node.conn!.id);
     if (!conns.length) {
       vscode.window.showWarningMessage('No other connections to sync to.');
       return;
@@ -271,6 +272,13 @@ export async function runExportWizard(
         // xlsx 是二进制，必须按字节写；此前统一按 utf8 写会产出无法打开的文件。
         await vscode.workspace.fs.writeFile(target, toFileBytes(content));
       }
+    });
+    AuditLogger.tryLog({
+      action: 'export_data',
+      connName: node.conn.name || node.conn.host,
+      database,
+      sql: `EXPORT ${format.toUpperCase()} ${tables.length} table(s): ${tables.join(', ')}`,
+      rowCount: tables.length,
     });
     vscode.window.showInformationMessage(l10n('export.done', { count: tables.length }));
   } catch (error) {
@@ -403,6 +411,13 @@ async function importStructuredData(
       vscode.window.showErrorMessage(l10n('import.rolledBack', { row: result.errors[0].row }));
       return;
     }
+    AuditLogger.tryLog({
+      action: 'import_data',
+      connName: conn.name || conn.host,
+      database,
+      sql: `IMPORT INTO ${table.label} (${result.imported} row(s))`,
+      rowCount: result.imported,
+    });
     treeProvider.refresh();
     vscode.window.showInformationMessage(l10n('import.rowsDone', { count: result.imported }));
   } catch (error) {
@@ -460,14 +475,19 @@ function importFilters(format: TransferFormat): Record<string, string[]> {
 }
 
 async function pickFormat(action: 'import' | 'export'): Promise<TransferFormat | undefined> {
+  const items = [
+    { label: 'SQL', description: action === 'import' ? l10n('import.formatSql') : l10n('export.formatSql'), value: 'sql' as const },
+    { label: 'CSV', description: action === 'import' ? l10n('import.formatCsv') : l10n('export.formatCsv'), value: 'csv' as const },
+    { label: 'JSON', description: action === 'import' ? l10n('import.formatJson') : l10n('export.formatJson'), value: 'json' as const },
+    { label: 'XML', description: '.xml', value: 'xml' as const },
+  ];
+  // Excel 依赖可选包 xlsx，未安装时不提供该选项 ——
+  // 否则用户选完才在读写阶段撞上 'xlsx library not available'。
+  if (isXlsxAvailable()) {
+    items.splice(3, 0, { label: 'Excel', description: '.xlsx', value: 'xlsx' as const } as any);
+  }
   return (await vscode.window.showQuickPick(
-    [
-      { label: 'SQL', description: action === 'import' ? l10n('import.formatSql') : l10n('export.formatSql'), value: 'sql' as const },
-      { label: 'CSV', description: action === 'import' ? l10n('import.formatCsv') : l10n('export.formatCsv'), value: 'csv' as const },
-      { label: 'JSON', description: action === 'import' ? l10n('import.formatJson') : l10n('export.formatJson'), value: 'json' as const },
-      { label: 'Excel', description: '.xlsx', value: 'xlsx' as const },
-      { label: 'XML', description: '.xml', value: 'xml' as const },
-    ],
+    items,
     { placeHolder: action === 'import' ? l10n('import.chooseFormat') : l10n('export.chooseFormat') },
   ))?.value;
 }

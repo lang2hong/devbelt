@@ -3,7 +3,8 @@ import { BaseWebView } from '../result/baseWebView';
 import { DbTreeNode } from '../tree/dbTreeNode';
 import type { Deps } from './shared';
 import { requireCapability } from './shared';
-import { l10n, isZh } from '../i18n';
+import { l10n } from '../i18n';
+import { AuditLogger } from '../utils/auditLogger';
 
 const PRIVILEGES = [
   'ALL PRIVILEGES', 'SELECT', 'INSERT', 'UPDATE', 'DELETE',
@@ -45,6 +46,8 @@ export class UserForm extends BaseWebView {
       if (!requireCapability(session, 'manageUsers')) { this.dispose(); return; }
       if (this.mode === 'create') {
         await session.table.createUser(msg.name, msg.password, msg.host);
+        // 只记动作与对象，绝不记密码
+        AuditLogger.tryLog({ action: 'user_manage', connName: conn.name || conn.host, sql: `CREATE USER ${msg.name}@${msg.host}` });
         this.deps.treeProvider.refresh();
         vscode.window.showInformationMessage(l10n('user.created', { name: msg.name }));
       } else {
@@ -54,6 +57,7 @@ export class UserForm extends BaseWebView {
         for (const priv of privs) {
           await session.table.grantPrivilege(parts[0], priv, db, parts[1] || '%');
         }
+        AuditLogger.tryLog({ action: 'user_manage', connName: conn.name || conn.host, database: db, sql: `GRANT ${privs.join(', ')} TO ${this.node.label}` });
         this.deps.treeProvider.refresh();
         vscode.window.showInformationMessage(l10n('user.granted', { priv: privs.join(', '), name: this.node.label }));
       }
@@ -71,7 +75,6 @@ export class UserForm extends BaseWebView {
       nodeLabel: this.node.label,
       database: this.node.database || '',
       privileges: PRIVILEGES,
-      isZh: isZh(),
     });
   }
 }

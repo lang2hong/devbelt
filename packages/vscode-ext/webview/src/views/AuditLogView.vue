@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
+import { useI18n } from '../composables/useI18n';
 
 const { post, onMessage } = useVsCode();
+const { t } = useI18n();
 
 interface AuditEntry {
   id: string;
@@ -58,10 +60,10 @@ onUnmounted(() => {});
   <div class="audit-panel">
     <div class="toolbar">
       <select v-model="filterAction" @change="post({ type: 'filter', action: filterAction })">
-        <option value="">All Actions</option>
+        <option value="">{{ t('wv.audit.allActions') }}</option>
         <option v-for="(label, key) in actionLabels" :key="key" :value="key">{{ label }}</option>
       </select>
-      <button class="btn" @click="post({ type: 'clear' })">Clear</button>
+      <button class="btn" @click="post({ type: 'clear' })">{{ t('wv.common.clear') }}</button>
     </div>
     <div class="entry-list">
       <div
@@ -77,7 +79,7 @@ onUnmounted(() => {});
         <span class="meta" v-if="e.rowCount !== undefined">{{ e.rowCount }} rows</span>
         <span class="meta" v-if="e.costTime !== undefined">{{ e.costTime }}ms</span>
       </div>
-      <div v-if="!entries.length" class="empty">No audit entries yet.</div>
+      <div v-if="!entries.length" class="empty">{{ t('wv.audit.noEntries') }}</div>
     </div>
     <div v-if="selected" class="detail">
       <pre>{{ selected.sql || '(no SQL)' }}</pre>

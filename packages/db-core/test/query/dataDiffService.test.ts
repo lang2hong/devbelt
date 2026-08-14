@@ -136,4 +136,41 @@ describe('DataDiffService', () => {
     expect(sql).toContain('DELETE FROM');
     expect(sql).toContain('UPDATE');
   });
+  /**
+   * 回归：值转义必须走方言。
+   * 曾用文件级私有 escapeValue（只处理单引号），MySQL 下 `C:\tmp` 的反斜杠
+   * 未翻倍，写进目标库会被当转义符解释成制表符，同步后数据与源库不一致。
+   */
+  it('generateSyncSql 按方言转义反斜杠（MySQL 翻倍）', () => {
+    const conn = new FakeConnection();
+    const query = makeQueryService(conn);
+    const diff: any = {
+      sourceDb: 'a', targetDb: 'b',
+      diffs: [{
+        tableName: 't',
+        pkColumns: ['id'],
+        columnNames: ['id', 'path'],
+        rows: [{ status: 'added', pkValues: { id: 1 }, sourceRow: { id: 1, path: 'C:\\tmp' } }],
+      }],
+    };
+    const sql = DataDiffService.generateSyncSql(diff, 'b', query);
+    expect(sql).toContain("'C:\\\\tmp'");
+  });
+
+  it('generateSyncSql 转义单引号与 NULL', () => {
+    const conn = new FakeConnection();
+    const query = makeQueryService(conn);
+    const diff: any = {
+      sourceDb: 'a', targetDb: 'b',
+      diffs: [{
+        tableName: 't',
+        pkColumns: ['id'],
+        columnNames: ['id', 'name', 'note'],
+        rows: [{ status: 'added', pkValues: { id: 1 }, sourceRow: { id: 1, name: "O'Brien", note: null } }],
+      }],
+    };
+    const sql = DataDiffService.generateSyncSql(diff, 'b', query);
+    expect(sql).toContain("'O''Brien'");
+    expect(sql).toContain('NULL');
+  });
 });

@@ -52,6 +52,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const serverUrl = AuthService.getServerUrl(vscode.workspace.getConfiguration());
   const auth = new AuthService(context.secrets, serverUrl);
   await auth.init();
+  // package.json 的 commandPalette 用 dbclient.loggedIn 控制 login/logout/
+  // changeSyncPassword 的可见性。此前从未 setContext，导致 logout 与
+  // changeSyncPassword 永久不可见、login 永久可见。
+  void syncLoggedInContext(auth);
   const masterPasswordStore = new MasterPasswordStore(context.secrets);
   const sync = new SyncManager(auth, store, history, context.globalState, masterPasswordStore);
   const syncBar = new SyncStatusBar(auth, () => sync.getLastSyncAt());
@@ -208,6 +212,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
 
   registerCommands({ context, store, manager, treeProvider, executor, history, auth, sync, syncBar, connCtx });
+}
+
+/**
+ * 把登录态同步到 `dbclient.loggedIn` 上下文键。
+ *
+ * package.json 的 commandPalette 靠它控制 login / logout / changeSyncPassword
+ * 三条命令的可见性，登录/登出后必须重新调用，否则命令面板显示的是旧状态。
+ */
+export async function syncLoggedInContext(auth: { isLoggedIn(): boolean }): Promise<void> {
+  await vscode.commands.executeCommand('setContext', 'dbclient.loggedIn', auth.isLoggedIn());
 }
 
 /** 定时备份配置向导：已有计划则提供运行/修改/删除，否则询问周期与输出目录 */

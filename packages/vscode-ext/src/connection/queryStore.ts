@@ -1,5 +1,6 @@
 import type { SavedQuery } from '@db-client/core';
 import { mergeById } from '../utils/merge';
+import { uniqueId } from '../utils/id';
 import { EventEmitter, type Event } from '../utils/event';
 
 /** 保存查询文件夹（本地存储）。 */
@@ -86,7 +87,7 @@ export class QueryStore {
   async saveQuery(q: Omit<SavedQuery, 'id' | 'createTime' | 'updateTime'>): Promise<string> {
     const all = this.memento.get<SavedQuery[]>(QueryStore.QKEY) || [];
     const now = Date.now();
-    const query: SavedQuery = { ...q, id: `q-${now}`, createTime: now, updateTime: now, deleted: false };
+    const query: SavedQuery = { ...q, id: uniqueId('q'), createTime: now, updateTime: now, deleted: false };
     all.push(query);
     await this.memento.update(QueryStore.QKEY, all);
     this.changedEmitter.fire();
@@ -122,7 +123,7 @@ export class QueryStore {
   async addQueryFolder(name: string): Promise<string> {
     const all = this.memento.get<QueryFolder[]>(QueryStore.FKEY) || [];
     const now = Date.now();
-    const folder: QueryFolder = { id: `qf-${now}`, name, createTime: now, updateTime: now, deleted: false };
+    const folder: QueryFolder = { id: uniqueId('qf'), name, createTime: now, updateTime: now, deleted: false };
     all.push(folder);
     await this.memento.update(QueryStore.FKEY, all);
     this.changedEmitter.fire();

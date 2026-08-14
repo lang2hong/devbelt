@@ -6,13 +6,19 @@ import { SyncConflictError } from '../sync/syncClient';
 import { totalChanges } from '../sync/mergePlan';
 import { SyncDiffView } from '../result/syncDiffView';
 import { l10n } from '../i18n';
+import { syncLoggedInContext } from '../extension';
 import type { Deps, Sub } from './shared';
 import { resolveMasterPassword } from './shared';
 
 export function registerSyncCommands(deps: Deps, sub: Sub): void {
   const { auth, sync, syncBar, treeProvider } = deps;
 
-  sub('dbclient.login', () => LoginForm.open(auth, () => syncBar.update()));
+  // 登录成功后除刷新状态栏，还要同步 dbclient.loggedIn 上下文，
+  // 否则命令面板里 logout / changeSyncPassword 仍然不可见
+  sub('dbclient.login', () => LoginForm.open(auth, () => {
+    syncBar.update();
+    void syncLoggedInContext(auth);
+  }));
   sub('dbclient.sessions', () => SessionView.open(auth));
   sub('dbclient.pats', () => PatView.open(auth));
 
@@ -20,6 +26,7 @@ export function registerSyncCommands(deps: Deps, sub: Sub): void {
     await sync.forgetMasterPassword();
     await auth.logout();
     syncBar.update();
+    await syncLoggedInContext(auth);
     vscode.window.showInformationMessage(l10n('cmd.loggedOut'));
   });
 

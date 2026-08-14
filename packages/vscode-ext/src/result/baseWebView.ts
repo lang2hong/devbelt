@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { getWebviewHtml } from '../webview/html';
 import { diagError } from '../utils/diagnostics';
+import { isZh } from '../i18n';
 
 /**
  * Webview 面板基类：统一处理 panel 创建、HTML 注入、消息监听器 dispose。
@@ -40,9 +41,19 @@ export abstract class BaseWebView {
   /** 子类实现消息处理 */
   protected abstract handleMessage(msg: any): Promise<void>;
 
-  /** 向 webview 发消息 */
+  /**
+   * 向 webview 发消息。
+   *
+   * `init` 消息统一补上 `isZh`：webview 拿不到 `vscode.env` / 配置，语言只能由
+   * 扩展端下发。在基类单点注入，11 个视图都不必各自记得传（此前只有
+   * connectionForm 与 userForm 传了，其余视图因此永远是英文）。
+   * 子类若已显式给出 isZh 则保留其值。
+   */
   protected post(msg: any): void {
-    void this.panel.webview.postMessage(msg);
+    const payload = msg && msg.type === 'init' && msg.isZh === undefined
+      ? { ...msg, isZh: isZh() }
+      : msg;
+    void this.panel.webview.postMessage(payload);
   }
 
   /** dispose 面板 */

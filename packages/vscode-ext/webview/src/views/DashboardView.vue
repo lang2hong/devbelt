@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
+import { useI18n } from '../composables/useI18n';
 
 const { post, onMessage } = useVsCode();
+const { t } = useI18n();
 
 interface MetricPoint { time: number; value: number }
 interface DashboardData {
@@ -119,10 +121,10 @@ function formatBytes(n: number): string {
   <div class="dashboard">
     <div class="summary" v-if="data?.summary">
       <span class="badge">{{ data.summary.dbType }}</span>
-      <span v-if="data.summary.version" class="kv"><b>Version</b> {{ data.summary.version }}</span>
-      <span v-if="data.summary.currentUser" class="kv"><b>User</b> {{ data.summary.currentUser }}</span>
-      <span v-if="data.summary.database" class="kv"><b>Database</b> {{ data.summary.database }}</span>
-      <span class="kv live">Live</span>
+      <span v-if="data.summary.version" class="kv"><b>{{ t('wv.common.version') }}</b> {{ data.summary.version }}</span>
+      <span v-if="data.summary.currentUser" class="kv"><b>{{ t('wv.common.user') }}</b> {{ data.summary.currentUser }}</span>
+      <span v-if="data.summary.database" class="kv"><b>{{ t('wv.common.database') }}</b> {{ data.summary.database }}</span>
+      <span class="kv live">{{ t('wv.dashboard.live') }}</span>
     </div>
     <div class="error" v-if="error">{{ error }}</div>
     <div class="cards" v-if="data?.keyVars">
@@ -148,7 +150,7 @@ function formatBytes(n: number): string {
           </tr>
         </tbody>
       </table>
-      <p v-else>No processes.</p>
+      <p v-else>{{ t('wv.dashboard.noProcesses') }}</p>
     </div>
   </div>
 </template>

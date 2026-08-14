@@ -32,3 +32,14 @@ function getXLSX(): any {
     return undefined;
   }
 }
+
+/**
+ * xlsx 依赖是否可用。
+ *
+ * 该依赖是可选的（未在 package.json 声明，打包时不含），因此 Excel 格式
+ * 只在运行时能 require 到时才可用。UI 必须先问这里再决定是否提供 Excel
+ * 选项 —— 否则用户选了才在导出/导入阶段撞上 'xlsx library not available'。
+ */
+export function isXlsxAvailable(): boolean {
+  return getXLSX() !== undefined;
+}

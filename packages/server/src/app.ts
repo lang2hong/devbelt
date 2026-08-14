@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import mysql from '@fastify/mysql';
 import sensible from '@fastify/sensible';
+import { createConnection } from 'mysql2/promise';
 import { config } from './config.js';
 import { initSchema } from './repository/mysql/schema.js';
 import { MysqlUserRepo } from './repository/mysql/userRepo.js';
@@ -43,6 +44,8 @@ export async function createApp() {
   app.register(cors, { origin: process.env.NODE_ENV === 'production' ? (process.env.CORS_ORIGIN || false) : true });
   app.register(sensible);
   app.register(jwt, { secret: config.jwtSecret, sign: { expiresIn: config.accessTokenExpiresIn } });
+  // 建库必须早于池注册：池里每条连接都要带默认库，否则并发时非首条连接会 ER_NO_DB_ERROR
+  await ensureDatabase(app);
   await app.register(mysql, { connectionString: authString(), promise: true });
   app.decorate('jwtSecret', config.jwtSecret);
 
@@ -86,8 +89,37 @@ export async function createApp() {
   return app;
 }
 
-/** 构造 MySQL 连接串（不含 database，由 initSchema 执行 USE） */
+/**
+ * 构造 MySQL 连接串（**含 database**）。
+ *
+ * 必须带库名：`@fastify/mysql` 默认走 `createPool`，池中每条连接独立握手，
+ * 靠一次 `USE db` 只能影响当前借出的那条，其余连接没有默认库。
+ */
 function authString(): string {
   const { mysql: m } = config;
-  return `mysql://${encodeURIComponent(m.user)}:${encodeURIComponent(m.password)}@${m.host}:${m.port}`;
+  const auth = `${encodeURIComponent(m.user)}:${encodeURIComponent(m.password)}`;
+  return `mysql://${auth}@${m.host}:${m.port}/${encodeURIComponent(m.database)}`;
+}
+
+/**
+ * 用一条临时连接确保目标库存在，随后立即关闭。
+ *
+ * 不能复用 `app.mysql`：那是带 `database` 的池，库不存在时连接本身就建不起来。
+ * 账号无建库权限时不视为失败（库通常已由 DBA 预建），但库确实不存在时
+ * 后续池注册会立刻报错——把原先「启动静默通过、首次查询才炸」改成启动即失败。
+ */
+async function ensureDatabase(app: ReturnType<typeof Fastify>): Promise<void> {
+  const { mysql: m } = config;
+  let conn: Awaited<ReturnType<typeof createConnection>> | undefined;
+  try {
+    conn = await createConnection({ host: m.host, port: m.port, user: m.user, password: m.password });
+    await conn.query(
+      `CREATE DATABASE IF NOT EXISTS \`${m.database.replace(/`/g, '``')}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+    );
+  } catch (err: any) {
+    if (err?.code !== 'ER_DBACCESS_DENIED_ERROR' && err?.code !== 'ER_CANT_CREATE_DB') throw err;
+    app.log.warn({ err }, `no privilege to create database "${m.database}"; assuming it already exists`);
+  } finally {
+    await conn?.end().catch(() => {});
+  }
 }

@@ -12,6 +12,18 @@ import { columnTypesFor } from './typeCatalog';
 export class SqliteDialect implements SqlDialect {
   readonly dbType = DatabaseType.SQLITE;
   readonly columnTypes = columnTypesFor(DatabaseType.SQLITE);
+
+  createTableTemplate(table: string): string {
+    return `CREATE TABLE IF NOT EXISTS ${table} (\n  "id" INTEGER PRIMARY KEY AUTOINCREMENT,\n  "name" TEXT\n);`;
+  }
+
+  /**
+   * SQLite 无存储过程；返回空串表示不支持，调用方据此不提供入口。
+   * 保留参数以对齐接口签名（调用方按统一形态传名字）。
+   */
+  createRoutineTemplate(_name: string): string {
+    return '';
+  }
   readonly capabilities: DatabaseCapabilities = {
     multiDatabaseExplorer: false,
     databases: false,

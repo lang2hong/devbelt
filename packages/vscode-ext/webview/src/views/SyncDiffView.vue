@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
+import { useI18n } from '../composables/useI18n';
 
 const { post, onMessage } = useVsCode();
+const { t } = useI18n();
 
 interface MergeItemChange { id: string; kind: 'added' | 'updated' | 'deleted'; label: string; detail?: string }
 interface MergeSection { added: number; updated: number; deleted: number; localOnly: number; items: MergeItemChange[] }
@@ -63,7 +65,7 @@ function cancel() { post({ type: 'cancel' }); }
 <template>
   <div class="app">
     <div class="header">
-      <h2>Sync Diff Preview</h2>
+      <h2>{{ t('wv.sync.diffTitle') }}</h2>
       <span class="count" v-if="plan">{{ totalChanges }} change(s)</span>
     </div>
 
@@ -100,14 +102,14 @@ function cancel() { post({ type: 'cancel' }); }
         </div>
 
         <div class="section" v-if="historyText">
-          <div class="section-title"><span>Query History</span><span class="summary">{{ historyText }}</span></div>
+          <div class="section-title"><span>{{ t('wv.sync.queryHistory') }}</span><span class="summary">{{ historyText }}</span></div>
         </div>
 
         <div class="actions">
           <button class="btn primary" :disabled="state === 'applying'" @click="apply">
-            {{ state === 'applying' ? 'Applying…' : 'Apply Merge' }}
+            {{ state === 'applying' ? t('wv.sync.applying') : t('wv.sync.applyMerge') }}
           </button>
-          <button class="btn" :disabled="state === 'applying'" @click="cancel">Cancel</button>
+          <button class="btn" :disabled="state === 'applying'" @click="cancel">{{ t('wv.common.cancel') }}</button>
         </div>
       </template>
     </template>

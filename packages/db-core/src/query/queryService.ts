@@ -17,6 +17,15 @@ export class QueryError extends Error {
   }
 }
 
+/** 单次查询的行为选项。 */
+export interface QueryOptions {
+  /**
+   * 跳过 `maxResultRows` 截断。
+   * 仅用于元数据读取——截断元数据会造成功能缺项（表/列清单少项）而非单纯展示问题。
+   */
+  noTruncate?: boolean;
+}
+
 /**
  * 查询服务（复用连接 + 方言）。
  *
@@ -49,7 +58,7 @@ export class QueryService {
   /** Maximum number of rows retained in an arbitrary query result. */
   static maxResultRows = 10_000;
 
-  async query(sql: string, values?: any): Promise<QueryResult> {
+  async query(sql: string, values?: any, options?: QueryOptions): Promise<QueryResult> {
     if (!sql || typeof sql !== 'string' || sql.trim().length === 0) {
       throw new QueryError('SQL statement cannot be empty');
     }
@@ -88,7 +97,7 @@ export class QueryService {
           reject(new QueryError(err.message, sql, costTime));
           return;
         }
-        resolve(this.normalizeResult(sql, results, fields || [], costTime));
+        resolve(this.normalizeResult(sql, results, fields || [], costTime, options));
       };
       if (values !== undefined) {
         this.connection.query(sql, values, callback);
@@ -96,6 +105,11 @@ export class QueryService {
         this.connection.query(sql, callback);
       }
     });
+  }
+
+  /** 当前在途查询数（供连接池统计区分「活跃」与「空闲」会话）。 */
+  get inFlightCount(): number {
+    return this.activeCancels.size;
   }
 
   /** Stops delivery of the current result and lets the caller close its session. */
@@ -106,6 +120,16 @@ export class QueryService {
     for (const cancelFn of cancels) cancelFn();
     this.connection.abortQuery();
     return true;
+  }
+
+  /**
+   * 执行不截断的查询，供元数据读取使用。
+   *
+   * `maxResultRows` 是面向「用户任意查询」的内存保护；元数据（表/列/索引清单）
+   * 被截断会导致功能性缺项而非展示问题，因此单独开一条不截断的路径。
+   */
+  async queryAll(sql: string, values?: any): Promise<QueryResult> {
+    return this.query(sql, values, { noTruncate: true });
   }
 
   /** 执行分页查询 */
@@ -129,6 +153,7 @@ export class QueryService {
     results: any,
     fields: FieldInfo[],
     costTime: number,
+    options?: QueryOptions,
   ): QueryResult {
     let rows: any[] = [];
     let affectedRows: number | undefined;
@@ -150,7 +175,9 @@ export class QueryService {
       }
     }
 
-    const truncated = rows.length > QueryService.maxResultRows;
+    // 元数据查询必须拿全量：库里表数超过 maxResultRows 时，截断会让
+    // 树视图、补全、导出的表/列清单静默缺项，且无任何提示。
+    const truncated = !options?.noTruncate && rows.length > QueryService.maxResultRows;
     if (truncated) rows = rows.slice(0, QueryService.maxResultRows);
     return { sql, costTime, rows, fields: fields || [], affectedRows, total, truncated, message: truncated ? `Results truncated to ${QueryService.maxResultRows} rows` : undefined };
   }

@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
+import { useI18n } from '../composables/useI18n';
 
 const { post, onMessage } = useVsCode();
+const { t } = useI18n();
 
 interface RowDiff {
   status: 'added' | 'removed' | 'changed' | 'unchanged';
@@ -78,13 +80,13 @@ function statusClass(status: string) {
     <div class="diff-header">
       <h3>{{ diff?.sourceDb }} → {{ diff?.targetDb }}</h3>
       <div class="diff-summary">
-        <span class="status-added">+{{ summary.added }} added</span>
-        <span class="status-removed">-{{ summary.removed }} removed</span>
-        <span class="status-changed">~{{ summary.changed }} changed</span>
+        <span class="status-added">+{{ summary.added }} {{ t('wv.dataDiff.added') }}</span>
+        <span class="status-removed">-{{ summary.removed }} {{ t('wv.dataDiff.removed') }}</span>
+        <span class="status-changed">~{{ summary.changed }} {{ t('wv.dataDiff.changed') }}</span>
       </div>
       <div class="diff-actions">
-        <button class="btn primary" :disabled="applied" @click="applySync">Apply Sync</button>
-        <span v-if="applied" class="status-added">Sync applied!</span>
+        <button class="btn primary" :disabled="applied" @click="applySync">{{ t('wv.dataDiff.applySync') }}</button>
+        <span v-if="applied" class="status-added">{{ t('wv.dataDiff.applied') }}</span>
       </div>
     </div>
     <div v-if="error" class="error">{{ error }}</div>

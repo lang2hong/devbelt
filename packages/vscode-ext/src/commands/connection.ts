@@ -4,6 +4,7 @@ import { DbTreeNode, NodeKind } from '../tree/dbTreeNode';
 import { ConnectionForm } from '../connection/connectionForm';
 import type { SavedConnection } from '../connection/connectionStore';
 import { l10n } from '../i18n';
+import { AuditLogger } from '../utils/auditLogger';
 import type { Deps, Sub } from './shared';
 import { confirm } from './shared';
 
@@ -74,6 +75,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
       const ver = await queryServerVersion(session, conn.dbType);
       treeProvider.setConnVersion(conn.id, `${conn.dbType} ${ver}`.trim());
       treeProvider.refresh();
+      AuditLogger.tryLog({ action: 'connection_open', connName: conn.name || conn.host, database: conn.database });
     } catch (err) {
       vscode.window.showErrorMessage(`Open connection failed: ${(err as Error).message}`);
     }
@@ -84,6 +86,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     manager.disposeConn(node.conn.id);
     treeProvider.markClosed(node.conn.id);
     treeProvider.refresh();
+    AuditLogger.tryLog({ action: 'connection_close', connName: node.conn.name || node.conn.host });
     vscode.window.showInformationMessage(l10n('conn.closed', { name: node.conn.name || node.conn.host }));
   });
 

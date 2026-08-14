@@ -416,7 +416,9 @@ export class TableService {
       if (max > 0 && val.length > max) val = val.slice(0, max);
     }
 
-    return isNumeric ? val : `'${val.replace(/'/g, "''")}'`;
+    // 值转义走方言（this.esc）：此处曾自建 `'${val.replace(/'/g,"''")}'`，
+    // 只处理单引号而漏掉反斜杠，MySQL 下造出的数据会与预期不符。
+    return isNumeric ? val : this.esc(val);
   }
 
   /** 解析 enum/set 列的合法值 */

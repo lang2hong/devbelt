@@ -25,6 +25,27 @@ export interface SqlDialect {
   readonly columnTypes: readonly string[];
 
   /**
+   * 建表语句模板（新建表命令的初始 SQL）。
+   *
+   * 由方言提供而非命令层硬编码：自增主键的写法三家完全不同
+   * （MySQL `AUTO_INCREMENT`、PG `SERIAL`、SQLite `INTEGER PRIMARY KEY AUTOINCREMENT`），
+   * 过去统一发 MySQL 语法，PG/SQLite 用户拿到的模板直接执行会报错。
+   *
+   * @param table 已包裹好的表标识符
+   */
+  createTableTemplate(table: string): string;
+
+  /**
+   * 存储过程/函数模板；本方言不支持例程时返回空字符串。
+   *
+   * MySQL 需要 `DELIMITER` 包裹（那是客户端命令，PG 不认），
+   * PG 用 `CREATE FUNCTION ... $$ ... $$ LANGUAGE plpgsql`。
+   *
+   * @param name 例程名（未包裹，由实现按需处理）
+   */
+  createRoutineTemplate(name: string): string;
+
+  /**
    * 包裹标识符（表名/列名），防止 SQL 注入与关键字冲突。
    * @param identifier 原始标识符
    */

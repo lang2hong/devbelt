@@ -4,7 +4,8 @@ import { ConnectionFactory } from '@db-client/core';
 import type { IConnection } from '@db-client/core';
 import type { SavedConnection, ConnectionGroup } from './connectionStore';
 import { SshTunnel } from './sshTunnel';
-import { isZh, l10n } from '../i18n';
+import { l10n } from '../i18n';
+import { uniqueId } from '../utils/id';
 import { BaseWebView } from '../result/baseWebView';
 
 /**
@@ -73,7 +74,7 @@ export class ConnectionForm extends BaseWebView {
         }
         case 'save': {
           const conn = decodeConnection(msg.payload);
-          const id = conn.id || `${Date.now()}`;
+          const id = conn.id || uniqueId('c');
           await this.store.save({ ...conn, id });
           vscode.window.showInformationMessage(
             l10n('form.saved', { name: conn.name || conn.host || '' }),
@@ -94,7 +95,7 @@ export class ConnectionForm extends BaseWebView {
   }
 
   private sendInit(): void {
-    this.post({ type: 'init', mode: 'connectionForm', groups: this.groups, isZh: isZh() });
+    this.post({ type: 'init', mode: 'connectionForm', groups: this.groups });
     if (this.editing) {
       this.post({ type: 'prefill', conn: this.editing });
     } else {

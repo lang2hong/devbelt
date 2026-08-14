@@ -90,3 +90,37 @@ describe('PlanPolicy.syncVersionRetention', () => {
     expect(await policy.syncVersionRetention('pro')).toBe(10);
   });
 });
+/**
+ * 回归：Feature 必须在**编译产物**里真实存在。
+ *
+ * 它曾是 `const enum`，tsc 会完全擦除：`dist/domain/enums.js` 只导出
+ * SECTION_TYPES，`dist/policy/planPolicy.js` 也没有 `export { Feature }`，
+ * 运行时 `import { Feature }` 得到 undefined。vitest 走 esbuild 能跑通，
+ * 编译产物不能 —— 典型的「测试绿、上线炸」。
+ */
+describe('Feature 运行时可用性', () => {
+  it('是运行时对象而非被擦除的 const enum', () => {
+    expect(typeof Feature).toBe('object');
+    expect(Feature).not.toBeUndefined();
+  });
+
+  it('六个位值互不重叠且为 2 的幂', () => {
+    const values = Object.values(Feature);
+    expect(values).toHaveLength(6);
+    expect(new Set(values).size).toBe(6);
+    for (const v of values) {
+      expect(Number.isInteger(Math.log2(v))).toBe(true);
+    }
+  });
+
+  it('位掩码组合可用（客户端按位与的前提）', () => {
+    const pro = Feature.basic | Feature.er_export | Feature.excel;
+    expect(pro & Feature.er_export).toBe(Feature.er_export);
+    expect(pro & Feature.audit_log).toBe(0);
+  });
+
+  it('可枚举（Object.keys 拿得到名字，供诊断/日志用）', () => {
+    expect(Object.keys(Feature)).toContain('er_export');
+    expect(Object.keys(Feature)).toContain('audit_log');
+  });
+});

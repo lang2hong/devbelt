@@ -346,9 +346,9 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     return [...colNodes, ...subCategories];
   }
 
-  /** 根节点：顶层分组 + 未分组连接 */
+  /** 根节点：顶层分组 + 未分组连接（不含软删除墓碑） */
   private buildRootChildren(): DbTreeNode[] {
-    const data = this.store.getTreeData();
+    const data = this.store.getVisibleTreeData();
     const topGroups = data.groups.filter((g) => !g.parentId);
     const ungrouped = data.connections.filter((c) => !c.groupId);
     const gNodes = topGroups.map(
@@ -365,9 +365,9 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     return [...gNodes, ...cNodes];
   }
 
-  /** 分组节点：子分组 + 组内连接 */
+  /** 分组节点：子分组 + 组内连接（不含软删除墓碑） */
   private buildGroupChildren(groupId: string): DbTreeNode[] {
-    const data = this.store.getTreeData();
+    const data = this.store.getVisibleTreeData();
     const childGroups = data.groups.filter((g) => g.parentId === groupId);
     const conns = data.connections.filter((c) => c.groupId === groupId);
     const gNodes = childGroups.map(

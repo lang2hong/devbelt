@@ -21,12 +21,14 @@ describe('tableQuerySql', () => {
       { column: 'status', op: 'eq', value: 'active' },
       { column: 'age', op: 'gte', value: '18' },
     ];
-    expect(buildTableSelect(DatabaseType.MYSQL, 'users', 'app', conditions, '', '', 0, 100)).toBe(
+    expect(buildTableSelect(DatabaseType.MYSQL, 'users', 'app', conditions, '', '', 0, 100, { age: 'int' })).toBe(
       'SELECT * FROM `app`.`users` WHERE `status` = \'active\' AND `age` >= 18 LIMIT 100 OFFSET 0',
     );
   });
 
   it('supports a full set of comparison operators', () => {
+    // 列 a 声明为 int，数字字面量才裸写；未声明类型的列一律加引号（见下方专门用例）
+    const numeric = { a: 'int' };
     const cases: Array<[FilterCondition, string]> = [
       [{ column: 'a', op: 'eq', value: 'x' }, '`a` = \'x\''],
       [{ column: 'a', op: 'ne', value: 'x' }, '`a` <> \'x\''],
@@ -46,11 +48,11 @@ describe('tableQuerySql', () => {
       [{ column: 'a', op: 'notEmpty' }, "`a` <> ''"],
       [{ column: 'a', op: 'between', value: '1', value2: '10' }, "`a` BETWEEN 1 AND 10"],
       [{ column: 'a', op: 'notBetween', value: '1', value2: '10' }, "`a` NOT BETWEEN 1 AND 10"],
-      [{ column: 'a', op: 'in', value: '1, 2, 3' }, "`a` IN ('1', '2', '3')"],
-      [{ column: 'a', op: 'notIn', value: '1, 2' }, "`a` NOT IN ('1', '2')"],
+      [{ column: 'a', op: 'in', value: '1, 2, 3' }, '`a` IN (1, 2, 3)'],
+      [{ column: 'a', op: 'notIn', value: '1, 2' }, '`a` NOT IN (1, 2)'],
     ];
     for (const [condition, expected] of cases) {
-      expect(buildCondition(DatabaseType.MYSQL, condition)).toBe(expected);
+      expect(buildCondition(DatabaseType.MYSQL, condition, numeric)).toBe(expected);
     }
   });
 
@@ -105,5 +107,96 @@ describe('tableQuerySql', () => {
     expect(buildCountSql(DatabaseType.MYSQL, 'users', 'app', conditions)).toBe(
       'SELECT COUNT(*) AS total FROM `app`.`users` WHERE `status` = \'active\'',
     );
+  });
+});
+
+/**
+ * 回归：引号取决于**列类型**，不是值长得像不像数字。
+ *
+ * 曾经只看值：varchar 主键填 `1` 会产出 `` `id` = 1 ``，MySQL 把整列转 double 比较，
+ * `'1'`/`'01'`/`' 1'`/`'1abc'` 全部命中且索引失效。
+ */
+describe('筛选值引号按列类型决定', () => {
+  it('varchar 列填数字 → 加引号（精确字符串比较）', () => {
+    const cond: FilterCondition = { column: 'id', op: 'eq', value: '1' };
+    expect(buildCondition(DatabaseType.MYSQL, cond, { id: 'varchar(64)' })).toBe("`id` = '1'");
+    expect(buildCondition(DatabaseType.PG, cond, { id: 'character varying' })).toBe(`"id" = '1'`);
+    expect(buildCondition(DatabaseType.SQLITE, cond, { id: 'TEXT' })).toBe(`"id" = '1'`);
+  });
+
+  it('数值列填数字 → 裸写（保持索引可用）', () => {
+    const cases: Array<[string, string]> = [
+      ['int', '`n` = 1'],
+      ['int(11) unsigned', '`n` = 1'],
+      ['bigint', '`n` = 1'],
+      ['tinyint(1)', '`n` = 1'],
+      ['decimal(10,2)', '`n` = 1'],
+      ['double precision', '`n` = 1'],
+      ['numeric', '`n` = 1'],
+      ['serial', '`n` = 1'],
+      ['int4', '`n` = 1'],
+      ['float8', '`n` = 1'],
+    ];
+    for (const [type, expected] of cases) {
+      expect(buildCondition(DatabaseType.MYSQL, { column: 'n', op: 'eq', value: '1' }, { n: type })).toBe(expected);
+    }
+  });
+
+  it('类型未知 → 加引号（安全默认：数值列会隐式转数字，语义不变）', () => {
+    expect(buildCondition(DatabaseType.MYSQL, { column: 'id', op: 'eq', value: '1' })).toBe("`id` = '1'");
+    expect(buildCondition(DatabaseType.MYSQL, { column: 'id', op: 'eq', value: '1' }, {})).toBe("`id` = '1'");
+    expect(buildCondition(DatabaseType.MYSQL, { column: 'id', op: 'eq', value: '1' }, { other: 'int' })).toBe("`id` = '1'");
+  });
+
+  it('数值列填非数字 → 仍加引号（不产出非法 SQL）', () => {
+    expect(buildCondition(DatabaseType.MYSQL, { column: 'n', op: 'eq', value: 'abc' }, { n: 'int' }))
+      .toBe("`n` = 'abc'");
+  });
+
+  it('负数与小数在数值列上裸写', () => {
+    expect(buildCondition(DatabaseType.MYSQL, { column: 'n', op: 'gt', value: '-1.5' }, { n: 'decimal(10,2)' }))
+      .toBe('`n` > -1.5');
+  });
+
+  it('BETWEEN 两端同规则', () => {
+    const cond: FilterCondition = { column: 'n', op: 'between', value: '1', value2: '10' };
+    expect(buildCondition(DatabaseType.MYSQL, cond, { n: 'int' })).toBe('`n` BETWEEN 1 AND 10');
+    expect(buildCondition(DatabaseType.MYSQL, cond, { n: 'varchar(10)' })).toBe("`n` BETWEEN '1' AND '10'");
+  });
+
+  it('IN 列表逐项同规则', () => {
+    const cond: FilterCondition = { column: 'n', op: 'in', value: '1, 2, 3' };
+    expect(buildCondition(DatabaseType.MYSQL, cond, { n: 'int' })).toBe('`n` IN (1, 2, 3)');
+    expect(buildCondition(DatabaseType.MYSQL, cond, { n: 'varchar(10)' })).toBe("`n` IN ('1', '2', '3')");
+  });
+
+  it('IN 列表混合数字与非数字：数值列下非数字项仍加引号', () => {
+    const cond: FilterCondition = { column: 'n', op: 'in', value: '1, abc' };
+    expect(buildCondition(DatabaseType.MYSQL, cond, { n: 'int' })).toBe("`n` IN (1, 'abc')");
+  });
+
+  it('IN 空项被过滤，全空返回空串', () => {
+    expect(buildCondition(DatabaseType.MYSQL, { column: 'n', op: 'in', value: ' , ,' }, { n: 'int' })).toBe('');
+    expect(buildCondition(DatabaseType.MYSQL, { column: 'n', op: 'in', value: '1, , 2' }, { n: 'int' }))
+      .toBe('`n` IN (1, 2)');
+  });
+
+  it('LIKE 家族不受影响（始终是字符串模式）', () => {
+    expect(buildCondition(DatabaseType.MYSQL, { column: 'n', op: 'contains', value: '1' }, { n: 'int' }))
+      .toBe("`n` LIKE '%1%' ESCAPE '\\\\'");
+  });
+
+  it('date/datetime 列填数字仍加引号（不是数值列）', () => {
+    expect(buildCondition(DatabaseType.MYSQL, { column: 'd', op: 'eq', value: '2024' }, { d: 'datetime' }))
+      .toBe("`d` = '2024'");
+  });
+
+  it('COUNT 与 SELECT 使用同一份列类型', () => {
+    const conditions: FilterCondition[] = [{ column: 'id', op: 'eq', value: '1' }];
+    const types = { id: 'varchar(64)' };
+    expect(buildCountSql(DatabaseType.MYSQL, 't', 'db', conditions, types))
+      .toBe("SELECT COUNT(*) AS total FROM `db`.`t` WHERE `id` = '1'");
+    expect(buildTableSelect(DatabaseType.MYSQL, 't', 'db', conditions, '', '', 0, 100, types))
+      .toBe("SELECT * FROM `db`.`t` WHERE `id` = '1' LIMIT 100 OFFSET 0");
   });
 });

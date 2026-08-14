@@ -93,12 +93,10 @@ export class BackupService {
             parts.push(`INSERT INTO ${qualified} (${colList}) VALUES`);
           }
           for (const row of result.rows as Record<string, unknown>[]) {
-            const vals = columns.map((c) => {
-              const v = row[c];
-              if (v === null || v === undefined) return 'NULL';
-              if (typeof v === 'number') return String(v);
-              return `'${String(v).replace(/'/g, "''")}'`;
-            }).join(', ');
+            // 值转义必须走方言：此处曾自建 `'${String(v).replace(/'/g,"''")}'`，
+            // 只处理单引号而漏掉反斜杠。MySQL 字符串字面量里 `\` 有转义语义，
+            // `C:\tmp` 会被写成制表符（实测字符码 92,116 → 9），数据静默损坏。
+            const vals = columns.map((c) => query.dialect.escapeValue(row[c])).join(', ');
             parts.push(`(${vals}),`);
           }
           if (result.rows.length < pageSize) break;

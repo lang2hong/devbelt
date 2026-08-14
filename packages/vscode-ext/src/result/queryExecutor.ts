@@ -3,6 +3,7 @@ import type { SavedConnection } from '../connection/connectionStore';
 import { TableQueryView } from './tableQueryView';
 import { HistoryStore } from '../history/historyStore';
 import type { AuditLogger } from '../utils/auditLogger';
+import { QueryExecutedEvent, eventBus } from '../utils/event';
 
 export type QueryExecutionMode = 'reuse' | 'new';
 
@@ -57,14 +58,18 @@ export class QueryExecutor {
           rowCount,
           costTime,
         });
+        // QueryExecutedEvent 此前只有类型定义、从无发布点
+        void eventBus.publish(new QueryExecutedEvent(conn.id, sql, costTime, rowCount));
       } else if (error) {
+        const costTime = Date.now() - start;
         await this.history?.add({
           sql,
           connection: conn.name || conn.host,
           connectionId: conn.id,
           database,
-          costTime: Date.now() - start,
+          costTime,
         });
+        void eventBus.publish(new QueryExecutedEvent(conn.id, sql, costTime, 0, error.message));
       }
     }, mode);
   }
@@ -74,10 +79,19 @@ export class QueryExecutor {
     this.view?.renderExternal(result);
   }
 
-  /** 执行 EXPLAIN 查询计划。 */
+  /**
+   * 执行 EXPLAIN 查询计划。
+   *
+   * 走专门的 openForExplain：此前先 openForQuery（排一条普通执行）再覆盖队列为
+   * explain，复用面板时原语句已经开跑，写语句会产生一次真实副作用。
+   */
   async explain(conn: SavedConnection, sql: string, database?: string): Promise<void> {
-    this.view = await TableQueryView.openForQuery(conn, this.manager, sql, database, undefined, 'reuse');
-    // openForQuery 已 queueQuery（正常 execute）；这里覆盖为 explain 模式
-    (this.view as any).queueQueryExplain(sql, database);
+    this.view = await TableQueryView.openForExplain(conn, this.manager, sql, database, 'reuse');
+    this.audit?.log({
+      action: 'query_explain',
+      connName: conn.name || conn.host,
+      database,
+      sql: sql.length > AUDIT_SQL_MAX ? `${sql.slice(0, AUDIT_SQL_MAX)}…` : sql,
+    });
   }
 }

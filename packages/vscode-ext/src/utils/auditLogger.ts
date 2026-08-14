@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { uniqueId } from './id';
 
 export type AuditAction =
   | 'query_execute'
@@ -40,13 +41,28 @@ export class AuditLogger {
     return AuditLogger.instance;
   }
 
+  /**
+   * 取实例，未初始化时返回 undefined。
+   *
+   * 供审计写入点使用：审计是旁路能力，拿不到 logger 不该让主流程失败，
+   * 也不该逼每个调用点都 try/catch getInstance()。
+   */
+  static tryGet(): AuditLogger | undefined {
+    return AuditLogger.instance;
+  }
+
+  /** 便捷写入：未初始化则静默跳过。 */
+  static tryLog(entry: Omit<AuditEntry, 'id' | 'timestamp'>): void {
+    AuditLogger.instance?.log(entry);
+  }
+
   private constructor(private readonly state: vscode.Memento) {}
 
   log(entry: Omit<AuditEntry, 'id' | 'timestamp'>): void {
     const entries = this.getEntries();
     const record: AuditEntry = {
       ...entry,
-      id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      id: uniqueId('audit'),
       timestamp: Date.now(),
     };
     entries.unshift(record);

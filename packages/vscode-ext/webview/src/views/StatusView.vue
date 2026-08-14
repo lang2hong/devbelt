@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
+import { useI18n } from '../composables/useI18n';
 
 const { post, onMessage } = useVsCode();
+const { t } = useI18n();
 const tab = ref<'process' | 'status' | 'vars'>('process');
 const processList = ref<any[]>([]);
 const statusVars = ref<any[]>([]);
@@ -103,10 +105,10 @@ const keyVars = computed(() => {
   <div class="app">
     <div class="summary" v-if="summary">
       <span class="badge">{{ summary.dbType }}</span>
-      <span v-if="summary.version" class="kv"><b>Version</b> {{ summary.version }}</span>
-      <span v-if="summary.host" class="kv"><b>Host</b> {{ summary.host }}<template v-if="summary.port">:{{ summary.port }}</template></span>
-      <span v-if="summary.currentUser" class="kv"><b>User</b> {{ summary.currentUser }}</span>
-      <span v-if="summary.database" class="kv"><b>Database</b> {{ summary.database }}</span>
+      <span v-if="summary.version" class="kv"><b>{{ t('wv.common.version') }}</b> {{ summary.version }}</span>
+      <span v-if="summary.host" class="kv"><b>{{ t('wv.common.host') }}</b> {{ summary.host }}<template v-if="summary.port">:{{ summary.port }}</template></span>
+      <span v-if="summary.currentUser" class="kv"><b>{{ t('wv.common.user') }}</b> {{ summary.currentUser }}</span>
+      <span v-if="summary.database" class="kv"><b>{{ t('wv.common.database') }}</b> {{ summary.database }}</span>
     </div>
     <div class="dashboard" v-if="keyVars.length">
       <div class="kv-cell" v-for="kv in keyVars" :key="kv.key">
@@ -115,12 +117,12 @@ const keyVars = computed(() => {
       </div>
     </div>
     <div class="tabs">
-      <button :class="{ active: tab === 'process' }" @click="tab = 'process'">Process ({{ processList.length }})</button>
-      <button :class="{ active: tab === 'status' }" @click="tab = 'status'">Status ({{ statusVars.length }})</button>
-      <button :class="{ active: tab === 'vars' }" @click="tab = 'vars'">Variables ({{ serverVars.length }})</button>
+      <button :class="{ active: tab === 'process' }" @click="tab = 'process'">{{ t('wv.status.tabProcess') }} ({{ processList.length }})</button>
+      <button :class="{ active: tab === 'status' }" @click="tab = 'status'">{{ t('wv.status.tabStatus') }} ({{ statusVars.length }})</button>
+      <button :class="{ active: tab === 'vars' }" @click="tab = 'vars'">{{ t('wv.status.tabVariables') }} ({{ serverVars.length }})</button>
     </div>
     <div class="search">
-      <input v-model="search" :placeholder="tab === 'process' ? 'Filter user/host/db/id...' : 'Filter...'" class="input" />
+      <input v-model="search" :placeholder="tab === 'process' ? t('wv.status.filterProcess') : t('wv.status.filter')" class="input" />
     </div>
     <div class="error" v-if="error">{{ error }}</div>
     <div class="content" v-else>
@@ -129,17 +131,17 @@ const keyVars = computed(() => {
         <thead>
           <tr>
             <th v-for="k in Object.keys(processRows[0])" :key="k">{{ k }}</th>
-            <th class="act-col">Action</th>
+            <th class="act-col">{{ t('wv.common.actions') }}</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="(row, i) in processRows" :key="i">
             <td v-for="k in Object.keys(processRows[0])" :key="k">{{ row[k] }}</td>
-            <td><button v-if="processIdOf(row) !== undefined" class="btn-kill" @click="killProcess(row)">Kill</button></td>
+            <td><button v-if="processIdOf(row) !== undefined" class="btn-kill" @click="killProcess(row)">{{ t('wv.status.kill') }}</button></td>
           </tr>
         </tbody>
       </table>
-      <p v-else-if="tab === 'process'">No processes.</p>
+      <p v-else-if="tab === 'process'">{{ t('wv.status.noProcesses') }}</p>
       <!-- Status Variables -->
       <table v-if="tab === 'status' && filteredStatus.length">
         <thead><tr><th v-for="k in Object.keys(filteredStatus[0])" :key="k">{{ k }}</th></tr></thead>
@@ -149,7 +151,7 @@ const keyVars = computed(() => {
           </tr>
         </tbody>
       </table>
-      <p v-else-if="tab === 'status'">No status variables. (MySQL only)</p>
+      <p v-else-if="tab === 'status'">{{ t('wv.status.noStatusVars') }}</p>
       <!-- Server Variables -->
       <table v-if="tab === 'vars' && filteredVars.length">
         <thead><tr><th v-for="k in Object.keys(filteredVars[0])" :key="k">{{ k }}</th></tr></thead>
@@ -159,7 +161,7 @@ const keyVars = computed(() => {
           </tr>
         </tbody>
       </table>
-      <p v-else-if="tab === 'vars'">No variables.</p>
+      <p v-else-if="tab === 'vars'">{{ t('wv.status.noVariables') }}</p>
     </div>
   </div>
 </template>

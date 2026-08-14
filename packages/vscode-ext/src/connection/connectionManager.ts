@@ -100,19 +100,44 @@ export class ConnectionManager {
     }
   }
 
+  /**
+   * 真正建连。
+   *
+   * SSH 隧道一旦建起，**后续任何失败路径都必须关掉它**，否则隧道连同其
+   * ssh2 客户端与本地监听端口会悬空。原实现只在 `connection.connect` 的
+   * `.catch` 里关，而 `ConnectionFactory.createWithDialect`（不支持的 dbType 会
+   * 直接 throw）、`new QueryService` 等同步构造发生在 catch 之外，
+   * 那些路径会泄漏隧道。这里统一用 try/catch 兜住建隧道之后的全部逻辑。
+   */
   private async doConnect(conn: SavedConnection): Promise<ConnectionSession> {
     this.evictIfNeeded();
 
     let host = conn.host;
     let port = conn.port;
+    let tunnelOpened = false;
     if (conn.sshHost) {
       const localPort = await SshTunnel.create(conn);
       if (localPort) {
         host = '127.0.0.1';
         port = localPort;
+        tunnelOpened = true;
       }
     }
 
+    try {
+      return await this.buildSession(conn, host, port);
+    } catch (err) {
+      if (tunnelOpened) SshTunnel.close(conn.id);
+      throw err;
+    }
+  }
+
+  /** 装配连接与四个服务；失败由 doConnect 统一清理隧道。 */
+  private async buildSession(
+    conn: SavedConnection,
+    host: string,
+    port: number,
+  ): Promise<ConnectionSession> {
     const { connection, dialect } = ConnectionFactory.createWithDialect(
       conn.dbType as DatabaseType,
       {
@@ -138,9 +163,6 @@ export class ConnectionManager {
 
     await new Promise<void>((resolve, reject) => {
       connection.connect((err) => (err ? reject(err) : resolve()));
-    }).catch((err) => {
-      if (conn.sshHost) SshTunnel.close(conn.id);
-      throw err;
     });
 
     const query = new QueryService(connection, dialect);
@@ -192,6 +214,9 @@ export class ConnectionManager {
     for (const session of all) {
       session.close();
     }
+    // 兜底：session.close() 会按 connId 关自己的隧道，但若某条隧道的会话
+    // 从未装配成功（建连中途失败），它不在 sessions 里，只能靠这里清掉。
+    SshTunnel.closeAll();
   }
 
   /** 获取当前活跃连接数 */
@@ -206,20 +231,26 @@ export class ConnectionManager {
     explicit: number;
     maxConnections: number;
     idleTimeoutMs: number;
-    sessions: { id: string; lastUsed: number; isExplicit: boolean; isAlive: boolean }[];
+    sessions: { id: string; lastUsed: number; isExplicit: boolean; isAlive: boolean; inFlight: number }[];
   } {
-    const sessions: { id: string; lastUsed: number; isExplicit: boolean; isAlive: boolean }[] = [];
+    const sessions: { id: string; lastUsed: number; isExplicit: boolean; isAlive: boolean; inFlight: number }[] = [];
+    let active = 0;
     for (const [id, entry] of this.sessionEntries) {
+      const inFlight = entry.session.query.inFlightCount;
+      if (inFlight > 0) active++;
       sessions.push({
         id,
         lastUsed: entry.lastUsed,
         isExplicit: this.explicit.has(id),
         isAlive: entry.session.isAlive(),
+        inFlight,
       });
     }
     return {
+      // total = 池中缓存的会话数；active = 其中有在途查询的会话数。
+      // 二者曾都取 sessions.size，导致 active 恒等于 total、指标无意义。
       total: this.sessions.size,
-      active: this.sessions.size,
+      active,
       explicit: this.explicit.size,
       maxConnections: this.config.maxConnections,
       idleTimeoutMs: this.config.idleTimeoutMs,

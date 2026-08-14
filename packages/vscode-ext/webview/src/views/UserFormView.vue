@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
+import { useI18n } from '../composables/useI18n';
 
 const { post, onMessage } = useVsCode();
+const { t } = useI18n();
 
-const isZh = ref(false);
 const userMode = ref<'create' | 'grant'>('create');
 const nodeLabel = ref('');
 const database = ref('');
@@ -17,33 +18,12 @@ const host = ref('%');
 const checkedPrivs = ref(new Set<string>());
 const error = ref('');
 
-const I18N: Record<string, Record<'en' | 'zh', string>> = {
-  createTitle: { en: 'Create User', zh: '创建用户' },
-  grantTitle: { en: 'Grant Privilege to {label}', zh: '授予 {label} 权限' },
-  username: { en: 'Username', zh: '用户名' },
-  password: { en: 'Password', zh: '密码' },
-  confirmPw: { en: 'Confirm Password', zh: '确认密码' },
-  host: { en: 'Host', zh: '主机' },
-  privileges: { en: 'Privileges', zh: '权限' },
-  database: { en: 'Database', zh: '数据库' },
-  submit: { en: 'Submit', zh: '提交' },
-  cancel: { en: 'Cancel', zh: '取消' },
-  errNameRequired: { en: 'Username required', zh: '请输入用户名' },
-  errPwMismatch: { en: 'Passwords do not match', zh: '两次密码不一致' },
-  errNoPriv: { en: 'Select at least one privilege', zh: '请至少选择一个权限' },
-};
-const t = (key: string, vars?: Record<string, string>): string => {
-  let text = I18N[key]?.[isZh.value ? 'zh' : 'en'] ?? key;
-  if (vars) for (const [k, v] of Object.entries(vars)) text = text.replace(`{${k}}`, v);
-  return text;
-};
 
 let cleanup: (() => void) | undefined;
 
 onMounted(() => {
   cleanup = onMessage((msg: any) => {
     if (msg.type !== 'init') return;
-    isZh.value = !!msg.isZh;
     userMode.value = msg.userMode === 'grant' ? 'grant' : 'create';
     nodeLabel.value = msg.nodeLabel || '';
     database.value = msg.database || '';
@@ -59,13 +39,13 @@ onUnmounted(() => cleanup?.());
 function submit(): void {
   error.value = '';
   if (userMode.value === 'create') {
-    if (!name.value) { error.value = t('errNameRequired'); return; }
-    if (password.value !== confirmPw.value) { error.value = t('errPwMismatch'); return; }
+    if (!name.value) { error.value = t('wv.userForm.errNameRequired'); return; }
+    if (password.value !== confirmPw.value) { error.value = t('wv.userForm.errPwMismatch'); return; }
     post({ type: 'submit', name: name.value, password: password.value, host: host.value || '%' });
     return;
   }
   const privs = privileges.value.filter((p) => checkedPrivs.value.has(p));
-  if (!privs.length) { error.value = t('errNoPriv'); return; }
+  if (!privs.length) { error.value = t('wv.userForm.errNoPriv'); return; }
   post({ type: 'submit', priv: privs, database: database.value });
 }
 
@@ -76,30 +56,30 @@ function cancel(): void {
 
 <template>
   <div class="wrap">
-    <h3>{{ userMode === 'create' ? t('createTitle') : t('grantTitle', { label: nodeLabel }) }}</h3>
+    <h3>{{ userMode === 'create' ? t('wv.userForm.createTitle') : t('wv.userForm.grantTitle', { label: nodeLabel }) }}</h3>
 
     <template v-if="userMode === 'create'">
-      <div class="field"><label>{{ t('username') }}</label><input v-model="name" autofocus></div>
-      <div class="field"><label>{{ t('password') }}</label><input v-model="password" type="password"></div>
-      <div class="field"><label>{{ t('confirmPw') }}</label><input v-model="confirmPw" type="password"></div>
-      <div class="field"><label>{{ t('host') }}</label><input v-model="host"></div>
+      <div class="field"><label>{{ t('wv.userForm.username') }}</label><input v-model="name" autofocus></div>
+      <div class="field"><label>{{ t('wv.userForm.password') }}</label><input v-model="password" type="password"></div>
+      <div class="field"><label>{{ t('wv.userForm.confirmPw') }}</label><input v-model="confirmPw" type="password"></div>
+      <div class="field"><label>{{ t('wv.userForm.host') }}</label><input v-model="host"></div>
     </template>
 
     <template v-else>
-      <div class="field"><label>{{ t('privileges') }}</label>
+      <div class="field"><label>{{ t('wv.userForm.privileges') }}</label>
         <div class="privs">
           <label v-for="p in privileges" :key="p" class="priv">
             <input v-model="checkedPrivs" type="checkbox" :value="p"> {{ p }}
           </label>
         </div>
       </div>
-      <div class="field"><label>{{ t('database') }}</label><input v-model="database"></div>
+      <div class="field"><label>{{ t('wv.userForm.database') }}</label><input v-model="database"></div>
     </template>
 
     <div v-if="error" class="error">{{ error }}</div>
     <div class="actions">
-      <button class="btn" @click="submit">{{ t('submit') }}</button>
-      <button class="btn sec" @click="cancel">{{ t('cancel') }}</button>
+      <button class="btn" @click="submit">{{ t('wv.userForm.submit') }}</button>
+      <button class="btn sec" @click="cancel">{{ t('wv.userForm.cancel') }}</button>
     </div>
   </div>
 </template>

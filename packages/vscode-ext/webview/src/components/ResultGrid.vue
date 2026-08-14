@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
-import { VueDatePicker } from '@vuepic/vue-datepicker';
-import '@vuepic/vue-datepicker/dist/main.css';
+import { useI18n } from '../composables/useI18n';
 import { FILTER_OP } from '../../../src/utils/filterOps';
+import {
+  canUseNativePicker, classifyTemporal, formatHintFor, inputTypeFor, toInputValue, toSqlValue,
+  type TemporalKind,
+} from '../utils/temporal';
 
 interface Field { name: string; simpleType?: string; type?: string }
 interface Row { [key: string]: any }
@@ -22,6 +25,8 @@ const props = defineProps<{
   tableName?: string;
   dbName?: string;
   hiddenColumns?: string[];
+  /** Excel 依赖（可选包 xlsx）是否可用；不可用时隐藏该导出格式 */
+  xlsxAvailable?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -36,15 +41,17 @@ const emit = defineEmits<{
 }>();
 
 const { post } = useVsCode();
+const { t } = useI18n();
 const conditions = ref<Cond[]>([]);
 const showFilter = ref(false);
 const showExport = ref(false);
 const selectedRows = ref<Row[]>([]);
 const editingCell = ref<string | null>(null);
 const editValue = ref('');
+/** 当前编辑中的单元格是否走原生日期控件（null = 纯文本） */
+const editKind = ref<TemporalKind | null>(null);
 const editInput = ref<HTMLInputElement | null>(null);
 const editContainer = ref<HTMLElement | null>(null);
-const editDateRef = ref<any>(null);
 const inserting = ref(false);
 const newRow = ref<Record<string, string>>({});
 const showColumnMenu = ref(false);
@@ -162,45 +169,45 @@ let editingField: Field | null = null;
 function startEdit(row: Row, field: Field) {
   if (!props.hasTable) return;
   const pk = getPk(row);
-  if (!pk) return;
+  // 无定位列时双击过去毫无反应，用户无从知晓原因
+  if (!pk) return showToast(t('wv.grid.cannotEditNoPk'));
   editingRow = row;
   editingField = field;
   editingCell.value = `${pkKey(row)}:${field.name}`;
-  editValue.value = String(row[field.name] ?? '');
-  setTimeout(() => {
-    const dp = editContainer.value?.querySelector('.dp__input') as HTMLInputElement | undefined;
-    if (dp) dp.focus();
-    else editInput.value?.focus();
-  }, 0);
-}
-
-function openDatePicker() {
-  (editDateRef.value as any)?.openPicker();
+  const raw = row[field.name];
+  const kind = pickerKindFor(field.name, raw);
+  editKind.value = kind;
+  // 原生控件要的是 `yyyy-MM-ddTHH:mm:ss` 这类规范格式，DB 文本需先归一
+  editValue.value = kind ? (toInputValue(kind, raw) ?? '') : String(raw ?? '');
+  setTimeout(() => editInput.value?.focus(), 0);
 }
 
 function cancelEdit() {
   editingCell.value = null;
+  editKind.value = null;
   editingRow = null;
   editingField = null;
 }
 
 function commitEdit(row: Row, field: Field) {
   const pk = getPk(row);
-  if (!pk) { editingCell.value = null; editingRow = null; editingField = null; return; }
+  if (!pk) { cancelEdit(); return; }
   const oldVal = String(row[field.name] ?? 'NULL');
-  if (editValue.value !== oldVal && editValue.value !== 'NULL') {
-    post({ type: 'updateCell', pkColumns: pk.columns, pkValues: pk.values, column: field.name, value: editValue.value });
+  // 日期控件的 value 是原生格式（带 T），写回前转成 DB 文本再与原值比较，
+  // 否则每次打开选择器都会被判定为「改过」而白跑一条 UPDATE
+  const nextVal = editKind.value ? toSqlValue(editKind.value, editValue.value) : editValue.value;
+  if (nextVal !== oldVal && nextVal !== 'NULL') {
+    post({ type: 'updateCell', pkColumns: pk.columns, pkValues: pk.values, column: field.name, value: nextVal });
   }
-  editingCell.value = null;
-  editingRow = null;
-  editingField = null;
+  cancelEdit();
 }
 
 function onDocMouseDown(e: MouseEvent) {
   if (!editingCell.value) return;
   const target = e.target as HTMLElement;
   if (!target) return;
-  if (target.closest('.dp__menu')) return;
+  // 原生选择器的弹层由浏览器渲染在页面之外，不会产生落在文档里的 mousedown，
+  // 因此不再需要旧方案针对自绘弹层（.dp__menu）的例外判断
   if (editContainer.value && !editContainer.value.contains(target) && editingRow && editingField) {
     commitEdit(editingRow, editingField);
   }
@@ -222,12 +229,14 @@ function isRowSelected(row: Row): boolean {
 }
 
 function deleteSelected() {
+  if (!selectedRows.value.length) return showToast(t('wv.grid.selectRowsFirst'));
   const rows: { pkColumns: string[]; pkValues: any[] }[] = [];
   for (const row of selectedRows.value) {
     const pk = getPk(row);
     if (pk) rows.push({ pkColumns: pk.columns, pkValues: pk.values });
   }
-  if (!rows.length) return;
+  // 选了行却一行都定位不了：不能静默什么都不做
+  if (!rows.length) return showToast(t('wv.grid.cannotDeleteNoPk'));
   pendingDelete.value = rows;
 }
 
@@ -243,28 +252,34 @@ function cancelDelete() {
   pendingDelete.value = [];
 }
 
-const FILTER_OPS = [
+/**
+ * 筛选操作符下拉项。
+ *
+ * 必须是 computed：模块级 const 在 import 时就求值，那时 init 消息还没到、
+ * setLanguage() 尚未调用，标签会永久锁死英文。
+ */
+const FILTER_OPS = computed(() => [
   { value: FILTER_OP.eq, label: '=' },
   { value: FILTER_OP.ne, label: '!=' },
-  { value: FILTER_OP.contains, label: 'contains' },
-  { value: FILTER_OP.notContains, label: 'not contains' },
-  { value: FILTER_OP.startsWith, label: 'starts with' },
-  { value: FILTER_OP.endsWith, label: 'ends with' },
-  { value: FILTER_OP.notStartsWith, label: 'not starts with' },
-  { value: FILTER_OP.notEndsWith, label: 'not ends with' },
+  { value: FILTER_OP.contains, label: t('wv.op.contains') },
+  { value: FILTER_OP.notContains, label: t('wv.op.notContains') },
+  { value: FILTER_OP.startsWith, label: t('wv.op.startsWith') },
+  { value: FILTER_OP.endsWith, label: t('wv.op.endsWith') },
+  { value: FILTER_OP.notStartsWith, label: t('wv.op.notStartsWith') },
+  { value: FILTER_OP.notEndsWith, label: t('wv.op.notEndsWith') },
   { value: FILTER_OP.gt, label: '>' },
   { value: FILTER_OP.gte, label: '>=' },
   { value: FILTER_OP.lt, label: '<' },
   { value: FILTER_OP.lte, label: '<=' },
-  { value: FILTER_OP.between, label: 'between' },
-  { value: FILTER_OP.notBetween, label: 'not between' },
-  { value: FILTER_OP.in, label: 'in list' },
-  { value: FILTER_OP.notIn, label: 'not in list' },
-  { value: FILTER_OP.isNull, label: 'is null' },
-  { value: FILTER_OP.notNull, label: 'is not null' },
-  { value: FILTER_OP.isEmpty, label: "is empty ('')" },
-  { value: FILTER_OP.notEmpty, label: 'is not empty' },
-];
+  { value: FILTER_OP.between, label: t('wv.op.between') },
+  { value: FILTER_OP.notBetween, label: t('wv.op.notBetween') },
+  { value: FILTER_OP.in, label: t('wv.op.inList') },
+  { value: FILTER_OP.notIn, label: t('wv.op.notInList') },
+  { value: FILTER_OP.isNull, label: t('wv.op.isNull') },
+  { value: FILTER_OP.notNull, label: t('wv.op.isNotNull') },
+  { value: FILTER_OP.isEmpty, label: t('wv.op.isEmpty') },
+  { value: FILTER_OP.notEmpty, label: t('wv.op.isNotEmpty') },
+]);
 
 const NO_VALUE_OPS = [FILTER_OP.isNull, FILTER_OP.notNull, FILTER_OP.isEmpty, FILTER_OP.notEmpty];
 const DUAL_VALUE_OPS = [FILTER_OP.between, FILTER_OP.notBetween];
@@ -291,20 +306,89 @@ function isEnumColumn(name: string): boolean {
   const f = fieldOf(name);
   return !!(f && /^(enum|set)/i.test(f.simpleType || f.type || '') && enumValuesOf(name).length);
 }
-function isDateTimeColumn(name: string): boolean {
-  const t = typeStrOf(name);
-  return t.includes('datetime') || t.includes('timestamp');
+/**
+ * 列的时间语义（date / time / datetime / year），非时间列为 null。
+ * 判定逻辑集中在 utils/temporal.ts，避免过去「timestamp 被判成仅时间」那类
+ * 靠模板 v-if 顺序侥幸兜住的子串匹配。
+ */
+function temporalKindOf(name: string): TemporalKind | null {
+  return classifyTemporal(fieldOf(name)?.simpleType || fieldOf(name)?.type);
 }
-function isDateColumn(name: string): boolean {
-  const t = typeStrOf(name);
-  return t === 'date' || (t.includes('date') && !t.includes('time'));
-}
-function isTimeColumn(name: string): boolean {
-  const t = typeStrOf(name);
-  return t === 'time' || (t.includes('time') && !t.includes('date'));
-}
+
 function isNumberColumn(name: string): boolean {
   return NUMBER_TYPES.has(typeStrOf(name));
+}
+
+/**
+ * 单元格编辑：该值能否用原生日期控件承载。
+ * 承载不了（超范围 TIME、带时区的 timestamptz、零日期、非零小数秒）时退化为
+ * 纯文本输入，原样进原样出，不因控件表达力不足而改写数据。
+ */
+function pickerKindFor(name: string, raw: unknown): TemporalKind | null {
+  const kind = temporalKindOf(name);
+  if (!kind || kind === 'year') return null;
+  return canUseNativePicker(kind, raw) ? kind : null;
+}
+
+/** 筛选面板的日期控件：条件值由用户输入，空值也应能直接选。 */
+function filterPickerKindFor(name: string, value: string | undefined): TemporalKind | null {
+  const kind = temporalKindOf(name);
+  if (!kind || kind === 'year') return null;
+  return canUseNativePicker(kind, value ?? '') ? kind : null;
+}
+
+/**
+ * 筛选条件值 → 原生控件 value。
+ *
+ * 条件值本身始终以 **DB 文本**保存（`2024-01-15 10:30:45`），由 buildCondition
+ * 直接拼进 SQL；只在渲染时转成原生格式（`…T…`），避免两种格式在状态里混用。
+ */
+function temporalInputValue(name: string, value: string | undefined): string {
+  const kind = filterPickerKindFor(name, value);
+  if (!kind) return value ?? '';
+  return toInputValue(kind, value ?? '') ?? '';
+}
+
+/** 原生控件 value → 条件值（DB 文本）。 */
+function onTemporalFilterInput(cond: Cond, key: 'value' | 'value2', event: Event): void {
+  const kind = temporalKindOf(cond.column);
+  const raw = (event.target as HTMLInputElement).value;
+  cond[key] = kind ? toSqlValue(kind, raw) : raw;
+}
+
+/** 文本输入框的占位提示：多值列表 / 时间格式 / 通用。 */
+function filterPlaceholderFor(cond: Cond): string {
+  if (MULTI_VALUE_OPS.includes(cond.op)) return t('wv.grid.valueList');
+  const kind = temporalKindOf(cond.column);
+  if (kind) return formatHintFor(kind);
+  return t('wv.grid.valuePlaceholder');
+}
+
+/**
+ * 插入行的时间控件。与单元格编辑同一套规则：
+ * newRow 里存 DB 文本，渲染时转原生格式，change 时转回。
+ * 过去插入行是清一色的纯文本输入，没有任何类型化控件。
+ */
+function insertPickerKindFor(name: string): TemporalKind | null {
+  return filterPickerKindFor(name, newRow.value[name]);
+}
+
+function insertInputValue(name: string): string {
+  const kind = insertPickerKindFor(name);
+  if (!kind) return newRow.value[name] ?? '';
+  return toInputValue(kind, newRow.value[name] ?? '') ?? '';
+}
+
+function onTemporalInsertInput(name: string, event: Event): void {
+  const kind = temporalKindOf(name);
+  const raw = (event.target as HTMLInputElement).value;
+  newRow.value[name] = kind ? toSqlValue(kind, raw) : raw;
+}
+
+/** 插入行的占位提示：时间列给出期望格式，其余沿用 NULL。 */
+function insertPlaceholderFor(name: string): string {
+  const kind = temporalKindOf(name);
+  return kind ? formatHintFor(kind) : t('wv.common.null');
 }
 
 function addCondition() {
@@ -340,7 +424,7 @@ const activeFilterSummary = computed(() => {
 /** 与表导出（commands/database.ts）保持同一格式集合。 */
 type ExportFormat = 'sql' | 'csv' | 'json' | 'xlsx' | 'xml';
 
-const EXPORT_FORMATS: { format: ExportFormat; label: string }[] = [
+const ALL_EXPORT_FORMATS: { format: ExportFormat; label: string }[] = [
   { format: 'sql', label: 'SQL' },
   { format: 'csv', label: 'CSV' },
   { format: 'json', label: 'JSON' },
@@ -348,8 +432,16 @@ const EXPORT_FORMATS: { format: ExportFormat; label: string }[] = [
   { format: 'xml', label: 'XML' },
 ];
 
+/**
+ * 可用导出格式。Excel 走可选依赖 xlsx，未安装时必须从菜单里去掉 ——
+ * 否则用户点了才在扩展端撞上 'xlsx library not available'。
+ */
+const EXPORT_FORMATS = computed(() => ALL_EXPORT_FORMATS.filter(
+  (f) => f.format !== 'xlsx' || props.xlsxAvailable,
+));
+
 function exportData(format: ExportFormat) {
-  if (!props.rows.length) return;
+  if (!props.rows.length) return showToast(t('wv.grid.nothingToExport'));
   post({ type: 'exportData', format, columns: visibleFields.value.map(f => f.name), rows: props.rows });
 }
 
@@ -382,7 +474,8 @@ function saveInsert() {
 }
 
 function copyAsInsert() {
-  if (!props.tableName || !props.rows.length) return;
+  if (!props.tableName) return showToast(t('wv.grid.copyNeedsTable'));
+  if (!props.rows.length) return showToast(t('wv.grid.nothingToCopy'));
   const targets = selectedRows.value.length ? selectedRows.value : props.rows;
   const cols = visibleFields.value.map((f) => f.name);
   const esc = (v: any): string => (v === null || v === undefined) ? 'NULL' : `'${String(v).replace(/'/g, "''")}'`;
@@ -393,7 +486,7 @@ function copyAsInsert() {
     return `INSERT INTO ${target} (${cols.map(q).join(', ')}) VALUES (${vals});`;
   }).join('\n');
   void navigator.clipboard.writeText(sql).then(() => {
-    showToast(`Copied ${targets.length} INSERT statement(s)`);
+    showToast(t('wv.grid.copiedInserts', { count: targets.length }));
   });
 }
 
@@ -433,12 +526,12 @@ watch(() => props.filterConditions, (conds) => {
     </button>
     <template v-if="hasTable">
       <div class="filter-wrap">
-        <button class="btn" @click="toggleFilterPanel">Filter</button>
+        <button class="btn" @click="toggleFilterPanel">{{ t('wv.grid.filter') }}</button>
         <span v-if="activeFilterSummary" class="filter-summary" @click="toggleFilterPanel">{{ activeFilterSummary }}</span>
         <div v-if="showFilter" class="filter-panel">
           <div v-for="(cond, index) in conditions" :key="index" class="filter-row">
             <select v-model="cond.column" class="input col-select">
-              <option value="">-- column --</option>
+              <option value="">{{ t('wv.grid.chooseColumn') }}</option>
               <option v-for="f in fields" :key="f.name" :value="f.name">{{ f.name }}</option>
             </select>
             <select v-model="cond.op" class="input op-select">
@@ -446,52 +539,49 @@ watch(() => props.filterConditions, (conds) => {
             </select>
             <template v-if="!NO_VALUE_OPS.includes(cond.op)">
               <template v-if="DUAL_VALUE_OPS.includes(cond.op)">
-                <input v-model="cond.value" class="input" placeholder="from" />
+                <input v-if="filterPickerKindFor(cond.column, cond.value)"
+                  class="input"
+                  :type="inputTypeFor(filterPickerKindFor(cond.column, cond.value)!)"
+                  step="1"
+                  :value="temporalInputValue(cond.column, cond.value)"
+                  @change="onTemporalFilterInput(cond, 'value', $event)" />
+                <input v-else v-model="cond.value" class="input" :placeholder="t('wv.grid.valueFrom')" />
                 <span class="sep">~</span>
-                <input v-model="cond.value2" class="input" placeholder="to" />
+                <input v-if="filterPickerKindFor(cond.column, cond.value2)"
+                  class="input"
+                  :type="inputTypeFor(filterPickerKindFor(cond.column, cond.value2)!)"
+                  step="1"
+                  :value="temporalInputValue(cond.column, cond.value2)"
+                  @change="onTemporalFilterInput(cond, 'value2', $event)" />
+                <input v-else v-model="cond.value2" class="input" :placeholder="t('wv.grid.valueTo')" />
               </template>
               <select v-else-if="isEnumColumn(cond.column)" v-model="cond.value" class="input">
-                <option value="">-- value --</option>
+                <option value="">{{ t('wv.grid.chooseValue') }}</option>
                 <option v-for="ev in enumValuesOf(cond.column)" :key="ev" :value="ev">{{ ev }}</option>
               </select>
-              <VueDatePicker
-                v-else-if="isDateTimeColumn(cond.column)"
-                v-model="cond.value"
-                :enable-time-picker="true"
-                format="yyyy-MM-dd HH:mm"
-                model-type="yyyy-MM-dd HH:mm"
-                auto-apply
-                teleport-to="body"
-                :placeholder="'datetime...'"
-                class="dp-input"
-              />
-              <VueDatePicker
-                v-else-if="isDateColumn(cond.column)"
-                v-model="cond.value"
-                :enable-time-picker="false"
-                format="yyyy-MM-dd"
-                model-type="yyyy-MM-dd"
-                auto-apply
-                teleport-to="body"
-                :placeholder="'date...'"
-                class="dp-input"
-              />
-              <input v-else-if="isTimeColumn(cond.column)" v-model="cond.value" class="input" type="time" />
-              <input v-else-if="isNumberColumn(cond.column)" v-model="cond.value" class="input" type="number" />
-              <input v-else v-model="cond.value" class="input" :placeholder="MULTI_VALUE_OPS.includes(cond.op) ? 'v1, v2, v3' : 'value...'" />
-            </template>
+              <!-- 单值时间条件：原生控件；step=1 让秒位出现（默认粒度是分钟） -->
+              <input v-else-if="!MULTI_VALUE_OPS.includes(cond.op) && filterPickerKindFor(cond.column, cond.value)"
+                class="input"
+                :type="inputTypeFor(filterPickerKindFor(cond.column, cond.value)!)"
+                step="1"
+                :value="temporalInputValue(cond.column, cond.value)"
+                @change="onTemporalFilterInput(cond, 'value', $event)" />
+              <input v-else-if="isNumberColumn(cond.column) && !MULTI_VALUE_OPS.includes(cond.op)"
+                v-model="cond.value" class="input" type="number" />
+              <input v-else v-model="cond.value" class="input"
+                :placeholder="filterPlaceholderFor(cond)" /></template>
             <button class="btn" @click="removeCondition(index)">✕</button>
           </div>
           <div class="filter-actions">
-            <button class="btn" @click="addCondition">+ Add</button>
-            <button class="btn primary" @click="applyFilter">Apply</button>
+            <button class="btn" @click="addCondition">{{ t('wv.grid.addCondition') }}</button>
+            <button class="btn primary" @click="applyFilter">{{ t('wv.common.apply') }}</button>
           </div>
         </div>
       </div>
     </template>
-    <button v-if="hasTable" class="btn" @click="$emit('resetProfile')">Reset Layout</button>
+    <button v-if="hasTable" class="btn" @click="$emit('resetProfile')">{{ t('wv.grid.resetLayout') }}</button>
     <div v-if="hasTable" class="col-menu-wrap">
-      <button class="btn" @click="showColumnMenu = !showColumnMenu">Columns</button>
+      <button class="btn" @click="showColumnMenu = !showColumnMenu">{{ t('wv.grid.columns') }}</button>
       <div v-if="showColumnMenu" class="col-menu">
         <label v-for="f in fields" :key="f.name" class="col-menu-item">
           <input type="checkbox" :checked="!isHidden(f.name)" @change="toggleColumnVisibility(f.name)" />
@@ -500,14 +590,14 @@ watch(() => props.filterConditions, (conds) => {
       </div>
     </div>
     <div class="export-wrap">
-      <button class="btn" :disabled="!rows.length" @click="startExport()">Export ▾</button>
+      <button class="btn" :disabled="!rows.length" @click="startExport()">{{ t('wv.grid.export') }} ▾</button>
       <div v-if="showExport" class="export-menu">
         <button v-for="f in EXPORT_FORMATS" :key="f.format" class="menu-item"
           @click="startExport(f.format)">{{ f.label }}</button>
       </div>
     </div>
-    <button v-if="canModifyRows" class="btn" @click="startInsert">Insert Row</button>
-    <button v-if="hasTable" class="btn" :disabled="!rows.length" @click="copyAsInsert">Copy INSERT</button>
+    <button v-if="canModifyRows" class="btn" @click="startInsert">{{ t('wv.grid.insertRow') }}</button>
+    <button v-if="hasTable" class="btn" :disabled="!rows.length" @click="copyAsInsert">{{ t('wv.grid.copyInsert') }}</button>
   </div>
   <div class="grid-wrap">
     <table>
@@ -530,11 +620,22 @@ watch(() => props.filterConditions, (conds) => {
         <tr v-if="inserting" class="insert-row">
           <td v-if="canSelectRows"></td>
           <td v-for="f in visibleFields" :key="f.name" :style="columnStyle(f.name)">
-            <input v-model="newRow[f.name]" class="cell-edit" placeholder="NULL" />
+            <select v-if="isEnumColumn(f.name)" v-model="newRow[f.name]" class="cell-edit">
+              <option value="">{{ t('wv.common.null') }}</option>
+              <option v-for="ev in enumValuesOf(f.name)" :key="ev" :value="ev">{{ ev }}</option>
+            </select>
+            <input v-else-if="insertPickerKindFor(f.name)" class="cell-edit"
+              :type="inputTypeFor(insertPickerKindFor(f.name)!)" step="1"
+              :value="insertInputValue(f.name)"
+              @change="onTemporalInsertInput(f.name, $event)" />
+            <input v-else-if="isNumberColumn(f.name)" v-model="newRow[f.name]" class="cell-edit"
+              type="number" :placeholder="t('wv.common.null')" />
+            <input v-else v-model="newRow[f.name]" class="cell-edit"
+              :placeholder="insertPlaceholderFor(f.name)" />
           </td>
           <td>
-            <button class="btn primary" @click="saveInsert">Save</button>
-            <button class="btn" @click="cancelInsert">Cancel</button>
+            <button class="btn primary" @click="saveInsert">{{ t('wv.common.save') }}</button>
+            <button class="btn" @click="cancelInsert">{{ t('wv.common.cancel') }}</button>
           </td>
         </tr>
         <tr v-for="(row, idx) in rows" :key="idx" :class="{ 'row-selected': isRowSelected(row) }">
@@ -545,24 +646,20 @@ watch(() => props.filterConditions, (conds) => {
           </td>
           <td v-for="f in visibleFields" :key="f.name" :style="columnStyle(f.name)"
             @dblclick="canModifyRows && startEdit(row, f)"
-            :title="canModifyRows && getPk(row) ? 'Double-click to edit' : ''">
+            :title="canModifyRows && getPk(row) ? t('wv.grid.doubleClickToEdit') : ''">
             <template v-if="editingCell === `${pkKey(row)}:${f.name}`">
               <div ref="editContainer" class="cell-edit-wrap">
-                <input v-if="!isDateTimeColumn(f.name) && !isDateColumn(f.name) && !isTimeColumn(f.name)"
-                  ref="editInput" v-model="editValue" class="cell-edit"
+                <!--
+                  时间列走原生 date / time / datetime-local；step=1 是关键，
+                  不加的话控件粒度为分钟，TIME 与 DATETIME 的秒会被吃掉。
+                  editKind 为 null 时（超范围 TIME、带时区 timestamptz、零日期、
+                  非零小数秒，以及所有非时间列）退化为纯文本输入。
+                -->
+                <input v-if="editKind" ref="editInput" v-model="editValue" class="cell-edit"
+                  :type="inputTypeFor(editKind)" step="1" :placeholder="formatHintFor(editKind)"
                   @keydown.enter="commitEdit(row, f)"
                   @keydown.esc="cancelEdit" />
-                <VueDatePicker v-else-if="isDateTimeColumn(f.name)" ref="editDateRef" v-model="editValue"
-                  :enable-time-picker="true" time-picker-inline format="yyyy-MM-dd HH:mm:ss" model-type="yyyy-MM-dd HH:mm:ss"
-                  auto-apply teleport-to="body" placeholder="yyyy-MM-dd HH:mm:ss" class="dp-input cell-edit"
-                  @contextmenu.prevent="openDatePicker"
-                  @closed="commitEdit(row, f)" />
-                <VueDatePicker v-else-if="isDateColumn(f.name)" ref="editDateRef" v-model="editValue"
-                  :enable-time-picker="false" format="yyyy-MM-dd" model-type="yyyy-MM-dd"
-                  auto-apply teleport-to="body" placeholder="yyyy-MM-dd" class="dp-input cell-edit"
-                  @contextmenu.prevent="openDatePicker"
-                  @closed="commitEdit(row, f)" />
-                <input v-else ref="editInput" v-model="editValue" class="cell-edit" type="time"
+                <input v-else ref="editInput" v-model="editValue" class="cell-edit"
                   @keydown.enter="commitEdit(row, f)"
                   @keydown.esc="cancelEdit" />
               </div>
@@ -577,11 +674,11 @@ watch(() => props.filterConditions, (conds) => {
   </div>
   <div v-if="pendingDelete.length" class="modal-mask" @click.self="cancelDelete">
     <div class="modal">
-      <div class="modal-title">Delete rows</div>
-      <div class="modal-body">Delete {{ pendingDelete.length }} selected row(s)? This cannot be undone.</div>
+      <div class="modal-title">{{ t('wv.grid.deleteRows') }}</div>
+      <div class="modal-body">{{ t('wv.grid.confirmDeleteRows', { count: pendingDelete.length }) }}</div>
       <div class="modal-actions">
-        <button class="btn" @click="cancelDelete">Cancel</button>
-        <button class="btn danger" @click="confirmDelete">Delete</button>
+        <button class="btn" @click="cancelDelete">{{ t('wv.common.cancel') }}</button>
+        <button class="btn danger" @click="confirmDelete">{{ t('wv.common.delete') }}</button>
       </div>
     </div>
   </div>
@@ -624,10 +721,6 @@ td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
 .filter-row .op-select { flex: 0 0 100px; }
 .filter-row .input { flex: 1; min-width: 0; }
 .filter-row .sep { flex: 0 0 auto; color: var(--vscode-descriptionForeground, #808080); font-size: 12px; }
-.filter-row .dp-input { flex: 1; min-width: 0; }
-.filter-row .dp-input :deep(input) { width: 100%; font-size: 12px; padding: 4px 8px;
-  background: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #d4d4d4);
-  border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 3px; box-sizing: border-box; }
 .filter-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
 .filter-summary { font-size: 11px; color: var(--vscode-descriptionForeground, #808080); cursor: pointer; max-width: 300px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -648,79 +741,33 @@ td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
 </style>
 
 <style>
-/* VueDatePicker 主题对齐 VS Code 深色界面（菜单 teleport 到 body，需全局覆盖） */
-.dp__menu {
-  background: var(--vscode-editorWidget-background, var(--vscode-editor-background)) !important;
-  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)) !important;
-  border-radius: 4px !important;
-  color: var(--vscode-foreground, #cccccc) !important;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.35) !important;
+/*
+ * 原生日期/时间控件的主题适配。
+ *
+ * 用原生控件替掉自绘弹层后，不再需要几十行 !important 去追第三方组件的内部类名：
+ * `color-scheme` 一行就让浏览器把日历弹层、下拉箭头、选中态整体切到深色，
+ * 且随 VS Code 主题自动切换。这里只补输入框本身的配色与图标反色。
+ */
+.vscode-dark, .vscode-high-contrast { color-scheme: dark; }
+.vscode-light, .vscode-high-contrast-light { color-scheme: light; }
+
+input[type="date"], input[type="time"], input[type="datetime-local"] {
+  font-family: var(--vscode-font-family, sans-serif);
 }
-.dp__calendar,
-.dp__calendar_header,
-.dp__calendar_header_separator,
-.dp__month_year_select,
-.dp__month_year_wrap,
-.dp__overlay,
-.dp__time_col,
-.dp__time_row,
-.dp__time_controls {
-  background: transparent !important;
-  color: var(--vscode-foreground, #cccccc) !important;
+/* 深色主题下日历/时钟图标默认是黑色，需反色才看得见 */
+.vscode-dark input[type="date"]::-webkit-calendar-picker-indicator,
+.vscode-dark input[type="time"]::-webkit-calendar-picker-indicator,
+.vscode-dark input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+.vscode-high-contrast input[type="date"]::-webkit-calendar-picker-indicator,
+.vscode-high-contrast input[type="time"]::-webkit-calendar-picker-indicator,
+.vscode-high-contrast input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  cursor: pointer;
+  opacity: 0.75;
 }
-.dp__month_year_select,
-.dp__button,
-.dp__action_button,
-.dp__arrow_button {
-  color: var(--vscode-foreground, #cccccc) !important;
-}
-.dp__month_year_select:hover,
-.dp__button:hover,
-.dp__arrow_button:hover,
-.dp__overlay_cell:hover,
-.dp__month_year_select:hover .dp__overlay_cell {
-  background: var(--vscode-list-hoverBackground, #2a2d2e) !important;
-}
-.dp__cell_inner {
-  color: var(--vscode-foreground, #cccccc) !important;
-  border-radius: 3px !important;
-}
-.dp__cell_inner:hover {
-  background: var(--vscode-list-hoverBackground, #2a2d2e) !important;
-}
-.dp__today {
-  border-color: var(--vscode-focusBorder, #007fd4) !important;
-  color: var(--vscode-textLink-foreground, var(--vscode-focusBorder)) !important;
-}
-.dp__active_date,
-.dp__range_end,
-.dp__range_start,
-.dp__range_between {
-  background: var(--vscode-button-background, #0e639c) !important;
-  color: var(--vscode-button-foreground, #ffffff) !important;
-}
-.dp__now_invalid,
-.dp__cell_disabled,
-.dp__cell_outside {
-  color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground)) !important;
-}
-.dp__svg {
-  fill: var(--vscode-foreground, #cccccc) !important;
-}
-.dp__input {
-  background: var(--vscode-input-background, #3c3c3c) !important;
-  color: var(--vscode-input-foreground, #d4d4d4) !important;
-  border: 1px solid var(--vscode-input-border, #3c3c3c) !important;
-  border-radius: 3px !important;
-  font-size: 13px !important;
-  padding: 2px 6px !important;
-}
-.dp__input_focus,
-.dp__input:hover {
-  border-color: var(--vscode-focusBorder, #007fd4) !important;
-}
-.dp__overlay_cell_active {
-  background: var(--vscode-button-background, #0e639c) !important;
-  color: var(--vscode-button-foreground, #ffffff) !important;
+.vscode-dark input[type="date"]::-webkit-calendar-picker-indicator:hover,
+.vscode-dark input[type="time"]::-webkit-calendar-picker-indicator:hover,
+.vscode-dark input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
 }
 </style>

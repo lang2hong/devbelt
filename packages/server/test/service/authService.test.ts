@@ -172,6 +172,46 @@ describe('AuthService.login', () => {
     await userRepo.create('legacy@example.com', legacy, 'user', 'free');
     await expect(auth.login('legacy@example.com', 'legacy-pass')).resolves.toBeTruthy();
   });
+
+  /**
+   * 回归：旧 sha256 哈希登录成功后应就地升级为 scrypt。
+   * `upgradePasswordIfNeeded` 此前无任何调用点，这批用户永远停在弱哈希，
+   * 且其 legacySalt 取自 JWT_SECRET —— 轮换密钥后密码再也验不过。
+   */
+  it('登录后把 legacy sha256 升级为 scrypt', async () => {
+    const { auth, userRepo } = setup();
+    const { createHash } = await import('crypto');
+    const legacy = createHash('sha256').update(`${JWT_SECRET}legacy-pass`).digest('hex');
+    const created = await userRepo.create('up@example.com', legacy, 'user', 'free');
+
+    expect((await userRepo.findById(created.id))!.passwordHash).toBe(legacy);
+    await auth.login('up@example.com', 'legacy-pass');
+
+    const after = (await userRepo.findById(created.id))!.passwordHash;
+    expect(after.startsWith('scrypt$')).toBe(true);
+    expect(after).not.toBe(legacy);
+  });
+
+  it('升级后仍能用同一密码登录（新旧哈希都验得过）', async () => {
+    const { auth, userRepo } = setup();
+    const { createHash } = await import('crypto');
+    const legacy = createHash('sha256').update(`${JWT_SECRET}pw12345678`).digest('hex');
+    await userRepo.create('twice@example.com', legacy, 'user', 'free');
+
+    await expect(auth.login('twice@example.com', 'pw12345678')).resolves.toBeTruthy();
+    // 第二次走的已是 scrypt 路径
+    await expect(auth.login('twice@example.com', 'pw12345678')).resolves.toBeTruthy();
+  });
+
+  it('已是 scrypt 的哈希不会被重写', async () => {
+    const { auth, userRepo } = setup();
+    const reg = await auth.register('keep@example.com', 'password123');
+    const before = (await userRepo.findById(reg.user.id))!.passwordHash;
+
+    await auth.login('keep@example.com', 'password123');
+
+    expect((await userRepo.findById(reg.user.id))!.passwordHash).toBe(before);
+  });
 });
 
 describe('AuthService.refresh', () => {

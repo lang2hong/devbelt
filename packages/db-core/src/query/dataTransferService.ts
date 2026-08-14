@@ -61,20 +61,16 @@ export class DataTransferService {
           errors.push(`${table}: schema sync failed - ${(err as Error).message}`);
           continue;
         }
-      } else if (diff?.status === 'added') {
-        try {
-          await this.transferTable(
-            sourceQuery, sourceMeta, sourceTable, sourceDb, table,
-            targetQuery, targetMeta, targetDb,
-            { includeData, pageSize, isCancelled },
-          );
-        } catch (err) {
-          errors.push(`${table}: transfer failed - ${(err as Error).message}`);
-          continue;
-        }
       }
 
-      if (includeData && diff?.status !== 'added') {
+      // 数据阶段对**所有**需要同步的表执行，包括 status='added'。
+      //
+      // 原先这里排除了 'added'（`diff?.status !== 'added'`），配套一个
+      // `else if (diff?.status === 'added')` 分支想走 transferTable 补数据。
+      // 但那个 else-if 永不可达：上面的 `if (diff && diff.status !== 'unchanged')`
+      // 已经吞掉了 'added'。结果是新增表只建了结构、数据从未复制，
+      // 而 transferTable 成了死代码。
+      if (includeData) {
         try {
           onProgress?.({ table, phase: 'data', completed: i, total });
           await this.syncTableData(
@@ -92,6 +88,12 @@ export class DataTransferService {
     return { tablesSynced: total - errors.length, errors };
   }
 
+  /**
+   * 单表迁移（DROP + 重建 DDL + 分页灌数据）。
+   *
+   * 供调用方单独迁移一张表使用。`transferDatabase` 走的是
+   * 「schema diff 同步结构 + syncTableData 同步数据」两阶段路径，不经过这里。
+   */
   static async transferTable(
     sourceQuery: QueryService,
     sourceMeta: MetadataService,
@@ -130,12 +132,9 @@ export class DataTransferService {
 
       const rows = result.rows as Record<string, unknown>[];
       const values = rows.map((row) => {
-        const vals = cols.map((c) => {
-          const v = row[c];
-          if (v === null || v === undefined) return 'NULL';
-          if (typeof v === 'number') return String(v);
-          return `'${String(v).replace(/'/g, "''")}'`;
-        }).join(', ');
+        // 用**目标**方言转义：这批值要写进目标库，字符串字面量规则以目标为准。
+        // 此处曾自建只处理单引号的转义，跨库迁移时反斜杠会被 MySQL 当转义符吃掉。
+        const vals = cols.map((c) => targetQuery.dialect.escapeValue(row[c])).join(', ');
         return `(${vals})`;
       }).join(',\n');
 
@@ -174,6 +173,21 @@ export class DataTransferService {
   }
 }
 
+/**
+ * 按分号切分 SQL，**丢弃注释**，只产出可执行语句。
+ *
+ * 两处必须注意：
+ *
+ * 1. `--` 注释不能写回缓冲区。原实现是 `buf += sql.slice(i, nl)`，把注释文本
+ *    留在了当前语句里。`generateSyncSql` 的产物形如
+ *    `-- Data sync: …\n\n-- t: 1 row\nINSERT INTO …;`，整段直到第一个分号才被
+ *    切开，于是切出的唯一元素以 `--` 开头，被调用方的 `startsWith('--')` 过滤
+ *    整条跳过 —— 数据同步的 INSERT/UPDATE/DELETE **从未真正执行**。
+ *    这里与 `/* *\/` 的处理保持一致：直接跳过，不入 buf。
+ *
+ * 2. 注释内的分号不参与切分（跳过整段注释后 `;` 自然不会被看到），
+ *    避免 `-- note; more` 把一条语句切成两半。
+ */
 function splitSql(sql: string): string[] {
   const result: string[] = [];
   let buf = '';
@@ -189,7 +203,7 @@ function splitSql(sql: string): string[] {
     if (!inSingle && !inDouble && !inBacktick && ch === '-' && next === '-') {
       const nl = sql.indexOf('\n', i);
       if (nl === -1) { i = sql.length; continue; }
-      buf += sql.slice(i, nl);
+      // 跳过注释正文，保留换行让语句之间不粘连
       i = nl;
       continue;
     }

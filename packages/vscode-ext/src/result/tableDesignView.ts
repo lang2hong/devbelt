@@ -3,6 +3,8 @@ import { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from './baseWebView';
 import { confirmSqlExecution } from '../utils/sqlSafety';
 import { DialectRegistry, validateIdent } from '@db-client/core';
+import { DataChangeEvent, eventBus } from '../utils/event';
+import { AuditLogger } from '../utils/auditLogger';
 
 export class TableDesignView extends BaseWebView {
   private static current?: TableDesignView;
@@ -117,10 +119,23 @@ export class TableDesignView extends BaseWebView {
     }
   }
 
+  /**
+   * 所有 DDL 变更的唯一出口：确认 → 执行 → 重载 → 通知。
+   *
+   * 审计与事件在这里统一发出，避免每个 msg 分支各写一遍（漏一处就少一条痕迹）。
+   * schema_change 与 DataChangeEvent('ddl') 此前都没有任何写入点。
+   */
   private async mutate(op: string, fn: () => Promise<unknown>): Promise<void> {
     try {
       if (!(await confirmSqlExecution(this.conn, op))) return;
       await fn();
+      AuditLogger.tryLog({
+        action: 'schema_change',
+        connName: this.conn.name || this.conn.host,
+        database: this.database,
+        sql: op,
+      });
+      void eventBus.publish(new DataChangeEvent(this.conn.id, this.database ?? '', this.table, 'ddl'));
       await this.loadData();
       this.onMutate?.();
     } catch (err) {

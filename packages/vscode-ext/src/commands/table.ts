@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { DialectRegistry, type DatabaseType } from '@db-client/core';
 import { DbTreeNode, NodeKind } from '../tree/dbTreeNode';
 import { wrapIdentForConn } from '../utils/sql';
 import { l10n } from '../i18n';
@@ -20,9 +21,18 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
   sub('dbclient.newTable', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     connCtx.setLast(node.conn, node.database);
-    const useDb = node.database ? `USE ${wrapIdentForConn(node.conn, node.database)};\n` : '';
-    const tpl = useDb + `CREATE TABLE IF NOT EXISTS ${wrapIdentForConn(node.conn, 'new_table')} (\n  id INT AUTO_INCREMENT PRIMARY KEY,\n  name VARCHAR(255)\n);`;
-    const editor = await openSqlDocEditor(tpl);
+    // 模板由方言给出：自增主键的写法三家不同，过去统一发 MySQL 语法，
+    // PG/SQLite 用户拿到的模板直接执行会报错。
+    const dialect = DialectRegistry.get(node.conn.dbType as DatabaseType);
+    const table = wrapIdentForConn(node.conn, 'new_table');
+    const body = dialect
+      ? dialect.createTableTemplate(table)
+      : `CREATE TABLE IF NOT EXISTS ${table} (\n  id INT PRIMARY KEY,\n  name VARCHAR(255)\n);`;
+    // MySQL 才有 USE 语句；PG 用 schema、SQLite 单库，加了会报语法错
+    const useDb = node.database && node.conn.dbType === 'MYSQL'
+      ? `USE ${wrapIdentForConn(node.conn, node.database)};\n`
+      : '';
+    const editor = await openSqlDocEditor(useDb + body);
     if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
   });
 
@@ -177,9 +187,19 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
   sub('dbclient.newRoutine', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     connCtx.setLast(node.conn, node.database);
-    const useDb = node.database ? `USE ${wrapIdentForConn(node.conn, node.database)};\n\n` : '';
-    const tpl = useDb + `DELIMITER $$\nCREATE PROCEDURE new_routine()\nBEGIN\n  -- routine body\nEND$$\nDELIMITER ;`;
-    const editor = await openSqlDocEditor(tpl);
+    // 例程模板由方言给出：`DELIMITER` 是 MySQL 客户端命令，PG 不认它，
+    // 而 PG 需要 `$$ ... $$ LANGUAGE plpgsql`。
+    const dialect = DialectRegistry.get(node.conn.dbType as DatabaseType);
+    const body = dialect?.createRoutineTemplate('new_routine') ?? '';
+    if (!body) {
+      vscode.window.showWarningMessage(l10n('cmd.routinesUnsupported'));
+      return;
+    }
+    connCtx.setLast(node.conn, node.database);
+    const useDb = node.database && node.conn.dbType === 'MYSQL'
+      ? `USE ${wrapIdentForConn(node.conn, node.database)};\n\n`
+      : '';
+    const editor = await openSqlDocEditor(useDb + body);
     if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
   });
 

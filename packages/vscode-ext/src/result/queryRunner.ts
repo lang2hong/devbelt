@@ -4,7 +4,7 @@ import type { ConnectionManager } from '../connection/connectionManager';
 import type { SavedConnection } from '../connection/connectionStore';
 import { splitSqlStatements } from '../utils/sql';
 import { confirmSqlExecution } from '../utils/sqlSafety';
-import { buildCountSql, buildTableSelect, type FilterCondition } from './tableQuerySql';
+import { buildCountSql, buildTableSelect, type ColumnTypeMap, type FilterCondition } from './tableQuerySql';
 import { diagError } from '../utils/diagnostics';
 
 /**
@@ -25,6 +25,15 @@ export class QueryRunner {
   private execQueue: Promise<unknown> = Promise.resolve();
   private disposed = false;
 
+  /**
+   * 列名 → 列类型，由每次执行时已取到的元数据填充。
+   *
+   * 筛选条件要按列类型决定值是否加引号：varchar 列填 `1` 必须写成 `'1'`，
+   * 否则 MySQL 会把整列转 double 比较（`'01'`/`' 1'`/`'1abc'` 全部误命中且索引失效）。
+   * 首次执行前为空，此时一律加引号——对数值列语义等价，是安全的默认。
+   */
+  private columnTypes: ColumnTypeMap = {};
+
   constructor(
     private readonly conn: SavedConnection,
     private readonly manager: ConnectionManager,
@@ -41,13 +50,13 @@ export class QueryRunner {
     if (!this.table) return '';
     return buildTableSelect(
       this.conn.dbType, this.table, this.database, this.filterConditions,
-      this.sortCol, this.sortDir, this.offset, this.limit,
+      this.sortCol, this.sortDir, this.offset, this.limit, this.columnTypes,
     );
   }
 
   getCountSql(): string {
     if (!this.table) return '';
-    return buildCountSql(this.conn.dbType, this.table, this.database, this.filterConditions);
+    return buildCountSql(this.conn.dbType, this.table, this.database, this.filterConditions, this.columnTypes);
   }
 
   execute(
@@ -136,6 +145,12 @@ export class QueryRunner {
           cols = await session.metadata.getColumns(this.table, this.database);
           pkCols = cols.filter((c: any) => c.isPrimary).map((c: any) => c.name);
           if (pkCols.length === 0) pkCols = cols.map((c: any) => c.name);
+          // 供后续筛选/计数决定值是否加引号；首屏查询无 WHERE，因此这里填充得
+          // 及时（用户加筛选前必然已经跑过一次首屏）。取不到时保持为空，
+          // 退化为「一律加引号」的安全默认。
+          this.columnTypes = Object.fromEntries(
+            cols.map((c: any) => [c.name, c.simpleType || c.type]),
+          );
         } catch {}
       }
       let total: number | undefined;

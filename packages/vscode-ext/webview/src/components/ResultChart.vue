@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
+import { useI18n } from '../composables/useI18n';
 
 const props = defineProps<{
   rows: Record<string, unknown>[];
   fields: { name: string }[];
 }>();
+
+const { t } = useI18n();
 
 const chartType = ref<'bar' | 'line' | 'pie' | 'scatter' | 'doughnut' | 'radar'>('bar');
 const xField = ref('');
@@ -135,12 +138,12 @@ function exportChart() {
   <div class="chart-panel">
     <div class="chart-toolbar">
       <select v-model="chartType">
-        <option value="bar">Bar</option>
-        <option value="line">Line</option>
-        <option value="pie">Pie</option>
-        <option value="doughnut">Doughnut</option>
-        <option value="scatter">Scatter</option>
-        <option value="radar">Radar</option>
+        <option value="bar">{{ t('wv.chart.typeBar') }}</option>
+        <option value="line">{{ t('wv.chart.typeLine') }}</option>
+        <option value="pie">{{ t('wv.chart.typePie') }}</option>
+        <option value="doughnut">{{ t('wv.chart.typeDoughnut') }}</option>
+        <option value="scatter">{{ t('wv.chart.typeScatter') }}</option>
+        <option value="radar">{{ t('wv.chart.typeRadar') }}</option>
       </select>
       <select v-model="xField">
         <option v-for="f in allFields" :key="f" :value="f">{{ f }}</option>
@@ -151,15 +154,15 @@ function exportChart() {
       </select>
       <span class="axis-label">Y</span>
       <select v-model="aggregate">
-        <option value="none">Raw</option>
-        <option value="sum">SUM</option>
-        <option value="avg">AVG</option>
-        <option value="count">COUNT</option>
-        <option value="max">MAX</option>
-        <option value="min">MIN</option>
+        <option value="none">{{ t('wv.chart.aggRaw') }}</option>
+        <option value="sum">{{ t('wv.chart.aggSum') }}</option>
+        <option value="avg">{{ t('wv.chart.aggAvg') }}</option>
+        <option value="count">{{ t('wv.chart.aggCount') }}</option>
+        <option value="max">{{ t('wv.chart.aggMax') }}</option>
+        <option value="min">{{ t('wv.chart.aggMin') }}</option>
       </select>
-      <button class="btn" @click="renderChart">Render</button>
-      <button class="btn" @click="exportChart">Export PNG</button>
+      <button class="btn" @click="renderChart">{{ t('wv.chart.render') }}</button>
+      <button class="btn" @click="exportChart">{{ t('wv.chart.exportPng') }}</button>
     </div>
     <div class="chart-container">
       <canvas ref="chartCanvas"></canvas>

@@ -1,6 +1,8 @@
 import type { ConnectionManager } from '../connection/connectionManager';
 import type { SavedConnection } from '../connection/connectionStore';
 import { confirmSqlExecution } from '../utils/sqlSafety';
+import { DataChangeEvent, eventBus } from '../utils/event';
+import { AuditLogger } from '../utils/auditLogger';
 
 export interface RowEditorOptions {
   /** 数据变更后刷新结果（视图负责重新执行查询）。 */
@@ -35,6 +37,7 @@ export class RowEditor {
       const session = await this.manager.connect(this.conn);
       await session.data.updateCell(this.table, pkColumns, pkValues, col, val, this.database);
       this.post({ type: 'cellUpdated' });
+      this.notify('update', `UPDATE ${this.table} SET ${col} WHERE ${pkColumns.join(', ')}`, 1);
       await this.opts.refresh();
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
@@ -58,6 +61,7 @@ export class RowEditor {
         this.database,
       );
       this.post({ type: 'rowsDeleted', count: rows.length });
+      this.notify('delete', `DELETE FROM ${this.table} WHERE ${cols.join(', ')}`, rows.length);
       await this.opts.refresh();
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
@@ -69,9 +73,31 @@ export class RowEditor {
       if (!(await confirmSqlExecution(this.conn, `INSERT INTO ${this.table} ...`))) return;
       const session = await this.manager.connect(this.conn);
       await session.data.insertRow(this.table, columns, values, this.database);
+      this.notify('insert', `INSERT INTO ${this.table} (${columns.join(', ')})`, 1);
       await this.opts.refresh();
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
     }
+  }
+
+  /**
+   * 发布数据变更事件 + 写审计。
+   *
+   * DataChangeEvent 此前只有类型定义、从无发布点；审计日志也只记录查询执行，
+   * 数据编辑不留痕 —— 审计面板看不到谁改了哪一行。
+   */
+  private notify(
+    operation: 'insert' | 'update' | 'delete',
+    sql: string,
+    rowCount: number,
+  ): void {
+    void eventBus.publish(new DataChangeEvent(this.conn.id, this.database ?? '', this.table, operation));
+    AuditLogger.tryLog({
+      action: operation === 'insert' ? 'data_insert' : operation === 'update' ? 'data_edit' : 'data_delete',
+      connName: this.conn.name || this.conn.host,
+      database: this.database,
+      sql,
+      rowCount,
+    });
   }
 }

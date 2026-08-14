@@ -12,6 +12,15 @@ import { columnTypesFor } from './typeCatalog';
 export class MysqlDialect implements SqlDialect {
   readonly dbType = DatabaseType.MYSQL;
   readonly columnTypes = columnTypesFor(DatabaseType.MYSQL);
+
+  createTableTemplate(table: string): string {
+    return `CREATE TABLE IF NOT EXISTS ${table} (\n  \`id\` INT AUTO_INCREMENT PRIMARY KEY,\n  \`name\` VARCHAR(255)\n);`;
+  }
+
+  /** MySQL 需要 DELIMITER 切换语句结束符，否则例程体内的 `;` 会被提前截断。 */
+  createRoutineTemplate(name: string): string {
+    return `DELIMITER $$\nCREATE PROCEDURE ${name}()\nBEGIN\n  -- routine body\nEND$$\nDELIMITER ;`;
+  }
   readonly capabilities: DatabaseCapabilities = {
     multiDatabaseExplorer: true,
     databases: true,
@@ -38,12 +47,17 @@ export class MysqlDialect implements SqlDialect {
     return 'SHOW DATABASES';
   }
 
+  /**
+   * 表列表。必须 SELECT `TABLE_COMMENT`：`parseTableList` 读 `row.comment`，
+   * 缺这一列时表注释恒为空（树节点 description 与 tooltip 都拿不到注释）。
+   */
   getTableListSql(database?: string): string {
+    const cols = 'TABLE_NAME AS name, TABLE_ROWS AS table_rows, TABLE_COMMENT AS comment';
     if (database) {
       validateIdent(database);
-      return `SELECT TABLE_NAME AS name, TABLE_ROWS AS table_rows FROM information_schema.tables WHERE table_schema = '${database}' AND table_type = 'BASE TABLE'`;
+      return `SELECT ${cols} FROM information_schema.tables WHERE table_schema = '${database}' AND table_type = 'BASE TABLE'`;
     }
-    return `SELECT TABLE_NAME AS name, TABLE_ROWS AS table_rows FROM information_schema.tables WHERE table_type = 'BASE TABLE'`;
+    return `SELECT ${cols} FROM information_schema.tables WHERE table_type = 'BASE TABLE'`;
   }
 
   getViewListSql(database?: string): string {

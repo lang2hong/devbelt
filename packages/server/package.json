@@ -18,7 +18,8 @@
     "@fastify/mysql": "^5.0.2",
     "@fastify/sensible": "^6.0.3",
     "dotenv": "^17.4.2",
-    "fastify": "^5.11.2"
+    "fastify": "^5.11.2",
+    "mysql2": "3.23.2"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

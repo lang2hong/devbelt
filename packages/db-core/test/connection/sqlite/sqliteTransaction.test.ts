@@ -47,6 +47,43 @@ describe('SQLite single-process transaction (real sqlite3 CLI)', () => {
   });
 });
 
+/**
+ * sqlite3 CLI 的 `-bail` 缺陷实证（不加该参数时批处理非原子）：
+ *
+ * sqlite3 从 stdin 读 SQL 默认在**语法错误处不中止**，而是打印错误后继续执行到
+ * `COMMIT;`。因此 `BEGIN; INSERT A; INSERT B; INSERT bad; COMMIT;` 会把 A、B
+ * 提交掉。`SQLite.query` 当前 spawn 参数（[-header,-nullvalue,-cmd,.mode tcl]）
+ * 不含 `-bail`，所以同样的问题存在于：
+ *  - BackupService.restore 的 singleStatement（F33 只保证事务不被进程边界切断）
+ *  - importService.importRowsBatched 声称的「事务原子性」
+ *
+ * 加 `-bail` 后失败即中止并回滚，残留 0 行。此对照把缺陷固定为可回归验证。
+ */
+describe('sqlite3 CLI -bail 影响事务原子性', () => {
+  const sql = 'CREATE TABLE t(id INTEGER);\nBEGIN;\nINSERT INTO t VALUES(1);\nINSERT INTO t VALUES(2);\nINSERT INTO bad;\nCOMMIT;\n';
+
+  it('不带 -bail（当前 SQLite.query 行为）：坏语句被跳过，先前写入被提交', async () => {
+    const db = path.join(os.tmpdir(), `bail-nobail-${Date.now()}.db`);
+    const { execFileSync } = await import('child_process');
+    // 语法错误会 print 到 stderr，写入失败符合预期；命令整体不抛因为坏语句不是强制错误码
+    try {
+      execFileSync('sqlite3', [db], { input: sql, encoding: 'utf8' });
+    } catch { /* stderr 里的语法错误是预期的 */ }
+    const out = execFileSync('sqlite3', [db, 'SELECT COUNT(*) FROM t;'], { encoding: 'utf8' }).trim();
+    expect(out).toBe('2');
+  });
+
+  it('带 -bail：失败即中止并回滚，残留 0 行', async () => {
+    const db = path.join(os.tmpdir(), `bail-yes-${Date.now()}.db`);
+    const { execFileSync } = await import('child_process');
+    try {
+      execFileSync('sqlite3', ['-bail', db], { input: sql, encoding: 'utf8' });
+    } catch { /* bad 语句导致 -bail 中止退出码非 0，符合预期 */ }
+    const out = execFileSync('sqlite3', [db, 'SELECT COUNT(*) FROM t;'], { encoding: 'utf8' }).trim();
+    expect(out).toBe('0');
+  });
+});
+
 describe('SqliteConnection.beginTransaction', () => {
   it('fails explicitly instead of pretending the transaction started', async () => {
     const conn = new SqliteConnection({ dbPath: '/tmp/never-opened.db' } as any, 'sqlite3');

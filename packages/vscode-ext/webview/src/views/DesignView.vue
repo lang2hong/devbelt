@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
+import { useI18n } from '../composables/useI18n';
 
 const { post, onMessage } = useVsCode();
+const { t } = useI18n();
 
 const tab = ref<'cols' | 'idx' | 'ddl'>('cols');
 const columns = ref<any[]>([]);
@@ -12,6 +14,27 @@ const error = ref('');
 
 const canReorder = ref(false);
 const dbType = ref('');
+
+/**
+ * 表单校验提示。
+ *
+ * 与 `error` 分开：`error` 走 `v-if/v-else`，写进去会把整个表单替换掉，
+ * 用户就看不到自己填了一半的内容了。这里是行内横幅，表单保持可见可改。
+ * 之前这些校验分支是静默 `return`，点 Add 完全没反应。
+ */
+const notice = ref('');
+let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+
+function notify(msg: string): void {
+  notice.value = msg;
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => { notice.value = ''; }, 4000);
+}
+
+function clearNotice(): void {
+  notice.value = '';
+  clearTimeout(noticeTimer);
+}
 /** 列类型候选，由扩展端按方言注入（MySQL/PG/SQLite 各不相同）。 */
 const columnTypes = ref<string[]>([]);
 
@@ -76,7 +99,7 @@ onMounted(() => {
     } else if (msg.type === 'data') {
       columns.value = msg.columns || [];
       indexes.value = msg.indexes || [];
-      ddl.value = msg.ddl || '-- No DDL';
+      ddl.value = msg.ddl || t('wv.design.noDdl');
       error.value = '';
     } else if (msg.type === 'error') {
       error.value = msg.message;
@@ -84,7 +107,10 @@ onMounted(() => {
   });
   post({ type: 'ready' });
 });
-onUnmounted(() => cleanup?.());
+onUnmounted(() => {
+  cleanup?.();
+  clearTimeout(noticeTimer);
+});
 
 function startEdit(col: any) {
   editingName.value = col.name;
@@ -104,18 +130,22 @@ function cancelEdit() {
 
 function saveEdit() {
   const f = editingCol.value;
-  if (!f || !f.type.trim()) return;
+  if (!f) return;
+  if (!f.type.trim()) return notify(t('wv.design.columnTypeRequired'));
   post({ type: 'modifyColumn', column: f.name, definition: buildDef(f) });
   editingCol.value = null;
   editingName.value = '';
+  clearNotice();
 }
 
 function saveAdd() {
   const f = newRow.value;
   const type = (f.type || defaultType.value).trim();
-  if (!f.name.trim() || !type) return;
+  if (!f.name.trim()) return notify(t('wv.design.columnNameRequired'));
+  if (!type) return notify(t('wv.design.columnTypeRequired'));
   post({ type: 'addColumn', column: f.name.trim(), definition: buildDef({ ...f, type }) });
   newRow.value = { name: '', type: '', notNull: false, defaultVal: '', comment: '' };
+  clearNotice();
 }
 
 function moveColumn(col: any, dir: 'up' | 'down') {
@@ -179,7 +209,9 @@ function saveIdxForm() {
   const f = idxForm.value;
   const name = f.name.trim();
   const cols = Object.keys(f.cols).filter((c) => f.cols[c]);
-  if (!name || !cols.length) return;
+  if (!name) return notify(t('wv.design.indexNameRequired'));
+  if (!cols.length) return notify(t('wv.design.indexColumnsRequired'));
+  clearNotice();
   if (f.oldName) {
     post({ type: 'editIndex', oldName: f.oldName, name, columns: cols, isUnique: f.unique });
   } else {
@@ -215,23 +247,27 @@ function truthy(v: unknown): boolean {
 <template>
   <div class="app">
     <div class="tabs">
-      <button :class="{ active: tab === 'cols' }" @click="tab = 'cols'">Columns</button>
-      <button :class="{ active: tab === 'idx' }" @click="tab = 'idx'">Indexes</button>
-      <button :class="{ active: tab === 'ddl' }" @click="tab = 'ddl'">DDL</button>
+      <button :class="{ active: tab === 'cols' }" @click="tab = 'cols'">{{ t('wv.design.tabColumns') }}</button>
+      <button :class="{ active: tab === 'idx' }" @click="tab = 'idx'">{{ t('wv.design.tabIndexes') }}</button>
+      <button :class="{ active: tab === 'ddl' }" @click="tab = 'ddl'">{{ t('wv.design.tabDdl') }}</button>
     </div>
     <div class="error" v-if="error">{{ error }}</div>
     <div class="content" v-else>
+      <div v-if="notice" class="notice" role="alert">
+        <span>{{ notice }}</span>
+        <button class="notice-close" :title="t('wv.common.dismiss')" @click="clearNotice">✕</button>
+      </div>
       <!-- Columns -->
       <div v-if="tab === 'cols'">
         <table class="grid">
           <thead>
             <tr>
-              <th class="c-name">Name</th>
-              <th class="c-type">Type</th>
-              <th class="c-chk">Not Null</th>
-              <th class="c-def">Default</th>
-              <th class="c-cmt">Comment</th>
-              <th class="c-act">Actions</th>
+              <th class="c-name">{{ t('wv.common.name') }}</th>
+              <th class="c-type">{{ t('wv.common.type') }}</th>
+              <th class="c-chk">{{ t('wv.design.notNull') }}</th>
+              <th class="c-def">{{ t('wv.design.default') }}</th>
+              <th class="c-cmt">{{ t('wv.design.comment') }}</th>
+              <th class="c-act">{{ t('wv.common.actions') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -242,15 +278,15 @@ function truthy(v: unknown): boolean {
                   <div class="type-cell">
                     <input v-model="editingCol.type" class="input" :placeholder="defaultType" />
                     <button class="btn sm type-toggle" :disabled="!columnTypes.length"
-                      title="Pick type" @click="openTypePicker('edit')">▾</button>
+                      :title="t('wv.design.pickType')" @click="openTypePicker('edit')">▾</button>
                   </div>
                 </td>
                 <td><input type="checkbox" v-model="editingCol.notNull" /></td>
-                <td><input v-model="editingCol.defaultVal" class="input" placeholder="NULL" /></td>
+                <td><input v-model="editingCol.defaultVal" class="input" :placeholder="t('wv.common.null')" /></td>
                 <td><input v-model="editingCol.comment" class="input" /></td>
                 <td>
-                  <button class="btn primary" @click="saveEdit">Save</button>
-                  <button class="btn" @click="cancelEdit">Cancel</button>
+                  <button class="btn primary" @click="saveEdit">{{ t('wv.common.save') }}</button>
+                  <button class="btn" @click="cancelEdit">{{ t('wv.common.cancel') }}</button>
                 </td>
               </template>
               <template v-else>
@@ -260,26 +296,26 @@ function truthy(v: unknown): boolean {
                 <td class="mono">{{ c.defaultValue ?? '' }}</td>
                 <td>{{ c.comment ?? '' }}</td>
                 <td>
-                  <button v-if="canReorder" class="btn sm" :disabled="idx === 0" @click="moveColumn(c, 'up')" title="Move up">▲</button>
-                  <button v-if="canReorder" class="btn sm" :disabled="idx === columns.length - 1" @click="moveColumn(c, 'down')" title="Move down">▼</button>
-                  <button class="btn" @click="startEdit(c)">Edit</button>
-                  <button class="btn danger" @click="dropCol(c)">Del</button>
+                  <button v-if="canReorder" class="btn sm" :disabled="idx === 0" @click="moveColumn(c, 'up')" :title="t('wv.design.moveUp')">▲</button>
+                  <button v-if="canReorder" class="btn sm" :disabled="idx === columns.length - 1" @click="moveColumn(c, 'down')" :title="t('wv.design.moveDown')">▼</button>
+                  <button class="btn" @click="startEdit(c)">{{ t('wv.common.edit') }}</button>
+                  <button class="btn danger" @click="dropCol(c)">{{ t('wv.common.del') }}</button>
                 </td>
               </template>
             </tr>
             <tr class="new-row">
-              <td><input v-model="newRow.name" class="input" placeholder="new column" /></td>
+              <td><input v-model="newRow.name" class="input" :placeholder="t('wv.design.newColumn')" /></td>
               <td>
                 <div class="type-cell">
                   <input v-model="newRow.type" class="input" :placeholder="defaultType" />
                   <button class="btn sm type-toggle" :disabled="!columnTypes.length"
-                    title="Pick type" @click="openTypePicker('new')">▾</button>
+                    :title="t('wv.design.pickType')" @click="openTypePicker('new')">▾</button>
                 </div>
               </td>
               <td><input type="checkbox" v-model="newRow.notNull" /></td>
-              <td><input v-model="newRow.defaultVal" class="input" placeholder="NULL" /></td>
+              <td><input v-model="newRow.defaultVal" class="input" :placeholder="t('wv.common.null')" /></td>
               <td><input v-model="newRow.comment" class="input" /></td>
-              <td><button class="btn primary" @click="saveAdd">+ Add</button></td>
+              <td><button class="btn primary" @click="saveAdd">{{ t('wv.design.addColumn') }}</button></td>
             </tr>
           </tbody>
         </table>
@@ -287,10 +323,10 @@ function truthy(v: unknown): boolean {
       <!-- Indexes -->
       <div v-else-if="tab === 'idx'">
         <div class="toolbar">
-          <button class="btn" @click="startAddIdx">+ Add Index</button>
+          <button class="btn" @click="startAddIdx">{{ t('wv.design.addIndex') }}</button>
         </div>
         <table class="grid">
-          <thead><tr><th class="c-name">Name</th><th>Columns</th><th class="c-chk">Unique</th><th class="c-chk">Primary</th><th class="c-act">Actions</th></tr></thead>
+          <thead><tr><th class="c-name">{{ t('wv.common.name') }}</th><th>{{ t('wv.design.tabColumns') }}</th><th class="c-chk">{{ t('wv.design.unique') }}</th><th class="c-chk">{{ t('wv.design.primary') }}</th><th class="c-act">{{ t('wv.common.actions') }}</th></tr></thead>
           <tbody>
             <tr v-for="i in indexes" :key="i.name">
               <td class="mono">{{ i.name }}</td>
@@ -298,10 +334,10 @@ function truthy(v: unknown): boolean {
               <td>{{ truthy(i.isUnique) ? 'YES' : 'NO' }}</td>
               <td>{{ truthy(i.isPrimary) ? 'YES' : 'NO' }}</td>
                 <td>
-                  <button class="btn" @click="startEditIdx(i)">Edit</button>
+                  <button class="btn" @click="startEditIdx(i)">{{ t('wv.common.edit') }}</button>
                   <button class="btn danger" :disabled="truthy(i.isPrimary)"
-                    :title="truthy(i.isPrimary) ? 'Primary key cannot be dropped as an index' : 'Drop index'"
-                    @click="dropIdx(i)">Del</button>
+                    :title="truthy(i.isPrimary) ? t('wv.design.primaryCannotDrop') : t('wv.design.dropIndexTitle')"
+                    @click="dropIdx(i)">{{ t('wv.common.del') }}</button>
                 </td>
             </tr>
           </tbody>
@@ -313,14 +349,14 @@ function truthy(v: unknown): boolean {
     <!-- 类型选择浮层：候选来自方言，有值时也展示全量（原生 datalist 会按前缀过滤而空掉） -->
     <div v-if="typePicker" class="modal-mask" @click.self="closeTypePicker">
       <div class="modal type-modal">
-        <div class="modal-title">Column type · {{ dbType }}</div>
-        <input v-model="typeFilter" class="input" placeholder="Filter types" autofocus />
+        <div class="modal-title">{{ t('wv.common.type') }} · {{ dbType }}</div>
+        <input v-model="typeFilter" class="input" :placeholder="t('wv.design.filterTypes')" autofocus />
         <div class="type-list">
           <button v-for="t in filteredTypes" :key="t" class="type-item mono" @click="chooseType(t)">{{ t }}</button>
-          <div v-if="!filteredTypes.length" class="type-empty">No matching type</div>
+          <div v-if="!filteredTypes.length" class="type-empty">{{ t('wv.design.noMatchingType') }}</div>
         </div>
         <div class="modal-actions">
-          <button class="btn" @click="closeTypePicker">Cancel</button>
+          <button class="btn" @click="closeTypePicker">{{ t('wv.common.cancel') }}</button>
         </div>
       </div>
     </div>
@@ -328,10 +364,10 @@ function truthy(v: unknown): boolean {
     <!-- 索引编辑/新增弹窗 -->
     <div v-if="showIdxForm" class="modal-mask" @click.self="cancelIdxForm">
       <div class="modal idx-modal">
-        <div class="modal-title">{{ idxForm.oldName ? 'Edit Index' : 'Add Index' }}</div>
+        <div class="modal-title">{{ idxForm.oldName ? t('wv.common.edit') : t('wv.design.addIndex') }}</div>
         <div class="form-row">
-          <label>Index Name</label>
-          <input v-model="idxForm.name" class="input" placeholder="index name" />
+          <label>{{ t('wv.design.indexName') }}</label>
+          <input v-model="idxForm.name" class="input" :placeholder="t('wv.design.indexNamePlaceholder')" />
         </div>
         <div class="form-row">
           <label class="chk"><input type="checkbox" v-model="idxForm.unique" /> Unique</label>
@@ -345,7 +381,7 @@ function truthy(v: unknown): boolean {
           </div>
         </div>
         <div class="modal-actions">
-          <button class="btn" @click="cancelIdxForm">Cancel</button>
+          <button class="btn" @click="cancelIdxForm">{{ t('wv.common.cancel') }}</button>
           <button class="btn primary" @click="saveIdxForm">{{ idxForm.oldName ? 'Save' : 'Add' }}</button>
         </div>
       </div>
@@ -353,21 +389,21 @@ function truthy(v: unknown): boolean {
 
     <div v-if="confirmDrop" class="modal-mask" @click.self="confirmDrop = null">
       <div class="modal">
-        <div class="modal-title">Delete column</div>
-        <div class="modal-body">Delete column "{{ confirmDrop.name }}"? This cannot be undone.</div>
+        <div class="modal-title">{{ t('wv.design.deleteColumn') }}</div>
+        <div class="modal-body">{{ t('wv.design.confirmDropColumn', { name: confirmDrop.name }) }}</div>
         <div class="modal-actions">
-          <button class="btn" @click="confirmDrop = null">Cancel</button>
-          <button class="btn danger" @click="confirmDropCol">Delete</button>
+          <button class="btn" @click="confirmDrop = null">{{ t('wv.common.cancel') }}</button>
+          <button class="btn danger" @click="confirmDropCol">{{ t('wv.common.delete') }}</button>
         </div>
       </div>
     </div>
     <div v-if="confirmDropIdx" class="modal-mask" @click.self="confirmDropIdx = null">
       <div class="modal">
-        <div class="modal-title">Delete index</div>
-        <div class="modal-body">Delete index "{{ confirmDropIdx.name }}"? This cannot be undone.</div>
+        <div class="modal-title">{{ t('wv.design.deleteIndex') }}</div>
+        <div class="modal-body">{{ t('wv.design.confirmDropIndex', { name: confirmDropIdx.name }) }}</div>
         <div class="modal-actions">
-          <button class="btn" @click="confirmDropIdx = null">Cancel</button>
-          <button class="btn danger" @click="confirmDropIdxHandler">Delete</button>
+          <button class="btn" @click="confirmDropIdx = null">{{ t('wv.common.cancel') }}</button>
+          <button class="btn danger" @click="confirmDropIdxHandler">{{ t('wv.common.delete') }}</button>
         </div>
       </div>
     </div>
@@ -423,4 +459,11 @@ th { background: var(--vscode-editor-background, #1e1e1e); position: sticky; top
 .col-item { display: flex; padding: 2px 4px; }
 pre { white-space: pre-wrap; font-family: var(--vscode-editor-font-family, monospace); font-size: 13px; }
 .error { padding: 12px; color: var(--vscode-errorForeground, #f48771); }
+.notice { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px;
+  padding: 6px 10px; font-size: 12px; border-radius: 3px;
+  background: var(--vscode-inputValidation-warningBackground, #352a05);
+  border: 1px solid var(--vscode-inputValidation-warningBorder, #b89500);
+  color: var(--vscode-inputValidation-warningForeground, var(--vscode-foreground, #cccccc)); }
+.notice-close { background: transparent; border: none; cursor: pointer; padding: 0 2px;
+  color: inherit; font-size: 12px; line-height: 1; }
 </style>

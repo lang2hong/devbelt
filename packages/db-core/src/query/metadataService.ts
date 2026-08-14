@@ -7,6 +7,10 @@ import type { ColumnMeta, TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta
  *
  * 提供库/表/视图/列的元数据查询能力，屏蔽各方言 SQL 差异。
  * 内部通过方言生成 SQL，再通过方言解析结果行。
+ *
+ * 全部走 `queryService.queryAll`（不截断）：`maxResultRows` 是给用户任意查询的
+ * 内存保护，套到元数据上会让超大库的表/列清单静默缺项——树视图少表、
+ * 补全少列、导出漏字段，且没有任何提示。
  */
 export class MetadataService {
   constructor(private readonly queryService: QueryService) {}
@@ -15,21 +19,21 @@ export class MetadataService {
   async getDatabases(): Promise<string[]> {
     const sql = this.queryService.dialect.getDatabaseListSql();
     if (!sql) return [];
-    const result = await this.queryService.query(sql);
+    const result = await this.queryService.queryAll(sql);
     return result.rows.map((row: any) => row.name ?? row.Database ?? row.datname);
   }
 
   /** 查询表列表 */
   async getTables(database?: string): Promise<TableMeta[]> {
     const sql = this.queryService.dialect.getTableListSql(database);
-    const result = await this.queryService.query(sql);
+    const result = await this.queryService.queryAll(sql);
     return this.queryService.dialect.parseTableList(result.rows);
   }
 
   /** 查询视图列表 */
   async getViews(database?: string): Promise<ViewMeta[]> {
     const sql = this.queryService.dialect.getViewListSql(database);
-    const result = await this.queryService.query(sql);
+    const result = await this.queryService.queryAll(sql);
     return this.queryService.dialect.parseViewList(result.rows);
   }
 
@@ -37,7 +41,7 @@ export class MetadataService {
   async getFunctions(database?: string): Promise<RoutineMeta[]> {
     const sql = this.queryService.dialect.getFunctionListSql(database);
     if (!sql) return [];
-    const result = await this.queryService.query(sql);
+    const result = await this.queryService.queryAll(sql);
     return this.queryService.dialect.parseFunctionList(result.rows);
   }
 
@@ -45,7 +49,7 @@ export class MetadataService {
   async getEvents(database?: string): Promise<EventMeta[]> {
     const sql = this.queryService.dialect.getEventListSql(database);
     if (!sql) return [];
-    const result = await this.queryService.query(sql);
+    const result = await this.queryService.queryAll(sql);
     return this.queryService.dialect.parseEventList(result.rows);
   }
 
@@ -53,7 +57,7 @@ export class MetadataService {
   async getRoutineDefinition(name: string, routineType: string, database?: string): Promise<string> {
     const sql = this.queryService.dialect.getRoutineDefinitionSql(name, routineType, database);
     if (!sql) return '';
-    const result = await this.queryService.query(sql);
+    const result = await this.queryService.queryAll(sql);
     const row = result.rows[0];
     if (!row) return '';
     return row['Create Procedure'] || row['Create Function'] || row.definition || row.Create || '';
@@ -63,7 +67,7 @@ export class MetadataService {
   async getEventDefinition(name: string, database?: string): Promise<string> {
     const sql = this.queryService.dialect.getEventDefinitionSql(name, database);
     if (!sql) return '';
-    const result = await this.queryService.query(sql);
+    const result = await this.queryService.queryAll(sql);
     const row = result.rows[0];
     if (!row) return '';
     return row['Create Event'] || row.definition || row.Create || '';
@@ -73,7 +77,7 @@ export class MetadataService {
   async getViewDefinition(name: string, database?: string): Promise<string> {
     const sql = this.queryService.dialect.getViewDefinitionSql(name, database);
     if (!sql) return '';
-    const result = await this.queryService.query(sql);
+    const result = await this.queryService.queryAll(sql);
     const row = result.rows[0];
     if (!row) return '';
     return row['Create View'] || row.definition || row.sql || row.Create || '';
@@ -82,7 +86,7 @@ export class MetadataService {
   /** 查询表的列元数据 */
   async getColumns(table: string, database?: string): Promise<ColumnMeta[]> {
     const sql = this.queryService.dialect.getColumnsSql(table, database);
-    const result = await this.queryService.query(sql);
+    const result = await this.queryService.queryAll(sql);
     return result.rows.map((row: any) => normalizeColumnMeta(row));
   }
 
@@ -90,7 +94,7 @@ export class MetadataService {
   async getIndexes(table: string, database?: string): Promise<IndexMeta[]> {
     const sql = this.queryService.dialect.getIndexListSql(table, database);
     if (!sql) return [];
-    const result = await this.queryService.query(sql);
+    const result = await this.queryService.queryAll(sql);
     return this.queryService.dialect.parseIndexList(result.rows);
   }
 
@@ -98,7 +102,7 @@ export class MetadataService {
   async getTriggers(table: string, database?: string): Promise<TriggerMeta[]> {
     const sql = this.queryService.dialect.getTriggerListSql(table, database);
     if (!sql) return [];
-    const result = await this.queryService.query(sql);
+    const result = await this.queryService.queryAll(sql);
     return this.queryService.dialect.parseTriggerList(result.rows);
   }
 
@@ -106,7 +110,7 @@ export class MetadataService {
   async getTriggerDefinition(name: string, database?: string): Promise<string> {
     const sql = this.queryService.dialect.getTriggerDefinitionSql(name, database);
     if (!sql) return '';
-    const result = await this.queryService.query(sql);
+    const result = await this.queryService.queryAll(sql);
     const row = result.rows[0];
     if (!row) return '';
     return row['SQL Original Statement'] || row.definition || row.Trigger || row.Create || '';
@@ -141,28 +145,28 @@ export class MetadataService {
   async getUsers(): Promise<UserMeta[]> {
     const sql = this.queryService.dialect.getUserListSql();
     if (!sql) return [];
-    const result = await this.queryService.query(sql);
+    const result = await this.queryService.queryAll(sql);
     return this.queryService.dialect.parseUserList(result.rows);
   }
 
   async getProcessList(): Promise<any[]> {
     const sql = this.queryService.dialect.getProcessListSql();
     if (!sql) return [];
-    const r = await this.queryService.query(sql);
+    const r = await this.queryService.queryAll(sql);
     return r.rows;
   }
 
   async getStatusVariables(): Promise<any[]> {
     const sql = this.queryService.dialect.getStatusVariablesSql();
     if (!sql) return [];
-    const r = await this.queryService.query(sql);
+    const r = await this.queryService.queryAll(sql);
     return r.rows;
   }
 
   async getServerVariables(): Promise<any[]> {
     const sql = this.queryService.dialect.getServerVariablesSql();
     if (!sql) return [];
-    const r = await this.queryService.query(sql);
+    const r = await this.queryService.queryAll(sql);
     return r.rows;
   }
 
@@ -170,7 +174,7 @@ export class MetadataService {
   async getForeignKeys(database?: string): Promise<ForeignKeyMeta[]> {
     const sql = this.queryService.dialect.getForeignKeysSql(database);
     if (!sql) return [];
-    const result = await this.queryService.query(sql);
+    const result = await this.queryService.queryAll(sql);
     return this.queryService.dialect.parseForeignKeys(result.rows);
   }
 }

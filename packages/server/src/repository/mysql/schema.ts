@@ -1,23 +1,16 @@
 import type { FastifyInstance } from 'fastify';
-import { config } from '../../config.js';
 
 /**
  * 初始化数据库 schema（幂等）。
- * 建库 + 建表 + plans 数据播种 + 旧表(users)补列。
+ * 建表 + plans 数据播种 + 旧表(users)补列。
  * 旧表 sync_data 暂保留兼容，期四切换 sync_sections 后废弃。
+ *
+ * 建库不在此处：`app.mysql` 是**连接池**，`USE db` 只对池中借出的那一条连接生效，
+ * 其余连接仍无默认库，并发起来会 `ER_NO_DB_ERROR`。库的创建改由 `ensureDatabase()`
+ * 在注册池之前用一条临时连接完成，池本身带 `database` 参数，见 app.ts。
  */
 export async function initSchema(app: FastifyInstance): Promise<void> {
   const mysql = app.mysql;
-  const db = config.mysql.database;
-
-  try {
-    await mysql.query(
-      `CREATE DATABASE IF NOT EXISTS \`${db}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
-    );
-  } catch (err: any) {
-    if (err?.code !== 'ER_DBACCESS_DENIED_ERROR' && err?.code !== 'ER_CANT_CREATE_DB') throw err;
-  }
-  await mysql.query(`USE \`${db}\``);
 
   // plans 套餐定义表
   await mysql.query(`

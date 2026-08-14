@@ -99,10 +99,10 @@ export function registerGroupCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.moveToGroup', async (node: DbTreeNode) => {
     if (!node?.conn) return;
-    const data = store.getTreeData();
+    const groups = store.getGroups();
     const picked = await vscode.window.showQuickPick(
       [{ label: '$(close) ' + l10n('tree.ungroup'), target: undefined as string | undefined },
-        ...data.groups.map((g) => ({ label: g.name, target: g.id as string | undefined }))],
+        ...groups.map((g) => ({ label: g.name, target: g.id as string | undefined }))],
       { placeHolder: l10n('tree.moveGroup') },
     );
     if (!picked) return;

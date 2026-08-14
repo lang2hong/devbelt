@@ -12,6 +12,15 @@ import { columnTypesFor } from './typeCatalog';
 export class PostgreSqlDialect implements SqlDialect {
   readonly dbType = DatabaseType.PG;
   readonly columnTypes = columnTypesFor(DatabaseType.PG);
+
+  createTableTemplate(table: string): string {
+    return `CREATE TABLE IF NOT EXISTS ${table} (\n  "id" SERIAL PRIMARY KEY,\n  "name" VARCHAR(255)\n);`;
+  }
+
+  /** PG 无 DELIMITER 概念，函数体用 $$ 包裹并声明语言。 */
+  createRoutineTemplate(name: string): string {
+    return `CREATE OR REPLACE FUNCTION ${name}()\nRETURNS void AS $$\nBEGIN\n  -- function body\nEND;\n$$ LANGUAGE plpgsql;`;
+  }
   readonly capabilities: DatabaseCapabilities = {
     multiDatabaseExplorer: false,
     databases: true,

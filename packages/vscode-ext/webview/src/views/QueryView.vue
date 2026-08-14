@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
+import { useI18n } from '../composables/useI18n';
 import ResultGrid from '../components/ResultGrid.vue';
 import ResultChart from '../components/ResultChart.vue';
 
 const { post, onMessage } = useVsCode();
+const { t } = useI18n();
 
 const sql = ref('');
 const completionItems = ref<{ label: string; kind: string }[]>([]);
@@ -13,6 +15,8 @@ const completionIndex = ref(0);
 const showCompletion = ref(false);
 let completionTimer: any;
 const hasTable = ref(false);
+/** Excel 依赖（可选包 xlsx）是否可用，由扩展端在 init 时告知 */
+const xlsxAvailable = ref(false);
 const rows = ref<any[]>([]);
 const fields = ref<{ name: string }[]>([]);
 const results = ref<{ sql: string; rows: any[]; fields: { name: string }[]; costTime: number; truncated?: boolean }[]>([]);
@@ -52,6 +56,7 @@ onMounted(() => {
     if (msg.type === 'init') {
       sql.value = msg.initialSql || '';
       hasTable.value = msg.hasTable || false;
+      xlsxAvailable.value = !!msg.xlsxAvailable;
       tableName.value = msg.tableName || '';
       dbName.value = msg.dbName || '';
       sortCol.value = msg.sortCol || '';
@@ -328,21 +333,21 @@ function onKeydown(e: KeyboardEvent) {
 
 <template>
   <div class="app">
-    <textarea v-model="sql" class="editor" @input="onSqlInput" @keydown="onKeydown" placeholder="Enter SQL..."></textarea>
+    <textarea v-model="sql" class="editor" @input="onSqlInput" @keydown="onKeydown" :placeholder="t('wv.query.sqlPlaceholder')"></textarea>
     <div v-if="showCompletion" class="completion">
       <div v-for="(c, i) in filteredCandidates" :key="c.label" :class="['comp-item', 'kind-' + c.kind, { sel: i === completionIndex }]" @mousedown.prevent="selectCompletion(i)">{{ c.label }}</div>
     </div>
     <div class="action-bar">
-      <button class="btn primary" :disabled="running" @click="run">Run</button>
-      <button class="btn" :disabled="running" @click="explain">Explain</button>
-      <button v-if="running" class="btn" @click="cancel">Cancel</button>
+      <button class="btn primary" :disabled="running" @click="run">{{ t('wv.query.run') }}</button>
+      <button class="btn" :disabled="running" @click="explain">{{ t('wv.query.explain') }}</button>
+      <button v-if="running" class="btn" @click="cancel">{{ t('wv.query.cancel') }}</button>
       <span v-if="transactionState" class="txn-badge" :class="transactionState">TX: {{ transactionState }}</span>
       <div class="spacer"></div>
       <span v-if="meta" class="page-info">{{ meta }}</span>
       <span v-if="hasTable && total !== undefined" class="page-info">
         · Page {{ currentPage }} / {{ totalPages }} · {{ total }} row(s)
       </span>
-      <span v-if="hasTable" class="page-info">Limit</span>
+      <span v-if="hasTable" class="page-info">{{ t('wv.query.limit') }}</span>
       <input v-if="hasTable" type="number" v-model.number="limit" class="limit-input" min="1" @change="setLimit()" />
       <button v-if="hasTable" class="btn" :disabled="currentPage <= 1" @click="prevPage">◀ Prev</button>
       <button v-if="hasTable" class="btn" :disabled="currentPage >= totalPages" @click="nextPage">Next ▶</button>
@@ -355,8 +360,8 @@ function onKeydown(e: KeyboardEvent) {
     </div>
     <div class="error" v-if="error">{{ error }}</div>
     <div v-if="rows.length > 0" class="view-toggle">
-      <button class="btn" :class="{ active: viewMode === 'table' }" @click="viewMode = 'table'">Table</button>
-      <button class="btn" :class="{ active: viewMode === 'chart' }" @click="viewMode = 'chart'">Chart</button>
+      <button class="btn" :class="{ active: viewMode === 'table' }" @click="viewMode = 'table'">{{ t('wv.query.tabTable') }}</button>
+      <button class="btn" :class="{ active: viewMode === 'chart' }" @click="viewMode = 'chart'">{{ t('wv.query.tabChart') }}</button>
     </div>
     <template v-if="viewMode === 'table'">
       <ResultGrid
@@ -372,6 +377,7 @@ function onKeydown(e: KeyboardEvent) {
       :table-name="tableName"
       :db-name="dbName"
       :hidden-columns="hiddenColumns"
+      :xlsx-available="xlsxAvailable"
       @sort="handleSort"
       @filter="handleFilter"
       @update-cell="handleUpdateCell"

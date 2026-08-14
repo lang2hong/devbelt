@@ -1,7 +1,7 @@
 import type { IUserRepo, IPlanRepo, ISubscriptionRepo, IRefreshTokenRepo } from '../repository/interfaces.js';
 import type { TokenService } from './tokenService.js';
 import type { Subscription, User, SessionInfo } from '../domain/entities.js';
-import { hashPassword, verifyPassword } from './password.js';
+import { hashPassword, upgradePasswordIfNeeded, verifyPassword } from './password.js';
 import { InvalidCredentialsError, DeviceLimitError, TokenReuseError, ValidationError } from '../domain/errors.js';
 
 /** 设备信息（登录/刷新时记录到 refresh_tokens） */
@@ -75,6 +75,15 @@ export class AuthService {
     const user = await this.userRepo.findByEmail(email);
     if (!user || !verifyPassword(password, user.passwordHash, this.jwtSecret)) throw new InvalidCredentialsError();
     if (user.status !== 'active') throw new InvalidCredentialsError();
+
+    // 旧 sha256 哈希登录成功后就地升级为 scrypt。
+    // 不升级的话这批用户永远停在弱哈希上，且其 legacySalt 取自 JWT_SECRET —— 
+    // 一旦轮换 JWT 密钥，他们的密码就再也验不过。升级失败不阻断登录。
+    if (upgradePasswordIfNeeded(user.passwordHash)) {
+      try {
+        await this.userRepo.updatePassword(user.id, hashPassword(password));
+      } catch { /* 升级是尽力而为，不影响本次登录 */ }
+    }
 
     const plan = await this.planRepo.findByCode(user.planCode);
     const now = new Date();
