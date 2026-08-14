@@ -21,6 +21,14 @@ const notice = ref('');
 /** 当前选中的用户展示名（`name@host` 或 `name`）。 */
 const selected = ref('');
 
+/** 列表过滤词；空串表示不过滤。大小写不敏感，匹配 name 与 name@host。 */
+const search = ref('');
+const filteredUsers = computed(() => {
+  const q = search.value.trim().toLowerCase();
+  if (!q) return users.value;
+  return users.value.filter((u) => userLabel(u).toLowerCase().includes(q));
+});
+
 const newName = ref('');
 const newPassword = ref('');
 const newConfirm = ref('');
@@ -175,10 +183,11 @@ function confirmDrop(): void {
     <div class="cols">
       <div class="list">
         <div class="list-title">{{ t('wv.userManage.users') }}</div>
+        <input v-model="search" class="search" :placeholder="t('wv.userManage.searchPlaceholder')">
         <div v-if="loading" class="empty">{{ t('wv.common.loading') }}</div>
-        <div v-else-if="!users.length" class="empty">{{ t('wv.userManage.noUsers') }}</div>
+        <div v-else-if="!filteredUsers.length" class="empty">{{ search ? t('wv.userManage.noMatches') : t('wv.userManage.noUsers') }}</div>
         <div
-          v-for="u in users"
+          v-for="u in filteredUsers"
           v-else
           :key="userLabel(u)"
           class="row"
@@ -256,6 +265,11 @@ h3 { margin: 0; }
 .row { padding: 6px 10px; cursor: pointer; }
 .row:hover { background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.08)); }
 .row.active { background: var(--vscode-list-activeSelectionBackground, #094771); color: var(--vscode-list-activeSelectionForeground, #ffffff); }
+.search {
+  width: calc(100% - 20px); margin: 6px 10px 8px; padding: 5px 6px; box-sizing: border-box;
+  background: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #d4d4d4);
+  border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 3px;
+}
 .empty { padding: 10px; opacity: 0.7; }
 .card { border: 1px solid var(--vscode-panel-border, #3c3c3c); border-radius: 3px; margin-bottom: 12px; }
 .card .field, .card .grid, .card .privs, .card-actions, .confirm-text { padding: 0 10px; }
