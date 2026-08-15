@@ -245,6 +245,7 @@ describe('MetadataService', () => {
       query(sql: string, callback?: QueryCallback): void;
       query(sql: string, values: any, callback?: QueryCallback): void;
       query(sql: string, values?: any, callback?: any): void {
+        this.sqls.push(sql);
         const cb = callback || values;
         cb(new Error('Access denied for user'));
       }
