@@ -25,9 +25,22 @@ export class SqliteConnection extends IConnection {
       values = undefined;
     }
     const event = new EventEmitter();
+    // DML（INSERT/UPDATE/DELETE/REPLACE）追加 SELECT changes()，借同一 CLI 进程
+    // 拿到受影响行数：SQLite CLI 的 `.mode tcl` 不回显 changes，导致这些语句的
+    // affectedRows 恒缺失、结果面板只会显示「0 行受影响」。DDL/SELECT 不追加。
+    const isDml = /^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i.test(sql);
+    const effectiveSql = isDml ? `${sql} SELECT changes()` : sql;
     this.sqlite
-      .query(sql + ';')
+      .query(effectiveSql + ';')
       .then((res) => {
+        if (isDml) {
+          const list = Array.isArray(res) ? res : [res];
+          const changesRow = list[list.length - 1]?.rows?.[0];
+          const changes = changesRow ? Number(Object.values(changesRow)[0]) : undefined;
+          const first = list[0];
+          if (callback) callback(null, { rows: first.rows, affectedRows: changes }, first.fields);
+          return;
+        }
         if (Array.isArray(res)) {
           if (callback) callback(null, res);
         } else if (callback) {

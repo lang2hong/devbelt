@@ -93,6 +93,38 @@ describe('SqliteConnection.beginTransaction', () => {
   });
 });
 
+describe('SqliteConnection DML affectedRows (real sqlite3 CLI)', () => {
+  function makeQuery(dbPath: string): QueryService {
+    const conn = new SqliteConnection({ dbPath } as any, 'sqlite3');
+    return new QueryService(conn, new SqliteDialect());
+  }
+
+  it('INSERT/UPDATE/DELETE 返回真实受影响行数', async () => {
+    const dbPath = path.join(os.tmpdir(), `db-dml-${Date.now()}.db`);
+    const query = makeQuery(dbPath);
+    await query.query('CREATE TABLE t(id INTEGER, name TEXT);');
+
+    const ins = await query.query("INSERT INTO t VALUES (1,'a'),(2,'b'),(3,'c');");
+    expect(ins.affectedRows).toBe(3);
+
+    const upd = await query.query("UPDATE t SET name='x' WHERE id <= 2;");
+    expect(upd.affectedRows).toBe(2);
+
+    const del = await query.query('DELETE FROM t WHERE id = 1;');
+    expect(del.affectedRows).toBe(1);
+  });
+
+  it('SELECT 不返回 affectedRows', async () => {
+    const dbPath = path.join(os.tmpdir(), `db-select-${Date.now()}.db`);
+    const query = makeQuery(dbPath);
+    await query.query('CREATE TABLE t(id INTEGER);');
+    await query.query("INSERT INTO t VALUES (1);");
+    const sel = await query.query('SELECT * FROM t;');
+    expect(sel.affectedRows).toBeUndefined();
+    expect(sel.rows.length).toBe(1);
+  });
+});
+
 describe('BackupService.restore singleStatement (real sqlite3 CLI)', () => {
   function makeQuery(dbPath: string): QueryService {
     const conn = new SqliteConnection({ dbPath } as any, 'sqlite3');
