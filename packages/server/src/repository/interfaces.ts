@@ -45,7 +45,7 @@ export interface ISubscriptionRepo {
 }
 
 export interface IRefreshTokenRepo {
-  create(token: Omit<RefreshToken, 'id' | 'createTime'>): Promise<RefreshToken>;
+  create(token: Omit<RefreshToken, 'id' | 'createTime' | 'updateTime'>): Promise<RefreshToken>;
   findByHash(hash: string): Promise<RefreshToken | undefined>;
   findById(id: number): Promise<RefreshToken | undefined>;
   revoke(id: number): Promise<void>;
@@ -57,7 +57,7 @@ export interface IRefreshTokenRepo {
 }
 
 export interface IPatRepo {
-  create(pat: Omit<Pat, 'id' | 'createTime'>): Promise<Pat>;
+  create(pat: Omit<Pat, 'id' | 'createTime' | 'updateTime'>): Promise<Pat>;
   findByHash(hash: string): Promise<Pat | undefined>;
   findById(id: number): Promise<Pat | undefined>;
   listByUser(userId: number): Promise<Pat[]>;

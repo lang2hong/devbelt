@@ -10,7 +10,7 @@ export class MysqlRefreshTokenRepo implements IRefreshTokenRepo {
     return rows[0] ? mapRefreshToken(rows[0]) : undefined;
   }
 
-  async create(token: Omit<RefreshToken, 'id' | 'createTime'>): Promise<RefreshToken> {
+  async create(token: Omit<RefreshToken, 'id' | 'createTime' | 'updateTime'>): Promise<RefreshToken> {
     const [result] = await this.db().query<any>(
       `INSERT INTO refresh_tokens (user_id, token_hash, device_name, user_agent, ip, expires_time)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -74,5 +74,6 @@ function mapRefreshToken(r: any): RefreshToken {
     revokedTime: r.revoked_time ? new Date(r.revoked_time) : undefined,
     lastUsedTime: r.last_used_time ? new Date(r.last_used_time) : undefined,
     createTime: new Date(r.create_time),
+    updateTime: new Date(r.update_time),
   };
 }

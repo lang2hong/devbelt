@@ -5,7 +5,7 @@ import type { MysqlDb } from './db.js';
 export class MysqlPatRepo implements IPatRepo {
   constructor(private readonly db: () => MysqlDb) {}
 
-  async create(pat: Omit<Pat, 'id' | 'createTime'>): Promise<Pat> {
+  async create(pat: Omit<Pat, 'id' | 'createTime' | 'updateTime'>): Promise<Pat> {
     const [result] = await this.db().query<any>(
       `INSERT INTO personal_access_tokens (user_id, name, token_hash, scopes, expires_time)
        VALUES (?, ?, ?, ?, ?)`,
@@ -63,5 +63,6 @@ function mapPat(r: any): Pat {
     expiresTime: r.expires_time ? new Date(r.expires_time) : undefined,
     revokedTime: r.revoked_time ? new Date(r.revoked_time) : undefined,
     createTime: new Date(r.create_time),
+    updateTime: new Date(r.update_time),
   };
 }

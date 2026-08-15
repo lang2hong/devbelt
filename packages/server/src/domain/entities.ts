@@ -57,6 +57,7 @@ export interface RefreshToken {
   revokedTime?: Date;
   lastUsedTime?: Date;
   createTime: Date;
+  updateTime: Date;
 }
 
 /** 个人访问令牌 PAT */
@@ -70,6 +71,7 @@ export interface Pat {
   expiresTime?: Date;
   revokedTime?: Date;
   createTime: Date;
+  updateTime: Date;
 }
 
 /** 同步分节当前版本 */
@@ -78,6 +80,7 @@ export interface SyncSection {
   section: SectionType;
   encryptedData: string;
   version: number;
+  createTime: Date;
   updateTime: Date;
 }
 
@@ -90,6 +93,7 @@ export interface SyncSectionVersion {
   encryptedData: string;
   dataBytes: number;            // 该版本字节数（配额审计）
   createTime: Date;
+  updateTime: Date;
 }
 
 /** 设备会话视图（/sessions 返回） */

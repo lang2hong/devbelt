@@ -174,8 +174,9 @@ export class FakeRefreshTokenRepo implements IRefreshTokenRepo {
   readonly tokens = new Map<number, RefreshToken>();
   private seq = 0;
 
-  async create(token: Omit<RefreshToken, 'id' | 'createTime'>): Promise<RefreshToken> {
-    const created: RefreshToken = { ...token, id: ++this.seq, createTime: new Date() };
+  async create(token: Omit<RefreshToken, 'id' | 'createTime' | 'updateTime'>): Promise<RefreshToken> {
+    const now = new Date();
+    const created: RefreshToken = { ...token, id: ++this.seq, createTime: now, updateTime: now };
     this.tokens.set(created.id, created);
     return created;
   }
@@ -232,8 +233,9 @@ export class FakePatRepo implements IPatRepo {
   readonly pats = new Map<number, Pat>();
   private seq = 0;
 
-  async create(pat: Omit<Pat, 'id' | 'createTime'>): Promise<Pat> {
-    const created: Pat = { ...pat, id: ++this.seq, createTime: new Date() };
+  async create(pat: Omit<Pat, 'id' | 'createTime' | 'updateTime'>): Promise<Pat> {
+    const now = new Date();
+    const created: Pat = { ...pat, id: ++this.seq, createTime: now, updateTime: now };
     this.pats.set(created.id, created);
     return created;
   }
@@ -285,11 +287,14 @@ export class FakeSyncRepo implements ISyncRepo {
     encryptedData: string,
     version: number,
   ): Promise<number> {
-    this.current.set(key(userId, section), {
+    const k = key(userId, section);
+    const existing = this.current.get(k);
+    this.current.set(k, {
       userId,
       section,
       encryptedData,
       version,
+      createTime: existing?.createTime ?? new Date(),
       updateTime: new Date(),
     });
     return version;
@@ -316,6 +321,7 @@ export class FakeSyncRepo implements ISyncRepo {
   ): Promise<void> {
     const k = key(userId, section);
     const list = this.history.get(k) ?? [];
+    const now = new Date();
     list.push({
       id: ++this.seq,
       userId,
@@ -323,7 +329,8 @@ export class FakeSyncRepo implements ISyncRepo {
       version,
       encryptedData,
       dataBytes,
-      createTime: new Date(),
+      createTime: now,
+      updateTime: now,
     });
     this.history.set(k, list);
   }

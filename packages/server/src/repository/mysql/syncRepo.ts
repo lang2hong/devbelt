@@ -127,6 +127,7 @@ function mapSection(r: any): SyncSection {
     section: r.section as SectionType,
     encryptedData: r.encrypted_data,
     version: r.version,
+    createTime: new Date(r.create_time),
     updateTime: new Date(r.update_time),
   };
 }
@@ -140,5 +141,6 @@ function mapVersion(r: any): SyncSectionVersion {
     encryptedData: r.encrypted_data,
     dataBytes: r.data_bytes,
     createTime: new Date(r.create_time),
+    updateTime: new Date(r.update_time),
   };
 }

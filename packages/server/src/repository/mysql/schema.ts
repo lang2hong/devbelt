@@ -15,7 +15,8 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
   // plans 套餐定义表
   await mysql.query(`
     CREATE TABLE IF NOT EXISTS plans (
-      code VARCHAR(16) PRIMARY KEY,
+      id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      code VARCHAR(16) NOT NULL UNIQUE,
       name VARCHAR(40) NOT NULL,
       price_month INT UNSIGNED NOT NULL DEFAULT 0,
       price_year INT UNSIGNED NOT NULL DEFAULT 0,
@@ -86,6 +87,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       revoked_time TIMESTAMP NULL DEFAULT NULL,
       last_used_time TIMESTAMP NULL DEFAULT NULL,
       create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       KEY idx_rt_user (user_id, revoked_time, expires_time)
     ) ENGINE=InnoDB
@@ -103,6 +105,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       expires_time TIMESTAMP NULL DEFAULT NULL,
       revoked_time TIMESTAMP NULL DEFAULT NULL,
       create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       KEY idx_pat_user (user_id, revoked_time)
     ) ENGINE=InnoDB
@@ -111,12 +114,14 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
   // sync_sections 分节同步当前版本表（方案 A）
   await mysql.query(`
     CREATE TABLE IF NOT EXISTS sync_sections (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
       user_id INT UNSIGNED NOT NULL,
       section VARCHAR(16) NOT NULL,
       encrypted_data MEDIUMTEXT NOT NULL,
       version INT UNSIGNED NOT NULL DEFAULT 1,
+      create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      PRIMARY KEY (user_id, section),
+      UNIQUE KEY uq_ss_user_section (user_id, section),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB
   `);
@@ -131,6 +136,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       encrypted_data MEDIUMTEXT NOT NULL,
       data_bytes INT UNSIGNED NOT NULL DEFAULT 0,
       create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       KEY idx_sv_user_section (user_id, section, version)
     ) ENGINE=InnoDB
