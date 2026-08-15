@@ -3,7 +3,8 @@ import type { SavedConnection } from '../connection/connectionStore';
 import { TableQueryView } from './tableQueryView';
 import { HistoryStore } from '../history/historyStore';
 import type { AuditLogger } from '../utils/auditLogger';
-import { QueryExecutedEvent, eventBus } from '../utils/event';
+import { QueryExecutedEvent, DataChangeEvent, eventBus } from '../utils/event';
+import { classifyWriteKind } from '../utils/sqlRisk';
 
 export type QueryExecutionMode = 'reuse' | 'new';
 
@@ -56,6 +57,11 @@ export class QueryExecutor {
           rowCount,
           costTime,
         });
+        // DDL 会改变库/表结构：发布数据变更事件让树刷新（DataChangeEvent 缺订阅者时
+        // 树从不会在 SQL 编辑器跑完 DDL 后刷新，新表不可见）。
+        if (classifyWriteKind(sql) === 'ddl') {
+          void eventBus.publish(new DataChangeEvent(conn.id, database ?? '', '', 'ddl'));
+        }
         // QueryExecutedEvent 此前只有类型定义、从无发布点
         void eventBus.publish(new QueryExecutedEvent(conn.id, sql, costTime, rowCount));
       } else if (error) {

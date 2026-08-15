@@ -22,7 +22,7 @@ import { SyncManager } from './sync/syncManager';
 import { MasterPasswordStore } from './sync/masterPasswordStore';
 import { AutoSyncService, type AutoSyncMode } from './sync/autoSyncService';
 import type { Event } from './utils/event';
-import { eventBus, ConnectionChangedEvent } from './utils/event';
+import { eventBus, ConnectionChangedEvent, DataChangeEvent } from './utils/event';
 import { invalidateLanguage, LANGUAGE_CONFIG_KEY, l10n } from './i18n';
 import { registerCommands, SyncStatusBar } from './commands';
 import { SqlCompletionProvider } from './completion/sqlCompletionProvider';
@@ -88,6 +88,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 事件总线：连接/分组变更时自动刷新树（同步 pull 等无命令处理器的场景）
   context.subscriptions.push(
     eventBus.subscribe(ConnectionChangedEvent, () => treeProvider.refresh()),
+  );
+  // DDL（CREATE/ALTER/DROP/TRUNCATE 等）后刷新树：表结构变化，表列表需要重拉。
+  // 只响应 ddl，rowEditor 的 insert/update/delete 不触发整树刷新。
+  context.subscriptions.push(
+    eventBus.subscribe(DataChangeEvent, (e) => {
+      if (e.operation === 'ddl') treeProvider.refresh();
+    }),
   );
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
