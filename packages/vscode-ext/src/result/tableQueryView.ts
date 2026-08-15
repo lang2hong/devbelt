@@ -167,9 +167,9 @@ export class TableQueryView extends BaseWebView {
       enqueue(existing);
       return existing;
     }
-    // 结果面板放在 SQL 编辑器下方：先 split down，再在下方活动组创建 webview
-    await vscode.commands.executeCommand('workbench.action.splitEditorDown');
-    const view = new TableQueryView(conn, manager, undefined, database, vscode.ViewColumn.Active);
+    // 结果面板放在 SQL 编辑器旁侧（右侧列）。不能用 splitEditorDown：那条命令会
+    // 复制当前活动编辑器（SQL 文档），造成「同一份 SQL 文档出现两次」。
+    const view = new TableQueryView(conn, manager, undefined, database, vscode.ViewColumn.Beside);
     TableQueryView.queryViews.set(conn.id, view);
     enqueue(view);
     return view;
