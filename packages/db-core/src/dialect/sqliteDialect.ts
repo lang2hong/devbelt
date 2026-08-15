@@ -78,6 +78,17 @@ export class SqliteDialect implements SqlDialect {
     return `SELECT sql AS definition FROM sqlite_master WHERE type = 'view' AND name = '${name}'`;
   }
 
+  /**
+   * SQLite 不支持 `CREATE OR REPLACE VIEW`，用 `DROP VIEW IF EXISTS` + `CREATE VIEW`。
+   * 改完执行时先删再建，等价于「替换」。
+   */
+  normalizeViewAlterSql(raw: string, name: string): string {
+    const head = raw.match(/^CREATE\s+VIEW\s+\S+\s+AS\s+/i);
+    const select = (head ? raw.slice(head[0].length) : raw).replace(/;?\s*$/, '').trim();
+    const q = this.wrap(validateIdent(name));
+    return `DROP VIEW IF EXISTS ${q};\nCREATE VIEW ${q} AS\n${select};`;
+  }
+
   getIndexListSql(table: string): string {
     validateIdent(table);
     return `SELECT name AS name, 0 AS is_unique, name LIKE 'sqlite_autoindex%' AS is_primary FROM sqlite_master WHERE type = 'index' AND tbl_name = '${table}'`;

@@ -192,6 +192,21 @@ export class MetadataService {
     }
   }
 
+  /**
+   * 查询视图的「可编辑可执行」修改语句。
+   *
+   * `getViewDefinition` 返回库里的原始 DDL（MySQL 带 DEFINER 头且是 CREATE VIEW，
+   * 重跑会因已存在报错；PG 只返回纯 SELECT）。这里调方言 `normalizeViewAlterSql`
+   * 规范成 `CREATE OR REPLACE VIEW <name> AS <select>`（SQLite 用 DROP+CREATE），
+   * 交给编辑器让用户改完直接执行重建视图。
+   */
+  async getViewAlterSql(name: string, database?: string): Promise<string> {
+    const dialect = this.queryService.dialect;
+    const raw = await this.getViewDefinition(name, database);
+    if (!raw) return '';
+    return dialect.normalizeViewAlterSql(raw, name, database);
+  }
+
   async getProcessList(): Promise<any[]> {
     const sql = this.queryService.dialect.getProcessListSql();
     if (!sql) return [];

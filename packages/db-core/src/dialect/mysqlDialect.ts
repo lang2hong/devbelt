@@ -106,6 +106,19 @@ export class MysqlDialect implements SqlDialect {
     return `SHOW CREATE VIEW ${qualified}`;
   }
 
+  /**
+   * 剥掉 SHOW CREATE VIEW 的 ALGORITHM/DEFINER/SQL SECURITY 头，
+   * 取 AS 后的 SELECT，重组为 `CREATE OR REPLACE VIEW <name> AS <select>`。
+   * DEFINER 子句带连接特定账号，原样重跑会因权限报错；去掉它并改成 OR REPLACE
+   * 后，用户改完 SELECT 即可重建视图。
+   */
+  normalizeViewAlterSql(raw: string, name: string, database?: string): string {
+    const head = raw.match(/^CREATE\s+(?:ALGORITHM=\S+\s+)?(?:DEFINER=\S+\s+)?(?:SQL\s+SECURITY\s+\S+\s+)?VIEW\s+\S+\s+AS\s+/i);
+    const select = head ? raw.slice(head[0].length) : raw.replace(/^.*?\bAS\b\s+/is, '');
+    const q = database ? `${this.wrap(validateIdent(database))}.${this.wrap(validateIdent(name))}` : this.wrap(validateIdent(name));
+    return `CREATE OR REPLACE VIEW ${q} AS\n${select.replace(/;?\s*$/, '')};`;
+  }
+
   getIndexListSql(table: string, database?: string): string {
     validateIdent(table);
     const where = database

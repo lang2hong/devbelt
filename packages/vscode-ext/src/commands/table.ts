@@ -181,9 +181,14 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.modifyView', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    connCtx.setLast(node.conn, node.database);
     const session = await manager.connect(node.conn);
-    const def = await session.metadata.getViewDefinition(node.label, node.database);
-    await openSqlDoc(def || '-- No definition found');
+    // 拿「可编辑可执行」的 CREATE OR REPLACE VIEW 语句（SQLite 为 DROP+CREATE），
+    // 用可编辑编辑器打开并绑定连接：用户改完 SELECT 直接 Run 重建视图。
+    // 此前用 openSqlDoc 只读 + 原始定义（带 DEFINER、是 CREATE VIEW），既不能改也不能直接重跑。
+    const sql = await session.metadata.getViewAlterSql(node.label, node.database);
+    const editor = await openSqlDocEditor(sql || '-- No definition found');
+    if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
   });
 
   sub('dbclient.openRoutine', async (node: DbTreeNode) => {

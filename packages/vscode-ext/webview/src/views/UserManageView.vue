@@ -68,7 +68,12 @@ onMounted(() => {
     }
     if (msg.type === 'grants') {
       // 回显已有权限：选中用户时把其当前权限默认勾上。
-      checkedPrivs.value = Array.isArray(msg.grants) ? msg.grants : [];
+      const g = Array.isArray(msg.grants) ? msg.grants : [];
+      // `ALL PRIVILEGES` 隐含全部权限（含 DML/DDL）：展开成全勾（USAGE 是「无权限占位」不勾），
+      // 否则用户会看到「DML 没勾」误以为该用户没有增删改权限。
+      checkedPrivs.value = g.includes('ALL PRIVILEGES')
+        ? privileges.value.filter((p) => p !== 'USAGE')
+        : g;
       return;
     }
     if (msg.type === 'done') {

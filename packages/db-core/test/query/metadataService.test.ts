@@ -253,4 +253,31 @@ describe('MetadataService', () => {
     const grants = await svc.getUserGrants('u', 'h');
     expect(grants).toEqual([]);
   });
+
+  /**
+   * 视图修改：拿到原始定义后规范成可编辑可执行的重建语句。
+   */
+  it('getViewAlterSql 规范 MySQL SHOW CREATE VIEW（剥 DEFINER，改 OR REPLACE）', async () => {
+    const conn = new FakeConnection();
+    conn.result = { rows: [{ 'Create View': "CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`%` SQL SECURITY DEFINER VIEW `v` AS select 1 AS one" }] };
+    const svc = new MetadataService(new QueryService(conn, new MysqlDialect()));
+    const sql = await svc.getViewAlterSql('v', 'db');
+    expect(sql).toBe("CREATE OR REPLACE VIEW `db`.`v` AS\nselect 1 AS one;");
+  });
+
+  it('getViewAlterSql 包裹 PG 纯 SELECT（CREATE OR REPLACE）', async () => {
+    const conn = new FakeConnection();
+    conn.result = { rows: [{ definition: 'SELECT\n    col\nFROM t' }] };
+    const svc = new MetadataService(new QueryService(conn, new PostgreSqlDialect()));
+    const sql = await svc.getViewAlterSql('v');
+    expect(sql).toBe('CREATE OR REPLACE VIEW "v" AS\nSELECT\n    col\nFROM t;');
+  });
+
+  it('getViewAlterSql SQLite 用 DROP + CREATE（不支持 OR REPLACE）', async () => {
+    const conn = new FakeConnection();
+    conn.result = { rows: [{ definition: 'CREATE VIEW "v" AS SELECT 1 AS one' }] };
+    const svc = new MetadataService(new QueryService(conn, new SqliteDialect()));
+    const sql = await svc.getViewAlterSql('v');
+    expect(sql).toBe('DROP VIEW IF EXISTS "v";\nCREATE VIEW "v" AS\nSELECT 1 AS one;');
+  });
 });

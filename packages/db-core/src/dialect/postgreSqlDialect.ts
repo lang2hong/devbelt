@@ -95,6 +95,13 @@ export class PostgreSqlDialect implements SqlDialect {
     return `SELECT pg_get_viewdef(current_schema() || '.' || '${name}', true) AS definition`;
   }
 
+  /** pg_get_viewdef 返回纯 SELECT，包上 CREATE OR REPLACE VIEW 外壳。 */
+  normalizeViewAlterSql(raw: string, name: string, database?: string): string {
+    const select = (raw || '').replace(/;?\s*$/, '').trim();
+    const q = database ? `${this.wrap(validateIdent(database))}.${this.wrap(validateIdent(name))}` : this.wrap(validateIdent(name));
+    return `CREATE OR REPLACE VIEW ${q} AS\n${select};`;
+  }
+
   getIndexListSql(table: string): string {
     validateIdent(table);
     return `SELECT indexname AS name, indexdef AS definition, 

@@ -96,6 +96,18 @@ export interface SqlDialect {
   /** 查询视图定义的 SQL（空字符串表示不支持） */
   getViewDefinitionSql(name: string, database?: string): string;
 
+  /**
+   * 把原始视图定义规范化为「可编辑可执行」的修改语句。
+   *
+   * `getViewDefinitionSql` 返回的是库里的原始 DDL（MySQL 的 SHOW CREATE VIEW
+   * 带 `ALGORITHM/DEFINER/SQL SECURITY` 头且是 `CREATE VIEW`，重跑会因已存在报错；
+   * PG 的 `pg_get_viewdef` 只返回纯 SELECT；SQLite 是 `CREATE VIEW`）。
+   * 这里统一成 `CREATE OR REPLACE VIEW <name> AS <select>`（SQLite 不支持
+   * OR REPLACE，用 `DROP VIEW IF EXISTS` + `CREATE VIEW`），交给编辑器让用户改完
+   * 直接执行重建视图。
+   */
+  normalizeViewAlterSql(raw: string, name: string, database?: string): string;
+
   /** 查询表索引列表 SQL */
   getIndexListSql(table: string, database?: string): string;
 
