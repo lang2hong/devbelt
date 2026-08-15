@@ -27,7 +27,7 @@ const rows = ref<any[]>([]);
 const fields = ref<{ name: string }[]>([]);
 const results = ref<{
   sql: string; rows: any[]; fields: { name: string }[]; costTime: number;
-  truncated?: boolean; affectedRows?: number;
+  truncated?: boolean; affectedRows?: number; kind?: 'dml' | 'ddl' | 'other';
 }[]>([]);
 const activeResultIndex = ref(0);
 const transactionState = ref<'active' | 'committed' | 'rolledback' | ''>('');
@@ -60,10 +60,11 @@ function isResultSet(r: { fields?: { name: string }[] }): boolean {
  * 结果摘要文案。写语句必须报「受影响行数」——过去一律按 rows.length 算，
  * 表面板里执行 UPDATE 只会看到 `0 row(s)`，像是没生效。
  */
-function describeResult(r: { rows: any[]; fields?: { name: string }[]; costTime: number; truncated?: boolean; affectedRows?: number }): string {
+function describeResult(r: { rows: any[]; fields?: { name: string }[]; costTime: number; truncated?: boolean; affectedRows?: number; kind?: 'dml' | 'ddl' | 'other' }): string {
   const secs = ((r.costTime || 0) / 1000).toFixed(3);
   if (!isResultSet(r)) {
-    return `${r.affectedRows ?? 0} ${t('wv.query.rowsAffected')} · ${secs}s`;
+    if (r.kind === 'dml') return `${r.affectedRows ?? 0} ${t('wv.query.rowsAffected')} · ${secs}s`;
+    return `${t('wv.query.success')} · ${secs}s`;
   }
   return `${r.rows.length} row(s) in ${secs}s${r.truncated ? ' (truncated)' : ''}`;
 }
@@ -121,7 +122,7 @@ onMounted(() => {
       const list = msg.results || [];
       const batch = list.map((r: any) => ({
         sql: r.sql || msg.sql || '', rows: r.rows || [], fields: r.fields || [],
-        costTime: r.costTime || 0, truncated: r.truncated, affectedRows: r.affectedRows,
+        costTime: r.costTime || 0, truncated: r.truncated, affectedRows: r.affectedRows, kind: r.kind,
       }));
       results.value = results.value.concat(batch);
       if (results.value.length > 20) results.value = results.value.slice(-20);
@@ -187,6 +188,7 @@ function run() {
 
 function selectResult(index: number) {
   activeResultIndex.value = index;
+  error.value = '';
   const r = results.value[index];
   if (r) {
     rows.value = r.rows;
@@ -196,6 +198,7 @@ function selectResult(index: number) {
 }
 
 function closeResult(index: number) {
+  error.value = '';
   results.value.splice(index, 1);
   if (activeResultIndex.value >= results.value.length) {
     activeResultIndex.value = Math.max(0, results.value.length - 1);
@@ -408,7 +411,7 @@ function onKeydown(e: KeyboardEvent) {
       <button class="btn" :class="{ active: viewMode === 'table' }" @click="viewMode = 'table'">{{ t('wv.query.tabTable') }}</button>
       <button class="btn" :class="{ active: viewMode === 'chart' }" @click="viewMode = 'chart'">{{ t('wv.query.tabChart') }}</button>
     </div>
-    <template v-if="viewMode === 'table'">
+    <template v-if="viewMode === 'table' && fields.length > 0">
       <ResultGrid
       :rows="rows"
       :fields="fields"
@@ -434,7 +437,14 @@ function onKeydown(e: KeyboardEvent) {
       @reset-profile="resetProfile"
     />
     </template>
-    <ResultChart v-else :rows="rows" :fields="fields" />
+    <ResultChart v-else-if="viewMode === 'chart' && fields.length > 0" :rows="rows" :fields="fields" />
+    <!--
+      写语句（无结果集）的信息表格：单行单列呈现结果摘要（DML 影响行数 / DDL 成功）。
+      过去此处空白，用户看不到执行结果；Navicat 这类工具都会给一条醒目的信息行。
+    -->
+    <table v-if="results.length > 0 && !error && fields.length === 0" class="result-info">
+      <tbody><tr><td>{{ meta }}</td></tr></tbody>
+    </table>
   </div>
 </template>
 
@@ -476,4 +486,7 @@ function onKeydown(e: KeyboardEvent) {
   .tab-close:hover { opacity: 1; color: var(--vscode-errorForeground, #f48771); }
 .meta { padding: 4px 8px; font-size: 12px; color: var(--vscode-descriptionForeground, #808080); }
 .error { padding: 8px; color: var(--vscode-errorForeground, #f48771); white-space: pre-wrap; }
+.result-info { width: 100%; border-collapse: collapse; }
+.result-info td { padding: 8px 12px; font-size: 12px; color: var(--vscode-foreground, #cccccc);
+  border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); background: var(--vscode-editor-background, #1e1e1e); }
 </style>

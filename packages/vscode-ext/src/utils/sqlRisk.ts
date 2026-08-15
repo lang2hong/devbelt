@@ -58,6 +58,19 @@ function stripLiteralsAndComments(sql: string): string {
   return out;
 }
 
+/**
+ * 写语句动作类型，供结果面板区分「影响行数」与「成功」两类展示：
+ * DML（INSERT/UPDATE/DELETE/REPLACE/MERGE）有受影响行数的语义；
+ * DDL（CREATE/ALTER/DROP/TRUNCATE/RENAME/GRANT/REVOKE）与其余控制语句没有，
+ * 展示「成功」而非误导性的「0 行受影响」。
+ */
+export function classifyWriteKind(sql: string): 'dml' | 'ddl' | 'other' {
+  const normalized = stripLiteralsAndComments(sql).trim().toUpperCase();
+  if (/\b(CREATE|ALTER|DROP|TRUNCATE|RENAME|GRANT|REVOKE)\b/.test(normalized)) return 'ddl';
+  if (/\b(INSERT|UPDATE|DELETE|MERGE|REPLACE)\b/.test(normalized)) return 'dml';
+  return 'other';
+}
+
 /** A conservative, dependency-free classifier used by every execution surface. */
 export function analyzeSqlRisk(sql: string): SqlRisk {
   const normalized = stripLiteralsAndComments(sql).trim().toUpperCase();

@@ -4,6 +4,7 @@ import type { ConnectionManager } from '../connection/connectionManager';
 import type { SavedConnection } from '../connection/connectionStore';
 import { splitSqlStatements } from '../utils/sql';
 import { confirmSqlExecution } from '../utils/sqlSafety';
+import { classifyWriteKind } from '../utils/sqlRisk';
 import { buildCountSql, buildTableSelect, type ColumnTypeMap, type FilterCondition } from './tableQuerySql';
 import { diagError } from '../utils/diagnostics';
 
@@ -139,7 +140,8 @@ export class QueryRunner {
           if (upper.includes('= 0') || upper.includes('=0')) transactionState = 'active';
           continue;
         }
-        results.push(await session.query.query(stmt, undefined, stmtOpts));
+        const r = await session.query.query(stmt, undefined, stmtOpts);
+        results.push({ ...r, kind: classifyWriteKind(stmt) });
       }
       const result = results[results.length - 1];
       // 表面板里也会执行 UPDATE/INSERT/DELETE/DDL。这类语句没有结果集，
