@@ -51,6 +51,13 @@ const viewMode = ref<'table' | 'chart'>('table');
 const totalPages = computed(() => total.value === undefined ? 0 : Math.max(1, Math.ceil(total.value / limit.value)));
 const currentPage = computed(() => total.value === undefined ? 0 : Math.floor(offset.value / limit.value) + 1);
 
+/**
+ * EXPLAIN 只对「有执行计划可看」的查询语句有意义（SELECT/WITH/VALUES/TABLE）。
+ * DDL/DML/控制语句没有计划可解释：DDL 会语法报错，DML 的 EXPLAIN 要么无意义要么
+ * （PG 的 EXPLAIN ANALYZE）有副作用。按钮据此隐藏，避免和 Run 一起无条件出现。
+ */
+const isExplorable = computed(() => /^\s*(SELECT|WITH|VALUES|TABLE)\b/i.test(sql.value));
+
 /** 结果集？没有字段的结果来自 UPDATE/INSERT/DELETE/DDL，只有受影响行数可报。 */
 function isResultSet(r: { fields?: { name: string }[] }): boolean {
   return Array.isArray(r.fields) && r.fields.length > 0;
@@ -383,7 +390,7 @@ function onKeydown(e: KeyboardEvent) {
     </div>
     <div class="action-bar">
       <button v-if="viewKind !== 'structure'" class="btn primary" :disabled="running" @click="run">{{ t('wv.query.run') }}</button>
-      <button v-if="viewKind !== 'structure'" class="btn" :disabled="running" @click="explain">{{ t('wv.query.explain') }}</button>
+      <button v-if="viewKind !== 'structure' && isExplorable" class="btn" :disabled="running" @click="explain">{{ t('wv.query.explain') }}</button>
       <button v-if="running" class="btn" @click="cancel">{{ t('wv.query.cancel') }}</button>
       <span v-if="transactionState" class="txn-badge" :class="transactionState">TX: {{ transactionState }}</span>
       <div class="spacer"></div>
