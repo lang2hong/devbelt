@@ -1,5 +1,55 @@
 import * as vscode from 'vscode';
-import { SyncClient, AuthResult } from './syncClient';
+import { createHash } from 'crypto';
+import { hostname, platform, arch, release, networkInterfaces, cpus } from 'os';
+import { SyncClient, AuthResult, DeviceInfo } from './syncClient';
+
+let _fingerprint: string | undefined;
+
+/** 硬件指纹（确定性，不依赖本地存储；同硬件同值，卸载重装不变） */
+function machineFingerprint(): string {
+  if (_fingerprint) return _fingerprint;
+  const cpu = cpus()[0]?.model ?? '';
+  const raw = `${hostname()}|${cpu}|${firstMac()}|${platform()}/${arch()}`;
+  _fingerprint = createHash('sha256').update(raw).digest('hex');
+  return _fingerprint;
+}
+
+function firstMac(): string {
+  const ifs = networkInterfaces();
+  for (const name of Object.keys(ifs)) {
+    for (const ni of ifs[name] ?? []) {
+      if (ni && ni.mac && ni.mac !== '00:00:00:00:00:00' && !ni.internal) return ni.mac;
+    }
+  }
+  return '';
+}
+
+function timezoneName(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  } catch {
+    return '';
+  }
+}
+
+/** 组装设备信息：deviceId 为硬件指纹（判同键），machineId 为 VSCode 原始值（仅追溯） */
+function buildDeviceInfo(): DeviceInfo {
+  const name = `${hostname()} · ${platform()}/${arch()} · VSCode ${vscode.version}`;
+  return {
+    deviceName: name.length > 120 ? name.slice(0, 120) : name,
+    deviceId: machineFingerprint(),
+    machineId: vscode.env.machineId,
+    hostname: hostname(),
+    os: platform(),
+    arch: arch(),
+    osVersion: release(),
+    appName: vscode.env.appName,
+    appVersion: vscode.version,
+    remoteName: vscode.env.remoteName || undefined,
+    language: vscode.env.language,
+    timezone: timezoneName(),
+  };
+}
 
 /**
  * 认证服务：管理双 token（access + refresh）的持久化。
@@ -19,7 +69,7 @@ export class AuthService {
   private accessToken?: string;
   private refreshToken?: string;
   /** 缓存的套餐（SyncStatusBar 刷新时填，requireFeature 用） */
-  private cachedPlan?: { code: string; name: string; features: number; maxDevices: number; maxConnections: number; syncQuotaBytes: number; maxPats: number };
+  private cachedPlan?: { code: string; name: string; features: number; maxDevices: number; maxConnections: number; syncQuotaBytes: number };
 
   /** 读取缓存套餐 */
   getCachedPlan() {
@@ -27,7 +77,7 @@ export class AuthService {
   }
 
   /** 设置缓存套餐（SyncStatusBar getMe 后调用） */
-  setCachedPlan(plan: { code: string; name: string; features: number; maxDevices: number; maxConnections: number; syncQuotaBytes: number; maxPats: number }): void {
+  setCachedPlan(plan: { code: string; name: string; features: number; maxDevices: number; maxConnections: number; syncQuotaBytes: number }): void {
     this.cachedPlan = plan;
   }
 
@@ -45,6 +95,7 @@ export class AuthService {
         void this.secrets.store(AuthService.ACCESS_TOKEN_KEY, access);
         void this.secrets.store(AuthService.REFRESH_TOKEN_KEY, refresh);
       },
+      buildDeviceInfo(),
     );
   }
 
@@ -57,6 +108,11 @@ export class AuthService {
   /** 是否已登录（有 access token） */
   isLoggedIn(): boolean {
     return !!this.accessToken;
+  }
+
+  /** 读取当前 access token（供管理员面板外部打开时注入） */
+  getAccessToken(): string | undefined {
+    return this.accessToken;
   }
 
   /** 读取服务器地址 */

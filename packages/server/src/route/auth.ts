@@ -20,6 +20,17 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): 
 
   const deviceInfo = (req: any): DeviceInfo => ({
     deviceName: req.headers['x-device-name'] as string | undefined,
+    deviceId: req.headers['x-device-id'] as string | undefined,
+    machineId: req.headers['x-device-machine-id'] as string | undefined,
+    hostname: req.headers['x-device-hostname'] as string | undefined,
+    os: req.headers['x-device-os'] as string | undefined,
+    arch: req.headers['x-device-arch'] as string | undefined,
+    osVersion: req.headers['x-device-os-version'] as string | undefined,
+    appName: req.headers['x-device-app'] as string | undefined,
+    appVersion: req.headers['x-device-app-version'] as string | undefined,
+    remoteName: req.headers['x-device-remote'] as string | undefined,
+    language: req.headers['x-device-language'] as string | undefined,
+    timezone: req.headers['x-device-timezone'] as string | undefined,
     userAgent: req.headers['user-agent'] as string | undefined,
     ip: req.ip,
   });
@@ -89,7 +100,7 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): 
 
       child.get('/api/auth/sessions', async (req, reply) => {
         const userId = req.user.sub as number;
-        const sessions = await auth.listSessions(userId);
+        const sessions = await auth.listSessions(userId, req.user.sid as number | undefined);
         reply.send({ sessions });
       });
 

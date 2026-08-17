@@ -46,9 +46,12 @@ function makePayload(): SyncPayload {
 function makeStore(payload: SyncPayload) {
   return {
     getSyncData: vi.fn(async (): Promise<ConnectionTreeData> => ({ groups: payload.groups, connections: payload.connections })),
+    getConnectionMeta: vi.fn(() => []),
     replaceAllMerge: vi.fn(async (_tree: ConnectionTreeData) => {}),
+    replaceAll: vi.fn(async (_tree: ConnectionTreeData) => {}),
     getQueriesForSync: vi.fn(() => ({ queries: payload.queries, folders: payload.queryFolders })),
     replaceQueriesForSync: vi.fn(async (_data: { queries: SavedQuery[]; folders: QueryFolder[] }) => {}),
+    replaceQueriesForSyncAll: vi.fn(async (_data: { queries: SavedQuery[]; folders: QueryFolder[] }) => {}),
   };
 }
 
@@ -170,6 +173,50 @@ describe('SyncManager', () => {
     await sync.pull('master-pass', true);
 
     expect(store.replaceAllMerge).toHaveBeenCalled();
+  });
+
+  describe('applyPreviewedPull 策略', () => {
+    async function setup() {
+      const payload = makePayload();
+      const auth = makeAuth();
+      auth.setRemote(payload, 'master-pass');
+      const store = makeStore(makePayload());
+      const history = makeHistory(makePayload());
+      const hashStore = makeHashStore();
+      const sync = new SyncManager(auth as any, store as any, history as any, hashStore as any, masterStore as any);
+      await sync.previewPull('master-pass');
+      return { store, history, sync };
+    }
+
+    it('merge 走 replaceAllMerge / replaceQueriesForSync', async () => {
+      const { store, history, sync } = await setup();
+      await sync.applyPreviewedPull('merge');
+      expect(store.replaceAllMerge).toHaveBeenCalled();
+      expect(store.replaceQueriesForSync).toHaveBeenCalled();
+      expect(store.replaceAll).not.toHaveBeenCalled();
+      expect(store.replaceQueriesForSyncAll).not.toHaveBeenCalled();
+      expect(history.replaceAllMerge).toHaveBeenCalled();
+    });
+
+    it('remote 走 replaceAll / replaceQueriesForSyncAll', async () => {
+      const { store, history, sync } = await setup();
+      await sync.applyPreviewedPull('remote');
+      expect(store.replaceAll).toHaveBeenCalled();
+      expect(store.replaceQueriesForSyncAll).toHaveBeenCalled();
+      expect(store.replaceAllMerge).not.toHaveBeenCalled();
+      expect(store.replaceQueriesForSync).not.toHaveBeenCalled();
+      expect(history.replaceAllMerge).toHaveBeenCalled();
+    });
+
+    it('local 不写任何 store/history（保留本地）', async () => {
+      const { store, history, sync } = await setup();
+      await sync.applyPreviewedPull('local');
+      expect(store.replaceAllMerge).not.toHaveBeenCalled();
+      expect(store.replaceAll).not.toHaveBeenCalled();
+      expect(store.replaceQueriesForSync).not.toHaveBeenCalled();
+      expect(store.replaceQueriesForSyncAll).not.toHaveBeenCalled();
+      expect(history.replaceAllMerge).not.toHaveBeenCalled();
+    });
   });
 
   it('isLocalDirty is false right after a push (hash up to date)', async () => {

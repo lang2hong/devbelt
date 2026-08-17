@@ -99,6 +99,23 @@ describe('ConnectionStore sync model', () => {
     expect(store.get('primary')).toBeUndefined();
   });
 
+  it('replaceAll replaces local connections entirely (use remote)', async () => {
+    const memento = createMemento({ groups: [], connections: [conn({ name: 'Local', host: 'db.internal', user: 'app', password: 'local-password', updateTime: 200 })] });
+    const secrets = createSecrets();
+    const store = new ConnectionStore(memento, secrets as any);
+    await store.init();
+
+    await store.replaceAll({
+      groups: [],
+      connections: [conn({ id: 'secondary', name: 'Remote', host: 'db.remote', user: 'app', password: 'remote-password', updateTime: 100 })],
+    });
+
+    expect(store.list()).toHaveLength(1);
+    expect(store.get('secondary')!.name).toBe('Remote');
+    expect(store.get('primary')).toBeUndefined();
+    expect(await secrets.get('dbclient.connection.secondary.password')).toBe('remote-password');
+  });
+
   it('materializes a saved password back into the connection', async () => {
     const memento = createMemento({ groups: [], connections: [] });
     const secrets = createSecrets();

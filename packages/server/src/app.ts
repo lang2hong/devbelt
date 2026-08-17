@@ -10,7 +10,10 @@ import { MysqlUserRepo } from './repository/mysql/userRepo.js';
 import { MysqlPlanRepo } from './repository/mysql/planRepo.js';
 import { MysqlSubscriptionRepo } from './repository/mysql/subscriptionRepo.js';
 import { MysqlRefreshTokenRepo } from './repository/mysql/refreshTokenRepo.js';
-import { MysqlPatRepo } from './repository/mysql/patRepo.js';
+import { MysqlDeviceRepo } from './repository/mysql/deviceRepo.js';
+import { MysqlConnectionMetaRepo } from './repository/mysql/connectionMetaRepo.js';
+import { MysqlSyncEventRepo } from './repository/mysql/syncEventRepo.js';
+import { MysqlUsageEventRepo } from './repository/mysql/usageEventRepo.js';
 import { MysqlSyncRepo } from './repository/mysql/syncRepo.js';
 import { TokenService, type JwtPort } from './service/tokenService.js';
 import { AuthService } from './service/authService.js';
@@ -20,13 +23,13 @@ import { meRoutes } from './route/me.js';
 import { syncRoutes } from './route/sync.js';
 import { PlanPolicy } from './policy/planPolicy.js';
 import { SyncService } from './service/syncService.js';
-import { PatService } from './service/patService.js';
 import { PaymentService } from './service/paymentService.js';
 import { AdminService } from './service/adminService.js';
 import { ManualPaymentAdapter } from './adapter/manualPaymentAdapter.js';
 import { adminRoutes } from './route/admin.js';
-import { patRoutes } from './route/pat.js';
+import { adminUiRoutes } from './route/adminUi.js';
 import { webhookRoutes } from './route/webhook.js';
+import { usageRoutes } from './route/usage.js';
 
 /**
  * 组合根（composition root）：组装 Fastify 实例 + 依赖注入。
@@ -57,26 +60,29 @@ export async function createApp() {
   const planRepo = new MysqlPlanRepo(getMysql);
   const subRepo = new MysqlSubscriptionRepo(getMysql);
   const refreshTokenRepo = new MysqlRefreshTokenRepo(getMysql);
-  const patRepo = new MysqlPatRepo(getMysql);
+  const deviceRepo = new MysqlDeviceRepo(getMysql);
+  const connectionMetaRepo = new MysqlConnectionMetaRepo(getMysql);
+  const syncEventRepo = new MysqlSyncEventRepo(getMysql);
+  const usageEventRepo = new MysqlUsageEventRepo(getMysql);
   const syncRepo = new MysqlSyncRepo(getMysql);
 
   // policy / service 层
   const planPolicy = new PlanPolicy((code) => planRepo.findByCode(code));
   const tokenService = new TokenService(app.jwt as unknown as JwtPort, config.accessTokenExpiresIn, config.refreshTokenExpiresIn);
-  const authService = new AuthService(userRepo, planRepo, subRepo, refreshTokenRepo, tokenService, config.jwtSecret);
-  const subscriptionService = new SubscriptionService(userRepo, planRepo, subRepo, refreshTokenRepo, patRepo, syncRepo);
-  const syncService = new SyncService(syncRepo, userRepo, planPolicy);
-  const patService = new PatService(patRepo, userRepo, planPolicy);
-  const adminService = new AdminService(userRepo);
+  const authService = new AuthService(userRepo, subRepo, refreshTokenRepo, deviceRepo, tokenService, config.jwtSecret);
+  const subscriptionService = new SubscriptionService(userRepo, planRepo, subRepo, refreshTokenRepo, syncRepo, connectionMetaRepo);
+  const syncService = new SyncService(syncRepo, userRepo, planPolicy, connectionMetaRepo, syncEventRepo);
+  const adminService = new AdminService(userRepo, planRepo, subRepo, refreshTokenRepo, syncRepo, deviceRepo, connectionMetaRepo, syncEventRepo, usageEventRepo);
   const paymentService = new PaymentService(subRepo, userRepo);
   paymentService.registerProvider(new ManualPaymentAdapter());
 
   // route 层
   app.get('/health', async () => ({ status: 'ok' }));
+  app.register(adminUiRoutes);
   app.register(authRoutes, { authService });
   app.register(meRoutes, { subscriptionService });
   app.register(syncRoutes, { syncService });
-  app.register(patRoutes, { patService });
+  app.register(usageRoutes, { usageEventRepo });
   app.register(adminRoutes, { adminService, paymentService });
   app.register(webhookRoutes, { paymentService });
 

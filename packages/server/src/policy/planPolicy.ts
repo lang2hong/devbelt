@@ -18,7 +18,6 @@ export class PlanPolicy {
       case 'devices': return plan.maxDevices;
       case 'connections': return plan.maxConnections;
       case 'sync_bytes': return plan.syncQuotaBytes;
-      case 'pats': return plan.maxPats;
       case 'history': return plan.historyRetentionCount;
     }
   }

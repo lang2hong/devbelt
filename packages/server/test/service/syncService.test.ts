@@ -7,7 +7,7 @@ import {
   VersionNotFoundError,
   QuotaExceededError,
 } from '../../src/domain/errors.js';
-import { FakeSyncRepo, FakeUserRepo, FakePlanRepo, makePlan } from '../helpers/fakeRepos.js';
+import { FakeSyncRepo, FakeUserRepo, FakePlanRepo, FakeConnectionMetaRepo, FakeSyncEventRepo, makePlan } from '../helpers/fakeRepos.js';
 
 async function setup(over: Parameters<typeof makePlan>[1] = {}) {
   const syncRepo = new FakeSyncRepo();
@@ -15,9 +15,11 @@ async function setup(over: Parameters<typeof makePlan>[1] = {}) {
   const plan = makePlan('free', { syncQuotaBytes: 0, syncVersionRetention: 0, ...over });
   const planRepo = new FakePlanRepo([plan]);
   const policy = new PlanPolicy((code) => planRepo.findByCode(code));
-  const service = new SyncService(syncRepo, userRepo, policy);
+  const connectionMetaRepo = new FakeConnectionMetaRepo();
+  const syncEventRepo = new FakeSyncEventRepo();
+  const service = new SyncService(syncRepo, userRepo, policy, connectionMetaRepo, syncEventRepo);
   const user = await userRepo.create('a@example.com', 'scrypt$x$y', 'user', 'free');
-  return { service, syncRepo, userRepo, plan, user };
+  return { service, syncRepo, userRepo, plan, user, policy, connectionMetaRepo, syncEventRepo };
 }
 
 describe('SyncService.push', () => {

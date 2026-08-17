@@ -1,12 +1,23 @@
-import type { IUserRepo, IPlanRepo, ISubscriptionRepo, IRefreshTokenRepo } from '../repository/interfaces.js';
+import type { IUserRepo, ISubscriptionRepo, IRefreshTokenRepo, IDeviceRepo } from '../repository/interfaces.js';
 import type { TokenService } from './tokenService.js';
-import type { Subscription, User, SessionInfo } from '../domain/entities.js';
+import type { Subscription, User, SessionInfo, Device } from '../domain/entities.js';
 import { hashPassword, upgradePasswordIfNeeded, verifyPassword } from './password.js';
-import { InvalidCredentialsError, DeviceLimitError, TokenReuseError, ValidationError } from '../domain/errors.js';
+import { InvalidCredentialsError, TokenReuseError, ValidationError } from '../domain/errors.js';
 
-/** 设备信息（登录/刷新时记录到 refresh_tokens） */
+/** 设备信息（登录/刷新时上报；deviceId 为同设备判同键） */
 export interface DeviceInfo {
   deviceName?: string;
+  deviceId?: string;
+  machineId?: string;
+  hostname?: string;
+  os?: string;
+  arch?: string;
+  osVersion?: string;
+  appName?: string;
+  appVersion?: string;
+  remoteName?: string;
+  language?: string;
+  timezone?: string;
   userAgent?: string;
   ip?: string;
 }
@@ -29,16 +40,17 @@ export interface RefreshResponse {
 const TRIAL_DAYS = 14;
 
 /**
- * 认证服务（Facade）：协调 user/subscription/refreshToken repo + TokenService。
+ * 认证服务（Facade）：协调 user/subscription/refreshToken/device repo + TokenService。
  * 职责：注册/登录/刷新/登出/会话管理。
  * 令牌策略：access JWT 短期 + refresh 随机 token（hash 存库）+ 轮换 + 重用检测。
+ * 设备判同：同 user+deviceId 重登先 upsert 设备实体 + 撤销该设备旧会话，设备数恒定。
  */
 export class AuthService {
   constructor(
     private readonly userRepo: IUserRepo,
-    private readonly planRepo: IPlanRepo,
     private readonly subRepo: ISubscriptionRepo,
     private readonly refreshTokenRepo: IRefreshTokenRepo,
+    private readonly deviceRepo: IDeviceRepo,
     private readonly tokenService: TokenService,
     private readonly jwtSecret: string,
   ) {}
@@ -55,6 +67,8 @@ export class AuthService {
     const hash = hashPassword(password);
     const user = await this.userRepo.create(email, hash, 'user', 'free');
 
+    if (device?.deviceId) await this.deviceRepo.upsert(toDevice(user.id, device));
+
     const periodEnd = new Date(Date.now() + TRIAL_DAYS * 86400000);
     const subscription = await this.subRepo.upsert({
       userId: user.id, planCode: 'free', status: 'trialing',
@@ -62,14 +76,14 @@ export class AuthService {
     });
 
     const { token, hash: rtHash, expiresAt } = this.tokenService.generateRefreshToken();
-    await this.refreshTokenRepo.create({ userId: user.id, tokenHash: rtHash, ...device, expiresTime: expiresAt });
-    const accessToken = this.tokenService.signAccessToken(user.id, user.role, user.planCode);
+    const rt = await this.refreshTokenRepo.create(tokenForCreate(user.id, rtHash, device, expiresAt));
+    const accessToken = this.tokenService.signAccessToken(user.id, user.role, user.planCode, rt.id);
     await this.userRepo.updateLastLogin(user.id, new Date());
 
     return { accessToken, refreshToken: token, user: sanitize(user), subscription };
   }
 
-  /** 登录：校验凭据 + 设备数检查 + 签双 token */
+  /** 登录：校验凭据 + 设备判同 + 设备数检查 + 签双 token */
   async login(email: string, password: string, device?: DeviceInfo): Promise<AuthResponse> {
     if (!email || !password) throw new InvalidCredentialsError();
     const user = await this.userRepo.findByEmail(email);
@@ -85,16 +99,17 @@ export class AuthService {
       } catch { /* 升级是尽力而为，不影响本次登录 */ }
     }
 
-    const plan = await this.planRepo.findByCode(user.planCode);
-    const now = new Date();
-    if (plan && plan.maxDevices > 0) {
-      const count = await this.refreshTokenRepo.countActiveForUser(user.id, now);
-      if (count >= plan.maxDevices) throw new DeviceLimitError(plan.maxDevices, count);
+    // 设备判同：先登记设备固有信息，再顶掉该设备旧会话（同设备重登不叠加会话）
+    if (device?.deviceId) {
+      await this.deviceRepo.upsert(toDevice(user.id, device));
+      await this.refreshTokenRepo.revokeByDevice(user.id, device.deviceId);
     }
 
+    const now = new Date();
+
     const { token, hash: rtHash, expiresAt } = this.tokenService.generateRefreshToken();
-    await this.refreshTokenRepo.create({ userId: user.id, tokenHash: rtHash, ...device, expiresTime: expiresAt });
-    const accessToken = this.tokenService.signAccessToken(user.id, user.role, user.planCode);
+    const rt = await this.refreshTokenRepo.create(tokenForCreate(user.id, rtHash, device, expiresAt));
+    const accessToken = this.tokenService.signAccessToken(user.id, user.role, user.planCode, rt.id);
     await this.userRepo.updateLastLogin(user.id, now);
 
     const subscription = await this.subRepo.findByUserId(user.id);
@@ -120,11 +135,20 @@ export class AuthService {
     await this.refreshTokenRepo.updateLastUsed(rt.id, now);
     await this.refreshTokenRepo.revoke(rt.id);
     const { token, hash: rtHash, expiresAt } = this.tokenService.generateRefreshToken();
-    await this.refreshTokenRepo.create({ userId: rt.userId, tokenHash: rtHash, ...device, expiresTime: expiresAt });
+    // 继承旧 token 的设备字段（刷新请求未带时用旧值），保持同设备会话延续
+    const newRt = await this.refreshTokenRepo.create({
+      userId: rt.userId,
+      tokenHash: rtHash,
+      deviceName: device?.deviceName ?? rt.deviceName,
+      deviceId: device?.deviceId ?? rt.deviceId,
+      userAgent: device?.userAgent ?? rt.userAgent,
+      ip: device?.ip ?? rt.ip,
+      expiresTime: expiresAt,
+    });
 
     const user = await this.userRepo.findById(rt.userId);
     if (!user) throw new InvalidCredentialsError();
-    const accessToken = this.tokenService.signAccessToken(user.id, user.role, user.planCode);
+    const accessToken = this.tokenService.signAccessToken(user.id, user.role, user.planCode, newRt.id);
     return { accessToken, refreshToken: token };
   }
 
@@ -136,8 +160,9 @@ export class AuthService {
   }
 
   /** 列出当前用户活跃会话 */
-  async listSessions(userId: number): Promise<SessionInfo[]> {
-    return this.refreshTokenRepo.listActiveForUser(userId, new Date());
+  async listSessions(userId: number, currentRefreshId?: number): Promise<SessionInfo[]> {
+    const sessions = await this.refreshTokenRepo.listActiveForUser(userId, new Date());
+    return sessions.map((s) => ({ ...s, current: currentRefreshId != null && s.id === currentRefreshId }));
   }
 
   /** 踢出指定设备会话 */
@@ -157,6 +182,43 @@ export class AuthService {
     await this.userRepo.updatePassword(userId, hash);
     await this.refreshTokenRepo.revokeAllForUser(userId);
   }
+}
+
+/** 组装 refresh_tokens 行（仅会话字段，设备固有信息不入会话表） */
+function tokenForCreate(
+  userId: number,
+  tokenHash: string,
+  device: DeviceInfo | undefined,
+  expiresAt: Date,
+): Omit<import('../domain/entities.js').RefreshToken, 'id' | 'createTime' | 'updateTime'> {
+  return {
+    userId,
+    tokenHash,
+    deviceName: device?.deviceName,
+    deviceId: device?.deviceId,
+    userAgent: device?.userAgent,
+    ip: device?.ip,
+    expiresTime: expiresAt,
+  };
+}
+
+/** 组装 devices 表行（设备固有信息） */
+function toDevice(userId: number, device: DeviceInfo): Omit<Device, 'id' | 'createTime' | 'updateTime'> {
+  return {
+    userId,
+    deviceId: device.deviceId!,
+    hostname: device.hostname,
+    os: device.os,
+    arch: device.arch,
+    osVersion: device.osVersion,
+    appName: device.appName,
+    appVersion: device.appVersion,
+    remoteName: device.remoteName,
+    vsMachineId: device.machineId,
+    language: device.language,
+    timezone: device.timezone,
+    lastSeenTime: new Date(),
+  };
 }
 
 function sanitize(user: User): UserInfo {

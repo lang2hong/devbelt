@@ -6,8 +6,8 @@ import {
   FakePlanRepo,
   FakeSubscriptionRepo,
   FakeRefreshTokenRepo,
-  FakePatRepo,
   FakeSyncRepo,
+  FakeConnectionMetaRepo,
   makePlan,
 } from '../helpers/fakeRepos.js';
 
@@ -21,11 +21,11 @@ async function setup() {
   ]);
   const subRepo = new FakeSubscriptionRepo();
   const rtRepo = new FakeRefreshTokenRepo();
-  const patRepo = new FakePatRepo();
   const syncRepo = new FakeSyncRepo();
-  const service = new SubscriptionService(userRepo, planRepo, subRepo, rtRepo, patRepo, syncRepo);
+  const connectionMetaRepo = new FakeConnectionMetaRepo();
+  const service = new SubscriptionService(userRepo, planRepo, subRepo, rtRepo, syncRepo, connectionMetaRepo);
   const user = await userRepo.create('a@example.com', 'scrypt$x$y', 'user', 'pro');
-  return { service, userRepo, planRepo, subRepo, rtRepo, patRepo, syncRepo, user };
+  return { service, userRepo, planRepo, subRepo, rtRepo, syncRepo, connectionMetaRepo, user };
 }
 
 describe('SubscriptionService.ensureActive', () => {
@@ -102,7 +102,7 @@ describe('SubscriptionService.downgradeExpired', () => {
 
 describe('SubscriptionService.getMe', () => {
   it('assembles user + plan + subscription + usage without the password hash', async () => {
-    const { service, subRepo, rtRepo, patRepo, syncRepo, user } = await setup();
+    const { service, subRepo, rtRepo, syncRepo, user } = await setup();
     await subRepo.upsert({
       userId: user.id,
       planCode: 'pro',
@@ -112,7 +112,6 @@ describe('SubscriptionService.getMe', () => {
     });
     await rtRepo.create({ userId: user.id, tokenHash: 'h1', expiresTime: new Date(Date.now() + DAY) });
     await rtRepo.create({ userId: user.id, tokenHash: 'h2', expiresTime: new Date(Date.now() + DAY) });
-    await patRepo.create({ userId: user.id, name: 'ci', tokenHash: 'p1', scopes: 'sync:read' });
     await syncRepo.putSection(user.id, 'connections', 'x'.repeat(300), 1);
     await syncRepo.putSection(user.id, 'queries', 'y'.repeat(200), 1);
 
@@ -122,21 +121,18 @@ describe('SubscriptionService.getMe', () => {
     expect(me.user.email).toBe('a@example.com');
     expect(me.plan.code).toBe('pro');
     expect(me.subscription?.status).toBe('active');
-    expect(me.usage).toEqual({ devices: 2, connections: 0, syncBytes: 500, pats: 1, history: 0 });
+    expect(me.usage).toEqual({ devices: 2, connections: 0, syncBytes: 500, history: 0 });
   });
 
-  it('excludes revoked or expired sessions and revoked PATs from usage', async () => {
-    const { service, rtRepo, patRepo, user } = await setup();
+  it('excludes revoked or expired sessions from usage', async () => {
+    const { service, rtRepo, user } = await setup();
     const live = await rtRepo.create({ userId: user.id, tokenHash: 'h1', expiresTime: new Date(Date.now() + DAY) });
     const revoked = await rtRepo.create({ userId: user.id, tokenHash: 'h2', expiresTime: new Date(Date.now() + DAY) });
     await rtRepo.revoke(revoked.id);
     await rtRepo.create({ userId: user.id, tokenHash: 'h3', expiresTime: new Date(Date.now() - DAY) });
-    const pat = await patRepo.create({ userId: user.id, name: 'ci', tokenHash: 'p1', scopes: 'sync:read' });
-    await patRepo.revoke(pat.id);
 
     const me = await service.getMe(user.id);
     expect(me.usage.devices).toBe(1);
-    expect(me.usage.pats).toBe(0);
     expect(live.revokedTime).toBeUndefined();
   });
 

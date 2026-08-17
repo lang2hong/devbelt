@@ -41,7 +41,7 @@ describe.skipIf(!URL)('MySQL initSchema + syncRepo (isolated test db)', () => {
       [DB_NAME],
     );
     const names = tables.map((t: any) => t.TABLE_NAME);
-    for (const expected of ['plans', 'users', 'subscriptions', 'refresh_tokens', 'personal_access_tokens', 'sync_sections', 'sync_section_versions']) {
+    for (const expected of ['plans', 'users', 'subscriptions', 'refresh_tokens', 'sync_sections', 'sync_section_versions']) {
       expect(names).toContain(expected);
     }
 

@@ -15,7 +15,6 @@ describe('PlanPolicy.limit', () => {
       maxDevices: 2,
       maxConnections: 10,
       syncQuotaBytes: 1024,
-      maxPats: 1,
       historyRetentionCount: 100,
     }),
   );
@@ -24,7 +23,6 @@ describe('PlanPolicy.limit', () => {
     expect(await policy.limit('free', 'devices')).toBe(2);
     expect(await policy.limit('free', 'connections')).toBe(10);
     expect(await policy.limit('free', 'sync_bytes')).toBe(1024);
-    expect(await policy.limit('free', 'pats')).toBe(1);
     expect(await policy.limit('free', 'history')).toBe(100);
   });
 

@@ -181,4 +181,11 @@ export class QueryStore {
     await this.memento.update(QueryStore.FKEY, mergedFolders);
     this.changedEmitter.fire();
   }
+
+  /** 全量替换（use remote 策略）：本地查询/文件夹整个替换为远端，不做并集 */
+  async replaceAll(remote: { queries: SavedQuery[]; folders: QueryFolder[] }): Promise<void> {
+    await this.memento.update(QueryStore.QKEY, remote.queries);
+    await this.memento.update(QueryStore.FKEY, remote.folders);
+    this.changedEmitter.fire();
+  }
 }

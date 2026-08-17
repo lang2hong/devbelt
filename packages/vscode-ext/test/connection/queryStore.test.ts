@@ -61,4 +61,19 @@ describe('QueryStore', () => {
 
     expect(store.getQueries('primary', 'app')).toHaveLength(0);
   });
+
+  it('replaceAll replaces local queries and folders entirely (use remote)', async () => {
+    const store = new QueryStore(createMemento());
+    await store.saveQuery({ name: 'Local', sql: 'SELECT 1', connId: 'primary', database: 'app' });
+    await store.addQueryFolder('LocalFolder');
+
+    await store.replaceAll({
+      queries: [{ id: 'r1', name: 'Remote', sql: 'SELECT 2', connId: 'primary', database: 'app', createTime: 1, updateTime: 1, deleted: false }],
+      folders: [{ id: 'rf1', name: 'RemoteFolder', createTime: 1, updateTime: 1, deleted: false }],
+    });
+
+    const data = store.getSyncData();
+    expect(data.queries).toEqual([expect.objectContaining({ id: 'r1' })]);
+    expect(data.folders).toEqual([expect.objectContaining({ id: 'rf1' })]);
+  });
 });

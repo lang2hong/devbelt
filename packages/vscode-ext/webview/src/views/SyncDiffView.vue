@@ -57,8 +57,17 @@ const totalChanges = computed(() => {
     + c.history.added;
 });
 
+const totalLocalOnly = computed(() => {
+  if (!plan.value) return 0;
+  const c = plan.value;
+  return c.connections.localOnly + c.queries.localOnly + c.folders.localOnly;
+});
+
 function kindLabel(k: string) { return k.charAt(0).toUpperCase() + k.slice(1); }
-function apply() { state.value = 'applying'; post({ type: 'apply' }); }
+function applyWith(strategy: 'remote' | 'local' | 'merge') {
+  state.value = 'applying';
+  post({ type: 'apply', strategy });
+}
 function cancel() { post({ type: 'cancel' }); }
 </script>
 
@@ -105,9 +114,15 @@ function cancel() { post({ type: 'cancel' }); }
           <div class="section-title"><span>{{ t('wv.sync.queryHistory') }}</span><span class="summary">{{ historyText }}</span></div>
         </div>
 
+        <div class="banner warn" v-if="totalLocalOnly > 0">
+          {{ t('wv.sync.localOnlyDiscard', { n: totalLocalOnly }) }}
+        </div>
+
         <div class="actions">
-          <button class="btn primary" :disabled="state === 'applying'" @click="apply">
-            {{ state === 'applying' ? t('wv.sync.applying') : t('wv.sync.applyMerge') }}
+          <button class="btn" :disabled="state === 'applying'" @click="applyWith('remote')">{{ t('wv.sync.useRemote') }}</button>
+          <button class="btn" :disabled="state === 'applying'" @click="applyWith('local')">{{ t('wv.sync.useLocal') }}</button>
+          <button class="btn primary" :disabled="state === 'applying'" @click="applyWith('merge')">
+            {{ state === 'applying' ? t('wv.sync.applying') : t('wv.sync.merge') }}
           </button>
           <button class="btn" :disabled="state === 'applying'" @click="cancel">{{ t('wv.common.cancel') }}</button>
         </div>

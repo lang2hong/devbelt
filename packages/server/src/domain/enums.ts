@@ -14,7 +14,7 @@ export type SubStatus = 'active' | 'trialing' | 'expired' | 'canceled';
 export type PaymentProvider = 'manual' | 'stripe' | 'lemonsqueezy';
 
 /** 配额维度 */
-export type QuotaType = 'devices' | 'connections' | 'sync_bytes' | 'pats' | 'history';
+export type QuotaType = 'devices' | 'connections' | 'sync_bytes' | 'history';
 
 /** 同步分节（方案 A：分节存储） */
 export type SectionType = 'groups' | 'connections' | 'queries' | 'folders' | 'history';
@@ -42,6 +42,3 @@ export const Feature = {
 
 /** Feature 位值类型（供签名标注）。 */
 export type FeatureFlag = (typeof Feature)[keyof typeof Feature];
-
-/** PAT 作用域 */
-export type PatScope = 'sync:read' | 'sync:write';

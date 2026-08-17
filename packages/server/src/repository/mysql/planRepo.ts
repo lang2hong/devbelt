@@ -1,4 +1,4 @@
-import type { IPlanRepo } from '../interfaces.js';
+import type { IPlanRepo, PlanEditableFields } from '../interfaces.js';
 import type { Plan } from '../../domain/entities.js';
 import type { PlanCode } from '../../domain/enums.js';
 import type { MysqlDb } from './db.js';
@@ -19,17 +19,27 @@ export class MysqlPlanRepo implements IPlanRepo {
   async seed(plans: Array<Omit<Plan, 'createTime' | 'updateTime'>>): Promise<void> {
     for (const p of plans) {
       await this.db().query(
-        `INSERT INTO plans (code, name, price_month, price_year, max_devices, max_connections, sync_quota_bytes, sync_version_retention, history_retention_count, max_pats, features)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO plans (code, name, price_month, price_year, max_devices, max_connections, sync_quota_bytes, sync_version_retention, history_retention_count, features)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
            name = VALUES(name), price_month = VALUES(price_month), price_year = VALUES(price_year),
            max_devices = VALUES(max_devices), max_connections = VALUES(max_connections),
            sync_quota_bytes = VALUES(sync_quota_bytes), sync_version_retention = VALUES(sync_version_retention),
-           history_retention_count = VALUES(history_retention_count), max_pats = VALUES(max_pats),
+           history_retention_count = VALUES(history_retention_count),
            features = VALUES(features)`,
-        [p.code, p.name, p.priceMonth, p.priceYear, p.maxDevices, p.maxConnections, p.syncQuotaBytes, p.syncVersionRetention, p.historyRetentionCount, p.maxPats, p.features],
+        [p.code, p.name, p.priceMonth, p.priceYear, p.maxDevices, p.maxConnections, p.syncQuotaBytes, p.syncVersionRetention, p.historyRetentionCount, p.features],
       );
     }
+  }
+
+  async update(code: PlanCode, fields: PlanEditableFields): Promise<void> {
+    await this.db().query(
+      `UPDATE plans
+       SET name = ?, price_month = ?, price_year = ?, max_connections = ?,
+           sync_quota_bytes = ?, sync_version_retention = ?, features = ?
+       WHERE code = ?`,
+      [fields.name, fields.priceMonth, fields.priceYear, fields.maxConnections, fields.syncQuotaBytes, fields.syncVersionRetention, fields.features, code],
+    );
   }
 }
 
@@ -44,7 +54,6 @@ function mapPlan(r: any): Plan {
     syncQuotaBytes: r.sync_quota_bytes,
     syncVersionRetention: r.sync_version_retention,
     historyRetentionCount: r.history_retention_count,
-    maxPats: r.max_pats,
     features: r.features,
     createTime: new Date(r.create_time),
     updateTime: new Date(r.update_time),

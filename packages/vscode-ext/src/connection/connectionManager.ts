@@ -5,6 +5,7 @@ import type { SavedConnection } from './connectionStore';
 import type { HistoryStore } from '../history/historyStore';
 import { QueryHistoryRecorder } from '../history/queryHistoryRecorder';
 import { SshTunnel } from './sshTunnel';
+import { usageTracker } from '../analytics/usageTracker';
 
 export interface PoolConfig {
   maxConnections: number;
@@ -194,6 +195,7 @@ export class ConnectionManager {
     };
     this.sessions.set(conn.id, session);
     this.sessionEntries.set(conn.id, { session, lastUsed: Date.now(), connId: conn.id });
+    usageTracker.recordConnectionOpen();
     if (this.disposing) {
       session.close();
       throw new Error('ConnectionManager is disposing');

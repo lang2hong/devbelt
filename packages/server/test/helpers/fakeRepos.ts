@@ -3,19 +3,28 @@ import type {
   IPlanRepo,
   ISubscriptionRepo,
   IRefreshTokenRepo,
-  IPatRepo,
   ISyncRepo,
+  IDeviceRepo,
+  IConnectionMetaRepo,
+  ISyncEventRepo,
+  IUsageEventRepo,
+  ConnectionMetaInput,
+  PlanEditableFields,
 } from '../../src/repository/interfaces.js';
 import type {
   User,
   Plan,
   Subscription,
   RefreshToken,
-  Pat,
   SyncSection,
   SyncSectionVersion,
   SyncVersionSummary,
   SessionInfo,
+  Device,
+  DeviceEvent,
+  ConnectionMeta,
+  SyncEvent,
+  UsageEvent,
 } from '../../src/domain/entities.js';
 import type { PlanCode, Role, SubStatus, SectionType, UserStatus } from '../../src/domain/enums.js';
 
@@ -36,7 +45,6 @@ export function makePlan(code: PlanCode, over: Partial<Plan> = {}): Plan {
     syncQuotaBytes: 0,
     syncVersionRetention: 0,
     historyRetentionCount: 0,
-    maxPats: 0,
     features: 1,
     createTime: now,
     updateTime: now,
@@ -101,6 +109,10 @@ export class FakeUserRepo implements IUserRepo {
   async listAll(limit: number, offset: number): Promise<User[]> {
     return [...this.users.values()].slice(offset, offset + limit);
   }
+
+  async count(): Promise<number> {
+    return this.users.size;
+  }
 }
 
 export class FakePlanRepo implements IPlanRepo {
@@ -121,6 +133,11 @@ export class FakePlanRepo implements IPlanRepo {
   async seed(plans: Array<Omit<Plan, 'createTime' | 'updateTime'>>): Promise<void> {
     const now = new Date();
     for (const p of plans) this.plans.set(p.code, { ...p, createTime: now, updateTime: now });
+  }
+
+  async update(code: PlanCode, fields: PlanEditableFields): Promise<void> {
+    const p = this.plans.get(code);
+    if (p) Object.assign(p, fields);
   }
 }
 
@@ -154,6 +171,10 @@ export class FakeSubscriptionRepo implements ISubscriptionRepo {
 
   async listByStatus(status: SubStatus): Promise<Subscription[]> {
     return [...this.subs.values()].filter((s) => s.status === status);
+  }
+
+  async listAll(): Promise<Subscription[]> {
+    return [...this.subs.values()];
   }
 
   async downgradeExpired(now: Date): Promise<number> {
@@ -202,6 +223,13 @@ export class FakeRefreshTokenRepo implements IRefreshTokenRepo {
     }
   }
 
+  async revokeByDevice(userId: number, deviceId: string): Promise<void> {
+    const now = new Date();
+    for (const t of this.tokens.values()) {
+      if (t.userId === userId && t.deviceId === deviceId && !t.revokedTime) t.revokedTime = now;
+    }
+  }
+
   async countActiveForUser(userId: number, now: Date): Promise<number> {
     return this.activeFor(userId, now).length;
   }
@@ -226,45 +254,6 @@ export class FakeRefreshTokenRepo implements IRefreshTokenRepo {
     return [...this.tokens.values()].filter(
       (t) => t.userId === userId && !t.revokedTime && t.expiresTime > now,
     );
-  }
-}
-
-export class FakePatRepo implements IPatRepo {
-  readonly pats = new Map<number, Pat>();
-  private seq = 0;
-
-  async create(pat: Omit<Pat, 'id' | 'createTime' | 'updateTime'>): Promise<Pat> {
-    const now = new Date();
-    const created: Pat = { ...pat, id: ++this.seq, createTime: now, updateTime: now };
-    this.pats.set(created.id, created);
-    return created;
-  }
-
-  async findByHash(hash: string): Promise<Pat | undefined> {
-    for (const p of this.pats.values()) if (p.tokenHash === hash) return p;
-    return undefined;
-  }
-
-  async findById(id: number): Promise<Pat | undefined> {
-    return this.pats.get(id);
-  }
-
-  async listByUser(userId: number): Promise<Pat[]> {
-    return [...this.pats.values()].filter((p) => p.userId === userId);
-  }
-
-  async revoke(id: number): Promise<void> {
-    const p = this.pats.get(id);
-    if (p && !p.revokedTime) p.revokedTime = new Date();
-  }
-
-  async countActiveForUser(userId: number): Promise<number> {
-    return [...this.pats.values()].filter((p) => p.userId === userId && !p.revokedTime).length;
-  }
-
-  async updateLastUsed(id: number, time: Date): Promise<void> {
-    const p = this.pats.get(id);
-    if (p) p.lastUsedTime = time;
   }
 }
 
@@ -383,6 +372,106 @@ export class FakeSyncRepo implements ISyncRepo {
   /** 测试辅助：某节的历史版本号列表（升序） */
   historyVersions(userId: number, section: SectionType): number[] {
     return (this.history.get(key(userId, section)) ?? []).map((v) => v.version).sort((a, b) => a - b);
+  }
+}
+
+export class FakeDeviceRepo implements IDeviceRepo {
+  readonly devices = new Map<string, Device>();
+  readonly events = new Map<string, DeviceEvent[]>();
+  private seq = 0;
+  private eventSeq = 0;
+
+  async upsert(device: Omit<Device, 'id' | 'createTime' | 'updateTime'>): Promise<Device> {
+    const k = `${device.userId}:${device.deviceId}`;
+    const now = new Date();
+    const existing = this.devices.get(k);
+    let result: Device;
+    if (existing) {
+      result = { ...existing, ...device, id: existing.id, updateTime: now };
+    } else {
+      result = { ...device, id: ++this.seq, createTime: now, updateTime: now };
+    }
+    this.devices.set(k, result);
+
+    // 留痕（简化）：首次 → register；app 版本变 → app_upgrade；否则 os 版本变 → os_change
+    let event: DeviceEvent['event'] | undefined;
+    if (!existing) event = 'register';
+    else if (result.appVersion && result.appVersion !== existing.appVersion) event = 'app_upgrade';
+    else if (result.osVersion && result.osVersion !== existing.osVersion) event = 'os_change';
+    if (event) {
+      const list = this.events.get(k) ?? [];
+      list.push({
+        id: ++this.eventSeq, userId: result.userId, deviceId: result.deviceId, event,
+        vsMachineId: result.vsMachineId, appName: result.appName, appVersion: result.appVersion,
+        os: result.os, osVersion: result.osVersion, arch: result.arch, createTime: now,
+      });
+      this.events.set(k, list);
+    }
+
+    return result;
+  }
+
+  async listByUser(userId: number): Promise<Device[]> {
+    return [...this.devices.values()].filter((d) => d.userId === userId);
+  }
+
+  async listEvents(userId: number, deviceId: string): Promise<DeviceEvent[]> {
+    return this.events.get(`${userId}:${deviceId}`) ?? [];
+  }
+}
+
+export class FakeConnectionMetaRepo implements IConnectionMetaRepo {
+  readonly metas = new Map<string, ConnectionMeta>();
+  private seq = 0;
+
+  async replaceAll(userId: number, metas: ConnectionMetaInput[]): Promise<number> {
+    const active = metas.filter((m) => !m.deleted).length;
+    const now = new Date();
+    for (const m of metas) {
+      const k = `${userId}:${m.connUuid}`;
+      const existing = this.metas.get(k);
+      this.metas.set(k, {
+        ...m, id: existing?.id ?? ++this.seq, userId,
+        createTime: existing?.createTime ?? now, updateTime: now,
+      });
+    }
+    return active;
+  }
+
+  async countActive(userId: number): Promise<number> {
+    let n = 0;
+    for (const m of this.metas.values()) if (m.userId === userId && !m.deleted) n++;
+    return n;
+  }
+
+  async listByUser(userId: number): Promise<ConnectionMeta[]> {
+    return [...this.metas.values()].filter((m) => m.userId === userId);
+  }
+}
+
+export class FakeSyncEventRepo implements ISyncEventRepo {
+  readonly events: SyncEvent[] = [];
+  private seq = 0;
+
+  async record(event: Omit<SyncEvent, 'id' | 'createTime'>): Promise<void> {
+    this.events.push({ ...event, id: ++this.seq, createTime: new Date() });
+  }
+
+  async listByUser(userId: number, limit = 100): Promise<SyncEvent[]> {
+    return this.events.filter((e) => e.userId === userId).slice(-limit).reverse();
+  }
+}
+
+export class FakeUsageEventRepo implements IUsageEventRepo {
+  readonly events: UsageEvent[] = [];
+  private seq = 0;
+
+  async record(userId: number, deviceId: string | undefined, kind: UsageEvent['kind'], count: number): Promise<void> {
+    this.events.push({ id: ++this.seq, userId, deviceId, kind, count, createTime: new Date() });
+  }
+
+  async listByUser(userId: number, limit = 200): Promise<UsageEvent[]> {
+    return this.events.filter((e) => e.userId === userId).slice(-limit).reverse();
   }
 }
 

@@ -4,7 +4,6 @@ import { TokenService, type JwtPort } from '../../src/service/tokenService.js';
 import { hashPassword } from '../../src/service/password.js';
 import {
   InvalidCredentialsError,
-  DeviceLimitError,
   TokenReuseError,
   ValidationError,
 } from '../../src/domain/errors.js';
@@ -13,6 +12,7 @@ import {
   FakePlanRepo,
   FakeSubscriptionRepo,
   FakeRefreshTokenRepo,
+  FakeDeviceRepo,
   makePlan,
 } from '../helpers/fakeRepos.js';
 
@@ -35,10 +35,11 @@ function setup(planOver: Parameters<typeof makePlan>[1] = {}) {
   const planRepo = new FakePlanRepo([makePlan('free', planOver), makePlan('pro', { maxDevices: 0 })]);
   const subRepo = new FakeSubscriptionRepo();
   const rtRepo = new FakeRefreshTokenRepo();
+  const deviceRepo = new FakeDeviceRepo();
   const jwt = new FakeJwt();
   const tokenService = new TokenService(jwt, '15m', '30d');
-  const auth = new AuthService(userRepo, planRepo, subRepo, rtRepo, tokenService, JWT_SECRET);
-  return { auth, userRepo, planRepo, subRepo, rtRepo, jwt, tokenService };
+  const auth = new AuthService(userRepo, subRepo, rtRepo, deviceRepo, tokenService, JWT_SECRET);
+  return { auth, userRepo, planRepo, subRepo, rtRepo, deviceRepo, jwt, tokenService };
 }
 
 describe('AuthService.register', () => {
@@ -137,35 +138,7 @@ describe('AuthService.login', () => {
     );
   });
 
-  it('enforces maxDevices from the plan', async () => {
-    const { auth } = setup({ maxDevices: 2 });
-    await auth.register('a@example.com', 'password123'); // device 1
-    await auth.login('a@example.com', 'password123');    // device 2
-    const err = await auth.login('a@example.com', 'password123').catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(DeviceLimitError);
-    expect((err as DeviceLimitError).limit).toBe(2);
-    expect((err as DeviceLimitError).current).toBe(2);
-  });
-
-  it('frees a device slot once a session is revoked', async () => {
-    const { auth, rtRepo } = setup({ maxDevices: 1 });
-    const first = await auth.register('a@example.com', 'password123');
-    await expect(auth.login('a@example.com', 'password123')).rejects.toBeInstanceOf(DeviceLimitError);
-    await auth.logout(first.refreshToken);
-    expect(rtRepo.tokens.size).toBe(1);
-    await expect(auth.login('a@example.com', 'password123')).resolves.toBeTruthy();
-  });
-
-  it('treats maxDevices 0 as unlimited', async () => {
-    const { auth, userRepo } = setup({ maxDevices: 0 });
-    const res = await auth.register('a@example.com', 'password123');
-    await userRepo.updatePlan(res.user.id, 'pro');
-    for (let i = 0; i < 5; i++) {
-      await expect(auth.login('a@example.com', 'password123')).resolves.toBeTruthy();
-    }
-  });
-
-  it('accepts a legacy sha256 password hash (migration path)', async () => {
+it('accepts a legacy sha256 password hash (migration path)', async () => {
     const { auth, userRepo } = setup();
     const { createHash } = await import('crypto');
     const legacy = createHash('sha256').update(`${JWT_SECRET}legacy-pass`).digest('hex');
@@ -211,6 +184,40 @@ describe('AuthService.login', () => {
     await auth.login('keep@example.com', 'password123');
 
     expect((await userRepo.findById(reg.user.id))!.passwordHash).toBe(before);
+  });
+});
+
+describe('AuthService.device identity', () => {
+  it('同一设备重登不增加设备数（顶掉旧会话，不触发设备上限）', async () => {
+    const { auth, rtRepo, deviceRepo } = setup({ maxDevices: 1 });
+    const device = { deviceId: 'machine-1', deviceName: 'laptop', os: 'linux' };
+    const reg = await auth.register('a@example.com', 'password123', device);
+    await expect(auth.login('a@example.com', 'password123', device)).resolves.toBeTruthy();
+    expect(deviceRepo.devices.size).toBe(1);
+    const active = await rtRepo.listActiveForUser(reg.user.id, new Date());
+    expect(active).toHaveLength(1);
+    expect(active[0].deviceName).toBe('laptop');
+  });
+
+  it('登记并更新设备固有信息', async () => {
+    const { auth, deviceRepo } = setup();
+    const reg = await auth.register('a@example.com', 'password123', { deviceId: 'm1', os: 'linux', appVersion: '1.80' });
+    await auth.login('a@example.com', 'password123', { deviceId: 'm1', os: 'linux', appVersion: '1.81' });
+    expect(deviceRepo.devices.size).toBe(1);
+    const list = await deviceRepo.listByUser(reg.user.id);
+    expect(list).toHaveLength(1);
+    expect(list[0].appVersion).toBe('1.81');
+  });
+
+  it('退出后重新登录仍是同一设备', async () => {
+    const { auth, rtRepo, deviceRepo } = setup({ maxDevices: 1 });
+    const device = { deviceId: 'machine-1', deviceName: 'laptop' };
+    const reg = await auth.register('a@example.com', 'password123', device);
+    await auth.logout(reg.refreshToken);
+    await expect(auth.login('a@example.com', 'password123', device)).resolves.toBeTruthy();
+    expect(deviceRepo.devices.size).toBe(1);
+    const active = await rtRepo.listActiveForUser(reg.user.id, new Date());
+    expect(active).toHaveLength(1);
   });
 });
 
@@ -286,13 +293,15 @@ describe('AuthService session management', () => {
     await expect(auth.logout('never-issued')).resolves.toBeUndefined();
   });
 
-  it('lists active sessions with device metadata', async () => {
-    const { auth } = setup();
+  it('lists active sessions with device metadata and marks the current device', async () => {
+    const { auth, rtRepo } = setup();
     const reg = await auth.register('a@example.com', 'password123', { deviceName: 'laptop', ip: '1.1.1.1' });
     await auth.login('a@example.com', 'password123', { deviceName: 'phone', ip: '2.2.2.2' });
-    const sessions = await auth.listSessions(reg.user.id);
+    const current = [...rtRepo.tokens.values()].find((t) => t.deviceName === 'phone')!;
+    const sessions = await auth.listSessions(reg.user.id, current.id);
     expect(sessions.map((s) => s.deviceName)).toEqual(['laptop', 'phone']);
     expect(sessions.map((s) => s.ip)).toEqual(['1.1.1.1', '2.2.2.2']);
+    expect(sessions.map((s) => s.current)).toEqual([false, true]);
   });
 
   it('refuses to revoke a session belonging to another user', async () => {

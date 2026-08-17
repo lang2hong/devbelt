@@ -23,7 +23,7 @@ declare module 'fastify' {
 
 declare module '@fastify/jwt' {
   interface FastifyJWT {
-    /** 签名载荷：sub 为用户 id，role 用于 RBAC */
-    user: { sub: number; role: string };
+    /** 签名载荷：sub 为用户 id，role 用于 RBAC；plan 套餐；sid 为当前 refresh token 主键（标记当前设备） */
+    user: { sub: number; role: string; plan?: string; sid?: number };
   }
 }

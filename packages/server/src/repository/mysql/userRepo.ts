@@ -50,6 +50,11 @@ export class MysqlUserRepo implements IUserRepo {
     const [rows] = await this.db().query<any[]>('SELECT * FROM users ORDER BY id LIMIT ? OFFSET ?', [limit, offset]);
     return rows.map(mapUser);
   }
+
+  async count(): Promise<number> {
+    const [rows] = await this.db().query<any[]>('SELECT COUNT(*) AS cnt FROM users');
+    return Number(rows[0]?.cnt ?? 0);
+  }
 }
 
 function mapUser(r: any): User {

@@ -331,6 +331,40 @@ export class ConnectionStore {
   }
 
   /**
+   * 同步：全量替换（use remote 策略）——本地分组/连接整个替换为远端，不做 id 并集，
+   * 本地独有项随之丢弃。凭据沿用 reconcileSecrets 处理（远端有值写回、无值清理）。
+   * 不逐条派发 ConnectionChangedEvent：use remote 后由调用方全量 refresh 树。
+   */
+  async replaceAll(remote: ConnectionTreeData): Promise<void> {
+    const sanitized = await Promise.all(remote.connections.map(async (c) => this.reconcileSecrets(c)));
+    await this.memento.update(ConnectionStore.KEY, { groups: remote.groups, connections: sanitized });
+    this.changedEmitter.fire();
+  }
+
+  /**
+   * 读取连接明文元数据（上传服务端计量/分析用，不含任何敏感字段）。
+   * 返回结构对齐服务端 connection_meta 表：type/name/groupName/enabled/deleted/时间戳。
+   */
+  getConnectionMeta(): Array<{
+    connUuid: string; type: string; name: string; groupName?: string;
+    enabled: boolean; deleted: boolean; createdAt?: number; updatedAt?: number;
+  }> {
+    const data = this.getTreeData();
+    const groupNameById = new Map<string, string>();
+    for (const g of data.groups) groupNameById.set(g.id, g.name);
+    return data.connections.map((c) => ({
+      connUuid: c.id,
+      type: c.dbType,
+      name: c.name,
+      groupName: c.groupId ? groupNameById.get(c.groupId) : undefined,
+      enabled: true,
+      deleted: !!c.deleted,
+      createdAt: c.createTime,
+      updatedAt: c.updateTime,
+    }));
+  }
+
+  /**
    * 读取同步用全量数据：连接 materialize 含密码（含墓碑），分组原样。
    * 该结果经 SyncManager 加密后上传；服务端只见密文。
    */
@@ -484,5 +518,10 @@ export class ConnectionStore {
   /** 同步：合并远端保存查询数据 */
   replaceQueriesForSync(remote: { queries: SavedQuery[]; folders: QueryFolder[] }): Promise<void> {
     return this.queryStore.replaceAllMerge(remote);
+  }
+
+  /** 同步：全量替换远端保存查询数据（use remote 策略） */
+  replaceQueriesForSyncAll(remote: { queries: SavedQuery[]; folders: QueryFolder[] }): Promise<void> {
+    return this.queryStore.replaceAll(remote);
   }
 }

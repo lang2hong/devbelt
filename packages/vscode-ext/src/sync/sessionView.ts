@@ -11,7 +11,7 @@ export class SessionView {
     if (SessionView.panel) { SessionView.panel.reveal(vscode.ViewColumn.Active); return; }
     const panel = vscode.window.createWebviewPanel(
       'dbclient.sessions', l10n('sessions.title'), vscode.ViewColumn.Active,
-      { enableScripts: true, retainContextWhenHidden: false },
+      { enableScripts: true, retainContextWhenHidden: true },
     );
     SessionView.panel = panel;
     panel.webview.html = SessionView.html();
@@ -56,7 +56,8 @@ th{background:var(--vscode-editor-background)}
 <script nonce="${nonce}">
 const vscode=acquireVsCodeApi();
 window.addEventListener('message',e=>{const m=e.data;if(m.type==='sessions')render(m.sessions);else if(m.type==='error')document.getElementById('error').textContent=m.message;});
-function render(ss){const l=document.getElementById('list');if(!ss.length){l.innerHTML='<tr><td colspan=6 class="empty">${s('sessions.empty')}</td></tr>';return;}l.innerHTML=ss.map(x=>'<tr><td>'+(x.deviceName||'-')+'</td><td>'+(x.ip||'-')+'</td><td>'+x.createTime+'</td><td>'+(x.lastUsedTime||'-')+'</td><td>'+(x.current?'✓':'')+'</td><td>'+(x.current?'':'<button class="btn" onclick="revoke('+x.id+')">${s('sessions.kick')}</button>')+'</td></tr>').join('');}
+function fmt(s){if(!s)return '-';var d=new Date(s);if(isNaN(d))return s;var p=function(n){return (n<10?'0':'')+n;};return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());}
+function render(ss){const l=document.getElementById('list');if(!ss.length){l.innerHTML='<tr><td colspan=6 class="empty">${s('sessions.empty')}</td></tr>';return;}l.innerHTML=ss.map(x=>'<tr><td>'+(x.deviceName||'-')+'</td><td>'+(x.ip||'-')+'</td><td>'+fmt(x.createTime)+'</td><td>'+fmt(x.lastUsedTime)+'</td><td>'+(x.current?'✓':'')+'</td><td>'+(x.current?'':'<button class="btn" onclick="revoke('+x.id+')">${s('sessions.kick')}</button>')+'</td></tr>').join('');}
 function revoke(id){vscode.postMessage({type:'revoke',id});}
 </script></body></html>`;
   }

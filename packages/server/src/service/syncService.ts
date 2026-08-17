@@ -1,4 +1,4 @@
-import type { ISyncRepo, IUserRepo } from '../repository/interfaces.js';
+import type { ISyncRepo, IUserRepo, IConnectionMetaRepo, ISyncEventRepo, ConnectionMetaInput } from '../repository/interfaces.js';
 import type { PlanPolicy } from '../policy/planPolicy.js';
 import type { SectionType } from '../domain/enums.js';
 import type { SyncSection, SyncVersionSummary } from '../domain/entities.js';
@@ -19,32 +19,48 @@ export interface PullResult {
   sections: SectionData[];
 }
 
+export interface PushInput {
+  deviceId?: string;
+  itemCount?: number;
+  /** 仅 connections section：明文连接元数据清单（计量/分析；内容仍加密） */
+  meta?: ConnectionMetaInput[];
+}
+
 /**
  * 同步服务：分节 push/pull + 配额校验 + 历史回滚。
  *
- * 端到端加密：server 仅见密文，合并/解密在客户端。server 职责：
- * - 分节存储当前版本 + 历史快照
- * - 乐观锁（baseVersion 校验）+ sync_quota_bytes 配额
- * - 回滚（取旧版本密文写回当前行，新 version=current+1）
+ * 端到端加密：server 仅见密文。但连接数 etc. 需服务端计量，
+ * 故 push connections 时客户端附带明文元数据（connection_meta），
+ * 据此校验 maxConnections 并落库；内容仍存 sync_sections 密文。
+ * 每次 pull/push 写 sync_events 留痕。
  */
 export class SyncService {
   constructor(
     private readonly syncRepo: ISyncRepo,
     private readonly userRepo: IUserRepo,
     private readonly planPolicy: PlanPolicy,
+    private readonly connectionMetaRepo: IConnectionMetaRepo,
+    private readonly syncEventRepo: ISyncEventRepo,
   ) {}
 
   /**
-   * 推送单节：配额前置校验 + 乐观锁 + 记历史 + 清理超限。
+   * 推送单节：连接数/字节配额前置校验 + 乐观锁 + 记历史 + 清理超限 + 事件留痕。
    *
-   * 配额必须在写库**之前**校验：否则超额密文已经落库，403 只是事后通知，
-   * 配额形同虚设。投影总量 = 当前总量 − 该节旧字节数 + 新字节数。
+   * 配额必须在写库**之前**校验：否则超额密文已经落库，403 只是事后通知。
+   * 投影总量 = 当前总量 − 该节旧字节数 + 新字节数。
    */
-  async push(userId: number, section: SectionType, encryptedData: string, baseVersion: number): Promise<PushResult> {
+  async push(userId: number, section: SectionType, encryptedData: string, baseVersion: number, input: PushInput = {}): Promise<PushResult> {
     const user = await this.userRepo.findById(userId);
     if (!user) throw new EntityNotFoundError('user', userId);
 
     const newSectionBytes = Buffer.byteLength(encryptedData, 'utf8');
+
+    // 连接数配额：仅 connections section，按明文元数据计（先于写库）
+    if (section === 'connections' && input.meta) {
+      const activeCount = input.meta.filter((m) => !m.deleted).length;
+      await this.planPolicy.check(user.planCode, 'connections', activeCount);
+    }
+
     await this.checkQuota(userId, user.planCode, section, newSectionBytes);
 
     const newVersion = await this.syncRepo.putSectionIfVersion(userId, section, encryptedData, baseVersion);
@@ -53,12 +69,21 @@ export class SyncService {
       throw new ConflictError(cur ? cur.version : 0, baseVersion);
     }
 
+    if (section === 'connections' && input.meta) {
+      await this.connectionMetaRepo.replaceAll(userId, input.meta);
+    }
+
     if (newSectionBytes > 0) {
       await this.syncRepo.recordVersion(userId, section, newVersion, encryptedData, newSectionBytes);
     }
 
     const retention = await this.planPolicy.syncVersionRetention(user.planCode);
     if (retention > 0) await this.syncRepo.pruneVersions(userId, section, retention);
+
+    await this.syncEventRepo.record({
+      userId, deviceId: input.deviceId, direction: 'push', section,
+      bytes: newSectionBytes, itemCount: input.itemCount ?? 0,
+    });
 
     return { version: newVersion };
   }
@@ -80,14 +105,20 @@ export class SyncService {
     await this.planPolicy.check(planCode, 'sync_bytes', projected);
   }
 
-  /** 拉取：指定 section 单节，或全部 section */
-  async pull(userId: number, section?: SectionType): Promise<PullResult> {
+  /** 拉取：指定 section 单节，或全部 section（每节写 pull 事件留痕） */
+  async pull(userId: number, section?: SectionType, deviceId?: string): Promise<PullResult> {
     let sections: SyncSection[];
     if (section) {
       const s = await this.syncRepo.getSection(userId, section);
       sections = s ? [s] : [];
     } else {
       sections = await this.syncRepo.listSections(userId);
+    }
+    for (const s of sections) {
+      await this.syncEventRepo.record({
+        userId, deviceId, direction: 'pull', section: s.section,
+        bytes: Buffer.byteLength(s.encryptedData, 'utf8'), itemCount: 0,
+      });
     }
     return { sections: sections.map(toSectionData) };
   }

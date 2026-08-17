@@ -1,17 +1,20 @@
 import { BaseWebView } from './baseWebView';
-import type { SyncManager } from '../sync/syncManager';
+import type { ApplyStrategy } from '../sync/syncManager';
 import type { MergePlan } from '../sync/mergePlan';
 
 /**
- * 同步合并差异预览视图：展示 pull 前的合并计划，用户确认后应用。
- * 主密码仅在此实例（扩展进程）持有，不发往 webview；webview 仅发送 apply/cancel 意图。
+ * 同步合并差异预览视图：展示 pull/push 前的合并计划，用户选定策略后应用。
+ *
+ * 视图不绑定具体同步动作（pull 还是 push）：由调用方注入 onStrategy 回调，
+ * 收到 webview 的 apply(strategy) 时执行。主密码仅在调用方（扩展进程）持有，
+ * 不发往 webview；webview 仅发送 apply(local/remote/merge) 或 cancel 意图。
  */
 export class SyncDiffView extends BaseWebView {
   private static current?: SyncDiffView;
   private initSent = false;
 
   private constructor(
-    private readonly sync: SyncManager,
+    private readonly onStrategy: (strategy: ApplyStrategy) => Promise<void>,
     private readonly plan: MergePlan,
     private readonly onApplied?: () => void | Promise<void>,
   ) {
@@ -19,19 +22,19 @@ export class SyncDiffView extends BaseWebView {
   }
 
   static open(
-    sync: SyncManager,
+    onStrategy: (strategy: ApplyStrategy) => Promise<void>,
     plan: MergePlan,
     onApplied?: () => void | Promise<void>,
   ): void {
     if (SyncDiffView.current) SyncDiffView.current.dispose();
-    const view = new SyncDiffView(sync, plan, onApplied);
+    const view = new SyncDiffView(onStrategy, plan, onApplied);
     SyncDiffView.current = view;
   }
 
   protected async handleMessage(msg: any): Promise<void> {
     if (msg.type === 'apply') {
       try {
-        await this.sync.applyPreviewedPull();
+        await this.onStrategy((msg.strategy as ApplyStrategy) || 'merge');
         this.post({ type: 'applied' });
         await this.onApplied?.();
         this.dispose();

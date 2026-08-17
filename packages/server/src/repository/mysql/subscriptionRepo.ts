@@ -31,6 +31,11 @@ export class MysqlSubscriptionRepo implements ISubscriptionRepo {
     return rows.map(mapSub);
   }
 
+  async listAll(): Promise<Subscription[]> {
+    const [rows] = await this.db().query<any[]>('SELECT * FROM subscriptions ORDER BY create_time DESC');
+    return rows.map(mapSub);
+  }
+
   async downgradeExpired(now: Date): Promise<number> {
     const [result] = await this.db().query<any>(
       `UPDATE subscriptions s

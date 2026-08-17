@@ -25,7 +25,6 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       sync_quota_bytes INT UNSIGNED NOT NULL DEFAULT 0,
       sync_version_retention SMALLINT UNSIGNED NOT NULL DEFAULT 0,
       history_retention_count SMALLINT UNSIGNED NOT NULL DEFAULT 0,
-      max_pats SMALLINT UNSIGNED NOT NULL DEFAULT 0,
       features INT UNSIGNED NOT NULL DEFAULT 0,
       create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -81,6 +80,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       user_id INT UNSIGNED NOT NULL,
       token_hash CHAR(64) NOT NULL UNIQUE,
       device_name VARCHAR(120) NULL,
+      device_id VARCHAR(64) NULL,
       user_agent VARCHAR(255) NULL,
       ip VARCHAR(45) NULL,
       expires_time TIMESTAMP NOT NULL,
@@ -92,22 +92,103 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       KEY idx_rt_user (user_id, revoked_time, expires_time)
     ) ENGINE=InnoDB
   `);
+  // 旧 refresh_tokens 表补 device_id 列
+  await addColumnIfMissing(mysql, 'refresh_tokens', 'device_id', 'VARCHAR(64) NULL');
 
-  // personal_access_tokens PAT 表
+  // devices 设备实体表（同设备判同 + 设备固有信息，区别于易变的会话表）
   await mysql.query(`
-    CREATE TABLE IF NOT EXISTS personal_access_tokens (
-      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    CREATE TABLE IF NOT EXISTS devices (
+      id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
       user_id INT UNSIGNED NOT NULL,
-      name VARCHAR(80) NOT NULL,
-      token_hash CHAR(64) NOT NULL UNIQUE,
-      scopes VARCHAR(255) NOT NULL DEFAULT '',
-      last_used_time TIMESTAMP NULL DEFAULT NULL,
-      expires_time TIMESTAMP NULL DEFAULT NULL,
-      revoked_time TIMESTAMP NULL DEFAULT NULL,
+      device_id VARCHAR(64) NOT NULL,
+      hostname VARCHAR(120) NULL,
+      os VARCHAR(32) NULL,
+      arch VARCHAR(16) NULL,
+      os_version VARCHAR(64) NULL,
+      app_name VARCHAR(64) NULL,
+      app_version VARCHAR(32) NULL,
+      remote_name VARCHAR(32) NULL,
+      vs_machine_id VARCHAR(64) NULL,
+      language VARCHAR(16) NULL,
+      timezone VARCHAR(64) NULL,
+      last_seen_time TIMESTAMP NULL DEFAULT NULL,
       create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-      KEY idx_pat_user (user_id, revoked_time)
+      UNIQUE KEY uq_device_user (user_id, device_id)
+    ) ENGINE=InnoDB
+  `);
+  // 旧 devices 表补列
+  await addColumnIfMissing(mysql, 'devices', 'vs_machine_id', 'VARCHAR(64) NULL');
+  await addColumnIfMissing(mysql, 'devices', 'language', 'VARCHAR(16) NULL');
+  await addColumnIfMissing(mysql, 'devices', 'timezone', 'VARCHAR(64) NULL');
+
+  // device_events 设备事件留痕表（升级/系统变化/首次登记）
+  await mysql.query(`
+    CREATE TABLE IF NOT EXISTS device_events (
+      id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      user_id INT UNSIGNED NOT NULL,
+      device_id VARCHAR(64) NOT NULL,
+      event VARCHAR(16) NOT NULL,
+      vs_machine_id VARCHAR(64) NULL,
+      app_name VARCHAR(64) NULL,
+      app_version VARCHAR(32) NULL,
+      os VARCHAR(32) NULL,
+      os_version VARCHAR(64) NULL,
+      arch VARCHAR(16) NULL,
+      create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      KEY idx_de_user_device (user_id, device_id, create_time)
+    ) ENGINE=InnoDB
+  `);
+
+  // connection_meta 连接元数据表（明文，服务端计量/分析用；内容仍加密存于 sync_sections）
+  await mysql.query(`
+    CREATE TABLE IF NOT EXISTS connection_meta (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      user_id INT UNSIGNED NOT NULL,
+      conn_uuid VARCHAR(64) NOT NULL,
+      type VARCHAR(32) NOT NULL,
+      name VARCHAR(200) NULL,
+      group_name VARCHAR(100) NULL,
+      enabled TINYINT(1) NOT NULL DEFAULT 1,
+      deleted TINYINT(1) NOT NULL DEFAULT 0,
+      created_at BIGINT NULL,
+      updated_at BIGINT NULL,
+      create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE KEY uq_cm_user_conn (user_id, conn_uuid)
+    ) ENGINE=InnoDB
+  `);
+
+  // sync_events 同步事件留痕表（每次 pull/push 的明文元数据）
+  await mysql.query(`
+    CREATE TABLE IF NOT EXISTS sync_events (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      user_id INT UNSIGNED NOT NULL,
+      device_id VARCHAR(64) NULL,
+      direction VARCHAR(8) NOT NULL,
+      section VARCHAR(16) NOT NULL,
+      bytes INT UNSIGNED NOT NULL DEFAULT 0,
+      item_count INT UNSIGNED NOT NULL DEFAULT 0,
+      create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      KEY idx_se_user (user_id, create_time)
+    ) ENGINE=InnoDB
+  `);
+
+  // usage_events 用量行为表（连接打开/查询执行的累计计数，明文）
+  await mysql.query(`
+    CREATE TABLE IF NOT EXISTS usage_events (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      user_id INT UNSIGNED NOT NULL,
+      device_id VARCHAR(64) NULL,
+      kind VARCHAR(32) NOT NULL,
+      count INT UNSIGNED NOT NULL DEFAULT 1,
+      create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      KEY idx_ue_user (user_id, create_time)
     ) ENGINE=InnoDB
   `);
 
@@ -171,7 +252,6 @@ interface PlanSeed {
   syncQuotaBytes: number;
   syncVersionRetention: number;
   historyRetentionCount: number;
-  maxPats: number;
   features: number;
 }
 
@@ -179,32 +259,28 @@ const PLAN_SEED: PlanSeed[] = [
   {
     code: 'free', name: 'Free', priceMonth: 0, priceYear: 0,
     maxDevices: 1, maxConnections: 5, syncQuotaBytes: 1 * 1024 * 1024,
-    syncVersionRetention: 3, historyRetentionCount: 50, maxPats: 0, features: 1,
+    syncVersionRetention: 3, historyRetentionCount: 50, features: 1,
   },
   {
-    code: 'pro', name: 'Pro', priceMonth: 39, priceYear: 390,
+    code: 'pro', name: 'Pro', priceMonth: 5, priceYear: 60,
     maxDevices: 5, maxConnections: 50, syncQuotaBytes: 100 * 1024 * 1024,
-    syncVersionRetention: 30, historyRetentionCount: 0, maxPats: 3, features: 0b111,
+    syncVersionRetention: 30, historyRetentionCount: 0, features: 0b111,
   },
   {
-    code: 'team', name: 'Team', priceMonth: 129, priceYear: 1290,
+    code: 'team', name: 'Team', priceMonth: 20, priceYear: 200,
     maxDevices: 20, maxConnections: 500, syncQuotaBytes: 1024 * 1024 * 1024,
-    syncVersionRetention: 90, historyRetentionCount: 0, maxPats: 20, features: 0b111111,
+    syncVersionRetention: 90, historyRetentionCount: 0, features: 0b111111,
   },
 ];
 
 async function seedPlans(mysql: { query: (sql: string, p?: any[]) => Promise<any> }): Promise<void> {
   for (const p of PLAN_SEED) {
+    // 仅首次创建；已存在的套餐不覆盖任何字段（价格/配额改由管理后台编辑，避免重启重置）。
     await mysql.query(
-      `INSERT INTO plans (code, name, price_month, price_year, max_devices, max_connections, sync_quota_bytes, sync_version_retention, history_retention_count, max_pats, features)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         name = VALUES(name), price_month = VALUES(price_month), price_year = VALUES(price_year),
-         max_devices = VALUES(max_devices), max_connections = VALUES(max_connections),
-         sync_quota_bytes = VALUES(sync_quota_bytes), sync_version_retention = VALUES(sync_version_retention),
-         history_retention_count = VALUES(history_retention_count), max_pats = VALUES(max_pats),
-         features = VALUES(features)`,
-      [p.code, p.name, p.priceMonth, p.priceYear, p.maxDevices, p.maxConnections, p.syncQuotaBytes, p.syncVersionRetention, p.historyRetentionCount, p.maxPats, p.features],
+      `INSERT INTO plans (code, name, price_month, price_year, max_devices, max_connections, sync_quota_bytes, sync_version_retention, history_retention_count, features)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE code = VALUES(code)`,
+      [p.code, p.name, p.priceMonth, p.priceYear, p.maxDevices, p.maxConnections, p.syncQuotaBytes, p.syncVersionRetention, p.historyRetentionCount, p.features],
     );
   }
 }

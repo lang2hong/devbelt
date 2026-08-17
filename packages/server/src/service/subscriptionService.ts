@@ -1,5 +1,5 @@
 import type {
-  IUserRepo, IPlanRepo, ISubscriptionRepo, IRefreshTokenRepo, IPatRepo, ISyncRepo,
+  IUserRepo, IPlanRepo, ISubscriptionRepo, IRefreshTokenRepo, ISyncRepo, IConnectionMetaRepo,
 } from '../repository/interfaces.js';
 import type { Plan, User, Subscription, Usage } from '../domain/entities.js';
 import { EntityNotFoundError } from '../domain/errors.js';
@@ -24,8 +24,8 @@ export class SubscriptionService {
     private readonly planRepo: IPlanRepo,
     private readonly subRepo: ISubscriptionRepo,
     private readonly refreshTokenRepo: IRefreshTokenRepo,
-    private readonly patRepo: IPatRepo,
     private readonly syncRepo: ISyncRepo,
+    private readonly connectionMetaRepo: IConnectionMetaRepo,
   ) {}
 
   /** 确保用户订阅状态最新（到期则降级） */
@@ -54,9 +54,8 @@ export class SubscriptionService {
     const now = new Date();
     const usage: Usage = {
       devices: await this.refreshTokenRepo.countActiveForUser(userId, now),
-      connections: 0,   // 客户端维度，server 不可见（同步数据加密）
+      connections: await this.connectionMetaRepo.countActive(userId),
       syncBytes: await this.syncRepo.sumBytes(userId),
-      pats: await this.patRepo.countActiveForUser(userId),
       history: 0,       // 客户端维度
     };
     const { passwordHash, ...safeUser } = user;

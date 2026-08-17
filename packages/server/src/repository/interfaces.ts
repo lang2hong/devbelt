@@ -4,11 +4,15 @@ import type {
   Plan,
   Subscription,
   RefreshToken,
-  Pat,
   SyncSection,
   SyncSectionVersion,
   SyncVersionSummary,
   SessionInfo,
+  Device,
+  DeviceEvent,
+  ConnectionMeta,
+  SyncEvent,
+  UsageEvent,
 } from '../domain/entities.js';
 
 /**
@@ -27,6 +31,18 @@ export interface IUserRepo {
   updatePassword(id: number, passwordHash: string): Promise<void>;
   updateStatus(id: number, status: UserStatus): Promise<void>;
   listAll(limit: number, offset: number): Promise<User[]>;
+  count(): Promise<number>;
+}
+
+/** 套餐可编辑字段（管理后台编辑套餐） */
+export interface PlanEditableFields {
+  name: string;
+  priceMonth: number;
+  priceYear: number;
+  maxConnections: number;
+  syncQuotaBytes: number;
+  syncVersionRetention: number;
+  features: number;
 }
 
 export interface IPlanRepo {
@@ -34,11 +50,14 @@ export interface IPlanRepo {
   listAll(): Promise<Plan[]>;
   /** 播种套餐数据（仅 schema 初始化时调用） */
   seed(plans: Array<Omit<Plan, 'createTime' | 'updateTime'>>): Promise<void>;
+  /** 更新套餐可编辑字段（管理后台编辑） */
+  update(code: PlanCode, fields: PlanEditableFields): Promise<void>;
 }
 
 export interface ISubscriptionRepo {
   findByUserId(userId: number): Promise<Subscription | undefined>;
   upsert(sub: Omit<Subscription, 'id' | 'createTime' | 'updateTime'> & { id?: number }): Promise<Subscription>;
+  listAll(): Promise<Subscription[]>;
   listByStatus(status: SubStatus): Promise<Subscription[]>;
   /** 到期降级：status=active 且 period_end_time < now → status=expired, user.plan_code=free */
   downgradeExpired(now: Date): Promise<number>;
@@ -51,19 +70,40 @@ export interface IRefreshTokenRepo {
   revoke(id: number): Promise<void>;
   /** 撤销某用户全部会话（token 重用时强制下线所有设备） */
   revokeAllForUser(userId: number): Promise<void>;
+  /** 撤销某用户在某设备上的全部活跃会话（同设备重登顶掉旧会话） */
+  revokeByDevice(userId: number, deviceId: string): Promise<void>;
   countActiveForUser(userId: number, now: Date): Promise<number>;
   listActiveForUser(userId: number, now: Date): Promise<SessionInfo[]>;
   updateLastUsed(id: number, time: Date): Promise<void>;
 }
 
-export interface IPatRepo {
-  create(pat: Omit<Pat, 'id' | 'createTime' | 'updateTime'>): Promise<Pat>;
-  findByHash(hash: string): Promise<Pat | undefined>;
-  findById(id: number): Promise<Pat | undefined>;
-  listByUser(userId: number): Promise<Pat[]>;
-  revoke(id: number): Promise<void>;
-  countActiveForUser(userId: number): Promise<number>;
-  updateLastUsed(id: number, time: Date): Promise<void>;
+/** 设备实体仓储（设备固有信息，独立于会话） */
+export interface IDeviceRepo {
+  upsert(device: Omit<Device, 'id' | 'createTime' | 'updateTime'>): Promise<Device>;
+  listByUser(userId: number): Promise<Device[]>;
+  /** 设备事件留痕（升级/系统变化/首次登记） */
+  listEvents(userId: number, deviceId: string): Promise<DeviceEvent[]>;
+}
+
+/** 连接元数据仓储（明文，计量/分析；内容仍加密） */
+export type ConnectionMetaInput = Omit<ConnectionMeta, 'id' | 'userId' | 'createTime' | 'updateTime'>;
+export interface IConnectionMetaRepo {
+  /** 全量替换某用户连接元数据（含删除墓碑），返回落库后的活跃连接数 */
+  replaceAll(userId: number, metas: ConnectionMetaInput[]): Promise<number>;
+  countActive(userId: number): Promise<number>;
+  listByUser(userId: number): Promise<ConnectionMeta[]>;
+}
+
+/** 同步事件留痕仓储 */
+export interface ISyncEventRepo {
+  record(event: Omit<SyncEvent, 'id' | 'createTime'>): Promise<void>;
+  listByUser(userId: number, limit?: number): Promise<SyncEvent[]>;
+}
+
+/** 用量行为仓储（连接打开/查询执行的累计计数） */
+export interface IUsageEventRepo {
+  record(userId: number, deviceId: string | undefined, kind: UsageEvent['kind'], count: number): Promise<void>;
+  listByUser(userId: number, limit?: number): Promise<UsageEvent[]>;
 }
 
 /**

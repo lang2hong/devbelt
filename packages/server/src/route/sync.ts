@@ -23,8 +23,9 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
       child.get('/api/sync', async (req, reply) => {
         const userId = req.user.sub as number;
         const section = (req.query as any).section as SectionType | undefined;
+        const deviceId = (req.headers['x-device-id'] as string) ?? undefined;
         try {
-          const r = await opts.syncService.pull(userId, section);
+          const r = await opts.syncService.pull(userId, section, deviceId);
           reply.send(r);
         } catch (e) {
           sendError(reply, e);
@@ -33,9 +34,14 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
 
       child.put('/api/sync', async (req, reply) => {
         const userId = req.user.sub as number;
-        const { section, encryptedData, baseVersion } = req.body as any;
+        const { section, encryptedData, baseVersion, itemCount, meta } = req.body as any;
+        const deviceId = (req.headers['x-device-id'] as string) ?? undefined;
         try {
-          const r = await opts.syncService.push(userId, section, encryptedData, Number(baseVersion));
+          const r = await opts.syncService.push(userId, section, encryptedData, Number(baseVersion), {
+            deviceId,
+            itemCount: Number(itemCount) || 0,
+            meta,
+          });
           reply.send(r);
         } catch (e) {
           sendError(reply, e);

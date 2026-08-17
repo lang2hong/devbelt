@@ -24,7 +24,6 @@ export interface Plan {
   syncQuotaBytes: number;        // 0 = 无限
   syncVersionRetention: number;  // 同步历史版本保留数（0 = 不记历史）
   historyRetentionCount: number; // 查询历史条数（0 = 无限）
-  maxPats: number;
   features: number;              // Feature 位掩码
   createTime: Date;
   updateTime: Date;
@@ -51,6 +50,7 @@ export interface RefreshToken {
   userId: number;
   tokenHash: string;            // sha256 hex，不存明文
   deviceName?: string;
+  deviceId?: string;            // 关联 devices.device_id（同设备判同键）
   userAgent?: string;
   ip?: string;
   expiresTime: Date;
@@ -60,18 +60,77 @@ export interface RefreshToken {
   updateTime: Date;
 }
 
-/** 个人访问令牌 PAT */
-export interface Pat {
+/** 设备实体（稳定固有信息，跨登录/重登不变） */
+export interface Device {
   id: number;
   userId: number;
-  name: string;
-  tokenHash: string;
-  scopes: string;                // 逗号分隔
-  lastUsedTime?: Date;
-  expiresTime?: Date;
-  revokedTime?: Date;
+  deviceId: string;             // 硬件指纹（判同键）
+  hostname?: string;
+  os?: string;
+  arch?: string;
+  osVersion?: string;
+  appName?: string;
+  appVersion?: string;
+  remoteName?: string;
+  vsMachineId?: string;          // vscode.env.machineId 原始值（可随重装变化，仅追溯）
+  language?: string;
+  timezone?: string;
+  lastSeenTime?: Date;
   createTime: Date;
   updateTime: Date;
+}
+
+/** 设备事件留痕（升级/系统变化/首次登记） */
+export interface DeviceEvent {
+  id: number;
+  userId: number;
+  deviceId: string;
+  event: 'register' | 'app_upgrade' | 'os_change';
+  vsMachineId?: string;
+  appName?: string;
+  appVersion?: string;
+  os?: string;
+  osVersion?: string;
+  arch?: string;
+  createTime: Date;
+}
+
+/** 连接元数据（明文，计量/分析；连接内容仍加密） */
+export interface ConnectionMeta {
+  id: number;
+  userId: number;
+  connUuid: string;
+  type: string;
+  name?: string;
+  groupName?: string;
+  enabled: boolean;
+  deleted: boolean;
+  createdAt?: number;
+  updatedAt?: number;
+  createTime: Date;
+  updateTime: Date;
+}
+
+/** 同步事件留痕（每次 pull/push 的明文元数据） */
+export interface SyncEvent {
+  id: number;
+  userId: number;
+  deviceId?: string;
+  direction: 'pull' | 'push';
+  section: string;
+  bytes: number;
+  itemCount: number;
+  createTime: Date;
+}
+
+/** 用量行为事件（连接打开 / 查询执行的累计计数） */
+export interface UsageEvent {
+  id: number;
+  userId: number;
+  deviceId?: string;
+  kind: 'connection_open' | 'query_execute';
+  count: number;
+  createTime: Date;
 }
 
 /** 同步分节当前版本 */
@@ -118,6 +177,5 @@ export interface Usage {
   devices: number;
   connections: number;
   syncBytes: number;
-  pats: number;
   history: number;
 }

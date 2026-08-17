@@ -7,6 +7,7 @@ import { parseSyncPayload, type SyncPayload } from './syncPayload';
 import { computeMergePlan, totalLocalOnly, type MergePlan } from './mergePlan';
 import { MasterPasswordStore } from './masterPasswordStore';
 import { SyncEvent, eventBus } from '../utils/event';
+import { usageTracker } from '../analytics/usageTracker';
 
 interface MementoLike {
   get<T>(key: string): T | undefined;
@@ -23,6 +24,9 @@ export class SyncLocalDirtyError extends Error {
 /** 同步分节（与 server SectionType 对齐） */
 const SECTION_TYPES = ['groups', 'connections', 'queries', 'folders', 'history'] as const;
 type SectionType = (typeof SECTION_TYPES)[number];
+
+/** 应用远端数据的策略：remote=远端覆盖本地；local=保留本地；merge=智能合并 */
+export type ApplyStrategy = 'remote' | 'local' | 'merge';
 
 /** 从完整 payload 取某节的原始数据 */
 function sectionDataOf(payload: SyncPayload, section: SectionType): unknown {
@@ -121,10 +125,13 @@ export class SyncManager {
         // 异步派生：600k 轮 PBKDF2 × 5 个 section，同步版会冻结扩展主进程数秒
         const enc = await Encryption.encryptAsync(data, masterPassword);
         const base = this.sectionVersions[section] ?? 0;
-        const { version } = await this.auth.client.pushSection(section, enc, base);
+        const itemCount = this.itemCountOf(section, payload);
+        const meta = section === 'connections' ? this.store.getConnectionMeta() : undefined;
+        const { version } = await this.auth.client.pushSection(section, enc, base, itemCount, meta);
         this.sectionVersions[section] = version;
       }
       await this.updateLastSyncHash();
+      await this.reportUsageIfAny();
       void eventBus.publish(new SyncEvent('push', `${SECTION_TYPES.length} section(s)`));
     } catch (err) {
       void eventBus.publish(new SyncEvent('error', `push failed: ${(err as Error).message}`));
@@ -157,12 +164,24 @@ export class SyncManager {
     return { ...plan, hasLocalUnpushed };
   }
 
-  async applyPreviewedPull(): Promise<void> {
+  /** push 前的差异预览：与 previewPull 同源（fetch + 解密 + 计划），语义上仅命名区分 */
+  async previewPush(masterPassword: string): Promise<MergePlan> {
+    return this.previewPull(masterPassword);
+  }
+
+  async applyPreviewedPull(strategy: ApplyStrategy = 'merge'): Promise<void> {
     if (!this.pendingRemote) throw new Error('no previewed remote data to apply');
-    await this.applyRemote(this.pendingRemote);
+    const remote = this.pendingRemote;
+    if (strategy !== 'local') {
+      await this.applyRemote(remote, strategy);
+    }
     this.pendingRemote = undefined;
-    await this.updateLastSyncHash();
-    void eventBus.publish(new SyncEvent('applied', 'previewed pull applied'));
+    // local 策略保留本地现状、不应用远端，也不更新同步基线 —— 保持 local dirty，
+    // 这样用户后续 push 才能把本地作为权威源覆盖远端。
+    if (strategy !== 'local') {
+      await this.updateLastSyncHash();
+    }
+    void eventBus.publish(new SyncEvent('applied', `previewed pull applied (${strategy})`));
   }
 
   /** 列某节历史版本 */
@@ -225,9 +244,17 @@ export class SyncManager {
     return parseSyncPayload(payload);
   }
 
-  private async applyRemote(remote: SyncPayload): Promise<void> {
-    await this.store.replaceAllMerge({ groups: remote.groups, connections: remote.connections });
-    await this.store.replaceQueriesForSync({ queries: remote.queries, folders: remote.queryFolders });
+  private async applyRemote(remote: SyncPayload, strategy: 'remote' | 'merge' = 'merge'): Promise<void> {
+    const remoteTree = { groups: remote.groups, connections: remote.connections };
+    const remoteQueries = { queries: remote.queries, folders: remote.queryFolders };
+    if (strategy === 'remote') {
+      await this.store.replaceAll(remoteTree);
+      await this.store.replaceQueriesForSyncAll(remoteQueries);
+    } else {
+      await this.store.replaceAllMerge(remoteTree);
+      await this.store.replaceQueriesForSync(remoteQueries);
+    }
+    // 历史为日志型数据，不做软删除，冲突无「远端覆盖/本地保留」之分，三策略恒为合并
     await this.history.replaceAllMerge(remote.history);
   }
 
@@ -243,6 +270,28 @@ export class SyncManager {
       queryFolders: folders,
       history,
     };
+  }
+
+  /** 计算某节明文条数（服务端计量用；软删除墓碑不计） */
+  private itemCountOf(section: SectionType, payload: SyncPayload): number {
+    switch (section) {
+      case 'groups': return payload.groups.filter((g) => !g.deleted).length;
+      case 'connections': return payload.connections.filter((c) => !c.deleted).length;
+      case 'queries': return payload.queries.filter((q: any) => !q.deleted).length;
+      case 'folders': return payload.queryFolders.filter((f: any) => !f.deleted).length;
+      case 'history': return payload.history.length;
+    }
+  }
+
+  /** 同步成功后上报累计的用量埋点（连接打开/查询执行），失败不阻塞同步 */
+  private async reportUsageIfAny(): Promise<void> {
+    const usage = await usageTracker.flush();
+    if (usage.connectionOpens === 0 && usage.queryExecutes === 0) return;
+    try {
+      await this.auth.client.reportUsage(usage);
+    } catch {
+      // 上报失败不计较（遥测尽力而为）；已清零的计数不恢复
+    }
   }
 
   private async computeLocalHash(): Promise<string> {

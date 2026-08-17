@@ -16,6 +16,22 @@ export interface AuthResult {
   token: string;
 }
 
+/** 设备信息（登录/刷新时通过 header 上报；deviceId 为同设备判同键） */
+export interface DeviceInfo {
+  deviceName: string;
+  deviceId: string;
+  machineId: string;
+  hostname: string;
+  os: string;
+  arch: string;
+  osVersion: string;
+  appName: string;
+  appVersion: string;
+  remoteName?: string;
+  language: string;
+  timezone: string;
+}
+
 export interface SectionData {
   section: string;
   encryptedData: string;
@@ -43,10 +59,10 @@ export interface MeResponse {
     code: string; name: string;
     maxDevices: number; maxConnections: number;
     syncQuotaBytes: number; syncVersionRetention: number;
-    historyRetentionCount: number; maxPats: number; features: number;
+    historyRetentionCount: number; features: number;
   };
   subscription?: { planCode: string; status: string; periodEndTime: string };
-  usage: { devices: number; connections: number; syncBytes: number; pats: number; history: number };
+  usage: { devices: number; connections: number; syncBytes: number; history: number };
 }
 
 export interface SessionInfo {
@@ -58,14 +74,7 @@ export interface SessionInfo {
   current: boolean;
 }
 
-export interface PatInfo {
-  id: number;
-  name: string;
-  scopes: string;
-  createTime: string;
-  lastUsedTime?: string;
-  expiresTime?: string;
-}
+
 
 /** 冲突错误：某 section 远端 version 已变化 */
 export class SyncConflictError extends Error {
@@ -83,6 +92,7 @@ export class SyncClient {
     private readonly getAccessToken: () => string | undefined,
     private readonly getRefreshToken: () => string | undefined,
     private readonly onTokensRefreshed?: (access: string, refresh: string) => void,
+    private readonly device?: DeviceInfo,
   ) {}
 
   /** 注册 */
@@ -101,7 +111,7 @@ export class SyncClient {
     if (!rt) throw new Error('no refresh token');
     const res = await this.fetchWithRetry(`${this.baseUrl}/api/auth/refresh`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...this.deviceHeaders() },
       body: JSON.stringify({ refreshToken: rt }),
     });
     if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
@@ -132,6 +142,12 @@ export class SyncClient {
     return res.json() as Promise<MeResponse>;
   }
 
+  /** 上报用量累计计数（连接打开 / 查询执行） */
+  async reportUsage(usage: { connectionOpens: number; queryExecutes: number }): Promise<void> {
+    const res = await this.request('POST', '/api/usage', usage, true);
+    if (!res.ok) throw new Error(`Report usage failed: ${res.status}`);
+  }
+
   /** 拉取同步分节（section 可选，无则全节） */
   async fetchSections(section?: string): Promise<PullResult> {
     const path = section ? `/api/sync?section=${encodeURIComponent(section)}` : '/api/sync';
@@ -140,9 +156,9 @@ export class SyncClient {
     return res.json() as Promise<PullResult>;
   }
 
-  /** 推送单节（乐观锁 baseVersion） */
-  async pushSection(section: string, encryptedData: string, baseVersion: number): Promise<PushResult> {
-    const res = await this.request('PUT', '/api/sync', { section, encryptedData, baseVersion }, true);
+  /** 推送单节（乐观锁 baseVersion；附带明文 itemCount + 连接元数据供服务端计量） */
+  async pushSection(section: string, encryptedData: string, baseVersion: number, itemCount?: number, meta?: unknown[]): Promise<PushResult> {
+    const res = await this.request('PUT', '/api/sync', { section, encryptedData, baseVersion, itemCount, meta }, true);
     if (res.status === 409) {
       const body = (await res.json().catch(() => ({}))) as { version?: number };
       throw new SyncConflictError(section, body.version ?? 0);
@@ -179,26 +195,6 @@ export class SyncClient {
     await this.request('DELETE', `/api/auth/sessions/${id}`, undefined, true);
   }
 
-  /** 列 PAT */
-  async listPats(): Promise<PatInfo[]> {
-    const res = await this.request('GET', '/api/auth/tokens', undefined, true);
-    if (!res.ok) throw new Error(`List PATs failed: ${res.status}`);
-    const body = (await res.json()) as { pats: PatInfo[] };
-    return body.pats;
-  }
-
-  /** 创建 PAT（返回明文 token，仅此次） */
-  async createPat(name: string, scopes: string): Promise<{ pat: PatInfo; token: string }> {
-    const res = await this.request('POST', '/api/auth/tokens', { name, scopes }, true);
-    if (!res.ok) throw new Error(`Create PAT failed: ${res.status}`);
-    return res.json() as Promise<{ pat: PatInfo; token: string }>;
-  }
-
-  /** 撤销 PAT */
-  async revokePat(id: number): Promise<void> {
-    await this.request('DELETE', `/api/auth/tokens/${id}`, undefined, true);
-  }
-
   private async postForm(path: string, body: object): Promise<AuthResult> {
     const res = await this.request('POST', path, body, false);
     if (!res.ok) {
@@ -214,7 +210,7 @@ export class SyncClient {
    */
   private async request(method: string, path: string, body: unknown, needsAuth: boolean): Promise<Response> {
     const url = `${this.baseUrl}${path}`;
-    const init: RequestInit = { method, headers: { 'Content-Type': 'application/json' } };
+    const init: RequestInit = { method, headers: { 'Content-Type': 'application/json', ...this.deviceHeaders() } };
     if (needsAuth) {
       const token = this.getAccessToken();
       if (token) (init.headers as Record<string, string>).Authorization = `Bearer ${token}`;
@@ -263,5 +259,26 @@ export class SyncClient {
 
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /** 设备标识头（登录/刷新时上报设备信息） */
+  private deviceHeaders(): Record<string, string> {
+    const d = this.device;
+    if (!d) return {};
+    const headers: Record<string, string> = {
+      'X-Device-Name': d.deviceName,
+      'X-Device-Id': d.deviceId,
+      'X-Device-Machine-Id': d.machineId,
+      'X-Device-Hostname': d.hostname,
+      'X-Device-Os': d.os,
+      'X-Device-Arch': d.arch,
+      'X-Device-Os-Version': d.osVersion,
+      'X-Device-App': d.appName,
+      'X-Device-App-Version': d.appVersion,
+      'X-Device-Language': d.language,
+      'X-Device-Timezone': d.timezone,
+    };
+    if (d.remoteName) headers['X-Device-Remote'] = d.remoteName;
+    return headers;
   }
 }

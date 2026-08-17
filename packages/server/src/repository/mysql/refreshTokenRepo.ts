@@ -11,10 +11,11 @@ export class MysqlRefreshTokenRepo implements IRefreshTokenRepo {
   }
 
   async create(token: Omit<RefreshToken, 'id' | 'createTime' | 'updateTime'>): Promise<RefreshToken> {
+    const now = new Date();
     const [result] = await this.db().query<any>(
-      `INSERT INTO refresh_tokens (user_id, token_hash, device_name, user_agent, ip, expires_time)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [token.userId, token.tokenHash, token.deviceName ?? null, token.userAgent ?? null, token.ip ?? null, token.expiresTime],
+      `INSERT INTO refresh_tokens (user_id, token_hash, device_name, device_id, user_agent, ip, expires_time, last_used_time)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [token.userId, token.tokenHash, token.deviceName ?? null, token.deviceId ?? null, token.userAgent ?? null, token.ip ?? null, token.expiresTime, now],
     );
     const created = await this.findById(result.insertId);
     if (!created) throw new Error('refresh_token insert failed');
@@ -29,6 +30,13 @@ export class MysqlRefreshTokenRepo implements IRefreshTokenRepo {
     await this.db().query('UPDATE refresh_tokens SET revoked_time = ? WHERE user_id = ? AND revoked_time IS NULL', [new Date(), userId]);
   }
 
+  async revokeByDevice(userId: number, deviceId: string): Promise<void> {
+    await this.db().query(
+      'UPDATE refresh_tokens SET revoked_time = ? WHERE user_id = ? AND device_id = ? AND revoked_time IS NULL',
+      [new Date(), userId, deviceId],
+    );
+  }
+
   async countActiveForUser(userId: number, now: Date): Promise<number> {
     const [rows] = await this.db().query<any[]>(
       'SELECT COUNT(*) AS cnt FROM refresh_tokens WHERE user_id = ? AND revoked_time IS NULL AND expires_time > ?',
@@ -39,7 +47,7 @@ export class MysqlRefreshTokenRepo implements IRefreshTokenRepo {
 
   async listActiveForUser(userId: number, now: Date): Promise<SessionInfo[]> {
     const [rows] = await this.db().query<any[]>(
-      'SELECT id, device_name, ip, create_time, last_used_time FROM refresh_tokens WHERE user_id = ? AND revoked_time IS NULL AND expires_time > ? ORDER BY create_time DESC',
+      'SELECT id, device_name, ip, create_time, COALESCE(last_used_time, create_time) AS last_used_time FROM refresh_tokens WHERE user_id = ? AND revoked_time IS NULL AND expires_time > ? ORDER BY create_time DESC',
       [userId, now],
     );
     return rows.map((r: any) => ({
@@ -68,6 +76,7 @@ function mapRefreshToken(r: any): RefreshToken {
     userId: r.user_id,
     tokenHash: r.token_hash,
     deviceName: r.device_name ?? undefined,
+    deviceId: r.device_id ?? undefined,
     userAgent: r.user_agent ?? undefined,
     ip: r.ip ?? undefined,
     expiresTime: new Date(r.expires_time),
