@@ -20,6 +20,11 @@ describe('validateIdent — 放行', () => {
     expect(validateIdent('таблица')).toBe('таблица');
   });
 
+  it('接受连字符标识符（库里既存对象名）', () => {
+    expect(validateIdent('happy-crewman')).toBe('happy-crewman');
+    expect(validateIdent('user_1-v2')).toBe('user_1-v2');
+  });
+
   it('接受长度正好 64 的标识符', () => {
     const name = 'a'.repeat(64);
     expect(validateIdent(name)).toBe(name);
