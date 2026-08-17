@@ -49,7 +49,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.renameTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
-    const newName = await vscode.window.showInputBox({ prompt: l10n('table.renamePrompt'), value: node.label });
+    const newName = await vscode.window.showInputBox({ prompt: l10n('table.renamePrompt'), value: node.label, valueSelection: [0, node.label.length] });
     if (!newName || newName === node.label) return;
     const session = await manager.connect(node.conn);
     if (!requireCapability(session, 'renameTable')) return;
@@ -59,7 +59,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.renameView', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
-    const newName = await vscode.window.showInputBox({ prompt: l10n('view.renamePrompt'), value: node.label });
+    const newName = await vscode.window.showInputBox({ prompt: l10n('view.renamePrompt'), value: node.label, valueSelection: [0, node.label.length] });
     if (!newName || newName === node.label) return;
     const session = await manager.connect(node.conn);
     if (!requireCapability(session, 'renameView')) return;
@@ -357,6 +357,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     const newName = await vscode.window.showInputBox({
       prompt: l10n('column.renamePrompt'),
       value: node.label,
+      valueSelection: [0, node.label.length],
       validateInput: (v) => (v.trim() ? undefined : l10n('column.nameRequired')),
     });
     if (!newName?.trim() || newName.trim() === node.label) return;
