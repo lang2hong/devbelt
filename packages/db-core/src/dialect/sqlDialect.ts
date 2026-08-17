@@ -36,6 +36,27 @@ export interface SqlDialect {
   createTableTemplate(table: string): string;
 
   /**
+   * 新增列语句模板（新建列 SQL 入口的初始语句）。
+   *
+   * 与建表模板同源：列类型候选因方言而异，命令层不硬编码类型。
+   *
+   * @param table 已包裹好的表标识符
+   */
+  addColumnTemplate(table: string): string;
+
+  /**
+   * 修改列语句模板（改列 SQL 入口的初始语句）。
+   *
+   * MySQL 用 `MODIFY COLUMN`（改名走独立的 RENAME COLUMN 入口）；
+   * PG 用 `ALTER COLUMN ... TYPE`；SQLite 不支持改列型，只能改名。
+   *
+   * @param table 已包裹好的表标识符
+   * @param column 未包裹的列名（由实现按需包裹）
+   * @param definition 预填的列定义/类型（MySQL 为完整定义）
+   */
+  modifyColumnTemplate(table: string, column: string, definition: string): string;
+
+  /**
    * 存储过程/函数模板；本方言不支持例程时返回空字符串。
    *
    * MySQL 需要 `DELIMITER` 包裹（那是客户端命令，PG 不认），

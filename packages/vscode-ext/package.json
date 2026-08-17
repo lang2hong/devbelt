@@ -410,6 +410,16 @@
         "category": "DB Client"
       },
       {
+        "command": "dbclient.addColumnSql",
+        "title": "Add Column (SQL)",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.modifyColumnSql",
+        "title": "Modify Column (SQL)",
+        "category": "DB Client"
+      },
+      {
         "command": "dbclient.renameColumn",
         "title": "Rename Column",
         "category": "DB Client"
@@ -508,11 +518,6 @@
         "category": "DB Client"
       },
       {
-        "command": "dbclient.pats",
-        "title": "Personal Access Tokens",
-        "category": "DB Client"
-      },
-      {
         "command": "dbclient.compareData",
         "title": "Compare Data",
         "category": "DB Client"
@@ -585,10 +590,6 @@
         },
         {
           "command": "dbclient.sessions",
-          "when": "dbclient.loggedIn"
-        },
-        {
-          "command": "dbclient.pats",
           "when": "dbclient.loggedIn"
         },
         {
@@ -715,6 +716,11 @@
           "group": "3_edit"
         },
         {
+          "command": "dbclient.addColumnSql",
+          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
+          "group": "3_edit"
+        },
+        {
           "command": "dbclient.truncateTable",
           "when": "view == dbclient.explorer && viewItem =~ /^table\\.(MYSQL|PG)$/",
           "group": "2_danger"
@@ -733,17 +739,27 @@
         {
           "command": "dbclient.addColumn",
           "when": "view == dbclient.explorer && viewItem =~ /^column\\./",
-          "group": "2_col"
+          "group": "2_col@1"
+        },
+        {
+          "command": "dbclient.addColumnSql",
+          "when": "view == dbclient.explorer && viewItem =~ /^column\\./",
+          "group": "2_col@2"
         },
         {
           "command": "dbclient.modifyColumn",
           "when": "view == dbclient.explorer && viewItem =~ /^column\\./",
-          "group": "2_col"
+          "group": "2_col@3"
+        },
+        {
+          "command": "dbclient.modifyColumnSql",
+          "when": "view == dbclient.explorer && viewItem =~ /^column\\./",
+          "group": "2_col@4"
         },
         {
           "command": "dbclient.renameColumn",
           "when": "view == dbclient.explorer && viewItem =~ /^column\\./",
-          "group": "2_col"
+          "group": "2_col@5"
         },
         {
           "command": "dbclient.dropColumn",
@@ -1252,7 +1268,7 @@
         },
         "dbclient.sync.rememberMaster": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Remember the sync master password in OS secure storage to enable silent background sync.",
           "markdownDescription": "在本机安全存储中记住同步主密码，以启用后台静默同步（主密码从不上传）。"
         },

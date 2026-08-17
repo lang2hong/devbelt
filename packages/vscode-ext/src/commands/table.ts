@@ -7,6 +7,7 @@ import type { Deps, Sub } from './shared';
 import { confirm, openSqlDoc, openSqlDocEditor, recordBulkHistory, requireCapability } from './shared';
 import { ensureWritable } from '../utils/sqlSafety';
 import { TableQueryView } from '../result/tableQueryView';
+import { TableDesignView } from '../result/tableDesignView';
 
 export function registerTableCommands(deps: Deps, sub: Sub): void {
   const { manager, treeProvider, executor, connCtx } = deps;
@@ -282,22 +283,6 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     node.kind === NodeKind.Column ? node.parent?.label : node.label
   );
 
-  /** 列类型输入：候选来自方言，也允许手输（长度/精度千变万化）。 */
-  const askColumnType = async (
-    conn: import('../connection/connectionStore').SavedConnection,
-    value?: string,
-  ): Promise<string | undefined> => {
-    const dialect = DialectRegistry.get(conn.dbType as DatabaseType);
-    const types = dialect ? [...dialect.columnTypes] : [];
-    const input = await vscode.window.showInputBox({
-      prompt: l10n('column.typePrompt'),
-      value: value ?? types.find((t) => /^(VARCHAR|CHARACTER VARYING|TEXT)/i.test(t)) ?? '',
-      placeHolder: types.slice(0, 6).join(', '),
-      validateInput: (v) => (v.trim() ? undefined : l10n('column.typeRequired')),
-    });
-    return input?.trim() || undefined;
-  };
-
   /** 刷新列所在的表节点，而不是整棵树（整树刷新会把所有节点折叠回去）。 */
   const refreshColumnParent = (node: DbTreeNode): void => {
     const target = node.kind === NodeKind.Column ? node.parent : node;
@@ -306,71 +291,63 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
   };
 
   sub('dbclient.addColumn', async (node: DbTreeNode) => {
+    if (!node?.conn || !node?.database) return;
+    const table = columnTable(node);
+    if (!table) return;
+    if (!ensureWritable(node.conn)) return;
+    // 打开表设计器：新加列在可视化表单里完成，而不是 inputBox 顺序问答。
+    TableDesignView.open(node.conn, table, node.database, manager, () => refreshColumnParent(node));
+  });
+
+  sub('dbclient.addColumnSql', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     const table = columnTable(node);
     if (!table) return;
-    const session = await manager.connect(node.conn);
-    if (!requireCapability(session, 'alterTable') || !ensureWritable(node.conn)) return;
-    const name = await vscode.window.showInputBox({
-      prompt: l10n('column.namePrompt'),
-      validateInput: (v) => (v.trim() ? undefined : l10n('column.nameRequired')),
-    });
-    if (!name?.trim()) return;
-    const type = await askColumnType(node.conn);
-    if (!type) return;
-    const nullable = await vscode.window.showQuickPick(
-      [{ label: l10n('column.nullable'), value: false }, { label: l10n('column.notNull'), value: true }],
-      { placeHolder: l10n('column.nullPrompt') },
-    );
-    if (!nullable) return;
-    try {
-      await session.table.addColumn(
-        table, name.trim(), `${type}${nullable.value ? ' NOT NULL' : ' NULL'}`, node.database,
-      );
-      refreshColumnParent(node);
-      vscode.window.showInformationMessage(l10n('column.added', { name: name.trim() }));
-    } catch (err) {
-      vscode.window.showErrorMessage((err as Error).message);
-    }
+    connCtx.setLast(node.conn, node.database);
+    const dialect = DialectRegistry.get(node.conn.dbType as DatabaseType);
+    const wrapped = wrapIdentForConn(node.conn, table);
+    const body = dialect
+      ? dialect.addColumnTemplate(wrapped)
+      : `ALTER TABLE ${wrapped} ADD COLUMN new_column INT;`;
+    const useDb = node.database && node.conn.dbType === 'MYSQL'
+      ? `USE ${wrapIdentForConn(node.conn, node.database)};\n`
+      : '';
+    const editor = await openSqlDocEditor(useDb + body);
+    if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
   });
 
-  /**
-   * 改字段。
-   *
-   * MySQL 必须用 `CHANGE COLUMN`：`MODIFY COLUMN` 改不了列名，而改名是最常见的诉求。
-   * 当前定义会预填进输入框（MySQL 从 DDL 解析全量定义），
-   * 否则 NOT NULL / DEFAULT / 注释会在一次「改类型」里被静默抹掉。
-   */
   sub('dbclient.modifyColumn', async (node: DbTreeNode) => {
-    if (!node?.conn || node.kind !== NodeKind.Column || !node.parent) return;
-    const table = node.parent.label;
-    const session = await manager.connect(node.conn);
-    if (!requireCapability(session, 'alterTable') || !ensureWritable(node.conn)) return;
-    const newName = await vscode.window.showInputBox({
-      prompt: l10n('column.renamePrompt'),
-      value: node.label,
-      validateInput: (v) => (v.trim() ? undefined : l10n('column.nameRequired')),
-    });
-    if (!newName?.trim()) return;
+    if (!node?.conn || node.kind !== NodeKind.Column || !node.parent || !node.database) return;
+    if (!ensureWritable(node.conn)) return;
+    TableDesignView.open(node.conn, node.parent.label, node.database, manager, () => refreshColumnParent(node));
+  });
 
-    let current: string | undefined;
+  sub('dbclient.modifyColumnSql', async (node: DbTreeNode) => {
+    if (!node?.conn || node.kind !== NodeKind.Column || !node.parent || !node.database) return;
+    const table = node.parent.label;
+    connCtx.setLast(node.conn, node.database);
+    const session = await manager.connect(node.conn);
+    // 预填当前定义：MySQL 从 DDL 解析全量定义（含 NOT NULL/DEFAULT/注释），
+    // 否则改一次类型会把约束静默抹掉；非 MySQL 退回列元数据里的类型。
+    let definition: string | undefined;
     try {
-      current = await session.table.getColumnDefinition(table, node.label, node.database);
+      definition = await session.table.getColumnDefinition(table, node.label, node.database);
     } catch {
-      // 非 MySQL 或解析失败：退回列元数据里的类型
       const cols = await session.metadata.getColumns(table, node.database);
       const col = cols.find((c: any) => c.name === node.label);
-      current = col?.type || col?.simpleType;
+      definition = col?.type || col?.simpleType;
     }
-    const definition = await askColumnType(node.conn, current);
-    if (!definition) return;
-    try {
-      await session.table.changeColumn(table, node.label, newName.trim(), definition, node.database);
-      refreshColumnParent(node);
-      vscode.window.showInformationMessage(l10n('column.modified', { name: newName.trim() }));
-    } catch (err) {
-      vscode.window.showErrorMessage((err as Error).message);
-    }
+    if (!definition) definition = 'INT';
+    const dialect = DialectRegistry.get(node.conn.dbType as DatabaseType);
+    const wrapped = wrapIdentForConn(node.conn, table);
+    const body = dialect
+      ? dialect.modifyColumnTemplate(wrapped, node.label, definition)
+      : `ALTER TABLE ${wrapped} ALTER COLUMN ${wrapIdentForConn(node.conn, node.label)} TYPE ${definition};`;
+    const useDb = node.database && node.conn.dbType === 'MYSQL'
+      ? `USE ${wrapIdentForConn(node.conn, node.database)};\n`
+      : '';
+    const editor = await openSqlDocEditor(useDb + body);
+    if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
   });
 
   sub('dbclient.renameColumn', async (node: DbTreeNode) => {

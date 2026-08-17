@@ -17,6 +17,15 @@ export class SqliteDialect implements SqlDialect {
     return `CREATE TABLE IF NOT EXISTS ${table} (\n  "id" INTEGER PRIMARY KEY AUTOINCREMENT,\n  "name" TEXT\n);`;
   }
 
+  addColumnTemplate(table: string): string {
+    return `ALTER TABLE ${table} ADD COLUMN "new_column" INTEGER;`;
+  }
+
+  /** SQLite 不支持改列型（需 DROP 后重建表），只能改列名。 */
+  modifyColumnTemplate(table: string, column: string, _definition: string): string {
+    return `-- SQLite does not support altering a column type.\nALTER TABLE ${table} RENAME COLUMN ${this.wrap(column)} TO ${this.wrap(column)};`;
+  }
+
   /**
    * SQLite 无存储过程；返回空串表示不支持，调用方据此不提供入口。
    * 保留参数以对齐接口签名（调用方按统一形态传名字）。

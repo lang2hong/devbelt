@@ -175,3 +175,32 @@ describe('方言模板（建表 / 例程）', () => {
     }
   });
 });
+
+describe('方言模板（加列 / 改列）', () => {
+  /** 回归：加列/改列 SQL 入口的模板必须按方言给，不能统一塞 MySQL 语法。 */
+  it('新增列模板按方言给出类型与包裹', () => {
+    expect(new MysqlDialect().addColumnTemplate('`t`')).toBe('ALTER TABLE `t` ADD COLUMN `new_column` INT;');
+    expect(new PostgreSqlDialect().addColumnTemplate('"t"')).toBe('ALTER TABLE "t" ADD COLUMN "new_column" INTEGER;');
+    expect(new SqliteDialect().addColumnTemplate('"t"')).toContain('ADD COLUMN "new_column"');
+  });
+
+  it('改列模板：MySQL MODIFY、PG ALTER TYPE、SQLite 仅改名', () => {
+    expect(new MysqlDialect().modifyColumnTemplate('`t`', 'age', 'INT NOT NULL')).toBe(
+      'ALTER TABLE `t` MODIFY COLUMN `age` INT NOT NULL;',
+    );
+    expect(new PostgreSqlDialect().modifyColumnTemplate('"t"', 'age', 'INTEGER')).toBe(
+      'ALTER TABLE "t" ALTER COLUMN "age" TYPE INTEGER;',
+    );
+    const sqlite = new SqliteDialect().modifyColumnTemplate('"t"', 'age', 'INTEGER');
+    expect(sqlite).toContain('RENAME COLUMN "age" TO "age"');
+    expect(sqlite).not.toContain('TYPE INTEGER');
+  });
+
+  it('方言注册表取到的实例带加列/改列模板方法', () => {
+    for (const dbType of [DatabaseType.MYSQL, DatabaseType.PG, DatabaseType.SQLITE]) {
+      const d = DialectRegistry.get(dbType)!;
+      expect(typeof d.addColumnTemplate).toBe('function');
+      expect(typeof d.modifyColumnTemplate).toBe('function');
+    }
+  });
+});

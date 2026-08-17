@@ -17,6 +17,14 @@ export class MysqlDialect implements SqlDialect {
     return `CREATE TABLE IF NOT EXISTS ${table} (\n  \`id\` INT AUTO_INCREMENT PRIMARY KEY,\n  \`name\` VARCHAR(255)\n);`;
   }
 
+  addColumnTemplate(table: string): string {
+    return `ALTER TABLE ${table} ADD COLUMN \`new_column\` INT;`;
+  }
+
+  modifyColumnTemplate(table: string, column: string, definition: string): string {
+    return `ALTER TABLE ${table} MODIFY COLUMN ${this.wrap(column)} ${definition};`;
+  }
+
   /** MySQL 需要 DELIMITER 切换语句结束符，否则例程体内的 `;` 会被提前截断。 */
   createRoutineTemplate(name: string): string {
     return `DELIMITER $$\nCREATE PROCEDURE ${name}()\nBEGIN\n  -- routine body\nEND$$\nDELIMITER ;`;
