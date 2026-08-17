@@ -7,7 +7,11 @@ const { post, onMessage } = useVsCode();
 const { t } = useI18n();
 
 const editingId = ref('');
-const groups = ref<{ id: string; name: string }[]>([]);
+const groups = ref<{ id: string; name: string; depth?: number }[]>([]);
+
+function indentGroup(g: { name: string; depth?: number }): string {
+  return '\u00a0\u00a0'.repeat(g.depth || 0) + g.name;
+}
 const status = ref('');
 const statusOk = ref(true);
 
@@ -139,7 +143,7 @@ function save(): void {
         <label>{{ t('wv.form.group') }}</label>
         <select v-model="form.groupId">
           <option value="">{{ t('wv.form.noGroup') }}</option>
-          <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</option>
+          <option v-for="g in groups" :key="g.id" :value="g.id">{{ indentGroup(g) }}</option>
         </select>
       </div>
     </div>

@@ -45,7 +45,7 @@ export const en: MessageCatalog = {
   'tree.addGroup': 'Group name',
   'tree.moveGroup': 'Move connection to group',
   'tree.ungroup': 'Ungroup',
-  'tree.deleteGroupTitle': 'Delete group "{name}"? Child groups and members will be ungrouped.',
+  'tree.deleteGroupTitle': 'Delete group "{name}"? Child groups and their connections will be deleted too.',
   'tree.deleteGroupConfirm': 'Delete',
 
   // 命令
@@ -563,7 +563,7 @@ export const zh: MessageCatalog = {
   'tree.addGroup': '分组名称',
   'tree.moveGroup': '移动连接到分组',
   'tree.ungroup': '取消分组',
-  'tree.deleteGroupTitle': '删除分组 "{name}"？子分组及其成员将被取消分组。',
+  'tree.deleteGroupTitle': '删除分组 "{name}"？子分组及其成员连接将被一并删除。',
   'tree.deleteGroupConfirm': '删除',
 
   'cmd.openEditorFirst': '请先打开 SQL 编辑器。',

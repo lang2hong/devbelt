@@ -208,3 +208,33 @@ describe('ConnectionStore.getVisibleTreeData', () => {
     expect(store.getTreeData().connections.find((c) => c.id === 'primary')!.deleted).toBe(true);
   });
 });
+
+describe('ConnectionStore.removeGroup', () => {
+  it('删除父分组：递归删除子分组，并一并删除组下连接（含子分组下的）', async () => {
+    const secrets = createSecrets();
+    const store = new ConnectionStore(createMemento({
+      groups: [
+        { id: 'root', name: 'Root' },
+        { id: 'child', name: 'Child', parentId: 'root' },
+      ],
+      connections: [
+        conn({ id: 'c1', groupId: 'root', password: 'p1' }),
+        conn({ id: 'c2', groupId: 'child', password: 'p2' }),
+        conn({ id: 'c3' }),
+      ],
+    }), secrets as any);
+    await store.init();
+
+    await store.removeGroup('root');
+
+    const data = store.getTreeData();
+    expect(data.groups.find((g) => g.id === 'root')!.deleted).toBe(true);
+    expect(data.groups.find((g) => g.id === 'child')!.deleted).toBe(true);
+    expect(data.connections.find((c) => c.id === 'c1')!.deleted).toBe(true);
+    expect(data.connections.find((c) => c.id === 'c2')!.deleted).toBe(true);
+    expect(data.connections.find((c) => c.id === 'c3')!.deleted).toBe(false);
+    expect(await secrets.get('dbclient.connection.c1.password')).toBeUndefined();
+    expect(await secrets.get('dbclient.connection.c2.password')).toBeUndefined();
+    expect(store.getVisibleTreeData().connections.map((c) => c.id)).toEqual(['c3']);
+  });
+});

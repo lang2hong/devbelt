@@ -6,6 +6,7 @@ import type { SavedConnection, ConnectionGroup } from './connectionStore';
 import { SshTunnel } from './sshTunnel';
 import { l10n } from '../i18n';
 import { uniqueId } from '../utils/id';
+import { flattenGroups } from '../utils/groupTree';
 import { BaseWebView } from '../result/baseWebView';
 
 /**
@@ -95,7 +96,11 @@ export class ConnectionForm extends BaseWebView {
   }
 
   private sendInit(): void {
-    this.post({ type: 'init', mode: 'connectionForm', groups: this.groups });
+    this.post({
+      type: 'init',
+      mode: 'connectionForm',
+      groups: flattenGroups(this.groups).map(({ group, depth }) => ({ id: group.id, name: group.name, depth })),
+    });
     if (this.editing) {
       this.post({ type: 'prefill', conn: this.editing });
     } else {

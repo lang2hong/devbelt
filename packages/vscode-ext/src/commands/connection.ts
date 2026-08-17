@@ -5,6 +5,7 @@ import { ConnectionForm } from '../connection/connectionForm';
 import type { SavedConnection } from '../connection/connectionStore';
 import { l10n } from '../i18n';
 import { AuditLogger } from '../utils/auditLogger';
+import { flattenGroups } from '../utils/groupTree';
 import type { Deps, Sub } from './shared';
 import { confirm } from './shared';
 
@@ -103,10 +104,29 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
       vscode.window.showInformationMessage(l10n('conn.exportNone'));
       return;
     }
-    const picked = await vscode.window.showQuickPick(
-      all.map((c) => ({ label: c.name || c.host || c.id, value: c.id, picked: !node || node.conn?.id === c.id })),
-      { canPickMany: true, placeHolder: l10n('conn.exportPick') },
-    );
+    const picked = await (async () => {
+      const grouped = new Map<string | undefined, SavedConnection[]>();
+      for (const c of all) {
+        const arr = grouped.get(c.groupId) ?? [];
+        arr.push(c);
+        grouped.set(c.groupId, arr);
+      }
+      type ExportPick = vscode.QuickPickItem & { value?: string };
+      const items: ExportPick[] = [];
+      const pushConn = (c: SavedConnection, depth: number) => {
+        items.push({
+          label: '\u00a0\u00a0'.repeat(depth) + (c.name || c.host),
+          value: c.id,
+          picked: !node || node.conn?.id === c.id,
+        });
+      };
+      for (const c of grouped.get(undefined) ?? []) pushConn(c, 0);
+      for (const { group, path } of flattenGroups(store.getGroups())) {
+        items.push({ label: path, kind: vscode.QuickPickItemKind.Separator });
+        for (const c of grouped.get(group.id) ?? []) pushConn(c, 1);
+      }
+      return vscode.window.showQuickPick(items, { canPickMany: true, placeHolder: l10n('conn.exportPick') });
+    })();
     if (!picked?.length) return;
     const includeSecrets = await vscode.window.showQuickPick(
       [

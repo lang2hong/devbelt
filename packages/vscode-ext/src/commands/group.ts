@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { DbTreeNode, NodeKind } from '../tree/dbTreeNode';
 import { l10n } from '../i18n';
+import { flattenGroups } from '../utils/groupTree';
 import type { Deps, Sub } from './shared';
 import { confirm, openQueryFile } from './shared';
 
@@ -58,7 +59,7 @@ export function registerQueryFolderCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.renameQueryFolder', async (node: DbTreeNode) => {
     if (!node?.queryFolderId) return;
-    const name = await vscode.window.showInputBox({ prompt: 'Query folder name', value: node.label });
+    const name = await vscode.window.showInputBox({ prompt: 'Query folder name', value: node.label, valueSelection: [0, node.label.length] });
     if (!name || name === node.label) return;
     await store.renameQueryFolder(node.queryFolderId, name);
     treeProvider.refresh();
@@ -84,7 +85,7 @@ export function registerGroupCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.renameGroup', async (node: DbTreeNode) => {
     if (!node?.groupId) return;
-    const name = await vscode.window.showInputBox({ prompt: 'Group name', value: node.label });
+    const name = await vscode.window.showInputBox({ prompt: 'Group name', value: node.label, valueSelection: [0, node.label.length] });
     if (!name || name === node.label) return;
     await store.renameGroup(node.groupId, name);
     treeProvider.refresh();
@@ -99,12 +100,14 @@ export function registerGroupCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.moveToGroup', async (node: DbTreeNode) => {
     if (!node?.conn) return;
-    const groups = store.getGroups();
-    const picked = await vscode.window.showQuickPick(
-      [{ label: '$(close) ' + l10n('tree.ungroup'), target: undefined as string | undefined },
-        ...groups.map((g) => ({ label: g.name, target: g.id as string | undefined }))],
-      { placeHolder: l10n('tree.moveGroup') },
-    );
+    const items: { label: string; target: string | undefined }[] = [
+      { label: '$(close) ' + l10n('tree.ungroup'), target: undefined },
+      ...flattenGroups(store.getGroups()).map(({ group, path }) => ({
+        label: path,
+        target: group.id,
+      })),
+    ];
+    const picked = await vscode.window.showQuickPick(items, { placeHolder: l10n('tree.moveGroup') });
     if (!picked) return;
     await store.moveToGroup(node.conn.id, picked.target);
     treeProvider.refresh();

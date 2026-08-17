@@ -265,7 +265,7 @@ export class ConnectionStore {
     }
   }
 
-  /** 删除分组（递归软删除子分组，组内连接移回未分组） */
+  /** 删除分组（递归软删除子分组，组内连接一并软删除并清凭据） */
   async removeGroup(id: string): Promise<void> {
     const data = this.getTreeData();
     const toDelete = new Set<string>();
@@ -278,16 +278,22 @@ export class ConnectionStore {
     data.groups.forEach((g) => {
       if (toDelete.has(g.id)) { g.deleted = true; g.updateTime = now; }
     });
-    const movedConnIds: string[] = [];
+    const deletedConnIds: string[] = [];
     data.connections.forEach((c) => {
-      if (c.groupId && toDelete.has(c.groupId)) { c.groupId = undefined; c.updateTime = now; movedConnIds.push(c.id); }
+      if (c.groupId && toDelete.has(c.groupId)) {
+        c.deleted = true;
+        c.groupId = undefined;
+        c.updateTime = now;
+        deletedConnIds.push(c.id);
+      }
     });
     await this.memento.update(ConnectionStore.KEY, data);
+    for (const connId of deletedConnIds) {
+      await this.clearSecrets(connId);
+      void eventBus.publish(new ConnectionChangedEvent('connection', 'delete', connId));
+    }
     this.changedEmitter.fire();
     void eventBus.publish(new ConnectionChangedEvent('group', 'delete', id));
-    for (const connId of movedConnIds) {
-      void eventBus.publish(new ConnectionChangedEvent('connection', 'move', connId));
-    }
   }
 
   /**
