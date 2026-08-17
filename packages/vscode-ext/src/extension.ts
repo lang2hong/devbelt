@@ -21,10 +21,12 @@ import { requireFeature, Feature } from './sync/features';
 import { SyncManager } from './sync/syncManager';
 import { MasterPasswordStore } from './sync/masterPasswordStore';
 import { AutoSyncService, type AutoSyncMode } from './sync/autoSyncService';
+import { usageTracker } from './analytics/usageTracker';
 import type { Event } from './utils/event';
 import { eventBus, ConnectionChangedEvent, DataChangeEvent } from './utils/event';
 import { invalidateLanguage, LANGUAGE_CONFIG_KEY, l10n } from './i18n';
 import { registerCommands, SyncStatusBar } from './commands';
+import { refreshAdminCommand } from './commands/admin';
 import { SqlCompletionProvider } from './completion/sqlCompletionProvider';
 import { SqlCodeLensProvider } from './completion/sqlCodeLensProvider';
 import { TerminalService } from './terminal/terminalService';
@@ -33,6 +35,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const store = new ConnectionStore(context.globalState, context.secrets);
   await store.init();
   const history = new HistoryStore(context.globalState);
+  usageTracker.init(context.globalState);
   // history 注入管理器：所有会话的修改性语句由此自动进历史，
   // 不再依赖各命令自行调用 history.add（漏一个就少一段痕迹）。
   const manager = new ConnectionManager(undefined, history);
@@ -57,6 +60,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // changeSyncPassword 的可见性。此前从未 setContext，导致 logout 与
   // changeSyncPassword 永久不可见、login 永久可见。
   void syncLoggedInContext(auth);
+  void refreshAdminCommand(auth);
   const masterPasswordStore = new MasterPasswordStore(context.secrets);
   const sync = new SyncManager(auth, store, history, context.globalState, masterPasswordStore);
   const syncBar = new SyncStatusBar(auth, () => sync.getLastSyncAt());
