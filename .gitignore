@@ -5,6 +5,8 @@ out/
 .DS_Store
 .vscode/
 *.tsbuildinfo
+packages/server/public/
 .env
 .env.local
 *.vsix
+db-client-connections.json
