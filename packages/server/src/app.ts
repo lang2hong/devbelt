@@ -6,7 +6,6 @@ import sensible from '@fastify/sensible';
 import { createConnection } from 'mysql2/promise';
 import { config } from './config.js';
 import { buildMysqlPoolOptions } from './mysqlPool.js';
-import { MAX_SECTION_BYTES } from './route/schemas.js';
 import { initSchema } from './repository/mysql/schema.js';
 import { MysqlUserRepo } from './repository/mysql/userRepo.js';
 import { MysqlPlanRepo } from './repository/mysql/planRepo.js';
@@ -54,14 +53,18 @@ import { registerRateLimit } from './ratelimit/rateLimitPlugin.js';
 export async function createApp() {
   // trustProxy 决定 req.ip：既是限流的分桶键，也是 devices.ip 的来源。
   // 默认信任 1 跳（nginx 反代）。取值语义见 config.parseTrustProxy。
-  // bodyLimit 必须显式给：Fastify 默认 1 MiB，而 PUT /api/sync 的 body 里
-  // encryptedData 是整节全量密文 —— 默认值让单节永远传不过 1MB，Pro 的 100MB
-  // 与 Team 的 1GB 同步配额在技术上不可达。上界取 sync_sections.encrypted_data
-  // 的 MEDIUMTEXT 硬上限，再留出 JSON 包裹与 meta 数组的余量。
+  //
+  // bodyLimit 显式收在 1 MiB（与 Fastify 默认值相同，写出来是为了表明这是决策
+  // 而非默认）。放宽只针对真正需要的那一个端点：`PUT /api/sync` 在
+  // route/sync.ts 里单独设 SYNC_BODY_LIMIT。
+  //
+  // 不要把全局值抬高：`/api/auth/login`、`/api/auth/register` 这类未认证端点
+  // 只需要几百字节，让它们接受 8~17MB 请求体纯粹是白送攻击面 —— 限流挂在
+  // onRequest（早于 body 解析）能兜一部分，但没有理由先把门开大再去堵。
   const app = Fastify({
     logger: true,
     trustProxy: config.trustProxy,
-    bodyLimit: MAX_SECTION_BYTES + 1024 * 1024,
+    bodyLimit: 1024 * 1024,
   });
 
   // 全局错误处理器必须早于路由注册：漏写 try/catch 的 handler 靠它兜住，

@@ -35,7 +35,7 @@ import { TrafficCollector } from '../../src/observability/trafficCollector.js';
 import { registerTrafficPlugin } from '../../src/observability/trafficPlugin.js';
 import { RateLimitConfig } from '../../src/ratelimit/rateLimitConfig.js';
 import { registerRateLimit } from '../../src/ratelimit/rateLimitPlugin.js';
-import { MAX_SECTION_BYTES } from '../../src/route/schemas.js';
+
 
 /**
  * 路由级测试装配：真实的 route + middleware + errorHandler + JWT，
@@ -108,12 +108,14 @@ export interface TestApp {
 
 export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
   // trustProxy: 1 与 createApp 的默认值一致，让 req.ip 的行为在测试里也真实。
-  // bodyLimit 也必须与 createApp 对齐：默认 1 MiB 会让「单节密文上限」这类
-  // 用例在测试里表现得和生产不一样（生产按 MAX_SECTION_BYTES 走）。
+  //
+  // bodyLimit 必须与 createApp 一致地收在 1 MiB：放宽只发生在 `PUT /api/sync`
+  // 的路由级配置里（route/sync.ts 的 SYNC_BODY_LIMIT）。如果这里把全局抬高，
+  // 「未认证端点不接受大请求体」那条用例就会在测试里假绿。
   const app = Fastify({
     logger: false,
     trustProxy: 1,
-    bodyLimit: MAX_SECTION_BYTES + 1024 * 1024,
+    bodyLimit: 1024 * 1024,
   });
 
   // 必须在任何路由注册之前挂：onRoute 只对之后注册的路由触发

@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { buildTestApp, type TestApp } from '../helpers/testApp.js';
 import { DEVICE_HEADER_LIMITS, readDeviceHeaders } from '../../src/route/deviceHeaders.js';
+import { MAX_SECTION_BYTES } from '../../src/route/schemas.js';
 
 /**
  * 设备请求头的长度收敛。
@@ -208,26 +209,57 @@ describe('三条真实路径都接上了截断（断言落库值，不只看状�
 });
 
 /**
- * 密文体积上界。
+ * 请求体上限的作用域。
  *
- * Fastify 默认 bodyLimit 是 1 MiB 且此前未覆盖，所以单节密文实际上永远传不过
- * 1MB —— 而 PLAN_SEED 给 Pro 卖 100MB、Team 卖 1GB，那两个配额在技术上不可达。
- * 现在 bodyLimit 与 `sync_sections.encrypted_data` 的 MEDIUMTEXT 上限（16MiB）
- * 对齐，`encryptedData` 的 maxLength 同步跟上，超限在入口以 400 拒绝而不是
- * 打到 MySQL 变成 500。
+ * 放宽 bodyLimit 必须是**逐路由**的。只有 `PUT /api/sync` 的 body 里装着整节
+ * 全量密文；`/api/auth/login`、`/api/auth/register` 这类未认证端点只需要几百
+ * 字节，让它们也接受 8MB 纯粹是白送攻击面。
+ *
+ * 这组用例把作用域钉住：同一个 2 MiB 请求体，同步端点接受、登录端点以 413 拒绝。
+ * 若哪天有人为了图省事把全局 bodyLimit 抬高，第二条会立刻红。
  */
-describe('encryptedData 长度上界', () => {
+describe('bodyLimit 的作用域', () => {
   let t: TestApp;
   beforeEach(async () => { t = await buildTestApp(); });
   afterEach(async () => { await t.close(); });
 
-  it('刚好在上限内的密文被接受（不是靠 1MB 默认值挡住的）', async () => {
+  it('同步端点接受 2 MiB 密文（超出全局 1 MiB，靠路由级放宽）', async () => {
     const token = (await t.makeUser()).token;
     const res = await t.app.inject({
       method: 'PUT', url: '/api/sync', headers: t.auth(token),
-      // 2MiB：旧的 1MiB 默认 bodyLimit 会把它挡成 413
       payload: { section: 'groups', encryptedData: 'a'.repeat(2 * 1024 * 1024), baseVersion: 0 },
     });
     expect(res.statusCode).toBe(200);
+  });
+
+  it('登录端点拒绝同样大小的请求体（未认证端点不该被放宽）', async () => {
+    const res = await t.app.inject({
+      method: 'POST', url: '/api/auth/login',
+      headers: { 'content-type': 'application/json' },
+      payload: { email: 'a@b.com', password: 'x'.repeat(2 * 1024 * 1024) },
+    });
+    expect(res.statusCode).toBe(413);
+  });
+
+  it('注册端点同样拒绝', async () => {
+    const res = await t.app.inject({
+      method: 'POST', url: '/api/auth/register',
+      headers: { 'content-type': 'application/json' },
+      payload: { email: 'a@b.com', password: 'x'.repeat(2 * 1024 * 1024) },
+    });
+    expect(res.statusCode).toBe(413);
+  });
+
+  it('超过单节上限的密文以 400 拒绝（schema 层，不打到数据库）', async () => {
+    const token = (await t.makeUser()).token;
+    const res = await t.app.inject({
+      method: 'PUT', url: '/api/sync', headers: t.auth(token),
+      payload: {
+        section: 'groups',
+        encryptedData: 'a'.repeat(MAX_SECTION_BYTES + 1),
+        baseVersion: 0,
+      },
+    });
+    expect(res.statusCode).toBe(400);
   });
 });

@@ -3,8 +3,23 @@ import { authScope, type GetAuthUser, type GetAuthSession } from '../middleware/
 import { sendError } from '../middleware/errorHandler.js';
 import type { SyncService } from '../service/syncService.js';
 import type { SectionType } from '../domain/enums.js';
-import { pushBody, rollbackBody, sectionQuery, sectionRequiredQuery } from './schemas.js';
+import {
+  MAX_SECTION_BYTES,
+  pushBody,
+  rollbackBody,
+  sectionQuery,
+  sectionRequiredQuery,
+} from './schemas.js';
 import { readDeviceId } from './deviceHeaders.js';
+
+/**
+ * `PUT /api/sync` 的请求体上限。
+ *
+ * 密文上限之外要留出 JSON 包裹与 `meta` 数组的余量：meta 最多 2000 条连接元数据
+ * （明文），约 400KB。给 1 MiB 余量足够，且仍与全局 1 MiB 拉开明确差距 ——
+ * 放宽是这一个端点的决策，不是全局默认。
+ */
+const SYNC_BODY_LIMIT = MAX_SECTION_BYTES + 1024 * 1024;
 
 export interface SyncRouteOptions {
   syncService: SyncService;
@@ -38,7 +53,12 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         }
       });
 
-      child.put('/api/sync', { schema: { body: pushBody } }, async (req, reply) => {
+      // 唯一需要放宽 bodyLimit 的端点：body 里 encryptedData 是整节全量密文。
+      // 全局仍是 1 MiB（app.ts），所以未认证端点不受这里影响。
+      child.put('/api/sync', {
+        bodyLimit: SYNC_BODY_LIMIT,
+        schema: { body: pushBody },
+      }, async (req, reply) => {
         const userId = req.user.sub as number;
         const { section, encryptedData, baseVersion, itemCount, meta } = req.body as any;
         const deviceId = readDeviceId(req);

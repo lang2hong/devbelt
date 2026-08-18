@@ -76,21 +76,30 @@ export const sectionRequiredQuery = {
 /**
  * 单节密文的字节上界。
  *
- * 三个数字必须对齐，此前一个都没对上：
- *  - `sync_sections.encrypted_data` 是 MEDIUMTEXT，硬上限 16 MiB
- *  - Fastify 的 `bodyLimit` 默认 1 MiB，且 app.ts 从未覆盖
- *  - `plans.sync_quota_bytes` 给 Pro 卖 100MB、Team 卖 1GB
+ * 取值依据是**实测的真实数据规模**，不是列类型能存多少。按含 SSH 配置与环境
+ * 标记的完整连接记录测算，单条约 568 字节明文；GCM 密文≈明文，base64 膨胀 4/3，
+ * 信封（salt/iv/tag/iterations）约 150 字节：
  *
- * 结果是单节密文实际永远传不过 1MB，Pro/Team 的同步配额在技术上不可达；
- * 而超限时 Fastify 抛 `FST_ERR_CTP_BODY_TOO_LARGE`（413），message 被
- * errorHandler 替换成 'Bad request'，客户端只看到「push failed: HTTP 413」，
- * 完全不指向真正原因。
+ *  |   连接数 |   明文 |  请求体 |
+ *  |---------|-------|--------|
+ *  |      50 |  28KB | 0.04MB |
+ *  |     500 | 278KB | 0.36MB |   ← Team 套餐的 maxConnections 上限
+ *  |    2000 | 1.1MB | 1.45MB |
  *
- * 现在以 MEDIUMTEXT 的 16 MiB 为准：`app.ts` 的 bodyLimit 按此值加余量，
- * 这里的 maxLength 同步跟上，超限在入口以 400 拒绝而不是打到 MySQL 变 500。
- * 要真正支持 100MB/1GB 需要改列类型 + 分片上传，那是产品决策，不在此处解决。
+ * 也就是说 Team 的 500 连接只要 0.36MB，Fastify 默认的 1 MiB 本来就够用。
+ * 真正可能撑大的是 `queries` 节 —— 保存的 SQL 文本没有长度限制。8 MiB 覆盖
+ * 约 1 万条连接或大量长 SQL，对当前数据形态留了一个数量级的余量。
+ *
+ * 之前这里写的是 16 MiB（`sync_sections.encrypted_data` 的 MEDIUMTEXT 硬上限），
+ * 那是「列能存多少」而不是「业务需要多少」，选错了依据；而且当时把它设成了
+ * **全局** bodyLimit，等于让 `/api/auth/login` 也接受 17MB 请求体。现在全局
+ * 收在 1 MiB，只有 `PUT /api/sync` 单独放宽，见 route/sync.ts 的 SYNC_BODY_LIMIT。
+ *
+ * 与 `plans.sync_quota_bytes` 卖的 Pro 100MB / Team 1GB 依然不匹配 —— 那两个
+ * 数字与真实数据规模脱节，该调的是配额而不是这里。真要支持那个量级需要改列
+ * 类型 + 分片上传，属产品决策。
  */
-export const MAX_SECTION_BYTES = 16 * 1024 * 1024;
+export const MAX_SECTION_BYTES = 8 * 1024 * 1024;
 
 export const pushBody = {
   type: 'object',
