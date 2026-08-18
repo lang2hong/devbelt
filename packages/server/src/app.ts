@@ -5,6 +5,7 @@ import mysql from '@fastify/mysql';
 import sensible from '@fastify/sensible';
 import { createConnection } from 'mysql2/promise';
 import { config } from './config.js';
+import { buildMysqlPoolOptions } from './mysqlPool.js';
 import { MAX_SECTION_BYTES } from './route/schemas.js';
 import { initSchema } from './repository/mysql/schema.js';
 import { MysqlUserRepo } from './repository/mysql/userRepo.js';
@@ -72,7 +73,14 @@ export async function createApp() {
   app.register(jwt, { secret: config.jwtSecret, sign: { expiresIn: config.accessTokenExpiresIn } });
   // 建库必须早于池注册：池里每条连接都要带默认库，否则并发时非首条连接会 ER_NO_DB_ERROR
   await ensureDatabase(app);
-  await app.register(mysql, { connectionString: authString(), promise: true });
+  // 字段形式而非 connectionString：@fastify/mysql 的实现是
+  // `createPool(options.connectionString || options)` —— 传 URL 就只用这个 URL，
+  // 其余选项全被丢弃，池会退回 mysql2 的默认值（10 连接、队列无上限、
+  // 无获取超时、timezone:'local'）。实测确认过这四项。见 mysqlPool.ts。
+  await app.register(mysql, {
+    ...buildMysqlPoolOptions(config.mysql, process.env),
+    promise: true,
+  });
   app.decorate('jwtSecret', config.jwtSecret);
 
   // 惰性连接 getter：repo 在路由注册阶段构造，运行时（ready 后）才取 app.mysql
@@ -167,18 +175,6 @@ export async function createApp() {
   void subscriptionService.downgradeExpired().catch((e) => app.log.warn({ err: e }, 'downgradeExpired failed'));
 
   return app;
-}
-
-/**
- * 构造 MySQL 连接串（**含 database**）。
- *
- * 必须带库名：`@fastify/mysql` 默认走 `createPool`，池中每条连接独立握手，
- * 靠一次 `USE db` 只能影响当前借出的那条，其余连接没有默认库。
- */
-function authString(): string {
-  const { mysql: m } = config;
-  const auth = `${encodeURIComponent(m.user)}:${encodeURIComponent(m.password)}`;
-  return `mysql://${auth}@${m.host}:${m.port}/${encodeURIComponent(m.database)}`;
 }
 
 /**

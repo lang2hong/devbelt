@@ -65,20 +65,30 @@ export class AdminService {
     private readonly usageEventRepo: IUsageEventRepo,
   ) {}
 
+  /**
+   * 用户列表 + 订阅摘要。
+   *
+   * 订阅**必须批量取**：原实现在循环里逐个 `findByUserId`，而 admin-ui 固定请求
+   * `limit=500`（`paginationQuery` 的上界也正是 500），于是一次 `/admin/users`
+   * 是 `countUsers` 1 + `listAll` 1 + 500 次串行单查 = 502 个往返，全程独占一条
+   * 池连接。跨可用区 2ms RTT 即约 1 秒，10 个并发 admin 请求就能占满连接池。
+   */
   async listUsers(limit: number, offset: number): Promise<AdminUserRow[]> {
     const users = await this.userRepo.listAll(limit, offset);
-    const rows: AdminUserRow[] = [];
-    for (const user of users) {
-      const safe = sanitize(user);
-      const sub = await this.subRepo.findByUserId(user.id);
-      rows.push({
-        ...safe,
+    if (users.length === 0) return [];
+
+    const subs = await this.subRepo.findByUserIds(users.map((u) => u.id));
+    const byUser = new Map(subs.map((s) => [s.userId, s]));
+
+    return users.map((user) => {
+      const sub = byUser.get(user.id);
+      return {
+        ...sanitize(user),
         subscription: sub
           ? { planCode: sub.planCode, status: sub.status, periodEndTime: sub.periodEndTime }
           : undefined,
-      });
-    }
-    return rows;
+      };
+    });
   }
 
   async countUsers(): Promise<number> {

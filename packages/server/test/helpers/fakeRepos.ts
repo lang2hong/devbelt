@@ -153,9 +153,23 @@ export class FakeSubscriptionRepo implements ISubscriptionRepo {
   /** downgradeExpired 的调用次数（断言 ensureActive 是否触发批量降级） */
   downgradeCalls = 0;
 
+  /** findByUserId 调用次数（断言 listUsers 不再走 N+1） */
+  findByUserIdCalls = 0;
+  /** findByUserIds 调用次数 */
+  findByUserIdsCalls = 0;
+
   async findByUserId(userId: number): Promise<Subscription | undefined> {
+    this.findByUserIdCalls++;
     for (const s of this.subs.values()) if (s.userId === userId) return s;
     return undefined;
+  }
+
+  async findByUserIds(userIds: number[]): Promise<Subscription[]> {
+    this.findByUserIdsCalls++;
+    // 真实现空数组时提前返回（IN () 是语法错误），这里复刻同样的语义
+    if (userIds.length === 0) return [];
+    const wanted = new Set(userIds);
+    return [...this.subs.values()].filter((s) => wanted.has(s.userId));
   }
 
   async upsert(

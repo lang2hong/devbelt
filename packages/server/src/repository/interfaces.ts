@@ -56,6 +56,14 @@ export interface IPlanRepo {
 
 export interface ISubscriptionRepo {
   findByUserId(userId: number): Promise<Subscription | undefined>;
+  /**
+   * 批量取订阅（管理端列表用）。
+   *
+   * 存在的理由是消掉 N+1：`listUsers` 原本在循环里逐个 `findByUserId`，
+   * 而 admin-ui 固定请求 limit=500，一次列表就是 500 次串行往返、独占一条池连接。
+   * 传空数组时不应发起查询。
+   */
+  findByUserIds(userIds: number[]): Promise<Subscription[]>;
   upsert(sub: Omit<Subscription, 'id' | 'createTime' | 'updateTime'> & { id?: number }): Promise<Subscription>;
   listAll(): Promise<Subscription[]>;
   listByStatus(status: SubStatus): Promise<Subscription[]>;

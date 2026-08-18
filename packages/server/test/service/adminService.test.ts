@@ -55,6 +55,68 @@ describe('AdminService.listUsers', () => {
     const { service } = await setup();
     expect(await service.countUsers()).toBe(2);
   });
+
+  /**
+   * N+1 回归。
+   *
+   * 原实现在 `for (const user of users)` 里逐个 `subRepo.findByUserId(user.id)`。
+   * admin-ui 固定请求 `limit=500`（且 paginationQuery 的上界正是 500），于是
+   * 一次 `/admin/users` 是 `countUsers` 1 + `listAll` 1 + **500 次串行 findByUserId**
+   * = 502 个往返，全程独占一条池连接。跨可用区 2ms RTT 就是 1 秒，10 个并发
+   * admin 请求即打满 10 连接的池，第 11 个请求进入无上限队列挂死。
+   *
+   * 断言查询次数而不是断言耗时：假仓储没有 I/O 成本，只有调用计数能暴露这个缺陷。
+   */
+  it('批量取订阅，不按用户逐条查（N+1 回归）', async () => {
+    const { service, subRepo, userRepo } = await setup();
+    for (let i = 0; i < 20; i++) {
+      const u = await userRepo.create(`bulk${i}@example.com`, 'scrypt$00$00', 'user', 'free');
+      await subRepo.upsert({
+        userId: u.id, planCode: 'pro', status: 'active',
+        periodEndTime: new Date(Date.now() + DAY), provider: 'manual',
+      });
+    }
+    subRepo.findByUserIdCalls = 0;
+    subRepo.findByUserIdsCalls = 0;
+
+    const rows = await service.listUsers(500, 0);
+
+    expect(rows.length).toBeGreaterThanOrEqual(20);
+    expect(subRepo.findByUserIdCalls).toBe(0);
+    expect(subRepo.findByUserIdsCalls).toBe(1);
+  });
+
+  it('批量取订阅后，每个用户仍对应到自己的订阅（不串行也不串号）', async () => {
+    const { service, subRepo, userRepo, alice } = await setup();
+    const bob = await userRepo.create('bob2@example.com', 'scrypt$00$00', 'user', 'free');
+    await subRepo.upsert({
+      userId: alice.id, planCode: 'free', status: 'trialing',
+      periodEndTime: new Date(Date.now() + DAY), provider: 'manual',
+    });
+    await subRepo.upsert({
+      userId: bob.id, planCode: 'team', status: 'active',
+      periodEndTime: new Date(Date.now() + DAY), provider: 'manual',
+    });
+
+    const rows = await service.listUsers(500, 0);
+    expect(rows.find((r) => r.id === alice.id)!.subscription?.planCode).toBe('free');
+    expect(rows.find((r) => r.id === bob.id)!.subscription?.planCode).toBe('team');
+  });
+
+  it('没有订阅的用户 subscription 为 undefined', async () => {
+    const { service, userRepo } = await setup();
+    const solo = await userRepo.create('solo@example.com', 'scrypt$00$00', 'user', 'free');
+    const rows = await service.listUsers(500, 0);
+    expect(rows.find((r) => r.id === solo.id)!.subscription).toBeUndefined();
+  });
+
+  it('空用户列表不发起批量查询', async () => {
+    const { service, subRepo } = await setup();
+    subRepo.findByUserIdsCalls = 0;
+    const rows = await service.listUsers(500, 999);
+    expect(rows).toHaveLength(0);
+    expect(subRepo.findByUserIdsCalls).toBe(0);
+  });
 });
 
 describe('AdminService.getUserDetail', () => {
