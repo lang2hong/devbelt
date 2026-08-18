@@ -123,6 +123,46 @@ describe('SqliteConnection DML affectedRows (real sqlite3 CLI)', () => {
     expect(sel.affectedRows).toBeUndefined();
     expect(sel.rows.length).toBe(1);
   });
+
+  /**
+   * 回归：**不带结尾分号**的 DML 必须照样执行。
+   *
+   * 追加 `SELECT changes()` 时若不补分号，拼出的是
+   * `INSERT INTO t VALUES(1) SELECT changes()` —— sqlite3 报
+   * `Parse error near "SELECT"`。而 DataService 生成的 UPDATE/DELETE/INSERT
+   * 全都不带结尾分号（updateCell/deleteRows/insertRow），于是 SQLite 上的
+   * 单元格编辑、插入行、删除行全部失败。此前的用例恰好每条都自带分号，
+   * 把这个缺陷完整掩盖了。
+   */
+  it('无结尾分号的 DML（DataService 的真实形状）仍返回受影响行数', async () => {
+    const dbPath = path.join(os.tmpdir(), `db-nosemi-${Date.now()}.db`);
+    const query = makeQuery(dbPath);
+    await query.query('CREATE TABLE t(id INTEGER, name TEXT);');
+
+    const ins = await query.query("INSERT INTO t (id, name) VALUES (1, 'a')");
+    expect(ins.affectedRows).toBe(1);
+
+    const ins2 = await query.query("INSERT INTO t (id, name) VALUES (2, 'b')");
+    expect(ins2.affectedRows).toBe(1);
+
+    const upd = await query.query("UPDATE t SET name = 'x' WHERE id = 1");
+    expect(upd.affectedRows).toBe(1);
+
+    const del = await query.query('DELETE FROM t WHERE id = 2');
+    expect(del.affectedRows).toBe(1);
+
+    const rest = await query.query('SELECT id, name FROM t');
+    expect(rest.rows.length).toBe(1);
+    expect(String(rest.rows[0].name)).toBe('x');
+  });
+
+  it('结尾分号后带空白的 DML 也不会拼错', async () => {
+    const dbPath = path.join(os.tmpdir(), `db-semiws-${Date.now()}.db`);
+    const query = makeQuery(dbPath);
+    await query.query('CREATE TABLE t(id INTEGER);');
+    const ins = await query.query('INSERT INTO t VALUES (1);  \n');
+    expect(ins.affectedRows).toBe(1);
+  });
 });
 
 describe('BackupService.restore singleStatement (real sqlite3 CLI)', () => {

@@ -58,8 +58,27 @@ export class PostgreSqlConnection extends IConnection {
     if (Array.isArray(values)) queryArgs.push(values);
     queryArgs.push((err: any, res: any) => {
       if (err) {
-        if (callback) callback(err);
-        event.emit('error', err.message);
+        // 错误只送一次，且只送给真的有人收的地方。
+        //
+        // 原实现是「callback(err) 之后再 event.emit('error', …)」，两件事都做。
+        // 但 Node 的 EventEmitter 在没有 'error' 监听者时会把 emit 的参数
+        // **抛出来**（ERR_UNHANDLED_ERROR）。全仓没有任何调用方监听这个
+        // emitter 的 'error'，于是每一次查询失败都会多抛一次 —— 尽管调用方
+        // 已经通过 callback 正常收到并处理了该错误。一条写错表名的 SQL 就够。
+        //
+        // 这条比 sqliteConnection 里的同类缺陷更严重，因为抛出位置不同：
+        //   sqlite   —— emit 在 promise 的 .catch() 里 → unhandledRejection（日志）
+        //   这里     —— emit 在 pg 驱动的同步回调里   → uncaughtException（进程退出）
+        // VS Code 扩展宿主自带 uncaughtException handler 所以扩展里不会真崩，
+        // 但那是靠宿主兜着；db-core 被扩展之外的场景复用时会直接被打死。
+        if (callback) {
+          callback(err);
+          return;
+        }
+        // 无 callback 时才走事件通道，并且先确认有人在听
+        if (event.listenerCount('error') > 0) {
+          event.emit('error', err.message);
+        }
       } else if (!callback) {
         if (res.rows.length === 0) {
           event.emit('end');

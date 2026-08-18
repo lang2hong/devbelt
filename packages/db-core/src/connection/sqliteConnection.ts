@@ -28,8 +28,16 @@ export class SqliteConnection extends IConnection {
     // DML（INSERT/UPDATE/DELETE/REPLACE）追加 SELECT changes()，借同一 CLI 进程
     // 拿到受影响行数：SQLite CLI 的 `.mode tcl` 不回显 changes，导致这些语句的
     // affectedRows 恒缺失、结果面板只会显示「0 行受影响」。DDL/SELECT 不追加。
+    //
+    // 必须显式用 `;` 分隔两条语句：调用方是否自带结尾分号并不统一
+    // （DataService 的 updateCell/deleteRows/insertRow 都不带），拼成
+    // `INSERT ... VALUES (1) SELECT changes()` 会让 sqlite3 报
+    // `Parse error near "SELECT"` —— SQLite 上的单元格编辑、插入行、删除行
+    // 全部失败。先剥掉尾部已有的分号与空白再统一补，两种输入都合法。
     const isDml = /^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i.test(sql);
-    const effectiveSql = isDml ? `${sql} SELECT changes()` : sql;
+    const effectiveSql = isDml
+      ? `${sql.replace(/[\s;]+$/, '')}; SELECT changes()`
+      : sql;
     this.sqlite
       .query(effectiveSql + ';')
       .then((res) => {
@@ -53,8 +61,25 @@ export class SqliteConnection extends IConnection {
         }
       })
       .catch((err) => {
-        if (callback) callback(err);
-        event.emit('error', err.message);
+        // 错误只送一次，且只送给真的有人收的地方。
+        //
+        // 原实现是「callback(err) 之后再 event.emit('error', …)」，两件事都做。
+        // 但 Node 的 EventEmitter 在没有 'error' 监听者时会把 emit 的参数**抛出来**
+        // （ERR_UNHANDLED_ERROR），而这里位于 promise 的 .catch() 内，抛出的东西
+        // 就变成一条无人处理的 promise 拒绝。全仓没有任何调用方监听这个 emitter
+        // 的 'error'，于是每一次 SQLite 查询失败都会多出一条未捕获拒绝 ——
+        // 尽管调用方已经通过 callback 正常收到并处理了该错误。
+        //
+        // 表现：扩展宿主里一条来源不明的错误日志；跑在
+        // --unhandled-rejections=strict 下的 Node 里则直接让进程退出。
+        if (callback) {
+          callback(err);
+          return;
+        }
+        // 无 callback 时才走事件通道，并且先确认有人在听
+        if (event.listenerCount('error') > 0) {
+          event.emit('error', err.message);
+        }
       });
     return event;
   }
