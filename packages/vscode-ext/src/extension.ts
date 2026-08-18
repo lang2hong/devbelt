@@ -55,6 +55,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 同步服务
   const serverUrl = AuthService.getServerUrl(vscode.workspace.getConfiguration());
   const auth = new AuthService(context.secrets, serverUrl);
+  // AuthService 订阅了 SecretStorage 变更（多窗口 token 同步），必须随扩展一起释放
+  context.subscriptions.push(auth);
   await auth.init();
   // package.json 的 commandPalette 用 dbclient.loggedIn 控制 login/logout/
   // changeSyncPassword 的可见性。此前从未 setContext，导致 logout 与

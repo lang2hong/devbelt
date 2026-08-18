@@ -288,7 +288,7 @@ describe('刷新成功后回写 token', () => {
     vi.stubGlobal('fetch', vi.fn(async () =>
       jsonRes(200, { accessToken: 'A2', refreshToken: 'R2' }),
     ));
-    const client = new SyncClient('http://x', () => 'A1', () => 'R1', (a, r) => seen.push([a, r]));
+    const client = new SyncClient('http://x', () => 'A1', () => 'R1', (a, r) => { seen.push([a, r]); });
 
     await client.refresh();
     expect(seen).toEqual([['A2', 'R2']]);

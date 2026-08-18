@@ -31,12 +31,25 @@ export async function refreshAdminCommand(auth: AuthService): Promise<void> {
   await vscode.commands.executeCommand('setContext', 'dbclient.isAdmin', isAdmin);
 }
 
+/**
+ * 打开管理后台。
+ *
+ * **刻意不携带 token。** 原实现是 `${serverUrl}/admin#token=<access token>`，
+ * 把一个具备管理员权限的 bearer token 放进 URL fragment，代价是：
+ *  - 进浏览器历史记录，并可能被会话恢复反复重放
+ *  - 进剪贴板（用户复制地址栏）与任何"分享此页"路径
+ *  - serverUrl 默认是明文 http，fragment 虽不上行，但整页仍是明文传输
+ *  - access token 有效期内（当前配置 7d）那条历史记录一直可用
+ *
+ * 管理员在 admin-ui 手动登录一次即可，代价远小于把 token 写进浏览器历史。
+ * 若要恢复免登录跳转，正确做法是服务端签发一次性、短时效的换取码，
+ * 而不是直接传递长效 token。
+ */
 export function openAdminPanel(auth: AuthService): void {
-  const token = auth.getAccessToken();
-  if (!token) {
+  if (!auth.isLoggedIn()) {
     void vscode.window.showWarningMessage('Not logged in');
     return;
   }
   const serverUrl = AuthService.getServerUrl(vscode.workspace.getConfiguration());
-  void vscode.env.openExternal(vscode.Uri.parse(`${serverUrl}/admin#token=${encodeURIComponent(token)}`));
+  void vscode.env.openExternal(vscode.Uri.parse(`${serverUrl}/admin`));
 }

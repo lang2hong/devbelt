@@ -96,8 +96,14 @@ export class SyncClient {
   constructor(
     private readonly baseUrl: string,
     private readonly getAccessToken: () => string | undefined,
-    private readonly getRefreshToken: () => string | undefined,
-    private readonly onTokensRefreshed?: (access: string, refresh: string) => void,
+    /**
+     * 取当前 refresh token。**允许返回 Promise**：调用方（AuthService）会实时
+     * 从 SecretStorage 读最新值，而不是返回进程内存里的快照 —— 多窗口场景下
+     * 内存快照可能是别的窗口已经轮换掉的旧 token，用它刷新会命中服务端的
+     * 重用检测并导致全设备登出。
+     */
+    private readonly getRefreshToken: () => string | undefined | Promise<string | undefined>,
+    private readonly onTokensRefreshed?: (access: string, refresh: string) => void | Promise<void>,
     private readonly device?: DeviceInfo,
   ) {}
 
@@ -123,7 +129,8 @@ export class SyncClient {
    * （调用方会把 401 冒泡给用户，重新登录一次即可），也不能把人从所有设备踢掉。
    */
   async refresh(): Promise<{ accessToken: string; refreshToken: string }> {
-    const rt = this.getRefreshToken();
+    // await：getRefreshToken 会去读 SecretStorage，拿的是跨窗口的最新值
+    const rt = await this.getRefreshToken();
     if (!rt) throw new Error('no refresh token');
     const res = await fetch(`${this.baseUrl}/api/auth/refresh`, {
       method: 'POST',
@@ -132,13 +139,14 @@ export class SyncClient {
     });
     if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
     const body = (await res.json()) as { accessToken: string; refreshToken: string };
-    this.onTokensRefreshed?.(body.accessToken, body.refreshToken);
+    // await：轮换结果必须在本次调用返回前落盘，否则其他窗口仍会读到旧 token
+    await this.onTokensRefreshed?.(body.accessToken, body.refreshToken);
     return body;
   }
 
   /** 登出（撤销当前 refresh token） */
   async logout(): Promise<void> {
-    const rt = this.getRefreshToken();
+    const rt = await this.getRefreshToken();
     if (rt) await this.request('POST', '/api/auth/logout', { refreshToken: rt }, true);
   }
 
