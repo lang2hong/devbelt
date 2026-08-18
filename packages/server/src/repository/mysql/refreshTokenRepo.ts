@@ -26,6 +26,27 @@ export class MysqlRefreshTokenRepo implements IRefreshTokenRepo {
     await this.db().query('UPDATE refresh_tokens SET revoked_time = ? WHERE id = ?', [new Date(), id]);
   }
 
+  /**
+   * 原子消费一条 refresh token：返回本次调用是否是撤销它的那一个。
+   *
+   * 这是 refresh 轮换正确性的唯一判据。原来的流程是「查 → 判 revokedTime →
+   * revoke」，三步之间有 await（事件循环让出点），而 `revoke` 用的是
+   * `WHERE id = ?` 且不看 affectedRows —— 于是两个请求带同一个 token 并发到达时
+   * 双方都能通过检查、各自签出新会话，refresh token 的「一次性」保证失效，
+   * 重用检测在最需要它的场景下静默失灵。
+   *
+   * 条件更新 `AND revoked_time IS NULL` 把裁决交给数据库：无论并发多少个，
+   * `affectedRows === 1` 的只可能有一个。输的那个不必区分「并发」还是「重放」，
+   * 一律按重用处理即可 —— 两者在安全语义上本来就该同等对待。
+   */
+  async consume(id: number, now: Date): Promise<boolean> {
+    const [result] = await this.db().query<any>(
+      'UPDATE refresh_tokens SET revoked_time = ?, last_used_time = ? WHERE id = ? AND revoked_time IS NULL',
+      [now, now, id],
+    );
+    return result.affectedRows === 1;
+  }
+
   async revokeAllForUser(userId: number): Promise<void> {
     await this.db().query('UPDATE refresh_tokens SET revoked_time = ? WHERE user_id = ? AND revoked_time IS NULL', [new Date(), userId]);
   }

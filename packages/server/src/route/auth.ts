@@ -84,7 +84,9 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): 
       child.post('/api/auth/logout', { schema: { body: refreshTokenBody } }, async (req, reply) => {
         const { refreshToken } = req.body as any;
         try {
-          await auth.logout(refreshToken);
+          // sid 是权威判据：即使客户端手上的 refresh token 已被攻击者轮换掉，
+          // 当前会话也必须被撤销。见 AuthService.logout 的说明。
+          await auth.logout(req.user.sid as number, req.user.sub as number, refreshToken);
           reply.send({ ok: true });
         } catch (e) {
           sendError(reply, e);

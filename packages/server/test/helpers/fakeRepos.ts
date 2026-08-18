@@ -236,6 +236,23 @@ export class FakeRefreshTokenRepo implements IRefreshTokenRepo {
     if (t && !t.revokedTime) t.revokedTime = new Date();
   }
 
+  /**
+   * 原子消费，复刻真实现的 `UPDATE ... WHERE id = ? AND revoked_time IS NULL`
+   * 与 affectedRows 语义。
+   *
+   * 判定与赋值之间**刻意不放任何 await** —— 真实现靠单条 SQL 的原子性保证只有
+   * 一个赢家，这里靠 JS 的同步执行保证同一件事。如果这里插入 await，fake 就会
+   * 比真实现更宽松，从而把并发缺陷盖住（本仓库在 FakeSyncRepo 上踩过反向的坑：
+   * fake 比真实现更严格，同样会让缺陷不可见）。
+   */
+  async consume(id: number, now: Date): Promise<boolean> {
+    const t = this.tokens.get(id);
+    if (!t || t.revokedTime) return false;
+    t.revokedTime = now;
+    t.lastUsedTime = now;
+    return true;
+  }
+
   async revokeAllForUser(userId: number): Promise<void> {
     const now = new Date();
     for (const t of this.tokens.values()) {

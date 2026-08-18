@@ -76,6 +76,13 @@ export interface IRefreshTokenRepo {
   findByHash(hash: string): Promise<RefreshToken | undefined>;
   findById(id: number): Promise<RefreshToken | undefined>;
   revoke(id: number): Promise<void>;
+  /**
+   * 原子消费（条件撤销）：仅当该行尚未撤销时置 revoked_time，返回是否由本次调用完成。
+   *
+   * refresh 轮换必须以此为判据而非「先查后写」—— 后者在并发下会让同一个
+   * refresh token 签出两条活跃会话，一次性保证失效且重用检测失灵。
+   */
+  consume(id: number, now: Date): Promise<boolean>;
   /** 撤销某用户全部会话（token 重用时强制下线所有设备） */
   revokeAllForUser(userId: number): Promise<void>;
   /** 撤销某用户在某设备上的全部活跃会话（同设备重登顶掉旧会话） */

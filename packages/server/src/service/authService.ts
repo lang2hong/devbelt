@@ -131,14 +131,23 @@ export class AuthService {
     if (!rt) throw new InvalidCredentialsError();
     const now = new Date();
 
-    if (rt.revokedTime) {
+    if (rt.expiresTime <= now) throw new InvalidCredentialsError();
+
+    // 原子消费：条件更新的 affectedRows 是唯一判据。
+    //
+    // 不能用「先判 rt.revokedTime 再 revoke」—— 那中间有 await（事件循环让出点），
+    // 两个带同一个 token 的并发请求会双双通过检查、各自签出新会话，于是
+    // refresh token 的一次性保证失效、`refresh_tokens` 出现两条活跃行、
+    // 重用检测在最需要它的场景下静默失灵。
+    //
+    // consume 返回 false 有两种成因：并发下输给了另一个请求，或这是一个已被
+    // 轮换掉的旧 token 被重放。两者在安全语义上同等 —— 都说明这个 token 已经
+    // 不该再被接受，一律按泄露处理，撤销该用户全部会话。
+    if (!(await this.refreshTokenRepo.consume(rt.id, now))) {
       await this.refreshTokenRepo.revokeAllForUser(rt.userId);
       throw new TokenReuseError(rt.id, rt.userId);
     }
-    if (rt.expiresTime <= now) throw new InvalidCredentialsError();
 
-    await this.refreshTokenRepo.updateLastUsed(rt.id, now);
-    await this.refreshTokenRepo.revoke(rt.id);
     const { token, hash: rtHash, expiresAt } = this.tokenService.generateRefreshToken();
     // 继承旧 token 的设备字段（刷新请求未带时用旧值），保持同设备会话延续
     const newRt = await this.refreshTokenRepo.create({
@@ -168,11 +177,43 @@ export class AuthService {
     return { accessToken, refreshToken: token };
   }
 
-  /** 登出：撤销当前 refresh token */
-  async logout(refreshTokenStr: string): Promise<void> {
-    const hash = this.tokenService.hashToken(refreshTokenStr);
-    const rt = await this.refreshTokenRepo.findByHash(hash);
-    if (rt && !rt.revokedTime) await this.refreshTokenRepo.revoke(rt.id);
+  /**
+   * 登出。
+   *
+   * 语义底线是**发起登出的那条会话一定要死掉**，所以以 `sid`（access token 里
+   * 携带的、签发它的 refresh token 行 id）为准，而不是以传入的 refresh token 为准。
+   *
+   * 原实现只按传入的 refresh token 查找并撤销，且「找不到」与「已撤销」都静默
+   * 返回成功。真实攻击链：攻击者窃取 R1 并抢先 refresh → 服务端撤销 R1、签出
+   * 攻击者的 R2 → 受害者察觉异常点「退出登录」，客户端发送它手上的 R1 →
+   * 服务端发现 R1 已撤销 → 无操作、返回 200 → 攻击者的会话完好无损，而受害者
+   * 以为已经登出。
+   *
+   * 另外，同一个已撤销 token 出现在 refresh 时会触发 revokeAllForUser，出现在
+   * logout 时却什么都不做 —— 面对同一个泄露信号，两条路径的处置不该不对称。
+   *
+   * @param sid   当前 access token 的会话 id（权威）
+   * @param userId 当前用户 id，用于归属校验，防止用他人 sid 越权撤销
+   * @param refreshTokenStr 客户端持有的 refresh token（可选）
+   */
+  async logout(sid: number, userId: number, refreshTokenStr?: string): Promise<void> {
+    // 1. 当前会话：仅在归属本人时撤销
+    const current = await this.refreshTokenRepo.findById(sid);
+    if (current && current.userId === userId) {
+      await this.refreshTokenRepo.revoke(sid);
+    }
+
+    if (!refreshTokenStr) return;
+
+    const rt = await this.refreshTokenRepo.findByHash(this.tokenService.hashToken(refreshTokenStr));
+    if (!rt || rt.userId !== userId) return; // 不是自己的 token，忽略
+
+    if (rt.revokedTime && rt.id !== sid) {
+      // 出示一个已被轮换掉的 token：与 refresh 侧同等对待，按泄露处理
+      await this.refreshTokenRepo.revokeAllForUser(userId);
+      return;
+    }
+    await this.refreshTokenRepo.revoke(rt.id);
   }
 
   /** 列出当前用户活跃会话 */

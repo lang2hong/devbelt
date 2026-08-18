@@ -213,7 +213,8 @@ describe('AuthService.device identity', () => {
     const { auth, rtRepo, deviceRepo } = setup({ maxDevices: 1 });
     const device = { deviceId: 'machine-1', deviceName: 'laptop' };
     const reg = await auth.register('a@example.com', 'password123', device);
-    await auth.logout(reg.refreshToken);
+    const regSid = [...rtRepo.tokens.values()].find((t) => !t.revokedTime)!.id;
+    await auth.logout(regSid, reg.user.id, reg.refreshToken);
     await expect(auth.login('a@example.com', 'password123', device)).resolves.toBeTruthy();
     expect(deviceRepo.devices.size).toBe(1);
     const active = await rtRepo.listActiveForUser(reg.user.id, new Date());
@@ -278,19 +279,39 @@ describe('AuthService.refresh', () => {
 
 describe('AuthService session management', () => {
   it('logout revokes only the presented token', async () => {
-    const { auth, rtRepo } = setup();
+    const { auth, rtRepo, tokenService } = setup();
     const a = await auth.register('a@example.com', 'password123');
     const b = await auth.login('a@example.com', 'password123');
-    await auth.logout(a.refreshToken);
+    const sidA = [...rtRepo.tokens.values()]
+      .find((t) => t.tokenHash === tokenService.hashToken(a.refreshToken))!.id;
+    await auth.logout(sidA, a.user.id, a.refreshToken);
 
     const active = await rtRepo.listActiveForUser(a.user.id, new Date());
     expect(active).toHaveLength(1);
     await expect(auth.refresh(b.refreshToken)).resolves.toBeTruthy();
   });
 
-  it('logout of an unknown token is a no-op', async () => {
+  /**
+   * 这条原来断言的是「未知 token 登出 = 什么都不做」，把一个缺陷钉成了期望值：
+   * 登出的语义底线是当前会话必须死掉，而当前会话由 access token 里的 sid 标识，
+   * 与客户端手上那个 refresh token 是否仍然有效无关。
+   *
+   * 现在断言正确行为：token 未知不影响 sid 对应会话被撤销；只有 sid 也不存在时
+   * 才真的是 no-op。
+   */
+  it('未知 token 不阻止当前会话（sid）被撤销', async () => {
+    const { auth, rtRepo } = setup();
+    const reg = await auth.register('a@example.com', 'password123');
+    const sid = [...rtRepo.tokens.values()].find((t) => !t.revokedTime)!.id;
+
+    await auth.logout(sid, reg.user.id, 'never-issued');
+
+    expect(await rtRepo.countActiveForUser(reg.user.id, new Date())).toBe(0);
+  });
+
+  it('sid 与 token 都不存在时才是 no-op', async () => {
     const { auth } = setup();
-    await expect(auth.logout('never-issued')).resolves.toBeUndefined();
+    await expect(auth.logout(9999, 1, 'never-issued')).resolves.toBeUndefined();
   });
 
   it('lists active sessions with device metadata and marks the current device', async () => {
