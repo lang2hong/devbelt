@@ -1,0 +1,100 @@
+# DB Client 同步服务 —— nginx 反向代理示例
+#
+# 与 server 端 `TRUST_PROXY` 配对使用。默认 `TRUST_PROXY=1`（信任 1 跳），
+# 配合下面的 `X-Forwarded-For $proxy_add_x_forwarded_for` 是安全的：
+# Fastify 从 XFF 右往左数 1 跳，恒好取到 nginx 自己追加的那一段，
+# 客户端预先塞进 XFF 的伪造值会被跳过。
+#
+# 反过来，如果 server 端设了 `TRUST_PROXY=true`，Fastify 会取 XFF **最左**段，
+# 那一段完全由客户端控制 —— 攻击者每个请求换一个伪造 IP 就能绕开所有按 IP
+# 的限流。因此 server 端的 config.ts 直接拒绝 `TRUST_PROXY=true` 启动。
+#
+# 用法：复制到 /etc/nginx/conf.d/dbclient.conf，改掉 server_name 与证书路径。
+
+upstream dbclient_server {
+    # 单实例部署。server 只监听回环地址，不要把 3000 暴露到公网 ——
+    # 一旦可直连，客户端就能绕过 nginx 自带伪造的 XFF 头进来。
+    server 127.0.0.1:3000;
+    keepalive 32;
+}
+
+server {
+    listen 80;
+    server_name your-domain.example;
+
+    # 生产建议全量跳 HTTPS：同步载荷虽已在客户端加密，但 JWT 是明文传输的
+    # return 301 https://$host$request_uri;
+
+    # ── 请求体上限 ────────────────────────────────────────────────
+    # sync_sections.encrypted_data 是 MEDIUMTEXT（16MB），但 Fastify 的
+    # bodyLimit 默认 1MB —— 连接数很多的用户 push 时可能被 Fastify 侧 413。
+    # 这里给到 2m 只是让 nginx 不成为更早的瓶颈，真正的上限仍是 server 的 1MB。
+    client_max_body_size 2m;
+
+    # ── 代理头 ───────────────────────────────────────────────────
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Connection        "";
+
+    # 同步接口在慢网络下可能耗时较久（5 个 section 逐个 push）
+    proxy_connect_timeout 5s;
+    proxy_send_timeout    60s;
+    proxy_read_timeout    60s;
+
+    # ── 压缩 ─────────────────────────────────────────────────────
+    gzip on;
+    gzip_types application/json application/javascript text/css text/plain;
+    gzip_min_length 1024;
+    gzip_proxied any;
+
+    # ── 路由 ─────────────────────────────────────────────────────
+    # 限流刻意**不在 nginx 做**（无 limit_req）。
+    # server 侧已有 @fastify/rate-limit 分桶限流，阈值可在 /admin 后台按桶
+    # 实时调整，并且 429 会被记录到 traffic_blocked 表里可查。两边都限的话，
+    # 出问题时分不清是谁挡的，而 nginx 挡掉的请求在后台完全看不见。
+    location / {
+        proxy_pass http://dbclient_server;
+    }
+
+    # 管理后台。仅由 admin JWT 保护，页面本身是公开的静态资源。
+    # 如需额外收紧，可在此加 IP 白名单：
+    #   allow 203.0.113.0/24;
+    #   deny all;
+    location /admin {
+        proxy_pass http://dbclient_server;
+    }
+
+    # 健康检查在 server 侧已豁免限流，可安全地被监控高频轮询
+    location = /health {
+        proxy_pass http://dbclient_server;
+        access_log off;
+    }
+}
+
+# ── HTTPS ────────────────────────────────────────────────────────
+# server {
+#     listen 443 ssl http2;
+#     server_name your-domain.example;
+#
+#     ssl_certificate     /etc/letsencrypt/live/your-domain.example/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/your-domain.example/privkey.pem;
+#     ssl_protocols       TLSv1.2 TLSv1.3;
+#     ssl_ciphers         HIGH:!aNULL:!MD5;
+#     ssl_session_cache   shared:SSL:10m;
+#
+#     client_max_body_size 2m;
+#
+#     proxy_http_version 1.1;
+#     proxy_set_header Host              $host;
+#     proxy_set_header X-Real-IP         $remote_addr;
+#     proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+#     proxy_set_header X-Forwarded-Proto $scheme;
+#     proxy_set_header Connection        "";
+#
+#     location / {
+#         proxy_pass http://dbclient_server;
+#     }
+# }
