@@ -57,6 +57,12 @@ const WRITE_COMMANDS: Record<string, string[]> = {
     'dbclient.addForeignKey',
     'dbclient.dropForeignKey',
   ],
+  // query.ts 原本不在扫描范围内 —— 这正是 dbclient.updateCell 长期漏掉守卫的原因。
+  // 它是个已注册命令，任何 executeCommand 调用方（其他扩展、webview 消息）都能
+  // 直接触发，绕过 RowEditor 那条带确认的路径。
+  'query.ts': [
+    'dbclient.updateCell',
+  ],
 };
 
 /**
