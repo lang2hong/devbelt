@@ -8,6 +8,7 @@ import {
   idParam,
   refreshTokenBody,
 } from './schemas.js';
+import { readDeviceHeaders } from './deviceHeaders.js';
 
 export interface AuthRouteOptions {
   authService: AuthService;
@@ -26,22 +27,14 @@ export interface AuthRouteOptions {
 export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): Promise<void> {
   const auth = opts.authService;
 
-  const deviceInfo = (req: any): DeviceInfo => ({
-    deviceName: req.headers['x-device-name'] as string | undefined,
-    deviceId: req.headers['x-device-id'] as string | undefined,
-    machineId: req.headers['x-device-machine-id'] as string | undefined,
-    hostname: req.headers['x-device-hostname'] as string | undefined,
-    os: req.headers['x-device-os'] as string | undefined,
-    arch: req.headers['x-device-arch'] as string | undefined,
-    osVersion: req.headers['x-device-os-version'] as string | undefined,
-    appName: req.headers['x-device-app'] as string | undefined,
-    appVersion: req.headers['x-device-app-version'] as string | undefined,
-    remoteName: req.headers['x-device-remote'] as string | undefined,
-    language: req.headers['x-device-language'] as string | undefined,
-    timezone: req.headers['x-device-timezone'] as string | undefined,
-    userAgent: req.headers['user-agent'] as string | undefined,
-    ip: req.ip,
-  });
+  /**
+   * 从请求头读设备信息。
+   *
+   * 逐字段截断到 DB 列宽，见 deviceHeaders.ts —— 原来是原样透传，一个 300 字符的
+   * User-Agent（真实存在）就会让 `refresh_tokens` / `devices` 的 INSERT 撞
+   * `ER_DATA_TOO_LONG`，登录直接 500 且那类客户端永远登不上。
+   */
+  const deviceInfo = (req: any): DeviceInfo => readDeviceHeaders(req);
 
   app.post('/api/auth/register', { schema: { body: credentialsBody } }, async (req, reply) => {
     const { email, password } = req.body as any;

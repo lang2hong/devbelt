@@ -3,6 +3,7 @@ import { authScope, type GetAuthUser, type GetAuthSession } from '../middleware/
 import { sendError } from '../middleware/errorHandler.js';
 import type { IUsageEventRepo } from '../repository/interfaces.js';
 import { usageBody } from './schemas.js';
+import { readDeviceId } from './deviceHeaders.js';
 
 export interface UsageRouteOptions {
   usageEventRepo: IUsageEventRepo;
@@ -21,7 +22,7 @@ export async function usageRoutes(app: FastifyInstance, opts: UsageRouteOptions)
     routes: async (child) => {
       child.post('/api/usage', { schema: { body: usageBody } }, async (req, reply) => {
         const userId = req.user.sub as number;
-        const deviceId = (req.headers['x-device-id'] as string) ?? undefined;
+        const deviceId = readDeviceId(req);
         const { connectionOpens, queryExecutes } = req.body as any;
         try {
           if (Number(connectionOpens) > 0) {

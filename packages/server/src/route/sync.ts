@@ -4,6 +4,7 @@ import { sendError } from '../middleware/errorHandler.js';
 import type { SyncService } from '../service/syncService.js';
 import type { SectionType } from '../domain/enums.js';
 import { pushBody, rollbackBody, sectionQuery, sectionRequiredQuery } from './schemas.js';
+import { readDeviceId } from './deviceHeaders.js';
 
 export interface SyncRouteOptions {
   syncService: SyncService;
@@ -28,7 +29,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
       child.get('/api/sync', { schema: { querystring: sectionQuery } }, async (req, reply) => {
         const userId = req.user.sub as number;
         const section = (req.query as any).section as SectionType | undefined;
-        const deviceId = (req.headers['x-device-id'] as string) ?? undefined;
+        const deviceId = readDeviceId(req);
         try {
           const r = await opts.syncService.pull(userId, section, deviceId);
           reply.send(r);
@@ -40,7 +41,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
       child.put('/api/sync', { schema: { body: pushBody } }, async (req, reply) => {
         const userId = req.user.sub as number;
         const { section, encryptedData, baseVersion, itemCount, meta } = req.body as any;
-        const deviceId = (req.headers['x-device-id'] as string) ?? undefined;
+        const deviceId = readDeviceId(req);
         try {
           const r = await opts.syncService.push(userId, section, encryptedData, Number(baseVersion), {
             deviceId,

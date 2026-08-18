@@ -35,6 +35,7 @@ import { TrafficCollector } from '../../src/observability/trafficCollector.js';
 import { registerTrafficPlugin } from '../../src/observability/trafficPlugin.js';
 import { RateLimitConfig } from '../../src/ratelimit/rateLimitConfig.js';
 import { registerRateLimit } from '../../src/ratelimit/rateLimitPlugin.js';
+import { MAX_SECTION_BYTES } from '../../src/route/schemas.js';
 
 /**
  * 路由级测试装配：真实的 route + middleware + errorHandler + JWT，
@@ -106,8 +107,14 @@ export interface TestApp {
 }
 
 export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
-  // trustProxy: 1 与 createApp 的默认值一致，让 req.ip 的行为在测试里也真实
-  const app = Fastify({ logger: false, trustProxy: 1 });
+  // trustProxy: 1 与 createApp 的默认值一致，让 req.ip 的行为在测试里也真实。
+  // bodyLimit 也必须与 createApp 对齐：默认 1 MiB 会让「单节密文上限」这类
+  // 用例在测试里表现得和生产不一样（生产按 MAX_SECTION_BYTES 走）。
+  const app = Fastify({
+    logger: false,
+    trustProxy: 1,
+    bodyLimit: MAX_SECTION_BYTES + 1024 * 1024,
+  });
 
   // 必须在任何路由注册之前挂：onRoute 只对之后注册的路由触发
   if (opts.onRoute) {

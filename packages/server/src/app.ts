@@ -5,6 +5,7 @@ import mysql from '@fastify/mysql';
 import sensible from '@fastify/sensible';
 import { createConnection } from 'mysql2/promise';
 import { config } from './config.js';
+import { MAX_SECTION_BYTES } from './route/schemas.js';
 import { initSchema } from './repository/mysql/schema.js';
 import { MysqlUserRepo } from './repository/mysql/userRepo.js';
 import { MysqlPlanRepo } from './repository/mysql/planRepo.js';
@@ -52,7 +53,15 @@ import { registerRateLimit } from './ratelimit/rateLimitPlugin.js';
 export async function createApp() {
   // trustProxy 决定 req.ip：既是限流的分桶键，也是 devices.ip 的来源。
   // 默认信任 1 跳（nginx 反代）。取值语义见 config.parseTrustProxy。
-  const app = Fastify({ logger: true, trustProxy: config.trustProxy });
+  // bodyLimit 必须显式给：Fastify 默认 1 MiB，而 PUT /api/sync 的 body 里
+  // encryptedData 是整节全量密文 —— 默认值让单节永远传不过 1MB，Pro 的 100MB
+  // 与 Team 的 1GB 同步配额在技术上不可达。上界取 sync_sections.encrypted_data
+  // 的 MEDIUMTEXT 硬上限，再留出 JSON 包裹与 meta 数组的余量。
+  const app = Fastify({
+    logger: true,
+    trustProxy: config.trustProxy,
+    bodyLimit: MAX_SECTION_BYTES + 1024 * 1024,
+  });
 
   // 全局错误处理器必须早于路由注册：漏写 try/catch 的 handler 靠它兜住，
   // 否则 Fastify 默认处理器会把 err.message（含 mysql2 的原始 SQL）回显给客户端

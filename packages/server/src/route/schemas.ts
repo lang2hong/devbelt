@@ -73,15 +73,35 @@ export const sectionRequiredQuery = {
   properties: { section: sectionEnum },
 } as const;
 
+/**
+ * 单节密文的字节上界。
+ *
+ * 三个数字必须对齐，此前一个都没对上：
+ *  - `sync_sections.encrypted_data` 是 MEDIUMTEXT，硬上限 16 MiB
+ *  - Fastify 的 `bodyLimit` 默认 1 MiB，且 app.ts 从未覆盖
+ *  - `plans.sync_quota_bytes` 给 Pro 卖 100MB、Team 卖 1GB
+ *
+ * 结果是单节密文实际永远传不过 1MB，Pro/Team 的同步配额在技术上不可达；
+ * 而超限时 Fastify 抛 `FST_ERR_CTP_BODY_TOO_LARGE`（413），message 被
+ * errorHandler 替换成 'Bad request'，客户端只看到「push failed: HTTP 413」，
+ * 完全不指向真正原因。
+ *
+ * 现在以 MEDIUMTEXT 的 16 MiB 为准：`app.ts` 的 bodyLimit 按此值加余量，
+ * 这里的 maxLength 同步跟上，超限在入口以 400 拒绝而不是打到 MySQL 变 500。
+ * 要真正支持 100MB/1GB 需要改列类型 + 分片上传，那是产品决策，不在此处解决。
+ */
+export const MAX_SECTION_BYTES = 16 * 1024 * 1024;
+
 export const pushBody = {
   type: 'object',
   required: ['section', 'encryptedData', 'baseVersion'],
   properties: {
     section: sectionEnum,
-    encryptedData: { type: 'string' },
+    encryptedData: { type: 'string', maxLength: MAX_SECTION_BYTES },
     baseVersion: { type: 'integer', minimum: 0 },
     // 以下为可选：旧客户端不发这两个字段
-    itemCount: { type: 'integer', minimum: 0 },
+    // itemCount 上界对齐 sync_events.item_count 的 INT UNSIGNED，理由同 usageBody
+    itemCount: { type: 'integer', minimum: 0, maximum: 4294967295 },
     meta: { type: 'array' },
   },
 } as const;
