@@ -1239,7 +1239,8 @@
         "dbclient.sync.serverUrl": {
           "type": "string",
           "default": "http://localhost:3000",
-          "description": "DB Client sync server URL"
+          "scope": "machine",
+          "description": "DB Client sync server URL. Machine-scoped on purpose: a workspace-level override would let any cloned repository redirect login credentials, refresh tokens and encrypted sync payloads to an attacker-controlled host."
         },
         "dbclient.sync.auto": {
           "type": "string",
