@@ -183,3 +183,60 @@ describe('同步与用量路由也覆盖', () => {
     expect(res.statusCode).toBe(401);
   });
 });
+
+/**
+ * 会话自然过期。
+ *
+ * `getSession` 一直把 `expiresTime` 取回来，中间件却只判 `revokedTime` ——
+ * 一条「已过期但从未被撤销」的会话行仍然会为 access token 背书。
+ *
+ * 当前参数下（access 15m < refresh 30d）不可直接利用，但那是参数凑巧而非设计
+ * 保证：把 access TTL 调大、或把 refresh TTL 调小，这条路径立刻可用，且原来
+ * 没有任何测试覆盖它。
+ */
+describe('会话自然过期后 access token 失效', () => {
+  it('过期但未撤销的会话 → 401 SESSION_EXPIRED', async () => {
+    const u = await t.makeUser();
+    const session = t.repos.refreshTokenRepo.tokens.get(u.sid)!;
+    // 只改过期时间，revokedTime 保持 null
+    session.expiresTime = new Date(Date.now() - 1000);
+
+    const res = await t.app.inject({ method: 'GET', url: '/api/me', headers: t.auth(u.token) });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().code).toBe('SESSION_EXPIRED');
+  });
+
+  it('admin 路由同样拒绝已过期会话', async () => {
+    const u = await t.makeUser({ role: 'admin' });
+    t.repos.refreshTokenRepo.tokens.get(u.sid)!.expiresTime = new Date(Date.now() - 1000);
+
+    const res = await t.app.inject({
+      method: 'GET', url: '/admin/users?limit=10&offset=0', headers: t.auth(u.token),
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('同步路由同样拒绝', async () => {
+    const u = await t.makeUser();
+    t.repos.refreshTokenRepo.tokens.get(u.sid)!.expiresTime = new Date(Date.now() - 1000);
+
+    const res = await t.app.inject({ method: 'GET', url: '/api/sync', headers: t.auth(u.token) });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('未过期的会话不受影响（不误伤正常请求）', async () => {
+    const u = await t.makeUser();
+    const res = await t.app.inject({ method: 'GET', url: '/api/me', headers: t.auth(u.token) });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('撤销优先于过期报告（两者同时成立时报 SESSION_REVOKED）', async () => {
+    const u = await t.makeUser();
+    const s = t.repos.refreshTokenRepo.tokens.get(u.sid)!;
+    s.expiresTime = new Date(Date.now() - 1000);
+    s.revokedTime = new Date(Date.now() - 2000);
+
+    const res = await t.app.inject({ method: 'GET', url: '/api/me', headers: t.auth(u.token) });
+    expect(res.json().code).toBe('SESSION_REVOKED');
+  });
+});

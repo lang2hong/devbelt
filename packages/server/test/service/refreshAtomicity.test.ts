@@ -10,8 +10,6 @@ import {
 import { hashPassword } from '../../src/service/password.js';
 import { TokenReuseError } from '../../src/domain/errors.js';
 
-const JWT_SECRET = 'test-jwt-secret';
-
 /** 简易 JWT 端口：只需能签发/解析，签名正确性由别处覆盖 */
 function makeJwt() {
   return {
@@ -26,7 +24,7 @@ async function setup() {
   const rtRepo = new FakeRefreshTokenRepo();
   const deviceRepo = new FakeDeviceRepo();
   const tokenService = new TokenService(makeJwt(), '15m', '30d');
-  const auth = new AuthService(userRepo, subRepo, rtRepo, deviceRepo, tokenService, JWT_SECRET);
+  const auth = new AuthService(userRepo, subRepo, rtRepo, deviceRepo, tokenService);
   const user = await userRepo.create('u@example.com', hashPassword('pw12345678'), 'user', 'free');
   return { auth, userRepo, rtRepo, tokenService, user };
 }

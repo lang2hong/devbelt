@@ -123,8 +123,9 @@ export async function createApp() {
 
   // policy / service 层
   const planPolicy = new PlanPolicy((code) => planRepo.findByCode(code));
-  const tokenService = new TokenService(app.jwt as unknown as JwtPort, config.accessTokenExpiresIn, config.refreshTokenExpiresIn);
-  const authService = new AuthService(userRepo, subRepo, refreshTokenRepo, deviceRepo, tokenService, config.jwtSecret);
+  // 传毫秒而非字符串：解析与上限校验已在 config 完成，避免二次解析与静默回落
+  const tokenService = new TokenService(app.jwt as unknown as JwtPort, config.accessTokenExpiresIn, config.refreshTokenExpiresMs);
+  const authService = new AuthService(userRepo, subRepo, refreshTokenRepo, deviceRepo, tokenService);
   const subscriptionService = new SubscriptionService(userRepo, planRepo, subRepo, refreshTokenRepo, syncRepo, connectionMetaRepo);
   const syncService = new SyncService(syncRepo, userRepo, planPolicy, connectionMetaRepo, syncEventRepo);
   const adminService = new AdminService(userRepo, planRepo, subRepo, refreshTokenRepo, syncRepo, deviceRepo, connectionMetaRepo, syncEventRepo, usageEventRepo);

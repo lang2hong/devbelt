@@ -127,6 +127,64 @@ export function resolveJwtSecret(
   return secret;
 }
 
+/** access token 的硬上限：1 小时。 */
+const MAX_ACCESS_TTL_MS = 60 * 60 * 1000;
+/** refresh token 的硬上限：90 天。 */
+const MAX_REFRESH_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
+/**
+ * 解析并校验 token 有效期。
+ *
+ * 为什么要在启动时校验，而不是把字符串直接交给 fast-jwt：
+ *
+ *  1. **上限**。access token 是承载全部权限的 bearer 凭据，没有设备/IP 绑定，
+ *     泄漏即等于访问权。代码注释、限流阈值推导、会话吊销测试全部以「15 分钟」
+ *     为前提，而实际配置曾是 `7d` —— 672 倍的暴露窗口，且没有任何机制会提示。
+ *  2. **格式**。fast-jwt 内部用 @lukeed/ms，`'900'` 被解析成 **900 毫秒**
+ *     （按 jsonwebtoken 的「数字 = 秒」直觉配置的人会得到 0.9 秒就过期的 token），
+ *     `'abc'` 则让**每一次**登录/注册/刷新在签发时抛错 → 全部 500，认证完全不可用。
+ *     这类错误留到运行时才暴露，代价远高于启动失败。
+ *  3. 原 `tokenService.parseDuration` 对非法值**静默回落到 30 天**
+ *     （`REFRESH_TOKEN_EXPIRES_IN=1y` → 30d），也在这里一并收敛。
+ *
+ * 刻意不接受纯数字：语义歧义（秒还是毫秒）本身就是缺陷来源。
+ */
+export function parseTokenTtl(
+  raw: string,
+  varName: string,
+  maxMs: number,
+): { raw: string; ms: number } {
+  const m = /^(\d+)([smhd])$/.exec(raw);
+  if (!m) {
+    throw new Error(
+      `${varName} must match \\d+[smhd] (e.g. 15m, 1h, 30d), got ${JSON.stringify(raw)}. ` +
+        'Bare numbers are rejected because the unit is ambiguous.',
+    );
+  }
+  const mult: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+  const ms = Number(m[1]) * mult[m[2]];
+  if (ms <= 0) throw new Error(`${varName} must be greater than zero, got ${JSON.stringify(raw)}`);
+  if (ms > maxMs) {
+    throw new Error(
+      `${varName}=${raw} exceeds the ${Math.round(maxMs / 60_000)} minute limit. ` +
+        'Long-lived bearer tokens widen the window between leak and detection; ' +
+        'clients refresh silently on 401, so a short TTL does not force users to log in again.',
+    );
+  }
+  return { raw, ms };
+}
+
+const accessTtl = parseTokenTtl(
+  process.env.ACCESS_TOKEN_EXPIRES_IN || '15m',
+  'ACCESS_TOKEN_EXPIRES_IN',
+  MAX_ACCESS_TTL_MS,
+);
+const refreshTtl = parseTokenTtl(
+  process.env.REFRESH_TOKEN_EXPIRES_IN || '30d',
+  'REFRESH_TOKEN_EXPIRES_IN',
+  MAX_REFRESH_TTL_MS,
+);
+
 /**
  * 服务端配置：从环境变量读取，提供默认值。
  */
@@ -135,10 +193,12 @@ export const config = {
   port: Number(process.env.PORT || 3000),
   /** JWT 签名密钥（生产必须通过环境变量注入，且拒绝弱值/短值） */
   jwtSecret: resolveJwtSecret(process.env.JWT_SECRET, process.env.NODE_ENV),
-  /** Access token 过期时间（短期） */
-  accessTokenExpiresIn: process.env.ACCESS_TOKEN_EXPIRES_IN || '15m',
-  /** Refresh token 过期时间（长期，可撤销） */
-  refreshTokenExpiresIn: process.env.REFRESH_TOKEN_EXPIRES_IN || '30d',
+  /** Access token 过期时间（短期，上限 1h，启动时校验） */
+  accessTokenExpiresIn: accessTtl.raw,
+  /** Refresh token 过期时间（长期，可撤销，上限 90d） */
+  refreshTokenExpiresIn: refreshTtl.raw,
+  /** Refresh token 有效期（毫秒），供 TokenService 直接使用，避免二次解析 */
+  refreshTokenExpiresMs: refreshTtl.ms,
   /** MySQL 连接配置 */
   mysql: {
     host: process.env.MYSQL_HOST || '127.0.0.1',

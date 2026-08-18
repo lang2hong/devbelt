@@ -1,7 +1,7 @@
 import type { IUserRepo, ISubscriptionRepo, IRefreshTokenRepo, IDeviceRepo } from '../repository/interfaces.js';
 import type { TokenService } from './tokenService.js';
 import type { Subscription, User, SessionInfo, Device } from '../domain/entities.js';
-import { hashPassword, upgradePasswordIfNeeded, verifyPassword } from './password.js';
+import { hashPassword, verifyPassword } from './password.js';
 import {
   InvalidCredentialsError,
   TokenReuseError,
@@ -57,7 +57,6 @@ export class AuthService {
     private readonly refreshTokenRepo: IRefreshTokenRepo,
     private readonly deviceRepo: IDeviceRepo,
     private readonly tokenService: TokenService,
-    private readonly jwtSecret: string,
   ) {}
 
   /** 注册：建 user(free) + 试用订阅(14d) + 签双 token */
@@ -92,17 +91,8 @@ export class AuthService {
   async login(email: string, password: string, device?: DeviceInfo): Promise<AuthResponse> {
     if (!email || !password) throw new InvalidCredentialsError();
     const user = await this.userRepo.findByEmail(email);
-    if (!user || !verifyPassword(password, user.passwordHash, this.jwtSecret)) throw new InvalidCredentialsError();
+    if (!user || !verifyPassword(password, user.passwordHash)) throw new InvalidCredentialsError();
     if (user.status !== 'active') throw new InvalidCredentialsError();
-
-    // 旧 sha256 哈希登录成功后就地升级为 scrypt。
-    // 不升级的话这批用户永远停在弱哈希上，且其 legacySalt 取自 JWT_SECRET —— 
-    // 一旦轮换 JWT 密钥，他们的密码就再也验不过。升级失败不阻断登录。
-    if (upgradePasswordIfNeeded(user.passwordHash)) {
-      try {
-        await this.userRepo.updatePassword(user.id, hashPassword(password));
-      } catch { /* 升级是尽力而为，不影响本次登录 */ }
-    }
 
     // 设备判同：先登记设备固有信息，再顶掉该设备旧会话（同设备重登不叠加会话）
     if (device?.deviceId) {
@@ -233,7 +223,7 @@ export class AuthService {
   async changePassword(userId: number, oldPassword: string, newPassword: string): Promise<void> {
     const user = await this.userRepo.findById(userId);
     if (!user) throw new InvalidCredentialsError();
-    if (!verifyPassword(oldPassword, user.passwordHash, this.jwtSecret)) throw new InvalidCredentialsError();
+    if (!verifyPassword(oldPassword, user.passwordHash)) throw new InvalidCredentialsError();
     if (!newPassword || newPassword.length < 8) throw new ValidationError('password must be at least 8 chars');
     const hash = hashPassword(newPassword);
     await this.userRepo.updatePassword(userId, hash);

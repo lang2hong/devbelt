@@ -59,6 +59,10 @@ export function requireRole(roles: Role[]) {
         if (session.revokedTime) {
           return reply.code(401).send({ message: 'session revoked', code: 'SESSION_REVOKED' });
         }
+        // 自然过期与撤销同级处理，理由见 requireAuth 中的同名判定
+        if (session.expiresTime && session.expiresTime <= new Date()) {
+          return reply.code(401).send({ message: 'session expired', code: 'SESSION_EXPIRED' });
+        }
         if (session.userId !== (req.user.sub as number)) {
           return reply.code(401).send({ message: 'unauthorized' });
         }

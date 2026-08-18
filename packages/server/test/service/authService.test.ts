@@ -16,8 +16,6 @@ import {
   makePlan,
 } from '../helpers/fakeRepos.js';
 
-const JWT_SECRET = 'test-jwt-secret';
-
 /** 可预测的 JWT 端口：payload 直接序列化，便于断言 sub/role/plan */
 class FakeJwt implements JwtPort {
   signCount = 0;
@@ -38,7 +36,7 @@ function setup(planOver: Parameters<typeof makePlan>[1] = {}) {
   const deviceRepo = new FakeDeviceRepo();
   const jwt = new FakeJwt();
   const tokenService = new TokenService(jwt, '15m', '30d');
-  const auth = new AuthService(userRepo, subRepo, rtRepo, deviceRepo, tokenService, JWT_SECRET);
+  const auth = new AuthService(userRepo, subRepo, rtRepo, deviceRepo, tokenService);
   return { auth, userRepo, planRepo, subRepo, rtRepo, deviceRepo, jwt, tokenService };
 }
 
@@ -138,42 +136,33 @@ describe('AuthService.login', () => {
     );
   });
 
-it('accepts a legacy sha256 password hash (migration path)', async () => {
+/**
+   * legacy sha256 分支已删除。
+   *
+   * 旧格式是 `sha256(JWT_SECRET + password)` —— 把签名密钥当密码盐，导致
+   * 「轮换 JWT_SECRET」这个安全操作会让尚未登录过的用户永久无法登录。
+   * 生产库确认 legacy 用户为 0，因此删除分支而不是引入配置项维持耦合。
+   *
+   * 原来这里有三条用例断言 legacy 哈希可登录并被就地升级 —— 现在断言相反的
+   * 行为：弱哈希一律拒绝，这类账号的出路是密码重置。
+   */
+  it('拒绝 legacy sha256 哈希（不再接受弱哈希）', async () => {
     const { auth, userRepo } = setup();
     const { createHash } = await import('crypto');
-    const legacy = createHash('sha256').update(`${JWT_SECRET}legacy-pass`).digest('hex');
+    const legacy = createHash('sha256').update('any-saltlegacy-pass').digest('hex');
     await userRepo.create('legacy@example.com', legacy, 'user', 'free');
-    await expect(auth.login('legacy@example.com', 'legacy-pass')).resolves.toBeTruthy();
+
+    await expect(auth.login('legacy@example.com', 'legacy-pass')).rejects.toBeTruthy();
   });
 
-  /**
-   * 回归：旧 sha256 哈希登录成功后应就地升级为 scrypt。
-   * `upgradePasswordIfNeeded` 此前无任何调用点，这批用户永远停在弱哈希，
-   * 且其 legacySalt 取自 JWT_SECRET —— 轮换密钥后密码再也验不过。
-   */
-  it('登录后把 legacy sha256 升级为 scrypt', async () => {
+  it('legacy 哈希不会被静默重写（拒绝即拒绝，不做升级尝试）', async () => {
     const { auth, userRepo } = setup();
     const { createHash } = await import('crypto');
-    const legacy = createHash('sha256').update(`${JWT_SECRET}legacy-pass`).digest('hex');
+    const legacy = createHash('sha256').update('any-saltlegacy-pass').digest('hex');
     const created = await userRepo.create('up@example.com', legacy, 'user', 'free');
 
+    await expect(auth.login('up@example.com', 'legacy-pass')).rejects.toBeTruthy();
     expect((await userRepo.findById(created.id))!.passwordHash).toBe(legacy);
-    await auth.login('up@example.com', 'legacy-pass');
-
-    const after = (await userRepo.findById(created.id))!.passwordHash;
-    expect(after.startsWith('scrypt$')).toBe(true);
-    expect(after).not.toBe(legacy);
-  });
-
-  it('升级后仍能用同一密码登录（新旧哈希都验得过）', async () => {
-    const { auth, userRepo } = setup();
-    const { createHash } = await import('crypto');
-    const legacy = createHash('sha256').update(`${JWT_SECRET}pw12345678`).digest('hex');
-    await userRepo.create('twice@example.com', legacy, 'user', 'free');
-
-    await expect(auth.login('twice@example.com', 'pw12345678')).resolves.toBeTruthy();
-    // 第二次走的已是 scrypt 路径
-    await expect(auth.login('twice@example.com', 'pw12345678')).resolves.toBeTruthy();
   });
 
   it('已是 scrypt 的哈希不会被重写', async () => {

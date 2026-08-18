@@ -161,7 +161,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
 
   const planPolicy = new PlanPolicy((code) => planRepo.findByCode(code));
   const tokenService = new TokenService(app.jwt as unknown as JwtPort, '15m', '30d');
-  const authService = new AuthService(userRepo, subRepo, refreshTokenRepo, deviceRepo, tokenService, TEST_SECRET);
+  const authService = new AuthService(userRepo, subRepo, refreshTokenRepo, deviceRepo, tokenService);
   const subscriptionService = new SubscriptionService(
     userRepo, planRepo, subRepo, refreshTokenRepo, syncRepo, connectionMetaRepo,
   );

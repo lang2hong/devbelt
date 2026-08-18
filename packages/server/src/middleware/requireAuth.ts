@@ -90,6 +90,15 @@ export async function authScope(
       if (session.revokedTime) {
         return reply.code(401).send({ message: 'session revoked', code: 'SESSION_REVOKED' });
       }
+      // 会话自然过期。
+      //
+      // `expiresTime` 一直被取回来却从没被判断过 —— 于是一条「已过期但从未被
+      // 撤销」的会话行仍然会为 access token 背书。当前参数下（access 15m <
+      // refresh 30d）不可直接利用，但那纯属参数凑巧：任何把 access TTL 调大或
+      // 把 refresh TTL 调小的改动都会让它立即成立，而且没有任何测试会发现。
+      if (session.expiresTime && session.expiresTime <= new Date()) {
+        return reply.code(401).send({ message: 'session expired', code: 'SESSION_EXPIRED' });
+      }
       // sid 必须属于 token 里的那个用户，否则拿别人的 sid 拼一个 token 就能续命
       if (session.userId !== (req.user.sub as number)) {
         return reply.code(401).send({ message: 'unauthorized' });

@@ -9,15 +9,6 @@ export interface JwtPort {
   verify<T = any>(token: string): T;
 }
 
-/** 解析时长字符串（如 '30d'、'15m'）为毫秒 */
-function parseDuration(s: string): number {
-  const m = /^(\d+)([smhd])$/.exec(s);
-  if (!m) return 30 * 86400 * 1000;
-  const n = parseInt(m[1], 10);
-  const mult: Record<string, number> = { s: 1000, m: 60000, h: 3600000, d: 86400000 };
-  return n * mult[m[2]];
-}
-
 /**
  * Token 服务（Factory 模式）：
  * - access token：JWT 短期（15m），payload 含 sub/role/plan
@@ -28,12 +19,27 @@ function parseDuration(s: string): number {
 export class TokenService {
   private readonly refreshExpiresMs: number;
 
+  /**
+   * @param refreshExpiresIn refresh token 有效期。可传毫秒数（推荐，由
+   *        config.parseTokenTtl 解析并校验过）或 `\d+[smhd]` 字符串。
+   *
+   *        原实现内部有一个 parseDuration，对非法值**静默回落到 30 天**
+   *        （`1y` → 30d，配置写错完全无感）。解析与校验已上移到 config.ts，
+   *        非法值在启动时就失败；这里保留字符串分支仅为兼容直接构造的测试。
+   */
   constructor(
     private readonly jwt: JwtPort,
     private readonly accessExpiresIn: string,
-    refreshExpiresIn: string,
+    refreshExpiresIn: string | number,
   ) {
-    this.refreshExpiresMs = parseDuration(refreshExpiresIn);
+    if (typeof refreshExpiresIn === 'number') {
+      this.refreshExpiresMs = refreshExpiresIn;
+    } else {
+      const m = /^(\d+)([smhd])$/.exec(refreshExpiresIn);
+      if (!m) throw new Error(`invalid refresh token ttl: ${JSON.stringify(refreshExpiresIn)}`);
+      const mult: Record<string, number> = { s: 1000, m: 60000, h: 3600000, d: 86400000 };
+      this.refreshExpiresMs = Number(m[1]) * mult[m[2]];
+    }
   }
 
   /** 签发 access token（JWT）；sid 为当前 refresh token 主键，用于标记"当前设备" */
