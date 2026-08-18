@@ -43,8 +43,16 @@ export class MysqlDialect implements SqlDialect {
     ],
   };
 
+  /**
+   * 包裹标识符。内部反引号必须翻倍（MySQL 的标识符转义规则）。
+   *
+   * 不翻倍时 `` a`,`b `` 会产出 `` `a`,`b` `` —— 反引号提前闭合，逗号之后的部分
+   * 脱离标识符上下文，成为注入点。调用方虽然大多会先过 `validateIdent`，但
+   * 这里不依赖那一点：转义是包裹函数自己的责任，漏校验只应导致报错，
+   * 不应导致越权执行。
+   */
   wrap(identifier: string): string {
-    return `\`${identifier}\``;
+    return `\`${identifier.replace(/`/g, '``')}\``;
   }
 
   getPagedSql(sql: string, offset: number, limit: number): string {

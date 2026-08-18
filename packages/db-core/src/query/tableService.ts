@@ -653,9 +653,21 @@ export class TableService {
     return this.queryService.dialect.wrap(identifier);
   }
 
-  /** 包裹限定名：`db`.`table` 或 `"table"` */
+  /**
+   * 包裹限定名：`db`.`table` 或 `"table"`。
+   *
+   * 这里强制 `validateIdent` 而不是交给调用方：`wrapQualified` 是 DROP / TRUNCATE /
+   * RENAME / DUPLICATE / CREATE TABLE 等 DDL 的公共出口，本文件里有 60 多处
+   * `validateIdent` 调用点，但恰好这条主干上的几个入口漏了 —— 漏一处就是一条
+   * 以调用者权限执行任意 DDL 的路径。
+   *
+   * 威胁模型见 test/dialect/identEscape.test.ts 顶部：表名来自数据库自身的元数据
+   * （树节点标签），不是用户输入，所以"用户不会输入引号"这个假设不成立。
+   */
   private wrapQualified(name: string, database?: string): string {
+    validateIdent(name);
     if (!database) return this.wrap(name);
+    validateIdent(database);
     return `${this.wrap(database)}.${this.wrap(name)}`;
   }
 
@@ -685,7 +697,11 @@ export class TableService {
           GROUP BY c.relname`;
       }
       default:
-        return `SELECT sql FROM sqlite_master WHERE name = '${table}'`;
+        // 表名进的是字符串**字面量**而非标识符，`wrap` 的翻倍转义在这里不适用；
+        // 而 SQLite 驱动经 CLI stdin 执行、天然支持多语句，一个 `x'; DROP ...; --`
+        // 会被完整执行。校验之外再用方言的 escapeValue 生成字面量，两道都上。
+        validateIdent(table);
+        return `SELECT sql FROM sqlite_master WHERE name = ${this.esc(table)}`;
     }
   }
 }

@@ -45,8 +45,12 @@ export class PostgreSqlDialect implements SqlDialect {
     ],
   };
 
+  /**
+   * 包裹标识符。内部双引号必须翻倍（SQL 标准的标识符转义规则）。
+   * 不翻倍时 `a","b` 会闭合标识符并让后半段脱离上下文，见 mysqlDialect.wrap 注释。
+   */
   wrap(identifier: string): string {
-    return `"${identifier}"`;
+    return `"${identifier.replace(/"/g, '""')}"`;
   }
 
   getPagedSql(sql: string, offset: number, limit: number): string {

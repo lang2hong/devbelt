@@ -45,8 +45,12 @@ export class SqliteDialect implements SqlDialect {
     operations: ['renameTable', 'duplicateTable', 'getTableDefinition', 'alterTable', 'manageIndexes', 'dumpTable'],
   };
 
+  /**
+   * 包裹标识符。内部双引号必须翻倍（SQL 标准的标识符转义规则）。
+   * SQLite 驱动经 CLI stdin 执行、支持多语句，逃出标识符上下文的代价比另两家更高。
+   */
   wrap(identifier: string): string {
-    return `"${identifier}"`;
+    return `"${identifier.replace(/"/g, '""')}"`;
   }
 
   getPagedSql(sql: string, offset: number, limit: number): string {
