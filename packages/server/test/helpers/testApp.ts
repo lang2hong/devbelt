@@ -128,7 +128,14 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   await app.register(jwt, { secret: TEST_SECRET, sign: { expiresIn: '15m' } });
 
   const userRepo = new FakeUserRepo();
-  const planRepo = new FakePlanRepo([makePlan('free'), makePlan('pro'), makePlan('team')]);
+  // 配额取真实种子值（schema.ts 的 PLAN_SEED）而非全 0：
+  // makePlan 默认把配额都设为 0，而 0 在 PlanPolicy 里表示「无限」——
+  // 用默认值搭出来的 app 会让所有配额校验静默通过，配额相关缺陷在测试里不可见。
+  const planRepo = new FakePlanRepo([
+    makePlan('free', { maxDevices: 1, maxConnections: 5, syncQuotaBytes: 1024 * 1024, syncVersionRetention: 3 }),
+    makePlan('pro', { maxDevices: 5, maxConnections: 50, syncQuotaBytes: 100 * 1024 * 1024, syncVersionRetention: 30 }),
+    makePlan('team', { maxDevices: 20, maxConnections: 500, syncQuotaBytes: 1024 * 1024 * 1024, syncVersionRetention: 90 }),
+  ]);
   const subRepo = new FakeSubscriptionRepo();
   const refreshTokenRepo = new FakeRefreshTokenRepo();
   const deviceRepo = new FakeDeviceRepo();
@@ -161,7 +168,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
 
   const planPolicy = new PlanPolicy((code) => planRepo.findByCode(code));
   const tokenService = new TokenService(app.jwt as unknown as JwtPort, '15m', '30d');
-  const authService = new AuthService(userRepo, subRepo, refreshTokenRepo, deviceRepo, tokenService);
+  const authService = new AuthService(userRepo, subRepo, refreshTokenRepo, deviceRepo, tokenService, planPolicy);
   const subscriptionService = new SubscriptionService(
     userRepo, planRepo, subRepo, refreshTokenRepo, syncRepo, connectionMetaRepo,
   );

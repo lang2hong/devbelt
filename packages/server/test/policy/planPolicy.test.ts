@@ -41,12 +41,34 @@ describe('PlanPolicy.check', () => {
     await expect(policy.check('free', 'devices', 1)).resolves.toBeUndefined();
   });
 
-  it('rejects at the limit (>= is the boundary, not >)', async () => {
-    await expect(policy.check('free', 'devices', 2)).rejects.toBeInstanceOf(QuotaExceededError);
+  /**
+   * 边界语义修正。
+   *
+   * 原来断言「current == limit 就拒绝」。那在「current = 新增之前的已用量」
+   * 语义下是对的，但两个调用方（syncService 的连接数与字节数）传的都是**写入后
+   * 的总量** —— 于是实际可用上限变成 limit-1：free 宣传 5 个连接，第 5 个就被
+   * 拒绝，错误信息还写着 `5/5`。
+   *
+   * 现在两种语义有各自的方法：checkTotal（写入后总量，<= limit 通过）与
+   * checkIncrement（已用量 + delta）。check 保留为 checkTotal 的别名。
+   */
+  it('写入后总量恰好等于上限时通过', async () => {
+    await expect(policy.checkTotal('free', 'devices', 2)).resolves.toBeUndefined();
+  });
+
+  it('写入后总量超出上限才拒绝', async () => {
+    await expect(policy.checkTotal('free', 'devices', 3)).rejects.toBeInstanceOf(QuotaExceededError);
+  });
+
+  it('checkIncrement 按「已用量 + delta」判定', async () => {
+    // 已用 1，再加 1 = 2 <= limit 2 → 通过
+    await expect(policy.checkIncrement('free', 'devices', 1)).resolves.toBeUndefined();
+    // 已用 2，再加 1 = 3 > 2 → 拒绝
+    await expect(policy.checkIncrement('free', 'devices', 2)).rejects.toBeInstanceOf(QuotaExceededError);
   });
 
   it('carries quota/limit/current on the error', async () => {
-    const err = await policy.check('free', 'devices', 5).catch((e: unknown) => e);
+    const err = await policy.checkTotal('free', 'devices', 5).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(QuotaExceededError);
     const quotaErr = err as QuotaExceededError;
     expect(quotaErr.code).toBe('QUOTA_EXCEEDED');

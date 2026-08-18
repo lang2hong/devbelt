@@ -2,7 +2,7 @@ import type { ISyncRepo, IUserRepo, IConnectionMetaRepo, ISyncEventRepo, Connect
 import type { PlanPolicy } from '../policy/planPolicy.js';
 import type { SectionType } from '../domain/enums.js';
 import type { SyncSection, SyncVersionSummary } from '../domain/entities.js';
-import { EntityNotFoundError, ConflictError, VersionNotFoundError } from '../domain/errors.js';
+import { EntityNotFoundError, ConflictError, VersionNotFoundError, ValidationError } from '../domain/errors.js';
 
 export interface PushResult {
   version: number;
@@ -55,10 +55,22 @@ export class SyncService {
 
     const newSectionBytes = Buffer.byteLength(encryptedData, 'utf8');
 
-    // 连接数配额：仅 connections section，按明文元数据计（先于写库）
-    if (section === 'connections' && input.meta) {
-      const activeCount = input.meta.filter((m) => !m.deleted).length;
-      await this.planPolicy.check(user.planCode, 'connections', activeCount);
+    // 连接数配额。
+    //
+    // 三条曾经的绕过路径，都必须堵住：
+    //  1. 原判据是 `if (section === 'connections' && input.meta)` —— 不发 meta
+    //     就完全跳过校验，而 meta 是可选字段，密文服务端又不解析，无从察觉。
+    //     所以现在 connections 节**强制要求** meta。
+    //  2. 原来校验的是入参条数，与库内存量无关。replaceAll 是全量替换语义，
+    //     所以写入后的活跃数就等于入参里的非墓碑条数 —— 以此为投影总量。
+    //  3. replaceAll 此前只 upsert 不删除，导致库内活跃行单调累加；已在
+    //     ConnectionMetaRepo 修正为真正的全量替换。
+    if (section === 'connections') {
+      if (!input.meta) {
+        throw new ValidationError('connections section requires meta for quota accounting');
+      }
+      const projectedActive = input.meta.filter((m) => !m.deleted).length;
+      await this.planPolicy.checkTotal(user.planCode, 'connections', projectedActive);
     }
 
     await this.checkQuota(userId, user.planCode, section, newSectionBytes);
@@ -102,7 +114,7 @@ export class SyncService {
     const existing = await this.syncRepo.getSection(userId, section);
     const existingBytes = existing ? Buffer.byteLength(existing.encryptedData, 'utf8') : 0;
     const projected = Math.max(0, currentTotal - existingBytes + incomingBytes);
-    await this.planPolicy.check(planCode, 'sync_bytes', projected);
+    await this.planPolicy.checkTotal(planCode, 'sync_bytes', projected);
   }
 
   /** 拉取：指定 section 单节，或全部 section（每节写 pull 事件留痕） */

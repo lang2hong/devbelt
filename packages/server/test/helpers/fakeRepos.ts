@@ -474,9 +474,16 @@ export class FakeConnectionMetaRepo implements IConnectionMetaRepo {
   readonly metas = new Map<string, ConnectionMeta>();
   private seq = 0;
 
+  /**
+   * 复刻真实现的**全量替换**语义：upsert 入参 + 把未上报的现存行置墓碑。
+   *
+   * 原来这里和真实现一样只做 upsert（fake 忠实复刻了缺陷），所以
+   * 「replaceAll 不删除」这个绕过路径在测试里结构性不可见。返回值同样改为
+   * 取库内真值而非入参推算。
+   */
   async replaceAll(userId: number, metas: ConnectionMetaInput[]): Promise<number> {
-    const active = metas.filter((m) => !m.deleted).length;
     const now = new Date();
+    const seen = new Set(metas.map((m) => m.connUuid));
     for (const m of metas) {
       const k = `${userId}:${m.connUuid}`;
       const existing = this.metas.get(k);
@@ -485,7 +492,13 @@ export class FakeConnectionMetaRepo implements IConnectionMetaRepo {
         createTime: existing?.createTime ?? now, updateTime: now,
       });
     }
-    return active;
+    // 本次未上报的行 → 墓碑
+    for (const [k, m] of this.metas) {
+      if (m.userId === userId && !m.deleted && !seen.has(m.connUuid)) {
+        this.metas.set(k, { ...m, deleted: true, updateTime: now });
+      }
+    }
+    return this.countActive(userId);
   }
 
   async countActive(userId: number): Promise<number> {

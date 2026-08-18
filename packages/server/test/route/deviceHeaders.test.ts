@@ -224,9 +224,12 @@ describe('bodyLimit 的作用域', () => {
   afterEach(async () => { await t.close(); });
 
   it('同步端点接受 2 MiB 密文（超出全局 1 MiB，靠路由级放宽）', async () => {
-    const token = (await t.makeUser()).token;
+    const u = await t.makeUser();
+    // free 的 syncQuotaBytes 是 1MiB，会先撞配额（403）而测不到 bodyLimit；
+    // 用 team（1GiB）把配额这一层排除，专门验证请求体上限
+    await t.repos.userRepo.updatePlan(u.id, 'team');
     const res = await t.app.inject({
-      method: 'PUT', url: '/api/sync', headers: t.auth(token),
+      method: 'PUT', url: '/api/sync', headers: t.auth(u.token),
       payload: { section: 'groups', encryptedData: 'a'.repeat(2 * 1024 * 1024), baseVersion: 0 },
     });
     expect(res.statusCode).toBe(200);
@@ -251,9 +254,10 @@ describe('bodyLimit 的作用域', () => {
   });
 
   it('超过单节上限的密文以 400 拒绝（schema 层，不打到数据库）', async () => {
-    const token = (await t.makeUser()).token;
+    const u = await t.makeUser();
+    await t.repos.userRepo.updatePlan(u.id, 'team');
     const res = await t.app.inject({
-      method: 'PUT', url: '/api/sync', headers: t.auth(token),
+      method: 'PUT', url: '/api/sync', headers: t.auth(u.token),
       payload: {
         section: 'groups',
         encryptedData: 'a'.repeat(MAX_SECTION_BYTES + 1),

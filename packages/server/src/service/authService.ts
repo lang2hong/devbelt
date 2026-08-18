@@ -2,7 +2,9 @@ import type { IUserRepo, ISubscriptionRepo, IRefreshTokenRepo, IDeviceRepo } fro
 import type { TokenService } from './tokenService.js';
 import type { Subscription, User, SessionInfo, Device } from '../domain/entities.js';
 import { hashPassword, verifyPassword } from './password.js';
+import type { PlanPolicy } from '../policy/planPolicy.js';
 import {
+  DeviceLimitError,
   InvalidCredentialsError,
   TokenReuseError,
   UserDisabledError,
@@ -57,6 +59,11 @@ export class AuthService {
     private readonly refreshTokenRepo: IRefreshTokenRepo,
     private readonly deviceRepo: IDeviceRepo,
     private readonly tokenService: TokenService,
+    /**
+     * 套餐策略。可选仅为兼容既有直接构造 AuthService 的调用方；
+     * 不注入时设备数配额不生效（生产路径由 app.ts 注入）。
+     */
+    private readonly planPolicy?: PlanPolicy,
   ) {}
 
   /** 注册：建 user(free) + 试用订阅(14d) + 签双 token */
@@ -101,6 +108,23 @@ export class AuthService {
     }
 
     const now = new Date();
+
+    // 设备数配额。
+    //
+    // 这段此前**完全不存在**：`planPolicy.limit('devices')` 有实现、
+    // `DeviceLimitError` 有定义（还映射了 403）、方法注释也写着「设备数检查」，
+    // 但 src 下零引用 —— free 用户（maxDevices=1）可以在任意多台机器登录，
+    // 一个账号供整个团队共用，付费套餐的核心分层维度失效。
+    //
+    // 顺序很关键：必须在 revokeByDevice **之后**计数，否则同设备重登会被自己
+    // 刚要被顶掉的旧会话挡住。不带 deviceId 的旧客户端不计入（无法判同）。
+    if (device?.deviceId && this.planPolicy) {
+      const limit = await this.planPolicy.limit(user.planCode, 'devices');
+      if (limit > 0) {
+        const active = await this.refreshTokenRepo.countActiveForUser(user.id, now);
+        if (active >= limit) throw new DeviceLimitError(limit, active + 1);
+      }
+    }
 
     const { token, hash: rtHash, expiresAt } = this.tokenService.generateRefreshToken();
     const rt = await this.refreshTokenRepo.create(tokenForCreate(user.id, rtHash, device, expiresAt));

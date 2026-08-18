@@ -22,10 +22,41 @@ export class PlanPolicy {
     }
   }
 
-  /** 校验用量是否超限；超限抛 QuotaExceededError */
-  async check(code: Plan['code'], quota: QuotaType, current: number): Promise<void> {
+  /**
+   * 校验「再增加 delta 个」是否越界。
+   *
+   * `current` 语义是**新增之前的已用量**，所以判据是 `current + delta > limit`。
+   */
+  async checkIncrement(
+    code: Plan['code'],
+    quota: QuotaType,
+    current: number,
+    delta = 1,
+  ): Promise<void> {
     const limit = await this.limit(code, quota);
-    if (limit > 0 && current >= limit) throw new QuotaExceededError(quota, limit, current);
+    const projected = current + delta;
+    if (limit > 0 && projected > limit) throw new QuotaExceededError(quota, limit, projected);
+  }
+
+  /**
+   * 校验**写入后的总量**是否越界。
+   *
+   * 两个语义必须分开，否则调用方得靠猜。原来只有一个 `check(current)`，判据是
+   * `current >= limit`（「已用量」语义下正确），但两个调用方传的都是写入后的
+   * 总量 —— 于是实际可用上限变成 `limit - 1`：free 宣传 5 个连接，第 5 个就被
+   * 拒绝，而错误信息还写着 `5/5`，用户和客服都判断不出是超限还是 bug。
+   */
+  async checkTotal(code: Plan['code'], quota: QuotaType, projected: number): Promise<void> {
+    const limit = await this.limit(code, quota);
+    if (limit > 0 && projected > limit) throw new QuotaExceededError(quota, limit, projected);
+  }
+
+  /**
+   * @deprecated 语义含糊，用 checkTotal（写入后总量）或 checkIncrement（增量）。
+   * 保留仅为兼容既有调用方。
+   */
+  async check(code: Plan['code'], quota: QuotaType, current: number): Promise<void> {
+    return this.checkTotal(code, quota, current);
   }
 
   /** 功能位校验（features 位掩码） */
