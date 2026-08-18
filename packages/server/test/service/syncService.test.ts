@@ -189,11 +189,11 @@ describe('SyncService.pull', () => {
     const { service, user } = await setup();
     await service.push(user.id, 'groups', 'c1', 0);
     await service.push(user.id, 'queries', 'q1', 0);
-    await service.push(user.id, 'snippets', 'g1', 0);
+    await service.push(user.id, 'folders', 'g1', 0);
 
     const res = await service.pull(user.id);
 
-    expect(res.sections.map((s) => s.section).sort()).toEqual(['groups', 'queries', 'snippets']);
+    expect(res.sections.map((s) => s.section).sort()).toEqual(['folders', 'groups', 'queries']);
   });
 
   it('returns an empty list for a missing section instead of throwing', async () => {
