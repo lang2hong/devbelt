@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { SchemaDiffService, BackupService, DataTransferService, DatabaseType, validateIdent } from '@db-client/core';
 import { DbTreeNode } from '../tree/dbTreeNode';
 import { wrapIdentForConn, splitSqlStatements } from '../utils/sql';
-import { confirmSqlExecution } from '../utils/sqlSafety';
+import { confirmSqlExecution, ensureWritable } from '../utils/sqlSafety';
 import { parseCsv } from '../data/transfer/csv';
 import { parseJson } from '../data/transfer/json';
 import { parseXlsx } from '../data/transfer/xlsx';
@@ -27,6 +27,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.createDatabase', async (node: DbTreeNode) => {
     if (!node?.conn) return;
+    if (!ensureWritable(node.conn)) return;
     const name = await vscode.window.showInputBox({ prompt: l10n('db.createPrompt') });
     if (!name) return;
     connCtx.setLast(node.conn);
@@ -39,6 +40,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.dropDatabase', async (node: DbTreeNode) => {
     if (!node?.conn) return;
+    if (!ensureWritable(node.conn)) return;
     if (!(await confirm('db.dropConfirm', 'db.drop', node.label))) return;
     const session = await manager.connect(node.conn);
     if (!requireCapability(session, 'dropDatabase')) return;
@@ -74,6 +76,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
   sub('dbclient.restoreDatabase', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     const conn = node.conn;
+    if (!ensureWritable(conn)) return;
     const uri = await vscode.window.showOpenDialog({
       filters: { 'SQL Files': ['sql'] },
       canSelectMany: false,
@@ -177,6 +180,9 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
       { placeHolder: `Sync "${node.database}" to which connection?` },
     );
     if (!target) return;
+    // 写的是**目标**连接，不是 node.conn —— 只读标记必须查目标，
+    // 否则「只读」的连接可以作为同步目标被整库覆盖
+    if (!ensureWritable(target.value)) return;
     const targetSession = await manager.connect(target.value);
     const targetDbs = await targetSession.metadata.getDatabases();
     const targetDb = await vscode.window.showQuickPick(

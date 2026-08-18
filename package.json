@@ -5,7 +5,7 @@
   "description": "All-in-one Database Client for VS Code (monorepo)",
   "license": "MIT",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
     "build": "pnpm -r run build",

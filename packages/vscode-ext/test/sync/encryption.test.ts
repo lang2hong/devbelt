@@ -118,3 +118,89 @@ describe('Encryption（异步派生）', () => {
     expect(e1.iv).not.toBe(e2.iv);
   });
 });
+/**
+ * iterations 的边界。
+ *
+ * 这个字段是从密文信封里读出来的，而信封来自服务端 —— 不完全受本地控制。
+ * PBKDF2 的耗时与它线性相关（600k 轮约 0.5s），所以两个方向都得管：
+ *
+ *  - 太小 → 派生被弱化，等于降低了主密码的实际强度
+ *  - 太大 → 解密时把 libuv 线程池占死，扩展 UI 无响应且用户看不出原因
+ *
+ * 上界选择「抛错」而不是「截断」：截断会让合法的高强度密文解不开却报成
+ * 「主密码错误」，那是更难排查的问题。
+ */
+describe('Encryption iterations 边界', () => {
+  /** 造一个指定 iterations 的信封（内容用同样的 iterations 加密，保证本该解得开） */
+  function envelopeWith(iterations: number, declared = iterations): string {
+    const salt = 'a'.repeat(32);
+    const key = Encryption.deriveKey('pw', salt, iterations);
+    const iv = Buffer.alloc(12, 7);
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    const enc = Buffer.concat([cipher.update('{"ok":true}', 'utf8'), cipher.final()]);
+    return JSON.stringify({
+      salt,
+      iterations: declared,
+      iv: iv.toString('base64'),
+      tag: cipher.getAuthTag().toString('base64'),
+      data: enc.toString('base64'),
+    });
+  }
+
+  it('超过上界直接抛错，不去真的跑派生', () => {
+    const bomb = envelopeWith(100_000, 5_000_000_000);
+    expect(() => Encryption.decrypt(bomb, 'pw')).toThrow(/exceeds/i);
+  });
+
+  it('异步版同样拒绝（主进程路径走的是这个）', async () => {
+    const bomb = envelopeWith(100_000, 5_000_000_000);
+    await expect(Encryption.decryptAsync(bomb, 'pw')).rejects.toThrow(/exceeds/i);
+  });
+
+  /**
+   * JSON 里写不出 Infinity 字面量（`JSON.stringify(Infinity)` 得到 `null`），
+   * 但 `1e400` 这种溢出的数字字面量是合法 JSON，`JSON.parse` 会把它变成 Infinity。
+   * 所以非有限数确实是可达的输入，必须挡。
+   */
+  it('拒绝溢出成 Infinity 的数字字面量（1e400 是合法 JSON）', () => {
+    const base = JSON.parse(envelopeWith(100_000));
+    for (const literal of ['1e400', '-1e400']) {
+      const raw = `{"salt":"${base.salt}","iterations":${literal},` +
+        `"iv":"${base.iv}","tag":"${base.tag}","data":"${base.data}"}`;
+      expect(Number.isFinite(JSON.parse(raw).iterations), '前提：确实解析成非有限数').toBe(false);
+      expect(() => Encryption.decrypt(raw, 'pw'), literal).toThrow(/exceeds/i);
+    }
+  });
+
+  it('略高于上界被拒（判定用的是 > 上界）', () => {
+    const s = envelopeWith(100_000, 2_000_001);
+    expect(() => Encryption.decrypt(s, 'pw')).toThrow(/exceeds/i);
+  });
+
+  it('恰好等于上界不被上界判定拦下（边界含等号）', () => {
+    // 这条会真的跑 200 万轮派生（约 1–2 秒），因为上界检查通过之后就进派生了。
+    // 密钥不对所以最终仍会抛，但错误必须是 GCM 认证失败，不能是 exceeds。
+    const s = envelopeWith(100_000, 2_000_000);
+    let err: unknown;
+    try {
+      Encryption.decrypt(s, 'pw');
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeDefined();
+    expect(String((err as Error).message)).not.toMatch(/exceeds/i);
+  });
+
+  it('低于下界的 iterations 被抬到 LEGACY（不接受弱化派生）', () => {
+    // 声明 1 轮，但内容其实是用 100_000 轮加密的：
+    // 解析时抬到 LEGACY_ITERATIONS=100_000，于是能解开。
+    const s = envelopeWith(100_000, 1);
+    expect(Encryption.decrypt(s, 'pw')).toEqual({ ok: true });
+  });
+
+  it('正常的 600k 轮密文不受影响', () => {
+    const e = Encryption.encrypt({ ok: true }, 'pw');
+    expect(JSON.parse(e).iterations).toBe(600_000);
+    expect(Encryption.decrypt(e, 'pw')).toEqual({ ok: true });
+  });
+});

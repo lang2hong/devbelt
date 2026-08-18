@@ -31,6 +31,7 @@
 | [db-core](packages/db-core/README.md) | 纯连接/查询/元数据层（无 vscode 依赖） |
 | [vscode-ext](packages/vscode-ext/README.md) | VS Code 扩展（**市场发布版**） |
 | [server](packages/server/README.md) | 云同步后端（Fastify + MySQL + JWT） |
+| admin-ui | 服务端管理后台（Vue 3 + Vite，构建产物由 server 托管在 `/admin`） |
 
 ## Monorepo 结构
 
@@ -38,8 +39,13 @@
 packages/
 ├── db-core/     # 纯层：连接/查询/元数据服务（无 vscode 依赖，可独立测试）
 ├── vscode-ext/  # VS Code 扩展：树、命令、webview 查询/设计/ER、补全、i18n、同步客户端
-└── server/      # 云同步后端：Fastify + MySQL + JWT
+├── server/      # 云同步后端：Fastify + MySQL + JWT
+└── admin-ui/    # 管理后台 SPA：用户/订阅/套餐/流量/限流，产物输出到 server/public
 ```
+
+`admin-ui` 没有独立的 README —— 它只是 server 的一张脸，运行方式和端点契约都在
+[server 文档](packages/server/README.md)里。它也没有测试运行器，所以聚合与格式化
+逻辑一律放服务端，组件只做渲染。
 
 ## 快速上手
 

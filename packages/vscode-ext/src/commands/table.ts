@@ -41,6 +41,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.dropTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureWritable(node.conn)) return;
     if (!(await confirm('table.dropConfirm', 'table.delete', node.label))) return;
     const session = await manager.connect(node.conn);
     await session.table.dropTable(node.label, node.database);
@@ -49,6 +50,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.renameTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureWritable(node.conn)) return;
     const newName = await vscode.window.showInputBox({ prompt: l10n('table.renamePrompt'), value: node.label, valueSelection: [0, node.label.length] });
     if (!newName || newName === node.label) return;
     const session = await manager.connect(node.conn);
@@ -59,6 +61,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.renameView', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureWritable(node.conn)) return;
     const newName = await vscode.window.showInputBox({ prompt: l10n('view.renamePrompt'), value: node.label, valueSelection: [0, node.label.length] });
     if (!newName || newName === node.label) return;
     const session = await manager.connect(node.conn);
@@ -69,6 +72,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.truncateTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureWritable(node.conn)) return;
     if (!(await confirm('table.truncateConfirm', 'table.truncate', node.label))) return;
     const session = await manager.connect(node.conn);
     if (!requireCapability(session, 'truncateTable')) return;
@@ -77,6 +81,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.dupTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureWritable(node.conn)) return;
     const newName = await vscode.window.showInputBox({ prompt: l10n('table.dupPrompt', { name: node.label }), value: `${node.label}_copy` });
     if (!newName) return;
     const session = await manager.connect(node.conn);
@@ -145,6 +150,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.mockData', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureWritable(node.conn)) return;
     const input = await vscode.window.showInputBox({
       prompt: l10n('mock.prompt'), value: '10',
       validateInput: (v) => /^\d+$/.test(v) ? undefined : l10n('mock.invalid'),
@@ -165,6 +171,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
   // ── 视图/函数/事件 ──
   sub('dbclient.dropView', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureWritable(node.conn)) return;
     if (!(await confirm('view.deleteConfirm', 'view.delete', node.label))) return;
     const session = await manager.connect(node.conn);
     await session.table.dropView(node.label, node.database);
@@ -201,6 +208,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.dropRoutine', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureWritable(node.conn)) return;
     if (!(await confirm('routine.deleteConfirm', 'routine.delete', node.label))) return;
     const session = await manager.connect(node.conn);
     if (!requireCapability(session, 'manageRoutines')) return;
@@ -217,6 +225,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.dropEvent', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureWritable(node.conn)) return;
     if (!(await confirm('event.deleteConfirm', 'event.delete', node.label))) return;
     const session = await manager.connect(node.conn);
     if (!requireCapability(session, 'manageEvents')) return;

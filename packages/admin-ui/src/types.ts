@@ -118,6 +118,66 @@ export interface UsageEvent {
   createTime: string;
 }
 
+/**
+ * 流量报表。
+ *
+ * 全部字段都是服务端算好的 —— 这些组件刻意不做聚合，因为 admin-ui 没有
+ * 测试运行器，聚合逻辑放在服务端（TrafficReporter）才有测试覆盖。
+ */
+export interface RouteSummary {
+  route: string;
+  total: number;
+  ok: number;
+  clientError: number;
+  serverError: number;
+  /** 0..1 */
+  errorRate: number;
+}
+
+export interface HourPoint {
+  bucketTime: string;
+  total: number;
+  byClass: Record<number, number>;
+}
+
+export interface MinutePoint {
+  minuteTs: number;
+  total: number;
+  byClass: Record<number, number>;
+}
+
+export interface BlockedRow {
+  ip: string;
+  route: string;
+  bucket: string;
+  createTime: string;
+}
+
+export interface TrafficReport {
+  hours: number;
+  total: number;
+  routes: RouteSummary[];
+  hourly: HourPoint[];
+  minutes: MinutePoint[];
+  blocked: BlockedRow[];
+  blockedTotal: number;
+}
+
+export interface RateLimitRuleRow {
+  bucket: string;
+  maxRequests: number;
+  windowSeconds: number;
+  enabled: boolean;
+  description: string;
+  /** 与代码内置基线一致时为 true，用来提示哪些被改过 */
+  isDefault: boolean;
+}
+
+export interface RateLimitResponse {
+  rules: RateLimitRuleRow[];
+  allowlist: string[];
+}
+
 export interface MeResponse {
   user: UserInfo;
 }

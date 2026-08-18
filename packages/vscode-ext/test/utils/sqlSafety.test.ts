@@ -1,5 +1,39 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { analyzeSqlRisk } from '../../src/utils/sqlRisk';
+import { confirmSqlExecution, ensureWritable } from '../../src/utils/sqlSafety';
+
+/** 记录 vscode 弹窗调用，供断言「是否弹了模态」。 */
+const shown = {
+  errors: [] as string[],
+  warnings: [] as { message: string; modal: boolean }[],
+};
+/** showWarningMessage 的返回值（模拟用户点了确认按钮或取消）。 */
+let warningAnswer: string | undefined;
+
+vi.mock('vscode', () => ({
+  window: {
+    showErrorMessage: (msg: string) => { shown.errors.push(msg); },
+    showWarningMessage: (msg: string, opts?: any, action?: string) => {
+      shown.warnings.push({ message: msg, modal: Boolean(opts?.modal) });
+      return Promise.resolve(warningAnswer === '__ACTION__' ? action : warningAnswer);
+    },
+  },
+  workspace: { getConfiguration: () => ({ get: (_k: string, d: unknown) => d }) },
+  env: { language: 'en' },
+}));
+
+function conn(over: Record<string, unknown> = {}): any {
+  return {
+    id: 'c1', name: 'prod-db', host: 'h', dbType: 'MYSQL',
+    readOnly: false, environment: 'development', ...over,
+  };
+}
+
+beforeEach(() => {
+  shown.errors = [];
+  shown.warnings = [];
+  warningAnswer = undefined;
+});
 
 describe('analyzeSqlRisk', () => {
   it('allows read-only statements', () => {
@@ -87,5 +121,85 @@ describe('analyzeSqlRisk', () => {
       // 未闭合引号后全部视为字面量，结果是 SELECT 部分保留 → 只读
       expect(analyzeSqlRisk("SELECT 'unterminated")).toEqual({ level: 'none', isWrite: false });
     });
+  });
+});
+
+/**
+ * 只读连接闸门。这是「只读」这个能力边界的**唯一**实现点，
+ * 树右键的 DDL 命令刻意不弹确认框，只靠它守住。
+ */
+describe('ensureWritable', () => {
+  it('可写连接放行且不提示', () => {
+    expect(ensureWritable(conn())).toBe(true);
+    expect(shown.errors).toEqual([]);
+  });
+
+  it('只读连接拦截并提示连接名', () => {
+    expect(ensureWritable(conn({ readOnly: true }))).toBe(false);
+    expect(shown.errors).toHaveLength(1);
+    expect(shown.errors[0]).toContain('prod-db');
+  });
+
+  it('无 name 时回退用 host 提示', () => {
+    expect(ensureWritable(conn({ readOnly: true, name: undefined, host: '10.0.0.1' }))).toBe(false);
+    expect(shown.errors[0]).toContain('10.0.0.1');
+  });
+});
+
+describe('confirmSqlExecution', () => {
+  it('只读语句直接放行，不查只读标记也不弹窗', async () => {
+    // 注意顺序：isWrite 判定先于 ensureWritable，所以只读连接上的 SELECT 必须能跑
+    await expect(confirmSqlExecution(conn({ readOnly: true }), 'SELECT * FROM users')).resolves.toBe(true);
+    expect(shown.errors).toEqual([]);
+    expect(shown.warnings).toEqual([]);
+  });
+
+  it('只读连接上的写语句被拦截', async () => {
+    await expect(confirmSqlExecution(conn({ readOnly: true }), "INSERT INTO t VALUES (1)")).resolves.toBe(false);
+    expect(shown.errors).toHaveLength(1);
+    expect(shown.warnings).toEqual([]);
+  });
+
+  it('开发环境的普通写语句无需确认', async () => {
+    await expect(confirmSqlExecution(conn(), "INSERT INTO t VALUES (1)")).resolves.toBe(true);
+    expect(shown.warnings).toEqual([]);
+  });
+
+  it('critical 语句弹模态，确认后放行', async () => {
+    warningAnswer = '__ACTION__';
+    await expect(confirmSqlExecution(conn(), 'DROP TABLE users')).resolves.toBe(true);
+    expect(shown.warnings).toHaveLength(1);
+    expect(shown.warnings[0].modal).toBe(true);
+    expect(shown.warnings[0].message).toContain('DDL or permission change');
+  });
+
+  it('critical 语句弹模态，用户取消则拒绝', async () => {
+    warningAnswer = undefined;
+    await expect(confirmSqlExecution(conn(), 'DROP TABLE users')).resolves.toBe(false);
+    expect(shown.warnings).toHaveLength(1);
+  });
+
+  it('生产连接上的普通写语句也要确认', async () => {
+    warningAnswer = '__ACTION__';
+    await expect(
+      confirmSqlExecution(conn({ environment: 'production' }), 'INSERT INTO t VALUES (1)'),
+    ).resolves.toBe(true);
+    expect(shown.warnings).toHaveLength(1);
+    expect(shown.warnings[0].modal).toBe(true);
+  });
+
+  it('生产连接 + 用户取消 → 拒绝', async () => {
+    warningAnswer = 'Cancel';
+    await expect(
+      confirmSqlExecution(conn({ environment: 'production' }), 'INSERT INTO t VALUES (1)'),
+    ).resolves.toBe(false);
+  });
+
+  it('只读优先于确认：只读的生产连接不弹窗直接拒', async () => {
+    await expect(
+      confirmSqlExecution(conn({ readOnly: true, environment: 'production' }), 'DROP TABLE t'),
+    ).resolves.toBe(false);
+    expect(shown.warnings).toEqual([]);
+    expect(shown.errors).toHaveLength(1);
   });
 });

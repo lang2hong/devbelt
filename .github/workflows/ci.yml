@@ -11,7 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [18, 20]
+        # 20 是下限（vitest 4 的 engines 是 ^20 || ^22 || >=24），22 是当前 LTS。
+        # 之前这里写的是 [18, 20]，而 Node 18 上 vitest 装不起来 —— 那条腿的
+        # Test 步骤从来没真正跑过测试。
+        node-version: [20, 22]
 
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +28,10 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: 'pnpm'
 
-      - run: pnpm install
+      # --frozen-lockfile：lockfile 与 package.json 不一致时直接失败，
+      # 而不是悄悄改 lockfile 装一套和本地不同的依赖。CI 必须装的是被审阅过
+      # 的那份依赖树。
+      - run: pnpm install --frozen-lockfile
 
       - name: Build
         run: pnpm build
@@ -35,3 +41,79 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      # vscode-ext 是市场发布版，打包配置出问题（漏文件、.vscodeignore 写错、
+      # manifest 校验失败）原先要等到准备发布时才发现。vsce 会校验 entrypoint
+      # 存在，所以必须放在 Build 之后 —— 实测删掉 out/ 后它会报
+      # "Extension entrypoint(s) missing" 并失败。
+      - name: Package extension
+        run: pnpm -C packages/vscode-ext package
+  # 需要真实数据库的测试。四个文件全是 describe.skipIf(!URL)，本地无库时
+  # 整体跳过，所以 `pnpm test` 在任何机器上都能过 —— 代价是它们在 CI 里
+  # 也从未跑过。这个 job 用 service container 把门禁打开。
+  #
+  # 单独一个 job 而不是塞进 build 的 matrix：build 跑两个 Node 版本，
+  # 塞进去等于把数据库启动等待期付两遍，还会拖慢单测的反馈速度。
+  integration:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-pass
+          # mysqlSchema / mysqlReal 都硬编码库名 dbclient_verify，
+          # 由 container 直接建好，测试自己不建库
+          MYSQL_DATABASE: dbclient_verify
+        ports:
+          - 3306:3306
+        # 没有 health check 的话测试会在 MySQL 还没起来时就连，随机失败
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-root-pass"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci-pg-pass
+          POSTGRES_DB: dbclient_verify
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd=pg_isready
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      # server 的集成测试 import src/**/*.js，需要先编译
+      - name: Build
+        run: pnpm build
+
+      # 两个 URL 就是这些测试的门禁开关（未设置则 skipIf 整体跳过）。
+      # 密码里没有特殊字符，但格式上仍按测试要求做百分号编码约定。
+      - name: Integration tests (db-core)
+        env:
+          MYSQL_TEST_URL: mysql://root:ci-root-pass@127.0.0.1:3306
+          PG_TEST_URL: postgres://postgres:ci-pg-pass@127.0.0.1:5432/dbclient_verify
+        run: pnpm -C packages/db-core test
+
+      - name: Integration tests (server)
+        env:
+          MYSQL_TEST_URL: mysql://root:ci-root-pass@127.0.0.1:3306
+        run: pnpm -C packages/server test

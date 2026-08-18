@@ -132,3 +132,146 @@ describe('AutoSyncService', () => {
     svc.dispose();
   });
 });
+
+/**
+ * 重入保护。
+ *
+ * 一次 tryAutoSync 是 7 个串行 HTTP 请求（1 pull + 5 push + 1 usage），每个都可能
+ * 因为网络慢或 PBKDF2 派生（600k 轮，约 0.5s）拖到几秒。而防抖窗口只有 3 秒，
+ * 定时器最小间隔 1 分钟 —— 上一轮没跑完下一轮就来了是常态，不是边缘情况。
+ *
+ * 重叠的后果不只是浪费请求：两个 trigger 会各自撞到 access token 过期，各自拿
+ * 同一个 refresh token 去续期。服务端的 refresh 是「查—撤销—签发」三步非原子，
+ * 并发进去要么泄漏一个孤儿 token，要么命中重用检测把用户从所有设备踢下线。
+ */
+describe('AutoSyncService 重入保护', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  /** tryAutoSync 需要外部控制何时 resolve，才能造出重叠 */
+  function setupSlow() {
+    const emitter = new EventEmitter<void>();
+    let release: (() => void) | undefined;
+    const inFlight: Array<() => void> = [];
+    const tryAuto = vi.fn(
+      () =>
+        new Promise<Status>((resolve) => {
+          release = () => resolve('ok');
+          inFlight.push(release);
+        }),
+    );
+    const sync = { tryAutoSync: tryAuto } as any;
+    const onSynced = vi.fn();
+    const svc = new AutoSyncService(
+      sync, () => 'silent', () => 0, emitter.event, () => {}, onSynced, () => true,
+    );
+    return {
+      emitter, tryAuto, onSynced, svc,
+      releaseAll: () => { inFlight.splice(0).forEach((r) => r()); },
+    };
+  }
+
+  it('上一轮未结束时，新的触发不会并发启动第二轮', async () => {
+    const { emitter, tryAuto, svc, releaseAll } = setupSlow();
+    svc.start(); // 启动触发一次，卡住不 resolve
+    await vi.advanceTimersByTimeAsync(1);
+    expect(tryAuto).toHaveBeenCalledTimes(1);
+
+    // 期间数据反复变更，防抖窗口过去 → 若无 guard 会再开一轮
+    emitter.fire();
+    await vi.advanceTimersByTimeAsync(3500);
+    emitter.fire();
+    await vi.advanceTimersByTimeAsync(3500);
+    expect(tryAuto).toHaveBeenCalledTimes(1);
+
+    releaseAll();
+    await vi.advanceTimersByTimeAsync(1);
+  });
+
+  it('上一轮结束后仍可正常触发（guard 不会永久卡死）', async () => {
+    const { emitter, tryAuto, svc, releaseAll } = setupSlow();
+    svc.start();
+    await vi.advanceTimersByTimeAsync(1);
+    releaseAll();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(tryAuto).toHaveBeenCalledTimes(1);
+
+    emitter.fire();
+    await vi.advanceTimersByTimeAsync(3500);
+    expect(tryAuto).toHaveBeenCalledTimes(2);
+    releaseAll();
+    await vi.advanceTimersByTimeAsync(1);
+  });
+
+  /**
+   * tryAutoSync 抛异常时的三个要求：
+   *  1. guard 必须释放（否则一次意外之后自动同步永久停摆到重启）
+   *  2. 按 'error' 处理（退避重排 + 提示），语义上和返回 'error' 没区别
+   *  3. 不能漏出未捕获的 promise 拒绝 —— 所有调用点都是 `void this.trigger()`
+   */
+  it('抛异常时释放 guard 并按 error 处理', async () => {
+    const emitter = new EventEmitter<void>();
+    let shouldThrow = true;
+    const tryAuto = vi.fn(async (): Promise<Status> => {
+      if (shouldThrow) throw new Error('boom');
+      return 'ok';
+    });
+    const sync = { tryAutoSync: tryAuto } as any;
+    const onReminder = vi.fn();
+    const onSynced = vi.fn();
+    const svc = new AutoSyncService(
+      sync, () => 'silent', () => 0, emitter.event, onReminder, onSynced, () => true,
+    );
+    svc.start();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(tryAuto).toHaveBeenCalledTimes(1);
+    expect(onReminder).toHaveBeenCalled();
+    expect(onSynced).not.toHaveBeenCalled();
+
+    // guard 已释放：下一次变更还能触发
+    shouldThrow = false;
+    emitter.fire();
+    await vi.advanceTimersByTimeAsync(3500);
+    expect(tryAuto).toHaveBeenCalledTimes(2);
+    expect(onSynced).toHaveBeenCalled();
+    svc.dispose();
+  });
+
+  it('抛异常也会安排退避重试（与返回 error 一致）', async () => {
+    const emitter = new EventEmitter<void>();
+    const tryAuto = vi.fn(async (): Promise<Status> => { throw new Error('boom'); });
+    const sync = { tryAutoSync: tryAuto } as any;
+    const svc = new AutoSyncService(
+      sync, () => 'silent', () => 0, emitter.event, () => {}, () => {}, () => true,
+    );
+    svc.start();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(tryAuto).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(30_000); // 退避 #1
+    expect(tryAuto).toHaveBeenCalledTimes(2);
+    svc.dispose();
+  });
+
+  it('定时器周期触发同样受 guard 约束', async () => {
+    const emitter = new EventEmitter<void>();
+    const inFlight: Array<() => void> = [];
+    const tryAuto = vi.fn(
+      () => new Promise<Status>((resolve) => { inFlight.push(() => resolve('ok')); }),
+    );
+    const sync = { tryAutoSync: tryAuto } as any;
+    const svc = new AutoSyncService(
+      sync, () => 'silent', () => 1, emitter.event, () => {}, () => {}, () => true,
+    );
+    svc.start();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(tryAuto).toHaveBeenCalledTimes(1);
+
+    // 三个周期过去，第一轮始终没结束
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(tryAuto).toHaveBeenCalledTimes(1);
+
+    inFlight.splice(0).forEach((r) => r());
+    await vi.advanceTimersByTimeAsync(1);
+    svc.dispose();
+  });
+});

@@ -17,6 +17,19 @@ export class Encryption {
   private static readonly ITERATIONS = 600_000;
   /** 旧版本加密数据使用的迭代次数（payload 无 iterations 字段时回退）。 */
   private static readonly LEGACY_ITERATIONS = 100_000;
+  /**
+   * 解密时接受的迭代次数上界。
+   *
+   * `iterations` 是从密文信封里读出来的，而信封来自服务端 —— 也就是说这个数字
+   * 不完全在本地控制之下。PBKDF2 的耗时与它成正比：600k 轮约 0.5 秒，
+   * 塞进 10 亿轮就是十几分钟，扩展主进程的 libuv 线程池被占死，UI 无响应且
+   * 用户看不出发生了什么。
+   *
+   * 上界给到当前值的 3 倍多，留足未来提升迭代次数的空间（安全实践是逐年上调），
+   * 又把最坏耗时压在几秒量级。超限直接抛错，不静默截断 —— 截断会让本来合法的
+   * 高强度密文解不开却报「密码错误」，那是更难查的问题。
+   */
+  private static readonly MAX_ITERATIONS = 2_000_000;
 
   /**
    * 由主密码派生密钥（迭代次数随 payload 记录，保证新旧数据双向兼容）。
@@ -105,7 +118,14 @@ export class Encryption {
     });
   }
 
-  /** 解析密文负载并归一化迭代次数（旧格式无 iterations 字段时回退） */
+  /**
+   * 解析密文负载并归一化迭代次数。
+   *
+   * 三段处理：
+   *  - 缺字段 → 旧格式，回退 LEGACY_ITERATIONS
+   *  - 低于下界 → 抬到 LEGACY_ITERATIONS（防止 `iterations: 1` 这类弱化派生）
+   *  - 高于上界 → **抛错**（防止拿一个巨大的数字把主进程卡死，见 MAX_ITERATIONS）
+   */
   private static parseEnvelope(encrypted: string): Envelope {
     const { salt, iv, tag, data, iterations } = JSON.parse(encrypted) as {
       salt: string;
@@ -114,12 +134,18 @@ export class Encryption {
       data: string;
       iterations?: number;
     };
+    const raw = iterations ?? Encryption.LEGACY_ITERATIONS;
+    if (!Number.isFinite(raw) || raw > Encryption.MAX_ITERATIONS) {
+      throw new Error(
+        `Refusing to decrypt: iterations ${raw} exceeds the ${Encryption.MAX_ITERATIONS} limit`,
+      );
+    }
     return {
       salt,
       iv,
       tag,
       data,
-      iterations: Math.max(iterations ?? Encryption.LEGACY_ITERATIONS, Encryption.LEGACY_ITERATIONS),
+      iterations: Math.max(raw, Encryption.LEGACY_ITERATIONS),
     };
   }
 
