@@ -56,6 +56,68 @@ describe('Encryption（同步加密）', () => {
   });
 });
 
+/**
+ * GCM 认证标签长度。
+ *
+ * Node 的 `createDecipheriv` 在不显式声明 authTagLength 时，会接受 4/8/12/13..16
+ * 字节的短标签（GCM 规范允许截断标签，Node 照规范实现）。而标签是从服务端下发的
+ * 信封里读出来的 —— 攻击者把 16 字节标签截成 4 字节，伪造一条密文所需的尝试次数
+ * 就从 2^128 掉到 2^32。
+ *
+ * 这类伪造的实际危害在于负载内容：connections 节里带 host/port/password，
+ * 把 host 换成攻击者的库，用户下次连上去就把真实数据库口令交出去了。
+ */
+describe('Encryption 认证标签长度', () => {
+  /** 用合法密钥重新封装一条密文，并把标签截断到指定长度 */
+  function sealWithTruncatedTag(plain: unknown, masterPassword: string, tagLen: number): string {
+    const salt = crypto.randomBytes(16).toString('hex');
+    const iterations = 100_000;
+    const key = Encryption.deriveKey(masterPassword, salt, iterations);
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    const body = Buffer.concat([
+      cipher.update(Buffer.from(JSON.stringify(plain), 'utf8')),
+      cipher.final(),
+    ]);
+    const fullTag = cipher.getAuthTag();
+    return JSON.stringify({
+      salt,
+      iterations,
+      iv: iv.toString('base64'),
+      tag: fullTag.subarray(0, tagLen).toString('base64'),
+      data: body.toString('base64'),
+    });
+  }
+
+  it.each([4, 8, 12, 15])('拒绝 %i 字节的截断标签', (tagLen) => {
+    const payload = sealWithTruncatedTag({ a: 1 }, 'master-pass', tagLen);
+    expect(() => Encryption.decrypt(payload, 'master-pass')).toThrow(/auth tag/i);
+  });
+
+  it('16 字节标签正常解密（不误伤合法密文）', () => {
+    const payload = sealWithTruncatedTag({ a: 1 }, 'master-pass', 16);
+    expect(Encryption.decrypt(payload, 'master-pass')).toEqual({ a: 1 });
+  });
+
+  it('异步路径同样拒绝截断标签（主进程走的是这条）', async () => {
+    const payload = sealWithTruncatedTag({ a: 1 }, 'master-pass', 4);
+    await expect(Encryption.decryptAsync(payload, 'master-pass')).rejects.toThrow(/auth tag/i);
+  });
+
+  it('超长标签（17 字节）同样拒绝', () => {
+    const payload = sealWithTruncatedTag({ a: 1 }, 'master-pass', 16);
+    const env = JSON.parse(payload);
+    env.tag = Buffer.concat([Buffer.from(env.tag, 'base64'), Buffer.alloc(1)]).toString('base64');
+    expect(() => Encryption.decrypt(JSON.stringify(env), 'master-pass')).toThrow(/auth tag/i);
+  });
+
+  it('缺 tag 字段时报可区分的错误，而不是底层 crypto 错误', () => {
+    const env = JSON.parse(Encryption.encrypt({ a: 1 }, 'master-pass'));
+    delete env.tag;
+    expect(() => Encryption.decrypt(JSON.stringify(env), 'master-pass')).toThrow(/auth tag/i);
+  });
+});
+
 describe('Encryption（异步派生）', () => {
   it('encryptAsync 后 decryptAsync 可还原', async () => {
     const data = { connections: [{ host: 'h', password: 'p' }] };

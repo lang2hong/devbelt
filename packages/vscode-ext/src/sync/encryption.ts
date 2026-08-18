@@ -30,6 +30,21 @@ export class Encryption {
    * 高强度密文解不开却报「密码错误」，那是更难查的问题。
    */
   private static readonly MAX_ITERATIONS = 2_000_000;
+  /**
+   * GCM 认证标签长度（字节），解密时强制要求。
+   *
+   * GCM 规范允许截断标签，Node 也照规范实现：不显式声明 `authTagLength` 时，
+   * `createDecipheriv` 会接受 4/8/12/13..16 字节的标签。而标签是从信封里读出来的，
+   * 信封来自服务端 —— 于是攻击者只要把 16 字节标签截成 4 字节，伪造一条能通过
+   * 完整性校验的密文所需的期望尝试次数就从 2^128 掉到 2^32。
+   *
+   * 危害不在"解出乱码"，而在负载内容：connections 节里带 host/port/password，
+   * 一条伪造成功的记录把 host 指向攻击者的库，用户下次连上去就交出了真实口令。
+   *
+   * 因此这里既拒短标签也拒长标签 —— 本实现只产出 16 字节，任何其他长度都说明
+   * 信封被人动过（或不是本实现产出的），没有兼容它的理由。
+   */
+  private static readonly TAG_LEN = 16;
 
   /**
    * 由主密码派生密钥（迭代次数随 payload 记录，保证新旧数据双向兼容）。
@@ -140,6 +155,17 @@ export class Encryption {
         `Refusing to decrypt: iterations ${raw} exceeds the ${Encryption.MAX_ITERATIONS} limit`,
       );
     }
+    // 标签长度在派生密钥之前就校验：省掉一次 600k 轮 PBKDF2，也让"信封结构不对"
+    // 与"主密码错误"成为两个可区分的错误（后者只可能在 final() 阶段抛出）。
+    if (typeof tag !== 'string') {
+      throw new Error('Refusing to decrypt: missing GCM auth tag in payload');
+    }
+    const tagBytes = Buffer.from(tag, 'base64');
+    if (tagBytes.length !== Encryption.TAG_LEN) {
+      throw new Error(
+        `Refusing to decrypt: GCM auth tag must be ${Encryption.TAG_LEN} bytes, got ${tagBytes.length}`,
+      );
+    }
     return {
       salt,
       iv,
@@ -151,10 +177,14 @@ export class Encryption {
 
   /** 用已派生的密钥解开密文负载（decrypt/decryptAsync 共用） */
   private static openWithKey(env: Envelope, key: Buffer): unknown {
+    // authTagLength 必须显式传：不传则 Node 接受截断标签，见 TAG_LEN 注释。
+    // parseEnvelope 已经挡了一道，这里是第二道 —— 靠 crypto 自己拒绝，
+    // 不依赖上游调用顺序。
     const decipher = crypto.createDecipheriv(
       'aes-256-gcm',
       key,
       Buffer.from(env.iv, 'base64'),
+      { authTagLength: Encryption.TAG_LEN },
     );
     decipher.setAuthTag(Buffer.from(env.tag, 'base64'));
     const decrypted = Buffer.concat([
