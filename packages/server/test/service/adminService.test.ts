@@ -141,4 +141,51 @@ describe('AdminService.updateUser', () => {
     expect(u?.planCode).toBe('pro');
     expect(u?.status).toBe('disabled');
   });
+
+  /**
+   * 枚举白名单：路由 schema 与服务层是双层防护。
+   *
+   * 这些用例独立测服务层 —— 路由测试无法覆盖它（schema 会先拦下来），
+   * 而 `UpdateUserInput` 的字段是 TS 联合类型，编译期约束在运行时不存在。
+   * 任何绕过路由的调用方（脚本、将来的内部接口）都要靠这一层。
+   */
+  describe('枚举校验', () => {
+    it('非法 role 抛 ValidationError 且不写库', async () => {
+      const { service, userRepo, alice } = await setup();
+      await expect(
+        service.updateUser(alice.id, { role: 'superadmin' as any }),
+      ).rejects.toThrow(/invalid role/);
+      expect((await userRepo.findById(alice.id))?.role).toBe('user');
+    });
+
+    it('非法 planCode 抛错（防孤儿套餐码导致 /api/me 500）', async () => {
+      const { service, userRepo, alice } = await setup();
+      const before = (await userRepo.findById(alice.id))?.planCode;
+      await expect(
+        service.updateUser(alice.id, { planCode: 'enterprise' as any }),
+      ).rejects.toThrow(/invalid planCode/);
+      expect((await userRepo.findById(alice.id))?.planCode).toBe(before);
+    });
+
+    it('非法 status 抛错', async () => {
+      const { service, alice } = await setup();
+      await expect(
+        service.updateUser(alice.id, { status: 'zombie' as any }),
+      ).rejects.toThrow(/invalid status/);
+    });
+
+    it('校验先于任何写入：一个字段非法则整体不生效', async () => {
+      const { service, userRepo, alice } = await setup();
+      await expect(
+        service.updateUser(alice.id, { role: 'admin', status: 'bogus' as any }),
+      ).rejects.toThrow(/invalid status/);
+      // role 合法但不应被写入 —— 避免部分生效（无事务，只能靠前置校验）
+      expect((await userRepo.findById(alice.id))?.role).toBe('user');
+    });
+
+    it('空输入是合法的 no-op', async () => {
+      const { service, alice } = await setup();
+      await expect(service.updateUser(alice.id, {})).resolves.toBeUndefined();
+    });
+  });
 });

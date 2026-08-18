@@ -1,10 +1,18 @@
 import type { FastifyInstance } from 'fastify';
 import type { AuthService, DeviceInfo } from '../service/authService.js';
-import { authScope } from '../middleware/requireAuth.js';
+import { authScope, type GetAuthUser, type GetAuthSession } from '../middleware/requireAuth.js';
 import { sendError } from '../middleware/errorHandler.js';
+import {
+  changePasswordBody,
+  credentialsBody,
+  idParam,
+  refreshTokenBody,
+} from './schemas.js';
 
 export interface AuthRouteOptions {
   authService: AuthService;
+  getUser?: GetAuthUser;
+  getSession?: GetAuthSession;
 }
 
 /**
@@ -35,7 +43,7 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): 
     ip: req.ip,
   });
 
-  app.post('/api/auth/register', async (req, reply) => {
+  app.post('/api/auth/register', { schema: { body: credentialsBody } }, async (req, reply) => {
     const { email, password } = req.body as any;
     try {
       const r = await auth.register(email, password, deviceInfo(req));
@@ -50,7 +58,7 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): 
     }
   });
 
-  app.post('/api/auth/login', async (req, reply) => {
+  app.post('/api/auth/login', { schema: { body: credentialsBody } }, async (req, reply) => {
     const { email, password } = req.body as any;
     try {
       const r = await auth.login(email, password, deviceInfo(req));
@@ -65,7 +73,7 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): 
     }
   });
 
-  app.post('/api/auth/refresh', async (req, reply) => {
+  app.post('/api/auth/refresh', { schema: { body: refreshTokenBody } }, async (req, reply) => {
     const { refreshToken } = req.body as any;
     try {
       const r = await auth.refresh(refreshToken, deviceInfo(req));
@@ -77,8 +85,10 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): 
 
   // 以下路由需认证（authScope 子作用域）
   app.register(authScope, {
+    getUser: opts.getUser,
+    getSession: opts.getSession,
     routes: async (child) => {
-      child.post('/api/auth/logout', async (req, reply) => {
+      child.post('/api/auth/logout', { schema: { body: refreshTokenBody } }, async (req, reply) => {
         const { refreshToken } = req.body as any;
         try {
           await auth.logout(refreshToken);
@@ -88,7 +98,7 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): 
         }
       });
 
-      child.post('/api/auth/change-password', async (req, reply) => {
+      child.post('/api/auth/change-password', { schema: { body: changePasswordBody } }, async (req, reply) => {
         const { oldPassword, newPassword } = req.body as any;
         try {
           await auth.changePassword(req.user.sub, oldPassword, newPassword);
@@ -100,11 +110,15 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): 
 
       child.get('/api/auth/sessions', async (req, reply) => {
         const userId = req.user.sub as number;
-        const sessions = await auth.listSessions(userId, req.user.sid as number | undefined);
-        reply.send({ sessions });
+        try {
+          const sessions = await auth.listSessions(userId, req.user.sid as number | undefined);
+          reply.send({ sessions });
+        } catch (e) {
+          sendError(reply, e);
+        }
       });
 
-      child.delete('/api/auth/sessions/:id', async (req, reply) => {
+      child.delete('/api/auth/sessions/:id', { schema: { params: idParam } }, async (req, reply) => {
         const userId = req.user.sub as number;
         const id = Number((req.params as any).id);
         try {

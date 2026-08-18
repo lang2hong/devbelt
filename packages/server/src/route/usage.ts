@@ -1,10 +1,13 @@
 import type { FastifyInstance } from 'fastify';
-import { authScope } from '../middleware/requireAuth.js';
+import { authScope, type GetAuthUser, type GetAuthSession } from '../middleware/requireAuth.js';
 import { sendError } from '../middleware/errorHandler.js';
 import type { IUsageEventRepo } from '../repository/interfaces.js';
+import { usageBody } from './schemas.js';
 
 export interface UsageRouteOptions {
   usageEventRepo: IUsageEventRepo;
+  getUser?: GetAuthUser;
+  getSession?: GetAuthSession;
 }
 
 /**
@@ -13,8 +16,10 @@ export interface UsageRouteOptions {
  */
 export async function usageRoutes(app: FastifyInstance, opts: UsageRouteOptions): Promise<void> {
   app.register(authScope, {
+    getUser: opts.getUser,
+    getSession: opts.getSession,
     routes: async (child) => {
-      child.post('/api/usage', async (req, reply) => {
+      child.post('/api/usage', { schema: { body: usageBody } }, async (req, reply) => {
         const userId = req.user.sub as number;
         const deviceId = (req.headers['x-device-id'] as string) ?? undefined;
         const { connectionOpens, queryExecutes } = req.body as any;

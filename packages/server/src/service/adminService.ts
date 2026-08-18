@@ -166,12 +166,38 @@ export class AdminService {
     return this.usageEventRepo.listByUser(userId, 200);
   }
 
+  /**
+   * 改用户的 role / planCode / status（三者均可选，只改传了的）。
+   *
+   * 枚举校验不能只靠路由 schema：`UpdateUserInput` 的字段是 TS 联合类型，
+   * 编译期约束在运行时不存在，而路由层此前是 `req.body as UpdateUserInput`
+   * 纯断言。写入非法值的后果各不相同且都不好查：
+   *  - `planCode` 任意字符串 → `users.plan_code` 无 FK 指向 `plans.code`
+   *    → 孤儿套餐码 → 之后 `/api/me` 因 `plan not found` 抛裸 Error → 500
+   *  - `status` 任意值 → login 的 `status !== 'active'` 会拒绝登录（软封号）
+   *  - `role` 任意值 → requireRole 不匹配，等于降权
+   * 这里做服务层兜底，schema 与它是双层防护而非重复。
+   */
   async updateUser(id: number, input: UpdateUserInput): Promise<void> {
+    if (input.role !== undefined && !VALID_ROLES.includes(input.role)) {
+      throw new ValidationError(`invalid role: ${input.role}`);
+    }
+    if (input.planCode !== undefined && !VALID_PLAN_CODES.includes(input.planCode)) {
+      throw new ValidationError(`invalid planCode: ${input.planCode}`);
+    }
+    if (input.status !== undefined && !VALID_USER_STATUSES.includes(input.status)) {
+      throw new ValidationError(`invalid status: ${input.status}`);
+    }
     if (input.role) await this.userRepo.updateRole(id, input.role);
     if (input.planCode) await this.userRepo.updatePlan(id, input.planCode);
     if (input.status) await this.userRepo.updateStatus(id, input.status);
   }
 }
+
+/** 枚举白名单（enums.ts 的类型是编译期的，运行时需要显式的值列表） */
+const VALID_ROLES: readonly Role[] = ['user', 'admin'];
+const VALID_PLAN_CODES: readonly PlanCode[] = ['free', 'pro', 'team'];
+const VALID_USER_STATUSES: readonly UserStatus[] = ['active', 'disabled'];
 
 function sanitize(user: User): UserInfo {
   const { passwordHash, ...rest } = user;

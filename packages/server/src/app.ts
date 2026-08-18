@@ -30,6 +30,14 @@ import { adminRoutes } from './route/admin.js';
 import { adminUiRoutes } from './route/adminUi.js';
 import { webhookRoutes } from './route/webhook.js';
 import { usageRoutes } from './route/usage.js';
+import { registerErrorHandler } from './middleware/errorHandler.js';
+import type { GetAuthUser, GetAuthSession } from './middleware/requireAuth.js';
+import { MysqlTrafficRepo } from './repository/mysql/trafficRepo.js';
+import { MysqlRateLimitRepo } from './repository/mysql/rateLimitRepo.js';
+import { TrafficCollector } from './observability/trafficCollector.js';
+import { registerTrafficPlugin } from './observability/trafficPlugin.js';
+import { RateLimitConfig } from './ratelimit/rateLimitConfig.js';
+import { registerRateLimit } from './ratelimit/rateLimitPlugin.js';
 
 /**
  * 组合根（composition root）：组装 Fastify 实例 + 依赖注入。
@@ -42,7 +50,13 @@ import { usageRoutes } from './route/usage.js';
  * 期三：接入套餐配额（PlanPolicy + SubscriptionService + /api/me）。
  */
 export async function createApp() {
-  const app = Fastify({ logger: true });
+  // trustProxy 决定 req.ip：既是限流的分桶键，也是 devices.ip 的来源。
+  // 默认信任 1 跳（nginx 反代）。取值语义见 config.parseTrustProxy。
+  const app = Fastify({ logger: true, trustProxy: config.trustProxy });
+
+  // 全局错误处理器必须早于路由注册：漏写 try/catch 的 handler 靠它兜住，
+  // 否则 Fastify 默认处理器会把 err.message（含 mysql2 的原始 SQL）回显给客户端
+  registerErrorHandler(app);
 
   app.register(cors, { origin: process.env.NODE_ENV === 'production' ? (process.env.CORS_ORIGIN || false) : true });
   app.register(sensible);
@@ -65,6 +79,27 @@ export async function createApp() {
   const syncEventRepo = new MysqlSyncEventRepo(getMysql);
   const usageEventRepo = new MysqlUsageEventRepo(getMysql);
   const syncRepo = new MysqlSyncRepo(getMysql);
+  const trafficRepo = new MysqlTrafficRepo(getMysql);
+  const rateLimitRepo = new MysqlRateLimitRepo(getMysql);
+
+  /**
+   * 限流与观测。
+   *
+   * 注册顺序要紧：两者都用 `onRequest`/`onResponse` 全局钩子，必须早于路由
+   * 注册，否则 Fastify 的封装规则会让钩子只对后注册的路由生效。
+   *
+   * 规则的实际值此时还是代码默认值 —— DB 里的覆盖行要等 `app.ready()` 之后
+   * 才能读（那时连接池才可用），见下方的 `rateLimitConfig.reload()`。
+   * 这个顺序是安全的：DB 读之前限流已经按默认值在工作，不存在「启动初期不限流」的窗口。
+   */
+  const trafficCollector = new TrafficCollector();
+  const rateLimitConfig = new RateLimitConfig(rateLimitRepo, app.log);
+  await registerRateLimit(app, {
+    config: rateLimitConfig,
+    collector: trafficCollector,
+    enabled: config.rateLimitEnabled,
+  });
+  await registerTrafficPlugin(app, { collector: trafficCollector, repo: trafficRepo });
 
   // policy / service 层
   const planPolicy = new PlanPolicy((code) => planRepo.findByCode(code));
@@ -76,18 +111,48 @@ export async function createApp() {
   const paymentService = new PaymentService(subRepo, userRepo);
   paymentService.registerProvider(new ManualPaymentAdapter());
 
+  /**
+   * 认证中间件的用户状态查询。
+   *
+   * 每个已认证请求多一次 users 主键查询，换来「禁用/降级即时生效」：
+   * token 里的 status/role 是签发时的快照，只读 token 的话封禁要等到
+   * access token 过期（默认 15 分钟）才生效，而 refresh 还能无限续期。
+   * 刻意不加缓存 —— TTL 缓存只是把 15 分钟窗口缩短，不是消除。
+   */
+  const getUser: GetAuthUser = async (id) => userRepo.findById(id);
+
+  /**
+   * access token 的吊销校验。
+   *
+   * token 里的 `sid` 是签发它的 refresh token 行 id，那一行的 revoked_time
+   * 已被登出 / 改密 / 踢设备 / 重用检测维护着，所以不需要另建 jti 黑名单。
+   * 少了这一步，所有「立即下线」实际都是延迟到 access token 过期才下线。
+   */
+  const getSession: GetAuthSession = async (id) => refreshTokenRepo.findById(id);
+
   // route 层
   app.get('/health', async () => ({ status: 'ok' }));
   app.register(adminUiRoutes);
-  app.register(authRoutes, { authService });
-  app.register(meRoutes, { subscriptionService });
-  app.register(syncRoutes, { syncService });
-  app.register(usageRoutes, { usageEventRepo });
-  app.register(adminRoutes, { adminService, paymentService });
+  app.register(authRoutes, { authService, getUser, getSession });
+  app.register(meRoutes, { subscriptionService, getUser, getSession });
+  app.register(syncRoutes, { syncService, getUser, getSession });
+  app.register(usageRoutes, { usageEventRepo, getUser, getSession });
+  app.register(adminRoutes, {
+    adminService,
+    paymentService,
+    getUser,
+    getSession,
+    trafficRepo,
+    trafficCollector,
+    rateLimitConfig,
+  });
   app.register(webhookRoutes, { paymentService });
 
   await app.ready();
   await initSchema(app);
+
+  // 建表之后才能读规则表。此前限流已按代码默认值生效，没有「启动初期不限流」的窗口
+  await rateLimitConfig.reload();
 
   // 启动时批量降级到期订阅
   void subscriptionService.downgradeExpired().catch((e) => app.log.warn({ err: e }, 'downgradeExpired failed'));

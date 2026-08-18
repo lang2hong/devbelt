@@ -2,7 +2,12 @@ import type { IUserRepo, ISubscriptionRepo, IRefreshTokenRepo, IDeviceRepo } fro
 import type { TokenService } from './tokenService.js';
 import type { Subscription, User, SessionInfo, Device } from '../domain/entities.js';
 import { hashPassword, upgradePasswordIfNeeded, verifyPassword } from './password.js';
-import { InvalidCredentialsError, TokenReuseError, ValidationError } from '../domain/errors.js';
+import {
+  InvalidCredentialsError,
+  TokenReuseError,
+  UserDisabledError,
+  ValidationError,
+} from '../domain/errors.js';
 
 /** 设备信息（登录/刷新时上报；deviceId 为同设备判同键） */
 export interface DeviceInfo {
@@ -148,6 +153,17 @@ export class AuthService {
 
     const user = await this.userRepo.findById(rt.userId);
     if (!user) throw new InvalidCredentialsError();
+
+    // 被禁用的账号不得续期。
+    //
+    // 少了这一条，「禁用」在实现层面等于无效：requireAuth 只校验 JWT 签名，
+    // 而这里只判 user 是否存在 —— 用户可以拿 refresh 无限换新 access token，
+    // 永久保有访问权。顺手撤销其全部会话，避免它继续持有其他设备的 refresh。
+    if (user.status !== 'active') {
+      await this.refreshTokenRepo.revokeAllForUser(user.id);
+      throw new UserDisabledError(user.id);
+    }
+
     const accessToken = this.tokenService.signAccessToken(user.id, user.role, user.planCode, newRt.id);
     return { accessToken, refreshToken: token };
   }

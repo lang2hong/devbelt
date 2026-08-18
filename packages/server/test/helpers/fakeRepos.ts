@@ -8,6 +8,12 @@ import type {
   IConnectionMetaRepo,
   ISyncEventRepo,
   IUsageEventRepo,
+  ITrafficRepo,
+  IRateLimitRepo,
+  AllowlistRow,
+  RateLimitRuleRow,
+  TrafficBlockedRow,
+  TrafficStatRow,
   ConnectionMetaInput,
   PlanEditableFields,
 } from '../../src/repository/interfaces.js';
@@ -289,6 +295,14 @@ export class FakeSyncRepo implements ISyncRepo {
     return version;
   }
 
+  /**
+   * 精确复刻 MysqlSyncRepo.putSectionIfVersion 的三条分支。
+   *
+   * 这个假实现曾经比真实现**更严格**（只判 curVersion !== baseVersion 就返回
+   * null），于是真实现里「落后一个版本被误判成功」的缺陷在单测里完全看不见 ——
+   * 假实现替真实现把关，把洞盖住了。教训：fake 的语义必须与真实现逐分支对齐，
+   * 宁可一起错也不能一边宽一边严。
+   */
   async putSectionIfVersion(
     userId: number,
     section: SectionType,
@@ -296,9 +310,14 @@ export class FakeSyncRepo implements ISyncRepo {
     baseVersion: number,
   ): Promise<number | null> {
     const cur = this.current.get(key(userId, section));
-    const curVersion = cur ? cur.version : 0;
-    if (curVersion !== baseVersion) return null;
-    return this.putSection(userId, section, encryptedData, curVersion + 1);
+    // 行存在：版本必须精确匹配
+    if (cur) {
+      if (cur.version !== baseVersion) return null;
+      return this.putSection(userId, section, encryptedData, baseVersion + 1);
+    }
+    // 行不存在：首次写入只允许 base = 0
+    if (baseVersion !== 0) return null;
+    return this.putSection(userId, section, encryptedData, 1);
   }
 
   async recordVersion(
@@ -472,6 +491,77 @@ export class FakeUsageEventRepo implements IUsageEventRepo {
 
   async listByUser(userId: number, limit = 200): Promise<UsageEvent[]> {
     return this.events.filter((e) => e.userId === userId).slice(-limit).reverse();
+  }
+}
+
+/**
+ * 流量仓储假实现。
+ *
+ * `upsertStats` 复刻真实现的 `count = count + VALUES(count)` 语义（累加而非
+ * 覆盖）—— 采集器每分钟 flush 一次同一个小时桶，写成覆盖的话会丢掉前面
+ * 几十次的计数，那是个很容易犯又很难看出来的错。
+ */
+export class FakeTrafficRepo implements ITrafficRepo {
+  readonly stats = new Map<string, TrafficStatRow>();
+  readonly blocked: TrafficBlockedRow[] = [];
+  /** 置为 true 让写入抛错，用来测 flush 失败后的数据回滚 */
+  failWrites = false;
+
+  async upsertStats(rows: TrafficStatRow[]): Promise<void> {
+    if (this.failWrites) throw new Error('simulated stats write failure');
+    for (const r of rows) {
+      const k = `${r.bucketTime.getTime()}|${r.route}|${r.statusClass}`;
+      const existing = this.stats.get(k);
+      if (existing) existing.count += r.count;
+      else this.stats.set(k, { ...r });
+    }
+  }
+
+  async queryStats(from: Date, to: Date): Promise<TrafficStatRow[]> {
+    return [...this.stats.values()]
+      .filter((r) => r.bucketTime >= from && r.bucketTime <= to)
+      .sort((a, b) => a.bucketTime.getTime() - b.bucketTime.getTime());
+  }
+
+  async insertBlocked(rows: Array<Omit<TrafficBlockedRow, 'createTime'>>): Promise<void> {
+    if (this.failWrites) throw new Error('simulated blocked write failure');
+    for (const r of rows) this.blocked.push({ ...r, createTime: new Date() });
+  }
+
+  async queryBlocked(from: Date, to: Date, limit: number): Promise<TrafficBlockedRow[]> {
+    return this.blocked
+      .filter((r) => r.createTime >= from && r.createTime <= to)
+      .slice(-limit)
+      .reverse();
+  }
+}
+
+export class FakeRateLimitRepo implements IRateLimitRepo {
+  readonly rules = new Map<string, RateLimitRuleRow>();
+  readonly allowlist = new Map<string, AllowlistRow>();
+  /** 置为 true 让读取抛错，用来测「DB 挂了限流仍按默认值工作」 */
+  failReads = false;
+
+  async listRules(): Promise<RateLimitRuleRow[]> {
+    if (this.failReads) throw new Error('simulated rules read failure');
+    return [...this.rules.values()];
+  }
+
+  async upsertRule(rule: RateLimitRuleRow): Promise<void> {
+    this.rules.set(rule.bucket, { ...rule });
+  }
+
+  async listAllowlist(): Promise<AllowlistRow[]> {
+    if (this.failReads) throw new Error('simulated allowlist read failure');
+    return [...this.allowlist.values()];
+  }
+
+  async addAllowlist(ip: string, note?: string): Promise<void> {
+    this.allowlist.set(ip, { ip, note, createTime: new Date() });
+  }
+
+  async removeAllowlist(ip: string): Promise<void> {
+    this.allowlist.delete(ip);
   }
 }
 
