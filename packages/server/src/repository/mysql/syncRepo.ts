@@ -47,22 +47,74 @@ export class MysqlSyncRepo implements ISyncRepo {
   }
 
   /** 原子乐观锁写入：仅当当前版本匹配 baseVersion 时才更新，返回新版本号或 null */
+  /**
+   * 乐观锁写入：仅当当前版本 === baseVersion 时才写，否则返回 null 表示冲突。
+   *
+   * ## 为什么不能用 INSERT ... ON DUPLICATE KEY UPDATE 加回读判断
+   *
+   * 原实现是「一条 upsert 里用 `IF(version = base, …)` 条件更新，再回读 version
+   * 与 base+1 比较」。这个判据在**落后正好一个版本**时会误判成功：
+   *
+   *   行现有 version = V，客户端传 base = V-1
+   *   → IF(version = base) 不匹配，数据和 version 都没动，仍是 V
+   *   → 回读得到 V，而 base+1 = V，两者相等 → 判定为“写入成功”
+   *
+   * 而 base = V-1 恰恰是最常见的冲突场景：两台设备先后推送同一 section，
+   * 后一台手里的 base 就落后一版。于是 `syncService.push` 不抛 ConflictError，
+   * 客户端记下新版本号并标记“已同步”，**用户的本地修改被静默丢弃**。
+   * 历史版本表还会记进一条根本没写进当前表的快照，导致历史与现状不一致。
+   *
+   * 另一个洞：行不存在时任何 base 都放行（base=5 也能 INSERT 出 version=6），
+   * 等于首次写入完全不校验。
+   *
+   * ## 现在的做法
+   *
+   * 先 UPDATE 判 affectedRows，再按“行是否存在”决定是插入还是报冲突：
+   *
+   *   UPDATE 命中 1 行            → 成功
+   *   UPDATE 命中 0 行 + 行不存在 → 首次写入，仅当 base = 0 才允许 INSERT
+   *   UPDATE 命中 0 行 + 行存在   → 版本不符，冲突
+   *
+   * 注意 affectedRows 而非 changedRows：mysql2 默认不带 CLIENT_FOUND_ROWS，
+   * affectedRows 是“实际改动的行数”。相同内容重复推送时 MySQL 会返回 0 ——
+   * 但这里 version 每次都递增，行内容必然变化，所以不会误判。
+   *
+   * 并发安全靠唯一键 uq_ss_user_section (user_id, section)：两个请求同时走到
+   * INSERT 分支时只有一个成功，另一个拿 ER_DUP_ENTRY，按冲突处理。
+   */
   async putSectionIfVersion(userId: number, section: SectionType, encryptedData: string, baseVersion: number): Promise<number | null> {
     const newVersion = baseVersion + 1;
-    await this.db().query<any>(
-      `INSERT INTO sync_sections (user_id, section, encrypted_data, version)
-       VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         encrypted_data = IF(version = ?, VALUES(encrypted_data), encrypted_data),
-         version = IF(version = ?, ?, version),
-         update_time = IF(version = ?, CURRENT_TIMESTAMP, update_time)`,
-      [userId, section, encryptedData, newVersion, baseVersion, baseVersion, newVersion, baseVersion],
+
+    const [upd] = await this.db().query<any>(
+      `UPDATE sync_sections
+          SET encrypted_data = ?, version = ?, update_time = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND section = ? AND version = ?`,
+      [encryptedData, newVersion, userId, section, baseVersion],
     );
+    if ((upd?.affectedRows ?? 0) > 0) return newVersion;
+
+    // 没更新到：要么行不存在（首次写入），要么版本不符（冲突）
     const [rows] = await this.db().query<any[]>(
       'SELECT version FROM sync_sections WHERE user_id = ? AND section = ?',
       [userId, section],
     );
-    return rows[0]?.version === newVersion ? newVersion : null;
+    if (rows.length > 0) return null; // 行存在但版本不符 → 冲突
+
+    // 首次写入必须从 0 开始。base > 0 说明客户端手里的版本号来自别处
+    // （比如账号被重置过），不能凭空造出一个高版本行。
+    if (baseVersion !== 0) return null;
+
+    try {
+      await this.db().query(
+        'INSERT INTO sync_sections (user_id, section, encrypted_data, version) VALUES (?, ?, ?, ?)',
+        [userId, section, encryptedData, newVersion],
+      );
+      return newVersion;
+    } catch (e: any) {
+      // 并发下另一个请求先插入了同一 (user_id, section)：唯一键拦住，按冲突处理
+      if (e?.code === 'ER_DUP_ENTRY' || e?.errno === 1062) return null;
+      throw e;
+    }
   }
 
   /** 记录历史版本快照（回滚用） */

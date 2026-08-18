@@ -1,11 +1,14 @@
 import type { FastifyInstance } from 'fastify';
-import { authScope } from '../middleware/requireAuth.js';
+import { authScope, type GetAuthUser, type GetAuthSession } from '../middleware/requireAuth.js';
 import { sendError } from '../middleware/errorHandler.js';
 import type { SyncService } from '../service/syncService.js';
 import type { SectionType } from '../domain/enums.js';
+import { pushBody, rollbackBody, sectionQuery, sectionRequiredQuery } from './schemas.js';
 
 export interface SyncRouteOptions {
   syncService: SyncService;
+  getUser?: GetAuthUser;
+  getSession?: GetAuthSession;
 }
 
 /**
@@ -19,8 +22,10 @@ export interface SyncRouteOptions {
  */
 export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): Promise<void> {
   app.register(authScope, {
+    getUser: opts.getUser,
+    getSession: opts.getSession,
     routes: async (child) => {
-      child.get('/api/sync', async (req, reply) => {
+      child.get('/api/sync', { schema: { querystring: sectionQuery } }, async (req, reply) => {
         const userId = req.user.sub as number;
         const section = (req.query as any).section as SectionType | undefined;
         const deviceId = (req.headers['x-device-id'] as string) ?? undefined;
@@ -32,7 +37,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         }
       });
 
-      child.put('/api/sync', async (req, reply) => {
+      child.put('/api/sync', { schema: { body: pushBody } }, async (req, reply) => {
         const userId = req.user.sub as number;
         const { section, encryptedData, baseVersion, itemCount, meta } = req.body as any;
         const deviceId = (req.headers['x-device-id'] as string) ?? undefined;
@@ -48,7 +53,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         }
       });
 
-      child.get('/api/sync/versions', async (req, reply) => {
+      child.get('/api/sync/versions', { schema: { querystring: sectionRequiredQuery } }, async (req, reply) => {
         const userId = req.user.sub as number;
         const section = (req.query as any).section as SectionType;
         try {
@@ -59,7 +64,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         }
       });
 
-      child.post('/api/sync/rollback', async (req, reply) => {
+      child.post('/api/sync/rollback', { schema: { body: rollbackBody } }, async (req, reply) => {
         const userId = req.user.sub as number;
         const { section, toVersion } = req.body as any;
         try {

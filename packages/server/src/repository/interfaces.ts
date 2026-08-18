@@ -130,3 +130,60 @@ export interface ISyncRepo {
   /** 统计各 section 当前密文字节总和（配额校验用） */
   sumBytes(userId: number): Promise<number>;
 }
+
+/** 一条小时粒度流量聚合（route × status_class） */
+export interface TrafficStatRow {
+  bucketTime: Date;
+  route: string;
+  statusClass: number;
+  count: number;
+}
+
+/** 一次被限流拦截的记录 */
+export interface TrafficBlockedRow {
+  ip: string;
+  route: string;
+  bucket: string;
+  createTime: Date;
+}
+
+/**
+ * 流量统计仓储。
+ *
+ * 写入是**批量 upsert**：采集器在内存里攒一分钟，一条 SQL 落库。
+ * 逐请求写库会让每个请求多一次 I/O，那是本末倒置。
+ */
+export interface ITrafficRepo {
+  /** 批量累加（同键 count 相加）。空数组是合法输入，直接返回 */
+  upsertStats(rows: Array<Omit<TrafficStatRow, 'count'> & { count: number }>): Promise<void>;
+  /** 查询时间区间内的聚合行（含起止） */
+  queryStats(from: Date, to: Date): Promise<TrafficStatRow[]>;
+  /** 批量插入 429 记录 */
+  insertBlocked(rows: Array<Omit<TrafficBlockedRow, 'createTime'>>): Promise<void>;
+  /** 查询区间内的 429 记录 */
+  queryBlocked(from: Date, to: Date, limit: number): Promise<TrafficBlockedRow[]>;
+}
+
+/** 限流规则覆盖行（DB 里只存与默认值不同的桶） */
+export interface RateLimitRuleRow {
+  bucket: string;
+  maxRequests: number;
+  windowSeconds: number;
+  enabled: boolean;
+}
+
+/** 免限流 IP */
+export interface AllowlistRow {
+  ip: string;
+  note?: string;
+  createTime: Date;
+}
+
+/** 限流配置仓储：阈值覆盖 + IP 白名单 */
+export interface IRateLimitRepo {
+  listRules(): Promise<RateLimitRuleRow[]>;
+  upsertRule(rule: RateLimitRuleRow): Promise<void>;
+  listAllowlist(): Promise<AllowlistRow[]>;
+  addAllowlist(ip: string, note?: string): Promise<void>;
+  removeAllowlist(ip: string): Promise<void>;
+}

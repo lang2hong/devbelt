@@ -223,6 +223,89 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
     ) ENGINE=InnoDB
   `);
 
+  /**
+   * traffic_stats 流量统计（小时粒度聚合）。
+   *
+   * 刻意**不记录每个请求**：一条一行的话 100 用户开自动同步一天就是几十万行，
+   * 而这张表的用途是看趋势，分辨率到小时足够。分钟级实时曲线走内存环形缓冲
+   * （见 observability/trafficCollector.ts），进程重启即丢，这是有意的取舍。
+   *
+   * 无 user_id、无外键：未认证流量（login/register/404/静态资源）根本没有 user，
+   * 加了列也只能填 NULL，反而让主键和查询都变复杂。
+   *
+   * route 存的是**路由模板**（`/admin/users/:id`）而非实际路径，否则基数无界会打爆表。
+   * status_class = floor(status/100)，即 2/3/4/5。
+   *
+   * 容量：27 路由 × 5 状态类 × 24 桶 ≈ 每天上限 3240 行，实际远低于此。
+   * **没有清理任务** —— 这个量级下不值得再引入一个会出错的定时任务。
+   */
+  await mysql.query(`
+    CREATE TABLE IF NOT EXISTS traffic_stats (
+      bucket_time DATETIME NOT NULL,
+      route VARCHAR(80) NOT NULL,
+      status_class TINYINT UNSIGNED NOT NULL,
+      count INT UNSIGNED NOT NULL DEFAULT 0,
+      PRIMARY KEY (bucket_time, route, status_class)
+    ) ENGINE=InnoDB
+  `);
+
+  /**
+   * traffic_blocked 被限流拦截的请求（429 逐条记录）。
+   *
+   * 为什么不合进 traffic_stats：那里的 status_class=4 把 400/401/403/404/429
+   * 混在一起，看不出是不是限流挡的。而 429 恰恰是最需要精确定位的 ——
+   * 「谁被挡了、挡在哪个端点」直接决定阈值该不该放宽。
+   *
+   * 逐条记录是安全的：正常情况下 429 应该极少；真被打的时候这张表的增长
+   * 本身就是告警信号。
+   */
+  await mysql.query(`
+    CREATE TABLE IF NOT EXISTS traffic_blocked (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      ip VARCHAR(45) NOT NULL,
+      route VARCHAR(80) NOT NULL,
+      bucket VARCHAR(32) NOT NULL,
+      create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_tb_time (create_time),
+      KEY idx_tb_ip (ip, create_time)
+    ) ENGINE=InnoDB
+  `);
+
+  /**
+   * rate_limit_rules 限流阈值覆盖表。
+   *
+   * 只存**覆盖行**，不是全量配置：代码里的 DEFAULT_RULES 是基线，这张表为空
+   * 时限流照常工作。这样 DB 读失败不会让限流失效（回落到默认值即可），
+   * 也不需要在部署时先播种数据。
+   *
+   * 启动时读进内存，后台改动同时写 DB + 更新内存。单实例下内存即权威值，
+   * 没有 TTL 缓存、没有每请求查库、没有陈旧窗口。
+   */
+  await mysql.query(`
+    CREATE TABLE IF NOT EXISTS rate_limit_rules (
+      bucket VARCHAR(32) NOT NULL PRIMARY KEY,
+      max_requests INT UNSIGNED NOT NULL,
+      window_seconds INT UNSIGNED NOT NULL,
+      enabled TINYINT(1) NOT NULL DEFAULT 1,
+      update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB
+  `);
+
+  /**
+   * rate_limit_allowlist 免限流 IP。
+   *
+   * 存在的理由很具体：多个用户在同一间办公室共用出口 IP 时，按 IP 分桶会把
+   * 整个办公室算成一个人。这是按 IP 限流的固有缺陷（限流跑在 onRequest，
+   * 早于 jwtVerify，拿不到 req.user，只能按 IP 分）。
+   */
+  await mysql.query(`
+    CREATE TABLE IF NOT EXISTS rate_limit_allowlist (
+      ip VARCHAR(45) NOT NULL PRIMARY KEY,
+      note VARCHAR(120) NULL,
+      create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB
+  `);
+
   // plans 数据播种
   await seedPlans(mysql);
 }
