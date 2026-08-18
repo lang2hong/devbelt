@@ -36,9 +36,13 @@ services:
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
       MYSQL_USER: dbclient
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
       MYSQL_DATABASE: db_client
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-prod}
+      # 刻意不给默认值：Dockerfile 设了 NODE_ENV=production，而一个默认值会让
+      # process.env.JWT_SECRET 恒非空，把 config.ts 里「生产必填」的检查绕过去 ——
+      # 服务就会用仓库里公开可见的字符串签发 token。`:?` 让缺失在 compose 阶段
+      # 就失败，而不是留到运行时变成一个可伪造 admin token 的线上服务。
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (openssl rand -base64 48)}
       PORT: 3000
     ports:
       - "3000:3000"
