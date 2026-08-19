@@ -183,6 +183,21 @@ export async function createApp() {
   });
   app.register(webhookRoutes, { paymentService });
 
+  /**
+   * 事件表清理任务在 ready 之后才启动（那时连接池才可用），但它的 onClose
+   * 钩子必须在 `await app.ready()` **之前**注册。
+   *
+   * 为什么顺序这么别扭：Fastify 的 `ready()` 底层（avvio）把 `start` 事件挂在
+   * `process.nextTick` 上延迟触发 —— `ready()` 的 Promise 先 resolve，实例的
+   * `started` 标志要等下一次事件循环才变成 true。ready 之后任何一个 `await`
+   * （initSchema、rateLimitConfig.reload 的 DB 查询）都会让出事件循环，让
+   * started 翻转，于是再调 `addHook` 就抛 FST_ERR_INSTANCE_ALREADY_LISTENING。
+   * 服务会因此完全起不来（批 14 引入，验证只跑了 typecheck/build/vitest，
+   * 从没真正 boot 过 createApp）。
+   */
+  let stopMaintenance: (() => void) | undefined;
+  app.addHook('onClose', async () => { stopMaintenance?.(); });
+
   await app.ready();
   await initSchema(app);
 
@@ -193,19 +208,16 @@ export async function createApp() {
   void subscriptionService.downgradeExpired().catch((e) => app.log.warn({ err: e }, 'downgradeExpired failed'));
 
   /**
-   * 事件表清理任务。
-   *
-   * 必须挂 onClose：定时器已经 unref（不阻止进程退出），但服务停止后还留着
-   * 一个会往已关闭的连接池发 DELETE 的回调 —— 优雅停机时会打出一串
-   * 「Pool is closed」错误日志，掩盖真正的停机原因。
+   * 定时器已经 unref（不阻止进程退出），但服务停止后还留着一个会往已关闭的
+   * 连接池发 DELETE 的回调 —— 优雅停机时会打出一串「Pool is closed」错误日志，
+   * 掩盖真正的停机原因。所以记下停止函数，交给上面提前注册的 onClose 调用。
    */
-  const stopMaintenance = startMaintenance({
+  stopMaintenance = startMaintenance({
     repo: maintenanceRepo,
     log: app.log,
     retentionDays: config.eventRetentionDays,
     intervalMs: config.maintenanceIntervalMs,
   });
-  app.addHook('onClose', async () => { stopMaintenance(); });
 
   return app;
 }
