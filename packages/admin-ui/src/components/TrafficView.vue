@@ -55,13 +55,80 @@ function pct(v: number): string {
   return (v * 100).toFixed(2) + '%';
 }
 
+/** 纵轴刻度缩写，避免大数字把左侧刻度列撑爆 */
+function axisNum(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 10_000) return (n / 1_000).toFixed(1).replace(/\.0$/, '') + 'k';
+  return String(n);
+}
+
+/** 柱高百分比，最小 2% 让低值柱也可见 */
+function barPct(total: number, max: number): number {
+  return Math.max(2, (total / max) * 100);
+}
+
+/**
+ * 采样下标：最多约 8 个刻度。
+ *
+ * 横轴标签和柱上数值共用这一套下标 —— 两边各算一套密度是上一版「布局乱」
+ * 的根因（24 柱时数值画 24 个、时间标签只有 8 个，柱顶糊成一片）。
+ */
+function tickIndexes(n: number): number[] {
+  if (n <= 0) return [];
+  const step = Math.max(1, Math.ceil(n / 8));
+  const out: number[] = [];
+  for (let i = 0; i < n; i += step) out.push(i);
+  const last = n - 1;
+  const tail = out[out.length - 1];
+  // 末尾总要有刻度，但离前一个太近就顶替掉它，否则两个标签会叠在一起
+  if (tail !== last) {
+    if (last - tail < step / 2) out[out.length - 1] = last;
+    else out.push(last);
+  }
+  return out;
+}
+
+/** 柱心在绘图区里的横向百分比，横轴标签按它绝对定位 */
+function leftPct(i: number, n: number): number {
+  return ((i + 0.5) / n) * 100;
+}
+
+/** 柱间空隙：柱很多时（如 30 天 720 柱）空隙总和会超过容器宽度，直接归零 */
+function gapOf(n: number): string {
+  return n > 200 ? '0px' : '1px';
+}
+
 function minuteLabel(ts: number): string {
-  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const d = new Date(ts);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 function hourLabel(iso: string): string {
-  return new Date(iso).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit' });
+  const d = new Date(iso);
+  return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:00`;
 }
+
+/** 横轴刻度：只渲染采样出来的这几个，不再给每根柱塞一个空 span */
+const minuteTicks = computed(() => {
+  const arr = report.value?.minutes ?? [];
+  return tickIndexes(arr.length).map((i) => ({
+    i,
+    left: leftPct(i, arr.length),
+    label: minuteLabel(arr[i].minuteTs),
+  }));
+});
+const hourTicks = computed(() => {
+  const arr = report.value?.hourly ?? [];
+  return tickIndexes(arr.length).map((i) => ({
+    i,
+    left: leftPct(i, arr.length),
+    label: hourLabel(arr[i].bucketTime),
+  }));
+});
+
+/** 柱上数值只画在刻度柱上，与横轴保持同一密度 */
+const minuteValAt = computed(() => new Set(minuteTicks.value.map((t) => t.i)));
+const hourValAt = computed(() => new Set(hourTicks.value.map((t) => t.i)));
 
 /** 一根柱子里 4xx/5xx 的占比，用来染色 */
 function errShare(byClass: Record<number, number>, total: number): number {
@@ -129,15 +196,50 @@ onMounted(load);
         </div>
         <div class="card" style="grid-column: span 2">
           <h3>Realtime (per minute, in-memory)</h3>
-          <div class="spark">
-            <div
-              v-for="m in report.minutes"
-              :key="m.minuteTs"
-              class="spark-bar"
-              :class="{ err: errShare(m.byClass, m.total) > 0.2 }"
-              :style="{ height: Math.max(2, (m.total / minuteMax) * 100) + '%' }"
-              :title="`${minuteLabel(m.minuteTs)} — ${m.total} req`"
-            />
+          <div class="chart">
+            <div class="plot">
+              <div class="y-axis">
+                <div class="y-inner">
+                  <span class="y-tick t100">{{ axisNum(minuteMax) }}</span>
+                  <span class="y-tick t50">{{ axisNum(Math.round(minuteMax / 2)) }}</span>
+                  <span class="y-tick t0">0</span>
+                </div>
+              </div>
+              <div class="plot-area">
+                <div class="gridlines"><span class="gline g0"></span><span class="gline g50"></span><span class="gline g100"></span></div>
+                <div class="bars" :style="{ gap: gapOf(report.minutes.length) }">
+                  <div
+                    v-for="(m, i) in report.minutes"
+                    :key="m.minuteTs"
+                    class="bar-col"
+                    :title="`${minuteLabel(m.minuteTs)} — ${m.total} req`"
+                  >
+                    <span
+                      v-if="m.total > 0 && minuteValAt.has(i)"
+                      class="bar-val"
+                      :style="{ bottom: 'calc(' + barPct(m.total, minuteMax) + '% + 2px)' }"
+                    >{{ axisNum(m.total) }}</span>
+                    <div
+                      class="spark-bar"
+                      :class="{ err: errShare(m.byClass, m.total) > 0.2 }"
+                      :style="{ height: barPct(m.total, minuteMax) + '%' }"
+                    ></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="x-axis">
+              <span class="x-pad"></span>
+              <div class="x-labels">
+                <span
+                  v-for="t in minuteTicks"
+                  :key="t.i"
+                  class="x-tick"
+                  :class="{ first: t.i === 0, last: t.i === report.minutes.length - 1 }"
+                  :style="{ left: t.left + '%' }"
+                >{{ t.label }}</span>
+              </div>
+            </div>
           </div>
           <p class="muted" style="margin: 6px 0 0; font-size: 12px">
             Resets on server restart. Bars turn amber when 4xx+5xx exceeds 20%.
@@ -146,15 +248,50 @@ onMounted(load);
       </div>
 
       <h3 class="section-title">Hourly ({{ report.hours }}h)</h3>
-      <div class="spark tall">
-        <div
-          v-for="h in report.hourly"
-          :key="h.bucketTime"
-          class="spark-bar"
-          :class="{ err: errShare(h.byClass, h.total) > 0.2 }"
-          :style="{ height: Math.max(2, (h.total / hourMax) * 100) + '%' }"
-          :title="`${hourLabel(h.bucketTime)} — ${h.total} req`"
-        />
+      <div class="chart">
+        <div class="plot">
+          <div class="y-axis">
+            <div class="y-inner">
+              <span class="y-tick t100">{{ axisNum(hourMax) }}</span>
+              <span class="y-tick t50">{{ axisNum(Math.round(hourMax / 2)) }}</span>
+              <span class="y-tick t0">0</span>
+            </div>
+          </div>
+          <div class="plot-area hour">
+            <div class="gridlines"><span class="gline g0"></span><span class="gline g50"></span><span class="gline g100"></span></div>
+            <div class="bars" :style="{ gap: gapOf(report.hourly.length) }">
+              <div
+                v-for="(h, i) in report.hourly"
+                :key="h.bucketTime"
+                class="bar-col"
+                :title="`${hourLabel(h.bucketTime)} — ${h.total} req`"
+              >
+                <span
+                  v-if="h.total > 0 && hourValAt.has(i)"
+                  class="bar-val"
+                  :style="{ bottom: 'calc(' + barPct(h.total, hourMax) + '% + 2px)' }"
+                >{{ axisNum(h.total) }}</span>
+                <div
+                  class="spark-bar"
+                  :class="{ err: errShare(h.byClass, h.total) > 0.2 }"
+                  :style="{ height: barPct(h.total, hourMax) + '%' }"
+                ></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="x-axis">
+          <span class="x-pad"></span>
+          <div class="x-labels">
+            <span
+              v-for="t in hourTicks"
+              :key="t.i"
+              class="x-tick"
+              :class="{ first: t.i === 0, last: t.i === report.hourly.length - 1 }"
+              :style="{ left: t.left + '%' }"
+            >{{ t.label }}</span>
+          </div>
+        </div>
       </div>
 
       <h3 class="section-title">By route</h3>
@@ -219,26 +356,121 @@ onMounted(load);
   color: var(--accent);
   font-size: 15px;
 }
-.spark {
-  display: flex;
-  align-items: flex-end;
-  gap: 1px;
-  height: 70px;
-  padding: 6px 8px;
+.chart { margin: 6px 0; }
+.plot { display: flex; align-items: stretch; gap: 8px; }
+.y-axis {
+  position: relative;
+  width: 44px;
+  flex-shrink: 0;
+}
+/*
+ * 刻度带必须和 .gridlines 完全重合，所以用同一套像素偏移：
+ * 上 = 绘图区 1px 边框 + 16px 数值预留，下 = 1px 边框。
+ */
+.y-inner {
+  position: absolute;
+  top: 17px;
+  bottom: 1px;
+  left: 0;
+  right: 4px;
+}
+.y-tick {
+  position: absolute;
+  right: 0;
+  /* 让文字垂直居中压在网格线上，而不是坐在线的上/下方 */
+  transform: translateY(50%);
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.y-tick.t0 { bottom: 0; }
+.y-tick.t50 { bottom: 50%; }
+.y-tick.t100 { bottom: 100%; }
+.plot-area {
+  position: relative;
+  flex: 1;
+  height: 80px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
 }
-.spark.tall { height: 120px; }
-.spark-bar {
+.plot-area.hour { height: 130px; }
+/* 不能叫 .grid —— styles.css 里有全局 .grid { display: grid } 会漏进来 */
+.gridlines,
+.bars {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 16px;
+  bottom: 0;
+}
+.gline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed var(--border);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.gline.g0 { bottom: 0; }
+.gline.g50 { bottom: 50%; }
+.gline.g100 { bottom: 100%; }
+.bars {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+}
+.bar-col {
   flex: 1;
-  min-width: 2px;
+  min-width: 0;
+  position: relative;
+}
+.bar-val {
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 9px;
+  color: var(--muted);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.spark-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   background: var(--accent);
   opacity: 0.75;
   border-radius: 1px 1px 0 0;
 }
-.spark-bar:hover { opacity: 1; }
+.bar-col:hover .spark-bar { opacity: 1; }
 .spark-bar.err { background: var(--warn); }
+.x-axis {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 4px;
+}
+.x-pad { width: 44px; flex-shrink: 0; }
+.x-labels {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 13px;
+}
+.x-tick {
+  position: absolute;
+  /* left 是柱心百分比，平移半个自身宽度让标签正对柱子 */
+  transform: translateX(-50%);
+  font-size: 10px;
+  line-height: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+/* 首尾贴边，避免第一个标签溢出左边、最后一个溢出右边 */
+.x-tick.first { transform: none; }
+.x-tick.last { transform: translateX(-100%); }
 .warnText { color: var(--warn); }
 .dangerText { color: var(--danger); }
 code { font-size: 12px; color: var(--muted); }
