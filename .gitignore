@@ -8,5 +8,6 @@ out/
 packages/server/public/
 .env
 .env.local
+.env.production
 *.vsix
 db-client-connections.json
