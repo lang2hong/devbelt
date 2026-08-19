@@ -78,14 +78,13 @@ export class BackupService {
 
       const ddl = await tableService.getCreateSql(table, database);
       parts.push('');
-      const qualifiedDrop = dbType === DatabaseType.SQLITE
+      const qualified = dbType === DatabaseType.SQLITE
         ? query.dialect.wrap(table)
         : `${query.dialect.wrap(database)}.${query.dialect.wrap(table)}`;
-      parts.push(`DROP TABLE IF EXISTS ${qualifiedDrop};`);
+      parts.push(`DROP TABLE IF EXISTS ${qualified};`);
       parts.push(ddl.replace(/;\s*$/, '') + ';');
 
       if (includeData) {
-        const qualified = query.dialect.wrap(database) + '.' + query.dialect.wrap(table);
         const columns = (await meta.getColumns(table, database)).map((c) => c.name);
         const colList = columns.map((c) => query.dialect.wrap(c)).join(', ');
 

@@ -150,6 +150,24 @@ describe('BackupService', () => {
     expect(dump).toContain('PRAGMA foreign_keys = ON');
   });
 
+  it('databaseDump SQLite 带数据时不限定 database，产出可恢复的 INSERT', async () => {
+    const conn = new FakeConnection();
+    conn.setResponses([{ rows: [{ id: 1, name: 'Alice' }] }]);
+    const query = makeQueryService(conn, new SqliteDialect());
+    const meta = makeMetadataService();
+    const tableService = {
+      getCreateSql: async () => 'CREATE TABLE "users" (\n  "id" INTEGER NOT NULL\n)',
+    } as unknown as TableService;
+
+    const dump = await BackupService.databaseDump(query, meta, tableService, 'test', { includeData: true });
+    expect(dump).toContain('INSERT INTO "users"');
+    expect(conn.executed.some((s) => s.includes('SELECT * FROM "users"'))).toBe(true);
+    // 回归：SQLite 无 database 概念，不能产出 "db"."table" 这种非法限定
+    expect(dump).not.toContain('"test"."users"');
+    expect(conn.executed.some((s) => s.includes('"test"."users"'))).toBe(false);
+    expect(dump).toContain("'Alice'");
+  });
+
   it('includeData=false 不生成 INSERT 语句', async () => {
     const conn = new FakeConnection();
     conn.setResponses([{ rows: [{ id: 1, name: 'Alice' }] }]);

@@ -6,14 +6,25 @@ import type { ConnectionConfig } from '../types/connection';
 import type { QueryCallback } from '../types/query';
 
 /**
- * mysql2 的二进制类型名。
+ * 类型名与「二进制 or 文本」存在多义的类型。
  *
- * 这些列的字节必须原样交给上层：默认的 `buf.toString()` 按 UTF-8 解码，
- * 任何不合法的字节序列会被替换成 U+FFFD，**不可逆**。结果网格里编辑一行
- * 再保存，写回库的就是被替换过的内容 —— 图片、加密字节流、序列化数据全废。
+ * 这些类型**不能用 `field.type` 判定二进制**：MySQL 协议里 BLOB 家族的 type
+ * code 同时代表两类 ——
+ *   - `BLOB`      = BLOB 与 TEXT
+ *   - `TINY_BLOB` = TINYBLOB 与 TINYTEXT
+ *   - `MEDIUM_BLOB`= MEDIUMBLOB 与 MEDIUMTEXT
+ *   - `LONG_BLOB` = LONGBLOB 与 LONGTEXT
+ *   - `STRING`    = CHAR 与 BINARY
+ *   - `VAR_STRING`= VARCHAR 与 VARBINARY
+ *
+ * 真正区分二进制靠**字符集**（characterSet === 63，binary），而这一判断在
+ * mysql2 内部已经做好（readCodeFor 的 default 分支：charset 为 BINARY 时返回
+ * Buffer，否则按列编码返回 string）。因此这类值直接 `next()` 交给 mysql2，
+ * 不在这里用 type 白名单一刀切 —— 一刀切正是「TEXT 被误判成 BLOB、
+ * VARBINARY 被误判成 VARCHAR」的根因。
  */
-const BINARY_TYPES = new Set([
-  'BLOB', 'TINY_BLOB', 'MEDIUM_BLOB', 'LONG_BLOB', 'GEOMETRY',
+const TEXT_OR_BINARY_TYPES = new Set([
+  'BLOB', 'TINY_BLOB', 'MEDIUM_BLOB', 'LONG_BLOB', 'STRING', 'VAR_STRING',
 ]);
 
 /** 日期时间类：交给驱动按 dateStrings 处理，不自己转 */
@@ -145,11 +156,17 @@ export class MysqlConnection extends IConnection {
 
   /** 类型转换：日期交给驱动，二进制保持 Buffer，BIT 转 boolean，其余转字符串 */
   private castField(field: TypeCastField, next: () => unknown): unknown {
+    if (field.type === 'BIT') return this.bitToBoolean(field.buffer());
+    // GEOMETRY：二进制几何值，保持 Buffer（上层自行解析；不走 next 以避免
+    // mysql2 把它解析成 Geometry 对象，改变既有契约）
+    if (field.type === 'GEOMETRY') return field.buffer() ?? null;
+    // JSON：charset 是 63（binary），但内容是 JSON 文本，必须转字符串。
+    if (field.type === 'JSON') return field.buffer()?.toString() ?? null;
     if (DATE_TYPES.has(field.type)) return next();
-    const buf = field.buffer();
-    if (field.type === 'BIT') return this.bitToBoolean(buf);
-    if (BINARY_TYPES.has(field.type)) return buf ?? null;
-    return buf?.toString() ?? null;
+    // BLOB/TEXT/BINARY/VARBINARY：多义类型交给 mysql2 按 charset 解码，
+    // 见 TEXT_OR_BINARY_TYPES 注释 —— 不在这里用 type 判定 binary/text。
+    if (TEXT_OR_BINARY_TYPES.has(field.type)) return next();
+    return field.buffer()?.toString() ?? null;
   }
 
   isAlive(): boolean {

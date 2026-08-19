@@ -175,40 +175,57 @@ describe('typeCast', () => {
   const field = (type: string, buf: Buffer | null) => ({ type, buffer: () => buf });
 
   /**
-   * 二进制列必须保持 Buffer。
+   * BLOB / TEXT / BINARY / VARBINARY 是「二进制 or 文本」多义类型。
    *
-   * 原实现对一切非日期类型走 `buf.toString()`，默认按 UTF-8 解码。BLOB /
-   * VARBINARY / 图片 / 加密后的字节流经过它就**不可逆地损坏**了：任何不是
-   * 合法 UTF-8 的字节序列会被替换成 U+FFFD。这不是显示问题 —— 结果网格里
-   * 编辑一行再保存，写回库的就是被替换过的内容。
+   * MySQL 协议里 `BLOB`=BLOB/TEXT、`STRING`=CHAR/BINARY、`VAR_STRING`=VARCHAR/VARBINARY
+   * 共享 type code，真正区分二进制靠列的 characterSet（63=binary），而这一区分
+   * mysql2 已在内部做对（text_parser 的 readCodeFor）。因此这些类型直接委托给
+   * next()，不在这里用 type 白名单一刀切 —— 一刀切正是「TEXT 被误判成 Buffer、
+   * SHOW COLUMNS 的 Type/Comment 等元数据文本列渲染成 {"type":"Buffer"}」的根因。
    */
-  it('BLOB / 二进制列返回 Buffer，不做 UTF-8 解码', () => {
+  it('BLOB/TEXT/BINARY/VARBINARY 委托给 next（由 mysql2 按 charset 判定）', () => {
     const cast = castOf();
-    const raw = Buffer.from([0x00, 0xff, 0xfe, 0x41]);
-    for (const t of ['BLOB', 'TINY_BLOB', 'MEDIUM_BLOB', 'LONG_BLOB', 'GEOMETRY']) {
-      const out = cast(field(t, raw), () => 'NEXT');
-      expect(Buffer.isBuffer(out), `${t} 应保持 Buffer`).toBe(true);
-      expect((out as Buffer).equals(raw)).toBe(true);
-    }
-  });
-
-  it('文本列仍返回字符串', () => {
-    const cast = castOf();
-    expect(cast(field('VAR_STRING', Buffer.from('héllo')), () => 'NEXT')).toBe('héllo');
-  });
-
-  it('日期时间类交给驱动处理（dateStrings 生效）', () => {
-    const cast = castOf();
-    for (const t of ['DATETIME', 'TIMESTAMP', 'DATE', 'TIME', 'NEWDATE']) {
+    for (const t of ['BLOB', 'TINY_BLOB', 'MEDIUM_BLOB', 'LONG_BLOB', 'STRING', 'VAR_STRING']) {
       expect(cast(field(t, Buffer.from('x')), () => 'NEXT')).toBe('NEXT');
     }
   });
 
-  it('BIT 仍转 boolean，NULL 保持 null', () => {
+  /**
+   * GEOMETRY 保持 Buffer，不委托 next —— next 会把它解析成 Geometry 对象，
+   * 改变既有契约（上层拿到的是 Buffer）。
+   */
+  it('GEOMETRY 保持 Buffer', () => {
+    const cast = castOf();
+    const raw = Buffer.from([0x00, 0xff, 0xfe, 0x41]);
+    expect(cast(field('GEOMETRY', raw), () => 'NEXT')).toBe(raw);
+  });
+
+  /** JSON 列 charset 是 binary，但内容是 JSON 文本，必须转字符串。 */
+  it('JSON 转字符串', () => {
+    const cast = castOf();
+    expect(cast(field('JSON', Buffer.from('{"a":1}')), () => 'NEXT')).toBe('{"a":1}');
+  });
+
+  it('日期时间类交给驱动处理（dateStrings 生效）', () => {
+    const cast = castOf();
+    for (const t of ['DATETIME', 'TIMESTAMP', 'DATE', 'TIME', 'NEWDATE', 'DATETIME2']) {
+      expect(cast(field(t, Buffer.from('x')), () => 'NEXT')).toBe('NEXT');
+    }
+  });
+
+  it('BIT 仍转 boolean', () => {
     const cast = castOf();
     expect(cast(field('BIT', Buffer.from([1])), () => 'NEXT')).toBe(true);
     expect(cast(field('BIT', Buffer.from([0])), () => 'NEXT')).toBe(false);
-    expect(cast(field('VAR_STRING', null), () => 'NEXT')).toBe(null);
+  });
+
+  /** 数值等其它类型仍转字符串（保持 numeric→string 现状，不漂移）。 */
+  it('数值等其它类型转字符串', () => {
+    const cast = castOf();
+    for (const t of ['LONG', 'TINY', 'FLOAT', 'DOUBLE', 'NEWDECIMAL']) {
+      expect(cast(field(t, Buffer.from('123')), () => 'NEXT')).toBe('123');
+    }
+    expect(cast(field('LONG', null), () => 'NEXT')).toBe(null);
   });
 });
 

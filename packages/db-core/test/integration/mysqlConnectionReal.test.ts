@@ -59,6 +59,53 @@ describe.skipIf(!URL)('MysqlConnection 真库行为', () => {
     }
   }, 30_000);
 
+  it('TEXT 列返回字符串，不被误判成 Buffer', async () => {
+    const T = `z_text_${Date.now()}`;
+    const admin = await createConnection({ ...cfg() });
+    const { con, q } = svc();
+    await connect(con);
+    try {
+      // TEXT 与 BLOB 在 MySQL 协议里共享 type code（0xfc），区分全靠列的字符集：
+      // BLOB 是 binary、TEXT 是文本。此前 castField 用 type 白名单把二者一并判为
+      // Buffer，导致 TEXT 列在结果网格误显 [BLOB N B]。
+      await admin.query(`CREATE TABLE \`${T}\` (id INT PRIMARY KEY, body TEXT, note LONGTEXT)`);
+      await admin.query(`INSERT INTO \`${T}\` VALUES (1, 'hello text', 'hello longtext')`);
+      const res = await q.query(`SELECT body, note FROM \`${T}\` WHERE id = 1`);
+      const row: any = res.rows[0];
+      expect(typeof row.body).toBe('string');
+      expect(row.body).toBe('hello text');
+      expect(row.note).toBe('hello longtext');
+    } finally {
+      await admin.query(`DROP TABLE IF EXISTS \`${T}\``);
+      await admin.end();
+      con.end();
+    }
+  }, 30_000);
+
+  /**
+   * 设计视图的根因回归：SHOW FULL COLUMNS 的 Type/Comment 等文本列，协议上被标成
+   * BLOB 类型。此前 castField 因此把它们返回成 Buffer，设计器把这些列渲染成
+   * {"type":"Buffer","data":[...]}。修好后必须是字符串。
+   */
+  it('SHOW FULL COLUMNS 元数据列返回字符串，不被误判成 Buffer', async () => {
+    const T = `z_meta_${Date.now()}`;
+    const admin = await createConnection({ ...cfg() });
+    const { con, q } = svc();
+    await connect(con);
+    try {
+      await admin.query(`CREATE TABLE \`${T}\` (id INT PRIMARY KEY, name VARCHAR(64) COMMENT 'nickname')`);
+      const res = await q.query(`SHOW FULL COLUMNS FROM \`${T}\``);
+      const row: any = res.rows[1];
+      expect(typeof row.Type).toBe('string');
+      expect(String(row.Type)).toBe('varchar(64)');
+      expect(String(row.Comment)).toBe('nickname');
+    } finally {
+      await admin.query(`DROP TABLE IF EXISTS \`${T}\``);
+      await admin.end();
+      con.end();
+    }
+  }, 30_000);
+
   it('BIGINT 以字符串返回，不丢精度', async () => {
     const T = `z_big_${Date.now()}`;
     const admin = await createConnection({ ...cfg() });

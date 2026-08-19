@@ -30,7 +30,10 @@ class SQLite {
 
   query(query: string): Promise<ResultNew | ResultNew[]> {
     if (!this.sqliteCommand) {
-      return Promise.resolve({ sql: query, fields: [], rows: [] });
+      return Promise.reject(new Error(
+        'sqlite3 command is not configured. '
+        + 'Install sqlite3 or set the "sqliteCommand" field on this connection.',
+      ));
     }
     return new Promise((res, rej) => {
       let settled = false;

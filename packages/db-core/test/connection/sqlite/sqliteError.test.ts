@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { EventEmitter } from 'events';
 import { SqliteConnection } from '../../../src/connection/sqliteConnection';
+import { SQLite } from '../../../src/connection/sqlite/index';
 
 /**
  * query() 失败路径的进程安全性。
@@ -144,5 +145,26 @@ describe('SqliteConnection query 失败路径', () => {
     });
 
     expect(out.affectedRows).toBe(3);
+  });
+});
+
+/**
+ * SQLite 命令缺失时不能静默成功。
+ *
+ * 原实现 `if (!this.sqliteCommand) return Promise.resolve({ fields: [], rows: [] })`，
+ * 于是 connect()（`SELECT 1`）照样回调 null、后续查询全部静默返回 0 行 ——
+ * 用户看不到任何报错，无从排查。这里固定为显式失败。
+ */
+describe('SQLite 无可用命令时显式失败', () => {
+  it('未提供 sqliteCommand 时 query() reject 而非静默返回空', async () => {
+    const sqlite = new SQLite('/tmp/x.db');
+    await expect(sqlite.query('SELECT 1')).rejects.toThrow(/not configured/);
+  });
+
+  it('SqliteConnection.connect() 在无命令时回调错误，而非假装连上', async () => {
+    const conn = new SqliteConnection({ dbPath: '/tmp/x.db' } as any);
+    const err = await new Promise<any>((resolve) => conn.connect(resolve));
+    expect(err).toBeTruthy();
+    expect(conn.isAlive()).toBe(false);
   });
 });
