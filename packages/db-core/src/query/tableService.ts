@@ -680,20 +680,46 @@ export class TableService {
         return `SHOW CREATE TABLE ${qualified}`;
       case 'PG': {
         validateIdent(table);
-        const schema = database ? `quote_literal(${this.wrap(database)})` : 'current_schema()';
+        /**
+         * 三处此前都是坏的：
+         *
+         * 1. `ad.adsrc` —— `pg_attrdef.adsrc` 在 PostgreSQL **12 被移除**
+         *    （11 起废弃）。引用它的查询在 PG 12+ 上直接报
+         *    `column ad.adsrc does not exist`，也就是说"查看建表语句"这个功能
+         *    在所有现代 PG 上都不工作，而报错完全指不到原因。
+         *    正确写法是 `pg_get_expr(ad.adbin, ad.adrelid)`。
+         *
+         * 2. `quote_literal(${'${this.wrap(database)}'})` —— `wrap` 生成的是**双引号
+         *    标识符** `"myschema"`，而 PG 里双引号表示标识符，于是它被解析成
+         *    "把名为 myschema 的列传给 quote_literal"，报
+         *    `column "myschema" does not exist`。指定 schema 的路径同样是坏的。
+         *    schema 名要以字符串字面量进去。
+         *
+         * 3. 缺 `relkind` 过滤与 `ORDER BY a.attnum`。pg_class 里表、索引、
+         *    序列、视图共用 relname 命名空间，同名索引会让 string_agg 把两个
+         *    对象的列混在一起；而 string_agg 不保证输入顺序，不排序时生成的
+         *    DDL 列顺序随机 —— 拿它去别处建表，按位置赋值的 INSERT 就错列。
+         */
+        const schema = database
+          ? this.esc(validateIdent(database))
+          : 'current_schema()';
         return `SELECT
             'CREATE TABLE ' || quote_ident(c.relname) || ' (' || chr(10) ||
             string_agg(
               '  ' || quote_ident(a.attname) || ' ' || format_type(a.atttypid, a.atttypmod)
                 || CASE WHEN a.attnotnull THEN ' NOT NULL' ELSE '' END
-                || CASE WHEN ad.adsrc IS NOT NULL THEN ' DEFAULT ' || ad.adsrc ELSE '' END,
-              ',' || chr(10)
+                || CASE WHEN ad.adbin IS NOT NULL
+                        THEN ' DEFAULT ' || pg_get_expr(ad.adbin, ad.adrelid)
+                        ELSE '' END,
+              ',' || chr(10) ORDER BY a.attnum
             ) || chr(10) || ');' AS create_sql
           FROM pg_class c
           JOIN pg_namespace n ON n.oid = c.relnamespace
           JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
           LEFT JOIN pg_attrdef ad ON ad.adrelid = c.oid AND ad.adnum = a.attnum
-          WHERE c.relname = '${table}' AND n.nspname = ${schema}
+          WHERE c.relname = ${this.esc(table)}
+            AND n.nspname = ${schema}
+            AND c.relkind IN ('r', 'p')
           GROUP BY c.relname`;
       }
       default:

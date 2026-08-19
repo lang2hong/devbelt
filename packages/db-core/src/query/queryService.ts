@@ -4,15 +4,56 @@ import type { QueryCallback, QueryResult } from '../types/query';
 import type { FieldInfo } from '../types/meta';
 
 /**
+ * 密码赋值的字面量。
+ *
+ * 覆盖 MySQL 的 `IDENTIFIED BY '…'` / `IDENTIFIED WITH plugin BY '…'` 与
+ * PG 的 `[ENCRYPTED] PASSWORD '…'`（含 `WITH LOGIN PASSWORD`）。
+ * 匹配的是 **关键字 + 紧跟的字符串字面量** 这个结构，所以
+ * `SELECT PASSWORD FROM legacy_users` 或备注里出现 "password" 都不会被误伤 ——
+ * 报错里的 SQL 是主要排查线索，误伤等于把有用信息一起抹掉。
+ *
+ * 字面量内部允许 SQL 的双写转义（`''`）与反斜杠转义。
+ */
+const PASSWORD_LITERAL = new RegExp(
+  String.raw`(\b(?:identified\s+(?:with\s+\S+\s+)?by|(?:encrypted\s+)?password)\s+)`
+  + String.raw`('(?:[^']|'')*'|"(?:[^"]|"")*")`,
+  'gi',
+);
+
+/**
+ * 抹掉 SQL 文本里的明文密码。
+ *
+ * 必须在 db-core 里做：上层有十几个 `catch (e) { show(e.message) }`，
+ * 靠每一处自己记得脱敏是维持不住的。
+ *
+ * 这不是"多一层保险"—— 泄漏路径是实打实的：
+ *  - MySQL 的语法错误会回显语句片段，形如
+ *    `... check the manual ... near 'IDENTIFIED BY 'p@ss''`，密码里带个引号
+ *    就足以触发，而这条 message 会被 post 到 webview 显示。
+ *  - `QueryError.sql` 原样带着整条语句，任何日志、`JSON.stringify(err)`
+ *    或将来的错误面板都会把它带出去。
+ */
+export function redactSql(sql: string | undefined): string | undefined {
+  if (!sql) return sql;
+  return sql.replace(PASSWORD_LITERAL, (_m, kw: string) => `${kw}'***'`);
+}
+
+/**
  * 查询错误封装：统一携带 SQL 与耗时，便于上层展示与排查。
+ *
+ * `sql` 与 `message` 在构造时就脱敏，调用方拿到的对象里不存在明文密码 ——
+ * 而不是要求每个展示点自己记得处理。
  */
 export class QueryError extends Error {
+  readonly sql?: string;
+
   constructor(
     message: string,
-    public readonly sql?: string,
+    sql?: string,
     public readonly costTime: number = 0,
   ) {
-    super(message);
+    super(redactSql(message) ?? message);
+    this.sql = redactSql(sql);
     this.name = 'QueryError';
   }
 }
@@ -143,13 +184,16 @@ export class QueryService {
         finish();
         const costTime = Date.now() - start;
         if (err) {
-          this.notifyObserver({ sql, costTime, rowCount: 0, error: err.message }, options);
+          this.notifyObserver(
+            { sql: redactSql(sql)!, costTime, rowCount: 0, error: redactSql(err.message) },
+            options,
+          );
           reject(new QueryError(err.message, sql, costTime));
           return;
         }
         const result = this.normalizeResult(sql, results, fields || [], costTime, options);
         this.notifyObserver(
-          { sql, costTime, rowCount: result.rows.length, affectedRows: result.affectedRows },
+          { sql: redactSql(sql)!, costTime, rowCount: result.rows.length, affectedRows: result.affectedRows },
           options,
         );
         resolve(result);
@@ -236,6 +280,14 @@ export class QueryService {
     // 树视图、补全、导出的表/列清单静默缺项，且无任何提示。
     const truncated = !options?.noTruncate && rows.length > QueryService.maxResultRows;
     if (truncated) rows = rows.slice(0, QueryService.maxResultRows);
-    return { sql, costTime, rows, fields: fields || [], affectedRows, total, truncated, message: truncated ? `Results truncated to ${QueryService.maxResultRows} rows` : undefined };
+    /**
+     * 结果里的 sql 一并脱敏。
+     *
+     * 唯一的消费者是 rowEditor（拿原 SELECT 解析表名以构造 UPDATE），而 SELECT
+     * 不含密码字面量、不会被脱敏规则匹配到 —— 所以这里没有功能代价，
+     * 换来的是"任何流出 db-core 的 SQL 文本都已脱敏"这一条统一的保证，
+     * 不必逐个消费点判断该不该处理。
+     */
+    return { sql: redactSql(sql)!, costTime, rows, fields: fields || [], affectedRows, total, truncated, message: truncated ? `Results truncated to ${QueryService.maxResultRows} rows` : undefined };
   }
 }

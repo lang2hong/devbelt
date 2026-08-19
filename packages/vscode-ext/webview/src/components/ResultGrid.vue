@@ -178,10 +178,21 @@ function startEdit(row: Row, field: Field, index: number) {
   const pk = getPk(row);
   // 无定位列时双击过去毫无反应，用户无从知晓原因
   if (!pk) return showToast(t('wv.grid.cannotEditNoPk'));
+  const raw = row[field.name];
+  /**
+   * 二进制列不能在网格里编辑。
+   *
+   * `String(raw)` 对 `{type:'Buffer',data:[…]}` 得到 `[object Object]` ——
+   * 双击进入编辑再失焦（本组件是"失焦即提交"）就会把这七个字符写进 BLOB 列，
+   * 覆盖掉真实字节。图片、加密数据、序列化对象一次误触就没了，
+   * 而且看不出发生了什么。
+   */
+  if (raw && typeof raw === 'object' && (raw as any).type === 'Buffer') {
+    return showToast(t('wv.grid.cannotEditBinary'));
+  }
   editingRow = row;
   editingField = field;
   editingCell.value = `${index}:${field.name}`;
-  const raw = row[field.name];
   const kind = pickerKindFor(field.name, raw);
   editKind.value = kind;
   // 原生控件要的是 `yyyy-MM-ddTHH:mm:ss` 这类规范格式，DB 文本需先归一
