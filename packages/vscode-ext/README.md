@@ -49,14 +49,14 @@
 ## Cloud Sync
 
 1. Run **DB Client: Login** (`dbclient.login`) and register.
-2. Configure the sync server URL: `dbclient.sync.serverUrl` (default `http://localhost:3000`).
+2. Configure the sync server URL: `dbclient.sync.serverUrl` (defaults to `http://db.xfhyt.com` in production, `http://localhost:3000` in development).
 3. **Sync Push** encrypts your connection config (excluding passwords) with your master password and uploads; **Sync Pull** restores it.
 
 ## Configuration
 
 | Setting | Default | Description |
 |---|---|---|
-| `dbclient.sync.serverUrl` | `http://localhost:3000` | Cloud sync server URL |
+| `dbclient.sync.serverUrl` | `http://db.xfhyt.com` (prod) / `http://localhost:3000` (dev) | Cloud sync server URL |
 | `dbclient.language` | `auto` | Extension language: `auto` / `zh` / `en` |
 
 ## License

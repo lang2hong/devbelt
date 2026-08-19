@@ -10,8 +10,32 @@
  */
 const { build, context } = require('esbuild');
 const path = require('path');
+const fs = require('fs');
 
 const isWatch = process.argv.includes('--watch');
+
+// 构建时读取环境文件，注入为全局常量（define）。
+// 开发（--watch / F5 调试）读 .env，生产打包读 .env.production；
+// 唯一消费方是 src/sync/authService.ts（DEFAULT_SERVER_URL）；
+// 测试不走 esbuild，同名字段由 vitest.config.ts 的 define 提供。
+function loadDotEnv() {
+  const file = path.resolve(__dirname, isWatch ? '.env' : '.env.production');
+  const env = {};
+  if (!fs.existsSync(file)) return env;
+  for (const raw of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!m) continue;
+    let val = m[2].trim();
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    env[m[1]] = val;
+  }
+  return env;
+}
+const env = loadDotEnv();
 
 const options = {
   entryPoints: [path.resolve(__dirname, 'src/extension.ts')],
@@ -28,6 +52,9 @@ const options = {
   // db-core 是 ESM 源码，经由 workspace 链接解析，需声明为可打包依赖
   mainFields: ['module', 'main'],
   logLevel: 'info',
+  define: {
+    __SYNC_SERVER_URL__: JSON.stringify(env.SYNC_SERVER_URL || (isWatch ? 'http://localhost:3000' : 'http://db.xfhyt.com')),
+  },
 };
 
 async function run() {

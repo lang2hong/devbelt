@@ -50,6 +50,5 @@ export function openAdminPanel(auth: AuthService): void {
     void vscode.window.showWarningMessage('Not logged in');
     return;
   }
-  const serverUrl = AuthService.getServerUrl(vscode.workspace.getConfiguration());
-  void vscode.env.openExternal(vscode.Uri.parse(`${serverUrl}/admin`));
+  void vscode.env.openExternal(vscode.Uri.parse(`${auth.serverUrl}/admin`));
 }

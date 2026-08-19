@@ -12,3 +12,6 @@ out/**/*.map
 **/*.test.js
 .gitignore
 .prettierrc
+.env
+.env.example
+.env.production

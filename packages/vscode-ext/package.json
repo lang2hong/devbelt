@@ -1238,9 +1238,8 @@
       "properties": {
         "dbclient.sync.serverUrl": {
           "type": "string",
-          "default": "http://localhost:3000",
           "scope": "machine",
-          "description": "DB Client sync server URL. Machine-scoped on purpose: a workspace-level override would let any cloned repository redirect login credentials, refresh tokens and encrypted sync payloads to an attacker-controlled host."
+          "description": "DB Client sync server URL. Defaults to http://db.xfhyt.com in production and http://localhost:3000 in development (chosen at runtime by the extension mode). Machine-scoped on purpose: a workspace-level override would let any cloned repository redirect login credentials, refresh tokens and encrypted sync payloads to an attacker-controlled host."
         },
         "dbclient.sync.auto": {
           "type": "string",

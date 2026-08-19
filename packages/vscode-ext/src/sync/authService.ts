@@ -3,6 +3,12 @@ import { createHash } from 'crypto';
 import { hostname, platform, arch, release, networkInterfaces, cpus } from 'os';
 import { SyncClient, AuthResult, DeviceInfo } from './syncClient';
 
+// 由 esbuild 构建时从 .env / .env.production 注入（见 esbuild.js 的 define）；测试环境由 vitest.config.ts 提供同名字段
+declare const __SYNC_SERVER_URL__: string;
+
+/** 默认同步服务器地址（构建时由 esbuild 从 .env / .env.production 注入） */
+export const DEFAULT_SERVER_URL = __SYNC_SERVER_URL__;
+
 let _fingerprint: string | undefined;
 
 /** 硬件指纹（确定性，不依赖本地存储；同硬件同值，卸载重装不变） */
@@ -86,7 +92,7 @@ export class AuthService {
 
   constructor(
     private readonly secrets: vscode.SecretStorage,
-    serverUrl: string,
+    readonly serverUrl: string,
   ) {
     this.client = new SyncClient(
       serverUrl,
@@ -152,9 +158,12 @@ export class AuthService {
     return this.accessToken;
   }
 
-  /** 读取服务器地址 */
-  static getServerUrl(config: vscode.WorkspaceConfiguration): string {
-    return config.get<string>(AuthService.SERVER_URL_KEY) || 'http://localhost:3000';
+  /** 读取服务器地址；未配置时回落到构建时注入的默认值（.env / .env.production） */
+  static getServerUrl(
+    config: vscode.WorkspaceConfiguration,
+    fallback: string = DEFAULT_SERVER_URL,
+  ): string {
+    return config.get<string>(AuthService.SERVER_URL_KEY) || fallback;
   }
 
   /** 移除服务器地址设置（供重建客户端） */
