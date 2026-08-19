@@ -294,6 +294,8 @@ describe('SyncService.rollback', () => {
     await service.push(user.id, 'groups', 'v2', 1);
     await service.rollback(user.id, 'groups', 2);
 
-    expect(syncRepo.historyVersions(user.id, 'groups')).toEqual([1, 2]);
+    // 回滚本身也是一次写入，会记下 v3 的快照（真实现一直如此，此前 fake 漏了这步，
+    // 于是这条断言写成了 [1, 2]）。retention=2 → 保留最新两条 = [2, 3]。
+    expect(syncRepo.historyVersions(user.id, 'groups')).toEqual([2, 3]);
   });
 });

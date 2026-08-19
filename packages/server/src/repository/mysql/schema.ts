@@ -207,7 +207,18 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
     ) ENGINE=InnoDB
   `);
 
-  // sync_section_versions 历史版本表（回滚用）
+  /**
+   * sync_section_versions 历史版本表（回滚用）。
+   *
+   * (user_id, section, version) 必须**唯一**。此前只有一个普通索引，于是同一
+   * 版本号可以存在多行 —— `getVersion` 取 `rows[0]` 等于随机挑一条，回滚到
+   * 哪份内容不可预测；`pruneVersions` 的「保留最新 N 条」也会把重复行算进去，
+   * 实际保留的版本数少于套餐承诺。重复行的来源是旧 rollback 实现的丢写竞态
+   * （两个并发回滚都写 current+1）。
+   *
+   * 唯一键同时覆盖了原 idx_sv_user_section 的全部前缀查询，新库不再单独建那个
+   * 普通索引；老库上它已经存在，留着只多一份写入开销，不值得为此加一次 DROP。
+   */
   await mysql.query(`
     CREATE TABLE IF NOT EXISTS sync_section_versions (
       id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -219,9 +230,17 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-      KEY idx_sv_user_section (user_id, section, version)
+      UNIQUE KEY uq_sv_user_section (user_id, section, version)
     ) ENGINE=InnoDB
   `);
+  // 老库补唯一键（表已存在时 CREATE TABLE IF NOT EXISTS 不会改结构）
+  await addIndexIfMissing(
+    mysql,
+    'sync_section_versions',
+    'uq_sv_user_section',
+    'UNIQUE KEY `uq_sv_user_section` (user_id, section, version)',
+    app.log,
+  );
 
   /**
    * traffic_stats 流量统计（小时粒度聚合）。
@@ -308,6 +327,43 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
 
   // plans 数据播种
   await seedPlans(mysql);
+}
+
+/** 只用到 error 级别；FastifyBaseLogger 与 console 都满足 */
+type MinimalLogger = { error: (msg: string) => void };
+
+/**
+ * 幂等加索引。MySQL 没有 `ADD INDEX IF NOT EXISTS`，靠错误码区分三种结果：
+ *
+ * - ER_DUP_KEYNAME(1061)：索引已存在 → 正常，什么都不做。
+ * - ER_DUP_ENTRY(1062)：表里已有违反唯一性的数据 → **记错误日志并继续**。
+ * - 其他错误 → 抛出，让启动失败。
+ *
+ * 为什么 1062 不抛：`initSchema` 跑在服务启动路径上。一次历史脏数据把服务
+ * 永久钉死在起不来的状态，比「少一条唯一性保证但服务在跑」严重得多。
+ * 日志里带上去重 SQL，让运维能自己收尾。
+ */
+export async function addIndexIfMissing(
+  mysql: { query: (sql: string, p?: any[]) => Promise<any> },
+  table: string,
+  indexName: string,
+  definition: string,
+  log?: MinimalLogger,
+): Promise<void> {
+  try {
+    await mysql.query(`ALTER TABLE \`${table}\` ADD ${definition}`);
+  } catch (err: any) {
+    if (err?.code === 'ER_DUP_KEYNAME' || err?.errno === 1061) return;
+    if (err?.code === 'ER_DUP_ENTRY' || err?.errno === 1062) {
+      log?.error(
+        `[schema] 无法为 ${table} 建立索引 ${indexName}：表内已有重复数据。` +
+        `服务继续启动，但该唯一性约束缺失。请先人工去重后重启，` +
+        `例如：DELETE t FROM ${table} t JOIN ${table} k ON <唯一列相同> AND t.id > k.id;`,
+      );
+      return;
+    }
+    throw err;
+  }
 }
 
 /** 幂等加列：列不存在才 ADD（MySQL 无 IF NOT EXISTS 语法，靠错误码兼容） */

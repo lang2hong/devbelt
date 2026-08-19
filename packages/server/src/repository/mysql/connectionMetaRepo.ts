@@ -1,6 +1,9 @@
 import type { IConnectionMetaRepo, ConnectionMetaInput } from '../interfaces.js';
 import type { ConnectionMeta } from '../../domain/entities.js';
-import type { MysqlDb } from './db.js';
+import { withTransaction, type MysqlDb } from './db.js';
+
+/** 能执行 SQL 的东西：连接池或事务连接 */
+type Exec = { query<T = any>(sql: string, params?: any[]): Promise<T> };
 
 /**
  * 连接元数据仓储：connection_meta 表（明文元数据，服务端计量/分析用）。
@@ -23,10 +26,20 @@ export class MysqlConnectionMetaRepo implements IConnectionMetaRepo {
    * 返回值取自**库内真值**（countActive）而不是入参推算 —— 原实现返回的是
    * `metas.filter(m => !m.deleted).length`，与 countActive 读的是两回事，
    * 两者可以不一致，而 /api/me 报的用量与配额校验用的数就此对不上。
+   *
+   * ## 为什么必须包事务
+   *
+   * 「全量替换」由两半组成：上报行 upsert + 未上报行置墓碑。中间断开会留下
+   * **半套数据** —— 新连接已入库、被删连接的墓碑没打上，库内活跃数偏高，
+   * `/api/me` 报的用量与实际对不上，而且没有任何东西会去修正它（下一次 push
+   * 才会覆盖）。500 个连接要分 3 条 INSERT 写，这个窗口不是理论上的。
+   *
+   * countActive 也放在事务内读：在事务外读会拿到别的连接、别的快照，
+   * 返回的数字可能既不是替换前也不是替换后的状态。
    */
   async replaceAll(userId: number, metas: ConnectionMetaInput[]): Promise<number> {
     if (metas.length === 0) {
-      // 全清空：所有现存行置墓碑
+      // 全清空：单条语句本身原子，不必开事务
       await this.db().query(
         'UPDATE connection_meta SET deleted = 1 WHERE user_id = ? AND deleted = 0',
         [userId],
@@ -34,43 +47,49 @@ export class MysqlConnectionMetaRepo implements IConnectionMetaRepo {
       return 0;
     }
 
-    // 分片：500 连接 x 9 参数 = 4500 个占位符，默认 max_allowed_packet 下安全，
-    // 但显式分片避免将来配额调大时撞上包大小或占位符上限
-    const CHUNK = 200;
-    for (let i = 0; i < metas.length; i += CHUNK) {
-      const slice = metas.slice(i, i + CHUNK);
-      const placeholders = slice.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
-      const params: any[] = [];
-      for (const m of slice) {
-        params.push(
-          userId, m.connUuid, m.type, m.name ?? null, m.groupName ?? null,
-          m.enabled ? 1 : 0, m.deleted ? 1 : 0, m.createdAt ?? null, m.updatedAt ?? null,
+    return withTransaction(this.db(), async (tx) => {
+      // 分片：500 连接 x 9 参数 = 4500 个占位符，默认 max_allowed_packet 下安全，
+      // 但显式分片避免将来配额调大时撞上包大小或占位符上限
+      const CHUNK = 200;
+      for (let i = 0; i < metas.length; i += CHUNK) {
+        const slice = metas.slice(i, i + CHUNK);
+        const placeholders = slice.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+        const params: any[] = [];
+        for (const m of slice) {
+          params.push(
+            userId, m.connUuid, m.type, m.name ?? null, m.groupName ?? null,
+            m.enabled ? 1 : 0, m.deleted ? 1 : 0, m.createdAt ?? null, m.updatedAt ?? null,
+          );
+        }
+        await tx.query(
+          `INSERT INTO connection_meta (user_id, conn_uuid, type, name, group_name, enabled, deleted, created_at, updated_at)
+           VALUES ${placeholders}
+           ON DUPLICATE KEY UPDATE
+             type = VALUES(type), name = VALUES(name), group_name = VALUES(group_name),
+             enabled = VALUES(enabled), deleted = VALUES(deleted),
+             created_at = VALUES(created_at), updated_at = VALUES(updated_at)`,
+          params,
         );
       }
-      await this.db().query(
-        `INSERT INTO connection_meta (user_id, conn_uuid, type, name, group_name, enabled, deleted, created_at, updated_at)
-         VALUES ${placeholders}
-         ON DUPLICATE KEY UPDATE
-           type = VALUES(type), name = VALUES(name), group_name = VALUES(group_name),
-           enabled = VALUES(enabled), deleted = VALUES(deleted),
-           created_at = VALUES(created_at), updated_at = VALUES(updated_at)`,
-        params,
+
+      // 本次未上报的行 = 客户端已删除 → 置墓碑。这是「全量替换」的另一半。
+      const uuids = metas.map((m) => m.connUuid);
+      await tx.query(
+        `UPDATE connection_meta SET deleted = 1
+          WHERE user_id = ? AND deleted = 0 AND conn_uuid NOT IN (${uuids.map(() => '?').join(', ')})`,
+        [userId, ...uuids],
       );
-    }
 
-    // 本次未上报的行 = 客户端已删除 → 置墓碑。这是「全量替换」的另一半。
-    const uuids = metas.map((m) => m.connUuid);
-    await this.db().query(
-      `UPDATE connection_meta SET deleted = 1
-        WHERE user_id = ? AND deleted = 0 AND conn_uuid NOT IN (${uuids.map(() => '?').join(', ')})`,
-      [userId, ...uuids],
-    );
-
-    return this.countActive(userId);
+      return this.countActiveOn(tx, userId);
+    });
   }
 
   async countActive(userId: number): Promise<number> {
-    const [rows] = await this.db().query<any[]>(
+    return this.countActiveOn(this.db(), userId);
+  }
+
+  private async countActiveOn(exec: Exec, userId: number): Promise<number> {
+    const [rows] = await exec.query<any[]>(
       'SELECT COUNT(*) AS cnt FROM connection_meta WHERE user_id = ? AND deleted = 0',
       [userId],
     );

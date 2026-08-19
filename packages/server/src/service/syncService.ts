@@ -75,18 +75,21 @@ export class SyncService {
 
     await this.checkQuota(userId, user.planCode, section, newSectionBytes);
 
-    const newVersion = await this.syncRepo.putSectionIfVersion(userId, section, encryptedData, baseVersion);
+    // 当前版本与历史快照必须一起落盘（repo 内单事务）。分两次写会留下
+    // 「当前行已是 version N，但历史里没有 N 的快照」的状态：用户回滚到自己
+    // 刚推的那一版会得到 VERSION_NOT_FOUND。
+    const newVersion = await this.syncRepo.pushSection(userId, section, encryptedData, baseVersion, newSectionBytes);
     if (newVersion === null) {
       const cur = await this.syncRepo.getSection(userId, section);
       throw new ConflictError(cur ? cur.version : 0, baseVersion);
     }
 
+    // connection_meta 与密文不共享事务：跨仓储的原子性要引入 UnitOfWork，
+    // 而这里失败的后果有限 —— meta 只是明文计量副本，配额校验取的是入参投影
+    // （见上），不依赖库内 meta，所以 meta 落后一次不会放宽任何限制，
+    // 下一次 push 会整体覆盖。
     if (section === 'connections' && input.meta) {
       await this.connectionMetaRepo.replaceAll(userId, input.meta);
-    }
-
-    if (newSectionBytes > 0) {
-      await this.syncRepo.recordVersion(userId, section, newVersion, encryptedData, newSectionBytes);
     }
 
     const retention = await this.planPolicy.syncVersionRetention(user.planCode);

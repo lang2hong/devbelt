@@ -6,11 +6,8 @@ import type { FastifyJWT } from '@fastify/jwt';
  */
 declare module 'fastify' {
   interface FastifyInstance {
-    /** @fastify/mysql 注入的 MySQL 连接实例 */
-    mysql: {
-      database: string;
-      query<T = any>(sql: string, params?: any[]): Promise<T>;
-    };
+    /** @fastify/mysql 注入的 MySQL 连接池（promise 模式） */
+    mysql: import('../repository/mysql/db.js').MysqlDb;
     /** JWT 签名密钥（来自配置） */
     jwtSecret: string;
   }

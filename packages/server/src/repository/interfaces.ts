@@ -124,23 +124,28 @@ export interface IUsageEventRepo {
 /**
  * 同步数据访问（方案 A：分节存储 + 历史版本回滚）。
  * - getSection / putSection：当前版本读写
+ * - pushSection：乐观锁写入 + 历史快照（单事务），push 的唯一入口
  * - recordVersion / listVersions / getVersion / pruneVersions：历史版本
- * - rollback：取旧版本密文写回当前行（version+1）
+ * - rollback：取旧版本密文写回当前行（乐观锁，version+1）
  */
 export interface ISyncRepo {
   getSection(userId: number, section: SectionType): Promise<SyncSection | undefined>;
   listSections(userId: number): Promise<SyncSection[]>;
-  /** 写当前版本（不存在则插入）；返回新 version */
+  /** 写当前版本（不存在则插入），无版本校验；仅管理/播种路径使用。返回新 version */
   putSection(userId: number, section: SectionType, encryptedData: string, version: number): Promise<number>;
-  /** 原子乐观锁写入：仅当当前版本匹配 baseVersion 时更新，返回新版本号或 null */
-  putSectionIfVersion(userId: number, section: SectionType, encryptedData: string, baseVersion: number): Promise<number | null>;
-  /** 记录历史版本快照 */
+  /**
+   * 乐观锁写入当前版本 + 记录历史快照，两者同一事务。
+   * 返回新版本号，或 null 表示版本冲突（未产生任何写入）。
+   * dataBytes = 0 时只写当前版本，不记快照。
+   */
+  pushSection(userId: number, section: SectionType, encryptedData: string, baseVersion: number, dataBytes: number): Promise<number | null>;
+  /** 记录历史版本快照（同一 (user, section, version) 覆盖写） */
   recordVersion(userId: number, section: SectionType, version: number, encryptedData: string, dataBytes: number): Promise<void>;
   listVersions(userId: number, section: SectionType, limit: number): Promise<SyncVersionSummary[]>;
   getVersion(userId: number, section: SectionType, version: number): Promise<SyncSectionVersion | undefined>;
   /** 清理超保留数的旧版本（按 version 升序删最旧） */
   pruneVersions(userId: number, section: SectionType, retention: number): Promise<void>;
-  /** 回滚：取指定版本密文写回当前行，新 version = current+1 */
+  /** 回滚：取指定版本密文写回当前行，新 version = current+1（乐观锁，冲突重试后抛 ConflictError） */
   rollback(userId: number, section: SectionType, toVersion: number): Promise<number>;
   /** 统计各 section 当前密文字节总和（配额校验用） */
   sumBytes(userId: number): Promise<number>;

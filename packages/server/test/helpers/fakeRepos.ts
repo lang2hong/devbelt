@@ -33,6 +33,7 @@ import type {
   UsageEvent,
 } from '../../src/domain/entities.js';
 import type { PlanCode, Role, SubStatus, SectionType, UserStatus } from '../../src/domain/enums.js';
+import { ConflictError, VersionNotFoundError } from '../../src/domain/errors.js';
 
 /**
  * 内存假仓储：service/policy 层单测用。
@@ -351,6 +352,26 @@ export class FakeSyncRepo implements ISyncRepo {
     return this.putSection(userId, section, encryptedData, 1);
   }
 
+  /**
+   * 复刻 MysqlSyncRepo.pushSection：乐观锁 + 历史快照。
+   * 真实现里两者在一个事务内；内存实现天然不会半途失败，此处只需保证
+   * 「冲突时一个字都不写」和「dataBytes = 0 不记快照」这两条外部可见语义一致。
+   */
+  async pushSection(
+    userId: number,
+    section: SectionType,
+    encryptedData: string,
+    baseVersion: number,
+    dataBytes: number,
+  ): Promise<number | null> {
+    const newVersion = await this.putSectionIfVersion(userId, section, encryptedData, baseVersion);
+    if (newVersion === null) return null;
+    if (dataBytes > 0) {
+      await this.recordVersion(userId, section, newVersion, encryptedData, dataBytes);
+    }
+    return newVersion;
+  }
+
   async recordVersion(
     userId: number,
     section: SectionType,
@@ -361,6 +382,16 @@ export class FakeSyncRepo implements ISyncRepo {
     const k = key(userId, section);
     const list = this.history.get(k) ?? [];
     const now = new Date();
+    // 唯一键 (user_id, section, version) + ON DUPLICATE KEY UPDATE：同版本覆盖而非追加。
+    // 真实现从 INSERT 改成 upsert 后，这里也必须跟着改 —— 否则 fake 里会攒出
+    // 重复版本行，把「历史表不该有重复版本」这条不变量在单测里遮住。
+    const existing = list.find((v) => v.version === version);
+    if (existing) {
+      existing.encryptedData = encryptedData;
+      existing.dataBytes = dataBytes;
+      existing.updateTime = now;
+      return;
+    }
     list.push({
       id: ++this.seq,
       userId,
@@ -402,12 +433,24 @@ export class FakeSyncRepo implements ISyncRepo {
     this.history.set(k, kept);
   }
 
+  /**
+   * 复刻 MysqlSyncRepo.rollback：走乐观锁 + 记新版本快照。
+   *
+   * 两处此前与真实现不一致的地方：
+   *  - 真实现 rollback 会 recordVersion，fake 不记 —— 于是「回滚后历史里多一条」
+   *    这个可观察行为在单测里看不见。
+   *  - 真实现原本用无条件 upsert（丢写竞态），现已改乐观锁；fake 用 pushSection
+   *    对齐。内存实现无并发，重试分支走不到，但语义一致。
+   * 抛 VersionNotFoundError 而不是裸 Error：路由层按 code 映射 404。
+   */
   async rollback(userId: number, section: SectionType, toVersion: number): Promise<number> {
     const target = await this.getVersion(userId, section, toVersion);
-    if (!target) throw new Error(`version not found: ${toVersion}`);
+    if (!target) throw new VersionNotFoundError(userId, section, toVersion);
     const cur = this.current.get(key(userId, section));
-    const next = (cur ? cur.version : 0) + 1;
-    await this.putSection(userId, section, target.encryptedData, next);
+    const base = cur ? cur.version : 0;
+    const dataBytes = Buffer.byteLength(target.encryptedData, 'utf8');
+    const next = await this.pushSection(userId, section, target.encryptedData, base, dataBytes);
+    if (next === null) throw new ConflictError(base, toVersion);
     return next;
   }
 

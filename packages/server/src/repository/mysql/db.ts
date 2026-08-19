@@ -6,4 +6,58 @@
 export type MysqlDb = {
   database: string;
   query<T = any>(sql: string, params?: any[]): Promise<T>;
+  /**
+   * 从池里借一条连接。事务必须跑在**同一条连接**上 ——
+   * 池的 `query()` 每次可能拿到不同连接，`BEGIN` 和 `COMMIT` 落到两条连接上
+   * 等于什么都没做（还会把一条连接永久留在未提交状态）。
+   */
+  getConnection(): Promise<MysqlTx>;
 };
+
+/** 一条借出的连接：可开事务，用完必须 release 回池 */
+export type MysqlTx = {
+  query<T = any>(sql: string, params?: any[]): Promise<T>;
+  beginTransaction(): Promise<void>;
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
+  release(): void;
+};
+
+/**
+ * 在单条连接的事务里执行一组语句：成功 COMMIT，抛错 ROLLBACK，无论如何 RELEASE。
+ *
+ * 三个容易漏掉的点，都在这里兜住：
+ *
+ * 1. **release 必须在 finally**。忘了归还连接，池会被一次次借出而永不释放，
+ *    达到 connectionLimit 后所有请求卡在获取超时上 —— 表现为「服务突然全挂」，
+ *    且与最初出错的那个请求已经隔开很久，极难定位。
+ * 2. **ROLLBACK 自身也会失败**（连接已断时最典型）。这里吞掉回滚的错误并抛出
+ *    原始错误：连接断了本来就意味着事务不会提交，而调用方需要看到的是业务
+ *    错误，不是「rollback 时 socket 已关闭」。
+ * 3. **COMMIT 失败同样要 release**。COMMIT 抛错时事务已经结束（成或败由
+ *    server 决定），此处不再补一次 ROLLBACK，只把错误抛出去。
+ *
+ * 刻意不提供「嵌套事务」：MySQL 没有真正的嵌套事务，内层 COMMIT 会把外层
+ * 一起提交。需要跨仓储的原子性时应该把连接显式传进去，而不是靠这个函数嵌套。
+ */
+export async function withTransaction<T>(db: MysqlDb, fn: (tx: MysqlTx) => Promise<T>): Promise<T> {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    let result: T;
+    try {
+      result = await fn(conn);
+    } catch (err) {
+      try {
+        await conn.rollback();
+      } catch {
+        // 回滚失败不能掩盖原始错误：调用方要的是业务错误本身
+      }
+      throw err;
+    }
+    await conn.commit();
+    return result;
+  } finally {
+    conn.release();
+  }
+}
