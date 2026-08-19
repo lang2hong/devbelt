@@ -43,6 +43,30 @@ export const refreshTokenBody = {
   properties: { refreshToken: { type: 'string', minLength: 1, maxLength: 512 } },
 } as const;
 
+/**
+ * 登出的 body：refreshToken **可选**。
+ *
+ * `POST /api/auth/refresh` 必须带它（那是唯一的凭据），登出不必：`sid` 是
+ * 权威判据，撤销当前会话只需要它（见 AuthService.logout）。
+ *
+ * 强制必填会让「只存 access token 的客户端」无法真正登出 —— 管理后台正是
+ * 如此（refresh token 放进 localStorage 只是把 15 分钟的泄露窗口扩成 90 天）。
+ * 那样的话后台的"退出"只是清空前端状态，服务端会话仍有效到自然过期，
+ * 共享电脑上等于没登出。
+ *
+ * 仍然拒绝空字符串：客户端传 `refreshToken: ''` 是明显的 bug（拼错字段、
+ * 变量未初始化），静默当作"没传"会把它藏起来。
+ */
+export const logoutBody = {
+  // `['object', 'null']` 而不是 `'object'`：完全不带 body 时 req.body 是
+  // undefined，AJV 会以「body must be object」400 掉。要求登出必须带一个
+  // JSON body 是无谓的摩擦 —— `curl -X POST .../logout -H 'Authorization: ...'`
+  // 是最自然的写法，它应该能工作。
+  type: ['object', 'null'],
+  properties: { refreshToken: { type: 'string', minLength: 1, maxLength: 512 } },
+  additionalProperties: false,
+} as const;
+
 export const changePasswordBody = {
   type: 'object',
   required: ['oldPassword', 'newPassword'],

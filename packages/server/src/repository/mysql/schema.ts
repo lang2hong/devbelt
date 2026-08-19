@@ -8,6 +8,16 @@ import type { FastifyInstance } from 'fastify';
  * 建库不在此处：`app.mysql` 是**连接池**，`USE db` 只对池中借出的那一条连接生效，
  * 其余连接仍无默认库，并发起来会 `ER_NO_DB_ERROR`。库的创建改由 `ensureDatabase()`
  * 在注册池之前用一条临时连接完成，池本身带 `database` 参数，见 app.ts。
+ *
+ * 每张表都**显式**声明 `DEFAULT CHARSET=utf8mb4`，不依赖库的默认字符集。
+ * 理由是具体的：MySQL 的 `character_set_server` 在不少发行版与云实例上仍是
+ * utf8mb3（本项目用的阿里云 RDS 8.0 就是），而 `ensureDatabase()` 只在库
+ * **不存在**时才带上 utf8mb4 —— 部署账号没有建库权限、由 DBA 预建库时
+ * （代码里专门处理了 ER_DBACCESS_DENIED_ERROR，说明这是预期形态），
+ * 库很可能是 utf8mb3，于是所有表继承成 utf8mb3。
+ * 后果不是"某些字符显示成问号"，而是**写入直接失败**：
+ * `Incorrect string value: '\xF0\x9F\x99\x82'` —— 用户给连接起个带 emoji
+ * 的名字、设备名里有 emoji，同步就会报 500。
  */
 export async function initSchema(app: FastifyInstance): Promise<void> {
   const mysql = app.mysql;
@@ -28,7 +38,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       features INT UNSIGNED NOT NULL DEFAULT 0,
       create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
   // 旧 plans 表补列（若已存在）
   await addColumnIfMissing(mysql, 'plans', 'sync_version_retention', 'SMALLINT UNSIGNED NOT NULL DEFAULT 0');
@@ -46,7 +56,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       last_login_time TIMESTAMP NULL DEFAULT NULL,
       create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
   // 旧 users 表补列
   await addColumnIfMissing(mysql, 'users', 'status', "VARCHAR(16) NOT NULL DEFAULT 'active'");
@@ -70,7 +80,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       UNIQUE KEY uq_sub_user (user_id)
-    ) ENGINE=InnoDB
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
   // refresh_tokens 设备会话表
@@ -90,7 +100,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       KEY idx_rt_user (user_id, revoked_time, expires_time)
-    ) ENGINE=InnoDB
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
   // 旧 refresh_tokens 表补 device_id 列
   await addColumnIfMissing(mysql, 'refresh_tokens', 'device_id', 'VARCHAR(64) NULL');
@@ -116,7 +126,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       UNIQUE KEY uq_device_user (user_id, device_id)
-    ) ENGINE=InnoDB
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
   // 旧 devices 表补列
   await addColumnIfMissing(mysql, 'devices', 'vs_machine_id', 'VARCHAR(64) NULL');
@@ -139,7 +149,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       KEY idx_de_user_device (user_id, device_id, create_time)
-    ) ENGINE=InnoDB
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
   // connection_meta 连接元数据表（明文，服务端计量/分析用；内容仍加密存于 sync_sections）
@@ -159,7 +169,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       UNIQUE KEY uq_cm_user_conn (user_id, conn_uuid)
-    ) ENGINE=InnoDB
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
   // sync_events 同步事件留痕表（每次 pull/push 的明文元数据）
@@ -175,7 +185,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       KEY idx_se_user (user_id, create_time)
-    ) ENGINE=InnoDB
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
   // usage_events 用量行为表（连接打开/查询执行的累计计数，明文）
@@ -189,7 +199,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       KEY idx_ue_user (user_id, create_time)
-    ) ENGINE=InnoDB
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
   // sync_sections 分节同步当前版本表（方案 A）
@@ -204,7 +214,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       UNIQUE KEY uq_ss_user_section (user_id, section),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
   /**
@@ -231,7 +241,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       UNIQUE KEY uq_sv_user_section (user_id, section, version)
-    ) ENGINE=InnoDB
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
   // 老库补唯一键（表已存在时 CREATE TABLE IF NOT EXISTS 不会改结构）
   await addIndexIfMissing(
@@ -265,7 +275,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       status_class TINYINT UNSIGNED NOT NULL,
       count INT UNSIGNED NOT NULL DEFAULT 0,
       PRIMARY KEY (bucket_time, route, status_class)
-    ) ENGINE=InnoDB
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
   /**
@@ -287,7 +297,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       KEY idx_tb_time (create_time),
       KEY idx_tb_ip (ip, create_time)
-    ) ENGINE=InnoDB
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
   /**
@@ -307,7 +317,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       window_seconds INT UNSIGNED NOT NULL,
       enabled TINYINT(1) NOT NULL DEFAULT 1,
       update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
   /**
@@ -322,7 +332,43 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       ip VARCHAR(45) NOT NULL PRIMARY KEY,
       note VARCHAR(120) NULL,
       create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  /**
+   * admin_audit_log 管理操作留痕。
+   *
+   * 记的是「谁在什么时候把谁改成了什么」。没有这张表时，提权、改配额、
+   * 放行 IP 只体现为当前状态 —— 事后无法回答「这是谁干的」，多管理员场景下
+   * 出了事只能靠猜。
+   *
+   * 两个刻意的取舍：
+   *
+   * 1. `actor_user_id` **不设外键**。用户被删之后留痕必须还在 ——「谁删了这个
+   *    账号」正是最需要追溯的一类操作，ON DELETE CASCADE 会把证据一起删掉。
+   *    同时冗余一份 actor_email，账号删除后仍能读出是谁。
+   * 2. `detail` 用 TEXT 存 JSON 文本而非 JSON 列类型。这张表只被顺序读取和
+   *    按时间过滤，从不按 detail 内部字段检索，JSON 列换不到检索能力，
+   *    却带来 5.7/8.0 的行为差异和更高的写入开销。
+   *
+   * 这张表**不参与定期清理**：审计留痕的价值随时间增长而不是衰减，而且写入
+   * 频率极低（只有管理操作，不是每请求），涨不起来。
+   */
+  await mysql.query(`
+    CREATE TABLE IF NOT EXISTS admin_audit_log (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      actor_user_id BIGINT UNSIGNED NOT NULL,
+      actor_email VARCHAR(190) NULL,
+      action VARCHAR(64) NOT NULL,
+      target_type VARCHAR(32) NOT NULL,
+      target_id VARCHAR(64) NOT NULL,
+      detail TEXT NULL,
+      ip VARCHAR(45) NULL,
+      create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_aal_time (create_time),
+      KEY idx_aal_actor (actor_user_id, create_time),
+      KEY idx_aal_target (target_type, target_id, create_time)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
   /**
@@ -354,12 +400,57 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
     app.log,
   );
 
+  // 老库遗留的非 utf8mb4 表：只告警，不自动转换
+  await warnNonUtf8mb4Tables(mysql, app.log);
+
   // plans 数据播种
   await seedPlans(mysql);
 }
 
-/** 只用到 error 级别；FastifyBaseLogger 与 console 都满足 */
-type MinimalLogger = { error: (msg: string) => void };
+/**
+ * 检查是否有表不是 utf8mb4，有则告警。
+ *
+ * **刻意不自动 ALTER**：`ALTER TABLE ... CONVERT TO CHARACTER SET` 会重建整张
+ * 表并全程持锁，在有数据的生产库上是分钟级的停顿；它还会改变索引键的字节
+ * 长度，某些前缀索引可能直接超限而失败。这种操作必须由人挑时间窗口执行，
+ * 不能藏在服务启动流程里。
+ *
+ * 告警本身有价值：utf8mb4 的缺失只在用户恰好输入了四字节字符时才暴露，
+ * 而那时表现为一个难以复现的 500。启动日志里的一行提示能省掉整轮排查。
+ */
+async function warnNonUtf8mb4Tables(
+  mysql: { query: (sql: string, p?: any[]) => Promise<any> },
+  log?: MinimalLogger,
+): Promise<void> {
+  if (!log) return;
+  try {
+    const [rows] = await mysql.query(
+      `SELECT table_name AS t, table_collation AS c
+         FROM information_schema.tables
+        WHERE table_schema = DATABASE() AND table_collation NOT LIKE 'utf8mb4%'`,
+    );
+    const bad = (rows as any[]).map((r) => `${r.t}(${r.c})`);
+    if (bad.length > 0) {
+      log.warn(
+        { tables: bad },
+        'these tables are not utf8mb4; four-byte characters (emoji) will fail to insert. '
+        + 'Convert them during a maintenance window: ALTER TABLE <t> CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci',
+      );
+    }
+  } catch (err) {
+    // 检查失败不该阻止启动 —— 它只是诊断
+    log.warn({ err }, 'charset check skipped');
+  }
+}
+
+/**
+ * 只用到 error / warn 两级；FastifyBaseLogger 与 console 都满足。
+ * warn 的两种调用形态（`warn(msg)` 与 `warn(obj, msg)`）都要能编译。
+ */
+type MinimalLogger = {
+  error: (msg: string) => void;
+  warn: (arg1: unknown, arg2?: string) => void;
+};
 
 /**
  * 幂等加索引。MySQL 没有 `ADD INDEX IF NOT EXISTS`，靠错误码区分三种结果：

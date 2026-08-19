@@ -230,6 +230,47 @@ describe('会话自然过期后 access token 失效', () => {
     expect(res.statusCode).toBe(200);
   });
 
+  /**
+   * 不持有 refresh token 的客户端也必须能真正登出。
+   *
+   * 管理后台就是这样一个客户端：它只把 access token 存进 localStorage
+   * （refresh token 放进浏览器存储没有意义 —— 一个能读 localStorage 的 XSS
+   * 会把两个都拿走，只是把 15 分钟的窗口扩成 90 天）。如果登出接口硬要
+   * refreshToken 字段，后台的"退出"就只能停留在清空前端状态，服务端会话
+   * 仍然有效直到自然过期。共享电脑上这等于没登出。
+   *
+   * sid 本身就是权威判据（见 AuthService.logout），所以 refreshToken 该是可选的。
+   */
+  it('登出可以不带 refreshToken：仅凭 sid 撤销当前会话', async () => {
+    const u = await t.makeUser();
+    const headers = t.auth(u.token);
+
+    const res = await t.app.inject({ method: 'POST', url: '/api/auth/logout', headers });
+    expect(res.statusCode).toBe(200);
+
+    expect(t.repos.refreshTokenRepo.tokens.get(u.sid)!.revokedTime).toBeInstanceOf(Date);
+    expect((await t.app.inject({ method: 'GET', url: '/api/me', headers })).statusCode).toBe(401);
+  });
+
+  it('登出带空 body 也可以（后台 fetch 不发 body）', async () => {
+    const u = await t.makeUser();
+    const headers = t.auth(u.token);
+    const res = await t.app.inject({
+      method: 'POST', url: '/api/auth/logout', headers, payload: {},
+    });
+    expect(res.statusCode).toBe(200);
+    expect(t.repos.refreshTokenRepo.tokens.get(u.sid)!.revokedTime).toBeInstanceOf(Date);
+  });
+
+  it('登出仍拒绝空字符串 refreshToken（明显是客户端 bug，不该静默当作没传）', async () => {
+    const u = await t.makeUser();
+    const res = await t.app.inject({
+      method: 'POST', url: '/api/auth/logout', headers: t.auth(u.token),
+      payload: { refreshToken: '' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it('撤销优先于过期报告（两者同时成立时报 SESSION_REVOKED）', async () => {
     const u = await t.makeUser();
     const s = t.repos.refreshTokenRepo.tokens.get(u.sid)!;

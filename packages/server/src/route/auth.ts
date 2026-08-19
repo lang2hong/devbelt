@@ -6,6 +6,7 @@ import {
   changePasswordBody,
   credentialsBody,
   idParam,
+  logoutBody,
   refreshTokenBody,
 } from './schemas.js';
 import { readDeviceHeaders } from './deviceHeaders.js';
@@ -81,8 +82,9 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): 
     getUser: opts.getUser,
     getSession: opts.getSession,
     routes: async (child) => {
-      child.post('/api/auth/logout', { schema: { body: refreshTokenBody } }, async (req, reply) => {
-        const { refreshToken } = req.body as any;
+      child.post('/api/auth/logout', { schema: { body: logoutBody } }, async (req, reply) => {
+        // body 可以整体缺失（fetch 不带 body），故不能直接解构
+        const refreshToken = (req.body as any)?.refreshToken as string | undefined;
         try {
           // sid 是权威判据：即使客户端手上的 refresh token 已被攻击者轮换掉，
           // 当前会话也必须被撤销。见 AuthService.logout 的说明。

@@ -48,8 +48,17 @@ export interface AdminRouteOptions {
  * GET    /admin/users/:id/sessions       列活跃会话
  * DELETE /admin/users/:id/sessions/:sid  吊销指定会话
  * GET    /admin/subscriptions            全部订阅明细
+ * GET    /admin/audit                    管理操作留痕（分页）
  */
 export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions): Promise<void> {
+  /**
+   * 操作者上下文。
+   *
+   * `req.user.sub` 由 requireRole 的 jwtVerify + DB 复核填好，不是客户端可控值。
+   * ip 取 `req.ip`（受 trustProxy 影响，与限流分桶、devices.ip 同一来源）。
+   */
+  const actorOf = (req: { user: { sub: number }; ip: string }) => ({ userId: req.user.sub, ip: req.ip });
+
   app.register(requireRole(['admin']), {
     getUser: opts.getUser,
     getSession: opts.getSession,
@@ -66,7 +75,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions)
       child.post('/admin/plans/:code', { schema: { params: planCodeParam, body: updatePlanBody } }, async (req, reply) => {
         const code = (req.params as any).code as PlanCode;
         try {
-          await opts.adminService.updatePlan(code, req.body as any);
+          await opts.adminService.updatePlan(code, req.body as any, actorOf(req as any));
           reply.send({ ok: true });
         } catch (e) {
           sendError(reply, e);
@@ -102,7 +111,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions)
         const id = Number((req.params as any).id);
         const input = req.body as UpdateUserInput;
         try {
-          await opts.adminService.updateUser(id, input);
+          await opts.adminService.updateUser(id, input, actorOf(req as any));
           reply.send({ ok: true });
         } catch (e) {
           sendError(reply, e);
@@ -113,6 +122,10 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions)
         const id = Number((req.params as any).id);
         const { planCode, period, provider } = req.body as any;
         try {
+          // 手动续费等于免费发放付费套餐，是最需要留痕的一类管理操作
+          await opts.adminService.recordAudit(actorOf(req as any), 'user.renew', 'user', String(id), {
+            planCode, period, provider: provider ?? 'manual',
+          });
           const sub = await opts.paymentService.renew(id, planCode as PlanCode, period as PaymentPeriod, provider);
           reply.send({ subscription: sub });
         } catch (e) {
@@ -134,7 +147,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions)
         const id = Number((req.params as any).id);
         const sid = Number((req.params as any).sid);
         try {
-          await opts.adminService.revokeSession(id, sid);
+          await opts.adminService.revokeSession(id, sid, actorOf(req as any));
           reply.send({ ok: true });
         } catch (e) {
           sendError(reply, e);
@@ -187,6 +200,22 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions)
         try {
           const usageEvents = await opts.adminService.listUsageEvents(id);
           reply.send({ usageEvents });
+        } catch (e) {
+          sendError(reply, e);
+        }
+      });
+
+      /**
+       * 管理操作留痕。
+       *
+       * 只读、只给 admin。放在 admin 作用域下没有额外风险：能读留痕的人
+       * 本来就能做被留痕的操作。
+       */
+      child.get('/admin/audit', { schema: { querystring: paginationQuery } }, async (req, reply) => {
+        const limit = Number((req.query as any).limit ?? 50);
+        const offset = Number((req.query as any).offset ?? 0);
+        try {
+          reply.send(await opts.adminService.listAudit(limit, offset));
         } catch (e) {
           sendError(reply, e);
         }
@@ -246,6 +275,9 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions)
               reply.code(503).send({ message: 'rate limiting not configured', code: 'UNAVAILABLE' });
               return;
             }
+            await opts.adminService.recordAudit(actorOf(req as any), 'ratelimit.update', 'bucket', bucket, {
+              ...(req.body as any),
+            });
             await opts.rateLimitConfig.update(bucket, req.body as any);
             reply.send({ ok: true, rules: opts.rateLimitConfig.listAll() });
           } catch (e) {
@@ -264,6 +296,9 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions)
               reply.code(503).send({ message: 'rate limiting not configured', code: 'UNAVAILABLE' });
               return;
             }
+            await opts.adminService.recordAudit(actorOf(req as any), 'ratelimit.allowlist.add', 'ip', String(ip), {
+              note: note ?? null,
+            });
             await opts.rateLimitConfig.addAllowlist(ip, note);
             reply.send({ ok: true, allowlist: opts.rateLimitConfig.listAllowlist() });
           } catch (e) {
@@ -282,6 +317,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions)
               reply.code(503).send({ message: 'rate limiting not configured', code: 'UNAVAILABLE' });
               return;
             }
+            await opts.adminService.recordAudit(actorOf(req as any), 'ratelimit.allowlist.remove', 'ip', ip, {});
             await opts.rateLimitConfig.removeAllowlist(ip);
             reply.send({ ok: true, allowlist: opts.rateLimitConfig.listAllowlist() });
           } catch (e) {

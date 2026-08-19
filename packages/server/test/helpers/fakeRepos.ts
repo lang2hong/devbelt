@@ -10,6 +10,8 @@ import type {
   IUsageEventRepo,
   ITrafficRepo,
   IRateLimitRepo,
+  IAdminAuditRepo,
+  AdminAuditInput,
   AllowlistRow,
   RateLimitRuleRow,
   TrafficBlockedRow,
@@ -18,6 +20,7 @@ import type {
   PlanEditableFields,
 } from '../../src/repository/interfaces.js';
 import type {
+  AdminAuditLog,
   User,
   Plan,
   Subscription,
@@ -119,6 +122,13 @@ export class FakeUserRepo implements IUserRepo {
 
   async count(): Promise<number> {
     return this.users.size;
+  }
+
+  /** 只数 active 的 admin：被禁用的 admin 登不进来，不能算作「还有人能管」 */
+  async countAdmins(): Promise<number> {
+    let n = 0;
+    for (const u of this.users.values()) if (u.role === 'admin' && u.status === 'active') n += 1;
+    return n;
   }
 }
 
@@ -680,6 +690,34 @@ export class FakeRateLimitRepo implements IRateLimitRepo {
 
   async removeAllowlist(ip: string): Promise<void> {
     this.allowlist.delete(ip);
+  }
+}
+
+/**
+ * 内存审计仓储。
+ *
+ * `failNext` 用来测「留痕写不进去时管理操作必须一起失败」—— 这条不变量
+ * 没法用真实故障触发，只能注入。
+ */
+export class FakeAdminAuditRepo implements IAdminAuditRepo {
+  readonly rows: AdminAuditLog[] = [];
+  failNext = false;
+  private seq = 0;
+
+  async record(entry: AdminAuditInput): Promise<void> {
+    if (this.failNext) {
+      this.failNext = false;
+      throw new Error('simulated audit write failure');
+    }
+    this.rows.push({ ...entry, id: ++this.seq, createTime: new Date() });
+  }
+
+  async list(limit: number, offset: number): Promise<AdminAuditLog[]> {
+    return [...this.rows].reverse().slice(offset, offset + limit);
+  }
+
+  async count(): Promise<number> {
+    return this.rows.length;
   }
 }
 

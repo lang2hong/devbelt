@@ -1,5 +1,6 @@
 import type { PlanCode, Role, SubStatus, SectionType, UserStatus } from '../domain/enums.js';
 import type {
+  AdminAuditLog,
   User,
   Plan,
   Subscription,
@@ -32,6 +33,13 @@ export interface IUserRepo {
   updateStatus(id: number, status: UserStatus): Promise<void>;
   listAll(limit: number, offset: number): Promise<User[]>;
   count(): Promise<number>;
+  /**
+   * 仍能登录的 admin 数量（role='admin' 且 status='active'）。
+   *
+   * 「最后一个 admin」保护的判据。被禁用的 admin 登不进来，不能算作
+   * 「还有人能管」，所以 status 必须一起过滤。
+   */
+  countAdmins(): Promise<number>;
 }
 
 /** 套餐可编辑字段（管理后台编辑套餐） */
@@ -139,6 +147,28 @@ export interface PruneResult {
 export interface IMaintenanceRepo {
   /** 删除 create_time 早于 now - retentionDays 的行；retentionDays <= 0 视为关闭 */
   pruneEvents(retentionDays: number, now?: Date): Promise<PruneResult>;
+}
+
+/** 管理操作的操作者上下文。ip 只用于留痕，不参与任何判定 */
+export interface AuditActor {
+  userId: number;
+  ip?: string;
+}
+
+/** 一条待写入的留痕（id / createTime 由库生成） */
+export type AdminAuditInput = Omit<AdminAuditLog, 'id' | 'createTime'>;
+
+/**
+ * 管理操作留痕仓储。
+ *
+ * 写入失败**必须抛错**，调用方要让业务操作一起失败。吞掉错误的后果是
+ * 「审计表一坏，所有管理操作变成无痕操作」，且没有任何迹象 ——
+ * 这正是攻击者拿到 admin 之后最希望的状态。
+ */
+export interface IAdminAuditRepo {
+  record(entry: AdminAuditInput): Promise<void>;
+  list(limit: number, offset: number): Promise<AdminAuditLog[]>;
+  count(): Promise<number>;
 }
 
 /** 同步事件留痕仓储 */

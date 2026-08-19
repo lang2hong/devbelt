@@ -10,6 +10,7 @@ import {
   FakeConnectionMetaRepo,
   FakeSyncEventRepo,
   FakeUsageEventRepo,
+  FakeAdminAuditRepo,
   makePlan,
 } from '../helpers/fakeRepos.js';
 import { EntityNotFoundError } from '../../src/domain/errors.js';
@@ -29,10 +30,13 @@ async function setup() {
   const connectionMetaRepo = new FakeConnectionMetaRepo();
   const syncEventRepo = new FakeSyncEventRepo();
   const usageEventRepo = new FakeUsageEventRepo();
-  const service = new AdminService(userRepo, planRepo, subRepo, rtRepo, syncRepo, deviceRepo, connectionMetaRepo, syncEventRepo, usageEventRepo);
+  const auditRepo = new FakeAdminAuditRepo();
+  const service = new AdminService(userRepo, planRepo, subRepo, rtRepo, syncRepo, deviceRepo, connectionMetaRepo, syncEventRepo, usageEventRepo, auditRepo);
   const admin = await userRepo.create('admin@example.com', 'h', 'admin', 'pro');
   const alice = await userRepo.create('alice@example.com', 'h', 'user', 'free');
-  return { service, userRepo, planRepo, subRepo, rtRepo, syncRepo, deviceRepo, connectionMetaRepo, syncEventRepo, usageEventRepo, admin, alice };
+  // 管理操作都要带操作者（留痕 + 自伤防护的判据）。这里固定用 admin。
+  const actor = { userId: admin.id, ip: '127.0.0.1' };
+  return { service, userRepo, planRepo, subRepo, rtRepo, syncRepo, deviceRepo, connectionMetaRepo, syncEventRepo, usageEventRepo, auditRepo, admin, alice, actor };
 }
 
 describe('AdminService.listUsers', () => {
@@ -169,16 +173,16 @@ describe('AdminService sessions / plans / subscriptions', () => {
   });
 
   it('revokes a session that belongs to the user', async () => {
-    const { service, rtRepo, alice } = await setup();
+    const { service, rtRepo, alice, actor } = await setup();
     const t = await rtRepo.create({ userId: alice.id, tokenHash: 'h1', expiresTime: new Date(Date.now() + DAY) });
-    await service.revokeSession(alice.id, t.id);
+    await service.revokeSession(alice.id, t.id, actor);
     expect(await service.listSessions(alice.id)).toHaveLength(0);
   });
 
   it('refuses to revoke another user session', async () => {
-    const { service, rtRepo, alice, admin } = await setup();
+    const { service, rtRepo, alice, admin, actor } = await setup();
     const t = await rtRepo.create({ userId: alice.id, tokenHash: 'h1', expiresTime: new Date(Date.now() + DAY) });
-    await expect(service.revokeSession(admin.id, t.id)).rejects.toBeInstanceOf(EntityNotFoundError);
+    await expect(service.revokeSession(admin.id, t.id, actor)).rejects.toBeInstanceOf(EntityNotFoundError);
   });
 
   it('lists subscriptions with owner email', async () => {
@@ -196,8 +200,8 @@ describe('AdminService sessions / plans / subscriptions', () => {
 
 describe('AdminService.updateUser', () => {
   it('updates role/plan/status', async () => {
-    const { service, userRepo, alice } = await setup();
-    await service.updateUser(alice.id, { role: 'admin', planCode: 'pro', status: 'disabled' });
+    const { service, userRepo, alice, actor } = await setup();
+    await service.updateUser(alice.id, { role: 'admin', planCode: 'pro', status: 'disabled' }, actor);
     const u = await userRepo.findById(alice.id);
     expect(u?.role).toBe('admin');
     expect(u?.planCode).toBe('pro');
@@ -213,41 +217,41 @@ describe('AdminService.updateUser', () => {
    */
   describe('枚举校验', () => {
     it('非法 role 抛 ValidationError 且不写库', async () => {
-      const { service, userRepo, alice } = await setup();
+      const { service, userRepo, alice, actor } = await setup();
       await expect(
-        service.updateUser(alice.id, { role: 'superadmin' as any }),
+        service.updateUser(alice.id, { role: 'superadmin' as any }, actor),
       ).rejects.toThrow(/invalid role/);
       expect((await userRepo.findById(alice.id))?.role).toBe('user');
     });
 
     it('非法 planCode 抛错（防孤儿套餐码导致 /api/me 500）', async () => {
-      const { service, userRepo, alice } = await setup();
+      const { service, userRepo, alice, actor } = await setup();
       const before = (await userRepo.findById(alice.id))?.planCode;
       await expect(
-        service.updateUser(alice.id, { planCode: 'enterprise' as any }),
+        service.updateUser(alice.id, { planCode: 'enterprise' as any }, actor),
       ).rejects.toThrow(/invalid planCode/);
       expect((await userRepo.findById(alice.id))?.planCode).toBe(before);
     });
 
     it('非法 status 抛错', async () => {
-      const { service, alice } = await setup();
+      const { service, alice, actor } = await setup();
       await expect(
-        service.updateUser(alice.id, { status: 'zombie' as any }),
+        service.updateUser(alice.id, { status: 'zombie' as any }, actor),
       ).rejects.toThrow(/invalid status/);
     });
 
     it('校验先于任何写入：一个字段非法则整体不生效', async () => {
-      const { service, userRepo, alice } = await setup();
+      const { service, userRepo, alice, actor } = await setup();
       await expect(
-        service.updateUser(alice.id, { role: 'admin', status: 'bogus' as any }),
+        service.updateUser(alice.id, { role: 'admin', status: 'bogus' as any }, actor),
       ).rejects.toThrow(/invalid status/);
       // role 合法但不应被写入 —— 避免部分生效（无事务，只能靠前置校验）
       expect((await userRepo.findById(alice.id))?.role).toBe('user');
     });
 
     it('空输入是合法的 no-op', async () => {
-      const { service, alice } = await setup();
-      await expect(service.updateUser(alice.id, {})).resolves.toBeUndefined();
+      const { service, alice, actor } = await setup();
+      await expect(service.updateUser(alice.id, {}, actor)).resolves.toBeUndefined();
     });
   });
 });

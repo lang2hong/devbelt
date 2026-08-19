@@ -178,6 +178,24 @@ export interface RateLimitResponse {
   allowlist: string[];
 }
 
+/** 管理操作留痕行。detail 是 { field: { from, to } } 或任意形状的补充信息 */
+export interface AuditRow {
+  id: number;
+  actorUserId: number;
+  actorEmail?: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  detail: Record<string, unknown>;
+  ip?: string;
+  createTime: string;
+}
+
+export interface AuditResponse {
+  total: number;
+  entries: AuditRow[];
+}
+
 export interface MeResponse {
   user: UserInfo;
 }

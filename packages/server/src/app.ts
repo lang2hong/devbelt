@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
 import mysql from '@fastify/mysql';
 import sensible from '@fastify/sensible';
@@ -32,10 +33,12 @@ import { adminUiRoutes } from './route/adminUi.js';
 import { webhookRoutes } from './route/webhook.js';
 import { usageRoutes } from './route/usage.js';
 import { registerErrorHandler } from './middleware/errorHandler.js';
+import { securityHeaders } from './middleware/securityHeaders.js';
 import type { GetAuthUser, GetAuthSession } from './middleware/requireAuth.js';
 import { MysqlTrafficRepo } from './repository/mysql/trafficRepo.js';
 import { MysqlRateLimitRepo } from './repository/mysql/rateLimitRepo.js';
 import { MysqlMaintenanceRepo } from './repository/mysql/maintenanceRepo.js';
+import { MysqlAdminAuditRepo } from './repository/mysql/adminAuditRepo.js';
 import { startMaintenance } from './maintenance.js';
 import { TrafficCollector } from './observability/trafficCollector.js';
 import { registerTrafficPlugin } from './observability/trafficPlugin.js';
@@ -74,6 +77,11 @@ export async function createApp() {
   registerErrorHandler(app);
 
   app.register(cors, { origin: process.env.NODE_ENV === 'production' ? (process.env.CORS_ORIGIN || false) : true });
+  /**
+   * 安全响应头。必须早于路由注册（helmet 挂 onRequest 钩子，Fastify 的封装
+   * 规则让钩子只对之后注册的路由生效）。策略与理由见 securityHeaders()。
+   */
+  app.register(helmet, securityHeaders());
   app.register(sensible);
   app.register(jwt, { secret: config.jwtSecret, sign: { expiresIn: config.accessTokenExpiresIn } });
   // 建库必须早于池注册：池里每条连接都要带默认库，否则并发时非首条连接会 ER_NO_DB_ERROR
@@ -104,6 +112,7 @@ export async function createApp() {
   const trafficRepo = new MysqlTrafficRepo(getMysql);
   const rateLimitRepo = new MysqlRateLimitRepo(getMysql);
   const maintenanceRepo = new MysqlMaintenanceRepo(getMysql);
+  const adminAuditRepo = new MysqlAdminAuditRepo(getMysql);
 
   /**
    * 限流与观测。
@@ -131,7 +140,7 @@ export async function createApp() {
   const authService = new AuthService(userRepo, subRepo, refreshTokenRepo, deviceRepo, tokenService, planPolicy);
   const subscriptionService = new SubscriptionService(userRepo, planRepo, subRepo, refreshTokenRepo, syncRepo, connectionMetaRepo);
   const syncService = new SyncService(syncRepo, userRepo, planPolicy, connectionMetaRepo, syncEventRepo);
-  const adminService = new AdminService(userRepo, planRepo, subRepo, refreshTokenRepo, syncRepo, deviceRepo, connectionMetaRepo, syncEventRepo, usageEventRepo);
+  const adminService = new AdminService(userRepo, planRepo, subRepo, refreshTokenRepo, syncRepo, deviceRepo, connectionMetaRepo, syncEventRepo, usageEventRepo, adminAuditRepo);
   const paymentService = new PaymentService(subRepo, userRepo);
   paymentService.registerProvider(new ManualPaymentAdapter());
 

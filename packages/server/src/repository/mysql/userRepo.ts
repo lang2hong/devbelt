@@ -55,6 +55,20 @@ export class MysqlUserRepo implements IUserRepo {
     const [rows] = await this.db().query<any[]>('SELECT COUNT(*) AS cnt FROM users');
     return Number(rows[0]?.cnt ?? 0);
   }
+
+  /**
+   * 仍能登录的 admin 数量。
+   *
+   * status 必须一起过滤：被禁用的 admin 登不进来，把它算进去会让
+   * 「最后一个 admin」保护在「一个 active + 一个 disabled」时误放行，
+   * 降级掉那个 active 的之后就没人能进后台了。
+   */
+  async countAdmins(): Promise<number> {
+    const [rows] = await this.db().query<any[]>(
+      `SELECT COUNT(*) AS cnt FROM users WHERE role = 'admin' AND status = 'active'`,
+    );
+    return Number(rows[0]?.cnt ?? 0);
+  }
 }
 
 function mapUser(r: any): User {

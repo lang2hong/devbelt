@@ -55,15 +55,45 @@ function goPage(d: number) {
   page.value = Math.min(totalPages.value, Math.max(1, page.value + d));
 }
 
-async function updateUser(id: number, field: string, value: string) {
+/**
+ * 需要二次确认的改动。
+ *
+ * 服务端已经拦掉了不可逆的自伤（自我降级 / 禁用自己 / 降级最后一个 admin），
+ * 但下面这几种是**合法但影响很大**的操作，服务端不该拦、UI 该拦一下：
+ *  - 提权到 admin：一个下拉框的误点就等于交出整个后台
+ *  - 降级 admin / 禁用账号：立刻把对方踢出去
+ * 每一次都会留痕（admin_audit_log），确认只是把"顺手点错"和"确实要做"分开。
+ */
+function confirmMessage(u: UserRow, field: string, value: string): string | null {
+  if (field === 'role' && value === 'admin' && u.role !== 'admin') {
+    return `Grant ADMIN to ${u.email}?\n\nThey will gain full access to this console, including the ability to change plans, revoke sessions and grant admin to others.`;
+  }
+  if (field === 'role' && value === 'user' && u.role === 'admin') {
+    return `Remove admin from ${u.email}?\n\nThey will lose access to this console immediately.`;
+  }
+  if (field === 'status' && value === 'disabled' && u.status !== 'disabled') {
+    return `Disable ${u.email}?\n\nThey will not be able to sign in until re-enabled.`;
+  }
+  return null;
+}
+
+async function updateUser(u: UserRow, field: string, value: string) {
+  const ask = confirmMessage(u, field, value);
+  // 取消时必须重载：<select> 的显示值已经被浏览器改掉了，不刷新会留下
+  // 一个与服务端不一致的界面（看着像已经改了，其实没改）
+  if (ask && !confirm(ask)) {
+    await load();
+    return;
+  }
   try {
     const body: Record<string, string> = {};
     body[field] = value;
-    await api('/admin/users/' + id, { method: 'PATCH', body });
-    await load();
+    await api('/admin/users/' + u.id, { method: 'PATCH', body });
   } catch (ex) {
     alert(ex instanceof Error ? ex.message : String(ex));
   }
+  // 成功或失败都重载：失败时同样要把下拉框拨回服务端的真实值
+  await load();
 }
 
 function planOptions(selected: string): string[] {
@@ -114,19 +144,19 @@ onMounted(load);
           <td>{{ u.id }}</td>
           <td>{{ u.email }}</td>
           <td>
-            <select :value="u.role" @change="updateUser(u.id, 'role', selValue($event))">
+            <select :value="u.role" @change="updateUser(u, 'role', selValue($event))">
               <option value="user">user</option>
               <option value="admin">admin</option>
             </select>
           </td>
           <td>
-            <select :value="u.status" @change="updateUser(u.id, 'status', selValue($event))">
+            <select :value="u.status" @change="updateUser(u, 'status', selValue($event))">
               <option value="active">active</option>
               <option value="disabled">disabled</option>
             </select>
           </td>
           <td>
-            <select :value="u.planCode" @change="updateUser(u.id, 'planCode', selValue($event))">
+            <select :value="u.planCode" @change="updateUser(u, 'planCode', selValue($event))">
               <option v-for="c in planOptions(u.planCode)" :key="c" :value="c">{{ c }}</option>
             </select>
           </td>

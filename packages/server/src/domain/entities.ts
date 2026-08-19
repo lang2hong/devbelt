@@ -179,3 +179,26 @@ export interface Usage {
   syncBytes: number;
   history: number;
 }
+
+/**
+ * 管理操作留痕。
+ *
+ * `detail` 里放的是「改了什么」，通常形如 `{ role: { from, to } }` ——
+ * 只记新值的话，「配额从多少改成多少」事后查不到。
+ * 严禁写入口令散列、token 散列或任何凭据材料：审计表的读取门槛比
+ * users 表低（运维排查会直接 SELECT），把凭据复制进来等于扩大暴露面。
+ */
+export interface AdminAuditLog {
+  id: number;
+  /** 操作者的 users.id。用户被删后仍保留记录，故不设外键级联删除 */
+  actorUserId: number;
+  actorEmail?: string;
+  /** 形如 user.update / session.revoke / plan.update / ratelimit.update */
+  action: string;
+  targetType: string;
+  /** 目标标识。用户是数字 id，套餐是 code，故统一存字符串 */
+  targetId: string;
+  detail: Record<string, unknown>;
+  ip?: string;
+  createTime: Date;
+}

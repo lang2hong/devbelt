@@ -1,6 +1,8 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import jwt from '@fastify/jwt';
+import helmet from '@fastify/helmet';
 import {
+  FakeAdminAuditRepo,
   FakeConnectionMetaRepo,
   FakeDeviceRepo,
   FakePlanRepo,
@@ -15,6 +17,7 @@ import {
   makePlan,
 } from './fakeRepos.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
+import { securityHeaders } from '../../src/middleware/securityHeaders.js';
 import type { GetAuthUser, GetAuthSession } from '../../src/middleware/requireAuth.js';
 import { TokenService, type JwtPort } from '../../src/service/tokenService.js';
 import { AuthService } from '../../src/service/authService.js';
@@ -89,6 +92,7 @@ export interface TestApp {
     syncRepo: FakeSyncRepo;
     trafficRepo: FakeTrafficRepo;
     rateLimitRepo: FakeRateLimitRepo;
+    adminAuditRepo: FakeAdminAuditRepo;
   };
   services: {
     authService: AuthService;
@@ -125,6 +129,9 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   }
 
   registerErrorHandler(app);
+  // 与 createApp 同一份策略、同一个注册位置（早于路由）：
+  // 头部策略只在 app.ts 里注册的话，securityHeaders.test.ts 测不到任何东西
+  await app.register(helmet, securityHeaders());
   await app.register(jwt, { secret: TEST_SECRET, sign: { expiresIn: '15m' } });
 
   const userRepo = new FakeUserRepo();
@@ -145,6 +152,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   const syncRepo = new FakeSyncRepo();
   const trafficRepo = new FakeTrafficRepo();
   const rateLimitRepo = new FakeRateLimitRepo();
+  const adminAuditRepo = new FakeAdminAuditRepo();
 
   // 与 createApp 同序：限流/采集的全局钩子必须早于路由注册
   const collector = new TrafficCollector();
@@ -175,7 +183,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   const syncService = new SyncService(syncRepo, userRepo, planPolicy, connectionMetaRepo, syncEventRepo);
   const adminService = new AdminService(
     userRepo, planRepo, subRepo, refreshTokenRepo, syncRepo,
-    deviceRepo, connectionMetaRepo, syncEventRepo, usageEventRepo,
+    deviceRepo, connectionMetaRepo, syncEventRepo, usageEventRepo, adminAuditRepo,
   );
   const paymentService = new PaymentService(subRepo, userRepo);
   paymentService.registerProvider(new ManualPaymentAdapter());
@@ -231,7 +239,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
     repos: {
       userRepo, planRepo, subRepo, refreshTokenRepo, deviceRepo,
       connectionMetaRepo, syncEventRepo, usageEventRepo, syncRepo,
-      trafficRepo, rateLimitRepo,
+      trafficRepo, rateLimitRepo, adminAuditRepo,
     },
     services: { authService, adminService, paymentService },
     collector,
