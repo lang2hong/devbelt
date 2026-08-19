@@ -171,6 +171,26 @@ export interface IAdminAuditRepo {
   count(): Promise<number>;
 }
 
+/**
+ * webhook 事件去重仓储。
+ *
+ * 幂等键是 `(provider, event_key)`：eventId 的唯一性只在同一支付商内成立，
+ * 两家支付商各自用 `evt_1` 编号完全可能，跨商去重会把第二家的第一个事件吃掉。
+ */
+export interface IWebhookEventRepo {
+  /** 已处理过则返回 true。用于处理前的短路判断 */
+  seen(provider: string, eventKey: string): Promise<boolean>;
+  /**
+   * 记下"已处理"。**必须在业务处理成功之后调用** ——
+   * 先记后做的话，一次中途失败会让该事件被永久标记为已处理，
+   * 支付商的重试全被挡掉，用户付了钱但套餐没生效，且没有任何重试机会。
+   *
+   * 并发下同一事件可能两次都通过 seen() 检查，靠唯一键在这里兜底：
+   * 重复插入不抛错（幂等），返回 false 表示已经有人记过。
+   */
+  record(provider: string, eventKey: string, detail?: Record<string, unknown>): Promise<boolean>;
+}
+
 /** 同步事件留痕仓储 */
 export interface ISyncEventRepo {
   record(event: Omit<SyncEvent, 'id' | 'createTime'>): Promise<void>;

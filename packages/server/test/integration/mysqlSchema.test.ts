@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createPool } from 'mysql2/promise';
 import { initSchema } from '../../src/repository/mysql/schema.js';
 import { MysqlSyncRepo } from '../../src/repository/mysql/syncRepo.js';
+import { resolveTestDb, parseMysqlUrl } from './testDb.js';
 
 /**
  * 真实 MySQL（独立测试库 dbclient_verify）上的 server 持久化行为验证。
@@ -11,20 +12,14 @@ import { MysqlSyncRepo } from '../../src/repository/mysql/syncRepo.js';
  */
 const URL = process.env.MYSQL_TEST_URL;
 
-function hostFrom(url: string) {
-  const m = /^mysql:\/\/([^:]+):([^@]*)@([^:/]+)(?::(\d+))?/.exec(url);
-  if (!m) throw new Error(`bad MYSQL_TEST_URL: ${url}`);
-  const [, user, encPwd, host, port] = m;
-  return { host, port: port ? Number(port) : 3306, user: decodeURIComponent(user), password: decodeURIComponent(encPwd) };
-}
-
-const DB_NAME = 'dbclient_verify';
+// 门禁只在真要连库时求值：URL 未设置时整体 skip，不能因环境变量让文件失败
+const DB_NAME = URL ? resolveTestDb() : 'skipped';
 
 describe.skipIf(!URL)('MySQL initSchema + syncRepo (isolated test db)', () => {
   let pool: ReturnType<typeof createPool> | undefined;
 
   async function freshPool() {
-    const { host, port, user, password } = hostFrom(URL!);
+    const { host, port, user, password } = parseMysqlUrl(URL!);
     pool = createPool({ host, port, user, password, database: DB_NAME, waitForConnections: true, connectionLimit: 5 });
     return pool;
   }

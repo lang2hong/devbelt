@@ -183,3 +183,27 @@ export function toSqlValue(kind: TemporalKind, input: string): string {
 export function canUseNativePicker(kind: TemporalKind, raw: unknown): boolean {
   return toInputValue(kind, raw) !== null;
 }
+
+/**
+ * 该单元格值是否是二进制数据（BLOB / VARBINARY / 图片 / 加密字节流）。
+ *
+ * 二进制列**不能内联编辑**。db-core 的 typeCast 会把这些列保持为 Buffer，
+ * 经 webview 的 postMessage 序列化后是 `{ type: 'Buffer', data: [...] }`，
+ * 而 `String(raw)` 对它得到 `[object Object]` —— 结果网格是"失焦即提交"，
+ * 双击进入编辑再点一下别处就把这七个字符写进了 BLOB 列，覆盖掉真实字节。
+ * 图片、加密数据、序列化对象一次误触就没了，而且界面上看不出发生了什么。
+ *
+ * 放在 utils 而不是组件内部，就为了能被测试钉住：组件里的判断没有测试栈覆盖。
+ */
+export function isBinaryCell(raw: unknown): boolean {
+  if (raw == null || typeof raw !== 'object') return false;
+  const v = raw as { type?: unknown; data?: unknown };
+  // Node Buffer 经 JSON 序列化后的形态
+  if (v.type === 'Buffer' && Array.isArray(v.data)) return true;
+  // 结构化克隆（webview 的 postMessage 在部分宿主下不走 JSON）会保留真实类型
+  if (typeof ArrayBuffer !== 'undefined') {
+    if (raw instanceof ArrayBuffer) return true;
+    if (ArrayBuffer.isView(raw as any)) return true;
+  }
+  return false;
+}

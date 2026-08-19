@@ -1,7 +1,11 @@
 import type { ISubscriptionRepo } from '../interfaces.js';
 import type { Subscription } from '../../domain/entities.js';
 import type { SubStatus, PaymentProvider, PlanCode } from '../../domain/enums.js';
+import { EXPIRABLE_STATUSES } from '../../domain/enums.js';
 import { withTransaction, type MysqlDb } from './db.js';
+
+/** `IN (?, ?, ?)` 的占位符，随 EXPIRABLE_STATUSES 长度自动对齐 */
+const EXPIRABLE_PLACEHOLDERS = EXPIRABLE_STATUSES.map(() => '?').join(', ');
 
 export class MysqlSubscriptionRepo implements ISubscriptionRepo {
   constructor(private readonly db: () => MysqlDb) {}
@@ -73,8 +77,10 @@ export class MysqlSubscriptionRepo implements ISubscriptionRepo {
       `UPDATE subscriptions s
        JOIN users u ON u.id = s.user_id
        SET s.status = 'expired', u.plan_code = 'free'
-       WHERE s.user_id = ? AND s.status = 'active' AND s.period_end_time <= ?`,
-      [userId, now],
+       WHERE s.user_id = ?
+         AND s.status IN (${EXPIRABLE_PLACEHOLDERS})
+         AND s.period_end_time <= ?`,
+      [userId, ...EXPIRABLE_STATUSES, now],
     );
     return (result?.affectedRows ?? 0) > 0;
   }
@@ -87,7 +93,7 @@ export class MysqlSubscriptionRepo implements ISubscriptionRepo {
    * 的用户又只计 1 —— 于是「降级了几个人」这个数字既不是 N 也不是 2N，
    * 运维照着它排查会被直接带偏。单表 UPDATE 的 affectedRows 就是行数。
    *
-   * 顺序不能反：先改 users（JOIN 条件依赖 subscriptions 仍是 active），
+   * 顺序不能反：先改 users（JOIN 条件依赖 subscriptions 仍处于可降级状态），
    * 再把 subscriptions 置 expired。事务保证两张表不会只改一半。
    */
   async downgradeExpired(now: Date): Promise<number> {
@@ -96,13 +102,13 @@ export class MysqlSubscriptionRepo implements ISubscriptionRepo {
         `UPDATE users u
            JOIN subscriptions s ON s.user_id = u.id
             SET u.plan_code = 'free'
-          WHERE s.status = 'active' AND s.period_end_time <= ?`,
-        [now],
+          WHERE s.status IN (${EXPIRABLE_PLACEHOLDERS}) AND s.period_end_time <= ?`,
+        [...EXPIRABLE_STATUSES, now],
       );
       const [result] = await tx.query<any>(
         `UPDATE subscriptions SET status = 'expired'
-          WHERE status = 'active' AND period_end_time <= ?`,
-        [now],
+          WHERE status IN (${EXPIRABLE_PLACEHOLDERS}) AND period_end_time <= ?`,
+        [...EXPIRABLE_STATUSES, now],
       );
       return result?.affectedRows ?? 0;
     });

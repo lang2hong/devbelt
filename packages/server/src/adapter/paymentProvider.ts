@@ -9,6 +9,18 @@ export interface WebhookEvent {
   periodEnd: Date;
   externalId: string;
   provider: ProviderName;
+  /**
+   * 支付商的事件 id，用于幂等去重。
+   *
+   * 支付商在请求超时或收到 5xx 时**必然重试**（Stripe 会持续重试到 3 天），
+   * 所以同一个事件到达多次是常态而非异常。没有去重的话，一条
+   * `subscription_renewed` 处理两次就把周期延长两倍。
+   *
+   * 可选：并非所有支付商都提供，缺失时 PaymentService 退回按事件内容摘要去重。
+   */
+  eventId?: string;
+  /** 事件在支付商侧的发生时间，仅用于留痕排查 */
+  occurredAt?: Date;
 }
 
 /**

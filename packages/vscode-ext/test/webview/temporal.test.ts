@@ -7,6 +7,7 @@ import {
   toInputValue,
   toSqlValue,
   type TemporalKind,
+  isBinaryCell,
 } from '../../webview/src/utils/temporal';
 
 describe('classifyTemporal', () => {
@@ -236,5 +237,41 @@ describe('canUseNativePicker', () => {
 
   it('NULL 走文本回退', () => {
     expect(canUseNativePicker('date', null)).toBe(false);
+  });
+});
+
+/**
+ * 二进制单元格的编辑拦截。
+ *
+ * db-core 现在让 BLOB / VARBINARY 保持 Buffer（此前会被 UTF-8 解码破坏），
+ * 于是结果网格必须挡住对它们的内联编辑：`String(raw)` 对 Buffer 得到
+ * `[object Object]`，而网格是"失焦即提交"—— 双击进入编辑再点一下别处，
+ * 这七个字符就写进 BLOB 列了，真实字节被覆盖且界面上毫无迹象。
+ */
+describe('isBinaryCell', () => {
+  it('识别 JSON 序列化后的 Buffer', () => {
+    expect(isBinaryCell({ type: 'Buffer', data: [0, 255, 65] })).toBe(true);
+    expect(isBinaryCell({ type: 'Buffer', data: [] })).toBe(true);
+  });
+
+  it('识别结构化克隆保留的真实二进制类型', () => {
+    expect(isBinaryCell(new ArrayBuffer(4))).toBe(true);
+    expect(isBinaryCell(new Uint8Array([1, 2]))).toBe(true);
+    expect(isBinaryCell(Buffer.from([1, 2]))).toBe(true);
+  });
+
+  it('普通值不被误判（否则可编辑的列会变成不可编辑）', () => {
+    for (const v of [null, undefined, '', 'text', 0, 42, true, false, '2024-01-01 00:00:00']) {
+      expect(isBinaryCell(v), `${String(v)} 不该被判为二进制`).toBe(false);
+    }
+  });
+
+  it('形似但不是 Buffer 的对象不被误判', () => {
+    // 用户表里真的可能有一列 JSON，内容恰好带 type 字段
+    expect(isBinaryCell({ type: 'Buffer' })).toBe(false);
+    expect(isBinaryCell({ type: 'Buffer', data: 'not-array' })).toBe(false);
+    expect(isBinaryCell({ type: 'other', data: [1] })).toBe(false);
+    expect(isBinaryCell({ a: 1 })).toBe(false);
+    expect(isBinaryCell([1, 2, 3])).toBe(false);
   });
 });

@@ -30,8 +30,14 @@ const MAX_BATCHES_PER_TABLE = 100;
  *
  * 刻意**不含** traffic_stats：那张表是小时粒度聚合，容量上限约每天 3240 行
  * （27 路由 × 5 状态类 × 24 桶），几年都不值得清理，见 schema.ts 的说明。
+ *
+ * 也**不含** admin_audit_log：审计留痕的价值随时间增长而非衰减，且写入频率
+ * 极低（只有管理操作），涨不起来。
+ *
+ * webhook_events 在列：它只用于去重，保留期（默认 90 天）远超所有支付商的
+ * 重试窗口（Stripe 最长 3 天），过期记录没有价值。
  */
-const EVENT_TABLES = ['sync_events', 'usage_events', 'device_events', 'traffic_blocked'] as const;
+const EVENT_TABLES = ['sync_events', 'usage_events', 'device_events', 'traffic_blocked', 'webhook_events'] as const;
 
 /** 运维清理仓储：事件表按保留期删除 + 过期会话行回收 */
 export class MysqlMaintenanceRepo implements IMaintenanceRepo {

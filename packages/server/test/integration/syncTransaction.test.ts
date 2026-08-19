@@ -3,6 +3,7 @@ import { createPool } from 'mysql2/promise';
 import { initSchema, addIndexIfMissing } from '../../src/repository/mysql/schema.js';
 import { MysqlSyncRepo } from '../../src/repository/mysql/syncRepo.js';
 import { MysqlConnectionMetaRepo } from '../../src/repository/mysql/connectionMetaRepo.js';
+import { resolveTestDb, parseMysqlUrl } from './testDb.js';
 
 /**
  * 真实 MySQL 上的事务与唯一键验证（独立测试库 dbclient_verify）。
@@ -12,18 +13,12 @@ import { MysqlConnectionMetaRepo } from '../../src/repository/mysql/connectionMe
  * 门禁：MYSQL_TEST_URL 未设置整个跳过。
  */
 const URL = process.env.MYSQL_TEST_URL;
-const DB_NAME = process.env.MYSQL_TEST_DB || 'dbclient_verify';
-
-function hostFrom(url: string) {
-  const m = /^mysql:\/\/([^:]+):([^@]*)@([^:/]+)(?::(\d+))?/.exec(url);
-  if (!m) throw new Error(`bad MYSQL_TEST_URL: ${url}`);
-  const [, user, encPwd, host, port] = m;
-  return { host, port: port ? Number(port) : 3306, user: decodeURIComponent(user), password: decodeURIComponent(encPwd) };
-}
+// 门禁只在真要连库时求值：URL 未设置时整体 skip，不能因环境变量让文件失败
+const DB_NAME = URL ? resolveTestDb() : 'skipped';
 
 describe.skipIf(!URL)('MySQL 事务与唯一键（isolated test db）', () => {
   async function freshPool() {
-    const { host, port, user, password } = hostFrom(URL!);
+    const { host, port, user, password } = parseMysqlUrl(URL!);
     return createPool({ host, port, user, password, database: DB_NAME, waitForConnections: true, connectionLimit: 8 });
   }
 

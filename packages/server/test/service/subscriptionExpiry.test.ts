@@ -82,15 +82,21 @@ describe('SubscriptionService.ensureActive 只影响当前用户', () => {
     expect((await userRepo.findById(user.id))!.planCode).toBe('pro');
   });
 
-  it('trialing 过期不由 ensureActive 处理（试用到期是支付流程的事）', async () => {
+  /**
+   * 这条用例原先断言的是**相反的行为**——「trialing 过期不由 ensureActive 处理」，
+   * 还给了个听起来合理的理由（"试用到期是支付流程的事"）。那是把缺陷写成了期望：
+   * 没有任何支付流程会来处理 trialing，结果就是注册写下的 trialing 行永远
+   * 停在那里，用户 7 天后 /api/me 仍显示"试用中"。
+   * trialing 与 canceled 的到期处理见 trialExpiry.test.ts。
+   */
+  it('trialing 过期同样由 ensureActive 降级', async () => {
     const { service, subRepo, userRepo, user } = await setup();
     await subRepo.upsert({ userId: user.id, planCode: 'pro', status: 'trialing', periodEndTime: new Date(Date.now() - DAY), provider: 'manual' });
 
     await service.ensureActive(user.id);
 
-    expect(subRepo.expireOneCalls).toBe(0);
-    expect((await subRepo.findByUserId(user.id))!.status).toBe('trialing');
-    expect((await userRepo.findById(user.id))!.planCode).toBe('pro');
+    expect((await subRepo.findByUserId(user.id))!.status).toBe('expired');
+    expect((await userRepo.findById(user.id))!.planCode).toBe('free');
   });
 
   it('无订阅行时什么都不做', async () => {
@@ -127,13 +133,26 @@ describe('SubscriptionService.downgradeExpired（全表，定时任务用）', (
     expect((await userRepo.findById(user.id))!.planCode).toBe('free');
   });
 
-  it('只碰 active：trialing / canceled / expired 都不动', async () => {
+  /**
+   * 同上：原先断言「trialing / canceled / expired 都不动」，把漏处理写成了期望。
+   * 现在 trialing 与 canceled 都要降级，只有 expired 是终态不再重复处理。
+   */
+  it('trialing / canceled 到期降级，expired 是终态不再处理', async () => {
     const { service, subRepo, userRepo } = await setup();
     const past = new Date(Date.now() - DAY);
+    const ids: Record<string, number> = {};
     for (const [i, status] of (['trialing', 'canceled', 'expired'] as const).entries()) {
       const u = await userRepo.create(`s${i}@example.com`, 'scrypt$x$y', 'user', 'pro');
+      ids[status] = u.id;
       await subRepo.upsert({ userId: u.id, planCode: 'pro', status, periodEndTime: past, provider: 'manual' });
     }
-    expect(await service.downgradeExpired()).toBe(0);
+
+    expect(await service.downgradeExpired()).toBe(2);
+
+    expect((await subRepo.findByUserId(ids.trialing))!.status).toBe('expired');
+    expect((await subRepo.findByUserId(ids.canceled))!.status).toBe('expired');
+    expect((await userRepo.findById(ids.trialing))!.planCode).toBe('free');
+    // 已是 expired 的那个用户不该被这次调用计入，plan 也不该被再改一遍
+    expect((await userRepo.findById(ids.expired))!.planCode).toBe('pro');
   });
 });

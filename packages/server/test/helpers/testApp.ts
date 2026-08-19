@@ -4,6 +4,7 @@ import helmet from '@fastify/helmet';
 import {
   FakeAdminAuditRepo,
   FakeConnectionMetaRepo,
+  FakeWebhookEventRepo,
   FakeDeviceRepo,
   FakePlanRepo,
   FakeRateLimitRepo,
@@ -93,6 +94,7 @@ export interface TestApp {
     trafficRepo: FakeTrafficRepo;
     rateLimitRepo: FakeRateLimitRepo;
     adminAuditRepo: FakeAdminAuditRepo;
+    webhookEventRepo: FakeWebhookEventRepo;
   };
   services: {
     authService: AuthService;
@@ -153,6 +155,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   const trafficRepo = new FakeTrafficRepo();
   const rateLimitRepo = new FakeRateLimitRepo();
   const adminAuditRepo = new FakeAdminAuditRepo();
+  const webhookEventRepo = new FakeWebhookEventRepo();
 
   // 与 createApp 同序：限流/采集的全局钩子必须早于路由注册
   const collector = new TrafficCollector();
@@ -185,7 +188,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
     userRepo, planRepo, subRepo, refreshTokenRepo, syncRepo,
     deviceRepo, connectionMetaRepo, syncEventRepo, usageEventRepo, adminAuditRepo,
   );
-  const paymentService = new PaymentService(subRepo, userRepo);
+  const paymentService = new PaymentService(subRepo, userRepo, planRepo, webhookEventRepo);
   paymentService.registerProvider(new ManualPaymentAdapter());
 
   const getUser: GetAuthUser = async (id) => userRepo.findById(id);
@@ -239,7 +242,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
     repos: {
       userRepo, planRepo, subRepo, refreshTokenRepo, deviceRepo,
       connectionMetaRepo, syncEventRepo, usageEventRepo, syncRepo,
-      trafficRepo, rateLimitRepo, adminAuditRepo,
+      trafficRepo, rateLimitRepo, adminAuditRepo, webhookEventRepo,
     },
     services: { authService, adminService, paymentService },
     collector,

@@ -3,6 +3,7 @@ import { createConnection } from 'mysql2/promise';
 import { MysqlConnection } from '../../src/connection/mysqlConnection';
 import { QueryService } from '../../src/query/queryService';
 import { MysqlDialect } from '../../src/dialect/mysqlDialect';
+import { resolveTestDb, parseMysqlUrl } from './testDb.js';
 
 /**
  * 真实 MySQL 上验证连接适配器的两件事：
@@ -12,17 +13,11 @@ import { MysqlDialect } from '../../src/dialect/mysqlDialect';
  * 门禁：MYSQL_TEST_URL。
  */
 const URL = process.env.MYSQL_TEST_URL;
-const DB = process.env.MYSQL_TEST_DB || 'dbclient_verify';
+const DB = URL ? resolveTestDb() : 'skipped';
 
-function hostFrom(url: string) {
-  const m = /^mysql:\/\/([^:]+):([^@]*)@([^:/]+)(?::(\d+))?/.exec(url);
-  if (!m) throw new Error(`bad MYSQL_TEST_URL: ${url}`);
-  const [, user, encPwd, host, port] = m;
-  return { host, port: port ? Number(port) : 3306, user: decodeURIComponent(user), password: decodeURIComponent(encPwd) };
-}
 
 describe.skipIf(!URL)('MysqlConnection 真库行为', () => {
-  const cfg = () => ({ ...hostFrom(URL!), database: DB, connectTimeout: 8000 });
+  const cfg = () => ({ ...parseMysqlUrl(URL!), database: DB, connectTimeout: 8000 });
 
   function svc() {
     const con = new MysqlConnection(cfg());
@@ -170,7 +165,7 @@ describe.skipIf(!URL)('MysqlConnection 真库行为', () => {
   it('连接串模式下精度与二进制行为与字段模式一致', async () => {
     const T = `z_url_${Date.now()}`;
     const admin = await createConnection({ ...cfg() });
-    const { host, port, user, password } = hostFrom(URL!);
+    const { host, port, user, password } = parseMysqlUrl(URL!);
     const url = `mysql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${DB}`;
     const con = new MysqlConnection({
       host, port, user, password, database: DB,

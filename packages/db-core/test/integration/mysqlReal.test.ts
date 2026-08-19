@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createPool } from 'mysql2/promise';
 import { MysqlDialect } from '../../src/dialect/mysqlDialect';
+import { resolveTestDb, parseMysqlUrl } from './testDb.js';
 
 
 /**
@@ -12,18 +13,12 @@ import { MysqlDialect } from '../../src/dialect/mysqlDialect';
  */
 const URL = process.env.MYSQL_TEST_URL;
 
-function hostFrom(url: string) {
-  const m = /^mysql:\/\/([^:]+):([^@]*)@([^:/]+)(?::(\d+))?/.exec(url);
-  if (!m) throw new Error(`bad MYSQL_TEST_URL: ${url}`);
-  const [, user, encPwd, host, port] = m;
-  return { host, port: port ? Number(port) : 3306, user: decodeURIComponent(user), password: decodeURIComponent(encPwd) };
-}
 
-const DB = 'dbclient_verify';
+const DB = URL ? resolveTestDb() : 'skipped';
 
 describe.skipIf(!URL)('db-core MySQL dialect (real db)', () => {
   it('F 项回归：varchar 列填入数字的筛选，必须精确字符串比较', async () => {
-    const { host, port, user, password } = hostFrom(URL!);
+    const { host, port, user, password } = parseMysqlUrl(URL!);
     const pool = createPool({ host, port, user, password, database: DB, waitForConnections: true, connectionLimit: 4 });
     const T = `z_verify_f_${Date.now()}`;
     const qT = `\`${T}\``;
@@ -51,7 +46,7 @@ describe.skipIf(!URL)('db-core MySQL dialect (real db)', () => {
   });
 
   it('escapeValue 写读往返：反斜杠、引号、日期、NULL 经方言转义后读写一致', async () => {
-    const { host, port, user, password } = hostFrom(URL!);
+    const { host, port, user, password } = parseMysqlUrl(URL!);
     const pool = createPool({ host, port, user, password, database: DB, waitForConnections: true, connectionLimit: 4, dateStrings: true });
     const T = `z_verify_esc_${Date.now()}`;
     const qT = `\`${T}\``;
@@ -92,7 +87,7 @@ describe.skipIf(!URL)('db-core MySQL dialect (real db)', () => {
    * 现在全部走 dialect.escapeValue，反斜杠翻倍后写入必须与原值逐字节一致。
    */
   it('反斜杠经 dialect.escapeValue 写入后逐字节一致（修复前会变成 TAB）', async () => {
-    const { host, port, user, password } = hostFrom(URL!);
+    const { host, port, user, password } = parseMysqlUrl(URL!);
     const pool = createPool({ host, port, user, password, database: DB, waitForConnections: true, connectionLimit: 4 });
     const T = `z_verify_bs_${Date.now()}`;
     const qT = `\`${T}\``;
@@ -124,7 +119,7 @@ describe.skipIf(!URL)('db-core MySQL dialect (real db)', () => {
 
   /** 真实库确认表注释现在能读到（修复前 getTableListSql 漏 TABLE_COMMENT，恒为空）。 */
   it('getTableListSql 返回表注释（修复前恒为空）', async () => {
-    const { host, port, user, password } = hostFrom(URL!);
+    const { host, port, user, password } = parseMysqlUrl(URL!);
     const pool = createPool({ host, port, user, password, database: DB, waitForConnections: true, connectionLimit: 4 });
     const T = `z_verify_cmt_${Date.now()}`;
     const qT = `\`${T}\``;
@@ -143,7 +138,7 @@ describe.skipIf(!URL)('db-core MySQL dialect (real db)', () => {
   });
 
   it('mysql 方言 parseIndexList：索引列聚合正确、is_unique/is_primary 归一', async () => {
-    const { host, port, user, password } = hostFrom(URL!);
+    const { host, port, user, password } = parseMysqlUrl(URL!);
     const pool = createPool({ host, port, user, password, database: DB, waitForConnections: true, connectionLimit: 4 });
     const T = `z_verify_idx_${Date.now()}`;
     const qT = `\`${T}\``;

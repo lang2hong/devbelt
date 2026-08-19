@@ -3,6 +3,7 @@ import type {
 } from '../repository/interfaces.js';
 import type { Plan, User, Subscription, Usage } from '../domain/entities.js';
 import { EntityNotFoundError } from '../domain/errors.js';
+import { EXPIRABLE_STATUSES } from '../domain/enums.js';
 
 export interface MeResponse {
   user: Omit<User, 'passwordHash'>;
@@ -46,7 +47,10 @@ export class SubscriptionService {
    */
   async ensureActive(userId: number, now: Date = new Date()): Promise<void> {
     const sub = await this.subRepo.findByUserId(userId);
-    if (!sub || sub.status !== 'active') return;
+    // 与 repo 的 EXPIRABLE_STATUSES 对齐：trialing 与 canceled 到期同样要降级。
+    // 只判 'active' 时，注册写下的 trialing 行永远不会被处理 ——
+    // 用户 7 天后 /api/me 里仍显示"试用中"，而这些行也永不被索引扫到。
+    if (!sub || !EXPIRABLE_STATUSES.includes(sub.status)) return;
     if (sub.periodEndTime > now) return;
     await this.subRepo.expireOne(userId, now);
   }

@@ -372,6 +372,32 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
   `);
 
   /**
+   * webhook_events 支付回调的幂等记录。
+   *
+   * 支付商在请求超时或收到 5xx 时**必然重试**（Stripe 会持续重试到 3 天），
+   * 同一事件到达多次是常态。没有这张表的话，一条 subscription_renewed
+   * 处理两次就把周期延长两倍 —— 白送一个月。
+   *
+   * 唯一键是 `(provider, event_key)` 而不是单独的 event_key：eventId 的
+   * 唯一性只在同一支付商内成立，两家支付商各自用 `evt_1` 编号完全可能，
+   * 跨商去重会把第二家的第一个事件吃掉。
+   *
+   * 这张表**参与定期清理**（按 create_time），保留期内足够覆盖所有支付商的
+   * 重试窗口；过了重试窗口的记录没有价值。
+   */
+  await mysql.query(`
+    CREATE TABLE IF NOT EXISTS webhook_events (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      provider VARCHAR(32) NOT NULL,
+      event_key VARCHAR(191) NOT NULL,
+      detail TEXT NULL,
+      create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_we_provider_key (provider, event_key),
+      KEY idx_we_time (create_time)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  /**
    * 清理与到期扫描所依赖的索引。
    *
    * 这些不是「优化」，是让相关语句可用的前提：

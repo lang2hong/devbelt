@@ -3,6 +3,7 @@ import { createPool } from 'mysql2/promise';
 import { initSchema } from '../../src/repository/mysql/schema.js';
 import { MysqlAdminAuditRepo } from '../../src/repository/mysql/adminAuditRepo.js';
 import { MysqlUserRepo } from '../../src/repository/mysql/userRepo.js';
+import { resolveTestDb, parseMysqlUrl } from './testDb.js';
 
 /**
  * 真库验证审计表与 countAdmins。
@@ -11,18 +12,12 @@ import { MysqlUserRepo } from '../../src/repository/mysql/userRepo.js';
  * 同一个对象、`countAdmins` 的 WHERE 是否真的过滤了 status。
  */
 const URL = process.env.MYSQL_TEST_URL;
-const DB_NAME = process.env.MYSQL_TEST_DB || 'dbclient_verify';
-
-function hostFrom(url: string) {
-  const m = /^mysql:\/\/([^:]+):([^@]*)@([^:/]+)(?::(\d+))?/.exec(url);
-  if (!m) throw new Error(`bad MYSQL_TEST_URL: ${url}`);
-  const [, user, encPwd, host, port] = m;
-  return { host, port: port ? Number(port) : 3306, user: decodeURIComponent(user), password: decodeURIComponent(encPwd) };
-}
+// 门禁只在真要连库时求值：URL 未设置时整体 skip，不能因环境变量让文件失败
+const DB_NAME = URL ? resolveTestDb() : 'skipped';
 
 describe.skipIf(!URL)('admin_audit_log 与 countAdmins（isolated test db）', () => {
   async function freshPool() {
-    const { host, port, user, password } = hostFrom(URL!);
+    const { host, port, user, password } = parseMysqlUrl(URL!);
     return createPool({ host, port, user, password, database: DB_NAME, waitForConnections: true, connectionLimit: 5 });
   }
 
@@ -42,10 +37,12 @@ describe.skipIf(!URL)('admin_audit_log 与 countAdmins（isolated test db）', (
       /**
        * 表必须是 utf8mb4，**不能**继承库的默认字符集。
        *
-       * 这个测试库 dbclient_verify 刻意保持 utf8mb3（阿里云 RDS 的
+       * 本地的测试库 dbclient_verify 刻意保持 utf8mb3（阿里云 RDS 的
        * character_set_server 就是 utf8mb3），正好复现「DBA 预建库、部署账号
-       * 没有建库权限」的生产形态。表继承成 utf8mb3 的后果不是乱码，而是
-       * 用户名/连接名里带 emoji 时写入直接报错。
+       * 没有建库权限」的生产形态 —— 修复前这条断言在本地就是红的。
+       * CI 的 mysql:8 容器默认已是 utf8mb4，那里这条断言只起回归护栏作用。
+       * 表继承成 utf8mb3 的后果不是乱码，而是用户名/连接名里带 emoji
+       * 时写入直接报错。
        */
       const [tinfo]: any = await pool.query(
         `SELECT table_collation c FROM information_schema.tables

@@ -4,7 +4,8 @@ import { useVsCode } from '../composables/useVsCode';
 import { useI18n } from '../composables/useI18n';
 import { FILTER_OP } from '../../../src/utils/filterOps';
 import {
-  canUseNativePicker, classifyTemporal, formatHintFor, inputTypeFor, toInputValue, toSqlValue,
+  canUseNativePicker, classifyTemporal, formatHintFor, inputTypeFor, isBinaryCell,
+  toInputValue, toSqlValue,
   type TemporalKind,
 } from '../utils/temporal';
 
@@ -187,7 +188,7 @@ function startEdit(row: Row, field: Field, index: number) {
    * 覆盖掉真实字节。图片、加密数据、序列化对象一次误触就没了，
    * 而且看不出发生了什么。
    */
-  if (raw && typeof raw === 'object' && (raw as any).type === 'Buffer') {
+  if (isBinaryCell(raw)) {
     return showToast(t('wv.grid.cannotEditBinary'));
   }
   editingRow = row;

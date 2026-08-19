@@ -7,7 +7,9 @@ import type {
   WebhookEvent,
 } from '../../src/adapter/paymentProvider.js';
 import type { PlanCode, PaymentProvider as ProviderName } from '../../src/domain/enums.js';
-import { FakeSubscriptionRepo, FakeUserRepo } from '../helpers/fakeRepos.js';
+import {
+  FakePlanRepo, FakeSubscriptionRepo, FakeUserRepo, FakeWebhookEventRepo, makePlan,
+} from '../helpers/fakeRepos.js';
 
 const DAY = 86400000;
 
@@ -41,9 +43,12 @@ class StubProvider implements PaymentProvider {
 async function setup() {
   const subRepo = new FakeSubscriptionRepo();
   const userRepo = new FakeUserRepo();
-  const service = new PaymentService(subRepo, userRepo);
+  subRepo.linkUsers(userRepo);
+  const planRepo = new FakePlanRepo([makePlan('free'), makePlan('pro'), makePlan('team')]);
+  const eventRepo = new FakeWebhookEventRepo();
+  const service = new PaymentService(subRepo, userRepo, planRepo, eventRepo);
   const user = await userRepo.create('a@example.com', 'scrypt$x$y', 'user', 'free');
-  return { service, subRepo, userRepo, user };
+  return { service, subRepo, userRepo, planRepo, eventRepo, user };
 }
 
 function event(over: Partial<WebhookEvent> = {}): WebhookEvent {

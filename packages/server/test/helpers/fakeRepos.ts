@@ -12,6 +12,7 @@ import type {
   IRateLimitRepo,
   IAdminAuditRepo,
   AdminAuditInput,
+  IWebhookEventRepo,
   AllowlistRow,
   RateLimitRuleRow,
   TrafficBlockedRow,
@@ -36,6 +37,7 @@ import type {
   UsageEvent,
 } from '../../src/domain/entities.js';
 import type { PlanCode, Role, SubStatus, SectionType, UserStatus } from '../../src/domain/enums.js';
+import { EXPIRABLE_STATUSES } from '../../src/domain/enums.js';
 import { ConflictError, VersionNotFoundError } from '../../src/domain/errors.js';
 
 /**
@@ -178,6 +180,9 @@ export class FakeSubscriptionRepo implements ISubscriptionRepo {
     this.users = userRepo;
   }
 
+  /** 置为 true 让下一次 upsert 抛错，用来测「处理失败时不记幂等」 */
+  failNextUpsert = false;
+
   /** findByUserId 调用次数（断言 listUsers 不再走 N+1） */
   findByUserIdCalls = 0;
   /** findByUserIds 调用次数 */
@@ -200,6 +205,10 @@ export class FakeSubscriptionRepo implements ISubscriptionRepo {
   async upsert(
     sub: Omit<Subscription, 'id' | 'createTime' | 'updateTime'> & { id?: number },
   ): Promise<Subscription> {
+    if (this.failNextUpsert) {
+      this.failNextUpsert = false;
+      throw new Error('simulated upsert failure');
+    }
     const now = new Date();
     const existing = sub.id !== undefined
       ? this.subs.get(sub.id)
@@ -222,11 +231,15 @@ export class FakeSubscriptionRepo implements ISubscriptionRepo {
     return [...this.subs.values()];
   }
 
-  /** 复刻真实现：只改这一个用户，status → expired 且 users.plan_code → free */
+  /**
+   * 复刻真实现：只改这一个用户，status → expired 且 users.plan_code → free。
+   * 可降级状态取共享常量 —— fake 里硬编码 'active' 会把 trialing/canceled
+   * 的处理遮住（真实现改了，fake 没改，测试照样绿）。
+   */
   async expireOne(userId: number, now: Date): Promise<boolean> {
     this.expireOneCalls++;
     for (const s of this.subs.values()) {
-      if (s.userId === userId && s.status === 'active' && s.periodEndTime <= now) {
+      if (s.userId === userId && EXPIRABLE_STATUSES.includes(s.status) && s.periodEndTime <= now) {
         s.status = 'expired';
         await this.users?.updatePlan(userId, 'free');
         return true;
@@ -243,7 +256,7 @@ export class FakeSubscriptionRepo implements ISubscriptionRepo {
     this.downgradeCalls++;
     let n = 0;
     for (const s of this.subs.values()) {
-      if (s.status === 'active' && s.periodEndTime <= now) {
+      if (EXPIRABLE_STATUSES.includes(s.status) && s.periodEndTime <= now) {
         s.status = 'expired';
         await this.users?.updatePlan(s.userId, 'free');
         n++;
@@ -718,6 +731,27 @@ export class FakeAdminAuditRepo implements IAdminAuditRepo {
 
   async count(): Promise<number> {
     return this.rows.length;
+  }
+}
+
+/**
+ * 内存 webhook 去重仓储。
+ *
+ * 键与真实现一致地按 `(provider, eventKey)` 组合 —— 只用 eventKey 的话
+ * 「跨支付商不去重」这条不变量就被遮住了。
+ */
+export class FakeWebhookEventRepo implements IWebhookEventRepo {
+  readonly rows = new Map<string, Record<string, unknown> | undefined>();
+
+  async seen(provider: string, eventKey: string): Promise<boolean> {
+    return this.rows.has(`${provider}:${eventKey}`);
+  }
+
+  async record(provider: string, eventKey: string, detail?: Record<string, unknown>): Promise<boolean> {
+    const k = `${provider}:${eventKey}`;
+    if (this.rows.has(k)) return false;
+    this.rows.set(k, detail);
+    return true;
   }
 }
 

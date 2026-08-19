@@ -8,7 +8,7 @@ import { l10n } from '../i18n';
 import { syncLoggedInContext } from '../extension';
 import { refreshAdminCommand, isAdminUser, openAdminPanel } from './admin';
 import type { Deps, Sub } from './shared';
-import { resolveMasterPassword } from './shared';
+import { withMasterPassword } from './shared';
 
 export function registerSyncCommands(deps: Deps, sub: Sub): void {
   const { auth, sync, syncBar, treeProvider } = deps;
@@ -92,15 +92,16 @@ export function registerSyncCommands(deps: Deps, sub: Sub): void {
   });
 
   sub('dbclient.syncPull', async () => {
-    const mp = await resolveMasterPassword(sync, vscode.workspace.getConfiguration('dbclient.sync').get<boolean>('rememberMaster', true));
-    if (!mp) return;
-    let plan;
-    try {
-      plan = await sync.previewPull(mp);
-    } catch (error) {
-      vscode.window.showErrorMessage(l10n('cmd.pullFailed', { message: (error as Error).message }));
-      return;
-    }
+    // previewPull 会解密远端数据 —— 这一步同时验证了主密码，
+    // 所以「记住密码」交给 withMasterPassword 在成功之后做。
+    const outcome = await withMasterPassword(
+      sync,
+      vscode.workspace.getConfiguration('dbclient.sync').get<boolean>('rememberMaster', true),
+      (password) => sync.previewPull(password),
+      (error) => vscode.window.showErrorMessage(l10n('cmd.pullFailed', { message: (error as Error).message })),
+    );
+    if (!outcome) return;
+    const plan = outcome.result;
     if (totalChanges(plan) === 0) {
       vscode.window.showInformationMessage(l10n('cmd.syncUpToDate'));
       return;
@@ -116,19 +117,29 @@ export function registerSyncCommands(deps: Deps, sub: Sub): void {
   });
 
   sub('dbclient.syncPush', async () => {
-    const mp = await resolveMasterPassword(sync, vscode.workspace.getConfiguration('dbclient.sync').get<boolean>('rememberMaster', true));
-    if (!mp) return;
+    /**
+     * push 路径上验证主密码尤其关键：用错误密码加密上传会让其他设备再也解不开
+     * 远端数据 —— 数据丢失级别的后果，而起因只是一次手抖。
+     * previewPush 内部会解密远端数据，正好充当验证。
+     */
+    const outcome = await withMasterPassword(
+      sync,
+      vscode.workspace.getConfiguration('dbclient.sync').get<boolean>('rememberMaster', true),
+      async (password) => {
+        // 本地无变更时也要先验证密码：否则「无需推送」这条提示会在密码错误的
+        // 情况下照样弹出，用户以为一切正常，直到某次真的有变更才发现推不上去。
+        const plan = await sync.previewPush(password);
+        return { plan, dirty: await sync.isLocalDirty() };
+      },
+      (error) => vscode.window.showErrorMessage(l10n('cmd.pushFailed', { message: (error as Error).message })),
+    );
+    if (!outcome) return;
+    const { plan, dirty } = outcome.result;
+    const mp = outcome.password;
+
     // 场景 A：本地无变更，无需推送
-    if (!(await sync.isLocalDirty())) {
+    if (!dirty) {
       vscode.window.showInformationMessage(l10n('cmd.nothingToPush'));
-      return;
-    }
-    // 场景 B/C：拉远端算 diff，判是否存在真冲突（远端有本地不知道的变化）
-    let plan;
-    try {
-      plan = await sync.previewPush(mp);
-    } catch (error) {
-      vscode.window.showErrorMessage(l10n('cmd.pushFailed', { message: (error as Error).message }));
       return;
     }
     if (totalChanges(plan) === 0) {

@@ -39,6 +39,7 @@ import { MysqlTrafficRepo } from './repository/mysql/trafficRepo.js';
 import { MysqlRateLimitRepo } from './repository/mysql/rateLimitRepo.js';
 import { MysqlMaintenanceRepo } from './repository/mysql/maintenanceRepo.js';
 import { MysqlAdminAuditRepo } from './repository/mysql/adminAuditRepo.js';
+import { MysqlWebhookEventRepo } from './repository/mysql/webhookEventRepo.js';
 import { startMaintenance } from './maintenance.js';
 import { TrafficCollector } from './observability/trafficCollector.js';
 import { registerTrafficPlugin } from './observability/trafficPlugin.js';
@@ -113,6 +114,7 @@ export async function createApp() {
   const rateLimitRepo = new MysqlRateLimitRepo(getMysql);
   const maintenanceRepo = new MysqlMaintenanceRepo(getMysql);
   const adminAuditRepo = new MysqlAdminAuditRepo(getMysql);
+  const webhookEventRepo = new MysqlWebhookEventRepo(getMysql);
 
   /**
    * 限流与观测。
@@ -141,7 +143,7 @@ export async function createApp() {
   const subscriptionService = new SubscriptionService(userRepo, planRepo, subRepo, refreshTokenRepo, syncRepo, connectionMetaRepo);
   const syncService = new SyncService(syncRepo, userRepo, planPolicy, connectionMetaRepo, syncEventRepo);
   const adminService = new AdminService(userRepo, planRepo, subRepo, refreshTokenRepo, syncRepo, deviceRepo, connectionMetaRepo, syncEventRepo, usageEventRepo, adminAuditRepo);
-  const paymentService = new PaymentService(subRepo, userRepo);
+  const paymentService = new PaymentService(subRepo, userRepo, planRepo, webhookEventRepo);
   paymentService.registerProvider(new ManualPaymentAdapter());
 
   /**

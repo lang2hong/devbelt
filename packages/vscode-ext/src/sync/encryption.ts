@@ -10,6 +10,24 @@ import * as crypto from 'crypto';
  *  - 每次加密使用随机 salt 与随机 IV，防止重放/模式分析
  *  - 推论：主密码遗失即数据不可恢复；主密码强度即实际安全上限
  */
+/**
+ * 主密码不正确（GCM 认证标签校验失败）。
+ *
+ * 必须与"数据坏了"区分开。两者都表现为 decipher.final() 抛错，但处置完全相反：
+ *  - 密码错 → 清掉记住的密码、提示用户重新输入。重试永远不会成功。
+ *  - 数据坏（信封截断、字段缺失、版本不兼容）→ 密码是对的，反复让用户重输
+ *    只会把人逼疯，真正的问题在载荷本身。
+ *
+ * 自动同步尤其依赖这个区分：它对失败的默认处置是**退避重试直到成功**，
+ * 而一个记错的密码会让它永久重试，每轮都白烧一次 600k 轮 PBKDF2。
+ */
+export class MasterPasswordError extends Error {
+  constructor(message = 'incorrect master password') {
+    super(message);
+    this.name = 'MasterPasswordError';
+  }
+}
+
 export class Encryption {
   private static readonly KEY_LEN = 32; // AES-256
   private static readonly IV_LEN = 12; // GCM 推荐 IV 长度
@@ -187,10 +205,25 @@ export class Encryption {
       { authTagLength: Encryption.TAG_LEN },
     );
     decipher.setAuthTag(Buffer.from(env.tag, 'base64'));
-    const decrypted = Buffer.concat([
-      decipher.update(Buffer.from(env.data, 'base64')),
-      decipher.final(),
-    ]);
+    let decrypted: Buffer;
+    try {
+      decrypted = Buffer.concat([
+        decipher.update(Buffer.from(env.data, 'base64')),
+        decipher.final(),
+      ]);
+    } catch (err) {
+      /**
+       * GCM 认证失败几乎只有一个原因：密钥不对，也就是主密码不对。
+       * （密文被篡改也会走到这里，但那种情况下同样什么都做不了，
+       * 而"密码不对"是用户唯一能采取行动的解释。）
+       *
+       * 换成专门的错误类型，让调用方能区分"重输密码"与"重试网络"——
+       * 原先一律是裸 Error，自动同步只能把它当瞬时故障无限退避重试。
+       */
+      throw new MasterPasswordError(
+        `incorrect master password (${err instanceof Error ? err.message : String(err)})`,
+      );
+    }
     return JSON.parse(decrypted.toString('utf8'));
   }
 }

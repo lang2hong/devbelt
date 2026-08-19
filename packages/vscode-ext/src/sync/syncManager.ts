@@ -2,7 +2,7 @@ import * as crypto from 'crypto';
 import { ConnectionStore } from '../connection/connectionStore';
 import { HistoryStore } from '../history/historyStore';
 import { AuthService } from './authService';
-import { Encryption } from './encryption';
+import { Encryption, MasterPasswordError } from './encryption';
 import { parseSyncPayload, type SyncPayload } from './syncPayload';
 import { computeMergePlan, totalLocalOnly, type MergePlan } from './mergePlan';
 import { MasterPasswordStore } from './masterPasswordStore';
@@ -208,6 +208,18 @@ export class SyncManager {
     return this.hashStore.get<number>(SyncManager.LAST_SYNC_AT_KEY) ?? 0;
   }
 
+  /**
+   * 自动同步一轮。
+   *
+   * 返回值决定调用方的处置（见 AutoSyncService）：`error` 会**退避重试直到
+   * 成功**，`no-master` 只提示用户。所以"主密码不对"必须归到 no-master ——
+   * 原先一律返回 error，一个记错的密码会让自动同步永久重试，每轮都白烧一次
+   * 600k 轮 PBKDF2，而用户看到的只是反复弹出的同步提醒，没有任何线索指向
+   * 主密码。
+   *
+   * 密码错时还要**清掉**记住的值，否则下一次手动 pull 仍会直接拿它去解密，
+   * 不再提示输入。
+   */
   async tryAutoSync(): Promise<'ok' | 'no-master' | 'error'> {
     const mp = await this.masterPasswordStore.get();
     if (!mp) return 'no-master';
@@ -216,7 +228,11 @@ export class SyncManager {
       await this.push(mp);
       await this.hashStore.update(SyncManager.LAST_SYNC_AT_KEY, Date.now());
       return 'ok';
-    } catch {
+    } catch (err) {
+      if (err instanceof MasterPasswordError) {
+        await this.masterPasswordStore.clear();
+        return 'no-master';
+      }
       return 'error';
     }
   }
