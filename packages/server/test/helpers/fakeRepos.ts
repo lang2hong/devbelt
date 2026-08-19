@@ -151,8 +151,22 @@ export class FakePlanRepo implements IPlanRepo {
 export class FakeSubscriptionRepo implements ISubscriptionRepo {
   readonly subs = new Map<number, Subscription>();
   private seq = 0;
-  /** downgradeExpired 的调用次数（断言 ensureActive 是否触发批量降级） */
+  /** downgradeExpired 的调用次数（断言 ensureActive 不再触发全表批量降级） */
   downgradeCalls = 0;
+  /** expireOne 的调用次数 */
+  expireOneCalls = 0;
+
+  /**
+   * 真实现的 expireOne / downgradeExpired 都是一条语句改 subscriptions + users
+   * 两张表。fake 拿不到 users 就只能改自己那半边 —— 此前它改的是
+   * `subscriptions.plan_code`，一个真实现根本不碰的列，于是「用户有没有被降到
+   * free」这条核心不变量在单测里从未被验证过。链上 userRepo 才能忠实复刻。
+   */
+  private users?: FakeUserRepo;
+
+  linkUsers(userRepo: FakeUserRepo): void {
+    this.users = userRepo;
+  }
 
   /** findByUserId 调用次数（断言 listUsers 不再走 N+1） */
   findByUserIdCalls = 0;
@@ -198,13 +212,30 @@ export class FakeSubscriptionRepo implements ISubscriptionRepo {
     return [...this.subs.values()];
   }
 
+  /** 复刻真实现：只改这一个用户，status → expired 且 users.plan_code → free */
+  async expireOne(userId: number, now: Date): Promise<boolean> {
+    this.expireOneCalls++;
+    for (const s of this.subs.values()) {
+      if (s.userId === userId && s.status === 'active' && s.periodEndTime <= now) {
+        s.status = 'expired';
+        await this.users?.updatePlan(userId, 'free');
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * 复刻真实现：改 users.plan_code（不是 subscriptions.plan_code），
+   * 返回**订阅行数**。边界与 expireOne 统一用 `<=`。
+   */
   async downgradeExpired(now: Date): Promise<number> {
     this.downgradeCalls++;
     let n = 0;
     for (const s of this.subs.values()) {
       if (s.status === 'active' && s.periodEndTime <= now) {
         s.status = 'expired';
-        s.planCode = 'free';
+        await this.users?.updatePlan(s.userId, 'free');
         n++;
       }
     }

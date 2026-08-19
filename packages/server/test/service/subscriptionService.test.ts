@@ -20,6 +20,9 @@ async function setup() {
     makePlan('pro', { maxDevices: 5, syncQuotaBytes: 10240 }),
   ]);
   const subRepo = new FakeSubscriptionRepo();
+  // 真实现的 expireOne / downgradeExpired 是一条语句同时改 subscriptions 与 users；
+  // fake 要链上 userRepo 才能复刻「用户被降到 free」这一半。
+  subRepo.linkUsers(userRepo);
   const rtRepo = new FakeRefreshTokenRepo();
   const syncRepo = new FakeSyncRepo();
   const connectionMetaRepo = new FakeConnectionMetaRepo();
@@ -28,77 +31,8 @@ async function setup() {
   return { service, userRepo, planRepo, subRepo, rtRepo, syncRepo, connectionMetaRepo, user };
 }
 
-describe('SubscriptionService.ensureActive', () => {
-  it('downgrades an active-but-expired subscription and drops the user to free', async () => {
-    const { service, subRepo, userRepo, user } = await setup();
-    await subRepo.upsert({
-      userId: user.id,
-      planCode: 'pro',
-      status: 'active',
-      periodEndTime: new Date(Date.now() - DAY),
-      provider: 'manual',
-    });
-
-    await service.ensureActive(user.id);
-
-    expect((await subRepo.findByUserId(user.id))!.status).toBe('expired');
-    expect((await userRepo.findById(user.id))!.planCode).toBe('free');
-  });
-
-  it('leaves a subscription that is still inside its period alone', async () => {
-    const { service, subRepo, userRepo, user } = await setup();
-    await subRepo.upsert({
-      userId: user.id,
-      planCode: 'pro',
-      status: 'active',
-      periodEndTime: new Date(Date.now() + DAY),
-      provider: 'manual',
-    });
-
-    await service.ensureActive(user.id);
-
-    expect((await subRepo.findByUserId(user.id))!.status).toBe('active');
-    expect((await userRepo.findById(user.id))!.planCode).toBe('pro');
-    expect(subRepo.downgradeCalls).toBe(0);
-  });
-
-  it('does not touch a trialing subscription even after its period end', async () => {
-    const { service, subRepo, userRepo, user } = await setup();
-    await subRepo.upsert({
-      userId: user.id,
-      planCode: 'pro',
-      status: 'trialing',
-      periodEndTime: new Date(Date.now() - DAY),
-      provider: 'manual',
-    });
-
-    await service.ensureActive(user.id);
-
-    expect((await subRepo.findByUserId(user.id))!.status).toBe('trialing');
-    expect((await userRepo.findById(user.id))!.planCode).toBe('pro');
-  });
-
-  it('is a no-op when the user has no subscription row', async () => {
-    const { service, subRepo, user } = await setup();
-    await expect(service.ensureActive(user.id)).resolves.toBeUndefined();
-    expect(subRepo.downgradeCalls).toBe(0);
-  });
-});
-
-describe('SubscriptionService.downgradeExpired', () => {
-  it('counts only the rows it actually downgraded', async () => {
-    const { service, subRepo, userRepo } = await setup();
-    const b = await userRepo.create('b@example.com', 'scrypt$x$y', 'user', 'pro');
-    const c = await userRepo.create('c@example.com', 'scrypt$x$y', 'user', 'pro');
-
-    await subRepo.upsert({ userId: 1, planCode: 'pro', status: 'active', periodEndTime: new Date(Date.now() - DAY), provider: 'manual' });
-    await subRepo.upsert({ userId: b.id, planCode: 'pro', status: 'active', periodEndTime: new Date(Date.now() + DAY), provider: 'manual' });
-    await subRepo.upsert({ userId: c.id, planCode: 'pro', status: 'canceled', periodEndTime: new Date(Date.now() - DAY), provider: 'manual' });
-
-    expect(await service.downgradeExpired()).toBe(1);
-    expect(await service.downgradeExpired()).toBe(0);
-  });
-});
+// ensureActive / downgradeExpired 的行为（单用户 vs 全表、边界比较符、
+// users.plan_code 是否跟着降）集中在 subscriptionExpiry.test.ts，此处不重复。
 
 describe('SubscriptionService.getMe', () => {
   it('assembles user + plan + subscription + usage without the password hash', async () => {

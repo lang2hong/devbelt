@@ -35,6 +35,8 @@ import { registerErrorHandler } from './middleware/errorHandler.js';
 import type { GetAuthUser, GetAuthSession } from './middleware/requireAuth.js';
 import { MysqlTrafficRepo } from './repository/mysql/trafficRepo.js';
 import { MysqlRateLimitRepo } from './repository/mysql/rateLimitRepo.js';
+import { MysqlMaintenanceRepo } from './repository/mysql/maintenanceRepo.js';
+import { startMaintenance } from './maintenance.js';
 import { TrafficCollector } from './observability/trafficCollector.js';
 import { registerTrafficPlugin } from './observability/trafficPlugin.js';
 import { RateLimitConfig } from './ratelimit/rateLimitConfig.js';
@@ -101,6 +103,7 @@ export async function createApp() {
   const syncRepo = new MysqlSyncRepo(getMysql);
   const trafficRepo = new MysqlTrafficRepo(getMysql);
   const rateLimitRepo = new MysqlRateLimitRepo(getMysql);
+  const maintenanceRepo = new MysqlMaintenanceRepo(getMysql);
 
   /**
    * 限流与观测。
@@ -177,6 +180,21 @@ export async function createApp() {
 
   // 启动时批量降级到期订阅
   void subscriptionService.downgradeExpired().catch((e) => app.log.warn({ err: e }, 'downgradeExpired failed'));
+
+  /**
+   * 事件表清理任务。
+   *
+   * 必须挂 onClose：定时器已经 unref（不阻止进程退出），但服务停止后还留着
+   * 一个会往已关闭的连接池发 DELETE 的回调 —— 优雅停机时会打出一串
+   * 「Pool is closed」错误日志，掩盖真正的停机原因。
+   */
+  const stopMaintenance = startMaintenance({
+    repo: maintenanceRepo,
+    log: app.log,
+    retentionDays: config.eventRetentionDays,
+    intervalMs: config.maintenanceIntervalMs,
+  });
+  app.addHook('onClose', async () => { stopMaintenance(); });
 
   return app;
 }

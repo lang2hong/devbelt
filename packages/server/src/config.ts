@@ -186,6 +186,22 @@ const refreshTtl = parseTokenTtl(
 );
 
 /**
+ * 解析非负整数配置项。
+ *
+ * 非法值直接让启动失败而不是静默回落到默认值：把 `EVENT_RETENTION_DAYS=ninety`
+ * 悄悄当成 90 天，与把它当成 0（永不清理）在后果上差很远，而运维看不到任何提示。
+ * 未设置才用默认值。
+ */
+function parseNonNegativeInt(raw: string | undefined, fallback: number, name: string): number {
+  if (raw === undefined || raw === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) {
+    throw new Error(`${name} must be a non-negative integer, got "${raw}"`);
+  }
+  return n;
+}
+
+/**
  * 服务端配置：从环境变量读取，提供默认值。
  */
 export const config = {
@@ -217,6 +233,23 @@ export const config = {
    * 改环境变量重启即可全面放行。
    */
   rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== 'false',
+  /**
+   * 事件/留痕表的保留天数。0 或负数关闭清理。
+   *
+   * 默认 90 天：足够覆盖「上个季度的用量趋势」这类回溯需求，又不至于让
+   * sync_events 无限增长（每次 pull/push 一行，100 用户开自动同步一天约 14 万行）。
+   * 关掉清理是有意保留的选项 —— 排查问题期间不希望留痕被删。
+   */
+  eventRetentionDays: parseNonNegativeInt(process.env.EVENT_RETENTION_DAYS, 90, 'EVENT_RETENTION_DAYS'),
+  /**
+   * 两轮清理之间的间隔（小时）。默认 24。
+   *
+   * 下限 1 小时：清理是批量 DELETE，间隔过短只会反复空扫并占用连接。
+   */
+  maintenanceIntervalMs: Math.max(
+    1,
+    parseNonNegativeInt(process.env.MAINTENANCE_INTERVAL_HOURS, 24, 'MAINTENANCE_INTERVAL_HOURS'),
+  ) * 3600_000,
 };
 
 export { parseTrustProxy };

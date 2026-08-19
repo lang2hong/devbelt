@@ -325,6 +325,35 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
     ) ENGINE=InnoDB
   `);
 
+  /**
+   * 清理与到期扫描所依赖的索引。
+   *
+   * 这些不是「优化」，是让相关语句可用的前提：
+   *
+   * - 事件表的清理是 `DELETE ... WHERE create_time < ? LIMIT 2000`。已有的
+   *   `idx_se_user (user_id, create_time)` 帮不上忙 —— create_time 不是最左
+   *   前缀，优化器只能全表扫。表涨到几十万行后每一批都要扫全表。
+   * - `refresh_tokens` 的回收按 expires_time 过滤，同理走不了
+   *   `idx_rt_user (user_id, revoked_time, expires_time)`。
+   * - `subscriptions` 的到期降级是 `WHERE status = 'active' AND
+   *   period_end_time <= ?`，此前只有 `uq_sub_user (user_id)`，全表扫。
+   *   定时任务扫全表还能忍，但 expireOne 挂在 /api/me 上。
+   *
+   * 全部走 addIndexIfMissing：新库在 CREATE TABLE 时没带这些索引（保持建表
+   * 语句可读），老库也要能补上，两边统一从这里加。
+   */
+  await addIndexIfMissing(mysql, 'sync_events', 'idx_se_time', 'KEY `idx_se_time` (create_time)', app.log);
+  await addIndexIfMissing(mysql, 'usage_events', 'idx_ue_time', 'KEY `idx_ue_time` (create_time)', app.log);
+  await addIndexIfMissing(mysql, 'device_events', 'idx_de_time', 'KEY `idx_de_time` (create_time)', app.log);
+  await addIndexIfMissing(mysql, 'refresh_tokens', 'idx_rt_expires', 'KEY `idx_rt_expires` (expires_time)', app.log);
+  await addIndexIfMissing(
+    mysql,
+    'subscriptions',
+    'idx_sub_status_period',
+    'KEY `idx_sub_status_period` (status, period_end_time)',
+    app.log,
+  );
+
   // plans 数据播种
   await seedPlans(mysql);
 }

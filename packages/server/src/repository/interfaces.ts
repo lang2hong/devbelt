@@ -67,7 +67,18 @@ export interface ISubscriptionRepo {
   upsert(sub: Omit<Subscription, 'id' | 'createTime' | 'updateTime'> & { id?: number }): Promise<Subscription>;
   listAll(): Promise<Subscription[]>;
   listByStatus(status: SubStatus): Promise<Subscription[]>;
-  /** 到期降级：status=active 且 period_end_time < now → status=expired, user.plan_code=free */
+  /**
+   * 到期降级**单个用户**：status=active 且 period_end_time <= now
+   * → status=expired 且 users.plan_code=free，一条语句改两张表。返回是否改到了行。
+   *
+   * 与 downgradeExpired 分开是必需的：ensureActive 挂在 /api/me 上，
+   * 每个客户端启动都会走一次，不能让它去扫全表。
+   */
+  expireOne(userId: number, now: Date): Promise<boolean>;
+  /**
+   * 到期降级**全部**：status=active 且 period_end_time <= now
+   * → status=expired, users.plan_code=free。定时任务/启动时调用。
+   */
   downgradeExpired(now: Date): Promise<number>;
 }
 
@@ -107,6 +118,27 @@ export interface IConnectionMetaRepo {
   replaceAll(userId: number, metas: ConnectionMetaInput[]): Promise<number>;
   countActive(userId: number): Promise<number>;
   listByUser(userId: number): Promise<ConnectionMeta[]>;
+}
+
+/** 一轮清理的结果：每表删除行数 + 各表独立的错误 */
+export interface PruneResult {
+  /** 表名 → 本轮删除行数 */
+  deleted: Record<string, number>;
+  /** 单表失败不中断整轮，错误在此汇总 */
+  errors: Array<{ table: string; error: Error }>;
+  total: number;
+}
+
+/**
+ * 运维清理仓储：按保留期删除事件/留痕表的旧行，回收已失效的会话行。
+ *
+ * 存在的理由是这几张表**只增不减**：sync_events 每次 pull/push 一行，
+ * 一个开自动同步的客户端每小时约 60 行，100 用户一天 14 万行，
+ * 而没有任何业务逻辑读历史行。不清理就是等着磁盘被吃满。
+ */
+export interface IMaintenanceRepo {
+  /** 删除 create_time 早于 now - retentionDays 的行；retentionDays <= 0 视为关闭 */
+  pruneEvents(retentionDays: number, now?: Date): Promise<PruneResult>;
 }
 
 /** 同步事件留痕仓储 */

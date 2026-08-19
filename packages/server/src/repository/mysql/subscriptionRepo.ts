@@ -1,7 +1,7 @@
 import type { ISubscriptionRepo } from '../interfaces.js';
 import type { Subscription } from '../../domain/entities.js';
 import type { SubStatus, PaymentProvider, PlanCode } from '../../domain/enums.js';
-import type { MysqlDb } from './db.js';
+import { withTransaction, type MysqlDb } from './db.js';
 
 export class MysqlSubscriptionRepo implements ISubscriptionRepo {
   constructor(private readonly db: () => MysqlDb) {}
@@ -51,15 +51,61 @@ export class MysqlSubscriptionRepo implements ISubscriptionRepo {
     return rows.map(mapSub);
   }
 
-  async downgradeExpired(now: Date): Promise<number> {
+  /**
+   * 单用户到期降级。
+   *
+   * `ensureActive` 原先在这里调 `downgradeExpired(now)` —— 一条
+   * `UPDATE subscriptions JOIN users` 的**全表**语句。而 ensureActive 挂在
+   * `/api/me` 上，每个客户端启动、每次刷新面板都会走一次：一个用户的订阅到期，
+   * 就让所有在线用户各自触发一次全表 JOIN UPDATE，并发下互相锁等待。
+   *
+   * 比较符与 downgradeExpired 统一为 `<=`。此前 service 判 `periodEndTime <= now`
+   * 而 SQL 用 `< ?`：periodEndTime 恰好等于 now 时 SQL 一行都不匹配，
+   * 旧代码却仍单独执行 `updatePlan(userId, 'free')` —— 留下
+   * user.plan_code=free 但 subscription.status=active 的半套状态，
+   * 此后每次 /api/me 都重新触发一次全表 UPDATE。
+   *
+   * 多表 UPDATE 的 affectedRows 是两张表改动行数之和；plan_code 已是 free 时
+   * 只计 1（那一行没变化）。所以判据是 `> 0` 而不是 `=== 2`。
+   */
+  async expireOne(userId: number, now: Date): Promise<boolean> {
     const [result] = await this.db().query<any>(
       `UPDATE subscriptions s
        JOIN users u ON u.id = s.user_id
        SET s.status = 'expired', u.plan_code = 'free'
-       WHERE s.status = 'active' AND s.period_end_time < ?`,
-      [now],
+       WHERE s.user_id = ? AND s.status = 'active' AND s.period_end_time <= ?`,
+      [userId, now],
     );
-    return result.affectedRows;
+    return (result?.affectedRows ?? 0) > 0;
+  }
+
+  /**
+   * 全表到期降级（定时任务 / 启动时），返回**降级的订阅行数**。
+   *
+   * 拆成两条单表 UPDATE 而不是一条 JOIN UPDATE，就为了返回值可信：
+   * 多表 UPDATE 的 affectedRows 是各表改动行数之和，plan_code 恰好已是 free
+   * 的用户又只计 1 —— 于是「降级了几个人」这个数字既不是 N 也不是 2N，
+   * 运维照着它排查会被直接带偏。单表 UPDATE 的 affectedRows 就是行数。
+   *
+   * 顺序不能反：先改 users（JOIN 条件依赖 subscriptions 仍是 active），
+   * 再把 subscriptions 置 expired。事务保证两张表不会只改一半。
+   */
+  async downgradeExpired(now: Date): Promise<number> {
+    return withTransaction(this.db(), async (tx) => {
+      await tx.query(
+        `UPDATE users u
+           JOIN subscriptions s ON s.user_id = u.id
+            SET u.plan_code = 'free'
+          WHERE s.status = 'active' AND s.period_end_time <= ?`,
+        [now],
+      );
+      const [result] = await tx.query<any>(
+        `UPDATE subscriptions SET status = 'expired'
+          WHERE status = 'active' AND period_end_time <= ?`,
+        [now],
+      );
+      return result?.affectedRows ?? 0;
+    });
   }
 }
 
