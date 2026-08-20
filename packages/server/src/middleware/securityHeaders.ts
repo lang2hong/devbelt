@@ -39,6 +39,14 @@ export function securityHeaders(): FastifyHelmetOptions {
         // 点击劫持：后台的下拉框改 role、按钮吊销会话，被嵌进 iframe 诱导点击
         // 的代价很高。frame-ancestors 是现代浏览器的判据，X-Frame-Options 兜旧的
         frameAncestors: ["'none'"],
+        /**
+         * 显式禁用 helmet 默认的 upgrade-insecure-requests。
+         *
+         * 该指令会把页面里的 http 子资源（CSS/JS）强制升级成 https；本服务的
+         * 生产部署是明文 http（443 被别的进程占用），升级后直接连接失败、后台
+         * 白屏。TLS 属于部署层（nginx）的职责，不在应用侧强制。
+         */
+        upgradeInsecureRequests: null,
       },
     },
     /**
