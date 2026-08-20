@@ -61,7 +61,7 @@ export interface MeResponse {
   user: { id: number; email: string; role: string; planCode: string; status: string };
   plan: {
     code: string; name: string;
-    maxDevices: number; maxConnections: number;
+    maxDevices: number; maxConnections: number; maxOpenConnections: number;
     syncQuotaBytes: number; syncVersionRetention: number;
     historyRetentionCount: number; features: number;
   };

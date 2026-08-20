@@ -12,6 +12,7 @@ const form = reactive({
   priceMonth: 0,
   priceYear: 0,
   maxConnections: 0,
+  maxOpenConnections: 0,
   quotaMb: 0,
   syncVersionRetention: 0,
   features: 0,
@@ -28,6 +29,7 @@ function openEdit(p: Plan) {
   form.priceMonth = p.priceMonth;
   form.priceYear = p.priceYear;
   form.maxConnections = p.maxConnections;
+  form.maxOpenConnections = p.maxOpenConnections;
   form.quotaMb = p.syncQuotaBytes === 0 ? 0 : Math.round(p.syncQuotaBytes / 1048576);
   form.syncVersionRetention = p.syncVersionRetention;
   form.features = p.features;
@@ -44,6 +46,7 @@ async function save() {
     priceMonth: form.priceMonth,
     priceYear: form.priceYear,
     maxConnections: form.maxConnections,
+    maxOpenConnections: form.maxOpenConnections,
     syncQuotaBytes: form.quotaMb * 1048576,
     syncVersionRetention: form.syncVersionRetention,
     features: form.features,
@@ -73,6 +76,7 @@ onMounted(load);
         <div class="row"><span class="k">Monthly</span><span class="v">¥{{ p.priceMonth }}</span></div>
         <div class="row"><span class="k">Yearly</span><span class="v">¥{{ p.priceYear }}</span></div>
         <div class="row"><span class="k">Max connections</span><span class="v">{{ p.maxConnections === 0 ? '∞' : p.maxConnections }}</span></div>
+        <div class="row"><span class="k">Max open connections</span><span class="v">{{ p.maxOpenConnections === 0 ? '∞' : p.maxOpenConnections }}</span></div>
         <div class="row"><span class="k">Sync quota</span><span class="v">{{ p.syncQuotaBytes === 0 ? '∞' : bytes(p.syncQuotaBytes) }}</span></div>
         <div class="row"><span class="k">Version retention</span><span class="v">{{ p.syncVersionRetention }}</span></div>
         <div class="row"><span class="k">Features</span><span class="v">{{ featNames(p.features) }}</span></div>
@@ -92,6 +96,7 @@ onMounted(load);
           <span class="k">Monthly (¥)</span><input v-model.number="form.priceMonth" type="number" min="0" step="1" />
           <span class="k">Yearly (¥)</span><input v-model.number="form.priceYear" type="number" min="0" step="1" />
           <span class="k">Max connections</span><input v-model.number="form.maxConnections" type="number" min="0" step="1" />
+          <span class="k">Max open connections</span><input v-model.number="form.maxOpenConnections" type="number" min="0" step="1" />
           <span class="k">Sync quota (MB)</span><input v-model.number="form.quotaMb" type="number" min="0" step="1" />
           <span class="k">Version retention</span><input v-model.number="form.syncVersionRetention" type="number" min="0" step="1" />
         </div>

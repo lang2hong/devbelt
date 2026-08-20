@@ -12,6 +12,7 @@ export const Feature = {
   datatransfer: 8,
   team_share: 16,
   audit_log: 32,
+  export_connections: 64,
 } as const;
 
 const FEATURE_NAMES: Record<number, string> = {
@@ -20,7 +21,12 @@ const FEATURE_NAMES: Record<number, string> = {
   [Feature.datatransfer]: 'Data Transfer',
   [Feature.team_share]: 'Team Sharing',
   [Feature.audit_log]: 'Audit Log',
+  [Feature.export_connections]: 'Export Connections',
 };
+
+function featureName(feature: number): string {
+  return FEATURE_NAMES[feature] || 'This feature';
+}
 
 /**
  * 收费前置校验：检查当前套餐是否含某功能。
@@ -29,6 +35,17 @@ const FEATURE_NAMES: Record<number, string> = {
  * 无权限时提示升级，返回 false。
  */
 export async function requireFeature(auth: AuthService, feature: number): Promise<boolean> {
+  const name = featureName(feature);
+  // 未登录：付费能力直接拦截并引导登录。此前未登录会被下面 catch 当「网络失败」
+  // 放行（getMe 抛 401 → return true），等于未登录用户白嫖所有付费功能。
+  if (!auth.isLoggedIn()) {
+    const choice = await vscode.window.showInformationMessage(
+      `${name} requires a Pro or Team plan. Sign in to continue.`,
+      'Login',
+    );
+    if (choice === 'Login') void vscode.commands.executeCommand('dbclient.login');
+    return false;
+  }
   let plan = auth.getCachedPlan();
   if (!plan) {
     try {
@@ -36,15 +53,14 @@ export async function requireFeature(auth: AuthService, feature: number): Promis
       auth.setCachedPlan(me.plan);
       plan = me.plan;
     } catch {
-      return true; // 网络失败不阻断
+      return true; // 已登录但网络失败，不阻断
     }
   }
   if ((plan.features & feature) === feature) return true;
-  const name = FEATURE_NAMES[feature] || 'This feature';
   const choice = await vscode.window.showInformationMessage(
     `${name} requires a Pro or Team plan.`,
     'Upgrade',
   );
-  if (choice === 'Upgrade') void vscode.commands.executeCommand('dbclient.login');
+  if (choice === 'Upgrade') void vscode.commands.executeCommand('dbclient.account');
   return false;
 }

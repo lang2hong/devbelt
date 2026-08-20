@@ -22,6 +22,7 @@ export interface Plan {
   priceMonth: number;
   priceYear: number;
   maxConnections: number;
+  maxOpenConnections: number;
   syncQuotaBytes: number;
   syncVersionRetention: number;
   features: number;

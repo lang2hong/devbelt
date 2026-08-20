@@ -75,7 +75,7 @@ export class AuthService {
   private accessToken?: string;
   private refreshToken?: string;
   /** 缓存的套餐（SyncStatusBar 刷新时填，requireFeature 用） */
-  private cachedPlan?: { code: string; name: string; features: number; maxDevices: number; maxConnections: number; syncQuotaBytes: number };
+  private cachedPlan?: { code: string; name: string; features: number; maxDevices: number; maxConnections: number; maxOpenConnections: number; syncQuotaBytes: number };
 
   /** 读取缓存套餐 */
   getCachedPlan() {
@@ -83,7 +83,7 @@ export class AuthService {
   }
 
   /** 设置缓存套餐（SyncStatusBar getMe 后调用） */
-  setCachedPlan(plan: { code: string; name: string; features: number; maxDevices: number; maxConnections: number; syncQuotaBytes: number }): void {
+  setCachedPlan(plan: { code: string; name: string; features: number; maxDevices: number; maxConnections: number; maxOpenConnections: number; syncQuotaBytes: number }): void {
     this.cachedPlan = plan;
   }
 

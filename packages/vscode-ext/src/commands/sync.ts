@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { LoginForm } from '../sync/loginForm';
 import { SessionView } from '../sync/sessionView';
+import { AccountView } from '../sync/accountView';
 import { SyncConflictError } from '../sync/syncClient';
 import { totalChanges } from '../sync/mergePlan';
 import { SyncDiffView } from '../result/syncDiffView';
@@ -59,6 +60,7 @@ export function registerSyncCommands(deps: Deps, sub: Sub): void {
     void refreshAdminCommand(auth);
   }));
   sub('dbclient.sessions', () => SessionView.open(auth));
+  sub('dbclient.account', () => AccountView.open(auth));
 
   sub('dbclient.logout', async () => {
     await sync.forgetMasterPassword();

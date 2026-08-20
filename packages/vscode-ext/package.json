@@ -108,7 +108,12 @@
       },
       {
         "command": "dbclient.changeSyncPassword",
-        "title": "Change Sync Password",
+        "title": "%cmd.changeSyncPassword%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.account",
+        "title": "%account.title%",
         "category": "DB Client"
       },
       {
@@ -586,6 +591,10 @@
         },
         {
           "command": "dbclient.changeSyncPassword",
+          "when": "dbclient.loggedIn"
+        },
+        {
+          "command": "dbclient.account",
           "when": "dbclient.loggedIn"
         },
         {

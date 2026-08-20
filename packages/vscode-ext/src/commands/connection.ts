@@ -7,6 +7,7 @@ import { l10n } from '../i18n';
 import { AuditLogger } from '../utils/auditLogger';
 import { flattenGroups } from '../utils/groupTree';
 import type { Deps, Sub } from './shared';
+import { requireFeature, Feature } from '../sync/features';
 import { confirm } from './shared';
 
 async function queryServerVersion(session: any, dbType: string): Promise<string> {
@@ -25,7 +26,7 @@ async function queryServerVersion(session: any, dbType: string): Promise<string>
 }
 
 export function registerConnectionCommands(deps: Deps, sub: Sub): void {
-  const { store, manager, treeProvider, connCtx } = deps;
+  const { store, manager, treeProvider, connCtx, auth } = deps;
 
   sub('dbclient.addConnection', (node?: DbTreeNode) => {
     const gid = node?.kind === NodeKind.Group ? node.groupId : undefined;
@@ -99,6 +100,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
   sub('dbclient.refresh', () => treeProvider.refresh());
 
   sub('dbclient.exportConnections', async (node?: DbTreeNode) => {
+    if (!(await requireFeature(auth, Feature.export_connections))) return;
     const all = store.list();
     if (!all.length) {
       vscode.window.showInformationMessage(l10n('conn.exportNone'));

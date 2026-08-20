@@ -20,6 +20,7 @@ export const FEATURES: Array<[string, number]> = [
   ['datatransfer', 8],
   ['team_share', 16],
   ['audit_log', 32],
+  ['export_connections', 64],
 ];
 
 export function featNames(f: number): string {

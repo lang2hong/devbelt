@@ -21,6 +21,8 @@
   "cmd.cloneConnection": "克隆连接",
   "cmd.renameView": "重命名视图",
   "cmd.sessions": "管理设备会话",
+  "cmd.changeSyncPassword": "修改同步密码",
+  "account.title": "账户",
   "cmd.copyName": "复制名称",
   "cmd.manageUsers": "管理用户",
   "cmd.pats": "管理访问令牌",

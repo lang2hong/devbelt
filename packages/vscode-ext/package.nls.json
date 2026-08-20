@@ -21,6 +21,8 @@
   "cmd.cloneConnection": "Clone Connection",
   "cmd.renameView": "Rename View",
   "cmd.sessions": "Manage Device Sessions",
+  "cmd.changeSyncPassword": "Change Sync Password",
+  "account.title": "Account",
   "cmd.copyName": "Copy Name",
   "cmd.manageUsers": "Manage Users",
   "cmd.pats": "Manage Access Tokens",
