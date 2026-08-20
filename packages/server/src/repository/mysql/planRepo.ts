@@ -19,15 +19,16 @@ export class MysqlPlanRepo implements IPlanRepo {
   async seed(plans: Array<Omit<Plan, 'createTime' | 'updateTime'>>): Promise<void> {
     for (const p of plans) {
       await this.db().query(
-        `INSERT INTO plans (code, name, price_month, price_year, max_devices, max_connections, sync_quota_bytes, sync_version_retention, history_retention_count, features)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO plans (code, name, price_month, price_year, max_devices, max_connections, max_open_connections, sync_quota_bytes, sync_version_retention, history_retention_count, features)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
            name = VALUES(name), price_month = VALUES(price_month), price_year = VALUES(price_year),
            max_devices = VALUES(max_devices), max_connections = VALUES(max_connections),
+           max_open_connections = VALUES(max_open_connections),
            sync_quota_bytes = VALUES(sync_quota_bytes), sync_version_retention = VALUES(sync_version_retention),
            history_retention_count = VALUES(history_retention_count),
            features = VALUES(features)`,
-        [p.code, p.name, p.priceMonth, p.priceYear, p.maxDevices, p.maxConnections, p.syncQuotaBytes, p.syncVersionRetention, p.historyRetentionCount, p.features],
+        [p.code, p.name, p.priceMonth, p.priceYear, p.maxDevices, p.maxConnections, p.maxOpenConnections, p.syncQuotaBytes, p.syncVersionRetention, p.historyRetentionCount, p.features],
       );
     }
   }
@@ -35,10 +36,10 @@ export class MysqlPlanRepo implements IPlanRepo {
   async update(code: PlanCode, fields: PlanEditableFields): Promise<void> {
     await this.db().query(
       `UPDATE plans
-       SET name = ?, price_month = ?, price_year = ?, max_connections = ?,
+       SET name = ?, price_month = ?, price_year = ?, max_connections = ?, max_open_connections = ?,
            sync_quota_bytes = ?, sync_version_retention = ?, features = ?
        WHERE code = ?`,
-      [fields.name, fields.priceMonth, fields.priceYear, fields.maxConnections, fields.syncQuotaBytes, fields.syncVersionRetention, fields.features, code],
+      [fields.name, fields.priceMonth, fields.priceYear, fields.maxConnections, fields.maxOpenConnections, fields.syncQuotaBytes, fields.syncVersionRetention, fields.features, code],
     );
   }
 }
@@ -51,6 +52,7 @@ function mapPlan(r: any): Plan {
     priceYear: r.price_year,
     maxDevices: r.max_devices,
     maxConnections: r.max_connections,
+    maxOpenConnections: r.max_open_connections,
     syncQuotaBytes: r.sync_quota_bytes,
     syncVersionRetention: r.sync_version_retention,
     historyRetentionCount: r.history_retention_count,

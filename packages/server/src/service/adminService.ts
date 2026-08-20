@@ -130,6 +130,7 @@ export class AdminService {
     int(input.priceMonth, 'priceMonth');
     int(input.priceYear, 'priceYear');
     int(input.maxConnections, 'maxConnections');
+    int(input.maxOpenConnections, 'maxOpenConnections');
     int(input.syncQuotaBytes, 'syncQuotaBytes');
     int(input.syncVersionRetention, 'syncVersionRetention');
     int(input.features, 'features');
@@ -335,7 +336,7 @@ function diffFields<T extends Record<string, any>>(
 
 /** 套餐的可审计字段。刻意与 PlanEditableFields 对齐，新增字段时一并加进来 */
 const PLAN_AUDIT_FIELDS = [
-  'name', 'priceMonth', 'priceYear', 'maxConnections',
+  'name', 'priceMonth', 'priceYear', 'maxConnections', 'maxOpenConnections',
   'syncQuotaBytes', 'syncVersionRetention', 'features',
 ] as const;
 

@@ -21,6 +21,7 @@ export interface Plan {
   priceYear: number;
   maxDevices: number;            // 0 = 无限
   maxConnections: number;        // 0 = 无限
+  maxOpenConnections: number;    // 同时打开的连接数，0 = 无限
   syncQuotaBytes: number;        // 0 = 无限
   syncVersionRetention: number;  // 同步历史版本保留数（0 = 不记历史）
   historyRetentionCount: number; // 查询历史条数（0 = 无限）

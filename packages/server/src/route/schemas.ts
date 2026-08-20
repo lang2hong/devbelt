@@ -217,6 +217,7 @@ export const updatePlanBody = {
     priceMonth: { type: 'integer', minimum: 0 },
     priceYear: { type: 'integer', minimum: 0 },
     maxConnections: { type: 'integer', minimum: 0 },
+    maxOpenConnections: { type: 'integer', minimum: 0 },
     syncQuotaBytes: { type: 'integer', minimum: 0 },
     syncVersionRetention: { type: 'integer', minimum: 0 },
     features: { type: 'integer', minimum: 0 },

@@ -54,6 +54,7 @@ export function makePlan(code: PlanCode, over: Partial<Plan> = {}): Plan {
     priceYear: 0,
     maxDevices: 0,
     maxConnections: 0,
+    maxOpenConnections: 0,
     syncQuotaBytes: 0,
     syncVersionRetention: 0,
     historyRetentionCount: 0,

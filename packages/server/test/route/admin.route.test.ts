@@ -215,12 +215,12 @@ describe('POST /admin/plans/:code', () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it('admin-ui 实际的 7 字段载荷 → 200', async () => {
+  it('admin-ui 实际的 8 字段载荷 → 200', async () => {
     const res = await t.app.inject({
       method: 'POST', url: '/admin/plans/pro', headers: t.auth(adminToken),
       payload: {
         name: 'Pro', priceMonth: 10, priceYear: 100,
-        maxConnections: 20, syncQuotaBytes: 10485760,
+        maxConnections: 20, maxOpenConnections: 0, syncQuotaBytes: 10485760,
         syncVersionRetention: 10, features: 7,
       },
     });

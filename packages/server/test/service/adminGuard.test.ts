@@ -202,7 +202,7 @@ describe('管理操作留痕', () => {
   it('改套餐配额留痕，含改前配额', async () => {
     await c.service.updatePlan('pro', {
       name: 'Pro', priceMonth: 1000, priceYear: 10000,
-      maxConnections: 999, syncQuotaBytes: 123, syncVersionRetention: 7, features: 0,
+      maxConnections: 999, maxOpenConnections: 0, syncQuotaBytes: 123, syncVersionRetention: 7, features: 0,
     }, actor(c.admin.id));
 
     const [row] = c.auditRepo.rows;

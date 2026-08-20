@@ -32,6 +32,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       price_year INT UNSIGNED NOT NULL DEFAULT 0,
       max_devices SMALLINT UNSIGNED NOT NULL DEFAULT 0,
       max_connections SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+      max_open_connections SMALLINT UNSIGNED NOT NULL DEFAULT 0,
       sync_quota_bytes INT UNSIGNED NOT NULL DEFAULT 0,
       sync_version_retention SMALLINT UNSIGNED NOT NULL DEFAULT 0,
       history_retention_count SMALLINT UNSIGNED NOT NULL DEFAULT 0,
@@ -43,6 +44,7 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
   // 旧 plans 表补列（若已存在）
   await addColumnIfMissing(mysql, 'plans', 'sync_version_retention', 'SMALLINT UNSIGNED NOT NULL DEFAULT 0');
   await addColumnIfMissing(mysql, 'plans', 'max_connections', 'SMALLINT UNSIGNED NOT NULL DEFAULT 0');
+  await addColumnIfMissing(mysql, 'plans', 'max_open_connections', 'SMALLINT UNSIGNED NOT NULL DEFAULT 0');
 
   // users 表（新增字段幂等 ALTER；旧表若存在则补列）
   await mysql.query(`
@@ -534,6 +536,7 @@ interface PlanSeed {
   priceYear: number;
   maxDevices: number;
   maxConnections: number;
+  maxOpenConnections: number;
   syncQuotaBytes: number;
   syncVersionRetention: number;
   historyRetentionCount: number;
@@ -543,18 +546,18 @@ interface PlanSeed {
 const PLAN_SEED: PlanSeed[] = [
   {
     code: 'free', name: 'Free', priceMonth: 0, priceYear: 0,
-    maxDevices: 1, maxConnections: 5, syncQuotaBytes: 1 * 1024 * 1024,
+    maxDevices: 1, maxConnections: 20, maxOpenConnections: 2, syncQuotaBytes: 1 * 1024 * 1024,
     syncVersionRetention: 3, historyRetentionCount: 50, features: 1,
   },
   {
     code: 'pro', name: 'Pro', priceMonth: 5, priceYear: 60,
-    maxDevices: 5, maxConnections: 50, syncQuotaBytes: 100 * 1024 * 1024,
-    syncVersionRetention: 30, historyRetentionCount: 0, features: 0b111,
+    maxDevices: 5, maxConnections: 200, maxOpenConnections: 0, syncQuotaBytes: 100 * 1024 * 1024,
+    syncVersionRetention: 30, historyRetentionCount: 0, features: 0b1000111,
   },
   {
     code: 'team', name: 'Team', priceMonth: 20, priceYear: 200,
-    maxDevices: 20, maxConnections: 500, syncQuotaBytes: 1024 * 1024 * 1024,
-    syncVersionRetention: 90, historyRetentionCount: 0, features: 0b111111,
+    maxDevices: 20, maxConnections: 500, maxOpenConnections: 0, syncQuotaBytes: 1024 * 1024 * 1024,
+    syncVersionRetention: 90, historyRetentionCount: 0, features: 0b1111111,
   },
 ];
 
@@ -562,10 +565,10 @@ async function seedPlans(mysql: { query: (sql: string, p?: any[]) => Promise<any
   for (const p of PLAN_SEED) {
     // 仅首次创建；已存在的套餐不覆盖任何字段（价格/配额改由管理后台编辑，避免重启重置）。
     await mysql.query(
-      `INSERT INTO plans (code, name, price_month, price_year, max_devices, max_connections, sync_quota_bytes, sync_version_retention, history_retention_count, features)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO plans (code, name, price_month, price_year, max_devices, max_connections, max_open_connections, sync_quota_bytes, sync_version_retention, history_retention_count, features)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE code = VALUES(code)`,
-      [p.code, p.name, p.priceMonth, p.priceYear, p.maxDevices, p.maxConnections, p.syncQuotaBytes, p.syncVersionRetention, p.historyRetentionCount, p.features],
+      [p.code, p.name, p.priceMonth, p.priceYear, p.maxDevices, p.maxConnections, p.maxOpenConnections, p.syncQuotaBytes, p.syncVersionRetention, p.historyRetentionCount, p.features],
     );
   }
 }

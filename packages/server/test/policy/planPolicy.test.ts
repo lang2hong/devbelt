@@ -124,10 +124,10 @@ describe('Feature 运行时可用性', () => {
     expect(Feature).not.toBeUndefined();
   });
 
-  it('六个位值互不重叠且为 2 的幂', () => {
+  it('七个位值互不重叠且为 2 的幂', () => {
     const values = Object.values(Feature);
-    expect(values).toHaveLength(6);
-    expect(new Set(values).size).toBe(6);
+    expect(values).toHaveLength(7);
+    expect(new Set(values).size).toBe(7);
     for (const v of values) {
       expect(Number.isInteger(Math.log2(v))).toBe(true);
     }

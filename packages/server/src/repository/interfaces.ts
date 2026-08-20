@@ -48,6 +48,7 @@ export interface PlanEditableFields {
   priceMonth: number;
   priceYear: number;
   maxConnections: number;
+  maxOpenConnections: number;
   syncQuotaBytes: number;
   syncVersionRetention: number;
   features: number;

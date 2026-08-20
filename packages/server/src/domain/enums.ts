@@ -60,6 +60,7 @@ export const Feature = {
   datatransfer: 1 << 3,
   team_share: 1 << 4,
   audit_log: 1 << 5,
+  export_connections: 1 << 6,
 } as const;
 
 /** Feature 位值类型（供签名标注）。 */
