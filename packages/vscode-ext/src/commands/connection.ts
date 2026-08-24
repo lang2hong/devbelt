@@ -7,7 +7,7 @@ import { l10n } from '../i18n';
 import { AuditLogger } from '../utils/auditLogger';
 import { flattenGroups } from '../utils/groupTree';
 import type { Deps, Sub } from './shared';
-import { requireFeature, Feature } from '../sync/features';
+import { requireFeature, Feature, resolveMaxOpenConnections } from '../sync/features';
 import { confirm } from './shared';
 
 async function queryServerVersion(session: any, dbType: string): Promise<string> {
@@ -68,6 +68,18 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.openConnection', async (conn: SavedConnection) => {
     if (!conn?.id) return;
+    const max = await resolveMaxOpenConnections(auth);
+    if (max !== undefined) {
+      const openCount = manager.getPoolStats().explicit - (manager.isExplicit(conn.id) ? 1 : 0);
+      if (openCount >= max) {
+        const choice = await vscode.window.showInformationMessage(
+          `You can have at most ${max} connections open at once. Close another connection or upgrade your plan.`,
+          'Upgrade',
+        );
+        if (choice === 'Upgrade') void vscode.commands.executeCommand('dbclient.account');
+        return;
+      }
+    }
     treeProvider.markOpen(conn.id);
     connCtx.setLast(conn);
     treeProvider.refresh();

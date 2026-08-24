@@ -64,3 +64,28 @@ export async function requireFeature(auth: AuthService, feature: number): Promis
   if (choice === 'Upgrade') void vscode.commands.executeCommand('dbclient.account');
   return false;
 }
+
+/**
+ * 取「同时打开的连接数」上限。
+ *
+ * 返回 undefined = 不限；返回正整数 = 上限。孱弱网络下的取舍：
+ *
+ *  - 未登录：本地固定 1，不依赖网络（逼登录，也防止匿名白嫖多开）。
+ *  - 已登录且有缓存（内存或 globalState 持久化）：直接按套餐限制，无网络也正确。
+ *  - 已登录但无任何缓存且 getMe 失败（首次使用遇到弱网）：**放行**，
+ *    宁可少拦一次，也不把付费用户在弱网下锁死。
+ */
+export async function resolveMaxOpenConnections(auth: AuthService): Promise<number | undefined> {
+  if (!auth.isLoggedIn()) return 1;
+  let plan = auth.getCachedPlan();
+  if (!plan) {
+    try {
+      const me = await auth.client.getMe();
+      auth.setCachedPlan(me.plan);
+      plan = me.plan;
+    } catch {
+      return undefined; // 已登录但网络失败，放行
+    }
+  }
+  return plan.maxOpenConnections > 0 ? plan.maxOpenConnections : undefined; // 0 = 无限
+}

@@ -1,63 +1,89 @@
 # DB Client Pro
 
-**All-in-one Database Client for VS Code** — MySQL, PostgreSQL and SQLite. Query, edit, import/export, design, sync — all in one extension.
+**All-in-one database client for MySQL, PostgreSQL and SQLite — right inside VS Code.**
 
-## Features
+Query, edit and design your databases without leaving the editor. Run SQL with autocomplete, edit data in a grid, design tables visually, draw ER diagrams, import/export, tunnel through SSH, and keep your connections in sync across devices.
+
+## Highlights
 
 - **Multi-database** — MySQL, PostgreSQL, SQLite (Redis, ElasticSearch planned)
-- **Connection management** — hierarchical groups, connection form, test connection, SSH tunnel
-- **SQL querying** — run in the current panel or a new one, query history, SQL formatting, result grid with inline cell editing, pagination
-- **SQL intelligence** — context-aware autocomplete in the built-in query editor *and* `.sql` files (tables, columns, functions, keywords), snippets, EXPLAIN, run-statement
-- **Table tools** — data preview, sort/filter, inline edit, insert/delete, mock data, duplicate, dump/export
-- **Schema & design** — visual table designer, view DDL, ER diagram, schema compare
+- **Smart SQL editing** — context-aware autocomplete in the built-in editor *and* `.sql` files, snippets, formatting, EXPLAIN, run active statement
+- **Data editing** — result grid with inline cell editing, pagination, sort/filter, insert/delete, mock data, duplicate
+- **Schema & design** — visual table designer, DDL view, ER diagram, schema compare
 - **Data transfer** — CSV/JSON import & export with field mapping
-- **Cloud sync** — account login, AES-256-GCM encrypted config sync across devices (credentials never leave the client)
+- **Connections** — hierarchical groups, connection form, connection test, SSH tunnel
+- **Cloud sync** — AES-256-GCM encrypted config sync across devices; your credentials never leave the client
 - **Users & privileges** — create users, grant/revoke, change password
-- **Internationalization** — 中文 / English, follows VS Code display language by default
+- **Internationalization** — English / 中文, follows VS Code display language
 
 ## Requirements
 
-- VS Code `^1.85.0`
+- VS Code `1.85.0` or newer
+
+## Installation
+
+Install from the Visual Studio Marketplace, or build from source:
+
+```
+git clone https://gitee.com/lang2hong/vscode-db-client
+cd vscode-db-client/packages/vscode-ext
+pnpm install
+pnpm package
+```
+
+Then run **Install from VSIX…** and pick the generated `vscode-db-client-*.vsix`.
 
 ## Quick Start
 
-1. Open the **DB Client** activity bar.
+1. Open the **DB Client** view in the Activity Bar.
 2. Click **+** to add a connection (MySQL / PostgreSQL / SQLite).
-3. For SQLite, you can use the bundled `sqlite3` CLI or point to your own binary.
+3. For SQLite you can use the bundled CLI or point to your own binary.
 4. Right-click a table → **View Data** to preview, or **New Query** to run SQL.
 
-## Usage Tips
+## Keyboard Shortcuts
 
-- **Ctrl+Enter** (macOS `Cmd+Enter`) — run query / active statement
-- **Ctrl+Alt+Enter** (macOS `Cmd+Ctrl+Enter`) — run in a new panel
-- **Ctrl+Shift+E** (macOS `Cmd+Shift+E`) — EXPLAIN
-- Autocomplete in the query editor: tables, columns, functions, keywords — select with **Enter**, dismiss with **Esc**.
-- Destructive statements (DELETE without WHERE / DDL) ask for confirmation; read-only connections are enforced.
+| Shortcut | macOS | Action |
+|---|---|---|
+| `Ctrl+Enter` | `Cmd+Enter` | Run query / active statement |
+| `Ctrl+Alt+Enter` | `Cmd+Ctrl+Enter` | Run in a new panel |
+| `Ctrl+Shift+E` | `Cmd+Shift+E` | Explain query |
+| `Ctrl+Alt+F` | `Cmd+Alt+F` | Search database objects |
+| `Ctrl+Alt+C` | `Cmd+Alt+C` | Search connections |
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| Add Connection / Edit / Delete | Manage saved connections |
+| Add / Edit / Delete Connection | Manage saved connections |
 | Open / Close Connection | Explicitly open or release a connection |
-| New Query / Run Query | Run SQL in current or new panel |
-| View Data / View DDL / Design Table | Inspect and edit table schema |
-| Import / Export | CSV, JSON transfer with mapping |
-| Compare Schema / ER Diagram | Schema analysis |
-| Sync Pull / Sync Push | Cloud sync of non-credential config |
+| New Query / Run Query | Run SQL in the current or a new panel |
+| View Data / View DDL / Design Table | Inspect and edit table schemas |
+| Import / Export | CSV/JSON transfer with field mapping |
+| ER Diagram / Compare Schema | Schema analysis |
+| Sync Pull / Sync Push | Encrypted cloud sync of non-credential config |
 
 ## Cloud Sync
 
-1. Run **DB Client: Login** (`dbclient.login`) and register.
-2. Configure the sync server URL: `dbclient.sync.serverUrl` (defaults to `http://db.xfhyt.com` in production, `http://localhost:3000` in development).
-3. **Sync Push** encrypts your connection config (excluding passwords) with your master password and uploads; **Sync Pull** restores it.
+1. Run **DB Client: Login** and register an account.
+2. **Sync Push** encrypts your connection config (excluding passwords) with your master password and uploads it.
+3. **Sync Pull** restores it on any device — the master password is never uploaded.
 
-## Configuration
+## Settings
 
 | Setting | Default | Description |
 |---|---|---|
-| `dbclient.sync.serverUrl` | `http://db.xfhyt.com` (prod) / `http://localhost:3000` (dev) | Cloud sync server URL |
+| `dbclient.sync.auto` | `off` | Cloud sync mode: `reminder` notifies on change, `silent` syncs in the background |
+| `dbclient.sync.intervalMin` | `0` | Auto-sync interval in minutes (`0` disables the periodic timer) |
+| `dbclient.sync.rememberMaster` | `true` | Remember the master password in OS secure storage for silent sync |
 | `dbclient.language` | `auto` | Extension language: `auto` / `zh` / `en` |
+| `dbclient.format.indent` | `2` | SQL formatting indent width (spaces) |
+| `dbclient.format.keywordCase` | `upper` | SQL keyword case: `preserve` / `upper` / `lower` |
+
+## Roadmap
+
+- Redis and ElasticSearch support
+- Team sharing and audit log
+- Scheduled backups
 
 ## License
 

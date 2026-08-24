@@ -178,6 +178,7 @@ export function registerSyncCommands(deps: Deps, sub: Sub): void {
       { label: '$(device-desktop) Device Sessions', description: 'Manage devices', value: 'sessions' },
       { label: '$(cloud-download) Pull from Cloud', description: 'Download & merge', value: 'syncPull' },
       { label: '$(cloud-upload) Push to Cloud', description: 'Upload local data', value: 'syncPush' },
+      ...(loggedIn ? [{ label: '$(account) Account', description: 'View plan, usage and subscription', value: 'account' }] : []),
       loggedIn
         ? { label: '$(sign-out) Logout', value: 'logout' }
         : { label: '$(sign-in) Login', value: 'login' },

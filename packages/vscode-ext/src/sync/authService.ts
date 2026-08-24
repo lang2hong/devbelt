@@ -9,6 +9,17 @@ declare const __SYNC_SERVER_URL__: string;
 /** 默认同步服务器地址（构建时由 esbuild 从 .env / .env.production 注入） */
 export const DEFAULT_SERVER_URL = __SYNC_SERVER_URL__;
 
+/** 套餐缓存（与 server Plan 对齐，持久化到 globalState；不含时间类字段） */
+export interface CachedPlan {
+  code: string;
+  name: string;
+  features: number;
+  maxDevices: number;
+  maxConnections: number;
+  maxOpenConnections: number;
+  syncQuotaBytes: number;
+}
+
 let _fingerprint: string | undefined;
 
 /** 硬件指纹（确定性，不依赖本地存储；同硬件同值，卸载重装不变） */
@@ -67,24 +78,32 @@ export class AuthService {
   private static readonly ACCESS_TOKEN_KEY = 'dbclient.auth.accessToken';
   private static readonly REFRESH_TOKEN_KEY = 'dbclient.auth.refreshToken';
   private static readonly USER_EMAIL_KEY = 'dbclient.auth.email';
-  private static readonly SERVER_URL_KEY = 'dbclient.sync.serverUrl';
+  private static readonly PLAN_CACHE_KEY = 'dbclient.sync.cachedPlan';
 
   /** 同步客户端（token 通过 getter 实时读取） */
   readonly client: SyncClient;
 
   private accessToken?: string;
   private refreshToken?: string;
-  /** 缓存的套餐（SyncStatusBar 刷新时填，requireFeature 用） */
-  private cachedPlan?: { code: string; name: string; features: number; maxDevices: number; maxConnections: number; maxOpenConnections: number; syncQuotaBytes: number };
+  /** 缓存的套餐（SyncStatusBar 刷新时填，requireFeature 用；持久化到 globalState 供重启后弱网回退） */
+  private cachedPlan?: CachedPlan;
 
-  /** 读取缓存套餐 */
-  getCachedPlan() {
+  /** 读取缓存套餐：优先内存，回退 globalState（重启后无网仍能读回上次已知套餐）。 */
+  getCachedPlan(): CachedPlan | undefined {
+    if (this.cachedPlan) return this.cachedPlan;
+    if (this.memento) {
+      const stored = this.memento.get<CachedPlan>(AuthService.PLAN_CACHE_KEY);
+      if (stored) this.cachedPlan = stored;
+    }
     return this.cachedPlan;
   }
 
-  /** 设置缓存套餐（SyncStatusBar getMe 后调用） */
-  setCachedPlan(plan: { code: string; name: string; features: number; maxDevices: number; maxConnections: number; maxOpenConnections: number; syncQuotaBytes: number }): void {
+  /** 设置缓存套餐（SyncStatusBar getMe 后调用），同步写 globalState。 */
+  setCachedPlan(plan: CachedPlan): void {
     this.cachedPlan = plan;
+    try {
+      this.memento?.update(AuthService.PLAN_CACHE_KEY, plan);
+    } catch { /* memento 写失败不影响本次判断 */ }
   }
 
   /** SecretStorage 变更订阅（多窗口同步），dispose 时取消 */
@@ -93,6 +112,7 @@ export class AuthService {
   constructor(
     private readonly secrets: vscode.SecretStorage,
     readonly serverUrl: string,
+    private readonly memento?: vscode.Memento,
   ) {
     this.client = new SyncClient(
       serverUrl,
@@ -158,19 +178,6 @@ export class AuthService {
     return this.accessToken;
   }
 
-  /** 读取服务器地址；未配置时回落到构建时注入的默认值（.env / .env.production） */
-  static getServerUrl(
-    config: vscode.WorkspaceConfiguration,
-    fallback: string = DEFAULT_SERVER_URL,
-  ): string {
-    return config.get<string>(AuthService.SERVER_URL_KEY) || fallback;
-  }
-
-  /** 移除服务器地址设置（供重建客户端） */
-  static clearServerUrl(config: vscode.WorkspaceConfiguration): void {
-    void config.update(AuthService.SERVER_URL_KEY, undefined, vscode.ConfigurationTarget.Global);
-  }
-
   /** 注册并登录 */
   async register(email: string, password: string): Promise<AuthResult> {
     const result = await this.client.register(email, password);
@@ -194,9 +201,13 @@ export class AuthService {
     }
     this.accessToken = undefined;
     this.refreshToken = undefined;
+    this.cachedPlan = undefined;
     await this.secrets.delete(AuthService.ACCESS_TOKEN_KEY);
     await this.secrets.delete(AuthService.REFRESH_TOKEN_KEY);
     await this.secrets.delete(AuthService.USER_EMAIL_KEY);
+    try {
+      this.memento?.update(AuthService.PLAN_CACHE_KEY, undefined);
+    } catch { /* 忽略 */ }
   }
 
   /** 修改账号密码（需当前已登录） */

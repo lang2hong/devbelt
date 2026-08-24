@@ -1,10 +1,31 @@
 {
   "name": "vscode-db-client",
   "displayName": "DB Client Pro",
-  "description": "All-in-one database client for MySQL, PostgreSQL and SQLite — query, import/export, sync and design.",
+  "description": "All-in-one database client for MySQL, PostgreSQL and SQLite in VS Code — query, edit data, design schemas, ER diagrams, import/export, SSH tunnels and encrypted cloud sync.",
   "version": "0.0.1",
-  "publisher": "local",
+  "publisher": "lang2hong",
   "license": "MIT",
+  "icon": "resources/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://gitee.com/lang2hong/vscode-db-client"
+  },
+  "keywords": [
+    "database",
+    "sql",
+    "mysql",
+    "postgresql",
+    "sqlite",
+    "database-client",
+    "sql-client",
+    "query",
+    "er-diagram",
+    "sync"
+  ],
+  "galleryBanner": {
+    "color": "#16324F",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -1245,11 +1266,6 @@
     "configuration": {
       "title": "DB Client",
       "properties": {
-        "dbclient.sync.serverUrl": {
-          "type": "string",
-          "scope": "machine",
-          "description": "DB Client sync server URL. Defaults to http://db.xfhyt.com in production and http://localhost:3000 in development (chosen at runtime by the extension mode). Machine-scoped on purpose: a workspace-level override would let any cloned repository redirect login credentials, refresh tokens and encrypted sync payloads to an attacker-controlled host."
-        },
         "dbclient.sync.auto": {
           "type": "string",
           "enum": [
@@ -1362,7 +1378,7 @@
     "dev:webview": "cd webview && npx vite build --watch",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "test": "cd webview && npx vite build && cd .. && vitest run",
-    "package": "vsce package --no-dependencies --allow-missing-repository"
+    "package": "vsce package --no-dependencies"
   },
   "dependencies": {
     "chart.js": "^4.4.0",

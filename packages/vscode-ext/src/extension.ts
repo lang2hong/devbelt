@@ -16,7 +16,7 @@ import { PoolStatusView } from './result/poolStatusView';
 import { AuditLogger } from './utils/auditLogger';
 import { BackupScheduler } from './schedule/backupScheduler';
 import { HistoryStore } from './history/historyStore';
-import { AuthService } from './sync/authService';
+import { AuthService, DEFAULT_SERVER_URL } from './sync/authService';
 import { requireFeature, Feature } from './sync/features';
 import { SyncManager } from './sync/syncManager';
 import { MasterPasswordStore } from './sync/masterPasswordStore';
@@ -53,8 +53,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   TableQueryView.init(context.extensionUri);
 
   // 同步服务
-  const serverUrl = AuthService.getServerUrl(vscode.workspace.getConfiguration());
-  const auth = new AuthService(context.secrets, serverUrl);
+  const serverUrl = DEFAULT_SERVER_URL;
+  const auth = new AuthService(context.secrets, serverUrl, context.globalState);
   // AuthService 订阅了 SecretStorage 变更（多窗口 token 同步），必须随扩展一起释放
   context.subscriptions.push(auth);
   await auth.init();
