@@ -8,7 +8,7 @@
   "icon": "resources/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://gitee.com/lang2hong/vscode-db-client"
+    "url": "https://github.com/lang2hong/vscode-db-client"
   },
   "keywords": [
     "database",
