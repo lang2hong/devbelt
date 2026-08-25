@@ -22,16 +22,10 @@ Query, edit and design your databases without leaving the editor. Run SQL with a
 
 ## Installation
 
-Install from the Visual Studio Marketplace, or build from source:
+1. Open the Extensions view in VS Code (`Ctrl+Shift+X` / `Cmd+Shift+X`).
+2. Search for **DB Client Pro** and click **Install**.
 
-```
-git clone https://gitee.com/lang2hong/vscode-db-client
-cd vscode-db-client/packages/vscode-ext
-pnpm install
-pnpm package
-```
-
-Then run **Install from VSIX…** and pick the generated `vscode-db-client-*.vsix`.
+You can also install from a `.vsix` file: run **Extensions: Install from VSIX…** and select the file.
 
 ## Quick Start
 
