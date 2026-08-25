@@ -1,60 +1,57 @@
 import * as vscode from 'vscode';
-import type { AuthService } from './authService';
+import { BaseWebView } from '../result/baseWebView';
 import { l10n } from '../i18n';
+import type { AuthService } from './authService';
 
-/** 账户/套餐面板：展示当前套餐、配额用量与订阅状态（升级入口） */
-export class AccountView {
-  private static panel?: vscode.WebviewPanel;
+/**
+ * 账户/套餐面板（Vue 版，替代原 accountView.ts 的同步塞 HTML）。
+ *
+ * 消息协议（与 webview/src/views/AccountView.vue 对齐）：
+ *   webview → ext: ready | upgrade{code}
+ *   ext → webview: init{mode:'account'} | me{me} | error{message}
+ *
+ * 原实现是「先 loading HTML、getMe 后整体替换 HTML」，迁移后改为异步消息：
+ * 视图挂载后发 ready，扩展端 getMe 再回 me（或 error）。
+ */
+export class AccountView extends BaseWebView {
+  private static current?: AccountView;
+  private initSent = false;
+  private readonly auth: AuthService;
 
-  static async open(auth: AuthService): Promise<void> {
-    if (AccountView.panel) { AccountView.panel.reveal(vscode.ViewColumn.Active); return; }
-    const panel = vscode.window.createWebviewPanel(
-      'dbclient.account', l10n('account.title'), vscode.ViewColumn.Active,
-      { enableScripts: true, retainContextWhenHidden: true },
-    );
-    AccountView.panel = panel;
-    panel.webview.html = AccountView.loadingHtml();
+  private constructor(auth: AuthService) {
+    super('dbclient.account', l10n('account.title'));
+    this.auth = auth;
+  }
 
-    try {
-      const me = await auth.client.getMe();
-      panel.webview.html = AccountView.detailHtml(me);
-    } catch (e) {
-      panel.webview.html = AccountView.errorHtml((e as Error).message);
+  static open(auth: AuthService): void {
+    if (AccountView.current) {
+      AccountView.current.panel.reveal(vscode.ViewColumn.Active);
+      return;
     }
-    panel.onDidDispose(() => { AccountView.panel = undefined; });
+    AccountView.current = new AccountView(auth);
   }
 
-  private static loadingHtml(): string {
-    return '<!DOCTYPE html><html><body style="font-family:var(--vscode-font-family);padding:20px">…</body></html>';
+  protected async handleMessage(msg: any): Promise<void> {
+    if (msg?.type === 'upgrade') {
+      void vscode.window.showInformationMessage(l10n('account.upgradeHint'));
+      return;
+    }
+    if (msg?.type !== 'ready') return;
+    if (!this.initSent) {
+      this.initSent = true;
+      this.post({ type: 'init', mode: 'account' });
+      return;
+    }
+    try {
+      const me = await this.auth.client.getMe();
+      this.post({ type: 'me', me });
+    } catch (e) {
+      this.post({ type: 'error', message: (e as Error).message });
+    }
   }
 
-  private static errorHtml(message: string): string {
-    return `<!DOCTYPE html><html><body style="font-family:var(--vscode-font-family);padding:20px;color:var(--vscode-errorForeground)">${message}</body></html>`;
-  }
-
-  private static detailHtml(me: any): string {
-    const plan = me.plan;
-    const u = me.usage;
-    const sub = me.subscription;
-    const bytes = (n: number) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B';
-    const quota = (cur: number, max: number) => max === 0 ? `${cur} / ∞` : `${cur} / ${max}`;
-    const row = (k: string, v: string) => `<tr><td>${k}</td><td>${v}</td></tr>`;
-    return `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
-body{font-family:var(--vscode-font-family);color:var(--vscode-foreground);background:var(--vscode-editor-background);padding:20px;margin:0}
-h2{font-size:14px;margin:0 0 12px}
-table{border-collapse:collapse;font-size:13px;width:100%;max-width:440px}
-td{padding:6px 10px;border:1px solid var(--vscode-panel-border)}
-td:first-child{color:var(--vscode-descriptionForeground);width:160px}
-p{color:var(--vscode-descriptionForeground);font-size:12px;margin-top:12px;max-width:440px}
-</style></head><body>
-<h2>${plan.name} <small>(${plan.code})</small></h2>
-<table>
-${row(l10n('account.devices'), quota(u.devices, plan.maxDevices))}
-${row(l10n('account.connections'), quota(u.connections, plan.maxConnections))}
-${row(l10n('account.sync'), `${bytes(u.syncBytes)} / ${plan.syncQuotaBytes ? bytes(plan.syncQuotaBytes) : '∞'}`)}
-${row(l10n('account.subscription'), sub ? sub.status : '-')}
-</table>
-<p>${l10n('account.upgradeHint')}</p>
-</body></html>`;
+  protected onDispose(): void {
+    super.onDispose();
+    if (AccountView.current === this) AccountView.current = undefined;
   }
 }

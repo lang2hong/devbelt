@@ -1,3 +1,11 @@
+import { Agent, fetch as undiciFetch } from 'undici';
+
+// 用 undici 包的 fetch + 直连 Agent，绕过两层问题：
+//  1) VS Code 把 extension host 的 globalThis.fetch 替换成「走环境代理」的版本，不尊重 init.dispatcher；
+//  2) undici 走 HTTP 代理对 http 目标用 CONNECT 隧道，与 Squid 不兼容 → Request was cancelled。
+// 改用 undici 包的 fetch（bundled、纯 undici、尊重 dispatcher）+ 直连 Agent，绕过两者。server 为公网可直连。
+const directAgent = new Agent();
+
 /**
  * 同步客户端：封装与后端同步服务的 HTTP 通信。
  * 双 token：access(短期) + refresh(长期)；401 自动用 refresh 换新 access 并重试一次。
@@ -25,6 +33,7 @@ export interface DeviceInfo {
   deviceName: string;
   deviceId: string;
   machineId: string;
+  osMachineId: string;
   hostname: string;
   os: string;
   arch: string;
@@ -57,25 +66,47 @@ export interface VersionSummary {
   createTime: string;
 }
 
+export interface PlanInfo {
+  code: string;
+  name: string;
+  priceMonth: number;
+  priceYear: number;
+  maxDevices: number;
+  maxConnections: number;
+  maxOpenConnections: number;
+  syncQuotaBytes: number;
+  syncVersionRetention: number;
+  historyRetentionCount: number;
+  features: number;
+}
+
 export interface MeResponse {
   user: { id: number; email: string; role: string; planCode: string; status: string };
-  plan: {
-    code: string; name: string;
-    maxDevices: number; maxConnections: number; maxOpenConnections: number;
-    syncQuotaBytes: number; syncVersionRetention: number;
-    historyRetentionCount: number; features: number;
-  };
+  plan: PlanInfo;
+  plans: PlanInfo[];
   subscription?: { planCode: string; status: string; periodEndTime: string };
   usage: { devices: number; connections: number; syncBytes: number; history: number };
 }
 
-export interface SessionInfo {
+export interface DeviceItem {
   id: number;
-  deviceName?: string;
-  ip?: string;
+  userId: number;
+  deviceId: string;
+  hostname?: string;
+  os?: string;
+  arch?: string;
+  osVersion?: string;
+  appName?: string;
+  appVersion?: string;
+  remoteName?: string;
+  vsMachineId?: string;
+  osMachineId?: string;
+  language?: string;
+  timezone?: string;
+  revokedTime?: string;
+  lastSeenTime?: string;
   createTime: string;
-  lastUsedTime?: string;
-  current: boolean;
+  updateTime: string;
 }
 
 
@@ -85,6 +116,30 @@ export class SyncConflictError extends Error {
   constructor(public readonly section: string, public readonly latestVersion: number) {
     super(`sync conflict on section ${section}: remote version ${latestVersion}`);
     this.name = 'SyncConflictError';
+  }
+}
+
+/** 设备数超限（server 403 DEVICE_LIMIT_EXCEEDED）：当前设备未绑定且配额已满 */
+export class DeviceLimitExceededError extends Error {
+  constructor() {
+    super('Device limit reached. Upgrade to Pro to use this device, or contact the administrator.');
+    this.name = 'DeviceLimitExceededError';
+  }
+}
+
+/** 付费功能（server 403 PRO_FEATURE_REQUIRED）：free 套餐不可用 */
+export class ProFeatureRequiredError extends Error {
+  constructor() {
+    super('Device management requires a paid plan. Upgrade to Pro.');
+    this.name = 'ProFeatureRequiredError';
+  }
+}
+
+/** 配额超限（server 403 QUOTA_EXCEEDED）：连接数 / 同步存储超限 */
+export class QuotaExceededError extends Error {
+  constructor(message?: string) {
+    super(message || 'Plan quota exceeded. Upgrade to continue syncing.');
+    this.name = 'QuotaExceededError';
   }
 }
 
@@ -105,6 +160,8 @@ export class SyncClient {
     private readonly getRefreshToken: () => string | undefined | Promise<string | undefined>,
     private readonly onTokensRefreshed?: (access: string, refresh: string) => void | Promise<void>,
     private readonly device?: DeviceInfo,
+    /** fetch 实现可注入（测试 mock 用；默认 undici 包 fetch，绕过 VS Code 对 globalThis.fetch 的代理包装） */
+    private readonly fetchImpl: typeof undiciFetch = undiciFetch,
   ) {}
 
   /** 注册 */
@@ -132,11 +189,12 @@ export class SyncClient {
     // await：getRefreshToken 会去读 SecretStorage，拿的是跨窗口的最新值
     const rt = await this.getRefreshToken();
     if (!rt) throw new Error('no refresh token');
-    const res = await fetch(`${this.baseUrl}/api/auth/refresh`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/api/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this.deviceHeaders() },
       body: JSON.stringify({ refreshToken: rt }),
-    });
+      dispatcher: directAgent,
+    } as any);
     if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
     const body = (await res.json()) as { accessToken: string; refreshToken: string };
     // await：轮换结果必须在本次调用返回前落盘，否则其他窗口仍会读到旧 token
@@ -176,6 +234,7 @@ export class SyncClient {
   async fetchSections(section?: string): Promise<PullResult> {
     const path = section ? `/api/sync?section=${encodeURIComponent(section)}` : '/api/sync';
     const res = await this.request('GET', path, undefined, true);
+    await this.throwIfDeviceLimit(res);
     if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
     return res.json() as Promise<PullResult>;
   }
@@ -183,6 +242,7 @@ export class SyncClient {
   /** 推送单节（乐观锁 baseVersion；附带明文 itemCount + 连接元数据供服务端计量） */
   async pushSection(section: string, encryptedData: string, baseVersion: number, itemCount?: number, meta?: unknown[]): Promise<PushResult> {
     const res = await this.request('PUT', '/api/sync', { section, encryptedData, baseVersion, itemCount, meta }, true);
+    await this.throwIfDeviceLimit(res);
     if (res.status === 409) {
       const body = (await res.json().catch(() => ({}))) as { version?: number };
       throw new SyncConflictError(section, body.version ?? 0);
@@ -206,17 +266,30 @@ export class SyncClient {
     return res.json() as Promise<PushResult>;
   }
 
-  /** 列设备会话 */
-  async listSessions(): Promise<SessionInfo[]> {
-    const res = await this.request('GET', '/api/auth/sessions', undefined, true);
-    if (!res.ok) throw new Error(`List sessions failed: ${res.status}`);
-    const body = (await res.json()) as { sessions: SessionInfo[] };
-    return body.sessions;
+  /** 列当前用户全部设备（含绑定状态） */
+  async listDevices(): Promise<{ devices: DeviceItem[]; currentDeviceId?: string }> {
+    const res = await this.request('GET', '/api/devices', undefined, true);
+    if (!res.ok) throw new Error(`List devices failed: ${res.status}`);
+    return res.json() as Promise<{ devices: DeviceItem[]; currentDeviceId?: string }>;
   }
 
-  /** 踢出设备会话 */
-  async revokeSession(id: number): Promise<void> {
-    await this.request('DELETE', `/api/auth/sessions/${id}`, undefined, true);
+  /** 撤销设备（释放配额位；free 由服务端 403 兜底） */
+  async revokeDevice(deviceId: string): Promise<void> {
+    const res = await this.request('DELETE', `/api/devices/${encodeURIComponent(deviceId)}`, undefined, true);
+    await this.throwIfDeviceLimit(res);
+    if (!res.ok) {
+      const errBody = (await res.json().catch(() => ({}))) as { message?: string };
+      throw new Error(errBody.message || `Revoke failed: ${res.status}`);
+    }
+  }
+
+  /** 识别服务端 403（设备数超限 / 付费功能 / 配额超限），转成客户端可判定的错误类型 */
+  private async throwIfDeviceLimit(res: Response): Promise<void> {
+    if (res.status !== 403) return;
+    const body = (await res.json().catch(() => ({}))) as { code?: string; message?: string };
+    if (body.code === 'DEVICE_LIMIT_EXCEEDED') throw new DeviceLimitExceededError();
+    if (body.code === 'PRO_FEATURE_REQUIRED') throw new ProFeatureRequiredError();
+    if (body.code === 'QUOTA_EXCEEDED') throw new QuotaExceededError(body.message);
   }
 
   private async postForm(path: string, body: object): Promise<AuthResult> {
@@ -234,9 +307,14 @@ export class SyncClient {
    */
   private async request(method: string, path: string, body: unknown, needsAuth: boolean): Promise<Response> {
     const url = `${this.baseUrl}${path}`;
-    const init: RequestInit = { method, headers: { 'Content-Type': 'application/json', ...this.deviceHeaders() } };
+    // body 为空时（GET / DELETE）不带 Content-Type，否则 fastify 的 content-type-parser
+    // 会尝试解析空 body 报 FST_ERR_CTP_EMPTY_JSON_BODY（如 free 用户撤销设备应返回 403，
+    // 却被 400 拦在 handler 之前）。
+    const headers: Record<string, string> = { ...this.deviceHeaders() };
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const init: RequestInit = { method, headers };
     const tokenBefore = needsAuth ? this.getAccessToken() : undefined;
-    if (tokenBefore) (init.headers as Record<string, string>).Authorization = `Bearer ${tokenBefore}`;
+    if (tokenBefore) headers.Authorization = `Bearer ${tokenBefore}`;
     if (body !== undefined) init.body = JSON.stringify(body);
 
     let res = await this.fetchWithRetry(url, init);
@@ -291,7 +369,7 @@ export class SyncClient {
     let lastErr: unknown;
     for (let attempt = 0; attempt < SyncClient.MAX_ATTEMPTS; attempt++) {
       try {
-        const res = await fetch(url, init);
+        const res = await this.fetchImpl(url, { ...init, dispatcher: directAgent } as any);
         if (res.status >= 500) throw new Error(`server error ${res.status}`);
         return res;
       } catch (e) {
@@ -316,6 +394,7 @@ export class SyncClient {
       'X-Device-Name': d.deviceName,
       'X-Device-Id': d.deviceId,
       'X-Device-Machine-Id': d.machineId,
+      'X-Device-Os-Machine-Id': d.osMachineId,
       'X-Device-Hostname': d.hostname,
       'X-Device-Os': d.os,
       'X-Device-Arch': d.arch,

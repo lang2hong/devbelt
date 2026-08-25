@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
-import { createHash } from 'crypto';
-import { hostname, platform, arch, release, networkInterfaces, cpus } from 'os';
+import { execSync } from 'child_process';
+import { readFileSync } from 'fs';
+import { hostname, platform, arch, release } from 'os';
 import { SyncClient, AuthResult, DeviceInfo } from './syncClient';
 
 // 由 esbuild 构建时从 .env / .env.production 注入（见 esbuild.js 的 define）；测试环境由 vitest.config.ts 提供同名字段
@@ -18,27 +19,37 @@ export interface CachedPlan {
   maxConnections: number;
   maxOpenConnections: number;
   syncQuotaBytes: number;
+  historyRetentionCount: number;
 }
 
-let _fingerprint: string | undefined;
+let _osMachineId: string | undefined;
 
-/** 硬件指纹（确定性，不依赖本地存储；同硬件同值，卸载重装不变） */
-function machineFingerprint(): string {
-  if (_fingerprint) return _fingerprint;
-  const cpu = cpus()[0]?.model ?? '';
-  const raw = `${hostname()}|${cpu}|${firstMac()}|${platform()}/${arch()}`;
-  _fingerprint = createHash('sha256').update(raw).digest('hex');
-  return _fingerprint;
-}
-
-function firstMac(): string {
-  const ifs = networkInterfaces();
-  for (const name of Object.keys(ifs)) {
-    for (const ni of ifs[name] ?? []) {
-      if (ni && ni.mac && ni.mac !== '00:00:00:00:00:00' && !ni.internal) return ni.mac;
-    }
+/** 操作系统级 machine id（跨 VSCode 重装稳定，重装系统才变），作为 device 判同依据。
+ *  Linux: /etc/machine-id；macOS: IOPlatformUUID；Windows: MachineGuid（注册表）。 */
+function getOsMachineId(): string {
+  if (_osMachineId !== undefined) return _osMachineId;
+  try {
+    const id = (() => {
+      switch (platform()) {
+        case 'linux': return readFileSync('/etc/machine-id', 'utf8').trim();
+        case 'darwin': {
+          const out = execSync('ioreg -d2 -c IOPlatformExpertDevice', { encoding: 'utf8' });
+          const m = out.match(/"IOPlatformUUID"\s*=\s*"([^"]+)"/);
+          return m ? m[1] : '';
+        }
+        case 'win32': {
+          const out = execSync('reg query "HKLM\\SOFTWARE\\Microsoft\\Cryptography" /v MachineGuid', { encoding: 'utf8' });
+          const m = out.match(/MachineGuid\s+REG_SZ\s+([0-9A-Fa-f-]+)/);
+          return m ? m[1] : '';
+        }
+        default: return '';
+      }
+    })();
+    _osMachineId = id || '';
+  } catch {
+    _osMachineId = '';
   }
-  return '';
+  return _osMachineId;
 }
 
 function timezoneName(): string {
@@ -49,13 +60,16 @@ function timezoneName(): string {
   }
 }
 
-/** 组装设备信息：deviceId 为硬件指纹（判同键），machineId 为 VSCode 原始值（仅追溯） */
+/** 组装设备信息：deviceId = osMachineId（跨 VSCode 重装稳定的判同键）；
+ *  machineId 为 VSCode 原始值（可随重装变化，仅追溯）；osMachineId 单独上报供服务端存档。 */
 function buildDeviceInfo(): DeviceInfo {
   const name = `${hostname()} · ${platform()}/${arch()} · VSCode ${vscode.version}`;
+  const osMachineId = getOsMachineId();
   return {
     deviceName: name.length > 120 ? name.slice(0, 120) : name,
-    deviceId: machineFingerprint(),
+    deviceId: osMachineId,
     machineId: vscode.env.machineId,
+    osMachineId,
     hostname: hostname(),
     os: platform(),
     arch: arch(),

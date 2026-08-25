@@ -7,6 +7,13 @@ vi.mock('vscode', () => ({
   ConfigurationTarget: { Global: 1 },
 }));
 
+// SyncClient 静态 import undici 的 fetch，绕过 VS Code 对 globalThis.fetch 的代理。
+// 测试里让它委托回 globalThis.fetch，这样 installServerStub 替换 global fetch 即可生效。
+vi.mock('undici', () => ({
+  Agent: class {},
+  fetch: (url: any, init?: any) => globalThis.fetch(url, init),
+}));
+
 import { AuthService } from '../../src/sync/authService';
 
 /**

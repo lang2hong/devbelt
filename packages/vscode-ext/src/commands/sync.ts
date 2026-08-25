@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { LoginForm } from '../sync/loginForm';
+import { LoginFormView } from '../sync/loginFormView';
 import { SessionView } from '../sync/sessionView';
 import { AccountView } from '../sync/accountView';
 import { SyncConflictError } from '../sync/syncClient';
@@ -54,7 +54,7 @@ export function registerSyncCommands(deps: Deps, sub: Sub): void {
 
   // 登录成功后除刷新状态栏，还要同步 dbclient.loggedIn 上下文，
   // 否则命令面板里 logout / changeSyncPassword 仍然不可见
-  sub('dbclient.login', () => LoginForm.open(auth, () => {
+  sub('dbclient.login', () => LoginFormView.open(auth, () => {
     syncBar.update();
     void syncLoggedInContext(auth);
     void refreshAdminCommand(auth);
@@ -173,22 +173,34 @@ export function registerSyncCommands(deps: Deps, sub: Sub): void {
     const loggedIn = auth.isLoggedIn();
     const items: (vscode.QuickPickItem & { value: string })[] = [
       { label: '$(add) New Group', description: 'Create a connection group', value: 'addGroup' },
+      { label: '$(download) Import Connections', description: 'Import connections from a file', value: 'importConnections' },
       { label: '$(export) Export Connections', description: 'Export selected connections', value: 'exportConnections' },
       { label: '$(history) History', description: 'View recent queries', value: 'showHistory' },
       { label: '$(device-desktop) Device Sessions', description: 'Manage devices', value: 'sessions' },
       { label: '$(cloud-download) Pull from Cloud', description: 'Download & merge', value: 'syncPull' },
       { label: '$(cloud-upload) Push to Cloud', description: 'Upload local data', value: 'syncPush' },
-      ...(loggedIn ? [{ label: '$(account) Account', description: 'View plan, usage and subscription', value: 'account' }] : []),
-      loggedIn
-        ? { label: '$(sign-out) Logout', value: 'logout' }
-        : { label: '$(sign-in) Login', value: 'login' },
     ];
     if (loggedIn && await isAdminUser(auth)) {
-      items.splice(items.length - 1, 0, { label: '$(shield) Admin Panel', description: 'Open the admin dashboard', value: 'openAdminPanel' });
+      items.push({ label: '$(shield) Admin Panel', description: 'Open the admin dashboard', value: 'openAdminPanel' });
     }
     const picked = await vscode.window.showQuickPick(items, { placeHolder: 'DB Client actions' });
     if (!picked) return;
     if (picked.value === 'openAdminPanel') openAdminPanel(auth);
     else await vscode.commands.executeCommand(`dbclient.${picked.value}`);
+  });
+
+  // 账户入口收进底部状态栏：点击状态栏弹出 Account / Login / Logout，
+  // 不再与「添加连接」等树操作挤在顶部「...」菜单里。
+  sub('dbclient.accountMenu', async () => {
+    const items: (vscode.QuickPickItem & { value: string })[] = auth.isLoggedIn()
+      ? [
+          { label: `$(device-desktop) ${l10n('sessions.title')}`, description: l10n('sessions.menuHint'), value: 'sessions' },
+          { label: '$(account) Account', description: 'View plan, usage and subscription', value: 'account' },
+          { label: '$(sign-out) Logout', value: 'logout' },
+        ]
+      : [{ label: '$(sign-in) Login', value: 'login' }];
+    const picked = await vscode.window.showQuickPick(items, { placeHolder: 'DB Client account' });
+    if (!picked) return;
+    await vscode.commands.executeCommand(`dbclient.${picked.value}`);
   });
 }

@@ -34,7 +34,9 @@ import { TerminalService } from './terminal/terminalService';
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const store = new ConnectionStore(context.globalState, context.secrets);
   await store.init();
-  const history = new HistoryStore(context.globalState);
+  const serverUrl = DEFAULT_SERVER_URL;
+  const auth = new AuthService(context.secrets, serverUrl, context.globalState);
+  const history = new HistoryStore(context.globalState, () => auth.getCachedPlan()?.historyRetentionCount);
   usageTracker.init(context.globalState);
   // history 注入管理器：所有会话的修改性语句由此自动进历史，
   // 不再依赖各命令自行调用 history.add（漏一个就少一段痕迹）。
@@ -52,9 +54,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   BaseWebView.init(context.extensionUri);
   TableQueryView.init(context.extensionUri);
 
-  // 同步服务
-  const serverUrl = DEFAULT_SERVER_URL;
-  const auth = new AuthService(context.secrets, serverUrl, context.globalState);
   // AuthService 订阅了 SecretStorage 变更（多窗口 token 同步），必须随扩展一起释放
   context.subscriptions.push(auth);
   await auth.init();
@@ -64,7 +63,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   void syncLoggedInContext(auth);
   void refreshAdminCommand(auth);
   const masterPasswordStore = new MasterPasswordStore(context.secrets);
-  const sync = new SyncManager(auth, store, history, context.globalState, masterPasswordStore);
+  const sync = new SyncManager(auth, store, history, context.globalState, masterPasswordStore, (err) => {
+    void vscode.window.showErrorMessage(err.message, 'Upgrade').then((choice) => {
+      if (choice === 'Upgrade') void vscode.commands.executeCommand('dbclient.account');
+    });
+  });
   const syncBar = new SyncStatusBar(auth, () => sync.getLastSyncAt());
 
   // 自动同步：合并连接/查询 与 历史 的变更事件
@@ -200,7 +203,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
     // 审计日志
-    vscode.commands.registerCommand('dbclient.showAuditLog', () => {
+    vscode.commands.registerCommand('dbclient.showAuditLog', async () => {
+      if (!(await requireFeature(auth, Feature.audit_log))) return;
       AuditLogView.open(auditLogger);
     }),
     // 连接池状态

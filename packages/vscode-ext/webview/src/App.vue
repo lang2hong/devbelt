@@ -13,9 +13,12 @@ import DataDiffView from './views/DataDiffView.vue';
 import DashboardView from './views/DashboardView.vue';
 import AuditLogView from './views/AuditLogView.vue';
 import PoolStatusView from './views/PoolStatusView.vue';
+import LoginFormView from './views/LoginFormView.vue';
+import SessionView from './views/SessionView.vue';
+import AccountView from './views/AccountView.vue';
 
 const { onMessage } = useVsCode();
-const mode = ref<'query' | 'design' | 'status' | 'er' | 'connectionForm' | 'userManage' | 'syncDiff' | 'dataDiff' | 'dashboard' | 'auditLog' | 'poolStatus'>('query');
+const mode = ref<'query' | 'design' | 'status' | 'er' | 'connectionForm' | 'userManage' | 'syncDiff' | 'dataDiff' | 'dashboard' | 'auditLog' | 'poolStatus' | 'loginForm' | 'session' | 'account'>('query');
 
 let cleanup: (() => void) | undefined;
 onMounted(() => {
@@ -40,7 +43,10 @@ onUnmounted(() => cleanup?.());
   <SyncDiffView v-else-if="mode === 'syncDiff'" />
   <DataDiffView v-else-if="mode === 'dataDiff'" />
   <DashboardView v-else-if="mode === 'dashboard'" />
-  <AuditLogView v-else-if="mode === 'auditLog'" />
-  <PoolStatusView v-else-if="mode === 'poolStatus'" />
-  <ERDiagramView v-else />
+<AuditLogView v-else-if="mode === 'auditLog'" />
+      <PoolStatusView v-else-if="mode === 'poolStatus'" />
+      <LoginFormView v-else-if="mode === 'loginForm'" />
+      <SessionView v-else-if="mode === 'session'" />
+      <AccountView v-else-if="mode === 'account'" />
+      <ERDiagramView v-else />
 </template>

@@ -25,7 +25,7 @@ export interface QueryHistoryEntry {
  */
 export class HistoryStore {
   private static readonly KEY = 'dbclient.history';
-  private static readonly MAX_ENTRIES = 100;
+  private static readonly DEFAULT_MAX_ENTRIES = 100;
   private static idCounter = 0;
 
   private readonly changedEmitter = new EventEmitter<void>();
@@ -37,6 +37,11 @@ export class HistoryStore {
       get<T>(key: string): T | undefined;
       update(key: string, value: any): Thenable<void>;
     },
+    /**
+     * 解析当前套餐的查询历史保留条数（historyRetentionCount）。
+     * 返回 undefined = 未知（未登录，退回 DEFAULT_MAX_ENTRIES）；0 = 无限；正数 = 硬上限。
+     */
+    private readonly resolveRetention: () => number | undefined = () => undefined,
   ) {}
 
   /** 读取全部历史（新→旧） */
@@ -48,9 +53,7 @@ export class HistoryStore {
   async add(entry: Omit<QueryHistoryEntry, 'id' | 'time'>): Promise<void> {
     const list = this.list();
     list.unshift({ ...entry, id: `${Date.now()}_${++HistoryStore.idCounter}`, time: Date.now() });
-    if (list.length > HistoryStore.MAX_ENTRIES) {
-      list.length = HistoryStore.MAX_ENTRIES;
-    }
+    this.trimToRetention(list);
     await this.memento.update(HistoryStore.KEY, list);
     this.changedEmitter.fire();
     void eventBus.publish(new HistoryChangedEvent('add'));
@@ -61,6 +64,13 @@ export class HistoryStore {
     await this.memento.update(HistoryStore.KEY, []);
     this.changedEmitter.fire();
     void eventBus.publish(new HistoryChangedEvent('clear'));
+  }
+
+  /** 按套餐 historyRetentionCount 截断：undefined→默认上限，0→不限，正数→硬上限 */
+  private trimToRetention(list: QueryHistoryEntry[]): void {
+    const retention = this.resolveRetention();
+    const cap = retention != null ? (retention > 0 ? retention : undefined) : HistoryStore.DEFAULT_MAX_ENTRIES;
+    if (cap != null && list.length > cap) list.length = cap;
   }
 
   // ─── 同步 ───
@@ -83,7 +93,7 @@ export class HistoryStore {
       if (!prev || (entry.time ?? 0) >= (prev.time ?? 0)) map.set(entry.id, entry);
     }
     const merged = [...map.values()].sort((a, b) => (b.time ?? 0) - (a.time ?? 0));
-    if (merged.length > HistoryStore.MAX_ENTRIES) merged.length = HistoryStore.MAX_ENTRIES;
+    this.trimToRetention(merged);
     await this.memento.update(HistoryStore.KEY, merged);
     this.changedEmitter.fire();
     void eventBus.publish(new HistoryChangedEvent('merge'));

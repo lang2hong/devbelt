@@ -54,6 +54,10 @@ const options = {
   logLevel: 'info',
   define: {
     __SYNC_SERVER_URL__: JSON.stringify(env.SYNC_SERVER_URL || (isWatch ? 'http://localhost:3000' : 'http://db.xfhyt.com')),
+    // pg@8 加载时用 `typeof navigator` 检测 Cloudflare Workers；VS Code 1.101+ 的
+    // extension host 会拦截 navigator 访问并在开发模式打印 PendingMigrationError 日志。
+    // 本项目源码不使用 navigator，打包期替换为 undefined 让 pg 走 node 分支，消除噪音。
+    navigator: 'undefined',
   },
 };
 

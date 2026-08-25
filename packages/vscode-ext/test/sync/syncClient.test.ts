@@ -50,13 +50,14 @@ function setup(handler: (call: Call, n: number) => Response | Promise<Response>)
     calls.push(call);
     return handler(call, calls.length);
   });
-  vi.stubGlobal('fetch', fetchMock);
 
   const client = new SyncClient(
     'http://x',
     () => access,
     () => refreshTok,
     (a, r) => { access = a; refreshTok = r; },
+    undefined,
+    fetchMock as any,
   );
 
   return {
@@ -129,7 +130,7 @@ describe('刷新单飞', () => {
       t.client.getMe(),
       t.client.getMe(),
       t.client.fetchSections(),
-      t.client.listSessions().catch(() => undefined),
+      t.client.listDevices().catch(() => undefined),
     ]);
 
     expect(refreshCount).toBe(1);
@@ -246,12 +247,12 @@ describe('refresh 请求不进重试通道', () => {
 
   it('refresh 遇网络异常不重发', async () => {
     const calls: string[] = [];
-    vi.stubGlobal('fetch', vi.fn(async (url: any) => {
+    const fetchMock = vi.fn(async (url: any) => {
       calls.push(String(url));
       if (String(url).endsWith('/api/auth/refresh')) throw new Error('ECONNRESET');
       return jsonRes(401);
-    }));
-    const client = new SyncClient('http://x', () => 'a', () => 'r', () => {});
+    });
+    const client = new SyncClient('http://x', () => 'a', () => 'r', () => {}, undefined, fetchMock as any);
 
     await expect(client.refresh()).rejects.toThrow(/ECONNRESET/);
     expect(calls.filter((u) => u.endsWith('/api/auth/refresh'))).toHaveLength(1);
@@ -259,12 +260,12 @@ describe('refresh 请求不进重试通道', () => {
 
   it('业务请求仍然享受 5xx 重试（重试通道没被一起砍掉）', async () => {
     let n = 0;
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    const fetchMock = vi.fn(async () => {
       n++;
       return n < 3 ? jsonRes(500) : jsonRes(200, { user: {} });
-    }));
+    });
     vi.useFakeTimers();
-    const client = new SyncClient('http://x', () => 'a', () => 'r', () => {});
+    const client = new SyncClient('http://x', () => 'a', () => 'r', () => {}, undefined, fetchMock as any);
     const p = client.getMe();
     await vi.advanceTimersByTimeAsync(5000);
     await expect(p).resolves.toBeDefined();
@@ -274,8 +275,8 @@ describe('refresh 请求不进重试通道', () => {
 
   it('没有 refresh token 时直接抛错，不发请求', async () => {
     const calls: string[] = [];
-    vi.stubGlobal('fetch', vi.fn(async (url: any) => { calls.push(String(url)); return jsonRes(200); }));
-    const client = new SyncClient('http://x', () => 'a', () => undefined, () => {});
+    const fetchMock = vi.fn(async (url: any) => { calls.push(String(url)); return jsonRes(200); });
+    const client = new SyncClient('http://x', () => 'a', () => undefined, () => {}, undefined, fetchMock as any);
 
     await expect(client.refresh()).rejects.toThrow(/no refresh token/);
     expect(calls).toHaveLength(0);
@@ -285,10 +286,10 @@ describe('refresh 请求不进重试通道', () => {
 describe('刷新成功后回写 token', () => {
   it('onTokensRefreshed 收到新的 access + refresh', async () => {
     const seen: Array<[string, string]> = [];
-    vi.stubGlobal('fetch', vi.fn(async () =>
+    const fetchMock = vi.fn(async () =>
       jsonRes(200, { accessToken: 'A2', refreshToken: 'R2' }),
-    ));
-    const client = new SyncClient('http://x', () => 'A1', () => 'R1', (a, r) => { seen.push([a, r]); });
+    );
+    const client = new SyncClient('http://x', () => 'A1', () => 'R1', (a, r) => { seen.push([a, r]); }, undefined, fetchMock as any);
 
     await client.refresh();
     expect(seen).toEqual([['A2', 'R2']]);

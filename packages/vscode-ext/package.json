@@ -572,11 +572,6 @@
           "group": "navigation"
         },
         {
-          "command": "dbclient.importConnections",
-          "when": "view == dbclient.explorer",
-          "group": "navigation"
-        },
-        {
           "command": "dbclient.searchObjects",
           "when": "view == dbclient.explorer",
           "group": "navigation"
@@ -1382,7 +1377,8 @@
   },
   "dependencies": {
     "chart.js": "^4.4.0",
-    "ssh2": "^1.16.1"
+    "ssh2": "^1.16.1",
+    "undici": "^7.29.0"
   },
   "devDependencies": {
     "@db-client/core": "workspace:*",

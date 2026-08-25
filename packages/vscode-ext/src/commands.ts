@@ -58,7 +58,7 @@ export class SyncStatusBar implements SyncStatusBarLike {
         } else {
           this.item.text = `$(cloud) ${email || 'synced'}${rel ? ` · ${rel}` : ''}`;
         }
-        this.item.command = 'dbclient.logout';
+        this.item.command = 'dbclient.accountMenu';
       });
   }
   private relativeTime(t: number): string {

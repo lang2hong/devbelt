@@ -3,8 +3,8 @@ packages:
 
 allowBuilds:
   '@vscode/vsce-sign': true
-  cpu-features: set this to true or false
+  cpu-features: false
   esbuild: true
   keytar: false
-  ssh2: set this to true or false
+  ssh2: false
   vue-demi: true

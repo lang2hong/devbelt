@@ -8,6 +8,7 @@ import { computeMergePlan, totalLocalOnly, type MergePlan } from './mergePlan';
 import { MasterPasswordStore } from './masterPasswordStore';
 import { SyncEvent, eventBus } from '../utils/event';
 import { usageTracker } from '../analytics/usageTracker';
+import { DeviceLimitExceededError, ProFeatureRequiredError, QuotaExceededError, type PullResult } from './syncClient';
 
 interface MementoLike {
   get<T>(key: string): T | undefined;
@@ -96,14 +97,35 @@ export class SyncManager {
     private readonly history: HistoryStore,
     private readonly hashStore: MementoLike,
     private readonly masterPasswordStore: MasterPasswordStore,
+    private readonly onDeviceLimit?: (err: Error) => void,
   ) {}
+
+  private deviceLimitNotifiedAt = 0;
+  /** 设备超限/付费功能引导：60s 去重；通知由构造注入的 onDeviceLimit 回调处理（避免本类依赖 vscode） */
+  guideDeviceLimit(err: unknown): void {
+    if (!(err instanceof DeviceLimitExceededError || err instanceof ProFeatureRequiredError || err instanceof QuotaExceededError)) return;
+    const now = Date.now();
+    if (now - this.deviceLimitNotifiedAt < 60_000) return;
+    this.deviceLimitNotifiedAt = now;
+    this.onDeviceLimit?.(err as Error);
+  }
+
+  /** fetchSections 包装：识别设备超限/付费功能并引导，其余错误透传 */
+  private async fetchSectionsGuarded(section?: string): Promise<PullResult> {
+    try {
+      return await this.auth.client.fetchSections(section);
+    } catch (err) {
+      this.guideDeviceLimit(err);
+      throw err;
+    }
+  }
 
   async pull(masterPassword: string, force = false): Promise<void> {
     if (!force) {
       if (await this.isLocalDirty()) throw new SyncLocalDirtyError();
     }
     try {
-      const result = await this.auth.client.fetchSections();
+      const result = await this.fetchSectionsGuarded();
       const payload = await this.decryptSections(result.sections, masterPassword);
       await this.applyRemote(payload);
       if (!force) {
@@ -134,6 +156,7 @@ export class SyncManager {
       await this.reportUsageIfAny();
       void eventBus.publish(new SyncEvent('push', `${SECTION_TYPES.length} section(s)`));
     } catch (err) {
+      this.guideDeviceLimit(err);
       void eventBus.publish(new SyncEvent('error', `push failed: ${(err as Error).message}`));
       throw err;
     }
@@ -141,7 +164,7 @@ export class SyncManager {
 
   /** 强制推送：先拉远端 versions 作 base，避免冲突，再推本地 */
   async forcePush(masterPassword: string): Promise<void> {
-    const result = await this.auth.client.fetchSections();
+    const result = await this.fetchSectionsGuarded();
     for (const sec of result.sections) {
       this.sectionVersions[sec.section as SectionType] = sec.version;
     }
@@ -155,7 +178,7 @@ export class SyncManager {
   }
 
   async previewPull(masterPassword: string): Promise<MergePlan> {
-    const result = await this.auth.client.fetchSections();
+    const result = await this.fetchSectionsGuarded();
     const remote = await this.decryptSections(result.sections, masterPassword);
     this.pendingRemote = remote;
     const local = await this.buildLocalPayload();
@@ -193,7 +216,7 @@ export class SyncManager {
   async rollback(section: string, toVersion: number, masterPassword: string): Promise<void> {
     await this.auth.client.rollback(section, toVersion);
     // 回滚后刷新本地该节
-    const result = await this.auth.client.fetchSections(section);
+    const result = await this.fetchSectionsGuarded(section);
     if (result.sections.length) {
       const payload = await this.decryptSections(result.sections, masterPassword);
       await this.applyRemote(payload);

@@ -89,3 +89,24 @@ export async function resolveMaxOpenConnections(auth: AuthService): Promise<numb
   }
   return plan.maxOpenConnections > 0 ? plan.maxOpenConnections : undefined; // 0 = 无限
 }
+
+/**
+ * 取「可保存的连接总数」上限（maxConnections）。
+ * 语义与 resolveMaxOpenConnections 一致：连到 sync push 的 server 端校验，
+ * 这里在本地保存时提前拦截，避免本地超配后同步反复 403 的割裂体验。
+ * 未登录按 free 上限 10 拦（引导登录）；0 = 无限。
+ */
+export async function resolveMaxConnections(auth: AuthService): Promise<number | undefined> {
+  if (!auth.isLoggedIn()) return 10;
+  let plan = auth.getCachedPlan();
+  if (!plan) {
+    try {
+      const me = await auth.client.getMe();
+      auth.setCachedPlan(me.plan);
+      plan = me.plan;
+    } catch {
+      return undefined; // 已登录但网络失败，放行
+    }
+  }
+  return plan.maxConnections > 0 ? plan.maxConnections : undefined; // 0 = 无限
+}
