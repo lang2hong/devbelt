@@ -4,7 +4,7 @@ import {
   FakeUserRepo,
   FakePlanRepo,
   FakeSubscriptionRepo,
-  FakeRefreshTokenRepo,
+  FakeDeviceRepo,
   FakeSyncRepo,
   FakeConnectionMetaRepo,
   makePlan,
@@ -22,7 +22,7 @@ async function setup() {
   // 真实现根本不碰的列）。
   subRepo.linkUsers(userRepo);
   const service = new SubscriptionService(
-    userRepo, planRepo, subRepo, new FakeRefreshTokenRepo(), new FakeSyncRepo(), new FakeConnectionMetaRepo(),
+    userRepo, planRepo, subRepo, new FakeDeviceRepo(), new FakeSyncRepo(), new FakeConnectionMetaRepo(),
   );
   const user = await userRepo.create('a@example.com', 'scrypt$x$y', 'user', 'pro');
   return { service, userRepo, subRepo, user };

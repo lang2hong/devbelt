@@ -85,6 +85,7 @@ export function errorStatus(code: string): number {
       return 401;
     case 'USER_DISABLED':
     case 'DEVICE_LIMIT_EXCEEDED':
+    case 'PRO_FEATURE_REQUIRED':
     case 'SUBSCRIPTION_EXPIRED':
     case 'QUOTA_EXCEEDED':
       return 403;

@@ -58,14 +58,6 @@ export class MysqlRefreshTokenRepo implements IRefreshTokenRepo {
     );
   }
 
-  async countActiveForUser(userId: number, now: Date): Promise<number> {
-    const [rows] = await this.db().query<any[]>(
-      'SELECT COUNT(*) AS cnt FROM refresh_tokens WHERE user_id = ? AND revoked_time IS NULL AND expires_time > ?',
-      [userId, now],
-    );
-    return rows[0]?.cnt ?? 0;
-  }
-
   async listActiveForUser(userId: number, now: Date): Promise<SessionInfo[]> {
     const [rows] = await this.db().query<any[]>(
       'SELECT id, device_name, ip, create_time, COALESCE(last_used_time, create_time) AS last_used_time FROM refresh_tokens WHERE user_id = ? AND revoked_time IS NULL AND expires_time > ? ORDER BY create_time DESC',

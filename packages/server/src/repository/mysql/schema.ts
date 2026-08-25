@@ -121,9 +121,11 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
       app_version VARCHAR(32) NULL,
       remote_name VARCHAR(32) NULL,
       vs_machine_id VARCHAR(64) NULL,
+      os_machine_id VARCHAR(64) NULL,
       language VARCHAR(16) NULL,
       timezone VARCHAR(64) NULL,
       last_seen_time TIMESTAMP NULL DEFAULT NULL,
+      revoked_time TIMESTAMP NULL DEFAULT NULL,
       create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -132,8 +134,10 @@ export async function initSchema(app: FastifyInstance): Promise<void> {
   `);
   // 旧 devices 表补列
   await addColumnIfMissing(mysql, 'devices', 'vs_machine_id', 'VARCHAR(64) NULL');
+  await addColumnIfMissing(mysql, 'devices', 'os_machine_id', 'VARCHAR(64) NULL');
   await addColumnIfMissing(mysql, 'devices', 'language', 'VARCHAR(16) NULL');
   await addColumnIfMissing(mysql, 'devices', 'timezone', 'VARCHAR(64) NULL');
+  await addColumnIfMissing(mysql, 'devices', 'revoked_time', 'TIMESTAMP NULL DEFAULT NULL');
 
   // device_events 设备事件留痕表（升级/系统变化/首次登记）
   await mysql.query(`
@@ -546,7 +550,7 @@ interface PlanSeed {
 const PLAN_SEED: PlanSeed[] = [
   {
     code: 'free', name: 'Free', priceMonth: 0, priceYear: 0,
-    maxDevices: 1, maxConnections: 20, maxOpenConnections: 2, syncQuotaBytes: 1 * 1024 * 1024,
+    maxDevices: 1, maxConnections: 10, maxOpenConnections: 2, syncQuotaBytes: 1 * 1024 * 1024,
     syncVersionRetention: 3, historyRetentionCount: 50, features: 1,
   },
   {

@@ -107,7 +107,6 @@ export interface IRefreshTokenRepo {
   revokeAllForUser(userId: number): Promise<void>;
   /** 撤销某用户在某设备上的全部活跃会话（同设备重登顶掉旧会话） */
   revokeByDevice(userId: number, deviceId: string): Promise<void>;
-  countActiveForUser(userId: number, now: Date): Promise<number>;
   listActiveForUser(userId: number, now: Date): Promise<SessionInfo[]>;
   updateLastUsed(id: number, time: Date): Promise<void>;
 }
@@ -118,6 +117,14 @@ export interface IDeviceRepo {
   listByUser(userId: number): Promise<Device[]>;
   /** 设备事件留痕（升级/系统变化/首次登记） */
   listEvents(userId: number, deviceId: string): Promise<DeviceEvent[]>;
+  /** 绑定设备：占用配额位（revoked_time=NULL）；登录/同步时对配额内的设备调用 */
+  bind(userId: number, deviceId: string): Promise<void>;
+  /** 释放设备：归还配额位（revoked_time=NOW()）；用户撤销或管理员撤销时调用 */
+  revoke(userId: number, deviceId: string): Promise<void>;
+  /** 设备是否绑定中（revoked_time IS NULL） */
+  isBound(userId: number, deviceId: string): Promise<boolean>;
+  /** 绑定中设备数（即当前占用的设备配额量） */
+  countBound(userId: number): Promise<number>;
 }
 
 /** 连接元数据仓储（明文，计量/分析；内容仍加密） */

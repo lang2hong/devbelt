@@ -115,47 +115,46 @@ describe('POST /api/auth/refresh', () => {
     expect(res.statusCode).toBe(403);
     expect(res.json().code).toBe('USER_DISABLED');
 
-    const active = await t.repos.refreshTokenRepo.countActiveForUser(userId, new Date());
+    const active = (await t.repos.refreshTokenRepo.listActiveForUser(userId, new Date())).length;
     expect(active).toBe(0);
   });
 });
 
-describe('GET /api/auth/sessions', () => {
+describe('GET /api/devices', () => {
   it('无 token → 401', async () => {
-    const res = await t.app.inject({ method: 'GET', url: '/api/auth/sessions' });
+    const res = await t.app.inject({ method: 'GET', url: '/api/devices' });
     expect(res.statusCode).toBe(401);
   });
 
   it('有 token → 200', async () => {
     const { token } = await t.makeUser();
     const res = await t.app.inject({
-      method: 'GET', url: '/api/auth/sessions', headers: t.auth(token),
+      method: 'GET', url: '/api/devices', headers: t.auth(token),
     });
     expect(res.statusCode).toBe(200);
-    expect(Array.isArray(res.json().sessions)).toBe(true);
+    expect(Array.isArray(res.json().devices)).toBe(true);
   });
 });
 
-describe('DELETE /api/auth/sessions/:id', () => {
-  it('非数字 id → 400', async () => {
-    const { token } = await t.makeUser();
+describe('DELETE /api/devices/:deviceId', () => {
+  it('free 用户撤销 → 403（Pro 功能）', async () => {
+    const u = await t.makeUser();
+    await t.repos.deviceRepo.upsert({ userId: u.id, deviceId: 'dev-1' } as any);
     const res = await t.app.inject({
-      method: 'DELETE', url: '/api/auth/sessions/abc', headers: t.auth(token),
+      method: 'DELETE', url: '/api/devices/dev-1', headers: t.auth(u.token),
     });
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe('PRO_FEATURE_REQUIRED');
   });
 
-  it('他人会话 → 401（IDOR 防护）', async () => {
-    const a = await t.makeUser();
-    const b = await t.makeUser();
-    const rt = await t.repos.refreshTokenRepo.create({
-      userId: b.id, tokenHash: 'h-b', expiresTime: new Date(Date.now() + 86400000),
-    });
+  it('pro 用户撤销 → 200', async () => {
+    const u = await t.makeUser();
+    await t.repos.userRepo.updatePlan(u.id, 'pro');
+    await t.repos.deviceRepo.upsert({ userId: u.id, deviceId: 'dev-1' } as any);
     const res = await t.app.inject({
-      method: 'DELETE', url: `/api/auth/sessions/${rt.id}`, headers: t.auth(a.token),
+      method: 'DELETE', url: '/api/devices/dev-1', headers: t.auth(u.token),
     });
-    expect(res.statusCode).toBe(401);
-    expect((await t.repos.refreshTokenRepo.findById(rt.id))?.revokedTime).toBeUndefined();
+    expect(res.statusCode).toBe(200);
   });
 });
 

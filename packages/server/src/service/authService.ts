@@ -1,11 +1,12 @@
 import type { IUserRepo, ISubscriptionRepo, IRefreshTokenRepo, IDeviceRepo } from '../repository/interfaces.js';
 import type { TokenService } from './tokenService.js';
-import type { Subscription, User, SessionInfo, Device } from '../domain/entities.js';
+import type { Subscription, User, Device } from '../domain/entities.js';
+import type { PlanCode } from '../domain/enums.js';
 import { hashPassword, verifyPassword } from './password.js';
 import type { PlanPolicy } from '../policy/planPolicy.js';
 import {
-  DeviceLimitError,
   InvalidCredentialsError,
+  ProFeatureRequiredError,
   TokenReuseError,
   UserDisabledError,
   ValidationError,
@@ -16,6 +17,7 @@ export interface DeviceInfo {
   deviceName?: string;
   deviceId?: string;
   machineId?: string;
+  osMachineId?: string;
   hostname?: string;
   os?: string;
   arch?: string;
@@ -78,7 +80,10 @@ export class AuthService {
     const hash = hashPassword(password);
     const user = await this.userRepo.create(email, hash, 'user', 'free');
 
-    if (device?.deviceId) await this.deviceRepo.upsert(toDevice(user.id, device));
+    if (device?.deviceId) {
+      await this.deviceRepo.upsert(toDevice(user.id, device));
+      await this.tryBindDevice(user.id, user.planCode, device);
+    }
 
     const periodEnd = new Date(Date.now() + TRIAL_DAYS * 86400000);
     const subscription = await this.subRepo.upsert({
@@ -109,22 +114,9 @@ export class AuthService {
 
     const now = new Date();
 
-    // 设备数配额。
-    //
-    // 这段此前**完全不存在**：`planPolicy.limit('devices')` 有实现、
-    // `DeviceLimitError` 有定义（还映射了 403）、方法注释也写着「设备数检查」，
-    // 但 src 下零引用 —— free 用户（maxDevices=1）可以在任意多台机器登录，
-    // 一个账号供整个团队共用，付费套餐的核心分层维度失效。
-    //
-    // 顺序很关键：必须在 revokeByDevice **之后**计数，否则同设备重登会被自己
-    // 刚要被顶掉的旧会话挡住。不带 deviceId 的旧客户端不计入（无法判同）。
-    if (device?.deviceId && this.planPolicy) {
-      const limit = await this.planPolicy.limit(user.planCode, 'devices');
-      if (limit > 0) {
-        const active = await this.refreshTokenRepo.countActiveForUser(user.id, now);
-        if (active >= limit) throw new DeviceLimitError(limit, active + 1);
-      }
-    }
+    // 设备配额：登录放行，不在此拒登录。设备未绑定且配额未满才绑定，满则保持
+    // 未激活，由 sync 层硬卡（超限设备无法同步/使用），引导升级或联系管理员。
+    await this.tryBindDevice(user.id, user.planCode, device);
 
     const { token, hash: rtHash, expiresAt } = this.tokenService.generateRefreshToken();
     const rt = await this.refreshTokenRepo.create(tokenForCreate(user.id, rtHash, device, expiresAt));
@@ -230,17 +222,29 @@ export class AuthService {
     await this.refreshTokenRepo.revoke(rt.id);
   }
 
-  /** 列出当前用户活跃会话 */
-  async listSessions(userId: number, currentRefreshId?: number): Promise<SessionInfo[]> {
-    const sessions = await this.refreshTokenRepo.listActiveForUser(userId, new Date());
-    return sessions.map((s) => ({ ...s, current: currentRefreshId != null && s.id === currentRefreshId }));
+  /** 列出当前用户全部设备（含绑定状态 revokedTime） */
+  async listDevices(userId: number): Promise<Device[]> {
+    return this.deviceRepo.listByUser(userId);
   }
 
-  /** 踢出指定设备会话 */
-  async revokeSession(userId: number, sessionId: number): Promise<void> {
-    const session = await this.refreshTokenRepo.findById(sessionId);
-    if (!session || session.userId !== userId) throw new InvalidCredentialsError();
-    await this.refreshTokenRepo.revoke(sessionId);
+  /** 撤销设备（释放配额位）。free 用户不可自助撤销（防「撤销=共享」），需升级或联系管理员 */
+  async revokeDevice(userId: number, deviceId: string): Promise<void> {
+    const user = await this.userRepo.findById(userId);
+    if (!user) throw new InvalidCredentialsError();
+    if (user.planCode === 'free') throw new ProFeatureRequiredError('device management');
+    await this.deviceRepo.revoke(userId, deviceId);
+    await this.refreshTokenRepo.revokeByDevice(userId, deviceId);
+  }
+
+  /** 尝试绑定设备（登录/注册用）：未绑定且配额未满才绑定；满则保持未激活，不抛错。
+   *  超限设备由 sync 层硬卡（403），引导升级或联系管理员。 */
+  private async tryBindDevice(userId: number, planCode: PlanCode, device?: DeviceInfo): Promise<void> {
+    if (!device?.deviceId || !this.planPolicy) return;
+    const limit = await this.planPolicy.limit(planCode, 'devices');
+    if (limit <= 0) return; // 0 = 无限
+    if (await this.deviceRepo.isBound(userId, device.deviceId)) return;
+    const bound = await this.deviceRepo.countBound(userId);
+    if (bound < limit) await this.deviceRepo.bind(userId, device.deviceId);
   }
 
   /** 修改密码：验旧密码 → 更新 → 撤销全部会话（强制所有设备重新登录） */
@@ -286,6 +290,7 @@ function toDevice(userId: number, device: DeviceInfo): Omit<Device, 'id' | 'crea
     appVersion: device.appVersion,
     remoteName: device.remoteName,
     vsMachineId: device.machineId,
+    osMachineId: device.osMachineId,
     language: device.language,
     timezone: device.timezone,
     lastSeenTime: new Date(),

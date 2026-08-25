@@ -171,13 +171,18 @@ describe('设备数配额', () => {
       headers: { 'x-device-id': deviceId }, payload: creds,
     });
   }
+  async function pull(token: string, deviceId: string) {
+    return t.app.inject({ method: 'GET', url: '/api/sync', headers: { ...t.auth(token), 'x-device-id': deviceId } });
+  }
 
-  it('free 套餐（maxDevices=1）第二台设备登录被拒', async () => {
+  it('free 套餐（maxDevices=1）第二台设备可登录但被同步层硬卡', async () => {
     await register({ 'x-device-id': 'device-1' });
 
     const second = await login('device-2');
-    expect(second.statusCode).toBe(403);
-    expect(second.json().code).toBe('DEVICE_LIMIT_EXCEEDED');
+    expect(second.statusCode).toBe(200);
+    const sync = await pull(second.json().accessToken, 'device-2');
+    expect(sync.statusCode).toBe(403);
+    expect(sync.json().code).toBe('DEVICE_LIMIT_EXCEEDED');
   });
 
   it('同一设备重复登录不受限（顶掉旧会话，不叠加）', async () => {
@@ -187,13 +192,15 @@ describe('设备数配额', () => {
     expect(again.statusCode).toBe(200);
   });
 
-  it('顶掉旧会话后换新设备可以登录（计数看活跃会话而非历史）', async () => {
+  it('释放设备绑定后（revoke）新设备可同步', async () => {
     await register({ 'x-device-id': 'device-1' });
-    // 踢掉设备 1 的会话
-    await t.repos.refreshTokenRepo.revokeAllForUser(1);
+    // 释放设备 1 的绑定（不再靠撤销会话语义决定配额）
+    await t.repos.deviceRepo.revoke(1, 'device-1');
 
     const res = await login('device-2');
     expect(res.statusCode).toBe(200);
+    const sync = await pull(res.json().accessToken, 'device-2');
+    expect(sync.statusCode).toBe(200);
   });
 
   it('maxDevices=0 表示无限，不做限制', async () => {

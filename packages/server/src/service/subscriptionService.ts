@@ -1,5 +1,5 @@
 import type {
-  IUserRepo, IPlanRepo, ISubscriptionRepo, IRefreshTokenRepo, ISyncRepo, IConnectionMetaRepo,
+  IUserRepo, IPlanRepo, ISubscriptionRepo, IDeviceRepo, ISyncRepo, IConnectionMetaRepo,
 } from '../repository/interfaces.js';
 import type { Plan, User, Subscription, Usage } from '../domain/entities.js';
 import { EntityNotFoundError } from '../domain/errors.js';
@@ -8,6 +8,7 @@ import { EXPIRABLE_STATUSES } from '../domain/enums.js';
 export interface MeResponse {
   user: Omit<User, 'passwordHash'>;
   plan: Plan;
+  plans: Plan[];
   subscription?: Subscription;
   usage: Usage;
 }
@@ -28,7 +29,7 @@ export class SubscriptionService {
     private readonly userRepo: IUserRepo,
     private readonly planRepo: IPlanRepo,
     private readonly subRepo: ISubscriptionRepo,
-    private readonly refreshTokenRepo: IRefreshTokenRepo,
+    private readonly deviceRepo: IDeviceRepo,
     private readonly syncRepo: ISyncRepo,
     private readonly connectionMetaRepo: IConnectionMetaRepo,
   ) {}
@@ -68,14 +69,14 @@ export class SubscriptionService {
     const plan = await this.planRepo.findByCode(user.planCode);
     if (!plan) throw new Error(`plan not found: ${user.planCode}`);
     const subscription = await this.subRepo.findByUserId(userId);
-    const now = new Date();
+    const plans = await this.planRepo.listAll();
     const usage: Usage = {
-      devices: await this.refreshTokenRepo.countActiveForUser(userId, now),
+      devices: await this.deviceRepo.countBound(userId),
       connections: await this.connectionMetaRepo.countActive(userId),
       syncBytes: await this.syncRepo.sumBytes(userId),
       history: 0,       // 客户端维度
     };
     const { passwordHash, ...safeUser } = user;
-    return { user: safeUser, plan, subscription, usage };
+    return { user: safeUser, plan, plans, subscription, usage };
   }
 }

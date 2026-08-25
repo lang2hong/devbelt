@@ -74,8 +74,10 @@ export interface Device {
   appVersion?: string;
   remoteName?: string;
   vsMachineId?: string;          // vscode.env.machineId 原始值（可随重装变化，仅追溯）
+  osMachineId?: string;          // 操作系统级 machine id（跨 VSCode 重装稳定，判同依据）
   language?: string;
   timezone?: string;
+  revokedTime?: Date;           // NULL=绑定中（占设备配额）；非NULL=已释放/未激活
   lastSeenTime?: Date;
   createTime: Date;
   updateTime: Date;

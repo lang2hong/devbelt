@@ -7,7 +7,7 @@ import {
   VersionNotFoundError,
   QuotaExceededError,
 } from '../../src/domain/errors.js';
-import { FakeSyncRepo, FakeUserRepo, FakePlanRepo, FakeConnectionMetaRepo, FakeSyncEventRepo, makePlan } from '../helpers/fakeRepos.js';
+import { FakeSyncRepo, FakeUserRepo, FakePlanRepo, FakeConnectionMetaRepo, FakeSyncEventRepo, FakeDeviceRepo, makePlan } from '../helpers/fakeRepos.js';
 
 async function setup(over: Parameters<typeof makePlan>[1] = {}) {
   const syncRepo = new FakeSyncRepo();
@@ -17,7 +17,8 @@ async function setup(over: Parameters<typeof makePlan>[1] = {}) {
   const policy = new PlanPolicy((code) => planRepo.findByCode(code));
   const connectionMetaRepo = new FakeConnectionMetaRepo();
   const syncEventRepo = new FakeSyncEventRepo();
-  const service = new SyncService(syncRepo, userRepo, policy, connectionMetaRepo, syncEventRepo);
+  const deviceRepo = new FakeDeviceRepo();
+  const service = new SyncService(syncRepo, userRepo, policy, connectionMetaRepo, syncEventRepo, deviceRepo);
   const user = await userRepo.create('a@example.com', 'scrypt$x$y', 'user', 'free');
   return { service, syncRepo, userRepo, plan, user, policy, connectionMetaRepo, syncEventRepo };
 }
@@ -199,7 +200,11 @@ describe('SyncService.pull', () => {
   it('returns an empty list for a missing section instead of throwing', async () => {
     const { service, user } = await setup();
     await expect(service.pull(user.id, 'folders')).resolves.toEqual({ sections: [] });
-    await expect(service.pull(4242)).resolves.toEqual({ sections: [] });
+  });
+
+  it('throws EntityNotFoundError for a nonexistent user on pull', async () => {
+    const { service } = await setup();
+    await expect(service.pull(4242)).rejects.toBeInstanceOf(EntityNotFoundError);
   });
 
   it('does not leak other users data', async () => {

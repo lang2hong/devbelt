@@ -5,11 +5,10 @@ import { sendError } from '../middleware/errorHandler.js';
 import {
   changePasswordBody,
   credentialsBody,
-  idParam,
   logoutBody,
   refreshTokenBody,
 } from './schemas.js';
-import { readDeviceHeaders } from './deviceHeaders.js';
+import { readDeviceHeaders, readDeviceId } from './deviceHeaders.js';
 
 export interface AuthRouteOptions {
   authService: AuthService;
@@ -105,21 +104,21 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): 
         }
       });
 
-      child.get('/api/auth/sessions', async (req, reply) => {
+      child.get('/api/devices', async (req, reply) => {
         const userId = req.user.sub as number;
         try {
-          const sessions = await auth.listSessions(userId, req.user.sid as number | undefined);
-          reply.send({ sessions });
+          const devices = await auth.listDevices(userId);
+          reply.send({ devices, currentDeviceId: readDeviceId(req) });
         } catch (e) {
           sendError(reply, e);
         }
       });
 
-      child.delete('/api/auth/sessions/:id', { schema: { params: idParam } }, async (req, reply) => {
+      child.delete('/api/devices/:deviceId', async (req, reply) => {
         const userId = req.user.sub as number;
-        const id = Number((req.params as any).id);
+        const deviceId = String((req.params as any).deviceId);
         try {
-          await auth.revokeSession(userId, id);
+          await auth.revokeDevice(userId, deviceId);
           reply.send({ ok: true });
         } catch (e) {
           sendError(reply, e);

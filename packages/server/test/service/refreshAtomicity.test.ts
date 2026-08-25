@@ -63,7 +63,7 @@ describe('refresh 并发消费', () => {
     expect((failed[0] as PromiseRejectedResult).reason).toBeInstanceOf(TokenReuseError);
 
     // 判为重用后必须撤销该用户全部会话，包括刚签出的那条
-    const active = await rtRepo.countActiveForUser(user.id, new Date());
+    const active = (await rtRepo.listActiveForUser(user.id, new Date())).length;
     expect(active).toBe(0);
   });
 
@@ -126,7 +126,7 @@ describe('logout 撤销当前会话', () => {
     // 受害者用已失效的 R1 登出，但它的 access token 里的 sid 是有效的
     await auth.logout(attackerSid, user.id, login.refreshToken);
 
-    const active = await rtRepo.countActiveForUser(user.id, new Date());
+    const active = (await rtRepo.listActiveForUser(user.id, new Date())).length;
     expect(active).toBe(0);
     expect(attacker.refreshToken).toBeTruthy();
   });
@@ -142,14 +142,14 @@ describe('logout 撤销当前会话', () => {
     // a.refreshToken 已被轮换掉 —— 与 refresh 侧同等对待
     await auth.logout(currentSid, user.id, a.refreshToken);
 
-    expect(await rtRepo.countActiveForUser(user.id, new Date())).toBe(0);
+    expect((await rtRepo.listActiveForUser(user.id, new Date())).length).toBe(0);
   });
 
   it('正常登出只撤当前会话，不影响其他设备', async () => {
     const { auth, rtRepo, user } = await setup();
     const deviceA = await auth.login('u@example.com', 'pw12345678');
     await auth.login('u@example.com', 'pw12345678');
-    const before = await rtRepo.countActiveForUser(user.id, new Date());
+    const before = (await rtRepo.listActiveForUser(user.id, new Date())).length;
     expect(before).toBe(2);
 
     const sidA = [...rtRepo.tokens.values()].find(
@@ -157,7 +157,7 @@ describe('logout 撤销当前会话', () => {
     )!.id;
     await auth.logout(sidA, user.id, deviceA.refreshToken);
 
-    expect(await rtRepo.countActiveForUser(user.id, new Date())).toBe(1);
+    expect((await rtRepo.listActiveForUser(user.id, new Date())).length).toBe(1);
   });
 
   it('不接受他人的 sid（越权撤销）', async () => {
@@ -175,7 +175,7 @@ describe('logout 撤销当前会话', () => {
     await auth.logout(victimSession.id, (await userRepo.findByEmail('u@example.com'))!.id, undefined);
 
     // 受害者的会话必须还活着
-    expect(await rtRepo.countActiveForUser(victim.id, new Date())).toBe(1);
+    expect((await rtRepo.listActiveForUser(victim.id, new Date())).length).toBe(1);
   });
 
   it('不传 refresh token 也能登出当前会话', async () => {
@@ -185,6 +185,6 @@ describe('logout 撤销当前会话', () => {
 
     await auth.logout(sid, user.id, undefined);
 
-    expect(await rtRepo.countActiveForUser(user.id, new Date())).toBe(0);
+    expect((await rtRepo.listActiveForUser(user.id, new Date())).length).toBe(0);
   });
 });

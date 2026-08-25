@@ -14,18 +14,19 @@ export class MysqlDeviceRepo implements IDeviceRepo {
     const old = await this.findByUserAndDevice(device.userId, device.deviceId);
 
     await this.db().query(
-      `INSERT INTO devices (user_id, device_id, hostname, os, arch, os_version, app_name, app_version, remote_name, vs_machine_id, language, timezone, last_seen_time)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO devices (user_id, device_id, hostname, os, arch, os_version, app_name, app_version, remote_name, vs_machine_id, os_machine_id, language, timezone, revoked_time, last_seen_time)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
        ON DUPLICATE KEY UPDATE
          hostname = VALUES(hostname), os = VALUES(os), arch = VALUES(arch),
          os_version = VALUES(os_version), app_name = VALUES(app_name), app_version = VALUES(app_version),
          remote_name = VALUES(remote_name), vs_machine_id = VALUES(vs_machine_id),
+         os_machine_id = VALUES(os_machine_id),
          language = VALUES(language), timezone = VALUES(timezone), last_seen_time = VALUES(last_seen_time)`,
       [
         device.userId, device.deviceId,
         device.hostname ?? null, device.os ?? null, device.arch ?? null,
         device.osVersion ?? null, device.appName ?? null, device.appVersion ?? null,
-        device.remoteName ?? null, device.vsMachineId ?? null,
+        device.remoteName ?? null, device.vsMachineId ?? null, device.osMachineId ?? null,
         device.language ?? null, device.timezone ?? null, device.lastSeenTime ?? null,
       ],
     );
@@ -51,6 +52,33 @@ export class MysqlDeviceRepo implements IDeviceRepo {
       [userId, deviceId],
     );
     return rows.map(mapEvent);
+  }
+
+  async bind(userId: number, deviceId: string): Promise<void> {
+    await this.db().query(
+      'UPDATE devices SET revoked_time = NULL WHERE user_id = ? AND device_id = ?',
+      [userId, deviceId],
+    );
+  }
+
+  async revoke(userId: number, deviceId: string): Promise<void> {
+    await this.db().query(
+      'UPDATE devices SET revoked_time = NOW() WHERE user_id = ? AND device_id = ?',
+      [userId, deviceId],
+    );
+  }
+
+  async isBound(userId: number, deviceId: string): Promise<boolean> {
+    const d = await this.findByUserAndDevice(userId, deviceId);
+    return !!(d && d.revokedTime == null);
+  }
+
+  async countBound(userId: number): Promise<number> {
+    const [rows] = await this.db().query<any[]>(
+      'SELECT COUNT(*) AS cnt FROM devices WHERE user_id = ? AND revoked_time IS NULL',
+      [userId],
+    );
+    return rows[0]?.cnt ?? 0;
   }
 
   private async findByUserAndDevice(userId: number, deviceId: string): Promise<Device | undefined> {
@@ -99,8 +127,10 @@ function mapDevice(r: any): Device {
     appVersion: r.app_version ?? undefined,
     remoteName: r.remote_name ?? undefined,
     vsMachineId: r.vs_machine_id ?? undefined,
+    osMachineId: r.os_machine_id ?? undefined,
     language: r.language ?? undefined,
     timezone: r.timezone ?? undefined,
+    revokedTime: r.revoked_time ? new Date(r.revoked_time) : undefined,
     lastSeenTime: r.last_seen_time ? new Date(r.last_seen_time) : undefined,
     createTime: new Date(r.create_time),
     updateTime: new Date(r.update_time),

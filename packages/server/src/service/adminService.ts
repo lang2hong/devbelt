@@ -153,7 +153,12 @@ export class AdminService {
       userId,
       deviceName: session.deviceName,
     });
-    await this.refreshTokenRepo.revoke(sessionId);
+    if (session.deviceId) {
+      await this.deviceRepo.revoke(userId, session.deviceId);
+      await this.refreshTokenRepo.revokeByDevice(userId, session.deviceId);
+    } else {
+      await this.refreshTokenRepo.revoke(sessionId);
+    }
   }
 
   async listSubscriptions(): Promise<AdminSubscriptionRow[]> {

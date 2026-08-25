@@ -235,7 +235,7 @@ describe('作用域隔离（真实装配）', () => {
   it('各已认证端点一致返回 401', async () => {
     for (const [method, url] of [
       ['GET', '/api/me'], ['GET', '/api/sync'], ['GET', '/api/sync/versions?section=groups'],
-      ['POST', '/api/usage'], ['GET', '/api/auth/sessions'], ['GET', '/admin/plans'],
+      ['POST', '/api/usage'], ['GET', '/api/devices'], ['GET', '/admin/plans'],
     ] as const) {
       const res = await t.app.inject({ method, url });
       expect(res.statusCode, `${method} ${url}`).toBe(401);

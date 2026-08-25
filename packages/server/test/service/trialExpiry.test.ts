@@ -3,7 +3,7 @@ import { SubscriptionService } from '../../src/service/subscriptionService.js';
 import {
   FakeConnectionMetaRepo,
   FakePlanRepo,
-  FakeRefreshTokenRepo,
+  FakeDeviceRepo,
   FakeSubscriptionRepo,
   FakeSyncRepo,
   FakeUserRepo,
@@ -34,10 +34,10 @@ async function setup() {
   const planRepo = new FakePlanRepo([makePlan('free'), makePlan('pro'), makePlan('team')]);
   const subRepo = new FakeSubscriptionRepo();
   subRepo.linkUsers(userRepo);
-  const rtRepo = new FakeRefreshTokenRepo();
+  const deviceRepo = new FakeDeviceRepo();
   const syncRepo = new FakeSyncRepo();
   const cmRepo = new FakeConnectionMetaRepo();
-  const service = new SubscriptionService(userRepo, planRepo, subRepo, rtRepo, syncRepo, cmRepo);
+  const service = new SubscriptionService(userRepo, planRepo, subRepo, deviceRepo, syncRepo, cmRepo);
   const user = await userRepo.create('a@example.com', 'scrypt$x$y', 'user', 'pro');
   return { service, userRepo, planRepo, subRepo, user };
 }

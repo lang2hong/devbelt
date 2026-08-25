@@ -181,9 +181,9 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   const tokenService = new TokenService(app.jwt as unknown as JwtPort, '15m', '30d');
   const authService = new AuthService(userRepo, subRepo, refreshTokenRepo, deviceRepo, tokenService, planPolicy);
   const subscriptionService = new SubscriptionService(
-    userRepo, planRepo, subRepo, refreshTokenRepo, syncRepo, connectionMetaRepo,
+    userRepo, planRepo, subRepo, deviceRepo, syncRepo, connectionMetaRepo,
   );
-  const syncService = new SyncService(syncRepo, userRepo, planPolicy, connectionMetaRepo, syncEventRepo);
+  const syncService = new SyncService(syncRepo, userRepo, planPolicy, connectionMetaRepo, syncEventRepo, deviceRepo);
   const adminService = new AdminService(
     userRepo, planRepo, subRepo, refreshTokenRepo, syncRepo,
     deviceRepo, connectionMetaRepo, syncEventRepo, usageEventRepo, adminAuditRepo,

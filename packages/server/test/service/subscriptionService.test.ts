@@ -5,7 +5,7 @@ import {
   FakeUserRepo,
   FakePlanRepo,
   FakeSubscriptionRepo,
-  FakeRefreshTokenRepo,
+  FakeDeviceRepo,
   FakeSyncRepo,
   FakeConnectionMetaRepo,
   makePlan,
@@ -23,12 +23,12 @@ async function setup() {
   // 真实现的 expireOne / downgradeExpired 是一条语句同时改 subscriptions 与 users；
   // fake 要链上 userRepo 才能复刻「用户被降到 free」这一半。
   subRepo.linkUsers(userRepo);
-  const rtRepo = new FakeRefreshTokenRepo();
+  const deviceRepo = new FakeDeviceRepo();
   const syncRepo = new FakeSyncRepo();
   const connectionMetaRepo = new FakeConnectionMetaRepo();
-  const service = new SubscriptionService(userRepo, planRepo, subRepo, rtRepo, syncRepo, connectionMetaRepo);
+  const service = new SubscriptionService(userRepo, planRepo, subRepo, deviceRepo, syncRepo, connectionMetaRepo);
   const user = await userRepo.create('a@example.com', 'scrypt$x$y', 'user', 'pro');
-  return { service, userRepo, planRepo, subRepo, rtRepo, syncRepo, connectionMetaRepo, user };
+  return { service, userRepo, planRepo, subRepo, deviceRepo, syncRepo, connectionMetaRepo, user };
 }
 
 // ensureActive / downgradeExpired 的行为（单用户 vs 全表、边界比较符、
@@ -36,7 +36,7 @@ async function setup() {
 
 describe('SubscriptionService.getMe', () => {
   it('assembles user + plan + subscription + usage without the password hash', async () => {
-    const { service, subRepo, rtRepo, syncRepo, user } = await setup();
+    const { service, subRepo, deviceRepo, syncRepo, user } = await setup();
     await subRepo.upsert({
       userId: user.id,
       planCode: 'pro',
@@ -44,8 +44,10 @@ describe('SubscriptionService.getMe', () => {
       periodEndTime: new Date(Date.now() + DAY),
       provider: 'manual',
     });
-    await rtRepo.create({ userId: user.id, tokenHash: 'h1', expiresTime: new Date(Date.now() + DAY) });
-    await rtRepo.create({ userId: user.id, tokenHash: 'h2', expiresTime: new Date(Date.now() + DAY) });
+    await deviceRepo.upsert({ userId: user.id, deviceId: 'd1' } as any);
+    await deviceRepo.bind(user.id, 'd1');
+    await deviceRepo.upsert({ userId: user.id, deviceId: 'd2' } as any);
+    await deviceRepo.bind(user.id, 'd2');
     await syncRepo.putSection(user.id, 'connections', 'x'.repeat(300), 1);
     await syncRepo.putSection(user.id, 'queries', 'y'.repeat(200), 1);
 
@@ -58,16 +60,14 @@ describe('SubscriptionService.getMe', () => {
     expect(me.usage).toEqual({ devices: 2, connections: 0, syncBytes: 500, history: 0 });
   });
 
-  it('excludes revoked or expired sessions from usage', async () => {
-    const { service, rtRepo, user } = await setup();
-    const live = await rtRepo.create({ userId: user.id, tokenHash: 'h1', expiresTime: new Date(Date.now() + DAY) });
-    const revoked = await rtRepo.create({ userId: user.id, tokenHash: 'h2', expiresTime: new Date(Date.now() + DAY) });
-    await rtRepo.revoke(revoked.id);
-    await rtRepo.create({ userId: user.id, tokenHash: 'h3', expiresTime: new Date(Date.now() - DAY) });
+  it('counts only bound devices (revoked/unbound excluded) in usage', async () => {
+    const { service, deviceRepo, user } = await setup();
+    await deviceRepo.upsert({ userId: user.id, deviceId: 'bound' } as any);
+    await deviceRepo.bind(user.id, 'bound');
+    await deviceRepo.upsert({ userId: user.id, deviceId: 'unbound' } as any);
 
     const me = await service.getMe(user.id);
     expect(me.usage.devices).toBe(1);
-    expect(live.revokedTime).toBeUndefined();
   });
 
   it('reflects the downgrade performed by ensureActive', async () => {

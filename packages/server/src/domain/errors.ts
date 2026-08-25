@@ -89,3 +89,11 @@ export class ValidationError extends DomainError {
     this.name = 'ValidationError';
   }
 }
+
+/** 付费功能（free 套餐不可用，需升级 Pro） */
+export class ProFeatureRequiredError extends DomainError {
+  constructor(public readonly feature: string) {
+    super(`${feature} requires a paid plan`, 'PRO_FEATURE_REQUIRED');
+    this.name = 'ProFeatureRequiredError';
+  }
+}

@@ -1,8 +1,8 @@
-import type { ISyncRepo, IUserRepo, IConnectionMetaRepo, ISyncEventRepo, ConnectionMetaInput } from '../repository/interfaces.js';
+import type { ISyncRepo, IUserRepo, IDeviceRepo, IConnectionMetaRepo, ISyncEventRepo, ConnectionMetaInput } from '../repository/interfaces.js';
 import type { PlanPolicy } from '../policy/planPolicy.js';
-import type { SectionType } from '../domain/enums.js';
+import type { SectionType, PlanCode } from '../domain/enums.js';
 import type { SyncSection, SyncVersionSummary } from '../domain/entities.js';
-import { EntityNotFoundError, ConflictError, VersionNotFoundError, ValidationError } from '../domain/errors.js';
+import { EntityNotFoundError, ConflictError, DeviceLimitError, VersionNotFoundError, ValidationError } from '../domain/errors.js';
 
 export interface PushResult {
   version: number;
@@ -41,6 +41,7 @@ export class SyncService {
     private readonly planPolicy: PlanPolicy,
     private readonly connectionMetaRepo: IConnectionMetaRepo,
     private readonly syncEventRepo: ISyncEventRepo,
+    private readonly deviceRepo: IDeviceRepo,
   ) {}
 
   /**
@@ -52,6 +53,7 @@ export class SyncService {
   async push(userId: number, section: SectionType, encryptedData: string, baseVersion: number, input: PushInput = {}): Promise<PushResult> {
     const user = await this.userRepo.findById(userId);
     if (!user) throw new EntityNotFoundError('user', userId);
+    await this.requireDeviceBound(userId, user.planCode, input.deviceId);
 
     const newSectionBytes = Buffer.byteLength(encryptedData, 'utf8');
 
@@ -120,8 +122,23 @@ export class SyncService {
     await this.planPolicy.checkTotal(planCode, 'sync_bytes', projected);
   }
 
+  /** 设备绑定检查（sync 硬卡）：已绑定放行；未绑定且配额未满则补绑；满则 403 */
+  private async requireDeviceBound(userId: number, planCode: PlanCode, deviceId?: string): Promise<void> {
+    if (!deviceId) return; // 旧客户端无设备信息，跳过（无法判同）
+    const limit = await this.planPolicy.limit(planCode, 'devices');
+    if (limit <= 0) return; // 0 = 无限
+    if (await this.deviceRepo.isBound(userId, deviceId)) return;
+    const bound = await this.deviceRepo.countBound(userId);
+    if (bound >= limit) throw new DeviceLimitError(limit, bound);
+    await this.deviceRepo.bind(userId, deviceId);
+  }
+
   /** 拉取：指定 section 单节，或全部 section（每节写 pull 事件留痕） */
   async pull(userId: number, section?: SectionType, deviceId?: string): Promise<PullResult> {
+    const user = await this.userRepo.findById(userId);
+    if (!user) throw new EntityNotFoundError('user', userId);
+    await this.requireDeviceBound(userId, user.planCode, deviceId);
+
     let sections: SyncSection[];
     if (section) {
       const s = await this.syncRepo.getSection(userId, section);

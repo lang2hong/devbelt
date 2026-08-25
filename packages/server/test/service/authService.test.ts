@@ -4,6 +4,7 @@ import { TokenService, type JwtPort } from '../../src/service/tokenService.js';
 import { hashPassword } from '../../src/service/password.js';
 import {
   InvalidCredentialsError,
+  ProFeatureRequiredError,
   TokenReuseError,
   ValidationError,
 } from '../../src/domain/errors.js';
@@ -295,7 +296,7 @@ describe('AuthService session management', () => {
 
     await auth.logout(sid, reg.user.id, 'never-issued');
 
-    expect(await rtRepo.countActiveForUser(reg.user.id, new Date())).toBe(0);
+    expect((await rtRepo.listActiveForUser(reg.user.id, new Date())).length).toBe(0);
   });
 
   it('sid 与 token 都不存在时才是 no-op', async () => {
@@ -303,41 +304,23 @@ describe('AuthService session management', () => {
     await expect(auth.logout(9999, 1, 'never-issued')).resolves.toBeUndefined();
   });
 
-  it('lists active sessions with device metadata and marks the current device', async () => {
-    const { auth, rtRepo } = setup();
-    const reg = await auth.register('a@example.com', 'password123', { deviceName: 'laptop', ip: '1.1.1.1' });
-    await auth.login('a@example.com', 'password123', { deviceName: 'phone', ip: '2.2.2.2' });
-    const current = [...rtRepo.tokens.values()].find((t) => t.deviceName === 'phone')!;
-    const sessions = await auth.listSessions(reg.user.id, current.id);
-    expect(sessions.map((s) => s.deviceName)).toEqual(['laptop', 'phone']);
-    expect(sessions.map((s) => s.ip)).toEqual(['1.1.1.1', '2.2.2.2']);
-    expect(sessions.map((s) => s.current)).toEqual([false, true]);
-  });
-
-  it('refuses to revoke a session belonging to another user', async () => {
-    const { auth, rtRepo } = setup();
-    const victim = await auth.register('victim@example.com', 'password123');
-    const attacker = await auth.register('attacker@example.com', 'password123');
-    const victimSession = [...rtRepo.tokens.values()].find((t) => t.userId === victim.user.id)!;
-
-    await expect(auth.revokeSession(attacker.user.id, victimSession.id)).rejects.toBeInstanceOf(
-      InvalidCredentialsError,
-    );
-    expect(victimSession.revokedTime).toBeUndefined();
-  });
-
-  it('revokes an own session', async () => {
-    const { auth, rtRepo } = setup();
+  it('free 用户不可自助撤销设备（需升级）', async () => {
+    const { auth, deviceRepo } = setup();
     const reg = await auth.register('a@example.com', 'password123');
-    const own = [...rtRepo.tokens.values()][0];
-    await auth.revokeSession(reg.user.id, own.id);
-    expect(own.revokedTime).toBeInstanceOf(Date);
+    await deviceRepo.upsert({ userId: reg.user.id, deviceId: 'dev-1' } as any);
+    await deviceRepo.bind(reg.user.id, 'dev-1');
+    await expect(auth.revokeDevice(reg.user.id, 'dev-1')).rejects.toBeInstanceOf(ProFeatureRequiredError);
+    expect(await deviceRepo.isBound(reg.user.id, 'dev-1')).toBe(true);
   });
 
-  it('rejects revoking a nonexistent session', async () => {
-    const { auth } = setup();
+  it('pro 用户可撤销自己的设备', async () => {
+    const { auth, userRepo, deviceRepo } = setup();
     const reg = await auth.register('a@example.com', 'password123');
-    await expect(auth.revokeSession(reg.user.id, 9999)).rejects.toBeInstanceOf(InvalidCredentialsError);
+    await deviceRepo.upsert({ userId: reg.user.id, deviceId: 'dev-1' } as any);
+    await deviceRepo.bind(reg.user.id, 'dev-1');
+    await userRepo.updatePlan(reg.user.id, 'pro');
+    await auth.revokeDevice(reg.user.id, 'dev-1');
+    expect(await deviceRepo.isBound(reg.user.id, 'dev-1')).toBe(false);
   });
 });
 

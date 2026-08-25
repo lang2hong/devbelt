@@ -323,10 +323,6 @@ export class FakeRefreshTokenRepo implements IRefreshTokenRepo {
     }
   }
 
-  async countActiveForUser(userId: number, now: Date): Promise<number> {
-    return this.activeFor(userId, now).length;
-  }
-
   async listActiveForUser(userId: number, now: Date): Promise<SessionInfo[]> {
     return this.activeFor(userId, now).map((t) => ({
       id: t.id,
@@ -537,7 +533,7 @@ export class FakeDeviceRepo implements IDeviceRepo {
     if (existing) {
       result = { ...existing, ...device, id: existing.id, updateTime: now };
     } else {
-      result = { ...device, id: ++this.seq, createTime: now, updateTime: now };
+      result = { ...device, id: ++this.seq, createTime: now, updateTime: now, revokedTime: new Date() };
     }
     this.devices.set(k, result);
 
@@ -565,6 +561,25 @@ export class FakeDeviceRepo implements IDeviceRepo {
 
   async listEvents(userId: number, deviceId: string): Promise<DeviceEvent[]> {
     return this.events.get(`${userId}:${deviceId}`) ?? [];
+  }
+
+  async bind(userId: number, deviceId: string): Promise<void> {
+    const d = this.devices.get(`${userId}:${deviceId}`);
+    if (d) this.devices.set(`${userId}:${deviceId}`, { ...d, revokedTime: undefined });
+  }
+
+  async revoke(userId: number, deviceId: string): Promise<void> {
+    const d = this.devices.get(`${userId}:${deviceId}`);
+    if (d) this.devices.set(`${userId}:${deviceId}`, { ...d, revokedTime: new Date() });
+  }
+
+  async isBound(userId: number, deviceId: string): Promise<boolean> {
+    const d = this.devices.get(`${userId}:${deviceId}`);
+    return !!(d && d.revokedTime == null);
+  }
+
+  async countBound(userId: number): Promise<number> {
+    return [...this.devices.values()].filter((d) => d.userId === userId && d.revokedTime == null).length;
   }
 }
 
