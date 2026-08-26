@@ -11,7 +11,7 @@ import type { AuthService } from './authService';
  *   webview → ext: ready | revoke{deviceId}
  *   ext → webview: init{mode:'session'} | devices{devices,currentDeviceId,canRevoke} | error{message}
  *
- * canRevoke 由扩展端按 planCode 下发：free=false（撤销按钮换成 Pro 标记），
+ * canRevoke 由扩展端按 plan.features 下发：free=false（撤销按钮换成 Pro 标记），
  * 由 syncClient.throwIfDeviceLimit 在 server 端 403 兜底。
  */
 export class SessionView extends BaseWebView {

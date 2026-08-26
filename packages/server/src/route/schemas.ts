@@ -63,7 +63,6 @@ export const logoutBody = {
   // 是最自然的写法，它应该能工作。
   type: ['object', 'null'],
   properties: { refreshToken: { type: 'string', minLength: 1, maxLength: 512 } },
-  additionalProperties: false,
 } as const;
 
 export const changePasswordBody = {
@@ -220,8 +219,8 @@ export const updatePlanBody = {
   type: 'object',
   properties: {
     name: { type: 'string', minLength: 1, maxLength: 64 },
-    priceMonth: { type: 'integer', minimum: 0 },
-    priceYear: { type: 'integer', minimum: 0 },
+    priceMonth: { type: 'number', minimum: 0 },
+    priceYear: { type: 'number', minimum: 0 },
     seatPriceMonth: { type: 'integer', minimum: 0 },
     seatPriceYear: { type: 'integer', minimum: 0 },
     includedSeats: { type: 'integer', minimum: 0 },

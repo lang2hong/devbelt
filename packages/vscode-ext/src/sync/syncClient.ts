@@ -22,8 +22,8 @@ export interface AuthResult {
   refreshToken: string;
   userId: number;
   role: string;
-  user?: { id: number; email: string; role: string; planCode?: string };
-  subscription?: { planCode: string; status: string; periodEndTime?: string };
+  user?: { id: number; email: string; role: string };
+  subscription?: { planId: number; status: string; periodEndTime?: string };
   /** 兼容旧字段 */
   token: string;
 }
@@ -33,7 +33,6 @@ export interface DeviceInfo {
   deviceName: string;
   deviceId: string;
   machineId: string;
-  osMachineId: string;
   hostname: string;
   os: string;
   arch: string;
@@ -100,7 +99,6 @@ export interface DeviceItem {
   appVersion?: string;
   remoteName?: string;
   vsMachineId?: string;
-  osMachineId?: string;
   language?: string;
   timezone?: string;
   revokedTime?: string;
@@ -222,12 +220,6 @@ export class SyncClient {
     const res = await this.request('GET', '/api/me', undefined, true);
     if (!res.ok) throw new Error(`Get me failed: ${res.status}`);
     return res.json() as Promise<MeResponse>;
-  }
-
-  /** 上报用量累计计数（连接打开 / 查询执行）。v2 服务端无此路由，404 静默不阻塞同步。 */
-  async reportUsage(usage: { connectionOpens: number; queryExecutes: number }): Promise<void> {
-    const res = await this.request('POST', '/api/usage', usage, true);
-    if (!res.ok && res.status !== 404) throw new Error(`Report usage failed: ${res.status}`);
   }
 
   /** 拉取同步分节（section 可选，无则全节） */

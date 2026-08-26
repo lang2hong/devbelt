@@ -11,6 +11,7 @@ import type {
 import type { Role, UserStatus, SectionType } from '../domain/enums.js';
 import { EntityNotFoundError, ValidationError } from '../domain/errors.js';
 import type { PlanPolicy } from '../policy/planPolicy.js';
+import { pickPrimaryPlan } from './planUtils.js';
 
 export type UserInfo = Omit<User, 'passwordHash'>;
 
@@ -108,7 +109,7 @@ export class AdminService {
     // 但路由 schema 把它们设为 optional，运行时分步 PATCH 会传 undefined。
     const int = (n: number | undefined, label: string) => {
       if (n === undefined) return;
-      if (!Number.isInteger(n) || n < 0) throw new ValidationError('invalid ' + label);
+      if (!Number.isFinite(n) || n < 0) throw new ValidationError('invalid ' + label);
     };
     if (input.name !== undefined && (typeof input.name !== 'string' || !input.name.trim())) throw new ValidationError('invalid name');
     int(input.priceMonth, 'priceMonth');
@@ -300,11 +301,6 @@ const PLAN_AUDIT_FIELDS = [
 /** 枚举白名单（enums.ts 的类型是编译期的，运行时需要显式的值列表） */
 const VALID_ROLES: readonly Role[] = ['user', 'admin'];
 const VALID_USER_STATUSES: readonly UserStatus[] = ['active', 'disabled'];
-
-function pickPrimaryPlan(plans: Plan[]): Plan {
-  if (plans.length === 0) throw new Error('no effective plan; registration should guarantee a personal org');
-  return plans.reduce((a, b) => (b.priceMonth > a.priceMonth ? b : a));
-}
 
 function sanitize(user: User): UserInfo {
   const { passwordHash, ...rest } = user;

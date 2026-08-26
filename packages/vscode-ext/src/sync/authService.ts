@@ -61,7 +61,7 @@ function timezoneName(): string {
 }
 
 /** 组装设备信息：deviceId = osMachineId（跨 VSCode 重装稳定的判同键）；
- *  machineId 为 VSCode 原始值（可随重装变化，仅追溯）；osMachineId 单独上报供服务端存档。 */
+ *  machineId 为 VSCode 原始值（可随重装变化，仅追溯）。 */
 function buildDeviceInfo(): DeviceInfo {
   const name = `${hostname()} · ${platform()}/${arch()} · VSCode ${vscode.version}`;
   const osMachineId = getOsMachineId();
@@ -69,7 +69,6 @@ function buildDeviceInfo(): DeviceInfo {
     deviceName: name.length > 120 ? name.slice(0, 120) : name,
     deviceId: osMachineId,
     machineId: vscode.env.machineId,
-    osMachineId,
     hostname: hostname(),
     os: platform(),
     arch: arch(),

@@ -94,8 +94,5 @@ export class SubscriptionService {
   }
 }
 
-/** 主套餐：取有效席位套餐中月费最高的（"你所在档位的最高套餐"）。空则抛错（数据完整性问题） */
-function pickPrimaryPlan(plans: Plan[]): Plan {
-  if (plans.length === 0) throw new Error('no effective plan; registration should guarantee a personal org');
-  return plans.reduce((a, b) => (b.priceMonth > a.priceMonth ? b : a));
-}
+import { pickPrimaryPlan } from './planUtils.js';
+

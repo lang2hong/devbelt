@@ -16,7 +16,7 @@
 
 | Method | Path | 认证 | 说明 |
 |---|---|---|---|
-| POST | `/api/auth/register` | 公开 | 注册。`email` 需含 `@`，`password` ≥ 8 位。成功 201，登记一个 active free 订阅（无试用期）。邮箱重复返回 401（防用户枚举） |
+| POST | `/api/auth/register` | 公开 | 注册。`email` 需含 `@`，`password` ≥ 8 位。成功 201，登记一个 active free 订阅（无试用期）。邮箱重复返回 401（防用户枚举）；并发注册撞唯一键返回 409 |
 | POST | `/api/auth/login` | 公开 | 登录。设备满额时登录不报错（保持未激活），超限设备由 sync 层 `requireDeviceBound` 返回 403 |
 | POST | `/api/auth/refresh` | 公开 | 用 `refreshToken` 换新 token 对（轮换式）。检测到已撤销 token 被重用时，撤销该用户**全部**会话并返回 401 |
 | POST | `/api/auth/logout` | JWT | 撤销请求体里的 `refreshToken` |

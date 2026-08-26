@@ -7,7 +7,6 @@ import { parseSyncPayload, type SyncPayload } from './syncPayload';
 import { computeMergePlan, totalLocalOnly, type MergePlan } from './mergePlan';
 import { MasterPasswordStore } from './masterPasswordStore';
 import { SyncEvent, eventBus } from '../utils/event';
-import { usageTracker } from '../analytics/usageTracker';
 import { DeviceLimitExceededError, ProFeatureRequiredError, QuotaExceededError, type PullResult } from './syncClient';
 
 interface MementoLike {
@@ -153,7 +152,6 @@ export class SyncManager {
         this.sectionVersions[section] = version;
       }
       await this.updateLastSyncHash();
-      await this.reportUsageIfAny();
       void eventBus.publish(new SyncEvent('push', `${SECTION_TYPES.length} section(s)`));
     } catch (err) {
       this.guideDeviceLimit(err);
@@ -319,17 +317,6 @@ export class SyncManager {
       case 'queries': return payload.queries.filter((q: any) => !q.deleted).length;
       case 'folders': return payload.queryFolders.filter((f: any) => !f.deleted).length;
       case 'history': return payload.history.length;
-    }
-  }
-
-  /** 同步成功后上报累计的用量埋点（连接打开/查询执行），失败不阻塞同步 */
-  private async reportUsageIfAny(): Promise<void> {
-    const usage = await usageTracker.flush();
-    if (usage.connectionOpens === 0 && usage.queryExecutes === 0) return;
-    try {
-      await this.auth.client.reportUsage(usage);
-    } catch {
-      // 上报失败不计较（遥测尽力而为）；已清零的计数不恢复
     }
   }
 

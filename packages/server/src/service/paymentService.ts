@@ -39,7 +39,7 @@ export class PaymentService {
     providerName: ProviderName = 'manual',
   ): Promise<Subscription> {
     const provider = this.providers.get(providerName);
-    if (!provider) throw new Error(`payment provider not registered: ${providerName}`);
+    if (!provider) throw new ValidationError(`unknown payment provider: ${providerName}`);
     const plan = await this.planRepo.findByCode(planCode);
     if (!plan) throw new EntityNotFoundError('plan', planCode);
     const { externalId, periodEnd } = await provider.createSubscription(organizationId, planCode, period);
@@ -58,7 +58,7 @@ export class PaymentService {
   /** 处理 webhook 原始载荷（路由层调用） */
   async handleWebhook(providerName: ProviderName, payload: Buffer, signature?: string): Promise<void> {
     const provider = this.providers.get(providerName);
-    if (!provider) throw new Error(`payment provider not registered: ${providerName}`);
+    if (!provider) throw new ValidationError(`unknown payment provider: ${providerName}`);
     const evt = await provider.handleWebhook(payload, signature);
     await this.applyWebhookEvent(evt);
   }

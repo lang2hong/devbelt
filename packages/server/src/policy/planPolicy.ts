@@ -27,8 +27,14 @@ export async function resolveEffectivePlans(
     if (!sub || sub.status === 'expired') continue;
     // active/canceled 按 period_end_time 到期；trialing 按 trial_end_time 到期。
     // 试用必须能过期，否则建 team 组织即永久免费 team（付费门禁旁路）。
-    if (sub.periodEndTime && sub.periodEndTime <= now) continue;
-    if (sub.status === 'trialing' && sub.trialEndTime && sub.trialEndTime <= now) continue;
+    // 防御：canceled 无 periodEndTime → 视为过期（防管理员/webhook 造出 NULL 永久订阅）。
+    // active 无 periodEndTime → 视为永久有效（free 订阅即如此）。
+    if (sub.status === 'active') {
+      if (sub.periodEndTime && sub.periodEndTime <= now) continue;
+    } else if (sub.status === 'canceled') {
+      if (!sub.periodEndTime || sub.periodEndTime <= now) continue;
+    }
+    if (sub.status === 'trialing' && (!sub.trialEndTime || sub.trialEndTime <= now)) continue;
     const plan = await deps.planRepo.findById(sub.planId);
     if (plan) plans.set(plan.id, plan);
   }

@@ -8,7 +8,6 @@ import { classifyWriteKind } from '../utils/sqlRisk';
 import { buildCountSql, buildTableSelect, type ColumnTypeMap, type FilterCondition } from './tableQuerySql';
 import { diagError } from '../utils/diagnostics';
 import { l10n } from '../i18n';
-import { usageTracker } from '../analytics/usageTracker';
 
 /**
  * 查询执行器：持有表/查询的查询状态（分页、排序、筛选、运行句柄），
@@ -67,7 +66,6 @@ export class QueryRunner {
     onExecuted?: (result: any, error?: Error) => void,
     database = this.database || this.conn.database,
   ): Promise<void> {
-    usageTracker.recordQueryExecute();
     return this.enqueue(() => this.doExecute(sql, onExecuted, database));
   }
 

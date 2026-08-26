@@ -21,7 +21,6 @@ import { requireFeature, Feature } from './sync/features';
 import { SyncManager } from './sync/syncManager';
 import { MasterPasswordStore } from './sync/masterPasswordStore';
 import { AutoSyncService, type AutoSyncMode } from './sync/autoSyncService';
-import { usageTracker } from './analytics/usageTracker';
 import type { Event } from './utils/event';
 import { eventBus, ConnectionChangedEvent, DataChangeEvent } from './utils/event';
 import { invalidateLanguage, LANGUAGE_CONFIG_KEY, l10n } from './i18n';
@@ -37,7 +36,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const serverUrl = DEFAULT_SERVER_URL;
   const auth = new AuthService(context.secrets, serverUrl, context.globalState);
   const history = new HistoryStore(context.globalState, () => auth.getCachedPlan()?.perUserHistoryRetentionCount);
-  usageTracker.init(context.globalState);
   // history 注入管理器：所有会话的修改性语句由此自动进历史，
   // 不再依赖各命令自行调用 history.add（漏一个就少一段痕迹）。
   const manager = new ConnectionManager(undefined, history);

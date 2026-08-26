@@ -75,7 +75,7 @@ describe('PaymentService.renew', () => {
   it('rejects an unregistered provider before touching the repos', async () => {
     const { service, subRepo, org } = await setup();
     await expect(service.renew(org.id, 'pro', 'month', 'stripe')).rejects.toThrow(
-      'payment provider not registered: stripe',
+      'unknown payment provider: stripe',
     );
     expect(subRepo.subs.size).toBe(0);
   });
@@ -136,7 +136,7 @@ describe('PaymentService.handleWebhook', () => {
   it('rejects an unregistered provider', async () => {
     const { service } = await setup();
     await expect(service.handleWebhook('stripe', Buffer.from('{}'))).rejects.toThrow(
-      'payment provider not registered: stripe',
+      'unknown payment provider: stripe',
     );
   });
 
