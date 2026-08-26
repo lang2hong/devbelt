@@ -15,11 +15,11 @@ export interface CachedPlan {
   code: string;
   name: string;
   features: number;
-  maxDevices: number;
-  maxConnections: number;
-  maxOpenConnections: number;
-  syncQuotaBytes: number;
-  historyRetentionCount: number;
+  perSeatMaxDevices: number;
+  perUserMaxPrivateConnections: number;
+  perUserMaxOpenConnections: number;
+  perUserPrivateSyncQuotaBytes: number;
+  perUserHistoryRetentionCount: number;
 }
 
 let _osMachineId: string | undefined;
@@ -107,7 +107,14 @@ export class AuthService {
     if (this.cachedPlan) return this.cachedPlan;
     if (this.memento) {
       const stored = this.memento.get<CachedPlan>(AuthService.PLAN_CACHE_KEY);
-      if (stored) this.cachedPlan = stored;
+      if (stored) {
+        // v1→v2 兼容：旧缓存用 maxDevices 等 v1 字段名，读到时作废重取
+        if ('maxDevices' in stored || 'maxConnections' in stored) {
+          this.memento.update(AuthService.PLAN_CACHE_KEY, undefined);
+          return undefined;
+        }
+        this.cachedPlan = stored;
+      }
     }
     return this.cachedPlan;
   }

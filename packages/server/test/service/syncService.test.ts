@@ -302,3 +302,47 @@ describe('SyncService.rollback', () => {
     expect(syncRepo.historyVersions(user.id, 'groups')).toEqual([2, 3]);
   });
 });
+
+describe('SyncService.push — connections meta 契约（客户端实际形状）', () => {
+  it('用客户端字段名 connId + deleted 标志推送，deleted 条目被过滤', async () => {
+    const c = await setup({ perUserMaxPrivateConnections: 2 });
+    const meta = [
+      { connId: 'conn-1', type: 'pg', name: 'prod', enabled: true, clientCreatedAt: 100, clientUpdatedAt: 200 },
+      { connId: 'conn-2', type: 'mysql', name: 'dev', enabled: true, clientCreatedAt: 101, clientUpdatedAt: 201 },
+      { connId: 'conn-3', type: 'pg', name: 'old', enabled: false, deleted: true, clientCreatedAt: 50, clientUpdatedAt: 60 },
+    ];
+    // projectedActive 应 = 2（deleted 被过滤），不超 perUserMaxPrivateConnections=2
+    const res = await c.service.push(c.user.id, 'connections', 'cipher', 0, { meta });
+    expect(res.version).toBe(1);
+    // 活跃连接 = 2（conn-3 被 deleted 过滤，不入库）
+    expect(await c.connectionMetaRepo.countActive(c.user.id)).toBe(2);
+  });
+
+  it('deleted 条目不被 upsert（墓碑由 replaceAll 的 NOT IN 逻辑处理）', async () => {
+    const c = await setup({ perUserMaxPrivateConnections: 0 });
+    // 先推 2 个活跃 + 1 个 deleted
+    await c.service.push(c.user.id, 'connections', 'c1', 0, {
+      meta: [
+        { connId: 'a', type: 'pg', name: 'A', enabled: true },
+        { connId: 'b', type: 'pg', name: 'B', enabled: true },
+        { connId: 'c', type: 'pg', name: 'C', enabled: false, deleted: true },
+      ],
+    });
+    expect(await c.connectionMetaRepo.countActive(c.user.id)).toBe(2);
+    // 再推只含 1 个活跃（b 不在 → 应被墓碑）
+    await c.service.push(c.user.id, 'connections', 'c2', 1, {
+      meta: [{ connId: 'a', type: 'pg', name: 'A', enabled: true }],
+    });
+    expect(await c.connectionMetaRepo.countActive(c.user.id)).toBe(1);
+  });
+
+  it('全量 deleted 时 projectedActive=0 不超配额', async () => {
+    const c = await setup({ perUserMaxPrivateConnections: 1 });
+    const meta = [
+      { connId: 'x', type: 'pg', name: 'X', enabled: false, deleted: true },
+    ];
+    const res = await c.service.push(c.user.id, 'connections', 'cipher', 0, { meta });
+    expect(res.version).toBe(1);
+    expect(await c.connectionMetaRepo.countActive(c.user.id)).toBe(0);
+  });
+});

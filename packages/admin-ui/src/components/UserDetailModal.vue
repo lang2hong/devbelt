@@ -39,7 +39,7 @@ async function load() {
 }
 
 async function revoke(sid: number) {
-  if (!confirm('Revoke session #' + sid + '?')) return;
+  if (!confirm('Revoke device + all sessions for #' + sid + '?')) return;
   try {
     await api('/admin/users/' + props.userId + '/sessions/' + sid, { method: 'DELETE' });
     await load();
@@ -146,7 +146,7 @@ onMounted(load);
               </tbody>
             </table>
             <p v-else class="muted">No sync data</p>
-            <p class="muted">Note: connections/history counts are end-to-end encrypted and invisible to the server.</p>
+            <p class="muted">Note: history section content is E2E encrypted; connection metadata is visible to the server for quota accounting.</p>
           </div>
         </div>
 
@@ -197,8 +197,7 @@ onMounted(load);
                 <td>{{ c.name }}</td>
                 <td>{{ c.groupName }}</td>
                 <td>
-                  <span v-if="c.deleteTime" class="badge canceled">deleted</span>
-                  <span v-else-if="c.enabled" class="badge active">active</span>
+                  <span v-if="c.enabled" class="badge active">active</span>
                   <span v-else class="badge disabled">disabled</span>
                 </td>
                 <td>{{ fmt(c.clientCreatedAt) }}</td>

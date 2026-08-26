@@ -164,7 +164,6 @@ export interface SessionInfo {
   ip?: string;
   createTime: Date;
   lastUsedTime?: Date;
-  current: boolean;
 }
 
 /** 同步版本摘要（列版本用，不含密文） */

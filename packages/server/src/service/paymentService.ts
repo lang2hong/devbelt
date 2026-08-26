@@ -64,22 +64,21 @@ export class PaymentService {
   }
 
   /**
-   * 应用 webhook 事件：校验 → 去重 → 更新本地订阅 + 记订单 + 调整席位 → 记幂等。
+   * 应用 webhook 事件：校验 → 原子 INSERT 抢占幂等行 → 更新订阅 + 记订单 + 调整席位 → 完成。
    *
-   * 幂等：同一支付商事件到达多次是常态（支付商超时/5xx 必然重试）。
-   * 幂等记录写在**处理成功之后**——先记后做的话，一次中途失败会把事件永久
-   * 标记为已处理，重试全被挡掉，用户付了钱套餐却没生效。重复投递不抛错（对
-   * 支付商必须回 200）。
+   * 幂等（A5 修复）：同一支付商事件到达多次是常态（超时/5xx 必然重试）。
+   * 先 record（原子 INSERT，唯一键兜底）再 process —— 消除 seen→process→record
+   * 的 check-then-act 竞态（并发双处理导致席位双加）。record 返回 false = 已有人
+   * 记过，直接跳过。process 失败时调 forget 撤销幂等行，允许支付商重试。
    */
   async applyWebhookEvent(evt: WebhookEvent): Promise<void> {
     await this.validateEvent(evt);
 
     const key = eventKeyOf(evt);
-    if (await this.eventRepo.seen(evt.provider, key)) return;
 
-    await this.applyEventEffects(evt);
-
-    await this.eventRepo.record(evt.provider, key, {
+    // A5: 先 record（原子 INSERT），false = 已处理（ER_DUP_ENTRY），直接跳过。
+    // 消除 seen→process→record 的 check-then-act 竞态（并发双处理导致席位双加）。
+    const inserted = await this.eventRepo.record(evt.provider, key, {
       type: evt.type,
       organizationId: evt.organizationId,
       planCode: evt.planCode,
@@ -87,6 +86,13 @@ export class PaymentService {
       externalId: evt.externalId,
       occurredAt: evt.occurredAt?.toISOString(),
     });
+    if (!inserted) return;
+
+    // 注意：applyEventEffects 不在事务里（repos 不支持 tx 入参）。
+    // 若中途失败，事件保持已记录状态（不调 forget）——防止毒消息死循环
+    // （order 已写 → seat 失败 → forget → 重试 → order 撞 UNIQUE → 再 forget → 永久循环）。
+    // 失败的支付事件需人工排查，这是支付处理的常规取舍。
+    await this.applyEventEffects(evt);
   }
 
   private async validateEvent(evt: WebhookEvent): Promise<void> {
@@ -147,6 +153,11 @@ export class PaymentService {
    * 约束把人架空。席位是数量，撤席失败不回滚订阅（仍尽力而为）。
    */
   private async applySeatDelta(organizationId: number, subscriptionId: number, seatDelta: number): Promise<void> {
+    // P3-20: 硬上限防异常 webhook 灌入超量席位
+    const MAX_SEAT_DELTA = 100;
+    if (Math.abs(seatDelta) > MAX_SEAT_DELTA) {
+      throw new ValidationError(`seatDelta exceeds limit (${MAX_SEAT_DELTA})`);
+    }
     if (seatDelta > 0) {
       for (let i = 0; i < seatDelta; i++) {
         await this.seatRepo.create({ subscriptionId, organizationId });

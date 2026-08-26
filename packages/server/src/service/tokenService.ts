@@ -11,7 +11,7 @@ export interface JwtPort {
 
 /**
  * Token 服务（Factory 模式）：
- * - access token：JWT 短期（15m），payload 含 sub/role/plan
+ * - access token：JWT 短期（15m），payload 含 sub/role/sid
  * - refresh token：随机 256bit token，仅 hash 存库（明文返回客户端）
  *
  * refresh 轮换：旧 refresh 标记 revoked，签新 refresh；重用检测在 AuthService 层。

@@ -144,6 +144,42 @@ describe('OrganizationService.listResources restricted 授权', () => {
   });
 });
 
+describe('OrganizationService addMember 治理（P1-6）', () => {
+  it('orgMaxMembers 超限返回 400', async () => {
+    const orgRepo = new FakeOrganizationRepo();
+    const membershipRepo = new FakeMembershipRepo();
+    const seatRepo = new FakeSeatRepo();
+    const resourceRepo = new FakeOrganizationResourceRepo();
+    const auditRepo = new FakeOrganizationAuditRepo();
+    const subRepo = new FakeSubscriptionRepo();
+    const planRepo = new FakePlanRepo([makePlan('free'), makePlan('team', { includedSeats: 10, orgMaxMembers: 2 })]);
+    const service = new OrganizationService(orgRepo, membershipRepo, seatRepo, resourceRepo, auditRepo, subRepo, planRepo);
+    const teamPlan = (await planRepo.findByCode('team'))!;
+    const org = await orgRepo.create({ name: 'Acme', type: 'team', ownerUserId: 1 });
+    await membershipRepo.create({ organizationId: org.id, userId: 1, role: 'admin' });
+    await membershipRepo.create({ organizationId: org.id, userId: 2, role: 'member' });
+    const sub = await subRepo.upsert({ organizationId: org.id, planId: teamPlan.id, status: 'active', provider: 'manual' });
+    // 建 10 个席位（includedSeats=10），让 seat 检查通过，orgMaxMembers=2 才是瓶颈
+    for (let i = 0; i < 10; i++) await seatRepo.create({ subscriptionId: sub.id, organizationId: org.id });
+    // 2 active members, orgMaxMembers=2 → add 3rd should fail
+    await expect(service.addMember(org.id, 3, 'member', 1)).rejects.toThrowError(/member limit/);
+  });
+
+  it('成员自退成功（leaveOrganization）', async () => {
+    const { service, org, membershipRepo } = await setup();
+    // userId=2 是普通成员，可以自退
+    await service.leaveOrganization(org.id, 2);
+    const m = await membershipRepo.findByOrgAndUser(org.id, 2);
+    expect(m?.status).not.toBe('active');
+  });
+
+  it('owner 不可自退', async () => {
+    const { service, org } = await setup();
+    // userId=1 是 owner/admin，不可自退
+    await expect(service.leaveOrganization(org.id, 1)).rejects.toThrow();
+  });
+});
+
 describe('team 试用到期降级（付费门禁旁路 #2 修复）', () => {
   it('试用期内 resolveEffectivePlans 解出 team 套餐', async () => {
     const c = await setupForCreate();

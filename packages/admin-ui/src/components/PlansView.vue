@@ -98,7 +98,7 @@ onMounted(load);
           <h2>Edit plan</h2>
           <button class="modal-close" @click="editing = null">&times;</button>
         </div>
-        <p class="muted">Edit plan <b>{{ editing.code }}</b></p>
+        <p class="muted">Edit plan <b>{{ editing.code }}</b> · 配额填 0 = 无限</p>
         <div class="kv" style="margin: 12px 0">
           <span class="k">Name</span><input v-model="form.name" />
           <span class="k">Monthly (¥)</span><input v-model.number="form.priceMonth" type="number" min="0" step="1" />

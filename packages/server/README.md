@@ -6,7 +6,7 @@
 
 ## 接口
 
-共 41 个端点（含 `/health`；不含 `/admin` 静态托管与 Fastify 给 GET 自动补的 HEAD）。「认证」列含义：
+共 42 个端点（含 `/health`；不含 `/admin` 静态托管与 Fastify 给 GET 自动补的 HEAD）。「认证」列含义：
 
 - **公开** — 无需任何凭据
 - **JWT** — 需 `Authorization: Bearer <accessToken>`
@@ -49,6 +49,7 @@
 | POST | `/api/organizations/:id/members` | JWT + org admin | 加成员 `{userId, role}`，受「活跃成员数 ≤ 席位数」约束 |
 | PATCH | `/api/organizations/:id/members/:mid` | JWT + org admin | 改成员角色（不可降级 owner） |
 | DELETE | `/api/organizations/:id/members/:mid` | JWT + org admin | 移除成员（不可移除 owner） |
+| POST | `/api/organizations/:id/leave` | JWT + member | 成员自退（owner 不可自退） |
 | GET | `/api/organizations/:id/resources` | JWT | 列共享资源。`restricted` 资源仅 admin 或被授权成员可见 |
 | POST | `/api/organizations/:id/resources` | JWT + org admin | 建资源 `{resourceType, name, accessScope, encryptedData}` |
 | PATCH | `/api/organizations/:id/resources/:rid` | JWT + org admin | 更新资源字段 |
@@ -188,8 +189,8 @@ API 端点保护（JWT + `role === 'admin'`），所以未登录时页面只能�
 已知缺口（部署前请评估）：
 
 - **`devices.ip` 的历史数据不可信**。该列取自 `req.ip`，而 `trustProxy` 是后来才加的 —— 在那之前落库的全是反向代理的地址，不是真实客户端 IP。
-- **请求体上限**：PUT `/api/sync` 已单独放宽到 9MiB（`sync.ts` 的 `SYNC_BODY_LIMIT`），其余端点仍为 Fastify 默认 1MB。`nginx.conf.example` 里 `client_max_body_size 2m` 反而成了 sync 推送 >2MB 的实际瓶颈，部署时建议上调到 ≥9m。
-- **Webhook 验签不成立**（见上文 Webhook 小节）。
+- **请求体上限**：PUT `/api/sync` 已单独放宽到 9MiB（`sync.ts` 的 `SYNC_BODY_LIMIT`），其余端点仍为 Fastify 默认 1MB。`nginx.conf.example` 已设 `client_max_body_size 10m` 覆盖。
+- **Webhook 验签**：已用作用域 content-type parser 实现 `req.rawBody`，HMAC 验签可用。
 - **套餐功能门禁全在客户端**：`plans.features` 位掩码经 `/api/me` 下发，服务端不做校验，且客户端在网络失败时会放行。
 - 容器以 root 运行，`docker-compose.yml` 把 3306 暴露到宿主。
 

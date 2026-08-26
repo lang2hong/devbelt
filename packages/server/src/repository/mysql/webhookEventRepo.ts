@@ -32,4 +32,11 @@ export class MysqlWebhookEventRepo implements IWebhookEventRepo {
       throw err;
     }
   }
+
+  async forget(provider: string, eventKey: string): Promise<void> {
+    await this.db().query(
+      'DELETE FROM webhook_events WHERE provider = ? AND event_key = ?',
+      [provider, eventKey],
+    );
+  }
 }

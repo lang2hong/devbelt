@@ -71,20 +71,20 @@ export interface PlanInfo {
   name: string;
   priceMonth: number;
   priceYear: number;
-  maxDevices: number;
-  maxConnections: number;
-  maxOpenConnections: number;
-  syncQuotaBytes: number;
-  syncVersionRetention: number;
-  historyRetentionCount: number;
+  perSeatMaxDevices: number;
+  perUserMaxPrivateConnections: number;
+  perUserMaxOpenConnections: number;
+  perUserPrivateSyncQuotaBytes: number;
+  perUserSyncVersionRetention: number;
+  perUserHistoryRetentionCount: number;
   features: number;
 }
 
 export interface MeResponse {
-  user: { id: number; email: string; role: string; planCode: string; status: string };
+  user: { id: number; email: string; role: string; status: string };
   plan: PlanInfo;
   plans: PlanInfo[];
-  subscription?: { planCode: string; status: string; periodEndTime: string };
+  subscription?: { planId: number; status: string; periodEndTime: string };
   usage: { devices: number; connections: number; syncBytes: number; history: number };
 }
 
@@ -208,7 +208,7 @@ export class SyncClient {
     if (rt) await this.request('POST', '/api/auth/logout', { refreshToken: rt }, true);
   }
 
-  /** 修改密码（兼容旧；server 新流暂未实现，会 501） */
+  /** 修改密码（改密后撤销全部会话） */
   async changePassword(oldPassword: string, newPassword: string): Promise<void> {
     const res = await this.request('POST', '/api/auth/change-password', { oldPassword, newPassword }, true);
     if (!res.ok) {
@@ -224,10 +224,10 @@ export class SyncClient {
     return res.json() as Promise<MeResponse>;
   }
 
-  /** 上报用量累计计数（连接打开 / 查询执行） */
+  /** 上报用量累计计数（连接打开 / 查询执行）。v2 服务端无此路由，404 静默不阻塞同步。 */
   async reportUsage(usage: { connectionOpens: number; queryExecutes: number }): Promise<void> {
     const res = await this.request('POST', '/api/usage', usage, true);
-    if (!res.ok) throw new Error(`Report usage failed: ${res.status}`);
+    if (!res.ok && res.status !== 404) throw new Error(`Report usage failed: ${res.status}`);
   }
 
   /** 拉取同步分节（section 可选，无则全节） */
@@ -394,7 +394,6 @@ export class SyncClient {
       'X-Device-Name': d.deviceName,
       'X-Device-Id': d.deviceId,
       'X-Device-Machine-Id': d.machineId,
-      'X-Device-Os-Machine-Id': d.osMachineId,
       'X-Device-Hostname': d.hostname,
       'X-Device-Os': d.os,
       'X-Device-Arch': d.arch,

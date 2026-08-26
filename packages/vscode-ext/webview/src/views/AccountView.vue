@@ -17,20 +17,20 @@ interface PlanInfo {
   name: string;
   priceMonth: number;
   priceYear: number;
-  maxDevices: number;
-  maxConnections: number;
-  maxOpenConnections: number;
-  syncQuotaBytes: number;
-  syncVersionRetention: number;
-  historyRetentionCount: number;
+  perSeatMaxDevices: number;
+  perUserMaxPrivateConnections: number;
+  perUserMaxOpenConnections: number;
+  perUserPrivateSyncQuotaBytes: number;
+  perUserSyncVersionRetention: number;
+  perUserHistoryRetentionCount: number;
   features: number;
 }
 
 interface Me {
-  user: { planCode: string };
+  user: { id: number; email: string; role: string; status: string };
   plan: PlanInfo;
   plans: PlanInfo[];
-  subscription?: { status: string };
+  subscription?: { planId: number; status: string };
   usage: { devices: number; connections: number; syncBytes: number };
 }
 
@@ -112,11 +112,11 @@ onMounted(() => {
           <div class="divider"></div>
 
           <ul class="quota">
-            <li><span>{{ t('account.devices') }}</span><b>{{ num(p.maxDevices) }}</b></li>
-            <li><span>{{ t('account.connections') }}</span><b>{{ num(p.maxConnections) }}</b></li>
-            <li><span>{{ t('account.openConnections') }}</span><b>{{ num(p.maxOpenConnections) }}</b></li>
-            <li><span>{{ t('account.sync') }}</span><b>{{ p.syncQuotaBytes ? bytes(p.syncQuotaBytes) : '∞' }}</b></li>
-            <li><span>{{ t('account.versionHistory') }}</span><b>{{ num(p.syncVersionRetention) }}</b></li>
+            <li><span>{{ t('account.devices') }}</span><b>{{ num(p.perSeatMaxDevices) }}</b></li>
+            <li><span>{{ t('account.connections') }}</span><b>{{ num(p.perUserMaxPrivateConnections) }}</b></li>
+            <li><span>{{ t('account.openConnections') }}</span><b>{{ num(p.perUserMaxOpenConnections) }}</b></li>
+            <li><span>{{ t('account.sync') }}</span><b>{{ p.perUserPrivateSyncQuotaBytes ? bytes(p.perUserPrivateSyncQuotaBytes) : '∞' }}</b></li>
+            <li><span>{{ t('account.versionHistory') }}</span><b>{{ num(p.perUserSyncVersionRetention) }}</b></li>
           </ul>
 
           <ul class="features">
@@ -133,8 +133,8 @@ onMounted(() => {
       </div>
 
       <div class="usage">
-        <span>{{ t('account.connections') }}: <b>{{ me.usage.connections }}/{{ me.plan.maxConnections || '∞' }}</b></span>
-        <span>{{ t('account.devices') }}: <b>{{ me.usage.devices }}/{{ me.plan.maxDevices || '∞' }}</b></span>
+        <span>{{ t('account.connections') }}: <b>{{ me.usage.connections }}/{{ me.plan.perUserMaxPrivateConnections || '∞' }}</b></span>
+        <span>{{ t('account.devices') }}: <b>{{ me.usage.devices }}/{{ me.plan.perSeatMaxDevices || '∞' }}</b></span>
         <span>{{ t('account.sync') }}: <b>{{ bytes(me.usage.syncBytes) }}</b></span>
       </div>
       <p class="hint">{{ t('account.upgradeHint') }}</p>

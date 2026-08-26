@@ -166,6 +166,7 @@ onMounted(load);
         <option :value="168">7 days</option>
         <option :value="720">30 days</option>
       </select>
+      <small class="muted">（内存仅保留 60 分钟，超出为空；routes 恒为单行 all）</small>
       <button class="btn" :disabled="loading" @click="load">
         {{ loading ? 'Loading…' : 'Refresh' }}
       </button>

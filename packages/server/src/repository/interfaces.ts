@@ -144,7 +144,10 @@ export interface IDeviceRepo {
 }
 
 /** 连接元数据仓储（明文，计量/分析；内容仍加密） */
-export type ConnectionMetaInput = Omit<ConnectionMeta, 'id' | 'userId' | 'createTime' | 'updateTime' | 'deleteTime'>;
+export interface ConnectionMetaInput extends Omit<ConnectionMeta, 'id' | 'userId' | 'createTime' | 'updateTime' | 'deleteTime'> {
+  /** 客户端墓碑标记：true 表示该连接已删除，服务端应跳过 upsert 并墓碑 */
+  deleted?: boolean;
+}
 export interface IConnectionMetaRepo {
   /** 全量替换某用户连接元数据（含删除墓碑），返回落库后的活跃连接数 */
   replaceAll(userId: number, metas: ConnectionMetaInput[]): Promise<number>;
@@ -185,14 +188,16 @@ export interface IWebhookEventRepo {
   /** 已处理过则返回 true。用于处理前的短路判断 */
   seen(provider: string, eventKey: string): Promise<boolean>;
   /**
-   * 记下"已处理"。**必须在业务处理成功之后调用** ——
-   * 先记后做的话，一次中途失败会让该事件被永久标记为已处理，
-   * 支付商的重试全被挡掉，用户付了钱但套餐没生效，且没有任何重试机会。
+   * 原子地标记"已处理"（INSERT，唯一键兜底）。
+   * 返回 true = 首次插入（当前调用者获得处理权）；false = 已有人记过。
    *
-   * 并发下同一事件可能两次都通过 seen() 检查，靠唯一键在这里兜底：
-   * 重复插入不抛错（幂等），返回 false 表示已经有人记过。
+   * A5 修复：先 record（原子 INSERT）再 process，消除 seen→process→record
+   * 的 check-then-act 竞态（并发双处理导致席位双加）。
+   * 若 process 失败，调 forget 撤销记录，允许支付商重试。
    */
   record(provider: string, eventKey: string, detail?: Record<string, unknown>): Promise<boolean>;
+  /** 撤销"已处理"标记（process 失败时调用，允许重试） */
+  forget(provider: string, eventKey: string): Promise<void>;
 }
 
 

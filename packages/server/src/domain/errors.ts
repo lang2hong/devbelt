@@ -82,6 +82,14 @@ export class ConflictError extends DomainError {
   }
 }
 
+/** 资源已存在（并发注册/重复创建）→ 409 */
+export class AlreadyExistsError extends DomainError {
+  constructor(message: string) {
+    super(message, 'CONFLICT');
+    this.name = 'AlreadyExistsError';
+  }
+}
+
 /** 请求参数校验失败 */
 export class ValidationError extends DomainError {
   constructor(message: string) {

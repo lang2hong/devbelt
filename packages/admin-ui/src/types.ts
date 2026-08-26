@@ -62,7 +62,7 @@ export interface SessionInfo {
   ip?: string;
   createTime: string;
   lastUsedTime?: string;
-  current: boolean;
+  current?: boolean;
 }
 
 export interface SectionUsage {

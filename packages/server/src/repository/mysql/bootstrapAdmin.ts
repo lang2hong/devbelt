@@ -48,7 +48,8 @@ async function createInitialAdmin(tx: MysqlTx, input: BootstrapAdminInput): Prom
   );
   const userId = Number(userResult.insertId);
 
-  const orgName = input.displayName ? `${input.displayName}'s workspace` : `${input.email}'s workspace`;
+  const baseName = input.displayName || input.email;
+  const orgName = `${baseName.substring(0, 88)}'s workspace`;
   const [orgResult] = await tx.query<any>(
     `INSERT INTO organizations (name, type, owner_user_id, status)
      VALUES (?, 'personal', ?, 'active')`,

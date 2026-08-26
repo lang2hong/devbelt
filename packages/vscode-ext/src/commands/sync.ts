@@ -139,8 +139,10 @@ export function registerSyncCommands(deps: Deps, sub: Sub): void {
     const { plan, dirty } = outcome.result;
     const mp = outcome.password;
 
-    // 场景 A：本地无变更，无需推送
-    if (!dirty) {
+    // 场景 A：本地无变更且无未推送的本地节，无需推送
+    // P0-3：DB 重建后基线丢失（lastHash 不存在）→ isLocalDirty 恒 false，
+    //       但 hasLocalUnpushed 可能为 true（本地有数据、远端为空）→ 仍需推送。
+    if (!dirty && !plan.hasLocalUnpushed) {
       vscode.window.showInformationMessage(l10n('cmd.nothingToPush'));
       return;
     }

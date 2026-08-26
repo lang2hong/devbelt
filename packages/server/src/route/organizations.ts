@@ -3,6 +3,10 @@ import { authScope, type GetAuthUser, type GetAuthSession } from '../middleware/
 import { sendError } from '../middleware/errorHandler.js';
 import type { OrganizationService } from '../service/organizationService.js';
 import type { MemberRole, ResourceType, ResourcePermission } from '../domain/enums.js';
+import {
+  createOrgBody, addMemberBody, updateMemberBody,
+  createResourceBody, updateResourceBody, grantPermissionBody,
+} from './schemas.js';
 
 export interface OrganizationRouteOptions {
   organizationService: OrganizationService;
@@ -34,7 +38,7 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         }
       });
 
-      child.post('/api/organizations', async (req, reply) => {
+      child.post('/api/organizations', { schema: { body: createOrgBody } }, async (req, reply) => {
         try {
           const { organization, membership } = await svc.createOrganization(req.user.sub as number, body(req).name);
           reply.code(201).send({ organization, membership });
@@ -59,7 +63,7 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         }
       });
 
-      child.post('/api/organizations/:organizationId/members', async (req, reply) => {
+      child.post('/api/organizations/:organizationId/members', { schema: { body: addMemberBody } }, async (req, reply) => {
         try {
           const { userId, role } = body(req);
           const membership = await svc.addMember(orgId(req), Number(userId), role as MemberRole, req.user.sub as number);
@@ -69,7 +73,7 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         }
       });
 
-      child.patch('/api/organizations/:organizationId/members/:membershipId', async (req, reply) => {
+      child.patch('/api/organizations/:organizationId/members/:membershipId', { schema: { body: updateMemberBody } }, async (req, reply) => {
         try {
           await svc.updateMemberRole(orgId(req), membershipId(req), body(req).role as MemberRole, req.user.sub as number);
           reply.send({ ok: true });
@@ -87,6 +91,15 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         }
       });
 
+      child.post('/api/organizations/:organizationId/leave', async (req, reply) => {
+        try {
+          await svc.leaveOrganization(orgId(req), req.user.sub as number);
+          reply.send({ ok: true });
+        } catch (e) {
+          sendError(reply, e);
+        }
+      });
+
       child.get('/api/organizations/:organizationId/resources', async (req, reply) => {
         try {
           const type = (req.query as any).type as ResourceType | undefined;
@@ -96,7 +109,7 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         }
       });
 
-      child.post('/api/organizations/:organizationId/resources', async (req, reply) => {
+      child.post('/api/organizations/:organizationId/resources', { schema: { body: createResourceBody } }, async (req, reply) => {
         try {
           const { resourceType, name, accessScope, encryptedData } = body(req);
           const resource = await svc.createResource(orgId(req), req.user.sub as number, {
@@ -111,7 +124,7 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         }
       });
 
-      child.patch('/api/organizations/:organizationId/resources/:resourceId', async (req, reply) => {
+      child.patch('/api/organizations/:organizationId/resources/:resourceId', { schema: { body: updateResourceBody } }, async (req, reply) => {
         try {
           await svc.updateResource(orgId(req), resourceId(req), req.user.sub as number, body(req));
           reply.send({ ok: true });
@@ -129,7 +142,7 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         }
       });
 
-      child.post('/api/organizations/:organizationId/resources/:resourceId/permissions', async (req, reply) => {
+      child.post('/api/organizations/:organizationId/resources/:resourceId/permissions', { schema: { body: grantPermissionBody } }, async (req, reply) => {
         try {
           const { membershipId, permission } = body(req);
           const granted = await svc.grantPermission(

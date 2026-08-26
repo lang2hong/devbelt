@@ -7,7 +7,7 @@ import type {
   Organization, Membership, OrganizationResource, OrganizationResourcePermission, OrganizationAuditLog,
 } from '../domain/entities.js';
 import type { MemberRole, ResourcePermission, ResourceType } from '../domain/enums.js';
-import { EntityNotFoundError, ValidationError, ForbiddenError } from '../domain/errors.js';
+import { EntityNotFoundError, ValidationError, ForbiddenError, AlreadyExistsError } from '../domain/errors.js';
 
 /** team 组织创建时赠送的试用天数；到期后订阅降为 expired，回落 free。 */
 const TEAM_TRIAL_DAYS = 14;
@@ -74,6 +74,20 @@ export class OrganizationService {
    */
   async createOrganization(userId: number, name: string): Promise<{ organization: Organization; membership: Membership }> {
     if (!name || !name.trim()) throw new ValidationError('name is required');
+
+    // A3: 每用户最多 1 个活跃 team 组织（防试用薅：脚本循环建 team org 无限薅 14 天试用）
+    const memberships = await this.membershipRepo.listByUser(userId);
+    for (const m of memberships) {
+      if (m.status !== 'active') continue;
+      const org = await this.orgRepo.findById(m.organizationId);
+      if (org?.type === 'team') {
+        const sub = await this.subRepo.findByOrganizationId(org.id);
+        if (sub && (sub.status === 'active' || sub.status === 'trialing')) {
+          throw new AlreadyExistsError('user already has an active team organization');
+        }
+      }
+    }
+
     const org = await this.orgRepo.create({ name: name.trim(), type: 'team', ownerUserId: userId });
     const membership = await this.membershipRepo.create({ organizationId: org.id, userId, role: 'admin' });
     const teamPlan = await this.planRepo.findByCode('team');
@@ -105,9 +119,25 @@ export class OrganizationService {
     const activeSeats = await this.seatRepo.countActiveByOrganization(organizationId);
     const activeMembers = await this.membershipRepo.countActiveByOrganization(organizationId);
     if (activeMembers >= activeSeats) throw new ValidationError('no available seat');
+    // P1-6: orgMaxMembers 校验（0 = 无限）
+    const sub = await this.subRepo.findByOrganizationId(organizationId);
+    if (sub) {
+      const plan = await this.planRepo.findById(sub.planId);
+      if (plan && plan.orgMaxMembers > 0 && activeMembers >= plan.orgMaxMembers) {
+        throw new ValidationError(`organization member limit reached (${plan.orgMaxMembers})`);
+      }
+    }
     const membership = await this.membershipRepo.create({ organizationId, userId, role });
     await this.audit(actorUserId, organizationId, 'member.add', 'membership', membership.id, { userId, role });
     return membership;
+  }
+
+  /** P1-6: 成员自退；owner 禁止自退（需先转让或解散） */
+  async leaveOrganization(organizationId: number, userId: number): Promise<void> {
+    const m = await this.getMembership(organizationId, userId);
+    await this.ensureNotOwner(organizationId, userId);
+    await this.membershipRepo.softDelete(m.id);
+    await this.audit(userId, organizationId, 'member.leave', 'membership', m.id, {});
   }
 
   async updateMemberRole(organizationId: number, membershipId: number, role: MemberRole, actorUserId: number): Promise<void> {

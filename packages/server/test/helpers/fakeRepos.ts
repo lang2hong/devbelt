@@ -561,6 +561,10 @@ export class FakeWebhookEventRepo implements IWebhookEventRepo {
     this.rows.set(k, detail);
     return true;
   }
+
+  async forget(provider: string, eventKey: string): Promise<void> {
+    this.rows.delete(`${provider}:${eventKey}`);
+  }
 }
 
 function key(userId: number, section: SectionType): string {

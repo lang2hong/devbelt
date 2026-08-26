@@ -69,7 +69,9 @@ export class SyncService {
       if (!input.meta) {
         throw new ValidationError('connections section requires meta for quota accounting');
       }
-      const projectedActive = input.meta.length;
+      // 客户端可能附带 deleted:true 的墓碑行——过滤后只计活跃连接
+      const activeMeta = input.meta.filter((m) => !m.deleted);
+      const projectedActive = activeMeta.length;
       await this.planPolicy.checkTotal(userId, 'connections', projectedActive);
     }
 
@@ -89,7 +91,9 @@ export class SyncService {
     // （见上），不依赖库内 meta，所以 meta 落后一次不会放宽任何限制，
     // 下一次 push 会整体覆盖。
     if (section === 'connections' && input.meta) {
-      await this.connectionMetaRepo.replaceAll(userId, input.meta);
+      // 过滤 deleted:true 的墓碑行——不 upsert，让 replaceAll 的 NOT IN 逻辑自动墓碑
+      const activeMeta = input.meta.filter((m) => !m.deleted) as ConnectionMetaInput[];
+      await this.connectionMetaRepo.replaceAll(userId, activeMeta);
     }
 
     const retention = await this.planPolicy.syncVersionRetention(userId);
@@ -154,9 +158,10 @@ export class SyncService {
    * 回滚到指定版本（取旧密文写回当前，新 version=current+1）。
    * 同 push：回滚也是一次写入，需前置配额校验，否则可绕过配额。
    */
-  async rollback(userId: number, section: SectionType, toVersion: number): Promise<PushResult> {
+  async rollback(userId: number, section: SectionType, toVersion: number, deviceId?: string): Promise<PushResult> {
     const user = await this.userRepo.findById(userId);
     if (!user) throw new EntityNotFoundError('user', userId);
+    await this.requireDeviceBound(userId, deviceId);
 
     const target = await this.syncRepo.getVersion(userId, section, toVersion);
     if (!target) throw new VersionNotFoundError(userId, section, toVersion);

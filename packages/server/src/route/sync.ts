@@ -88,8 +88,9 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
       child.post('/api/sync/rollback', { schema: { body: rollbackBody } }, async (req, reply) => {
         const userId = req.user.sub as number;
         const { section, toVersion } = req.body as any;
+        const deviceId = readDeviceId(req);
         try {
-          const r = await opts.syncService.rollback(userId, section, Number(toVersion));
+          const r = await opts.syncService.rollback(userId, section, Number(toVersion), deviceId);
           reply.send(r);
         } catch (e) {
           sendError(reply, e);

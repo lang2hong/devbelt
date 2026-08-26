@@ -134,7 +134,23 @@ export const pushBody = {
     // 以下为可选：itemCount / meta（当前客户端都发）
     // itemCount 上界对齐 sync_sections 的 INT UNSIGNED
     itemCount: { type: 'integer', minimum: 0, maximum: 4294967295 },
-    meta: { type: 'array' },
+    meta: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['connId', 'type'],
+        properties: {
+          connId: { type: 'string', minLength: 1, maxLength: 64 },
+          type: { type: 'string', maxLength: 32 },
+          name: { type: 'string', maxLength: 200 },
+          groupName: { type: 'string', maxLength: 100 },
+          enabled: { type: 'boolean' },
+          deleted: { type: 'boolean' },
+          clientCreatedAt: { type: 'integer' },
+          clientUpdatedAt: { type: 'integer' },
+        },
+      },
+    },
   },
 } as const;
 
@@ -238,5 +254,55 @@ export const providerParam = {
   properties: { provider: { type: 'string', minLength: 1, maxLength: 32 } },
 } as const;
 
-/** IPv6 最长 45 字符，与 DB 列宽一致 */
+// ── 组织域 ──
+
+export const createOrgBody = {
+  type: 'object',
+  required: ['name'],
+  properties: { name: { type: 'string', minLength: 1, maxLength: 100 } },
+} as const;
+
+export const addMemberBody = {
+  type: 'object',
+  required: ['userId', 'role'],
+  properties: {
+    userId: { type: 'integer', minimum: 1 },
+    role: { type: 'string', enum: ['admin', 'member'] },
+  },
+} as const;
+
+export const updateMemberBody = {
+  type: 'object',
+  required: ['role'],
+  properties: { role: { type: 'string', enum: ['admin', 'member'] } },
+} as const;
+
+export const createResourceBody = {
+  type: 'object',
+  required: ['resourceType', 'name', 'accessScope'],
+  properties: {
+    resourceType: { type: 'string', enum: ['connection_template', 'query', 'folder'] },
+    name: { type: 'string', minLength: 1, maxLength: 200 },
+    accessScope: { type: 'string', enum: ['organization', 'restricted'] },
+    encryptedData: { type: 'string' },
+  },
+} as const;
+
+export const updateResourceBody = {
+  type: 'object',
+  properties: {
+    name: { type: 'string', minLength: 1, maxLength: 200 },
+    accessScope: { type: 'string', enum: ['organization', 'restricted'] },
+    encryptedData: { type: 'string' },
+  },
+} as const;
+
+export const grantPermissionBody = {
+  type: 'object',
+  required: ['membershipId', 'permission'],
+  properties: {
+    membershipId: { type: 'integer', minimum: 1 },
+    permission: { type: 'string', enum: ['read', 'write'] },
+  },
+} as const;
 

@@ -139,14 +139,15 @@ describe('幂等', () => {
     expect((await c.subRepo.findByOrganizationId(c.orgId))!.periodEndTime!.getTime()).toBe(later.getTime());
   });
 
-  it('处理失败时不记幂等，重试仍能生效', async () => {
+  it('处理失败时事件保持已记录（不 forget，防毒消息死循环，需人工排查）', async () => {
     const e = evt({ organizationId: c.orgId, eventId: 'evt_retry' });
     c.subRepo.failNextUpsert = true;
     await expect(c.svc.applyWebhookEvent(e)).rejects.toThrow();
-    expect(await c.eventRepo.seen('stripe', 'evt_retry')).toBe(false);
-
+    // record-first：事件已记录，不 forget —— 防止 order 已写→seat 失败→forget→重试→撞 UNIQUE→死循环
+    expect(await c.eventRepo.seen('stripe', 'evt_retry')).toBe(true);
+    // 重试被跳过（record 返回 false = 已有人记过）
     await c.svc.applyWebhookEvent(e);
-    expect((await c.subRepo.findByOrganizationId(c.orgId))!.status).toBe('active');
+    // 订阅仍未激活（处理未完成，需人工排查）
   });
 
   it('eventId 按 provider 分别去重', async () => {

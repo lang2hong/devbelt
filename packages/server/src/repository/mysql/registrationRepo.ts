@@ -1,5 +1,6 @@
 import type { IRegistrationRepo, RegistrationAccountInput, RegistrationResult } from '../interfaces.js';
 import { withTransaction, type MysqlDb } from './db.js';
+import { AlreadyExistsError } from '../../domain/errors.js';
 
 /**
  * 注册账号仓储：原子创建 user + personal org + admin membership + free 订阅 + 席位。
@@ -16,20 +17,29 @@ export class MysqlRegistrationRepo implements IRegistrationRepo {
   async createAccount(input: RegistrationAccountInput): Promise<RegistrationResult> {
     return withTransaction(this.db(), async (tx) => {
       const [existing] = await tx.query<any[]>('SELECT id FROM users WHERE email = ? LIMIT 1', [input.email]);
-      if (existing.length > 0) throw new Error(`user already exists: ${input.email}`);
+      if (existing.length > 0) throw new AlreadyExistsError(`user already exists: ${input.email}`);
 
       const [planRows] = await tx.query<any[]>('SELECT id FROM plans WHERE code = ? LIMIT 1', ['free']);
       const freePlan = planRows[0];
       if (!freePlan) throw new Error('free plan is missing; run migrations before register');
 
-      const [userResult] = await tx.query<any>(
-        `INSERT INTO users (email, password_hash, display_name, role, status)
-         VALUES (?, ?, ?, ?, 'active')`,
-        [input.email, input.passwordHash, input.displayName ?? null, input.role],
-      );
-      const userId = Number(userResult.insertId);
+      let userId: number;
+      try {
+        const [userResult] = await tx.query<any>(
+          `INSERT INTO users (email, password_hash, display_name, role, status)
+           VALUES (?, ?, ?, ?, 'active')`,
+          [input.email, input.passwordHash, input.displayName ?? null, input.role],
+        );
+        userId = Number(userResult.insertId);
+      } catch (err: any) {
+        // A7: 并发注册穿透预检查后撞唯一键 → 409（非 500）
+        if (err?.code === 'ER_DUP_ENTRY' || err?.errno === 1062) throw new AlreadyExistsError(`user already exists: ${input.email}`);
+        throw err;
+      }
 
-      const orgName = input.displayName ? `${input.displayName}'s workspace` : `${input.email}'s workspace`;
+      // A6: 截断 org name 至 100 字符（"'s workspace" = 12 字符，baseName ≤ 88）
+      const baseName = input.displayName || input.email;
+      const orgName = `${baseName.substring(0, 88)}'s workspace`;
       const [orgResult] = await tx.query<any>(
         `INSERT INTO organizations (name, type, owner_user_id, status)
          VALUES (?, 'personal', ?, 'active')`,

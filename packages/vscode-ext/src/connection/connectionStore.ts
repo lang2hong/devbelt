@@ -349,25 +349,27 @@ export class ConnectionStore {
 
   /**
    * 读取连接明文元数据（上传服务端计量/分析用，不含任何敏感字段）。
-   * 返回结构对齐服务端 connection_meta 表：type/name/groupName/enabled/deleted/时间戳。
+   * 返回结构对齐服务端 connection_meta 表：connId/type/name/groupName/enabled/时间戳。
+   * deleted:true 的墓碑行不发送——服务端 replaceAll 会自动墓碑不在列表中的行。
    */
   getConnectionMeta(): Array<{
-    connUuid: string; type: string; name: string; groupName?: string;
-    enabled: boolean; deleted: boolean; createdAt?: number; updatedAt?: number;
+    connId: string; type: string; name: string; groupName?: string;
+    enabled: boolean; clientCreatedAt?: number; clientUpdatedAt?: number;
   }> {
     const data = this.getTreeData();
     const groupNameById = new Map<string, string>();
     for (const g of data.groups) groupNameById.set(g.id, g.name);
-    return data.connections.map((c) => ({
-      connUuid: c.id,
-      type: c.dbType,
-      name: c.name,
-      groupName: c.groupId ? groupNameById.get(c.groupId) : undefined,
-      enabled: true,
-      deleted: !!c.deleted,
-      createdAt: c.createTime,
-      updatedAt: c.updateTime,
-    }));
+    return data.connections
+      .filter((c) => !c.deleted)
+      .map((c) => ({
+        connId: c.id,
+        type: c.dbType,
+        name: c.name,
+        groupName: c.groupId ? groupNameById.get(c.groupId) : undefined,
+        enabled: true,
+        clientCreatedAt: c.createTime,
+        clientUpdatedAt: c.updateTime,
+      }));
   }
 
   /**

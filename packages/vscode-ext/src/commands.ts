@@ -51,10 +51,10 @@ export class SyncStatusBar implements SyncStatusBarLike {
         const rel = this.relativeTime(this.getLastSyncAt());
         if (me) {
           this.auth.setCachedPlan(me.plan);
-          const dev = `${me.usage.devices}/${me.plan.maxDevices || '∞'}`;
-          const bytes = `${formatBytes(me.usage.syncBytes)}/${me.plan.syncQuotaBytes ? formatBytes(me.plan.syncQuotaBytes) : '∞'}`;
+          const dev = `${me.usage.devices}/${me.plan.perSeatMaxDevices || '∞'}`;
+          const bytes = `${formatBytes(me.usage.syncBytes)}/${me.plan.perUserPrivateSyncQuotaBytes ? formatBytes(me.plan.perUserPrivateSyncQuotaBytes) : '∞'}`;
           this.item.text = `$(cloud) ${email || 'synced'} · ${me.plan.name} · ${dev} dev · ${bytes}`;
-          this.item.tooltip = `Plan: ${me.plan.name}\nDevices: ${dev}\nSync: ${bytes}\nConnections: ${me.usage.connections}/${me.plan.maxConnections || '∞'}\nLast sync: ${rel || 'never'}`;
+          this.item.tooltip = `Plan: ${me.plan.name}\nDevices: ${dev}\nSync: ${bytes}\nConnections: ${me.usage.connections}/${me.plan.perUserMaxPrivateConnections || '∞'}\nLast sync: ${rel || 'never'}`;
         } else {
           this.item.text = `$(cloud) ${email || 'synced'}${rel ? ` · ${rel}` : ''}`;
         }

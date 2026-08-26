@@ -28,8 +28,8 @@ server {
     # ── 请求体上限 ────────────────────────────────────────────────
     # sync_sections.encrypted_data 是 MEDIUMTEXT（16MB）。PUT /api/sync 已
     # 单独放宽到 9MiB（SYNC_BODY_LIMIT），其余端点仍为 Fastify 默认 1MB。
-    # 这里给 2m 会让 nginx 反成 sync 推送 >2MB 的瓶颈——部署时建议上调到 ≥9m。
-    client_max_body_size 2m;
+    # 这里给 10m 覆盖 sync 的 9MiB 上限，nginx 不再成为瓶颈。
+    client_max_body_size 10m;
 
     # ── 代理头 ───────────────────────────────────────────────────
     proxy_http_version 1.1;

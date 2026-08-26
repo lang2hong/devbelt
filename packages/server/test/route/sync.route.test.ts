@@ -85,12 +85,40 @@ describe('PUT /api/sync', () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it('带 itemCount/meta 也通过', async () => {
+  it('带 itemCount/meta 也通过（v2 客户端形状 connId）', async () => {
     const res = await t.app.inject({
       method: 'PUT', url: '/api/sync', headers: t.auth(token),
-      payload: { ...base, itemCount: 3, meta: [{ uuid: 'a' }] },
+      payload: { ...base, itemCount: 3, meta: [{ connId: 'a', type: 'pg', name: 'test', enabled: true }] },
     });
     expect(res.statusCode).toBe(200);
+  });
+
+  it('meta 含 deleted:true 条目 → 活跃计数不含墓碑（契约测试）', async () => {
+    const res = await t.app.inject({
+      method: 'PUT', url: '/api/sync', headers: t.auth(token),
+      payload: {
+        ...base, section: 'connections', encryptedData: 'conn-cipher', baseVersion: 0,
+        meta: [
+          { connId: 'c1', type: 'pg', name: 'prod', enabled: true },
+          { connId: 'c2', type: 'mysql', name: 'dev', enabled: true, deleted: true },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    // deleted 条目不应入库为活跃行
+    const countRes = await t.app.inject({
+      method: 'GET', url: '/api/me', headers: t.auth(token),
+    });
+    const me = JSON.parse(countRes.body);
+    expect(me.usage.connections).toBe(1);
+  });
+
+  it('meta 缺 connId → 400（schema required）', async () => {
+    const res = await t.app.inject({
+      method: 'PUT', url: '/api/sync', headers: t.auth(token),
+      payload: { ...base, meta: [{ type: 'pg', name: 'x' }] },
+    });
+    expect(res.statusCode).toBe(400);
   });
 
   it('未声明的额外字段被忽略而非拒绝（不设 additionalProperties:false）', async () => {

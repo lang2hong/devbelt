@@ -36,7 +36,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   await store.init();
   const serverUrl = DEFAULT_SERVER_URL;
   const auth = new AuthService(context.secrets, serverUrl, context.globalState);
-  const history = new HistoryStore(context.globalState, () => auth.getCachedPlan()?.historyRetentionCount);
+  const history = new HistoryStore(context.globalState, () => auth.getCachedPlan()?.perUserHistoryRetentionCount);
   usageTracker.init(context.globalState);
   // history 注入管理器：所有会话的修改性语句由此自动进历史，
   // 不再依赖各命令自行调用 history.add（漏一个就少一段痕迹）。
