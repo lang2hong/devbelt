@@ -131,8 +131,19 @@ onMounted(load);
             <button class="btn primary" style="margin-top: 8px" :disabled="!detail.subscription" @click="openRenew">Renew</button>
           </div>
 
+          <div class="section" v-if="detail.memberships?.length">
+            <h4>Organizations</h4>
+            <table style="margin-top: 4px">
+              <tr><th>Org</th><th>Role</th><th>Status</th></tr>
+              <tr v-for="m in detail.memberships" :key="m.organizationId">
+                <td>{{ m.organizationName }} (#{{ m.organizationId }})</td>
+                <td>{{ m.role }}</td>
+                <td><span class="badge" :class="m.status">{{ m.status }}</span></td>
+              </tr>
+            </table>
+          </div>
+
           <div class="section">
-            <h4>Sync usage</h4>
             <div class="kv">
               <span class="k">Active devices</span><span>{{ detail.usage.devices }}</span>
               <span class="k">Total sync (cipher)</span><span>{{ bytes(detail.usage.syncBytes) }}</span>

@@ -186,7 +186,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
 
   const planPolicy = new PlanPolicy((userId) => resolveEffectivePlans(userId, { membershipRepo, subRepo, planRepo }));
   const tokenService = new TokenService(app.jwt as unknown as JwtPort, '15m', '30d');
-  const authService = new AuthService(userRepo, subRepo, refreshTokenRepo, deviceRepo, registrationRepo, tokenService, planPolicy);
+  const authService = new AuthService(userRepo, subRepo, refreshTokenRepo, deviceRepo, registrationRepo, tokenService, planPolicy, membershipRepo);
   const subscriptionService = new SubscriptionService(
     userRepo, planRepo, subRepo, membershipRepo, organizationRepo,
     deviceRepo, syncRepo, connectionMetaRepo, planPolicy,

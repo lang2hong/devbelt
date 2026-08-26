@@ -112,9 +112,12 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions)
         const organizationId = Number((req.params as any).id);
         const { planCode, period, provider } = req.body as any;
         try {
+          // P3-16: admin 是目标组织成员时标记 selfBenefit（self-dealing 审计）
+          const isMember = await opts.adminService.isMemberOf(organizationId, (req as any).user.sub);
           // 手动续费等于免费发放付费套餐，是最需要留痕的一类管理操作
           await opts.adminService.recordAudit(actorOf(req as any), 'organization.renew', 'organization', String(organizationId), {
             planCode, period, provider: provider ?? 'manual',
+            ...(isMember ? { selfBenefit: true } : {}),
           });
           const sub = await opts.paymentService.renew(organizationId, planCode as PlanCode, period as PaymentPeriod, provider);
           reply.send({ subscription: sub });

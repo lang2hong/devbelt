@@ -76,6 +76,7 @@ export interface AdminUserDetail {
   plan: Plan;
   subscription?: Subscription;
   sessions: SessionInfo[];
+  memberships: Array<{ organizationId: number; organizationName: string; role: string; status: string }>;
   usage: { devices: number; syncBytes: number; sections: SectionUsage[] };
 }
 

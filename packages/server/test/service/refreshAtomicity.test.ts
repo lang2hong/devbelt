@@ -7,6 +7,7 @@ import {
   FakeSubscriptionRepo,
   FakeRefreshTokenRepo,
   FakeDeviceRepo,
+  FakeMembershipRepo,
 } from '../helpers/fakeRepos.js';
 import { hashPassword } from '../../src/service/password.js';
 import { TokenReuseError } from '../../src/domain/errors.js';
@@ -25,7 +26,7 @@ async function setup() {
   const rtRepo = new FakeRefreshTokenRepo();
   const deviceRepo = new FakeDeviceRepo();
   const tokenService = new TokenService(makeJwt(), '15m', '30d');
-  const auth = new AuthService(userRepo, subRepo, rtRepo, deviceRepo, {} as any, tokenService, new PlanPolicy(async () => []));
+  const auth = new AuthService(userRepo, subRepo, rtRepo, deviceRepo, {} as any, tokenService, new PlanPolicy(async () => []), new FakeMembershipRepo());
   const user = await userRepo.create('u@example.com', hashPassword('pw12345678'), 'user');
   return { auth, userRepo, rtRepo, tokenService, user };
 }

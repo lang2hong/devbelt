@@ -143,7 +143,7 @@ export async function createApp() {
   const planPolicy = new PlanPolicy((userId) => resolveEffectivePlans(userId, { membershipRepo, subRepo, planRepo }));
   // 传毫秒而非字符串：解析与上限校验已在 config 完成，避免二次解析与静默回落
   const tokenService = new TokenService(app.jwt as unknown as JwtPort, config.accessTokenExpiresIn, config.refreshTokenExpiresMs);
-  const authService = new AuthService(userRepo, subRepo, refreshTokenRepo, deviceRepo, registrationRepo, tokenService, planPolicy);
+  const authService = new AuthService(userRepo, subRepo, refreshTokenRepo, deviceRepo, registrationRepo, tokenService, planPolicy, membershipRepo);
   const subscriptionService = new SubscriptionService(userRepo, planRepo, subRepo, membershipRepo, organizationRepo, deviceRepo, syncRepo, connectionMetaRepo, planPolicy);
   const syncService = new SyncService(syncRepo, userRepo, planPolicy, connectionMetaRepo, deviceRepo);
   const adminService = new AdminService(userRepo, planRepo, subRepo, membershipRepo, organizationRepo, refreshTokenRepo, syncRepo, deviceRepo, connectionMetaRepo, adminAuditRepo, planPolicy);

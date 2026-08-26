@@ -1,5 +1,6 @@
 import type {
   IUserRepo, ISubscriptionRepo, IRefreshTokenRepo, IDeviceRepo, IRegistrationRepo,
+  IMembershipRepo,
 } from '../repository/interfaces.js';
 import type { TokenService } from './tokenService.js';
 import type { Subscription, User, Device } from '../domain/entities.js';
@@ -62,6 +63,7 @@ export class AuthService {
     private readonly registrationRepo: IRegistrationRepo,
     private readonly tokenService: TokenService,
     private readonly planPolicy: PlanPolicy,
+    private readonly membershipRepo: IMembershipRepo,
   ) {}
 
   /** 注册：原子建 user + personal org + membership + free 订阅 + 席位，再签双 token */
@@ -117,7 +119,17 @@ export class AuthService {
     const accessToken = this.tokenService.signAccessToken(user.id, user.role, rt.id);
     await this.userRepo.updateLastLogin(user.id, now);
 
-    return { accessToken, refreshToken: token, user: sanitize(user) };
+    return { accessToken, refreshToken: token, user: sanitize(user), subscription: await this.findPersonalSubscription(user.id) };
+  }
+
+  /** P3-18: 找用户的 personal org 订阅（login 响应对齐 register） */
+  private async findPersonalSubscription(userId: number): Promise<Subscription | undefined> {
+    const memberships = await this.membershipRepo.listByUser(userId);
+    for (const m of memberships) {
+      const sub = await this.subRepo.findByOrganizationId(m.organizationId);
+      if (sub) return sub;
+    }
+    return undefined;
   }
 
   /**

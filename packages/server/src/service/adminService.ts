@@ -37,6 +37,7 @@ export interface AdminUserDetail {
   plan: Plan;
   subscription?: Subscription;
   sessions: SessionInfo[];
+  memberships: Array<{ organizationId: number; organizationName: string; role: string; status: string }>;
   usage: {
     devices: number;
     syncBytes: number;
@@ -87,6 +88,14 @@ export class AdminService {
     const subscription = await this.personalSubscription(id);
     const sessions = await this.refreshTokenRepo.listActiveForUser(id, new Date());
     const sections = await this.syncRepo.listSections(id);
+    // P3-19: 用户所属组织列表
+    const rawMemberships = await this.membershipRepo.listByUser(id);
+    const memberships = await Promise.all(
+      rawMemberships.map(async (m) => {
+        const org = await this.organizationRepo.findById(m.organizationId);
+        return { organizationId: m.organizationId, organizationName: org?.name ?? '?', role: m.role, status: m.status };
+      }),
+    );
     const usage = {
       devices: await this.deviceRepo.countBound(id),
       syncBytes: sections.reduce((n, s) => n + Buffer.byteLength(s.encryptedData, 'utf8'), 0),
@@ -97,7 +106,7 @@ export class AdminService {
         updateTime: s.updateTime,
       })),
     };
-    return { user: sanitize(user), plan, subscription, sessions, usage };
+    return { user: sanitize(user), plan, subscription, sessions, memberships, usage };
   }
 
   async listPlans(): Promise<Plan[]> {
@@ -236,6 +245,12 @@ export class AdminService {
     detail: Record<string, unknown>,
   ): Promise<void> {
     await this.audit(actor, action, targetType, targetId, detail);
+  }
+
+  /** P3-16: 检查 admin 是否是目标组织的成员（self-dealing 标记用） */
+  async isMemberOf(organizationId: number, userId: number): Promise<boolean> {
+    const m = await this.membershipRepo.findByOrgAndUser(organizationId, userId);
+    return m?.status === 'active';
   }
 
   /** 取用户 personal org 的当前订阅（显示用） */

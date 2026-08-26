@@ -63,7 +63,7 @@ function setup(planOver: Parameters<typeof makePlan>[1] = {}) {
   });
   const jwt = new FakeJwt();
   const tokenService = new TokenService(jwt, '15m', '30d');
-  const auth = new AuthService(userRepo, subRepo, rtRepo, deviceRepo, registrationRepo, tokenService, planPolicy);
+  const auth = new AuthService(userRepo, subRepo, rtRepo, deviceRepo, registrationRepo, tokenService, planPolicy, new FakeMembershipRepo());
   return { auth, userRepo, planRepo, subRepo, orgRepo, membershipRepo, rtRepo, deviceRepo, jwt, tokenService };
 }
 
