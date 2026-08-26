@@ -3,7 +3,7 @@ import type { DeviceInfo } from '../service/authService.js';
 /**
  * 设备请求头的列宽上界。
  *
- * 每个值都对齐 `repository/mysql/schema.ts` 里对应列的定义：
+ * 每个值都对齐 `repository/mysql/migrations/001_initial_schema.ts` 里对应列的定义：
  *  - `refresh_tokens.device_name` VARCHAR(120) / `device_id` VARCHAR(64) / `user_agent` VARCHAR(255)
  *  - `devices.hostname` VARCHAR(120) / `os` VARCHAR(32) / `arch` VARCHAR(16) /
  *    `os_version` VARCHAR(64) / `app_name` VARCHAR(64) / `app_version` VARCHAR(32) /
@@ -16,7 +16,6 @@ export const DEVICE_HEADER_LIMITS = {
   deviceName: 120,
   deviceId: 64,
   machineId: 64,
-  osMachineId: 64,
   hostname: 120,
   os: 32,
   arch: 16,
@@ -34,7 +33,6 @@ const HEADER_MAP: ReadonlyArray<[string, keyof typeof DEVICE_HEADER_LIMITS]> = [
   ['x-device-name', 'deviceName'],
   ['x-device-id', 'deviceId'],
   ['x-device-machine-id', 'machineId'],
-  ['x-device-os-machine-id', 'osMachineId'],
   ['x-device-hostname', 'hostname'],
   ['x-device-os', 'os'],
   ['x-device-arch', 'arch'],
@@ -61,7 +59,7 @@ const HEADER_MAP: ReadonlyArray<[string, keyof typeof DEVICE_HEADER_LIMITS]> = [
  * 不截断的后果（MySQL 8 默认 STRICT_TRANS_TABLES，超长报 ER_DATA_TOO_LONG 而非截断）：
  *
  *  - 登录：`deviceRepo.upsert` 抛错 → 500，登录彻底完不成。
- *  - 推送：`PUT /api/sync` 先提交 section（版本 N→N+1），再写 `sync_events`。
+ *  - 推送：`PUT /api/sync` 提交 section（版本 N→N+1）。
  *    后者抛错时前者不回滚，客户端收到 500 因而不更新本地 base，下次推送
  *    base=N 而服务端已是 N+1 → 该 section **永久 409**，只能靠 forcePush 脱困。
  *

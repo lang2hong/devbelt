@@ -13,17 +13,11 @@ export type SubStatus = 'active' | 'trialing' | 'expired' | 'canceled';
 /**
  * 周期结束后需要降级的订阅状态。
  *
- * 原先只有 `'active'` 参与到期扫描，于是 trialing 与 canceled 的行**永远
- * 不会被处理**：
- *  - 注册时写的是 `status: 'trialing'`（authService.register），用户 7 天后
- *    `/api/me` 仍显示 trialing，界面上"试用中"永久挂着；这些行也永不被
- *    `idx_sub_status_period` 扫到，积在表里只增不减。
- *  - `canceled` 是"已取消但仍在已付周期内"，周期结束同样要变 expired；
- *    不处理的话取消过的用户会一直保持付费套餐。
- *
- * 眼下试用给的是 free 套餐，所以 trialing 不漏钱 —— 但这是定时炸弹：
- * 试用给付费套餐是最常见的做法，authService 里的 planCode 一改成 'pro'，
- * 同一段代码立刻变成"所有试用用户永久免费用 pro"。
+ * - `active`：正常付费订阅，按 `period_end_time` 到期降级。
+ * - `trialing`：建 team 组织时赠送的 14 天试用（`createOrganization` 写
+ *   `trial_end_time`）。按 `trial_end_time` 到期降级，回落 free。
+ *   若不纳入扫描，试用将永久挂付费套餐——这正是 #2 付费门禁旁路的根因。
+ * - `canceled`：已取消但仍在已付周期内，周期结束同样要变 expired。
  *
  * `expired` 不在列表里：已是终态，重复处理只是白写一次 UPDATE。
  *
@@ -65,3 +59,37 @@ export const Feature = {
 
 /** Feature 位值类型（供签名标注）。 */
 export type FeatureFlag = (typeof Feature)[keyof typeof Feature];
+
+// ── v2：组织 / 成员 / 席位 / 订单 / 资源 / 权限 ──────────────────────
+//
+// 以下枚举服务于以「组织」为计费主体的 v2 模型（见 docs/数据库设计v2.md）。
+// 它们与上方 v1 枚举并存：S3a 纯增量，不改 v1 的 PlanCode / Role / SubStatus，
+// 待 S3b/S3c 切换运行时后再清理。MemberRole 与全局系统 Role 是不同命名空间：
+// 前者是组织内 admin/member，后者是系统级 user/admin。
+
+/** 组织类型 */
+export type OrgType = 'personal' | 'team';
+
+/** 组织状态（沿用 UserStatus 的 active/disabled 约定） */
+export type OrgStatus = 'active' | 'disabled';
+
+/** 组织成员角色（组织内；区别于全局系统 Role） */
+export type MemberRole = 'admin' | 'member';
+
+/** 成员状态 */
+export type MemberStatus = 'active' | 'disabled';
+
+/** 席位状态（席位增减由订单 seat_delta 驱动） */
+export type SeatStatus = 'active' | 'revoked';
+
+/** 订单状态 */
+export type OrderStatus = 'pending' | 'paid' | 'failed' | 'refunded' | 'canceled';
+
+/** 组织共享资源类型（首期不含数据库密码 / SSH 私钥） */
+export type ResourceType = 'connection_template' | 'query' | 'folder';
+
+/** 资源访问范围 */
+export type AccessScope = 'organization' | 'restricted';
+
+/** 资源权限 */
+export type ResourcePermission = 'read' | 'write';

@@ -19,7 +19,7 @@ export interface AuthRouteOptions {
 /**
  * 认证路由（HTTP 层）：仅编组 AuthService + 序列化，无业务逻辑。
  * 公开：register / login / refresh
- * 需认证：logout / change-password / sessions / sessions/:id（包在 authScope 子作用域）
+ * 需认证：logout / change-password（包在 authScope 子作用域）
  *
  * 兼容旧客户端：register/login/refresh 响应附带 token/userId/role 顶层字段，
  * 旧 syncClient 读 token；新客户端读 accessToken/refreshToken。

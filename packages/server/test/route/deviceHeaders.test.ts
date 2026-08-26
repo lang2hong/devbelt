@@ -14,8 +14,7 @@ import { MAX_SECTION_BYTES } from '../../src/route/schemas.js';
  *  - 登录：`deviceRepo.upsert` 抛错 → 500，用户根本登不上。而 300 字符的
  *    User-Agent 在真实世界里是存在的（某些代理/客户端），那类用户会遇到
  *    「无论如何都登不上」且日志里只有一行 SQL 错误。
- *  - 推送：`PUT /api/sync` 的写入顺序是「先写 section（版本 N→N+1 已提交）→
- *    再写 sync_events」。后者因超长 device_id 抛错时前者不回滚，客户端拿到 500
+ *  - 推送：`PUT /api/sync` 因超长 device_id 抛错 → 客户端拿到 500
  *    因而不更新本地 base，下次推送 base=N 而服务端已是 N+1 → **永久 409**。
  *
  * 选择截断而不是返回 400：`user-agent` 不由用户意图决定，为它拒绝登录是错的；
@@ -157,7 +156,7 @@ describe('三条真实路径都接上了截断（断言落库值，不只看状�
     expect([...t.repos.deviceRepo.devices.values()][0].deviceId).toBe(registeredId);
   });
 
-  it('推送：sync_events 里的 device_id 已收敛，且版本可连续推进', async () => {
+  it('推送：超长 device_id 被截断后版本可连续推进', async () => {
     const headers = { ...t.auth(token), 'x-device-id': 'y'.repeat(500) };
 
     const first = await t.app.inject({
@@ -166,9 +165,6 @@ describe('三条真实路径都接上了截断（断言落库值，不只看状�
     });
     expect(first.statusCode).toBe(200);
     const v1 = first.json().version;
-
-    expect(t.repos.syncEventRepo.events.at(-1)!.deviceId)
-      .toHaveLength(DEVICE_HEADER_LIMITS.deviceId);
 
     // 真库上留痕写失败会让第一次变 500，客户端本地 base 不前进 → 这里就是 409
     const second = await t.app.inject({
@@ -179,33 +175,7 @@ describe('三条真实路径都接上了截断（断言落库值，不只看状�
     expect(second.json().version).toBe(v1 + 1);
   });
 
-  it('用量上报：usage_events 里的 device_id 已收敛', async () => {
-    const res = await t.app.inject({
-      method: 'POST', url: '/api/usage',
-      headers: { ...t.auth(token), 'x-device-id': 'z'.repeat(300) },
-      payload: { connectionOpens: 1, queryExecutes: 2 },
-    });
-    expect(res.statusCode).toBe(200);
-    expect(t.repos.usageEventRepo.events.at(-1)!.deviceId)
-      .toHaveLength(DEVICE_HEADER_LIMITS.deviceId);
-  });
 
-  it('拉取：sync_events 里的 device_id 已收敛', async () => {
-    // pull 只对已存在的 section 留痕，所以先推一节
-    await t.app.inject({
-      method: 'PUT', url: '/api/sync', headers: t.auth(token),
-      payload: { section: 'groups', encryptedData: 'cipher', baseVersion: 0 },
-    });
-
-    const res = await t.app.inject({
-      method: 'GET', url: '/api/sync',
-      headers: { ...t.auth(token), 'x-device-id': 'p'.repeat(300) },
-    });
-    expect(res.statusCode).toBe(200);
-
-    const pullEvent = t.repos.syncEventRepo.events.filter((e) => e.direction === 'pull').at(-1)!;
-    expect(pullEvent.deviceId).toHaveLength(DEVICE_HEADER_LIMITS.deviceId);
-  });
 });
 
 /**
@@ -227,7 +197,7 @@ describe('bodyLimit 的作用域', () => {
     const u = await t.makeUser();
     // free 的 syncQuotaBytes 是 1MiB，会先撞配额（403）而测不到 bodyLimit；
     // 用 team（1GiB）把配额这一层排除，专门验证请求体上限
-    await t.repos.userRepo.updatePlan(u.id, 'team');
+    await t.grantPlan(u.id, 'team');
     const res = await t.app.inject({
       method: 'PUT', url: '/api/sync', headers: t.auth(u.token),
       payload: { section: 'groups', encryptedData: 'a'.repeat(2 * 1024 * 1024), baseVersion: 0 },
@@ -255,7 +225,7 @@ describe('bodyLimit 的作用域', () => {
 
   it('超过单节上限的密文以 400 拒绝（schema 层，不打到数据库）', async () => {
     const u = await t.makeUser();
-    await t.repos.userRepo.updatePlan(u.id, 'team');
+    await t.grantPlan(u.id, 'team');
     const res = await t.app.inject({
       method: 'PUT', url: '/api/sync', headers: t.auth(u.token),
       payload: {

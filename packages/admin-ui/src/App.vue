@@ -7,11 +7,10 @@ import UsersView from './components/UsersView.vue';
 import SubscriptionsView from './components/SubscriptionsView.vue';
 import PlansView from './components/PlansView.vue';
 import TrafficView from './components/TrafficView.vue';
-import RateLimitView from './components/RateLimitView.vue';
 import AuditView from './components/AuditView.vue';
 
 const me = ref<UserInfo | null>(null);
-const activeTab = ref<'users' | 'subs' | 'plans' | 'traffic' | 'limits' | 'audit'>('users');
+const activeTab = ref<'users' | 'subs' | 'plans' | 'traffic' | 'audit'>('users');
 
 onUnauthorized(() => {
   me.value = null;
@@ -67,7 +66,6 @@ async function logout() {
         <button :class="{ active: activeTab === 'subs' }" @click="activeTab = 'subs'">Subscriptions</button>
         <button :class="{ active: activeTab === 'plans' }" @click="activeTab = 'plans'">Plans</button>
         <button :class="{ active: activeTab === 'traffic' }" @click="activeTab = 'traffic'">Traffic</button>
-        <button :class="{ active: activeTab === 'limits' }" @click="activeTab = 'limits'">Limits</button>
         <button :class="{ active: activeTab === 'audit' }" @click="activeTab = 'audit'">Audit</button>
       </nav>
       <span class="whoami">{{ me.email }}</span>
@@ -82,7 +80,6 @@ async function logout() {
         还会起定时器。用 v-show 的话切到别的标签页它仍在后台轮询。
       -->
       <TrafficView v-if="activeTab === 'traffic'" />
-      <RateLimitView v-if="activeTab === 'limits'" />
       <!-- v-if：留痕列表每次进来都该拉最新的，不该显示上次打开时的快照 -->
       <AuditView v-if="activeTab === 'audit'" />
     </main>

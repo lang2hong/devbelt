@@ -7,18 +7,16 @@
  * `req.user` 还是空的，拿不到用户身份。而且真正需要挡的恰恰是**未认证**的
  * 请求（暴力登录、注册轰炸），它们本来就没有用户。所以只能按 IP。
  *
- * 代价是共用出口 IP 的用户会被算成一个人。这是固有缺陷，用 `rate_limit_allowlist`
- * 兜（见 rateLimitConfig.ts）。
+ * 代价是共用出口 IP 的用户会被算成一个人。这是固有缺陷（v2 无 DB 白名单，IP 豁免改由路由豁免表表达）。
  *
  * ## 默认阈值是怎么来的
  *
  * 不是拍脑袋，是从客户端代码推的。一次自动同步（`AutoSyncService.trigger` →
  * `SyncManager.tryAutoSync`）的实际请求数：
  *
- *   pull  → 1 个 GET /api/sync
- *   push  → 5 个 PUT /api/sync（SECTION_TYPES 有 5 个 section，逐个推，同一路由打 5 次）
- *   usage → 1 个 POST /api/usage
- *   合计 7 个请求
+ *   pull → 1 个 GET /api/sync
+ *   push → 5 个 PUT /api/sync（SECTION_TYPES 有 5 个 section，逐个推，同一路由打 5 次）
+ *   合计 6 个请求
  *
  * 触发点三个，其中防抖那个是流量大头：`extension.ts` 把 `history.onChanged`
  * 也并进了 `storeChanged`，而用户每执行一条查询就会变更 history。所以
@@ -30,9 +28,7 @@
  * - **auth 类可以定得很紧**：合法流量确实极少（一天登录几次），而安全价值
  *   是实打实的（scrypt 每次十几毫秒 CPU，既是暴力破解面也是 DoS 放大面）。
  * - **sync/default 类只能当 DoS 天花板**：合法峰值本身就高且不可预测，
- *   定紧了就是在锁自己人。真正的收紧要等 traffic_stats 攒出真实数据。
- *
- * 所有阈值都可以在 /admin 后台按桶实时改（写 DB + 更新内存，无需重启）。
+ *   定紧了就是在锁自己人。真正的收紧要靠真实流量数据再校正。
  */
 
 /** 限流桶标识 */
@@ -65,8 +61,7 @@ export const RATE_LIMIT_BUCKETS: readonly RateLimitBucket[] = [
 /**
  * 代码内置基线。
  *
- * `rate_limit_rules` 表为空时限流照常按这套工作 —— 所以 DB 读失败、
- * 或者全新部署没播种数据，都不会让限流失效。
+ * 阈值回归代码常量：v2 无 DB 覆盖，改阈值需改码重部署。
  */
 export const DEFAULT_RULES: Readonly<Record<RateLimitBucket, RateLimitRule>> = {
   'auth-strict': {

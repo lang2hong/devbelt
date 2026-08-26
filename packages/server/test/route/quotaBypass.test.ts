@@ -37,7 +37,7 @@ afterEach(async () => { await t.close(); });
 /** 造 n 条连接元数据 */
 function metas(n: number, prefix = 'c'): Array<Record<string, unknown>> {
   return Array.from({ length: n }, (_, i) => ({
-    connUuid: `${prefix}-${i}`, type: 'MYSQL', name: `conn-${i}`, enabled: true, deleted: false,
+    connId: `${prefix}-${i}`, type: 'MYSQL', name: `conn-${i}`, enabled: true,
   }));
 }
 
@@ -101,20 +101,6 @@ describe('连接数配额：按库内存量而非入参条数', () => {
       section: 'connections', encryptedData: 'cipher', baseVersion: 0, meta: metas(6),
     });
     expect(res.statusCode).toBe(403);
-  });
-
-  it('墓碑（deleted）不计入活跃数', async () => {
-    const u = await t.makeUser();
-    const withTombstones = [
-      ...metas(5),
-      ...Array.from({ length: 10 }, (_, i) => ({
-        connUuid: `dead-${i}`, type: 'MYSQL', enabled: false, deleted: true,
-      })),
-    ];
-    const res = await push(u.token, {
-      section: 'connections', encryptedData: 'cipher', baseVersion: 0, meta: withTombstones,
-    });
-    expect(res.statusCode).toBe(200);
   });
 });
 
@@ -206,7 +192,7 @@ describe('设备数配额', () => {
   it('maxDevices=0 表示无限，不做限制', async () => {
     // pro 套餐的 maxDevices 为 0
     await register({ 'x-device-id': 'd1' });
-    await t.repos.userRepo.updatePlan(1, 'pro');
+    await t.grantPlan(1, 'pro');
     await t.repos.refreshTokenRepo.revokeAllForUser(1);
     await t.app.inject({
       method: 'POST', url: '/api/auth/login',

@@ -101,10 +101,9 @@ describe('限流表与真实路由一致', () => {
    * 客户端一次自动同步的实际请求数，是 sync-write 阈值的推导依据。
    * 路由改名会让这个推导失效，所以在这里钉住。
    */
-  it('自动同步用到的三个路由都存在（阈值推导的前提）', () => {
+  it('自动同步用到的两个路由都存在（阈值推导的前提）', () => {
     const actual = new Set(realRoutes().map((r) => `${r.method} ${r.url}`));
     expect(actual.has('GET /api/sync'), 'pull').toBe(true);
     expect(actual.has('PUT /api/sync'), 'push（5 个 section 各一次）').toBe(true);
-    expect(actual.has('POST /api/usage'), 'usage 上报').toBe(true);
   });
 });

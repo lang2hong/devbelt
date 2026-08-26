@@ -178,38 +178,6 @@ describe('POST /api/sync/rollback', () => {
   });
 });
 
-describe('POST /api/usage', () => {
-  it('缺 body → 400 而非 500', async () => {
-    const res = await t.app.inject({ method: 'POST', url: '/api/usage', headers: t.auth(token) });
-    expect(res.statusCode).toBe(400);
-    expect(res.json().message).not.toContain('destructure');
-  });
-
-  it('合法上报 → 200', async () => {
-    const res = await t.app.inject({
-      method: 'POST', url: '/api/usage', headers: t.auth(token),
-      payload: { connectionOpens: 2, queryExecutes: 5 },
-    });
-    expect(res.statusCode).toBe(200);
-  });
-
-  it('负数 → 400', async () => {
-    const res = await t.app.inject({
-      method: 'POST', url: '/api/usage', headers: t.auth(token),
-      payload: { connectionOpens: -1, queryExecutes: 0 },
-    });
-    expect(res.statusCode).toBe(400);
-  });
-
-  it('超过 INT UNSIGNED 上限 → 400（不留给 MySQL 报错）', async () => {
-    const res = await t.app.inject({
-      method: 'POST', url: '/api/usage', headers: t.auth(token),
-      payload: { connectionOpens: 4294967296, queryExecutes: 0 },
-    });
-    expect(res.statusCode).toBe(400);
-  });
-});
-
 describe('禁用用户访问已认证端点', () => {
   it('status=disabled → 403 USER_DISABLED', async () => {
     await t.repos.userRepo.updateStatus(userId, 'disabled');

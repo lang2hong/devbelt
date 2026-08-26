@@ -149,7 +149,7 @@ describe('DELETE /api/devices/:deviceId', () => {
 
   it('pro 用户撤销 → 200', async () => {
     const u = await t.makeUser();
-    await t.repos.userRepo.updatePlan(u.id, 'pro');
+    await t.grantPlan(u.id, 'pro');
     await t.repos.deviceRepo.upsert({ userId: u.id, deviceId: 'dev-1' } as any);
     const res = await t.app.inject({
       method: 'DELETE', url: '/api/devices/dev-1', headers: t.auth(u.token),

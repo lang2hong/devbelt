@@ -1,46 +1,48 @@
 import type { ISubscriptionRepo } from '../interfaces.js';
 import type { Subscription } from '../../domain/entities.js';
-import type { SubStatus, PaymentProvider, PlanCode } from '../../domain/enums.js';
+import type { SubStatus, PaymentProvider } from '../../domain/enums.js';
 import { EXPIRABLE_STATUSES } from '../../domain/enums.js';
-import { withTransaction, type MysqlDb } from './db.js';
+import { type MysqlDb } from './db.js';
 
 /** `IN (?, ?, ?)` 的占位符，随 EXPIRABLE_STATUSES 长度自动对齐 */
 const EXPIRABLE_PLACEHOLDERS = EXPIRABLE_STATUSES.map(() => '?').join(', ');
 
+/**
+ * 订阅仓库。v2：订阅挂组织（organization_id + plan_id），一组织一条当前订阅
+ * （UNIQUE organization_id）。到期降级只置 status=expired，不再改 users.plan_code。
+ */
 export class MysqlSubscriptionRepo implements ISubscriptionRepo {
   constructor(private readonly db: () => MysqlDb) {}
 
-  async findByUserId(userId: number): Promise<Subscription | undefined> {
-    const [rows] = await this.db().query<any[]>('SELECT * FROM subscriptions WHERE user_id = ?', [userId]);
+  async findByOrganizationId(organizationId: number): Promise<Subscription | undefined> {
+    const [rows] = await this.db().query<any[]>('SELECT * FROM subscriptions WHERE organization_id = ?', [organizationId]);
     return rows[0] ? mapSub(rows[0]) : undefined;
   }
 
-  /**
-   * 批量取订阅。一条 `IN (?)` 取代 N 次单查，见 ISubscriptionRepo 的说明。
-   *
-   * mysql2 对数组参数会展开成逗号分隔的占位符列表，所以这里只需一个 `?`。
-   * 空数组必须提前返回：`IN ()` 是语法错误。
-   */
-  async findByUserIds(userIds: number[]): Promise<Subscription[]> {
-    if (userIds.length === 0) return [];
+  async findByOrganizationIds(organizationIds: number[]): Promise<Subscription[]> {
+    if (organizationIds.length === 0) return [];
     const [rows] = await this.db().query<any[]>(
-      'SELECT * FROM subscriptions WHERE user_id IN (?)',
-      [userIds],
+      'SELECT * FROM subscriptions WHERE organization_id IN (?)',
+      [organizationIds],
     );
     return rows.map(mapSub);
   }
 
   async upsert(sub: Omit<Subscription, 'id' | 'createTime' | 'updateTime'> & { id?: number }): Promise<Subscription> {
     await this.db().query(
-      `INSERT INTO subscriptions (user_id, plan_code, status, period_end_time, trial_end_time, cancel_time, provider, external_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO subscriptions (organization_id, plan_id, status, period_start_time, period_end_time, trial_end_time, cancel_time, provider, external_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
-         plan_code = VALUES(plan_code), status = VALUES(status), period_end_time = VALUES(period_end_time),
-         trial_end_time = VALUES(trial_end_time), cancel_time = VALUES(cancel_time),
-         provider = VALUES(provider), external_id = VALUES(external_id)`,
-      [sub.userId, sub.planCode, sub.status, sub.periodEndTime, sub.trialEndTime ?? null, sub.cancelTime ?? null, sub.provider, sub.externalId ?? null],
+         plan_id = VALUES(plan_id), status = VALUES(status), period_start_time = VALUES(period_start_time),
+         period_end_time = VALUES(period_end_time), trial_end_time = VALUES(trial_end_time),
+         cancel_time = VALUES(cancel_time), provider = VALUES(provider), external_id = VALUES(external_id)`,
+      [
+        sub.organizationId, sub.planId, sub.status, sub.periodStartTime ?? null,
+        sub.periodEndTime ?? null, sub.trialEndTime ?? null, sub.cancelTime ?? null,
+        sub.provider, sub.externalId ?? null,
+      ],
     );
-    const [rows] = await this.db().query<any[]>('SELECT * FROM subscriptions WHERE user_id = ?', [sub.userId]);
+    const [rows] = await this.db().query<any[]>('SELECT * FROM subscriptions WHERE organization_id = ?', [sub.organizationId]);
     if (!rows[0]) throw new Error('subscription upsert failed');
     return mapSub(rows[0]);
   }
@@ -56,72 +58,49 @@ export class MysqlSubscriptionRepo implements ISubscriptionRepo {
   }
 
   /**
-   * 单用户到期降级。
+   * 单组织到期降级：status 可降级且（period_end_time 到期 或 trialing 的 trial_end_time 到期）→ status=expired。
    *
-   * `ensureActive` 原先在这里调 `downgradeExpired(now)` —— 一条
-   * `UPDATE subscriptions JOIN users` 的**全表**语句。而 ensureActive 挂在
-   * `/api/me` 上，每个客户端启动、每次刷新面板都会走一次：一个用户的订阅到期，
-   * 就让所有在线用户各自触发一次全表 JOIN UPDATE，并发下互相锁等待。
-   *
-   * 比较符与 downgradeExpired 统一为 `<=`。此前 service 判 `periodEndTime <= now`
-   * 而 SQL 用 `< ?`：periodEndTime 恰好等于 now 时 SQL 一行都不匹配，
-   * 旧代码却仍单独执行 `updatePlan(userId, 'free')` —— 留下
-   * user.plan_code=free 但 subscription.status=active 的半套状态，
-   * 此后每次 /api/me 都重新触发一次全表 UPDATE。
-   *
-   * 多表 UPDATE 的 affectedRows 是两张表改动行数之和；plan_code 已是 free 时
-   * 只计 1（那一行没变化）。所以判据是 `> 0` 而不是 `=== 2`。
+   * `<=` 而非 `<`：周期/试用结束时刻到达即结束。service 判据与这两条 SQL 统一到 `<=`。
+   * trialing 必须能按 trial_end_time 到期，否则建 team 组织即永久免费 team（付费门禁旁路）。
    */
-  async expireOne(userId: number, now: Date): Promise<boolean> {
+  async expireOne(organizationId: number, now: Date): Promise<boolean> {
     const [result] = await this.db().query<any>(
-      `UPDATE subscriptions s
-       JOIN users u ON u.id = s.user_id
-       SET s.status = 'expired', u.plan_code = 'free'
-       WHERE s.user_id = ?
-         AND s.status IN (${EXPIRABLE_PLACEHOLDERS})
-         AND s.period_end_time <= ?`,
-      [userId, ...EXPIRABLE_STATUSES, now],
+      `UPDATE subscriptions
+           SET status = 'expired'
+         WHERE organization_id = ?
+           AND status IN (${EXPIRABLE_PLACEHOLDERS})
+           AND (
+             (period_end_time IS NOT NULL AND period_end_time <= ?)
+             OR (status = 'trialing' AND trial_end_time IS NOT NULL AND trial_end_time <= ?)
+           )`,
+      [organizationId, ...EXPIRABLE_STATUSES, now, now],
     );
     return (result?.affectedRows ?? 0) > 0;
   }
 
-  /**
-   * 全表到期降级（定时任务 / 启动时），返回**降级的订阅行数**。
-   *
-   * 拆成两条单表 UPDATE 而不是一条 JOIN UPDATE，就为了返回值可信：
-   * 多表 UPDATE 的 affectedRows 是各表改动行数之和，plan_code 恰好已是 free
-   * 的用户又只计 1 —— 于是「降级了几个人」这个数字既不是 N 也不是 2N，
-   * 运维照着它排查会被直接带偏。单表 UPDATE 的 affectedRows 就是行数。
-   *
-   * 顺序不能反：先改 users（JOIN 条件依赖 subscriptions 仍处于可降级状态），
-   * 再把 subscriptions 置 expired。事务保证两张表不会只改一半。
-   */
+  /** 全表到期降级（定时任务 / 启动时），返回降级行数。单条单表 UPDATE 的 affectedRows 即行数 */
   async downgradeExpired(now: Date): Promise<number> {
-    return withTransaction(this.db(), async (tx) => {
-      await tx.query(
-        `UPDATE users u
-           JOIN subscriptions s ON s.user_id = u.id
-            SET u.plan_code = 'free'
-          WHERE s.status IN (${EXPIRABLE_PLACEHOLDERS}) AND s.period_end_time <= ?`,
-        [...EXPIRABLE_STATUSES, now],
-      );
-      const [result] = await tx.query<any>(
-        `UPDATE subscriptions SET status = 'expired'
-          WHERE status IN (${EXPIRABLE_PLACEHOLDERS}) AND period_end_time <= ?`,
-        [...EXPIRABLE_STATUSES, now],
-      );
-      return result?.affectedRows ?? 0;
-    });
+    const [result] = await this.db().query<any>(
+      `UPDATE subscriptions SET status = 'expired'
+        WHERE status IN (${EXPIRABLE_PLACEHOLDERS})
+          AND (
+            (period_end_time IS NOT NULL AND period_end_time <= ?)
+            OR (status = 'trialing' AND trial_end_time IS NOT NULL AND trial_end_time <= ?)
+          )`,
+      [...EXPIRABLE_STATUSES, now, now],
+    );
+    return result?.affectedRows ?? 0;
   }
 }
 
 function mapSub(r: any): Subscription {
   return {
     id: r.id,
-    userId: r.user_id,
-    planCode: r.plan_code as PlanCode,
+    organizationId: r.organization_id,
+    planId: r.plan_id,
     status: r.status as SubStatus,
-    periodEndTime: new Date(r.period_end_time),
+    periodStartTime: r.period_start_time ? new Date(r.period_start_time) : undefined,
+    periodEndTime: r.period_end_time ? new Date(r.period_end_time) : undefined,
     trialEndTime: r.trial_end_time ? new Date(r.trial_end_time) : undefined,
     cancelTime: r.cancel_time ? new Date(r.cancel_time) : undefined,
     provider: r.provider as PaymentProvider,

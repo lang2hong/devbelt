@@ -2,18 +2,25 @@ import { describe, it, expect } from 'vitest';
 import { AuthService } from '../../src/service/authService.js';
 import { TokenService, type JwtPort } from '../../src/service/tokenService.js';
 import { hashPassword } from '../../src/service/password.js';
+import { PlanPolicy } from '../../src/policy/planPolicy.js';
 import {
   InvalidCredentialsError,
   ProFeatureRequiredError,
   TokenReuseError,
   ValidationError,
 } from '../../src/domain/errors.js';
+import type { Plan } from '../../src/domain/entities.js';
+import type { PlanCode } from '../../src/domain/enums.js';
 import {
   FakeUserRepo,
   FakePlanRepo,
   FakeSubscriptionRepo,
   FakeRefreshTokenRepo,
   FakeDeviceRepo,
+  FakeOrganizationRepo,
+  FakeMembershipRepo,
+  FakeSeatRepo,
+  FakeRegistrationRepo,
   makePlan,
 } from '../helpers/fakeRepos.js';
 
@@ -31,36 +38,61 @@ class FakeJwt implements JwtPort {
 
 function setup(planOver: Parameters<typeof makePlan>[1] = {}) {
   const userRepo = new FakeUserRepo();
-  const planRepo = new FakePlanRepo([makePlan('free', planOver), makePlan('pro', { maxDevices: 0 })]);
+  const planRepo = new FakePlanRepo([makePlan('free', planOver), makePlan('pro', { perSeatMaxDevices: 0 })]);
   const subRepo = new FakeSubscriptionRepo();
   const rtRepo = new FakeRefreshTokenRepo();
   const deviceRepo = new FakeDeviceRepo();
+  const orgRepo = new FakeOrganizationRepo();
+  const membershipRepo = new FakeMembershipRepo();
+  const seatRepo = new FakeSeatRepo();
+  const registrationRepo = new FakeRegistrationRepo({
+    users: userRepo, orgs: orgRepo, memberships: membershipRepo, subs: subRepo, seats: seatRepo, plans: planRepo,
+  });
+  const planPolicy = new PlanPolicy(async (userId: number): Promise<Plan[]> => {
+    const memberships = (await membershipRepo.listByUser(userId)).filter((m) => m.status === 'active');
+    const subs = await subRepo.findByOrganizationIds(memberships.map((m) => m.organizationId));
+    const subByOrg = new Map(subs.map((s) => [s.organizationId, s]));
+    const plans: Plan[] = [];
+    for (const m of memberships) {
+      const sub = subByOrg.get(m.organizationId);
+      if (!sub || sub.status === 'expired') continue;
+      const plan = await planRepo.findById(sub.planId);
+      if (plan) plans.push(plan);
+    }
+    return plans;
+  });
   const jwt = new FakeJwt();
   const tokenService = new TokenService(jwt, '15m', '30d');
-  const auth = new AuthService(userRepo, subRepo, rtRepo, deviceRepo, tokenService);
-  return { auth, userRepo, planRepo, subRepo, rtRepo, deviceRepo, jwt, tokenService };
+  const auth = new AuthService(userRepo, subRepo, rtRepo, deviceRepo, registrationRepo, tokenService, planPolicy);
+  return { auth, userRepo, planRepo, subRepo, orgRepo, membershipRepo, rtRepo, deviceRepo, jwt, tokenService };
+}
+
+/** 把某用户 personal org 的订阅切到指定套餐（v2：改 org 订阅，而非 users.planCode） */
+async function grantPlan(
+  userId: number,
+  code: PlanCode,
+  deps: { subRepo: FakeSubscriptionRepo; orgRepo: FakeOrganizationRepo; membershipRepo: FakeMembershipRepo; planRepo: FakePlanRepo },
+): Promise<void> {
+  const ms = await deps.membershipRepo.listByUser(userId);
+  const org = await deps.orgRepo.findById(ms[0].organizationId);
+  const plan = await deps.planRepo.findByCode(code);
+  await deps.subRepo.upsert({ organizationId: org!.id, planId: plan!.id, status: 'active', provider: 'manual' });
 }
 
 describe('AuthService.register', () => {
-  it('creates a free user with a 14-day trial subscription and both tokens', async () => {
-    const { auth, userRepo, subRepo } = setup();
-    const before = Date.now();
+  it('creates a user + personal org + free subscription + seat, and both tokens', async () => {
+    const { auth, userRepo, subRepo, orgRepo } = setup();
     const res = await auth.register('a@example.com', 'password123', { deviceName: 'laptop' });
 
     expect(res.accessToken).toContain('"role":"user"');
-    expect(res.accessToken).toContain('"plan":"free"');
     expect(res.refreshToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(res.user.email).toBe('a@example.com');
-    expect(res.user.planCode).toBe('free');
-    expect(res.subscription?.status).toBe('trialing');
-
-    const trialDays = (res.subscription!.periodEndTime.getTime() - before) / 86400000;
-    expect(trialDays).toBeGreaterThan(13.9);
-    expect(trialDays).toBeLessThan(14.1);
+    expect(res.subscription?.status).toBe('active');
 
     const stored = await userRepo.findByEmail('a@example.com');
     expect(stored?.lastLoginTime).toBeInstanceOf(Date);
     expect(subRepo.subs.size).toBe(1);
+    expect(orgRepo.orgs.size).toBe(1); // personal org 创建
   });
 
   it('never leaks passwordHash in the response', async () => {
@@ -108,7 +140,7 @@ describe('AuthService.login', () => {
     const { auth } = setup();
     await auth.register('a@example.com', 'password123');
     const res = await auth.login('a@example.com', 'password123', { ip: '10.0.0.1' });
-    expect(res.subscription?.status).toBe('trialing');
+    expect(res.subscription).toBeUndefined(); // v2：订阅按 org，login 不返回 subscription
     expect(res.user.email).toBe('a@example.com');
     expect('passwordHash' in res.user).toBe(false);
   });
@@ -137,21 +169,11 @@ describe('AuthService.login', () => {
     );
   });
 
-/**
-   * legacy sha256 分支已删除。
-   *
-   * 旧格式是 `sha256(JWT_SECRET + password)` —— 把签名密钥当密码盐，导致
-   * 「轮换 JWT_SECRET」这个安全操作会让尚未登录过的用户永久无法登录。
-   * 生产库确认 legacy 用户为 0，因此删除分支而不是引入配置项维持耦合。
-   *
-   * 原来这里有三条用例断言 legacy 哈希可登录并被就地升级 —— 现在断言相反的
-   * 行为：弱哈希一律拒绝，这类账号的出路是密码重置。
-   */
   it('拒绝 legacy sha256 哈希（不再接受弱哈希）', async () => {
     const { auth, userRepo } = setup();
     const { createHash } = await import('crypto');
     const legacy = createHash('sha256').update('any-saltlegacy-pass').digest('hex');
-    await userRepo.create('legacy@example.com', legacy, 'user', 'free');
+    await userRepo.create('legacy@example.com', legacy, 'user');
 
     await expect(auth.login('legacy@example.com', 'legacy-pass')).rejects.toBeTruthy();
   });
@@ -160,7 +182,7 @@ describe('AuthService.login', () => {
     const { auth, userRepo } = setup();
     const { createHash } = await import('crypto');
     const legacy = createHash('sha256').update('any-saltlegacy-pass').digest('hex');
-    const created = await userRepo.create('up@example.com', legacy, 'user', 'free');
+    const created = await userRepo.create('up@example.com', legacy, 'user');
 
     await expect(auth.login('up@example.com', 'legacy-pass')).rejects.toBeTruthy();
     expect((await userRepo.findById(created.id))!.passwordHash).toBe(legacy);
@@ -179,7 +201,7 @@ describe('AuthService.login', () => {
 
 describe('AuthService.device identity', () => {
   it('同一设备重登不增加设备数（顶掉旧会话，不触发设备上限）', async () => {
-    const { auth, rtRepo, deviceRepo } = setup({ maxDevices: 1 });
+    const { auth, rtRepo, deviceRepo } = setup({ perSeatMaxDevices: 1 });
     const device = { deviceId: 'machine-1', deviceName: 'laptop', os: 'linux' };
     const reg = await auth.register('a@example.com', 'password123', device);
     await expect(auth.login('a@example.com', 'password123', device)).resolves.toBeTruthy();
@@ -200,7 +222,7 @@ describe('AuthService.device identity', () => {
   });
 
   it('退出后重新登录仍是同一设备', async () => {
-    const { auth, rtRepo, deviceRepo } = setup({ maxDevices: 1 });
+    const { auth, rtRepo, deviceRepo } = setup({ perSeatMaxDevices: 1 });
     const device = { deviceId: 'machine-1', deviceName: 'laptop' };
     const reg = await auth.register('a@example.com', 'password123', device);
     const regSid = [...rtRepo.tokens.values()].find((t) => !t.revokedTime)!.id;
@@ -248,7 +270,7 @@ describe('AuthService.refresh', () => {
 
   it('rejects an expired refresh token without revoking siblings', async () => {
     const { auth, userRepo, rtRepo, tokenService } = setup();
-    const user = await userRepo.create('a@example.com', hashPassword('password123'), 'user', 'free');
+    const user = await userRepo.create('a@example.com', hashPassword('password123'), 'user');
     const expired = 'expired-plaintext-token';
     await rtRepo.create({
       userId: user.id,
@@ -281,14 +303,6 @@ describe('AuthService session management', () => {
     await expect(auth.refresh(b.refreshToken)).resolves.toBeTruthy();
   });
 
-  /**
-   * 这条原来断言的是「未知 token 登出 = 什么都不做」，把一个缺陷钉成了期望值：
-   * 登出的语义底线是当前会话必须死掉，而当前会话由 access token 里的 sid 标识，
-   * 与客户端手上那个 refresh token 是否仍然有效无关。
-   *
-   * 现在断言正确行为：token 未知不影响 sid 对应会话被撤销；只有 sid 也不存在时
-   * 才真的是 no-op。
-   */
   it('未知 token 不阻止当前会话（sid）被撤销', async () => {
     const { auth, rtRepo } = setup();
     const reg = await auth.register('a@example.com', 'password123');
@@ -314,11 +328,11 @@ describe('AuthService session management', () => {
   });
 
   it('pro 用户可撤销自己的设备', async () => {
-    const { auth, userRepo, deviceRepo } = setup();
+    const { auth, deviceRepo, subRepo, orgRepo, membershipRepo, planRepo } = setup();
     const reg = await auth.register('a@example.com', 'password123');
     await deviceRepo.upsert({ userId: reg.user.id, deviceId: 'dev-1' } as any);
     await deviceRepo.bind(reg.user.id, 'dev-1');
-    await userRepo.updatePlan(reg.user.id, 'pro');
+    await grantPlan(reg.user.id, 'pro', { subRepo, orgRepo, membershipRepo, planRepo });
     await auth.revokeDevice(reg.user.id, 'dev-1');
     expect(await deviceRepo.isBound(reg.user.id, 'dev-1')).toBe(false);
   });

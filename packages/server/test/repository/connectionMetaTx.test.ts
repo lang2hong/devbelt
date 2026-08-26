@@ -3,14 +3,13 @@ import { MysqlConnectionMetaRepo } from '../../src/repository/mysql/connectionMe
 import type { ConnectionMetaInput } from '../../src/repository/interfaces.js';
 
 /**
- * connection_meta 的「全量替换」由两半组成：上报行 upsert + 未上报行置墓碑。
- * 两半之间断开会留下**半套数据**：新连接已入库、被删连接的墓碑没打上，
- * 库内活跃数偏高，/api/me 报的用量与真实情况对不上。
- * 分片写入（>200 条）更是把窗口拉长到多条语句。所以必须包在一个事务里。
+ * connection_meta 的「全量替换」由两半组成：上报行 upsert + 未上报行置墓碑（delete_time）。
+ * 两半之间断开会留下**半套数据**。分片写入（>200 条）更是把窗口拉长到多条语句。
+ * 所以必须包在一个事务里。
  */
 class StubDb {
   readonly database = 'stub';
-  /** conn_uuid → deleted */
+  /** conn_id → 0(有效) / 1(已软删) */
   rows = new Map<string, number>();
   log: string[] = [];
   failOn?: string;
@@ -29,11 +28,11 @@ class StubDb {
 
     if (sql.includes('INSERT INTO connection_meta')) {
       this.log.push('UPSERT');
-      // params 每 9 个一组：userId, connUuid, type, name, groupName, enabled, deleted, createdAt, updatedAt
-      for (let i = 0; i < params.length; i += 9) {
-        this.rows.set(params[i + 1], params[i + 6]);
+      // params 每 8 个一组：userId, connId, type, name, groupName, enabled, clientCreatedAt, clientUpdatedAt
+      for (let i = 0; i < params.length; i += 8) {
+        this.rows.set(params[i + 1], 0);
       }
-      return [{ affectedRows: params.length / 9 }, []];
+      return [{ affectedRows: params.length / 8 }, []];
     }
 
     if (sql.includes('UPDATE connection_meta')) {
@@ -76,8 +75,8 @@ class StubDb {
   }
 }
 
-function meta(uuid: string, deleted = false): ConnectionMetaInput {
-  return { connUuid: uuid, type: 'mysql', name: uuid, enabled: true, deleted };
+function meta(id: string): ConnectionMetaInput {
+  return { connId: id, type: 'mysql', name: id, enabled: true };
 }
 
 describe('MysqlConnectionMetaRepo.replaceAll 事务性', () => {
@@ -97,7 +96,6 @@ describe('MysqlConnectionMetaRepo.replaceAll 事务性', () => {
     const repo = new MysqlConnectionMetaRepo(() => db as any);
     db.failOn = 'NOT IN';
     await expect(repo.replaceAll(1, [meta('a')])).rejects.toThrow();
-    // 'a' 不能留在库里，'old' 也不能被误置墓碑
     expect(db.rows.has('a')).toBe(false);
     expect(db.rows.get('old')).toBe(0);
     expect(db.rollbacks).toBe(1);

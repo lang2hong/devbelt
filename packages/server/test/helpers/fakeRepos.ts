@@ -6,19 +6,36 @@ import type {
   ISyncRepo,
   IDeviceRepo,
   IConnectionMetaRepo,
-  ISyncEventRepo,
-  IUsageEventRepo,
-  ITrafficRepo,
-  IRateLimitRepo,
+  
+  
+  
+  
   IAdminAuditRepo,
   AdminAuditInput,
   IWebhookEventRepo,
-  AllowlistRow,
-  RateLimitRuleRow,
-  TrafficBlockedRow,
-  TrafficStatRow,
+  
+  
+  
+  
   ConnectionMetaInput,
   PlanEditableFields,
+  IOrganizationRepo,
+  IMembershipRepo,
+  ISeatRepo,
+  IOrderRepo,
+  IOrganizationResourceRepo,
+  IOrganizationAuditRepo,
+  OrganizationInput,
+  OrganizationEditableFields,
+  MembershipInput,
+  SeatInput,
+  OrderInput,
+  OrganizationResourceInput,
+  OrganizationResourceEditableFields,
+  OrganizationAuditInput,
+  IRegistrationRepo,
+  RegistrationAccountInput,
+  RegistrationResult,
 } from '../../src/repository/interfaces.js';
 import type {
   AdminAuditLog,
@@ -31,33 +48,56 @@ import type {
   SyncVersionSummary,
   SessionInfo,
   Device,
-  DeviceEvent,
+
   ConnectionMeta,
-  SyncEvent,
-  UsageEvent,
+
+
+  Organization,
+  Membership,
+  Seat,
+  Order,
+  OrganizationResource,
+  OrganizationResourcePermission,
+  OrganizationAuditLog,
 } from '../../src/domain/entities.js';
 import type { PlanCode, Role, SubStatus, SectionType, UserStatus } from '../../src/domain/enums.js';
+import type {
+  MemberRole,
+  MemberStatus,
+  ResourceType,
+  ResourcePermission,
+} from '../../src/domain/enums.js';
 import { EXPIRABLE_STATUSES } from '../../src/domain/enums.js';
 import { ConflictError, VersionNotFoundError } from '../../src/domain/errors.js';
 
-/**
- * 内存假仓储：service/policy 层单测用。
- * 只保证被测服务依赖的语义（乐观锁、撤销、配额计数），不追求 SQL 实现的全部细节。
- */
 
+
+/**
+ * 内存审计仓储。
+ *
+ * `failNext` 用来测「留痕写不进去时管理操作必须一起失败」—— 这条不变量
+ * 没法用真实故障触发，只能注入。
+ */
 export function makePlan(code: PlanCode, over: Partial<Plan> = {}): Plan {
   const now = new Date();
   return {
+    id: 0,
     code,
     name: code,
     priceMonth: 0,
     priceYear: 0,
-    maxDevices: 0,
-    maxConnections: 0,
-    maxOpenConnections: 0,
-    syncQuotaBytes: 0,
-    syncVersionRetention: 0,
-    historyRetentionCount: 0,
+    seatPriceMonth: undefined,
+    seatPriceYear: undefined,
+    includedSeats: 1,
+    perSeatMaxDevices: 0,
+    perUserMaxPrivateConnections: 0,
+    perUserMaxOpenConnections: 0,
+    perUserPrivateSyncQuotaBytes: 0,
+    perUserSyncVersionRetention: 0,
+    perUserHistoryRetentionCount: 0,
+    orgMaxSharedConnections: 0,
+    orgSharedSyncQuotaBytes: 0,
+    orgMaxMembers: 0,
     features: 1,
     createTime: now,
     updateTime: now,
@@ -69,198 +109,83 @@ export class FakeUserRepo implements IUserRepo {
   readonly users = new Map<number, User>();
   private seq = 0;
 
-  async findById(id: number): Promise<User | undefined> {
-    return this.users.get(id);
-  }
-
+  async findById(id: number): Promise<User | undefined> { return this.users.get(id); }
   async findByEmail(email: string): Promise<User | undefined> {
     for (const u of this.users.values()) if (u.email === email) return u;
     return undefined;
   }
-
-  async create(email: string, passwordHash: string, role: Role, planCode: PlanCode): Promise<User> {
+  async create(email: string, passwordHash: string, role: Role, displayName?: string): Promise<User> {
     const now = new Date();
-    const user: User = {
-      id: ++this.seq,
-      email,
-      passwordHash,
-      role,
-      status: 'active',
-      planCode,
-      createTime: now,
-      updateTime: now,
-    };
+    const user: User = { id: ++this.seq, email, passwordHash, displayName, role, status: 'active', createTime: now, updateTime: now };
     this.users.set(user.id, user);
     return user;
   }
-
-  async updateLastLogin(id: number, time: Date): Promise<void> {
-    const u = this.users.get(id);
-    if (u) u.lastLoginTime = time;
-  }
-
-  async updatePlan(id: number, planCode: PlanCode): Promise<void> {
-    const u = this.users.get(id);
-    if (u) u.planCode = planCode;
-  }
-
-  async updateRole(id: number, role: Role): Promise<void> {
-    const u = this.users.get(id);
-    if (u) u.role = role;
-  }
-
-  async updatePassword(id: number, passwordHash: string): Promise<void> {
-    const u = this.users.get(id);
-    if (u) u.passwordHash = passwordHash;
-  }
-
-  async updateStatus(id: number, status: UserStatus): Promise<void> {
-    const u = this.users.get(id);
-    if (u) u.status = status;
-  }
-
-  async listAll(limit: number, offset: number): Promise<User[]> {
-    return [...this.users.values()].slice(offset, offset + limit);
-  }
-
-  async count(): Promise<number> {
-    return this.users.size;
-  }
-
-  /** 只数 active 的 admin：被禁用的 admin 登不进来，不能算作「还有人能管」 */
-  async countAdmins(): Promise<number> {
-    let n = 0;
-    for (const u of this.users.values()) if (u.role === 'admin' && u.status === 'active') n += 1;
-    return n;
-  }
+  async updateLastLogin(id: number, time: Date): Promise<void> { const u = this.users.get(id); if (u) u.lastLoginTime = time; }
+  async updateRole(id: number, role: Role): Promise<void> { const u = this.users.get(id); if (u) u.role = role; }
+  async updatePassword(id: number, passwordHash: string): Promise<void> { const u = this.users.get(id); if (u) u.passwordHash = passwordHash; }
+  async updateStatus(id: number, status: UserStatus): Promise<void> { const u = this.users.get(id); if (u) u.status = status; }
+  async listAll(limit: number, offset: number): Promise<User[]> { return [...this.users.values()].slice(offset, offset + limit); }
+  async count(): Promise<number> { return this.users.size; }
+  async countAdmins(): Promise<number> { let n = 0; for (const u of this.users.values()) if (u.role === 'admin' && u.status === 'active') n += 1; return n; }
 }
 
 export class FakePlanRepo implements IPlanRepo {
-  readonly plans = new Map<PlanCode, Plan>();
-
-  constructor(plans: Plan[] = []) {
-    for (const p of plans) this.plans.set(p.code, p);
-  }
-
-  async findByCode(code: PlanCode): Promise<Plan | undefined> {
-    return this.plans.get(code);
-  }
-
-  async listAll(): Promise<Plan[]> {
-    return [...this.plans.values()];
-  }
-
-  async seed(plans: Array<Omit<Plan, 'createTime' | 'updateTime'>>): Promise<void> {
-    const now = new Date();
-    for (const p of plans) this.plans.set(p.code, { ...p, createTime: now, updateTime: now });
-  }
-
-  async update(code: PlanCode, fields: PlanEditableFields): Promise<void> {
-    const p = this.plans.get(code);
-    if (p) Object.assign(p, fields);
-  }
+  readonly plans = new Map<number, Plan>();
+  private seq = 0;
+  constructor(plans: Plan[] = []) { for (const p of plans) { const id = ++this.seq; this.plans.set(id, { ...p, id }); } }
+  async findById(id: number): Promise<Plan | undefined> { return this.plans.get(id); }
+  async findByCode(code: PlanCode): Promise<Plan | undefined> { for (const p of this.plans.values()) if (p.code === code) return p; return undefined; }
+  async listAll(): Promise<Plan[]> { return [...this.plans.values()]; }
+  async seed(plans: Array<Omit<Plan, 'createTime' | 'updateTime'>>): Promise<void> { const now = new Date(); for (const p of plans) { const id = ++this.seq; this.plans.set(id, { ...p, id, createTime: now, updateTime: now }); } }
+  async update(code: PlanCode, fields: PlanEditableFields): Promise<void> { const p = await this.findByCode(code); if (p) Object.assign(p, fields); }
 }
 
 export class FakeSubscriptionRepo implements ISubscriptionRepo {
   readonly subs = new Map<number, Subscription>();
   private seq = 0;
-  /** downgradeExpired 的调用次数（断言 ensureActive 不再触发全表批量降级） */
   downgradeCalls = 0;
-  /** expireOne 的调用次数 */
   expireOneCalls = 0;
-
-  /**
-   * 真实现的 expireOne / downgradeExpired 都是一条语句改 subscriptions + users
-   * 两张表。fake 拿不到 users 就只能改自己那半边 —— 此前它改的是
-   * `subscriptions.plan_code`，一个真实现根本不碰的列，于是「用户有没有被降到
-   * free」这条核心不变量在单测里从未被验证过。链上 userRepo 才能忠实复刻。
-   */
-  private users?: FakeUserRepo;
-
-  linkUsers(userRepo: FakeUserRepo): void {
-    this.users = userRepo;
-  }
-
-  /** 置为 true 让下一次 upsert 抛错，用来测「处理失败时不记幂等」 */
   failNextUpsert = false;
 
-  /** findByUserId 调用次数（断言 listUsers 不再走 N+1） */
-  findByUserIdCalls = 0;
-  /** findByUserIds 调用次数 */
-  findByUserIdsCalls = 0;
-
-  async findByUserId(userId: number): Promise<Subscription | undefined> {
-    this.findByUserIdCalls++;
-    for (const s of this.subs.values()) if (s.userId === userId) return s;
+  async findByOrganizationId(organizationId: number): Promise<Subscription | undefined> {
+    for (const s of this.subs.values()) if (s.organizationId === organizationId) return s;
     return undefined;
   }
-
-  async findByUserIds(userIds: number[]): Promise<Subscription[]> {
-    this.findByUserIdsCalls++;
-    // 真实现空数组时提前返回（IN () 是语法错误），这里复刻同样的语义
-    if (userIds.length === 0) return [];
-    const wanted = new Set(userIds);
-    return [...this.subs.values()].filter((s) => wanted.has(s.userId));
+  async findByOrganizationIds(organizationIds: number[]): Promise<Subscription[]> {
+    if (organizationIds.length === 0) return [];
+    const wanted = new Set(organizationIds);
+    return [...this.subs.values()].filter((s) => wanted.has(s.organizationId));
   }
-
-  async upsert(
-    sub: Omit<Subscription, 'id' | 'createTime' | 'updateTime'> & { id?: number },
-  ): Promise<Subscription> {
-    if (this.failNextUpsert) {
-      this.failNextUpsert = false;
-      throw new Error('simulated upsert failure');
-    }
+  async upsert(sub: Omit<Subscription, 'id' | 'createTime' | 'updateTime'> & { id?: number }): Promise<Subscription> {
+    if (this.failNextUpsert) { this.failNextUpsert = false; throw new Error('simulated upsert failure'); }
     const now = new Date();
-    const existing = sub.id !== undefined
-      ? this.subs.get(sub.id)
-      : await this.findByUserId(sub.userId);
-    if (existing) {
-      const merged: Subscription = { ...existing, ...sub, id: existing.id, updateTime: now };
-      this.subs.set(existing.id, merged);
-      return merged;
-    }
+    const existing = sub.id !== undefined ? this.subs.get(sub.id) : await this.findByOrganizationId(sub.organizationId);
+    if (existing) { const merged: Subscription = { ...existing, ...sub, id: existing.id, updateTime: now }; this.subs.set(existing.id, merged); return merged; }
     const created: Subscription = { ...sub, id: ++this.seq, createTime: now, updateTime: now };
     this.subs.set(created.id, created);
     return created;
   }
-
-  async listByStatus(status: SubStatus): Promise<Subscription[]> {
-    return [...this.subs.values()].filter((s) => s.status === status);
-  }
-
-  async listAll(): Promise<Subscription[]> {
-    return [...this.subs.values()];
-  }
-
-  /**
-   * 复刻真实现：只改这一个用户，status → expired 且 users.plan_code → free。
-   * 可降级状态取共享常量 —— fake 里硬编码 'active' 会把 trialing/canceled
-   * 的处理遮住（真实现改了，fake 没改，测试照样绿）。
-   */
-  async expireOne(userId: number, now: Date): Promise<boolean> {
+  async listByStatus(status: SubStatus): Promise<Subscription[]> { return [...this.subs.values()].filter((s) => s.status === status); }
+  async listAll(): Promise<Subscription[]> { return [...this.subs.values()]; }
+  async expireOne(organizationId: number, now: Date): Promise<boolean> {
     this.expireOneCalls++;
     for (const s of this.subs.values()) {
-      if (s.userId === userId && EXPIRABLE_STATUSES.includes(s.status) && s.periodEndTime <= now) {
-        s.status = 'expired';
-        await this.users?.updatePlan(userId, 'free');
-        return true;
+      if (s.organizationId === organizationId && EXPIRABLE_STATUSES.includes(s.status)) {
+        const expired = (s.periodEndTime != null && s.periodEndTime <= now)
+          || (s.status === 'trialing' && s.trialEndTime != null && s.trialEndTime <= now);
+        if (expired) { s.status = 'expired'; return true; }
       }
     }
     return false;
   }
-
-  /**
-   * 复刻真实现：改 users.plan_code（不是 subscriptions.plan_code），
-   * 返回**订阅行数**。边界与 expireOne 统一用 `<=`。
-   */
   async downgradeExpired(now: Date): Promise<number> {
     this.downgradeCalls++;
     let n = 0;
     for (const s of this.subs.values()) {
-      if (EXPIRABLE_STATUSES.includes(s.status) && s.periodEndTime <= now) {
-        s.status = 'expired';
-        await this.users?.updatePlan(s.userId, 'free');
-        n++;
+      if (EXPIRABLE_STATUSES.includes(s.status)) {
+        const expired = (s.periodEndTime != null && s.periodEndTime <= now)
+          || (s.status === 'trialing' && s.trialEndTime != null && s.trialEndTime <= now);
+        if (expired) { s.status = 'expired'; n++; }
       }
     }
     return n;
@@ -521,9 +446,7 @@ export class FakeSyncRepo implements ISyncRepo {
 
 export class FakeDeviceRepo implements IDeviceRepo {
   readonly devices = new Map<string, Device>();
-  readonly events = new Map<string, DeviceEvent[]>();
   private seq = 0;
-  private eventSeq = 0;
 
   async upsert(device: Omit<Device, 'id' | 'createTime' | 'updateTime'>): Promise<Device> {
     const k = `${device.userId}:${device.deviceId}`;
@@ -536,31 +459,11 @@ export class FakeDeviceRepo implements IDeviceRepo {
       result = { ...device, id: ++this.seq, createTime: now, updateTime: now, revokedTime: new Date() };
     }
     this.devices.set(k, result);
-
-    // 留痕（简化）：首次 → register；app 版本变 → app_upgrade；否则 os 版本变 → os_change
-    let event: DeviceEvent['event'] | undefined;
-    if (!existing) event = 'register';
-    else if (result.appVersion && result.appVersion !== existing.appVersion) event = 'app_upgrade';
-    else if (result.osVersion && result.osVersion !== existing.osVersion) event = 'os_change';
-    if (event) {
-      const list = this.events.get(k) ?? [];
-      list.push({
-        id: ++this.eventSeq, userId: result.userId, deviceId: result.deviceId, event,
-        vsMachineId: result.vsMachineId, appName: result.appName, appVersion: result.appVersion,
-        os: result.os, osVersion: result.osVersion, arch: result.arch, createTime: now,
-      });
-      this.events.set(k, list);
-    }
-
     return result;
   }
 
   async listByUser(userId: number): Promise<Device[]> {
     return [...this.devices.values()].filter((d) => d.userId === userId);
-  }
-
-  async listEvents(userId: number, deviceId: string): Promise<DeviceEvent[]> {
-    return this.events.get(`${userId}:${deviceId}`) ?? [];
   }
 
   async bind(userId: number, deviceId: string): Promise<void> {
@@ -587,28 +490,20 @@ export class FakeConnectionMetaRepo implements IConnectionMetaRepo {
   readonly metas = new Map<string, ConnectionMeta>();
   private seq = 0;
 
-  /**
-   * 复刻真实现的**全量替换**语义：upsert 入参 + 把未上报的现存行置墓碑。
-   *
-   * 原来这里和真实现一样只做 upsert（fake 忠实复刻了缺陷），所以
-   * 「replaceAll 不删除」这个绕过路径在测试里结构性不可见。返回值同样改为
-   * 取库内真值而非入参推算。
-   */
   async replaceAll(userId: number, metas: ConnectionMetaInput[]): Promise<number> {
     const now = new Date();
-    const seen = new Set(metas.map((m) => m.connUuid));
+    const seen = new Set(metas.map((m) => m.connId));
     for (const m of metas) {
-      const k = `${userId}:${m.connUuid}`;
+      const k = `${userId}:${m.connId}`;
       const existing = this.metas.get(k);
       this.metas.set(k, {
-        ...m, id: existing?.id ?? ++this.seq, userId,
+        ...m, id: existing?.id ?? ++this.seq, userId, deleteTime: undefined,
         createTime: existing?.createTime ?? now, updateTime: now,
       });
     }
-    // 本次未上报的行 → 墓碑
     for (const [k, m] of this.metas) {
-      if (m.userId === userId && !m.deleted && !seen.has(m.connUuid)) {
-        this.metas.set(k, { ...m, deleted: true, updateTime: now });
+      if (m.userId === userId && m.deleteTime == null && !seen.has(m.connId)) {
+        this.metas.set(k, { ...m, deleteTime: now, updateTime: now });
       }
     }
     return this.countActive(userId);
@@ -616,118 +511,15 @@ export class FakeConnectionMetaRepo implements IConnectionMetaRepo {
 
   async countActive(userId: number): Promise<number> {
     let n = 0;
-    for (const m of this.metas.values()) if (m.userId === userId && !m.deleted) n++;
+    for (const m of this.metas.values()) if (m.userId === userId && m.deleteTime == null) n++;
     return n;
   }
 
   async listByUser(userId: number): Promise<ConnectionMeta[]> {
-    return [...this.metas.values()].filter((m) => m.userId === userId);
+    return [...this.metas.values()].filter((m) => m.userId === userId && m.deleteTime == null);
   }
 }
 
-export class FakeSyncEventRepo implements ISyncEventRepo {
-  readonly events: SyncEvent[] = [];
-  private seq = 0;
-
-  async record(event: Omit<SyncEvent, 'id' | 'createTime'>): Promise<void> {
-    this.events.push({ ...event, id: ++this.seq, createTime: new Date() });
-  }
-
-  async listByUser(userId: number, limit = 100): Promise<SyncEvent[]> {
-    return this.events.filter((e) => e.userId === userId).slice(-limit).reverse();
-  }
-}
-
-export class FakeUsageEventRepo implements IUsageEventRepo {
-  readonly events: UsageEvent[] = [];
-  private seq = 0;
-
-  async record(userId: number, deviceId: string | undefined, kind: UsageEvent['kind'], count: number): Promise<void> {
-    this.events.push({ id: ++this.seq, userId, deviceId, kind, count, createTime: new Date() });
-  }
-
-  async listByUser(userId: number, limit = 200): Promise<UsageEvent[]> {
-    return this.events.filter((e) => e.userId === userId).slice(-limit).reverse();
-  }
-}
-
-/**
- * 流量仓储假实现。
- *
- * `upsertStats` 复刻真实现的 `count = count + VALUES(count)` 语义（累加而非
- * 覆盖）—— 采集器每分钟 flush 一次同一个小时桶，写成覆盖的话会丢掉前面
- * 几十次的计数，那是个很容易犯又很难看出来的错。
- */
-export class FakeTrafficRepo implements ITrafficRepo {
-  readonly stats = new Map<string, TrafficStatRow>();
-  readonly blocked: TrafficBlockedRow[] = [];
-  /** 置为 true 让写入抛错，用来测 flush 失败后的数据回滚 */
-  failWrites = false;
-
-  async upsertStats(rows: TrafficStatRow[]): Promise<void> {
-    if (this.failWrites) throw new Error('simulated stats write failure');
-    for (const r of rows) {
-      const k = `${r.bucketTime.getTime()}|${r.route}|${r.statusClass}`;
-      const existing = this.stats.get(k);
-      if (existing) existing.count += r.count;
-      else this.stats.set(k, { ...r });
-    }
-  }
-
-  async queryStats(from: Date, to: Date): Promise<TrafficStatRow[]> {
-    return [...this.stats.values()]
-      .filter((r) => r.bucketTime >= from && r.bucketTime <= to)
-      .sort((a, b) => a.bucketTime.getTime() - b.bucketTime.getTime());
-  }
-
-  async insertBlocked(rows: Array<Omit<TrafficBlockedRow, 'createTime'>>): Promise<void> {
-    if (this.failWrites) throw new Error('simulated blocked write failure');
-    for (const r of rows) this.blocked.push({ ...r, createTime: new Date() });
-  }
-
-  async queryBlocked(from: Date, to: Date, limit: number): Promise<TrafficBlockedRow[]> {
-    return this.blocked
-      .filter((r) => r.createTime >= from && r.createTime <= to)
-      .slice(-limit)
-      .reverse();
-  }
-}
-
-export class FakeRateLimitRepo implements IRateLimitRepo {
-  readonly rules = new Map<string, RateLimitRuleRow>();
-  readonly allowlist = new Map<string, AllowlistRow>();
-  /** 置为 true 让读取抛错，用来测「DB 挂了限流仍按默认值工作」 */
-  failReads = false;
-
-  async listRules(): Promise<RateLimitRuleRow[]> {
-    if (this.failReads) throw new Error('simulated rules read failure');
-    return [...this.rules.values()];
-  }
-
-  async upsertRule(rule: RateLimitRuleRow): Promise<void> {
-    this.rules.set(rule.bucket, { ...rule });
-  }
-
-  async listAllowlist(): Promise<AllowlistRow[]> {
-    if (this.failReads) throw new Error('simulated allowlist read failure');
-    return [...this.allowlist.values()];
-  }
-
-  async addAllowlist(ip: string, note?: string): Promise<void> {
-    this.allowlist.set(ip, { ip, note, createTime: new Date() });
-  }
-
-  async removeAllowlist(ip: string): Promise<void> {
-    this.allowlist.delete(ip);
-  }
-}
-
-/**
- * 内存审计仓储。
- *
- * `failNext` 用来测「留痕写不进去时管理操作必须一起失败」—— 这条不变量
- * 没法用真实故障触发，只能注入。
- */
 export class FakeAdminAuditRepo implements IAdminAuditRepo {
   readonly rows: AdminAuditLog[] = [];
   failNext = false;
@@ -773,4 +565,399 @@ export class FakeWebhookEventRepo implements IWebhookEventRepo {
 
 function key(userId: number, section: SectionType): string {
   return `${userId}:${section}`;
+}
+
+// ── v2：组织 / 成员 / 席位 / 订单 / 资源 / 审计 内存假仓储 ─────────
+//
+// S3a 纯增量，为 S3b 的 service 层单测备好落点。语义必须与 mysql 实现逐分支
+// 对齐（见文件顶部教训：fake 比真实现更宽或更严都会把缺陷盖住）：
+// - 活跃判定 = status='active' && deleteTime == null
+// - 软删除置 deleteTime；软删后不在 list/count 出现
+// - 权限 UPSERT：同 (resourceId, membershipId) 覆盖 permission
+
+export function makeOrganization(over: Partial<Organization> = {}): Organization {
+  const now = new Date();
+  return {
+    id: 0,
+    name: 'org',
+    type: 'personal',
+    ownerUserId: 1,
+    status: 'active',
+    createTime: now,
+    updateTime: now,
+    ...over,
+  };
+}
+
+export class FakeOrganizationRepo implements IOrganizationRepo {
+  readonly orgs = new Map<number, Organization>();
+  private seq = 0;
+
+  async findById(id: number): Promise<Organization | undefined> {
+    const o = this.orgs.get(id);
+    return o && o.deleteTime == null ? o : undefined;
+  }
+
+  async listByOwner(userId: number): Promise<Organization[]> {
+    return [...this.orgs.values()].filter((o) => o.ownerUserId === userId && o.deleteTime == null);
+  }
+
+  async create(input: OrganizationInput): Promise<Organization> {
+    const now = new Date();
+    const org: Organization = {
+      id: ++this.seq,
+      name: input.name,
+      type: input.type,
+      ownerUserId: input.ownerUserId,
+      status: 'active',
+      createTime: now,
+      updateTime: now,
+    };
+    this.orgs.set(org.id, org);
+    return org;
+  }
+
+  async update(id: number, fields: OrganizationEditableFields): Promise<void> {
+    const o = this.orgs.get(id);
+    if (o) {
+      o.name = fields.name;
+      o.status = fields.status;
+      o.updateTime = new Date();
+    }
+  }
+
+  async softDelete(id: number): Promise<void> {
+    const o = this.orgs.get(id);
+    if (o && o.deleteTime == null) o.deleteTime = new Date();
+  }
+
+  async listAll(limit: number, offset: number): Promise<Organization[]> {
+    return [...this.orgs.values()].filter((o) => o.deleteTime == null).slice(offset, offset + limit);
+  }
+
+  async count(): Promise<number> {
+    return [...this.orgs.values()].filter((o) => o.deleteTime == null).length;
+  }
+}
+
+export class FakeMembershipRepo implements IMembershipRepo {
+  readonly memberships = new Map<number, Membership>();
+  private seq = 0;
+
+  async findById(id: number): Promise<Membership | undefined> {
+    const m = this.memberships.get(id);
+    return m && m.deleteTime == null ? m : undefined;
+  }
+
+  async findByOrgAndUser(organizationId: number, userId: number): Promise<Membership | undefined> {
+    return [...this.memberships.values()].find(
+      (m) => m.organizationId === organizationId && m.userId === userId && m.deleteTime == null,
+    );
+  }
+
+  async listByOrganization(organizationId: number): Promise<Membership[]> {
+    return [...this.memberships.values()].filter(
+      (m) => m.organizationId === organizationId && m.deleteTime == null,
+    );
+  }
+
+  async listByUser(userId: number): Promise<Membership[]> {
+    return [...this.memberships.values()].filter((m) => m.userId === userId && m.deleteTime == null);
+  }
+
+  async create(input: MembershipInput): Promise<Membership> {
+    const now = new Date();
+    const m: Membership = {
+      id: ++this.seq,
+      organizationId: input.organizationId,
+      userId: input.userId,
+      role: input.role,
+      status: 'active',
+      createTime: now,
+      updateTime: now,
+    };
+    this.memberships.set(m.id, m);
+    return m;
+  }
+
+  async updateRole(id: number, role: MemberRole): Promise<void> {
+    const m = this.memberships.get(id);
+    if (m) {
+      m.role = role;
+      m.updateTime = new Date();
+    }
+  }
+
+  async updateStatus(id: number, status: MemberStatus): Promise<void> {
+    const m = this.memberships.get(id);
+    if (m) {
+      m.status = status;
+      m.updateTime = new Date();
+    }
+  }
+
+  async softDelete(id: number): Promise<void> {
+    const m = this.memberships.get(id);
+    if (m && m.deleteTime == null) m.deleteTime = new Date();
+  }
+
+  async countActiveByOrganization(organizationId: number): Promise<number> {
+    return [...this.memberships.values()].filter(
+      (m) => m.organizationId === organizationId && m.status === 'active' && m.deleteTime == null,
+    ).length;
+  }
+
+  async countActiveByUser(userId: number): Promise<number> {
+    return [...this.memberships.values()].filter(
+      (m) => m.userId === userId && m.status === 'active' && m.deleteTime == null,
+    ).length;
+  }
+}
+
+export class FakeSeatRepo implements ISeatRepo {
+  readonly seats = new Map<number, Seat>();
+  private seq = 0;
+
+  async findById(id: number): Promise<Seat | undefined> {
+    const s = this.seats.get(id);
+    return s && s.deleteTime == null ? s : undefined;
+  }
+
+  async listByOrganization(organizationId: number): Promise<Seat[]> {
+    return [...this.seats.values()].filter((s) => s.organizationId === organizationId && s.deleteTime == null);
+  }
+
+  async countActiveByOrganization(organizationId: number): Promise<number> {
+    return [...this.seats.values()].filter(
+      (s) => s.organizationId === organizationId && s.status === 'active' && s.deleteTime == null,
+    ).length;
+  }
+
+  async create(input: SeatInput): Promise<Seat> {
+    const now = new Date();
+    const seat: Seat = {
+      id: ++this.seq,
+      subscriptionId: input.subscriptionId,
+      organizationId: input.organizationId,
+      status: 'active',
+      createTime: now,
+      updateTime: now,
+    };
+    this.seats.set(seat.id, seat);
+    return seat;
+  }
+
+  async revoke(id: number): Promise<void> {
+    const s = this.seats.get(id);
+    if (s) {
+      s.status = 'revoked';
+      s.updateTime = new Date();
+    }
+  }
+}
+
+export class FakeOrderRepo implements IOrderRepo {
+  readonly orders = new Map<number, Order>();
+  private seq = 0;
+
+  async findById(id: number): Promise<Order | undefined> {
+    return this.orders.get(id);
+  }
+
+  async create(input: OrderInput): Promise<Order> {
+    const now = new Date();
+    const order: Order = {
+      id: ++this.seq,
+      organizationId: input.organizationId,
+      subscriptionId: input.subscriptionId,
+      planId: input.planId,
+      amount: input.amount,
+      currency: input.currency,
+      status: input.status,
+      provider: input.provider,
+      externalId: input.externalId,
+      seatDelta: input.seatDelta,
+      periodMonths: input.periodMonths,
+      createTime: now,
+      updateTime: now,
+    };
+    this.orders.set(order.id, order);
+    return order;
+  }
+
+  async listByOrganization(organizationId: number, limit: number, offset: number): Promise<Order[]> {
+    return [...this.orders.values()]
+      .filter((o) => o.organizationId === organizationId)
+      .sort((a, b) => b.id - a.id)
+      .slice(offset, offset + limit);
+  }
+
+  async countByOrganization(organizationId: number): Promise<number> {
+    return [...this.orders.values()].filter((o) => o.organizationId === organizationId).length;
+  }
+
+  async findByProviderExternal(provider: string, externalId: string): Promise<Order | undefined> {
+    return [...this.orders.values()].find((o) => o.provider === provider && o.externalId === externalId);
+  }
+}
+
+export class FakeOrganizationResourceRepo implements IOrganizationResourceRepo {
+  readonly resources = new Map<number, OrganizationResource>();
+  readonly permissions = new Map<number, OrganizationResourcePermission>();
+  private seq = 0;
+  private permSeq = 0;
+
+  async findById(id: number): Promise<OrganizationResource | undefined> {
+    const r = this.resources.get(id);
+    return r && r.deleteTime == null ? r : undefined;
+  }
+
+  async listByOrganization(organizationId: number, type?: ResourceType): Promise<OrganizationResource[]> {
+    return [...this.resources.values()].filter(
+      (r) =>
+        r.organizationId === organizationId &&
+        r.deleteTime == null &&
+        (type === undefined || r.resourceType === type),
+    );
+  }
+
+  async create(input: OrganizationResourceInput): Promise<OrganizationResource> {
+    const now = new Date();
+    const r: OrganizationResource = {
+      id: ++this.seq,
+      organizationId: input.organizationId,
+      resourceType: input.resourceType,
+      name: input.name,
+      accessScope: input.accessScope,
+      encryptedData: input.encryptedData,
+      createdByUserId: input.createdByUserId,
+      createTime: now,
+      updateTime: now,
+    };
+    this.resources.set(r.id, r);
+    return r;
+  }
+
+  async update(id: number, fields: OrganizationResourceEditableFields): Promise<void> {
+    const r = this.resources.get(id);
+    if (!r) return;
+    if (fields.name !== undefined) r.name = fields.name;
+    if (fields.accessScope !== undefined) r.accessScope = fields.accessScope;
+    if (fields.encryptedData !== undefined) r.encryptedData = fields.encryptedData;
+    if (fields.updatedByUserId !== undefined) r.updatedByUserId = fields.updatedByUserId;
+    r.updateTime = new Date();
+  }
+
+  async softDelete(id: number): Promise<void> {
+    const r = this.resources.get(id);
+    if (r && r.deleteTime == null) r.deleteTime = new Date();
+  }
+
+  async grantPermission(
+    organizationId: number,
+    resourceId: number,
+    membershipId: number,
+    permission: ResourcePermission,
+  ): Promise<OrganizationResourcePermission> {
+    const existing = await this.findPermission(resourceId, membershipId);
+    if (existing) {
+      existing.permission = permission;
+      existing.updateTime = new Date();
+      return existing;
+    }
+    const now = new Date();
+    const p: OrganizationResourcePermission = {
+      id: ++this.permSeq,
+      organizationId,
+      resourceId,
+      membershipId,
+      permission,
+      createTime: now,
+      updateTime: now,
+    };
+    this.permissions.set(p.id, p);
+    return p;
+  }
+
+  async revokePermission(resourceId: number, membershipId: number): Promise<void> {
+    for (const [id, p] of this.permissions) {
+      if (p.resourceId === resourceId && p.membershipId === membershipId) this.permissions.delete(id);
+    }
+  }
+
+  async listPermissions(resourceId: number): Promise<OrganizationResourcePermission[]> {
+    return [...this.permissions.values()].filter((p) => p.resourceId === resourceId);
+  }
+
+  async listPermissionsForMembership(membershipId: number): Promise<OrganizationResourcePermission[]> {
+    return [...this.permissions.values()].filter((p) => p.membershipId === membershipId);
+  }
+
+  async findPermission(resourceId: number, membershipId: number): Promise<OrganizationResourcePermission | undefined> {
+    return [...this.permissions.values()].find(
+      (p) => p.resourceId === resourceId && p.membershipId === membershipId,
+    );
+  }
+}
+
+/**
+ * 内存组织审计假实现。`failNext` 复刻 IAdminAuditRepo 的不变量：
+ * 留痕写不进去时管理操作必须一起失败 —— 这条没法用真实故障触发，只能注入。
+ */
+export class FakeOrganizationAuditRepo implements IOrganizationAuditRepo {
+  readonly rows: OrganizationAuditLog[] = [];
+  failNext = false;
+  private seq = 0;
+
+  async record(entry: OrganizationAuditInput): Promise<void> {
+    if (this.failNext) {
+      this.failNext = false;
+      throw new Error('simulated org audit write failure');
+    }
+    this.rows.push({ ...entry, id: ++this.seq, createTime: new Date() });
+  }
+
+  async listByOrganization(organizationId: number, limit: number, offset: number): Promise<OrganizationAuditLog[]> {
+    return [...this.rows]
+      .filter((r) => r.organizationId === organizationId)
+      .reverse()
+      .slice(offset, offset + limit);
+  }
+
+  async countByOrganization(organizationId: number): Promise<number> {
+    return this.rows.filter((r) => r.organizationId === organizationId).length;
+  }
+}
+
+/**
+ * 内存注册假实现：把 user + personal org + membership + free 订阅 + 席位
+ * 写进共享的 fake 上，使 resolvePlans(member → org → sub → plan) 能被解析。
+ * free 套餐 id 从 planRepo 按 code 查询。
+ */
+export class FakeRegistrationRepo implements IRegistrationRepo {
+  constructor(
+    private readonly deps: {
+      users: FakeUserRepo;
+      orgs: FakeOrganizationRepo;
+      memberships: FakeMembershipRepo;
+      subs: FakeSubscriptionRepo;
+      seats: FakeSeatRepo;
+      plans: FakePlanRepo;
+    },
+  ) {}
+
+  async createAccount(input: RegistrationAccountInput): Promise<RegistrationResult> {
+    const exist = await this.deps.users.findByEmail(input.email);
+    if (exist) throw new Error(`user already exists: ${input.email}`);
+    const free = await this.deps.plans.findByCode('free');
+    if (!free) throw new Error('free plan is missing');
+    const user = await this.deps.users.create(input.email, input.passwordHash, input.role, input.displayName);
+    const org = await this.deps.orgs.create({
+      name: `${input.displayName ?? input.email}'s workspace`, type: 'personal', ownerUserId: user.id,
+    });
+    await this.deps.memberships.create({ organizationId: org.id, userId: user.id, role: 'admin' });
+    const sub = await this.deps.subs.upsert({ organizationId: org.id, planId: free.id, status: 'active', provider: 'manual' });
+    await this.deps.seats.create({ subscriptionId: sub.id, organizationId: org.id });
+    return { userId: user.id, organizationId: org.id, subscriptionId: sub.id };
+  }
 }

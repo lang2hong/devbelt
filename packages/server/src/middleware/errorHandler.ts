@@ -13,8 +13,7 @@ export function sendError(reply: FastifyReply, e: unknown): void {
 /**
  * 注册全局错误处理器。
  *
- * `sendError` 是逐 handler 手工调用的，漏写 try/catch 的端点（曾有 10 个：
- * auth 的 sessions + admin 的 9 个列表端点）会落到 Fastify 默认处理器，
+ * `sendError` 是逐 handler 手工调用的，漏写 try/catch 的端点（admin 的 9 个列表端点）会落到 Fastify 默认处理器，
  * 响应体带 `err.message` —— mysql2 的 `sqlMessage` 会连同插值后的 SQL
  * 一起回显给客户端。典型触发：`GET /admin/users?limit=abc` 生成
  * `LIMIT NaN`，MySQL 语法错原文外泄。
@@ -88,6 +87,7 @@ export function errorStatus(code: string): number {
     case 'PRO_FEATURE_REQUIRED':
     case 'SUBSCRIPTION_EXPIRED':
     case 'QUOTA_EXCEEDED':
+    case 'FORBIDDEN':
       return 403;
     case 'NOT_FOUND':
     case 'VERSION_NOT_FOUND':

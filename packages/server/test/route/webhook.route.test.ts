@@ -34,8 +34,8 @@ class HmacTestAdapter implements PaymentProvider {
   /** 记录每次收到的原始字节，供断言 */
   lastPayload?: Buffer;
 
-  async createSubscription(userId: number, _p: PlanCode, _period: any) {
-    return { externalId: `x-${userId}`, periodEnd: new Date() };
+  async createSubscription(organizationId: number, _p: PlanCode, _period: any) {
+    return { externalId: `x-${organizationId}`, periodEnd: new Date() };
   }
   async cancelSubscription(): Promise<void> {}
 
@@ -46,8 +46,9 @@ class HmacTestAdapter implements PaymentProvider {
     const body = JSON.parse(payload.toString('utf8'));
     return {
       type: 'subscription_renewed',
-      userId: body.userId,
+      organizationId: body.organizationId,
       planCode: body.planCode ?? 'pro',
+      seatDelta: body.seatDelta ?? 0,
       periodEnd: new Date(Date.now() + 30 * 86400_000),
       externalId: body.externalId ?? 'ext-1',
       provider: this.name,
@@ -78,58 +79,56 @@ function post(raw: string, signature?: string) {
   });
 }
 
+/** 造一个用户并取它的 personal org id（webhook 事件按组织定位） */
+async function makeOrgId(): Promise<number> {
+  const u = await t.makeUser();
+  const memberships = await t.repos.membershipRepo.listByUser(u.id);
+  return memberships.find((m) => m.status === 'active')!.organizationId;
+}
+
 describe('原始字节保真', () => {
   it('签名基于原文计算时验签通过', async () => {
-    const u = await t.makeUser();
-    const raw = JSON.stringify({ userId: u.id, planCode: 'pro', externalId: 'ext-1' });
+    const oid = await makeOrgId();
+    const raw = JSON.stringify({ organizationId: oid, planCode: 'pro', externalId: 'ext-1' });
     const res = await post(raw, sign(raw));
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ received: true });
   });
 
   it('适配器收到的字节与请求原文逐字节一致', async () => {
-    const u = await t.makeUser();
-    const raw = JSON.stringify({ userId: u.id, planCode: 'pro', externalId: 'ext-1' });
+    const oid = await makeOrgId();
+    const raw = JSON.stringify({ organizationId: oid, planCode: 'pro', externalId: 'ext-1' });
     await post(raw, sign(raw));
     expect(adapter.lastPayload?.toString('utf8')).toBe(raw);
   });
 
-  /**
-   * 键顺序：JSON.stringify 按对象属性顺序输出，而 Fastify 解析再重建后的顺序
-   * 取决于 JSON.parse 的插入顺序。支付商把 `type` 放最后的话，重建结果就变了。
-   */
   it('键顺序不常规的载荷仍能验签（重新序列化会改变字节）', async () => {
-    const u = await t.makeUser();
-    const raw = `{"externalId":"ext-9","planCode":"pro","userId":${u.id}}`;
+    const oid = await makeOrgId();
+    const raw = `{"externalId":"ext-9","planCode":"pro","organizationId":${oid}}`;
     const res = await post(raw, sign(raw));
     expect(res.statusCode).toBe(200);
     expect(adapter.lastPayload?.toString('utf8')).toBe(raw);
   });
 
   it('带缩进与换行的载荷仍能验签（stringify 会压掉空白）', async () => {
-    const u = await t.makeUser();
-    const raw = `{\n  "userId": ${u.id},\n  "planCode": "pro",\n  "externalId": "ext-2"\n}`;
+    const oid = await makeOrgId();
+    const raw = `{\n  "organizationId": ${oid},\n  "planCode": "pro",\n  "externalId": "ext-2"\n}`;
     const res = await post(raw, sign(raw));
     expect(res.statusCode).toBe(200);
     expect(adapter.lastPayload?.toString('utf8')).toBe(raw);
   });
 
-  /**
-   * `\u00e9` 与 `é` 解析成同一个字符串，但字节不同。
-   * stringify 会输出后者，签名随之失配。
-   */
   it('Unicode 转义形式的载荷仍能验签（stringify 会还原成字面量）', async () => {
-    const u = await t.makeUser();
-    const raw = `{"userId":${u.id},"planCode":"pro","note":"caf\\u00e9"}`;
+    const oid = await makeOrgId();
+    const raw = `{"organizationId":${oid},"planCode":"pro","note":"caf\\u00e9"}`;
     const res = await post(raw, sign(raw));
     expect(res.statusCode).toBe(200);
     expect(adapter.lastPayload?.toString('utf8')).toBe(raw);
   });
 
-  /** `1.0e3` 解析成 1000，stringify 输出 `1000` —— 字节变了 */
   it('科学计数法数字仍能验签（stringify 会规范化）', async () => {
-    const u = await t.makeUser();
-    const raw = `{"userId":${u.id},"planCode":"pro","amount":1.0e3}`;
+    const oid = await makeOrgId();
+    const raw = `{"organizationId":${oid},"planCode":"pro","amount":1.0e3}`;
     const res = await post(raw, sign(raw));
     expect(res.statusCode).toBe(200);
     expect(adapter.lastPayload?.toString('utf8')).toBe(raw);
@@ -199,13 +198,4 @@ describe('parser 的作用域隔离', () => {
    * 若 parser 泄漏到全局，adapter 不会被调用（provider 不同），但 parser 会跑 ——
    * 这里通过「业务路由正常工作 + 适配器完全没被碰过」间接确认作用域正确。
    */
-  it('业务路由走默认解析，webhook 适配器完全不参与', async () => {
-    const u = await t.makeUser();
-    const res = await t.app.inject({
-      method: 'POST', url: '/api/usage', headers: t.auth(u.token),
-      payload: { connectionOpens: 1, queryExecutes: 0 },
-    });
-    expect(res.statusCode).toBe(200);
-    expect(adapter.lastPayload).toBeUndefined();
-  });
 });

@@ -1,9 +1,11 @@
 import type {
-  IUserRepo, IPlanRepo, ISubscriptionRepo, IDeviceRepo, ISyncRepo, IConnectionMetaRepo,
+  IUserRepo, IPlanRepo, ISubscriptionRepo, IMembershipRepo, IOrganizationRepo,
+  IDeviceRepo, ISyncRepo, IConnectionMetaRepo,
 } from '../repository/interfaces.js';
 import type { Plan, User, Subscription, Usage } from '../domain/entities.js';
 import { EntityNotFoundError } from '../domain/errors.js';
 import { EXPIRABLE_STATUSES } from '../domain/enums.js';
+import type { PlanPolicy } from '../policy/planPolicy.js';
 
 export interface MeResponse {
   user: Omit<User, 'passwordHash'>;
@@ -16,44 +18,41 @@ export interface MeResponse {
 /**
  * 订阅服务：到期降级 + /api/me 装配。
  *
- * 到期降级策略：status=active 且 period_end_time <= now → status=expired + user.plan_code=free。
- * `<=` 而非 `<`：periodEndTime 是周期的**结束时刻**，到达即结束；列是秒精度的
- * TIMESTAMP，用 `<` 会让整个第 N 秒仍算有效。service 判据与两条 SQL 现在
- * 全部统一到 `<=`（此前 service 用 `<=`、SQL 用 `<`，边界上互相打架）。
- *
- * ensureActive 走单用户 expireOne（挂在 /api/me 上，不能扫全表）；
- * 全表批量降级是 downgradeExpired，由启动与定时清理任务调用。
+ * v2：订阅挂组织，个人套餐由「有效席位套餐」推导（PlanPolicy.effectivePlans）。
+ * 到期降级按组织逐个 expireOne；全表批量降级 downgradeExpired 由启动/定时调用。
  */
 export class SubscriptionService {
   constructor(
     private readonly userRepo: IUserRepo,
     private readonly planRepo: IPlanRepo,
     private readonly subRepo: ISubscriptionRepo,
+    private readonly membershipRepo: IMembershipRepo,
+    private readonly organizationRepo: IOrganizationRepo,
     private readonly deviceRepo: IDeviceRepo,
     private readonly syncRepo: ISyncRepo,
     private readonly connectionMetaRepo: IConnectionMetaRepo,
+    private readonly planPolicy: PlanPolicy,
   ) {}
 
   /**
-   * 确保**当前用户**订阅状态最新（到期则降级）。
+   * 确保**当前用户**相关组织的订阅状态最新（到期则降级）。
+   * 只碰该用户活跃成员关系指向的组织，不扫全表。
    *
-   * 只碰这一个用户。旧实现在这里调全表 `downgradeExpired`，而本方法挂在
-   * `/api/me` 上：一个用户到期就让所有在线用户各自触发一次全表 JOIN UPDATE。
-   *
-   * 状态与套餐由 `expireOne` 一条语句一起改，不再另外调 `updatePlan` ——
-   * 分开写时 SQL 没匹配到行、updatePlan 却照样执行，会留下
-   * plan_code=free 但 status=active 的半套状态。
-   *
-   * now 可注入，供测试构造「恰好等于周期结束时刻」的边界。
+   * active/canceled 按 periodEndTime 到期；trialing 按 trialEndTime 到期。
+   * 试用必须能过期，否则建 team 组织即永久免费 team（付费门禁旁路）。
    */
   async ensureActive(userId: number, now: Date = new Date()): Promise<void> {
-    const sub = await this.subRepo.findByUserId(userId);
-    // 与 repo 的 EXPIRABLE_STATUSES 对齐：trialing 与 canceled 到期同样要降级。
-    // 只判 'active' 时，注册写下的 trialing 行永远不会被处理 ——
-    // 用户 7 天后 /api/me 里仍显示"试用中"，而这些行也永不被索引扫到。
-    if (!sub || !EXPIRABLE_STATUSES.includes(sub.status)) return;
-    if (sub.periodEndTime > now) return;
-    await this.subRepo.expireOne(userId, now);
+    const memberships = await this.membershipRepo.listByUser(userId);
+    for (const m of memberships) {
+      if (m.status !== 'active') continue;
+      const sub = await this.subRepo.findByOrganizationId(m.organizationId);
+      if (!sub || !EXPIRABLE_STATUSES.includes(sub.status)) continue;
+      const expired = (sub.periodEndTime && sub.periodEndTime <= now)
+        || (sub.status === 'trialing' && sub.trialEndTime && sub.trialEndTime <= now);
+      if (expired) {
+        await this.subRepo.expireOne(m.organizationId, now);
+      }
+    }
   }
 
   /** 批量降级所有到期订阅（启动/定时调用），返回降级的订阅行数 */
@@ -61,15 +60,17 @@ export class SubscriptionService {
     return this.subRepo.downgradeExpired(now);
   }
 
-  /** 装配 /api/me 响应：用户 + 套餐 + 订阅 + 配额用量 */
+  /** 装配 /api/me 响应：用户 + 有效套餐 + 全套餐列表 + 订阅 + 配额用量 */
   async getMe(userId: number): Promise<MeResponse> {
     await this.ensureActive(userId);
     const user = await this.userRepo.findById(userId);
     if (!user) throw new EntityNotFoundError('user', userId);
-    const plan = await this.planRepo.findByCode(user.planCode);
-    if (!plan) throw new Error(`plan not found: ${user.planCode}`);
-    const subscription = await this.subRepo.findByUserId(userId);
+
+    const effective = await this.planPolicy.effectivePlans(userId);
+    const plan = pickPrimaryPlan(effective);
     const plans = await this.planRepo.listAll();
+    const subscription = await this.personalSubscription(userId);
+
     const usage: Usage = {
       devices: await this.deviceRepo.countBound(userId),
       connections: await this.connectionMetaRepo.countActive(userId),
@@ -79,4 +80,22 @@ export class SubscriptionService {
     const { passwordHash, ...safeUser } = user;
     return { user: safeUser, plan, plans, subscription, usage };
   }
+
+  /** 取用户 personal org 的当前订阅（显示用；个人套餐由 effectivePlans 决定） */
+  private async personalSubscription(userId: number): Promise<Subscription | undefined> {
+    const memberships = await this.membershipRepo.listByUser(userId);
+    for (const m of memberships) {
+      const org = await this.organizationRepo.findById(m.organizationId);
+      if (org && org.type === 'personal') {
+        return this.subRepo.findByOrganizationId(org.id);
+      }
+    }
+    return undefined;
+  }
+}
+
+/** 主套餐：取有效席位套餐中月费最高的（"你所在档位的最高套餐"）。空则抛错（数据完整性问题） */
+function pickPrimaryPlan(plans: Plan[]): Plan {
+  if (plans.length === 0) throw new Error('no effective plan; registration should guarantee a personal org');
+  return plans.reduce((a, b) => (b.priceMonth > a.priceMonth ? b : a));
 }

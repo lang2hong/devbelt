@@ -7,20 +7,18 @@ import {
   VersionNotFoundError,
   QuotaExceededError,
 } from '../../src/domain/errors.js';
-import { FakeSyncRepo, FakeUserRepo, FakePlanRepo, FakeConnectionMetaRepo, FakeSyncEventRepo, FakeDeviceRepo, makePlan } from '../helpers/fakeRepos.js';
+import { FakeSyncRepo, FakeUserRepo, FakeConnectionMetaRepo,  FakeDeviceRepo, makePlan } from '../helpers/fakeRepos.js';
 
 async function setup(over: Parameters<typeof makePlan>[1] = {}) {
   const syncRepo = new FakeSyncRepo();
   const userRepo = new FakeUserRepo();
-  const plan = makePlan('free', { syncQuotaBytes: 0, syncVersionRetention: 0, ...over });
-  const planRepo = new FakePlanRepo([plan]);
-  const policy = new PlanPolicy((code) => planRepo.findByCode(code));
+  const plan = makePlan('free', { perUserPrivateSyncQuotaBytes: 0, perUserSyncVersionRetention: 0, ...over });
+  const policy = new PlanPolicy(async () => [plan]);
   const connectionMetaRepo = new FakeConnectionMetaRepo();
-  const syncEventRepo = new FakeSyncEventRepo();
   const deviceRepo = new FakeDeviceRepo();
-  const service = new SyncService(syncRepo, userRepo, policy, connectionMetaRepo, syncEventRepo, deviceRepo);
-  const user = await userRepo.create('a@example.com', 'scrypt$x$y', 'user', 'free');
-  return { service, syncRepo, userRepo, plan, user, policy, connectionMetaRepo, syncEventRepo };
+  const service = new SyncService(syncRepo, userRepo, policy, connectionMetaRepo, deviceRepo);
+  const user = await userRepo.create('a@example.com', 'scrypt$x$y', 'user');
+  return { service, syncRepo, userRepo, plan, user, policy, connectionMetaRepo };
 }
 
 describe('SyncService.push', () => {
@@ -78,7 +76,7 @@ describe('SyncService.push', () => {
 
 describe('SyncService.push — quota is enforced before the write', () => {
   it('does not persist the payload when the projected total exceeds the quota', async () => {
-    const { service, syncRepo, user } = await setup({ syncQuotaBytes: 100 });
+    const { service, syncRepo, user } = await setup({ perUserPrivateSyncQuotaBytes: 100 });
     await service.push(user.id, 'groups', 'a'.repeat(50), 0);
 
     const err = await service
@@ -96,7 +94,7 @@ describe('SyncService.push — quota is enforced before the write', () => {
   });
 
   it('uses replacement semantics: the old bytes of the same section are subtracted', async () => {
-    const { service, user } = await setup({ syncQuotaBytes: 100 });
+    const { service, user } = await setup({ perUserPrivateSyncQuotaBytes: 100 });
     await service.push(user.id, 'groups', 'a'.repeat(90), 0);
 
     // 90 → 95 同节替换：投影 = 90 - 90 + 95 = 95 < 100
@@ -114,7 +112,7 @@ describe('SyncService.push — quota is enforced before the write', () => {
    * 只能建 4 个，而错误信息还写着 `5/5`。现在断言正确行为。
    */
   it('允许写满配额，超出 1 字节才拒（边界含等号）', async () => {
-    const { service, user } = await setup({ syncQuotaBytes: 100 });
+    const { service, user } = await setup({ perUserPrivateSyncQuotaBytes: 100 });
     await expect(service.push(user.id, 'groups', 'a'.repeat(100), 0)).resolves.toEqual({
       version: 1,
     });
@@ -124,7 +122,7 @@ describe('SyncService.push — quota is enforced before the write', () => {
   });
 
   it('counts bytes, not characters (multi-byte payloads)', async () => {
-    const { service, user } = await setup({ syncQuotaBytes: 100 });
+    const { service, user } = await setup({ perUserPrivateSyncQuotaBytes: 100 });
     // 40 个三字节字符 = 120 字节
     await expect(service.push(user.id, 'groups', '中'.repeat(40), 0)).rejects.toBeInstanceOf(
       QuotaExceededError,
@@ -135,14 +133,14 @@ describe('SyncService.push — quota is enforced before the write', () => {
   });
 
   it('treats syncQuotaBytes 0 as unlimited', async () => {
-    const { service, user } = await setup({ syncQuotaBytes: 0 });
+    const { service, user } = await setup({ perUserPrivateSyncQuotaBytes: 0 });
     await expect(service.push(user.id, 'groups', 'x'.repeat(100000), 0)).resolves.toEqual({
       version: 1,
     });
   });
 
   it('checks the quota before the optimistic-lock check', async () => {
-    const { service, syncRepo, user } = await setup({ syncQuotaBytes: 100 });
+    const { service, syncRepo, user } = await setup({ perUserPrivateSyncQuotaBytes: 100 });
     await service.push(user.id, 'groups', 'a'.repeat(90), 0);
 
     // baseVersion 也是错的，但配额先失败
@@ -155,7 +153,7 @@ describe('SyncService.push — quota is enforced before the write', () => {
 
 describe('SyncService.push — version retention', () => {
   it('prunes history down to the plan retention, keeping the newest', async () => {
-    const { service, syncRepo, user } = await setup({ syncVersionRetention: 2 });
+    const { service, syncRepo, user } = await setup({ perUserSyncVersionRetention: 2 });
     await service.push(user.id, 'groups', 'v1', 0);
     await service.push(user.id, 'groups', 'v2', 1);
     await service.push(user.id, 'groups', 'v3', 2);
@@ -164,7 +162,7 @@ describe('SyncService.push — version retention', () => {
   });
 
   it('keeps every snapshot when retention is 0 (no pruning)', async () => {
-    const { service, syncRepo, user } = await setup({ syncVersionRetention: 0 });
+    const { service, syncRepo, user } = await setup({ perUserSyncVersionRetention: 0 });
     await service.push(user.id, 'groups', 'v1', 0);
     await service.push(user.id, 'groups', 'v2', 1);
     await service.push(user.id, 'groups', 'v3', 2);
@@ -209,7 +207,7 @@ describe('SyncService.pull', () => {
 
   it('does not leak other users data', async () => {
     const { service, userRepo, user } = await setup();
-    const other = await userRepo.create('b@example.com', 'scrypt$x$y', 'user', 'free');
+    const other = await userRepo.create('b@example.com', 'scrypt$x$y', 'user');
     await service.push(user.id, 'groups', 'mine', 0);
     await service.push(other.id, 'groups', 'theirs', 0);
 
@@ -220,7 +218,7 @@ describe('SyncService.pull', () => {
 
 describe('SyncService.listVersions', () => {
   it('caps the list at the plan retention, newest first', async () => {
-    const { service, user } = await setup({ syncVersionRetention: 2 });
+    const { service, user } = await setup({ perUserSyncVersionRetention: 2 });
     await service.push(user.id, 'groups', 'v1', 0);
     await service.push(user.id, 'groups', 'v2', 1);
     await service.push(user.id, 'groups', 'v3', 2);
@@ -232,7 +230,7 @@ describe('SyncService.listVersions', () => {
   });
 
   it('falls back to 100 when retention is 0, so the list is not empty', async () => {
-    const { service, user } = await setup({ syncVersionRetention: 0 });
+    const { service, user } = await setup({ perUserSyncVersionRetention: 0 });
     await service.push(user.id, 'groups', 'v1', 0);
     await service.push(user.id, 'groups', 'v2', 1);
 
@@ -279,11 +277,11 @@ describe('SyncService.rollback', () => {
   });
 
   it('cannot be used to bypass the quota after a plan downgrade', async () => {
-    const { service, syncRepo, plan, user } = await setup({ syncQuotaBytes: 1000 });
+    const { service, syncRepo, plan, user } = await setup({ perUserPrivateSyncQuotaBytes: 1000 });
     await service.push(user.id, 'groups', 'a'.repeat(500), 0);
     await service.push(user.id, 'groups', 'b'.repeat(10), 1);
 
-    plan.syncQuotaBytes = 100; // 降级到更小的配额
+    plan.perUserPrivateSyncQuotaBytes = 100; // 降级到更小的配额
 
     const err = await service.rollback(user.id, 'groups', 1).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(QuotaExceededError);
@@ -294,7 +292,7 @@ describe('SyncService.rollback', () => {
   });
 
   it('prunes history after a rollback when retention applies', async () => {
-    const { service, syncRepo, user } = await setup({ syncVersionRetention: 2 });
+    const { service, syncRepo, user } = await setup({ perUserSyncVersionRetention: 2 });
     await service.push(user.id, 'groups', 'v1', 0);
     await service.push(user.id, 'groups', 'v2', 1);
     await service.rollback(user.id, 'groups', 2);

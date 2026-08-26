@@ -7,40 +7,43 @@ import sensible from '@fastify/sensible';
 import { createConnection } from 'mysql2/promise';
 import { config } from './config.js';
 import { buildMysqlPoolOptions } from './mysqlPool.js';
-import { initSchema } from './repository/mysql/schema.js';
 import { MysqlUserRepo } from './repository/mysql/userRepo.js';
 import { MysqlPlanRepo } from './repository/mysql/planRepo.js';
 import { MysqlSubscriptionRepo } from './repository/mysql/subscriptionRepo.js';
 import { MysqlRefreshTokenRepo } from './repository/mysql/refreshTokenRepo.js';
 import { MysqlDeviceRepo } from './repository/mysql/deviceRepo.js';
 import { MysqlConnectionMetaRepo } from './repository/mysql/connectionMetaRepo.js';
-import { MysqlSyncEventRepo } from './repository/mysql/syncEventRepo.js';
-import { MysqlUsageEventRepo } from './repository/mysql/usageEventRepo.js';
 import { MysqlSyncRepo } from './repository/mysql/syncRepo.js';
+import { MysqlOrganizationRepo } from './repository/mysql/organizationRepo.js';
+import { MysqlMembershipRepo } from './repository/mysql/membershipRepo.js';
+import { MysqlSeatRepo } from './repository/mysql/seatRepo.js';
+import { MysqlOrderRepo } from './repository/mysql/orderRepo.js';
+import { MysqlOrganizationResourceRepo } from './repository/mysql/organizationResourceRepo.js';
+import { MysqlOrganizationAuditRepo } from './repository/mysql/organizationAuditRepo.js';
+import { MysqlRegistrationRepo } from './repository/mysql/registrationRepo.js';
 import { TokenService, type JwtPort } from './service/tokenService.js';
 import { AuthService } from './service/authService.js';
 import { SubscriptionService } from './service/subscriptionService.js';
 import { authRoutes } from './route/auth.js';
 import { meRoutes } from './route/me.js';
 import { syncRoutes } from './route/sync.js';
-import { PlanPolicy } from './policy/planPolicy.js';
+import { PlanPolicy, resolveEffectivePlans } from './policy/planPolicy.js';
 import { SyncService } from './service/syncService.js';
 import { PaymentService } from './service/paymentService.js';
 import { AdminService } from './service/adminService.js';
 import { ManualPaymentAdapter } from './adapter/manualPaymentAdapter.js';
 import { adminRoutes } from './route/admin.js';
+import { OrganizationService } from './service/organizationService.js';
+import { organizationRoutes } from './route/organizations.js';
 import { adminUiRoutes } from './route/adminUi.js';
 import { webhookRoutes } from './route/webhook.js';
-import { usageRoutes } from './route/usage.js';
 import { registerErrorHandler } from './middleware/errorHandler.js';
 import { securityHeaders } from './middleware/securityHeaders.js';
 import type { GetAuthUser, GetAuthSession } from './middleware/requireAuth.js';
-import { MysqlTrafficRepo } from './repository/mysql/trafficRepo.js';
-import { MysqlRateLimitRepo } from './repository/mysql/rateLimitRepo.js';
-import { MysqlMaintenanceRepo } from './repository/mysql/maintenanceRepo.js';
 import { MysqlAdminAuditRepo } from './repository/mysql/adminAuditRepo.js';
 import { MysqlWebhookEventRepo } from './repository/mysql/webhookEventRepo.js';
-import { startMaintenance } from './maintenance.js';
+import { runMigrations } from './repository/mysql/migrate.js';
+import { migrations } from './repository/mysql/migrations/index.js';
 import { TrafficCollector } from './observability/trafficCollector.js';
 import { registerTrafficPlugin } from './observability/trafficPlugin.js';
 import { RateLimitConfig } from './ratelimit/rateLimitConfig.js';
@@ -107,14 +110,16 @@ export async function createApp() {
   const refreshTokenRepo = new MysqlRefreshTokenRepo(getMysql);
   const deviceRepo = new MysqlDeviceRepo(getMysql);
   const connectionMetaRepo = new MysqlConnectionMetaRepo(getMysql);
-  const syncEventRepo = new MysqlSyncEventRepo(getMysql);
-  const usageEventRepo = new MysqlUsageEventRepo(getMysql);
   const syncRepo = new MysqlSyncRepo(getMysql);
-  const trafficRepo = new MysqlTrafficRepo(getMysql);
-  const rateLimitRepo = new MysqlRateLimitRepo(getMysql);
-  const maintenanceRepo = new MysqlMaintenanceRepo(getMysql);
   const adminAuditRepo = new MysqlAdminAuditRepo(getMysql);
   const webhookEventRepo = new MysqlWebhookEventRepo(getMysql);
+  const organizationRepo = new MysqlOrganizationRepo(getMysql);
+  const membershipRepo = new MysqlMembershipRepo(getMysql);
+  const seatRepo = new MysqlSeatRepo(getMysql);
+  const orderRepo = new MysqlOrderRepo(getMysql);
+  const organizationResourceRepo = new MysqlOrganizationResourceRepo(getMysql);
+  const organizationAuditRepo = new MysqlOrganizationAuditRepo(getMysql);
+  const registrationRepo = new MysqlRegistrationRepo(getMysql);
 
   /**
    * 限流与观测。
@@ -122,28 +127,28 @@ export async function createApp() {
    * 注册顺序要紧：两者都用 `onRequest`/`onResponse` 全局钩子，必须早于路由
    * 注册，否则 Fastify 的封装规则会让钩子只对后注册的路由生效。
    *
-   * 规则的实际值此时还是代码默认值 —— DB 里的覆盖行要等 `app.ready()` 之后
-   * 才能读（那时连接池才可用），见下方的 `rateLimitConfig.reload()`。
-   * 这个顺序是安全的：DB 读之前限流已经按默认值在工作，不存在「启动初期不限流」的窗口。
+   * 规则的实际值是代码默认值（`src/ratelimit/rules.ts` 的 DEFAULT_RULES），
+   * v2 已无 DB 覆盖。不存在「启动初期不限流」的窗口。
    */
   const trafficCollector = new TrafficCollector();
-  const rateLimitConfig = new RateLimitConfig(rateLimitRepo, app.log);
+  const rateLimitConfig = new RateLimitConfig();
   await registerRateLimit(app, {
     config: rateLimitConfig,
     collector: trafficCollector,
     enabled: config.rateLimitEnabled,
   });
-  await registerTrafficPlugin(app, { collector: trafficCollector, repo: trafficRepo });
+  await registerTrafficPlugin(app, { collector: trafficCollector });
 
   // policy / service 层
-  const planPolicy = new PlanPolicy((code) => planRepo.findByCode(code));
+  const planPolicy = new PlanPolicy((userId) => resolveEffectivePlans(userId, { membershipRepo, subRepo, planRepo }));
   // 传毫秒而非字符串：解析与上限校验已在 config 完成，避免二次解析与静默回落
   const tokenService = new TokenService(app.jwt as unknown as JwtPort, config.accessTokenExpiresIn, config.refreshTokenExpiresMs);
-  const authService = new AuthService(userRepo, subRepo, refreshTokenRepo, deviceRepo, tokenService, planPolicy);
-  const subscriptionService = new SubscriptionService(userRepo, planRepo, subRepo, deviceRepo, syncRepo, connectionMetaRepo);
-  const syncService = new SyncService(syncRepo, userRepo, planPolicy, connectionMetaRepo, syncEventRepo, deviceRepo);
-  const adminService = new AdminService(userRepo, planRepo, subRepo, refreshTokenRepo, syncRepo, deviceRepo, connectionMetaRepo, syncEventRepo, usageEventRepo, adminAuditRepo);
-  const paymentService = new PaymentService(subRepo, userRepo, planRepo, webhookEventRepo);
+  const authService = new AuthService(userRepo, subRepo, refreshTokenRepo, deviceRepo, registrationRepo, tokenService, planPolicy);
+  const subscriptionService = new SubscriptionService(userRepo, planRepo, subRepo, membershipRepo, organizationRepo, deviceRepo, syncRepo, connectionMetaRepo, planPolicy);
+  const syncService = new SyncService(syncRepo, userRepo, planPolicy, connectionMetaRepo, deviceRepo);
+  const adminService = new AdminService(userRepo, planRepo, subRepo, membershipRepo, organizationRepo, refreshTokenRepo, syncRepo, deviceRepo, connectionMetaRepo, adminAuditRepo, planPolicy);
+  const paymentService = new PaymentService(subRepo, organizationRepo, planRepo, orderRepo, seatRepo, webhookEventRepo, membershipRepo);
+  const organizationService = new OrganizationService(organizationRepo, membershipRepo, seatRepo, organizationResourceRepo, organizationAuditRepo, subRepo, planRepo);
   paymentService.registerProvider(new ManualPaymentAdapter());
 
   /**
@@ -170,54 +175,22 @@ export async function createApp() {
   app.register(adminUiRoutes);
   app.register(authRoutes, { authService, getUser, getSession });
   app.register(meRoutes, { subscriptionService, getUser, getSession });
+  app.register(organizationRoutes, { organizationService, getUser, getSession });
   app.register(syncRoutes, { syncService, getUser, getSession });
-  app.register(usageRoutes, { usageEventRepo, getUser, getSession });
   app.register(adminRoutes, {
     adminService,
     paymentService,
     getUser,
     getSession,
-    trafficRepo,
     trafficCollector,
-    rateLimitConfig,
   });
   app.register(webhookRoutes, { paymentService });
 
-  /**
-   * 事件表清理任务在 ready 之后才启动（那时连接池才可用），但它的 onClose
-   * 钩子必须在 `await app.ready()` **之前**注册。
-   *
-   * 为什么顺序这么别扭：Fastify 的 `ready()` 底层（avvio）把 `start` 事件挂在
-   * `process.nextTick` 上延迟触发 —— `ready()` 的 Promise 先 resolve，实例的
-   * `started` 标志要等下一次事件循环才变成 true。ready 之后任何一个 `await`
-   * （initSchema、rateLimitConfig.reload 的 DB 查询）都会让出事件循环，让
-   * started 翻转，于是再调 `addHook` 就抛 FST_ERR_INSTANCE_ALREADY_LISTENING。
-   * 服务会因此完全起不来（批 14 引入，验证只跑了 typecheck/build/vitest，
-   * 从没真正 boot 过 createApp）。
-   */
-  let stopMaintenance: (() => void) | undefined;
-  app.addHook('onClose', async () => { stopMaintenance?.(); });
-
   await app.ready();
-  await initSchema(app);
-
-  // 建表之后才能读规则表。此前限流已按代码默认值生效，没有「启动初期不限流」的窗口
-  await rateLimitConfig.reload();
+  await runMigrations(app.mysql as any, [...migrations]);
 
   // 启动时批量降级到期订阅
   void subscriptionService.downgradeExpired().catch((e) => app.log.warn({ err: e }, 'downgradeExpired failed'));
-
-  /**
-   * 定时器已经 unref（不阻止进程退出），但服务停止后还留着一个会往已关闭的
-   * 连接池发 DELETE 的回调 —— 优雅停机时会打出一串「Pool is closed」错误日志，
-   * 掩盖真正的停机原因。所以记下停止函数，交给上面提前注册的 onClose 调用。
-   */
-  stopMaintenance = startMaintenance({
-    repo: maintenanceRepo,
-    log: app.log,
-    retentionDays: config.eventRetentionDays,
-    intervalMs: config.maintenanceIntervalMs,
-  });
 
   return app;
 }
@@ -235,7 +208,7 @@ async function ensureDatabase(app: ReturnType<typeof Fastify>): Promise<void> {
   try {
     conn = await createConnection({ host: m.host, port: m.port, user: m.user, password: m.password });
     await conn.query(
-      `CREATE DATABASE IF NOT EXISTS \`${m.database.replace(/`/g, '``')}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE DATABASE IF NOT EXISTS \`${m.database.replace(/`/g, '``')}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`,
     );
   } catch (err: any) {
     if (err?.code !== 'ER_DBACCESS_DENIED_ERROR' && err?.code !== 'ER_CANT_CREATE_DB') throw err;

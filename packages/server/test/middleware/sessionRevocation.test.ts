@@ -172,16 +172,6 @@ describe('同步与用量路由也覆盖', () => {
     });
     expect(res.statusCode).toBe(401);
   });
-
-  it('会话撤销后 POST /api/usage 401', async () => {
-    const u = await t.makeUser();
-    await t.repos.refreshTokenRepo.revoke(u.sid);
-    const res = await t.app.inject({
-      method: 'POST', url: '/api/usage', headers: t.auth(u.token),
-      payload: { connectionOpens: 1, queryExecutes: 1 },
-    });
-    expect(res.statusCode).toBe(401);
-  });
 });
 
 /**
@@ -206,6 +196,7 @@ describe('会话自然过期后 access token 失效', () => {
     expect(res.json().code).toBe('SESSION_EXPIRED');
   });
 
+describe('orphaned tests', () => {
   it('admin 路由同样拒绝已过期会话', async () => {
     const u = await t.makeUser({ role: 'admin' });
     t.repos.refreshTokenRepo.tokens.get(u.sid)!.expiresTime = new Date(Date.now() - 1000);
@@ -280,4 +271,6 @@ describe('会话自然过期后 access token 失效', () => {
     const res = await t.app.inject({ method: 'GET', url: '/api/me', headers: t.auth(u.token) });
     expect(res.json().code).toBe('SESSION_REVOKED');
   });
+});
+
 });

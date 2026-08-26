@@ -12,7 +12,7 @@
 - **设计与对比**：可视化表设计、DDL 查看、ER 图、Schema 对比
 - **数据迁移**：CSV/JSON 导入导出，带字段映射
 - **云同步**：AES-256-GCM 端到端加密的配置跨设备同步（含连接密码，服务端只见密文）
-- **运维面板**：性能仪表盘、连接池状态、审计日志、定时备份与 SQL Dump 恢复
+- **运维面板**：审计日志（系统 admin 操作留痕）、用户/订阅/套餐管理
 - **数据对比**：Schema 对比、跨库数据对比
 - **国际化**：中文 / English
 
@@ -40,7 +40,7 @@ packages/
 ├── db-core/     # 纯层：连接/查询/元数据服务（无 vscode 依赖，可独立测试）
 ├── vscode-ext/  # VS Code 扩展：树、命令、webview 查询/设计/ER、补全、i18n、同步客户端
 ├── server/      # 云同步后端：Fastify + MySQL + JWT
-└── admin-ui/    # 管理后台 SPA：用户/订阅/套餐/流量/限流，产物输出到 server/public
+└── admin-ui/    # 管理后台 SPA：用户/订阅/套餐/审计，产物输出到 server/public
 ```
 
 `admin-ui` 没有独立的 README —— 它只是 server 的一张脸，运行方式和端点契约都在

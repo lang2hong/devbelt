@@ -1,6 +1,6 @@
-import type { ISyncRepo, IUserRepo, IDeviceRepo, IConnectionMetaRepo, ISyncEventRepo, ConnectionMetaInput } from '../repository/interfaces.js';
+import type { ISyncRepo, IUserRepo, IDeviceRepo, IConnectionMetaRepo, ConnectionMetaInput } from '../repository/interfaces.js';
 import type { PlanPolicy } from '../policy/planPolicy.js';
-import type { SectionType, PlanCode } from '../domain/enums.js';
+import type { SectionType } from '../domain/enums.js';
 import type { SyncSection, SyncVersionSummary } from '../domain/entities.js';
 import { EntityNotFoundError, ConflictError, DeviceLimitError, VersionNotFoundError, ValidationError } from '../domain/errors.js';
 
@@ -32,7 +32,6 @@ export interface PushInput {
  * 端到端加密：server 仅见密文。但连接数 etc. 需服务端计量，
  * 故 push connections 时客户端附带明文元数据（connection_meta），
  * 据此校验 maxConnections 并落库；内容仍存 sync_sections 密文。
- * 每次 pull/push 写 sync_events 留痕。
  */
 export class SyncService {
   constructor(
@@ -40,7 +39,6 @@ export class SyncService {
     private readonly userRepo: IUserRepo,
     private readonly planPolicy: PlanPolicy,
     private readonly connectionMetaRepo: IConnectionMetaRepo,
-    private readonly syncEventRepo: ISyncEventRepo,
     private readonly deviceRepo: IDeviceRepo,
   ) {}
 
@@ -53,7 +51,7 @@ export class SyncService {
   async push(userId: number, section: SectionType, encryptedData: string, baseVersion: number, input: PushInput = {}): Promise<PushResult> {
     const user = await this.userRepo.findById(userId);
     if (!user) throw new EntityNotFoundError('user', userId);
-    await this.requireDeviceBound(userId, user.planCode, input.deviceId);
+    await this.requireDeviceBound(userId, input.deviceId);
 
     const newSectionBytes = Buffer.byteLength(encryptedData, 'utf8');
 
@@ -71,11 +69,11 @@ export class SyncService {
       if (!input.meta) {
         throw new ValidationError('connections section requires meta for quota accounting');
       }
-      const projectedActive = input.meta.filter((m) => !m.deleted).length;
-      await this.planPolicy.checkTotal(user.planCode, 'connections', projectedActive);
+      const projectedActive = input.meta.length;
+      await this.planPolicy.checkTotal(userId, 'connections', projectedActive);
     }
 
-    await this.checkQuota(userId, user.planCode, section, newSectionBytes);
+    await this.checkQuota(userId, section, newSectionBytes);
 
     // 当前版本与历史快照必须一起落盘（repo 内单事务）。分两次写会留下
     // 「当前行已是 version N，但历史里没有 N 的快照」的状态：用户回滚到自己
@@ -94,13 +92,9 @@ export class SyncService {
       await this.connectionMetaRepo.replaceAll(userId, input.meta);
     }
 
-    const retention = await this.planPolicy.syncVersionRetention(user.planCode);
+    const retention = await this.planPolicy.syncVersionRetention(userId);
     if (retention > 0) await this.syncRepo.pruneVersions(userId, section, retention);
 
-    await this.syncEventRepo.record({
-      userId, deviceId: input.deviceId, direction: 'push', section,
-      bytes: newSectionBytes, itemCount: input.itemCount ?? 0,
-    });
 
     return { version: newVersion };
   }
@@ -111,7 +105,6 @@ export class SyncService {
    */
   private async checkQuota(
     userId: number,
-    planCode: Parameters<PlanPolicy['check']>[0],
     section: SectionType,
     incomingBytes: number,
   ): Promise<void> {
@@ -119,13 +112,13 @@ export class SyncService {
     const existing = await this.syncRepo.getSection(userId, section);
     const existingBytes = existing ? Buffer.byteLength(existing.encryptedData, 'utf8') : 0;
     const projected = Math.max(0, currentTotal - existingBytes + incomingBytes);
-    await this.planPolicy.checkTotal(planCode, 'sync_bytes', projected);
+    await this.planPolicy.checkTotal(userId, 'sync_bytes', projected);
   }
 
   /** 设备绑定检查（sync 硬卡）：已绑定放行；未绑定且配额未满则补绑；满则 403 */
-  private async requireDeviceBound(userId: number, planCode: PlanCode, deviceId?: string): Promise<void> {
+  private async requireDeviceBound(userId: number, deviceId?: string): Promise<void> {
     if (!deviceId) return; // 旧客户端无设备信息，跳过（无法判同）
-    const limit = await this.planPolicy.limit(planCode, 'devices');
+    const limit = await this.planPolicy.limit(userId, 'devices');
     if (limit <= 0) return; // 0 = 无限
     if (await this.deviceRepo.isBound(userId, deviceId)) return;
     const bound = await this.deviceRepo.countBound(userId);
@@ -133,11 +126,11 @@ export class SyncService {
     await this.deviceRepo.bind(userId, deviceId);
   }
 
-  /** 拉取：指定 section 单节，或全部 section（每节写 pull 事件留痕） */
+  /** 拉取：指定 section 单节，或全部 section */
   async pull(userId: number, section?: SectionType, deviceId?: string): Promise<PullResult> {
     const user = await this.userRepo.findById(userId);
     if (!user) throw new EntityNotFoundError('user', userId);
-    await this.requireDeviceBound(userId, user.planCode, deviceId);
+    await this.requireDeviceBound(userId, deviceId);
 
     let sections: SyncSection[];
     if (section) {
@@ -146,12 +139,6 @@ export class SyncService {
     } else {
       sections = await this.syncRepo.listSections(userId);
     }
-    for (const s of sections) {
-      await this.syncEventRepo.record({
-        userId, deviceId, direction: 'pull', section: s.section,
-        bytes: Buffer.byteLength(s.encryptedData, 'utf8'), itemCount: 0,
-      });
-    }
     return { sections: sections.map(toSectionData) };
   }
 
@@ -159,7 +146,7 @@ export class SyncService {
   async listVersions(userId: number, section: SectionType): Promise<SyncVersionSummary[]> {
     const user = await this.userRepo.findById(userId);
     if (!user) throw new EntityNotFoundError('user', userId);
-    const retention = await this.planPolicy.syncVersionRetention(user.planCode);
+    const retention = await this.planPolicy.syncVersionRetention(userId);
     return this.syncRepo.listVersions(userId, section, retention > 0 ? retention : 100);
   }
 
@@ -173,10 +160,10 @@ export class SyncService {
 
     const target = await this.syncRepo.getVersion(userId, section, toVersion);
     if (!target) throw new VersionNotFoundError(userId, section, toVersion);
-    await this.checkQuota(userId, user.planCode, section, Buffer.byteLength(target.encryptedData, 'utf8'));
+    await this.checkQuota(userId, section, Buffer.byteLength(target.encryptedData, 'utf8'));
 
     const newVersion = await this.syncRepo.rollback(userId, section, toVersion);
-    const retention = await this.planPolicy.syncVersionRetention(user.planCode);
+    const retention = await this.planPolicy.syncVersionRetention(userId);
     if (retention > 0) await this.syncRepo.pruneVersions(userId, section, retention);
     return { version: newVersion };
   }

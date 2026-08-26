@@ -56,11 +56,8 @@ describe('buildMysqlPoolOptions', () => {
 
   it('时区钉死 UTC', () => {
     // mysql2 默认 timezone:'local'，按 Node 进程本地时区格式化 Date。
-    // MySQL 对 TIMESTAMP 列按 session time_zone 折算成 UTC 存储，对 DATETIME
-    // 列不做任何转换 —— 本库两种类型混用（traffic_stats.bucket_time 是 DATETIME，
-    // 其余业务表是 TIMESTAMP）。Node 与 MySQL 时区不一致时，同一个管理页面上
-    // 「小时柱状图」与「被限流请求」会错开数小时，而 expires_time / period_end_time
-    // 这类判定也整体平移。本机开发时两者同机同区，所以一切正常 —— 这正是难查的地方。
+    // v2 的 DATETIME 列按 UTC 存储，Node 与 MySQL 时区不一致时 expires_time /
+    // period_end_time 这类判定会整体平移。本机开发时两者同机同区，所以一切正常。
     expect(buildMysqlPoolOptions(base, {}).timezone).toBe('Z');
   });
 

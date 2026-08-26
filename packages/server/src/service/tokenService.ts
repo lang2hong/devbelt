@@ -43,8 +43,8 @@ export class TokenService {
   }
 
   /** 签发 access token（JWT）；sid 为当前 refresh token 主键，用于标记"当前设备" */
-  signAccessToken(sub: number, role: string, plan: string, sid: number): string {
-    return this.jwt.sign({ sub, role, plan, sid }, { expiresIn: this.accessExpiresIn });
+  signAccessToken(sub: number, role: string, sid: number): string {
+    return this.jwt.sign({ sub, role, sid }, { expiresIn: this.accessExpiresIn });
   }
 
   /** 校验 access token，返回 payload */

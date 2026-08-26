@@ -103,8 +103,8 @@ function minuteLabel(ts: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-function hourLabel(iso: string): string {
-  const d = new Date(iso);
+function hourLabel(ts: number): string {
+  const d = new Date(ts);
   return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:00`;
 }
 
@@ -122,7 +122,7 @@ const hourTicks = computed(() => {
   return tickIndexes(arr.length).map((i) => ({
     i,
     left: leftPct(i, arr.length),
-    label: hourLabel(arr[i].bucketTime),
+    label: hourLabel(arr[i].minuteTs),
   }));
 });
 
@@ -262,9 +262,9 @@ onMounted(load);
             <div class="bars" :style="{ gap: gapOf(report.hourly.length) }">
               <div
                 v-for="(h, i) in report.hourly"
-                :key="h.bucketTime"
+                :key="h.minuteTs"
                 class="bar-col"
-                :title="`${hourLabel(h.bucketTime)} — ${h.total} req`"
+                :title="`${hourLabel(h.minuteTs)} — ${h.total} req`"
               >
                 <span
                   v-if="h.total > 0 && hourValAt.has(i)"

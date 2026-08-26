@@ -4,8 +4,10 @@ export type PaymentPeriod = 'month' | 'year';
 
 export interface WebhookEvent {
   type: 'subscription_activated' | 'subscription_renewed' | 'subscription_canceled' | 'subscription_expired';
-  userId: number;
+  organizationId: number;
   planCode: PlanCode;
+  /** 席位增减：正数加席、负数减席、0 表示纯续费 */
+  seatDelta: number;
   periodEnd: Date;
   externalId: string;
   provider: ProviderName;
@@ -31,7 +33,7 @@ export interface WebhookEvent {
 export interface PaymentProvider {
   readonly name: ProviderName;
   /** 创建/同步订阅，返回外部 ID 与到期时间 */
-  createSubscription(userId: number, planCode: PlanCode, period: PaymentPeriod): Promise<{ externalId: string; periodEnd: Date }>;
+  createSubscription(organizationId: number, planCode: PlanCode, period: PaymentPeriod): Promise<{ externalId: string; periodEnd: Date }>;
   /** 取消订阅（预约期末取消） */
   cancelSubscription(externalId: string): Promise<void>;
   /** 解析 webhook 原始载荷（含验签）→ 标准事件 */

@@ -8,10 +8,10 @@ import type { PlanCode, PaymentProvider as ProviderName } from '../domain/enums.
 export class ManualPaymentAdapter implements PaymentProvider {
   readonly name: ProviderName = 'manual';
 
-  async createSubscription(userId: number, _planCode: PlanCode, period: PaymentPeriod): Promise<{ externalId: string; periodEnd: Date }> {
+  async createSubscription(organizationId: number, _planCode: PlanCode, period: PaymentPeriod): Promise<{ externalId: string; periodEnd: Date }> {
     const days = period === 'year' ? 365 : 30;
     return {
-      externalId: `manual-${userId}-${Date.now()}`,
+      externalId: `manual-${organizationId}-${Date.now()}`,
       periodEnd: new Date(Date.now() + days * 86400000),
     };
   }

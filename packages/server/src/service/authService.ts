@@ -1,7 +1,8 @@
-import type { IUserRepo, ISubscriptionRepo, IRefreshTokenRepo, IDeviceRepo } from '../repository/interfaces.js';
+import type {
+  IUserRepo, ISubscriptionRepo, IRefreshTokenRepo, IDeviceRepo, IRegistrationRepo,
+} from '../repository/interfaces.js';
 import type { TokenService } from './tokenService.js';
 import type { Subscription, User, Device } from '../domain/entities.js';
-import type { PlanCode } from '../domain/enums.js';
 import { hashPassword, verifyPassword } from './password.js';
 import type { PlanPolicy } from '../policy/planPolicy.js';
 import {
@@ -17,7 +18,6 @@ export interface DeviceInfo {
   deviceName?: string;
   deviceId?: string;
   machineId?: string;
-  osMachineId?: string;
   hostname?: string;
   os?: string;
   arch?: string;
@@ -46,13 +46,12 @@ export interface RefreshResponse {
   refreshToken: string;
 }
 
-const TRIAL_DAYS = 14;
-
 /**
- * 认证服务（Facade）：协调 user/subscription/refreshToken/device repo + TokenService。
+ * 认证服务（Facade）：协调 registration/user/subscription/refreshToken/device repo + TokenService。
  * 职责：注册/登录/刷新/登出/会话管理。
- * 令牌策略：access JWT 短期 + refresh 随机 token（hash 存库）+ 轮换 + 重用检测。
- * 设备判同：同 user+deviceId 重登先 upsert 设备实体 + 撤销该设备旧会话，设备数恒定。
+ *
+ * v2：注册走 IRegistrationRepo 原子创建 user + personal org + membership + free
+ * 订阅 + 席位；设备配额与功能门控由 PlanPolicy 按「有效席位套餐」解析，不再读 user.planCode。
  */
 export class AuthService {
   constructor(
@@ -60,15 +59,12 @@ export class AuthService {
     private readonly subRepo: ISubscriptionRepo,
     private readonly refreshTokenRepo: IRefreshTokenRepo,
     private readonly deviceRepo: IDeviceRepo,
+    private readonly registrationRepo: IRegistrationRepo,
     private readonly tokenService: TokenService,
-    /**
-     * 套餐策略。可选仅为兼容既有直接构造 AuthService 的调用方；
-     * 不注入时设备数配额不生效（生产路径由 app.ts 注入）。
-     */
-    private readonly planPolicy?: PlanPolicy,
+    private readonly planPolicy: PlanPolicy,
   ) {}
 
-  /** 注册：建 user(free) + 试用订阅(14d) + 签双 token */
+  /** 注册：原子建 user + personal org + membership + free 订阅 + 席位，再签双 token */
   async register(email: string, password: string, device?: DeviceInfo): Promise<AuthResponse> {
     if (!email || !password) throw new InvalidCredentialsError();
     if (typeof email !== 'string' || !email.includes('@')) throw new ValidationError('invalid email format');
@@ -78,24 +74,26 @@ export class AuthService {
     if (exist) throw new InvalidCredentialsError();
 
     const hash = hashPassword(password);
-    const user = await this.userRepo.create(email, hash, 'user', 'free');
+    const { userId, organizationId } = await this.registrationRepo.createAccount({
+      email: email.trim().toLowerCase(),
+      passwordHash: hash,
+      role: 'user',
+    });
+
+    const user = await this.userRepo.findById(userId);
+    if (!user) throw new Error('user create failed');
 
     if (device?.deviceId) {
       await this.deviceRepo.upsert(toDevice(user.id, device));
-      await this.tryBindDevice(user.id, user.planCode, device);
+      await this.tryBindDevice(user.id, device);
     }
-
-    const periodEnd = new Date(Date.now() + TRIAL_DAYS * 86400000);
-    const subscription = await this.subRepo.upsert({
-      userId: user.id, planCode: 'free', status: 'trialing',
-      periodEndTime: periodEnd, trialEndTime: periodEnd, provider: 'manual',
-    });
 
     const { token, hash: rtHash, expiresAt } = this.tokenService.generateRefreshToken();
     const rt = await this.refreshTokenRepo.create(tokenForCreate(user.id, rtHash, device, expiresAt));
-    const accessToken = this.tokenService.signAccessToken(user.id, user.role, user.planCode, rt.id);
+    const accessToken = this.tokenService.signAccessToken(user.id, user.role, rt.id);
     await this.userRepo.updateLastLogin(user.id, new Date());
 
+    const subscription = await this.subRepo.findByOrganizationId(organizationId);
     return { accessToken, refreshToken: token, user: sanitize(user), subscription };
   }
 
@@ -106,25 +104,20 @@ export class AuthService {
     if (!user || !verifyPassword(password, user.passwordHash)) throw new InvalidCredentialsError();
     if (user.status !== 'active') throw new InvalidCredentialsError();
 
-    // 设备判同：先登记设备固有信息，再顶掉该设备旧会话（同设备重登不叠加会话）
     if (device?.deviceId) {
       await this.deviceRepo.upsert(toDevice(user.id, device));
       await this.refreshTokenRepo.revokeByDevice(user.id, device.deviceId);
     }
 
     const now = new Date();
-
-    // 设备配额：登录放行，不在此拒登录。设备未绑定且配额未满才绑定，满则保持
-    // 未激活，由 sync 层硬卡（超限设备无法同步/使用），引导升级或联系管理员。
-    await this.tryBindDevice(user.id, user.planCode, device);
+    await this.tryBindDevice(user.id, device);
 
     const { token, hash: rtHash, expiresAt } = this.tokenService.generateRefreshToken();
     const rt = await this.refreshTokenRepo.create(tokenForCreate(user.id, rtHash, device, expiresAt));
-    const accessToken = this.tokenService.signAccessToken(user.id, user.role, user.planCode, rt.id);
+    const accessToken = this.tokenService.signAccessToken(user.id, user.role, rt.id);
     await this.userRepo.updateLastLogin(user.id, now);
 
-    const subscription = await this.subRepo.findByUserId(user.id);
-    return { accessToken, refreshToken: token, user: sanitize(user), subscription };
+    return { accessToken, refreshToken: token, user: sanitize(user) };
   }
 
   /**
@@ -139,23 +132,12 @@ export class AuthService {
 
     if (rt.expiresTime <= now) throw new InvalidCredentialsError();
 
-    // 原子消费：条件更新的 affectedRows 是唯一判据。
-    //
-    // 不能用「先判 rt.revokedTime 再 revoke」—— 那中间有 await（事件循环让出点），
-    // 两个带同一个 token 的并发请求会双双通过检查、各自签出新会话，于是
-    // refresh token 的一次性保证失效、`refresh_tokens` 出现两条活跃行、
-    // 重用检测在最需要它的场景下静默失灵。
-    //
-    // consume 返回 false 有两种成因：并发下输给了另一个请求，或这是一个已被
-    // 轮换掉的旧 token 被重放。两者在安全语义上同等 —— 都说明这个 token 已经
-    // 不该再被接受，一律按泄露处理，撤销该用户全部会话。
     if (!(await this.refreshTokenRepo.consume(rt.id, now))) {
       await this.refreshTokenRepo.revokeAllForUser(rt.userId);
       throw new TokenReuseError(rt.id, rt.userId);
     }
 
     const { token, hash: rtHash, expiresAt } = this.tokenService.generateRefreshToken();
-    // 继承旧 token 的设备字段（刷新请求未带时用旧值），保持同设备会话延续
     const newRt = await this.refreshTokenRepo.create({
       userId: rt.userId,
       tokenHash: rtHash,
@@ -169,41 +151,20 @@ export class AuthService {
     const user = await this.userRepo.findById(rt.userId);
     if (!user) throw new InvalidCredentialsError();
 
-    // 被禁用的账号不得续期。
-    //
-    // 少了这一条，「禁用」在实现层面等于无效：requireAuth 只校验 JWT 签名，
-    // 而这里只判 user 是否存在 —— 用户可以拿 refresh 无限换新 access token，
-    // 永久保有访问权。顺手撤销其全部会话，避免它继续持有其他设备的 refresh。
     if (user.status !== 'active') {
       await this.refreshTokenRepo.revokeAllForUser(user.id);
       throw new UserDisabledError(user.id);
     }
 
-    const accessToken = this.tokenService.signAccessToken(user.id, user.role, user.planCode, newRt.id);
+    const accessToken = this.tokenService.signAccessToken(user.id, user.role, newRt.id);
     return { accessToken, refreshToken: token };
   }
 
   /**
-   * 登出。
-   *
-   * 语义底线是**发起登出的那条会话一定要死掉**，所以以 `sid`（access token 里
+   * 登出。语义底线是发起登出的那条会话一定要死掉，所以以 sid（access token 里
    * 携带的、签发它的 refresh token 行 id）为准，而不是以传入的 refresh token 为准。
-   *
-   * 原实现只按传入的 refresh token 查找并撤销，且「找不到」与「已撤销」都静默
-   * 返回成功。真实攻击链：攻击者窃取 R1 并抢先 refresh → 服务端撤销 R1、签出
-   * 攻击者的 R2 → 受害者察觉异常点「退出登录」，客户端发送它手上的 R1 →
-   * 服务端发现 R1 已撤销 → 无操作、返回 200 → 攻击者的会话完好无损，而受害者
-   * 以为已经登出。
-   *
-   * 另外，同一个已撤销 token 出现在 refresh 时会触发 revokeAllForUser，出现在
-   * logout 时却什么都不做 —— 面对同一个泄露信号，两条路径的处置不该不对称。
-   *
-   * @param sid   当前 access token 的会话 id（权威）
-   * @param userId 当前用户 id，用于归属校验，防止用他人 sid 越权撤销
-   * @param refreshTokenStr 客户端持有的 refresh token（可选）
    */
   async logout(sid: number, userId: number, refreshTokenStr?: string): Promise<void> {
-    // 1. 当前会话：仅在归属本人时撤销
     const current = await this.refreshTokenRepo.findById(sid);
     if (current && current.userId === userId) {
       await this.refreshTokenRepo.revoke(sid);
@@ -212,10 +173,9 @@ export class AuthService {
     if (!refreshTokenStr) return;
 
     const rt = await this.refreshTokenRepo.findByHash(this.tokenService.hashToken(refreshTokenStr));
-    if (!rt || rt.userId !== userId) return; // 不是自己的 token，忽略
+    if (!rt || rt.userId !== userId) return;
 
     if (rt.revokedTime && rt.id !== sid) {
-      // 出示一个已被轮换掉的 token：与 refresh 侧同等对待，按泄露处理
       await this.refreshTokenRepo.revokeAllForUser(userId);
       return;
     }
@@ -227,20 +187,22 @@ export class AuthService {
     return this.deviceRepo.listByUser(userId);
   }
 
-  /** 撤销设备（释放配额位）。free 用户不可自助撤销（防「撤销=共享」），需升级或联系管理员 */
+  /** 撤销设备（释放配额位）。只有 free 全套用户不可自助撤销（防「撤销=共享」） */
   async revokeDevice(userId: number, deviceId: string): Promise<void> {
     const user = await this.userRepo.findById(userId);
     if (!user) throw new InvalidCredentialsError();
-    if (user.planCode === 'free') throw new ProFeatureRequiredError('device management');
+    const plans = await this.planPolicy.effectivePlans(userId);
+    const isFree = plans.length === 0 || plans.every((p) => p.code === 'free');
+    if (isFree) throw new ProFeatureRequiredError('device management');
     await this.deviceRepo.revoke(userId, deviceId);
     await this.refreshTokenRepo.revokeByDevice(userId, deviceId);
   }
 
   /** 尝试绑定设备（登录/注册用）：未绑定且配额未满才绑定；满则保持未激活，不抛错。
    *  超限设备由 sync 层硬卡（403），引导升级或联系管理员。 */
-  private async tryBindDevice(userId: number, planCode: PlanCode, device?: DeviceInfo): Promise<void> {
-    if (!device?.deviceId || !this.planPolicy) return;
-    const limit = await this.planPolicy.limit(planCode, 'devices');
+  private async tryBindDevice(userId: number, device?: DeviceInfo): Promise<void> {
+    if (!device?.deviceId) return;
+    const limit = await this.planPolicy.limit(userId, 'devices');
     if (limit <= 0) return; // 0 = 无限
     if (await this.deviceRepo.isBound(userId, device.deviceId)) return;
     const bound = await this.deviceRepo.countBound(userId);
@@ -277,7 +239,7 @@ function tokenForCreate(
   };
 }
 
-/** 组装 devices 表行（设备固有信息） */
+/** 组装 devices 表行（设备固有信息）。v2 无 os_machine_id（device_id 即 OS machine id） */
 function toDevice(userId: number, device: DeviceInfo): Omit<Device, 'id' | 'createTime' | 'updateTime'> {
   return {
     userId,
@@ -290,7 +252,6 @@ function toDevice(userId: number, device: DeviceInfo): Omit<Device, 'id' | 'crea
     appVersion: device.appVersion,
     remoteName: device.remoteName,
     vsMachineId: device.machineId,
-    osMachineId: device.osMachineId,
     language: device.language,
     timezone: device.timezone,
     lastSeenTime: new Date(),

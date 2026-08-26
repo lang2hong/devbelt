@@ -23,7 +23,7 @@ export class MysqlRefreshTokenRepo implements IRefreshTokenRepo {
   }
 
   async revoke(id: number): Promise<void> {
-    await this.db().query('UPDATE refresh_tokens SET revoked_time = ? WHERE id = ?', [new Date(), id]);
+    await this.db().query('UPDATE refresh_tokens SET revoke_time = ? WHERE id = ?', [new Date(), id]);
   }
 
   /**
@@ -35,32 +35,32 @@ export class MysqlRefreshTokenRepo implements IRefreshTokenRepo {
    * 双方都能通过检查、各自签出新会话，refresh token 的「一次性」保证失效，
    * 重用检测在最需要它的场景下静默失灵。
    *
-   * 条件更新 `AND revoked_time IS NULL` 把裁决交给数据库：无论并发多少个，
+   * 条件更新 `AND revoke_time IS NULL` 把裁决交给数据库：无论并发多少个，
    * `affectedRows === 1` 的只可能有一个。输的那个不必区分「并发」还是「重放」，
    * 一律按重用处理即可 —— 两者在安全语义上本来就该同等对待。
    */
   async consume(id: number, now: Date): Promise<boolean> {
     const [result] = await this.db().query<any>(
-      'UPDATE refresh_tokens SET revoked_time = ?, last_used_time = ? WHERE id = ? AND revoked_time IS NULL',
+      'UPDATE refresh_tokens SET revoke_time = ?, last_used_time = ? WHERE id = ? AND revoke_time IS NULL',
       [now, now, id],
     );
     return result.affectedRows === 1;
   }
 
   async revokeAllForUser(userId: number): Promise<void> {
-    await this.db().query('UPDATE refresh_tokens SET revoked_time = ? WHERE user_id = ? AND revoked_time IS NULL', [new Date(), userId]);
+    await this.db().query('UPDATE refresh_tokens SET revoke_time = ? WHERE user_id = ? AND revoke_time IS NULL', [new Date(), userId]);
   }
 
   async revokeByDevice(userId: number, deviceId: string): Promise<void> {
     await this.db().query(
-      'UPDATE refresh_tokens SET revoked_time = ? WHERE user_id = ? AND device_id = ? AND revoked_time IS NULL',
+      'UPDATE refresh_tokens SET revoke_time = ? WHERE user_id = ? AND device_id = ? AND revoke_time IS NULL',
       [new Date(), userId, deviceId],
     );
   }
 
   async listActiveForUser(userId: number, now: Date): Promise<SessionInfo[]> {
     const [rows] = await this.db().query<any[]>(
-      'SELECT id, device_name, ip, create_time, COALESCE(last_used_time, create_time) AS last_used_time FROM refresh_tokens WHERE user_id = ? AND revoked_time IS NULL AND expires_time > ? ORDER BY create_time DESC',
+      'SELECT id, device_name, ip, create_time, COALESCE(last_used_time, create_time) AS last_used_time FROM refresh_tokens WHERE user_id = ? AND revoke_time IS NULL AND expires_time > ? ORDER BY create_time DESC',
       [userId, now],
     );
     return rows.map((r: any) => ({
@@ -93,7 +93,7 @@ function mapRefreshToken(r: any): RefreshToken {
     userAgent: r.user_agent ?? undefined,
     ip: r.ip ?? undefined,
     expiresTime: new Date(r.expires_time),
-    revokedTime: r.revoked_time ? new Date(r.revoked_time) : undefined,
+    revokedTime: r.revoke_time ? new Date(r.revoke_time) : undefined,
     lastUsedTime: r.last_used_time ? new Date(r.last_used_time) : undefined,
     createTime: new Date(r.create_time),
     updateTime: new Date(r.update_time),

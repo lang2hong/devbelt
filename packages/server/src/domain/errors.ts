@@ -97,3 +97,16 @@ export class ProFeatureRequiredError extends DomainError {
     this.name = 'ProFeatureRequiredError';
   }
 }
+
+/**
+ * 授权拒绝（已认证但无权对该资源操作）。
+ *
+ * 区别于 401（未认证）：调用方身份已知，只是不属于目标组织 / 不是 admin。
+ * 用于组织域的成员/资源管理：非成员写、非 admin 改成员等。
+ */
+export class ForbiddenError extends DomainError {
+  constructor(message = 'forbidden') {
+    super(message, 'FORBIDDEN');
+    this.name = 'ForbiddenError';
+  }
+}

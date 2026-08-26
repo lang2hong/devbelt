@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { AuthService } from '../../src/service/authService.js';
 import { TokenService } from '../../src/service/tokenService.js';
+import { PlanPolicy } from '../../src/policy/planPolicy.js';
 import {
   FakeUserRepo,
   FakeSubscriptionRepo,
@@ -24,8 +25,8 @@ async function setup() {
   const rtRepo = new FakeRefreshTokenRepo();
   const deviceRepo = new FakeDeviceRepo();
   const tokenService = new TokenService(makeJwt(), '15m', '30d');
-  const auth = new AuthService(userRepo, subRepo, rtRepo, deviceRepo, tokenService);
-  const user = await userRepo.create('u@example.com', hashPassword('pw12345678'), 'user', 'free');
+  const auth = new AuthService(userRepo, subRepo, rtRepo, deviceRepo, {} as any, tokenService, new PlanPolicy(async () => []));
+  const user = await userRepo.create('u@example.com', hashPassword('pw12345678'), 'user');
   return { auth, userRepo, rtRepo, tokenService, user };
 }
 
@@ -162,7 +163,7 @@ describe('logout 撤销当前会话', () => {
 
   it('不接受他人的 sid（越权撤销）', async () => {
     const { auth, rtRepo, userRepo } = await setup();
-    const victim = await userRepo.create('victim@example.com', hashPassword('pw12345678'), 'user', 'free');
+    const victim = await userRepo.create('victim@example.com', hashPassword('pw12345678'), 'user');
     const victimSession = await rtRepo.create({
       userId: victim.id,
       tokenHash: 'victim-hash',

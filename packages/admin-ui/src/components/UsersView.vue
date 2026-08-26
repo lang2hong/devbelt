@@ -2,29 +2,21 @@
 import { ref, computed, onMounted } from 'vue';
 import { api } from '../lib/api';
 import { fmt } from '../lib/format';
-import type { UserRow, Plan } from '../types';
+import type { UserRow } from '../types';
 import UserDetailModal from './UserDetailModal.vue';
 
 const users = ref<UserRow[]>([]);
 const total = ref(0);
-const planCodes = ref<string[]>([]);
 const query = ref('');
 const page = ref(1);
 const PAGE_SIZE = 20;
 
 const detailUserId = ref<number | null>(null);
-const renewState = ref<{ id: number } | null>(null);
-const renewPlan = ref('free');
-const renewPeriod = ref('month');
 
 async function load() {
-  const [uR, pR] = await Promise.all([
-    api<{ total: number; users: UserRow[] }>('/admin/users?limit=500&offset=0'),
-    api<{ plans: Plan[] }>('/admin/plans'),
-  ]);
+  const uR = await api<{ total: number; users: UserRow[] }>('/admin/users?limit=500&offset=0');
   users.value = uR.users || [];
   total.value = uR.total || users.value.length;
-  planCodes.value = (pR.plans || []).map((p) => p.code);
 }
 
 const filtered = computed(() => {
@@ -96,30 +88,6 @@ async function updateUser(u: UserRow, field: string, value: string) {
   await load();
 }
 
-function planOptions(selected: string): string[] {
-  return planCodes.value.length ? planCodes.value : ['free', 'pro', 'team'];
-}
-
-function openRenew(u: UserRow) {
-  renewState.value = { id: u.id };
-  renewPlan.value = u.planCode;
-  renewPeriod.value = 'month';
-}
-
-async function submitRenew() {
-  if (!renewState.value) return;
-  try {
-    await api('/admin/users/' + renewState.value.id + '/renew', {
-      method: 'POST',
-      body: { planCode: renewPlan.value, period: renewPeriod.value },
-    });
-    renewState.value = null;
-    await load();
-  } catch (ex) {
-    alert(ex instanceof Error ? ex.message : String(ex));
-  }
-}
-
 onMounted(load);
 </script>
 
@@ -134,12 +102,12 @@ onMounted(load);
     <table>
       <thead>
         <tr>
-          <th>ID</th><th>Email</th><th>Role</th><th>Status</th><th>Plan</th>
-          <th>Subscription</th><th>Expires</th><th>Last login</th><th>Created</th><th>Actions</th>
+          <th>ID</th><th>Email</th><th>Role</th><th>Status</th>
+          <th>Last login</th><th>Created</th><th>Actions</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-if="slice.length === 0"><td colspan="10" class="muted">No users</td></tr>
+        <tr v-if="slice.length === 0"><td colspan="7" class="muted">No users</td></tr>
         <tr v-for="u in slice" :key="u.id">
           <td>{{ u.id }}</td>
           <td>{{ u.email }}</td>
@@ -155,21 +123,10 @@ onMounted(load);
               <option value="disabled">disabled</option>
             </select>
           </td>
-          <td>
-            <select :value="u.planCode" @change="updateUser(u, 'planCode', selValue($event))">
-              <option v-for="c in planOptions(u.planCode)" :key="c" :value="c">{{ c }}</option>
-            </select>
-          </td>
-          <td>
-            <span v-if="u.subscription" class="badge" :class="u.subscription.status">{{ u.subscription.status }}</span>
-            <span v-else class="muted">—</span>
-          </td>
-          <td>{{ fmt(u.subscription ? u.subscription.periodEndTime : null) }}</td>
           <td>{{ fmt(u.lastLoginTime) }}</td>
           <td>{{ fmt(u.createTime) }}</td>
           <td>
             <button class="btn" @click="detailUserId = u.id">Detail</button>
-            <button class="btn primary" @click="openRenew(u)">Renew</button>
           </td>
         </tr>
       </tbody>
@@ -182,27 +139,5 @@ onMounted(load);
     </div>
 
     <UserDetailModal v-if="detailUserId" :user-id="detailUserId" @close="detailUserId = null" />
-
-    <div v-if="renewState" class="modal" @click.self="renewState = null">
-      <div class="modal-body">
-        <div class="modal-head">
-          <h2>Renew</h2>
-          <button class="modal-close" @click="renewState = null">&times;</button>
-        </div>
-        <p class="muted">Renew subscription for user #{{ renewState.id }}.</p>
-        <div class="kv" style="margin: 12px 0">
-          <span class="k">Plan</span>
-          <select v-model="renewPlan">
-            <option v-for="c in planCodes" :key="c" :value="c">{{ c }}</option>
-          </select>
-          <span class="k">Period</span>
-          <select v-model="renewPeriod">
-            <option value="month">month</option>
-            <option value="year">year</option>
-          </select>
-        </div>
-        <button class="btn primary" @click="submitRenew">Renew</button>
-      </div>
-    </div>
   </div>
 </template>

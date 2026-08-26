@@ -4,45 +4,56 @@ export type UserStatus = 'active' | 'disabled';
 export interface UserInfo {
   id: number;
   email: string;
+  displayName?: string;
   role: Role;
   status: UserStatus;
-  planCode: string;
   lastLoginTime?: string;
   createTime: string;
   updateTime: string;
 }
 
-export interface UserRow extends UserInfo {
-  subscription?: { planCode: string; status: string; periodEndTime?: string };
-}
+export interface UserRow extends UserInfo {}
 
 export interface Plan {
+  id: number;
   code: string;
   name: string;
   priceMonth: number;
   priceYear: number;
-  maxConnections: number;
-  maxOpenConnections: number;
-  syncQuotaBytes: number;
-  syncVersionRetention: number;
+  seatPriceMonth?: number;
+  seatPriceYear?: number;
+  includedSeats: number;
+  perSeatMaxDevices: number;
+  perUserMaxPrivateConnections: number;
+  perUserMaxOpenConnections: number;
+  perUserPrivateSyncQuotaBytes: number;
+  perUserSyncVersionRetention: number;
+  perUserHistoryRetentionCount: number;
+  orgMaxSharedConnections: number;
+  orgSharedSyncQuotaBytes: number;
+  orgMaxMembers: number;
   features: number;
+  createTime: string;
+  updateTime: string;
 }
 
 export interface Subscription {
   id: number;
-  userId: number;
-  planCode: string;
+  organizationId: number;
+  planId: number;
   status: string;
+  periodStartTime?: string;
   periodEndTime?: string;
   trialEndTime?: string;
   cancelTime?: string;
-  provider?: string;
+  provider: string;
   externalId?: string;
   createTime: string;
+  updateTime: string;
 }
 
 export interface SubscriptionRow extends Subscription {
-  email?: string;
+  organizationName?: string;
 }
 
 export interface SessionInfo {
@@ -75,48 +86,30 @@ export interface Device {
   hostname?: string;
   os?: string;
   arch?: string;
+  osVersion?: string;
   appName?: string;
   appVersion?: string;
   remoteName?: string;
+  vsMachineId?: string;
   language?: string;
+  timezone?: string;
   lastSeenTime?: string;
-}
-
-export interface DeviceEvent {
-  id: number;
-  event: string;
-  appName?: string;
-  appVersion?: string;
-  os?: string;
-  osVersion?: string;
-  createTime: string;
+  revokeTime?: string;
 }
 
 export interface ConnectionMeta {
   id: number;
+  userId: number;
+  connId: string;
   type: string;
   name?: string;
   groupName?: string;
   enabled: boolean;
-  deleted: boolean;
-  createdAt?: number;
-  updatedAt?: number;
-}
-
-export interface SyncEvent {
-  id: number;
-  direction: string;
-  section: string;
-  bytes: number;
-  itemCount: number;
+  clientCreatedAt?: number;
+  clientUpdatedAt?: number;
   createTime: string;
-}
-
-export interface UsageEvent {
-  id: number;
-  kind: string;
-  count: number;
-  createTime: string;
+  updateTime: string;
+  deleteTime?: string;
 }
 
 /**
@@ -133,12 +126,6 @@ export interface RouteSummary {
   serverError: number;
   /** 0..1 */
   errorRate: number;
-}
-
-export interface HourPoint {
-  bucketTime: string;
-  total: number;
-  byClass: Record<number, number>;
 }
 
 export interface MinutePoint {
@@ -158,25 +145,10 @@ export interface TrafficReport {
   hours: number;
   total: number;
   routes: RouteSummary[];
-  hourly: HourPoint[];
+  hourly: MinutePoint[];
   minutes: MinutePoint[];
   blocked: BlockedRow[];
   blockedTotal: number;
-}
-
-export interface RateLimitRuleRow {
-  bucket: string;
-  maxRequests: number;
-  windowSeconds: number;
-  enabled: boolean;
-  description: string;
-  /** 与代码内置基线一致时为 true，用来提示哪些被改过 */
-  isDefault: boolean;
-}
-
-export interface RateLimitResponse {
-  rules: RateLimitRuleRow[];
-  allowlist: string[];
 }
 
 /** 管理操作留痕行。detail 是 { field: { from, to } } 或任意形状的补充信息 */

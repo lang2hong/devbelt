@@ -7,14 +7,21 @@ import {
   FakeWebhookEventRepo,
   FakeDeviceRepo,
   FakePlanRepo,
-  FakeRateLimitRepo,
+  
   FakeRefreshTokenRepo,
   FakeSubscriptionRepo,
-  FakeSyncEventRepo,
+  
   FakeSyncRepo,
-  FakeTrafficRepo,
-  FakeUsageEventRepo,
+  
+  
   FakeUserRepo,
+  FakeOrganizationRepo,
+  FakeMembershipRepo,
+  FakeSeatRepo,
+  FakeOrderRepo,
+  FakeOrganizationResourceRepo,
+  FakeOrganizationAuditRepo,
+  FakeRegistrationRepo,
   makePlan,
 } from './fakeRepos.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
@@ -26,15 +33,16 @@ import { SubscriptionService } from '../../src/service/subscriptionService.js';
 import { SyncService } from '../../src/service/syncService.js';
 import { AdminService } from '../../src/service/adminService.js';
 import { PaymentService } from '../../src/service/paymentService.js';
+import { OrganizationService } from '../../src/service/organizationService.js';
 import { ManualPaymentAdapter } from '../../src/adapter/manualPaymentAdapter.js';
-import { PlanPolicy } from '../../src/policy/planPolicy.js';
+import { PlanPolicy, resolveEffectivePlans } from '../../src/policy/planPolicy.js';
 import { authRoutes } from '../../src/route/auth.js';
 import { meRoutes } from '../../src/route/me.js';
 import { syncRoutes } from '../../src/route/sync.js';
-import { usageRoutes } from '../../src/route/usage.js';
 import { adminRoutes } from '../../src/route/admin.js';
+import { organizationRoutes } from '../../src/route/organizations.js';
 import { webhookRoutes } from '../../src/route/webhook.js';
-import type { Role, UserStatus } from '../../src/domain/enums.js';
+import type { Role, UserStatus, PlanCode } from '../../src/domain/enums.js';
 import { TrafficCollector } from '../../src/observability/trafficCollector.js';
 import { registerTrafficPlugin } from '../../src/observability/trafficPlugin.js';
 import { RateLimitConfig } from '../../src/ratelimit/rateLimitConfig.js';
@@ -88,13 +96,14 @@ export interface TestApp {
     refreshTokenRepo: FakeRefreshTokenRepo;
     deviceRepo: FakeDeviceRepo;
     connectionMetaRepo: FakeConnectionMetaRepo;
-    syncEventRepo: FakeSyncEventRepo;
-    usageEventRepo: FakeUsageEventRepo;
-    syncRepo: FakeSyncRepo;
-    trafficRepo: FakeTrafficRepo;
-    rateLimitRepo: FakeRateLimitRepo;
-    adminAuditRepo: FakeAdminAuditRepo;
+            syncRepo: FakeSyncRepo;
+            adminAuditRepo: FakeAdminAuditRepo;
     webhookEventRepo: FakeWebhookEventRepo;
+    organizationRepo: FakeOrganizationRepo;
+    membershipRepo: FakeMembershipRepo;
+    seatRepo: FakeSeatRepo;
+    orderRepo: FakeOrderRepo;
+    registrationRepo: FakeRegistrationRepo;
   };
   services: {
     authService: AuthService;
@@ -108,6 +117,8 @@ export interface TestApp {
   tokenFor(userId: number, opts?: { role?: string; sid?: number; expiresIn?: string }): string;
   /** 造一个用户并返回 { id, token } */
   makeUser(over?: { role?: Role; status?: UserStatus; email?: string }): Promise<{ id: number; token: string; sid: number }>;
+  /** 把某用户 personal org 的订阅切到指定套餐（v2 的「升级套餐」等价操作） */
+  grantPlan(userId: number, code: PlanCode): Promise<void>;
   auth(token: string): Record<string, string>;
   close(): Promise<void>;
 }
@@ -141,54 +152,53 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   // makePlan 默认把配额都设为 0，而 0 在 PlanPolicy 里表示「无限」——
   // 用默认值搭出来的 app 会让所有配额校验静默通过，配额相关缺陷在测试里不可见。
   const planRepo = new FakePlanRepo([
-    makePlan('free', { maxDevices: 1, maxConnections: 5, syncQuotaBytes: 1024 * 1024, syncVersionRetention: 3 }),
-    makePlan('pro', { maxDevices: 5, maxConnections: 50, syncQuotaBytes: 100 * 1024 * 1024, syncVersionRetention: 30 }),
-    makePlan('team', { maxDevices: 20, maxConnections: 500, syncQuotaBytes: 1024 * 1024 * 1024, syncVersionRetention: 90 }),
+    makePlan('free', { perSeatMaxDevices: 1, perUserMaxPrivateConnections: 5, perUserPrivateSyncQuotaBytes: 1024 * 1024, perUserSyncVersionRetention: 3 }),
+    makePlan('pro', { perSeatMaxDevices: 5, perUserMaxPrivateConnections: 50, perUserPrivateSyncQuotaBytes: 100 * 1024 * 1024, perUserSyncVersionRetention: 30 }),
+    makePlan('team', { perSeatMaxDevices: 20, perUserMaxPrivateConnections: 500, perUserPrivateSyncQuotaBytes: 1024 * 1024 * 1024, perUserSyncVersionRetention: 90, includedSeats: 5 }),
   ]);
   const subRepo = new FakeSubscriptionRepo();
   const refreshTokenRepo = new FakeRefreshTokenRepo();
   const deviceRepo = new FakeDeviceRepo();
   const connectionMetaRepo = new FakeConnectionMetaRepo();
-  const syncEventRepo = new FakeSyncEventRepo();
-  const usageEventRepo = new FakeUsageEventRepo();
-  const syncRepo = new FakeSyncRepo();
-  const trafficRepo = new FakeTrafficRepo();
-  const rateLimitRepo = new FakeRateLimitRepo();
-  const adminAuditRepo = new FakeAdminAuditRepo();
+      const syncRepo = new FakeSyncRepo();
+      const adminAuditRepo = new FakeAdminAuditRepo();
   const webhookEventRepo = new FakeWebhookEventRepo();
+  const organizationRepo = new FakeOrganizationRepo();
+  const membershipRepo = new FakeMembershipRepo();
+  const seatRepo = new FakeSeatRepo();
+  const orderRepo = new FakeOrderRepo();
+  const organizationResourceRepo = new FakeOrganizationResourceRepo();
+  const organizationAuditRepo = new FakeOrganizationAuditRepo();
+  const registrationRepo = new FakeRegistrationRepo({
+    users: userRepo, orgs: organizationRepo, memberships: membershipRepo,
+    subs: subRepo, seats: seatRepo, plans: planRepo,
+  });
 
   // 与 createApp 同序：限流/采集的全局钩子必须早于路由注册
   const collector = new TrafficCollector();
-  const rateLimitConfig = new RateLimitConfig(rateLimitRepo);
-  if (opts.rateLimitOverrides) {
-    for (const [bucket, over] of Object.entries(opts.rateLimitOverrides)) {
-      if (over) await rateLimitConfig.update(bucket as any, over);
-    }
-  }
+  const rateLimitConfig = new RateLimitConfig();
   await registerRateLimit(app, {
     config: rateLimitConfig,
     collector,
     enabled: opts.rateLimit === true,
   });
-  await registerTrafficPlugin(app, {
-    collector,
-    repo: trafficRepo,
-    // 默认给一个大到不会自动触发的周期，测试用 app.flushTraffic() 手动 flush
-    flushIntervalMs: opts.flushIntervalMs ?? 3_600_000,
-  });
+  await registerTrafficPlugin(app, { collector });
 
-  const planPolicy = new PlanPolicy((code) => planRepo.findByCode(code));
+  const planPolicy = new PlanPolicy((userId) => resolveEffectivePlans(userId, { membershipRepo, subRepo, planRepo }));
   const tokenService = new TokenService(app.jwt as unknown as JwtPort, '15m', '30d');
-  const authService = new AuthService(userRepo, subRepo, refreshTokenRepo, deviceRepo, tokenService, planPolicy);
+  const authService = new AuthService(userRepo, subRepo, refreshTokenRepo, deviceRepo, registrationRepo, tokenService, planPolicy);
   const subscriptionService = new SubscriptionService(
-    userRepo, planRepo, subRepo, deviceRepo, syncRepo, connectionMetaRepo,
+    userRepo, planRepo, subRepo, membershipRepo, organizationRepo,
+    deviceRepo, syncRepo, connectionMetaRepo, planPolicy,
   );
-  const syncService = new SyncService(syncRepo, userRepo, planPolicy, connectionMetaRepo, syncEventRepo, deviceRepo);
+  const syncService = new SyncService(syncRepo, userRepo, planPolicy, connectionMetaRepo, deviceRepo);
   const adminService = new AdminService(
-    userRepo, planRepo, subRepo, refreshTokenRepo, syncRepo,
-    deviceRepo, connectionMetaRepo, syncEventRepo, usageEventRepo, adminAuditRepo,
+    userRepo, planRepo, subRepo, membershipRepo, organizationRepo,
+    refreshTokenRepo, syncRepo, deviceRepo, connectionMetaRepo,
+    adminAuditRepo, planPolicy,
   );
-  const paymentService = new PaymentService(subRepo, userRepo, planRepo, webhookEventRepo);
+  const paymentService = new PaymentService(subRepo, organizationRepo, planRepo, orderRepo, seatRepo, webhookEventRepo, membershipRepo);
+  const organizationService = new OrganizationService(organizationRepo, membershipRepo, seatRepo, organizationResourceRepo, organizationAuditRepo, subRepo, planRepo);
   paymentService.registerProvider(new ManualPaymentAdapter());
 
   const getUser: GetAuthUser = async (id) => userRepo.findById(id);
@@ -198,11 +208,10 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   app.get('/health', async () => ({ status: 'ok' }));
   await app.register(authRoutes, { authService, getUser, getSession });
   await app.register(meRoutes, { subscriptionService, getUser, getSession });
+  await app.register(organizationRoutes, { organizationService, getUser, getSession });
   await app.register(syncRoutes, { syncService, getUser, getSession });
-  await app.register(usageRoutes, { usageEventRepo, getUser, getSession });
   await app.register(adminRoutes, {
-    adminService, paymentService, getUser, getSession,
-    trafficRepo, trafficCollector: collector, rateLimitConfig,
+    adminService, paymentService, getUser, getSession, trafficCollector: collector,
   });
   await app.register(webhookRoutes, { paymentService });
 
@@ -223,16 +232,20 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
    */
   const makeUser: TestApp['makeUser'] = async (over = {}) => {
     const email = over.email ?? `u${++emailSeq}@example.com`;
-    const user = await userRepo.create(email, 'scrypt$00$00', over.role ?? 'user', 'free');
-    if (over.status) await userRepo.updateStatus(user.id, over.status);
+    const { userId } = await registrationRepo.createAccount({
+      email,
+      passwordHash: 'scrypt$00$00',
+      role: over.role ?? 'user',
+    });
+    if (over.status) await userRepo.updateStatus(userId, over.status);
     const session = await refreshTokenRepo.create({
-      userId: user.id,
-      tokenHash: `hash-${user.id}-${Date.now()}`,
+      userId,
+      tokenHash: `hash-${userId}-${Date.now()}`,
       expiresTime: new Date(Date.now() + 30 * 86400_000),
     } as any);
     return {
-      id: user.id,
-      token: tokenFor(user.id, { role: over.role ?? 'user', sid: session.id }),
+      id: userId,
+      token: tokenFor(userId, { role: over.role ?? 'user', sid: session.id }),
       sid: session.id,
     };
   };
@@ -241,14 +254,21 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
     app,
     repos: {
       userRepo, planRepo, subRepo, refreshTokenRepo, deviceRepo,
-      connectionMetaRepo, syncEventRepo, usageEventRepo, syncRepo,
-      trafficRepo, rateLimitRepo, adminAuditRepo, webhookEventRepo,
+      connectionMetaRepo,  syncRepo,
+      adminAuditRepo, webhookEventRepo,
+      organizationRepo, membershipRepo, seatRepo, orderRepo, registrationRepo,
     },
     services: { authService, adminService, paymentService },
     collector,
     rateLimitConfig,
     tokenFor,
     makeUser,
+    grantPlan: async (userId, code) => {
+      const memberships = (await membershipRepo.listByUser(userId)).filter((m) => m.status === 'active');
+      const org = await organizationRepo.findById(memberships[0].organizationId);
+      const plan = await planRepo.findByCode(code);
+      await subRepo.upsert({ organizationId: org!.id, planId: plan!.id, status: 'active', provider: 'manual' });
+    },
     auth: (token) => ({ authorization: `Bearer ${token}` }),
     close: () => app.close(),
   };

@@ -6,7 +6,7 @@
 
 ## 接口
 
-共 34 个 API 端点（不含 `/admin` 静态托管与 Fastify 给 GET 自动补的 HEAD）。「认证」列含义：
+共 41 个端点（含 `/health`；不含 `/admin` 静态托管与 Fastify 给 GET 自动补的 HEAD）。「认证」列含义：
 
 - **公开** — 无需任何凭据
 - **JWT** — 需 `Authorization: Bearer <accessToken>`
@@ -16,15 +16,15 @@
 
 | Method | Path | 认证 | 说明 |
 |---|---|---|---|
-| POST | `/api/auth/register` | 公开 | 注册。`email` 需含 `@`，`password` ≥ 8 位。成功 201，附带 14 天 `trialing` 订阅。邮箱重复返回 401（防用户枚举） |
-| POST | `/api/auth/login` | 公开 | 登录。超出套餐 `maxDevices` 时 403 |
+| POST | `/api/auth/register` | 公开 | 注册。`email` 需含 `@`，`password` ≥ 8 位。成功 201，登记一个 active free 订阅（无试用期）。邮箱重复返回 401（防用户枚举） |
+| POST | `/api/auth/login` | 公开 | 登录。设备满额时登录不报错（保持未激活），超限设备由 sync 层 `requireDeviceBound` 返回 403 |
 | POST | `/api/auth/refresh` | 公开 | 用 `refreshToken` 换新 token 对（轮换式）。检测到已撤销 token 被重用时，撤销该用户**全部**会话并返回 401 |
 | POST | `/api/auth/logout` | JWT | 撤销请求体里的 `refreshToken` |
 | POST | `/api/auth/change-password` | JWT | 改密后撤销全部会话 |
-| GET | `/api/auth/sessions` | JWT | 列出本人活跃会话 |
-| DELETE | `/api/auth/sessions/:id` | JWT | 撤销指定会话（非本人的会话返回 401） |
+| GET | `/api/devices` | JWT | 列出本人设备，返回 `currentDeviceId` 标记当前设备 |
+| DELETE | `/api/devices/:deviceId` | JWT | 撤销指定设备的全部会话。free 用户不可自助撤设备（返回 403，防「撤销=共享」），需管理员协助 |
 
-`register` / `login` / `refresh` 的响应除 `accessToken` / `refreshToken` 外，额外附带 `token` / `userId` / `role` 顶层字段，仅为兼容旧版客户端，新代码请读 `accessToken`。
+`register` / `login` / `refresh` 的响应除 `accessToken` / `refreshToken` 外，额外附带 `token` / `userId` / `role` 顶层字段，仅为兼容旧版扩展读字段（非协议兼容，Greenfield 不迁移旧数据/不兼容旧客户端协议），新代码请读 `accessToken`。后续可移除。
 
 三者都会读取 `x-device-name` 请求头与 `user-agent` / 来源 IP，记入会话列表。
 
@@ -32,9 +32,32 @@
 
 | Method | Path | 认证 | 说明 |
 |---|---|---|---|
-| GET | `/api/me` | JWT | 返回 `{user, plan, subscription, usage}`。顺带做一次到期降级检查 |
+| GET | `/api/me` | JWT | 返回 `{user, plan, plans, subscription, usage}`。顺带做一次到期降级检查 |
 
-`usage` 中 `devices` / `syncBytes` / `pats` 为实时统计；`connections` 与 `history` 当前恒为 `0`（未接入统计）。
+`usage` 中 `devices` / `syncBytes` 为实时统计；`connections` 由 `connectionMetaRepo.countActive` 实时统计；`history` 当前恒为 `0`（未接入统计）。
+
+### 组织域（团队协作）
+
+组织是 v2 计费主体。写操作（成员/资源/权限/审计管理）需 `requireOrgAdmin`，读操作需 `requireMember`（任意活跃成员）。
+
+| Method | Path | 认证 | 说明 |
+|---|---|---|---|
+| GET | `/api/organizations` | JWT | 列出本人所属组织（活跃成员关系指向的） |
+| POST | `/api/organizations` | JWT | 建 team 组织。创建者成为 owner + admin，并按 team 套餐 `included_seats` 补订阅与席位 |
+| GET | `/api/organizations/:id` | JWT | 组织详情（成员可读） |
+| GET | `/api/organizations/:id/members` | JWT | 列成员（成员可读） |
+| POST | `/api/organizations/:id/members` | JWT + org admin | 加成员 `{userId, role}`，受「活跃成员数 ≤ 席位数」约束 |
+| PATCH | `/api/organizations/:id/members/:mid` | JWT + org admin | 改成员角色（不可降级 owner） |
+| DELETE | `/api/organizations/:id/members/:mid` | JWT + org admin | 移除成员（不可移除 owner） |
+| GET | `/api/organizations/:id/resources` | JWT | 列共享资源。`restricted` 资源仅 admin 或被授权成员可见 |
+| POST | `/api/organizations/:id/resources` | JWT + org admin | 建资源 `{resourceType, name, accessScope, encryptedData}` |
+| PATCH | `/api/organizations/:id/resources/:rid` | JWT + org admin | 更新资源字段 |
+| DELETE | `/api/organizations/:id/resources/:rid` | JWT + org admin | 软删资源 |
+| POST | `/api/organizations/:id/resources/:rid/permissions` | JWT + org admin | 授予 restricted 资源权限 `{membershipId, permission}` |
+| GET | `/api/organizations/:id/resources/:rid/permissions` | JWT | 列该资源的授权（成员可读，软删资源返回 404） |
+| GET | `/api/organizations/:id/audit` | JWT + org admin | 组织审计（最近 100 条） |
+
+`accessScope` 取值 `organization`（全体成员可见）/ `restricted`（需显式授权）。
 
 ### 同步（按用户隔离，仅存密文）
 
@@ -47,28 +70,23 @@
 
 `section` 取值：`groups` / `connections` / `queries` / `folders` / `history`。
 
-### 个人访问令牌（PAT）
-
-| Method | Path | 认证 | 说明 |
-|---|---|---|---|
-| GET | `/api/auth/tokens` | JWT | 列出本人未撤销的 PAT |
-| POST | `/api/auth/tokens` | JWT | 创建 `{name, scopes}`，201 返回明文 token（**仅此一次**，库里只存 sha256） |
-| DELETE | `/api/auth/tokens/:id` | JWT | 撤销（非本人的返回 404） |
-
-> PAT 目前**只能签发、不能用于认证**：`middleware/requireAuth.ts` 只做 `jwtVerify()`，没有 PAT 分支，`scopes` 也未被强制。接入前不要把它当作可用的凭据。
-
 ### 管理员
 
 | Method | Path | 认证 | 说明 |
 |---|---|---|---|
 | GET | `/admin/users` | JWT + admin | 列用户，`?limit=`（默认 50，上限 500）`&offset=` |
-| PATCH | `/admin/users/:id` | JWT + admin | 改 `role` / `planCode` / `status`（三次独立 UPDATE，无事务、无审计；枚举有白名单校验） |
-| POST | `/admin/users/:id/renew` | JWT + admin | 手动续费 `{planCode, period, provider?}`，`period` 为 `month` / `year` |
-| GET | `/admin/traffic` | JWT + admin | 流量报表，`?hours=`（默认 24，上限 720）。返回按路由汇总 + 小时序列 + 最近 60 分钟实时序列 + 429 明细 |
-| GET | `/admin/rate-limits` | JWT + admin | 列出限流桶（含默认值说明与是否被改过）与 IP 白名单 |
-| PATCH | `/admin/rate-limits/:bucket` | JWT + admin | 改阈值 `{maxRequests?, windowSeconds?, enabled?}`，**立即生效，无需重启** |
-| POST | `/admin/rate-limits/allowlist` | JWT + admin | 加免限流 IP `{ip, note?}` |
-| DELETE | `/admin/rate-limits/allowlist/:ip` | JWT + admin | 移除免限流 IP |
+| GET | `/admin/users/:id` | JWT + admin | 用户详情（套餐/订阅/会话/用量） |
+| PATCH | `/admin/users/:id` | JWT + admin | 改 `role` / `status`（枚举有白名单校验；v2 无 planCode，套餐由组织订阅推导） |
+| POST | `/admin/organizations/:id/renew` | JWT + admin | 手动续费 `{planCode, period, provider?}`，`period` 为 `month` / `year` |
+| GET | `/admin/users/:id/sessions` | JWT + admin | 列该用户活跃会话 |
+| DELETE | `/admin/users/:id/sessions/:sid` | JWT + admin | 吊销指定会话 |
+| GET | `/admin/users/:id/devices` | JWT + admin | 列该用户设备 |
+| GET | `/admin/users/:id/connections` | JWT + admin | 列该用户连接元数据 |
+| GET | `/admin/plans` | JWT + admin | 列全部套餐 |
+| POST | `/admin/plans/:code` | JWT + admin | 更新套餐定价/配额 |
+| GET | `/admin/subscriptions` | JWT + admin | 全部订阅明细 |
+| GET | `/admin/audit` | JWT + admin | 系统 admin 操作审计，`?limit=&offset=` |
+| GET | `/admin/traffic` | JWT + admin | 流量报表，`?hours=`（默认 24，上限 720）。v2 只读内存：最近 60 分钟实时序列 + 429 明细，无历史落库 |
 
 注意 admin 路径没有 `/api` 前缀，与其他路由不一致。
 
@@ -88,7 +106,7 @@ Webhook 传给适配器的是**原始请求体字节**（`req.rawBody`），不�
 没有引入 `@fastify/raw-body`：那个插件默认全局生效，会给所有路由多留一份 body 副本。
 
 > 目前仅 `manual` provider 可用，它的 `handleWebhook` 直接抛错（手动续费走
-> `POST /admin/users/:id/renew`，不经 webhook）。接 Stripe / LemonSqueezy 时在
+> `POST /admin/organizations/:id/renew`，不经 webhook）。接 Stripe / LemonSqueezy 时在
 > 适配器里实现验签即可，路由层已经把原始字节备好。验签路径本身由
 > `test/route/webhook.route.test.ts` 用一个真做 HMAC 校验的假 provider 覆盖。
 
@@ -136,7 +154,7 @@ API 端点保护（JWT + `role === 'admin'`），所以未登录时页面只能�
 
 1. `ensureDatabase()` 用一条临时连接执行 `CREATE DATABASE IF NOT EXISTS`，随后立即关闭该连接。
 2. `@fastify/mysql` 注册连接池，连接串**带 `database`**。
-3. `app.ready()` 之后 `initSchema()` 建表、播种 `plans`、给旧表补列（全部幂等）。
+3. `app.ready()` 之后 `runMigrations()` 按版本化 migration 建表、播种 `plans`（幂等，见「数据库迁移」）。
 4. 跑一次 `downgradeExpired()` 批量降级到期订阅（失败仅 warn）。
 
 为什么建库必须早于池注册：`@fastify/mysql` 默认走 `mysql.createPool`，池中每条连接各自握手。若靠 `USE \`db\`` 选库，只有当时借出的那一条连接生效，其余连接没有默认库，并发起来会 `ER_NO_DB_ERROR`——顺序请求时因连接复用往往「看起来正常」，负载一上来才暴露。
@@ -148,7 +166,7 @@ API 端点保护（JWT + `role === 'admin'`），所以未登录时页面只能�
 
 `JWT_SECRET` 在 `NODE_ENV=production` 下缺失会在 `config.ts` 模块求值期直接抛错，同样是启动即失败。
 
-订阅到期只有两个降级触发点：启动时的批量任务，以及 `GET /api/me` 里的懒检查。**没有定时任务**，且 `trialing` 到期没有任何降级路径。
+订阅到期只有两个降级触发点：启动时的批量任务，以及 `GET /api/me` 里的懒检查。**没有定时任务**。`active`/`canceled` 按 `period_end_time` 到期降级；`trialing`（如建 team 组织赠送的 14 天试用）按 `trial_end_time` 到期降级，回落 free——二者都走 `ensureActive`/`expireOne`/`downgradeExpired`。
 
 ## 安全
 
@@ -157,25 +175,22 @@ API 端点保护（JWT + `role === 'admin'`），所以未登录时页面只能�
 - 服务端只存**加密后的数据体**（客户端主密码 PBKDF2 派生 + AES-256-GCM），服务端无解密能力
 - 密码用 **scrypt + 每用户 16 字节随机盐**（`scrypt$salt$hash`），比较走 `timingSafeEqual`，兼容校验旧版 sha256 哈希
 - Refresh token 256 位随机，仅存 sha256，轮换式发放并检测重用（重用即撤销全部会话）
-- JWT 携带 `sub` / `role` / `plan`，`requireRole` 做 RBAC
+- JWT 携带 `sub` / `role`，`requireRole` 做 RBAC
 - 业务 SQL 全部参数化（`?` 占位），仅建表 DDL 拼接常量标识符
 - 响应统一剥离 `passwordHash` / `tokenHash`
 - 全部端点挂 JSON Schema 校验；`registerErrorHandler` 兜住漏写 try/catch 的 handler
 - 认证中间件每请求查一次 `users.status`/`role`，**封禁与降级即时生效**（不等 access token 过期）
 - access token 可被**即时吊销**：token 里的 `sid` 是签发它的 refresh token 行 id，中间件每请求校验该会话未被撤销。于是登出 / 改密 / 踢设备 / token 重用检测都对已发出的 access token 立即生效，不需要 jti 黑名单
 - 同步写入走乐观锁，**冲突判定精确**：`UPDATE ... WHERE version = base` 判 `affectedRows`，行不存在时仅接受 `base = 0`，并发首次写入靠唯一键裁决
-- 按 IP 分桶限流，阈值可在后台实时调整（见下文「限流」）
+- 按 IP 分桶限流（v2：阈值回归代码常量，无后台实时调整/白名单）
 - webhook 验签拿**原始请求体字节**，不是 `req.body` 的重新序列化结果
 
 已知缺口（部署前请评估）：
 
 - **`devices.ip` 的历史数据不可信**。该列取自 `req.ip`，而 `trustProxy` 是后来才加的 —— 在那之前落库的全是反向代理的地址，不是真实客户端 IP。
-- **请求体上限 1MB**（Fastify `bodyLimit` 默认值，未调整）。`sync_sections.encrypted_data` 是 MEDIUMTEXT，理论上能存 16MB，所以连接数极多的用户 push 时可能被 413。`nginx.conf.example` 里 `client_max_body_size` 给的 2m 只是让 nginx 不成为更早的瓶颈，真正的上限仍在 server 侧。
-- **`traffic_stats` / `traffic_blocked` 没有清理任务**。前者每天最多约 3200 行（27 路由 × 5 状态类 × 24 桶），这个量级下不值得再引入一个会出错的定时任务；后者只在被限流时写入，正常情况下应该接近空。真需要清理时手工 `DELETE ... WHERE create_time < ?` 即可。
-- **PAT 无法用于认证**（见上文 PAT 小节）。
+- **请求体上限**：PUT `/api/sync` 已单独放宽到 9MiB（`sync.ts` 的 `SYNC_BODY_LIMIT`），其余端点仍为 Fastify 默认 1MB。`nginx.conf.example` 里 `client_max_body_size 2m` 反而成了 sync 推送 >2MB 的实际瓶颈，部署时建议上调到 ≥9m。
 - **Webhook 验签不成立**（见上文 Webhook 小节）。
 - **套餐功能门禁全在客户端**：`plans.features` 位掩码经 `/api/me` 下发，服务端不做校验，且客户端在网络失败时会放行。
-- 旧 sha256 密码的盐取自 `JWT_SECRET`。这批用户**下次登录时会自动升级**到 scrypt（`authService.login` 调 `upgradePasswordIfNeeded`），但在升级发生前轮换 `JWT_SECRET` 会让他们无法登录。
 - 容器以 root 运行，`docker-compose.yml` 把 3306 暴露到宿主。
 
 ## 反向代理
@@ -229,53 +244,33 @@ PUT 是写，共用同一个模板。
 并静默退化到 `default`。`test/ratelimit/routeCoverage.test.ts` 用 `onRoute` 钩子
 从真实 app 实例抓路由表来比对，守住这件事。
 
-**阈值的来源不是拍脑袋**。一次客户端自动同步 = 7 个请求（1 个 `GET /api/sync`
-+ 5 个 `PUT /api/sync`，因为 `SECTION_TYPES` 有 5 个 section 且逐个推
-+ 1 个 `POST /api/usage`）。`dbclient.sync.auto=silent` 时防抖 3 秒触发一次，
+**阈值的来源不是拍脑袋**。一次客户端自动同步 = 6 个请求（1 个 `GET /api/sync`
++ 5 个 `PUT /api/sync`，因为 `SECTION_TYPES` 有 5 个 section 且逐个推）。
+`dbclient.sync.auto=silent` 时防抖 3 秒触发一次，
 所以单设备峰值约 **140 req/min**。`sync-write` 的 1200 留了约 8 倍余量给共用出口 IP。
 
 于是阈值分两类：`auth-*` 定得紧（合法流量一天几次，而 scrypt 每次十几毫秒 CPU，
 既是暴力破解面也是 DoS 放大面）；`sync-write` / `default` 只是 DoS 天花板，
-真正的收紧要等 `traffic_stats` 攒出真实数据。
+真正的收紧要靠真实流量数据再校正。
 
 ### 调整阈值
 
-代码内置基线（`ratelimit/rules.ts` 的 `DEFAULT_RULES`）+ DB 覆盖（`rate_limit_rules`
-表只存**与默认值不同**的行）+ 内存权威值。
-
-- 在 `/admin` 后台的 **Limits** 标签页改，写 DB 同时更新内存，**立即生效，无需重启**
-- 表为空时限流照常按代码默认值工作 —— 全新部署不需要播种数据
-- **DB 读失败时回落到默认值并记 warn**，限流不会因为 MySQL 抖动而失效
-- 单实例下内存即权威值：没有 TTL 缓存、没有每请求查库、没有陈旧窗口。多实例部署会打破这个假设，那时应该换 Redis store 而不是给这里加轮询
-
-### 共用出口 IP
-
-多个用户在同一间办公室时按 IP 分桶会把整个办公室算成一个人。这是按 IP 限流的
-固有缺陷。处理方式是把那个出口 IP 加进 `rate_limit_allowlist`（后台可加），
-而不是把全局阈值调到形同虚设。
-
-判断依据在后台 **Traffic** 标签页的「Rate limited requests」表 —— 429 会带
-IP / 路由 / 桶名逐条落库（`traffic_blocked`），合法用户出现在里面就说明该放宽了。
+v2 阈值回归代码常量（`ratelimit/rules.ts` 的 `DEFAULT_RULES`），改阈值需改码重部署。
+不再有 DB 覆盖 / 后台 Limits 标签页实时调整。多实例部署下内存即权威值；需要动态
+调阈值时换 Redis store 或环境变量。
 
 ### 逃生通道
 
-阈值配错把所有人（含管理员）锁在门外时，后台本身也进不去，改不了 DB。这时设
-`RATE_LIMIT_ENABLED=false` 并重启，完全绕过限流。这个开关不依赖 DB 也不依赖后台。
+阈值配错把所有人（含管理员）锁在门外时，设 `RATE_LIMIT_ENABLED=false` 并重启，
+完全绕过限流。这个开关不依赖任何 DB 或后台。
 
 ## 流量观测
 
-两层数据，用途不同：
-
-- **最近 60 分钟，分钟粒度** —— 纯内存环形缓冲（60 槽，`minuteTs % 60` 作索引，槽被复用时自动重置，无需清理逻辑）。进程重启即丢，这是有意的取舍：实时曲线的价值在即时性。
-- **历史，小时粒度** —— `traffic_stats` 表，采集器在内存攒 60 秒后批量 upsert（`count = count + VALUES(count)`，累加而非覆盖）。
-
-`route` 列存的是 Fastify 的**路由模板**（`/admin/users/:id`）而不是实际路径 ——
-后者基数无界，一万个用户就是一万个 route 值。404 归 `__unmatched__` 桶（路由
-探测扫描不会撑爆表），静态资源归 `__static__`。
-
-flush 失败时数据会**合并回**采集器下个周期重试（不是覆盖 —— drain 之后新请求
-仍在写入，覆盖会静默丢掉这段数据）。flush 定时器已 `unref` 且在 `onClose` 里
-`clearInterval` + 做最后一次落库，否则进程收到 SIGTERM 不会退出。
+v2 只保留**纯内存**观测（最近 60 分钟，分钟粒度环形缓冲，60 槽，`minuteTs % 60`
+作索引，槽被复用时自动重置，无需清理逻辑）。进程重启即丢，这是有意的取舍：
+实时曲线的价值在即时性。历史小时粒度落库（`traffic_stats`）已随 Greenfield 移除，
+观测交给外部日志系统。`/admin/traffic` 只读内存，429 明细同样在内存（有上限，
+最新优先）。
 
 ## 启动
 
@@ -310,7 +305,7 @@ docker run -e JWT_SECRET=xxx -e MYSQL_HOST=xxx -e MYSQL_PASSWORD=xxx -p 3000:300
 
 ```bash
 pnpm dev        # tsx watch
-pnpm test       # vitest，116 用例，用内存假仓储，不依赖真实 MySQL
+pnpm test       # vitest，用内存假仓储，不依赖真实 MySQL
 pnpm typecheck
 ```
 
@@ -319,8 +314,8 @@ pnpm typecheck
 | 变量 | 默认 | 说明 |
 |------|------|------|
 | `PORT` | `3000` | 服务端口 |
-| `JWT_SECRET` | `dev-secret-change-me`（仅非生产） | JWT 签名密钥。`NODE_ENV=production` 下缺失会导致启动失败。同时用作旧 sha256 密码的盐，**轮换会使旧密码用户无法登录** |
-| `ACCESS_TOKEN_EXPIRES_IN` | `15m` | Access token 有效期。格式 `\d+[smhd]`，解析失败会静默回落 30 天 |
+| `JWT_SECRET` | `dev-secret-change-me`（仅非生产） | JWT 签名密钥。`NODE_ENV=production` 下缺失、已知弱值、或长度 <32 字符均会导致启动失败。v2 已删除 legacy sha256 分支，与密码哈希彻底解耦，轮换的唯一代价是所有人重新登录一次 |
+| `ACCESS_TOKEN_EXPIRES_IN` | `15m` | Access token 有效期。格式 `\d+[smhd]`，非法值直接启动失败（拒绝启动），不再静默回落 |
 | `REFRESH_TOKEN_EXPIRES_IN` | `30d` | Refresh token 有效期，同上格式要求 |
 | `MYSQL_HOST` | `127.0.0.1` | MySQL 地址 |
 | `MYSQL_PORT` | `3306` | MySQL 端口 |

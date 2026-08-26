@@ -48,10 +48,8 @@ export interface MysqlPoolOptions extends MysqlCredentials {
  * `timezone: 'local'`。字段形式还顺带省掉了密码的百分号编码问题。
  *
  * `timezone: 'Z'` 是必需的：mysql2 默认按 Node 进程本地时区格式化 `Date`，
- * MySQL 对 `TIMESTAMP` 按 session 时区折算成 UTC 存储、对 `DATETIME` 不折算。
- * 本库两种类型混用（`traffic_stats.bucket_time` 是 DATETIME，业务表是 TIMESTAMP），
- * Node 与 MySQL 时区不一致时两类列会整体错开，`expires_time`（会话过期）与
- * `period_end_time`（订阅到期）的判定也随之平移。
+ * 而 v2 统一用 `DATETIME`（UTC）存储。Node 与 MySQL 时区不一致时会整体错开，
+ * `expires_time`（会话过期）与 `period_end_time`（订阅到期）的判定也随之平移。
  */
 export function buildMysqlPoolOptions(
   creds: MysqlCredentials,
@@ -70,6 +68,6 @@ export function buildMysqlPoolOptions(
     enableKeepAlive: true,
     keepAliveInitialDelay: 10_000,
     timezone: 'Z',
-    charset: 'utf8mb4_unicode_ci',
+    charset: 'utf8mb4_0900_ai_ci',
   };
 }

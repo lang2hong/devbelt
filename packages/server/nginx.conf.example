@@ -26,9 +26,9 @@ server {
     # return 301 https://$host$request_uri;
 
     # ── 请求体上限 ────────────────────────────────────────────────
-    # sync_sections.encrypted_data 是 MEDIUMTEXT（16MB），但 Fastify 的
-    # bodyLimit 默认 1MB —— 连接数很多的用户 push 时可能被 Fastify 侧 413。
-    # 这里给到 2m 只是让 nginx 不成为更早的瓶颈，真正的上限仍是 server 的 1MB。
+    # sync_sections.encrypted_data 是 MEDIUMTEXT（16MB）。PUT /api/sync 已
+    # 单独放宽到 9MiB（SYNC_BODY_LIMIT），其余端点仍为 Fastify 默认 1MB。
+    # 这里给 2m 会让 nginx 反成 sync 推送 >2MB 的瓶颈——部署时建议上调到 ≥9m。
     client_max_body_size 2m;
 
     # ── 代理头 ───────────────────────────────────────────────────
@@ -52,9 +52,8 @@ server {
 
     # ── 路由 ─────────────────────────────────────────────────────
     # 限流刻意**不在 nginx 做**（无 limit_req）。
-    # server 侧已有 @fastify/rate-limit 分桶限流，阈值可在 /admin 后台按桶
-    # 实时调整，并且 429 会被记录到 traffic_blocked 表里可查。两边都限的话，
-    # 出问题时分不清是谁挡的，而 nginx 挡掉的请求在后台完全看不见。
+    # server 侧已有 @fastify/rate-limit 分桶限流（阈值回归代码常量）。两边都限
+    # 的话，出问题时分不清是谁挡的，而 nginx 挡掉的请求在服务端完全看不见。
     location / {
         proxy_pass http://dbclient_server;
     }

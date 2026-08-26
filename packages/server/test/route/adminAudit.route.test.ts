@@ -41,12 +41,11 @@ describe('留痕的操作者取自认证身份', () => {
 
   it('body 里塞 actorUserId 不被采信', async () => {
     const target = await t.makeUser();
-    // schema 的 additionalProperties 会先挡下来；万一将来放开，
-    // 也必须以认证身份为准而不是请求体
+    // schema 会挡下未知字段；万一将来放开，也必须以认证身份为准而不是请求体
     const res = await t.app.inject({
       method: 'PATCH', url: `/admin/users/${target.id}`,
       headers: t.auth(admin.token),
-      payload: { planCode: 'pro', actorUserId: 999999 },
+      payload: { role: 'admin', actorUserId: 999999 },
     });
     if (res.statusCode === 200) {
       expect(t.repos.adminAuditRepo.rows[0].actorUserId).toBe(admin.id);
@@ -57,48 +56,25 @@ describe('留痕的操作者取自认证身份', () => {
 
   it('手动续费留痕（免费发放付费套餐是最需要追溯的操作）', async () => {
     const target = await t.makeUser();
+    const memberships = await t.repos.membershipRepo.listByUser(target.id);
+    const orgId = memberships.find((m) => m.status === 'active')!.organizationId;
     const res = await t.app.inject({
-      method: 'POST', url: `/admin/users/${target.id}/renew`,
+      method: 'POST', url: `/admin/organizations/${orgId}/renew`,
       headers: t.auth(admin.token),
       payload: { planCode: 'pro', period: 'month' },
     });
     expect(res.statusCode).toBe(200);
 
-    const row = t.repos.adminAuditRepo.rows.find((r) => r.action === 'user.renew');
+    const row = t.repos.adminAuditRepo.rows.find((r) => r.action === 'organization.renew');
     expect(row).toBeDefined();
     expect(row!.actorUserId).toBe(admin.id);
     expect(row!.detail).toMatchObject({ planCode: 'pro', period: 'month' });
   });
 
-  it('改限流阈值留痕', async () => {
-    const res = await t.app.inject({
-      method: 'PATCH', url: '/admin/rate-limits/auth-strict',
-      headers: t.auth(admin.token),
-      payload: { maxRequests: 3, windowSeconds: 60 },
-    });
-    expect(res.statusCode).toBe(200);
-    const row = t.repos.adminAuditRepo.rows.find((r) => r.action === 'ratelimit.update');
-    expect(row?.targetId).toBe('auth-strict');
-    expect(row?.detail).toMatchObject({ maxRequests: 3 });
-  });
 
   /**
    * 放行 IP 等于把限流这道防线对某个来源整体关掉，是安全边界的移动。
    */
-  it('增删免限流 IP 都留痕', async () => {
-    await t.app.inject({
-      method: 'POST', url: '/admin/rate-limits/allowlist',
-      headers: t.auth(admin.token), payload: { ip: '198.51.100.7', note: 'office' },
-    });
-    await t.app.inject({
-      method: 'DELETE', url: '/admin/rate-limits/allowlist/198.51.100.7',
-      headers: t.auth(admin.token),
-    });
-
-    const actions = t.repos.adminAuditRepo.rows.map((r) => r.action);
-    expect(actions).toContain('ratelimit.allowlist.add');
-    expect(actions).toContain('ratelimit.allowlist.remove');
-  });
 
   it('吊销会话留痕', async () => {
     const target = await t.makeUser();
@@ -164,7 +140,7 @@ describe('GET /admin/audit', () => {
     for (const u of [a, b]) {
       await t.app.inject({
         method: 'PATCH', url: `/admin/users/${u.id}`,
-        headers: t.auth(admin.token), payload: { planCode: 'pro' },
+        headers: t.auth(admin.token), payload: { role: 'admin' },
       });
     }
 

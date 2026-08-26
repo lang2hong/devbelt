@@ -1,5 +1,4 @@
 import { SECTION_TYPES } from '../domain/enums.js';
-import { RATE_LIMIT_BUCKETS } from '../ratelimit/rules.js';
 
 /**
  * 共享 JSON Schema 片段。
@@ -132,8 +131,8 @@ export const pushBody = {
     section: sectionEnum,
     encryptedData: { type: 'string', maxLength: MAX_SECTION_BYTES },
     baseVersion: { type: 'integer', minimum: 0 },
-    // 以下为可选：旧客户端不发这两个字段
-    // itemCount 上界对齐 sync_events.item_count 的 INT UNSIGNED，理由同 usageBody
+    // 以下为可选：itemCount / meta（当前客户端都发）
+    // itemCount 上界对齐 sync_sections 的 INT UNSIGNED
     itemCount: { type: 'integer', minimum: 0, maximum: 4294967295 },
     meta: { type: 'array' },
   },
@@ -148,21 +147,17 @@ export const rollbackBody = {
   },
 } as const;
 
-/**
- * 用量上报。上界对齐 `usage_events.count` 的 INT UNSIGNED —— 超过会在
- * strict 模式下由 MySQL 报错，不如在入口挡掉。
- */
-export const usageBody = {
-  type: 'object',
-  properties: {
-    connectionOpens: { type: 'integer', minimum: 0, maximum: 4294967295 },
-    queryExecutes: { type: 'integer', minimum: 0, maximum: 4294967295 },
-  },
-} as const;
-
 // ── admin ──
 
 const planCodeEnum = { type: 'string', enum: ['free', 'pro', 'team'] } as const;
+
+/** 流量查询窗口。上限 720 小时（30 天），但内存只保留 60 分钟，超出部分为空 */
+export const trafficQuery = {
+  type: 'object',
+  properties: {
+    hours: { type: 'integer', minimum: 1, maximum: 720 },
+  },
+} as const;
 
 export const planCodeParam = {
   type: 'object',
@@ -183,18 +178,13 @@ export const paginationQuery = {
 } as const;
 
 /**
- * 改用户。admin-ui 一次只发一个字段（role / planCode / status 之一），
- * 所以三者都是 optional；但取值必须在枚举内。
- *
- * 校验缺失的后果（此前）：`planCode` 可写成任意字符串，而 `users.plan_code`
- * 没有 FK 指向 `plans.code` → 孤儿套餐码 → 之后 `/api/me` 因 `plan not found`
- * 抛裸 Error → 500。
+ * 改用户。admin-ui 一次只发一个字段（role / status 之一），
+ * 所以两者都是 optional；但取值必须在枚举内。v2：无 planCode（套餐由组织订阅推导）。
  */
 export const updateUserBody = {
   type: 'object',
   properties: {
     role: { type: 'string', enum: ['user', 'admin'] },
-    planCode: planCodeEnum,
     status: { type: 'string', enum: ['active', 'disabled'] },
   },
 } as const;
@@ -216,10 +206,18 @@ export const updatePlanBody = {
     name: { type: 'string', minLength: 1, maxLength: 64 },
     priceMonth: { type: 'integer', minimum: 0 },
     priceYear: { type: 'integer', minimum: 0 },
-    maxConnections: { type: 'integer', minimum: 0 },
-    maxOpenConnections: { type: 'integer', minimum: 0 },
-    syncQuotaBytes: { type: 'integer', minimum: 0 },
-    syncVersionRetention: { type: 'integer', minimum: 0 },
+    seatPriceMonth: { type: 'integer', minimum: 0 },
+    seatPriceYear: { type: 'integer', minimum: 0 },
+    includedSeats: { type: 'integer', minimum: 0 },
+    perSeatMaxDevices: { type: 'integer', minimum: 0 },
+    perUserMaxPrivateConnections: { type: 'integer', minimum: 0 },
+    perUserMaxOpenConnections: { type: 'integer', minimum: 0 },
+    perUserPrivateSyncQuotaBytes: { type: 'integer', minimum: 0 },
+    perUserSyncVersionRetention: { type: 'integer', minimum: 0 },
+    perUserHistoryRetentionCount: { type: 'integer', minimum: 0 },
+    orgMaxSharedConnections: { type: 'integer', minimum: 0 },
+    orgSharedSyncQuotaBytes: { type: 'integer', minimum: 0 },
+    orgMaxMembers: { type: 'integer', minimum: 0 },
     features: { type: 'integer', minimum: 0 },
   },
 } as const;
@@ -233,14 +231,6 @@ export const sessionIdParams = {
   },
 } as const;
 
-export const deviceEventsParams = {
-  type: 'object',
-  required: ['id', 'deviceId'],
-  properties: {
-    id: { type: 'integer', minimum: 1 },
-    deviceId: { type: 'string', minLength: 1, maxLength: 128 },
-  },
-} as const;
 
 export const providerParam = {
   type: 'object',
@@ -248,50 +238,5 @@ export const providerParam = {
   properties: { provider: { type: 'string', minLength: 1, maxLength: 32 } },
 } as const;
 
-/** 流量查询窗口。上限 720 小时（30 天），够看月趋势又不至于把整张表捞出来 */
-export const trafficQuery = {
-  type: 'object',
-  properties: {
-    hours: { type: 'integer', minimum: 1, maximum: 720 },
-  },
-} as const;
-
-export const rateLimitBucketParam = {
-  type: 'object',
-  required: ['bucket'],
-  properties: {
-    bucket: { type: 'string', enum: [...RATE_LIMIT_BUCKETS] },
-  },
-} as const;
-
-/**
- * 阈值修改。
- *
- * `maxRequests` 下限给 1 而不是 0：0 等于「全部拒绝」，那是把自己锁死，
- * 要停用某个桶应该用 `enabled: false`，语义清楚得多。
- * 窗口上限 1 天 —— 再长的窗口在内存 LRU 里没有意义（进程重启就清了）。
- */
-export const updateRateLimitBody = {
-  type: 'object',
-  properties: {
-    maxRequests: { type: 'integer', minimum: 1, maximum: 1_000_000 },
-    windowSeconds: { type: 'integer', minimum: 1, maximum: 86_400 },
-    enabled: { type: 'boolean' },
-  },
-} as const;
-
 /** IPv6 最长 45 字符，与 DB 列宽一致 */
-export const allowlistBody = {
-  type: 'object',
-  required: ['ip'],
-  properties: {
-    ip: { type: 'string', minLength: 3, maxLength: 45 },
-    note: { type: 'string', maxLength: 120 },
-  },
-} as const;
 
-export const allowlistIpParam = {
-  type: 'object',
-  required: ['ip'],
-  properties: { ip: { type: 'string', minLength: 3, maxLength: 45 } },
-} as const;

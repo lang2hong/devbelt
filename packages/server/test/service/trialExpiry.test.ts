@@ -1,128 +1,99 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { SubscriptionService } from '../../src/service/subscriptionService.js';
+import { PlanPolicy, resolveEffectivePlans } from '../../src/policy/planPolicy.js';
+import type { PlanCode } from '../../src/domain/enums.js';
 import {
-  FakeConnectionMetaRepo,
-  FakePlanRepo,
-  FakeDeviceRepo,
-  FakeSubscriptionRepo,
-  FakeSyncRepo,
-  FakeUserRepo,
-  makePlan,
+  FakeUserRepo, FakePlanRepo, FakeSubscriptionRepo, FakeDeviceRepo, FakeSyncRepo,
+  FakeConnectionMetaRepo, FakeOrganizationRepo, FakeMembershipRepo, FakeSeatRepo,
+  FakeRegistrationRepo, makePlan,
 } from '../helpers/fakeRepos.js';
 
 /**
- * 试用期到期。
- *
- * 注册时会写一行 `status: 'trialing'`（authService.register），而到期扫描
- * ——`expireOne` 与 `downgradeExpired`——只看 `status = 'active'`。
- * 结果是 trialing 的行**永远不会被处理**：
- *
- *  - 用户注册 7 天后，`/api/me` 里的 subscription.status 一直是 trialing。
- *    界面上"试用中"永久显示，用户不知道试用早就结束了。
- *  - 这些行也永远不被 `idx_sub_status_period` 扫到，积在表里只增不减。
- *  - 眼下试用给的是 free 套餐所以没有直接的收入损失，但这是个定时炸弹:
- *    试用给付费套餐是最常见的做法，一旦 authService 的 planCode 改成 'pro'，
- *    同一段代码就变成"所有试用用户永久免费用 pro"。
- *
- * 语义：试用期结束 = expired（和付费周期结束一致）。
+ * 试用期到期（v2：订阅挂组织，到期只置 status=expired，不回写 users.plan_code）。
+ * trialing / canceled 同 active 一起参与到期降级，expired 是终态。
  */
-
 const DAY = 86400_000;
 
 async function setup() {
   const userRepo = new FakeUserRepo();
   const planRepo = new FakePlanRepo([makePlan('free'), makePlan('pro'), makePlan('team')]);
   const subRepo = new FakeSubscriptionRepo();
-  subRepo.linkUsers(userRepo);
-  const deviceRepo = new FakeDeviceRepo();
-  const syncRepo = new FakeSyncRepo();
-  const cmRepo = new FakeConnectionMetaRepo();
-  const service = new SubscriptionService(userRepo, planRepo, subRepo, deviceRepo, syncRepo, cmRepo);
-  const user = await userRepo.create('a@example.com', 'scrypt$x$y', 'user', 'pro');
-  return { service, userRepo, planRepo, subRepo, user };
+  const orgRepo = new FakeOrganizationRepo();
+  const membershipRepo = new FakeMembershipRepo();
+  const seatRepo = new FakeSeatRepo();
+  const registrationRepo = new FakeRegistrationRepo({
+    users: userRepo, orgs: orgRepo, memberships: membershipRepo, subs: subRepo, seats: seatRepo, plans: planRepo,
+  });
+  const planPolicy = new PlanPolicy((id) => resolveEffectivePlans(id, { membershipRepo, subRepo, planRepo }));
+  const service = new SubscriptionService(
+    userRepo, planRepo, subRepo, membershipRepo, orgRepo,
+    new FakeDeviceRepo(), new FakeSyncRepo(), new FakeConnectionMetaRepo(), planPolicy,
+  );
+  const { userId } = await registrationRepo.createAccount({ email: 'a@example.com', passwordHash: 'x', role: 'user' });
+  return { service, userRepo, planRepo, subRepo, membershipRepo, registrationRepo, userId };
+}
+
+/** 把某用户 personal org 的订阅切到指定套餐/状态/到期时间，返回 organizationId */
+async function setOrgSub(userId: number, code: PlanCode, status: string, periodEndTime: Date | undefined, c: Awaited<ReturnType<typeof setup>>): Promise<number> {
+  const m = (await c.membershipRepo.listByUser(userId)).find((x) => x.status === 'active')!;
+  const plan = (await c.planRepo.findByCode(code))!;
+  await c.subRepo.upsert({ organizationId: m.organizationId, planId: plan.id, status: status as any, periodEndTime, provider: 'manual' });
+  return m.organizationId;
 }
 
 let c: Awaited<ReturnType<typeof setup>>;
 beforeEach(async () => { c = await setup(); });
 
 describe('ensureActive 处理 trialing', () => {
-  it('试用期已过 → 置为 expired 并降到 free', async () => {
-    await c.subRepo.upsert({
-      userId: c.user.id, planCode: 'pro', status: 'trialing',
-      periodEndTime: new Date(Date.now() - DAY), provider: 'manual',
-    });
-
-    await c.service.ensureActive(c.user.id);
-
-    expect((await c.subRepo.findByUserId(c.user.id))!.status).toBe('expired');
-    expect((await c.userRepo.findById(c.user.id))!.planCode).toBe('free');
+  it('试用期已过 → 置为 expired', async () => {
+    const orgId = await setOrgSub(c.userId, 'pro', 'trialing', new Date(Date.now() - DAY), c);
+    await c.service.ensureActive(c.userId);
+    expect((await c.subRepo.findByOrganizationId(orgId))!.status).toBe('expired');
   });
 
   it('试用期未到 → 保持 trialing', async () => {
-    await c.subRepo.upsert({
-      userId: c.user.id, planCode: 'pro', status: 'trialing',
-      periodEndTime: new Date(Date.now() + DAY), provider: 'manual',
-    });
-
-    await c.service.ensureActive(c.user.id);
-
-    expect((await c.subRepo.findByUserId(c.user.id))!.status).toBe('trialing');
-    expect((await c.userRepo.findById(c.user.id))!.planCode).toBe('pro');
+    const orgId = await setOrgSub(c.userId, 'pro', 'trialing', new Date(Date.now() + DAY), c);
+    await c.service.ensureActive(c.userId);
+    expect((await c.subRepo.findByOrganizationId(orgId))!.status).toBe('trialing');
   });
 
   it('边界：结束时刻恰好等于 now 也算到期', async () => {
     const now = new Date();
-    await c.subRepo.upsert({
-      userId: c.user.id, planCode: 'pro', status: 'trialing',
-      periodEndTime: now, provider: 'manual',
-    });
-    await c.service.ensureActive(c.user.id, now);
-    expect((await c.subRepo.findByUserId(c.user.id))!.status).toBe('expired');
+    const orgId = await setOrgSub(c.userId, 'pro', 'trialing', now, c);
+    await c.service.ensureActive(c.userId, now);
+    expect((await c.subRepo.findByOrganizationId(orgId))!.status).toBe('expired');
   });
 
-  /**
-   * canceled 是用户主动取消、但仍在已付周期内的状态 —— 它到期后同样要变
-   * expired。不处理的话，一个取消过的用户会一直保持付费套餐。
-   */
   it('canceled 到期同样降级', async () => {
-    await c.subRepo.upsert({
-      userId: c.user.id, planCode: 'pro', status: 'canceled',
-      periodEndTime: new Date(Date.now() - DAY), provider: 'manual',
-    });
-    await c.service.ensureActive(c.user.id);
-    expect((await c.subRepo.findByUserId(c.user.id))!.status).toBe('expired');
-    expect((await c.userRepo.findById(c.user.id))!.planCode).toBe('free');
+    const orgId = await setOrgSub(c.userId, 'pro', 'canceled', new Date(Date.now() - DAY), c);
+    await c.service.ensureActive(c.userId);
+    expect((await c.subRepo.findByOrganizationId(orgId))!.status).toBe('expired');
   });
 
   it('已经是 expired 的不再重复处理', async () => {
-    await c.subRepo.upsert({
-      userId: c.user.id, planCode: 'free', status: 'expired',
-      periodEndTime: new Date(Date.now() - DAY), provider: 'manual',
-    });
+    await setOrgSub(c.userId, 'free', 'expired', new Date(Date.now() - DAY), c);
     c.subRepo.expireOneCalls = 0;
-    await c.service.ensureActive(c.user.id);
+    await c.service.ensureActive(c.userId);
     expect(c.subRepo.expireOneCalls).toBe(0);
   });
 });
 
 describe('downgradeExpired 处理 trialing', () => {
   it('批量降级覆盖 trialing 与 canceled', async () => {
-    const b = await c.userRepo.create('b@example.com', 'scrypt$x$y', 'user', 'pro');
-    const d = await c.userRepo.create('d@example.com', 'scrypt$x$y', 'user', 'pro');
     const past = new Date(Date.now() - DAY);
     const future = new Date(Date.now() + DAY);
-
-    await c.subRepo.upsert({ userId: c.user.id, planCode: 'pro', status: 'trialing', periodEndTime: past, provider: 'manual' });
-    await c.subRepo.upsert({ userId: b.id, planCode: 'pro', status: 'canceled', periodEndTime: past, provider: 'manual' });
-    await c.subRepo.upsert({ userId: d.id, planCode: 'pro', status: 'trialing', periodEndTime: future, provider: 'manual' });
+    const aId = await setOrgSub(c.userId, 'pro', 'trialing', past, c);
+    const b = await c.registrationRepo.createAccount({ email: 'b@example.com', passwordHash: 'x', role: 'user' });
+    const bOrg = await setOrgSub(b.userId, 'pro', 'canceled', past, c);
+    const d = await c.registrationRepo.createAccount({ email: 'd@example.com', passwordHash: 'x', role: 'user' });
+    const dOrg = await setOrgSub(d.userId, 'pro', 'trialing', future, c);
 
     expect(await c.service.downgradeExpired()).toBe(2);
 
-    expect((await c.subRepo.findByUserId(c.user.id))!.status).toBe('expired');
-    expect((await c.subRepo.findByUserId(b.id))!.status).toBe('expired');
+    expect((await c.subRepo.findByOrganizationId(aId))!.status).toBe('expired');
+    expect((await c.subRepo.findByOrganizationId(bOrg))!.status).toBe('expired');
     // 未到期的不动
-    expect((await c.subRepo.findByUserId(d.id))!.status).toBe('trialing');
-    expect((await c.userRepo.findById(d.id))!.planCode).toBe('pro');
+    expect((await c.subRepo.findByOrganizationId(dOrg))!.status).toBe('trialing');
 
     // 幂等
     expect(await c.service.downgradeExpired()).toBe(0);

@@ -11,8 +11,10 @@ const form = reactive({
   name: '',
   priceMonth: 0,
   priceYear: 0,
-  maxConnections: 0,
-  maxOpenConnections: 0,
+  includedSeats: 0,
+  perSeatMaxDevices: 0,
+  perUserMaxPrivateConnections: 0,
+  perUserMaxOpenConnections: 0,
   quotaMb: 0,
   syncVersionRetention: 0,
   features: 0,
@@ -28,10 +30,12 @@ function openEdit(p: Plan) {
   form.name = p.name;
   form.priceMonth = p.priceMonth;
   form.priceYear = p.priceYear;
-  form.maxConnections = p.maxConnections;
-  form.maxOpenConnections = p.maxOpenConnections;
-  form.quotaMb = p.syncQuotaBytes === 0 ? 0 : Math.round(p.syncQuotaBytes / 1048576);
-  form.syncVersionRetention = p.syncVersionRetention;
+  form.includedSeats = p.includedSeats;
+  form.perSeatMaxDevices = p.perSeatMaxDevices;
+  form.perUserMaxPrivateConnections = p.perUserMaxPrivateConnections;
+  form.perUserMaxOpenConnections = p.perUserMaxOpenConnections;
+  form.quotaMb = p.perUserPrivateSyncQuotaBytes === 0 ? 0 : Math.round(p.perUserPrivateSyncQuotaBytes / 1048576);
+  form.syncVersionRetention = p.perUserSyncVersionRetention;
   form.features = p.features;
 }
 
@@ -45,10 +49,12 @@ async function save() {
     name: form.name,
     priceMonth: form.priceMonth,
     priceYear: form.priceYear,
-    maxConnections: form.maxConnections,
-    maxOpenConnections: form.maxOpenConnections,
-    syncQuotaBytes: form.quotaMb * 1048576,
-    syncVersionRetention: form.syncVersionRetention,
+    includedSeats: form.includedSeats,
+    perSeatMaxDevices: form.perSeatMaxDevices,
+    perUserMaxPrivateConnections: form.perUserMaxPrivateConnections,
+    perUserMaxOpenConnections: form.perUserMaxOpenConnections,
+    perUserPrivateSyncQuotaBytes: form.quotaMb * 1048576,
+    perUserSyncVersionRetention: form.syncVersionRetention,
     features: form.features,
   };
   try {
@@ -75,10 +81,12 @@ onMounted(load);
         <h3>{{ p.name }} <span class="muted">({{ p.code }})</span></h3>
         <div class="row"><span class="k">Monthly</span><span class="v">¥{{ p.priceMonth }}</span></div>
         <div class="row"><span class="k">Yearly</span><span class="v">¥{{ p.priceYear }}</span></div>
-        <div class="row"><span class="k">Max connections</span><span class="v">{{ p.maxConnections === 0 ? '∞' : p.maxConnections }}</span></div>
-        <div class="row"><span class="k">Max open connections</span><span class="v">{{ p.maxOpenConnections === 0 ? '∞' : p.maxOpenConnections }}</span></div>
-        <div class="row"><span class="k">Sync quota</span><span class="v">{{ p.syncQuotaBytes === 0 ? '∞' : bytes(p.syncQuotaBytes) }}</span></div>
-        <div class="row"><span class="k">Version retention</span><span class="v">{{ p.syncVersionRetention }}</span></div>
+        <div class="row"><span class="k">Included seats</span><span class="v">{{ p.includedSeats }}</span></div>
+        <div class="row"><span class="k">Max devices / seat</span><span class="v">{{ p.perSeatMaxDevices === 0 ? '∞' : p.perSeatMaxDevices }}</span></div>
+        <div class="row"><span class="k">Max private connections</span><span class="v">{{ p.perUserMaxPrivateConnections === 0 ? '∞' : p.perUserMaxPrivateConnections }}</span></div>
+        <div class="row"><span class="k">Max open connections</span><span class="v">{{ p.perUserMaxOpenConnections === 0 ? '∞' : p.perUserMaxOpenConnections }}</span></div>
+        <div class="row"><span class="k">Sync quota</span><span class="v">{{ p.perUserPrivateSyncQuotaBytes === 0 ? '∞' : bytes(p.perUserPrivateSyncQuotaBytes) }}</span></div>
+        <div class="row"><span class="k">Version retention</span><span class="v">{{ p.perUserSyncVersionRetention }}</span></div>
         <div class="row"><span class="k">Features</span><span class="v">{{ featNames(p.features) }}</span></div>
         <button class="btn" style="margin-top: 10px" @click="openEdit(p)">Edit</button>
       </div>
@@ -95,8 +103,10 @@ onMounted(load);
           <span class="k">Name</span><input v-model="form.name" />
           <span class="k">Monthly (¥)</span><input v-model.number="form.priceMonth" type="number" min="0" step="1" />
           <span class="k">Yearly (¥)</span><input v-model.number="form.priceYear" type="number" min="0" step="1" />
-          <span class="k">Max connections</span><input v-model.number="form.maxConnections" type="number" min="0" step="1" />
-          <span class="k">Max open connections</span><input v-model.number="form.maxOpenConnections" type="number" min="0" step="1" />
+          <span class="k">Included seats</span><input v-model.number="form.includedSeats" type="number" min="0" step="1" />
+          <span class="k">Max devices / seat</span><input v-model.number="form.perSeatMaxDevices" type="number" min="0" step="1" />
+          <span class="k">Max private connections</span><input v-model.number="form.perUserMaxPrivateConnections" type="number" min="0" step="1" />
+          <span class="k">Max open connections</span><input v-model.number="form.perUserMaxOpenConnections" type="number" min="0" step="1" />
           <span class="k">Sync quota (MB)</span><input v-model.number="form.quotaMb" type="number" min="0" step="1" />
           <span class="k">Version retention</span><input v-model.number="form.syncVersionRetention" type="number" min="0" step="1" />
         </div>

@@ -1,5 +1,14 @@
 import type { PlanCode, Role, SubStatus, SectionType, UserStatus } from '../domain/enums.js';
 import type {
+  OrgStatus,
+  MemberRole,
+  MemberStatus,
+  ResourceType,
+  AccessScope,
+  ResourcePermission,
+  PaymentProvider,
+} from '../domain/enums.js';
+import type {
   AdminAuditLog,
   User,
   Plan,
@@ -10,10 +19,17 @@ import type {
   SyncVersionSummary,
   SessionInfo,
   Device,
-  DeviceEvent,
+
   ConnectionMeta,
-  SyncEvent,
-  UsageEvent,
+
+
+  Organization,
+  Membership,
+  Seat,
+  Order,
+  OrganizationResource,
+  OrganizationResourcePermission,
+  OrganizationAuditLog,
 } from '../domain/entities.js';
 
 /**
@@ -25,36 +41,44 @@ import type {
 export interface IUserRepo {
   findById(id: number): Promise<User | undefined>;
   findByEmail(email: string): Promise<User | undefined>;
-  create(email: string, passwordHash: string, role: Role, planCode: PlanCode): Promise<User>;
+  create(email: string, passwordHash: string, role: Role, displayName?: string): Promise<User>;
   updateLastLogin(id: number, time: Date): Promise<void>;
-  updatePlan(id: number, planCode: PlanCode): Promise<void>;
   updateRole(id: number, role: Role): Promise<void>;
   updatePassword(id: number, passwordHash: string): Promise<void>;
   updateStatus(id: number, status: UserStatus): Promise<void>;
   listAll(limit: number, offset: number): Promise<User[]>;
-  count(): Promise<number>;
   /**
-   * 仍能登录的 admin 数量（role='admin' 且 status='active'）。
+   * 列出**未软删**的活跃用户（delete_time IS NULL）。
    *
-   * 「最后一个 admin」保护的判据。被禁用的 admin 登不进来，不能算作
-   * 「还有人能管」，所以 status 必须一起过滤。
+   * 与 count() 的差异：软删用户不再计入可登录/可管理的数量。
    */
+  count(): Promise<number>;
+  /** 仍能登录的 admin 数量（role='admin' 且 status='active' 且未软删） */
   countAdmins(): Promise<number>;
 }
 
-/** 套餐可编辑字段（管理后台编辑套餐） */
+/** 套餐可编辑字段（管理后台编辑套餐）。per-user/org 额度与席位定价 */
 export interface PlanEditableFields {
   name: string;
   priceMonth: number;
   priceYear: number;
-  maxConnections: number;
-  maxOpenConnections: number;
-  syncQuotaBytes: number;
-  syncVersionRetention: number;
+  seatPriceMonth?: number;
+  seatPriceYear?: number;
+  includedSeats: number;
+  perSeatMaxDevices: number;
+  perUserMaxPrivateConnections: number;
+  perUserMaxOpenConnections: number;
+  perUserPrivateSyncQuotaBytes: number;
+  perUserSyncVersionRetention: number;
+  perUserHistoryRetentionCount: number;
+  orgMaxSharedConnections: number;
+  orgSharedSyncQuotaBytes: number;
+  orgMaxMembers: number;
   features: number;
 }
 
 export interface IPlanRepo {
+  findById(id: number): Promise<Plan | undefined>;
   findByCode(code: PlanCode): Promise<Plan | undefined>;
   listAll(): Promise<Plan[]>;
   /** 播种套餐数据（仅 schema 初始化时调用） */
@@ -64,29 +88,23 @@ export interface IPlanRepo {
 }
 
 export interface ISubscriptionRepo {
-  findByUserId(userId: number): Promise<Subscription | undefined>;
+  findByOrganizationId(organizationId: number): Promise<Subscription | undefined>;
   /**
    * 批量取订阅（管理端列表用）。
-   *
-   * 存在的理由是消掉 N+1：`listUsers` 原本在循环里逐个 `findByUserId`，
-   * 而 admin-ui 固定请求 limit=500，一次列表就是 500 次串行往返、独占一条池连接。
    * 传空数组时不应发起查询。
    */
-  findByUserIds(userIds: number[]): Promise<Subscription[]>;
+  findByOrganizationIds(organizationIds: number[]): Promise<Subscription[]>;
   upsert(sub: Omit<Subscription, 'id' | 'createTime' | 'updateTime'> & { id?: number }): Promise<Subscription>;
   listAll(): Promise<Subscription[]>;
   listByStatus(status: SubStatus): Promise<Subscription[]>;
   /**
-   * 到期降级**单个用户**：status=active 且 period_end_time <= now
-   * → status=expired 且 users.plan_code=free，一条语句改两张表。返回是否改到了行。
-   *
-   * 与 downgradeExpired 分开是必需的：ensureActive 挂在 /api/me 上，
-   * 每个客户端启动都会走一次，不能让它去扫全表。
+   * 到期降级**单个组织**：status 可降级且 period_end_time <= now → status=expired。
+   * 返回是否改到了行。v2 无 users.plan_code 可重置，只置订阅状态。
    */
-  expireOne(userId: number, now: Date): Promise<boolean>;
+  expireOne(organizationId: number, now: Date): Promise<boolean>;
   /**
-   * 到期降级**全部**：status=active 且 period_end_time <= now
-   * → status=expired, users.plan_code=free。定时任务/启动时调用。
+   * 到期降级**全部**：status 可降级且 period_end_time <= now → status=expired。
+   * 定时任务/启动时调用，返回降级行数。
    */
   downgradeExpired(now: Date): Promise<number>;
 }
@@ -115,8 +133,6 @@ export interface IRefreshTokenRepo {
 export interface IDeviceRepo {
   upsert(device: Omit<Device, 'id' | 'createTime' | 'updateTime'>): Promise<Device>;
   listByUser(userId: number): Promise<Device[]>;
-  /** 设备事件留痕（升级/系统变化/首次登记） */
-  listEvents(userId: number, deviceId: string): Promise<DeviceEvent[]>;
   /** 绑定设备：占用配额位（revoked_time=NULL）；登录/同步时对配额内的设备调用 */
   bind(userId: number, deviceId: string): Promise<void>;
   /** 释放设备：归还配额位（revoked_time=NOW()）；用户撤销或管理员撤销时调用 */
@@ -128,7 +144,7 @@ export interface IDeviceRepo {
 }
 
 /** 连接元数据仓储（明文，计量/分析；内容仍加密） */
-export type ConnectionMetaInput = Omit<ConnectionMeta, 'id' | 'userId' | 'createTime' | 'updateTime'>;
+export type ConnectionMetaInput = Omit<ConnectionMeta, 'id' | 'userId' | 'createTime' | 'updateTime' | 'deleteTime'>;
 export interface IConnectionMetaRepo {
   /** 全量替换某用户连接元数据（含删除墓碑），返回落库后的活跃连接数 */
   replaceAll(userId: number, metas: ConnectionMetaInput[]): Promise<number>;
@@ -136,26 +152,6 @@ export interface IConnectionMetaRepo {
   listByUser(userId: number): Promise<ConnectionMeta[]>;
 }
 
-/** 一轮清理的结果：每表删除行数 + 各表独立的错误 */
-export interface PruneResult {
-  /** 表名 → 本轮删除行数 */
-  deleted: Record<string, number>;
-  /** 单表失败不中断整轮，错误在此汇总 */
-  errors: Array<{ table: string; error: Error }>;
-  total: number;
-}
-
-/**
- * 运维清理仓储：按保留期删除事件/留痕表的旧行，回收已失效的会话行。
- *
- * 存在的理由是这几张表**只增不减**：sync_events 每次 pull/push 一行，
- * 一个开自动同步的客户端每小时约 60 行，100 用户一天 14 万行，
- * 而没有任何业务逻辑读历史行。不清理就是等着磁盘被吃满。
- */
-export interface IMaintenanceRepo {
-  /** 删除 create_time 早于 now - retentionDays 的行；retentionDays <= 0 视为关闭 */
-  pruneEvents(retentionDays: number, now?: Date): Promise<PruneResult>;
-}
 
 /** 管理操作的操作者上下文。ip 只用于留痕，不参与任何判定 */
 export interface AuditActor {
@@ -199,17 +195,7 @@ export interface IWebhookEventRepo {
   record(provider: string, eventKey: string, detail?: Record<string, unknown>): Promise<boolean>;
 }
 
-/** 同步事件留痕仓储 */
-export interface ISyncEventRepo {
-  record(event: Omit<SyncEvent, 'id' | 'createTime'>): Promise<void>;
-  listByUser(userId: number, limit?: number): Promise<SyncEvent[]>;
-}
 
-/** 用量行为仓储（连接打开/查询执行的累计计数） */
-export interface IUsageEventRepo {
-  record(userId: number, deviceId: string | undefined, kind: UsageEvent['kind'], count: number): Promise<void>;
-  listByUser(userId: number, limit?: number): Promise<UsageEvent[]>;
-}
 
 /**
  * 同步数据访问（方案 A：分节存储 + 历史版本回滚）。
@@ -241,59 +227,163 @@ export interface ISyncRepo {
   sumBytes(userId: number): Promise<number>;
 }
 
-/** 一条小时粒度流量聚合（route × status_class） */
-export interface TrafficStatRow {
-  bucketTime: Date;
-  route: string;
-  statusClass: number;
-  count: number;
+// ── v2：组织 / 成员 / 席位 / 订单 / 资源 / 审计 ─────────────────────
+//
+// 以下六组接口服务于以「组织」为计费主体的 v2 模型。S3a 纯增量：
+// 不改上方任何 v1 接口，不接入 app.ts / service / route。
+// 组织共享资源的权限（organization_resource_permissions）折进
+// IOrganizationResourceRepo，作为资源的从属授权操作。
+
+/** 组织创建入参（id / 时间列由库生成） */
+export type OrganizationInput = Pick<Organization, 'name' | 'type' | 'ownerUserId'>;
+
+/** 组织可更新字段（管理后台编辑组织） */
+export interface OrganizationEditableFields {
+  name: string;
+  status: OrgStatus;
 }
 
-/** 一次被限流拦截的记录 */
-export interface TrafficBlockedRow {
-  ip: string;
-  route: string;
-  bucket: string;
-  createTime: Date;
+/** 组织仓储（计费主体） */
+export interface IOrganizationRepo {
+  findById(id: number): Promise<Organization | undefined>;
+  /** 某 user 拥有的组织（注册时建 personal org、owner 查询） */
+  listByOwner(userId: number): Promise<Organization[]>;
+  create(input: OrganizationInput): Promise<Organization>;
+  update(id: number, fields: OrganizationEditableFields): Promise<void>;
+  /** 软删除（置 delete_time）。owner 删除前需先转移 / 解散组织 */
+  softDelete(id: number): Promise<void>;
+  listAll(limit: number, offset: number): Promise<Organization[]>;
+  count(): Promise<number>;
+}
+
+/** 成员创建入参 */
+export type MembershipInput = Pick<Membership, 'organizationId' | 'userId' | 'role'>;
+
+/** 成员仓储（成员对席位的占用由此表表达） */
+export interface IMembershipRepo {
+  findById(id: number): Promise<Membership | undefined>;
+  /** 同组织的成员（权限校验、席位校验用） */
+  findByOrgAndUser(organizationId: number, userId: number): Promise<Membership | undefined>;
+  listByOrganization(organizationId: number): Promise<Membership[]>;
+  /** 某 user 在所有组织中的成员关系（求有效席位套餐最高值） */
+  listByUser(userId: number): Promise<Membership[]>;
+  create(input: MembershipInput): Promise<Membership>;
+  updateRole(id: number, role: MemberRole): Promise<void>;
+  updateStatus(id: number, status: MemberStatus): Promise<void>;
+  /** 软删除成员（置 delete_time；不级联删除资源，留痕仍在） */
+  softDelete(id: number): Promise<void>;
+  /** 活跃成员数（status=active 且未软删），席位占用计量的依据 */
+  countActiveByOrganization(organizationId: number): Promise<number>;
+  /** 某 user 的活跃成员关系数（跨组织；用于个人额度判定） */
+  countActiveByUser(userId: number): Promise<number>;
+}
+
+/** 席位创建入参 */
+export type SeatInput = Pick<Seat, 'subscriptionId' | 'organizationId'>;
+
+/** 席位仓储（逐席数量；增减由订单 seat_delta 驱动） */
+export interface ISeatRepo {
+  findById(id: number): Promise<Seat | undefined>;
+  listByOrganization(organizationId: number): Promise<Seat[]>;
+  /** 活跃席位数（status=active 且未软删）；活跃成员数须 ≤ 此值 */
+  countActiveByOrganization(organizationId: number): Promise<number>;
+  create(input: SeatInput): Promise<Seat>;
+  /** 撤销席位（status=revoked；订单 seat_delta 为负时调用） */
+  revoke(id: number): Promise<void>;
+}
+
+/** 订单创建入参（不可变计账；id / 时间列由库生成） */
+export type OrderInput = Omit<Order, 'id' | 'createTime' | 'updateTime'>;
+
+/** 订单仓储（不可变计费流水） */
+export interface IOrderRepo {
+  findById(id: number): Promise<Order | undefined>;
+  create(input: OrderInput): Promise<Order>;
+  listByOrganization(organizationId: number, limit: number, offset: number): Promise<Order[]>;
+  countByOrganization(organizationId: number): Promise<number>;
+  /** 按支付商 + 外部 ID 查（幂等：同一回调不重复建单） */
+  findByProviderExternal(provider: PaymentProvider, externalId: string): Promise<Order | undefined>;
+}
+
+/** 资源创建入参（id / 时间列由库生成） */
+export type OrganizationResourceInput = Pick<
+  OrganizationResource,
+  'organizationId' | 'resourceType' | 'name' | 'accessScope' | 'encryptedData' | 'createdByUserId'
+>;
+
+/** 资源可更新字段（管理后台 / 成员编辑共享资源） */
+export interface OrganizationResourceEditableFields {
+  name?: string;
+  accessScope?: AccessScope;
+  encryptedData?: string;
+  updatedByUserId?: number;
+}
+
+/** 组织共享资源仓储（含 restricted 资源的授权） */
+export interface IOrganizationResourceRepo {
+  findById(id: number): Promise<OrganizationResource | undefined>;
+  /** 列出某组织的未软删资源，可按类型过滤 */
+  listByOrganization(organizationId: number, type?: ResourceType): Promise<OrganizationResource[]>;
+  create(input: OrganizationResourceInput): Promise<OrganizationResource>;
+  update(id: number, fields: OrganizationResourceEditableFields): Promise<void>;
+  /** 软删除资源（置 delete_time；权限行由外键 CASCADE 跟随） */
+  softDelete(id: number): Promise<void>;
+
+  // ── restricted 资源授权 ──
+  /** 授予成员对资源的权限（UPSERT：同 resource+membership 覆盖） */
+  grantPermission(
+    organizationId: number,
+    resourceId: number,
+    membershipId: number,
+    permission: ResourcePermission,
+  ): Promise<OrganizationResourcePermission>;
+  /** 撤销成员对资源的全部权限 */
+  revokePermission(resourceId: number, membershipId: number): Promise<void>;
+  /** 列出某资源的全部授权（restricted 资源管理用） */
+  listPermissions(resourceId: number): Promise<OrganizationResourcePermission[]>;
+  /** 列出某成员的全部授权（求其可访问的 restricted 资源） */
+  listPermissionsForMembership(membershipId: number): Promise<OrganizationResourcePermission[]>;
+  /** 查单条授权（判定某成员对某资源的具体权限） */
+  findPermission(resourceId: number, membershipId: number): Promise<OrganizationResourcePermission | undefined>;
+}
+
+/** 组织审计写入入参（id / createTime 由库生成） */
+export type OrganizationAuditInput = Omit<OrganizationAuditLog, 'id' | 'createTime'>;
+
+/**
+ * 组织协作审计仓储。
+ *
+ * 写入失败**必须抛错**（与 IAdminAuditRepo 同）：吞掉错误会让审计一坏、
+ * 所有组织操作变无痕，正是越权者最希望的状态。
+ */
+export interface IOrganizationAuditRepo {
+  record(entry: OrganizationAuditInput): Promise<void>;
+  listByOrganization(organizationId: number, limit: number, offset: number): Promise<OrganizationAuditLog[]>;
+  countByOrganization(organizationId: number): Promise<number>;
+}
+
+/** 注册账号入参 */
+export interface RegistrationAccountInput {
+  email: string;
+  passwordHash: string;
+  role: Role;
+  displayName?: string;
+}
+
+/** 注册结果：新建的 user / personal org / free 订阅 */
+export interface RegistrationResult {
+  userId: number;
+  organizationId: number;
+  subscriptionId: number;
 }
 
 /**
- * 流量统计仓储。
+ * 注册账号仓储：原子创建 user + personal org + admin membership + free 订阅 + 席位。
  *
- * 写入是**批量 upsert**：采集器在内存里攒一分钟，一条 SQL 落库。
- * 逐请求写库会让每个请求多一次 I/O，那是本末倒置。
+ * 必须**原子**：五张表任一失败即整体回滚，不能留下「有 user 无 personal org /
+ * 订阅」的半套状态（否则该用户被自己的残留 user 行困住，无法再注册）。
+ * 与 bootstrapAdmin 的初始管理员创建同构，但 role / displayName 参数化。
  */
-export interface ITrafficRepo {
-  /** 批量累加（同键 count 相加）。空数组是合法输入，直接返回 */
-  upsertStats(rows: Array<Omit<TrafficStatRow, 'count'> & { count: number }>): Promise<void>;
-  /** 查询时间区间内的聚合行（含起止） */
-  queryStats(from: Date, to: Date): Promise<TrafficStatRow[]>;
-  /** 批量插入 429 记录 */
-  insertBlocked(rows: Array<Omit<TrafficBlockedRow, 'createTime'>>): Promise<void>;
-  /** 查询区间内的 429 记录 */
-  queryBlocked(from: Date, to: Date, limit: number): Promise<TrafficBlockedRow[]>;
-}
-
-/** 限流规则覆盖行（DB 里只存与默认值不同的桶） */
-export interface RateLimitRuleRow {
-  bucket: string;
-  maxRequests: number;
-  windowSeconds: number;
-  enabled: boolean;
-}
-
-/** 免限流 IP */
-export interface AllowlistRow {
-  ip: string;
-  note?: string;
-  createTime: Date;
-}
-
-/** 限流配置仓储：阈值覆盖 + IP 白名单 */
-export interface IRateLimitRepo {
-  listRules(): Promise<RateLimitRuleRow[]>;
-  upsertRule(rule: RateLimitRuleRow): Promise<void>;
-  listAllowlist(): Promise<AllowlistRow[]>;
-  addAllowlist(ip: string, note?: string): Promise<void>;
-  removeAllowlist(ip: string): Promise<void>;
+export interface IRegistrationRepo {
+  createAccount(input: RegistrationAccountInput): Promise<RegistrationResult>;
 }
