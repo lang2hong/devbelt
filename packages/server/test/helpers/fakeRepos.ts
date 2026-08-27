@@ -259,11 +259,6 @@ export class FakeRefreshTokenRepo implements IRefreshTokenRepo {
     }));
   }
 
-  async updateLastUsed(id: number, time: Date): Promise<void> {
-    const t = this.tokens.get(id);
-    if (t) t.lastUsedTime = time;
-  }
-
   private activeFor(userId: number, now: Date): RefreshToken[] {
     return [...this.tokens.values()].filter(
       (t) => t.userId === userId && !t.revokedTime && t.expiresTime > now,
@@ -551,10 +546,6 @@ export class FakeAdminAuditRepo implements IAdminAuditRepo {
 export class FakeWebhookEventRepo implements IWebhookEventRepo {
   readonly rows = new Map<string, Record<string, unknown> | undefined>();
 
-  async seen(provider: string, eventKey: string): Promise<boolean> {
-    return this.rows.has(`${provider}:${eventKey}`);
-  }
-
   async record(provider: string, eventKey: string, detail?: Record<string, unknown>): Promise<boolean> {
     const k = `${provider}:${eventKey}`;
     if (this.rows.has(k)) return false;
@@ -798,10 +789,6 @@ export class FakeOrderRepo implements IOrderRepo {
 
   async countByOrganization(organizationId: number): Promise<number> {
     return [...this.orders.values()].filter((o) => o.organizationId === organizationId).length;
-  }
-
-  async findByProviderExternal(provider: string, externalId: string): Promise<Order | undefined> {
-    return [...this.orders.values()].find((o) => o.provider === provider && o.externalId === externalId);
   }
 }
 

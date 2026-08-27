@@ -221,10 +221,6 @@ export class SyncManager {
     }
   }
 
-  getVersion(): number {
-    return 0; // 分节无全局 version，保留接口兼容
-  }
-
   getLastSyncAt(): number {
     return this.hashStore.get<number>(SyncManager.LAST_SYNC_AT_KEY) ?? 0;
   }

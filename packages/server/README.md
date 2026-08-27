@@ -6,7 +6,7 @@
 
 ## 接口
 
-共 42 个端点（含 `/health`；不含 `/admin` 静态托管与 Fastify 给 GET 自动补的 HEAD）。「认证」列含义：
+共 43 个端点（含 `/health`；不含 `/admin` 静态托管与 Fastify 给 GET 自动补的 HEAD）。「认证」列含义：
 
 - **公开** — 无需任何凭据
 - **JWT** — 需 `Authorization: Bearer <accessToken>`
@@ -24,7 +24,7 @@
 | GET | `/api/devices` | JWT | 列出本人设备，返回 `currentDeviceId` 标记当前设备 |
 | DELETE | `/api/devices/:deviceId` | JWT | 撤销指定设备的全部会话。free 用户不可自助撤设备（返回 403，防「撤销=共享」），需管理员协助 |
 
-`register` / `login` / `refresh` 的响应除 `accessToken` / `refreshToken` 外，额外附带 `token` / `userId` / `role` 顶层字段，仅为兼容旧版扩展读字段（非协议兼容，Greenfield 不迁移旧数据/不兼容旧客户端协议），新代码请读 `accessToken`。后续可移除。
+`register` / `login` / `refresh` 的响应统一返回 `accessToken` / `refreshToken` / `user` / `subscription`（register 和 login）。
 
 三者都会读取 `x-device-name` 请求头与 `user-agent` / 来源 IP，记入会话列表。
 
@@ -56,6 +56,7 @@
 | DELETE | `/api/organizations/:id/resources/:rid` | JWT + org admin | 软删资源 |
 | POST | `/api/organizations/:id/resources/:rid/permissions` | JWT + org admin | 授予 restricted 资源权限 `{membershipId, permission}` |
 | GET | `/api/organizations/:id/resources/:rid/permissions` | JWT | 列该资源的授权（成员可读，软删资源返回 404） |
+| DELETE | `/api/organizations/:id/resources/:rid/permissions/:membershipId` | JWT + org admin | 撤销成员对 restricted 资源的全部权限 |
 | GET | `/api/organizations/:id/audit` | JWT + org admin | 组织审计（最近 100 条） |
 
 `accessScope` 取值 `organization`（全体成员可见）/ `restricted`（需显式授权）。

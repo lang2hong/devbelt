@@ -163,6 +163,16 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         }
       });
 
+      child.delete('/api/organizations/:organizationId/resources/:resourceId/permissions/:membershipId', async (req, reply) => {
+        try {
+          const mid = Number((req.params as any).membershipId);
+          await svc.revokePermission(orgId(req), resourceId(req), mid, req.user.sub as number);
+          reply.code(204).send();
+        } catch (e) {
+          sendError(reply, e);
+        }
+      });
+
       child.get('/api/organizations/:organizationId/audit', async (req, reply) => {
         try {
           const entries = await svc.listAudit(orgId(req), req.user.sub as number, 100, 0);

@@ -6,7 +6,6 @@ import type {
   ResourceType,
   AccessScope,
   ResourcePermission,
-  PaymentProvider,
 } from '../domain/enums.js';
 import type {
   AdminAuditLog,
@@ -81,7 +80,7 @@ export interface IPlanRepo {
   findById(id: number): Promise<Plan | undefined>;
   findByCode(code: PlanCode): Promise<Plan | undefined>;
   listAll(): Promise<Plan[]>;
-  /** 播种套餐数据（仅 schema 初始化时调用） */
+  /** 播种套餐数据（v2 由 migration 002 播种，此方法供测试与管理路径使用） */
   seed(plans: Array<Omit<Plan, 'createTime' | 'updateTime'>>): Promise<void>;
   /** 更新套餐可编辑字段（管理后台编辑） */
   update(code: PlanCode, fields: PlanEditableFields): Promise<void>;
@@ -126,7 +125,6 @@ export interface IRefreshTokenRepo {
   /** 撤销某用户在某设备上的全部活跃会话（同设备重登顶掉旧会话） */
   revokeByDevice(userId: number, deviceId: string): Promise<void>;
   listActiveForUser(userId: number, now: Date): Promise<SessionInfo[]>;
-  updateLastUsed(id: number, time: Date): Promise<void>;
 }
 
 /** 设备实体仓储（设备固有信息，独立于会话） */
@@ -185,8 +183,6 @@ export interface IAdminAuditRepo {
  * 两家支付商各自用 `evt_1` 编号完全可能，跨商去重会把第二家的第一个事件吃掉。
  */
 export interface IWebhookEventRepo {
-  /** 已处理过则返回 true。用于处理前的短路判断 */
-  seen(provider: string, eventKey: string): Promise<boolean>;
   /**
    * 原子地标记"已处理"（INSERT，唯一键兜底）。
    * 返回 true = 首次插入（当前调用者获得处理权）；false = 已有人记过。
@@ -306,8 +302,6 @@ export interface IOrderRepo {
   create(input: OrderInput): Promise<Order>;
   listByOrganization(organizationId: number, limit: number, offset: number): Promise<Order[]>;
   countByOrganization(organizationId: number): Promise<number>;
-  /** 按支付商 + 外部 ID 查（幂等：同一回调不重复建单） */
-  findByProviderExternal(provider: PaymentProvider, externalId: string): Promise<Order | undefined>;
 }
 
 /** 资源创建入参（id / 时间列由库生成） */

@@ -31,7 +31,7 @@ export interface PushInput {
  *
  * 端到端加密：server 仅见密文。但连接数 etc. 需服务端计量，
  * 故 push connections 时客户端附带明文元数据（connection_meta），
- * 据此校验 maxConnections 并落库；内容仍存 sync_sections 密文。
+ * 据此校验 perUserMaxPrivateConnections 并落库；内容仍存 sync_sections 密文。
  */
 export class SyncService {
   constructor(

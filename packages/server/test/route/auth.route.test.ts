@@ -106,8 +106,8 @@ describe('POST /api/auth/refresh', () => {
       method: 'POST', url: '/api/auth/register',
       payload: { email: 'ban@example.com', password: 'longenough1' },
     });
-    const { refreshToken, userId } = reg.json();
-    await t.repos.userRepo.updateStatus(userId, 'disabled');
+    const { refreshToken, user } = reg.json();
+    await t.repos.userRepo.updateStatus(user.id, 'disabled');
 
     const res = await t.app.inject({
       method: 'POST', url: '/api/auth/refresh', payload: { refreshToken },
@@ -115,7 +115,7 @@ describe('POST /api/auth/refresh', () => {
     expect(res.statusCode).toBe(403);
     expect(res.json().code).toBe('USER_DISABLED');
 
-    const active = (await t.repos.refreshTokenRepo.listActiveForUser(userId, new Date())).length;
+    const active = (await t.repos.refreshTokenRepo.listActiveForUser(user.id, new Date())).length;
     expect(active).toBe(0);
   });
 });

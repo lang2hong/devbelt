@@ -144,7 +144,7 @@ describe('幂等', () => {
     c.subRepo.failNextUpsert = true;
     await expect(c.svc.applyWebhookEvent(e)).rejects.toThrow();
     // record-first：事件已记录，不 forget —— 防止 order 已写→seat 失败→forget→重试→撞 UNIQUE→死循环
-    expect(await c.eventRepo.seen('stripe', 'evt_retry')).toBe(true);
+    expect(await c.eventRepo.record('stripe', 'evt_retry')).toBe(false);
     // 重试被跳过（record 返回 false = 已有人记过）
     await c.svc.applyWebhookEvent(e);
     // 订阅仍未激活（处理未完成，需人工排查）
@@ -193,7 +193,7 @@ describe('handleWebhook 端到端（含幂等与校验）', () => {
     await c.svc.handleWebhook('stripe' as ProviderName, Buffer.from('{}'), 'sig');
     const sub = (await c.subRepo.findByOrganizationId(c.orgId))!;
     expect(sub.planId).toBe((await c.planRepo.findByCode('pro'))!.id);
-    expect(await c.eventRepo.seen('stripe', 'evt_e2e')).toBe(true);
+    expect(await c.eventRepo.record('stripe', 'evt_e2e')).toBe(false);
   });
 
   it('重复投递返回成功但不重复生效', async () => {

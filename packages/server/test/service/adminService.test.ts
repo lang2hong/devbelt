@@ -71,11 +71,10 @@ describe('AdminService.listUsers', () => {
 describe('AdminService.getUserDetail', () => {
   it('assembles user + plan + subscription + sessions + usage', async () => {
     const { service, rtRepo, syncRepo, deviceRepo, alice } = await setup();
-    const t = await rtRepo.create({
+    await rtRepo.create({
       userId: alice.id, tokenHash: 'h1', deviceName: 'mac', ip: '1.2.3.4',
       expiresTime: new Date(Date.now() + DAY),
     });
-    await rtRepo.updateLastUsed(t.id, new Date());
     await deviceRepo.upsert({ userId: alice.id, deviceId: 'dev1', hostname: 'mac' });
     await deviceRepo.bind(alice.id, 'dev1');
     await syncRepo.putSection(alice.id, 'connections', 'x'.repeat(10), 3);

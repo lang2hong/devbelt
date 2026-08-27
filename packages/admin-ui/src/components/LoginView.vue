@@ -18,11 +18,11 @@ async function submit() {
       method: 'POST',
       body: { email: email.value, password: password.value },
     });
-    if (r.role !== 'admin') {
+    if (r.user.role !== 'admin') {
       error.value = 'This account is not an admin.';
       return;
     }
-    setToken(r.token);
+    setToken(r.accessToken);
     emit('logged-in', r.user);
   } catch (ex) {
     error.value = ex instanceof Error ? ex.message : String(ex);

@@ -174,7 +174,6 @@ export interface MeResponse {
 }
 
 export interface LoginResponse {
-  token: string;
+  accessToken: string;
   user: UserInfo;
-  role: string;
 }

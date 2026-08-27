@@ -105,7 +105,7 @@ export const sectionRequiredQuery = {
  *  |   连接数 |   明文 |  请求体 |
  *  |---------|-------|--------|
  *  |      50 |  28KB | 0.04MB |
- *  |     500 | 278KB | 0.36MB |   ← Team 套餐的 maxConnections 上限
+ *  |     500 | 278KB | 0.36MB |   ← Team 套餐的 perUserMaxPrivateConnections 上限
  *  |    2000 | 1.1MB | 1.45MB |
  *
  * 也就是说 Team 的 500 连接只要 0.36MB，Fastify 默认的 1 MiB 本来就够用。

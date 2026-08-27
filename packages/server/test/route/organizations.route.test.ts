@@ -153,4 +153,41 @@ describe('组织域授权守卫', () => {
     // 这是可接受的（不泄漏 404 vs 403 的区别给非成员），此处仅断言非 200
     expect(res.statusCode).toBeGreaterThanOrEqual(400);
   });
+
+  it('revokePermission → 204 且授权消失', async () => {
+    const { orgId, ownerToken } = await makeOrg({ seats: 2 });
+    // 建一个 restricted 资源
+    const create = await t.app.inject({
+      method: 'POST', url: `/api/organizations/${orgId}/resources`, headers: t.auth(ownerToken),
+      payload: { resourceType: 'query', name: 'q1', accessScope: 'restricted', encryptedData: 'enc' },
+    });
+    const resourceId = create.json().resource.id;
+
+    // 加成员
+    const member = await t.makeUser();
+    await t.app.inject({
+      method: 'POST', url: `/api/organizations/${orgId}/members`, headers: t.auth(ownerToken),
+      payload: { userId: member.id, role: 'member' },
+    });
+
+    // 取成员的 membershipId
+    const membersRes = await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}/members`, headers: t.auth(ownerToken) });
+    const memberMembershipId = membersRes.json().members.find((m: any) => m.userId === member.id).id;
+
+    // 授权
+    await t.app.inject({
+      method: 'POST', url: `/api/organizations/${orgId}/resources/${resourceId}/permissions`, headers: t.auth(ownerToken),
+      payload: { membershipId: memberMembershipId, permission: 'read' },
+    });
+
+    // 撤销
+    const res = await t.app.inject({
+      method: 'DELETE', url: `/api/organizations/${orgId}/resources/${resourceId}/permissions/${memberMembershipId}`, headers: t.auth(ownerToken),
+    });
+    expect(res.statusCode).toBe(204);
+
+    // 确认授权列表为空
+    const listRes = await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}/resources/${resourceId}/permissions`, headers: t.auth(ownerToken) });
+    expect(listRes.json().permissions).toHaveLength(0);
+  });
 });

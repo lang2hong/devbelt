@@ -81,17 +81,6 @@ describe('MysqlOrderRepo', () => {
     expect(db.calls[0].params).toEqual([1, 9, 2, 200, 'CNY', 'paid', 'stripe', 'evt_1', 2, 12]);
   });
 
-  it('findByProviderExternal 按 (provider, external_id) 查幂等', async () => {
-    const db = new StubDb().reply('external_id = ?', [
-      { id: 8, organization_id: 1, subscription_id: 9, plan_id: 2, amount: 200, currency: 'CNY', status: 'paid', provider: 'stripe', external_id: 'evt_1', seat_delta: 2, period_months: 12, create_time: '2026-01-01', update_time: '2026-01-01' },
-    ]);
-    const o = await repo(db).findByProviderExternal('stripe', 'evt_1');
-    expect(o?.id).toBe(8);
-    expect(o?.amount).toBe(200);
-    expect(o?.seatDelta).toBe(2);
-    expect(db.calls[0].params).toEqual(['stripe', 'evt_1']);
-  });
-
   it('listByOrganization 按 id DESC 分页', async () => {
     const db = new StubDb().reply('organization_id = ?', [
       { id: 3, organization_id: 1, subscription_id: null, plan_id: 1, amount: 0, currency: 'CNY', status: 'paid', provider: 'manual', external_id: null, seat_delta: 0, period_months: 1, create_time: '2026-01-01', update_time: '2026-01-01' },

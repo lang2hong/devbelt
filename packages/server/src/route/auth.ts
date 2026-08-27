@@ -20,9 +20,6 @@ export interface AuthRouteOptions {
  * 认证路由（HTTP 层）：仅编组 AuthService + 序列化，无业务逻辑。
  * 公开：register / login / refresh
  * 需认证：logout / change-password（包在 authScope 子作用域）
- *
- * 兼容旧客户端：register/login/refresh 响应附带 token/userId/role 顶层字段，
- * 旧 syncClient 读 token；新客户端读 accessToken/refreshToken。
  */
 export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): Promise<void> {
   const auth = opts.authService;
@@ -40,12 +37,7 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): 
     const { email, password } = req.body as any;
     try {
       const r = await auth.register(email, password, deviceInfo(req));
-      reply.code(201).send({
-        ...r,
-        token: r.accessToken,
-        userId: r.user.id,
-        role: r.user.role,
-      });
+      reply.code(201).send(r);
     } catch (e) {
       sendError(reply, e);
     }
@@ -55,12 +47,7 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): 
     const { email, password } = req.body as any;
     try {
       const r = await auth.login(email, password, deviceInfo(req));
-      reply.send({
-        ...r,
-        token: r.accessToken,
-        userId: r.user.id,
-        role: r.user.role,
-      });
+      reply.send(r);
     } catch (e) {
       sendError(reply, e);
     }
@@ -70,7 +57,7 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): 
     const { refreshToken } = req.body as any;
     try {
       const r = await auth.refresh(refreshToken, deviceInfo(req));
-      reply.send({ ...r, token: r.accessToken });
+      reply.send(r);
     } catch (e) {
       sendError(reply, e);
     }

@@ -1,14 +1,13 @@
 import type { IOrderRepo, OrderInput } from '../interfaces.js';
 import type { Order } from '../../domain/entities.js';
-import type { OrderStatus, PaymentProvider } from '../../domain/enums.js';
+import type { OrderStatus } from '../../domain/enums.js';
 import type { MysqlDb } from './db.js';
 
 /**
  * 订单仓储（不可变计费流水）（已接入运行时）。
  *
  * 列名与 001_initial_schema.ts 的 orders 表逐列对齐。
- * 订单一旦写入不改 status 之外的列（不可变计账）；幂等靠
- * `findByProviderExternal` 按 (provider, external_id) 防重复建单。
+ * 订单一旦写入不改 status 之外的列（不可变计账）。
  */
 export class MysqlOrderRepo implements IOrderRepo {
   constructor(private readonly db: () => MysqlDb) {}
@@ -55,14 +54,6 @@ export class MysqlOrderRepo implements IOrderRepo {
       organizationId,
     ]);
     return Number(rows[0]?.cnt ?? 0);
-  }
-
-  async findByProviderExternal(provider: PaymentProvider, externalId: string): Promise<Order | undefined> {
-    const [rows] = await this.db().query<any[]>(
-      'SELECT * FROM orders WHERE provider = ? AND external_id = ?',
-      [provider, externalId],
-    );
-    return rows[0] ? mapOrder(rows[0]) : undefined;
   }
 }
 

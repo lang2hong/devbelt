@@ -20,12 +20,8 @@ const directAgent = new Agent();
 export interface AuthResult {
   accessToken: string;
   refreshToken: string;
-  userId: number;
-  role: string;
   user?: { id: number; email: string; role: string };
   subscription?: { planId: number; status: string; periodEndTime?: string };
-  /** 兼容旧字段 */
-  token: string;
 }
 
 /** 设备信息（登录/刷新时通过 header 上报；deviceId 为同设备判同键） */

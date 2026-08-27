@@ -73,10 +73,6 @@ export class MysqlRefreshTokenRepo implements IRefreshTokenRepo {
     }));
   }
 
-  async updateLastUsed(id: number, time: Date): Promise<void> {
-    await this.db().query('UPDATE refresh_tokens SET last_used_time = ? WHERE id = ?', [time, id]);
-  }
-
   async findById(id: number): Promise<RefreshToken | undefined> {
     const [rows] = await this.db().query<any[]>('SELECT * FROM refresh_tokens WHERE id = ?', [id]);
     return rows[0] ? mapRefreshToken(rows[0]) : undefined;

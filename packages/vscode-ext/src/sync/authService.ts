@@ -235,7 +235,7 @@ export class AuthService {
     await this.client.changePassword(oldPassword, newPassword);
   }
 
-  /** 刷新 token：用 refresh 换新 access + 轮换 refresh */
+  /** 手动刷新 token（测试用；生产路径由 401 自动刷新处理） */
   async refreshTokens(): Promise<void> {
     await this.client.refresh();
   }

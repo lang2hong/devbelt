@@ -4,7 +4,7 @@ import { buildTestApp, type TestApp } from '../helpers/testApp.js';
 /**
  * 配额绕过。
  *
- * `maxConnections` 与 `maxDevices` 是 free/pro/team 三档套餐的两个核心分层维度，
+ * `perUserMaxPrivateConnections` 与 `perSeatMaxDevices` 是 free/pro/team 三档套餐的两个核心分层维度，
  * 但服务端此前都拦不住：
  *
  * ## 连接数
@@ -63,7 +63,7 @@ describe('连接数配额：不发 meta 不能绕过校验', () => {
 
 describe('连接数配额：按库内存量而非入参条数', () => {
   it('分多次每次只发 1 条，累计超限时被拒', async () => {
-    // free 套餐 maxConnections = 5（makePlan 的默认值）
+    // free 套餐 perUserMaxPrivateConnections = 5（makePlan 的默认值）
     const u = await t.makeUser();
     let version = 0;
 

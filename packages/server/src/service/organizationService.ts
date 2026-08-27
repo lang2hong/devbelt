@@ -229,6 +229,17 @@ export class OrganizationService {
     return this.resourceRepo.listPermissions(resourceId);
   }
 
+  /** 撤销成员对 restricted 资源的权限 */
+  async revokePermission(organizationId: number, resourceId: number, membershipId: number, actorUserId: number): Promise<void> {
+    await this.requireOrgAdmin(organizationId, actorUserId);
+    const r = await this.resourceRepo.findById(resourceId);
+    if (!r || r.organizationId !== organizationId) throw new EntityNotFoundError('resource', resourceId);
+    const m = await this.membershipRepo.findById(membershipId);
+    if (!m || m.organizationId !== organizationId) throw new EntityNotFoundError('membership', membershipId);
+    await this.resourceRepo.revokePermission(resourceId, membershipId);
+    await this.audit(actorUserId, organizationId, 'resource.revoke', r.resourceType, resourceId, { membershipId });
+  }
+
   // ── 审计 ──
 
   async listAudit(organizationId: number, actorUserId: number, limit: number, offset: number): Promise<OrganizationAuditLog[]> {
