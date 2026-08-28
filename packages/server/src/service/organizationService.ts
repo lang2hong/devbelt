@@ -1,295 +1,391 @@
+import { randomBytes } from 'crypto';
+import {
+  ValidationError,
+  ForbiddenError,
+  EntityNotFoundError,
+  OrganizationNotFoundError,
+  OrganizationAdminRequiredError,
+  InvitationInvalidError,
+  InvitationTargetNotEligibleError,
+  OrganizationQuotaExceededError,
+} from '../domain/errors.js';
+import type { OrganizationMembership } from '../domain/entities.js';
+import type { OrganizationRole } from '../domain/enums.js';
 import type {
-  IOrganizationRepo, IMembershipRepo, ISeatRepo, IOrganizationResourceRepo,
-  IOrganizationAuditRepo, ISubscriptionRepo, IPlanRepo,
-  OrganizationResourceInput, OrganizationResourceEditableFields,
+  IUserRepo,
+  IOrganizationRepo,
+  IOrganizationPlanRepo,
+  IOrganizationSubscriptionRepo,
+  IMembershipRepo,
+  IOrganizationInvitationRepo,
+  InvitationDto,
 } from '../repository/interfaces.js';
-import type {
-  Organization, Membership, OrganizationResource, OrganizationResourcePermission, OrganizationAuditLog,
-} from '../domain/entities.js';
-import type { MemberRole, ResourcePermission, ResourceType } from '../domain/enums.js';
-import { EntityNotFoundError, ValidationError, ForbiddenError, AlreadyExistsError } from '../domain/errors.js';
+import type { TxRunner, Queryable } from '../repository/mysql/db.js';
+import type { RateLimitService } from './rateLimitService.js';
+import type { TokenService } from './tokenService.js';
+import type { EmailSender } from './emailSender.js';
+import { roleHasPermission } from '../authz/permissionCatalog.js';
 
-/** team 组织创建时赠送的试用天数；到期后订阅降为 expired，回落 free。 */
-const TEAM_TRIAL_DAYS = 14;
+const ORGANIZATION_FREE = 'organization_free';
+
+// 限流阈值（实施规格 §4.5）：组织创建按用户每小时最多 10 次（已认证，不按 IP）。
+const ORG_CREATE_WINDOW_S = 3600;
+const ORG_CREATE_MAX = 10;
+
+// 邀请 token 有效期 7 天（实施规格 §4.7）。
+const INVITATION_TOKEN_TTL_MS = 7 * 24 * 3600 * 1000;
+
+/** 组织 DTO（route 层再转 id -> string）。 */
+export interface OrganizationDto {
+  organizationId: number;
+  name: string;
+  status: string;
+  closedTime: Date | null;
+  role: OrganizationRole;
+}
+
+/** 邀请创建结果（route 层序列化 invitationId -> string）。 */
+export interface InvitationResultDto {
+  invitationId: number;
+  email: string;
+  role: OrganizationRole;
+  expiresTime: Date;
+}
 
 /**
- * 组织域服务：组织 / 成员 / 席位 / 共享资源 / 权限 / 组织审计。
+ * 组织服务（切片 2 / 切片 3）。
  *
- * v2 核心：团队协作放在 organization 上。私有资源仍属 user；本服务只管 org 级
- * 共享资源与成员生命周期。席位约束（活跃成员数 ≤ 活跃席位数）在 addMember 时
- * 应用层强制。
+ * 成员变更（角色/移除/退出）与邀请（创建/接受/撤销/过期）在事务内
+ * 「锁组织行 → 锁订阅 → 锁 membership → 锁 invitation」串行化，并在锁内做
+ * 最后 active admin 保护与 seat 容量校验（§3/§4.3）。
  *
- * ## 授权模型
- *
- * - 写操作（成员/资源/权限/审计管理）→ **requireOrgAdmin**：调用方必须是该 org 的
- *   active admin 成员（owner 注册即 admin，故 owner 恒通过）。
- * - 读操作（org 详情/成员/资源列表）→ **requireMember**：active 成员即可。
- * - 创建组织 / 列自己的组织 不加守卫（创建者 / 自身）。
- *
- * 任何越权一律抛 ForbiddenError → 403。这是发布级安全边界：org 路由的 authScope
- * 只验「登录」，成员归属必须在这里兜住，否则任意用户可改任意 org。
+ * 邀请 token 复用身份切片的既有模式（§4.7）：事务内落库 → 提交后发信 →
+ * 发送失败不回滚；重新邀请先作废旧 token，保证同时最多一个有效 token。
  */
 export class OrganizationService {
   constructor(
-    private readonly orgRepo: IOrganizationRepo,
+    private readonly userRepo: IUserRepo,
+    private readonly organizationRepo: IOrganizationRepo,
+    private readonly organizationPlanRepo: IOrganizationPlanRepo,
+    private readonly organizationSubscriptionRepo: IOrganizationSubscriptionRepo,
     private readonly membershipRepo: IMembershipRepo,
-    private readonly seatRepo: ISeatRepo,
-    private readonly resourceRepo: IOrganizationResourceRepo,
-    private readonly auditRepo: IOrganizationAuditRepo,
-    private readonly subRepo: ISubscriptionRepo,
-    private readonly planRepo: IPlanRepo,
+    private readonly invitationRepo: IOrganizationInvitationRepo,
+    private readonly rateLimiter: RateLimitService,
+    private readonly tokenService: TokenService,
+    private readonly emailSender: EmailSender,
+    private readonly runner: TxRunner,
   ) {}
 
-  /** 列出某用户所属（活跃成员关系指向的）组织 */
-  async listMyOrganizations(userId: number): Promise<Organization[]> {
-    const memberships = await this.membershipRepo.listByUser(userId);
-    const orgs: Organization[] = [];
-    for (const m of memberships) {
-      if (m.status !== 'active') continue;
-      const org = await this.orgRepo.findById(m.organizationId);
-      if (org) orgs.push(org);
-    }
-    return orgs;
+  /** 列出用户 active membership 且组织 active 的组织（含其角色）。 */
+  async listOrganizations(userId: number): Promise<OrganizationDto[]> {
+    return this.membershipRepo.listActiveByUserWithOrg(userId);
   }
 
-  async getOrganization(organizationId: number, actorUserId: number): Promise<Organization> {
-    const org = await this.orgRepo.findById(organizationId);
-    if (!org) throw new EntityNotFoundError('organization', organizationId);
-    await this.requireMember(organizationId, actorUserId);
-    return org;
+  /** 创建组织：限流后单事务锁定 organization_free plan，创建 active 组织 + Free 订阅 + 首位 active admin（§4.2）。 */
+  async createOrganization(userId: number, name: string): Promise<OrganizationDto> {
+    const trimmed = name.trim();
+    if (!trimmed || Array.from(trimmed).length > 100) throw new ValidationError('invalid organization name');
+
+    // 每次尝试都计数（事务外、进入业务前），与 register 一致；仅按用户，不按 IP。
+    await this.rateLimiter.hit(`org:create:user:${userId}`, ORG_CREATE_WINDOW_S, ORG_CREATE_MAX);
+
+    const org = await this.runner(async (tx) => {
+      const plan = await this.organizationPlanRepo.findByCodeForUpdate(tx, ORGANIZATION_FREE);
+      if (!plan) throw new Error(`${ORGANIZATION_FREE} plan is missing; run migrations before create`);
+
+      const created = await this.organizationRepo.create(tx, { name: trimmed });
+      const now = new Date();
+      await this.organizationSubscriptionRepo.create(tx, {
+        organizationId: created.id,
+        planId: plan.id,
+        seatLimit: plan.includedSeats,
+        status: 'active',
+        entitlementSnapshot: {
+          includedSeats: plan.includedSeats,
+          maxSharedResources: plan.maxSharedResources,
+          sharedStorageQuotaBytes: plan.sharedStorageQuotaBytes,
+          allowedTemplateDatabaseTypes: plan.allowedTemplateDatabaseTypes,
+        },
+        periodStartTime: now,
+        periodEndTime: null,
+      });
+      await this.membershipRepo.create(tx, {
+        organizationId: created.id,
+        userId,
+        role: 'admin',
+        status: 'active',
+        invitedByUserId: null,
+        joinedTime: now,
+        removedTime: null,
+      });
+      return created;
+    });
+
+    return { organizationId: org.id, name: org.name, status: org.status, closedTime: org.closedTime, role: 'admin' };
+  }
+
+  async updateOrganization(organizationId: number, name: string): Promise<{ ok: true }> {
+    const trimmed = name.trim();
+    if (!trimmed || Array.from(trimmed).length > 100) throw new ValidationError('invalid organization name');
+    await this.runner(async (tx) => {
+      const org = await this.organizationRepo.lockById(tx, organizationId);
+      if (!org || org.status !== 'active') throw new OrganizationNotFoundError();
+      await this.organizationRepo.updateName(tx, organizationId, trimmed);
+    });
+    return { ok: true };
   }
 
   /**
-   * 创建 team 组织：建 org + admin 成员 + team 订阅（14 天试用）+ included_seats 个席位。
-   *
-   * 席位是 addMember 的硬约束（活跃成员数 ≤ 活跃席位数）。若只建 org 不建订阅/席位，
-   * owner 这第一个成员就把 activeMembers 顶到 1 而 activeSeats 仍是 0，之后任何
-   * addMember 恒抛「no available seat」——team 组织建出来即不可用。因此建组织时
-   * 即按 team 套餐的 included_seats 补齐初始席位，owner 占其一。
-   *
-   * 订阅走 `trialing` + `trialEndTime`（TEAM_TRIAL_DAYS 天）：试用期内 resolveEffectivePlans
-   * 解出 team 套餐额度，试用到期后由 ensureActive/downgradeExpired 降为 expired，回落
-   * free。**不得建 active 订阅**——那等于免费永久发放付费套餐（付费门禁旁路）。
-   * 正式 team 订阅由支付 webhook / admin renew 建立（status=active + periodEndTime）。
+   * 关闭组织（§5）：单一事务内置 closed、写 closed_time、撤销全部有效 invitations 行，
+   * 并把该组织全部 invited membership 置 removed（§4.3/§6.5 切片 3 清单）。
+   * 已 active 的 membership 保留。不可撤销。
    */
-  async createOrganization(userId: number, name: string): Promise<{ organization: Organization; membership: Membership }> {
-    if (!name || !name.trim()) throw new ValidationError('name is required');
-
-    // A3: 每用户最多 1 个活跃 team 组织（防试用薅：脚本循环建 team org 无限薅 14 天试用）
-    const memberships = await this.membershipRepo.listByUser(userId);
-    for (const m of memberships) {
-      if (m.status !== 'active') continue;
-      const org = await this.orgRepo.findById(m.organizationId);
-      if (org?.type === 'team') {
-        const sub = await this.subRepo.findByOrganizationId(org.id);
-        if (sub && (sub.status === 'active' || sub.status === 'trialing')) {
-          throw new AlreadyExistsError('user already has an active team organization');
-        }
-      }
-    }
-
-    const org = await this.orgRepo.create({ name: name.trim(), type: 'team', ownerUserId: userId });
-    const membership = await this.membershipRepo.create({ organizationId: org.id, userId, role: 'admin' });
-    const teamPlan = await this.planRepo.findByCode('team');
-    if (!teamPlan) throw new ValidationError('team plan is missing; run migrations before createOrganization');
-    const now = new Date();
-    const sub = await this.subRepo.upsert({
-      organizationId: org.id, planId: teamPlan.id, status: 'trialing', provider: 'manual',
-      periodStartTime: now, trialEndTime: new Date(now.getTime() + TEAM_TRIAL_DAYS * 86_400_000),
+  async closeOrganization(organizationId: number): Promise<{ ok: true }> {
+    await this.runner(async (tx) => {
+      const org = await this.organizationRepo.lockById(tx, organizationId);
+      if (!org || org.status !== 'active') throw new OrganizationNotFoundError();
+      await this.organizationSubscriptionRepo.findByOrganizationIdForUpdate(tx, organizationId);
+      const now = new Date();
+      await this.organizationRepo.close(tx, organizationId, now);
+      // 锁序统一：organization → subscription → membership → invitation
+      await this.membershipRepo.removeInvitedByOrganization(tx, organizationId, now);
+      await this.invitationRepo.revokeByOrganization(tx, organizationId, now);
     });
-    for (let i = 0; i < teamPlan.includedSeats; i++) {
-      await this.seatRepo.create({ subscriptionId: sub.id, organizationId: org.id });
-    }
-    await this.audit(userId, org.id, 'organization.create', undefined, undefined, { name: org.name });
-    return { organization: org, membership };
+    return { ok: true };
   }
 
-  // ── 成员 ──
-
-  async listMembers(organizationId: number, actorUserId: number): Promise<Membership[]> {
-    await this.getOrganization(organizationId, actorUserId);
+  async listMembers(organizationId: number) {
     return this.membershipRepo.listByOrganization(organizationId);
   }
 
-  /** 加成员。席位约束：活跃成员数必须 ≤ 活跃席位数（personal org 恒有 1 席位） */
-  async addMember(organizationId: number, userId: number, role: MemberRole, actorUserId: number): Promise<Membership> {
-    await this.requireOrgAdmin(organizationId, actorUserId);
-    const existing = await this.membershipRepo.findByOrgAndUser(organizationId, userId);
-    if (existing) throw new ValidationError('user is already a member');
-    const activeSeats = await this.seatRepo.countActiveByOrganization(organizationId);
-    const activeMembers = await this.membershipRepo.countActiveByOrganization(organizationId);
-    if (activeMembers >= activeSeats) throw new ValidationError('no available seat');
-    // P1-6: orgMaxMembers 校验（0 = 无限）
-    const sub = await this.subRepo.findByOrganizationId(organizationId);
-    if (sub) {
-      const plan = await this.planRepo.findById(sub.planId);
-      if (plan && plan.orgMaxMembers > 0 && activeMembers >= plan.orgMaxMembers) {
-        throw new ValidationError(`organization member limit reached (${plan.orgMaxMembers})`);
+  /** 分配角色（member.role.assign，目标非自身，最后 admin 保护）。 */
+  async assignRole(organizationId: number, membershipId: number, role: OrganizationRole, actorUserId: number): Promise<{ ok: true }> {
+    await this.runner(async (tx) => {
+      await this.organizationRepo.lockById(tx, organizationId);
+      await this.organizationSubscriptionRepo.findByOrganizationIdForUpdate(tx, organizationId);
+      const membership = await this.requireMembershipInTx(tx, membershipId, organizationId);
+      if (membership.userId === actorUserId) throw new ForbiddenError('cannot assign role to self');
+      if (membership.role === 'admin' && role === 'member') {
+        await this.ensureNotLastAdmin(tx, organizationId);
       }
+      await this.membershipRepo.updateRole(tx, membershipId, role);
+    });
+    return { ok: true };
+  }
+
+  /** 移除成员（member.remove，目标非自身，最后 admin 保护）。 */
+  async removeMember(organizationId: number, membershipId: number, actorUserId: number): Promise<{ ok: true }> {
+    await this.runner(async (tx) => {
+      await this.organizationRepo.lockById(tx, organizationId);
+      await this.organizationSubscriptionRepo.findByOrganizationIdForUpdate(tx, organizationId);
+      const membership = await this.requireMembershipInTx(tx, membershipId, organizationId);
+      if (membership.userId === actorUserId) throw new ForbiddenError('cannot remove self');
+      if (membership.role === 'admin') await this.ensureNotLastAdmin(tx, organizationId);
+      await this.membershipRepo.remove(tx, membershipId, new Date());
+    });
+    return { ok: true };
+  }
+
+  /** 退出组织（active member；退出者不是最后 active admin）。 */
+  async leaveOrganization(organizationId: number, userId: number): Promise<{ ok: true }> {
+    await this.runner(async (tx) => {
+      await this.organizationRepo.lockById(tx, organizationId);
+      await this.organizationSubscriptionRepo.findByOrganizationIdForUpdate(tx, organizationId);
+      const membership = await this.membershipRepo.findByOrgAndUserForUpdate(tx, organizationId, userId);
+      if (!membership || membership.status !== 'active') throw new OrganizationNotFoundError();
+      if (membership.role === 'admin') await this.ensureNotLastAdmin(tx, organizationId);
+      await this.membershipRepo.remove(tx, membership.id, new Date());
+    });
+    return { ok: true };
+  }
+
+  private async requireMembershipInTx(tx: Queryable, membershipId: number, organizationId: number): Promise<OrganizationMembership> {
+    const membership = await this.membershipRepo.findByIdForUpdate(tx, membershipId);
+    if (!membership || membership.organizationId !== organizationId || membership.status !== 'active') {
+      throw new EntityNotFoundError('membership', membershipId);
     }
-    const membership = await this.membershipRepo.create({ organizationId, userId, role });
-    await this.audit(actorUserId, organizationId, 'member.add', 'membership', membership.id, { userId, role });
     return membership;
   }
 
-  /** P1-6: 成员自退；owner 禁止自退（需先转让或解散） */
-  async leaveOrganization(organizationId: number, userId: number): Promise<void> {
-    const m = await this.getMembership(organizationId, userId);
-    await this.ensureNotOwner(organizationId, userId);
-    await this.membershipRepo.softDelete(m.id);
-    await this.audit(userId, organizationId, 'member.leave', 'membership', m.id, {});
+  private async ensureNotLastAdmin(tx: Queryable, organizationId: number): Promise<void> {
+    const admins = await this.membershipRepo.countActiveAdmins(tx, organizationId);
+    if (admins <= 1) throw new OrganizationAdminRequiredError();
   }
 
-  async updateMemberRole(organizationId: number, membershipId: number, role: MemberRole, actorUserId: number): Promise<void> {
-    await this.requireOrgAdmin(organizationId, actorUserId);
-    const m = await this.membershipRepo.findById(membershipId);
-    if (!m || m.organizationId !== organizationId) throw new EntityNotFoundError('membership', membershipId);
-    if (role !== 'admin') {
-      await this.ensureNotOwner(organizationId, m.userId);
-    }
-    await this.membershipRepo.updateRole(membershipId, role);
-    await this.audit(actorUserId, organizationId, 'member.update_role', 'membership', membershipId, { role });
-  }
-
-  async removeMember(organizationId: number, membershipId: number, actorUserId: number): Promise<void> {
-    await this.requireOrgAdmin(organizationId, actorUserId);
-    const m = await this.membershipRepo.findById(membershipId);
-    if (!m || m.organizationId !== organizationId) throw new EntityNotFoundError('membership', membershipId);
-    await this.ensureNotOwner(organizationId, m.userId);
-    await this.membershipRepo.softDelete(membershipId);
-    await this.audit(actorUserId, organizationId, 'member.remove', 'membership', membershipId, { userId: m.userId });
-  }
-
-  // ── 共享资源 ──
-
-  /**
-   * 列出组织内可见的共享资源。
-   *
-   * `access_scope='organization'` 的资源全体成员可见；`restricted` 资源只有
-   * admin 或在 organization_resource_permissions 里被显式授权的成员可见。
-   * 这是 restricted 语义在读取路径的落地点 —— 不在这里过滤，任意成员就能
-   * 读到受限资源的密文载荷，grantPermission 的授权就形同虚设。
-   */
-  async listResources(organizationId: number, actorUserId: number, type?: ResourceType): Promise<OrganizationResource[]> {
-    await this.getOrganization(organizationId, actorUserId);
-    const membership = await this.getMembership(organizationId, actorUserId);
-    const resources = await this.resourceRepo.listByOrganization(organizationId, type);
-    if (membership.role === 'admin') return resources;
-    const perms = await this.resourceRepo.listPermissionsForMembership(membership.id);
-    const allowedResourceIds = new Set(perms.map((p) => p.resourceId));
-    return resources.filter(
-      (r) => r.accessScope === 'organization' || allowedResourceIds.has(r.id),
-    );
-  }
-
-  async createResource(organizationId: number, actorUserId: number, input: Omit<OrganizationResourceInput, 'organizationId' | 'createdByUserId'>): Promise<OrganizationResource> {
-    await this.requireOrgAdmin(organizationId, actorUserId);
-    const resource = await this.resourceRepo.create({ ...input, organizationId, createdByUserId: actorUserId });
-    await this.audit(actorUserId, organizationId, 'resource.create', input.resourceType, resource.id, { name: input.name });
-    return resource;
-  }
-
-  async updateResource(organizationId: number, resourceId: number, actorUserId: number, fields: OrganizationResourceEditableFields): Promise<void> {
-    await this.requireOrgAdmin(organizationId, actorUserId);
-    const r = await this.resourceRepo.findById(resourceId);
-    if (!r || r.organizationId !== organizationId) throw new EntityNotFoundError('resource', resourceId);
-    await this.resourceRepo.update(resourceId, { ...fields, updatedByUserId: actorUserId });
-    await this.audit(actorUserId, organizationId, 'resource.update', r.resourceType, resourceId, {});
-  }
-
-  async softDeleteResource(organizationId: number, resourceId: number, actorUserId: number): Promise<void> {
-    await this.requireOrgAdmin(organizationId, actorUserId);
-    const r = await this.resourceRepo.findById(resourceId);
-    if (!r || r.organizationId !== organizationId) throw new EntityNotFoundError('resource', resourceId);
-    await this.resourceRepo.softDelete(resourceId);
-    await this.audit(actorUserId, organizationId, 'resource.delete', r.resourceType, resourceId, {});
-  }
-
-  // ── 权限 ──
-
-  async grantPermission(organizationId: number, resourceId: number, membershipId: number, permission: ResourcePermission, actorUserId: number): Promise<OrganizationResourcePermission> {
-    await this.requireOrgAdmin(organizationId, actorUserId);
-    const r = await this.resourceRepo.findById(resourceId);
-    if (!r || r.organizationId !== organizationId) throw new EntityNotFoundError('resource', resourceId);
-    const m = await this.membershipRepo.findById(membershipId);
-    if (!m || m.organizationId !== organizationId) throw new EntityNotFoundError('membership', membershipId);
-    const granted = await this.resourceRepo.grantPermission(organizationId, resourceId, membershipId, permission);
-    await this.audit(actorUserId, organizationId, 'resource.grant', r.resourceType, resourceId, { membershipId, permission });
-    return granted;
-  }
-
-  /**
-   * 列出某资源的授权。先确认资源存在且未软删（findById 过滤 delete_time），
-   * 再校验调用方是该 org 成员 —— 否则软删资源的陈旧授权会泄漏给非成员。
-   */
-  async listPermissions(organizationId: number, resourceId: number, actorUserId: number): Promise<OrganizationResourcePermission[]> {
-    await this.requireMember(organizationId, actorUserId);
-    const r = await this.resourceRepo.findById(resourceId);
-    if (!r || r.organizationId !== organizationId) throw new EntityNotFoundError('resource', resourceId);
-    return this.resourceRepo.listPermissions(resourceId);
-  }
-
-  /** 撤销成员对 restricted 资源的权限 */
-  async revokePermission(organizationId: number, resourceId: number, membershipId: number, actorUserId: number): Promise<void> {
-    await this.requireOrgAdmin(organizationId, actorUserId);
-    const r = await this.resourceRepo.findById(resourceId);
-    if (!r || r.organizationId !== organizationId) throw new EntityNotFoundError('resource', resourceId);
-    const m = await this.membershipRepo.findById(membershipId);
-    if (!m || m.organizationId !== organizationId) throw new EntityNotFoundError('membership', membershipId);
-    await this.resourceRepo.revokePermission(resourceId, membershipId);
-    await this.audit(actorUserId, organizationId, 'resource.revoke', r.resourceType, resourceId, { membershipId });
-  }
-
-  // ── 审计 ──
-
-  async listAudit(organizationId: number, actorUserId: number, limit: number, offset: number): Promise<OrganizationAuditLog[]> {
-    await this.requireOrgAdmin(organizationId, actorUserId);
-    return this.auditRepo.listByOrganization(organizationId, limit, offset);
-  }
-
-  // ── 授权守卫 ──
-
-  /** 调用方必须是该 org 的活跃成员（任意角色） */
-  private async requireMember(organizationId: number, userId: number): Promise<void> {
-    await this.getMembership(organizationId, userId);
-  }
-
-  /** 取调用方的活跃成员关系（requireMember 的可返回值版本） */
-  private async getMembership(organizationId: number, userId: number): Promise<Membership> {
-    const m = await this.membershipRepo.findByOrgAndUser(organizationId, userId);
-    if (!m || m.status !== 'active') throw new ForbiddenError('not a member of this organization');
-    return m;
-  }
-
-  /** 调用方必须是该 org 的活跃 admin 成员（owner 注册即 admin） */
-  private async requireOrgAdmin(organizationId: number, userId: number): Promise<void> {
-    const m = await this.membershipRepo.findByOrgAndUser(organizationId, userId);
-    if (!m || m.status !== 'active' || m.role !== 'admin') throw new ForbiddenError('organization admin required');
-  }
-
-  /**
-   * 禁止移除/降级商业 Owner。
-   *
-   * `organizations.owner_user_id` 是商业 Owner 的唯一权威，membership 不表达
-   * owner（见设计文档 §2）。若任意 admin 能把 owner 的 membership 移除或降级
-   * 出 admin，组织就会失去 owner（指针悬空）或失去最后一个可自管理的 admin。
-   * owner 转移需另立显式方法，不在成员管理范围内。
-   */
-  private async ensureNotOwner(organizationId: number, userId: number): Promise<void> {
-    const org = await this.orgRepo.findById(organizationId);
-    if (org && org.ownerUserId === userId) {
-      throw new ValidationError('cannot remove or demote the organization owner');
-    }
-  }
-
-  private async audit(
-    actorUserId: number,
+  /** 创建邀请（member.invite；§4.3 前置条件 + 容量 + token 作废旧）。 */
+  async inviteMember(
     organizationId: number,
-    action: string,
-    resourceType: string | undefined,
-    resourceId: number | undefined,
-    detail: Record<string, unknown>,
-  ): Promise<void> {
-    await this.auditRepo.record({ organizationId, actorUserId, action, resourceType, resourceId, detail });
+    actorUserId: number,
+    actorRole: OrganizationRole,
+    emailRaw: string,
+    role?: OrganizationRole,
+  ): Promise<InvitationResultDto> {
+    const email = normalizeEmail(emailRaw);
+    const targetRole = role ?? 'member';
+    if (targetRole === 'admin' && !roleHasPermission(actorRole, 'member.role.assign')) {
+      throw new ForbiddenError('inviting as admin requires member.role.assign');
+    }
+
+    const token = randomBytes(32).toString('base64url');
+    const tokenHash = this.tokenService.hashToken(token);
+    const expiresTime = new Date(Date.now() + INVITATION_TOKEN_TTL_MS);
+
+    const outcome = await this.runner(async (tx) => {
+      const now = new Date();
+      const org = await this.organizationRepo.lockById(tx, organizationId);
+      if (!org || org.status !== 'active') throw new OrganizationNotFoundError();
+      const subscription = await this.organizationSubscriptionRepo.findByOrganizationIdForUpdate(tx, organizationId);
+      if (!subscription || subscription.status !== 'active') throw new OrganizationNotFoundError();
+
+      const target = await this.userRepo.findByEmail(email);
+      if (!target || target.status !== 'active' || !target.emailVerifiedTime) {
+        throw new InvitationTargetNotEligibleError();
+      }
+
+      const membership = await this.membershipRepo.findByOrgAndUserForUpdate(tx, organizationId, target.id);
+      if (membership?.status === 'active') throw new InvitationTargetNotEligibleError('target is already a member');
+
+      // 容量：有效占用（active + 有效 invited）+ 是否新增一个 seat。
+      const used =
+        (await this.membershipRepo.countActive(tx, organizationId)) +
+        (await this.membershipRepo.countValidInvited(tx, organizationId, now));
+      const holdsSeat = !!membership
+        && membership.status === 'invited'
+        && (await this.invitationRepo.hasValidInvitation(tx, membership.id, now));
+      if (used + (holdsSeat ? 0 : 1) > subscription.seatLimit) throw new OrganizationQuotaExceededError();
+
+      // 重新邀请：作废旧 token，保证同时最多一个有效 token（§4.7）。
+      if (membership) await this.invitationRepo.revokeByMembership(tx, membership.id, now);
+
+      const saved = await this.membershipRepo.upsertInvited(tx, {
+        organizationId,
+        userId: target.id,
+        role: targetRole,
+        invitedByUserId: actorUserId,
+      });
+      const invitation = await this.invitationRepo.create(tx, {
+        organizationId,
+        membershipId: saved.id,
+        email,
+        tokenHash,
+        expiresTime,
+      });
+      return { invitationId: invitation.id, email, organizationName: org.name, targetDisplayName: target.displayName };
+    });
+
+    await this.emailSender.sendInvitationEmail({
+      to: email,
+      organizationName: outcome.organizationName,
+      token,
+      displayName: outcome.targetDisplayName,
+      expiresTime,
+    }).catch((err) => {
+      console.warn('[org] invitation email failed', String(err));
+    });
+
+    return { invitationId: outcome.invitationId, email, role: targetRole, expiresTime };
   }
+
+  /** 列有效邀请（member.invite；不含 token/hash）。 */
+  async listInvitations(organizationId: number): Promise<InvitationDto[]> {
+    return this.invitationRepo.listActiveByOrganization(organizationId, new Date());
+  }
+
+  /** 撤销邀请（member.invite）：invitation revoked，membership removed，释放容量。 */
+  async revokeInvitation(organizationId: number, invitationId: number): Promise<{ ok: true }> {
+    // 先非锁读拿 membership 归属，再按「组织 → 订阅 → membership → invitation」加锁。
+    // 跨组织 / 不存在的 id 返回 404 NOT_FOUND（§5 反枚举，与跨组织 membershipId 一致），
+    // 仅「本组织内但已 accepted/revoked」属 token 状态非法，保持 400 INVITATION_INVALID。
+    const hint = await this.invitationRepo.findById(invitationId);
+    if (!hint || hint.organizationId !== organizationId) throw new EntityNotFoundError('invitation', invitationId);
+
+    await this.runner(async (tx) => {
+      const now = new Date();
+      const org = await this.organizationRepo.lockById(tx, organizationId);
+      if (!org || org.status !== 'active') throw new OrganizationNotFoundError();
+      await this.organizationSubscriptionRepo.findByOrganizationIdForUpdate(tx, organizationId);
+
+      const membership = await this.membershipRepo.findByIdForUpdate(tx, hint.membershipId);
+      if (!membership || membership.organizationId !== organizationId) throw new EntityNotFoundError('membership', hint.membershipId);
+
+      const inv = await this.invitationRepo.findByIdForUpdate(tx, invitationId);
+      if (!inv || inv.organizationId !== organizationId) throw new EntityNotFoundError('invitation', invitationId);
+      if (inv.acceptedTime || inv.revokedTime) throw new InvitationInvalidError();
+
+      await this.invitationRepo.markRevoked(tx, inv.id, now);
+      await this.membershipRepo.remove(tx, membership.id, now);
+    });
+    return { ok: true };
+  }
+
+  /** 接受邀请（authenticated；token 反查组织；邮箱匹配；单次消费）。 */
+  async acceptInvitation(token: string, userId: number): Promise<{ organization: OrganizationDto }> {
+    const tokenHash = this.tokenService.hashToken(token);
+
+    // 先非锁读拿到组织归属，再按「组织 → 订阅 → membership → invitation」加锁。
+    const hint = await this.invitationRepo.findByTokenHash(tokenHash);
+    if (!hint) throw new InvitationInvalidError();
+
+    return this.runner(async (tx) => {
+      const now = new Date();
+      const org = await this.organizationRepo.lockById(tx, hint.organizationId);
+      if (!org || org.status !== 'active') throw new InvitationInvalidError();
+      const subscription = await this.organizationSubscriptionRepo.findByOrganizationIdForUpdate(tx, org.id);
+      if (!subscription || subscription.status !== 'active') throw new InvitationInvalidError();
+
+      const membership = await this.membershipRepo.findByIdForUpdate(tx, hint.membershipId);
+      if (!membership || membership.organizationId !== org.id || membership.status !== 'invited') {
+        throw new InvitationInvalidError();
+      }
+
+      const inv = await this.invitationRepo.findByTokenHashForUpdate(tx, tokenHash);
+      if (!inv || inv.acceptedTime || inv.revokedTime || inv.expiresTime <= now) throw new InvitationInvalidError();
+      if (inv.organizationId !== org.id || inv.membershipId !== membership.id) throw new InvitationInvalidError();
+
+      const user = await this.userRepo.findById(userId);
+      if (!user || user.status !== 'active' || !user.emailVerifiedTime || user.email !== inv.email) {
+        throw new InvitationInvalidError();
+      }
+
+      await this.invitationRepo.markAccepted(tx, inv.id, now);
+      await this.membershipRepo.activate(tx, membership.id, now);
+
+      return {
+        organization: {
+          organizationId: org.id,
+          name: org.name,
+          status: org.status,
+          closedTime: org.closedTime,
+          role: membership.role,
+        },
+      };
+    });
+  }
+
+  /**
+   * 过期清理（§4.3/§4.7）：由受控清理任务调用。按组织维度协调——对每个有
+   * 「已过期且未终结」邀请的组织开一个事务，按「锁组织 → 锁订阅」后执行过期，
+   * 与创建/接受/撤销同一锁顺序（§4.3），避免绕过组织锁与业务事务交错。
+   * 单组织失败仅记录日志，不中断其余组织（幂等，下次周期重试）。
+   */
+  async expireInvitations(): Promise<void> {
+    const orgIds = await this.invitationRepo.findExpiredOrganizationIds(new Date());
+    for (const orgId of orgIds) {
+      await this.runner(async (tx) => {
+        await this.organizationRepo.lockById(tx, orgId);
+        await this.organizationSubscriptionRepo.findByOrganizationIdForUpdate(tx, orgId);
+        await this.invitationRepo.expireByOrganization(tx, orgId, new Date());
+      }).catch((err) => {
+        console.warn('[invitation] expire failed', String(err));
+      });
+    }
+  }
+}
+
+function normalizeEmail(emailRaw: string): string {
+  const email = typeof emailRaw === 'string' ? emailRaw.trim().toLowerCase() : '';
+  if (!email || email.length > 255 || !email.includes('@')) {
+    throw new ValidationError('invalid email');
+  }
+  return email;
 }

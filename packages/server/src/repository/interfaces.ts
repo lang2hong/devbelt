@@ -1,388 +1,307 @@
-import type { PlanCode, Role, SubStatus, SectionType, UserStatus } from '../domain/enums.js';
 import type {
-  OrgStatus,
-  MemberRole,
-  MemberStatus,
-  ResourceType,
-  AccessScope,
-  ResourcePermission,
-} from '../domain/enums.js';
-import type {
-  AdminAuditLog,
   User,
-  Plan,
-  Subscription,
-  RefreshToken,
-  SyncSection,
-  SyncSectionVersion,
-  SyncVersionSummary,
-  SessionInfo,
+  EmailVerificationToken,
+  PersonalPlan,
+  PersonalSubscription,
   Device,
-
-  ConnectionMeta,
-
-
+  RefreshToken,
   Organization,
-  Membership,
-  Seat,
-  Order,
-  OrganizationResource,
-  OrganizationResourcePermission,
-  OrganizationAuditLog,
+  OrganizationPlan,
+  OrganizationSubscription,
+  OrganizationMembership,
+  OrganizationInvitation,
 } from '../domain/entities.js';
+import type {
+  UserStatus,
+  EmailVerificationPurpose,
+  OrganizationRole,
+  OrganizationMembershipStatus,
+  OrganizationSubscriptionStatus,
+} from '../domain/enums.js';
+import type { Queryable } from './mysql/db.js';
 
 /**
- * 数据访问层接口（Repository 模式）。
+ * V3 Phase 1 数据访问层接口（Repository 模式）。
+ *
  * 接口与实现分离：domain/service 仅依赖接口，不依赖具体 DB 驱动。
- * 当前唯一实现为 mysql/，后续可加 postgres/sqlite 实现。
+ * 当前唯一实现为 mysql/。带 `exec` 参数的方法在**调用方事务**（TxRunner 提供的
+ * Queryable）上执行，用于跨表原子性；不带 `exec` 的为普通只读 / 独立写。
  */
 
 export interface IUserRepo {
   findById(id: number): Promise<User | undefined>;
+  /** 在事务内锁定用户行（`SELECT ... FOR UPDATE`），作为该用户设备配额/会话操作的序列化点。 */
+  lockById(exec: Queryable, id: number): Promise<User | undefined>;
   findByEmail(email: string): Promise<User | undefined>;
-  create(email: string, passwordHash: string, role: Role, displayName?: string): Promise<User>;
+  /** 创建用户（status 固定 active）。email 应由调用方规范化小写。 */
+  create(email: string, passwordHash: string, displayName?: string): Promise<User>;
   updateLastLogin(id: number, time: Date): Promise<void>;
-  updateRole(id: number, role: Role): Promise<void>;
-  updatePassword(id: number, passwordHash: string): Promise<void>;
+  /** 改密（在改密事务内执行，与撤销会话同事务）。 */
+  updatePassword(exec: Queryable, id: number, passwordHash: string): Promise<void>;
   updateStatus(id: number, status: UserStatus): Promise<void>;
-  listAll(limit: number, offset: number): Promise<User[]>;
-  /**
-   * 列出**未软删**的活跃用户（delete_time IS NULL）。
-   *
-   * 与 count() 的差异：软删用户不再计入可登录/可管理的数量。
-   */
-  count(): Promise<number>;
-  /** 仍能登录的 admin 数量（role='admin' 且 status='active' 且未软删） */
-  countAdmins(): Promise<number>;
+  /** 置 email_verified_time（与 token 消费同事务）。 */
+  markEmailVerified(exec: Queryable, id: number, time: Date): Promise<void>;
 }
 
-/** 套餐可编辑字段（管理后台编辑套餐）。per-user/org 额度与席位定价 */
-export interface PlanEditableFields {
-  name: string;
-  priceMonth: number;
-  priceYear: number;
-  seatPriceMonth?: number;
-  seatPriceYear?: number;
-  includedSeats: number;
-  perSeatMaxDevices: number;
-  perUserMaxPrivateConnections: number;
-  perUserMaxOpenConnections: number;
-  perUserPrivateSyncQuotaBytes: number;
-  perUserSyncVersionRetention: number;
-  perUserHistoryRetentionCount: number;
-  orgMaxSharedConnections: number;
-  orgSharedSyncQuotaBytes: number;
-  orgMaxMembers: number;
-  features: number;
+export interface IEmailVerificationTokenRepo {
+  create(exec: Queryable, input: {
+    userId: number;
+    email: string;
+    purpose: EmailVerificationPurpose;
+    tokenHash: string;
+    expiresTime: Date;
+  }): Promise<EmailVerificationToken>;
+  /** 按 hash 查未消费 token（只读）。 */
+  findByHash(tokenHash: string): Promise<EmailVerificationToken | undefined>;
+  /** 在事务内锁定 token 行（confirmEmail 与 markEmailVerified 同事务）。 */
+  findByHashForUpdate(exec: Queryable, tokenHash: string): Promise<EmailVerificationToken | undefined>;
+  /** 原子消费：AND consumed_time IS NULL，返回是否由本次调用完成。事务内执行。 */
+  consume(exec: Queryable, id: number, now: Date): Promise<boolean>;
+  /** 作废某用户 +(email,purpose) 既有的未消费 token（重发/重新邀请前调用）。事务内执行。 */
+  invalidate(exec: Queryable, userId: number, email: string, purpose: EmailVerificationPurpose, now: Date): Promise<void>;
 }
 
-export interface IPlanRepo {
-  findById(id: number): Promise<Plan | undefined>;
-  findByCode(code: PlanCode): Promise<Plan | undefined>;
-  listAll(): Promise<Plan[]>;
-  /** 播种套餐数据（v2 由 migration 002 播种，此方法供测试与管理路径使用） */
-  seed(plans: Array<Omit<Plan, 'createTime' | 'updateTime'>>): Promise<void>;
-  /** 更新套餐可编辑字段（管理后台编辑） */
-  update(code: PlanCode, fields: PlanEditableFields): Promise<void>;
+export interface IPersonalPlanRepo {
+  findByCode(code: string): Promise<PersonalPlan | undefined>;
+  findById(id: number): Promise<PersonalPlan | undefined>;
 }
 
-export interface ISubscriptionRepo {
-  findByOrganizationId(organizationId: number): Promise<Subscription | undefined>;
-  /**
-   * 批量取订阅（管理端列表用）。
-   * 传空数组时不应发起查询。
-   */
-  findByOrganizationIds(organizationIds: number[]): Promise<Subscription[]>;
-  upsert(sub: Omit<Subscription, 'id' | 'createTime' | 'updateTime'> & { id?: number }): Promise<Subscription>;
-  listAll(): Promise<Subscription[]>;
-  listByStatus(status: SubStatus): Promise<Subscription[]>;
-  /**
-   * 到期降级**单个组织**：status 可降级且 period_end_time <= now → status=expired。
-   * 返回是否改到了行。v2 无 users.plan_code 可重置，只置订阅状态。
-   */
-  expireOne(organizationId: number, now: Date): Promise<boolean>;
-  /**
-   * 到期降级**全部**：status 可降级且 period_end_time <= now → status=expired。
-   * 定时任务/启动时调用，返回降级行数。
-   */
-  downgradeExpired(now: Date): Promise<number>;
+export interface IPersonalSubscriptionRepo {
+  findByUserId(userId: number): Promise<PersonalSubscription | undefined>;
+  create(input: {
+    userId: number;
+    planId: number;
+    status: PersonalSubscription['status'];
+    entitlementSnapshot: Record<string, unknown>;
+    periodStartTime: Date;
+    periodEndTime: Date | null;
+  }): Promise<PersonalSubscription>;
+}
+
+export interface IDeviceRepo {
+  /** 在事务（exec）内按 (user_id, device_key) upsert；不存在创建 active，active 更新元数据，revoked 复活。 */
+  upsert(exec: Queryable, device: Omit<Device, 'id' | 'createTime' | 'updateTime'>): Promise<Device>;
+  /** 按 (user_id, device_key) 查设备。配额相关读取必须在事务（exec）内执行。 */
+  findByUserAndKey(exec: Queryable, userId: number, deviceKey: string): Promise<Device | undefined>;
+  /** 在事务内锁定设备行（`SELECT ... FOR UPDATE`），摘撤销设备时保证与 session 撤销同事务。 */
+  findByIdForUpdate(exec: Queryable, id: number): Promise<Device | undefined>;
+  listByUser(userId: number): Promise<Device[]>;
+  /** active 设备数（占用配额的计量）。必须在事务（exec）内执行，配合用户行锁防并发绕过。 */
+  countActive(exec: Queryable, userId: number): Promise<number>;
+  /** 撤销设备（status=revoked）。 */
+  revoke(exec: Queryable, id: number, now: Date): Promise<void>;
+  /** 仅更新 last_used_time（refresh 时刷新活跃，不改变 status、不创建、不复活）。 */
+  touch(exec: Queryable, id: number, now: Date): Promise<void>;
 }
 
 export interface IRefreshTokenRepo {
-  create(token: Omit<RefreshToken, 'id' | 'createTime' | 'updateTime'>): Promise<RefreshToken>;
-  findByHash(hash: string): Promise<RefreshToken | undefined>;
+  create(exec: Queryable, input: {
+    userId: number;
+    deviceId: number | null;
+    tokenHash: string;
+    familyId: string;
+    replacedByTokenId: number | null;
+    expiresTime: Date;
+  }): Promise<RefreshToken>;
+  findByHash(tokenHash: string): Promise<RefreshToken | undefined>;
+  /** 在事务内锁定 token 行（`SELECT ... FOR UPDATE`），refresh 轮换的序列化点。 */
+  findByHashForUpdate(exec: Queryable, tokenHash: string): Promise<RefreshToken | undefined>;
   findById(id: number): Promise<RefreshToken | undefined>;
-  revoke(id: number): Promise<void>;
-  /**
-   * 原子消费（条件撤销）：仅当该行尚未撤销时置 revoked_time，返回是否由本次调用完成。
-   *
-   * refresh 轮换必须以此为判据而非「先查后写」—— 后者在并发下会让同一个
-   * refresh token 签出两条活跃会话，一次性保证失效且重用检测失灵。
-   */
-  consume(id: number, now: Date): Promise<boolean>;
-  /** 撤销某用户全部会话（token 重用时强制下线所有设备） */
-  revokeAllForUser(userId: number): Promise<void>;
-  /** 撤销某用户在某设备上的全部活跃会话（同设备重登顶掉旧会话） */
-  revokeByDevice(userId: number, deviceId: string): Promise<void>;
-  listActiveForUser(userId: number, now: Date): Promise<SessionInfo[]>;
-}
-
-/** 设备实体仓储（设备固有信息，独立于会话） */
-export interface IDeviceRepo {
-  upsert(device: Omit<Device, 'id' | 'createTime' | 'updateTime'>): Promise<Device>;
-  listByUser(userId: number): Promise<Device[]>;
-  /** 绑定设备：占用配额位（revoked_time=NULL）；登录/同步时对配额内的设备调用 */
-  bind(userId: number, deviceId: string): Promise<void>;
-  /** 释放设备：归还配额位（revoked_time=NOW()）；用户撤销或管理员撤销时调用 */
-  revoke(userId: number, deviceId: string): Promise<void>;
-  /** 设备是否绑定中（revoked_time IS NULL） */
-  isBound(userId: number, deviceId: string): Promise<boolean>;
-  /** 绑定中设备数（即当前占用的设备配额量） */
-  countBound(userId: number): Promise<number>;
-}
-
-/** 连接元数据仓储（明文，计量/分析；内容仍加密） */
-export interface ConnectionMetaInput extends Omit<ConnectionMeta, 'id' | 'userId' | 'createTime' | 'updateTime' | 'deleteTime'> {
-  /** 客户端墓碑标记：true 表示该连接已删除，服务端应跳过 upsert 并墓碑 */
-  deleted?: boolean;
-}
-export interface IConnectionMetaRepo {
-  /** 全量替换某用户连接元数据（含删除墓碑），返回落库后的活跃连接数 */
-  replaceAll(userId: number, metas: ConnectionMetaInput[]): Promise<number>;
-  countActive(userId: number): Promise<number>;
-  listByUser(userId: number): Promise<ConnectionMeta[]>;
-}
-
-
-/** 管理操作的操作者上下文。ip 只用于留痕，不参与任何判定 */
-export interface AuditActor {
-  userId: number;
-  ip?: string;
-}
-
-/** 一条待写入的留痕（id / createTime 由库生成） */
-export type AdminAuditInput = Omit<AdminAuditLog, 'id' | 'createTime'>;
-
-/**
- * 管理操作留痕仓储。
- *
- * 写入失败**必须抛错**，调用方要让业务操作一起失败。吞掉错误的后果是
- * 「审计表一坏，所有管理操作变成无痕操作」，且没有任何迹象 ——
- * 这正是攻击者拿到 admin 之后最希望的状态。
- */
-export interface IAdminAuditRepo {
-  record(entry: AdminAuditInput): Promise<void>;
-  list(limit: number, offset: number): Promise<AdminAuditLog[]>;
-  count(): Promise<number>;
+  /** 原子消费：AND revoked_time IS NULL，返回是否由本次调用完成。事务内执行。 */
+  consume(exec: Queryable, id: number, now: Date): Promise<boolean>;
+  /** 撤销某 family 全部未撤销 token（refresh 复用检测触发）。 */
+  revokeFamily(exec: Queryable, familyId: string, now: Date): Promise<void>;
+  /** 撤销某设备全部 token（设备撤销时调用）。 */
+  revokeByDevice(exec: Queryable, deviceId: number, now: Date): Promise<void>;
+  /** 撤销某用户全部 token（改密/禁用时调用）。 */
+  revokeAllForUser(exec: Queryable, userId: number, now: Date): Promise<void>;
 }
 
 /**
- * webhook 事件去重仓储。
- *
- * 幂等键是 `(provider, event_key)`：eventId 的唯一性只在同一支付商内成立，
- * 两家支付商各自用 `evt_1` 编号完全可能，跨商去重会把第二家的第一个事件吃掉。
+ * 分桶键约定（服务端生成，绝不包含密码/token）：
+ * - `login:email:<normalized>`  — 登录按 email 限流
+ * - `login:ip:<ip>`             — 登录按来源 IP 限流
+ * - `register:ip:<ip>`          — 注册按来源 IP 限流
+ * - `verify:email:<normalized>` — 邮箱验证重发按 email 限流（匿名）
+ * - `verify:ip:<ip>`            — 邮箱验证重发按来源 IP 限流（匿名）
+ * - `org:create:user:<userId>`  — 组织创建按用户限流（已认证，不按 IP）
  */
-export interface IWebhookEventRepo {
-  /**
-   * 原子地标记"已处理"（INSERT，唯一键兜底）。
-   * 返回 true = 首次插入（当前调用者获得处理权）；false = 已有人记过。
-   *
-   * A5 修复：先 record（原子 INSERT）再 process，消除 seen→process→record
-   * 的 check-then-act 竞态（并发双处理导致席位双加）。
-   * 若 process 失败，调 forget 撤销记录，允许支付商重试。
-   */
-  record(provider: string, eventKey: string, detail?: Record<string, unknown>): Promise<boolean>;
-  /** 撤销"已处理"标记（process 失败时调用，允许重试） */
-  forget(provider: string, eventKey: string): Promise<void>;
+export interface IRateLimitRepo {
+  /** 固定窗口原子递增（唯一键 bucket_key+window_start_time），返回递增后的计数。 */
+  increment(bucketKey: string, windowStartTime: Date): Promise<number>;
+  /** 只读当前窗口计数（不存在则 0），供「失败才计数」的预检。 */
+  peek(bucketKey: string, windowStartTime: Date): Promise<number>;
+  /** 清理早于该时间的过期桶。 */
+  prune(before: Date): Promise<void>;
 }
 
-
-
-/**
- * 同步数据访问（方案 A：分节存储 + 历史版本回滚）。
- * - getSection / putSection：当前版本读写
- * - pushSection：乐观锁写入 + 历史快照（单事务），push 的唯一入口
- * - recordVersion / listVersions / getVersion / pruneVersions：历史版本
- * - rollback：取旧版本密文写回当前行（乐观锁，version+1）
- */
-export interface ISyncRepo {
-  getSection(userId: number, section: SectionType): Promise<SyncSection | undefined>;
-  listSections(userId: number): Promise<SyncSection[]>;
-  /** 写当前版本（不存在则插入），无版本校验；仅管理/播种路径使用。返回新 version */
-  putSection(userId: number, section: SectionType, encryptedData: string, version: number): Promise<number>;
-  /**
-   * 乐观锁写入当前版本 + 记录历史快照，两者同一事务。
-   * 返回新版本号，或 null 表示版本冲突（未产生任何写入）。
-   * dataBytes = 0 时只写当前版本，不记快照。
-   */
-  pushSection(userId: number, section: SectionType, encryptedData: string, baseVersion: number, dataBytes: number): Promise<number | null>;
-  /** 记录历史版本快照（同一 (user, section, version) 覆盖写） */
-  recordVersion(userId: number, section: SectionType, version: number, encryptedData: string, dataBytes: number): Promise<void>;
-  listVersions(userId: number, section: SectionType, limit: number): Promise<SyncVersionSummary[]>;
-  getVersion(userId: number, section: SectionType, version: number): Promise<SyncSectionVersion | undefined>;
-  /** 清理超保留数的旧版本（按 version 升序删最旧） */
-  pruneVersions(userId: number, section: SectionType, retention: number): Promise<void>;
-  /** 回滚：取指定版本密文写回当前行，新 version = current+1（乐观锁，冲突重试后抛 ConflictError） */
-  rollback(userId: number, section: SectionType, toVersion: number): Promise<number>;
-  /** 统计各 section 当前密文字节总和（配额校验用） */
-  sumBytes(userId: number): Promise<number>;
-}
-
-// ── v2：组织 / 成员 / 席位 / 订单 / 资源 / 审计 ─────────────────────
-//
-// 以下六组接口服务于以「组织」为计费主体的 v2 模型。S3a 纯增量：
-// 不改上方任何 v1 接口，不接入 app.ts / service / route。
-// 组织共享资源的权限（organization_resource_permissions）折进
-// IOrganizationResourceRepo，作为资源的从属授权操作。
-
-/** 组织创建入参（id / 时间列由库生成） */
-export type OrganizationInput = Pick<Organization, 'name' | 'type' | 'ownerUserId'>;
-
-/** 组织可更新字段（管理后台编辑组织） */
-export interface OrganizationEditableFields {
-  name: string;
-  status: OrgStatus;
-}
-
-/** 组织仓储（计费主体） */
-export interface IOrganizationRepo {
-  findById(id: number): Promise<Organization | undefined>;
-  /** 某 user 拥有的组织（注册时建 personal org、owner 查询） */
-  listByOwner(userId: number): Promise<Organization[]>;
-  create(input: OrganizationInput): Promise<Organization>;
-  update(id: number, fields: OrganizationEditableFields): Promise<void>;
-  /** 软删除（置 delete_time）。owner 删除前需先转移 / 解散组织 */
-  softDelete(id: number): Promise<void>;
-  listAll(limit: number, offset: number): Promise<Organization[]>;
-  count(): Promise<number>;
-}
-
-/** 成员创建入参 */
-export type MembershipInput = Pick<Membership, 'organizationId' | 'userId' | 'role'>;
-
-/** 成员仓储（成员对席位的占用由此表表达） */
-export interface IMembershipRepo {
-  findById(id: number): Promise<Membership | undefined>;
-  /** 同组织的成员（权限校验、席位校验用） */
-  findByOrgAndUser(organizationId: number, userId: number): Promise<Membership | undefined>;
-  listByOrganization(organizationId: number): Promise<Membership[]>;
-  /** 某 user 在所有组织中的成员关系（求有效席位套餐最高值） */
-  listByUser(userId: number): Promise<Membership[]>;
-  create(input: MembershipInput): Promise<Membership>;
-  updateRole(id: number, role: MemberRole): Promise<void>;
-  updateStatus(id: number, status: MemberStatus): Promise<void>;
-  /** 软删除成员（置 delete_time；不级联删除资源，留痕仍在） */
-  softDelete(id: number): Promise<void>;
-  /** 活跃成员数（status=active 且未软删），席位占用计量的依据 */
-  countActiveByOrganization(organizationId: number): Promise<number>;
-  /** 某 user 的活跃成员关系数（跨组织；用于个人额度判定） */
-  countActiveByUser(userId: number): Promise<number>;
-}
-
-/** 席位创建入参 */
-export type SeatInput = Pick<Seat, 'subscriptionId' | 'organizationId'>;
-
-/** 席位仓储（逐席数量；增减由订单 seat_delta 驱动） */
-export interface ISeatRepo {
-  findById(id: number): Promise<Seat | undefined>;
-  listByOrganization(organizationId: number): Promise<Seat[]>;
-  /** 活跃席位数（status=active 且未软删）；活跃成员数须 ≤ 此值 */
-  countActiveByOrganization(organizationId: number): Promise<number>;
-  create(input: SeatInput): Promise<Seat>;
-  /** 撤销席位（status=revoked；订单 seat_delta 为负时调用） */
-  revoke(id: number): Promise<void>;
-}
-
-/** 订单创建入参（不可变计账；id / 时间列由库生成） */
-export type OrderInput = Omit<Order, 'id' | 'createTime' | 'updateTime'>;
-
-/** 订单仓储（不可变计费流水） */
-export interface IOrderRepo {
-  findById(id: number): Promise<Order | undefined>;
-  create(input: OrderInput): Promise<Order>;
-  listByOrganization(organizationId: number, limit: number, offset: number): Promise<Order[]>;
-  countByOrganization(organizationId: number): Promise<number>;
-}
-
-/** 资源创建入参（id / 时间列由库生成） */
-export type OrganizationResourceInput = Pick<
-  OrganizationResource,
-  'organizationId' | 'resourceType' | 'name' | 'accessScope' | 'encryptedData' | 'createdByUserId'
->;
-
-/** 资源可更新字段（管理后台 / 成员编辑共享资源） */
-export interface OrganizationResourceEditableFields {
-  name?: string;
-  accessScope?: AccessScope;
-  encryptedData?: string;
-  updatedByUserId?: number;
-}
-
-/** 组织共享资源仓储（含 restricted 资源的授权） */
-export interface IOrganizationResourceRepo {
-  findById(id: number): Promise<OrganizationResource | undefined>;
-  /** 列出某组织的未软删资源，可按类型过滤 */
-  listByOrganization(organizationId: number, type?: ResourceType): Promise<OrganizationResource[]>;
-  create(input: OrganizationResourceInput): Promise<OrganizationResource>;
-  update(id: number, fields: OrganizationResourceEditableFields): Promise<void>;
-  /** 软删除资源（置 delete_time；权限行由外键 CASCADE 跟随） */
-  softDelete(id: number): Promise<void>;
-
-  // ── restricted 资源授权 ──
-  /** 授予成员对资源的权限（UPSERT：同 resource+membership 覆盖） */
-  grantPermission(
-    organizationId: number,
-    resourceId: number,
-    membershipId: number,
-    permission: ResourcePermission,
-  ): Promise<OrganizationResourcePermission>;
-  /** 撤销成员对资源的全部权限 */
-  revokePermission(resourceId: number, membershipId: number): Promise<void>;
-  /** 列出某资源的全部授权（restricted 资源管理用） */
-  listPermissions(resourceId: number): Promise<OrganizationResourcePermission[]>;
-  /** 列出某成员的全部授权（求其可访问的 restricted 资源） */
-  listPermissionsForMembership(membershipId: number): Promise<OrganizationResourcePermission[]>;
-  /** 查单条授权（判定某成员对某资源的具体权限） */
-  findPermission(resourceId: number, membershipId: number): Promise<OrganizationResourcePermission | undefined>;
-}
-
-/** 组织审计写入入参（id / createTime 由库生成） */
-export type OrganizationAuditInput = Omit<OrganizationAuditLog, 'id' | 'createTime'>;
-
-/**
- * 组织协作审计仓储。
- *
- * 写入失败**必须抛错**（与 IAdminAuditRepo 同）：吞掉错误会让审计一坏、
- * 所有组织操作变无痕，正是越权者最希望的状态。
- */
-export interface IOrganizationAuditRepo {
-  record(entry: OrganizationAuditInput): Promise<void>;
-  listByOrganization(organizationId: number, limit: number, offset: number): Promise<OrganizationAuditLog[]>;
-  countByOrganization(organizationId: number): Promise<number>;
-}
-
-/** 注册账号入参 */
+/** 注册账号入参（邮箱验证 token 的 hash/过期由 service 提前算好）。 */
 export interface RegistrationAccountInput {
   email: string;
   passwordHash: string;
-  role: Role;
   displayName?: string;
+  verificationTokenHash: string;
+  verificationExpiresTime: Date;
 }
 
-/** 注册结果：新建的 user / personal org / free 订阅 */
 export interface RegistrationResult {
   userId: number;
-  organizationId: number;
-  subscriptionId: number;
 }
 
 /**
- * 注册账号仓储：原子创建 user + personal org + admin membership + free 订阅 + 席位。
+ * 注册账号仓储：单事务原子创建 user + Free 订阅（含 entitlement snapshot）+ 邮箱验证 token。
  *
- * 必须**原子**：五张表任一失败即整体回滚，不能留下「有 user 无 personal org /
- * 订阅」的半套状态（否则该用户被自己的残留 user 行困住，无法再注册）。
- * 与 bootstrapAdmin 的初始管理员创建同构，但 role / displayName 参数化。
+ * 三张表任一失败整体回滚，避免「有 user 无订阅 / 无验证 token」的半套状态。
+ * Free 套餐 id 在事务内按 code 查询；缺失即报错（migration 002 必须先播种）。
  */
 export interface IRegistrationRepo {
   createAccount(input: RegistrationAccountInput): Promise<RegistrationResult>;
+}
+
+// ── 组织域（切片 2）──
+
+export interface IOrganizationPlanRepo {
+  findByCode(code: string): Promise<OrganizationPlan | undefined>;
+  findById(id: number): Promise<OrganizationPlan | undefined>;
+  /** 在事务内锁定 plan 行（创建组织时防 plan 变更）。 */
+  findByCodeForUpdate(exec: Queryable, code: string): Promise<OrganizationPlan | undefined>;
+}
+
+export interface IOrganizationRepo {
+  findById(id: number): Promise<Organization | undefined>;
+  /** 在事务内锁定组织行（成员变更/关闭的序列化点）。 */
+  lockById(exec: Queryable, id: number): Promise<Organization | undefined>;
+  create(exec: Queryable, input: { name: string }): Promise<Organization>;
+  updateName(exec: Queryable, id: number, name: string): Promise<void>;
+  close(exec: Queryable, id: number, closedTime: Date): Promise<void>;
+}
+
+export interface IOrganizationSubscriptionRepo {
+  findByOrganizationId(organizationId: number): Promise<OrganizationSubscription | undefined>;
+  /** 在事务内锁定订阅行（创建/接受/撤销邀请时取 seat_limit，§4.3）。 */
+  findByOrganizationIdForUpdate(exec: Queryable, organizationId: number): Promise<OrganizationSubscription | undefined>;
+  create(exec: Queryable, input: {
+    organizationId: number;
+    planId: number;
+    seatLimit: number;
+    status: OrganizationSubscriptionStatus;
+    entitlementSnapshot: Record<string, unknown>;
+    periodStartTime: Date;
+    periodEndTime: Date | null;
+  }): Promise<OrganizationSubscription>;
+}
+
+/** 成员目录项（join users 取 displayName；不返回 email，§5.1）。 */
+export interface MemberDto {
+  membershipId: number;
+  userId: number;
+  displayName?: string;
+  role: OrganizationRole;
+  status: OrganizationMembershipStatus;
+  joinedTime: Date | null;
+}
+
+/** 列组织用的组织摘要（join organizations 得到名称/状态与调用者角色）。 */
+export interface OrganizationSummary {
+  organizationId: number;
+  name: string;
+  status: string;
+  closedTime: Date | null;
+  role: OrganizationRole;
+}
+
+export interface IMembershipRepo {
+  create(exec: Queryable, input: {
+    organizationId: number;
+    userId: number;
+    role: OrganizationRole;
+    status: OrganizationMembershipStatus;
+    invitedByUserId: number | null;
+    joinedTime: Date | null;
+    removedTime: Date | null;
+  }): Promise<OrganizationMembership>;
+  /** 成员目录（active + invited，不含 removed），join users 取 displayName。 */
+  listByOrganization(organizationId: number): Promise<MemberDto[]>;
+  /** 某用户的 active membership（含组织 id，用于列组织）。 */
+  listActiveByUser(userId: number): Promise<OrganizationMembership[]>;
+  /** 某用户 active membership 且组织 active 的摘要（单条 JOIN organizations，供列组织）。 */
+  listActiveByUserWithOrg(userId: number): Promise<OrganizationSummary[]>;
+  /** 普通读（授权中间件用，非锁）。 */
+  findByOrgAndUser(organizationId: number, userId: number): Promise<OrganizationMembership | undefined>;
+  /** 事务内锁定 membership 行（角色/移除/退出）。 */
+  findByOrgAndUserForUpdate(exec: Queryable, organizationId: number, userId: number): Promise<OrganizationMembership | undefined>;
+  /** 事务内锁定 membership 行（按 id）。 */
+  findByIdForUpdate(exec: Queryable, id: number): Promise<OrganizationMembership | undefined>;
+  updateRole(exec: Queryable, id: number, role: OrganizationRole): Promise<void>;
+  /** 置 status=removed + removed_time（移除/退出时）。 */
+  remove(exec: Queryable, id: number, now: Date): Promise<void>;
+  /** 关闭组织时把该组织全部 invited membership 置 removed（invitations 行撤销属切片 3）。 */
+  removeInvitedByOrganization(exec: Queryable, organizationId: number, now: Date): Promise<void>;
+  /**
+   * 写入/复用一个 invited membership（创建邀请时用）：不存在则建，已存在（removed /
+   * invited）则改回 invited 并覆盖角色，写 invited_by、清 joined/removed。按
+   * (organization_id,user_id) 唯一键 upsert。
+   */
+  upsertInvited(exec: Queryable, input: {
+    organizationId: number;
+    userId: number;
+    role: OrganizationRole;
+    invitedByUserId: number;
+  }): Promise<OrganizationMembership>;
+  /** 置 status=active + joined_time、清 removed_time（接受邀请时）。 */
+  activate(exec: Queryable, id: number, now: Date): Promise<void>;
+  /** active 成员数（容量计量，不含 invited）。 */
+  countActive(exec: Queryable, organizationId: number): Promise<number>;
+  /** 有效 invited 成员数（join invitations，排除过期/撤销/已接受；容量计量）。 */
+  countValidInvited(exec: Queryable, organizationId: number, now: Date): Promise<number>;
+  /** active admin 数（最后 active admin 保护）。 */
+  countActiveAdmins(exec: Queryable, organizationId: number): Promise<number>;
+}
+
+// ── 组织邀请（切片 3）──
+
+/** 有效邀请目录项（join membership 取角色；不含 token/hash，§5.1）。 */
+export interface InvitationDto {
+  invitationId: number;
+  email: string;
+  role: OrganizationRole;
+  expiresTime: Date;
+  invitedTime: Date;
+}
+
+export interface IOrganizationInvitationRepo {
+  create(exec: Queryable, input: {
+    organizationId: number;
+    membershipId: number;
+    email: string;
+    tokenHash: string;
+    expiresTime: Date;
+  }): Promise<OrganizationInvitation>;
+  /** 按 token hash 只读查找（accept 预检，不回锁，锁定交给后续步骤）。 */
+  findByTokenHash(tokenHash: string): Promise<OrganizationInvitation | undefined>;
+  /** 按 id 只读查找（revoke 预检，不回锁）。 */
+  findById(id: number): Promise<OrganizationInvitation | undefined>;
+  /** 事务内按 id 锁定 invitation 行（accept/revoke 的序列化点）。 */
+  findByIdForUpdate(exec: Queryable, id: number): Promise<OrganizationInvitation | undefined>;
+  /** 事务内按 token hash 锁定（唯一键）。 */
+  findByTokenHashForUpdate(exec: Queryable, tokenHash: string): Promise<OrganizationInvitation | undefined>;
+  /** 作废某 membership 既有的未终结 invitation（重新邀请前调用，保证同时最多一个有效 token）。 */
+  revokeByMembership(exec: Queryable, membershipId: number, now: Date): Promise<void>;
+  /** 撤销某组织全部未终结 invitation（关闭组织时调用）。 */
+  revokeByOrganization(exec: Queryable, organizationId: number, now: Date): Promise<void>;
+  /** 标记接受（写 accepted_time）。 */
+  markAccepted(exec: Queryable, id: number, now: Date): Promise<void>;
+  /** 标记撤销（写 revoked_time）。 */
+  markRevoked(exec: Queryable, id: number, now: Date): Promise<void>;
+  /** 列某组织有效邀请（未 accepted/revoked 且未过期），join membership 取角色。 */
+  listActiveByOrganization(organizationId: number, now: Date): Promise<InvitationDto[]>;
+  /** 该 membership 当前是否有有效（未过期/未撤销/未接受）邀请。 */
+  hasValidInvitation(exec: Queryable, membershipId: number, now: Date): Promise<boolean>;
+  /** 列出有「已过期且未终结」邀请的组织 id（过期清理的候选，只读）。 */
+  findExpiredOrganizationIds(now: Date): Promise<number[]>;
+  /**
+   * 把某组织内「过期（expires_time<=now 且未 accepted/revoked）」的邀请置 revoked、
+   * 对应 membership 置 removed。必须在调用方事务内（已锁组织+订阅）执行。幂等。
+   */
+  expireByOrganization(exec: Queryable, organizationId: number, now: Date): Promise<void>;
 }

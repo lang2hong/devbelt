@@ -1,67 +1,72 @@
-import { randomBytes, createHash } from 'crypto';
+import { randomBytes, randomUUID, createHash } from 'crypto';
+import type { KeyObject } from 'crypto';
+import { SignJWT, jwtVerify } from 'jose';
+import { UnauthorizedError } from '../domain/errors.js';
+import type { SigningKeys } from './signingKeys.js';
+
+export type { SigningKeys };
 
 /**
- * JWT 端口（端口接口，隔离 fastify-jwt 实现）。
- * service 层依赖此接口而非 fastify app，便于测试与替换签名实现。
+ * Access token 载荷（签发后经 Ed25519 签名，客户端不可读改）。
+ * - `sub`：用户 id（十进制字符串）
+ * - `iat` / `exp`：签发 / 过期（jose 自动填）
+ * - `jti`：随机 token ID（实施规格 §4.5）
+ * - header `kid`：签名 key id，验证时据此选公钥（轮换支持）
  */
-export interface JwtPort {
-  sign(payload: object, options?: { expiresIn?: string | number }): string;
-  verify<T = any>(token: string): T;
+export interface AccessTokenPayload {
+  sub: string;
+  jti: string;
+  iat?: number;
+  exp?: number;
 }
 
 /**
- * Token 服务（Factory 模式）：
- * - access token：JWT 短期（15m），payload 含 sub/role/sid
- * - refresh token：随机 256bit token，仅 hash 存库（明文返回客户端）
+ * Token 服务（V3：Ed25519 access token + 随机 refresh token）。
  *
- * refresh 轮换：旧 refresh 标记 revoked，签新 refresh；重用检测在 AuthService 层。
+ * - access token：Ed25519 JWT，15 分钟，Authorization: Bearer 传输，绝不写 URL/日志。
+ * - refresh token：>=256 bits 熵（32 bytes），DB 只存 SHA-256 hash。
  */
 export class TokenService {
-  private readonly refreshExpiresMs: number;
-
-  /**
-   * @param refreshExpiresIn refresh token 有效期。可传毫秒数（推荐，由
-   *        config.parseTokenTtl 解析并校验过）或 `\d+[smhd]` 字符串。
-   *
-   *        原实现内部有一个 parseDuration，对非法值**静默回落到 30 天**
-   *        （`1y` → 30d，配置写错完全无感）。解析与校验已上移到 config.ts，
-   *        非法值在启动时就失败；这里保留字符串分支仅为兼容直接构造的测试。
-   */
   constructor(
-    private readonly jwt: JwtPort,
+    private readonly keys: SigningKeys,
     private readonly accessExpiresIn: string,
-    refreshExpiresIn: string | number,
-  ) {
-    if (typeof refreshExpiresIn === 'number') {
-      this.refreshExpiresMs = refreshExpiresIn;
-    } else {
-      const m = /^(\d+)([smhd])$/.exec(refreshExpiresIn);
-      if (!m) throw new Error(`invalid refresh token ttl: ${JSON.stringify(refreshExpiresIn)}`);
-      const mult: Record<string, number> = { s: 1000, m: 60000, h: 3600000, d: 86400000 };
-      this.refreshExpiresMs = Number(m[1]) * mult[m[2]];
-    }
+    private readonly refreshExpiresMs: number,
+  ) {}
+
+  /** 签发带 subject 的 Ed25519 access token。 */
+  async signAccessToken(userId: number): Promise<string> {
+    const jti = randomUUID();
+    return new SignJWT({ sub: String(userId), jti })
+      .setProtectedHeader({ alg: 'EdDSA', kid: this.keys.kid })
+      .setIssuedAt()
+      .setExpirationTime(this.accessExpiresIn)
+      .sign(this.keys.privateKey);
   }
 
-  /** 签发 access token（JWT）；sid 为当前 refresh token 主键，用于标记"当前设备" */
-  signAccessToken(sub: number, role: string, sid: number): string {
-    return this.jwt.sign({ sub, role, sid }, { expiresIn: this.accessExpiresIn });
+  /** 验证 access token（按 header kid 选公钥），失败抛 UnauthorizedError。 */
+  async verifyAccessToken<T = AccessTokenPayload>(token: string): Promise<T> {
+    const { payload } = await jwtVerify(token, this.resolveKey, { algorithms: ['EdDSA'] });
+    return payload as T;
   }
 
-  /** 校验 access token，返回 payload */
-  verifyAccessToken<T = any>(token: string): T {
-    return this.jwt.verify<T>(token);
-  }
-
-  /** 生成 refresh token：返回明文 + hash + 过期时间 */
+  /** 生成 refresh token：返回明文 + hash + 过期时间。 */
   generateRefreshToken(): { token: string; hash: string; expiresAt: Date } {
     const token = randomBytes(32).toString('base64url');
-    const hash = createHash('sha256').update(token).digest('hex');
+    const hash = this.hashToken(token);
     const expiresAt = new Date(Date.now() + this.refreshExpiresMs);
     return { token, hash, expiresAt };
   }
 
-  /** 计算 refresh token 的 hash（查找/撤销用） */
+  /** SHA-256 hash（refresh token / 邮箱验证 token 共用的存储形式）。 */
   hashToken(token: string): string {
     return createHash('sha256').update(token).digest('hex');
   }
+
+  /** 按 header 的 kid 从公钥集选择验证密钥；kid 不存在视为验证失败。 */
+  private readonly resolveKey = async (protectedHeader: { kid?: string }): Promise<KeyObject> => {
+    const kid = protectedHeader?.kid;
+    const key = kid ? this.keys.publicKeys.get(kid) : undefined;
+    if (!key) throw new UnauthorizedError('unknown signing key');
+    return key;
+  };
 }

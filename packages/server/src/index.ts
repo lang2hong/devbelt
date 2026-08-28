@@ -9,7 +9,7 @@ async function main(): Promise<void> {
   const port = Number(process.env.PORT || 3000);
   try {
     await app.listen({ port, host: '0.0.0.0' });
-    app.log.info(`Sync server listening on :${port}`);
+    app.log.info(`DB Client server listening on :${port}`);
   } catch (err) {
     app.log.error(err);
     process.exit(1);

@@ -1,223 +1,166 @@
 import { describe, it, expect } from 'vitest';
-import { OrganizationService } from '../../src/service/organizationService.js';
-import { resolveEffectivePlans } from '../../src/policy/planPolicy.js';
+import { generateKeyPairSync } from 'crypto';
 import {
-  FakeOrganizationRepo, FakeMembershipRepo, FakeSeatRepo,
-  FakeOrganizationResourceRepo, FakeOrganizationAuditRepo,
-  FakeSubscriptionRepo, FakePlanRepo, makePlan,
+  FakeUserRepo,
+  FakeOrganizationRepo,
+  FakeOrganizationPlanRepo,
+  FakeOrganizationSubscriptionRepo,
+  FakeMembershipRepo,
+  FakeInvitationRepo,
+  FakeRateLimitRepo,
 } from '../helpers/fakeRepos.js';
+import { OrganizationService } from '../../src/service/organizationService.js';
+import { RateLimitService } from '../../src/service/rateLimitService.js';
+import { TokenService } from '../../src/service/tokenService.js';
+import { MemoryEmailSender } from '../../src/service/emailSender.js';
+import { OrganizationAdminRequiredError, ForbiddenError, EntityNotFoundError, ValidationError } from '../../src/domain/errors.js';
+import type { Queryable } from '../../src/repository/mysql/db.js';
 
-async function setup() {
-  const orgRepo = new FakeOrganizationRepo();
-  const membershipRepo = new FakeMembershipRepo();
-  const seatRepo = new FakeSeatRepo();
-  const resourceRepo = new FakeOrganizationResourceRepo();
-  const auditRepo = new FakeOrganizationAuditRepo();
-  const subRepo = new FakeSubscriptionRepo();
-  const planRepo = new FakePlanRepo([makePlan('free'), makePlan('pro'), makePlan('team', { includedSeats: 5 })]);
-  const service = new OrganizationService(orgRepo, membershipRepo, seatRepo, resourceRepo, auditRepo, subRepo, planRepo);
-  const org = await orgRepo.create({ name: 'Acme', type: 'team', ownerUserId: 1 });
-  await membershipRepo.create({ organizationId: org.id, userId: 1, role: 'admin' });
-  const member = await membershipRepo.create({ organizationId: org.id, userId: 2, role: 'member' });
-  return { service, orgRepo, membershipRepo, seatRepo, resourceRepo, subRepo, planRepo, org, memberId: member.id };
+function makeService() {
+  const organizationRepo = new FakeOrganizationRepo();
+  const organizationPlanRepo = new FakeOrganizationPlanRepo();
+  const organizationSubscriptionRepo = new FakeOrganizationSubscriptionRepo();
+  const userRepo = new FakeUserRepo();
+  const membershipRepo = new FakeMembershipRepo(userRepo, organizationRepo);
+  const invitationRepo = new FakeInvitationRepo(membershipRepo);
+  const rateLimiter = new RateLimitService(new FakeRateLimitRepo(), false);
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const tokenService = new TokenService({ kid: 'test', privateKey, publicKeys: new Map([['test', publicKey]]) }, '15m', 30 * 24 * 3600 * 1000);
+  const svc = new OrganizationService(
+    userRepo,
+    organizationRepo,
+    organizationPlanRepo,
+    organizationSubscriptionRepo,
+    membershipRepo,
+    invitationRepo,
+    rateLimiter,
+    tokenService,
+    new MemoryEmailSender(),
+    async (fn) => fn({} as Queryable),
+  );
+  return { svc, organizationRepo, membershipRepo, organizationSubscriptionRepo };
 }
 
-async function setupForCreate() {
-  const orgRepo = new FakeOrganizationRepo();
-  const membershipRepo = new FakeMembershipRepo();
-  const seatRepo = new FakeSeatRepo();
-  const resourceRepo = new FakeOrganizationResourceRepo();
-  const auditRepo = new FakeOrganizationAuditRepo();
-  const subRepo = new FakeSubscriptionRepo();
-  const planRepo = new FakePlanRepo([makePlan('free'), makePlan('pro'), makePlan('team', { includedSeats: 5 })]);
-  const service = new OrganizationService(orgRepo, membershipRepo, seatRepo, resourceRepo, auditRepo, subRepo, planRepo);
-  return { service, orgRepo, membershipRepo, seatRepo, subRepo, planRepo };
+/** 建一个组织，返回 { orgId, adminMembershipId, creatorId }。 */
+async function createOrg(svc: OrganizationService, creatorId = 1) {
+  const org = await svc.createOrganization(creatorId, 'Acme');
+  return { orgId: org.organizationId, memberships: await svc.listMembers(org.organizationId) };
 }
 
-describe('OrganizationService.createOrganization 席位补齐', () => {
-  it('建 team 组织即补 team 订阅（trialing 14 天试用）+ included_seats 个席位', async () => {
-    const c = await setupForCreate();
-    const before = Date.now();
-    const { organization, membership } = await c.service.createOrganization(1, 'Acme');
+/** 往组织里加第二个 admin 成员，返回其 membership id。 */
+async function addAdmin(membershipRepo: FakeMembershipRepo, orgId: number, userId: number) {
+  return membershipRepo.create({} as Queryable, {
+    organizationId: orgId,
+    userId,
+    role: 'admin',
+    status: 'active',
+    invitedByUserId: null,
+    joinedTime: new Date(),
+    removedTime: null,
+  });
+}
 
-    expect(organization.type).toBe('team');
-    expect(membership.role).toBe('admin');
-    const sub = await c.subRepo.findByOrganizationId(organization.id);
-    expect(sub).toBeDefined();
-    // 不得建 active 订阅——那等于免费永久发放付费套餐（付费门禁旁路）
-    expect(sub!.status).toBe('trialing');
-    const teamPlan = await c.planRepo.findByCode('team');
-    expect(sub!.planId).toBe(teamPlan!.id);
-    expect(sub!.trialEndTime).toBeInstanceOf(Date);
-    // trialEndTime ≈ now + 14d
-    const trialMs = sub!.trialEndTime!.getTime() - before;
-    expect(trialMs).toBeGreaterThan(13 * 86_400_000);
-    expect(trialMs).toBeLessThan(15 * 86_400_000);
-    expect(sub!.periodEndTime).toBeUndefined();
-    // owner 占 1 席，剩余 4 席可加成员
-    expect(await c.seatRepo.countActiveByOrganization(organization.id)).toBe(5);
+describe('OrganizationService', () => {
+  it('createOrganization creates org + free subscription + first active admin', async () => {
+    const { svc, membershipRepo, organizationSubscriptionRepo } = makeService();
+    const org = await svc.createOrganization(1, '  Acme  ');
+    expect(org.name).toBe('Acme');
+    const sub = await organizationSubscriptionRepo.findByOrganizationId(org.organizationId);
+    expect(sub?.seatLimit).toBe(3);
+    const members = await membershipRepo.listByOrganization(org.organizationId);
+    expect(members).toHaveLength(1);
+    expect(members[0].role).toBe('admin');
+    expect(members[0].status).toBe('active');
   });
 
-  it('建组织后 addMember 不再恒抛 no available seat', async () => {
-    const c = await setupForCreate();
-    const { organization } = await c.service.createOrganization(1, 'Acme');
-    const m = await c.service.addMember(organization.id, 2, 'member', 1);
-    expect(m.role).toBe('member');
-    expect(await c.seatRepo.countActiveByOrganization(organization.id)).toBe(5);
+  it('cannot demote the last active admin', async () => {
+    const { svc } = makeService();
+    const { orgId, memberships } = await createOrg(svc, 1);
+    await expect(svc.assignRole(orgId, memberships[0].membershipId, 'member', 2)).rejects.toBeInstanceOf(OrganizationAdminRequiredError);
   });
-});
 
-describe('OrganizationService.listResources restricted 授权', () => {
-  it('admin 可见全部资源（含 restricted）', async () => {
-    const c = await setup();
-    await c.resourceRepo.create({
-      organizationId: c.org.id, resourceType: 'query', name: 'org-res',
-      accessScope: 'organization', encryptedData: 'enc-org', createdByUserId: 1,
+  it('cannot assign role to self', async () => {
+    const { svc } = makeService();
+    const { orgId, memberships } = await createOrg(svc, 1);
+    await expect(svc.assignRole(orgId, memberships[0].membershipId, 'member', 1)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('can demote an admin when another admin remains', async () => {
+    const { svc, membershipRepo } = makeService();
+    const { orgId } = await createOrg(svc, 1);
+    const second = await addAdmin(membershipRepo, orgId, 2);
+    await svc.assignRole(orgId, second.id, 'member', 1);
+    const admins = (await svc.listMembers(orgId)).filter((m) => m.role === 'admin');
+    expect(admins).toHaveLength(1);
+  });
+
+  it('cannot remove the last active admin', async () => {
+    const { svc } = makeService();
+    const { orgId, memberships } = await createOrg(svc, 1);
+    await expect(svc.removeMember(orgId, memberships[0].membershipId, 2)).rejects.toBeInstanceOf(OrganizationAdminRequiredError);
+  });
+
+  it('cannot remove self', async () => {
+    const { svc } = makeService();
+    const { orgId, memberships } = await createOrg(svc, 1);
+    await expect(svc.removeMember(orgId, memberships[0].membershipId, 1)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('last admin cannot leave', async () => {
+    const { svc } = makeService();
+    const { orgId } = await createOrg(svc, 1);
+    await expect(svc.leaveOrganization(orgId, 1)).rejects.toBeInstanceOf(OrganizationAdminRequiredError);
+  });
+
+  it('a member can leave', async () => {
+    const { svc, membershipRepo } = makeService();
+    const { orgId } = await createOrg(svc, 1);
+    const second = await addAdmin(membershipRepo, orgId, 2);
+    expect(second.id).toBeTruthy();
+    await svc.leaveOrganization(orgId, 2);
+    const members = await svc.listMembers(orgId);
+    expect(members.filter((m) => m.role === 'admin')).toHaveLength(1);
+  });
+
+  it('assignRole with a cross-org membership id throws not-found', async () => {
+    const { svc } = makeService();
+    const { orgId } = await createOrg(svc, 1);
+    await svc.createOrganization(2, 'Other');
+    await expect(svc.assignRole(orgId, 999999, 'admin', 2)).rejects.toBeInstanceOf(EntityNotFoundError);
+  });
+
+  it('listOrganizations returns only active orgs the user is an active member of', async () => {
+    const { svc } = makeService();
+    const a = await svc.createOrganization(1, 'A');
+    await svc.createOrganization(2, 'B');
+    const list = await svc.listOrganizations(1);
+    expect(list.map((o) => o.name)).toEqual(['A']);
+    expect(a.name).toBe('A');
+  });
+
+  it('rejects blank or over-long organization name with ValidationError', async () => {
+    const { svc } = makeService();
+    await expect(svc.createOrganization(1, '   ')).rejects.toBeInstanceOf(ValidationError);
+    await expect(svc.createOrganization(1, 'x'.repeat(101))).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('closeOrganization revokes invited memberships and keeps active admin', async () => {
+    const { svc, membershipRepo } = makeService();
+    const { orgId } = await createOrg(svc, 1);
+    const invited = await membershipRepo.create({} as Queryable, {
+      organizationId: orgId,
+      userId: 2,
+      role: 'member',
+      status: 'invited',
+      invitedByUserId: 1,
+      joinedTime: null,
+      removedTime: null,
     });
-    await c.resourceRepo.create({
-      organizationId: c.org.id, resourceType: 'query', name: 'restricted-res',
-      accessScope: 'restricted', encryptedData: 'enc-restricted', createdByUserId: 1,
-    });
-
-    const list = await c.service.listResources(c.org.id, 1);
-
-    expect(list).toHaveLength(2);
-    expect(list.map((r) => r.name).sort()).toEqual(['org-res', 'restricted-res']);
-  });
-
-  it('member 看不到未被授权的 restricted 资源（密文不泄漏）', async () => {
-    const c = await setup();
-    await c.resourceRepo.create({
-      organizationId: c.org.id, resourceType: 'query', name: 'org-res',
-      accessScope: 'organization', encryptedData: 'enc-org', createdByUserId: 1,
-    });
-    await c.resourceRepo.create({
-      organizationId: c.org.id, resourceType: 'query', name: 'restricted-res',
-      accessScope: 'restricted', encryptedData: 'enc-restricted', createdByUserId: 1,
-    });
-
-    const list = await c.service.listResources(c.org.id, 2);
-
-    expect(list).toHaveLength(1);
-    expect(list[0].name).toBe('org-res');
-    expect(list.find((r) => r.accessScope === 'restricted')).toBeUndefined();
-  });
-
-  it('member 被显式授权后可见对应 restricted 资源', async () => {
-    const c = await setup();
-    const restricted = await c.resourceRepo.create({
-      organizationId: c.org.id, resourceType: 'query', name: 'restricted-res',
-      accessScope: 'restricted', encryptedData: 'enc-restricted', createdByUserId: 1,
-    });
-    await c.resourceRepo.grantPermission(c.org.id, restricted.id, c.memberId, 'read');
-
-    const list = await c.service.listResources(c.org.id, 2);
-
-    expect(list).toHaveLength(1);
-    expect(list[0].name).toBe('restricted-res');
-    expect(list[0].encryptedData).toBe('enc-restricted');
-  });
-
-  it('type 过滤仍生效且不绕过 restricted 授权', async () => {
-    const c = await setup();
-    await c.resourceRepo.create({
-      organizationId: c.org.id, resourceType: 'query', name: 'q-org',
-      accessScope: 'organization', encryptedData: 'enc', createdByUserId: 1,
-    });
-    await c.resourceRepo.create({
-      organizationId: c.org.id, resourceType: 'folder', name: 'f-org',
-      accessScope: 'organization', encryptedData: 'enc', createdByUserId: 1,
-    });
-    const restricted = await c.resourceRepo.create({
-      organizationId: c.org.id, resourceType: 'query', name: 'q-restricted',
-      accessScope: 'restricted', encryptedData: 'enc', createdByUserId: 1,
-    });
-
-    // 未授权 member 按 query 过滤：只看到 org 的 query，看不到 restricted query
-    const list = await c.service.listResources(c.org.id, 2, 'query');
-    expect(list.map((r) => r.name)).toEqual(['q-org']);
-
-    // 授权后可见
-    await c.resourceRepo.grantPermission(c.org.id, restricted.id, c.memberId, 'read');
-    const list2 = await c.service.listResources(c.org.id, 2, 'query');
-    expect(list2.map((r) => r.name).sort()).toEqual(['q-org', 'q-restricted']);
-  });
-});
-
-describe('OrganizationService addMember 治理（P1-6）', () => {
-  it('orgMaxMembers 超限返回 400', async () => {
-    const orgRepo = new FakeOrganizationRepo();
-    const membershipRepo = new FakeMembershipRepo();
-    const seatRepo = new FakeSeatRepo();
-    const resourceRepo = new FakeOrganizationResourceRepo();
-    const auditRepo = new FakeOrganizationAuditRepo();
-    const subRepo = new FakeSubscriptionRepo();
-    const planRepo = new FakePlanRepo([makePlan('free'), makePlan('team', { includedSeats: 10, orgMaxMembers: 2 })]);
-    const service = new OrganizationService(orgRepo, membershipRepo, seatRepo, resourceRepo, auditRepo, subRepo, planRepo);
-    const teamPlan = (await planRepo.findByCode('team'))!;
-    const org = await orgRepo.create({ name: 'Acme', type: 'team', ownerUserId: 1 });
-    await membershipRepo.create({ organizationId: org.id, userId: 1, role: 'admin' });
-    await membershipRepo.create({ organizationId: org.id, userId: 2, role: 'member' });
-    const sub = await subRepo.upsert({ organizationId: org.id, planId: teamPlan.id, status: 'active', provider: 'manual' });
-    // 建 10 个席位（includedSeats=10），让 seat 检查通过，orgMaxMembers=2 才是瓶颈
-    for (let i = 0; i < 10; i++) await seatRepo.create({ subscriptionId: sub.id, organizationId: org.id });
-    // 2 active members, orgMaxMembers=2 → add 3rd should fail
-    await expect(service.addMember(org.id, 3, 'member', 1)).rejects.toThrowError(/member limit/);
-  });
-
-  it('成员自退成功（leaveOrganization）', async () => {
-    const { service, org, membershipRepo } = await setup();
-    // userId=2 是普通成员，可以自退
-    await service.leaveOrganization(org.id, 2);
-    const m = await membershipRepo.findByOrgAndUser(org.id, 2);
-    expect(m?.status).not.toBe('active');
-  });
-
-  it('owner 不可自退', async () => {
-    const { service, org } = await setup();
-    // userId=1 是 owner/admin，不可自退
-    await expect(service.leaveOrganization(org.id, 1)).rejects.toThrow();
-  });
-});
-
-describe('team 试用到期降级（付费门禁旁路 #2 修复）', () => {
-  it('试用期内 resolveEffectivePlans 解出 team 套餐', async () => {
-    const c = await setupForCreate();
-    const { organization } = await c.service.createOrganization(1, 'Acme');
-    expect(organization).toBeDefined();
-    const plans = await resolveEffectivePlans(1, { membershipRepo: c.membershipRepo, subRepo: c.subRepo, planRepo: c.planRepo });
-    expect(plans.map((p) => p.code)).toContain('team');
-  });
-
-  it('试用到期后 resolveEffectivePlans 不再解出 team（回落 free）', async () => {
-    const c = await setupForCreate();
-    const { organization } = await c.service.createOrganization(1, 'Acme');
-    const sub = (await c.subRepo.findByOrganizationId(organization.id))!;
-    await c.subRepo.upsert({ id: sub.id, organizationId: organization.id, planId: sub.planId, status: 'trialing', provider: 'manual', trialEndTime: new Date(Date.now() - 1000) });
-    const plans = await resolveEffectivePlans(1, { membershipRepo: c.membershipRepo, subRepo: c.subRepo, planRepo: c.planRepo });
-    expect(plans.map((p) => p.code)).not.toContain('team');
-    expect(plans.map((p) => p.code)).toContain('free');
-  });
-
-  it('expireOne 把 trialing 试用到期降为 expired', async () => {
-    const c = await setupForCreate();
-    const { organization } = await c.service.createOrganization(1, 'Acme');
-    const sub = (await c.subRepo.findByOrganizationId(organization.id))!;
-    await c.subRepo.upsert({ id: sub.id, organizationId: organization.id, planId: sub.planId, status: 'trialing', provider: 'manual', trialEndTime: new Date(Date.now() - 1000) });
-    const changed = await c.subRepo.expireOne(organization.id, new Date());
-    expect(changed).toBe(true);
-    const after = (await c.subRepo.findByOrganizationId(organization.id))!;
-    expect(after.status).toBe('expired');
-  });
-
-  it('downgradeExpired 批量降级 trialing 试用到期', async () => {
-    const c = await setupForCreate();
-    const { organization } = await c.service.createOrganization(1, 'Acme');
-    const sub = (await c.subRepo.findByOrganizationId(organization.id))!;
-    await c.subRepo.upsert({ id: sub.id, organizationId: organization.id, planId: sub.planId, status: 'trialing', provider: 'manual', trialEndTime: new Date(Date.now() - 1000) });
-    const n = await c.subRepo.downgradeExpired(new Date());
-    expect(n).toBeGreaterThanOrEqual(1);
-    const after = (await c.subRepo.findByOrganizationId(organization.id))!;
-    expect(after.status).toBe('expired');
+    await svc.closeOrganization(orgId);
+    expect(membershipRepo.store.get(invited.id)?.status).toBe('removed');
+    const all = await svc.listMembers(orgId);
+    expect(all).toHaveLength(1);
+    expect(all[0].role).toBe('admin');
+    expect(all[0].status).toBe('active');
   });
 });

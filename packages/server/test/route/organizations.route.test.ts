@@ -1,193 +1,184 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { buildTestApp, type TestApp } from '../helpers/testApp.js';
+import type { Queryable } from '../../src/repository/mysql/db.js';
+import type { OrganizationRole } from '../../src/domain/enums.js';
 
-/**
- * 组织域路由的成员授权守卫。
- *
- * authScope 只验「登录」，成员归属必须由 OrganizationService 兜住 ——
- * 否则任意已登录用户可改任意 org 的成员/资源。这里把守卫钉成断言：
- * 非成员写 → 403、非成员读 → 403、owner/admin → 200、软删资源 listPermissions → 404。
- */
-
-let t: TestApp;
-
-beforeEach(async () => { t = await buildTestApp(); });
-afterEach(async () => { await t.close(); });
-
-/** 造一个 team org，owner 成为 admin 成员；可选给 org 配席位（含 owner 占用，故加成员需 ≥2） */
-async function makeOrg(opts: { seats?: number } = {}): Promise<{ ownerToken: string; ownerId: number; orgId: number }> {
-  const owner = await t.makeUser();
-  const res = await t.app.inject({
-    method: 'POST', url: '/api/organizations', headers: t.auth(owner.token),
-    payload: { name: 'Acme' },
-  });
-  expect(res.statusCode).toBe(201);
-  const orgId = res.json().organization.id;
-  if (opts.seats) {
-    const teamPlan = (await t.repos.planRepo.findByCode('team'))!;
-    const sub = await t.repos.subRepo.upsert({ organizationId: orgId, planId: teamPlan.id, status: 'active', provider: 'manual' });
-    for (let i = 0; i < opts.seats; i++) {
-      await t.repos.seatRepo.create({ subscriptionId: sub.id, organizationId: orgId });
-    }
-  }
-  return { ownerToken: owner.token, ownerId: owner.id, orgId };
+async function makeUser(t: TestApp, email: string) {
+  const user = await t.repos.userRepo.create(email, 'hash', undefined);
+  const token = await t.tokenFor(user.id);
+  return { id: user.id, token };
 }
 
-/** 列成员：owner → 200，非成员 → 403 */
-describe('组织域授权守卫', () => {
-  it('非成员读成员列表 → 403 FORBIDDEN', async () => {
-    const { orgId, ownerToken } = await makeOrg();
-    const outsider = await t.makeUser();
-    // owner 能读（成员）
-    expect((await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}/members`, headers: t.auth(ownerToken) })).statusCode).toBe(200);
-    // 非成员被拒
-    const res = await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}/members`, headers: t.auth(outsider.token) });
-    expect(res.statusCode).toBe(403);
-    expect(res.json().code).toBe('FORBIDDEN');
+async function makeOrg(t: TestApp, name = 'Acme') {
+  const org = await t.repos.organizationRepo.create({} as Queryable, { name });
+  return org.id;
+}
+
+async function addMembership(t: TestApp, orgId: number, userId: number, role: OrganizationRole) {
+  return t.repos.membershipRepo.create({} as Queryable, {
+    organizationId: orgId,
+    userId,
+    role,
+    status: 'active',
+    invitedByUserId: null,
+    joinedTime: new Date(),
+    removedTime: null,
+  });
+}
+
+describe('organization routes', () => {
+  it('requires auth to list organizations', async () => {
+    const t = await buildTestApp();
+    const res = await t.app.inject({ method: 'GET', url: '/api/organizations' });
+    expect(res.statusCode).toBe(401);
+    await t.close();
   });
 
-  it('非成员加成员 → 403（在席位检查之前拒绝）', async () => {
-    const { orgId } = await makeOrg({ seats: 2 });
-    const outsider = await t.makeUser();
-    const target = await t.makeUser();
-    const res = await t.app.inject({
-      method: 'POST', url: `/api/organizations/${orgId}/members`, headers: t.auth(outsider.token),
-      payload: { userId: target.id, role: 'member' },
-    });
-    expect(res.statusCode).toBe(403);
-  });
-
-  it('owner（admin 成员）加成员 → 201', async () => {
-    const { orgId, ownerToken } = await makeOrg({ seats: 2 });
-    const target = await t.makeUser();
-    const res = await t.app.inject({
-      method: 'POST', url: `/api/organizations/${orgId}/members`, headers: t.auth(ownerToken),
-      payload: { userId: target.id, role: 'member' },
-    });
-    expect(res.statusCode).toBe(201);
-  });
-
-  it('owner 加成员后再以该成员身份读资源列表 → 200（member 可读）', async () => {
-    const { orgId, ownerToken } = await makeOrg({ seats: 2 });
-    const member = await t.makeUser();
-    await t.app.inject({
-      method: 'POST', url: `/api/organizations/${orgId}/members`, headers: t.auth(ownerToken),
-      payload: { userId: member.id, role: 'member' },
-    });
-    // member 身份读资源：admin-only 路由里 listResources 是 member 级 → 200
-    expect((await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}/resources`, headers: t.auth(member.token) })).statusCode).toBe(200);
-  });
-
-  it('非 admin 成员建资源 → 403（资源管理 admin-only）', async () => {
-    const { orgId, ownerToken } = await makeOrg();
-    const member = await t.makeUser();
-    await t.app.inject({
-      method: 'POST', url: `/api/organizations/${orgId}/members`, headers: t.auth(ownerToken),
-      payload: { userId: member.id, role: 'member' },
-    });
-    const res = await t.app.inject({
-      method: 'POST', url: `/api/organizations/${orgId}/resources`, headers: t.auth(member.token),
-      payload: { resourceType: 'query', name: 'q1', accessScope: 'organization', encryptedData: 'enc' },
-    });
-    expect(res.statusCode).toBe(403);
-  });
-
-  it('owner 建资源 → 201；软删后 listPermissions → 404（陈旧授权不泄漏）', async () => {
-    const { orgId, ownerToken } = await makeOrg();
+  it('creates an organization and lists it', async () => {
+    const t = await buildTestApp();
+    const { token } = await makeUser(t, 'a@b.com');
     const create = await t.app.inject({
-      method: 'POST', url: `/api/organizations/${orgId}/resources`, headers: t.auth(ownerToken),
-      payload: { resourceType: 'query', name: 'q1', accessScope: 'restricted', encryptedData: 'enc' },
+      method: 'POST', url: '/api/organizations', headers: t.auth(token),
+      payload: { name: 'Acme' },
     });
     expect(create.statusCode).toBe(201);
-    const resourceId = create.json().resource.id;
+    const org = create.json().organization;
+    expect(org.name).toBe('Acme');
+    expect(org.role).toBe('admin');
+    expect(typeof org.organizationId).toBe('string');
 
-    // 未软删时 listPermissions 可读（owner 是 member）
-    expect((await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}/resources/${resourceId}/permissions`, headers: t.auth(ownerToken) })).statusCode).toBe(200);
+    const list = await t.app.inject({ method: 'GET', url: '/api/organizations', headers: t.auth(token) });
+    expect(list.json().organizations).toHaveLength(1);
+    await t.close();
+  });
 
-    // 软删资源
-    expect((await t.app.inject({ method: 'DELETE', url: `/api/organizations/${orgId}/resources/${resourceId}`, headers: t.auth(ownerToken) })).statusCode).toBe(200);
+  it('a member can read but cannot update (forbidden)', async () => {
+    const t = await buildTestApp();
+    const owner = await makeUser(t, 'owner@b.com');
+    const member = await makeUser(t, 'member@b.com');
+    const orgId = await makeOrg(t);
+    await addMembership(t, orgId, owner.id, 'admin');
+    await addMembership(t, orgId, member.id, 'member');
 
-    // 软删后 listPermissions → 404（service findById 过滤软删资源）
-    const res = await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}/resources/${resourceId}/permissions`, headers: t.auth(ownerToken) });
+    const read = await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}`, headers: t.auth(member.token) });
+    expect(read.statusCode).toBe(200);
+
+    const update = await t.app.inject({
+      method: 'PATCH', url: `/api/organizations/${orgId}`, headers: t.auth(member.token), payload: { name: 'x' },
+    });
+    expect(update.statusCode).toBe(403);
+    expect(update.json().code).toBe('FORBIDDEN');
+    await t.close();
+  });
+
+  it('non-member and closed org both return 404 (no enumeration)', async () => {
+    const t = await buildTestApp();
+    const outsider = await makeUser(t, 'out@b.com');
+    const orgId = await makeOrg(t);
+    const res = await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}`, headers: t.auth(outsider.token) });
     expect(res.statusCode).toBe(404);
+    expect(res.json().code).toBe('ORGANIZATION_NOT_FOUND');
+
+    await t.repos.organizationRepo.close({} as Queryable, orgId, new Date());
+    const owner = await makeUser(t, 'ow2@b.com');
+    await addMembership(t, orgId, owner.id, 'admin');
+    const res2 = await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}`, headers: t.auth(owner.token) });
+    expect(res2.statusCode).toBe(404);
+    await t.close();
   });
 
-  it('admin 成员不能移除 owner（组织不可失去商业 Owner）', async () => {
-    const { orgId, ownerToken, ownerId } = await makeOrg({ seats: 2 });
-    // 加一个 admin 成员（owner 加成员需席位）
-    const secondAdmin = await t.makeUser();
-    await t.app.inject({
-      method: 'POST', url: `/api/organizations/${orgId}/members`, headers: t.auth(ownerToken),
-      payload: { userId: secondAdmin.id, role: 'admin' },
-    });
-    // owner 的 membership id
-    const membersRes = await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}/members`, headers: t.auth(ownerToken) });
-    const ownerMembershipId = membersRes.json().members.find((m: any) => m.userId === ownerId).id;
-    // 第二个 admin 尝试移除 owner → 400
+  it('member directory does not leak emails', async () => {
+    const t = await buildTestApp();
+    const owner = await makeUser(t, 'o@b.com');
+    const orgId = await makeOrg(t);
+    await addMembership(t, orgId, owner.id, 'admin');
+    const res = await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}/members`, headers: t.auth(owner.token) });
+    expect(res.statusCode).toBe(200);
+    const members = res.json().members;
+    expect(members).toHaveLength(1);
+    expect(JSON.stringify(members)).not.toContain('o@b.com');
+    expect(members[0].membershipId).toBeTruthy();
+    await t.close();
+  });
+
+  it('admin can assign role by membership id', async () => {
+    const t = await buildTestApp();
+    const owner = await makeUser(t, 'o@c.com');
+    const member = await makeUser(t, 'm@c.com');
+    const orgId = await makeOrg(t);
+    await addMembership(t, orgId, owner.id, 'admin');
+    const memberM = await addMembership(t, orgId, member.id, 'member');
+
     const res = await t.app.inject({
-      method: 'DELETE', url: `/api/organizations/${orgId}/members/${ownerMembershipId}`, headers: t.auth(secondAdmin.token),
+      method: 'PATCH', url: `/api/organizations/${orgId}/members/${memberM.id}`, headers: t.auth(owner.token),
+      payload: { role: 'admin' },
     });
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(200);
+
+    const memberList = await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}/members`, headers: t.auth(owner.token) });
+    const admins = memberList.json().members.filter((m: any) => m.role === 'admin');
+    expect(admins).toHaveLength(2);
+    await t.close();
   });
 
-  it('admin 成员不能把 owner 降级出 admin', async () => {
-    const { orgId, ownerToken, ownerId } = await makeOrg({ seats: 2 });
-    const secondAdmin = await t.makeUser();
-    await t.app.inject({
-      method: 'POST', url: `/api/organizations/${orgId}/members`, headers: t.auth(ownerToken),
-      payload: { userId: secondAdmin.id, role: 'admin' },
+  it('a member gets 403 on role.assign, member.remove and organization.close', async () => {
+    const t = await buildTestApp();
+    const owner = await makeUser(t, 'o@d.com');
+    const member = await makeUser(t, 'm@d.com');
+    const target = await makeUser(t, 't@d.com');
+    const orgId = await makeOrg(t);
+    await addMembership(t, orgId, owner.id, 'admin');
+    await addMembership(t, orgId, member.id, 'member');
+    const targetM = await addMembership(t, orgId, target.id, 'member');
+
+    const assign = await t.app.inject({
+      method: 'PATCH', url: `/api/organizations/${orgId}/members/${targetM.id}`, headers: t.auth(member.token), payload: { role: 'admin' },
     });
-    const membersRes = await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}/members`, headers: t.auth(secondAdmin.token) });
-    const ownerMembershipId = membersRes.json().members.find((m: any) => m.userId === ownerId).id;
+    expect(assign.statusCode).toBe(403);
+
+    const remove = await t.app.inject({
+      method: 'DELETE', url: `/api/organizations/${orgId}/members/${targetM.id}`, headers: t.auth(member.token),
+    });
+    expect(remove.statusCode).toBe(403);
+
+    const close = await t.app.inject({
+      method: 'POST', url: `/api/organizations/${orgId}/close`, headers: t.auth(member.token),
+    });
+    expect(close.statusCode).toBe(403);
+    await t.close();
+  });
+
+  it('closing an organization via route makes it 404 afterwards', async () => {
+    const t = await buildTestApp();
+    const owner = await makeUser(t, 'o@e.com');
+    const orgId = await makeOrg(t);
+    await addMembership(t, orgId, owner.id, 'admin');
+
+    const close = await t.app.inject({ method: 'POST', url: `/api/organizations/${orgId}/close`, headers: t.auth(owner.token) });
+    expect(close.statusCode).toBe(200);
+
+    const res = await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}`, headers: t.auth(owner.token) });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().code).toBe('ORGANIZATION_NOT_FOUND');
+    await t.close();
+  });
+
+  it('cross-organization membership id via HTTP returns 404', async () => {
+    const t = await buildTestApp();
+    const owner = await makeUser(t, 'o@f.com');
+    const member = await makeUser(t, 'm@f.com');
+    const orgA = await makeOrg(t, 'A');
+    const orgB = await makeOrg(t, 'B');
+    await addMembership(t, orgA, owner.id, 'admin');
+    await addMembership(t, orgB, owner.id, 'admin');
+    const memberInA = await addMembership(t, orgA, member.id, 'member');
+
     const res = await t.app.inject({
-      method: 'PATCH', url: `/api/organizations/${orgId}/members/${ownerMembershipId}`, headers: t.auth(secondAdmin.token),
-      payload: { role: 'member' },
+      method: 'PATCH', url: `/api/organizations/${orgB}/members/${memberInA.id}`, headers: t.auth(owner.token),
+      payload: { role: 'admin' },
     });
-    expect(res.statusCode).toBe(400);
-  });
-
-  it('不存在的组织 → 404（而非 403，避免暴露组织存在性）', async () => {
-    const u = await t.makeUser();
-    const res = await t.app.inject({ method: 'GET', url: '/api/organizations/999999/members', headers: t.auth(u.token) });
-    // requireMember 在 org 不存在时：findByOrgAndUser 返回 undefined → ForbiddenError(403)
-    // 这是可接受的（不泄漏 404 vs 403 的区别给非成员），此处仅断言非 200
-    expect(res.statusCode).toBeGreaterThanOrEqual(400);
-  });
-
-  it('revokePermission → 204 且授权消失', async () => {
-    const { orgId, ownerToken } = await makeOrg({ seats: 2 });
-    // 建一个 restricted 资源
-    const create = await t.app.inject({
-      method: 'POST', url: `/api/organizations/${orgId}/resources`, headers: t.auth(ownerToken),
-      payload: { resourceType: 'query', name: 'q1', accessScope: 'restricted', encryptedData: 'enc' },
-    });
-    const resourceId = create.json().resource.id;
-
-    // 加成员
-    const member = await t.makeUser();
-    await t.app.inject({
-      method: 'POST', url: `/api/organizations/${orgId}/members`, headers: t.auth(ownerToken),
-      payload: { userId: member.id, role: 'member' },
-    });
-
-    // 取成员的 membershipId
-    const membersRes = await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}/members`, headers: t.auth(ownerToken) });
-    const memberMembershipId = membersRes.json().members.find((m: any) => m.userId === member.id).id;
-
-    // 授权
-    await t.app.inject({
-      method: 'POST', url: `/api/organizations/${orgId}/resources/${resourceId}/permissions`, headers: t.auth(ownerToken),
-      payload: { membershipId: memberMembershipId, permission: 'read' },
-    });
-
-    // 撤销
-    const res = await t.app.inject({
-      method: 'DELETE', url: `/api/organizations/${orgId}/resources/${resourceId}/permissions/${memberMembershipId}`, headers: t.auth(ownerToken),
-    });
-    expect(res.statusCode).toBe(204);
-
-    // 确认授权列表为空
-    const listRes = await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}/resources/${resourceId}/permissions`, headers: t.auth(ownerToken) });
-    expect(listRes.json().permissions).toHaveLength(0);
+    expect(res.statusCode).toBe(404);
+    expect(res.json().code).toBe('NOT_FOUND');
+    await t.close();
   });
 });

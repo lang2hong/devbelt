@@ -21,6 +21,10 @@ export default defineConfig({
           environment: 'node',
           include: ['test/**/*.test.ts'],
           exclude: ['test/integration/**'],
+          // Argon2id（实施规格 §4.5：memory 65536KiB / iterations 3）在纯 JS
+          // @noble/hashes 下每次约 2s；注册/登录/改密的测试单例含多次 hash，
+          // 需要比默认 5s 更大的超时。集成测试单独有 testTimeout=60s。
+          testTimeout: 60_000,
         },
       },
       {
@@ -31,6 +35,8 @@ export default defineConfig({
           // 同一个库上的 DDL 与全表 DML 不能并发
           fileParallelism: false,
           testTimeout: 60_000,
+          // 每次运行前清空 MYSQL_TEST_DB，去除「先手动清库」的隐式前提
+          globalSetup: ['./test/integration/globalSetup.ts'],
         },
       },
     ],

@@ -1,29 +1,78 @@
 import type { FastifyInstance } from 'fastify';
-import { authScope, type GetAuthUser, type GetAuthSession } from '../middleware/requireAuth.js';
+import { authScope, type GetAuthUser } from '../middleware/requireAuth.js';
+import type { TokenService } from '../service/tokenService.js';
 import { sendError } from '../middleware/errorHandler.js';
-import type { SubscriptionService } from '../service/subscriptionService.js';
+import type { IUserRepo, IPersonalSubscriptionRepo, IPersonalPlanRepo } from '../repository/interfaces.js';
+import type { User } from '../domain/entities.js';
 
 export interface MeRouteOptions {
-  subscriptionService: SubscriptionService;
-  getUser?: GetAuthUser;
-  getSession?: GetAuthSession;
+  tokenService: TokenService;
+  getUser: GetAuthUser;
+  userRepo: IUserRepo;
+  personalSubscriptionRepo: IPersonalSubscriptionRepo;
+  personalPlanRepo: IPersonalPlanRepo;
 }
 
-/** /api/me 路由：返回当前用户 + 套餐 + 订阅 + 配额用量（需认证） */
+/** /api/me、/api/workspaces、/api/personal/subscription（需认证）。 */
 export async function meRoutes(app: FastifyInstance, opts: MeRouteOptions): Promise<void> {
   app.register(authScope, {
+    tokenService: opts.tokenService,
     getUser: opts.getUser,
-    getSession: opts.getSession,
     routes: async (child) => {
       child.get('/api/me', async (req, reply) => {
-        const userId = req.user.sub as number;
+        const userId = (req as any).authUserId as number;
         try {
-          const me = await opts.subscriptionService.getMe(userId);
-          reply.send(me);
+          const user = await opts.userRepo.findById(userId);
+          if (!user) return reply.code(401).send({ message: 'unauthorized', code: 'UNAUTHORIZED' });
+          const subscription = await opts.personalSubscriptionRepo.findByUserId(userId);
+          const plan = subscription ? await opts.personalPlanRepo.findById(subscription.planId) : undefined;
+          reply.send({
+            user: sanitizeUser(user),
+            subscription: subscription
+              ? {
+                  planCode: plan?.code ?? null,
+                  status: subscription.status,
+                  entitlement: subscription.entitlementSnapshot,
+                  periodStartTime: subscription.periodStartTime.toISOString(),
+                  periodEndTime: subscription.periodEndTime ? subscription.periodEndTime.toISOString() : null,
+                }
+              : null,
+          });
+        } catch (e) {
+          sendError(reply, e);
+        }
+      });
+
+      // Workspace 摘要：切片 1 只有个人空间；组织列表由后续切片填充
+      child.get('/api/workspaces', async (_req, reply) => {
+        reply.send({ personal: { kind: 'personal' }, organizations: [] });
+      });
+
+      child.get('/api/personal/subscription', async (req, reply) => {
+        const userId = (req as any).authUserId as number;
+        try {
+          const subscription = await opts.personalSubscriptionRepo.findByUserId(userId);
+          const plan = subscription ? await opts.personalPlanRepo.findById(subscription.planId) : undefined;
+          reply.send({
+            planCode: plan?.code ?? null,
+            status: subscription?.status ?? null,
+            entitlement: subscription?.entitlementSnapshot ?? null,
+          });
         } catch (e) {
           sendError(reply, e);
         }
       });
     },
   });
+
+  function sanitizeUser(user: User) {
+    return {
+      userId: String(user.id),
+      email: user.email,
+      displayName: user.displayName,
+      emailVerified: !!user.emailVerifiedTime,
+      status: user.status,
+      lastLoginTime: user.lastLoginTime ? user.lastLoginTime.toISOString() : null,
+    };
+  }
 }

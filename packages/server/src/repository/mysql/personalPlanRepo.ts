@@ -1,0 +1,33 @@
+import type { IPersonalPlanRepo } from '../interfaces.js';
+import type { PersonalPlan } from '../../domain/entities.js';
+import type { PersonalPlanStatus } from '../../domain/enums.js';
+import type { MysqlDb } from './db.js';
+
+/** 个人套餐仓储（Phase 1 只读，seed 由 migration 002 完成）。 */
+export class MysqlPersonalPlanRepo implements IPersonalPlanRepo {
+  constructor(private readonly db: () => MysqlDb) {}
+
+  async findByCode(code: string): Promise<PersonalPlan | undefined> {
+    const [rows] = await this.db().query<any[]>('SELECT * FROM personal_plans WHERE code = ?', [code]);
+    return rows[0] ? mapPlan(rows[0]) : undefined;
+  }
+
+  async findById(id: number): Promise<PersonalPlan | undefined> {
+    const [rows] = await this.db().query<any[]>('SELECT * FROM personal_plans WHERE id = ?', [id]);
+    return rows[0] ? mapPlan(rows[0]) : undefined;
+  }
+}
+
+function mapPlan(r: any): PersonalPlan {
+  const allowed = typeof r.allowed_database_types === 'string' ? JSON.parse(r.allowed_database_types) : r.allowed_database_types;
+  return {
+    id: r.id,
+    code: r.code,
+    name: r.name,
+    allowedDatabaseTypes: Array.isArray(allowed) ? allowed : [],
+    maxDevices: r.max_devices,
+    status: r.status as PersonalPlanStatus,
+    createTime: new Date(r.create_time),
+    updateTime: new Date(r.update_time),
+  };
+}

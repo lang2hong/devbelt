@@ -1,381 +1,257 @@
-import { describe, it, expect } from 'vitest';
-import { AuthService } from '../../src/service/authService.js';
-import { TokenService, type JwtPort } from '../../src/service/tokenService.js';
-import { hashPassword } from '../../src/service/password.js';
-import { PlanPolicy } from '../../src/policy/planPolicy.js';
-import {
-  InvalidCredentialsError,
-  ProFeatureRequiredError,
-  TokenReuseError,
-  ValidationError,
-} from '../../src/domain/errors.js';
-import type { Plan } from '../../src/domain/entities.js';
-import type { PlanCode } from '../../src/domain/enums.js';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { generateKeyPairSync } from 'crypto';
 import {
   FakeUserRepo,
-  FakePlanRepo,
-  FakeSubscriptionRepo,
-  FakeRefreshTokenRepo,
+  FakeEmailVerificationTokenRepo,
+  FakePersonalPlanRepo,
+  FakePersonalSubscriptionRepo,
   FakeDeviceRepo,
-  FakeOrganizationRepo,
-  FakeMembershipRepo,
-  FakeSeatRepo,
+  FakeRefreshTokenRepo,
+  FakeRateLimitRepo,
   FakeRegistrationRepo,
-  makePlan,
 } from '../helpers/fakeRepos.js';
+import { TokenService, type SigningKeys } from '../../src/service/tokenService.js';
+import { AuthService, type DeviceFields } from '../../src/service/authService.js';
+import { RateLimitService } from '../../src/service/rateLimitService.js';
+import { MemoryEmailSender } from '../../src/service/emailSender.js';
+import type { Queryable } from '../../src/repository/mysql/db.js';
+import {
+  UnauthorizedError,
+  PersonalFeatureRequiredError,
+} from '../../src/domain/errors.js';
 
-/** 可预测的 JWT 端口：payload 直接序列化，便于断言 sub/role/plan */
-class FakeJwt implements JwtPort {
-  signCount = 0;
-  sign(payload: object, options?: { expiresIn?: string | number }): string {
-    this.signCount++;
-    return `jwt:${JSON.stringify(payload)}:${options?.expiresIn ?? ''}`;
-  }
-  verify<T = any>(token: string): T {
-    return JSON.parse(token.split(':')[1]) as T;
-  }
+const device = (key = 'device-key-00000001'): DeviceFields => ({
+  deviceKey: key,
+  devicePlatform: 'linux',
+  deviceName: 'test-device',
+  clientVersion: '1.0.0',
+});
+
+const PASSWORD = 'correct-horse-battery';
+
+interface Fixture {
+  auth: AuthService;
+  repos: {
+    userRepo: FakeUserRepo;
+    emailVerificationTokenRepo: FakeEmailVerificationTokenRepo;
+    personalPlanRepo: FakePersonalPlanRepo;
+    personalSubscriptionRepo: FakePersonalSubscriptionRepo;
+    deviceRepo: FakeDeviceRepo;
+    refreshTokenRepo: FakeRefreshTokenRepo;
+    rateLimitRepo: FakeRateLimitRepo;
+  };
+  emailSender: MemoryEmailSender;
 }
 
-function setup(planOver: Parameters<typeof makePlan>[1] = {}) {
+function makeFixture(opts: { rateLimit?: boolean } = {}): Fixture {
   const userRepo = new FakeUserRepo();
-  const planRepo = new FakePlanRepo([makePlan('free', planOver), makePlan('pro', { perSeatMaxDevices: 0 })]);
-  const subRepo = new FakeSubscriptionRepo();
-  const rtRepo = new FakeRefreshTokenRepo();
+  const emailVerificationTokenRepo = new FakeEmailVerificationTokenRepo();
+  const personalPlanRepo = new FakePersonalPlanRepo();
+  const personalSubscriptionRepo = new FakePersonalSubscriptionRepo();
   const deviceRepo = new FakeDeviceRepo();
-  const orgRepo = new FakeOrganizationRepo();
-  const membershipRepo = new FakeMembershipRepo();
-  const seatRepo = new FakeSeatRepo();
-  const registrationRepo = new FakeRegistrationRepo({
-    users: userRepo, orgs: orgRepo, memberships: membershipRepo, subs: subRepo, seats: seatRepo, plans: planRepo,
-  });
-  const planPolicy = new PlanPolicy(async (userId: number): Promise<Plan[]> => {
-    const memberships = (await membershipRepo.listByUser(userId)).filter((m) => m.status === 'active');
-    const subs = await subRepo.findByOrganizationIds(memberships.map((m) => m.organizationId));
-    const subByOrg = new Map(subs.map((s) => [s.organizationId, s]));
-    const plans: Plan[] = [];
-    for (const m of memberships) {
-      const sub = subByOrg.get(m.organizationId);
-      if (!sub || sub.status === 'expired') continue;
-      const plan = await planRepo.findById(sub.planId);
-      if (plan) plans.push(plan);
-    }
-    return plans;
-  });
-  const jwt = new FakeJwt();
-  const tokenService = new TokenService(jwt, '15m', '30d');
-  const auth = new AuthService(userRepo, subRepo, rtRepo, deviceRepo, registrationRepo, tokenService, planPolicy, new FakeMembershipRepo());
-  return { auth, userRepo, planRepo, subRepo, orgRepo, membershipRepo, rtRepo, deviceRepo, jwt, tokenService };
+  const refreshTokenRepo = new FakeRefreshTokenRepo();
+  const rateLimitRepo = new FakeRateLimitRepo();
+  const registrationRepo = new FakeRegistrationRepo(personalPlanRepo, userRepo, personalSubscriptionRepo, emailVerificationTokenRepo);
+
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const keys: SigningKeys = { kid: 'test', privateKey, publicKeys: new Map([['test', publicKey]]) };
+  const tokenService = new TokenService(keys, '15m', 30 * 24 * 3600 * 1000);
+  const rateLimiter = new RateLimitService(rateLimitRepo, opts.rateLimit === true);
+  const emailSender = new MemoryEmailSender();
+  const auth = new AuthService(
+    userRepo,
+    emailVerificationTokenRepo,
+    personalSubscriptionRepo,
+    deviceRepo,
+    refreshTokenRepo,
+    registrationRepo,
+    tokenService,
+    emailSender,
+    rateLimiter,
+    async (fn) => fn({} as Queryable),
+  );
+  return {
+    auth,
+    repos: {
+      userRepo,
+      emailVerificationTokenRepo,
+      personalPlanRepo,
+      personalSubscriptionRepo,
+      deviceRepo,
+      refreshTokenRepo,
+      rateLimitRepo,
+    },
+    emailSender,
+  };
 }
 
-/** 把某用户 personal org 的订阅切到指定套餐（v2：改 org 订阅，而非 users.planCode） */
-async function grantPlan(
-  userId: number,
-  code: PlanCode,
-  deps: { subRepo: FakeSubscriptionRepo; orgRepo: FakeOrganizationRepo; membershipRepo: FakeMembershipRepo; planRepo: FakePlanRepo },
-): Promise<void> {
-  const ms = await deps.membershipRepo.listByUser(userId);
-  const org = await deps.orgRepo.findById(ms[0].organizationId);
-  const plan = await deps.planRepo.findByCode(code);
-  await deps.subRepo.upsert({ organizationId: org!.id, planId: plan!.id, status: 'active', provider: 'manual' });
+/** 走完「注册→取验证 token→确认邮箱」的完整流程，返回 userId。 */
+async function registerAndVerify(f: Fixture, email = 'a@b.com'): Promise<number> {
+  await f.auth.register(email, PASSWORD);
+  const token = f.emailSender.sent.find((m) => m.kind === 'verification')?.token;
+  expect(token).toBeTruthy();
+  await f.auth.confirmEmail(token!);
+  const user = await f.repos.userRepo.findByEmail(email);
+  expect(user?.emailVerifiedTime).toBeTruthy();
+  return user!.id;
 }
 
-describe('AuthService.register', () => {
-  it('creates a user + personal org + free subscription + seat, and both tokens', async () => {
-    const { auth, userRepo, subRepo, orgRepo } = setup();
-    const res = await auth.register('a@example.com', 'password123', { deviceName: 'laptop' });
-
-    expect(res.accessToken).toContain('"role":"user"');
-    expect(res.refreshToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(res.user.email).toBe('a@example.com');
-    expect(res.subscription?.status).toBe('active');
-
-    const stored = await userRepo.findByEmail('a@example.com');
-    expect(stored?.lastLoginTime).toBeInstanceOf(Date);
-    expect(subRepo.subs.size).toBe(1);
-    expect(orgRepo.orgs.size).toBe(1); // personal org 创建
+describe('AuthService', () => {
+  let f: Fixture;
+  beforeEach(() => {
+    f = makeFixture();
   });
 
-  it('never leaks passwordHash in the response', async () => {
-    const { auth } = setup();
-    const res = await auth.register('b@example.com', 'password123');
-    expect('passwordHash' in res.user).toBe(false);
+  it('register creates only user + free subscription + verification token (no personal org)', async () => {
+    await f.auth.register('user@example.com', PASSWORD, 'Alice');
+    const user = await f.repos.userRepo.findByEmail('user@example.com');
+    expect(user).toBeTruthy();
+    expect(user!.emailVerifiedTime).toBeNull();
+    const sub = await f.repos.personalSubscriptionRepo.findByUserId(user!.id);
+    expect(sub).toBeTruthy();
+    expect(sub!.entitlementSnapshot).toMatchObject({ maxDevices: 0 });
+    expect(f.emailSender.sent.some((m) => m.kind === 'verification')).toBe(true);
   });
 
-  it('stores a scrypt hash, not the plaintext', async () => {
-    const { auth, userRepo } = setup();
-    await auth.register('c@example.com', 'password123');
-    const stored = await userRepo.findByEmail('c@example.com');
-    expect(stored?.passwordHash.startsWith('scrypt$')).toBe(true);
-    expect(stored?.passwordHash).not.toContain('password123');
+  it('register with existing email returns identical success and keeps the account intact', async () => {
+    await f.auth.register('user@example.com', PASSWORD);
+    const before = await f.repos.userRepo.findByEmail('user@example.com');
+    const result = await f.auth.register('USER@example.com', PASSWORD);
+    expect(result).toEqual({ ok: true });
+    const after = await f.repos.userRepo.findByEmail('user@example.com');
+    expect(after!.id).toBe(before!.id);
+    expect(f.emailSender.sent.filter((m) => m.kind === 'already_registered').length).toBe(1);
   });
 
-  it('rejects a duplicate email without disclosing that it exists', async () => {
-    const { auth, userRepo } = setup();
-    await auth.register('dup@example.com', 'password123');
-    await expect(auth.register('dup@example.com', 'password123')).rejects.toBeInstanceOf(
-      InvalidCredentialsError,
-    );
-    expect(userRepo.users.size).toBe(1);
+  it('rejects short passwords', async () => {
+    await expect(f.auth.register('x@example.com', 'short')).rejects.toThrow(/password/);
   });
 
-  it('rejects a malformed email', async () => {
-    const { auth } = setup();
-    await expect(auth.register('not-an-email', 'password123')).rejects.toBeInstanceOf(ValidationError);
+  it('confirmEmail then login succeeds; unverified login fails with 401', async () => {
+    const id = await registerAndVerify(f, 'ok@example.com');
+    const res = await f.auth.login('ok@example.com', PASSWORD, device());
+    expect(res.accessToken).toBeTruthy();
+    expect(res.user.userId).toBe(String(id));
   });
 
-  it('rejects a password shorter than 8 chars', async () => {
-    const { auth } = setup();
-    await expect(auth.register('d@example.com', 'short')).rejects.toBeInstanceOf(ValidationError);
+  it('login with wrong password returns UnauthorizedError', async () => {
+    await registerAndVerify(f, 'nope@example.com');
+    await expect(f.auth.login('nope@example.com', 'wrong-password', device())).rejects.toBeInstanceOf(UnauthorizedError);
   });
 
-  it('rejects empty credentials', async () => {
-    const { auth } = setup();
-    await expect(auth.register('', 'password123')).rejects.toBeInstanceOf(InvalidCredentialsError);
-    await expect(auth.register('e@example.com', '')).rejects.toBeInstanceOf(InvalidCredentialsError);
-  });
-});
+  it('refresh rotates and reuse on the old token revokes the family', async () => {
+    await registerAndVerify(f, 'rt@example.com');
+    const { refreshToken } = await f.auth.login('rt@example.com', PASSWORD, device());
+    const rotated = await f.auth.refresh(refreshToken, device());
+    expect(rotated.refreshToken).toBeTruthy();
+    expect(rotated.refreshToken).not.toBe(refreshToken);
 
-describe('AuthService.login', () => {
-  it('returns tokens plus the existing subscription', async () => {
-    const { auth } = setup();
-    await auth.register('a@example.com', 'password123');
-    const res = await auth.login('a@example.com', 'password123', { ip: '10.0.0.1' });
-    expect(res.subscription).toBeUndefined(); // v2：订阅按 org，login 不返回 subscription
-    expect(res.user.email).toBe('a@example.com');
-    expect('passwordHash' in res.user).toBe(false);
+    // 旧 token 已撤销，再次使用 → family 取消 → 401
+    await expect(f.auth.refresh(refreshToken, device())).rejects.toBeInstanceOf(UnauthorizedError);
+    // 轮换出的新 token 也因 family 被撤销而失效
+    await expect(f.auth.refresh(rotated.refreshToken, device())).rejects.toBeInstanceOf(UnauthorizedError);
   });
 
-  it('rejects a wrong password', async () => {
-    const { auth } = setup();
-    await auth.register('a@example.com', 'password123');
-    await expect(auth.login('a@example.com', 'password124')).rejects.toBeInstanceOf(
-      InvalidCredentialsError,
-    );
+  it('changePassword revokes all refresh tokens', async () => {
+    const id = await registerAndVerify(f, 'cp@example.com');
+    const { refreshToken } = await f.auth.login('cp@example.com', PASSWORD, device());
+    await f.auth.changePassword(id, PASSWORD, 'new-password-1234');
+    await expect(f.auth.refresh(refreshToken, device())).rejects.toBeInstanceOf(UnauthorizedError);
+    // 新密码可登录
+    await expect(f.auth.login('cp@example.com', 'new-password-1234', device())).resolves.toBeTruthy();
   });
 
-  it('rejects an unknown email with the same error as a wrong password', async () => {
-    const { auth } = setup();
-    await expect(auth.login('ghost@example.com', 'password123')).rejects.toBeInstanceOf(
-      InvalidCredentialsError,
-    );
+  it('enforces max_devices entitlement', async () => {
+    const id = await registerAndVerify(f, 'dev@example.com');
+    // 把该用户 entitlement 的 maxDevices 调整为 1
+    const sub = await f.repos.personalSubscriptionRepo.findByUserId(id);
+    sub!.entitlementSnapshot = { ...sub!.entitlementSnapshot, maxDevices: 1 };
+
+    await f.auth.login('dev@example.com', PASSWORD, device('device-key-00000001'));
+    await expect(f.auth.login('dev@example.com', PASSWORD, device('device-key-00000002'))).rejects.toBeInstanceOf(PersonalFeatureRequiredError);
+    // 同一设备重登不占新位
+    await expect(f.auth.login('dev@example.com', PASSWORD, device('device-key-00000001'))).resolves.toBeTruthy();
   });
 
-  it('rejects a disabled user', async () => {
-    const { auth, userRepo } = setup();
-    const res = await auth.register('a@example.com', 'password123');
-    await userRepo.updateStatus(res.user.id, 'disabled');
-    await expect(auth.login('a@example.com', 'password123')).rejects.toBeInstanceOf(
-      InvalidCredentialsError,
-    );
+  it('revokeDevice removes the device and its sessions', async () => {
+    await registerAndVerify(f, 'rd@example.com');
+    await f.auth.login('rd@example.com', PASSWORD, device('device-key-00000001'));
+    const user = await f.repos.userRepo.findByEmail('rd@example.com');
+    const devices = await f.repos.deviceRepo.listByUser(user!.id);
+    expect(devices.length).toBe(1);
+    await f.auth.revokeDevice(user!.id, devices[0].id);
+    expect((await f.repos.deviceRepo.listByUser(user!.id))[0].status).toBe('revoked');
   });
 
-  it('拒绝 legacy sha256 哈希（不再接受弱哈希）', async () => {
-    const { auth, userRepo } = setup();
-    const { createHash } = await import('crypto');
-    const legacy = createHash('sha256').update('any-saltlegacy-pass').digest('hex');
-    await userRepo.create('legacy@example.com', legacy, 'user');
-
-    await expect(auth.login('legacy@example.com', 'legacy-pass')).rejects.toBeTruthy();
+  it('refresh rejects a mismatched deviceKey and does not migrate the session', async () => {
+    await registerAndVerify(f, 'bind@example.com');
+    const { refreshToken } = await f.auth.login('bind@example.com', PASSWORD, device('device-key-00000001'));
+    // 用 device B 的 key 请求 refresh → 401，且不 upsert/迁移/复活
+    await expect(f.auth.refresh(refreshToken, device('device-key-00000002'))).rejects.toBeInstanceOf(UnauthorizedError);
+    // 原 deviceKey 仍可成功 refresh（证明 token 未被消费，也未迁移到 B）
+    const rotated = await f.auth.refresh(refreshToken, device('device-key-00000001'));
+    expect(rotated.refreshToken).toBeTruthy();
   });
 
-  it('legacy 哈希不会被静默重写（拒绝即拒绝，不做升级尝试）', async () => {
-    const { auth, userRepo } = setup();
-    const { createHash } = await import('crypto');
-    const legacy = createHash('sha256').update('any-saltlegacy-pass').digest('hex');
-    const created = await userRepo.create('up@example.com', legacy, 'user');
-
-    await expect(auth.login('up@example.com', 'legacy-pass')).rejects.toBeTruthy();
-    expect((await userRepo.findById(created.id))!.passwordHash).toBe(legacy);
+  it('refresh rejects after the device is revoked', async () => {
+    await registerAndVerify(f, 'rdev@example.com');
+    const { refreshToken } = await f.auth.login('rdev@example.com', PASSWORD, device('device-key-00000001'));
+    const user = await f.repos.userRepo.findByEmail('rdev@example.com');
+    const devices = await f.repos.deviceRepo.listByUser(user!.id);
+    await f.auth.revokeDevice(user!.id, devices[0].id);
+    await expect(f.auth.refresh(refreshToken, device('device-key-00000001'))).rejects.toBeInstanceOf(UnauthorizedError);
   });
 
-  it('已是 scrypt 的哈希不会被重写', async () => {
-    const { auth, userRepo } = setup();
-    const reg = await auth.register('keep@example.com', 'password123');
-    const before = (await userRepo.findById(reg.user.id))!.passwordHash;
-
-    await auth.login('keep@example.com', 'password123');
-
-    expect((await userRepo.findById(reg.user.id))!.passwordHash).toBe(before);
-  });
-});
-
-describe('AuthService.device identity', () => {
-  it('同一设备重登不增加设备数（顶掉旧会话，不触发设备上限）', async () => {
-    const { auth, rtRepo, deviceRepo } = setup({ perSeatMaxDevices: 1 });
-    const device = { deviceId: 'machine-1', deviceName: 'laptop', os: 'linux' };
-    const reg = await auth.register('a@example.com', 'password123', device);
-    await expect(auth.login('a@example.com', 'password123', device)).resolves.toBeTruthy();
-    expect(deviceRepo.devices.size).toBe(1);
-    const active = await rtRepo.listActiveForUser(reg.user.id, new Date());
-    expect(active).toHaveLength(1);
-    expect(active[0].deviceName).toBe('laptop');
+  it('register respects the per-IP limit when rate limiting is on', async () => {
+    const g = makeFixture({ rateLimit: true });
+    // 预填充 register:ip 计数到 10（避免真实跑 10 次 Argon2id hash），再注册一次应触发限流
+    const windowStart = new Date(Math.floor(Date.now() / 3600000) * 3600000);
+    for (let i = 0; i < 10; i++) await g.repos.rateLimitRepo.increment('register:ip:1.2.3.4', windowStart);
+    await expect(g.auth.register('x@example.com', PASSWORD, undefined, '1.2.3.4')).rejects.toThrow(/too many/i);
   });
 
-  it('登记并更新设备固有信息', async () => {
-    const { auth, deviceRepo } = setup();
-    const reg = await auth.register('a@example.com', 'password123', { deviceId: 'm1', os: 'linux', appVersion: '1.80' });
-    await auth.login('a@example.com', 'password123', { deviceId: 'm1', os: 'linux', appVersion: '1.81' });
-    expect(deviceRepo.devices.size).toBe(1);
-    const list = await deviceRepo.listByUser(reg.user.id);
-    expect(list).toHaveLength(1);
-    expect(list[0].appVersion).toBe('1.81');
+  it('login counts failures and returns 429 after exceeding the email limit', async () => {
+    const g = makeFixture({ rateLimit: true });
+    await registerAndVerify(g, 'lim@example.com');
+    const windowStart = new Date(Math.floor(Date.now() / 900000) * 900000);
+    // 预填充 5 次失败；第 6 次失败触发 429
+    for (let i = 0; i < 5; i++) await g.repos.rateLimitRepo.increment('login:email:lim@example.com', windowStart);
+    await expect(g.auth.login('lim@example.com', 'wrong-password', device())).rejects.toThrow(/too many/i);
   });
 
-  it('退出后重新登录仍是同一设备', async () => {
-    const { auth, rtRepo, deviceRepo } = setup({ perSeatMaxDevices: 1 });
-    const device = { deviceId: 'machine-1', deviceName: 'laptop' };
-    const reg = await auth.register('a@example.com', 'password123', device);
-    const regSid = [...rtRepo.tokens.values()].find((t) => !t.revokedTime)!.id;
-    await auth.logout(regSid, reg.user.id, reg.refreshToken);
-    await expect(auth.login('a@example.com', 'password123', device)).resolves.toBeTruthy();
-    expect(deviceRepo.devices.size).toBe(1);
-    const active = await rtRepo.listActiveForUser(reg.user.id, new Date());
-    expect(active).toHaveLength(1);
-  });
-});
-
-describe('AuthService.refresh', () => {
-  it('rotates the refresh token: old one is revoked, new one works', async () => {
-    const { auth, rtRepo } = setup();
-    const reg = await auth.register('a@example.com', 'password123');
-
-    const first = await auth.refresh(reg.refreshToken, { deviceName: 'laptop' });
-    expect(first.refreshToken).not.toBe(reg.refreshToken);
-    expect(rtRepo.tokens.size).toBe(2);
-    expect([...rtRepo.tokens.values()][0].revokedTime).toBeInstanceOf(Date);
-    expect([...rtRepo.tokens.values()][0].lastUsedTime).toBeInstanceOf(Date);
-
-    const second = await auth.refresh(first.refreshToken);
-    expect(second.refreshToken).not.toBe(first.refreshToken);
+  it('successful login does not count against the failure limit', async () => {
+    const g = makeFixture({ rateLimit: true });
+    await registerAndVerify(g, 'oklim@example.com');
+    const windowStart = new Date(Math.floor(Date.now() / 900000) * 900000);
+    for (let i = 0; i < 5; i++) await g.repos.rateLimitRepo.increment('login:email:oklim@example.com', windowStart);
+    // 密码正确 → 成功登录不计数，不 429
+    await expect(g.auth.login('oklim@example.com', PASSWORD, device())).resolves.toBeTruthy();
   });
 
-  it('detects reuse of an already-rotated token and kills every session', async () => {
-    const { auth, rtRepo } = setup();
-    const reg = await auth.register('a@example.com', 'password123');
-    await auth.login('a@example.com', 'password123'); // second device
-    const rotated = await auth.refresh(reg.refreshToken);
-
-    const err = await auth.refresh(reg.refreshToken).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(TokenReuseError);
-    expect((err as TokenReuseError).code).toBe('TOKEN_REUSE');
-
-    for (const t of rtRepo.tokens.values()) expect(t.revokedTime).toBeInstanceOf(Date);
-    await expect(auth.refresh(rotated.refreshToken)).rejects.toBeInstanceOf(TokenReuseError);
+  it('resendVerification for an unknown email returns identical success and sends no mail', async () => {
+    const r = await f.auth.resendVerification('nobody@example.com');
+    expect(r).toEqual({ ok: true });
+    expect(f.emailSender.sent.filter((m) => m.kind === 'verification')).toHaveLength(0);
   });
 
-  it('rejects an unknown refresh token', async () => {
-    const { auth } = setup();
-    await expect(auth.refresh('never-issued')).rejects.toBeInstanceOf(InvalidCredentialsError);
+  it('resendVerification for an un-verified email issues a new token', async () => {
+    await f.auth.register('rv@example.com', PASSWORD);
+    const before = f.emailSender.sent.filter((m) => m.kind === 'verification').length;
+    await f.auth.resendVerification('rv@example.com');
+    expect(f.emailSender.sent.filter((m) => m.kind === 'verification').length).toBe(before + 1);
   });
 
-  it('rejects an expired refresh token without revoking siblings', async () => {
-    const { auth, userRepo, rtRepo, tokenService } = setup();
-    const user = await userRepo.create('a@example.com', hashPassword('password123'), 'user');
-    const expired = 'expired-plaintext-token';
-    await rtRepo.create({
-      userId: user.id,
-      tokenHash: tokenService.hashToken(expired),
-      expiresTime: new Date(Date.now() - 1000),
-    });
-    await expect(auth.refresh(expired)).rejects.toBeInstanceOf(InvalidCredentialsError);
-    expect([...rtRepo.tokens.values()][0].revokedTime).toBeUndefined();
+  it('resendVerification for a verified email returns identical success and sends no mail', async () => {
+    await registerAndVerify(f, 'vr@example.com');
+    const before = f.emailSender.sent.filter((m) => m.kind === 'verification').length;
+    await f.auth.resendVerification('vr@example.com');
+    expect(f.emailSender.sent.filter((m) => m.kind === 'verification').length).toBe(before);
   });
 
-  it('rejects when the owning user vanished', async () => {
-    const { auth, userRepo } = setup();
-    const reg = await auth.register('a@example.com', 'password123');
-    userRepo.users.delete(reg.user.id);
-    await expect(auth.refresh(reg.refreshToken)).rejects.toBeInstanceOf(InvalidCredentialsError);
-  });
-});
-
-describe('AuthService session management', () => {
-  it('logout revokes only the presented token', async () => {
-    const { auth, rtRepo, tokenService } = setup();
-    const a = await auth.register('a@example.com', 'password123');
-    const b = await auth.login('a@example.com', 'password123');
-    const sidA = [...rtRepo.tokens.values()]
-      .find((t) => t.tokenHash === tokenService.hashToken(a.refreshToken))!.id;
-    await auth.logout(sidA, a.user.id, a.refreshToken);
-
-    const active = await rtRepo.listActiveForUser(a.user.id, new Date());
-    expect(active).toHaveLength(1);
-    await expect(auth.refresh(b.refreshToken)).resolves.toBeTruthy();
-  });
-
-  it('未知 token 不阻止当前会话（sid）被撤销', async () => {
-    const { auth, rtRepo } = setup();
-    const reg = await auth.register('a@example.com', 'password123');
-    const sid = [...rtRepo.tokens.values()].find((t) => !t.revokedTime)!.id;
-
-    await auth.logout(sid, reg.user.id, 'never-issued');
-
-    expect((await rtRepo.listActiveForUser(reg.user.id, new Date())).length).toBe(0);
-  });
-
-  it('sid 与 token 都不存在时才是 no-op', async () => {
-    const { auth } = setup();
-    await expect(auth.logout(9999, 1, 'never-issued')).resolves.toBeUndefined();
-  });
-
-  it('free 用户不可自助撤销设备（需升级）', async () => {
-    const { auth, deviceRepo } = setup();
-    const reg = await auth.register('a@example.com', 'password123');
-    await deviceRepo.upsert({ userId: reg.user.id, deviceId: 'dev-1' } as any);
-    await deviceRepo.bind(reg.user.id, 'dev-1');
-    await expect(auth.revokeDevice(reg.user.id, 'dev-1')).rejects.toBeInstanceOf(ProFeatureRequiredError);
-    expect(await deviceRepo.isBound(reg.user.id, 'dev-1')).toBe(true);
-  });
-
-  it('pro 用户可撤销自己的设备', async () => {
-    const { auth, deviceRepo, subRepo, orgRepo, membershipRepo, planRepo } = setup();
-    const reg = await auth.register('a@example.com', 'password123');
-    await deviceRepo.upsert({ userId: reg.user.id, deviceId: 'dev-1' } as any);
-    await deviceRepo.bind(reg.user.id, 'dev-1');
-    await grantPlan(reg.user.id, 'pro', { subRepo, orgRepo, membershipRepo, planRepo });
-    await auth.revokeDevice(reg.user.id, 'dev-1');
-    expect(await deviceRepo.isBound(reg.user.id, 'dev-1')).toBe(false);
-  });
-});
-
-describe('AuthService.changePassword', () => {
-  it('rejects a wrong old password and leaves the hash untouched', async () => {
-    const { auth, userRepo } = setup();
-    const reg = await auth.register('a@example.com', 'password123');
-    const before = (await userRepo.findById(reg.user.id))!.passwordHash;
-    await expect(auth.changePassword(reg.user.id, 'wrong-old', 'newpassword')).rejects.toBeInstanceOf(
-      InvalidCredentialsError,
-    );
-    expect((await userRepo.findById(reg.user.id))!.passwordHash).toBe(before);
-  });
-
-  it('rejects a new password shorter than 8 chars', async () => {
-    const { auth } = setup();
-    const reg = await auth.register('a@example.com', 'password123');
-    await expect(auth.changePassword(reg.user.id, 'password123', 'short')).rejects.toBeInstanceOf(
-      ValidationError,
-    );
-  });
-
-  it('rejects an unknown user', async () => {
-    const { auth } = setup();
-    await expect(auth.changePassword(4242, 'password123', 'newpassword')).rejects.toBeInstanceOf(
-      InvalidCredentialsError,
-    );
-  });
-
-  it('rehashes, forces every device to re-login, and accepts only the new password', async () => {
-    const { auth, rtRepo } = setup();
-    const reg = await auth.register('a@example.com', 'password123');
-    await auth.login('a@example.com', 'password123');
-
-    await auth.changePassword(reg.user.id, 'password123', 'newpassword');
-
-    for (const t of rtRepo.tokens.values()) expect(t.revokedTime).toBeInstanceOf(Date);
-    await expect(auth.refresh(reg.refreshToken)).rejects.toBeInstanceOf(TokenReuseError);
-    await expect(auth.login('a@example.com', 'password123')).rejects.toBeInstanceOf(
-      InvalidCredentialsError,
-    );
-    await expect(auth.login('a@example.com', 'newpassword')).resolves.toBeTruthy();
+  it('resendVerification is rate-limited by email', async () => {
+    const g = makeFixture({ rateLimit: true });
+    const windowStart = new Date(Math.floor(Date.now() / 3600000) * 3600000);
+    for (let i = 0; i < 3; i++) await g.repos.rateLimitRepo.increment('verify:email:rlim@example.com', windowStart);
+    await expect(g.auth.resendVerification('rlim@example.com')).rejects.toThrow(/too many/i);
   });
 });

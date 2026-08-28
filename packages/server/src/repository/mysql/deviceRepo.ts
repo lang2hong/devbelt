@@ -1,101 +1,87 @@
 import type { IDeviceRepo } from '../interfaces.js';
 import type { Device } from '../../domain/entities.js';
-import type { MysqlDb } from './db.js';
+import type { DeviceStatus } from '../../domain/enums.js';
+import type { MysqlDb, Queryable } from './db.js';
 
 /**
- * 设备实体仓储：devices 表（设备固有信息，独立于易变的 refresh_tokens）。
- * 唯一键 (user_id, device_id)，同设备重登时 upsert 刷新固有信息 + last_seen_time。
+ * 设备仓储（V3：device_key 为客户端生成的稳定随机标识，UNIQUE(user_id, device_key)）。
+ *
+ * 事务方法（带 exec 参数）在调用方事务上执行，用于：
+ * - 设备配额（countActive + upsert + 用户行锁）的并发正确性
+ * - 设备撤销与 session 撤销的同一事务
  */
 export class MysqlDeviceRepo implements IDeviceRepo {
   constructor(private readonly db: () => MysqlDb) {}
 
-  async upsert(device: Omit<Device, 'id' | 'createTime' | 'updateTime'>): Promise<Device> {
-    await this.db().query(
-      `INSERT INTO devices (user_id, device_id, hostname, os, arch, os_version, app_name, app_version, remote_name, vs_machine_id, language, timezone, revoke_time, last_seen_time)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
+  async upsert(exec: Queryable, device: Omit<Device, 'id' | 'createTime' | 'updateTime'>): Promise<Device> {
+    await exec.query(
+      `INSERT INTO devices (user_id, device_key, device_platform, device_name, client_version, status, last_used_time)
+       VALUES (?, ?, ?, ?, ?, 'active', ?)
        ON DUPLICATE KEY UPDATE
-         hostname = VALUES(hostname), os = VALUES(os), arch = VALUES(arch),
-         os_version = VALUES(os_version), app_name = VALUES(app_name), app_version = VALUES(app_version),
-         remote_name = VALUES(remote_name), vs_machine_id = VALUES(vs_machine_id),
-         language = VALUES(language), timezone = VALUES(timezone), last_seen_time = VALUES(last_seen_time)`,
-      [
-        device.userId, device.deviceId,
-        device.hostname ?? null, device.os ?? null, device.arch ?? null,
-        device.osVersion ?? null, device.appName ?? null, device.appVersion ?? null,
-        device.remoteName ?? null, device.vsMachineId ?? null,
-        device.language ?? null, device.timezone ?? null, device.lastSeenTime ?? null,
-      ],
+         device_platform = VALUES(device_platform),
+         device_name = VALUES(device_name),
+         client_version = VALUES(client_version),
+         status = 'active',
+         last_used_time = VALUES(last_used_time)`,
+      [device.userId, device.deviceKey, device.devicePlatform, device.deviceName, device.clientVersion, device.lastUsedTime ?? null],
     );
-
-    const fresh = await this.findByUserAndDevice(device.userId, device.deviceId);
+    const fresh = await this.findByUserAndKeyExec(exec, device.userId, device.deviceKey);
     if (!fresh) throw new Error('device upsert failed');
-
     return fresh;
+  }
+
+  async findByUserAndKey(exec: Queryable, userId: number, deviceKey: string): Promise<Device | undefined> {
+    return this.findByUserAndKeyExec(exec, userId, deviceKey);
+  }
+
+  async findByIdForUpdate(exec: Queryable, id: number): Promise<Device | undefined> {
+    const [rows] = await exec.query<any[]>('SELECT * FROM devices WHERE id = ? FOR UPDATE', [id]);
+    return rows[0] ? mapDevice(rows[0]) : undefined;
   }
 
   async listByUser(userId: number): Promise<Device[]> {
     const [rows] = await this.db().query<any[]>(
-      'SELECT * FROM devices WHERE user_id = ? ORDER BY last_seen_time DESC',
+      'SELECT * FROM devices WHERE user_id = ? ORDER BY last_used_time DESC',
       [userId],
     );
     return rows.map(mapDevice);
   }
 
-
-  async bind(userId: number, deviceId: string): Promise<void> {
-    await this.db().query(
-      'UPDATE devices SET revoke_time = NULL WHERE user_id = ? AND device_id = ?',
-      [userId, deviceId],
-    );
-  }
-
-  async revoke(userId: number, deviceId: string): Promise<void> {
-    await this.db().query(
-      'UPDATE devices SET revoke_time = NOW() WHERE user_id = ? AND device_id = ?',
-      [userId, deviceId],
-    );
-  }
-
-  async isBound(userId: number, deviceId: string): Promise<boolean> {
-    const d = await this.findByUserAndDevice(userId, deviceId);
-    return !!(d && d.revokedTime == null);
-  }
-
-  async countBound(userId: number): Promise<number> {
-    const [rows] = await this.db().query<any[]>(
-      'SELECT COUNT(*) AS cnt FROM devices WHERE user_id = ? AND revoke_time IS NULL',
+  async countActive(exec: Queryable, userId: number): Promise<number> {
+    const [rows] = await exec.query<any[]>(
+      "SELECT COUNT(*) AS cnt FROM devices WHERE user_id = ? AND status = 'active'",
       [userId],
     );
-    return rows[0]?.cnt ?? 0;
+    return Number(rows[0]?.cnt ?? 0);
   }
 
-  private async findByUserAndDevice(userId: number, deviceId: string): Promise<Device | undefined> {
-    const [rows] = await this.db().query<any[]>(
-      'SELECT * FROM devices WHERE user_id = ? AND device_id = ?',
-      [userId, deviceId],
+  async revoke(exec: Queryable, id: number, now: Date): Promise<void> {
+    await exec.query("UPDATE devices SET status = 'revoked', last_used_time = ? WHERE id = ?", [now, id]);
+  }
+
+  async touch(exec: Queryable, id: number, now: Date): Promise<void> {
+    await exec.query('UPDATE devices SET last_used_time = ? WHERE id = ?', [now, id]);
+  }
+
+  private async findByUserAndKeyExec(exec: Queryable, userId: number, deviceKey: string): Promise<Device | undefined> {
+    const [rows] = await exec.query<any[]>(
+      'SELECT * FROM devices WHERE user_id = ? AND device_key = ?',
+      [userId, deviceKey],
     );
     return rows[0] ? mapDevice(rows[0]) : undefined;
   }
-
 }
 
 function mapDevice(r: any): Device {
   return {
     id: r.id,
     userId: r.user_id,
-    deviceId: r.device_id,
-    hostname: r.hostname ?? undefined,
-    os: r.os ?? undefined,
-    arch: r.arch ?? undefined,
-    osVersion: r.os_version ?? undefined,
-    appName: r.app_name ?? undefined,
-    appVersion: r.app_version ?? undefined,
-    remoteName: r.remote_name ?? undefined,
-    vsMachineId: r.vs_machine_id ?? undefined,
-    language: r.language ?? undefined,
-    timezone: r.timezone ?? undefined,
-    revokedTime: r.revoke_time ? new Date(r.revoke_time) : undefined,
-    lastSeenTime: r.last_seen_time ? new Date(r.last_seen_time) : undefined,
+    deviceKey: r.device_key,
+    devicePlatform: r.device_platform ?? '',
+    deviceName: r.device_name ?? '',
+    clientVersion: r.client_version ?? '',
+    status: r.status as DeviceStatus,
+    lastUsedTime: r.last_used_time ? new Date(r.last_used_time) : null,
     createTime: new Date(r.create_time),
     updateTime: new Date(r.update_time),
   };

@@ -1,68 +1,46 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { DomainError } from '../domain/errors.js';
+import { DomainError, RateLimitedError } from '../domain/errors.js';
 
-/** 统一错误响应：DomainError 按 code 映射 HTTP 状态，其他默认 500 */
+/** 统一错误响应：DomainError 按 code 映射 HTTP 状态，其他默认 500。 */
 export function sendError(reply: FastifyReply, e: unknown): void {
   if (e instanceof DomainError) {
-    reply.code(errorStatus(e.code)).send({ message: (e as Error).message, code: (e as DomainError).code });
+    if (e instanceof RateLimitedError) {
+      reply.header('Retry-After', e.retryAfterSeconds);
+    }
+    reply.code(errorStatus(e.code)).send({ message: e.message, code: e.code });
   } else {
     reply.code(500).send({ message: 'Internal server error' });
   }
 }
 
 /**
- * 注册全局错误处理器。
+ * 注册全局错误处理器（安全网，兜住漏写 try/catch 的 handler）。
  *
- * `sendError` 是逐 handler 手工调用的，漏写 try/catch 的端点（admin 的 9 个列表端点）会落到 Fastify 默认处理器，
- * 响应体带 `err.message` —— mysql2 的 `sqlMessage` 会连同插值后的 SQL
- * 一起回显给客户端。典型触发：`GET /admin/users?limit=abc` 生成
- * `LIMIT NaN`，MySQL 语法错原文外泄。
- *
- * 这里兜住三类：
- *  1. schema 校验失败（err.validation）→ 400，结构与 DomainError 一致
- *  2. DomainError → 按 code 映射
- *  3. 其余 → 500 固定文案，原始错误只进服务端日志
- *
- * 注意：不改既有 handler 里的 sendError 调用。那些是显式的、语义更精确的
- * 处理，全局 handler 只是安全网。
+ * - schema 校验失败 → 400 VALIDATION_FAILED（与规格 §5 统一错误码一致）
+ * - DomainError → 按 code 映射
+ * - 429（DomainError 之外的限流源）→ 保留 Retry-After
+ * - 其余 4xx 保留状态码但不透传内部细节；未处理异常只进日志，回 500 固定文案
  */
 export function registerErrorHandler(app: FastifyInstance): void {
   app.setErrorHandler((err: FastifyError, req: FastifyRequest, reply: FastifyReply) => {
-    // Fastify schema 校验失败：err.validation 是校验器给的明细数组
     if (err.validation) {
-      reply.code(400).send({
-        message: `request validation failed: ${err.message}`,
-        code: 'VALIDATION_ERROR',
-      });
+      reply.code(400).send({ message: 'validation failed', code: 'VALIDATION_FAILED' });
       return;
     }
 
     if (err instanceof DomainError) {
+      if (err instanceof RateLimitedError) reply.header('Retry-After', err.retryAfterSeconds);
       reply.code(errorStatus(err.code)).send({ message: err.message, code: err.code });
       return;
     }
 
     const status = typeof err.statusCode === 'number' ? err.statusCode : 500;
-
-    /**
-     * 429 必须在通用 4xx 分支之前处理。
-     *
-     * `@fastify/rate-limit` 是 `throw errorResponseBuilder(...)`（源码 index.js:375），
-     * 抛出的 Error 带 `statusCode: 429`，所以会落到下面的 4xx 分支被改写成
-     * 'Bad request' —— 客户端就拿不到「多久后可重试」了。状态码和 retry-after
-     * 响应头不受影响（头在 throw 之前就 set 好了），但正文里的等待时长会丢。
-     *
-     * 这里的 message 是插件自己生成的固定文案，不含任何内部信息，可以放行。
-     */
     if (status === 429) {
-      reply.code(429).send({ message: err.message, code: err.code ?? 'RATE_LIMITED' });
+      reply.code(429).send({ message: 'too many requests', code: 'TOO_MANY_REQUESTS' });
       return;
     }
-
-    // Fastify 自身抛的 4xx（如 body 不是合法 JSON、415、请求体超限）保留其状态码，
-    // 但不透传 message —— 那里可能带解析器细节。
     if (status >= 400 && status < 500) {
-      reply.code(status).send({ message: 'Bad request', code: err.code ?? 'BAD_REQUEST' });
+      reply.code(status).send({ message: 'Bad request', code: 'VALIDATION_FAILED' });
       return;
     }
 
@@ -70,30 +48,42 @@ export function registerErrorHandler(app: FastifyInstance): void {
     reply.code(500).send({ message: 'Internal server error' });
   });
 
-  // 404 也统一结构（默认处理器会回显 `Route GET:/x not found`，泄漏路由探测信息）
   app.setNotFoundHandler((_req: FastifyRequest, reply: FastifyReply) => {
     reply.code(404).send({ message: 'not found', code: 'NOT_FOUND' });
   });
 }
 
-/** 领域错误码 → HTTP 状态码映射 */
+/**
+ * 领域错误码 → HTTP 状态码映射（全量，见实施规格 §5 统一错误）。
+ * 未在此表中的 code 一律 400（新增 code 需先在规格冻结后再补映射）。
+ */
 export function errorStatus(code: string): number {
   switch (code) {
-    case 'INVALID_CREDENTIALS':
-    case 'TOKEN_REUSE':
+    case 'UNAUTHORIZED':
       return 401;
     case 'USER_DISABLED':
-    case 'DEVICE_LIMIT_EXCEEDED':
-    case 'PRO_FEATURE_REQUIRED':
-    case 'SUBSCRIPTION_EXPIRED':
-    case 'QUOTA_EXCEEDED':
+    case 'PERSONAL_FEATURE_REQUIRED':
     case 'FORBIDDEN':
+    case 'ORGANIZATION_FEATURE_REQUIRED':
       return 403;
+    case 'ORGANIZATION_NOT_FOUND':
     case 'NOT_FOUND':
-    case 'VERSION_NOT_FOUND':
+    case 'RESOURCE_NOT_FOUND':
       return 404;
+    case 'ORGANIZATION_QUOTA_EXCEEDED':
+    case 'RESOURCE_VERSION_CONFLICT':
+    case 'FOLDER_NOT_EMPTY':
+    case 'FOLDER_MOVE_CYCLE':
+    case 'ORGANIZATION_ADMIN_REQUIRED':
     case 'CONFLICT':
       return 409;
+    case 'RESOURCE_CONTENT_INVALID':
+    case 'INVITATION_INVALID':
+    case 'INVITATION_TARGET_NOT_ELIGIBLE':
+    case 'VALIDATION_FAILED':
+      return 400;
+    case 'TOO_MANY_REQUESTS':
+      return 429;
     default:
       return 400;
   }

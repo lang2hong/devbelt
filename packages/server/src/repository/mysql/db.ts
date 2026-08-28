@@ -24,6 +24,23 @@ export type MysqlTx = {
 };
 
 /**
+ * 可执行 SQL 的最小接口。repository 的事务方法接受它（而非具体连接类型），
+ * 使同一方法既能在池连接上执行，也能在事务里执行。
+ * 服务层通过 TxRunner 拿到它而不感知底层连接。
+ */
+export type Queryable = {
+  query<T = any>(sql: string, params?: any[]): Promise<T>;
+};
+
+/**
+ * 事务执行器（服务层依赖此抽象发起跨仓储事务）。
+ *
+ * - 生产/真库装配：`(fn) => withTransaction(db, fn)`。
+ * - 测试装配：内存假仓储天然原子，可用 `(fn) => fn(dummy)` 直接执行。
+ */
+export type TxRunner = <T>(fn: (tx: Queryable) => Promise<T>) => Promise<T>;
+
+/**
  * 在单条连接的事务里执行一组语句：成功 COMMIT，抛错 ROLLBACK，无论如何 RELEASE。
  *
  * 三个容易漏掉的点，都在这里兜住：
