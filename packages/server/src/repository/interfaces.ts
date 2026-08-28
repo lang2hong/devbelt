@@ -10,6 +10,8 @@ import type {
   OrganizationSubscription,
   OrganizationMembership,
   OrganizationInvitation,
+  Folder,
+  Resource,
 } from '../domain/entities.js';
 import type {
   UserStatus,
@@ -17,6 +19,7 @@ import type {
   OrganizationRole,
   OrganizationMembershipStatus,
   OrganizationSubscriptionStatus,
+  ResourceType,
 } from '../domain/enums.js';
 import type { Queryable } from './mysql/db.js';
 
@@ -304,4 +307,74 @@ export interface IOrganizationInvitationRepo {
    * 对应 membership 置 removed。必须在调用方事务内（已锁组织+订阅）执行。幂等。
    */
   expireByOrganization(exec: Queryable, organizationId: number, now: Date): Promise<void>;
+}
+
+// ── 组织资源（切片 4）──
+
+/** 目录 DTO（无作者字段，id 在 route 层转 string）。 */
+export interface FolderDto {
+  folderId: number;
+  name: string;
+  parentId: number | null;
+}
+
+/** 资源列表项 DTO（不含 content，§7 载荷）。 */
+export interface ResourceSummaryDto {
+  resourceId: number;
+  resourceType: ResourceType;
+  name: string;
+  folderId: number | null;
+  version: number;
+  createdByMembershipId: number;
+  updatedByMembershipId: number | null;
+}
+
+export interface IFolderRepo {
+  create(exec: Queryable, input: { organizationId: number; parentId: number | null; name: string }): Promise<Folder>;
+  /** 事务内按 (id, organization_id) 锁定目录行（org 作用域）。 */
+  findByIdForUpdate(exec: Queryable, organizationId: number, id: number): Promise<Folder | undefined>;
+  /** 组织内全部未删除目录（含 parent_id）。 */
+  listActive(organizationId: number): Promise<Folder[]>;
+  /** 未删除子目录数（删除非空判定）。 */
+  countActiveChildren(exec: Queryable, organizationId: number, parentId: number): Promise<number>;
+  /** 目录下未删除资源数（删除非空判定）。 */
+  countActiveResources(exec: Queryable, organizationId: number, folderId: number): Promise<number>;
+  updateName(exec: Queryable, id: number, name: string, organizationId: number): Promise<void>;
+  updateParent(exec: Queryable, id: number, parentId: number | null, organizationId: number): Promise<void>;
+  /** 软删：`WHERE id AND organization_id AND delete_time IS NULL`。 */
+  softDelete(exec: Queryable, id: number, organizationId: number, now: Date): Promise<void>;
+  /** 该目录在组织内的全部后代目录 id（含自身；环比检测）。 */
+  collectDescendantIds(exec: Queryable, organizationId: number, folderId: number): Promise<number[]>;
+}
+
+export interface IResourceRepo {
+  create(exec: Queryable, input: {
+    organizationId: number;
+    folderId: number | null;
+    resourceType: ResourceType;
+    name: string;
+    content: Record<string, unknown>;
+    version: number;
+    createdByMembershipId: number;
+  }): Promise<Resource>;
+  /** 按 (id, organization_id) 只读查（org 作用域）。 */
+  findById(organizationId: number, id: number): Promise<Resource | undefined>;
+  /** 事务内按 (id, organization_id) 锁定资源行（org 作用域）。 */
+  findByIdForUpdate(exec: Queryable, organizationId: number, id: number): Promise<Resource | undefined>;
+  /** 组织内全部未删除资源（不含 content）。 */
+  listActiveByOrganization(organizationId: number): Promise<ResourceSummaryDto[]>;
+  /** 锁内读回未删除资源 content（app 侧按 canonical JSON 计量，§4.2）。 */
+  listActiveContent(exec: Queryable, organizationId: number): Promise<Record<string, unknown>[]>;
+  /** 乐观锁更新（§4.3）：`WHERE id AND organization_id AND version=? AND delete_time IS NULL`；返回受影响的 skipper。 */
+  update(exec: Queryable, input: {
+    id: number;
+    organizationId: number;
+    name: string;
+    folderId: number | null;
+    content: Record<string, unknown>;
+    baseVersion: number;
+    updatedByMembershipId: number;
+  }): Promise<boolean>;
+  /** 软删：`WHERE id AND organization_id AND delete_time IS NULL`，写 updated_by。 */
+  softDelete(exec: Queryable, id: number, organizationId: number, now: Date, deletedByMembershipId: number): Promise<void>;
 }

@@ -15,12 +15,15 @@ import {
   FakeOrganizationSubscriptionRepo,
   FakeMembershipRepo,
   FakeInvitationRepo,
+  FakeFolderRepo,
+  FakeResourceRepo,
 } from './fakeRepos.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
 import { securityHeaders } from '../../src/middleware/securityHeaders.js';
 import { TokenService, type SigningKeys } from '../../src/service/tokenService.js';
 import { AuthService } from '../../src/service/authService.js';
 import { OrganizationService } from '../../src/service/organizationService.js';
+import { OrganizationResourceService } from '../../src/service/organizationResourceService.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
 import { MemoryEmailSender } from '../../src/service/emailSender.js';
 import { authRoutes } from '../../src/route/auth.js';
@@ -50,12 +53,15 @@ export interface TestApp {
     organizationSubscriptionRepo: FakeOrganizationSubscriptionRepo;
     membershipRepo: FakeMembershipRepo;
     invitationRepo: FakeInvitationRepo;
+    folderRepo: FakeFolderRepo;
+    resourceRepo: FakeResourceRepo;
   };
   services: {
     authService: AuthService;
     emailSender: MemoryEmailSender;
     tokenService: TokenService;
     organizationService: OrganizationService;
+    resourceService: OrganizationResourceService;
   };
   tokenService: TokenService;
   /** 为指定 userId 签一个真实 Ed25519 access token。 */
@@ -97,6 +103,8 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   const organizationSubscriptionRepo = new FakeOrganizationSubscriptionRepo();
   const membershipRepo = new FakeMembershipRepo(userRepo, organizationRepo);
   const invitationRepo = new FakeInvitationRepo(membershipRepo);
+  const resourceRepo = new FakeResourceRepo();
+  const folderRepo = new FakeFolderRepo(resourceRepo);
 
   const tokenService = new TokenService(makeSigningKeys(), '15m', 30 * 24 * 3600 * 1000);
   const rateLimiter = new RateLimitService(rateLimitRepo, opts.rateLimit === true);
@@ -125,6 +133,13 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
     emailSender,
     async (fn) => fn({} as Queryable),
   );
+  const resourceService = new OrganizationResourceService(
+    organizationRepo,
+    organizationSubscriptionRepo,
+    folderRepo,
+    resourceRepo,
+    async (fn) => fn({} as Queryable),
+  );
 
   const getUser = async (id: number) => userRepo.findById(id);
 
@@ -132,7 +147,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   await app.register(authRoutes, { authService, tokenService, getUser });
   await app.register(meRoutes, { tokenService, getUser, userRepo, personalSubscriptionRepo, personalPlanRepo });
   await app.register(personalRoutes, { tokenService, getUser, deviceRepo, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId) });
-  await app.register(organizationRoutes, { tokenService, getUser, organizationService, organizationRepo, membershipRepo });
+  await app.register(organizationRoutes, { tokenService, getUser, organizationService, resourceService, organizationRepo, membershipRepo });
   await app.register(invitationRoutes, { tokenService, getUser, organizationService });
 
   await app.ready();
@@ -153,8 +168,10 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
       organizationSubscriptionRepo,
       membershipRepo,
       invitationRepo,
+      folderRepo,
+      resourceRepo,
     },
-    services: { authService, emailSender, tokenService, organizationService },
+    services: { authService, emailSender, tokenService, organizationService, resourceService },
     tokenService,
     tokenFor: (userId) => tokenService.signAccessToken(userId),
     auth: (token) => ({ authorization: `Bearer ${token}` }),

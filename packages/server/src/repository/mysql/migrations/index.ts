@@ -6,6 +6,7 @@ import { organizationPlansV3 } from './004_organization_plans.js';
 import { seedOrganizationPlansV3 } from './005_seed_organization_plans.js';
 import { organizationsV3 } from './006_organizations.js';
 import { invitationsV3 } from './007_invitations.js';
+import { resourcesV3 } from './008_organization_resources.js';
 
 /** V3 新库启动时按固定顺序执行的 migration 集合（依赖顺序见各文件内注释）。 */
 export const migrations: readonly Migration[] = [
@@ -16,4 +17,5 @@ export const migrations: readonly Migration[] = [
   seedOrganizationPlansV3,
   organizationsV3,
   invitationsV3,
+  resourcesV3,
 ];

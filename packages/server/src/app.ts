@@ -19,9 +19,12 @@ import { MysqlOrganizationRepo } from './repository/mysql/organizationRepo.js';
 import { MysqlOrganizationSubscriptionRepo } from './repository/mysql/organizationSubscriptionRepo.js';
 import { MysqlMembershipRepo } from './repository/mysql/membershipRepo.js';
 import { MysqlOrganizationInvitationRepo } from './repository/mysql/invitationRepo.js';
+import { MysqlFolderRepo } from './repository/mysql/folderRepo.js';
+import { MysqlResourceRepo } from './repository/mysql/resourceRepo.js';
 import { TokenService } from './service/tokenService.js';
 import { AuthService } from './service/authService.js';
 import { OrganizationService } from './service/organizationService.js';
+import { OrganizationResourceService } from './service/organizationResourceService.js';
 import { RateLimitService } from './service/rateLimitService.js';
 import { startRateLimitCleanup } from './service/rateLimitCleanup.js';
 import { startInvitationCleanup } from './service/invitationCleanup.js';
@@ -91,6 +94,8 @@ export async function createApp() {
   const organizationSubscriptionRepo = new MysqlOrganizationSubscriptionRepo(getMysql);
   const membershipRepo = new MysqlMembershipRepo(getMysql);
   const invitationRepo = new MysqlOrganizationInvitationRepo(getMysql);
+  const folderRepo = new MysqlFolderRepo(getMysql);
+  const resourceRepo = new MysqlResourceRepo(getMysql);
 
   // service 层
   const tokenService = new TokenService(signingKeys, config.accessTokenExpiresIn, config.refreshTokenExpiresMs);
@@ -120,6 +125,13 @@ export async function createApp() {
     emailSender,
     (fn) => withTransaction(app.mysql, fn),
   );
+  const resourceService = new OrganizationResourceService(
+    organizationRepo,
+    organizationSubscriptionRepo,
+    folderRepo,
+    resourceRepo,
+    (fn) => withTransaction(app.mysql, fn),
+  );
 
   // 受控限流清理任务（实施规格 §4.2）：过期桶由周期任务删除，不依赖请求
   startRateLimitCleanup(rateLimitRepo);
@@ -133,7 +145,7 @@ export async function createApp() {
   app.register(authRoutes, { authService, tokenService, getUser });
   app.register(meRoutes, { tokenService, getUser, userRepo, personalSubscriptionRepo, personalPlanRepo });
   app.register(personalRoutes, { tokenService, getUser, deviceRepo, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId) });
-  app.register(organizationRoutes, { tokenService, getUser, organizationService, organizationRepo, membershipRepo });
+  app.register(organizationRoutes, { tokenService, getUser, organizationService, resourceService, organizationRepo, membershipRepo });
   app.register(invitationRoutes, { tokenService, getUser, organizationService });
 
   await app.ready();

@@ -3,29 +3,38 @@ import { authScope, type GetAuthUser } from '../middleware/requireAuth.js';
 import { organizationAuth, type AuthnOrgRequest } from '../middleware/organizationAuth.js';
 import type { TokenService } from '../service/tokenService.js';
 import type { OrganizationService } from '../service/organizationService.js';
+import type { OrganizationResourceService } from '../service/organizationResourceService.js';
 import type { IOrganizationRepo, IMembershipRepo, InvitationDto } from '../repository/interfaces.js';
-import type { OrganizationRole } from '../domain/enums.js';
+import type { OrganizationRole, ResourceType } from '../domain/enums.js';
 import { sendError } from '../middleware/errorHandler.js';
 import {
   assignRoleBody,
+  createFolderBody,
   createInvitationBody,
   createOrganizationBody,
+  createResourceBody,
+  folderIdParam,
   invitationIdParam,
   membershipIdParam,
   organizationIdParam,
+  resourceIdParam,
+  updateFolderBody,
   updateOrganizationBody,
+  updateResourceBody,
 } from './schemas.js';
 
 export interface OrganizationRouteOptions {
   tokenService: TokenService;
   getUser: GetAuthUser;
   organizationService: OrganizationService;
+  resourceService: OrganizationResourceService;
   organizationRepo: IOrganizationRepo;
   membershipRepo: IMembershipRepo;
 }
 
 export async function organizationRoutes(app: FastifyInstance, opts: OrganizationRouteOptions): Promise<void> {
   const svc = opts.organizationService;
+  const resources = opts.resourceService;
 
   // 列 / 创建组织：仅需认证
   app.register(authScope, {
@@ -180,16 +189,143 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
           sendError(reply, e);
         }
       });
+
+      // ── 目录（folder.read / folder.manage）──
+      org.get('/api/organizations/:organizationId/folders', { config: { permission: 'folder.read' }, schema: { params: organizationIdParam } }, async (req, reply) => {
+        const organizationId = (req as any).authOrganizationId as number;
+        try {
+          const list = await resources.listFolders(organizationId);
+          reply.send({ folders: list.map(toFolderDto) });
+        } catch (e) {
+          sendError(reply, e);
+        }
+      });
+
+      org.post('/api/organizations/:organizationId/folders', { config: { permission: 'folder.manage' }, schema: { params: organizationIdParam, body: createFolderBody } }, async (req, reply) => {
+        const organizationId = (req as any).authOrganizationId as number;
+        const body = req.body as any;
+        try {
+          const folder = await resources.createFolder(organizationId, body.name, body.parentId === null ? null : body.parentId ? Number(body.parentId) : undefined);
+          reply.code(201).send({ folder: toFolderDto(folder) });
+        } catch (e) {
+          sendError(reply, e);
+        }
+      });
+
+      org.patch('/api/organizations/:organizationId/folders/:folderId', { config: { permission: 'folder.manage' }, schema: { params: folderIdParam, body: updateFolderBody } }, async (req, reply) => {
+        const organizationId = (req as any).authOrganizationId as number;
+        const folderId = Number((req.params as any).folderId);
+        const body = req.body as any;
+        const parentId = body.parentId === null ? null : body.parentId !== undefined ? Number(body.parentId) : undefined;
+        try {
+          const folder = await resources.updateFolder(organizationId, folderId, { name: body.name, parentId });
+          reply.send({ folder: toFolderDto(folder) });
+        } catch (e) {
+          sendError(reply, e);
+        }
+      });
+
+      org.delete('/api/organizations/:organizationId/folders/:folderId', { config: { permission: 'folder.manage' }, schema: { params: folderIdParam } }, async (req, reply) => {
+        const organizationId = (req as any).authOrganizationId as number;
+        const folderId = Number((req.params as any).folderId);
+        try {
+          const r = await resources.deleteFolder(organizationId, folderId);
+          reply.send(r);
+        } catch (e) {
+          sendError(reply, e);
+        }
+      });
+
+      // ── 资源（resource.read/write/delete）──
+      org.get('/api/organizations/:organizationId/resources', { config: { permission: 'resource.read' }, schema: { params: organizationIdParam } }, async (req, reply) => {
+        const organizationId = (req as any).authOrganizationId as number;
+        try {
+          const list = await resources.listResources(organizationId);
+          reply.send({ resources: list.map(toResourceSummaryDto) });
+        } catch (e) {
+          sendError(reply, e);
+        }
+      });
+
+      org.post('/api/organizations/:organizationId/resources', { config: { permission: 'resource.write' }, schema: { params: organizationIdParam, body: createResourceBody } }, async (req, reply) => {
+        const organizationId = (req as any).authOrganizationId as number;
+        const membershipId = (req as unknown as AuthnOrgRequest).authMembershipId;
+        const body = req.body as any;
+        const folderId = body.folderId === null ? null : body.folderId !== undefined ? Number(body.folderId) : undefined;
+        try {
+          const created = await resources.createResource(organizationId, { resourceType: body.resourceType as ResourceType, name: body.name, folderId, content: body.content }, membershipId);
+          reply.code(201).send({ resource: toResourceSummaryDto(created) });
+        } catch (e) {
+          sendError(reply, e);
+        }
+      });
+
+      org.get('/api/organizations/:organizationId/resources/:resourceId', { config: { permission: 'resource.read' }, schema: { params: resourceIdParam } }, async (req, reply) => {
+        const organizationId = (req as any).authOrganizationId as number;
+        const resourceId = Number((req.params as any).resourceId);
+        try {
+          const resource = await resources.getResource(organizationId, resourceId);
+          reply.send({ resource: toResourceDetailDto(resource) });
+        } catch (e) {
+          sendError(reply, e);
+        }
+      });
+
+      org.patch('/api/organizations/:organizationId/resources/:resourceId', { config: { permission: 'resource.write' }, schema: { params: resourceIdParam, body: updateResourceBody } }, async (req, reply) => {
+        const organizationId = (req as any).authOrganizationId as number;
+        const resourceId = Number((req.params as any).resourceId);
+        const membershipId = (req as unknown as AuthnOrgRequest).authMembershipId;
+        const body = req.body as any;
+        const folderId = body.folderId === null ? null : body.folderId !== undefined ? Number(body.folderId) : undefined;
+        try {
+          const updated = await resources.updateResource(organizationId, resourceId, { baseVersion: body.baseVersion, name: body.name, folderId, content: body.content }, membershipId);
+          reply.send({ resource: toResourceSummaryDto(updated) });
+        } catch (e) {
+          sendError(reply, e);
+        }
+      });
+
+      org.delete('/api/organizations/:organizationId/resources/:resourceId', { config: { permission: 'resource.delete' }, schema: { params: resourceIdParam } }, async (req, reply) => {
+        const organizationId = (req as any).authOrganizationId as number;
+        const resourceId = Number((req.params as any).resourceId);
+        const membershipId = (req as unknown as AuthnOrgRequest).authMembershipId;
+        try {
+          const r = await resources.deleteResource(organizationId, resourceId, membershipId);
+          reply.send(r);
+        } catch (e) {
+          sendError(reply, e);
+        }
+      });
     },
   });
 }
 
-function toInvitationDto(r: { invitationId: number; email: string; role: OrganizationRole; expiresTime: Date }) {
+function toFolderDto(f: { folderId: number; name: string; parentId: number | null }) {
+  return { folderId: String(f.folderId), name: f.name, parentId: f.parentId === null ? null : String(f.parentId) };
+}
+
+function toResourceSummaryDto(r: { resourceId: number; resourceType: ResourceType; name: string; folderId: number | null; version: number; createdByMembershipId: number; updatedByMembershipId: number | null }) {
   return {
-    invitationId: String(r.invitationId),
-    email: r.email,
-    role: r.role,
-    expiresTime: r.expiresTime.toISOString(),
+    resourceId: String(r.resourceId),
+    resourceType: r.resourceType,
+    name: r.name,
+    folderId: r.folderId === null ? null : String(r.folderId),
+    version: r.version,
+    createdByMembershipId: String(r.createdByMembershipId),
+    updatedByMembershipId: r.updatedByMembershipId === null ? null : String(r.updatedByMembershipId),
+  };
+}
+
+function toResourceDetailDto(r: { id: number; organizationId: number; folderId: number | null; resourceType: ResourceType; name: string; content: Record<string, unknown>; version: number; createdByMembershipId: number; updatedByMembershipId: number | null }) {
+  return {
+    resourceId: String(r.id),
+    resourceType: r.resourceType,
+    name: r.name,
+    folderId: r.folderId === null ? null : String(r.folderId),
+    version: r.version,
+    content: r.content,
+    createdByMembershipId: String(r.createdByMembershipId),
+    updatedByMembershipId: r.updatedByMembershipId === null ? null : String(r.updatedByMembershipId),
   };
 }
 
@@ -200,6 +336,15 @@ function toInvitationListItem(d: InvitationDto) {
     role: d.role,
     expiresTime: d.expiresTime.toISOString(),
     invitedTime: d.invitedTime.toISOString(),
+  };
+}
+
+function toInvitationDto(r: { invitationId: number; email: string; role: OrganizationRole; expiresTime: Date }) {
+  return {
+    invitationId: String(r.invitationId),
+    email: r.email,
+    role: r.role,
+    expiresTime: r.expiresTime.toISOString(),
   };
 }
 

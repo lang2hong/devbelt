@@ -159,3 +159,70 @@ export const invitationTokenParam = {
   required: ['token'],
   properties: { token: { type: 'string', minLength: 1, maxLength: 256 } },
 } as const;
+
+// ── 目录与资源（切片 4）──
+
+const nullableId = { anyOf: [{ type: 'string', pattern: '^[0-9]{1,20}$' }, { type: 'null' }] } as const;
+
+export const createFolderBody = {
+  type: 'object',
+  required: ['name'],
+  additionalProperties: false,
+  properties: {
+    name: { type: 'string', minLength: 1, maxLength: 200 },
+    parentId: nullableId,
+  },
+} as const;
+
+export const updateFolderBody = {
+  type: 'object',
+  additionalProperties: false,
+  minProperties: 1,
+  properties: {
+    name: { type: 'string', minLength: 1, maxLength: 200 },
+    parentId: nullableId,
+  },
+} as const;
+
+export const createResourceBody = {
+  type: 'object',
+  required: ['resourceType', 'name', 'content'],
+  additionalProperties: false,
+  properties: {
+    resourceType: { type: 'string', enum: ['connection_template', 'query'] },
+    name: { type: 'string', minLength: 1, maxLength: 200 },
+    folderId: nullableId,
+    content: { type: 'object' },
+  },
+} as const;
+
+export const updateResourceBody = {
+  type: 'object',
+  required: ['baseVersion'],
+  additionalProperties: false,
+  minProperties: 2,
+  properties: {
+    baseVersion: { type: 'integer', minimum: 1 },
+    name: { type: 'string', minLength: 1, maxLength: 200 },
+    folderId: nullableId,
+    content: { type: 'object' },
+  },
+} as const;
+
+export const folderIdParam = {
+  type: 'object',
+  required: ['organizationId', 'folderId'],
+  properties: {
+    organizationId: { type: 'string', pattern: '^[0-9]{1,20}$' },
+    folderId: { type: 'string', pattern: '^[0-9]{1,20}$' },
+  },
+} as const;
+
+export const resourceIdParam = {
+  type: 'object',
+  required: ['organizationId', 'resourceId'],
+  properties: {
+    organizationId: { type: 'string', pattern: '^[0-9]{1,20}$' },
+    resourceId: { type: 'string', pattern: '^[0-9]{1,20}$' },
+  },
+} as const;

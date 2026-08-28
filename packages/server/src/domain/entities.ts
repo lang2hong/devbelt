@@ -9,6 +9,7 @@ import type {
   OrganizationMembershipStatus,
   OrganizationPlanStatus,
   OrganizationSubscriptionStatus,
+  ResourceType,
 } from './enums.js';
 
 /**
@@ -177,6 +178,35 @@ export interface OrganizationInvitation {
   expiresTime: Date;
   acceptedTime: Date | null;
   revokedTime: Date | null;
+  createTime: Date;
+  updateTime: Date;
+}
+
+// ── 组织资源（切片 4）──
+
+/** 组织目录。无作者字段；软删除置 delete_time。 */
+export interface Folder {
+  id: number;
+  organizationId: number;
+  parentId: number | null;
+  name: string;
+  deleteTime: Date | null;
+  createTime: Date;
+  updateTime: Date;
+}
+
+/** 组织资源（connection_template / query）。content 为开放 JSON（4.4 节闭合 schema 校验）。 */
+export interface Resource {
+  id: number;
+  organizationId: number;
+  folderId: number | null;
+  resourceType: ResourceType;
+  name: string;
+  content: Record<string, unknown>;
+  version: number;
+  createdByMembershipId: number;
+  updatedByMembershipId: number | null;
+  deleteTime: Date | null;
   createTime: Date;
   updateTime: Date;
 }

@@ -17,13 +17,22 @@ export interface InvitationCleanupOptions {
 export function startInvitationCleanup(expire: () => Promise<void>, opts: InvitationCleanupOptions = {}): { stop(): void } {
   const intervalMs = opts.intervalMs ?? 15 * 60 * 1000;
 
-  const run = (): void => {
-    expire().catch((err) => {
+  // 重入闸：上一轮 expire 未结束则跳过本轮，避免周期任务与自身重叠叠加连接占用
+  //（过期语义幂等，重叠不会写坏数据，但会同批占用连接）。
+  let running = false;
+  const run = async (): Promise<void> => {
+    if (running) return;
+    running = true;
+    try {
+      await expire();
+    } catch (err) {
       console.warn('[invitation] cleanup failed', String(err));
-    });
+    } finally {
+      running = false;
+    }
   };
 
-  const timer = setInterval(run, intervalMs);
+  const timer = setInterval(() => { void run(); }, intervalMs);
   timer.unref?.();
   return { stop: () => clearInterval(timer) };
 }

@@ -112,10 +112,58 @@ export class InvitationTargetNotEligibleError extends DomainError {
   }
 }
 
-/** 组织容量（seat_limit）已满 → 409 ORGANIZATION_QUOTA_EXCEEDED（§4.3）。 */
+/** 组织容量（seat / 资源数量 / 字节）已满 → 409 ORGANIZATION_QUOTA_EXCEEDED（§4.2/§4.3）。 */
 export class OrganizationQuotaExceededError extends DomainError {
-  constructor() {
-    super('organization seat quota exceeded', 'ORGANIZATION_QUOTA_EXCEEDED');
+  constructor(message = 'organization quota exceeded') {
+    super(message, 'ORGANIZATION_QUOTA_EXCEEDED');
     this.name = 'OrganizationQuotaExceededError';
+  }
+}
+
+/** 组织资源不存在 / 软删除 / 跨组织 → 404 RESOURCE_NOT_FOUND（§9.1 ACL 语义依赖此码）。 */
+export class ResourceNotFoundError extends DomainError {
+  constructor() {
+    super('resource not found', 'RESOURCE_NOT_FOUND');
+    this.name = 'ResourceNotFoundError';
+  }
+}
+
+/** 资源内容违反 4.4 节闭合 schema → 400 RESOURCE_CONTENT_INVALID。 */
+export class ResourceContentInvalidError extends DomainError {
+  constructor(message = 'resource content invalid') {
+    super(message, 'RESOURCE_CONTENT_INVALID');
+    this.name = 'ResourceContentInvalidError';
+  }
+}
+
+/** 不允许的模板引擎（超出订阅快照白名单）→ 403 ORGANIZATION_FEATURE_REQUIRED。 */
+export class OrganizationFeatureRequiredError extends DomainError {
+  constructor(message = 'organization feature required') {
+    super(message, 'ORGANIZATION_FEATURE_REQUIRED');
+    this.name = 'OrganizationFeatureRequiredError';
+  }
+}
+
+/** 乐观锁版本冲突 → 409 RESOURCE_VERSION_CONFLICT（响应带 currentVersion）。 */
+export class ResourceVersionConflictError extends DomainError {
+  constructor(public readonly currentVersion: number) {
+    super('resource version conflict', 'RESOURCE_VERSION_CONFLICT');
+    this.name = 'ResourceVersionConflictError';
+  }
+}
+
+/** 目录非空（含未删除子目录或资源）不可删除 → 409 FOLDER_NOT_EMPTY。 */
+export class FolderNotEmptyError extends DomainError {
+  constructor() {
+    super('folder not empty', 'FOLDER_NOT_EMPTY');
+    this.name = 'FolderNotEmptyError';
+  }
+}
+
+/** 目录移动成环（parentId=自身或新父为其后代）→ 409 FOLDER_MOVE_CYCLE。 */
+export class FolderMoveCycleError extends DomainError {
+  constructor() {
+    super('folder move would create a cycle', 'FOLDER_MOVE_CYCLE');
+    this.name = 'FolderMoveCycleError';
   }
 }

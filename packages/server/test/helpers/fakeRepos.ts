@@ -12,9 +12,12 @@ import type {
   IOrganizationSubscriptionRepo,
   IMembershipRepo,
   IOrganizationInvitationRepo,
+  IFolderRepo,
+  IResourceRepo,
   MemberDto,
   OrganizationSummary,
   InvitationDto,
+  ResourceSummaryDto,
   RegistrationAccountInput,
   RegistrationResult,
 } from '../../src/repository/interfaces.js';
@@ -30,6 +33,8 @@ import type {
   OrganizationSubscription,
   OrganizationMembership,
   OrganizationInvitation,
+  Folder,
+  Resource,
 } from '../../src/domain/entities.js';
 import type {
   UserStatus,
@@ -37,6 +42,7 @@ import type {
   OrganizationRole,
   OrganizationMembershipStatus,
   OrganizationSubscriptionStatus,
+  ResourceType,
 } from '../../src/domain/enums.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 import { ConflictError } from '../../src/domain/errors.js';
@@ -761,4 +767,171 @@ export class FakeInvitationRepo implements IOrganizationInvitationRepo {
       }
     }
   }
+}
+
+export class FakeFolderRepo implements IFolderRepo {
+  readonly store = new Map<number, Folder>();
+
+  constructor(private readonly resourceRepo?: FakeResourceRepo) {}
+
+  async create(_exec: Queryable, input: { organizationId: number; parentId: number | null; name: string }): Promise<Folder> {
+    const folder: Folder = {
+      id: nextId(),
+      organizationId: input.organizationId,
+      parentId: input.parentId,
+      name: input.name,
+      deleteTime: null,
+      createTime: new Date(),
+      updateTime: new Date(),
+    };
+    this.store.set(folder.id, folder);
+    return folder;
+  }
+
+  async findByIdForUpdate(_exec: Queryable, organizationId: number, id: number): Promise<Folder | undefined> {
+    const f = this.store.get(id);
+    return f && f.organizationId === organizationId ? f : undefined;
+  }
+
+  async listActive(organizationId: number): Promise<Folder[]> {
+    return [...this.store.values()]
+      .filter((f) => f.organizationId === organizationId && !f.deleteTime)
+      .sort((a, b) => a.id - b.id);
+  }
+
+  async countActiveChildren(_exec: Queryable, organizationId: number, parentId: number): Promise<number> {
+    return [...this.store.values()].filter((f) => f.organizationId === organizationId && f.parentId === parentId && !f.deleteTime).length;
+  }
+
+  async countActiveResources(_exec: Queryable, organizationId: number, folderId: number): Promise<number> {
+    if (!this.resourceRepo) return 0;
+    let n = 0;
+    for (const r of this.resourceRepo.store.values()) {
+      if (r.organizationId === organizationId && r.folderId === folderId && !r.deleteTime) n++;
+    }
+    return n;
+  }
+
+  async updateName(_exec: Queryable, id: number, name: string, _organizationId: number): Promise<void> {
+    const f = this.store.get(id);
+    if (f) f.name = name;
+  }
+
+  async updateParent(_exec: Queryable, id: number, parentId: number | null, _organizationId: number): Promise<void> {
+    const f = this.store.get(id);
+    if (f) f.parentId = parentId;
+  }
+
+  async softDelete(_exec: Queryable, id: number, _organizationId: number, now: Date): Promise<void> {
+    const f = this.store.get(id);
+    if (f) f.deleteTime = now;
+  }
+
+  async collectDescendantIds(_exec: Queryable, organizationId: number, folderId: number): Promise<number[]> {
+    const out = new Set<number>([folderId]);
+    let added = true;
+    while (added) {
+      added = false;
+      for (const f of this.store.values()) {
+        if (f.organizationId === organizationId && !f.deleteTime && f.parentId !== null && out.has(f.parentId) && !out.has(f.id)) {
+          out.add(f.id);
+          added = true;
+        }
+      }
+    }
+    return [...out];
+  }
+}
+
+export class FakeResourceRepo implements IResourceRepo {
+  readonly store = new Map<number, Resource>();
+
+  async create(_exec: Queryable, input: {
+    organizationId: number;
+    folderId: number | null;
+    resourceType: ResourceType;
+    name: string;
+    content: Record<string, unknown>;
+    version: number;
+    createdByMembershipId: number;
+  }): Promise<Resource> {
+    const resource: Resource = {
+      id: nextId(),
+      organizationId: input.organizationId,
+      folderId: input.folderId,
+      resourceType: input.resourceType,
+      name: input.name,
+      content: input.content,
+      version: input.version,
+      createdByMembershipId: input.createdByMembershipId,
+      updatedByMembershipId: null,
+      deleteTime: null,
+      createTime: new Date(),
+      updateTime: new Date(),
+    };
+    this.store.set(resource.id, resource);
+    return resource;
+  }
+
+  async findById(organizationId: number, id: number): Promise<Resource | undefined> {
+    const r = this.store.get(id);
+    return r && r.organizationId === organizationId ? r : undefined;
+  }
+
+  async findByIdForUpdate(_exec: Queryable, organizationId: number, id: number): Promise<Resource | undefined> {
+    const r = this.store.get(id);
+    return r && r.organizationId === organizationId ? r : undefined;
+  }
+
+  async listActiveByOrganization(organizationId: number): Promise<ResourceSummaryDto[]> {
+    return [...this.store.values()]
+      .filter((r) => r.organizationId === organizationId && !r.deleteTime)
+      .sort((a, b) => a.id - b.id)
+      .map(toResourceSummary);
+  }
+
+  async listActiveContent(_exec: Queryable, organizationId: number): Promise<Record<string, unknown>[]> {
+    return [...this.store.values()]
+      .filter((r) => r.organizationId === organizationId && !r.deleteTime)
+      .map((r) => r.content);
+  }
+
+  async update(_exec: Queryable, input: {
+    id: number;
+    organizationId: number;
+    name: string;
+    folderId: number | null;
+    content: Record<string, unknown>;
+    baseVersion: number;
+    updatedByMembershipId: number;
+  }): Promise<boolean> {
+    const r = this.store.get(input.id);
+    if (!r || r.organizationId !== input.organizationId || r.deleteTime || r.version !== input.baseVersion) return false;
+    r.name = input.name;
+    r.folderId = input.folderId;
+    r.content = input.content;
+    r.version = input.baseVersion + 1;
+    r.updatedByMembershipId = input.updatedByMembershipId;
+    return true;
+  }
+
+  async softDelete(_exec: Queryable, id: number, organizationId: number, now: Date, deletedByMembershipId: number): Promise<void> {
+    const r = this.store.get(id);
+    if (r && r.organizationId === organizationId && !r.deleteTime) {
+      r.deleteTime = now;
+      r.updatedByMembershipId = deletedByMembershipId;
+    }
+  }
+}
+
+function toResourceSummary(r: Resource): ResourceSummaryDto {
+  return {
+    resourceId: r.id,
+    resourceType: r.resourceType,
+    name: r.name,
+    folderId: r.folderId,
+    version: r.version,
+    createdByMembershipId: r.createdByMembershipId,
+    updatedByMembershipId: r.updatedByMembershipId,
+  };
 }

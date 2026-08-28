@@ -1,5 +1,12 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { DomainError, RateLimitedError } from '../domain/errors.js';
+import { DomainError, RateLimitedError, ResourceVersionConflictError } from '../domain/errors.js';
+
+/** 构造 DomainError 的标准响应体；RESOURCE_VERSION_CONFLICT 附带 currentVersion（§4.3）。 */
+function domainErrorBody(e: DomainError): Record<string, unknown> {
+  const body: Record<string, unknown> = { message: e.message, code: e.code };
+  if (e instanceof ResourceVersionConflictError) body.currentVersion = e.currentVersion;
+  return body;
+}
 
 /** 统一错误响应：DomainError 按 code 映射 HTTP 状态，其他默认 500。 */
 export function sendError(reply: FastifyReply, e: unknown): void {
@@ -7,7 +14,7 @@ export function sendError(reply: FastifyReply, e: unknown): void {
     if (e instanceof RateLimitedError) {
       reply.header('Retry-After', e.retryAfterSeconds);
     }
-    reply.code(errorStatus(e.code)).send({ message: e.message, code: e.code });
+    reply.code(errorStatus(e.code)).send(domainErrorBody(e));
   } else {
     reply.code(500).send({ message: 'Internal server error' });
   }
@@ -30,7 +37,7 @@ export function registerErrorHandler(app: FastifyInstance): void {
 
     if (err instanceof DomainError) {
       if (err instanceof RateLimitedError) reply.header('Retry-After', err.retryAfterSeconds);
-      reply.code(errorStatus(err.code)).send({ message: err.message, code: err.code });
+      reply.code(errorStatus(err.code)).send(domainErrorBody(err));
       return;
     }
 

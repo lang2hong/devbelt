@@ -40,3 +40,8 @@ export type OrganizationPlanStatus = 'active' | 'archived';
 
 /** 组织订阅状态。Phase 1 Free 永久 active。 */
 export type OrganizationSubscriptionStatus = 'active' | 'expired' | 'canceled';
+
+// ── 组织资源（切片 4）──
+
+/** 组织资源类型。 */
+export type ResourceType = 'connection_template' | 'query';
