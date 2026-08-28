@@ -3,6 +3,7 @@ import { execSync } from 'child_process';
 import { readFileSync } from 'fs';
 import { hostname, platform, arch, release } from 'os';
 import { SyncClient, AuthResult, DeviceInfo } from './syncClient';
+import { eventBus, AuthEvent } from '../utils/event';
 
 // 由 esbuild 构建时从 .env / .env.production 注入（见 esbuild.js 的 define）；测试环境由 vitest.config.ts 提供同名字段
 declare const __SYNC_SERVER_URL__: string;
@@ -228,6 +229,7 @@ export class AuthService {
     try {
       this.memento?.update(AuthService.PLAN_CACHE_KEY, undefined);
     } catch { /* 忽略 */ }
+    void eventBus.publish(new AuthEvent('logout'));
   }
 
   /** 修改账号密码（需当前已登录） */
@@ -251,5 +253,6 @@ export class AuthService {
     await this.secrets.store(AuthService.ACCESS_TOKEN_KEY, result.accessToken);
     await this.secrets.store(AuthService.REFRESH_TOKEN_KEY, result.refreshToken);
     await this.secrets.store(AuthService.USER_EMAIL_KEY, email);
+    void eventBus.publish(new AuthEvent('login'));
   }
 }

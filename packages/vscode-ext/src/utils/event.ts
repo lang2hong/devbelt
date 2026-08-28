@@ -92,6 +92,13 @@ export class HistoryChangedEvent extends AppEvent {
   }
 }
 
+/** 认证状态变更事件（登录/登出）。组织缓存据此整用户失效（§6.2 的 401 清认证）。 */
+export class AuthEvent extends AppEvent {
+  constructor(readonly kind: 'login' | 'logout') {
+    super('AuthService');
+  }
+}
+
 // ─── 事件总线 ───
 
 interface HandlerEntry {

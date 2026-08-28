@@ -562,6 +562,55 @@
         "command": "dbclient.scheduleBackup",
         "title": "Schedule Backup",
         "category": "DB Client"
+      },
+      {
+        "command": "dbclient.org.refresh",
+        "title": "Refresh Organizations",
+        "category": "DB Client",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "dbclient.org.newFolder",
+        "title": "New Folder",
+        "category": "DB Client",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "dbclient.org.deleteFolder",
+        "title": "Delete Folder",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.org.newQuery",
+        "title": "New Query Resource",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.org.openResource",
+        "title": "Open Resource",
+        "category": "DB Client",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "dbclient.org.saveResource",
+        "title": "Save Resource",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.org.deleteResource",
+        "title": "Delete Resource",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.org.connectTemplate",
+        "title": "Connect",
+        "category": "DB Client",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "dbclient.org.runQuery",
+        "title": "Run Query on Organization Connection",
+        "category": "DB Client"
       }
     ],
     "menus": {
@@ -579,6 +628,16 @@
         {
           "command": "dbclient.explorerMenu",
           "when": "view == dbclient.explorer",
+          "group": "navigation"
+        },
+        {
+          "command": "dbclient.org.refresh",
+          "when": "view == dbclient.explorer.organization",
+          "group": "navigation"
+        },
+        {
+          "command": "dbclient.org.newFolder",
+          "when": "view == dbclient.explorer.organization",
           "group": "navigation"
         }
       ],
@@ -623,6 +682,36 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "dbclient.org.connectTemplate",
+          "when": "view == dbclient.explorer.organization && viewItem == dbclient.org.resource.connection_template",
+          "group": "inline"
+        },
+        {
+          "command": "dbclient.org.openResource",
+          "when": "view == dbclient.explorer.organization && viewItem =~ /^dbclient\\.org\\.resource\\./",
+          "group": "inline"
+        },
+        {
+          "command": "dbclient.org.deleteResource",
+          "when": "view == dbclient.explorer.organization && viewItem =~ /^dbclient\\.org\\.resource\\./",
+          "group": "1_modify"
+        },
+        {
+          "command": "dbclient.org.newQuery",
+          "when": "view == dbclient.explorer.organization && viewItem =~ /^(dbclient\\.org\\.organization|dbclient\\.org\\.folder)$/",
+          "group": "1_create"
+        },
+        {
+          "command": "dbclient.org.newFolder",
+          "when": "view == dbclient.explorer.organization && viewItem =~ /^(dbclient\\.org\\.organization|dbclient\\.org\\.folder)$/",
+          "group": "1_create"
+        },
+        {
+          "command": "dbclient.org.deleteFolder",
+          "when": "view == dbclient.explorer.organization && viewItem == dbclient.org.folder",
+          "group": "1_modify"
+        },
         {
           "command": "dbclient.previewTable",
           "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
@@ -1331,6 +1420,10 @@
         {
           "id": "dbclient.explorer",
           "name": "%view.explorer%"
+        },
+        {
+          "id": "dbclient.explorer.organization",
+          "name": "Organization Resources"
         }
       ]
     },

@@ -3,6 +3,7 @@ import { TreeItemCollapsibleState } from 'vscode';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DbTreeNode, NodeKind, type CategoryType } from '../../src/tree/dbTreeNode';
+import { OrgTreeNode } from '../../src/tree/orgTreeDataProvider';
 
 vi.mock('vscode', () => ({
   TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
@@ -63,6 +64,25 @@ function allContextValues(): Set<string> {
   return values;
 }
 
+/**
+ * 组织树（dbclient.explorer.organization）能产生的全部 contextValue。
+ * 与个人信息来源树分离，见 OrgTreeNode.computeContextValue。
+ */
+function allOrgContextValues(): Set<string> {
+  const values = new Set<string>();
+  const none = TreeItemCollapsibleState.None as any;
+  const summary = (resourceType: 'connection_template' | 'query') => ({
+    resourceId: 'r', resourceType, name: 'x', folderId: null,
+    version: 1, createdByMembershipId: '1', updatedByMembershipId: null,
+  });
+
+  values.add(new OrgTreeNode('x', none, 'organization', 'o').contextValue as string);
+  values.add(new OrgTreeNode('x', none, 'folder', 'o', 'f').contextValue as string);
+  values.add(new OrgTreeNode('x', none, 'resource', 'o', undefined, summary('connection_template')).contextValue as string);
+  values.add(new OrgTreeNode('x', none, 'resource', 'o', undefined, summary('query')).contextValue as string);
+  return values;
+}
+
 interface MenuEntry { command: string; when?: string; group?: string }
 
 function contextMenus(): MenuEntry[] {
@@ -109,7 +129,7 @@ describe('树右键菜单 when 表达式', () => {
    * 只会表现为命令永远不出现，不会有任何编译或运行时报错。
    */
   it('每条 when 至少匹配一个真实 contextValue', () => {
-    const values = [...allContextValues()];
+    const values = [...allContextValues(), ...allOrgContextValues()];
     const dead = contextMenus()
       .filter((e) => {
         const match = viewItemMatcher(e.when || '');

@@ -22,13 +22,18 @@ import { SyncManager } from './sync/syncManager';
 import { MasterPasswordStore } from './sync/masterPasswordStore';
 import { AutoSyncService, type AutoSyncMode } from './sync/autoSyncService';
 import type { Event } from './utils/event';
-import { eventBus, ConnectionChangedEvent, DataChangeEvent } from './utils/event';
+import { eventBus, ConnectionChangedEvent, DataChangeEvent, AuthEvent } from './utils/event';
 import { invalidateLanguage, LANGUAGE_CONFIG_KEY, l10n } from './i18n';
 import { registerCommands, SyncStatusBar } from './commands';
 import { refreshAdminCommand } from './commands/admin';
 import { SqlCompletionProvider } from './completion/sqlCompletionProvider';
 import { SqlCodeLensProvider } from './completion/sqlCodeLensProvider';
 import { TerminalService } from './terminal/terminalService';
+import { OrgClient } from './org/client';
+import { CredentialVault } from './org/credentialVault';
+import { OrgWorkspace } from './org/workspace';
+import { OrgTreeDataProvider } from './tree/orgTreeDataProvider';
+import { registerOrgCommands } from './commands/org';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const store = new ConnectionStore(context.globalState, context.secrets);
@@ -125,13 +130,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     treeDataProvider: treeProvider,
     showCollapseAll: true,
   });
+  context.subscriptions.push(treeView);
+
+  // ── 组织 Workspace（切片 5）：独立数据源，与个人连接树/同步完全分离（§6.2）──
+  const orgClient = new OrgClient(auth.client);
+  const orgVault = new CredentialVault(context.secrets);
+  const orgWorkspace = new OrgWorkspace(orgClient, orgVault);
+  const orgTreeProvider = new OrgTreeDataProvider(orgWorkspace);
+  const orgTreeView = vscode.window.createTreeView('dbclient.explorer.organization', {
+    treeDataProvider: orgTreeProvider,
+    showCollapseAll: true,
+  });
+  context.subscriptions.push(
+    orgTreeView,
+    // 登出 → 清组织缓存（§6.2 的 401 清认证；登录态变化即整用户失效）
+    eventBus.subscribe(AuthEvent, (e) => {
+      if (e.kind === 'logout') orgWorkspace.clearAuth();
+    }),
+  );
+  registerOrgCommands({ context, workspace: orgWorkspace, manager, executor, tree: orgTreeProvider });
   // 这里原先用 onDidChangeSelection 往 `dbclient.dbType` / `dbclient.has*` 写
   // context key，供菜单 when 判断数据库类型。那是竞态的：右键未选中项、或右键
   // 与当前选中项不同时，键里还是上一个节点的值 —— 在 SQLite 表上会看到 MySQL
   // 专属命令，该出现的命令反而不出现。
   // 现在数据库类型编码进节点自己的 contextValue（`<base>.<DBTYPE>`，见
   // DbTreeNode），菜单 when 直接匹配 viewItem，不再有任何时序依赖。
-  context.subscriptions.push(treeView);
   const completionProvider = new SqlCompletionProvider(connCtx, manager);
   context.subscriptions.push(
     vscode.languages.registerCompletionItemProvider(

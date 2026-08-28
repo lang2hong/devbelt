@@ -165,7 +165,7 @@ export class SyncClient {
 
   /** 登录 */
   async login(email: string, password: string): Promise<AuthResult> {
-    return this.postForm('/api/auth/login', { email, password });
+    return this.postForm('/api/auth/login', { email, password, ...this.deviceFields() });
   }
 
   /**
@@ -186,7 +186,7 @@ export class SyncClient {
     const res = await this.fetchImpl(`${this.baseUrl}/api/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this.deviceHeaders() },
-      body: JSON.stringify({ refreshToken: rt }),
+      body: JSON.stringify({ refreshToken: rt, ...this.deviceFields() }),
       dispatcher: directAgent,
     } as any);
     if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
@@ -209,6 +209,27 @@ export class SyncClient {
       const errBody = (await res.json().catch(() => ({}))) as { message?: string };
       throw new Error(errBody.message || `Change password failed: ${res.status}`);
     }
+  }
+
+  /**
+   * 通用鉴权请求（供组织 Workspace 复用）：自动 401 单飞刷新 + 5xx 退避重试，
+   * 返回原始状态码 + 已解析的 JSON body（空 body 为 undefined）。
+   *
+   * 不在此处做业务错误码归因（V2 的 DEVICE_LIMIT 等归因仍留在 sync 路径），
+   * 组织侧的错误映射由 OrgClient 依据 `code`/`status` 完成。
+   */
+  async requestRaw(method: string, path: string, body?: unknown): Promise<{ status: number; body: unknown }> {
+    const res = await this.request(method, path, body, true);
+    const text = await res.text();
+    let parsed: unknown;
+    if (text) {
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = text;
+      }
+    }
+    return { status: res.status, body: parsed };
   }
 
   /** 当前用户 + 套餐 + 订阅 + 配额用量 */
@@ -393,5 +414,24 @@ export class SyncClient {
     };
     if (d.remoteName) headers['X-Device-Remote'] = d.remoteName;
     return headers;
+  }
+
+  /**
+   * V3 设备请求字段（实施规格 §4.6 DeviceFields，login/refresh 请求体必填）。
+   *
+   * deviceKey 取 os machine id（跨重装稳定），缺失回退 vscode machineId，
+   * 并清洗为 `[A-Za-z0-9_-]`、长度收敛到 16..128（不足用同字符集补齐兜底，
+   * 避免登录被 400 拦下）。
+   */
+  private deviceFields(): { deviceKey: string; devicePlatform: string; deviceName: string; clientVersion: string } {
+    const d = this.device;
+    const raw = (d?.deviceId || d?.machineId || '').replace(/[^A-Za-z0-9_-]/g, '');
+    const deviceKey = (raw.length >= 16 ? raw : raw.padEnd(16, '0')).slice(0, 128);
+    return {
+      deviceKey,
+      devicePlatform: (d?.os ?? '').slice(0, 100),
+      deviceName: (d?.deviceName ?? '').slice(0, 100),
+      clientVersion: (d?.appVersion ?? '').slice(0, 100),
+    };
   }
 }

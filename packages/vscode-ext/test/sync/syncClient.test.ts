@@ -295,3 +295,66 @@ describe('刷新成功后回写 token', () => {
     expect(seen).toEqual([['A2', 'R2']]);
   });
 });
+
+describe('V3 login/refresh 请求体必带 DeviceFields（§4.6）', () => {
+  const device = {
+    deviceName: 'test-host · linux/x64',
+    deviceId: 'abcdef0123456789abcdef0123456789',
+    machineId: 'fedcba9876543210fedcba9876543210',
+    hostname: 'test-host',
+    os: 'linux',
+    arch: 'x64',
+    osVersion: '6.0',
+    appName: 'VSCode',
+    appVersion: '1.90.0',
+    language: 'en',
+    timezone: 'UTC',
+  };
+
+  function makeClient(dev: unknown = device) {
+    const bodies: unknown[] = [];
+    const fetchMock = vi.fn(async (_url: unknown, init: any) => {
+      bodies.push(init?.body ? JSON.parse(init.body) : undefined);
+      return jsonRes(200, { accessToken: 'A', refreshToken: 'R' });
+    });
+    const client = new SyncClient('http://x', () => 'access-1', () => 'refresh-1', () => {}, dev as any, fetchMock as any);
+    return { client, bodies };
+  }
+
+  it('login 请求体含 4 个设备字段', async () => {
+    const { client, bodies } = makeClient();
+    await client.login('a@b.c', 'password-1234');
+
+    const body = bodies[0] as Record<string, unknown>;
+    expect(body.email).toBe('a@b.c');
+    expect(body.password).toBe('password-1234');
+    expect(body.deviceKey).toBe('abcdef0123456789abcdef0123456789');
+    expect(body.devicePlatform).toBe('linux');
+    expect(body.deviceName).toBe('test-host · linux/x64');
+    expect(body.clientVersion).toBe('1.90.0');
+  });
+
+  it('refresh 请求体含 4 个设备字段', async () => {
+    const { client, bodies } = makeClient();
+    await client.refresh();
+
+    const body = bodies[0] as Record<string, unknown>;
+    expect(body.refreshToken).toBe('refresh-1');
+    expect(body.deviceKey).toBe('abcdef0123456789abcdef0123456789');
+    expect(body.devicePlatform).toBe('linux');
+    expect(body.deviceName).toBe('test-host · linux/x64');
+    expect(body.clientVersion).toBe('1.90.0');
+  });
+
+  it('deviceKey 清洗为 [A-Za-z0-9_-] 且长度收敛到 16..128', async () => {
+    const { client, bodies } = makeClient({
+      ...device,
+      deviceId: '', // 空 → 回退 machineId
+      machineId: 'bad id with spaces!', // 含非法字符，需清洗
+    });
+    await client.refresh();
+
+    const key = (bodies[0] as Record<string, unknown>).deviceKey as string;
+    expect(key).toMatch(/^[A-Za-z0-9_-]{16,128}$/);
+  });
+});
