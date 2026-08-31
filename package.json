@@ -11,6 +11,7 @@
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",
     "typecheck": "pnpm -r run typecheck",
+    "lint": "pnpm -r run lint",
     "dev": "pnpm --filter ./packages/vscode-ext run dev"
   },
   "devDependencies": {

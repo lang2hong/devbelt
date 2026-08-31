@@ -1465,6 +1465,7 @@
     "dev": "node esbuild.js --watch",
     "dev:webview": "cd webview && npx vite build --watch",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "lint": "tsc --noEmit -p tsconfig.test.json",
     "test": "cd webview && npx vite build && cd .. && vitest run",
     "package": "vsce package --no-dependencies"
   },

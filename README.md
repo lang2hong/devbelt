@@ -6,13 +6,14 @@
 
 - **多数据库**：MySQL、PostgreSQL、SQLite（Redis、ElasticSearch 规划中）
 - **连接管理**：层级分组、连接表单、测试连接、SSH 隧道
+- **组织工作区**：组织共享的目录与资源树、连接模板映射本地凭据（Phase 1）
 - **SQL 查询**：当前/新面板运行、查询历史、SQL 格式化、结果表格、单元格内联编辑
 - **SQL 智能**：查询编辑器与 `.sql` 文件的上下文补全、片段、EXPLAIN
 - **表工具**：预览、排序/筛选、增删改、造数、复制、导出
 - **设计与对比**：可视化表设计、DDL 查看、ER 图、Schema 对比
 - **数据迁移**：CSV/JSON 导入导出，带字段映射
-- **云同步**：AES-256-GCM 端到端加密的配置跨设备同步（含连接密码，服务端只见密文）
-- **运维面板**：审计日志（系统 admin 操作留痕）、用户/订阅/套餐管理
+- **云同步**：AES-256-GCM 端到端加密的配置跨设备同步（§8 暂缓，Phase 1 未实现）
+- **运维面板**：审计日志、用户/订阅/套餐管理（§8 暂缓）
 - **数据对比**：Schema 对比、跨库数据对比
 - **国际化**：中文 / English
 
@@ -20,6 +21,7 @@
 
 | 文档 | 说明 |
 |---|---|
+| **[V3 实施规格](docs/v3/README.md)** | V3 唯一实施权威（已冻结基础域契约 + 暂缓专项准入条件） |
 | **[产品介绍](docs/产品介绍.md)** | 产品定位、核心能力、使用场景、Roadmap |
 | **[技术文档](docs/技术文档.md)** | 架构、SQL 补全引擎设计、连接生命周期、安全、评审与修复 |
 | **[开发文档](docs/开发文档.md)** | 构建、调试、测试、发布、贡献 |
@@ -30,22 +32,22 @@
 |---|---|
 | [db-core](packages/db-core/README.md) | 纯连接/查询/元数据层（无 vscode 依赖） |
 | [vscode-ext](packages/vscode-ext/README.md) | VS Code 扩展（**市场发布版**） |
-| [server](packages/server/README.md) | 云同步后端（Fastify + MySQL + JWT） |
-| admin-ui | 服务端管理后台（Vue 3 + Vite，构建产物由 server 托管在 `/admin`） |
+| [server](packages/server/README.md) | 后端（Fastify + MySQL + JWT：认证、设备、组织与资源） |
+| admin-ui | 管理后台 SPA（Vue 3 + Vite），构建产物输出 server/public；`/admin` 托管属 §8 暂缓 |
 
 ## Monorepo 结构
 
 ```
 packages/
 ├── db-core/     # 纯层：连接/查询/元数据服务（无 vscode 依赖，可独立测试）
-├── vscode-ext/  # VS Code 扩展：树、命令、webview 查询/设计/ER、补全、i18n、同步客户端
-├── server/      # 云同步后端：Fastify + MySQL + JWT
-└── admin-ui/    # 管理后台 SPA：用户/订阅/套餐/审计，产物输出到 server/public
+├── vscode-ext/  # VS Code 扩展：树、命令、webview 查询/设计/ER、补全、i18n、账号与组织工作区
+├── server/      # 后端：Fastify + MySQL + JWT（认证、设备、组织与资源）
+└── admin-ui/    # 管理后台 SPA（§8 暂缓），产物输出到 server/public
 ```
 
-`admin-ui` 没有独立的 README —— 它只是 server 的一张脸，运行方式和端点契约都在
-[server 文档](packages/server/README.md)里。它也没有测试运行器，所以聚合与格式化
-逻辑一律放服务端，组件只做渲染。
+`admin-ui` 没有独立的 README —— Phase 1 它只作为构建产物输出到 server/public；
+`/admin` 的托管服务属 §8 暂缓（Platform Admin 未实现）。它也没有测试运行器，聚合与
+格式化逻辑一律放服务端，组件只做渲染。运行方式与端点契约见 [server 文档](packages/server/README.md)。
 
 ## 快速上手
 
@@ -61,8 +63,11 @@ packages/
 pnpm install
 pnpm build
 pnpm typecheck
+pnpm lint
 pnpm test
 ```
+
+> `pnpm lint` 是零依赖 lint 门禁（等价 `pnpm typecheck`：严格 `tsc` + `noUnusedLocals`/`noUnusedParameters`/`noFallthroughCasesInSwitch`）；暂未引入 ESLint/Biome。
 
 详细流程见 [开发文档](docs/开发文档.md)。
 

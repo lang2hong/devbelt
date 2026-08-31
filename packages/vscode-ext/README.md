@@ -2,7 +2,7 @@
 
 **All-in-one database client for MySQL, PostgreSQL and SQLite — right inside VS Code.**
 
-Query, edit and design your databases without leaving the editor. Run SQL with autocomplete, edit data in a grid, design tables visually, draw ER diagrams, import/export, tunnel through SSH, and keep your connections in sync across devices.
+Query, edit and design your databases without leaving the editor. Run SQL with autocomplete, edit data in a grid, design tables visually, draw ER diagrams, import/export, and tunnel through SSH.
 
 ## Highlights
 
@@ -12,7 +12,8 @@ Query, edit and design your databases without leaving the editor. Run SQL with a
 - **Schema & design** — visual table designer, DDL view, ER diagram, schema compare
 - **Data transfer** — CSV/JSON import & export with field mapping
 - **Connections** — hierarchical groups, connection form, connection test, SSH tunnel
-- **Cloud sync** — AES-256-GCM encrypted config sync across devices; your credentials never leave the client
+- **Organization workspaces** — folder/query resource tree with connection templates mapped to local credentials; fixed admin/member model: admin can create/edit/delete, member read-only (Phase 1)
+- **Cloud sync** — AES-256-GCM encrypted config sync across devices (§8 暂缓专项，Phase 1 未实现)
 - **Users & privileges** — create users, grant/revoke, change password
 - **Internationalization** — English / 中文, follows VS Code display language
 
@@ -54,15 +55,19 @@ You can also install from a `.vsix` file: run **Extensions: Install from VSIX…
 | View Data / View DDL / Design Table | Inspect and edit table schemas |
 | Import / Export | CSV/JSON transfer with field mapping |
 | ER Diagram / Compare Schema | Schema analysis |
-| Sync Pull / Sync Push | Encrypted cloud sync of non-credential config |
+| Sync Pull / Sync Push | V2 遗留入口：不属 Phase 1、不受 V3 支持（§8 个人 E2E 专项准入时收敛） |
 
 ## Cloud Sync
+
+> §8 暂缓专项：个人 E2E 同步未在 Phase 1 实现。以下 `Sync Pull`/`Sync Push` 命令与 `dbclient.sync.*` 设置仍作为 V2 遗留入口注册，不受 V3 服务端支持；UI 暴露将在 §8 个人 E2E 专项准入时一并收敛，不属于 Phase 1。
 
 1. Run **DB Client: Login** and register an account.
 2. **Sync Push** encrypts your connection config (excluding passwords) with your master password and uploads it.
 3. **Sync Pull** restores it on any device — the master password is never uploaded.
 
 ## Settings
+
+> `dbclient.sync.*` 是个人 E2E 同步（§8 暂缓）的 V2 遗留设置，Phase 1 未实现、不受 V3 支持。
 
 | Setting | Default | Description |
 |---|---|---|

@@ -2,11 +2,11 @@
 
 **DB Client 后端**（Fastify 5 + MySQL 8 + Ed25519 + Argon2id）。
 
-V3 Greenfield 重构的 Phase 1「身份与会话」切片：个人空间、邮箱验证、登录/刷新、设备与会话管理。个人 E2E 同步、组织域、商业与运营、账号生命周期等均为暂缓专项模块，尚未实施。
+V3 Greenfield 重构的 Phase 1 全部切片（1–5）已落地：个人空间、邮箱验证、登录/刷新、设备与会话、组织与成员、邀请与容量、组织目录与资源。个人 E2E 同步、动态权限映射、受限协作、商业与运营、账号生命周期、组织暂停、组织内容加密均为暂缓专项模块，尚未实施（须先过 §8 专项设计）。
 
 > 契约权威见 [docs/v3/实施规格](../../docs/v3/实施规格.md)。历史 V1/V2 文档仅背景，不能作为实现依据。
 
-## 数据模型（切片 1）
+## 数据模型（Phase 1）
 
 | 表 | 说明 |
 |---|---|
@@ -17,10 +17,17 @@ V3 Greenfield 重构的 Phase 1「身份与会话」切片：个人空间、邮�
 | `devices` | `UNIQUE(user_id, device_key)`、`status(active/revoked)` |
 | `refresh_tokens` | `token_hash` 唯一、`family_id` + `replaced_by_token_id` 轮换链 |
 | `rate_limit_entries` | 跨实例共享限流计数（固定窗口） |
+| `organizations` | 组织：`name`、`status(active/closed)`、`closed_time` |
+| `organization_plans` | 只 seed `organization_free`（3 席位、50 资源、MySQL 模板引擎） |
+| `organization_subscriptions` | `organization_id` 唯一、`seat_limit`、entitlement 快照、永久 active |
+| `organization_memberships` | `UNIQUE(organization_id, user_id)`、`role(admin/member)`、`status(active/invited/removed)` |
+| `organization_invitations` | token 只存 SHA-256、7 天、单次消费、挂接 invited membership |
+| `organization_resource_folders` | 组织目录：`parent_id` 树、软删除 |
+| `organization_resources` | 组织资源：`resource_type(connection_template/query)`、`content(JSON schema)`、`version` 乐观锁、软删除 |
 
 主键 `BIGINT UNSIGNED`，DTO 中一律十进制 `string`。时间 `DATETIME(3)` 以 UTC 读写。
 
-## API（切片 1）
+## API（Phase 1）
 
 | Method | Path | 说明 |
 |---|---|---|
@@ -34,6 +41,20 @@ V3 Greenfield 重构的 Phase 1「身份与会话」切片：个人空间、邮�
 | `GET` | `/api/me` | 当前用户 + 个人订阅 |
 | `GET` | `/api/personal/subscription` | 个人订阅 |
 | `GET/DELETE` | `/api/personal/devices[/:deviceId]` | 列设备 / 撤销本人设备 |
+| `GET/POST` | `/api/organizations` | 列 active organizations（本人成员）/ 创建（按用户每小时 ≤10） |
+| `GET/PATCH` | `/api/organizations/:organizationId` | 读取摘要 / 更新名称 |
+| `POST` | `/api/organizations/:organizationId/close` | 关闭组织（撤销邀请与 invited 成员） |
+| `GET` | `/api/organizations/:organizationId/members` | 最小成员目录（不含 email） |
+| `PATCH/DELETE` | `/api/organizations/:organizationId/members/:membershipId` | 分配角色 / 移除成员 |
+| `POST` | `/api/organizations/:organizationId/leave` | 退出（受最后 active admin 约束） |
+| `POST/GET` | `/api/organizations/:organizationId/invitations` | 创建邀请（email、role?）/ 列有效邀请 |
+| `DELETE` | `/api/organizations/:organizationId/invitations/:invitationId` | 撤销邀请 |
+| `POST` | `/api/organization-invitations/:token/accept` | 按邮箱匹配接受邀请 |
+| `GET/POST` | `/api/organizations/:organizationId/folders` | 列 / 创建目录 |
+| `PATCH/DELETE` | `/api/organizations/:organizationId/folders/:folderId` | 改名/移动 / 删除空目录 |
+| `GET/POST` | `/api/organizations/:organizationId/resources` | 列 / 创建资源 |
+| `GET` | `/api/organizations/:organizationId/resources/:resourceId` | 读取资源 |
+| `PATCH/DELETE` | `/api/organizations/:organizationId/resources/:resourceId` | 更新（baseVersion 乐观锁）/ 软删除 |
 
 ## 环境变量
 
