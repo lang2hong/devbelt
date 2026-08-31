@@ -12,6 +12,7 @@ import {
   SyncQuotaExceededError,
   SyncEpochStaleError,
   ConflictError,
+  ValidationError,
 } from '../../src/domain/errors.js';
 import type { SmpKdf, RecoveryKdf, SyncEnvelope } from '../../src/domain/entities.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
@@ -85,6 +86,17 @@ async function init(stack: ReturnType<typeof makeStack>) {
     signPub: keys.signPub, recoverSignPub: keys.signPub,
   });
   return keys;
+}
+
+async function createRecord(keys: ReturnType<typeof makeKeys>, stack: ReturnType<typeof makeStack>, m: number, r: number) {
+  const mMid = mid(m);
+  const rId = rid(r);
+  const body = putBody(mMid, rId, 50 + m, 51 + m, '0');
+  const s = signRecord(keys.signPriv, USER, 'record.put', body);
+  return stack.recordSvc.putRecord(USER, {
+    keyEpoch: '1', mutationId: mMid, signature: s.signatureBuf, baseVersion: '0', requestDigest: s.digest,
+    recordId: rId, cipherSuite: 'AES-256-GCM', formatVersion: 1, ...decodeBody(body),
+  });
 }
 
 describe('SyncRecordService', () => {
@@ -270,5 +282,46 @@ describe('SyncRecordService', () => {
       keyEpoch: '1', mutationId: m1, signature: s1.signatureBuf, baseVersion: '0', requestDigest: s1.digest,
       recordId: RID, cipherSuite: 'AES-256-GCM', formatVersion: 1, ...decodeBody(b1),
     })).rejects.toBeInstanceOf(SyncNonceReusedError);
+  });
+
+  it('validates cursor/snapshot range (future snapshot, after > snapshot)', async () => {
+    const stack = makeStack();
+    const keys = await init(stack);
+    await createRecord(keys, stack, 40, 40);
+    await createRecord(keys, stack, 41, 41);
+    await createRecord(keys, stack, 42, 42); // changeSequence = 3
+
+    // future snapshot
+    await expect(stack.recordSvc.pull(USER, '0', '100', 256)).rejects.toBeInstanceOf(ValidationError);
+
+    // after > snapshotSequence
+    await expect(stack.recordSvc.pull(USER, '4', '3', 256)).rejects.toBeInstanceOf(ValidationError);
+
+    // 边界：after == snapshotSequence → 空页（合法，客户端已追上）
+    const p = await stack.recordSvc.pull(USER, '3', '3', 256);
+    expect(p.records).toHaveLength(0);
+    expect(p.snapshotSequence).toBe('3');
+  });
+
+  it('serves a fixed snapshot across pages (later writes excluded)', async () => {
+    const stack = makeStack();
+    const keys = await init(stack);
+    await createRecord(keys, stack, 50, 50); // seq 1
+    await createRecord(keys, stack, 51, 51); // seq 2
+    await createRecord(keys, stack, 52, 52); // seq 3
+
+    const snap = '3';
+    const p1 = await stack.recordSvc.pull(USER, '0', snap, 2);
+    expect(p1.snapshotSequence).toBe(snap);
+    expect(p1.records.map((x) => x.changeSequence)).toEqual(['1', '2']);
+    expect(p1.nextAfter).toBe('2');
+
+    // 快照之后的新写入（seq 4）不得混入下一页
+    await createRecord(keys, stack, 53, 53); // seq 4
+
+    const p2 = await stack.recordSvc.pull(USER, '2', snap, 2);
+    expect(p2.snapshotSequence).toBe(snap);
+    expect(p2.records.map((x) => x.changeSequence)).toEqual(['3']);
+    expect(p2.nextAfter).toBeUndefined();
   });
 });

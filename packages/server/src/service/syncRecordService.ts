@@ -15,7 +15,7 @@ import {
   ValidationError,
   EntityNotFoundError,
 } from '../domain/errors.js';
-import { incU64 } from '../domain/syncU64.js';
+import { incU64, parseU64 } from '../domain/syncU64.js';
 import { SYNC_DOMAIN, assertU64, assertEpoch, verifySignature, checkReceipt, recordReceipt } from './syncShared.js';
 
 const MAX_RECORD_CIPHERTEXT_BYTES = 256 * 1024; // 256 KiB（§8.1.7）
@@ -116,6 +116,8 @@ export class SyncRecordService {
     return this.runner(async (tx) => {
       const state = await this.lockActive(tx, userId);
       const snap = snapshotSequence ?? state.changeSequence;
+      if (parseU64(snap) > parseU64(state.changeSequence)) throw new ValidationError('snapshotSequence must not exceed current changeSequence');
+      if (parseU64(after) > parseU64(snap)) throw new ValidationError('after must not exceed snapshotSequence');
       const metas = await this.recordRepo.listByFeed(tx, userId, state.keyEpoch, after, snap, limit);
 
       const records: RecordDto[] = [];
