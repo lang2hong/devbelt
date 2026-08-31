@@ -37,11 +37,6 @@ export class HistoryStore {
       get<T>(key: string): T | undefined;
       update(key: string, value: any): Thenable<void>;
     },
-    /**
-     * 解析当前套餐的查询历史保留条数（historyRetentionCount）。
-     * 返回 undefined = 未知（未登录，退回 DEFAULT_MAX_ENTRIES）；0 = 无限；正数 = 硬上限。
-     */
-    private readonly resolveRetention: () => number | undefined = () => undefined,
   ) {}
 
   /** 读取全部历史（新→旧） */
@@ -66,11 +61,9 @@ export class HistoryStore {
     void eventBus.publish(new HistoryChangedEvent('clear'));
   }
 
-  /** 按套餐 historyRetentionCount 截断：undefined→默认上限，0→不限，正数→硬上限 */
+  /** 截断至固定上限（超出则丢弃最旧）。Phase 1 无 per-user 套餐保留数，恒取默认值。 */
   private trimToRetention(list: QueryHistoryEntry[]): void {
-    const retention = this.resolveRetention();
-    const cap = retention != null ? (retention > 0 ? retention : undefined) : HistoryStore.DEFAULT_MAX_ENTRIES;
-    if (cap != null && list.length > cap) list.length = cap;
+    if (list.length > HistoryStore.DEFAULT_MAX_ENTRIES) list.length = HistoryStore.DEFAULT_MAX_ENTRIES;
   }
 
   // ─── 同步 ───

@@ -146,7 +146,7 @@ export class SyncClient {
    * 后续须经 confirmEmail 验证邮箱，再 login 取得 token。
    */
   async register(email: string, password: string): Promise<{ ok: boolean }> {
-    return (await this.postJson('/api/auth/register', { email, password })) as { ok: boolean };
+    return (await this.postJson('/api/auth/register', { email, password }, false)) as { ok: boolean };
   }
 
   /** 消费初始邮箱验证 token（§4.7 单次消费）。 */

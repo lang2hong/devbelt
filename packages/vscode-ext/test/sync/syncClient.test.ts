@@ -387,6 +387,18 @@ describe('V3 注册/验证流程（register 不回 token）', () => {
     expect(bodies[0]).toEqual({ email: 'a@b.c', password: 'password-1234' });
   });
 
+  it('register 遇 500 不重试（避免重复发信）', async () => {
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls++;
+      return jsonRes(500, { code: 'INTERNAL', message: 'boom' });
+    });
+    const client = new SyncClient('http://x', () => undefined, () => undefined, undefined, undefined, fetchMock as any);
+
+    await expect(client.register('a@b.c', 'password-1234')).rejects.toThrow();
+    expect(calls).toBe(1);
+  });
+
   it('confirmEmail / resendVerification 命中对应路径', async () => {
     const calls: { url: string; method: string; body?: unknown }[] = [];
     const fetchMock = vi.fn(async (url: unknown, init: any) => {
