@@ -2,7 +2,7 @@ import type { ISyncNonceRepo } from '../interfaces.js';
 import type { Queryable } from './db.js';
 
 export class MysqlSyncNonceRepo implements ISyncNonceRepo {
-  async insert(exec: Queryable, userId: number, keyEpoch: number, nonce: Buffer): Promise<boolean> {
+  async insert(exec: Queryable, userId: number, keyEpoch: string, nonce: Buffer): Promise<boolean> {
     try {
       await exec.query(
         'INSERT INTO personal_sync_nonces (user_id, key_epoch, nonce) VALUES (?, ?, ?)',

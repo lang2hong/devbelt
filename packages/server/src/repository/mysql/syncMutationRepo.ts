@@ -3,15 +3,24 @@ import type { SyncMutation } from '../../domain/entities.js';
 import type { SyncAction, SyncMutationStatus } from '../../domain/enums.js';
 import type { Queryable } from './db.js';
 
+const SELECT_COLS = `
+  user_id,
+  CAST(key_epoch AS CHAR) AS key_epoch,
+  mutation_id, request_digest, action,
+  CAST(result_version AS CHAR) AS result_version,
+  CAST(result_change_sequence AS CHAR) AS result_change_sequence,
+  status, expires_time, create_time
+`;
+
 function mapMutation(r: any): SyncMutation {
   return {
     userId: r.user_id,
-    keyEpoch: r.key_epoch,
+    keyEpoch: String(r.key_epoch),
     mutationId: r.mutation_id,
     requestDigest: r.request_digest,
     action: r.action as SyncAction,
-    resultVersion: r.result_version != null ? Number(r.result_version) : null,
-    resultChangeSequence: r.result_change_sequence != null ? Number(r.result_change_sequence) : null,
+    resultVersion: r.result_version != null ? String(r.result_version) : null,
+    resultChangeSequence: r.result_change_sequence != null ? String(r.result_change_sequence) : null,
     status: r.status as SyncMutationStatus,
     expiresTime: new Date(r.expires_time),
     createTime: new Date(r.create_time),
@@ -19,9 +28,9 @@ function mapMutation(r: any): SyncMutation {
 }
 
 export class MysqlSyncMutationRepo implements ISyncMutationRepo {
-  async findByMutationId(exec: Queryable, userId: number, keyEpoch: number, mutationId: Buffer): Promise<SyncMutation | undefined> {
+  async findByMutationId(exec: Queryable, userId: number, keyEpoch: string, mutationId: Buffer): Promise<SyncMutation | undefined> {
     const [rows] = await exec.query<any[]>(
-      'SELECT * FROM personal_sync_mutations WHERE user_id = ? AND key_epoch = ? AND mutation_id = ?',
+      `SELECT ${SELECT_COLS} FROM personal_sync_mutations WHERE user_id = ? AND key_epoch = ? AND mutation_id = ?`,
       [userId, keyEpoch, mutationId],
     );
     return rows[0] ? mapMutation(rows[0]) : undefined;
@@ -29,12 +38,12 @@ export class MysqlSyncMutationRepo implements ISyncMutationRepo {
 
   async record(exec: Queryable, input: {
     userId: number;
-    keyEpoch: number;
+    keyEpoch: string;
     mutationId: Buffer;
     requestDigest: Buffer;
     action: SyncAction;
-    resultVersion: number | null;
-    resultChangeSequence: number | null;
+    resultVersion: string | null;
+    resultChangeSequence: string | null;
     status: SyncMutation['status'];
     expiresTime: Date;
   }): Promise<void> {

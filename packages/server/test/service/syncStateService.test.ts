@@ -1,0 +1,310 @@
+import { describe, it, expect } from 'vitest';
+import { generateKeyPairSync, sign as nodeSign, type KeyObject } from 'crypto';
+import { FakeSyncStateRepo, FakeSyncRecordRepo, FakeSyncMutationRepo } from '../helpers/fakeRepos.js';
+import { SyncStateService } from '../../src/service/syncStateService.js';
+import { jcs, requestDigestOf } from '../../src/service/syncCrypto.js';
+import {
+  SyncNotInitializedError,
+  SyncStateExistsError,
+  SyncEpochStaleError,
+  SyncSignatureInvalidError,
+  SyncVersionConflictError,
+  ConflictError,
+} from '../../src/domain/errors.js';
+import type { SmpKdf, RecoveryKdf, SyncEnvelope } from '../../src/domain/entities.js';
+import type { Queryable } from '../../src/repository/mysql/db.js';
+
+const runner = ((fn: any) => fn({} as Queryable));
+
+function buf(n: number, fill = 1): Buffer { return Buffer.alloc(n, fill); }
+
+function smpKdf(): SmpKdf {
+  return { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: buf(16, 2), outputBytes: 32 };
+}
+function recoveryKdf(): RecoveryKdf {
+  return { alg: 'hkdf-sha256', version: 1, salt: buf(16, 3), outputBytes: 32 };
+}
+function env(version: string, fill = 4): SyncEnvelope {
+  return { version, nonce: buf(12, fill), ct: buf(32, fill + 1), tag: buf(16, fill + 2) };
+}
+
+function b64kdf(k: SmpKdf | RecoveryKdf): Record<string, unknown> {
+  return { ...k, salt: k.salt.toString('base64url') };
+}
+function b64env(e: SyncEnvelope): Record<string, unknown> {
+  return {
+    protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: e.version,
+    nonce: e.nonce.toString('base64url'), ciphertext: e.ct.toString('base64url'), tag: e.tag.toString('base64url'),
+  };
+}
+
+function makeKeys() {
+  const a = generateKeyPairSync('ed25519');
+  const b = generateKeyPairSync('ed25519');
+  return {
+    signPriv: a.privateKey,
+    recoverPriv: b.privateKey,
+    signPub: Buffer.from((a.publicKey.export({ format: 'jwk' }) as any).x, 'base64url'),
+    recoverPub: Buffer.from((b.publicKey.export({ format: 'jwk' }) as any).x, 'base64url'),
+  };
+}
+
+/** 客户端侧签名：body 不含 signature；digest = SHA256(JCS(body))。 */
+function signBody(priv: KeyObject, userId: number, action: string, body: Record<string, unknown>) {
+  const digest = requestDigestOf(body);
+  const signingInput = {
+    domain: 'dbclient/sync/v1', action, userId: String(userId),
+    keyEpoch: body.keyEpoch, expectedStateVersion: body.expectedStateVersion,
+    mutationId: body.mutationId, requestDigest: digest,
+  };
+  const signature = nodeSign(null, Buffer.from(jcs(signingInput), 'utf8'), priv);
+  return { digest, signatureBuf: signature };
+}
+
+function makeStack() {
+  const stateRepo = new FakeSyncStateRepo();
+  const recordRepo = new FakeSyncRecordRepo();
+  const mutationRepo = new FakeSyncMutationRepo();
+  const svc = new SyncStateService(stateRepo, recordRepo, mutationRepo, runner);
+  return { stateRepo, recordRepo, mutationRepo, svc };
+}
+
+const USER = 42;
+const MID = Buffer.alloc(16, 9).toString('base64url');
+
+describe('SyncStateService', () => {
+  it('getState requires init; init is first-writer-wins', async () => {
+    const { svc } = makeStack();
+    const keys = makeKeys();
+    await expect(svc.getState(USER)).rejects.toBeInstanceOf(SyncNotInitializedError);
+
+    const ns = {
+      protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const,
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(),
+      envelopeSmp: env('1'), envelopeRecovery: env('1'),
+      signPub: keys.signPub, recoverSignPub: keys.recoverPub,
+    };
+    await svc.init(USER, ns);
+    await expect(svc.init(USER, ns)).rejects.toBeInstanceOf(SyncStateExistsError);
+
+    const state = await svc.getState(USER);
+    expect(state.keyEpoch).toBe('1');
+    expect(state.stateVersion).toBe('1');
+    expect(state.envelopeSmp.version).toBe('1');
+  });
+
+  it('change-key succeeds and increments stateVersion; replay is idempotent; wrong digest conflicts', async () => {
+    const { svc } = makeStack();
+    const keys = makeKeys();
+    await svc.init(USER, {
+      protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'),
+      signPub: keys.signPub, recoverSignPub: keys.recoverPub,
+    });
+
+    const mutationId = MID;
+    const body = {
+      protocolVersion: 1, keyEpoch: '1', mutationId, expectedStateVersion: '1',
+      smpKdf: b64kdf(smpKdf()), envelopeSmp: b64env(env('2', 40)),
+    };
+    const { digest, signatureBuf } = signBody(keys.signPriv, USER, 'state.change-key', body);
+
+    const input = {
+      keyEpoch: '1', mutationId, signature: signatureBuf, expectedStateVersion: '1', requestDigest: digest,
+      smpKdf: smpKdf(), envelopeSmp: env('2', 40),
+    };
+
+    const res = await svc.changeKey(USER, input);
+    expect(res.stateVersion).toBe('2');
+
+    // 幂等重放：同 mutationId 同 digest → 返回原结果，不重复递增。
+    const replay = await svc.changeKey(USER, input);
+    expect(replay.stateVersion).toBe('2');
+
+    // 同 id 异 digest → 409 CONFLICT。
+    const otherBody = { ...body, envelopeSmp: b64env(env('2', 41)) };
+    const other = signBody(keys.signPriv, USER, 'state.change-key', otherBody);
+    await expect(svc.changeKey(USER, { ...input, requestDigest: other.digest, signature: other.signatureBuf }))
+      .rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it('change-key rejects stale epoch, bad signature and version conflicts', async () => {
+    const { svc } = makeStack();
+    const keys = makeKeys();
+    await svc.init(USER, {
+      protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'),
+      signPub: keys.signPub, recoverSignPub: keys.recoverPub,
+    });
+
+    const base = { protocolVersion: 1, mutationId: MID, smpKdf: b64kdf(smpKdf()), envelopeSmp: b64env(env('2')) };
+
+    // stale epoch
+    const staleBody = { ...base, keyEpoch: '2', expectedStateVersion: '1' };
+    const stale = signBody(keys.signPriv, USER, 'state.change-key', staleBody);
+    await expect(svc.changeKey(USER, { keyEpoch: '2', mutationId: MID, signature: stale.signatureBuf, expectedStateVersion: '1', requestDigest: stale.digest, smpKdf: smpKdf(), envelopeSmp: env('2') }))
+      .rejects.toBeInstanceOf(SyncEpochStaleError);
+
+    // bad signature（用别人的私钥签名）
+    const otherKeys = makeKeys();
+    const badBody = { ...base, keyEpoch: '1', expectedStateVersion: '1' };
+    const bad = signBody(otherKeys.signPriv, USER, 'state.change-key', badBody);
+    await expect(svc.changeKey(USER, { keyEpoch: '1', mutationId: MID, signature: bad.signatureBuf, expectedStateVersion: '1', requestDigest: bad.digest, smpKdf: smpKdf(), envelopeSmp: env('2') }))
+      .rejects.toBeInstanceOf(SyncSignatureInvalidError);
+
+    // version conflict（expectedStateVersion 错）
+    const verBody = { ...base, keyEpoch: '1', expectedStateVersion: '99' };
+    const ver = signBody(keys.signPriv, USER, 'state.change-key', verBody);
+    await expect(svc.changeKey(USER, { keyEpoch: '1', mutationId: MID, signature: ver.signatureBuf, expectedStateVersion: '99', requestDigest: ver.digest, smpKdf: smpKdf(), envelopeSmp: env('2') }))
+      .rejects.toBeInstanceOf(SyncVersionConflictError);
+  });
+
+  it('recover rotates recovery envelope and recoverSignPub using recovery key', async () => {
+    const { svc } = makeStack();
+    const keys = makeKeys();
+    await svc.init(USER, {
+      protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'),
+      signPub: keys.signPub, recoverSignPub: keys.recoverPub,
+    });
+
+    const newRecoverPub = makeKeys().recoverPub;
+    const body = {
+      protocolVersion: 1, keyEpoch: '1', mutationId: MID, expectedStateVersion: '1',
+      smpKdf: b64kdf(smpKdf()),
+      envelopeSmp: b64env(env('2', 50)),
+      recoveryKdf: b64kdf(recoveryKdf()),
+      envelopeRecovery: b64env(env('2', 60)),
+      recoverSignPub: newRecoverPub.toString('base64url'),
+    };
+    const { digest, signatureBuf } = signBody(keys.recoverPriv, USER, 'state.recover', body);
+    const res = await svc.recover(USER, {
+      keyEpoch: '1', mutationId: MID, signature: signatureBuf, expectedStateVersion: '1', requestDigest: digest,
+      smpKdf: smpKdf(), envelopeSmp: env('2', 50),
+      recoveryKdf: recoveryKdf(), envelopeRecovery: env('2', 60), recoverSignPub: newRecoverPub,
+    });
+    expect(res.stateVersion).toBe('2');
+    const state = await svc.getState(USER);
+    expect(state.envelopeRecovery.version).toBe('2');
+  });
+
+  it('destroy tombstones records (version+1) and advances global changeSequence', async () => {
+    const { svc, recordRepo } = makeStack();
+    const keys = makeKeys();
+    await svc.init(USER, {
+      protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'),
+      signPub: keys.signPub, recoverSignPub: keys.recoverPub,
+    });
+
+    const recordId = buf(16, 70);
+    await recordRepo.create({} as Queryable, {
+      userId: USER, keyEpoch: '1', recordId,
+      cipherSuite: 'AES-256-GCM', formatVersion: 1,
+      nonce: buf(12, 71), ciphertext: buf(50, 72), tag: buf(16, 73),
+      version: '1', changeSequence: '0',
+    });
+
+    const newKeys = makeKeys();
+    const body = {
+      protocolVersion: 1, keyEpoch: '1', mutationId: MID, expectedStateVersion: '1',
+      newState: {
+        protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+        smpKdf: b64kdf(smpKdf()), recoveryKdf: b64kdf(recoveryKdf()),
+        envelopeSmp: b64env(env('1')), envelopeRecovery: b64env(env('1')),
+        signPub: newKeys.signPub.toString('base64url'), recoverSignPub: newKeys.recoverPub.toString('base64url'),
+      },
+    };
+    const { digest, signatureBuf } = signBody(keys.signPriv, USER, 'state.destroy', body);
+    const destroyInput = {
+      keyEpoch: '1', mutationId: MID, signature: signatureBuf, expectedStateVersion: '1', requestDigest: digest,
+      newState: {
+        protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const,
+        smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'),
+        signPub: newKeys.signPub, recoverSignPub: newKeys.recoverPub,
+      },
+    };
+    const res = await svc.destroy(USER, destroyInput);
+    expect(res.keyEpoch).toBe('2');
+
+    expect((await recordRepo.countActive({} as Queryable, USER, '1')).count).toBe(0);
+    const tomb = await recordRepo.findForUpdate({} as Queryable, USER, '1', recordId);
+    expect(tomb?.deleteTime).not.toBeNull();
+    expect(tomb?.version).toBe('2');
+
+    const state = await svc.getState(USER);
+    expect(state.keyEpoch).toBe('2');
+    expect(state.stateVersion).toBe('1');
+    expect(state.changeSequence).toBe('1');
+  });
+
+  it('destroy replay after epoch advance returns SYNC_EPOCH_STALE', async () => {
+    const { svc } = makeStack();
+    const keys = makeKeys();
+    await svc.init(USER, {
+      protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'),
+      signPub: keys.signPub, recoverSignPub: keys.recoverPub,
+    });
+
+    const newKeys = makeKeys();
+    const body = {
+      protocolVersion: 1, keyEpoch: '1', mutationId: MID, expectedStateVersion: '1',
+      newState: {
+        protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+        smpKdf: b64kdf(smpKdf()), recoveryKdf: b64kdf(recoveryKdf()),
+        envelopeSmp: b64env(env('1')), envelopeRecovery: b64env(env('1')),
+        signPub: newKeys.signPub.toString('base64url'), recoverSignPub: newKeys.recoverPub.toString('base64url'),
+      },
+    };
+    const { digest, signatureBuf } = signBody(keys.signPriv, USER, 'state.destroy', body);
+    const destroyInput = {
+      keyEpoch: '1', mutationId: MID, signature: signatureBuf, expectedStateVersion: '1', requestDigest: digest,
+      newState: {
+        protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const,
+        smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'),
+        signPub: newKeys.signPub, recoverSignPub: newKeys.recoverPub,
+      },
+    };
+    await svc.destroy(USER, destroyInput);
+
+    try {
+      await svc.destroy(USER, destroyInput);
+    } catch (e: any) {
+      expect(e).toBeInstanceOf(SyncEpochStaleError);
+      expect(e.code).toBe('SYNC_EPOCH_STALE');
+      expect(e.currentKeyEpoch).toBe('2');
+      return;
+    }
+    throw new Error('expected SYNC_EPOCH_STALE');
+  });
+
+  it('expired receipt is ignored (different-digest stale receipt does not conflict)', async () => {
+    const { svc, mutationRepo } = makeStack();
+    const keys = makeKeys();
+    await svc.init(USER, {
+      protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'),
+      signPub: keys.signPub, recoverSignPub: keys.recoverPub,
+    });
+
+    // 预置一个已过期、且 digest 不同的 receipt（同 mutationId）。
+    await mutationRepo.record({} as Queryable, {
+      userId: USER, keyEpoch: '1', mutationId: Buffer.from(MID, 'base64url'),
+      requestDigest: buf(32, 99), action: 'state.change-key', resultVersion: '9', resultChangeSequence: null,
+      status: 'applied', expiresTime: new Date(0),
+    });
+
+    const body = {
+      protocolVersion: 1, keyEpoch: '1', mutationId: MID, expectedStateVersion: '1',
+      smpKdf: b64kdf(smpKdf()), envelopeSmp: b64env(env('2', 40)),
+    };
+    const { digest, signatureBuf } = signBody(keys.signPriv, USER, 'state.change-key', body);
+    // 正常校验通过（不再命中过期 receipt；也不因异 digest 而 409）。
+    const res = await svc.changeKey(USER, {
+      keyEpoch: '1', mutationId: MID, signature: signatureBuf, expectedStateVersion: '1', requestDigest: digest,
+      smpKdf: smpKdf(), envelopeSmp: env('2', 40),
+    });
+    expect(res.stateVersion).toBe('2');
+  });
+});

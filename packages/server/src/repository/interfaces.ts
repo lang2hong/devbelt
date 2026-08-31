@@ -394,65 +394,65 @@ export interface ISyncStateRepo {
   /** 首次建态（仅当无行）；已存在返回 false。init 用。 */
   create(exec: Queryable, state: Omit<PersonalSyncState, 'createTime' | 'updateTime'>): Promise<boolean>;
   /** 覆盖 state 行（change-key/recover/destroy/reset）：`WHERE user_id AND state_version=expectedStateVersion`。 */
-  update(exec: Queryable, userId: number, expectedStateVersion: number, state: Omit<PersonalSyncState, 'createTime' | 'updateTime'>): Promise<boolean>;
+  update(exec: Queryable, userId: number, expectedStateVersion: string, state: Omit<PersonalSyncState, 'createTime' | 'updateTime'>): Promise<boolean>;
 }
 
 export interface ISyncRecordRepo {
   create(exec: Queryable, input: {
     userId: number;
-    keyEpoch: number;
+    keyEpoch: string;
     recordId: Buffer;
     cipherSuite: PersonalConnectionMeta['cipherSuite'];
     formatVersion: PersonalConnectionMeta['formatVersion'];
     nonce: Buffer;
     ciphertext: Buffer;
     tag: Buffer;
-    version: number;
-    changeSequence: number;
+    version: string;
+    changeSequence: string;
   }): Promise<PersonalConnectionMeta>;
   /** 事务内按 (user_id, key_epoch, record_id) 锁定 record（FOR UPDATE）。 */
-  findForUpdate(exec: Queryable, userId: number, keyEpoch: number, recordId: Buffer): Promise<PersonalConnectionMeta | undefined>;
+  findForUpdate(exec: Queryable, userId: number, keyEpoch: string, recordId: Buffer): Promise<PersonalConnectionMeta | undefined>;
   /** 乐观锁更新（`WHERE version=baseVersion AND delete_time IS NULL`）并写新 version/change_sequence。 */
   update(exec: Queryable, input: {
     userId: number;
-    keyEpoch: number;
+    keyEpoch: string;
     recordId: Buffer;
-    baseVersion: number;
+    baseVersion: string;
     cipherSuite: PersonalConnectionMeta['cipherSuite'];
     formatVersion: PersonalConnectionMeta['formatVersion'];
     nonce: Buffer;
     ciphertext: Buffer;
     tag: Buffer;
-    newVersion: number;
-    changeSequence: number;
+    newVersion: string;
+    changeSequence: string;
   }): Promise<boolean>;
   /** 软删 tombstone：清空 ciphertext/tag、写 delete_time 与新 version/change_sequence。 */
-  softDelete(exec: Queryable, userId: number, keyEpoch: number, recordId: Buffer, baseVersion: number, newVersion: number, changeSequence: number, now: Date): Promise<boolean>;
+  softDelete(exec: Queryable, userId: number, keyEpoch: string, recordId: Buffer, baseVersion: string, newVersion: string, changeSequence: string, now: Date): Promise<boolean>;
   /** feed：active epoch 内 `change_sequence > after AND <= snapshotSequence`，含 tombstone，按 change_sequence 升序。 */
-  listByFeed(exec: Queryable, userId: number, keyEpoch: number, after: number, snapshotSequence: number, limit: number): Promise<PersonalConnectionMeta[]>;
+  listByFeed(exec: Queryable, userId: number, keyEpoch: string, after: string, snapshotSequence: string, limit: number): Promise<PersonalConnectionMeta[]>;
   /** active record 数 + 密文字节（配额计量：ciphertext+tag+nonce 长度，§8.1.9）。锁内执行。 */
-  countActive(exec: Queryable, userId: number, keyEpoch: number): Promise<{ count: number; bytes: number }>;
-  /** destroy/reset：该 epoch 全部未删 record 置 tombstone（清空 ciphertext/tag）。 */
-  tombstoneAllByEpoch(exec: Queryable, userId: number, keyEpoch: number, now: Date): Promise<void>;
+  countActive(exec: Queryable, userId: number, keyEpoch: string): Promise<{ count: number; bytes: number }>;
+  /** 列出该 epoch 全部未删 record（destroy/reset 逐个 tombstone 用，持锁内调用）。 */
+  listActiveByEpoch(exec: Queryable, userId: number, keyEpoch: string): Promise<PersonalConnectionMeta[]>;
 }
 
 export interface ISyncNonceRepo {
   /** 插入 nonce；唯一键冲突返回 false（对应 SYNC_NONCE_REUSED），成功 true。 */
-  insert(exec: Queryable, userId: number, keyEpoch: number, nonce: Buffer): Promise<boolean>;
+  insert(exec: Queryable, userId: number, keyEpoch: string, nonce: Buffer): Promise<boolean>;
 }
 
 export interface ISyncMutationRepo {
   /** 幂等查：返回该 mutationId 的 receipt（若有）。 */
-  findByMutationId(exec: Queryable, userId: number, keyEpoch: number, mutationId: Buffer): Promise<SyncMutation | undefined>;
+  findByMutationId(exec: Queryable, userId: number, keyEpoch: string, mutationId: Buffer): Promise<SyncMutation | undefined>;
   /** UPSERT（by PK）一份已应用 mutation 的结果。 */
   record(exec: Queryable, input: {
     userId: number;
-    keyEpoch: number;
+    keyEpoch: string;
     mutationId: Buffer;
     requestDigest: Buffer;
     action: SyncAction;
-    resultVersion: number | null;
-    resultChangeSequence: number | null;
+    resultVersion: string | null;
+    resultChangeSequence: string | null;
     status: SyncMutation['status'];
     expiresTime: Date;
   }): Promise<void>;

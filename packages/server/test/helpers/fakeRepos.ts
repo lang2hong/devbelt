@@ -970,7 +970,7 @@ export class FakeSyncStateRepo implements ISyncStateRepo {
     return true;
   }
 
-  async update(_exec: Queryable, userId: number, expectedStateVersion: number, state: Omit<PersonalSyncState, 'createTime' | 'updateTime'>): Promise<boolean> {
+  async update(_exec: Queryable, userId: number, expectedStateVersion: string, state: Omit<PersonalSyncState, 'createTime' | 'updateTime'>): Promise<boolean> {
     const cur = this.store.get(userId);
     if (!cur || cur.stateVersion !== expectedStateVersion) return false;
     this.store.set(userId, { ...state, createTime: cur.createTime, updateTime: new Date() });
@@ -981,14 +981,14 @@ export class FakeSyncStateRepo implements ISyncStateRepo {
 export class FakeSyncRecordRepo implements ISyncRecordRepo {
   readonly store = new Map<string, PersonalConnectionMeta>();
 
-  private key(userId: number, keyEpoch: number, recordId: Buffer): string {
+  private key(userId: number, keyEpoch: string, recordId: Buffer): string {
     return `${userId}:${keyEpoch}:${recordId.toString('base64url')}`;
   }
 
   async create(_exec: Queryable, input: {
-    userId: number; keyEpoch: number; recordId: Buffer;
+    userId: number; keyEpoch: string; recordId: Buffer;
     cipherSuite: PersonalConnectionMeta['cipherSuite']; formatVersion: PersonalConnectionMeta['formatVersion'];
-    nonce: Buffer; ciphertext: Buffer; tag: Buffer; version: number; changeSequence: number;
+    nonce: Buffer; ciphertext: Buffer; tag: Buffer; version: string; changeSequence: string;
   }): Promise<PersonalConnectionMeta> {
     const meta: PersonalConnectionMeta = {
       id: nextId(),
@@ -1002,14 +1002,14 @@ export class FakeSyncRecordRepo implements ISyncRecordRepo {
     return meta;
   }
 
-  async findForUpdate(_exec: Queryable, userId: number, keyEpoch: number, recordId: Buffer): Promise<PersonalConnectionMeta | undefined> {
+  async findForUpdate(_exec: Queryable, userId: number, keyEpoch: string, recordId: Buffer): Promise<PersonalConnectionMeta | undefined> {
     return this.store.get(this.key(userId, keyEpoch, recordId));
   }
 
   async update(_exec: Queryable, input: {
-    userId: number; keyEpoch: number; recordId: Buffer; baseVersion: number;
+    userId: number; keyEpoch: string; recordId: Buffer; baseVersion: string;
     cipherSuite: PersonalConnectionMeta['cipherSuite']; formatVersion: PersonalConnectionMeta['formatVersion'];
-    nonce: Buffer; ciphertext: Buffer; tag: Buffer; newVersion: number; changeSequence: number;
+    nonce: Buffer; ciphertext: Buffer; tag: Buffer; newVersion: string; changeSequence: string;
   }): Promise<boolean> {
     const m = this.store.get(this.key(input.userId, input.keyEpoch, input.recordId));
     if (!m || m.deleteTime || m.version !== input.baseVersion) return false;
@@ -1019,21 +1019,24 @@ export class FakeSyncRecordRepo implements ISyncRecordRepo {
     return true;
   }
 
-  async softDelete(_exec: Queryable, userId: number, keyEpoch: number, recordId: Buffer, baseVersion: number, newVersion: number, changeSequence: number, now: Date): Promise<boolean> {
+  async softDelete(_exec: Queryable, userId: number, keyEpoch: string, recordId: Buffer, baseVersion: string, newVersion: string, changeSequence: string, now: Date): Promise<boolean> {
     const m = this.store.get(this.key(userId, keyEpoch, recordId));
     if (!m || m.deleteTime || m.version !== baseVersion) return false;
     m.ciphertext = null; m.tag = null; m.version = newVersion; m.changeSequence = changeSequence; m.deleteTime = now; m.updateTime = new Date();
     return true;
   }
 
-  async listByFeed(_exec: Queryable, userId: number, keyEpoch: number, after: number, snapshotSequence: number, limit: number): Promise<PersonalConnectionMeta[]> {
+  async listByFeed(_exec: Queryable, userId: number, keyEpoch: string, after: string, snapshotSequence: string, limit: number): Promise<PersonalConnectionMeta[]> {
+    const afterN = BigInt(after);
+    const snapN = BigInt(snapshotSequence);
     return [...this.store.values()]
-      .filter((m) => m.userId === userId && m.keyEpoch === keyEpoch && m.changeSequence > after && m.changeSequence <= snapshotSequence)
-      .sort((a, b) => a.changeSequence - b.changeSequence)
+      .filter((m) => m.userId === userId && m.keyEpoch === keyEpoch
+        && BigInt(m.changeSequence) > afterN && BigInt(m.changeSequence) <= snapN)
+      .sort((a, b) => (BigInt(a.changeSequence) > BigInt(b.changeSequence) ? 1 : BigInt(a.changeSequence) < BigInt(b.changeSequence) ? -1 : 0))
       .slice(0, limit);
   }
 
-  async countActive(_exec: Queryable, userId: number, keyEpoch: number): Promise<{ count: number; bytes: number }> {
+  async countActive(_exec: Queryable, userId: number, keyEpoch: string): Promise<{ count: number; bytes: number }> {
     let count = 0; let bytes = 0;
     for (const m of this.store.values()) {
       if (m.userId === userId && m.keyEpoch === keyEpoch && !m.deleteTime) {
@@ -1044,19 +1047,17 @@ export class FakeSyncRecordRepo implements ISyncRecordRepo {
     return { count, bytes };
   }
 
-  async tombstoneAllByEpoch(_exec: Queryable, userId: number, keyEpoch: number, now: Date): Promise<void> {
-    for (const m of this.store.values()) {
-      if (m.userId === userId && m.keyEpoch === keyEpoch && !m.deleteTime) {
-        m.ciphertext = null; m.tag = null; m.deleteTime = now;
-      }
-    }
+  async listActiveByEpoch(_exec: Queryable, userId: number, keyEpoch: string): Promise<PersonalConnectionMeta[]> {
+    return [...this.store.values()]
+      .filter((m) => m.userId === userId && m.keyEpoch === keyEpoch && !m.deleteTime)
+      .sort((a, b) => (BigInt(a.changeSequence) > BigInt(b.changeSequence) ? 1 : -1));
   }
 }
 
 export class FakeSyncNonceRepo implements ISyncNonceRepo {
   private readonly seen = new Set<string>();
 
-  async insert(_exec: Queryable, userId: number, keyEpoch: number, nonce: Buffer): Promise<boolean> {
+  async insert(_exec: Queryable, userId: number, keyEpoch: string, nonce: Buffer): Promise<boolean> {
     const k = `${userId}:${keyEpoch}:${nonce.toString('base64url')}`;
     if (this.seen.has(k)) return false;
     this.seen.add(k);
@@ -1067,17 +1068,17 @@ export class FakeSyncNonceRepo implements ISyncNonceRepo {
 export class FakeSyncMutationRepo implements ISyncMutationRepo {
   readonly store = new Map<string, SyncMutation>();
 
-  private key(userId: number, keyEpoch: number, mutationId: Buffer): string {
+  private key(userId: number, keyEpoch: string, mutationId: Buffer): string {
     return `${userId}:${keyEpoch}:${mutationId.toString('base64url')}`;
   }
 
-  async findByMutationId(_exec: Queryable, userId: number, keyEpoch: number, mutationId: Buffer): Promise<SyncMutation | undefined> {
+  async findByMutationId(_exec: Queryable, userId: number, keyEpoch: string, mutationId: Buffer): Promise<SyncMutation | undefined> {
     return this.store.get(this.key(userId, keyEpoch, mutationId));
   }
 
   async record(_exec: Queryable, input: {
-    userId: number; keyEpoch: number; mutationId: Buffer; requestDigest: Buffer;
-    action: SyncAction; resultVersion: number | null; resultChangeSequence: number | null;
+    userId: number; keyEpoch: string; mutationId: Buffer; requestDigest: Buffer;
+    action: SyncAction; resultVersion: string | null; resultChangeSequence: string | null;
     status: SyncMutationStatus; expiresTime: Date;
   }): Promise<void> {
     this.store.set(this.key(input.userId, input.keyEpoch, input.mutationId), {

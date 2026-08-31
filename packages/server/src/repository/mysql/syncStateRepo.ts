@@ -6,7 +6,24 @@ import type {
 } from '../../domain/entities.js';
 import type { MysqlDb, Queryable } from './db.js';
 
-const COLS = [
+// u64 协议字段（key_epoch/state_version/change_sequence/envelope versions）在 SQL 层
+// CAST AS CHAR 返回十进制字符串，避免 mysql2 默认 number 的 2^53 精度丢失（§8.1.7/8）。
+const SELECT_COLS = `
+  user_id,
+  CAST(key_epoch AS CHAR) AS key_epoch,
+  CAST(state_version AS CHAR) AS state_version,
+  CAST(change_sequence AS CHAR) AS change_sequence,
+  protocol_version, cipher_suite, format_version,
+  smp_kdf_json, recovery_kdf_json,
+  CAST(envelope_smp_version AS CHAR) AS envelope_smp_version,
+  envelope_smp_nonce, envelope_smp_ct, envelope_smp_tag,
+  CAST(envelope_recovery_version AS CHAR) AS envelope_recovery_version,
+  envelope_recovery_nonce, envelope_recovery_ct, envelope_recovery_tag,
+  sign_pub, recover_sign_pub, recovery_code_set_time,
+  create_time, update_time
+`;
+
+const INSERT_COLS = [
   'user_id', 'key_epoch', 'state_version', 'change_sequence',
   'protocol_version', 'cipher_suite', 'format_version',
   'smp_kdf_json', 'recovery_kdf_json',
@@ -45,9 +62,9 @@ function mapState(r: any): PersonalSyncState {
   const rec = typeof r.recovery_kdf_json === 'string' ? JSON.parse(r.recovery_kdf_json) : r.recovery_kdf_json;
   return {
     userId: r.user_id,
-    keyEpoch: r.key_epoch,
-    stateVersion: r.state_version,
-    changeSequence: r.change_sequence,
+    keyEpoch: String(r.key_epoch),
+    stateVersion: String(r.state_version),
+    changeSequence: String(r.change_sequence),
     protocolVersion: r.protocol_version,
     cipherSuite: r.cipher_suite,
     formatVersion: r.format_version,
@@ -58,8 +75,8 @@ function mapState(r: any): PersonalSyncState {
     recoveryKdf: {
       alg: 'hkdf-sha256', version: 1, salt: Buffer.from(rec.salt, 'base64url'), outputBytes: 32,
     },
-    envelopeSmp: { version: r.envelope_smp_version, nonce: r.envelope_smp_nonce, ct: r.envelope_smp_ct, tag: r.envelope_smp_tag },
-    envelopeRecovery: { version: r.envelope_recovery_version, nonce: r.envelope_recovery_nonce, ct: r.envelope_recovery_ct, tag: r.envelope_recovery_tag },
+    envelopeSmp: { version: String(r.envelope_smp_version), nonce: r.envelope_smp_nonce, ct: r.envelope_smp_ct, tag: r.envelope_smp_tag },
+    envelopeRecovery: { version: String(r.envelope_recovery_version), nonce: r.envelope_recovery_nonce, ct: r.envelope_recovery_ct, tag: r.envelope_recovery_tag },
     signPub: r.sign_pub,
     recoverSignPub: r.recover_sign_pub,
     recoveryCodeSetTime: r.recovery_code_set_time ? new Date(r.recovery_code_set_time) : null,
@@ -72,30 +89,29 @@ export class MysqlSyncStateRepo implements ISyncStateRepo {
   constructor(private readonly db: () => MysqlDb) {}
 
   async findByUserId(userId: number): Promise<PersonalSyncState | undefined> {
-    const [rows] = await this.db().query<any[]>('SELECT * FROM personal_sync_state WHERE user_id = ?', [userId]);
+    const [rows] = await this.db().query<any[]>(`SELECT ${SELECT_COLS} FROM personal_sync_state WHERE user_id = ?`, [userId]);
     return rows[0] ? mapState(rows[0]) : undefined;
   }
 
   async lockByUserId(exec: Queryable, userId: number): Promise<PersonalSyncState | undefined> {
-    const [rows] = await exec.query<any[]>('SELECT * FROM personal_sync_state WHERE user_id = ? FOR UPDATE', [userId]);
+    const [rows] = await exec.query<any[]>(`SELECT ${SELECT_COLS} FROM personal_sync_state WHERE user_id = ? FOR UPDATE`, [userId]);
     return rows[0] ? mapState(rows[0]) : undefined;
   }
 
   async create(exec: Queryable, state: StateInput): Promise<boolean> {
     try {
       await exec.query<any>(
-        `INSERT INTO personal_sync_state (${COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO personal_sync_state (${INSERT_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         params(state),
       );
       return true;
     } catch (err: any) {
-      // PK 冲突（user_id 已有 state）→ init 竞态，返回 false 对应 409 SYNC_STATE_EXISTS。
       if (err?.code === 'ER_DUP_ENTRY' || err?.errno === 1062) return false;
       throw err;
     }
   }
 
-  async update(exec: Queryable, userId: number, expectedStateVersion: number, state: StateInput): Promise<boolean> {
+  async update(exec: Queryable, userId: number, expectedStateVersion: string, state: StateInput): Promise<boolean> {
     const [result] = await exec.query<any>(
       `UPDATE personal_sync_state
        SET key_epoch = ?, state_version = ?, change_sequence = ?,

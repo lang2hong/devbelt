@@ -2,19 +2,29 @@ import type { ISyncRecordRepo } from '../interfaces.js';
 import type { PersonalConnectionMeta } from '../../domain/entities.js';
 import type { Queryable } from './db.js';
 
+// u64 协议字段（key_epoch/version/change_sequence）CAST AS CHAR 返回十进制字符串（§8.1.7/8）。
+const SELECT_COLS = `
+  id, user_id,
+  CAST(key_epoch AS CHAR) AS key_epoch,
+  record_id, cipher_suite, format_version, nonce, ciphertext, tag,
+  CAST(version AS CHAR) AS version,
+  CAST(change_sequence AS CHAR) AS change_sequence,
+  update_time, delete_time
+`;
+
 function mapMeta(r: any): PersonalConnectionMeta {
   return {
     id: r.id,
     userId: r.user_id,
-    keyEpoch: r.key_epoch,
+    keyEpoch: String(r.key_epoch),
     recordId: r.record_id,
     cipherSuite: r.cipher_suite,
     formatVersion: r.format_version,
     nonce: r.nonce,
     ciphertext: r.ciphertext != null ? (Buffer.isBuffer(r.ciphertext) ? r.ciphertext : Buffer.from(r.ciphertext)) : null,
     tag: r.tag != null ? (Buffer.isBuffer(r.tag) ? r.tag : Buffer.from(r.tag)) : null,
-    version: r.version,
-    changeSequence: r.change_sequence,
+    version: String(r.version),
+    changeSequence: String(r.change_sequence),
     updateTime: new Date(r.update_time),
     deleteTime: r.delete_time ? new Date(r.delete_time) : null,
   };
@@ -23,15 +33,15 @@ function mapMeta(r: any): PersonalConnectionMeta {
 export class MysqlSyncRecordRepo implements ISyncRecordRepo {
   async create(exec: Queryable, input: {
     userId: number;
-    keyEpoch: number;
+    keyEpoch: string;
     recordId: Buffer;
     cipherSuite: PersonalConnectionMeta['cipherSuite'];
     formatVersion: PersonalConnectionMeta['formatVersion'];
     nonce: Buffer;
     ciphertext: Buffer;
     tag: Buffer;
-    version: number;
-    changeSequence: number;
+    version: string;
+    changeSequence: string;
   }): Promise<PersonalConnectionMeta> {
     await exec.query(
       `INSERT INTO personal_connection_meta
@@ -45,18 +55,17 @@ export class MysqlSyncRecordRepo implements ISyncRecordRepo {
     return created;
   }
 
-  /** 非公开辅助：回读已写入的 record（loose，无锁）。 */
-  private async findById(exec: Queryable, userId: number, keyEpoch: number, recordId: Buffer): Promise<PersonalConnectionMeta | undefined> {
+  private async findById(exec: Queryable, userId: number, keyEpoch: string, recordId: Buffer): Promise<PersonalConnectionMeta | undefined> {
     const [rows] = await exec.query<any[]>(
-      'SELECT * FROM personal_connection_meta WHERE user_id = ? AND key_epoch = ? AND record_id = ?',
+      `SELECT ${SELECT_COLS} FROM personal_connection_meta WHERE user_id = ? AND key_epoch = ? AND record_id = ?`,
       [userId, keyEpoch, recordId],
     );
     return rows[0] ? mapMeta(rows[0]) : undefined;
   }
 
-  async findForUpdate(exec: Queryable, userId: number, keyEpoch: number, recordId: Buffer): Promise<PersonalConnectionMeta | undefined> {
+  async findForUpdate(exec: Queryable, userId: number, keyEpoch: string, recordId: Buffer): Promise<PersonalConnectionMeta | undefined> {
     const [rows] = await exec.query<any[]>(
-      'SELECT * FROM personal_connection_meta WHERE user_id = ? AND key_epoch = ? AND record_id = ? FOR UPDATE',
+      `SELECT ${SELECT_COLS} FROM personal_connection_meta WHERE user_id = ? AND key_epoch = ? AND record_id = ? FOR UPDATE`,
       [userId, keyEpoch, recordId],
     );
     return rows[0] ? mapMeta(rows[0]) : undefined;
@@ -64,16 +73,16 @@ export class MysqlSyncRecordRepo implements ISyncRecordRepo {
 
   async update(exec: Queryable, input: {
     userId: number;
-    keyEpoch: number;
+    keyEpoch: string;
     recordId: Buffer;
-    baseVersion: number;
+    baseVersion: string;
     cipherSuite: PersonalConnectionMeta['cipherSuite'];
     formatVersion: PersonalConnectionMeta['formatVersion'];
     nonce: Buffer;
     ciphertext: Buffer;
     tag: Buffer;
-    newVersion: number;
-    changeSequence: number;
+    newVersion: string;
+    changeSequence: string;
   }): Promise<boolean> {
     const [result] = await exec.query<any>(
       `UPDATE personal_connection_meta
@@ -87,7 +96,7 @@ export class MysqlSyncRecordRepo implements ISyncRecordRepo {
     return Number(result.affectedRows) === 1;
   }
 
-  async softDelete(exec: Queryable, userId: number, keyEpoch: number, recordId: Buffer, baseVersion: number, newVersion: number, changeSequence: number, now: Date): Promise<boolean> {
+  async softDelete(exec: Queryable, userId: number, keyEpoch: string, recordId: Buffer, baseVersion: string, newVersion: string, changeSequence: string, now: Date): Promise<boolean> {
     const [result] = await exec.query<any>(
       `UPDATE personal_connection_meta
        SET ciphertext = NULL, tag = NULL, version = ?, change_sequence = ?, delete_time = ?
@@ -97,17 +106,17 @@ export class MysqlSyncRecordRepo implements ISyncRecordRepo {
     return Number(result.affectedRows) === 1;
   }
 
-  async listByFeed(exec: Queryable, userId: number, keyEpoch: number, after: number, snapshotSequence: number, limit: number): Promise<PersonalConnectionMeta[]> {
+  async listByFeed(exec: Queryable, userId: number, keyEpoch: string, after: string, snapshotSequence: string, limit: number): Promise<PersonalConnectionMeta[]> {
     const [rows] = await exec.query<any[]>(
-      `SELECT * FROM personal_connection_meta
+      `SELECT ${SELECT_COLS} FROM personal_connection_meta
        WHERE user_id = ? AND key_epoch = ? AND change_sequence > ? AND change_sequence <= ?
-       ORDER BY change_sequence ASC LIMIT ?`,
+       ORDER BY change_sequence + 0 ASC LIMIT ?`,
       [userId, keyEpoch, after, snapshotSequence, limit],
     );
     return rows.map(mapMeta);
   }
 
-  async countActive(exec: Queryable, userId: number, keyEpoch: number): Promise<{ count: number; bytes: number }> {
+  async countActive(exec: Queryable, userId: number, keyEpoch: string): Promise<{ count: number; bytes: number }> {
     const [rows] = await exec.query<any[]>(
       `SELECT COUNT(*) AS cnt, COALESCE(SUM(OCTET_LENGTH(ciphertext) + OCTET_LENGTH(tag) + OCTET_LENGTH(nonce)), 0) AS bytes
        FROM personal_connection_meta
@@ -117,11 +126,13 @@ export class MysqlSyncRecordRepo implements ISyncRecordRepo {
     return { count: Number(rows[0]?.cnt ?? 0), bytes: Number(rows[0]?.bytes ?? 0) };
   }
 
-  async tombstoneAllByEpoch(exec: Queryable, userId: number, keyEpoch: number, now: Date): Promise<void> {
-    await exec.query(
-      `UPDATE personal_connection_meta SET ciphertext = NULL, tag = NULL, delete_time = ?
-       WHERE user_id = ? AND key_epoch = ? AND delete_time IS NULL`,
-      [now, userId, keyEpoch],
+  async listActiveByEpoch(exec: Queryable, userId: number, keyEpoch: string): Promise<PersonalConnectionMeta[]> {
+    const [rows] = await exec.query<any[]>(
+      `SELECT ${SELECT_COLS} FROM personal_connection_meta
+       WHERE user_id = ? AND key_epoch = ? AND delete_time IS NULL
+       ORDER BY change_sequence + 0 ASC`,
+      [userId, keyEpoch],
     );
+    return rows.map(mapMeta);
   }
 }

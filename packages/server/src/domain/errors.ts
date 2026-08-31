@@ -167,3 +167,48 @@ export class FolderMoveCycleError extends DomainError {
     this.name = 'FolderMoveCycleError';
   }
 }
+
+// ── 个人 E2E 同步（§8.1.11）──
+
+/** 无 active sync state 的读写（与从未注册同形）→ 400 SYNC_NOT_INITIALIZED。 */
+export class SyncNotInitializedError extends DomainError {
+  constructor() { super('sync not initialized', 'SYNC_NOT_INITIALIZED'); this.name = 'SyncNotInitializedError'; }
+}
+
+/** 请求 protocol/cipher/format 不在支持集 → 400 SYNC_PROTOCOL_UNSUPPORTED。 */
+export class SyncProtocolUnsupportedError extends DomainError {
+  constructor(message = 'sync protocol unsupported') { super(message, 'SYNC_PROTOCOL_UNSUPPORTED'); this.name = 'SyncProtocolUnsupportedError'; }
+}
+
+/** 签名验证失败（未证明持钥=无权）→ 403 SYNC_SIGNATURE_INVALID。 */
+export class SyncSignatureInvalidError extends DomainError {
+  constructor() { super('sync signature invalid', 'SYNC_SIGNATURE_INVALID'); this.name = 'SyncSignatureInvalidError'; }
+}
+
+/** 重复 init → 409 SYNC_STATE_EXISTS。 */
+export class SyncStateExistsError extends DomainError {
+  constructor() { super('sync state already exists', 'SYNC_STATE_EXISTS'); this.name = 'SyncStateExistsError'; }
+}
+
+/** 请求 keyEpoch ≠ active keyEpoch → 409 SYNC_EPOCH_STALE（附 currentKeyEpoch）。 */
+export class SyncEpochStaleError extends DomainError {
+  constructor(public readonly currentKeyEpoch: string) { super('sync epoch stale', 'SYNC_EPOCH_STALE'); this.name = 'SyncEpochStaleError'; }
+}
+
+/** baseVersion/expectedStateVersion 与当前不一致（乐观锁）→ 409 SYNC_VERSION_CONFLICT（附 currentVersion）。 */
+export class SyncVersionConflictError extends DomainError {
+  constructor(public readonly currentVersion: string) { super('sync version conflict', 'SYNC_VERSION_CONFLICT'); this.name = 'SyncVersionConflictError'; }
+}
+
+/** (user_id,key_epoch) 下 nonce 复用 → 409 SYNC_NONCE_REUSED。 */
+export class SyncNonceReusedError extends DomainError {
+  constructor() { super('sync nonce reused', 'SYNC_NONCE_REUSED'); this.name = 'SyncNonceReusedError'; }
+}
+
+/** count/bytes 配额超限 → 409 SYNC_QUOTA_EXCEEDED（附 quota/limit/used）。 */
+export class SyncQuotaExceededError extends DomainError {
+  constructor(public readonly quota: 'count' | 'bytes', public readonly limit: string, public readonly used: string) {
+    super('sync quota exceeded', 'SYNC_QUOTA_EXCEEDED');
+    this.name = 'SyncQuotaExceededError';
+  }
+}

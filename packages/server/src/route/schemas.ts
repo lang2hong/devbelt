@@ -226,3 +226,125 @@ export const resourceIdParam = {
     resourceId: { type: 'string', pattern: '^[0-9]{1,20}$' },
   },
 } as const;
+
+// ── 个人 E2E 同步（§8.1 专项）──
+
+/** base64url 无 padding，固定字符长度。 */
+const b64url = (min: number, max: number) => ({ type: 'string' as const, minLength: min, maxLength: max, pattern: '^[A-Za-z0-9_-]+$' });
+/** u64 十进制字符串（禁前导零；值域上限由服务层 parseU64 再校验）。 */
+const u64Str = { type: 'string' as const, pattern: '^(0|[1-9][0-9]{0,19})$' };
+/** 协议常量（V1 唯一）。 */
+const protocolV1 = { type: 'integer' as const, enum: [1] };
+const suiteV1 = { type: 'string' as const, enum: ['AES-256-GCM'] };
+
+const syncEnvelope = {
+  type: 'object',
+  required: ['protocolVersion', 'cipherSuite', 'formatVersion', 'envelopeVersion', 'nonce', 'ciphertext', 'tag'],
+  additionalProperties: false,
+  properties: {
+    protocolVersion: protocolV1,
+    cipherSuite: suiteV1,
+    formatVersion: protocolV1,
+    envelopeVersion: u64Str,
+    nonce: b64url(16, 16),
+    ciphertext: b64url(43, 43),
+    tag: b64url(22, 22),
+  },
+} as const;
+
+const smpKdfSchema = {
+  type: 'object',
+  required: ['alg', 'version', 'memoryKiB', 'iterations', 'parallelism', 'salt', 'outputBytes'],
+  additionalProperties: false,
+  properties: {
+    alg: { type: 'string', enum: ['argon2id'] },
+    version: { type: 'integer', enum: [1] },
+    memoryKiB: { type: 'integer', minimum: 65536, maximum: 262144 },
+    iterations: { type: 'integer', minimum: 3, maximum: 10 },
+    parallelism: { type: 'integer', minimum: 1, maximum: 4 },
+    salt: b64url(22, 22),
+    outputBytes: { type: 'integer', enum: [32] },
+  },
+} as const;
+
+const recoveryKdfSchema = {
+  type: 'object',
+  required: ['alg', 'version', 'salt', 'outputBytes'],
+  additionalProperties: false,
+  properties: {
+    alg: { type: 'string', enum: ['hkdf-sha256'] },
+    version: { type: 'integer', enum: [1] },
+    salt: b64url(22, 22),
+    outputBytes: { type: 'integer', enum: [32] },
+  },
+} as const;
+
+const syncNewState = {
+  type: 'object',
+  required: ['protocolVersion', 'cipherSuite', 'formatVersion', 'smpKdf', 'recoveryKdf', 'envelopeSmp', 'envelopeRecovery', 'signPub', 'recoverSignPub'],
+  additionalProperties: false,
+  properties: {
+    protocolVersion: protocolV1,
+    cipherSuite: suiteV1,
+    formatVersion: protocolV1,
+    smpKdf: smpKdfSchema,
+    recoveryKdf: recoveryKdfSchema,
+    envelopeSmp: syncEnvelope,
+    envelopeRecovery: syncEnvelope,
+    signPub: b64url(43, 43),
+    recoverSignPub: b64url(43, 43),
+  },
+} as const;
+
+/** SignedMutation 公共字段（keyEpoch/mutationId/signature + 协议版本）。 */
+const signedMutationProps = {
+  protocolVersion: protocolV1,
+  keyEpoch: u64Str,
+  mutationId: b64url(22, 22),
+  signature: b64url(86, 86),
+} as const;
+
+export const syncInitBody = {
+  type: 'object',
+  required: ['newState'],
+  additionalProperties: false,
+  properties: { newState: syncNewState },
+} as const;
+
+export const syncChangeKeyBody = {
+  type: 'object',
+  required: ['protocolVersion', 'keyEpoch', 'mutationId', 'signature', 'expectedStateVersion', 'smpKdf', 'envelopeSmp'],
+  additionalProperties: false,
+  properties: {
+    ...signedMutationProps,
+    expectedStateVersion: u64Str,
+    smpKdf: smpKdfSchema,
+    envelopeSmp: syncEnvelope,
+  },
+} as const;
+
+export const syncRecoverBody = {
+  type: 'object',
+  required: ['protocolVersion', 'keyEpoch', 'mutationId', 'signature', 'expectedStateVersion', 'smpKdf', 'envelopeSmp', 'recoveryKdf', 'envelopeRecovery', 'recoverSignPub'],
+  additionalProperties: false,
+  properties: {
+    ...signedMutationProps,
+    expectedStateVersion: u64Str,
+    smpKdf: smpKdfSchema,
+    envelopeSmp: syncEnvelope,
+    recoveryKdf: recoveryKdfSchema,
+    envelopeRecovery: syncEnvelope,
+    recoverSignPub: b64url(43, 43),
+  },
+} as const;
+
+export const syncDestroyBody = {
+  type: 'object',
+  required: ['protocolVersion', 'keyEpoch', 'mutationId', 'signature', 'expectedStateVersion', 'newState'],
+  additionalProperties: false,
+  properties: {
+    ...signedMutationProps,
+    expectedStateVersion: u64Str,
+    newState: syncNewState,
+  },
+} as const;

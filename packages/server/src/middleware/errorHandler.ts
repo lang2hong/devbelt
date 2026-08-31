@@ -1,10 +1,24 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { DomainError, RateLimitedError, ResourceVersionConflictError } from '../domain/errors.js';
+import {
+  DomainError,
+  RateLimitedError,
+  ResourceVersionConflictError,
+  SyncEpochStaleError,
+  SyncVersionConflictError,
+  SyncQuotaExceededError,
+} from '../domain/errors.js';
 
-/** 构造 DomainError 的标准响应体；RESOURCE_VERSION_CONFLICT 附带 currentVersion（§4.3）。 */
+/** 构造 DomainError 的标准响应体；版本/配额/epoch 冲突附带对应上下文字段。 */
 function domainErrorBody(e: DomainError): Record<string, unknown> {
   const body: Record<string, unknown> = { message: e.message, code: e.code };
   if (e instanceof ResourceVersionConflictError) body.currentVersion = e.currentVersion;
+  if (e instanceof SyncVersionConflictError) body.currentVersion = e.currentVersion;
+  if (e instanceof SyncEpochStaleError) body.currentKeyEpoch = e.currentKeyEpoch;
+  if (e instanceof SyncQuotaExceededError) {
+    body.quota = e.quota;
+    body.limit = e.limit;
+    body.used = e.used;
+  }
   return body;
 }
 
@@ -73,6 +87,8 @@ export function errorStatus(code: string): number {
     case 'FORBIDDEN':
     case 'ORGANIZATION_FEATURE_REQUIRED':
       return 403;
+    case 'SYNC_SIGNATURE_INVALID':
+      return 403;
     case 'ORGANIZATION_NOT_FOUND':
     case 'NOT_FOUND':
     case 'RESOURCE_NOT_FOUND':
@@ -84,10 +100,19 @@ export function errorStatus(code: string): number {
     case 'ORGANIZATION_ADMIN_REQUIRED':
     case 'CONFLICT':
       return 409;
+    case 'SYNC_STATE_EXISTS':
+    case 'SYNC_EPOCH_STALE':
+    case 'SYNC_VERSION_CONFLICT':
+    case 'SYNC_NONCE_REUSED':
+    case 'SYNC_QUOTA_EXCEEDED':
+      return 409;
     case 'RESOURCE_CONTENT_INVALID':
     case 'INVITATION_INVALID':
     case 'INVITATION_TARGET_NOT_ELIGIBLE':
     case 'VALIDATION_FAILED':
+      return 400;
+    case 'SYNC_NOT_INITIALIZED':
+    case 'SYNC_PROTOCOL_UNSUPPORTED':
       return 400;
     case 'TOO_MANY_REQUESTS':
       return 429;

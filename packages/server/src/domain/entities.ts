@@ -241,20 +241,20 @@ export interface RecoveryKdf {
   outputBytes: 32;
 }
 
-/** 同步 envelope（加密后的 DEK：nonce 12B、ct 32B、tag 16B）。 */
+/** 同步 envelope（加密后的 DEK：nonce 12B、ct 32B、tag 16B）。version 为十进制字符串（u64）。 */
 export interface SyncEnvelope {
-  version: number;
+  version: string;
   nonce: Buffer;
   ct: Buffer;
   tag: Buffer;
 }
 
-/** 个人同步状态（每用户严格单行，§8.1.5）。 */
+/** 个人同步状态（每用户严格单行，§8.1.5）。u64 协议字段一律十进制字符串。 */
 export interface PersonalSyncState {
   userId: number;
-  keyEpoch: number;
-  stateVersion: number;
-  changeSequence: number;
+  keyEpoch: string;
+  stateVersion: string;
+  changeSequence: string;
   protocolVersion: SyncProtocolVersion;
   cipherSuite: SyncCipherSuite;
   formatVersion: SyncFormatVersion;
@@ -269,32 +269,32 @@ export interface PersonalSyncState {
   updateTime: Date;
 }
 
-/** 个人 E2E record / tombstone（ciphertext/tag 于 tombstone 时为空）。 */
+/** 个人 E2E record / tombstone（ciphertext/tag 于 tombstone 时为空）。u64 协议字段十进制字符串。 */
 export interface PersonalConnectionMeta {
   id: number;
   userId: number;
-  keyEpoch: number;
+  keyEpoch: string;
   recordId: Buffer;
   cipherSuite: SyncCipherSuite;
   formatVersion: SyncFormatVersion;
   nonce: Buffer;
   ciphertext: Buffer | null;
   tag: Buffer | null;
-  version: number;
-  changeSequence: number;
+  version: string;
+  changeSequence: string;
   updateTime: Date;
   deleteTime: Date | null;
 }
 
-/** mutation receipt（冗等重放；只存定长字段）。 */
+/** mutation receipt（冗等重放；只存定长字段）。u64 协议字段十进制字符串。 */
 export interface SyncMutation {
   userId: number;
-  keyEpoch: number;
+  keyEpoch: string;
   mutationId: Buffer;
   requestDigest: Buffer;
   action: SyncAction;
-  resultVersion: number | null;
-  resultChangeSequence: number | null;
+  resultVersion: string | null;
+  resultChangeSequence: string | null;
   status: SyncMutationStatus;
   expiresTime: Date;
   createTime: Date;
