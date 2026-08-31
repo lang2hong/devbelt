@@ -158,9 +158,22 @@ export class SyncClient {
     private readonly fetchImpl: typeof undiciFetch = undiciFetch,
   ) {}
 
-  /** 注册 */
-  async register(email: string, password: string): Promise<AuthResult> {
-    return this.postForm('/api/auth/register', { email, password });
+  /**
+   * 注册（V3：仅创建账号 + 发验证邮件，201 不回 token）。
+   * 后续须经 confirmEmail 验证邮箱，再 login 取得 token。
+   */
+  async register(email: string, password: string): Promise<{ ok: boolean }> {
+    return (await this.postJson('/api/auth/register', { email, password })) as { ok: boolean };
+  }
+
+  /** 消费初始邮箱验证 token（§4.7 单次消费）。 */
+  async confirmEmail(token: string): Promise<{ ok: boolean }> {
+    return (await this.postJson(`/api/auth/email-verifications/${encodeURIComponent(token)}/confirm`, undefined)) as { ok: boolean };
+  }
+
+  /** 匿名重发验证邮件（§5：不区分邮箱是否存在，响应恒成功，防枚举）。 */
+  async resendVerification(email: string): Promise<{ ok: boolean }> {
+    return (await this.postJson('/api/auth/email-verifications', { email })) as { ok: boolean };
   }
 
   /** 登录 */
@@ -185,7 +198,7 @@ export class SyncClient {
     if (!rt) throw new Error('no refresh token');
     const res = await this.fetchImpl(`${this.baseUrl}/api/auth/refresh`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...this.deviceHeaders() },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken: rt, ...this.deviceFields() }),
       dispatcher: directAgent,
     } as any);
@@ -310,6 +323,17 @@ export class SyncClient {
     return res.json() as Promise<AuthResult>;
   }
 
+  /** 匿名 POST（无鉴权、无刷新），body 可缺省（如 confirm 仅 URL 携带 token）。 */
+  private async postJson(path: string, body: unknown): Promise<unknown> {
+    const res = await this.request('POST', path, body, false);
+    if (!res.ok) {
+      const errBody = (await res.json().catch(() => ({}))) as { code?: string; message?: string };
+      const code = errBody.code ? ` [${errBody.code}]` : '';
+      throw new Error(errBody.message ? `${errBody.message}${code}` : `Request failed: ${res.status}`);
+    }
+    return res.json().catch(() => ({}));
+  }
+
   /**
    * 带重试 + 401 自动刷新的 HTTP 请求。
    * 401 且 needsAuth：尝试 refresh 换新 access，成功则重试一次。
@@ -319,7 +343,7 @@ export class SyncClient {
     // body 为空时（GET / DELETE）不带 Content-Type，否则 fastify 的 content-type-parser
     // 会尝试解析空 body 报 FST_ERR_CTP_EMPTY_JSON_BODY（如 free 用户撤销设备应返回 403，
     // 却被 400 拦在 handler 之前）。
-    const headers: Record<string, string> = { ...this.deviceHeaders() };
+    const headers: Record<string, string> = {};
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     const init: RequestInit = { method, headers };
     const tokenBefore = needsAuth ? this.getAccessToken() : undefined;
@@ -393,27 +417,6 @@ export class SyncClient {
 
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  /** 设备标识头（登录/刷新时上报设备信息） */
-  private deviceHeaders(): Record<string, string> {
-    const d = this.device;
-    if (!d) return {};
-    const headers: Record<string, string> = {
-      'X-Device-Name': d.deviceName,
-      'X-Device-Id': d.deviceId,
-      'X-Device-Machine-Id': d.machineId,
-      'X-Device-Hostname': d.hostname,
-      'X-Device-Os': d.os,
-      'X-Device-Arch': d.arch,
-      'X-Device-Os-Version': d.osVersion,
-      'X-Device-App': d.appName,
-      'X-Device-App-Version': d.appVersion,
-      'X-Device-Language': d.language,
-      'X-Device-Timezone': d.timezone,
-    };
-    if (d.remoteName) headers['X-Device-Remote'] = d.remoteName;
-    return headers;
   }
 
   /**

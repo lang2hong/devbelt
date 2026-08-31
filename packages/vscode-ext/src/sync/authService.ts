@@ -200,10 +200,18 @@ export class AuthService {
   }
 
   /** 注册并登录 */
-  async register(email: string, password: string): Promise<AuthResult> {
-    const result = await this.client.register(email, password);
-    await this.saveSession(result, email);
-    return result;
+  async register(email: string, password: string): Promise<{ ok: boolean }> {
+    return this.client.register(email, password);
+  }
+
+  /** 消费初始邮箱验证 token（注册后经邮件链接/输入 token 验证）。 */
+  async confirmEmail(token: string): Promise<{ ok: boolean }> {
+    return this.client.confirmEmail(token);
+  }
+
+  /** 匿名重发验证邮件。 */
+  async resendVerification(email: string): Promise<{ ok: boolean }> {
+    return this.client.resendVerification(email);
   }
 
   /** 登录 */

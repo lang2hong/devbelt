@@ -358,3 +358,62 @@ describe('V3 login/refresh 请求体必带 DeviceFields（§4.6）', () => {
     expect(key).toMatch(/^[A-Za-z0-9_-]{16,128}$/);
   });
 });
+
+describe('V3 注册/验证流程（register 不回 token）', () => {
+  const device = {
+    deviceName: 'test-host · linux/x64',
+    deviceId: 'abcdef0123456789abcdef0123456789',
+    machineId: 'fedcba9876543210fedcba9876543210',
+    hostname: 'test-host',
+    os: 'linux',
+    arch: 'x64',
+    osVersion: '6.0',
+    appName: 'VSCode',
+    appVersion: '1.90.0',
+    language: 'en',
+    timezone: 'UTC',
+  };
+
+  it('register 请求体仅含 email/password，不回 token', async () => {
+    const bodies: unknown[] = [];
+    const fetchMock = vi.fn(async (_url: unknown, init: any) => {
+      bodies.push(init?.body ? JSON.parse(init.body) : undefined);
+      return jsonRes(201, { ok: true });
+    });
+    const client = new SyncClient('http://x', () => undefined, () => undefined, undefined, device as any, fetchMock as any);
+
+    const result = await client.register('a@b.c', 'password-1234');
+    expect(result).toEqual({ ok: true });
+    expect(bodies[0]).toEqual({ email: 'a@b.c', password: 'password-1234' });
+  });
+
+  it('confirmEmail / resendVerification 命中对应路径', async () => {
+    const calls: { url: string; method: string; body?: unknown }[] = [];
+    const fetchMock = vi.fn(async (url: unknown, init: any) => {
+      calls.push({ url: String(url), method: init?.method ?? 'GET', body: init?.body ? JSON.parse(init.body) : undefined });
+      return jsonRes(200, { ok: true });
+    });
+    const client = new SyncClient('http://x', () => undefined, () => undefined, undefined, undefined, fetchMock as any);
+
+    await client.confirmEmail('tok_123');
+    await client.resendVerification('a@b.c');
+
+    expect(calls[0].url).toBe('http://x/api/auth/email-verifications/tok_123/confirm');
+    expect(calls[0].method).toBe('POST');
+    expect(calls[1].url).toBe('http://x/api/auth/email-verifications');
+    expect(calls[1].body).toEqual({ email: 'a@b.c' });
+  });
+
+  it('不再发送 V2 X-Device-* 请求头', async () => {
+    let headers: Record<string, string> = {};
+    const fetchMock = vi.fn(async (_url: unknown, init: any) => {
+      headers = (init?.headers ?? {}) as Record<string, string>;
+      return jsonRes(200, { accessToken: 'A', refreshToken: 'R' });
+    });
+    const client = new SyncClient('http://x', () => 'a', () => 'r', () => {}, device as any, fetchMock as any);
+
+    await client.login('a@b.c', 'password-1234');
+
+    expect(Object.keys(headers).filter((k) => k.startsWith('X-Device-'))).toEqual([]);
+  });
+});
