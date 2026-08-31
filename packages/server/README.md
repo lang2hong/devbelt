@@ -32,7 +32,6 @@ V3 Greenfield 重构的 Phase 1「身份与会话」切片：个人空间、邮�
 | `POST` | `/api/auth/logout` | 登出（撤销当前 refresh token） |
 | `POST` | `/api/auth/change-password` | 改密（认证；撤销全部 session） |
 | `GET` | `/api/me` | 当前用户 + 个人订阅 |
-| `GET` | `/api/workspaces` | Workspace 摘要（切片 1 仅 personal） |
 | `GET` | `/api/personal/subscription` | 个人订阅 |
 | `GET/DELETE` | `/api/personal/devices[/:deviceId]` | 列设备 / 撤销本人设备 |
 

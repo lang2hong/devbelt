@@ -13,7 +13,7 @@ export interface MeRouteOptions {
   personalPlanRepo: IPersonalPlanRepo;
 }
 
-/** /api/me、/api/workspaces、/api/personal/subscription（需认证）。 */
+/** /api/me、/api/personal/subscription（需认证）。 */
 export async function meRoutes(app: FastifyInstance, opts: MeRouteOptions): Promise<void> {
   app.register(authScope, {
     tokenService: opts.tokenService,
@@ -41,11 +41,6 @@ export async function meRoutes(app: FastifyInstance, opts: MeRouteOptions): Prom
         } catch (e) {
           sendError(reply, e);
         }
-      });
-
-      // Workspace 摘要：切片 1 只有个人空间；组织列表由后续切片填充
-      child.get('/api/workspaces', async (_req, reply) => {
-        reply.send({ personal: { kind: 'personal' }, organizations: [] });
       });
 
       child.get('/api/personal/subscription', async (req, reply) => {
