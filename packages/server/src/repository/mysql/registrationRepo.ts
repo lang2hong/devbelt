@@ -42,6 +42,9 @@ export class MysqlRegistrationRepo implements IRegistrationRepo {
       const entitlementSnapshot = {
         allowedDatabaseTypes: Array.isArray(allowedTypes) ? allowedTypes : [],
         maxDevices: freePlan.max_devices,
+        // 数值配额列（§8.1.6）：快照即权威，服务端只读快照不读当前 plan。
+        maxConnectionMetas: Number(freePlan.max_connection_metas ?? 0),
+        syncStorageBytes: Number(freePlan.sync_storage_bytes ?? 0),
       };
       const now = new Date();
 

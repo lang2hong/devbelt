@@ -14,6 +14,11 @@ import type {
   IOrganizationInvitationRepo,
   IFolderRepo,
   IResourceRepo,
+  ISyncStateRepo,
+  ISyncRecordRepo,
+  ISyncNonceRepo,
+  ISyncMutationRepo,
+  ISyncResetTokenRepo,
   MemberDto,
   OrganizationSummary,
   InvitationDto,
@@ -35,6 +40,10 @@ import type {
   OrganizationInvitation,
   Folder,
   Resource,
+  PersonalSyncState,
+  PersonalConnectionMeta,
+  SyncMutation,
+  SyncResetToken,
 } from '../../src/domain/entities.js';
 import type {
   UserStatus,
@@ -43,6 +52,8 @@ import type {
   OrganizationMembershipStatus,
   OrganizationSubscriptionStatus,
   ResourceType,
+  SyncAction,
+  SyncMutationStatus,
 } from '../../src/domain/enums.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 import { ConflictError } from '../../src/domain/errors.js';
@@ -168,6 +179,8 @@ export function makeFreePlan(id = nextId()): PersonalPlan {
     name: 'Free',
     allowedDatabaseTypes: ['mysql', 'sqlite'],
     maxDevices: 0,
+    maxConnectionMetas: 500,
+    syncStorageBytes: 33554432,
     status: 'active',
     createTime: new Date(),
     updateTime: new Date(),
@@ -385,6 +398,8 @@ export class FakeRegistrationRepo implements IRegistrationRepo {
     const entitlementSnapshot = {
       allowedDatabaseTypes: freePlan.allowedDatabaseTypes,
       maxDevices: freePlan.maxDevices,
+      maxConnectionMetas: freePlan.maxConnectionMetas,
+      syncStorageBytes: freePlan.syncStorageBytes,
     };
     await this.subs.create({
       userId: user.id,
@@ -934,4 +949,174 @@ function toResourceSummary(r: Resource): ResourceSummaryDto {
     createdByMembershipId: r.createdByMembershipId,
     updatedByMembershipId: r.updatedByMembershipId,
   };
+}
+
+// ── 个人 E2E 同步（§8.1 专项）──
+
+export class FakeSyncStateRepo implements ISyncStateRepo {
+  readonly store = new Map<number, PersonalSyncState>();
+
+  async findByUserId(userId: number): Promise<PersonalSyncState | undefined> {
+    return this.store.get(userId);
+  }
+
+  async lockByUserId(_exec: Queryable, userId: number): Promise<PersonalSyncState | undefined> {
+    return this.store.get(userId);
+  }
+
+  async create(_exec: Queryable, state: Omit<PersonalSyncState, 'createTime' | 'updateTime'>): Promise<boolean> {
+    if (this.store.has(state.userId)) return false;
+    this.store.set(state.userId, { ...state, createTime: new Date(), updateTime: new Date() });
+    return true;
+  }
+
+  async update(_exec: Queryable, userId: number, expectedStateVersion: number, state: Omit<PersonalSyncState, 'createTime' | 'updateTime'>): Promise<boolean> {
+    const cur = this.store.get(userId);
+    if (!cur || cur.stateVersion !== expectedStateVersion) return false;
+    this.store.set(userId, { ...state, createTime: cur.createTime, updateTime: new Date() });
+    return true;
+  }
+}
+
+export class FakeSyncRecordRepo implements ISyncRecordRepo {
+  readonly store = new Map<string, PersonalConnectionMeta>();
+
+  private key(userId: number, keyEpoch: number, recordId: Buffer): string {
+    return `${userId}:${keyEpoch}:${recordId.toString('base64url')}`;
+  }
+
+  async create(_exec: Queryable, input: {
+    userId: number; keyEpoch: number; recordId: Buffer;
+    cipherSuite: PersonalConnectionMeta['cipherSuite']; formatVersion: PersonalConnectionMeta['formatVersion'];
+    nonce: Buffer; ciphertext: Buffer; tag: Buffer; version: number; changeSequence: number;
+  }): Promise<PersonalConnectionMeta> {
+    const meta: PersonalConnectionMeta = {
+      id: nextId(),
+      userId: input.userId, keyEpoch: input.keyEpoch, recordId: input.recordId,
+      cipherSuite: input.cipherSuite, formatVersion: input.formatVersion,
+      nonce: input.nonce, ciphertext: input.ciphertext, tag: input.tag,
+      version: input.version, changeSequence: input.changeSequence,
+      updateTime: new Date(), deleteTime: null,
+    };
+    this.store.set(this.key(input.userId, input.keyEpoch, input.recordId), meta);
+    return meta;
+  }
+
+  async findForUpdate(_exec: Queryable, userId: number, keyEpoch: number, recordId: Buffer): Promise<PersonalConnectionMeta | undefined> {
+    return this.store.get(this.key(userId, keyEpoch, recordId));
+  }
+
+  async update(_exec: Queryable, input: {
+    userId: number; keyEpoch: number; recordId: Buffer; baseVersion: number;
+    cipherSuite: PersonalConnectionMeta['cipherSuite']; formatVersion: PersonalConnectionMeta['formatVersion'];
+    nonce: Buffer; ciphertext: Buffer; tag: Buffer; newVersion: number; changeSequence: number;
+  }): Promise<boolean> {
+    const m = this.store.get(this.key(input.userId, input.keyEpoch, input.recordId));
+    if (!m || m.deleteTime || m.version !== input.baseVersion) return false;
+    m.cipherSuite = input.cipherSuite; m.formatVersion = input.formatVersion;
+    m.nonce = input.nonce; m.ciphertext = input.ciphertext; m.tag = input.tag;
+    m.version = input.newVersion; m.changeSequence = input.changeSequence; m.updateTime = new Date();
+    return true;
+  }
+
+  async softDelete(_exec: Queryable, userId: number, keyEpoch: number, recordId: Buffer, baseVersion: number, newVersion: number, changeSequence: number, now: Date): Promise<boolean> {
+    const m = this.store.get(this.key(userId, keyEpoch, recordId));
+    if (!m || m.deleteTime || m.version !== baseVersion) return false;
+    m.ciphertext = null; m.tag = null; m.version = newVersion; m.changeSequence = changeSequence; m.deleteTime = now; m.updateTime = new Date();
+    return true;
+  }
+
+  async listByFeed(_exec: Queryable, userId: number, keyEpoch: number, after: number, snapshotSequence: number, limit: number): Promise<PersonalConnectionMeta[]> {
+    return [...this.store.values()]
+      .filter((m) => m.userId === userId && m.keyEpoch === keyEpoch && m.changeSequence > after && m.changeSequence <= snapshotSequence)
+      .sort((a, b) => a.changeSequence - b.changeSequence)
+      .slice(0, limit);
+  }
+
+  async countActive(_exec: Queryable, userId: number, keyEpoch: number): Promise<{ count: number; bytes: number }> {
+    let count = 0; let bytes = 0;
+    for (const m of this.store.values()) {
+      if (m.userId === userId && m.keyEpoch === keyEpoch && !m.deleteTime) {
+        count++;
+        bytes += (m.ciphertext?.length ?? 0) + (m.tag?.length ?? 0) + (m.nonce?.length ?? 0);
+      }
+    }
+    return { count, bytes };
+  }
+
+  async tombstoneAllByEpoch(_exec: Queryable, userId: number, keyEpoch: number, now: Date): Promise<void> {
+    for (const m of this.store.values()) {
+      if (m.userId === userId && m.keyEpoch === keyEpoch && !m.deleteTime) {
+        m.ciphertext = null; m.tag = null; m.deleteTime = now;
+      }
+    }
+  }
+}
+
+export class FakeSyncNonceRepo implements ISyncNonceRepo {
+  private readonly seen = new Set<string>();
+
+  async insert(_exec: Queryable, userId: number, keyEpoch: number, nonce: Buffer): Promise<boolean> {
+    const k = `${userId}:${keyEpoch}:${nonce.toString('base64url')}`;
+    if (this.seen.has(k)) return false;
+    this.seen.add(k);
+    return true;
+  }
+}
+
+export class FakeSyncMutationRepo implements ISyncMutationRepo {
+  readonly store = new Map<string, SyncMutation>();
+
+  private key(userId: number, keyEpoch: number, mutationId: Buffer): string {
+    return `${userId}:${keyEpoch}:${mutationId.toString('base64url')}`;
+  }
+
+  async findByMutationId(_exec: Queryable, userId: number, keyEpoch: number, mutationId: Buffer): Promise<SyncMutation | undefined> {
+    return this.store.get(this.key(userId, keyEpoch, mutationId));
+  }
+
+  async record(_exec: Queryable, input: {
+    userId: number; keyEpoch: number; mutationId: Buffer; requestDigest: Buffer;
+    action: SyncAction; resultVersion: number | null; resultChangeSequence: number | null;
+    status: SyncMutationStatus; expiresTime: Date;
+  }): Promise<void> {
+    this.store.set(this.key(input.userId, input.keyEpoch, input.mutationId), {
+      userId: input.userId, keyEpoch: input.keyEpoch, mutationId: input.mutationId, requestDigest: input.requestDigest,
+      action: input.action, resultVersion: input.resultVersion, resultChangeSequence: input.resultChangeSequence,
+      status: input.status, expiresTime: input.expiresTime, createTime: new Date(),
+    });
+  }
+}
+
+export class FakeSyncResetTokenRepo implements ISyncResetTokenRepo {
+  readonly store = new Map<number, SyncResetToken>();
+
+  async create(_exec: Queryable, input: { userId: number; tokenHash: Buffer; expiresTime: Date }): Promise<SyncResetToken> {
+    const t: SyncResetToken = {
+      id: nextId(), userId: input.userId, tokenHash: input.tokenHash,
+      expiresTime: input.expiresTime, consumedTime: null, revokedTime: null, createTime: new Date(),
+    };
+    this.store.set(t.id, t);
+    return t;
+  }
+
+  async revokePendingByUser(_exec: Queryable, userId: number, now: Date): Promise<void> {
+    for (const t of this.store.values()) {
+      if (t.userId === userId && !t.consumedTime && !t.revokedTime) t.revokedTime = now;
+    }
+  }
+
+  async findUsableForUpdate(_exec: Queryable, tokenHash: Buffer): Promise<SyncResetToken | undefined> {
+    for (const t of this.store.values()) {
+      if (t.tokenHash.equals(tokenHash) && !t.consumedTime && !t.revokedTime && t.expiresTime > new Date()) return t;
+    }
+    return undefined;
+  }
+
+  async consume(_exec: Queryable, id: number, now: Date): Promise<boolean> {
+    const t = this.store.get(id);
+    if (!t || t.consumedTime || t.revokedTime) return false;
+    t.consumedTime = now;
+    return true;
+  }
 }

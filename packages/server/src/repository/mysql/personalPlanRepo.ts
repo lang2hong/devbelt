@@ -26,6 +26,8 @@ function mapPlan(r: any): PersonalPlan {
     name: r.name,
     allowedDatabaseTypes: Array.isArray(allowed) ? allowed : [],
     maxDevices: r.max_devices,
+    maxConnectionMetas: Number(r.max_connection_metas ?? 0),
+    syncStorageBytes: Number(r.sync_storage_bytes ?? 0),
     status: r.status as PersonalPlanStatus,
     createTime: new Date(r.create_time),
     updateTime: new Date(r.update_time),

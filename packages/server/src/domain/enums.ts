@@ -45,3 +45,25 @@ export type OrganizationSubscriptionStatus = 'active' | 'expired' | 'canceled';
 
 /** 组织资源类型。 */
 export type ResourceType = 'connection_template' | 'query';
+
+// ── 个人 E2E 同步（§8.1 专项）──
+
+/** 同步协议版本（V1 唯一）。 */
+export type SyncProtocolVersion = 1;
+
+/** 密文格式版本（V1 唯一）。 */
+export type SyncFormatVersion = 1;
+
+/** 同步加密套件（V1 唯一）。 */
+export type SyncCipherSuite = 'AES-256-GCM';
+
+/** 需要签名证明的 mutation 动作（SigningInput.action，§8.1.8）。 */
+export type SyncAction =
+  | 'record.put'
+  | 'record.delete'
+  | 'state.change-key'
+  | 'state.recover'
+  | 'state.destroy';
+
+/** mutation receipt 状态（V1 仅 applied）。 */
+export type SyncMutationStatus = 'applied';

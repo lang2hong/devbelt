@@ -10,6 +10,11 @@ import type {
   OrganizationPlanStatus,
   OrganizationSubscriptionStatus,
   ResourceType,
+  SyncProtocolVersion,
+  SyncFormatVersion,
+  SyncCipherSuite,
+  SyncAction,
+  SyncMutationStatus,
 } from './enums.js';
 
 /**
@@ -55,6 +60,10 @@ export interface PersonalPlan {
   allowedDatabaseTypes: string[];
   /** 设备数上限；0 = 无限 */
   maxDevices: number;
+  /** 云端同步连接元数据条数；0 = 无限（§8.1.6） */
+  maxConnectionMetas: number;
+  /** 云端同步密文总字节配额；0 = 无限（§8.1.6） */
+  syncStorageBytes: number;
   status: PersonalPlanStatus;
   createTime: Date;
   updateTime: Date;
@@ -209,4 +218,95 @@ export interface Resource {
   deleteTime: Date | null;
   createTime: Date;
   updateTime: Date;
+}
+
+// ── 个人 E2E 同步（§8.1 专项）──
+
+/** SMP 派生 KDF（仅 Argon2id；salt 16B、output 32B，§8.1.2）。 */
+export interface SmpKdf {
+  alg: 'argon2id';
+  version: 1;
+  memoryKiB: number;
+  iterations: number;
+  parallelism: number;
+  salt: Buffer;
+  outputBytes: 32;
+}
+
+/** 恢复码派生 KDF（仅 HKDF-SHA-256；§8.1.2）。 */
+export interface RecoveryKdf {
+  alg: 'hkdf-sha256';
+  version: 1;
+  salt: Buffer;
+  outputBytes: 32;
+}
+
+/** 同步 envelope（加密后的 DEK：nonce 12B、ct 32B、tag 16B）。 */
+export interface SyncEnvelope {
+  version: number;
+  nonce: Buffer;
+  ct: Buffer;
+  tag: Buffer;
+}
+
+/** 个人同步状态（每用户严格单行，§8.1.5）。 */
+export interface PersonalSyncState {
+  userId: number;
+  keyEpoch: number;
+  stateVersion: number;
+  changeSequence: number;
+  protocolVersion: SyncProtocolVersion;
+  cipherSuite: SyncCipherSuite;
+  formatVersion: SyncFormatVersion;
+  smpKdf: SmpKdf;
+  recoveryKdf: RecoveryKdf;
+  envelopeSmp: SyncEnvelope;
+  envelopeRecovery: SyncEnvelope;
+  signPub: Buffer;
+  recoverSignPub: Buffer;
+  recoveryCodeSetTime: Date | null;
+  createTime: Date;
+  updateTime: Date;
+}
+
+/** 个人 E2E record / tombstone（ciphertext/tag 于 tombstone 时为空）。 */
+export interface PersonalConnectionMeta {
+  id: number;
+  userId: number;
+  keyEpoch: number;
+  recordId: Buffer;
+  cipherSuite: SyncCipherSuite;
+  formatVersion: SyncFormatVersion;
+  nonce: Buffer;
+  ciphertext: Buffer | null;
+  tag: Buffer | null;
+  version: number;
+  changeSequence: number;
+  updateTime: Date;
+  deleteTime: Date | null;
+}
+
+/** mutation receipt（冗等重放；只存定长字段）。 */
+export interface SyncMutation {
+  userId: number;
+  keyEpoch: number;
+  mutationId: Buffer;
+  requestDigest: Buffer;
+  action: SyncAction;
+  resultVersion: number | null;
+  resultChangeSequence: number | null;
+  status: SyncMutationStatus;
+  expiresTime: Date;
+  createTime: Date;
+}
+
+/** reset-after-loss 邮箱挑战 token（token_hash 只存 SHA-256）。 */
+export interface SyncResetToken {
+  id: number;
+  userId: number;
+  tokenHash: Buffer;
+  expiresTime: Date;
+  consumedTime: Date | null;
+  revokedTime: Date | null;
+  createTime: Date;
 }
