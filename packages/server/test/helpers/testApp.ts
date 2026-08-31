@@ -20,6 +20,7 @@ import {
   FakeSyncStateRepo,
   FakeSyncRecordRepo,
   FakeSyncMutationRepo,
+  FakeSyncNonceRepo,
 } from './fakeRepos.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
 import { securityHeaders } from '../../src/middleware/securityHeaders.js';
@@ -37,6 +38,7 @@ import { organizationRoutes } from '../../src/route/organizations.js';
 import { invitationRoutes } from '../../src/route/invitations.js';
 import { syncRoutes } from '../../src/route/sync.js';
 import { SyncStateService } from '../../src/service/syncStateService.js';
+import { SyncRecordService } from '../../src/service/syncRecordService.js';
 
 export interface TestAppOptions {
   rateLimit?: boolean;
@@ -113,6 +115,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   const syncStateRepo = new FakeSyncStateRepo();
   const syncRecordRepo = new FakeSyncRecordRepo();
   const syncMutationRepo = new FakeSyncMutationRepo();
+  const syncNonceRepo = new FakeSyncNonceRepo();
 
   const tokenService = new TokenService(makeSigningKeys(), '15m', 30 * 24 * 3600 * 1000);
   const rateLimiter = new RateLimitService(rateLimitRepo, opts.rateLimit === true);
@@ -154,6 +157,14 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
     syncMutationRepo,
     async (fn) => fn({} as Queryable),
   );
+  const syncRecordService = new SyncRecordService(
+    syncStateRepo,
+    syncRecordRepo,
+    syncNonceRepo,
+    syncMutationRepo,
+    personalSubscriptionRepo,
+    async (fn) => fn({} as Queryable),
+  );
 
   const getUser = async (id: number) => userRepo.findById(id);
 
@@ -163,7 +174,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   await app.register(personalRoutes, { tokenService, getUser, deviceRepo, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId) });
   await app.register(organizationRoutes, { tokenService, getUser, organizationService, resourceService, organizationRepo, membershipRepo });
   await app.register(invitationRoutes, { tokenService, getUser, organizationService });
-  await app.register(syncRoutes, { tokenService, getUser, syncState: syncStateService });
+  await app.register(syncRoutes, { tokenService, getUser, syncState: syncStateService, syncRecord: syncRecordService });
 
   await app.ready();
 

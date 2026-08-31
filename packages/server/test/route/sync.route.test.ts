@@ -52,6 +52,17 @@ describe('sync routes smoke', () => {
     expect(state.statusCode).toBe(200);
     expect(state.json().keyEpoch).toBe('1');
     expect(state.json().stateVersion).toBe('1');
+
+    const records = await t.app.inject({ method: 'GET', url: '/api/sync/records', headers: t.auth(token) });
+    expect(records.statusCode).toBe(200);
+    expect(records.json().records).toEqual([]);
+    await t.close();
+  });
+
+  it('records endpoint requires authentication', async () => {
+    const t = await buildTestApp();
+    const anon = await t.app.inject({ method: 'GET', url: '/api/sync/records' });
+    expect(anon.statusCode).toBe(401);
     await t.close();
   });
 

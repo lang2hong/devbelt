@@ -348,3 +348,48 @@ export const syncDestroyBody = {
     newState: syncNewState,
   },
 } as const;
+
+const recordIdSchema = { type: 'string' as const, minLength: 1, maxLength: 171, pattern: '^[A-Za-z0-9_-]+$' };
+
+export const syncPutRecordBody = {
+  type: 'object',
+  required: ['protocolVersion', 'keyEpoch', 'mutationId', 'signature', 'recordId', 'baseVersion', 'cipherSuite', 'formatVersion', 'nonce', 'ciphertext', 'tag'],
+  additionalProperties: false,
+  properties: {
+    ...signedMutationProps,
+    recordId: recordIdSchema,
+    baseVersion: u64Str,
+    cipherSuite: suiteV1,
+    formatVersion: protocolV1,
+    nonce: b64url(16, 16),
+    ciphertext: b64url(1, 349526),
+    tag: b64url(22, 22),
+  },
+} as const;
+
+export const syncDeleteRecordBody = {
+  type: 'object',
+  required: ['protocolVersion', 'keyEpoch', 'mutationId', 'signature', 'recordId', 'baseVersion'],
+  additionalProperties: false,
+  properties: {
+    ...signedMutationProps,
+    recordId: recordIdSchema,
+    baseVersion: u64Str,
+  },
+} as const;
+
+export const syncRecordIdParam = {
+  type: 'object',
+  required: ['recordId'],
+  properties: { recordId: recordIdSchema },
+} as const;
+
+export const syncRecordsQuery = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    after: u64Str,
+    snapshotSequence: u64Str,
+    limit: { type: 'integer', minimum: 1, maximum: 256 },
+  },
+} as const;

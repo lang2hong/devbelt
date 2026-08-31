@@ -8,17 +8,13 @@ import type { PersonalSyncState, SmpKdf, RecoveryKdf, SyncEnvelope } from '../do
 import {
   SyncNotInitializedError,
   SyncStateExistsError,
-  SyncEpochStaleError,
-  SyncSignatureInvalidError,
   SyncVersionConflictError,
   SyncProtocolUnsupportedError,
   ValidationError,
-  ConflictError,
 } from '../domain/errors.js';
-import { incU64, parseU64 } from '../domain/syncU64.js';
-import { jcs, verifyEd25519, decodeB64Url } from './syncCrypto.js';
+import { incU64 } from '../domain/syncU64.js';
+import { SYNC_DOMAIN, assertU64, assertEpoch, verifySignature, checkReceipt, recordReceipt } from './syncShared.js';
 
-const DOMAIN = 'dbclient/sync/v1';
 const V1 = 1 as const;
 const SUITE = 'AES-256-GCM' as const;
 
@@ -97,15 +93,6 @@ function validateNewState(n: SyncNewState): void {
   if (n.signPub.length !== 32 || n.recoverSignPub.length !== 32) throw new ValidationError('invalid sync public key length');
 }
 
-/** u64 输入字段经 parseU64 校验（拒前导零/越界），非法→400 VALIDATION_FAILED。 */
-function assertU64(value: string, field: string): void {
-  try {
-    parseU64(value);
-  } catch {
-    throw new ValidationError(`${field} is not a valid u64`);
-  }
-}
-
 function toState(userId: number, keyEpoch: string, stateVersion: string, changeSequence: string, n: SyncNewState, recoveryCodeSetTime: Date): Omit<PersonalSyncState, 'createTime' | 'updateTime'> {
   return {
     userId, keyEpoch, stateVersion, changeSequence,
@@ -144,8 +131,8 @@ export class SyncStateService {
     assertU64(input.envelopeSmp.version, 'envelopeSmp.version');
     return this.runner(async (tx) => {
       const state = await this.lockActive(tx, userId);
-      this.assertEpoch(state, input.keyEpoch);
-      const receipt = await this.checkReceipt(tx, userId, input.keyEpoch, input.mutationId, input.requestDigest);
+      assertEpoch(state, input.keyEpoch);
+      const receipt = await checkReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest);
       if (receipt) return { keyEpoch: input.keyEpoch, stateVersion: receipt.resultVersion ?? state.stateVersion };
 
       this.assertSignature(state.signPub, userId, input, 'state.change-key');
@@ -176,7 +163,7 @@ export class SyncStateService {
       const ok = await this.stateRepo.update(tx, userId, state.stateVersion, next);
       if (!ok) throw new SyncVersionConflictError(state.stateVersion);
 
-      await this.recordReceipt(tx, userId, input.keyEpoch, input.mutationId, input.requestDigest, 'state.change-key', next.stateVersion, null);
+      await recordReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest, 'state.change-key', next.stateVersion, null);
       return { keyEpoch: next.keyEpoch, stateVersion: next.stateVersion };
     });
   }
@@ -188,8 +175,8 @@ export class SyncStateService {
     assertU64(input.envelopeRecovery.version, 'envelopeRecovery.version');
     return this.runner(async (tx) => {
       const state = await this.lockActive(tx, userId);
-      this.assertEpoch(state, input.keyEpoch);
-      const receipt = await this.checkReceipt(tx, userId, input.keyEpoch, input.mutationId, input.requestDigest);
+      assertEpoch(state, input.keyEpoch);
+      const receipt = await checkReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest);
       if (receipt) return { keyEpoch: input.keyEpoch, stateVersion: receipt.resultVersion ?? state.stateVersion, recoveryCodeSetTime: state.recoveryCodeSetTime ? state.recoveryCodeSetTime.toISOString() : '' };
 
       // recover 用旧 recoverSignPub 验签（§8.1.2）。
@@ -222,7 +209,7 @@ export class SyncStateService {
       const ok = await this.stateRepo.update(tx, userId, state.stateVersion, next);
       if (!ok) throw new SyncVersionConflictError(state.stateVersion);
 
-      await this.recordReceipt(tx, userId, input.keyEpoch, input.mutationId, input.requestDigest, 'state.recover', next.stateVersion, null);
+      await recordReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest, 'state.recover', next.stateVersion, null);
       return { keyEpoch: next.keyEpoch, stateVersion: next.stateVersion, recoveryCodeSetTime: now.toISOString() };
     });
   }
@@ -233,8 +220,8 @@ export class SyncStateService {
     assertU64(input.expectedStateVersion, 'expectedStateVersion');
     return this.runner(async (tx) => {
       const state = await this.lockActive(tx, userId);
-      this.assertEpoch(state, input.keyEpoch);
-      const receipt = await this.checkReceipt(tx, userId, input.keyEpoch, input.mutationId, input.requestDigest);
+      assertEpoch(state, input.keyEpoch);
+      const receipt = await checkReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest);
       if (receipt) return { keyEpoch: incU64(input.keyEpoch) };
 
       this.assertSignature(state.signPub, userId, input, 'state.destroy');
@@ -254,7 +241,7 @@ export class SyncStateService {
       const ok = await this.stateRepo.update(tx, userId, state.stateVersion, next);
       if (!ok) throw new SyncVersionConflictError(state.stateVersion);
 
-      await this.recordReceipt(tx, userId, input.keyEpoch, input.mutationId, input.requestDigest, 'state.destroy', next.stateVersion, null);
+      await recordReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest, 'state.destroy', next.stateVersion, null);
       return { keyEpoch: next.keyEpoch };
     });
   }
@@ -268,50 +255,20 @@ export class SyncStateService {
   }
 
   /** receipt 幂等：同 id 同 digest → 返回已存结果；同 id 异 digest → 409；未命中或已过期 → undefined。 */
-  private async checkReceipt(tx: Queryable, userId: number, keyEpoch: string, mutationId: string, requestDigest: string): Promise<{ resultVersion: string | null } | undefined> {
-    const mid = decodeB64Url(mutationId, 16, 'mutationId');
-    const digest = decodeB64Url(requestDigest, 32, 'requestDigest');
-    const existing = await this.mutationRepo.findByMutationId(tx, userId, keyEpoch, mid);
-    if (!existing) return undefined;
-    // 24h 仅为保留期；过期即按无 receipt 走正常 epoch/签名/版本校验（§8.1.8）。
-    if (existing.expiresTime <= new Date()) return undefined;
-    if (existing.requestDigest.equals(digest)) return { resultVersion: existing.resultVersion };
-    throw new ConflictError('mutation id reused with different digest');
-  }
-
-  private assertEpoch(state: PersonalSyncState, keyEpoch: string): void {
-    if (state.keyEpoch !== keyEpoch) throw new SyncEpochStaleError(state.keyEpoch);
-  }
-
   private assertExpectedVersion(state: PersonalSyncState, expectedStateVersion: string): void {
     if (state.stateVersion !== expectedStateVersion) throw new SyncVersionConflictError(state.stateVersion);
   }
 
   private assertSignature(rawPub: Buffer, userId: number, input: SignedStateMutation, action: string): void {
-    const signingInput = {
-      domain: DOMAIN,
+    verifySignature(rawPub, {
+      domain: SYNC_DOMAIN,
       action,
       userId: String(userId),
       keyEpoch: input.keyEpoch,
       expectedStateVersion: input.expectedStateVersion,
       mutationId: input.mutationId,
       requestDigest: input.requestDigest,
-    };
-    const message = Buffer.from(jcs(signingInput), 'utf8');
-    if (!verifyEd25519(rawPub, message, input.signature)) throw new SyncSignatureInvalidError();
-  }
-
-  private async recordReceipt(tx: Queryable, userId: number, keyEpoch: string, mutationId: string, requestDigest: string, action: 'state.change-key' | 'state.recover' | 'state.destroy', resultVersion: string | null, resultChangeSequence: string | null): Promise<void> {
-    await this.mutationRepo.record(tx, {
-      userId, keyEpoch,
-      mutationId: decodeB64Url(mutationId, 16, 'mutationId'),
-      requestDigest: decodeB64Url(requestDigest, 32, 'requestDigest'),
-      action,
-      resultVersion,
-      resultChangeSequence,
-      status: 'applied',
-      expiresTime: new Date(Date.now() + 24 * 3600 * 1000),
-    });
+    }, input.signature);
   }
 }
 

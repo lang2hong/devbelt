@@ -7,18 +7,24 @@ import {
   SyncStateService,
   type SyncNewState,
 } from '../service/syncStateService.js';
+import { SyncRecordService } from '../service/syncRecordService.js';
 import type { SmpKdf, RecoveryKdf, SyncEnvelope } from '../domain/entities.js';
 import {
   syncInitBody,
   syncChangeKeyBody,
   syncRecoverBody,
   syncDestroyBody,
+  syncPutRecordBody,
+  syncDeleteRecordBody,
+  syncRecordIdParam,
+  syncRecordsQuery,
 } from './schemas.js';
 
 export interface SyncRouteOptions {
   tokenService: TokenService;
   getUser: GetAuthUser;
   syncState: SyncStateService;
+  syncRecord: SyncRecordService;
 }
 
 function decodeEnvelope(e: any): SyncEnvelope {
@@ -130,6 +136,60 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
             expectedStateVersion: body.expectedStateVersion,
             requestDigest: digestOf(body),
             newState: decodeNewState(body.newState),
+          }));
+        } catch (e) { sendError(reply, e); }
+      });
+
+      child.get('/api/sync/records', { schema: { querystring: syncRecordsQuery } }, async (req, reply) => {
+        const userId = (req as any).authUserId as number;
+        const q = (req.query ?? {}) as Record<string, unknown>;
+        const after = typeof q.after === 'string' ? q.after : '0';
+        const snapshotSequence = typeof q.snapshotSequence === 'string' ? q.snapshotSequence : undefined;
+        const limit = typeof q.limit === 'number' ? q.limit : 256;
+        try {
+          reply.send(await opts.syncRecord.pull(userId, after, snapshotSequence, limit));
+        } catch (e) { sendError(reply, e); }
+      });
+
+      child.put('/api/sync/records/:recordId', { schema: { params: syncRecordIdParam, body: syncPutRecordBody } }, async (req, reply) => {
+        const userId = (req as any).authUserId as number;
+        const body = req.body as any;
+        const pathId = (req.params as any).recordId as string;
+        if (pathId !== body.recordId) {
+          return reply.code(400).send({ message: 'validation failed', code: 'VALIDATION_FAILED' });
+        }
+        try {
+          reply.send(await opts.syncRecord.putRecord(userId, {
+            keyEpoch: body.keyEpoch,
+            mutationId: body.mutationId,
+            signature: decodeB64Url(body.signature, 64, 'signature'),
+            baseVersion: body.baseVersion,
+            requestDigest: digestOf(body),
+            recordId: body.recordId,
+            cipherSuite: body.cipherSuite,
+            formatVersion: body.formatVersion,
+            nonce: decodeB64Url(body.nonce, 12, 'nonce'),
+            ciphertext: Buffer.from(body.ciphertext, 'base64url'),
+            tag: decodeB64Url(body.tag, 16, 'tag'),
+          }));
+        } catch (e) { sendError(reply, e); }
+      });
+
+      child.delete('/api/sync/records/:recordId', { schema: { params: syncRecordIdParam, body: syncDeleteRecordBody } }, async (req, reply) => {
+        const userId = (req as any).authUserId as number;
+        const body = req.body as any;
+        const pathId = (req.params as any).recordId as string;
+        if (pathId !== body.recordId) {
+          return reply.code(400).send({ message: 'validation failed', code: 'VALIDATION_FAILED' });
+        }
+        try {
+          reply.send(await opts.syncRecord.deleteRecord(userId, {
+            keyEpoch: body.keyEpoch,
+            mutationId: body.mutationId,
+            signature: decodeB64Url(body.signature, 64, 'signature'),
+            baseVersion: body.baseVersion,
+            requestDigest: digestOf(body),
+            recordId: body.recordId,
           }));
         } catch (e) { sendError(reply, e); }
       });
