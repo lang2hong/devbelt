@@ -26,14 +26,15 @@ export class SmtpEmailSender implements EmailSender {
   }
 
   async sendVerificationEmail(input: { to: string; token: string; displayName?: string }): Promise<void> {
-    // 正文只含收件人展示名、动作说明、一次性链接 —— 不含密码/其他 token/内部内容。
+    // 正文只含收件人展示名、动作说明、一次性链接与可复制 token —— 不含密码/其他 token/内部内容。
     await this.transporter.sendMail({
       from: this.from,
       to: input.to,
       subject: 'DB Client email verification',
       text: `Hi${input.displayName ? ` ${input.displayName}` : ''},\n\n` +
         `Verify your email for DB Client by visiting the link below. It expires in 24 hours.\n\n` +
-        `Verification link (one-time): ${this.verificationUrl(input.token)}\n`,
+        `Verification link (one-time): ${this.verificationUrl(input.token)}\n\n` +
+        `Or paste this verification token into the extension: ${input.token}\n`,
     });
   }
 

@@ -168,12 +168,12 @@ export class SyncClient {
 
   /** 消费初始邮箱验证 token（§4.7 单次消费）。 */
   async confirmEmail(token: string): Promise<{ ok: boolean }> {
-    return (await this.postJson(`/api/auth/email-verifications/${encodeURIComponent(token)}/confirm`, undefined)) as { ok: boolean };
+    return (await this.postJson(`/api/auth/email-verifications/${encodeURIComponent(token)}/confirm`, undefined, false)) as { ok: boolean };
   }
 
   /** 匿名重发验证邮件（§5：不区分邮箱是否存在，响应恒成功，防枚举）。 */
   async resendVerification(email: string): Promise<{ ok: boolean }> {
-    return (await this.postJson('/api/auth/email-verifications', { email })) as { ok: boolean };
+    return (await this.postJson('/api/auth/email-verifications', { email }, false)) as { ok: boolean };
   }
 
   /** 登录 */
@@ -215,9 +215,9 @@ export class SyncClient {
     if (rt) await this.request('POST', '/api/auth/logout', { refreshToken: rt }, true);
   }
 
-  /** 修改密码（改密后撤销全部会话） */
+  /** 修改密码（改密后撤销全部会话）。V3 字段名为 currentPassword。 */
   async changePassword(oldPassword: string, newPassword: string): Promise<void> {
-    const res = await this.request('POST', '/api/auth/change-password', { oldPassword, newPassword }, true);
+    const res = await this.request('POST', '/api/auth/change-password', { currentPassword: oldPassword, newPassword }, true);
     if (!res.ok) {
       const errBody = (await res.json().catch(() => ({}))) as { message?: string };
       throw new Error(errBody.message || `Change password failed: ${res.status}`);
@@ -323,9 +323,24 @@ export class SyncClient {
     return res.json() as Promise<AuthResult>;
   }
 
-  /** 匿名 POST（无鉴权、无刷新），body 可缺省（如 confirm 仅 URL 携带 token）。 */
-  private async postJson(path: string, body: unknown): Promise<unknown> {
-    const res = await this.request('POST', path, body, false);
+  /**
+   * 匿名 POST（无鉴权、无刷新），body 可缺省（如 confirm 仅 URL 携带 token）。
+   *
+   * `retry=false` 用于幂等性敏感的一次性操作（confirm/resend）：token 单次消费 /
+   * 重发会作废旧 token，服务端已成功但响应在传输中失败时，重试会造成
+   * 「已消费 token 被再次提交 → 401」而误报失败。与 refresh 同理，不走重试。
+   */
+  private async postJson(path: string, body: unknown, retry = true): Promise<unknown> {
+    const url = `${this.baseUrl}${path}`;
+    const headers: Record<string, string> = {};
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const init: RequestInit = { method: 'POST', headers };
+    if (body !== undefined) init.body = JSON.stringify(body);
+
+    const res = retry
+      ? await this.fetchWithRetry(url, init)
+      : await this.fetchImpl(url, { ...init, dispatcher: directAgent } as any);
+
     if (!res.ok) {
       const errBody = (await res.json().catch(() => ({}))) as { code?: string; message?: string };
       const code = errBody.code ? ` [${errBody.code}]` : '';

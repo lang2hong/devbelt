@@ -417,3 +417,43 @@ describe('V3 注册/验证流程（register 不回 token）', () => {
     expect(Object.keys(headers).filter((k) => k.startsWith('X-Device-'))).toEqual([]);
   });
 });
+
+describe('V3 change-password / confirm 单次消费契约', () => {
+  it('changePassword 发送 { currentPassword, newPassword }（不用 V2 oldPassword）', async () => {
+    const bodies: unknown[] = [];
+    const fetchMock = vi.fn(async (_url: unknown, init: any) => {
+      if (init?.body) bodies.push(JSON.parse(init.body));
+      return jsonRes(200, { ok: true });
+    });
+    const client = new SyncClient('http://x', () => 'access-1', () => 'refresh-1', undefined, undefined, fetchMock as any);
+
+    await client.changePassword('old-123456', 'new-123456');
+
+    expect(bodies[0]).toEqual({ currentPassword: 'old-123456', newPassword: 'new-123456' });
+    expect(JSON.stringify(bodies[0])).not.toContain('oldPassword');
+  });
+
+  it('confirmEmail 遇 5xx 不重试（单次消费）', async () => {
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls++;
+      return jsonRes(500, { code: 'INTERNAL', message: 'boom' });
+    });
+    const client = new SyncClient('http://x', () => undefined, () => undefined, undefined, undefined, fetchMock as any);
+
+    await expect(client.confirmEmail('tok_123')).rejects.toThrow();
+    expect(calls).toBe(1);
+  });
+
+  it('resendVerification 遇 500 不重试（重发会作废旧 token）', async () => {
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls++;
+      return jsonRes(500, { code: 'INTERNAL', message: 'boom' });
+    });
+    const client = new SyncClient('http://x', () => undefined, () => undefined, undefined, undefined, fetchMock as any);
+
+    await expect(client.resendVerification('a@b.c')).rejects.toThrow();
+    expect(calls).toBe(1);
+  });
+});
