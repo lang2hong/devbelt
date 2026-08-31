@@ -20,11 +20,10 @@ import { importRows } from '../data/transfer/importService';
 import { AuditLogger } from '../utils/auditLogger';
 import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
-import { requireFeature, Feature } from '../sync/features';
 import { confirm, openSqlDoc, recordBulkHistory, requireCapability } from './shared';
 
 export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
-  const { manager, treeProvider, connCtx, auth } = deps;
+  const { manager, treeProvider, connCtx } = deps;
 
   sub('dbclient.createDatabase', async (node: DbTreeNode) => {
     if (!node?.conn) return;
@@ -54,7 +53,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (!node?.conn) return;
     const format = await pickFormat('import');
     if (!format) return;
-    if (format !== 'sql' && !(await requireFeature(auth, Feature.excel))) return;
+
     const uri = await vscode.window.showOpenDialog({
       filters: importFilters(format),
       canSelectMany: false,
@@ -72,7 +71,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.exportConnection', async (node: DbTreeNode) => {
     if (!node?.conn) return;
-    if (!(await requireFeature(auth, Feature.excel))) return;
+
     await runExportWizard(node, manager, connCtx);
   });
 
@@ -127,7 +126,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (!node?.conn) return;
     const format = await pickFormat('import');
     if (!format) return;
-    if (format !== 'sql' && !(await requireFeature(auth, Feature.excel))) return;
+
     const uri = await vscode.window.showOpenDialog({
       filters: importFilters(format),
       canSelectMany: false,
@@ -145,7 +144,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.exportTable', async (node: DbTreeNode) => {
     if (!node?.conn) return;
-    if (!(await requireFeature(auth, Feature.excel))) return;
+
     await runExportWizard(node, manager, connCtx, node.label);
   });
 
@@ -175,7 +174,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.syncDatabase', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
-    if (!(await requireFeature(auth, Feature.datatransfer))) return;
+
     const conns = deps.store.getVisibleTreeData().connections.filter((c) => c.id !== node.conn!.id);
     if (!conns.length) {
       vscode.window.showWarningMessage('No other connections to sync to.');

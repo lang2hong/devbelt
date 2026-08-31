@@ -7,24 +7,7 @@ import { l10n } from '../i18n';
 import { AuditLogger } from '../utils/auditLogger';
 import { flattenGroups } from '../utils/groupTree';
 import type { Deps, Sub } from './shared';
-import { requireFeature, Feature, resolveMaxOpenConnections, resolveMaxConnections } from '../sync/features';
-import type { AuthService } from '../sync/authService';
 import { confirm } from './shared';
-
-async function assertCanAddConnection(auth: AuthService, store: { list(): SavedConnection[] }): Promise<boolean> {
-  const max = await resolveMaxConnections(auth);
-  if (max === undefined) return true;
-  const current = store.list().length;
-  if (current >= max) {
-    const choice = await vscode.window.showInformationMessage(
-      l10n('conn.limitReached', { current, max }),
-      l10n('conn.upgrade'),
-    );
-    if (choice === l10n('conn.upgrade')) void vscode.commands.executeCommand('dbclient.account');
-    return false;
-  }
-  return true;
-}
 
 async function queryServerVersion(session: any, dbType: string): Promise<string> {
   try {
@@ -42,11 +25,10 @@ async function queryServerVersion(session: any, dbType: string): Promise<string>
 }
 
 export function registerConnectionCommands(deps: Deps, sub: Sub): void {
-  const { store, manager, treeProvider, connCtx, auth } = deps;
+  const { store, manager, treeProvider, connCtx } = deps;
 
-  sub('dbclient.addConnection', async (node?: DbTreeNode) => {
+  sub('dbclient.addConnection', (node?: DbTreeNode) => {
     const gid = node?.kind === NodeKind.Group ? node.groupId : undefined;
-    if (!(await assertCanAddConnection(auth, store))) return;
     ConnectionForm.open(store, () => treeProvider.refresh(), gid);
   });
 
@@ -54,9 +36,8 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     if (node?.conn) ConnectionForm.open(store, () => treeProvider.refresh(), undefined, node.conn);
   });
 
-  sub('dbclient.cloneConnection', async (node: DbTreeNode) => {
+  sub('dbclient.cloneConnection', (node: DbTreeNode) => {
     if (!node?.conn) return;
-    if (!(await assertCanAddConnection(auth, store))) return;
     const src = node.conn;
     const cloned: SavedConnection = { ...src, id: '', name: `${src.name || src.host} (copy)` };
     ConnectionForm.open(store, () => treeProvider.refresh(), undefined, cloned);
@@ -86,18 +67,6 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.openConnection', async (conn: SavedConnection) => {
     if (!conn?.id) return;
-    const max = await resolveMaxOpenConnections(auth);
-    if (max !== undefined) {
-      const openCount = manager.getPoolStats().explicit - (manager.isExplicit(conn.id) ? 1 : 0);
-      if (openCount >= max) {
-        const choice = await vscode.window.showInformationMessage(
-          `You can have at most ${max} connections open at once. Close another connection or upgrade your plan.`,
-          'Upgrade',
-        );
-        if (choice === 'Upgrade') void vscode.commands.executeCommand('dbclient.account');
-        return;
-      }
-    }
     treeProvider.markOpen(conn.id);
     connCtx.setLast(conn);
     treeProvider.refresh();
@@ -130,7 +99,6 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
   sub('dbclient.refresh', () => treeProvider.refresh());
 
   sub('dbclient.exportConnections', async (node?: DbTreeNode) => {
-    if (!(await requireFeature(auth, Feature.export_connections))) return;
     const all = store.list();
     if (!all.length) {
       vscode.window.showInformationMessage(l10n('conn.exportNone'));
@@ -202,7 +170,6 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
   });
 
   sub('dbclient.importConnections', async () => {
-    if (!(await requireFeature(auth, Feature.export_connections))) return;
     const uri = await vscode.window.showOpenDialog({
       filters: { JSON: ['json'] },
       canSelectMany: false,
@@ -220,20 +187,6 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     if (!Array.isArray(payload.connections)) {
       vscode.window.showErrorMessage(l10n('conn.importInvalid'));
       return;
-    }
-    // 配额前置：导入是批量新增，单条的 assertCanAddConnection 挡不住；按「不会被覆盖的新连接数」投影总量
-    const max = await resolveMaxConnections(auth);
-    if (max !== undefined) {
-      const existingIds = new Set(store.list().map((c) => c.id));
-      const incoming = payload.connections.filter((c) => (c?.name || c?.host) && !existingIds.has(c?.id));
-      if (store.list().length + incoming.length > max) {
-        const choice = await vscode.window.showInformationMessage(
-          l10n('conn.importLimitReached', { current: store.list().length, max }),
-          l10n('conn.upgrade'),
-        );
-        if (choice === l10n('conn.upgrade')) void vscode.commands.executeCommand('dbclient.account');
-        return;
-      }
     }
     // 重建分组（保留原 id 与父级，维持连接归属）；旧文件无 groups 字段则跳过
     if (Array.isArray(payload.groups)) {

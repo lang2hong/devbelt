@@ -17,7 +17,6 @@ import { AuditLogger } from './utils/auditLogger';
 import { BackupScheduler } from './schedule/backupScheduler';
 import { HistoryStore } from './history/historyStore';
 import { AuthService, DEFAULT_SERVER_URL } from './sync/authService';
-import { requireFeature, Feature } from './sync/features';
 import { SyncManager } from './sync/syncManager';
 import { MasterPasswordStore } from './sync/masterPasswordStore';
 import { AutoSyncService, type AutoSyncMode } from './sync/autoSyncService';
@@ -25,7 +24,6 @@ import type { Event } from './utils/event';
 import { eventBus, ConnectionChangedEvent, DataChangeEvent, AuthEvent } from './utils/event';
 import { invalidateLanguage, LANGUAGE_CONFIG_KEY, l10n } from './i18n';
 import { registerCommands, SyncStatusBar } from './commands';
-import { refreshAdminCommand } from './commands/admin';
 import { SqlCompletionProvider } from './completion/sqlCompletionProvider';
 import { SqlCodeLensProvider } from './completion/sqlCodeLensProvider';
 import { TerminalService } from './terminal/terminalService';
@@ -40,7 +38,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   await store.init();
   const serverUrl = DEFAULT_SERVER_URL;
   const auth = new AuthService(context.secrets, serverUrl, context.globalState);
-  const history = new HistoryStore(context.globalState, () => auth.getCachedPlan()?.perUserHistoryRetentionCount);
+  const history = new HistoryStore(context.globalState);
   // history 注入管理器：所有会话的修改性语句由此自动进历史，
   // 不再依赖各命令自行调用 history.add（漏一个就少一段痕迹）。
   const manager = new ConnectionManager(undefined, history);
@@ -64,14 +62,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // changeSyncPassword 的可见性。此前从未 setContext，导致 logout 与
   // changeSyncPassword 永久不可见、login 永久可见。
   void syncLoggedInContext(auth);
-  void refreshAdminCommand(auth);
   const masterPasswordStore = new MasterPasswordStore(context.secrets);
   const sync = new SyncManager(auth, store, history, context.globalState, masterPasswordStore, (err) => {
     void vscode.window.showErrorMessage(err.message, 'Upgrade').then((choice) => {
       if (choice === 'Upgrade') void vscode.commands.executeCommand('dbclient.account');
     });
   });
-  const syncBar = new SyncStatusBar(auth, () => sync.getLastSyncAt());
+  const syncBar = new SyncStatusBar(auth);
 
   // 自动同步：合并连接/查询 与 历史 的变更事件
   const storeChanged: Event<void> = (listener) => {
@@ -195,9 +192,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
     // ER 图
-    vscode.commands.registerCommand('dbclient.showERDiagram', async (node: any) => {
+    vscode.commands.registerCommand('dbclient.showERDiagram', (node: any) => {
       if (node?.conn && node?.database) {
-        if (!await requireFeature(auth, Feature.er_export)) return;
         ERDiagramView.open(node.conn, node.database, manager);
       }
     }),
@@ -224,8 +220,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
     // 审计日志
-    vscode.commands.registerCommand('dbclient.showAuditLog', async () => {
-      if (!(await requireFeature(auth, Feature.audit_log))) return;
+    vscode.commands.registerCommand('dbclient.showAuditLog', () => {
       AuditLogView.open(auditLogger);
     }),
     // 连接池状态

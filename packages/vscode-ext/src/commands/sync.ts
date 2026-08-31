@@ -7,7 +7,6 @@ import { totalChanges } from '../sync/mergePlan';
 import { SyncDiffView } from '../result/syncDiffView';
 import { l10n } from '../i18n';
 import { syncLoggedInContext } from '../extension';
-import { refreshAdminCommand, isAdminUser, openAdminPanel } from './admin';
 import type { Deps, Sub } from './shared';
 import { withMasterPassword } from './shared';
 
@@ -57,7 +56,6 @@ export function registerSyncCommands(deps: Deps, sub: Sub): void {
   sub('dbclient.login', () => LoginFormView.open(auth, () => {
     syncBar.update();
     void syncLoggedInContext(auth);
-    void refreshAdminCommand(auth);
   }));
   sub('dbclient.sessions', () => SessionView.open(auth));
   sub('dbclient.account', () => AccountView.open(auth));
@@ -67,7 +65,6 @@ export function registerSyncCommands(deps: Deps, sub: Sub): void {
     await auth.logout();
     syncBar.update();
     await syncLoggedInContext(auth);
-    await refreshAdminCommand(auth);
     vscode.window.showInformationMessage(l10n('cmd.loggedOut'));
   });
 
@@ -172,7 +169,6 @@ export function registerSyncCommands(deps: Deps, sub: Sub): void {
   });
 
   sub('dbclient.explorerMenu', async () => {
-    const loggedIn = auth.isLoggedIn();
     const items: (vscode.QuickPickItem & { value: string })[] = [
       { label: '$(add) New Group', description: 'Create a connection group', value: 'addGroup' },
       { label: '$(download) Import Connections', description: 'Import connections from a file', value: 'importConnections' },
@@ -182,13 +178,9 @@ export function registerSyncCommands(deps: Deps, sub: Sub): void {
       { label: '$(cloud-download) Pull from Cloud', description: 'Download & merge', value: 'syncPull' },
       { label: '$(cloud-upload) Push to Cloud', description: 'Upload local data', value: 'syncPush' },
     ];
-    if (loggedIn && await isAdminUser(auth)) {
-      items.push({ label: '$(shield) Admin Panel', description: 'Open the admin dashboard', value: 'openAdminPanel' });
-    }
     const picked = await vscode.window.showQuickPick(items, { placeHolder: 'DB Client actions' });
     if (!picked) return;
-    if (picked.value === 'openAdminPanel') openAdminPanel(auth);
-    else await vscode.commands.executeCommand(`dbclient.${picked.value}`);
+    await vscode.commands.executeCommand(`dbclient.${picked.value}`);
   });
 
   // 账户入口收进底部状态栏：点击状态栏弹出 Account / Login / Logout，

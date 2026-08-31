@@ -489,3 +489,19 @@ describe('V3 设备管理（/api/personal/devices）', () => {
     expect(calls[0].method).toBe('DELETE');
   });
 });
+
+describe('V3 getMe（个人权益）', () => {
+  it('返回 { user, subscription.entitlement }', async () => {
+    const fetchMock = vi.fn(async () => jsonRes(200, {
+      user: { userId: '42', email: 'a@b.c', displayName: null, emailVerified: true, status: 'active', lastLoginTime: null },
+      subscription: { planCode: 'free', status: 'active', entitlement: { allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 0 }, periodStartTime: null, periodEndTime: null },
+    }));
+    const client = new SyncClient('http://x', () => 'access-1', () => 'refresh-1', undefined, undefined, fetchMock as any);
+
+    const me = await client.getMe();
+
+    expect(me.user.userId).toBe('42');
+    expect(me.subscription?.planCode).toBe('free');
+    expect(me.subscription?.entitlement).toEqual({ allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 0 });
+  });
+});

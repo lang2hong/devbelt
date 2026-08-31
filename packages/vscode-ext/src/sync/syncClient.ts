@@ -20,8 +20,6 @@ const directAgent = new Agent();
 export interface AuthResult {
   accessToken: string;
   refreshToken: string;
-  user?: { id: number; email: string; role: string };
-  subscription?: { planId: number; status: string; periodEndTime?: string };
 }
 
 /** 设备信息（登录/刷新时通过 header 上报；deviceId 为同设备判同键） */
@@ -61,26 +59,21 @@ export interface VersionSummary {
   createTime: string;
 }
 
-export interface PlanInfo {
-  code: string;
-  name: string;
-  priceMonth: number;
-  priceYear: number;
-  perSeatMaxDevices: number;
-  perUserMaxPrivateConnections: number;
-  perUserMaxOpenConnections: number;
-  perUserPrivateSyncQuotaBytes: number;
-  perUserSyncVersionRetention: number;
-  perUserHistoryRetentionCount: number;
-  features: number;
+/** V3 个人权益快照（personal_plans entitlement_snapshot）。 */
+export interface PersonalEntitlement {
+  allowedDatabaseTypes: string[];
+  maxDevices: number;
 }
 
 export interface MeResponse {
-  user: { id: number; email: string; role: string; status: string };
-  plan: PlanInfo;
-  plans: PlanInfo[];
-  subscription?: { planId: number; status: string; periodEndTime: string };
-  usage: { devices: number; connections: number; syncBytes: number; history: number };
+  user: { userId: string; email: string; displayName: string | null; emailVerified: boolean; status: string; lastLoginTime: string | null };
+  subscription: {
+    planCode: string | null;
+    status: string | null;
+    entitlement: PersonalEntitlement | null;
+    periodStartTime: string | null;
+    periodEndTime: string | null;
+  } | null;
 }
 
 export interface DeviceItem {

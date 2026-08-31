@@ -32,10 +32,6 @@ export class AccountView extends BaseWebView {
   }
 
   protected async handleMessage(msg: any): Promise<void> {
-    if (msg?.type === 'upgrade') {
-      void vscode.window.showInformationMessage(l10n('account.upgradeHint'));
-      return;
-    }
     if (msg?.type !== 'ready') return;
     if (!this.initSent) {
       this.initSent = true;

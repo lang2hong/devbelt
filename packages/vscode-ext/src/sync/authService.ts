@@ -11,16 +11,11 @@ declare const __SYNC_SERVER_URL__: string;
 /** 默认同步服务器地址（构建时由 esbuild 从 .env / .env.production 注入） */
 export const DEFAULT_SERVER_URL = __SYNC_SERVER_URL__;
 
-/** 套餐缓存（与 server Plan 对齐，持久化到 globalState；不含时间类字段） */
-export interface CachedPlan {
-  code: string;
-  name: string;
-  features: number;
-  perSeatMaxDevices: number;
-  perUserMaxPrivateConnections: number;
-  perUserMaxOpenConnections: number;
-  perUserPrivateSyncQuotaBytes: number;
-  perUserHistoryRetentionCount: number;
+/** 缓存的个人权益（V3 personal_plans entitlement_snapshot；不含时间类字段）。 */
+export interface CachedEntitlement {
+  planCode: string;
+  allowedDatabaseTypes: string[];
+  maxDevices: number;
 }
 
 let _osMachineId: string | undefined;
@@ -92,38 +87,35 @@ export class AuthService {
   private static readonly ACCESS_TOKEN_KEY = 'dbclient.auth.accessToken';
   private static readonly REFRESH_TOKEN_KEY = 'dbclient.auth.refreshToken';
   private static readonly USER_EMAIL_KEY = 'dbclient.auth.email';
-  private static readonly PLAN_CACHE_KEY = 'dbclient.sync.cachedPlan';
+  private static readonly ENTITLEMENT_CACHE_KEY = 'dbclient.sync.cachedEntitlement';
 
   /** 同步客户端（token 通过 getter 实时读取） */
   readonly client: SyncClient;
 
   private accessToken?: string;
   private refreshToken?: string;
-  /** 缓存的套餐（SyncStatusBar 刷新时填，requireFeature 用；持久化到 globalState 供重启后弱网回退） */
-  private cachedPlan?: CachedPlan;
+  /** 缓存的个人权益（V3 free 权益，持久化到 globalState 供重启后弱网回退） */
+  private cachedEntitlement?: CachedEntitlement;
 
-  /** 读取缓存套餐：优先内存，回退 globalState（重启后无网仍能读回上次已知套餐）。 */
-  getCachedPlan(): CachedPlan | undefined {
-    if (this.cachedPlan) return this.cachedPlan;
+  /** 读取缓存权益：优先内存，回退 globalState。旧 V2 套餐缓存（无 allowedDatabaseTypes）作废。 */
+  getCachedEntitlement(): CachedEntitlement | undefined {
+    if (this.cachedEntitlement) return this.cachedEntitlement;
     if (this.memento) {
-      const stored = this.memento.get<CachedPlan>(AuthService.PLAN_CACHE_KEY);
-      if (stored) {
-        // v1→v2 兼容：旧缓存用 maxDevices 等 v1 字段名，读到时作废重取
-        if ('maxDevices' in stored || 'maxConnections' in stored) {
-          this.memento.update(AuthService.PLAN_CACHE_KEY, undefined);
-          return undefined;
-        }
-        this.cachedPlan = stored;
+      const stored = this.memento.get<CachedEntitlement>(AuthService.ENTITLEMENT_CACHE_KEY);
+      if (stored && typeof stored.planCode === 'string' && Array.isArray(stored.allowedDatabaseTypes) && typeof stored.maxDevices === 'number') {
+        this.cachedEntitlement = stored;
+      } else if (stored) {
+        this.memento.update(AuthService.ENTITLEMENT_CACHE_KEY, undefined);
       }
     }
-    return this.cachedPlan;
+    return this.cachedEntitlement;
   }
 
-  /** 设置缓存套餐（SyncStatusBar getMe 后调用），同步写 globalState。 */
-  setCachedPlan(plan: CachedPlan): void {
-    this.cachedPlan = plan;
+  /** 设置缓存权益，同步写 globalState。 */
+  setCachedEntitlement(entitlement: CachedEntitlement): void {
+    this.cachedEntitlement = entitlement;
     try {
-      this.memento?.update(AuthService.PLAN_CACHE_KEY, plan);
+      this.memento?.update(AuthService.ENTITLEMENT_CACHE_KEY, entitlement);
     } catch { /* memento 写失败不影响本次判断 */ }
   }
 
@@ -230,12 +222,12 @@ export class AuthService {
     }
     this.accessToken = undefined;
     this.refreshToken = undefined;
-    this.cachedPlan = undefined;
+    this.cachedEntitlement = undefined;
     await this.secrets.delete(AuthService.ACCESS_TOKEN_KEY);
     await this.secrets.delete(AuthService.REFRESH_TOKEN_KEY);
     await this.secrets.delete(AuthService.USER_EMAIL_KEY);
     try {
-      this.memento?.update(AuthService.PLAN_CACHE_KEY, undefined);
+      this.memento?.update(AuthService.ENTITLEMENT_CACHE_KEY, undefined);
     } catch { /* 忽略 */ }
     void eventBus.publish(new AuthEvent('logout'));
   }
