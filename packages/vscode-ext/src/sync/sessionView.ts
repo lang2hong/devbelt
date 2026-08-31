@@ -4,15 +4,15 @@ import { l10n } from '../i18n';
 import type { AuthService } from './authService';
 
 /**
- * 设备管理（Vue 版）：展示当前用户全部设备（主机名/系统/版本/最后活跃 + 绑定状态），
- * 支持撤销设备（释放配额位）。
+ * 设备管理（Vue 版）：展示当前用户全部设备（平台/客户端版本/最后活跃 + 状态），
+ * 支持撤销本人设备。
  *
  * 消息协议（与 webview/src/views/SessionView.vue 对齐）：
  *   webview → ext: ready | revoke{deviceId}
- *   ext → webview: init{mode:'session'} | devices{devices,currentDeviceId,canRevoke} | error{message}
+ *   ext → webview: init{mode:'session'} | devices{devices,canRevoke} | error{message}
  *
- * canRevoke 由扩展端按 plan.features 下发：free=false（撤销按钮换成 Pro 标记），
- * 由 syncClient.throwIfDeviceLimit 在 server 端 403 兜底。
+ * V3 设备经 /api/personal/devices：free 无设备配额（maxDevices=0），撤销本人设备恒允许，
+ * 故 canRevoke 恒为 true；无 plan.features 位图、无 throwIfDeviceLimit 门禁。
  */
 export class SessionView extends BaseWebView {
   private static current?: SessionView;
@@ -55,8 +55,8 @@ export class SessionView extends BaseWebView {
 
   private async refresh(): Promise<void> {
     try {
-      const { devices, currentDeviceId } = await this.auth.client.listDevices();
-      this.post({ type: 'devices', devices, currentDeviceId, canRevoke: this.auth.getCachedPlan()?.code !== 'free' });
+      const { devices } = await this.auth.client.listDevices();
+      this.post({ type: 'devices', devices, canRevoke: true });
     } catch (e) {
       this.post({ type: 'error', message: (e as Error).message });
     }

@@ -457,3 +457,35 @@ describe('V3 change-password / confirm 单次消费契约', () => {
     expect(calls).toBe(1);
   });
 });
+
+describe('V3 设备管理（/api/personal/devices）', () => {
+  it('listDevices 命中 /api/personal/devices 并解析 V3 DTO', async () => {
+    const calls: { url: string; method: string }[] = [];
+    const device = { deviceId: 'd1', devicePlatform: 'linux', deviceName: 'host', clientVersion: '1.90.0', status: 'active', lastUsedTime: null, createTime: '2024-01-01T00:00:00.000Z' };
+    const fetchMock = vi.fn(async (url: unknown, init: any) => {
+      calls.push({ url: String(url), method: init?.method ?? 'GET' });
+      return jsonRes(200, { devices: [device] });
+    });
+    const client = new SyncClient('http://x', () => 'access-1', () => 'refresh-1', undefined, undefined, fetchMock as any);
+
+    const { devices } = await client.listDevices();
+
+    expect(calls[0].url).toBe('http://x/api/personal/devices');
+    expect(calls[0].method).toBe('GET');
+    expect(devices[0]).toEqual({ deviceId: 'd1', devicePlatform: 'linux', deviceName: 'host', clientVersion: '1.90.0', status: 'active', lastUsedTime: null, createTime: '2024-01-01T00:00:00.000Z' });
+  });
+
+  it('revokeDevice 命中 /api/personal/devices/:id', async () => {
+    const calls: { url: string; method: string }[] = [];
+    const fetchMock = vi.fn(async (url: unknown, init: any) => {
+      calls.push({ url: String(url), method: init?.method ?? 'DELETE' });
+      return jsonRes(200, { ok: true });
+    });
+    const client = new SyncClient('http://x', () => 'access-1', () => 'refresh-1', undefined, undefined, fetchMock as any);
+
+    await client.revokeDevice('d1');
+
+    expect(calls[0].url).toBe('http://x/api/personal/devices/d1');
+    expect(calls[0].method).toBe('DELETE');
+  });
+});

@@ -84,23 +84,13 @@ export interface MeResponse {
 }
 
 export interface DeviceItem {
-  id: number;
-  userId: number;
   deviceId: string;
-  hostname?: string;
-  os?: string;
-  arch?: string;
-  osVersion?: string;
-  appName?: string;
-  appVersion?: string;
-  remoteName?: string;
-  vsMachineId?: string;
-  language?: string;
-  timezone?: string;
-  revokedTime?: string;
-  lastSeenTime?: string;
+  devicePlatform: string;
+  deviceName: string;
+  clientVersion: string;
+  status: 'active' | 'revoked';
+  lastUsedTime: string | null;
   createTime: string;
-  updateTime: string;
 }
 
 
@@ -288,17 +278,19 @@ export class SyncClient {
     return res.json() as Promise<PushResult>;
   }
 
-  /** 列当前用户全部设备（含绑定状态） */
-  async listDevices(): Promise<{ devices: DeviceItem[]; currentDeviceId?: string }> {
-    const res = await this.request('GET', '/api/devices', undefined, true);
-    if (!res.ok) throw new Error(`List devices failed: ${res.status}`);
-    return res.json() as Promise<{ devices: DeviceItem[]; currentDeviceId?: string }>;
+  /** 列当前用户全部设备（§4.6 /api/personal/devices，V3 无 currentDeviceId）。 */
+  async listDevices(): Promise<{ devices: DeviceItem[] }> {
+    const res = await this.request('GET', '/api/personal/devices', undefined, true);
+    if (!res.ok) {
+      const errBody = (await res.json().catch(() => ({}))) as { message?: string };
+      throw new Error(errBody.message || `List devices failed: ${res.status}`);
+    }
+    return res.json() as Promise<{ devices: DeviceItem[] }>;
   }
 
-  /** 撤销设备（释放配额位；free 由服务端 403 兜底） */
+  /** 撤销本人设备（§4.6 /api/personal/devices；free 无配额，撤销恒允许）。 */
   async revokeDevice(deviceId: string): Promise<void> {
-    const res = await this.request('DELETE', `/api/devices/${encodeURIComponent(deviceId)}`, undefined, true);
-    await this.throwIfDeviceLimit(res);
+    const res = await this.request('DELETE', `/api/personal/devices/${encodeURIComponent(deviceId)}`, undefined, true);
     if (!res.ok) {
       const errBody = (await res.json().catch(() => ({}))) as { message?: string };
       throw new Error(errBody.message || `Revoke failed: ${res.status}`);
