@@ -5,7 +5,7 @@
 
 ## Context
 
-V2 only distinguishes organization `admin` and `member`, and does not fully specify invitations, seat assignment, adjustable role permissions, resource-level access, personal-device isolation or Workspace invalidation. Authorization must be explicit before V3 service and client work begins.
+V2 only distinguishes organization `admin` and `member`, and does not fully specify invitations, seat assignment, adjustable role permissions, resource-level access, personal-device isolation or Workspace invalidation. Authorization must be explicit before V3 service and client work begins, including an anti-enumeration semantics that does not reveal whether a missing entity simply does not exist or exists but is forbidden.
 
 ## Decision
 
@@ -17,6 +17,7 @@ V2 only distinguishes organization `admin` and `member`, and does not fully spec
 6. Organization roles cannot access or manage another user's devices, sessions, private connections, private E2E data or local credentials.
 7. Phase 2 onward, privileged organization or platform actions write an audit record without credentials or decrypted content.
 8. The default client behavior is no persistent organization-resource offline cache. Loss of membership or organization access clears in-memory organization data immediately.
+9. Organization presence is sensitive metadata. For a caller who is not an active member, or when the organization/entity does not exist or is closed, the API returns the same 404 as for absence and never a 403 (anti-enumeration): organization APIs return `404 ORGANIZATION_NOT_FOUND`, cross-scope membership/invitation/folder return `404 NOT_FOUND`, and resources return `404 RESOURCE_NOT_FOUND`. The same holds for a user acting on another user's device (revoke returns `404 NOT_FOUND`).
 
 ## Consequences
 
