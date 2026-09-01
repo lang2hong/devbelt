@@ -18,8 +18,8 @@ ADR-0006 闭环了服务端 S1–S5（个人 E2E 同步 V1 数据层/仓储/状�
 
 范围小、可独立闭环、无可服务端改动。核心裁定（详见 §8.1.6）：
 
-- **权益轴 fail-open**：无 `CachedEntitlement`（未登录/登出已清缓存）→ 直接放行、不比对 `allowedDatabaseTypes`；个人连接本地优先，离线/首次启动不阻断本地 PostgreSQL。有缓存直接用缓存值、不强制实时校验；权益仅在登录 `/api/me` 时点刷新。
-- **引擎轴 fail-closed**：映射 `MYSQL→mysql` / `PG→postgresql` / `SQLITE→sqlite` 三条；未知 `DatabaseType` 一律拒绝。
+- **fail-closed 默认 Free**：无 `CachedEntitlement`（未登录/登出已清缓存）→ `DEFAULT_FREE=['mysql','sqlite']` 兜底；仅 `postgresql` 被拒并引导登录/升级。有缓存直接用缓存值、不强制实时校验；权益仅在登录 `/api/me` 时点刷新。
+- **映射表 fail-closed**：`MYSQL→mysql` / `PG→postgresql` / `SQLITE→sqlite` 三条；未知 `DatabaseType` 一律拒绝。
 - **仅门禁个人连接**：`ConnectionManager` 是个人+组织共用的建连入口（组织模板 `commands/org.ts` 经同一 `manager.connect`），门禁落点须先判定归属；组织连接走 organization 模板权益口径。
 - **五个使用点**：建连兜底点（`doConnect`，覆盖全部 `manager.connect`）、表单 `save`/`test`、连接导入、同步解密后应用。
 - **解密后=逐条跳过 + 汇总上报**：同步 pull 应用远端连接时违规引擎逐条跳过、收集清单、一次性提示，绝不整批失败、不删本地连接。

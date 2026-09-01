@@ -4,15 +4,14 @@ import type { CachedEntitlement } from './authService';
 /**
  * 个人连接许可证门禁（§8.1.6 扩展端口径裁定）。
  *
- * 两轴语义：
- *  - 权益轴＝fail-open：`CachedEntitlement` 缺失（未登录/登出已清缓存）时放行，
- *    不比对 allowedDatabaseTypes——个人连接本地优先，离线/首次启动不可阻断本地
- *    PostgreSQL。有缓存才按 allowedDatabaseTypes 门禁。
- *  - 引擎轴＝fail-closed：`DatabaseType` 映射表之外（未知/新增引擎）一律拒绝，
- *    不透传放行。
+ * fail-closed 默认 Free：无 `CachedEntitlement`（未登录/登出已清缓存）时按
+ * `DEFAULT_FREE_ENGINES` 兜底，与服务端匿名口径一致——仅 `postgresql` 被拒。
+ * 映射表 fail-closed：未知/新增 `DatabaseType` 一律拒绝，不透传放行。
  *
  * 本文件零 vscode 依赖，纯函数可单测。
  */
+
+export const DEFAULT_FREE_ENGINES: readonly string[] = ['mysql', 'sqlite'];
 
 const ENGINE_BY_DB_TYPE: Readonly<Partial<Record<DatabaseType, string>>> = {
   [DatabaseType.MYSQL]: 'mysql',
@@ -43,15 +42,13 @@ export function isOrganizationConnectionId(id?: string): boolean {
   return id?.startsWith(ORG_CONNECTION_ID_PREFIX) ?? false;
 }
 
-/** 有缓存返回允许列表；无缓存返回 undefined（fail-open：不受限）。 */
-export function allowedEngines(entitlement?: CachedEntitlement | null): readonly string[] | undefined {
-  return entitlement?.allowedDatabaseTypes;
+/** 当前允许的引擎集合：有缓存用缓存值，无缓存 fail-closed 到 Free。 */
+export function allowedEngines(entitlement?: CachedEntitlement | null): readonly string[] {
+  return entitlement?.allowedDatabaseTypes ?? DEFAULT_FREE_ENGINES;
 }
 
 export function isDatabaseTypeAllowed(dbType: DatabaseType, entitlement?: CachedEntitlement | null): boolean {
-  const engine = databaseEngineOf(dbType); // 未知引擎 fail-closed
-  if (!entitlement) return true; // 无权益放行
-  return entitlement.allowedDatabaseTypes.includes(engine);
+  return allowedEngines(entitlement).includes(databaseEngineOf(dbType));
 }
 
 /** 建连/保存/导入等个人连接写入点前的断言；违规抛 PersonalEntitlementDeniedError。 */
