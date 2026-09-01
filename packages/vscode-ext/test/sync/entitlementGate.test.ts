@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DatabaseType } from '@db-client/core';
 import {
-  DEFAULT_FREE_ENGINES,
   PersonalEntitlementDeniedError,
   assertPersonalDatabaseType,
   allowedEngines,
@@ -25,12 +24,12 @@ describe('databaseEngineOf', () => {
 });
 
 describe('allowedEngines', () => {
-  it('无权益时 fail-closed 到默认 Free', () => {
-    expect(allowedEngines(undefined)).toEqual(DEFAULT_FREE_ENGINES);
-    expect(allowedEngines(null)).toEqual(DEFAULT_FREE_ENGINES);
+  it('无权益返回 undefined（fail-open 不受限）', () => {
+    expect(allowedEngines(undefined)).toBeUndefined();
+    expect(allowedEngines(null)).toBeUndefined();
   });
 
-  it('有权益时直接用缓存值', () => {
+  it('有权益直接返回缓存列表', () => {
     expect(allowedEngines(pro)).toEqual(['mysql', 'postgresql', 'sqlite']);
   });
 });
@@ -38,10 +37,14 @@ describe('allowedEngines', () => {
 describe('assertPersonalDatabaseType', () => {
   it('允许的引擎不抛', () => {
     expect(() => assertPersonalDatabaseType(DatabaseType.MYSQL, free)).not.toThrow();
-    expect(() => assertPersonalDatabaseType(DatabaseType.SQLITE, undefined)).not.toThrow();
   });
 
-  it('拒绝的引擎抛 PersonalEntitlementDeniedError 且携带 engine', () => {
+  it('无权益（未登录/登出）fail-open：postgresql 放行', () => {
+    expect(() => assertPersonalDatabaseType(DatabaseType.PG, undefined)).not.toThrow();
+    expect(() => assertPersonalDatabaseType(DatabaseType.PG, null)).not.toThrow();
+  });
+
+  it('有 free 权益时 postgresql 被拒且携带 engine', () => {
     const fn = () => assertPersonalDatabaseType(DatabaseType.PG, free);
     expect(fn).toThrowError(PersonalEntitlementDeniedError);
     try {
@@ -49,11 +52,6 @@ describe('assertPersonalDatabaseType', () => {
     } catch (err) {
       expect((err as PersonalEntitlementDeniedError).engine).toBe('postgresql');
     }
-  });
-
-  it('无权益（未登录）默认 Free：postgresql 被拒', () => {
-    expect(() => assertPersonalDatabaseType(DatabaseType.PG, undefined)).toThrowError(PersonalEntitlementDeniedError);
-    expect(() => assertPersonalDatabaseType(DatabaseType.PG, null)).toThrowError(PersonalEntitlementDeniedError);
   });
 
   it('有 pro 权益时 postgresql 放行', () => {
@@ -64,14 +62,7 @@ describe('assertPersonalDatabaseType', () => {
 describe('filterPersonalConnectionsByEntitlement', () => {
   const c = (dbType: DatabaseType, name: string, deleted = false) => ({ dbType, name, deleted });
 
-  it('全允许时 allowed 全保留、skipped 空', () => {
-    const input = [c(DatabaseType.MYSQL, 'a'), c(DatabaseType.SQLITE, 'b')];
-    const { allowed, skipped } = filterPersonalConnectionsByEntitlement(input, free);
-    expect(allowed).toEqual(input);
-    expect(skipped).toEqual([]);
-  });
-
-  it('不勾选的引擎逐条跳过并收集（name, engine）清单', () => {
+  it('有 free 权益：不勾选引擎逐条跳过并收集（name, engine）清单', () => {
     const input = [c(DatabaseType.MYSQL, 'a'), c(DatabaseType.PG, 'pg-one'), c(DatabaseType.PG, 'pg-two')];
     const { allowed, skipped } = filterPersonalConnectionsByEntitlement(input, free);
     expect(allowed).toEqual([c(DatabaseType.MYSQL, 'a')]);
@@ -81,6 +72,13 @@ describe('filterPersonalConnectionsByEntitlement', () => {
     ]);
   });
 
+  it('无权益：fail-open 全部放行（含 postgresql）', () => {
+    const input = [c(DatabaseType.MYSQL, 'a'), c(DatabaseType.PG, 'pg')];
+    const { allowed, skipped } = filterPersonalConnectionsByEntitlement(input, undefined);
+    expect(allowed).toEqual(input);
+    expect(skipped).toEqual([]);
+  });
+
   it('删除墓碑永不门禁、原样保留', () => {
     const input = [c(DatabaseType.MYSQL, 'a'), c(DatabaseType.PG, 'pg-tombstone', true)];
     const { allowed, skipped } = filterPersonalConnectionsByEntitlement(input, free);
@@ -88,10 +86,14 @@ describe('filterPersonalConnectionsByEntitlement', () => {
     expect(skipped).toEqual([]);
   });
 
-  it('未知 dbType 保守拒绝并归入 skipped', () => {
+  it('未知 dbType 保守拒绝并归入 skipped（与权益无关）', () => {
     const unknown = { dbType: 'MARIADB' as unknown as DatabaseType, name: 'x', deleted: false };
-    const { allowed, skipped } = filterPersonalConnectionsByEntitlement([unknown], free);
-    expect(allowed).toEqual([]);
-    expect(skipped).toEqual([{ name: 'x', engine: 'MARIADB' }]);
+    const withFree = filterPersonalConnectionsByEntitlement([unknown], free);
+    expect(withFree.allowed).toEqual([]);
+    expect(withFree.skipped).toEqual([{ name: 'x', engine: 'MARIADB' }]);
+
+    const noEntitlement = filterPersonalConnectionsByEntitlement([unknown], undefined);
+    expect(noEntitlement.allowed).toEqual([]);
+    expect(noEntitlement.skipped).toEqual([{ name: 'x', engine: 'MARIADB' }]);
   });
 });
