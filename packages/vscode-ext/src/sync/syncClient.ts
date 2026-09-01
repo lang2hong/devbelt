@@ -214,8 +214,8 @@ export class SyncClient {
    * 不在此处做业务错误码归因（V2 的 DEVICE_LIMIT 等归因仍留在 sync 路径），
    * 组织侧的错误映射由 OrgClient 依据 `code`/`status` 完成。
    */
-  async requestRaw(method: string, path: string, body?: unknown): Promise<{ status: number; body: unknown }> {
-    const res = await this.request(method, path, body, true);
+  async requestRaw(method: string, path: string, body?: unknown, opts?: { retry?: boolean }): Promise<{ status: number; body: unknown }> {
+    const res = await this.request(method, path, body, true, opts?.retry);
     const text = await res.text();
     let parsed: unknown;
     if (text) {
@@ -338,7 +338,7 @@ export class SyncClient {
    * 带重试 + 401 自动刷新的 HTTP 请求。
    * 401 且 needsAuth：尝试 refresh 换新 access，成功则重试一次。
    */
-  private async request(method: string, path: string, body: unknown, needsAuth: boolean): Promise<Response> {
+  private async request(method: string, path: string, body: unknown, needsAuth: boolean, retry = true): Promise<Response> {
     const url = `${this.baseUrl}${path}`;
     // body 为空时（GET / DELETE）不带 Content-Type，否则 fastify 的 content-type-parser
     // 会尝试解析空 body 报 FST_ERR_CTP_EMPTY_JSON_BODY（如 free 用户撤销设备应返回 403，
@@ -350,13 +350,18 @@ export class SyncClient {
     if (tokenBefore) headers.Authorization = `Bearer ${tokenBefore}`;
     if (body !== undefined) init.body = JSON.stringify(body);
 
-    let res = await this.fetchWithRetry(url, init);
+    // retry=false 仅关闭 5xx 指数退避重试（写操作幂等边界）；401 的单飞刷新+重发仍是
+    // token 续期的正常语义，不受 retry 控制。
+    const doFetch = (i: RequestInit): Promise<Response> =>
+      retry ? this.fetchWithRetry(url, i) : this.fetchImpl(url, { ...i, dispatcher: directAgent } as any);
+
+    let res = await doFetch(init);
     if (res.status === 401 && needsAuth) {
       const ok = await this.tryRefresh(tokenBefore);
       if (ok) {
         const newToken = this.getAccessToken();
         if (newToken) (init.headers as Record<string, string>).Authorization = `Bearer ${newToken}`;
-        res = await this.fetchWithRetry(url, init);
+        res = await doFetch(init);
       }
     }
     return res;

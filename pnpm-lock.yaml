@@ -95,6 +95,9 @@ importers:
         specifier: ^9.0.5
         version: 9.0.5
     devDependencies:
+      '@db-client/core':
+        specifier: workspace:*
+        version: link:../db-core
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.43

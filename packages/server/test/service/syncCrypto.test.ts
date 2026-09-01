@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { generateKeyPairSync, sign as nodeSign } from 'crypto';
 import { parseU64, isU64, incU64, U64_MAX } from '../../src/domain/syncU64.js';
 import { jcs, requestDigestOf, verifyEd25519, decodeB64Url, sha256 } from '../../src/service/syncCrypto.js';
+import { JCS_VECTORS, NORMALIZED_JCS_VECTORS, INVALID_JCS_VALUES } from '@db-client/core/dist/sync/jcsVectors.js';
 
 describe('syncU64', () => {
   it('parses and rejects boundaries correctly', () => {
@@ -31,6 +32,18 @@ describe('syncCrypto', () => {
     expect(jcs({ b: 1, a: 'x', c: { d: true, e: null } })).toBe('{"a":"x","b":1,"c":{"d":true,"e":null}}');
     expect(jcs([3, 1, 2])).toBe('[3,1,2]');
     expect(jcs('a"b\\c')).toBe('"a\\"b\\\\c"');
+  });
+
+  it.each(JCS_VECTORS)('jcs 共享向量 $name（与扩展端双向锚定）', ({ value, expected }) => {
+    expect(jcs(value)).toBe(expected);
+  });
+
+  it.each(NORMALIZED_JCS_VECTORS)('jcs 共享向量 $name（域外归一一致）', ({ value, expected }) => {
+    expect(jcs(value)).toBe(expected);
+  });
+
+  it.each(INVALID_JCS_VALUES)('jcs 共享向量 $name（非有限拒绝一致）', ({ value }) => {
+    expect(() => jcs(value)).toThrow();
   });
 
   it('requestDigestOf is base64url 43 chars', () => {
