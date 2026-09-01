@@ -8,6 +8,7 @@ import {
 } from '../../../src/sync/crypto/sign';
 import { requestDigestOf } from '../../../src/sync/crypto/digest';
 import { deriveEd25519KeyPair, signEd25519 } from '../../../src/sync/crypto/ed25519';
+import { SYNC_SIGN_TEST_VECTOR } from '@db-client/core/dist/sync/signVector.js';
 
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 
@@ -58,5 +59,13 @@ describe('互通：@noble sign ↔ Node crypto.verify（B1 遗留冒烟兑现）
     const pub = createPublicKey({ key: spki, format: 'der', type: 'spki' });
     expect(cryptoVerify(null, msg, pub, Buffer.from(sig))).toBe(true);
     expect(cryptoVerify(null, Buffer.from('tampered'), pub, Buffer.from(sig))).toBe(false);
+  });
+
+  it('互通向量（单一源）：@noble 复算得到同一公钥与签名', () => {
+    const seed = new Uint8Array(Buffer.from(SYNC_SIGN_TEST_VECTOR.seedHex, 'hex'));
+    const kp = deriveEd25519KeyPair(seed);
+    expect(Buffer.from(kp.publicKey).toString('hex')).toBe(SYNC_SIGN_TEST_VECTOR.publicKeyHex);
+    const msg = new TextEncoder().encode(SYNC_SIGN_TEST_VECTOR.message);
+    expect(Buffer.from(signEd25519(msg, seed)).toString('base64url')).toBe(SYNC_SIGN_TEST_VECTOR.signatureB64Url);
   });
 });

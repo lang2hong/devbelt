@@ -3,6 +3,7 @@ import { generateKeyPairSync, sign as nodeSign } from 'crypto';
 import { parseU64, isU64, incU64, U64_MAX } from '../../src/domain/syncU64.js';
 import { jcs, requestDigestOf, verifyEd25519, decodeB64Url, sha256 } from '../../src/service/syncCrypto.js';
 import { JCS_VECTORS, NORMALIZED_JCS_VECTORS, INVALID_JCS_VALUES } from '@db-client/core/dist/sync/jcsVectors.js';
+import { SYNC_SIGN_TEST_VECTOR } from '@db-client/core/dist/sync/signVector.js';
 
 describe('syncU64', () => {
   it('parses and rejects boundaries correctly', () => {
@@ -66,6 +67,14 @@ describe('syncCrypto', () => {
 
     const badRaw = Buffer.alloc(32, 1);
     expect(verifyEd25519(badRaw, msg, sig)).toBe(false);
+  });
+
+  it('互通向量（单一源）：Node verify 验 @noble 签名，篡改失败', () => {
+    const rawPub = Buffer.from(SYNC_SIGN_TEST_VECTOR.publicKeyHex, 'hex');
+    const msg = Buffer.from(SYNC_SIGN_TEST_VECTOR.message, 'utf8');
+    const sig = Buffer.from(SYNC_SIGN_TEST_VECTOR.signatureB64Url, 'base64url');
+    expect(verifyEd25519(rawPub, msg, sig)).toBe(true);
+    expect(verifyEd25519(rawPub, Buffer.concat([msg, Buffer.from('x')]), sig)).toBe(false);
   });
 
   it('sha256 matches digest of requestDigestOf', () => {
