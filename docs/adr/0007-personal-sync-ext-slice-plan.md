@@ -41,7 +41,7 @@ ADR-0006 闭环了服务端 S1–S5（个人 E2E 同步 V1 数据层/仓储/状�
 ## 未决问题（切片 B 开工前须裁定，不得实现时自行决定）
 
 1. V2→V3 迁移策略：一次性迁移、双写过渡，还是新用户 V3 / 老用户继续 V2（B5 的核心）。
-2. 客户端密钥/状态持久化位置：DEK/签名私钥/恢复码/epoch/未消费 nonce 各落在 `SecretStorage` 还是 `globalState`，以及弱网/离线下的可用性边界。
+2. 客户端密钥/状态持久化位置：DEK/签名私钥/恢复码/epoch/未消费 nonce 各落在 `SecretStorage` 还是 `globalState`，以及弱网/离线下的可用性边界。**（B1 子集已裁定，2026-09-01）**：DEK 仅 SecretStorage、key 按 `dbclient.sync.dek.v1.<userId>.<keyEpoch>` 账户+epoch 隔离；`syncSignPriv`/`recoverSignPriv`/SMP/恢复码均不自动落盘（即时派生或用户保管）；公开件与 envelope 密文落 globalState。**B3 子集仍开放**：globalState 状态机（keyEpoch/stateVersion/change_sequence）与未消费 nonce ledger 的存储/src 作用域须按 `userId` 隔离，具体 schema 归 B3 裁定。
 3. `SavedConnection`（含明文 DB 凭据）到 §8.1 record 密文的映射：一 record 一连接？payload 结构？`recordId` 与本地 `connection.id` 如何对应。
 4. V3 与 V2 并存期的 UI 语言（sync 面板如何解释两套协议），以及与切片 A 解密后门禁的衔接。
 
