@@ -110,7 +110,8 @@ describe.skipIf(!URL)('sync reset-after-loss (real MySQL)', () => {
     expect(state?.stateVersion).toBe('1');
     // change_sequence 从 1 起、tombstone 一条 → 2
     expect(state?.changeSequence).toBe('2');
-    expect((await u.recordRepo.countActive({} as any, userId, '1')).count).toBe(0);
+    const activeCount = await withTransaction(db, (tx) => u.recordRepo.countActive(tx, userId, '1'));
+    expect(activeCount.count).toBe(0);
   });
 
   it('two concurrent resetAfterLoss on the same token yield exactly one success', async () => {
