@@ -60,7 +60,7 @@ ADR-0006 闭环了服务端 S1–S5（个人 E2E 同步 V1 数据层/仓储/状�
 
 ## B3b 冻结裁定（2026-09-01）
 
-1. **本地脏冲突**：V3 的权威并发版本是服务端 `record.version`，本机时钟不决定胜负；不允许静默远端覆盖。若本地连接自该 record 最后成功应用/确认后发生变更，且 pull 到更高远端 version（含 tombstone）→ 停止在该 record、保留本地连接与当前 cursor、不覆盖不删除，抛不含秘密的 `V3RecordConflictError`，冲突解决 UI 归 B4。若远端 version == 已确认 version，本地变更作为待推送 mutation，不被 pull 覆盖。未推送本地编辑可能被覆盖的风险写入 B4 强制项（pull 前脏检查/冲突提示）。
+1. **本地脏冲突**：V3 的权威并发版本是服务端 `record.version`，本机时钟不决定胜负；不允许静默远端覆盖。若本地连接自该 record 最后成功应用/确认后发生变更，且 pull 到更高远端 version（含 tombstone）→ 停止在该 record、保留本地连接与当前 cursor、不覆盖不删除，抛不含秘密的 `V3RecordConflictError`，冲突解决 UI 归 B4。若远端 version == 已确认 version，本地变更作为待推送 mutation，不被 pull 覆盖。B4 项为脏状态展示与防御纵深（冲突检测已用 revision 标记挡住覆盖风险）。
 2. **connectionId**：复用 `uniqueId('c')`（本地 UI 标识，非密码学标识）；生成后必须确认无同 ID，碰撞即重生成。`recordId` 仍为 CSPRNG 16B → 22 字符无 padding base64url，不复用 connectionId。
 3. **apply 幂等**：`RecordMapStore` 持久化 `recordId + connectionId + 服务端确认 recordVersion + 本地连接 revision 标记(updateTime)`；收到 version ≤ 已确认 version 不重复写，更高 version 才进冲突检查/远端应用；tombstone 按 version 判断。
 4. **epoch 清理时序**：不等待下一次 pull。destroy/reset 或发现远端已切 epoch → ①服务端成功确认 → ②GET state 确认新 epoch → ③持久化新 snapshot → ④清旧 epoch record map / pending outbox / 游标 → ⑤删旧 epoch DEK。新 DEK 在发起需要它的新 epoch 请求前入 SecretStorage；服务端成功但本地 ②-⑤ 失败不回滚服务端，保留新旧 DEK 与可重放清理标记，启动时 `reconcileEpochTransition()` 对账恢复。UI 命令/确认归 B4，不在此接线。

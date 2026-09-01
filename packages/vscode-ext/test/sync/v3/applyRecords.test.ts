@@ -43,55 +43,75 @@ describe('applyRecord', () => {
   it('同 version 重放幂等：应用两次 → 恰好一个连接', async () => {
     const { store, mapStore, uniqueConnectionId } = setup();
     const id = 'A'.repeat(22);
-    expect(applyRecord({ recordId: id, version: '1', tombstone: false, payload }, { store: store as any, mapStore, uniqueConnectionId })).toMatchObject({ disposition: 'created' });
-    await store.save.mock.results[0].value;
+    const ctx = { store: store as any, mapStore, uniqueConnectionId };
+    expect(await applyRecord({ recordId: id, version: '1', tombstone: false, payload }, ctx)).toMatchObject({ disposition: 'created' });
     expect(store.all()).toHaveLength(1);
-    expect(applyRecord({ recordId: id, version: '1', tombstone: false, payload }, { store: store as any, mapStore, uniqueConnectionId })).toMatchObject({ disposition: 'skipped' });
+    expect(await applyRecord({ recordId: id, version: '1', tombstone: false, payload }, ctx)).toMatchObject({ disposition: 'skipped' });
     expect(store.all()).toHaveLength(1);
   });
 
   it('更高 version 干净更新，连接数不变', async () => {
     const { store, mapStore, uniqueConnectionId } = setup();
     const id = 'A'.repeat(22);
-    applyRecord({ recordId: id, version: '1', tombstone: false, payload }, { store: store as any, mapStore, uniqueConnectionId });
-    expect(applyRecord({ recordId: id, version: '2', tombstone: false, payload }, { store: store as any, mapStore, uniqueConnectionId })).toMatchObject({ disposition: 'updated' });
+    const ctx = { store: store as any, mapStore, uniqueConnectionId };
+    await applyRecord({ recordId: id, version: '1', tombstone: false, payload }, ctx);
+    expect(await applyRecord({ recordId: id, version: '2', tombstone: false, payload }, ctx)).toMatchObject({ disposition: 'updated' });
     expect(store.all()).toHaveLength(1);
   });
 
   it('tombstone 删除已映射连接 + 清映射', async () => {
     const { store, mapStore, uniqueConnectionId } = setup();
     const id = 'A'.repeat(22);
-    applyRecord({ recordId: id, version: '1', tombstone: false, payload }, { store: store as any, mapStore, uniqueConnectionId });
-    expect(applyRecord({ recordId: id, version: '2', tombstone: true }, { store: store as any, mapStore, uniqueConnectionId })).toMatchObject({ disposition: 'deleted' });
+    const ctx = { store: store as any, mapStore, uniqueConnectionId };
+    await applyRecord({ recordId: id, version: '1', tombstone: false, payload }, ctx);
+    expect(await applyRecord({ recordId: id, version: '2', tombstone: true }, ctx)).toMatchObject({ disposition: 'deleted' });
     expect(store.all()).toHaveLength(0);
     expect(mapStore.getByRecordId(id)).toBeUndefined();
   });
 
   it('未映射 tombstone 不建连接不报错', async () => {
     const { store, mapStore, uniqueConnectionId } = setup();
-    expect(applyRecord({ recordId: 'A'.repeat(22), version: '1', tombstone: true }, { store: store as any, mapStore, uniqueConnectionId })).toMatchObject({ disposition: 'ignored-tombstone' });
+    expect(await applyRecord({ recordId: 'A'.repeat(22), version: '1', tombstone: true }, { store: store as any, mapStore, uniqueConnectionId })).toMatchObject({ disposition: 'ignored-tombstone' });
     expect(store.all()).toHaveLength(0);
   });
 
-  it('本地脏 + 更高 version → V3RecordConflictError', async () => {
+  it('本地脏 + 更高 version active → 冲突，保留本地连接', async () => {
     const dirtyConn: SavedConnection = { id: 'c-1', name: 'n', dbType: 'MYSQL' as any, host: 'h', port: 3306, user: 'u', updateTime: 200 } as SavedConnection;
     const { store, mapStore, uniqueConnectionId } = setup([dirtyConn]);
-    mapStore.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 100 });
-    expect(() => applyRecord(
+    await mapStore.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 100 });
+    await expect(applyRecord(
       { recordId: 'A'.repeat(22), version: '2', tombstone: false, payload },
       { store: store as any, mapStore, uniqueConnectionId },
-    )).toThrowError(V3RecordConflictError);
-    expect(store.all()).toHaveLength(1); // 保留本地连接
+    )).rejects.toThrowError(V3RecordConflictError);
+    expect(store.all()).toHaveLength(1);
+  });
+
+  it('本地脏 + 更高 version tombstone → 冲突，不删', async () => {
+    const dirtyConn: SavedConnection = { id: 'c-1', name: 'n', dbType: 'MYSQL' as any, host: 'h', port: 3306, user: 'u', updateTime: 200 } as SavedConnection;
+    const { store, mapStore, uniqueConnectionId } = setup([dirtyConn]);
+    await mapStore.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 100 });
+    await expect(applyRecord(
+      { recordId: 'A'.repeat(22), version: '2', tombstone: true },
+      { store: store as any, mapStore, uniqueConnectionId },
+    )).rejects.toThrowError(V3RecordConflictError);
+    expect(store.all()).toHaveLength(1);
   });
 
   it('引擎门禁（free + postgresql）跳过', async () => {
     const { store, mapStore, uniqueConnectionId } = setup();
     const free = { planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 2 };
-    const r = applyRecord(
+    expect(await applyRecord(
       { recordId: 'A'.repeat(22), version: '1', tombstone: false, payload: { ...payload, dbType: 'postgresql' } },
       { store: store as any, mapStore, uniqueConnectionId, entitlement: free },
-    );
-    expect(r.disposition).toBe('skipped');
+    )).toMatchObject({ disposition: 'skipped' });
     expect(store.all()).toHaveLength(0);
+  });
+
+  it('未知 payload 字段拒绝（严格解码）', async () => {
+    const { store, mapStore, uniqueConnectionId } = setup();
+    await expect(applyRecord(
+      { recordId: 'A'.repeat(22), version: '1', tombstone: false, payload: { ...payload, extra: 1 } },
+      { store: store as any, mapStore, uniqueConnectionId },
+    )).rejects.toThrowError(/unexpected/);
   });
 });

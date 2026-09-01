@@ -58,6 +58,108 @@ export function databaseTypeFromEngine(engine: string): DatabaseType {
   return t;
 }
 
+export interface DecodedRecordPayload {
+  name: string;
+  dbType: DatabaseType;
+  host: string;
+  port: number;
+  user: string;
+  password?: string;
+  database?: string;
+  schema?: string;
+  timezone?: string;
+  groupId?: string;
+  environment?: 'development' | 'test' | 'staging' | 'production';
+  readOnly?: boolean;
+  useSSL?: boolean;
+  sshHost?: string;
+  sshPort?: number;
+  sshUser?: string;
+  sshPassword?: string;
+  sshPassphrase?: string;
+}
+
+function rejectExtraKeys(obj: Record<string, unknown>, allowed: readonly string[], field: string): void {
+  for (const k of Object.keys(obj)) {
+    if (!allowed.includes(k)) throw new Error(`${field} has unexpected key "${k}"`);
+  }
+}
+
+function strOf(obj: Record<string, unknown>, key: string): string | undefined {
+  const v = obj[key];
+  if (v === undefined) return undefined;
+  if (typeof v !== 'string') throw new Error(`record payload.${key} must be a string`);
+  return v;
+}
+
+function intOf(obj: Record<string, unknown>, key: string): number | undefined {
+  const v = obj[key];
+  if (v === undefined) return undefined;
+  if (typeof v !== 'number' || !Number.isInteger(v)) throw new Error(`record payload.${key} must be an integer`);
+  return v;
+}
+
+function uint16Of(obj: Record<string, unknown>, key: string): number | undefined {
+  const v = intOf(obj, key);
+  if (v === undefined) return undefined;
+  if (v < 0 || v > 65535) throw new Error(`record payload.${key} out of range 0..65535`);
+  return v;
+}
+
+function boolOf(obj: Record<string, unknown>, key: string): boolean | undefined {
+  const v = obj[key];
+  if (v === undefined) return undefined;
+  if (typeof v !== 'boolean') throw new Error(`record payload.${key} must be a boolean`);
+  return v;
+}
+
+/**
+ * 严格解码 record 明文 payload → 已校验字段（§8.1.1 + ADR-0007 冻结）。
+ *
+ * 拒绝未知字段（additionalProperties:false）、类型错误、未知 engine、端口越界，并
+ * 拒绝 `connectionUrl`/`useConnectionString`/`sqliteCommand`（这些早已不在白名单，
+ * 出现即被 rejectExtraKeys 拒绝）。返回的是纯数据，不含 toJSON/getter/undefined。
+ */
+export function decodeRecordPayload(p: unknown): DecodedRecordPayload {
+  if (typeof p !== 'object' || p === null) throw new Error('record payload must be an object');
+  const obj = p as Record<string, unknown>;
+  rejectExtraKeys(obj, RECORD_PAYLOAD_FIELDS as readonly string[], 'record payload');
+
+  const dbTypeStr = strOf(obj, 'dbType');
+  if (dbTypeStr === undefined) throw new Error('record payload.dbType is required');
+  const dbType = databaseTypeFromEngine(dbTypeStr);
+  const name = strOf(obj, 'name');
+  if (name === undefined) throw new Error('record payload.name is required');
+  const host = strOf(obj, 'host');
+  if (host === undefined) throw new Error('record payload.host is required');
+  const port = uint16Of(obj, 'port');
+  if (port === undefined) throw new Error('record payload.port is required');
+  const user = strOf(obj, 'user');
+  if (user === undefined) throw new Error('record payload.user is required');
+
+  const env = strOf(obj, 'environment');
+  if (env !== undefined && !['development', 'test', 'staging', 'production'].includes(env)) {
+    throw new Error(`record payload.environment invalid: ${env}`);
+  }
+
+  return {
+    name, dbType, host, port, user,
+    password: strOf(obj, 'password'),
+    database: strOf(obj, 'database'),
+    schema: strOf(obj, 'schema'),
+    timezone: strOf(obj, 'timezone'),
+    groupId: strOf(obj, 'groupId'),
+    environment: env as DecodedRecordPayload['environment'],
+    readOnly: boolOf(obj, 'readOnly'),
+    useSSL: boolOf(obj, 'useSSL'),
+    sshHost: strOf(obj, 'sshHost'),
+    sshPort: uint16Of(obj, 'sshPort'),
+    sshUser: strOf(obj, 'sshUser'),
+    sshPassword: strOf(obj, 'sshPassword'),
+    sshPassphrase: strOf(obj, 'sshPassphrase'),
+  };
+}
+
 /** record AAD 对象（§8.1.8）。purpose 恒为 'record'，写死。 */
 export function recordAad(ctx: RecordAadCtx): Record<string, unknown> {
   return {
