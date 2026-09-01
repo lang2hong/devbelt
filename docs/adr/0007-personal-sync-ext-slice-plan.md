@@ -37,11 +37,11 @@ ADR-0006 闭环了服务端 S1–S5（个人 E2E 同步 V1 数据层/仓储/状�
 | B3a 协议本地原语 | 本地 state 快照（`dbclient.sync.v3.state.<userId>`，u64 单调防回退）、`recordAad`（purpose='record'）、白名单 record 编解码、record 解密 helper（§8.1.4/8.1.8） | B2 |
 | B3b record 映射与状态机编排 | record ↔ SavedConnection 双向映射、tombstone 删除、epoch 清理；mutation 生命周期（生成/提交/版本推进/冲突对齐/feed 续拉）（§8.1.4/8.1.9） | B3a |
 | B4 UI 命令 | init / change-key / recover / destroy / reset-after-loss 命令与恢复码展示、SMP 解锁 worker | B3b |
-| B5 迁移 | V2 分节同步（`/api/sync` 分节 push/pull/versions/rollback + 主密码 AES-GCM）→ V3 record 的存量数据迁移与并存期策略 | B3 |
+| ~~B5 迁移~~ | ~~V2 分节同步 → V3 record 迁移~~ **已取消（2026-09-01）**：无迁移、无 fallback、无并存，V2 客户端直接删除 | 已取消 |
 
 ## 未决问题（切片 B 开工前须裁定，不得实现时自行决定）
 
-1. V2→V3 迁移策略：一次性迁移、双写过渡，还是新用户 V3 / 老用户继续 V2（B5 的核心）。
+1. ~~V2→V3 迁移策略~~ **已取消（2026-09-01）**：实施规格 §6.5 Greenfield 原则规定不迁移、无双写、无 fallback；V2 分节同步客户端（SyncManager/encryption/masterPasswordStore/autoSyncService/mergePlan/同步命令）已整体删除，不保留迁移或并存。
 2. 客户端密钥/状态持久化位置：DEK/签名私钥/恢复码/epoch/未消费 nonce 各落在 `SecretStorage` 还是 `globalState`，以及弱网/离线下的可用性边界。**（B1 子集已裁定，2026-09-01）**：DEK 仅 SecretStorage、key 按 `dbclient.sync.dek.v1.<userId>.<keyEpoch>` 账户+epoch 隔离；`syncSignPriv`/`recoverSignPriv`/SMP/恢复码均不自动落盘（即时派生或用户保管）；公开件与 envelope 密文落 globalState。**B3a 子集已裁定**：globalState 状态机（keyEpoch/stateVersion/change_sequence）按 `userId` 隔离。**nonce 子项已裁定关闭（2026-09-01）**：客户端不持久化 nonce ledger；每次 mutation 用随机 12B nonce（同 key 碰撞生日界可忽略），服务端 `personal_sync_nonces` + mutation receipt 幂等兜底；失败重试同一 mutation 必须原样复用 nonce/mutationId/body/signature。
 3. `SavedConnection`（含明文 DB 凭据）到 §8.1 record 密文的映射。**（已裁定草案归 B3b，2026-09-01）**：一 record 一连接；recordId 为 CSPRNG 16B → 22 字符无 padding base64url，不复用 `connection.id`；映射按 userId+keyEpoch 双向（`recordId ↔ connectionId`）；远端新 record 生成新 `connectionId`、tombstone 删除映射与本地连接、组织连接永不入映射、未映射 tombstone 不建连接不报错；epoch 清理仅在服务端状态确认且本地应用完成后。
 4. V3 与 V2 并存期的 UI 语言（sync 面板如何解释两套协议），以及与切片 A 解密后门禁的衔接。

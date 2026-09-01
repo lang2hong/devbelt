@@ -17,13 +17,9 @@ import { AuditLogger } from './utils/auditLogger';
 import { BackupScheduler } from './schedule/backupScheduler';
 import { HistoryStore } from './history/historyStore';
 import { AuthService, DEFAULT_SERVER_URL } from './sync/authService';
-import { SyncManager } from './sync/syncManager';
-import { MasterPasswordStore } from './sync/masterPasswordStore';
-import { AutoSyncService, type AutoSyncMode } from './sync/autoSyncService';
-import type { Event } from './utils/event';
 import { eventBus, ConnectionChangedEvent, DataChangeEvent, AuthEvent } from './utils/event';
-import { invalidateLanguage, LANGUAGE_CONFIG_KEY, l10n } from './i18n';
-import { registerCommands, SyncStatusBar } from './commands';
+import { invalidateLanguage, LANGUAGE_CONFIG_KEY } from './i18n';
+import { registerCommands } from './commands';
 import { SqlCompletionProvider } from './completion/sqlCompletionProvider';
 import { SqlCodeLensProvider } from './completion/sqlCodeLensProvider';
 import { TerminalService } from './terminal/terminalService';
@@ -62,45 +58,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // changeSyncPassword 的可见性。此前从未 setContext，导致 logout 与
   // changeSyncPassword 永久不可见、login 永久可见。
   void syncLoggedInContext(auth);
-  const masterPasswordStore = new MasterPasswordStore(context.secrets);
-  const sync = new SyncManager(auth, store, history, context.globalState, masterPasswordStore, (err) => {
-    void vscode.window.showErrorMessage(err.message, 'Upgrade').then((choice) => {
-      if (choice === 'Upgrade') void vscode.commands.executeCommand('dbclient.account');
-    });
-  }, (skipped) => {
-    const engines = [...new Set(skipped.map((s) => s.engine))].join(', ');
-    void vscode.window.showWarningMessage(l10n('entitlement.skippedSummary', { count: skipped.length, engines }));
-  });
-  const syncBar = new SyncStatusBar(auth);
 
-  // 自动同步：合并连接/查询 与 历史 的变更事件
-  const storeChanged: Event<void> = (listener) => {
-    const d1 = store.onChanged((source) => {
-      // 并存期隔离（B3b 冻结裁定）：V3 远端应用（source='v3-sync'）不得触发 V2 auto-sync。
-      if (source !== 'v3-sync') listener();
-    });
-    const d2 = history.onChanged(listener);
-    return { dispose: () => { d1.dispose(); d2.dispose(); } };
-  };
-  const autoSync = new AutoSyncService(
-    sync,
-    () => vscode.workspace.getConfiguration('dbclient.sync').get<AutoSyncMode>('auto', 'off'),
-    () => vscode.workspace.getConfiguration('dbclient.sync').get<number>('intervalMin', 0),
-    storeChanged,
-    () => {
-      void vscode.window
-        .showInformationMessage(l10n('cmd.syncPending'), l10n('cmd.syncNow'))
-        .then((ch) => {
-          if (ch === l10n('cmd.syncNow')) void vscode.commands.executeCommand('dbclient.syncPush');
-        });
-    },
-    () => syncBar.update(),
-    () => auth.isLoggedIn(),
-  );
-  autoSync.start();
-  context.subscriptions.push(autoSync);
-
-  // 事件总线：连接/分组变更时自动刷新树（同步 pull 等无命令处理器的场景）
+  // 事件总线：连接/分组变更时自动刷新树
   context.subscriptions.push(
     eventBus.subscribe(ConnectionChangedEvent, () => treeProvider.refresh()),
   );
@@ -111,12 +70,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (e.operation === 'ddl') treeProvider.refresh();
     }),
   );
-  context.subscriptions.push(
-    vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('dbclient.sync')) autoSync.restart();
-    }),
-  );
-
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration(LANGUAGE_CONFIG_KEY)) invalidateLanguage();
@@ -247,7 +200,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     origRefresh();
   };
 
-  registerCommands({ context, store, manager, treeProvider, executor, history, auth, sync, syncBar, connCtx });
+  registerCommands({ context, store, manager, treeProvider, executor, history, auth, connCtx });
 }
 
 /**

@@ -118,21 +118,6 @@
         "category": "DB Client"
       },
       {
-        "command": "dbclient.syncPull",
-        "title": "%cmd.syncPull%",
-        "category": "DB Client"
-      },
-      {
-        "command": "dbclient.syncPush",
-        "title": "%cmd.syncPush%",
-        "category": "DB Client"
-      },
-      {
-        "command": "dbclient.changeSyncPassword",
-        "title": "%cmd.changeSyncPassword%",
-        "category": "DB Client"
-      },
-      {
         "command": "dbclient.account",
         "title": "%account.title%",
         "category": "DB Client"
@@ -662,10 +647,6 @@
         },
         {
           "command": "dbclient.logout",
-          "when": "dbclient.loggedIn"
-        },
-        {
-          "command": "dbclient.changeSyncPassword",
           "when": "dbclient.loggedIn"
         },
         {
@@ -1350,30 +1331,6 @@
     "configuration": {
       "title": "DB Client",
       "properties": {
-        "dbclient.sync.auto": {
-          "type": "string",
-          "enum": [
-            "off",
-            "reminder",
-            "silent"
-          ],
-          "default": "off",
-          "description": "Automatic cloud sync mode. 'reminder' notifies on changes; 'silent' runs background sync (requires remembering the master password).",
-          "markdownDescription": "自动云同步模式：`reminder` 变更时提示；`silent` 后台静默同步（需记住主密码）。"
-        },
-        "dbclient.sync.intervalMin": {
-          "type": "number",
-          "default": 0,
-          "minimum": 0,
-          "description": "Automatic sync interval in minutes. 0 disables the periodic timer.",
-          "markdownDescription": "自动同步周期（分钟）。0 表示关闭定时同步。"
-        },
-        "dbclient.sync.rememberMaster": {
-          "type": "boolean",
-          "default": true,
-          "description": "Remember the sync master password in OS secure storage to enable silent background sync.",
-          "markdownDescription": "在本机安全存储中记住同步主密码，以启用后台静默同步（主密码从不上传）。"
-        },
         "dbclient.language": {
           "type": "string",
           "enum": [

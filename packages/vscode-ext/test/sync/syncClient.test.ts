@@ -129,7 +129,6 @@ describe('刷新单飞', () => {
       t.client.getMe(),
       t.client.getMe(),
       t.client.getMe(),
-      t.client.fetchSections(),
       t.client.listDevices().catch(() => undefined),
     ]);
 

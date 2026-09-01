@@ -55,25 +55,15 @@ You can also install from a `.vsix` file: run **Extensions: Install from VSIX…
 | View Data / View DDL / Design Table | Inspect and edit table schemas |
 | Import / Export | CSV/JSON transfer with field mapping |
 | ER Diagram / Compare Schema | Schema analysis |
-| Sync Pull / Sync Push | V2 遗留入口：走旧协议，不受 V3 服务端支持（§8.1 服务端已实施，扩展端 V3 同步客户端仍未落地） |
 
 ## Cloud Sync
 
-> §8.1 个人 E2E 同步的服务端已逐切片实现（S1–S5），但本扩展尚未接入 V3 同步协议。以下 `Sync Pull`/`Sync Push` 命令与 `dbclient.sync.*` 设置仍作为 V2 遗留入口注册，不受 V3 服务端支持；UI 暴露将在 V3 同步客户端接入时一并收敛。
-
-1. Run **DB Client: Login** and register an account.
-2. **Sync Push** encrypts your connection config (excluding passwords) with your master password and uploads it.
-3. **Sync Pull** restores it on any device — the master password is never uploaded.
+> §8.1 个人 E2E 同步服务端已落地（S1–S5），扩展端 V3 同步客户端（B1–B3 原语）正在推进、尚未接入 UI。旧的 V2 分节同步入口已移除；同步命令与界面将在 B4 完成后再暴露。
 
 ## Settings
 
-> `dbclient.sync.*` 是个人 E2E 同步的 V2 遗留设置；V3 服务端已实现 §8.1（S1–S5），但扩展端 V3 同步客户端尚未接入，仍不受 V3 支持。
-
 | Setting | Default | Description |
 |---|---|---|
-| `dbclient.sync.auto` | `off` | Cloud sync mode: `reminder` notifies on change, `silent` syncs in the background |
-| `dbclient.sync.intervalMin` | `0` | Auto-sync interval in minutes (`0` disables the periodic timer) |
-| `dbclient.sync.rememberMaster` | `true` | Remember the master password in OS secure storage for silent sync |
 | `dbclient.language` | `auto` | Extension language: `auto` / `zh` / `en` |
 | `dbclient.format.indent` | `2` | SQL formatting indent width (spaces) |
 | `dbclient.format.keywordCase` | `upper` | SQL keyword case: `preserve` / `upper` / `lower` |

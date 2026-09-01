@@ -7,7 +7,6 @@ import { DbTreeDataProvider } from '../tree/dbTreeDataProvider';
 import { QueryExecutor } from '../result/queryExecutor';
 import { HistoryStore } from '../history/historyStore';
 import { AuthService } from '../sync/authService';
-import { SyncManager } from '../sync/syncManager';
 import { l10n } from '../i18n';
 import type { DatabaseOperation } from '@db-client/core';
 import type { ConnectionSession } from '../connection/connectionManager';
@@ -20,13 +19,7 @@ export interface Deps {
   executor: QueryExecutor;
   history: HistoryStore;
   auth: AuthService;
-  sync: SyncManager;
-  syncBar: SyncStatusBarLike;
   connCtx: ConnectionContext;
-}
-
-export interface SyncStatusBarLike {
-  update(): void;
 }
 
 export type Sub = (cmd: string, handler: (...args: any[]) => any) => void;
@@ -108,91 +101,4 @@ export async function pickConnection(store: ConnectionStore): Promise<SavedConne
     { placeHolder: l10n('cmd.selectConnection') },
   );
   return picked?.value;
-}
-
-export async function promptMasterPassword(): Promise<string | undefined> {
-  return vscode.window.showInputBox({ prompt: l10n('cmd.masterPassword'), password: true });
-}
-
-/** 主密码 + 验证结果的回调。见 resolveMasterPassword。 */
-export interface ResolvedMasterPassword {
-  password: string;
-  /** 密码确认可用（能解开远端数据）后调用，按设置决定是否写入 SecretStorage */
-  confirm(): Promise<void>;
-  /** 密码不可用时调用，清掉可能已记住的错误值 */
-  reject(): Promise<void>;
-}
-
-/**
- * 取主密码：优先用已记住的，否则提示输入。
- *
- * **不再在这里写入 SecretStorage。** 原实现是"提示输入 → 立刻记住 → 返回"，
- * 而调用方拿到密码后才去 preview —— 那时才知道密码对不对。输错一次的后果：
- *
- *  - pull：错误密码被记住 → 本次解密失败 → 下次 pull 直接取那个错误密码，
- *    **不再提示输入**，再次失败。用户被永久卡住，除非知道"忘记主密码"藏在
- *    logout 里。
- *  - push：更糟。错误密码会被用来**加密并上传**，远端数据从此用一个用户自己
- *    都不知道的密码加密，其他设备用正确密码拉取会全部解密失败 ——
- *    数据丢失级别的后果，起因只是一次手抖。
- *
- * 改成由调用方在验证成功后 `confirm()`、失败时 `reject()`。
- * 已记住的密码不需要重复写入，所以它的 confirm 是空操作。
- */
-export async function resolveMasterPassword(
-  sync: SyncManager,
-  remember: boolean,
-): Promise<ResolvedMasterPassword | undefined> {
-  const noop = async (): Promise<void> => {};
-  const forget = () => sync.forgetMasterPassword();
-
-  const remembered = await sync.getRememberedMasterPassword();
-  if (remembered) {
-    return { password: remembered, confirm: noop, reject: forget };
-  }
-
-  const mp = await promptMasterPassword();
-  // 空字符串按取消处理：它不可能是有效主密码，当成"输入了"会拿它去解密/加密
-  if (!mp) return undefined;
-
-  return {
-    password: mp,
-    confirm: remember ? async () => { await sync.rememberMasterPassword(mp); } : noop,
-    reject: forget,
-  };
-}
-
-/**
- * 取主密码 → 用它做一次需要解密的操作 → 按结果 confirm / reject。
- *
- * 提取成函数而不是在两个命令里各写一遍，理由有两个：
- *  - pull 与 push 的这段编排完全相同，重复写一定会漂移（改了一处忘了另一处）。
- *  - `confirm()` / `reject()` 漏调是**静默失效**：漏 confirm 则"记住主密码"
- *    这个功能形同不存在（每次同步都要重输），漏 reject 则历史遗留的错误密码
- *    永远清不掉。两者都不会报错，只能靠测试钉住 —— 而分散在命令注册回调里
- *    的代码需要整套 vscode mock 才测得到。
- *
- * 返回 undefined 表示"用户取消"或"操作失败"，调用方直接返回即可；
- * 失败的错误信息由 onError 展示（各命令的文案不同）。
- */
-export async function withMasterPassword<T>(
-  sync: SyncManager,
-  remember: boolean,
-  operation: (password: string) => Promise<T>,
-  onError: (err: unknown) => void,
-): Promise<{ password: string; result: T } | undefined> {
-  const mp = await resolveMasterPassword(sync, remember);
-  if (!mp) return undefined;
-  try {
-    const result = await operation(mp.password);
-    // 只有真的解开了远端数据才记住这个密码
-    await mp.confirm();
-    return { password: mp.password, result };
-  } catch (err) {
-    // 解不开就清掉可能已记住的错误值，让下次能重新输入；
-    // 否则历史遗留的错误密码会让用户永远进不去。
-    await mp.reject();
-    onError(err);
-    return undefined;
-  }
 }

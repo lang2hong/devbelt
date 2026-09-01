@@ -9,7 +9,6 @@ const directAgent = new Agent();
 /**
  * 同步客户端：封装与后端同步服务的 HTTP 通信。
  * 双 token：access(短期) + refresh(长期)；401 自动用 refresh 换新 access 并重试一次。
- * 分节同步：fetchSections/pushSection/listVersions/rollback（方案 A）。
  * 网络错误与 5xx 指数退避重试（最多 3 次）；4xx 业务错误不重试。
  *
  * 两条与 refresh token 一次性语义相关的规则（细节见 refresh / tryRefresh）：
@@ -36,27 +35,6 @@ export interface DeviceInfo {
   remoteName?: string;
   language: string;
   timezone: string;
-}
-
-export interface SectionData {
-  section: string;
-  encryptedData: string;
-  version: number;
-  updateTime: string;
-}
-
-export interface PullResult {
-  sections: SectionData[];
-}
-
-export interface PushResult {
-  version: number;
-}
-
-export interface VersionSummary {
-  version: number;
-  dataBytes: number;
-  createTime: string;
 }
 
 /** V3 个人权益快照（personal_plans entitlement_snapshot）。 */
@@ -87,38 +65,6 @@ export interface DeviceItem {
 }
 
 
-
-/** 冲突错误：某 section 远端 version 已变化 */
-export class SyncConflictError extends Error {
-  constructor(public readonly section: string, public readonly latestVersion: number) {
-    super(`sync conflict on section ${section}: remote version ${latestVersion}`);
-    this.name = 'SyncConflictError';
-  }
-}
-
-/** 设备数超限（server 403 DEVICE_LIMIT_EXCEEDED）：当前设备未绑定且配额已满 */
-export class DeviceLimitExceededError extends Error {
-  constructor() {
-    super('Device limit reached. Upgrade to Pro to use this device, or contact the administrator.');
-    this.name = 'DeviceLimitExceededError';
-  }
-}
-
-/** 付费功能（server 403 PRO_FEATURE_REQUIRED）：free 套餐不可用 */
-export class ProFeatureRequiredError extends Error {
-  constructor() {
-    super('Device management requires a paid plan. Upgrade to Pro.');
-    this.name = 'ProFeatureRequiredError';
-  }
-}
-
-/** 配额超限（server 403 QUOTA_EXCEEDED）：连接数 / 同步存储超限 */
-export class QuotaExceededError extends Error {
-  constructor(message?: string) {
-    super(message || 'Plan quota exceeded. Upgrade to continue syncing.');
-    this.name = 'QuotaExceededError';
-  }
-}
 
 export class SyncClient {
   private static readonly MAX_ATTEMPTS = 3;
@@ -235,42 +181,6 @@ export class SyncClient {
     return res.json() as Promise<MeResponse>;
   }
 
-  /** 拉取同步分节（section 可选，无则全节） */
-  async fetchSections(section?: string): Promise<PullResult> {
-    const path = section ? `/api/sync?section=${encodeURIComponent(section)}` : '/api/sync';
-    const res = await this.request('GET', path, undefined, true);
-    await this.throwIfDeviceLimit(res);
-    if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-    return res.json() as Promise<PullResult>;
-  }
-
-  /** 推送单节（乐观锁 baseVersion；附带明文 itemCount + 连接元数据供服务端计量） */
-  async pushSection(section: string, encryptedData: string, baseVersion: number, itemCount?: number, meta?: unknown[]): Promise<PushResult> {
-    const res = await this.request('PUT', '/api/sync', { section, encryptedData, baseVersion, itemCount, meta }, true);
-    await this.throwIfDeviceLimit(res);
-    if (res.status === 409) {
-      const body = (await res.json().catch(() => ({}))) as { version?: number };
-      throw new SyncConflictError(section, body.version ?? 0);
-    }
-    if (!res.ok) throw new Error(`Push failed: ${res.status}`);
-    return res.json() as Promise<PushResult>;
-  }
-
-  /** 列历史版本 */
-  async listVersions(section: string): Promise<VersionSummary[]> {
-    const res = await this.request('GET', `/api/sync/versions?section=${encodeURIComponent(section)}`, undefined, true);
-    if (!res.ok) throw new Error(`List versions failed: ${res.status}`);
-    const body = (await res.json()) as { versions: VersionSummary[] };
-    return body.versions;
-  }
-
-  /** 回滚到指定版本 */
-  async rollback(section: string, toVersion: number): Promise<PushResult> {
-    const res = await this.request('POST', '/api/sync/rollback', { section, toVersion }, true);
-    if (!res.ok) throw new Error(`Rollback failed: ${res.status}`);
-    return res.json() as Promise<PushResult>;
-  }
-
   /** 列当前用户全部设备（§4.6 /api/personal/devices，V3 无 currentDeviceId）。 */
   async listDevices(): Promise<{ devices: DeviceItem[] }> {
     const res = await this.request('GET', '/api/personal/devices', undefined, true);
@@ -288,15 +198,6 @@ export class SyncClient {
       const errBody = (await res.json().catch(() => ({}))) as { message?: string };
       throw new Error(errBody.message || `Revoke failed: ${res.status}`);
     }
-  }
-
-  /** 识别服务端 403（设备数超限 / 付费功能 / 配额超限），转成客户端可判定的错误类型 */
-  private async throwIfDeviceLimit(res: Response): Promise<void> {
-    if (res.status !== 403) return;
-    const body = (await res.json().catch(() => ({}))) as { code?: string; message?: string };
-    if (body.code === 'DEVICE_LIMIT_EXCEEDED') throw new DeviceLimitExceededError();
-    if (body.code === 'PRO_FEATURE_REQUIRED') throw new ProFeatureRequiredError();
-    if (body.code === 'QUOTA_EXCEEDED') throw new QuotaExceededError(body.message);
   }
 
   private async postForm(path: string, body: object): Promise<AuthResult> {

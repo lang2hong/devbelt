@@ -75,16 +75,6 @@ export class QueryExecutedEvent extends AppEvent {
   }
 }
 
-/** 同步事件（push/pull/冲突）。 */
-export class SyncEvent extends AppEvent {
-  constructor(
-    readonly type: 'push' | 'pull' | 'applied' | 'error',
-    readonly details?: string,
-  ) {
-    super('SyncManager');
-  }
-}
-
 /** 历史记录变更事件。 */
 export class HistoryChangedEvent extends AppEvent {
   constructor(readonly operation: 'add' | 'clear' | 'merge') {
