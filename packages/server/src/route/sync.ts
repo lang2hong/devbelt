@@ -3,11 +3,13 @@ import { authScope, type GetAuthUser } from '../middleware/requireAuth.js';
 import type { TokenService } from '../service/tokenService.js';
 import { sendError } from '../middleware/errorHandler.js';
 import { requestDigestOf, decodeB64Url } from '../service/syncCrypto.js';
+import { SyncProtocolUnsupportedError } from '../domain/errors.js';
 import {
   SyncStateService,
   type SyncNewState,
 } from '../service/syncStateService.js';
 import { SyncRecordService } from '../service/syncRecordService.js';
+import { SyncResetService } from '../service/syncResetService.js';
 import type { SmpKdf, RecoveryKdf, SyncEnvelope } from '../domain/entities.js';
 import {
   syncInitBody,
@@ -18,6 +20,7 @@ import {
   syncDeleteRecordBody,
   syncRecordIdParam,
   syncRecordsQuery,
+  syncResetAfterLossBody,
 } from './schemas.js';
 
 export interface SyncRouteOptions {
@@ -25,9 +28,18 @@ export interface SyncRouteOptions {
   getUser: GetAuthUser;
   syncState: SyncStateService;
   syncRecord: SyncRecordService;
+  syncReset: SyncResetService;
+}
+
+/** 协议/cipher/format 值域由服务层判定（§8.1.11：不在支持集 → 400 SYNC_PROTOCOL_UNSUPPORTED）。 */
+function assertProtocolV1(protocolVersion: unknown): void {
+  if (protocolVersion !== 1) throw new SyncProtocolUnsupportedError();
 }
 
 function decodeEnvelope(e: any): SyncEnvelope {
+  if (e.protocolVersion !== 1 || e.cipherSuite !== 'AES-256-GCM' || e.formatVersion !== 1) {
+    throw new SyncProtocolUnsupportedError();
+  }
   return {
     version: e.envelopeVersion,
     nonce: decodeB64Url(e.nonce, 12, 'envelope.nonce'),
@@ -49,6 +61,9 @@ function decodeRecoveryKdf(k: any): RecoveryKdf {
 }
 
 function decodeNewState(ns: any): SyncNewState {
+  if (ns.protocolVersion !== 1 || ns.cipherSuite !== 'AES-256-GCM' || ns.formatVersion !== 1) {
+    throw new SyncProtocolUnsupportedError();
+  }
   return {
     protocolVersion: ns.protocolVersion,
     cipherSuite: ns.cipherSuite,
@@ -94,6 +109,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         const userId = (req as any).authUserId as number;
         const body = req.body as any;
         try {
+          assertProtocolV1(body.protocolVersion);
           reply.send(await opts.syncState.changeKey(userId, {
             keyEpoch: body.keyEpoch,
             mutationId: body.mutationId,
@@ -110,6 +126,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         const userId = (req as any).authUserId as number;
         const body = req.body as any;
         try {
+          assertProtocolV1(body.protocolVersion);
           reply.send(await opts.syncState.recover(userId, {
             keyEpoch: body.keyEpoch,
             mutationId: body.mutationId,
@@ -129,6 +146,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         const userId = (req as any).authUserId as number;
         const body = req.body as any;
         try {
+          assertProtocolV1(body.protocolVersion);
           reply.send(await opts.syncState.destroy(userId, {
             keyEpoch: body.keyEpoch,
             mutationId: body.mutationId,
@@ -159,6 +177,8 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
           return reply.code(400).send({ message: 'validation failed', code: 'VALIDATION_FAILED' });
         }
         try {
+          assertProtocolV1(body.protocolVersion);
+          if (body.cipherSuite !== 'AES-256-GCM' || body.formatVersion !== 1) throw new SyncProtocolUnsupportedError();
           reply.send(await opts.syncRecord.putRecord(userId, {
             keyEpoch: body.keyEpoch,
             mutationId: body.mutationId,
@@ -183,6 +203,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
           return reply.code(400).send({ message: 'validation failed', code: 'VALIDATION_FAILED' });
         }
         try {
+          assertProtocolV1(body.protocolVersion);
           reply.send(await opts.syncRecord.deleteRecord(userId, {
             keyEpoch: body.keyEpoch,
             mutationId: body.mutationId,
@@ -190,6 +211,26 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
             baseVersion: body.baseVersion,
             requestDigest: digestOf(body),
             recordId: body.recordId,
+          }));
+        } catch (e) { sendError(reply, e); }
+      });
+
+      child.post('/api/sync/reset-challenges', async (req, reply) => {
+        const userId = (req as any).authUserId as number;
+        try {
+          await opts.syncReset.requestResetChallenge(userId, req.ip);
+          reply.code(202).send();
+        } catch (e) { sendError(reply, e); }
+      });
+
+      child.post('/api/sync/reset-after-loss', { schema: { body: syncResetAfterLossBody } }, async (req, reply) => {
+        const userId = (req as any).authUserId as number;
+        const body = req.body as any;
+        try {
+          assertProtocolV1(body.protocolVersion);
+          reply.send(await opts.syncReset.resetAfterLoss(userId, {
+            resetToken: decodeB64Url(body.resetToken, 32, 'resetToken'),
+            newState: decodeNewState(body.newState),
           }));
         } catch (e) { sendError(reply, e); }
       });

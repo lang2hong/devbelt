@@ -71,4 +71,21 @@ export class SmtpEmailSender implements EmailSender {
     const base = (process.env.SMTP_BASE_URL || 'http://localhost:5173').replace(/\/$/, '');
     return `${base}/accept-invitation?token=${encodeURIComponent(token)}`;
   }
+
+  async sendResetChallengeEmail(input: { to: string; token: string; displayName?: string }): Promise<void> {
+    await this.transporter.sendMail({
+      from: this.from,
+      to: input.to,
+      subject: 'DB Client sync reset challenge',
+      text: `Hi${input.displayName ? ` ${input.displayName}` : ''},\n\n` +
+        `A sync reset was requested for your DB Client account. Complete it by visiting the link below. It expires in 24 hours.\n\n` +
+        `Reset link (one-time): ${this.resetUrl(input.token)}\n`,
+    });
+  }
+
+  /** 一次性 sync reset 链接。 */
+  private resetUrl(token: string): string {
+    const base = (process.env.SMTP_BASE_URL || 'http://localhost:5173').replace(/\/$/, '');
+    return `${base}/sync-reset?token=${encodeURIComponent(token)}`;
+  }
 }

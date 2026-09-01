@@ -207,6 +207,11 @@ export class FakePersonalSubscriptionRepo implements IPersonalSubscriptionRepo {
     return undefined;
   }
 
+  async findByUserIdInTx(_exec: Queryable, userId: number): Promise<PersonalSubscription | undefined> {
+    for (const s of this.store.values()) if (s.userId === userId) return s;
+    return undefined;
+  }
+
   async create(input: {
     userId: number;
     planId: number;

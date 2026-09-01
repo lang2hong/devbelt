@@ -24,11 +24,17 @@ export interface EmailSender {
     displayName?: string;
     expiresTime: Date;
   }): Promise<void>;
+  /** 发送同步 reset-after-loss 邮箱挑战邮件。token 为**明文**（仅用于构造一次链接），不得落日志。 */
+  sendResetChallengeEmail(input: {
+    to: string;
+    token: string;
+    displayName?: string;
+  }): Promise<void>;
 }
 
 /** 收件箱捕获（测试替身用）：记录发送出去的邮件，供断言。 */
 export interface SentEmail {
-  kind: 'verification' | 'already_registered' | 'invitation';
+  kind: 'verification' | 'already_registered' | 'invitation' | 'reset_challenge';
   to: string;
   token?: string;
   displayName?: string;
@@ -53,6 +59,10 @@ export class MemoryEmailSender implements EmailSender {
   async sendInvitationEmail(input: { to: string; organizationName: string; token: string; displayName?: string; expiresTime: Date }): Promise<void> {
     this.sent.push({ kind: 'invitation', to: input.to, token: input.token, organizationName: input.organizationName, displayName: input.displayName, expiresTime: input.expiresTime });
   }
+
+  async sendResetChallengeEmail(input: { to: string; token: string; displayName?: string }): Promise<void> {
+    this.sent.push({ kind: 'reset_challenge', to: input.to, token: input.token, displayName: input.displayName });
+  }
 }
 
 /**
@@ -71,5 +81,9 @@ export class LogEmailSender implements EmailSender {
 
   async sendInvitationEmail(input: { to: string; organizationName: string; token: string; displayName?: string; expiresTime: Date }): Promise<void> {
     console.info(`[email:stub] invitation email would be sent to ${input.to} for ${input.organizationName}`);
+  }
+
+  async sendResetChallengeEmail(input: { to: string; token: string; displayName?: string }): Promise<void> {
+    console.info(`[email:stub] reset challenge email would be sent to ${input.to}`);
   }
 }

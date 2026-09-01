@@ -81,7 +81,7 @@ function validateRecoveryKdf(k: RecoveryKdf): void {
   if (k.salt.length !== 16) throw new ValidationError('hkdf salt must be 16 bytes');
 }
 
-function validateNewState(n: SyncNewState): void {
+export function validateNewState(n: SyncNewState): void {
   validateV1Protocol(n.protocolVersion, n.cipherSuite, n.formatVersion);
   validateSmpKdf(n.smpKdf);
   validateRecoveryKdf(n.recoveryKdf);
@@ -93,7 +93,7 @@ function validateNewState(n: SyncNewState): void {
   if (n.signPub.length !== 32 || n.recoverSignPub.length !== 32) throw new ValidationError('invalid sync public key length');
 }
 
-function toState(userId: number, keyEpoch: string, stateVersion: string, changeSequence: string, n: SyncNewState, recoveryCodeSetTime: Date): Omit<PersonalSyncState, 'createTime' | 'updateTime'> {
+export function toState(userId: number, keyEpoch: string, stateVersion: string, changeSequence: string, n: SyncNewState, recoveryCodeSetTime: Date): Omit<PersonalSyncState, 'createTime' | 'updateTime'> {
   return {
     userId, keyEpoch, stateVersion, changeSequence,
     protocolVersion: n.protocolVersion, cipherSuite: n.cipherSuite, formatVersion: n.formatVersion,
@@ -138,7 +138,6 @@ export class SyncStateService {
       this.assertSignature(state.signPub, userId, input, 'state.change-key');
       this.assertExpectedVersion(state, input.expectedStateVersion);
 
-      validateV1Protocol(V1, SUITE, V1);
       validateSmpKdf(input.smpKdf);
       // envelope 版本单调：smp +1；recovery 不变（§8.1.2）。
       if (input.envelopeSmp.version !== incU64(state.envelopeSmp.version)) throw new ValidationError('smp envelope version must be increment of stored');

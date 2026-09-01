@@ -25,12 +25,14 @@ import { MysqlSyncStateRepo } from './repository/mysql/syncStateRepo.js';
 import { MysqlSyncRecordRepo } from './repository/mysql/syncRecordRepo.js';
 import { MysqlSyncMutationRepo } from './repository/mysql/syncMutationRepo.js';
 import { MysqlSyncNonceRepo } from './repository/mysql/syncNonceRepo.js';
+import { MysqlSyncResetTokenRepo } from './repository/mysql/syncResetTokenRepo.js';
 import { TokenService } from './service/tokenService.js';
 import { AuthService } from './service/authService.js';
 import { OrganizationService } from './service/organizationService.js';
 import { OrganizationResourceService } from './service/organizationResourceService.js';
 import { SyncStateService } from './service/syncStateService.js';
 import { SyncRecordService } from './service/syncRecordService.js';
+import { SyncResetService } from './service/syncResetService.js';
 import { RateLimitService } from './service/rateLimitService.js';
 import { startRateLimitCleanup } from './service/rateLimitCleanup.js';
 import { startInvitationCleanup } from './service/invitationCleanup.js';
@@ -107,6 +109,7 @@ export async function createApp() {
   const syncRecordRepo = new MysqlSyncRecordRepo();
   const syncMutationRepo = new MysqlSyncMutationRepo();
   const syncNonceRepo = new MysqlSyncNonceRepo();
+  const syncResetTokenRepo = new MysqlSyncResetTokenRepo();
 
   // service 层
   const tokenService = new TokenService(signingKeys, config.accessTokenExpiresIn, config.refreshTokenExpiresMs);
@@ -157,6 +160,15 @@ export async function createApp() {
     personalSubscriptionRepo,
     (fn) => withTransaction(app.mysql, fn),
   );
+  const syncResetService = new SyncResetService(
+    syncStateRepo,
+    syncRecordRepo,
+    syncResetTokenRepo,
+    userRepo,
+    (fn) => withTransaction(app.mysql, fn),
+    emailSender,
+    rateLimiter,
+  );
 
   // 受控限流清理任务（实施规格 §4.2）：过期桶由周期任务删除，不依赖请求
   startRateLimitCleanup(rateLimitRepo);
@@ -172,7 +184,7 @@ export async function createApp() {
   app.register(personalRoutes, { tokenService, getUser, deviceRepo, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId) });
   app.register(organizationRoutes, { tokenService, getUser, organizationService, resourceService, organizationRepo, membershipRepo });
   app.register(invitationRoutes, { tokenService, getUser, organizationService });
-  app.register(syncRoutes, { tokenService, getUser, syncState: syncStateService, syncRecord: syncRecordService });
+  app.register(syncRoutes, { tokenService, getUser, syncState: syncStateService, syncRecord: syncRecordService, syncReset: syncResetService });
 
   await app.ready();
   await runMigrations(app.mysql as any, [...migrations]);

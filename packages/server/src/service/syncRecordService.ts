@@ -12,8 +12,8 @@ import {
   SyncVersionConflictError,
   SyncNonceReusedError,
   SyncQuotaExceededError,
+  SyncRecordNotFoundError,
   ValidationError,
-  EntityNotFoundError,
 } from '../domain/errors.js';
 import { incU64, parseU64 } from '../domain/syncU64.js';
 import { SYNC_DOMAIN, assertU64, assertEpoch, verifySignature, checkReceipt, recordReceipt } from './syncShared.js';
@@ -151,7 +151,12 @@ export class SyncRecordService {
       const state = await this.lockActive(tx, userId);
       assertEpoch(state, input.keyEpoch);
       const receipt = await checkReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest);
-      if (receipt) return { version: receipt.resultVersion ?? state.changeSequence, changeSequence: receipt.resultChangeSequence ?? state.changeSequence };
+      if (receipt) {
+      if (receipt.resultVersion === null || receipt.resultChangeSequence === null) {
+        throw new Error('corrupt mutation receipt');
+      }
+      return { version: receipt.resultVersion, changeSequence: receipt.resultChangeSequence };
+    }
 
       verifySignature(state.signPub, {
         domain: SYNC_DOMAIN, action: 'record.put', userId: String(userId), keyEpoch: input.keyEpoch,
@@ -176,7 +181,8 @@ export class SyncRecordService {
         });
       } else {
         const existing = await this.recordRepo.findForUpdate(tx, userId, input.keyEpoch, recordIdBuf);
-        if (!existing || existing.deleteTime) throw new EntityNotFoundError('record', input.recordId);
+        if (!existing) throw new SyncRecordNotFoundError();
+        if (existing.deleteTime) throw new SyncVersionConflictError(existing.version);
         const bytesDelta = (input.ciphertext.length + 16 + 12) - ((existing.ciphertext?.length ?? 0) + 16 + 12);
         await this.assertRecordQuota(tx, userId, input.keyEpoch, { countDelta: 0, bytesDelta });
         const newVersion = incU64(existing.version);
@@ -207,7 +213,12 @@ export class SyncRecordService {
       const state = await this.lockActive(tx, userId);
       assertEpoch(state, input.keyEpoch);
       const receipt = await checkReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest);
-      if (receipt) return { version: receipt.resultVersion ?? state.changeSequence, changeSequence: receipt.resultChangeSequence ?? state.changeSequence };
+      if (receipt) {
+      if (receipt.resultVersion === null || receipt.resultChangeSequence === null) {
+        throw new Error('corrupt mutation receipt');
+      }
+      return { version: receipt.resultVersion, changeSequence: receipt.resultChangeSequence };
+    }
 
       verifySignature(state.signPub, {
         domain: SYNC_DOMAIN, action: 'record.delete', userId: String(userId), keyEpoch: input.keyEpoch,
@@ -215,7 +226,8 @@ export class SyncRecordService {
       }, input.signature);
 
       const existing = await this.recordRepo.findForUpdate(tx, userId, input.keyEpoch, recordIdBuf);
-      if (!existing || existing.deleteTime) throw new EntityNotFoundError('record', input.recordId);
+      if (!existing) throw new SyncRecordNotFoundError();
+      if (existing.deleteTime) throw new SyncVersionConflictError(existing.version);
 
       const changeSeq = incU64(state.changeSequence);
       const newVersion = incU64(existing.version);
@@ -239,7 +251,7 @@ export class SyncRecordService {
   }
 
   private async assertRecordQuota(tx: Queryable, userId: number, keyEpoch: string, delta: { countDelta: number; bytesDelta: number }): Promise<void> {
-    const sub = await this.subscriptionRepo.findByUserId(userId);
+    const sub = await this.subscriptionRepo.findByUserIdInTx(tx, userId);
     const snapshot = (sub?.entitlementSnapshot ?? {}) as Record<string, unknown>;
     const maxMetas = Number(snapshot.maxConnectionMetas ?? 0);
     const maxBytes = Number(snapshot.syncStorageBytes ?? 0);
@@ -247,11 +259,11 @@ export class SyncRecordService {
 
     if (quotaEnabled(maxMetas)) {
       const nextCount = current.count + delta.countDelta;
-      if (nextCount > maxMetas) throw new SyncQuotaExceededError('count', String(maxMetas), String(nextCount));
+      if (nextCount > maxMetas) throw new SyncQuotaExceededError('count', String(maxMetas), String(current.count));
     }
     if (quotaEnabled(maxBytes)) {
       const nextBytes = current.bytes + delta.bytesDelta;
-      if (nextBytes > maxBytes) throw new SyncQuotaExceededError('bytes', String(maxBytes), String(nextBytes));
+      if (nextBytes > maxBytes) throw new SyncQuotaExceededError('bytes', String(maxBytes), String(current.bytes));
     }
   }
 }

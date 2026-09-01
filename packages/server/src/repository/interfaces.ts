@@ -76,6 +76,8 @@ export interface IPersonalPlanRepo {
 
 export interface IPersonalSubscriptionRepo {
   findByUserId(userId: number): Promise<PersonalSubscription | undefined>;
+  /** 事务内按 user_id 读取（配额锁内计量，ADR-0005）。 */
+  findByUserIdInTx(exec: Queryable, userId: number): Promise<PersonalSubscription | undefined>;
   create(input: {
     userId: number;
     planId: number;

@@ -1,7 +1,7 @@
 import type { IPersonalSubscriptionRepo } from '../interfaces.js';
 import type { PersonalSubscription } from '../../domain/entities.js';
 import type { PersonalSubscriptionStatus } from '../../domain/enums.js';
-import type { MysqlDb } from './db.js';
+import type { MysqlDb, Queryable } from './db.js';
 
 /** 个人订阅仓储（Phase 1 只读/注册写入，update 属商业专项）。 */
 export class MysqlPersonalSubscriptionRepo implements IPersonalSubscriptionRepo {
@@ -9,6 +9,14 @@ export class MysqlPersonalSubscriptionRepo implements IPersonalSubscriptionRepo 
 
   async findByUserId(userId: number): Promise<PersonalSubscription | undefined> {
     const [rows] = await this.db().query<any[]>(
+      'SELECT * FROM personal_subscriptions WHERE user_id = ?',
+      [userId],
+    );
+    return rows[0] ? mapSubscription(rows[0]) : undefined;
+  }
+
+  async findByUserIdInTx(exec: Queryable, userId: number): Promise<PersonalSubscription | undefined> {
+    const [rows] = await exec.query<any[]>(
       'SELECT * FROM personal_subscriptions WHERE user_id = ?',
       [userId],
     );

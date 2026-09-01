@@ -233,9 +233,9 @@ export const resourceIdParam = {
 const b64url = (min: number, max: number) => ({ type: 'string' as const, minLength: min, maxLength: max, pattern: '^[A-Za-z0-9_-]+$' });
 /** u64 十进制字符串（禁前导零；值域上限由服务层 parseU64 再校验）。 */
 const u64Str = { type: 'string' as const, pattern: '^(0|[1-9][0-9]{0,19})$' };
-/** 协议常量（V1 唯一）。 */
-const protocolV1 = { type: 'integer' as const, enum: [1] };
-const suiteV1 = { type: 'string' as const, enum: ['AES-256-GCM'] };
+/** 协议常量（V1 唯一）。schema 只做结构校验，值域由服务层判 SYNC_PROTOCOL_UNSUPPORTED（§8.1.11）。 */
+const protocolV1 = { type: 'integer' as const };
+const suiteV1 = { type: 'string' as const };
 
 const syncEnvelope = {
   type: 'object',
@@ -345,6 +345,23 @@ export const syncDestroyBody = {
   properties: {
     ...signedMutationProps,
     expectedStateVersion: u64Str,
+    newState: syncNewState,
+  },
+} as const;
+
+/** 三个不可逆确认必须为字面量 true（§8.1.10）。 */
+const confirmTrue = { type: 'boolean' as const, enum: [true] as const };
+
+export const syncResetAfterLossBody = {
+  type: 'object',
+  required: ['protocolVersion', 'resetToken', 'confirmIrreversible', 'confirmDataLoss', 'confirmNoRecovery', 'newState'],
+  additionalProperties: false,
+  properties: {
+    protocolVersion: protocolV1,
+    resetToken: b64url(43, 43),
+    confirmIrreversible: confirmTrue,
+    confirmDataLoss: confirmTrue,
+    confirmNoRecovery: confirmTrue,
     newState: syncNewState,
   },
 } as const;

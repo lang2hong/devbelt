@@ -11,6 +11,7 @@ import {
   SyncNonceReusedError,
   SyncQuotaExceededError,
   SyncEpochStaleError,
+  SyncRecordNotFoundError,
   ConflictError,
   ValidationError,
 } from '../../src/domain/errors.js';
@@ -199,6 +200,8 @@ describe('SyncRecordService', () => {
     } catch (e: any) {
       expect(e).toBeInstanceOf(SyncQuotaExceededError);
       expect(e.quota).toBe('count');
+      expect(e.limit).toBe('1');
+      expect(e.used).toBe('1');
       return;
     }
     throw new Error('expected SYNC_QUOTA_EXCEEDED');
@@ -282,6 +285,55 @@ describe('SyncRecordService', () => {
       keyEpoch: '1', mutationId: m1, signature: s1.signatureBuf, baseVersion: '0', requestDigest: s1.digest,
       recordId: RID, cipherSuite: 'AES-256-GCM', formatVersion: 1, ...decodeBody(b1),
     })).rejects.toBeInstanceOf(SyncNonceReusedError);
+  });
+
+  it('update/delete on tombstone → SYNC_VERSION_CONFLICT; nonexistent → NOT_FOUND without recordId', async () => {
+    const stack = makeStack();
+    const keys = await init(stack);
+
+    // create RID (version 1) then tombstone → version 2
+    const createMid = mid(30);
+    const createBody = putBody(createMid, RID, 60, 61, '0');
+    const create = signRecord(keys.signPriv, USER, 'record.put', createBody);
+    await stack.recordSvc.putRecord(USER, {
+      keyEpoch: '1', mutationId: createMid, signature: create.signatureBuf, baseVersion: '0', requestDigest: create.digest,
+      recordId: RID, cipherSuite: 'AES-256-GCM', formatVersion: 1, ...decodeBody(createBody),
+    });
+    const delMid = mid(31);
+    const delBody = { protocolVersion: 1, keyEpoch: '1', mutationId: delMid, recordId: RID, baseVersion: '1' };
+    const delSign = signRecord(keys.signPriv, USER, 'record.delete', delBody);
+    await stack.recordSvc.deleteRecord(USER, {
+      keyEpoch: '1', mutationId: delMid, signature: delSign.signatureBuf, baseVersion: '1', requestDigest: delSign.digest, recordId: RID,
+    });
+
+    // update (baseVersion '1') on tombstone → currentVersion=tombstone '2'
+    const updMid = mid(32);
+    const updBody = putBody(updMid, RID, 70, 71, '1');
+    const updSign = signRecord(keys.signPriv, USER, 'record.put', updBody);
+    await expect(stack.recordSvc.putRecord(USER, {
+      keyEpoch: '1', mutationId: updMid, signature: updSign.signatureBuf, baseVersion: '1', requestDigest: updSign.digest,
+      recordId: RID, cipherSuite: 'AES-256-GCM', formatVersion: 1, ...decodeBody(updBody),
+    })).rejects.toMatchObject({ name: 'SyncVersionConflictError', code: 'SYNC_VERSION_CONFLICT', currentVersion: '2' });
+
+    // delete with baseVersion 恰等于 tombstone 版本 → 仍 409（不落入 softDelete 的成功分支）
+    const delMid2 = mid(33);
+    const dB2 = { protocolVersion: 1, keyEpoch: '1', mutationId: delMid2, recordId: RID, baseVersion: '2' };
+    const dS2 = signRecord(keys.signPriv, USER, 'record.delete', dB2);
+    await expect(stack.recordSvc.deleteRecord(USER, {
+      keyEpoch: '1', mutationId: delMid2, signature: dS2.signatureBuf, baseVersion: '2', requestDigest: dS2.digest, recordId: RID,
+    })).rejects.toMatchObject({ name: 'SyncVersionConflictError', code: 'SYNC_VERSION_CONFLICT', currentVersion: '2' });
+
+    // 真不存在 → NOT_FOUND，message 不含 recordId
+    const ghostId = rid(99);
+    const gm = mid(34);
+    const gBody = { protocolVersion: 1, keyEpoch: '1', mutationId: gm, recordId: ghostId, baseVersion: '1' };
+    const gSign = signRecord(keys.signPriv, USER, 'record.delete', gBody);
+    const ghostErr = await stack.recordSvc.deleteRecord(USER, {
+      keyEpoch: '1', mutationId: gm, signature: gSign.signatureBuf, baseVersion: '1', requestDigest: gSign.digest, recordId: ghostId,
+    }).catch((e) => e);
+    expect(ghostErr).toBeInstanceOf(SyncRecordNotFoundError);
+    expect((ghostErr as any).message).toBe('record not found');
+    expect((ghostErr as any).code).toBe('NOT_FOUND');
   });
 
   it('validates cursor/snapshot range (future snapshot, after > snapshot)', async () => {

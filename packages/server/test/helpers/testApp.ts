@@ -21,6 +21,7 @@ import {
   FakeSyncRecordRepo,
   FakeSyncMutationRepo,
   FakeSyncNonceRepo,
+  FakeSyncResetTokenRepo,
 } from './fakeRepos.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
 import { securityHeaders } from '../../src/middleware/securityHeaders.js';
@@ -39,6 +40,7 @@ import { invitationRoutes } from '../../src/route/invitations.js';
 import { syncRoutes } from '../../src/route/sync.js';
 import { SyncStateService } from '../../src/service/syncStateService.js';
 import { SyncRecordService } from '../../src/service/syncRecordService.js';
+import { SyncResetService } from '../../src/service/syncResetService.js';
 
 export interface TestAppOptions {
   rateLimit?: boolean;
@@ -62,6 +64,7 @@ export interface TestApp {
     invitationRepo: FakeInvitationRepo;
     folderRepo: FakeFolderRepo;
     resourceRepo: FakeResourceRepo;
+    syncResetTokenRepo: FakeSyncResetTokenRepo;
   };
   services: {
     authService: AuthService;
@@ -116,6 +119,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   const syncRecordRepo = new FakeSyncRecordRepo();
   const syncMutationRepo = new FakeSyncMutationRepo();
   const syncNonceRepo = new FakeSyncNonceRepo();
+  const syncResetTokenRepo = new FakeSyncResetTokenRepo();
 
   const tokenService = new TokenService(makeSigningKeys(), '15m', 30 * 24 * 3600 * 1000);
   const rateLimiter = new RateLimitService(rateLimitRepo, opts.rateLimit === true);
@@ -165,6 +169,15 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
     personalSubscriptionRepo,
     async (fn) => fn({} as Queryable),
   );
+  const syncResetService = new SyncResetService(
+    syncStateRepo,
+    syncRecordRepo,
+    syncResetTokenRepo,
+    userRepo,
+    async (fn) => fn({} as Queryable),
+    emailSender,
+    rateLimiter,
+  );
 
   const getUser = async (id: number) => userRepo.findById(id);
 
@@ -174,7 +187,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   await app.register(personalRoutes, { tokenService, getUser, deviceRepo, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId) });
   await app.register(organizationRoutes, { tokenService, getUser, organizationService, resourceService, organizationRepo, membershipRepo });
   await app.register(invitationRoutes, { tokenService, getUser, organizationService });
-  await app.register(syncRoutes, { tokenService, getUser, syncState: syncStateService, syncRecord: syncRecordService });
+  await app.register(syncRoutes, { tokenService, getUser, syncState: syncStateService, syncRecord: syncRecordService, syncReset: syncResetService });
 
   await app.ready();
 
@@ -196,6 +209,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
       invitationRepo,
       folderRepo,
       resourceRepo,
+      syncResetTokenRepo,
     },
     services: { authService, emailSender, tokenService, organizationService, resourceService },
     tokenService,

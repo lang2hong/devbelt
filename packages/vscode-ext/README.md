@@ -59,7 +59,7 @@ You can also install from a `.vsix` file: run **Extensions: Install from VSIX…
 
 ## Cloud Sync
 
-> §8.1 个人 E2E 同步的服务端已逐切片实现（S1–S4；S5 待合并），但本扩展尚未接入 V3 同步协议。以下 `Sync Pull`/`Sync Push` 命令与 `dbclient.sync.*` 设置仍作为 V2 遗留入口注册，不受 V3 服务端支持；UI 暴露将在 V3 同步客户端接入时一并收敛。
+> §8.1 个人 E2E 同步的服务端已逐切片实现（S1–S5），但本扩展尚未接入 V3 同步协议。以下 `Sync Pull`/`Sync Push` 命令与 `dbclient.sync.*` 设置仍作为 V2 遗留入口注册，不受 V3 服务端支持；UI 暴露将在 V3 同步客户端接入时一并收敛。
 
 1. Run **DB Client: Login** and register an account.
 2. **Sync Push** encrypts your connection config (excluding passwords) with your master password and uploads it.
@@ -67,7 +67,7 @@ You can also install from a `.vsix` file: run **Extensions: Install from VSIX…
 
 ## Settings
 
-> `dbclient.sync.*` 是个人 E2E 同步的 V2 遗留设置；V3 服务端已实现 §8.1（S1–S4；S5 待合并），但扩展端 V3 同步客户端尚未接入，仍不受 V3 支持。
+> `dbclient.sync.*` 是个人 E2E 同步的 V2 遗留设置；V3 服务端已实现 §8.1（S1–S5），但扩展端 V3 同步客户端尚未接入，仍不受 V3 支持。
 
 | Setting | Default | Description |
 |---|---|---|

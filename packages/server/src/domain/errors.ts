@@ -175,6 +175,11 @@ export class SyncNotInitializedError extends DomainError {
   constructor() { super('sync not initialized', 'SYNC_NOT_INITIALIZED'); this.name = 'SyncNotInitializedError'; }
 }
 
+/** record 不存在（同一 epoch 下从未创建）→ 404 NOT_FOUND（§8.1.2：错误体不出现 recordId）。 */
+export class SyncRecordNotFoundError extends DomainError {
+  constructor() { super('record not found', 'NOT_FOUND'); this.name = 'SyncRecordNotFoundError'; }
+}
+
 /** 请求 protocol/cipher/format 不在支持集 → 400 SYNC_PROTOCOL_UNSUPPORTED。 */
 export class SyncProtocolUnsupportedError extends DomainError {
   constructor(message = 'sync protocol unsupported') { super(message, 'SYNC_PROTOCOL_UNSUPPORTED'); this.name = 'SyncProtocolUnsupportedError'; }
