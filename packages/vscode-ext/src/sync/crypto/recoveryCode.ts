@@ -57,13 +57,22 @@ export function assertRecoveryKdfParams(p: RecoveryKdfParams): void {
   }
 }
 
-/** KEK_recovery（32B）= HKDF(ikm=恢复码, salt=recoveryKdf.salt, info=kek/recovery)。 */
-export function deriveKekRecovery(recoveryCode: Uint8Array, salt: Uint8Array): Uint8Array {
-  return hkdfSha256(recoveryCode, salt, SYNC_INFO.kekRecovery, RECOVERY_KDF_OUTPUT_BYTES);
+function assertRecoveryCode(recoveryCode: Uint8Array): void {
+  if (recoveryCode.length !== RECOVERY_CODE_BYTES) {
+    throw new Error(`recovery code must be ${RECOVERY_CODE_BYTES} bytes, got ${recoveryCode.length}`);
+  }
 }
 
-/** recoverSign 密钥对 = Ed25519(HKDF(恢复码, 空 salt, info=recover-signing))。 */
+/** KEK_recovery（32B）= HKDF(ikm=恢复码, salt=recoveryKdf.salt, info=kek/recovery)。恢复码须 32B。 */
+export function deriveKekRecovery(recoveryCode: Uint8Array, params: RecoveryKdfParams): Uint8Array {
+  assertRecoveryCode(recoveryCode);
+  assertRecoveryKdfParams(params);
+  return hkdfSha256(recoveryCode, params.salt, SYNC_INFO.kekRecovery, RECOVERY_KDF_OUTPUT_BYTES);
+}
+
+/** recoverSign 密钥对 = Ed25519(HKDF(恢复码, 空 salt, info=recover-signing))。恢复码须 32B。 */
 export function deriveRecoverSignKeyPair(recoveryCode: Uint8Array): Ed25519KeyPair {
+  assertRecoveryCode(recoveryCode);
   const seed = hkdfSha256(recoveryCode, new Uint8Array(0), SYNC_INFO.recoverSigning);
   return deriveEd25519KeyPair(seed);
 }

@@ -27,6 +27,8 @@ export type EnvelopePurpose = 'smp' | 'recovery';
  * 杜绝 `"01"` / `"1.0"` 等多义表示。
  */
 export function envelopeInfo(keyEpoch: bigint, purpose: EnvelopePurpose, envelopeVersion: bigint): string {
+  if (keyEpoch < 1n) throw new Error(`keyEpoch must be >= 1, got ${keyEpoch}`);
+  if (envelopeVersion < 1n) throw new Error(`envelopeVersion must be >= 1, got ${envelopeVersion}`);
   return `dbclient/sync/v1/envelope/${keyEpoch.toString(10)}/${purpose}/${envelopeVersion.toString(10)}`;
 }
 

@@ -36,6 +36,12 @@ describe('argon2', () => {
     expect(() => assertSmpKdfParams({ ...valid, parallelism: 8 })).toThrowError(/parallelism/);
   });
 
+  it('非安全整数（浮点/NaN/Infinity）拒绝', () => {
+    expect(() => assertSmpKdfParams({ ...valid, memoryKiB: 65536.5 })).toThrowError(/memoryKiB/);
+    expect(() => assertSmpKdfParams({ ...valid, iterations: NaN })).toThrowError(/iterations/);
+    expect(() => assertSmpKdfParams({ ...valid, parallelism: Infinity })).toThrowError(/parallelism/);
+  });
+
   it('salt 长度错误拒绝', () => {
     expect(() => assertSmpKdfParams({ ...valid, salt: new Uint8Array(15) })).toThrowError(/salt/);
   });

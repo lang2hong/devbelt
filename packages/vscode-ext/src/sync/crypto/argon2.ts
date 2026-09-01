@@ -42,14 +42,14 @@ export function assertSmpKdfParams(p: SmpKdfParams): void {
   if (p.outputBytes !== ARGON2ID_OUTPUT_BYTES) {
     throw new Error(`SMP KDF output must be ${ARGON2ID_OUTPUT_BYTES} bytes, got ${String(p.outputBytes)}`);
   }
-  if (p.memoryKiB < ARGON2ID_MEMORY_MIN_KIB || p.memoryKiB > ARGON2ID_MEMORY_MAX_KIB) {
-    throw new Error(`SMP KDF memoryKiB out of range [${ARGON2ID_MEMORY_MIN_KIB}, ${ARGON2ID_MEMORY_MAX_KIB}]: ${p.memoryKiB}`);
+  if (!Number.isSafeInteger(p.memoryKiB) || p.memoryKiB < ARGON2ID_MEMORY_MIN_KIB || p.memoryKiB > ARGON2ID_MEMORY_MAX_KIB) {
+    throw new Error(`SMP KDF memoryKiB must be a safe integer in [${ARGON2ID_MEMORY_MIN_KIB}, ${ARGON2ID_MEMORY_MAX_KIB}]: ${String(p.memoryKiB)}`);
   }
-  if (p.iterations < ARGON2ID_ITERATIONS_MIN || p.iterations > ARGON2ID_ITERATIONS_MAX) {
-    throw new Error(`SMP KDF iterations out of range [${ARGON2ID_ITERATIONS_MIN}, ${ARGON2ID_ITERATIONS_MAX}]: ${p.iterations}`);
+  if (!Number.isSafeInteger(p.iterations) || p.iterations < ARGON2ID_ITERATIONS_MIN || p.iterations > ARGON2ID_ITERATIONS_MAX) {
+    throw new Error(`SMP KDF iterations must be a safe integer in [${ARGON2ID_ITERATIONS_MIN}, ${ARGON2ID_ITERATIONS_MAX}]: ${String(p.iterations)}`);
   }
-  if (p.parallelism < ARGON2ID_PARALLELISM_MIN || p.parallelism > ARGON2ID_PARALLELISM_MAX) {
-    throw new Error(`SMP KDF parallelism out of range [${ARGON2ID_PARALLELISM_MIN}, ${ARGON2ID_PARALLELISM_MAX}]: ${p.parallelism}`);
+  if (!Number.isSafeInteger(p.parallelism) || p.parallelism < ARGON2ID_PARALLELISM_MIN || p.parallelism > ARGON2ID_PARALLELISM_MAX) {
+    throw new Error(`SMP KDF parallelism must be a safe integer in [${ARGON2ID_PARALLELISM_MIN}, ${ARGON2ID_PARALLELISM_MAX}]: ${String(p.parallelism)}`);
   }
 }
 
