@@ -7,6 +7,9 @@ import { mergeById } from '../utils/merge';
 import { uniqueId } from '../utils/id';
 import { EventEmitter, type Event, eventBus, ConnectionChangedEvent } from '../utils/event';
 
+/** 连接变更来源：'v3-sync' 不触发 V2 自动同步（B3b 并存期隔离）。 */
+export type ChangeSource = 'user' | 'v2-sync' | 'v3-sync';
+
 /**
  * 已保存的连接（持久化到 VSCode 全局状态）。
  * 在 db-core 的 ConnectionConfig 基础上补充展示名与数据库类型。
@@ -92,9 +95,9 @@ export class ConnectionStore {
   private static readonly SENSITIVE_FIELDS = ['password', 'sshPassword', 'sshPassphrase'] as const;
   private readonly secretCache = new Map<string, string>();
   private readonly queryStore: QueryStore;
-  private readonly changedEmitter = new EventEmitter<void>();
-  /** 数据变更事件（连接/分组/查询，含子 QueryStore 转发），供自动同步订阅。 */
-  readonly onChanged: Event<void> = this.changedEmitter.event;
+  private readonly changedEmitter = new EventEmitter<ChangeSource>();
+  /** 数据变更事件（连接/分组/查询，含子 QueryStore 转发），供自动同步订阅。source 用于并存期隔离。 */
+  readonly onChanged: Event<ChangeSource> = this.changedEmitter.event;
 
   constructor(
     private readonly memento: {
@@ -105,7 +108,7 @@ export class ConnectionStore {
   ) {
     this.queryStore = new QueryStore(memento);
     this.queryStore.onChanged(() => {
-      this.changedEmitter.fire();
+      this.changedEmitter.fire('user');
       void eventBus.publish(new ConnectionChangedEvent('connection', 'update'));
     });
   }
@@ -182,7 +185,7 @@ export class ConnectionStore {
   }
 
   /** 新增或更新连接（按 id 覆盖） */
-  async save(conn: SavedConnection): Promise<void> {
+  async save(conn: SavedConnection, source: ChangeSource = 'user'): Promise<void> {
     const data = this.getTreeData();
     const { connection } = await this.sanitize(conn);
     const now = Date.now();
@@ -199,12 +202,12 @@ export class ConnectionStore {
       data.connections.push(connection);
     }
     await this.memento.update(ConnectionStore.KEY, data);
-    this.changedEmitter.fire();
+    this.changedEmitter.fire(source);
     void eventBus.publish(new ConnectionChangedEvent('connection', isNew ? 'create' : 'update', connection.id));
   }
 
   /** 删除连接（软删除：置墓碑，记录保留；清理凭据以避免墓碑携带密码） */
-  async remove(id: string): Promise<void> {
+  async remove(id: string, source: ChangeSource = 'user'): Promise<void> {
     const data = this.getTreeData();
     const conn = data.connections.find((c) => c.id === id);
     if (!conn) return;
@@ -212,7 +215,7 @@ export class ConnectionStore {
     conn.updateTime = Date.now();
     await this.memento.update(ConnectionStore.KEY, data);
     await this.clearSecrets(id);
-    this.changedEmitter.fire();
+    this.changedEmitter.fire(source);
     void eventBus.publish(new ConnectionChangedEvent('connection', 'delete', id));
   }
 
@@ -224,7 +227,7 @@ export class ConnectionStore {
     conn.groupId = groupId;
     conn.updateTime = Date.now();
     await this.memento.update(ConnectionStore.KEY, data);
-    this.changedEmitter.fire();
+    this.changedEmitter.fire('user');
     void eventBus.publish(new ConnectionChangedEvent('connection', 'move', connId));
   }
 
@@ -235,7 +238,7 @@ export class ConnectionStore {
     const group: ConnectionGroup = { id: uniqueId('g'), name, parentId, createTime: now, updateTime: now, deleted: false };
     data.groups.push(group);
     await this.memento.update(ConnectionStore.KEY, data);
-    this.changedEmitter.fire();
+    this.changedEmitter.fire('user');
     void eventBus.publish(new ConnectionChangedEvent('group', 'create', group.id));
     return group.id;
   }
@@ -248,7 +251,7 @@ export class ConnectionStore {
     const now = Date.now();
     data.groups.push({ id, name, parentId, createTime: now, updateTime: now, deleted: false });
     await this.memento.update(ConnectionStore.KEY, data);
-    this.changedEmitter.fire();
+    this.changedEmitter.fire('user');
     void eventBus.publish(new ConnectionChangedEvent('group', 'create', id));
   }
 
@@ -260,7 +263,7 @@ export class ConnectionStore {
       g.name = name;
       g.updateTime = Date.now();
       await this.memento.update(ConnectionStore.KEY, data);
-      this.changedEmitter.fire();
+      this.changedEmitter.fire('user');
       void eventBus.publish(new ConnectionChangedEvent('group', 'update', id));
     }
   }
@@ -292,7 +295,7 @@ export class ConnectionStore {
       await this.clearSecrets(connId);
       void eventBus.publish(new ConnectionChangedEvent('connection', 'delete', connId));
     }
-    this.changedEmitter.fire();
+    this.changedEmitter.fire('user');
     void eventBus.publish(new ConnectionChangedEvent('group', 'delete', id));
   }
 
@@ -316,7 +319,7 @@ export class ConnectionStore {
     const sanitized = await Promise.all(mergedConns.map(async (c) => this.reconcileSecrets(c)));
     const merged = { groups: mergedGroups, connections: sanitized };
     await this.memento.update(ConnectionStore.KEY, merged);
-    this.changedEmitter.fire();
+    this.changedEmitter.fire('user');
 
     for (const [id, conn] of newConnMap) {
       const old = oldConnMap.get(id);
@@ -344,7 +347,7 @@ export class ConnectionStore {
   async replaceAll(remote: ConnectionTreeData): Promise<void> {
     const sanitized = await Promise.all(remote.connections.map(async (c) => this.reconcileSecrets(c)));
     await this.memento.update(ConnectionStore.KEY, { groups: remote.groups, connections: sanitized });
-    this.changedEmitter.fire();
+    this.changedEmitter.fire('user');
   }
 
   /**

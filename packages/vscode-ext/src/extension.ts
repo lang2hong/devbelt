@@ -75,7 +75,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // 自动同步：合并连接/查询 与 历史 的变更事件
   const storeChanged: Event<void> = (listener) => {
-    const d1 = store.onChanged(listener);
+    const d1 = store.onChanged((source) => {
+      // 并存期隔离（B3b 冻结裁定）：V3 远端应用（source='v3-sync'）不得触发 V2 auto-sync。
+      if (source !== 'v3-sync') listener();
+    });
     const d2 = history.onChanged(listener);
     return { dispose: () => { d1.dispose(); d2.dispose(); } };
   };

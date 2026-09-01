@@ -1,5 +1,7 @@
 import { openAes256Gcm, sealAes256Gcm, type SealedBox } from '../crypto/aead';
 import { jcs } from '../crypto/jcs';
+import { DatabaseType } from '@db-client/core';
+import { databaseEngineOf } from '../entitlementGate';
 import type { SavedConnection } from '../../connection/connectionStore';
 
 /**
@@ -17,8 +19,8 @@ import type { SavedConnection } from '../../connection/connectionStore';
 
 export const RECORD_PAYLOAD_FIELDS = [
   'name', 'dbType', 'host', 'port', 'user', 'password', 'database', 'schema',
-  'timezone', 'groupId', 'environment', 'readOnly', 'useConnectionString',
-  'connectionUrl', 'useSSL', 'sshHost', 'sshPort', 'sshUser', 'sshPassword', 'sshPassphrase',
+  'timezone', 'groupId', 'environment', 'readOnly', 'useSSL',
+  'sshHost', 'sshPort', 'sshUser', 'sshPassword', 'sshPassphrase',
 ] as const;
 
 export interface RecordAadCtx {
@@ -28,15 +30,32 @@ export interface RecordAadCtx {
   recordVersion: string;
 }
 
-/** 白名单严格关闭对象：仅列内字段，剔除 undefined。 */
+/** 白名单严格关闭对象：仅列内字段，剔除 undefined。URI/命令类字段 fail-closed。 */
 export function encodeRecordPayload(conn: SavedConnection): Record<string, unknown> {
+  if (conn.useConnectionString) throw new Error('V3 sync does not support useConnectionString');
+  if (conn.connectionUrl) throw new Error('V3 sync does not support connectionUrl');
+  if (conn.sqliteCommand) throw new Error('V3 sync does not support sqliteCommand');
   const src = conn as unknown as Record<string, unknown>;
   const out: Record<string, unknown> = {};
   for (const k of RECORD_PAYLOAD_FIELDS) {
+    if (k === 'dbType') { out[k] = databaseEngineOf(conn.dbType); continue; }
     const v = src[k];
     if (v !== undefined) out[k] = v;
   }
   return out;
+}
+
+const ENGINE_TO_DB_TYPE: Record<string, DatabaseType> = {
+  mysql: DatabaseType.MYSQL,
+  postgresql: DatabaseType.PG,
+  sqlite: DatabaseType.SQLITE,
+};
+
+/** payload 的 engine 字符串 → DatabaseType（未知引擎 fail-closed）。 */
+export function databaseTypeFromEngine(engine: string): DatabaseType {
+  const t = ENGINE_TO_DB_TYPE[engine];
+  if (!t) throw new Error(`unknown database engine: ${engine}`);
+  return t;
 }
 
 /** record AAD 对象（§8.1.8）。purpose 恒为 'record'，写死。 */
