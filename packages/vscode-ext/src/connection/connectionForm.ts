@@ -8,6 +8,8 @@ import { l10n } from '../i18n';
 import { uniqueId } from '../utils/id';
 import { flattenGroups } from '../utils/groupTree';
 import { BaseWebView } from '../result/baseWebView';
+import { assertPersonalDatabaseType, PersonalEntitlementDeniedError } from '../sync/entitlementGate';
+import type { CachedEntitlement } from '../sync/authService';
 
 /**
  * 连接表单 webview（Vue 3 模式）。
@@ -27,6 +29,7 @@ export class ConnectionForm extends BaseWebView {
   private editing?: SavedConnection;
   private presetGroupId?: string;
   private onSaved?: () => void;
+  private getEntitlement?: () => CachedEntitlement | undefined;
 
   private constructor(
     private readonly store: ConnectionStorage,
@@ -34,12 +37,14 @@ export class ConnectionForm extends BaseWebView {
     onSaved?: () => void,
     editing?: SavedConnection,
     presetGroupId?: string,
+    getEntitlement?: () => CachedEntitlement | undefined,
   ) {
     super('dbclient.connectionForm', editing ? 'Edit Connection' : 'New Connection');
     this.groups = groups;
     this.onSaved = onSaved;
     this.editing = editing;
     this.presetGroupId = presetGroupId;
+    this.getEntitlement = getEntitlement;
   }
 
   /** 打开连接表单（单例复用），可预设分组或编辑已有连接 */
@@ -48,16 +53,18 @@ export class ConnectionForm extends BaseWebView {
     onSaved?: () => void,
     presetGroupId?: string,
     editing?: SavedConnection,
+    getEntitlement?: () => CachedEntitlement | undefined,
   ): void {
     if (ConnectionForm.current) {
       ConnectionForm.current.panel.reveal(vscode.ViewColumn.Active);
       ConnectionForm.current.onSaved = onSaved;
       ConnectionForm.current.editing = editing;
       ConnectionForm.current.presetGroupId = presetGroupId;
+      ConnectionForm.current.getEntitlement = getEntitlement;
       ConnectionForm.current.sendInit();
       return;
     }
-    ConnectionForm.current = new ConnectionForm(store, store.getGroups(), onSaved, editing, presetGroupId);
+    ConnectionForm.current = new ConnectionForm(store, store.getGroups(), onSaved, editing, presetGroupId, getEntitlement);
   }
 
   protected async handleMessage(msg: any): Promise<void> {
@@ -69,12 +76,14 @@ export class ConnectionForm extends BaseWebView {
       switch (msg.type) {
         case 'test': {
           const conn = decodeConnection(msg.payload);
+          this.assertEngine(conn);
           const okMsg = await this.testConnection(conn);
           this.post({ type: 'testResult', ...okMsg });
           break;
         }
         case 'save': {
           const conn = decodeConnection(msg.payload);
+          this.assertEngine(conn);
           const id = conn.id || uniqueId('c');
           await this.store.save({ ...conn, id });
           vscode.window.showInformationMessage(
@@ -86,8 +95,15 @@ export class ConnectionForm extends BaseWebView {
         }
       }
     } catch (err) {
-      this.post({ type: 'error', message: (err as Error).message });
+      const message = err instanceof PersonalEntitlementDeniedError
+        ? l10n('entitlement.denied', { engine: err.engine })
+        : (err as Error).message;
+      this.post({ type: 'error', message });
     }
+  }
+
+  private assertEngine(conn: SavedConnection): void {
+    assertPersonalDatabaseType(conn.dbType, this.getEntitlement?.());
   }
 
   protected onDispose(): void {

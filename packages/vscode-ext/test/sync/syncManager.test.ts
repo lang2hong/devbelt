@@ -68,6 +68,7 @@ function makeAuth() {
   const remote = new Map<string, { encryptedData: string; version: number }>();
   return {
     pushed,
+    getCachedEntitlement() { return undefined; },
     /** 将完整 payload 分节加密后置入远端 */
     setRemote(payload: SyncPayload, masterPassword: string, startVersion = 0) {
       const sections: Array<[string, unknown]> = [

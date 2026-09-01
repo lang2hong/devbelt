@@ -8,6 +8,7 @@ import { computeMergePlan, totalLocalOnly, type MergePlan } from './mergePlan';
 import { MasterPasswordStore } from './masterPasswordStore';
 import { SyncEvent, eventBus } from '../utils/event';
 import { DeviceLimitExceededError, ProFeatureRequiredError, QuotaExceededError, type PullResult } from './syncClient';
+import { filterPersonalConnectionsByEntitlement, type SkippedPersonalConnection } from './entitlementGate';
 
 interface MementoLike {
   get<T>(key: string): T | undefined;
@@ -97,6 +98,7 @@ export class SyncManager {
     private readonly hashStore: MementoLike,
     private readonly masterPasswordStore: MasterPasswordStore,
     private readonly onDeviceLimit?: (err: Error) => void,
+    private readonly onEntitlementSkipped?: (skipped: SkippedPersonalConnection[]) => void,
   ) {}
 
   private deviceLimitNotifiedAt = 0;
@@ -278,7 +280,11 @@ export class SyncManager {
   }
 
   private async applyRemote(remote: SyncPayload, strategy: 'remote' | 'merge' = 'merge'): Promise<void> {
-    const remoteTree = { groups: remote.groups, connections: remote.connections };
+    const { allowed: connections, skipped } = filterPersonalConnectionsByEntitlement(
+      remote.connections,
+      this.auth.getCachedEntitlement(),
+    );
+    const remoteTree = { groups: remote.groups, connections };
     const remoteQueries = { queries: remote.queries, folders: remote.queryFolders };
     if (strategy === 'remote') {
       await this.store.replaceAll(remoteTree);
@@ -289,6 +295,7 @@ export class SyncManager {
     }
     // 历史为日志型数据，不做软删除，冲突无「远端覆盖/本地保留」之分，三策略恒为合并
     await this.history.replaceAllMerge(remote.history);
+    if (skipped.length) this.onEntitlementSkipped?.(skipped);
   }
 
   private async buildLocalPayload(): Promise<SyncPayload> {

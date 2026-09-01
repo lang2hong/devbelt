@@ -80,7 +80,7 @@ export function registerOrgCommands(deps: OrgDeps): void {
     await workspace.vault.set(orgId, resource.resourceId, cred);
 
     const conn = toSavedConnection(orgId, resource.resourceId, resource.name, c, cred);
-    await manager.connect(conn);
+    await manager.connect(conn, { scope: 'organization' });
 
     const doc = await vscode.workspace.openTextDocument({ content: '', language: 'sql' });
     const editor = await vscode.window.showTextDocument(doc);

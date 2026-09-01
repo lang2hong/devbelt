@@ -42,6 +42,7 @@ const emptyHistory = {
 /** 远端有一节用 `right-password` 加密的数据 */
 function authWithRemote(encryptedWith: string) {
   return {
+    getCachedEntitlement() { return undefined; },
     client: {
       async fetchSections() {
         return {
@@ -61,6 +62,7 @@ function authWithRemote(encryptedWith: string) {
 /** fetchSections 直接抛错，模拟网络/服务端故障 */
 function authThatFails() {
   return {
+    getCachedEntitlement() { return undefined; },
     client: {
       async fetchSections(): Promise<never> { throw new Error('ECONNRESET'); },
       async pushSection() { return { version: 2 }; },

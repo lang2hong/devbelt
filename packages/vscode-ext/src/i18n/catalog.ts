@@ -574,6 +574,8 @@ export const en: MessageCatalog = {
   'wv.userManage.errNoPriv': 'Select at least one privilege',
   'wv.form.namePlaceholder': 'My Database',
   'wv.form.databasePlaceholder': 'default',
+  'entitlement.denied': 'Database engine "{engine}" is not available on your current plan. Log in or upgrade to use it.',
+  'entitlement.skippedSummary': 'Skipped {count} connection(s) not allowed by your plan ({engines}).',
 };
 
 /** 中文词条 */
@@ -1128,4 +1130,6 @@ export const zh: MessageCatalog = {
   'wv.userManage.errNoPriv': '请至少选择一个权限',
   'wv.form.namePlaceholder': '我的数据库',
   'wv.form.databasePlaceholder': '默认',
+  'entitlement.denied': '当前套餐不支持数据库引擎「{engine}」。请登录或升级后使用。',
+  'entitlement.skippedSummary': '已跳过 {count} 个当前套餐不允许的连接（{engines}）。',
 };
