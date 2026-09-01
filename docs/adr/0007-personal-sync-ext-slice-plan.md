@@ -33,7 +33,7 @@ ADR-0006 闭环了服务端 S1–S5（个人 E2E 同步 V1 数据层/仓储/状�
 | 子切片 | 范围 | 依赖 |
 |---|---|---|
 | B1 密钥层 | DEK 生成、`syncSignPriv`/`recoverSignPriv` HKDF 派生、`KEK_smp`(Argon2id)/`KEK_recovery`(HKDF)、envelope 每版专用 AEAD key、AES-256-GCM 加解密、恢复码熵与持久化（§8.1.2/8.1.3） | 无 |
-| B2 协议层 | `SyncClient` 增 11 个 V3 方法；JCS canonicalize(RFC8785)；Ed25519 签名 + `requestDigest`；`SignedMutation`/envelope 编码（§8.1.7/8.1.8/8.1.9） | B1 |
+| B2 协议层 | 新增独立 V3 客户端（10 个路由方法，5 个需签名）；JCS（镜像服务端 `syncCrypto.jcs`）；Ed25519 签名 + `requestDigest`；`SignedMutation`/envelope 编码（§8.1.7/8.1.8/8.1.9） | B1 |
 | B3 状态机 | 本地 keyEpoch/stateVersion/change_sequence/nonce 防重；密文 record 持久化与本地连接映射（§8.1.4） | B2 |
 | B4 UI 命令 | init / change-key / recover / destroy / reset-after-loss 命令与恢复码展示 | B3 |
 | B5 迁移 | V2 分节同步（`/api/sync` 分节 push/pull/versions/rollback + 主密码 AES-GCM）→ V3 record 的存量数据迁移与并存期策略 | B3 |
