@@ -33,10 +33,10 @@ function newState(fill = 10): SyncNewState {
   };
 }
 
-function makeState(userId: number): PersonalSyncState {
+function makeState(userId: number, changeSequence = '0'): PersonalSyncState {
   const n = newState(20);
   return {
-    userId: userId, keyEpoch: '1', stateVersion: '1', changeSequence: '0',
+    userId: userId, keyEpoch: '1', stateVersion: '1', changeSequence,
     protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
     smpKdf: n.smpKdf, recoveryKdf: n.recoveryKdf, envelopeSmp: n.envelopeSmp, envelopeRecovery: n.envelopeRecovery,
     signPub: n.signPub, recoverSignPub: n.recoverSignPub,
@@ -85,7 +85,7 @@ describe.skipIf(!URL)('sync reset-after-loss (real MySQL)', () => {
 
   async function seed(u: ReturnType<typeof makeSvc>, userId: number, raw: Buffer): Promise<void> {
     await withTransaction(db, async (tx) => {
-      await u.stateRepo.create(tx, makeState(userId));
+      await u.stateRepo.create(tx, makeState(userId, '1'));
       await u.recordRepo.create(tx, {
         userId, keyEpoch: '1', recordId: buf(16, 70),
         cipherSuite: 'AES-256-GCM', formatVersion: 1,
