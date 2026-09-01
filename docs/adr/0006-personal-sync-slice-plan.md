@@ -13,7 +13,7 @@
 
    **准入条件与解除方式**：
    - 条件 A（修复批，本批解除）：协议契约偏差 #1–#6 修正、三处裁定行为测试锚定、receipt fail-closed、换行补齐、签名路由 smoke 与同步并发真库测试。
-   - 条件 B（CI 真库证据，待 push 解除）：push 后由 CI 真库集成门禁（含新增 `syncConcurrency.test.ts` / `syncReset.test.ts`）跑过，把结果回填本文「测试输出」栏；回填后准入才闭环。
+   - 条件 B（CI 真库证据，已解除）：push 后由 CI 真库集成门禁（含新增 `syncConcurrency.test.ts` / `syncReset.test.ts`）跑过，结果见下文「测试输出」。
 2. **切片计划（L2/L3）**：按以下纵向切片交付，前一切片评审通过后方可依赖其行为：
 
 | 切片 | 范围 | 状态 |
@@ -22,7 +22,7 @@
 | S2 | 仓储层 + 注册快照透传 | 已合并 `d39bae7` |
 | S3 | 状态服务与路由（state/init/change-key/recover/destroy） | 已合并 `332a290` |
 | S4 | record feed 与配额（pull/put/delete + 配额） | 已合并 `b9b4e57` + `895c7ba` |
-| S5 | reset-after-loss 邮箱挑战协议 | 本批合并 |
+| S5 | reset-after-loss 邮箱挑战协议 | 已合并 `fc8cb5a` |
 
 3. **三处规格空白裁定**（§6.5 澄清记录，已写回 `docs/v3/实施规格.md` §8.1）：
    - reset-after-loss 无 active state → 等价建 `keyEpoch=1` 新 epoch（不返回 `SYNC_NOT_INITIALIZED`）。
@@ -37,6 +37,13 @@
 - **S3** `332a290`：变更 `syncU64.ts`/`syncCrypto.ts`/`syncStateService.ts`/`sync.ts`/`schemas.ts` + `errorHandler.ts`；测试 `syncCrypto.test.ts`/`syncStateService.test.ts`/`sync.route.test.ts`。未覆盖：签名路由 HTTP 层 smoke（本次补）。
 - **S4** `b9b4e57` + `895c7ba`：变更 `syncRecordService.ts`/`syncShared.ts`；测试 `syncRecordService.test.ts`。未覆盖：并发 putRecord/destroy 真库（本次补）。
 - **S5**（本批）：变更 `syncResetService.ts`/`emailSender.ts`/`smtpEmailSender.ts`/`schemas.ts`/`sync.ts`/`app.ts`；测试 `syncResetService.test.ts`/`sync.route.test.ts`/`syncReset.test.ts`（集成）。
+
+## 测试输出（CI 真库证据，准入条件 B）
+
+- CI run：<https://github.com/lang2hong/vscode-db-client-mirror/actions/runs/33469714031> — **success**（私有 mirror 仓，`build@20` / `build@22` / `integration` 三 job 全绿；`integration` 用 MySQL 8 + PostgreSQL 16 service container）。
+- server 真库集成 `pnpm -C packages/server test`：**32 passed (32)**，其中新增 `syncConcurrency.test.ts`（2 用例：并发 putRecord 恰一成功 / 并发 destroy 恰一 `SYNC_EPOCH_STALE`）与 `syncReset.test.ts`（2 用例：epoch 轮换+tombstone / 同 token 并发恰一成功）均通过。
+- 其余：server 单测 `23 passed | 9 skipped`（build job 无 DB 时 integration 跳过）；db-core `22 passed | 3 skipped`（真库 `25 passed`）；vscode-ext `42 passed`。
+- 结论：准入条件 A/B 均已解除，个人 E2E 同步 V1（S1–S5）闭环。
 
 ## 理由（Rationale）
 
