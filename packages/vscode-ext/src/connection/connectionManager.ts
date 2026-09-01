@@ -121,7 +121,7 @@ export class ConnectionManager {
     }
   }
 
-  /** 建连前的个人权益门禁：组织连接（显式 scope 或 org: 前缀 id）跳过；个人连接按权益 fail-open。 */
+  /** 建连前的个人权益门禁：组织连接（显式 scope 或 org: 前缀 id）跳过；个人连接 fail-closed 到 Free。 */
   private assertEngineScope(conn: SavedConnection, scope: ConnectScope): void {
     if (scope === 'organization' || isOrganizationConnectionId(conn.id)) return;
     assertPersonalDatabaseType(conn.dbType, this.getPersonalEntitlement?.());
