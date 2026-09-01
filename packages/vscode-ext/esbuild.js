@@ -37,6 +37,16 @@ function loadDotEnv() {
 }
 const env = loadDotEnv();
 
+// ssh2 的可选原生加速 .node（sshcrypto.node）：esbuild 无法 bundle，"No loader for .node"。
+// 用插件把它们标为 external，留给运行时按需 require —— 缺失时 ssh2 内部 try/catch 降级纯 JS
+// （与 external: ['cpu-features'] 同一意图）。JS API 的 external 只收字符串，正则需走插件。
+const nativeNodeExternal = {
+  name: 'native-node-external',
+  setup(build) {
+    build.onResolve({ filter: /\.node$/ }, (args) => ({ path: args.path, external: true }));
+  },
+};
+
 const options = {
   entryPoints: [path.resolve(__dirname, 'src/extension.ts')],
   bundle: true,
@@ -49,6 +59,7 @@ const options = {
   // external: vscode 由扩展 host 提供；cpu-features 为 ssh2 的可选原生加速
   // （缺失时 ssh2 内部 try/catch 自动降级），ssh2 本身打包进 bundle 使 VSIX 自包含
   external: ['vscode', 'cpu-features'],
+  plugins: [nativeNodeExternal],
   // db-core 是 ESM 源码，经由 workspace 链接解析，需声明为可打包依赖
   mainFields: ['module', 'main'],
   logLevel: 'info',
