@@ -6,6 +6,7 @@ import {
   allowedEngines,
   databaseEngineOf,
   filterPersonalConnectionsByEntitlement,
+  isOrganizationConnectionId,
 } from '../../src/sync/entitlementGate';
 
 const free = { planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 2 };
@@ -56,6 +57,19 @@ describe('assertPersonalDatabaseType', () => {
 
   it('有 pro 权益时 postgresql 放行', () => {
     expect(() => assertPersonalDatabaseType(DatabaseType.PG, pro)).not.toThrow();
+  });
+});
+
+describe('isOrganizationConnectionId', () => {
+  it('组织连接 org: 前缀识别为 true', () => {
+    expect(isOrganizationConnectionId('org:1:2')).toBe(true);
+    expect(isOrganizationConnectionId('org:abc')).toBe(true);
+  });
+
+  it('个人连接 id 与空值识别为 false', () => {
+    expect(isOrganizationConnectionId('c-1-2')).toBe(false);
+    expect(isOrganizationConnectionId(undefined)).toBe(false);
+    expect(isOrganizationConnectionId('')).toBe(false);
   });
 });
 

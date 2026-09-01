@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { DatabaseType } from '@db-client/core';
 import type { SavedConnection } from '../connection/connectionStore';
 import type { ConnectionManager } from '../connection/connectionManager';
+import { ORG_CONNECTION_ID_PREFIX } from '../sync/entitlementGate';
 import type { QueryExecutor } from '../result/queryExecutor';
 import { OrgWorkspace } from '../org/workspace';
 import { OrgApiError } from '../org/client';
@@ -224,7 +225,7 @@ function toSavedConnection(
 ): SavedConnection {
   const useSSL = c.ssl?.mode === 'require' || c.ssl?.mode === 'verify-ca' || c.ssl?.mode === 'verify-full';
   return {
-    id: `org:${orgId}:${resourceId}`,
+    id: `${ORG_CONNECTION_ID_PREFIX}${orgId}:${resourceId}`,
     name,
     dbType: DatabaseType.MYSQL,
     host: c.host,

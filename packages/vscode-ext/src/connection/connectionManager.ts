@@ -3,7 +3,7 @@ import type { DatabaseType } from '@db-client/core';
 import type { DatabaseCapabilities } from '@db-client/core';
 import type { SavedConnection } from './connectionStore';
 import type { HistoryStore } from '../history/historyStore';
-import { assertPersonalDatabaseType } from '../sync/entitlementGate';
+import { assertPersonalDatabaseType, isOrganizationConnectionId } from '../sync/entitlementGate';
 import type { CachedEntitlement } from '../sync/authService';
 import { QueryHistoryRecorder } from '../history/queryHistoryRecorder';
 import { SshTunnel } from './sshTunnel';
@@ -121,9 +121,9 @@ export class ConnectionManager {
     }
   }
 
-  /** 建连前的个人权益门禁：组织连接跳过；个人连接 fail-closed 到 Free。 */
+  /** 建连前的个人权益门禁：组织连接（显式 scope 或 org: 前缀 id）跳过；个人连接按权益 fail-open。 */
   private assertEngineScope(conn: SavedConnection, scope: ConnectScope): void {
-    if (scope === 'organization') return;
+    if (scope === 'organization' || isOrganizationConnectionId(conn.id)) return;
     assertPersonalDatabaseType(conn.dbType, this.getPersonalEntitlement?.());
   }
 
