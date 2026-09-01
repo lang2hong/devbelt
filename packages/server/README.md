@@ -2,7 +2,7 @@
 
 **DB Client 后端**（Fastify 5 + MySQL 8 + Ed25519 + Argon2id）。
 
-V3 Greenfield 重构的 Phase 1 全部切片（1–5）已落地：个人空间、邮箱验证、登录/刷新、设备与会话、组织与成员、邀请与容量、组织目录与资源。个人 E2E 同步、动态权限映射、受限协作、商业与运营、账号生命周期、组织暂停、组织内容加密均为暂缓专项模块，尚未实施（须先过 §8 专项设计）。
+V3 Greenfield 重构的 Phase 1 全部切片（1–5）已落地：个人空间、邮箱验证、登录/刷新、设备与会话、组织与成员、邀请与容量、组织目录与资源。个人 E2E 同步专项（§8.1，服务端）逐切片实施中（S1–S4 已合并、S5 待合并）；动态权限映射、受限协作、商业与运营、账号生命周期、组织暂停、组织内容加密均为暂缓专项模块，尚未实施（须先过 §8 专项设计）。
 
 > 契约权威见 [docs/v3/实施规格](../../docs/v3/实施规格.md)。历史 V1/V2 文档仅背景，不能作为实现依据。
 
@@ -24,6 +24,11 @@ V3 Greenfield 重构的 Phase 1 全部切片（1–5）已落地：个人空间�
 | `organization_invitations` | token 只存 SHA-256、7 天、单次消费、挂接 invited membership |
 | `organization_resource_folders` | 组织目录：`parent_id` 树、软删除 |
 | `organization_resources` | 组织资源：`resource_type(connection_template/query)`、`content(JSON schema)`、`version` 乐观锁、软删除 |
+| `personal_sync_state` | 每用户单行：`key_epoch`/`state_version`/`change_sequence`、envelope 元数据与公开签名材料 |
+| `personal_connection_meta` | 个人连接 record/tombstone（E2E 密文、nonce、tag、`version` 乐观锁） |
+| `personal_sync_nonces` | 永久 nonce 账本（防 AES-GCM nonce 复用） |
+| `personal_sync_mutations` | mutation receipt（幂等重放，只存定长 digest） |
+| `personal_sync_reset_tokens` | reset-after-loss 邮箱挑战，只存 SHA-256 hash |
 
 主键 `BIGINT UNSIGNED`，DTO 中一律十进制 `string`。时间 `DATETIME(3)` 以 UTC 读写。
 
@@ -55,6 +60,12 @@ V3 Greenfield 重构的 Phase 1 全部切片（1–5）已落地：个人空间�
 | `GET/POST` | `/api/organizations/:organizationId/resources` | 列 / 创建资源 |
 | `GET` | `/api/organizations/:organizationId/resources/:resourceId` | 读取资源 |
 | `PATCH/DELETE` | `/api/organizations/:organizationId/resources/:resourceId` | 更新（baseVersion 乐观锁）/ 软删除 |
+| `GET` | `/api/sync/state` | 读取同步状态（未初始化 400 `SYNC_NOT_INITIALIZED`） |
+| `PUT` | `/api/sync/init` | 首次初始化同步状态（E2E，无签名） |
+| `GET` | `/api/sync/records` | 拉取变更 feed（`after`/`limit`/`snapshotSequence` 固定快照） |
+| `PUT/DELETE` | `/api/sync/records/:recordId` | 写入/删除 record（Ed25519 签名 + 幂等 + nonce + 配额） |
+| `POST` | `/api/sync/change-key` · `recover` · `destroy` | 状态侧变更（签名，epoch/stateVersion 乐观锁） |
+| `POST` | `/api/sync/reset-challenges` · `reset-after-loss` | 邮箱挑战协议（认证；恒 202 / 200 `{keyEpoch}`） |
 
 ## 环境变量
 
