@@ -63,12 +63,12 @@ function makeHistory(payload: SyncPayload) {
 }
 
 /** 分节 mock client：fetchSections / pushSection */
-function makeAuth() {
+function makeAuth(entitlement?: { planCode: string; allowedDatabaseTypes: string[]; maxDevices: number }) {
   const pushed: { section: string; data: string; baseVersion: number }[] = [];
   const remote = new Map<string, { encryptedData: string; version: number }>();
   return {
     pushed,
-    getCachedEntitlement() { return undefined; },
+    getCachedEntitlement() { return entitlement; },
     /** 将完整 payload 分节加密后置入远端 */
     setRemote(payload: SyncPayload, masterPassword: string, startVersion = 0) {
       const sections: Array<[string, unknown]> = [
@@ -174,6 +174,43 @@ describe('SyncManager', () => {
     await sync.pull('master-pass', true);
 
     expect(store.replaceAllMerge).toHaveBeenCalled();
+  });
+
+  it('applyRemote 过滤：Free 权益下远端 PG 连接被跳过并上报，墓碑不参与断言干扰', async () => {
+    const free = { planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 2 };
+    const mysqlConn = { id: 'my1', name: 'MySQL One', dbType: 'MYSQL' as any, host: 'h', port: 3306, user: 'u', updateTime: 200 } as SavedConnection;
+    const pgConn = { id: 'pg1', name: 'PG One', dbType: 'PG' as any, host: 'h', port: 5432, user: 'u', updateTime: 200 } as SavedConnection;
+    const pgTombstone = { id: 'pg-tomb', name: 'PG Tomb', dbType: 'PG' as any, host: 'h', port: 5432, user: 'u', updateTime: 200, deleted: true } as SavedConnection;
+
+    const remote: SyncPayload = {
+      version: 1,
+      groups: [],
+      connections: [mysqlConn, pgConn, pgTombstone],
+      queries: [],
+      queryFolders: [],
+      history: [],
+    };
+
+    const auth = makeAuth(free);
+    auth.setRemote(remote, 'master-pass');
+    const store = makeStore(makePayload());
+    const history = makeHistory(makePayload());
+    const hashStore = makeHashStore();
+    const skipped: Array<{ name: string; engine: string }> = [];
+    const sync = new SyncManager(
+      auth as any, store as any, history as any, hashStore as any, masterStore as any,
+      undefined,
+      (list) => skipped.push(...list),
+    );
+
+    await sync.pull('master-pass', true);
+
+    expect(skipped).toEqual([{ name: 'PG One', engine: 'postgresql' }]);
+    const merged = store.replaceAllMerge.mock.calls[0][0] as ConnectionTreeData;
+    const ids = merged.connections.map((c) => c.id);
+    expect(ids).toContain('my1');
+    expect(ids).toContain('pg-tomb');
+    expect(ids).not.toContain('pg1');
   });
 
   describe('applyPreviewedPull 策略', () => {
