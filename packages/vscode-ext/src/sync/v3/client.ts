@@ -1,7 +1,19 @@
 import type { SyncClient } from '../syncClient';
 import { requestDigestOf } from '../crypto/digest';
 import { buildRecordSigningInput, buildStateSigningInput, signSigningInput, type SyncAction } from '../crypto/sign';
-import { assertB64UrlLen, assertU64Decimal, type NewStateDto } from './types';
+import {
+  assertBase64UrlNoPad,
+  assertRecordId,
+  assertU64Decimal,
+  validateEnvelope,
+  validateNewState,
+  validateRecoveryKdf,
+  validateSmpKdf,
+  type EnvelopeDto,
+  type NewStateDto,
+  type RecoveryKdfDto,
+  type SmpKdfDto,
+} from './types';
 
 /**
  * 个人同步 V3 协议客户端（10 个路由，5 个需签名）。
@@ -10,12 +22,11 @@ import { assertB64UrlLen, assertU64Decimal, type NewStateDto } from './types';
  * 鉴权/401 单飞刷新能力。本层只交付协议方法与签名/摘要原语，不持有本地
  * epoch/nonce/状态机，也不管理签名 seed 的生命周期（由 B3 传入）。
  *
- * 重试策略（§8.1.8 / 服务端 receipt）：
- *  - 默认自动重试 5xx：GET state/records、5 个签名 mutation（同 mutationId +
- *    requestDigest + signature 幂等重放由 receipt 保证）。
- *  - 禁止自动重试：PUT init、POST reset-after-loss（无 receipt，重放会得到
- *    SYNC_STATE_EXISTS / 失效 reset token，误报成功为失败）。
- *  - reset-challenges 202 同形，保留默认重试（服务端 3/时 限流语义）。
+ * requestDigest 顺序锚点：从「实际发送 body（尚未附 signature）」构造纯 JSON
+ * 冻结对象 → 算 digest → 构造 signingInput（含 digest）→ 签名 → 附 signature。
+ *
+ * 重试策略：默认自动重试 5xx（GET state/records、5 个签名 mutation 由 receipt
+ * 幂等）；init / reset-after-loss 禁止重试（无 receipt，重放误报成功为失败）。
  */
 
 export class SyncApiError extends Error {
@@ -51,16 +62,16 @@ export interface DeleteRecordOpts extends MutateOptsBase {
 
 export interface ChangeKeyOpts extends MutateOptsBase {
   expectedStateVersion: string;
-  smpKdf: unknown;
-  envelopeSmp: unknown;
+  smpKdf: SmpKdfDto;
+  envelopeSmp: EnvelopeDto;
 }
 
 export interface RecoverOpts extends MutateOptsBase {
   expectedStateVersion: string;
-  smpKdf: unknown;
-  envelopeSmp: unknown;
-  recoveryKdf: unknown;
-  envelopeRecovery: unknown;
+  smpKdf: SmpKdfDto;
+  envelopeSmp: EnvelopeDto;
+  recoveryKdf: RecoveryKdfDto;
+  envelopeRecovery: EnvelopeDto;
   recoverSignPub: string;
 }
 
@@ -78,11 +89,11 @@ export class V3SyncClient {
     return this.call('GET', '/api/sync/state');
   }
 
-  init(newState: NewStateDto): Promise<unknown> {
-    return this.call('PUT', '/api/sync/init', { newState }, { retry: false });
+  async init(newState: NewStateDto): Promise<unknown> {
+    return this.call('PUT', '/api/sync/init', { newState: validateNewState(newState) }, { retry: false });
   }
 
-  getRecords(after: string, snapshotSequence: string | undefined, limit: number): Promise<unknown> {
+  async getRecords(after: string, snapshotSequence: string | undefined, limit: number): Promise<unknown> {
     assertU64Decimal(after, 'after', true);
     if (snapshotSequence !== undefined) assertU64Decimal(snapshotSequence, 'snapshotSequence');
     const q = new URLSearchParams();
@@ -96,12 +107,19 @@ export class V3SyncClient {
     return this.call('POST', '/api/sync/reset-challenges');
   }
 
-  resetAfterLoss(resetToken: string, newState: NewStateDto): Promise<unknown> {
-    assertB64UrlLen(resetToken, 32, 'resetToken');
+  async resetAfterLoss(resetToken: string, newState: NewStateDto): Promise<unknown> {
+    assertBase64UrlNoPad(resetToken, 32, 'resetToken');
     return this.call(
       'POST',
       '/api/sync/reset-after-loss',
-      { protocolVersion: 1, resetToken, confirmIrreversible: true, confirmDataLoss: true, confirmNoRecovery: true, newState },
+      {
+        protocolVersion: 1,
+        resetToken,
+        confirmIrreversible: true,
+        confirmDataLoss: true,
+        confirmNoRecovery: true,
+        newState: validateNewState(newState),
+      },
       { retry: false },
     );
   }
@@ -111,7 +129,11 @@ export class V3SyncClient {
   async putRecord(o: PutRecordOpts): Promise<unknown> {
     assertU64Decimal(o.keyEpoch, 'keyEpoch');
     assertU64Decimal(o.baseVersion, 'baseVersion', true);
-    assertB64UrlLen(o.mutationId, 16, 'mutationId');
+    assertBase64UrlNoPad(o.mutationId, 16, 'mutationId');
+    assertRecordId(o.recordId);
+    assertBase64UrlNoPad(o.nonce, 12, 'nonce');
+    if (!/^[A-Za-z0-9_-]+$/.test(o.ciphertext)) throw new Error('ciphertext must be unpadded base64url');
+    assertBase64UrlNoPad(o.tag, 16, 'tag');
     const body: Record<string, unknown> = {
       protocolVersion: 1,
       keyEpoch: o.keyEpoch,
@@ -124,15 +146,15 @@ export class V3SyncClient {
       ciphertext: o.ciphertext,
       tag: o.tag,
     };
-    const signature = this.signMutation('record.put', { ...o }, body);
-    body.signature = signature;
+    body.signature = this.signMutation('record.put', o, body);
     return this.call('PUT', `/api/sync/records/${encodeURIComponent(o.recordId)}`, body);
   }
 
   async deleteRecord(o: DeleteRecordOpts): Promise<unknown> {
     assertU64Decimal(o.keyEpoch, 'keyEpoch');
     assertU64Decimal(o.baseVersion, 'baseVersion');
-    assertB64UrlLen(o.mutationId, 16, 'mutationId');
+    assertBase64UrlNoPad(o.mutationId, 16, 'mutationId');
+    assertRecordId(o.recordId);
     const body: Record<string, unknown> = {
       protocolVersion: 1,
       keyEpoch: o.keyEpoch,
@@ -140,74 +162,67 @@ export class V3SyncClient {
       recordId: o.recordId,
       baseVersion: o.baseVersion,
     };
-    const signature = this.signMutation('record.delete', { ...o }, body);
-    body.signature = signature;
+    body.signature = this.signMutation('record.delete', o, body);
     return this.call('DELETE', `/api/sync/records/${encodeURIComponent(o.recordId)}`, body);
   }
 
   async changeKey(o: ChangeKeyOpts): Promise<unknown> {
     assertU64Decimal(o.keyEpoch, 'keyEpoch');
     assertU64Decimal(o.expectedStateVersion, 'expectedStateVersion');
-    assertB64UrlLen(o.mutationId, 16, 'mutationId');
+    assertBase64UrlNoPad(o.mutationId, 16, 'mutationId');
     const body: Record<string, unknown> = {
       protocolVersion: 1,
       keyEpoch: o.keyEpoch,
       mutationId: o.mutationId,
       expectedStateVersion: o.expectedStateVersion,
-      smpKdf: o.smpKdf,
-      envelopeSmp: o.envelopeSmp,
+      smpKdf: validateSmpKdf(o.smpKdf),
+      envelopeSmp: validateEnvelope(o.envelopeSmp, 'envelopeSmp'),
     };
-    const signature = this.signMutation('state.change-key', { ...o }, body);
-    body.signature = signature;
+    body.signature = this.signMutation('state.change-key', o, body);
     return this.call('POST', '/api/sync/change-key', body);
   }
 
   async recover(o: RecoverOpts): Promise<unknown> {
     assertU64Decimal(o.keyEpoch, 'keyEpoch');
     assertU64Decimal(o.expectedStateVersion, 'expectedStateVersion');
-    assertB64UrlLen(o.mutationId, 16, 'mutationId');
+    assertBase64UrlNoPad(o.mutationId, 16, 'mutationId');
+    assertBase64UrlNoPad(o.recoverSignPub, 32, 'recoverSignPub');
     const body: Record<string, unknown> = {
       protocolVersion: 1,
       keyEpoch: o.keyEpoch,
       mutationId: o.mutationId,
       expectedStateVersion: o.expectedStateVersion,
-      smpKdf: o.smpKdf,
-      envelopeSmp: o.envelopeSmp,
-      recoveryKdf: o.recoveryKdf,
-      envelopeRecovery: o.envelopeRecovery,
+      smpKdf: validateSmpKdf(o.smpKdf),
+      envelopeSmp: validateEnvelope(o.envelopeSmp, 'envelopeSmp'),
+      recoveryKdf: validateRecoveryKdf(o.recoveryKdf),
+      envelopeRecovery: validateEnvelope(o.envelopeRecovery, 'envelopeRecovery'),
       recoverSignPub: o.recoverSignPub,
     };
-    const signature = this.signMutation('state.recover', { ...o }, body);
-    body.signature = signature;
+    body.signature = this.signMutation('state.recover', o, body);
     return this.call('POST', '/api/sync/recover', body);
   }
 
   async destroy(o: DestroyOpts): Promise<unknown> {
     assertU64Decimal(o.keyEpoch, 'keyEpoch');
     assertU64Decimal(o.expectedStateVersion, 'expectedStateVersion');
-    assertB64UrlLen(o.mutationId, 16, 'mutationId');
+    assertBase64UrlNoPad(o.mutationId, 16, 'mutationId');
     const body: Record<string, unknown> = {
       protocolVersion: 1,
       keyEpoch: o.keyEpoch,
       mutationId: o.mutationId,
       expectedStateVersion: o.expectedStateVersion,
-      newState: o.newState,
+      newState: validateNewState(o.newState),
     };
-    const signature = this.signMutation('state.destroy', { ...o }, body);
-    body.signature = signature;
+    body.signature = this.signMutation('state.destroy', o, body);
     return this.call('POST', '/api/sync/destroy', body);
   }
 
-  /**
-   * requestDigest 顺序锚点：从「实际发送 body（尚未附 signature）」算 digest →
-   * 构造 signingInput（含 digest）→ 签名。绝不把 signature 算进自己的 digest。
-   */
   private signMutation(action: SyncAction, o: { userId: string; keyEpoch: string; mutationId: string; seed: Uint8Array }, body: Record<string, unknown>): string {
     const requestDigest = requestDigestOf(body);
     const common = { userId: o.userId, keyEpoch: o.keyEpoch, mutationId: o.mutationId, requestDigest };
     const input = action === 'record.put' || action === 'record.delete'
-      ? buildRecordSigningInput(action, { ...common, recordId: (body.recordId as string), baseVersion: (body.baseVersion as string) })
-      : buildStateSigningInput(action, { ...common, expectedStateVersion: (body.expectedStateVersion as string) });
+      ? buildRecordSigningInput(action, { ...common, recordId: body.recordId as string, baseVersion: body.baseVersion as string })
+      : buildStateSigningInput(action, { ...common, expectedStateVersion: body.expectedStateVersion as string });
     return signSigningInput(input, o.seed);
   }
 

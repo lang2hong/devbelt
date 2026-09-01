@@ -1,12 +1,24 @@
 import { decodeBase64Url } from '../crypto/recoveryCode';
+import {
+  ARGON2ID_ITERATIONS_MAX,
+  ARGON2ID_ITERATIONS_MIN,
+  ARGON2ID_MEMORY_MAX_KIB,
+  ARGON2ID_MEMORY_MIN_KIB,
+  ARGON2ID_PARALLELISM_MAX,
+  ARGON2ID_PARALLELISM_MIN,
+} from '../crypto/argon2';
 
 /**
  * 个人同步 V3 协议 DTO 类型与编码校验（§8.1.7）。
  *
  * u64（keyEpoch/stateVersion/baseVersion/envelopeVersion/after/snapshotSequence）
- * 一律十进制字符串、无符号、无前导零；0 仅在该字段协议允许时接受。base64url
- * 值严格解码并校验规格长度。待签名 body 不得混入 undefined/函数/bigint/任意对象。
+ * 十进制字符串、无符号、无前导零、≤ 2^64-1；0 仅在该字段协议允许时接受。base64url
+ * 严格为**无 padding**（拒绝 `=`/`+`/`/`/空）。validator 返回「冻结纯 JSON」——
+ * 显式字段构造的普通对象，不含 undefined/函数/bigint/toJSON，保证 JCS 与
+ * JSON.stringify 请求体逐字节一致。
  */
+
+export const U64_MAX = '18446744073709551615';
 
 export interface SmpKdfDto {
   alg: 'argon2id';
@@ -47,30 +59,118 @@ export interface NewStateDto {
   recoverSignPub: string;
 }
 
-export interface SignedMutationBase {
-  protocolVersion: 1;
-  keyEpoch: string;
-  mutationId: string;
+function rejectExtraKeys(obj: Record<string, unknown>, allowed: readonly string[], field: string): void {
+  for (const k of Object.keys(obj)) {
+    if (!allowed.includes(k)) throw new Error(`${field} has unexpected key "${k}"`);
+  }
 }
 
-/** u64 十进制字符串：无符号，无前导零；0 仅在 allowZero 时接受。 */
-export function assertU64Decimal(s: string, field: string, allowZero = false): void {
-  if (allowZero && s === '0') return;
+/** u64 十进制字符串：无符号、无前导零、≤ 2^64-1；0 仅在 allowZero 时接受。 */
+export function assertU64Decimal(s: string, field: string, allowZero = false): string {
+  if (allowZero && s === '0') return s;
   if (!/^[1-9][0-9]*$/.test(s)) {
     throw new Error(`${field} must be an unsigned decimal integer with no leading zeros`);
   }
+  if (s.length > U64_MAX.length || (s.length === U64_MAX.length && s > U64_MAX)) {
+    throw new Error(`${field} exceeds u64 max ${U64_MAX}`);
+  }
+  return s;
 }
 
-/** base64url 严格解码并校验长度。 */
-export function assertB64UrlLen(s: string, lenBytes: number, field: string): Uint8Array {
-  let bytes: Uint8Array;
-  try {
-    bytes = decodeBase64Url(s);
-  } catch (err) {
-    throw new Error(`${field} is not valid base64url: ${err instanceof Error ? err.message : String(err)}`);
+/** 无 padding base64url 严格校验（拒绝 `=`/`+`/`/`/空），并校验解码长度。 */
+export function assertBase64UrlNoPad(s: string, lenBytes: number, field: string): Uint8Array {
+  if (!/^[A-Za-z0-9_-]+$/.test(s)) {
+    throw new Error(`${field} must be unpadded base64url`);
   }
+  const bytes = decodeBase64Url(s);
   if (bytes.length !== lenBytes) {
     throw new Error(`${field} must decode to ${lenBytes} bytes (got ${bytes.length})`);
   }
   return bytes;
+}
+
+/** recordId：无语义随机 base64url，解码 1‥128 字节（§8.1.5）。 */
+export function assertRecordId(s: string, field = 'recordId'): string {
+  if (!/^[A-Za-z0-9_-]+$/.test(s)) throw new Error(`${field} must be unpadded base64url`);
+  const bytes = decodeBase64Url(s);
+  if (bytes.length < 1 || bytes.length > 128) {
+    throw new Error(`${field} must decode to 1..128 bytes (got ${bytes.length})`);
+  }
+  return s;
+}
+
+export function validateSmpKdf(k: unknown): SmpKdfDto {
+  if (typeof k !== 'object' || k === null) throw new Error('smpKdf must be an object');
+  const obj = k as Record<string, unknown>;
+  rejectExtraKeys(obj, ['alg', 'version', 'memoryKiB', 'iterations', 'parallelism', 'salt', 'outputBytes'], 'smpKdf');
+  if (obj.alg !== 'argon2id') throw new Error(`smpKdf.alg must be argon2id`);
+  if (obj.version !== 1) throw new Error('smpKdf.version must be 1');
+  if (!Number.isSafeInteger(obj.memoryKiB) || (obj.memoryKiB as number) < ARGON2ID_MEMORY_MIN_KIB || (obj.memoryKiB as number) > ARGON2ID_MEMORY_MAX_KIB) {
+    throw new Error(`smpKdf.memoryKiB out of range [${ARGON2ID_MEMORY_MIN_KIB}, ${ARGON2ID_MEMORY_MAX_KIB}]`);
+  }
+  if (!Number.isSafeInteger(obj.iterations) || (obj.iterations as number) < ARGON2ID_ITERATIONS_MIN || (obj.iterations as number) > ARGON2ID_ITERATIONS_MAX) {
+    throw new Error(`smpKdf.iterations out of range [${ARGON2ID_ITERATIONS_MIN}, ${ARGON2ID_ITERATIONS_MAX}]`);
+  }
+  if (!Number.isSafeInteger(obj.parallelism) || (obj.parallelism as number) < ARGON2ID_PARALLELISM_MIN || (obj.parallelism as number) > ARGON2ID_PARALLELISM_MAX) {
+    throw new Error(`smpKdf.parallelism out of range [${ARGON2ID_PARALLELISM_MIN}, ${ARGON2ID_PARALLELISM_MAX}]`);
+  }
+  if (typeof obj.salt !== 'string') throw new Error('smpKdf.salt must be a string');
+  assertBase64UrlNoPad(obj.salt, 16, 'smpKdf.salt');
+  if (obj.outputBytes !== 32) throw new Error('smpKdf.outputBytes must be 32');
+  return {
+    alg: 'argon2id', version: 1,
+    memoryKiB: obj.memoryKiB as number, iterations: obj.iterations as number, parallelism: obj.parallelism as number,
+    salt: obj.salt, outputBytes: 32,
+  };
+}
+
+export function validateRecoveryKdf(k: unknown): RecoveryKdfDto {
+  if (typeof k !== 'object' || k === null) throw new Error('recoveryKdf must be an object');
+  const obj = k as Record<string, unknown>;
+  rejectExtraKeys(obj, ['alg', 'version', 'salt', 'outputBytes'], 'recoveryKdf');
+  if (obj.alg !== 'hkdf-sha256') throw new Error('recoveryKdf.alg must be hkdf-sha256');
+  if (obj.version !== 1) throw new Error('recoveryKdf.version must be 1');
+  if (typeof obj.salt !== 'string') throw new Error('recoveryKdf.salt must be a string');
+  assertBase64UrlNoPad(obj.salt, 16, 'recoveryKdf.salt');
+  if (obj.outputBytes !== 32) throw new Error('recoveryKdf.outputBytes must be 32');
+  return { alg: 'hkdf-sha256', version: 1, salt: obj.salt, outputBytes: 32 };
+}
+
+export function validateEnvelope(e: unknown, field: string): EnvelopeDto {
+  if (typeof e !== 'object' || e === null) throw new Error(`${field} must be an object`);
+  const obj = e as Record<string, unknown>;
+  rejectExtraKeys(obj, ['protocolVersion', 'cipherSuite', 'formatVersion', 'envelopeVersion', 'nonce', 'ciphertext', 'tag'], field);
+  if (obj.protocolVersion !== 1 || obj.cipherSuite !== 'AES-256-GCM' || obj.formatVersion !== 1) {
+    throw new Error(`${field} protocol/cipher/format must be 1 / AES-256-GCM / 1`);
+  }
+  assertU64Decimal(obj.envelopeVersion as string, `${field}.envelopeVersion`);
+  assertBase64UrlNoPad(obj.nonce as string, 12, `${field}.nonce`);
+  if (typeof obj.ciphertext !== 'string') throw new Error(`${field}.ciphertext must be a string`);
+  assertBase64UrlNoPad(obj.ciphertext, 32, `${field}.ciphertext`);
+  assertBase64UrlNoPad(obj.tag as string, 16, `${field}.tag`);
+  return {
+    protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+    envelopeVersion: obj.envelopeVersion as string,
+    nonce: obj.nonce as string, ciphertext: obj.ciphertext as string, tag: obj.tag as string,
+  };
+}
+
+export function validateNewState(ns: unknown): NewStateDto {
+  if (typeof ns !== 'object' || ns === null) throw new Error('newState must be an object');
+  const obj = ns as Record<string, unknown>;
+  rejectExtraKeys(obj, ['protocolVersion', 'cipherSuite', 'formatVersion', 'smpKdf', 'recoveryKdf', 'envelopeSmp', 'envelopeRecovery', 'signPub', 'recoverSignPub'], 'newState');
+  if (obj.protocolVersion !== 1 || obj.cipherSuite !== 'AES-256-GCM' || obj.formatVersion !== 1) {
+    throw new Error('newState protocol/cipher/format must be 1 / AES-256-GCM / 1');
+  }
+  assertBase64UrlNoPad(obj.signPub as string, 32, 'newState.signPub');
+  assertBase64UrlNoPad(obj.recoverSignPub as string, 32, 'newState.recoverSignPub');
+  return {
+    protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+    smpKdf: validateSmpKdf(obj.smpKdf),
+    recoveryKdf: validateRecoveryKdf(obj.recoveryKdf),
+    envelopeSmp: validateEnvelope(obj.envelopeSmp, 'newState.envelopeSmp'),
+    envelopeRecovery: validateEnvelope(obj.envelopeRecovery, 'newState.envelopeRecovery'),
+    signPub: obj.signPub as string,
+    recoverSignPub: obj.recoverSignPub as string,
+  };
 }
