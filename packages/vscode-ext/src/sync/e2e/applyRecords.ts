@@ -75,7 +75,7 @@ export async function applyRecord(input: ApplyRecordInput, ctx: ApplyContext): P
     if (existing.status === 'confirmed' && local && (local.updateTime ?? 0) > existing.revision) {
       throw new RecordConflictError(input.recordId, existing.recordVersion, version);
     }
-    const connectionId = local ? existing.connectionId : ctx.uniqueConnectionId();
+    const connectionId = local || existing.status === 'pending' ? existing.connectionId : ctx.uniqueConnectionId();
     await ctx.store.save({ ...conn, id: connectionId }, 'sync');
     const saved = ctx.store.get(connectionId);
     if (!saved || saved.updateTime === undefined) {

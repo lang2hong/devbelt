@@ -174,7 +174,7 @@ describe('applyRecord', () => {
     expect(mapStore.getByRecordId('A'.repeat(22))).toBeUndefined();
   });
 
-  it('pending 预留重放自愈：收敛为单个已确认连接', async () => {
+  it('pending 预留重放自愈：复用预留 connectionId 收敛为已确认连接', async () => {
     const { store, mapStore, uniqueConnectionId } = setup();
     const id = 'A'.repeat(22);
     const ctx = { store: store as any, mapStore, uniqueConnectionId };
@@ -182,7 +182,8 @@ describe('applyRecord', () => {
     expect(await applyRecord({ recordId: id, version: '1', tombstone: false, payload }, ctx)).toMatchObject({ disposition: 'created' });
     const entry = mapStore.getByRecordId(id)!;
     expect(entry.status).toBe('confirmed');
-    expect(entry.connectionId).not.toBe('c-ghost');
+    expect(entry.connectionId).toBe('c-ghost');
+    expect(store.save).toHaveBeenCalledWith(expect.objectContaining({ id: 'c-ghost' }), 'sync');
     expect(store.all()).toHaveLength(1);
   });
 });

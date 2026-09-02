@@ -73,8 +73,10 @@ export class RecordMapStore {
       if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0) {
         throw new Error('corrupt record map: invalid revision');
       }
-      assertStatus(entryRaw.status);
-      byRecordId[recordId] = { connectionId: entryRaw.connectionId, recordVersion: entryRaw.recordVersion, revision, status: entryRaw.status };
+      // 兼容：status 是本代新增的 additive 字段，旧条目缺失时语义上即为已确认。
+      const status = entryRaw.status === undefined ? 'confirmed' : entryRaw.status;
+      assertStatus(status);
+      byRecordId[recordId] = { connectionId: entryRaw.connectionId, recordVersion: entryRaw.recordVersion, revision, status };
     }
 
     const byConnectionId: RecordMapData['byConnectionId'] = {};
@@ -129,6 +131,7 @@ export class RecordMapStore {
     assertRecordId(recordId);
     assertConnectionId(entry.connectionId);
     assertU64Decimal(entry.recordVersion, 'recordVersion');
+    assertStatus(entry.status);
     return this.mutate(async () => {
       const current = this.read();
       // Validate and mutate a copy so a rejected reassignment cannot corrupt persisted state.

@@ -202,4 +202,13 @@ describe('RecordMapStore', () => {
     }), '7', '1');
     expect(() => mismatch.getByRecordId(rid)).toThrowError(/corrupt record map/);
   });
+
+  it('旧条目缺失 status 兼容为 confirmed', () => {
+    const key = 'dbclient.sync.recordMap.7.1';
+    const rid = 'A'.repeat(22);
+    const s = new RecordMapStore(makeMemento({
+      [key]: { byRecordId: { [rid]: { connectionId: 'c-1', recordVersion: '1', revision: 42 } }, byConnectionId: { 'c-1': rid } },
+    }), '7', '1');
+    expect(s.getByRecordId(rid)).toEqual({ recordId: rid, connectionId: 'c-1', recordVersion: '1', revision: 42, status: 'confirmed' });
+  });
 });
