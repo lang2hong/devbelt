@@ -47,6 +47,28 @@ function assertBase(recordId: string, connectionId: string, baseVersion: string,
   assertBase64UrlNoPad(requestDigest, 32, 'requestDigest');
 }
 
+function assertPendingMutationShape(m: unknown): asserts m is PendingMutation {
+  if (typeof m !== 'object' || m === null || Array.isArray(m)) {
+    throw new Error('corrupt outbox entry: expected object');
+  }
+  const o = m as Record<string, unknown>;
+  if (o.action !== 'record.put' && o.action !== 'record.delete') {
+    throw new Error('corrupt outbox entry: invalid action');
+  }
+  if (typeof o.recordId !== 'string' || typeof o.connectionId !== 'string' ||
+    typeof o.baseVersion !== 'string' || typeof o.mutationId !== 'string' ||
+    typeof o.signature !== 'string' || typeof o.requestDigest !== 'string') {
+    throw new Error('corrupt outbox entry: missing base field');
+  }
+  if (o.action === 'record.put') {
+    if (typeof o.nonce !== 'string' || typeof o.ciphertext !== 'string' || typeof o.tag !== 'string') {
+      throw new Error('corrupt outbox entry: put requires nonce/ciphertext/tag');
+    }
+  } else if ('nonce' in o || 'ciphertext' in o || 'tag' in o) {
+    throw new Error('corrupt outbox entry: delete must not carry nonce/ciphertext/tag');
+  }
+}
+
 export class PendingMutationStore {
   private static readonly KEY_PREFIX = 'dbclient.sync.outbox';
 
@@ -64,8 +86,11 @@ export class PendingMutationStore {
   }
 
   list(): PendingMutation[] {
-    const raw = this.memento.get<PendingMutation[]>(this.key);
-    return Array.isArray(raw) ? raw : [];
+    const raw = this.memento.get<unknown>(this.key);
+    if (raw === undefined) return [];
+    if (!Array.isArray(raw)) throw new Error('corrupt outbox: expected array');
+    for (const item of raw) assertPendingMutationShape(item);
+    return raw as PendingMutation[];
   }
 
   async put(m: PendingMutation): Promise<void> {

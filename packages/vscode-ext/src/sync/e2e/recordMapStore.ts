@@ -26,6 +26,10 @@ function assertConnectionId(id: string): void {
   if (id.startsWith('org:')) throw new Error('organization connection must not enter personal sync map');
 }
 
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
 export class RecordMapStore {
   private static readonly KEY_PREFIX = 'dbclient.sync.recordMap';
 
@@ -43,8 +47,29 @@ export class RecordMapStore {
   }
 
   private read(): RecordMapData {
-    const raw = this.memento.get<RecordMapData>(this.key);
-    return raw ?? { byRecordId: {}, byConnectionId: {} };
+    const raw = this.memento.get<unknown>(this.key);
+    if (raw === undefined) return { byRecordId: {}, byConnectionId: {} };
+    if (!isPlainObject(raw)) throw new Error('corrupt record map: expected object');
+    if (!isPlainObject(raw.byRecordId) || !isPlainObject(raw.byConnectionId)) {
+      throw new Error('corrupt record map: missing byRecordId/byConnectionId');
+    }
+    for (const entry of Object.values(raw.byRecordId)) {
+      if (!isPlainObject(entry) ||
+        typeof entry.connectionId !== 'string' || entry.connectionId === '' ||
+        typeof entry.recordVersion !== 'string' || entry.recordVersion === '' ||
+        typeof entry.revision !== 'number') {
+        throw new Error('corrupt record map: invalid record entry');
+      }
+    }
+    for (const recordId of Object.values(raw.byConnectionId)) {
+      if (typeof recordId !== 'string' || recordId === '') {
+        throw new Error('corrupt record map: invalid reverse index entry');
+      }
+    }
+    return {
+      byRecordId: raw.byRecordId as RecordMapData['byRecordId'],
+      byConnectionId: raw.byConnectionId as RecordMapData['byConnectionId'],
+    };
   }
 
   private async write(data: RecordMapData): Promise<void> {

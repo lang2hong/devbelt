@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { RecordMapStore } from '../../../src/sync/e2e/recordMapStore';
 
-function makeMemento() {
-  const m = new Map<string, unknown>();
+function makeMemento(seed?: Record<string, unknown>) {
+  const m = new Map<string, unknown>(Object.entries(seed ?? {}));
   return {
     get: <T>(k: string): T | undefined => m.get(k) as T | undefined,
     update: async (k: string, v: unknown): Promise<void> => { m.set(k, v); },
@@ -163,5 +163,20 @@ describe('RecordMapStore', () => {
 
     expect(s.getByRecordId('A'.repeat(22))).toBeUndefined();
     expect(s.getByConnectionId('c-1')).toBeUndefined();
+  });
+
+  it('read 对损坏形状 fail-closed', () => {
+    const key = 'dbclient.sync.recordMap.7.1';
+
+    const nonObject = new RecordMapStore(makeMemento({ [key]: 'garbage' }), '7', '1');
+    expect(() => nonObject.getByRecordId('A'.repeat(22))).toThrowError(/corrupt record map/);
+
+    const missingMaps = new RecordMapStore(makeMemento({ [key]: { byRecordId: null, byConnectionId: {} } }), '7', '1');
+    expect(() => missingMaps.getByConnectionId('c-1')).toThrowError(/corrupt record map/);
+
+    const badEntry = new RecordMapStore(makeMemento({
+      [key]: { byRecordId: { ['A'.repeat(22)]: { connectionId: 'c-1', recordVersion: '1', revision: 'bad' } }, byConnectionId: {} },
+    }), '7', '1');
+    expect(() => badEntry.getByRecordId('A'.repeat(22))).toThrowError(/corrupt record map/);
   });
 });

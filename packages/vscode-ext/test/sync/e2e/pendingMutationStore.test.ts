@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { PendingMutationStore, type PendingPutMutation, type PendingDeleteMutation } from '../../../src/sync/e2e/pendingMutationStore';
 
-function makeMemento() {
-  const m = new Map<string, unknown>();
+function makeMemento(seed?: Record<string, unknown>) {
+  const m = new Map<string, unknown>(Object.entries(seed ?? {}));
   return {
     get: <T>(k: string): T | undefined => m.get(k) as T | undefined,
     update: async (k: string, v: unknown): Promise<void> => { m.set(k, v); },
@@ -85,5 +85,20 @@ describe('PendingMutationStore', () => {
     await Promise.all([first, second]);
 
     expect(s.list()).toHaveLength(2);
+  });
+
+  it('list 对非数组损坏 fail-closed', () => {
+    const key = 'dbclient.sync.outbox.7.1';
+    const s = new PendingMutationStore(makeMemento({ [key]: 'not-an-array' }), '7', '1');
+    expect(() => s.list()).toThrowError(/corrupt outbox/);
+  });
+
+  it('list 对非法元素形状 fail-closed', () => {
+    const key = 'dbclient.sync.outbox.7.1';
+    const badAction = new PendingMutationStore(makeMemento({ [key]: [{ action: 'nope' }] }), '7', '1');
+    expect(() => badAction.list()).toThrowError(/corrupt outbox entry/);
+
+    const deleteWithNonce = new PendingMutationStore(makeMemento({ [key]: [{ ...del(), nonce: 'C'.repeat(16) }] }), '7', '1');
+    expect(() => deleteWithNonce.list()).toThrowError(/corrupt outbox entry/);
   });
 });

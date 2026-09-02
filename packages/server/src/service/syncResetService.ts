@@ -20,7 +20,7 @@ const RESET_CHALLENGE_WINDOW_S = 3600;
 const RESET_CHALLENGE_MAX = 3;
 const RESET_TOKEN_TTL_MS = 24 * 3600 * 1000;
 
-/** reset token 只存 SHA-256 摘要（§7.5）。 */
+/** reset token 只存 SHA-256 摘要。 */
 function hashResetToken(raw: Buffer): Buffer {
   return createHash('sha256').update(raw).digest();
 }
@@ -32,7 +32,7 @@ export interface ResetAfterLossInput {
 }
 
 /**
- * reset-after-loss 挑战协议（§7.5）。
+ * reset-after-loss 挑战协议。
  *
  * - reset-challenges：认证用户发起，向已验证邮箱发邮件挑战；对 active/none/abandoned
  *   恒同响应（防枚举）；按 user+IP 各自每小时 3 次限流。token 仅存 SHA-256，24h 单次消费，
@@ -56,7 +56,7 @@ export class SyncResetService {
     await this.rateLimiter.hit(`syncreset:ip:${ip ?? 'unknown'}`, RESET_CHALLENGE_WINDOW_S, RESET_CHALLENGE_MAX);
 
     const user = await this.userRepo.findById(userId);
-    // 仅向已验证邮箱发挑战（§7.5）；未验证则不发信、不建 token，仍同形返回（防枚举）。
+    // 仅向已验证邮箱发挑战；未验证则不发信、不建 token，仍同形返回（防枚举）。
     if (!user || !user.emailVerifiedTime) return;
 
     const token = randomBytes(32);
