@@ -140,7 +140,7 @@ describe.skipIf(!URL)('organization (real MySQL)', () => {
     }
   });
 
-  it('concurrent demote of two admins: one wins, one gets 409, one admin remains', async () => {
+  it('concurrent demote of two admins: one wins, loser rejected (actor demoted), one admin remains', async () => {
     const pool = newPool();
     const db = pool as unknown as MysqlDb;
     try {
@@ -167,14 +167,14 @@ describe.skipIf(!URL)('organization (real MySQL)', () => {
         svc.assignRole(orgId, aMembershipId, 'member', b!.id),
       ]);
       expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
-      expect(results.filter((r) => r.status === 'rejected' && (r as any).reason instanceof OrganizationAdminRequiredError)).toHaveLength(1);
+      expect(results.filter((r) => r.status === 'rejected' && (r as any).reason instanceof ForbiddenError)).toHaveLength(1);
       expect(await countAdmins(db, orgId)).toBeGreaterThanOrEqual(1);
     } finally {
       await pool.end();
     }
   });
 
-  it('concurrent remove of two admins: one wins, one gets 409, one admin remains', async () => {
+  it('concurrent remove of two admins: one wins, loser rejected (actor removed), one admin remains', async () => {
     const pool = newPool();
     const db = pool as unknown as MysqlDb;
     try {
@@ -201,7 +201,7 @@ describe.skipIf(!URL)('organization (real MySQL)', () => {
         svc.removeMember(orgId, cMembershipId, d!.id),
       ]);
       expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
-      expect(results.filter((r) => r.status === 'rejected' && (r as any).reason instanceof OrganizationAdminRequiredError)).toHaveLength(1);
+      expect(results.filter((r) => r.status === 'rejected' && (r as any).reason instanceof OrganizationNotFoundError)).toHaveLength(1);
       expect(await countAdmins(db, orgId)).toBeGreaterThanOrEqual(1);
     } finally {
       await pool.end();
