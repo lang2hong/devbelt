@@ -16,11 +16,10 @@ import {
 } from './types';
 
 /**
- * 个人同步 V3 协议客户端（10 个路由，5 个需签名）。
+ * 个人同步协议客户端（10 个路由，5 个需签名）。
  *
- * 独立于 V2 分节 `SyncClient`（并存期未决 #4）：仅复用其 `requestRaw` 的
- * 鉴权/401 单飞刷新能力。本层只交付协议方法与签名/摘要原语，不持有本地
- * epoch/nonce/状态机，也不管理签名 seed 的生命周期（由 B3 传入）。
+ * 复用 `SyncClient.requestRaw` 的鉴权和 401 单飞刷新能力。本层只提供协议方法与
+ * 签名/摘要原语，不持有本地 epoch/nonce/状态机，也不管理签名 seed 生命周期。
  *
  * requestDigest 顺序锚点：从「实际发送 body（尚未附 signature）」构造纯 JSON
  * 冻结对象 → 算 digest → 构造 signingInput（含 digest）→ 签名 → 附 signature。
@@ -80,7 +79,7 @@ export interface DestroyOpts extends MutateOptsBase {
   newState: NewStateDto;
 }
 
-export class V3SyncClient {
+export class PersonalSyncClient {
   constructor(private readonly http: SyncClient) {}
 
   // ── 无签名 ──

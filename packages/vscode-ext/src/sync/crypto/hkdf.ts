@@ -1,13 +1,13 @@
 import { hkdfSync } from 'crypto';
 
 /**
- * HKDF-SHA-256 派生原语（§8.1.2）。
+ * HKDF-SHA-256 派生原语（§7.1）。
  *
  * 所有派生 info 字符串由本节集中定义，避免散落魔法字符串。
  * 宿主 Node `crypto.hkdfSync` 承担派生，不引入第三方 HKDF 包。
  */
 
-/** §8.1.2 中三个固定 info（UTF-8）。 */
+/** 三个固定 info（UTF-8），见 §7.1。 */
 export const SYNC_INFO = {
   /** syncSignPriv 派生 */
   signing: 'dbclient/sync/v1/signing',
@@ -17,11 +17,11 @@ export const SYNC_INFO = {
   kekRecovery: 'dbclient/sync/v1/kek/recovery',
 } as const;
 
-/** envelope purpose 值域（§8.1.2 冻结） */
+/** envelope purpose 值域（§7.1） */
 export type EnvelopePurpose = 'smp' | 'recovery';
 
 /**
- * envelope 每版专用 AEAD 派生的 info（§8.1.2）。
+ * envelope 每版专用 AEAD 派生的 info（§7.1）。
  *
  * keyEpoch / envelopeVersion 一律十进制无前导零（内部 BigInt.toString(10)），
  * 杜绝 `"01"` / `"1.0"` 等多义表示。

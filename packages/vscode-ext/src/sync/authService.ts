@@ -11,7 +11,7 @@ declare const __SYNC_SERVER_URL__: string;
 /** 默认同步服务器地址（构建时由 esbuild 从 .env / .env.production 注入） */
 export const DEFAULT_SERVER_URL = __SYNC_SERVER_URL__;
 
-/** 缓存的个人权益（V3 personal_plans entitlement_snapshot；不含时间类字段）。 */
+/** 缓存的个人权益（personal_plans entitlement_snapshot，不含时间字段）。 */
 export interface CachedEntitlement {
   planCode: string;
   allowedDatabaseTypes: string[];
@@ -94,10 +94,10 @@ export class AuthService {
 
   private accessToken?: string;
   private refreshToken?: string;
-  /** 缓存的个人权益（V3 free 权益，持久化到 globalState 供重启后弱网回退） */
+  /** 缓存的个人权益，持久化到 globalState 供重启后弱网回退。 */
   private cachedEntitlement?: CachedEntitlement;
 
-  /** 读取缓存权益：优先内存，回退 globalState。旧 V2 套餐缓存（无 allowedDatabaseTypes）作废。 */
+  /** 读取缓存权益：优先内存，回退 globalState；无 allowedDatabaseTypes 的无效缓存直接忽略。 */
   getCachedEntitlement(): CachedEntitlement | undefined {
     if (this.cachedEntitlement) return this.cachedEntitlement;
     if (this.memento) {

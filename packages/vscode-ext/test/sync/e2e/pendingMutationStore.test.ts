@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PendingMutationStore, type PendingPutMutation, type PendingDeleteMutation } from '../../../src/sync/v3/pendingMutationStore';
+import { PendingMutationStore, type PendingPutMutation, type PendingDeleteMutation } from '../../../src/sync/e2e/pendingMutationStore';
 
 function makeMemento() {
   const m = new Map<string, unknown>();
@@ -58,5 +58,32 @@ describe('PendingMutationStore', () => {
   it('拒绝非法 mutationId 长度', async () => {
     const s = new PendingMutationStore(makeMemento(), '7', '1');
     await expect(s.put(put({ mutationId: 'short' }))).rejects.toThrowError(/mutationId/);
+  });
+
+  it('串行化并发写入，避免丢失 mutation', async () => {
+    const m = new Map<string, unknown>();
+    let releaseFirst!: () => void;
+    const firstUpdate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    let firstUpdateStarted!: () => void;
+    const started = new Promise<void>((resolve) => { firstUpdateStarted = resolve; });
+    let updates = 0;
+    const s = new PendingMutationStore({
+      get: <T>(key: string): T | undefined => m.get(key) as T | undefined,
+      update: async (key: string, value: unknown): Promise<void> => {
+        if (updates++ === 0) {
+          firstUpdateStarted();
+          await firstUpdate;
+        }
+        m.set(key, value);
+      },
+    }, '7', '1');
+
+    const first = s.put(put());
+    await started;
+    const second = s.put(put({ recordId: 'C'.repeat(22), connectionId: 'c-2', mutationId: 'G'.repeat(22) }));
+    releaseFirst();
+    await Promise.all([first, second]);
+
+    expect(s.list()).toHaveLength(2);
   });
 });

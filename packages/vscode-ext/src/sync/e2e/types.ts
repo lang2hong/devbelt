@@ -9,7 +9,7 @@ import {
 } from '../crypto/argon2';
 
 /**
- * 个人同步 V3 协议 DTO 类型与编码校验（§8.1.7）。
+ * 个人同步协议 DTO 类型与编码校验。
  *
  * u64（keyEpoch/stateVersion/baseVersion/envelopeVersion/after/snapshotSequence）
  * 十进制字符串、无符号、无前导零、≤ 2^64-1；0 仅在该字段协议允许时接受。base64url
@@ -89,7 +89,7 @@ export function assertBase64UrlNoPad(s: string, lenBytes: number, field: string)
   return bytes;
 }
 
-/** recordId：无语义随机 base64url，解码 1‥128 字节（§8.1.5）。 */
+/** recordId：无语义随机 base64url，解码 1‥128 字节（§7.1）。 */
 export function assertRecordId(s: string, field = 'recordId'): string {
   if (!/^[A-Za-z0-9_-]+$/.test(s)) throw new Error(`${field} must be unpadded base64url`);
   const bytes = decodeBase64Url(s);

@@ -1,10 +1,10 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 
 /**
- * AES-256-GCM 加解密原语（§8.1.2：nonce 12B、tag 16B 显式字段）。
+ * AES-256-GCM 加解密原语（§7.1：nonce 12B、tag 16B 显式字段）。
  *
  * 显式 key + nonce，不做密钥派生（派生归 hkdf / argon2）。nonce 复用防护不在本层：
- * 由 B3 状态机 + 服务端 `personal_sync_nonces` ledger 负责。
+ * 由同步状态机和服务端 `personal_sync_nonces` ledger 负责。
  * 使用宿主 Node `crypto`，不引入第三方 AES/CSPRNG 包。
  */
 
@@ -22,7 +22,7 @@ export interface SealedBox {
   tag: Uint8Array;
 }
 
-/** AES-256-GCM 加密。aad 可选（record/envelope AAD 由调用方在 B2 规范化后传入）。 */
+/** AES-256-GCM 加密。aad 可选，record/envelope AAD 由调用方规范化后传入。 */
 export function sealAes256Gcm(
   key: Uint8Array,
   nonce: Uint8Array,

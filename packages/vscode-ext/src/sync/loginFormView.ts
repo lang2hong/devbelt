@@ -43,7 +43,7 @@ export class LoginFormView extends BaseWebView {
       return; // 目标视图已挂载，等待用户提交
     }
 
-    // 登录/注册表单（V3：注册只发验证邮件，不回 token，需走 verify 步骤）
+    // 注册只发送验证邮件，不返回 token，随后进入邮箱验证步骤。
     if (msg?.type === 'login' || msg?.type === 'register') {
       const email: string = (msg.email || '').trim();
       const password: string = msg.password || '';

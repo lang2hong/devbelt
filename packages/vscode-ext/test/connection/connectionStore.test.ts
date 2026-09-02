@@ -10,7 +10,7 @@ vi.mock('vscode', () => ({
 }));
 
 function createMemento(data: ConnectionTreeData) {
-  const values = new Map<string, unknown>([['dbclient.connectionsV2', data]]);
+  const values = new Map<string, unknown>([['dbclient.connections', data]]);
   return {
     get<T>(key: string): T | undefined {
       return values.get(key) as T | undefined;
@@ -46,7 +46,7 @@ describe('ConnectionStore sync model', () => {
 
     await store.init();
 
-    expect(memento.get<ConnectionTreeData>('dbclient.connectionsV2')!.connections[0]).not.toHaveProperty('password');
+    expect(memento.get<ConnectionTreeData>('dbclient.connections')!.connections[0]).not.toHaveProperty('password');
     expect(await secrets.get('dbclient.connection.primary.password')).toBe('db-secret');
     expect(store.get('primary')!.password).toBe('db-secret');
   });

@@ -3,7 +3,7 @@ import { hkdfSha256, SYNC_INFO } from './hkdf';
 import { deriveEd25519KeyPair, type Ed25519KeyPair } from './ed25519';
 
 /**
- * 一次性恢复码（§8.1.2）。
+ * 一次性恢复码（§7.1）。
  *
  * 恢复码（256-bit CSPRNG = 32B）只在 init / recover 时一次性展示给用户，**不落盘**。
  * 由它派生出 recoverSign 密钥对与 KEK_recovery；recover 时用户重新输入恢复码即时派生。

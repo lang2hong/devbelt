@@ -53,12 +53,12 @@ describe('keyStore', () => {
   });
 
   it('SecretStorage 非法 base64url → fail-closed', async () => {
-    const store = new DekStore(makeSecretStorage({ 'dbclient.sync.dek.v1.user-a.1': '!!!not-base64url!!!' }));
+    const store = new DekStore(makeSecretStorage({ 'dbclient.sync.dek.user-a.1': '!!!not-base64url!!!' }));
     await expect(store.load('user-a', 1n)).rejects.toThrowError(/corrupt DEK/);
   });
 
   it('SecretStorage 解码后非 32B → fail-closed', async () => {
-    const store = new DekStore(makeSecretStorage({ 'dbclient.sync.dek.v1.user-a.1': 'c2hvcnQ' }));
+    const store = new DekStore(makeSecretStorage({ 'dbclient.sync.dek.user-a.1': 'c2hvcnQ' }));
     await expect(store.load('user-a', 1n)).rejects.toThrowError(/corrupt DEK/);
   });
 

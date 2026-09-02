@@ -11,7 +11,7 @@ import type { OrgLocalCredential } from '../org/credentialVault';
 import { OrgTreeNode, OrgTreeDataProvider } from '../tree/orgTreeDataProvider';
 
 /**
- * 组织 Workspace 命令（§6.2）。
+ * 组织 Workspace 命令（实施规格 §6）。
  *
  * 连接模板：模板 content（服务器） + 本地凭据（CredentialVault）→ 临时 SavedConnection，
  * 只存在于内存，绝不写入个人 ConnectionStore、绝不进请求体。

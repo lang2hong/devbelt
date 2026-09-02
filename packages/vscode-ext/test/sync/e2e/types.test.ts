@@ -5,7 +5,7 @@ import {
   assertRecordId,
   assertU64Decimal,
   validateNewState,
-} from '../../../src/sync/v3/types';
+} from '../../../src/sync/e2e/types';
 
 const smpKdf = { alg: 'argon2id' as const, version: 1 as const, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: 'A'.repeat(22), outputBytes: 32 as const };
 const recoveryKdf = { alg: 'hkdf-sha256' as const, version: 1 as const, salt: 'A'.repeat(22), outputBytes: 32 as const };

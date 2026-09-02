@@ -1,5 +1,5 @@
 /**
- * 组织 Workspace 协调层（§6.2）。
+ * 组织 Workspace 协调层（实施规格 §6）。
  *
  * 职责：
  *  - 维护当前 Workspace（personal / organization）
@@ -73,7 +73,7 @@ export class OrgWorkspace {
 
   // ── 带缓存的读取 ──
 
-  /** 列组织（不走持久缓存：角色/状态须实时反映，见 §6.2 成员状态变更立即重拉）。 */
+  /** 列组织（不走持久缓存：角色/状态须实时反映，成员状态变更后立即重拉）。 */
   async listOrganizations(): Promise<OrganizationSummaryDto[]> {
     return this.client.listOrganizations();
   }

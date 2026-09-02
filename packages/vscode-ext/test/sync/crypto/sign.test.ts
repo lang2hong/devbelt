@@ -49,7 +49,7 @@ describe('requestDigest 顺序锚定', () => {
   });
 });
 
-describe('互通：@noble sign ↔ Node crypto.verify（B1 遗留冒烟兑现）', () => {
+describe('互通：@noble sign ↔ Node crypto.verify', () => {
   it('Node 能验 @noble 签名，篡改消息失败', () => {
     const seed = new Uint8Array(32).fill(7);
     const kp = deriveEd25519KeyPair(seed);

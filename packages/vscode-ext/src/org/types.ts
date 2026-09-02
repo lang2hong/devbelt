@@ -1,8 +1,8 @@
 /**
  * 组织 Workspace 类型定义（纯类型 + 窄化守卫，无 vscode 依赖）。
  *
- * 契约来源：docs/v3/实施规格.md §4.4 / §5 / §5.1。
- * 所有 ID 在 DTO 中均为十进制字符串（§2.1）。
+ * 契约来源：docs/实施规格.md。
+ * 所有 ID 在 DTO 中均为十进制字符串（§2）。
  */
 
 export type OrganizationRole = 'admin' | 'member';
@@ -35,7 +35,7 @@ export interface ResourceSummaryDto {
   updatedByMembershipId: string | null;
 }
 
-/** connection_template 内容（§4.4 严格闭合 schema）。 */
+/** connection_template 内容（§6.3 严格闭合 schema）。 */
 export interface ConnectionTemplateContent {
   databaseType: 'mysql';
   host: string;
@@ -48,7 +48,7 @@ export interface ConnectionTemplateContent {
   };
 }
 
-/** query 内容（§4.4 严格闭合 schema）。 */
+/** query 内容（§6.3 严格闭合 schema）。 */
 export interface QueryContent {
   sql: string;
   dialect?: 'mysql' | 'postgresql' | 'sqlite';
@@ -61,7 +61,7 @@ export interface ResourceDetailDto extends ResourceSummaryDto {
   content: ResourceContent;
 }
 
-/** 判型守卫：服务端资源类型为其子集（§4.4 仅 MySQL 模板）。 */
+/** 判型守卫：服务端资源类型为其子集（§6.3 仅 MySQL 模板）。 */
 export function isConnectionTemplate(c: ResourceContent): c is ConnectionTemplateContent {
   return (c as ConnectionTemplateContent).databaseType !== undefined
     && (c as ConnectionTemplateContent).host !== undefined;

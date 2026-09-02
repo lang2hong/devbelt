@@ -1,7 +1,7 @@
 {
   "name": "vscode-db-client",
   "displayName": "DB Client Pro",
-  "description": "All-in-one database client for MySQL, PostgreSQL and SQLite in VS Code — query, edit data, design schemas, ER diagrams, import/export, SSH tunnels and encrypted cloud sync.",
+  "description": "All-in-one database client for MySQL, PostgreSQL and SQLite in VS Code — query, edit data, design schemas, ER diagrams, import/export and SSH tunnels.",
   "version": "0.0.1",
   "publisher": "lang2hong",
   "license": "MIT",
@@ -19,8 +19,7 @@
     "database-client",
     "sql-client",
     "query",
-    "er-diagram",
-    "sync"
+    "er-diagram"
   ],
   "galleryBanner": {
     "color": "#16324F",

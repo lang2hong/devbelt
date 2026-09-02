@@ -16,7 +16,7 @@ function makeWorkspace(handler: Handler) {
 
 const me = () => ({ status: 200, body: { user: { userId: 'u1', email: 'a@b.c', status: 'active' } } });
 
-describe('OrgWorkspace (错误驱动的缓存失效，§6.2)', () => {
+describe('OrgWorkspace (错误驱动的缓存失效)', () => {
   it('caches folder and resource lists per organization', async () => {
     let folderCalls = 0;
     let resourceCalls = 0;

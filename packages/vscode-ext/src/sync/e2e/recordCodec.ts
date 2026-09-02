@@ -5,15 +5,15 @@ import { databaseEngineOf } from '../entitlementGate';
 import type { SavedConnection } from '../../connection/connectionStore';
 
 /**
- * record 密文编解码（B3a，§8.1.1/8.1.5/8.1.8）。
+ * record 密文编解码。
  *
  * - 白名单严格关闭对象：只把下面列出的字段放进明文 record；`id`、`createTime`/
  *   `updateTime`/`deleted` 由服务端 record 行管理，`dbPath`/`sshPrivateKeyPath` 及
  *   一切本机路径、OS keychain、组织引用一律不入明文。
- * - `sqliteCommand` 可能间接携带本地路径/启动参数，在语义与校验规则明确前**刻意
- *   不在白名单**（后续单独裁定）。后果（B4 UI 义务）：拉回的 SQLite 连接无文件
- *   路径，设备 B 须由用户补数据库路径后方可连接。
- * - `dbType` 的 engine 归一（'MYSQL'→'mysql' 等）归 B3b，本层原样透传。
+ * - `sqliteCommand` 可能间接携带本地路径与启动参数，不在白名单。因此拉回的 SQLite
+ *   连接没有文件路径，须由用户在本设备补齐数据库路径后才能连接。
+ * - `dbType` 在本层归一为 engine 字符串（`databaseEngineOf`），解码时再还原为
+ *   `DatabaseType`，未知 engine fail-closed。
  * - record AAD.purpose 恒为 'record'（写死，不接受外部传参）。
  */
 
@@ -32,9 +32,9 @@ export interface RecordAadCtx {
 
 /** 白名单严格关闭对象：仅列内字段，剔除 undefined。URI/命令类字段 fail-closed。 */
 export function encodeRecordPayload(conn: SavedConnection): Record<string, unknown> {
-  if (conn.useConnectionString) throw new Error('V3 sync does not support useConnectionString');
-  if (conn.connectionUrl) throw new Error('V3 sync does not support connectionUrl');
-  if (conn.sqliteCommand) throw new Error('V3 sync does not support sqliteCommand');
+  if (conn.useConnectionString) throw new Error('sync does not support useConnectionString');
+  if (conn.connectionUrl) throw new Error('sync does not support connectionUrl');
+  if (conn.sqliteCommand) throw new Error('sync does not support sqliteCommand');
   const src = conn as unknown as Record<string, unknown>;
   const out: Record<string, unknown> = {};
   for (const k of RECORD_PAYLOAD_FIELDS) {
@@ -114,7 +114,7 @@ function boolOf(obj: Record<string, unknown>, key: string): boolean | undefined 
 }
 
 /**
- * 严格解码 record 明文 payload → 已校验字段（§8.1.1 + ADR-0007 冻结）。
+ * 严格解码 record 明文 payload → 已校验字段（§7.2）。
  *
  * 拒绝未知字段（additionalProperties:false）、类型错误、未知 engine、端口越界，并
  * 拒绝 `connectionUrl`/`useConnectionString`/`sqliteCommand`（这些早已不在白名单，
@@ -160,7 +160,7 @@ export function decodeRecordPayload(p: unknown): DecodedRecordPayload {
   };
 }
 
-/** record AAD 对象（§8.1.8）。purpose 恒为 'record'，写死。 */
+/** record AAD 对象（§7.1）。purpose 恒为 'record'，写死。 */
 export function recordAad(ctx: RecordAadCtx): Record<string, unknown> {
   return {
     userId: ctx.userId,
@@ -179,7 +179,7 @@ export function recordAadBytes(ctx: RecordAadCtx): Uint8Array {
   return new Uint8Array(Buffer.from(jcs(recordAad(ctx)), 'utf8'));
 }
 
-/** record 加密（key=DEK）。nonce 12B 由调用方提供（B3b 负责唯一）。 */
+/** record 加密（key=DEK）。nonce 12B 由调用方提供并保证唯一。 */
 export function sealRecord(dek: Uint8Array, nonce: Uint8Array, plaintext: Uint8Array, ctx: RecordAadCtx): SealedBox {
   return sealAes256Gcm(dek, nonce, plaintext, recordAadBytes(ctx));
 }

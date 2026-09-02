@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { applyRecord } from '../../../src/sync/v3/applyRecords';
-import { RecordMapStore } from '../../../src/sync/v3/recordMapStore';
-import { V3RecordConflictError } from '../../../src/sync/v3/errors';
+import { applyRecord } from '../../../src/sync/e2e/applyRecords';
+import { RecordMapStore } from '../../../src/sync/e2e/recordMapStore';
+import { RecordConflictError } from '../../../src/sync/e2e/errors';
 import type { SavedConnection } from '../../../src/connection/connectionStore';
 
 function makeMemento() {
@@ -82,7 +82,7 @@ describe('applyRecord', () => {
     await expect(applyRecord(
       { recordId: 'A'.repeat(22), version: '2', tombstone: false, payload },
       { store: store as any, mapStore, uniqueConnectionId },
-    )).rejects.toThrowError(V3RecordConflictError);
+    )).rejects.toThrowError(RecordConflictError);
     expect(store.all()).toHaveLength(1);
   });
 
@@ -93,7 +93,7 @@ describe('applyRecord', () => {
     await expect(applyRecord(
       { recordId: 'A'.repeat(22), version: '2', tombstone: true },
       { store: store as any, mapStore, uniqueConnectionId },
-    )).rejects.toThrowError(V3RecordConflictError);
+    )).rejects.toThrowError(RecordConflictError);
     expect(store.all()).toHaveLength(1);
   });
 
@@ -113,5 +113,32 @@ describe('applyRecord', () => {
       { recordId: 'A'.repeat(22), version: '1', tombstone: false, payload: { ...payload, extra: 1 } },
       { store: store as any, mapStore, uniqueConnectionId },
     )).rejects.toThrowError(/unexpected/);
+  });
+
+  it('新记录映射持久化失败时删除新连接', async () => {
+    const { store, uniqueConnectionId } = setup();
+    const mapStore = {
+      getByRecordId: () => undefined,
+      put: vi.fn(async () => { throw new Error('map write failed'); }),
+    };
+    await expect(applyRecord(
+      { recordId: 'A'.repeat(22), version: '1', tombstone: false, payload },
+      { store: store as any, mapStore: mapStore as any, uniqueConnectionId },
+    )).rejects.toThrowError(/map write failed/);
+    expect(store.all()).toEqual([]);
+    expect(store.remove).toHaveBeenCalledWith('c-new-1', 'sync');
+  });
+
+  it('更新映射持久化失败时恢复旧连接内容', async () => {
+    const old = { id: 'c-1', name: 'old', dbType: 'MYSQL' as any, host: 'old-host', port: 3306, user: 'old-user', updateTime: 100 } as SavedConnection;
+    const { store, mapStore, uniqueConnectionId } = setup([old]);
+    await mapStore.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 100 });
+    vi.spyOn(mapStore, 'put').mockRejectedValueOnce(new Error('map write failed'));
+
+    await expect(applyRecord(
+      { recordId: 'A'.repeat(22), version: '2', tombstone: false, payload },
+      { store: store as any, mapStore, uniqueConnectionId },
+    )).rejects.toThrowError(/map write failed/);
+    expect(store.get('c-1')).toMatchObject({ name: 'old', host: 'old-host', user: 'old-user' });
   });
 });

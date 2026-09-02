@@ -37,7 +37,7 @@ export interface DeviceInfo {
   timezone: string;
 }
 
-/** V3 个人权益快照（personal_plans entitlement_snapshot）。 */
+/** 个人权益快照（personal_plans entitlement_snapshot）。 */
 export interface PersonalEntitlement {
   allowedDatabaseTypes: string[];
   maxDevices: number;
@@ -88,19 +88,19 @@ export class SyncClient {
   ) {}
 
   /**
-   * 注册（V3：仅创建账号 + 发验证邮件，201 不回 token）。
+   * 注册：创建账号并发送验证邮件，201 不返回 token。
    * 后续须经 confirmEmail 验证邮箱，再 login 取得 token。
    */
   async register(email: string, password: string): Promise<{ ok: boolean }> {
     return (await this.postJson('/api/auth/register', { email, password }, false)) as { ok: boolean };
   }
 
-  /** 消费初始邮箱验证 token（§4.7 单次消费）。 */
+  /** 消费初始邮箱验证 token（§5.1 单次消费）。 */
   async confirmEmail(token: string): Promise<{ ok: boolean }> {
     return (await this.postJson(`/api/auth/email-verifications/${encodeURIComponent(token)}/confirm`, undefined, false)) as { ok: boolean };
   }
 
-  /** 匿名重发验证邮件（§5：不区分邮箱是否存在，响应恒成功，防枚举）。 */
+  /** 匿名重发验证邮件（§5.1：不区分邮箱是否存在，响应恒成功，防枚举）。 */
   async resendVerification(email: string): Promise<{ ok: boolean }> {
     return (await this.postJson('/api/auth/email-verifications', { email }, false)) as { ok: boolean };
   }
@@ -144,7 +144,7 @@ export class SyncClient {
     if (rt) await this.request('POST', '/api/auth/logout', { refreshToken: rt }, true);
   }
 
-  /** 修改密码（改密后撤销全部会话）。V3 字段名为 currentPassword。 */
+  /** 修改密码，成功后撤销全部会话。 */
   async changePassword(oldPassword: string, newPassword: string): Promise<void> {
     const res = await this.request('POST', '/api/auth/change-password', { currentPassword: oldPassword, newPassword }, true);
     if (!res.ok) {
@@ -157,7 +157,7 @@ export class SyncClient {
    * 通用鉴权请求（供组织 Workspace 复用）：自动 401 单飞刷新 + 5xx 退避重试，
    * 返回原始状态码 + 已解析的 JSON body（空 body 为 undefined）。
    *
-   * 不在此处做业务错误码归因（V2 的 DEVICE_LIMIT 等归因仍留在 sync 路径），
+   * 不在此处做业务错误码归因，
    * 组织侧的错误映射由 OrgClient 依据 `code`/`status` 完成。
    */
   async requestRaw(method: string, path: string, body?: unknown, opts?: { retry?: boolean }): Promise<{ status: number; body: unknown }> {
@@ -181,7 +181,7 @@ export class SyncClient {
     return res.json() as Promise<MeResponse>;
   }
 
-  /** 列当前用户全部设备（§4.6 /api/personal/devices，V3 无 currentDeviceId）。 */
+  /** 列当前用户全部设备。 */
   async listDevices(): Promise<{ devices: DeviceItem[] }> {
     const res = await this.request('GET', '/api/personal/devices', undefined, true);
     if (!res.ok) {
@@ -191,7 +191,7 @@ export class SyncClient {
     return res.json() as Promise<{ devices: DeviceItem[] }>;
   }
 
-  /** 撤销本人设备（§4.6 /api/personal/devices；free 无配额，撤销恒允许）。 */
+  /** 撤销本人设备（§5.2 /api/personal/devices；Free 无配额，撤销恒允许）。 */
   async revokeDevice(deviceId: string): Promise<void> {
     const res = await this.request('DELETE', `/api/personal/devices/${encodeURIComponent(deviceId)}`, undefined, true);
     if (!res.ok) {
@@ -326,7 +326,7 @@ export class SyncClient {
   }
 
   /**
-   * V3 设备请求字段（实施规格 §4.6 DeviceFields，login/refresh 请求体必填）。
+   * login/refresh 请求体必填的设备字段。
    *
    * deviceKey 取 os machine id（跨重装稳定），缺失回退 vscode machineId，
    * 并清洗为 `[A-Za-z0-9_-]`、长度收敛到 16..128（不足用同字符集补齐兜底，

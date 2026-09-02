@@ -3,17 +3,17 @@ import { decodeRecordPayload } from './recordCodec';
 import { assertRecordId, assertU64Decimal } from './types';
 import { filterPersonalConnectionsByEntitlement } from '../entitlementGate';
 import type { CachedEntitlement } from '../authService';
-import { V3RecordConflictError } from './errors';
+import { RecordConflictError } from './errors';
 import type { RecordMapStore } from './recordMapStore';
 
 /**
- * 远端 record 的本地应用（B3b，ADR-0007 #3 + 冻结裁定）。
+ * 远端 record 的本地应用。
  *
  * - 版本幂等：version ≤ 已确认 recordVersion 不重复写。
  * - tombstone：已映射且本地未脏 → 删连接 + 删映射；已映射但本地脏 → 抛冲突（不删）；
  *   未映射 → 不建不报错（推进 cursor）。
- * - 本地脏 + 更高 version（active 或 tombstone）→ 抛 V3RecordConflictError（不含秘密）。
- * - 写连接走 `source='v3-sync'`；解密后先过引擎门禁（墓碑不走门禁）。
+ * - 本地脏 + 更高 version（active 或 tombstone）→ 抛 RecordConflictError（不含秘密）。
+ * - 写连接走 `source='sync'`；解密后先过引擎门禁（墓碑不走门禁）。
  * - 全链路 async：await store 与 map 的持久化，避免「map 先于连接写入」。
  */
 
@@ -51,9 +51,9 @@ export async function applyRecord(input: ApplyRecordInput, ctx: ApplyContext): P
     if (existing) {
       const local = ctx.store.get(existing.connectionId);
       if (local && (local.updateTime ?? 0) > existing.revision) {
-        throw new V3RecordConflictError(input.recordId, existing.recordVersion, version);
+        throw new RecordConflictError(input.recordId, existing.recordVersion, version);
       }
-      await ctx.store.remove(existing.connectionId, 'v3-sync');
+      await ctx.store.remove(existing.connectionId, 'sync');
       await ctx.mapStore.deleteByRecordId(input.recordId);
       return { recordId: input.recordId, disposition: 'deleted' };
     }
@@ -70,18 +70,29 @@ export async function applyRecord(input: ApplyRecordInput, ctx: ApplyContext): P
   if (existing) {
     const local = ctx.store.get(existing.connectionId);
     if (local && (local.updateTime ?? 0) > existing.revision) {
-      throw new V3RecordConflictError(input.recordId, existing.recordVersion, version);
+      throw new RecordConflictError(input.recordId, existing.recordVersion, version);
     }
     const connectionId = local ? existing.connectionId : ctx.uniqueConnectionId();
-    await ctx.store.save({ ...conn, id: connectionId }, 'v3-sync');
+    await ctx.store.save({ ...conn, id: connectionId }, 'sync');
     const saved = ctx.store.get(connectionId);
-    await ctx.mapStore.put(input.recordId, { connectionId, recordVersion: version, revision: saved?.updateTime ?? 0 });
+    try {
+      await ctx.mapStore.put(input.recordId, { connectionId, recordVersion: version, revision: saved?.updateTime ?? 0 });
+    } catch (error) {
+      if (local) await ctx.store.save(local, 'sync');
+      else await ctx.store.remove(connectionId, 'sync');
+      throw error;
+    }
     return { recordId: input.recordId, disposition: local ? 'updated' : 'created' };
   }
 
   const connectionId = ctx.uniqueConnectionId();
-  await ctx.store.save({ ...conn, id: connectionId }, 'v3-sync');
+  await ctx.store.save({ ...conn, id: connectionId }, 'sync');
   const saved = ctx.store.get(connectionId);
-  await ctx.mapStore.put(input.recordId, { connectionId, recordVersion: version, revision: saved?.updateTime ?? 0 });
+  try {
+    await ctx.mapStore.put(input.recordId, { connectionId, recordVersion: version, revision: saved?.updateTime ?? 0 });
+  } catch (error) {
+    await ctx.store.remove(connectionId, 'sync');
+    throw error;
+  }
   return { recordId: input.recordId, disposition: 'created' };
 }

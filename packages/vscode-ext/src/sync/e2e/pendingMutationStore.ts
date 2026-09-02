@@ -2,12 +2,12 @@ import { assertBase64UrlNoPad, assertRecordId, assertU64Decimal } from './types'
 import type { MementoLike } from './stateStore';
 
 /**
- * 待推送 mutation outbox（B3b，§8.1.8 nonce/receipt 不可复用语义）。
+ * 待推送 mutation outbox。
  *
  * 持久化完整已签名 record mutation，使请求发出后能原样重放（同 mutationId/nonce/
  * ciphertext/digest/signature）。不存明文连接、DEK、SMP 或私钥。键按 userId+keyEpoch
  * 隔离。分判联合：
- *  - `record.put`：必须含 nonce/ciphertext/tag（§8.1.7 PutRecordRequest）。
+ *  - `record.put`：必须含 nonce/ciphertext/tag（§7.5 PutRecordRequest）。
  *  - `record.delete`：禁止 nonce/ciphertext/tag（DeleteRecordRequest 无这些字段）。
  */
 
@@ -48,9 +48,10 @@ function assertBase(recordId: string, connectionId: string, baseVersion: string,
 }
 
 export class PendingMutationStore {
-  private static readonly KEY_PREFIX = 'dbclient.sync.v3.outbox';
+  private static readonly KEY_PREFIX = 'dbclient.sync.outbox';
 
   private readonly key: string;
+  private writeChain: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly memento: MementoLike,
@@ -80,15 +81,25 @@ export class PendingMutationStore {
     } else {
       throw new Error(`invalid mutation action: ${(m as { action: string }).action}`);
     }
-    await this.write([...this.list(), m]);
+    await this.mutate((list) => [...list, m]);
   }
 
   async delete(mutationId: string): Promise<void> {
-    await this.write(this.list().filter((m) => m.mutationId !== mutationId));
+    await this.mutate((list) => list.filter((m) => m.mutationId !== mutationId));
   }
 
   async clear(): Promise<void> {
-    await this.write([]);
+    await this.mutate(() => []);
+  }
+
+  private mutate(change: (list: PendingMutation[]) => PendingMutation[]): Promise<void> {
+    const operation = this.writeChain.then(async () => {
+      await this.write(change(this.list()));
+    });
+    // Keep subsequent operations usable after a persistence failure while returning the failure
+    // to the caller that initiated it.
+    this.writeChain = operation.catch(() => {});
+    return operation;
   }
 
   private async write(list: PendingMutation[]): Promise<void> {

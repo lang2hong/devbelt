@@ -1,7 +1,7 @@
 import { assertU64Decimal } from './types';
 
 /**
- * 本地 sync state 快照（B3a，§8.1.4）。
+ * 本地 sync state 快照。
  *
  * 仅持久化服务端确认的 keyEpoch / stateVersion / changeSequence，供乐观锁与签名。
  * `changeSequence` 是用户级全局单调游标：客户端**只能**持久化服务端返回值，不得
@@ -21,7 +21,7 @@ export interface MementoLike {
 }
 
 export class StateStore {
-  private static readonly KEY_PREFIX = 'dbclient.sync.v3.state';
+  private static readonly KEY_PREFIX = 'dbclient.sync.state';
 
   private readonly key: string;
 
@@ -45,7 +45,7 @@ export class StateStore {
     };
   }
 
-  setSnapshot(snapshot: SyncStateSnapshot): void {
+  async setSnapshot(snapshot: SyncStateSnapshot): Promise<void> {
     const keyEpoch = assertU64Decimal(snapshot.keyEpoch, 'keyEpoch');
     const stateVersion = assertU64Decimal(snapshot.stateVersion, 'stateVersion');
     const changeSequence = assertU64Decimal(snapshot.changeSequence, 'changeSequence', true);
@@ -60,6 +60,6 @@ export class StateStore {
       }
     }
 
-    void this.memento.update(this.key, { keyEpoch, stateVersion, changeSequence });
+    await this.memento.update(this.key, { keyEpoch, stateVersion, changeSequence });
   }
 }

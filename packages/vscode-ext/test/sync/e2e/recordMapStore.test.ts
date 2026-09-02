@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RecordMapStore } from '../../../src/sync/v3/recordMapStore';
+import { RecordMapStore } from '../../../src/sync/e2e/recordMapStore';
 
 function makeMemento() {
   const m = new Map<string, unknown>();
@@ -52,5 +52,7 @@ describe('RecordMapStore', () => {
     await s.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 0 });
     await s.put('B'.repeat(22), { connectionId: 'c-2', recordVersion: '1', revision: 0 });
     await expect(s.put('B'.repeat(22), { connectionId: 'c-1', recordVersion: '2', revision: 0 })).rejects.toThrowError(/mapped/);
+    expect(s.getByConnectionId('c-1')!.recordId).toBe('A'.repeat(22));
+    expect(s.getByConnectionId('c-2')!.recordId).toBe('B'.repeat(22));
   });
 });

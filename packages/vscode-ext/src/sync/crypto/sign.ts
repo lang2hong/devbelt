@@ -2,10 +2,10 @@ import { jcs } from './jcs';
 import { signEd25519 } from './ed25519';
 
 /**
- * 签名构造（§8.1.8）。action 字段集与服务端 `assertSignature` 口径逐一对齐：
+ * 签名构造（§7.4）。action 字段集与服务端 `assertSignature` 口径逐一对齐：
  *  - record 签名含 recordId + baseVersion
  *  - state 签名含 expectedStateVersion
- * recover 用恢复码派生的 seed；其余用 DEK 派生的 syncSign seed（由 B3 传入）。
+ * recover 使用恢复码派生的 seed，其余操作使用 DEK 派生的 syncSign seed。
  */
 
 export const SYNC_DOMAIN = 'dbclient/sync/v1';

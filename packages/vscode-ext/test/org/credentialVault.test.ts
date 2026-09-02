@@ -40,7 +40,7 @@ describe('CredentialVault', () => {
 
     for (const key of store.keys()) {
       expect(key.startsWith('dbclient.org.credential.')).toBe(true);
-      expect(key).not.toContain('dbclient.connectionsV2');
+      expect(key).not.toContain('dbclient.connections');
     }
     expect(CredentialVault.key('org1', 'res1')).toBe('dbclient.org.credential.org1.res1');
   });

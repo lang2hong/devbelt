@@ -5,13 +5,12 @@ import { deriveEd25519KeyPair, type Ed25519KeyPair } from './ed25519';
 import { decodeBase64Url, encodeBase64Url } from './recoveryCode';
 
 /**
- * DEK 生成与落盘（§8.1.2 客户端密钥落盘裁定）。
+ * DEK 生成与落盘（§7.1）。
  *
  * DEK 是随 keyEpoch 轮换的 32B CSPRNG，是客户端唯一需要持久化的对称密钥根。
- * 落盘介质仅 SecretStorage，key 按账户 + epoch 隔离：`dbclient.sync.dek.v1.<userId>.<keyEpoch>`。
+ * 落盘介质仅 SecretStorage，key 按账户 + epoch 隔离：`dbclient.sync.dek.<userId>.<keyEpoch>`。
  * 本模块**只提供 load/store/delete 原语**；换钥、旧 epoch 清理、远端状态提交后的
- * 编排与原子性一律归 B3，这里不声称原子。logout 不删 DEK；destroy / 成功 reset-after-loss
- * 删除对应旧 epoch DEK 的调用编排归 B3/B4。
+ * 编排层负责跨存储原子性。logout 不删 DEK；destroy / reset-after-loss 成功后删除旧 epoch DEK。
  */
 
 export const DEK_BYTES = 32;
@@ -29,7 +28,7 @@ export function deriveSyncSignKeyPair(dek: Uint8Array): Ed25519KeyPair {
 
 /** DEK 的 SecretStorage 存取（account + epoch 隔离）。 */
 export class DekStore {
-  private static readonly KEY_PREFIX = 'dbclient.sync.dek.v1';
+  private static readonly KEY_PREFIX = 'dbclient.sync.dek';
 
   constructor(private readonly secrets: SecretStorage) {}
 

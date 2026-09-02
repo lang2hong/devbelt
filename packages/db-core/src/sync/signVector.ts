@@ -4,7 +4,7 @@
  * 固定 32B seed 派生 Ed25519 公钥，并对固定 signingInput 的 JCS 消息签名。
  * - 扩展端断言 @noble/curves 确定性复算得到同一公钥/签名；
  * - 服务端断言 Node `crypto.verify` 对该签名验签通过（篡改消息则失败）。
- * 该向量不得在任一包内拷贝，双方共同 import 本文件（B2 遗留端到端验签冒烟兑现）。
+ * 该向量不得在任一包内拷贝，双方共同 import 本文件以验证端到端签名互通。
  */
 
 export const SYNC_SIGN_TEST_VECTOR = {

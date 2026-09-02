@@ -4,7 +4,7 @@ import { useVsCode } from '../composables/useVsCode';
 import { useI18n } from '../composables/useI18n';
 
 /**
- * 账户面板（Vue 版，V3）：Phase 1 仅有 personal Free 套餐，展示邮箱与 free 权益。
+ * 账户面板：展示邮箱与个人 Free 权益。
  * 消息协议（与 src/sync/accountView.ts 对齐）：
  *   webview → ext: ready
  *   ext → webview: init{mode:'account'} | me{me} | error{message}

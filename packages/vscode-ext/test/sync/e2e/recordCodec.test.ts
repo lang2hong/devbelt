@@ -5,7 +5,7 @@ import {
   openRecord,
   recordAad,
   sealRecord,
-} from '../../../src/sync/v3/recordCodec';
+} from '../../../src/sync/e2e/recordCodec';
 
 describe('encodeRecordPayload 白名单', () => {
   it('只保留白名单字段，剔除本机路径/id/时间戳/deleted；dbType 归一为 engine', () => {

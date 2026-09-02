@@ -2,7 +2,7 @@ import { assertRecordId, assertU64Decimal } from './types';
 import type { MementoLike } from './stateStore';
 
 /**
- * record ↔ connectionId 双向映射（B3b，§8.1.5 + ADR-0007 #3 裁定）。
+ * record ↔ connectionId 双向映射。
  *
  * 键按 userId + keyEpoch 隔离。持久化 recordId / connectionId / 服务端确认的
  * `recordVersion` / 本地连接 revision 标记（用 `updateTime` 毫秒）。组织连接（connectionId
@@ -27,7 +27,7 @@ function assertConnectionId(id: string): void {
 }
 
 export class RecordMapStore {
-  private static readonly KEY_PREFIX = 'dbclient.sync.v3.recordMap';
+  private static readonly KEY_PREFIX = 'dbclient.sync.recordMap';
 
   private readonly key: string;
 
@@ -68,7 +68,12 @@ export class RecordMapStore {
     assertRecordId(recordId);
     assertConnectionId(entry.connectionId);
     assertU64Decimal(entry.recordVersion, 'recordVersion');
-    const data = this.read();
+    const current = this.read();
+    // Validate and mutate a copy so a rejected reassignment cannot corrupt persisted state.
+    const data: RecordMapData = {
+      byRecordId: { ...current.byRecordId },
+      byConnectionId: { ...current.byConnectionId },
+    };
     // 双射不变量：先清旧反向指针，再拒绝目标 connectionId 被其他 record 占用。
     const old = data.byRecordId[recordId];
     if (old && old.connectionId !== entry.connectionId) {

@@ -6,8 +6,8 @@ import { QueryStore, type QueryFolder } from './queryStore';
 import { uniqueId } from '../utils/id';
 import { EventEmitter, type Event, eventBus, ConnectionChangedEvent } from '../utils/event';
 
-/** 连接变更来源：'v3-sync' 不触发 V2 自动同步（B3b 并存期隔离）。 */
-export type ChangeSource = 'user' | 'v2-sync' | 'v3-sync';
+/** 连接变更来源。远端同步应用使用 sync，避免再次触发上传。 */
+export type ChangeSource = 'user' | 'sync';
 
 /**
  * 已保存的连接（持久化到 VSCode 全局状态）。
@@ -90,12 +90,12 @@ export type { QueryFolder } from './queryStore';
  * 密码存于 SecretStorage，同步时随 E2EE payload 一并materialize/还原。
  */
 export class ConnectionStore {
-  private static readonly KEY = 'dbclient.connectionsV2';
+  private static readonly KEY = 'dbclient.connections';
   private static readonly SENSITIVE_FIELDS = ['password', 'sshPassword', 'sshPassphrase'] as const;
   private readonly secretCache = new Map<string, string>();
   private readonly queryStore: QueryStore;
   private readonly changedEmitter = new EventEmitter<ChangeSource>();
-  /** 数据变更事件（连接/分组/查询，含子 QueryStore 转发），供自动同步订阅。source 用于并存期隔离。 */
+  /** 数据变更事件（连接/分组/查询，含子 QueryStore 转发），供同步订阅。 */
   readonly onChanged: Event<ChangeSource> = this.changedEmitter.event;
 
   constructor(
@@ -113,7 +113,7 @@ export class ConnectionStore {
   }
 
   /**
-   * 初始化：迁移历史明文凭据到 SecretStorage，并为连接/分组补全
+   * 初始化：将状态中的明文凭据移入 SecretStorage，并为连接/分组补全
    * `createTime`/`updateTime`/`deleted` 默认值；同时迁移保存查询字段名。幂等。
    */
   async init(): Promise<void> {
@@ -127,7 +127,7 @@ export class ConnectionStore {
       if (g.deleted === undefined) { g.deleted = false; changed = true; }
     });
 
-    // 连接：历史凭据迁移 + 字段补全
+    // 连接凭据清理和字段补全
     let connChanged = false;
     data.connections = await Promise.all(data.connections.map(async (connection) => {
       const { connection: sanitized, changed: sanitizeChanged } = await this.sanitize(connection);

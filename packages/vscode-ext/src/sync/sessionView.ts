@@ -11,7 +11,7 @@ import type { AuthService } from './authService';
  *   webview → ext: ready | revoke{deviceId}
  *   ext → webview: init{mode:'session'} | devices{devices,canRevoke} | error{message}
  *
- * V3 设备经 /api/personal/devices：free 无设备配额（maxDevices=0），撤销本人设备恒允许，
+ * 设备经 /api/personal/devices 管理：Free 无设备配额（maxDevices=0），撤销本人设备恒允许，
  * 故 canRevoke 恒为 true；无 plan.features 位图、无 throwIfDeviceLimit 门禁。
  */
 export class SessionView extends BaseWebView {

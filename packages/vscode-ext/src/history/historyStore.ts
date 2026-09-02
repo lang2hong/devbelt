@@ -61,7 +61,7 @@ export class HistoryStore {
     void eventBus.publish(new HistoryChangedEvent('clear'));
   }
 
-  /** 截断至固定上限（超出则丢弃最旧）。Phase 1 无 per-user 套餐保留数，恒取默认值。 */
+  /** 截断至固定上限，超出时丢弃最旧记录。 */
   private trimToRetention(list: QueryHistoryEntry[]): void {
     if (list.length > HistoryStore.DEFAULT_MAX_ENTRIES) list.length = HistoryStore.DEFAULT_MAX_ENTRIES;
   }

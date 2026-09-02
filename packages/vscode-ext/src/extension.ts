@@ -88,7 +88,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   context.subscriptions.push(treeView);
 
-  // ── 组织 Workspace（切片 5）：独立数据源，与个人连接树/同步完全分离（§6.2）──
+  // 组织 Workspace 使用独立数据源，与个人连接树和同步完全分离。
   const orgClient = new OrgClient(auth.client);
   const orgVault = new CredentialVault(context.secrets);
   const orgWorkspace = new OrgWorkspace(orgClient, orgVault);
@@ -99,7 +99,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   context.subscriptions.push(
     orgTreeView,
-    // 登出 → 清组织缓存（§6.2 的 401 清认证；登录态变化即整用户失效）
+    // 登出 → 清组织缓存（401 清认证；登录态变化即整用户失效）
     eventBus.subscribe(AuthEvent, (e) => {
       if (e.kind === 'logout') orgWorkspace.clearAuth();
     }),

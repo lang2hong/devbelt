@@ -4,14 +4,9 @@ import { l10n } from '../i18n';
 import type { AuthService } from './authService';
 
 /**
- * 账户/套餐面板（Vue 版，替代原 accountView.ts 的同步塞 HTML）。
- *
- * 消息协议（与 webview/src/views/AccountView.vue 对齐）：
- *   webview → ext: ready | upgrade{code}
- *   ext → webview: init{mode:'account'} | me{me} | error{message}
- *
- * 原实现是「先 loading HTML、getMe 后整体替换 HTML」，迁移后改为异步消息：
- * 视图挂载后发 ready，扩展端 getMe 再回 me（或 error）。
+ * 账户面板消息协议：
+ * webview -> ext: ready
+ * ext -> webview: init{mode:'account'} | me{me} | error{message}
  */
 export class AccountView extends BaseWebView {
   private static current?: AccountView;

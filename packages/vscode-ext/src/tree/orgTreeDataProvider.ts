@@ -6,7 +6,7 @@ export type OrgNodeKind = 'organization' | 'folder' | 'resource' | 'info';
 
 /**
  * 组织 Workspace 树节点。
- * 与个人 `DbTreeNode` 完全分离：组织资源不进入个人 `ConnectionStore`（§6.2）。
+ * 与个人 `DbTreeNode` 完全分离：组织资源不进入个人 `ConnectionStore`（§2 个人与组织边界）。
  */
 export class OrgTreeNode extends vscode.TreeItem {
   constructor(

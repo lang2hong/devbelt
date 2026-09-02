@@ -11,7 +11,7 @@ import { useI18n } from '../composables/useI18n';
  *   ext → webview: init{mode:'loginForm'} | error{message} | success{message}
  *                  | verifySent{email,message} | verified{message}
  *
- * V3 注册不返回 token：注册成功后进入 verify 步骤，输入邮件中的验证 token，
+ * 注册不返回 token：成功后进入 verify 步骤，输入邮件中的验证 token，
  * 验证通过后再用同一邮箱密码登录。
  */
 const { post, onMessage } = useVsCode();

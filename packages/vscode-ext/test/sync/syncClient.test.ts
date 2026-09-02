@@ -295,7 +295,7 @@ describe('刷新成功后回写 token', () => {
   });
 });
 
-describe('V3 login/refresh 请求体必带 DeviceFields（§4.6）', () => {
+describe('login/refresh 请求体必带 DeviceFields', () => {
   const device = {
     deviceName: 'test-host · linux/x64',
     deviceId: 'abcdef0123456789abcdef0123456789',
@@ -358,7 +358,7 @@ describe('V3 login/refresh 请求体必带 DeviceFields（§4.6）', () => {
   });
 });
 
-describe('V3 注册/验证流程（register 不回 token）', () => {
+describe('注册和验证流程（register 不回 token）', () => {
   const device = {
     deviceName: 'test-host · linux/x64',
     deviceId: 'abcdef0123456789abcdef0123456789',
@@ -415,7 +415,7 @@ describe('V3 注册/验证流程（register 不回 token）', () => {
     expect(calls[1].body).toEqual({ email: 'a@b.c' });
   });
 
-  it('不再发送 V2 X-Device-* 请求头', async () => {
+  it('不发送 X-Device-* 请求头', async () => {
     let headers: Record<string, string> = {};
     const fetchMock = vi.fn(async (_url: unknown, init: any) => {
       headers = (init?.headers ?? {}) as Record<string, string>;
@@ -429,8 +429,8 @@ describe('V3 注册/验证流程（register 不回 token）', () => {
   });
 });
 
-describe('V3 change-password / confirm 单次消费契约', () => {
-  it('changePassword 发送 { currentPassword, newPassword }（不用 V2 oldPassword）', async () => {
+describe('change-password / confirm 单次消费契约', () => {
+  it('changePassword 发送 { currentPassword, newPassword }', async () => {
     const bodies: unknown[] = [];
     const fetchMock = vi.fn(async (_url: unknown, init: any) => {
       if (init?.body) bodies.push(JSON.parse(init.body));
@@ -469,8 +469,8 @@ describe('V3 change-password / confirm 单次消费契约', () => {
   });
 });
 
-describe('V3 设备管理（/api/personal/devices）', () => {
-  it('listDevices 命中 /api/personal/devices 并解析 V3 DTO', async () => {
+describe('设备管理（/api/personal/devices）', () => {
+  it('listDevices 命中 /api/personal/devices 并解析 DTO', async () => {
     const calls: { url: string; method: string }[] = [];
     const device = { deviceId: 'd1', devicePlatform: 'linux', deviceName: 'host', clientVersion: '1.90.0', status: 'active', lastUsedTime: null, createTime: '2024-01-01T00:00:00.000Z' };
     const fetchMock = vi.fn(async (url: unknown, init: any) => {
@@ -501,7 +501,7 @@ describe('V3 设备管理（/api/personal/devices）', () => {
   });
 });
 
-describe('V3 getMe（个人权益）', () => {
+describe('getMe（个人权益）', () => {
   it('返回 { user, subscription.entitlement }', async () => {
     const fetchMock = vi.fn(async () => jsonRes(200, {
       user: { userId: '42', email: 'a@b.c', displayName: null, emailVerified: true, status: 'active', lastLoginTime: null },

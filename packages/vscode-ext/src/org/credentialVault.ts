@@ -1,5 +1,5 @@
 /**
- * 本地凭据映射（§6.2「组织模板通过 organizationId + resourceId 映射用户自己的本地凭据」）。
+ * 本地凭据映射：组织模板通过 organizationId + resourceId 映射用户自己的本地凭据，映射不上传服务端。
  *
  * 三段硬保证：
  *  1. 只写 vscode.SecretStorage（个人密钥存储），绝不写个人 ConnectionStore；

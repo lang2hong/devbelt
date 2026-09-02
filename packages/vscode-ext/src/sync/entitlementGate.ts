@@ -2,7 +2,7 @@ import { DatabaseType } from '@db-client/core';
 import type { CachedEntitlement } from './authService';
 
 /**
- * 个人连接许可证门禁（§8.1.6 扩展端口径裁定）。
+ * 个人连接许可证门禁（§7.2 引擎门禁）。
  *
  * fail-closed 默认 Free：无 `CachedEntitlement`（未登录/登出已清缓存）时按
  * `DEFAULT_FREE_ENGINES` 兜底，与服务端匿名口径一致——仅 `postgresql` 被拒。

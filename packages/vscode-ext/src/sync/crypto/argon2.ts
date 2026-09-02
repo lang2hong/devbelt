@@ -1,14 +1,13 @@
 import { argon2id } from 'hash-wasm';
 
 /**
- * Argon2id KDF（§8.1.2 的 KEK_smp 派生）。
+ * Argon2id KDF，用于派生 KEK_smp。
  *
- * 参数范围冻结于 §8.1.2：memory ∈ [65536, 262144] KiB、iterations ∈ [3, 10]、
+ * 参数范围：memory ∈ [65536, 262144] KiB、iterations ∈ [3, 10]、
  * parallelism ∈ [1, 4]、salt 16B、output 32B。任何越界值 fail-closed 拒绝。
  *
- * ⚠️ 执行边界（冻结约束 F4）：本 API 是异步接口（返回 Promise），**但底层在 WASM
- * 上同步计算，Promise 只是接口形态，不代表不回阻塞调用线程**。生产使用（B3/B4
- * 解锁 SMP）必须在 Worker 中执行；本模块不得被接入扩展主线程的任何运行时调用点。
+ * 本 API 返回 Promise，但底层在 WASM 上同步计算，仍会阻塞调用线程。解锁 SMP
+ * 必须在 Worker 中执行；本模块不得接入扩展主线程的运行时调用点。
  */
 
 export const ARGON2ID_ALG = 'argon2id' as const;
