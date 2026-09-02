@@ -186,4 +186,35 @@ describe('applyRecord', () => {
     expect(store.save).toHaveBeenCalledWith(expect.objectContaining({ id: 'c-ghost' }), 'sync');
     expect(store.all()).toHaveLength(1);
   });
+
+  it('pending + 本地连接存在(active) → 冲突且不覆盖本地', async () => {
+    const local: SavedConnection = { id: 'c-1', name: 'local', dbType: 'MYSQL' as any, host: 'h', port: 3306, user: 'u', updateTime: 200 } as SavedConnection;
+    const { store, mapStore, uniqueConnectionId } = setup([local]);
+    const id = 'A'.repeat(22);
+    await mapStore.put(id, { connectionId: 'c-1', recordVersion: '1', revision: 0, status: 'pending' });
+    try {
+      await applyRecord({ recordId: id, version: '1', tombstone: false, payload }, { store: store as any, mapStore, uniqueConnectionId });
+      throw new Error('should have thrown');
+    } catch (error) {
+      expect(error).toBeInstanceOf(RecordConflictError);
+      expect((error as RecordConflictError).kind).toBe('pending');
+    }
+    expect(store.get('c-1')).toMatchObject({ name: 'local' });
+  });
+
+  it('pending + 本地连接存在(tombstone) → 冲突且不删除', async () => {
+    const local: SavedConnection = { id: 'c-1', name: 'local', dbType: 'MYSQL' as any, host: 'h', port: 3306, user: 'u', updateTime: 200 } as SavedConnection;
+    const { store, mapStore, uniqueConnectionId } = setup([local]);
+    const id = 'A'.repeat(22);
+    await mapStore.put(id, { connectionId: 'c-1', recordVersion: '1', revision: 0, status: 'pending' });
+    try {
+      await applyRecord({ recordId: id, version: '2', tombstone: true }, { store: store as any, mapStore, uniqueConnectionId });
+      throw new Error('should have thrown');
+    } catch (error) {
+      expect(error).toBeInstanceOf(RecordConflictError);
+      expect((error as RecordConflictError).kind).toBe('pending');
+    }
+    expect(store.all()).toHaveLength(1);
+    expect(store.get('c-1')?.deleted).toBeUndefined();
+  });
 });

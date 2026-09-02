@@ -73,10 +73,8 @@ export class RecordMapStore {
       if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0) {
         throw new Error('corrupt record map: invalid revision');
       }
-      // 兼容：status 是本代新增的 additive 字段，旧条目缺失时语义上即为已确认。
-      const status = entryRaw.status === undefined ? 'confirmed' : entryRaw.status;
-      assertStatus(status);
-      byRecordId[recordId] = { connectionId: entryRaw.connectionId, recordVersion: entryRaw.recordVersion, revision, status };
+      assertStatus(entryRaw.status);
+      byRecordId[recordId] = { connectionId: entryRaw.connectionId, recordVersion: entryRaw.recordVersion, revision, status: entryRaw.status };
     }
 
     const byConnectionId: RecordMapData['byConnectionId'] = {};

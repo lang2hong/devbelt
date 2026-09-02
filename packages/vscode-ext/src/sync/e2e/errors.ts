@@ -7,8 +7,11 @@ export class RecordConflictError extends Error {
     public readonly recordId: string,
     public readonly confirmedVersion: string,
     public readonly remoteVersion: string,
+    public readonly kind: 'version' | 'pending' = 'version',
   ) {
-    super(`record conflict: recordId=${recordId}, remote version ${remoteVersion} > confirmed ${confirmedVersion}`);
+    super(kind === 'pending'
+      ? `record conflict (pending reservation): recordId=${recordId}`
+      : `record conflict: recordId=${recordId}, remote version ${remoteVersion} > confirmed ${confirmedVersion}`);
     this.name = 'RecordConflictError';
   }
 }

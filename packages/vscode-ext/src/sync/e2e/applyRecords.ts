@@ -16,6 +16,8 @@ import type { RecordMapStore } from './recordMapStore';
  * - tombstone：confirmed 且本地未脏 → 删连接+删映射；本地脏 → 抛冲突（不删）；
  *   未映射 → 不建不报错（推进 cursor）。
  * - 本地脏 + 更高 version（仅 confirmed）→ 抛 RecordConflictError（不含秘密）。
+ * - pending + 本地连接存在 → 抛 RecordConflictError(kind='pending')：崩溃窗口内本地连接
+ *   可能是用户已编辑的临时状态，禁止静默覆盖(active)/静默删除(tombstone)，保留本地交 UI。
  * - 写连接走 `source='sync'`；解密后先过引擎门禁（墓碑不走门禁）。
  * - 补偿失败时允许留下「有映射无连接」的 pending 状态（可自愈），绝不留「有连接无映射」。
  */
@@ -53,6 +55,9 @@ export async function applyRecord(input: ApplyRecordInput, ctx: ApplyContext): P
   if (input.tombstone) {
     if (existing) {
       const local = ctx.store.get(existing.connectionId);
+      if (existing.status === 'pending' && local) {
+        throw new RecordConflictError(input.recordId, existing.recordVersion, version, 'pending');
+      }
       if (existing.status === 'confirmed' && local && (local.updateTime ?? 0) > existing.revision) {
         throw new RecordConflictError(input.recordId, existing.recordVersion, version);
       }
@@ -72,9 +77,16 @@ export async function applyRecord(input: ApplyRecordInput, ctx: ApplyContext): P
 
   if (existing) {
     const local = ctx.store.get(existing.connectionId);
+    if (existing.status === 'pending' && local) {
+      throw new RecordConflictError(input.recordId, existing.recordVersion, version, 'pending');
+    }
+    // updateTime 恒由 ConnectionStore.save/remove 写入（init() 对旧连接回填 0），
+    // 故 `?? 0` 只是防御性 no-op，不构成 fail-open 风险。
     if (existing.status === 'confirmed' && local && (local.updateTime ?? 0) > existing.revision) {
       throw new RecordConflictError(input.recordId, existing.recordVersion, version);
     }
+    // 不对称语义：pending+缺失 → 复用预留 id 恢复；confirmed+缺失 = 用户已删连接，
+    // 更高 version 下此处新铸 id 并覆写映射会「复活」已删连接——该交互归任务 2/3。
     const connectionId = local || existing.status === 'pending' ? existing.connectionId : ctx.uniqueConnectionId();
     await ctx.store.save({ ...conn, id: connectionId }, 'sync');
     const saved = ctx.store.get(connectionId);
@@ -98,17 +110,20 @@ export async function applyRecord(input: ApplyRecordInput, ctx: ApplyContext): P
   await ctx.mapStore.put(input.recordId, { connectionId, recordVersion: version, revision: 0, status: 'pending' });
   try {
     await ctx.store.save({ ...conn, id: connectionId }, 'sync');
-  } catch {
+  } catch (error) {
     // save 失败回滚映射；回滚失败留下「有映射无连接」的 pending 状态，由 existing 分支自愈。
+    // cause 链为 ConnectionStore.save 的错误（字段校验/IO，不含密码/明文密文）。
     let rollbackFailed = false;
     try {
       await ctx.mapStore.deleteByRecordId(input.recordId);
     } catch {
       rollbackFailed = true;
     }
-    throw new Error(rollbackFailed
+    const causeError = new Error(rollbackFailed
       ? 'apply failed and reservation rollback failed; pending mapping kept for recovery'
-      : 'connection save failed and reservation rollback succeeded');
+      : 'connection save failed and reservation rollback succeeded') as Error & { cause?: unknown };
+    causeError.cause = error;
+    throw causeError;
   }
   const saved = ctx.store.get(connectionId);
   if (!saved || saved.updateTime === undefined) {
