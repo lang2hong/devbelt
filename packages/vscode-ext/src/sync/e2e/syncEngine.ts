@@ -224,7 +224,11 @@ export class SyncEngine {
           }
           // 可重试 error：递增连续失败计数；1–4 中止本轮，≥5 保留条目、附 stalled、允许继续 pull。
           const nextCount = m.consecutiveFailureCount + 1;
-          await this.deps.outbox.setFailureCount(m.mutationId, nextCount);
+          try {
+            await this.deps.outbox.setFailureCount(m.mutationId, nextCount);
+          } catch (err) {
+            return { stage: 'error', conflicts: [], applied: 0, reason: `failure-count commit failed: ${describe(err)}` };
+          }
           if (nextCount >= STALL_THRESHOLD) {
             stalled = { mutationId: m.mutationId };
             break;

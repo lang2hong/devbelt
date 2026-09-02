@@ -330,6 +330,20 @@ describe('SyncEngine', () => {
     expect(outbox.list()[0].consecutiveFailureCount).toBe(1);
   });
 
+  it('failure-count 落盘失败 → error（结构化），保留条目，不进 pull', async () => {
+    const m = putMutation();
+    const client = clientWith({ putRecordSigned: vi.fn(async () => { throw new SyncApiError(500); }) });
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    await outbox.put(m);
+    vi.spyOn(outbox, 'setFailureCount').mockRejectedValueOnce(new Error('count write failed'));
+    const eng = engine({ client, snap: SNAP, mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox });
+    const r = await eng.sync();
+    expect(r.stage).toBe('error');
+    expect(r.reason).toContain('failure-count commit failed');
+    expect(outbox.list()).toHaveLength(1);
+    expect(client.getRecords).not.toHaveBeenCalled();
+  });
+
   it('连续失败 5 轮 → 附 stalled，允许 pull', async () => {
     const m = putMutation();
     const client = clientWith({
