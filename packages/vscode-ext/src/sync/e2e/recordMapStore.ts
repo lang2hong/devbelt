@@ -30,6 +30,7 @@ export class RecordMapStore {
   private static readonly KEY_PREFIX = 'dbclient.sync.recordMap';
 
   private readonly key: string;
+  private writeChain: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly memento: MementoLike,
@@ -50,6 +51,15 @@ export class RecordMapStore {
     await this.memento.update(this.key, data);
   }
 
+  private mutate(change: () => Promise<void>): Promise<void> {
+    const operation = this.writeChain.then(async () => {
+      await change();
+    });
+    // 持久化失败后仍保持后续操作可用，同时把失败返回给发起调用者。
+    this.writeChain = operation.catch(() => {});
+    return operation;
+  }
+
   getByRecordId(recordId: string): (RecordMapEntry & { recordId: string }) | undefined {
     assertRecordId(recordId);
     const entry = this.read().byRecordId[recordId];
@@ -68,43 +78,59 @@ export class RecordMapStore {
     assertRecordId(recordId);
     assertConnectionId(entry.connectionId);
     assertU64Decimal(entry.recordVersion, 'recordVersion');
-    const current = this.read();
-    // Validate and mutate a copy so a rejected reassignment cannot corrupt persisted state.
-    const data: RecordMapData = {
-      byRecordId: { ...current.byRecordId },
-      byConnectionId: { ...current.byConnectionId },
-    };
-    // 双射不变量：先清旧反向指针，再拒绝目标 connectionId 被其他 record 占用。
-    const old = data.byRecordId[recordId];
-    if (old && old.connectionId !== entry.connectionId) {
-      delete data.byConnectionId[old.connectionId];
-    }
-    const occupiedBy = data.byConnectionId[entry.connectionId];
-    if (occupiedBy !== undefined && occupiedBy !== recordId) {
-      throw new Error(`connectionId ${entry.connectionId} already mapped to recordId ${occupiedBy}`);
-    }
-    data.byRecordId[recordId] = entry;
-    data.byConnectionId[entry.connectionId] = recordId;
-    await this.write(data);
+    return this.mutate(async () => {
+      const current = this.read();
+      // Validate and mutate a copy so a rejected reassignment cannot corrupt persisted state.
+      const data: RecordMapData = {
+        byRecordId: { ...current.byRecordId },
+        byConnectionId: { ...current.byConnectionId },
+      };
+      // 双射不变量：先清旧反向指针，再拒绝目标 connectionId 被其他 record 占用。
+      const old = data.byRecordId[recordId];
+      if (old && old.connectionId !== entry.connectionId) {
+        delete data.byConnectionId[old.connectionId];
+      }
+      const occupiedBy = data.byConnectionId[entry.connectionId];
+      if (occupiedBy !== undefined && occupiedBy !== recordId) {
+        throw new Error(`connectionId ${entry.connectionId} already mapped to recordId ${occupiedBy}`);
+      }
+      data.byRecordId[recordId] = entry;
+      data.byConnectionId[entry.connectionId] = recordId;
+      await this.write(data);
+    });
   }
 
   async deleteByRecordId(recordId: string): Promise<void> {
-    const data = this.read();
-    const entry = data.byRecordId[recordId];
-    if (entry) delete data.byConnectionId[entry.connectionId];
-    delete data.byRecordId[recordId];
-    await this.write(data);
+    return this.mutate(async () => {
+      const current = this.read();
+      const data: RecordMapData = {
+        byRecordId: { ...current.byRecordId },
+        byConnectionId: { ...current.byConnectionId },
+      };
+      const entry = data.byRecordId[recordId];
+      if (entry) delete data.byConnectionId[entry.connectionId];
+      delete data.byRecordId[recordId];
+      await this.write(data);
+    });
   }
 
   async deleteByConnectionId(connectionId: string): Promise<void> {
-    const data = this.read();
-    const recordId = data.byConnectionId[connectionId];
-    if (recordId) delete data.byRecordId[recordId];
-    delete data.byConnectionId[connectionId];
-    await this.write(data);
+    return this.mutate(async () => {
+      const current = this.read();
+      const data: RecordMapData = {
+        byRecordId: { ...current.byRecordId },
+        byConnectionId: { ...current.byConnectionId },
+      };
+      const recordId = data.byConnectionId[connectionId];
+      if (recordId) delete data.byRecordId[recordId];
+      delete data.byConnectionId[connectionId];
+      await this.write(data);
+    });
   }
 
   async clear(): Promise<void> {
-    await this.write({ byRecordId: {}, byConnectionId: {} });
+    return this.mutate(async () => {
+      await this.write({ byRecordId: {}, byConnectionId: {} });
+    });
   }
 }
