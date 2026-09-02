@@ -82,6 +82,8 @@ export class PendingMutationStore {
 
   private readonly key: string;
   private writeChain: Promise<void> = Promise.resolve();
+  readonly userId: string;
+  readonly keyEpoch: string;
 
   constructor(
     private readonly memento: MementoLike,
@@ -90,6 +92,8 @@ export class PendingMutationStore {
   ) {
     assertU64Decimal(userId, 'userId');
     assertU64Decimal(keyEpoch, 'keyEpoch');
+    this.userId = userId;
+    this.keyEpoch = keyEpoch;
     this.key = `${PendingMutationStore.KEY_PREFIX}.${userId}.${keyEpoch}`;
   }
 

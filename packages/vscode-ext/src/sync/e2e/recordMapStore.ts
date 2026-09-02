@@ -42,6 +42,8 @@ export class RecordMapStore {
 
   private readonly key: string;
   private writeChain: Promise<void> = Promise.resolve();
+  readonly userId: string;
+  readonly keyEpoch: string;
 
   constructor(
     private readonly memento: MementoLike,
@@ -50,6 +52,8 @@ export class RecordMapStore {
   ) {
     assertU64Decimal(userId, 'userId');
     assertU64Decimal(keyEpoch, 'keyEpoch');
+    this.userId = userId;
+    this.keyEpoch = keyEpoch;
     this.key = `${RecordMapStore.KEY_PREFIX}.${userId}.${keyEpoch}`;
   }
 

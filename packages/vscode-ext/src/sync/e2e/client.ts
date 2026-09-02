@@ -165,6 +165,67 @@ export class PersonalSyncClient {
     return this.call('DELETE', `/api/sync/records/${encodeURIComponent(o.recordId)}`, body);
   }
 
+  // ── 已签名 mutation 直发（重放专用，不做签名，逐字复用持久化 signature/digest）──
+
+  async putRecordSigned(o: {
+    keyEpoch: string;
+    mutationId: string;
+    recordId: string;
+    baseVersion: string;
+    signature: string;
+    requestDigest: string;
+    nonce: string;
+    ciphertext: string;
+    tag: string;
+  }): Promise<unknown> {
+    assertU64Decimal(o.keyEpoch, 'keyEpoch');
+    assertU64Decimal(o.baseVersion, 'baseVersion', true);
+    assertBase64UrlNoPad(o.mutationId, 16, 'mutationId');
+    assertRecordId(o.recordId);
+    assertBase64UrlNoPad(o.nonce, 12, 'nonce');
+    if (!/^[A-Za-z0-9_-]+$/.test(o.ciphertext)) throw new Error('ciphertext must be unpadded base64url');
+    assertBase64UrlNoPad(o.tag, 16, 'tag');
+    const body: Record<string, unknown> = {
+      protocolVersion: 1,
+      keyEpoch: o.keyEpoch,
+      mutationId: o.mutationId,
+      recordId: o.recordId,
+      baseVersion: o.baseVersion,
+      cipherSuite: 'AES-256-GCM',
+      formatVersion: 1,
+      nonce: o.nonce,
+      ciphertext: o.ciphertext,
+      tag: o.tag,
+    };
+    if (requestDigestOf(body) !== o.requestDigest) throw new Error('outbox mutation digest mismatch');
+    body.signature = o.signature;
+    return this.call('PUT', `/api/sync/records/${encodeURIComponent(o.recordId)}`, body);
+  }
+
+  async deleteRecordSigned(o: {
+    keyEpoch: string;
+    mutationId: string;
+    recordId: string;
+    baseVersion: string;
+    signature: string;
+    requestDigest: string;
+  }): Promise<unknown> {
+    assertU64Decimal(o.keyEpoch, 'keyEpoch');
+    assertU64Decimal(o.baseVersion, 'baseVersion');
+    assertBase64UrlNoPad(o.mutationId, 16, 'mutationId');
+    assertRecordId(o.recordId);
+    const body: Record<string, unknown> = {
+      protocolVersion: 1,
+      keyEpoch: o.keyEpoch,
+      mutationId: o.mutationId,
+      recordId: o.recordId,
+      baseVersion: o.baseVersion,
+    };
+    if (requestDigestOf(body) !== o.requestDigest) throw new Error('outbox mutation digest mismatch');
+    body.signature = o.signature;
+    return this.call('DELETE', `/api/sync/records/${encodeURIComponent(o.recordId)}`, body);
+  }
+
   async changeKey(o: ChangeKeyOpts): Promise<unknown> {
     assertU64Decimal(o.keyEpoch, 'keyEpoch');
     assertU64Decimal(o.expectedStateVersion, 'expectedStateVersion');

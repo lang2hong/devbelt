@@ -1,27 +1,31 @@
 import { PersonalSyncClient, SyncApiError } from './client';
 import { openRecord } from './recordCodec';
-import { applyRecord, type ApplyDisposition } from './applyRecords';
+import { applyRecord, type ApplyContext } from './applyRecords';
 import { RecordConflictError } from './errors';
 import type { RecordMapStore } from './recordMapStore';
 import { PendingMutationStore, type PendingMutation } from './pendingMutationStore';
 import type { StateStore } from './stateStore';
 import type { ConnectionStore } from '../../connection/connectionStore';
 import type { CachedEntitlement } from '../authService';
-import { assertU64Decimal } from './types';
+import { assertRecordId, assertU64Decimal } from './types';
 
 /**
  * 个人同步运行循环（SyncEngine）。
  *
  * 只负责「已初始化、已持有 DEK」状态下的单轮同步，不持有密钥生命周期、不做 UI、不接
- * 连接变更监听（归任务 3/4/5）。并发调用单飞合并；一轮内固定顺序：
+ * 连接变更监听（归任务 3/4）。并发调用单飞合并；一轮内固定顺序：
  *
- *   epoch 对账 → outbox 重放/推 mutation → 分页 feed → 解密 + 安全应用 → 保存 cursor
+ *   epoch 对账 → outbox 重放 → 分页 feed → 解密 + 安全应用 → 逐页保存 cursor
+ *
+ * 本轮只重放已持久化的 outbox（push 已签名 mutation，逐字复用 signature/requestDigest，
+ * 不重新签名）；「本地连接变更 → 生成 mutation」的入口归任务 3。
  *
  * 失败语义：
- * - epoch 不匹配（远端 keyEpoch > 本地）→ 停止、stage='epoch-mismatch'，不重试不覆盖。
- * - outbox 重放网络失败/5xx → 保留 outbox 原样，本轮中止；下轮重演同 mutationId。
- * - 同 mutationId 异 digest（409 CONFLICT）→ 永久错误，标记 terminal，不重推不静默删。
- * - 应用遇 RecordConflictError → 停在该 record、cursor 停在最后确认页，交 UI（任务 4）。
+ * - epoch 不匹配 → 停止 stage='epoch-mismatch'，不重试不覆盖。
+ * - outbox 4xx（CONFLICT 等 terminal 码集合）→ terminal；其余（5xx/网络/401/429）保留 outbox 重演。
+ * - 应用遇 RecordConflictError → 停在该 record，cursor 停在最后确认页，交任务 4 UI。
+ * - 页内部分应用后重放：返回 changeSequence=最后确认页游标，下轮重拉重应用，依赖
+ *   applyRecord 的 confirmed + version≤ 幂等收敛。
  */
 
 export type SyncRunStage = 'ok' | 'epoch-mismatch' | 'conflict' | 'error' | 'terminal';
@@ -31,9 +35,15 @@ export interface SyncConflictEntry {
   kind: 'version' | 'pending';
 }
 
+export interface SyncTerminalEntry {
+  mutationId: string;
+  code?: string;
+}
+
 export interface SyncRunResult {
   stage: SyncRunStage;
   conflicts: SyncConflictEntry[];
+  terminal?: SyncTerminalEntry;
   applied: number;
   changeSequence?: string;
   reason?: string; // 不含秘密
@@ -61,16 +71,20 @@ interface PullPage {
   records: RemoteRecord[];
 }
 
+const MAX_PAGES = 1000;
+const TERMINAL_CODES = new Set(['CONFLICT', 'SYNC_PROTOCOL_UNSUPPORTED', 'SYNC_SIGNATURE_INVALID', 'SYNC_EPOCH_STALE', 'VALIDATION_FAILED']);
+
 export interface SyncEngineDeps {
   userId: string;
+  keyEpoch: string;
   client: PersonalSyncClient;
   stateStore: StateStore;
   mapStore: RecordMapStore;
   outbox: PendingMutationStore;
   store: ConnectionStore;
-  /** DEK 数据加密密钥（解密 feed record；同时由调用方派生签名 seed）。 */
+  /** DEK 数据加密密钥（解密 feed record）。 */
   dek: () => Uint8Array;
-  /** 签名 seed（由 DEK 经 HKDF 派生），供 put/delete record 签名。 */
+  /** 仅供任务 3「本地变更→mutation」首次签名；本轮 outbox 重放不调用。 */
   signSeed: () => Uint8Array;
   uniqueConnectionId: () => string;
   entitlement?: () => CachedEntitlement | undefined;
@@ -84,16 +98,24 @@ function describe(err: unknown): string {
 export class SyncEngine {
   private inflight?: Promise<SyncRunResult>;
 
-  constructor(private readonly deps: SyncEngineDeps) {}
+  constructor(private readonly deps: SyncEngineDeps) {
+    if (deps.mapStore.keyEpoch !== deps.keyEpoch) throw new Error('mapStore keyEpoch mismatch');
+    if (deps.outbox.keyEpoch !== deps.keyEpoch) throw new Error('outbox keyEpoch mismatch');
+  }
 
-  /** 单飞：并发 sync() 合并进同一轮，失败后清空允许下次重试。 */
+  /** 单飞：并发 sync() 合并进同一轮，失败后清空允许下次重试（不产生未处理 rejection）。 */
   sync(): Promise<SyncRunResult> {
     if (this.inflight) return this.inflight;
     const p = this.run();
     this.inflight = p;
-    void p.finally(() => {
-      if (this.inflight === p) this.inflight = undefined;
-    });
+    void p.then(
+      () => {
+        if (this.inflight === p) this.inflight = undefined;
+      },
+      () => {
+        if (this.inflight === p) this.inflight = undefined;
+      },
+    );
     return p;
   }
 
@@ -103,8 +125,7 @@ export class SyncEngine {
     // 1. epoch 对账
     let remoteState: RemoteState;
     try {
-      const raw = await this.deps.client.getState();
-      remoteState = this.parseState(raw);
+      remoteState = this.parseState(await this.deps.client.getState());
     } catch (err) {
       return { stage: 'error', conflicts: [], applied: 0, reason: `getState failed: ${describe(err)}` };
     }
@@ -113,72 +134,86 @@ export class SyncEngine {
     if (!local) {
       return { stage: 'epoch-mismatch', conflicts: [], applied: 0, reason: 'no local sync state (init required)' };
     }
+    if (BigInt(local.keyEpoch) !== BigInt(this.deps.keyEpoch)) {
+      return { stage: 'error', conflicts: [], applied: 0, reason: 'engine keyEpoch mismatch with local state' };
+    }
     if (BigInt(remoteState.keyEpoch) !== BigInt(local.keyEpoch)) {
       return { stage: 'epoch-mismatch', conflicts: [], applied: 0, reason: 'remote keyEpoch differs from local' };
     }
 
-    // 2. outbox 重放：逐条按原样字段 push（§7.4），成功删 outbox。
+    // 2. outbox 重放：逐条直发已签名 mutation（逐字复用 signature/requestDigest，不重签）。
     for (const m of this.deps.outbox.list()) {
       try {
         await this.pushMutation(m);
         await this.deps.outbox.delete(m.mutationId);
       } catch (err) {
-        if (err instanceof SyncApiError && err.status < 500) {
-          // 4xx 永久错误（CONFLICT / SYNC_PROTOCOL_UNSUPPORTED / 签名无效等）：terminal，不重推不静默删。
-          return { stage: 'terminal', conflicts: [], applied: 0, reason: `outbox push rejected: ${describe(err)}` };
+        if (err instanceof SyncApiError && TERMINAL_CODES.has(err.code ?? '')) {
+          return { stage: 'terminal', conflicts: [], applied: 0, terminal: { mutationId: m.mutationId, code: err.code } };
         }
-        // 网络/5xx：保留 outbox 原样，本轮中止，下轮重演同 mutationId。
+        // 网络/5xx/其它 4xx（401/429）：保留 outbox 原样，本轮中止，下轮重演。
         return { stage: 'error', conflicts: [], applied: 0, reason: `push failed: ${describe(err)}` };
       }
     }
 
-    // 3. 分页 pull + 解密 + 应用 + 逐页 cursor
-    let after = local.changeSequence;
-    let applied = 0;
-    const conflicts: SyncConflictEntry[] = [];
-    const ctx = {
+    // 3. 分页 feed + 解密 + 应用 + 逐页 cursor
+    const remoteSnap = remoteState.changeSequence;
+    const ctx: ApplyContext = {
       store: this.deps.store,
       mapStore: this.deps.mapStore,
       entitlement: this.deps.entitlement?.(),
       uniqueConnectionId: this.deps.uniqueConnectionId,
     };
 
-    for (;;) {
+    let cursor = local.changeSequence;
+    let lastCommitted = local.changeSequence;
+    let applied = 0;
+    const conflicts: SyncConflictEntry[] = [];
+
+    for (let pages = 0; ; pages++) {
+      if (pages >= MAX_PAGES) {
+        return { stage: 'error', conflicts, applied, changeSequence: lastCommitted, reason: 'paging exceeded limit' };
+      }
+      const requested = cursor;
       let page: PullPage;
       try {
-        const raw = await this.deps.client.getRecords(after, remoteState.changeSequence, limit);
-        page = this.parsePage(raw);
+        page = this.parsePage(await this.deps.client.getRecords(requested, remoteSnap, limit));
       } catch (err) {
-        return { stage: 'error', conflicts, applied, reason: `pull failed: ${describe(err)}` };
+        return { stage: 'error', conflicts, applied, changeSequence: lastCommitted, reason: `pull failed: ${describe(err)}` };
+      }
+      if (page.snapshotSequence !== remoteSnap) {
+        return { stage: 'error', conflicts, applied, changeSequence: lastCommitted, reason: 'snapshotSequence drift' };
       }
 
-      let pageLast: string | undefined;
-      for (const rec of page.records) {
-        try {
-          await this.applyRemote(rec, remoteState.keyEpoch, ctx);
-          applied += 1;
-          pageLast = rec.changeSequence;
-        } catch (err) {
-          if (err instanceof RecordConflictError) {
-            conflicts.push({ recordId: rec.recordId, kind: err.kind });
-            // 停在该 record，cursor 不前移；后续 record 本轮不处理。
-            return { stage: 'conflict', conflicts, applied, changeSequence: after, reason: `conflict at ${rec.recordId}` };
+      if (page.records.length > 0) {
+        for (const rec of page.records) {
+          try {
+            await this.applyRemote(rec, this.deps.keyEpoch, ctx);
+            applied += 1;
+          } catch (err) {
+            if (err instanceof RecordConflictError) {
+              conflicts.push({ recordId: rec.recordId, kind: err.kind });
+              return { stage: 'conflict', conflicts, applied, changeSequence: lastCommitted };
+            }
+            return { stage: 'error', conflicts, applied, changeSequence: lastCommitted, reason: `apply failed: ${describe(err)}` };
           }
-          return { stage: 'error', conflicts, applied, changeSequence: after, reason: `apply failed: ${describe(err)}` };
+        }
+        const lastSeq = page.records[page.records.length - 1].changeSequence;
+        try {
+          await this.commitCursor(remoteState.keyEpoch, remoteState.stateVersion, lastSeq);
+          lastCommitted = lastSeq;
+        } catch (err) {
+          return { stage: 'error', conflicts, applied, changeSequence: lastCommitted, reason: `cursor commit failed: ${describe(err)}` };
         }
       }
 
-      // 该页全部成功：推进本地 cursor 到该页最后一条 changeSequence。
-      if (pageLast !== undefined) {
-        after = pageLast;
-        await this.commitCursor(remoteState.keyEpoch, remoteState.stateVersion, pageLast);
+      if (page.nextAfter === undefined) break;
+      if (page.nextAfter === requested) {
+        return { stage: 'error', conflicts, applied, changeSequence: lastCommitted, reason: 'paging stalled' };
       }
-
-      if (!page.nextAfter) break;
-      after = page.nextAfter;
+      cursor = page.nextAfter;
     }
 
-    return { stage: 'ok', conflicts, applied, changeSequence: after };
+    return { stage: 'ok', conflicts, applied, changeSequence: lastCommitted };
   }
 
   private parseState(raw: unknown): RemoteState {
@@ -199,63 +234,76 @@ export class SyncEngine {
     const records: RemoteRecord[] = recordsRaw.map((r) => {
       if (typeof r !== 'object' || r === null) throw new Error('invalid feed record');
       const ro = r as Record<string, unknown>;
+      const recordId = assertRecordId(typeof ro.recordId === 'string' ? ro.recordId : '', 'recordId');
+      const version = assertU64Decimal(String(ro.version), 'version');
+      const changeSequence = assertU64Decimal(String(ro.changeSequence), 'changeSequence', true);
+      const deleteTime = ro.deleteTime == null ? null : String(ro.deleteTime);
+      const nonce = ro.nonce;
+      const ciphertext = ro.ciphertext;
+      const tag = ro.tag;
+      if (deleteTime == null) {
+        if (typeof nonce !== 'string' || nonce === '' ||
+          typeof ciphertext !== 'string' || ciphertext === '' ||
+          typeof tag !== 'string' || tag === '') {
+          throw new Error('active feed record missing nonce/ciphertext/tag');
+        }
+      }
       return {
-        recordId: String(ro.recordId),
-        version: assertU64Decimal(String(ro.version), 'version'),
-        changeSequence: assertU64Decimal(String(ro.changeSequence), 'changeSequence', true),
-        deleteTime: ro.deleteTime == null ? null : String(ro.deleteTime),
-        nonce: typeof ro.nonce === 'string' ? ro.nonce : undefined,
-        ciphertext: typeof ro.ciphertext === 'string' ? ro.ciphertext : undefined,
-        tag: typeof ro.tag === 'string' ? ro.tag : undefined,
+        recordId,
+        version,
+        changeSequence,
+        deleteTime,
+        nonce: typeof nonce === 'string' ? nonce : undefined,
+        ciphertext: typeof ciphertext === 'string' ? ciphertext : undefined,
+        tag: typeof tag === 'string' ? tag : undefined,
       };
     });
-    const nextAfter = typeof o.nextAfter === 'string' ? o.nextAfter : undefined;
-    return { snapshotSequence, nextAfter, records };
+    return { snapshotSequence, nextAfter: typeof o.nextAfter === 'string' ? o.nextAfter : undefined, records };
   }
 
   private async pushMutation(m: PendingMutation): Promise<void> {
-    const seed = this.deps.signSeed();
+    const keyEpoch = this.deps.keyEpoch;
     if (m.action === 'record.put') {
-      await this.deps.client.putRecord({
-        userId: this.deps.userId,
-        keyEpoch: this.deps.stateStore.getSnapshot()!.keyEpoch,
+      await this.deps.client.putRecordSigned({
+        keyEpoch,
         mutationId: m.mutationId,
-        seed,
         recordId: m.recordId,
         baseVersion: m.baseVersion,
+        signature: m.signature,
+        requestDigest: m.requestDigest,
         nonce: m.nonce,
         ciphertext: m.ciphertext,
         tag: m.tag,
       });
     } else {
-      await this.deps.client.deleteRecord({
-        userId: this.deps.userId,
-        keyEpoch: this.deps.stateStore.getSnapshot()!.keyEpoch,
+      await this.deps.client.deleteRecordSigned({
+        keyEpoch,
         mutationId: m.mutationId,
-        seed,
         recordId: m.recordId,
         baseVersion: m.baseVersion,
+        signature: m.signature,
+        requestDigest: m.requestDigest,
       });
     }
   }
 
-  private async applyRemote(rec: RemoteRecord, keyEpoch: string, ctx: Parameters<typeof applyRecord>[1]): Promise<{ disposition: ApplyDisposition }> {
+  private async applyRemote(rec: RemoteRecord, keyEpoch: string, ctx: ApplyContext): Promise<void> {
     if (rec.deleteTime != null) {
-      return applyRecord({ recordId: rec.recordId, version: rec.version, tombstone: true }, ctx);
+      await applyRecord({ recordId: rec.recordId, version: rec.version, tombstone: true }, ctx);
+      return;
     }
     const dek = this.deps.dek();
-    const nonce = rec.nonce ?? '';
-    const ciphertext = rec.ciphertext ?? '';
-    const tag = rec.tag ?? '';
     const plaintext = openRecord(
       dek,
-      Buffer.from(nonce, 'base64url'),
-      Buffer.from(ciphertext, 'base64url'),
-      Buffer.from(tag, 'base64url'),
+      Buffer.from(rec.nonce!, 'base64url'),
+      Buffer.from(rec.ciphertext!, 'base64url'),
+      Buffer.from(rec.tag!, 'base64url'),
       { userId: this.deps.userId, keyEpoch, recordId: rec.recordId, recordVersion: rec.version },
     );
-    const payload = JSON.parse(Buffer.from(plaintext).toString('utf8')) as unknown;
-    return applyRecord({ recordId: rec.recordId, version: rec.version, tombstone: false, payload }, ctx);
+    await applyRecord(
+      { recordId: rec.recordId, version: rec.version, tombstone: false, payload: JSON.parse(Buffer.from(plaintext).toString('utf8')) },
+      ctx,
+    );
   }
 
   private async commitCursor(keyEpoch: string, stateVersion: string, changeSequence: string): Promise<void> {
