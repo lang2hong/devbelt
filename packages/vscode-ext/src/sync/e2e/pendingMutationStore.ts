@@ -7,7 +7,7 @@ import type { MementoLike } from './stateStore';
  * 持久化完整已签名 record mutation，使请求发出后能原样重放（同 mutationId/nonce/
  * ciphertext/digest/signature）。不存明文连接、DEK、SMP 或私钥。键按 userId+keyEpoch
  * 隔离。分判联合：
- *  - `record.put`：必须含 nonce/ciphertext/tag（§7.5 PutRecordRequest）。
+ *  - `record.put`：必须含 nonce/ciphertext/tag（§7.5.1）。
  *  - `record.delete`：禁止 nonce/ciphertext/tag（DeleteRecordRequest 无这些字段）。
  */
 
@@ -47,7 +47,8 @@ function assertBase(recordId: string, connectionId: string, baseVersion: string,
   assertBase64UrlNoPad(requestDigest, 32, 'requestDigest');
 }
 
-function assertPendingMutationShape(m: unknown): asserts m is PendingMutation {
+/** 全量协议校验：形状 + 字段长度/编码。put() 写入与 list() 读取共用同一口径。 */
+function assertMutation(m: unknown): asserts m is PendingMutation {
   if (typeof m !== 'object' || m === null || Array.isArray(m)) {
     throw new Error('corrupt outbox entry: expected object');
   }
@@ -60,12 +61,19 @@ function assertPendingMutationShape(m: unknown): asserts m is PendingMutation {
     typeof o.signature !== 'string' || typeof o.requestDigest !== 'string') {
     throw new Error('corrupt outbox entry: missing base field');
   }
+  assertBase(o.recordId, o.connectionId, o.baseVersion, o.mutationId, o.signature, o.requestDigest);
   if (o.action === 'record.put') {
     if (typeof o.nonce !== 'string' || typeof o.ciphertext !== 'string' || typeof o.tag !== 'string') {
       throw new Error('corrupt outbox entry: put requires nonce/ciphertext/tag');
     }
-  } else if ('nonce' in o || 'ciphertext' in o || 'tag' in o) {
-    throw new Error('corrupt outbox entry: delete must not carry nonce/ciphertext/tag');
+    assertBase64UrlNoPad(o.nonce, 12, 'nonce');
+    assertBase64UrlNoPad(o.tag, 16, 'tag');
+  } else if ('nonce' in o) {
+    throw new Error('corrupt outbox entry: delete must not carry nonce');
+  } else if ('ciphertext' in o) {
+    throw new Error('corrupt outbox entry: delete must not carry ciphertext');
+  } else if ('tag' in o) {
+    throw new Error('corrupt outbox entry: delete must not carry tag');
   }
 }
 
@@ -89,23 +97,12 @@ export class PendingMutationStore {
     const raw = this.memento.get<unknown>(this.key);
     if (raw === undefined) return [];
     if (!Array.isArray(raw)) throw new Error('corrupt outbox: expected array');
-    for (const item of raw) assertPendingMutationShape(item);
+    for (const item of raw) assertMutation(item);
     return raw as PendingMutation[];
   }
 
   async put(m: PendingMutation): Promise<void> {
-    assertBase(m.recordId, m.connectionId, m.baseVersion, m.mutationId, m.signature, m.requestDigest);
-    if (m.action === 'record.put') {
-      assertBase64UrlNoPad(m.nonce, 12, 'nonce');
-      if (typeof m.ciphertext !== 'string') throw new Error('put mutation requires ciphertext');
-      assertBase64UrlNoPad(m.tag, 16, 'tag');
-    } else if (m.action === 'record.delete') {
-      if ('nonce' in m) throw new Error('delete mutation must not carry nonce');
-      if ('ciphertext' in m) throw new Error('delete mutation must not carry ciphertext');
-      if ('tag' in m) throw new Error('delete mutation must not carry tag');
-    } else {
-      throw new Error(`invalid mutation action: ${(m as { action: string }).action}`);
-    }
+    assertMutation(m);
     await this.mutate((list) => [...list, m]);
   }
 

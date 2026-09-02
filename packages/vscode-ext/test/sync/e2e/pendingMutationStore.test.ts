@@ -101,4 +101,38 @@ describe('PendingMutationStore', () => {
     const deleteWithNonce = new PendingMutationStore(makeMemento({ [key]: [{ ...del(), nonce: 'C'.repeat(16) }] }), '7', '1');
     expect(() => deleteWithNonce.list()).toThrowError(/corrupt outbox entry/);
   });
+
+  it('list 对类型合法但协议非法的元素 fail-closed', () => {
+    const key = 'dbclient.sync.outbox.7.1';
+    // recordId 非法 base64url（"!"）
+    const badRecordId = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), recordId: '!' }] }), '7', '1');
+    expect(() => badRecordId.list()).toThrowError(/recordId/);
+
+    // baseVersion 非 u64（"-1"）
+    const badBase = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), baseVersion: '-1' }] }), '7', '1');
+    expect(() => badBase.list()).toThrowError(/baseVersion/);
+
+    // connectionId 组织引用
+    const orgConn = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), connectionId: 'org:x' }] }), '7', '1');
+    expect(() => orgConn.list()).toThrowError(/organization/);
+
+    // mutationId 错误长度
+    const badMutationId = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), mutationId: 'short' }] }), '7', '1');
+    expect(() => badMutationId.list()).toThrowError(/mutationId/);
+
+    // signature 错误长度
+    const badSignature = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), signature: 'short' }] }), '7', '1');
+    expect(() => badSignature.list()).toThrowError(/signature/);
+
+    // requestDigest 错误长度
+    const badDigest = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), requestDigest: 'short' }] }), '7', '1');
+    expect(() => badDigest.list()).toThrowError(/requestDigest/);
+
+    // put 的 nonce/tag 错误长度
+    const badNonce = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), nonce: 'too-short' }] }), '7', '1');
+    expect(() => badNonce.list()).toThrowError(/nonce/);
+
+    const badTag = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), tag: 'too-short' }] }), '7', '1');
+    expect(() => badTag.list()).toThrowError(/tag/);
+  });
 });

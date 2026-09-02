@@ -346,7 +346,7 @@ export const syncDestroyBody = {
   },
 } as const;
 
-/** 三个不可逆确认必须为字面量 true（§7.5）。 */
+/** 三个不可逆确认必须为字面量 true（§7.5.1）。 */
 const confirmTrue = { type: 'boolean' as const, enum: [true] as const };
 
 export const syncResetAfterLossBody = {

@@ -136,4 +136,42 @@ describe.skipIf(!URL)('migration smoke (real MySQL)', () => {
       await pool.end();
     }
   });
+
+  it('re-adds only the missing column when 009 partially applied', async () => {
+    const { host, port, user, password } = parseMysqlUrl(URL!);
+    const pool = mysql.createPool({ host, port, user, password, database: resolveTestDb(), timezone: 'Z' });
+    try {
+      await pool.query('SET FOREIGN_KEY_CHECKS = 0');
+      const [t0] = await pool.query('SHOW TABLES');
+      for (const r of t0 as Array<Record<string, unknown>>) {
+        await pool.query(`DROP TABLE IF EXISTS \`${String(Object.values(r)[0])}\``);
+      }
+      await pool.query('SET FOREIGN_KEY_CHECKS = 1');
+
+      await runMigrations(pool as any, [...migrations]);
+
+      // 部分执行模拟：删掉其中一列，同时移除 009 账本行（含 legacy 别名）让 009 重跑。
+      await pool.query('ALTER TABLE personal_plans DROP COLUMN sync_storage_bytes');
+      await pool.query("DELETE FROM schema_migrations WHERE version IN ('009_personal_sync', '009_personal_sync_v3')");
+
+      await runMigrations(pool as any, [...migrations]);
+
+      // 只补回被删的一列，另一列未被重复添加，且无异常。
+      const [cols] = await pool.query(
+        `SELECT COLUMN_NAME, COUNT(*) AS c FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'personal_plans'
+           AND COLUMN_NAME IN ('max_connection_metas', 'sync_storage_bytes')
+         GROUP BY COLUMN_NAME`,
+      ) as [Array<Record<string, unknown>>, unknown];
+      expect(cols).toHaveLength(2);
+      for (const row of cols) expect(Number(row.c)).toBe(1);
+
+      // 账本回到 9 行且名称为无后缀
+      const [ledger] = (await pool.query('SELECT version FROM schema_migrations')) as [Array<{ version: string }>, unknown];
+      expect(ledger).toHaveLength(9);
+      expect(ledger.every((r) => !r.version.endsWith('_v3'))).toBe(true);
+    } finally {
+      await pool.end();
+    }
+  });
 });
