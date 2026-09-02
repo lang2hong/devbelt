@@ -13,14 +13,14 @@ function put(over: Partial<PendingPutMutation> = {}): PendingPutMutation {
   return {
     action: 'record.put', recordId: 'A'.repeat(22), connectionId: 'c-1', baseVersion: '0',
     mutationId: 'B'.repeat(22), nonce: 'C'.repeat(16), ciphertext: 'YQ', tag: 'D'.repeat(22),
-    signature: 'E'.repeat(86), requestDigest: 'F'.repeat(43), ...over,
+    signature: 'E'.repeat(86), requestDigest: 'F'.repeat(43), revision: 0, consecutiveFailureCount: 0, ...over,
   };
 }
 
 function del(over: Partial<PendingDeleteMutation> = {}): PendingDeleteMutation {
   return {
     action: 'record.delete', recordId: 'A'.repeat(22), connectionId: 'c-1', baseVersion: '3',
-    mutationId: 'B'.repeat(22), signature: 'E'.repeat(86), requestDigest: 'F'.repeat(43), ...over,
+    mutationId: 'B'.repeat(22), signature: 'E'.repeat(86), requestDigest: 'F'.repeat(43), revision: 0, consecutiveFailureCount: 0, ...over,
   };
 }
 

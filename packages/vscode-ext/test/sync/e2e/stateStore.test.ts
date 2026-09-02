@@ -38,6 +38,19 @@ describe('StateStore', () => {
     await expect(s.setSnapshot({ keyEpoch: '1', stateVersion: '2', changeSequence: '5' })).resolves.toBeUndefined();
   });
 
+  it('同 keyEpoch stateVersion 回退拒绝', async () => {
+    const s = new StateStore(makeMemento(), '7');
+    await s.setSnapshot({ keyEpoch: '1', stateVersion: '5', changeSequence: '5' });
+    await expect(s.setSnapshot({ keyEpoch: '1', stateVersion: '4', changeSequence: '6' })).rejects.toThrowError(/stateVersion/);
+  });
+
+  it('跨 epoch 允许 stateVersion 重置', async () => {
+    const s = new StateStore(makeMemento(), '7');
+    await s.setSnapshot({ keyEpoch: '1', stateVersion: '5', changeSequence: '5' });
+    await expect(s.setSnapshot({ keyEpoch: '2', stateVersion: '1', changeSequence: '6' })).resolves.toBeUndefined();
+    expect(s.getSnapshot()).toEqual({ keyEpoch: '2', stateVersion: '1', changeSequence: '6' });
+  });
+
   it('传播持久化失败', async () => {
     const s = new StateStore({
       get: () => undefined,

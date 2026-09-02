@@ -5,8 +5,9 @@ import { assertU64Decimal } from './types';
  *
  * 仅持久化服务端确认的 keyEpoch / stateVersion / changeSequence，供乐观锁与签名。
  * `changeSequence` 是用户级全局单调游标：客户端**只能**持久化服务端返回值，不得
- * 本地递增或推测。`setSnapshot` 单调防旧响应回退（changeSequence / keyEpoch 不得
- * 回退）。键按 userId 隔离；userId 必须先通过规范正 u64 校验。
+ * 本地递增或推测。`setSnapshot` 分段单调防旧响应回退：changeSequence 全局不回退、
+ * keyEpoch 不回退；stateVersion 仅同一 keyEpoch 内不回退（跨 epoch 允许重置）。键按
+ * userId 隔离；userId 必须先通过规范正 u64 校验。
  */
 
 export interface SyncStateSnapshot {
@@ -52,11 +53,16 @@ export class StateStore {
 
     const prev = this.getSnapshot();
     if (prev) {
+      // 分段单调（§7.1）：changeSequence 全局不回退；keyEpoch 不回退；
+      // stateVersion 仅同一 keyEpoch 内不回退，跨 epoch 允许重置（如 5 → 1）。
       if (BigInt(changeSequence) < BigInt(prev.changeSequence)) {
         throw new Error('changeSequence must not regress');
       }
       if (BigInt(keyEpoch) < BigInt(prev.keyEpoch)) {
         throw new Error('keyEpoch must not regress');
+      }
+      if (BigInt(keyEpoch) === BigInt(prev.keyEpoch) && BigInt(stateVersion) < BigInt(prev.stateVersion)) {
+        throw new Error('stateVersion must not regress within the same keyEpoch');
       }
     }
 

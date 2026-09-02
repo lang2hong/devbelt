@@ -32,6 +32,8 @@ export class SyncApiError extends Error {
   constructor(
     public readonly status: number,
     public readonly code?: string,
+    public readonly currentVersion?: string,
+    public readonly currentKeyEpoch?: string,
     message?: string,
   ) {
     super(message || `sync API error ${status}${code ? ` [${code}]` : ''}`);
@@ -293,7 +295,7 @@ export class PersonalSyncClient {
   private async call(method: string, path: string, body?: unknown, opts?: { retry?: boolean }): Promise<unknown> {
     const res = await this.http.requestRaw(method, path, body, opts);
     if (res.status >= 200 && res.status < 300) return res.body;
-    const b = (res.body ?? {}) as { code?: string; message?: string };
-    throw new SyncApiError(res.status, b.code, b.message);
+    const b = (res.body ?? {}) as { code?: string; message?: string; currentVersion?: string; currentKeyEpoch?: string };
+    throw new SyncApiError(res.status, b.code, b.currentVersion, b.currentKeyEpoch, b.message);
   }
 }

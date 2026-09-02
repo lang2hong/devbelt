@@ -33,17 +33,25 @@ export type SyncRunStage = 'ok' | 'epoch-mismatch' | 'conflict' | 'error' | 'ter
 export interface SyncConflictEntry {
   recordId: string;
   kind: 'version' | 'pending';
+  code?: string;
+  currentVersion?: string;
 }
 
 export interface SyncTerminalEntry {
   mutationId: string;
   code?: string;
+  currentKeyEpoch?: string;
+}
+
+export interface SyncStalledEntry {
+  mutationId: string;
 }
 
 export interface SyncRunResult {
   stage: SyncRunStage;
   conflicts: SyncConflictEntry[];
   terminal?: SyncTerminalEntry;
+  stalled?: SyncStalledEntry;
   applied: number;
   changeSequence?: string;
   reason?: string; // 不含秘密
@@ -72,7 +80,30 @@ interface PullPage {
 }
 
 const MAX_PAGES = 1000;
-const TERMINAL_CODES = new Set(['CONFLICT', 'SYNC_PROTOCOL_UNSUPPORTED', 'SYNC_SIGNATURE_INVALID', 'SYNC_EPOCH_STALE', 'VALIDATION_FAILED']);
+const STALL_THRESHOLD = 5;
+
+type ErrorClass = 'terminal' | 'terminal-state' | 'terminal-epoch' | 'conflict' | 'retryable';
+
+/** §7.4 重放与错误处置分类表。 */
+function classifyError(e: SyncApiError): ErrorClass {
+  switch (e.code) {
+    case 'SYNC_PROTOCOL_UNSUPPORTED':
+    case 'SYNC_SIGNATURE_INVALID':
+    case 'VALIDATION_FAILED':
+    case 'SYNC_NONCE_REUSED':
+    case 'SYNC_QUOTA_EXCEEDED':
+    case 'CONFLICT':
+      return 'terminal';
+    case 'SYNC_EPOCH_STALE':
+      return 'terminal-epoch';
+    case 'SYNC_NOT_INITIALIZED':
+      return 'terminal-state';
+    case 'SYNC_VERSION_CONFLICT':
+      return 'conflict';
+    default:
+      return 'retryable';
+  }
+}
 
 export interface SyncEngineDeps {
   userId: string;
@@ -165,17 +196,50 @@ export class SyncEngine {
     }
 
     // 2. outbox 重放：逐条直发已签名 mutation（逐字复用 signature/requestDigest，不重签）。
+    // 成功 → 先确认 recordMap → 再删条目；确认失败保留条目原样重放（幂等 receipt 收敛）。
+    let stalled: SyncStalledEntry | undefined;
     for (const m of this.deps.outbox.list()) {
+      let receipt: unknown;
       try {
-        await this.pushMutation(m);
-        await this.deps.outbox.delete(m.mutationId);
+        receipt = await this.pushMutation(m);
       } catch (err) {
-        if (err instanceof SyncApiError && TERMINAL_CODES.has(err.code ?? '')) {
-          return { stage: 'terminal', conflicts: [], applied: 0, terminal: { mutationId: m.mutationId, code: err.code } };
+        if (err instanceof SyncApiError) {
+          const cls = classifyError(err);
+          if (cls === 'terminal' || cls === 'terminal-state' || cls === 'terminal-epoch') {
+            return {
+              stage: 'terminal', conflicts: [], applied: 0,
+              terminal: { mutationId: m.mutationId, code: err.code, currentKeyEpoch: err.currentKeyEpoch },
+              reason: cls === 'terminal-state'
+                ? 'outbox mutation requires init / epoch handling'
+                : cls === 'terminal-epoch' ? 'outbox mutation epoch stale' : undefined,
+            };
+          }
+          if (cls === 'conflict') {
+            return {
+              stage: 'conflict',
+              conflicts: [{ recordId: m.recordId, kind: 'version', code: err.code, currentVersion: err.currentVersion }],
+              applied: 0,
+              reason: 'outbox mutation version conflict',
+            };
+          }
+          // 可重试 error：递增连续失败计数；1–4 中止本轮，≥5 保留条目、附 stalled、允许继续 pull。
+          const nextCount = m.consecutiveFailureCount + 1;
+          await this.deps.outbox.setFailureCount(m.mutationId, nextCount);
+          if (nextCount >= STALL_THRESHOLD) {
+            stalled = { mutationId: m.mutationId };
+            break;
+          }
+          return { stage: 'error', conflicts: [], applied: 0, reason: `push failed: ${describe(err)}` };
         }
-        // 网络/5xx/其它 4xx（401/429）：保留 outbox 原样，本轮中止，下轮重演。
         return { stage: 'error', conflicts: [], applied: 0, reason: `push failed: ${describe(err)}` };
       }
+
+      try {
+        await this.confirmOutbound(m, receipt);
+      } catch (err) {
+        return { stage: 'error', conflicts: [], applied: 0, reason: `confirm failed: ${describe(err)}` };
+      }
+      await this.deps.outbox.delete(m.mutationId);
     }
 
     // 3. 分页 feed + 解密 + 应用 + 逐页 cursor
@@ -194,17 +258,17 @@ export class SyncEngine {
 
     for (let pages = 0; ; pages++) {
       if (pages >= MAX_PAGES) {
-        return { stage: 'error', conflicts, applied, changeSequence: lastCommitted, reason: 'paging exceeded limit' };
+        return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: 'paging exceeded limit' };
       }
       const requested = cursor;
       let page: PullPage;
       try {
         page = this.parsePage(await this.deps.client.getRecords(requested, remoteSnap, limit));
       } catch (err) {
-        return { stage: 'error', conflicts, applied, changeSequence: lastCommitted, reason: `pull failed: ${describe(err)}` };
+        return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `pull failed: ${describe(err)}` };
       }
       if (page.snapshotSequence !== remoteSnap) {
-        return { stage: 'error', conflicts, applied, changeSequence: lastCommitted, reason: 'snapshotSequence drift' };
+        return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: 'snapshotSequence drift' };
       }
 
       if (page.records.length > 0) {
@@ -215,9 +279,9 @@ export class SyncEngine {
           } catch (err) {
             if (err instanceof RecordConflictError) {
               conflicts.push({ recordId: rec.recordId, kind: err.kind });
-              return { stage: 'conflict', conflicts, applied, changeSequence: lastCommitted };
+              return { stage: 'conflict', conflicts, stalled, applied, changeSequence: lastCommitted };
             }
-            return { stage: 'error', conflicts, applied, changeSequence: lastCommitted, reason: `apply failed: ${describe(err)}` };
+            return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `apply failed: ${describe(err)}` };
           }
         }
         const lastSeq = page.records[page.records.length - 1].changeSequence;
@@ -225,7 +289,7 @@ export class SyncEngine {
           await this.commitCursor(remoteState.keyEpoch, remoteState.stateVersion, lastSeq);
           lastCommitted = lastSeq;
         } catch (err) {
-          return { stage: 'error', conflicts, applied, changeSequence: lastCommitted, reason: `cursor commit failed: ${describe(err)}` };
+          return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `cursor commit failed: ${describe(err)}` };
         }
       }
 
@@ -234,18 +298,18 @@ export class SyncEngine {
       try {
         nextAfter = assertU64Decimal(page.nextAfter, 'nextAfter', true);
       } catch (err) {
-        return { stage: 'error', conflicts, applied, changeSequence: lastCommitted, reason: `invalid nextAfter: ${describe(err)}` };
+        return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `invalid nextAfter: ${describe(err)}` };
       }
       if (BigInt(nextAfter) <= BigInt(requested)) {
-        return { stage: 'error', conflicts, applied, changeSequence: lastCommitted, reason: 'paging stalled' };
+        return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: 'paging stalled' };
       }
       if (BigInt(nextAfter) > BigInt(remoteSnap)) {
-        return { stage: 'error', conflicts, applied, changeSequence: lastCommitted, reason: 'nextAfter exceeds snapshotSequence' };
+        return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: 'nextAfter exceeds snapshotSequence' };
       }
       cursor = nextAfter;
     }
 
-    return { stage: 'ok', conflicts, applied, changeSequence: lastCommitted };
+    return { stage: 'ok', conflicts, stalled, applied, changeSequence: lastCommitted };
   }
 
   private parseState(raw: unknown): RemoteState {
@@ -293,10 +357,10 @@ export class SyncEngine {
     return { snapshotSequence, nextAfter: typeof o.nextAfter === 'string' ? o.nextAfter : undefined, records };
   }
 
-  private async pushMutation(m: PendingMutation): Promise<void> {
+  private async pushMutation(m: PendingMutation): Promise<unknown> {
     const keyEpoch = this.deps.keyEpoch;
     if (m.action === 'record.put') {
-      await this.deps.client.putRecordSigned({
+      return this.deps.client.putRecordSigned({
         keyEpoch,
         mutationId: m.mutationId,
         recordId: m.recordId,
@@ -307,16 +371,37 @@ export class SyncEngine {
         ciphertext: m.ciphertext,
         tag: m.tag,
       });
-    } else {
-      await this.deps.client.deleteRecordSigned({
-        keyEpoch,
-        mutationId: m.mutationId,
-        recordId: m.recordId,
-        baseVersion: m.baseVersion,
-        signature: m.signature,
-        requestDigest: m.requestDigest,
-      });
     }
+    return this.deps.client.deleteRecordSigned({
+      keyEpoch,
+      mutationId: m.mutationId,
+      recordId: m.recordId,
+      baseVersion: m.baseVersion,
+      signature: m.signature,
+      requestDigest: m.requestDigest,
+    });
+  }
+
+  /** 出站「确认」：成功先回写 recordMap，再（调用方）删 outbox；与入站 applyRecord confirm 对称。 */
+  private async confirmOutbound(m: PendingMutation, receipt: unknown): Promise<void> {
+    if (m.action === 'record.put') {
+      const version = this.parseReceiptVersion(receipt);
+      await this.deps.mapStore.put(m.recordId, {
+        connectionId: m.connectionId,
+        recordVersion: version,
+        revision: m.revision,
+        status: 'confirmed',
+      });
+    } else {
+      await this.deps.mapStore.deleteByConnectionId(m.connectionId);
+    }
+  }
+
+  private parseReceiptVersion(receipt: unknown): string {
+    if (typeof receipt !== 'object' || receipt === null) throw new Error('invalid record receipt');
+    const o = receipt as Record<string, unknown>;
+    if (typeof o.version !== 'string') throw new Error('record receipt missing version');
+    return assertU64Decimal(o.version, 'receipt.version');
   }
 
   private async applyRemote(rec: RemoteRecord, keyEpoch: string, ctx: ApplyContext): Promise<void> {

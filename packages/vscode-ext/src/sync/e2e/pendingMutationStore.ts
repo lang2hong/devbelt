@@ -18,6 +18,10 @@ interface PendingBase {
   mutationId: string;
   signature: string;
   requestDigest: string;
+  /** 加密 payload 对应时刻的本地连接 revision（updateTime 毫秒），receipt 确认用。 */
+  revision: number;
+  /** 连续可重试失败轮次（仅 error 递增，成功/terminal/conflict 清终止）。 */
+  consecutiveFailureCount: number;
 }
 
 export interface PendingPutMutation extends PendingBase {
@@ -62,6 +66,12 @@ function assertMutation(m: unknown): asserts m is PendingMutation {
     throw new Error('corrupt outbox entry: missing base field');
   }
   assertBase(o.recordId, o.connectionId, o.baseVersion, o.mutationId, o.signature, o.requestDigest);
+  if (typeof o.revision !== 'number' || !Number.isSafeInteger(o.revision) || o.revision < 0) {
+    throw new Error('corrupt outbox entry: invalid revision');
+  }
+  if (typeof o.consecutiveFailureCount !== 'number' || !Number.isSafeInteger(o.consecutiveFailureCount) || o.consecutiveFailureCount < 0) {
+    throw new Error('corrupt outbox entry: invalid consecutiveFailureCount');
+  }
   if (o.action === 'record.put') {
     if (typeof o.nonce !== 'string' || typeof o.ciphertext !== 'string' || typeof o.tag !== 'string') {
       throw new Error('corrupt outbox entry: put requires nonce/ciphertext/tag');
@@ -107,11 +117,22 @@ export class PendingMutationStore {
 
   async put(m: PendingMutation): Promise<void> {
     assertMutation(m);
-    await this.mutate((list) => [...list, m]);
+    await this.mutate((list) => {
+      if (list.some((x) => x.mutationId === m.mutationId)) {
+        throw new Error(`outbox already contains mutationId ${m.mutationId}`);
+      }
+      return [...list, m];
+    });
   }
 
   async delete(mutationId: string): Promise<void> {
     await this.mutate((list) => list.filter((m) => m.mutationId !== mutationId));
+  }
+
+  /** 仅更新 consecutiveFailureCount，签名/digest/nonce/ciphertext 等逐字段原样。 */
+  async setFailureCount(mutationId: string, count: number): Promise<void> {
+    if (!Number.isSafeInteger(count) || count < 0) throw new Error('consecutiveFailureCount must be a non-negative safe integer');
+    await this.mutate((list) => list.map((m) => (m.mutationId === mutationId ? { ...m, consecutiveFailureCount: count } : m)));
   }
 
   async clear(): Promise<void> {

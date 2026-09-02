@@ -50,6 +50,18 @@ describe('applyRecord', () => {
     expect(store.all()).toHaveLength(1);
   });
 
+  it('outbound 确认后的回声 record（confirmed + 同 version）→ skipped，不重复建连接、映射不变', async () => {
+    const existing: SavedConnection = { id: 'c-1', name: 'n', dbType: 'MYSQL' as any, host: 'h', port: 3306, user: 'u', updateTime: 100 } as SavedConnection;
+    const { store, mapStore, uniqueConnectionId } = setup([existing]);
+    const id = 'A'.repeat(22);
+    await mapStore.put(id, { connectionId: 'c-1', recordVersion: '1', revision: 100, status: 'confirmed' });
+    const before = mapStore.getByRecordId(id);
+    expect(await applyRecord({ recordId: id, version: '1', tombstone: false, payload }, { store: store as any, mapStore, uniqueConnectionId })).toMatchObject({ disposition: 'skipped' });
+    expect(store.save).not.toHaveBeenCalled();
+    expect(store.all()).toHaveLength(1);
+    expect(mapStore.getByRecordId(id)).toEqual(before);
+  });
+
   it('更高 version 干净更新，连接数不变', async () => {
     const { store, mapStore, uniqueConnectionId } = setup();
     const id = 'A'.repeat(22);

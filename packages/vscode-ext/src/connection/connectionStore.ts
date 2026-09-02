@@ -177,6 +177,18 @@ export class ConnectionStore {
     return this.getTreeData().connections.filter((c) => !c.deleted).map((connection) => this.materialize(connection));
   }
 
+  /**
+   * 同步专用读取：materialize 后的可见连接（含凭据）+ 软删除墓碑（`deleted=true`，凭据
+   * 已被 `remove` 清除故不含凭据），供全量对账识别 delete。组织连接（`org:`）由同步扫描
+   * 层用 `isOrganizationConnectionId` 显式跳过，不在本方法内过滤。
+   */
+  listForSync(): SavedConnection[] {
+    return this.getTreeData().connections.map((c) => {
+      if (c.deleted) return { ...c, deleted: true };
+      return this.materialize(c);
+    });
+  }
+
   /** 按 id 查找连接（跳过软删除），未找到返回 undefined */
   get(id: string): SavedConnection | undefined {
     const connection = this.getTreeData().connections.find((c) => c.id === id && !c.deleted);
