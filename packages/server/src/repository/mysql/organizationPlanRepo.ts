@@ -3,7 +3,7 @@ import type { OrganizationPlan } from '../../domain/entities.js';
 import type { OrganizationPlanStatus } from '../../domain/enums.js';
 import type { MysqlDb, Queryable } from './db.js';
 
-/** 组织套餐仓储（Phase 1 只读，seed 由 migration 005 完成）。 */
+/** 组织套餐仓储。当前只读，seed 由 migration 005 完成。 */
 export class MysqlOrganizationPlanRepo implements IOrganizationPlanRepo {
   constructor(private readonly db: () => MysqlDb) {}
 

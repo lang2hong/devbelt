@@ -18,8 +18,8 @@ import {
 import { incU64, parseU64 } from '../domain/syncU64.js';
 import { SYNC_DOMAIN, assertU64, assertEpoch, verifySignature, checkReceipt, recordReceipt } from './syncShared.js';
 
-const MAX_RECORD_CIPHERTEXT_BYTES = 256 * 1024; // 256 KiB（§8.1.7）
-const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;       // 2 MiB（§8.1.9）
+const MAX_RECORD_CIPHERTEXT_BYTES = 256 * 1024; // 256 KiB（§7.5）
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;       // 2 MiB（§7.5 feed 分页上限）
 
 interface SignedRecordMutation {
   keyEpoch: string;
@@ -163,7 +163,7 @@ export class SyncRecordService {
         baseVersion: input.baseVersion, recordId: input.recordId, mutationId: input.mutationId, requestDigest: input.requestDigest,
       }, input.signature);
 
-      // nonce ledger：复用即时拒绝（§8.1.5）。
+      // nonce ledger：复用即时拒绝（§7.4）。
       if (!(await this.nonceRepo.insert(tx, userId, input.keyEpoch, input.nonce))) throw new SyncNonceReusedError();
 
       const create = input.baseVersion === '0';

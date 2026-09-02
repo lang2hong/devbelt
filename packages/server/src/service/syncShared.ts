@@ -41,7 +41,7 @@ export async function checkReceipt(
   const digest = decodeB64Url(requestDigest, 32, 'requestDigest');
   const existing = await mutationRepo.findByMutationId(tx, userId, keyEpoch, mid);
   if (!existing) return undefined;
-  // 24h 仅为保留期；过期即按无 receipt 走正常 epoch/签名/版本校验（§8.1.8）。
+  // 24h 仅为保留期；过期即按无 receipt 走正常 epoch/签名/版本校验（§7.4）。
   if (existing.expiresTime <= new Date()) return undefined;
   if (existing.requestDigest.equals(digest)) {
     return { resultVersion: existing.resultVersion, resultChangeSequence: existing.resultChangeSequence };

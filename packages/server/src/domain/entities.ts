@@ -18,14 +18,14 @@ import type {
 } from './enums.js';
 
 /**
- * V3 Phase 1 领域实体（身份与会话切片）。
+ * 领域实体。
  *
  * 约定：所有主键 `BIGINT UNSIGNED`，DB 列 snake_case，HTTP DTO camelCase。
  * 实体内部 id 用 number（mysql2 默认返回，实际值恒 < 2^53）；DTO 序列化在
- * route 层统一转十进制 string（实施规格 §2.1）。
+ * route 层统一转十进制 string（实施规格 §2）。
  */
 
-/** 用户（全局身份）。个人空间所有者；组织成员关系属后续切片。 */
+/** 用户（全局身份和个人空间所有者）。 */
 export interface User {
   id: number;
   email: string;
@@ -51,7 +51,7 @@ export interface EmailVerificationToken {
   updateTime: Date;
 }
 
-/** 个人套餐定义。Phase 1 只 seed free。 */
+/** 个人套餐定义。当前只 seed free。 */
 export interface PersonalPlan {
   id: number;
   code: string;
@@ -60,9 +60,9 @@ export interface PersonalPlan {
   allowedDatabaseTypes: string[];
   /** 设备数上限；0 = 无限 */
   maxDevices: number;
-  /** 云端同步连接元数据条数；0 = 无限（§8.1.6） */
+  /** 云端同步连接元数据条数；0 = 无限（§4.2） */
   maxConnectionMetas: number;
-  /** 云端同步密文总字节配额；0 = 无限（§8.1.6） */
+  /** 云端同步密文总字节配额；0 = 无限（§4.2） */
   syncStorageBytes: number;
   status: PersonalPlanStatus;
   createTime: Date;
@@ -123,7 +123,7 @@ export interface DeviceInfoDto {
   createTime: Date;
 }
 
-// ── 组织域（切片 2）──
+// ── 组织域 ──
 
 /** 组织（协作空间）。无 Owner 字段；创建组织的用户成为首位 active admin。 */
 export interface Organization {
@@ -135,7 +135,7 @@ export interface Organization {
   updateTime: Date;
 }
 
-/** 组织套餐定义（Phase 1 只 seed organization_free）。 */
+/** 组织套餐定义。当前只 seed organization_free。 */
 export interface OrganizationPlan {
   id: number;
   code: string;
@@ -177,7 +177,7 @@ export interface OrganizationMembership {
   updateTime: Date;
 }
 
-/** 组织邀请（切片 3）。token_hash 只存 SHA-256，有效期 7 天，单次消费。 */
+/** 组织邀请。token_hash 只存 SHA-256，有效期 7 天，单次消费。 */
 export interface OrganizationInvitation {
   id: number;
   organizationId: number;
@@ -191,7 +191,7 @@ export interface OrganizationInvitation {
   updateTime: Date;
 }
 
-// ── 组织资源（切片 4）──
+// ── 组织资源 ──
 
 /** 组织目录。无作者字段；软删除置 delete_time。 */
 export interface Folder {
@@ -220,9 +220,9 @@ export interface Resource {
   updateTime: Date;
 }
 
-// ── 个人 E2E 同步（§8.1 专项）──
+// ── 个人端到端同步 ──
 
-/** SMP 派生 KDF（仅 Argon2id；salt 16B、output 32B，§8.1.2）。 */
+/** SMP 派生 KDF（仅 Argon2id；salt 16B、output 32B，§7.1）。 */
 export interface SmpKdf {
   alg: 'argon2id';
   version: 1;
@@ -233,7 +233,7 @@ export interface SmpKdf {
   outputBytes: 32;
 }
 
-/** 恢复码派生 KDF（仅 HKDF-SHA-256；§8.1.2）。 */
+/** 恢复码派生 KDF（仅 HKDF-SHA-256；§7.1）。 */
 export interface RecoveryKdf {
   alg: 'hkdf-sha256';
   version: 1;
@@ -249,7 +249,7 @@ export interface SyncEnvelope {
   tag: Buffer;
 }
 
-/** 个人同步状态（每用户严格单行，§8.1.5）。u64 协议字段一律十进制字符串。 */
+/** 个人同步状态（每用户严格单行，§7.3）。u64 协议字段一律十进制字符串。 */
 export interface PersonalSyncState {
   userId: number;
   keyEpoch: string;

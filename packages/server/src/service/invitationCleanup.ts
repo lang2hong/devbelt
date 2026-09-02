@@ -1,10 +1,10 @@
 export interface InvitationCleanupOptions {
-  /** 清理周期（毫秒）。默认 15 分钟（§4.3）。 */
+  /** 清理周期（毫秒）。默认 15 分钟。 */
   intervalMs?: number;
 }
 
 /**
- * 受控邀请过期清理任务（实施规格 §4.3/§4.7：过期邀请由受控清理任务释放容量，
+ * 受控邀请过期清理任务（实施规格 §3/§6.2：过期邀请由受控清理任务释放容量，
  * 不依赖成员再次操作）。
  *
  * 过期处理的事务协调在 OrganizationService.expireInvitations()（按组织维度锁

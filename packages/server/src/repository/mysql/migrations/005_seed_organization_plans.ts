@@ -10,12 +10,10 @@ const ORGANIZATION_FREE_SEED = {
 } as const;
 
 /**
- * seed organization_free 套餐（切片 2，§4.2）。
- * version 字符串保持 `005_seed_organization_plans_v3` 不变——schema_migrations
- * 按 version 记录，改名会导致已应用库重跑 seed。
+ * Seed organization_free 套餐。
  */
-export const seedOrganizationPlansV3: Migration = {
-  version: '005_seed_organization_plans_v3',
+export const seedOrganizationPlansMigration: Migration = {
+  version: '005_seed_organization_plans',
   async up(db): Promise<void> {
     await db.query(`SET time_zone = '+00:00'`);
     await db.query(

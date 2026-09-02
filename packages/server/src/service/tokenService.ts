@@ -10,7 +10,7 @@ export type { SigningKeys };
  * Access token 载荷（签发后经 Ed25519 签名，客户端不可读改）。
  * - `sub`：用户 id（十进制字符串）
  * - `iat` / `exp`：签发 / 过期（jose 自动填）
- * - `jti`：随机 token ID（实施规格 §4.5）
+ * - `jti`：随机 token ID（实施规格 §5.1）
  * - header `kid`：签名 key id，验证时据此选公钥（轮换支持）
  */
 export interface AccessTokenPayload {
@@ -21,7 +21,7 @@ export interface AccessTokenPayload {
 }
 
 /**
- * Token 服务（V3：Ed25519 access token + 随机 refresh token）。
+ * Token 服务：Ed25519 access token + 随机 refresh token。
  *
  * - access token：Ed25519 JWT，15 分钟，Authorization: Bearer 传输，绝不写 URL/日志。
  * - refresh token：>=256 bits 熵（32 bytes），DB 只存 SHA-256 hash。

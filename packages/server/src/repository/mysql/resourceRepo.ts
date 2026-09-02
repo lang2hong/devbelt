@@ -4,10 +4,10 @@ import type { ResourceType } from '../../domain/enums.js';
 import type { MysqlDb, Queryable } from './db.js';
 
 /**
- * 组织资源仓储（切片 4）。表名 `organization_resources`（§4.1）。
+ * 组织资源仓储。表名 `organization_resources`。
  *
  * content 列是 JSON（mysql2 以字符串返回，读写时 JSON.parse / JSON.stringify）。
- * 字节配额不在 SQL 内 `SUM(LENGTH(content))`（§4.2 要求 canonical JSON 逐字节精确），
+ * 字节配额不在 SQL 内 `SUM(LENGTH(content))`（§6.2 要求 canonical JSON 逐字节精确），
  * 而是锁内读回 content 由服务层 `canonicalJson()` 求和 —— 见 listActiveContent。
  */
 export class MysqlResourceRepo implements IResourceRepo {

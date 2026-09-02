@@ -11,7 +11,7 @@ function unjson<T>(v: T): T {
 }
 
 describe.skipIf(!URL)('migration smoke (real MySQL)', () => {
-  it('creates V3 tables and seeds the personal free plan', async () => {
+  it('creates tables and seeds the personal free plan', async () => {
     const { host, port, user, password } = parseMysqlUrl(URL!);
     const pool = mysql.createPool({ host, port, user, password, database: resolveTestDb(), timezone: 'Z' });
     try {
@@ -49,7 +49,7 @@ describe.skipIf(!URL)('migration smoke (real MySQL)', () => {
     }
   });
 
-  it('backfills existing Phase 1 subscription snapshots when applying 009', async () => {
+  it('backfills existing subscription snapshots when applying 009', async () => {
     const { host, port, user, password } = parseMysqlUrl(URL!);
     const pool = mysql.createPool({ host, port, user, password, database: resolveTestDb(), timezone: 'Z' });
     try {

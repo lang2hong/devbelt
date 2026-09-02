@@ -4,7 +4,7 @@ import type { OrganizationRole } from '../../domain/enums.js';
 import type { MysqlDb, Queryable } from './db.js';
 
 /**
- * 组织邀请仓储（切片 3）。
+ * 组织邀请仓储。
  *
  * 写方法在事务 `exec` 内执行。过期清理由 OrganizationService 按组织维度协调
  * （锁组织 + 订阅后调用 `expireByOrganization`），本仓储不自行发起事务。

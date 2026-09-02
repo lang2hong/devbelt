@@ -7,7 +7,7 @@ import type {
 import type { MysqlDb, Queryable } from './db.js';
 
 // u64 协议字段（key_epoch/state_version/change_sequence/envelope versions）在 SQL 层
-// CAST AS CHAR 返回十进制字符串，避免 mysql2 默认 number 的 2^53 精度丢失（§8.1.7/8）。
+// CAST AS CHAR 返回十进制字符串，避免 mysql2 默认 number 的 2^53 精度丢失（§7.1）。
 const SELECT_COLS = `
   user_id,
   CAST(key_epoch AS CHAR) AS key_epoch,

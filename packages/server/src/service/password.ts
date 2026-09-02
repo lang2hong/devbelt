@@ -4,7 +4,7 @@ import { randomBytes, timingSafeEqual } from 'crypto';
 /**
  * 密码哈希（Argon2id，纯 JS @noble/hashes）。
  *
- * 参数固定（实施规格 §4.5）：memory 65536 KiB、iterations 3、parallelism 1、
+ * 参数固定（实施规格 §5.1）：memory 65536 KiB、iterations 3、parallelism 1、
  * salt 16 bytes、output 32 bytes。每个 hash 自描述算法与参数，格式：
  *
  *   `argon2id$m=65536,t=3,p=1$<salt base64>$<hash base64>`

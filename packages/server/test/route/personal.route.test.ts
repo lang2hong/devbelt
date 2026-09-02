@@ -36,7 +36,7 @@ describe('personal routes smoke', () => {
     await t.close();
   });
 
-  it('reports the V3 entitlement shape when a Free subscription exists', async () => {
+  it('reports the entitlement shape when a Free subscription exists', async () => {
     const t = await buildTestApp();
     const { id, token } = await makeUser(t, 'ent@b.com');
     const plan = await t.repos.personalPlanRepo.findByCode('free');

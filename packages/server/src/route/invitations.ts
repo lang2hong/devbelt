@@ -12,7 +12,7 @@ export interface InvitationRouteOptions {
 }
 
 /**
- * 邀请接受路由（§5）：`POST /api/organization-invitations/:token/accept`。
+ * 邀请接受路由（§6.4）：`POST /api/organization-invitations/:token/accept`。
  *
  * 只需认证（authScope），组织作用域由邀请 token 反查 —— 这个路由的 URL 里没有
  * `:organizationId`，授权不能走 organizationAuth。

@@ -3,7 +3,7 @@ import type { User } from '../../domain/entities.js';
 import type { UserStatus } from '../../domain/enums.js';
 import type { MysqlDb, Queryable } from './db.js';
 
-/** 用户仓储（V3：无 role / plan_code / delete_time，邮箱验证由 email_verified_time 表达）。 */
+/** 用户仓储。邮箱验证由 email_verified_time 表达。 */
 export class MysqlUserRepo implements IUserRepo {
   constructor(private readonly db: () => MysqlDb) {}
 

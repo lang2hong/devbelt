@@ -31,7 +31,7 @@ export interface SyncRouteOptions {
   syncReset: SyncResetService;
 }
 
-/** 协议/cipher/format 值域由服务层判定（§8.1.11：不在支持集 → 400 SYNC_PROTOCOL_UNSUPPORTED）。 */
+/** 协议/cipher/format 值域由服务层判定（§8：不在支持集 → 400 SYNC_PROTOCOL_UNSUPPORTED）。 */
 function assertProtocolV1(protocolVersion: unknown): void {
   if (protocolVersion !== 1) throw new SyncProtocolUnsupportedError();
 }
@@ -77,14 +77,14 @@ function decodeNewState(ns: any): SyncNewState {
   };
 }
 
-/** requestDigest = SHA-256(JCS(body 除 signature))，见 §8.1.8。 */
+/** requestDigest = SHA-256(JCS(body 除 signature))，见 §7.4。 */
 function digestOf(body: Record<string, unknown>): string {
   const withoutSig: Record<string, unknown> = { ...body };
   delete withoutSig.signature;
   return requestDigestOf(withoutSig);
 }
 
-/** 个人 E2E 同步状态侧路由（§8.1.7：GET state / PUT init / POST change-key·recover·destroy）。 */
+/** 个人 E2E 同步状态侧路由（§7.5：GET state / PUT init / POST change-key·recover·destroy）。 */
 export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): Promise<void> {
   app.register(authScope, {
     tokenService: opts.tokenService,

@@ -3,7 +3,7 @@ import type { PersonalSubscription } from '../../domain/entities.js';
 import type { PersonalSubscriptionStatus } from '../../domain/enums.js';
 import type { MysqlDb, Queryable } from './db.js';
 
-/** 个人订阅仓储（Phase 1 只读/注册写入，update 属商业专项）。 */
+/** 个人订阅仓储。当前支持读取和注册写入。 */
 export class MysqlPersonalSubscriptionRepo implements IPersonalSubscriptionRepo {
   constructor(private readonly db: () => MysqlDb) {}
 

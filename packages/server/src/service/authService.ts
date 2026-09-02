@@ -23,7 +23,7 @@ import type {
 } from '../repository/interfaces.js';
 import type { Queryable, TxRunner } from '../repository/mysql/db.js';
 
-/** 登录/刷新请求携带的设备字段（实施规格 §4.6 DeviceFields）。 */
+/** 登录/刷新请求携带的设备字段（实施规格 §5.2 DeviceFields）。 */
 export interface DeviceFields {
   deviceKey: string;
   devicePlatform: string;
@@ -56,7 +56,7 @@ const VERIFICATION_TOKEN_TTL_MS = 24 * 3600 * 1000; // 24 小时
 const PASSWORD_MIN = 12;
 const PASSWORD_MAX = 128;
 
-// 限流阈值（实施规格 §4.5）
+// 限流阈值（实施规格 §5.2）
 const LOGIN_WINDOW_S = 15 * 60;
 const LOGIN_MAX = 5;
 const REGISTER_WINDOW_S = 3600;
@@ -69,10 +69,10 @@ const VERIFY_RESEND_MAX = 3;
  *
  * 会话相关的多表操作（login / refresh / revokeDevice / logout）通过 `runner` 在同一
  * 连接、同一事务内完成，保证：
- * - refresh 原子轮换（锁 token 行 + 消费旧 + 写新），并发复用只产出一条有效链（§4.5）
- * - refresh 校验 device 绑定，不得把会话迁移到其他 device（§4.6）
- * - 设备撤销与 session 撤销同一事务（§4.6）
- * - 登录的设备配额检查在用户行锁下序列化，并发不超额（§4.6）
+ * - refresh 原子轮换（锁 token 行 + 消费旧 + 写新），并发复用只产出一条有效链（§5.1）
+ * - refresh 校验 device 绑定，不得把会话迁移到其他 device（§5.1）
+ * - 设备撤销与 session 撤销同一事务（§5.1）
+ * - 登录的设备配额检查在用户行锁下序列化，并发不超额（§5.1）
  */
 export class AuthService {
   constructor(
@@ -146,7 +146,7 @@ export class AuthService {
   }
 
   /**
-   * 匿名重发验证 token（§4.5/§5）：不区分邮箱是否存在/已验证，响应恒为相同成功。
+   * 匿名重发验证 token（§5.1/§5.2）：不区分邮箱是否存在/已验证，响应恒为相同成功。
    * 按 email + IP 限流防枚举；仅对「存在且未验证」的用户真正作废+重建 token 并发邮件。
    */
   async resendVerification(emailRaw: string, ip?: string): Promise<{ ok: true }> {
@@ -187,7 +187,7 @@ export class AuthService {
     const email = normalizeEmail(emailRaw);
     const found = await this.userRepo.findByEmail(email);
     if (!found) {
-      // 未知邮箱 = 失败（§4.5）：原子计数，超阈值 429 否则 401。
+      // 未知邮箱 = 失败（§5.2）：原子计数，超阈值 429 否则 401。
       if (await this.countLoginFailure(email, ip)) throw new RateLimitedError(LOGIN_WINDOW_S);
       throw new UnauthorizedError();
     }
@@ -225,7 +225,7 @@ export class AuthService {
   }
 
   /**
-   * 登录失败原子计数（§4.5）：email 与 IP 各原子递增一次并判定，任一超阈值
+   * 登录失败原子计数（§5.2）：email 与 IP 各原子递增一次并判定，任一超阈值
    * 返回 true（调用方回 429）。用原子递增取代「peek 预检」，避免并发失败请求
    * 都读到 count<max 而全部放行。
    */
@@ -251,7 +251,7 @@ export class AuthService {
         if (!user) throw new UnauthorizedError();
         if (user.status !== 'active') throw new UserDisabledError(user.id);
 
-        // 设备绑定校验（§4.6）：锁 device 行，要求其 active、归属、且 deviceKey 与请求一致。
+        // 设备绑定校验（§5.1）：锁 device 行，要求其 active、归属、且 deviceKey 与请求一致。
         const bound = await this.deviceRepo.findByIdForUpdate(tx, preDeviceId);
         if (!bound || bound.userId !== user.id || bound.status !== 'active' || bound.deviceKey !== device.deviceKey) {
           throw new UnauthorizedError('device mismatch');
@@ -282,7 +282,7 @@ export class AuthService {
     );
 
     if (outcome.kind === 'reuse') {
-      // 复用检测：在**独立事务**里撤销整族（§4.5）。不能放进上面的轮换事务 ——
+      // 复用检测：在**独立事务**里撤销整族（§5.1）。不能放进上面的轮换事务 ——
       // 那样 throw 会被 withTransaction 回滚，把撤销一起丢掉。
       await this.runner((tx) => this.refreshTokenRepo.revokeFamily(tx, outcome.familyId, new Date()));
       throw new UnauthorizedError('refresh token reuse detected');
@@ -304,7 +304,7 @@ export class AuthService {
     return { ok: true };
   }
 
-  /** 改密：同一事务内锁用户 → 重新校验当前密码 → 更新 hash → 撤销全部 refresh token（§4.5）。 */
+  /** 改密：同一事务内锁用户 → 重新校验当前密码 → 更新 hash → 撤销全部 refresh token（§5.1）。 */
   async changePassword(userId: number, currentPassword: string, newPassword: string): Promise<{ ok: true }> {
     this.validatePassword(newPassword);
     const newHash = hashPassword(newPassword); // Argon2id 慢，事务外预计算
@@ -324,7 +324,7 @@ export class AuthService {
     return this.deviceRepo.listByUser(userId);
   }
 
-  /** 撤销设备：同一事务内撤销 device + 该 device 全部 session（§4.6）。 */
+  /** 撤销设备：同一事务内撤销 device + 该 device 全部 session（§5.1）。 */
   async revokeDevice(userId: number, deviceId: number): Promise<{ ok: true }> {
     await this.runner(async (tx) => {
       // 统一锁顺序 user -> device -> token（先锁用户行串行化该用户所有会话操作）。
@@ -347,7 +347,7 @@ export class AuthService {
   }
 
   /**
-   * 设备 upsert + 设备数上限约束（§4.6）。在用户行锁（调用方事务）内执行。
+   * 设备 upsert + 设备数上限约束（§5.1）。在用户行锁（调用方事务）内执行。
    */
   private async upsertDevice(exec: Queryable, userId: number, device: DeviceFields): Promise<number | null> {
     if (!device?.deviceKey) return null;

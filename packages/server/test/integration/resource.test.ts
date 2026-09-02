@@ -63,6 +63,7 @@ async function makeStack(db: MysqlDb) {
   const resourceSvc = new OrganizationResourceService(
     organizationRepo,
     organizationSubscriptionRepo,
+    membershipRepo,
     new MysqlFolderRepo(() => db),
     new MysqlResourceRepo(() => db),
     runner,
@@ -79,8 +80,7 @@ async function makeVerifiedUser(userRepo: MysqlUserRepo, db: MysqlDb, email: str
 async function makeOrg(stack: Awaited<ReturnType<typeof makeStack>>, db: MysqlDb) {
   const admin = await makeVerifiedUser(stack.userRepo, db, uniqueEmail('admin'));
   const org = await stack.orgSvc.createOrganization(admin.id, 'Acme');
-  const members = await stack.orgSvc.listMembers(org.organizationId);
-  return { org, adminMembershipId: members[0].membershipId };
+  return { org, adminUserId: admin.id };
 }
 
 async function setSnapshot(db: MysqlDb, orgId: number, snapshot: Record<string, unknown>) {
@@ -96,12 +96,12 @@ describe.skipIf(!URL)('organization resources (real MySQL)', () => {
     try {
       await runMigrations(db, [...migrations]);
       const stack = await makeStack(db);
-      const { org, adminMembershipId } = await makeOrg(stack, db);
-      const created = await stack.resourceSvc.createResource(org.organizationId, { resourceType: 'query', name: 'q', content: QUERY }, adminMembershipId);
+      const { org, adminUserId } = await makeOrg(stack, db);
+      const created = await stack.resourceSvc.createResource(org.organizationId, adminUserId, { resourceType: 'query', name: 'q', content: QUERY });
 
       const results = await Promise.allSettled([
-        stack.resourceSvc.updateResource(org.organizationId, created.resourceId, { baseVersion: 1, name: 'a' }, adminMembershipId),
-        stack.resourceSvc.updateResource(org.organizationId, created.resourceId, { baseVersion: 1, name: 'b' }, adminMembershipId),
+        stack.resourceSvc.updateResource(org.organizationId, adminUserId, created.resourceId, { baseVersion: 1, name: 'a' }),
+        stack.resourceSvc.updateResource(org.organizationId, adminUserId, created.resourceId, { baseVersion: 1, name: 'b' }),
       ]);
       expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
       expect(results.filter((r) => r.status === 'rejected' && (r as any).reason instanceof ResourceVersionConflictError)).toHaveLength(1);
@@ -121,7 +121,7 @@ describe.skipIf(!URL)('organization resources (real MySQL)', () => {
       const stack = await makeStack(db);
       const a = await makeOrg(stack, db);
       const b = await makeOrg(stack, db);
-      const created = await stack.resourceSvc.createResource(a.org.organizationId, { resourceType: 'query', name: 'q', content: QUERY }, a.adminMembershipId);
+      const created = await stack.resourceSvc.createResource(a.org.organizationId, a.adminUserId, { resourceType: 'query', name: 'q', content: QUERY });
       await expect(stack.resourceSvc.getResource(b.org.organizationId, created.resourceId)).rejects.toBeInstanceOf(ResourceNotFoundError);
     } finally {
       await pool.end();
@@ -134,21 +134,21 @@ describe.skipIf(!URL)('organization resources (real MySQL)', () => {
     try {
       await runMigrations(db, [...migrations]);
       const stack = await makeStack(db);
-      const { org, adminMembershipId } = await makeOrg(stack, db);
+      const { org, adminUserId } = await makeOrg(stack, db);
 
       const bytes = canonicalJsonBytes(QUERY);
       await setSnapshot(db, org.organizationId, { includedSeats: 3, maxSharedResources: 1, sharedStorageQuotaBytes: bytes, allowedTemplateDatabaseTypes: ['mysql'] });
-      const q1 = await stack.resourceSvc.createResource(org.organizationId, { resourceType: 'query', name: 'q1', content: QUERY }, adminMembershipId);
+      const q1 = await stack.resourceSvc.createResource(org.organizationId, adminUserId, { resourceType: 'query', name: 'q1', content: QUERY });
       // 数量维度：第二个即超限
-      await expect(stack.resourceSvc.createResource(org.organizationId, { resourceType: 'query', name: 'q2', content: QUERY }, adminMembershipId))
+      await expect(stack.resourceSvc.createResource(org.organizationId, adminUserId, { resourceType: 'query', name: 'q2', content: QUERY }))
         .rejects.toBeInstanceOf(OrganizationQuotaExceededError);
 
       // 软删释放后，字节维度：放开数量，字节配额恰好等于一条的 canonical 大小
-      await stack.resourceSvc.deleteResource(org.organizationId, q1.resourceId, adminMembershipId);
+      await stack.resourceSvc.deleteResource(org.organizationId, adminUserId, q1.resourceId);
       await setSnapshot(db, org.organizationId, { includedSeats: 3, maxSharedResources: 0, sharedStorageQuotaBytes: bytes, allowedTemplateDatabaseTypes: ['mysql'] });
-      const first = await stack.resourceSvc.createResource(org.organizationId, { resourceType: 'query', name: 'q3', content: QUERY }, adminMembershipId);
+      const first = await stack.resourceSvc.createResource(org.organizationId, adminUserId, { resourceType: 'query', name: 'q3', content: QUERY });
       expect(first.resourceId).toBeTruthy();
-      await expect(stack.resourceSvc.createResource(org.organizationId, { resourceType: 'query', name: 'q4', content: QUERY }, adminMembershipId))
+      await expect(stack.resourceSvc.createResource(org.organizationId, adminUserId, { resourceType: 'query', name: 'q4', content: QUERY }))
         .rejects.toBeInstanceOf(OrganizationQuotaExceededError);
     } finally {
       await pool.end();
@@ -161,14 +161,14 @@ describe.skipIf(!URL)('organization resources (real MySQL)', () => {
     try {
       await runMigrations(db, [...migrations]);
       const stack = await makeStack(db);
-      const { org, adminMembershipId } = await makeOrg(stack, db);
+      const { org, adminUserId } = await makeOrg(stack, db);
 
-      const a = await stack.resourceSvc.createFolder(org.organizationId, 'A');
-      const b = await stack.resourceSvc.createFolder(org.organizationId, 'B', a.folderId);
-      await expect(stack.resourceSvc.updateFolder(org.organizationId, a.folderId, { parentId: b.folderId })).rejects.toBeInstanceOf(FolderMoveCycleError);
+      const a = await stack.resourceSvc.createFolder(org.organizationId, adminUserId, 'A');
+      const b = await stack.resourceSvc.createFolder(org.organizationId, adminUserId, 'B', a.folderId);
+      await expect(stack.resourceSvc.updateFolder(org.organizationId, adminUserId, a.folderId, { parentId: b.folderId })).rejects.toBeInstanceOf(FolderMoveCycleError);
 
-      await stack.resourceSvc.createResource(org.organizationId, { resourceType: 'query', name: 'q', folderId: b.folderId, content: QUERY }, adminMembershipId);
-      await expect(stack.resourceSvc.deleteFolder(org.organizationId, b.folderId)).rejects.toBeInstanceOf(FolderNotEmptyError);
+      await stack.resourceSvc.createResource(org.organizationId, adminUserId, { resourceType: 'query', name: 'q', folderId: b.folderId, content: QUERY });
+      await expect(stack.resourceSvc.deleteFolder(org.organizationId, adminUserId, b.folderId)).rejects.toBeInstanceOf(FolderNotEmptyError);
     } finally {
       await pool.end();
     }

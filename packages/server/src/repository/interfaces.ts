@@ -29,7 +29,7 @@ import type {
 import type { Queryable } from './mysql/db.js';
 
 /**
- * V3 Phase 1 数据访问层接口（Repository 模式）。
+ * 数据访问层接口（Repository 模式）。
  *
  * 接口与实现分离：domain/service 仅依赖接口，不依赖具体 DB 驱动。
  * 当前唯一实现为 mysql/。带 `exec` 参数的方法在**调用方事务**（TxRunner 提供的
@@ -76,7 +76,7 @@ export interface IPersonalPlanRepo {
 
 export interface IPersonalSubscriptionRepo {
   findByUserId(userId: number): Promise<PersonalSubscription | undefined>;
-  /** 事务内按 user_id 读取（配额锁内计量，ADR-0005）。 */
+  /** 事务内按 user_id 读取，用于锁内配额计量。 */
   findByUserIdInTx(exec: Queryable, userId: number): Promise<PersonalSubscription | undefined>;
   create(input: {
     userId: number;
@@ -168,7 +168,7 @@ export interface IRegistrationRepo {
   createAccount(input: RegistrationAccountInput): Promise<RegistrationResult>;
 }
 
-// ── 组织域（切片 2）──
+// ── 组织域 ──
 
 export interface IOrganizationPlanRepo {
   findByCode(code: string): Promise<OrganizationPlan | undefined>;
@@ -188,7 +188,7 @@ export interface IOrganizationRepo {
 
 export interface IOrganizationSubscriptionRepo {
   findByOrganizationId(organizationId: number): Promise<OrganizationSubscription | undefined>;
-  /** 在事务内锁定订阅行（创建/接受/撤销邀请时取 seat_limit，§4.3）。 */
+  /** 在事务内锁定订阅行（创建/接受/撤销邀请时取 seat_limit，§6.2）。 */
   findByOrganizationIdForUpdate(exec: Queryable, organizationId: number): Promise<OrganizationSubscription | undefined>;
   create(exec: Queryable, input: {
     organizationId: number;
@@ -201,7 +201,7 @@ export interface IOrganizationSubscriptionRepo {
   }): Promise<OrganizationSubscription>;
 }
 
-/** 成员目录项（join users 取 displayName；不返回 email，§5.1）。 */
+/** 成员目录项（join users 取 displayName；不返回 email，§2 第 4 条）。 */
 export interface MemberDto {
   membershipId: number;
   userId: number;
@@ -245,7 +245,7 @@ export interface IMembershipRepo {
   updateRole(exec: Queryable, id: number, role: OrganizationRole): Promise<void>;
   /** 置 status=removed + removed_time（移除/退出时）。 */
   remove(exec: Queryable, id: number, now: Date): Promise<void>;
-  /** 关闭组织时把该组织全部 invited membership 置 removed（invitations 行撤销属切片 3）。 */
+  /** 关闭组织时把该组织全部 invited membership 置 removed。 */
   removeInvitedByOrganization(exec: Queryable, organizationId: number, now: Date): Promise<void>;
   /**
    * 写入/复用一个 invited membership（创建邀请时用）：不存在则建，已存在（removed /
@@ -268,9 +268,9 @@ export interface IMembershipRepo {
   countActiveAdmins(exec: Queryable, organizationId: number): Promise<number>;
 }
 
-// ── 组织邀请（切片 3）──
+// ── 组织邀请 ──
 
-/** 有效邀请目录项（join membership 取角色；不含 token/hash，§5.1）。 */
+/** 有效邀请目录项（join membership 取角色；不含 token/hash，§2 第 4 条）。 */
 export interface InvitationDto {
   invitationId: number;
   email: string;
@@ -316,7 +316,7 @@ export interface IOrganizationInvitationRepo {
   expireByOrganization(exec: Queryable, organizationId: number, now: Date): Promise<void>;
 }
 
-// ── 组织资源（切片 4）──
+// ── 组织资源 ──
 
 /** 目录 DTO（无作者字段，id 在 route 层转 string）。 */
 export interface FolderDto {
@@ -325,7 +325,7 @@ export interface FolderDto {
   parentId: number | null;
 }
 
-/** 资源列表项 DTO（不含 content，§7 载荷）。 */
+/** 资源列表项 DTO（不含 content，§6.4 载荷）。 */
 export interface ResourceSummaryDto {
   resourceId: number;
   resourceType: ResourceType;
@@ -370,9 +370,9 @@ export interface IResourceRepo {
   findByIdForUpdate(exec: Queryable, organizationId: number, id: number): Promise<Resource | undefined>;
   /** 组织内全部未删除资源（不含 content）。 */
   listActiveByOrganization(organizationId: number): Promise<ResourceSummaryDto[]>;
-  /** 锁内读回未删除资源 content（app 侧按 canonical JSON 计量，§4.2）。 */
+  /** 锁内读回未删除资源 content（app 侧按 canonical JSON 计量，§6.2）。 */
   listActiveContent(exec: Queryable, organizationId: number): Promise<Record<string, unknown>[]>;
-  /** 乐观锁更新（§4.3）：`WHERE id AND organization_id AND version=? AND delete_time IS NULL`；返回受影响的 skipper。 */
+  /** 乐观锁更新（§6.2）：`WHERE id AND organization_id AND version=? AND delete_time IS NULL`；返回受影响的 skipper。 */
   update(exec: Queryable, input: {
     id: number;
     organizationId: number;
@@ -386,7 +386,7 @@ export interface IResourceRepo {
   softDelete(exec: Queryable, id: number, organizationId: number, now: Date, deletedByMembershipId: number): Promise<void>;
 }
 
-// ── 个人 E2E 同步（§8.1 专项）──
+// ── 个人 E2E 同步（§7 专项）──
 
 export interface ISyncStateRepo {
   /** 只读当前 active state（无锁）。 */
@@ -432,7 +432,7 @@ export interface ISyncRecordRepo {
   softDelete(exec: Queryable, userId: number, keyEpoch: string, recordId: Buffer, baseVersion: string, newVersion: string, changeSequence: string, now: Date): Promise<boolean>;
   /** feed：active epoch 内 `change_sequence > after AND <= snapshotSequence`，含 tombstone，按 change_sequence 升序。 */
   listByFeed(exec: Queryable, userId: number, keyEpoch: string, after: string, snapshotSequence: string, limit: number): Promise<PersonalConnectionMeta[]>;
-  /** active record 数 + 密文字节（配额计量：ciphertext+tag+nonce 长度，§8.1.9）。锁内执行。 */
+  /** active record 数 + 密文字节（配额计量：ciphertext+tag+nonce 长度，§4.2）。锁内执行。 */
   countActive(exec: Queryable, userId: number, keyEpoch: string): Promise<{ count: number; bytes: number }>;
   /** 列出该 epoch 全部未删 record（destroy/reset 逐个 tombstone 用，持锁内调用）。 */
   listActiveByEpoch(exec: Queryable, userId: number, keyEpoch: string): Promise<PersonalConnectionMeta[]>;

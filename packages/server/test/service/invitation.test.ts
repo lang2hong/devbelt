@@ -19,6 +19,7 @@ import {
   InvitationTargetNotEligibleError,
   OrganizationQuotaExceededError,
   EntityNotFoundError,
+  OrganizationNotFoundError,
 } from '../../src/domain/errors.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 
@@ -63,7 +64,7 @@ describe('invitations (OrganizationService)', () => {
     const org = await svc.createOrganization(1, 'Acme');
     const b = await makeVerifiedUser(userRepo, 'b@x.com', 'Bee');
 
-    const r = await svc.inviteMember(org.organizationId, 1, 'admin', 'b@x.com');
+    const r = await svc.inviteMember(org.organizationId, 1, 'b@x.com');
     expect(r.role).toBe('member');
 
     const members = await svc.listMembers(org.organizationId);
@@ -78,30 +79,49 @@ describe('invitations (OrganizationService)', () => {
     expect(sent?.organizationName).toBe('Acme');
   });
 
-  it('inviting as admin requires member.role.assign', async () => {
-    const { svc, userRepo } = makeService();
+  it('a plain member cannot invite (permission re-checked inside the transaction)', async () => {
+    const { svc, userRepo, membershipRepo } = makeService();
     const org = await svc.createOrganization(1, 'Acme');
     await makeVerifiedUser(userRepo, 'b@x.com');
-    await expect(svc.inviteMember(org.organizationId, 1, 'member', 'b@x.com', 'admin')).rejects.toBeInstanceOf(ForbiddenError);
+    const plain = await makeVerifiedUser(userRepo, 'member@x.com');
+    await membershipRepo.create({} as Queryable, {
+      organizationId: org.organizationId,
+      userId: plain.id,
+      role: 'member',
+      status: 'active',
+      invitedByUserId: 1,
+      joinedTime: new Date(),
+      removedTime: null,
+    });
+    await expect(svc.inviteMember(org.organizationId, plain.id, 'b@x.com')).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('an actor removed after middleware authorization can no longer invite', async () => {
+    const { svc, userRepo, membershipRepo } = makeService();
+    const org = await svc.createOrganization(1, 'Acme');
+    await makeVerifiedUser(userRepo, 'b@x.com');
+    const admin = (await svc.listMembers(org.organizationId))[0];
+    await membershipRepo.remove({} as Queryable, admin.membershipId, new Date());
+    await expect(svc.inviteMember(org.organizationId, 1, 'b@x.com')).rejects.toBeInstanceOf(OrganizationNotFoundError);
   });
 
   it('rejects unregistered or unverified target', async () => {
     const { svc, userRepo } = makeService();
     const org = await svc.createOrganization(1, 'Acme');
-    await expect(svc.inviteMember(org.organizationId, 1, 'admin', 'missing@x.com')).rejects.toBeInstanceOf(InvitationTargetNotEligibleError);
+    await expect(svc.inviteMember(org.organizationId, 1, 'missing@x.com')).rejects.toBeInstanceOf(InvitationTargetNotEligibleError);
 
     await userRepo.create('unverified@x.com', 'hash'); // 未验证
-    await expect(svc.inviteMember(org.organizationId, 1, 'admin', 'unverified@x.com')).rejects.toBeInstanceOf(InvitationTargetNotEligibleError);
+    await expect(svc.inviteMember(org.organizationId, 1, 'unverified@x.com')).rejects.toBeInstanceOf(InvitationTargetNotEligibleError);
   });
 
   it('rejects inviting an already-active member', async () => {
     const { svc, userRepo, emailSender } = makeService();
     const org = await svc.createOrganization(1, 'Acme');
     const b = await makeVerifiedUser(userRepo, 'b@x.com');
-    await svc.inviteMember(org.organizationId, 1, 'admin', 'b@x.com');
+    await svc.inviteMember(org.organizationId, 1, 'b@x.com');
     const token = emailSender.sent.find((m) => m.kind === 'invitation')!.token!;
     await svc.acceptInvitation(token, b.id);
-    await expect(svc.inviteMember(org.organizationId, 1, 'admin', 'b@x.com')).rejects.toBeInstanceOf(InvitationTargetNotEligibleError);
+    await expect(svc.inviteMember(org.organizationId, 1, 'b@x.com')).rejects.toBeInstanceOf(InvitationTargetNotEligibleError);
   });
 
   it('enforces seat capacity', async () => {
@@ -111,9 +131,9 @@ describe('invitations (OrganizationService)', () => {
     await makeVerifiedUser(userRepo, 'c@x.com');
     await makeVerifiedUser(userRepo, 'd@x.com');
 
-    await svc.inviteMember(org.organizationId, 1, 'admin', 'b@x.com');
-    await svc.inviteMember(org.organizationId, 1, 'admin', 'c@x.com');
-    await expect(svc.inviteMember(org.organizationId, 1, 'admin', 'd@x.com')).rejects.toBeInstanceOf(OrganizationQuotaExceededError);
+    await svc.inviteMember(org.organizationId, 1, 'b@x.com');
+    await svc.inviteMember(org.organizationId, 1, 'c@x.com');
+    await expect(svc.inviteMember(org.organizationId, 1, 'd@x.com')).rejects.toBeInstanceOf(OrganizationQuotaExceededError);
   });
 
   it('re-inviting the same target leaves exactly one valid token', async () => {
@@ -121,8 +141,8 @@ describe('invitations (OrganizationService)', () => {
     const org = await svc.createOrganization(1, 'Acme');
     await makeVerifiedUser(userRepo, 'b@x.com');
 
-    await svc.inviteMember(org.organizationId, 1, 'admin', 'b@x.com');
-    await svc.inviteMember(org.organizationId, 1, 'admin', 'b@x.com');
+    await svc.inviteMember(org.organizationId, 1, 'b@x.com');
+    await svc.inviteMember(org.organizationId, 1, 'b@x.com');
 
     const pending = [...invitationRepo.store.values()].filter((i) => !i.acceptedTime && !i.revokedTime);
     expect(pending).toHaveLength(1);
@@ -133,7 +153,7 @@ describe('invitations (OrganizationService)', () => {
     const { svc, userRepo, emailSender } = makeService();
     const org = await svc.createOrganization(1, 'Acme');
     const b = await makeVerifiedUser(userRepo, 'b@x.com');
-    await svc.inviteMember(org.organizationId, 1, 'admin', 'b@x.com');
+    await svc.inviteMember(org.organizationId, 1, 'b@x.com');
     const token = emailSender.sent.find((m) => m.kind === 'invitation')!.token!;
 
     const result = await svc.acceptInvitation(token, b.id);
@@ -151,7 +171,7 @@ describe('invitations (OrganizationService)', () => {
     const org = await svc.createOrganization(1, 'Acme');
     const b = await makeVerifiedUser(userRepo, 'b@x.com');
     const c = await makeVerifiedUser(userRepo, 'c@x.com');
-    await svc.inviteMember(org.organizationId, 1, 'admin', 'b@x.com');
+    await svc.inviteMember(org.organizationId, 1, 'b@x.com');
     const token = emailSender.sent.find((m) => m.kind === 'invitation')!.token!;
 
     await expect(svc.acceptInvitation('bad-token', b.id)).rejects.toBeInstanceOf(InvitationInvalidError);
@@ -162,7 +182,7 @@ describe('invitations (OrganizationService)', () => {
     const { svc, userRepo, emailSender } = makeService();
     const org = await svc.createOrganization(1, 'Acme');
     const b = await makeVerifiedUser(userRepo, 'b@x.com');
-    await svc.inviteMember(org.organizationId, 1, 'admin', 'b@x.com');
+    await svc.inviteMember(org.organizationId, 1, 'b@x.com');
     const token = emailSender.sent.find((m) => m.kind === 'invitation')!.token!;
     await svc.acceptInvitation(token, b.id);
     await expect(svc.acceptInvitation(token, b.id)).rejects.toBeInstanceOf(InvitationInvalidError);
@@ -172,9 +192,9 @@ describe('invitations (OrganizationService)', () => {
     const { svc, userRepo, invitationRepo } = makeService();
     const org = await svc.createOrganization(1, 'Acme');
     const b = await makeVerifiedUser(userRepo, 'b@x.com');
-    const r = await svc.inviteMember(org.organizationId, 1, 'admin', 'b@x.com');
+    const r = await svc.inviteMember(org.organizationId, 1, 'b@x.com');
 
-    await svc.revokeInvitation(org.organizationId, r.invitationId);
+    await svc.revokeInvitation(org.organizationId, 1, r.invitationId);
     expect(invitationRepo.store.get(r.invitationId)?.revokedTime).toBeTruthy();
     const members = await svc.listMembers(org.organizationId);
     expect(members.find((m) => m.userId === b.id)).toBeUndefined();
@@ -184,9 +204,9 @@ describe('invitations (OrganizationService)', () => {
     const { svc, userRepo, invitationRepo } = makeService();
     const org = await svc.createOrganization(1, 'Acme');
     const b = await makeVerifiedUser(userRepo, 'b@x.com');
-    const r = await svc.inviteMember(org.organizationId, 1, 'admin', 'b@x.com');
+    const r = await svc.inviteMember(org.organizationId, 1, 'b@x.com');
 
-    await svc.closeOrganization(org.organizationId);
+    await svc.closeOrganization(org.organizationId, 1);
     expect(invitationRepo.store.get(r.invitationId)?.revokedTime).toBeTruthy();
     const members = await svc.listMembers(org.organizationId);
     expect(members.find((m) => m.userId === b.id)).toBeUndefined();
@@ -196,7 +216,7 @@ describe('invitations (OrganizationService)', () => {
     const { svc, userRepo, emailSender, organizationSubscriptionRepo } = makeService();
     const org = await svc.createOrganization(1, 'Acme');
     const b = await makeVerifiedUser(userRepo, 'b@x.com');
-    await svc.inviteMember(org.organizationId, 1, 'admin', 'b@x.com');
+    await svc.inviteMember(org.organizationId, 1, 'b@x.com');
     const token = emailSender.sent.find((m) => m.kind === 'invitation')!.token!;
 
     const sub = await organizationSubscriptionRepo.findByOrganizationId(org.organizationId);
@@ -208,7 +228,7 @@ describe('invitations (OrganizationService)', () => {
     const { svc, userRepo, emailSender, organizationSubscriptionRepo } = makeService();
     const org = await svc.createOrganization(1, 'Acme');
     const b = await makeVerifiedUser(userRepo, 'b@x.com');
-    await svc.inviteMember(org.organizationId, 1, 'admin', 'b@x.com');
+    await svc.inviteMember(org.organizationId, 1, 'b@x.com');
     const token = emailSender.sent.find((m) => m.kind === 'invitation')!.token!;
 
     organizationSubscriptionRepo.store.clear();
@@ -220,19 +240,19 @@ describe('invitations (OrganizationService)', () => {
     const orgA = await svc.createOrganization(1, 'A');
     const orgB = await svc.createOrganization(2, 'B');
     await makeVerifiedUser(userRepo, 'b@x.com');
-    const r = await svc.inviteMember(orgA.organizationId, 1, 'admin', 'b@x.com');
+    const r = await svc.inviteMember(orgA.organizationId, 1, 'b@x.com');
 
-    await expect(svc.revokeInvitation(orgB.organizationId, r.invitationId)).rejects.toBeInstanceOf(EntityNotFoundError);
+    await expect(svc.revokeInvitation(orgB.organizationId, 1, r.invitationId)).rejects.toBeInstanceOf(EntityNotFoundError);
   });
 
   it('revokeInvitation of an accepted invitation returns INVITATION_INVALID', async () => {
     const { svc, userRepo, emailSender } = makeService();
     const org = await svc.createOrganization(1, 'Acme');
     const b = await makeVerifiedUser(userRepo, 'b@x.com');
-    const r = await svc.inviteMember(org.organizationId, 1, 'admin', 'b@x.com');
+    const r = await svc.inviteMember(org.organizationId, 1, 'b@x.com');
     const token = emailSender.sent.find((m) => m.kind === 'invitation')!.token!;
     await svc.acceptInvitation(token, b.id);
 
-    await expect(svc.revokeInvitation(org.organizationId, r.invitationId)).rejects.toBeInstanceOf(InvitationInvalidError);
+    await expect(svc.revokeInvitation(org.organizationId, 1, r.invitationId)).rejects.toBeInstanceOf(InvitationInvalidError);
   });
 });

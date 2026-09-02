@@ -279,7 +279,7 @@ describe('SyncRecordService', () => {
       recordId: RID, cipherSuite: 'AES-256-GCM', formatVersion: 1, ...decodeBody(b4),
     })).rejects.toMatchObject({ name: 'SyncVersionConflictError', code: 'SYNC_VERSION_CONFLICT', currentVersion: '2' });
 
-    // 3) 过期 receipt 后的字节级重放 → nonce ledger 兜底拒绝（§8.1.8「绝不绕过 nonce 校验」）
+    // 3) 过期 receipt 后的字节级重放 → nonce ledger 兜底拒绝（§7.4「绝不绕过 nonce 校验」）
     for (const r of stack.mutationRepo.store.values()) r.expiresTime = new Date(Date.now() - 1000);
     await expect(stack.recordSvc.putRecord(USER, {
       keyEpoch: '1', mutationId: m1, signature: s1.signatureBuf, baseVersion: '0', requestDigest: s1.digest,

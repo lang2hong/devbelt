@@ -3,7 +3,7 @@ import type { OrganizationSubscription } from '../../domain/entities.js';
 import type { OrganizationSubscriptionStatus } from '../../domain/enums.js';
 import type { MysqlDb, Queryable } from './db.js';
 
-/** 组织订阅仓储（Phase 1 只读/创建组织时写入）。 */
+/** 组织订阅仓储。当前支持读取和创建组织时写入。 */
 export class MysqlOrganizationSubscriptionRepo implements IOrganizationSubscriptionRepo {
   constructor(private readonly db: () => MysqlDb) {}
 

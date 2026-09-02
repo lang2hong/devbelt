@@ -22,22 +22,25 @@ function domainErrorBody(e: DomainError): Record<string, unknown> {
   return body;
 }
 
-/** 统一错误响应：DomainError 按 code 映射 HTTP 状态，其他默认 500。 */
+/**
+ * 统一错误响应：只处理 DomainError（按 code 映射 HTTP 状态）。
+ *
+ * 非 DomainError 一律**重新抛出**，交给全局 errorHandler ——
+ * 那里才会 `req.log.error` 记录堆栈与请求上下文。若在此直接回 500，
+ * 未知异常就永久丢失了诊断信息（只剩一条无上下文的 500 响应）。
+ */
 export function sendError(reply: FastifyReply, e: unknown): void {
-  if (e instanceof DomainError) {
-    if (e instanceof RateLimitedError) {
-      reply.header('Retry-After', e.retryAfterSeconds);
-    }
-    reply.code(errorStatus(e.code)).send(domainErrorBody(e));
-  } else {
-    reply.code(500).send({ message: 'Internal server error' });
+  if (!(e instanceof DomainError)) throw e;
+  if (e instanceof RateLimitedError) {
+    reply.header('Retry-After', e.retryAfterSeconds);
   }
+  reply.code(errorStatus(e.code)).send(domainErrorBody(e));
 }
 
 /**
  * 注册全局错误处理器（安全网，兜住漏写 try/catch 的 handler）。
  *
- * - schema 校验失败 → 400 VALIDATION_FAILED（与规格 §5 统一错误码一致）
+ * - schema 校验失败 → 400 VALIDATION_FAILED（与规格 §8 统一错误码一致）
  * - DomainError → 按 code 映射
  * - 429（DomainError 之外的限流源）→ 保留 Retry-After
  * - 其余 4xx 保留状态码但不透传内部细节；未处理异常只进日志，回 500 固定文案
@@ -75,7 +78,7 @@ export function registerErrorHandler(app: FastifyInstance): void {
 }
 
 /**
- * 领域错误码 → HTTP 状态码映射（全量，见实施规格 §5 统一错误）。
+ * 领域错误码 → HTTP 状态码映射（全量，见实施规格 §8）。
  * 未在此表中的 code 一律 400（新增 code 需先在规格冻结后再补映射）。
  */
 export function errorStatus(code: string): number {

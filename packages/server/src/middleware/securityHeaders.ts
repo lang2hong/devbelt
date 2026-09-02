@@ -6,11 +6,10 @@ import type { FastifyHelmetOptions } from '@fastify/helmet';
  * 单独成模块是为了让 createApp 与测试装配共用同一份值 —— 头部策略写在
  * app.ts 里的话，测试要么复制一遍（然后漂移），要么测不到。
  *
- * CSP 在这个项目里不是"加分项"：管理后台是 server 同源托管的 SPA，
- * admin token 存在 localStorage，而后台要渲染用户邮箱、设备名、连接名这些
- * 用户可控字符串。任何一处 XSS 都能直接读走一个 admin 的 token。
- * `script-src 'self'` 挡掉注入的 inline script 和外部脚本，也就挡掉了绝大
- * 多数把 token 外发出去的路径。
+ * 当前服务端只提供 JSON API，未托管任何前端产物。这份 CSP 仍按"未来会在
+ * 同源托管管理后台"设定：`script-src 'self'` 挡掉注入的 inline script 与外部
+ * 脚本，`connect-src 'self'` 阻断把凭据外发的路径。管理后台的目标形态见
+ * docs/管理后台架构.md；真正挂载静态资源时需连同这里一起复核。
  */
 export function securityHeaders(): FastifyHelmetOptions {
   return {
@@ -21,12 +20,10 @@ export function securityHeaders(): FastifyHelmetOptions {
         // 这两个关键字一旦加上，CSP 对 XSS 的防护基本归零。
         scriptSrc: ["'self'"],
         /**
-         * style 必须允许 inline。
-         *
-         * Vue 的 `v-show` 生成 `style="display:none"` 内联属性，CSP3 里在没有
-         * 单独 style-src-attr 时由 style-src 兜住。收紧它会让后台的标签切换
-         * 直接失效（所有面板同时显示）。这是有意识的妥协：style 注入的危害
-         * 远小于 script 注入，且没有可行的替代（改掉 v-show 是另一回事）。
+         * style 允许 inline：常见前端框架（含 Vue 的 `v-show`）会写
+         * `style="display:none"` 这类内联属性，CSP3 里在没有单独 style-src-attr
+         * 时由 style-src 兜住。这是有意识的妥协 —— style 注入的危害远小于
+         * script 注入。
          */
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", 'data:'],
@@ -36,21 +33,21 @@ export function securityHeaders(): FastifyHelmetOptions {
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
         formAction: ["'self'"],
-        // 点击劫持：后台的下拉框改 role、按钮吊销会话，被嵌进 iframe 诱导点击
-        // 的代价很高。frame-ancestors 是现代浏览器的判据，X-Frame-Options 兜旧的
+        // 点击劫持：管理界面会改角色、吊销会话，被嵌进 iframe 诱导点击的代价很高。
+        // frame-ancestors 是现代浏览器的判据，X-Frame-Options 兜旧的
         frameAncestors: ["'none'"],
         /**
          * 显式禁用 helmet 默认的 upgrade-insecure-requests。
          *
-         * 该指令会把页面里的 http 子资源（CSS/JS）强制升级成 https；本服务的
-         * 生产部署是明文 http（443 被别的进程占用），升级后直接连接失败、后台
-         * 白屏。TLS 属于部署层（nginx）的职责，不在应用侧强制。
+         * 该指令会把页面里的 http 子资源强制升级成 https。应用不知道自己是否
+         * 真在 TLS 后面（本地开发与内网部署可能是明文 http），升级后子资源直接
+         * 连接失败。TLS 由部署层（反向代理）终止，不在应用侧强制。
          */
         upgradeInsecureRequests: null,
       },
     },
     /**
-     * HSTS 由部署层（nginx）决定，应用侧不发。
+     * HSTS 由部署层（反向代理）决定，应用侧不发。
      *
      * 应用不知道自己是否真在 HTTPS 后面：直连 HTTP 的开发/内网部署上发出
      * HSTS，会把访问过的浏览器锁死在一个连不通的 https 地址上，而 HSTS 的

@@ -17,7 +17,7 @@ import { OrganizationService } from '../../src/service/organizationService.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
 import { TokenService } from '../../src/service/tokenService.js';
 import { MemoryEmailSender } from '../../src/service/emailSender.js';
-import { OrganizationAdminRequiredError, EntityNotFoundError, RateLimitedError } from '../../src/domain/errors.js';
+import { OrganizationAdminRequiredError, EntityNotFoundError, RateLimitedError, OrganizationNotFoundError, ForbiddenError } from '../../src/domain/errors.js';
 
 const URL = process.env.MYSQL_TEST_URL;
 
@@ -74,7 +74,7 @@ describe.skipIf(!URL)('organization (real MySQL)', () => {
     }
   });
 
-  it('rejects removing the last active admin', async () => {
+  it('rejects a non-member actor on member removal (authorization re-checked in tx)', async () => {
     const pool = newPool();
     const db = pool as unknown as MysqlDb;
     try {
@@ -85,7 +85,37 @@ describe.skipIf(!URL)('organization (real MySQL)', () => {
       const user = await userRepo.findByEmail('admin@example.com');
       const org = await svc.createOrganization(user!.id, 'Acme');
       const members = await svc.listMembers(org.organizationId);
-      await expect(svc.removeMember(org.organizationId, members[0].membershipId, 999999)).rejects.toBeInstanceOf(OrganizationAdminRequiredError);
+      await expect(svc.removeMember(org.organizationId, members[0].membershipId, 999999)).rejects.toBeInstanceOf(OrganizationNotFoundError);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it('rejects an actor demoted after middleware authorization', async () => {
+    const pool = newPool();
+    const db = pool as unknown as MysqlDb;
+    try {
+      await runMigrations(db, [...migrations]);
+      const userRepo = new MysqlUserRepo(() => db);
+      const email = `demoted-${Date.now()}@example.com`;
+      await userRepo.create(email, 'hash', 'D');
+      const svc = await makeService(db);
+      const owner = await userRepo.findByEmail(email);
+      const org = await svc.createOrganization(owner!.id, 'Acme');
+
+      const membershipRepo = new MysqlMembershipRepo(() => db);
+      const secondEmail = `second-${Date.now()}@example.com`;
+      await userRepo.create(secondEmail, 'hash', 'S');
+      const second = await userRepo.findByEmail(secondEmail);
+      const secondMembership = await membershipRepo.create(db, {
+        organizationId: org.organizationId, userId: second!.id, role: 'admin', status: 'active',
+        invitedByUserId: null, joinedTime: new Date(), removedTime: null,
+      });
+      await membershipRepo.updateRole(db, secondMembership.id, 'member');
+
+      const members = await svc.listMembers(org.organizationId);
+      const ownerMembershipId = members.find((m) => m.userId === owner!.id)!.membershipId;
+      await expect(svc.assignRole(org.organizationId, ownerMembershipId, 'member', second!.id)).rejects.toBeInstanceOf(ForbiddenError);
     } finally {
       await pool.end();
     }
@@ -104,7 +134,7 @@ describe.skipIf(!URL)('organization (real MySQL)', () => {
       const b = await svc.createOrganization(user!.id, 'B');
       const aMembers = await svc.listMembers(a.organizationId);
       // 用 A 组织的 membership id 在 B 组织里做角色分配 → 404（跨组织不可访问）
-      await expect(svc.assignRole(b.organizationId, aMembers[0].membershipId, 'member', 999999)).rejects.toBeInstanceOf(EntityNotFoundError);
+      await expect(svc.assignRole(b.organizationId, aMembers[0].membershipId, 'member', user!.id)).rejects.toBeInstanceOf(EntityNotFoundError);
     } finally {
       await pool.end();
     }

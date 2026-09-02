@@ -1,18 +1,18 @@
 import type { Migration } from '../migrate.js';
 
 /**
- * V3 Phase 1 身份与会话 schema（6 张表，不含 schema_migrations —— runner 自建）。
+ * 身份与会话 schema（6 张表，不含 schema_migrations，runner 自建）。
  *
- * 对应 docs/v3/实施规格.md §4.1/4.2：
+ * 约束：
  * - 所有主键 BIGINT UNSIGNED AUTO_INCREMENT；时间 DATETIME(3) 以 UTC 读写。
  * - DB 列 snake_case；核心业务关系建外键。
  * - 建表顺序按外键依赖：users -> plan -> subscription -> email tokens -> devices -> refresh tokens。
  *
  * 迁移统一 `SET time_zone = '+00:00'`：应用只以 UTC 读写 DATETIME(3)，不依赖 DB
- * 或宿主机时区（实施规格 §4.2）。pool 侧时区由 mysqlPool.ts 的 `timezone: 'Z'` 兜住。
+ * 或宿主机时区（实施规格 §2）。pool 侧时区由 mysqlPool.ts 的 `timezone: 'Z'` 兜住。
  */
-export const usersAuthV3: Migration = {
-  version: '001_users_auth_v3',
+export const usersAuthMigration: Migration = {
+  version: '001_users_auth',
   async up(db): Promise<void> {
     await db.query(`SET time_zone = '+00:00'`);
 

@@ -2,14 +2,14 @@ import { ResourceContentInvalidError } from '../domain/errors.js';
 import type { ResourceType } from '../domain/enums.js';
 
 /**
- * 资源 content 校验（§4.4）与 canonical JSON 计量（§4.2）。
+ * 资源 content 校验（§6.3）与 canonical JSON 计量（§6.2）。
  *
- * content 校验是**纯函数**（§5 说明：在业务事务外先做），不依赖订阅快照；
+ * content 校验是**纯函数**（在业务事务外先做），不依赖订阅快照；
  * 引擎白名单（connection_template 的 databaseType 是否在订阅快照内）在
  * ResourceService 锁内按快照判定，返回 403 ORGANIZATION_FEATURE_REQUIRED。
  */
 
-/** 递归字典序键排序 + 紧凑序列化（§4.2 canonical JSON）。 */
+/** 递归字典序键排序 + 紧凑序列化（§6.2 canonical JSON）。 */
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(sortKeys(value));
 }

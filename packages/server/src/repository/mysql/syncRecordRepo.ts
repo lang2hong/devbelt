@@ -2,7 +2,7 @@ import type { ISyncRecordRepo } from '../interfaces.js';
 import type { PersonalConnectionMeta } from '../../domain/entities.js';
 import type { Queryable } from './db.js';
 
-// u64 协议字段（key_epoch/version/change_sequence）CAST AS CHAR 返回十进制字符串（§8.1.7/8）。
+// u64 协议字段（key_epoch/version/change_sequence）CAST AS CHAR 返回十进制字符串（§7.1）。
 const SELECT_COLS = `
   id, user_id,
   CAST(key_epoch AS CHAR) AS key_epoch,

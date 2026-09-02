@@ -110,7 +110,7 @@ describe.skipIf(!URL)('concurrency (real MySQL)', () => {
       const email = uniqueEmail();
       await registerAndVerify(emailSender, auth, email);
       const user = await userRepo.findByEmail(email);
-      // Phase 1 Free 的 max_devices=0（无限）；此处把该用户 entitlement 收紧为 1，验证并发不超额
+      // Free 的 max_devices=0（无限）；此处把该用户 entitlement 收紧为 1，验证并发不超额
       await db.query(
         "UPDATE personal_subscriptions SET entitlement_snapshot = JSON_SET(entitlement_snapshot, '$.maxDevices', 1) WHERE user_id = ?",
         [user!.id],

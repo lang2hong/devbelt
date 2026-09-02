@@ -1,7 +1,7 @@
 import type { MysqlDb } from './db.js';
 
 /**
- * 让连接池每建立一条连接都初始化 UTC 会话时区（实施规格 §4.2：
+ * 让连接池每建立一条连接都初始化 UTC 会话时区（实施规格 §2：
  * 「migration 与每个 MySQL pool connection 初始化必须执行 SET time_zone = '+00:00'」）。
  *
  * @fastify/mysql 不暴露 per-connection init SQL 选项，但把底层 mysql2 pool

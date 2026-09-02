@@ -1,12 +1,12 @@
 import type { Migration } from '../migrate.js';
 
 /**
- * V3 个人 E2E 同步数据层（§8.1.5/8.1.6/8.1.12；专项切片 S1）。
+ * 个人端到端同步数据层。
  *
  * forward-only：MySQL DDL 隐式提交，本迁移不假设可整体回滚；任一步失败即停部署、
  * 不启动依赖新 schema 的应用版本，由审查通过的前向 repair migration 修复。
  *
- * 顺序按 §8.1.12：①ALTER plans + seed → ②..⑥建表 → ⑦既有订阅快照回填。
+ * 顺序（§4.1）：①ALTER plans + seed → ②..⑥建表 → ⑦既有订阅快照回填。
  * 所有表外键仅引用 users（均建于 001 之后），无跨表顺序依赖。
  * - personal_sync_state：严格单行（PK=user_id）；epoch/stateVersion/envelope 元数据 + 公开签名材料。
  * - personal_connection_meta：E2E record/tombstone；record nonce 唯一性由 personal_sync_nonces 单独强制（本表不加 unique）。
@@ -14,12 +14,12 @@ import type { Migration } from '../migrate.js';
  * - personal_sync_mutations：mutation receipt（幂等重放）仅存定长 digest。
  * - personal_sync_reset_tokens：reset-after-loss 邮箱挑战，token_hash 只存 SHA-256。
  */
-export const personalSyncV3: Migration = {
-  version: '009_personal_sync_v3',
+export const personalSyncMigration: Migration = {
+  version: '009_personal_sync',
   async up(db): Promise<void> {
     await db.query(`SET time_zone = '+00:00'`);
 
-    // ① 个人套餐新增两项数值配额列（0=unlimited；V1 Free 固定 500 / 33,554,432，§8.1.1）
+    // ① 个人套餐新增两项数值配额列（0=unlimited；Free 固定 500 / 33,554,432，§4.2）
     await db.query(`
       ALTER TABLE personal_plans
         ADD COLUMN max_connection_metas BIGINT UNSIGNED NOT NULL DEFAULT 0,
@@ -126,7 +126,7 @@ export const personalSyncV3: Migration = {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
-    // ⑦ 既有个人订阅快照回填两项新权益（V1 Free 固定值 §8.1.1）
+    // ⑦ 个人订阅快照回填两项权益（Free 固定值 §4.2）
     await db.query(
       `UPDATE personal_subscriptions
        SET entitlement_snapshot = JSON_SET(

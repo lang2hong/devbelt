@@ -2,7 +2,7 @@ import { createPublicKey, createHash, verify as cryptoVerify, type KeyObject } f
 import { ValidationError } from '../domain/errors.js';
 
 /**
- * 个人 E2E 同步的验签 / digest / JCS（§8.1.7/8.1.8）。
+ * 个人 E2E 同步的验签 / digest / JCS（§7.4）。
  *
  * 服务端只验签、只校验协议元数据与 KDF 参数范围；不派生任何密钥、不持有明文。
  * - 签名 Ed25519（RFC8032），公钥为服务端存 `personal_sync_state.sign_pub`（32B raw）。

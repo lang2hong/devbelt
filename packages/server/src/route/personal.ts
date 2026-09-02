@@ -12,7 +12,7 @@ export interface PersonalRouteOptions {
   revokeDevice: (userId: number, deviceId: number) => Promise<{ ok: true }>;
 }
 
-/** 本人设备列表 / 撤销（需认证）。实施规格 §4.6。 */
+/** 本人设备列表 / 撤销（需认证）。实施规格 §5.2。 */
 export async function personalRoutes(app: FastifyInstance, opts: PersonalRouteOptions): Promise<void> {
   app.register(authScope, {
     tokenService: opts.tokenService,

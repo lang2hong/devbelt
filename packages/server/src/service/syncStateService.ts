@@ -15,7 +15,7 @@ import {
 import { incU64 } from '../domain/syncU64.js';
 import { SYNC_DOMAIN, assertU64, assertEpoch, verifySignature, checkReceipt, recordReceipt } from './syncShared.js';
 
-const V1 = 1 as const;
+const SUPPORTED_VERSION = 1 as const;
 const SUITE = 'AES-256-GCM' as const;
 
 /** init / destroy / reset 里由客户端提交的新状态（epoch/stateVersion/changeSequence 由服务端定）。 */
@@ -63,7 +63,7 @@ export interface StateDto {
 }
 
 function validateV1Protocol(protocolVersion: number, cipherSuite: string, formatVersion: number): void {
-  if (protocolVersion !== V1 || formatVersion !== V1 || cipherSuite !== SUITE) {
+  if (protocolVersion !== SUPPORTED_VERSION || formatVersion !== SUPPORTED_VERSION || cipherSuite !== SUITE) {
     throw new SyncProtocolUnsupportedError();
   }
 }
@@ -139,7 +139,7 @@ export class SyncStateService {
       this.assertExpectedVersion(state, input.expectedStateVersion);
 
       validateSmpKdf(input.smpKdf);
-      // envelope 版本单调：smp +1；recovery 不变（§8.1.2）。
+      // envelope 版本单调：smp +1；recovery 不变（§7.3）。
       if (input.envelopeSmp.version !== incU64(state.envelopeSmp.version)) throw new ValidationError('smp envelope version must be increment of stored');
       if (input.envelopeSmp.nonce.length !== 12 || input.envelopeSmp.ct.length !== 32 || input.envelopeSmp.tag.length !== 16) throw new ValidationError('invalid smp envelope');
 
@@ -178,7 +178,7 @@ export class SyncStateService {
       const receipt = await checkReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest);
       if (receipt) return { keyEpoch: input.keyEpoch, stateVersion: receipt.resultVersion ?? state.stateVersion, recoveryCodeSetTime: state.recoveryCodeSetTime ? state.recoveryCodeSetTime.toISOString() : '' };
 
-      // recover 用旧 recoverSignPub 验签（§8.1.2）。
+      // recover 用旧 recoverSignPub 验签（§7.4）。
       this.assertSignature(state.recoverSignPub, userId, input, 'state.recover');
       this.assertExpectedVersion(state, input.expectedStateVersion);
 
@@ -227,7 +227,7 @@ export class SyncStateService {
       this.assertExpectedVersion(state, input.expectedStateVersion);
 
       const now = new Date();
-      // 逐个 tombstone：version+1 + 全局单调 change_sequence（§8.1.4：一个序列恰对应一条变更，永不重置）。
+      // 逐个 tombstone：version+1 + 全局单调 change_sequence（§7.3：一个序列恰对应一条变更，永不重置）。
       let seq = state.changeSequence;
       const active = await this.recordRepo.listActiveByEpoch(tx, userId, state.keyEpoch);
       for (const r of active) {

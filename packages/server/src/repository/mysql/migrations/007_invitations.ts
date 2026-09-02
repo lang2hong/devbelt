@@ -1,7 +1,7 @@
 import type { Migration } from '../migrate.js';
 
 /**
- * V3 组织邀请（切片 3，§4.2/§4.3）。
+ * 组织邀请。
  *
  * - token_hash 只存 SHA-256，`UNIQUE` 保证同一明文 token 全库唯一。
  * - 复合 FK `(membership_id, organization_id)` → organization_memberships
@@ -9,8 +9,8 @@ import type { Migration } from '../migrate.js';
  * - accepted_time / revoked_time NULL 表示「未接受 / 未撤销」；终态（accepted 或
  *   revoked）不删除行（保留审计线索）。
  */
-export const invitationsV3: Migration = {
-  version: '007_invitations_v3',
+export const invitationsMigration: Migration = {
+  version: '007_invitations',
   async up(db): Promise<void> {
     await db.query(`SET time_zone = '+00:00'`);
     await db.query(`

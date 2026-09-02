@@ -38,7 +38,7 @@ services:
       MYSQL_USER: dbclient
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
       MYSQL_DATABASE: db_client
-      # Ed25519 签名密钥（V3 取代 JWT_SECRET，实施规格 §4.5）。`:?` 让缺失在 compose
+      # Ed25519 签名密钥（实施规格 §5.1）。`:?` 让缺失在 compose
       # 阶段就失败，而不是留到运行时。TOKEN_VERIFY_KEYS_JSON 需包含 TOKEN_SIGNING_KID
       # 对应的公钥。见 .env.example 的生成命令。
       TOKEN_SIGNING_KEY_B64: ${TOKEN_SIGNING_KEY_B64:?TOKEN_SIGNING_KEY_B64 is required}

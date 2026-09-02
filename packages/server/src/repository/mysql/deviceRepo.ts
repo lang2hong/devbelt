@@ -4,7 +4,7 @@ import type { DeviceStatus } from '../../domain/enums.js';
 import type { MysqlDb, Queryable } from './db.js';
 
 /**
- * 设备仓储（V3：device_key 为客户端生成的稳定随机标识，UNIQUE(user_id, device_key)）。
+ * 设备仓储。device_key 为客户端生成的稳定随机标识，UNIQUE(user_id, device_key)。
  *
  * 事务方法（带 exec 参数）在调用方事务上执行，用于：
  * - 设备配额（countActive + upsert + 用户行锁）的并发正确性

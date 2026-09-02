@@ -956,7 +956,7 @@ function toResourceSummary(r: Resource): ResourceSummaryDto {
   };
 }
 
-// ── 个人 E2E 同步（§8.1 专项）──
+// ── 个人 E2E 同步（§7 专项）──
 
 export class FakeSyncStateRepo implements ISyncStateRepo {
   readonly store = new Map<number, PersonalSyncState>();

@@ -16,8 +16,8 @@ export interface AuthScopeOptions {
 /**
  * 认证作用域插件：内部注册的路由均需有效 access token（Ed25519 JWT）。
  *
- * V3 access token 无 sid 会话吊销 —— 吊销只作用于 refresh token（family 轮换 +
- * 复用检测）。所以这里只验签 + 检查用户 status（实施规格 §4.5：access token
+ * access token 无 sid 会话吊销；吊销只作用于 refresh token（family 轮换 +
+ * 复用检测）。所以这里只验签 + 检查用户 status（实施规格 §5.1：access token
  * 到期前可继续有效，但每个受保护请求仍检查用户状态）。
  *
  * Fastify 封装上下文语义：onRequest 钩子只作用于本插件作用域，故需认证的路由

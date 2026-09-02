@@ -45,6 +45,7 @@ import { invitationRoutes } from './route/invitations.js';
 import { syncRoutes } from './route/sync.js';
 import { registerErrorHandler } from './middleware/errorHandler.js';
 import { securityHeaders } from './middleware/securityHeaders.js';
+import { buildLoggerOptions } from './middleware/requestLogging.js';
 import { runMigrations } from './repository/mysql/migrate.js';
 import { migrations } from './repository/mysql/migrations/index.js';
 import { mysqlTimeZoneInit } from './repository/mysql/mysqlTimeZoneInit.js';
@@ -55,16 +56,17 @@ import { withTransaction } from './repository/mysql/db.js';
  *
  * 依赖链：route -> service -> repository(interface) <- mysql 实现。
  *
- * V3 切片 1：身份与会话。EmailSender 按 SMTP_* 环境变量选择（生产 SMTP / 开发 log）。
+ * EmailSender 按 SMTP_* 环境变量选择（生产 SMTP / 开发 log）。
  */
 export async function createApp() {
   const app = Fastify({
-    logger: true,
+    // 自定义 req 序列化器：URL 里的邮箱验证 / 邀请 token 不得进日志（§8）。
+    logger: buildLoggerOptions(),
     trustProxy: config.trustProxy,
     bodyLimit: 1024 * 1024,
     ajv: {
       customOptions: {
-        // 让 additionalProperties: false 真正拒绝未知字段（实施规格 §5.1），
+        // 让 additionalProperties: false 真正拒绝未知字段（实施规格 §5.2），
         // 而不是 Fastify 默认的「静默剔除」。
         removeAdditional: false,
       },
@@ -142,6 +144,7 @@ export async function createApp() {
   const resourceService = new OrganizationResourceService(
     organizationRepo,
     organizationSubscriptionRepo,
+    membershipRepo,
     folderRepo,
     resourceRepo,
     (fn) => withTransaction(app.mysql, fn),
@@ -170,9 +173,9 @@ export async function createApp() {
     rateLimiter,
   );
 
-  // 受控限流清理任务（实施规格 §4.2）：过期桶由周期任务删除，不依赖请求
+  // 受控限流清理任务（实施规格 §3）：过期桶由周期任务删除，不依赖请求
   startRateLimitCleanup(rateLimitRepo);
-  // 受控邀请过期清理任务（实施规格 §4.3）：过期邀请释放容量，不依赖成员再次操作
+  // 受控邀请过期清理任务（实施规格 §3）：过期邀请释放容量，不依赖成员再次操作
   startInvitationCleanup(() => organizationService.expireInvitations());
 
   // route 层

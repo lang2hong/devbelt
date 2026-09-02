@@ -58,8 +58,8 @@ async function makeVerifiedUser(userRepo: MysqlUserRepo, db: MysqlDb, email: str
   return user;
 }
 
-async function inviteAndGetToken(stack: Awaited<ReturnType<typeof makeStack>>, orgId: number, email: string) {
-  await stack.svc.inviteMember(orgId, 1, 'admin', email);
+async function inviteAndGetToken(stack: Awaited<ReturnType<typeof makeStack>>, orgId: number, adminUserId: number, email: string) {
+  await stack.svc.inviteMember(orgId, adminUserId, email);
   return stack.emailSender.sent.filter((m) => m.kind === 'invitation').at(-1)!.token!;
 }
 
@@ -76,7 +76,7 @@ describe.skipIf(!URL)('invitation (real MySQL)', () => {
 
       const targetEmail = uniqueEmail('t');
       const target = await makeVerifiedUser(stack.userRepo, db, targetEmail);
-      const token = await inviteAndGetToken(stack, org.organizationId, targetEmail);
+      const token = await inviteAndGetToken(stack, org.organizationId, admin.id, targetEmail);
 
       const result = await stack.svc.acceptInvitation(token, target.id);
       expect(result.organization.organizationId).toBe(org.organizationId);
@@ -103,7 +103,7 @@ describe.skipIf(!URL)('invitation (real MySQL)', () => {
       const emails = [uniqueEmail('a'), uniqueEmail('b'), uniqueEmail('c')];
       for (const email of emails) await makeVerifiedUser(stack.userRepo, db, email);
 
-      const results = await Promise.allSettled(emails.map((email) => stack.svc.inviteMember(org.organizationId, admin.id, 'admin', email)));
+      const results = await Promise.allSettled(emails.map((email) => stack.svc.inviteMember(org.organizationId, admin.id, email)));
       const fulfilled = results.filter((r) => r.status === 'fulfilled');
       const quota = results.filter((r) => r.status === 'rejected' && (r as any).reason instanceof OrganizationQuotaExceededError);
       expect(fulfilled).toHaveLength(2);
@@ -130,8 +130,8 @@ describe.skipIf(!URL)('invitation (real MySQL)', () => {
       const targetEmail = uniqueEmail('t');
       await makeVerifiedUser(stack.userRepo, db, targetEmail);
 
-      await stack.svc.inviteMember(org.organizationId, admin.id, 'admin', targetEmail);
-      await stack.svc.inviteMember(org.organizationId, admin.id, 'admin', targetEmail);
+      await stack.svc.inviteMember(org.organizationId, admin.id, targetEmail);
+      await stack.svc.inviteMember(org.organizationId, admin.id, targetEmail);
 
       const [rows] = (await db.query(
         "SELECT COUNT(*) AS cnt FROM organization_invitations WHERE organization_id = ? AND accepted_time IS NULL AND revoked_time IS NULL",
@@ -155,7 +155,7 @@ describe.skipIf(!URL)('invitation (real MySQL)', () => {
       await makeVerifiedUser(stack.userRepo, db, targetEmail);
       const other = await makeVerifiedUser(stack.userRepo, db, uniqueEmail('o'));
 
-      const token = await inviteAndGetToken(stack, org.organizationId, targetEmail);
+      const token = await inviteAndGetToken(stack, org.organizationId, admin.id, targetEmail);
       await expect(stack.svc.acceptInvitation(token, other.id)).rejects.toBeInstanceOf(InvitationInvalidError);
     } finally {
       await pool.end();
@@ -172,7 +172,7 @@ describe.skipIf(!URL)('invitation (real MySQL)', () => {
       const org = await stack.svc.createOrganization(admin.id, 'Acme');
       const targetEmail = uniqueEmail('t');
       const target = await makeVerifiedUser(stack.userRepo, db, targetEmail);
-      const r = await stack.svc.inviteMember(org.organizationId, admin.id, 'admin', targetEmail);
+      const r = await stack.svc.inviteMember(org.organizationId, admin.id, targetEmail);
 
       // 把 expires_time 改为过去，模拟自然过期
       const past = new Date(Date.now() - 1000);
@@ -203,7 +203,7 @@ describe.skipIf(!URL)('invitation (real MySQL)', () => {
       const org = await stack.svc.createOrganization(admin.id, 'Acme');
       const targetEmail = uniqueEmail('t');
       const target = await makeVerifiedUser(stack.userRepo, db, targetEmail);
-      const token = await inviteAndGetToken(stack, org.organizationId, targetEmail);
+      const token = await inviteAndGetToken(stack, org.organizationId, admin.id, targetEmail);
 
       await db.query('DELETE FROM organization_subscriptions WHERE organization_id = ?', [org.organizationId]);
       await expect(stack.svc.acceptInvitation(token, target.id)).rejects.toBeInstanceOf(InvitationInvalidError);
@@ -222,7 +222,7 @@ describe.skipIf(!URL)('invitation (real MySQL)', () => {
       const org = await stack.svc.createOrganization(admin.id, 'Acme');
       const targetEmail = uniqueEmail('t');
       const target = await makeVerifiedUser(stack.userRepo, db, targetEmail);
-      const token = await inviteAndGetToken(stack, org.organizationId, targetEmail);
+      const token = await inviteAndGetToken(stack, org.organizationId, admin.id, targetEmail);
 
       await db.query("UPDATE organization_subscriptions SET status = 'expired' WHERE organization_id = ?", [org.organizationId]);
       await expect(stack.svc.acceptInvitation(token, target.id)).rejects.toBeInstanceOf(InvitationInvalidError);
@@ -241,13 +241,13 @@ describe.skipIf(!URL)('invitation (real MySQL)', () => {
       const org = await stack.svc.createOrganization(admin.id, 'Acme');
       const targetEmail = uniqueEmail('t');
       const target = await makeVerifiedUser(stack.userRepo, db, targetEmail);
-      const token = await inviteAndGetToken(stack, org.organizationId, targetEmail);
+      const token = await inviteAndGetToken(stack, org.organizationId, admin.id, targetEmail);
       const [invRows] = (await db.query('SELECT id FROM organization_invitations WHERE organization_id = ?', [org.organizationId])) as [Array<{ id: number }>, unknown];
       const invitationId = invRows[0].id;
 
       const results = await Promise.allSettled([
         stack.svc.acceptInvitation(token, target.id),
-        stack.svc.revokeInvitation(org.organizationId, invitationId),
+        stack.svc.revokeInvitation(org.organizationId, admin.id, invitationId),
       ]);
       expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
 
@@ -272,14 +272,14 @@ describe.skipIf(!URL)('invitation (real MySQL)', () => {
       const org = await stack.svc.createOrganization(admin.id, 'Acme');
       const targetEmail = uniqueEmail('t');
       await makeVerifiedUser(stack.userRepo, db, targetEmail);
-      await stack.svc.inviteMember(org.organizationId, admin.id, 'admin', targetEmail);
+      await stack.svc.inviteMember(org.organizationId, admin.id, targetEmail);
 
       // 让既有邀请已过期，同时并发重邀（会复用 membership 并作废旧 token）
       await db.query("UPDATE organization_invitations SET expires_time = ? WHERE organization_id = ?", [new Date(Date.now() - 1000), org.organizationId]);
 
       const results = await Promise.allSettled([
         stack.svc.expireInvitations(),
-        stack.svc.inviteMember(org.organizationId, admin.id, 'admin', targetEmail),
+        stack.svc.inviteMember(org.organizationId, admin.id, targetEmail),
       ]);
       // 冒烟：两侧都拿到 org 行锁后串行化，任何一方都不应因死锁被回滚成 500
       for (const r of results) {
@@ -314,7 +314,7 @@ describe.skipIf(!URL)('invitation (real MySQL)', () => {
       const org = await stack.svc.createOrganization(admin.id, 'Acme');
       const targetEmail = uniqueEmail('t');
       const target = await makeVerifiedUser(stack.userRepo, db, targetEmail);
-      const token = await inviteAndGetToken(stack, org.organizationId, targetEmail);
+      const token = await inviteAndGetToken(stack, org.organizationId, admin.id, targetEmail);
       await db.query("UPDATE organization_invitations SET expires_time = ? WHERE organization_id = ?", [new Date(Date.now() - 1000), org.organizationId]);
 
       const results = await Promise.allSettled([
@@ -347,9 +347,9 @@ describe.skipIf(!URL)('invitation (real MySQL)', () => {
       const orgB = await stack.svc.createOrganization(admin.id, 'B');
       const targetEmail = uniqueEmail('t');
       await makeVerifiedUser(stack.userRepo, db, targetEmail);
-      const r = await stack.svc.inviteMember(orgA.organizationId, admin.id, 'admin', targetEmail);
+      const r = await stack.svc.inviteMember(orgA.organizationId, admin.id, targetEmail);
 
-      await expect(stack.svc.revokeInvitation(orgB.organizationId, r.invitationId)).rejects.toBeInstanceOf(EntityNotFoundError);
+      await expect(stack.svc.revokeInvitation(orgB.organizationId, admin.id, r.invitationId)).rejects.toBeInstanceOf(EntityNotFoundError);
     } finally {
       await pool.end();
     }
@@ -365,9 +365,9 @@ describe.skipIf(!URL)('invitation (real MySQL)', () => {
       const org = await stack.svc.createOrganization(admin.id, 'Acme');
       const targetEmail = uniqueEmail('t');
       const target = await makeVerifiedUser(stack.userRepo, db, targetEmail);
-      const r = await stack.svc.inviteMember(org.organizationId, admin.id, 'admin', targetEmail);
+      const r = await stack.svc.inviteMember(org.organizationId, admin.id, targetEmail);
 
-      await stack.svc.closeOrganization(org.organizationId);
+      await stack.svc.closeOrganization(org.organizationId, admin.id);
       const [rows] = (await db.query(
         "SELECT revoked_time FROM organization_invitations WHERE id = ?",
         [r.invitationId],

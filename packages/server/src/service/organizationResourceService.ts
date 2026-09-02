@@ -14,6 +14,7 @@ import type { ResourceType } from '../domain/enums.js';
 import type {
   IOrganizationRepo,
   IOrganizationSubscriptionRepo,
+  IMembershipRepo,
   IFolderRepo,
   IResourceRepo,
   FolderDto,
@@ -21,13 +22,15 @@ import type {
 } from '../repository/interfaces.js';
 import type { OrganizationSubscription } from '../domain/entities.js';
 import type { TxRunner, Queryable } from '../repository/mysql/db.js';
+import { roleHasPermission, type PermissionCode } from '../authz/permissionCatalog.js';
+import { ForbiddenError } from '../domain/errors.js';
 import { canonicalJsonBytes, validateResourceContent } from './resourceContent.js';
 
 /**
- * 组织目录与资源服务（切片 4）。
+ * 组织目录与资源服务。
  *
  * 锁链：organization -> subscription(+ snapshot 计量) -> folder -> resource，
- * 接在既有锁链之后（§4.3）。祖先链环检测的安全性来自前置的**组织行锁串行化**——
+ * 接在既有锁链之后（§6.2）。祖先链环检测的安全性来自前置的**组织行锁串行化**——
  * 本服务所有写事务先 `lockById(org)`，故目录移动/删除的子树读取与并发写同一组织
  * 天然串行；若未来脱离组织锁复用这段逻辑，必须按 folder id 升序逐级锁定祖先链。
  */
@@ -35,6 +38,7 @@ export class OrganizationResourceService {
   constructor(
     private readonly organizationRepo: IOrganizationRepo,
     private readonly organizationSubscriptionRepo: IOrganizationSubscriptionRepo,
+    private readonly membershipRepo: IMembershipRepo,
     private readonly folderRepo: IFolderRepo,
     private readonly resourceRepo: IResourceRepo,
     private readonly runner: TxRunner,
@@ -47,24 +51,26 @@ export class OrganizationResourceService {
     return folders.map((f) => ({ folderId: f.id, name: f.name, parentId: f.parentId }));
   }
 
-  async createFolder(organizationId: number, name: string, parentId?: number | null): Promise<FolderDto> {
+  async createFolder(organizationId: number, actorUserId: number, name: string, parentId?: number | null): Promise<FolderDto> {
     const trimmed = validateName(name);
     const created = await this.runner(async (tx) => {
       await this.lockOrganization(tx, organizationId);
       await this.requireSubscription(tx, organizationId);
+      await this.requireActor(tx, organizationId, actorUserId, 'folder.manage');
       const parent = parentId == null ? null : await this.resolveFolder(tx, organizationId, parentId);
       return this.folderRepo.create(tx, { organizationId, parentId: parent ? parent.id : null, name: trimmed });
     });
     return { folderId: created.id, name: created.name, parentId: created.parentId };
   }
 
-  async updateFolder(organizationId: number, folderId: number, input: { name?: string; parentId?: number | null }): Promise<FolderDto> {
+  async updateFolder(organizationId: number, actorUserId: number, folderId: number, input: { name?: string; parentId?: number | null }): Promise<FolderDto> {
     const name = input.name !== undefined ? validateName(input.name) : undefined;
     if (name === undefined && input.parentId === undefined) throw new ValidationError('at least one folder field is required');
 
     const current = await this.runner(async (tx) => {
       await this.lockOrganization(tx, organizationId);
       await this.requireSubscription(tx, organizationId);
+      await this.requireActor(tx, organizationId, actorUserId, 'folder.manage');
       const folder = await this.requireFolder(tx, organizationId, folderId);
 
       if (name !== undefined) await this.folderRepo.updateName(tx, folderId, name, organizationId);
@@ -84,10 +90,11 @@ export class OrganizationResourceService {
     return { folderId: current.id, name: current.name, parentId: current.parentId };
   }
 
-  async deleteFolder(organizationId: number, folderId: number): Promise<{ ok: true }> {
+  async deleteFolder(organizationId: number, actorUserId: number, folderId: number): Promise<{ ok: true }> {
     await this.runner(async (tx) => {
       await this.lockOrganization(tx, organizationId);
       await this.requireSubscription(tx, organizationId);
+      await this.requireActor(tx, organizationId, actorUserId, 'folder.manage');
       await this.requireFolder(tx, organizationId, folderId);
       const children = await this.folderRepo.countActiveChildren(tx, organizationId, folderId);
       const resources = await this.folderRepo.countActiveResources(tx, organizationId, folderId);
@@ -105,15 +112,17 @@ export class OrganizationResourceService {
 
   async createResource(
     organizationId: number,
+    actorUserId: number,
     input: { resourceType: ResourceType; name: string; folderId?: number | null; content: Record<string, unknown> },
-    membershipId: number,
   ): Promise<ResourceSummaryDto> {
     const name = validateName(input.name);
-    validateResourceContent(input.resourceType, input.content); // 纯函数，事务外（§5）
+    validateResourceContent(input.resourceType, input.content); // 纯函数，事务外（§6.3）
 
     const created = await this.runner(async (tx) => {
       await this.lockOrganization(tx, organizationId);
       const subscription = await this.requireSubscription(tx, organizationId);
+      // 作者取锁内 membership：中间件传下来的 id 可能已被并发移除。
+      const membershipId = (await this.requireActor(tx, organizationId, actorUserId, 'resource.write')).id;
       this.assertEngineAllowed(subscription, input.resourceType, input.content);
 
       const folderId = input.folderId == null ? null : (await this.resolveFolder(tx, organizationId, input.folderId)).id;
@@ -140,9 +149,9 @@ export class OrganizationResourceService {
 
   async updateResource(
     organizationId: number,
+    actorUserId: number,
     resourceId: number,
     input: { baseVersion: number; name?: string; folderId?: number | null; content?: Record<string, unknown> },
-    membershipId: number,
   ): Promise<ResourceSummaryDto> {
     const name = input.name !== undefined ? validateName(input.name) : undefined;
     if (name === undefined && input.folderId === undefined && input.content === undefined) {
@@ -157,8 +166,9 @@ export class OrganizationResourceService {
     const updated = await this.runner(async (tx) => {
       await this.lockOrganization(tx, organizationId);
       const subscription = await this.requireSubscription(tx, organizationId);
+      const membershipId = (await this.requireActor(tx, organizationId, actorUserId, 'resource.write')).id;
 
-      // 锁序（§4.3）：folder 先于 resource。显式移动到目录时先锁定并校验目标 folder。
+      // 锁序（§6.2）：folder 先于 resource。显式移动到目录时先锁定并校验目标 folder。
       let resolvedFolderId: number | null | undefined;
       if (input.folderId !== undefined) {
         resolvedFolderId = input.folderId === null ? null : (await this.resolveFolder(tx, organizationId, input.folderId)).id;
@@ -177,7 +187,7 @@ export class OrganizationResourceService {
         bytesDelta: canonicalJsonBytes(newContent) - canonicalJsonBytes(existing.content),
       });
 
-      // 乐观锁数据库契约（§4.3）：WHERE version=baseVersion；0 行受影响说明版本已变。
+      // 乐观锁数据库契约（§6.2）：WHERE version=baseVersion；0 行受影响说明版本已变。
       const affected = await this.resourceRepo.update(tx, {
         id: resourceId,
         organizationId,
@@ -194,10 +204,11 @@ export class OrganizationResourceService {
     return toSummary(updated);
   }
 
-  async deleteResource(organizationId: number, resourceId: number, membershipId: number): Promise<{ ok: true }> {
+  async deleteResource(organizationId: number, actorUserId: number, resourceId: number): Promise<{ ok: true }> {
     await this.runner(async (tx) => {
       await this.lockOrganization(tx, organizationId);
       await this.requireSubscription(tx, organizationId);
+      const membershipId = (await this.requireActor(tx, organizationId, actorUserId, 'resource.delete')).id;
       const existing = await this.resourceRepo.findByIdForUpdate(tx, organizationId, resourceId);
       if (!existing || existing.deleteTime) throw new ResourceNotFoundError();
       await this.resourceRepo.softDelete(tx, resourceId, organizationId, new Date(), membershipId);
@@ -216,6 +227,25 @@ export class OrganizationResourceService {
     const subscription = await this.organizationSubscriptionRepo.findByOrganizationIdForUpdate(tx, organizationId);
     if (!subscription || subscription.status !== 'active') throw new OrganizationNotFoundError();
     return subscription;
+  }
+
+  /**
+   * 事务内复核操作者授权，并返回锁内 membership（§6.1/§6.2）。
+   *
+   * organizationAuth 在事务外判角色，请求放行后操作者可能被并发移除或降级；
+   * 这里在组织锁之后重锁 membership 重算权限码，并用锁内 id 作为资源作者，
+   * 避免把写入归属到已失效的 membership。
+   */
+  private async requireActor(
+    tx: Queryable,
+    organizationId: number,
+    actorUserId: number,
+    permission: PermissionCode,
+  ): Promise<{ id: number }> {
+    const actor = await this.membershipRepo.findByOrgAndUserForUpdate(tx, organizationId, actorUserId);
+    if (!actor || actor.status !== 'active') throw new OrganizationNotFoundError();
+    if (!roleHasPermission(actor.role, permission)) throw new ForbiddenError(`missing permission: ${permission}`);
+    return actor;
   }
 
   private async requireFolder(tx: Queryable, organizationId: number, folderId: number) {
@@ -239,7 +269,7 @@ export class OrganizationResourceService {
     }
   }
 
-  /** §4.2：数量与字节配额在锁内按快照计量；0 表示无限（跳过对应维度）。 */
+  /** §6.2：数量与字节配额在锁内按快照计量；0 表示无限（跳过对应维度）。 */
   private async assertResourceQuota(
     tx: Queryable,
     organizationId: number,

@@ -1,12 +1,11 @@
 import type { Migration } from '../migrate.js';
 
 /**
- * V3 组织套餐定义表（切片 2）。
- * 对应 docs/v3/实施规格.md §4.1/4.2：不含个人配额或 max_members；
+ * 组织套餐定义表。不含个人配额或 max_members；
  * included_seats 至少 1；allowed_template_database_types 为模板引擎白名单。
  */
-export const organizationPlansV3: Migration = {
-  version: '004_organization_plans_v3',
+export const organizationPlansMigration: Migration = {
+  version: '004_organization_plans',
   async up(db): Promise<void> {
     await db.query(`SET time_zone = '+00:00'`);
     await db.query(`

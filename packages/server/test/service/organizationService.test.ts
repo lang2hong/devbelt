@@ -13,7 +13,7 @@ import { OrganizationService } from '../../src/service/organizationService.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
 import { TokenService } from '../../src/service/tokenService.js';
 import { MemoryEmailSender } from '../../src/service/emailSender.js';
-import { OrganizationAdminRequiredError, ForbiddenError, EntityNotFoundError, ValidationError } from '../../src/domain/errors.js';
+import { OrganizationAdminRequiredError, ForbiddenError, EntityNotFoundError, ValidationError, OrganizationNotFoundError } from '../../src/domain/errors.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 
 function makeService() {
@@ -73,10 +73,44 @@ describe('OrganizationService', () => {
     expect(members[0].status).toBe('active');
   });
 
-  it('cannot demote the last active admin', async () => {
+  it('a non-member actor cannot assign roles (404, authorization re-checked in tx)', async () => {
     const { svc } = makeService();
     const { orgId, memberships } = await createOrg(svc, 1);
-    await expect(svc.assignRole(orgId, memberships[0].membershipId, 'member', 2)).rejects.toBeInstanceOf(OrganizationAdminRequiredError);
+    await expect(svc.assignRole(orgId, memberships[0].membershipId, 'member', 2)).rejects.toBeInstanceOf(OrganizationNotFoundError);
+  });
+
+  it('an actor demoted after middleware authorization can no longer assign roles', async () => {
+    const { svc, membershipRepo } = makeService();
+    const { orgId, memberships } = await createOrg(svc, 1);
+    const second = await addAdmin(membershipRepo, orgId, 2);
+    // 模拟「中间件放行后被并发降级」：actor 2 已不再是 admin
+    await membershipRepo.updateRole({} as Queryable, second.id, 'member');
+    await expect(svc.assignRole(orgId, memberships[0].membershipId, 'member', 2)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('an actor removed after middleware authorization can no longer remove members', async () => {
+    const { svc, membershipRepo } = makeService();
+    const { orgId, memberships } = await createOrg(svc, 1);
+    const second = await addAdmin(membershipRepo, orgId, 2);
+    await membershipRepo.remove({} as Queryable, second.id, new Date());
+    await expect(svc.removeMember(orgId, memberships[0].membershipId, 2)).rejects.toBeInstanceOf(OrganizationNotFoundError);
+  });
+
+  it('updateOrganization and closeOrganization reject a non-member actor', async () => {
+    const { svc } = makeService();
+    const { orgId } = await createOrg(svc, 1);
+    await expect(svc.updateOrganization(orgId, 2, 'Renamed')).rejects.toBeInstanceOf(OrganizationNotFoundError);
+    await expect(svc.closeOrganization(orgId, 2)).rejects.toBeInstanceOf(OrganizationNotFoundError);
+  });
+
+  it('updateOrganization rejects an actor without organization.update', async () => {
+    const { svc, membershipRepo } = makeService();
+    const { orgId } = await createOrg(svc, 1);
+    await membershipRepo.create({} as Queryable, {
+      organizationId: orgId, userId: 3, role: 'member', status: 'active',
+      invitedByUserId: 1, joinedTime: new Date(), removedTime: null,
+    });
+    await expect(svc.updateOrganization(orgId, 3, 'Renamed')).rejects.toBeInstanceOf(ForbiddenError);
   });
 
   it('cannot assign role to self', async () => {
@@ -94,10 +128,10 @@ describe('OrganizationService', () => {
     expect(admins).toHaveLength(1);
   });
 
-  it('cannot remove the last active admin', async () => {
+  it('a non-member actor cannot remove members (404)', async () => {
     const { svc } = makeService();
     const { orgId, memberships } = await createOrg(svc, 1);
-    await expect(svc.removeMember(orgId, memberships[0].membershipId, 2)).rejects.toBeInstanceOf(OrganizationAdminRequiredError);
+    await expect(svc.removeMember(orgId, memberships[0].membershipId, 2)).rejects.toBeInstanceOf(OrganizationNotFoundError);
   });
 
   it('cannot remove self', async () => {
@@ -126,7 +160,7 @@ describe('OrganizationService', () => {
     const { svc } = makeService();
     const { orgId } = await createOrg(svc, 1);
     await svc.createOrganization(2, 'Other');
-    await expect(svc.assignRole(orgId, 999999, 'admin', 2)).rejects.toBeInstanceOf(EntityNotFoundError);
+    await expect(svc.assignRole(orgId, 999999, 'admin', 1)).rejects.toBeInstanceOf(EntityNotFoundError);
   });
 
   it('listOrganizations returns only active orgs the user is an active member of', async () => {
@@ -156,7 +190,7 @@ describe('OrganizationService', () => {
       joinedTime: null,
       removedTime: null,
     });
-    await svc.closeOrganization(orgId);
+    await svc.closeOrganization(orgId, 1);
     expect(membershipRepo.store.get(invited.id)?.status).toBe('removed');
     const all = await svc.listMembers(orgId);
     expect(all).toHaveLength(1);

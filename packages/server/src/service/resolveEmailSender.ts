@@ -2,7 +2,7 @@ import { LogEmailSender, type EmailSender } from './emailSender.js';
 import { SmtpEmailSender } from './smtpEmailSender.js';
 
 /**
- * 按环境选择 EmailSender（实施规格 §4.7）。
+ * 按环境选择 EmailSender（实施规格 §5.1）。
  *
  * - production：必须配置 SMTP，否则验证邮件无法投递 —— 启动即失败。
  * - 非 production（开发/测试）：**固定** LogEmailSender，绝不向真实地址发信

@@ -1,7 +1,7 @@
 /**
- * 邮件投递抽象（实施规格 §4.7）。
+ * 邮件投递抽象（实施规格 §5.1：业务事务提交后再发送邮件）。
  *
- * 服务端只通过单一 EmailSender 发送邮件。Phase 1 有两类邮件：邮箱验证与组织邀请。
+ * 服务端只通过单一 EmailSender 发送邮箱验证与组织邀请邮件。
  * 生产环境使用部署环境注入的 SMTP 凭据，凭据只来自环境配置、不入库、不经 API 返回。
  * 测试与本地开发必须使用可断言的替身，禁止向真实地址发信。
  *
@@ -14,7 +14,7 @@ export interface EmailSender {
     token: string;
     displayName?: string;
   }): Promise<void>;
-  /** 发送「该邮箱已注册」提示（防枚举，见实施规格 §5 末段）。 */
+  /** 发送「该邮箱已注册」提示（防枚举，见实施规格 §5.1）。 */
   sendAlreadyRegisteredEmail(input: { to: string }): Promise<void>;
   /** 发送组织邀请邮件。token 为**明文**（仅用于构造一次链接），不得落日志。 */
   sendInvitationEmail(input: {

@@ -21,7 +21,7 @@ export default defineConfig({
           environment: 'node',
           include: ['test/**/*.test.ts'],
           exclude: ['test/integration/**'],
-          // Argon2id（实施规格 §4.5：memory 65536KiB / iterations 3）在纯 JS
+          // Argon2id（实施规格 §5.1：memory 65536KiB / iterations 3）在纯 JS
           // @noble/hashes 下每次约 2s；注册/登录/改密的测试单例含多次 hash，
           // 需要比默认 5s 更大的超时。集成测试单独有 testTimeout=60s。
           testTimeout: 60_000,

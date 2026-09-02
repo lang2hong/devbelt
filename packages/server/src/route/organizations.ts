@@ -82,9 +82,10 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
 
       org.patch('/api/organizations/:organizationId', { config: { permission: 'organization.update' }, schema: { params: organizationIdParam, body: updateOrganizationBody } }, async (req, reply) => {
         const organizationId = (req as any).authOrganizationId as number;
+        const actorUserId = (req as any).authUserId as number;
         const { name } = req.body as any;
         try {
-          const r = await svc.updateOrganization(organizationId, name);
+          const r = await svc.updateOrganization(organizationId, actorUserId, name);
           reply.send(r);
         } catch (e) {
           sendError(reply, e);
@@ -93,8 +94,9 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
 
       org.post('/api/organizations/:organizationId/close', { config: { permission: 'organization.close' }, schema: { params: organizationIdParam } }, async (req, reply) => {
         const organizationId = (req as any).authOrganizationId as number;
+        const actorUserId = (req as any).authUserId as number;
         try {
-          const r = await svc.closeOrganization(organizationId);
+          const r = await svc.closeOrganization(organizationId, actorUserId);
           reply.send(r);
         } catch (e) {
           sendError(reply, e);
@@ -155,14 +157,13 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         }
       });
 
-      // ── 邀请（切片 3，permission member.invite）──
+      // ── 邀请（permission member.invite）──
       org.post('/api/organizations/:organizationId/invitations', { config: { permission: 'member.invite' }, schema: { params: organizationIdParam, body: createInvitationBody } }, async (req, reply) => {
         const organizationId = (req as any).authOrganizationId as number;
         const actorUserId = (req as any).authUserId as number;
-        const actorRole = (req as unknown as AuthnOrgRequest).authMembershipRole;
         const { email, role } = req.body as any;
         try {
-          const r = await svc.inviteMember(organizationId, actorUserId, actorRole, email, role as OrganizationRole | undefined);
+          const r = await svc.inviteMember(organizationId, actorUserId, email, role as OrganizationRole | undefined);
           reply.code(201).send({ invitation: toInvitationDto(r) });
         } catch (e) {
           sendError(reply, e);
@@ -181,9 +182,10 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
 
       org.delete('/api/organizations/:organizationId/invitations/:invitationId', { config: { permission: 'member.invite' }, schema: { params: invitationIdParam } }, async (req, reply) => {
         const organizationId = (req as any).authOrganizationId as number;
+        const actorUserId = (req as any).authUserId as number;
         const invitationId = Number((req.params as any).invitationId);
         try {
-          const r = await svc.revokeInvitation(organizationId, invitationId);
+          const r = await svc.revokeInvitation(organizationId, actorUserId, invitationId);
           reply.send(r);
         } catch (e) {
           sendError(reply, e);
@@ -203,9 +205,10 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
 
       org.post('/api/organizations/:organizationId/folders', { config: { permission: 'folder.manage' }, schema: { params: organizationIdParam, body: createFolderBody } }, async (req, reply) => {
         const organizationId = (req as any).authOrganizationId as number;
+        const actorUserId = (req as any).authUserId as number;
         const body = req.body as any;
         try {
-          const folder = await resources.createFolder(organizationId, body.name, body.parentId === null ? null : body.parentId ? Number(body.parentId) : undefined);
+          const folder = await resources.createFolder(organizationId, actorUserId, body.name, body.parentId === null ? null : body.parentId ? Number(body.parentId) : undefined);
           reply.code(201).send({ folder: toFolderDto(folder) });
         } catch (e) {
           sendError(reply, e);
@@ -214,11 +217,12 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
 
       org.patch('/api/organizations/:organizationId/folders/:folderId', { config: { permission: 'folder.manage' }, schema: { params: folderIdParam, body: updateFolderBody } }, async (req, reply) => {
         const organizationId = (req as any).authOrganizationId as number;
+        const actorUserId = (req as any).authUserId as number;
         const folderId = Number((req.params as any).folderId);
         const body = req.body as any;
         const parentId = body.parentId === null ? null : body.parentId !== undefined ? Number(body.parentId) : undefined;
         try {
-          const folder = await resources.updateFolder(organizationId, folderId, { name: body.name, parentId });
+          const folder = await resources.updateFolder(organizationId, actorUserId, folderId, { name: body.name, parentId });
           reply.send({ folder: toFolderDto(folder) });
         } catch (e) {
           sendError(reply, e);
@@ -227,9 +231,10 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
 
       org.delete('/api/organizations/:organizationId/folders/:folderId', { config: { permission: 'folder.manage' }, schema: { params: folderIdParam } }, async (req, reply) => {
         const organizationId = (req as any).authOrganizationId as number;
+        const actorUserId = (req as any).authUserId as number;
         const folderId = Number((req.params as any).folderId);
         try {
-          const r = await resources.deleteFolder(organizationId, folderId);
+          const r = await resources.deleteFolder(organizationId, actorUserId, folderId);
           reply.send(r);
         } catch (e) {
           sendError(reply, e);
@@ -249,11 +254,11 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
 
       org.post('/api/organizations/:organizationId/resources', { config: { permission: 'resource.write' }, schema: { params: organizationIdParam, body: createResourceBody } }, async (req, reply) => {
         const organizationId = (req as any).authOrganizationId as number;
-        const membershipId = (req as unknown as AuthnOrgRequest).authMembershipId;
+        const actorUserId = (req as any).authUserId as number;
         const body = req.body as any;
         const folderId = body.folderId === null ? null : body.folderId !== undefined ? Number(body.folderId) : undefined;
         try {
-          const created = await resources.createResource(organizationId, { resourceType: body.resourceType as ResourceType, name: body.name, folderId, content: body.content }, membershipId);
+          const created = await resources.createResource(organizationId, actorUserId, { resourceType: body.resourceType as ResourceType, name: body.name, folderId, content: body.content });
           reply.code(201).send({ resource: toResourceSummaryDto(created) });
         } catch (e) {
           sendError(reply, e);
@@ -274,11 +279,11 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
       org.patch('/api/organizations/:organizationId/resources/:resourceId', { config: { permission: 'resource.write' }, schema: { params: resourceIdParam, body: updateResourceBody } }, async (req, reply) => {
         const organizationId = (req as any).authOrganizationId as number;
         const resourceId = Number((req.params as any).resourceId);
-        const membershipId = (req as unknown as AuthnOrgRequest).authMembershipId;
+        const actorUserId = (req as any).authUserId as number;
         const body = req.body as any;
         const folderId = body.folderId === null ? null : body.folderId !== undefined ? Number(body.folderId) : undefined;
         try {
-          const updated = await resources.updateResource(organizationId, resourceId, { baseVersion: body.baseVersion, name: body.name, folderId, content: body.content }, membershipId);
+          const updated = await resources.updateResource(organizationId, actorUserId, resourceId, { baseVersion: body.baseVersion, name: body.name, folderId, content: body.content });
           reply.send({ resource: toResourceSummaryDto(updated) });
         } catch (e) {
           sendError(reply, e);
@@ -288,9 +293,9 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
       org.delete('/api/organizations/:organizationId/resources/:resourceId', { config: { permission: 'resource.delete' }, schema: { params: resourceIdParam } }, async (req, reply) => {
         const organizationId = (req as any).authOrganizationId as number;
         const resourceId = Number((req.params as any).resourceId);
-        const membershipId = (req as unknown as AuthnOrgRequest).authMembershipId;
+        const actorUserId = (req as any).authUserId as number;
         try {
-          const r = await resources.deleteResource(organizationId, resourceId, membershipId);
+          const r = await resources.deleteResource(organizationId, actorUserId, resourceId);
           reply.send(r);
         } catch (e) {
           sendError(reply, e);

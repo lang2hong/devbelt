@@ -14,16 +14,20 @@ export interface OrganizationAuthOptions {
 }
 
 /**
- * 组织授权插件（实施规格 §5 授权顺序）：
+ * 组织授权插件（实施规格 §2 第 5 条授权顺序）：
  *
  *   认证（Ed25519 验签）→ users.status=active → organization active →
  *   active membership → permission code。
  *
  * - 组织不存在 / closed / 调用者非 active membership 统一返回 `404 ORGANIZATION_NOT_FOUND`
- *   （不区分、防枚举，§5）。
+ *   （不区分、防枚举，§6.1）。
  * - 权限不足返回 `403 FORBIDDEN`。
+ *
+ * 这里的判定发生在事务外，只是第一道闸门：写操作必须在事务内用
+ * `authUserId` 重新复核操作者（§6.2），否则「放行 → 被并发降级 → 仍然提交」
+ * 的竞态会绕过授权。
  * - 路由通过 `{ config: { permission: '...' } }` 声明所需权限码。组织 id 从 URL 的
- *   `:organizationId` 取（Workspace 选择不是授权输入，§2.5）。
+ *   `:organizationId` 取（Workspace 选择不是授权输入，§2 第 5 条）。
  */
 export async function organizationAuth(app: FastifyInstance, opts: OrganizationAuthOptions): Promise<void> {
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
@@ -69,7 +73,6 @@ export async function organizationAuth(app: FastifyInstance, opts: OrganizationA
 
     (req as unknown as AuthnOrgRequest).authUserId = userId;
     (req as unknown as AuthnOrgRequest).authOrganizationId = organizationId;
-    (req as unknown as AuthnOrgRequest).authMembershipId = membership.id;
     (req as unknown as AuthnOrgRequest).authMembershipRole = membership.role;
     (req as unknown as AuthnOrgRequest).authOrganization = org;
   });
@@ -77,13 +80,19 @@ export async function organizationAuth(app: FastifyInstance, opts: OrganizationA
 }
 
 /**
- * organizationAuth 挂到 request 上的已解析上下文（handler 直接取用，不得重复查询）。
- * 中间件已校验组织 active + active membership，这里不重查以避免竞态（§5）。
+ * organizationAuth 挂到 request 上的已解析上下文。
+ *
+ * 这些值只反映**请求进入时**的状态，仅可用于只读响应组装。写路径不得据此授权或
+ * 记账：本钩子在事务外执行，放行后操作者可能被并发降级/移除。因此写操作只传
+ * `authUserId`，由 service 在组织锁内重锁 membership、重算权限码并取用锁内
+ * membership id（§6.1/§6.2）。
+ *
+ * 也因此不再暴露 `authMembershipId` —— 它曾被资源写入直接当作作者字段，
+ * 会把写入归属到已失效的 membership。
  */
 export interface AuthnOrgRequest {
   authUserId: number;
   authOrganizationId: number;
-  authMembershipId: number;
   authMembershipRole: import('../domain/enums.js').OrganizationRole;
   authOrganization: import('../domain/entities.js').Organization;
 }

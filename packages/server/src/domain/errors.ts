@@ -1,8 +1,7 @@
 /**
  * 领域错误基类：携带 code 供路由层映射 HTTP 状态码。
  *
- * code 全集见 docs/v3/实施规格.md §5「统一错误」。本切片只实现会用到的错误类，
- * 但 errorStatus 映射表会覆盖已冻结的全部 code，后续切片无需改动映射结构。
+ * code 全集见 docs/实施规格.md。errorStatus 映射表集中维护 HTTP 状态。
  */
 export class DomainError extends Error {
   constructor(message: string, public readonly code: string) {
@@ -37,7 +36,7 @@ export class UserDisabledError extends DomainError {
 
 /**
  * 个人权益不足（如设备数超限）→ 403 PERSONAL_FEATURE_REQUIRED。
- * 与后续切片的 ORGANIZATION_FEATURE_REQUIRED / FORBIDDEN 语义分离。
+ * 与 ORGANIZATION_FEATURE_REQUIRED / FORBIDDEN 语义分离。
  */
 export class PersonalFeatureRequiredError extends DomainError {
   constructor(public readonly feature: string) {
@@ -71,7 +70,7 @@ export class ConflictError extends DomainError {
 }
 
 /**
- * 组织不存在 / closed / 调用者非 active member → 统一 404（§5：不区分，防枚举）。
+ * 组织不存在 / closed / 调用者非 active member → 统一 404（§6.1：不区分，防枚举）。
  */
 export class OrganizationNotFoundError extends DomainError {
   constructor() {
@@ -80,7 +79,7 @@ export class OrganizationNotFoundError extends DomainError {
   }
 }
 
-/** 操作会导致最后一个 active admin 消失 → 409 ORGANIZATION_ADMIN_REQUIRED（§3）。 */
+/** 操作会导致最后一个 active admin 消失 → 409 ORGANIZATION_ADMIN_REQUIRED（§6.1）。 */
 export class OrganizationAdminRequiredError extends DomainError {
   constructor() {
     super('at least one active admin is required', 'ORGANIZATION_ADMIN_REQUIRED');
@@ -112,7 +111,7 @@ export class InvitationTargetNotEligibleError extends DomainError {
   }
 }
 
-/** 组织容量（seat / 资源数量 / 字节）已满 → 409 ORGANIZATION_QUOTA_EXCEEDED（§4.2/§4.3）。 */
+/** 组织容量（seat / 资源数量 / 字节）已满 → 409 ORGANIZATION_QUOTA_EXCEEDED（§4.2/§6.2）。 */
 export class OrganizationQuotaExceededError extends DomainError {
   constructor(message = 'organization quota exceeded') {
     super(message, 'ORGANIZATION_QUOTA_EXCEEDED');
@@ -120,7 +119,7 @@ export class OrganizationQuotaExceededError extends DomainError {
   }
 }
 
-/** 组织资源不存在 / 软删除 / 跨组织 → 404 RESOURCE_NOT_FOUND（§9.1 ACL 语义依赖此码）。 */
+/** 组织资源不存在 / 软删除 / 跨组织 → 404 RESOURCE_NOT_FOUND（§8）。 */
 export class ResourceNotFoundError extends DomainError {
   constructor() {
     super('resource not found', 'RESOURCE_NOT_FOUND');
@@ -168,14 +167,14 @@ export class FolderMoveCycleError extends DomainError {
   }
 }
 
-// ── 个人 E2E 同步（§8.1.11）──
+// ── 个人 E2E 同步（§8 同步错误）──
 
 /** 无 active sync state 的读写（与从未注册同形）→ 400 SYNC_NOT_INITIALIZED。 */
 export class SyncNotInitializedError extends DomainError {
   constructor() { super('sync not initialized', 'SYNC_NOT_INITIALIZED'); this.name = 'SyncNotInitializedError'; }
 }
 
-/** record 不存在（同一 epoch 下从未创建）→ 404 NOT_FOUND（§8.1.2：错误体不出现 recordId）。 */
+/** record 不存在（同一 epoch 下从未创建）→ 404 NOT_FOUND（§8：错误体不出现 recordId）。 */
 export class SyncRecordNotFoundError extends DomainError {
   constructor() { super('record not found', 'NOT_FOUND'); this.name = 'SyncRecordNotFoundError'; }
 }

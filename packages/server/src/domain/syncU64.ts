@@ -1,5 +1,5 @@
 /**
- * u64 十进制字符串解析与比较（§8.1.8：baseVersion/expectedStateVersion 须可解析为
+ * u64 十进制字符串解析与比较（§7.1：baseVersion/expectedStateVersion 须可解析为
  * unsigned 64-bit 十进制，否则 400 VALIDATION_FAILED）。
  *
  * 约定：sync 域所有 u64 协议字段（keyEpoch / stateVersion / changeSequence / record

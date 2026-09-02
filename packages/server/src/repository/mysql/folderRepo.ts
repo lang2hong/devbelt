@@ -3,7 +3,7 @@ import type { Folder } from '../../domain/entities.js';
 import type { MysqlDb, Queryable } from './db.js';
 
 /**
- * 组织目录仓储（切片 4）。表规范名 `organization_resource_folders`（§4.1）。
+ * 组织目录仓储。表名 `organization_resource_folders`。
  *
  * 所有写方法在事务 `exec` 内执行；软删除置 delete_time。移动/环检测的祖先链锁定
  * 由 ResourceService 在组织行锁之后按 id 升序获取，本仓储只提供所需查询。

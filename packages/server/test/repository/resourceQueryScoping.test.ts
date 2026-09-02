@@ -4,7 +4,7 @@ import { MysqlResourceRepo } from '../../src/repository/mysql/resourceRepo.js';
 import type { MysqlDb } from '../../src/repository/mysql/db.js';
 
 /**
- * 机械化 §6.5 验收项「查询均受 organizationId 约束」：folder / resource 仓储的
+ * 机械化验收项「查询均受 organizationId 约束」（§2 第 5 条）：folder / resource 仓储的
  * 每条查询（除 create 的 INSERT + 按刚插入主键回读外）都必须带 `organization_id`
  * 谓词，跨组织越界在 SQL 层即被限定，而非只靠服务层事后比对。
  */

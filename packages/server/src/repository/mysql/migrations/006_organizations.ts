@@ -1,16 +1,16 @@
 import type { Migration } from '../migrate.js';
 
 /**
- * V3 组织 / 组织订阅 / 成员关系（切片 2）。
+ * 组织、组织订阅和成员关系。
  *
  * 建表顺序按外键依赖：organizations -> organization_subscriptions -> organization_memberships。
- * 对应 docs/v3/实施规格.md §4.1/4.2：
+ * 约束：
  * - organizations：无 Owner 字段（业务口语中的「组织 Owner」仅指 admin）。
  * - organization_subscriptions：organization_id 唯一；`UNIQUE(id,organization_id)` 供复合外键。
  * - organization_memberships：`UNIQUE(organization_id,user_id)` + `UNIQUE(id,organization_id)`。
  */
-export const organizationsV3: Migration = {
-  version: '006_organizations_v3',
+export const organizationsMigration: Migration = {
+  version: '006_organizations',
   async up(db): Promise<void> {
     await db.query(`SET time_zone = '+00:00'`);
 

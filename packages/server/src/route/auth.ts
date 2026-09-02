@@ -16,7 +16,7 @@ export interface AuthRouteOptions {
  * 公开：register / login / refresh / logout / confirm-email / resend-verification
  * 需认证：change-password（包在 authScope 子作用域）
  *
- * 设备字段从请求体读取（V3 DeviceFields，非 V2 的请求头）。
+ * 设备字段从请求体读取。
  */
 export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): Promise<void> {
   const auth = opts.authService;
@@ -78,7 +78,7 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): 
     }
   });
 
-  // 登出凭 refresh token（V3 access token 无 sid），匿名即可：撤销需要 token 本身。
+  // 登出凭 refresh token，匿名即可：撤销需要 token 本身。
   app.post('/api/auth/logout', { schema: { body: { type: 'object', additionalProperties: false, properties: { refreshToken: { type: 'string', minLength: 1, maxLength: 512 } } } } }, async (req, reply) => {
     const refreshToken = (req.body as any)?.refreshToken as string | undefined;
     try {

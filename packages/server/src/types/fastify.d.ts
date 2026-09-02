@@ -1,5 +1,5 @@
 /**
- * Fastify 插件类型增强（V3）。
+ * Fastify 插件类型增强。
  * 让 TS 识别 app.mysql（@fastify/mysql）。
  *
  * `export {}` 使本文件成为模块，`declare module 'fastify'` 因此是**模块增强**

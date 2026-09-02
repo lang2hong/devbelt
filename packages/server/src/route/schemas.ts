@@ -1,15 +1,12 @@
 /**
- * V3 请求 JSON Schema（切片 1：身份与会话）。
- *
- * 与 V2 的关键差异：请求体一律 `additionalProperties: false`（实施规格 §5.1
- * 「请求体必须严格闭合，出现未知字段即拒绝」）。Greenfield 无兼容包袱。
+ * 请求 JSON Schema。请求体一律 `additionalProperties: false`，未知字段直接拒绝。
  *
  * 密码的精确 code point 校验（12..128）在 AuthService（Array.from 长度），
  * schema 只兜类型与粗略长度 —— JSON Schema 的 minLength/maxLength 按 UTF-16
  * 单元计数，无法精确表达 Unicode code points。
  */
 
-/** 设备请求字段（实施规格 §4.6 DeviceFields）。 */
+/** 设备请求字段（实施规格 §5.2 DeviceFields）。 */
 export const deviceKeySchema = {
   type: 'string',
   minLength: 16,
@@ -95,7 +92,7 @@ export const deviceIdParam = {
   properties: { deviceId: { type: 'string', pattern: '^[0-9]{1,20}$' } },
 } as const;
 
-// ── 组织域（切片 2）──
+// ── 组织域 ──
 
 export const createOrganizationBody = {
   type: 'object',
@@ -133,7 +130,7 @@ export const membershipIdParam = {
   },
 } as const;
 
-// ── 组织邀请（切片 3）──
+// ── 组织邀请 ──
 
 export const createInvitationBody = {
   type: 'object',
@@ -160,7 +157,7 @@ export const invitationTokenParam = {
   properties: { token: { type: 'string', minLength: 1, maxLength: 256 } },
 } as const;
 
-// ── 目录与资源（切片 4）──
+// ── 目录与资源 ──
 
 const nullableId = { anyOf: [{ type: 'string', pattern: '^[0-9]{1,20}$' }, { type: 'null' }] } as const;
 
@@ -227,13 +224,13 @@ export const resourceIdParam = {
   },
 } as const;
 
-// ── 个人 E2E 同步（§8.1 专项）──
+// ── 个人 E2E 同步（§7 专项）──
 
 /** base64url 无 padding，固定字符长度。 */
 const b64url = (min: number, max: number) => ({ type: 'string' as const, minLength: min, maxLength: max, pattern: '^[A-Za-z0-9_-]+$' });
 /** u64 十进制字符串（禁前导零；值域上限由服务层 parseU64 再校验）。 */
 const u64Str = { type: 'string' as const, pattern: '^(0|[1-9][0-9]{0,19})$' };
-/** 协议常量（V1 唯一）。schema 只做结构校验，值域由服务层判 SYNC_PROTOCOL_UNSUPPORTED（§8.1.11）。 */
+/** 协议常量。schema 只做结构校验，值域由服务层判 SYNC_PROTOCOL_UNSUPPORTED（§8）。 */
 const protocolV1 = { type: 'integer' as const };
 const suiteV1 = { type: 'string' as const };
 
@@ -349,7 +346,7 @@ export const syncDestroyBody = {
   },
 } as const;
 
-/** 三个不可逆确认必须为字面量 true（§8.1.10）。 */
+/** 三个不可逆确认必须为字面量 true（§7.5）。 */
 const confirmTrue = { type: 'boolean' as const, enum: [true] as const };
 
 export const syncResetAfterLossBody = {

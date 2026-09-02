@@ -2,7 +2,7 @@ import nodemailer, { type Transporter } from 'nodemailer';
 import type { EmailSender } from './emailSender.js';
 
 /**
- * SMTP 邮件发送器（生产实现，实施规格 §4.7）。
+ * SMTP 邮件发送器（生产实现，实施规格 §5.1）。
  *
  * 凭据只来自部署环境变量：SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/SMTP_FROM。
  * 未配置 SMTP_HOST 时应由装配层回退到 LogEmailSender，绝不本类内置凭据回退。

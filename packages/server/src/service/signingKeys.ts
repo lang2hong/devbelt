@@ -1,7 +1,7 @@
 import { createPrivateKey, createPublicKey, type KeyObject } from 'crypto';
 
 /**
- * Ed25519 签名密钥解析（V3 取代 V2 的 HS256 JWT_SECRET）。
+ * Ed25519 签名密钥解析。
  *
  * 独立成模块以便单独测试（config.ts 顶层会立即用 process.env 求值，import 即
  * 可能抛错；本模块是纯函数，只接受显式 env 参数）。

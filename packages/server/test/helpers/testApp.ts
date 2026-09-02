@@ -151,6 +151,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   const resourceService = new OrganizationResourceService(
     organizationRepo,
     organizationSubscriptionRepo,
+    membershipRepo,
     folderRepo,
     resourceRepo,
     async (fn) => fn({} as Queryable),

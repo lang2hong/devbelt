@@ -3,7 +3,7 @@ import type { RefreshToken } from '../../domain/entities.js';
 import type { MysqlDb, Queryable } from './db.js';
 
 /**
- * Refresh token 仓储（V3：family 复用检测 + 轮换链 replaced_by_token_id）。
+ * Refresh token 仓储：family 复用检测 + 轮换链 replaced_by_token_id。
  *
  * 事务方法（带 exec 参数）支持 refresh 的原子轮换：`FOR UPDATE` 锁定 +
  * 消费旧 + 写新都在同一事务连接上，避免并发复用下签出两条活跃会话。

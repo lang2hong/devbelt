@@ -1,17 +1,17 @@
 import type { Migration } from '../migrate.js';
 
 /**
- * V3 组织目录与资源（切片 4，§4.1/§4.2/§4.3）。
+ * 组织目录与资源。
  *
  * 建表按外键依赖：organization_resource_folders -> organization_resources。
- * - 目录表规范名为 `organization_resource_folders`（§4.1 14 表清单）。
+ * - 目录表规范名为 `organization_resource_folders`（§4.2 表清单）。
  * - 目录/作者均使用同组织复合外键；`UNIQUE(id, organization_id)` 供复合 FK 引用。
  * - 软删除：`delete_time NULL` 表示未删除；资源 `version` 从 1 起，乐观锁锚点。
- * - 全部 ON DELETE CASCADE：Phase 1 不物理删除（组织 close 软、成员 remove 软），
+ * - 全部 ON DELETE CASCADE：业务不物理删除组织和成员，
  *   该级联仅为「物理删除父行」时的安全网，正常不触发。
  */
-export const resourcesV3: Migration = {
-  version: '008_organization_resources_v3',
+export const organizationResourcesMigration: Migration = {
+  version: '008_organization_resources',
   async up(db): Promise<void> {
     await db.query(`SET time_zone = '+00:00'`);
 
