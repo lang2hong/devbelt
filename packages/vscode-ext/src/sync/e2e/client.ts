@@ -182,6 +182,8 @@ export class PersonalSyncClient {
     assertU64Decimal(o.baseVersion, 'baseVersion', true);
     assertBase64UrlNoPad(o.mutationId, 16, 'mutationId');
     assertRecordId(o.recordId);
+    assertBase64UrlNoPad(o.signature, 64, 'signature');
+    assertBase64UrlNoPad(o.requestDigest, 32, 'requestDigest');
     assertBase64UrlNoPad(o.nonce, 12, 'nonce');
     if (!/^[A-Za-z0-9_-]+$/.test(o.ciphertext)) throw new Error('ciphertext must be unpadded base64url');
     assertBase64UrlNoPad(o.tag, 16, 'tag');
@@ -214,6 +216,8 @@ export class PersonalSyncClient {
     assertU64Decimal(o.baseVersion, 'baseVersion');
     assertBase64UrlNoPad(o.mutationId, 16, 'mutationId');
     assertRecordId(o.recordId);
+    assertBase64UrlNoPad(o.signature, 64, 'signature');
+    assertBase64UrlNoPad(o.requestDigest, 32, 'requestDigest');
     const body: Record<string, unknown> = {
       protocolVersion: 1,
       keyEpoch: o.keyEpoch,

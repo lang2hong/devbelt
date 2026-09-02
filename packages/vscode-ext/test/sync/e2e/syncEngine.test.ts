@@ -174,15 +174,16 @@ describe('SyncEngine', () => {
     expect(r2).toBeTruthy();
   });
 
-  it('第二页 snapshotSequence 漂移 → error，不提交 cursor', async () => {
+  it('第二页 snapshotSequence 漂移 → error，第二页不提交 cursor', async () => {
     const id = 'A'.repeat(22);
     const setSnapshot = vi.fn(async () => {});
+    const rec = { recordId: id, version: '2', changeSequence: '3', deleteTime: '2026-01-01T00:00:00.000Z' };
+    const getRecords = vi.fn()
+      .mockResolvedValueOnce({ snapshotSequence: '5', nextAfter: '3', records: [rec] })
+      .mockResolvedValueOnce({ snapshotSequence: '99', records: [rec] });
     const client = clientWith({
       getState: vi.fn(async () => ({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
-      getRecords: vi.fn(async () => ({
-        snapshotSequence: '99',
-        records: [{ recordId: id, version: '2', changeSequence: '5', deleteTime: '2026-01-01T00:00:00.000Z' }],
-      })),
+      getRecords,
     });
     const eng = new SyncEngine({
       userId: '7', keyEpoch: '1', client,
@@ -195,7 +196,8 @@ describe('SyncEngine', () => {
     const r = await eng.sync();
     expect(r.stage).toBe('error');
     expect(r.reason).toContain('snapshotSequence drift');
-    expect(setSnapshot).not.toHaveBeenCalled();
+    expect(setSnapshot).toHaveBeenCalledTimes(1);
+    expect(setSnapshot).toHaveBeenCalledWith({ keyEpoch: '1', stateVersion: '1', changeSequence: '3' });
   });
 
   it('分页停滞（nextAfter 未前进）→ error', async () => {
@@ -207,5 +209,66 @@ describe('SyncEngine', () => {
     const r = await eng.sync();
     expect(r.stage).toBe('error');
     expect(r.reason).toContain('paging stalled');
+  });
+
+  it('构造函数拒绝 userId 不匹配的 mapStore / outbox', () => {
+    const base = {
+      keyEpoch: '1', client: clientWith(),
+      stateStore: { getSnapshot: () => SNAP, setSnapshot: async () => {} } as never,
+      store: makeStore() as never,
+      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueConnectionId: () => 'c-new-1',
+    };
+    expect(() => new SyncEngine({
+      ...base, userId: '7',
+      mapStore: new RecordMapStore(makeMemento(), '8', '1'),
+      outbox: new PendingMutationStore(makeMemento(), '7', '1'),
+    })).toThrowError(/mapStore userId mismatch/);
+    expect(() => new SyncEngine({
+      ...base, userId: '7',
+      mapStore: new RecordMapStore(makeMemento(), '7', '1'),
+      outbox: new PendingMutationStore(makeMemento(), '8', '1'),
+    })).toThrowError(/outbox userId mismatch/);
+  });
+
+  it('同 epoch、stateVersion 变化、空 feed → 更新快照', async () => {
+    const setSnapshot = vi.fn(async () => {});
+    const client = clientWith({
+      getState: vi.fn(async () => ({ keyEpoch: '1', stateVersion: '2', changeSequence: '0' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '0', records: [] })),
+    });
+    const eng = new SyncEngine({
+      userId: '7', keyEpoch: '1', client,
+      stateStore: { getSnapshot: () => SNAP, setSnapshot } as never,
+      mapStore: new RecordMapStore(makeMemento(), '7', '1'),
+      outbox: new PendingMutationStore(makeMemento(), '7', '1'),
+      store: makeStore() as never,
+      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueConnectionId: () => 'c-new-1',
+    });
+    const r = await eng.sync();
+    expect(r.stage).toBe('ok');
+    expect(setSnapshot).toHaveBeenCalledWith({ keyEpoch: '1', stateVersion: '2', changeSequence: '0' });
+  });
+
+  it('同 epoch、远端 stateVersion 低于本地 → error，不进 outbox/feed，不覆写快照', async () => {
+    const setSnapshot = vi.fn(async () => {});
+    const getRecords = vi.fn(async () => ({ snapshotSequence: '0', records: [] }));
+    const localSnap: SyncStateSnapshot = { keyEpoch: '1', stateVersion: '2', changeSequence: '0' };
+    const client = clientWith({
+      getState: vi.fn(async () => ({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' })),
+      getRecords,
+    });
+    const eng = new SyncEngine({
+      userId: '7', keyEpoch: '1', client,
+      stateStore: { getSnapshot: () => localSnap, setSnapshot } as never,
+      mapStore: new RecordMapStore(makeMemento(), '7', '1'),
+      outbox: new PendingMutationStore(makeMemento(), '7', '1'),
+      store: makeStore() as never,
+      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueConnectionId: () => 'c-new-1',
+    });
+    const r = await eng.sync();
+    expect(r.stage).toBe('error');
+    expect(r.reason).toContain('behind local');
+    expect(setSnapshot).not.toHaveBeenCalled();
+    expect(getRecords).not.toHaveBeenCalled();
   });
 });

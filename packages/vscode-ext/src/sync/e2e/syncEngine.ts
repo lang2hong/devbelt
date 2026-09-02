@@ -99,6 +99,8 @@ export class SyncEngine {
   private inflight?: Promise<SyncRunResult>;
 
   constructor(private readonly deps: SyncEngineDeps) {
+    if (deps.mapStore.userId !== deps.userId) throw new Error('mapStore userId mismatch');
+    if (deps.outbox.userId !== deps.userId) throw new Error('outbox userId mismatch');
     if (deps.mapStore.keyEpoch !== deps.keyEpoch) throw new Error('mapStore keyEpoch mismatch');
     if (deps.outbox.keyEpoch !== deps.keyEpoch) throw new Error('outbox keyEpoch mismatch');
   }
@@ -139,6 +141,27 @@ export class SyncEngine {
     }
     if (BigInt(remoteState.keyEpoch) !== BigInt(local.keyEpoch)) {
       return { stage: 'epoch-mismatch', conflicts: [], applied: 0, reason: 'remote keyEpoch differs from local' };
+    }
+
+    // 状态对账：同 epoch 但远端 stateVersion 已推进（如异设备 change-key/recover）时，
+    // 无新 record 也须把本地 stateVersion 同步到远端，否则后续 expectedStateVersion 会冲突。
+    // stateVersion 单调防回退：旧响应/服务端异常/竞态返回更小版本时 fail-closed，
+    // 不进 outbox/feed，也不覆写本地快照。
+    const remoteSv = BigInt(remoteState.stateVersion);
+    const localSv = BigInt(local.stateVersion);
+    if (remoteSv < localSv) {
+      return { stage: 'error', conflicts: [], applied: 0, reason: 'remote stateVersion is behind local' };
+    }
+    if (remoteSv > localSv) {
+      try {
+        await this.deps.stateStore.setSnapshot({
+          keyEpoch: local.keyEpoch,
+          stateVersion: remoteState.stateVersion,
+          changeSequence: local.changeSequence,
+        });
+      } catch (err) {
+        return { stage: 'error', conflicts: [], applied: 0, reason: `state reconcile failed: ${describe(err)}` };
+      }
     }
 
     // 2. outbox 重放：逐条直发已签名 mutation（逐字复用 signature/requestDigest，不重签）。
@@ -207,10 +230,19 @@ export class SyncEngine {
       }
 
       if (page.nextAfter === undefined) break;
-      if (page.nextAfter === requested) {
+      let nextAfter: string;
+      try {
+        nextAfter = assertU64Decimal(page.nextAfter, 'nextAfter', true);
+      } catch (err) {
+        return { stage: 'error', conflicts, applied, changeSequence: lastCommitted, reason: `invalid nextAfter: ${describe(err)}` };
+      }
+      if (BigInt(nextAfter) <= BigInt(requested)) {
         return { stage: 'error', conflicts, applied, changeSequence: lastCommitted, reason: 'paging stalled' };
       }
-      cursor = page.nextAfter;
+      if (BigInt(nextAfter) > BigInt(remoteSnap)) {
+        return { stage: 'error', conflicts, applied, changeSequence: lastCommitted, reason: 'nextAfter exceeds snapshotSequence' };
+      }
+      cursor = nextAfter;
     }
 
     return { stage: 'ok', conflicts, applied, changeSequence: lastCommitted };
