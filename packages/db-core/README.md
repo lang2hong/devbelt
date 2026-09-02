@@ -1,52 +1,22 @@
 # @db-client/core
 
-纯数据库连接/查询/元数据核心层，**无 vscode 依赖**，可独立测试与复用。
+数据库驱动、SQL 方言、连接、查询和元数据核心，不依赖 VS Code 或服务端领域。
 
-## 分层架构
+## 结构
 
-```
-types      领域模型（ConnectionConfig / FieldInfo / QueryResult）
-  ↓
-dialect    方言行为（策略模式 + 注册表）
-  ↓
-connection 连接适配（适配器模式：mysql2 / pg / sqlite3）
-  ↓
-factory    连接工厂（工厂模式）
-  ↓
-query      查询 / 分页 / 元数据 / 数据编辑
+```text
+types       领域类型
+dialect     数据库专属 SQL 和类型行为
+connection  MySQL、PostgreSQL、SQLite 驱动适配
+factory     连接与方言构造
+query       查询、分页、元数据、编辑和导出
+sync        与服务端共享的签名与 JCS 测试向量
+utils       SQL 语句切分与标识符校验
 ```
 
-## 设计模式
-
-| 模式 | 落点 |
-|------|------|
-| 工厂 | `ConnectionFactory.createWithDialect()` |
-| 策略 | `SqlDialect` 隔离方言差异 |
-| 适配器 | `MysqlConnection` 等适配底层驱动 |
-| 模板方法 | `IConnection.convertToDump()` |
-| 注册表 | `DialectRegistry` 按类型取方言 |
-
-## 使用
-
-```ts
-import { ConnectionFactory, QueryService } from '@db-client/core';
-
-const { connection, dialect } = ConnectionFactory.createWithDialect(
-  DatabaseType.MYSQL,
-  { host, port, user, password, database },
-);
-await new Promise((res, rej) => connection.connect((e) => (e ? rej(e) : res())));
-
-const query = new QueryService(connection, dialect);
-const result = await query.query('SELECT * FROM users');
-```
-
-## 测试
+新增数据库类型时实现 `SqlDialect` 和连接适配器，再注册到 factory。驱动差异只留在适配器和方言中，调用方使用统一领域类型。
 
 ```bash
-pnpm test
+pnpm -C packages/db-core build
+pnpm -C packages/db-core test
 ```
-
-## 扩展新数据库
-
-实现 1 个 `SqlDialect` + 1 个 `Connection`，在工厂与注册表各加一行即可，零侵入现有代码。

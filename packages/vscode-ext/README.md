@@ -1,79 +1,32 @@
 # DB Client Pro
 
-**All-in-one database client for MySQL, PostgreSQL and SQLite — right inside VS Code.**
+运行在 VS Code 内的 MySQL、PostgreSQL 和 SQLite 客户端。
 
-Query, edit and design your databases without leaving the editor. Run SQL with autocomplete, edit data in a grid, design tables visually, draw ER diagrams, import/export, and tunnel through SSH.
+## 功能
 
-## Highlights
+- 连接分组、连接测试和 SSH 隧道。
+- SQL 编辑、补全、格式化、执行和 EXPLAIN。
+- 结果编辑、导入导出、表设计、DDL、ER 图和 Schema 对比。
+- 组织 Workspace、共享查询和连接模板。
 
-- **Multi-database** — MySQL, PostgreSQL, SQLite (Redis, ElasticSearch planned)
-- **Smart SQL editing** — context-aware autocomplete in the built-in editor *and* `.sql` files, snippets, formatting, EXPLAIN, run active statement
-- **Data editing** — result grid with inline cell editing, pagination, sort/filter, insert/delete, mock data, duplicate
-- **Schema & design** — visual table designer, DDL view, ER diagram, schema compare
-- **Data transfer** — CSV/JSON import & export with field mapping
-- **Connections** — hierarchical groups, connection form, connection test, SSH tunnel
-- **Organization workspaces** — folder/query resource tree with connection templates mapped to local credentials; fixed admin/member model: admin can create/edit/delete, member read-only (Phase 1)
-- **Cloud sync** — AES-256-GCM encrypted config sync across devices (§8 暂缓专项，Phase 1 未实现)
-- **Users & privileges** — create users, grant/revoke, change password
-- **Internationalization** — English / 中文, follows VS Code display language
+个人连接同步正在开发，当前没有用户入口。
 
-## Requirements
+## 要求
 
-- VS Code `1.85.0` or newer
+- VS Code 1.85.0 或更高版本。
 
-## Installation
+## 快捷键
 
-1. Open the Extensions view in VS Code (`Ctrl+Shift+X` / `Cmd+Shift+X`).
-2. Search for **DB Client Pro** and click **Install**.
-
-You can also install from a `.vsix` file: run **Extensions: Install from VSIX…** and select the file.
-
-## Quick Start
-
-1. Open the **DB Client** view in the Activity Bar.
-2. Click **+** to add a connection (MySQL / PostgreSQL / SQLite).
-3. For SQLite you can use the bundled CLI or point to your own binary.
-4. Right-click a table → **View Data** to preview, or **New Query** to run SQL.
-
-## Keyboard Shortcuts
-
-| Shortcut | macOS | Action |
+| 快捷键 | macOS | 操作 |
 |---|---|---|
-| `Ctrl+Enter` | `Cmd+Enter` | Run query / active statement |
-| `Ctrl+Alt+Enter` | `Cmd+Ctrl+Enter` | Run in a new panel |
-| `Ctrl+Shift+E` | `Cmd+Shift+E` | Explain query |
-| `Ctrl+Alt+F` | `Cmd+Alt+F` | Search database objects |
-| `Ctrl+Alt+C` | `Cmd+Alt+C` | Search connections |
+| `Ctrl+Enter` | `Cmd+Enter` | 运行查询或当前语句 |
+| `Ctrl+Alt+Enter` | `Cmd+Ctrl+Enter` | 在新面板运行 |
+| `Ctrl+Shift+E` | `Cmd+Shift+E` | EXPLAIN |
+| `Ctrl+Alt+F` | `Cmd+Alt+F` | 搜索数据库对象 |
+| `Ctrl+Alt+C` | `Cmd+Alt+C` | 搜索连接 |
 
-## Commands
+项目架构和开发状态见[文档中心](../../docs/README.md)。
 
-| Command | Description |
-|---|---|
-| Add / Edit / Delete Connection | Manage saved connections |
-| Open / Close Connection | Explicitly open or release a connection |
-| New Query / Run Query | Run SQL in the current or a new panel |
-| View Data / View DDL / Design Table | Inspect and edit table schemas |
-| Import / Export | CSV/JSON transfer with field mapping |
-| ER Diagram / Compare Schema | Schema analysis |
-
-## Cloud Sync
-
-> §8.1 个人 E2E 同步服务端已落地（S1–S5），扩展端 V3 同步客户端（B1–B3 原语）正在推进、尚未接入 UI。旧的 V2 分节同步入口已移除；同步命令与界面将在 B4 完成后再暴露。
-
-## Settings
-
-| Setting | Default | Description |
-|---|---|---|
-| `dbclient.language` | `auto` | Extension language: `auto` / `zh` / `en` |
-| `dbclient.format.indent` | `2` | SQL formatting indent width (spaces) |
-| `dbclient.format.keywordCase` | `upper` | SQL keyword case: `preserve` / `upper` / `lower` |
-
-## Roadmap
-
-- Redis and ElasticSearch support
-- Team sharing and audit log
-- Scheduled backups
-
-## License
+## 许可
 
 MIT
