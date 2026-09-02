@@ -27,7 +27,10 @@ export async function runMigrations(db: MigrationDb, migrations: Migration[]): P
   `);
 
   const [rows] = (await db.query('SELECT version FROM schema_migrations')) as [Array<{ version: string }>, unknown];
-  const applied = new Set<string>(rows.map((r) => r.version));
+  // 遗留账本兼容：历史 `${version}_v3` 账本键视为已应用，避免旧库重跑。
+  // 只对当前 migration 集合内明确存在的别名归一化，不做全局替换（非版本管理机制，不改写旧账本行）。
+  const legacyAliases = new Map(migrations.map((m) => [`${m.version}_v3`, m.version]));
+  const applied = new Set<string>(rows.map((r) => legacyAliases.get(r.version) ?? r.version));
 
   for (const migration of migrations) {
     if (applied.has(migration.version)) continue;

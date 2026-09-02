@@ -92,4 +92,48 @@ describe.skipIf(!URL)('migration smoke (real MySQL)', () => {
       await pool.end();
     }
   });
+
+  it('normalizes legacy *_v3 ledger keys and skips re-run (no duplicate columns)', async () => {
+    const { host, port, user, password } = parseMysqlUrl(URL!);
+    const pool = mysql.createPool({ host, port, user, password, database: resolveTestDb(), timezone: 'Z' });
+    try {
+      // 隔离：重建空库
+      await pool.query('SET FOREIGN_KEY_CHECKS = 0');
+      const [t0] = await pool.query('SHOW TABLES');
+      for (const r of t0 as Array<Record<string, unknown>>) {
+        await pool.query(`DROP TABLE IF EXISTS \`${String(Object.values(r)[0])}\``);
+      }
+      await pool.query('SET FOREIGN_KEY_CHECKS = 1');
+
+      // 首次正常迁移建表并播种
+      await runMigrations(pool as any, [...migrations]);
+
+      // 模拟旧库：账本键改回 *_v3（分节同步时代）。personal_plans 两列已因首次迁移存在。
+      await pool.query("UPDATE schema_migrations SET version = CONCAT(version, '_v3')");
+
+      // 重跑：归一化后应全部跳过，不得因 ADD COLUMN 重入而 ER_DUP_FIELDNAME
+      await runMigrations(pool as any, [...migrations]);
+
+      // 两列各只出现一次
+      const [cols] = await pool.query(
+        `SELECT COLUMN_NAME, COUNT(*) AS c FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'personal_plans'
+           AND COLUMN_NAME IN ('max_connection_metas', 'sync_storage_bytes')
+         GROUP BY COLUMN_NAME`,
+      ) as [Array<Record<string, unknown>>, unknown];
+      expect(cols).toHaveLength(2);
+      for (const row of cols) expect(Number(row.c)).toBe(1);
+
+      // seed 未重复：free plan 仍仅一行
+      const [planRows] = (await pool.query("SELECT COUNT(*) AS c FROM personal_plans WHERE code = 'free'")) as [Array<{ c: number }>, unknown];
+      expect(Number(planRows[0].c)).toBe(1);
+
+      // 账本保留 *_v3 键（归一化只读，不改写历史）
+      const [ledger] = (await pool.query('SELECT version FROM schema_migrations')) as [Array<{ version: string }>, unknown];
+      expect(ledger).toHaveLength(9);
+      expect(ledger.every((r) => r.version.endsWith('_v3'))).toBe(true);
+    } finally {
+      await pool.end();
+    }
+  });
 });

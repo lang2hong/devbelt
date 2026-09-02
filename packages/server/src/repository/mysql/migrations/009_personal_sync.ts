@@ -20,11 +20,23 @@ export const personalSyncMigration: Migration = {
     await db.query(`SET time_zone = '+00:00'`);
 
     // ① 个人套餐新增两项数值配额列（0=unlimited；Free 固定 500 / 33,554,432，§4.2）
-    await db.query(`
-      ALTER TABLE personal_plans
-        ADD COLUMN max_connection_metas BIGINT UNSIGNED NOT NULL DEFAULT 0,
-        ADD COLUMN sync_storage_bytes BIGINT UNSIGNED NOT NULL DEFAULT 0
-    `);
+    // 守卫：逐列查 information_schema，已存在则跳过——兼容旧账本重跑与 DDL 隐式提交的部分执行（ER_DUP_FIELDNAME）。
+    const [columnRows] = await db.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'personal_plans'
+         AND COLUMN_NAME IN ('max_connection_metas', 'sync_storage_bytes')`,
+    ) as [Array<{ COLUMN_NAME: string }>, unknown];
+    const existingColumns = new Set(columnRows.map((r) => r.COLUMN_NAME));
+    const addColumns: string[] = [];
+    if (!existingColumns.has('max_connection_metas')) {
+      addColumns.push('ADD COLUMN max_connection_metas BIGINT UNSIGNED NOT NULL DEFAULT 0');
+    }
+    if (!existingColumns.has('sync_storage_bytes')) {
+      addColumns.push('ADD COLUMN sync_storage_bytes BIGINT UNSIGNED NOT NULL DEFAULT 0');
+    }
+    if (addColumns.length > 0) {
+      await db.query(`ALTER TABLE personal_plans ${addColumns.join(', ')}`);
+    }
     await db.query(
       `UPDATE personal_plans SET max_connection_metas = 500, sync_storage_bytes = 33554432 WHERE code = 'free'`,
     );
