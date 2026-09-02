@@ -78,7 +78,7 @@ describe('applyRecord', () => {
   it('本地脏 + 更高 version active → 冲突，保留本地连接', async () => {
     const dirtyConn: SavedConnection = { id: 'c-1', name: 'n', dbType: 'MYSQL' as any, host: 'h', port: 3306, user: 'u', updateTime: 200 } as SavedConnection;
     const { store, mapStore, uniqueConnectionId } = setup([dirtyConn]);
-    await mapStore.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 100 });
+    await mapStore.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 100, status: 'confirmed' });
     await expect(applyRecord(
       { recordId: 'A'.repeat(22), version: '2', tombstone: false, payload },
       { store: store as any, mapStore, uniqueConnectionId },
@@ -89,7 +89,7 @@ describe('applyRecord', () => {
   it('本地脏 + 更高 version tombstone → 冲突，不删', async () => {
     const dirtyConn: SavedConnection = { id: 'c-1', name: 'n', dbType: 'MYSQL' as any, host: 'h', port: 3306, user: 'u', updateTime: 200 } as SavedConnection;
     const { store, mapStore, uniqueConnectionId } = setup([dirtyConn]);
-    await mapStore.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 100 });
+    await mapStore.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 100, status: 'confirmed' });
     await expect(applyRecord(
       { recordId: 'A'.repeat(22), version: '2', tombstone: true },
       { store: store as any, mapStore, uniqueConnectionId },
@@ -115,24 +115,25 @@ describe('applyRecord', () => {
     )).rejects.toThrowError(/unexpected/);
   });
 
-  it('新记录映射持久化失败时删除新连接', async () => {
+  it('预留映射失败不写连接', async () => {
     const { store, uniqueConnectionId } = setup();
     const mapStore = {
       getByRecordId: () => undefined,
       put: vi.fn(async () => { throw new Error('map write failed'); }),
+      deleteByRecordId: vi.fn(async () => {}),
     };
     await expect(applyRecord(
       { recordId: 'A'.repeat(22), version: '1', tombstone: false, payload },
       { store: store as any, mapStore: mapStore as any, uniqueConnectionId },
     )).rejects.toThrowError(/map write failed/);
-    expect(store.all()).toEqual([]);
-    expect(store.remove).toHaveBeenCalledWith('c-new-1', 'sync');
+    expect(store.save).not.toHaveBeenCalled();
+    expect(store.remove).not.toHaveBeenCalled();
   });
 
   it('更新映射持久化失败时恢复旧连接内容', async () => {
     const old = { id: 'c-1', name: 'old', dbType: 'MYSQL' as any, host: 'old-host', port: 3306, user: 'old-user', updateTime: 100 } as SavedConnection;
     const { store, mapStore, uniqueConnectionId } = setup([old]);
-    await mapStore.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 100 });
+    await mapStore.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 100, status: 'confirmed' });
     vi.spyOn(mapStore, 'put').mockRejectedValueOnce(new Error('map write failed'));
 
     await expect(applyRecord(
@@ -140,5 +141,48 @@ describe('applyRecord', () => {
       { store: store as any, mapStore, uniqueConnectionId },
     )).rejects.toThrowError(/map write failed/);
     expect(store.get('c-1')).toMatchObject({ name: 'old', host: 'old-host', user: 'old-user' });
+  });
+
+  it('连接写失败回滚预留映射', async () => {
+    const { store, mapStore, uniqueConnectionId } = setup();
+    store.save.mockRejectedValueOnce(new Error('store write failed'));
+    await expect(applyRecord(
+      { recordId: 'A'.repeat(22), version: '1', tombstone: false, payload },
+      { store: store as any, mapStore, uniqueConnectionId },
+    )).rejects.toThrowError(/rollback succeeded/);
+    expect(mapStore.getByRecordId('A'.repeat(22))).toBeUndefined();
+  });
+
+  it('save 失败且回滚失败：留下 pending 映射并抛聚合错误', async () => {
+    const { store, mapStore, uniqueConnectionId } = setup();
+    store.save.mockRejectedValueOnce(new Error('store write failed'));
+    vi.spyOn(mapStore, 'deleteByRecordId').mockRejectedValueOnce(new Error('rollback failed'));
+    await expect(applyRecord(
+      { recordId: 'A'.repeat(22), version: '1', tombstone: false, payload },
+      { store: store as any, mapStore, uniqueConnectionId },
+    )).rejects.toThrowError(/pending mapping kept for recovery/);
+    expect(mapStore.getByRecordId('A'.repeat(22))?.status).toBe('pending');
+  });
+
+  it('连接保存后回读不到 updateTime → 抛错并回滚映射', async () => {
+    const { store, mapStore, uniqueConnectionId } = setup();
+    store.save.mockImplementationOnce(async () => {});
+    await expect(applyRecord(
+      { recordId: 'A'.repeat(22), version: '1', tombstone: false, payload },
+      { store: store as any, mapStore, uniqueConnectionId },
+    )).rejects.toThrowError(/did not report updateTime/);
+    expect(mapStore.getByRecordId('A'.repeat(22))).toBeUndefined();
+  });
+
+  it('pending 预留重放自愈：收敛为单个已确认连接', async () => {
+    const { store, mapStore, uniqueConnectionId } = setup();
+    const id = 'A'.repeat(22);
+    const ctx = { store: store as any, mapStore, uniqueConnectionId };
+    await mapStore.put(id, { connectionId: 'c-ghost', recordVersion: '1', revision: 0, status: 'pending' });
+    expect(await applyRecord({ recordId: id, version: '1', tombstone: false, payload }, ctx)).toMatchObject({ disposition: 'created' });
+    const entry = mapStore.getByRecordId(id)!;
+    expect(entry.status).toBe('confirmed');
+    expect(entry.connectionId).not.toBe('c-ghost');
+    expect(store.all()).toHaveLength(1);
   });
 });

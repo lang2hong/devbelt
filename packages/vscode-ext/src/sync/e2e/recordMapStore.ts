@@ -10,10 +10,13 @@ import type { MementoLike } from './stateStore';
  * 对应；违反时 fail-closed。写操作异步（await memento.update），读操作同步。
  */
 
+export type RecordMapStatus = 'pending' | 'confirmed';
+
 export interface RecordMapEntry {
   connectionId: string;
   recordVersion: string;
   revision: number;
+  status: RecordMapStatus;
 }
 
 interface RecordMapData {
@@ -24,6 +27,10 @@ interface RecordMapData {
 function assertConnectionId(id: string): void {
   if (!id) throw new Error('connectionId must not be empty');
   if (id.startsWith('org:')) throw new Error('organization connection must not enter personal sync map');
+}
+
+function assertStatus(status: unknown): asserts status is RecordMapStatus {
+  if (status !== 'pending' && status !== 'confirmed') throw new Error('corrupt record map: invalid status');
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -53,23 +60,42 @@ export class RecordMapStore {
     if (!isPlainObject(raw.byRecordId) || !isPlainObject(raw.byConnectionId)) {
       throw new Error('corrupt record map: missing byRecordId/byConnectionId');
     }
-    for (const entry of Object.values(raw.byRecordId)) {
-      if (!isPlainObject(entry) ||
-        typeof entry.connectionId !== 'string' || entry.connectionId === '' ||
-        typeof entry.recordVersion !== 'string' || entry.recordVersion === '' ||
-        typeof entry.revision !== 'number') {
-        throw new Error('corrupt record map: invalid record entry');
+
+    const byRecordId: RecordMapData['byRecordId'] = {};
+    for (const [recordId, entryRaw] of Object.entries(raw.byRecordId)) {
+      assertRecordId(recordId);
+      if (!isPlainObject(entryRaw)) throw new Error('corrupt record map: invalid record entry');
+      if (typeof entryRaw.connectionId !== 'string') throw new Error('corrupt record map: invalid record entry');
+      assertConnectionId(entryRaw.connectionId);
+      if (typeof entryRaw.recordVersion !== 'string') throw new Error('corrupt record map: invalid record entry');
+      assertU64Decimal(entryRaw.recordVersion, 'recordVersion');
+      const revision = entryRaw.revision;
+      if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0) {
+        throw new Error('corrupt record map: invalid revision');
+      }
+      assertStatus(entryRaw.status);
+      byRecordId[recordId] = { connectionId: entryRaw.connectionId, recordVersion: entryRaw.recordVersion, revision, status: entryRaw.status };
+    }
+
+    const byConnectionId: RecordMapData['byConnectionId'] = {};
+    for (const [connectionId, recordIdRaw] of Object.entries(raw.byConnectionId)) {
+      assertConnectionId(connectionId);
+      if (typeof recordIdRaw !== 'string') throw new Error('corrupt record map: invalid reverse index entry');
+      assertRecordId(recordIdRaw);
+      byConnectionId[connectionId] = recordIdRaw;
+    }
+
+    // 双射校验：两张索引大小一致且正反向一一对应。
+    if (Object.keys(byRecordId).length !== Object.keys(byConnectionId).length) {
+      throw new Error('corrupt record map: index sizes do not match');
+    }
+    for (const [recordId, entry] of Object.entries(byRecordId)) {
+      if (byConnectionId[entry.connectionId] !== recordId) {
+        throw new Error('corrupt record map: reverse index does not match');
       }
     }
-    for (const recordId of Object.values(raw.byConnectionId)) {
-      if (typeof recordId !== 'string' || recordId === '') {
-        throw new Error('corrupt record map: invalid reverse index entry');
-      }
-    }
-    return {
-      byRecordId: raw.byRecordId as RecordMapData['byRecordId'],
-      byConnectionId: raw.byConnectionId as RecordMapData['byConnectionId'],
-    };
+
+    return { byRecordId, byConnectionId };
   }
 
   private async write(data: RecordMapData): Promise<void> {
