@@ -96,6 +96,16 @@ export class AuthService {
   private refreshToken?: string;
   /** 缓存的个人权益，持久化到 globalState 供重启后弱网回退。 */
   private cachedEntitlement?: CachedEntitlement;
+  /** 缓存的规范 userId（来源 GET /api/me），登出清空。 */
+  private cachedUserId?: string;
+
+  /** 读取当前用户规范 userId；缓存到内存，登出清空。 */
+  async getUserId(): Promise<string> {
+    if (this.cachedUserId) return this.cachedUserId;
+    const me = await this.client.getMe();
+    this.cachedUserId = me.user.userId;
+    return this.cachedUserId;
+  }
 
   /** 读取缓存权益：优先内存，回退 globalState；无 allowedDatabaseTypes 的无效缓存直接忽略。 */
   getCachedEntitlement(): CachedEntitlement | undefined {
@@ -223,6 +233,7 @@ export class AuthService {
     this.accessToken = undefined;
     this.refreshToken = undefined;
     this.cachedEntitlement = undefined;
+    this.cachedUserId = undefined;
     await this.secrets.delete(AuthService.ACCESS_TOKEN_KEY);
     await this.secrets.delete(AuthService.REFRESH_TOKEN_KEY);
     await this.secrets.delete(AuthService.USER_EMAIL_KEY);
