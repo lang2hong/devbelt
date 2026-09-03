@@ -64,4 +64,51 @@ describe('SyncCoordinator', () => {
 
     coordinator.stop();
   });
+
+  it('成功轮次清空上次 lastError', async () => {
+    vi.useFakeTimers();
+    const events = new EventEmitter<'user' | 'sync'>();
+    const store = { onChanged: events.event } as unknown as ConnectionStore;
+
+    const reconcile = vi.fn()
+      .mockRejectedValueOnce(new Error('corrupt outbox'))
+      .mockResolvedValueOnce({ generated: 0, pendingSkipped: [], skipped: [] });
+    const sync = vi.fn(async () => ({ stage: 'ok' as const, conflicts: [], applied: 0 }));
+    const mutator = { reconcile } as unknown as SyncMutator;
+    const engine = { sync } as unknown as SyncEngine;
+
+    const coordinator = new SyncCoordinator(store, mutator, engine);
+    coordinator.start();
+
+    events.fire('user');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(coordinator.lastError).toContain('corrupt outbox');
+
+    events.fire('user');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(coordinator.lastError).toBeUndefined();
+
+    coordinator.stop();
+  });
+
+  it('后台轮次得 conflict → lastRun 可观测，lastError 为空', async () => {
+    vi.useFakeTimers();
+    const events = new EventEmitter<'user' | 'sync'>();
+    const store = { onChanged: events.event } as unknown as ConnectionStore;
+
+    const reconcile = vi.fn(async () => ({ generated: 0, pendingSkipped: [], skipped: [] }));
+    const sync = vi.fn(async () => ({ stage: 'conflict' as const, conflicts: [{ recordId: 'A'.repeat(22), kind: 'version' as const }], applied: 0 }));
+    const mutator = { reconcile } as unknown as SyncMutator;
+    const engine = { sync } as unknown as SyncEngine;
+
+    const coordinator = new SyncCoordinator(store, mutator, engine);
+    coordinator.start();
+
+    events.fire('user');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(coordinator.lastRun?.stage).toBe('conflict');
+    expect(coordinator.lastError).toBeUndefined();
+
+    coordinator.stop();
+  });
 });

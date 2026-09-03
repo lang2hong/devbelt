@@ -7,6 +7,7 @@ tsconfig.test.json
 vitest.config.ts
 esbuild.js
 out/**/*.map
+out/mainThreadFixture.js
 *.tsbuildinfo
 **/*.test.ts
 **/*.test.js

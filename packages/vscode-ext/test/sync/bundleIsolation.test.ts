@@ -2,10 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 
-const OUT = join(__dirname, '../../out');
+const ROOT = join(__dirname, '../..');
+const OUT = join(ROOT, 'out');
 const EXT = join(OUT, 'extension.js');
 const WORKER = join(OUT, 'argon2Worker.js');
 const MAIN = join(OUT, 'mainThreadFixture.js');
+
+describe('bundle 红线门禁前置自检（始终运行）', () => {
+  it('esbuild minify 须为 false：负向/正向标记依赖未压缩产物', () => {
+    // hash-wasm 标记来自 esbuild 保留的模块命名，argon2id( 来自保留的调用标识符；
+    // 一旦开启 minify，二者会失真，红线门禁会静默失效。
+    const esbuildSrc = readFileSync(join(ROOT, 'esbuild.js'), 'utf8');
+    expect(/minify:\s*false/.test(esbuildSrc), 'esbuild minify 非 false：请同步更新门禁标记（或改用抗压缩标记）').toBe(true);
+  });
+});
 
 const describeIfBuilt = [EXT, WORKER, MAIN].every((p) => existsSync(p))
   ? describe
