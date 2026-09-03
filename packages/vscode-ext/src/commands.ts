@@ -26,16 +26,30 @@ export function registerCommands(deps: Deps): void {
   registerDdlCommands(deps, sub);
   registerSearchCommands(deps, sub);
   sub('dbclient.explorerMenu', async () => {
-    const picked = await vscode.window.showQuickPick(
-      [
-        { label: l10n('cmd.groups'), value: 'addGroup' },
-        { label: l10n('cmd.showHistory'), value: 'showHistory' },
-      ],
-      { placeHolder: l10n('cmd.explorerMenu') },
-    );
+    const items: { label: string; value: string }[] = [
+      { label: l10n('cmd.groups'), value: 'addGroup' },
+      { label: l10n('cmd.showHistory'), value: 'showHistory' },
+    ];
+    if (deps.auth.isLoggedIn()) {
+      items.push(
+        { label: l10n('account.title'), value: 'account' },
+        { label: l10n('sessions.title'), value: 'sessions' },
+        { label: l10n('cmd.logout'), value: 'logout' },
+      );
+    } else {
+      items.push({ label: l10n('cmd.login'), value: 'login' });
+    }
+    const picked = await vscode.window.showQuickPick(items, { placeHolder: l10n('cmd.explorerMenu') });
     if (!picked) return;
-    if (picked.value === 'addGroup') await vscode.commands.executeCommand('dbclient.addGroup');
-    else if (picked.value === 'showHistory') await vscode.commands.executeCommand('dbclient.showHistory');
+    const cmd: string | undefined = ({
+      addGroup: 'dbclient.addGroup',
+      showHistory: 'dbclient.showHistory',
+      login: 'dbclient.login',
+      account: 'dbclient.account',
+      sessions: 'dbclient.sessions',
+      logout: 'dbclient.logout',
+    } as Record<string, string>)[picked.value];
+    if (cmd) await vscode.commands.executeCommand(cmd);
   });
   deps.context.subscriptions.push({ dispose: () => deps.manager.disposeAll() });
 }
