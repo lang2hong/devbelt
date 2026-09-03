@@ -6,7 +6,7 @@ import {
   ARGON2ID_MEMORY_MIN_KIB,
   ARGON2ID_PARALLELISM_MAX,
   ARGON2ID_PARALLELISM_MIN,
-} from '../crypto/argon2';
+} from '../crypto/smpKdfParams';
 
 /**
  * 个人同步协议 DTO 类型与编码校验。

@@ -48,9 +48,13 @@ const nativeNodeExternal = {
 };
 
 const options = {
-  entryPoints: [path.resolve(__dirname, 'src/extension.ts')],
+  // 多入口：extension 是主扩展；argon2Worker 是独立 worker 线程入口（Argon2id 须在 Worker 执行）。
+  entryPoints: {
+    extension: path.resolve(__dirname, 'src/extension.ts'),
+    argon2Worker: path.resolve(__dirname, 'src/sync/crypto/argon2Worker.ts'),
+  },
   bundle: true,
-  outfile: path.resolve(__dirname, 'out/extension.js'),
+  outdir: path.resolve(__dirname, 'out'),
   platform: 'node',
   format: 'cjs',
   target: 'node18',
