@@ -129,6 +129,14 @@ describe('方言策略（策略模式）', () => {
       expect(new PostgreSqlDialect().getTriggerListSql('users')).toContain('pg_trigger');
       expect(new SqliteDialect().getTriggerListSql('users')).toContain("type = 'trigger'");
     });
+
+    it('MySQL 表/视图列表带 ORDER BY TABLE_NAME（排序稳定）', () => {
+      const d = new MysqlDialect();
+      expect(d.getTableListSql('app')).toContain('ORDER BY TABLE_NAME');
+      expect(d.getTableListSql()).toContain('ORDER BY TABLE_NAME');
+      expect(d.getViewListSql('app')).toContain('ORDER BY TABLE_NAME');
+      expect(d.getViewListSql()).toContain('ORDER BY TABLE_NAME');
+    });
   });
 });
 describe('方言模板（建表 / 例程）', () => {

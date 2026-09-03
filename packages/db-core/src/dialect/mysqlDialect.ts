@@ -71,17 +71,17 @@ export class MysqlDialect implements SqlDialect {
     const cols = 'TABLE_NAME AS name, TABLE_ROWS AS table_rows, TABLE_COMMENT AS comment';
     if (database) {
       validateIdent(database);
-      return `SELECT ${cols} FROM information_schema.tables WHERE table_schema = '${database}' AND table_type = 'BASE TABLE'`;
+      return `SELECT ${cols} FROM information_schema.tables WHERE table_schema = '${database}' AND table_type = 'BASE TABLE' ORDER BY TABLE_NAME`;
     }
-    return `SELECT ${cols} FROM information_schema.tables WHERE table_type = 'BASE TABLE'`;
+    return `SELECT ${cols} FROM information_schema.tables WHERE table_type = 'BASE TABLE' ORDER BY TABLE_NAME`;
   }
 
   getViewListSql(database?: string): string {
     if (database) {
       validateIdent(database);
-      return `SELECT TABLE_NAME AS name FROM information_schema.views WHERE table_schema = '${database}'`;
+      return `SELECT TABLE_NAME AS name FROM information_schema.views WHERE table_schema = '${database}' ORDER BY TABLE_NAME`;
     }
-    return `SELECT TABLE_NAME AS name FROM information_schema.views`;
+    return `SELECT TABLE_NAME AS name FROM information_schema.views ORDER BY TABLE_NAME`;
   }
 
   getFunctionListSql(database?: string): string {
