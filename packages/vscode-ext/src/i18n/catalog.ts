@@ -123,6 +123,8 @@ export const en: MessageCatalog = {
   'cmd.no': 'No',
   'cmd.updated': 'Updated {table}.{column}',
   'cmd.groups': 'New Group',
+  'cmd.showHistory': 'Show History',
+  'cmd.explorerMenu': 'More Actions',
 
   // 全局对象搜索
   'search.prompt': 'Search tables and views by name',
@@ -652,6 +654,8 @@ export const zh: MessageCatalog = {
   'cmd.no': '否',
   'cmd.updated': '已更新 {table}.{column}',
   'cmd.groups': '新建分组',
+  'cmd.showHistory': '查看历史',
+  'cmd.explorerMenu': '更多操作',
 
   // 全局对象搜索
   'search.prompt': '按名称搜索表和视图',
