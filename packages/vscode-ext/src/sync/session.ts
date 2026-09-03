@@ -150,6 +150,8 @@ export class PersonalSyncSession {
    * 带可重放 cleanup intent；失败中途留下 intent，由 resumeEpochTransition 完整幂等重放。
    * 删 DEK 只用 fromKeyEpoch（绝不误删新 epoch DEK）。参数 fail-closed：两个 epoch 须为
    * 规范 u64、toKeyEpoch > fromKeyEpoch、newSnapshot.keyEpoch === toKeyEpoch。
+   * 清理始终按 fromKeyEpoch 显式构造旧 epoch store（不依赖会话内存字段），故重启后 resume
+   * 也能清除旧 epoch 的持久化 recordMap/outbox。
    */
   async reconcileEpochTransition(fromKeyEpoch: string, toKeyEpoch: string, newSnapshot: SyncStateSnapshot): Promise<void> {
     assertU64Decimal(fromKeyEpoch, 'fromKeyEpoch');
@@ -168,8 +170,8 @@ export class PersonalSyncSession {
 
     await this.writeIntent({ fromKeyEpoch, toKeyEpoch });
     await this.stateStore.setSnapshot(newSnapshot);
-    if (this.mapStore) await this.mapStore.clear();
-    if (this.outbox) await this.outbox.clear();
+    await new RecordMapStore(this.memento, this.userId, fromKeyEpoch).clear();
+    await new PendingMutationStore(this.memento, this.userId, fromKeyEpoch).clear();
     await this.dekStore.delete(this.userId, BigInt(fromKeyEpoch));
     await this.clearIntent();
 

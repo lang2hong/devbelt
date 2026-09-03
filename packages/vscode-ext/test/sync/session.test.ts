@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from '../../src/utils/event';
 import { PersonalSyncSession } from '../../src/sync/session';
 import { DekStore } from '../../src/sync/crypto/keyStore';
+import { RecordMapStore } from '../../src/sync/e2e/recordMapStore';
+import { PendingMutationStore, type PendingPutMutation } from '../../src/sync/e2e/pendingMutationStore';
 import type { PersonalSyncClient } from '../../src/sync/e2e/client';
 import type { ConnectionStore } from '../../src/connection/connectionStore';
 import type { CachedEntitlement } from '../../src/sync/authService';
@@ -34,6 +36,14 @@ function makeDekStore(opts?: { deleteFailOnce?: boolean }) {
 }
 
 const dek32 = () => new Uint8Array(32);
+
+function makePutMutation(): PendingPutMutation {
+  return {
+    action: 'record.put', recordId: 'A'.repeat(22), connectionId: 'c-1', baseVersion: '0',
+    mutationId: 'B'.repeat(22), nonce: 'C'.repeat(16), ciphertext: 'YQ', tag: 'D'.repeat(22),
+    signature: 'E'.repeat(86), requestDigest: 'F'.repeat(43), revision: 0, consecutiveFailureCount: 0,
+  };
+}
 
 describe('PersonalSyncSession', () => {
   it('ensureStores epoch 不一致抛错（不静默沿用旧 store）', () => {
@@ -148,5 +158,36 @@ describe('PersonalSyncSession', () => {
     expect(s.lastRun?.stage).toBe('error');
     expect(s.lastRun?.reason).toContain('sync session locked');
     vi.useRealTimers();
+  });
+
+  it('重启后 resume（内存 store 未建）仍清空旧 epoch 持久化键 + 删 DEK + 清 intent', async () => {
+    const memento = makeMemento();
+    const { store: dekStore, secrets } = makeDekStore();
+
+    // 旧 epoch=2 的持久化 store 留数据 + cleanup intent（模拟上一次切换崩在清 store 前）
+    await new RecordMapStore(memento, '7', '2').put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await new PendingMutationStore(memento, '7', '2').put(makePutMutation());
+    await memento.update('dbclient.sync.epochCleanup.7', { fromKeyEpoch: '2', toKeyEpoch: '3' });
+
+    // 新会话（未 unlock，内存 mapStore/outbox 均为 undefined）= 扩展重启
+    const s = new PersonalSyncSession('7', memento, dekStore, makeStore().store, makeClient());
+    await expect(s.resumeEpochTransition({ keyEpoch: '3', stateVersion: '1', changeSequence: '5' })).resolves.toBe(true);
+
+    expect(new RecordMapStore(memento, '7', '2').getByRecordId('A'.repeat(22))).toBeUndefined();
+    expect(new PendingMutationStore(memento, '7', '2').list()).toEqual([]);
+    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.2');
+    expect(memento.get('dbclient.sync.epochCleanup.7')).toBeUndefined();
+  });
+
+  it('resume 拒绝：snapshot keyEpoch 与 intent toKeyEpoch 不匹配', async () => {
+    const memento = makeMemento();
+    const { store: dekStore, secrets } = makeDekStore();
+    await memento.update('dbclient.sync.epochCleanup.7', { fromKeyEpoch: '2', toKeyEpoch: '3' });
+
+    const s = new PersonalSyncSession('7', memento, dekStore, makeStore().store, makeClient());
+    await expect(s.resumeEpochTransition({ keyEpoch: '5', stateVersion: '1', changeSequence: '5' }))
+      .rejects.toThrowError(/resume snapshot keyEpoch does not match/);
+    expect(secrets.delete).not.toHaveBeenCalled();
+    expect(memento.get('dbclient.sync.epochCleanup.7')).toEqual({ fromKeyEpoch: '2', toKeyEpoch: '3' });
   });
 });
