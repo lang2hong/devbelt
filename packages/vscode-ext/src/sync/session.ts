@@ -5,6 +5,7 @@ import { SyncEngine } from './e2e/syncEngine';
 import { SyncMutator } from './e2e/syncMutator';
 import { SyncCoordinator } from './e2e/syncCoordinator';
 import type { PersonalSyncClient } from './e2e/client';
+import { assertU64Decimal } from './e2e/types';
 import { DekStore, deriveSyncSignKeyPair } from './crypto/keyStore';
 import type { ConnectionStore } from '../connection/connectionStore';
 import type { CachedEntitlement } from './authService';
@@ -24,10 +25,10 @@ import { uniqueId } from '../utils/id';
  *
  * epoch 切换（destroy/reset-after-loss）：
  *   reconcileEpochTransition(fromKeyEpoch, toKeyEpoch, newSnapshot) 自己按
- *   ③ 持久化新 snapshot → ④ 清旧 epoch recordMap/outbox → ⑤ 删旧 epoch DEK 执行，逐步
- *   写入可重放 cleanup intent（dbclient.sync.epochCleanup.<userId>），任一中断后由
- *   resumeEpochTransition() 续跑（setSnapshot 非严格、clear/delete 幂等）。changeSequence
- *   全局不回退、绝不本地重置（§7.3）。
+ *   ③ 持久化新 snapshot → ④ 清旧 epoch recordMap/outbox → ⑤ 删旧 epoch DEK 执行，写入
+ *   可重放 cleanup intent（dbclient.sync.epochCleanup.<userId>），任一中断后由
+ *   resumeEpochTransition() 完整幂等重放（clear/delete 幂等、setSnapshot 等值重放不抛）。
+ *   changeSequence 全局不回退、绝不本地重置（§7.3）。
  */
 
 export interface SyncSessionOptions {
@@ -38,7 +39,6 @@ export interface SyncSessionOptions {
 interface EpochCleanupIntent {
   fromKeyEpoch: string;
   toKeyEpoch: string;
-  step: number; // 0=仅 intent；1=新 snapshot 已持久化；2=旧 map/outbox 已清
 }
 
 export class PersonalSyncSession {
@@ -147,31 +147,43 @@ export class PersonalSyncSession {
 
   /**
    * epoch 切换清理：③持久化新 snapshot → ④清旧 epoch recordMap/outbox → ⑤删旧 epoch DEK，
-   * 带可重放 cleanup intent；失败中途留下 intent，由 resumeEpochTransition(idempotent) 续跑。
-   * 删 DEK 只用 fromKeyEpoch（绝不误删新 epoch DEK）。
+   * 带可重放 cleanup intent；失败中途留下 intent，由 resumeEpochTransition 完整幂等重放。
+   * 删 DEK 只用 fromKeyEpoch（绝不误删新 epoch DEK）。参数 fail-closed：两个 epoch 须为
+   * 规范 u64、toKeyEpoch > fromKeyEpoch、newSnapshot.keyEpoch === toKeyEpoch。
    */
   async reconcileEpochTransition(fromKeyEpoch: string, toKeyEpoch: string, newSnapshot: SyncStateSnapshot): Promise<void> {
+    assertU64Decimal(fromKeyEpoch, 'fromKeyEpoch');
+    assertU64Decimal(toKeyEpoch, 'toKeyEpoch');
+    assertU64Decimal(newSnapshot.keyEpoch, 'newSnapshot.keyEpoch');
+    if (!(BigInt(toKeyEpoch) > BigInt(fromKeyEpoch))) {
+      throw new Error('epoch transition toKeyEpoch must be greater than fromKeyEpoch');
+    }
+    if (newSnapshot.keyEpoch !== toKeyEpoch) {
+      throw new Error('epoch transition snapshot keyEpoch does not match toKeyEpoch');
+    }
     if (this.keyEpoch !== undefined && this.keyEpoch !== fromKeyEpoch) {
       throw new Error('epoch transition fromKeyEpoch mismatch');
     }
     this.coordinator?.stop();
 
-    await this.writeIntent({ fromKeyEpoch, toKeyEpoch, step: 0 });
+    await this.writeIntent({ fromKeyEpoch, toKeyEpoch });
     await this.stateStore.setSnapshot(newSnapshot);
-    await this.writeIntent({ fromKeyEpoch, toKeyEpoch, step: 1 });
     if (this.mapStore) await this.mapStore.clear();
     if (this.outbox) await this.outbox.clear();
-    await this.writeIntent({ fromKeyEpoch, toKeyEpoch, step: 2 });
     await this.dekStore.delete(this.userId, BigInt(fromKeyEpoch));
     await this.clearIntent();
 
     this.resetRuntime();
   }
 
-  /** 检测到 cleanup intent 时续跑（setSnapshot 非严格、clear/delete 幂等，可从任意 step 重放）。 */
+  /** 检测到 cleanup intent 时完整幂等重放（clear/delete 幂等、setSnapshot 等值不抛）。 */
   async resumeEpochTransition(newSnapshot: SyncStateSnapshot): Promise<boolean> {
     const intent = this.readIntent();
     if (!intent) return false;
+    assertU64Decimal(newSnapshot.keyEpoch, 'newSnapshot.keyEpoch');
+    if (newSnapshot.keyEpoch !== intent.toKeyEpoch) {
+      throw new Error('resume snapshot keyEpoch does not match intent toKeyEpoch');
+    }
     await this.reconcileEpochTransition(intent.fromKeyEpoch, intent.toKeyEpoch, newSnapshot);
     return true;
   }
@@ -202,10 +214,10 @@ export class PersonalSyncSession {
     if (raw === undefined) return undefined;
     if (typeof raw !== 'object' || raw === null) throw new Error('corrupt epoch cleanup intent');
     const o = raw as Record<string, unknown>;
-    if (typeof o.fromKeyEpoch !== 'string' || typeof o.toKeyEpoch !== 'string' || typeof o.step !== 'number') {
+    if (typeof o.fromKeyEpoch !== 'string' || typeof o.toKeyEpoch !== 'string') {
       throw new Error('corrupt epoch cleanup intent');
     }
-    return { fromKeyEpoch: o.fromKeyEpoch, toKeyEpoch: o.toKeyEpoch, step: o.step };
+    return { fromKeyEpoch: o.fromKeyEpoch, toKeyEpoch: o.toKeyEpoch };
   }
 
   private async writeIntent(i: EpochCleanupIntent): Promise<void> {

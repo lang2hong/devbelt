@@ -96,6 +96,33 @@ describe('PersonalSyncSession', () => {
     expect(s.isUnlocked).toBe(false);
   });
 
+  it('epoch transition 拒绝：snapshot keyEpoch 与 toKeyEpoch 不匹配', async () => {
+    const { store, secrets } = makeDekStore();
+    const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, makeClient());
+    s.unlock('2', dek32());
+
+    await expect(s.reconcileEpochTransition('2', '3', { keyEpoch: '2', stateVersion: '1', changeSequence: '5' }))
+      .rejects.toThrowError(/snapshot keyEpoch does not match/);
+    expect(s.pendingCleanup).toBeUndefined();
+    expect(s.getStateStore().getSnapshot()).toBeUndefined();
+    expect(secrets.delete).not.toHaveBeenCalled();
+    expect(s.isUnlocked).toBe(true);
+  });
+
+  it('epoch transition 拒绝：目标 epoch 不前进（相同 / 倒退）', async () => {
+    const { store, secrets } = makeDekStore();
+    const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, makeClient());
+    s.unlock('3', dek32());
+
+    for (const target of ['3', '2']) {
+      await expect(s.reconcileEpochTransition('3', target, { keyEpoch: target, stateVersion: '1', changeSequence: '5' }))
+        .rejects.toThrowError(/toKeyEpoch must be greater/);
+    }
+    expect(s.pendingCleanup).toBeUndefined();
+    expect(secrets.delete).not.toHaveBeenCalled();
+    expect(s.isUnlocked).toBe(true);
+  });
+
   it('lock 后在途 pull 调 thunk → 结构化 error（sync session locked）', async () => {
     vi.useFakeTimers();
     let releaseRecords!: (v: unknown) => void;
