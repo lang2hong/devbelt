@@ -6,6 +6,7 @@ import { registerQueryCommands } from './commands/query';
 import { registerTableCommands } from './commands/table';
 import { registerDatabaseCommands } from './commands/database';
 import { registerUserCommands } from './commands/user';
+import { registerAccountCommands } from './commands/account';
 import { registerSavedQueryCommands, registerGroupCommands, registerQueryFolderCommands } from './commands/group';
 import { registerDdlCommands } from './commands/ddl';
 import { registerSearchCommands } from './commands/search';
@@ -18,6 +19,7 @@ export function registerCommands(deps: Deps): void {
   registerTableCommands(deps, sub);
   registerDatabaseCommands(deps, sub);
   registerUserCommands(deps, sub);
+  registerAccountCommands(deps, sub);
   registerSavedQueryCommands(deps, sub);
   registerQueryFolderCommands(deps, sub);
   registerGroupCommands(deps, sub);

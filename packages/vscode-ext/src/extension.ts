@@ -99,9 +99,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   context.subscriptions.push(
     orgTreeView,
-    // 登出 → 清组织缓存（401 清认证；登录态变化即整用户失效）
+    // 登录/登出 → 刷新 dbclient.loggedIn 上下文；登出 → 清组织缓存
     eventBus.subscribe(AuthEvent, (e) => {
       if (e.kind === 'logout') orgWorkspace.clearAuth();
+      void syncLoggedInContext(auth);
     }),
   );
   registerOrgCommands({ context, workspace: orgWorkspace, manager, executor, tree: orgTreeProvider });

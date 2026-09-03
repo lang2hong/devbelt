@@ -567,7 +567,8 @@
       {
         "command": "dbclient.org.newQuery",
         "title": "New Query Resource",
-        "category": "DB Client"
+        "category": "DB Client",
+        "icon": "$(new-file)"
       },
       {
         "command": "dbclient.org.openResource",
@@ -621,6 +622,11 @@
         },
         {
           "command": "dbclient.org.newFolder",
+          "when": "view == dbclient.explorer.organization",
+          "group": "navigation"
+        },
+        {
+          "command": "dbclient.org.newQuery",
           "when": "view == dbclient.explorer.organization",
           "group": "navigation"
         }

@@ -135,7 +135,7 @@ export function registerOrgCommands(deps: OrgDeps): void {
 
   // ── 新建 query 资源 ──
   sub('dbclient.org.newQuery', async (node: OrgTreeNode) => {
-    const orgId = node?.orgId;
+    const orgId = node?.orgId ?? await pickOrgId(workspace);
     if (!orgId) return;
     const name = await vscode.window.showInputBox({ prompt: 'Query name' });
     if (!name) return;
@@ -196,7 +196,7 @@ export function registerOrgCommands(deps: OrgDeps): void {
 
   // ── 新建目录 ──
   sub('dbclient.org.newFolder', async (node: OrgTreeNode) => {
-    const orgId = node?.orgId;
+    const orgId = node?.orgId ?? await pickOrgId(workspace);
     if (!orgId) return;
     const name = await vscode.window.showInputBox({ prompt: 'Folder name' });
     if (!name) return;
@@ -249,4 +249,19 @@ function showError(e: unknown): void {
   } else if (e instanceof Error) {
     vscode.window.showErrorMessage(e.message);
   }
+}
+
+/** 标题栏入口无节点时选组织：单组织直接用，多组织弹选择，无组织提示登录。 */
+async function pickOrgId(workspace: OrgWorkspace): Promise<string | undefined> {
+  const orgs = await workspace.listOrganizations().catch(() => []);
+  if (!orgs.length) {
+    vscode.window.showInformationMessage('Sign in and join an organization to manage resources.');
+    return undefined;
+  }
+  if (orgs.length === 1) return orgs[0].organizationId;
+  const picked = await vscode.window.showQuickPick(
+    orgs.map((o) => ({ label: o.name, value: o.organizationId })),
+    { placeHolder: 'Select organization' },
+  );
+  return picked?.value;
 }
