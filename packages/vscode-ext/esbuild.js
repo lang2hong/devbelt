@@ -52,6 +52,7 @@ const options = {
   entryPoints: {
     extension: path.resolve(__dirname, 'src/extension.ts'),
     argon2Worker: path.resolve(__dirname, 'src/sync/crypto/argon2Worker.ts'),
+    mainThreadFixture: path.resolve(__dirname, 'src/sync/crypto/mainThreadFixture.ts'),
   },
   bundle: true,
   outdir: path.resolve(__dirname, 'out'),

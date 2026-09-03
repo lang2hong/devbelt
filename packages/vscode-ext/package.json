@@ -1422,7 +1422,7 @@
     "dev:webview": "cd webview && npx vite build --watch",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "lint": "tsc --noEmit -p tsconfig.test.json",
-    "test": "pnpm -C ../db-core build && cd webview && npx vite build && cd .. && vitest run",
+    "test": "pnpm -C ../db-core build && cd webview && npx vite build && cd .. && node esbuild.js && vitest run",
     "package": "vsce package --no-dependencies"
   },
   "dependencies": {

@@ -103,6 +103,8 @@ describe('deriveKekSmpInWorker', () => {
   });
 
   itIfWorkerBuilt('真实 worker：默认 spawn 输出与执行体逐字节一致', async () => {
+    // 注意：此处仅在测试主线程调用 deriveKekSmp 以取得 oracle（KAT），
+    // 生产代码不得在 src 主线程调用它（§7.1 红线：Argon2id 只在 Worker 执行）。
     const viaWorker = await deriveKekSmpInWorker('smp-password', valid);
     const direct = await deriveKekSmp('smp-password', valid);
     expect(Buffer.from(viaWorker).toString('hex')).toBe(Buffer.from(direct).toString('hex'));
