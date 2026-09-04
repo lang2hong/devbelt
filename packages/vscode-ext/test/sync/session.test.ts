@@ -140,7 +140,16 @@ describe('PersonalSyncSession', () => {
     const events = new EventEmitter<'user' | 'sync'>();
     const store = { onChanged: events.event, listForSync: () => [] } as unknown as ConnectionStore;
     const client = {
-      getState: async () => ({ keyEpoch: '1', stateVersion: '1', changeSequence: '1' }),
+      getState: async () => ({
+        protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+        keyEpoch: '1', stateVersion: '1', changeSequence: '1',
+        signPub: 'A'.repeat(43), recoverSignPub: 'A'.repeat(43),
+        smpKdf: { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: 'A'.repeat(22), outputBytes: 32 },
+        recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: 'A'.repeat(22), outputBytes: 32 },
+        envelopeSmp: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: 'A'.repeat(16), ciphertext: 'A'.repeat(43), tag: 'A'.repeat(22) },
+        envelopeRecovery: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: 'A'.repeat(16), ciphertext: 'A'.repeat(43), tag: 'A'.repeat(22) },
+        recoveryCodeSetTime: null,
+      }),
       getRecords: async () => recordsGate as Promise<unknown>,
     } as unknown as PersonalSyncClient;
 
@@ -152,7 +161,7 @@ describe('PersonalSyncSession', () => {
     events.fire('user');
     await vi.advanceTimersByTimeAsync(300); // drain 启动，reconcile 无出站，block 在 getRecords
     s.lock(); // 清 DEK，stop 不等待在途 drain
-    releaseRecords({ snapshotSequence: '1', records: [{ recordId: 'A'.repeat(22), version: '1', changeSequence: '1', deleteTime: null, nonce: 'C'.repeat(16), ciphertext: 'YQ', tag: 'D'.repeat(22) }] });
+    releaseRecords({ snapshotSequence: '1', records: [{ recordId: 'A'.repeat(22), version: '1', changeSequence: '1', deleteTime: null, cipherSuite: 'AES-256-GCM', formatVersion: 1, nonce: 'C'.repeat(16), ciphertext: 'YQ', tag: 'D'.repeat(22) }] });
     await vi.advanceTimersByTimeAsync(0);
 
     expect(s.lastRun?.stage).toBe('error');

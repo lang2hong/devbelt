@@ -7,7 +7,7 @@ import { PendingMutationStore, type PendingMutation } from './pendingMutationSto
 import type { StateStore } from './stateStore';
 import type { ConnectionStore } from '../../connection/connectionStore';
 import type { CachedEntitlement } from '../authService';
-import { assertRecordId, assertU64Decimal } from './types';
+import { assertRecordId, assertBase64UrlNoPad, assertBase64UrlRange, assertU64Decimal, rejectExtraKeys, validateSyncState } from './types';
 
 /**
  * 个人同步运行循环（SyncEngine）。
@@ -81,6 +81,15 @@ interface PullPage {
 
 const MAX_PAGES = 1000;
 const STALL_THRESHOLD = 5;
+const MAX_RECORD_CIPHERTEXT_BYTES = 256 * 1024;
+
+/** 协议不匹配 / 畸形 feed 输入：fail-closed，标记为 terminal 终止本轮（重试无意义）。 */
+class FeedProtocolError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FeedProtocolError';
+  }
+}
 
 type ErrorClass = 'terminal' | 'terminal-state' | 'terminal-epoch' | 'conflict' | 'retryable';
 
@@ -198,6 +207,7 @@ export class SyncEngine {
     // 2. outbox 重放：逐条直发已签名 mutation（逐字复用 signature/requestDigest，不重签）。
     // 成功 → 先确认 recordMap → 再删条目；确认失败保留条目原样重放（幂等 receipt 收敛）。
     let stalled: SyncStalledEntry | undefined;
+    let lastCommitted = local.changeSequence;
     for (const m of this.deps.outbox.list()) {
       let receipt: unknown;
       try {
@@ -238,12 +248,20 @@ export class SyncEngine {
         return { stage: 'error', conflicts: [], applied: 0, reason: `push failed: ${describe(err)}` };
       }
 
+      let confirmed: { version: string; changeSequence: string };
       try {
-        await this.confirmOutbound(m, receipt);
+        confirmed = this.parseReceipt(receipt);
+      } catch (err) {
+        return { stage: 'error', conflicts: [], applied: 0, reason: `invalid receipt: ${describe(err)}` };
+      }
+      try {
+        await this.confirmOutbound(m, confirmed.version);
       } catch (err) {
         return { stage: 'error', conflicts: [], applied: 0, reason: `confirm failed: ${describe(err)}` };
       }
       await this.deps.outbox.delete(m.mutationId);
+      // 推进本地 changeSequence 到本次 push 的服务端回执位置
+      lastCommitted = confirmed.changeSequence;
     }
 
     // 3. 分页 feed + 解密 + 应用 + 逐页 cursor
@@ -256,7 +274,6 @@ export class SyncEngine {
     };
 
     let cursor = local.changeSequence;
-    let lastCommitted = local.changeSequence;
     let applied = 0;
     const conflicts: SyncConflictEntry[] = [];
 
@@ -269,6 +286,9 @@ export class SyncEngine {
       try {
         page = this.parsePage(await this.deps.client.getRecords(requested, remoteSnap, limit));
       } catch (err) {
+        if (err instanceof FeedProtocolError) {
+          return { stage: 'terminal', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `feed protocol unsupported: ${describe(err)}` };
+        }
         return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `pull failed: ${describe(err)}` };
       }
       if (page.snapshotSequence !== remoteSnap) {
@@ -291,7 +311,7 @@ export class SyncEngine {
         const lastSeq = page.records[page.records.length - 1].changeSequence;
         try {
           await this.commitCursor(remoteState.keyEpoch, remoteState.stateVersion, lastSeq);
-          lastCommitted = lastSeq;
+          if (BigInt(lastSeq) > BigInt(lastCommitted)) lastCommitted = lastSeq;
         } catch (err) {
           return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `cursor commit failed: ${describe(err)}` };
         }
@@ -313,52 +333,73 @@ export class SyncEngine {
       cursor = nextAfter;
     }
 
+    // push-only 或无新 record 的轮次：本地 changeSequence 也必须推进到 push receipt / 最后游标
+    try {
+      await this.commitCursor(remoteState.keyEpoch, remoteState.stateVersion, lastCommitted);
+    } catch (err) {
+      return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `cursor commit failed: ${describe(err)}` };
+    }
+
     return { stage: 'ok', conflicts, stalled, applied, changeSequence: lastCommitted };
   }
 
   private parseState(raw: unknown): RemoteState {
-    if (typeof raw !== 'object' || raw === null) throw new Error('invalid sync state');
-    const o = raw as Record<string, unknown>;
-    const keyEpoch = assertU64Decimal(String(o.keyEpoch), 'keyEpoch');
-    const stateVersion = assertU64Decimal(String(o.stateVersion), 'stateVersion');
-    const changeSequence = assertU64Decimal(String(o.changeSequence), 'changeSequence', true);
-    return { keyEpoch, stateVersion, changeSequence };
+    const s = validateSyncState(raw);
+    return { keyEpoch: s.keyEpoch, stateVersion: s.stateVersion, changeSequence: s.changeSequence };
   }
 
   private parsePage(raw: unknown): PullPage {
-    if (typeof raw !== 'object' || raw === null) throw new Error('invalid feed page');
+    if (typeof raw !== 'object' || raw === null) throw new FeedProtocolError('invalid feed page');
     const o = raw as Record<string, unknown>;
-    const snapshotSequence = assertU64Decimal(String(o.snapshotSequence), 'snapshotSequence', true);
+    rejectExtraKeys(o, ['snapshotSequence', 'nextAfter', 'records'], 'feed page');
+    const snapshotSequence = this.readU64(o, 'snapshotSequence', true);
     const recordsRaw = o.records;
-    if (!Array.isArray(recordsRaw)) throw new Error('invalid feed page records');
+    if (!Array.isArray(recordsRaw)) throw new FeedProtocolError('invalid feed page records');
     const records: RemoteRecord[] = recordsRaw.map((r) => {
-      if (typeof r !== 'object' || r === null) throw new Error('invalid feed record');
+      if (typeof r !== 'object' || r === null) throw new FeedProtocolError('invalid feed record');
       const ro = r as Record<string, unknown>;
+      rejectExtraKeys(ro, ['recordId', 'version', 'changeSequence', 'deleteTime', 'cipherSuite', 'formatVersion', 'nonce', 'ciphertext', 'tag', 'updateTime'], 'feed record');
       const recordId = assertRecordId(typeof ro.recordId === 'string' ? ro.recordId : '', 'recordId');
-      const version = assertU64Decimal(String(ro.version), 'version');
-      const changeSequence = assertU64Decimal(String(ro.changeSequence), 'changeSequence', true);
+      const version = this.readU64(ro, 'version');
+      const changeSequence = this.readU64(ro, 'changeSequence', true);
       const deleteTime = ro.deleteTime == null ? null : String(ro.deleteTime);
-      const nonce = ro.nonce;
-      const ciphertext = ro.ciphertext;
-      const tag = ro.tag;
       if (deleteTime == null) {
-        if (typeof nonce !== 'string' || nonce === '' ||
-          typeof ciphertext !== 'string' || ciphertext === '' ||
-          typeof tag !== 'string' || tag === '') {
-          throw new Error('active feed record missing nonce/ciphertext/tag');
+        // active：cipherSuite/formatVersion 必须匹配，nonce/tag/ciphertext 严格校验
+        if (ro.cipherSuite !== 'AES-256-GCM' || ro.formatVersion !== 1) {
+          throw new FeedProtocolError('feed record cipherSuite/formatVersion unsupported');
         }
+        const nonce = this.readB64(ro, 'nonce', 12);
+        const ciphertext = this.readB64Range(ro, 'ciphertext', 1, MAX_RECORD_CIPHERTEXT_BYTES);
+        const tag = this.readB64(ro, 'tag', 16);
+        return { recordId, version, changeSequence, deleteTime, nonce, ciphertext, tag };
       }
-      return {
-        recordId,
-        version,
-        changeSequence,
-        deleteTime,
-        nonce: typeof nonce === 'string' ? nonce : undefined,
-        ciphertext: typeof ciphertext === 'string' ? ciphertext : undefined,
-        tag: typeof tag === 'string' ? tag : undefined,
-      };
+      // tombstone：不得携带密文字段
+      if (ro.nonce !== undefined || ro.ciphertext !== undefined || ro.tag !== undefined) {
+        throw new FeedProtocolError('tombstone feed record must not carry nonce/ciphertext/tag');
+      }
+      return { recordId, version, changeSequence, deleteTime };
     });
     return { snapshotSequence, nextAfter: typeof o.nextAfter === 'string' ? o.nextAfter : undefined, records };
+  }
+
+  private readU64(o: Record<string, unknown>, key: string, allowZero = false): string {
+    const v = o[key];
+    if (typeof v !== 'string') throw new FeedProtocolError(`${key} must be a string`);
+    return assertU64Decimal(v, key, allowZero);
+  }
+
+  private readB64(o: Record<string, unknown>, key: string, len: number): string {
+    const v = o[key];
+    if (typeof v !== 'string') throw new FeedProtocolError(`${key} must be a string`);
+    assertBase64UrlNoPad(v, len, key);
+    return v;
+  }
+
+  private readB64Range(o: Record<string, unknown>, key: string, min: number, max: number): string {
+    const v = o[key];
+    if (typeof v !== 'string') throw new FeedProtocolError(`${key} must be a string`);
+    assertBase64UrlRange(v, min, max, key);
+    return v;
   }
 
   private async pushMutation(m: PendingMutation): Promise<unknown> {
@@ -387,9 +428,8 @@ export class SyncEngine {
   }
 
   /** 出站「确认」：成功先回写 recordMap，再（调用方）删 outbox；与入站 applyRecord confirm 对称。 */
-  private async confirmOutbound(m: PendingMutation, receipt: unknown): Promise<void> {
+  private async confirmOutbound(m: PendingMutation, version: string): Promise<void> {
     if (m.action === 'record.put') {
-      const version = this.parseReceiptVersion(receipt);
       await this.deps.mapStore.put(m.recordId, {
         connectionId: m.connectionId,
         recordVersion: version,
@@ -401,11 +441,15 @@ export class SyncEngine {
     }
   }
 
-  private parseReceiptVersion(receipt: unknown): string {
+  private parseReceipt(receipt: unknown): { version: string; changeSequence: string } {
     if (typeof receipt !== 'object' || receipt === null) throw new Error('invalid record receipt');
     const o = receipt as Record<string, unknown>;
     if (typeof o.version !== 'string') throw new Error('record receipt missing version');
-    return assertU64Decimal(o.version, 'receipt.version');
+    if (typeof o.changeSequence !== 'string') throw new Error('record receipt missing changeSequence');
+    return {
+      version: assertU64Decimal(o.version, 'receipt.version'),
+      changeSequence: assertU64Decimal(o.changeSequence, 'receipt.changeSequence', true),
+    };
   }
 
   private async applyRemote(rec: RemoteRecord, keyEpoch: string, ctx: ApplyContext): Promise<void> {

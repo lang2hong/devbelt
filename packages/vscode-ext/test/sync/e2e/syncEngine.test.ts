@@ -5,6 +5,7 @@ import { RecordMapStore } from '../../../src/sync/e2e/recordMapStore';
 import { PendingMutationStore, type PendingDeleteMutation, type PendingPutMutation } from '../../../src/sync/e2e/pendingMutationStore';
 import type { SyncStateSnapshot } from '../../../src/sync/e2e/stateStore';
 import type { SavedConnection } from '../../../src/connection/connectionStore';
+import type { StateDto } from '../../../src/sync/e2e/types';
 
 function makeMemento() {
   const m = new Map<string, unknown>();
@@ -31,9 +32,43 @@ function makeStore(seed: SavedConnection[] = []) {
   };
 }
 
+const b64 = (bytes: number) => 'A'.repeat(Math.ceil((bytes * 4) / 3));
+
+function envelope() {
+  return {
+    protocolVersion: 1 as const,
+    cipherSuite: 'AES-256-GCM' as const,
+    formatVersion: 1 as const,
+    envelopeVersion: '1',
+    nonce: b64(12),
+    ciphertext: b64(32),
+    tag: b64(16),
+  };
+}
+
+/** 返回一个可通过 validateSyncState 的完整 state 响应（默认 epoch1/v1/seq0）。 */
+function stateDto(over: Partial<StateDto> = {}): StateDto {
+  return {
+    protocolVersion: 1,
+    cipherSuite: 'AES-256-GCM',
+    formatVersion: 1,
+    keyEpoch: '1',
+    stateVersion: '1',
+    changeSequence: '0',
+    signPub: b64(32),
+    recoverSignPub: b64(32),
+    smpKdf: { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: b64(16), outputBytes: 32 },
+    recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: b64(16), outputBytes: 32 },
+    envelopeSmp: envelope(),
+    envelopeRecovery: envelope(),
+    recoveryCodeSetTime: null,
+    ...over,
+  };
+}
+
 function clientWith(over: Partial<PersonalSyncClient> = {}) {
   return {
-    getState: vi.fn(async () => ({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' })),
+    getState: vi.fn(async () => stateDto()),
     getRecords: vi.fn(async () => ({ snapshotSequence: '0', records: [] })),
     putRecord: vi.fn(async () => ({ version: '1', changeSequence: '1' })),
     deleteRecord: vi.fn(async () => ({ version: '1', changeSequence: '1' })),
@@ -90,7 +125,7 @@ describe('SyncEngine', () => {
   });
 
   it('远端 epoch 高于本地 → epoch-mismatch，不拉 feed', async () => {
-    const client = clientWith({ getState: vi.fn(async () => ({ keyEpoch: '2', stateVersion: '1', changeSequence: '1' })) });
+    const client = clientWith({ getState: vi.fn(async () => stateDto({ keyEpoch: '2', stateVersion: '1', changeSequence: '1' })) });
     const eng = engine({ client, snap: SNAP, mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox: new PendingMutationStore(makeMemento(), '7', '1') });
     const r = await eng.sync();
     expect(r.stage).toBe('epoch-mismatch');
@@ -141,7 +176,7 @@ describe('SyncEngine', () => {
     await mapStore.put(id, { connectionId: 'c-1', recordVersion: '1', revision: 0, status: 'pending' });
     const store = makeStore([{ id: 'c-1', name: 'n', dbType: 'MYSQL' as never, host: 'h', port: 3306, user: 'u', updateTime: 200 } as SavedConnection]);
     const client = clientWith({
-      getState: vi.fn(async () => ({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
       getRecords: vi.fn(async () => ({
         snapshotSequence: '5',
         records: [{ recordId: id, version: '2', changeSequence: '5', deleteTime: '2026-01-01T00:00:00.000Z' }],
@@ -157,7 +192,7 @@ describe('SyncEngine', () => {
   it('cursor 持久化失败 → error，下次 sync() 仍可启动', async () => {
     const id = 'A'.repeat(22);
     const client = clientWith({
-      getState: vi.fn(async () => ({ keyEpoch: '1', stateVersion: '1', changeSequence: '3' })),
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '3' })),
       getRecords: vi.fn(async () => ({
         snapshotSequence: '3',
         records: [{ recordId: id, version: '2', changeSequence: '3', deleteTime: '2026-01-01T00:00:00.000Z' }],
@@ -182,7 +217,7 @@ describe('SyncEngine', () => {
       .mockResolvedValueOnce({ snapshotSequence: '5', nextAfter: '3', records: [rec] })
       .mockResolvedValueOnce({ snapshotSequence: '99', records: [rec] });
     const client = clientWith({
-      getState: vi.fn(async () => ({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
       getRecords,
     });
     const eng = new SyncEngine({
@@ -202,7 +237,7 @@ describe('SyncEngine', () => {
 
   it('分页停滞（nextAfter 未前进）→ error', async () => {
     const client = clientWith({
-      getState: vi.fn(async () => ({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
       getRecords: vi.fn(async () => ({ snapshotSequence: '5', nextAfter: '0', records: [] })),
     });
     const eng = engine({ client, snap: SNAP, mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox: new PendingMutationStore(makeMemento(), '7', '1') });
@@ -233,7 +268,7 @@ describe('SyncEngine', () => {
   it('同 epoch、stateVersion 变化、空 feed → 更新快照', async () => {
     const setSnapshot = vi.fn(async () => {});
     const client = clientWith({
-      getState: vi.fn(async () => ({ keyEpoch: '1', stateVersion: '2', changeSequence: '0' })),
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '2', changeSequence: '0' })),
       getRecords: vi.fn(async () => ({ snapshotSequence: '0', records: [] })),
     });
     const eng = new SyncEngine({
@@ -254,7 +289,7 @@ describe('SyncEngine', () => {
     const getRecords = vi.fn(async () => ({ snapshotSequence: '0', records: [] }));
     const localSnap: SyncStateSnapshot = { keyEpoch: '1', stateVersion: '2', changeSequence: '0' };
     const client = clientWith({
-      getState: vi.fn(async () => ({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' })),
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' })),
       getRecords,
     });
     const eng = new SyncEngine({

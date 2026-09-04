@@ -3,6 +3,7 @@ import { requestDigestOf } from '../crypto/digest';
 import { buildRecordSigningInput, buildStateSigningInput, signSigningInput, type SyncAction } from '../crypto/sign';
 import {
   assertBase64UrlNoPad,
+  assertBase64UrlRange,
   assertRecordId,
   assertU64Decimal,
   validateEnvelope,
@@ -13,6 +14,7 @@ import {
   type NewStateDto,
   type RecoveryKdfDto,
   type SmpKdfDto,
+  type StateDto,
 } from './types';
 
 /**
@@ -81,17 +83,41 @@ export interface DestroyOpts extends MutateOptsBase {
   newState: NewStateDto;
 }
 
+/** record put/delete 回执。 */
+export interface RecordReceipt {
+  version: string;
+  changeSequence: string;
+}
+
+/** change-key 回执。 */
+export interface ChangeKeyResult {
+  keyEpoch: string;
+  stateVersion: string;
+}
+
+/** recover 回执。 */
+export interface RecoverResult extends ChangeKeyResult {
+  recoveryCodeSetTime: string | null;
+}
+
+/** destroy / reset-after-loss 回执：完整三字段快照。 */
+export interface DestroyResult {
+  keyEpoch: string;
+  stateVersion: string;
+  changeSequence: string;
+}
+
 export class PersonalSyncClient {
   constructor(private readonly http: SyncClient) {}
 
   // ── 无签名 ──
 
-  getState(): Promise<unknown> {
-    return this.call('GET', '/api/sync/state');
+  getState(): Promise<StateDto> {
+    return this.call<StateDto>('GET', '/api/sync/state');
   }
 
-  async init(newState: NewStateDto): Promise<unknown> {
-    return this.call('PUT', '/api/sync/init', { newState: validateNewState(newState) }, { retry: false });
+  async init(newState: NewStateDto): Promise<void> {
+    return this.call<void>('PUT', '/api/sync/init', { newState: validateNewState(newState) }, { retry: false });
   }
 
   async getRecords(after: string, snapshotSequence: string | undefined, limit: number): Promise<unknown> {
@@ -108,9 +134,9 @@ export class PersonalSyncClient {
     return this.call('POST', '/api/sync/reset-challenges');
   }
 
-  async resetAfterLoss(resetToken: string, newState: NewStateDto): Promise<unknown> {
+  async resetAfterLoss(resetToken: string, newState: NewStateDto): Promise<DestroyResult> {
     assertBase64UrlNoPad(resetToken, 32, 'resetToken');
-    return this.call(
+    return this.call<DestroyResult>(
       'POST',
       '/api/sync/reset-after-loss',
       {
@@ -127,13 +153,13 @@ export class PersonalSyncClient {
 
   // ── 签名 mutation ──
 
-  async putRecord(o: PutRecordOpts): Promise<unknown> {
+  async putRecord(o: PutRecordOpts): Promise<RecordReceipt> {
     assertU64Decimal(o.keyEpoch, 'keyEpoch');
     assertU64Decimal(o.baseVersion, 'baseVersion', true);
     assertBase64UrlNoPad(o.mutationId, 16, 'mutationId');
     assertRecordId(o.recordId);
     assertBase64UrlNoPad(o.nonce, 12, 'nonce');
-    if (!/^[A-Za-z0-9_-]+$/.test(o.ciphertext)) throw new Error('ciphertext must be unpadded base64url');
+    assertBase64UrlRange(o.ciphertext, 1, 256 * 1024, 'ciphertext');
     assertBase64UrlNoPad(o.tag, 16, 'tag');
     const body: Record<string, unknown> = {
       protocolVersion: 1,
@@ -148,10 +174,10 @@ export class PersonalSyncClient {
       tag: o.tag,
     };
     body.signature = this.signMutation('record.put', o, body);
-    return this.call('PUT', `/api/sync/records/${encodeURIComponent(o.recordId)}`, body);
+    return this.call<RecordReceipt>('PUT', `/api/sync/records/${encodeURIComponent(o.recordId)}`, body);
   }
 
-  async deleteRecord(o: DeleteRecordOpts): Promise<unknown> {
+  async deleteRecord(o: DeleteRecordOpts): Promise<RecordReceipt> {
     assertU64Decimal(o.keyEpoch, 'keyEpoch');
     assertU64Decimal(o.baseVersion, 'baseVersion');
     assertBase64UrlNoPad(o.mutationId, 16, 'mutationId');
@@ -164,7 +190,7 @@ export class PersonalSyncClient {
       baseVersion: o.baseVersion,
     };
     body.signature = this.signMutation('record.delete', o, body);
-    return this.call('DELETE', `/api/sync/records/${encodeURIComponent(o.recordId)}`, body);
+    return this.call<RecordReceipt>('DELETE', `/api/sync/records/${encodeURIComponent(o.recordId)}`, body);
   }
 
   // ── 已签名 mutation 直发（重放专用，不做签名，逐字复用持久化 signature/digest）──
@@ -179,7 +205,7 @@ export class PersonalSyncClient {
     nonce: string;
     ciphertext: string;
     tag: string;
-  }): Promise<unknown> {
+  }): Promise<RecordReceipt> {
     assertU64Decimal(o.keyEpoch, 'keyEpoch');
     assertU64Decimal(o.baseVersion, 'baseVersion', true);
     assertBase64UrlNoPad(o.mutationId, 16, 'mutationId');
@@ -187,7 +213,7 @@ export class PersonalSyncClient {
     assertBase64UrlNoPad(o.signature, 64, 'signature');
     assertBase64UrlNoPad(o.requestDigest, 32, 'requestDigest');
     assertBase64UrlNoPad(o.nonce, 12, 'nonce');
-    if (!/^[A-Za-z0-9_-]+$/.test(o.ciphertext)) throw new Error('ciphertext must be unpadded base64url');
+    assertBase64UrlRange(o.ciphertext, 1, 256 * 1024, 'ciphertext');
     assertBase64UrlNoPad(o.tag, 16, 'tag');
     const body: Record<string, unknown> = {
       protocolVersion: 1,
@@ -203,7 +229,7 @@ export class PersonalSyncClient {
     };
     if (requestDigestOf(body) !== o.requestDigest) throw new Error('outbox mutation digest mismatch');
     body.signature = o.signature;
-    return this.call('PUT', `/api/sync/records/${encodeURIComponent(o.recordId)}`, body);
+    return this.call<RecordReceipt>('PUT', `/api/sync/records/${encodeURIComponent(o.recordId)}`, body);
   }
 
   async deleteRecordSigned(o: {
@@ -213,7 +239,7 @@ export class PersonalSyncClient {
     baseVersion: string;
     signature: string;
     requestDigest: string;
-  }): Promise<unknown> {
+  }): Promise<RecordReceipt> {
     assertU64Decimal(o.keyEpoch, 'keyEpoch');
     assertU64Decimal(o.baseVersion, 'baseVersion');
     assertBase64UrlNoPad(o.mutationId, 16, 'mutationId');
@@ -229,10 +255,10 @@ export class PersonalSyncClient {
     };
     if (requestDigestOf(body) !== o.requestDigest) throw new Error('outbox mutation digest mismatch');
     body.signature = o.signature;
-    return this.call('DELETE', `/api/sync/records/${encodeURIComponent(o.recordId)}`, body);
+    return this.call<RecordReceipt>('DELETE', `/api/sync/records/${encodeURIComponent(o.recordId)}`, body);
   }
 
-  async changeKey(o: ChangeKeyOpts): Promise<unknown> {
+  async changeKey(o: ChangeKeyOpts): Promise<ChangeKeyResult> {
     assertU64Decimal(o.keyEpoch, 'keyEpoch');
     assertU64Decimal(o.expectedStateVersion, 'expectedStateVersion');
     assertBase64UrlNoPad(o.mutationId, 16, 'mutationId');
@@ -245,10 +271,10 @@ export class PersonalSyncClient {
       envelopeSmp: validateEnvelope(o.envelopeSmp, 'envelopeSmp'),
     };
     body.signature = this.signMutation('state.change-key', o, body);
-    return this.call('POST', '/api/sync/change-key', body);
+    return this.call<ChangeKeyResult>('POST', '/api/sync/change-key', body);
   }
 
-  async recover(o: RecoverOpts): Promise<unknown> {
+  async recover(o: RecoverOpts): Promise<RecoverResult> {
     assertU64Decimal(o.keyEpoch, 'keyEpoch');
     assertU64Decimal(o.expectedStateVersion, 'expectedStateVersion');
     assertBase64UrlNoPad(o.mutationId, 16, 'mutationId');
@@ -265,10 +291,10 @@ export class PersonalSyncClient {
       recoverSignPub: o.recoverSignPub,
     };
     body.signature = this.signMutation('state.recover', o, body);
-    return this.call('POST', '/api/sync/recover', body);
+    return this.call<RecoverResult>('POST', '/api/sync/recover', body);
   }
 
-  async destroy(o: DestroyOpts): Promise<unknown> {
+  async destroy(o: DestroyOpts): Promise<DestroyResult> {
     assertU64Decimal(o.keyEpoch, 'keyEpoch');
     assertU64Decimal(o.expectedStateVersion, 'expectedStateVersion');
     assertBase64UrlNoPad(o.mutationId, 16, 'mutationId');
@@ -280,7 +306,7 @@ export class PersonalSyncClient {
       newState: validateNewState(o.newState),
     };
     body.signature = this.signMutation('state.destroy', o, body);
-    return this.call('POST', '/api/sync/destroy', body);
+    return this.call<DestroyResult>('POST', '/api/sync/destroy', body);
   }
 
   private signMutation(action: SyncAction, o: { userId: string; keyEpoch: string; mutationId: string; seed: Uint8Array }, body: Record<string, unknown>): string {
@@ -292,9 +318,9 @@ export class PersonalSyncClient {
     return signSigningInput(input, o.seed);
   }
 
-  private async call(method: string, path: string, body?: unknown, opts?: { retry?: boolean }): Promise<unknown> {
+  private async call<T = unknown>(method: string, path: string, body?: unknown, opts?: { retry?: boolean }): Promise<T> {
     const res = await this.http.requestRaw(method, path, body, opts);
-    if (res.status >= 200 && res.status < 300) return res.body;
+    if (res.status >= 200 && res.status < 300) return res.body as T;
     const b = (res.body ?? {}) as { code?: string; message?: string; currentVersion?: string; currentKeyEpoch?: string };
     throw new SyncApiError(res.status, b.code, b.currentVersion, b.currentKeyEpoch, b.message);
   }

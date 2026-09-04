@@ -65,6 +65,8 @@ function rejectExtraKeys(obj: Record<string, unknown>, allowed: readonly string[
   }
 }
 
+export { rejectExtraKeys };
+
 /** u64 十进制字符串：无符号、无前导零、≤ 2^64-1；0 仅在 allowZero 时接受。 */
 export function assertU64Decimal(s: string, field: string, allowZero = false): string {
   if (allowZero && s === '0') return s;
@@ -85,6 +87,18 @@ export function assertBase64UrlNoPad(s: string, lenBytes: number, field: string)
   const bytes = decodeBase64Url(s);
   if (bytes.length !== lenBytes) {
     throw new Error(`${field} must decode to ${lenBytes} bytes (got ${bytes.length})`);
+  }
+  return bytes;
+}
+
+/** 无 padding base64url 严格校验（拒绝 `=`/`+`/`/`/空），并校验解码长度落在 [minBytes, maxBytes]。 */
+export function assertBase64UrlRange(s: string, minBytes: number, maxBytes: number, field: string): Uint8Array {
+  if (!/^[A-Za-z0-9_-]+$/.test(s)) {
+    throw new Error(`${field} must be unpadded base64url`);
+  }
+  const bytes = decodeBase64Url(s);
+  if (bytes.length < minBytes || bytes.length > maxBytes) {
+    throw new Error(`${field} must decode to ${minBytes}..${maxBytes} bytes (got ${bytes.length})`);
   }
   return bytes;
 }
@@ -172,5 +186,59 @@ export function validateNewState(ns: unknown): NewStateDto {
     envelopeRecovery: validateEnvelope(obj.envelopeRecovery, 'newState.envelopeRecovery'),
     signPub: obj.signPub as string,
     recoverSignPub: obj.recoverSignPub as string,
+  };
+}
+
+/** 服务端 GET /api/sync/state 的响应 DTO（对齐 server StateDto / toDto 输出）。 */
+export interface StateDto {
+  protocolVersion: 1;
+  cipherSuite: 'AES-256-GCM';
+  formatVersion: 1;
+  keyEpoch: string;
+  stateVersion: string;
+  changeSequence: string;
+  signPub: string;
+  recoverSignPub: string;
+  smpKdf: SmpKdfDto;
+  recoveryKdf: RecoveryKdfDto;
+  envelopeSmp: EnvelopeDto;
+  envelopeRecovery: EnvelopeDto;
+  recoveryCodeSetTime: string | null;
+}
+
+/** 校验服务端 sync state 响应（fail-closed）：全字段、未知字段拒绝、长度/base64url/KDF/envelope 严格。 */
+export function validateSyncState(raw: unknown): StateDto {
+  if (typeof raw !== 'object' || raw === null) throw new Error('sync state must be an object');
+  const obj = raw as Record<string, unknown>;
+  rejectExtraKeys(obj, [
+    'protocolVersion', 'cipherSuite', 'formatVersion', 'keyEpoch', 'stateVersion', 'changeSequence',
+    'signPub', 'recoverSignPub', 'smpKdf', 'recoveryKdf', 'envelopeSmp', 'envelopeRecovery', 'recoveryCodeSetTime',
+  ], 'sync state');
+  if (obj.protocolVersion !== 1 || obj.cipherSuite !== 'AES-256-GCM' || obj.formatVersion !== 1) {
+    throw new Error('sync state protocol/cipher/format must be 1 / AES-256-GCM / 1');
+  }
+  const keyEpoch = obj.keyEpoch;
+  const stateVersion = obj.stateVersion;
+  const changeSequence = obj.changeSequence;
+  if (typeof keyEpoch !== 'string' || typeof stateVersion !== 'string' || typeof changeSequence !== 'string') {
+    throw new Error('sync state counters must be strings');
+  }
+  assertU64Decimal(keyEpoch, 'state.keyEpoch');
+  assertU64Decimal(stateVersion, 'state.stateVersion');
+  assertU64Decimal(changeSequence, 'state.changeSequence', true);
+  assertBase64UrlNoPad(typeof obj.signPub === 'string' ? obj.signPub : '', 32, 'state.signPub');
+  assertBase64UrlNoPad(typeof obj.recoverSignPub === 'string' ? obj.recoverSignPub : '', 32, 'state.recoverSignPub');
+  if (obj.recoveryCodeSetTime !== null && typeof obj.recoveryCodeSetTime !== 'string') {
+    throw new Error('state.recoveryCodeSetTime must be a string or null');
+  }
+  return {
+    protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+    keyEpoch, stateVersion, changeSequence,
+    signPub: obj.signPub as string, recoverSignPub: obj.recoverSignPub as string,
+    smpKdf: validateSmpKdf(obj.smpKdf),
+    recoveryKdf: validateRecoveryKdf(obj.recoveryKdf),
+    envelopeSmp: validateEnvelope(obj.envelopeSmp, 'state.envelopeSmp'),
+    envelopeRecovery: validateEnvelope(obj.envelopeRecovery, 'state.envelopeRecovery'),
+    recoveryCodeSetTime: obj.recoveryCodeSetTime as string | null,
   };
 }
