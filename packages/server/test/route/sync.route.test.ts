@@ -97,6 +97,13 @@ describe('sync routes smoke', () => {
     expect(state.statusCode).toBe(200);
     expect(state.json().keyEpoch).toBe('1');
     expect(state.json().stateVersion).toBe('1');
+    // A1：出站 envelope 用长名 envelopeVersion/ciphertext + 每 envelope 协议字段，无短名 version/ct
+    expect(state.json().envelopeSmp.envelopeVersion).toBe('1');
+    expect(state.json().envelopeSmp.cipherSuite).toBe('AES-256-GCM');
+    expect(state.json().envelopeSmp.formatVersion).toBe(1);
+    expect(state.json().envelopeSmp.ciphertext).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(state.json().envelopeSmp).not.toHaveProperty('version');
+    expect(state.json().envelopeSmp).not.toHaveProperty('ct');
 
     const records = await t.app.inject({ method: 'GET', url: '/api/sync/records', headers: t.auth(token) });
     expect(records.statusCode).toBe(200);
@@ -250,6 +257,24 @@ describe('sync routes smoke', () => {
     await t.close();
   });
 
+  it('PUT record rejects oversized ciphertext (>256KiB) → 400 VALIDATION_FAILED', async () => {
+    const t = await buildTestApp();
+    const { token, userId } = await makeUser(t, 'sync-big@b.com');
+    const keys = makeKeys();
+    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: withKeys(newStateBody(), keys) } });
+
+    const recordId = b64(8, 6);
+    const big = signRecord(keys.signPriv, userId, 'record.put', {
+      protocolVersion: 1, keyEpoch: '1', mutationId: b64(16, 11), recordId, baseVersion: '0',
+      cipherSuite: 'AES-256-GCM', formatVersion: 1,
+      nonce: b64(12, 8), ciphertext: Buffer.alloc(256 * 1024 + 1, 7).toString('base64url'), tag: b64(16, 8),
+    });
+    const res = await t.app.inject({ method: 'PUT', url: `/api/sync/records/${recordId}`, headers: t.auth(token), payload: big });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('VALIDATION_FAILED');
+    await t.close();
+  });
+
   it('change-key over HTTP (signed) increments stateVersion; stale epoch → 409', async () => {
     const t = await buildTestApp();
     const { token, userId } = await makeUser(t, 'sync-ck@b.com');
@@ -284,6 +309,8 @@ describe('sync routes smoke', () => {
     const res = await t.app.inject({ method: 'POST', url: '/api/sync/destroy', headers: t.auth(token), payload: signState(keys.signPriv, userId, 'state.destroy', body) });
     expect(res.statusCode).toBe(200);
     expect(res.json().keyEpoch).toBe('2');
+    expect(res.json().stateVersion).toBe('1');
+    expect(res.json().changeSequence).toBe('0');
     await t.close();
   });
 

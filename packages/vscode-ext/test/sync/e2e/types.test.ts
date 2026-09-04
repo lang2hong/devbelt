@@ -2,15 +2,25 @@ import { describe, expect, it } from 'vitest';
 import {
   U64_MAX,
   assertBase64UrlNoPad,
+  assertBase64UrlRange,
   assertRecordId,
   assertU64Decimal,
   validateNewState,
+  validateSyncState,
 } from '../../../src/sync/e2e/types';
 
 const smpKdf = { alg: 'argon2id' as const, version: 1 as const, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: 'A'.repeat(22), outputBytes: 32 as const };
 const recoveryKdf = { alg: 'hkdf-sha256' as const, version: 1 as const, salt: 'A'.repeat(22), outputBytes: 32 as const };
 const envelope = { protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const, envelopeVersion: '1', nonce: 'A'.repeat(16), ciphertext: 'A'.repeat(43), tag: 'A'.repeat(22) };
 const newState = { protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const, smpKdf, recoveryKdf, envelopeSmp: envelope, envelopeRecovery: envelope, signPub: 'A'.repeat(43), recoverSignPub: 'A'.repeat(43) };
+
+const state = {
+  protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const,
+  keyEpoch: '1', stateVersion: '1', changeSequence: '0',
+  signPub: 'A'.repeat(43), recoverSignPub: 'A'.repeat(43),
+  smpKdf, recoveryKdf, envelopeSmp: envelope, envelopeRecovery: envelope,
+  recoveryCodeSetTime: null,
+};
 
 describe('assertU64Decimal', () => {
   it('通过边界 0(allowZero)/1/U64_MAX', () => {
@@ -76,5 +86,49 @@ describe('validateNewState 嵌套校验', () => {
 
   it('拒绝额外字段', () => {
     expect(() => validateNewState({ ...newState, extra: 1 })).toThrowError(/unexpected/);
+  });
+});
+
+describe('assertBase64UrlRange', () => {
+  it('接受 [min,max] 内长度', () => {
+    expect(assertBase64UrlRange('AA', 1, 256 * 1024, 'x')).toHaveLength(1);
+  });
+
+  it('拒绝空 / 超长', () => {
+    expect(() => assertBase64UrlRange('', 1, 256 * 1024, 'x')).toThrow(/unpadded base64url/);
+    expect(() => assertBase64UrlRange('A'.repeat(400000), 1, 256 * 1024, 'x')).toThrow(/decode/);
+  });
+});
+
+describe('validateSyncState（服务端 /state 响应契约）', () => {
+  it('合法 state 通过并返回关键计数器', () => {
+    expect(validateSyncState(state)).toMatchObject({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+  });
+
+  it('缺字段拒绝', () => {
+    const { envelopeSmp: _drop, ...rest } = state;
+    expect(() => validateSyncState(rest)).toThrow();
+  });
+
+  it('counter 非字符串拒绝', () => {
+    expect(() => validateSyncState({ ...state, keyEpoch: 1 })).toThrow(/string/);
+    expect(() => validateSyncState({ ...state, changeSequence: null })).toThrow(/string/);
+  });
+
+  it('signPub 长度错误拒绝', () => {
+    expect(() => validateSyncState({ ...state, signPub: 'A'.repeat(10) })).toThrow(/decode/);
+  });
+
+  it('envelope 短名 version/ct / 缺协议字段拒绝（对齐服务端长名契约）', () => {
+    const short = { version: '1', nonce: 'A'.repeat(16), ct: 'A'.repeat(43), tag: 'A'.repeat(22) };
+    expect(() => validateSyncState({ ...state, envelopeSmp: short })).toThrow();
+  });
+
+  it('非法 KDF 参数拒绝', () => {
+    expect(() => validateSyncState({ ...state, smpKdf: { ...smpKdf, memoryKiB: 1024 } })).toThrow(/memoryKiB/);
+  });
+
+  it('额外字段拒绝', () => {
+    expect(() => validateSyncState({ ...state, extra: 1 })).toThrow(/unexpected/);
   });
 });

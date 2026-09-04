@@ -155,7 +155,7 @@ describe('SyncResetService', () => {
     const token = await injectToken(s.resetTokenRepo, USER, raw);
     const res = await s.svc.resetAfterLoss(USER, { resetToken: raw, newState: newState() });
 
-    expect(res.keyEpoch).toBe('2');
+    expect(res).toEqual({ keyEpoch: '2', stateVersion: '1', changeSequence: '2' });
     expect(token.consumedTime).not.toBeNull();
 
     const tomb = await s.recordRepo.findForUpdate({} as Queryable, USER, '1', recordId);
@@ -175,7 +175,7 @@ describe('SyncResetService', () => {
     await injectToken(s.resetTokenRepo, USER, raw);
     const res = await s.svc.resetAfterLoss(USER, { resetToken: raw, newState: newState() });
 
-    expect(res.keyEpoch).toBe('1');
+    expect(res).toEqual({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
     const state = await s.stateRepo.findByUserId(USER);
     expect(state?.keyEpoch).toBe('1');
     expect(state?.stateVersion).toBe('1');

@@ -461,4 +461,65 @@ describe('SyncEngine', () => {
     expect(outbox.list()).toHaveLength(0);
     expect(mapStore.getByConnectionId('c-1')).toMatchObject({ recordVersion: '1', status: 'confirmed', revision: 0 });
   });
+
+  it('push 成功后推进本地 changeSequence 到 receipt.changeSequence（push-only 也提交游标）', async () => {
+    const setSnapshot = vi.fn(async () => {});
+    const client = clientWith({
+      putRecordSigned: vi.fn(async () => ({ version: '1', changeSequence: '7' })),
+    });
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    await outbox.put(putMutation());
+    const eng = new SyncEngine({
+      userId: '7', keyEpoch: '1', client,
+      stateStore: { getSnapshot: () => SNAP, setSnapshot } as never,
+      mapStore: new RecordMapStore(makeMemento(), '7', '1'),
+      outbox,
+      store: makeStore() as never,
+      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueConnectionId: () => 'c-new-1',
+    });
+    const r = await eng.sync();
+    expect(r.stage).toBe('ok');
+    expect(r.changeSequence).toBe('7');
+    expect(setSnapshot).toHaveBeenCalledWith({ keyEpoch: '1', stateVersion: '1', changeSequence: '7' });
+  });
+
+  it('receipt 缺 changeSequence → error', async () => {
+    const client = clientWith({
+      putRecordSigned: vi.fn(async () => ({ version: '1' }) as never),
+    });
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    await outbox.put(putMutation());
+    const eng = engine({ client, snap: SNAP, mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox });
+    const r = await eng.sync();
+    expect(r.stage).toBe('error');
+    expect(r.reason).toContain('missing changeSequence');
+  });
+
+  it('parsePage 拒绝非法 cipherSuite/formatVersion → terminal', async () => {
+    const client = clientWith({
+      getState: vi.fn(async () => stateDto({ changeSequence: '1' })),
+      getRecords: vi.fn(async () => ({
+        snapshotSequence: '1',
+        records: [{ recordId: 'A'.repeat(22), version: '1', changeSequence: '1', deleteTime: null, cipherSuite: 'CHACHA20', formatVersion: 1, nonce: 'C'.repeat(16), ciphertext: 'YQ', tag: 'D'.repeat(22) }],
+      })),
+    });
+    const eng = engine({ client, snap: SNAP, mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox: new PendingMutationStore(makeMemento(), '7', '1') });
+    const r = await eng.sync();
+    expect(r.stage).toBe('terminal');
+    expect(r.reason).toContain('protocol unsupported');
+  });
+
+  it('parsePage 拒绝 tombstone 携带密文字段 → terminal', async () => {
+    const client = clientWith({
+      getState: vi.fn(async () => stateDto({ changeSequence: '1' })),
+      getRecords: vi.fn(async () => ({
+        snapshotSequence: '1',
+        records: [{ recordId: 'A'.repeat(22), version: '1', changeSequence: '1', deleteTime: '2026-01-01T00:00:00.000Z', nonce: 'C'.repeat(16), ciphertext: 'YQ', tag: 'D'.repeat(22) }],
+      })),
+    });
+    const eng = engine({ client, snap: SNAP, mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox: new PendingMutationStore(makeMemento(), '7', '1') });
+    const r = await eng.sync();
+    expect(r.stage).toBe('terminal');
+    expect(r.reason).toContain('protocol unsupported');
+  });
 });
