@@ -260,8 +260,10 @@ export class SyncEngine {
         return { stage: 'error', conflicts: [], applied: 0, reason: `confirm failed: ${describe(err)}` };
       }
       await this.deps.outbox.delete(m.mutationId);
-      // 推进本地 changeSequence 到本次 push 的服务端回执位置
-      lastCommitted = confirmed.changeSequence;
+      // 刻意不用 receipt.changeSequence 推进本地 cursor：本轮 pull 快照（remoteSnap）在
+      // outbox 回放之前捕获，若存在并发 remote record 落于其上，直接提交回执序列会永久
+      // 越过该记录（下轮 cursor 已越过其 seq，无法再拉）。cursor 仅由 pull 逐页提交推进，
+      // 本轮未拉到的 push record 由下轮幂等重放收敛。
     }
 
     // 3. 分页 feed + 解密 + 应用 + 逐页 cursor
@@ -311,7 +313,7 @@ export class SyncEngine {
         const lastSeq = page.records[page.records.length - 1].changeSequence;
         try {
           await this.commitCursor(remoteState.keyEpoch, remoteState.stateVersion, lastSeq);
-          if (BigInt(lastSeq) > BigInt(lastCommitted)) lastCommitted = lastSeq;
+          lastCommitted = lastSeq;
         } catch (err) {
           return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `cursor commit failed: ${describe(err)}` };
         }
@@ -331,13 +333,6 @@ export class SyncEngine {
         return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: 'nextAfter exceeds snapshotSequence' };
       }
       cursor = nextAfter;
-    }
-
-    // push-only 或无新 record 的轮次：本地 changeSequence 也必须推进到 push receipt / 最后游标
-    try {
-      await this.commitCursor(remoteState.keyEpoch, remoteState.stateVersion, lastCommitted);
-    } catch (err) {
-      return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `cursor commit failed: ${describe(err)}` };
     }
 
     return { stage: 'ok', conflicts, stalled, applied, changeSequence: lastCommitted };

@@ -29,6 +29,28 @@ function makeSecrets() {
   };
 }
 
+/** 共享 SecretStorage：store/delete 时广播变更（模拟另一 VS Code 窗口的写入）。 */
+function makeSharedSecrets() {
+  const values = new Map<string, string>();
+  const listeners = new Set<(e: { key: string }) => void>();
+  return {
+    values,
+    async get(key: string): Promise<string | undefined> { return values.get(key); },
+    async store(key: string, value: string): Promise<void> {
+      const changed = values.get(key) !== value;
+      values.set(key, value);
+      if (changed) for (const l of listeners) l({ key });
+    },
+    async delete(key: string): Promise<void> {
+      if (values.delete(key)) for (const l of listeners) l({ key });
+    },
+    onDidChange(listener: (e: { key: string }) => void) {
+      listeners.add(listener);
+      return { dispose: () => listeners.delete(listener) };
+    },
+  };
+}
+
 function makeMemento() {
   const values = new Map<string, unknown>();
   return {
@@ -165,6 +187,30 @@ describe('AuthService.refreshEntitlement', () => {
     const inflight = auth.getMe();
     await auth.logout(); // 身份变更：generation 递增
     pendingMe!(meResponse(proSub)); // 账户 A 的响应此刻才返回
+
+    await expect(inflight).rejects.toThrow(/session changed/);
+    expect(auth.getCachedEntitlement()).toBeUndefined();
+    expect(memento.values.get(ENTITLEMENT_KEY)).toBeUndefined();
+  });
+
+  it('跨窗口 token 变更（onDidChange）使飞行中 /api/me 失效且清除身份缓存', async () => {
+    const secrets = makeSharedSecrets();
+    const memento = makeMemento();
+    let pendingMe: ((v: unknown) => void) | undefined;
+    globalThis.fetch = (async (url: any) => {
+      const u = String(url);
+      if (u.endsWith('/api/me')) {
+        return new Promise<Response>((resolve) => {
+          pendingMe = (v) => resolve(new Response(JSON.stringify(v), { status: 200, headers: { 'content-type': 'application/json' } }));
+        });
+      }
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as any;
+
+    const auth = new AuthService(secrets as any, 'http://localhost:3000', memento as any);
+    const inflight = auth.getMe(); // 账户 A 的请求在飞行中
+    await secrets.store(ACCESS_KEY, 'B-token'); // 另一窗口登录为账户 B（触发 onDidChange）
+    pendingMe!(meResponse(proSub)); // A 的响应此时才返回
 
     await expect(inflight).rejects.toThrow(/session changed/);
     expect(auth.getCachedEntitlement()).toBeUndefined();

@@ -203,7 +203,22 @@ export class AuthService {
       } else if (e.key === AuthService.REFRESH_TOKEN_KEY) {
         void this.secrets.get(AuthService.REFRESH_TOKEN_KEY).then((v) => { this.refreshToken = v; });
       }
+      // 跨窗口 token 变更可能代表换号（另一窗口 A→B）：使飞行中的 /api/me 失效并清除
+      // 派生身份缓存，避免账户 A 的权益/ userId 落进已持账户 B token 的本实例。
+      if (e.key === AuthService.ACCESS_TOKEN_KEY || e.key === AuthService.REFRESH_TOKEN_KEY) {
+        this.invalidateCachedIdentity();
+      }
     });
+  }
+
+  /** 使认证身份缓存失效：任何飞行中 /api/me 结果作废，已缓存的 userId/权益清空。 */
+  private invalidateCachedIdentity(): void {
+    this.authGeneration += 1;
+    this.cachedUserId = undefined;
+    this.cachedEntitlement = undefined;
+    try {
+      this.memento?.update(AuthService.ENTITLEMENT_CACHE_KEY, undefined);
+    } catch { /* 忽略 */ }
   }
 
   /** 初始化：从安全存储恢复 token */
@@ -271,15 +286,10 @@ export class AuthService {
     }
     this.accessToken = undefined;
     this.refreshToken = undefined;
-    this.cachedEntitlement = undefined;
-    this.cachedUserId = undefined;
-    this.authGeneration += 1;
+    this.invalidateCachedIdentity();
     await this.secrets.delete(AuthService.ACCESS_TOKEN_KEY);
     await this.secrets.delete(AuthService.REFRESH_TOKEN_KEY);
     await this.secrets.delete(AuthService.USER_EMAIL_KEY);
-    try {
-      this.memento?.update(AuthService.ENTITLEMENT_CACHE_KEY, undefined);
-    } catch { /* 忽略 */ }
     void eventBus.publish(new AuthEvent('logout'));
   }
 

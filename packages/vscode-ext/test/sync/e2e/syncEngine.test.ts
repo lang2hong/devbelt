@@ -462,10 +462,11 @@ describe('SyncEngine', () => {
     expect(mapStore.getByConnectionId('c-1')).toMatchObject({ recordVersion: '1', status: 'confirmed', revision: 0 });
   });
 
-  it('push 成功后推进本地 changeSequence 到 receipt.changeSequence（push-only 也提交游标）', async () => {
+  it('push 回执不越过 pull 快照推进 cursor（并发 record 不永久跳过）', async () => {
     const setSnapshot = vi.fn(async () => {});
+    // 并发场景：A 读快照 S=0，本地 push 收到回执 changeSequence=2（S+1 已被并发 B 占用）
     const client = clientWith({
-      putRecordSigned: vi.fn(async () => ({ version: '1', changeSequence: '7' })),
+      putRecordSigned: vi.fn(async () => ({ version: '1', changeSequence: '2' })),
     });
     const outbox = new PendingMutationStore(makeMemento(), '7', '1');
     await outbox.put(putMutation());
@@ -479,8 +480,46 @@ describe('SyncEngine', () => {
     });
     const r = await eng.sync();
     expect(r.stage).toBe('ok');
-    expect(r.changeSequence).toBe('7');
-    expect(setSnapshot).toHaveBeenCalledWith({ keyEpoch: '1', stateVersion: '1', changeSequence: '7' });
+    // 本轮 pull 快照仍为 0：cursor 不得推进到回执的 2，否则永久越过并发 record 1
+    expect(r.changeSequence).toBe('0');
+    expect(setSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('并发 record 落在回执与快照之间 → 下一轮从旧 cursor 重新拉取（两轮收敛）', async () => {
+    const setSnapshot = vi.fn(async () => {});
+    // 第一轮：快照 S=0，push 回执=2，feed 空；第二轮：快照=2，feed 返回并发 B 的 tombstone（seq=1）
+    const client = clientWith({
+      getState: vi.fn()
+        .mockResolvedValueOnce(stateDto({ changeSequence: '0' }))
+        .mockResolvedValueOnce(stateDto({ changeSequence: '2' })),
+      putRecordSigned: vi.fn(async () => ({ version: '1', changeSequence: '2' })),
+      getRecords: vi.fn()
+        .mockResolvedValueOnce({ snapshotSequence: '0', records: [] })
+        .mockResolvedValueOnce({
+          snapshotSequence: '2',
+          records: [{ recordId: 'B'.repeat(22), version: '1', changeSequence: '1', deleteTime: '2026-01-01T00:00:00.000Z' }],
+        }),
+    });
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    await outbox.put(putMutation());
+    const eng = new SyncEngine({
+      userId: '7', keyEpoch: '1', client,
+      stateStore: { getSnapshot: () => SNAP, setSnapshot } as never,
+      mapStore: new RecordMapStore(makeMemento(), '7', '1'),
+      outbox,
+      store: makeStore() as never,
+      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueConnectionId: () => 'c-new-1',
+    });
+
+    const r1 = await eng.sync();
+    expect(r1.stage).toBe('ok');
+    expect(r1.changeSequence).toBe('0'); // 本轮不越过快照
+
+    const r2 = await eng.sync();
+    expect(r2.stage).toBe('ok');
+    expect(r2.applied).toBe(1); // B 的 tombstone 被应用（未被永久跳过）
+    expect(r2.changeSequence).toBe('1'); // cursor 收敛到并发 record 1
+    expect(setSnapshot).toHaveBeenCalledWith({ keyEpoch: '1', stateVersion: '1', changeSequence: '1' });
   });
 
   it('receipt 缺 changeSequence → error', async () => {
