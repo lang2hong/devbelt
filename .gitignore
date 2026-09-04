@@ -11,3 +11,4 @@ packages/server/public/
 .env.production
 *.vsix
 db-client-connections.json
+docs/archive/

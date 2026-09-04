@@ -1,7 +1,7 @@
 /**
  * 组织 Workspace 类型定义（纯类型 + 窄化守卫，无 vscode 依赖）。
  *
- * 契约来源：docs/实施规格.md。
+ * 契约来源：docs/同步协议.md 与服务端 route/organizations.ts。
  * 所有 ID 在 DTO 中均为十进制字符串（§2）。
  */
 

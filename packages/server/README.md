@@ -20,7 +20,7 @@ Fastify + MySQL 8 服务，负责身份、个人权益、设备、组织、资�
 | 组织 | `/api/organizations/*`、`/api/organization-invitations/*` |
 | 同步 | `/api/sync/state`、`/init`、`/records`、`/change-key`、`/recover`、`/destroy`、重置路由 |
 
-字段、授权和错误语义见[实施规格](../../docs/实施规格.md)。
+字段、授权和错误语义见[P2 阶段文档](../../docs/阶段/P2-个人同步-v1.md)和[架构](../../docs/架构.md)。
 
 ## 环境变量
 

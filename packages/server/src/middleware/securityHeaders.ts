@@ -9,7 +9,7 @@ import type { FastifyHelmetOptions } from '@fastify/helmet';
  * 当前服务端只提供 JSON API，未托管任何前端产物。这份 CSP 仍按"未来会在
  * 同源托管管理后台"设定：`script-src 'self'` 挡掉注入的 inline script 与外部
  * 脚本，`connect-src 'self'` 阻断把凭据外发的路径。管理后台的目标形态见
- * docs/管理后台架构.md；真正挂载静态资源时需连同这里一起复核。
+ * docs/archive/管理后台架构.md；真正挂载静态资源时需连同这里一起复核。
  */
 export function securityHeaders(): FastifyHelmetOptions {
   return {

@@ -1,7 +1,7 @@
 import { resolveSigningKeys, type SigningKeys } from './service/signingKeys.js';
 
 /**
- * 解析 `TRUST_PROXY`。取值语义见 docs/开发文档.md；`true` 被显式拒绝（左段
+ * 解析 `TRUST_PROXY`。取值语义见 docs/开发指南.md；`true` 被显式拒绝（左段
  * XFF 可由客户端伪造，使按 IP 的限流失效）。默认跳数 1（nginx 反代之后）。
  */
 function parseTrustProxy(raw: string | undefined): boolean | number | string {

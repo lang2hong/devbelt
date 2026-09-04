@@ -1,7 +1,7 @@
 /**
  * 领域错误基类：携带 code 供路由层映射 HTTP 状态码。
  *
- * code 全集见 docs/实施规格.md。errorStatus 映射表集中维护 HTTP 状态。
+ * code 全集见各 route service；errorStatus 映射表集中维护 HTTP 状态。
  */
 export class DomainError extends Error {
   constructor(message: string, public readonly code: string) {

@@ -55,8 +55,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(auth);
   await auth.init();
   // package.json 的 commandPalette 用 dbclient.loggedIn 控制 login/logout/account/sessions
-// 的可见性。此前从未及时 setContext，导致 logout/account/sessions 永久不可见、login 永久可见；
-// AuthEvent 订阅（下方）在登录/登出后刷新此上下文保持同步。
+  // 的可见性。此前从未及时 setContext，导致 logout/account/sessions 永久不可见、login 永久可见；
+  // AuthEvent 订阅（下方）在登录/登出后刷新此上下文保持同步。
   void syncLoggedInContext(auth);
 
   // 事件总线：连接/分组变更时自动刷新树
@@ -207,8 +207,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 /**
  * 把登录态同步到 `dbclient.loggedIn` 上下文键。
  *
- * package.json 的 commandPalette 靠它控制 login / logout / changeSyncPassword
- * 三条命令的可见性，登录/登出后必须重新调用，否则命令面板显示的是旧状态。
+ * package.json 的 commandPalette 靠它控制 login / logout / account / sessions
+ * 四条命令的可见性，登录/登出后必须重新调用，否则命令面板显示的是旧状态。
  */
 export async function syncLoggedInContext(auth: { isLoggedIn(): boolean }): Promise<void> {
   await vscode.commands.executeCommand('setContext', 'dbclient.loggedIn', auth.isLoggedIn());
