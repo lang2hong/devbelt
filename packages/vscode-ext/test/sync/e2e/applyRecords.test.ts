@@ -111,7 +111,7 @@ describe('applyRecord', () => {
 
   it('引擎门禁（free + postgresql）跳过', async () => {
     const { store, mapStore, uniqueConnectionId } = setup();
-    const free = { planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 2 };
+    const free = { planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 2, maxSavedConnections: 10, allowConnectionImport: false };
     expect(await applyRecord(
       { recordId: 'A'.repeat(22), version: '1', tombstone: false, payload: { ...payload, dbType: 'postgresql' } },
       { store: store as any, mapStore, uniqueConnectionId, entitlement: free },
@@ -228,5 +228,15 @@ describe('applyRecord', () => {
     }
     expect(store.all()).toHaveLength(1);
     expect(store.get('c-1')?.deleted).toBeUndefined();
+  });
+
+  it('SQLite payload 应用时不要求 host/port（兜底空值）', async () => {
+    const { store, mapStore, uniqueConnectionId } = setup();
+    const id = 'A'.repeat(22);
+    const ctx = { store: store as any, mapStore, uniqueConnectionId };
+    const sqlitePayload = { dbType: 'sqlite', name: 'sq', password: 'p' };
+    expect(await applyRecord({ recordId: id, version: '1', tombstone: false, payload: sqlitePayload }, ctx)).toMatchObject({ disposition: 'created' });
+    const saved = store.all()[0];
+    expect(saved).toMatchObject({ dbType: 'SQLITE', name: 'sq', host: '', port: 0, user: '' });
   });
 });

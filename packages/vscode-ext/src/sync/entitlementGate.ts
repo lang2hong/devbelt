@@ -16,6 +16,9 @@ import type { CachedEntitlement } from './authService';
 
 export const DEFAULT_FREE_ENGINES: readonly string[] = ['mysql', 'sqlite'];
 
+/** free 档本机可保存连接数上限（连接资产差异点）。 */
+export const DEFAULT_FREE_MAX_CONNECTIONS = 10;
+
 const ENGINE_BY_DB_TYPE: Readonly<Partial<Record<DatabaseType, string>>> = {
   [DatabaseType.MYSQL]: 'mysql',
   [DatabaseType.PG]: 'postgresql',
@@ -44,6 +47,17 @@ export function allowedEngines(entitlement?: CachedEntitlement | null): readonly
 
 export function isDatabaseTypeAllowed(dbType: DatabaseType, entitlement?: CachedEntitlement | null): boolean {
   return allowedEngines(entitlement).includes(databaseEngineOf(dbType));
+}
+
+/** 本机可保存连接数上限；无缓存/无效值 fail-closed 到 free（10）。0 视为不限。 */
+export function maxSavedConnections(entitlement?: CachedEntitlement | null): number {
+  const v = entitlement?.maxSavedConnections;
+  return typeof v === 'number' && v >= 0 ? v : DEFAULT_FREE_MAX_CONNECTIONS;
+}
+
+/** 是否允许导入连接配置；无缓存 fail-closed 到 free（禁止）。导出恒允许，无需此函数。 */
+export function canImportConnections(entitlement?: CachedEntitlement | null): boolean {
+  return entitlement?.allowConnectionImport === true;
 }
 
 export interface SkippedPersonalConnection {

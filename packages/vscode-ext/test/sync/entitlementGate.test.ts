@@ -6,10 +6,12 @@ import {
   databaseEngineOf,
   filterPersonalConnectionsByEntitlement,
   isOrganizationConnectionId,
+  maxSavedConnections,
+  canImportConnections,
 } from '../../src/sync/entitlementGate';
 
-const free = { planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 2 };
-const pro = { planCode: 'pro', allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 5 };
+const free = { planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 2, maxSavedConnections: 10, allowConnectionImport: false };
+const pro = { planCode: 'pro', allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 5, maxSavedConnections: 100, allowConnectionImport: true };
 
 describe('databaseEngineOf', () => {
   it('三值映射正确', () => {
@@ -79,5 +81,34 @@ describe('filterPersonalConnectionsByEntitlement', () => {
     const { allowed, skipped } = filterPersonalConnectionsByEntitlement([unknown], free);
     expect(allowed).toEqual([]);
     expect(skipped).toEqual([{ name: 'x', engine: 'MARIADB' }]);
+  });
+});
+describe('连接资产门禁 (maxSavedConnections / canImportConnections)', () => {
+  it('无权益时 fail-closed：连接上限 10、禁止导入', () => {
+    expect(maxSavedConnections(undefined)).toBe(10);
+    expect(maxSavedConnections(null)).toBe(10);
+    expect(canImportConnections(undefined)).toBe(false);
+    expect(canImportConnections(null)).toBe(false);
+  });
+
+  it('free 档：10 条、禁止导入', () => {
+    expect(maxSavedConnections(free)).toBe(10);
+    expect(canImportConnections(free)).toBe(false);
+  });
+
+  it('pro 档：100 条、允许导入', () => {
+    expect(maxSavedConnections(pro)).toBe(100);
+    expect(canImportConnections(pro)).toBe(true);
+  });
+
+  it('0 视为不限，但 canImportConnections 只看布尔', () => {
+    const unlimited = { ...free, maxSavedConnections: 0 };
+    expect(maxSavedConnections(unlimited)).toBe(0);
+    expect(canImportConnections(unlimited)).toBe(false);
+  });
+
+  it('缺 maxSavedConnections 字段回落到默认 10', () => {
+    const missing = { planCode: 'x', allowedDatabaseTypes: [], maxDevices: 0 } as unknown as Parameters<typeof maxSavedConnections>[0];
+    expect(maxSavedConnections(missing)).toBe(10);
   });
 });

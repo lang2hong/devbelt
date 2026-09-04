@@ -4,7 +4,7 @@ import { readFileSync } from 'fs';
 import { hostname, platform, arch, release } from 'os';
 import { SyncClient, AuthResult, DeviceInfo, MeResponse } from './syncClient';
 import { eventBus, AuthEvent } from '../utils/event';
-import { DEFAULT_FREE_ENGINES } from './entitlementGate';
+import { DEFAULT_FREE_ENGINES, DEFAULT_FREE_MAX_CONNECTIONS } from './entitlementGate';
 
 // 由 esbuild 构建时从 .env / .env.production 注入（见 esbuild.js 的 define）；测试环境由 vitest.config.ts 提供同名字段
 declare const __SYNC_SERVER_URL__: string;
@@ -17,6 +17,10 @@ export interface CachedEntitlement {
   planCode: string;
   allowedDatabaseTypes: string[];
   maxDevices: number;
+  /** 本机可保存连接数上限；0 = 不限。 */
+  maxSavedConnections: number;
+  /** 是否允许导入连接配置（导出恒允许）。 */
+  allowConnectionImport: boolean;
 }
 
 let _osMachineId: string | undefined;
@@ -149,6 +153,8 @@ export class AuthService {
       planCode: sub?.planCode ?? 'free',
       allowedDatabaseTypes: sub?.entitlement?.allowedDatabaseTypes ?? Array.from(DEFAULT_FREE_ENGINES),
       maxDevices: sub?.entitlement?.maxDevices ?? 0,
+      maxSavedConnections: sub?.entitlement?.maxSavedConnections ?? DEFAULT_FREE_MAX_CONNECTIONS,
+      allowConnectionImport: sub?.entitlement?.allowConnectionImport === true,
     });
     this.cachedUserId = me.user.userId;
     return me;

@@ -41,6 +41,10 @@ export interface DeviceInfo {
 export interface PersonalEntitlement {
   allowedDatabaseTypes: string[];
   maxDevices: number;
+  /** 本机可保存连接数上限；0 = 不限。 */
+  maxSavedConnections: number;
+  /** 是否允许导入连接配置（导出恒允许）。 */
+  allowConnectionImport: boolean;
 }
 
 export interface MeResponse {

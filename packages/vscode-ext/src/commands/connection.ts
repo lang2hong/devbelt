@@ -8,6 +8,11 @@ import { AuditLogger } from '../utils/auditLogger';
 import { flattenGroups } from '../utils/groupTree';
 import type { Deps, Sub } from './shared';
 import { confirm } from './shared';
+import {
+  canImportConnections,
+  maxSavedConnections,
+  isOrganizationConnectionId,
+} from '../sync/entitlementGate';
 
 async function queryServerVersion(session: any, dbType: string): Promise<string> {
   try {
@@ -25,9 +30,22 @@ async function queryServerVersion(session: any, dbType: string): Promise<string>
 }
 
 export function registerConnectionCommands(deps: Deps, sub: Sub): void {
-  const { store, manager, treeProvider, connCtx } = deps;
+  const { store, manager, treeProvider, connCtx, auth } = deps;
+
+  // 连接资产门禁（§6.2）：本机保存连接数按个人档上限；org: 共享模板不计入。
+  const activeConnectionCount = () =>
+    store.list().filter((c) => !isOrganizationConnectionId(c.id)).length;
+  const connectionCap = () => maxSavedConnections(auth.getCachedEntitlement());
+  const atConnectionCap = () => {
+    const cap = connectionCap();
+    return cap > 0 && activeConnectionCount() >= cap;
+  };
 
   sub('dbclient.addConnection', (node?: DbTreeNode) => {
+    if (atConnectionCap()) {
+      void vscode.window.showWarningMessage(l10n('conn.capReached', { count: connectionCap() }));
+      return;
+    }
     const gid = node?.kind === NodeKind.Group ? node.groupId : undefined;
     ConnectionForm.open(store, () => treeProvider.refresh(), gid);
   });
@@ -38,6 +56,10 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.cloneConnection', (node: DbTreeNode) => {
     if (!node?.conn) return;
+    if (atConnectionCap()) {
+      void vscode.window.showWarningMessage(l10n('conn.capReached', { count: connectionCap() }));
+      return;
+    }
     const src = node.conn;
     const cloned: SavedConnection = { ...src, id: '', name: `${src.name || src.host} (copy)` };
     ConnectionForm.open(store, () => treeProvider.refresh(), undefined, cloned);
@@ -170,6 +192,10 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
   });
 
   sub('dbclient.importConnections', async () => {
+    if (!canImportConnections(auth.getCachedEntitlement())) {
+      void vscode.window.showWarningMessage(l10n('conn.importUpgrade'));
+      return;
+    }
     const uri = await vscode.window.showOpenDialog({
       filters: { JSON: ['json'] },
       canSelectMany: false,

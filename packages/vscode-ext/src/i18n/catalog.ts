@@ -332,6 +332,8 @@ export const en: MessageCatalog = {
   'conn.importOpen': 'Select connection file',
   'conn.importInvalid': 'Invalid connection file.',
   'conn.importDone': 'Imported {count} connection(s).',
+  'conn.importUpgrade': 'Importing connections is a Pro feature. Upgrade your plan to import.',
+  'conn.capReached': 'Free plan allows {count} saved connections. Upgrade to Pro to add more.',
 
   // ── webview UI 文案（wv.*）──
   'wv.common.save': 'Save',
@@ -859,6 +861,8 @@ export const zh: MessageCatalog = {
   'conn.importOpen': '选择连接文件',
   'conn.importInvalid': '连接文件无效。',
   'conn.importDone': '已导入 {count} 个连接。',
+  'conn.importUpgrade': '导入连接是 Pro 功能，请升级套餐后再导入。',
+  'conn.capReached': '免费套餐最多保存 {count} 个连接，升级到 Pro 可添加更多。',
 
   // ── webview UI 文案（wv.*）──
   'wv.common.save': '保存',
