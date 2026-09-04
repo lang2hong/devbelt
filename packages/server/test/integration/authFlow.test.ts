@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import mysql from 'mysql2/promise';
 import { generateKeyPairSync } from 'crypto';
-import { parseMysqlUrl, resolveTestDb } from './testDb.js';
+import { createTestPool } from './testDb.js';
 import { runMigrations } from '../../src/repository/mysql/migrate.js';
 import { migrations } from '../../src/repository/mysql/migrations/index.js';
 import type { MysqlDb } from '../../src/repository/mysql/db.js';
@@ -72,8 +71,7 @@ async function registerAndLogin(emailSender: MemoryEmailSender, auth: AuthServic
 
 describe.skipIf(!URL)('auth flow (real MySQL)', () => {
   it('refresh reuse revokes the family and change-password revokes sessions', async () => {
-    const { host, port, user, password } = parseMysqlUrl(URL!);
-    const pool = mysql.createPool({ host, port, user, password, database: resolveTestDb(), timezone: 'Z' });
+    const pool = createTestPool();
     const db = pool as unknown as MysqlDb;
     try {
       await runMigrations(db, [...migrations]);

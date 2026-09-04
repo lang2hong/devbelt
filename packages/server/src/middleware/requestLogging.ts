@@ -61,10 +61,75 @@ export function redactUrl(rawUrl: string): string {
 }
 
 /**
- * Fastify logger 选项：沿用 pino 默认级别，仅替换 req 序列化器。
+ * mysql2 在每个失败的查询对象上挂 `sql`，而本项目一律用 `query(sql, params)`
+ * （客户端插值），所以那个 `sql` 是**参数已内联**的完整语句。pino 默认的 err
+ * 序列化器会拷贝 error 的所有可枚举自有属性，于是任何一次查询失败都会把
+ * `password_hash`、各类 `token_hash`、明文邮箱、E2E `ciphertext` 原样写进日志 ——
+ * 与 §8「日志不得包含 token」直接冲突。
  *
- * 字段刻意保持最小：method / 脱敏 URL / 客户端地址。不记录 header 与 body，
+ * 这些键一律不进日志。`sqlMessage` 同样可能回显违规的字段值（例如
+ * ER_DATA_TOO_LONG 会带上被截断的内容）。
+ */
+const ERR_DROP_KEYS: ReadonlySet<string> = new Set([
+  'sql',
+  'sqlMessage',
+  'parameters',
+  'values',
+  'query',
+  'rows',
+  'fields',
+]);
+
+/**
+ * 保留字段：mysql2 诊断码 + 堆栈。
+ * `stack` 只含代码位置、不含行数据，是排查 500 的主要线索，故保留。
+ */
+const ERR_KEEP_KEYS: readonly string[] = ['code', 'errno', 'sqlState', 'fatal'];
+
+/**
+ * error 序列化器：保留类型/消息/诊断码，剥离一切可能携带行数据的字段。
+ *
+ * 注意 `message` 仍然保留 —— DomainError 的消息是自己写的、不含密钥；
+ * 但 mysql2 的 `message` 常等于 `sqlMessage`，故对带 `code` 的驱动错误
+ * 只保留一句固定文本，具体原因靠 `code`/`errno` 判断。
+ */
+export function serializeError(err: unknown): unknown {
+  if (err === null || typeof err !== 'object') return { message: String(err) };
+
+  const e = err as Record<string, unknown> & { name?: string; message?: string };
+  const isDriverError = typeof e.code === 'string' && (e.errno !== undefined || e.sqlState !== undefined);
+
+  const out: Record<string, unknown> = {
+    type: e.name ?? 'Error',
+    // 驱动错误的 message 常与 sqlMessage 同源（可能回显字段值），不透传。
+    message: isDriverError ? 'database error (details omitted)' : String(e.message ?? ''),
+  };
+
+  for (const k of ERR_KEEP_KEYS) {
+    if (e[k] !== undefined) out[k] = e[k];
+  }
+  if (typeof e.stack === 'string') out.stack = e.stack;
+
+  // 其余自有属性按白名单外一律丢弃，避免将来新增字段意外带出数据。
+  for (const k of Object.keys(e)) {
+    if (ERR_DROP_KEYS.has(k) || ERR_KEEP_KEYS.includes(k)) continue;
+    if (k === 'name' || k === 'message' || k === 'stack') continue;
+    const v = e[k];
+    // 只放行标量；对象/数组可能是承载行数据的结构（如 rows、fields）。
+    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+      out[k] = typeof v === 'string' && v.length > 200 ? `${v.slice(0, 200)}…` : v;
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Fastify logger 选项：沿用 pino 默认级别，替换 req 与 err 序列化器。
+ *
+ * req 字段刻意保持最小：method / 脱敏 URL / 客户端地址。不记录 header 与 body，
  * 避免 Authorization、refresh token 与请求正文进入日志（实施规格 §8）。
+ * err 走 serializeError，剥离 mysql2 的内联 SQL。
  */
 export function buildLoggerOptions(): {
   // pino 的 SerializerFn 形参是 any；这里保持同构以便直接作为 Fastify logger 选项传入。
@@ -77,6 +142,7 @@ export function buildLoggerOptions(): {
         url: redactUrl(req.url),
         remoteAddress: req.ip,
       }),
+      err: (err: unknown) => serializeError(err),
     },
   };
 }

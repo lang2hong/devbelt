@@ -18,11 +18,13 @@ const runner = ((fn: any) => fn({} as Queryable));
 
 function buf(n: number, fill = 1): Buffer { return Buffer.alloc(n, fill); }
 
-function smpKdf(): SmpKdf {
-  return { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: buf(16, 2), outputBytes: 32 };
+// salt 的填充字节可变：envelope 重写时服务端要求 salt/nonce 必须换新
+// （防 AES-GCM 密钥流复用），故夹具需要能产出不同的 salt。
+function smpKdf(saltFill = 2): SmpKdf {
+  return { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: buf(16, saltFill), outputBytes: 32 };
 }
-function recoveryKdf(): RecoveryKdf {
-  return { alg: 'hkdf-sha256', version: 1, salt: buf(16, 3), outputBytes: 32 };
+function recoveryKdf(saltFill = 3): RecoveryKdf {
+  return { alg: 'hkdf-sha256', version: 1, salt: buf(16, saltFill), outputBytes: 32 };
 }
 function env(version: string, fill = 4): SyncEnvelope {
   return { version, nonce: buf(12, fill), ct: buf(32, fill + 1), tag: buf(16, fill + 2) };
@@ -107,13 +109,13 @@ describe('SyncStateService', () => {
     const mutationId = MID;
     const body = {
       protocolVersion: 1, keyEpoch: '1', mutationId, expectedStateVersion: '1',
-      smpKdf: b64kdf(smpKdf()), envelopeSmp: b64env(env('2', 40)),
+      smpKdf: b64kdf(smpKdf(22)), envelopeSmp: b64env(env('2', 40)),
     };
     const { digest, signatureBuf } = signBody(keys.signPriv, USER, 'state.change-key', body);
 
     const input = {
       keyEpoch: '1', mutationId, signature: signatureBuf, expectedStateVersion: '1', requestDigest: digest,
-      smpKdf: smpKdf(), envelopeSmp: env('2', 40),
+      smpKdf: smpKdf(22), envelopeSmp: env('2', 40),
     };
 
     const res = await svc.changeKey(USER, input);
@@ -139,25 +141,25 @@ describe('SyncStateService', () => {
       signPub: keys.signPub, recoverSignPub: keys.recoverPub,
     });
 
-    const base = { protocolVersion: 1, mutationId: MID, smpKdf: b64kdf(smpKdf()), envelopeSmp: b64env(env('2')) };
+    const base = { protocolVersion: 1, mutationId: MID, smpKdf: b64kdf(smpKdf(22)), envelopeSmp: b64env(env('2', 40)) };
 
     // stale epoch
     const staleBody = { ...base, keyEpoch: '2', expectedStateVersion: '1' };
     const stale = signBody(keys.signPriv, USER, 'state.change-key', staleBody);
-    await expect(svc.changeKey(USER, { keyEpoch: '2', mutationId: MID, signature: stale.signatureBuf, expectedStateVersion: '1', requestDigest: stale.digest, smpKdf: smpKdf(), envelopeSmp: env('2') }))
+    await expect(svc.changeKey(USER, { keyEpoch: '2', mutationId: MID, signature: stale.signatureBuf, expectedStateVersion: '1', requestDigest: stale.digest, smpKdf: smpKdf(22), envelopeSmp: env('2', 40) }))
       .rejects.toBeInstanceOf(SyncEpochStaleError);
 
     // bad signature（用别人的私钥签名）
     const otherKeys = makeKeys();
     const badBody = { ...base, keyEpoch: '1', expectedStateVersion: '1' };
     const bad = signBody(otherKeys.signPriv, USER, 'state.change-key', badBody);
-    await expect(svc.changeKey(USER, { keyEpoch: '1', mutationId: MID, signature: bad.signatureBuf, expectedStateVersion: '1', requestDigest: bad.digest, smpKdf: smpKdf(), envelopeSmp: env('2') }))
+    await expect(svc.changeKey(USER, { keyEpoch: '1', mutationId: MID, signature: bad.signatureBuf, expectedStateVersion: '1', requestDigest: bad.digest, smpKdf: smpKdf(22), envelopeSmp: env('2', 40) }))
       .rejects.toBeInstanceOf(SyncSignatureInvalidError);
 
     // version conflict（expectedStateVersion 错）
     const verBody = { ...base, keyEpoch: '1', expectedStateVersion: '99' };
     const ver = signBody(keys.signPriv, USER, 'state.change-key', verBody);
-    await expect(svc.changeKey(USER, { keyEpoch: '1', mutationId: MID, signature: ver.signatureBuf, expectedStateVersion: '99', requestDigest: ver.digest, smpKdf: smpKdf(), envelopeSmp: env('2') }))
+    await expect(svc.changeKey(USER, { keyEpoch: '1', mutationId: MID, signature: ver.signatureBuf, expectedStateVersion: '99', requestDigest: ver.digest, smpKdf: smpKdf(22), envelopeSmp: env('2', 40) }))
       .rejects.toBeInstanceOf(SyncVersionConflictError);
   });
 
@@ -173,17 +175,17 @@ describe('SyncStateService', () => {
     const newRecoverPub = makeKeys().recoverPub;
     const body = {
       protocolVersion: 1, keyEpoch: '1', mutationId: MID, expectedStateVersion: '1',
-      smpKdf: b64kdf(smpKdf()),
+      smpKdf: b64kdf(smpKdf(22)),
       envelopeSmp: b64env(env('2', 50)),
-      recoveryKdf: b64kdf(recoveryKdf()),
+      recoveryKdf: b64kdf(recoveryKdf(33)),
       envelopeRecovery: b64env(env('2', 60)),
       recoverSignPub: newRecoverPub.toString('base64url'),
     };
     const { digest, signatureBuf } = signBody(keys.recoverPriv, USER, 'state.recover', body);
     const res = await svc.recover(USER, {
       keyEpoch: '1', mutationId: MID, signature: signatureBuf, expectedStateVersion: '1', requestDigest: digest,
-      smpKdf: smpKdf(), envelopeSmp: env('2', 50),
-      recoveryKdf: recoveryKdf(), envelopeRecovery: env('2', 60), recoverSignPub: newRecoverPub,
+      smpKdf: smpKdf(22), envelopeSmp: env('2', 50),
+      recoveryKdf: recoveryKdf(33), envelopeRecovery: env('2', 60), recoverSignPub: newRecoverPub,
     });
     expect(res.stateVersion).toBe('2');
     const state = await svc.getState(USER);
@@ -212,8 +214,8 @@ describe('SyncStateService', () => {
       protocolVersion: 1, keyEpoch: '1', mutationId: MID, expectedStateVersion: '1',
       newState: {
         protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
-        smpKdf: b64kdf(smpKdf()), recoveryKdf: b64kdf(recoveryKdf()),
-        envelopeSmp: b64env(env('1')), envelopeRecovery: b64env(env('1')),
+        smpKdf: b64kdf(smpKdf(22)), recoveryKdf: b64kdf(recoveryKdf(33)),
+        envelopeSmp: b64env(env('1', 70)), envelopeRecovery: b64env(env('1', 80)),
         signPub: newKeys.signPub.toString('base64url'), recoverSignPub: newKeys.recoverPub.toString('base64url'),
       },
     };
@@ -222,7 +224,7 @@ describe('SyncStateService', () => {
       keyEpoch: '1', mutationId: MID, signature: signatureBuf, expectedStateVersion: '1', requestDigest: digest,
       newState: {
         protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const,
-        smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'),
+        smpKdf: smpKdf(22), recoveryKdf: recoveryKdf(33), envelopeSmp: env('1', 70), envelopeRecovery: env('1', 80),
         signPub: newKeys.signPub, recoverSignPub: newKeys.recoverPub,
       },
     };
@@ -254,8 +256,8 @@ describe('SyncStateService', () => {
       protocolVersion: 1, keyEpoch: '1', mutationId: MID, expectedStateVersion: '1',
       newState: {
         protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
-        smpKdf: b64kdf(smpKdf()), recoveryKdf: b64kdf(recoveryKdf()),
-        envelopeSmp: b64env(env('1')), envelopeRecovery: b64env(env('1')),
+        smpKdf: b64kdf(smpKdf(22)), recoveryKdf: b64kdf(recoveryKdf(33)),
+        envelopeSmp: b64env(env('1', 70)), envelopeRecovery: b64env(env('1', 80)),
         signPub: newKeys.signPub.toString('base64url'), recoverSignPub: newKeys.recoverPub.toString('base64url'),
       },
     };
@@ -264,7 +266,7 @@ describe('SyncStateService', () => {
       keyEpoch: '1', mutationId: MID, signature: signatureBuf, expectedStateVersion: '1', requestDigest: digest,
       newState: {
         protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const,
-        smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'),
+        smpKdf: smpKdf(22), recoveryKdf: recoveryKdf(33), envelopeSmp: env('1', 70), envelopeRecovery: env('1', 80),
         signPub: newKeys.signPub, recoverSignPub: newKeys.recoverPub,
       },
     };
@@ -293,14 +295,60 @@ describe('SyncStateService', () => {
 
     const body = {
       protocolVersion: 1, keyEpoch: '1', mutationId: MID, expectedStateVersion: '1',
-      smpKdf: b64kdf(smpKdf()), envelopeSmp: b64env(env('2', 40)),
+      smpKdf: b64kdf(smpKdf(22)), envelopeSmp: b64env(env('2', 40)),
     };
     const { digest, signatureBuf } = signBody(keys.signPriv, USER, 'state.change-key', body);
     // 正常校验通过（不再命中过期 receipt；也不因异 digest 而 409）。
     const res = await svc.changeKey(USER, {
       keyEpoch: '1', mutationId: MID, signature: signatureBuf, expectedStateVersion: '1', requestDigest: digest,
-      smpKdf: smpKdf(), envelopeSmp: env('2', 40),
+      smpKdf: smpKdf(22), envelopeSmp: env('2', 40),
     });
+    expect(res.stateVersion).toBe('2');
+  });
+});
+
+describe('AES-GCM keystream reuse prevention (envelope freshness)', () => {
+  /** 建好一个已 init 的栈，返回 change-key 所需的签名构造器。 */
+  async function initialized() {
+    const stack = makeStack();
+    const keys = makeKeys();
+    await stack.svc.init(USER, {
+      protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'),
+      signPub: keys.signPub, recoverSignPub: keys.recoverPub,
+    });
+    return { ...stack, keys };
+  }
+
+  function changeKeyInput(keys: ReturnType<typeof makeKeys>, kdf: SmpKdf, envelope: SyncEnvelope) {
+    const body = {
+      protocolVersion: 1, keyEpoch: '1', mutationId: MID, expectedStateVersion: '1',
+      smpKdf: b64kdf(kdf), envelopeSmp: b64env(envelope),
+    };
+    const { digest, signatureBuf } = signBody(keys.signPriv, USER, 'state.change-key', body);
+    return {
+      keyEpoch: '1', mutationId: MID, signature: signatureBuf, expectedStateVersion: '1',
+      requestDigest: digest, smpKdf: kdf, envelopeSmp: envelope,
+    };
+  }
+
+  it('rejects change-key that reuses the stored KDF salt', async () => {
+    const { svc, keys } = await initialized();
+    // salt 沿用已存值 → 同口令派生出同一把 KEK。
+    await expect(svc.changeKey(USER, changeKeyInput(keys, smpKdf(2), env('2', 40))))
+      .rejects.toThrow(/salt must be freshly generated/);
+  });
+
+  it('rejects change-key that reuses the stored GCM nonce', async () => {
+    const { svc, keys } = await initialized();
+    // salt 换新但 nonce 沿用 env('1') 的 fill=4 → 同一段密钥流。
+    await expect(svc.changeKey(USER, changeKeyInput(keys, smpKdf(22), env('2', 4))))
+      .rejects.toThrow(/nonce must be freshly generated/);
+  });
+
+  it('accepts change-key when both salt and nonce are fresh', async () => {
+    const { svc, keys } = await initialized();
+    const res = await svc.changeKey(USER, changeKeyInput(keys, smpKdf(22), env('2', 40)));
     expect(res.stateVersion).toBe('2');
   });
 });

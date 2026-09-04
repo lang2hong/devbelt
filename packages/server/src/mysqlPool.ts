@@ -5,6 +5,7 @@
  * 这些参数 —— 池配置错了不会有任何报错，只会在生产的某个并发高峰突然表现为
  * 「全站卡死但 MySQL 侧看不到慢查询」，事后极难定位。
  */
+import { readFileSync } from 'fs';
 
 /** 池大小默认值。高于 mysql2 的默认 10：单请求的串行查询数本身就有 2~12 次。 */
 const DEFAULT_POOL_SIZE = 20;
@@ -27,6 +28,18 @@ export interface MysqlCredentials {
   database: string;
 }
 
+export interface MysqlSslOptions {
+  /** CA 证书内容（PEM）。用于校验服务端证书链。 */
+  ca?: string;
+  /**
+   * 是否校验服务端证书。默认 true。
+   * 置 false 仅用于自签证书的临时排查 —— 此时链路虽加密但**不防中间人**。
+   */
+  rejectUnauthorized: boolean;
+  /** 期望的服务端主机名（证书 CN/SAN 与实际连接地址不一致时使用）。 */
+  servername?: string;
+}
+
 export interface MysqlPoolOptions extends MysqlCredentials {
   waitForConnections: boolean;
   connectionLimit: number;
@@ -36,6 +49,8 @@ export interface MysqlPoolOptions extends MysqlCredentials {
   keepAliveInitialDelay: number;
   timezone: string;
   charset: string;
+  /** TLS 配置；未启用时为 undefined（mysql2 视作明文连接）。 */
+  ssl?: MysqlSslOptions;
 }
 
 /**
@@ -69,5 +84,41 @@ export function buildMysqlPoolOptions(
     keepAliveInitialDelay: 10_000,
     timezone: 'Z',
     charset: 'utf8mb4_0900_ai_ci',
+    ssl: buildSslOptions(env),
   };
+}
+
+/**
+ * TLS 选项。
+ *
+ * 不配置任何 `MYSQL_SSL*` 时返回 undefined，保持明文连接（本地 docker / 回环）。
+ * 一旦库在网络另一端（托管 RDS 等），明文链路上会经过：握手阶段的账号密码，
+ * 以及 payload 里的 `password_hash`、各类 `token_hash`、E2E `ciphertext/nonce/tag`。
+ *
+ * 取值：
+ * - `MYSQL_SSL=true|1`            启用 TLS（不带 CA 时依赖系统根证书）
+ * - `MYSQL_SSL_CA`                CA 证书 PEM 内容；给出即隐含启用
+ * - `MYSQL_SSL_CA_FILE`           CA 证书路径；给出即隐含启用
+ * - `MYSQL_SSL_REJECT_UNAUTHORIZED=false` 关闭证书校验（**不防 MITM**，仅排查用）
+ * - `MYSQL_SSL_SERVERNAME`        证书主机名与连接地址不一致时指定
+ */
+function buildSslOptions(env: Record<string, string | undefined>): MysqlSslOptions | undefined {
+  const flag = (env.MYSQL_SSL ?? '').trim().toLowerCase();
+  const caInline = (env.MYSQL_SSL_CA ?? '').trim();
+  const caFile = (env.MYSQL_SSL_CA_FILE ?? '').trim();
+  const enabled = flag === 'true' || flag === '1' || caInline !== '' || caFile !== '';
+  if (!enabled) return undefined;
+
+  let ca: string | undefined = caInline || undefined;
+  if (!ca && caFile) {
+    // 读失败不静默降级成明文：那会把「以为加密了」变成「其实没加密」。
+    ca = readFileSync(caFile, 'utf8');
+  }
+
+  const rejectRaw = (env.MYSQL_SSL_REJECT_UNAUTHORIZED ?? '').trim().toLowerCase();
+  const rejectUnauthorized = !(rejectRaw === 'false' || rejectRaw === '0');
+
+  const servername = (env.MYSQL_SSL_SERVERNAME ?? '').trim() || undefined;
+
+  return { ca, rejectUnauthorized, servername };
 }

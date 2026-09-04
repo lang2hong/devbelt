@@ -28,6 +28,8 @@ function mapPlan(r: any): PersonalPlan {
     maxDevices: r.max_devices,
     maxConnectionMetas: Number(r.max_connection_metas ?? 0),
     syncStorageBytes: Number(r.sync_storage_bytes ?? 0),
+    maxSavedConnections: Number(r.max_saved_connections ?? 0),
+    allowConnectionImport: r.allow_connection_import === 1 || r.allow_connection_import === true,
     status: r.status as PersonalPlanStatus,
     createTime: new Date(r.create_time),
     updateTime: new Date(r.update_time),

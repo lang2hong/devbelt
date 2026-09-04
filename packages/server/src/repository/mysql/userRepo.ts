@@ -22,6 +22,16 @@ export class MysqlUserRepo implements IUserRepo {
     return rows[0] ? mapUser(rows[0]) : undefined;
   }
 
+  async findByIdInTx(exec: Queryable, id: number): Promise<User | undefined> {
+    const [rows] = await exec.query<any[]>('SELECT * FROM users WHERE id = ?', [id]);
+    return rows[0] ? mapUser(rows[0]) : undefined;
+  }
+
+  async findByEmailInTx(exec: Queryable, email: string): Promise<User | undefined> {
+    const [rows] = await exec.query<any[]>('SELECT * FROM users WHERE email = ?', [email]);
+    return rows[0] ? mapUser(rows[0]) : undefined;
+  }
+
   async create(email: string, passwordHash: string, displayName?: string): Promise<User> {
     const [result] = await this.db().query<any>(
       'INSERT INTO users (email, password_hash, display_name, status) VALUES (?, ?, ?, ?)',

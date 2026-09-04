@@ -45,6 +45,9 @@ export class MysqlRegistrationRepo implements IRegistrationRepo {
         // 数值配额列（§4.2）：快照即权威，服务端只读快照不读当前 plan。
         maxConnectionMetas: Number(freePlan.max_connection_metas ?? 0),
         syncStorageBytes: Number(freePlan.sync_storage_bytes ?? 0),
+        // 连接资产差异点：快照冻结时把这两个也带走（§6.2）。
+        maxSavedConnections: Number(freePlan.max_saved_connections ?? 0),
+        allowConnectionImport: freePlan.allow_connection_import === 1 || freePlan.allow_connection_import === true,
       };
       const now = new Date();
 

@@ -106,12 +106,25 @@ export class MysqlOrganizationInvitationRepo implements IOrganizationInvitationR
     return rows.map((r: any) => r.organization_id as number);
   }
 
+  /**
+   * 过期未处理的邀请：撤销邀请，并把**仍处于 invited 状态**的成员行置为 removed。
+   *
+   * `AND m.status = 'invited'` 不可省。少了它，这条 UPDATE 会把邀请所指向的成员行
+   * 无条件置为 removed —— 不管它此刻是不是已经 active。后果是后台清理任务**静默移除
+   * 真实成员**；若那人是最后一个 admin，组织会落到零 admin，而所有授予 admin 的操作
+   * 都要求先有一个 admin，等于**不可恢复**（ensureNotLastAdmin 完全不在这条路径上）。
+   *
+   * 目前「active 成员身上还挂着未处理邀请」这个状态在业务上不可达（accept 会先
+   * markAccepted、invite 拒绝 active 目标、重复邀请会先 revokeByMembership），
+   * 但那依赖另一个文件里的三条不变量同时成立。这一个谓词把「靠约定」变成「靠构造」。
+   */
   async expireByOrganization(exec: Queryable, organizationId: number, now: Date): Promise<void> {
     await exec.query(
       `UPDATE organization_invitations i
        JOIN organization_memberships m ON m.id = i.membership_id AND m.organization_id = i.organization_id
        SET i.revoked_time = ?, m.status = 'removed', m.removed_time = ?
-       WHERE i.organization_id = ? AND i.expires_time <= ? AND i.accepted_time IS NULL AND i.revoked_time IS NULL`,
+       WHERE i.organization_id = ? AND i.expires_time <= ? AND i.accepted_time IS NULL AND i.revoked_time IS NULL
+         AND m.status = 'invited'`,
       [now, now, organizationId, now],
     );
   }

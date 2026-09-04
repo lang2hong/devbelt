@@ -28,6 +28,32 @@ export function verifySignature(rawPub: Buffer, signingInput: Record<string, unk
   if (!verifyEd25519(rawPub, message, signature)) throw new SyncSignatureInvalidError();
 }
 
+/**
+ * envelope 重写时的 (KDF salt, GCM nonce) 新鲜度校验。
+ *
+ * 为什么必须有：envelope 的 AES-256-GCM 密钥由「口令 + KDF salt」派生。若客户端
+ * 提交与已存**相同的 salt**，同一口令会得到**同一把 KEK**；再叠加**相同的 nonce**，
+ * 就是 GCM 下的密钥流复用。而 envelope 的 ct 固定 32 字节（恰好两个 AES 块内），
+ * 攻击者拿到新旧两条密文即可异或得到两把主密钥的 XOR；单块消息还能直接反解出
+ * GHASH 的 H，从而伪造 tag。
+ *
+ * 只要 salt 或 nonce 任一变化即安全（KEK 变或密钥流变）。此处要求**两者都不得
+ * 与已存值相同**，比理论下限更严一点，代价仅是客户端必须两者都重新随机 ——
+ * 这本就是正确实现的行为，且能挡住「只换其一」的实现疏漏。
+ */
+export function assertEnvelopeFreshness(
+  prev: { salt: Buffer; nonce: Buffer },
+  next: { salt: Buffer; nonce: Buffer },
+  label: string,
+): void {
+  if (prev.salt.equals(next.salt)) {
+    throw new ValidationError(`${label} KDF salt must be freshly generated (reusing it repeats the AES-GCM keystream)`);
+  }
+  if (prev.nonce.equals(next.nonce)) {
+    throw new ValidationError(`${label} envelope nonce must be freshly generated (reusing it repeats the AES-GCM keystream)`);
+  }
+}
+
 /** receipt 幂等：同 id 同 digest → 返回已存结果；同 id 异 digest → 409；未命中或已过期 → undefined。 */
 export async function checkReceipt(
   tx: Queryable,

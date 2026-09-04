@@ -256,3 +256,42 @@ describe('invitations (OrganizationService)', () => {
     await expect(svc.revokeInvitation(org.organizationId, 1, r.invitationId)).rejects.toBeInstanceOf(InvitationInvalidError);
   });
 });
+describe('expireInvitations must not touch active members', () => {
+  it('leaves an already-active membership alone when a stale invitation still points at it', async () => {
+    // 回归防线：expireByOrganization 的 UPDATE ... JOIN 必须带 AND m.status='invited'。
+    // 少了它，后台清理会把邀请指向的成员行无条件置为 removed —— 即使那人已经 active。
+    // 若那人是最后一个 admin，组织将落到零 admin 且不可恢复。
+    const { svc, membershipRepo, invitationRepo, userRepo } = makeService();
+    const org = await svc.createOrganization(1, 'Acme');
+    await makeVerifiedUser(userRepo, 'b@x.com');
+
+    await svc.inviteMember(org.organizationId, 1, 'b@x.com');
+    const inv = [...invitationRepo.store.values()][0];
+
+    // 人为造出「成员已 active，但邀请行仍是未接受/未撤销且已过期」这个状态。
+    const membership = membershipRepo.store.get(inv.membershipId)!;
+    membership.status = 'active';
+    membership.joinedTime = new Date();
+    inv.expiresTime = new Date(Date.now() - 1000);
+
+    await svc.expireInvitations();
+
+    // 邀请被撤销是对的；成员必须保持 active。
+    expect(membershipRepo.store.get(inv.membershipId)!.status).toBe('active');
+    expect([...invitationRepo.store.values()][0].revokedTime).not.toBeNull();
+  });
+
+  it('still removes the membership when the invitation expires while genuinely invited', async () => {
+    const { svc, membershipRepo, invitationRepo, userRepo } = makeService();
+    const org = await svc.createOrganization(1, 'Acme');
+    await makeVerifiedUser(userRepo, 'c@x.com');
+
+    await svc.inviteMember(org.organizationId, 1, 'c@x.com');
+    const inv = [...invitationRepo.store.values()][0];
+    inv.expiresTime = new Date(Date.now() - 1000);
+
+    await svc.expireInvitations();
+
+    expect(membershipRepo.store.get(inv.membershipId)!.status).toBe('removed');
+  });
+});

@@ -36,6 +36,7 @@ import { SyncResetService } from './service/syncResetService.js';
 import { RateLimitService } from './service/rateLimitService.js';
 import { startRateLimitCleanup } from './service/rateLimitCleanup.js';
 import { startInvitationCleanup } from './service/invitationCleanup.js';
+import { startRetentionCleanup } from './service/retentionCleanup.js';
 import { resolveEmailSender } from './service/resolveEmailSender.js';
 import { authRoutes } from './route/auth.js';
 import { meRoutes } from './route/me.js';
@@ -177,6 +178,16 @@ export async function createApp() {
   startRateLimitCleanup(rateLimitRepo);
   // 受控邀请过期清理任务（实施规格 §3）：过期邀请释放容量，不依赖成员再次操作
   startInvitationCleanup(() => organizationService.expireInvitations());
+  // 过期数据保留清理：refresh_tokens / email_verification_tokens /
+  // personal_sync_mutations / personal_sync_reset_tokens 四张表原本只增不减
+  // （其中三张自带 expires_time 却无人消费）。
+  startRetentionCleanup({
+    refreshTokenRepo,
+    emailVerificationTokenRepo,
+    syncMutationRepo,
+    syncResetTokenRepo,
+    exec: () => app.mysql,
+  });
 
   // route 层
   const getUser = async (id: number) => userRepo.findById(id);

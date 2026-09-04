@@ -82,6 +82,25 @@ export class MysqlRefreshTokenRepo implements IRefreshTokenRepo {
       [now, userId],
     );
   }
+
+  /**
+   * 清理已终结的 refresh token 行。
+   *
+   * 轮换语义让这张表只增不减：每次刷新插一条新行，旧行只被置 revoked_time。
+   * access token 15 分钟过期即触发轮换，单个活跃用户约 2900 行/月。
+   * 删「已过期」或「撤销已久」的行；LIMIT 分批，避免一次删太多长时间持锁。
+   * replaced_by_token_id 指向的旧行被删后成为悬挂引用 —— 无妨：复用检测走
+   * family_id，不依赖这条链，且该列已无外键约束。
+   */
+  async prune(before: Date, limit: number): Promise<number> {
+    const [result] = await this.db().query<any>(
+      `DELETE FROM refresh_tokens
+       WHERE expires_time < ? OR (revoked_time IS NOT NULL AND revoked_time < ?)
+       LIMIT ?`,
+      [before, before, limit],
+    );
+    return Number(result?.affectedRows ?? 0);
+  }
 }
 
 function mapRefreshToken(r: any): RefreshToken {

@@ -13,7 +13,7 @@ import {
   ValidationError,
 } from '../domain/errors.js';
 import { incU64 } from '../domain/syncU64.js';
-import { SYNC_DOMAIN, assertU64, assertEpoch, verifySignature, checkReceipt, recordReceipt } from './syncShared.js';
+import { SYNC_DOMAIN, assertU64, assertEpoch, verifySignature, checkReceipt, recordReceipt, assertEnvelopeFreshness } from './syncShared.js';
 
 const SUPPORTED_VERSION = 1 as const;
 const SUITE = 'AES-256-GCM' as const;
@@ -143,16 +143,26 @@ export class SyncStateService {
     return this.runner(async (tx) => {
       const state = await this.lockActive(tx, userId);
       assertEpoch(state, input.keyEpoch);
+      // 验签必须先于 receipt 查询：否则只持会话 token（无同步签名私钥）者就能用
+      // 任意 mutationId/digest 探测 receipt —— 未命中/异 digest/命中三种结果可区分，
+      // 且命中时会返回 stateVersion。前置验签后，未签名请求一律止步于此。
+      this.assertSignature(state.signPub, userId, input, 'state.change-key');
+
       const receipt = await checkReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest);
       if (receipt) return { keyEpoch: input.keyEpoch, stateVersion: receipt.resultVersion ?? state.stateVersion };
 
-      this.assertSignature(state.signPub, userId, input, 'state.change-key');
       this.assertExpectedVersion(state, input.expectedStateVersion);
 
       validateSmpKdf(input.smpKdf);
       // envelope 版本单调：smp +1；recovery 不变（§7.3）。
       if (input.envelopeSmp.version !== incU64(state.envelopeSmp.version)) throw new ValidationError('smp envelope version must be increment of stored');
       if (input.envelopeSmp.nonce.length !== 12 || input.envelopeSmp.ct.length !== 32 || input.envelopeSmp.tag.length !== 16) throw new ValidationError('invalid smp envelope');
+      // 防 AES-GCM 密钥流复用：salt 与 nonce 都必须换新（详见 assertEnvelopeFreshness）。
+      assertEnvelopeFreshness(
+        { salt: state.smpKdf.salt, nonce: state.envelopeSmp.nonce },
+        { salt: input.smpKdf.salt, nonce: input.envelopeSmp.nonce },
+        'smp',
+      );
 
       const next = {
         userId,
@@ -186,11 +196,12 @@ export class SyncStateService {
     return this.runner(async (tx) => {
       const state = await this.lockActive(tx, userId);
       assertEpoch(state, input.keyEpoch);
+      // recover 用旧 recoverSignPub 验签（§7.4）。前置于 receipt 查询，理由同 change-key。
+      this.assertSignature(state.recoverSignPub, userId, input, 'state.recover');
+
       const receipt = await checkReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest);
       if (receipt) return { keyEpoch: input.keyEpoch, stateVersion: receipt.resultVersion ?? state.stateVersion, recoveryCodeSetTime: state.recoveryCodeSetTime ? state.recoveryCodeSetTime.toISOString() : null };
 
-      // recover 用旧 recoverSignPub 验签（§7.4）。
-      this.assertSignature(state.recoverSignPub, userId, input, 'state.recover');
       this.assertExpectedVersion(state, input.expectedStateVersion);
 
       validateSmpKdf(input.smpKdf);
@@ -198,6 +209,17 @@ export class SyncStateService {
       if (input.envelopeSmp.version !== incU64(state.envelopeSmp.version)) throw new ValidationError('smp envelope version must be increment of stored');
       if (input.envelopeRecovery.version !== incU64(state.envelopeRecovery.version)) throw new ValidationError('recovery envelope version must be increment of stored');
       if (input.recoverSignPub.length !== 32) throw new ValidationError('invalid recoverSignPub length');
+      // 两条 envelope 都被重写，各自独立校验新鲜度。
+      assertEnvelopeFreshness(
+        { salt: state.smpKdf.salt, nonce: state.envelopeSmp.nonce },
+        { salt: input.smpKdf.salt, nonce: input.envelopeSmp.nonce },
+        'smp',
+      );
+      assertEnvelopeFreshness(
+        { salt: state.recoveryKdf.salt, nonce: state.envelopeRecovery.nonce },
+        { salt: input.recoveryKdf.salt, nonce: input.envelopeRecovery.nonce },
+        'recovery',
+      );
 
       const now = new Date();
       const next = {
@@ -230,14 +252,44 @@ export class SyncStateService {
     assertU64(input.expectedStateVersion, 'expectedStateVersion');
     return this.runner(async (tx) => {
       const state = await this.lockActive(tx, userId);
-      // destroy 会推进 keyEpoch，重放时 request 的旧 epoch 已与 active state 不一致，
-      // 故 receipt 必须先于 assertEpoch 判定（保证幂等重放返回完整结果而非 409）。
-      const receipt = await checkReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest);
-      if (receipt) return { keyEpoch: state.keyEpoch, stateVersion: state.stateVersion, changeSequence: state.changeSequence };
-      assertEpoch(state, input.keyEpoch);
 
+      // 这里刻意**不**把验签前置（其它 mutation 都前置了），因为 destroy 会用
+      // newState.signPub 替换 signPub：重放时 state 里已是新公钥，拿它验旧签名
+      // 必然失败，前置验签会把合法重放变成 401。
+      //
+      // 不前置是否形成 receipt 预言机？不构成：checkReceipt 命中要求
+      // requestDigest 与已存的 32 字节 SHA-256 **逐字节相等**，攻击者无法凭
+      // 会话 token 猜出它；猜错只会得到与「不存在」同形的 undefined 或
+      // 「同 id 异 digest」的 409，都不泄露额外信息。真正需要前置验签的是
+      // change-key / recover —— 它们不换 signPub，前置无副作用。
+      const receipt = await checkReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest);
+      if (receipt) {
+        // 重放应返回**当次 mutation 的结果**，而非 read-time 的当前状态：
+        // destroy → change-key → 重放 destroy 时，后者会把 change-key 的版本号
+        // 当成 destroy 的结果报回去，违反幂等契约。receipt 里存了原始结果。
+        return {
+          keyEpoch: state.keyEpoch,
+          stateVersion: receipt.resultVersion ?? state.stateVersion,
+          changeSequence: receipt.resultChangeSequence ?? state.changeSequence,
+        };
+      }
+      assertEpoch(state, input.keyEpoch);
       this.assertSignature(state.signPub, userId, input, 'state.destroy');
       this.assertExpectedVersion(state, input.expectedStateVersion);
+
+      // destroy 用 newState 整体替换两条 envelope。validateNewState 只校验长度，
+      // 不比对旧值，故此处仍需新鲜度校验：否则「销毁后用同 salt+nonce 重建」
+      // 会与销毁前的 envelope 构成密钥流复用。
+      assertEnvelopeFreshness(
+        { salt: state.smpKdf.salt, nonce: state.envelopeSmp.nonce },
+        { salt: input.newState.smpKdf.salt, nonce: input.newState.envelopeSmp.nonce },
+        'smp',
+      );
+      assertEnvelopeFreshness(
+        { salt: state.recoveryKdf.salt, nonce: state.envelopeRecovery.nonce },
+        { salt: input.newState.recoveryKdf.salt, nonce: input.newState.envelopeRecovery.nonce },
+        'recovery',
+      );
 
       const now = new Date();
       // 逐个 tombstone：version+1 + 全局单调 change_sequence（§7.3：一个序列恰对应一条变更，永不重置）。

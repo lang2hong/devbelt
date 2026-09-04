@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import mysql from 'mysql2/promise';
 import { generateKeyPairSync } from 'crypto';
-import { parseMysqlUrl, resolveTestDb } from './testDb.js';
+import { createTestPool } from './testDb.js';
 import { runMigrations } from '../../src/repository/mysql/migrate.js';
 import { migrations } from '../../src/repository/mysql/migrations/index.js';
 import type { MysqlDb } from '../../src/repository/mysql/db.js';
@@ -36,8 +36,7 @@ function uniqueEmail(prefix = 'res'): string {
 }
 
 function newPool(): mysql.Pool {
-  const { host, port, user, password } = parseMysqlUrl(URL!);
-  return mysql.createPool({ host, port, user, password, database: resolveTestDb(), timezone: 'Z' });
+  return createTestPool();
 }
 
 async function makeStack(db: MysqlDb) {
@@ -55,7 +54,8 @@ async function makeStack(db: MysqlDb) {
     organizationSubscriptionRepo,
     membershipRepo,
     new MysqlOrganizationInvitationRepo(() => db),
-    new RateLimitService(new MysqlRateLimitRepo(() => db), true),
+    // 关限流：本文件验证资源/目录逻辑，不验证限流（同 invitation.test.ts）。
+    new RateLimitService(new MysqlRateLimitRepo(() => db), false),
     tokenService,
     new MemoryEmailSender(),
     runner,

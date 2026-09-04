@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import mysql from 'mysql2/promise';
 import { generateKeyPairSync, sign as nodeSign, type KeyObject } from 'crypto';
-import { parseMysqlUrl, resolveTestDb } from './testDb.js';
+import { createTestPool } from './testDb.js';
 import { runMigrations } from '../../src/repository/mysql/migrate.js';
 import { migrations } from '../../src/repository/mysql/migrations/index.js';
 import type { MysqlDb } from '../../src/repository/mysql/db.js';
@@ -45,11 +45,17 @@ function makeState(userId: number, keys: ReturnType<typeof makeKeys>): PersonalS
   };
 }
 
+/**
+ * destroy 用的新 state。salt/nonce 全部随 `fill` 变化：服务端要求重写 envelope 时
+ * KDF salt 与 GCM nonce 都必须换新（同 salt ⇒ 同 KEK，同 nonce ⇒ 同密钥流，
+ * 而 envelope 密文只有 32 字节，两条即可异或出主密钥）。
+ * 原先这里的 salt 写死为 makeState 的同一批填充值，会被该校验拒掉。
+ */
 function newState(fill = 20): SyncNewState {
   return {
     protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
-    smpKdf: { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: buf(16, 2), outputBytes: 32 },
-    recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: buf(16, 3), outputBytes: 32 },
+    smpKdf: { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: buf(16, fill + 8), outputBytes: 32 },
+    recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: buf(16, fill + 9), outputBytes: 32 },
     envelopeSmp: { version: '1', nonce: buf(12, fill), ct: buf(32, fill + 1), tag: buf(16, fill + 2) },
     envelopeRecovery: { version: '1', nonce: buf(12, fill + 3), ct: buf(32, fill + 4), tag: buf(16, fill + 5) },
     signPub: buf(32, fill + 6), recoverSignPub: buf(32, fill + 7),
@@ -91,8 +97,7 @@ describe.skipIf(!URL)('sync concurrency (real MySQL)', () => {
   let db: MysqlDb;
 
   beforeAll(async () => {
-    const { host, port, user, password } = parseMysqlUrl(URL!);
-    pool = mysql.createPool({ host, port, user, password, database: resolveTestDb(), timezone: 'Z' });
+    pool = createTestPool();
     db = pool as unknown as MysqlDb;
     await runMigrations(db, [...migrations]);
   });

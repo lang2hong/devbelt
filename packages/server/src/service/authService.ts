@@ -59,6 +59,12 @@ const PASSWORD_MAX = 128;
 // 限流阈值（实施规格 §5.2）
 const LOGIN_WINDOW_S = 15 * 60;
 const LOGIN_MAX = 5;
+/**
+ * 登录滥用硬上限（同窗口、同桶的失败次数）。仅用于在 Argon2id 之前廉价拒绝，
+ * 不改变「失败才计数、正确密码不被锁」的认证语义，故必须 > LOGIN_MAX。
+ * 20 次失败 × ~2.5s 即约 50s CPU，是单个 (email|ip, 15min) 的最坏开销上界。
+ */
+const LOGIN_ABUSE_MAX = 20;
 const REGISTER_WINDOW_S = 3600;
 const REGISTER_MAX = 10;
 const VERIFY_RESEND_WINDOW_S = 3600;
@@ -95,7 +101,7 @@ export class AuthService {
 
     await this.rateLimiter.hit(`register:ip:${ip ?? 'unknown'}`, REGISTER_WINDOW_S, REGISTER_MAX);
 
-    const passwordHash = hashPassword(password);
+    const passwordHash = await hashPassword(password);
     const token = randomBytes(32).toString('base64url');
     const tokenHash = this.tokenService.hashToken(token);
     const expiresTime = new Date(Date.now() + VERIFICATION_TOKEN_TTL_MS);
@@ -185,6 +191,22 @@ export class AuthService {
   /** 登录：仅已验证邮箱 + active 用户成功；失败按 email/IP 原子计数，达到阈值 429。 */
   async login(emailRaw: string, password: string, device: DeviceFields, ip?: string): Promise<AuthResponse> {
     const email = normalizeEmail(emailRaw);
+
+    // 滥用闸（≠ 认证节流）：在 **Argon2id 之前**廉价拒绝，防止「超限请求依然各烧
+    // ~2.5s CPU」把事件循环占满。
+    //
+    // 阈值刻意取 LOGIN_ABUSE_MAX 而**不是** LOGIN_MAX：本端点的既有语义是
+    // 「只对失败计数，密码正确者永不被锁」（§5.2）。若在 LOGIN_MAX 上做前置拒绝，
+    // 攻击者只要替受害者打满 5 次失败，就能把真正的用户挡在门外 15 分钟 ——
+    // 那正是原设计特意规避的账号锁定型 DoS。
+    //
+    // 于是两条阈值各司其职：
+    //   LOGIN_MAX(5)        失败后判定，回 429，但不阻止正确密码通过；
+    //   LOGIN_ABUSE_MAX(20) 同一桶失败到该量级即视为滥用，后续请求不再算 argon2。
+    // 计数桶只在失败时递增，所以从未失败过的正常用户恒为 0，不受影响。
+    await this.rateLimiter.assertUnder(`login:email:${email}`, LOGIN_WINDOW_S, LOGIN_ABUSE_MAX);
+    await this.rateLimiter.assertUnder(`login:ip:${ip ?? 'unknown'}`, LOGIN_WINDOW_S, LOGIN_ABUSE_MAX);
+
     const found = await this.userRepo.findByEmail(email);
     if (!found) {
       // 未知邮箱 = 失败（§5.2）：原子计数，超阈值 429 否则 401。
@@ -193,12 +215,26 @@ export class AuthService {
     }
 
     const userId = found.id;
+
+    // Argon2id（~2.5s）在**事务与行锁之外**计算。原实现放在 lockById 之后，
+    // 意味着每次登录都持有该用户的行锁 + 一条池连接约 2.5s：同账号并发登录被串行化，
+    // 数十个并发即超过 innodb_lock_wait_timeout 开始报错。
+    //
+    // 原注释给出的理由（锁内复核，使校验结果不能跨越改密提交点）依然成立，做法改为：
+    // 锁外用 found.passwordHash 验密码，锁内只比对 hash **串本身**有没有变。
+    // 并发改密会改写 password_hash，锁内比对即失配 → 拒绝。等价的防护，
+    // 但昂贵计算不再占着锁。
+    const passwordOk = await verifyPassword(password, found.passwordHash);
+    const verifiedAgainstHash = found.passwordHash;
+
     const outcome = await this.runner(
       async (tx): Promise<{ ok: false } | { ok: true; accessToken: string; refreshToken: string; user: UserDto }> => {
-        // 锁用户行：设备配额序列化 + 锁内重新校验密码，使改密前的校验结果不能跨越改密提交点。
+        // 锁用户行：设备配额序列化 + 复核密码校验所依据的 hash 未被并发改密取代。
         const user = await this.userRepo.lockById(tx, userId);
         if (!user || user.status !== 'active' || !user.emailVerifiedTime) return { ok: false };
-        if (!verifyPassword(password, user.passwordHash)) return { ok: false };
+        if (!passwordOk) return { ok: false };
+        // 锁外的校验依据已过期（期间发生改密）→ 视为失败，不放行。
+        if (user.passwordHash !== verifiedAgainstHash) return { ok: false };
 
         const deviceId = await this.upsertDevice(tx, user.id, device);
         const { token, hash, expiresAt } = this.tokenService.generateRefreshToken();
@@ -307,12 +343,21 @@ export class AuthService {
   /** 改密：同一事务内锁用户 → 重新校验当前密码 → 更新 hash → 撤销全部 refresh token（§5.1）。 */
   async changePassword(userId: number, currentPassword: string, newPassword: string): Promise<{ ok: true }> {
     this.validatePassword(newPassword);
-    const newHash = hashPassword(newPassword); // Argon2id 慢，事务外预计算
+    const newHash = await hashPassword(newPassword); // Argon2id 慢（worker 内算），事务外预计算
+
+    // 旧密码校验同样移到事务外（与 login 一致）：两次 Argon2id 各约 2.5s，
+    // 放在锁内会让用户行锁与池连接被占用约 5s。
+    const current = await this.userRepo.findById(userId);
+    if (!current) throw new UnauthorizedError();
+    const currentOk = await verifyPassword(currentPassword, current.passwordHash);
+    const verifiedAgainstHash = current.passwordHash;
+
     await this.runner(async (tx) => {
       const user = await this.userRepo.lockById(tx, userId);
       if (!user) throw new UnauthorizedError();
-      // 锁内重新校验，旧密码校验结果不能跨越改密提交点
-      if (!verifyPassword(currentPassword, user.passwordHash)) throw new UnauthorizedError();
+      if (!currentOk) throw new UnauthorizedError();
+      // 锁内复核校验依据未被并发改密取代（防两个改密请求都基于同一旧 hash 通过）。
+      if (user.passwordHash !== verifiedAgainstHash) throw new UnauthorizedError();
       await this.userRepo.updatePassword(tx, userId, newHash);
       await this.refreshTokenRepo.revokeAllForUser(tx, userId, new Date());
     });
@@ -351,7 +396,7 @@ export class AuthService {
    */
   private async upsertDevice(exec: Queryable, userId: number, device: DeviceFields): Promise<number | null> {
     if (!device?.deviceKey) return null;
-    const maxDevices = await this.maxDevices(userId);
+    const maxDevices = await this.maxDevices(exec, userId);
     const existing = await this.deviceRepo.findByUserAndKey(exec, userId, device.deviceKey);
     if ((!existing || existing.status !== 'active') && maxDevices > 0) {
       const activeCount = await this.deviceRepo.countActive(exec, userId);
@@ -369,8 +414,15 @@ export class AuthService {
     return saved.id;
   }
 
-  private async maxDevices(userId: number): Promise<number> {
-    const sub = await this.personalSubscriptionRepo.findByUserId(userId);
+  /**
+   * 读设备配额。**必须接受调用方的 `exec`**：本方法只在 `upsertDevice` 里被调用，
+   * 而那是在 login 事务的用户行锁内。若改用连接池（`findByUserId`），该请求会在
+   * 持有事务连接的同时再向池申请第二条连接 —— 并发数达到 connectionLimit 时
+   * 所有请求互相等待，且 mysql2 没有获取超时，进程永久死锁只能重启。
+   * 顺带：走同一事务才能让配额读落在用户行锁的快照内，配额检查才真正被序列化。
+   */
+  private async maxDevices(exec: Queryable, userId: number): Promise<number> {
+    const sub = await this.personalSubscriptionRepo.findByUserIdInTx(exec, userId);
     const n = sub?.entitlementSnapshot?.maxDevices;
     return typeof n === 'number' ? n : 0;
   }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import mysql from 'mysql2/promise';
 import { generateKeyPairSync } from 'crypto';
-import { parseMysqlUrl, resolveTestDb } from './testDb.js';
+import { createTestPool } from './testDb.js';
 import { runMigrations } from '../../src/repository/mysql/migrate.js';
 import { migrations } from '../../src/repository/mysql/migrations/index.js';
 import type { MysqlDb } from '../../src/repository/mysql/db.js';
@@ -26,8 +26,7 @@ function uniqueEmail(prefix = 'inv'): string {
 }
 
 function newPool(): mysql.Pool {
-  const { host, port, user, password } = parseMysqlUrl(URL!);
-  return mysql.createPool({ host, port, user, password, database: resolveTestDb(), timezone: 'Z' });
+  return createTestPool();
 }
 
 async function makeStack(db: MysqlDb) {
@@ -44,7 +43,10 @@ async function makeStack(db: MysqlDb) {
     new MysqlOrganizationSubscriptionRepo(() => db),
     membershipRepo,
     invitationRepo,
-    new RateLimitService(new MysqlRateLimitRepo(() => db), true),
+    // 关限流：本文件验证邀请生命周期，不验证限流。它在同一 userId 上建 13 次组织，
+    // 而 ORG_CREATE_MAX=10 —— 开着限流会在第 11 次抛 429，淹没真正要测的断言。
+    // 组织创建限流本身由 organization.test.ts 专门覆盖。
+    new RateLimitService(new MysqlRateLimitRepo(() => db), false),
     tokenService,
     emailSender,
     (fn) => withTransaction(db, fn),

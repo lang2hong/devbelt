@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import mysql from 'mysql2/promise';
 import { generateKeyPairSync } from 'crypto';
-import { parseMysqlUrl, resolveTestDb } from './testDb.js';
+import { createTestPool } from './testDb.js';
 import { runMigrations } from '../../src/repository/mysql/migrate.js';
 import { migrations } from '../../src/repository/mysql/migrations/index.js';
 import type { MysqlDb } from '../../src/repository/mysql/db.js';
@@ -21,10 +21,19 @@ import { OrganizationAdminRequiredError, EntityNotFoundError, RateLimitedError, 
 
 const URL = process.env.MYSQL_TEST_URL;
 
-async function makeService(db: MysqlDb) {
+/**
+ * @param rateLimit 是否启用限流。**默认关闭**。
+ *
+ * 每个 it 各自建库跑 migrations，但 rate_limit_entries 里的桶键是
+ * `org:create:user:<id>` —— userId 在各测试间会重复，于是所有测试共享同一个
+ * 「每用户每小时 10 次」的配额。本文件累计建组织 11 次，开着限流就会互相挤占：
+ * 单跑时最后那个限流测试挂，与其它文件一起跑时第一个测试就挂。
+ * 因此只有专门验证限流的那个测试开启它（并使用独立 userId）。
+ */
+async function makeService(db: MysqlDb, rateLimit = false) {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   const tokenService = new TokenService({ kid: 'test', privateKey, publicKeys: new Map([['test', publicKey]]) }, '15m', 30 * 24 * 3600 * 1000);
-  const rateLimiter = new RateLimitService(new MysqlRateLimitRepo(() => db), true);
+  const rateLimiter = new RateLimitService(new MysqlRateLimitRepo(() => db), rateLimit);
   return new OrganizationService(
     new MysqlUserRepo(() => db),
     new MysqlOrganizationRepo(() => db),
@@ -40,8 +49,7 @@ async function makeService(db: MysqlDb) {
 }
 
 function newPool(): mysql.Pool {
-  const { host, port, user, password } = parseMysqlUrl(URL!);
-  return mysql.createPool({ host, port, user, password, database: resolveTestDb(), timezone: 'Z' });
+  return createTestPool();
 }
 
 async function countAdmins(db: MysqlDb, organizationId: number): Promise<number> {
@@ -245,22 +253,34 @@ describe.skipIf(!URL)('organization (real MySQL)', () => {
     const db = pool as unknown as MysqlDb;
     try {
       await runMigrations(db, [...migrations]);
-      const userRepo = new MysqlUserRepo(() => db);
-      await userRepo.create('rl@example.com', 'hash', 'RL');
-      const svc = await makeService(db);
-      const user = await userRepo.findByEmail('rl@example.com');
+      // 唯一一处显式开启限流的地方（makeService 默认关闭，见其文档）。
+      const svc = await makeService(db, true);
 
-      for (let i = 0; i < 10; i++) await svc.createOrganization(user!.id, `Org ${i}`);
+      // rate_limit_entries 由所有集成测试文件共享（各文件连同一个测试库，
+      // userId 都从 1 开始），故取一个业务不会产生的 id 做专属桶并清零，
+      // 使本测试不依赖执行顺序。限流只按桶键计数，不要求 user 行存在。
+      const rlUserId = 990_001;
+      const storedKey = MysqlRateLimitRepo.storageKey(`org:create:user:${rlUserId}`);
+      await db.query('DELETE FROM rate_limit_entries WHERE bucket_key = ?', [storedKey]);
+
+      // 前 10 次必须全部放行（阈值 ORG_CREATE_MAX=10）。
+      // 这一段同时守住一个真实缺陷：若 rate_limit_entries 带 AUTO_INCREMENT 主键，
+      // 首次命中返回的会是自增 id 而非计数 1，表里行数一多就在 i=0 即误判 429。
+      for (let i = 0; i < 10; i++) {
+        await svc.createOrganization(rlUserId, `Org ${i}`);
+      }
 
       let threw = false;
       try {
-        await svc.createOrganization(user!.id, 'Org 10');
+        await svc.createOrganization(rlUserId, 'Org 10');
       } catch (e) {
         threw = e instanceof RateLimitedError;
       }
       expect(threw).toBe(true);
 
-      const [rows] = (await db.query('SELECT count FROM rate_limit_entries WHERE bucket_key = ?', [`org:create:user:${user!.id}`])) as [any[], unknown];
+      // bucket_key 在库里是定长摘要（逻辑键含用户可控内容，超 255 会撑爆
+      // VARCHAR(255) 并让限流失效），故必须经同一映射查，不能按逻辑键查。
+      const [rows] = (await db.query('SELECT count FROM rate_limit_entries WHERE bucket_key = ?', [storedKey])) as [any[], unknown];
       expect(rows[0].count).toBe(11);
     } finally {
       await pool.end();

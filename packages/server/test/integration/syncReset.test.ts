@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import mysql from 'mysql2/promise';
 import { createHash } from 'crypto';
-import { parseMysqlUrl, resolveTestDb } from './testDb.js';
+import { createTestPool } from './testDb.js';
 import { runMigrations } from '../../src/repository/mysql/migrate.js';
 import { migrations } from '../../src/repository/mysql/migrations/index.js';
 import type { MysqlDb } from '../../src/repository/mysql/db.js';
@@ -61,8 +61,7 @@ describe.skipIf(!URL)('sync reset-after-loss (real MySQL)', () => {
   let db: MysqlDb;
 
   beforeAll(async () => {
-    const { host, port, user, password } = parseMysqlUrl(URL!);
-    pool = mysql.createPool({ host, port, user, password, database: resolveTestDb(), timezone: 'Z' });
+    pool = createTestPool();
     db = pool as unknown as MysqlDb;
     await runMigrations(db, [...migrations]);
   });

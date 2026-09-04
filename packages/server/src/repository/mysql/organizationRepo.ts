@@ -19,7 +19,7 @@ export class MysqlOrganizationRepo implements IOrganizationRepo {
 
   async create(exec: Queryable, input: { name: string }): Promise<Organization> {
     const [result] = await exec.query<any>(
-      "INSERT INTO organizations (name, status) VALUES (?, 'active')",
+      'INSERT INTO organizations (name) VALUES (?)',
       [input.name],
     );
     const [rows] = await exec.query<any[]>('SELECT * FROM organizations WHERE id = ?', [result.insertId]);
@@ -31,17 +31,23 @@ export class MysqlOrganizationRepo implements IOrganizationRepo {
     await exec.query('UPDATE organizations SET name = ? WHERE id = ?', [name, id]);
   }
 
+  /** 关闭组织 = 软删除。只写 delete_time；status/closedTime 由 mapper 派生。 */
   async close(exec: Queryable, id: number, closedTime: Date): Promise<void> {
-    await exec.query("UPDATE organizations SET status = 'closed', closed_time = ? WHERE id = ?", [closedTime, id]);
+    await exec.query('UPDATE organizations SET delete_time = ? WHERE id = ? AND delete_time IS NULL', [closedTime, id]);
   }
 }
 
+/**
+ * 行 → 实体。`status` / `closedTime` 是**派生**字段：库里只有 delete_time 一列，
+ * 这样不可能出现两列互相矛盾。领域层与 API 的形状保持不变。
+ */
 function mapOrganization(r: any): Organization {
+  const deleteTime = r.delete_time ? new Date(r.delete_time) : null;
   return {
     id: r.id,
     name: r.name,
-    status: r.status as OrganizationStatus,
-    closedTime: r.closed_time ? new Date(r.closed_time) : null,
+    status: (deleteTime ? 'closed' : 'active') as OrganizationStatus,
+    closedTime: deleteTime,
     createTime: new Date(r.create_time),
     updateTime: new Date(r.update_time),
   };

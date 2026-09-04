@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import mysql from 'mysql2/promise';
-import { parseMysqlUrl, resolveTestDb } from './testDb.js';
+import { createTestPool } from './testDb.js';
 import { runMigrations } from '../../src/repository/mysql/migrate.js';
 import { migrations } from '../../src/repository/mysql/migrations/index.js';
 
@@ -12,8 +11,7 @@ function unjson<T>(v: T): T {
 
 describe.skipIf(!URL)('migration smoke (real MySQL)', () => {
   it('creates tables and seeds the personal free plan', async () => {
-    const { host, port, user, password } = parseMysqlUrl(URL!);
-    const pool = mysql.createPool({ host, port, user, password, database: resolveTestDb(), timezone: 'Z' });
+    const pool = createTestPool();
     try {
       await runMigrations(pool as any, [...migrations]);
 
@@ -50,8 +48,7 @@ describe.skipIf(!URL)('migration smoke (real MySQL)', () => {
   });
 
   it('backfills existing subscription snapshots when applying 009', async () => {
-    const { host, port, user, password } = parseMysqlUrl(URL!);
-    const pool = mysql.createPool({ host, port, user, password, database: resolveTestDb(), timezone: 'Z' });
+    const pool = createTestPool();
     try {
       // 隔离：重建「迁移 001–008 已应用、009 未应用」的世界
       await pool.query('SET FOREIGN_KEY_CHECKS = 0');
@@ -61,7 +58,11 @@ describe.skipIf(!URL)('migration smoke (real MySQL)', () => {
       }
       await pool.query('SET FOREIGN_KEY_CHECKS = 1');
 
-      await runMigrations(pool as any, migrations.slice(0, 8));
+      // 按版本号定位 009 的位置，而不是写死索引 8：
+      // 本用例验证的是「009 对既有订阅快照的回填」，前置条件是「009 之前全部已应用」。
+      const syncIdx = migrations.findIndex((m) => m.version === '009_personal_sync');
+      expect(syncIdx).toBeGreaterThan(0);
+      await runMigrations(pool as any, migrations.slice(0, syncIdx));
 
       const [planRows] = (await pool.query(
         "SELECT id FROM personal_plans WHERE code = 'free' LIMIT 1",
@@ -76,7 +77,7 @@ describe.skipIf(!URL)('migration smoke (real MySQL)', () => {
         [userId, planRows[0].id, JSON.stringify({ allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 0 })],
       );
 
-      await runMigrations(pool as any, migrations.slice(8));
+      await runMigrations(pool as any, migrations.slice(syncIdx));
 
       const [sub] = (await pool.query(
         'SELECT entitlement_snapshot FROM personal_subscriptions WHERE user_id = ?',
@@ -94,8 +95,7 @@ describe.skipIf(!URL)('migration smoke (real MySQL)', () => {
   });
 
   it('normalizes legacy *_v3 ledger keys and skips re-run (no duplicate columns)', async () => {
-    const { host, port, user, password } = parseMysqlUrl(URL!);
-    const pool = mysql.createPool({ host, port, user, password, database: resolveTestDb(), timezone: 'Z' });
+    const pool = createTestPool();
     try {
       // 隔离：重建空库
       await pool.query('SET FOREIGN_KEY_CHECKS = 0');
@@ -129,8 +129,9 @@ describe.skipIf(!URL)('migration smoke (real MySQL)', () => {
       expect(Number(planRows[0].c)).toBe(1);
 
       // 账本保留 *_v3 键（归一化只读，不改写历史）
+      // 长度从 migrations 推导：硬编码会让「新增一个迁移」连带改测试。
       const [ledger] = (await pool.query('SELECT version FROM schema_migrations')) as [Array<{ version: string }>, unknown];
-      expect(ledger).toHaveLength(9);
+      expect(ledger).toHaveLength(migrations.length);
       expect(ledger.every((r) => r.version.endsWith('_v3'))).toBe(true);
     } finally {
       await pool.end();
@@ -138,8 +139,7 @@ describe.skipIf(!URL)('migration smoke (real MySQL)', () => {
   });
 
   it('re-adds only the missing column when 009 partially applied', async () => {
-    const { host, port, user, password } = parseMysqlUrl(URL!);
-    const pool = mysql.createPool({ host, port, user, password, database: resolveTestDb(), timezone: 'Z' });
+    const pool = createTestPool();
     try {
       await pool.query('SET FOREIGN_KEY_CHECKS = 0');
       const [t0] = await pool.query('SHOW TABLES');
@@ -166,9 +166,9 @@ describe.skipIf(!URL)('migration smoke (real MySQL)', () => {
       expect(cols).toHaveLength(2);
       for (const row of cols) expect(Number(row.c)).toBe(1);
 
-      // 账本回到 9 行且名称为无后缀
+      // 账本回到 migrations.length 行且名称为无后缀
       const [ledger] = (await pool.query('SELECT version FROM schema_migrations')) as [Array<{ version: string }>, unknown];
-      expect(ledger).toHaveLength(9);
+      expect(ledger).toHaveLength(migrations.length);
       expect(ledger.every((r) => !r.version.endsWith('_v3'))).toBe(true);
     } finally {
       await pool.end();

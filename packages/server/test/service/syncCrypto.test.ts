@@ -90,3 +90,37 @@ describe('syncCrypto', () => {
     expect(digest.toString('base64url')).toMatch(/^[A-Za-z0-9_-]{43}$/);
   });
 });
+describe('base64url canonicality (aliasing must be rejected)', () => {
+  it('rejects non-canonical encodings that decode to the same bytes', () => {
+    // "AA" 与 "AB" 都解码成单字节 <00>：Buffer 静默丢弃末字符多余低位。
+    // 若放行，recordId 就能以多个各自合法签名的身份指向同一条物理记录，
+    // mutationId 也会别名折叠到同一主键却带不同 digest（诚实重试被判 409）。
+    expect(Buffer.from('AA', 'base64url').equals(Buffer.from('AB', 'base64url'))).toBe(true);
+    expect(() => decodeB64Url('AA', 1, 'x')).not.toThrow();
+    expect(() => decodeB64Url('AB', 1, 'x')).toThrow(/canonical/);
+  });
+
+  it('rejects padding, out-of-alphabet chars and impossible lengths', () => {
+    const canonical16 = Buffer.alloc(16, 7).toString('base64url');
+    expect(() => decodeB64Url(canonical16, 16, 'mutationId')).not.toThrow();
+
+    expect(() => decodeB64Url(`${canonical16}=`, 16, 'mutationId')).toThrow(/unpadded/);
+    // 标准 base64 的 +/ 不属于 base64url 字母表
+    expect(() => decodeB64Url('a+/b', 3, 'x')).toThrow(/unpadded base64url/);
+    // 无 padding base64 不可能出现 %4===1 的长度
+    expect(() => decodeB64Url('AAAAA', 3, 'x')).toThrow(/invalid base64url length/);
+    expect(() => decodeB64Url('', 1, 'x')).toThrow();
+  });
+
+  it('still accepts every canonical round-trip', () => {
+    for (const n of [1, 12, 16, 32, 64]) {
+      const s = Buffer.alloc(n, n).toString('base64url');
+      expect(decodeB64Url(s, n, 'x').length).toBe(n);
+    }
+  });
+
+  it('applies the same canonicality rule to the range variant', () => {
+    expect(() => decodeB64UrlRange('AB', 1, 10, 'ciphertext')).toThrow(/canonical/);
+    expect(decodeB64UrlRange(Buffer.alloc(5, 1).toString('base64url'), 1, 10, 'ciphertext').length).toBe(5);
+  });
+});

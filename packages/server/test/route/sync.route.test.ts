@@ -49,17 +49,22 @@ function signState(priv: KeyObject, userId: number, action: string, body: Record
   return { ...body, signature: signature.toString('base64url') };
 }
 
-function newStateBody() {
+/**
+ * 构造 newState。`seed` 用于错开 salt / nonce：destroy 会用 newState 覆盖两条
+ * envelope，而服务端要求 salt 与 nonce 都必须换新（防 AES-GCM 密钥流复用），
+ * 故 destroy 的 newState 不能与 init 时用同一批填充值。
+ */
+function newStateBody(seed = 0) {
   const envelope = (version: string, f: number) => ({
     protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: version,
     nonce: b64(12, f), ciphertext: b64(32, f + 1), tag: b64(16, f + 2),
   });
   return {
     protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
-    smpKdf: { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: b64(16, 2), outputBytes: 32 },
-    recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: b64(16, 3), outputBytes: 32 },
-    envelopeSmp: envelope('1', 4),
-    envelopeRecovery: envelope('1', 7),
+    smpKdf: { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: b64(16, 2 + seed), outputBytes: 32 },
+    recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: b64(16, 3 + seed), outputBytes: 32 },
+    envelopeSmp: envelope('1', 4 + seed),
+    envelopeRecovery: envelope('1', 7 + seed),
     signPub: b64(32, 10),
     recoverSignPub: b64(32, 11),
   };
@@ -283,7 +288,7 @@ describe('sync routes smoke', () => {
 
     const body = {
       protocolVersion: 1, keyEpoch: '1', mutationId: b64(16, 12), expectedStateVersion: '1',
-      smpKdf: { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: b64(16, 2), outputBytes: 32 },
+      smpKdf: { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: b64(16, 22), outputBytes: 32 },
       envelopeSmp: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '2', nonce: b64(12, 40), ciphertext: b64(32, 41), tag: b64(16, 42) },
     };
     const res = await t.app.inject({ method: 'POST', url: '/api/sync/change-key', headers: t.auth(token), payload: signState(keys.signPriv, userId, 'state.change-key', body) });
@@ -304,7 +309,7 @@ describe('sync routes smoke', () => {
 
     const body = {
       protocolVersion: 1, keyEpoch: '1', mutationId: b64(16, 13), expectedStateVersion: '1',
-      newState: withKeys(newStateBody(), makeKeys()),
+      newState: withKeys(newStateBody(100), makeKeys()),
     };
     const res = await t.app.inject({ method: 'POST', url: '/api/sync/destroy', headers: t.auth(token), payload: signState(keys.signPriv, userId, 'state.destroy', body) });
     expect(res.statusCode).toBe(200);
@@ -322,9 +327,9 @@ describe('sync routes smoke', () => {
 
     const body = {
       protocolVersion: 1, keyEpoch: '1', mutationId: b64(16, 14), expectedStateVersion: '1',
-      smpKdf: { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: b64(16, 2), outputBytes: 32 },
+      smpKdf: { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: b64(16, 22), outputBytes: 32 },
       envelopeSmp: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '2', nonce: b64(12, 50), ciphertext: b64(32, 51), tag: b64(16, 52) },
-      recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: b64(16, 3), outputBytes: 32 },
+      recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: b64(16, 33), outputBytes: 32 },
       envelopeRecovery: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '2', nonce: b64(12, 60), ciphertext: b64(32, 61), tag: b64(16, 62) },
       recoverSignPub: makeKeys().recoverPub.toString('base64url'),
     };

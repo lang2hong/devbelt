@@ -62,6 +62,17 @@ export class MysqlEmailVerificationTokenRepo implements IEmailVerificationTokenR
     if (!rows[0]) throw new Error('email_verification_token insert failed');
     return mapToken(rows[0]);
   }
+
+  /** 清理已消费或已过期的验证 token（分批）。 */
+  async prune(before: Date, limit: number): Promise<number> {
+    const [result] = await this.db().query<any>(
+      `DELETE FROM email_verification_tokens
+       WHERE expires_time < ? OR (consumed_time IS NOT NULL AND consumed_time < ?)
+       LIMIT ?`,
+      [before, before, limit],
+    );
+    return Number(result?.affectedRows ?? 0);
+  }
 }
 
 function mapToken(r: any): EmailVerificationToken {

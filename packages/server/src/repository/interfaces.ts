@@ -41,6 +41,14 @@ export interface IUserRepo {
   /** 在事务内锁定用户行（`SELECT ... FOR UPDATE`），作为该用户设备配额/会话操作的序列化点。 */
   lockById(exec: Queryable, id: number): Promise<User | undefined>;
   findByEmail(email: string): Promise<User | undefined>;
+  /**
+   * 事务内按 id 读用户（不加锁）。调用方已在事务中时**必须**用此变体而非
+   * `findById`：在持有事务连接时再向池申请连接会耗尽 connectionLimit，
+   * 而 mysql2 无获取超时，进程将永久死锁。
+   */
+  findByIdInTx(exec: Queryable, id: number): Promise<User | undefined>;
+  /** 事务内按 email 读用户（不加锁）。同上，事务中不得走连接池。 */
+  findByEmailInTx(exec: Queryable, email: string): Promise<User | undefined>;
   /** 创建用户（status 固定 active）。email 应由调用方规范化小写。 */
   create(email: string, passwordHash: string, displayName?: string): Promise<User>;
   updateLastLogin(id: number, time: Date): Promise<void>;
@@ -67,6 +75,8 @@ export interface IEmailVerificationTokenRepo {
   consume(exec: Queryable, id: number, now: Date): Promise<boolean>;
   /** 作废某用户 +(email,purpose) 既有的未消费 token（重发/重新邀请前调用）。事务内执行。 */
   invalidate(exec: Queryable, userId: number, email: string, purpose: EmailVerificationPurpose, now: Date): Promise<void>;
+  /** 删除已消费或已过期且超出保留期的 token 行。返回删除行数。 */
+  prune(before: Date, limit: number): Promise<number>;
 }
 
 export interface IPersonalPlanRepo {
@@ -125,6 +135,13 @@ export interface IRefreshTokenRepo {
   revokeByDevice(exec: Queryable, deviceId: number, now: Date): Promise<void>;
   /** 撤销某用户全部 token（改密/禁用时调用）。 */
   revokeAllForUser(exec: Queryable, userId: number, now: Date): Promise<void>;
+  /**
+   * 删除已终结且超出保留期的 token 行（`expires_time < before OR revoked_time < before`）。
+   * 轮换每次刷新都插新行、旧行仅置 revoked_time，不清理会无界增长
+   * （access 15min 过期即轮换 ⇒ 单活跃用户约 2900 行/月）。
+   * 返回删除行数，便于清理任务分批推进。
+   */
+  prune(before: Date, limit: number): Promise<number>;
 }
 
 /**
@@ -458,6 +475,12 @@ export interface ISyncMutationRepo {
     status: SyncMutation['status'];
     expiresTime: Date;
   }): Promise<void>;
+  /**
+   * 删除已过 expires_time 的 receipt。该列本就是为清理而设，但此前无人清 ——
+   * 每次 record mutation 都插一行，不清理即无界增长。返回删除行数。
+   * 本仓储无状态（不持连接池），故 exec 由调用方传入。
+   */
+  prune(exec: Queryable, before: Date, limit: number): Promise<number>;
 }
 
 export interface ISyncResetTokenRepo {
@@ -468,4 +491,6 @@ export interface ISyncResetTokenRepo {
   findUsableForUpdate(exec: Queryable, tokenHash: Buffer): Promise<SyncResetToken | undefined>;
   /** 原子消费（`WHERE consumed_time IS NULL AND revoked_time IS NULL`）。 */
   consume(exec: Queryable, id: number, now: Date): Promise<boolean>;
+  /** 删除已消费/已撤销/已过期且超出保留期的 token 行。返回删除行数。 */
+  prune(exec: Queryable, before: Date, limit: number): Promise<number>;
 }

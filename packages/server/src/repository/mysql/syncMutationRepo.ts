@@ -64,4 +64,17 @@ export class MysqlSyncMutationRepo implements ISyncMutationRepo {
       ],
     );
   }
+
+  /**
+   * 清理过期 receipt。`expires_time` 本就是为此设计（24h 保留期），
+   * 但此前没有任何任务消费它，于是每条 mutation 都永久留一行。
+   * 本仓储无状态，exec 由调用方传入。
+   */
+  async prune(exec: Queryable, before: Date, limit: number): Promise<number> {
+    const [result] = await exec.query<any>(
+      'DELETE FROM personal_sync_mutations WHERE expires_time < ? LIMIT ?',
+      [before, limit],
+    );
+    return Number(result?.affectedRows ?? 0);
+  }
 }

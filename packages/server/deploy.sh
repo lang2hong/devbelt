@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 #
-# 裸机部署脚本：本地构建 server，推送产物到服务器，用 systemd 常驻。
+# 裸机部署脚本：本地构建 server（esbuild 打成自包含 bundle），推送产物到服务器，
+# 用 systemd 常驻。
 #
-# 依赖：本地需有 pnpm（scp 随 OpenSSH 自带）；服务器需有 nvm 装好的 node>=20 + systemd。
+# 依赖：本地需有 pnpm + node（构建用）；服务器只需 nvm 装好的 node>=20 + systemd，
+# **无需 npm/pnpm**（bundle 已把全部依赖打进 dist，服务器零依赖安装）。
 #
 # 用法：
 #   1. 填好下方「部署目标」里的变量（REMOTE 是 ssh config 里的 Host 别名）；
@@ -41,12 +43,12 @@ ssh "$REMOTE" "rm -rf '$DEPLOY_DIR/dist' '$DEPLOY_DIR/public'"
 # dist 用 tar 流式传输，绕开 OpenSSH 9 scp 对「目录/.」的兼容问题
 tar czf - -C "$SCRIPT_DIR" dist | ssh "$REMOTE" "cd '$DEPLOY_DIR' && tar xzf -"
 
-scp "$SCRIPT_DIR/package.json"    "$REMOTE:$DEPLOY_DIR/package.json"
 # 服务端 dotenv 只读工作目录下的 .env
 scp "$SCRIPT_DIR/.env.production" "$REMOTE:$DEPLOY_DIR/.env"
 
-echo "==> [3/4] 服务器安装生产依赖 + 写 systemd 服务"
-ssh "$REMOTE" ". \"\$HOME/.nvm/nvm.sh\" >/dev/null 2>&1 && cd '$DEPLOY_DIR' && npm install --omit=dev"
+echo "==> [3/4] 写 systemd 服务"
+# bundle 自包含全部依赖，服务器无需 npm install（不再推 package.json / 装 node_modules）。
+# 只需定位 node 可执行文件用于 systemd ExecStart。
 NODE_BIN="$(ssh "$REMOTE" '. "$HOME/.nvm/nvm.sh" >/dev/null 2>&1 && command -v node')"
 if [[ -z "$NODE_BIN" ]]; then
   echo "错误：服务器上找不到 node（需 node>=20）" >&2
@@ -61,7 +63,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=${DEPLOY_DIR}
-ExecStart=${NODE_BIN} dist/index.js
+ExecStart=${NODE_BIN} dist/index.cjs
 Restart=on-failure
 RestartSec=3
 Environment=NODE_ENV=production

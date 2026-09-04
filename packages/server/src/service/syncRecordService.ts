@@ -164,6 +164,21 @@ export class SyncRecordService {
       }, input.signature);
 
       // nonce ledger：复用即时拒绝（§7.4）。
+      //
+      // 台账插入**刻意**与业务写在同一事务内，不要改成「先独立提交、尝试即烧」：
+      //
+      // ① 台账要防的是「同一 nonce 的两份**不同**密文同时落库」—— 那才让读到库
+      //    （备份泄露/DBA/入侵）的人能异或出明文 XOR。同事务保证了不变量
+      //    「nonce 在台账 ⟺ 对应密文已持久化」严格成立：回滚时密文根本没落库，
+      //    因此也不该占用 nonce。
+      // ② 客户端是**原样重放**语义：outbox 持久化了 nonce/ciphertext/tag 并在重试时
+      //    逐字节重发（见 vscode-ext/src/sync/e2e/pendingMutationStore.ts 头注释）。
+      //    若改成尝试即烧，一次事务失败（锁等待、配额、网络中断）之后，那条 outbox
+      //    条目会因 nonce 已烧而永久 SYNC_NONCE_REUSED，再也推不上去。
+      // ③ 已提交后的原样重放不会走到这里：checkReceipt 在上方先命中并直接返回。
+      //
+      // 换言之「同 nonce + 同密文」是正常重试（安全），「同 nonce + 异密文」才是威胁，
+      // 而后者只要有一次成功提交就会被这里拦住。
       if (!(await this.nonceRepo.insert(tx, userId, input.keyEpoch, input.nonce))) throw new SyncNonceReusedError();
 
       const create = input.baseVersion === '0';
@@ -171,6 +186,11 @@ export class SyncRecordService {
 
       if (create) {
         const existing = await this.recordRepo.findForUpdate(tx, userId, input.keyEpoch, recordIdBuf);
+        // 墓碑也算「已存在」→ 409。这是刻意的：客户端的 recordId 由 randomBytes
+        // 随机生成（vscode-ext/src/sync/e2e/syncMutator.ts mintId），删除时连映射
+        // 一起清掉，新建必然拿到全新 id，所以正常流程**不会**用 create 命中墓碑。
+        // 一旦命中，说明客户端状态已错乱（或存在重放），此时静默覆盖墓碑会让
+        // 其它设备看到一条「复活」却无从判断是否该信任 —— 报冲突让客户端重新对齐。
         if (existing) throw new SyncVersionConflictError(existing.version);
         await this.assertRecordQuota(tx, userId, input.keyEpoch, { countDelta: 1, bytesDelta: input.ciphertext.length + 16 + 12 });
         await this.recordRepo.create(tx, {

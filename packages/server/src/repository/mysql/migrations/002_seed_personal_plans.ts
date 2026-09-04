@@ -10,6 +10,9 @@ const PERSONAL_PLAN_SEED = {
   name: 'Free',
   allowedDatabaseTypes: ['mysql', 'sqlite'],
   maxDevices: 0,
+  // 连接资产差异点（§6.2）：本机保存连接数上限 10，导出放行、导入禁止。
+  maxSavedConnections: 10,
+  allowConnectionImport: 0,
 } as const;
 
 export const seedPersonalPlansMigration: Migration = {
@@ -17,14 +20,16 @@ export const seedPersonalPlansMigration: Migration = {
   async up(db): Promise<void> {
     await db.query(`SET time_zone = '+00:00'`);
     await db.query(
-      `INSERT INTO personal_plans (code, name, allowed_database_types, max_devices, status)
-       VALUES (?, ?, ?, ?, 'active')
+      `INSERT INTO personal_plans (code, name, allowed_database_types, max_devices, max_saved_connections, allow_connection_import, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'active')
        ON DUPLICATE KEY UPDATE name = VALUES(name)`,
       [
         PERSONAL_PLAN_SEED.code,
         PERSONAL_PLAN_SEED.name,
         JSON.stringify(PERSONAL_PLAN_SEED.allowedDatabaseTypes),
         PERSONAL_PLAN_SEED.maxDevices,
+        PERSONAL_PLAN_SEED.maxSavedConnections,
+        PERSONAL_PLAN_SEED.allowConnectionImport,
       ],
     );
   },

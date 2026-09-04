@@ -137,7 +137,7 @@ export class OrganizationService {
   }
 
   /**
-   * 关闭组织（§6.1）：单一事务内置 closed、写 closed_time、撤销全部有效 invitations 行，
+   * 关闭组织（§6.1）：单一事务内写 delete_time（= 已关闭）、撤销全部有效 invitations 行，
    * 并把该组织全部 invited membership 置 removed。
    * 已 active 的 membership 保留。不可撤销。
    */
@@ -270,7 +270,9 @@ export class OrganizationService {
         throw new ForbiddenError('inviting as admin requires member.role.assign');
       }
 
-      const target = await this.userRepo.findByEmail(email);
+      // 走 InTx：事务中不得再向连接池申请第二条连接（会耗尽 connectionLimit 且
+      // mysql2 无获取超时 → 永久死锁）。同时使该读落在本事务快照内。
+      const target = await this.userRepo.findByEmailInTx(tx, email);
       if (!target || target.status !== 'active' || !target.emailVerifiedTime) {
         throw new InvitationTargetNotEligibleError();
       }
@@ -376,10 +378,19 @@ export class OrganizationService {
       if (!inv || inv.acceptedTime || inv.revokedTime || inv.expiresTime <= now) throw new InvitationInvalidError();
       if (inv.organizationId !== org.id || inv.membershipId !== membership.id) throw new InvitationInvalidError();
 
-      const user = await this.userRepo.findById(userId);
-      if (!user || user.status !== 'active' || !user.emailVerifiedTime || user.email !== inv.email) {
+      // 授权判据是 membership.userId === 调用者，**不是** email 字符串相等。
+      // 原实现用 `user.email !== inv.email` 做授权，有两个问题：
+      // ① users.email 是 utf8mb4_0900_ai_ci（大小写且**重音**不敏感），邀请时
+      //    findByEmail 用该 collation 匹配成功、却把用户**输入的**串存进 inv.email，
+      //    于是 josé/jose 这类情形下这里的 JS 严格比较永远失败 —— 合法 token 永久
+      //    400，seat 被占到过期。
+      // ② 一旦将来支持改邮箱，「谁持有该地址」就能激活别人的 membership。
+      // email 相等降级为一致性校验（仅在两侧都存在时比对），不再承担授权职责。
+      const user = await this.userRepo.findByIdInTx(tx, userId);
+      if (!user || user.status !== 'active' || !user.emailVerifiedTime) {
         throw new InvitationInvalidError();
       }
+      if (membership.userId !== userId) throw new InvitationInvalidError();
 
       await this.invitationRepo.markAccepted(tx, inv.id, now);
       await this.membershipRepo.activate(tx, membership.id, now);

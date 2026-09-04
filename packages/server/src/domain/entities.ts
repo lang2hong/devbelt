@@ -64,6 +64,10 @@ export interface PersonalPlan {
   maxConnectionMetas: number;
   /** 云端同步密文总字节配额；0 = 无限（§4.2） */
   syncStorageBytes: number;
+  /** 本机可保存连接数上限；0 = 无限（连接资产差异点） */
+  maxSavedConnections: number;
+  /** 是否允许导入连接配置（导出恒允许） */
+  allowConnectionImport: boolean;
   status: PersonalPlanStatus;
   createTime: Date;
   updateTime: Date;

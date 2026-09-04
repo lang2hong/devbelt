@@ -57,15 +57,41 @@ export function requestDigestOf(bodyWithoutSignature: unknown): string {
   return sha256(Buffer.from(jcs(bodyWithoutSignature), 'utf8')).toString('base64url');
 }
 
+/**
+ * base64url 解码 + **规范性**校验。
+ *
+ * `Buffer.from(s, 'base64url')` 很宽松：它接受非法字符、接受 padding，还会**静默丢弃
+ * 末字符的多余低位**。于是多个不同字符串解码出同一批字节（`"AA"` 与 `"AB"` 都得到
+ * `<00>`）。这在本协议里有实际后果：
+ * - `recordId` 以解码后的字节作为 DB 主键，而签名与 requestDigest 覆盖的是**原始
+ *   字符串** —— 同一条物理记录因此可以挂在多个各自合法签名的身份下。
+ * - `mutationId` 别名折叠到同一 BINARY(16) 主键，但 digest 不同，诚实客户端换一种
+ *   编码重试即被判 409「同 id 异 digest」。
+ *
+ * 故这里要求严格规范形式：仅 base64url 字母表、无 padding、长度与字节数匹配、
+ * 且**重新编码后必须逐字符等于输入**（后者一举排除多余低位的情况）。
+ */
+function decodeCanonicalB64Url(s: string, field: string): Buffer {
+  if (typeof s !== 'string' || s.length === 0) throw new ValidationError(`${field} is not base64url`);
+  // 仅 base64url 字母表，且不允许 padding。
+  if (!/^[A-Za-z0-9_-]+$/.test(s)) {
+    throw new ValidationError(`${field} must be unpadded base64url`);
+  }
+  // 无 padding base64 的合法余数只有 0 / 2 / 3（余 1 不可能由任何字节串产生）。
+  if (s.length % 4 === 1) {
+    throw new ValidationError(`${field} has an invalid base64url length`);
+  }
+  const buf = Buffer.from(s, 'base64url');
+  // 规范性判据：重新编码必须复现原串，否则末字符带了会被丢弃的低位。
+  if (buf.toString('base64url') !== s) {
+    throw new ValidationError(`${field} is not canonical base64url`);
+  }
+  return buf;
+}
+
 /** base64url 无 padding 解码，按期望字节长度校验（不符抛 ValidationError）。 */
 export function decodeB64Url(s: string, expectedLength: number, field: string): Buffer {
-  if (typeof s !== 'string' || s.length === 0) throw new ValidationError(`${field} is not base64url`);
-  let buf: Buffer;
-  try {
-    buf = Buffer.from(s, 'base64url');
-  } catch {
-    throw new ValidationError(`${field} is not valid base64url`);
-  }
+  const buf = decodeCanonicalB64Url(s, field);
   if (buf.length !== expectedLength) {
     throw new ValidationError(`${field} must decode to ${expectedLength} bytes (got ${buf.length})`);
   }
@@ -74,13 +100,7 @@ export function decodeB64Url(s: string, expectedLength: number, field: string): 
 
 /** base64url 无 padding 解码，按字节长度区间 [minBytes, maxBytes] 校验（变长字段，如 record ciphertext）。 */
 export function decodeB64UrlRange(s: string, minBytes: number, maxBytes: number, field: string): Buffer {
-  if (typeof s !== 'string' || s.length === 0) throw new ValidationError(`${field} is not base64url`);
-  let buf: Buffer;
-  try {
-    buf = Buffer.from(s, 'base64url');
-  } catch {
-    throw new ValidationError(`${field} is not valid base64url`);
-  }
+  const buf = decodeCanonicalB64Url(s, field);
   if (buf.length < minBytes || buf.length > maxBytes) {
     throw new ValidationError(`${field} must decode to ${minBytes}..${maxBytes} bytes (got ${buf.length})`);
   }

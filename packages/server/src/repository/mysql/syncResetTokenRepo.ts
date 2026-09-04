@@ -49,4 +49,17 @@ export class MysqlSyncResetTokenRepo implements ISyncResetTokenRepo {
     );
     return Number(result.affectedRows) === 1;
   }
+
+  /** 清理已消费/已撤销/已过期的 reset token（分批）。 */
+  async prune(exec: Queryable, before: Date, limit: number): Promise<number> {
+    const [result] = await exec.query<any>(
+      `DELETE FROM personal_sync_reset_tokens
+       WHERE expires_time < ?
+          OR (consumed_time IS NOT NULL AND consumed_time < ?)
+          OR (revoked_time IS NOT NULL AND revoked_time < ?)
+       LIMIT ?`,
+      [before, before, before, limit],
+    );
+    return Number(result?.affectedRows ?? 0);
+  }
 }

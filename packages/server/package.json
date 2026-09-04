@@ -3,15 +3,14 @@
   "version": "0.1.0",
   "description": "DB Client server (Fastify + MySQL + Ed25519 + Argon2id)",
   "private": true,
-  "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/index.cjs",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node build.cjs",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "lint": "tsc --noEmit -p tsconfig.test.json",
-    "test": "pnpm -C ../db-core build && vitest run",
-    "start": "node dist/index.js",
-    "dev": "tsx watch src/index.ts"
+    "test": "node build.cjs && pnpm -C ../db-core build && vitest run",
+    "start": "node dist/index.cjs",
+    "dev": "node dev.cjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
@@ -29,6 +28,7 @@
     "@db-client/core": "workspace:*",
     "@types/node": "^20.0.0",
     "@types/nodemailer": "^8.0.1",
+    "esbuild": "^0.28.1",
     "tsx": "^4.19.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"

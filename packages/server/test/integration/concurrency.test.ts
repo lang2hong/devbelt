@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import mysql from 'mysql2/promise';
 import { generateKeyPairSync } from 'crypto';
-import { parseMysqlUrl, resolveTestDb } from './testDb.js';
+import { createTestPool } from './testDb.js';
 import { runMigrations } from '../../src/repository/mysql/migrate.js';
 import { migrations } from '../../src/repository/mysql/migrations/index.js';
 import type { MysqlDb } from '../../src/repository/mysql/db.js';
@@ -69,8 +69,7 @@ async function registerAndVerify(emailSender: MemoryEmailSender, auth: AuthServi
 }
 
 function newPool(): mysql.Pool {
-  const { host, port, user, password } = parseMysqlUrl(URL!);
-  return mysql.createPool({ host, port, user, password, database: resolveTestDb(), timezone: 'Z' });
+  return createTestPool();
 }
 
 describe.skipIf(!URL)('concurrency (real MySQL)', () => {

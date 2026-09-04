@@ -7,7 +7,12 @@ import type { Migration } from '../migrate.js';
  * 不启动依赖新 schema 的应用版本，由审查通过的前向 repair migration 修复。
  *
  * 顺序（§4.1）：①ALTER plans + seed → ②..⑥建表 → ⑦既有订阅快照回填。
- * 所有表外键仅引用 users（均建于 001 之后），无跨表顺序依赖。
+ *
+ * 不建外键（理由见 001 文件头）。这五张表原先都挂 `user_id → users ON DELETE CASCADE`，
+ * 而 nonce ledger 与 connection_meta（LONGBLOB）是本库最大的两张表：一次删用户会
+ * 触发跨这些大表的级联扫描。用户注销应走显式的分批清理服务，而不是让一条
+ * `DELETE FROM users` 隐式牵动数百万行。
+ * 每张表的 user_id 访问路径都已由主键或既有索引的前导列覆盖，无需额外补索引。
  * - personal_sync_state：严格单行（PK=user_id）；epoch/stateVersion/envelope 元数据 + 公开签名材料。
  * - personal_connection_meta：E2E record/tombstone；record nonce 唯一性由 personal_sync_nonces 单独强制（本表不加 unique）。
  * - personal_sync_nonces：永久 nonce ledger，防 AES-GCM nonce 复用（tombstone 亦计入）。
@@ -65,8 +70,7 @@ export const personalSyncMigration: Migration = {
         recover_sign_pub BINARY(32) NOT NULL,
         recovery_code_set_time DATETIME(3) NULL,
         create_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-        update_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-        CONSTRAINT fk_sync_state_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        update_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
@@ -87,8 +91,7 @@ export const personalSyncMigration: Migration = {
         update_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
         delete_time DATETIME(3) NULL,
         UNIQUE KEY uq_conn_meta_user_epoch_record (user_id, key_epoch, record_id),
-        KEY idx_conn_meta_user_epoch_seq (user_id, key_epoch, change_sequence),
-        CONSTRAINT fk_conn_meta_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        KEY idx_conn_meta_user_epoch_seq (user_id, key_epoch, change_sequence)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
@@ -99,8 +102,7 @@ export const personalSyncMigration: Migration = {
         key_epoch BIGINT UNSIGNED NOT NULL,
         nonce BINARY(12) NOT NULL,
         create_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-        PRIMARY KEY (user_id, key_epoch, nonce),
-        CONSTRAINT fk_sync_nonce_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        PRIMARY KEY (user_id, key_epoch, nonce)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
@@ -117,8 +119,7 @@ export const personalSyncMigration: Migration = {
         status VARCHAR(16) NOT NULL,
         expires_time DATETIME(3) NOT NULL,
         create_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-        PRIMARY KEY (user_id, key_epoch, mutation_id),
-        CONSTRAINT fk_sync_mutation_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        PRIMARY KEY (user_id, key_epoch, mutation_id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
@@ -133,8 +134,7 @@ export const personalSyncMigration: Migration = {
         revoked_time DATETIME(3) NULL,
         create_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
         UNIQUE KEY uq_sync_reset_token_hash (token_hash),
-        KEY idx_sync_reset_token_user (user_id),
-        CONSTRAINT fk_sync_reset_token_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        KEY idx_sync_reset_token_user (user_id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 

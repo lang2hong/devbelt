@@ -83,6 +83,15 @@ export class FakeUserRepo implements IUserRepo {
     return id === undefined ? undefined : this.store.get(id);
   }
 
+  async findByIdInTx(_exec: Queryable, id: number): Promise<User | undefined> {
+    return this.store.get(id);
+  }
+
+  async findByEmailInTx(_exec: Queryable, email: string): Promise<User | undefined> {
+    const id = this.emailIndex.get(email);
+    return id === undefined ? undefined : this.store.get(id);
+  }
+
   async create(email: string, passwordHash: string, displayName?: string): Promise<User> {
     if (this.emailIndex.has(email)) throw new ConflictError(`user already exists: ${email}`);
     const user: User = {
@@ -170,6 +179,15 @@ export class FakeEmailVerificationTokenRepo implements IEmailVerificationTokenRe
       }
     }
   }
+
+  async prune(before: Date, limit: number): Promise<number> {
+    let n = 0;
+    for (const [id, t] of [...this.store]) {
+      if (n >= limit) break;
+      if (t.expiresTime < before || (t.consumedTime && t.consumedTime < before)) { this.store.delete(id); n++; }
+    }
+    return n;
+  }
 }
 
 export function makeFreePlan(id = nextId()): PersonalPlan {
@@ -181,6 +199,8 @@ export function makeFreePlan(id = nextId()): PersonalPlan {
     maxDevices: 0,
     maxConnectionMetas: 500,
     syncStorageBytes: 33554432,
+    maxSavedConnections: 10,
+    allowConnectionImport: false,
     status: 'active',
     createTime: new Date(),
     updateTime: new Date(),
@@ -355,6 +375,15 @@ export class FakeRefreshTokenRepo implements IRefreshTokenRepo {
 
   async revokeAllForUser(_exec: Queryable, userId: number, now: Date): Promise<void> {
     for (const t of this.store.values()) if (t.userId === userId && !t.revokedTime) t.revokedTime = now;
+  }
+
+  async prune(before: Date, limit: number): Promise<number> {
+    let n = 0;
+    for (const [id, t] of [...this.store]) {
+      if (n >= limit) break;
+      if (t.expiresTime < before || (t.revokedTime && t.revokedTime < before)) { this.store.delete(id); n++; }
+    }
+    return n;
   }
 }
 
@@ -783,7 +812,14 @@ export class FakeInvitationRepo implements IOrganizationInvitationRepo {
     for (const i of this.store.values()) {
       if (i.organizationId === organizationId && !i.acceptedTime && !i.revokedTime && i.expiresTime <= now) {
         i.revokedTime = now;
-        if (this.membershipRepo) await this.membershipRepo.remove({} as Queryable, i.membershipId, now);
+        // 与 SQL 实现保持一致：只移除**仍是 invited** 的成员行。
+        // 缺这个守卫会让过期清理静默移除已 active 的真实成员（可能是最后一个 admin）。
+        if (this.membershipRepo) {
+          const m = await this.membershipRepo.findByIdForUpdate({} as Queryable, i.membershipId);
+          if (m?.status === 'invited') {
+            await this.membershipRepo.remove({} as Queryable, i.membershipId, now);
+          }
+        }
       }
     }
   }
@@ -1092,6 +1128,15 @@ export class FakeSyncMutationRepo implements ISyncMutationRepo {
       status: input.status, expiresTime: input.expiresTime, createTime: new Date(),
     });
   }
+
+  async prune(_exec: Queryable, before: Date, limit: number): Promise<number> {
+    let n = 0;
+    for (const [k, m] of [...this.store]) {
+      if (n >= limit) break;
+      if (m.expiresTime < before) { this.store.delete(k); n++; }
+    }
+    return n;
+  }
 }
 
 export class FakeSyncResetTokenRepo implements ISyncResetTokenRepo {
@@ -1124,5 +1169,16 @@ export class FakeSyncResetTokenRepo implements ISyncResetTokenRepo {
     if (!t || t.consumedTime || t.revokedTime) return false;
     t.consumedTime = now;
     return true;
+  }
+
+  async prune(_exec: Queryable, before: Date, limit: number): Promise<number> {
+    let n = 0;
+    for (const [id, t] of [...this.store]) {
+      if (n >= limit) break;
+      if (t.expiresTime < before || (t.consumedTime && t.consumedTime < before) || (t.revokedTime && t.revokedTime < before)) {
+        this.store.delete(id); n++;
+      }
+    }
+    return n;
   }
 }

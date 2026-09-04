@@ -3,12 +3,22 @@ import type { Migration } from '../migrate.js';
 /**
  * 组织目录与资源。
  *
- * 建表按外键依赖：organization_resource_folders -> organization_resources。
+ * 建表顺序：organization_resource_folders -> organization_resources。
  * - 目录表规范名为 `organization_resource_folders`（§4.2 表清单）。
- * - 目录/作者均使用同组织复合外键；`UNIQUE(id, organization_id)` 供复合 FK 引用。
+ * - `UNIQUE(id, organization_id)` 保留：服务层用它做「同组织」校验。
  * - 软删除：`delete_time NULL` 表示未删除；资源 `version` 从 1 起，乐观锁锚点。
- * - 全部 ON DELETE CASCADE：业务不物理删除组织和成员，
- *   该级联仅为「物理删除父行」时的安全网，正常不触发。
+ *
+ * 不建外键（理由见 001 文件头）。这里另有一条**独立于性能**的理由：
+ * `created_by_membership_id` / `updated_by_membership_id` 原先挂 `ON DELETE CASCADE`
+ * 指向 organization_memberships —— 一旦成员行被物理删除，其创建的资源会被**连带删掉**。
+ * 审计归属信息本应比成员关系活得更久，级联删资源是错误语义。
+ * 跨组织引用与作者存在性改由服务层在组织行锁内校验。
+ *
+ * 审计列**刻意指向 membership 而非 user**，不要「修正」成 user_id：
+ * `UNIQUE(organization_id, user_id)` 加上 upsertInvited 的 ON DUPLICATE KEY UPDATE
+ * 意味着同一个 (组织, 用户) 永远复用同一行、同一 id —— 成员被移除再重新邀请
+ * 拿到的还是原来那个 membership_id。因此归属不会因成员生命周期变化而断裂，
+ * 而 membership 粒度还额外保留了「以哪个组织身份创建」这一信息。
  */
 export const organizationResourcesMigration: Migration = {
   version: '008_organization_resources',
@@ -26,9 +36,9 @@ export const organizationResourcesMigration: Migration = {
         update_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
         UNIQUE KEY uq_folder_id_org (id, organization_id),
         KEY idx_folder_org (organization_id),
-        CONSTRAINT fk_folder_org FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
-        CONSTRAINT fk_folder_parent FOREIGN KEY (parent_id, organization_id)
-          REFERENCES organization_resource_folders(id, organization_id) ON DELETE CASCADE
+        -- parent_id 原由 fk_folder_parent 自动带索引；collectDescendantIds 的递归 CTE
+        -- 按 parent_id 逐层展开，缺索引会让每层都全表扫。
+        KEY idx_folder_parent (parent_id, organization_id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
@@ -49,14 +59,7 @@ export const organizationResourcesMigration: Migration = {
         UNIQUE KEY uq_resource_id_org (id, organization_id),
         KEY idx_resource_org (organization_id),
         KEY idx_resource_folder (folder_id),
-        CONSTRAINT chk_resource_type CHECK (resource_type IN ('connection_template', 'query')),
-        CONSTRAINT fk_resource_org FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
-        CONSTRAINT fk_resource_folder FOREIGN KEY (folder_id, organization_id)
-          REFERENCES organization_resource_folders(id, organization_id) ON DELETE CASCADE,
-        CONSTRAINT fk_resource_created_by FOREIGN KEY (created_by_membership_id, organization_id)
-          REFERENCES organization_memberships(id, organization_id) ON DELETE CASCADE,
-        CONSTRAINT fk_resource_updated_by FOREIGN KEY (updated_by_membership_id, organization_id)
-          REFERENCES organization_memberships(id, organization_id) ON DELETE CASCADE
+        CONSTRAINT chk_resource_type CHECK (resource_type IN ('connection_template', 'query'))
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
   },

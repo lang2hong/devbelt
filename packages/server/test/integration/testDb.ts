@@ -16,6 +16,10 @@
  * 所以：解析目标库名时**硬性拒绝**生产库名。宁可测试起不来。
  */
 
+import mysql from 'mysql2/promise';
+import { mysqlTimeZoneInit } from '../../src/repository/mysql/mysqlTimeZoneInit.js';
+import type { MysqlDb } from '../../src/repository/mysql/db.js';
+
 /** 从 mysql:// URL 取连接参数。密码需百分号编码。 */
 export function parseMysqlUrl(url: string): {
   host: string; port: number; user: string; password: string;
@@ -63,4 +67,32 @@ export function resolveTestDb(env: NodeJS.ProcessEnv = process.env): string {
     );
   }
   return name;
+}
+
+/**
+ * 集成测试的共享连接池工厂。
+ *
+ * 必须经此创建，不要直接 `mysql.createPool`。时区正确需要**两层**设置，
+ * 少任何一层都会出现难查的偏移（见 mysqlPool.ts 的说明）：
+ *
+ *  1. `timezone: 'Z'` —— mysql2 客户端侧对 `Date` 的序列化时区。
+ *  2. `mysqlTimeZoneInit` —— MySQL **会话**的 `SET time_zone='+00:00'`，
+ *     决定服务端 `NOW()` / `CURRENT_TIMESTAMP` 的语义。
+ *
+ * 此前 12 处测试各自 createPool 只设了第 1 层。在会话时区非 UTC 的实例上
+ * （本项目的 RDS 是 +08:00），`expires_time > NOW(3)` 这类**服务端时钟比较**
+ * 会整体偏移 8 小时 —— 1 小时有效期的 sync reset token 一创建即被判为过期，
+ * 表现为「刚写入就查不到」。生产同样受影响，因此这是实现问题而非测试问题。
+ */
+export function createTestPool(): mysql.Pool {
+  const url = process.env.MYSQL_TEST_URL;
+  if (!url) throw new Error('MYSQL_TEST_URL is required to create a test pool');
+  const { host, port, user, password } = parseMysqlUrl(url);
+  const pool = mysql.createPool({
+    host, port, user, password,
+    database: resolveTestDb(),
+    timezone: 'Z',
+  });
+  mysqlTimeZoneInit(pool as unknown as MysqlDb);
+  return pool;
 }
