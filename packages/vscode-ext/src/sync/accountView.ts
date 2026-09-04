@@ -34,7 +34,7 @@ export class AccountView extends BaseWebView {
       return;
     }
     try {
-      const me = await this.auth.client.getMe();
+      const me = await this.auth.getMe();
       this.post({ type: 'me', me });
     } catch (e) {
       this.post({ type: 'error', message: (e as Error).message });

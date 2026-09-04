@@ -2,11 +2,14 @@ import { DatabaseType } from '@db-client/core';
 import type { CachedEntitlement } from './authService';
 
 /**
- * 个人连接许可证门禁（§7.2 引擎门禁）。
+ * 个人同步的引擎权益过滤（§7.2 引擎门禁）与组织连接 id 辅助。
  *
- * fail-closed 默认 Free：无 `CachedEntitlement`（未登录/登出已清缓存）时按
- * `DEFAULT_FREE_ENGINES` 兜底，与服务端匿名口径一致——仅 `postgresql` 被拒。
- * 映射表 fail-closed：未知/新增 `DatabaseType` 一律拒绝，不透传放行。
+ * 本地连接不在此门禁内：本地引擎支持只看方言是否注册，权益门禁仅作用于
+ * 个人同步入站 record 过滤（跨设备同步为 Pro 权益）与组织资源口径。
+ *
+ * 过滤 fail-closed：无 `CachedEntitlement`（未登录/权益未拉取）时按
+ * `DEFAULT_FREE_ENGINES` 兜底，与服务端匿名口径一致——仅 `postgresql` 被过滤；
+ * 映射表 fail-closed：未知/新增 `DatabaseType` 保守判为不允许，不透传放行。
  *
  * 本文件零 vscode 依赖，纯函数可单测。
  */
@@ -18,14 +21,6 @@ const ENGINE_BY_DB_TYPE: Readonly<Partial<Record<DatabaseType, string>>> = {
   [DatabaseType.PG]: 'postgresql',
   [DatabaseType.SQLITE]: 'sqlite',
 };
-
-/** 权益不足/引擎不允许时的可诊断错误（各 UI 层据此映射 i18n 文案）。 */
-export class PersonalEntitlementDeniedError extends Error {
-  constructor(public readonly engine: string) {
-    super(`database engine "${engine}" is not allowed by the current plan`);
-    this.name = 'PersonalEntitlementDeniedError';
-  }
-}
 
 /** dbType → engine 字符串；未知枚举抛错（fail-closed）。 */
 export function databaseEngineOf(dbType: DatabaseType): string {
@@ -49,13 +44,6 @@ export function allowedEngines(entitlement?: CachedEntitlement | null): readonly
 
 export function isDatabaseTypeAllowed(dbType: DatabaseType, entitlement?: CachedEntitlement | null): boolean {
   return allowedEngines(entitlement).includes(databaseEngineOf(dbType));
-}
-
-/** 建连/保存/导入等个人连接写入点前的断言；违规抛 PersonalEntitlementDeniedError。 */
-export function assertPersonalDatabaseType(dbType: DatabaseType, entitlement?: CachedEntitlement | null): void {
-  if (!isDatabaseTypeAllowed(dbType, entitlement)) {
-    throw new PersonalEntitlementDeniedError(databaseEngineOf(dbType));
-  }
 }
 
 export interface SkippedPersonalConnection {

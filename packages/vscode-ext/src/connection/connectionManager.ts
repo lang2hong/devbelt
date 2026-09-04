@@ -3,8 +3,6 @@ import type { DatabaseType } from '@db-client/core';
 import type { DatabaseCapabilities } from '@db-client/core';
 import type { SavedConnection } from './connectionStore';
 import type { HistoryStore } from '../history/historyStore';
-import { assertPersonalDatabaseType, isOrganizationConnectionId } from '../sync/entitlementGate';
-import type { CachedEntitlement } from '../sync/authService';
 import { QueryHistoryRecorder } from '../history/queryHistoryRecorder';
 import { SshTunnel } from './sshTunnel';
 
@@ -39,7 +37,7 @@ interface SessionEntry {
   connId: string;
 }
 
-/** 建连归属：个人连接受个人权益门禁；组织连接走 organization 模板权益口径。 */
+/** 建连归属。本地连接不再走权益门禁，scope 当前仅为调用方语义标记（组织调用方传入 'organization'）。 */
 export type ConnectScope = 'personal' | 'organization';
 
 export interface ConnectOptions {
@@ -67,8 +65,6 @@ export class ConnectionManager {
      * 传入后，本管理器建立的每个会话都会把修改性语句写进历史。
      */
     private readonly history?: HistoryStore,
-    /** 个人权益 getter（门禁用）；注入后建连前会校验个人连接引擎。组织连接跳过。 */
-    private readonly getPersonalEntitlement?: () => CachedEntitlement | undefined,
   ) {
     this.config = { ...DEFAULT_POOL_CONFIG, ...config };
     this.startHealthCheck();
@@ -99,7 +95,7 @@ export class ConnectionManager {
    * @param conn 已保存连接配置
    */
   async connect(conn: SavedConnection, opts?: ConnectOptions): Promise<ConnectionSession> {
-    this.assertEngineScope(conn, opts?.scope ?? 'personal');
+    void opts; // scope 仅为调用方语义标记（组织调用方传入 'organization'），当前不参与建连逻辑
     const existing = this.sessions.get(conn.id);
     if (existing) {
       this.touch(conn.id);
@@ -119,12 +115,6 @@ export class ConnectionManager {
     } finally {
       this.connecting.delete(conn.id);
     }
-  }
-
-  /** 建连前的个人权益门禁：组织连接（显式 scope 或 org: 前缀 id）跳过；个人连接 fail-closed 到 Free。 */
-  private assertEngineScope(conn: SavedConnection, scope: ConnectScope): void {
-    if (scope === 'organization' || isOrganizationConnectionId(conn.id)) return;
-    assertPersonalDatabaseType(conn.dbType, this.getPersonalEntitlement?.());
   }
 
   /**

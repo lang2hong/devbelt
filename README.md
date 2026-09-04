@@ -1,10 +1,10 @@
 # DB Client
 
-集成在 VS Code 中的数据库客户端，支持 MySQL、SQLite（PostgreSQL 权益门禁修复中），带账号体系、组织协作和端到端加密个人连接同步（开发中）。
+集成在 VS Code 中的数据库客户端，支持 MySQL、SQLite、PostgreSQL 本地连接，带账号体系、组织协作和端到端加密个人连接同步（开发中）。
 
 ## 功能
 
-- 多数据库：MySQL、SQLite 完整支持；PostgreSQL 需登录后 Pro 权益（当前权益缓存存在缺陷，PG 连接暂不可用）
+- 多数据库：MySQL、SQLite、PostgreSQL 本地连接完整可用；跨设备同步为登录后 Pro 权益
 - SQL 编辑、补全、格式化、执行、取消、EXPLAIN
 - 结果表格、受控行内编辑、多结果集
 - CSV/JSON/XML/XLSX/SQL 导入导出、库间数据传输

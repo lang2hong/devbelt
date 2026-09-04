@@ -55,6 +55,7 @@ export class SessionView extends BaseWebView {
 
   private async refresh(): Promise<void> {
     try {
+      void this.auth.refreshEntitlement();
       const { devices } = await this.auth.client.listDevices();
       this.post({ type: 'devices', devices, canRevoke: true });
     } catch (e) {

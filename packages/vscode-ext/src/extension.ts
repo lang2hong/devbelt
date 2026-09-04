@@ -37,7 +37,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const history = new HistoryStore(context.globalState);
   // history 注入管理器：所有会话的修改性语句由此自动进历史，
   // 不再依赖各命令自行调用 history.add（漏一个就少一段痕迹）。
-  const manager = new ConnectionManager(undefined, history, () => auth.getCachedEntitlement());
+  const manager = new ConnectionManager(undefined, history);
   const treeProvider = new DbTreeDataProvider(store, manager);
   const auditLogger = AuditLogger.init(context.globalState);
   const executor = new QueryExecutor(manager, history, auditLogger);

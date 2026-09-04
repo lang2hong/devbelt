@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { DatabaseType } from '@db-client/core';
 import {
   DEFAULT_FREE_ENGINES,
-  PersonalEntitlementDeniedError,
-  assertPersonalDatabaseType,
   allowedEngines,
   databaseEngineOf,
   filterPersonalConnectionsByEntitlement,
@@ -33,32 +31,6 @@ describe('allowedEngines', () => {
 
   it('有权益时直接用缓存值', () => {
     expect(allowedEngines(pro)).toEqual(['mysql', 'postgresql', 'sqlite']);
-  });
-});
-
-describe('assertPersonalDatabaseType', () => {
-  it('允许的引擎不抛', () => {
-    expect(() => assertPersonalDatabaseType(DatabaseType.MYSQL, free)).not.toThrow();
-    expect(() => assertPersonalDatabaseType(DatabaseType.SQLITE, undefined)).not.toThrow();
-  });
-
-  it('拒绝的引擎抛 PersonalEntitlementDeniedError 且携带 engine', () => {
-    const fn = () => assertPersonalDatabaseType(DatabaseType.PG, free);
-    expect(fn).toThrowError(PersonalEntitlementDeniedError);
-    try {
-      fn();
-    } catch (err) {
-      expect((err as PersonalEntitlementDeniedError).engine).toBe('postgresql');
-    }
-  });
-
-  it('无权益（未登录）默认 Free：postgresql 被拒', () => {
-    expect(() => assertPersonalDatabaseType(DatabaseType.PG, undefined)).toThrowError(PersonalEntitlementDeniedError);
-    expect(() => assertPersonalDatabaseType(DatabaseType.PG, null)).toThrowError(PersonalEntitlementDeniedError);
-  });
-
-  it('有 pro 权益时 postgresql 放行', () => {
-    expect(() => assertPersonalDatabaseType(DatabaseType.PG, pro)).not.toThrow();
   });
 });
 

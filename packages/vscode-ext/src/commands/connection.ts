@@ -6,8 +6,6 @@ import type { SavedConnection } from '../connection/connectionStore';
 import { l10n } from '../i18n';
 import { AuditLogger } from '../utils/auditLogger';
 import { flattenGroups } from '../utils/groupTree';
-import { assertPersonalDatabaseType, PersonalEntitlementDeniedError } from '../sync/entitlementGate';
-import type { CachedEntitlement } from '../sync/authService';
 import type { Deps, Sub } from './shared';
 import { confirm } from './shared';
 
@@ -27,23 +25,22 @@ async function queryServerVersion(session: any, dbType: string): Promise<string>
 }
 
 export function registerConnectionCommands(deps: Deps, sub: Sub): void {
-  const { store, manager, treeProvider, connCtx, auth } = deps;
-  const getEntitlement = (): CachedEntitlement | undefined => auth.getCachedEntitlement();
+  const { store, manager, treeProvider, connCtx } = deps;
 
   sub('dbclient.addConnection', (node?: DbTreeNode) => {
     const gid = node?.kind === NodeKind.Group ? node.groupId : undefined;
-    ConnectionForm.open(store, () => treeProvider.refresh(), gid, undefined, getEntitlement);
+    ConnectionForm.open(store, () => treeProvider.refresh(), gid);
   });
 
   sub('dbclient.editConnection', (node: DbTreeNode) => {
-    if (node?.conn) ConnectionForm.open(store, () => treeProvider.refresh(), undefined, node.conn, getEntitlement);
+    if (node?.conn) ConnectionForm.open(store, () => treeProvider.refresh(), undefined, node.conn);
   });
 
   sub('dbclient.cloneConnection', (node: DbTreeNode) => {
     if (!node?.conn) return;
     const src = node.conn;
     const cloned: SavedConnection = { ...src, id: '', name: `${src.name || src.host} (copy)` };
-    ConnectionForm.open(store, () => treeProvider.refresh(), undefined, cloned, getEntitlement);
+    ConnectionForm.open(store, () => treeProvider.refresh(), undefined, cloned);
   });
 
   sub('dbclient.searchConnections', async () => {
@@ -81,11 +78,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
       treeProvider.refresh();
       AuditLogger.tryLog({ action: 'connection_open', connName: conn.name || conn.host, database: conn.database });
     } catch (err) {
-      if (err instanceof PersonalEntitlementDeniedError) {
-        vscode.window.showErrorMessage(l10n('entitlement.denied', { engine: err.engine }));
-      } else {
-        vscode.window.showErrorMessage(`Open connection failed: ${(err as Error).message}`);
-      }
+      vscode.window.showErrorMessage(`Open connection failed: ${(err as Error).message}`);
     }
   });
 
@@ -204,28 +197,14 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
       }
     }
     let imported = 0;
-    const skippedEngines: string[] = [];
     for (const conn of payload.connections) {
       if (!conn?.name && !conn?.host) continue;
-      try {
-        assertPersonalDatabaseType(conn.dbType, getEntitlement());
-      } catch (err) {
-        if (err instanceof PersonalEntitlementDeniedError) {
-          skippedEngines.push(err.engine);
-          continue;
-        }
-        throw err;
-      }
       const existing = store.get(conn.id);
       const finalConn = existing ? { ...existing, ...conn } : conn;
       await store.save(finalConn);
       imported++;
     }
     treeProvider.refresh();
-    if (skippedEngines.length) {
-      const engines = [...new Set(skippedEngines)].join(', ');
-      vscode.window.showWarningMessage(l10n('entitlement.skippedSummary', { count: skippedEngines.length, engines }));
-    }
     vscode.window.showInformationMessage(l10n('conn.importDone', { count: imported }));
   });
 }

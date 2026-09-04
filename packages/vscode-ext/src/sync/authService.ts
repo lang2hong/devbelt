@@ -2,8 +2,9 @@ import * as vscode from 'vscode';
 import { execSync } from 'child_process';
 import { readFileSync } from 'fs';
 import { hostname, platform, arch, release } from 'os';
-import { SyncClient, AuthResult, DeviceInfo } from './syncClient';
+import { SyncClient, AuthResult, DeviceInfo, MeResponse } from './syncClient';
 import { eventBus, AuthEvent } from '../utils/event';
+import { DEFAULT_FREE_ENGINES } from './entitlementGate';
 
 // 由 esbuild 构建时从 .env / .env.production 注入（见 esbuild.js 的 define）；测试环境由 vitest.config.ts 提供同名字段
 declare const __SYNC_SERVER_URL__: string;
@@ -98,13 +99,14 @@ export class AuthService {
   private cachedEntitlement?: CachedEntitlement;
   /** 缓存的规范 userId（来源 GET /api/me），登出清空。 */
   private cachedUserId?: string;
+  /** 认证身份变更计数：login/logout 递增。用于丢弃飞行中 /api/me 的过期结果（换号/登出竞态）。 */
+  private authGeneration = 0;
 
   /** 读取当前用户规范 userId；缓存到内存，登出清空。 */
   async getUserId(): Promise<string> {
     if (this.cachedUserId) return this.cachedUserId;
-    const me = await this.client.getMe();
-    this.cachedUserId = me.user.userId;
-    return this.cachedUserId;
+    const me = await this.getMe();
+    return me.user.userId;
   }
 
   /** 读取缓存权益：优先内存，回退 globalState；无 allowedDatabaseTypes 的无效缓存直接忽略。 */
@@ -127,6 +129,42 @@ export class AuthService {
     try {
       this.memento?.update(AuthService.ENTITLEMENT_CACHE_KEY, entitlement);
     } catch { /* memento 写失败不影响本次判断 */ }
+  }
+
+  /**
+   * 拉取 /api/me、写权益缓存并返回规范化结果。所有 me 拉取点应走本方法，
+   * 由它统一落盘权益（旧实现各调用方只 getMe 不写缓存导致权益恒空）。
+   *
+   * 身份一致性：请求前捕获 authGeneration，响应返回时若身份已变（登出/换号）
+   * 则丢弃结果并抛错，避免账户 A 的权益被写成账户 B 的缓存。
+   */
+  async getMe(): Promise<MeResponse> {
+    const generation = this.authGeneration;
+    const me = await this.client.getMe();
+    if (generation !== this.authGeneration) {
+      throw new Error('session changed during /api/me');
+    }
+    const sub = me.subscription;
+    this.setCachedEntitlement({
+      planCode: sub?.planCode ?? 'free',
+      allowedDatabaseTypes: sub?.entitlement?.allowedDatabaseTypes ?? Array.from(DEFAULT_FREE_ENGINES),
+      maxDevices: sub?.entitlement?.maxDevices ?? 0,
+    });
+    this.cachedUserId = me.user.userId;
+    return me;
+  }
+
+  /**
+   * 拉取 /api/me 并刷新权益缓存。登录态建立后（init）、账户/设备面板打开时调用。
+   *
+   * 未登录直接返回；失败（网络/鉴权/换号）静默降级：不阻塞登录，权益缓存保持原值
+   * （无缓存即 fail-closed 到 Free）。
+   */
+  async refreshEntitlement(): Promise<void> {
+    if (!this.isLoggedIn()) return;
+    try {
+      await this.getMe();
+    } catch { /* 网络/鉴权/换号失败：降级到 Free，保持现状 */ }
   }
 
   /** SecretStorage 变更订阅（多窗口同步），dispose 时取消 */
@@ -172,6 +210,7 @@ export class AuthService {
   async init(): Promise<void> {
     this.accessToken = await this.secrets.get(AuthService.ACCESS_TOKEN_KEY);
     this.refreshToken = await this.secrets.get(AuthService.REFRESH_TOKEN_KEY);
+    if (this.accessToken) void this.refreshEntitlement();
   }
 
   /** 取消 SecretStorage 订阅（扩展 deactivate 时调用） */
@@ -234,6 +273,7 @@ export class AuthService {
     this.refreshToken = undefined;
     this.cachedEntitlement = undefined;
     this.cachedUserId = undefined;
+    this.authGeneration += 1;
     await this.secrets.delete(AuthService.ACCESS_TOKEN_KEY);
     await this.secrets.delete(AuthService.REFRESH_TOKEN_KEY);
     await this.secrets.delete(AuthService.USER_EMAIL_KEY);
@@ -259,6 +299,7 @@ export class AuthService {
   }
 
   private async saveSession(result: AuthResult, email: string): Promise<void> {
+    this.authGeneration += 1;
     this.accessToken = result.accessToken;
     this.refreshToken = result.refreshToken;
     await this.secrets.store(AuthService.ACCESS_TOKEN_KEY, result.accessToken);
