@@ -71,3 +71,18 @@ export function decodeB64Url(s: string, expectedLength: number, field: string): 
   }
   return buf;
 }
+
+/** base64url 无 padding 解码，按字节长度区间 [minBytes, maxBytes] 校验（变长字段，如 record ciphertext）。 */
+export function decodeB64UrlRange(s: string, minBytes: number, maxBytes: number, field: string): Buffer {
+  if (typeof s !== 'string' || s.length === 0) throw new ValidationError(`${field} is not base64url`);
+  let buf: Buffer;
+  try {
+    buf = Buffer.from(s, 'base64url');
+  } catch {
+    throw new ValidationError(`${field} is not valid base64url`);
+  }
+  if (buf.length < minBytes || buf.length > maxBytes) {
+    throw new ValidationError(`${field} must decode to ${minBytes}..${maxBytes} bytes (got ${buf.length})`);
+  }
+  return buf;
+}

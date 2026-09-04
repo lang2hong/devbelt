@@ -90,7 +90,9 @@ describe('SyncStateService', () => {
     const state = await svc.getState(USER);
     expect(state.keyEpoch).toBe('1');
     expect(state.stateVersion).toBe('1');
-    expect(state.envelopeSmp.version).toBe('1');
+    expect(state.envelopeSmp.envelopeVersion).toBe('1');
+    expect(state.envelopeSmp.ciphertext).not.toBe('');
+    expect(state.envelopeSmp.protocolVersion).toBe(1);
   });
 
   it('change-key succeeds and increments stateVersion; replay is idempotent; wrong digest conflicts', async () => {
@@ -185,7 +187,7 @@ describe('SyncStateService', () => {
     });
     expect(res.stateVersion).toBe('2');
     const state = await svc.getState(USER);
-    expect(state.envelopeRecovery.version).toBe('2');
+    expect(state.envelopeRecovery.envelopeVersion).toBe('2');
   });
 
   it('destroy tombstones records (version+1) and advances global changeSequence', async () => {
@@ -238,7 +240,7 @@ describe('SyncStateService', () => {
     expect(state.changeSequence).toBe('1');
   });
 
-  it('destroy replay after epoch advance returns SYNC_EPOCH_STALE', async () => {
+  it('destroy replay is idempotent and returns full snapshot', async () => {
     const { svc } = makeStack();
     const keys = makeKeys();
     await svc.init(USER, {
@@ -266,17 +268,11 @@ describe('SyncStateService', () => {
         signPub: newKeys.signPub, recoverSignPub: newKeys.recoverPub,
       },
     };
-    await svc.destroy(USER, destroyInput);
-
-    try {
-      await svc.destroy(USER, destroyInput);
-    } catch (e: any) {
-      expect(e).toBeInstanceOf(SyncEpochStaleError);
-      expect(e.code).toBe('SYNC_EPOCH_STALE');
-      expect(e.currentKeyEpoch).toBe('2');
-      return;
-    }
-    throw new Error('expected SYNC_EPOCH_STALE');
+    const first = await svc.destroy(USER, destroyInput);
+    // 重放同一请求（旧 epoch）必须幂等返回完整快照，而非 409 epoch stale
+    const replay = await svc.destroy(USER, destroyInput);
+    expect(replay).toEqual({ keyEpoch: '2', stateVersion: '1', changeSequence: first.changeSequence });
+    expect(first.changeSequence).toBe('0');
   });
 
   it('expired receipt is ignored (different-digest stale receipt does not conflict)', async () => {

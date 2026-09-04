@@ -57,9 +57,20 @@ export interface StateDto {
   recoverSignPub: string;
   smpKdf: Record<string, unknown>;
   recoveryKdf: Record<string, unknown>;
-  envelopeSmp: { version: string; nonce: string; ct: string; tag: string };
-  envelopeRecovery: { version: string; nonce: string; ct: string; tag: string };
+  envelopeSmp: EnvelopeDto;
+  envelopeRecovery: EnvelopeDto;
   recoveryCodeSetTime: string | null;
+}
+
+/** 出站 envelope DTO：与客户端 EnvelopeDto 对称（长名 + 每 envelope 协议字段）。 */
+export interface EnvelopeDto {
+  protocolVersion: number;
+  cipherSuite: string;
+  formatVersion: number;
+  envelopeVersion: string;
+  nonce: string;
+  ciphertext: string;
+  tag: string;
 }
 
 function validateV1Protocol(protocolVersion: number, cipherSuite: string, formatVersion: number): void {
@@ -167,7 +178,7 @@ export class SyncStateService {
     });
   }
 
-  async recover(userId: number, input: RecoverInput): Promise<{ keyEpoch: string; stateVersion: string; recoveryCodeSetTime: string }> {
+  async recover(userId: number, input: RecoverInput): Promise<{ keyEpoch: string; stateVersion: string; recoveryCodeSetTime: string | null }> {
     assertU64(input.keyEpoch, 'keyEpoch');
     assertU64(input.expectedStateVersion, 'expectedStateVersion');
     assertU64(input.envelopeSmp.version, 'envelopeSmp.version');
@@ -176,7 +187,7 @@ export class SyncStateService {
       const state = await this.lockActive(tx, userId);
       assertEpoch(state, input.keyEpoch);
       const receipt = await checkReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest);
-      if (receipt) return { keyEpoch: input.keyEpoch, stateVersion: receipt.resultVersion ?? state.stateVersion, recoveryCodeSetTime: state.recoveryCodeSetTime ? state.recoveryCodeSetTime.toISOString() : '' };
+      if (receipt) return { keyEpoch: input.keyEpoch, stateVersion: receipt.resultVersion ?? state.stateVersion, recoveryCodeSetTime: state.recoveryCodeSetTime ? state.recoveryCodeSetTime.toISOString() : null };
 
       // recover 用旧 recoverSignPub 验签（§7.4）。
       this.assertSignature(state.recoverSignPub, userId, input, 'state.recover');
@@ -213,15 +224,17 @@ export class SyncStateService {
     });
   }
 
-  async destroy(userId: number, input: DestroyInput): Promise<{ keyEpoch: string }> {
+  async destroy(userId: number, input: DestroyInput): Promise<{ keyEpoch: string; stateVersion: string; changeSequence: string }> {
     validateNewState(input.newState);
     assertU64(input.keyEpoch, 'keyEpoch');
     assertU64(input.expectedStateVersion, 'expectedStateVersion');
     return this.runner(async (tx) => {
       const state = await this.lockActive(tx, userId);
-      assertEpoch(state, input.keyEpoch);
+      // destroy 会推进 keyEpoch，重放时 request 的旧 epoch 已与 active state 不一致，
+      // 故 receipt 必须先于 assertEpoch 判定（保证幂等重放返回完整结果而非 409）。
       const receipt = await checkReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest);
-      if (receipt) return { keyEpoch: incU64(input.keyEpoch) };
+      if (receipt) return { keyEpoch: state.keyEpoch, stateVersion: state.stateVersion, changeSequence: state.changeSequence };
+      assertEpoch(state, input.keyEpoch);
 
       this.assertSignature(state.signPub, userId, input, 'state.destroy');
       this.assertExpectedVersion(state, input.expectedStateVersion);
@@ -240,8 +253,8 @@ export class SyncStateService {
       const ok = await this.stateRepo.update(tx, userId, state.stateVersion, next);
       if (!ok) throw new SyncVersionConflictError(state.stateVersion);
 
-      await recordReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest, 'state.destroy', next.stateVersion, null);
-      return { keyEpoch: next.keyEpoch };
+      await recordReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest, 'state.destroy', next.stateVersion, next.changeSequence);
+      return { keyEpoch: next.keyEpoch, stateVersion: next.stateVersion, changeSequence: next.changeSequence };
     });
   }
 
@@ -283,8 +296,21 @@ function toDto(s: PersonalSyncState): StateDto {
     recoverSignPub: s.recoverSignPub.toString('base64url'),
     smpKdf: { alg: s.smpKdf.alg, version: 1, memoryKiB: s.smpKdf.memoryKiB, iterations: s.smpKdf.iterations, parallelism: s.smpKdf.parallelism, salt: s.smpKdf.salt.toString('base64url'), outputBytes: 32 },
     recoveryKdf: { alg: s.recoveryKdf.alg, version: 1, salt: s.recoveryKdf.salt.toString('base64url'), outputBytes: 32 },
-    envelopeSmp: { version: s.envelopeSmp.version, nonce: s.envelopeSmp.nonce.toString('base64url'), ct: s.envelopeSmp.ct.toString('base64url'), tag: s.envelopeSmp.tag.toString('base64url') },
-    envelopeRecovery: { version: s.envelopeRecovery.version, nonce: s.envelopeRecovery.nonce.toString('base64url'), ct: s.envelopeRecovery.ct.toString('base64url'), tag: s.envelopeRecovery.tag.toString('base64url') },
+    envelopeSmp: toEnvelopeDto(s.envelopeSmp),
+    envelopeRecovery: toEnvelopeDto(s.envelopeRecovery),
     recoveryCodeSetTime: s.recoveryCodeSetTime ? s.recoveryCodeSetTime.toISOString() : null,
+  };
+}
+
+/** envelope 出站序列化：长名 + 每 envelope 附带协议字段（对齐客户端 EnvelopeDto）。 */
+function toEnvelopeDto(e: SyncEnvelope): EnvelopeDto {
+  return {
+    protocolVersion: 1,
+    cipherSuite: 'AES-256-GCM',
+    formatVersion: 1,
+    envelopeVersion: e.version,
+    nonce: e.nonce.toString('base64url'),
+    ciphertext: e.ct.toString('base64url'),
+    tag: e.tag.toString('base64url'),
   };
 }

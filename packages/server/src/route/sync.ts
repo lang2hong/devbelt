@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { authScope, type GetAuthUser } from '../middleware/requireAuth.js';
 import type { TokenService } from '../service/tokenService.js';
 import { sendError } from '../middleware/errorHandler.js';
-import { requestDigestOf, decodeB64Url } from '../service/syncCrypto.js';
+import { requestDigestOf, decodeB64Url, decodeB64UrlRange } from '../service/syncCrypto.js';
 import { SyncProtocolUnsupportedError } from '../domain/errors.js';
 import {
   SyncStateService,
@@ -189,7 +189,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
             cipherSuite: body.cipherSuite,
             formatVersion: body.formatVersion,
             nonce: decodeB64Url(body.nonce, 12, 'nonce'),
-            ciphertext: Buffer.from(body.ciphertext, 'base64url'),
+            ciphertext: decodeB64UrlRange(body.ciphertext, 1, 256 * 1024, 'ciphertext'),
             tag: decodeB64Url(body.tag, 16, 'tag'),
           }));
         } catch (e) { sendError(reply, e); }

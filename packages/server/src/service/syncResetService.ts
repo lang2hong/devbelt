@@ -79,7 +79,7 @@ export class SyncResetService {
     });
   }
 
-  async resetAfterLoss(userId: number, input: ResetAfterLossInput): Promise<{ keyEpoch: string }> {
+  async resetAfterLoss(userId: number, input: ResetAfterLossInput): Promise<{ keyEpoch: string; stateVersion: string; changeSequence: string }> {
     validateNewState(input.newState);
     const tokenHash = hashResetToken(input.resetToken);
 
@@ -105,14 +105,14 @@ export class SyncResetService {
         const next = toState(userId, incU64(state.keyEpoch), '1', seq, input.newState, now);
         const updated = await this.stateRepo.update(tx, userId, state.stateVersion, next);
         if (!updated) throw new SyncVersionConflictError(state.stateVersion);
-        return { keyEpoch: next.keyEpoch };
+        return { keyEpoch: next.keyEpoch, stateVersion: next.stateVersion, changeSequence: next.changeSequence };
       }
 
       // 无 active state：按 init 语义建 keyEpoch=1（对 reset-challenges「none」的对称处理）。
       const next = toState(userId, '1', '1', '0', input.newState, now);
       const created = await this.stateRepo.create(tx, next);
       if (!created) throw new SyncStateExistsError();
-      return { keyEpoch: next.keyEpoch };
+      return { keyEpoch: next.keyEpoch, stateVersion: next.stateVersion, changeSequence: next.changeSequence };
     });
   }
 }
