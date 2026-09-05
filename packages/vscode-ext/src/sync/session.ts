@@ -4,12 +4,21 @@ import { PendingMutationStore } from './e2e/pendingMutationStore';
 import { SyncEngine } from './e2e/syncEngine';
 import { SyncMutator } from './e2e/syncMutator';
 import { SyncCoordinator } from './e2e/syncCoordinator';
+import { EntityStore, UnresolvedRefStore } from './e2e/entityStore';
+import type { SyncEntityType } from './e2e/syncEntity';
 import type { PersonalSyncClient } from './e2e/client';
 import { assertU64Decimal } from './e2e/types';
 import { DekStore, deriveSyncSignKeyPair } from './crypto/keyStore';
 import type { ConnectionStore } from '../connection/connectionStore';
 import type { CachedEntitlement } from './authService';
 import { uniqueId } from '../utils/id';
+
+const LOCAL_ID_PREFIX: Record<SyncEntityType, string> = {
+  connection: 'c',
+  group: 'g',
+  queryFolder: 'qf',
+  query: 'q',
+};
 
 /**
  * 个人同步会话（compose root 层）：统一持有本地 store、同步引擎、出站生成与本地变更
@@ -45,6 +54,8 @@ export class PersonalSyncSession {
   private static readonly EPOCH_CLEANUP_KEY = 'dbclient.sync.epochCleanup';
 
   private readonly stateStore: StateStore;
+  private entities: EntityStore;
+  private unresolved?: UnresolvedRefStore;
   private mapStore?: RecordMapStore;
   private outbox?: PendingMutationStore;
   private engine?: SyncEngine;
@@ -63,11 +74,22 @@ export class PersonalSyncSession {
     private readonly opts: SyncSessionOptions = {},
   ) {
     this.stateStore = new StateStore(memento, userId);
+    this.entities = new EntityStore(store);
+  }
+
+  private uniqueEntityId(type: SyncEntityType): string {
+    if (type === 'connection' && this.opts.uniqueConnectionId) return this.opts.uniqueConnectionId();
+    return uniqueId(LOCAL_ID_PREFIX[type]);
   }
 
   /** 是否已解锁（DEK 在内存） */
   get isUnlocked(): boolean {
     return this.dek !== undefined;
+  }
+
+  /** 会话所属 userId（规范 u64 字符串）。 */
+  get uid(): string {
+    return this.userId;
   }
 
   /** 最近一次后台协调失败原因（不含秘密）；成功轮次已清空。 */
@@ -90,7 +112,7 @@ export class PersonalSyncSession {
     return this.stateStore;
   }
 
-  /** 建立当前 epoch 的 recordMap/outbox；epoch 与现存 store 不一致时抛错（不得静默沿用）。 */
+  /** 建立当前 epoch 的 recordMap/outbox/unresolved；epoch 与现存 store 不一致时抛错（不得静默沿用）。 */
   ensureStores(keyEpoch: string): void {
     if (this.keyEpoch !== undefined && this.keyEpoch !== keyEpoch) {
       throw new Error('sync session epoch mismatch');
@@ -98,6 +120,7 @@ export class PersonalSyncSession {
     this.keyEpoch = keyEpoch;
     if (!this.mapStore) this.mapStore = new RecordMapStore(this.memento, this.userId, keyEpoch);
     if (!this.outbox) this.outbox = new PendingMutationStore(this.memento, this.userId, keyEpoch);
+    if (!this.unresolved) this.unresolved = new UnresolvedRefStore(this.memento, this.userId, keyEpoch);
   }
 
   /** 载入 DEK 后建立并启动运行组件；epoch 与已构造 engine 不一致时抛错（须先走 transition）。 */
@@ -113,16 +136,17 @@ export class PersonalSyncSession {
         stateStore: this.stateStore,
         mapStore: this.mapStore!,
         outbox: this.outbox!,
-        store: this.store,
+        entities: this.entities,
+        unresolved: this.unresolved!,
         dek: this.dekThunk,
         signSeed: this.signSeedThunk,
-        uniqueConnectionId: this.opts.uniqueConnectionId ?? (() => uniqueId('c')),
+        uniqueId: (type) => this.uniqueEntityId(type),
         entitlement: this.opts.entitlement,
       });
       this.mutator = new SyncMutator({
         userId: this.userId,
         keyEpoch,
-        store: this.store,
+        entities: this.entities,
         mapStore: this.mapStore!,
         outbox: this.outbox!,
         dek: this.dekThunk,
@@ -172,6 +196,7 @@ export class PersonalSyncSession {
     await this.stateStore.setSnapshot(newSnapshot);
     await new RecordMapStore(this.memento, this.userId, fromKeyEpoch).clear();
     await new PendingMutationStore(this.memento, this.userId, fromKeyEpoch).clear();
+    await new UnresolvedRefStore(this.memento, this.userId, fromKeyEpoch).clear();
     await this.dekStore.delete(this.userId, BigInt(fromKeyEpoch));
     await this.clearIntent();
 
@@ -203,6 +228,7 @@ export class PersonalSyncSession {
   private resetRuntime(): void {
     this.mapStore = undefined;
     this.outbox = undefined;
+    this.unresolved = undefined;
     this.engine = undefined;
     this.mutator = undefined;
     this.coordinator = undefined;

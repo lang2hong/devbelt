@@ -4,7 +4,8 @@ import { SyncApiError, type PersonalSyncClient } from '../../../src/sync/e2e/cli
 import { RecordMapStore } from '../../../src/sync/e2e/recordMapStore';
 import { PendingMutationStore, type PendingDeleteMutation, type PendingPutMutation } from '../../../src/sync/e2e/pendingMutationStore';
 import type { SyncStateSnapshot } from '../../../src/sync/e2e/stateStore';
-import type { SavedConnection } from '../../../src/connection/connectionStore';
+import { EntityStore, UnresolvedRefStore } from '../../../src/sync/e2e/entityStore';
+import type { SavedConnection, ConnectionStore } from '../../../src/connection/connectionStore';
 import type { StateDto } from '../../../src/sync/e2e/types';
 
 function makeMemento() {
@@ -24,12 +25,26 @@ function makeStateStore(snap?: SyncStateSnapshot, setImpl?: (s: SyncStateSnapsho
 
 function makeStore(seed: SavedConnection[] = []) {
   const conns = new Map<string, SavedConnection>(seed.map((c) => [c.id, c]));
-  return {
+  const cs = {
     get: (id: string) => conns.get(id),
     save: vi.fn(async (c: SavedConnection) => { conns.set(c.id, { ...c, updateTime: Date.now() }); }),
     remove: vi.fn(async (id: string) => { const c = conns.get(id); if (c) conns.set(id, { ...c, deleted: true, updateTime: Date.now() }); }),
+    listForSync: () => [...conns.values()],
+    listGroupsForSync: () => [] as never[],
+    listFoldersForSync: () => [] as never[],
+    listQueriesForSync: () => [] as never[],
+    getGroupById: () => undefined,
+    getFolderById: () => undefined,
+    getQueryById: () => undefined,
+    upsertGroup: async () => {},
+    upsertFolder: async () => {},
+    upsertQuery: async () => {},
+    removeGroup: async () => {},
+    removeQueryFolder: async () => {},
+    removeQuery: async () => {},
     all: () => [...conns.values()].filter((c) => !(c as unknown as { deleted?: boolean }).deleted),
-  };
+  } as unknown as ConnectionStore;
+  return cs;
 }
 
 const b64 = (bytes: number) => 'A'.repeat(Math.ceil((bytes * 4) / 3));
@@ -90,6 +105,7 @@ interface EngineOpts {
 
 function engine(opts: EngineOpts) {
   const store = opts.store ?? makeStore();
+  const memento = makeMemento();
   return new SyncEngine({
     userId: '7',
     keyEpoch: '1',
@@ -97,10 +113,11 @@ function engine(opts: EngineOpts) {
     stateStore: makeStateStore(opts.snap, opts.setImpl) as never,
     mapStore: opts.mapStore,
     outbox: opts.outbox,
-    store: store as never,
+    entities: new EntityStore(store),
+    unresolved: new UnresolvedRefStore(memento, '7', '1'),
     dek: () => new Uint8Array(32),
     signSeed: opts.signSeed ?? (() => new Uint8Array(32)),
-    uniqueConnectionId: () => `c-new-${Math.random()}`,
+    uniqueId: () => `c-new-${Math.random()}`,
   });
 }
 
@@ -108,7 +125,7 @@ const SNAP: SyncStateSnapshot = { keyEpoch: '1', stateVersion: '1', changeSequen
 
 function putMutation(): PendingPutMutation {
   return {
-    action: 'record.put', recordId: 'A'.repeat(22), connectionId: 'c-1', baseVersion: '0',
+    action: 'record.put', recordId: 'A'.repeat(22), type: 'connection', localId: 'c-1', baseVersion: '0',
     mutationId: 'B'.repeat(22), nonce: 'C'.repeat(16), ciphertext: 'YQ', tag: 'D'.repeat(22),
     signature: 'E'.repeat(86), requestDigest: 'F'.repeat(43), revision: 0, consecutiveFailureCount: 0,
   };
@@ -173,7 +190,7 @@ describe('SyncEngine', () => {
   it('pull 记录 conflict 停止：cursor 不前移', async () => {
     const id = 'A'.repeat(22);
     const mapStore = new RecordMapStore(makeMemento(), '7', '1');
-    await mapStore.put(id, { connectionId: 'c-1', recordVersion: '1', revision: 0, status: 'pending' });
+    await mapStore.put(id, { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'pending' });
     const store = makeStore([{ id: 'c-1', name: 'n', dbType: 'MYSQL' as never, host: 'h', port: 3306, user: 'u', updateTime: 200 } as SavedConnection]);
     const client = clientWith({
       getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
@@ -225,8 +242,9 @@ describe('SyncEngine', () => {
       stateStore: { getSnapshot: () => SNAP, setSnapshot } as never,
       mapStore: new RecordMapStore(makeMemento(), '7', '1'),
       outbox: new PendingMutationStore(makeMemento(), '7', '1'),
-      store: makeStore() as never,
-      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueConnectionId: () => 'c-new-1',
+      entities: new EntityStore(makeStore()),
+      unresolved: new UnresolvedRefStore(makeMemento(), '7', '1'),
+      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueId: () => 'c-new-1',
     });
     const r = await eng.sync();
     expect(r.stage).toBe('error');
@@ -250,8 +268,9 @@ describe('SyncEngine', () => {
     const base = {
       keyEpoch: '1', client: clientWith(),
       stateStore: { getSnapshot: () => SNAP, setSnapshot: async () => {} } as never,
-      store: makeStore() as never,
-      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueConnectionId: () => 'c-new-1',
+      entities: new EntityStore(makeStore()),
+      unresolved: new UnresolvedRefStore(makeMemento(), '7', '1'),
+      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueId: () => 'c-new-1',
     };
     expect(() => new SyncEngine({
       ...base, userId: '7',
@@ -276,8 +295,9 @@ describe('SyncEngine', () => {
       stateStore: { getSnapshot: () => SNAP, setSnapshot } as never,
       mapStore: new RecordMapStore(makeMemento(), '7', '1'),
       outbox: new PendingMutationStore(makeMemento(), '7', '1'),
-      store: makeStore() as never,
-      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueConnectionId: () => 'c-new-1',
+      entities: new EntityStore(makeStore()),
+      unresolved: new UnresolvedRefStore(makeMemento(), '7', '1'),
+      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueId: () => 'c-new-1',
     });
     const r = await eng.sync();
     expect(r.stage).toBe('ok');
@@ -297,8 +317,9 @@ describe('SyncEngine', () => {
       stateStore: { getSnapshot: () => localSnap, setSnapshot } as never,
       mapStore: new RecordMapStore(makeMemento(), '7', '1'),
       outbox: new PendingMutationStore(makeMemento(), '7', '1'),
-      store: makeStore() as never,
-      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueConnectionId: () => 'c-new-1',
+      entities: new EntityStore(makeStore()),
+      unresolved: new UnresolvedRefStore(makeMemento(), '7', '1'),
+      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueId: () => 'c-new-1',
     });
     const r = await eng.sync();
     expect(r.stage).toBe('error');
@@ -410,14 +431,14 @@ describe('SyncEngine', () => {
     const r = await eng.sync();
     expect(r.stage).toBe('ok');
     expect(outbox.list()).toHaveLength(0);
-    expect(mapStore.getByConnectionId('c-1')).toEqual({
-      recordId: m.recordId, connectionId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed',
+    expect(mapStore.getByRef({ type: 'connection', localId: 'c-1' })).toEqual({
+      recordId: m.recordId, type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed',
     });
   });
 
   it('delete 成功 → 删映射 + outbox 清空', async () => {
     const del: PendingDeleteMutation = {
-      action: 'record.delete', recordId: 'A'.repeat(22), connectionId: 'c-1', baseVersion: '1',
+      action: 'record.delete', recordId: 'A'.repeat(22), type: 'connection', localId: 'c-1', baseVersion: '1',
       mutationId: 'B'.repeat(22), signature: 'E'.repeat(86), requestDigest: 'F'.repeat(43),
       revision: 0, consecutiveFailureCount: 0,
     };
@@ -425,12 +446,12 @@ describe('SyncEngine', () => {
     const outbox = new PendingMutationStore(makeMemento(), '7', '1');
     await outbox.put(del);
     const mapStore = new RecordMapStore(makeMemento(), '7', '1');
-    await mapStore.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await mapStore.put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
     const eng = engine({ client, snap: SNAP, mapStore, outbox });
     const r = await eng.sync();
     expect(r.stage).toBe('ok');
     expect(outbox.list()).toHaveLength(0);
-    expect(mapStore.getByConnectionId('c-1')).toBeUndefined();
+    expect(mapStore.getByRef({ type: 'connection', localId: 'c-1' })).toBeUndefined();
   });
 
   it('确认写失败 → 条目保留 → 重放同 receipt → 确认 → 删除', async () => {
@@ -459,7 +480,7 @@ describe('SyncEngine', () => {
     const r2 = await eng.sync();
     expect(r2.stage).toBe('ok');
     expect(outbox.list()).toHaveLength(0);
-    expect(mapStore.getByConnectionId('c-1')).toMatchObject({ recordVersion: '1', status: 'confirmed', revision: 0 });
+    expect(mapStore.getByRef({ type: 'connection', localId: 'c-1' })).toMatchObject({ recordVersion: '1', status: 'confirmed', revision: 0 });
   });
 
   it('push 回执不越过 pull 快照推进 cursor（并发 record 不永久跳过）', async () => {
@@ -475,8 +496,9 @@ describe('SyncEngine', () => {
       stateStore: { getSnapshot: () => SNAP, setSnapshot } as never,
       mapStore: new RecordMapStore(makeMemento(), '7', '1'),
       outbox,
-      store: makeStore() as never,
-      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueConnectionId: () => 'c-new-1',
+      entities: new EntityStore(makeStore()),
+      unresolved: new UnresolvedRefStore(makeMemento(), '7', '1'),
+      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueId: () => 'c-new-1',
     });
     const r = await eng.sync();
     expect(r.stage).toBe('ok');
@@ -507,8 +529,9 @@ describe('SyncEngine', () => {
       stateStore: { getSnapshot: () => SNAP, setSnapshot } as never,
       mapStore: new RecordMapStore(makeMemento(), '7', '1'),
       outbox,
-      store: makeStore() as never,
-      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueConnectionId: () => 'c-new-1',
+      entities: new EntityStore(makeStore()),
+      unresolved: new UnresolvedRefStore(makeMemento(), '7', '1'),
+      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueId: () => 'c-new-1',
     });
 
     const r1 = await eng.sync();

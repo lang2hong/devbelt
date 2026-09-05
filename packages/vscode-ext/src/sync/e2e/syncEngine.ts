@@ -1,11 +1,11 @@
 import { PersonalSyncClient, SyncApiError } from './client';
 import { openRecord } from './recordCodec';
-import { applyRecord, type ApplyContext } from './applyRecords';
+import { applyRecord, reconcileUnresolved, type ApplyContext } from './applyRecords';
 import { RecordConflictError } from './errors';
 import type { RecordMapStore } from './recordMapStore';
 import { PendingMutationStore, type PendingMutation } from './pendingMutationStore';
 import type { StateStore } from './stateStore';
-import type { ConnectionStore } from '../../connection/connectionStore';
+import { EntityStore, UnresolvedRefStore, applyOrder } from './entityStore';
 import type { CachedEntitlement } from '../authService';
 import { assertRecordId, assertBase64UrlNoPad, assertBase64UrlRange, assertU64Decimal, rejectExtraKeys, validateSyncState } from './types';
 
@@ -121,12 +121,13 @@ export interface SyncEngineDeps {
   stateStore: StateStore;
   mapStore: RecordMapStore;
   outbox: PendingMutationStore;
-  store: ConnectionStore;
+  entities: EntityStore;
+  unresolved: UnresolvedRefStore;
   /** DEK 数据加密密钥（解密 feed record）。 */
   dek: () => Uint8Array;
   /** 仅供任务 3「本地变更→mutation」首次签名；本轮 outbox 重放不调用。 */
   signSeed: () => Uint8Array;
-  uniqueConnectionId: () => string;
+  uniqueId: (type: import('./syncEntity').SyncEntityType) => string;
   entitlement?: () => CachedEntitlement | undefined;
   feedPageLimit?: number;
 }
@@ -269,10 +270,11 @@ export class SyncEngine {
     // 3. 分页 feed + 解密 + 应用 + 逐页 cursor
     const remoteSnap = remoteState.changeSequence;
     const ctx: ApplyContext = {
-      store: this.deps.store,
+      entities: this.deps.entities,
       mapStore: this.deps.mapStore,
+      unresolved: this.deps.unresolved,
       entitlement: this.deps.entitlement?.(),
-      uniqueConnectionId: this.deps.uniqueConnectionId,
+      uniqueId: this.deps.uniqueId,
     };
 
     let cursor = local.changeSequence;
@@ -298,7 +300,16 @@ export class SyncEngine {
       }
 
       if (page.records.length > 0) {
-        for (const rec of page.records) {
+        // 先解密得到 type，按 applyOrder 排序后应用，保证批内引用先于被依赖者到达时立即翻译（N2）。
+        // 解密失败（含 lock 后 thunk throw）归入结构化 error，不使 sync() 整体 reject。
+        let typed: { rec: RemoteRecord; type: import('./syncEntity').SyncEntityType }[];
+        try {
+          typed = page.records.map((rec) => ({ rec, type: this.typeOfRemote(rec) }));
+        } catch (err) {
+          return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `apply failed: ${describe(err)}` };
+        }
+        typed.sort((a, b) => applyOrder(a.type) - applyOrder(b.type));
+        for (const { rec } of typed) {
           try {
             await this.applyRemote(rec, this.deps.keyEpoch, ctx);
             applied += 1;
@@ -309,6 +320,12 @@ export class SyncEngine {
             }
             return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `apply failed: ${describe(err)}` };
           }
+        }
+        // 页内全部应用后收敛 unresolved 引用（引用方可能落在被依赖者之前到达的后续页）。
+        try {
+          await reconcileUnresolved(ctx);
+        } catch (err) {
+          return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `reconcile unresolved failed: ${describe(err)}` };
         }
         const lastSeq = page.records[page.records.length - 1].changeSequence;
         try {
@@ -426,13 +443,14 @@ export class SyncEngine {
   private async confirmOutbound(m: PendingMutation, version: string): Promise<void> {
     if (m.action === 'record.put') {
       await this.deps.mapStore.put(m.recordId, {
-        connectionId: m.connectionId,
+        type: m.type,
+        localId: m.localId,
         recordVersion: version,
         revision: m.revision,
         status: 'confirmed',
       });
     } else {
-      await this.deps.mapStore.deleteByConnectionId(m.connectionId);
+      await this.deps.mapStore.deleteByRef({ type: m.type, localId: m.localId });
     }
   }
 
@@ -445,6 +463,27 @@ export class SyncEngine {
       version: assertU64Decimal(o.version, 'receipt.version'),
       changeSequence: assertU64Decimal(o.changeSequence, 'receipt.changeSequence', true),
     };
+  }
+
+  /** 提前解密得到实体 type（tombstone 由映射反查），供应用前拓扑排序。 */
+  private typeOfRemote(rec: RemoteRecord): import('./syncEntity').SyncEntityType {
+    if (rec.deleteTime != null) {
+      const existing = this.deps.mapStore.getByRecordId(rec.recordId);
+      return existing?.type ?? 'connection';
+    }
+    const dek = this.deps.dek();
+    const plaintext = openRecord(
+      dek,
+      Buffer.from(rec.nonce!, 'base64url'),
+      Buffer.from(rec.ciphertext!, 'base64url'),
+      Buffer.from(rec.tag!, 'base64url'),
+      { userId: this.deps.userId, keyEpoch: this.deps.keyEpoch, recordId: rec.recordId, recordVersion: rec.version },
+    );
+    const payload = JSON.parse(Buffer.from(plaintext).toString('utf8')) as { type?: unknown };
+    if (payload.type === 'connection' || payload.type === 'group' || payload.type === 'queryFolder' || payload.type === 'query') {
+      return payload.type;
+    }
+    throw new FeedProtocolError('record payload missing valid type');
   }
 
   private async applyRemote(rec: RemoteRecord, keyEpoch: string, ctx: ApplyContext): Promise<void> {

@@ -1,36 +1,43 @@
 import { randomBytes } from 'crypto';
-import { encodeRecordPayload, sealRecord } from './recordCodec';
+import { encodeEntityPayload, sealRecord, type RefResolver } from './recordCodec';
 import { requestDigestOf } from '../crypto/digest';
 import { buildRecordSigningInput, signSigningInput } from '../crypto/sign';
 import { encodeBase64Url } from '../crypto/recoveryCode';
 import { isOrganizationConnectionId } from '../entitlementGate';
-import type { ConnectionStore, SavedConnection } from '../../connection/connectionStore';
 import type { RecordMapStore } from './recordMapStore';
 import { PendingMutationStore, type PendingDeleteMutation, type PendingPutMutation } from './pendingMutationStore';
+import { EntityStore, applyOrder, type EntityValue } from './entityStore';
+import { refKey, isOrgLocalId, type SyncEntityRef } from './syncEntity';
+import type { SavedConnection } from '../../connection/connectionStore';
+import type { SavedQuery } from '@db-client/core';
 
 /**
- * 本地连接变更 → 出站 mutation 生成（任务 3）。
+ * 本地实体变更 → 出站 mutation 生成（A4：全类型）。
  *
- * 全量对账（不依赖事件载荷拼接）：遍历 `listForSync()`（可见连接 + 软删除墓碑），对每个
- * connectionId 归纳差集，逐个生成已签名 record.put/record.delete 并**只追加**进 outbox。
+ * 按 applyOrder（group → queryFolder → connection → query）遍历 `EntityStore.listForSync()`
+ * 的四类实体（含软删除墓碑），对每个 typed ref 归纳差集，逐个生成已签名 record.put/
+ * record.delete 并**只追加**进 outbox。
  *
- * - 组织连接（`org:`）显式跳过，不依赖写入时抛错。
- * - `pending` 映射（入站应用未完成）与已有 outbox（每 record 至多一个 pending）跳过并汇总上报。
+ * - org 排除：connection 的 localId 为 `org:` 前缀 → 跳过；query 的 connId 经 recordMap /
+ *   本地反查为 `org:` 前缀连接 → 整条跳过（§三 / N7）。
+ * - `pending` 映射（入站应用未完成）与已有 outbox（每实体至多一个）跳过并汇总上报。
  * - baseVersion：新建 `"0"`；update/delete 取 confirmed 映射 `recordVersion`。
- * - outbox 条目持久化 payload 对应 revision（生成密文那刻 `updateTime`），receipt 确认用。
- * - record AAD.recordVersion 与服务端赋版本对齐：create → `"1"`；update → incU64(baseVersion)。
+ * - 引用转 recordId：同一轮内先 mint 的父实体 recordId 会被临时记入本轮 resolver，供
+ *   connection.groupId / queryFolder.connId / query.connId·folderId 编码；跨轮已 confirmed
+ *   的映射从 mapStore 反查。引用目标无 recordId 时省略该字段（unresolved，后续轮收敛）。
+ * - record AAD.recordVersion 与服务端赋版本对齐：create → "1"；update → incU64(baseVersion)。
  */
 
 export interface OutboundReconcileResult {
   generated: number;
   pendingSkipped: { recordId: string }[];
-  skipped: { connectionId: string; reason: string }[];
+  skipped: { ref: string; reason: string }[];
 }
 
 export interface SyncMutatorDeps {
   userId: string;
   keyEpoch: string;
-  store: ConnectionStore;
+  entities: EntityStore;
   mapStore: RecordMapStore;
   outbox: PendingMutationStore;
   dek: () => Uint8Array;
@@ -50,28 +57,43 @@ export class SyncMutator {
   constructor(private readonly deps: SyncMutatorDeps) {}
 
   async reconcile(): Promise<OutboundReconcileResult> {
-    const { store, mapStore, outbox } = this.deps;
-    const outboxByConnection = new Map<string, boolean>();
-    for (const m of outbox.list()) outboxByConnection.set(m.connectionId, true);
+    const { entities, mapStore, outbox } = this.deps;
+
+    const outboxByRef = new Map<string, boolean>();
+    for (const m of outbox.list()) outboxByRef.set(refKey({ type: m.type, localId: m.localId }), true);
+
+    // 本轮内刚 mint 的 recordId（local → recordId），供依赖它的子实体编码引用。
+    const minted = new Map<string, string>();
+
+    const resolveRef: RefResolver = (type, localId) => {
+      if (localId === undefined || localId === '') return undefined;
+      const confirmed = mapStore.getByRef({ type, localId });
+      if (confirmed) return confirmed.recordId;
+      return minted.get(refKey({ type, localId }));
+    };
 
     const pendingSkipped: { recordId: string }[] = [];
-    const skipped: { connectionId: string; reason: string }[] = [];
+    const skipped: { ref: string; reason: string }[] = [];
     let generated = 0;
 
-    for (const conn of store.listForSync()) {
-      if (isOrganizationConnectionId(conn.id)) continue;
+    const ordered = entities.listForSync().sort((a, b) => applyOrder(a.ref.type) - applyOrder(b.ref.type));
 
-      if (outboxByConnection.get(conn.id)) continue; // 每 record 至多一个 in-flight mutation
+    for (const { ref, deleted, updateTime } of ordered) {
+      if (isOrgLocalId(ref.type, ref.localId)) continue;
+      if (ref.type === 'query' && this.isQueryOfOrgConnection(ref, entities)) continue;
 
-      const mapEntry = mapStore.getByConnectionId(conn.id);
+      const key = refKey(ref);
+      if (outboxByRef.get(key)) continue; // 每实体至多一个 in-flight mutation
 
-      if (conn.deleted) {
+      const mapEntry = mapStore.getByRef(ref);
+
+      if (deleted) {
         if (mapEntry && mapEntry.status === 'confirmed') {
           try {
-            await outbox.put(this.buildDelete(mapEntry.recordId, conn.id, mapEntry.recordVersion, conn.updateTime ?? 0));
+            await outbox.put(this.buildDelete(mapEntry.recordId, ref, mapEntry.recordVersion, updateTime));
             generated += 1;
           } catch (err) {
-            skipped.push({ connectionId: conn.id, reason: describe(err) });
+            skipped.push({ ref: key, reason: describe(err) });
           }
         } else if (mapEntry) {
           pendingSkipped.push({ recordId: mapEntry.recordId });
@@ -86,34 +108,44 @@ export class SyncMutator {
 
       try {
         if (!mapEntry) {
-          await outbox.put(this.buildPutOnNew(conn));
+          const recordId = mintId(16);
+          minted.set(key, recordId);
+          await outbox.put(this.buildPutOnNew(recordId, ref, updateTime, resolveRef));
           generated += 1;
-        } else if ((conn.updateTime ?? 0) > mapEntry.revision) {
-          await outbox.put(this.buildPutOnExisting(mapEntry.recordId, conn, mapEntry.recordVersion));
+        } else if (updateTime > mapEntry.revision) {
+          await outbox.put(this.buildPutOnExisting(mapEntry.recordId, ref, updateTime, mapEntry.recordVersion, resolveRef));
           generated += 1;
         }
       } catch (err) {
-        skipped.push({ connectionId: conn.id, reason: describe(err) });
+        skipped.push({ ref: key, reason: describe(err) });
       }
     }
 
     return { generated, pendingSkipped, skipped };
   }
 
-  private buildPutOnNew(conn: SavedConnection): PendingPutMutation {
-    return this.buildPut(mintId(16), conn, '0');
+  private isQueryOfOrgConnection(ref: SyncEntityRef, entities: EntityStore): boolean {
+    const q = entities.get(ref) as SavedQuery | undefined;
+    if (!q) return false;
+    return isOrganizationConnectionId(q.connId);
   }
 
-  private buildPutOnExisting(recordId: string, conn: SavedConnection, baseVersion: string): PendingPutMutation {
-    return this.buildPut(recordId, conn, baseVersion);
+  private buildPutOnNew(recordId: string, ref: SyncEntityRef, revision: number, resolveRef: RefResolver): PendingPutMutation {
+    return this.buildPut(recordId, ref, '0', revision, resolveRef);
   }
 
-  private buildPut(recordId: string, conn: SavedConnection, baseVersion: string): PendingPutMutation {
-    const { userId, keyEpoch, dek, signSeed } = this.deps;
+  private buildPutOnExisting(recordId: string, ref: SyncEntityRef, revision: number, baseVersion: string, resolveRef: RefResolver): PendingPutMutation {
+    return this.buildPut(recordId, ref, baseVersion, revision, resolveRef);
+  }
+
+  private buildPut(recordId: string, ref: SyncEntityRef, baseVersion: string, revision: number, resolveRef: RefResolver): PendingPutMutation {
+    const { userId, keyEpoch, entities, dek, signSeed } = this.deps;
     const mutationId = mintId(16);
     const nonce = new Uint8Array(randomBytes(12));
-    const revision = conn.updateTime ?? 0;
-    const plaintext = Buffer.from(JSON.stringify(encodeRecordPayload(conn)), 'utf8');
+    const entity = entities.get(ref);
+    if (!entity) throw new Error(`entity ${refKey(ref)} missing during put`);
+    const payload = this.encodePayload(ref, entity, resolveRef);
+    const plaintext = Buffer.from(JSON.stringify(payload), 'utf8');
     const box = sealRecord(dek(), nonce, plaintext, {
       userId,
       keyEpoch,
@@ -143,7 +175,8 @@ export class SyncMutator {
     return {
       action: 'record.put',
       recordId,
-      connectionId: conn.id,
+      type: ref.type,
+      localId: ref.localId,
       baseVersion,
       mutationId,
       signature,
@@ -156,7 +189,16 @@ export class SyncMutator {
     };
   }
 
-  private buildDelete(recordId: string, connectionId: string, baseVersion: string, revision: number): PendingDeleteMutation {
+  private encodePayload(ref: SyncEntityRef, entity: EntityValue, resolveRef: RefResolver): Record<string, unknown> {
+    switch (ref.type) {
+      case 'connection': return encodeEntityPayload({ type: 'connection', entity: entity as SavedConnection }, resolveRef);
+      case 'group': return encodeEntityPayload({ type: 'group', entity: entity as never }, resolveRef);
+      case 'queryFolder': return encodeEntityPayload({ type: 'queryFolder', entity: entity as never }, resolveRef);
+      case 'query': return encodeEntityPayload({ type: 'query', entity: entity as never }, resolveRef);
+    }
+  }
+
+  private buildDelete(recordId: string, ref: SyncEntityRef, baseVersion: string, revision: number): PendingDeleteMutation {
     const { userId, keyEpoch, signSeed } = this.deps;
     const mutationId = mintId(16);
     const body = { protocolVersion: 1, keyEpoch, mutationId, recordId, baseVersion };
@@ -168,7 +210,8 @@ export class SyncMutator {
     return {
       action: 'record.delete',
       recordId,
-      connectionId,
+      type: ref.type,
+      localId: ref.localId,
       baseVersion,
       mutationId,
       signature,

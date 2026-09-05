@@ -18,7 +18,25 @@ function makeMemento() {
 
 function makeStore(): { store: ConnectionStore } {
   const events = new EventEmitter<'user' | 'sync'>();
-  return { store: { onChanged: events.event, listForSync: () => [] } as unknown as ConnectionStore };
+  return { store: {
+    onChanged: events.event,
+    listForSync: () => [],
+    listGroupsForSync: () => [],
+    listFoldersForSync: () => [],
+    listQueriesForSync: () => [],
+    get: () => undefined,
+    getGroupById: () => undefined,
+    getFolderById: () => undefined,
+    getQueryById: () => undefined,
+    save: async () => {},
+    remove: async () => {},
+    upsertGroup: async () => {},
+    upsertFolder: async () => {},
+    upsertQuery: async () => {},
+    removeGroup: async () => {},
+    removeQueryFolder: async () => {},
+    removeQuery: async () => {},
+  } as unknown as ConnectionStore };
 }
 
 function makeClient(): PersonalSyncClient {
@@ -39,7 +57,7 @@ const dek32 = () => new Uint8Array(32);
 
 function makePutMutation(): PendingPutMutation {
   return {
-    action: 'record.put', recordId: 'A'.repeat(22), connectionId: 'c-1', baseVersion: '0',
+    action: 'record.put', recordId: 'A'.repeat(22), type: 'connection', localId: 'c-1', baseVersion: '0',
     mutationId: 'B'.repeat(22), nonce: 'C'.repeat(16), ciphertext: 'YQ', tag: 'D'.repeat(22),
     signature: 'E'.repeat(86), requestDigest: 'F'.repeat(43), revision: 0, consecutiveFailureCount: 0,
   };
@@ -63,7 +81,7 @@ describe('PersonalSyncSession', () => {
   it('双 unlock 不产生双订阅（start 幂等）', () => {
     const { store } = makeDekStore();
     const spy = vi.fn(() => ({ dispose: () => {} }));
-    const fakeStore = { onChanged: spy, listForSync: () => [] } as unknown as ConnectionStore;
+    const fakeStore = { onChanged: spy, listForSync: () => [], listGroupsForSync: () => [], listFoldersForSync: () => [], listQueriesForSync: () => [] } as unknown as ConnectionStore;
     const s = new PersonalSyncSession('7', makeMemento(), store, fakeStore, makeClient());
     s.unlock('1', dek32());
     s.unlock('1', dek32());
@@ -138,7 +156,7 @@ describe('PersonalSyncSession', () => {
     let releaseRecords!: (v: unknown) => void;
     const recordsGate = new Promise((r) => { releaseRecords = r; });
     const events = new EventEmitter<'user' | 'sync'>();
-    const store = { onChanged: events.event, listForSync: () => [] } as unknown as ConnectionStore;
+    const store = { onChanged: events.event, listForSync: () => [], listGroupsForSync: () => [], listFoldersForSync: () => [], listQueriesForSync: () => [], getGroupById: () => undefined, getFolderById: () => undefined, getQueryById: () => undefined } as unknown as ConnectionStore;
     const client = {
       getState: async () => ({
         protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
@@ -174,7 +192,7 @@ describe('PersonalSyncSession', () => {
     const { store: dekStore, secrets } = makeDekStore();
 
     // 旧 epoch=2 的持久化 store 留数据 + cleanup intent（模拟上一次切换崩在清 store 前）
-    await new RecordMapStore(memento, '7', '2').put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await new RecordMapStore(memento, '7', '2').put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
     await new PendingMutationStore(memento, '7', '2').put(makePutMutation());
     await memento.update('dbclient.sync.epochCleanup.7', { fromKeyEpoch: '2', toKeyEpoch: '3' });
 
