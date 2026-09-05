@@ -9,51 +9,56 @@ function makeMemento(seed?: Record<string, unknown>) {
   };
 }
 
+const connectionRef = { type: 'connection', localId: 'c-1' } as const;
+
 describe('RecordMapStore', () => {
-  it('双向映射 put/get 往返', async () => {
+  it('双向映射 put/get 往返（typed ref）', async () => {
     const s = new RecordMapStore(makeMemento(), '7', '1');
-    await s.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '3', revision: 100, status: 'confirmed' });
-    expect(s.getByRecordId('A'.repeat(22))).toEqual({ recordId: 'A'.repeat(22), connectionId: 'c-1', recordVersion: '3', revision: 100, status: 'confirmed' });
-    expect(s.getByConnectionId('c-1')!.recordId).toBe('A'.repeat(22));
+    await s.put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '3', revision: 100, status: 'confirmed' });
+    expect(s.getByRecordId('A'.repeat(22))).toEqual({ recordId: 'A'.repeat(22), type: 'connection', localId: 'c-1', recordVersion: '3', revision: 100, status: 'confirmed' });
+    expect(s.getByRef(connectionRef)!.recordId).toBe('A'.repeat(22));
   });
 
   it('userId/keyEpoch 隔离', async () => {
     const a = new RecordMapStore(makeMemento(), '7', '1');
     const b = new RecordMapStore(makeMemento(), '8', '1');
     const c = new RecordMapStore(makeMemento(), '7', '2');
-    await a.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await a.put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
     expect(b.getByRecordId('A'.repeat(22))).toBeUndefined();
     expect(c.getByRecordId('A'.repeat(22))).toBeUndefined();
   });
 
-  it('拒绝 org: connectionId 入映射', async () => {
+  it('拒绝 org: connection 入映射；其他类型不受 org 前缀限制', async () => {
     const s = new RecordMapStore(makeMemento(), '7', '1');
-    await expect(s.put('A'.repeat(22), { connectionId: 'org:1:2', recordVersion: '1', revision: 0, status: 'confirmed' })).rejects.toThrowError(/organization/);
+    await expect(s.put('A'.repeat(22), { type: 'connection', localId: 'org:1:2', recordVersion: '1', revision: 0, status: 'confirmed' })).rejects.toThrowError(/organization/);
+    // query 类型 localId 含 org: 前缀不应被误判为组织连接。
+    await s.put('B'.repeat(22), { type: 'query', localId: 'org-like-query', recordVersion: '1', revision: 0, status: 'confirmed' });
+    expect(s.getByRecordId('B'.repeat(22))!.localId).toBe('org-like-query');
   });
 
   it('deleteByRecordId 清双向', async () => {
     const s = new RecordMapStore(makeMemento(), '7', '1');
-    await s.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await s.put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
     await s.deleteByRecordId('A'.repeat(22));
     expect(s.getByRecordId('A'.repeat(22))).toBeUndefined();
-    expect(s.getByConnectionId('c-1')).toBeUndefined();
+    expect(s.getByRef(connectionRef)).toBeUndefined();
   });
 
-  it('record 换 connectionId 时清旧反向指针（双射不变量）', async () => {
+  it('record 换 localId 时清旧反向指针（双射不变量）', async () => {
     const s = new RecordMapStore(makeMemento(), '7', '1');
-    await s.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
-    await s.put('A'.repeat(22), { connectionId: 'c-2', recordVersion: '2', revision: 0, status: 'confirmed' });
-    expect(s.getByConnectionId('c-1')).toBeUndefined();
-    expect(s.getByConnectionId('c-2')!.recordId).toBe('A'.repeat(22));
+    await s.put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await s.put('A'.repeat(22), { type: 'connection', localId: 'c-2', recordVersion: '2', revision: 0, status: 'confirmed' });
+    expect(s.getByRef({ type: 'connection', localId: 'c-1' })).toBeUndefined();
+    expect(s.getByRef({ type: 'connection', localId: 'c-2' })!.recordId).toBe('A'.repeat(22));
   });
 
-  it('connectionId 被其他 record 占用 fail-closed', async () => {
+  it('local entity 被其他 record 占用 fail-closed', async () => {
     const s = new RecordMapStore(makeMemento(), '7', '1');
-    await s.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
-    await s.put('B'.repeat(22), { connectionId: 'c-2', recordVersion: '1', revision: 0, status: 'confirmed' });
-    await expect(s.put('B'.repeat(22), { connectionId: 'c-1', recordVersion: '2', revision: 0, status: 'confirmed' })).rejects.toThrowError(/mapped/);
-    expect(s.getByConnectionId('c-1')!.recordId).toBe('A'.repeat(22));
-    expect(s.getByConnectionId('c-2')!.recordId).toBe('B'.repeat(22));
+    await s.put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await s.put('B'.repeat(22), { type: 'connection', localId: 'c-2', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await expect(s.put('B'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '2', revision: 0, status: 'confirmed' })).rejects.toThrowError(/mapped/);
+    expect(s.getByRef({ type: 'connection', localId: 'c-1' })!.recordId).toBe('A'.repeat(22));
+    expect(s.getByRef({ type: 'connection', localId: 'c-2' })!.recordId).toBe('B'.repeat(22));
   });
 
   it('串行化并发写入，避免丢失映射', async () => {
@@ -74,14 +79,14 @@ describe('RecordMapStore', () => {
       },
     }, '7', '1');
 
-    const first = s.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    const first = s.put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
     await started;
-    const second = s.put('B'.repeat(22), { connectionId: 'c-2', recordVersion: '1', revision: 0, status: 'confirmed' });
+    const second = s.put('B'.repeat(22), { type: 'connection', localId: 'c-2', recordVersion: '1', revision: 0, status: 'confirmed' });
     releaseFirst();
     await Promise.all([first, second]);
 
-    expect(s.getByRecordId('A'.repeat(22))?.connectionId).toBe('c-1');
-    expect(s.getByRecordId('B'.repeat(22))?.connectionId).toBe('c-2');
+    expect(s.getByRecordId('A'.repeat(22))?.localId).toBe('c-1');
+    expect(s.getByRecordId('B'.repeat(22))?.localId).toBe('c-2');
   });
 
   it('deleteByRecordId 持久化失败不污染内存视图', async () => {
@@ -94,14 +99,14 @@ describe('RecordMapStore', () => {
         m.set(k, v);
       },
     }, '7', '1');
-    await s.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await s.put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
     fail = true;
     await expect(s.deleteByRecordId('A'.repeat(22))).rejects.toThrowError(/write failed/);
-    expect(s.getByRecordId('A'.repeat(22))?.connectionId).toBe('c-1');
-    expect(s.getByConnectionId('c-1')?.recordId).toBe('A'.repeat(22));
+    expect(s.getByRecordId('A'.repeat(22))?.localId).toBe('c-1');
+    expect(s.getByRef(connectionRef)?.recordId).toBe('A'.repeat(22));
   });
 
-  it('deleteByConnectionId 持久化失败不污染内存视图', async () => {
+  it('deleteByRef 持久化失败不污染内存视图', async () => {
     const m = new Map<string, unknown>();
     let fail = false;
     const s = new RecordMapStore({
@@ -111,11 +116,11 @@ describe('RecordMapStore', () => {
         m.set(k, v);
       },
     }, '7', '1');
-    await s.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await s.put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
     fail = true;
-    await expect(s.deleteByConnectionId('c-1')).rejects.toThrowError(/write failed/);
-    expect(s.getByRecordId('A'.repeat(22))?.connectionId).toBe('c-1');
-    expect(s.getByConnectionId('c-1')?.recordId).toBe('A'.repeat(22));
+    await expect(s.deleteByRef(connectionRef)).rejects.toThrowError(/write failed/);
+    expect(s.getByRecordId('A'.repeat(22))?.localId).toBe('c-1');
+    expect(s.getByRef(connectionRef)?.recordId).toBe('A'.repeat(22));
   });
 
   it('首个写失败后仍可继续写', async () => {
@@ -128,13 +133,13 @@ describe('RecordMapStore', () => {
         m.set(k, v);
       },
     }, '7', '1');
-    await s.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await s.put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
     fail = true;
-    await expect(s.put('B'.repeat(22), { connectionId: 'c-2', recordVersion: '1', revision: 0, status: 'confirmed' })).rejects.toThrowError(/boom/);
+    await expect(s.put('B'.repeat(22), { type: 'connection', localId: 'c-2', recordVersion: '1', revision: 0, status: 'confirmed' })).rejects.toThrowError(/boom/);
     fail = false;
-    await s.put('C'.repeat(22), { connectionId: 'c-3', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await s.put('C'.repeat(22), { type: 'connection', localId: 'c-3', recordVersion: '1', revision: 0, status: 'confirmed' });
     expect(s.getByRecordId('B'.repeat(22))).toBeUndefined();
-    expect(s.getByRecordId('C'.repeat(22))?.connectionId).toBe('c-3');
+    expect(s.getByRecordId('C'.repeat(22))?.localId).toBe('c-3');
   });
 
   it('阻塞 put 后紧随 delete 顺序正确', async () => {
@@ -155,14 +160,14 @@ describe('RecordMapStore', () => {
       },
     }, '7', '1');
 
-    const putPromise = s.put('A'.repeat(22), { connectionId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    const putPromise = s.put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
     await started;
     const deletePromise = s.deleteByRecordId('A'.repeat(22));
     releaseFirst();
     await Promise.all([putPromise, deletePromise]);
 
     expect(s.getByRecordId('A'.repeat(22))).toBeUndefined();
-    expect(s.getByConnectionId('c-1')).toBeUndefined();
+    expect(s.getByRef(connectionRef)).toBeUndefined();
   });
 
   it('read 对损坏形状 fail-closed', () => {
@@ -171,11 +176,11 @@ describe('RecordMapStore', () => {
     const nonObject = new RecordMapStore(makeMemento({ [key]: 'garbage' }), '7', '1');
     expect(() => nonObject.getByRecordId('A'.repeat(22))).toThrowError(/corrupt record map/);
 
-    const missingMaps = new RecordMapStore(makeMemento({ [key]: { byRecordId: null, byConnectionId: {} } }), '7', '1');
-    expect(() => missingMaps.getByConnectionId('c-1')).toThrowError(/corrupt record map/);
+    const missingMaps = new RecordMapStore(makeMemento({ [key]: { byRecordId: null, byLocal: {} } }), '7', '1');
+    expect(() => missingMaps.getByRef(connectionRef)).toThrowError(/corrupt record map/);
 
     const badEntry = new RecordMapStore(makeMemento({
-      [key]: { byRecordId: { ['A'.repeat(22)]: { connectionId: 'c-1', recordVersion: '1', revision: 'bad' } }, byConnectionId: {} },
+      [key]: { byRecordId: { ['A'.repeat(22)]: { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 'bad' } }, byLocal: {} },
     }), '7', '1');
     expect(() => badEntry.getByRecordId('A'.repeat(22))).toThrowError(/corrupt record map/);
   });
@@ -184,21 +189,18 @@ describe('RecordMapStore', () => {
     const key = 'dbclient.sync.recordMap.7.1';
     const rid = 'A'.repeat(22);
 
-    // 组织 connectionId 入映射
     const orgConn = new RecordMapStore(makeMemento({
-      [key]: { byRecordId: { [rid]: { connectionId: 'org:x', recordVersion: '1', revision: 0, status: 'confirmed' } }, byConnectionId: { 'org:x': rid } },
+      [key]: { byRecordId: { [rid]: { type: 'connection', localId: 'org:x', recordVersion: '1', revision: 0, status: 'confirmed' } }, byLocal: { 'connection:org:x': rid } },
     }), '7', '1');
     expect(() => orgConn.getByRecordId(rid)).toThrowError(/organization/);
 
-    // recordVersion 非法
     const badVersion = new RecordMapStore(makeMemento({
-      [key]: { byRecordId: { [rid]: { connectionId: 'c-1', recordVersion: 'x', revision: 0, status: 'confirmed' } }, byConnectionId: { 'c-1': rid } },
+      [key]: { byRecordId: { [rid]: { type: 'connection', localId: 'c-1', recordVersion: 'x', revision: 0, status: 'confirmed' } }, byLocal: { 'connection:c-1': rid } },
     }), '7', '1');
     expect(() => badVersion.getByRecordId(rid)).toThrowError(/recordVersion/);
 
-    // 反向索引把 recordId 指到别处（双射破坏）
     const mismatch = new RecordMapStore(makeMemento({
-      [key]: { byRecordId: { [rid]: { connectionId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' } }, byConnectionId: { 'c-1': 'B'.repeat(22) } },
+      [key]: { byRecordId: { [rid]: { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' } }, byLocal: { 'connection:c-1': 'B'.repeat(22) } },
     }), '7', '1');
     expect(() => mismatch.getByRecordId(rid)).toThrowError(/corrupt record map/);
   });
@@ -207,8 +209,20 @@ describe('RecordMapStore', () => {
     const key = 'dbclient.sync.recordMap.7.1';
     const rid = 'A'.repeat(22);
     const s = new RecordMapStore(makeMemento({
-      [key]: { byRecordId: { [rid]: { connectionId: 'c-1', recordVersion: '1', revision: 42 } }, byConnectionId: { 'c-1': rid } },
+      [key]: { byRecordId: { [rid]: { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 42 } }, byLocal: { 'connection:c-1': rid } },
     }), '7', '1');
     expect(() => s.getByRecordId(rid)).toThrowError(/corrupt record map/);
+  });
+
+  it('四种类型共享同一双射且互不冲突（跨类型不变量）', async () => {
+    const s = new RecordMapStore(makeMemento(), '7', '1');
+    await s.put('A'.repeat(22), { type: 'group', localId: 'g-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await s.put('B'.repeat(22), { type: 'queryFolder', localId: 'qf-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await s.put('C'.repeat(22), { type: 'query', localId: 'q-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await s.put('D'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    expect(s.getByRef({ type: 'group', localId: 'g-1' })!.recordId).toBe('A'.repeat(22));
+    expect(s.getByRef({ type: 'queryFolder', localId: 'qf-1' })!.recordId).toBe('B'.repeat(22));
+    expect(s.getByRef({ type: 'query', localId: 'q-1' })!.recordId).toBe('C'.repeat(22));
+    expect(s.getByRef(connectionRef)!.recordId).toBe('D'.repeat(22));
   });
 });

@@ -11,7 +11,7 @@ function makeMemento(seed?: Record<string, unknown>) {
 
 function put(over: Partial<PendingPutMutation> = {}): PendingPutMutation {
   return {
-    action: 'record.put', recordId: 'A'.repeat(22), connectionId: 'c-1', baseVersion: '0',
+    action: 'record.put', recordId: 'A'.repeat(22), type: 'connection', localId: 'c-1', baseVersion: '0',
     mutationId: 'B'.repeat(22), nonce: 'C'.repeat(16), ciphertext: 'YQ', tag: 'D'.repeat(22),
     signature: 'E'.repeat(86), requestDigest: 'F'.repeat(43), revision: 0, consecutiveFailureCount: 0, ...over,
   };
@@ -19,7 +19,7 @@ function put(over: Partial<PendingPutMutation> = {}): PendingPutMutation {
 
 function del(over: Partial<PendingDeleteMutation> = {}): PendingDeleteMutation {
   return {
-    action: 'record.delete', recordId: 'A'.repeat(22), connectionId: 'c-1', baseVersion: '3',
+    action: 'record.delete', recordId: 'A'.repeat(22), type: 'connection', localId: 'c-1', baseVersion: '3',
     mutationId: 'B'.repeat(22), signature: 'E'.repeat(86), requestDigest: 'F'.repeat(43), revision: 0, consecutiveFailureCount: 0, ...over,
   };
 }
@@ -50,9 +50,11 @@ describe('PendingMutationStore', () => {
     await expect(s.put({ ...del(), ciphertext: 'YQ' } as never)).rejects.toThrowError(/must not carry ciphertext/);
   });
 
-  it('拒绝 org: connectionId 入 outbox', async () => {
+  it('拒绝 org: connection 入 outbox；query 类型不受影响', async () => {
     const s = new PendingMutationStore(makeMemento(), '7', '1');
-    await expect(s.put(put({ connectionId: 'org:1:2' }))).rejects.toThrowError(/organization/);
+    await expect(s.put(put({ localId: 'org:1:2' }))).rejects.toThrowError(/organization/);
+    await s.put(put({ type: 'query', localId: 'q-1', recordId: 'C'.repeat(22) }));
+    expect(s.list()).toHaveLength(1);
   });
 
   it('拒绝非法 mutationId 长度', async () => {
@@ -80,7 +82,7 @@ describe('PendingMutationStore', () => {
 
     const first = s.put(put());
     await started;
-    const second = s.put(put({ recordId: 'C'.repeat(22), connectionId: 'c-2', mutationId: 'G'.repeat(22) }));
+    const second = s.put(put({ recordId: 'C'.repeat(22), localId: 'c-2', mutationId: 'G'.repeat(22) }));
     releaseFirst();
     await Promise.all([first, second]);
 
@@ -104,31 +106,27 @@ describe('PendingMutationStore', () => {
 
   it('list 对类型合法但协议非法的元素 fail-closed', () => {
     const key = 'dbclient.sync.outbox.7.1';
-    // recordId 非法 base64url（"!"）
     const badRecordId = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), recordId: '!' }] }), '7', '1');
     expect(() => badRecordId.list()).toThrowError(/recordId/);
 
-    // baseVersion 非 u64（"-1"）
     const badBase = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), baseVersion: '-1' }] }), '7', '1');
     expect(() => badBase.list()).toThrowError(/baseVersion/);
 
-    // connectionId 组织引用
-    const orgConn = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), connectionId: 'org:x' }] }), '7', '1');
+    const orgConn = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), localId: 'org:x' }] }), '7', '1');
     expect(() => orgConn.list()).toThrowError(/organization/);
 
-    // mutationId 错误长度
     const badMutationId = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), mutationId: 'short' }] }), '7', '1');
     expect(() => badMutationId.list()).toThrowError(/mutationId/);
 
-    // signature 错误长度
+    const missingType = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), type: undefined }] }), '7', '1');
+    expect(() => missingType.list()).toThrowError(/unknown sync entity type/);
+
     const badSignature = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), signature: 'short' }] }), '7', '1');
     expect(() => badSignature.list()).toThrowError(/signature/);
 
-    // requestDigest 错误长度
     const badDigest = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), requestDigest: 'short' }] }), '7', '1');
     expect(() => badDigest.list()).toThrowError(/requestDigest/);
 
-    // put 的 nonce/tag 错误长度
     const badNonce = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), nonce: 'too-short' }] }), '7', '1');
     expect(() => badNonce.list()).toThrowError(/nonce/);
 
