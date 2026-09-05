@@ -111,4 +111,17 @@ describe('SyncCoordinator', () => {
 
     coordinator.stop();
   });
+
+  it('runNow 将本次显式同步失败返回调用方，但不阻断后续重试', async () => {
+    const store = { onChanged: () => ({ dispose: () => {} }) } as unknown as ConnectionStore;
+    const reconcile = vi.fn()
+      .mockRejectedValueOnce(new Error('network unavailable'))
+      .mockResolvedValueOnce({ generated: 0, pendingSkipped: [], skipped: [] });
+    const sync = vi.fn(async () => ({ stage: 'ok' as const, conflicts: [], applied: 0 }));
+    const coordinator = new SyncCoordinator(store, { reconcile } as unknown as SyncMutator, { sync } as unknown as SyncEngine);
+
+    await expect(coordinator.runNow()).rejects.toThrowError('network unavailable');
+    await expect(coordinator.runNow()).resolves.toMatchObject({ stage: 'ok' });
+    expect(coordinator.lastError).toBeUndefined();
+  });
 });

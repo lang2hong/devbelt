@@ -31,6 +31,7 @@ import { OrgTreeDataProvider } from './tree/orgTreeDataProvider';
 import { registerOrgCommands } from './commands/org';
 import { SyncSessionFactory } from './sync/sessionFactory';
 import { DekStore } from './sync/crypto/keyStore';
+import { registerPersonalSyncCommands } from './commands/personalSync';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const store = new ConnectionStore(context.globalState, context.secrets);
@@ -125,6 +126,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (e.kind === 'logout') syncFactory.invalidate();
   });
   context.subscriptions.push(onLogoutInvalidate);
+  // B1 是用户显式入口；注册本身不建 session，命令执行前才刷新权益并懒建。
+  registerPersonalSyncCommands(context, auth, syncFactory);
   // 这里原先用 onDidChangeSelection 往 `dbclient.dbType` / `dbclient.has*` 写
   // context key，供菜单 when 判断数据库类型。那是竞态的：右键未选中项、或右键
   // 与当前选中项不同时，键里还是上一个节点的值 —— 在 SQLite 表上会看到 MySQL

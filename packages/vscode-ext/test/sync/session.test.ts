@@ -7,6 +7,7 @@ import { PendingMutationStore, type PendingPutMutation } from '../../src/sync/e2
 import type { PersonalSyncClient } from '../../src/sync/e2e/client';
 import type { ConnectionStore } from '../../src/connection/connectionStore';
 import type { CachedEntitlement } from '../../src/sync/authService';
+import type { NewStateDto, StateDto } from '../../src/sync/e2e/types';
 
 function makeMemento() {
   const m = new Map<string, unknown>();
@@ -98,6 +99,30 @@ describe('PersonalSyncSession', () => {
     expect(s.isUnlocked).toBe(true);
     s.lock();
     expect(s.isUnlocked).toBe(false);
+  });
+
+  it('initializeSync 远端 init 成功后才持久化 DEK/snapshot 并解锁', async () => {
+    const { store, secrets } = makeDekStore();
+    const init = vi.fn(async () => {});
+    const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, { init } as unknown as PersonalSyncClient);
+
+    await s.initializeSync({} as NewStateDto, dek32());
+
+    expect(init).toHaveBeenCalledTimes(1);
+    expect(secrets.store).toHaveBeenCalledWith('dbclient.sync.dek.7.1', expect.any(String));
+    expect(s.getStateStore().getSnapshot()).toEqual({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+    expect(s.isUnlocked).toBe(true);
+  });
+
+  it('getRemoteState 严格校验网络响应，unlockFromState 持久化确认快照后解锁', async () => {
+    const { store, secrets } = makeDekStore();
+    const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, { getState: async () => ({ keyEpoch: '1' }) } as unknown as PersonalSyncClient);
+    await expect(s.getRemoteState()).rejects.toThrowError(/unexpected key|protocol/);
+
+    await s.unlockFromState({ keyEpoch: '2', stateVersion: '3', changeSequence: '4' } as StateDto, dek32());
+    expect(secrets.store).toHaveBeenCalledWith('dbclient.sync.dek.7.2', expect.any(String));
+    expect(s.getStateStore().getSnapshot()).toEqual({ keyEpoch: '2', stateVersion: '3', changeSequence: '4' });
+    expect(s.isUnlocked).toBe(true);
   });
 
   it('dispose 幂等', () => {

@@ -122,6 +122,16 @@
         "category": "DB Client"
       },
       {
+        "command": "dbclient.initializePersonalSync",
+        "title": "%cmd.initializePersonalSync%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.unlockPersonalSync",
+        "title": "%cmd.unlockPersonalSync%",
+        "category": "DB Client"
+      },
+      {
         "command": "dbclient.addIndex",
         "title": "Add Index",
         "category": "DB Client",
@@ -660,6 +670,14 @@
         },
         {
           "command": "dbclient.sessions",
+          "when": "dbclient.loggedIn"
+        },
+        {
+          "command": "dbclient.initializePersonalSync",
+          "when": "dbclient.loggedIn"
+        },
+        {
+          "command": "dbclient.unlockPersonalSync",
           "when": "dbclient.loggedIn"
         },
         {

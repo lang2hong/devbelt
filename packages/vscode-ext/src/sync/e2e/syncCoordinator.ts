@@ -56,6 +56,18 @@ export class SyncCoordinator {
     this.subscription = undefined;
   }
 
+  /** 用户显式请求的同步：复用同一串行链，避免和 debounce 轮次并发。 */
+  async runNow(): Promise<SyncRunResult | undefined> {
+    let failure: unknown;
+    this.chain = this.chain.then(() => this.drain()).catch((err) => {
+      this._lastError = describe(err);
+      failure = err;
+    });
+    await this.chain;
+    if (failure) throw failure;
+    return this._lastRun;
+  }
+
   private schedule(): void {
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(() => {

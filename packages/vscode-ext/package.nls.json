@@ -22,6 +22,8 @@
   "cmd.renameView": "Rename View",
   "cmd.sessions": "Manage Device Sessions",
   "cmd.changeSyncPassword": "Change Sync Password",
+  "cmd.initializePersonalSync": "Initialize Personal Sync",
+  "cmd.unlockPersonalSync": "Unlock Personal Sync",
   "account.title": "Account",
   "cmd.copyName": "Copy Name",
   "cmd.manageUsers": "Manage Users",

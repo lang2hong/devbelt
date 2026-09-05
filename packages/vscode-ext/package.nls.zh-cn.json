@@ -22,6 +22,8 @@
   "cmd.renameView": "重命名视图",
   "cmd.sessions": "管理设备会话",
   "cmd.changeSyncPassword": "修改同步密码",
+  "cmd.initializePersonalSync": "初始化个人同步",
+  "cmd.unlockPersonalSync": "解锁个人同步",
   "account.title": "账户",
   "cmd.copyName": "复制名称",
   "cmd.manageUsers": "管理用户",

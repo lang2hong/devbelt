@@ -7,7 +7,7 @@ import { SyncCoordinator } from './e2e/syncCoordinator';
 import { EntityStore, UnresolvedRefStore } from './e2e/entityStore';
 import type { SyncEntityType } from './e2e/syncEntity';
 import type { PersonalSyncClient } from './e2e/client';
-import { assertU64Decimal } from './e2e/types';
+import { assertU64Decimal, validateSyncState, type NewStateDto, type StateDto } from './e2e/types';
 import { DekStore, deriveSyncSignKeyPair } from './crypto/keyStore';
 import type { ConnectionStore } from '../connection/connectionStore';
 import type { CachedEntitlement } from './authService';
@@ -110,6 +110,42 @@ export class PersonalSyncSession {
 
   getStateStore(): StateStore {
     return this.stateStore;
+  }
+
+  /** 拉取并严格校验远端状态；命令层不得直接信任网络响应。 */
+  async getRemoteState(): Promise<StateDto> {
+    return validateSyncState(await this.client.getState());
+  }
+
+  /** 初始化成功后才落盘 DEK/snapshot，随后启动会话。 */
+  async initializeSync(newState: NewStateDto, dek: Uint8Array): Promise<void> {
+    await this.client.init(newState);
+    const snapshot: SyncStateSnapshot = { keyEpoch: '1', stateVersion: '1', changeSequence: '0' };
+    await this.dekStore.store(this.userId, 1n, dek);
+    await this.stateStore.setSnapshot(snapshot);
+    this.unlock(snapshot.keyEpoch, dek);
+  }
+
+  /**
+   * 对已存在 state 完成解锁。cleanup intent 必须先用远端确认快照收敛，再写当前 epoch
+   * 的 DEK/snapshot；任一步失败都不会启动 coordinator。
+   */
+  async unlockFromState(state: StateDto, dek: Uint8Array): Promise<void> {
+    const snapshot: SyncStateSnapshot = {
+      keyEpoch: state.keyEpoch,
+      stateVersion: state.stateVersion,
+      changeSequence: state.changeSequence,
+    };
+    if (this.pendingCleanup) await this.resumeEpochTransition(snapshot);
+    await this.dekStore.store(this.userId, BigInt(snapshot.keyEpoch), dek);
+    await this.stateStore.setSnapshot(snapshot);
+    this.unlock(snapshot.keyEpoch, dek);
+  }
+
+  /** 解锁后的首次/手动同步，复用 coordinator 的单飞链。 */
+  async syncNow() {
+    if (!this.coordinator) throw new Error('sync session is locked');
+    return this.coordinator.runNow();
   }
 
   /** 建立当前 epoch 的 recordMap/outbox/unresolved；epoch 与现存 store 不一致时抛错（不得静默沿用）。 */
