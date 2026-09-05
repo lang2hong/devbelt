@@ -5,6 +5,15 @@ import type { SavedConnection } from './connectionStore';
 import type { HistoryStore } from '../history/historyStore';
 import { QueryHistoryRecorder } from '../history/queryHistoryRecorder';
 import { SshTunnel } from './sshTunnel';
+import { validateConnectionPaths, type PathValidationResult } from './connectionPathValidator';
+
+/** 建连前路径校验失败：阻断建连（不含完整路径内容）。 */
+export class ConnectionPathError extends Error {
+  constructor(public readonly result: PathValidationResult) {
+    super(`connection path invalid: ${result.issues.map((i) => `${i.field}:${i.reason}`).join(', ')}`);
+    this.name = 'ConnectionPathError';
+  }
+}
 
 export interface PoolConfig {
   maxConnections: number;
@@ -118,6 +127,15 @@ export class ConnectionManager {
   }
 
   /**
+   * 建连前路径硬拒绝：已配置但缺失/不可读的本机路径直接拒绝建连，不静默降级。
+   * 返回校验结果供调用方（UI 提示）使用；抛 `ConnectionPathError` 阻断建连。
+   * 已缓存的活跃会话（isAlive）跳过校验（连接已建立，路径后续变化不影响既有会话）。
+   */
+  async validateConnectionPath(conn: SavedConnection): Promise<PathValidationResult> {
+    return validateConnectionPaths(conn);
+  }
+
+  /**
    * 真正建连。
    *
    * SSH 隧道一旦建起，**后续任何失败路径都必须关掉它**，否则隧道连同其
@@ -128,6 +146,12 @@ export class ConnectionManager {
    */
   private async doConnect(conn: SavedConnection): Promise<ConnectionSession> {
     this.evictIfNeeded();
+
+    // 建连前强制路径硬拒绝（阶段 A 附加）：已配置但缺失/不可读即拒建。
+    const pathCheck = await validateConnectionPaths(conn);
+    if (!pathCheck.valid) {
+      throw new ConnectionPathError(pathCheck);
+    }
 
     let host = conn.host;
     let port = conn.port;
@@ -171,6 +195,7 @@ export class ConnectionManager {
         useConnectionString: conn.useConnectionString,
         connectionUrl: conn.connectionUrl,
         useSSL: conn.useSSL,
+        rejectUnauthorized: conn.rejectUnauthorized,
         caPath: conn.caPath,
         clientCertPath: conn.clientCertPath,
         clientKeyPath: conn.clientKeyPath,

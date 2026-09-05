@@ -17,6 +17,7 @@ import { AuditLogger } from './utils/auditLogger';
 import { BackupScheduler } from './schedule/backupScheduler';
 import { HistoryStore } from './history/historyStore';
 import { AuthService, DEFAULT_SERVER_URL } from './sync/authService';
+import { PersonalSyncClient } from './sync/e2e/client';
 import { eventBus, ConnectionChangedEvent, DataChangeEvent, AuthEvent } from './utils/event';
 import { invalidateLanguage, LANGUAGE_CONFIG_KEY } from './i18n';
 import { registerCommands } from './commands';
@@ -28,6 +29,8 @@ import { CredentialVault } from './org/credentialVault';
 import { OrgWorkspace } from './org/workspace';
 import { OrgTreeDataProvider } from './tree/orgTreeDataProvider';
 import { registerOrgCommands } from './commands/org';
+import { SyncSessionFactory } from './sync/sessionFactory';
+import { DekStore } from './sync/crypto/keyStore';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const store = new ConnectionStore(context.globalState, context.secrets);
@@ -106,6 +109,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
   registerOrgCommands({ context, workspace: orgWorkspace, manager, executor, tree: orgTreeProvider });
+
+  // 受控同步 session 工厂（阶段 A 无 UI）：activation/locked 态零请求，仅经工厂懒建。
+  // 阶段 B 才接入初始化/解锁命令；此处只挂生命周期：logout → 丢弃 session，dispose → 清理。
+  const syncFactory = new SyncSessionFactory({
+    connectionStore: store,
+    dekStore: new DekStore(context.secrets),
+    memento: context.globalState,
+    getUserId: async () => (auth.isLoggedIn() ? auth.getUserId() : undefined),
+    entitlement: () => auth.getCachedEntitlement(),
+    createClient: () => new PersonalSyncClient(auth.client),
+  });
+  context.subscriptions.push({ dispose: () => syncFactory.dispose() });
+  const onLogoutInvalidate = eventBus.subscribe(AuthEvent, (e) => {
+    if (e.kind === 'logout') syncFactory.invalidate();
+  });
+  context.subscriptions.push(onLogoutInvalidate);
   // 这里原先用 onDidChangeSelection 往 `dbclient.dbType` / `dbclient.has*` 写
   // context key，供菜单 when 判断数据库类型。那是竞态的：右键未选中项、或右键
   // 与当前选中项不同时，键里还是上一个节点的值 —— 在 SQLite 表上会看到 MySQL
