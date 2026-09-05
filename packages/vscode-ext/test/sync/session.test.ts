@@ -8,6 +8,8 @@ import type { PersonalSyncClient } from '../../src/sync/e2e/client';
 import type { ConnectionStore } from '../../src/connection/connectionStore';
 import type { CachedEntitlement } from '../../src/sync/authService';
 import type { NewStateDto, StateDto } from '../../src/sync/e2e/types';
+import { deriveSyncSignKeyPair } from '../../src/sync/crypto/keyStore';
+import { encodeBase64Url } from '../../src/sync/crypto/recoveryCode';
 
 function makeMemento() {
   const m = new Map<string, unknown>();
@@ -119,10 +121,23 @@ describe('PersonalSyncSession', () => {
     const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, { getState: async () => ({ keyEpoch: '1' }) } as unknown as PersonalSyncClient);
     await expect(s.getRemoteState()).rejects.toThrowError(/unexpected key|protocol/);
 
-    await s.unlockFromState({ keyEpoch: '2', stateVersion: '3', changeSequence: '4' } as StateDto, dek32());
+    const dek = dek32();
+    await s.unlockFromState({ keyEpoch: '2', stateVersion: '3', changeSequence: '4', signPub: encodeBase64Url(deriveSyncSignKeyPair(dek).publicKey) } as StateDto, dek);
     expect(secrets.store).toHaveBeenCalledWith('dbclient.sync.dek.7.2', expect.any(String));
     expect(s.getStateStore().getSnapshot()).toEqual({ keyEpoch: '2', stateVersion: '3', changeSequence: '4' });
     expect(s.isUnlocked).toBe(true);
+  });
+
+  it('unlockFromState 拒绝与 state.signPub 不一致的 DEK，且不落盘或解锁', async () => {
+    const memento = makeMemento();
+    const { store, secrets } = makeDekStore();
+    const s = new PersonalSyncSession('7', memento, store, makeStore().store, makeClient());
+
+    await expect(s.unlockFromState({ keyEpoch: '1', stateVersion: '1', changeSequence: '0', signPub: 'A'.repeat(43) } as StateDto, dek32()))
+      .rejects.toThrowError(/signing key does not match/);
+    expect(secrets.store).not.toHaveBeenCalled();
+    expect(s.getStateStore().getSnapshot()).toBeUndefined();
+    expect(s.isUnlocked).toBe(false);
   });
 
   it('dispose 幂等', () => {

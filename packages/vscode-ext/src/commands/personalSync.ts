@@ -11,6 +11,7 @@ type SyncRun = { stage: string } | undefined;
 
 interface SyncSessionPort {
   readonly uid: string;
+  readonly isUnlocked: boolean;
   readonly pendingCleanup: { fromKeyEpoch: string; toKeyEpoch: string } | undefined;
   getRemoteState(): Promise<StateDto>;
   initializeSync(newState: NewStateDto, dek: Uint8Array): Promise<void>;
@@ -34,6 +35,7 @@ export interface PersonalSyncCommandDeps {
   auth: Pick<AuthService, 'isLoggedIn' | 'refreshEntitlement'>;
   factory: SyncFactoryPort;
   ui: SyncUi;
+  newRecoveryCode?: () => { code: string; raw: Uint8Array };
   createMaterial?: (userId: string, keyEpoch: string, smp: string, recoveryRaw: Uint8Array) => Promise<InitialSyncMaterial>;
   unlockDek?: (userId: string, keyEpoch: string, smp: string, state: StateDto) => Promise<Uint8Array>;
 }
@@ -74,7 +76,7 @@ async function existingState(session: SyncSessionPort): Promise<StateDto | undef
   try {
     return await session.getRemoteState();
   } catch (err) {
-    if (err instanceof SyncApiError && err.status === 404 && err.code === 'SYNC_NOT_INITIALIZED') return undefined;
+    if (err instanceof SyncApiError && err.status === 400 && err.code === 'SYNC_NOT_INITIALIZED') return undefined;
     throw err;
   }
 }
@@ -95,10 +97,27 @@ async function runFirstSync(session: SyncSessionPort, ui: SyncUi): Promise<void>
   }
 }
 
-/** 初始化路径：状态不存在才可执行；恢复码确认发生在远端写入前。 */
+function validateNewSmp(smp: string, ui: SyncUi): boolean {
+  if (smp.trim().length === 0) {
+    ui.error(l10n('sync.passphraseEmpty'));
+    return false;
+  }
+  const codePoints = [...smp].length;
+  if (codePoints < 12 || codePoints > 128) {
+    ui.error(l10n('sync.passphraseLength'));
+    return false;
+  }
+  return true;
+}
+
+/** 初始化路径：状态不存在才可执行；恢复码仅在远端及本地状态均成功后展示一次。 */
 export async function initializePersonalSync(deps: PersonalSyncCommandDeps): Promise<void> {
   const session = await getSession(deps);
   if (!session) return;
+  if (session.isUnlocked) {
+    deps.ui.info(l10n('sync.alreadyUnlocked'));
+    return;
+  }
   try {
     if (await existingState(session)) {
       deps.ui.info(l10n('sync.alreadyInitialized'));
@@ -111,26 +130,36 @@ export async function initializePersonalSync(deps: PersonalSyncCommandDeps): Pro
 
   const smp = await deps.ui.promptSmp(l10n('sync.createPassphrase'));
   if (!smp) return;
+  if (!validateNewSmp(smp, deps.ui)) return;
   const confirmation = await deps.ui.promptSmp(l10n('sync.confirmPassphrase'));
   if (!confirmation) return;
+  if (!validateNewSmp(confirmation, deps.ui)) return;
   if (smp !== confirmation) {
     deps.ui.error(l10n('sync.passphraseMismatch'));
     return;
   }
 
-  const recovery = newRecoveryCode();
-  if (!await deps.ui.confirmRecoveryCode(recovery.code)) return;
+  const recovery = (deps.newRecoveryCode ?? newRecoveryCode)();
+  let material: InitialSyncMaterial | undefined;
   try {
-    const material = await (deps.createMaterial ?? createInitialMaterial)(session.uid, '1', smp, recovery.raw);
+    material = await (deps.createMaterial ?? createInitialMaterial)(session.uid, '1', smp, recovery.raw);
     await session.initializeSync(newStateFrom(material), material.dek);
   } catch (err) {
     if (err instanceof SyncApiError && err.code === 'SYNC_STATE_EXISTS') {
       deps.ui.warn(l10n('sync.initializationRaced'));
+    } else if (material) {
+      // init 的网络结果或远端成功后的本机落盘状态可能未知，不能鼓励再次 init。
+      deps.ui.warn(l10n('sync.initializationUncertain'));
     } else {
       deps.ui.error(l10n('sync.initializationFailed'));
     }
     return;
+  } finally {
+    // session 已复制其拥有的 DEK；命令层材料和恢复码熵随后不应继续驻留。
+    recovery.raw.fill(0);
+    material?.dek.fill(0);
   }
+  await deps.ui.confirmRecoveryCode(recovery.code);
   await runFirstSync(session, deps.ui);
 }
 
@@ -138,6 +167,10 @@ export async function initializePersonalSync(deps: PersonalSyncCommandDeps): Pro
 export async function unlockPersonalSync(deps: PersonalSyncCommandDeps): Promise<void> {
   const session = await getSession(deps);
   if (!session) return;
+  if (session.isUnlocked) {
+    deps.ui.info(l10n('sync.alreadyUnlocked'));
+    return;
+  }
   let state: StateDto | undefined;
   try {
     state = await existingState(session);
@@ -152,14 +185,17 @@ export async function unlockPersonalSync(deps: PersonalSyncCommandDeps): Promise
 
   const smp = await deps.ui.promptSmp(l10n('sync.enterPassphrase'));
   if (!smp) return;
+  let dek: Uint8Array | undefined;
   try {
     const hadPendingCleanup = session.pendingCleanup !== undefined;
-    const dek = await (deps.unlockDek ?? ((uid, epoch, passphrase, remote) => unlockDek(uid, epoch, passphrase, remote.smpKdf, remote.envelopeSmp)))(session.uid, state.keyEpoch, smp, state);
+    dek = await (deps.unlockDek ?? ((uid, epoch, passphrase, remote) => unlockDek(uid, epoch, passphrase, remote.smpKdf, remote.envelopeSmp)))(session.uid, state.keyEpoch, smp, state);
     await session.unlockFromState(state, dek);
     if (hadPendingCleanup) deps.ui.info(l10n('sync.cleanupResumed'));
   } catch {
     deps.ui.error(l10n('sync.unlockFailed'));
     return;
+  } finally {
+    dek?.fill(0);
   }
   await runFirstSync(session, deps.ui);
 }

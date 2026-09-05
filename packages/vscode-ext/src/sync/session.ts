@@ -9,6 +9,7 @@ import type { SyncEntityType } from './e2e/syncEntity';
 import type { PersonalSyncClient } from './e2e/client';
 import { assertU64Decimal, validateSyncState, type NewStateDto, type StateDto } from './e2e/types';
 import { DekStore, deriveSyncSignKeyPair } from './crypto/keyStore';
+import { encodeBase64Url } from './crypto/recoveryCode';
 import type { ConnectionStore } from '../connection/connectionStore';
 import type { CachedEntitlement } from './authService';
 import { uniqueId } from '../utils/id';
@@ -121,9 +122,15 @@ export class PersonalSyncSession {
   async initializeSync(newState: NewStateDto, dek: Uint8Array): Promise<void> {
     await this.client.init(newState);
     const snapshot: SyncStateSnapshot = { keyEpoch: '1', stateVersion: '1', changeSequence: '0' };
-    await this.dekStore.store(this.userId, 1n, dek);
-    await this.stateStore.setSnapshot(snapshot);
-    this.unlock(snapshot.keyEpoch, dek);
+    const ownedDek = dek.slice();
+    try {
+      await this.dekStore.store(this.userId, 1n, ownedDek);
+      await this.stateStore.setSnapshot(snapshot);
+      this.unlock(snapshot.keyEpoch, ownedDek);
+    } catch (err) {
+      ownedDek.fill(0);
+      throw err;
+    }
   }
 
   /**
@@ -131,15 +138,24 @@ export class PersonalSyncSession {
    * 的 DEK/snapshot；任一步失败都不会启动 coordinator。
    */
   async unlockFromState(state: StateDto, dek: Uint8Array): Promise<void> {
+    if (encodeBase64Url(deriveSyncSignKeyPair(dek).publicKey) !== state.signPub) {
+      throw new Error('sync state signing key does not match decrypted key');
+    }
     const snapshot: SyncStateSnapshot = {
       keyEpoch: state.keyEpoch,
       stateVersion: state.stateVersion,
       changeSequence: state.changeSequence,
     };
-    if (this.pendingCleanup) await this.resumeEpochTransition(snapshot);
-    await this.dekStore.store(this.userId, BigInt(snapshot.keyEpoch), dek);
-    await this.stateStore.setSnapshot(snapshot);
-    this.unlock(snapshot.keyEpoch, dek);
+    const ownedDek = dek.slice();
+    try {
+      if (this.pendingCleanup) await this.resumeEpochTransition(snapshot);
+      await this.dekStore.store(this.userId, BigInt(snapshot.keyEpoch), ownedDek);
+      await this.stateStore.setSnapshot(snapshot);
+      this.unlock(snapshot.keyEpoch, ownedDek);
+    } catch (err) {
+      ownedDek.fill(0);
+      throw err;
+    }
   }
 
   /** 解锁后的首次/手动同步，复用 coordinator 的单飞链。 */
