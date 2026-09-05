@@ -159,7 +159,11 @@ export async function initializePersonalSync(deps: PersonalSyncCommandDeps): Pro
     recovery.raw.fill(0);
     material?.dek.fill(0);
   }
-  await deps.ui.confirmRecoveryCode(recovery.code);
+  // Recovery code is only available in this in-memory flow. A dismissed modal is not confirmation:
+  // keep prompting until the user explicitly acknowledges saving it before reporting success.
+  while (!await deps.ui.confirmRecoveryCode(recovery.code)) {
+    deps.ui.warn(l10n('sync.recoveryCodeMustConfirm'));
+  }
   await runFirstSync(session, deps.ui);
 }
 

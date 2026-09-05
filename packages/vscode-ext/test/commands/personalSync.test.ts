@@ -99,6 +99,28 @@ describe('personal sync B1 commands', () => {
     expect(session.syncNow).not.toHaveBeenCalled();
   });
 
+  it('does not sync or report ready until recovery-code confirmation is explicit', async () => {
+    const session = makeSession({ getRemoteState: vi.fn(async () => { throw new SyncApiError(400, 'SYNC_NOT_INITIALIZED'); }) });
+    const { deps, ui, info, warn } = makeDeps(session);
+    let confirm!: (value: boolean) => void;
+    ui.confirmRecoveryCode = vi.fn()
+      .mockResolvedValueOnce(false)
+      .mockImplementationOnce(() => new Promise<boolean>((resolve) => { confirm = resolve; }));
+
+    const initializing = initializePersonalSync(deps);
+    await vi.waitFor(() => expect(ui.confirmRecoveryCode).toHaveBeenCalledTimes(2));
+
+    expect(warn).toHaveBeenCalledWith('Save the recovery code and select “I saved it” to finish setup.');
+    expect(session.syncNow).not.toHaveBeenCalled();
+    expect(info).not.toHaveBeenCalledWith('Personal sync is unlocked and up to date.');
+
+    confirm(true);
+    await initializing;
+
+    expect(session.syncNow).toHaveBeenCalledTimes(1);
+    expect(info).toHaveBeenCalledWith('Personal sync is unlocked and up to date.');
+  });
+
   it('rejects initialization when a remote state already exists', async () => {
     const session = makeSession();
     const { deps, ui } = makeDeps(session);
