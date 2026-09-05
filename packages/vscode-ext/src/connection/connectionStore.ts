@@ -5,9 +5,9 @@ import type { SecretStorage } from 'vscode';
 import { QueryStore, type QueryFolder } from './queryStore';
 import { uniqueId } from '../utils/id';
 import { EventEmitter, type Event, eventBus, ConnectionChangedEvent } from '../utils/event';
+import type { ChangeSource } from './queryStore';
 
-/** 连接变更来源。远端同步应用使用 sync，避免再次触发上传。 */
-export type ChangeSource = 'user' | 'sync';
+export type { ChangeSource } from './queryStore';
 
 /**
  * 已保存的连接（持久化到 VSCode 全局状态）。
@@ -106,8 +106,8 @@ export class ConnectionStore {
     private readonly secrets: SecretStorage,
   ) {
     this.queryStore = new QueryStore(memento);
-    this.queryStore.onChanged(() => {
-      this.changedEmitter.fire('user');
+    this.queryStore.onChanged((source) => {
+      this.changedEmitter.fire(source);
       void eventBus.publish(new ConnectionChangedEvent('connection', 'update'));
     });
   }
@@ -172,6 +172,27 @@ export class ConnectionStore {
     return this.getTreeData().groups.filter((g) => !g.deleted);
   }
 
+  /** 同步专用：读取原始分组（含墓碑，未过滤）。 */
+  listGroupsForSync(): ConnectionGroup[] {
+    return this.getTreeData().groups;
+  }
+
+  /** 按 id 读取分组（含墓碑），供同步 apply 冲突判定。 */
+  getGroupById(id: string): ConnectionGroup | undefined {
+    return this.getTreeData().groups.find((g) => g.id === id);
+  }
+
+  /** 同步/导入写入：按 id 覆盖分组（含时间戳与墓碑字段）。 */
+  async upsertGroup(group: ConnectionGroup, source: ChangeSource = 'sync'): Promise<void> {
+    const data = this.getTreeData();
+    const idx = data.groups.findIndex((g) => g.id === group.id);
+    if (idx >= 0) data.groups[idx] = group;
+    else data.groups.push(group);
+    await this.memento.update(ConnectionStore.KEY, data);
+    this.changedEmitter.fire(source);
+    void eventBus.publish(new ConnectionChangedEvent('group', idx >= 0 ? 'update' : 'create', group.id));
+  }
+
   /** 读取全部已保存连接（已过滤软删除墓碑） */
   list(): SavedConnection[] {
     return this.getTreeData().connections.filter((c) => !c.deleted).map((connection) => this.materialize(connection));
@@ -217,7 +238,7 @@ export class ConnectionStore {
     void eventBus.publish(new ConnectionChangedEvent('connection', isNew ? 'create' : 'update', connection.id));
   }
 
-  /** 删除连接（软删除：置墓碑，记录保留；清理凭据以避免墓碑携带密码） */
+  /** 删除连接（软删除：置墓碑，记录保留；清理凭据以避免墓碑携带密码；级联 tombstone 其查询与文件夹） */
   async remove(id: string, source: ChangeSource = 'user'): Promise<void> {
     const data = this.getTreeData();
     const conn = data.connections.find((c) => c.id === id);
@@ -226,88 +247,90 @@ export class ConnectionStore {
     conn.updateTime = Date.now();
     await this.memento.update(ConnectionStore.KEY, data);
     await this.clearSecrets(id);
+    // 同事务级联：连接删除 → 其下查询与查询文件夹一并 tombstone（§三）。
+    await this.cascadeConnectionDelete(id, source);
     this.changedEmitter.fire(source);
     void eventBus.publish(new ConnectionChangedEvent('connection', 'delete', id));
   }
 
   /** 移动连接到指定分组 */
-  async moveToGroup(connId: string, groupId?: string): Promise<void> {
+  async moveToGroup(connId: string, groupId?: string, source: ChangeSource = 'user'): Promise<void> {
     const data = this.getTreeData();
     const conn = data.connections.find((c) => c.id === connId);
     if (!conn) return;
     conn.groupId = groupId;
     conn.updateTime = Date.now();
     await this.memento.update(ConnectionStore.KEY, data);
-    this.changedEmitter.fire('user');
+    this.changedEmitter.fire(source);
     void eventBus.publish(new ConnectionChangedEvent('connection', 'move', connId));
   }
 
   /** 新建分组，返回其 id */
-  async addGroup(name: string, parentId?: string): Promise<string> {
+  async addGroup(name: string, parentId?: string, source: ChangeSource = 'user'): Promise<string> {
     const data = this.getTreeData();
     const now = Date.now();
     const group: ConnectionGroup = { id: uniqueId('g'), name, parentId, createTime: now, updateTime: now, deleted: false };
     data.groups.push(group);
     await this.memento.update(ConnectionStore.KEY, data);
-    this.changedEmitter.fire('user');
+    this.changedEmitter.fire(source);
     void eventBus.publish(new ConnectionChangedEvent('group', 'create', group.id));
     return group.id;
   }
 
   /** 以指定 id 创建分组（导入用，保留原 id 以维持连接归属） */
-  async addGroupRaw(id: string, name: string, parentId?: string): Promise<void> {
+  async addGroupRaw(id: string, name: string, parentId?: string, source: ChangeSource = 'user'): Promise<void> {
     if (!id) return;
     const data = this.getTreeData();
     if (data.groups.some((g) => g.id === id)) return;
     const now = Date.now();
     data.groups.push({ id, name, parentId, createTime: now, updateTime: now, deleted: false });
     await this.memento.update(ConnectionStore.KEY, data);
-    this.changedEmitter.fire('user');
+    this.changedEmitter.fire(source);
     void eventBus.publish(new ConnectionChangedEvent('group', 'create', id));
   }
 
   /** 重命名分组 */
-  async renameGroup(id: string, name: string): Promise<void> {
+  async renameGroup(id: string, name: string, source: ChangeSource = 'user'): Promise<void> {
     const data = this.getTreeData();
     const g = data.groups.find((x) => x.id === id);
     if (g) {
       g.name = name;
       g.updateTime = Date.now();
       await this.memento.update(ConnectionStore.KEY, data);
-      this.changedEmitter.fire('user');
+      this.changedEmitter.fire(source);
       void eventBus.publish(new ConnectionChangedEvent('group', 'update', id));
     }
   }
 
-  /** 删除分组（递归软删除子分组，组内连接一并软删除并清凭据） */
-  async removeGroup(id: string): Promise<void> {
+  /** 删除分组（v2：仅 tombstone 分组树，直接成员连接移除分组而非删除；不做连接级联） */
+  async removeGroup(id: string, source: ChangeSource = 'user'): Promise<void> {
     const data = this.getTreeData();
     const toDelete = new Set<string>();
     const collect = (gid: string) => {
+      // 环检测：parentId 自指或回环直接终止（安全必需，防递归死循环）。
+      if (toDelete.has(gid)) return;
       toDelete.add(gid);
-      data.groups.filter((x) => x.parentId === gid).forEach((child) => collect(child.id));
+      data.groups.filter((x) => x.parentId === gid && x.id !== gid).forEach((child) => collect(child.id));
     };
     collect(id);
     const now = Date.now();
     data.groups.forEach((g) => {
       if (toDelete.has(g.id)) { g.deleted = true; g.updateTime = now; }
     });
-    const deletedConnIds: string[] = [];
+    // v2：被删分组树下直接/间接成员连接 groupId → undefined（移未分组），连接本身不动。
     data.connections.forEach((c) => {
       if (c.groupId && toDelete.has(c.groupId)) {
-        c.deleted = true;
         c.groupId = undefined;
         c.updateTime = now;
-        deletedConnIds.push(c.id);
       }
     });
     await this.memento.update(ConnectionStore.KEY, data);
-    for (const connId of deletedConnIds) {
-      await this.clearSecrets(connId);
-      void eventBus.publish(new ConnectionChangedEvent('connection', 'delete', connId));
-    }
-    this.changedEmitter.fire('user');
+    this.changedEmitter.fire(source);
     void eventBus.publish(new ConnectionChangedEvent('group', 'delete', id));
+  }
+
+  private async cascadeConnectionDelete(connId: string, source: ChangeSource): Promise<void> {
+    await this.queryStore.cascadeDeleteByConnection(connId, source);
   }
 
   private async sanitize(connection: SavedConnection): Promise<{ connection: SavedConnection; changed: boolean }> {
@@ -377,20 +400,20 @@ export class ConnectionStore {
   }
 
   /** 删除保存查询 */
-  removeQuery(id: string): Promise<void> {
-    return this.queryStore.removeQuery(id);
+  removeQuery(id: string, source: ChangeSource = 'user'): Promise<void> {
+    return this.queryStore.removeQuery(id, source);
   }
 
   // ─── 保存查询文件夹 ───
 
-  /** 读取全部保存查询文件夹 */
-  getQueryFolders(): QueryFolder[] {
-    return this.queryStore.getQueryFolders();
+  /** 读取全部保存查询文件夹（按连接过滤，可选） */
+  getQueryFolders(connId?: string): QueryFolder[] {
+    return this.queryStore.getQueryFolders(connId);
   }
 
   /** 新建保存查询文件夹，返回其 id */
-  addQueryFolder(name: string): Promise<string> {
-    return this.queryStore.addQueryFolder(name);
+  addQueryFolder(name: string, connId: string): Promise<string> {
+    return this.queryStore.addQueryFolder(name, connId);
   }
 
   /** 重命名保存查询文件夹 */
@@ -399,7 +422,39 @@ export class ConnectionStore {
   }
 
   /** 删除保存查询文件夹，内部查询移回根级 */
-  removeQueryFolder(id: string): Promise<void> {
-    return this.queryStore.removeQueryFolder(id);
+  removeQueryFolder(id: string, source: ChangeSource = 'user'): Promise<void> {
+    return this.queryStore.removeQueryFolder(id, source);
+  }
+
+  // ─── 同步专用原始访问（含墓碑） ───
+
+  /** 同步用：原始查询含墓碑。 */
+  listQueriesForSync() {
+    return this.queryStore.listQueriesForSync();
+  }
+
+  /** 同步用：原始文件夹含墓碑。 */
+  listFoldersForSync() {
+    return this.queryStore.listFoldersForSync();
+  }
+
+  /** 按 id 读查询（含墓碑）。 */
+  getQueryById(id: string) {
+    return this.queryStore.getQueryById(id);
+  }
+
+  /** 按 id 读文件夹（含墓碑）。 */
+  getFolderById(id: string) {
+    return this.queryStore.getFolderById(id);
+  }
+
+  /** 同步/导入写入：按 id 覆盖查询。 */
+  upsertQuery(query: SavedQuery, source: ChangeSource = 'sync'): Promise<void> {
+    return this.queryStore.upsertQuery(query, source);
+  }
+
+  /** 同步/导入写入：按 id 覆盖文件夹。 */
+  upsertFolder(folder: QueryFolder, source: ChangeSource = 'sync'): Promise<void> {
+    return this.queryStore.upsertFolder(folder, source);
   }
 }

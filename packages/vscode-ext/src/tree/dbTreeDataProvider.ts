@@ -170,7 +170,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     if (!db || !conn || !catType) return [];
 
     if (catType === 'query') {
-      const folderNodes = this.store.getQueryFolders().map(
+      const folderNodes = this.store.getQueryFolders(conn.id).map(
         (folder) =>
           new DbTreeNode(
             folder.name,

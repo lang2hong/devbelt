@@ -50,10 +50,26 @@ export function registerSavedQueryCommands(deps: Deps, sub: Sub): void {
 export function registerQueryFolderCommands(deps: Deps, sub: Sub): void {
   const { store, treeProvider } = deps;
 
-  sub('dbclient.newQueryFolder', async () => {
+  sub('dbclient.newQueryFolder', async (node?: DbTreeNode) => {
     const name = await vscode.window.showInputBox({ prompt: 'Query folder name' });
     if (!name) return;
-    await store.addQueryFolder(name);
+    // v2：文件夹跟随连接，需在连接上下文触发；阶段 A 命令口径暂以节点连接为准。
+    const connId = node?.conn?.id;
+    if (!connId) {
+      const conns = store.list().filter((c) => !c.deleted);
+      if (conns.length === 0) {
+        void vscode.window.showWarningMessage('No connection to attach the folder to.');
+        return;
+      }
+      const picked = await vscode.window.showQuickPick(
+        conns.map((c) => ({ label: c.name, value: c.id })),
+        { placeHolder: 'Attach folder to connection' },
+      );
+      if (!picked) return;
+      await store.addQueryFolder(name, picked.value);
+    } else {
+      await store.addQueryFolder(name, connId);
+    }
     treeProvider.refresh();
   });
 

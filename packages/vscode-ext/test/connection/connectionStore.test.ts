@@ -145,7 +145,7 @@ describe('ConnectionStore.getVisibleTreeData', () => {
 });
 
 describe('ConnectionStore.removeGroup', () => {
-  it('删除父分组：递归删除子分组，并一并删除组下连接（含子分组下的）', async () => {
+  it('删除父分组：tombstone 分组树，成员连接移未分组（不删除连接）', async () => {
     const secrets = createSecrets();
     const store = new ConnectionStore(createMemento({
       groups: [
@@ -165,11 +165,49 @@ describe('ConnectionStore.removeGroup', () => {
     const data = store.getTreeData();
     expect(data.groups.find((g) => g.id === 'root')!.deleted).toBe(true);
     expect(data.groups.find((g) => g.id === 'child')!.deleted).toBe(true);
-    expect(data.connections.find((c) => c.id === 'c1')!.deleted).toBe(true);
-    expect(data.connections.find((c) => c.id === 'c2')!.deleted).toBe(true);
+    // 连接本身不被删除，仅解除分组
+    expect(data.connections.find((c) => c.id === 'c1')!.deleted).toBe(false);
+    expect(data.connections.find((c) => c.id === 'c1')!.groupId).toBeUndefined();
+    expect(data.connections.find((c) => c.id === 'c2')!.deleted).toBe(false);
+    expect(data.connections.find((c) => c.id === 'c2')!.groupId).toBeUndefined();
     expect(data.connections.find((c) => c.id === 'c3')!.deleted).toBe(false);
-    expect(await secrets.get('dbclient.connection.c1.password')).toBeUndefined();
-    expect(await secrets.get('dbclient.connection.c2.password')).toBeUndefined();
-    expect(store.getVisibleTreeData().connections.map((c) => c.id)).toEqual(['c3']);
+    // 凭据保留（连接未被删除）
+    expect(await secrets.get('dbclient.connection.c1.password')).toBe('p1');
+    expect(await secrets.get('dbclient.connection.c2.password')).toBe('p2');
+    expect(store.getVisibleTreeData().connections.map((c) => c.id).sort()).toEqual(['c1', 'c2', 'c3']);
+  });
+});
+
+describe('ConnectionStore change source', () => {
+  it('group and move methods preserve an explicit sync source', async () => {
+    const store = new ConnectionStore(createMemento({
+      groups: [{ id: 'g-1', name: 'Old' }],
+      connections: [conn({ id: 'c-1' })],
+    }), createSecrets() as any);
+    const sources: string[] = [];
+    store.onChanged((source) => sources.push(source));
+
+    await store.moveToGroup('c-1', 'g-1', 'sync');
+    await store.addGroup('New', undefined, 'sync');
+    await store.addGroupRaw('g-raw', 'Raw', undefined, 'sync');
+    await store.renameGroup('g-1', 'Renamed', 'sync');
+
+    expect(sources).toEqual(['sync', 'sync', 'sync', 'sync']);
+  });
+
+  it('group and move methods default their source to user', async () => {
+    const store = new ConnectionStore(createMemento({
+      groups: [{ id: 'g-1', name: 'Old' }],
+      connections: [conn({ id: 'c-1' })],
+    }), createSecrets() as any);
+    const sources: string[] = [];
+    store.onChanged((source) => sources.push(source));
+
+    await store.moveToGroup('c-1', 'g-1');
+    await store.addGroup('New');
+    await store.addGroupRaw('g-raw', 'Raw');
+    await store.renameGroup('g-1', 'Renamed');
+
+    expect(sources).toEqual(['user', 'user', 'user', 'user']);
   });
 });

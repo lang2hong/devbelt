@@ -28,7 +28,7 @@ describe('QueryStore', () => {
 
   it('scopes saved queries into folders and moves them back to root on folder delete', async () => {
     const store = new QueryStore(createMemento());
-    const folderId = await store.addQueryFolder('Reports');
+    const folderId = await store.addQueryFolder('Reports', 'primary');
     await store.saveQuery({ name: 'Daily', sql: 'SELECT 1', connId: 'primary', database: 'app', folderId });
     await store.saveQuery({ name: 'Root', sql: 'SELECT 2', connId: 'primary', database: 'app' });
 
@@ -44,7 +44,7 @@ describe('QueryStore', () => {
 
   it('renames a query folder without losing its queries', async () => {
     const store = new QueryStore(createMemento());
-    const folderId = await store.addQueryFolder('Old');
+    const folderId = await store.addQueryFolder('Old', 'primary');
     await store.saveQuery({ name: 'Daily', sql: 'SELECT 1', connId: 'primary', database: 'app', folderId });
 
     await store.renameQueryFolder(folderId, 'New');
@@ -65,11 +65,11 @@ describe('QueryStore', () => {
   it('replaceAll replaces local queries and folders entirely (use remote)', async () => {
     const store = new QueryStore(createMemento());
     await store.saveQuery({ name: 'Local', sql: 'SELECT 1', connId: 'primary', database: 'app' });
-    await store.addQueryFolder('LocalFolder');
+    await store.addQueryFolder('LocalFolder', 'primary');
 
     await store.replaceAll({
       queries: [{ id: 'r1', name: 'Remote', sql: 'SELECT 2', connId: 'primary', database: 'app', createTime: 1, updateTime: 1, deleted: false }],
-      folders: [{ id: 'rf1', name: 'RemoteFolder', createTime: 1, updateTime: 1, deleted: false }],
+      folders: [{ id: 'rf1', name: 'RemoteFolder', connId: 'primary', createTime: 1, updateTime: 1, deleted: false }],
     });
 
     const data = store.getSyncData();
