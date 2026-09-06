@@ -49,13 +49,13 @@ export class PostgreSqlConnection extends IConnection {
         /** RFC 8996 已弃用 TLS 1.0/1.1；Node 18+ 默认下限本就是 1.2，显式写出以免被调低 */
         minVersion: 'TLSv1.2',
         /**
-         * 显式要求验证证书。
+         * 默认要求验证证书；允许上层显式关掉（如自签名测试环境）。
          *
          * pg 在没有 ca 时默认已是 true，写出来是为了防止将来有人"为了能连上"
          * 顺手改成 false —— 那样 SSL 只剩加密没有认证，中间人可以随意冒充
-         * 数据库，而界面上仍然显示"已启用 SSL"。
+         * 数据库，而界面上仍然显示"已启用 SSL"。缺省保持 true 的安全基线。
          */
-        rejectUnauthorized: true,
+        rejectUnauthorized: config.rejectUnauthorized ?? true,
       };
     }
     return conf;

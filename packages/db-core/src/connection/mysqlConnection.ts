@@ -131,6 +131,8 @@ export class MysqlConnection extends IConnection {
          * 也就是说那行代码唯一的效果是主动把安全基线往下调，让降级攻击可行。
          */
         minVersion: 'TLSv1.2',
+        // 缺省校验服务端证书；允许上层显式关掉（如自签名测试环境）。
+        rejectUnauthorized: config.rejectUnauthorized ?? true,
       };
     }
     return conf;

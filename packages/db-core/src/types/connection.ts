@@ -29,6 +29,8 @@ export interface ConnectionConfig {
 
   /** SSL */
   useSSL?: boolean;
+  /** 是否校验服务端证书；缺省 true（安全默认）。仅 MySQL/PostgreSQL 生效。 */
+  rejectUnauthorized?: boolean;
   caPath?: string;
   clientCertPath?: string;
   clientKeyPath?: string;
