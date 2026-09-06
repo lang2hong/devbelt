@@ -1,7 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import { SqliteConnection } from '../../../src/connection/sqliteConnection';
 import { SQLite } from '../../../src/connection/sqlite/index';
+
+// 「无可用 sqlite3」场景需要确定性：自动探测走 spawnSync('sqlite3')，这里统一让它
+// 失败（ENOENT），使「not configured」路径不依赖测试机是否真的装了 sqlite3。
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>();
+  return { ...actual, spawnSync: () => ({ error: new Error('sqlite3 not found') }) };
+});
 
 /**
  * query() 失败路径的进程安全性。

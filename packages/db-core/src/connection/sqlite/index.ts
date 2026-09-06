@@ -2,7 +2,7 @@ import * as child_process from 'child_process';
 import { EOL } from 'os';
 import { StreamParser } from './streamParser';
 import { ResultSetParser } from './resultSetParser';
-import { validateSqliteCommand } from './sqliteCommandValidation';
+import { validateSqliteCommand, getSqliteBinariesPath } from './sqliteCommandValidation';
 import type { Result, ResultNew, ResultSet } from './common';
 
 /**
@@ -17,7 +17,9 @@ class SQLite {
 
   constructor(dbPath: string, sqliteCommand?: string) {
     this.dbPath = dbPath;
-    this.sqliteCommand = sqliteCommand ? validateSqliteCommand(sqliteCommand) : undefined;
+    // 未显式配置 sqliteCommand 时自动探测：系统 sqlite3 →（后续）内置二进制回退。
+    // 探测不到则置空，query() 会以「not configured」显式失败，绝不静默返回空结果。
+    this.sqliteCommand = sqliteCommand ? validateSqliteCommand(sqliteCommand) : getSqliteBinariesPath();
   }
 
   /** 终止所有在途子进程（连接关闭时调用，避免进程悬空）。 */

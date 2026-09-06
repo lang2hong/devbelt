@@ -7,6 +7,12 @@ import { arch, platform } from 'os';
  *
  * 原项目通过 vscode context 提供 sqlite 二进制目录，此处改为由调用方显式传入，
  * 使本模块保持纯逻辑、可独立测试。
+ *
+ * 命令解析顺序：
+ *  1. 显式提供的 sqliteCommand 可用 → 用之；
+ *  2. 否则探测系统 PATH 上的 `sqlite3`（ESM 下不再用 `command-exists` 的 CommonJS
+ *     require——db-core 是 `"type":"module"`，`require` 会抛错并被吞掉）；
+ *  3. 否则回退到 fallbackDir 下的内置二进制。
  */
 
 /** 校验命令是否可用，不可用则回退到系统/bin 目录下的 sqlite3 */
@@ -43,13 +49,8 @@ export function isSqliteCommandValid(sqliteCommand: string): boolean {
 
 /** 获取 sqlite3 二进制路径：优先系统命令，否则回退到 fallbackDir 下的内置二进制 */
 export function getSqliteBinariesPath(fallbackDir?: string): string {
-  try {
-    const commandExists = require('command-exists').sync;
-    if (commandExists('sqlite3')) {
-      return 'sqlite3';
-    }
-  } catch {
-    // command-exists 不可用时忽略，继续回退
+  if (isSqliteCommandValid('sqlite3')) {
+    return 'sqlite3';
   }
 
   const plat = platform();
