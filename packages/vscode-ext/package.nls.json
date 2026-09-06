@@ -24,6 +24,7 @@
   "cmd.changeSyncPassword": "Change Sync Password",
   "cmd.initializePersonalSync": "Initialize Personal Sync",
   "cmd.unlockPersonalSync": "Unlock Personal Sync",
+  "cmd.syncNow": "Sync Now",
   "account.title": "Account",
   "cmd.copyName": "Copy Name",
   "cmd.manageUsers": "Manage Users",

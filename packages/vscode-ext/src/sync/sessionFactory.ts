@@ -1,5 +1,6 @@
 import { PersonalSyncSession } from './session';
 import type { PersonalSyncClient } from './e2e/client';
+import type { SyncRunResult } from './e2e/syncEngine';
 import type { MementoLike } from './e2e/stateStore';
 import type { DekStore } from './crypto/keyStore';
 import type { ConnectionStore } from '../connection/connectionStore';
@@ -22,6 +23,8 @@ export interface SyncSessionFactoryDeps {
   /** 当前登录用户（未登录返回 undefined，工厂不建 session）。 */
   readonly getUserId: () => Promise<string | undefined>;
   readonly entitlement?: () => CachedEntitlement | undefined;
+  /** 每轮后台 sync 结束（含失败）后回调；供扩展层刷树/更新状态栏。 */
+  readonly onSyncResult?: (result: SyncRunResult | undefined) => void;
   /** 受控建连接口：仅登录后调用。 */
   readonly createClient: () => PersonalSyncClient;
 }
@@ -50,7 +53,7 @@ export class SyncSessionFactory {
       this.deps.dekStore,
       this.deps.connectionStore,
       this.deps.createClient(),
-      { entitlement: this.deps.entitlement },
+      { entitlement: this.deps.entitlement, onSyncResult: this.deps.onSyncResult },
     );
     return this.session;
   }

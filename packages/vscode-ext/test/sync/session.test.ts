@@ -42,8 +42,24 @@ function makeStore(): { store: ConnectionStore } {
   } as unknown as ConnectionStore };
 }
 
+function validState(keyEpoch = '1', stateVersion = '1', changeSequence = '0'): StateDto {
+  return {
+    protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+    keyEpoch, stateVersion, changeSequence,
+    signPub: 'A'.repeat(43), recoverSignPub: 'A'.repeat(43),
+    smpKdf: { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: 'A'.repeat(22), outputBytes: 32 },
+    recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: 'A'.repeat(22), outputBytes: 32 },
+    envelopeSmp: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: 'A'.repeat(16), ciphertext: 'A'.repeat(43), tag: 'A'.repeat(22) },
+    envelopeRecovery: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: 'A'.repeat(16), ciphertext: 'A'.repeat(43), tag: 'A'.repeat(22) },
+    recoveryCodeSetTime: null,
+  };
+}
+
 function makeClient(): PersonalSyncClient {
-  return {} as PersonalSyncClient;
+  return {
+    getState: async () => validState(),
+    getRecords: async () => ({ snapshotSequence: '0', records: [] }),
+  } as unknown as PersonalSyncClient;
 }
 
 function makeDekStore(opts?: { deleteFailOnce?: boolean }) {
@@ -83,9 +99,9 @@ describe('PersonalSyncSession', () => {
 
   it('双 unlock 不产生双订阅（start 幂等）', () => {
     const { store } = makeDekStore();
-    const spy = vi.fn(() => ({ dispose: () => {} }));
-    const fakeStore = { onChanged: spy, listForSync: () => [], listGroupsForSync: () => [], listFoldersForSync: () => [], listQueriesForSync: () => [] } as unknown as ConnectionStore;
-    const s = new PersonalSyncSession('7', makeMemento(), store, fakeStore, makeClient());
+    const realStore = makeStore().store;
+    const spy = vi.spyOn(realStore, 'onChanged');
+    const s = new PersonalSyncSession('7', makeMemento(), store, realStore, makeClient());
     s.unlock('1', dek32());
     s.unlock('1', dek32());
     expect(spy).toHaveBeenCalledTimes(1);
@@ -106,7 +122,10 @@ describe('PersonalSyncSession', () => {
   it('initializeSync 远端 init 成功后才持久化 DEK/snapshot 并解锁', async () => {
     const { store, secrets } = makeDekStore();
     const init = vi.fn(async () => {});
-    const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, { init } as unknown as PersonalSyncClient);
+    const client = {
+      init, getState: async () => validState(), getRecords: async () => ({ snapshotSequence: '0', records: [] }),
+    } as unknown as PersonalSyncClient;
+    const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, client);
 
     await s.initializeSync({} as NewStateDto, dek32());
 
@@ -118,7 +137,12 @@ describe('PersonalSyncSession', () => {
 
   it('getRemoteState 严格校验网络响应，unlockFromState 持久化确认快照后解锁', async () => {
     const { store, secrets } = makeDekStore();
-    const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, { getState: async () => ({ keyEpoch: '1' }) } as unknown as PersonalSyncClient);
+    const getState = vi.fn()
+      .mockResolvedValueOnce({ keyEpoch: '1' })
+      .mockResolvedValue(validState());
+    const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, {
+      getState, getRecords: async () => ({ snapshotSequence: '0', records: [] }),
+    } as unknown as PersonalSyncClient);
     await expect(s.getRemoteState()).rejects.toThrowError(/unexpected key|protocol/);
 
     const dek = dek32();
@@ -195,29 +219,20 @@ describe('PersonalSyncSession', () => {
     vi.useFakeTimers();
     let releaseRecords!: (v: unknown) => void;
     const recordsGate = new Promise((r) => { releaseRecords = r; });
-    const events = new EventEmitter<'user' | 'sync'>();
-    const store = { onChanged: events.event, listForSync: () => [], listGroupsForSync: () => [], listFoldersForSync: () => [], listQueriesForSync: () => [], getGroupById: () => undefined, getFolderById: () => undefined, getQueryById: () => undefined } as unknown as ConnectionStore;
+    const store = makeStore().store;
     const client = {
-      getState: async () => ({
-        protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
-        keyEpoch: '1', stateVersion: '1', changeSequence: '1',
-        signPub: 'A'.repeat(43), recoverSignPub: 'A'.repeat(43),
-        smpKdf: { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: 'A'.repeat(22), outputBytes: 32 },
-        recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: 'A'.repeat(22), outputBytes: 32 },
-        envelopeSmp: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: 'A'.repeat(16), ciphertext: 'A'.repeat(43), tag: 'A'.repeat(22) },
-        envelopeRecovery: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: 'A'.repeat(16), ciphertext: 'A'.repeat(43), tag: 'A'.repeat(22) },
-        recoveryCodeSetTime: null,
-      }),
+      getState: async () => validState('1', '1', '1'), // 远端 changeSequence '1' > local '0'，触发 pull
       getRecords: async () => recordsGate as Promise<unknown>,
     } as unknown as PersonalSyncClient;
 
     const { store: dekStore } = makeDekStore();
     const s = new PersonalSyncSession('7', makeMemento(), dekStore, store, client);
-    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
-    s.unlock('1', dek32());
+    const dek = dek32();
+    // unlockFromState 解锁即 scheduleInitialSync → 首次 drain 阻塞在 getRecords（在途）
+    await s.unlockFromState({ keyEpoch: '1', stateVersion: '1', changeSequence: '0', signPub: encodeBase64Url(deriveSyncSignKeyPair(dek).publicKey) } as StateDto, dek);
 
-    events.fire('user');
-    await vi.advanceTimersByTimeAsync(300); // drain 启动，reconcile 无出站，block 在 getRecords
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0); // 确保首次 drain 已进入在途 getRecords
     s.lock(); // 清 DEK，stop 不等待在途 drain
     releaseRecords({ snapshotSequence: '1', records: [{ recordId: 'A'.repeat(22), version: '1', changeSequence: '1', deleteTime: null, cipherSuite: 'AES-256-GCM', formatVersion: 1, nonce: 'C'.repeat(16), ciphertext: 'YQ', tag: 'D'.repeat(22) }] });
     await vi.advanceTimersByTimeAsync(0);
@@ -256,5 +271,77 @@ describe('PersonalSyncSession', () => {
       .rejects.toThrowError(/resume snapshot keyEpoch does not match/);
     expect(secrets.delete).not.toHaveBeenCalled();
     expect(memento.get('dbclient.sync.epochCleanup.7')).toEqual({ fromKeyEpoch: '2', toKeyEpoch: '3' });
+  });
+
+  it('scheduleNow / scheduleInitialSync 未解锁抛错（fail-closed）', () => {
+    const s = new PersonalSyncSession('7', makeMemento(), makeDekStore().store, makeStore().store, makeClient());
+    expect(() => s.scheduleNow()).toThrowError(/locked/);
+    expect(() => s.scheduleInitialSync()).toThrowError(/locked/);
+    expect(s.stalled).toBe(false);
+  });
+
+  it('onSyncResult 透传：后台 drain 结束后回调', async () => {
+    vi.useFakeTimers();
+    const events = new EventEmitter<'user' | 'sync'>();
+    const store = {
+      onChanged: events.event, listForSync: () => [], listGroupsForSync: () => [],
+      listFoldersForSync: () => [], listQueriesForSync: () => [], getGroupById: () => undefined,
+      getFolderById: () => undefined, getQueryById: () => undefined,
+    } as unknown as ConnectionStore;
+    const client = {
+      getState: async () => ({
+        protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+        keyEpoch: '1', stateVersion: '1', changeSequence: '0',
+        signPub: 'A'.repeat(43), recoverSignPub: 'A'.repeat(43),
+        smpKdf: { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: 'A'.repeat(22), outputBytes: 32 },
+        recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: 'A'.repeat(22), outputBytes: 32 },
+        envelopeSmp: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: 'A'.repeat(16), ciphertext: 'A'.repeat(43), tag: 'A'.repeat(22) },
+        envelopeRecovery: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: 'A'.repeat(16), ciphertext: 'A'.repeat(43), tag: 'A'.repeat(22) },
+        recoveryCodeSetTime: null,
+      }),
+      getRecords: async () => ({ snapshotSequence: '0', records: [] }),
+    } as unknown as PersonalSyncClient;
+
+    const onSyncResult = vi.fn();
+    const s = new PersonalSyncSession('7', makeMemento(), makeDekStore().store, store, client, { onSyncResult });
+    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+    s.unlock('1', dek32());
+
+    events.fire('user');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(onSyncResult).toHaveBeenCalled();
+    expect(s.lastRun).toBeDefined();
+    vi.useRealTimers();
+  });
+
+  it('initializeSync 不触发首次同步（恢复码确认前零请求）', async () => {
+    vi.useFakeTimers();
+    const getState = vi.fn(async () => validState());
+    const client = {
+      init: vi.fn(async () => {}),
+      getState,
+      getRecords: async () => ({ snapshotSequence: '0', records: [] }),
+    } as unknown as PersonalSyncClient;
+    const s = new PersonalSyncSession('7', makeMemento(), makeDekStore().store, makeStore().store, client);
+    await s.initializeSync({} as NewStateDto, dek32());
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getState).not.toHaveBeenCalled(); // 初始化路径不自动同步，等命令层确认恢复码后 syncNow
+    vi.useRealTimers();
+  });
+
+  it('unlockFromState 触发首次同步恰好一次', async () => {
+    vi.useFakeTimers();
+    const getState = vi.fn(async () => validState());
+    const client = { getState, getRecords: async () => ({ snapshotSequence: '0', records: [] }) } as unknown as PersonalSyncClient;
+    const s = new PersonalSyncSession('7', makeMemento(), makeDekStore().store, makeStore().store, client);
+    const dek = dek32();
+    await s.unlockFromState({ keyEpoch: '1', stateVersion: '1', changeSequence: '0', signPub: encodeBase64Url(deriveSyncSignKeyPair(dek).publicKey) } as StateDto, dek);
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getState).toHaveBeenCalledTimes(1); // 解锁即首次同步，且仅一次
+    vi.useRealTimers();
   });
 });

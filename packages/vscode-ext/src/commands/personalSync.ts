@@ -201,7 +201,9 @@ export async function unlockPersonalSync(deps: PersonalSyncCommandDeps): Promise
   } finally {
     dek?.fill(0);
   }
-  await runFirstSync(session, deps.ui);
+  // 解锁即由 unlockFromState 内部排首次后台同步（scheduleInitialSync）；
+  // 命令层不再重复 syncNow（避免双轮），同步结果经状态栏/onSyncResult 异步反馈。
+  deps.ui.info(l10n('sync.unlocked'));
 }
 
 function vscodeUi(): SyncUi {

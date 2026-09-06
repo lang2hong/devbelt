@@ -4,6 +4,7 @@ import { PendingMutationStore } from './e2e/pendingMutationStore';
 import { SyncEngine } from './e2e/syncEngine';
 import { SyncMutator } from './e2e/syncMutator';
 import { SyncCoordinator } from './e2e/syncCoordinator';
+import type { SyncRunResult } from './e2e/syncEngine';
 import { EntityStore, UnresolvedRefStore } from './e2e/entityStore';
 import type { SyncEntityType } from './e2e/syncEntity';
 import type { PersonalSyncClient } from './e2e/client';
@@ -44,6 +45,8 @@ const LOCAL_ID_PREFIX: Record<SyncEntityType, string> = {
 export interface SyncSessionOptions {
   entitlement?: () => CachedEntitlement | undefined;
   uniqueConnectionId?: () => string;
+  /** 每轮后台 sync 结束（含失败）后回调；供扩展层刷树/更新状态栏。 */
+  onSyncResult?: (result: SyncRunResult | undefined) => void;
 }
 
 interface EpochCleanupIntent {
@@ -103,6 +106,16 @@ export class PersonalSyncSession {
     return this.coordinator?.lastRun;
   }
 
+  /** 是否因 terminal/conflict/epoch-mismatch/paging-stalled 已停止自动重试。 */
+  get stalled(): boolean {
+    return this.coordinator?.stalled ?? false;
+  }
+
+  /** 是否正处于失败退避重试的等待期。 */
+  get retrying(): boolean {
+    return this.coordinator?.retrying ?? false;
+  }
+
   /** 当前 epoch 的待续跑 cleanup intent（有则说明上次切换中断）。 */
   get pendingCleanup(): { fromKeyEpoch: string; toKeyEpoch: string } | undefined {
     const i = this.readIntent();
@@ -152,6 +165,8 @@ export class PersonalSyncSession {
       await this.dekStore.store(this.userId, BigInt(snapshot.keyEpoch), ownedDek);
       await this.stateStore.setSnapshot(snapshot);
       this.unlock(snapshot.keyEpoch, ownedDek);
+      // 解锁路径即排首次同步（幂等）；初始化路径走 initializeSync，不在此触发（等恢复码确认）。
+      this.scheduleInitialSync();
     } catch (err) {
       ownedDek.fill(0);
       throw err;
@@ -162,6 +177,18 @@ export class PersonalSyncSession {
   async syncNow() {
     if (!this.coordinator) throw new Error('sync session is locked');
     return this.coordinator.runNow();
+  }
+
+  /** 立即排一次后台同步（不 await、不抛错）；供命令/窗口聚焦使用。 */
+  scheduleNow(): void {
+    if (!this.coordinator) throw new Error('sync session is locked');
+    this.coordinator.scheduleNow();
+  }
+
+  /** 解锁后的首次同步（幂等）；供扩展层在解锁/首次聚焦时保证至少同步一次。 */
+  scheduleInitialSync(): void {
+    if (!this.coordinator) throw new Error('sync session is locked');
+    this.coordinator.scheduleInitialSync();
   }
 
   /** 建立当前 epoch 的 recordMap/outbox/unresolved；epoch 与现存 store 不一致时抛错（不得静默沿用）。 */
@@ -204,7 +231,9 @@ export class PersonalSyncSession {
         dek: this.dekThunk,
         signSeed: this.signSeedThunk,
       });
-      this.coordinator = new SyncCoordinator(this.store, this.mutator, this.engine);
+      this.coordinator = new SyncCoordinator(this.store, this.mutator, this.engine, {
+        onSettled: this.opts.onSyncResult,
+      });
     }
     this.coordinator!.start();
   }

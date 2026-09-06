@@ -140,8 +140,9 @@ describe('personal sync B1 commands', () => {
     expect(deps.auth.refreshEntitlement).toHaveBeenCalledBefore(deps.factory.ensureSession as any);
     expect(deps.unlockDek).toHaveBeenCalledWith('7', '1', 'sync secret!', state);
     expect(session.unlockFromState).toHaveBeenCalledWith(state, expect.any(Uint8Array));
-    expect(session.syncNow).toHaveBeenCalledTimes(1);
+    expect(session.syncNow).not.toHaveBeenCalled(); // 解锁由 unlockFromState 内部调度首次同步，命令层不再重复
     expect(info).toHaveBeenCalledWith('Completed pending personal sync cleanup.');
+    expect(info).toHaveBeenCalledWith('Personal sync is unlocked. Starting first sync in the background.');
   });
 
   it('zeros the command-owned decrypted DEK after the session accepts it', async () => {

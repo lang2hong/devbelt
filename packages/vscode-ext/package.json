@@ -132,6 +132,11 @@
         "category": "DB Client"
       },
       {
+        "command": "dbclient.syncNow",
+        "title": "%cmd.syncNow%",
+        "category": "DB Client"
+      },
+      {
         "command": "dbclient.addIndex",
         "title": "Add Index",
         "category": "DB Client",
@@ -679,6 +684,10 @@
         {
           "command": "dbclient.unlockPersonalSync",
           "when": "dbclient.loggedIn"
+        },
+        {
+          "command": "dbclient.syncNow",
+          "when": "dbclient.sync.ready"
         },
         {
           "command": "dbclient.scheduleBackup",

@@ -12,16 +12,32 @@ import type { SyncMutator } from './syncMutator';
  *
  * 串行协调：mutation 生成（reconcile 入 outbox）→ sync（push+确认+pull）→ 确认后重对账
  * （drain 循环，捕获「put 确认后再删」/「确认后二次编辑」等由确认驱动的后续 mutation）。
+ *
+ * 失败恢复（任务 B2）：`stage==='error'` 视为临时性失败，按指数退避（base 1s ×2、上限 30s）
+ * 自动重试；`ok` 复位退避。`stage∈{conflict,terminal,epoch-mismatch}` 或 `result.stalled`
+ * 属非临时状态，停止自动重试并令 `stalled` 可观测（不无限请求，等用户操作或生命周期流程）。
  */
+export interface SyncCoordinatorOptions {
+  /** 每个 drain 轮结束（含失败）后回调，供上层刷树/更新状态栏；回调异常不阻断同步链。 */
+  onSettled?: (result: SyncRunResult | undefined) => void;
+}
+
 export class SyncCoordinator {
   private static readonly DEBOUNCE_MS = 250;
   private static readonly MAX_DRAIN_ROUNDS = 5;
+  private static readonly RETRY_BASE_MS = 1000;
+  private static readonly RETRY_MAX_MS = 30000;
 
   private debounceTimer?: ReturnType<typeof setTimeout>;
+  private retryTimer?: ReturnType<typeof setTimeout>;
   private chain: Promise<void> = Promise.resolve();
   private subscription?: Disposable;
+  private stopped = false;
   private _lastError?: string;
   private _lastRun?: SyncRunResult;
+  private _stalled = false;
+  private retryDelay = SyncCoordinator.RETRY_BASE_MS;
+  private initialSyncTriggered = false;
 
   /** 最近一次后台协调失败的原因（不含秘密）；不阻断链，后续 user 变更仍能重调度。 */
   get lastError(): string | undefined {
@@ -33,14 +49,32 @@ export class SyncCoordinator {
     return this._lastRun;
   }
 
+  /** 是否因 terminal/conflict/epoch-mismatch/paging-stalled 已停止自动重试。 */
+  get stalled(): boolean {
+    return this._stalled;
+  }
+
+  /** 是否正处于失败退避重试的等待期（retryTimer 已排）。 */
+  get retrying(): boolean {
+    return this.retryTimer !== undefined;
+  }
+
   constructor(
     private readonly store: ConnectionStore,
     private readonly mutator: SyncMutator,
     private readonly engine: SyncEngine,
+    private readonly options: SyncCoordinatorOptions = {},
   ) {}
 
   start(): void {
     if (this.subscription) return; // 幂等：已订阅不重复订阅
+    this.stopped = false;
+    // 重入（lock→unlock 复用同一 coordinator）时重置懒状态，确保退避/首次同步从干净起点开始。
+    this._stalled = false;
+    this._lastError = undefined;
+    this.retryDelay = SyncCoordinator.RETRY_BASE_MS;
+    this.initialSyncTriggered = false;
+    this.clearRetry();
     this.subscription = this.store.onChanged((source) => {
       if (source !== 'user') return;
       this.schedule();
@@ -48,46 +82,132 @@ export class SyncCoordinator {
   }
 
   stop(): void {
+    this.stopped = true;
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = undefined;
     }
+    this.clearRetry();
     this.subscription?.dispose();
     this.subscription = undefined;
   }
 
-  /** 用户显式请求的同步：复用同一串行链，避免和 debounce 轮次并发。 */
+  /** 用户显式请求的同步：复用同一串行链，避免和 debounce 轮次并发。失败返回调用方。 */
   async runNow(): Promise<SyncRunResult | undefined> {
     let failure: unknown;
-    this.chain = this.chain.then(() => this.drain()).catch((err) => {
-      this._lastError = describe(err);
-      failure = err;
-    });
-    await this.chain;
+    const run = this.chain.then(() =>
+      this.drain()
+        .then((result) => {
+          this.notify(result);
+          this.maybeRetry(result);
+        })
+        .catch((err) => {
+          failure = err;
+          this._lastError = describe(err);
+          this.notify(undefined);
+        }),
+    );
+    this.chain = run.catch(() => {});
+    await run;
     if (failure) throw failure;
     return this._lastRun;
   }
 
+  /** 立即入链同步（无 debounce、无幂等）；错误经 lastError 与退避体现，不向上抛。 */
+  scheduleNow(): void {
+    if (this.stopped) return;
+    this.enqueue();
+  }
+
+  /** 解锁后的首次同步：幂等，仅触发一次（与聚焦/命令触发的后续同步去重）。 */
+  scheduleInitialSync(): void {
+    if (this.stopped || this.initialSyncTriggered) return;
+    this.initialSyncTriggered = true;
+    this.enqueue();
+  }
+
   private schedule(): void {
+    if (this.stopped) return;
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = undefined;
-      this.chain = this.chain.then(() => this.drain()).catch((err) => {
-        this._lastError = describe(err);
-      });
-      void this.chain;
+      this.enqueue();
     }, SyncCoordinator.DEBOUNCE_MS);
   }
 
-  private async drain(): Promise<void> {
-    // 成功轮次清空上次失败：新一轮开始即清，若本轮抛错由 schedule 的 catch 重写。
+  private enqueue(): void {
+    this.chain = this.chain.then(() => this.run()).catch(() => {});
+    void this.chain;
+  }
+
+  /** 后台轮：跑一轮 drain，永不拒绝（错误记录 + 退避）；结束统一 notify。 */
+  private async run(): Promise<void> {
+    try {
+      const result = await this.drain();
+      this.notify(result);
+      this.maybeRetry(result);
+    } catch (err) {
+      this._lastError = describe(err);
+      this.notify(undefined);
+      this.armRetry();
+    }
+  }
+
+  /** 一轮 drain：成功轮次清空上次失败；reconcile 产 mutation 后 sync，非 ok 即返回。 */
+  private async drain(): Promise<SyncRunResult | undefined> {
     this._lastError = undefined;
+    let last: SyncRunResult | undefined;
     for (let i = 0; i < SyncCoordinator.MAX_DRAIN_ROUNDS; i++) {
       const { generated } = await this.mutator.reconcile();
       const result = await this.engine.sync();
       this._lastRun = result;
-      if (result.stage !== 'ok') return;
-      if (generated === 0) return;
+      last = result;
+      if (result.stage !== 'ok') return result;
+      if (generated === 0) return result;
+    }
+    return last;
+  }
+
+  /** 据本轮结果决定退避/停止；成功复位退避并清 stalled。 */
+  private maybeRetry(result: SyncRunResult | undefined): void {
+    if (!result) return;
+    if (result.stage === 'ok') {
+      this._stalled = false;
+      this.clearRetry();
+      this.retryDelay = SyncCoordinator.RETRY_BASE_MS;
+      return;
+    }
+    if (result.stage === 'error' && !result.stalled) {
+      this._stalled = false;
+      this.armRetry();
+      return;
+    }
+    this._stalled = true;
+    this.clearRetry();
+  }
+
+  private armRetry(): void {
+    if (this.stopped || this.retryTimer) return;
+    const delay = this.retryDelay;
+    this.retryDelay = Math.min(this.retryDelay * 2, SyncCoordinator.RETRY_MAX_MS);
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = undefined;
+      if (!this.stopped) this.enqueue();
+    }, delay);
+  }
+
+  private clearRetry(): void {
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = undefined;
+    }
+  }
+
+  private notify(result: SyncRunResult | undefined): void {
+    try {
+      this.options.onSettled?.(result);
+    } catch {
+      // 上层回调异常不阻断同步链
     }
   }
 }

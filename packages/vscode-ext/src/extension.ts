@@ -19,7 +19,7 @@ import { HistoryStore } from './history/historyStore';
 import { AuthService, DEFAULT_SERVER_URL } from './sync/authService';
 import { PersonalSyncClient } from './sync/e2e/client';
 import { eventBus, ConnectionChangedEvent, DataChangeEvent, AuthEvent } from './utils/event';
-import { invalidateLanguage, LANGUAGE_CONFIG_KEY } from './i18n';
+import { invalidateLanguage, l10n, LANGUAGE_CONFIG_KEY } from './i18n';
 import { registerCommands } from './commands';
 import { SqlCompletionProvider } from './completion/sqlCompletionProvider';
 import { SqlCodeLensProvider } from './completion/sqlCodeLensProvider';
@@ -31,6 +31,7 @@ import { OrgTreeDataProvider } from './tree/orgTreeDataProvider';
 import { registerOrgCommands } from './commands/org';
 import { SyncSessionFactory } from './sync/sessionFactory';
 import { DekStore } from './sync/crypto/keyStore';
+import { deriveSyncStatus } from './sync/syncStatus';
 import { registerPersonalSyncCommands } from './commands/personalSync';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -113,19 +114,90 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // 受控同步 session 工厂（阶段 A 无 UI）：activation/locked 态零请求，仅经工厂懒建。
   // 阶段 B 才接入初始化/解锁命令；此处只挂生命周期：logout → 丢弃 session，dispose → 清理。
+  // ===== B2：状态栏 + 立即同步命令 + 窗口聚焦触发 =====
+  const syncStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  syncStatusBar.command = 'dbclient.syncNow';
+  syncStatusBar.hide();
+  context.subscriptions.push(syncStatusBar);
+
+  const setSyncReady = (ready: boolean): void => {
+    void vscode.commands.executeCommand('setContext', 'dbclient.sync.ready', ready);
+  };
+
+  // 依赖 syncFactory，但只在 onSyncResult / 聚焦 / logout 等异步回调中被调用，彼时已构造完毕。
+  function refreshSyncStatusBar(): void {
+    const session = syncFactory.current;
+    const status = deriveSyncStatus({
+      isUnlocked: session?.isUnlocked ?? false,
+      stalled: session?.stalled ?? false,
+      retrying: session?.retrying ?? false,
+      lastError: session?.lastError,
+      lastRun: session?.lastRun,
+    });
+    if (status === 'hidden') {
+      syncStatusBar.hide();
+      setSyncReady(false);
+      return;
+    }
+    setSyncReady(true);
+    syncStatusBar.show();
+    const reason = session!.lastError ?? session!.lastRun?.reason;
+    switch (status) {
+      case 'stalled':
+        syncStatusBar.text = `$(warning) ${l10n('sync.statusLabel')}`;
+        syncStatusBar.tooltip = l10n('sync.statusStalled');
+        break;
+      case 'retrying':
+        syncStatusBar.text = `$(sync~spin) ${l10n('sync.statusLabel')}`;
+        syncStatusBar.tooltip = `${l10n('sync.statusError')}: ${reason ?? ''}`;
+        break;
+      case 'error':
+        syncStatusBar.text = `$(error) ${l10n('sync.statusLabel')}`;
+        syncStatusBar.tooltip = `${l10n('sync.statusError')}: ${reason ?? ''}`;
+        break;
+      default:
+        syncStatusBar.text = `$(sync) ${l10n('sync.statusLabel')}`;
+        syncStatusBar.tooltip = l10n('sync.statusIdle');
+        break;
+    }
+  }
+
   const syncFactory = new SyncSessionFactory({
     connectionStore: store,
     dekStore: new DekStore(context.secrets),
     memento: context.globalState,
     getUserId: async () => (auth.isLoggedIn() ? auth.getUserId() : undefined),
     entitlement: () => auth.getCachedEntitlement(),
+    onSyncResult: (result) => {
+      // 入站 pull 应用了变更才刷树（避免每次空同步都整树刷新）；其余情况仅刷新状态栏。
+      if (result && result.applied > 0) treeProvider.refresh();
+      refreshSyncStatusBar();
+    },
     createClient: () => new PersonalSyncClient(auth.client),
   });
   context.subscriptions.push({ dispose: () => syncFactory.dispose() });
   const onLogoutInvalidate = eventBus.subscribe(AuthEvent, (e) => {
-    if (e.kind === 'logout') syncFactory.invalidate();
+    if (e.kind === 'logout') {
+      syncFactory.invalidate();
+      refreshSyncStatusBar();
+    }
   });
   context.subscriptions.push(onLogoutInvalidate);
+  // 立即同步命令（解锁态才可用，when=dbclient.sync.ready）+ 窗口聚焦补同步。
+  context.subscriptions.push(
+    vscode.commands.registerCommand('dbclient.syncNow', () => {
+      const session = syncFactory.current;
+      if (session?.isUnlocked) session.scheduleNow();
+    }),
+    vscode.window.onDidChangeWindowState((e) => {
+      if (!e.focused) return;
+      const session = syncFactory.current;
+      // stalled 后跳过自动聚焦同步，避免冲突/终止性错误在切窗时被反复自动重发；
+      // 用户仍可通过 dbclient.syncNow 手动重试。
+      if (!session?.isUnlocked || session.stalled) return;
+      session.scheduleNow();
+    }),
+  );
   // B1 是用户显式入口；注册本身不建 session，命令执行前才刷新权益并懒建。
   registerPersonalSyncCommands(context, auth, syncFactory);
   // 这里原先用 onDidChangeSelection 往 `dbclient.dbType` / `dbclient.has*` 写
