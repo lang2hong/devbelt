@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { Deps } from './commands/shared';
 import { makeSub } from './commands/shared';
 import { registerConnectionCommands } from './commands/connection';
+import { registerConnectionPathFixCommands } from './commands/connectionPathFix';
 import { registerQueryCommands } from './commands/query';
 import { registerTableCommands } from './commands/table';
 import { registerDatabaseCommands } from './commands/database';
@@ -15,6 +16,7 @@ import { l10n } from './i18n';
 export function registerCommands(deps: Deps): void {
   const sub = makeSub(deps.context);
   registerConnectionCommands(deps, sub);
+  registerConnectionPathFixCommands(deps, sub);
   registerQueryCommands(deps, sub);
   registerTableCommands(deps, sub);
   registerDatabaseCommands(deps, sub);

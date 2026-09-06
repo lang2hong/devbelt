@@ -29,8 +29,9 @@ export interface PathValidationResult {
 function pathFieldsOf(conn: SavedConnection): { field: string; value: string }[] {
   const fields: { field: string; value: string }[] = [];
   if (conn.dbType === DatabaseType.SQLITE) {
-    // SQLite 走 dbPath；sqliteCommand 是命令路径，缺失时可自动探测，不强制。
+    // SQLite 走 dbPath；sqliteCommand 是命令路径，缺失时可自动探测，但显式配置须可读。
     if (conn.dbPath) fields.push({ field: 'dbPath', value: conn.dbPath });
+    if (conn.sqliteCommand) fields.push({ field: 'sqliteCommand', value: conn.sqliteCommand });
   }
   if (conn.useSSL) {
     if (conn.caPath) fields.push({ field: 'caPath', value: conn.caPath });
@@ -47,6 +48,8 @@ function pathFieldsOf(conn: SavedConnection): { field: string; value: string }[]
 /**
  * 校验连接的本地路径是否可用（存在/可读）。组织连接（临时凭据映射、无本机路径）跳过。
  * `fsAccess` 可注入以便测试（真实环境用 fs.access）。
+ *
+ * connectionUrl 只做非空校验（连接串模式下必须有值；URL 合法性交给驱动报错，不做 fs 校验）。
  */
 export async function validateConnectionPaths(
   conn: SavedConnection,
@@ -55,6 +58,9 @@ export async function validateConnectionPaths(
   if (isOrganizationConnectionId(conn.id)) return { valid: true, issues: [] };
   const access = fsAccess ?? defaultAccess;
   const issues: PathValidationIssue[] = [];
+  if (conn.useConnectionString && !(conn.connectionUrl && conn.connectionUrl.trim() !== '')) {
+    issues.push({ field: 'connectionUrl', reason: 'missing' });
+  }
   for (const { field, value } of pathFieldsOf(conn)) {
     if (!value) continue; // 未配置则不校验，交给方言默认行为
     let ok = false;

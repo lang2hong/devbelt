@@ -137,6 +137,16 @@
         "category": "DB Client"
       },
       {
+        "command": "dbclient.fixConnectionPaths",
+        "title": "%cmd.fixConnectionPaths%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.removeConnectionPathOverrides",
+        "title": "%cmd.removeConnectionPathOverrides%",
+        "category": "DB Client"
+      },
+      {
         "command": "dbclient.addIndex",
         "title": "Add Index",
         "category": "DB Client",
@@ -690,6 +700,14 @@
           "when": "dbclient.sync.ready"
         },
         {
+          "command": "dbclient.fixConnectionPaths",
+          "when": "false"
+        },
+        {
+          "command": "dbclient.removeConnectionPathOverrides",
+          "when": "false"
+        },
+        {
           "command": "dbclient.scheduleBackup",
           "when": "false"
         }
@@ -1150,6 +1168,16 @@
         },
         {
           "command": "dbclient.editConnection",
+          "when": "view == dbclient.explorer && viewItem =~ /^connection/",
+          "group": "3_edit"
+        },
+        {
+          "command": "dbclient.fixConnectionPaths",
+          "when": "view == dbclient.explorer && viewItem =~ /^connection/",
+          "group": "3_edit"
+        },
+        {
+          "command": "dbclient.removeConnectionPathOverrides",
           "when": "view == dbclient.explorer && viewItem =~ /^connection/",
           "group": "3_edit"
         },

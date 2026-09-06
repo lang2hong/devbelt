@@ -74,9 +74,18 @@ export class ConnectionManager {
      * 传入后，本管理器建立的每个会话都会把修改性语句写进历史。
      */
     private readonly history?: HistoryStore,
+    /**
+     * 有效配置解析（B3）：建连/路径校验的单一入口，把本机覆盖应用到连接上。
+     * 缺省为恒等（无覆盖）。仅注入纯函数，不引入 vscode 依赖。
+     */
+    private readonly resolveEffective?: (conn: SavedConnection) => SavedConnection,
   ) {
     this.config = { ...DEFAULT_POOL_CONFIG, ...config };
     this.startHealthCheck();
+  }
+
+  private effective(conn: SavedConnection): SavedConnection {
+    return this.resolveEffective ? this.resolveEffective(conn) : conn;
   }
 
   /** 标记该连接为用户显式打开，关闭查询/预览面板时不做自动释放。 */
@@ -132,7 +141,7 @@ export class ConnectionManager {
    * 已缓存的活跃会话（isAlive）跳过校验（连接已建立，路径后续变化不影响既有会话）。
    */
   async validateConnectionPath(conn: SavedConnection): Promise<PathValidationResult> {
-    return validateConnectionPaths(conn);
+    return validateConnectionPaths(this.effective(conn));
   }
 
   /**
@@ -147,17 +156,20 @@ export class ConnectionManager {
   private async doConnect(conn: SavedConnection): Promise<ConnectionSession> {
     this.evictIfNeeded();
 
+    // 有效配置（本机覆盖优先）用作建连与路径校验的唯一依据。
+    const effective = this.effective(conn);
+
     // 建连前强制路径硬拒绝（阶段 A 附加）：已配置但缺失/不可读即拒建。
-    const pathCheck = await validateConnectionPaths(conn);
+    const pathCheck = await validateConnectionPaths(effective);
     if (!pathCheck.valid) {
       throw new ConnectionPathError(pathCheck);
     }
 
-    let host = conn.host;
-    let port = conn.port;
+    let host = effective.host;
+    let port = effective.port;
     let tunnelOpened = false;
-    if (conn.sshHost) {
-      const localPort = await SshTunnel.create(conn);
+    if (effective.sshHost) {
+      const localPort = await SshTunnel.create(effective);
       if (localPort) {
         host = '127.0.0.1';
         port = localPort;
@@ -166,9 +178,9 @@ export class ConnectionManager {
     }
 
     try {
-      return await this.buildSession(conn, host, port);
+      return await this.buildSession(effective, host, port);
     } catch (err) {
-      if (tunnelOpened) SshTunnel.close(conn.id);
+      if (tunnelOpened) SshTunnel.close(effective.id);
       throw err;
     }
   }

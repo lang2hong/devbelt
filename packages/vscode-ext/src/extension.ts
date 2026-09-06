@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { ConnectionStore } from './connection/connectionStore';
 import { ConnectionManager } from './connection/connectionManager';
+import { ConnectionPathOverrideStore } from './connection/connectionPathOverrideStore';
 import { ConnectionContext } from './connection/connectionContext';
 import { DbTreeDataProvider } from './tree/dbTreeDataProvider';
 import { QueryExecutor } from './result/queryExecutor';
@@ -40,10 +41,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const serverUrl = DEFAULT_SERVER_URL;
   const auth = new AuthService(context.secrets, serverUrl, context.globalState);
   const history = new HistoryStore(context.globalState);
+  // 本机路径覆盖（B3）：仅存本机 globalState、不回传、不产生 mutation/同步事件。
+  const overrideStore = new ConnectionPathOverrideStore(context.globalState);
   // history 注入管理器：所有会话的修改性语句由此自动进历史，
   // 不再依赖各命令自行调用 history.add（漏一个就少一段痕迹）。
-  const manager = new ConnectionManager(undefined, history);
-  const treeProvider = new DbTreeDataProvider(store, manager);
+  // resolveEffective 是建连/路径校验的单一有效配置入口（覆盖优先）。
+  const manager = new ConnectionManager(undefined, history, (c) => overrideStore.applyOverrides(c));
+  const treeProvider = new DbTreeDataProvider(store, manager, overrideStore);
   const auditLogger = AuditLogger.init(context.globalState);
   const executor = new QueryExecutor(manager, history, auditLogger);
   const connCtx = new ConnectionContext(context, store);
@@ -64,9 +68,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // AuthEvent 订阅（下方）在登录/登出后刷新此上下文保持同步。
   void syncLoggedInContext(auth);
 
-  // 事件总线：连接/分组变更时自动刷新树
+  // 事件总线：连接/分组变更时自动刷新树 + 重算路径 warning
   context.subscriptions.push(
-    eventBus.subscribe(ConnectionChangedEvent, () => treeProvider.refresh()),
+    eventBus.subscribe(ConnectionChangedEvent, () => void treeProvider.refreshPathIssues()),
   );
   // DDL（CREATE/ALTER/DROP/TRUNCATE 等）后刷新树：表结构变化，表列表需要重拉。
   // 只响应 ddl，rowEditor 的 insert/update/delete 不触发整树刷新。
@@ -169,8 +173,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     getUserId: async () => (auth.isLoggedIn() ? auth.getUserId() : undefined),
     entitlement: () => auth.getCachedEntitlement(),
     onSyncResult: (result) => {
-      // 入站 pull 应用了变更才刷树（避免每次空同步都整树刷新）；其余情况仅刷新状态栏。
-      if (result && result.applied > 0) treeProvider.refresh();
+      // 入站 pull 应用了变更才刷树（避免每次空同步都整树刷新），并重算路径 warning；
+      // 其余情况仅刷新状态栏。
+      if (result && result.applied > 0) void treeProvider.refreshPathIssues();
       refreshSyncStatusBar();
     },
     createClient: () => new PersonalSyncClient(auth.client),
@@ -295,7 +300,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     origRefresh();
   };
 
-  registerCommands({ context, store, manager, treeProvider, executor, history, auth, connCtx });
+  registerCommands({ context, store, manager, treeProvider, overrideStore, executor, history, auth, connCtx });
+
+  // 首次加载即异步重算路径 warning（仅本地 fs 校验，无同步/网络请求）。
+  void treeProvider.refreshPathIssues();
 }
 
 /**

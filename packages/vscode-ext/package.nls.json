@@ -25,6 +25,8 @@
   "cmd.initializePersonalSync": "Initialize Personal Sync",
   "cmd.unlockPersonalSync": "Unlock Personal Sync",
   "cmd.syncNow": "Sync Now",
+  "cmd.fixConnectionPaths": "Fix Connection Paths",
+  "cmd.removeConnectionPathOverrides": "Remove Path Overrides",
   "account.title": "Account",
   "cmd.copyName": "Copy Name",
   "cmd.manageUsers": "Manage Users",

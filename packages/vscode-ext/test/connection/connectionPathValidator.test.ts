@@ -54,4 +54,21 @@ describe('validateConnectionPaths', () => {
     const c = conn({ socketPath: '/var/run/mysql.sock' });
     expect((await validateConnectionPaths(c, accessWith(['/var/run/mysql.sock']))).valid).toBe(true);
   });
+
+  it('SQLite sqliteCommand 显式配置须可读（未配置自动探测不强制）', async () => {
+    const c = conn({ dbType: DatabaseType.SQLITE, sqliteCommand: '/usr/bin/sqlite3' });
+    expect((await validateConnectionPaths(c, accessWith([]))).valid).toBe(false);
+    expect((await validateConnectionPaths(c, accessWith(['/usr/bin/sqlite3']))).valid).toBe(true);
+    // 未配置 sqliteCommand：自动探测，不强制
+    expect((await validateConnectionPaths(conn({ dbType: DatabaseType.SQLITE }), accessWith([]))).valid).toBe(true);
+  });
+
+  it('useConnectionString 时 connectionUrl 必须非空（不做 fs 校验）', async () => {
+    const c = conn({ useConnectionString: true, connectionUrl: '' });
+    const r = await validateConnectionPaths(c, accessWith([]));
+    expect(r.valid).toBe(false);
+    expect(r.issues).toEqual([{ field: 'connectionUrl', reason: 'missing' }]);
+
+    expect((await validateConnectionPaths(conn({ useConnectionString: true, connectionUrl: 'mysql://u@h/db' }), accessWith([]))).valid).toBe(true);
+  });
 });

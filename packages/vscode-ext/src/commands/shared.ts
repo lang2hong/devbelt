@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { ConnectionStore } from '../connection/connectionStore';
 import type { SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
+import { ConnectionPathOverrideStore } from '../connection/connectionPathOverrideStore';
 import { ConnectionContext } from '../connection/connectionContext';
 import { DbTreeDataProvider } from '../tree/dbTreeDataProvider';
 import { QueryExecutor } from '../result/queryExecutor';
@@ -16,6 +17,7 @@ export interface Deps {
   store: ConnectionStore;
   manager: ConnectionManager;
   treeProvider: DbTreeDataProvider;
+  overrideStore: ConnectionPathOverrideStore;
   executor: QueryExecutor;
   history: HistoryStore;
   auth: AuthService;

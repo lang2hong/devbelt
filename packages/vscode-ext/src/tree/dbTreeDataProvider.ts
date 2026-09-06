@@ -2,6 +2,8 @@ import { Event, EventEmitter, TreeDataProvider, TreeItem, TreeItemCollapsibleSta
 import { DatabaseType, DialectRegistry } from '@db-client/core';
 import { ConnectionStore, type SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
+import { ConnectionPathOverrideStore } from '../connection/connectionPathOverrideStore';
+import { validateConnectionPaths, type PathValidationResult, type PathValidationIssue } from '../connection/connectionPathValidator';
 import { DbTreeNode, NodeKind, type CategoryType } from './dbTreeNode';
 import { MetadataNodeBuilder } from './metadataNodeBuilder';
 import { l10n } from '../i18n';
@@ -30,14 +32,45 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   /** 已打开连接的服务器类型+版本摘要（连接名右侧 description） */
   private readonly connVersions = new Map<string, string>();
 
+  /** 有效配置的路径校验结果缓存（按 connId，异步填充，供同步渲染读）。 */
+  private readonly pathIssues = new Map<string, PathValidationResult>();
+
   constructor(
     private readonly store: ConnectionStore,
     private readonly manager: ConnectionManager,
+    private readonly overrideStore?: ConnectionPathOverrideStore,
   ) {}
 
   /** 刷新整棵树 */
   refresh(): void {
     this.onDidChangeTreeDataEmitter.fire(undefined);
+  }
+
+  /**
+   * 异步重算有效配置（覆盖优先）的路径校验结果并刷新树。
+   * `connId` 省略时全量重扫；此方法不发起任何同步/网络请求，仅本地 fs 校验。
+   */
+  async refreshPathIssues(connId?: string): Promise<void> {
+    if (connId) {
+      const conn = this.store.get(connId);
+      if (!conn) this.pathIssues.delete(connId);
+      else this.pathIssues.set(connId, await validateConnectionPaths(this.effective(conn)));
+    } else {
+      this.pathIssues.clear();
+      for (const c of this.store.list()) {
+        this.pathIssues.set(c.id, await validateConnectionPaths(this.effective(c)));
+      }
+    }
+    this.refresh();
+  }
+
+  /** 某连接的有效配置（本机覆盖优先）；未注入覆盖存储时恒等。 */
+  private effective(conn: SavedConnection): SavedConnection {
+    return this.overrideStore ? this.overrideStore.applyOverrides(conn) : conn;
+  }
+
+  private pathTooltip(issues: PathValidationIssue[]): string {
+    return l10n('sync.needsPathConfig', { fields: issues.map((i) => i.field).join(', ') });
   }
 
   /** 刷新单个节点（重新拉取其子节点） */
@@ -403,6 +436,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       undefined,
       parent,
     );
+    const pathCheck = this.pathIssues.get(conn.id);
+    const hasPathIssues = !!pathCheck && !pathCheck.valid;
     if (!isOpen) {
       node.id = `closed_${conn.id}`;
       node.command = {
@@ -410,6 +445,10 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         title: 'Open',
         arguments: [conn],
       };
+      if (hasPathIssues) {
+        node.iconPath = new ThemeIcon('warning', new ThemeColor('editorWarning.foreground'));
+        node.tooltip = this.pathTooltip(pathCheck.issues);
+      }
     } else {
       node.id = conn.id;
       node.description = this.connVersions.get(conn.id) || '';
@@ -419,6 +458,9 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
           ? 'editorWarning.foreground'
           : 'gitDecoration.untrackedResourceForeground';
       node.iconPath = new ThemeIcon('server', new ThemeColor(envColor));
+      if (hasPathIssues) {
+        node.tooltip = this.pathTooltip(pathCheck.issues);
+      }
     }
     return node;
   }

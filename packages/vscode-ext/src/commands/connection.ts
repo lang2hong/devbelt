@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { DatabaseType } from '@db-client/core';
 import { DbTreeNode, NodeKind } from '../tree/dbTreeNode';
 import { ConnectionForm } from '../connection/connectionForm';
+import { ConnectionPathError } from '../connection/connectionManager';
 import type { SavedConnection } from '../connection/connectionStore';
 import { l10n } from '../i18n';
 import { AuditLogger } from '../utils/auditLogger';
@@ -100,7 +101,18 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
       treeProvider.refresh();
       AuditLogger.tryLog({ action: 'connection_open', connName: conn.name || conn.host, database: conn.database });
     } catch (err) {
-      vscode.window.showErrorMessage(`Open connection failed: ${(err as Error).message}`);
+      if (err instanceof ConnectionPathError) {
+        const fields = err.result.issues.map((i) => i.field).join(', ');
+        const picked = await vscode.window.showErrorMessage(
+          l10n('sync.pathInvalid', { fields }),
+          l10n('sync.fixPathsAction'),
+        );
+        if (picked === l10n('sync.fixPathsAction')) {
+          await vscode.commands.executeCommand('dbclient.fixConnectionPaths', conn);
+        }
+      } else {
+        vscode.window.showErrorMessage(`Open connection failed: ${(err as Error).message}`);
+      }
     }
   });
 
