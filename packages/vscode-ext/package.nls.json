@@ -36,5 +36,14 @@
   "cmd.copyName": "Copy Name",
   "cmd.manageUsers": "Manage Users",
   "cmd.pats": "Manage Access Tokens",
-  "view.explorer": "Connections"
+  "view.explorer": "Connections",
+  "cmd.org.refresh": "Refresh Organizations",
+  "cmd.org.newFolder": "New Folder",
+  "cmd.org.deleteFolder": "Delete Folder",
+  "cmd.org.newQuery": "New Query Resource",
+  "cmd.org.openResource": "Open Resource",
+  "cmd.org.saveResource": "Save Resource",
+  "cmd.org.deleteResource": "Delete Resource",
+  "cmd.org.connectTemplate": "Connect",
+  "cmd.org.runQuery": "Run Query on Organization Connection"
 }

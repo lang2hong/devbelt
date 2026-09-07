@@ -604,52 +604,52 @@
       },
       {
         "command": "dbclient.org.refresh",
-        "title": "Refresh Organizations",
+        "title": "%cmd.org.refresh%",
         "category": "DB Client",
         "icon": "$(refresh)"
       },
       {
         "command": "dbclient.org.newFolder",
-        "title": "New Folder",
+        "title": "%cmd.org.newFolder%",
         "category": "DB Client",
         "icon": "$(new-folder)"
       },
       {
         "command": "dbclient.org.deleteFolder",
-        "title": "Delete Folder",
+        "title": "%cmd.org.deleteFolder%",
         "category": "DB Client"
       },
       {
         "command": "dbclient.org.newQuery",
-        "title": "New Query Resource",
+        "title": "%cmd.org.newQuery%",
         "category": "DB Client",
         "icon": "$(new-file)"
       },
       {
         "command": "dbclient.org.openResource",
-        "title": "Open Resource",
+        "title": "%cmd.org.openResource%",
         "category": "DB Client",
         "icon": "$(eye)"
       },
       {
         "command": "dbclient.org.saveResource",
-        "title": "Save Resource",
+        "title": "%cmd.org.saveResource%",
         "category": "DB Client"
       },
       {
         "command": "dbclient.org.deleteResource",
-        "title": "Delete Resource",
+        "title": "%cmd.org.deleteResource%",
         "category": "DB Client"
       },
       {
         "command": "dbclient.org.connectTemplate",
-        "title": "Connect",
+        "title": "%cmd.org.connectTemplate%",
         "category": "DB Client",
         "icon": "$(plug)"
       },
       {
         "command": "dbclient.org.runQuery",
-        "title": "Run Query on Organization Connection",
+        "title": "%cmd.org.runQuery%",
         "category": "DB Client"
       }
     ],
@@ -677,12 +677,12 @@
         },
         {
           "command": "dbclient.org.newFolder",
-          "when": "view == dbclient.explorer.organization",
+          "when": "view == dbclient.explorer.organization && dbclient.orgRole == 'admin'",
           "group": "navigation"
         },
         {
           "command": "dbclient.org.newQuery",
-          "when": "view == dbclient.explorer.organization",
+          "when": "view == dbclient.explorer.organization && dbclient.orgRole == 'admin'",
           "group": "navigation"
         }
       ],
@@ -690,6 +690,16 @@
         {
           "command": "dbclient.runSqlFile",
           "when": "resourceLangId == sql",
+          "group": "navigation"
+        },
+        {
+          "command": "dbclient.org.saveResource",
+          "when": "dbclient.orgResourceEditor && dbclient.orgResourceEditorRole == 'admin'",
+          "group": "navigation"
+        },
+        {
+          "command": "dbclient.org.runQuery",
+          "when": "dbclient.orgSessionEditor",
           "group": "navigation"
         }
       ],
@@ -764,12 +774,48 @@
         {
           "command": "dbclient.scheduleBackup",
           "when": "false"
+        },
+        {
+          "command": "dbclient.org.refresh",
+          "when": "dbclient.loggedIn && dbclient.orgRole"
+        },
+        {
+          "command": "dbclient.org.newFolder",
+          "when": "dbclient.loggedIn && dbclient.orgRole == 'admin'"
+        },
+        {
+          "command": "dbclient.org.deleteFolder",
+          "when": "dbclient.loggedIn && dbclient.orgRole == 'admin'"
+        },
+        {
+          "command": "dbclient.org.newQuery",
+          "when": "dbclient.loggedIn && dbclient.orgRole == 'admin'"
+        },
+        {
+          "command": "dbclient.org.openResource",
+          "when": "dbclient.loggedIn && dbclient.orgRole"
+        },
+        {
+          "command": "dbclient.org.saveResource",
+          "when": "dbclient.loggedIn && dbclient.orgRole == 'admin'"
+        },
+        {
+          "command": "dbclient.org.deleteResource",
+          "when": "dbclient.loggedIn && dbclient.orgRole == 'admin'"
+        },
+        {
+          "command": "dbclient.org.connectTemplate",
+          "when": "dbclient.loggedIn && dbclient.orgRole"
+        },
+        {
+          "command": "dbclient.org.runQuery",
+          "when": "dbclient.loggedIn && dbclient.orgRole"
         }
       ],
       "view/item/context": [
         {
           "command": "dbclient.org.connectTemplate",
-          "when": "view == dbclient.explorer.organization && viewItem == dbclient.org.resource.connection_template",
+          "when": "view == dbclient.explorer.organization && viewItem =~ /^dbclient\\.org\\.resource\\.connection_template\\./",
           "group": "inline"
         },
         {
@@ -779,22 +825,22 @@
         },
         {
           "command": "dbclient.org.deleteResource",
-          "when": "view == dbclient.explorer.organization && viewItem =~ /^dbclient\\.org\\.resource\\./",
+          "when": "view == dbclient.explorer.organization && viewItem =~ /^dbclient\\.org\\.resource\\..*\\.admin$/",
           "group": "1_modify"
         },
         {
           "command": "dbclient.org.newQuery",
-          "when": "view == dbclient.explorer.organization && viewItem =~ /^(dbclient\\.org\\.organization|dbclient\\.org\\.folder)$/",
+          "when": "view == dbclient.explorer.organization && viewItem =~ /^(dbclient\\.org\\.organization|dbclient\\.org\\.folder)\\.admin$/",
           "group": "1_create"
         },
         {
           "command": "dbclient.org.newFolder",
-          "when": "view == dbclient.explorer.organization && viewItem =~ /^(dbclient\\.org\\.organization|dbclient\\.org\\.folder)$/",
+          "when": "view == dbclient.explorer.organization && viewItem =~ /^(dbclient\\.org\\.organization|dbclient\\.org\\.folder)\\.admin$/",
           "group": "1_create"
         },
         {
           "command": "dbclient.org.deleteFolder",
-          "when": "view == dbclient.explorer.organization && viewItem == dbclient.org.folder",
+          "when": "view == dbclient.explorer.organization && viewItem == dbclient.org.folder.admin",
           "group": "1_modify"
         },
         {

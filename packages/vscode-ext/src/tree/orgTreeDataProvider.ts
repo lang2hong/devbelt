@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { OrgWorkspace } from '../org/workspace';
-import type { ResourceSummaryDto } from '../org/types';
+import type { OrganizationRole, ResourceSummaryDto } from '../org/types';
+import { l10n } from '../i18n';
 
 export type OrgNodeKind = 'organization' | 'folder' | 'resource' | 'info';
 
@@ -19,6 +20,8 @@ export class OrgTreeNode extends vscode.TreeItem {
     public readonly folderId?: string,
     /** 资源摘要（resource 节点） */
     public readonly resource?: ResourceSummaryDto,
+    /** 当前用户在该组织内的角色（仅 UX，非授权；从组织根节点向下传播）。 */
+    public readonly role?: OrganizationRole,
   ) {
     super(label, collapsible);
     this.contextValue = this.computeContextValue();
@@ -33,9 +36,9 @@ export class OrgTreeNode extends vscode.TreeItem {
 
   private computeContextValue(): string {
     switch (this.kind) {
-      case 'organization': return 'dbclient.org.organization';
-      case 'folder': return 'dbclient.org.folder';
-      case 'resource': return `dbclient.org.resource.${this.resource?.resourceType ?? 'unknown'}`;
+      case 'organization': return `dbclient.org.organization.${this.role ?? 'unknown'}`;
+      case 'folder': return `dbclient.org.folder.${this.role ?? 'unknown'}`;
+      case 'resource': return `dbclient.org.resource.${this.resource?.resourceType ?? 'unknown'}.${this.role ?? 'unknown'}`;
       default: return 'dbclient.org.info';
     }
   }
@@ -62,10 +65,10 @@ export class OrgTreeDataProvider implements vscode.TreeDataProvider<OrgTreeNode>
       return this.roots();
     }
     if (element.kind === 'organization' && element.orgId) {
-      return this.orgChildren(element.orgId);
+      return this.orgChildren(element.orgId, element.role);
     }
     if (element.kind === 'folder' && element.orgId && element.folderId) {
-      return this.folderChildren(element.orgId, element.folderId);
+      return this.folderChildren(element.orgId, element.folderId, element.role);
     }
     return [];
   }
@@ -73,7 +76,7 @@ export class OrgTreeDataProvider implements vscode.TreeDataProvider<OrgTreeNode>
   private async roots(): Promise<OrgTreeNode[]> {
     try {
       const orgs = await this.workspace.listOrganizations();
-      if (!orgs.length) return [new OrgTreeNode('No organizations (not signed in, or not a member)', vscode.TreeItemCollapsibleState.None, 'info')];
+      if (!orgs.length) return [new OrgTreeNode(l10n('org.tree.noOrganizations'), vscode.TreeItemCollapsibleState.None, 'info')];
       return orgs.map((o) => new OrgTreeNode(
         o.name,
         vscode.TreeItemCollapsibleState.Collapsed,
@@ -81,9 +84,10 @@ export class OrgTreeDataProvider implements vscode.TreeDataProvider<OrgTreeNode>
         o.organizationId,
         undefined,
         undefined,
+        o.role,
       ));
     } catch {
-      return [new OrgTreeNode('Sign in to view organizations', vscode.TreeItemCollapsibleState.None, 'info')];
+      return [new OrgTreeNode(l10n('org.tree.signInFirst'), vscode.TreeItemCollapsibleState.None, 'info')];
     }
   }
 
@@ -95,14 +99,14 @@ export class OrgTreeDataProvider implements vscode.TreeDataProvider<OrgTreeNode>
     return { folders, resources };
   }
 
-  private async orgChildren(orgId: string): Promise<OrgTreeNode[]> {
+  private async orgChildren(orgId: string, role?: import('../org/types').OrganizationRole): Promise<OrgTreeNode[]> {
     const { folders, resources } = await this.loadOrg(orgId);
-    return this.buildNodes(orgId, folders, resources, null);
+    return this.buildNodes(orgId, folders, resources, null, role);
   }
 
-  private async folderChildren(orgId: string, folderId: string): Promise<OrgTreeNode[]> {
+  private async folderChildren(orgId: string, folderId: string, role?: import('../org/types').OrganizationRole): Promise<OrgTreeNode[]> {
     const { folders, resources } = await this.loadOrg(orgId);
-    return this.buildNodes(orgId, folders, resources, folderId);
+    return this.buildNodes(orgId, folders, resources, folderId, role);
   }
 
   private buildNodes(
@@ -110,16 +114,17 @@ export class OrgTreeDataProvider implements vscode.TreeDataProvider<OrgTreeNode>
     folders: import('../org/types').FolderDto[],
     resources: ResourceSummaryDto[],
     parentId: string | null,
+    role?: import('../org/types').OrganizationRole,
   ): OrgTreeNode[] {
     const nodes: OrgTreeNode[] = [];
     for (const f of folders) {
       if (f.parentId !== parentId) continue;
       const collapsible = folders.some((x) => x.parentId === f.folderId) || resources.some((r) => r.folderId === f.folderId);
-      nodes.push(new OrgTreeNode(f.name, collapsible ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None, 'folder', orgId, f.folderId));
+      nodes.push(new OrgTreeNode(f.name, collapsible ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None, 'folder', orgId, f.folderId, undefined, role));
     }
     for (const r of resources) {
       if (r.folderId !== parentId) continue;
-      const node = new OrgTreeNode(r.name, vscode.TreeItemCollapsibleState.None, 'resource', orgId, r.folderId ?? undefined, r);
+      const node = new OrgTreeNode(r.name, vscode.TreeItemCollapsibleState.None, 'resource', orgId, r.folderId ?? undefined, r, role);
       node.description = `${r.resourceType === 'connection_template' ? 'template' : 'query'} · v${r.version}`;
       nodes.push(node);
     }

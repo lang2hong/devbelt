@@ -37,7 +37,9 @@ export interface ResourceSummaryDto {
 
 /** connection_template 内容（§6.3 严格闭合 schema）。 */
 export interface ConnectionTemplateContent {
-  databaseType: 'mysql';
+  // 服务端白名单为 mysql；此处放宽为 string 使 `!== 'mysql'` 成为有效的运行时防御，
+  // 否则 TS 字面量类型会让非 mysql 分支在编译期收敛为 never。客户端在连接前再做一次校验。
+  databaseType: string;
   host: string;
   port: number;
   database: string;

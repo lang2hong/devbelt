@@ -101,22 +101,57 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // 组织 Workspace 使用独立数据源，与个人连接树和同步完全分离。
   const orgClient = new OrgClient(auth.client);
-  const orgVault = new CredentialVault(context.secrets);
+  const orgVault = new CredentialVault(context.secrets, context.globalState);
   const orgWorkspace = new OrgWorkspace(orgClient, orgVault);
   const orgTreeProvider = new OrgTreeDataProvider(orgWorkspace);
   const orgTreeView = vscode.window.createTreeView('dbclient.explorer.organization', {
     treeDataProvider: orgTreeProvider,
     showCollapseAll: true,
   });
+
+  // 当前 workspace 角色 → dbclient.orgRole context（驱动 commandPalette / view-title 门控）。
+  const syncOrgRoleContext = (): void => {
+    const ws = orgWorkspace.workspace;
+    const role = ws.kind === 'organization' ? ws.role : undefined;
+    void vscode.commands.executeCommand('setContext', 'dbclient.orgRole', role);
+  };
+
   context.subscriptions.push(
     orgTreeView,
-    // 登录/登出 → 刷新 dbclient.loggedIn 上下文；登出 → 清组织缓存
-    eventBus.subscribe(AuthEvent, (e) => {
-      if (e.kind === 'logout') orgWorkspace.clearAuth();
+    // 登录/登出 → 刷新 dbclient.loggedIn；登录 → 选默认组织；登出 → 清认证/凭据/role。
+    eventBus.subscribe(AuthEvent, async (e) => {
+      if (e.kind === 'login') {
+        await orgWorkspace.selectDefaultOrg();
+      } else {
+        // 登出：等待凭据清理完成后才宣告完成，保证「登出即清空」。
+        await orgWorkspace.clearAuth();
+        void vscode.commands.executeCommand('setContext', 'dbclient.orgRole', undefined);
+        orgTreeProvider.refresh();
+      }
       void syncLoggedInContext(auth);
+    }),
+    // workspace 变更（登录默认组织/成员角色变更/登出）→ 同步 role context。
+    orgWorkspace.onDidChange(() => syncOrgRoleContext()),
+    // 树选择仅同步角色（silent，不触发缓存失效），需单独订阅 onRoleChanged 同步 role context。
+    orgWorkspace.onRoleChanged(() => syncOrgRoleContext()),
+    // 会话过期：弹「登录已过期」并清 role context（主动 logout 不经此路径）。
+    orgWorkspace.onAuthFailure(() => {
+      vscode.window.showErrorMessage(l10n('org.error.authExpired'));
+      void vscode.commands.executeCommand('setContext', 'dbclient.orgRole', undefined);
+    }),
+    // 点击树中任一带 orgId+role 的节点 → 以 silent 方式同步该组织为当前工作组织，
+    // 使 commandPalette/view-title 的 role 与当前工作组织一致；不触发 changed（避免全树
+    // 刷新导致展开状态塌缩）。右键菜单仍只依赖节点自身 viewItem role。
+    orgTreeView.onDidChangeSelection((e) => {
+      const node = e.selection[0];
+      if (node && node.orgId && node.role && node.kind !== 'info') {
+        orgWorkspace.select({ kind: 'organization', organizationId: node.orgId, role: node.role }, { silent: true });
+      }
     }),
   );
   registerOrgCommands({ context, workspace: orgWorkspace, manager, executor, tree: orgTreeProvider });
+  // 扩展重启后仍处于登录态：恢复默认组织选择（AuthService.init 不会重发 login 事件）。
+  if (auth.isLoggedIn()) void orgWorkspace.selectDefaultOrg();
 
   // 受控同步 session 工厂（阶段 A 无 UI）：activation/locked 态零请求，仅经工厂懒建。
   // 阶段 B 才接入初始化/解锁命令；此处只挂生命周期：logout → 丢弃 session，dispose → 清理。
