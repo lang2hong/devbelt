@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { createInitialMaterial, unlockDek, newRecoveryCode } from '../../src/sync/keyLifecycle';
+import {
+  createInitialMaterial,
+  unlockDek,
+  newRecoveryCode,
+  buildChangeKeyMaterial,
+  buildRecoverMaterial,
+  newStateFromMaterial,
+  type InitialSyncMaterial,
+} from '../../src/sync/keyLifecycle';
 import { openEnvelope } from '../../src/sync/envelope';
 import { deriveKekRecovery } from '../../src/sync/crypto/recoveryCode';
 import { decodeBase64Url } from '../../src/sync/crypto/recoveryCode';
@@ -12,6 +20,7 @@ const itWorker = workerBuilt ? it : it.skip;
 const userId = '7';
 const keyEpoch = '1';
 const recoveryRaw = new Uint8Array(32).fill(3);
+const b64 = (bytes: number) => 'A'.repeat(Math.ceil((bytes * 4) / 3));
 
 describe('密钥生命周期', () => {
   itWorker('createInitialMaterial → unlockDek 用 SMP 重派生并解开 DEK（逐字节一致）', async () => {
@@ -40,5 +49,66 @@ describe('密钥生命周期', () => {
     const { code, raw } = newRecoveryCode();
     expect(raw).toHaveLength(32);
     expect(code.length).toBeGreaterThan(0);
+  });
+});
+
+describe('B5 生命周期材料', () => {
+  itWorker('buildChangeKeyMaterial：旧 SMP 验证一致、envelope 版本 +1、DEK 不变、新 SMP 可解锁', async () => {
+    const material = await createInitialMaterial(userId, keyEpoch, 'old-smp', recoveryRaw);
+    const cm = await buildChangeKeyMaterial(userId, keyEpoch, 'old-smp', material.smpKdf, material.envelopeSmp, 'new-smp');
+    expect(cm.envelopeSmp.envelopeVersion).toBe('2');
+    expect(Buffer.from(cm.verifiedDek).toString('hex')).toBe(Buffer.from(material.dek).toString('hex'));
+
+    const dek2 = await unlockDek(userId, keyEpoch, 'new-smp', cm.smpKdf, cm.envelopeSmp);
+    expect(Buffer.from(dek2).toString('hex')).toBe(Buffer.from(material.dek).toString('hex'));
+    // 旧 SMP 无法解新 envelope（GCM tag 失败）
+    await expect(unlockDek(userId, keyEpoch, 'old-smp', cm.smpKdf, cm.envelopeSmp)).rejects.toThrow();
+  }, 60000);
+
+  itWorker('buildRecoverMaterial：旧恢复码解封 DEK，两条 envelope 版本 +1，新恢复码轮换', async () => {
+    const material = await createInitialMaterial(userId, keyEpoch, 'smp-password', recoveryRaw);
+    const newRecovery = newRecoveryCode();
+    const rm = await buildRecoverMaterial(
+      userId, keyEpoch, recoveryRaw, material.recoveryKdf, material.envelopeRecovery,
+      material.envelopeSmp.envelopeVersion, 'new-smp', newRecovery.raw,
+    );
+    expect(Buffer.from(rm.dek).toString('hex')).toBe(Buffer.from(material.dek).toString('hex'));
+    expect(rm.envelopeSmp.envelopeVersion).toBe('2');
+    expect(rm.envelopeRecovery.envelopeVersion).toBe('2');
+    expect(rm.recoverSignPub).not.toBe(material.recoverSignPub);
+
+    // 新恢复码可解新 envelopeRecovery 得同一 DEK；旧恢复码不可
+    const kekNew = deriveKekRecovery(newRecovery.raw, {
+      alg: 'hkdf-sha256', version: 1,
+      salt: new Uint8Array(Buffer.from(rm.recoveryKdf.salt, 'base64url')), outputBytes: 32,
+    });
+    expect(Buffer.from(openEnvelope(kekNew, rm.envelopeRecovery, userId, keyEpoch, 'recovery')).toString('hex'))
+      .toBe(Buffer.from(material.dek).toString('hex'));
+    const kekOld = deriveKekRecovery(recoveryRaw, {
+      alg: 'hkdf-sha256', version: 1,
+      salt: new Uint8Array(Buffer.from(rm.recoveryKdf.salt, 'base64url')), outputBytes: 32,
+    });
+    expect(() => openEnvelope(kekOld, rm.envelopeRecovery, userId, keyEpoch, 'recovery')).toThrow();
+  }, 60000);
+
+  it('newStateFromMaterial 组装完整 NewStateDto', () => {
+    const material: InitialSyncMaterial = {
+      dek: new Uint8Array(32),
+      signPub: b64(32),
+      recoverSignPub: b64(32),
+      smpKdf: { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: b64(16), outputBytes: 32 },
+      recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: b64(16), outputBytes: 32 },
+      envelopeSmp: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: b64(12), ciphertext: b64(32), tag: b64(16) },
+      envelopeRecovery: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: b64(12), ciphertext: b64(32), tag: b64(16) },
+    };
+    const ns = newStateFromMaterial(material);
+    expect(ns.signPub).toBe(material.signPub);
+    expect(ns.recoverSignPub).toBe(material.recoverSignPub);
+    expect(ns.smpKdf).toBe(material.smpKdf);
+    expect(ns.recoveryKdf).toBe(material.recoveryKdf);
+    expect(ns.envelopeSmp).toBe(material.envelopeSmp);
+    expect(ns.envelopeRecovery).toBe(material.envelopeRecovery);
+    expect(ns.protocolVersion).toBe(1);
+    expect(ns.cipherSuite).toBe('AES-256-GCM');
   });
 });

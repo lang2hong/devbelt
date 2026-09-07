@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { EventEmitter } from '../../src/utils/event';
 import { PersonalSyncSession } from '../../src/sync/session';
+import { SyncApiError } from '../../src/sync/e2e/client';
 import { DekStore } from '../../src/sync/crypto/keyStore';
 import { RecordMapStore } from '../../src/sync/e2e/recordMapStore';
 import { PendingMutationStore, type PendingPutMutation } from '../../src/sync/e2e/pendingMutationStore';
@@ -10,6 +11,26 @@ import type { CachedEntitlement } from '../../src/sync/authService';
 import type { NewStateDto, StateDto } from '../../src/sync/e2e/types';
 import { deriveSyncSignKeyPair } from '../../src/sync/crypto/keyStore';
 import { encodeBase64Url } from '../../src/sync/crypto/recoveryCode';
+
+const kl = vi.hoisted(() => ({
+  createInitialMaterial: vi.fn(),
+  newRecoveryCode: vi.fn(),
+  unlockDek: vi.fn(),
+  buildChangeKeyMaterial: vi.fn(),
+  buildRecoverMaterial: vi.fn(),
+  newStateFromMaterial: vi.fn(),
+}));
+
+vi.mock('../../src/sync/keyLifecycle', () => {
+  return {
+    createInitialMaterial: kl.createInitialMaterial,
+    newRecoveryCode: kl.newRecoveryCode,
+    unlockDek: kl.unlockDek,
+    buildChangeKeyMaterial: kl.buildChangeKeyMaterial,
+    buildRecoverMaterial: kl.buildRecoverMaterial,
+    newStateFromMaterial: kl.newStateFromMaterial,
+  };
+});
 
 function makeMemento() {
   const m = new Map<string, unknown>();
@@ -62,12 +83,13 @@ function makeClient(): PersonalSyncClient {
   } as unknown as PersonalSyncClient;
 }
 
-function makeDekStore(opts?: { deleteFailOnce?: boolean }) {
-  let fail = opts?.deleteFailOnce ?? false;
+function makeDekStore(opts?: { deleteFailOnce?: boolean; storeFailOnce?: boolean }) {
+  let failDelete = opts?.deleteFailOnce ?? false;
+  let failStore = opts?.storeFailOnce ?? false;
   const secrets = {
     get: vi.fn(async () => undefined),
-    store: vi.fn(async () => {}),
-    delete: vi.fn(async () => { if (fail) { fail = false; throw new Error('delete failed'); } }),
+    store: vi.fn(async () => { if (failStore) { failStore = false; throw new Error('store failed'); } }),
+    delete: vi.fn(async () => { if (failDelete) { failDelete = false; throw new Error('delete failed'); } }),
   };
   return { store: new DekStore(secrets as never), secrets };
 }
@@ -343,5 +365,335 @@ describe('PersonalSyncSession', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(getState).toHaveBeenCalledTimes(1); // 解锁即首次同步，且仅一次
     vi.useRealTimers();
+  });
+});
+
+const FIX_DEK = new Uint8Array(32).fill(7);
+
+function fixedMaterial() {
+  return {
+    dek: new Uint8Array(32).fill(7),
+    signPub: 'B'.repeat(43),
+    recoverSignPub: 'C'.repeat(43),
+    smpKdf: { alg: 'argon2id' as const, version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: 'D'.repeat(22), outputBytes: 32 },
+    recoveryKdf: { alg: 'hkdf-sha256' as const, version: 1, salt: 'E'.repeat(22), outputBytes: 32 },
+    envelopeSmp: { protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const, envelopeVersion: '1', nonce: 'F'.repeat(16), ciphertext: 'G'.repeat(43), tag: 'H'.repeat(22) },
+    envelopeRecovery: { protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const, envelopeVersion: '1', nonce: 'F'.repeat(16), ciphertext: 'G'.repeat(43), tag: 'H'.repeat(22) },
+  };
+}
+
+function changeKeyMaterial() {
+  return {
+    verifiedDek: new Uint8Array(32).fill(7),
+    smpKdf: { alg: 'argon2id' as const, version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: 'D'.repeat(22), outputBytes: 32 },
+    envelopeSmp: { protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const, envelopeVersion: '2', nonce: 'F'.repeat(16), ciphertext: 'G'.repeat(43), tag: 'H'.repeat(22) },
+  };
+}
+
+function recoverMaterial() {
+  return {
+    dek: new Uint8Array(32).fill(7),
+    oldRecoverSignSeed: new Uint8Array(32).fill(9),
+    smpKdf: { alg: 'argon2id' as const, version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: 'D'.repeat(22), outputBytes: 32 },
+    envelopeSmp: { protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const, envelopeVersion: '2', nonce: 'F'.repeat(16), ciphertext: 'G'.repeat(43), tag: 'H'.repeat(22) },
+    recoveryKdf: { alg: 'hkdf-sha256' as const, version: 1, salt: 'E'.repeat(22), outputBytes: 32 },
+    envelopeRecovery: { protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const, envelopeVersion: '2', nonce: 'F'.repeat(16), ciphertext: 'G'.repeat(43), tag: 'H'.repeat(22) },
+    recoverSignPub: 'C'.repeat(43),
+  };
+}
+
+describe('PersonalSyncSession B5 生命周期', () => {
+  beforeEach(() => {
+    kl.createInitialMaterial.mockReset();
+    kl.newRecoveryCode.mockReset();
+    kl.unlockDek.mockReset();
+    kl.buildChangeKeyMaterial.mockReset();
+    kl.buildRecoverMaterial.mockReset();
+    kl.newStateFromMaterial.mockReset();
+    kl.newRecoveryCode.mockReturnValue({ code: 'NEWCODE', raw: new Uint8Array(32).fill(5) });
+  });
+
+  it('changeSyncPassword 锁定态抛错（fail-closed），不调用 changeKey', async () => {
+    const client = { changeKey: vi.fn(), getState: vi.fn(async () => validState()) } as unknown as PersonalSyncClient;
+    const s = new PersonalSyncSession('7', makeMemento(), makeDekStore().store, makeStore().store, client);
+    await expect(s.changeSyncPassword('old', 'new')).rejects.toThrowError(/locked/);
+    expect(client.changeKey).not.toHaveBeenCalled();
+  });
+
+  it('changeSyncPassword 验证失败（DEK 不匹配）不改 state、不调 changeKey', async () => {
+    const changeKey = vi.fn();
+    const client = { changeKey, getState: vi.fn(async () => validState()) } as unknown as PersonalSyncClient;
+    const s = new PersonalSyncSession('7', makeMemento(), makeDekStore().store, makeStore().store, client);
+    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+    s.unlock('1', FIX_DEK);
+    kl.buildChangeKeyMaterial.mockResolvedValue({ ...changeKeyMaterial(), verifiedDek: new Uint8Array(32).fill(1) });
+    await expect(s.changeSyncPassword('old', 'new')).rejects.toThrowError(/passphrase mismatch/);
+    expect(changeKey).not.toHaveBeenCalled();
+  });
+
+  it('changeSyncPassword 成功后仅更新 stateVersion（DEK/epoch 不变）', async () => {
+    const changeKey = vi.fn(async (_o: { expectedStateVersion: string; seed: Uint8Array }) => ({ keyEpoch: '1', stateVersion: '2' }));
+    const client = { changeKey, getState: vi.fn(async () => validState()) } as unknown as PersonalSyncClient;
+    const { store, secrets } = makeDekStore();
+    const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, client);
+    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+    s.unlock('1', FIX_DEK);
+    kl.buildChangeKeyMaterial.mockResolvedValue(changeKeyMaterial());
+
+    await s.changeSyncPassword('old', 'new');
+
+    expect(changeKey).toHaveBeenCalledTimes(1);
+    expect(changeKey.mock.calls[0][0].expectedStateVersion).toBe('1');
+    expect(Buffer.from(changeKey.mock.calls[0][0].seed).toString('hex'))
+      .toBe(Buffer.from(deriveSyncSignKeyPair(FIX_DEK).seed).toString('hex'));
+    expect(s.getStateStore().getSnapshot()).toEqual({ keyEpoch: '1', stateVersion: '2', changeSequence: '0' });
+    expect(secrets.store).not.toHaveBeenCalled(); // DEK 不变，不写 dekStore
+  });
+
+  it('recoverSync 成功后保存 DEK、更新 snapshot、解锁并返回新恢复码', async () => {
+    const recover = vi.fn(async () => ({}));
+    const recoverDek = new Uint8Array(32).fill(7);
+    const state = { ...validState(), signPub: encodeBase64Url(deriveSyncSignKeyPair(recoverDek).publicKey) };
+    const getState = vi.fn(async () => state);
+    const client = { recover, getState } as unknown as PersonalSyncClient;
+    const { store, secrets } = makeDekStore();
+    const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, client);
+    kl.buildRecoverMaterial.mockResolvedValue(recoverMaterial());
+
+    const code = await s.recoverSync('A'.repeat(43), 'new-smp');
+
+    expect(code).toBe('NEWCODE');
+    expect(recover).toHaveBeenCalledTimes(1);
+    expect(secrets.store).toHaveBeenCalledWith('dbclient.sync.dek.7.1', expect.any(String));
+    expect(s.isUnlocked).toBe(true);
+    expect(s.getStateStore().getSnapshot()).toEqual({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+  });
+
+  it('recoverSync 已解锁态抛错', async () => {
+    const client = { recover: vi.fn(), getState: vi.fn(async () => validState()) } as unknown as PersonalSyncClient;
+    const s = new PersonalSyncSession('7', makeMemento(), makeDekStore().store, makeStore().store, client);
+    s.unlock('1', FIX_DEK);
+    await expect(s.recoverSync('A'.repeat(43), 'new-smp')).rejects.toThrowError(/already unlocked/);
+  });
+
+  it('destroySync 成功后走 epoch transition：清理旧 epoch、存新 DEK、解锁新 epoch', async () => {
+    const destroy = vi.fn(async () => ({ keyEpoch: '2', stateVersion: '1', changeSequence: '0' }));
+    const client = { destroy, getState: vi.fn(async () => validState()) } as unknown as PersonalSyncClient;
+    const memento = makeMemento();
+    const { store, secrets } = makeDekStore();
+    const s = new PersonalSyncSession('7', memento, store, makeStore().store, client);
+    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+    s.unlock('1', FIX_DEK);
+    // 旧 epoch 有些持久化数据，销毁后应被清理
+    await new RecordMapStore(memento, '7', '1').put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    kl.unlockDek.mockResolvedValue(new Uint8Array(32).fill(7));
+    kl.createInitialMaterial.mockResolvedValue(fixedMaterial());
+    kl.newStateFromMaterial.mockReturnValue({} as NewStateDto);
+
+    const code = await s.destroySync('smp');
+
+    expect(code).toBe('NEWCODE');
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(new RecordMapStore(memento, '7', '1').getByRecordId('A'.repeat(22))).toBeUndefined();
+    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.1');
+    expect(secrets.store).toHaveBeenCalledWith('dbclient.sync.dek.7.2', expect.any(String));
+    expect(s.isUnlocked).toBe(true);
+    expect(s.getStateStore().getSnapshot()).toEqual({ keyEpoch: '2', stateVersion: '1', changeSequence: '0' });
+  });
+
+  it('destroySync 验证失败（SMP 错误）不调 destroy、不写本地', async () => {
+    const destroy = vi.fn();
+    const client = { destroy, getState: vi.fn(async () => validState()) } as unknown as PersonalSyncClient;
+    const { store, secrets } = makeDekStore();
+    const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, client);
+    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+    s.unlock('1', FIX_DEK);
+    kl.unlockDek.mockResolvedValue(new Uint8Array(32).fill(1));
+    await expect(s.destroySync('smp')).rejects.toThrowError(/passphrase mismatch/);
+    expect(destroy).not.toHaveBeenCalled();
+    expect(secrets.store).not.toHaveBeenCalled();
+    expect(secrets.delete).not.toHaveBeenCalled();
+  });
+
+  it('resetSyncAfterLoss（无本地 snapshot）成功：存新 DEK、解锁新 epoch', async () => {
+    const reset = vi.fn(async () => ({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' }));
+    const getState = vi.fn(async () => { throw new SyncApiError(400, 'SYNC_NOT_INITIALIZED'); });
+    const client = { resetAfterLoss: reset, getState } as unknown as PersonalSyncClient;
+    const { store, secrets } = makeDekStore();
+    const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, client);
+    kl.createInitialMaterial.mockResolvedValue(fixedMaterial());
+    kl.newStateFromMaterial.mockReturnValue({} as NewStateDto);
+
+    const code = await s.resetSyncAfterLoss('token', 'new-smp');
+
+    expect(code).toBe('NEWCODE');
+    expect(reset).toHaveBeenCalledTimes(1);
+    expect(secrets.store).toHaveBeenCalledWith('dbclient.sync.dek.7.1', expect.any(String));
+    expect(s.isUnlocked).toBe(true);
+  });
+
+  it('requestResetChallenge 透传 client.resetChallenges', async () => {
+    const resetChallenges = vi.fn(async () => {});
+    const client = { resetChallenges } as unknown as PersonalSyncClient;
+    const s = new PersonalSyncSession('7', makeMemento(), makeDekStore().store, makeStore().store, client);
+    await s.requestResetChallenge();
+    expect(resetChallenges).toHaveBeenCalledTimes(1);
+  });
+
+  it('destroy 在新 DEK 落盘中断 → 留 intent，resume 幂等收敛旧 epoch', async () => {
+    const destroy = vi.fn(async () => ({ keyEpoch: '2', stateVersion: '1', changeSequence: '0' }));
+    const client = { destroy, getState: vi.fn(async () => validState()) } as unknown as PersonalSyncClient;
+    const memento = makeMemento();
+    const { store, secrets } = makeDekStore({ storeFailOnce: true });
+    const s = new PersonalSyncSession('7', memento, store, makeStore().store, client);
+    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+    s.unlock('1', FIX_DEK);
+    await new RecordMapStore(memento, '7', '1').put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    kl.unlockDek.mockResolvedValue(new Uint8Array(32).fill(7));
+    kl.createInitialMaterial.mockResolvedValue(fixedMaterial());
+    kl.newStateFromMaterial.mockReturnValue({} as NewStateDto);
+
+    await expect(s.destroySync('smp')).rejects.toThrowError(/store failed/);
+    // intent 在 store 之前已写（durable），旧 epoch 尚未清理
+    expect(s.pendingCleanup).toEqual({ fromKeyEpoch: '1', toKeyEpoch: '2' });
+    expect(new RecordMapStore(memento, '7', '1').getByRecordId('A'.repeat(22))).toBeDefined();
+
+    // resume 幂等收敛（无 newDek：由下次 unlockFromState 补 store）
+    await s.resumeEpochTransition({ keyEpoch: '2', stateVersion: '1', changeSequence: '0' });
+    expect(s.pendingCleanup).toBeUndefined();
+    expect(new RecordMapStore(memento, '7', '1').getByRecordId('A'.repeat(22))).toBeUndefined();
+    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.1');
+  });
+
+  it('destroy 回执 epoch ≠ 预期 next → fail-closed 不写本地', async () => {
+    const destroy = vi.fn(async () => ({ keyEpoch: '9', stateVersion: '1', changeSequence: '0' }));
+    const client = { destroy, getState: vi.fn(async () => validState()) } as unknown as PersonalSyncClient;
+    const { store, secrets } = makeDekStore();
+    const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, client);
+    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+    s.unlock('1', FIX_DEK);
+    kl.unlockDek.mockResolvedValue(new Uint8Array(32).fill(7));
+    kl.createInitialMaterial.mockResolvedValue(fixedMaterial());
+    kl.newStateFromMaterial.mockReturnValue({} as NewStateDto);
+
+    await expect(s.destroySync('smp')).rejects.toThrowError(/epoch mismatch/);
+    expect(secrets.store).not.toHaveBeenCalled();
+    expect(secrets.delete).not.toHaveBeenCalled();
+    expect(s.isUnlocked).toBe(true); // 仍停留在旧 epoch 解锁态
+  });
+
+  it('reset 回执 epoch ≠ 预期 next → fail-closed 不写本地', async () => {
+    const reset = vi.fn(async () => ({ keyEpoch: '5', stateVersion: '1', changeSequence: '0' }));
+    const getState = vi.fn(async () => { throw new SyncApiError(400, 'SYNC_NOT_INITIALIZED'); });
+    const client = { resetAfterLoss: reset, getState } as unknown as PersonalSyncClient;
+    const { store, secrets } = makeDekStore();
+    const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, client);
+    kl.createInitialMaterial.mockResolvedValue(fixedMaterial());
+    kl.newStateFromMaterial.mockReturnValue({} as NewStateDto);
+
+    await expect(s.resetSyncAfterLoss('token', 'new-smp')).rejects.toThrowError(/epoch mismatch/);
+    expect(secrets.store).not.toHaveBeenCalled();
+    expect(s.isUnlocked).toBe(false);
+  });
+
+  it('reset 回执 keyEpoch 非 u64 → 拒绝', async () => {
+    const reset = vi.fn(async () => ({ keyEpoch: 'abc', stateVersion: '1', changeSequence: '0' }));
+    const getState = vi.fn(async () => { throw new SyncApiError(400, 'SYNC_NOT_INITIALIZED'); });
+    const client = { resetAfterLoss: reset, getState } as unknown as PersonalSyncClient;
+    const s = new PersonalSyncSession('7', makeMemento(), makeDekStore().store, makeStore().store, client);
+    kl.createInitialMaterial.mockResolvedValue(fixedMaterial());
+    kl.newStateFromMaterial.mockReturnValue({} as NewStateDto);
+
+    await expect(s.resetSyncAfterLoss('token', 'new-smp')).rejects.toThrowError(/receipt.keyEpoch/);
+  });
+
+  it('recover 后 DEK 与 state.signPub 不一致 → 拒绝解锁、不写 DEK', async () => {
+    const recover = vi.fn(async () => ({}));
+    const getState = vi.fn(async () => validState());
+    const client = { recover, getState } as unknown as PersonalSyncClient;
+    const { store, secrets } = makeDekStore();
+    const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, client);
+    kl.buildRecoverMaterial.mockResolvedValue(recoverMaterial());
+
+    await expect(s.recoverSync('A'.repeat(43), 'new-smp')).rejects.toThrowError(/signing key does not match/);
+    expect(secrets.store).not.toHaveBeenCalled();
+    expect(s.isUnlocked).toBe(false);
+  });
+
+  it('changeSyncPassword 回执 epoch 不一致 → 拒绝且不更新 snapshot', async () => {
+    const changeKey = vi.fn(async () => ({ keyEpoch: '9', stateVersion: '2' }));
+    const client = { changeKey, getState: vi.fn(async () => validState()) } as unknown as PersonalSyncClient;
+    const { store } = makeDekStore();
+    const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, client);
+    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+    s.unlock('1', FIX_DEK);
+    kl.buildChangeKeyMaterial.mockResolvedValue(changeKeyMaterial());
+
+    await expect(s.changeSyncPassword('old', 'new')).rejects.toThrowError(/epoch mismatch/);
+    expect(s.getStateStore().getSnapshot()).toEqual({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+  });
+
+  it('resetSyncAfterLoss 解锁态抛错（session 边界 fail-closed）', async () => {
+    const client = { resetAfterLoss: vi.fn(), getState: vi.fn(async () => { throw new SyncApiError(400, 'SYNC_NOT_INITIALIZED'); }) } as unknown as PersonalSyncClient;
+    const s = new PersonalSyncSession('7', makeMemento(), makeDekStore().store, makeStore().store, client);
+    s.unlock('1', FIX_DEK);
+    await expect(s.resetSyncAfterLoss('token', 'new-smp')).rejects.toThrowError(/already unlocked/);
+    expect(client.resetAfterLoss).not.toHaveBeenCalled();
+  });
+
+  it('destroy 回执丢失（请求前已落 intent）→ 重启解锁按 fromKeyEpoch 撤销并继续旧 epoch', async () => {
+    const destroy = vi.fn(async () => { throw new Error('network lost'); });
+    const client = { destroy, getState: vi.fn(async () => validState()) } as unknown as PersonalSyncClient;
+    const memento = makeMemento();
+    const { store, secrets } = makeDekStore();
+    const s = new PersonalSyncSession('7', memento, store, makeStore().store, client);
+    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+    s.unlock('1', FIX_DEK);
+    kl.unlockDek.mockResolvedValue(new Uint8Array(32).fill(7));
+    kl.createInitialMaterial.mockResolvedValue(fixedMaterial());
+    kl.newStateFromMaterial.mockReturnValue({} as NewStateDto);
+
+    await expect(s.destroySync('smp')).rejects.toThrowError(/network lost/);
+    // 不可逆请求前 intent 已落盘
+    expect(s.pendingCleanup).toEqual({ fromKeyEpoch: '1', toKeyEpoch: '2' });
+
+    // 模拟重启：新会话 unlockFromState，远端仍在旧 epoch '1' → 撤销 journal、正常解锁旧 epoch
+    const s2 = new PersonalSyncSession('7', memento, store, makeStore().store, {
+      destroy: vi.fn(),
+      getState: vi.fn(async () => validState()),
+    } as unknown as PersonalSyncClient);
+    const dek = new Uint8Array(32).fill(7);
+    const state2 = { ...validState('1'), signPub: encodeBase64Url(deriveSyncSignKeyPair(dek).publicKey) } as StateDto;
+    await s2.unlockFromState(state2, dek);
+    expect(s2.pendingCleanup).toBeUndefined();
+    expect(memento.get('dbclient.sync.epochCleanup.7')).toBeUndefined();
+    expect(s2.isUnlocked).toBe(true);
+    expect(secrets.delete).not.toHaveBeenCalled(); // 未提交成功，不清理旧 epoch
+  });
+
+  it('resumeEpochTransition：远端停留 fromKeyEpoch → 撤销 journal 返回 false', async () => {
+    const memento = makeMemento();
+    const { store: dekStore, secrets } = makeDekStore();
+    await memento.update('dbclient.sync.epochCleanup.7', { fromKeyEpoch: '1', toKeyEpoch: '2' });
+    const s = new PersonalSyncSession('7', memento, dekStore, makeStore().store, makeClient());
+    const r = await s.resumeEpochTransition({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+    expect(r).toBe(false);
+    expect(s.pendingCleanup).toBeUndefined();
+    expect(memento.get('dbclient.sync.epochCleanup.7')).toBeUndefined();
+    expect(secrets.delete).not.toHaveBeenCalled();
+  });
+
+  it('reset 时已有 pendingCleanup → fail-closed：不发 reset 也不替换 intent', async () => {
+    const memento = makeMemento();
+    await memento.update('dbclient.sync.epochCleanup.7', { fromKeyEpoch: '1', toKeyEpoch: '2' });
+    const resetAfterLoss = vi.fn(async () => ({ keyEpoch: '3', stateVersion: '1', changeSequence: '0' }));
+    const getState = vi.fn(async () => validState('2'));
+    const client = { resetAfterLoss, getState } as unknown as PersonalSyncClient;
+    const s = new PersonalSyncSession('7', memento, makeDekStore().store, makeStore().store, client);
+
+    await expect(s.resetSyncAfterLoss('token', 'new-smp')).rejects.toThrowError(/pending sync cleanup/);
+    expect(resetAfterLoss).not.toHaveBeenCalled();
+    expect(getState).not.toHaveBeenCalled();
+    expect(memento.get('dbclient.sync.epochCleanup.7')).toEqual({ fromKeyEpoch: '1', toKeyEpoch: '2' });
   });
 });

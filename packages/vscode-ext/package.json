@@ -152,6 +152,26 @@
         "category": "DB Client"
       },
       {
+        "command": "dbclient.changeSyncPassword",
+        "title": "%cmd.changeSyncPassword%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.recoverSync",
+        "title": "%cmd.recoverSync%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.destroySync",
+        "title": "%cmd.destroySync%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.resetSync",
+        "title": "%cmd.resetSync%",
+        "category": "DB Client"
+      },
+      {
         "command": "dbclient.addIndex",
         "title": "Add Index",
         "category": "DB Client",
@@ -715,6 +735,22 @@
         {
           "command": "dbclient.resolveConflicts",
           "when": "dbclient.sync.ready"
+        },
+        {
+          "command": "dbclient.changeSyncPassword",
+          "when": "dbclient.sync.unlocked"
+        },
+        {
+          "command": "dbclient.recoverSync",
+          "when": "dbclient.loggedIn && !dbclient.sync.unlocked"
+        },
+        {
+          "command": "dbclient.destroySync",
+          "when": "dbclient.sync.unlocked"
+        },
+        {
+          "command": "dbclient.resetSync",
+          "when": "dbclient.loggedIn && !dbclient.sync.unlocked"
         },
         {
           "command": "dbclient.scheduleBackup",

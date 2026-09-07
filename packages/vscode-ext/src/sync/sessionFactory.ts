@@ -25,6 +25,8 @@ export interface SyncSessionFactoryDeps {
   readonly entitlement?: () => CachedEntitlement | undefined;
   /** 每轮后台 sync 结束（含失败）后回调；供扩展层刷树/更新状态栏。 */
   readonly onSyncResult?: (result: SyncRunResult | undefined) => void;
+  /** 会话锁定态变化后同步回调；供命令门控 context 即时刷新。 */
+  readonly onSessionState?: () => void;
   /** 受控建连接口：仅登录后调用。 */
   readonly createClient: () => PersonalSyncClient;
 }
@@ -53,7 +55,7 @@ export class SyncSessionFactory {
       this.deps.dekStore,
       this.deps.connectionStore,
       this.deps.createClient(),
-      { entitlement: this.deps.entitlement, onSyncResult: this.deps.onSyncResult },
+      { entitlement: this.deps.entitlement, onSyncResult: this.deps.onSyncResult, onSessionState: this.deps.onSessionState },
     );
     return this.session;
   }

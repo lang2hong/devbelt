@@ -35,6 +35,7 @@ import { DekStore } from './sync/crypto/keyStore';
 import { deriveSyncStatus } from './sync/syncStatus';
 import { registerPersonalSyncCommands } from './commands/personalSync';
 import { registerConflictCommands } from './commands/syncConflicts';
+import { registerSyncLifecycleCommands } from './commands/syncLifecycle';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const store = new ConnectionStore(context.globalState, context.secrets);
@@ -128,6 +129,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const setSyncReady = (ready: boolean): void => {
     void vscode.commands.executeCommand('setContext', 'dbclient.sync.ready', ready);
   };
+  const setSyncUnlocked = (unlocked: boolean): void => {
+    void vscode.commands.executeCommand('setContext', 'dbclient.sync.unlocked', unlocked);
+  };
 
   // 依赖 syncFactory，但只在 onSyncResult / 聚焦 / logout 等异步回调中被调用，彼时已构造完毕。
   function refreshSyncStatusBar(): void {
@@ -143,9 +147,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (status === 'hidden') {
       syncStatusBar.hide();
       setSyncReady(false);
+      setSyncUnlocked(false);
       return;
     }
     setSyncReady(true);
+    setSyncUnlocked(session?.isUnlocked ?? false);
     syncStatusBar.show();
     const reason = session!.lastError ?? session!.lastRun?.reason;
     syncStatusBar.command = 'dbclient.syncNow';
@@ -186,6 +192,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (result && result.applied > 0) void treeProvider.refreshPathIssues();
       refreshSyncStatusBar();
     },
+    onSessionState: () => refreshSyncStatusBar(),
     createClient: () => new PersonalSyncClient(auth.client),
   });
   context.subscriptions.push({ dispose: () => syncFactory.dispose() });
@@ -215,6 +222,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   registerPersonalSyncCommands(context, auth, syncFactory);
   // B4 冲突面板。
   registerConflictCommands(context, syncFactory);
+  // B5 生命周期：换钥 / 恢复 / 销毁 / 重置。
+  registerSyncLifecycleCommands(context, auth, syncFactory);
   // 这里原先用 onDidChangeSelection 往 `dbclient.dbType` / `dbclient.has*` 写
   // context key，供菜单 when 判断数据库类型。那是竞态的：右键未选中项、或右键
   // 与当前选中项不同时，键里还是上一个节点的值 —— 在 SQLite 表上会看到 MySQL

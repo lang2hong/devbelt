@@ -1,10 +1,16 @@
 import { randomBytes } from 'crypto';
 import { generateDek, deriveSyncSignKeyPair } from './crypto/keyStore';
-import { generateRecoveryCode, deriveKekRecovery, deriveRecoverSignKeyPair, encodeBase64Url } from './crypto/recoveryCode';
+import {
+  generateRecoveryCode,
+  deriveKekRecovery,
+  deriveRecoverSignKeyPair,
+  encodeBase64Url,
+  type RecoveryKdfParams,
+} from './crypto/recoveryCode';
 import { deriveKekSmpInWorker } from './crypto/smpKdf';
 import { sealEnvelope, openEnvelope } from './envelope';
 import type { SmpKdfParams } from './crypto/smpKdfParams';
-import type { EnvelopeDto, RecoveryKdfDto, SmpKdfDto } from './e2e/types';
+import type { EnvelopeDto, NewStateDto, RecoveryKdfDto, SmpKdfDto } from './e2e/types';
 
 /**
  * 密钥生命周期（init 材料生成 / unlock DEK 恢复）。
@@ -97,4 +103,113 @@ export async function unlockDek(
 ): Promise<Uint8Array> {
   const kekSmp = await deriveKekSmpInWorker(smp, smpKdfDtoToParams(smpKdf));
   return openEnvelope(kekSmp, envelopeSmp, userId, keyEpoch, 'smp');
+}
+
+function incU64(v: string): string {
+  return (BigInt(v) + 1n).toString();
+}
+
+function recoveryKdfDtoToParams(dto: RecoveryKdfDto): RecoveryKdfParams {
+  return {
+    alg: dto.alg,
+    version: dto.version,
+    salt: new Uint8Array(Buffer.from(dto.salt, 'base64url')),
+    outputBytes: dto.outputBytes,
+  };
+}
+
+/** 由 init/destroy/reset 材料组装 newState DTO（协议字段 + 双 envelope + 双公钥）。 */
+export function newStateFromMaterial(material: InitialSyncMaterial): NewStateDto {
+  return {
+    protocolVersion: 1,
+    cipherSuite: 'AES-256-GCM',
+    formatVersion: 1,
+    smpKdf: material.smpKdf,
+    recoveryKdf: material.recoveryKdf,
+    envelopeSmp: material.envelopeSmp,
+    envelopeRecovery: material.envelopeRecovery,
+    signPub: material.signPub,
+    recoverSignPub: material.recoverSignPub,
+  };
+}
+
+/** 换钥材料：验证旧 SMP（解封当前 envelopeSmp 得 DEK），用新 SMP 重封 smp envelope（版本 +1）。 */
+export interface ChangeKeyMaterial {
+  /** 解封得到的 DEK（临时，调用方比对后清零）。 */
+  verifiedDek: Uint8Array;
+  smpKdf: SmpKdfDto;
+  envelopeSmp: EnvelopeDto;
+}
+
+export async function buildChangeKeyMaterial(
+  userId: string,
+  keyEpoch: string,
+  oldSmp: string,
+  oldSmpKdf: SmpKdfDto,
+  oldEnvelopeSmp: EnvelopeDto,
+  newSmp: string,
+): Promise<ChangeKeyMaterial> {
+  const verifiedDek = await unlockDek(userId, keyEpoch, oldSmp, oldSmpKdf, oldEnvelopeSmp);
+  const smpKdf = newSmpKdf();
+  const kekSmp = await deriveKekSmpInWorker(newSmp, smpKdfDtoToParams(smpKdf));
+  try {
+    const envelopeSmp = sealEnvelope(kekSmp, verifiedDek, userId, keyEpoch, 'smp', incU64(oldEnvelopeSmp.envelopeVersion));
+    return { verifiedDek, smpKdf, envelopeSmp };
+  } finally {
+    kekSmp.fill(0);
+  }
+}
+
+/** 恢复码恢复材料：旧恢复码解封 DEK + 派生旧 recoverSign seed；新 SMP/新恢复码重封两条 envelope（各 +1 版本）。 */
+export interface RecoverMaterial {
+  /** 解封得到的 DEK（临时，调用方清零）。 */
+  dek: Uint8Array;
+  /** 旧恢复码派生的 recoverSign seed（签名 state.recover，调用方签名后清零）。 */
+  oldRecoverSignSeed: Uint8Array;
+  smpKdf: SmpKdfDto;
+  envelopeSmp: EnvelopeDto;
+  recoveryKdf: RecoveryKdfDto;
+  envelopeRecovery: EnvelopeDto;
+  recoverSignPub: string;
+}
+
+export async function buildRecoverMaterial(
+  userId: string,
+  keyEpoch: string,
+  oldRecoveryRaw: Uint8Array,
+  oldRecoveryKdf: RecoveryKdfDto,
+  oldEnvelopeRecovery: EnvelopeDto,
+  oldEnvelopeSmpVersion: string,
+  newSmp: string,
+  newRecoveryRaw: Uint8Array,
+): Promise<RecoverMaterial> {
+  const kekRecovery = deriveKekRecovery(oldRecoveryRaw, recoveryKdfDtoToParams(oldRecoveryKdf));
+  let dek: Uint8Array;
+  try {
+    dek = openEnvelope(kekRecovery, oldEnvelopeRecovery, userId, keyEpoch, 'recovery');
+  } finally {
+    kekRecovery.fill(0);
+  }
+  const oldRecoverSignSeed = deriveRecoverSignKeyPair(oldRecoveryRaw).seed;
+
+  const smpKdf = newSmpKdf();
+  const kekSmp = await deriveKekSmpInWorker(newSmp, smpKdfDtoToParams(smpKdf));
+  let envelopeSmp: EnvelopeDto;
+  try {
+    envelopeSmp = sealEnvelope(kekSmp, dek, userId, keyEpoch, 'smp', incU64(oldEnvelopeSmpVersion));
+  } finally {
+    kekSmp.fill(0);
+  }
+
+  const recoveryKdf = newRecoveryKdf();
+  const kekRecoveryNew = deriveKekRecovery(newRecoveryRaw, recoveryKdfDtoToParams(recoveryKdf));
+  let envelopeRecovery: EnvelopeDto;
+  try {
+    envelopeRecovery = sealEnvelope(kekRecoveryNew, dek, userId, keyEpoch, 'recovery', incU64(oldEnvelopeRecovery.envelopeVersion));
+  } finally {
+    kekRecoveryNew.fill(0);
+  }
+
+  const recoverSignPub = encodeBase64Url(deriveRecoverSignKeyPair(newRecoveryRaw).publicKey);
+  return { dek, oldRecoverSignSeed, smpKdf, envelopeSmp, recoveryKdf, envelopeRecovery, recoverSignPub };
 }
