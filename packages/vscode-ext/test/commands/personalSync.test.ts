@@ -4,7 +4,7 @@ vi.mock('vscode', () => ({
   env: { language: 'en' },
   workspace: { getConfiguration: () => ({ get: () => 'en' }) },
   window: {},
-  commands: {},
+  commands: { executeCommand: vi.fn(async () => {}) },
 }));
 
 import { initializePersonalSync, unlockPersonalSync, type PersonalSyncCommandDeps, type SyncSessionPort, type SyncUi } from '../../src/commands/personalSync';
@@ -36,10 +36,13 @@ function makeSession(over: Partial<SyncSessionPort> = {}): SyncSessionPort {
     uid: '7',
     isUnlocked: false,
     pendingCleanup: undefined,
+    epochStale: false,
+    localEpoch: undefined,
     getRemoteState: vi.fn(async () => state),
     initializeSync: vi.fn(async () => {}),
     unlockFromState: vi.fn(async () => {}),
     syncNow: vi.fn(async () => ({ stage: 'ok' })),
+    lock: vi.fn(),
     ...over,
   };
 }
@@ -48,10 +51,11 @@ function makeDeps(session: SyncSessionPort, inputs: Array<string | undefined> = 
   const info = vi.fn();
   const warn = vi.fn();
   const error = vi.fn();
+  const errorAction = vi.fn();
   const ui: SyncUi = {
     promptSmp: vi.fn(async () => inputs.shift()),
     confirmRecoveryCode: vi.fn(async () => true),
-    info, warn, error,
+    info, warn, error, errorAction,
   };
   const deps: PersonalSyncCommandDeps = {
     auth: { isLoggedIn: () => true, refreshEntitlement: vi.fn(async () => {}) },
@@ -60,7 +64,7 @@ function makeDeps(session: SyncSessionPort, inputs: Array<string | undefined> = 
     createMaterial: vi.fn(async () => makeMaterial()),
     unlockDek: vi.fn(async () => makeMaterial().dek),
   };
-  return { deps, ui, info, warn, error };
+  return { deps, ui, info, warn, error, errorAction };
 }
 
 describe('personal sync B1 commands', () => {
@@ -199,5 +203,43 @@ describe('personal sync B1 commands', () => {
     await unlockPersonalSync(unlock.deps);
     expect(unlock.ui.promptSmp).not.toHaveBeenCalled();
     expect(unlock.info).toHaveBeenCalledWith('Personal sync is already unlocked and running.');
+  });
+
+  it('epoch-stale（解锁态）时重新解锁：先 lock 再走 SMP 解锁流程', async () => {
+    const session = makeSession({ isUnlocked: true, epochStale: true, lock: vi.fn() });
+    const { deps } = makeDeps(session, ['sync secret!']);
+    await unlockPersonalSync(deps);
+
+    expect(session.lock).toHaveBeenCalledTimes(1);
+    expect(deps.unlockDek).toHaveBeenCalledWith('7', '1', 'sync secret!', state);
+    expect(session.unlockFromState).toHaveBeenCalledWith(state, expect.any(Uint8Array));
+  });
+
+  it('epoch-stale 且解锁失败 → 提供 Clear Local Sync 逃生舱按钮', async () => {
+    const session = makeSession({ isUnlocked: false, epochStale: true });
+    const { deps, errorAction } = makeDeps(session, ['sync secret!']);
+    deps.unlockDek = vi.fn(async () => { throw new Error('gcm'); });
+    errorAction.mockResolvedValue('Clear Local Sync Data');
+
+    await unlockPersonalSync(deps);
+
+    expect(errorAction).toHaveBeenCalled();
+  });
+
+  it('重启后（无 coordinator）本地 epoch 落后 + 解锁失败 → 仍提供逃生舱（R1）', async () => {
+    const remoteState = { ...state, keyEpoch: '2' };
+    const session = makeSession({
+      isUnlocked: false,
+      epochStale: false,
+      localEpoch: '1',
+      getRemoteState: vi.fn(async () => remoteState),
+    });
+    const { deps, errorAction } = makeDeps(session, ['sync secret!']);
+    deps.unlockDek = vi.fn(async () => { throw new Error('gcm'); });
+    errorAction.mockResolvedValue('Clear Local Sync Data');
+
+    await unlockPersonalSync(deps);
+
+    expect(errorAction).toHaveBeenCalled();
   });
 });

@@ -25,6 +25,7 @@
   "cmd.recoverSync": "Recover with Recovery Code",
   "cmd.destroySync": "Destroy Sync Data",
   "cmd.resetSync": "Reset Sync (Forgot Passphrase)",
+  "cmd.clearLocalSync": "Clear Local Sync Data",
   "cmd.initializePersonalSync": "Initialize Personal Sync",
   "cmd.unlockPersonalSync": "Unlock Personal Sync",
   "cmd.syncNow": "Sync Now",

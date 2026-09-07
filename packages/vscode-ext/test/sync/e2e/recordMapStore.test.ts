@@ -225,4 +225,17 @@ describe('RecordMapStore', () => {
     expect(s.getByRef({ type: 'query', localId: 'q-1' })!.recordId).toBe('C'.repeat(22));
     expect(s.getByRef(connectionRef)!.recordId).toBe('D'.repeat(22));
   });
+
+  it('list() 返回全部映射条目（含 recordId）', async () => {
+    const s = new RecordMapStore(makeMemento(), '7', '1');
+    await s.put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await s.put('B'.repeat(22), { type: 'query', localId: 'q-1', recordVersion: '2', revision: 5, status: 'pending' });
+
+    const entries = s.list();
+    expect(entries).toHaveLength(2);
+    expect(entries).toEqual(expect.arrayContaining([
+      { recordId: 'A'.repeat(22), type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' },
+      { recordId: 'B'.repeat(22), type: 'query', localId: 'q-1', recordVersion: '2', revision: 5, status: 'pending' },
+    ]));
+  });
 });

@@ -126,6 +126,18 @@ export class PersonalSyncSession {
     return this.coordinator?.stalled ?? false;
   }
 
+  /** 远端 epoch 已前进（他设备 destroy/reset 等），需要重新输入 SMP 解锁新 epoch。 */
+  get epochStale(): boolean {
+    const r = this.coordinator?.lastRun;
+    if (!r) return false;
+    return r.stage === 'epoch-mismatch' || r.terminal?.code === 'SYNC_EPOCH_STALE';
+  }
+
+  /** 本地已持久化的 keyEpoch（未初始化则为 undefined）。 */
+  get localEpoch(): string | undefined {
+    return this.stateStore.getSnapshot()?.keyEpoch;
+  }
+
   /** 是否正处于失败退避重试的等待期。 */
   get retrying(): boolean {
     return this.coordinator?.retrying ?? false;
@@ -176,7 +188,14 @@ export class PersonalSyncSession {
     };
     const ownedDek = dek.slice();
     try {
-      if (this.pendingCleanup) await this.resumeEpochTransition(snapshot);
+      const local = this.stateStore.getSnapshot();
+      if (this.pendingCleanup) {
+        await this.resumeEpochTransition(snapshot);
+      } else if (local && BigInt(local.keyEpoch) < BigInt(state.keyEpoch)) {
+        // 远端 epoch 前进（他设备 destroy/reset 等）：清理本地旧 epoch 的三类 store 与 DEK，
+        // 避免旧 epoch 键成为孤儿、并防止 ensureStores 因 epoch 不一致抛错。
+        await this.reconcileEpochTransition(local.keyEpoch, state.keyEpoch, snapshot);
+      }
       await this.dekStore.store(this.userId, BigInt(snapshot.keyEpoch), ownedDek);
       await this.stateStore.setSnapshot(snapshot);
       this.unlock(snapshot.keyEpoch, ownedDek);
@@ -338,6 +357,35 @@ export class PersonalSyncSession {
   }
 
   /**
+   * 清除本地同步数据（纯本地，无服务端调用）：对 snapshot / cleanup intent 涉及的每个 epoch
+   * 先 wipe 已同步本地实体，再清 recordMap/outbox/unresolved/DEK，最后清 state 快照与 intent、
+   * 重置运行时，回到未初始化态。从未同步的本地新建实体保留（供 init/reset 播种）。
+   * 用于 reset 场景他设备旧 SMP 解锁失败后的逃生舱，或同步状态损坏时的清理。
+   */
+  async clearLocalSyncData(): Promise<void> {
+    this.coordinator?.stop();
+    const epochs = new Set<string>();
+    const snap = this.stateStore.getSnapshot();
+    if (snap) epochs.add(snap.keyEpoch);
+    const intent = this.readIntent();
+    if (intent) {
+      epochs.add(intent.fromKeyEpoch);
+      epochs.add(intent.toKeyEpoch);
+    }
+    for (const epoch of epochs) {
+      // 先 purge 该 epoch 映射实体（used 关闭 F1 逃逸：保留实体 + 清 map = 重推复活），再清 store。
+      await this.clearLocalSyncedEntities(epoch);
+      await new RecordMapStore(this.memento, this.userId, epoch).clear();
+      await new PendingMutationStore(this.memento, this.userId, epoch).clear();
+      await new UnresolvedRefStore(this.memento, this.userId, epoch).clear();
+      await this.dekStore.delete(this.userId, BigInt(epoch));
+    }
+    await this.stateStore.clear();
+    await this.clearIntent();
+    this.resetRuntime();
+  }
+
+  /**
    * 丢失 SMP 重置（锁定态）：重置意见码 + 全新 epoch 材料。旧数据不可恢复。
    * 若本地有旧 epoch 则走 transition 清理；否则直接落新 epoch。返回新恢复码。
    */
@@ -387,17 +435,23 @@ export class PersonalSyncSession {
   /** 落新 epoch：intent 先行 → 存新 DEK → transition 清旧 epoch → unlock → 首次同步。 */
   private async installNewEpoch(fromKeyEpoch: string | undefined, newSnapshot: SyncStateSnapshot, newDek: Uint8Array): Promise<void> {
     const newKeyEpoch = newSnapshot.keyEpoch;
-    if (fromKeyEpoch !== undefined && BigInt(fromKeyEpoch) < BigInt(newKeyEpoch)) {
-      // newDek 一并传入，使「存新 DEK」落在 transition 的 writeIntent 之后（可恢复序列的一部分）。
-      await this.reconcileEpochTransition(fromKeyEpoch, newKeyEpoch, newSnapshot, newDek);
-    } else {
-      this.coordinator?.stop();
-      this.resetRuntime();
-      await this.dekStore.store(this.userId, BigInt(newKeyEpoch), newDek);
-      this.ensureStores(newKeyEpoch);
-      await this.stateStore.setSnapshot(newSnapshot);
+    try {
+      if (fromKeyEpoch !== undefined && BigInt(fromKeyEpoch) < BigInt(newKeyEpoch)) {
+        // newDek 一并传入，使「存新 DEK」落在 transition 的 writeIntent 之后（可恢复序列的一部分）。
+        await this.reconcileEpochTransition(fromKeyEpoch, newKeyEpoch, newSnapshot, newDek);
+      } else {
+        this.coordinator?.stop();
+        this.resetRuntime();
+        await this.dekStore.store(this.userId, BigInt(newKeyEpoch), newDek);
+        this.ensureStores(newKeyEpoch);
+        await this.stateStore.setSnapshot(newSnapshot);
+      }
+      this.unlock(newKeyEpoch, newDek);
+    } catch (err) {
+      // 失败路径清零 newDek（成功后 newDek 由 this.dek 持有，不在此清零）。
+      newDek.fill(0);
+      throw err;
     }
-    this.unlock(newKeyEpoch, newDek);
     this.scheduleInitialSync();
   }
 
@@ -528,6 +582,9 @@ export class PersonalSyncSession {
     await this.writeIntent({ fromKeyEpoch, toKeyEpoch });
     if (newDek) await this.dekStore.store(this.userId, BigInt(toKeyEpoch), newDek);
     await this.stateStore.setSnapshot(newSnapshot);
+    // Gap-1（Option 1 严格清空）：进入新 epoch 前清除旧 epoch 的本地已同步实体，
+    // 避免 destroy/reset/跨设备迁移后本地实体被当作「从未同步」而全量重推（重复/复活）。
+    await this.clearLocalSyncedEntities(fromKeyEpoch);
     await new RecordMapStore(this.memento, this.userId, fromKeyEpoch).clear();
     await new PendingMutationStore(this.memento, this.userId, fromKeyEpoch).clear();
     await new UnresolvedRefStore(this.memento, this.userId, fromKeyEpoch).clear();
@@ -535,6 +592,22 @@ export class PersonalSyncSession {
     await this.clearIntent();
 
     this.resetRuntime();
+  }
+
+  /**
+   * 清除指定 epoch 映射到的本地实体（软删，source='sync'，级联由 store 承担）。
+   *
+   * 依赖闭包规则（Gap-1 Option 1）：记录在本 epoch recordMap 里的实体（含 confirmed 与
+   * pending 预留）都清除；pending 对应远端旧 epoch 的入站残留，存活会作为「从未同步」被重推。
+   * 删除 confirmed 父实体时，store 级联其依赖子树（连接 tombstone → 级联其 query/folder），
+   * 即使子项未映射——这是明确的依赖闭包，避免留下引用已清除连接的孤儿 query/folder。
+   * 未映射的独立实体与组织连接（org:）不在此映射内，天然保留。
+   */
+  private async clearLocalSyncedEntities(fromKeyEpoch: string): Promise<void> {
+    const entries = new RecordMapStore(this.memento, this.userId, fromKeyEpoch).list();
+    for (const e of entries) {
+      await this.entities.remove({ type: e.type, localId: e.localId }, 'sync');
+    }
   }
 
   /** 检测到 cleanup intent 时完整幂等重放（clear/delete 幂等、setSnapshot 等值不抛）。 */
@@ -550,6 +623,21 @@ export class PersonalSyncSession {
     if (newSnapshot.keyEpoch === intent.fromKeyEpoch) {
       // 提交前 journal：远端仍在旧 epoch（destroy/reset 未成功或响应丢失前已崩溃）——
       // 撤销 journal，继续正常解锁旧 epoch。
+      await this.clearIntent();
+      return false;
+    }
+    if (BigInt(newSnapshot.keyEpoch) > BigInt(intent.toKeyEpoch)) {
+      // 复合故障死角：本地 journal {from→to} 残留期间，他设备已把远端进一步推进到 > to。
+      // 视为「已提交且被超越」：from 与 to 两个 epoch 的旧 transition 都可能已持久化部分产物
+      // （实体/DEK/map/outbox/unresolved），先 purge 映射实体、再清 store 与 DEK，最后撤销
+      // journal，按远端实际 snapshot 继续（防止被越过时旧实体重推复活）。
+      for (const epoch of [intent.fromKeyEpoch, intent.toKeyEpoch]) {
+        await this.clearLocalSyncedEntities(epoch);
+        await new RecordMapStore(this.memento, this.userId, epoch).clear();
+        await new PendingMutationStore(this.memento, this.userId, epoch).clear();
+        await new UnresolvedRefStore(this.memento, this.userId, epoch).clear();
+        await this.dekStore.delete(this.userId, BigInt(epoch));
+      }
       await this.clearIntent();
       return false;
     }

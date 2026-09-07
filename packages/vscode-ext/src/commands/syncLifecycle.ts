@@ -19,6 +19,7 @@ interface SyncLifecycleSessionPort {
   destroySync(smp: string): Promise<string>;
   requestResetChallenge(): Promise<void>;
   resetSyncAfterLoss(resetToken: string, newSmp: string): Promise<string>;
+  clearLocalSyncData(): Promise<void>;
 }
 
 interface SyncLifecycleFactoryPort {
@@ -192,6 +193,24 @@ export async function resetSync(deps: SyncLifecycleCommandDeps): Promise<void> {
   deps.ui.info(l10n('sync.unlocked'));
 }
 
+/** 清除本地同步数据（纯本地逃生舱）：仅锁定态；二次确认后清 snapshot/DEK/stores 与已同步实体。 */
+export async function clearLocalSync(deps: SyncLifecycleCommandDeps): Promise<void> {
+  const session = await getSession(deps);
+  if (!session) return;
+  if (session.isUnlocked) {
+    deps.ui.warn(l10n('sync.requiresLockedForClear'));
+    return;
+  }
+  if (!(await deps.ui.confirmIrreversible(l10n('sync.clearLocalConfirm'), l10n('sync.clearLocalConfirmButton')))) return;
+  try {
+    await session.clearLocalSyncData();
+  } catch {
+    deps.ui.error(l10n('sync.clearLocalFailed'));
+    return;
+  }
+  deps.ui.info(l10n('sync.clearLocalDone'));
+}
+
 function vscodeUi(): SyncLifecycleUi {
   return {
     promptSmp: (prompt) => vscode.window.showInputBox({ prompt, password: true, ignoreFocusOut: true }),
@@ -225,6 +244,7 @@ export function registerSyncLifecycleCommands(
     vscode.commands.registerCommand('dbclient.recoverSync', () => recoverSync(deps)),
     vscode.commands.registerCommand('dbclient.destroySync', () => destroySync(deps)),
     vscode.commands.registerCommand('dbclient.resetSync', () => resetSync(deps)),
+    vscode.commands.registerCommand('dbclient.clearLocalSync', () => clearLocalSync(deps)),
   );
 }
 

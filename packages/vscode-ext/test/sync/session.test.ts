@@ -283,13 +283,13 @@ describe('PersonalSyncSession', () => {
     expect(memento.get('dbclient.sync.epochCleanup.7')).toBeUndefined();
   });
 
-  it('resume 拒绝：snapshot keyEpoch 与 intent toKeyEpoch 不匹配', async () => {
+  it('resume 拒绝：snapshot keyEpoch 倒退（< fromKeyEpoch）fail-closed', async () => {
     const memento = makeMemento();
     const { store: dekStore, secrets } = makeDekStore();
     await memento.update('dbclient.sync.epochCleanup.7', { fromKeyEpoch: '2', toKeyEpoch: '3' });
 
     const s = new PersonalSyncSession('7', memento, dekStore, makeStore().store, makeClient());
-    await expect(s.resumeEpochTransition({ keyEpoch: '5', stateVersion: '1', changeSequence: '5' }))
+    await expect(s.resumeEpochTransition({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' }))
       .rejects.toThrowError(/resume snapshot keyEpoch does not match/);
     expect(secrets.delete).not.toHaveBeenCalled();
     expect(memento.get('dbclient.sync.epochCleanup.7')).toEqual({ fromKeyEpoch: '2', toKeyEpoch: '3' });
@@ -369,6 +369,34 @@ describe('PersonalSyncSession', () => {
 });
 
 const FIX_DEK = new Uint8Array(32).fill(7);
+
+/** 带真实实体 Map + remove spy 的 ConnectionStore（用于验证实体 wipe 行为）。 */
+function makeEntityStore(seed: string[] = []) {
+  const removedIds: string[] = [];
+  const conns = new Map<string, { id: string; deleted?: boolean }>();
+  for (const id of seed) conns.set(id, { id });
+  const events = new EventEmitter<'user' | 'sync'>();
+  const store = {
+    onChanged: events.event,
+    listForSync: () => [...conns.values()],
+    listGroupsForSync: () => [],
+    listFoldersForSync: () => [],
+    listQueriesForSync: () => [],
+    get: (id: string) => conns.get(id),
+    getGroupById: () => undefined,
+    getFolderById: () => undefined,
+    getQueryById: () => undefined,
+    save: async () => {},
+    remove: vi.fn(async (id: string) => { removedIds.push(id); conns.set(id, { id, deleted: true }); }),
+    upsertGroup: async () => {},
+    upsertFolder: async () => {},
+    upsertQuery: async () => {},
+    removeGroup: async () => {},
+    removeQueryFolder: async () => {},
+    removeQuery: async () => {},
+  } as unknown as ConnectionStore;
+  return { store, removedIds, conns };
+}
 
 function fixedMaterial() {
   return {
@@ -695,5 +723,149 @@ describe('PersonalSyncSession B5 生命周期', () => {
     expect(resetAfterLoss).not.toHaveBeenCalled();
     expect(getState).not.toHaveBeenCalled();
     expect(memento.get('dbclient.sync.epochCleanup.7')).toEqual({ fromKeyEpoch: '1', toKeyEpoch: '2' });
+  });
+
+  it('unlockFromState：本地 epoch 落后于远端 → 清理旧 epoch 并解锁新 epoch', async () => {
+    const memento = makeMemento();
+    const { store, secrets } = makeDekStore();
+    const s = new PersonalSyncSession('7', memento, store, makeStore().store, makeClient());
+    await new RecordMapStore(memento, '7', '1').put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+
+    const dek = new Uint8Array(32).fill(7);
+    const state2 = { ...validState('2'), signPub: encodeBase64Url(deriveSyncSignKeyPair(dek).publicKey) } as StateDto;
+    await s.unlockFromState(state2, dek);
+
+    expect(new RecordMapStore(memento, '7', '1').getByRecordId('A'.repeat(22))).toBeUndefined();
+    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.1');
+    expect(s.isUnlocked).toBe(true);
+    expect(s.getStateStore().getSnapshot()).toEqual({ keyEpoch: '2', stateVersion: '1', changeSequence: '0' });
+  });
+
+  it('resumeEpochTransition：远端被推进到 > intent.to → 清理 from 与 to 两个 epoch 的实体与产物并撤销 journal 返回 false', async () => {
+    const memento = makeMemento();
+    const { store: dekStore, secrets } = makeDekStore();
+    const { store, removedIds } = makeEntityStore(['c-1', 'c-2', 'c-new']);
+    await memento.update('dbclient.sync.epochCleanup.7', { fromKeyEpoch: '1', toKeyEpoch: '2' });
+    // 中断 transition 已把 from(1) 与 to(2) 两个 epoch 的产物都持久化了一部分
+    await new RecordMapStore(memento, '7', '1').put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await new RecordMapStore(memento, '7', '2').put('B'.repeat(22), { type: 'connection', localId: 'c-2', recordVersion: '1', revision: 0, status: 'pending' });
+    await new PendingMutationStore(memento, '7', '2').put(makePutMutation());
+    const s = new PersonalSyncSession('7', memento, dekStore, store, makeClient());
+
+    const r = await s.resumeEpochTransition({ keyEpoch: '3', stateVersion: '1', changeSequence: '0' });
+    expect(r).toBe(false);
+    expect(s.pendingCleanup).toBeUndefined();
+    expect(new RecordMapStore(memento, '7', '1').getByRecordId('A'.repeat(22))).toBeUndefined();
+    expect(new RecordMapStore(memento, '7', '2').getByRecordId('B'.repeat(22))).toBeUndefined();
+    expect(new PendingMutationStore(memento, '7', '2').list()).toEqual([]);
+    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.1');
+    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.2');
+    expect(memento.get('dbclient.sync.epochCleanup.7')).toBeUndefined();
+    // 两个 epoch 的映射实体（含 pending）都被 wipe，从未映射的 c-new 保留
+    expect(removedIds).toEqual(expect.arrayContaining(['c-1', 'c-2']));
+    expect(removedIds).not.toContain('c-new');
+  });
+
+  it('epochStale：远端 epoch 前进后为 true', async () => {
+    vi.useFakeTimers();
+    const getState = vi.fn(async () => validState('2'));
+    const client = { getState, getRecords: async () => ({ snapshotSequence: '0', records: [] }) } as unknown as PersonalSyncClient;
+    const s = new PersonalSyncSession('7', makeMemento(), makeDekStore().store, makeStore().store, client);
+    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+    s.unlock('1', new Uint8Array(32).fill(7));
+    s.scheduleNow();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.epochStale).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('跨设备迁移清除本地已同步实体，保留未同步实体（Gap-1 Option 1）', async () => {
+    const memento = makeMemento();
+    const { store, removedIds, conns } = makeEntityStore(['c-synced', 'c-new']);
+    const { store: dekStore } = makeDekStore();
+    const s = new PersonalSyncSession('7', memento, dekStore, store, makeClient());
+    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+    // 仅 c-synced 有映射；c-new 从未同步（无映射）
+    await new RecordMapStore(memento, '7', '1').put('A'.repeat(22), { type: 'connection', localId: 'c-synced', recordVersion: '1', revision: 0, status: 'confirmed' });
+
+    const dek = new Uint8Array(32).fill(7);
+    const state2 = { ...validState('2'), signPub: encodeBase64Url(deriveSyncSignKeyPair(dek).publicKey) } as StateDto;
+    await s.unlockFromState(state2, dek);
+
+    expect(removedIds).toContain('c-synced');
+    expect(removedIds).not.toContain('c-new');
+    expect(conns.get('c-new')).toEqual({ id: 'c-new' }); // 未同步连接未删除
+  });
+
+  it('clearLocalSyncData：purge 已同步实体（snapshot 与 intent 两个 epoch 并集），保留未同步，回未初始化', async () => {
+    const memento = makeMemento();
+    const { store, removedIds, conns } = makeEntityStore(['c-1', 'c-2', 'c-new']);
+    const { store: dekStore, secrets } = makeDekStore();
+    const s = new PersonalSyncSession('7', memento, dekStore, store, makeClient());
+    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+    // snapshot 指向 epoch1（c-1 confirmed）；journal {1→2} 让 epoch2 也进清理集合（c-2 confirmed）
+    await new RecordMapStore(memento, '7', '1').put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await new RecordMapStore(memento, '7', '2').put('B'.repeat(22), { type: 'connection', localId: 'c-2', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await memento.update('dbclient.sync.epochCleanup.7', { fromKeyEpoch: '1', toKeyEpoch: '2' });
+
+    await s.clearLocalSyncData();
+
+    expect(removedIds).toEqual(expect.arrayContaining(['c-1', 'c-2']));
+    expect(removedIds).not.toContain('c-new');
+    expect(conns.get('c-new')).toEqual({ id: 'c-new' });
+    expect(s.getStateStore().getSnapshot()).toBeUndefined();
+    expect(new RecordMapStore(memento, '7', '1').getByRecordId('A'.repeat(22))).toBeUndefined();
+    expect(new RecordMapStore(memento, '7', '2').getByRecordId('B'.repeat(22))).toBeUndefined();
+    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.1');
+    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.2');
+    expect(memento.get('dbclient.sync.epochCleanup.7')).toBeUndefined();
+    expect(s.isUnlocked).toBe(false);
+  });
+
+  it('清除 confirmed connection 级联删除其 unmapped query/folder（依赖闭包）', async () => {
+    const memento = makeMemento();
+    const conns = new Map<string, { id: string; deleted?: boolean }>([['c-1', { id: 'c-1' }]]);
+    const folders = new Map<string, { id: string; connId: string; deleted?: boolean }>([['f-1', { id: 'f-1', connId: 'c-1' }]]);
+    const queries = new Map<string, { id: string; connId: string; deleted?: boolean }>([['q-1', { id: 'q-1', connId: 'c-1' }]]);
+    const events = new EventEmitter<'user' | 'sync'>();
+    // 模拟 ConnectionStore.remove 的级联：删连接时级联 tombstone 其 query/folder
+    const store = {
+      onChanged: events.event,
+      listForSync: () => [...conns.values()],
+      listGroupsForSync: () => [],
+      listFoldersForSync: () => [...folders.values()],
+      listQueriesForSync: () => [...queries.values()],
+      get: (id: string) => conns.get(id),
+      getGroupById: () => undefined,
+      getFolderById: (id: string) => folders.get(id),
+      getQueryById: (id: string) => queries.get(id),
+      save: async () => {},
+      remove: vi.fn(async (id: string) => {
+        conns.set(id, { id, deleted: true });
+        for (const [fid, f] of [...folders]) if (f.connId === id) folders.set(fid, { ...f, deleted: true });
+        for (const [qid, q] of [...queries]) if (q.connId === id) queries.set(qid, { ...q, deleted: true });
+      }),
+      upsertGroup: async () => {},
+      upsertFolder: async () => {},
+      upsertQuery: async () => {},
+      removeGroup: async () => {},
+      removeQueryFolder: async () => {},
+      removeQuery: async () => {},
+    } as unknown as ConnectionStore;
+
+    const { store: dekStore } = makeDekStore();
+    const s = new PersonalSyncSession('7', memento, dekStore, store, makeClient());
+    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+    await new RecordMapStore(memento, '7', '1').put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+
+    const dek = new Uint8Array(32).fill(7);
+    const state2 = { ...validState('2'), signPub: encodeBase64Url(deriveSyncSignKeyPair(dek).publicKey) } as StateDto;
+    await s.unlockFromState(state2, dek);
+
+    expect(conns.get('c-1')!.deleted).toBe(true);
+    expect(folders.get('f-1')!.deleted).toBe(true); // 依赖闭包：unmapped folder 随 confirmed connection 删除
+    expect(queries.get('q-1')!.deleted).toBe(true); // 依赖闭包：unmapped query 随 confirmed connection 删除
   });
 });

@@ -68,4 +68,9 @@ export class StateStore {
 
     await this.memento.update(this.key, { keyEpoch, stateVersion, changeSequence });
   }
+
+  /** 清空本地 state 快照（clearLocalSyncData 回未初始化态）。 */
+  async clear(): Promise<void> {
+    await this.memento.update(this.key, undefined);
+  }
 }

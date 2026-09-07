@@ -172,6 +172,11 @@
         "category": "DB Client"
       },
       {
+        "command": "dbclient.clearLocalSync",
+        "title": "%cmd.clearLocalSync%",
+        "category": "DB Client"
+      },
+      {
         "command": "dbclient.addIndex",
         "title": "Add Index",
         "category": "DB Client",
@@ -750,6 +755,10 @@
         },
         {
           "command": "dbclient.resetSync",
+          "when": "dbclient.loggedIn && !dbclient.sync.unlocked"
+        },
+        {
+          "command": "dbclient.clearLocalSync",
           "when": "dbclient.loggedIn && !dbclient.sync.unlocked"
         },
         {

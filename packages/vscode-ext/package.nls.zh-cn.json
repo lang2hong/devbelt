@@ -25,6 +25,7 @@
   "cmd.recoverSync": "使用恢复码恢复",
   "cmd.destroySync": "销毁同步数据",
   "cmd.resetSync": "重置同步（忘记口令）",
+  "cmd.clearLocalSync": "清除本地同步数据",
   "cmd.initializePersonalSync": "初始化个人同步",
   "cmd.unlockPersonalSync": "解锁个人同步",
   "cmd.syncNow": "立即同步",

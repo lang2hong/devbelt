@@ -136,6 +136,12 @@ export class RecordMapStore {
     return entry ? { recordId, ...entry } : undefined;
   }
 
+  /** 列出全部映射条目（供 epoch 迁移清理本地已同步实体）。 */
+  list(): (RecordMapEntry & { recordId: string })[] {
+    const data = this.read();
+    return Object.entries(data.byRecordId).map(([recordId, entry]) => ({ recordId, ...entry }));
+  }
+
   async put(recordId: string, entry: RecordMapEntry): Promise<void> {
     assertRecordId(recordId);
     assertLocalEntry(entry.type, entry.localId);

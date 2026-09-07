@@ -58,4 +58,12 @@ describe('StateStore', () => {
     }, '7');
     await expect(s.setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })).rejects.toThrowError(/write failed/);
   });
+
+  it('clear() 清空快照（回未初始化）', async () => {
+    const s = new StateStore(makeMemento(), '7');
+    await s.setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+    expect(s.getSnapshot()).toBeDefined();
+    await s.clear();
+    expect(s.getSnapshot()).toBeUndefined();
+  });
 });

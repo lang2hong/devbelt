@@ -13,10 +13,13 @@ interface SyncSessionPort {
   readonly uid: string;
   readonly isUnlocked: boolean;
   readonly pendingCleanup: { fromKeyEpoch: string; toKeyEpoch: string } | undefined;
+  readonly epochStale: boolean;
+  readonly localEpoch: string | undefined;
   getRemoteState(): Promise<StateDto>;
   initializeSync(newState: NewStateDto, dek: Uint8Array): Promise<void>;
   unlockFromState(state: StateDto, dek: Uint8Array): Promise<void>;
   syncNow(): Promise<SyncRun>;
+  lock(): void;
 }
 
 interface SyncFactoryPort {
@@ -29,6 +32,7 @@ interface SyncUi {
   info(message: string): void;
   warn(message: string): void;
   error(message: string): void;
+  errorAction?(message: string, actionLabel: string): PromiseLike<string | undefined>;
 }
 
 export interface PersonalSyncCommandDeps {
@@ -172,8 +176,12 @@ export async function unlockPersonalSync(deps: PersonalSyncCommandDeps): Promise
   const session = await getSession(deps);
   if (!session) return;
   if (session.isUnlocked) {
-    deps.ui.info(l10n('sync.alreadyUnlocked'));
-    return;
+    if (!session.epochStale) {
+      deps.ui.info(l10n('sync.alreadyUnlocked'));
+      return;
+    }
+    // 远端 epoch 已前进（他设备 destroy/reset）：先 lock 丢弃旧 epoch 的 DEK，再走下方 SMP 重新解锁。
+    session.lock();
   }
   let state: StateDto | undefined;
   try {
@@ -196,7 +204,16 @@ export async function unlockPersonalSync(deps: PersonalSyncCommandDeps): Promise
     await session.unlockFromState(state, dek);
     if (hadPendingCleanup) deps.ui.info(l10n('sync.cleanupResumed'));
   } catch {
-    deps.ui.error(l10n('sync.unlockFailed'));
+    // reset 场景：他设备旧 SMP 解封新 epoch 必然 GCM 失败——给出本地清理逃生舱入口。
+    // epochStale 依赖 coordinator.lastRun，重启后恒 false；补 localEpoch < remote 的判定覆盖常见实例。
+    const staleHint = session.epochStale
+      || (session.localEpoch !== undefined && BigInt(session.localEpoch) < BigInt(state.keyEpoch));
+    if (staleHint && deps.ui.errorAction) {
+      const act = await deps.ui.errorAction(l10n('sync.unlockEpochStale'), l10n('sync.clearLocalAction'));
+      if (act) void vscode.commands.executeCommand('dbclient.clearLocalSync');
+    } else {
+      deps.ui.error(l10n('sync.unlockFailed'));
+    }
     return;
   } finally {
     dek?.fill(0);
@@ -220,6 +237,7 @@ function vscodeUi(): SyncUi {
     info: (message) => { void vscode.window.showInformationMessage(message); },
     warn: (message) => { void vscode.window.showWarningMessage(message); },
     error: (message) => { void vscode.window.showErrorMessage(message); },
+    errorAction: (message, actionLabel) => vscode.window.showErrorMessage(message, actionLabel),
   };
 }
 

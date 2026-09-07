@@ -162,6 +162,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         syncStatusBar.tooltip = l10n('sync.statusConflictTooltip');
         break;
       case 'stalled':
+        if (session!.epochStale) {
+          syncStatusBar.command = 'dbclient.unlockPersonalSync';
+          syncStatusBar.text = `$(warning) ${l10n('sync.statusLabel')}`;
+          syncStatusBar.tooltip = l10n('sync.statusEpochStale');
+          break;
+        }
         syncStatusBar.text = `$(warning) ${l10n('sync.statusLabel')}`;
         syncStatusBar.tooltip = l10n('sync.statusStalled');
         break;
