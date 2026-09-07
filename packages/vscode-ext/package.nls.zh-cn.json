@@ -27,6 +27,7 @@
   "cmd.syncNow": "立即同步",
   "cmd.fixConnectionPaths": "补齐连接路径",
   "cmd.removeConnectionPathOverrides": "移除路径覆盖",
+  "cmd.resolveConflicts": "解决同步冲突",
   "account.title": "账户",
   "cmd.copyName": "复制名称",
   "cmd.manageUsers": "管理用户",

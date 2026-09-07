@@ -13,6 +13,21 @@ import type { MementoLike } from './stateStore';
  *  - `record.delete`：禁止 nonce/ciphertext/tag（DeleteRecordRequest 无这些字段）。
  */
 
+/** 持久化的出站/入站冲突状态（B4）。密文字段仅入站冲突时携带。 */
+export interface OutboxConflict {
+  kind: 'version' | 'pending';
+  /** 远端当前版本（Use Local 以此为 baseVersion 重新 rebase）。 */
+  currentVersion: string;
+  /** 远端 record 版本（与 currentVersion 一致；保留以对齐协议字段）。 */
+  remoteRecordVersion: string;
+  /** 远端密文（入站 enrich 且远端为 active 时携带；供 Use Remote 直接解密应用）。 */
+  remoteNonce?: string;
+  remoteCiphertext?: string;
+  remoteTag?: string;
+  /** 远端是否为 tombstone。三态：true=tombstone、false=active、undefined=尚未拉取（出站 409 未 enrich）。 */
+  remoteTombstone?: boolean;
+}
+
 interface PendingBase {
   recordId: string;
   type: SyncEntityType;
@@ -25,6 +40,8 @@ interface PendingBase {
   revision: number;
   /** 连续可重试失败轮次（仅 error 递增，成功/terminal/conflict 清终止）。 */
   consecutiveFailureCount: number;
+  /** 未解决冲突（可选）；有值则自动同步在该 record 上暂停，等用户三态决策。 */
+  conflict?: OutboxConflict;
 }
 
 export interface PendingPutMutation extends PendingBase {
@@ -79,6 +96,7 @@ function assertMutation(m: unknown): asserts m is PendingMutation {
   if (typeof o.consecutiveFailureCount !== 'number' || !Number.isSafeInteger(o.consecutiveFailureCount) || o.consecutiveFailureCount < 0) {
     throw new Error('corrupt outbox entry: invalid consecutiveFailureCount');
   }
+  if (o.conflict !== undefined) assertConflict(o.conflict);
   if (o.action === 'record.put') {
     if (typeof o.nonce !== 'string' || typeof o.ciphertext !== 'string' || typeof o.tag !== 'string') {
       throw new Error('corrupt outbox entry: put requires nonce/ciphertext/tag');
@@ -94,6 +112,29 @@ function assertMutation(m: unknown): asserts m is PendingMutation {
     throw new Error('corrupt outbox entry: delete must not carry ciphertext');
   } else if ('tag' in o) {
     throw new Error('corrupt outbox entry: delete must not carry tag');
+  }
+}
+
+/** 全量校验冲突字段（形状 + 版本 u64 + 可选密文 base64url）。 */
+function assertConflict(c: unknown): void {
+  if (typeof c !== 'object' || c === null || Array.isArray(c)) {
+    throw new Error('corrupt outbox conflict: expected object');
+  }
+  const o = c as Record<string, unknown>;
+  if (o.kind !== 'version' && o.kind !== 'pending') {
+    throw new Error('corrupt outbox conflict: invalid kind');
+  }
+  assertU64Decimal(typeof o.currentVersion === 'string' ? o.currentVersion : '', 'conflict.currentVersion', true);
+  assertU64Decimal(typeof o.remoteRecordVersion === 'string' ? o.remoteRecordVersion : '', 'conflict.remoteRecordVersion', true);
+  for (const k of ['remoteNonce', 'remoteCiphertext', 'remoteTag'] as const) {
+    const v = o[k];
+    if (v === undefined) continue;
+    if (typeof v !== 'string' || !/^[A-Za-z0-9_-]+$/.test(v)) {
+      throw new Error(`corrupt outbox conflict: invalid ${k}`);
+    }
+  }
+  if (o.remoteTombstone !== undefined && typeof o.remoteTombstone !== 'boolean') {
+    throw new Error('corrupt outbox conflict: invalid remoteTombstone');
   }
 }
 
@@ -143,6 +184,36 @@ export class PendingMutationStore {
   async setFailureCount(mutationId: string, count: number): Promise<void> {
     if (!Number.isSafeInteger(count) || count < 0) throw new Error('consecutiveFailureCount must be a non-negative safe integer');
     await this.mutate((list) => list.map((m) => (m.mutationId === mutationId ? { ...m, consecutiveFailureCount: count } : m)));
+  }
+
+  /** 设置某条 mutation 的冲突状态（B4 持久化）。 */
+  async setConflict(mutationId: string, conflict: OutboxConflict): Promise<void> {
+    assertConflict(conflict);
+    await this.mutate((list) => list.map((m) => (m.mutationId === mutationId ? { ...m, conflict } : m)));
+  }
+
+  /** 清除某条 mutation 的冲突状态。 */
+  async clearConflict(mutationId: string): Promise<void> {
+    await this.mutate((list) => list.map((m) => {
+      if (m.mutationId !== mutationId) return m;
+      const { conflict, ...rest } = m as PendingMutation & { conflict?: OutboxConflict };
+      return rest;
+    }));
+  }
+
+  /** 原子替换某条 mutation（Use Local：旧 mutation 换为 rebase 后的新 mutation）。 */
+  async replaceMutation(mutationId: string, next: PendingMutation): Promise<void> {
+    assertMutation(next);
+    await this.mutate((list) => {
+      const idx = list.findIndex((m) => m.mutationId === mutationId);
+      if (idx < 0) throw new Error(`outbox has no mutationId ${mutationId}`);
+      if (list.some((m, i) => i !== idx && m.mutationId === next.mutationId)) {
+        throw new Error(`outbox already contains mutationId ${next.mutationId}`);
+      }
+      const nextList = [...list];
+      nextList[idx] = next;
+      return nextList;
+    });
   }
 
   async clear(): Promise<void> {

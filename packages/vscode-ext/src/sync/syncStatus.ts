@@ -5,6 +5,7 @@ import type { SyncRunResult } from './e2e/syncEngine';
  *
  * 派生规则（优先级从高到低）：
  *  - 未解锁 → hidden（隐藏状态栏，禁用 syncNow）。
+ *  - 有未解决冲突（conflictCount > 0）→ conflict。
  *  - stalled（conflict/terminal/epoch-mismatch/paging-stalled）→ stalled。
  *  - 失败（lastError 或 lastRun.stage==='error'）：
  *      - 正在退避重试 → retrying；
@@ -13,7 +14,7 @@ import type { SyncRunResult } from './e2e/syncEngine';
  *
  * 关键约束：`stage:'error'` 绝不可落到 idle（否则同步失败被误报为“已是最新”）。
  */
-export type SyncStatusKind = 'hidden' | 'idle' | 'error' | 'retrying' | 'stalled';
+export type SyncStatusKind = 'hidden' | 'idle' | 'error' | 'retrying' | 'stalled' | 'conflict';
 
 export interface SyncStatusInput {
   isUnlocked: boolean;
@@ -21,10 +22,12 @@ export interface SyncStatusInput {
   retrying: boolean;
   lastError?: string;
   lastRun?: SyncRunResult;
+  conflictCount?: number;
 }
 
 export function deriveSyncStatus(input: SyncStatusInput): SyncStatusKind {
   if (!input.isUnlocked) return 'hidden';
+  if ((input.conflictCount ?? 0) > 0) return 'conflict';
   if (input.stalled) return 'stalled';
   const failed = input.lastError !== undefined || input.lastRun?.stage === 'error';
   if (failed) {

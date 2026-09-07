@@ -37,4 +37,15 @@ describe('deriveSyncStatus', () => {
       isUnlocked: true, stalled: false, retrying: false, lastError: 'network down',
     })).toBe('error');
   });
+
+  it('有未解决冲突 → conflict（优先于 stalled/error）', () => {
+    expect(deriveSyncStatus({
+      isUnlocked: true, stalled: true, retrying: false, lastError: 'x', lastRun: run('error'), conflictCount: 1,
+    })).toBe('conflict');
+    expect(deriveSyncStatus({ isUnlocked: true, stalled: false, retrying: false, conflictCount: 3 })).toBe('conflict');
+  });
+
+  it('无冲突（conflictCount 0/缺省）不影响既有判定', () => {
+    expect(deriveSyncStatus({ isUnlocked: true, stalled: false, retrying: false, conflictCount: 0 })).toBe('idle');
+  });
 });

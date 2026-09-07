@@ -147,6 +147,11 @@
         "category": "DB Client"
       },
       {
+        "command": "dbclient.resolveConflicts",
+        "title": "%cmd.resolveConflicts%",
+        "category": "DB Client"
+      },
+      {
         "command": "dbclient.addIndex",
         "title": "Add Index",
         "category": "DB Client",
@@ -706,6 +711,10 @@
         {
           "command": "dbclient.removeConnectionPathOverrides",
           "when": "false"
+        },
+        {
+          "command": "dbclient.resolveConflicts",
+          "when": "dbclient.sync.ready"
         },
         {
           "command": "dbclient.scheduleBackup",

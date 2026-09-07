@@ -35,6 +35,11 @@ export interface SyncConflictEntry {
   kind: 'version' | 'pending';
   code?: string;
   currentVersion?: string;
+  /** 远端密文（入站冲突时携带，供 Use Remote 直接解密应用）。 */
+  remoteNonce?: string;
+  remoteCiphertext?: string;
+  remoteTag?: string;
+  remoteVersion?: string;
 }
 
 export interface SyncTerminalEntry {
@@ -127,6 +132,8 @@ export interface SyncEngineDeps {
   dek: () => Uint8Array;
   /** 仅供任务 3「本地变更→mutation」首次签名；本轮 outbox 重放不调用。 */
   signSeed: () => Uint8Array;
+  /** B4 pending 冲突：无既有 outbox 条目时，用它构造一个 conflict carrier（复用 rebase 签名）。 */
+  seedConflictCarrier: (recordId: string, ref: import('./syncEntity').SyncEntityRef, baseVersion: string) => PendingMutation;
   uniqueId: (type: import('./syncEntity').SyncEntityType) => string;
   entitlement?: () => CachedEntitlement | undefined;
   feedPageLimit?: number;
@@ -207,9 +214,23 @@ export class SyncEngine {
 
     // 2. outbox 重放：逐条直发已签名 mutation（逐字复用 signature/requestDigest，不重签）。
     // 成功 → 先确认 recordMap → 再删条目；确认失败保留条目原样重放（幂等 receipt 收敛）。
+    const conflicts: SyncConflictEntry[] = [];
     let stalled: SyncStalledEntry | undefined;
     let lastCommitted = local.changeSequence;
     for (const m of this.deps.outbox.list()) {
+      // C1：已标记冲突的 mutation 不得再 push（避免每轮重复 409）；把持久化冲突反馈给 UI。
+      if (m.conflict) {
+        conflicts.push({
+          recordId: m.recordId,
+          kind: m.conflict.kind,
+          currentVersion: m.conflict.currentVersion,
+          remoteNonce: m.conflict.remoteNonce,
+          remoteCiphertext: m.conflict.remoteCiphertext,
+          remoteTag: m.conflict.remoteTag,
+          remoteVersion: m.conflict.remoteRecordVersion,
+        });
+        continue;
+      }
       let receipt: unknown;
       try {
         receipt = await this.pushMutation(m);
@@ -218,47 +239,63 @@ export class SyncEngine {
           const cls = classifyError(err);
           if (cls === 'terminal' || cls === 'terminal-state' || cls === 'terminal-epoch') {
             return {
-              stage: 'terminal', conflicts: [], applied: 0,
+              stage: 'terminal', conflicts, applied: 0,
               terminal: { mutationId: m.mutationId, code: err.code, currentKeyEpoch: err.currentKeyEpoch },
               reason: cls === 'terminal-state'
                 ? 'outbox mutation requires init / epoch handling'
                 : cls === 'terminal-epoch' ? 'outbox mutation epoch stale' : undefined,
             };
           }
+          // B4：持久化冲突（密文暂缺），跳过 push 继续 pull —— pull 会带回远端版本，
+          // applyRemote 再次触发 RecordConflictError 时补全密文（见下方入站冲突）。
           if (cls === 'conflict') {
-            return {
-              stage: 'conflict',
-              conflicts: [{ recordId: m.recordId, kind: 'version', code: err.code, currentVersion: err.currentVersion }],
-              applied: 0,
-              reason: 'outbox mutation version conflict',
-            };
+            // SYNC_VERSION_CONFLICT 必须携带规范 u64 currentVersion；缺失/非法即协议违规，
+            // fail-closed 返回 terminal，不得退回可重试（否则既无法构造冲突也无从 rebase）。
+            let currentVersion: string;
+            try {
+              if (typeof err.currentVersion !== 'string') throw new Error('missing');
+              currentVersion = assertU64Decimal(err.currentVersion, 'currentVersion');
+            } catch {
+              return {
+                stage: 'terminal', conflicts, applied: 0,
+                terminal: { mutationId: m.mutationId, code: err.code },
+                reason: 'malformed SYNC_VERSION_CONFLICT (missing/invalid currentVersion)',
+              };
+            }
+            conflicts.push({ recordId: m.recordId, kind: 'version', code: err.code, currentVersion });
+            await this.deps.outbox.setConflict(m.mutationId, {
+              kind: 'version',
+              currentVersion,
+              remoteRecordVersion: currentVersion,
+            });
+            continue;
           }
           // 可重试 error：递增连续失败计数；1–4 中止本轮，≥5 保留条目、附 stalled、允许继续 pull。
           const nextCount = m.consecutiveFailureCount + 1;
           try {
             await this.deps.outbox.setFailureCount(m.mutationId, nextCount);
           } catch (err) {
-            return { stage: 'error', conflicts: [], applied: 0, reason: `failure-count commit failed: ${describe(err)}` };
+            return { stage: 'error', conflicts, applied: 0, reason: `failure-count commit failed: ${describe(err)}` };
           }
           if (nextCount >= STALL_THRESHOLD) {
             stalled = { mutationId: m.mutationId };
             break;
           }
-          return { stage: 'error', conflicts: [], applied: 0, reason: `push failed: ${describe(err)}` };
+          return { stage: 'error', conflicts, applied: 0, reason: `push failed: ${describe(err)}` };
         }
-        return { stage: 'error', conflicts: [], applied: 0, reason: `push failed: ${describe(err)}` };
+        return { stage: 'error', conflicts, applied: 0, reason: `push failed: ${describe(err)}` };
       }
 
       let confirmed: { version: string; changeSequence: string };
       try {
         confirmed = this.parseReceipt(receipt);
       } catch (err) {
-        return { stage: 'error', conflicts: [], applied: 0, reason: `invalid receipt: ${describe(err)}` };
+        return { stage: 'error', conflicts, applied: 0, reason: `invalid receipt: ${describe(err)}` };
       }
       try {
         await this.confirmOutbound(m, confirmed.version);
       } catch (err) {
-        return { stage: 'error', conflicts: [], applied: 0, reason: `confirm failed: ${describe(err)}` };
+        return { stage: 'error', conflicts, applied: 0, reason: `confirm failed: ${describe(err)}` };
       }
       await this.deps.outbox.delete(m.mutationId);
       // 刻意不用 receipt.changeSequence 推进本地 cursor：本轮 pull 快照（remoteSnap）在
@@ -279,7 +316,6 @@ export class SyncEngine {
 
     let cursor = local.changeSequence;
     let applied = 0;
-    const conflicts: SyncConflictEntry[] = [];
 
     for (let pages = 0; ; pages++) {
       if (pages >= MAX_PAGES) {
@@ -315,7 +351,16 @@ export class SyncEngine {
             applied += 1;
           } catch (err) {
             if (err instanceof RecordConflictError) {
-              conflicts.push({ recordId: rec.recordId, kind: err.kind });
+              // B4：携带远端密文进冲突条目，并补全 outbox 中对应 mutation 的冲突状态。
+              conflicts.push({
+                recordId: rec.recordId,
+                kind: err.kind,
+                remoteNonce: rec.nonce,
+                remoteCiphertext: rec.ciphertext,
+                remoteTag: rec.tag,
+                remoteVersion: rec.version,
+              });
+              await this.persistConflict(rec, err);
               return { stage: 'conflict', conflicts, stalled, applied, changeSequence: lastCommitted };
             }
             return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `apply failed: ${describe(err)}` };
@@ -352,7 +397,9 @@ export class SyncEngine {
       cursor = nextAfter;
     }
 
-    return { stage: 'ok', conflicts, stalled, applied, changeSequence: lastCommitted };
+    // C2：本轮收集到冲突（出站 version 冲突未在本轮 pull 命中远端时仍属冲突）→ 以 conflict 收尾，
+    // 让 coordinator 进入 stalled，不再自动重放同一条冲突 mutation。
+    return { stage: conflicts.length > 0 ? 'conflict' : 'ok', conflicts, stalled, applied, changeSequence: lastCommitted };
   }
 
   private parseState(raw: unknown): RemoteState {
@@ -507,5 +554,29 @@ export class SyncEngine {
 
   private async commitCursor(keyEpoch: string, stateVersion: string, changeSequence: string): Promise<void> {
     await this.deps.stateStore.setSnapshot({ keyEpoch, stateVersion, changeSequence });
+  }
+
+  /** B4：入站冲突时，按 recordId→recordMap→localId 定位 outbox 条目并补全冲突密文。 */
+  private async persistConflict(rec: RemoteRecord, err: RecordConflictError): Promise<void> {
+    const mapEntry = this.deps.mapStore.getByRecordId(rec.recordId);
+    if (!mapEntry) return; // 无法定位本地实体，仅本轮内存呈现
+    const conflict = {
+      kind: err.kind,
+      currentVersion: rec.version,
+      remoteRecordVersion: rec.version,
+      remoteNonce: rec.nonce,
+      remoteCiphertext: rec.ciphertext,
+      remoteTag: rec.tag,
+      remoteTombstone: rec.deleteTime != null,
+    };
+    const mutation = this.deps.outbox.list().find((m) => m.type === mapEntry.type && m.localId === mapEntry.localId);
+    if (mutation) {
+      await this.deps.outbox.setConflict(mutation.mutationId, conflict);
+      return;
+    }
+    // 无既有 outbox 条目（pending 冲突：reconcile 对 pending map 跳过，不产 mutation）：
+    // 构造 conflict carrier 使其可被 listConflicts()/resolveConflict() 发现并处理。
+    const carrier = this.deps.seedConflictCarrier(rec.recordId, { type: mapEntry.type, localId: mapEntry.localId }, rec.version);
+    await this.deps.outbox.put({ ...carrier, conflict });
   }
 }

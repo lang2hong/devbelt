@@ -34,6 +34,7 @@ import { SyncSessionFactory } from './sync/sessionFactory';
 import { DekStore } from './sync/crypto/keyStore';
 import { deriveSyncStatus } from './sync/syncStatus';
 import { registerPersonalSyncCommands } from './commands/personalSync';
+import { registerConflictCommands } from './commands/syncConflicts';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const store = new ConnectionStore(context.globalState, context.secrets);
@@ -137,6 +138,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       retrying: session?.retrying ?? false,
       lastError: session?.lastError,
       lastRun: session?.lastRun,
+      conflictCount: session?.listConflicts().length ?? 0,
     });
     if (status === 'hidden') {
       syncStatusBar.hide();
@@ -146,7 +148,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     setSyncReady(true);
     syncStatusBar.show();
     const reason = session!.lastError ?? session!.lastRun?.reason;
+    syncStatusBar.command = 'dbclient.syncNow';
     switch (status) {
+      case 'conflict':
+        syncStatusBar.command = 'dbclient.resolveConflicts';
+        syncStatusBar.text = `$(warning) ${l10n('sync.statusConflict', { count: session!.listConflicts().length })}`;
+        syncStatusBar.tooltip = l10n('sync.statusConflictTooltip');
+        break;
       case 'stalled':
         syncStatusBar.text = `$(warning) ${l10n('sync.statusLabel')}`;
         syncStatusBar.tooltip = l10n('sync.statusStalled');
@@ -205,6 +213,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
   // B1 是用户显式入口；注册本身不建 session，命令执行前才刷新权益并懒建。
   registerPersonalSyncCommands(context, auth, syncFactory);
+  // B4 冲突面板。
+  registerConflictCommands(context, syncFactory);
   // 这里原先用 onDidChangeSelection 往 `dbclient.dbType` / `dbclient.has*` 写
   // context key，供菜单 when 判断数据库类型。那是竞态的：右键未选中项、或右键
   // 与当前选中项不同时，键里还是上一个节点的值 —— 在 SQLite 表上会看到 MySQL

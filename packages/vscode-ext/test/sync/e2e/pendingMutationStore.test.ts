@@ -133,4 +133,32 @@ describe('PendingMutationStore', () => {
     const badTag = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), tag: 'too-short' }] }), '7', '1');
     expect(() => badTag.list()).toThrowError(/tag/);
   });
+
+  it('setConflict / clearConflict / replaceMutation 原子迁移', async () => {
+    const s = new PendingMutationStore(makeMemento(), '7', '1');
+    const m = put();
+    await s.put(m);
+
+    await s.setConflict(m.mutationId, { kind: 'version', currentVersion: '7', remoteRecordVersion: '7', remoteCiphertext: 'YQ' });
+    expect(s.list()[0].conflict).toEqual({ kind: 'version', currentVersion: '7', remoteRecordVersion: '7', remoteCiphertext: 'YQ' });
+
+    await s.clearConflict(m.mutationId);
+    expect((s.list()[0] as { conflict?: unknown }).conflict).toBeUndefined();
+
+    // replaceMutation：旧 mutationId 换为新 mutation（新 mutationId、baseVersion 提升），保持 outbox 单条
+    await s.setConflict(m.mutationId, { kind: 'version', currentVersion: '7', remoteRecordVersion: '7' });
+    const next = put({ mutationId: 'C'.repeat(22), baseVersion: '7' });
+    await s.replaceMutation(m.mutationId, next);
+    const listed = s.list();
+    expect(listed).toHaveLength(1);
+    expect(listed[0].mutationId).toBe('C'.repeat(22));
+    expect(listed[0].baseVersion).toBe('7');
+  });
+
+  it('conflict 字段形状非法 fail-closed', async () => {
+    const s = new PendingMutationStore(makeMemento(), '7', '1');
+    const m = put();
+    await s.put(m);
+    await expect(s.setConflict(m.mutationId, { kind: 'nope' } as never)).rejects.toThrowError(/invalid kind/);
+  });
 });

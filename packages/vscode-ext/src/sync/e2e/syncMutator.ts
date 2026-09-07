@@ -124,6 +124,28 @@ export class SyncMutator {
     return { generated, pendingSkipped, skipped };
   }
 
+  /**
+   * B4 useLocal：读本地当前实体，以远端 `newBaseVersion` 为 baseVersion 重新 seal+sign
+   * 单条 put mutation（recordVersion = inc(newBaseVersion)）。不写 outbox（由调用方 replaceMutation）。
+   */
+  rebasePut(recordId: string, ref: SyncEntityRef, newBaseVersion: string): PendingPutMutation {
+    const entity = this.deps.entities.get(ref);
+    if (!entity) throw new Error(`entity ${refKey(ref)} missing during rebase`);
+    const revision = (entity as { updateTime?: number }).updateTime ?? 0;
+    const resolveRef: RefResolver = (type, localId) => {
+      if (localId === undefined || localId === '') return undefined;
+      return this.deps.mapStore.getByRef({ type, localId })?.recordId;
+    };
+    return this.buildPut(recordId, ref, newBaseVersion, revision, resolveRef);
+  }
+
+  /** B4 useLocal（本地删除冲突）：以远端 currentVersion 为 baseVersion 重新签名 record.delete（保留删除意图）。 */
+  rebaseDelete(recordId: string, ref: SyncEntityRef, newBaseVersion: string): PendingDeleteMutation {
+    const entity = this.deps.entities.get(ref);
+    const revision = (entity as { updateTime?: number }).updateTime ?? 0;
+    return this.buildDelete(recordId, ref, newBaseVersion, revision);
+  }
+
   private isQueryOfOrgConnection(ref: SyncEntityRef, entities: EntityStore): boolean {
     const q = entities.get(ref) as SavedQuery | undefined;
     if (!q) return false;

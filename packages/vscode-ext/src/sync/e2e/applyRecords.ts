@@ -36,6 +36,8 @@ export interface ApplyRecordInput {
   version: string;
   tombstone: boolean;
   payload?: unknown;
+  /** B4 useRemote：跳过本地脏冲突检查，强制采用远端版本。 */
+  force?: boolean;
 }
 
 export interface ApplyContext {
@@ -115,29 +117,29 @@ export async function applyRecord(input: ApplyRecordInput, ctx: ApplyContext): P
   const version = assertU64Decimal(input.version, 'version');
   const existing = ctx.mapStore.getByRecordId(input.recordId);
 
-  if (existing && existing.status === 'confirmed' && BigInt(version) <= BigInt(existing.recordVersion)) {
+  if (!input.force && existing && existing.status === 'confirmed' && BigInt(version) <= BigInt(existing.recordVersion)) {
     return { recordId: input.recordId, disposition: 'skipped' };
   }
 
   if (input.tombstone) {
-    return applyTombstone(input.recordId, version, existing, ctx);
+    return applyTombstone(input.recordId, version, existing, ctx, input.force === true);
   }
 
   const decoded = decodeEntityPayload(input.payload);
-  return applyActive(input.recordId, version, decoded, existing, ctx);
+  return applyActive(input.recordId, version, decoded, existing, ctx, input.force === true);
 }
 
-async function applyTombstone(recordId: string, version: string, existing: (RecordMapEntry & { recordId: string }) | undefined, ctx: ApplyContext): Promise<ApplyRecordResult> {
+async function applyTombstone(recordId: string, version: string, existing: (RecordMapEntry & { recordId: string }) | undefined, ctx: ApplyContext, force: boolean): Promise<ApplyRecordResult> {
   if (!existing) {
     return { recordId, disposition: 'ignored-tombstone' };
   }
   const ref: SyncEntityRef = { type: existing.type, localId: existing.localId };
   const local = ctx.entities.get(ref);
   if (existing.status === 'pending' && local) {
-    throw new RecordConflictError(recordId, existing.recordVersion, version, 'pending');
+    if (!force) throw new RecordConflictError(recordId, existing.recordVersion, version, 'pending');
   }
   if (existing.status === 'confirmed' && local && updateTimeOf(local) > existing.revision) {
-    throw new RecordConflictError(recordId, existing.recordVersion, version);
+    if (!force) throw new RecordConflictError(recordId, existing.recordVersion, version);
   }
   await ctx.entities.remove(ref, 'sync');
   await ctx.mapStore.deleteByRecordId(recordId);
@@ -150,6 +152,7 @@ async function applyActive(
   decoded: DecodedEntityPayload,
   existing: (RecordMapEntry & { recordId: string }) | undefined,
   ctx: ApplyContext,
+  force: boolean,
 ): Promise<ApplyRecordResult> {
   const type = decoded.type;
 
@@ -173,10 +176,10 @@ async function applyActive(
 
   if (existing) {
     const local = ctx.entities.get({ type, localId: existing.localId });
-    if (existing.status === 'pending' && local) {
+    if (existing.status === 'pending' && local && !force) {
       throw new RecordConflictError(recordId, existing.recordVersion, version, 'pending');
     }
-    if (existing.status === 'confirmed' && local && updateTimeOf(local) > existing.revision) {
+    if (existing.status === 'confirmed' && local && updateTimeOf(local) > existing.revision && !force) {
       throw new RecordConflictError(recordId, existing.recordVersion, version);
     }
     const targetRef: SyncEntityRef = { type, localId: local ? existing.localId : ctx.uniqueId(type) };

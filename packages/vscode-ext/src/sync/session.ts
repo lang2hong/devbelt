@@ -5,6 +5,7 @@ import { SyncEngine } from './e2e/syncEngine';
 import { SyncMutator } from './e2e/syncMutator';
 import { SyncCoordinator } from './e2e/syncCoordinator';
 import type { SyncRunResult } from './e2e/syncEngine';
+import { ConflictResolver, type ConflictItem } from './e2e/conflictResolver';
 import { EntityStore, UnresolvedRefStore } from './e2e/entityStore';
 import type { SyncEntityType } from './e2e/syncEntity';
 import type { PersonalSyncClient } from './e2e/client';
@@ -65,6 +66,7 @@ export class PersonalSyncSession {
   private engine?: SyncEngine;
   private mutator?: SyncMutator;
   private coordinator?: SyncCoordinator;
+  private resolver?: ConflictResolver;
   private dek?: Uint8Array;
   private signSeed?: Uint8Array;
   private keyEpoch?: string;
@@ -191,6 +193,18 @@ export class PersonalSyncSession {
     this.coordinator.scheduleInitialSync();
   }
 
+  /** B4：当前未解决冲突（来自 outbox 的 conflict 字段）。 */
+  listConflicts(): ConflictItem[] {
+    return this.resolver?.list() ?? [];
+  }
+
+  /** B4：三态迁移。cancel 为 noop；local/remote 由 ConflictResolver 原子执行。 */
+  async resolveConflict(recordId: string, decision: 'local' | 'remote' | 'cancel'): Promise<void> {
+    if (!this.resolver) throw new Error('sync session is locked');
+    if (decision === 'local') await this.resolver.useLocal(recordId);
+    else if (decision === 'remote') await this.resolver.useRemote(recordId);
+  }
+
   /** 建立当前 epoch 的 recordMap/outbox/unresolved；epoch 与现存 store 不一致时抛错（不得静默沿用）。 */
   ensureStores(keyEpoch: string): void {
     if (this.keyEpoch !== undefined && this.keyEpoch !== keyEpoch) {
@@ -208,6 +222,15 @@ export class PersonalSyncSession {
     this.dek = dek;
     this.signSeed = deriveSyncSignKeyPair(dek).seed;
     if (!this.engine) {
+      this.mutator = new SyncMutator({
+        userId: this.userId,
+        keyEpoch,
+        entities: this.entities,
+        mapStore: this.mapStore!,
+        outbox: this.outbox!,
+        dek: this.dekThunk,
+        signSeed: this.signSeedThunk,
+      });
       this.engine = new SyncEngine({
         userId: this.userId,
         keyEpoch,
@@ -221,18 +244,22 @@ export class PersonalSyncSession {
         signSeed: this.signSeedThunk,
         uniqueId: (type) => this.uniqueEntityId(type),
         entitlement: this.opts.entitlement,
-      });
-      this.mutator = new SyncMutator({
-        userId: this.userId,
-        keyEpoch,
-        entities: this.entities,
-        mapStore: this.mapStore!,
-        outbox: this.outbox!,
-        dek: this.dekThunk,
-        signSeed: this.signSeedThunk,
+        seedConflictCarrier: (recordId, ref, baseVersion) => this.mutator!.rebasePut(recordId, ref, baseVersion),
       });
       this.coordinator = new SyncCoordinator(this.store, this.mutator, this.engine, {
         onSettled: this.opts.onSyncResult,
+      });
+      this.resolver = new ConflictResolver({
+        userId: this.userId,
+        keyEpoch,
+        mapStore: this.mapStore!,
+        outbox: this.outbox!,
+        entities: this.entities,
+        unresolved: this.unresolved!,
+        dek: this.dekThunk,
+        mutator: this.mutator,
+        entitlement: this.opts.entitlement,
+        uniqueId: (type) => this.uniqueEntityId(type),
       });
     }
     this.coordinator!.start();
@@ -313,6 +340,7 @@ export class PersonalSyncSession {
     this.engine = undefined;
     this.mutator = undefined;
     this.coordinator = undefined;
+    this.resolver = undefined;
     this.dek = undefined;
     this.signSeed = undefined;
     this.keyEpoch = undefined;

@@ -5,6 +5,7 @@ import { RecordMapStore } from '../../../src/sync/e2e/recordMapStore';
 import { PendingMutationStore, type PendingDeleteMutation, type PendingPutMutation } from '../../../src/sync/e2e/pendingMutationStore';
 import type { SyncStateSnapshot } from '../../../src/sync/e2e/stateStore';
 import { EntityStore, UnresolvedRefStore } from '../../../src/sync/e2e/entityStore';
+import { SyncMutator } from '../../../src/sync/e2e/syncMutator';
 import type { SavedConnection, ConnectionStore } from '../../../src/connection/connectionStore';
 import type { StateDto } from '../../../src/sync/e2e/types';
 
@@ -106,6 +107,12 @@ interface EngineOpts {
 function engine(opts: EngineOpts) {
   const store = opts.store ?? makeStore();
   const memento = makeMemento();
+  const entities = new EntityStore(store);
+  const signSeed = opts.signSeed ?? (() => new Uint8Array(32));
+  const mutator = new SyncMutator({
+    userId: '7', keyEpoch: '1', entities, mapStore: opts.mapStore, outbox: opts.outbox,
+    dek: () => new Uint8Array(32), signSeed,
+  });
   return new SyncEngine({
     userId: '7',
     keyEpoch: '1',
@@ -113,15 +120,21 @@ function engine(opts: EngineOpts) {
     stateStore: makeStateStore(opts.snap, opts.setImpl) as never,
     mapStore: opts.mapStore,
     outbox: opts.outbox,
-    entities: new EntityStore(store),
+    entities,
     unresolved: new UnresolvedRefStore(memento, '7', '1'),
     dek: () => new Uint8Array(32),
-    signSeed: opts.signSeed ?? (() => new Uint8Array(32)),
+    signSeed,
     uniqueId: () => `c-new-${Math.random()}`,
+    seedConflictCarrier: (recordId, ref, baseVersion) => mutator.rebasePut(recordId, ref, baseVersion),
   });
 }
 
 const SNAP: SyncStateSnapshot = { keyEpoch: '1', stateVersion: '1', changeSequence: '0' };
+
+/** 不涉及 pending 冲突的用例：提供永不调用的 carrier 以满足必填 deps。 */
+const seedConflictStub = (): ReturnType<SyncMutator['rebasePut']> => {
+  throw new Error('seedConflictCarrier not exercised in this test');
+};
 
 function putMutation(): PendingPutMutation {
   return {
@@ -187,6 +200,20 @@ describe('SyncEngine', () => {
     expect(outbox.list()).toHaveLength(1);
   });
 
+  it('outbox 重放 409 SYNC_VERSION_CONFLICT 缺 currentVersion → terminal（fail-closed，不重试不重签）', async () => {
+    const client = clientWith({ putRecordSigned: vi.fn(async () => { throw new SyncApiError(409, 'SYNC_VERSION_CONFLICT'); }) });
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    const m = putMutation();
+    await outbox.put(m);
+    const eng = engine({ client, snap: SNAP, mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox });
+    const r = await eng.sync();
+    expect(r.stage).toBe('terminal');
+    expect(r.terminal).toEqual({ mutationId: m.mutationId, code: 'SYNC_VERSION_CONFLICT' });
+    expect(client.putRecordSigned).toHaveBeenCalledTimes(1);
+    expect(outbox.list()).toHaveLength(1);
+    expect(outbox.list()[0].conflict).toBeUndefined();
+  });
+
   it('pull 记录 conflict 停止：cursor 不前移', async () => {
     const id = 'A'.repeat(22);
     const mapStore = new RecordMapStore(makeMemento(), '7', '1');
@@ -199,11 +226,14 @@ describe('SyncEngine', () => {
         records: [{ recordId: id, version: '2', changeSequence: '5', deleteTime: '2026-01-01T00:00:00.000Z' }],
       })),
     });
-    const eng = engine({ client, snap: SNAP, mapStore, outbox: new PendingMutationStore(makeMemento(), '7', '1'), store });
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    const eng = engine({ client, snap: SNAP, mapStore, outbox, store });
     const r = await eng.sync();
     expect(r.stage).toBe('conflict');
-    expect(r.conflicts).toEqual([{ recordId: id, kind: 'pending' }]);
+    expect(r.conflicts).toMatchObject([{ recordId: id, kind: 'pending' }]);
     expect(r.changeSequence).toBe('0');
+    expect(outbox.list()).toHaveLength(1);
+    expect(outbox.list()[0].conflict).toMatchObject({ kind: 'pending', remoteTombstone: true });
   });
 
   it('cursor 持久化失败 → error，下次 sync() 仍可启动', async () => {
@@ -245,6 +275,7 @@ describe('SyncEngine', () => {
       entities: new EntityStore(makeStore()),
       unresolved: new UnresolvedRefStore(makeMemento(), '7', '1'),
       dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueId: () => 'c-new-1',
+      seedConflictCarrier: seedConflictStub,
     });
     const r = await eng.sync();
     expect(r.stage).toBe('error');
@@ -271,6 +302,7 @@ describe('SyncEngine', () => {
       entities: new EntityStore(makeStore()),
       unresolved: new UnresolvedRefStore(makeMemento(), '7', '1'),
       dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueId: () => 'c-new-1',
+      seedConflictCarrier: seedConflictStub,
     };
     expect(() => new SyncEngine({
       ...base, userId: '7',
@@ -298,6 +330,7 @@ describe('SyncEngine', () => {
       entities: new EntityStore(makeStore()),
       unresolved: new UnresolvedRefStore(makeMemento(), '7', '1'),
       dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueId: () => 'c-new-1',
+      seedConflictCarrier: seedConflictStub,
     });
     const r = await eng.sync();
     expect(r.stage).toBe('ok');
@@ -320,6 +353,7 @@ describe('SyncEngine', () => {
       entities: new EntityStore(makeStore()),
       unresolved: new UnresolvedRefStore(makeMemento(), '7', '1'),
       dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueId: () => 'c-new-1',
+      seedConflictCarrier: seedConflictStub,
     });
     const r = await eng.sync();
     expect(r.stage).toBe('error');
@@ -363,16 +397,34 @@ describe('SyncEngine', () => {
     expect(r.terminal?.currentKeyEpoch).toBe('3');
   });
 
-  it('SYNC_VERSION_CONFLICT → conflict，携带 recordId/code/currentVersion，保留条目', async () => {
+  it('SYNC_VERSION_CONFLICT → 持久化 conflict 后继续 pull（空 feed）→ 以 conflict 收尾，条目保留待下轮补密文', async () => {
     const m = putMutation();
     const client = clientWith({ putRecordSigned: vi.fn(async () => { throw new SyncApiError(409, 'SYNC_VERSION_CONFLICT', '7'); }) });
     const outbox = new PendingMutationStore(makeMemento(), '7', '1');
     await outbox.put(m);
     const eng = engine({ client, snap: SNAP, mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox });
     const r = await eng.sync();
-    expect(r.stage).toBe('conflict');
+    expect(r.stage).toBe('conflict'); // C2：出站冲突即使本轮 pull 未命中远端也以 conflict 收尾，使 coordinator stalled
     expect(r.conflicts[0]).toMatchObject({ recordId: m.recordId, kind: 'version', code: 'SYNC_VERSION_CONFLICT', currentVersion: '7' });
     expect(outbox.list()).toHaveLength(1);
+    expect(outbox.list()[0].conflict).toMatchObject({ kind: 'version', currentVersion: '7', remoteRecordVersion: '7' });
+  });
+
+  it('C1：已标记 conflict 的 mutation 不再重复 push（第二轮跳过）', async () => {
+    const m = putMutation();
+    const putRecordSigned = vi.fn(async () => { throw new SyncApiError(409, 'SYNC_VERSION_CONFLICT', '7'); });
+    const client = clientWith({ putRecordSigned });
+    const memento = makeMemento();
+    const outbox = new PendingMutationStore(memento, '7', '1');
+    await outbox.put(m);
+    const eng = engine({ client, snap: SNAP, mapStore: new RecordMapStore(memento, '7', '1'), outbox });
+
+    await eng.sync(); // 第一轮：出站冲突，setConflict
+    expect(outbox.list()[0].conflict).toBeDefined();
+
+    await eng.sync(); // 第二轮：循环开头 skip 已 conflict 的 mutation
+    expect(putRecordSigned).toHaveBeenCalledTimes(1);
+    expect(outbox.list()[0].conflict).toBeDefined();
   });
 
   it('可重试错误 → error，保留条目，consecutiveFailureCount 递增', async () => {
@@ -499,6 +551,7 @@ describe('SyncEngine', () => {
       entities: new EntityStore(makeStore()),
       unresolved: new UnresolvedRefStore(makeMemento(), '7', '1'),
       dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueId: () => 'c-new-1',
+      seedConflictCarrier: seedConflictStub,
     });
     const r = await eng.sync();
     expect(r.stage).toBe('ok');
@@ -532,6 +585,7 @@ describe('SyncEngine', () => {
       entities: new EntityStore(makeStore()),
       unresolved: new UnresolvedRefStore(makeMemento(), '7', '1'),
       dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueId: () => 'c-new-1',
+      seedConflictCarrier: seedConflictStub,
     });
 
     const r1 = await eng.sync();
@@ -583,5 +637,40 @@ describe('SyncEngine', () => {
     const r = await eng.sync();
     expect(r.stage).toBe('terminal');
     expect(r.reason).toContain('protocol unsupported');
+  });
+
+  it('pending 入站冲突无 outbox 条目 → 构造 conflict carrier 持久化（可被 listConflicts 发现）', async () => {
+    const id = 'A'.repeat(22);
+    const memento = makeMemento();
+    const mapStore = new RecordMapStore(memento, '7', '1');
+    await mapStore.put(id, { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'pending' });
+    const store = makeStore([{ id: 'c-1', name: 'n', dbType: 'MYSQL' as never, host: 'h', port: 3306, user: 'u', updateTime: 200 } as SavedConnection]);
+    const outbox = new PendingMutationStore(memento, '7', '1');
+    const entities = new EntityStore(store);
+    const mutator = new SyncMutator({
+      userId: '7', keyEpoch: '1', entities, mapStore, outbox,
+      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32),
+    });
+    const client = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords: vi.fn(async () => ({
+        snapshotSequence: '5',
+        records: [{ recordId: id, version: '2', changeSequence: '5', deleteTime: '2026-01-01T00:00:00.000Z' }],
+      })),
+    });
+    const eng = new SyncEngine({
+      userId: '7', keyEpoch: '1', client,
+      stateStore: makeStateStore(SNAP) as never, mapStore, outbox, entities,
+      unresolved: new UnresolvedRefStore(memento, '7', '1'),
+      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32),
+      uniqueId: () => 'new-1',
+      seedConflictCarrier: (rid, ref, bv) => mutator.rebasePut(rid, ref, bv),
+    });
+
+    const r = await eng.sync();
+    expect(r.stage).toBe('conflict');
+    const listed = outbox.list();
+    expect(listed).toHaveLength(1);
+    expect(listed[0].conflict).toMatchObject({ kind: 'pending', remoteTombstone: true });
   });
 });
