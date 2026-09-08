@@ -165,6 +165,14 @@ export class FakeEmailVerificationTokenRepo implements IEmailVerificationTokenRe
     return this.findByHash(tokenHash);
   }
 
+  async findByIdForUpdate(_exec: Queryable, id: number): Promise<EmailVerificationToken | undefined> {
+    return this.store.get(id);
+  }
+
+  async findByIdInTx(_exec: Queryable, id: number): Promise<EmailVerificationToken | undefined> {
+    return this.store.get(id);
+  }
+
   async consume(_exec: Queryable, id: number, now: Date): Promise<boolean> {
     const t = this.store.get(id);
     if (!t || t.consumedTime || t.expiresTime <= now) return false;

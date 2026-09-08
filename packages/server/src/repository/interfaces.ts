@@ -16,6 +16,8 @@ import type {
   PersonalConnectionMeta,
   SyncMutation,
   SyncResetToken,
+  MailFlow,
+  AuditEvent,
 } from '../domain/entities.js';
 import type {
   UserStatus,
@@ -25,6 +27,7 @@ import type {
   OrganizationSubscriptionStatus,
   ResourceType,
   SyncAction,
+  MailFlowType,
 } from '../domain/enums.js';
 import type { Queryable } from './mysql/db.js';
 
@@ -71,6 +74,10 @@ export interface IEmailVerificationTokenRepo {
   findByHash(tokenHash: string): Promise<EmailVerificationToken | undefined>;
   /** 在事务内锁定 token 行（confirmEmail 与 markEmailVerified 同事务）。 */
   findByHashForUpdate(exec: Queryable, tokenHash: string): Promise<EmailVerificationToken | undefined>;
+  /** 事务内按 id 锁定 token 行（mail-flow 消费按 target_record_id 定位而非 raw token hash）。 */
+  findByIdForUpdate(exec: Queryable, id: number): Promise<EmailVerificationToken | undefined>;
+  /** 事务内按 id 读 token（不加锁），仅用于锁序预读 userId，避免与旧 confirm 路径成死锁环。 */
+  findByIdInTx(exec: Queryable, id: number): Promise<EmailVerificationToken | undefined>;
   /** 原子消费：AND consumed_time IS NULL，返回是否由本次调用完成。事务内执行。 */
   consume(exec: Queryable, id: number, now: Date): Promise<boolean>;
   /** 作废某用户 +(email,purpose) 既有的未消费 token（重发/重新邀请前调用）。事务内执行。 */
@@ -493,4 +500,30 @@ export interface ISyncResetTokenRepo {
   consume(exec: Queryable, id: number, now: Date): Promise<boolean>;
   /** 删除已消费/已撤销/已过期且超出保留期的 token 行。返回删除行数。 */
   prune(exec: Queryable, before: Date, limit: number): Promise<number>;
+}
+
+// ── 一次性邮件链接（mail-flow）与审计 ──
+
+export interface IMailFlowRepo {
+  create(input: {
+    type: MailFlowType;
+    targetTokenHash: Buffer;
+    targetRecordId: number | null;
+    userId: number | null;
+    nonceHash: Buffer;
+    expiresTime: Date;
+  }): Promise<MailFlow>;
+  /** 按 nonce hash 只读查找。 */
+  findByNonceHash(nonceHash: Buffer): Promise<MailFlow | undefined>;
+  /** 事务内按 nonce hash 锁定 mail_flow 行（消费的序列化点）。 */
+  findByNonceHashForUpdate(exec: Queryable, nonceHash: Buffer): Promise<MailFlow | undefined>;
+  /** 标记消费（写 consumed_time）。事务内执行。 */
+  markConsumed(exec: Queryable, id: number, now: Date): Promise<void>;
+  /** 删除已过期或已消费且超出保留期的 flow 行。返回删除行数。 */
+  prune(before: Date, limit: number): Promise<number>;
+}
+
+/** 审计事件写入（append-only；只 INSERT，不 UPDATE/DELETE）。 */
+export interface IAuditRepo {
+  insert(event: Omit<AuditEvent, 'id' | 'createTime'>): Promise<AuditEvent>;
 }

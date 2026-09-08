@@ -38,6 +38,19 @@ export class MysqlEmailVerificationTokenRepo implements IEmailVerificationTokenR
     return rows[0] ? mapToken(rows[0]) : undefined;
   }
 
+  async findByIdForUpdate(exec: Queryable, id: number): Promise<EmailVerificationToken | undefined> {
+    const [rows] = await exec.query<any[]>(
+      'SELECT * FROM email_verification_tokens WHERE id = ? FOR UPDATE',
+      [id],
+    );
+    return rows[0] ? mapToken(rows[0]) : undefined;
+  }
+
+  async findByIdInTx(exec: Queryable, id: number): Promise<EmailVerificationToken | undefined> {
+    const [rows] = await exec.query<any[]>('SELECT * FROM email_verification_tokens WHERE id = ?', [id]);
+    return rows[0] ? mapToken(rows[0]) : undefined;
+  }
+
   /**
    * 原子消费：仅当尚未消费且未过期时置 consumed_time，返回是否由本次调用完成。
    */

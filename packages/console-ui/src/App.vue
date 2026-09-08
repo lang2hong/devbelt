@@ -1,18 +1,12 @@
 <script setup lang="ts">
-import VerifyEmail from './pages/VerifyEmail.vue';
-
-// 本片不引入 router：仅按 window.location.pathname 分支渲染。
-// /verify-email → 邮箱验证落地点；其余路径给最小「页面不存在」占位，
-// 不伪装为 /console/* 管理台。
-const path = window.location.pathname.replace(/\/+$/, '') || '/';
-const isVerifyEmail = path === '/verify-email';
+// 控制台 SPA 根（切片 3 起用）。本片仅保留最小占位，不渲染邮件落地点
+// （邮件页是独立 entry verify-email.html），也不伪装为任何管理台页面。
 </script>
 
 <template>
-  <VerifyEmail v-if="isVerifyEmail" />
-  <main v-else class="placeholder">
-    <h1>页面不存在</h1>
-    <p>未找到请求的页面。</p>
+  <main class="placeholder">
+    <h1>DB Client Console</h1>
+    <p>控制台暂未开放。</p>
   </main>
 </template>
 

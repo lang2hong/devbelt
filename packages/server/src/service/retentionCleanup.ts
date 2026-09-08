@@ -4,6 +4,7 @@ import type {
   IEmailVerificationTokenRepo,
   ISyncMutationRepo,
   ISyncResetTokenRepo,
+  IMailFlowRepo,
 } from '../repository/interfaces.js';
 
 /**
@@ -46,7 +47,8 @@ export interface RetentionCleanupDeps {
   emailVerificationTokenRepo: IEmailVerificationTokenRepo;
   syncMutationRepo: ISyncMutationRepo;
   syncResetTokenRepo: ISyncResetTokenRepo;
-  /** 无状态仓储（sync 两张表）需要显式连接来源。 */
+  mailFlowRepo: IMailFlowRepo;
+  /** 无状态仓储（sync 两张表 + mail_flows）需要显式连接来源。 */
   exec: () => Queryable;
 }
 
@@ -72,6 +74,7 @@ export function startRetentionCleanup(
       ['email_verification_tokens', () => deps.emailVerificationTokenRepo.prune(tokenBefore, batchSize)],
       ['personal_sync_mutations', () => deps.syncMutationRepo.prune(deps.exec(), nowDate, batchSize)],
       ['personal_sync_reset_tokens', () => deps.syncResetTokenRepo.prune(deps.exec(), tokenBefore, batchSize)],
+      ['mail_flows', () => deps.mailFlowRepo.prune(tokenBefore, batchSize)],
     ];
 
     for (const [table, run] of tasks) {

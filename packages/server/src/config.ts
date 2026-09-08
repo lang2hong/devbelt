@@ -1,4 +1,5 @@
 import { resolveSigningKeys, type SigningKeys } from './service/signingKeys.js';
+import { resolveConsoleOrigin } from './service/consoleOrigin.js';
 
 /**
  * 解析 `TRUST_PROXY`。取值语义见 docs/开发指南.md；`true` 被显式拒绝（左段
@@ -70,6 +71,8 @@ export const config = {
   },
   trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
   rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== 'false',
+  /** 控制台公开页/邮件流接口允许的同源 Origin（生产/预发必须为 HTTPS SMTP_BASE_URL 源）。 */
+  consoleOrigin: resolveConsoleOrigin(),
 };
 
 export { parseTrustProxy };

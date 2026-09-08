@@ -17,7 +17,12 @@ let stopping = false;
 
 function restart() {
   if (child) child.kill('SIGTERM');
-  const id = (child = spawn('node', ['dist/index.cjs'], { stdio: 'inherit' }));
+  const id = (child = spawn('node', ['dist/index.cjs'], {
+    stdio: 'inherit',
+    // 本地裸跑开发循环：默认声明 development profile，使 cookie / Origin 的 dev 例外
+    // 生效；显式导出 NODE_ENV（production 等）仍然优先，部署不受影响。
+    env: { ...process.env, NODE_ENV: process.env.NODE_ENV ?? 'development' },
+  }));
   id.on('exit', (code) => {
     if (!stopping && code !== 0) console.error(`[dev] server exited with code ${code}`);
   });

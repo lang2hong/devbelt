@@ -61,3 +61,11 @@ export type SyncAction =
 
 /** mutation receipt 状态。 */
 export type SyncMutationStatus = 'applied';
+
+// ── 一次性邮件链接（mail-flow）──
+
+/** 邮件流类型（token 来源的 token 表）。 */
+export type MailFlowType = 'verify-email' | 'accept-invitation' | 'sync-reset';
+
+/** 邮件流状态。issued = 已签发未消费，consumed = 已消费，expired = 过期，revoked = 撤销。 */
+export type MailFlowStatus = 'issued' | 'consumed' | 'expired' | 'revoked';

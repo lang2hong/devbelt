@@ -117,6 +117,10 @@ export function errorStatus(code: string): number {
     case 'SYNC_NOT_INITIALIZED':
     case 'SYNC_PROTOCOL_UNSUPPORTED':
       return 400;
+    case 'EMAIL_VERIFICATION_INVALID':
+      return 401;
+    case 'EMAIL_VERIFICATION_ALREADY_CONFIRMED':
+      return 409;
     case 'TOO_MANY_REQUESTS':
       return 429;
     default:

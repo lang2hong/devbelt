@@ -30,6 +30,8 @@ describe.skipIf(!URL)('migration smoke (real MySQL)', () => {
         'personal_sync_nonces',
         'personal_sync_mutations',
         'personal_sync_reset_tokens',
+        'mail_flows',
+        'audit_events',
       ]) {
         expect(names).toContain(t);
       }
@@ -42,6 +44,12 @@ describe.skipIf(!URL)('migration smoke (real MySQL)', () => {
       expect(unjson(planRows[0].allowed_database_types)).toEqual(['mysql', 'sqlite']);
       expect(planRows[0].max_connection_metas).toBe(500);
       expect(planRows[0].sync_storage_bytes).toBe(33554432);
+
+      // mail_flows 清理为索引化分批删除：到期/消费两索引必须存在。
+      const [indexRows] = await pool.query('SHOW INDEX FROM mail_flows') as [Array<{ Key_name: string }>, unknown];
+      const indexNames = new Set(indexRows.map((r) => r.Key_name));
+      expect(indexNames).toContain('idx_mail_flows_expires');
+      expect(indexNames).toContain('idx_mail_flows_consumed');
     } finally {
       await pool.end();
     }

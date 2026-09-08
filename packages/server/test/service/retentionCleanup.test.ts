@@ -5,6 +5,7 @@ import {
   FakeSyncMutationRepo,
   FakeSyncResetTokenRepo,
 } from '../helpers/fakeRepos.js';
+import { FakeMailFlowRepo } from '../helpers/linkFlowFakes.js';
 import { startRetentionCleanup } from '../../src/service/retentionCleanup.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 
@@ -17,7 +18,8 @@ function makeDeps() {
   const emailVerificationTokenRepo = new FakeEmailVerificationTokenRepo();
   const syncMutationRepo = new FakeSyncMutationRepo();
   const syncResetTokenRepo = new FakeSyncResetTokenRepo();
-  return { refreshTokenRepo, emailVerificationTokenRepo, syncMutationRepo, syncResetTokenRepo, exec };
+  const mailFlowRepo = new FakeMailFlowRepo();
+  return { refreshTokenRepo, emailVerificationTokenRepo, syncMutationRepo, syncResetTokenRepo, mailFlowRepo, exec };
 }
 
 describe('retention cleanup', () => {
@@ -80,6 +82,35 @@ describe('retention cleanup', () => {
     expect(await deps.syncMutationRepo.findByMutationId(exec(), 1, '1', Buffer.alloc(16, 1))).toBeUndefined();
     // 未过期的 receipt 必须留着，否则幂等重放会退化成重复执行
     expect(await deps.syncMutationRepo.findByMutationId(exec(), 1, '1', Buffer.alloc(16, 2))).toBeDefined();
+  });
+
+  it('prunes expired and consumed mail flows beyond retention, keeps live ones', async () => {
+    const deps = makeDeps();
+    const now = Date.now();
+    const expired = await deps.mailFlowRepo.create({
+      type: 'verify-email',
+      targetTokenHash: Buffer.alloc(32, 1),
+      targetRecordId: null,
+      userId: null,
+      nonceHash: Buffer.alloc(32, 1),
+      expiresTime: new Date(now - 2 * DAY),
+    });
+    await deps.mailFlowRepo.markConsumed(exec(), expired.id, new Date(now - 2 * DAY));
+    await deps.mailFlowRepo.create({
+      type: 'verify-email',
+      targetTokenHash: Buffer.alloc(32, 2),
+      targetRecordId: null,
+      userId: null,
+      nonceHash: Buffer.alloc(32, 2),
+      expiresTime: new Date(now + HOUR),
+    });
+
+    const c = startRetentionCleanup(deps, {});
+    await c.runOnce();
+    c.stop();
+
+    // 已消费且超出保留期 → 删；仍在有效期（未消费、未过期）→ 留。
+    expect(deps.mailFlowRepo.store.size).toBe(1);
   });
 
   it('honours batchSize so a single round cannot hold locks unboundedly', async () => {

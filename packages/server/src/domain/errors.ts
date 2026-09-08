@@ -216,3 +216,21 @@ export class SyncQuotaExceededError extends DomainError {
     this.name = 'SyncQuotaExceededError';
   }
 }
+
+// ── 一次性邮件链接（mail-flow）──
+
+/** 邮箱验证 token 已被消费（邮箱已验）→ 409 EMAIL_VERIFICATION_ALREADY_CONFIRMED。 */
+export class EmailVerificationAlreadyConfirmedError extends DomainError {
+  constructor() {
+    super('email verification already confirmed', 'EMAIL_VERIFICATION_ALREADY_CONFIRMED');
+    this.name = 'EmailVerificationAlreadyConfirmedError';
+  }
+}
+
+/** 邮件流失效/过期/撤销/不存在，或验证 token 无效/过期 → 401 EMAIL_VERIFICATION_INVALID。 */
+export class EmailVerificationInvalidError extends DomainError {
+  constructor() {
+    super('invalid or expired verification link', 'EMAIL_VERIFICATION_INVALID');
+    this.name = 'EmailVerificationInvalidError';
+  }
+}

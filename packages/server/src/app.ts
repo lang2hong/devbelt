@@ -51,6 +51,15 @@ import { runMigrations } from './repository/mysql/migrate.js';
 import { migrations } from './repository/mysql/migrations/index.js';
 import { mysqlTimeZoneInit } from './repository/mysql/mysqlTimeZoneInit.js';
 import { withTransaction } from './repository/mysql/db.js';
+import { MysqlMailFlowRepo } from './repository/mysql/mailFlowRepo.js';
+import { MysqlAuditRepo } from './repository/mysql/auditRepo.js';
+import { LinkFlowService } from './service/linkFlowService.js';
+import { AuditWriter } from './service/auditWriter.js';
+import { CsrfService } from './service/csrfService.js';
+import { linkFlowRoutes } from './route/linkFlows.js';
+import { consoleAuthRoutes } from './route/consoleAuth.js';
+import { requestId } from './middleware/requestId.js';
+import { registerConsoleStatic } from './consoleStatic.js';
 
 /**
  * 组合根（composition root）：组装 Fastify 实例 + 依赖注入。
@@ -75,6 +84,7 @@ export async function createApp() {
   });
 
   registerErrorHandler(app);
+  app.register(requestId);
 
   app.register(cors, { origin: process.env.NODE_ENV === 'production' ? (process.env.CORS_ORIGIN || false) : true });
   app.register(helmet, securityHeaders());
@@ -113,6 +123,8 @@ export async function createApp() {
   const syncMutationRepo = new MysqlSyncMutationRepo();
   const syncNonceRepo = new MysqlSyncNonceRepo();
   const syncResetTokenRepo = new MysqlSyncResetTokenRepo();
+  const mailFlowRepo = new MysqlMailFlowRepo(getMysql);
+  const auditRepo = new MysqlAuditRepo(getMysql);
 
   // service 层
   const tokenService = new TokenService(signingKeys, config.accessTokenExpiresIn, config.refreshTokenExpiresMs);
@@ -173,6 +185,15 @@ export async function createApp() {
     emailSender,
     rateLimiter,
   );
+  const csrfService = new CsrfService();
+  const auditWriter = new AuditWriter(auditRepo, (msg, data) => app.log.warn({ data }, msg));
+  const linkFlowService = new LinkFlowService(
+    mailFlowRepo,
+    emailVerificationTokenRepo,
+    userRepo,
+    (fn) => withTransaction(app.mysql, fn),
+    rateLimiter,
+  );
 
   // 受控限流清理任务（实施规格 §3）：过期桶由周期任务删除，不依赖请求
   startRateLimitCleanup(rateLimitRepo);
@@ -186,6 +207,7 @@ export async function createApp() {
     emailVerificationTokenRepo,
     syncMutationRepo,
     syncResetTokenRepo,
+    mailFlowRepo,
     exec: () => app.mysql,
   });
 
@@ -199,6 +221,15 @@ export async function createApp() {
   app.register(organizationRoutes, { tokenService, getUser, organizationService, resourceService, organizationRepo, membershipRepo });
   app.register(invitationRoutes, { tokenService, getUser, organizationService });
   app.register(syncRoutes, { tokenService, getUser, syncState: syncStateService, syncRecord: syncRecordService, syncReset: syncResetService });
+  app.register(consoleAuthRoutes, { csrfService, rateLimiter });
+  app.register(linkFlowRoutes, {
+    linkFlowService,
+    csrfService,
+    auditWriter,
+    consoleOrigin: config.consoleOrigin,
+    resendVerification: (email, ip) => authService.resendVerification(email, ip),
+  });
+  await registerConsoleStatic(app);
 
   await app.ready();
   await runMigrations(app.mysql as any, [...migrations]);

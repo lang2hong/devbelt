@@ -15,6 +15,8 @@ import type {
   SyncCipherSuite,
   SyncAction,
   SyncMutationStatus,
+  MailFlowType,
+  MailFlowStatus,
 } from './enums.js';
 
 /**
@@ -312,5 +314,48 @@ export interface SyncResetToken {
   expiresTime: Date;
   consumedTime: Date | null;
   revokedTime: Date | null;
+  createTime: Date;
+}
+
+// ── 一次性邮件链接（mail-flow）──
+
+/**
+ * 邮件流：表示「曾持有效邮件链接」的短时 opaque 引用。不表示登录态、不直接授权。
+ * type 决定目标 token 表；target_token_hash 只存 SHA-256 原始字节（BINARY(32)）。
+ */
+export interface MailFlow {
+  id: number;
+  type: MailFlowType;
+  /** 认领时传入 token 的 SHA-256（raw 32 字节）。 */
+  targetTokenHash: Buffer;
+  /** 解析后对应 token 表行 id；未知/过期 token 无法解析时为 null。 */
+  targetRecordId: number | null;
+  /** 认领时未知用户为 null，登录绑定或已认领时写入。 */
+  userId: number | null;
+  /** Cookie nonce 的 SHA-256（raw 32 字节）。 */
+  nonceHash: Buffer;
+  status: MailFlowStatus;
+  expiresTime: Date;
+  consumedTime: Date | null;
+  createTime: Date;
+  updateTime: Date;
+}
+
+/** 审计事件（append-only，无 UPDATE/DELETE）。 */
+export interface AuditEvent {
+  id: number;
+  eventTime: Date;
+  actorUserId: number | null;
+  actorRole: string | null;
+  eventType: string;
+  targetType: string | null;
+  targetId: string | null;
+  organizationId: number | null;
+  sourceIp: string | null;
+  requestId: string | null;
+  result: string;
+  failureCode: string | null;
+  /** 高危操作原因（仅受控写操作）。 */
+  reason: string | null;
   createTime: Date;
 }

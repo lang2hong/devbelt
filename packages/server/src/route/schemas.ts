@@ -78,6 +78,17 @@ export const resendBody = {
   },
 } as const;
 
+/** 一次性邮件链接认领（body：type + token）。token 固定 base64url 43 字符。 */
+export const linkFlowClaimBody = {
+  type: 'object',
+  required: ['type', 'token'],
+  additionalProperties: false,
+  properties: {
+    type: { type: 'string', enum: ['verify-email', 'accept-invitation', 'sync-reset'] },
+    token: { type: 'string', minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]+$' },
+  },
+} as const;
+
 /** 邮箱验证 token（path 参数，base64url）。 */
 export const verificationTokenParam = {
   type: 'object',
