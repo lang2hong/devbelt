@@ -102,6 +102,7 @@ export class FakeUserRepo implements IUserRepo {
       displayName,
       status: 'active',
       lastLoginTime: null,
+      sessionVersion: 0,
       createTime: new Date(),
       updateTime: new Date(),
     };
@@ -128,6 +129,16 @@ export class FakeUserRepo implements IUserRepo {
   async markEmailVerified(_exec: Queryable, id: number, time: Date): Promise<void> {
     const u = this.store.get(id);
     if (u) u.emailVerifiedTime = time;
+  }
+
+  async incrementSessionVersion(_exec: Queryable, id: number): Promise<void> {
+    const u = this.store.get(id);
+    if (u) u.sessionVersion += 1;
+  }
+
+  async updateDisplayName(id: number, displayName: string): Promise<void> {
+    const u = this.store.get(id);
+    if (u) u.displayName = displayName;
   }
 }
 
@@ -307,7 +318,7 @@ export class FakeDeviceRepo implements IDeviceRepo {
   }
 
   async countActive(_exec: Queryable, userId: number): Promise<number> {
-    return [...this.store.values()].filter((d) => d.userId === userId && d.status === 'active').length;
+    return [...this.store.values()].filter((d) => d.userId === userId && d.status === 'active' && d.devicePlatform !== 'web').length;
   }
 
   async revoke(_exec: Queryable, id: number, now: Date): Promise<void> {
@@ -321,6 +332,13 @@ export class FakeDeviceRepo implements IDeviceRepo {
   async touch(_exec: Queryable, id: number, now: Date): Promise<void> {
     const d = this.store.get(id);
     if (d) d.lastUsedTime = now;
+  }
+
+  async findActiveByUserAndPlatform(_exec: Queryable, userId: number, platform: string): Promise<Device | undefined> {
+    for (const d of this.store.values()) {
+      if (d.userId === userId && d.devicePlatform === platform && d.status === 'active') return d;
+    }
+    return undefined;
   }
 }
 
@@ -383,6 +401,13 @@ export class FakeRefreshTokenRepo implements IRefreshTokenRepo {
 
   async revokeAllForUser(_exec: Queryable, userId: number, now: Date): Promise<void> {
     for (const t of this.store.values()) if (t.userId === userId && !t.revokedTime) t.revokedTime = now;
+  }
+
+  async hasActiveToken(familyId: string): Promise<boolean> {
+    for (const t of this.store.values()) {
+      if (t.familyId === familyId && !t.revokedTime && t.expiresTime > new Date()) return true;
+    }
+    return false;
   }
 
   async prune(before: Date, limit: number): Promise<number> {

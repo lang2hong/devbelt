@@ -57,6 +57,14 @@ export class MysqlUserRepo implements IUserRepo {
   async markEmailVerified(exec: Queryable, id: number, time: Date): Promise<void> {
     await exec.query('UPDATE users SET email_verified_time = ? WHERE id = ?', [time, id]);
   }
+
+  async incrementSessionVersion(exec: Queryable, id: number): Promise<void> {
+    await exec.query('UPDATE users SET session_version = session_version + 1 WHERE id = ?', [id]);
+  }
+
+  async updateDisplayName(id: number, displayName: string): Promise<void> {
+    await this.db().query('UPDATE users SET display_name = ? WHERE id = ?', [displayName, id]);
+  }
 }
 
 function mapUser(r: any): User {
@@ -68,6 +76,7 @@ function mapUser(r: any): User {
     displayName: r.display_name ?? undefined,
     status: r.status as UserStatus,
     lastLoginTime: r.last_login_time ? new Date(r.last_login_time) : null,
+    sessionVersion: Number(r.session_version ?? 0),
     createTime: new Date(r.create_time),
     updateTime: new Date(r.update_time),
   };

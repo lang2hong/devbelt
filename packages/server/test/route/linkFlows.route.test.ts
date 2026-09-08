@@ -26,7 +26,7 @@ async function buildApp(): Promise<FastifyInstance> {
   const userRepo = new FakeUserRepo();
   const rateLimiter = new RateLimitService(new FakeRateLimitRepo(), false);
   const linkFlowService = new LinkFlowService(mailFlow, tokenRepo, userRepo, async (fn) => fn({} as Queryable), rateLimiter);
-  const csrfService = new CsrfService();
+  const csrfService = new CsrfService(Buffer.alloc(32, 7));
   const auditWriter = new AuditWriter(new FakeAuditRepo());
 
   await app.register(linkFlowRoutes, {
@@ -36,7 +36,15 @@ async function buildApp(): Promise<FastifyInstance> {
     consoleOrigin: ORIGIN,
     resendVerification: async () => ({ ok: true }),
   });
-  await app.register(consoleAuthRoutes, { csrfService, rateLimiter });
+  await app.register(consoleAuthRoutes, {
+    csrfService,
+    rateLimiter,
+    consoleAuthService: {} as any,
+    consoleOrigin: ORIGIN,
+    auditWriter,
+    refreshMaxAgeSeconds: 30 * 24 * 3600,
+    register: async () => ({ ok: true }),
+  });
   await app.ready();
   return app;
 }

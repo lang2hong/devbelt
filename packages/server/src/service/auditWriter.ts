@@ -12,6 +12,12 @@ const ALLOWED_EVENT_TYPES = [
   'email.verify.consumed',
   'email.verify.failed',
   'email.verification.resend',
+  'auth.login.success',
+  'auth.login.failed',
+  'auth.logout',
+  'auth.password.changed',
+  'auth.device.revoked',
+  'account.displayName.changed',
 ] as const;
 
 export type AuditEventType = (typeof ALLOWED_EVENT_TYPES)[number];

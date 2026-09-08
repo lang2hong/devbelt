@@ -1,13 +1,24 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { TokenService } from '../service/tokenService.js';
+import type { TokenService, AccessTokenPayload } from '../service/tokenService.js';
+import type { CsrfService } from '../service/csrfService.js';
 import type { GetAuthUser } from './requireAuth.js';
 import type { IOrganizationRepo, IMembershipRepo } from '../repository/interfaces.js';
 import type { PermissionCode } from '../authz/permissionCatalog.js';
 import { roleHasPermission } from '../authz/permissionCatalog.js';
+import { consoleWriteGuard } from './consoleWrite.js';
+
+const WRITE_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 
 export interface OrganizationAuthOptions {
   tokenService: TokenService;
   getUser: GetAuthUser;
+  /** 核验 session（refresh family）仍存活。可由 route 缺省。 */
+  getSessionActive?: (sessionId: string) => Promise<boolean>;
+  /** 请求 access token 必须命中至少一个 scope。 */
+  scope?: string[];
+  /** console audience 的组织写请求做 Origin+会话 CSRF 校验（扩展跳过）。可选。 */
+  csrfService?: CsrfService;
+  consoleOrigin?: string;
   organizationRepo: IOrganizationRepo;
   membershipRepo: IMembershipRepo;
   routes: (app: FastifyInstance) => void | Promise<void>;
@@ -37,18 +48,51 @@ export async function organizationAuth(app: FastifyInstance, opts: OrganizationA
       return reply.code(401).send({ message: 'unauthorized', code: 'UNAUTHORIZED' });
     }
     let userId: number;
+    let payload: AccessTokenPayload;
     try {
-      const payload = await opts.tokenService.verifyAccessToken(token);
+      payload = (await opts.tokenService.verifyAccessToken(token)) as AccessTokenPayload;
       userId = Number(payload.sub);
       if (!Number.isInteger(userId) || userId <= 0) throw new Error('bad sub');
     } catch {
       return reply.code(401).send({ message: 'unauthorized', code: 'UNAUTHORIZED' });
     }
 
+    // 组织/资源是共享业务 API：同时接受 extension 与 console audience（§4.1）。
+    if (payload.aud !== 'extension' && payload.aud !== 'console') {
+      return reply.code(403).send({ message: 'token audience not allowed here', code: 'TOKEN_AUDIENCE_FORBIDDEN' });
+    }
+    if (opts.scope && opts.scope.length > 0) {
+      const scopes = new Set(payload.scope ?? []);
+      if (!opts.scope.some((s) => scopes.has(s))) {
+        return reply.code(403).send({ message: 'forbidden', code: 'FORBIDDEN' });
+      }
+    }
+
     const user = await opts.getUser(userId);
     if (!user) return reply.code(401).send({ message: 'unauthorized', code: 'UNAUTHORIZED' });
     if (user.status !== 'active') {
       return reply.code(403).send({ message: 'user disabled', code: 'USER_DISABLED' });
+    }
+    if (payload.sessionVersion !== undefined && payload.sessionVersion !== user.sessionVersion) {
+      return reply.code(401).send({ message: 'session expired', code: 'UNAUTHORIZED' });
+    }
+    if (opts.getSessionActive && typeof payload.sessionId === 'string') {
+      const active = await opts.getSessionActive(payload.sessionId).catch(() => false);
+      if (!active) {
+        return reply.code(401).send({ message: 'session expired', code: 'UNAUTHORIZED' });
+      }
+    }
+
+    // 挂会话上下文（供 consoleWriteGuard 读取 audience/sessionId）。
+    (req as unknown as { authAudience?: string }).authAudience = payload.aud;
+    (req as unknown as { authSessionId?: string }).authSessionId = payload.sessionId;
+    (req as unknown as { authDeviceId?: number }).authDeviceId = payload.deviceId;
+
+    // console audience 的组织写请求（POST/PATCH/PUT/DELETE）须 Origin 同源 + 会话绑定 CSRF。
+    if (opts.csrfService && opts.consoleOrigin && payload.aud === 'console' && WRITE_METHODS.has(req.method)) {
+      if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) {
+        return reply.code(403).send({ message: 'forbidden', code: 'FORBIDDEN' });
+      }
     }
 
     const organizationId = Number((req.params as Record<string, unknown>).organizationId);

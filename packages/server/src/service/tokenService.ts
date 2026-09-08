@@ -3,21 +3,39 @@ import type { KeyObject } from 'crypto';
 import { SignJWT, jwtVerify } from 'jose';
 import { UnauthorizedError } from '../domain/errors.js';
 import type { SigningKeys } from './signingKeys.js';
+import type { TokenAudience } from '../domain/enums.js';
 
 export type { SigningKeys };
 
 /**
  * Access token 载荷（签发后经 Ed25519 签名，客户端不可读改）。
  * - `sub`：用户 id（十进制字符串）
- * - `iat` / `exp`：签发 / 过期（jose 自动填）
- * - `jti`：随机 token ID（实施规格 §5.1）
- * - header `kid`：签名 key id，验证时据此选公钥（轮换支持）
+ * - `aud`：audience（extension / console，§4.1）
+ * - `scope`：作用域（粗粒度，见 enums.EXTENSION_SCOPES / CONSOLE_SCOPES）
+ * - `sessionId`：refresh family id（会话吊销判定的载体）
+ * - `deviceId`：签发设备 id（设备吊销立即失效）
+ * - `sessionVersion`：签发时 users.session_version 快照（改密/禁用使旧 token 失效）
+ * - `jti`：随机 token ID；`iat` / `exp` 由 jose 自动填；header `kid` 选签名密钥（轮换支持）
  */
 export interface AccessTokenPayload {
   sub: string;
   jti: string;
+  aud: TokenAudience;
+  scope: string[];
+  sessionId?: string;
+  deviceId?: number;
+  sessionVersion?: number;
   iat?: number;
   exp?: number;
+}
+
+export interface SignAccessTokenInput {
+  userId: number;
+  aud: TokenAudience;
+  scope: string[];
+  sessionId?: string;
+  deviceId?: number;
+  sessionVersion?: number;
 }
 
 /**
@@ -33,10 +51,20 @@ export class TokenService {
     private readonly refreshExpiresMs: number,
   ) {}
 
-  /** 签发带 subject 的 Ed25519 access token。 */
-  async signAccessToken(userId: number): Promise<string> {
+  /** 签发带 audience/scope/session 声明的 Ed25519 access token。 */
+  async signAccessToken(input: SignAccessTokenInput): Promise<string> {
     const jti = randomUUID();
-    return new SignJWT({ sub: String(userId), jti })
+    const payload: Record<string, unknown> = {
+      sub: String(input.userId),
+      jti,
+      aud: input.aud,
+      scope: input.scope,
+    };
+    if (input.sessionId !== undefined) payload.sessionId = input.sessionId;
+    if (input.deviceId !== undefined) payload.deviceId = input.deviceId;
+    if (input.sessionVersion !== undefined) payload.sessionVersion = input.sessionVersion;
+
+    return new SignJWT(payload)
       .setProtectedHeader({ alg: 'EdDSA', kid: this.keys.kid })
       .setIssuedAt()
       .setExpirationTime(this.accessExpiresIn)

@@ -50,6 +50,13 @@ describe.skipIf(!URL)('migration smoke (real MySQL)', () => {
       const indexNames = new Set(indexRows.map((r) => r.Key_name));
       expect(indexNames).toContain('idx_mail_flows_expires');
       expect(indexNames).toContain('idx_mail_flows_consumed');
+
+      // 013_console_session：users.session_version 已存在（会话即时失效依赖）。
+      const [svCols] = await pool.query(
+        `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'session_version'`,
+      ) as [Array<{ COLUMN_NAME: string }>, unknown];
+      expect(svCols).toHaveLength(1);
     } finally {
       await pool.end();
     }

@@ -92,6 +92,8 @@ export function errorStatus(code: string): number {
       return 403;
     case 'SYNC_SIGNATURE_INVALID':
       return 403;
+    case 'TOKEN_AUDIENCE_FORBIDDEN':
+      return 403;
     case 'ORGANIZATION_NOT_FOUND':
     case 'NOT_FOUND':
     case 'RESOURCE_NOT_FOUND':

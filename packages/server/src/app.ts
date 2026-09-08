@@ -55,9 +55,11 @@ import { MysqlMailFlowRepo } from './repository/mysql/mailFlowRepo.js';
 import { MysqlAuditRepo } from './repository/mysql/auditRepo.js';
 import { LinkFlowService } from './service/linkFlowService.js';
 import { AuditWriter } from './service/auditWriter.js';
-import { CsrfService } from './service/csrfService.js';
+import { CsrfService, deriveCsrfKey } from './service/csrfService.js';
 import { linkFlowRoutes } from './route/linkFlows.js';
 import { consoleAuthRoutes } from './route/consoleAuth.js';
+import { consoleMeRoutes } from './route/consoleMe.js';
+import { ConsoleAuthService } from './service/consoleAuthService.js';
 import { requestId } from './middleware/requestId.js';
 import { registerConsoleStatic } from './consoleStatic.js';
 
@@ -185,7 +187,7 @@ export async function createApp() {
     emailSender,
     rateLimiter,
   );
-  const csrfService = new CsrfService();
+  const csrfService = new CsrfService(deriveCsrfKey());
   const auditWriter = new AuditWriter(auditRepo, (msg, data) => app.log.warn({ data }, msg));
   const linkFlowService = new LinkFlowService(
     mailFlowRepo,
@@ -193,6 +195,14 @@ export async function createApp() {
     userRepo,
     (fn) => withTransaction(app.mysql, fn),
     rateLimiter,
+  );
+  const consoleAuthService = new ConsoleAuthService(
+    userRepo,
+    deviceRepo,
+    refreshTokenRepo,
+    tokenService,
+    rateLimiter,
+    (fn) => withTransaction(app.mysql, fn),
   );
 
   // 受控限流清理任务（实施规格 §3）：过期桶由周期任务删除，不依赖请求
@@ -213,15 +223,37 @@ export async function createApp() {
 
   // route 层
   const getUser = async (id: number) => userRepo.findById(id);
+  const getSessionActive = (sessionId: string) => refreshTokenRepo.hasActiveToken(sessionId);
 
   app.get('/health', async () => ({ status: 'ok' }));
-  app.register(authRoutes, { authService, tokenService, getUser });
-  app.register(meRoutes, { tokenService, getUser, userRepo, personalSubscriptionRepo, personalPlanRepo });
-  app.register(personalRoutes, { tokenService, getUser, deviceRepo, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId) });
-  app.register(organizationRoutes, { tokenService, getUser, organizationService, resourceService, organizationRepo, membershipRepo });
-  app.register(invitationRoutes, { tokenService, getUser, organizationService });
-  app.register(syncRoutes, { tokenService, getUser, syncState: syncStateService, syncRecord: syncRecordService, syncReset: syncResetService });
-  app.register(consoleAuthRoutes, { csrfService, rateLimiter });
+  app.register(authRoutes, { authService, tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin: config.consoleOrigin });
+  app.register(meRoutes, { tokenService, getUser, getSessionActive, userRepo, personalSubscriptionRepo, personalPlanRepo });
+  app.register(personalRoutes, { tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin: config.consoleOrigin, deviceRepo, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId) });
+  app.register(organizationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin: config.consoleOrigin, organizationService, resourceService, organizationRepo, membershipRepo });
+  app.register(invitationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin: config.consoleOrigin, organizationService });
+  app.register(syncRoutes, { tokenService, getUser, getSessionActive, syncState: syncStateService, syncRecord: syncRecordService, syncReset: syncResetService });
+  app.register(consoleAuthRoutes, {
+    csrfService,
+    rateLimiter,
+    consoleAuthService,
+    consoleOrigin: config.consoleOrigin,
+    auditWriter,
+    refreshMaxAgeSeconds: Math.floor(config.refreshTokenExpiresMs / 1000),
+    register: (email, password, displayName, ip) => authService.register(email, password, displayName, ip),
+  });
+  app.register(consoleMeRoutes, {
+    tokenService,
+    getUser,
+    getSessionActive,
+    csrfService,
+    auditWriter,
+    rateLimiter,
+    consoleOrigin: config.consoleOrigin,
+    userRepo,
+    personalSubscriptionRepo,
+    personalPlanRepo,
+    membershipRepo,
+  });
   app.register(linkFlowRoutes, {
     linkFlowService,
     csrfService,

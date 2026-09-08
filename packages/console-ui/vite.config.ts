@@ -16,6 +16,8 @@ export default defineConfig({
       input: {
         index: new URL('./index.html', import.meta.url).pathname,
         'verify-email': new URL('./verify-email.html', import.meta.url).pathname,
+        login: new URL('./login.html', import.meta.url).pathname,
+        register: new URL('./register.html', import.meta.url).pathname,
       },
     },
   },

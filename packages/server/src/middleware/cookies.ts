@@ -29,6 +29,9 @@ export const linkFlowCookieName = (): string =>
 export const csrfCookieName = (): string =>
   secureCookiesEnabled() ? '__Host-dbclient_csrf' : 'dev_dbcsrf';
 
+export const refreshCookieName = (): string =>
+  secureCookiesEnabled() ? '__Host-dbclient_refresh' : 'dev_dbrefresh';
+
 /** 从请求 Cookie 头读取指定 cookie 的值。 */
 export function readCookie(req: FastifyRequest, name: string): string | undefined {
   const header = req.headers.cookie;

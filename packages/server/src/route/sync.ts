@@ -26,6 +26,7 @@ import {
 export interface SyncRouteOptions {
   tokenService: TokenService;
   getUser: GetAuthUser;
+  getSessionActive: (sessionId: string) => Promise<boolean>;
   syncState: SyncStateService;
   syncRecord: SyncRecordService;
   syncReset: SyncResetService;
@@ -89,6 +90,10 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
   app.register(authScope, {
     tokenService: opts.tokenService,
     getUser: opts.getUser,
+    getSessionActive: opts.getSessionActive,
+    // 个人 E2E 同步仅限扩展 audience（§4.1：浏览器不得接触 E2EE 材料）。
+    aud: 'extension',
+    scope: ['sync'],
     routes: async (child) => {
       child.get('/api/sync/state', async (req, reply) => {
         const userId = (req as any).authUserId as number;

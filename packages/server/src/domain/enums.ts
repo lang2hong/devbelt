@@ -69,3 +69,14 @@ export type MailFlowType = 'verify-email' | 'accept-invitation' | 'sync-reset';
 
 /** 邮件流状态。issued = 已签发未消费，consumed = 已消费，expired = 过期，revoked = 撤销。 */
 export type MailFlowStatus = 'issued' | 'consumed' | 'expired' | 'revoked';
+
+// ── 会话 / token audience ──
+
+/** access token 的 audience：extension（VS Code 扩展专用，含同步）与 console（浏览器控制台）。 */
+export type TokenAudience = 'extension' | 'console';
+
+/** 扩展端 token 的作用域（粗粒度；同步协议只在 extension 端暴露）。 */
+export const EXTENSION_SCOPES = ['sync', 'account', 'device', 'organization'] as const;
+
+/** 控制台 token 的作用域（不含 sync · E2EE 材料）。 */
+export const CONSOLE_SCOPES = ['console', 'account', 'device', 'organization'] as const;

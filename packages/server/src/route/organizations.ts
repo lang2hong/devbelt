@@ -6,6 +6,8 @@ import type { OrganizationService } from '../service/organizationService.js';
 import type { OrganizationResourceService } from '../service/organizationResourceService.js';
 import type { IOrganizationRepo, IMembershipRepo, InvitationDto } from '../repository/interfaces.js';
 import type { OrganizationRole, ResourceType } from '../domain/enums.js';
+import type { CsrfService } from '../service/csrfService.js';
+import { consoleWriteGuard, isConsoleAudience } from '../middleware/consoleWrite.js';
 import { sendError } from '../middleware/errorHandler.js';
 import {
   assignRoleBody,
@@ -26,6 +28,9 @@ import {
 export interface OrganizationRouteOptions {
   tokenService: TokenService;
   getUser: GetAuthUser;
+  getSessionActive: (sessionId: string) => Promise<boolean>;
+  csrfService: CsrfService;
+  consoleOrigin: string;
   organizationService: OrganizationService;
   resourceService: OrganizationResourceService;
   organizationRepo: IOrganizationRepo;
@@ -40,6 +45,9 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
   app.register(authScope, {
     tokenService: opts.tokenService,
     getUser: opts.getUser,
+    getSessionActive: opts.getSessionActive,
+    aud: ['extension', 'console'],
+    scope: ['organization'],
     routes: async (auth) => {
       auth.get('/api/organizations', async (req, reply) => {
         const userId = (req as any).authUserId as number;
@@ -52,6 +60,9 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
       });
 
       auth.post('/api/organizations', { schema: { body: createOrganizationBody } }, async (req, reply) => {
+        if (isConsoleAudience(req) && !consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) {
+          return reply.code(403).send({ message: 'forbidden', code: 'FORBIDDEN' });
+        }
         const userId = (req as any).authUserId as number;
         const { name } = req.body as any;
         try {
@@ -68,6 +79,10 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
   app.register(organizationAuth, {
     tokenService: opts.tokenService,
     getUser: opts.getUser,
+    getSessionActive: opts.getSessionActive,
+    scope: ['organization'],
+    csrfService: opts.csrfService,
+    consoleOrigin: opts.consoleOrigin,
     organizationRepo: opts.organizationRepo,
     membershipRepo: opts.membershipRepo,
     routes: async (org) => {

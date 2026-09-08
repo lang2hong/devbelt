@@ -36,6 +36,8 @@ export interface User {
   displayName?: string;
   status: UserStatus;
   lastLoginTime: Date | null;
+  /** 会话版本：改密/禁用时 +1，用于使所有存量 access token 立即失效（§4.1）。 */
+  sessionVersion: number;
   createTime: Date;
   updateTime: Date;
 }

@@ -83,6 +83,14 @@ export class MysqlRefreshTokenRepo implements IRefreshTokenRepo {
     );
   }
 
+  async hasActiveToken(familyId: string): Promise<boolean> {
+    const [rows] = await this.db().query<any[]>(
+      'SELECT COUNT(*) AS cnt FROM refresh_tokens WHERE family_id = ? AND revoked_time IS NULL AND expires_time > ?',
+      [familyId, new Date()],
+    );
+    return Number(rows[0]?.cnt ?? 0) > 0;
+  }
+
   /**
    * 清理已终结的 refresh token 行。
    *

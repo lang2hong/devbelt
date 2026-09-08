@@ -60,6 +60,10 @@ export interface IUserRepo {
   updateStatus(id: number, status: UserStatus): Promise<void>;
   /** 置 email_verified_time（与 token 消费同事务）。 */
   markEmailVerified(exec: Queryable, id: number, time: Date): Promise<void>;
+  /** 会话版本 +1（改密/禁用时，用于使存量 access token 立即失效）。事务内执行。 */
+  incrementSessionVersion(exec: Queryable, id: number): Promise<void>;
+  /** 更新显示名（PATCH /api/console/me，§4.4 校验在 service 层）。单列更新，无需事务。 */
+  updateDisplayName(id: number, displayName: string): Promise<void>;
 }
 
 export interface IEmailVerificationTokenRepo {
@@ -115,10 +119,12 @@ export interface IDeviceRepo {
   listByUser(userId: number): Promise<Device[]>;
   /** active 设备数（占用配额的计量）。必须在事务（exec）内执行，配合用户行锁防并发绕过。 */
   countActive(exec: Queryable, userId: number): Promise<number>;
-  /** 撤销设备（status=revoked）。 */
+  /** 已撤销设备（status=revoked）。 */
   revoke(exec: Queryable, id: number, now: Date): Promise<void>;
   /** 仅更新 last_used_time（refresh 时刷新活跃，不改变 status、不创建、不复活）。 */
   touch(exec: Queryable, id: number, now: Date): Promise<void>;
+  /** 查某用户 active 的指定 platform 设备（Web Console 单槽位）。事务内执行。 */
+  findActiveByUserAndPlatform(exec: Queryable, userId: number, platform: string): Promise<Device | undefined>;
 }
 
 export interface IRefreshTokenRepo {
@@ -142,6 +148,8 @@ export interface IRefreshTokenRepo {
   revokeByDevice(exec: Queryable, deviceId: number, now: Date): Promise<void>;
   /** 撤销某用户全部 token（改密/禁用时调用）。 */
   revokeAllForUser(exec: Queryable, userId: number, now: Date): Promise<void>;
+  /** 该 family 是否仍有活跃（未撤销、未过期）token（会话存活判定，供 requireSession 每请求核验）。 */
+  hasActiveToken(familyId: string): Promise<boolean>;
   /**
    * 删除已终结且超出保留期的 token 行（`expires_time < before OR revoked_time < before`）。
    * 轮换每次刷新都插新行、旧行仅置 revoked_time，不清理会无界增长

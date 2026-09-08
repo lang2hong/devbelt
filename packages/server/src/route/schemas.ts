@@ -33,7 +33,7 @@ export const registerBody = {
   properties: {
     email: { type: 'string', minLength: 3, maxLength: 255 },
     password: { type: 'string', maxLength: 256 },
-    displayName: { type: 'string', minLength: 1, maxLength: 100 },
+    displayName: { type: 'string', minLength: 1, maxLength: 200 },
   },
 } as const;
 
@@ -65,6 +65,16 @@ export const changePasswordBody = {
   properties: {
     currentPassword: { type: 'string', maxLength: 256 },
     newPassword: { type: 'string', maxLength: 256 },
+  },
+} as const;
+
+/** PATCH /api/console/me 显示名（长度上限由 service 按 code point 校验）。 */
+export const updateDisplayNameBody = {
+  type: 'object',
+  required: ['displayName'],
+  additionalProperties: false,
+  properties: {
+    displayName: { type: 'string', maxLength: 200 },
   },
 } as const;
 

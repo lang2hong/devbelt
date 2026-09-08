@@ -8,6 +8,7 @@ import type { User } from '../domain/entities.js';
 export interface MeRouteOptions {
   tokenService: TokenService;
   getUser: GetAuthUser;
+  getSessionActive: (sessionId: string) => Promise<boolean>;
   userRepo: IUserRepo;
   personalSubscriptionRepo: IPersonalSubscriptionRepo;
   personalPlanRepo: IPersonalPlanRepo;
@@ -18,6 +19,9 @@ export async function meRoutes(app: FastifyInstance, opts: MeRouteOptions): Prom
   app.register(authScope, {
     tokenService: opts.tokenService,
     getUser: opts.getUser,
+    getSessionActive: opts.getSessionActive,
+    aud: ['extension', 'console'],
+    scope: ['account'],
     routes: async (child) => {
       child.get('/api/me', async (req, reply) => {
         const userId = (req as any).authUserId as number;

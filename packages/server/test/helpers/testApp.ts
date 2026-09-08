@@ -26,6 +26,7 @@ import {
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
 import { securityHeaders } from '../../src/middleware/securityHeaders.js';
 import { TokenService, type SigningKeys } from '../../src/service/tokenService.js';
+import { EXTENSION_SCOPES } from '../../src/domain/enums.js';
 import { AuthService } from '../../src/service/authService.js';
 import { OrganizationService } from '../../src/service/organizationService.js';
 import { OrganizationResourceService } from '../../src/service/organizationResourceService.js';
@@ -41,6 +42,9 @@ import { syncRoutes } from '../../src/route/sync.js';
 import { SyncStateService } from '../../src/service/syncStateService.js';
 import { SyncRecordService } from '../../src/service/syncRecordService.js';
 import { SyncResetService } from '../../src/service/syncResetService.js';
+import { AuditWriter } from '../../src/service/auditWriter.js';
+import { CsrfService } from '../../src/service/csrfService.js';
+import { FakeAuditRepo } from './linkFlowFakes.js';
 
 export interface TestAppOptions {
   rateLimit?: boolean;
@@ -74,6 +78,7 @@ export interface TestApp {
     resourceService: OrganizationResourceService;
   };
   tokenService: TokenService;
+  csrfService: CsrfService;
   /** 为指定 userId 签一个真实 Ed25519 access token。 */
   tokenFor(userId: number): Promise<string>;
   auth(token: string): Record<string, string>;
@@ -181,14 +186,19 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   );
 
   const getUser = async (id: number) => userRepo.findById(id);
+  // 测试装配：会话存活默认通过（真库行为由 dedicated 用例验证）。
+  const getSessionActive = async (_sessionId: string) => true;
+  const auditWriter = new AuditWriter(new FakeAuditRepo());
+  const csrfService = new CsrfService(Buffer.alloc(32, 3));
+  const consoleOrigin = 'http://localhost:5173';
 
   app.get('/health', async () => ({ status: 'ok' }));
-  await app.register(authRoutes, { authService, tokenService, getUser });
-  await app.register(meRoutes, { tokenService, getUser, userRepo, personalSubscriptionRepo, personalPlanRepo });
-  await app.register(personalRoutes, { tokenService, getUser, deviceRepo, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId) });
-  await app.register(organizationRoutes, { tokenService, getUser, organizationService, resourceService, organizationRepo, membershipRepo });
-  await app.register(invitationRoutes, { tokenService, getUser, organizationService });
-  await app.register(syncRoutes, { tokenService, getUser, syncState: syncStateService, syncRecord: syncRecordService, syncReset: syncResetService });
+  await app.register(authRoutes, { authService, tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin });
+  await app.register(meRoutes, { tokenService, getUser, getSessionActive, userRepo, personalSubscriptionRepo, personalPlanRepo });
+  await app.register(personalRoutes, { tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin, deviceRepo, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId) });
+  await app.register(organizationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin, organizationService, resourceService, organizationRepo, membershipRepo });
+  await app.register(invitationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin, organizationService });
+  await app.register(syncRoutes, { tokenService, getUser, getSessionActive, syncState: syncStateService, syncRecord: syncRecordService, syncReset: syncResetService });
 
   await app.ready();
 
@@ -214,7 +224,14 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
     },
     services: { authService, emailSender, tokenService, organizationService, resourceService },
     tokenService,
-    tokenFor: (userId) => tokenService.signAccessToken(userId),
+    csrfService,
+    tokenFor: (userId) => tokenService.signAccessToken({
+      userId,
+      aud: 'extension',
+      scope: [...EXTENSION_SCOPES],
+      sessionId: 'test-session',
+      sessionVersion: 0,
+    }),
     auth: (token) => ({ authorization: `Bearer ${token}` }),
     close: () => app.close(),
   };

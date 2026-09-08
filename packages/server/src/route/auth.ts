@@ -2,13 +2,21 @@ import type { FastifyInstance } from 'fastify';
 import type { AuthService, DeviceFields } from '../service/authService.js';
 import { authScope, type GetAuthUser } from '../middleware/requireAuth.js';
 import type { TokenService } from '../service/tokenService.js';
+import type { AuditWriter } from '../service/auditWriter.js';
+import type { CsrfService } from '../service/csrfService.js';
+import { DomainError } from '../domain/errors.js';
 import { sendError } from '../middleware/errorHandler.js';
+import { consoleWriteGuard, clearSessionCookies } from '../middleware/consoleWrite.js';
 import { changePasswordBody, loginBody, refreshBody, registerBody, resendBody, verificationTokenParam } from './schemas.js';
 
 export interface AuthRouteOptions {
   authService: AuthService;
   tokenService: TokenService;
   getUser: GetAuthUser;
+  getSessionActive: (sessionId: string) => Promise<boolean>;
+  auditWriter: AuditWriter;
+  csrfService: CsrfService;
+  consoleOrigin: string;
 }
 
 /**
@@ -61,8 +69,10 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): 
     const device: DeviceFields = { deviceKey, devicePlatform, deviceName, clientVersion };
     try {
       const r = await auth.login(email, password, device, req.ip);
+      opts.auditWriter.write({ eventType: 'auth.login.success', result: 'success', actorUserId: Number(r.user.userId), sourceIp: req.ip });
       reply.send(r);
     } catch (e) {
+      opts.auditWriter.write({ eventType: 'auth.login.failed', result: 'failure', failureCode: e instanceof DomainError ? e.code : null, sourceIp: req.ip });
       sendError(reply, e);
     }
   });
@@ -83,6 +93,7 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): 
     const refreshToken = (req.body as any)?.refreshToken as string | undefined;
     try {
       const r = await auth.logout(refreshToken);
+      opts.auditWriter.write({ eventType: 'auth.logout', result: 'success', sourceIp: req.ip });
       reply.send(r);
     } catch (e) {
       sendError(reply, e);
@@ -93,13 +104,28 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOptions): 
   app.register(authScope, {
     tokenService: opts.tokenService,
     getUser: opts.getUser,
+    getSessionActive: opts.getSessionActive,
+    aud: ['extension', 'console'],
+    scope: ['account'],
     routes: async (child) => {
       child.post('/api/auth/change-password', { schema: { body: changePasswordBody } }, async (req, reply) => {
+        if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) {
+          return reply.code(403).send({ message: 'forbidden', code: 'FORBIDDEN' });
+        }
         const { currentPassword, newPassword } = req.body as any;
         const userId = (req as any).authUserId as number;
         try {
           const r = await auth.changePassword(userId, currentPassword, newPassword);
-          reply.send(r);
+          opts.auditWriter.write({
+            eventType: 'auth.password.changed',
+            result: 'success',
+            actorUserId: userId,
+            sourceIp: req.ip,
+            requestId: (req as unknown as { requestId?: string }).requestId ?? 'unknown',
+          });
+          // 改密使所有会话失效：服务端清除 refresh/csrf cookie（§4.2 L131），响应携带重登码。
+          clearSessionCookies(reply);
+          reply.send({ ...r, code: 'PASSWORD_CHANGED_RELOGIN_REQUIRED' });
         } catch (e) {
           sendError(reply, e);
         }

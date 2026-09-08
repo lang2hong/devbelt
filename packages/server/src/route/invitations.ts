@@ -2,12 +2,17 @@ import type { FastifyInstance } from 'fastify';
 import { authScope, type GetAuthUser } from '../middleware/requireAuth.js';
 import type { TokenService } from '../service/tokenService.js';
 import type { OrganizationService, OrganizationDto } from '../service/organizationService.js';
+import type { CsrfService } from '../service/csrfService.js';
+import { consoleWriteGuard, isConsoleAudience } from '../middleware/consoleWrite.js';
 import { sendError } from '../middleware/errorHandler.js';
 import { invitationTokenParam } from './schemas.js';
 
 export interface InvitationRouteOptions {
   tokenService: TokenService;
   getUser: GetAuthUser;
+  getSessionActive: (sessionId: string) => Promise<boolean>;
+  csrfService: CsrfService;
+  consoleOrigin: string;
   organizationService: OrganizationService;
 }
 
@@ -21,8 +26,14 @@ export async function invitationRoutes(app: FastifyInstance, opts: InvitationRou
   app.register(authScope, {
     tokenService: opts.tokenService,
     getUser: opts.getUser,
+    getSessionActive: opts.getSessionActive,
+    aud: ['extension', 'console'],
+    scope: ['organization'],
     routes: async (auth) => {
       auth.post('/api/organization-invitations/:token/accept', { schema: { params: invitationTokenParam } }, async (req, reply) => {
+        if (isConsoleAudience(req) && !consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) {
+          return reply.code(403).send({ message: 'forbidden', code: 'FORBIDDEN' });
+        }
         const userId = (req as any).authUserId as number;
         const token = (req.params as any).token as string;
         try {

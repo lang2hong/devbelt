@@ -234,3 +234,11 @@ export class EmailVerificationInvalidError extends DomainError {
     this.name = 'EmailVerificationInvalidError';
   }
 }
+
+/** access token 的 aud 不匹配当前端点 → 403 TOKEN_AUDIENCE_FORBIDDEN（§4.1）。 */
+export class TokenAudienceForbiddenError extends DomainError {
+  constructor() {
+    super('token audience not allowed here', 'TOKEN_AUDIENCE_FORBIDDEN');
+    this.name = 'TokenAudienceForbiddenError';
+  }
+}

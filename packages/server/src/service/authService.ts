@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'crypto';
 import { hashPassword, verifyPassword } from './password.js';
+import { sanitizeDisplayName } from './displayName.js';
 import type { TokenService } from './tokenService.js';
 import type { EmailSender } from './emailSender.js';
 import type { RateLimitService } from './rateLimitService.js';
@@ -13,6 +14,7 @@ import {
   RateLimitedError,
 } from '../domain/errors.js';
 import type { User, Device } from '../domain/entities.js';
+import { EXTENSION_SCOPES } from '../domain/enums.js';
 import type {
   IUserRepo,
   IEmailVerificationTokenRepo,
@@ -98,6 +100,7 @@ export class AuthService {
   async register(emailRaw: string, password: string, displayName?: string, ip?: string): Promise<{ ok: true }> {
     const email = normalizeEmail(emailRaw);
     this.validatePassword(password);
+    const sanitizedDisplayName = displayName !== undefined ? sanitizeDisplayName(displayName) : undefined;
 
     await this.rateLimiter.hit(`register:ip:${ip ?? 'unknown'}`, REGISTER_WINDOW_S, REGISTER_MAX);
 
@@ -110,7 +113,7 @@ export class AuthService {
       await this.registrationRepo.createAccount({
         email,
         passwordHash,
-        displayName,
+        displayName: sanitizedDisplayName,
         verificationTokenHash: tokenHash,
         verificationExpiresTime: expiresTime,
       });
@@ -238,15 +241,23 @@ export class AuthService {
 
         const deviceId = await this.upsertDevice(tx, user.id, device);
         const { token, hash, expiresAt } = this.tokenService.generateRefreshToken();
+        const familyId = randomUUID();
         await this.refreshTokenRepo.create(tx, {
           userId: user.id,
           deviceId,
           tokenHash: hash,
-          familyId: randomUUID(),
+          familyId,
           replacedByTokenId: null,
           expiresTime: expiresAt,
         });
-        const accessToken = await this.tokenService.signAccessToken(user.id);
+        const accessToken = await this.tokenService.signAccessToken({
+          userId: user.id,
+          aud: 'extension',
+          scope: [...EXTENSION_SCOPES],
+          sessionId: familyId,
+          deviceId: deviceId ?? undefined,
+          sessionVersion: user.sessionVersion,
+        });
         return { ok: true, accessToken, refreshToken: token, user: sanitize(user) };
       },
     );
@@ -312,7 +323,14 @@ export class AuthService {
           expiresTime: expiresAt,
         });
 
-        const accessToken = await this.tokenService.signAccessToken(user.id);
+        const accessToken = await this.tokenService.signAccessToken({
+          userId: user.id,
+          aud: 'extension',
+          scope: [...EXTENSION_SCOPES],
+          sessionId: rt.familyId,
+          deviceId: rt.deviceId ?? undefined,
+          sessionVersion: user.sessionVersion,
+        });
         return { kind: 'rotated', accessToken, refreshToken: token };
       },
     );
@@ -359,6 +377,9 @@ export class AuthService {
       // 锁内复核校验依据未被并发改密取代（防两个改密请求都基于同一旧 hash 通过）。
       if (user.passwordHash !== verifiedAgainstHash) throw new UnauthorizedError();
       await this.userRepo.updatePassword(tx, userId, newHash);
+      // 改密使所有存量会话失效：session_version +1 让 access token 立即失效（§4.1），
+      // 再撤销全部 refresh family 让 refresh 也无法续期。
+      await this.userRepo.incrementSessionVersion(tx, userId);
       await this.refreshTokenRepo.revokeAllForUser(tx, userId, new Date());
     });
     return { ok: true };
@@ -396,6 +417,10 @@ export class AuthService {
    */
   private async upsertDevice(exec: Queryable, userId: number, device: DeviceFields): Promise<number | null> {
     if (!device?.deviceKey) return null;
+    // 'web' 平台是控制台单槽位专用（服务端硬编码），扩展不得谎报以绕过 maxDevices（§4.1）。
+    if (device.devicePlatform === 'web') {
+      throw new ValidationError('devicePlatform "web" is reserved for the web console');
+    }
     const maxDevices = await this.maxDevices(exec, userId);
     const existing = await this.deviceRepo.findByUserAndKey(exec, userId, device.deviceKey);
     if ((!existing || existing.status !== 'active') && maxDevices > 0) {

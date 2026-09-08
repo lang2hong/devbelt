@@ -49,7 +49,7 @@ export class MysqlDeviceRepo implements IDeviceRepo {
 
   async countActive(exec: Queryable, userId: number): Promise<number> {
     const [rows] = await exec.query<any[]>(
-      "SELECT COUNT(*) AS cnt FROM devices WHERE user_id = ? AND status = 'active'",
+      "SELECT COUNT(*) AS cnt FROM devices WHERE user_id = ? AND status = 'active' AND device_platform <> 'web'",
       [userId],
     );
     return Number(rows[0]?.cnt ?? 0);
@@ -61,6 +61,14 @@ export class MysqlDeviceRepo implements IDeviceRepo {
 
   async touch(exec: Queryable, id: number, now: Date): Promise<void> {
     await exec.query('UPDATE devices SET last_used_time = ? WHERE id = ?', [now, id]);
+  }
+
+  async findActiveByUserAndPlatform(exec: Queryable, userId: number, platform: string): Promise<Device | undefined> {
+    const [rows] = await exec.query<any[]>(
+      "SELECT * FROM devices WHERE user_id = ? AND device_platform = ? AND status = 'active' ORDER BY id ASC LIMIT 1",
+      [userId, platform],
+    );
+    return rows[0] ? mapDevice(rows[0]) : undefined;
   }
 
   private async findByUserAndKeyExec(exec: Queryable, userId: number, deviceKey: string): Promise<Device | undefined> {
