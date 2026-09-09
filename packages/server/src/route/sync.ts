@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { authScope, type GetAuthUser } from '../middleware/requireAuth.js';
 import type { TokenService } from '../service/tokenService.js';
 import { sendError } from '../middleware/errorHandler.js';
-import { requestDigestOf, decodeB64Url, decodeB64UrlRange } from '../service/syncCrypto.js';
+import { requestDigestOf, decodeB64Url, decodeB64UrlRange, jcs, sha256 } from '../service/syncCrypto.js';
 import { SyncProtocolUnsupportedError } from '../domain/errors.js';
 import {
   SyncStateService,
@@ -232,10 +232,11 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         const userId = (req as any).authUserId as number;
         const body = req.body as any;
         try {
-          assertProtocolV1(body.protocolVersion);
-          reply.send(await opts.syncReset.resetAfterLoss(userId, {
-            resetToken: decodeB64Url(body.resetToken, 32, 'resetToken'),
+          // request_digest 覆盖客户端提交的 newState（JCS），completed 回放比对用。
+          reply.send(await opts.syncReset.resetAfterLossWithHandoff(userId, {
+            handoffTicket: decodeB64Url(body.handoffTicket, 32, 'handoffTicket'),
             newState: decodeNewState(body.newState),
+            requestDigest: sha256(Buffer.from(jcs({ newState: body.newState }), 'utf8')),
           }));
         } catch (e) { sendError(reply, e); }
       });

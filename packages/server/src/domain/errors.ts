@@ -234,6 +234,33 @@ export class SyncQuotaExceededError extends DomainError {
   }
 }
 
+// ── sync-reset handoff（切片 5）──
+
+/** handoff 无效 / 过期 / 撤销 / 用户不匹配 / 关联 reset token 失效 → 400 SYNC_RESET_HANDOFF_INVALID（不区分存在性）。 */
+export class SyncResetHandoffInvalidError extends DomainError {
+  constructor(message = 'sync reset handoff invalid') {
+    super(message, 'SYNC_RESET_HANDOFF_INVALID');
+    this.name = 'SyncResetHandoffInvalidError';
+  }
+}
+
+/** handoff 已 completed 但 request_digest 不同 → 409 SYNC_RESET_HANDOFF_REUSED。 */
+export class SyncResetHandoffReusedError extends DomainError {
+  constructor() {
+    super('sync reset handoff already used with a different request', 'SYNC_RESET_HANDOFF_REUSED');
+    this.name = 'SyncResetHandoffReusedError';
+  }
+}
+
+/** handoff 处于 processing（未超 60s）→ 409 SYNC_RESET_IN_PROGRESS + Retry-After:2。 */
+export class SyncResetInProgressError extends DomainError {
+  readonly retryAfterSeconds = 2;
+  constructor() {
+    super('sync reset already in progress', 'SYNC_RESET_IN_PROGRESS');
+    this.name = 'SyncResetInProgressError';
+  }
+}
+
 // ── 一次性邮件链接（mail-flow）──
 
 /** 邮箱验证 token 已被消费（邮箱已验）→ 409 EMAIL_VERIFICATION_ALREADY_CONFIRMED。 */

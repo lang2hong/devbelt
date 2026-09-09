@@ -367,19 +367,12 @@ export const syncDestroyBody = {
   },
 } as const;
 
-/** 三个不可逆确认必须为字面量 true（§7.5.1）。 */
-const confirmTrue = { type: 'boolean' as const, enum: [true] as const };
-
 export const syncResetAfterLossBody = {
   type: 'object',
-  required: ['protocolVersion', 'resetToken', 'confirmIrreversible', 'confirmDataLoss', 'confirmNoRecovery', 'newState'],
+  required: ['handoffTicket', 'newState'],
   additionalProperties: false,
   properties: {
-    protocolVersion: protocolV1,
-    resetToken: b64url(43, 43),
-    confirmIrreversible: confirmTrue,
-    confirmDataLoss: confirmTrue,
-    confirmNoRecovery: confirmTrue,
+    handoffTicket: b64url(43, 43),
     newState: syncNewState,
   },
 } as const;

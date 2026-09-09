@@ -18,6 +18,7 @@ import type {
   SyncMutationStatus,
   MailFlowType,
   MailFlowStatus,
+  SyncResetHandoffStatus,
 } from './enums.js';
 
 /**
@@ -324,6 +325,25 @@ export interface SyncResetToken {
   consumedTime: Date | null;
   revokedTime: Date | null;
   createTime: Date;
+}
+
+/** sync-reset handoff（浏览器签发、扩展消费的一次性交接 ticket；ticket_hash 只存 SHA-256）。 */
+export interface SyncResetHandoff {
+  id: number;
+  userId: number;
+  resetTokenId: number;
+  ticketHash: Buffer;
+  /** 首次最终 reset 时写入（SHA-256 of JCS({ newState })），completed 回放比对用。 */
+  requestDigest: Buffer | null;
+  resultStateDtoJson: string | null;
+  resultKeyEpoch: string | null;
+  resultStateVersion: string | null;
+  resultChangeSequence: string | null;
+  status: SyncResetHandoffStatus;
+  expiresTime: Date;
+  consumedTime: Date | null;
+  createTime: Date;
+  updateTime: Date;
 }
 
 // ── 一次性邮件链接（mail-flow）──

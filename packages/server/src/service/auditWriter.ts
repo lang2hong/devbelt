@@ -39,6 +39,9 @@ const ALLOWED_EVENT_TYPES = [
   'admin.audit.read',
   'admin.audit.export',
   'admin.role.granted',
+  'sync.reset.handoff.created',
+  'sync.reset.handoff.consumed',
+  'sync.reset.handoff.failed',
 ] as const;
 
 export type AuditEventType = (typeof ALLOWED_EVENT_TYPES)[number];

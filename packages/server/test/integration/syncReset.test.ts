@@ -9,11 +9,15 @@ import { withTransaction } from '../../src/repository/mysql/db.js';
 import { MysqlSyncStateRepo } from '../../src/repository/mysql/syncStateRepo.js';
 import { MysqlSyncRecordRepo } from '../../src/repository/mysql/syncRecordRepo.js';
 import { MysqlSyncResetTokenRepo } from '../../src/repository/mysql/syncResetTokenRepo.js';
+import { MysqlSyncResetHandoffRepo } from '../../src/repository/mysql/syncResetHandoffRepo.js';
+import { MysqlMailFlowRepo } from '../../src/repository/mysql/mailFlowRepo.js';
+import { MysqlAuditRepo } from '../../src/repository/mysql/auditRepo.js';
 import { MysqlUserRepo } from '../../src/repository/mysql/userRepo.js';
 import { MysqlRateLimitRepo } from '../../src/repository/mysql/rateLimitRepo.js';
 import { SyncResetService } from '../../src/service/syncResetService.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
 import { MemoryEmailSender } from '../../src/service/emailSender.js';
+import { AuditWriter } from '../../src/service/auditWriter.js';
 import type { SyncNewState } from '../../src/service/syncStateService.js';
 import type { PersonalSyncState } from '../../src/domain/entities.js';
 
@@ -28,7 +32,7 @@ function newState(fill = 10): SyncNewState {
     smpKdf: { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: buf(16, 2), outputBytes: 32 },
     recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: buf(16, 3), outputBytes: 32 },
     envelopeSmp: { version: '1', nonce: buf(12, fill), ct: buf(32, fill + 1), tag: buf(16, fill + 2) },
-    envelopeRecovery: { version: '1', nonce: buf(12, fill + 3), ct: buf(32, fill + 4), tag: buf(16, fill + 5) },
+    envelopeRecovery: { version: '1', nonce: buf(12, fill + 3), ct: buf(32, fill + 4), tag: buf(16, fill + 4) },
     signPub: buf(32, fill + 6), recoverSignPub: buf(32, fill + 7),
   };
 }
@@ -56,7 +60,7 @@ function uniqueEmail(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`;
 }
 
-describe.skipIf(!URL)('sync reset-after-loss (real MySQL)', () => {
+describe.skipIf(!URL)('sync reset-after-loss handoff (real MySQL)', () => {
   let pool: mysql.Pool;
   let db: MysqlDb;
 
@@ -71,19 +75,25 @@ describe.skipIf(!URL)('sync reset-after-loss (real MySQL)', () => {
   function makeSvc() {
     const stateRepo = new MysqlSyncStateRepo(() => db);
     const recordRepo = new MysqlSyncRecordRepo();
-    const resetTokenRepo = new MysqlSyncResetTokenRepo();
+    const resetTokenRepo = new MysqlSyncResetTokenRepo(() => db);
+    const handoffRepo = new MysqlSyncResetHandoffRepo(() => db);
+    const mailFlowRepo = new MysqlMailFlowRepo(() => db);
     const userRepo = new MysqlUserRepo(() => db);
     const emailSender = new MemoryEmailSender();
     const rateLimiter = new RateLimitService(new MysqlRateLimitRepo(() => db), false);
+    const auditWriter = new AuditWriter(new MysqlAuditRepo(() => db));
     const svc = new SyncResetService(
       stateRepo, recordRepo, resetTokenRepo, userRepo,
       (fn) => withTransaction(db, fn), emailSender, rateLimiter,
+      mailFlowRepo, handoffRepo, auditWriter,
     );
-    return { stateRepo, recordRepo, resetTokenRepo, svc };
+    return { stateRepo, recordRepo, resetTokenRepo, mailFlowRepo, svc };
   }
 
-  async function seed(u: ReturnType<typeof makeSvc>, userId: number, raw: Buffer): Promise<void> {
-    await withTransaction(db, async (tx) => {
+  /** 建 state + record + reset token + sync-reset mail_flow，签发 handoff 得到 ticket。 */
+  async function seed(userId: number, raw: Buffer): Promise<{ ticket: Buffer; tokenId: number }> {
+    const u = makeSvc();
+    const tokenId = await withTransaction(db, async (tx) => {
       await u.stateRepo.create(tx, makeState(userId, '1'));
       await u.recordRepo.create(tx, {
         userId, keyEpoch: '1', recordId: buf(16, 70),
@@ -91,48 +101,71 @@ describe.skipIf(!URL)('sync reset-after-loss (real MySQL)', () => {
         nonce: buf(12, 71), ciphertext: buf(50, 72), tag: buf(16, 73),
         version: '1', changeSequence: '1',
       });
-      await u.resetTokenRepo.create(tx, { userId, tokenHash: sha(raw), expiresTime: new Date(Date.now() + 3600_000) });
+      const token = await u.resetTokenRepo.create(tx, { userId, tokenHash: sha(raw), expiresTime: new Date(Date.now() + 3600_000) });
+      return token.id;
     });
+
+    const nonce = Buffer.alloc(32, 7).toString('base64url');
+    await u.mailFlowRepo.create({
+      type: 'sync-reset',
+      targetTokenHash: sha(raw),
+      targetRecordId: tokenId,
+      userId,
+      nonceHash: sha(Buffer.from(nonce, 'utf8')),
+      expiresTime: new Date(Date.now() + 600_000),
+    });
+    const { openUri } = await u.svc.createHandoff(nonce, userId);
+    return { ticket: Buffer.from(openUri.split('handoffTicket=')[1], 'base64url'), tokenId };
   }
 
   it('rotates epoch and tombstones records on real MySQL', async () => {
     const u = makeSvc();
     const userId = await makeUser(db, uniqueEmail('sr'));
     const raw = buf(32, 90);
-    await seed(u, userId, raw);
+    const { ticket } = await seed(userId, raw);
 
-    const res = await u.svc.resetAfterLoss(userId, { resetToken: raw, newState: newState() });
-    expect(res.keyEpoch).toBe('2');
+    const dto = await u.svc.resetAfterLossWithHandoff(userId, { handoffTicket: ticket, newState: newState(), requestDigest: buf(32, 0xab) });
+    expect(dto.keyEpoch).toBe('2');
 
     const state = await u.stateRepo.findByUserId(userId);
     expect(state?.keyEpoch).toBe('2');
     expect(state?.stateVersion).toBe('1');
-    // change_sequence 从 1 起、tombstone 一条 → 2
     expect(state?.changeSequence).toBe('2');
     const activeCount = await withTransaction(db, (tx) => u.recordRepo.countActive(tx, userId, '1'));
     expect(activeCount.count).toBe(0);
   });
 
-  it('two concurrent resetAfterLoss on the same token yield exactly one success', async () => {
+  it('two concurrent consumer calls with the same ticket and digest both return the same StateDto', async () => {
     const u = makeSvc();
     const userId = await makeUser(db, uniqueEmail('scc'));
     const raw = buf(32, 91);
-    await seed(u, userId, raw);
+    const { ticket } = await seed(userId, raw);
 
-    const results = await Promise.allSettled([
-      u.svc.resetAfterLoss(userId, { resetToken: raw, newState: newState() }),
-      u.svc.resetAfterLoss(userId, { resetToken: raw, newState: newState() }),
+    const results = await Promise.all([
+      u.svc.resetAfterLossWithHandoff(userId, { handoffTicket: ticket, newState: newState(), requestDigest: buf(32, 0xab) }),
+      u.svc.resetAfterLossWithHandoff(userId, { handoffTicket: ticket, newState: newState(), requestDigest: buf(32, 0xab) }),
     ]);
-    const fulfilled = results.filter((r) => r.status === 'fulfilled');
-    const rejected = results.filter((r) => r.status === 'rejected');
-    expect(fulfilled).toHaveLength(1);
-    expect(rejected).toHaveLength(1);
-    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({
-      code: 'VALIDATION_FAILED', message: 'reset token invalid',
-    });
+    expect(results[0]).toEqual(results[1]);
+    expect(results[0].keyEpoch).toBe('2');
 
+    // 状态只旋转一次，旧 records 只 tombstone 一次。
     const state = await u.stateRepo.findByUserId(userId);
     expect(state?.keyEpoch).toBe('2');
     expect(state?.stateVersion).toBe('1');
+    expect(state?.changeSequence).toBe('2');
+    const activeCount = await withTransaction(db, (tx) => u.recordRepo.countActive(tx, userId, '1'));
+    expect(activeCount.count).toBe(0);
+  });
+
+  it('a different digest after completion returns SYNC_RESET_HANDOFF_REUSED', async () => {
+    const u = makeSvc();
+    const userId = await makeUser(db, uniqueEmail('srd'));
+    const raw = buf(32, 92);
+    const { ticket } = await seed(userId, raw);
+
+    await u.svc.resetAfterLossWithHandoff(userId, { handoffTicket: ticket, newState: newState(), requestDigest: buf(32, 0xab) });
+    await expect(
+      u.svc.resetAfterLossWithHandoff(userId, { handoffTicket: ticket, newState: newState(), requestDigest: buf(32, 0xcd) }),
+    ).rejects.toMatchObject({ code: 'SYNC_RESET_HANDOFF_REUSED' });
   });
 });

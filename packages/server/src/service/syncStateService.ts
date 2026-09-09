@@ -336,7 +336,7 @@ export class SyncStateService {
   }
 }
 
-function toDto(s: PersonalSyncState): StateDto {
+export function toDto(s: Omit<PersonalSyncState, 'createTime' | 'updateTime'>): StateDto {
   return {
     protocolVersion: s.protocolVersion,
     cipherSuite: s.cipherSuite,

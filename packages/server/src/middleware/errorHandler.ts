@@ -8,6 +8,7 @@ import {
   SyncVersionConflictError,
   SyncQuotaExceededError,
   SubscriptionVersionConflictError,
+  SyncResetInProgressError,
 } from '../domain/errors.js';
 
 /** 构造 DomainError 的标准响应体；版本/配额/epoch 冲突附带对应上下文字段。 */
@@ -40,6 +41,9 @@ export function sendError(reply: FastifyReply, e: unknown): void {
   if (e instanceof IdempotencyInProgressError) {
     reply.header('Retry-After', e.retryAfterSeconds);
   }
+  if (e instanceof SyncResetInProgressError) {
+    reply.header('Retry-After', e.retryAfterSeconds);
+  }
   reply.code(errorStatus(e.code)).send(domainErrorBody(e));
 }
 
@@ -61,6 +65,7 @@ export function registerErrorHandler(app: FastifyInstance): void {
     if (err instanceof DomainError) {
       if (err instanceof RateLimitedError) reply.header('Retry-After', err.retryAfterSeconds);
       if (err instanceof IdempotencyInProgressError) reply.header('Retry-After', err.retryAfterSeconds);
+      if (err instanceof SyncResetInProgressError) reply.header('Retry-After', err.retryAfterSeconds);
       reply.code(errorStatus(err.code)).send(domainErrorBody(err));
       return;
     }
@@ -118,6 +123,8 @@ export function errorStatus(code: string): number {
     case 'SYNC_VERSION_CONFLICT':
     case 'SYNC_NONCE_REUSED':
     case 'SYNC_QUOTA_EXCEEDED':
+    case 'SYNC_RESET_HANDOFF_REUSED':
+    case 'SYNC_RESET_IN_PROGRESS':
       return 409;
     case 'IDEMPOTENCY_KEY_REUSED':
     case 'IDEMPOTENCY_IN_PROGRESS':
@@ -129,6 +136,7 @@ export function errorStatus(code: string): number {
       return 400;
     case 'SYNC_NOT_INITIALIZED':
     case 'SYNC_PROTOCOL_UNSUPPORTED':
+    case 'SYNC_RESET_HANDOFF_INVALID':
       return 400;
     case 'EMAIL_VERIFICATION_INVALID':
       return 401;

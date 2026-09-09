@@ -8,6 +8,7 @@ import {
 import type {
   IMailFlowRepo,
   IEmailVerificationTokenRepo,
+  ISyncResetTokenRepo,
   IUserRepo,
   IOrganizationInvitationRepo,
   IOrganizationRepo,
@@ -18,6 +19,7 @@ import type { MailFlow } from '../domain/entities.js';
 import type { OrganizationRole } from '../domain/enums.js';
 import type { TxRunner, Queryable } from '../repository/mysql/db.js';
 import type { RateLimitService } from './rateLimitService.js';
+import { decodeB64Url } from './syncCrypto.js';
 
 /** 邮件流短时有效（§5.1：签发后 10 分钟）。 */
 const MAIL_FLOW_TTL_MS = 10 * 60 * 1000;
@@ -52,19 +54,23 @@ export type AcceptInvitationResult =
   | { kind: 'already-accepted'; organization: AcceptInvitationOrganization };
 
 /**
- * 一次性邮件链接服务（P3 §5）：verify-email（切片 1）与 accept-invitation（切片 3）。
+ * 一次性邮件链接服务（P3 §5）：verify-email（切片 1）、accept-invitation（切片 3）与
+ * sync-reset 认领（切片 5）。
  *
- * - claim：校验 type/token 形态，幂等认领（同 nonce 复用），签发 opaque nonce，按 IP + token 限流。
+ * - claim：校验 type/token 形态，幂等认领（同 nonce 复用），签发 opaque nonce，按 IP + token 限流；
+ *   verify-email/accept-invitation/sync-reset 三种类型各自解析对应 token 表的 target_record_id。
  * - verifyEmail：以 nonce 定位 mail_flow，事务内消费验证 token + 标记邮箱已验。
  * - bindFlowToUser：登录成功后把 mail_flow 绑定到 authUserId（§5.3/§5.4）。
  * - acceptInvitation：console-only 消费，固定锁序（§5.3）。
  *
- * 不认领 sync-reset token、不签发 handoff、不调用同步 API、不处理 newState（切片 5）。
+ * 只认领并定位 sync-reset token（不签发 handoff、不调用同步 API、不处理 newState；
+ * handoff 签发与最终 reset 在 SyncResetService，见 §5.4/P2 交接协议）。
  */
 export class LinkFlowService {
   constructor(
     private readonly mailFlowRepo: IMailFlowRepo,
     private readonly emailVerificationTokenRepo: IEmailVerificationTokenRepo,
+    private readonly syncResetTokenRepo: ISyncResetTokenRepo,
     private readonly userRepo: IUserRepo,
     private readonly invitationRepo: IOrganizationInvitationRepo,
     private readonly organizationRepo: IOrganizationRepo,
@@ -75,7 +81,7 @@ export class LinkFlowService {
   ) {}
 
   async claim(args: { type: string; token: string; ip?: string; existingNonce?: string }): Promise<LinkFlowClaimResult> {
-    if (args.type !== 'verify-email' && args.type !== 'accept-invitation') {
+    if (args.type !== 'verify-email' && args.type !== 'accept-invitation' && args.type !== 'sync-reset') {
       throw new ValidationError('unsupported link flow type');
     }
     if (!TOKEN_PATTERN.test(args.token)) {
@@ -108,15 +114,20 @@ export class LinkFlowService {
     }
 
     // 解析目标 token 表行 id：类型决定对应 token 表（验证 → email_verification_tokens，
-    // 邀请 → organization_invitations）。未知/过期 token 无法解析时 targetRecordId 为 null，
-    // 消费阶段统一失效。
+    // 邀请 → organization_invitations，同步重置 → personal_sync_reset_tokens）。未知/过期
+    // token 无法解析时 targetRecordId 为 null，消费阶段统一失效。
     let targetRecordId: number | null = null;
     if (args.type === 'verify-email') {
       const tokenRecord = await this.emailVerificationTokenRepo.findByHash(tokenHashHex);
       targetRecordId = tokenRecord ? tokenRecord.id : null;
-    } else {
+    } else if (args.type === 'accept-invitation') {
       const invitation = await this.invitationRepo.findByTokenHash(tokenHashHex);
       targetRecordId = invitation ? invitation.id : null;
+    } else {
+      // sync-reset：邮件链接 token 是 32 字节 raw 的 base64url；token_hash 存 SHA-256(raw)。
+      const raw = decodeB64Url(args.token, 32, 'token');
+      const resetToken = await this.syncResetTokenRepo.findByHash(sha256(raw));
+      targetRecordId = resetToken ? resetToken.id : null;
     }
 
     const nonce = randomBytes(32).toString('base64url');

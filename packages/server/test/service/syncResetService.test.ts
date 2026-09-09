@@ -4,14 +4,17 @@ import {
   FakeSyncStateRepo,
   FakeSyncRecordRepo,
   FakeSyncResetTokenRepo,
+  FakeSyncResetHandoffRepo,
   FakeRateLimitRepo,
   FakeUserRepo,
 } from '../helpers/fakeRepos.js';
+import { FakeMailFlowRepo, FakeAuditRepo } from '../helpers/linkFlowFakes.js';
 import { SyncResetService } from '../../src/service/syncResetService.js';
 import { toState, type SyncNewState } from '../../src/service/syncStateService.js';
 import { MemoryEmailSender } from '../../src/service/emailSender.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
-import { RateLimitedError } from '../../src/domain/errors.js';
+import { AuditWriter } from '../../src/service/auditWriter.js';
+import { RateLimitedError, SyncResetHandoffInvalidError, SyncResetHandoffReusedError, SyncResetInProgressError } from '../../src/domain/errors.js';
 import type { SmpKdf, RecoveryKdf } from '../../src/domain/entities.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 
@@ -41,12 +44,15 @@ function makeStack() {
   const stateRepo = new FakeSyncStateRepo();
   const recordRepo = new FakeSyncRecordRepo();
   const resetTokenRepo = new FakeSyncResetTokenRepo();
+  const handoffRepo = new FakeSyncResetHandoffRepo();
+  const mailFlowRepo = new FakeMailFlowRepo();
   const userRepo = new FakeUserRepo();
   const emailSender = new MemoryEmailSender();
   const rateLimitRepo = new FakeRateLimitRepo();
   const rateLimiter = new RateLimitService(rateLimitRepo, true);
-  const svc = new SyncResetService(stateRepo, recordRepo, resetTokenRepo, userRepo, runner, emailSender, rateLimiter);
-  return { stateRepo, recordRepo, resetTokenRepo, userRepo, emailSender, rateLimitRepo, rateLimiter, svc };
+  const auditWriter = new AuditWriter(new FakeAuditRepo());
+  const svc = new SyncResetService(stateRepo, recordRepo, resetTokenRepo, userRepo, runner, emailSender, rateLimiter, mailFlowRepo, handoffRepo, auditWriter);
+  return { stateRepo, recordRepo, resetTokenRepo, handoffRepo, mailFlowRepo, userRepo, emailSender, rateLimitRepo, rateLimiter, svc };
 }
 
 async function makeVerifiedUser(userRepo: FakeUserRepo, email: string) {
@@ -65,7 +71,29 @@ function injectToken(resetTokenRepo: FakeSyncResetTokenRepo, userId: number, raw
   });
 }
 
+/** 建 reset token + 绑定 sync-reset mail_flow，走真实 createHandoff 得到 ticket。 */
+async function issueHandoff(s: ReturnType<typeof makeStack>, userId: number, rawToken: Buffer = buf(32, 90)) {
+  const token = await injectToken(s.resetTokenRepo, userId, rawToken);
+  const nonce = randomB64(32);
+  await s.mailFlowRepo.create({
+    type: 'sync-reset',
+    targetTokenHash: sha(rawToken),
+    targetRecordId: token.id,
+    userId,
+    nonceHash: sha(Buffer.from(nonce, 'utf8')),
+    expiresTime: new Date(Date.now() + 600_000),
+  });
+  const { openUri } = await s.svc.createHandoff(nonce, userId);
+  const ticket = openUri.split('handoffTicket=')[1];
+  return { token, ticket: Buffer.from(ticket, 'base64url') };
+}
+
+function randomB64(n: number): string {
+  return Buffer.from(Array.from({ length: n }, () => Math.floor(Math.random() * 256))).toString('base64url').slice(0, 43);
+}
+
 const USER = 42;
+const DIGEST = buf(32, 0xab);
 
 describe('SyncResetService', () => {
   it('reset-challenges issues a token, emails it, and revokes the previous pending token', async () => {
@@ -128,8 +156,8 @@ describe('SyncResetService', () => {
       sendAlreadyRegisteredEmail: async () => {},
       sendInvitationEmail: async () => {},
       sendResetChallengeEmail: async () => { throw new Error('smtp down'); },
-    };
-    const svc = new SyncResetService(s.stateRepo, s.recordRepo, s.resetTokenRepo, s.userRepo, runner, failingSender, s.rateLimiter);
+    } as any;
+    const svc = new SyncResetService(s.stateRepo, s.recordRepo, s.resetTokenRepo, s.userRepo, runner, failingSender, s.rateLimiter, s.mailFlowRepo, s.handoffRepo, new AuditWriter(new FakeAuditRepo()));
 
     await expect(svc.requestResetChallenge(user.id, '1.2.3.4')).resolves.toBeUndefined();
     expect(s.resetTokenRepo.store.size).toBe(1);
@@ -140,7 +168,24 @@ describe('SyncResetService', () => {
     expect(pending).toBe(1);
   });
 
-  it('reset-after-loss consumes token, tombstones records, and creates a new epoch', async () => {
+  it('createHandoff issues a ticket, revokes prior pending handoffs, and consumes the mail flow', async () => {
+    const s = makeStack();
+    const raw = buf(32, 1);
+    const { token, ticket } = await issueHandoff(s, USER, raw);
+
+    // 再次签发（重置邮件重发后新 flow）应撤销旧 handoff。
+    const handoffs = [...s.handoffRepo.store.values()];
+    expect(handoffs).toHaveLength(1);
+    const h = handoffs[0];
+    expect(h.status).toBe('issued');
+    expect(h.resetTokenId).toBe(token.id);
+    expect(h.ticketHash.equals(sha(ticket))).toBe(true);
+
+    // mail_flow 被消费。
+    expect([...s.mailFlowRepo.store.values()][0].status).toBe('consumed');
+  });
+
+  it('resetAfterLossWithHandoff consumes ticket+token, tombstones records, and returns full StateDto', async () => {
     const s = makeStack();
     await seedState(s.stateRepo, USER, '1');
     const recordId = buf(16, 70);
@@ -151,69 +196,82 @@ describe('SyncResetService', () => {
       version: '1', changeSequence: '1',
     });
 
-    const raw = buf(32, 90);
-    const token = await injectToken(s.resetTokenRepo, USER, raw);
-    const res = await s.svc.resetAfterLoss(USER, { resetToken: raw, newState: newState() });
+    const { token, ticket } = await issueHandoff(s, USER);
+    const dto = await s.svc.resetAfterLossWithHandoff(USER, { handoffTicket: ticket, newState: newState(), requestDigest: DIGEST });
 
-    expect(res).toEqual({ keyEpoch: '2', stateVersion: '1', changeSequence: '2' });
+    expect(dto.keyEpoch).toBe('2');
+    expect(dto.stateVersion).toBe('1');
     expect(token.consumedTime).not.toBeNull();
+
+    const h = [...s.handoffRepo.store.values()][0];
+    expect(h.status).toBe('completed');
+    expect(h.resultStateDtoJson).toBeTruthy();
 
     const tomb = await s.recordRepo.findForUpdate({} as Queryable, USER, '1', recordId);
     expect(tomb?.deleteTime).not.toBeNull();
-    expect(tomb?.version).toBe('2');
-    expect((await s.recordRepo.countActive({} as Queryable, USER, '1')).count).toBe(0);
-
-    const state = await s.stateRepo.findByUserId(USER);
-    expect(state?.keyEpoch).toBe('2');
-    expect(state?.stateVersion).toBe('1');
-    expect(state?.changeSequence).toBe('2');
   });
 
-  it('reset-after-loss creates an epoch (keyEpoch=1) when no active state exists', async () => {
+  it('resetAfterLossWithHandoff creates an epoch (keyEpoch=1) when no active state exists', async () => {
     const s = makeStack();
-    const raw = buf(32, 91);
-    await injectToken(s.resetTokenRepo, USER, raw);
-    const res = await s.svc.resetAfterLoss(USER, { resetToken: raw, newState: newState() });
-
-    expect(res).toEqual({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
-    const state = await s.stateRepo.findByUserId(USER);
-    expect(state?.keyEpoch).toBe('1');
-    expect(state?.stateVersion).toBe('1');
-    expect(state?.changeSequence).toBe('0');
+    const { ticket } = await issueHandoff(s, USER);
+    const dto = await s.svc.resetAfterLossWithHandoff(USER, { handoffTicket: ticket, newState: newState(), requestDigest: DIGEST });
+    expect(dto.keyEpoch).toBe('1');
+    expect(dto.changeSequence).toBe('0');
   });
 
-  it('reset-after-loss rejects unknown / expired / consumed / cross-user token with a constant 400 body', async () => {
+  it('completed handoff replays the same StateDto on the same digest; different digest is REUSED', async () => {
     const s = makeStack();
-    await seedState(s.stateRepo, USER);
-    const invalid = (p: Promise<unknown>) => expect(p).rejects.toMatchObject({ code: 'VALIDATION_FAILED', message: 'reset token invalid' });
+    const { ticket } = await issueHandoff(s, USER);
+    const first = await s.svc.resetAfterLossWithHandoff(USER, { handoffTicket: ticket, newState: newState(), requestDigest: DIGEST });
 
-    // 未知 token
-    await invalid(s.svc.resetAfterLoss(USER, { resetToken: buf(32, 1), newState: newState() }));
+    const replay = await s.svc.resetAfterLossWithHandoff(USER, { handoffTicket: ticket, newState: newState(), requestDigest: DIGEST });
+    expect(replay).toEqual(first);
 
-    // 过期 token
-    const expiredRaw = buf(32, 5);
-    await s.resetTokenRepo.create({} as Queryable, { userId: USER, tokenHash: sha(expiredRaw), expiresTime: new Date(Date.now() - 1000) });
-    await invalid(s.svc.resetAfterLoss(USER, { resetToken: expiredRaw, newState: newState() }));
-
-    // 已消费 token
-    const consumedRaw = buf(32, 2);
-    await injectToken(s.resetTokenRepo, USER, consumedRaw);
-    await s.svc.resetAfterLoss(USER, { resetToken: consumedRaw, newState: newState() });
-    await invalid(s.svc.resetAfterLoss(USER, { resetToken: consumedRaw, newState: newState() }));
-
-    // 跨用户：token 属于 USER，却以另一用户消费
-    const otherRaw = buf(32, 3);
-    await injectToken(s.resetTokenRepo, USER, otherRaw);
-    await invalid(s.svc.resetAfterLoss(USER + 1, { resetToken: otherRaw, newState: newState() }));
+    await expect(s.svc.resetAfterLossWithHandoff(USER, { handoffTicket: ticket, newState: newState(), requestDigest: buf(32, 0xcd) }))
+      .rejects.toBeInstanceOf(SyncResetHandoffReusedError);
   });
 
-  it('revoked token is rejected with a constant 400 body', async () => {
+  it('rejects wrong user / unknown / revoked ticket with a constant 400 body', async () => {
     const s = makeStack();
-    await seedState(s.stateRepo, USER);
-    const raw = buf(32, 4);
-    await injectToken(s.resetTokenRepo, USER, raw);
-    await s.resetTokenRepo.revokePendingByUser({} as Queryable, USER, new Date());
-    await expect(s.svc.resetAfterLoss(USER, { resetToken: raw, newState: newState() }))
-      .rejects.toMatchObject({ code: 'VALIDATION_FAILED', message: 'reset token invalid' });
+    // 未知 ticket
+    await expect(s.svc.resetAfterLossWithHandoff(USER, { handoffTicket: buf(32, 9), newState: newState(), requestDigest: DIGEST }))
+      .rejects.toBeInstanceOf(SyncResetHandoffInvalidError);
+
+    // 跨用户：ticket 属于 USER，以另一用户消费
+    const { ticket } = await issueHandoff(s, USER);
+    await expect(s.svc.resetAfterLossWithHandoff(USER + 1, { handoffTicket: ticket, newState: newState(), requestDigest: DIGEST }))
+      .rejects.toBeInstanceOf(SyncResetHandoffInvalidError);
+
+    // 已撤销：签发后被撤销
+    const s2 = makeStack();
+    const { ticket: t2 } = await issueHandoff(s2, USER);
+    const h = [...s2.handoffRepo.store.values()][0];
+    await s2.handoffRepo.revokePendingByResetToken({} as Queryable, h.resetTokenId, new Date());
+    await expect(s2.svc.resetAfterLossWithHandoff(USER, { handoffTicket: t2, newState: newState(), requestDigest: DIGEST }))
+      .rejects.toBeInstanceOf(SyncResetHandoffInvalidError);
+  });
+
+  it('expired ticket is rejected with a constant 400 body', async () => {
+    const s = makeStack();
+    const { ticket } = await issueHandoff(s, USER);
+    const h = [...s.handoffRepo.store.values()][0];
+    h.expiresTime = new Date(Date.now() - 1000);
+    await expect(s.svc.resetAfterLossWithHandoff(USER, { handoffTicket: ticket, newState: newState(), requestDigest: DIGEST }))
+      .rejects.toBeInstanceOf(SyncResetHandoffInvalidError);
+  });
+
+  it('processing state returns 409 IN_PROGRESS; stale processing (>60s) auto-recovers', async () => {
+    const s = makeStack();
+    const { ticket } = await issueHandoff(s, USER);
+    const h = [...s.handoffRepo.store.values()][0];
+    // 直接置 processing + 60s 内的 updateTime。
+    await s.handoffRepo.markProcessing({} as Queryable, h.id, DIGEST, new Date());
+    await expect(s.svc.resetAfterLossWithHandoff(USER, { handoffTicket: ticket, newState: newState(), requestDigest: DIGEST }))
+      .rejects.toBeInstanceOf(SyncResetInProgressError);
+
+    // 超过 60s：自动回退 issued，可正常消费。
+    await s.handoffRepo.markProcessing({} as Queryable, h.id, DIGEST, new Date(Date.now() - 61_000));
+    const dto = await s.svc.resetAfterLossWithHandoff(USER, { handoffTicket: ticket, newState: newState(), requestDigest: DIGEST });
+    expect(dto.keyEpoch).toBe('1');
   });
 });

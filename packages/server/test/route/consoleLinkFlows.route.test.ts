@@ -20,6 +20,7 @@ import {
   FakeOrganizationSubscriptionRepo,
   FakeMembershipRepo,
   FakeInvitationRepo,
+  FakeSyncResetTokenRepo,
 } from '../helpers/fakeRepos.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 
@@ -31,7 +32,13 @@ function sha256hex(input: string): string {
   return createHash('sha256').update(input).digest('hex');
 }
 
-async function build(serviceOverride?: unknown) {
+interface BuildOpts {
+  serviceOverride?: unknown;
+  createSyncResetHandoff?: (nonce: string, userId: number) => Promise<{ openUri: string; expiresTime: string }>;
+  rateLimit?: boolean;
+}
+
+async function build(opts: BuildOpts = {}) {
   const app = Fastify({ logger: false });
   registerErrorHandler(app);
   await app.register(requestId);
@@ -43,12 +50,12 @@ async function build(serviceOverride?: unknown) {
   const membershipRepo = new FakeMembershipRepo(userRepo, orgRepo);
   const invitationRepo = new FakeInvitationRepo(membershipRepo);
   const subscriptionRepo = new FakeOrganizationSubscriptionRepo();
-  const rateLimiter = new RateLimitService(new FakeRateLimitRepo(), false);
+  const rateLimiter = new RateLimitService(new FakeRateLimitRepo(), opts.rateLimit === true);
   const realService = new LinkFlowService(
-    mailFlowRepo, tokenRepo, userRepo, invitationRepo, orgRepo, subscriptionRepo, membershipRepo,
+    mailFlowRepo, tokenRepo, new FakeSyncResetTokenRepo(), userRepo, invitationRepo, orgRepo, subscriptionRepo, membershipRepo,
     async (fn) => fn({} as Queryable), rateLimiter,
   );
-  const linkFlowService = (serviceOverride ?? realService) as LinkFlowService;
+  const linkFlowService = (opts.serviceOverride ?? realService) as LinkFlowService;
   const auditRepo = new FakeAuditRepo();
 
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
@@ -65,6 +72,7 @@ async function build(serviceOverride?: unknown) {
     auditWriter: new AuditWriter(auditRepo),
     rateLimiter,
     consoleOrigin: ORIGIN,
+    createSyncResetHandoff: opts.createSyncResetHandoff ?? (async () => ({ openUri: 'vscode://dbclient.sync/reset-after-loss?handoffTicket=test', expiresTime: new Date().toISOString() })),
   });
   await app.ready();
   return { app, tokenService, csrfService, userRepo, orgRepo, membershipRepo, invitationRepo, subscriptionRepo, linkFlowService, auditRepo, mailFlowRepo };
@@ -248,10 +256,12 @@ describe('console link-flow accept-invitation route', () => {
 
   it('keeps the cookie on a 5xx service failure so the client can retry', async () => {
     const b = await build({
-      acceptInvitation: async () => {
-        throw new Error('db unavailable');
+      serviceOverride: {
+        acceptInvitation: async () => {
+          throw new Error('db unavailable');
+        },
+        bindFlowToUser: async () => {},
       },
-      bindFlowToUser: async () => {},
     });
     const user = await b.userRepo.create('retry@b.com', 'hash', 'R');
     await b.userRepo.markEmailVerified({} as Queryable, user.id, new Date());
@@ -267,6 +277,88 @@ describe('console link-flow accept-invitation route', () => {
     expect(res.statusCode).toBe(500);
     const cleared = setCookies(res).some((c) => c.startsWith(`${linkFlowCookieName()}=`) && c.includes('Max-Age=0'));
     expect(cleared).toBe(false);
+    await b.app.close();
+  });
+});
+
+describe('console link-flow create-sync-reset-handoff route', () => {
+  it('returns openUri for a console session with CSRF + mail-flow cookie', async () => {
+    const b = await build({
+      createSyncResetHandoff: async () => ({ openUri: 'vscode://dbclient.sync/reset-after-loss?handoffTicket=abc', expiresTime: '2026-09-09T00:00:00.000Z' }),
+    });
+    const user = await b.userRepo.create('sr@b.com', 'hash', 'S');
+    await b.userRepo.markEmailVerified({} as Queryable, user.id, new Date());
+    const token = await consoleToken(b.tokenService, user.id);
+    const csrf = b.csrfService.issue(SESSION);
+
+    const res = await b.app.inject({
+      method: 'POST',
+      url: '/api/console/link-flows/create-sync-reset-handoff',
+      headers: headersFor('N'.repeat(43), token, csrf),
+      payload: {},
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().openUri).toBe('vscode://dbclient.sync/reset-after-loss?handoffTicket=abc');
+    expect(res.json().expiresTime).toBe('2026-09-09T00:00:00.000Z');
+    await b.app.close();
+  });
+
+  it('rejects a missing cookie with 400 and clears the cookie', async () => {
+    const b = await build();
+    const user = await b.userRepo.create('sr-missing@b.com', 'hash', 'M');
+    await b.userRepo.markEmailVerified({} as Queryable, user.id, new Date());
+    const token = await consoleToken(b.tokenService, user.id);
+    const csrf = b.csrfService.issue(SESSION);
+
+    const res = await b.app.inject({
+      method: 'POST',
+      url: '/api/console/link-flows/create-sync-reset-handoff',
+      headers: headersFor(undefined, token, csrf),
+      payload: {},
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('SYNC_RESET_HANDOFF_INVALID');
+    const cleared = setCookies(res).some((c) => c.startsWith(`${linkFlowCookieName()}=`) && c.includes('Max-Age=0'));
+    expect(cleared).toBe(true);
+    await b.app.close();
+  });
+
+  it('rejects a request without CSRF/origin with 403 FORBIDDEN', async () => {
+    const b = await build();
+    const user = await b.userRepo.create('sr-csrf@b.com', 'hash', 'C');
+    await b.userRepo.markEmailVerified({} as Queryable, user.id, new Date());
+    const token = await consoleToken(b.tokenService, user.id);
+
+    const res = await b.app.inject({
+      method: 'POST',
+      url: '/api/console/link-flows/create-sync-reset-handoff',
+      headers: { authorization: `Bearer ${token}`, accept: 'application/json' },
+      payload: {},
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe('FORBIDDEN');
+    await b.app.close();
+  });
+
+  it('rate-limits to 3 per 15min per session (429 on 4th attempt)', async () => {
+    const b = await build({ rateLimit: true });
+    const user = await b.userRepo.create('sr-rl@b.com', 'hash', 'R');
+    await b.userRepo.markEmailVerified({} as Queryable, user.id, new Date());
+    const token = await consoleToken(b.tokenService, user.id);
+    const csrf = b.csrfService.issue(SESSION);
+
+    const post = () => b.app.inject({
+      method: 'POST',
+      url: '/api/console/link-flows/create-sync-reset-handoff',
+      headers: headersFor(undefined, token, csrf),
+      payload: {},
+    });
+    for (let i = 0; i < 3; i++) {
+      const res = await post();
+      expect(res.statusCode).toBe(400); // 缺 cookie，但限流计数已发生
+    }
+    const res = await post();
+    expect(res.statusCode).toBe(429);
     await b.app.close();
   });
 });

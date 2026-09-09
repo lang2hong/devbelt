@@ -27,6 +27,7 @@ import { MysqlSyncRecordRepo } from './repository/mysql/syncRecordRepo.js';
 import { MysqlSyncMutationRepo } from './repository/mysql/syncMutationRepo.js';
 import { MysqlSyncNonceRepo } from './repository/mysql/syncNonceRepo.js';
 import { MysqlSyncResetTokenRepo } from './repository/mysql/syncResetTokenRepo.js';
+import { MysqlSyncResetHandoffRepo } from './repository/mysql/syncResetHandoffRepo.js';
 import { TokenService } from './service/tokenService.js';
 import { AuthService } from './service/authService.js';
 import { OrganizationService } from './service/organizationService.js';
@@ -134,7 +135,8 @@ export async function createApp() {
   const syncRecordRepo = new MysqlSyncRecordRepo();
   const syncMutationRepo = new MysqlSyncMutationRepo();
   const syncNonceRepo = new MysqlSyncNonceRepo();
-  const syncResetTokenRepo = new MysqlSyncResetTokenRepo();
+  const syncResetTokenRepo = new MysqlSyncResetTokenRepo(getMysql);
+  const syncResetHandoffRepo = new MysqlSyncResetHandoffRepo(getMysql);
   const mailFlowRepo = new MysqlMailFlowRepo(getMysql);
   const auditRepo = new MysqlAuditRepo(getMysql);
   const idempotencyReceiptRepo = new MysqlIdempotencyReceiptRepo(getMysql);
@@ -189,6 +191,8 @@ export async function createApp() {
     personalSubscriptionRepo,
     (fn) => withTransaction(app.mysql, fn),
   );
+  const csrfService = new CsrfService(deriveCsrfKey());
+  const auditWriter = new AuditWriter(auditRepo, (msg, data) => app.log.warn({ data }, msg));
   const syncResetService = new SyncResetService(
     syncStateRepo,
     syncRecordRepo,
@@ -197,13 +201,15 @@ export async function createApp() {
     (fn) => withTransaction(app.mysql, fn),
     emailSender,
     rateLimiter,
+    mailFlowRepo,
+    syncResetHandoffRepo,
+    auditWriter,
   );
-  const csrfService = new CsrfService(deriveCsrfKey());
-  const auditWriter = new AuditWriter(auditRepo, (msg, data) => app.log.warn({ data }, msg));
   const idempotencyService = new IdempotencyService(idempotencyReceiptRepo, (fn) => withTransaction(app.mysql, fn));
   const linkFlowService = new LinkFlowService(
     mailFlowRepo,
     emailVerificationTokenRepo,
+    syncResetTokenRepo,
     userRepo,
     invitationRepo,
     organizationRepo,
@@ -330,6 +336,7 @@ export async function createApp() {
     auditWriter,
     rateLimiter,
     consoleOrigin: config.consoleOrigin,
+    createSyncResetHandoff: (nonce, userId) => syncResetService.createHandoff(nonce, userId),
   });
   await registerConsoleStatic(app);
 

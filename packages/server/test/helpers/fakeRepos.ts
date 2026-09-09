@@ -19,6 +19,7 @@ import type {
   ISyncNonceRepo,
   ISyncMutationRepo,
   ISyncResetTokenRepo,
+  ISyncResetHandoffRepo,
   IIdempotencyReceiptRepo,
   MemberDto,
   OrganizationSummary,
@@ -49,6 +50,7 @@ import type {
   PersonalConnectionMeta,
   SyncMutation,
   SyncResetToken,
+  SyncResetHandoff,
   IdempotencyReceipt,
 } from '../../src/domain/entities.js';
 import type {
@@ -61,6 +63,7 @@ import type {
   ResourceType,
   SyncAction,
   SyncMutationStatus,
+  SyncResetHandoffStatus,
 } from '../../src/domain/enums.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 import { ConflictError } from '../../src/domain/errors.js';
@@ -1352,6 +1355,17 @@ export class FakeSyncResetTokenRepo implements ISyncResetTokenRepo {
     return undefined;
   }
 
+  async findByHash(tokenHash: Buffer): Promise<SyncResetToken | undefined> {
+    for (const t of this.store.values()) {
+      if (t.tokenHash.equals(tokenHash)) return t;
+    }
+    return undefined;
+  }
+
+  async findByIdForUpdate(_exec: Queryable, id: number): Promise<SyncResetToken | undefined> {
+    return this.store.get(id);
+  }
+
   async consume(_exec: Queryable, id: number, now: Date): Promise<boolean> {
     const t = this.store.get(id);
     if (!t || t.consumedTime || t.revokedTime) return false;
@@ -1365,6 +1379,83 @@ export class FakeSyncResetTokenRepo implements ISyncResetTokenRepo {
       if (n >= limit) break;
       if (t.expiresTime < before || (t.consumedTime && t.consumedTime < before) || (t.revokedTime && t.revokedTime < before)) {
         this.store.delete(id); n++;
+      }
+    }
+    return n;
+  }
+}
+
+/** 内存 sync-reset handoff 假实现：以 ticketHash hex 为键。 */
+export class FakeSyncResetHandoffRepo implements ISyncResetHandoffRepo {
+  readonly store = new Map<string, SyncResetHandoff>();
+
+  async create(_exec: Queryable, input: { userId: number; resetTokenId: number; ticketHash: Buffer; expiresTime: Date }): Promise<SyncResetHandoff> {
+    const h: SyncResetHandoff = {
+      id: nextId(), userId: input.userId, resetTokenId: input.resetTokenId,
+      ticketHash: input.ticketHash, requestDigest: null, resultStateDtoJson: null,
+      resultKeyEpoch: null, resultStateVersion: null, resultChangeSequence: null,
+      status: 'issued' as SyncResetHandoffStatus, expiresTime: input.expiresTime,
+      consumedTime: null, createTime: new Date(), updateTime: new Date(),
+    };
+    this.store.set(input.ticketHash.toString('hex'), h);
+    return h;
+  }
+
+  async findByTicketHash(ticketHash: Buffer): Promise<SyncResetHandoff | undefined> {
+    return this.store.get(ticketHash.toString('hex'));
+  }
+
+  async findByTicketHashForUpdate(_exec: Queryable, ticketHash: Buffer): Promise<SyncResetHandoff | undefined> {
+    return this.store.get(ticketHash.toString('hex'));
+  }
+
+  async revokePendingByResetToken(_exec: Queryable, resetTokenId: number, now: Date): Promise<void> {
+    for (const h of this.store.values()) {
+      if (h.resetTokenId === resetTokenId && (h.status === 'issued' || h.status === 'processing')) {
+        h.status = 'revoked'; h.updateTime = now;
+      }
+    }
+  }
+
+  async markProcessing(_exec: Queryable, id: number, requestDigest: Buffer, now: Date): Promise<void> {
+    for (const h of this.store.values()) if (h.id === id) { h.status = 'processing'; h.requestDigest = requestDigest; h.updateTime = now; }
+  }
+
+  async markCompleted(_exec: Queryable, id: number, now: Date, result: { stateDtoJson: string; keyEpoch: string; stateVersion: string; changeSequence: string }): Promise<void> {
+    for (const h of this.store.values()) {
+      if (h.id === id) {
+        h.status = 'completed'; h.consumedTime = now; h.updateTime = now;
+        h.resultStateDtoJson = result.stateDtoJson;
+        h.resultKeyEpoch = result.keyEpoch;
+        h.resultStateVersion = result.stateVersion;
+        h.resultChangeSequence = result.changeSequence;
+      }
+    }
+  }
+
+  async rollbackProcessing(_exec: Queryable, id: number, now: Date): Promise<void> {
+    for (const h of this.store.values()) {
+      if (h.id === id && h.status === 'processing') { h.status = 'issued'; h.requestDigest = null; h.updateTime = now; }
+    }
+  }
+
+  async expire(_exec: Queryable, now: Date, limit: number): Promise<number> {
+    let n = 0;
+    for (const h of this.store.values()) {
+      if (n >= limit) break;
+      if ((h.status === 'issued' || h.status === 'processing') && h.expiresTime < now) {
+        h.status = 'expired'; h.updateTime = now; n++;
+      }
+    }
+    return n;
+  }
+
+  async prune(_exec: Queryable, before: Date, limit: number): Promise<number> {
+    let n = 0;
+    for (const [k, h] of [...this.store]) {
+      if (n >= limit) break;
+      if ((h.status === 'completed' || h.status === 'revoked' || h.status === 'expired') && h.updateTime < before) {
+        this.store.delete(k); n++;
       }
     }
     return n;

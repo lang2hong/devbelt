@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import { describe, expect, it } from 'vitest';
 import { LinkFlowService } from '../../src/service/linkFlowService.js';
 import { FakeMailFlowRepo } from '../helpers/linkFlowFakes.js';
-import { FakeEmailVerificationTokenRepo, FakeUserRepo, FakeRateLimitRepo, FakeOrganizationRepo, FakeOrganizationSubscriptionRepo, FakeMembershipRepo, FakeInvitationRepo } from '../helpers/fakeRepos.js';
+import { FakeEmailVerificationTokenRepo, FakeUserRepo, FakeRateLimitRepo, FakeOrganizationRepo, FakeOrganizationSubscriptionRepo, FakeMembershipRepo, FakeInvitationRepo, FakeSyncResetTokenRepo } from '../helpers/fakeRepos.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 
@@ -19,10 +19,12 @@ function makeService(mailFlow = new FakeMailFlowRepo()) {
   const membershipRepo = new FakeMembershipRepo(userRepo, orgRepo);
   const invitationRepo = new FakeInvitationRepo(membershipRepo);
   const subscriptionRepo = new FakeOrganizationSubscriptionRepo();
+  const resetTokenRepo = new FakeSyncResetTokenRepo();
   const rateLimiter = new RateLimitService(new FakeRateLimitRepo(), false);
   const service = new LinkFlowService(
     mailFlow,
     tokenRepo,
+    resetTokenRepo,
     userRepo,
     invitationRepo,
     orgRepo,
@@ -31,7 +33,7 @@ function makeService(mailFlow = new FakeMailFlowRepo()) {
     async (fn) => fn({} as Queryable),
     rateLimiter,
   );
-  return { service, tokenRepo, userRepo, mailFlow, invitationRepo, orgRepo, membershipRepo, subscriptionRepo };
+  return { service, tokenRepo, userRepo, mailFlow, invitationRepo, orgRepo, membershipRepo, subscriptionRepo, resetTokenRepo };
 }
 
 describe('LinkFlowService.claim', () => {
@@ -46,9 +48,22 @@ describe('LinkFlowService.claim', () => {
     expect(flows[0].status).toBe('issued');
   });
 
+  it('claim resolves sync-reset target_record_id from a reset token', async () => {
+    const s = makeService();
+    const raw = Buffer.alloc(32, 0);
+    const resetTok = await s.resetTokenRepo.create({} as Queryable, {
+      userId: 1, tokenHash: createHash('sha256').update(raw).digest(), expiresTime: new Date(Date.now() + 3600_000),
+    });
+    const result = await s.service.claim({ type: 'sync-reset', token: 'A'.repeat(43) });
+    expect(result.created).toBe(true);
+    const flows = [...s.mailFlow.store.values()];
+    expect(flows[0].type).toBe('sync-reset');
+    expect(flows[0].targetRecordId).toBe(resetTok.id);
+  });
+
   it('rejects an unsupported type', async () => {
     const { service } = makeService();
-    await expect(service.claim({ type: 'sync-reset', token: TOKEN })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    await expect(service.claim({ type: 'unknown-type', token: TOKEN })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
   });
 
   it('rejects a malformed token', async () => {

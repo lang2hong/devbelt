@@ -1,6 +1,6 @@
 import type { ISyncResetTokenRepo } from '../interfaces.js';
 import type { SyncResetToken } from '../../domain/entities.js';
-import type { Queryable } from './db.js';
+import type { MysqlDb, Queryable } from './db.js';
 
 function mapToken(r: any): SyncResetToken {
   return {
@@ -15,6 +15,7 @@ function mapToken(r: any): SyncResetToken {
 }
 
 export class MysqlSyncResetTokenRepo implements ISyncResetTokenRepo {
+  constructor(private readonly db: () => MysqlDb) {}
   async create(exec: Queryable, input: { userId: number; tokenHash: Buffer; expiresTime: Date }): Promise<SyncResetToken> {
     const [result] = await exec.query<any>(
       'INSERT INTO personal_sync_reset_tokens (user_id, token_hash, expires_time) VALUES (?, ?, ?)',
@@ -39,6 +40,16 @@ export class MysqlSyncResetTokenRepo implements ISyncResetTokenRepo {
        FOR UPDATE`,
       [tokenHash],
     );
+    return rows[0] ? mapToken(rows[0]) : undefined;
+  }
+
+  async findByHash(tokenHash: Buffer): Promise<SyncResetToken | undefined> {
+    const [rows] = await this.db().query<any[]>('SELECT * FROM personal_sync_reset_tokens WHERE token_hash = ?', [tokenHash]);
+    return rows[0] ? mapToken(rows[0]) : undefined;
+  }
+
+  async findByIdForUpdate(exec: Queryable, id: number): Promise<SyncResetToken | undefined> {
+    const [rows] = await exec.query<any[]>('SELECT * FROM personal_sync_reset_tokens WHERE id = ? FOR UPDATE', [id]);
     return rows[0] ? mapToken(rows[0]) : undefined;
   }
 

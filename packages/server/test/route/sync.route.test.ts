@@ -77,6 +77,14 @@ async function makeUser(t: TestApp, email: string) {
   return { token, userId: user.id };
 }
 
+/** 直接预置一个 issued handoff（绕过邮件流），供 reset-after-loss 路由测试。 */
+async function seedHandoff(t: TestApp, userId: number, raw = Buffer.alloc(32, 9)) {
+  const token = await t.repos.syncResetTokenRepo.create({} as any, { userId, tokenHash: sha(raw), expiresTime: new Date(Date.now() + 3600_000) });
+  const ticket = Buffer.alloc(32, 7);
+  await t.repos.syncResetHandoffRepo.create({} as any, { userId, resetTokenId: token.id, ticketHash: sha(ticket), expiresTime: new Date(Date.now() + 900_000) });
+  return { ticket, token };
+}
+
 describe('sync routes smoke', () => {
   it('requires auth and runs an init round-trip', async () => {
     const t = await buildTestApp();
@@ -137,7 +145,7 @@ describe('sync routes smoke', () => {
     await t.close();
   });
 
-  it('reset-challenges requires auth and returns 202; reset-after-loss consumes the emailed token', async () => {
+  it('reset-challenges requires auth and returns 202', async () => {
     const t = await buildTestApp();
 
     const anon = await t.app.inject({ method: 'POST', url: '/api/sync/reset-challenges' });
@@ -149,84 +157,70 @@ describe('sync routes smoke', () => {
 
     const sent = t.services.emailSender.sent.filter((e) => e.kind === 'reset_challenge');
     expect(sent).toHaveLength(1);
-    const resetToken = sent[0].token!;
+    await t.close();
+  });
 
-    const payload = {
-      protocolVersion: 1, resetToken,
-      confirmIrreversible: true, confirmDataLoss: true, confirmNoRecovery: true,
-      newState: newStateBody(),
-    };
+  it('reset-after-loss consumes the handoff ticket and replays the same StateDto', async () => {
+    const t = await buildTestApp();
+    const { token, userId } = await makeUser(t, 'reset-handoff@b.com');
+    const { ticket } = await seedHandoff(t, userId, Buffer.alloc(32, 90));
+
+    const payload = { handoffTicket: ticket.toString('base64url'), newState: newStateBody() };
     const res = await t.app.inject({ method: 'POST', url: '/api/sync/reset-after-loss', headers: t.auth(token), payload });
     expect(res.statusCode).toBe(200);
     expect(res.json().keyEpoch).toBe('1');
 
-    const reuse = await t.app.inject({ method: 'POST', url: '/api/sync/reset-after-loss', headers: t.auth(token), payload });
-    expect(reuse.statusCode).toBe(400);
-    expect(reuse.json().code).toBe('VALIDATION_FAILED');
+    // 同 ticket + 同 newState：completed 回放返回首次结果。
+    const replay = await t.app.inject({ method: 'POST', url: '/api/sync/reset-after-loss', headers: t.auth(token), payload });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().keyEpoch).toBe('1');
+
+    // 同 ticket + 不同 newState（seed=1 改变 salt/nonce）→ 409 REUSED。
+    const changed = { handoffTicket: ticket.toString('base64url'), newState: newStateBody(1) };
+    const reused = await t.app.inject({ method: 'POST', url: '/api/sync/reset-after-loss', headers: t.auth(token), payload: changed });
+    expect(reused.statusCode).toBe(409);
+    expect(reused.json().code).toBe('SYNC_RESET_HANDOFF_REUSED');
     await t.close();
   });
 
   it('reset-after-loss rejects unknown fields (strict schema)', async () => {
     const t = await buildTestApp();
     const { token } = await makeUser(t, 'reset-strict@b.com');
-    const payload: any = {
-      protocolVersion: 1, resetToken: b64(32, 9),
-      confirmIrreversible: true, confirmDataLoss: true, confirmNoRecovery: true,
-      newState: newStateBody(), bogus: true,
-    };
+    const payload: any = { handoffTicket: b64(32, 9), newState: newStateBody(), bogus: true };
     const res = await t.app.inject({ method: 'POST', url: '/api/sync/reset-after-loss', headers: t.auth(token), payload });
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('VALIDATION_FAILED');
     await t.close();
   });
 
-  it('reset-after-loss returns an identical 400 body for unknown/expired/consumed/revoked/cross-user tokens', async () => {
+  it('reset-after-loss returns an identical 400 body for unknown/expired/cross-user tickets', async () => {
     const t = await buildTestApp();
     const a = await makeUser(t, 'reset-eq@b.com');
     const bUser = await t.repos.userRepo.create('reset-other@b.com', 'hash', undefined);
     await t.repos.userRepo.markEmailVerified({} as any, bUser.id, new Date());
 
-    const payload = (resetToken: string) => ({
-      protocolVersion: 1, resetToken,
-      confirmIrreversible: true, confirmDataLoss: true, confirmNoRecovery: true,
-      newState: newStateBody(),
-    });
-    const expected = { message: 'reset token invalid', code: 'VALIDATION_FAILED' };
-    const inject = (raw: Buffer, userId: number, expiresTime = new Date(Date.now() + 3600_000)) =>
-      t.repos.syncResetTokenRepo.create({} as any, { userId, tokenHash: sha(raw), expiresTime });
-    const post = (token: string, body: Record<string, unknown>) =>
-      t.app.inject({ method: 'POST', url: '/api/sync/reset-after-loss', headers: t.auth(token), payload: body });
+    const expected = { message: 'sync reset handoff invalid', code: 'SYNC_RESET_HANDOFF_INVALID' };
+    const post = (token: string, ticketB64: string) =>
+      t.app.inject({ method: 'POST', url: '/api/sync/reset-after-loss', headers: t.auth(token), payload: { handoffTicket: ticketB64, newState: newStateBody() } });
 
-    // 未知
-    let res = await post(a.token, payload(b64(32, 1)));
+    // 未知 ticket
+    let res = await post(a.token, b64(32, 1));
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual(expected);
 
-    // 过期
-    const expiredRaw = Buffer.alloc(32, 2);
-    await inject(expiredRaw, a.userId, new Date(Date.now() - 1000));
-    res = await post(a.token, payload(expiredRaw.toString('base64url')));
+    // 过期 handoff
+    const expiredTicket = Buffer.alloc(32, 2);
+    const expToken = await t.repos.syncResetTokenRepo.create({} as any, { userId: a.userId, tokenHash: sha(Buffer.alloc(32, 90)), expiresTime: new Date(Date.now() + 3600_000) });
+    await t.repos.syncResetHandoffRepo.create({} as any, { userId: a.userId, resetTokenId: expToken.id, ticketHash: sha(expiredTicket), expiresTime: new Date(Date.now() - 1000) });
+    res = await post(a.token, expiredTicket.toString('base64url'));
     expect(res.json()).toEqual(expected);
 
-    // 已消费
-    const consumedRaw = Buffer.alloc(32, 3);
-    const cTok = await inject(consumedRaw, a.userId);
-    await t.repos.syncResetTokenRepo.consume({} as any, cTok.id, new Date());
-    res = await post(a.token, payload(consumedRaw.toString('base64url')));
-    expect(res.json()).toEqual(expected);
-
-    // 已撤销
-    const revokedRaw = Buffer.alloc(32, 4);
-    await inject(revokedRaw, a.userId);
-    await t.repos.syncResetTokenRepo.revokePendingByUser({} as any, a.userId, new Date());
-    res = await post(a.token, payload(revokedRaw.toString('base64url')));
-    expect(res.json()).toEqual(expected);
-
-    // 跨用户：token 属于 a，却以 b 的认证身份消费
-    const crossRaw = Buffer.alloc(32, 5);
-    await inject(crossRaw, a.userId);
+    // 跨用户：handoff 属于 a，却以 b 的认证身份消费
+    const crossTicket = Buffer.alloc(32, 3);
+    const crossToken = await t.repos.syncResetTokenRepo.create({} as any, { userId: a.userId, tokenHash: sha(Buffer.alloc(32, 91)), expiresTime: new Date(Date.now() + 3600_000) });
+    await t.repos.syncResetHandoffRepo.create({} as any, { userId: a.userId, resetTokenId: crossToken.id, ticketHash: sha(crossTicket), expiresTime: new Date(Date.now() + 900_000) });
     const bToken = await t.tokenFor(bUser.id);
-    res = await post(bToken, payload(crossRaw.toString('base64url')));
+    res = await post(bToken, crossTicket.toString('base64url'));
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual(expected);
 

@@ -73,6 +73,15 @@ export type MailFlowType = 'verify-email' | 'accept-invitation' | 'sync-reset';
 /** 邮件流状态。issued = 已签发未消费，consumed = 已消费，expired = 过期，revoked = 撤销。 */
 export type MailFlowStatus = 'issued' | 'consumed' | 'expired' | 'revoked';
 
+// ── sync-reset handoff（切片 5）──
+
+/**
+ * handoff ticket 状态。
+ * - issued = 已签发待消费；processing = 最终 reset 进行中（60s 崩溃恢复回退 issued）；
+ * - completed = 已完成；revoked = 被新 handoff 撤销；expired = 过期。
+ */
+export type SyncResetHandoffStatus = 'issued' | 'processing' | 'completed' | 'revoked' | 'expired';
+
 // ── 会话 / token audience ──
 
 /** access token 的 audience：extension（VS Code 扩展专用，含同步）与 console（浏览器控制台）。 */

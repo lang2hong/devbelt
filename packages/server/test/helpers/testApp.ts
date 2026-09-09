@@ -22,6 +22,7 @@ import {
   FakeSyncMutationRepo,
   FakeSyncNonceRepo,
   FakeSyncResetTokenRepo,
+  FakeSyncResetHandoffRepo,
   FakeIdempotencyReceiptRepo,
 } from './fakeRepos.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
@@ -46,7 +47,7 @@ import { SyncResetService } from '../../src/service/syncResetService.js';
 import { AuditWriter } from '../../src/service/auditWriter.js';
 import { CsrfService } from '../../src/service/csrfService.js';
 import { IdempotencyService } from '../../src/service/idempotencyService.js';
-import { FakeAuditRepo } from './linkFlowFakes.js';
+import { FakeAuditRepo, FakeMailFlowRepo } from './linkFlowFakes.js';
 
 export interface TestAppOptions {
   rateLimit?: boolean;
@@ -71,6 +72,8 @@ export interface TestApp {
     folderRepo: FakeFolderRepo;
     resourceRepo: FakeResourceRepo;
     syncResetTokenRepo: FakeSyncResetTokenRepo;
+    syncResetHandoffRepo: FakeSyncResetHandoffRepo;
+    mailFlowRepo: FakeMailFlowRepo;
   };
   services: {
     authService: AuthService;
@@ -127,6 +130,8 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   const syncMutationRepo = new FakeSyncMutationRepo();
   const syncNonceRepo = new FakeSyncNonceRepo();
   const syncResetTokenRepo = new FakeSyncResetTokenRepo();
+  const syncResetHandoffRepo = new FakeSyncResetHandoffRepo();
+  const mailFlowRepo = new FakeMailFlowRepo();
 
   const tokenService = new TokenService(makeSigningKeys(), '15m', 30 * 24 * 3600 * 1000);
   const rateLimiter = new RateLimitService(rateLimitRepo, opts.rateLimit === true);
@@ -177,6 +182,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
     personalSubscriptionRepo,
     async (fn) => fn({} as Queryable),
   );
+  const auditWriter = new AuditWriter(new FakeAuditRepo());
   const syncResetService = new SyncResetService(
     syncStateRepo,
     syncRecordRepo,
@@ -185,12 +191,14 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
     async (fn) => fn({} as Queryable),
     emailSender,
     rateLimiter,
+    mailFlowRepo,
+    syncResetHandoffRepo,
+    auditWriter,
   );
 
   const getUser = async (id: number) => userRepo.findById(id);
   // 测试装配：会话存活默认通过（真库行为由 dedicated 用例验证）。
   const getSessionActive = async (_sessionId: string) => true;
-  const auditWriter = new AuditWriter(new FakeAuditRepo());
   const csrfService = new CsrfService(Buffer.alloc(32, 3));
   const consoleOrigin = 'http://localhost:5173';
 
@@ -223,6 +231,8 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
       folderRepo,
       resourceRepo,
       syncResetTokenRepo,
+      syncResetHandoffRepo,
+      mailFlowRepo,
     },
     services: { authService, emailSender, tokenService, organizationService, resourceService },
     tokenService,

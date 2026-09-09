@@ -4,7 +4,7 @@ import { registerConsoleErrorHandler, rejectConsole } from '../middleware/consol
 import { consoleWriteGuard } from '../middleware/consoleWrite.js';
 import { linkFlowCookieName, readCookie, serializeCookie } from '../middleware/cookies.js';
 import type { LinkFlowService, AcceptInvitationOrganization } from '../service/linkFlowService.js';
-import { DomainError, InvitationInvalidError } from '../domain/errors.js';
+import { DomainError, InvitationInvalidError, SyncResetHandoffInvalidError } from '../domain/errors.js';
 import type { TokenService } from '../service/tokenService.js';
 import type { CsrfService } from '../service/csrfService.js';
 import type { AuditWriter } from '../service/auditWriter.js';
@@ -19,6 +19,7 @@ export interface ConsoleLinkFlowRouteOptions {
   auditWriter: AuditWriter;
   rateLimiter: RateLimitService;
   consoleOrigin: string;
+  createSyncResetHandoff: (nonce: string, userId: number) => Promise<{ openUri: string; expiresTime: string }>;
 }
 
 function requestIdOf(req: FastifyRequest): string {
@@ -66,6 +67,46 @@ export async function consoleLinkFlowRoutes(app: FastifyInstance, opts: ConsoleL
           if (e instanceof InvitationInvalidError) {
             clearLinkFlowCookie(reply);
             return rejectConsole(reply, 400, 'INVITATION_INVALID', 'invitation invalid');
+          }
+          throw e;
+        }
+      });
+
+      // 同步重置两阶段交接（§5.4）：已登录用户凭 mail_flow Cookie nonce 签发
+      // 扩展 handoff ticket。一次性操作（消费 mail_flow），重试依赖已签发 ticket。
+      child.post('/api/console/link-flows/create-sync-reset-handoff', async (req, reply) => {
+        if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) {
+          return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
+        }
+
+        const userId = authUserIdOf(req);
+        const sessionId = sessionIdOf(req);
+        // 每 session 3/15min、每用户 3/h（§5.4）。
+        await opts.rateLimiter.hit(`console:sync-reset-handoff:${sessionId ?? userId}`, 900, 3);
+        await opts.rateLimiter.hit(`console:sync-reset-handoff:user:${userId}`, 3600, 3);
+
+        const nonce = readCookie(req, linkFlowCookieName());
+        if (!nonce) {
+          clearLinkFlowCookie(reply);
+          opts.auditWriter.write({
+            eventType: 'sync.reset.handoff.failed',
+            result: 'failure',
+            failureCode: 'SYNC_RESET_HANDOFF_INVALID',
+            actorUserId: userId,
+            sourceIp: req.ip,
+            requestId: requestIdOf(req),
+          });
+          return rejectConsole(reply, 400, 'SYNC_RESET_HANDOFF_INVALID', 'sync reset handoff invalid');
+        }
+
+        try {
+          const result = await opts.createSyncResetHandoff(nonce, userId);
+          return reply.send({ openUri: result.openUri, expiresTime: result.expiresTime });
+        } catch (e) {
+          // 业务终态清 Cookie；未知异常保留 Cookie（§5.4 重试依赖 ticket，非终态不重签）。
+          if (e instanceof SyncResetHandoffInvalidError) clearLinkFlowCookie(reply);
+          if (e instanceof SyncResetHandoffInvalidError) {
+            return rejectConsole(reply, 400, 'SYNC_RESET_HANDOFF_INVALID', 'sync reset handoff invalid');
           }
           throw e;
         }

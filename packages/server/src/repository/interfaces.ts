@@ -16,6 +16,7 @@ import type {
   PersonalConnectionMeta,
   SyncMutation,
   SyncResetToken,
+  SyncResetHandoff,
   MailFlow,
   AuditEvent,
   IdempotencyReceipt,
@@ -601,9 +602,34 @@ export interface ISyncResetTokenRepo {
   revokePendingByUser(exec: Queryable, userId: number, now: Date): Promise<void>;
   /** 事务内按 hash 锁定可用 token（未消费/未撤销/未过期）。 */
   findUsableForUpdate(exec: Queryable, tokenHash: Buffer): Promise<SyncResetToken | undefined>;
+  /** 只读按 token_hash 查找（mail-flow 认领解析 target_record_id 用）。 */
+  findByHash(tokenHash: Buffer): Promise<SyncResetToken | undefined>;
+  /** 事务内按 id 锁定 reset token 行（handoff 消费锁序的第一把锁）。 */
+  findByIdForUpdate(exec: Queryable, id: number): Promise<SyncResetToken | undefined>;
   /** 原子消费（`WHERE consumed_time IS NULL AND revoked_time IS NULL`）。 */
   consume(exec: Queryable, id: number, now: Date): Promise<boolean>;
   /** 删除已消费/已撤销/已过期且超出保留期的 token 行。返回删除行数。 */
+  prune(exec: Queryable, before: Date, limit: number): Promise<number>;
+}
+
+/** sync-reset handoff（浏览器签发、扩展消费的一次性交接 ticket；仅存 SHA-256）。 */
+export interface ISyncResetHandoffRepo {
+  create(exec: Queryable, input: { userId: number; resetTokenId: number; ticketHash: Buffer; expiresTime: Date }): Promise<SyncResetHandoff>;
+  /** 只读按 ticket_hash 查找（消费预检走锁前）。 */
+  findByTicketHash(ticketHash: Buffer): Promise<SyncResetHandoff | undefined>;
+  /** 事务内按 ticket_hash 锁定（唯一键）。 */
+  findByTicketHashForUpdate(exec: Queryable, ticketHash: Buffer): Promise<SyncResetHandoff | undefined>;
+  /** 撤销某 reset token 下全部 issued/processing 未终结 handoff（签发新 handoff 前）。 */
+  revokePendingByResetToken(exec: Queryable, resetTokenId: number, now: Date): Promise<void>;
+  /** 置 processing + 写 request_digest（最终 reset 首次进入）。 */
+  markProcessing(exec: Queryable, id: number, requestDigest: Buffer, now: Date): Promise<void>;
+  /** 置 completed + 写结果收据（result_state_dto_json + 冗余计数字段）。 */
+  markCompleted(exec: Queryable, id: number, now: Date, result: { stateDtoJson: string; keyEpoch: string; stateVersion: string; changeSequence: string }): Promise<void>;
+  /** processing 超时（60s，崩溃恢复）回退 issued。 */
+  rollbackProcessing(exec: Queryable, id: number, now: Date): Promise<void>;
+  /** 过期 issued/processing → expired（清理任务，返回受影响行数）。 */
+  expire(exec: Queryable, now: Date, limit: number): Promise<number>;
+  /** 删除 completed/revoked/expired 且超出保留期的行。返回删除行数。 */
   prune(exec: Queryable, before: Date, limit: number): Promise<number>;
 }
 

@@ -166,7 +166,7 @@ describe.skipIf(!URL)('personal sync repos (real MySQL)', () => {
   });
 
   it('reset token: create, revoke pending, consume, usable lookup', async () => {
-    const repo = new MysqlSyncResetTokenRepo();
+    const repo = new MysqlSyncResetTokenRepo(() => db);
     const hash = buf(32, 90);
     await withTransaction(db, async (tx) => {
       const token = await repo.create(tx, { userId, tokenHash: hash, expiresTime: new Date(Date.now() + 3600_000) });
