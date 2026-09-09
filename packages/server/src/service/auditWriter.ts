@@ -30,6 +30,15 @@ const ALLOWED_EVENT_TYPES = [
   'organization.closed',
   'organization.member_email.read',
   'system.receipts.cleanup',
+  'admin.users.read',
+  'admin.user.disabled',
+  'admin.user.enabled',
+  'admin.user.subscription.changed',
+  'admin.organizations.read',
+  'admin.organization.subscription.changed',
+  'admin.audit.read',
+  'admin.audit.export',
+  'admin.role.granted',
 ] as const;
 
 export type AuditEventType = (typeof ALLOWED_EVENT_TYPES)[number];

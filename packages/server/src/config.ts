@@ -57,6 +57,15 @@ const refreshTtl = parseTokenTtl(process.env.REFRESH_TOKEN_EXPIRES_IN || '30d', 
  */
 export const signingKeys: SigningKeys = resolveSigningKeys();
 
+/**
+ * 平台管理员引导邮箱（§10.4）。逗号分隔；与注册/登录一致 trim + lowercase 规范化。
+ * 缺失 = 空数组（平台运营 fail-closed，无人自动提升）。
+ */
+function parsePlatformAdminEmails(raw: string | undefined): string[] {
+  if (!raw || !raw.trim()) return [];
+  return raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+}
+
 export const config = {
   port: Number(process.env.PORT || 3000),
   accessTokenExpiresIn: accessTtl.raw,
@@ -73,6 +82,8 @@ export const config = {
   rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== 'false',
   /** 控制台公开页/邮件流接口允许的同源 Origin（生产/预发必须为 HTTPS SMTP_BASE_URL 源）。 */
   consoleOrigin: resolveConsoleOrigin(),
+  /** 平台管理员引导邮箱（规范化后，供启动受控提升）。 */
+  platformAdminEmails: parsePlatformAdminEmails(process.env.PLATFORM_ADMIN_EMAILS),
 };
 
 export { parseTrustProxy };

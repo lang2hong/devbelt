@@ -1,5 +1,6 @@
 import type {
   UserStatus,
+  UserRole,
   PersonalPlanStatus,
   PersonalSubscriptionStatus,
   DeviceStatus,
@@ -35,6 +36,8 @@ export interface User {
   passwordHash: string;
   displayName?: string;
   status: UserStatus;
+  /** 平台角色（users.role，P3 切片 4）。 */
+  role: UserRole;
   lastLoginTime: Date | null;
   /** 会话版本：改密/禁用时 +1，用于使所有存量 access token 立即失效（§4.1）。 */
   sessionVersion: number;
@@ -87,6 +90,8 @@ export interface PersonalSubscription {
   entitlementSnapshot: Record<string, unknown>;
   periodStartTime: Date;
   periodEndTime: Date | null;
+  /** 乐观并发版本（P3 §6.2 订阅调整）。 */
+  version: number;
   createTime: Date;
   updateTime: Date;
 }
@@ -167,6 +172,8 @@ export interface OrganizationSubscription {
   entitlementSnapshot: Record<string, unknown>;
   periodStartTime: Date;
   periodEndTime: Date | null;
+  /** 乐观并发版本（P3 §6.2 订阅调整）。 */
+  version: number;
   createTime: Date;
   updateTime: Date;
 }

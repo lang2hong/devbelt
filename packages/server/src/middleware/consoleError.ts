@@ -13,7 +13,8 @@ import { errorStatus } from './errorHandler.js';
  * 走 422 信封。
  */
 export function consoleErrorStatus(code: string): number {
-  return code === 'VALIDATION_FAILED' ? 422 : errorStatus(code);
+  if (code === 'VALIDATION_FAILED' || code === 'EXPORT_TOO_LARGE') return 422;
+  return errorStatus(code);
 }
 
 /**

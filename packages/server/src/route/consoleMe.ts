@@ -70,7 +70,7 @@ export async function consoleMeRoutes(app: FastifyInstance, opts: ConsoleMeRoute
                 periodEndTime: subscription.periodEndTime ? subscription.periodEndTime.toISOString() : null,
               }
             : null,
-          platformAdmin: false,
+          platformAdmin: user.role === 'platform_admin',
           organizations: organizations.map((o) => ({
             organizationId: String(o.organizationId),
             name: o.name,

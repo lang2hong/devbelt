@@ -1,5 +1,6 @@
 import { getAccessToken } from './tokenStore';
 import { authedFetch, type FetchLike } from './authedFetch';
+import { resolveErrorKind } from './httpError';
 
 /**
  * 组织 API 客户端（P3 §6）。写请求（create/update/close/leave/assignRole/removeMember/
@@ -73,23 +74,6 @@ function write(csrfToken: string, token: string, idempotencyKey: string): Record
   };
 }
 
-async function resolveKind(res: Response): Promise<Exclude<Result<unknown>['kind'], 'ok'>> {
-  if (res.status === 401) return 'unauthorized';
-  if (res.status === 403) return 'forbidden';
-  if (res.status === 404) return 'not-found';
-  if (res.status === 409) {
-    try {
-      const body = (await res.json()) as { code?: string };
-      // 同类请求进行中（Retry-After: 1）：可重试，须保留原 key 重放。
-      if (body?.code === 'IDEMPOTENCY_IN_PROGRESS') return 'in-progress';
-    } catch {
-      // 非 JSON 409 视作业务冲突
-    }
-    return 'conflict';
-  }
-  return 'failure';
-}
-
 export async function listOrganizations(
   token: string | null = getAccessToken(),
   fetchImpl: FetchLike = fetch,
@@ -98,7 +82,7 @@ export async function listOrganizations(
   try {
     const res = await authedFetch('/api/organizations', { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: (await res.json()).organizations as OrgSummary[] };
-    return { kind: await resolveKind(res) };
+    return { kind: await resolveErrorKind(res) };
   } catch {
     return { kind: 'failure' };
   }
@@ -119,7 +103,7 @@ export async function createOrganization(
       fetchImpl,
     );
     if (res.ok) return { kind: 'ok', value: (await res.json()).organization as OrgSummary };
-    return { kind: await resolveKind(res) };
+    return { kind: await resolveErrorKind(res) };
   } catch {
     return { kind: 'failure' };
   }
@@ -134,7 +118,7 @@ export async function getOrganization(
   try {
     const res = await authedFetch(`/api/organizations/${organizationId}`, { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: (await res.json()).organization as OrgSummary };
-    return { kind: await resolveKind(res) };
+    return { kind: await resolveErrorKind(res) };
   } catch {
     return { kind: 'failure' };
   }
@@ -156,7 +140,7 @@ export async function updateOrganization(
       fetchImpl,
     );
     if (res.ok) return { kind: 'ok', value: await res.json() };
-    return { kind: await resolveKind(res) };
+    return { kind: await resolveErrorKind(res) };
   } catch {
     return { kind: 'failure' };
   }
@@ -177,7 +161,7 @@ export async function closeOrganization(
       fetchImpl,
     );
     if (res.ok) return { kind: 'ok', value: await res.json() };
-    return { kind: await resolveKind(res) };
+    return { kind: await resolveErrorKind(res) };
   } catch {
     return { kind: 'failure' };
   }
@@ -198,7 +182,7 @@ export async function leaveOrganization(
       fetchImpl,
     );
     if (res.ok) return { kind: 'ok', value: await res.json() };
-    return { kind: await resolveKind(res) };
+    return { kind: await resolveErrorKind(res) };
   } catch {
     return { kind: 'failure' };
   }
@@ -217,7 +201,7 @@ export async function listMembers(
       fetchImpl,
     );
     if (res.ok) return { kind: 'ok', value: (await res.json()).members as Member[] };
-    return { kind: await resolveKind(res) };
+    return { kind: await resolveErrorKind(res) };
   } catch {
     return { kind: 'failure' };
   }
@@ -240,7 +224,7 @@ export async function assignRole(
       fetchImpl,
     );
     if (res.ok) return { kind: 'ok', value: await res.json() };
-    return { kind: await resolveKind(res) };
+    return { kind: await resolveErrorKind(res) };
   } catch {
     return { kind: 'failure' };
   }
@@ -262,7 +246,7 @@ export async function removeMember(
       fetchImpl,
     );
     if (res.ok) return { kind: 'ok', value: await res.json() };
-    return { kind: await resolveKind(res) };
+    return { kind: await resolveErrorKind(res) };
   } catch {
     return { kind: 'failure' };
   }
@@ -281,7 +265,7 @@ export async function listInvitations(
       fetchImpl,
     );
     if (res.ok) return { kind: 'ok', value: (await res.json()).invitations as Invitation[] };
-    return { kind: await resolveKind(res) };
+    return { kind: await resolveErrorKind(res) };
   } catch {
     return { kind: 'failure' };
   }
@@ -304,7 +288,7 @@ export async function inviteMember(
       fetchImpl,
     );
     if (res.ok) return { kind: 'ok', value: (await res.json()).invitation as Invitation };
-    return { kind: await resolveKind(res) };
+    return { kind: await resolveErrorKind(res) };
   } catch {
     return { kind: 'failure' };
   }
@@ -326,7 +310,7 @@ export async function revokeInvitation(
       fetchImpl,
     );
     if (res.ok) return { kind: 'ok', value: await res.json() };
-    return { kind: await resolveKind(res) };
+    return { kind: await resolveErrorKind(res) };
   } catch {
     return { kind: 'failure' };
   }
@@ -341,7 +325,7 @@ export async function listFolders(
   try {
     const res = await authedFetch(`/api/organizations/${organizationId}/folders`, { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: (await res.json()).folders as Folder[] };
-    return { kind: await resolveKind(res) };
+    return { kind: await resolveErrorKind(res) };
   } catch {
     return { kind: 'failure' };
   }
@@ -356,7 +340,7 @@ export async function listResources(
   try {
     const res = await authedFetch(`/api/organizations/${organizationId}/resources`, { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: (await res.json()).resources as ResourceSummary[] };
-    return { kind: await resolveKind(res) };
+    return { kind: await resolveErrorKind(res) };
   } catch {
     return { kind: 'failure' };
   }

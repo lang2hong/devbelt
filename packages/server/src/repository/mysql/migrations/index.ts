@@ -13,6 +13,8 @@ import { mailFlowsMigration } from './011_mail_flows.js';
 import { auditEventsMigration } from './012_audit_events.js';
 import { consoleSessionMigration } from './013_console_session.js';
 import { idempotencyReceiptsMigration } from './014_idempotency_receipts.js';
+import { platformAdminMigration } from './015_platform_admin.js';
+import { idempotencyReceiptLongtextMigration } from './016_idempotency_receipt_longtext.js';
 
 /** 新库启动时按固定依赖顺序执行的 migration 集合。 */
 export const migrations: readonly Migration[] = [
@@ -30,4 +32,6 @@ export const migrations: readonly Migration[] = [
   auditEventsMigration,
   consoleSessionMigration,
   idempotencyReceiptsMigration,
+  platformAdminMigration,
+  idempotencyReceiptLongtextMigration,
 ];

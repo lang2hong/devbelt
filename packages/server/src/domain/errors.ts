@@ -259,3 +259,19 @@ export class TokenAudienceForbiddenError extends DomainError {
     this.name = 'TokenAudienceForbiddenError';
   }
 }
+
+/** 订阅乐观锁版本冲突 → 409 SUBSCRIPTION_VERSION_CONFLICT（§6.2，附 currentVersion）。 */
+export class SubscriptionVersionConflictError extends DomainError {
+  constructor(public readonly currentVersion: number) {
+    super('subscription version conflict', 'SUBSCRIPTION_VERSION_CONFLICT');
+    this.name = 'SubscriptionVersionConflictError';
+  }
+}
+
+/** 审计导出超出单次上限 → 422 EXPORT_TOO_LARGE（§6 导出边界）。 */
+export class ExportTooLargeError extends DomainError {
+  constructor() {
+    super('export exceeds the maximum allowed rows', 'EXPORT_TOO_LARGE');
+    this.name = 'ExportTooLargeError';
+  }
+}

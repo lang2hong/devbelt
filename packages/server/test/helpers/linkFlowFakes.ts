@@ -1,4 +1,4 @@
-import type { IAuditRepo, IMailFlowRepo } from '../../src/repository/interfaces.js';
+import type { IAuditRepo, IMailFlowRepo, AuditFilter } from '../../src/repository/interfaces.js';
 import type { AuditEvent, MailFlow } from '../../src/domain/entities.js';
 import type { MailFlowType } from '../../src/domain/enums.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
@@ -83,5 +83,38 @@ export class FakeAuditRepo implements IAuditRepo {
   async insertInTx(_exec: Queryable, event: Omit<AuditEvent, 'id' | 'createTime'>): Promise<AuditEvent> {
     this.events.push(event);
     return { ...event, id: this.events.length, createTime: new Date() };
+  }
+
+  async search(input: AuditFilter): Promise<AuditEvent[]> {
+    return this.db()
+      .filter((e) => this.match(e, input))
+      .slice(0, input.limit);
+  }
+
+  async count(input: Omit<AuditFilter, 'cursor' | 'limit'>): Promise<number> {
+    return this.db().filter((e) => this.match(e, input)).length;
+  }
+
+  async searchInTx(_exec: Queryable, input: AuditFilter): Promise<AuditEvent[]> {
+    return this.search(input);
+  }
+
+  async countInTx(_exec: Queryable, input: Omit<AuditFilter, 'cursor' | 'limit'>): Promise<number> {
+    return this.count(input);
+  }
+
+  private db(): AuditEvent[] {
+    return this.events.map((e, i) => ({ ...e, id: i + 1, createTime: new Date() }));
+  }
+
+  private match(e: AuditEvent, input: Partial<AuditFilter>): boolean {
+    if (input.fromTime && e.eventTime < input.fromTime) return false;
+    if (input.toTime && e.eventTime > input.toTime) return false;
+    if (input.actorUserId !== undefined && e.actorUserId !== input.actorUserId) return false;
+    if (input.eventType && e.eventType !== input.eventType) return false;
+    if (input.targetType && e.targetType !== input.targetType) return false;
+    if (input.organizationId !== undefined && e.organizationId !== input.organizationId) return false;
+    if (input.cursor !== undefined && e.id >= input.cursor) return false;
+    return true;
   }
 }

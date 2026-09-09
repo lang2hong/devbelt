@@ -3,6 +3,9 @@
 /** 用户状态（users.status）。 */
 export type UserStatus = 'active' | 'disabled';
 
+/** 用户平台角色（users.role，P3 切片 4）；仅平台管理员可读/操作运营页。 */
+export type UserRole = 'user' | 'platform_admin';
+
 /** 个人套餐状态。当前只 seed free。 */
 export type PersonalPlanStatus = 'active' | 'archived';
 

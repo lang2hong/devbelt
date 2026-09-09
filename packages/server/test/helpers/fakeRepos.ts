@@ -26,6 +26,10 @@ import type {
   ResourceSummaryDto,
   RegistrationAccountInput,
   RegistrationResult,
+  AdminUserFilter,
+  AdminUserRow,
+  AdminOrgFilter,
+  AdminOrgRow,
 } from '../../src/repository/interfaces.js';
 import type {
   User,
@@ -49,6 +53,7 @@ import type {
 } from '../../src/domain/entities.js';
 import type {
   UserStatus,
+  UserRole,
   EmailVerificationPurpose,
   OrganizationRole,
   OrganizationMembershipStatus,
@@ -103,6 +108,7 @@ export class FakeUserRepo implements IUserRepo {
       passwordHash,
       displayName,
       status: 'active',
+      role: 'user',
       lastLoginTime: null,
       sessionVersion: 0,
       createTime: new Date(),
@@ -126,6 +132,54 @@ export class FakeUserRepo implements IUserRepo {
   async updateStatus(id: number, status: UserStatus): Promise<void> {
     const u = this.store.get(id);
     if (u) u.status = status;
+  }
+
+  async updateStatusInTx(_exec: Queryable, id: number, status: UserStatus): Promise<void> {
+    const u = this.store.get(id);
+    if (u) u.status = status;
+  }
+
+  async setRole(id: number, role: UserRole): Promise<void> {
+    const u = this.store.get(id);
+    if (u) u.role = role;
+  }
+
+  async listUsers(input: AdminUserFilter): Promise<AdminUserRow[]> {
+    return this.filterUsers(input)
+      .sort((a, b) => b.userId - a.userId)
+      .slice(0, input.limit);
+  }
+
+  async countUsers(input: Omit<AdminUserFilter, 'cursor' | 'limit'>): Promise<number> {
+    return this.filterUsers({ ...input, limit: Number.MAX_SAFE_INTEGER }).length;
+  }
+
+  private filterUsers(input: AdminUserFilter): AdminUserRow[] {
+    return Array.from(this.store.values())
+      .filter((u) => {
+        if (input.userId !== undefined && u.id !== input.userId) return false;
+        if (input.emailExact && u.email !== input.emailExact) return false;
+        if (input.status !== undefined && u.status !== input.status) return false;
+        if (input.createdFrom && u.createTime < input.createdFrom) return false;
+        if (input.createdTo && u.createTime > input.createdTo) return false;
+        if (input.cursor !== undefined && u.id >= input.cursor) return false;
+        if (input.planCode) return false;
+        return true;
+      })
+      .map((u) => ({
+        userId: u.id,
+        email: u.email,
+        emailVerifiedTime: u.emailVerifiedTime,
+        displayName: u.displayName,
+        status: u.status,
+        role: u.role,
+        lastLoginTime: u.lastLoginTime,
+        createTime: u.createTime,
+        planCode: null,
+        deviceCount: 0,
+        subscriptionVersion: null,
+        periodEndTime: null,
+      }));
   }
 
   async markEmailVerified(_exec: Queryable, id: number, time: Date): Promise<void> {
@@ -243,6 +297,10 @@ export class FakePersonalPlanRepo implements IPersonalPlanRepo {
   async findById(id: number): Promise<PersonalPlan | undefined> {
     return this.plans.find((p) => p.id === id);
   }
+
+  async findByCodeInTx(_exec: Queryable, code: string): Promise<PersonalPlan | undefined> {
+    return this.findByCode(code);
+  }
 }
 
 export class FakePersonalSubscriptionRepo implements IPersonalSubscriptionRepo {
@@ -256,6 +314,29 @@ export class FakePersonalSubscriptionRepo implements IPersonalSubscriptionRepo {
   async findByUserIdInTx(_exec: Queryable, userId: number): Promise<PersonalSubscription | undefined> {
     for (const s of this.store.values()) if (s.userId === userId) return s;
     return undefined;
+  }
+
+  async findByUserIdForUpdate(_exec: Queryable, userId: number): Promise<PersonalSubscription | undefined> {
+    for (const s of this.store.values()) if (s.userId === userId) return s;
+    return undefined;
+  }
+
+  async update(_exec: Queryable, input: {
+    id: number;
+    planId: number;
+    status: PersonalSubscription['status'];
+    entitlementSnapshot: Record<string, unknown>;
+    periodEndTime: Date | null;
+    expectedVersion: number;
+  }): Promise<boolean> {
+    const s = this.store.get(input.id);
+    if (!s || s.version !== input.expectedVersion) return false;
+    s.planId = input.planId;
+    s.status = input.status;
+    s.entitlementSnapshot = input.entitlementSnapshot;
+    s.periodEndTime = input.periodEndTime;
+    s.version += 1;
+    return true;
   }
 
   async create(input: {
@@ -274,6 +355,7 @@ export class FakePersonalSubscriptionRepo implements IPersonalSubscriptionRepo {
       entitlementSnapshot: input.entitlementSnapshot,
       periodStartTime: input.periodStartTime,
       periodEndTime: input.periodEndTime,
+      version: 0,
       createTime: new Date(),
       updateTime: new Date(),
     };
@@ -564,6 +646,35 @@ export class FakeOrganizationRepo implements IOrganizationRepo {
       o.closedTime = closedTime;
     }
   }
+
+  async listForAdmin(input: AdminOrgFilter): Promise<AdminOrgRow[]> {
+    return Array.from(this.store.values())
+      .filter((o) => {
+        if (input.namePrefix && !o.name.startsWith(input.namePrefix)) return false;
+        if (input.status !== undefined && o.status !== input.status) return false;
+        if (input.planCode) return false;
+        if (input.cursor !== undefined && o.id >= input.cursor) return false;
+        return true;
+      })
+      .sort((a, b) => b.id - a.id)
+      .slice(0, input.limit)
+      .map((o) => ({
+        organizationId: o.id,
+        name: o.name,
+        status: o.status,
+        planCode: 'organization_free',
+        seatLimit: null,
+        activeMemberCount: 0,
+        invitedCount: 0,
+        createTime: o.createTime,
+        subscriptionVersion: null,
+        periodEndTime: null,
+      }));
+  }
+
+  async countForAdmin(input: Omit<AdminOrgFilter, 'cursor' | 'limit'>): Promise<number> {
+    return (await this.listForAdmin({ ...input, limit: Number.MAX_SAFE_INTEGER })).length;
+  }
 }
 
 export class FakeOrganizationSubscriptionRepo implements IOrganizationSubscriptionRepo {
@@ -596,11 +707,32 @@ export class FakeOrganizationSubscriptionRepo implements IOrganizationSubscripti
       entitlementSnapshot: input.entitlementSnapshot,
       periodStartTime: input.periodStartTime,
       periodEndTime: input.periodEndTime,
+      version: 0,
       createTime: new Date(),
       updateTime: new Date(),
     };
     this.store.set(s.id, s);
     return s;
+  }
+
+  async update(_exec: Queryable, input: {
+    id: number;
+    planId: number;
+    seatLimit: number;
+    status: OrganizationSubscriptionStatus;
+    entitlementSnapshot: Record<string, unknown>;
+    periodEndTime: Date | null;
+    expectedVersion: number;
+  }): Promise<boolean> {
+    const s = this.store.get(input.id);
+    if (!s || s.version !== input.expectedVersion) return false;
+    s.planId = input.planId;
+    s.seatLimit = input.seatLimit;
+    s.status = input.status;
+    s.entitlementSnapshot = input.entitlementSnapshot;
+    s.periodEndTime = input.periodEndTime;
+    s.version += 1;
+    return true;
   }
 }
 

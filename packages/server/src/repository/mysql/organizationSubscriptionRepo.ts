@@ -49,6 +49,32 @@ export class MysqlOrganizationSubscriptionRepo implements IOrganizationSubscript
     if (!rows[0]) throw new Error('organization_subscription insert failed');
     return mapSubscription(rows[0]);
   }
+
+  async update(exec: Queryable, input: {
+    id: number;
+    planId: number;
+    seatLimit: number;
+    status: OrganizationSubscriptionStatus;
+    entitlementSnapshot: Record<string, unknown>;
+    periodEndTime: Date | null;
+    expectedVersion: number;
+  }): Promise<boolean> {
+    const [result] = await exec.query<any>(
+      `UPDATE organization_subscriptions
+       SET plan_id = ?, seat_limit = ?, status = ?, entitlement_snapshot = ?, period_end_time = ?, version = version + 1
+       WHERE id = ? AND version = ?`,
+      [
+        input.planId,
+        input.seatLimit,
+        input.status,
+        JSON.stringify(input.entitlementSnapshot),
+        input.periodEndTime ?? null,
+        input.id,
+        input.expectedVersion,
+      ],
+    );
+    return result.affectedRows === 1;
+  }
 }
 
 function mapSubscription(r: any): OrganizationSubscription {
@@ -57,11 +83,12 @@ function mapSubscription(r: any): OrganizationSubscription {
     id: r.id,
     organizationId: r.organization_id,
     planId: r.plan_id,
-    seatLimit: r.seat_limit,
+    seatLimit: Number(r.seat_limit ?? 0),
     status: r.status as OrganizationSubscriptionStatus,
     entitlementSnapshot: snapshot ?? {},
     periodStartTime: new Date(r.period_start_time),
     periodEndTime: r.period_end_time ? new Date(r.period_end_time) : null,
+    version: Number(r.version ?? 0),
     createTime: new Date(r.create_time),
     updateTime: new Date(r.update_time),
   };

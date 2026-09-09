@@ -55,6 +55,7 @@ import { withTransaction } from './repository/mysql/db.js';
 import { MysqlMailFlowRepo } from './repository/mysql/mailFlowRepo.js';
 import { MysqlAuditRepo } from './repository/mysql/auditRepo.js';
 import { MysqlIdempotencyReceiptRepo } from './repository/mysql/idempotencyReceiptRepo.js';
+import type { IUserRepo } from './repository/interfaces.js';
 import { LinkFlowService } from './service/linkFlowService.js';
 import { AuditWriter } from './service/auditWriter.js';
 import { IdempotencyService } from './service/idempotencyService.js';
@@ -64,7 +65,10 @@ import { consoleLinkFlowRoutes } from './route/consoleLinkFlows.js';
 import { consoleAuthRoutes } from './route/consoleAuth.js';
 import { consoleMeRoutes } from './route/consoleMe.js';
 import { consoleDataRoutes } from './route/consoleData.js';
+import { consoleAdminRoutes } from './route/consoleAdmin.js';
 import { ConsoleAuthService } from './service/consoleAuthService.js';
+import { ConsoleAdminService } from './service/consoleAdminService.js';
+import { CursorService, deriveCursorKey } from './service/cursor.js';
 import { requestId } from './middleware/requestId.js';
 import { registerConsoleStatic } from './consoleStatic.js';
 
@@ -216,6 +220,19 @@ export async function createApp() {
     rateLimiter,
     (fn) => withTransaction(app.mysql, fn),
   );
+  const adminService = new ConsoleAdminService({
+    userRepo,
+    refreshTokenRepo,
+    personalPlanRepo,
+    personalSubscriptionRepo,
+    organizationPlanRepo,
+    organizationRepo,
+    organizationSubscriptionRepo,
+    membershipRepo,
+    auditRepo,
+    auditWriter,
+  });
+  const cursorService = new CursorService(deriveCursorKey());
 
   // 受控限流清理任务（实施规格 §3）：过期桶由周期任务删除，不依赖请求
   startRateLimitCleanup(rateLimitRepo);
@@ -284,6 +301,19 @@ export async function createApp() {
     syncRecordRepo,
     db: getMysql(),
   });
+  app.register(consoleAdminRoutes, {
+    tokenService,
+    getUser,
+    getSessionActive,
+    csrfService,
+    consoleOrigin: config.consoleOrigin,
+    rateLimiter,
+    idempotencyService,
+    adminService,
+    cursorService,
+    serverVersion: '1.0.0',
+    consoleApiVersion: '1',
+  });
   app.register(linkFlowRoutes, {
     linkFlowService,
     csrfService,
@@ -305,8 +335,38 @@ export async function createApp() {
 
   await app.ready();
   await runMigrations(app.mysql as any, [...migrations]);
+  // 平台管理员受控引导（§2.3/§10.4）：PLATFORM_ADMIN_EMAILS 仅作首次引导来源；
+  // 缺失时 fail-closed（无人被提升，requireAdmin 一律 403）。
+  await bootstrapPlatformAdmins(userRepo, auditWriter, config.platformAdminEmails, app.log.warn.bind(app.log));
 
   return app;
+}
+
+/**
+ * 把 PLATFORM_ADMIN_EMAILS（逗号分隔）列出的已存在用户提升为 platform_admin。
+ * 幂等：沿用注册/登录的 trim + lowercase 规范化，重复启动不重复发审计。
+ */
+async function bootstrapPlatformAdmins(
+  userRepo: IUserRepo,
+  auditWriter: AuditWriter,
+  emails: readonly string[],
+  warn: (msg: string, data?: unknown) => void,
+): Promise<void> {
+  if (emails.length === 0) {
+    warn('PLATFORM_ADMIN_EMAILS not configured; platform admin surface is fail-closed');
+    return;
+  }
+  for (const email of emails) {
+    const user = await userRepo.findByEmail(email);
+    // env 打错字/用户尚未注册 = 静默无管理员的事故，必须告警；移除 env 不降级，
+    // 已提升账号需重启后再次触发（本函数幂等）。
+    if (!user) {
+      warn('PLATFORM_ADMIN_EMAILS entry matches no registered user', { email });
+      continue;
+    }
+    await userRepo.setRole(user.id, 'platform_admin');
+    auditWriter.write({ eventType: 'admin.role.granted', result: 'success', actorUserId: null, targetType: 'user', targetId: String(user.id) });
+  }
 }
 
 /**

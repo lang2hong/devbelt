@@ -1,11 +1,11 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { TokenService, AccessTokenPayload } from '../service/tokenService.js';
-import type { TokenAudience } from '../domain/enums.js';
+import type { TokenAudience, UserRole } from '../domain/enums.js';
 
 /**
- * 认证用户状态查询端口：中间件只关心「用户当前还能不能用」 + 会话版本。
+ * 认证用户状态查询端口：中间件只关心「用户当前还能不能用」 + 会话版本（+ 平台角色）。
  */
-export type AuthUser = { status: string; sessionVersion: number };
+export type AuthUser = { status: string; sessionVersion: number; role: UserRole };
 export type GetAuthUser = (id: number) => Promise<AuthUser | undefined>;
 
 export interface AuthScopeOptions {
@@ -18,11 +18,13 @@ export interface AuthScopeOptions {
   getUser?: GetAuthUser;
   /** 给定了就核验 session（refresh family）仍存活（撤销设备/登出/复用检测后立即失效）。 */
   getSessionActive?: (sessionId: string) => Promise<boolean>;
+  /** 仅对 consoleSession 生效：要求调用者是 platform_admin（§6 平台运营）。 */
+  requireAdmin?: boolean;
   routes: (app: FastifyInstance) => void | Promise<void>;
 }
 
 type EvalResult =
-  | { kind: 'ok'; userId: number; sessionId?: string; deviceId?: number; audience: TokenAudience }
+  | { kind: 'ok'; userId: number; sessionId?: string; deviceId?: number; audience: TokenAudience; role: UserRole }
   | { kind: 'error'; status: number; code: string; message: string };
 
 async function evaluate(
@@ -60,6 +62,7 @@ async function evaluate(
     return { kind: 'error', status: 401, code: 'UNAUTHORIZED', message: 'unauthorized' };
   }
 
+  let role: UserRole = 'user';
   if (opts.getUser) {
     const user = await opts.getUser(userId);
     if (!user) return { kind: 'error', status: 401, code: 'UNAUTHORIZED', message: 'unauthorized' };
@@ -70,6 +73,7 @@ async function evaluate(
     if (payload.sessionVersion !== undefined && payload.sessionVersion !== user.sessionVersion) {
       return { kind: 'error', status: 401, code: 'UNAUTHORIZED', message: 'session expired' };
     }
+    role = user.role;
   }
 
   if (opts.getSessionActive && typeof payload.sessionId === 'string') {
@@ -79,7 +83,7 @@ async function evaluate(
     }
   }
 
-  return { kind: 'ok', userId, sessionId: payload.sessionId, deviceId: payload.deviceId, audience: payload.aud };
+  return { kind: 'ok', userId, sessionId: payload.sessionId, deviceId: payload.deviceId, audience: payload.aud, role };
 }
 
 /**
@@ -104,6 +108,7 @@ export function setAuthContext(req: FastifyRequest, result: Extract<EvalResult, 
   (req as unknown as { authSessionId?: string }).authSessionId = result.sessionId;
   (req as unknown as { authDeviceId?: number }).authDeviceId = result.deviceId;
   (req as unknown as { authAudience?: TokenAudience }).authAudience = result.audience;
+  (req as unknown as { authActorRole?: UserRole }).authActorRole = result.role;
 }
 
 /**
@@ -117,6 +122,9 @@ export async function consoleSession(app: FastifyInstance, opts: AuthScopeOption
     const result = await evaluate(effectiveOpts.tokenService, effectiveOpts, req);
     if (result.kind === 'error') {
       return reply.code(result.status).send({ error: { code: result.code, message: result.message } });
+    }
+    if (effectiveOpts.requireAdmin && result.role !== 'platform_admin') {
+      return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'platform admin required' } });
     }
     if (!acceptsJson(req)) {
       return reply.code(406).send({ error: { code: 'NOT_ACCEPTABLE', message: 'Accept must include application/json' } });

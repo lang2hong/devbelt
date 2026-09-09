@@ -11,6 +11,10 @@ import SyncView from './pages/SyncView.vue';
 import OrganizationsView from './pages/OrganizationsView.vue';
 import OrganizationDetailView from './pages/OrganizationDetailView.vue';
 import ResourcesView from './pages/ResourcesView.vue';
+import AdminUsersView from './pages/AdminUsersView.vue';
+import AdminOrganizationsView from './pages/AdminOrganizationsView.vue';
+import AdminAuditView from './pages/AdminAuditView.vue';
+import AdminVersionView from './pages/AdminVersionView.vue';
 import StatusPage from './pages/StatusPage.vue';
 
 const ROUTES: RouteConfig[] = [
@@ -20,6 +24,10 @@ const ROUTES: RouteConfig[] = [
   { pattern: '/console/organizations', name: 'organizations' },
   { pattern: '/console/organizations/:id', name: 'organization-detail' },
   { pattern: '/console/organizations/:id/resources', name: 'organization-resources' },
+  { pattern: '/console/admin/users', name: 'admin-users' },
+  { pattern: '/console/admin/organizations', name: 'admin-organizations' },
+  { pattern: '/console/admin/audit', name: 'admin-audit' },
+  { pattern: '/console/admin/version', name: 'admin-version' },
 ];
 
 installRouter(ROUTES);
@@ -28,6 +36,10 @@ const state = ref<'loading' | 'ready' | 'error'>('loading');
 const me_ = ref<ConsoleMe | null>(null);
 
 const view = computed<{ comp: Component; props: Record<string, unknown> }>(() => {
+  // 防御纵深：即使直接导航到 /console/admin/*，非平台管理员也只看到 403（服务端同样拒绝）。
+  if (router.name && router.name.startsWith('admin-') && !me_.value?.platformAdmin) {
+    return { comp: StatusPage, props: { code: 403 } };
+  }
   switch (router.name) {
     case 'account':
       return { comp: AccountView, props: { user: me_.value?.user ?? null } };
@@ -41,6 +53,14 @@ const view = computed<{ comp: Component; props: Record<string, unknown> }>(() =>
       return { comp: OrganizationDetailView, props: { organizationId: router.params.id } };
     case 'organization-resources':
       return { comp: ResourcesView, props: { organizationId: router.params.id } };
+    case 'admin-users':
+      return { comp: AdminUsersView, props: {} };
+    case 'admin-organizations':
+      return { comp: AdminOrganizationsView, props: {} };
+    case 'admin-audit':
+      return { comp: AdminAuditView, props: {} };
+    case 'admin-version':
+      return { comp: AdminVersionView, props: {} };
     default:
       return { comp: StatusPage, props: { code: 404 } };
   }
@@ -76,6 +96,7 @@ onMounted(async () => {
   state.value = 'ready';
   const p = window.location.pathname;
   if (p === '/console' || p === '/console/') navigate('/console/account');
+  if (p === '/console/admin' || p === '/console/admin/') navigate('/console/admin/users');
 });
 
 async function onLogout(): Promise<void> {
@@ -100,6 +121,7 @@ async function onLogout(): Promise<void> {
         <a href="/console/account/devices" :class="{ on: router.name === 'devices' }">设备</a>
         <a href="/console/account/sync" :class="{ on: router.name === 'sync' }">同步</a>
         <a href="/console/organizations" :class="{ on: router.name === 'organizations' || router.name === 'organization-detail' || router.name === 'organization-resources' }">组织</a>
+        <a v-if="me_.platformAdmin" href="/console/admin/users" :class="{ on: ['admin-users', 'admin-organizations', 'admin-audit', 'admin-version'].includes(router.name ?? '') }">管理</a>
         <span class="spacer"></span>
         <span class="email">{{ me_.user.email }}</span>
         <button class="btn ghost" @click="onLogout">登出</button>

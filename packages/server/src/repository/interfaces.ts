@@ -22,10 +22,12 @@ import type {
 } from '../domain/entities.js';
 import type {
   UserStatus,
+  UserRole,
   EmailVerificationPurpose,
   OrganizationRole,
   OrganizationMembershipStatus,
   OrganizationSubscriptionStatus,
+  OrganizationStatus,
   ResourceType,
   SyncAction,
   MailFlowType,
@@ -39,6 +41,59 @@ import type { Queryable } from './mysql/db.js';
  * 当前唯一实现为 mysql/。带 `exec` 参数的方法在**调用方事务**（TxRunner 提供的
  * Queryable）上执行，用于跨表原子性；不带 `exec` 的为普通只读 / 独立写。
  */
+
+/** 平台用户列表行（join 订阅取 planCode + 设备数，§2.3/§6 运营元数据）。 */
+export interface AdminUserRow {
+  userId: number;
+  email: string;
+  emailVerifiedTime: Date | null;
+  displayName?: string;
+  status: UserStatus;
+  role: UserRole;
+  lastLoginTime: Date | null;
+  createTime: Date;
+  planCode: string | null;
+  deviceCount: number;
+  /** 个人订阅当前版本（供乐观订阅调整 expectedVersion）。 */
+  subscriptionVersion: number | null;
+  periodEndTime: Date | null;
+}
+
+/** 平台用户列表过滤（cursor 为上一页最后一条 userId，keyset DESC）。 */
+export interface AdminUserFilter {
+  emailExact?: string;
+  userId?: number;
+  status?: UserStatus;
+  planCode?: string;
+  createdFrom?: Date;
+  createdTo?: Date;
+  cursor?: number;
+  limit: number;
+}
+
+/** 平台组织列表行（join 订阅取 planCode/seatLimit + 成员/邀请计数）。 */
+export interface AdminOrgRow {
+  organizationId: number;
+  name: string;
+  status: OrganizationStatus;
+  planCode: string | null;
+  seatLimit: number | null;
+  activeMemberCount: number;
+  invitedCount: number;
+  createTime: Date;
+  /** 组织订阅当前版本（供乐观订阅调整 expectedVersion）。 */
+  subscriptionVersion: number | null;
+  periodEndTime: Date | null;
+}
+
+/** 平台组织列表过滤。 */
+export interface AdminOrgFilter {
+  namePrefix?: string;
+  status?: OrganizationStatus;
+  planCode?: string;
+  cursor?: number;
+  limit: number;
+}
 
 export interface IUserRepo {
   findById(id: number): Promise<User | undefined>;
@@ -59,6 +114,14 @@ export interface IUserRepo {
   /** 改密（在改密事务内执行，与撤销会话同事务）。 */
   updatePassword(exec: Queryable, id: number, passwordHash: string): Promise<void>;
   updateStatus(id: number, status: UserStatus): Promise<void>;
+  /** 事务内更新用户状态（禁用/启用，与撤销会话同事务）。 */
+  updateStatusInTx(exec: Queryable, id: number, status: UserStatus): Promise<void>;
+  /** 置平台角色（仅 PLATFORM_ADMIN_EMAILS 受控引导任务写入）。 */
+  setRole(id: number, role: UserRole): Promise<void>;
+  /** 平台用户列表（filter + keyset cursor，DESC by id）。 */
+  listUsers(input: AdminUserFilter): Promise<AdminUserRow[]>;
+  /** 平台用户命中计数（导出/校验上限用）。 */
+  countUsers(input: Omit<AdminUserFilter, 'cursor' | 'limit'>): Promise<number>;
   /** 置 email_verified_time（与 token 消费同事务）。 */
   markEmailVerified(exec: Queryable, id: number, time: Date): Promise<void>;
   /** 会话版本 +1（改密/禁用时，用于使存量 access token 立即失效）。事务内执行。 */
@@ -96,12 +159,16 @@ export interface IEmailVerificationTokenRepo {
 export interface IPersonalPlanRepo {
   findByCode(code: string): Promise<PersonalPlan | undefined>;
   findById(id: number): Promise<PersonalPlan | undefined>;
+  /** 事务内按 code 读（订阅调整在回执事务内解析套餐，§6.2）。 */
+  findByCodeInTx(exec: Queryable, code: string): Promise<PersonalPlan | undefined>;
 }
 
 export interface IPersonalSubscriptionRepo {
   findByUserId(userId: number): Promise<PersonalSubscription | undefined>;
   /** 事务内按 user_id 读取，用于锁内配额计量。 */
   findByUserIdInTx(exec: Queryable, userId: number): Promise<PersonalSubscription | undefined>;
+  /** 事务内锁定订阅行（订阅调整序列化点，§6.2）。 */
+  findByUserIdForUpdate(exec: Queryable, userId: number): Promise<PersonalSubscription | undefined>;
   create(input: {
     userId: number;
     planId: number;
@@ -110,6 +177,15 @@ export interface IPersonalSubscriptionRepo {
     periodStartTime: Date;
     periodEndTime: Date | null;
   }): Promise<PersonalSubscription>;
+  /** 乐观更新（§6.2）：`WHERE id=? AND version=expectedVersion`，version+1；返回是否命中。 */
+  update(exec: Queryable, input: {
+    id: number;
+    planId: number;
+    status: PersonalSubscription['status'];
+    entitlementSnapshot: Record<string, unknown>;
+    periodEndTime: Date | null;
+    expectedVersion: number;
+  }): Promise<boolean>;
 }
 
 export interface IDeviceRepo {
@@ -221,6 +297,10 @@ export interface IOrganizationRepo {
   create(exec: Queryable, input: { name: string }): Promise<Organization>;
   updateName(exec: Queryable, id: number, name: string): Promise<void>;
   close(exec: Queryable, id: number, closedTime: Date): Promise<void>;
+  /** 平台组织列表（filter + keyset cursor，DESC by id），join 订阅/成员/邀请计数。 */
+  listForAdmin(input: AdminOrgFilter): Promise<AdminOrgRow[]>;
+  /** 平台组织命中计数。 */
+  countForAdmin(input: Omit<AdminOrgFilter, 'cursor' | 'limit'>): Promise<number>;
 }
 
 export interface IOrganizationSubscriptionRepo {
@@ -236,6 +316,16 @@ export interface IOrganizationSubscriptionRepo {
     periodStartTime: Date;
     periodEndTime: Date | null;
   }): Promise<OrganizationSubscription>;
+  /** 乐观更新（§6.2）：`WHERE id=? AND version=expectedVersion`，version+1；返回是否命中。 */
+  update(exec: Queryable, input: {
+    id: number;
+    planId: number;
+    seatLimit: number;
+    status: OrganizationSubscriptionStatus;
+    entitlementSnapshot: Record<string, unknown>;
+    periodEndTime: Date | null;
+    expectedVersion: number;
+  }): Promise<boolean>;
 }
 
 /** 成员目录项（join users 取 displayName；不返回 email，§2 第 4 条）。 */
@@ -545,6 +635,26 @@ export interface IAuditRepo {
   insert(event: Omit<AuditEvent, 'id' | 'createTime'>): Promise<AuditEvent>;
   /** 事务内写入（幂等回执下审计与业务写同事务、重放不重复审计）。 */
   insertInTx(exec: Queryable, event: Omit<AuditEvent, 'id' | 'createTime'>): Promise<AuditEvent>;
+  /** 平台审计查询（filter 有序，cursor 为上一页最后一条 id，DESC）。 */
+  search(input: AuditFilter): Promise<AuditEvent[]>;
+  /** 平台审计命中计数（导出上限校验）。 */
+  count(input: Omit<AuditFilter, 'cursor' | 'limit'>): Promise<number>;
+  /** 事务内查询（导出幂等回执下读取与审计写同事务）。 */
+  searchInTx(exec: Queryable, input: AuditFilter): Promise<AuditEvent[]>;
+  /** 事务内计数（导出上限校验）。 */
+  countInTx(exec: Queryable, input: Omit<AuditFilter, 'cursor' | 'limit'>): Promise<number>;
+}
+
+/** 平台审计查询过滤（§9）。时间跨度由 service 限制 ≤31 天。 */
+export interface AuditFilter {
+  fromTime?: Date;
+  toTime?: Date;
+  actorUserId?: number;
+  eventType?: string;
+  targetType?: string;
+  organizationId?: number;
+  cursor?: number;
+  limit: number;
 }
 
 /** 幂等回执仓储（P3 §6.1）。 */

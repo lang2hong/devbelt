@@ -1,7 +1,7 @@
 import type { IPersonalPlanRepo } from '../interfaces.js';
 import type { PersonalPlan } from '../../domain/entities.js';
 import type { PersonalPlanStatus } from '../../domain/enums.js';
-import type { MysqlDb } from './db.js';
+import type { MysqlDb, Queryable } from './db.js';
 
 /** 个人套餐仓储。当前只读，seed 由 migration 002 完成。 */
 export class MysqlPersonalPlanRepo implements IPersonalPlanRepo {
@@ -14,6 +14,11 @@ export class MysqlPersonalPlanRepo implements IPersonalPlanRepo {
 
   async findById(id: number): Promise<PersonalPlan | undefined> {
     const [rows] = await this.db().query<any[]>('SELECT * FROM personal_plans WHERE id = ?', [id]);
+    return rows[0] ? mapPlan(rows[0]) : undefined;
+  }
+
+  async findByCodeInTx(exec: Queryable, code: string): Promise<PersonalPlan | undefined> {
+    const [rows] = await exec.query<any[]>('SELECT * FROM personal_plans WHERE code = ?', [code]);
     return rows[0] ? mapPlan(rows[0]) : undefined;
   }
 }
