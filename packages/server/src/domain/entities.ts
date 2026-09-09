@@ -361,3 +361,20 @@ export interface AuditEvent {
   reason: string | null;
   createTime: Date;
 }
+
+/** 幂等回执（P3 §6.1）：同键同摘要重放，不重复业务写/审计。 */
+export interface IdempotencyReceipt {
+  id: number;
+  actorUserId: number;
+  sessionId: string;
+  method: string;
+  normalizedPath: string;
+  idempotencyKey: string;
+  requestDigest: Buffer;
+  status: 'processing' | 'completed';
+  httpStatus: number | null;
+  responseBody: string | null;
+  expiresTime: Date;
+  createTime: Date;
+  updateTime: Date;
+}

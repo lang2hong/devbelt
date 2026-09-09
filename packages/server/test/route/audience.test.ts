@@ -91,6 +91,7 @@ describe('token audience separation', () => {
         authorization: `Bearer ${consoleToken}`,
         'content-type': 'application/json',
         'x-csrf-token': boundCsrf,
+        'idempotency-key': '123e4567-e89b-42d3-8456-426614174000',
         cookie: `${csrfCookieName()}=${boundCsrf}`,
       },
       payload: { name: 'Console Org' },
@@ -115,6 +116,47 @@ describe('token audience separation', () => {
       payload: { name: 'Ext Org' },
     });
     expect(ext.statusCode).toBe(201);
+    await t.close();
+  });
+
+  it('rejects a console token on resource detail (content) but not on the metadata list', async () => {
+    const t = await buildTestApp();
+    const user = await t.repos.userRepo.create('content@b.com', 'hash', undefined);
+    const consoleToken = await t.tokenService.signAccessToken({
+      userId: user.id,
+      aud: 'console',
+      scope: [...CONSOLE_SCOPES],
+      sessionId: 'test-session',
+      sessionVersion: 0,
+    });
+
+    // 资源 detail（含 content）→ 仅 extension：console 直收 403。
+    const detail = await t.app.inject({
+      method: 'GET',
+      url: '/api/organizations/1/resources/1',
+      headers: t.auth(consoleToken),
+    });
+    expect(detail.statusCode).toBe(403);
+    expect(detail.json().code).toBe('TOKEN_AUDIENCE_FORBIDDEN');
+
+    // 目录写 → 仅 extension。
+    const folderWrite = await t.app.inject({
+      method: 'POST',
+      url: '/api/organizations/1/folders',
+      headers: t.auth(consoleToken),
+      payload: { name: 'f' },
+    });
+    expect(folderWrite.statusCode).toBe(403);
+    expect(folderWrite.json().code).toBe('TOKEN_AUDIENCE_FORBIDDEN');
+
+    // extension token 不被 aud 挡住（进入组织查证，无组织 → 404，而非 TOKEN_AUDIENCE）。
+    const extToken = await t.tokenFor(user.id);
+    const extDetail = await t.app.inject({
+      method: 'GET',
+      url: '/api/organizations/1/resources/1',
+      headers: t.auth(extToken),
+    });
+    expect(extDetail.statusCode).toBe(404);
     await t.close();
   });
 });

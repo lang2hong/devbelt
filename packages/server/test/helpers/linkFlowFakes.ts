@@ -41,6 +41,14 @@ export class FakeMailFlowRepo implements IMailFlowRepo {
     return this.store.get(nonceHash.toString('hex'));
   }
 
+  async bindUser(_exec: Queryable, id: number, userId: number): Promise<void> {
+    for (const f of this.store.values()) {
+      if (f.id === id && f.status === 'issued' && (f.userId === null || f.userId === userId)) {
+        f.userId = userId;
+      }
+    }
+  }
+
   async markConsumed(_exec: Queryable, id: number, now: Date): Promise<void> {
     for (const f of this.store.values()) {
       if (f.id === id) {
@@ -68,6 +76,11 @@ export class FakeAuditRepo implements IAuditRepo {
   readonly events: Omit<AuditEvent, 'id' | 'createTime'>[] = [];
 
   async insert(event: Omit<AuditEvent, 'id' | 'createTime'>): Promise<AuditEvent> {
+    this.events.push(event);
+    return { ...event, id: this.events.length, createTime: new Date() };
+  }
+
+  async insertInTx(_exec: Queryable, event: Omit<AuditEvent, 'id' | 'createTime'>): Promise<AuditEvent> {
     this.events.push(event);
     return { ...event, id: this.events.length, createTime: new Date() };
   }

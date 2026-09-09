@@ -5,7 +5,9 @@ import type {
   ISyncMutationRepo,
   ISyncResetTokenRepo,
   IMailFlowRepo,
+  IIdempotencyReceiptRepo,
 } from '../repository/interfaces.js';
+import type { AuditWriter } from './auditWriter.js';
 
 /**
  * 过期数据保留清理任务。
@@ -48,6 +50,9 @@ export interface RetentionCleanupDeps {
   syncMutationRepo: ISyncMutationRepo;
   syncResetTokenRepo: ISyncResetTokenRepo;
   mailFlowRepo: IMailFlowRepo;
+  idempotencyReceiptRepo: IIdempotencyReceiptRepo;
+  /** 回执删除的系统审计摘要（§6.1「删除本身写系统审计摘要」）。可选；写失败不阻断清理。 */
+  auditWriter?: AuditWriter;
   /** 无状态仓储（sync 两张表 + mail_flows）需要显式连接来源。 */
   exec: () => Queryable;
 }
@@ -75,6 +80,25 @@ export function startRetentionCleanup(
       ['personal_sync_mutations', () => deps.syncMutationRepo.prune(deps.exec(), nowDate, batchSize)],
       ['personal_sync_reset_tokens', () => deps.syncResetTokenRepo.prune(deps.exec(), tokenBefore, batchSize)],
       ['mail_flows', () => deps.mailFlowRepo.prune(tokenBefore, batchSize)],
+      [
+        'idempotency_receipts',
+        async () => {
+          const before = new Date(now);
+          const deleted = await deps.idempotencyReceiptRepo.prune(deps.exec(), before, batchSize);
+          if (deleted > 0 && deps.auditWriter) {
+            // 最小系统审计摘要：表名 + 删除数 + 时间窗口。不含幂等键/请求体/响应体/敏感信息。
+            deps.auditWriter.write({
+              eventType: 'system.receipts.cleanup',
+              result: 'success',
+              actorUserId: null,
+              targetType: 'idempotency_receipts',
+              targetId: null,
+              reason: `removed ${deleted} rows expired before ${before.toISOString()}`,
+            });
+          }
+          return deleted;
+        },
+      ],
     ];
 
     for (const [table, run] of tasks) {

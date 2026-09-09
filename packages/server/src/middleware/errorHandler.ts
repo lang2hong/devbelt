@@ -2,6 +2,7 @@ import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from
 import {
   DomainError,
   RateLimitedError,
+  IdempotencyInProgressError,
   ResourceVersionConflictError,
   SyncEpochStaleError,
   SyncVersionConflictError,
@@ -34,6 +35,9 @@ export function sendError(reply: FastifyReply, e: unknown): void {
   if (e instanceof RateLimitedError) {
     reply.header('Retry-After', e.retryAfterSeconds);
   }
+  if (e instanceof IdempotencyInProgressError) {
+    reply.header('Retry-After', e.retryAfterSeconds);
+  }
   reply.code(errorStatus(e.code)).send(domainErrorBody(e));
 }
 
@@ -54,6 +58,7 @@ export function registerErrorHandler(app: FastifyInstance): void {
 
     if (err instanceof DomainError) {
       if (err instanceof RateLimitedError) reply.header('Retry-After', err.retryAfterSeconds);
+      if (err instanceof IdempotencyInProgressError) reply.header('Retry-After', err.retryAfterSeconds);
       reply.code(errorStatus(err.code)).send(domainErrorBody(err));
       return;
     }
@@ -110,6 +115,9 @@ export function errorStatus(code: string): number {
     case 'SYNC_VERSION_CONFLICT':
     case 'SYNC_NONCE_REUSED':
     case 'SYNC_QUOTA_EXCEEDED':
+      return 409;
+    case 'IDEMPOTENCY_KEY_REUSED':
+    case 'IDEMPOTENCY_IN_PROGRESS':
       return 409;
     case 'RESOURCE_CONTENT_INVALID':
     case 'INVITATION_INVALID':

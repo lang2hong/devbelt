@@ -61,6 +61,11 @@ export async function organizationAuth(app: FastifyInstance, opts: OrganizationA
     if (payload.aud !== 'extension' && payload.aud !== 'console') {
       return reply.code(403).send({ message: 'token audience not allowed here', code: 'TOKEN_AUDIENCE_FORBIDDEN' });
     }
+    // per-route audience 收窄：资源 detail/写与目录写仅 extension（浏览器不得接组织业务内容）。
+    const routeAud = (req.routeOptions as { config?: { aud?: string } }).config?.aud;
+    if (routeAud && payload.aud !== routeAud) {
+      return reply.code(403).send({ message: 'token audience not allowed here', code: 'TOKEN_AUDIENCE_FORBIDDEN' });
+    }
     if (opts.scope && opts.scope.length > 0) {
       const scopes = new Set(payload.scope ?? []);
       if (!opts.scope.some((s) => scopes.has(s))) {
@@ -100,6 +105,19 @@ export async function organizationAuth(app: FastifyInstance, opts: OrganizationA
       return reply.code(404).send({ message: 'organization not found', code: 'ORGANIZATION_NOT_FOUND' });
     }
 
+    (req as unknown as AuthnOrgRequest).authUserId = userId;
+    (req as unknown as AuthnOrgRequest).authOrganizationId = organizationId;
+
+    // 组织管理写且带 Idempotency-Key 时，跳过此处的实时组织/成员/权限快速失败检查：
+    // 已完成的同 key 回执必须在「组织已关闭 / 成员已退出或已被移除」之后仍能重放（§6.1）。
+    // 首次写入、摘要不符、或非管理写（资源/目录，aud:'extension'）不做跳过，仍按原序快速失败；
+    // service 事务内仍以 lockActiveOrganization / requireActor / requireMembershipInTx 复核授权，
+    // 因此跳过本预览不致削弱最终授权边界。
+    const keyedManageWrite = WRITE_METHODS.has(req.method) && req.headers['idempotency-key'] !== undefined && routeAud === undefined;
+    if (keyedManageWrite) {
+      return;
+    }
+
     const org = await opts.organizationRepo.findById(organizationId);
     if (!org || org.status !== 'active') {
       return reply.code(404).send({ message: 'organization not found', code: 'ORGANIZATION_NOT_FOUND' });
@@ -115,8 +133,6 @@ export async function organizationAuth(app: FastifyInstance, opts: OrganizationA
       return reply.code(403).send({ message: 'forbidden', code: 'FORBIDDEN' });
     }
 
-    (req as unknown as AuthnOrgRequest).authUserId = userId;
-    (req as unknown as AuthnOrgRequest).authOrganizationId = organizationId;
     (req as unknown as AuthnOrgRequest).authMembershipRole = membership.role;
     (req as unknown as AuthnOrgRequest).authOrganization = org;
   });

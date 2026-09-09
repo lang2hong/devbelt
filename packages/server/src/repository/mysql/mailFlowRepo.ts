@@ -36,6 +36,13 @@ export class MysqlMailFlowRepo implements IMailFlowRepo {
     return rows[0] ? mapMailFlow(rows[0]) : undefined;
   }
 
+  async bindUser(exec: Queryable, id: number, userId: number): Promise<void> {
+    await exec.query(
+      'UPDATE mail_flows SET user_id = ? WHERE id = ? AND status = \'issued\' AND (user_id IS NULL OR user_id = ?)',
+      [userId, id, userId],
+    );
+  }
+
   async markConsumed(exec: Queryable, id: number, now: Date): Promise<void> {
     await exec.query('UPDATE mail_flows SET status = ?, consumed_time = ? WHERE id = ?', ['consumed', now, id]);
   }

@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { login, ensureCsrf, getOrCreateDeviceKey } from '../api/consoleAuth';
+import { safeReturnTo } from '../lib/returnTo';
 
 const email = ref('');
 const password = ref('');
 const error = ref('');
 const submitting = ref(false);
+
+const search = new URLSearchParams(window.location.search);
+const flow = search.get('flow');
+const returnTo = safeReturnTo(search.get('returnTo'));
 
 async function submit() {
   if (submitting.value) return;
@@ -16,7 +21,12 @@ async function submit() {
     const deviceKey = getOrCreateDeviceKey();
     const result = await login(email.value.trim(), password.value, deviceKey, csrf);
     if (result.kind === 'ok') {
-      window.location.assign('/console/');
+      // accept-invitation 邮件流：登录成功后回到干净落地页（不含 token）继续认领交接。
+      if (flow === 'accept-invitation') {
+        window.location.assign('/accept-invitation');
+        return;
+      }
+      window.location.assign(returnTo);
       return;
     }
     if (result.kind === 'invalid-credentials') error.value = '邮箱或密码错误，或邮箱尚未验证。';

@@ -69,6 +69,23 @@ export class ConflictError extends DomainError {
   }
 }
 
+/** 幂等键复用但请求摘要不同 → 409 IDEMPOTENCY_KEY_REUSED（§6.1）。 */
+export class IdempotencyKeyReusedError extends DomainError {
+  constructor() {
+    super('idempotency key reused with a different request', 'IDEMPOTENCY_KEY_REUSED');
+    this.name = 'IdempotencyKeyReusedError';
+  }
+}
+
+/** 同键同摘要请求仍在处理中 → 409 IDEMPOTENCY_IN_PROGRESS + Retry-After:1（§6.1）。 */
+export class IdempotencyInProgressError extends DomainError {
+  readonly retryAfterSeconds = 1;
+  constructor() {
+    super('idempotent request still in progress', 'IDEMPOTENCY_IN_PROGRESS');
+    this.name = 'IdempotencyInProgressError';
+  }
+}
+
 /**
  * 组织不存在 / closed / 调用者非 active member → 统一 404（§6.1：不区分，防枚举）。
  */

@@ -1,5 +1,6 @@
 import type { AuditEvent } from '../domain/entities.js';
 import type { IAuditRepo } from '../repository/interfaces.js';
+import type { Queryable } from '../repository/mysql/db.js';
 import { isIP } from 'net';
 
 /**
@@ -18,6 +19,17 @@ const ALLOWED_EVENT_TYPES = [
   'auth.password.changed',
   'auth.device.revoked',
   'account.displayName.changed',
+  'organization.created',
+  'organization.renamed',
+  'invitation.create',
+  'invitation.revoke',
+  'invitation.accept',
+  'organization.member.role_changed',
+  'organization.member.removed',
+  'organization.member.left',
+  'organization.closed',
+  'organization.member_email.read',
+  'system.receipts.cleanup',
 ] as const;
 
 export type AuditEventType = (typeof ALLOWED_EVENT_TYPES)[number];
@@ -38,7 +50,8 @@ export interface AuditWriteInput {
 
 /**
  * 审计写入器：只接收显式字段（永不接触原始 token/密码等敏感值），按白名单过滤后
- * 以 append-only 方式落库。写入失败只记日志、不向上抛 —— 审计失败不得阻断主流程。
+ * 以 append-only 方式落库。写入失败只记日志、不向上抛 —— 审计失败不得阻断主流程
+ * （`writeInTx` 除外：事务内审计随业务提交，失败应使整个事务回滚）。
  */
 export class AuditWriter {
   constructor(
@@ -47,12 +60,28 @@ export class AuditWriter {
   ) {}
 
   write(input: AuditWriteInput): void {
+    const event = this.build(input);
+    if (!event) return;
+    // 异步写入：审计落库失败不应改变或阻断主流程。
+    void this.repo.insert(event).catch((err) => {
+      this.log('audit write failed', { eventType: input.eventType, err: String(err) });
+    });
+  }
+
+  /** 事务内写入（幂等回执下审计与业务写同事务、重放不重复审计）。 */
+  async writeInTx(exec: Queryable, input: AuditWriteInput): Promise<void> {
+    const event = this.build(input);
+    if (!event) return;
+    await this.repo.insertInTx(exec, event);
+  }
+
+  private build(input: AuditWriteInput): Omit<AuditEvent, 'id' | 'createTime'> | null {
     if (!(ALLOWED_EVENT_TYPES as readonly string[]).includes(input.eventType)) {
       this.log('audit event type not whitelisted, dropped', { eventType: input.eventType });
-      return;
+      return null;
     }
 
-    const event: Omit<AuditEvent, 'id' | 'createTime'> = {
+    return {
       eventTime: new Date(),
       actorUserId: input.actorUserId ?? null,
       actorRole: input.actorRole ?? null,
@@ -66,11 +95,6 @@ export class AuditWriter {
       failureCode: input.failureCode ?? null,
       reason: input.reason ?? null,
     };
-
-    // 异步写入：审计落库失败不应改变或阻断主流程。
-    void this.repo.insert(event).catch((err) => {
-      this.log('audit write failed', { eventType: input.eventType, err: String(err) });
-    });
   }
 }
 

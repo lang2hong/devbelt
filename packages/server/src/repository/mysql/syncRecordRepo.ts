@@ -126,6 +126,23 @@ export class MysqlSyncRecordRepo implements ISyncRecordRepo {
     return { count: Number(rows[0]?.cnt ?? 0), bytes: Number(rows[0]?.bytes ?? 0) };
   }
 
+  async overview(exec: Queryable, userId: number, keyEpoch: string): Promise<{ count: number; bytes: number; lastActivityTime: Date | null }> {
+    const [rows] = await exec.query<any[]>(
+      `SELECT
+         COALESCE(SUM(delete_time IS NULL), 0) AS cnt,
+         COALESCE(SUM(CASE WHEN delete_time IS NULL THEN OCTET_LENGTH(ciphertext) + OCTET_LENGTH(tag) + OCTET_LENGTH(nonce) ELSE 0 END), 0) AS bytes,
+         MAX(update_time) AS last
+       FROM personal_connection_meta
+       WHERE user_id = ? AND key_epoch = ?`,
+      [userId, keyEpoch],
+    );
+    return {
+      count: Number(rows[0]?.cnt ?? 0),
+      bytes: Number(rows[0]?.bytes ?? 0),
+      lastActivityTime: rows[0]?.last ? new Date(rows[0].last) : null,
+    };
+  }
+
   async listActiveByEpoch(exec: Queryable, userId: number, keyEpoch: string): Promise<PersonalConnectionMeta[]> {
     const [rows] = await exec.query<any[]>(
       `SELECT ${SELECT_COLS} FROM personal_connection_meta

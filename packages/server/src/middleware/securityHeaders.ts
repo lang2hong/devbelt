@@ -1,72 +1,50 @@
 import type { FastifyHelmetOptions } from '@fastify/helmet';
+import type { FastifyInstance } from 'fastify';
+
+/** API 响应的严格 CSP（§8）：无任何资源加载来源。 */
+const API_CSP =
+  "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'";
 
 /**
- * 安全响应头配置（@fastify/helmet 的选项）。
+ * 非 CSP 安全头（@fastify/helmet 选项）。
  *
- * 单独成模块是为了让 createApp 与测试装配共用同一份值 —— 头部策略写在
- * app.ts 里的话，测试要么复制一遍（然后漂移），要么测不到。
+ * P3 §8 修正：CSP 改为按响应类型分层 —— HTML（公开页/邮件页/SPA 壳）在 consoleStatic
+ * 显式设 `self`-only CSP；API/404/405 等由 globalSecurityHeaders 兜底 `default-src
+ * 'none'`。因此 helmet 的全局 CSP 关闭，其余头（nosniff/XFO/Referrer-Policy 等）保留。
  *
- * 当前服务端只提供 JSON API，未托管任何前端产物。这份 CSP 仍按"未来会在
- * 同源托管管理后台"设定：`script-src 'self'` 挡掉注入的 inline script 与外部
- * 脚本，`connect-src 'self'` 阻断把凭据外发的路径。管理后台的目标形态见
- * docs/archive/管理后台架构.md；真正挂载静态资源时需连同这里一起复核。
+ * HSTS：生产强制 `max-age=31536000; includeSubDomains`（§8 L317），开发关闭
+ * （直连 HTTP 的开发/内网发出 HSTS 会锁死浏览器，跟 §8 L330 一致）。
  */
-export function securityHeaders(): FastifyHelmetOptions {
+export function securityHeaders(production = false): FastifyHelmetOptions {
   return {
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        // 后台产物是 vite 打出的外链 module script，不需要 inline 或 eval。
-        // 这两个关键字一旦加上，CSP 对 XSS 的防护基本归零。
-        scriptSrc: ["'self'"],
-        /**
-         * style 允许 inline：常见前端框架（含 Vue 的 `v-show`）会写
-         * `style="display:none"` 这类内联属性，CSP3 里在没有单独 style-src-attr
-         * 时由 style-src 兜住。这是有意识的妥协 —— style 注入的危害远小于
-         * script 注入。
-         */
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:'],
-        // 后台只请求自己的 API。允许 * 的话，XSS 拿到 token 后能直接外发
-        connectSrc: ["'self'"],
-        fontSrc: ["'self'", 'data:'],
-        objectSrc: ["'none'"],
-        baseUri: ["'self'"],
-        formAction: ["'self'"],
-        // 点击劫持：管理界面会改角色、吊销会话，被嵌进 iframe 诱导点击的代价很高。
-        // frame-ancestors 是现代浏览器的判据，X-Frame-Options 兜旧的
-        frameAncestors: ["'none'"],
-        /**
-         * 显式禁用 helmet 默认的 upgrade-insecure-requests。
-         *
-         * 该指令会把页面里的 http 子资源强制升级成 https。应用不知道自己是否
-         * 真在 TLS 后面（本地开发与内网部署可能是明文 http），升级后子资源直接
-         * 连接失败。TLS 由部署层（反向代理）终止，不在应用侧强制。
-         */
-        upgradeInsecureRequests: null,
-      },
-    },
-    /**
-     * HSTS 由部署层（反向代理）决定，应用侧不发。
-     *
-     * 应用不知道自己是否真在 HTTPS 后面：直连 HTTP 的开发/内网部署上发出
-     * HSTS，会把访问过的浏览器锁死在一个连不通的 https 地址上，而 HSTS 的
-     * max-age 在客户端，改回来只能等过期或让每个用户手工清。
-     */
-    hsts: false,
-    /**
-     * COEP 关掉：它要求所有跨源资源显式声明 CORP，而后台目前不需要
-     * SharedArrayBuffer 这类必须跨源隔离的能力，开着只会造成难查的加载失败。
-     */
+    contentSecurityPolicy: false,
+    hsts: production ? { maxAge: 31536000, includeSubDomains: true } : false,
     crossOriginEmbedderPolicy: false,
-    /**
-     * 静态资源要能被同源页面引用，用 same-origin 而不是默认的 same-origin
-     * 更严格值即可；这里显式写出以免 helmet 默认值变动。
-     */
     crossOriginResourcePolicy: { policy: 'same-origin' },
     referrerPolicy: { policy: 'no-referrer' },
-    // 明确 DENY：frame-ancestors 之外给不支持 CSP3 的浏览器兜一层
     frameguard: { action: 'deny' },
     xssFilter: false,
   };
+}
+
+/** API 默认 CSP 的兜底响应头 CORS 无关层。 */
+const API_CSP_HEADER = API_CSP;
+
+/**
+ * 全局兜底安全头（§8 全响应类型覆盖）：Permissions-Policy + 对「未显式设 CSP」的
+ * 响应（API 成功/错误、404/405、静态资源等）补 `default-src 'none'` CSP。HTML 页
+ * 已在 consoleStatic 显式设 CSP，此处跳过不覆盖。
+ *
+ * 注意：必须以**根实例直接调用**（`globalSecurityHeaders(app)` 而非 `app.register`）——
+ * register 会把本插件的 onSend 包进子封装作用域，只对其自身（空）路由生效，漏掉
+ * 根上的 API/404/405/静态路由。
+ */
+export function globalSecurityHeaders(app: FastifyInstance): void {
+  app.addHook('onSend', async (_req, reply, payload) => {
+    reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+    if (!reply.hasHeader('Content-Security-Policy')) {
+      reply.header('Content-Security-Policy', API_CSP_HEADER);
+    }
+    return payload;
+  });
 }

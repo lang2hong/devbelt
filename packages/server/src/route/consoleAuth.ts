@@ -5,7 +5,7 @@ import type { ConsoleAuthService } from '../service/consoleAuthService.js';
 import type { AuditWriter } from '../service/auditWriter.js';
 import { DomainError } from '../domain/errors.js';
 import { registerConsoleErrorHandler, rejectConsole } from '../middleware/consoleError.js';
-import { csrfCookieName, refreshCookieName, readCookie, serializeCookie } from '../middleware/cookies.js';
+import { csrfCookieName, refreshCookieName, linkFlowCookieName, readCookie, serializeCookie } from '../middleware/cookies.js';
 import { loginBody, registerBody } from './schemas.js';
 
 export interface ConsoleAuthRouteOptions {
@@ -17,6 +17,8 @@ export interface ConsoleAuthRouteOptions {
   /** Refresh cookie 的 Max-Age（秒），对齐服务端 refresh token 有效期（§4.2）。 */
   refreshMaxAgeSeconds: number;
   register: (email: string, password: string, displayName?: string, ip?: string) => Promise<{ ok: true }>;
+  /** 登录成功后把 link-flow cookie 绑定的 mail_flow 绑定到 userId（§5.3，best-effort）。 */
+  bindMailFlow?: (nonce: string, userId: number) => Promise<void>;
 }
 
 type Guard = (req: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
@@ -106,6 +108,12 @@ export async function consoleAuthRoutes(app: FastifyInstance, opts: ConsoleAuthR
         reply.header('Set-Cookie', serializeCookie(refreshCookieName(), result.refreshToken, { httpOnly: true, maxAgeSeconds: opts.refreshMaxAgeSeconds }));
         reply.header('Set-Cookie', serializeCookie(csrfCookieName(), opts.csrfService.issue(result.familyId), { httpOnly: false, maxAgeSeconds: 3600 }));
         opts.auditWriter.write({ eventType: 'auth.login.success', result: 'success', actorUserId: Number(result.user.userId), sourceIp: req.ip, requestId: requestIdOf(req) });
+        // 登录成功后把未登录阶段认领的 mail_flow 绑定到当前用户（accept-invitation 交接）。
+        // best-effort：绑定失败不阻断登录；消费端点会再次校验归属。
+        const nonce = readCookie(req, linkFlowCookieName());
+        if (nonce && opts.bindMailFlow) {
+          await opts.bindMailFlow(nonce, Number(result.user.userId)).catch(() => {});
+        }
         reply.send({ accessToken: result.accessToken, user: result.user });
       } catch (e) {
         opts.auditWriter.write({ eventType: 'auth.login.failed', result: 'failure', failureCode: e instanceof DomainError ? e.code : null, sourceIp: req.ip, requestId: requestIdOf(req) });

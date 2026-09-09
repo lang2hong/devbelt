@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import type { IRateLimitRepo } from '../interfaces.js';
-import type { MysqlDb } from './db.js';
+import type { MysqlDb, Queryable } from './db.js';
 
 /**
  * 跨实例共享限流计数仓储（固定窗口计数器，见 migration 003）。
@@ -44,12 +44,20 @@ export class MysqlRateLimitRepo implements IRateLimitRepo {
   }
 
   async increment(bucketKey: string, windowStartTime: Date): Promise<number> {
+    return this.incrementOn(this.db(), bucketKey, windowStartTime);
+  }
+
+  async incrementInTx(exec: Queryable, bucketKey: string, windowStartTime: Date): Promise<number> {
+    return this.incrementOn(exec, bucketKey, windowStartTime);
+  }
+
+  private async incrementOn(q: Queryable, bucketKey: string, windowStartTime: Date): Promise<number> {
     // 两个分支都要把新计数放进 LAST_INSERT_ID，才能用 insertId 一次取回。
     //
     // 前提：`rate_limit_entries` **不得有 AUTO_INCREMENT 列**（见 migration 003）。
     // 否则 VALUES 分支（该桶首次命中）会用自增 id 覆盖 LAST_INSERT_ID(1)，
     // insertId 返回自增 id 而非计数 1 —— 表里行数一多就超过阈值，首个请求即被误拒。
-    const [result] = await this.db().query<any>(
+    const [result] = await q.query<any>(
       `INSERT INTO rate_limit_entries (bucket_key, window_start_time, count)
        VALUES (?, ?, LAST_INSERT_ID(1))
        ON DUPLICATE KEY UPDATE count = LAST_INSERT_ID(count + 1)`,

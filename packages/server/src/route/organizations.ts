@@ -1,12 +1,16 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { authScope, type GetAuthUser } from '../middleware/requireAuth.js';
 import { organizationAuth, type AuthnOrgRequest } from '../middleware/organizationAuth.js';
 import type { TokenService } from '../service/tokenService.js';
-import type { OrganizationService } from '../service/organizationService.js';
+import type { OrganizationService, InviteOutcome } from '../service/organizationService.js';
 import type { OrganizationResourceService } from '../service/organizationResourceService.js';
 import type { IOrganizationRepo, IMembershipRepo, InvitationDto } from '../repository/interfaces.js';
 import type { OrganizationRole, ResourceType } from '../domain/enums.js';
 import type { CsrfService } from '../service/csrfService.js';
+import type { AuditWriter } from '../service/auditWriter.js';
+import type { IdempotencyService } from '../service/idempotencyService.js';
+import { validateIdempotencyKey } from '../service/idempotencyService.js';
+import type { Queryable } from '../repository/mysql/db.js';
 import { consoleWriteGuard, isConsoleAudience } from '../middleware/consoleWrite.js';
 import { sendError } from '../middleware/errorHandler.js';
 import {
@@ -35,6 +39,31 @@ export interface OrganizationRouteOptions {
   resourceService: OrganizationResourceService;
   organizationRepo: IOrganizationRepo;
   membershipRepo: IMembershipRepo;
+  auditWriter: AuditWriter;
+  idempotencyService: IdempotencyService;
+  /** 邀请邮件发送（提交后副作用；由 app.ts 注入 emailSender）。 */
+  sendInvitation: (outcome: InviteOutcome) => Promise<void>;
+}
+
+/** 关闭组织回执保留 30 天（§6.1）。 */
+const CLOSE_ORG_RETENTION_MS = 30 * 24 * 3600 * 1000;
+
+type IdempotencyMode = { mode: 'direct' } | { mode: 'key'; idempotencyKey: string };
+
+function idempotencyMode(req: FastifyRequest): IdempotencyMode {
+  const rawKey = req.headers['idempotency-key'];
+  if (isConsoleAudience(req) || rawKey !== undefined) {
+    return { mode: 'key', idempotencyKey: validateIdempotencyKey(rawKey) };
+  }
+  return { mode: 'direct' };
+}
+
+function sessionIdOf(req: FastifyRequest): string {
+  return (req as unknown as { authSessionId?: string }).authSessionId ?? '';
+}
+
+function requestIdOf(req: FastifyRequest): string {
+  return (req as unknown as { requestId?: string }).requestId ?? 'unknown';
 }
 
 export async function organizationRoutes(app: FastifyInstance, opts: OrganizationRouteOptions): Promise<void> {
@@ -66,8 +95,33 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         const userId = (req as any).authUserId as number;
         const { name } = req.body as any;
         try {
-          const org = await svc.createOrganization(userId, name);
-          reply.code(201).send({ organization: toOrgDto(org) });
+          const mode = idempotencyMode(req);
+          if (mode.mode === 'direct') {
+            const dto = await svc.createOrganization(userId, name);
+            opts.auditWriter.write({
+              eventType: 'organization.created', result: 'success', actorUserId: userId,
+              targetType: 'organization', targetId: String(dto.organizationId), organizationId: dto.organizationId,
+              sourceIp: req.ip, requestId: requestIdOf(req),
+            });
+            reply.code(201).send({ organization: toOrgDto(dto) });
+            return;
+          }
+          const result = await opts.idempotencyService.run({
+            actorUserId: userId, sessionId: sessionIdOf(req), method: 'POST', normalizedPath: '/api/organizations',
+            idempotencyKey: mode.idempotencyKey, requestBody: req.body,
+            // 限流在 createProcessing 之后、business 之前的同一事务内计数（随事务回滚）。
+            beforeWrite: (tx) => svc.throttleCreateOrganizationInTx(tx, userId),
+            business: async (tx: Queryable) => {
+              const dto = await svc.createOrganizationInTx(tx, userId, name);
+              await opts.auditWriter.writeInTx(tx, {
+                eventType: 'organization.created', result: 'success', actorUserId: userId,
+                targetType: 'organization', targetId: String(dto.organizationId), organizationId: dto.organizationId,
+                sourceIp: req.ip, requestId: requestIdOf(req),
+              });
+              return { status: 201, body: { organization: toOrgDto(dto) } };
+            },
+          });
+          reply.code(result.status).send(result.body);
         } catch (e) {
           sendError(reply, e);
         }
@@ -100,8 +154,31 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         const actorUserId = (req as any).authUserId as number;
         const { name } = req.body as any;
         try {
-          const r = await svc.updateOrganization(organizationId, actorUserId, name);
-          reply.send(r);
+          const mode = idempotencyMode(req);
+          if (mode.mode === 'direct') {
+            const r = await svc.updateOrganization(organizationId, actorUserId, name);
+            opts.auditWriter.write({
+              eventType: 'organization.renamed', result: 'success', actorUserId,
+              targetType: 'organization', targetId: String(organizationId), organizationId,
+              sourceIp: req.ip, requestId: requestIdOf(req),
+            });
+            reply.send(r);
+            return;
+          }
+          const result = await opts.idempotencyService.run({
+            actorUserId, sessionId: sessionIdOf(req), method: 'PATCH', normalizedPath: `/api/organizations/${organizationId}`,
+            idempotencyKey: mode.idempotencyKey, requestBody: req.body,
+            business: async (tx: Queryable) => {
+              const r = await svc.updateOrganizationInTx(tx, organizationId, actorUserId, name);
+              await opts.auditWriter.writeInTx(tx, {
+                eventType: 'organization.renamed', result: 'success', actorUserId,
+                targetType: 'organization', targetId: String(organizationId), organizationId,
+                sourceIp: req.ip, requestId: requestIdOf(req),
+              });
+              return { status: 200, body: r };
+            },
+          });
+          reply.code(result.status).send(result.body);
         } catch (e) {
           sendError(reply, e);
         }
@@ -111,8 +188,31 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         const organizationId = (req as any).authOrganizationId as number;
         const actorUserId = (req as any).authUserId as number;
         try {
-          const r = await svc.closeOrganization(organizationId, actorUserId);
-          reply.send(r);
+          const mode = idempotencyMode(req);
+          if (mode.mode === 'direct') {
+            const r = await svc.closeOrganization(organizationId, actorUserId);
+            opts.auditWriter.write({
+              eventType: 'organization.closed', result: 'success', actorUserId,
+              targetType: 'organization', targetId: String(organizationId), organizationId,
+              sourceIp: req.ip, requestId: requestIdOf(req),
+            });
+            reply.send(r);
+            return;
+          }
+          const result = await opts.idempotencyService.run({
+            actorUserId, sessionId: sessionIdOf(req), method: 'POST', normalizedPath: `/api/organizations/${organizationId}/close`,
+            idempotencyKey: mode.idempotencyKey, retentionMs: CLOSE_ORG_RETENTION_MS,
+            business: async (tx: Queryable) => {
+              const r = await svc.closeOrganizationInTx(tx, organizationId, actorUserId);
+              await opts.auditWriter.writeInTx(tx, {
+                eventType: 'organization.closed', result: 'success', actorUserId,
+                targetType: 'organization', targetId: String(organizationId), organizationId,
+                sourceIp: req.ip, requestId: requestIdOf(req),
+              });
+              return { status: 200, body: r };
+            },
+          });
+          reply.code(result.status).send(result.body);
         } catch (e) {
           sendError(reply, e);
         }
@@ -142,8 +242,32 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         const membershipId = Number((req.params as any).membershipId);
         const { role } = req.body as any;
         try {
-          const r = await svc.assignRole(organizationId, membershipId, role as OrganizationRole, userId);
-          reply.send(r);
+          const mode = idempotencyMode(req);
+          if (mode.mode === 'direct') {
+            const r = await svc.assignRole(organizationId, membershipId, role as OrganizationRole, userId);
+            opts.auditWriter.write({
+              eventType: 'organization.member.role_changed', result: 'success', actorUserId: userId,
+              targetType: 'membership', targetId: String(membershipId), organizationId,
+              sourceIp: req.ip, requestId: requestIdOf(req),
+            });
+            reply.send(r);
+            return;
+          }
+          const result = await opts.idempotencyService.run({
+            actorUserId: userId, sessionId: sessionIdOf(req), method: 'PATCH',
+            normalizedPath: `/api/organizations/${organizationId}/members/${membershipId}`,
+            idempotencyKey: mode.idempotencyKey, requestBody: req.body,
+            business: async (tx: Queryable) => {
+              const r = await svc.assignRoleInTx(tx, organizationId, membershipId, role as OrganizationRole, userId);
+              await opts.auditWriter.writeInTx(tx, {
+                eventType: 'organization.member.role_changed', result: 'success', actorUserId: userId,
+                targetType: 'membership', targetId: String(membershipId), organizationId,
+                sourceIp: req.ip, requestId: requestIdOf(req),
+              });
+              return { status: 200, body: r };
+            },
+          });
+          reply.code(result.status).send(result.body);
         } catch (e) {
           sendError(reply, e);
         }
@@ -154,8 +278,32 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         const userId = (req as any).authUserId as number;
         const membershipId = Number((req.params as any).membershipId);
         try {
-          const r = await svc.removeMember(organizationId, membershipId, userId);
-          reply.send(r);
+          const mode = idempotencyMode(req);
+          if (mode.mode === 'direct') {
+            const r = await svc.removeMember(organizationId, membershipId, userId);
+            opts.auditWriter.write({
+              eventType: 'organization.member.removed', result: 'success', actorUserId: userId,
+              targetType: 'membership', targetId: String(membershipId), organizationId,
+              sourceIp: req.ip, requestId: requestIdOf(req),
+            });
+            reply.send(r);
+            return;
+          }
+          const result = await opts.idempotencyService.run({
+            actorUserId: userId, sessionId: sessionIdOf(req), method: 'DELETE',
+            normalizedPath: `/api/organizations/${organizationId}/members/${membershipId}`,
+            idempotencyKey: mode.idempotencyKey,
+            business: async (tx: Queryable) => {
+              const r = await svc.removeMemberInTx(tx, organizationId, membershipId, userId);
+              await opts.auditWriter.writeInTx(tx, {
+                eventType: 'organization.member.removed', result: 'success', actorUserId: userId,
+                targetType: 'membership', targetId: String(membershipId), organizationId,
+                sourceIp: req.ip, requestId: requestIdOf(req),
+              });
+              return { status: 200, body: r };
+            },
+          });
+          reply.code(result.status).send(result.body);
         } catch (e) {
           sendError(reply, e);
         }
@@ -165,8 +313,32 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         const organizationId = (req as any).authOrganizationId as number;
         const userId = (req as any).authUserId as number;
         try {
-          const r = await svc.leaveOrganization(organizationId, userId);
-          reply.send(r);
+          const mode = idempotencyMode(req);
+          if (mode.mode === 'direct') {
+            const r = await svc.leaveOrganization(organizationId, userId);
+            opts.auditWriter.write({
+              eventType: 'organization.member.left', result: 'success', actorUserId: userId,
+              targetType: 'organization', targetId: String(organizationId), organizationId,
+              sourceIp: req.ip, requestId: requestIdOf(req),
+            });
+            reply.send(r);
+            return;
+          }
+          const result = await opts.idempotencyService.run({
+            actorUserId: userId, sessionId: sessionIdOf(req), method: 'POST',
+            normalizedPath: `/api/organizations/${organizationId}/leave`,
+            idempotencyKey: mode.idempotencyKey,
+            business: async (tx: Queryable) => {
+              const r = await svc.leaveOrganizationInTx(tx, organizationId, userId);
+              await opts.auditWriter.writeInTx(tx, {
+                eventType: 'organization.member.left', result: 'success', actorUserId: userId,
+                targetType: 'organization', targetId: String(organizationId), organizationId,
+                sourceIp: req.ip, requestId: requestIdOf(req),
+              });
+              return { status: 200, body: r };
+            },
+          });
+          reply.code(result.status).send(result.body);
         } catch (e) {
           sendError(reply, e);
         }
@@ -178,8 +350,35 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         const actorUserId = (req as any).authUserId as number;
         const { email, role } = req.body as any;
         try {
-          const r = await svc.inviteMember(organizationId, actorUserId, email, role as OrganizationRole | undefined);
-          reply.code(201).send({ invitation: toInvitationDto(r) });
+          const mode = idempotencyMode(req);
+          if (mode.mode === 'direct') {
+            const r = await svc.inviteMember(organizationId, actorUserId, email, role as OrganizationRole | undefined);
+            opts.auditWriter.write({
+              eventType: 'invitation.create', result: 'success', actorUserId,
+              targetType: 'invitation', targetId: String(r.invitationId), organizationId,
+              sourceIp: req.ip, requestId: requestIdOf(req),
+            });
+            reply.code(201).send({ invitation: toInvitationDto(r) });
+            return;
+          }
+          let outcome: InviteOutcome | undefined;
+          const result = await opts.idempotencyService.run({
+            actorUserId, sessionId: sessionIdOf(req), method: 'POST',
+            normalizedPath: `/api/organizations/${organizationId}/invitations`,
+            idempotencyKey: mode.idempotencyKey, requestBody: req.body,
+            business: async (tx: Queryable) => {
+              outcome = await svc.inviteMemberInTx(tx, organizationId, actorUserId, email, role as OrganizationRole | undefined);
+              await opts.auditWriter.writeInTx(tx, {
+                eventType: 'invitation.create', result: 'success', actorUserId,
+                targetType: 'invitation', targetId: String(outcome.invitationId), organizationId,
+                sourceIp: req.ip, requestId: requestIdOf(req),
+              });
+              return { status: 201, body: { invitation: toInvitationDto(outcome) } };
+            },
+          });
+          // 仅在首次（非重放）发信；重放不重复发信（§6.1）。
+          if (!result.replayed && outcome) await opts.sendInvitation(outcome);
+          reply.code(result.status).send(result.body);
         } catch (e) {
           sendError(reply, e);
         }
@@ -200,8 +399,33 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         const actorUserId = (req as any).authUserId as number;
         const invitationId = Number((req.params as any).invitationId);
         try {
-          const r = await svc.revokeInvitation(organizationId, actorUserId, invitationId);
-          reply.send(r);
+          const mode = idempotencyMode(req);
+          if (mode.mode === 'direct') {
+            const r = await svc.revokeInvitation(organizationId, actorUserId, invitationId);
+            opts.auditWriter.write({
+              eventType: 'invitation.revoke', result: 'success', actorUserId,
+              targetType: 'invitation', targetId: String(invitationId), organizationId,
+              sourceIp: req.ip, requestId: requestIdOf(req),
+            });
+            reply.send(r);
+            return;
+          }
+          const membershipId = await svc.invitationMembershipId(invitationId, organizationId);
+          const result = await opts.idempotencyService.run({
+            actorUserId, sessionId: sessionIdOf(req), method: 'DELETE',
+            normalizedPath: `/api/organizations/${organizationId}/invitations/${invitationId}`,
+            idempotencyKey: mode.idempotencyKey,
+            business: async (tx: Queryable) => {
+              const r = await svc.revokeInvitationInTx(tx, organizationId, actorUserId, invitationId, membershipId);
+              await opts.auditWriter.writeInTx(tx, {
+                eventType: 'invitation.revoke', result: 'success', actorUserId,
+                targetType: 'invitation', targetId: String(invitationId), organizationId,
+                sourceIp: req.ip, requestId: requestIdOf(req),
+              });
+              return { status: 200, body: r };
+            },
+          });
+          reply.code(result.status).send(result.body);
         } catch (e) {
           sendError(reply, e);
         }
@@ -218,7 +442,7 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         }
       });
 
-      org.post('/api/organizations/:organizationId/folders', { config: { permission: 'folder.manage' }, schema: { params: organizationIdParam, body: createFolderBody } }, async (req, reply) => {
+      org.post('/api/organizations/:organizationId/folders', { config: { permission: 'folder.manage', aud: 'extension' }, schema: { params: organizationIdParam, body: createFolderBody } }, async (req, reply) => {
         const organizationId = (req as any).authOrganizationId as number;
         const actorUserId = (req as any).authUserId as number;
         const body = req.body as any;
@@ -230,7 +454,7 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         }
       });
 
-      org.patch('/api/organizations/:organizationId/folders/:folderId', { config: { permission: 'folder.manage' }, schema: { params: folderIdParam, body: updateFolderBody } }, async (req, reply) => {
+      org.patch('/api/organizations/:organizationId/folders/:folderId', { config: { permission: 'folder.manage', aud: 'extension' }, schema: { params: folderIdParam, body: updateFolderBody } }, async (req, reply) => {
         const organizationId = (req as any).authOrganizationId as number;
         const actorUserId = (req as any).authUserId as number;
         const folderId = Number((req.params as any).folderId);
@@ -244,7 +468,7 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         }
       });
 
-      org.delete('/api/organizations/:organizationId/folders/:folderId', { config: { permission: 'folder.manage' }, schema: { params: folderIdParam } }, async (req, reply) => {
+      org.delete('/api/organizations/:organizationId/folders/:folderId', { config: { permission: 'folder.manage', aud: 'extension' }, schema: { params: folderIdParam } }, async (req, reply) => {
         const organizationId = (req as any).authOrganizationId as number;
         const actorUserId = (req as any).authUserId as number;
         const folderId = Number((req.params as any).folderId);
@@ -267,7 +491,7 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         }
       });
 
-      org.post('/api/organizations/:organizationId/resources', { config: { permission: 'resource.write' }, schema: { params: organizationIdParam, body: createResourceBody } }, async (req, reply) => {
+      org.post('/api/organizations/:organizationId/resources', { config: { permission: 'resource.write', aud: 'extension' }, schema: { params: organizationIdParam, body: createResourceBody } }, async (req, reply) => {
         const organizationId = (req as any).authOrganizationId as number;
         const actorUserId = (req as any).authUserId as number;
         const body = req.body as any;
@@ -280,7 +504,7 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         }
       });
 
-      org.get('/api/organizations/:organizationId/resources/:resourceId', { config: { permission: 'resource.read' }, schema: { params: resourceIdParam } }, async (req, reply) => {
+      org.get('/api/organizations/:organizationId/resources/:resourceId', { config: { permission: 'resource.read', aud: 'extension' }, schema: { params: resourceIdParam } }, async (req, reply) => {
         const organizationId = (req as any).authOrganizationId as number;
         const resourceId = Number((req.params as any).resourceId);
         try {
@@ -291,7 +515,7 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         }
       });
 
-      org.patch('/api/organizations/:organizationId/resources/:resourceId', { config: { permission: 'resource.write' }, schema: { params: resourceIdParam, body: updateResourceBody } }, async (req, reply) => {
+      org.patch('/api/organizations/:organizationId/resources/:resourceId', { config: { permission: 'resource.write', aud: 'extension' }, schema: { params: resourceIdParam, body: updateResourceBody } }, async (req, reply) => {
         const organizationId = (req as any).authOrganizationId as number;
         const resourceId = Number((req.params as any).resourceId);
         const actorUserId = (req as any).authUserId as number;
@@ -305,7 +529,7 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         }
       });
 
-      org.delete('/api/organizations/:organizationId/resources/:resourceId', { config: { permission: 'resource.delete' }, schema: { params: resourceIdParam } }, async (req, reply) => {
+      org.delete('/api/organizations/:organizationId/resources/:resourceId', { config: { permission: 'resource.delete', aud: 'extension' }, schema: { params: resourceIdParam } }, async (req, reply) => {
         const organizationId = (req as any).authOrganizationId as number;
         const resourceId = Number((req.params as any).resourceId);
         const actorUserId = (req as any).authUserId as number;

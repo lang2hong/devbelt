@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import Fastify from 'fastify';
 import { registerErrorHandler, sendError } from '../../src/middleware/errorHandler.js';
-import { OrganizationNotFoundError, RateLimitedError } from '../../src/domain/errors.js';
+import { registerConsoleErrorHandler } from '../../src/middleware/consoleError.js';
+import { OrganizationNotFoundError, RateLimitedError, IdempotencyInProgressError, IdempotencyKeyReusedError } from '../../src/domain/errors.js';
 
 /**
  * sendError 只映射 DomainError；未知异常必须冒泡到全局 errorHandler，
@@ -30,6 +31,14 @@ async function buildApp() {
   app.get('/rate-limited', async (_req, reply) => {
     try {
       throw new RateLimitedError(42);
+    } catch (e) {
+      sendError(reply, e);
+    }
+  });
+
+  app.get('/in-progress', async (_req, reply) => {
+    try {
+      throw new IdempotencyInProgressError();
     } catch (e) {
       sendError(reply, e);
     }
@@ -70,6 +79,18 @@ describe('sendError', () => {
     }
   });
 
+  it('sets Retry-After: 1 for idempotency-in-progress (flat envelope)', async () => {
+    const { app } = await buildApp();
+    try {
+      const res = await app.inject({ method: 'GET', url: '/in-progress' });
+      expect(res.statusCode).toBe(409);
+      expect(res.headers['retry-after']).toBe('1');
+      expect(res.json().code).toBe('IDEMPOTENCY_IN_PROGRESS');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('rethrows unknown errors so the global handler logs them, and hides details', async () => {
     const { app, logged } = await buildApp();
     try {
@@ -79,6 +100,47 @@ describe('sendError', () => {
       expect(res.body).not.toContain('internal detail');
       expect(logged).toHaveLength(1);
       expect((logged[0] as { err: Error }).err.message).toBe('boom: internal detail');
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('console error envelope for idempotency', () => {
+  async function buildConsoleApp() {
+    const app = Fastify({ logger: false });
+    await app.register(async (child) => {
+      registerConsoleErrorHandler(child);
+      child.get('/in-progress', async () => {
+        throw new IdempotencyInProgressError();
+      });
+      child.get('/key-reused', async () => {
+        throw new IdempotencyKeyReusedError();
+      });
+    });
+    await app.ready();
+    return app;
+  }
+
+  it('sets Retry-After: 1 for IDEMPOTENCY_IN_PROGRESS', async () => {
+    const app = await buildConsoleApp();
+    try {
+      const res = await app.inject({ method: 'GET', url: '/in-progress' });
+      expect(res.statusCode).toBe(409);
+      expect(res.headers['retry-after']).toBe('1');
+      expect(res.json().error.code).toBe('IDEMPOTENCY_IN_PROGRESS');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('maps IDEMPOTENCY_KEY_REUSED to 409 without Retry-After', async () => {
+    const app = await buildConsoleApp();
+    try {
+      const res = await app.inject({ method: 'GET', url: '/key-reused' });
+      expect(res.statusCode).toBe(409);
+      expect(res.headers['retry-after']).toBeUndefined();
+      expect(res.json().error.code).toBe('IDEMPOTENCY_KEY_REUSED');
     } finally {
       await app.close();
     }

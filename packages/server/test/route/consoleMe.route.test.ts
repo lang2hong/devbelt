@@ -7,9 +7,11 @@ import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
 import { TokenService, type SigningKeys } from '../../src/service/tokenService.js';
 import { CsrfService } from '../../src/service/csrfService.js';
 import { AuditWriter } from '../../src/service/auditWriter.js';
+import { IdempotencyService } from '../../src/service/idempotencyService.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
 import { CONSOLE_SCOPES } from '../../src/domain/enums.js';
 import { csrfCookieName } from '../../src/middleware/cookies.js';
+import type { Queryable } from '../../src/repository/mysql/db.js';
 import {
   FakeUserRepo,
   FakePersonalPlanRepo,
@@ -17,6 +19,7 @@ import {
   FakeMembershipRepo,
   FakeOrganizationRepo,
   FakeRateLimitRepo,
+  FakeIdempotencyReceiptRepo,
 } from '../helpers/fakeRepos.js';
 import { FakeAuditRepo } from '../helpers/linkFlowFakes.js';
 
@@ -45,6 +48,7 @@ async function buildApp(): Promise<{ app: FastifyInstance; tokenService: TokenSe
     csrfService,
     auditWriter: new AuditWriter(new FakeAuditRepo()),
     rateLimiter: new RateLimitService(new FakeRateLimitRepo(), false),
+    idempotencyService: new IdempotencyService(new FakeIdempotencyReceiptRepo(), async (fn) => fn({} as Queryable)),
     consoleOrigin: 'http://localhost:5173',
     userRepo,
     personalSubscriptionRepo,
@@ -66,7 +70,7 @@ describe('console me routes', () => {
     const u = await userRepo.findByEmail('me@b.com');
     const token = await consoleToken(tokenService, u!.id);
 
-    const res = await app.inject({ method: 'GET', url: '/api/console/me', headers: { authorization: `Bearer ${token}` } });
+    const res = await app.inject({ method: 'GET', url: '/api/console/me', headers: { authorization: `Bearer ${token}`, accept: 'application/json' } });
     expect(res.statusCode).toBe(200);
     expect(res.json().user.email).toBe('me@b.com');
     expect(res.json().platformAdmin).toBe(false);
@@ -99,6 +103,7 @@ describe('console me routes', () => {
         authorization: `Bearer ${token}`,
         'content-type': 'application/json',
         accept: 'application/json',
+        'idempotency-key': '123e4567-e89b-42d3-8456-426614174000',
         'x-csrf-token': boundCsrf,
         cookie: `${csrfCookieName()}=${boundCsrf}`,
       },
@@ -109,6 +114,30 @@ describe('console me routes', () => {
 
     const fresh = await userRepo.findById(u!.id);
     expect(fresh!.displayName).toBe('Bob');
+    await app.close();
+  });
+
+  it('PATCH /api/console/me requires an Idempotency-Key', async () => {
+    const { app, tokenService, csrfService, userRepo } = await buildApp();
+    const u = await userRepo.findByEmail('me@b.com');
+    const token = await consoleToken(tokenService, u!.id);
+    const boundCsrf = csrfService.issue(SESSION);
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/console/me',
+      headers: {
+        origin: 'http://localhost:5173',
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+        accept: 'application/json',
+        'x-csrf-token': boundCsrf,
+        cookie: `${csrfCookieName()}=${boundCsrf}`,
+      },
+      payload: { displayName: 'NoKey' },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('VALIDATION_FAILED');
     await app.close();
   });
 });

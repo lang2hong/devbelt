@@ -10,7 +10,7 @@ import { AuditWriter } from '../../src/service/auditWriter.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
 import { linkFlowCookieName, csrfCookieName } from '../../src/middleware/cookies.js';
 import { FakeMailFlowRepo, FakeAuditRepo } from '../helpers/linkFlowFakes.js';
-import { FakeEmailVerificationTokenRepo, FakeUserRepo, FakeRateLimitRepo } from '../helpers/fakeRepos.js';
+import { FakeEmailVerificationTokenRepo, FakeUserRepo, FakeRateLimitRepo, FakeOrganizationRepo, FakeOrganizationSubscriptionRepo, FakeMembershipRepo, FakeInvitationRepo } from '../helpers/fakeRepos.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 
 const ORIGIN = 'http://localhost:5173';
@@ -24,8 +24,12 @@ async function buildApp(): Promise<FastifyInstance> {
   const mailFlow = new FakeMailFlowRepo();
   const tokenRepo = new FakeEmailVerificationTokenRepo();
   const userRepo = new FakeUserRepo();
+  const orgRepo = new FakeOrganizationRepo();
+  const membershipRepo = new FakeMembershipRepo(userRepo, orgRepo);
+  const invitationRepo = new FakeInvitationRepo(membershipRepo);
+  const subscriptionRepo = new FakeOrganizationSubscriptionRepo();
   const rateLimiter = new RateLimitService(new FakeRateLimitRepo(), false);
-  const linkFlowService = new LinkFlowService(mailFlow, tokenRepo, userRepo, async (fn) => fn({} as Queryable), rateLimiter);
+  const linkFlowService = new LinkFlowService(mailFlow, tokenRepo, userRepo, invitationRepo, orgRepo, subscriptionRepo, membershipRepo, async (fn) => fn({} as Queryable), rateLimiter);
   const csrfService = new CsrfService(Buffer.alloc(32, 7));
   const auditWriter = new AuditWriter(new FakeAuditRepo());
 

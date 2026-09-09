@@ -109,6 +109,7 @@ export function setAuthContext(req: FastifyRequest, result: Extract<EvalResult, 
 /**
  * 控制台认证作用域插件（`/api/console/*`）：与 authScope 相同的会话核验，但错误走
  * §6 控制台信封 `{ error: { code, message } }`；aud 缺省 console。
+ * 统一在此处校验 Accept: application/json（缺失/非 JSON → 406），避免每个控制台路由重复实现。
  */
 export async function consoleSession(app: FastifyInstance, opts: AuthScopeOptions): Promise<void> {
   const effectiveOpts: AuthScopeOptions = { ...opts, aud: opts.aud ?? 'console' };
@@ -117,7 +118,20 @@ export async function consoleSession(app: FastifyInstance, opts: AuthScopeOption
     if (result.kind === 'error') {
       return reply.code(result.status).send({ error: { code: result.code, message: result.message } });
     }
+    if (!acceptsJson(req)) {
+      return reply.code(406).send({ error: { code: 'NOT_ACCEPTABLE', message: 'Accept must include application/json' } });
+    }
     setAuthContext(req, result);
   });
   await opts.routes(app);
+}
+
+function headerOf(req: FastifyRequest, name: string): string | undefined {
+  const v = req.headers[name];
+  return typeof v === 'string' ? v : undefined;
+}
+
+function acceptsJson(req: FastifyRequest): boolean {
+  const a = (headerOf(req, 'accept') ?? '').toLowerCase();
+  return a.includes('application/json') || a.includes('*/*');
 }

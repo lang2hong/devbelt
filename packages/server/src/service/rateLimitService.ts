@@ -1,5 +1,6 @@
 import { RateLimitedError } from '../domain/errors.js';
 import type { IRateLimitRepo } from '../repository/interfaces.js';
+import type { Queryable } from '../repository/mysql/db.js';
 
 /**
  * 跨实例共享限流服务（固定窗口计数器）。
@@ -48,6 +49,18 @@ export class RateLimitService {
   async hit(bucketKey: string, windowSeconds: number, max: number, now = new Date()): Promise<void> {
     if (!this.enabled || max <= 0) return;
     const count = await this.increment(bucketKey, windowSeconds, now);
+    if (count > max) {
+      throw new RateLimitedError(this.retryAfterSeconds(now, windowSeconds));
+    }
+  }
+
+  /**
+   * 同一事务内计数并判定（与幂等回执同 Queryable）：限流计数与业务写、回执同滚，
+   * 保证仅并发胜者计一次、失败整体回滚（超限抛 RateLimitedError 时该次计数也随事务回滚）。
+   */
+  async hitInTx(exec: Queryable, bucketKey: string, windowSeconds: number, max: number, now = new Date()): Promise<void> {
+    if (!this.enabled || max <= 0) return;
+    const count = await this.repo.incrementInTx(exec, bucketKey, this.windowStart(now, windowSeconds));
     if (count > max) {
       throw new RateLimitedError(this.retryAfterSeconds(now, windowSeconds));
     }

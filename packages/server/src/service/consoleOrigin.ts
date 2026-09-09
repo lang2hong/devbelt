@@ -23,7 +23,14 @@ export function resolveConsoleOrigin(env: NodeJS.ProcessEnv = process.env): stri
     throw new Error(`SMTP_BASE_URL is not a valid absolute URL: ${JSON.stringify(raw)}`);
   }
 
-  if (isDev) return url.origin;
+  if (isDev) {
+    // 开发环境只允许 Vite loopback 源（localhost / 127.0.0.0/8 / ::1），
+    // 拒绝把调试环境意外对外开放成可被跨域访问的任意源。
+    if (!isLoopbackHostname(url.hostname)) {
+      throw new Error(`SMTP_BASE_URL must be a loopback host in development: ${JSON.stringify(raw)}`);
+    }
+    return url.origin;
+  }
 
   if (url.protocol !== 'https:') {
     throw new Error(`SMTP_BASE_URL must use https outside development: ${JSON.stringify(raw)}`);
@@ -38,6 +45,49 @@ export function resolveConsoleOrigin(env: NodeJS.ProcessEnv = process.env): stri
   }
   if (url.search || url.hash) {
     throw new Error(`SMTP_BASE_URL must be a bare origin without query or fragment: ${JSON.stringify(raw)}`);
+  }
+  return url.origin;
+}
+
+/**
+ * 开发环境的 loopback 主机判定：`localhost`、`::1`（含括号形）与 127.0.0.0/8。
+ * WHATWG URL.hostname 对 IPv6 返回带方括号的 `[::1]`。
+ */
+function isLoopbackHostname(hostname: string): boolean {
+  if (hostname === 'localhost' || hostname === '::1' || hostname === '[::1]') return true;
+  return /^127\./.test(hostname);
+}
+
+/**
+ * 开发 CORS 允许的 Vite 源白名单（P3）：仅 http/https × loopback × 固定 5173。
+ * 放行任意 loopback 端口会让本机任意服务获得同源 API 跨域读取能力，故必须收窄。
+ */
+const VITE_LOOPBACK_ORIGINS: ReadonlySet<string> = new Set([
+  'http://localhost:5173',
+  'https://localhost:5173',
+  'http://127.0.0.1:5173',
+  'https://127.0.0.1:5173',
+  'http://[::1]:5173',
+  'https://[::1]:5173',
+]);
+
+/**
+ * CORS 允许的请求源解析：仅开发环境回显白名单内的 Vite loopback 5173 源（独立于
+ * 邮件链接所用的、较宽的 resolveConsoleOrigin 策略）；其余环境（production / staging /
+ * 未显式声明）一律返回 false，任何请求都不返回 Access-Control-Allow-Origin。
+ */
+export function resolveCorsOrigin(env: NodeJS.ProcessEnv = process.env): string | false {
+  if (env.NODE_ENV !== 'development') return false;
+
+  const raw = (env.SMTP_BASE_URL || '').trim() || 'http://localhost:5173';
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`CORS origin must be a Vite loopback http(s)://<loopback>:5173 origin in development: ${JSON.stringify(raw)}`);
+  }
+  if (!VITE_LOOPBACK_ORIGINS.has(url.origin)) {
+    throw new Error(`CORS origin must be a Vite loopback http(s)://<loopback>:5173 origin in development: ${JSON.stringify(raw)}`);
   }
   return url.origin;
 }

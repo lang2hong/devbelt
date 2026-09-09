@@ -2,17 +2,27 @@ import { createHash, randomBytes } from 'crypto';
 import {
   EmailVerificationAlreadyConfirmedError,
   EmailVerificationInvalidError,
+  InvitationInvalidError,
   ValidationError,
 } from '../domain/errors.js';
-import type { IMailFlowRepo, IEmailVerificationTokenRepo, IUserRepo } from '../repository/interfaces.js';
+import type {
+  IMailFlowRepo,
+  IEmailVerificationTokenRepo,
+  IUserRepo,
+  IOrganizationInvitationRepo,
+  IOrganizationRepo,
+  IOrganizationSubscriptionRepo,
+  IMembershipRepo,
+} from '../repository/interfaces.js';
 import type { MailFlow } from '../domain/entities.js';
+import type { OrganizationRole } from '../domain/enums.js';
 import type { TxRunner, Queryable } from '../repository/mysql/db.js';
 import type { RateLimitService } from './rateLimitService.js';
 
 /** 邮件流短时有效（§5.1：签发后 10 分钟）。 */
 const MAIL_FLOW_TTL_MS = 10 * 60 * 1000;
 
-/** 邮箱验证 token 的固定形态：32 字节随机值 base64url 编码 = 43 字符。 */
+/** 邮箱验证/邀请 token 的固定形态：32 字节随机值 base64url 编码 = 43 字符。 */
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 function sha256(input: string | Buffer): Buffer {
@@ -29,11 +39,25 @@ export interface LinkFlowClaimResult {
   created: boolean;
 }
 
+export interface AcceptInvitationOrganization {
+  organizationId: number;
+  name: string;
+  status: string;
+  closedTime: Date | null;
+  role: OrganizationRole;
+}
+
+export type AcceptInvitationResult =
+  | { kind: 'accepted'; organization: AcceptInvitationOrganization }
+  | { kind: 'already-accepted'; organization: AcceptInvitationOrganization };
+
 /**
- * 一次性邮件链接服务（P3 §5）：只处理 verify-email 类型（切片 1）。
+ * 一次性邮件链接服务（P3 §5）：verify-email（切片 1）与 accept-invitation（切片 3）。
  *
  * - claim：校验 type/token 形态，幂等认领（同 nonce 复用），签发 opaque nonce，按 IP + token 限流。
- * - verifyEmail：以 nonce 定位 mail_flow，在事务内消费验证 token + 标记邮箱已验。
+ * - verifyEmail：以 nonce 定位 mail_flow，事务内消费验证 token + 标记邮箱已验。
+ * - bindFlowToUser：登录成功后把 mail_flow 绑定到 authUserId（§5.3/§5.4）。
+ * - acceptInvitation：console-only 消费，固定锁序（§5.3）。
  *
  * 不认领 sync-reset token、不签发 handoff、不调用同步 API、不处理 newState（切片 5）。
  */
@@ -42,12 +66,16 @@ export class LinkFlowService {
     private readonly mailFlowRepo: IMailFlowRepo,
     private readonly emailVerificationTokenRepo: IEmailVerificationTokenRepo,
     private readonly userRepo: IUserRepo,
+    private readonly invitationRepo: IOrganizationInvitationRepo,
+    private readonly organizationRepo: IOrganizationRepo,
+    private readonly organizationSubscriptionRepo: IOrganizationSubscriptionRepo,
+    private readonly membershipRepo: IMembershipRepo,
     private readonly runner: TxRunner,
     private readonly rateLimiter: RateLimitService,
   ) {}
 
   async claim(args: { type: string; token: string; ip?: string; existingNonce?: string }): Promise<LinkFlowClaimResult> {
-    if (args.type !== 'verify-email') {
+    if (args.type !== 'verify-email' && args.type !== 'accept-invitation') {
       throw new ValidationError('unsupported link flow type');
     }
     if (!TOKEN_PATTERN.test(args.token)) {
@@ -70,7 +98,7 @@ export class LinkFlowService {
       const existing = await this.mailFlowRepo.findByNonceHash(sha256(args.existingNonce));
       if (
         existing &&
-        existing.type === 'verify-email' &&
+        existing.type === args.type &&
         existing.status === 'issued' &&
         existing.expiresTime > now &&
         existing.targetTokenHash.equals(targetTokenHash)
@@ -79,14 +107,24 @@ export class LinkFlowService {
       }
     }
 
-    const tokenRecord = await this.emailVerificationTokenRepo.findByHash(tokenHashHex);
+    // 解析目标 token 表行 id：类型决定对应 token 表（验证 → email_verification_tokens，
+    // 邀请 → organization_invitations）。未知/过期 token 无法解析时 targetRecordId 为 null，
+    // 消费阶段统一失效。
+    let targetRecordId: number | null = null;
+    if (args.type === 'verify-email') {
+      const tokenRecord = await this.emailVerificationTokenRepo.findByHash(tokenHashHex);
+      targetRecordId = tokenRecord ? tokenRecord.id : null;
+    } else {
+      const invitation = await this.invitationRepo.findByTokenHash(tokenHashHex);
+      targetRecordId = invitation ? invitation.id : null;
+    }
 
     const nonce = randomBytes(32).toString('base64url');
     const expiresTime = new Date(now.getTime() + MAIL_FLOW_TTL_MS);
     await this.mailFlowRepo.create({
-      type: 'verify-email',
+      type: args.type as MailFlow['type'],
       targetTokenHash,
-      targetRecordId: tokenRecord ? tokenRecord.id : null,
+      targetRecordId,
       userId: null,
       nonceHash: sha256(nonce),
       expiresTime,
@@ -110,6 +148,104 @@ export class LinkFlowService {
       }
 
       return this.consumeVerification(tx, flow, new Date());
+    });
+  }
+
+  /**
+   * 登录成功后把 mail_flow 绑定到当前用户（§5.3「服务端登录后 mail-flow 绑定」）。
+   * 幂等：仅 issued 且未过期、且尚未绑定（或已绑定同一用户）时写入；其余情况抛
+   * InvitationInvalidError（绑定是后续消费的前置门槛，失败即终止，不得静默放行）。
+   */
+  async bindFlowToUser(nonce: string, userId: number): Promise<void> {
+    const nonceHash = sha256(nonce);
+    await this.runner(async (tx) => {
+      const flow = await this.mailFlowRepo.findByNonceHashForUpdate(tx, nonceHash);
+      if (!flow || flow.status !== 'issued') throw new InvitationInvalidError();
+      if (flow.expiresTime <= new Date()) throw new InvitationInvalidError();
+      if (flow.userId != null && flow.userId !== userId) throw new InvitationInvalidError();
+      await this.mailFlowRepo.bindUser(tx, flow.id, userId);
+    });
+  }
+
+  /**
+   * 接受组织邀请（console-only，§5.3）。以 mail_flow 记录（非路径 token）作为凭据，
+   * 固定锁序：mail_flow → organization → subscription → invitation → membership。
+   * flow 必须已由 bindFlowToUser 绑定到当前登录用户（未绑定/绑定他人一律 400）。
+   *
+   * 其余路径（跨账号 / 失效 / 已被其他 flow 消费 / 组织关闭 / 用户未验证）统一
+   * 400 INVITATION_INVALID，不泄露更多状态。
+   */
+  async acceptInvitation(nonce: string, userId: number): Promise<AcceptInvitationResult> {
+    const nonceHash = sha256(nonce);
+
+    // 预读（非锁）拿 target_record_id 与组织归属，供后续锁序定位。
+    const flowHint = await this.mailFlowRepo.findByNonceHash(nonceHash);
+    if (!flowHint || flowHint.type !== 'accept-invitation' || flowHint.targetRecordId == null) {
+      throw new InvitationInvalidError();
+    }
+    const invHint = await this.invitationRepo.findById(flowHint.targetRecordId);
+    if (!invHint) throw new InvitationInvalidError();
+
+    return this.runner(async (tx) => {
+      const now = new Date();
+
+      // 1. mail_flow FOR UPDATE（唯一 nonce，其余两端点也以此行为首锁，避免反向锁序）。
+      const flow = await this.mailFlowRepo.findByNonceHashForUpdate(tx, nonceHash);
+      if (!flow || flow.type !== 'accept-invitation' || flow.targetRecordId == null) {
+        throw new InvitationInvalidError();
+      }
+      if (flow.status !== 'issued' || flow.expiresTime <= now) throw new InvitationInvalidError();
+      // 绑定是消费的前置条件（§5.3 裁定）：flow 必须已绑定到当前登录用户（未绑定/绑定他人 → 400）。
+      if (flow.userId !== userId) throw new InvitationInvalidError();
+
+      // 2. organization FOR UPDATE。
+      const org = await this.organizationRepo.lockById(tx, invHint.organizationId);
+      if (!org || org.status !== 'active') throw new InvitationInvalidError();
+
+      // 3. subscription FOR UPDATE。
+      const sub = await this.organizationSubscriptionRepo.findByOrganizationIdForUpdate(tx, org.id);
+      if (!sub || sub.status !== 'active') throw new InvitationInvalidError();
+
+      // 4. invitation FOR UPDATE（通过 target_record_id）。
+      const inv = await this.invitationRepo.findByIdForUpdate(tx, flow.targetRecordId);
+      if (!inv || inv.organizationId !== org.id) throw new InvitationInvalidError();
+
+      // 5. membership FOR UPDATE。
+      const membership = await this.membershipRepo.findByIdForUpdate(tx, inv.membershipId);
+      if (!membership || membership.organizationId !== org.id) throw new InvitationInvalidError();
+
+      // 用户 active 且邮箱已验证。
+      const user = await this.userRepo.findByIdInTx(tx, userId);
+      if (!user || user.status !== 'active' || !user.emailVerifiedTime) throw new InvitationInvalidError();
+
+      // 授权判据：membership.userId === 当前登录用户（跨账号 → 400，不泄露）。
+      if (membership.userId !== userId) throw new InvitationInvalidError();
+
+      const organization: AcceptInvitationOrganization = {
+        organizationId: org.id,
+        name: org.name,
+        status: org.status,
+        closedTime: org.closedTime,
+        role: membership.role,
+      };
+
+      if (inv.revokedTime || inv.expiresTime <= now) throw new InvitationInvalidError();
+
+      if (inv.acceptedTime) {
+        // 已被消费：仅当仍是本 flow 对应 invitation 且 membership active、用户仍为成员
+        // 时幂等返回 409（摘要从 membership 重新读取，不依赖旧结果缓存），同时消费本 flow。
+        if (membership.status !== 'active') throw new InvitationInvalidError();
+        await this.mailFlowRepo.markConsumed(tx, flow.id, now);
+        return { kind: 'already-accepted', organization };
+      }
+
+      // 未消费：执行接受（标记 invitation accepted + membership active）。
+      if (membership.status !== 'invited') throw new InvitationInvalidError();
+      await this.invitationRepo.markAccepted(tx, inv.id, now);
+      await this.membershipRepo.activate(tx, membership.id, now);
+      await this.mailFlowRepo.markConsumed(tx, flow.id, now);
+
+      return { kind: 'accepted', organization };
     });
   }
 

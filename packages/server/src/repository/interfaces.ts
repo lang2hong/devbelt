@@ -18,6 +18,7 @@ import type {
   SyncResetToken,
   MailFlow,
   AuditEvent,
+  IdempotencyReceipt,
 } from '../domain/entities.js';
 import type {
   UserStatus,
@@ -64,6 +65,8 @@ export interface IUserRepo {
   incrementSessionVersion(exec: Queryable, id: number): Promise<void>;
   /** 更新显示名（PATCH /api/console/me，§4.4 校验在 service 层）。单列更新，无需事务。 */
   updateDisplayName(id: number, displayName: string): Promise<void>;
+  /** 事务内更新显示名（幂等回执下审计+业务同事务）。 */
+  updateDisplayNameInTx(exec: Queryable, id: number, displayName: string): Promise<void>;
 }
 
 export interface IEmailVerificationTokenRepo {
@@ -171,6 +174,8 @@ export interface IRefreshTokenRepo {
 export interface IRateLimitRepo {
   /** 固定窗口原子递增（唯一键 bucket_key+window_start_time），返回递增后的计数。 */
   increment(bucketKey: string, windowStartTime: Date): Promise<number>;
+  /** 同一事务内递增（与幂等回执同连接，限流与业务写、回执同滚）。 */
+  incrementInTx(exec: Queryable, bucketKey: string, windowStartTime: Date): Promise<number>;
   /** 只读当前窗口计数（不存在则 0），供「失败才计数」的预检。 */
   peek(bucketKey: string, windowStartTime: Date): Promise<number>;
   /** 清理早于该时间的过期桶。 */
@@ -466,6 +471,8 @@ export interface ISyncRecordRepo {
   listByFeed(exec: Queryable, userId: number, keyEpoch: string, after: string, snapshotSequence: string, limit: number): Promise<PersonalConnectionMeta[]>;
   /** active record 数 + 密文字节（配额计量：ciphertext+tag+nonce 长度，§4.2）。锁内执行。 */
   countActive(exec: Queryable, userId: number, keyEpoch: string): Promise<{ count: number; bytes: number }>;
+  /** 同步概览聚合：active epoch 的记录数、密文字节、最近活动时间（无 record 时 null）。 */
+  overview(exec: Queryable, userId: number, keyEpoch: string): Promise<{ count: number; bytes: number; lastActivityTime: Date | null }>;
   /** 列出该 epoch 全部未删 record（destroy/reset 逐个 tombstone 用，持锁内调用）。 */
   listActiveByEpoch(exec: Queryable, userId: number, keyEpoch: string): Promise<PersonalConnectionMeta[]>;
 }
@@ -525,6 +532,8 @@ export interface IMailFlowRepo {
   findByNonceHash(nonceHash: Buffer): Promise<MailFlow | undefined>;
   /** 事务内按 nonce hash 锁定 mail_flow 行（消费的序列化点）。 */
   findByNonceHashForUpdate(exec: Queryable, nonceHash: Buffer): Promise<MailFlow | undefined>;
+  /** 绑定登录用户到邮件流（`user_id`）；仅 issued 且未绑定/同用户时生效。事务内执行。 */
+  bindUser(exec: Queryable, id: number, userId: number): Promise<void>;
   /** 标记消费（写 consumed_time）。事务内执行。 */
   markConsumed(exec: Queryable, id: number, now: Date): Promise<void>;
   /** 删除已过期或已消费且超出保留期的 flow 行。返回删除行数。 */
@@ -534,4 +543,26 @@ export interface IMailFlowRepo {
 /** 审计事件写入（append-only；只 INSERT，不 UPDATE/DELETE）。 */
 export interface IAuditRepo {
   insert(event: Omit<AuditEvent, 'id' | 'createTime'>): Promise<AuditEvent>;
+  /** 事务内写入（幂等回执下审计与业务写同事务、重放不重复审计）。 */
+  insertInTx(exec: Queryable, event: Omit<AuditEvent, 'id' | 'createTime'>): Promise<AuditEvent>;
+}
+
+/** 幂等回执仓储（P3 §6.1）。 */
+export interface IIdempotencyReceiptRepo {
+  /** 事务内插入 processing 回执（唯一键冲突抛 ER_DUP_ENTRY，由服务层捕获转重放/冲突）。 */
+  createProcessing(exec: Queryable, input: {
+    actorUserId: number;
+    sessionId: string;
+    method: string;
+    normalizedPath: string;
+    idempotencyKey: string;
+    requestDigest: Buffer;
+    expiresTime: Date;
+  }): Promise<IdempotencyReceipt>;
+  /** 只读查回执（预检，连接池）。 */
+  findByKey(actorUserId: number, sessionId: string, method: string, normalizedPath: string, idempotencyKey: string): Promise<IdempotencyReceipt | undefined>;
+  /** 事务内置 completed：http_status + 规范 JSON 响应体。 */
+  complete(exec: Queryable, id: number, httpStatus: number, responseBody: string): Promise<void>;
+  /** 删除已过期（expires_time < before）的回执行。返回删除行数。 */
+  prune(exec: Queryable, before: Date, limit: number): Promise<number>;
 }

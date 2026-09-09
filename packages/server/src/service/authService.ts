@@ -392,15 +392,19 @@ export class AuthService {
 
   /** 撤销设备：同一事务内撤销 device + 该 device 全部 session（§5.1）。 */
   async revokeDevice(userId: number, deviceId: number): Promise<{ ok: true }> {
-    await this.runner(async (tx) => {
-      // 统一锁顺序 user -> device -> token（先锁用户行串行化该用户所有会话操作）。
-      await this.userRepo.lockById(tx, userId);
-      const device = await this.deviceRepo.findByIdForUpdate(tx, deviceId);
-      if (!device || device.userId !== userId) throw new EntityNotFoundError('device', deviceId);
-      const now = new Date();
-      await this.deviceRepo.revoke(tx, device.id, now);
-      await this.refreshTokenRepo.revokeByDevice(tx, device.id, now);
-    });
+    await this.runner((tx) => this.revokeDeviceInTx(tx, userId, deviceId));
+    return { ok: true };
+  }
+
+  /** 撤销设备的在事务内实现（幂等回执下与业务写、审计同事务）。 */
+  async revokeDeviceInTx(tx: Queryable, userId: number, deviceId: number): Promise<{ ok: true }> {
+    // 统一锁顺序 user -> device -> token（先锁用户行串行化该用户所有会话操作）。
+    await this.userRepo.lockById(tx, userId);
+    const device = await this.deviceRepo.findByIdForUpdate(tx, deviceId);
+    if (!device || device.userId !== userId) throw new EntityNotFoundError('device', deviceId);
+    const now = new Date();
+    await this.deviceRepo.revoke(tx, device.id, now);
+    await this.refreshTokenRepo.revokeByDevice(tx, device.id, now);
     return { ok: true };
   }
 

@@ -19,6 +19,7 @@ import type {
   ISyncNonceRepo,
   ISyncMutationRepo,
   ISyncResetTokenRepo,
+  IIdempotencyReceiptRepo,
   MemberDto,
   OrganizationSummary,
   InvitationDto,
@@ -44,6 +45,7 @@ import type {
   PersonalConnectionMeta,
   SyncMutation,
   SyncResetToken,
+  IdempotencyReceipt,
 } from '../../src/domain/entities.js';
 import type {
   UserStatus,
@@ -137,6 +139,11 @@ export class FakeUserRepo implements IUserRepo {
   }
 
   async updateDisplayName(id: number, displayName: string): Promise<void> {
+    const u = this.store.get(id);
+    if (u) u.displayName = displayName;
+  }
+
+  async updateDisplayNameInTx(_exec: Queryable, id: number, displayName: string): Promise<void> {
     const u = this.store.get(id);
     if (u) u.displayName = displayName;
   }
@@ -432,6 +439,10 @@ export class FakeRateLimitRepo implements IRateLimitRepo {
     const next = (this.store.get(k) ?? 0) + 1;
     this.store.set(k, next);
     return next;
+  }
+
+  async incrementInTx(_exec: Queryable, bucketKey: string, windowStartTime: Date): Promise<number> {
+    return this.increment(bucketKey, windowStartTime);
   }
 
   async peek(bucketKey: string, windowStartTime: Date): Promise<number> {
@@ -1121,6 +1132,18 @@ export class FakeSyncRecordRepo implements ISyncRecordRepo {
     return { count, bytes };
   }
 
+  async overview(_exec: Queryable, userId: number, keyEpoch: string): Promise<{ count: number; bytes: number; lastActivityTime: Date | null }> {
+    let count = 0; let bytes = 0; let last: Date | null = null;
+    for (const m of this.store.values()) {
+      if (m.userId === userId && m.keyEpoch === keyEpoch && !m.deleteTime) {
+        count++;
+        bytes += (m.ciphertext?.length ?? 0) + (m.tag?.length ?? 0) + (m.nonce?.length ?? 0);
+        if (!last || m.updateTime > last) last = m.updateTime;
+      }
+    }
+    return { count, bytes, lastActivityTime: last };
+  }
+
   async listActiveByEpoch(_exec: Queryable, userId: number, keyEpoch: string): Promise<PersonalConnectionMeta[]> {
     return [...this.store.values()]
       .filter((m) => m.userId === userId && m.keyEpoch === keyEpoch && !m.deleteTime)
@@ -1211,6 +1234,68 @@ export class FakeSyncResetTokenRepo implements ISyncResetTokenRepo {
       if (t.expiresTime < before || (t.consumedTime && t.consumedTime < before) || (t.revokedTime && t.revokedTime < before)) {
         this.store.delete(id); n++;
       }
+    }
+    return n;
+  }
+}
+
+/** 内存幂等回执假实现：唯一键 + ER_DUP_ENTRY 语义。 */
+export class FakeIdempotencyReceiptRepo implements IIdempotencyReceiptRepo {
+  readonly store = new Map<string, IdempotencyReceipt>();
+
+  private key(actorUserId: number, sessionId: string, method: string, normalizedPath: string, idempotencyKey: string): string {
+    return `${actorUserId}|${sessionId}|${method}|${normalizedPath}|${idempotencyKey}`;
+  }
+
+  async createProcessing(_exec: Queryable, input: {
+    actorUserId: number; sessionId: string; method: string; normalizedPath: string;
+    idempotencyKey: string; requestDigest: Buffer; expiresTime: Date;
+  }): Promise<IdempotencyReceipt> {
+    const k = this.key(input.actorUserId, input.sessionId, input.method, input.normalizedPath, input.idempotencyKey);
+    if (this.store.has(k)) {
+      const err = new Error('duplicate key') as Error & { code: string };
+      err.code = 'ER_DUP_ENTRY';
+      throw err;
+    }
+    const receipt: IdempotencyReceipt = {
+      id: this.store.size + 1,
+      actorUserId: input.actorUserId,
+      sessionId: input.sessionId,
+      method: input.method,
+      normalizedPath: input.normalizedPath,
+      idempotencyKey: input.idempotencyKey,
+      requestDigest: input.requestDigest,
+      status: 'processing',
+      httpStatus: null,
+      responseBody: null,
+      expiresTime: input.expiresTime,
+      createTime: new Date(),
+      updateTime: new Date(),
+    };
+    this.store.set(k, receipt);
+    return receipt;
+  }
+
+  async findByKey(actorUserId: number, sessionId: string, method: string, normalizedPath: string, idempotencyKey: string): Promise<IdempotencyReceipt | undefined> {
+    return this.store.get(this.key(actorUserId, sessionId, method, normalizedPath, idempotencyKey));
+  }
+
+  async complete(_exec: Queryable, id: number, httpStatus: number, responseBody: string): Promise<void> {
+    for (const r of this.store.values()) {
+      if (r.id === id) {
+        r.status = 'completed';
+        r.httpStatus = httpStatus;
+        r.responseBody = responseBody;
+        r.updateTime = new Date();
+      }
+    }
+  }
+
+  async prune(_exec: Queryable, before: Date, limit: number): Promise<number> {
+    let n = 0;
+    for (const [k, r] of [...this.store]) {
+      if (n >= limit) break;
+      if (r.expiresTime < before) { this.store.delete(k); n++; }
     }
     return n;
   }

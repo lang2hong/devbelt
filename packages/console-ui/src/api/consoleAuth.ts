@@ -1,4 +1,7 @@
 import { readCsrfToken } from './csrf';
+import { getAccessToken, setAccessToken } from './tokenStore';
+
+export { getAccessToken, setAccessToken };
 
 /**
  * 控制台认证客户端（P3 切片 2）。
@@ -7,21 +10,13 @@ import { readCsrfToken } from './csrf';
  * - access token 仅在内存保存（不落 localStorage/sessionStorage/IndexedDB）；
  * - HTTP 请求前 GET csrf 并回显 X-CSRF-Token；
  * - Web 设备槽位 deviceKey 持久化在 localStorage（非 token/密钥/E2EE 材料）。
+ *
+ * 会话中的 me/改显示名/改密见 api/me.ts；401 静默刷新见 session.ts。
  */
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 type Result<T = undefined> = { kind: 'ok'; value: T } | { kind: 'invalid-credentials' } | { kind: 'rate-limited' } | { kind: 'failure' };
-
-let accessToken: string | null = null;
-
-export function getAccessToken(): string | null {
-  return accessToken;
-}
-
-export function setAccessToken(token: string | null): void {
-  accessToken = token;
-}
 
 const DEVICE_KEY_STORAGE = 'dbclient.web.deviceKey';
 
@@ -133,27 +128,5 @@ export async function logout(csrfToken: string, fetchImpl: FetchLike = fetch): P
     // 登出本端兜底：即使网络失败也清内存 token。
   } finally {
     setAccessToken(null);
-  }
-}
-
-export interface ConsoleMe {
-  user: ConsoleUser;
-  platformAdmin: boolean;
-  organizations: Array<{ organizationId: string; name: string; role: string }>;
-}
-
-export type MeResult = { kind: 'ok'; value: ConsoleMe } | { kind: 'unauthorized' } | { kind: 'failure' };
-
-export async function me(token: string | null = accessToken, fetchImpl: FetchLike = fetch): Promise<MeResult> {
-  if (!token) return { kind: 'unauthorized' };
-  try {
-    const res = await fetchImpl('/api/console/me', {
-      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
-    });
-    if (res.ok) return { kind: 'ok', value: (await res.json()) as ConsoleMe };
-    if (res.status === 401) return { kind: 'unauthorized' };
-    return { kind: 'failure' };
-  } catch {
-    return { kind: 'failure' };
   }
 }

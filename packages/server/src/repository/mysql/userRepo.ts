@@ -65,6 +65,10 @@ export class MysqlUserRepo implements IUserRepo {
   async updateDisplayName(id: number, displayName: string): Promise<void> {
     await this.db().query('UPDATE users SET display_name = ? WHERE id = ?', [displayName, id]);
   }
+
+  async updateDisplayNameInTx(exec: Queryable, id: number, displayName: string): Promise<void> {
+    await exec.query('UPDATE users SET display_name = ? WHERE id = ?', [displayName, id]);
+  }
 }
 
 function mapUser(r: any): User {

@@ -4,9 +4,12 @@ import {
   FakeEmailVerificationTokenRepo,
   FakeSyncMutationRepo,
   FakeSyncResetTokenRepo,
+  FakeIdempotencyReceiptRepo,
 } from '../helpers/fakeRepos.js';
 import { FakeMailFlowRepo } from '../helpers/linkFlowFakes.js';
+import { FakeAuditRepo } from '../helpers/linkFlowFakes.js';
 import { startRetentionCleanup } from '../../src/service/retentionCleanup.js';
+import { AuditWriter } from '../../src/service/auditWriter.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 
 const exec = () => ({} as Queryable);
@@ -19,7 +22,8 @@ function makeDeps() {
   const syncMutationRepo = new FakeSyncMutationRepo();
   const syncResetTokenRepo = new FakeSyncResetTokenRepo();
   const mailFlowRepo = new FakeMailFlowRepo();
-  return { refreshTokenRepo, emailVerificationTokenRepo, syncMutationRepo, syncResetTokenRepo, mailFlowRepo, exec };
+  const idempotencyReceiptRepo = new FakeIdempotencyReceiptRepo();
+  return { refreshTokenRepo, emailVerificationTokenRepo, syncMutationRepo, syncResetTokenRepo, mailFlowRepo, idempotencyReceiptRepo, exec };
 }
 
 describe('retention cleanup', () => {
@@ -144,6 +148,91 @@ describe('retention cleanup', () => {
     c.stop();
 
     expect(await deps.refreshTokenRepo.findByHash('old')).toBeUndefined();
+  });
+
+  it('prunes expired idempotency receipts, keeps live ones', async () => {
+    const deps = makeDeps();
+    const now = Date.now();
+    await deps.idempotencyReceiptRepo.createProcessing(exec(), {
+      actorUserId: 1, sessionId: 's', method: 'PATCH', normalizedPath: '/x', idempotencyKey: 'k'.repeat(22),
+      requestDigest: Buffer.alloc(32, 1), expiresTime: new Date(now - HOUR),
+    });
+    await deps.idempotencyReceiptRepo.createProcessing(exec(), {
+      actorUserId: 1, sessionId: 's', method: 'PATCH', normalizedPath: '/y', idempotencyKey: 'm'.repeat(22),
+      requestDigest: Buffer.alloc(32, 1), expiresTime: new Date(now + HOUR),
+    });
+
+    const c = startRetentionCleanup(deps, {});
+    await c.runOnce();
+    c.stop();
+
+    expect(await deps.idempotencyReceiptRepo.findByKey(1, 's', 'PATCH', '/x', 'k'.repeat(22))).toBeUndefined();
+    expect(await deps.idempotencyReceiptRepo.findByKey(1, 's', 'PATCH', '/y', 'm'.repeat(22))).toBeDefined();
+  });
+
+  it('writes a system audit summary only when idempotency receipts are actually deleted', async () => {
+    const deps = makeDeps();
+    const auditRepo = new FakeAuditRepo();
+    const depsWithAudit = { ...deps, auditWriter: new AuditWriter(auditRepo) };
+    const now = Date.now();
+    const uuid = () => '123e4567-e89b-42d3-8456-426614174000';
+    // 一条过期 + 一条仍有效。
+    await deps.idempotencyReceiptRepo.createProcessing(exec(), {
+      actorUserId: 1, sessionId: 's', method: 'PATCH', normalizedPath: '/x', idempotencyKey: uuid(),
+      requestDigest: Buffer.alloc(32, 1), expiresTime: new Date(now - HOUR),
+    });
+    await deps.idempotencyReceiptRepo.createProcessing(exec(), {
+      actorUserId: 1, sessionId: 's', method: 'PATCH', normalizedPath: '/y', idempotencyKey: '223e4567-e89b-42d3-8456-426614174000',
+      requestDigest: Buffer.alloc(32, 1), expiresTime: new Date(now + HOUR),
+    });
+
+    const c = startRetentionCleanup(depsWithAudit, {});
+    await c.runOnce();
+    c.stop();
+    await new Promise((r) => setTimeout(r, 0));
+
+    const events = auditRepo.events.filter((e) => e.eventType === 'system.receipts.cleanup');
+    expect(events).toHaveLength(1);
+    expect(events[0].actorUserId).toBeNull();
+    expect(events[0].reason).toContain('removed 1');
+    expect(JSON.stringify(events[0])).not.toContain('123e4567');
+  });
+
+  it('does nothing (no audit) when no receipts expire', async () => {
+    const deps = makeDeps();
+    const auditRepo = new FakeAuditRepo();
+    const depsWithAudit = { ...deps, auditWriter: new AuditWriter(auditRepo) };
+
+    const c = startRetentionCleanup(depsWithAudit, {});
+    await c.runOnce();
+    c.stop();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(auditRepo.events.filter((e) => e.eventType === 'system.receipts.cleanup')).toHaveLength(0);
+  });
+
+  it('audit write failure does not block the cleanup of other tables', async () => {
+    const deps = makeDeps();
+    const now = Date.now();
+    await deps.refreshTokenRepo.create(exec(), {
+      userId: 1, deviceId: null, tokenHash: 'old', familyId: 'f',
+      replacedByTokenId: null, expiresTime: new Date(now - 30 * DAY),
+    });
+    await deps.idempotencyReceiptRepo.createProcessing(exec(), {
+      actorUserId: 1, sessionId: 's', method: 'PATCH', normalizedPath: '/x', idempotencyKey: '123e4567-e89b-42d3-8456-426614174000',
+      requestDigest: Buffer.alloc(32, 1), expiresTime: new Date(now - HOUR),
+    });
+    const throwingAudit = new AuditWriter({
+      insert: async () => { throw new Error('audit down'); },
+      insertInTx: async () => { throw new Error('audit down'); },
+    } as any);
+    const depsWithAudit = { ...deps, auditWriter: throwingAudit };
+
+    const c = startRetentionCleanup(depsWithAudit, {});
+    await expect(c.runOnce()).resolves.toBeUndefined();
+    c.stop();
+
+    expect(await deps.refreshTokenRepo.findByHash('old')).toBeUndefined();
+    expect(deps.idempotencyReceiptRepo.store.size).toBe(0);
   });
 
   it('does not fire immediately on start (no startup thundering herd)', async () => {

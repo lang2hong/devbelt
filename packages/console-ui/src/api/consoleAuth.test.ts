@@ -5,9 +5,7 @@ import {
   getOrCreateDeviceKey,
   login,
   refresh,
-  me,
   ensureCsrf,
-  type FetchLike,
 } from './consoleAuth';
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -58,19 +56,6 @@ describe('refresh', () => {
     const r = await refresh('csrf', async () => jsonResponse(401, { error: { code: 'UNAUTHORIZED' } }));
     expect(r.kind).toBe('invalid-credentials');
     expect(getAccessToken()).toBeNull();
-  });
-});
-
-describe('me', () => {
-  it('returns the console me payload', async () => {
-    const body = { user: { userId: '1', email: 'a@b.com', displayName: null }, platformAdmin: false, organizations: [] };
-    const r = await me('tok', async () => jsonResponse(200, body));
-    expect(r).toEqual({ kind: 'ok', value: body });
-  });
-
-  it('returns unauthorized without a token', async () => {
-    const r = await me(null, (() => { throw new Error('unreachable'); }) as FetchLike);
-    expect(r).toEqual({ kind: 'unauthorized' });
   });
 });
 

@@ -5,6 +5,7 @@ import mysql from '@fastify/mysql';
 import sensible from '@fastify/sensible';
 import { createConnection } from 'mysql2/promise';
 import { config, signingKeys } from './config.js';
+import { resolveCorsOrigin } from './service/consoleOrigin.js';
 import { buildMysqlPoolOptions } from './mysqlPool.js';
 import { MysqlUserRepo } from './repository/mysql/userRepo.js';
 import { MysqlEmailVerificationTokenRepo } from './repository/mysql/emailVerificationTokenRepo.js';
@@ -45,7 +46,7 @@ import { organizationRoutes } from './route/organizations.js';
 import { invitationRoutes } from './route/invitations.js';
 import { syncRoutes } from './route/sync.js';
 import { registerErrorHandler } from './middleware/errorHandler.js';
-import { securityHeaders } from './middleware/securityHeaders.js';
+import { securityHeaders, globalSecurityHeaders } from './middleware/securityHeaders.js';
 import { buildLoggerOptions } from './middleware/requestLogging.js';
 import { runMigrations } from './repository/mysql/migrate.js';
 import { migrations } from './repository/mysql/migrations/index.js';
@@ -53,12 +54,16 @@ import { mysqlTimeZoneInit } from './repository/mysql/mysqlTimeZoneInit.js';
 import { withTransaction } from './repository/mysql/db.js';
 import { MysqlMailFlowRepo } from './repository/mysql/mailFlowRepo.js';
 import { MysqlAuditRepo } from './repository/mysql/auditRepo.js';
+import { MysqlIdempotencyReceiptRepo } from './repository/mysql/idempotencyReceiptRepo.js';
 import { LinkFlowService } from './service/linkFlowService.js';
 import { AuditWriter } from './service/auditWriter.js';
+import { IdempotencyService } from './service/idempotencyService.js';
 import { CsrfService, deriveCsrfKey } from './service/csrfService.js';
 import { linkFlowRoutes } from './route/linkFlows.js';
+import { consoleLinkFlowRoutes } from './route/consoleLinkFlows.js';
 import { consoleAuthRoutes } from './route/consoleAuth.js';
 import { consoleMeRoutes } from './route/consoleMe.js';
+import { consoleDataRoutes } from './route/consoleData.js';
 import { ConsoleAuthService } from './service/consoleAuthService.js';
 import { requestId } from './middleware/requestId.js';
 import { registerConsoleStatic } from './consoleStatic.js';
@@ -88,8 +93,9 @@ export async function createApp() {
   registerErrorHandler(app);
   app.register(requestId);
 
-  app.register(cors, { origin: process.env.NODE_ENV === 'production' ? (process.env.CORS_ORIGIN || false) : true });
-  app.register(helmet, securityHeaders());
+  app.register(cors, { origin: resolveCorsOrigin() });
+  app.register(helmet, securityHeaders(process.env.NODE_ENV === 'production'));
+  globalSecurityHeaders(app);
   app.register(sensible);
 
   // 建库必须早于池注册（池带默认库，库不存在时连接建不起来）。
@@ -127,6 +133,7 @@ export async function createApp() {
   const syncResetTokenRepo = new MysqlSyncResetTokenRepo();
   const mailFlowRepo = new MysqlMailFlowRepo(getMysql);
   const auditRepo = new MysqlAuditRepo(getMysql);
+  const idempotencyReceiptRepo = new MysqlIdempotencyReceiptRepo(getMysql);
 
   // service 层
   const tokenService = new TokenService(signingKeys, config.accessTokenExpiresIn, config.refreshTokenExpiresMs);
@@ -189,10 +196,15 @@ export async function createApp() {
   );
   const csrfService = new CsrfService(deriveCsrfKey());
   const auditWriter = new AuditWriter(auditRepo, (msg, data) => app.log.warn({ data }, msg));
+  const idempotencyService = new IdempotencyService(idempotencyReceiptRepo, (fn) => withTransaction(app.mysql, fn));
   const linkFlowService = new LinkFlowService(
     mailFlowRepo,
     emailVerificationTokenRepo,
     userRepo,
+    invitationRepo,
+    organizationRepo,
+    organizationSubscriptionRepo,
+    membershipRepo,
     (fn) => withTransaction(app.mysql, fn),
     rateLimiter,
   );
@@ -218,6 +230,8 @@ export async function createApp() {
     syncMutationRepo,
     syncResetTokenRepo,
     mailFlowRepo,
+    idempotencyReceiptRepo,
+    auditWriter,
     exec: () => app.mysql,
   });
 
@@ -228,8 +242,8 @@ export async function createApp() {
   app.get('/health', async () => ({ status: 'ok' }));
   app.register(authRoutes, { authService, tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin: config.consoleOrigin });
   app.register(meRoutes, { tokenService, getUser, getSessionActive, userRepo, personalSubscriptionRepo, personalPlanRepo });
-  app.register(personalRoutes, { tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin: config.consoleOrigin, deviceRepo, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId) });
-  app.register(organizationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin: config.consoleOrigin, organizationService, resourceService, organizationRepo, membershipRepo });
+  app.register(personalRoutes, { tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin: config.consoleOrigin, deviceRepo, idempotencyService, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId), revokeDeviceInTx: (tx, userId, deviceId) => authService.revokeDeviceInTx(tx, userId, deviceId) });
+  app.register(organizationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin: config.consoleOrigin, organizationService, resourceService, organizationRepo, membershipRepo, auditWriter, idempotencyService, sendInvitation: (o) => organizationService.sendInvitation(o) });
   app.register(invitationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin: config.consoleOrigin, organizationService });
   app.register(syncRoutes, { tokenService, getUser, getSessionActive, syncState: syncStateService, syncRecord: syncRecordService, syncReset: syncResetService });
   app.register(consoleAuthRoutes, {
@@ -240,6 +254,7 @@ export async function createApp() {
     auditWriter,
     refreshMaxAgeSeconds: Math.floor(config.refreshTokenExpiresMs / 1000),
     register: (email, password, displayName, ip) => authService.register(email, password, displayName, ip),
+    bindMailFlow: (nonce, userId) => linkFlowService.bindFlowToUser(nonce, userId),
   });
   app.register(consoleMeRoutes, {
     tokenService,
@@ -248,11 +263,26 @@ export async function createApp() {
     csrfService,
     auditWriter,
     rateLimiter,
+    idempotencyService,
     consoleOrigin: config.consoleOrigin,
     userRepo,
     personalSubscriptionRepo,
     personalPlanRepo,
     membershipRepo,
+  });
+  app.register(consoleDataRoutes, {
+    tokenService,
+    getUser,
+    getSessionActive,
+    auditWriter,
+    rateLimiter,
+    userRepo,
+    personalSubscriptionRepo,
+    membershipRepo,
+    organizationRepo,
+    syncStateRepo,
+    syncRecordRepo,
+    db: getMysql(),
   });
   app.register(linkFlowRoutes, {
     linkFlowService,
@@ -260,6 +290,16 @@ export async function createApp() {
     auditWriter,
     consoleOrigin: config.consoleOrigin,
     resendVerification: (email, ip) => authService.resendVerification(email, ip),
+  });
+  app.register(consoleLinkFlowRoutes, {
+    tokenService,
+    getUser,
+    getSessionActive,
+    linkFlowService,
+    csrfService,
+    auditWriter,
+    rateLimiter,
+    consoleOrigin: config.consoleOrigin,
   });
   await registerConsoleStatic(app);
 

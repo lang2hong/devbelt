@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { DomainError, RateLimitedError } from '../domain/errors.js';
+import { DomainError, RateLimitedError, IdempotencyInProgressError } from '../domain/errors.js';
 import { errorStatus } from './errorHandler.js';
 
 /**
@@ -32,6 +32,7 @@ export function registerConsoleErrorHandler(app: FastifyInstance): void {
 
     if (err instanceof DomainError) {
       if (err instanceof RateLimitedError) reply.header('Retry-After', String(err.retryAfterSeconds));
+      if (err instanceof IdempotencyInProgressError) reply.header('Retry-After', String(err.retryAfterSeconds));
       reply.code(consoleErrorStatus(err.code)).send({ error: { code: err.code, message: err.message } });
       return;
     }

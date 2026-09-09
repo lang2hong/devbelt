@@ -22,6 +22,7 @@ import {
   FakeSyncMutationRepo,
   FakeSyncNonceRepo,
   FakeSyncResetTokenRepo,
+  FakeIdempotencyReceiptRepo,
 } from './fakeRepos.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
 import { securityHeaders } from '../../src/middleware/securityHeaders.js';
@@ -44,6 +45,7 @@ import { SyncRecordService } from '../../src/service/syncRecordService.js';
 import { SyncResetService } from '../../src/service/syncResetService.js';
 import { AuditWriter } from '../../src/service/auditWriter.js';
 import { CsrfService } from '../../src/service/csrfService.js';
+import { IdempotencyService } from '../../src/service/idempotencyService.js';
 import { FakeAuditRepo } from './linkFlowFakes.js';
 
 export interface TestAppOptions {
@@ -195,8 +197,8 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   app.get('/health', async () => ({ status: 'ok' }));
   await app.register(authRoutes, { authService, tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin });
   await app.register(meRoutes, { tokenService, getUser, getSessionActive, userRepo, personalSubscriptionRepo, personalPlanRepo });
-  await app.register(personalRoutes, { tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin, deviceRepo, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId) });
-  await app.register(organizationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin, organizationService, resourceService, organizationRepo, membershipRepo });
+  await app.register(personalRoutes, { tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin, deviceRepo, idempotencyService: new IdempotencyService(new FakeIdempotencyReceiptRepo(), async (fn) => fn({} as Queryable)), revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId), revokeDeviceInTx: (tx, userId, deviceId) => authService.revokeDeviceInTx(tx, userId, deviceId) });
+  await app.register(organizationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin, organizationService, resourceService, organizationRepo, membershipRepo, auditWriter, idempotencyService: new IdempotencyService(new FakeIdempotencyReceiptRepo(), async (fn) => fn({} as Queryable)), sendInvitation: (o) => organizationService.sendInvitation(o) });
   await app.register(invitationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin, organizationService });
   await app.register(syncRoutes, { tokenService, getUser, getSessionActive, syncState: syncStateService, syncRecord: syncRecordService, syncReset: syncResetService });
 

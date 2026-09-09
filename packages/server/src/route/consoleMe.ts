@@ -8,6 +8,7 @@ import type { AuditWriter } from '../service/auditWriter.js';
 import type { RateLimitService } from '../service/rateLimitService.js';
 import type { GetAuthUser } from '../middleware/requireAuth.js';
 import { sanitizeDisplayName } from '../service/displayName.js';
+import { validateIdempotencyKey, type IdempotencyService } from '../service/idempotencyService.js';
 import { updateDisplayNameBody } from './schemas.js';
 import type { IUserRepo, IPersonalSubscriptionRepo, IPersonalPlanRepo, IMembershipRepo } from '../repository/interfaces.js';
 
@@ -18,6 +19,7 @@ export interface ConsoleMeRouteOptions {
   csrfService: CsrfService;
   auditWriter: AuditWriter;
   rateLimiter: RateLimitService;
+  idempotencyService: IdempotencyService;
   consoleOrigin: string;
   userRepo: IUserRepo;
   personalSubscriptionRepo: IPersonalSubscriptionRepo;
@@ -91,16 +93,33 @@ export async function consoleMeRoutes(app: FastifyInstance, opts: ConsoleMeRoute
 
         const { displayName } = req.body as { displayName: string };
         const sanitized = sanitizeDisplayName(displayName);
+        const idempotencyKey = validateIdempotencyKey(req.headers['idempotency-key']);
+        const requestId = (req as unknown as { requestId?: string }).requestId ?? 'unknown';
 
-        await opts.userRepo.updateDisplayName(userId, sanitized);
-        const updated = await opts.userRepo.findById(userId);
-        opts.auditWriter.write({
-          eventType: 'account.displayName.changed',
-          result: 'success',
+        const result = await opts.idempotencyService.run({
           actorUserId: userId,
-          requestId: (req as unknown as { requestId?: string }).requestId ?? 'unknown',
+          sessionId: sessionId,
+          method: 'PATCH',
+          normalizedPath: '/api/console/me',
+          idempotencyKey,
+          requestBody: req.body,
+          business: async (tx) => {
+            await opts.userRepo.updateDisplayNameInTx(tx, userId, sanitized);
+            const updated = await opts.userRepo.findByIdInTx(tx, userId);
+            await opts.auditWriter.writeInTx(tx, {
+              eventType: 'account.displayName.changed',
+              result: 'success',
+              actorUserId: userId,
+              requestId,
+            });
+            return {
+              status: 200,
+              body: { user: { userId: String(userId), displayName: updated?.displayName ?? sanitized } },
+            };
+          },
         });
-        reply.send({ user: { userId: String(userId), displayName: updated?.displayName ?? sanitized } });
+
+        reply.code(result.status).send(result.body);
       });
     },
   });
