@@ -61,10 +61,14 @@ export async function register(
   fetchImpl: FetchLike = fetch,
 ): Promise<Result> {
   try {
+    // displayName 可选：留空时从 body 省略，避免触发 schema `displayName.minLength:1`。
+    const body: { email: string; password: string; displayName?: string } = { email, password };
+    const name = displayName.trim();
+    if (name) body.displayName = name;
     const res = await fetchImpl('/api/console/auth/register', {
       method: 'POST',
       headers: jsonHeaders(csrfToken),
-      body: JSON.stringify({ email, password, displayName }),
+      body: JSON.stringify(body),
     });
     if (res.ok) return { kind: 'ok', value: undefined };
     if (res.status === 429) return { kind: 'rate-limited' };

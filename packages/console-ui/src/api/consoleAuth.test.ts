@@ -4,6 +4,7 @@ import {
   setAccessToken,
   getOrCreateDeviceKey,
   login,
+  register,
   refresh,
   ensureCsrf,
 } from './consoleAuth';
@@ -41,6 +42,27 @@ describe('login', () => {
   it('maps 429 to rate-limited', async () => {
     const r = await login('a@b.com', 'p', 'dk', 'csrf', async () => jsonResponse(429, { error: { code: 'TOO_MANY_REQUESTS' } }));
     expect(r).toEqual({ kind: 'rate-limited' });
+  });
+});
+
+describe('register', () => {
+  it('omits an empty displayName from the body', async () => {
+    let body = '';
+    const r = await register('a@b.com', 'password-1234', '   ', 'csrf', async (_url, init) => {
+      body = String(init?.body);
+      return jsonResponse(201, { ok: true });
+    });
+    expect(r.kind).toBe('ok');
+    expect(JSON.parse(body)).toEqual({ email: 'a@b.com', password: 'password-1234' });
+  });
+
+  it('trims and includes a non-empty displayName', async () => {
+    let body = '';
+    await register('a@b.com', 'password-1234', '  Alice  ', 'csrf', async (_url, init) => {
+      body = String(init?.body);
+      return jsonResponse(201, { ok: true });
+    });
+    expect(JSON.parse(body)).toEqual({ email: 'a@b.com', password: 'password-1234', displayName: 'Alice' });
   });
 });
 
