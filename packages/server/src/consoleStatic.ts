@@ -34,6 +34,7 @@ export async function registerConsoleStatic(app: FastifyInstance): Promise<void>
     app.get('/login', notFound);
     app.get('/register', notFound);
     app.get('/accept-invitation', notFound);
+    app.get('/sync-reset', notFound);
     app.get('/', notFound);
     app.get('/console/*', notFound);
     return;
@@ -74,6 +75,7 @@ export async function registerConsoleStatic(app: FastifyInstance): Promise<void>
     ['/login', 'login.html'],
     ['/register', 'register.html'],
     ['/accept-invitation', 'accept-invitation.html'],
+    ['/sync-reset', 'sync-reset.html'],
     ['/', 'index.html'],
   ];
   for (const [route, file] of entries) {

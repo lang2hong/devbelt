@@ -43,6 +43,13 @@ export type BindMailFlowResult =
   | { kind: 'unauthorized' }
   | { kind: 'failure' };
 
+export type CreateSyncResetHandoffResult =
+  | { kind: 'success'; openUri: string; expiresTime: string }
+  | { kind: 'invalid' }
+  | { kind: 'unauthorized' }
+  | { kind: 'rate-limited'; retryAfter: number }
+  | { kind: 'failure' };
+
 function jsonHeaders(csrfToken?: string): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' };
   if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
@@ -155,6 +162,43 @@ export async function bindMailFlow(
       },
     });
     if (res.ok) return { kind: 'ok' };
+    if (res.status === 400) return { kind: 'invalid' };
+    if (res.status === 401 || res.status === 403) return { kind: 'unauthorized' };
+    return { kind: 'failure' };
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+/**
+ * 签发扩展交接 handoff（§5.4，console-only）。body 为空；凭 link-flow cookie + 会话绑定
+ * CSRF + Bearer。一次性操作（消费 mail_flow），成功返回 `{ openUri, expiresTime }`，其中
+ * openUri 含一次性 handoffTicket 仅存于按钮 href 内存，不持久化、不展示、不复制。
+ * 错误分派与同文件的 acceptInvitation/bindMailFlow 同构（400 终态 invalid，401/403 未登录，
+ * 429 限流带 Retry-After），不引入第三份私有映射。
+ */
+export async function createSyncResetHandoff(
+  csrfToken: string,
+  accessToken: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<CreateSyncResetHandoffResult> {
+  try {
+    const res = await fetchImpl('/api/console/link-flows/create-sync-reset-handoff', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'X-CSRF-Token': csrfToken,
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+    if (res.ok) {
+      const body = (await res.json()) as { openUri: string; expiresTime: string };
+      return { kind: 'success', openUri: body.openUri, expiresTime: body.expiresTime };
+    }
+    if (res.status === 429) {
+      const retryAfter = Number(res.headers.get('Retry-After') ?? 60);
+      return { kind: 'rate-limited', retryAfter: Number.isFinite(retryAfter) ? retryAfter : 60 };
+    }
     if (res.status === 400) return { kind: 'invalid' };
     if (res.status === 401 || res.status === 403) return { kind: 'unauthorized' };
     return { kind: 'failure' };

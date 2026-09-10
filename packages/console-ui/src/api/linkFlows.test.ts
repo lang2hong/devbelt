@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { claimLinkFlow, verifyEmail, resendVerification, acceptInvitation, bindMailFlow, type FetchLike } from './linkFlows';
+import { claimLinkFlow, verifyEmail, resendVerification, acceptInvitation, bindMailFlow, createSyncResetHandoff, type FetchLike } from './linkFlows';
 import { readCsrfToken } from './csrf';
 
 function jsonResponse(status: number, body: unknown, headers?: Record<string, string>): Response {
@@ -192,5 +192,64 @@ describe('readCsrfToken', () => {
   it('returns null when absent', () => {
     expect(readCsrfToken('a=1')).toBeNull();
     expect(readCsrfToken('')).toBeNull();
+  });
+});
+
+describe('createSyncResetHandoff', () => {
+  it('resolves success with openUri and expiresTime on HTTP 200', async () => {
+    const r = await createSyncResetHandoff('csrf', 'token', async () =>
+      jsonResponse(200, { openUri: 'vscode://dbclient.sync/reset-after-loss?handoffTicket=abc', expiresTime: '2026-09-09T00:00:00.000Z' }),
+    );
+    expect(r).toEqual({ kind: 'success', openUri: 'vscode://dbclient.sync/reset-after-loss?handoffTicket=abc', expiresTime: '2026-09-09T00:00:00.000Z' });
+  });
+
+  it('resolves invalid on HTTP 400', async () => {
+    const r = await createSyncResetHandoff('csrf', 'token', async () => jsonResponse(400, { error: { code: 'SYNC_RESET_HANDOFF_INVALID' } }));
+    expect(r).toEqual({ kind: 'invalid' });
+  });
+
+  it('resolves unauthorized on HTTP 401 and 403', async () => {
+    const r401 = await createSyncResetHandoff('csrf', 'token', async () => jsonResponse(401, { error: { code: 'UNAUTHORIZED' } }));
+    expect(r401).toEqual({ kind: 'unauthorized' });
+    const r403 = await createSyncResetHandoff('csrf', 'token', async () => jsonResponse(403, { error: { code: 'FORBIDDEN' } }));
+    expect(r403).toEqual({ kind: 'unauthorized' });
+  });
+
+  it('resolves rate-limited with Retry-After, falling back to 60 on missing/non-numeric', async () => {
+    const withHeader = await createSyncResetHandoff('csrf', 'token', async () => jsonResponse(429, { error: { code: 'TOO_MANY_REQUESTS' } }, { 'Retry-After': '7' }));
+    expect(withHeader).toEqual({ kind: 'rate-limited', retryAfter: 7 });
+
+    const missing = await createSyncResetHandoff('csrf', 'token', async () => jsonResponse(429, { error: { code: 'TOO_MANY_REQUESTS' } }));
+    expect(missing).toEqual({ kind: 'rate-limited', retryAfter: 60 });
+
+    const nonNumeric = await createSyncResetHandoff('csrf', 'token', async () => jsonResponse(429, { error: { code: 'TOO_MANY_REQUESTS' } }, { 'Retry-After': 'nope' }));
+    expect(nonNumeric).toEqual({ kind: 'rate-limited', retryAfter: 60 });
+  });
+
+  it('resolves failure on HTTP 500 and network error', async () => {
+    const r500 = await createSyncResetHandoff('csrf', 'token', async () => jsonResponse(500, { error: { code: 'INTERNAL' } }));
+    expect(r500).toEqual({ kind: 'failure' });
+
+    const rNet = await createSyncResetHandoff('csrf', 'token', async () => {
+      throw new Error('network');
+    });
+    expect(rNet).toEqual({ kind: 'failure' });
+  });
+
+  it('POSTs the correct URL with bearer + csrf headers and no body', async () => {
+    let url = '';
+    let init: RequestInit | undefined;
+    await createSyncResetHandoff('the-csrf', 'the-token', async (input, i) => {
+      url = input;
+      init = i;
+      return jsonResponse(200, { openUri: 'vscode://x', expiresTime: '2026-09-09T00:00:00.000Z' });
+    });
+    const headers = init?.headers as Record<string, string>;
+    expect(url).toBe('/api/console/link-flows/create-sync-reset-handoff');
+    expect(init?.method).toBe('POST');
+    expect(headers.Authorization).toBe('Bearer the-token');
+    expect(headers['X-CSRF-Token']).toBe('the-csrf');
+    expect(headers.Accept).toBe('application/json');
+    expect(init?.body).toBeUndefined();
   });
 });
