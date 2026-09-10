@@ -18,6 +18,18 @@ export interface Migration {
   up(db: MigrationDb): Promise<void>;
 }
 
+/**
+ * 把数据库账本里已应用的版本号归一化为当前 migration 集合的版本。
+ *
+ * 遗留账本兼容：历史 `${version}_v3` 键（旧补丁式建表时代遗留）视为已应用同名迁移。
+ * 该归一化是迁移 runner 与就绪检查（/health/ready 的 schema 比对）共用的口径，
+ * 二者必须一致，否则旧库升级后会被就绪检查永久判为「未迁移」而 503。
+ */
+export function normalizeAppliedVersions(appliedVersions: string[], migrations: readonly Migration[]): Set<string> {
+  const legacyAliases = new Map(migrations.map((m) => [`${m.version}_v3`, m.version]));
+  return new Set(appliedVersions.map((v) => legacyAliases.get(v) ?? v));
+}
+
 export async function runMigrations(db: MigrationDb, migrations: Migration[]): Promise<void> {
   await db.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -27,10 +39,7 @@ export async function runMigrations(db: MigrationDb, migrations: Migration[]): P
   `);
 
   const [rows] = (await db.query('SELECT version FROM schema_migrations')) as [Array<{ version: string }>, unknown];
-  // 遗留账本兼容：历史 `${version}_v3` 账本键视为已应用，避免旧库重跑。
-  // 只对当前 migration 集合内明确存在的别名归一化，不做全局替换（非版本管理机制，不改写旧账本行）。
-  const legacyAliases = new Map(migrations.map((m) => [`${m.version}_v3`, m.version]));
-  const applied = new Set<string>(rows.map((r) => legacyAliases.get(r.version) ?? r.version));
+  const applied = normalizeAppliedVersions(rows.map((r) => r.version), migrations);
 
   for (const migration of migrations) {
     if (applied.has(migration.version)) continue;

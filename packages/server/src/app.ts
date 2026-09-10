@@ -53,6 +53,8 @@ import { runMigrations } from './repository/mysql/migrate.js';
 import { migrations } from './repository/mysql/migrations/index.js';
 import { mysqlTimeZoneInit } from './repository/mysql/mysqlTimeZoneInit.js';
 import { withTransaction } from './repository/mysql/db.js';
+import { registerHealthRoutes } from './route/health.js';
+import { MetricsRegistry, attachRequestMetrics } from './service/metrics.js';
 import { MysqlMailFlowRepo } from './repository/mysql/mailFlowRepo.js';
 import { MysqlAuditRepo } from './repository/mysql/auditRepo.js';
 import { MysqlIdempotencyReceiptRepo } from './repository/mysql/idempotencyReceiptRepo.js';
@@ -253,6 +255,7 @@ export async function createApp() {
     emailVerificationTokenRepo,
     syncMutationRepo,
     syncResetTokenRepo,
+    syncResetHandoffRepo,
     mailFlowRepo,
     idempotencyReceiptRepo,
     auditWriter,
@@ -263,7 +266,19 @@ export async function createApp() {
   const getUser = async (id: number) => userRepo.findById(id);
   const getSessionActive = (sessionId: string) => refreshTokenRepo.hasActiveToken(sessionId);
 
-  app.get('/health', async () => ({ status: 'ok' }));
+  // 请求速率 / 错误率打点（§11.3）：按 (method, route, status) 维度累加。
+  // 通过 app 装饰器 `app.metrics.snapshot()` 暴露给部署层/监控集成采集（受限出口，
+  // 不含 path 实际值 / query / token / 用户标识）。
+  const metrics = new MetricsRegistry();
+  attachRequestMetrics(app, metrics);
+  app.decorate('metrics', metrics);
+
+  registerHealthRoutes(app, {
+    migrations,
+    getDb: () => app.mysql,
+    // 邮件依赖就绪性由启动期把关（production 缺 SMTP 直接启动失败），此处恒就绪。
+    mailReady: true,
+  });
   app.register(authRoutes, { authService, tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin: config.consoleOrigin });
   app.register(meRoutes, { tokenService, getUser, getSessionActive, userRepo, personalSubscriptionRepo, personalPlanRepo });
   app.register(personalRoutes, { tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin: config.consoleOrigin, deviceRepo, idempotencyService, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId), revokeDeviceInTx: (tx, userId, deviceId) => authService.revokeDeviceInTx(tx, userId, deviceId) });

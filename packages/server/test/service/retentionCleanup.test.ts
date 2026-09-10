@@ -4,6 +4,7 @@ import {
   FakeEmailVerificationTokenRepo,
   FakeSyncMutationRepo,
   FakeSyncResetTokenRepo,
+  FakeSyncResetHandoffRepo,
   FakeIdempotencyReceiptRepo,
 } from '../helpers/fakeRepos.js';
 import { FakeMailFlowRepo } from '../helpers/linkFlowFakes.js';
@@ -21,9 +22,10 @@ function makeDeps() {
   const emailVerificationTokenRepo = new FakeEmailVerificationTokenRepo();
   const syncMutationRepo = new FakeSyncMutationRepo();
   const syncResetTokenRepo = new FakeSyncResetTokenRepo();
+  const syncResetHandoffRepo = new FakeSyncResetHandoffRepo();
   const mailFlowRepo = new FakeMailFlowRepo();
   const idempotencyReceiptRepo = new FakeIdempotencyReceiptRepo();
-  return { refreshTokenRepo, emailVerificationTokenRepo, syncMutationRepo, syncResetTokenRepo, mailFlowRepo, idempotencyReceiptRepo, exec };
+  return { refreshTokenRepo, emailVerificationTokenRepo, syncMutationRepo, syncResetTokenRepo, syncResetHandoffRepo, mailFlowRepo, idempotencyReceiptRepo, exec };
 }
 
 describe('retention cleanup', () => {
@@ -247,5 +249,29 @@ describe('retention cleanup', () => {
     c.stop();
     // 首次触发在 +intervalMs，启动瞬间不应有删除
     expect(await deps.refreshTokenRepo.findByHash('old')).toBeDefined();
+  });
+
+  it('expires overdue handoffs and prunes terminal handoffs past retention', async () => {
+    const deps = makeDeps();
+    const now = Date.now();
+    // 过期 issued → expire 置 expired（保留，终态 24h 后才物理删除）。
+    await deps.syncResetHandoffRepo.create(exec(), {
+      userId: 1, resetTokenId: 1, ticketHash: Buffer.alloc(32, 1), expiresTime: new Date(now - HOUR),
+    });
+    // 已完成且超保留期 → prune 物理删除。
+    const done = await deps.syncResetHandoffRepo.create(exec(), {
+      userId: 1, resetTokenId: 1, ticketHash: Buffer.alloc(32, 2), expiresTime: new Date(now + HOUR),
+    });
+    await deps.syncResetHandoffRepo.markCompleted(exec(), done.id, new Date(now - 2 * DAY), {
+      stateDtoJson: '{}', keyEpoch: '1', stateVersion: '1', changeSequence: '0',
+    });
+
+    const c = startRetentionCleanup(deps, {});
+    await c.runOnce();
+    c.stop();
+
+    expect(deps.syncResetHandoffRepo.store.size).toBe(1);
+    const remaining = [...deps.syncResetHandoffRepo.store.values()][0];
+    expect(remaining.status).toBe('expired');
   });
 });

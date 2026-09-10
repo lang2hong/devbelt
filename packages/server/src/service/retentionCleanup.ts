@@ -4,6 +4,7 @@ import type {
   IEmailVerificationTokenRepo,
   ISyncMutationRepo,
   ISyncResetTokenRepo,
+  ISyncResetHandoffRepo,
   IMailFlowRepo,
   IIdempotencyReceiptRepo,
 } from '../repository/interfaces.js';
@@ -49,6 +50,7 @@ export interface RetentionCleanupDeps {
   emailVerificationTokenRepo: IEmailVerificationTokenRepo;
   syncMutationRepo: ISyncMutationRepo;
   syncResetTokenRepo: ISyncResetTokenRepo;
+  syncResetHandoffRepo: ISyncResetHandoffRepo;
   mailFlowRepo: IMailFlowRepo;
   idempotencyReceiptRepo: IIdempotencyReceiptRepo;
   /** 回执删除的系统审计摘要（§6.1「删除本身写系统审计摘要」）。可选；写失败不阻断清理。 */
@@ -80,6 +82,16 @@ export function startRetentionCleanup(
       ['personal_sync_mutations', () => deps.syncMutationRepo.prune(deps.exec(), nowDate, batchSize)],
       ['personal_sync_reset_tokens', () => deps.syncResetTokenRepo.prune(deps.exec(), tokenBefore, batchSize)],
       ['mail_flows', () => deps.mailFlowRepo.prune(tokenBefore, batchSize)],
+      [
+        'sync_reset_handoffs (expire)',
+        // 过期 issued/processing ticket → expired（P2 §207，双阶段：先过期、后续再物理删除）。
+        () => deps.syncResetHandoffRepo.expire(deps.exec(), nowDate, batchSize),
+      ],
+      [
+        'sync_reset_handoffs (prune)',
+        // completed/revoked/expired 保留 24h 后分批物理删除（§11.2：≤1000 行/批）。
+        () => deps.syncResetHandoffRepo.prune(deps.exec(), tokenBefore, batchSize),
+      ],
       [
         'idempotency_receipts',
         async () => {
