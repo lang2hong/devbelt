@@ -70,8 +70,8 @@ function parseLimit(raw: unknown): number {
   return Math.min(n, 100);
 }
 
-/** 支付订单路由（P4 切片 2，console-only）。下单 = 受控写；列表/详情 = 限流读。 */
-export async function ordersRoutes(app: FastifyInstance, opts: OrdersRouteOptions): Promise<void> {
+/** 支付订单只读路由（P4 切片 3）：恒注册（无资金面风险）。列表/详情 = 限流读。 */
+export async function ordersReadRoutes(app: FastifyInstance, opts: OrdersRouteOptions): Promise<void> {
   registerConsoleErrorHandler(app);
   const svc = opts.orderService;
 
@@ -82,19 +82,6 @@ export async function ordersRoutes(app: FastifyInstance, opts: OrdersRouteOption
     aud: 'console',
     scope: ['console'],
     routes: async (child) => {
-      child.post('/api/console/orders', { schema: { body: createOrderBody } }, async (req, reply) => {
-        if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) {
-          return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
-        }
-        const actor = userIdOf(req);
-        await opts.rateLimiter.hit(`console:order:create:${actor}`, 3600, 10);
-        const { planCode, channel } = req.body as { planCode: string; channel: string };
-        const ch = parseChannel(channel);
-        const r = await svc.createOrder(actor, planCode, ch);
-        const order = await svc.getOrder(actor, r.orderNo);
-        reply.code(201).send({ order: orderDto(order), payParams: r.payParams });
-      });
-
       child.get('/api/console/orders', async (req, reply) => {
         const actor = userIdOf(req);
         await opts.rateLimiter.hit(`console:order:read:${actor}`, 60, 60);
@@ -120,6 +107,34 @@ export async function ordersRoutes(app: FastifyInstance, opts: OrdersRouteOption
         if (typeof orderNo !== 'string' || !orderNo) return rejectConsole(reply, 404, 'ORDER_NOT_FOUND', 'order not found');
         const order = await svc.getOrder(actor, orderNo);
         reply.send(orderDto(order));
+      });
+    },
+  });
+}
+
+/** 支付订单写路由（下单，P4 切片 2）：仅在支付网关配置后注册（受 `paymentEnabled` 门禁）。 */
+export async function ordersWriteRoutes(app: FastifyInstance, opts: OrdersRouteOptions): Promise<void> {
+  registerConsoleErrorHandler(app);
+  const svc = opts.orderService;
+
+  await app.register(consoleSession, {
+    tokenService: opts.tokenService,
+    getUser: opts.getUser,
+    getSessionActive: opts.getSessionActive,
+    aud: 'console',
+    scope: ['console'],
+    routes: async (child) => {
+      child.post('/api/console/orders', { schema: { body: createOrderBody } }, async (req, reply) => {
+        if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) {
+          return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
+        }
+        const actor = userIdOf(req);
+        await opts.rateLimiter.hit(`console:order:create:${actor}`, 3600, 10);
+        const { planCode, channel } = req.body as { planCode: string; channel: string };
+        const ch = parseChannel(channel);
+        const r = await svc.createOrder(actor, planCode, ch);
+        const order = await svc.getOrder(actor, r.orderNo);
+        reply.code(201).send({ order: orderDto(order), payParams: r.payParams });
       });
     },
   });

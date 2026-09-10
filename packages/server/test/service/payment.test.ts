@@ -57,16 +57,6 @@ class FakeOrderRepo implements IOrderRepo {
   async findPendingByUserAndPlan(userId: number, planCode: string, channel: Order['channel']): Promise<Order | undefined> {
     return [...this.store.values()].find((o) => o.userId === userId && o.planCode === planCode && o.channel === channel && o.status === 'pending');
   }
-  async expirePendingByUserAndPlanExcept(userId: number, planCode: string, keepChannel: Order['channel']): Promise<number> {
-    let n = 0;
-    for (const o of this.store.values()) {
-      if (o.userId === userId && o.planCode === planCode && o.channel !== keepChannel && o.status === 'pending') {
-        o.status = 'expired';
-        n += 1;
-      }
-    }
-    return n;
-  }
 }
 
 class FakePaymentRepo implements IPaymentRepo {
@@ -247,15 +237,29 @@ describe('OrderService.handleCallback', () => {
     expect([...orderRepo.store.values()].filter((o) => o.userId === 1)).toHaveLength(1);
   });
 
-  it('does NOT reuse a pending order across different channels, but expires the prior channel', async () => {
+  it('does NOT reuse a pending order across different channels, leaving the prior channel pending', async () => {
     const { svc, orderRepo } = makeService();
     const wechat = await svc.createOrder(1, 'pro', 'wechat');
     const alipay = await svc.createOrder(1, 'pro', 'alipay');
     expect(alipay.orderNo).not.toBe(wechat.orderNo);
     expect(alipay.channel).toBe('alipay');
-    // 旧渠道 pending 被置过期，维持「同套餐仅一张可支付 pending」。
-    expect(await orderRepo.findByOrderNo(wechat.orderNo)).toMatchObject({ status: 'expired' });
+    // 旧渠道保持 pending（自然过期），不本地宣告过期——用户可能已拿到旧渠道支付码。
+    expect(await orderRepo.findByOrderNo(wechat.orderNo)).toMatchObject({ status: 'pending' });
     expect(await orderRepo.findByOrderNo(alipay.orderNo)).toMatchObject({ status: 'pending' });
+  });
+
+  it('fulfills a prior-channel callback after switching channels (no confirmed-but-unfulfilled)', async () => {
+    const { svc, orderRepo, subsRepo } = makeService();
+    await subsRepo.create({ userId: 1, planId: 1, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null });
+    const wechat = await svc.createOrder(1, 'pro', 'wechat');
+    // 用户切到支付宝，开了第二个订单。
+    await svc.createOrder(1, 'pro', 'alipay');
+
+    // 但用户在旧微信页完成了付款 → 必须正常履约，而非被丢弃。
+    const cb = SUCCESS_CALLBACK(wechat.orderNo, 'wx-1', 9900);
+    const outcome = await svc.handleCallback('wechat', cb.raw, cb.headers);
+    expect(outcome.kind).toBe('fulfilled');
+    expect((await orderRepo.findByOrderNo(wechat.orderNo))!.status).toBe('fulfilled');
   });
 
   it('passes the original raw bytes to signature verification', async () => {

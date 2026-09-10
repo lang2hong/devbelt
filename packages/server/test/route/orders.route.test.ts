@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import Fastify from 'fastify';
 import { generateKeyPairSync } from 'crypto';
-import { ordersRoutes } from '../../src/route/orders.js';
+import { ordersReadRoutes, ordersWriteRoutes } from '../../src/route/orders.js';
 import { paymentCallbackRoutes } from '../../src/route/paymentCallback.js';
 import { requestId } from '../../src/middleware/requestId.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
@@ -41,7 +41,6 @@ class FOrderRepo {
   }
   async listByUser(uid: number, _c: number | undefined, limit: number) { return [...this.store.values()].filter((o) => o.userId === uid).slice(0, limit); }
   async findPendingByUserAndPlan(uid: number, plan: string, channel: string) { return [...this.store.values()].find((o) => o.userId === uid && o.planCode === plan && o.channel === channel && o.status === 'pending'); }
-  async expirePendingByUserAndPlanExcept(uid: number, plan: string, keep: string) { let n = 0; for (const o of this.store.values()) { if (o.userId === uid && o.planCode === plan && o.channel !== keep && o.status === 'pending') { o.status = 'expired'; n++; } } return n; }
 }
 
 class FPaymentRepo {
@@ -89,10 +88,12 @@ async function build() {
   const rateLimiter = new RateLimitService({ increment: async () => 1, peek: async () => 0 } as any, false);
   const cursorService = new CursorService(Buffer.alloc(32, 5));
 
-  await app.register(ordersRoutes, {
-    tokenService, getUser: async () => ({ status: 'active', sessionVersion: 0, role: 'user' }),
+  const orderOpts = {
+    tokenService, getUser: async () => ({ status: 'active', sessionVersion: 0, role: 'user' as const }),
     getSessionActive: async () => true, csrfService, consoleOrigin: ORIGIN, rateLimiter, cursorService, orderService,
-  });
+  };
+  await app.register(ordersReadRoutes, orderOpts);
+  await app.register(ordersWriteRoutes, orderOpts);
   await app.register(paymentCallbackRoutes, { orderService, auditWriter, rateLimiter });
   await app.ready();
 

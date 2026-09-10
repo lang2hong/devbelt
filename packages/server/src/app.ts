@@ -72,6 +72,9 @@ import { consoleMeRoutes } from './route/consoleMe.js';
 import { consoleDataRoutes } from './route/consoleData.js';
 import { consoleAdminRoutes } from './route/consoleAdmin.js';
 import { registerPaymentRoutes } from './route/paymentRoutes.js';
+import { invoiceRoutes } from './route/invoices.js';
+import { InvoiceService } from './service/invoiceService.js';
+import { MysqlInvoiceRepo } from './repository/mysql/invoiceRepo.js';
 import { ConsoleAuthService } from './service/consoleAuthService.js';
 import { ConsoleAdminService } from './service/consoleAdminService.js';
 import { OrderService } from './service/paymentService.js';
@@ -149,6 +152,7 @@ export async function createApp() {
   const idempotencyReceiptRepo = new MysqlIdempotencyReceiptRepo(getMysql);
   const orderRepo = new MysqlOrderRepo(getMysql);
   const paymentRepo = new MysqlPaymentRepo();
+  const invoiceRepo = new MysqlInvoiceRepo(getMysql);
 
   // service 层
   const tokenService = new TokenService(signingKeys, config.accessTokenExpiresIn, config.refreshTokenExpiresMs);
@@ -249,6 +253,8 @@ export async function createApp() {
     auditWriter,
   });
   const cursorService = new CursorService(deriveCursorKey());
+
+  const invoiceService = new InvoiceService({ invoiceRepo, orderRepo, auditWriter });
 
   const orderService = new OrderService({
     orderRepo,
@@ -392,8 +398,38 @@ export async function createApp() {
       },
     });
   } else {
-    app.log.warn('payment routes disabled: no real payment gateway adapter configured (P4 requires a real adapter)');
+    // 只读订单路由仍注册（无资金面风险）；下单/回调随真网关一起关闭。
+    await registerPaymentRoutes(app, {
+      enabled: false,
+      orders: {
+        tokenService,
+        getUser,
+        getSessionActive,
+        csrfService,
+        consoleOrigin: config.consoleOrigin,
+        rateLimiter,
+        cursorService,
+        orderService,
+      },
+      callback: {
+        orderService,
+        auditWriter,
+        rateLimiter,
+      },
+    });
+    app.log.warn('payment gateway disabled: order create + callback routes are not registered (P4 requires a real adapter)');
   }
+  await app.register(invoiceRoutes, {
+    tokenService,
+    getUser,
+    getSessionActive,
+    csrfService,
+    consoleOrigin: config.consoleOrigin,
+    rateLimiter,
+    idempotencyService,
+    cursorService,
+    invoiceService,
+  });
   await registerConsoleStatic(app);
 
   await app.ready();

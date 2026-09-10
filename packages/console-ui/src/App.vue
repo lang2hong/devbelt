@@ -8,6 +8,8 @@ import { me, type ConsoleMe } from './api/me';
 import AccountView from './pages/AccountView.vue';
 import DevicesView from './pages/DevicesView.vue';
 import SyncView from './pages/SyncView.vue';
+import OrdersView from './pages/OrdersView.vue';
+import InvoicesView from './pages/InvoicesView.vue';
 import OrganizationsView from './pages/OrganizationsView.vue';
 import OrganizationDetailView from './pages/OrganizationDetailView.vue';
 import ResourcesView from './pages/ResourcesView.vue';
@@ -21,6 +23,8 @@ const ROUTES: RouteConfig[] = [
   { pattern: '/console/account', name: 'account' },
   { pattern: '/console/account/devices', name: 'devices' },
   { pattern: '/console/account/sync', name: 'sync' },
+  { pattern: '/console/orders', name: 'orders' },
+  { pattern: '/console/invoices', name: 'invoices' },
   { pattern: '/console/organizations', name: 'organizations' },
   { pattern: '/console/organizations/:id', name: 'organization-detail' },
   { pattern: '/console/organizations/:id/resources', name: 'organization-resources' },
@@ -42,11 +46,15 @@ const view = computed<{ comp: Component; props: Record<string, unknown> }>(() =>
   }
   switch (router.name) {
     case 'account':
-      return { comp: AccountView, props: { user: me_.value?.user ?? null } };
+      return { comp: AccountView, props: { user: me_.value?.user ?? null, subscription: me_.value?.subscription ?? null } };
     case 'devices':
       return { comp: DevicesView, props: {} };
     case 'sync':
       return { comp: SyncView, props: {} };
+    case 'orders':
+      return { comp: OrdersView, props: {} };
+    case 'invoices':
+      return { comp: InvoicesView, props: {} };
     case 'organizations':
       return { comp: OrganizationsView, props: {} };
     case 'organization-detail':
@@ -120,6 +128,8 @@ async function onLogout(): Promise<void> {
         <a href="/console/account" :class="{ on: router.name === 'account' }">账户</a>
         <a href="/console/account/devices" :class="{ on: router.name === 'devices' }">设备</a>
         <a href="/console/account/sync" :class="{ on: router.name === 'sync' }">同步</a>
+        <a href="/console/orders" :class="{ on: router.name === 'orders' }">订单</a>
+        <a href="/console/invoices" :class="{ on: router.name === 'invoices' }">发票</a>
         <a href="/console/organizations" :class="{ on: router.name === 'organizations' || router.name === 'organization-detail' || router.name === 'organization-resources' }">组织</a>
         <a v-if="me_.platformAdmin" href="/console/admin/users" :class="{ on: ['admin-users', 'admin-organizations', 'admin-audit', 'admin-version'].includes(router.name ?? '') }">管理</a>
         <span class="spacer"></span>

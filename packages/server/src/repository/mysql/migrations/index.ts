@@ -17,6 +17,7 @@ import { platformAdminMigration } from './015_platform_admin.js';
 import { idempotencyReceiptLongtextMigration } from './016_idempotency_receipt_longtext.js';
 import { syncResetHandoffsMigration } from './017_sync_reset_handoffs.js';
 import { paymentMigration } from './018_payment.js';
+import { invoiceOrderUniqueMigration } from './019_invoice_order_unique.js';
 
 /** 新库启动时按固定依赖顺序执行的 migration 集合。 */
 export const migrations: readonly Migration[] = [
@@ -38,4 +39,5 @@ export const migrations: readonly Migration[] = [
   idempotencyReceiptLongtextMigration,
   syncResetHandoffsMigration,
   paymentMigration,
+  invoiceOrderUniqueMigration,
 ];

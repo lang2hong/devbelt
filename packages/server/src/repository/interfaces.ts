@@ -733,8 +733,6 @@ export interface IOrderRepo {
   listByUser(userId: number, cursor: number | undefined, limit: number): Promise<Order[]>;
   /** 同 (user, plan, channel) 未过期 pending 订单（下单去重：复用原订单，防重复付款，§P4）。 */
   findPendingByUserAndPlan(userId: number, planCode: string, channel: Order['channel']): Promise<Order | undefined>;
-  /** 过期同 (user, plan) 除指定 channel 外的 pending 订单（开新渠道订单前调用，防跨渠道重复付款，§P4）。 */
-  expirePendingByUserAndPlanExcept(userId: number, planCode: string, keepChannel: Order['channel']): Promise<number>;
 }
 
 export interface IPaymentRepo {
@@ -752,7 +750,7 @@ export interface IPaymentRepo {
 }
 
 export interface IInvoiceRepo {
-  create(input: {
+  create(exec: Queryable, input: {
     userId: number;
     orderId: number | null;
     title: string;

@@ -54,6 +54,13 @@ describe.skipIf(!URL)('migration smoke (real MySQL)', () => {
       expect(indexNames).toContain('idx_mail_flows_expires');
       expect(indexNames).toContain('idx_mail_flows_consumed');
 
+      // 019：invoices 的订单级唯一索引（一订单一票，税务不变量）：名 + 唯一 + 且仅 order_id 单列。
+      const [invIndexRows] = await pool.query('SHOW INDEX FROM invoices') as [Array<{ Key_name: string; Non_unique: number; Column_name: string }>, unknown];
+      const uniq = invIndexRows.filter((r) => r.Key_name === 'uq_invoices_order');
+      expect(uniq).toHaveLength(1);
+      expect(uniq[0].Non_unique).toBe(0);
+      expect(uniq[0].Column_name).toBe('order_id');
+
       // 013_console_session：users.session_version 已存在（会话即时失效依赖）。
       const [svCols] = await pool.query(
         `SELECT COLUMN_NAME FROM information_schema.COLUMNS

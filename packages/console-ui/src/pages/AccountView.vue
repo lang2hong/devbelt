@@ -4,7 +4,7 @@ import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
 import { updateDisplayName, changePassword, type ConsoleMeUser } from '../api/me';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 
-const props = defineProps<{ user: ConsoleMeUser | null }>();
+const props = defineProps<{ user: ConsoleMeUser | null; subscription: { planCode: string | null; status: string; periodEndTime: string | null } | null }>();
 
 const displayName = ref(props.user?.displayName ?? '');
 const nameSaving = ref(false);
@@ -88,6 +88,16 @@ async function submitPassword(): Promise<void> {
       <p v-if="nameError" class="error">{{ nameError }}</p>
       <p v-if="nameSaved" class="ok">已保存。</p>
       <button class="btn" :disabled="nameSaving" @click="saveName">{{ nameSaving ? '保存中…' : '保存' }}</button>
+    </div>
+
+    <div class="card">
+      <h3>订阅</h3>
+      <p class="row" v-if="subscription">
+        当前套餐：<strong>{{ subscription.planCode === 'pro' ? 'Pro' : (subscription.planCode ?? '—') }}</strong>
+        <span class="muted">（{{ subscription.status === 'active' ? '生效中' : subscription.status }}）</span>
+      </p>
+      <p class="row" v-if="subscription?.periodEndTime">到期时间：{{ new Date(subscription.periodEndTime).toLocaleString() }}</p>
+      <p class="row muted" v-if="!subscription">暂无订阅。</p>
     </div>
 
     <div class="card">

@@ -364,3 +364,11 @@ export class UnknownChannelError extends DomainError {
     this.name = 'UnknownChannelError';
   }
 }
+
+/** 同一订单重复申请发票 → 409 INVOICE_ALREADY_REQUESTED（invoices.order_id 唯一键兜底）。 */
+export class InvoiceAlreadyRequestedError extends DomainError {
+  constructor() {
+    super('an invoice for this order has already been requested', 'INVOICE_ALREADY_REQUESTED');
+    this.name = 'InvoiceAlreadyRequestedError';
+  }
+}

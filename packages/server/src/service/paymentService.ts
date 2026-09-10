@@ -86,10 +86,9 @@ export class OrderService {
       return { orderNo: existing.orderNo, channel, amountCents: existing.amountCents, payParams };
     }
 
-    // P2-E：开启新渠道订单前，过期同 (user, plan) 其他渠道的 pending，维持
-    // 「同一套餐同一时刻仅一张可支付 pending」（跨渠道且付款会重复收款）。
-    await this.orderRepo.expirePendingByUserAndPlanExcept(userId, planCode, channel);
-
+    // 注意：不因「开了别的渠道」而把旧渠道 pending 置 expired——用户可能已拿到旧渠道
+    // 支付码并完成付款，若本地单边宣告过期，回调会「确认付款但不履约」。旧订单自然过期，
+    // 后续合法 callback 一律正常履约；多渠道并行订单策略/渠道取消/超时补偿见 Runbook §9。
     const orderNo = randomBytes(32).toString('base64url');
     const expiresTime = new Date(Date.now() + ORDER_EXPIRES_MS);
 

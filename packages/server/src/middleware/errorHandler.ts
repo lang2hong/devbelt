@@ -139,6 +139,8 @@ export function errorStatus(code: string): number {
       return 404;
     case 'ORDER_INVALID_STATE':
       return 409;
+    case 'INVOICE_ALREADY_REQUESTED':
+      return 409;
     case 'PAYMENT_AMOUNT_MISMATCH':
     case 'PAYMENT_SIGNATURE_INVALID':
     case 'UNKNOWN_PLAN':

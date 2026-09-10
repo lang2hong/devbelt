@@ -46,6 +46,7 @@ const ALLOWED_EVENT_TYPES = [
   'payment.order.paid',
   'payment.order.fulfilled',
   'payment.callback.failed',
+  'invoice.requested',
 ] as const;
 
 export type AuditEventType = (typeof ALLOWED_EVENT_TYPES)[number];
