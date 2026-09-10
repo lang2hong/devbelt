@@ -19,9 +19,10 @@ export default defineConfig({
   workers: 1,
   retries: 1,
   reporter: [['list']],
+  expect: { timeout: 30_000 },
   use: {
     baseURL: BASE_URL,
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
   },
   webServer: {
     command: process.env.E2E_SERVER_CMD ?? 'node ../server/dist/index.cjs',

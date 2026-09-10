@@ -12,6 +12,10 @@ test('register → verify via emailed link', async ({ page }) => {
   await page.locator('input[type="email"]').fill(email);
   await page.locator('input[type="password"]').fill(PASSWORD);
   await page.getByRole('button', { name: '注册' }).click();
+
+  // 等注册态收敛（成功 .success 或失败 .error），打印页面文本便于定位 CI 失败。
+  await page.waitForSelector('.success, .error', { timeout: 30_000 });
+  console.log('[e2e] register body:', await page.locator('body').innerText());
   await expect(page.getByText(/验证邮件已发送/)).toBeVisible();
 
   const link = await getVerificationLink(email);
