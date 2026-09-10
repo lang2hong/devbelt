@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import mysql from 'mysql2/promise';
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { createTestPool } from './testDb.js';
 import { runMigrations } from '../../src/repository/mysql/migrate.js';
 import { migrations } from '../../src/repository/mysql/migrations/index.js';
@@ -105,7 +105,9 @@ describe.skipIf(!URL)('sync reset-after-loss handoff (real MySQL)', () => {
       return token.id;
     });
 
-    const nonce = Buffer.alloc(32, 7).toString('base64url');
+    // 非唯一 nonce 会撞 mail_flows.uq_mail_flows_nonce（该列唯一键）；用随机 nonce 保证
+    // 每个用例的 mail_flow 可独立签发，不跨用例复用。
+    const nonce = randomBytes(32).toString('base64url');
     await u.mailFlowRepo.create({
       type: 'sync-reset',
       targetTokenHash: sha(raw),
