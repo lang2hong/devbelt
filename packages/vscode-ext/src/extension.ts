@@ -35,7 +35,7 @@ import { DekStore } from './sync/crypto/keyStore';
 import { deriveSyncStatus } from './sync/syncStatus';
 import { registerPersonalSyncCommands } from './commands/personalSync';
 import { registerConflictCommands } from './commands/syncConflicts';
-import { registerSyncLifecycleCommands } from './commands/syncLifecycle';
+import { registerSyncLifecycleCommands, registerSyncResetUriHandler } from './commands/syncLifecycle';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const store = new ConnectionStore(context.globalState, context.secrets);
@@ -265,6 +265,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   registerConflictCommands(context, syncFactory);
   // B5 生命周期：换钥 / 恢复 / 销毁 / 重置。
   registerSyncLifecycleCommands(context, auth, syncFactory);
+  // 切片 5：sync-reset 深链 UriHandler（浏览器 handoff → 扩展最终 reset）。
+  registerSyncResetUriHandler(context, auth, syncFactory);
   // 这里原先用 onDidChangeSelection 往 `dbclient.dbType` / `dbclient.has*` 写
   // context key，供菜单 when 判断数据库类型。那是竞态的：右键未选中项、或右键
   // 与当前选中项不同时，键里还是上一个节点的值 —— 在 SQLite 表上会看到 MySQL

@@ -40,7 +40,7 @@ function newState(fill = 10): SyncNewState {
   };
 }
 
-function makeStack() {
+function makeStack(syncExtensionId = 'lang2hong.vscode-db-client') {
   const stateRepo = new FakeSyncStateRepo();
   const recordRepo = new FakeSyncRecordRepo();
   const resetTokenRepo = new FakeSyncResetTokenRepo();
@@ -51,7 +51,7 @@ function makeStack() {
   const rateLimitRepo = new FakeRateLimitRepo();
   const rateLimiter = new RateLimitService(rateLimitRepo, true);
   const auditWriter = new AuditWriter(new FakeAuditRepo());
-  const svc = new SyncResetService(stateRepo, recordRepo, resetTokenRepo, userRepo, runner, emailSender, rateLimiter, mailFlowRepo, handoffRepo, auditWriter);
+  const svc = new SyncResetService(stateRepo, recordRepo, resetTokenRepo, userRepo, runner, emailSender, rateLimiter, mailFlowRepo, handoffRepo, auditWriter, syncExtensionId);
   return { stateRepo, recordRepo, resetTokenRepo, handoffRepo, mailFlowRepo, userRepo, emailSender, rateLimitRepo, rateLimiter, svc };
 }
 
@@ -85,7 +85,7 @@ async function issueHandoff(s: ReturnType<typeof makeStack>, userId: number, raw
   });
   const { openUri } = await s.svc.createHandoff(nonce, userId);
   const ticket = openUri.split('handoffTicket=')[1];
-  return { token, ticket: Buffer.from(ticket, 'base64url') };
+  return { token, ticket: Buffer.from(ticket, 'base64url'), openUri };
 }
 
 function randomB64(n: number): string {
@@ -157,7 +157,7 @@ describe('SyncResetService', () => {
       sendInvitationEmail: async () => {},
       sendResetChallengeEmail: async () => { throw new Error('smtp down'); },
     } as any;
-    const svc = new SyncResetService(s.stateRepo, s.recordRepo, s.resetTokenRepo, s.userRepo, runner, failingSender, s.rateLimiter, s.mailFlowRepo, s.handoffRepo, new AuditWriter(new FakeAuditRepo()));
+    const svc = new SyncResetService(s.stateRepo, s.recordRepo, s.resetTokenRepo, s.userRepo, runner, failingSender, s.rateLimiter, s.mailFlowRepo, s.handoffRepo, new AuditWriter(new FakeAuditRepo()), 'lang2hong.vscode-db-client');
 
     await expect(svc.requestResetChallenge(user.id, '1.2.3.4')).resolves.toBeUndefined();
     expect(s.resetTokenRepo.store.size).toBe(1);
@@ -183,6 +183,16 @@ describe('SyncResetService', () => {
 
     // mail_flow 被消费。
     expect([...s.mailFlowRepo.store.values()][0].status).toBe('consumed');
+  });
+
+  it('createHandoff openUri uses the configured extension authority', async () => {
+    const s1 = makeStack();
+    const { openUri: u1 } = await issueHandoff(s1, USER, buf(32, 11));
+    expect(u1.startsWith('vscode://lang2hong.vscode-db-client/reset-after-loss?handoffTicket=')).toBe(true);
+
+    const s2 = makeStack('com.example.ext');
+    const { openUri: u2 } = await issueHandoff(s2, USER, buf(32, 12));
+    expect(u2.startsWith('vscode://com.example.ext/reset-after-loss?handoffTicket=')).toBe(true);
   });
 
   it('resetAfterLossWithHandoff consumes ticket+token, tombstones records, and returns full StateDto', async () => {

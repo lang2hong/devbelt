@@ -546,7 +546,7 @@ describe('PersonalSyncSession B5 生命周期', () => {
   it('resetSyncAfterLoss（无本地 snapshot）成功：存新 DEK、解锁新 epoch', async () => {
     const reset = vi.fn(async () => ({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' }));
     const getState = vi.fn(async () => { throw new SyncApiError(400, 'SYNC_NOT_INITIALIZED'); });
-    const client = { resetAfterLoss: reset, getState } as unknown as PersonalSyncClient;
+    const client = { resetAfterLossWithHandoff: reset, getState } as unknown as PersonalSyncClient;
     const { store, secrets } = makeDekStore();
     const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, client);
     kl.createInitialMaterial.mockResolvedValue(fixedMaterial());
@@ -613,7 +613,7 @@ describe('PersonalSyncSession B5 生命周期', () => {
   it('reset 回执 epoch ≠ 预期 next → fail-closed 不写本地', async () => {
     const reset = vi.fn(async () => ({ keyEpoch: '5', stateVersion: '1', changeSequence: '0' }));
     const getState = vi.fn(async () => { throw new SyncApiError(400, 'SYNC_NOT_INITIALIZED'); });
-    const client = { resetAfterLoss: reset, getState } as unknown as PersonalSyncClient;
+    const client = { resetAfterLossWithHandoff: reset, getState } as unknown as PersonalSyncClient;
     const { store, secrets } = makeDekStore();
     const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, client);
     kl.createInitialMaterial.mockResolvedValue(fixedMaterial());
@@ -627,7 +627,7 @@ describe('PersonalSyncSession B5 生命周期', () => {
   it('reset 回执 keyEpoch 非 u64 → 拒绝', async () => {
     const reset = vi.fn(async () => ({ keyEpoch: 'abc', stateVersion: '1', changeSequence: '0' }));
     const getState = vi.fn(async () => { throw new SyncApiError(400, 'SYNC_NOT_INITIALIZED'); });
-    const client = { resetAfterLoss: reset, getState } as unknown as PersonalSyncClient;
+    const client = { resetAfterLossWithHandoff: reset, getState } as unknown as PersonalSyncClient;
     const s = new PersonalSyncSession('7', makeMemento(), makeDekStore().store, makeStore().store, client);
     kl.createInitialMaterial.mockResolvedValue(fixedMaterial());
     kl.newStateFromMaterial.mockReturnValue({} as NewStateDto);
@@ -662,11 +662,11 @@ describe('PersonalSyncSession B5 生命周期', () => {
   });
 
   it('resetSyncAfterLoss 解锁态抛错（session 边界 fail-closed）', async () => {
-    const client = { resetAfterLoss: vi.fn(), getState: vi.fn(async () => { throw new SyncApiError(400, 'SYNC_NOT_INITIALIZED'); }) } as unknown as PersonalSyncClient;
+    const client = { resetAfterLossWithHandoff: vi.fn(), getState: vi.fn(async () => { throw new SyncApiError(400, 'SYNC_NOT_INITIALIZED'); }) } as unknown as PersonalSyncClient;
     const s = new PersonalSyncSession('7', makeMemento(), makeDekStore().store, makeStore().store, client);
     s.unlock('1', FIX_DEK);
     await expect(s.resetSyncAfterLoss('token', 'new-smp')).rejects.toThrowError(/already unlocked/);
-    expect(client.resetAfterLoss).not.toHaveBeenCalled();
+    expect(client.resetAfterLossWithHandoff).not.toHaveBeenCalled();
   });
 
   it('destroy 回执丢失（请求前已落 intent）→ 重启解锁按 fromKeyEpoch 撤销并继续旧 epoch', async () => {
@@ -714,13 +714,13 @@ describe('PersonalSyncSession B5 生命周期', () => {
   it('reset 时已有 pendingCleanup → fail-closed：不发 reset 也不替换 intent', async () => {
     const memento = makeMemento();
     await memento.update('dbclient.sync.epochCleanup.7', { fromKeyEpoch: '1', toKeyEpoch: '2' });
-    const resetAfterLoss = vi.fn(async () => ({ keyEpoch: '3', stateVersion: '1', changeSequence: '0' }));
+    const resetAfterLossWithHandoff = vi.fn(async () => ({ keyEpoch: '3', stateVersion: '1', changeSequence: '0' }));
     const getState = vi.fn(async () => validState('2'));
-    const client = { resetAfterLoss, getState } as unknown as PersonalSyncClient;
+    const client = { resetAfterLossWithHandoff, getState } as unknown as PersonalSyncClient;
     const s = new PersonalSyncSession('7', memento, makeDekStore().store, makeStore().store, client);
 
     await expect(s.resetSyncAfterLoss('token', 'new-smp')).rejects.toThrowError(/pending sync cleanup/);
-    expect(resetAfterLoss).not.toHaveBeenCalled();
+    expect(resetAfterLossWithHandoff).not.toHaveBeenCalled();
     expect(getState).not.toHaveBeenCalled();
     expect(memento.get('dbclient.sync.epochCleanup.7')).toEqual({ fromKeyEpoch: '1', toKeyEpoch: '2' });
   });

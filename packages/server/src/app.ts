@@ -204,6 +204,7 @@ export async function createApp() {
     mailFlowRepo,
     syncResetHandoffRepo,
     auditWriter,
+    config.syncExtensionId,
   );
   const idempotencyService = new IdempotencyService(idempotencyReceiptRepo, (fn) => withTransaction(app.mysql, fn));
   const linkFlowService = new LinkFlowService(

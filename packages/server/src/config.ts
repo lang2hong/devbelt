@@ -84,6 +84,13 @@ export const config = {
   consoleOrigin: resolveConsoleOrigin(),
   /** 平台管理员引导邮箱（规范化后，供启动受控提升）。 */
   platformAdminEmails: parsePlatformAdminEmails(process.env.PLATFORM_ADMIN_EMAILS),
+  /**
+   * sync-reset 深链目标扩展 id（`vscode://<id>/reset-after-loss`）。
+   * 深链按扩展的 publisher.name 路由；当前扩展 manifest 为 lang2hong.vscode-db-client，
+   * 故默认取此实际 id（开箱即用）。若日后以 dbclient.sync 重新发布 marketplace，部署时
+   * 用 SYNC_EXTENSION_ID 覆盖。
+   */
+  syncExtensionId: process.env.SYNC_EXTENSION_ID || 'lang2hong.vscode-db-client',
 };
 
 export { parseTrustProxy };

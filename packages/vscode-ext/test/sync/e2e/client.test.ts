@@ -45,21 +45,17 @@ describe('PersonalSyncClient 无签名方法', () => {
     expect(http.requestRaw).toHaveBeenCalledWith('POST', '/api/sync/reset-challenges', undefined, undefined);
   });
 
-  it('resetAfterLoss → POST，retry=false', async () => {
+  it('resetAfterLossWithHandoff → POST，默认重试（无 retry=false）', async () => {
     const http = makeHttp();
-    await new PersonalSyncClient(http).resetAfterLoss('A'.repeat(43), newState);
+    await new PersonalSyncClient(http).resetAfterLossWithHandoff('A'.repeat(43), newState);
     const [method, path, body, opts] = http.requestRaw.mock.calls[0];
     expect(method).toBe('POST');
     expect(path).toBe('/api/sync/reset-after-loss');
     expect(body).toEqual({
-      protocolVersion: 1,
-      resetToken: 'A'.repeat(43),
-      confirmIrreversible: true,
-      confirmDataLoss: true,
-      confirmNoRecovery: true,
+      handoffTicket: 'A'.repeat(43),
       newState,
     });
-    expect(opts).toEqual({ retry: false });
+    expect(opts).toBeUndefined();
   });
 });
 

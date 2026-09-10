@@ -1,9 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import * as vscode from 'vscode';
 
 vi.mock('vscode', () => ({
   env: { language: 'en' },
   workspace: { getConfiguration: () => ({ get: () => 'en' }) },
-  window: {},
+  window: {
+    registerUriHandler: vi.fn(),
+    showInputBox: vi.fn(),
+    showInformationMessage: vi.fn(),
+    showWarningMessage: vi.fn(),
+    showErrorMessage: vi.fn(),
+  },
   commands: {},
 }));
 
@@ -12,7 +19,9 @@ import {
   recoverSync,
   destroySync,
   resetSync,
+  resetSyncFromHandoff,
   clearLocalSync,
+  registerSyncResetUriHandler,
   type SyncLifecycleCommandDeps,
 } from '../../src/commands/syncLifecycle';
 
@@ -135,16 +144,15 @@ describe('syncLifecycle 命令（B5）', () => {
     expect(ui.confirmRecoveryCode).toHaveBeenCalledWith('CODE-ABC');
   });
 
-  it('resetSync：challenge → token → 新口令 → 成功', async () => {
-    const session = makeSession({ isUnlocked: false, resetSyncAfterLoss: vi.fn(async () => 'CODE-RS') });
+  it('resetSync：challenge 发送后仅提示查邮件，不再收集 token、不再本地 reset', async () => {
+    const session = makeSession({ isUnlocked: false });
     const { deps, ui } = makeDeps(session);
     ui.confirmIrreversible.mockResolvedValue(true);
-    ui.promptText.mockResolvedValue('token');
-    ui.promptSmp.mockResolvedValueOnce('new-passphrase-123').mockResolvedValueOnce('new-passphrase-123');
     await resetSync(deps);
-    expect(session.requestResetChallenge).toHaveBeenCalled();
-    expect(session.resetSyncAfterLoss).toHaveBeenCalledWith('token', 'new-passphrase-123');
-    expect(ui.confirmRecoveryCode).toHaveBeenCalledWith('CODE-RS');
+    expect(session.requestResetChallenge).toHaveBeenCalledTimes(1);
+    expect(ui.promptText).not.toHaveBeenCalled();
+    expect(session.resetSyncAfterLoss).not.toHaveBeenCalled();
+    expect(ui.info).toHaveBeenCalledWith(expect.stringContaining('mail'));
   });
 
   it('resetSync：challenge 失败 → 固定错误，不请求 token', async () => {
@@ -154,6 +162,33 @@ describe('syncLifecycle 命令（B5）', () => {
     await resetSync(deps);
     expect(ui.error).toHaveBeenCalled();
     expect(ui.promptText).not.toHaveBeenCalled();
+    expect(session.resetSyncAfterLoss).not.toHaveBeenCalled();
+  });
+
+  it('resetSyncFromHandoff：新 SMP 双输入 → handoffTicket 消费 → 展示恢复码', async () => {
+    const session = makeSession({ isUnlocked: false, resetSyncAfterLoss: vi.fn(async () => 'CODE-HF') });
+    const { deps, ui } = makeDeps(session);
+    ui.promptSmp.mockResolvedValueOnce('new-passphrase-123').mockResolvedValueOnce('new-passphrase-123');
+    await resetSyncFromHandoff(deps, 'HANDOFF-TICKET');
+    expect(session.resetSyncAfterLoss).toHaveBeenCalledWith('HANDOFF-TICKET', 'new-passphrase-123');
+    expect(ui.confirmRecoveryCode).toHaveBeenCalledWith('CODE-HF');
+    expect(ui.info).toHaveBeenCalled();
+  });
+
+  it('resetSyncFromHandoff：消费失败 → 固定错误，不展示恢复码', async () => {
+    const session = makeSession({ isUnlocked: false, resetSyncAfterLoss: vi.fn(async () => { throw new Error('x'); }) });
+    const { deps, ui } = makeDeps(session);
+    ui.promptSmp.mockResolvedValueOnce('new-passphrase-123').mockResolvedValueOnce('new-passphrase-123');
+    await resetSyncFromHandoff(deps, 'HANDOFF-TICKET');
+    expect(ui.error).toHaveBeenCalled();
+    expect(ui.confirmRecoveryCode).not.toHaveBeenCalled();
+  });
+
+  it('resetSyncFromHandoff：未登录 → 告警且不消费 ticket', async () => {
+    const session = makeSession();
+    const { deps, ui } = makeDeps(session, { loggedIn: false });
+    await resetSyncFromHandoff(deps, 'HANDOFF-TICKET');
+    expect(ui.warn).toHaveBeenCalled();
     expect(session.resetSyncAfterLoss).not.toHaveBeenCalled();
   });
 
@@ -217,5 +252,63 @@ describe('syncLifecycle 命令（B5）', () => {
     await clearLocalSync(deps);
     expect(session.clearLocalSyncData).not.toHaveBeenCalled();
     expect(ui.warn).toHaveBeenCalled();
+  });
+});
+
+describe('syncResetUriHandler', () => {
+  beforeEach(() => {
+    vi.mocked(vscode.window.registerUriHandler).mockClear();
+    vi.mocked(vscode.window.showInputBox).mockReset();
+    vi.mocked(vscode.window.showInformationMessage).mockReset();
+    vi.mocked(vscode.window.showWarningMessage).mockReset();
+    vi.mocked(vscode.window.showErrorMessage).mockReset();
+  });
+
+  function setupHandler() {
+    const session = makeSession({ isUnlocked: false, resetSyncAfterLoss: vi.fn(async () => 'CODE-H') });
+    const auth = { isLoggedIn: () => true, refreshEntitlement: vi.fn(async () => {}) } as any;
+    const factory = { ensureSession: vi.fn(async () => session) };
+    const context = { subscriptions: { push: vi.fn() } } as unknown as vscode.ExtensionContext;
+    registerSyncResetUriHandler(context, auth, factory as any);
+    const handler = vi.mocked(vscode.window.registerUriHandler).mock.calls[0][0];
+    return { session, factory, handler };
+  }
+
+  it('非 /reset-after-loss 路径静默忽略（不建 session、不报错）', async () => {
+    const { factory, handler } = setupHandler();
+    await handler.handleUri({ path: '/other', query: `handoffTicket=${'A'.repeat(43)}` } as unknown as vscode.Uri);
+    expect(factory.ensureSession).not.toHaveBeenCalled();
+    expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it('缺 ticket → 显示 resetHandoffInvalid，不建 session', async () => {
+    const { factory, handler } = setupHandler();
+    await handler.handleUri({ path: '/reset-after-loss', query: '' } as unknown as vscode.Uri);
+    expect(vscode.window.showErrorMessage).toHaveBeenCalled();
+    expect(factory.ensureSession).not.toHaveBeenCalled();
+  });
+
+  it('畸形 ticket → 快速拒绝，不进入 SMP 输入、不建 session', async () => {
+    const { session, factory, handler } = setupHandler();
+    await handler.handleUri({ path: '/reset-after-loss', query: 'handoffTicket=short' } as unknown as vscode.Uri);
+    expect(vscode.window.showErrorMessage).toHaveBeenCalled();
+    expect(factory.ensureSession).not.toHaveBeenCalled();
+    expect(vscode.window.showInputBox).not.toHaveBeenCalled();
+    expect(session.resetSyncAfterLoss).not.toHaveBeenCalled();
+  });
+
+  it('合法 ticket → 日志仅 handoff:<8hex> 脱敏前缀，进入 SMP 流程', async () => {
+    const { session, factory, handler } = setupHandler();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.mocked(vscode.window.showInputBox).mockResolvedValue(undefined); // 用户取消 SMP
+    const ticket = 'A'.repeat(43);
+    await handler.handleUri({ path: '/reset-after-loss', query: `handoffTicket=${ticket}` } as unknown as vscode.Uri);
+    expect(factory.ensureSession).toHaveBeenCalled();
+    expect(vscode.window.showInputBox).toHaveBeenCalled();
+    expect(session.resetSyncAfterLoss).not.toHaveBeenCalled(); // 取消 SMP，未消费 ticket
+    const logged = logSpy.mock.calls.map((c) => String(c[0])).join(' ');
+    expect(logged).toContain('handoff:');
+    expect(logged).not.toContain(ticket);
+    logSpy.mockRestore();
   });
 });

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { createHash } from 'crypto';
 import type { AuthService } from '../sync/authService';
 import type { SyncSessionFactory } from '../sync/sessionFactory';
 import { l10n } from '../i18n';
@@ -18,7 +19,7 @@ interface SyncLifecycleSessionPort {
   recoverSync(recoveryCode: string, newSmp: string): Promise<string>;
   destroySync(smp: string): Promise<string>;
   requestResetChallenge(): Promise<void>;
-  resetSyncAfterLoss(resetToken: string, newSmp: string): Promise<string>;
+  resetSyncAfterLoss(handoffTicket: string, newSmp: string): Promise<string>;
   clearLocalSyncData(): Promise<void>;
 }
 
@@ -157,7 +158,10 @@ export async function destroySync(deps: SyncLifecycleCommandDeps): Promise<void>
   deps.ui.info(l10n('sync.destroySuccess'));
 }
 
-/** 忘记同步口令（锁定态）：邮件挑战 → 重置 token + 新 SMP，成功后展示新恢复码。 */
+/**
+ * 忘记同步口令（锁定态）：发送邮件挑战。后续交接（浏览器认领 → 深链 → 扩展消费
+ * handoffTicket）由 syncResetFromHandoff 完成，命令层**不再**收集重置 token。
+ */
 export async function resetSync(deps: SyncLifecycleCommandDeps): Promise<void> {
   const session = await getSession(deps);
   if (!session) return;
@@ -177,16 +181,31 @@ export async function resetSync(deps: SyncLifecycleCommandDeps): Promise<void> {
     return;
   }
   deps.ui.info(l10n('sync.resetChallengeSent'));
-  const token = await deps.ui.promptText(l10n('sync.enterResetToken'));
-  if (!token) return;
+}
+
+/**
+ * 扩展消费浏览器深链带来的 handoffTicket（锁定态）：新 SMP 双输入 → 服务端最终 reset。
+ * ticket 仅存在于本函数参数（内存）；成功或终态失败后随函数返回自然释放，不写
+ * globalState/SecretStorage/日志。日志/错误上报只允许 `handoff:<8hex>` 前缀。
+ */
+export async function resetSyncFromHandoff(deps: SyncLifecycleCommandDeps, handoffTicket: string): Promise<void> {
+  const session = await getSession(deps);
+  if (!session) return;
+  if (session.isUnlocked) {
+    deps.ui.warn(l10n('sync.resetHandoffRequiresLocked'));
+    return;
+  }
+  if (session.pendingCleanup) {
+    deps.ui.warn(l10n('sync.resetPendingCleanup'));
+    return;
+  }
   const newSmp = await promptNewSmpTwice(deps.ui);
   if (!newSmp) return;
   let newRecovery: string;
   try {
-    newRecovery = await session.resetSyncAfterLoss(token, newSmp);
-  } catch (err) {
-    void err;
-    deps.ui.error(l10n('sync.resetFailed'));
+    newRecovery = await session.resetSyncAfterLoss(handoffTicket, newSmp);
+  } catch {
+    deps.ui.error(l10n('sync.resetHandoffFailed'));
     return;
   }
   await confirmNewRecoveryCode(deps.ui, newRecovery);
@@ -245,6 +264,39 @@ export function registerSyncLifecycleCommands(
     vscode.commands.registerCommand('dbclient.destroySync', () => destroySync(deps)),
     vscode.commands.registerCommand('dbclient.resetSync', () => resetSync(deps)),
     vscode.commands.registerCommand('dbclient.clearLocalSync', () => clearLocalSync(deps)),
+  );
+}
+
+/** ticket 脱敏：只输出 SHA-256 前 8 hex 前缀（日志/错误上报不得含完整 ticket）。 */
+function redactHandoffTicket(ticket: string): string {
+  return `handoff:${createHash('sha256').update(ticket).digest('hex').slice(0, 8)}...`;
+}
+
+/**
+ * sync-reset 深链 UriHandler（P3 切片 5，§5.4）：`vscode://<id>/reset-after-loss?handoffTicket=`。
+ * ticket 仅经参数传入 resetSyncFromHandoff（内存），绝不写 globalState/SecretStorage；
+ * 日志仅记录脱敏前缀。未匹配路径的 URI 静默忽略。
+ */
+export function registerSyncResetUriHandler(
+  context: vscode.ExtensionContext,
+  auth: AuthService,
+  factory: SyncSessionFactory,
+): void {
+  const deps: SyncLifecycleCommandDeps = { auth, factory, ui: vscodeUi() };
+  context.subscriptions.push(
+    vscode.window.registerUriHandler({
+      async handleUri(uri: vscode.Uri): Promise<void> {
+        if (uri.path !== '/reset-after-loss') return;
+        const ticket = uri.query ? new URLSearchParams(uri.query).get('handoffTicket') : null;
+        console.log(`[sync] reset handoff URI received: ${ticket ? redactHandoffTicket(ticket) : '(missing ticket)'}`);
+        // 快速拒绝缺失/畸形 ticket（256bit = 43 字符 base64url），不进入 SMP 输入、不建 session。
+        if (!ticket || !/^[A-Za-z0-9_-]{43}$/.test(ticket)) {
+          deps.ui.error(l10n('sync.resetHandoffInvalid'));
+          return;
+        }
+        await resetSyncFromHandoff(deps, ticket);
+      },
+    }),
   );
 }
 

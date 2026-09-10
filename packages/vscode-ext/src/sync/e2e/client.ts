@@ -26,8 +26,10 @@ import {
  * requestDigest 顺序锚点：从「实际发送 body（尚未附 signature）」构造纯 JSON
  * 冻结对象 → 算 digest → 构造 signingInput（含 digest）→ 签名 → 附 signature。
  *
- * 重试策略：默认自动重试 5xx（GET state/records、5 个签名 mutation 由 receipt
- * 幂等）；init / reset-after-loss 禁止重试（无 receipt，重放误报成功为失败）。
+ * 重试策略：默认自动重试网络/5xx ≤3（GET state/records、5 个签名 mutation 由 receipt
+ * 幂等）；init 禁止重试（无 receipt，重放误报成功为失败）。reset-after-loss 旧 reset-token
+ * 协议无 receipt 故禁止重试；新 handoff 协议有 completed receipt（同票同摘要重放），
+ * 故允许默认重试（见 resetAfterLossWithHandoff）。
  */
 
 export class SyncApiError extends Error {
@@ -134,21 +136,17 @@ export class PersonalSyncClient {
     return this.call('POST', '/api/sync/reset-challenges');
   }
 
-  async resetAfterLoss(resetToken: string, newState: NewStateDto): Promise<DestroyResult> {
-    assertBase64UrlNoPad(resetToken, 32, 'resetToken');
-    return this.call<DestroyResult>(
-      'POST',
-      '/api/sync/reset-after-loss',
-      {
-        protocolVersion: 1,
-        resetToken,
-        confirmIrreversible: true,
-        confirmDataLoss: true,
-        confirmNoRecovery: true,
-        newState: validateNewState(newState),
-      },
-      { retry: false },
-    );
+  /**
+   * sync-reset 最终交接（P3 切片 5）：扩展凭一次性 handoffTicket 提交 newState。
+   * 与旧 resetAfterLoss(resetToken) 不同，本端点有 completed receipt —— 同 ticket + 同
+   * newState 的响应丢失/重叠重试会重放首次完整 StateDto。故用默认重试（网络/5xx ≤3）。
+   */
+  async resetAfterLossWithHandoff(handoffTicket: string, newState: NewStateDto): Promise<StateDto> {
+    assertBase64UrlNoPad(handoffTicket, 32, 'handoffTicket');
+    return this.call<StateDto>('POST', '/api/sync/reset-after-loss', {
+      handoffTicket,
+      newState: validateNewState(newState),
+    });
   }
 
   // ── 签名 mutation ──

@@ -67,6 +67,7 @@ export class SyncResetService {
     private readonly mailFlowRepo: IMailFlowRepo,
     private readonly handoffRepo: ISyncResetHandoffRepo,
     private readonly auditWriter: AuditWriter,
+    private readonly syncExtensionId: string,
   ) {}
 
   async requestResetChallenge(userId: number, ip?: string): Promise<void> {
@@ -159,7 +160,7 @@ export class SyncResetService {
       });
 
       return {
-        openUri: `vscode://dbclient.sync/reset-after-loss?handoffTicket=${ticketB64}`,
+        openUri: `vscode://${this.syncExtensionId}/reset-after-loss?handoffTicket=${ticketB64}`,
         expiresTime: expiresTime.toISOString(),
       };
     } catch (e) {

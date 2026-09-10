@@ -386,10 +386,12 @@ export class PersonalSyncSession {
   }
 
   /**
-   * 丢失 SMP 重置（锁定态）：重置意见码 + 全新 epoch 材料。旧数据不可恢复。
-   * 若本地有旧 epoch 则走 transition 清理；否则直接落新 epoch。返回新恢复码。
+   * 丢失 SMP 重置（锁定态）：凭浏览器交接的一次性 handoff ticket + 新 SMP。
+   * 旧数据不可恢复。若本地有旧 epoch 则走 transition 清理；否则直接落新 epoch。
+   * 服务端返回完整 StateDto；本方法只取三字段快照（新 DEK 在本地由新材料派生）。
+   * 返回新恢复码。
    */
-  async resetSyncAfterLoss(resetToken: string, newSmp: string): Promise<string> {
+  async resetSyncAfterLoss(handoffTicket: string, newSmp: string): Promise<string> {
     if (this.isUnlocked) throw new Error('sync session already unlocked; use destroy instead');
     // 已有未收敛的 epoch-cleanup journal 时拒绝 reset：否则会用新 intent 覆盖旧的单键 journal，
     // 使更旧 epoch 的本地状态（recordMap/outbox/unresolved/DEK）失去清理入口而永久残留。
@@ -413,10 +415,10 @@ export class PersonalSyncSession {
     let material: InitialSyncMaterial | undefined;
     try {
       material = await createInitialMaterial(this.userId, newKeyEpoch, newSmp, newRecovery.raw);
-      // 本地下有旧 epoch 时才须清理；请求前先落 durable intent 覆盖「远端已提交、token 已消费、
-      // 回执丢失」的未知结果窗口（reset retry:false，无法重试）。
+      // 本地下有旧 epoch 时才须清理；请求前先落 durable intent 覆盖「远端已提交、ticket 已消费、
+      // 回执丢失」的未知结果窗口（同 ticket 同 newState 重试仅 3 次，且 ticket 单次消费）。
       if (hasLocalEpoch) await this.writeIntent({ fromKeyEpoch: localEpoch as string, toKeyEpoch: newKeyEpoch });
-      const res = await this.client.resetAfterLoss(resetToken, newStateFromMaterial(material));
+      const res = await this.client.resetAfterLossWithHandoff(handoffTicket, newStateFromMaterial(material));
       const ownedDek = material.dek.slice();
       const newSnapshot = this.assertEpochAdvanceReceipt(res, newKeyEpoch);
       const fromKeyEpoch = hasLocalEpoch ? (localEpoch as string) : undefined;
