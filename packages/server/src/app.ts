@@ -58,6 +58,8 @@ import { MetricsRegistry, attachRequestMetrics } from './service/metrics.js';
 import { MysqlMailFlowRepo } from './repository/mysql/mailFlowRepo.js';
 import { MysqlAuditRepo } from './repository/mysql/auditRepo.js';
 import { MysqlIdempotencyReceiptRepo } from './repository/mysql/idempotencyReceiptRepo.js';
+import { MysqlOrderRepo } from './repository/mysql/orderRepo.js';
+import { MysqlPaymentRepo } from './repository/mysql/paymentRepo.js';
 import type { IUserRepo } from './repository/interfaces.js';
 import { LinkFlowService } from './service/linkFlowService.js';
 import { AuditWriter } from './service/auditWriter.js';
@@ -69,8 +71,11 @@ import { consoleAuthRoutes } from './route/consoleAuth.js';
 import { consoleMeRoutes } from './route/consoleMe.js';
 import { consoleDataRoutes } from './route/consoleData.js';
 import { consoleAdminRoutes } from './route/consoleAdmin.js';
+import { registerPaymentRoutes } from './route/paymentRoutes.js';
 import { ConsoleAuthService } from './service/consoleAuthService.js';
 import { ConsoleAdminService } from './service/consoleAdminService.js';
+import { OrderService } from './service/paymentService.js';
+import { resolvePaymentGateway, paymentGatewayConfigured } from './service/paymentChannel.js';
 import { CursorService, deriveCursorKey } from './service/cursor.js';
 import { requestId } from './middleware/requestId.js';
 import { registerConsoleStatic } from './consoleStatic.js';
@@ -142,6 +147,8 @@ export async function createApp() {
   const mailFlowRepo = new MysqlMailFlowRepo(getMysql);
   const auditRepo = new MysqlAuditRepo(getMysql);
   const idempotencyReceiptRepo = new MysqlIdempotencyReceiptRepo(getMysql);
+  const orderRepo = new MysqlOrderRepo(getMysql);
+  const paymentRepo = new MysqlPaymentRepo();
 
   // service 层
   const tokenService = new TokenService(signingKeys, config.accessTokenExpiresIn, config.refreshTokenExpiresMs);
@@ -242,6 +249,17 @@ export async function createApp() {
     auditWriter,
   });
   const cursorService = new CursorService(deriveCursorKey());
+
+  const orderService = new OrderService({
+    orderRepo,
+    paymentRepo,
+    personalPlanRepo,
+    personalSubscriptionRepo,
+    auditWriter,
+    runner: (fn) => withTransaction(app.mysql, fn),
+    gatewayFor: (channel) => resolvePaymentGateway(channel),
+  });
+  const paymentEnabled = paymentGatewayConfigured();
 
   // 受控限流清理任务（实施规格 §3）：过期桶由周期任务删除，不依赖请求
   startRateLimitCleanup(rateLimitRepo);
@@ -354,6 +372,28 @@ export async function createApp() {
     consoleOrigin: config.consoleOrigin,
     createSyncResetHandoff: (nonce, userId) => syncResetService.createHandoff(nonce, userId),
   });
+  if (paymentEnabled) {
+    await registerPaymentRoutes(app, {
+      enabled: true,
+      orders: {
+        tokenService,
+        getUser,
+        getSessionActive,
+        csrfService,
+        consoleOrigin: config.consoleOrigin,
+        rateLimiter,
+        cursorService,
+        orderService,
+      },
+      callback: {
+        orderService,
+        auditWriter,
+        rateLimiter,
+      },
+    });
+  } else {
+    app.log.warn('payment routes disabled: no real payment gateway adapter configured (P4 requires a real adapter)');
+  }
   await registerConsoleStatic(app);
 
   await app.ready();

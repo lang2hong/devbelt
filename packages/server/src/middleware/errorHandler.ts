@@ -142,6 +142,7 @@ export function errorStatus(code: string): number {
     case 'PAYMENT_AMOUNT_MISMATCH':
     case 'PAYMENT_SIGNATURE_INVALID':
     case 'UNKNOWN_PLAN':
+    case 'UNKNOWN_CHANNEL':
       return 400;
     case 'SYNC_NOT_INITIALIZED':
     case 'SYNC_PROTOCOL_UNSUPPORTED':

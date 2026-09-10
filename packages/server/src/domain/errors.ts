@@ -356,3 +356,11 @@ export class UnknownPlanError extends DomainError {
     this.name = 'UnknownPlanError';
   }
 }
+
+/** 未知支付渠道 → 400 UNKNOWN_CHANNEL。 */
+export class UnknownChannelError extends DomainError {
+  constructor() {
+    super('unsupported payment channel', 'UNKNOWN_CHANNEL');
+    this.name = 'UnknownChannelError';
+  }
+}

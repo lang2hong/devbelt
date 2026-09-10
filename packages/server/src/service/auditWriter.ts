@@ -42,6 +42,10 @@ const ALLOWED_EVENT_TYPES = [
   'sync.reset.handoff.created',
   'sync.reset.handoff.consumed',
   'sync.reset.handoff.failed',
+  'payment.order.created',
+  'payment.order.paid',
+  'payment.order.fulfilled',
+  'payment.callback.failed',
 ] as const;
 
 export type AuditEventType = (typeof ALLOWED_EVENT_TYPES)[number];
