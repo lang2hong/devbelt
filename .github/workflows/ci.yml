@@ -120,3 +120,73 @@ jobs:
         env:
           MYSQL_TEST_URL: mysql://root:ci-root-pass@127.0.0.1:3306
         run: pnpm -C packages/server test
+
+  # 浏览器 e2e：注册/登录/邮箱验证/邀请全链路（Playwright + Mailpit 真发信 + 真实 MySQL）。
+  # 独立 job：需要构建 server（bundle）+ console-ui（dist）+ 起服务 + 装浏览器，成本高，
+  # 不塞进 build matrix。Mailpit SMTP sink（1025）收 server 真发的邮件，8025 提供 HTTP API 取信。
+  e2e:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: e2e-root-pass
+          MYSQL_DATABASE: dbclient_e2e
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pe2e-root-pass"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+      mailpit:
+        image: axllent/mailpit:v1.18
+        ports:
+          - 1025:1025
+          - 8025:8025
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build server + console-ui
+        run: pnpm -C packages/server build && pnpm -C packages/console-ui build
+
+      - name: Prepare Ed25519 signing keys
+        run: |
+          openssl genpkey -algorithm ed25519 -out /tmp/k1.pem
+          openssl pkey -in /tmp/k1.pem -pubout -out /tmp/k1.pub.pem
+          echo "TOKEN_SIGNING_KEY_B64=$(base64 -w0 /tmp/k1.pem)" >> "$GITHUB_ENV"
+          echo "TOKEN_VERIFY_KEYS_JSON={\"k1\":\"$(base64 -w0 /tmp/k1.pub.pem)\"}" >> "$GITHUB_ENV"
+
+      - name: Install Playwright browser
+        run: pnpm -C packages/e2e exec playwright install --with-deps chromium
+
+      - name: Run e2e
+        env:
+          NODE_ENV: development
+          SMTP_BASE_URL: http://localhost:3000
+          MAILER: mailpit
+          MAILPIT_HOST: localhost
+          MAILPIT_PORT: '1025'
+          MAILPIT_HTTP: http://localhost:8025
+          SMTP_FROM: no-reply@localhost.test
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: '3306'
+          MYSQL_USER: root
+          MYSQL_PASSWORD: e2e-root-pass
+          MYSQL_DATABASE: dbclient_e2e
+          PORT: '3000'
+          E2E_BASE_URL: http://localhost:3000
+        run: pnpm -C packages/e2e e2e

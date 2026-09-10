@@ -15,7 +15,7 @@ export class SmtpEmailSender implements EmailSender {
   private readonly from: string;
   private readonly baseUrl: string;
 
-  constructor(env: NodeJS.ProcessEnv = process.env) {
+  constructor(env: NodeJS.ProcessEnv = process.env, opts: { allowInsecure?: boolean } = {}) {
     const host = (env.SMTP_HOST || '').trim();
     if (!host) throw new Error('SMTP_HOST is required to construct SmtpEmailSender');
     this.from = (env.SMTP_FROM || 'no-reply@localhost').trim();
@@ -33,7 +33,9 @@ export class SmtpEmailSender implements EmailSender {
       // 中间人只要抹掉 STARTTLS 广告，验证 / 邀请 / sync-reset 的一次性 token
       // 就会明文过网 —— 那些 token 等同于账号控制权。
       // requireTLS 让升级失败即报错，宁可发不出去也不明文发。
-      requireTLS: !secure,
+      // 唯一例外：本地 Mailpit 联调/e2e（allowInsecure），Mailpit 的 SMTP sink 不提供
+      // STARTTLS；仅允许显式开启，生产装配绝不可传该选项。
+      requireTLS: opts.allowInsecure ? false : !secure,
       auth: env.SMTP_USER
         ? { user: env.SMTP_USER, pass: env.SMTP_PASS || '' }
         : undefined,

@@ -12,6 +12,21 @@ import { SmtpEmailSender } from './smtpEmailSender.js';
  * 独立成模块以便测试（app.ts 的 import 会触发 config 顶层求值，不便单独断言）。
  */
 export function resolveEmailSender(env: NodeJS.ProcessEnv = process.env): EmailSender {
+  // Mailpit 联调/e2e：真发到本地 Mailpit SMTP sink（无 STARTTLS），供浏览器 e2e 抓邮件链接。
+  // 仅显式 MAILER=mailpit 触发；生产/开发默认路径不受影响。
+  if (env.MAILER === 'mailpit') {
+    return new SmtpEmailSender(
+      {
+        ...env,
+        SMTP_HOST: env.MAILPIT_HOST ?? '127.0.0.1',
+        SMTP_PORT: env.MAILPIT_PORT ?? '1025',
+        SMTP_SECURE: 'false',
+        SMTP_USER: '',
+        SMTP_FROM: env.SMTP_FROM || 'no-reply@localhost.test',
+      },
+      { allowInsecure: true },
+    );
+  }
   if (env.NODE_ENV === 'production') {
     if (!env.SMTP_HOST || !env.SMTP_HOST.trim()) {
       throw new Error(
