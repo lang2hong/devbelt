@@ -135,6 +135,14 @@ export function errorStatus(code: string): number {
     case 'INVITATION_TARGET_NOT_ELIGIBLE':
     case 'VALIDATION_FAILED':
       return 400;
+    case 'ORDER_NOT_FOUND':
+      return 404;
+    case 'ORDER_INVALID_STATE':
+      return 409;
+    case 'PAYMENT_AMOUNT_MISMATCH':
+    case 'PAYMENT_SIGNATURE_INVALID':
+    case 'UNKNOWN_PLAN':
+      return 400;
     case 'SYNC_NOT_INITIALIZED':
     case 'SYNC_PROTOCOL_UNSUPPORTED':
     case 'SYNC_RESET_HANDOFF_INVALID':

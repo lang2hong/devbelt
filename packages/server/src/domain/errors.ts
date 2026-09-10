@@ -314,3 +314,45 @@ export class ExportTooLargeError extends DomainError {
     this.name = 'ExportTooLargeError';
   }
 }
+
+// ── 支付（P4）──
+
+/** 订单不存在 → 404 ORDER_NOT_FOUND（不区分是否存在，防订单号枚举）。 */
+export class OrderNotFoundError extends DomainError {
+  constructor() {
+    super('order not found', 'ORDER_NOT_FOUND');
+    this.name = 'OrderNotFoundError';
+  }
+}
+
+/** 订单状态不允许该操作（如重复回调、过期后支付、非法转移）→ 409 ORDER_INVALID_STATE。 */
+export class OrderInvalidStateError extends DomainError {
+  constructor(message = 'order is not in a state that allows this operation') {
+    super(message, 'ORDER_INVALID_STATE');
+    this.name = 'OrderInvalidStateError';
+  }
+}
+
+/** 支付金额与订单金额不匹配 → 400 PAYMENT_AMOUNT_MISMATCH。 */
+export class PaymentAmountMismatchError extends DomainError {
+  constructor() {
+    super('payment amount does not match the order', 'PAYMENT_AMOUNT_MISMATCH');
+    this.name = 'PaymentAmountMismatchError';
+  }
+}
+
+/** 支付回调签名校验失败 → 400 PAYMENT_SIGNATURE_INVALID。 */
+export class PaymentSignatureInvalidError extends DomainError {
+  constructor() {
+    super('payment callback signature verification failed', 'PAYMENT_SIGNATURE_INVALID');
+    this.name = 'PaymentSignatureInvalidError';
+  }
+}
+
+/** 未知或不对外售卖的套餐 → 400 UNKNOWN_PLAN。 */
+export class UnknownPlanError extends DomainError {
+  constructor() {
+    super('unknown or unavailable plan', 'UNKNOWN_PLAN');
+    this.name = 'UnknownPlanError';
+  }
+}

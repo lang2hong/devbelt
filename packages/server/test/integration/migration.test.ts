@@ -32,6 +32,9 @@ describe.skipIf(!URL)('migration smoke (real MySQL)', () => {
         'personal_sync_reset_tokens',
         'mail_flows',
         'audit_events',
+        'orders',
+        'payments',
+        'invoices',
       ]) {
         expect(names).toContain(t);
       }

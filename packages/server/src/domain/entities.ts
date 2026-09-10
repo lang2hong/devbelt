@@ -19,6 +19,10 @@ import type {
   MailFlowType,
   MailFlowStatus,
   SyncResetHandoffStatus,
+  OrderStatus,
+  PaymentChannel,
+  PaymentResult,
+  InvoiceStatus,
 } from './enums.js';
 
 /**
@@ -402,6 +406,58 @@ export interface IdempotencyReceipt {
   httpStatus: number | null;
   responseBody: string | null;
   expiresTime: Date;
+  createTime: Date;
+  updateTime: Date;
+}
+
+// ── 支付（P4）──
+
+/**
+ * 支付订单（P4 §数据模型）。金额一律 CNY 分（BIGINT UNSIGNED），由后端按 plan_code
+ * 计算，绝不接受前端传入金额；不存任何银行卡号/支付密码等敏感信息。
+ */
+export interface Order {
+  id: number;
+  /** 对外订单号（base64url opaque，避免自增 id 被枚举）。 */
+  orderNo: string;
+  userId: number;
+  planCode: string;
+  amountCents: number;
+  channel: PaymentChannel;
+  status: OrderStatus;
+  /** 支付平台交易号；回调到达后写入。 */
+  channelTradeNo: string | null;
+  paidTime: Date | null;
+  /** 下单后未支付的过期时间（P4 §状态机：30 分钟）。 */
+  expiresTime: Date;
+  createTime: Date;
+  updateTime: Date;
+}
+
+/** 支付流水（orders 一对多，支持多次回调/重试）。 */
+export interface Payment {
+  id: number;
+  orderId: number;
+  channel: PaymentChannel;
+  channelTradeNo: string;
+  amountCents: number;
+  /** 回调原始数据（不含密钥；仅存必要交易信息）。 */
+  rawNotification: string | null;
+  signatureVerified: boolean;
+  result: PaymentResult;
+  createTime: Date;
+}
+
+/** 发票申请记录（抬头/税号/邮箱；状态登记，不生成发票文件本身）。 */
+export interface Invoice {
+  id: number;
+  userId: number;
+  orderId: number | null;
+  title: string;
+  taxNo: string | null;
+  email: string;
+  amountCents: number;
+  status: InvoiceStatus;
   createTime: Date;
   updateTime: Date;
 }

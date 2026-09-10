@@ -20,6 +20,9 @@ import type {
   MailFlow,
   AuditEvent,
   IdempotencyReceipt,
+  Order,
+  Payment,
+  Invoice,
 } from '../domain/entities.js';
 import type {
   UserStatus,
@@ -701,4 +704,58 @@ export interface IIdempotencyReceiptRepo {
   complete(exec: Queryable, id: number, httpStatus: number, responseBody: string): Promise<void>;
   /** 删除已过期（expires_time < before）的回执行。返回删除行数。 */
   prune(exec: Queryable, before: Date, limit: number): Promise<number>;
+}
+
+// ── 支付（P4）──
+
+export interface IOrderRepo {
+  create(input: {
+    orderNo: string;
+    userId: number;
+    planCode: string;
+    amountCents: number;
+    channel: Order['channel'];
+    expiresTime: Date;
+  }): Promise<Order>;
+  /** 对外订单号只读查找。 */
+  findByOrderNo(orderNo: string): Promise<Order | undefined>;
+  /** 事务内按 order_no 锁定订单行（回调/状态推进的序列化点，§状态机）。 */
+  findByOrderNoForUpdate(exec: Queryable, orderNo: string): Promise<Order | undefined>;
+  /** 事务内推进状态：`WHERE id=? AND status=expectedStatus`，返回是否命中（幂等防重复回调）。 */
+  advance(exec: Queryable, input: {
+    id: number;
+    expectedStatus: Order['status'];
+    status: Order['status'];
+    channelTradeNo: string | null;
+    paidTime: Date | null;
+  }): Promise<boolean>;
+  /** 用户订单历史（keyset cursor，DESC by id）。 */
+  listByUser(userId: number, cursor: number | undefined, limit: number): Promise<Order[]>;
+}
+
+export interface IPaymentRepo {
+  create(exec: Queryable, input: {
+    orderId: number;
+    channel: Payment['channel'];
+    channelTradeNo: string;
+    amountCents: number;
+    rawNotification: string | null;
+    signatureVerified: boolean;
+    result: Payment['result'];
+  }): Promise<Payment>;
+  /** 按渠道交易号查流水（回调幂等：重复回调以唯一键兜底 + 此查询判定 duplicate）。 */
+  findByChannelTradeNo(exec: Queryable, channel: Payment['channel'], channelTradeNo: string): Promise<Payment | undefined>;
+}
+
+export interface IInvoiceRepo {
+  create(input: {
+    userId: number;
+    orderId: number | null;
+    title: string;
+    taxNo: string | null;
+    email: string;
+    amountCents: number;
+  }): Promise<Invoice>;
+  /** 用户发票申请历史（keyset cursor，DESC by id）。 */
+  listByUser(userId: number, cursor: number | undefined, limit: number): Promise<Invoice[]>;
 }

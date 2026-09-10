@@ -92,3 +92,21 @@ export const EXTENSION_SCOPES = ['sync', 'account', 'device', 'organization'] as
 
 /** 控制台 token 的作用域（不含 sync · E2EE 材料）。 */
 export const CONSOLE_SCOPES = ['console', 'account', 'device', 'organization'] as const;
+
+// ── 支付（P4）──
+
+/**
+ * 订单状态机（P4 §状态机规则）：
+ * `pending` → `paid` → `fulfilled`；`pending` → `failed` / `expired`；
+ * `paid` / `fulfilled` → `refunded`（退款走人工，仅登记状态）。
+ */
+export type OrderStatus = 'pending' | 'paid' | 'fulfilled' | 'failed' | 'refunded' | 'expired';
+
+/** 支付渠道（P4）：微信 Native、支付宝网页。 */
+export type PaymentChannel = 'wechat' | 'alipay';
+
+/** 支付流水处理结果（回调幂等记录）。duplicate = 重复回调，未推进订单。 */
+export type PaymentResult = 'success' | 'failure' | 'duplicate';
+
+/** 发票申请状态。 */
+export type InvoiceStatus = 'requested' | 'issued' | 'rejected';
