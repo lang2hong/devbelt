@@ -8,7 +8,7 @@ import type { CsrfService } from '../service/csrfService.js';
 import type { RateLimitService } from '../service/rateLimitService.js';
 import type { CursorService } from '../service/cursor.js';
 import type { Order } from '../domain/entities.js';
-import { ValidationError } from '../domain/errors.js';
+import { FeatureTemporarilyDisabledError, ValidationError } from '../domain/errors.js';
 import { PAYMENT_CHANNELS } from '../service/paymentChannel.js';
 
 /**
@@ -29,6 +29,8 @@ export interface OrdersRouteOptions {
   rateLimiter: RateLimitService;
   cursorService: CursorService;
   orderService: OrderService;
+  /** 支付功能开关（§11.4）。关闭时下单返回 503 FEATURE_TEMPORARILY_DISABLED。 */
+  paymentFeatureEnabled?: () => boolean;
 }
 
 function userIdOf(req: FastifyRequest): number {
@@ -125,6 +127,9 @@ export async function ordersWriteRoutes(app: FastifyInstance, opts: OrdersRouteO
     scope: ['console'],
     routes: async (child) => {
       child.post('/api/console/orders', { schema: { body: createOrderBody } }, async (req, reply) => {
+        if (opts.paymentFeatureEnabled && !opts.paymentFeatureEnabled()) {
+          throw new FeatureTemporarilyDisabledError('payment');
+        }
         if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) {
           return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
         }

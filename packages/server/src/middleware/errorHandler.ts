@@ -156,6 +156,8 @@ export function errorStatus(code: string): number {
       return 409;
     case 'TOO_MANY_REQUESTS':
       return 429;
+    case 'FEATURE_TEMPORARILY_DISABLED':
+      return 503;
     default:
       return 400;
   }

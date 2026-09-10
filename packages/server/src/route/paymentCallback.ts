@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { registerConsoleErrorHandler } from '../middleware/consoleError.js';
 import type { OrderService } from '../service/paymentService.js';
 import type { PaymentChannel } from '../domain/enums.js';
-import { PaymentSignatureInvalidError } from '../domain/errors.js';
+import { FeatureTemporarilyDisabledError, PaymentSignatureInvalidError } from '../domain/errors.js';
 import type { AuditWriter } from '../service/auditWriter.js';
 import type { RateLimitService } from '../service/rateLimitService.js';
 import { PAYMENT_CHANNELS } from '../service/paymentChannel.js';
@@ -19,6 +19,8 @@ export interface PaymentCallbackRouteOptions {
   orderService: OrderService;
   auditWriter: AuditWriter;
   rateLimiter: RateLimitService;
+  /** 支付功能开关（§11.4）。关闭时回调返回 503 FEATURE_TEMPORARILY_DISABLED。 */
+  paymentFeatureEnabled?: () => boolean;
 }
 
 function requestIdOf(req: FastifyRequest): string {
@@ -51,6 +53,9 @@ export async function paymentCallbackRoutes(app: FastifyInstance, opts: PaymentC
   }
 
   app.post('/api/public/payment-callback/:channel', async (req, reply) => {
+    if (opts.paymentFeatureEnabled && !opts.paymentFeatureEnabled()) {
+      throw new FeatureTemporarilyDisabledError('payment');
+    }
     const channel = (req.params as Record<string, unknown>).channel;
     if (typeof channel !== 'string' || !(PAYMENT_CHANNELS as readonly string[]).includes(channel)) {
       return reply.code(400).send({ error: { code: 'UNKNOWN_CHANNEL', message: 'unsupported payment channel' } });

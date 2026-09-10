@@ -79,6 +79,7 @@ import { ConsoleAuthService } from './service/consoleAuthService.js';
 import { ConsoleAdminService } from './service/consoleAdminService.js';
 import { OrderService } from './service/paymentService.js';
 import { resolvePaymentGateway, paymentGatewayConfigured } from './service/paymentChannel.js';
+import { resolveFeatureFlags } from './service/featureFlags.js';
 import { CursorService, deriveCursorKey } from './service/cursor.js';
 import { requestId } from './middleware/requestId.js';
 import { registerConsoleStatic } from './consoleStatic.js';
@@ -266,6 +267,7 @@ export async function createApp() {
     gatewayFor: (channel) => resolvePaymentGateway(channel),
   });
   const paymentEnabled = paymentGatewayConfigured();
+  const featureFlags = resolveFeatureFlags();
 
   // 受控限流清理任务（实施规格 §3）：过期桶由周期任务删除，不依赖请求
   startRateLimitCleanup(rateLimitRepo);
@@ -390,11 +392,13 @@ export async function createApp() {
         rateLimiter,
         cursorService,
         orderService,
+        paymentFeatureEnabled: () => featureFlags.enabled('payment'),
       },
       callback: {
         orderService,
         auditWriter,
         rateLimiter,
+        paymentFeatureEnabled: () => featureFlags.enabled('payment'),
       },
     });
   } else {
@@ -410,11 +414,13 @@ export async function createApp() {
         rateLimiter,
         cursorService,
         orderService,
+        paymentFeatureEnabled: () => featureFlags.enabled('payment'),
       },
       callback: {
         orderService,
         auditWriter,
         rateLimiter,
+        paymentFeatureEnabled: () => featureFlags.enabled('payment'),
       },
     });
     app.log.warn('payment gateway disabled: order create + callback routes are not registered (P4 requires a real adapter)');

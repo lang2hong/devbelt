@@ -372,3 +372,12 @@ export class InvoiceAlreadyRequestedError extends DomainError {
     this.name = 'InvoiceAlreadyRequestedError';
   }
 }
+
+/** 功能开关关闭 → 503 FEATURE_TEMPORARILY_DISABLED（不回退弱安全链路，§11.4）。 */
+export class FeatureTemporarilyDisabledError extends DomainError {
+  constructor(feature: string) {
+    super(`feature temporarily disabled`, 'FEATURE_TEMPORARILY_DISABLED');
+    this.name = 'FeatureTemporarilyDisabledError';
+    void feature;
+  }
+}
