@@ -131,6 +131,7 @@ export function errorStatus(code: string): number {
       return 409;
     case 'RESOURCE_CONTENT_INVALID':
     case 'INVITATION_INVALID':
+    case 'LINK_FLOW_INVALID':
     case 'INVITATION_TARGET_NOT_ELIGIBLE':
     case 'VALIDATION_FAILED':
       return 400;

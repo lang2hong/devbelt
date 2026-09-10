@@ -1,5 +1,6 @@
 import { getAccessToken } from './tokenStore';
 import { authedFetch, type FetchLike } from './authedFetch';
+import { resolveErrorKind } from './httpError';
 
 /**
  * 本人设备 API 客户端（P3 §5.2）。撤销为 console 写请求，幂等键由调用方铸定；
@@ -25,7 +26,10 @@ export type ListDevicesResult =
 export type RevokeDeviceResult =
   | { kind: 'ok'; currentSessionRevoked: boolean }
   | { kind: 'unauthorized' }
+  | { kind: 'forbidden' }
   | { kind: 'not-found' }
+  | { kind: 'conflict' }
+  | { kind: 'in-progress' }
   | { kind: 'failure' };
 
 function auth(token: string): Record<string, string> {
@@ -74,9 +78,7 @@ export async function revokeDevice(
       const body = await res.json();
       return { kind: 'ok', currentSessionRevoked: body.code === 'CURRENT_SESSION_REVOKED' };
     }
-    if (res.status === 401) return { kind: 'unauthorized' };
-    if (res.status === 404) return { kind: 'not-found' };
-    return { kind: 'failure' };
+    return { kind: await resolveErrorKind(res) };
   } catch {
     return { kind: 'failure' };
   }

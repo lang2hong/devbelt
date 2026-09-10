@@ -3,6 +3,7 @@ import {
   EmailVerificationAlreadyConfirmedError,
   EmailVerificationInvalidError,
   InvitationInvalidError,
+  LinkFlowInvalidError,
   ValidationError,
 } from '../domain/errors.js';
 import type {
@@ -165,15 +166,15 @@ export class LinkFlowService {
   /**
    * 登录成功后把 mail_flow 绑定到当前用户（§5.3「服务端登录后 mail-flow 绑定」）。
    * 幂等：仅 issued 且未过期、且尚未绑定（或已绑定同一用户）时写入；其余情况抛
-   * InvitationInvalidError（绑定是后续消费的前置门槛，失败即终止，不得静默放行）。
+   * LinkFlowInvalidError（绑定是后续消费的前置门槛，失败即终止，不得静默放行）。
    */
   async bindFlowToUser(nonce: string, userId: number): Promise<void> {
     const nonceHash = sha256(nonce);
     await this.runner(async (tx) => {
       const flow = await this.mailFlowRepo.findByNonceHashForUpdate(tx, nonceHash);
-      if (!flow || flow.status !== 'issued') throw new InvitationInvalidError();
-      if (flow.expiresTime <= new Date()) throw new InvitationInvalidError();
-      if (flow.userId != null && flow.userId !== userId) throw new InvitationInvalidError();
+      if (!flow || flow.status !== 'issued') throw new LinkFlowInvalidError();
+      if (flow.expiresTime <= new Date()) throw new LinkFlowInvalidError();
+      if (flow.userId != null && flow.userId !== userId) throw new LinkFlowInvalidError();
       await this.mailFlowRepo.bindUser(tx, flow.id, userId);
     });
   }

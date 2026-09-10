@@ -1,5 +1,6 @@
 import { getAccessToken } from './tokenStore';
 import { authedFetch } from './authedFetch';
+import { resolveErrorKind } from './httpError';
 import type { ConsoleUser, FetchLike } from './consoleAuth';
 
 /**
@@ -39,7 +40,14 @@ export async function me(token: string | null = getAccessToken(), fetchImpl: Fet
   }
 }
 
-export type UpdateDisplayNameResult = { kind: 'ok'; displayName: string } | { kind: 'unauthorized' } | { kind: 'failure' };
+export type UpdateDisplayNameResult =
+  | { kind: 'ok'; displayName: string }
+  | { kind: 'unauthorized' }
+  | { kind: 'forbidden' }
+  | { kind: 'not-found' }
+  | { kind: 'conflict' }
+  | { kind: 'in-progress' }
+  | { kind: 'failure' };
 
 function writeHeaders(csrfToken: string, token: string, idempotencyKey: string): Record<string, string> {
   return {
@@ -70,8 +78,7 @@ export async function updateDisplayName(
       const body = (await res.json()) as { user: { displayName: string } };
       return { kind: 'ok', displayName: body.user.displayName };
     }
-    if (res.status === 401) return { kind: 'unauthorized' };
-    return { kind: 'failure' };
+    return { kind: await resolveErrorKind(res) };
   } catch {
     return { kind: 'failure' };
   }

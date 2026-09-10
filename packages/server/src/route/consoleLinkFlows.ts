@@ -4,7 +4,7 @@ import { registerConsoleErrorHandler, rejectConsole } from '../middleware/consol
 import { consoleWriteGuard } from '../middleware/consoleWrite.js';
 import { linkFlowCookieName, readCookie, serializeCookie } from '../middleware/cookies.js';
 import type { LinkFlowService, AcceptInvitationOrganization } from '../service/linkFlowService.js';
-import { DomainError, InvitationInvalidError, SyncResetHandoffInvalidError } from '../domain/errors.js';
+import { DomainError, InvitationInvalidError, LinkFlowInvalidError, SyncResetHandoffInvalidError } from '../domain/errors.js';
 import type { TokenService } from '../service/tokenService.js';
 import type { CsrfService } from '../service/csrfService.js';
 import type { AuditWriter } from '../service/auditWriter.js';
@@ -58,15 +58,15 @@ export async function consoleLinkFlowRoutes(app: FastifyInstance, opts: ConsoleL
 
         const nonce = readCookie(req, linkFlowCookieName());
         if (!nonce) {
-          return rejectConsole(reply, 400, 'INVITATION_INVALID', 'invitation invalid');
+          return rejectConsole(reply, 400, 'LINK_FLOW_INVALID', 'link flow invalid');
         }
         try {
           await opts.linkFlowService.bindFlowToUser(nonce, userId);
           return reply.send({ ok: true });
         } catch (e) {
-          if (e instanceof InvitationInvalidError) {
+          if (e instanceof LinkFlowInvalidError) {
             clearLinkFlowCookie(reply);
-            return rejectConsole(reply, 400, 'INVITATION_INVALID', 'invitation invalid');
+            return rejectConsole(reply, 400, 'LINK_FLOW_INVALID', 'link flow invalid');
           }
           throw e;
         }

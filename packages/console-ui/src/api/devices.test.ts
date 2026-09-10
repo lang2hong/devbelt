@@ -43,4 +43,14 @@ describe('revokeDevice', () => {
     const r = await revokeDevice('5', 'k', 'csrf', 'at', async () => jsonRes(404, { error: { code: 'NOT_FOUND' } }));
     expect(r).toEqual({ kind: 'not-found' });
   });
+
+  it('maps 409 IDEMPOTENCY_IN_PROGRESS to in-progress', async () => {
+    const r = await revokeDevice('5', 'k', 'csrf', 'at', async () => jsonRes(409, { error: { code: 'IDEMPOTENCY_IN_PROGRESS' } }));
+    expect(r).toEqual({ kind: 'in-progress' });
+  });
+
+  it('maps 409 IDEMPOTENCY_KEY_REUSED to conflict', async () => {
+    const r = await revokeDevice('5', 'k', 'csrf', 'at', async () => jsonRes(409, { error: { code: 'IDEMPOTENCY_KEY_REUSED' } }));
+    expect(r).toEqual({ kind: 'conflict' });
+  });
 });

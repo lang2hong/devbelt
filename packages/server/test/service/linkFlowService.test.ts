@@ -323,6 +323,6 @@ describe('LinkFlowService.bindFlowToUser', () => {
     const other = await deps.userRepo.create('other@b.com', 'hash', 'O');
     const { nonce } = await service.claim({ type: 'accept-invitation', token: 'I'.repeat(43) });
     await service.bindFlowToUser(nonce, user.id);
-    await expect(service.bindFlowToUser(nonce, other.id)).rejects.toMatchObject({ code: 'INVITATION_INVALID' });
+    await expect(service.bindFlowToUser(nonce, other.id)).rejects.toMatchObject({ code: 'LINK_FLOW_INVALID' });
   });
 });

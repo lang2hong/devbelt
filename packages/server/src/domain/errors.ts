@@ -120,6 +120,18 @@ export class InvitationInvalidError extends DomainError {
   }
 }
 
+/**
+ * 邮件流绑定失败（流缺失/已过期/已绑定他人）→ 400 LINK_FLOW_INVALID。
+ * `bindFlowToUser` 同时服务 verify-email / accept-invitation / sync-reset 三种邮件流，
+ * 用邀请专用码 `INVITATION_INVALID` 名实不符，故设此中性码（行为不变）。
+ */
+export class LinkFlowInvalidError extends DomainError {
+  constructor(message = 'link flow invalid') {
+    super(message, 'LINK_FLOW_INVALID');
+    this.name = 'LinkFlowInvalidError';
+  }
+}
+
 /** 邀请目标不满足前置条件（未注册 / 未验证 / 已是成员）→ 400 INVITATION_TARGET_NOT_ELIGIBLE。 */
 export class InvitationTargetNotEligibleError extends DomainError {
   constructor(message = 'invitation target not eligible') {
