@@ -176,7 +176,7 @@ jobs:
       - name: Run e2e
         env:
           NODE_ENV: development
-          SMTP_BASE_URL: http://localhost:3000
+          SMTP_BASE_URL: http://localhost:5173
           MAILER: mailpit
           MAILPIT_HOST: localhost
           MAILPIT_PORT: '1025'
@@ -187,6 +187,6 @@ jobs:
           MYSQL_USER: root
           MYSQL_PASSWORD: e2e-root-pass
           MYSQL_DATABASE: dbclient_e2e
-          PORT: '3000'
-          E2E_BASE_URL: http://localhost:3000
+          PORT: '5173'
+          E2E_BASE_URL: http://localhost:5173
         run: pnpm -C packages/e2e e2e

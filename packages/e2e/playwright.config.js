@@ -2,7 +2,7 @@ import { defineConfig } from '@playwright/test';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const BASE_URL = process.env.E2E_BASE_URL ?? 'http://localhost:3000';
+const BASE_URL = process.env.E2E_BASE_URL ?? 'http://localhost:5173';
 // config 所在目录 = packages/e2e：webServer 命令相对此 cwd 起服务，
 // 服务端 consoleStatic 也据此解析 ../console-ui/dist。
 const e2eDir = dirname(fileURLToPath(import.meta.url));
