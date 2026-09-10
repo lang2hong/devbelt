@@ -22,6 +22,19 @@ async function makeUser(db: MysqlDb): Promise<number> {
     'hash',
     'P4',
   );
+  // 注册流程（registrationRepo）恒建 Free 订阅；此处直建 user，须补订阅以满足
+  // applyEntitlementInTx 的前置（真实用户必有订阅）。
+  const planRepo = new MysqlPersonalPlanRepo(() => db);
+  const subRepo = new MysqlPersonalSubscriptionRepo(() => db);
+  const plan = await planRepo.findByCode('free');
+  await subRepo.create({
+    userId: user.id,
+    planId: plan!.id,
+    status: 'active',
+    entitlementSnapshot: {},
+    periodStartTime: new Date(),
+    periodEndTime: null,
+  });
   return user.id;
 }
 
