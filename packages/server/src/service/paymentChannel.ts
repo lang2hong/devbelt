@@ -1,15 +1,17 @@
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { PaymentChannel } from '../domain/enums.js';
+import { resolveWechatCredentials, resolveAlipayCredentials } from './paymentCredentials.js';
+import { WechatPayGateway } from './wechatPay.js';
+import { AlipayGateway } from './alipay.js';
 
 /**
- * 支付渠道抽象（P4 §金额与安全）。真实微信/支付宝适配器在切片 4 落地，本切片
- * 只交付接口 + 内存 stub，使下单/回调/权益生效全程可离线单测、可 CI 验证，
- * 不接触真实资金、不加载商户证书/密钥。
+ * 支付渠道抽象（P4 §金额与安全）。
  *
- * ## fail-closed（P0）
- * 支付入口默认关闭。`resolvePaymentGateway` 在切片 2 **无条件抛错**——真实
- * WeChat/Alipay 适配器属切片 4，落地并注入商户凭据前，任何运行实例都不得装配
- * 可伪造的支付回调。内存 stub 只供测试直接依赖注入，绝不进组合根。
+ * ## fail-closed（P0/P4 §68）
+ * 真实渠道凭据经 env 注入（微信 `WECHAT_*`、支付宝 `ALIPAY_*`）；`resolvePaymentGateway`
+ * 在凭据缺失时抛错，`paymentGatewayConfigured` 仅在至少一个渠道凭据齐全时为 true——
+ * 未配置渠道的任何运行实例都不装配支付回调，绝不暴露可伪造/弱路径。内存 stub
+ * 只供测试直接依赖注入，绝不进组合根。
  */
 
 /** 下单返回给前端/扩展的支付参数（微信扫码 code_url / 支付宝跳转 url 等）。 */
@@ -81,14 +83,42 @@ export class MemoryPaymentGateway implements PaymentGateway {
   }
 }
 
-/** 支付渠道是否已装配（切片 2 恒 false：真实适配器未落地）。 */
-export function paymentGatewayConfigured(_env: NodeJS.ProcessEnv = process.env): boolean {
-  return false;
+/** 返回配置齐全的渠道集合（每个渠道单独判定，供路由做 fail-closed 拒绝）。 */
+export function resolveConfiguredChannels(env: NodeJS.ProcessEnv = process.env): ReadonlySet<PaymentChannel> {
+  const set = new Set<PaymentChannel>();
+  if (resolveWechatCredentials(env) !== undefined) set.add('wechat');
+  if (resolveAlipayCredentials(env) !== undefined) set.add('alipay');
+  return set;
 }
 
-/** 按渠道装配适配器。切片 2 无条件 fail-closed（无真实适配器）。 */
-export function resolvePaymentGateway(_channel: PaymentChannel, _env: NodeJS.ProcessEnv = process.env): PaymentGateway {
-  throw new Error('payment gateway is not configured; a real WeChat/Alipay adapter is required (P4 slice 4)');
+/** 支付渠道是否已装配（至少一个渠道凭据齐全）。 */
+export function paymentGatewayConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+  return resolveConfiguredChannels(env).size > 0;
+}
+
+/** 某渠道是否已配置（供路由在调用前做 503 拒绝，而非落 generic 异常路径）。 */
+export function isChannelConfigured(channel: PaymentChannel, env: NodeJS.ProcessEnv = process.env): boolean {
+  return resolveConfiguredChannels(env).has(channel);
+}
+
+/** 按渠道装配适配器。凭据缺失 fail-closed：无真实适配器就抛错。 */
+export function resolvePaymentGateway(
+  channel: PaymentChannel,
+  env: NodeJS.ProcessEnv = process.env,
+  fetchImpl?: (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<Response>,
+): PaymentGateway {
+  if (channel === 'wechat') {
+    const creds = resolveWechatCredentials(env);
+    if (!creds) {
+      throw new Error('wechat payment gateway is not configured; provide WECHAT_* credentials (P4 slice 4)');
+    }
+    return new WechatPayGateway(creds, fetchImpl as never);
+  }
+  const creds = resolveAlipayCredentials(env);
+  if (!creds) {
+    throw new Error('alipay payment gateway is not configured; provide ALIPAY_* credentials (P4 slice 4)');
+  }
+  return new AlipayGateway(creds, fetchImpl as never);
 }
 
 /** 支持的全部渠道。 */

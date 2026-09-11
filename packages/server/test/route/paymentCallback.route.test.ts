@@ -1,14 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import Fastify from 'fastify';
 import { Readable } from 'stream';
+import { generateKeyPairSync, createSign, createCipheriv } from 'crypto';
 import { paymentCallbackRoutes } from '../../src/route/paymentCallback.js';
 import { requestId } from '../../src/middleware/requestId.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
 import { OrderService } from '../../src/service/paymentService.js';
 import { AuditWriter } from '../../src/service/auditWriter.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
-import { signMemoryCallback } from '../../src/service/paymentChannel.js';
-import type { PaymentGateway, PaymentCallback, PrepayParams } from '../../src/service/paymentChannel.js';
+import { signMemoryCallback, type PaymentGateway, type PaymentCallback, type PrepayParams } from '../../src/service/paymentChannel.js';
+import { WechatPayGateway } from '../../src/service/wechatPay.js';
+import { resolveWechatCredentials } from '../../src/service/paymentCredentials.js';
 import type { PaymentChannel } from '../../src/domain/enums.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 import type { Order, Payment, PersonalPlan, PersonalSubscription } from '../../src/domain/entities.js';
@@ -121,6 +123,94 @@ describe('payment callback route raw bytes', () => {
     expect(gateway.captured).toBeDefined();
     expect(gateway.captured!.equals(raw)).toBe(true);
 
+    await app.close();
+  });
+
+  it('accepts a real WeChat v3 signed callback through the route (header forwarding + verify)', async () => {
+    const mk = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const env: NodeJS.ProcessEnv = {
+      PAYMENT_CALLBACK_BASE_URL: 'https://pay.example.com',
+      WECHAT_MCH_ID: 'mch',
+      WECHAT_APP_ID: 'app',
+      WECHAT_MERCHANT_CERT_SERIAL: 'ABCDEF1234567890',
+      WECHAT_PRIVATE_KEY_B64: Buffer.from(mk.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()).toString('base64'),
+      WECHAT_PLATFORM_CERT_B64: Buffer.from(mk.publicKey.export({ type: 'spki', format: 'pem' }).toString()).toString('base64'),
+      WECHAT_API_V3_KEY: '0123456789abcdef0123456789abcdef',
+    };
+    const cred = resolveWechatCredentials(env)!;
+
+    // 构造一个真实「已履约有订单 + 有订阅」的 OrderService：noop 回退会导致 rejected。
+    // 这里只证明验签 + 头部转发通过，故用真实 gateway，且让 order 不存在 → 验签通过后 rejected(ORDER_NOT_FOUND) 也证明验签成功。
+    const gateway = new WechatPayGateway(cred);
+    const app = await build(gateway);
+
+    // 加密一个合法 resource，再用平台私钥对 timestamp\nnonce\nbody\n 签名。
+    const apiV3Key = Buffer.from('0123456789abcdef0123456789abcdef');
+    const nonce = 'abcdefgh';
+    const aad = 'transaction';
+    const plaintext = JSON.stringify({ out_trade_no: 'ord1', transaction_id: 'wx-t-1', amount: { total: 9900 }, trade_state: 'SUCCESS' });
+    const enc = createCipheriv('aes-256-gcm', apiV3Key, Buffer.from(nonce));
+    enc.setAAD(Buffer.from(aad));
+    const ct = Buffer.concat([enc.update(plaintext, 'utf8'), enc.final()]);
+    const resource = Buffer.concat([ct, enc.getAuthTag()]).toString('base64');
+    const rawBody = Buffer.from(JSON.stringify({ resource: { ciphertext: resource, nonce, associated_data: aad } }));
+
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const signer = createSign('RSA-SHA256');
+    signer.update(`${timestamp}\n${nonce}\n${rawBody.toString('utf8')}\n`);
+    const signature = signer.sign(mk.privateKey, 'base64');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/public/payment-callback/wechat',
+      headers: {
+        'content-type': 'application/json',
+        'wechatpay-timestamp': timestamp,
+        'wechatpay-nonce': nonce,
+        'wechatpay-signature': signature,
+      },
+      payload: rawBody,
+    });
+
+    // 验签通过 → OrderService 继续走到订单查找；noop order 不存在 → rejected(ORDER_NOT_FOUND)，
+    // 但状态码必须是 200（验签通过后的领域拒绝），而非 400 PAYMENT_SIGNATURE_INVALID。
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe('rejected');
+    expect(res.json().code).toBe('ORDER_NOT_FOUND');
+
+    await app.close();
+  });
+
+  it('returns 503 when the channel is not configured', async () => {
+    const gateway = new CaptureGateway('wechat');
+    const app = Fastify({ logger: false });
+    registerErrorHandler(app);
+    await app.register(requestId);
+    const orderService = new OrderService({
+      orderRepo: noopOrderRepo as never,
+      paymentRepo: noopPaymentRepo as never,
+      personalPlanRepo: noopPlanRepo as never,
+      personalSubscriptionRepo: noopSubRepo as never,
+      auditWriter: new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as never),
+      runner: async (fn) => fn({} as Queryable),
+      gatewayFor: () => gateway,
+    });
+    await app.register(paymentCallbackRoutes, {
+      orderService,
+      auditWriter: new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as never),
+      rateLimiter: new RateLimitService({ increment: async () => 1, peek: async () => 0 } as never, false),
+      channelConfigured: () => false,
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/public/payment-callback/wechat',
+      headers: { 'content-type': 'application/json' },
+      payload: {},
+    });
+    expect(res.statusCode).toBe(503);
+    expect(res.json().error.code).toBe('FEATURE_TEMPORARILY_DISABLED');
     await app.close();
   });
 });

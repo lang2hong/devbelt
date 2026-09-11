@@ -78,7 +78,7 @@ import { MysqlInvoiceRepo } from './repository/mysql/invoiceRepo.js';
 import { ConsoleAuthService } from './service/consoleAuthService.js';
 import { ConsoleAdminService } from './service/consoleAdminService.js';
 import { OrderService } from './service/paymentService.js';
-import { resolvePaymentGateway, paymentGatewayConfigured } from './service/paymentChannel.js';
+import { resolvePaymentGateway, paymentGatewayConfigured, isChannelConfigured } from './service/paymentChannel.js';
 import { resolveFeatureFlags } from './service/featureFlags.js';
 import { CursorService, deriveCursorKey } from './service/cursor.js';
 import { requestId } from './middleware/requestId.js';
@@ -393,12 +393,14 @@ export async function createApp() {
         cursorService,
         orderService,
         paymentFeatureEnabled: () => featureFlags.enabled('payment'),
+        channelConfigured: (ch) => isChannelConfigured(ch),
       },
       callback: {
         orderService,
         auditWriter,
         rateLimiter,
         paymentFeatureEnabled: () => featureFlags.enabled('payment'),
+        channelConfigured: (ch) => isChannelConfigured(ch),
       },
     });
   } else {
@@ -415,12 +417,14 @@ export async function createApp() {
         cursorService,
         orderService,
         paymentFeatureEnabled: () => featureFlags.enabled('payment'),
+        channelConfigured: (ch) => isChannelConfigured(ch),
       },
       callback: {
         orderService,
         auditWriter,
         rateLimiter,
         paymentFeatureEnabled: () => featureFlags.enabled('payment'),
+        channelConfigured: (ch) => isChannelConfigured(ch),
       },
     });
     app.log.warn('payment gateway disabled: order create + callback routes are not registered (P4 requires a real adapter)');

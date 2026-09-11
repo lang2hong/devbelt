@@ -21,7 +21,15 @@ export interface PaymentCallbackRouteOptions {
   rateLimiter: RateLimitService;
   /** 支付功能开关（§11.4）。关闭时回调返回 503 FEATURE_TEMPORARILY_DISABLED。 */
   paymentFeatureEnabled?: () => boolean;
+  /** 该渠道是否已配置（未配置 → 503，而非落 generic 异常）。 */
+  channelConfigured?: (channel: PaymentChannel) => boolean;
 }
+
+/** 各渠道回调验签所需的标准化头转发白名单（验签输入，不外泄无关头）。 */
+const CHANNEL_HEADERS: Readonly<Record<PaymentChannel, readonly string[]>> = {
+  wechat: ['wechatpay-timestamp', 'wechatpay-nonce', 'wechatpay-signature', 'wechatpay-serial'],
+  alipay: [],
+};
 
 function requestIdOf(req: FastifyRequest): string {
   return (req as unknown as { requestId?: string }).requestId ?? 'unknown';
@@ -60,14 +68,24 @@ export async function paymentCallbackRoutes(app: FastifyInstance, opts: PaymentC
     if (typeof channel !== 'string' || !(PAYMENT_CHANNELS as readonly string[]).includes(channel)) {
       return reply.code(400).send({ error: { code: 'UNKNOWN_CHANNEL', message: 'unsupported payment channel' } });
     }
+    // 渠道未配置 → 显式 fail-closed 503，而非落 generic 异常。
+    if (opts.channelConfigured && !opts.channelConfigured(channel as PaymentChannel)) {
+      throw new FeatureTemporarilyDisabledError('payment');
+    }
 
     // 入口 IP 限流：验签靠后，但伪造回调必须被廉价限流挡住。
     await opts.rateLimiter.hit(`payment:callback:ip:${req.ip ?? 'unknown'}`, 60, 120);
 
     const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
-    const headers = {
-      'x-payment-signature': headerOf(req, 'x-payment-signature'),
-    } as Record<string, string>;
+    // 按渠道转发验签所需标准头（微信 v3 头；支付宝回调签名在表单内，无额外头）。
+    // 另保留 x-payment-signature 给内存测试 stub 使用（真实渠道不发送、生产无害）。
+    const headers: Record<string, string> = {};
+    for (const name of CHANNEL_HEADERS[channel as PaymentChannel]) {
+      const v = headerOf(req, name);
+      if (v !== undefined) headers[name] = v;
+    }
+    const stubSig = headerOf(req, 'x-payment-signature');
+    if (stubSig !== undefined) headers['x-payment-signature'] = stubSig;
 
     let outcome;
     try {

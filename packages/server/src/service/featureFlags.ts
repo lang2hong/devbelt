@@ -2,14 +2,14 @@
  * 功能开关服务（P4 切片 4A / Runbook §3）。
  *
  * 每个开关独立、默认启用，仅显式关闭才生效：
- *   - `browser-auth`  → env `FEATURE_BROWSER_AUTH`
- *   - `mail-flow`     → env `FEATURE_MAIL_FLOW`
- *   - `sync-handoff`  → env `FEATURE_SYNC_HANDOFF`
- *   - `payment`       → env `FEATURE_PAYMENT`
+ *   - `browser-auth`  → env `FEATURE_BROWSER_AUTH`（**预留，未接线**）
+ *   - `mail-flow`     → env `FEATURE_MAIL_FLOW`（**预留，未接线**）
+ *   - `sync-handoff`  → env `FEATURE_SYNC_HANDOFF`（**预留，未接线**）
+ *   - `payment`       → env `FEATURE_PAYMENT`（**已接线**：下单 + 回调 503）
  *
  * 关闭语义（§11.4）：命中开关关闭的请求返回 503 `FEATURE_TEMPORARILY_DISABLED`，
- * **不回退到旧的弱安全链路**。当前切片只落地 `payment` 开关的拦截；其余三类开关
- * 作为部署事实落地时按同名约定接入（故此接口泛化）。
+ * **不回退到旧的弱安全链路**。当前仅 `payment` 开关实际拦截；其余三类是**预留命名**，
+ * 在对应路由接入开关守卫前不产生运行时行为（不应被理解为已可运维的部署开关）。
  */
 
 export interface FeatureFlagSet {

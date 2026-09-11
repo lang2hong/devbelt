@@ -31,6 +31,8 @@ export interface OrdersRouteOptions {
   orderService: OrderService;
   /** 支付功能开关（§11.4）。关闭时下单返回 503 FEATURE_TEMPORARILY_DISABLED。 */
   paymentFeatureEnabled?: () => boolean;
+  /** 该渠道是否已配置（未配置 → 503，而非落 generic 异常）。 */
+  channelConfigured?: (channel: (typeof PAYMENT_CHANNELS)[number]) => boolean;
 }
 
 function userIdOf(req: FastifyRequest): number {
@@ -137,6 +139,9 @@ export async function ordersWriteRoutes(app: FastifyInstance, opts: OrdersRouteO
         await opts.rateLimiter.hit(`console:order:create:${actor}`, 3600, 10);
         const { planCode, channel } = req.body as { planCode: string; channel: string };
         const ch = parseChannel(channel);
+        if (opts.channelConfigured && !opts.channelConfigured(ch)) {
+          throw new FeatureTemporarilyDisabledError('payment');
+        }
         const r = await svc.createOrder(actor, planCode, ch);
         const order = await svc.getOrder(actor, r.orderNo);
         reply.code(201).send({ order: orderDto(order), payParams: r.payParams });
