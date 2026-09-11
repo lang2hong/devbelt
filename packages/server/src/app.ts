@@ -78,7 +78,7 @@ import { MysqlInvoiceRepo } from './repository/mysql/invoiceRepo.js';
 import { ConsoleAuthService } from './service/consoleAuthService.js';
 import { ConsoleAdminService } from './service/consoleAdminService.js';
 import { OrderService } from './service/paymentService.js';
-import { resolvePaymentGateway, paymentGatewayConfigured, isChannelConfigured } from './service/paymentChannel.js';
+import { resolvePaymentGateway, paymentRoutesEnabled, isChannelConfigured } from './service/paymentChannel.js';
 import { resolveFeatureFlags } from './service/featureFlags.js';
 import { CursorService, deriveCursorKey } from './service/cursor.js';
 import { requestId } from './middleware/requestId.js';
@@ -266,8 +266,9 @@ export async function createApp() {
     runner: (fn) => withTransaction(app.mysql, fn),
     gatewayFor: (channel) => resolvePaymentGateway(channel),
   });
-  const paymentEnabled = paymentGatewayConfigured();
   const featureFlags = resolveFeatureFlags();
+  // opt-in：凭据齐全 + 显式 FEATURE_PAYMENT=true 才注册真支付路由，否则仅注册只读订单路由。
+  const paymentEnabled = paymentRoutesEnabled();
 
   // 受控限流清理任务（实施规格 §3）：过期桶由周期任务删除，不依赖请求
   startRateLimitCleanup(rateLimitRepo);

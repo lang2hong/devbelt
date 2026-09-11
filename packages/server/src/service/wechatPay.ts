@@ -15,7 +15,10 @@ import type { WechatCredentials } from './paymentCredentials.js';
  */
 export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<Response>;
 
+/** API 绝对地址（仅作 fetch 目标）。 */
 const NATIVE_ORDER_URL = 'https://api.mch.weixin.qq.com/v3/pay/transactions/native';
+/** v3 请求签名使用的 canonical URI（不含 scheme/host，§请求签名规范）。 */
+const NATIVE_CANONICAL_PATH = '/v3/pay/transactions/native';
 
 export class WechatPayGateway implements PaymentGateway {
   readonly channel = 'wechat' as const;
@@ -28,16 +31,17 @@ export class WechatPayGateway implements PaymentGateway {
     private readonly fetchImpl: FetchLike = fetch as unknown as FetchLike,
   ) {}
 
-  async createPayment(input: { orderNo: string; amountCents: number }): Promise<PrepayParams> {
+  async createPayment(input: { orderNo: string; amountCents: number; expiresTime: Date }): Promise<PrepayParams> {
     const body = JSON.stringify({
       appid: this.creds.appId,
       mchid: this.creds.mchId,
       description: 'DB Client Pro subscription',
       out_trade_no: input.orderNo,
+      time_expire: input.expiresTime.toISOString().replace(/\.\d{3}Z$/, 'Z'),
       amount: { total: input.amountCents, currency: 'CNY' },
       notify_url: this.creds.callbackUrl,
     });
-    const { signature, timestamp, nonce } = this.signRequest('POST', NATIVE_ORDER_URL, body);
+    const { signature, timestamp, nonce } = this.signRequest('POST', NATIVE_CANONICAL_PATH, body);
 
     const res = await this.fetchImpl(NATIVE_ORDER_URL, {
       method: 'POST',
@@ -60,7 +64,11 @@ export class WechatPayGateway implements PaymentGateway {
     const timestamp = headers['wechatpay-timestamp'];
     const nonce = headers['wechatpay-nonce'];
     const signature = headers['wechatpay-signature'];
+    const serial = headers['wechatpay-serial'];
     if (!timestamp || !nonce || !signature) return false;
+
+    // 平台证书序列号绑定：入站 serial 必须等于配置的平台证书 serial（防证书轮换期错配）。
+    if (this.creds.platformCertSerial && serial !== this.creds.platformCertSerial) return false;
 
     // §54 防重放：时间戳必须落在 ±5min 新鲜度窗口内。
     const ts = Number(timestamp);
@@ -83,17 +91,35 @@ export class WechatPayGateway implements PaymentGateway {
     if (!r || !r.ciphertext || !r.nonce) throw new Error('wechat callback missing resource');
     const plain = this.decryptResource(r.ciphertext, r.nonce, r.associated_data ?? '');
     const data = JSON.parse(plain) as {
+      appid?: string;
+      mchid?: string;
       out_trade_no?: string;
       transaction_id?: string;
       amount?: { total?: number };
       trade_state?: string;
+      success_time?: string;
     };
+    // 身份绑定：解密后的 appid/mchid 必须与配置一致，否则视为解析失败（P1）。
+    if (data.appid !== this.creds.appId || data.mchid !== this.creds.mchId) {
+      throw new Error('wechat callback identity mismatch');
+    }
     if (!data.out_trade_no || !data.transaction_id) throw new Error('wechat callback missing trade fields');
+    const summary: Record<string, string> = {
+      appid: data.appid,
+      mchid: data.mchid,
+      out_trade_no: data.out_trade_no,
+      transaction_id: data.transaction_id,
+      total: String(data.amount?.total ?? 0),
+      trade_state: data.trade_state ?? '',
+    };
+    if (data.success_time) summary.success_time = data.success_time;
     return {
       orderNo: data.out_trade_no,
       channelTradeNo: data.transaction_id,
       amountCents: data.amount?.total ?? 0,
       status: data.trade_state === 'SUCCESS' ? 'success' : 'failure',
+      // 脱敏摘要：仅白名单字段落库 raw_notification，绝不存完整加密信封（P1 敏感信息边界）。
+      summary,
     };
   }
 

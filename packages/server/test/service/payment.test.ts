@@ -127,11 +127,24 @@ describe('OrderService.createOrder', () => {
     const { svc, orderRepo } = makeService();
     const r = await svc.createOrder(1, 'pro', 'wechat');
     expect(r.amountCents).toBe(9900);
+    expect(r.orderNo.length).toBeLessThanOrEqual(32); // 微信 out_trade_no 上限 32 字符
     const order = await orderRepo.findByOrderNo(r.orderNo);
     expect(order).toBeDefined();
     expect(order!.status).toBe('pending');
     expect(order!.channel).toBe('wechat');
     expect(r.payParams.orderNo).toBe(r.orderNo);
+  });
+
+  it('creates a fresh order instead of reusing a nearly-expired pending order', async () => {
+    const { svc, orderRepo } = makeService();
+    const first = await svc.createOrder(1, 'pro', 'wechat');
+    // 伪造既有 pending 临近过期（< 1m）：渠道无法表示不越界的外部窗口，应改建新单。
+    const o = await orderRepo.findByOrderNo(first.orderNo);
+    o!.expiresTime = new Date(Date.now() + 30 * 1000);
+
+    const second = await svc.createOrder(1, 'pro', 'wechat');
+    expect(second.orderNo).not.toBe(first.orderNo);
+    expect([...orderRepo.store.values()].filter((x) => x.userId === 1 && x.status === 'pending')).toHaveLength(2);
   });
 });
 
@@ -180,6 +193,23 @@ describe('OrderService.handleCallback', () => {
     const order = await orderRepo.findByOrderNo(alipay.orderNo);
     expect(order!.status).toBe('fulfilled');
     expect(order!.channel).toBe('alipay');
+  });
+
+  it('records (not fulfills) a callback arriving after the local order expiry', async () => {
+    const { svc, orderRepo, subsRepo } = makeService();
+    await subsRepo.create({ userId: 1, planId: 1, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null });
+    const { orderNo } = await svc.createOrder(1, 'pro', 'wechat');
+    // 伪造订单已过期。
+    const order = await orderRepo.findByOrderNo(orderNo);
+    order!.expiresTime = new Date(Date.now() - 1000);
+
+    const cb = SUCCESS_CALLBACK(orderNo, 'wx-1', 9900);
+    const outcome = await svc.handleCallback('wechat', cb.raw, cb.headers);
+
+    expect(outcome.kind).toBe('recorded');
+    expect((await orderRepo.findByOrderNo(orderNo))!.status).toBe('pending');
+    const sub = await subsRepo.findByUserId(1);
+    expect(sub!.planId).toBe(1); // 权益未改（不履约）。
   });
 
   it('rejects a tampered signature before any side effect', async () => {
@@ -235,6 +265,38 @@ describe('OrderService.handleCallback', () => {
     const second = await svc.createOrder(1, 'pro', 'wechat');
     expect(second.orderNo).toBe(first.orderNo);
     expect([...orderRepo.store.values()].filter((o) => o.userId === 1)).toHaveLength(1);
+  });
+
+  it('persists only the allowlisted summary to raw_notification, not the raw body', async () => {
+    const orderRepo = new FakeOrderRepo();
+    const paymentRepo = new FakePaymentRepo();
+    const subsRepo = new FakeSubsRepo();
+    const gateway: PaymentGateway = {
+      channel: 'wechat',
+      async createPayment() { return {}; },
+      verifyCallback() { return true; },
+      parseCallback(rawBody: Buffer): PaymentCallback {
+        const d = JSON.parse(rawBody.toString('utf8')) as { orderNo: string; channelTradeNo: string; amountCents: number };
+        return { orderNo: d.orderNo, channelTradeNo: d.channelTradeNo, amountCents: d.amountCents, status: 'success', summary: { out_trade_no: d.orderNo, transaction_id: d.channelTradeNo, total: String(d.amountCents) } };
+      },
+    };
+    const svc = new OrderService({
+      orderRepo, paymentRepo, personalPlanRepo: new FakePlanRepo(), personalSubscriptionRepo: subsRepo,
+      auditWriter: new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as any),
+      runner: async (fn) => fn({} as Queryable),
+      gatewayFor: () => gateway,
+    });
+    await subsRepo.create({ userId: 1, planId: 1, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null });
+    const { orderNo } = await svc.createOrder(1, 'pro', 'wechat');
+
+    // 原始 body 含未允许字段（payer.openid）；落库必须只留白名单摘要。
+    const raw = Buffer.from(JSON.stringify({ orderNo, channelTradeNo: 'wx-1', amountCents: 9900, status: 'success', payer: { openid: 'OPENID_SECRET' } }));
+    await svc.handleCallback('wechat', raw, {});
+
+    const p = paymentRepo.store[0];
+    expect(p).toBeDefined();
+    expect(p!.rawNotification).toBe(JSON.stringify({ out_trade_no: orderNo, transaction_id: 'wx-1', total: '9900' }));
+    expect(p!.rawNotification).not.toContain('OPENID_SECRET');
   });
 
   it('does NOT reuse a pending order across different channels, leaving the prior channel pending', async () => {

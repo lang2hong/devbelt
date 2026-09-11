@@ -33,7 +33,7 @@ class CaptureGateway implements PaymentGateway {
   readonly channel: PaymentChannel;
   captured: Buffer | undefined;
   constructor(channel: PaymentChannel) { this.channel = channel; }
-  async createPayment(_i: { orderNo: string; amountCents: number }): Promise<PrepayParams> { return {}; }
+  async createPayment(_i: { orderNo: string; amountCents: number; expiresTime: Date }): Promise<PrepayParams> { return {}; }
   verifyCallback(rawBody: Buffer): boolean { this.captured = rawBody; return true; }
   parseCallback(rawBody: Buffer): PaymentCallback { return JSON.parse(rawBody.toString('utf8')) as PaymentCallback; }
 }
@@ -133,6 +133,7 @@ describe('payment callback route raw bytes', () => {
       WECHAT_MCH_ID: 'mch',
       WECHAT_APP_ID: 'app',
       WECHAT_MERCHANT_CERT_SERIAL: 'ABCDEF1234567890',
+      WECHAT_PLATFORM_CERT_SERIAL: 'FEDCBA0987654321',
       WECHAT_PRIVATE_KEY_B64: Buffer.from(mk.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()).toString('base64'),
       WECHAT_PLATFORM_CERT_B64: Buffer.from(mk.publicKey.export({ type: 'spki', format: 'pem' }).toString()).toString('base64'),
       WECHAT_API_V3_KEY: '0123456789abcdef0123456789abcdef',
@@ -148,7 +149,7 @@ describe('payment callback route raw bytes', () => {
     const apiV3Key = Buffer.from('0123456789abcdef0123456789abcdef');
     const nonce = 'abcdefgh';
     const aad = 'transaction';
-    const plaintext = JSON.stringify({ out_trade_no: 'ord1', transaction_id: 'wx-t-1', amount: { total: 9900 }, trade_state: 'SUCCESS' });
+    const plaintext = JSON.stringify({ appid: 'app', mchid: 'mch', out_trade_no: 'ord1', transaction_id: 'wx-t-1', amount: { total: 9900 }, trade_state: 'SUCCESS' });
     const enc = createCipheriv('aes-256-gcm', apiV3Key, Buffer.from(nonce));
     enc.setAAD(Buffer.from(aad));
     const ct = Buffer.concat([enc.update(plaintext, 'utf8'), enc.final()]);
@@ -168,15 +169,15 @@ describe('payment callback route raw bytes', () => {
         'wechatpay-timestamp': timestamp,
         'wechatpay-nonce': nonce,
         'wechatpay-signature': signature,
+        'wechatpay-serial': cred.platformCertSerial,
       },
       payload: rawBody,
     });
 
-    // 验签通过 → OrderService 继续走到订单查找；noop order 不存在 → rejected(ORDER_NOT_FOUND)，
-    // 但状态码必须是 200（验签通过后的领域拒绝），而非 400 PAYMENT_SIGNATURE_INVALID。
+    // 验签通过 → OrderService 继续走到订单查找；noop order 不存在 → rejected，
+    // 但响应为微信 v3 的 JSON ack（provider 停止重试）。
     expect(res.statusCode).toBe(200);
-    expect(res.json().status).toBe('rejected');
-    expect(res.json().code).toBe('ORDER_NOT_FOUND');
+    expect(res.json()).toEqual({ code: 'SUCCESS', message: '成功' });
 
     await app.close();
   });
@@ -211,6 +212,45 @@ describe('payment callback route raw bytes', () => {
     });
     expect(res.statusCode).toBe(503);
     expect(res.json().error.code).toBe('FEATURE_TEMPORARILY_DISABLED');
+    await app.close();
+  });
+
+  it('returns text/plain "success" for an Alipay callback ack', async () => {
+    // 支付宝回调：验签恒真、解析返回固定归一化结果；noop order 不存在 → rejected，ack 仍为纯文本 success。
+    const gateway: PaymentGateway = {
+      channel: 'alipay',
+      async createPayment(): Promise<PrepayParams> { return {}; },
+      verifyCallback(): boolean { return true; },
+      parseCallback(): PaymentCallback { return { orderNo: 'ord1', channelTradeNo: 'ali-t-1', amountCents: 9900, status: 'success' }; },
+    };
+    const app = Fastify({ logger: false });
+    registerErrorHandler(app);
+    await app.register(requestId);
+    const orderService = new OrderService({
+      orderRepo: noopOrderRepo as never,
+      paymentRepo: noopPaymentRepo as never,
+      personalPlanRepo: noopPlanRepo as never,
+      personalSubscriptionRepo: noopSubRepo as never,
+      auditWriter: new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as never),
+      runner: async (fn) => fn({} as Queryable),
+      gatewayFor: () => gateway,
+    });
+    await app.register(paymentCallbackRoutes, {
+      orderService,
+      auditWriter: new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as never),
+      rateLimiter: new RateLimitService({ increment: async () => 1, peek: async () => 0 } as never, false),
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/public/payment-callback/alipay',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: 'out_trade_no=ord1&trade_no=ali-t-1&total_amount=99.00&trade_status=TRADE_SUCCESS',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/plain');
+    expect(res.body).toBe('success');
     await app.close();
   });
 });

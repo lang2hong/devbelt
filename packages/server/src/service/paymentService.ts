@@ -21,6 +21,8 @@ import type { PaymentGateway, PrepayParams } from './paymentChannel.js';
 
 /** 下单后未支付的过期时间（P4 §状态机：30 分钟）。 */
 const ORDER_EXPIRES_MS = 30 * 60 * 1000;
+/** 创建外部支付意图所需的最小剩余寿命（渠道需能设置有效期，避免过期即失效）。 */
+const MIN_ORDER_LIFETIME_MS = 60 * 1000;
 /** 付费后权益时长（占位：30 天，上线前按实际时长包调整）。 */
 const ENTITLEMENT_PERIOD_MS = 30 * 24 * 3600 * 1000;
 
@@ -81,19 +83,26 @@ export class OrderService {
     // P1b：同人同套餐同渠道的未过期 pending 直接复用，避免双击/重试产生重复付款；
     // channel 纳入复用键，防止复用旧渠道订单却按新渠道生成支付参数（跨渠道错配）。
     const existing = await this.orderRepo.findPendingByUserAndPlan(userId, planCode, channel);
-    if (existing) {
-      const payParams = await gateway.createPayment({ orderNo: existing.orderNo, amountCents: existing.amountCents });
+    // P1：复用前校验剩余寿命。渠道有效期只能取整分钟向下取整，若剩余不足 1m 就无法表示
+    // 不越过本地 deadline 的外部窗口 —— 此时不复用、改建新单（新单有完整 30m 寿命）。
+    if (existing && existing.expiresTime.getTime() - Date.now() >= MIN_ORDER_LIFETIME_MS) {
+      const payParams = await gateway.createPayment({ orderNo: existing.orderNo, amountCents: existing.amountCents, expiresTime: existing.expiresTime });
       return { orderNo: existing.orderNo, channel, amountCents: existing.amountCents, payParams };
     }
 
     // 注意：不因「开了别的渠道」而把旧渠道 pending 置 expired——用户可能已拿到旧渠道
     // 支付码并完成付款，若本地单边宣告过期，回调会「确认付款但不履约」。旧订单自然过期，
     // 后续合法 callback 一律正常履约；多渠道并行订单策略/渠道取消/超时补偿见 Runbook §9。
-    const orderNo = randomBytes(32).toString('base64url');
+    const orderNo = randomBytes(16).toString('hex');
     const expiresTime = new Date(Date.now() + ORDER_EXPIRES_MS);
 
+    // fail-closed：剩余时间太短就无法创建有效外部支付意图（渠道要能设置有效期）。
+    if (expiresTime.getTime() - Date.now() < MIN_ORDER_LIFETIME_MS) {
+      throw new OrderInvalidStateError('too little time remaining to create a payment intent');
+    }
+
     await this.orderRepo.create({ orderNo, userId, planCode, amountCents, channel, expiresTime });
-    const payParams = await gateway.createPayment({ orderNo, amountCents });
+    const payParams = await gateway.createPayment({ orderNo, amountCents, expiresTime });
 
     this.auditWriter.write({
       eventType: 'payment.order.created',
@@ -119,7 +128,8 @@ export class OrderService {
       throw new PaymentSignatureInvalidError();
     }
     const parsed = gateway.parseCallback(rawBody);
-    const notification = rawBody.toString('utf8').slice(0, 4000);
+    // 敏感信息边界：只落渠道适配器产出的白名单脱敏摘要，绝不落原始回调 body/加密信封/完整表单。
+    const notification = JSON.stringify(parsed.summary ?? {});
 
     return this.runner(async (tx) => {
       const order = await this.orderRepo.findByOrderNoForUpdate(tx, parsed.orderNo);
@@ -159,7 +169,7 @@ export class OrderService {
         return { kind: 'duplicate' };
       }
 
-      // 过期订单：不推进为 paid，记流水。
+      // 过期订单：不推进为 paid，记流水 + 审计（付款已发生但本地过期 → 需对账/退款兜底，不静默）。
       if (order.expiresTime <= new Date()) {
         await this.paymentRepo.create(tx, {
           orderId: order.id,
@@ -169,6 +179,14 @@ export class OrderService {
           rawNotification: notification,
           signatureVerified: true,
           result: 'failure',
+        });
+        this.auditWriter.writeInTx(tx, {
+          eventType: 'payment.callback.failed',
+          result: 'failure',
+          failureCode: 'ORDER_EXPIRED',
+          actorUserId: order.userId,
+          targetType: 'order',
+          targetId: order.orderNo,
         });
         return { kind: 'recorded' };
       }

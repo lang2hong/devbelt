@@ -32,6 +32,8 @@ export interface WechatCredentials {
   appId: string;
   /** 商户证书序列号（16 进制），v3 Authorization 元数据必填。 */
   merchantCertSerial: string;
+  /** 平台证书序列号（16 进制），回调验签绑定（防证书轮换期错配）。 */
+  platformCertSerial: string;
   /** 商户私钥（RSA PKCS8 PEM）。 */
   merchantPrivateKey: KeyObject;
   /** 平台证书公钥（RSA SPKI PEM），用于回调验签。 */
@@ -70,11 +72,13 @@ export function resolveWechatCredentials(env: NodeJS.ProcessEnv = process.env): 
   const mchId = (env.WECHAT_MCH_ID || '').trim();
   const appId = (env.WECHAT_APP_ID || '').trim();
   const serial = (env.WECHAT_MERCHANT_CERT_SERIAL || '').trim();
+  const platformSerial = (env.WECHAT_PLATFORM_CERT_SERIAL || '').trim();
   const keyB64 = (env.WECHAT_PRIVATE_KEY_B64 || '').trim();
   const certB64 = (env.WECHAT_PLATFORM_CERT_B64 || '').trim();
   const apiV3 = (env.WECHAT_API_V3_KEY || '').trim();
-  if (!mchId || !appId || !serial || !keyB64 || !certB64 || !apiV3) return undefined;
+  if (!mchId || !appId || !serial || !platformSerial || !keyB64 || !certB64 || !apiV3) return undefined;
   if (!HEX_SERIAL.test(serial)) return undefined;
+  if (!HEX_SERIAL.test(platformSerial)) return undefined;
 
   // APIv3 key 必须严格 32 UTF-8 字节：不截断、不接受短/长值（P1-2）。
   const apiV3Key = Buffer.from(apiV3, 'utf8');
@@ -84,6 +88,7 @@ export function resolveWechatCredentials(env: NodeJS.ProcessEnv = process.env): 
     mchId,
     appId,
     merchantCertSerial: serial,
+    platformCertSerial: platformSerial,
     merchantPrivateKey: createPrivateKey({ key: decodePem(keyB64, 'WECHAT_PRIVATE_KEY_B64'), format: 'pem' }),
     platformPublicKey: createPublicKey({ key: decodePem(certB64, 'WECHAT_PLATFORM_CERT_B64'), format: 'pem' }),
     apiV3Key,

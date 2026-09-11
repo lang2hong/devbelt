@@ -168,7 +168,7 @@ describe('payment callback route', () => {
     expect(res.json().error.code).toBe('PAYMENT_SIGNATURE_INVALID');
   });
 
-  it('returns 200 rejected for a post-signature domain failure (stops channel retry)', async () => {
+  it('returns 200 for a post-signature domain failure (provider ack stops retry)', async () => {
     const b = await build();
     const raw = Buffer.from(JSON.stringify({ orderNo: 'x'.repeat(43), channelTradeNo: 'wx-1', amountCents: 9900, status: 'success' }));
     const res = await b.app.inject({
@@ -178,8 +178,8 @@ describe('payment callback route', () => {
       payload: raw,
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json().status).toBe('rejected');
-    expect(res.json().code).toBe('ORDER_NOT_FOUND');
+    // 微信 v3 JSON ack。
+    expect(res.json()).toEqual({ code: 'SUCCESS', message: '成功' });
   });
 
   it('rejects an unknown channel with UNKNOWN_CHANNEL', async () => {

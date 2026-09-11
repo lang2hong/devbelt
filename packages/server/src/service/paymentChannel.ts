@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { PaymentChannel } from '../domain/enums.js';
 import { resolveWechatCredentials, resolveAlipayCredentials } from './paymentCredentials.js';
+import { resolveFeatureFlags } from './featureFlags.js';
 import { WechatPayGateway } from './wechatPay.js';
 import { AlipayGateway } from './alipay.js';
 
@@ -27,6 +28,8 @@ export interface PaymentCallback {
   amountCents: number;
   /** 渠道侧交易结果。failure 表示支付失败/关闭，不推进为 paid。 */
   status: 'success' | 'failure';
+  /** 渠道白名单脱敏摘要（仅允许字段），落库 raw_notification；不含原始信封/表单。 */
+  summary?: Record<string, string>;
 }
 
 /**
@@ -36,8 +39,8 @@ export interface PaymentCallback {
  */
 export interface PaymentGateway {
   readonly channel: PaymentChannel;
-  /** 向渠道发起预下单，返回支付参数（二维码/跳转链接等）。 */
-  createPayment(input: { orderNo: string; amountCents: number }): Promise<PrepayParams>;
+  /** 向渠道发起预下单，返回支付参数（二维码/跳转链接等）。`expiresTime` 为权威本地过期时刻，渠道据此设置外部支付有效期，避免「本地过期后仍可付款但无权益」。 */
+  createPayment(input: { orderNo: string; amountCents: number; expiresTime: Date }): Promise<PrepayParams>;
   /** 校验回调签名。false = 拒绝（服务层抛 PAYMENT_SIGNATURE_INVALID）。 */
   verifyCallback(rawBody: Buffer, headers: Record<string, string>): boolean;
   /** 验签通过后解析归一化交易信息。 */
@@ -60,10 +63,11 @@ export function signMemoryCallback(rawBody: Buffer): string {
 export class MemoryPaymentGateway implements PaymentGateway {
   constructor(readonly channel: PaymentChannel) {}
 
-  async createPayment(input: { orderNo: string; amountCents: number }): Promise<PrepayParams> {
+  async createPayment(input: { orderNo: string; amountCents: number; expiresTime: Date }): Promise<PrepayParams> {
     return {
       orderNo: input.orderNo,
       amountCents: input.amountCents,
+      expiresTime: input.expiresTime.toISOString(),
       channel: this.channel,
       mock: this.channel === 'wechat' ? 'weixin://wxpay/mock-code-url' : 'https://openapi.alipay.com/mock-redirect',
     };
@@ -96,6 +100,14 @@ export function paymentGatewayConfigured(env: NodeJS.ProcessEnv = process.env): 
   return resolveConfiguredChannels(env).size > 0;
 }
 
+/**
+ * 支付路由是否应注册（opt-in）：凭据齐全 **且** 显式 `FEATURE_PAYMENT=true/1/on`。
+ * 仅配凭据而缺开关视为关闭——资金面集成中「配凭据」与「开启客户支付」是两次独立上线动作。
+ */
+export function paymentRoutesEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return paymentGatewayConfigured(env) && resolveFeatureFlags(env).enabled('payment');
+}
+
 /** 某渠道是否已配置（供路由在调用前做 503 拒绝，而非落 generic 异常路径）。 */
 export function isChannelConfigured(channel: PaymentChannel, env: NodeJS.ProcessEnv = process.env): boolean {
   return resolveConfiguredChannels(env).has(channel);
@@ -118,7 +130,7 @@ export function resolvePaymentGateway(
   if (!creds) {
     throw new Error('alipay payment gateway is not configured; provide ALIPAY_* credentials (P4 slice 4)');
   }
-  return new AlipayGateway(creds, fetchImpl as never);
+  return new AlipayGateway(creds);
 }
 
 /** 支持的全部渠道。 */

@@ -109,9 +109,20 @@ export async function paymentCallbackRoutes(app: FastifyInstance, opts: PaymentC
         sourceIp: req.ip,
         requestId: requestIdOf(req),
       });
-      // 验签已通过、领域侧拒绝：200 终止渠道重试，不再重打。
-      return reply.code(200).send({ ok: true, status: 'rejected', code: outcome.code });
+      // 验签已通过、领域侧拒绝：返回渠道专属确认以终止重试（支付宝需纯文本 success）。
+      return ackChannel(reply, channel as PaymentChannel);
     }
-    reply.code(200).send({ ok: true, status: outcome.kind });
+    return ackChannel(reply, channel as PaymentChannel);
   });
+}
+
+/** 渠道专属回调确认：支付宝异步通知要求字面 `success`（text/plain）；微信 v3 用 JSON ack。 */
+function ackChannel(reply: { type(v: string): unknown; code(n: number): unknown; send(b: unknown): unknown }, channel: PaymentChannel): unknown {
+  if (channel === 'alipay') {
+    reply.type('text/plain');
+    reply.code(200);
+    return reply.send('success');
+  }
+  reply.code(200);
+  return reply.send({ code: 'SUCCESS', message: '成功' });
 }
