@@ -105,6 +105,14 @@ describe('导出文件名与过滤器（两端共用）', () => {
       expect(exportFileName('t', format).endsWith(`.${ext}`)).toBe(true);
     }
   });
+
+  it('清洗路径穿越与非法文件名字符', () => {
+    expect(exportFileName('../evil', 'csv')).toBe('__evil.csv');
+    expect(exportFileName('..', 'sql')).toBe('_.sql');
+    expect(exportFileName('a/b', 'json')).toBe('a_b.json');
+    expect(exportFileName('a\\b', 'csv')).toBe('a_b.csv');
+    expect(exportFileName('ta:ble*?9', 'xml')).toBe('ta_ble__9.xml');
+  });
 });
 
 describe('exportTable', () => {

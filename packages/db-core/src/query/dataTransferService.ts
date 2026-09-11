@@ -120,7 +120,7 @@ export class DataTransferService {
     const qualifiedTarget = targetDb ? `${wrap(targetDb)}.${wrap(sourceTableName)}` : wrap(sourceTableName);
     await targetQuery.query(`DROP TABLE IF EXISTS ${qualifiedTarget}`, undefined, SKIP);
     const adaptedDdl = ddl
-      .replace(/`(\w+)`/g, (_, name) => `\`${targetDb}\`.\`${name}\``)
+      .replace(/^CREATE\s+TABLE\s+`([^`]+)`/i, (_, name) => `CREATE TABLE \`${targetDb}\`.\`${name}\``)
       .replace(/;\s*$/, '');
     await targetQuery.query(adaptedDdl + ';', undefined, SKIP);
 
@@ -168,7 +168,7 @@ export class DataTransferService {
     const syncSql = DataDiffService.generateSyncSql(
       { diffs: dataDiff.diffs, sourceDb, targetDb },
       targetDb,
-      sourceQuery,
+      targetQuery,
     );
     const statements = splitSql(syncSql);
     for (const stmt of statements) {

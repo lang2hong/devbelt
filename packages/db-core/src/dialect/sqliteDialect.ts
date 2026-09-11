@@ -218,6 +218,7 @@ export class SqliteDialect implements SqlDialect {
     if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NULL';
     if (typeof value === 'boolean') return value ? '1' : '0';
     if (value instanceof Date) return `'${value.toISOString().replace(/'/g, "''")}'`;
+    if (Buffer.isBuffer(value)) return `X'${value.toString('hex')}'`;
     if (typeof value === 'object') {
       const json = JSON.stringify(value).replace(/'/g, "''");
       return `'${json}'`;

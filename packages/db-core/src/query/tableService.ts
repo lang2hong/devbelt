@@ -679,7 +679,7 @@ export class TableService {
       case 'MYSQL':
         return `SHOW CREATE TABLE ${qualified}`;
       case 'PG': {
-        validateIdent(table);
+        validateIdent(table, 63);
         /**
          * 三处此前都是坏的：
          *
@@ -701,7 +701,7 @@ export class TableService {
          *    DDL 列顺序随机 —— 拿它去别处建表，按位置赋值的 INSERT 就错列。
          */
         const schema = database
-          ? this.esc(validateIdent(database))
+          ? this.esc(validateIdent(database, 63))
           : 'current_schema()';
         return `SELECT
             'CREATE TABLE ' || quote_ident(c.relname) || ' (' || chr(10) ||

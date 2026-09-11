@@ -30,4 +30,19 @@ describe('CSV transfer codec', () => {
     expect(() => parseCsv('name,name\nAda,Lovelace')).toThrow('unique');
     expect(() => parseCsv('name\n"Ada')).toThrow('unterminated');
   });
+
+  it('对公式前缀加前导单引号，防止 CSV 注入；纯数值不受影响', () => {
+    const text = serializeCsv(['v'], [
+      { v: '=1+1' },
+      { v: '+SUM(A1:A2)' },
+      { v: '-2+3' },
+      { v: '@cmd' },
+      { v: '\tx' },
+      { v: '-5' },
+      { v: '3.14' },
+    ]);
+    expect(text).toBe(
+      "v\r\n'=1+1\r\n'+SUM(A1:A2)\r\n'-2+3\r\n'@cmd\r\n'\tx\r\n-5\r\n3.14\r\n",
+    );
+  });
 });

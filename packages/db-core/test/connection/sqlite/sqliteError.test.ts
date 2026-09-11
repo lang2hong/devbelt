@@ -175,3 +175,15 @@ describe('SQLite 无可用命令时显式失败', () => {
     expect(conn.isAlive()).toBe(false);
   });
 });
+
+describe('SQLite 参数化不支持（fail-closed）', () => {
+  it('传 values 时显式报错而非静默丢弃', async () => {
+    const conn = new SqliteConnection({ dbPath: '/tmp/x.db' } as any);
+    (conn as any).sqlite = { dbPath: '/tmp/x.db', query: () => Promise.resolve({ rows: [], fields: [] }) };
+    const err = await new Promise<any>((resolve) => {
+      conn.query('SELECT * FROM t WHERE id = ?', [1], (e: any) => resolve(e));
+    });
+    expect(err).toBeTruthy();
+    expect(String(err.message)).toContain('parameterized');
+  });
+});

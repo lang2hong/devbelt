@@ -82,6 +82,16 @@ describe('sqlite3 CLI -bail 影响事务原子性', () => {
     const out = execFileSync('sqlite3', [db, 'SELECT COUNT(*) FROM t;'], { encoding: 'utf8' }).trim();
     expect(out).toBe('0');
   });
+
+  it('驱动已加 -bail：坏语句中止并回滚，残留 0 行', async () => {
+    const db = path.join(os.tmpdir(), `bail-driver-${Date.now()}.db`);
+    const sqlite = new SQLite(db, 'sqlite3');
+    await sqlite.query('CREATE TABLE t(id INTEGER);');
+    const batch = 'BEGIN;\nINSERT INTO t VALUES(1);\nINSERT INTO t VALUES(2);\nINSERT INTO bad;\nCOMMIT;';
+    await expect(sqlite.query(batch)).rejects.toThrow();
+    const result = await sqlite.query('SELECT COUNT(*) AS c FROM t;');
+    expect(Number((result as any).rows[0].c)).toBe(0);
+  });
 });
 
 describe('SqliteConnection.beginTransaction', () => {

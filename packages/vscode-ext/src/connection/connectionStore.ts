@@ -91,7 +91,7 @@ export type { QueryFolder } from './queryStore';
  */
 export class ConnectionStore {
   private static readonly KEY = 'dbclient.connections';
-  private static readonly SENSITIVE_FIELDS = ['password', 'sshPassword', 'sshPassphrase'] as const;
+  static readonly SENSITIVE_FIELDS = ['password', 'sshPassword', 'sshPassphrase'] as const;
   private readonly secretCache = new Map<string, string>();
   private readonly queryStore: QueryStore;
   private readonly changedEmitter = new EventEmitter<ChangeSource>();
@@ -457,4 +457,16 @@ export class ConnectionStore {
   upsertFolder(folder: QueryFolder, source: ChangeSource = 'sync'): Promise<void> {
     return this.queryStore.upsertFolder(folder, source);
   }
+}
+
+/**
+ * 剥离连接凭据，供发送给 webview 的 prefill 等场景使用。
+ *
+ * 编辑表单时只回填非敏感字段；密码/SSH 口令不离开扩展主进程，避免经
+ * `postMessage` 泄入 webview。此前把整份 `SavedConnection` 原样 post。
+ */
+export function stripSecrets(conn: SavedConnection): SavedConnection {
+  const out = { ...conn } as Record<string, unknown>;
+  for (const field of ConnectionStore.SENSITIVE_FIELDS) delete out[field];
+  return out as unknown as SavedConnection;
 }

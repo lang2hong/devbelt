@@ -227,4 +227,29 @@ describe('DataTransferService.transferTable', () => {
     expect(insert).toContain("'O''Brien'");
     expect(insert).toContain('NULL');
   });
+
+  it('DDL 只给表头加库前缀，列名不带前缀', async () => {
+    const sourceConn = new FakeConnection();
+    const targetConn = new FakeConnection();
+    sourceConn.setResponses([{ rows: [] }]);
+
+    const sourceQuery = new QueryService(sourceConn, new MysqlDialect());
+    const targetQuery = new QueryService(targetConn, new MysqlDialect());
+    const tblSvc = {
+      getCreateSql: async () => 'CREATE TABLE `users` (\n  `id` int NOT NULL,\n  `name` varchar(255)\n) ENGINE=InnoDB',
+      supports: () => true,
+    } as unknown as TableService;
+
+    await DataTransferService.transferTable(
+      sourceQuery, meta(['users'], ['id', 'name']), tblSvc, 'src', 'users',
+      targetQuery, meta([], ['id', 'name']), 'dst',
+      { includeData: true },
+    );
+
+    const ddl = targetConn.executed.find((s) => /CREATE TABLE/i.test(s)) ?? '';
+    expect(ddl).toContain('CREATE TABLE `dst`.`users`');
+    expect(ddl).toContain('`id` int NOT NULL');
+    expect(ddl).not.toContain('`dst`.`id`');
+    expect(ddl).not.toContain('`dst`.`name`');
+  });
 });

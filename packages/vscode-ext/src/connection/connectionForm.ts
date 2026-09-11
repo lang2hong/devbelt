@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { DatabaseType } from '@db-client/core';
 import { ConnectionFactory } from '@db-client/core';
 import type { IConnection } from '@db-client/core';
-import type { SavedConnection, ConnectionGroup } from './connectionStore';
+import { stripSecrets, type SavedConnection, type ConnectionGroup } from './connectionStore';
 import { SshTunnel } from './sshTunnel';
 import { l10n } from '../i18n';
 import { uniqueId } from '../utils/id';
@@ -102,7 +102,7 @@ export class ConnectionForm extends BaseWebView {
       groups: flattenGroups(this.groups).map(({ group, depth }) => ({ id: group.id, name: group.name, depth })),
     });
     if (this.editing) {
-      this.post({ type: 'prefill', conn: this.editing });
+      this.post({ type: 'prefill', conn: stripSecrets(this.editing) });
     } else {
       this.post({ type: 'reset' });
     }

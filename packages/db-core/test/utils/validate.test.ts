@@ -81,6 +81,11 @@ describe('validateIdent — 其他边界', () => {
     expect(() => validateIdent('a'.repeat(65))).toThrow('SQL identifier too long');
   });
 
+  it('PG 上限 63：validateIdent(name, 63) 拒绝 64 字符、放行 63 字符', () => {
+    expect(() => validateIdent('a'.repeat(64), 63)).toThrow('SQL identifier too long');
+    expect(validateIdent('a'.repeat(63), 63)).toBe('a'.repeat(63));
+  });
+
   it('拒绝纯 emoji（不属于 \\p{L}）', () => {
     expect(() => validateIdent('🔥')).toThrow('Invalid SQL identifier');
   });

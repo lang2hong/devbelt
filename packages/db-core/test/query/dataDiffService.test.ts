@@ -3,6 +3,7 @@ import { DataDiffService } from '../../src/query/dataDiffService';
 import { QueryService } from '../../src/query/queryService';
 import type { MetadataService } from '../../src/query/metadataService';
 import { MysqlDialect } from '../../src/dialect/mysqlDialect';
+import { PostgreSqlDialect } from '../../src/dialect/postgreSqlDialect';
 import { IConnection } from '../../src/connection/connection';
 import type { QueryCallback } from '../../src/types/query';
 
@@ -172,5 +173,25 @@ describe('DataDiffService', () => {
     const sql = DataDiffService.generateSyncSql(diff, 'b', query);
     expect(sql).toContain("'O''Brien'");
     expect(sql).toContain('NULL');
+  });
+
+  it('generateSyncSql 用目标方言引号/转义（MySQL 源 → PG 目标）', () => {
+    const pgConn = new FakeConnection();
+    const pgQuery = new QueryService(pgConn, new PostgreSqlDialect());
+    const diff: any = {
+      sourceDb: 'a', targetDb: 'b',
+      diffs: [{
+        tableName: 'users',
+        pkColumns: ['id'],
+        columnNames: ['id', 'path'],
+        rows: [{ status: 'added', pkValues: { id: 1 }, sourceRow: { id: 1, path: 'C:\\tmp' } }],
+      }],
+    };
+    const sql = DataDiffService.generateSyncSql(diff, 'b', pgQuery);
+    expect(sql).toContain('INSERT INTO "b"."users"');
+    expect(sql).toContain('"id", "path"');
+    // PG 不翻倍反斜杠（standard_conforming_strings），也不发反引号
+    expect(sql).toContain("'C:\\tmp'");
+    expect(sql).not.toContain('`');
   });
 });

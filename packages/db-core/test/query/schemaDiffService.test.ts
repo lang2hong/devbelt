@@ -121,6 +121,41 @@ describe('SchemaDiffService', () => {
     expect(sql).toContain('CREATE TABLE');
   });
 
+  it('generateSyncSql 只给表名加库前缀，列名不带前缀', async () => {
+    const ddl = 'CREATE TABLE `users` (\n  `id` int(11) NOT NULL,\n  `name` varchar(255) DEFAULT NULL\n) ENGINE=InnoDB';
+    const tableService = {
+      getCreateSql: async () => ddl,
+      supports: () => true,
+      require: () => {},
+    } as unknown as TableService;
+    const diffs = [{ tableName: 'users', status: 'added' as const, columns: [] }];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'targetDb', tableService, 'sourceDb');
+    expect(sql).toContain('CREATE TABLE `targetDb`.`users`');
+    expect(sql).toContain('`id` int(11) NOT NULL');
+    expect(sql).toContain('`name` varchar(255) DEFAULT NULL');
+    expect(sql).not.toContain('`targetDb`.`id`');
+    expect(sql).not.toContain('`targetDb`.`name`');
+  });
+
+  it('generateSyncSql 拒绝含反引号的库名/表名（SQL 注入防线）', async () => {
+    const tableService = {
+      getCreateSql: async () => '',
+      supports: () => true,
+      require: () => {},
+    } as unknown as TableService;
+    await expect(
+      SchemaDiffService.generateSyncSql([], '`evil`', tableService, 'sourceDb'),
+    ).rejects.toThrow('Invalid SQL identifier');
+    await expect(
+      SchemaDiffService.generateSyncSql(
+        [{ tableName: 'a`; DROP TABLE x; --', status: 'removed' as const, columns: [] }],
+        'targetDb',
+        tableService,
+        'sourceDb',
+      ),
+    ).rejects.toThrow('Invalid SQL identifier');
+  });
+
   it('generateSyncSql 无差异时输出提示', async () => {
     const tableService = {
       getCreateSql: async () => '',

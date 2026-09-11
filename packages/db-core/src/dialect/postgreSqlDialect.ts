@@ -91,7 +91,7 @@ export class PostgreSqlDialect implements SqlDialect {
   }
 
   getRoutineDefinitionSql(name: string, _routineType: string): string {
-    validateIdent(name);
+    validateIdent(name, 63);
     return `SELECT pg_get_functiondef(p.oid) AS definition
       FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -103,19 +103,19 @@ export class PostgreSqlDialect implements SqlDialect {
   }
 
   getViewDefinitionSql(name: string): string {
-    validateIdent(name);
+    validateIdent(name, 63);
     return `SELECT pg_get_viewdef(current_schema() || '.' || '${name}', true) AS definition`;
   }
 
   /** pg_get_viewdef 返回纯 SELECT，包上 CREATE OR REPLACE VIEW 外壳。 */
   normalizeViewAlterSql(raw: string, name: string, database?: string): string {
     const select = (raw || '').replace(/;?\s*$/, '').trim();
-    const q = database ? `${this.wrap(validateIdent(database))}.${this.wrap(validateIdent(name))}` : this.wrap(validateIdent(name));
+    const q = database ? `${this.wrap(validateIdent(database, 63))}.${this.wrap(validateIdent(name, 63))}` : this.wrap(validateIdent(name, 63));
     return `CREATE OR REPLACE VIEW ${q} AS\n${select};`;
   }
 
   getIndexListSql(table: string): string {
-    validateIdent(table);
+    validateIdent(table, 63);
     return `SELECT indexname AS name, indexdef AS definition, 
       CASE WHEN indexdef LIKE '%UNIQUE%' THEN true ELSE false END AS is_unique,
       CASE WHEN indexname = '${table}_pkey' THEN true ELSE false END AS is_primary
@@ -142,7 +142,7 @@ export class PostgreSqlDialect implements SqlDialect {
   }
 
   getTriggerListSql(table: string): string {
-    validateIdent(table);
+    validateIdent(table, 63);
     return `SELECT t.tgname AS name, pg_get_triggerdef(t.oid, true) AS definition
       FROM pg_trigger t
       JOIN pg_class c ON c.oid = t.tgrelid
@@ -150,7 +150,7 @@ export class PostgreSqlDialect implements SqlDialect {
   }
 
   getTriggerDefinitionSql(name: string): string {
-    validateIdent(name);
+    validateIdent(name, 63);
     return `SELECT pg_get_triggerdef(t.oid, true) AS definition
       FROM pg_trigger t
       JOIN pg_class c ON c.oid = t.tgrelid
@@ -158,26 +158,26 @@ export class PostgreSqlDialect implements SqlDialect {
   }
 
   createIndexSql(name: string, table: string, columns: string[], unique: boolean): string {
-    const cols = columns.map((c) => this.wrap(validateIdent(c))).join(', ');
-    return `CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${this.wrap(validateIdent(name))} ON ${this.wrap(validateIdent(table))} (${cols})`;
+    const cols = columns.map((c) => this.wrap(validateIdent(c, 63))).join(', ');
+    return `CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${this.wrap(validateIdent(name, 63))} ON ${this.wrap(validateIdent(table, 63))} (${cols})`;
   }
 
   dropIndexSql(name: string, _table?: string, _database?: string): string {
-    return `DROP INDEX IF EXISTS ${this.wrap(validateIdent(name))}`;
+    return `DROP INDEX IF EXISTS ${this.wrap(validateIdent(name, 63))}`;
   }
 
   dropTriggerSql(name: string, table: string): string {
-    return `DROP TRIGGER IF EXISTS ${this.wrap(validateIdent(name))} ON ${this.wrap(validateIdent(table))}`;
+    return `DROP TRIGGER IF EXISTS ${this.wrap(validateIdent(name, 63))} ON ${this.wrap(validateIdent(table, 63))}`;
   }
 
   createForeignKeySql(name: string, table: string, columns: string[], refTable: string, refColumns: string[]): string {
-    const cols = columns.map((c) => this.wrap(validateIdent(c))).join(', ');
-    const refCols = refColumns.map((c) => this.wrap(validateIdent(c))).join(', ');
-    return `ALTER TABLE ${this.wrap(validateIdent(table))} ADD CONSTRAINT ${this.wrap(validateIdent(name))} FOREIGN KEY (${cols}) REFERENCES ${this.wrap(validateIdent(refTable))} (${refCols})`;
+    const cols = columns.map((c) => this.wrap(validateIdent(c, 63))).join(', ');
+    const refCols = refColumns.map((c) => this.wrap(validateIdent(c, 63))).join(', ');
+    return `ALTER TABLE ${this.wrap(validateIdent(table, 63))} ADD CONSTRAINT ${this.wrap(validateIdent(name, 63))} FOREIGN KEY (${cols}) REFERENCES ${this.wrap(validateIdent(refTable, 63))} (${refCols})`;
   }
 
   dropForeignKeySql(name: string, table: string): string {
-    return `ALTER TABLE ${this.wrap(validateIdent(table))} DROP CONSTRAINT ${this.wrap(validateIdent(name))}`;
+    return `ALTER TABLE ${this.wrap(validateIdent(table, 63))} DROP CONSTRAINT ${this.wrap(validateIdent(name, 63))}`;
   }
 
   getProcessListSql(): string {
@@ -189,10 +189,18 @@ export class PostgreSqlDialect implements SqlDialect {
   }
 
   getColumnsSql(table: string): string {
-    validateIdent(table);
+    validateIdent(table, 63);
     return `SELECT column_name AS name,
         data_type AS simple_type,
-        data_type AS type,
+        CASE
+          WHEN data_type IN ('character varying', 'character') AND character_maximum_length IS NOT NULL
+            THEN data_type || '(' || character_maximum_length || ')'
+          WHEN data_type = 'numeric' AND numeric_precision IS NOT NULL
+            THEN data_type || '(' || numeric_precision || ',' || COALESCE(numeric_scale, 0) || ')'
+          WHEN data_type = 'USER-DEFINED' AND udt_name IS NOT NULL
+            THEN udt_name
+          ELSE data_type
+        END AS type,
         COALESCE(column_default, '') AS default_value,
         is_nullable AS nullable,
         '' AS comment,
@@ -260,11 +268,11 @@ export class PostgreSqlDialect implements SqlDialect {
   }
 
   buildInsertSql(rows: Record<string, any>[], columns: string[], table: string, database?: string): string {
-    const validTable = validateIdent(table);
+    const validTable = validateIdent(table, 63);
     const qualified = database
-      ? `${this.wrap(validateIdent(database))}.${this.wrap(validTable)}`
+      ? `${this.wrap(validateIdent(database, 63))}.${this.wrap(validTable)}`
       : this.wrap(validTable);
-    const colList = columns.map((c) => this.wrap(validateIdent(c))).join(', ');
+    const colList = columns.map((c) => this.wrap(validateIdent(c, 63))).join(', ');
     let out = '';
     for (const row of rows) {
       const values = columns.map((c) => this.escapeValue(row[c])).join(', ');
@@ -279,6 +287,7 @@ export class PostgreSqlDialect implements SqlDialect {
     if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NULL';
     if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
     if (value instanceof Date) return `'${value.toISOString().replace(/'/g, "''")}'`;
+    if (Buffer.isBuffer(value)) return `'\\x${value.toString('hex')}'`;
     if (typeof value === 'object') {
       const json = JSON.stringify(value).replace(/'/g, "''");
       return `'${json}'`;

@@ -10,8 +10,22 @@ function formatValue(value: unknown): string {
   return String(value);
 }
 
+/** 合法数值（含正负号、小数、科学计数法），用于豁免数列被误加公式前缀。 */
+const NUMERIC = /^[+-]?(?:\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)$/;
+
+/**
+ * CSV 公式注入防护：以 `=` `@` 或制表符/CR 开头的单元格，以及以 `+` `-`
+ * 开头但非数值的内容，在 Excel/WPS 打开时会被当作公式/命令执行。加前导
+ * 单引号使其按文本处理（其他解析器读到的是明文，仅抑制电子表格公式求值）。
+ */
+function guardFormula(text: string): string {
+  if (/^[=@\t\r]/.test(text)) return `'${text}`;
+  if (/^[+-]/.test(text) && !NUMERIC.test(text)) return `'${text}`;
+  return text;
+}
+
 function escapeCell(value: unknown): string {
-  const text = formatValue(value);
+  const text = guardFormula(formatValue(value));
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 

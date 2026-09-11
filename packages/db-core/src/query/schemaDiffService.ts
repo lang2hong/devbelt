@@ -1,6 +1,7 @@
 import type { MetadataService } from './metadataService';
 import type { TableService } from './tableService';
 import type { ColumnMeta } from '../types/meta';
+import { validateIdent } from '../utils/validate';
 
 /** 列差异 */
 export interface ColumnDiff {
@@ -116,35 +117,39 @@ export class SchemaDiffService {
     if (!sourceTableService.supports('schemaSync')) {
       throw new Error('Schema sync SQL is currently supported for MySQL only');
     }
+    const targetDbIdent = validateIdent(targetDb);
     const parts: string[] = [];
     parts.push(`-- Schema sync: ${sourceDb} → ${targetDb}`);
     parts.push('');
 
     for (const d of diffs) {
+      const tableIdent = validateIdent(d.tableName);
       if (d.status === 'added') {
         const ddl = await sourceTableService.getCreateSql(d.tableName, sourceDb);
         parts.push(`-- Add table: ${d.tableName}`);
-        parts.push(`DROP TABLE IF EXISTS \`${targetDb}\`.\`${d.tableName}\`;`);
-        parts.push(ddl.replace(/`(\w+)`/g, `\`${targetDb}\`.\`$1\``) + ';');
+        parts.push(`DROP TABLE IF EXISTS \`${targetDbIdent}\`.\`${tableIdent}\`;`);
+        // 只给表头（CREATE TABLE 后的首个反引号标识符）加库前缀；列名不能被拼接 `db.` 前缀。
+        parts.push(ddl.replace(/^CREATE\s+TABLE\s+`([^`]+)`/i, `CREATE TABLE \`${targetDbIdent}\`.\`$1\``) + ';');
         parts.push('');
       } else if (d.status === 'removed') {
         parts.push(`-- Drop table: ${d.tableName}`);
-        parts.push(`DROP TABLE IF EXISTS \`${targetDb}\`.\`${d.tableName}\`;`);
+        parts.push(`DROP TABLE IF EXISTS \`${targetDbIdent}\`.\`${tableIdent}\`;`);
         parts.push('');
       } else if (d.status === 'changed') {
         const changes: string[] = [];
         for (const c of d.columns) {
+          const colIdent = validateIdent(c.columnName);
           if (c.status === 'added') {
-            changes.push(`  ADD COLUMN \`${c.columnName}\` ${c.sourceType || 'TEXT'}`);
+            changes.push(`  ADD COLUMN \`${colIdent}\` ${c.sourceType || 'TEXT'}`);
           } else if (c.status === 'removed') {
-            changes.push(`  DROP COLUMN \`${c.columnName}\``);
+            changes.push(`  DROP COLUMN \`${colIdent}\``);
           } else if (c.status === 'changed') {
-            changes.push(`  MODIFY COLUMN \`${c.columnName}\` ${c.sourceType || 'TEXT'}`);
+            changes.push(`  MODIFY COLUMN \`${colIdent}\` ${c.sourceType || 'TEXT'}`);
           }
         }
         if (changes.length) {
           parts.push(`-- Alter table: ${d.tableName}`);
-          parts.push(`ALTER TABLE \`${targetDb}\`.\`${d.tableName}\` ` + changes.join(',\n') + ';');
+          parts.push(`ALTER TABLE \`${targetDbIdent}\`.\`${tableIdent}\` ` + changes.join(',\n') + ';');
           parts.push('');
         }
       }

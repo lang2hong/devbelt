@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ConnectionStore, type ConnectionTreeData, type SavedConnection } from '../../src/connection/connectionStore';
+import { ConnectionStore, stripSecrets, type ConnectionTreeData, type SavedConnection } from '../../src/connection/connectionStore';
 
 vi.mock('vscode', () => ({
   window: {
@@ -209,5 +209,19 @@ describe('ConnectionStore change source', () => {
     await store.renameGroup('g-1', 'Renamed');
 
     expect(sources).toEqual(['user', 'user', 'user', 'user']);
+  });
+});
+
+describe('stripSecrets', () => {
+  it('剥离 password/sshPassword/sshPassphrase，保留其余字段与原对象', () => {
+    const c = conn({ password: 'p', sshHost: 'h', sshPassword: 'sp', sshPassphrase: 'pass' });
+    const out = stripSecrets(c);
+    expect(out).not.toHaveProperty('password');
+    expect(out).not.toHaveProperty('sshPassword');
+    expect(out).not.toHaveProperty('sshPassphrase');
+    expect(out.host).toBe('localhost');
+    expect(out.sshHost).toBe('h');
+    expect(c.password).toBe('p');
+    expect(c.sshPassphrase).toBe('pass');
   });
 });

@@ -44,6 +44,7 @@ class SQLite {
       const streamParser = new StreamParser(new ResultSetParser());
 
       const args = [
+        '-bail',
         '-header',
         '-nullvalue',
         'NULL',

@@ -25,6 +25,14 @@ export class SqliteConnection extends IConnection {
       values = undefined;
     }
     const event = new EventEmitter();
+    // SQLite CLI 驱动没有参数化绑定；传入 values 只会被静默丢弃，掩盖注入/转义缺陷。
+    // 这里 fail-closed 显式报错，要求调用方用方言转义后内插（buildInsertSql/escapeValue）。
+    if (values !== undefined) {
+      const err = new Error('SQLite driver does not support parameterized queries; escape values inline before calling query()');
+      if (callback) { callback(err); return; }
+      if (event.listenerCount('error') > 0) event.emit('error', err.message);
+      return event;
+    }
     // DML（INSERT/UPDATE/DELETE/REPLACE）追加 SELECT changes()，借同一 CLI 进程
     // 拿到受影响行数：SQLite CLI 的 `.mode tcl` 不回显 changes，导致这些语句的
     // affectedRows 恒缺失、结果面板只会显示「0 行受影响」。DDL/SELECT 不追加。

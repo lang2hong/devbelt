@@ -109,7 +109,21 @@ export function toFileBytes(content: string | Buffer): Uint8Array {
 
 /** 导出文件名（两端共用，避免结果导出与表导出命名不一致）。 */
 export function exportFileName(baseName: string, format: TransferFormat): string {
-  return `${baseName}.${format}`;
+  return `${sanitizeFileName(baseName)}.${format}`;
+}
+
+/**
+ * 清洗表名，用作磁盘文件名。
+ *
+ * 表名可能包含路径分隔符或 `..`：未经清洗直接拼进 `Uri.file / joinPath`
+ * 会把内容写出用户选中的目录（路径穿越）。这里阻断 `/`、`\`、连续句点
+ * 与 Windows 保留字符，避免文件名越界。
+ */
+export function sanitizeFileName(name: string): string {
+  const cleaned = name
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+    .replace(/[.]{2,}/g, '_');
+  return cleaned || 'table';
 }
 
 /** 保存对话框的文件类型过滤器（两端共用）。 */

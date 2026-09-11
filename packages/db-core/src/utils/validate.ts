@@ -13,14 +13,15 @@
  * 验证通过后返回原名；失败抛出 Error。最大长度 64（MySQL 限制）。
  */
 const IDENT_RE = /^[\p{L}_$][\p{L}\p{N}_$\-]*$/u;
+/** 默认最大长度 64（MySQL 限制）；PostgreSQL 上限为 63（NAMEDATALEN-1）。 */
 const MAX_LEN = 64;
 
-export function validateIdent(name: string): string {
+export function validateIdent(name: string, maxLen: number = MAX_LEN): string {
   if (!name || !IDENT_RE.test(name) || name.includes('--')) {
     throw new Error(`Invalid SQL identifier: "${name}"`);
   }
-  if (name.length > MAX_LEN) {
-    throw new Error(`SQL identifier too long (max ${MAX_LEN}): "${name.slice(0, 20)}..."`);
+  if (name.length > maxLen) {
+    throw new Error(`SQL identifier too long (max ${maxLen}): "${name.slice(0, 20)}..."`);
   }
   return name;
 }

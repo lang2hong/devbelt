@@ -92,6 +92,13 @@ describe('方言值转义（escapeValue）', () => {
     }
   });
 
+  it('Buffer 以 hex 字面量输出，而非 JSON.stringify 损坏', () => {
+    const buf = Buffer.from([0x00, 0x01, 0xde, 0xad, 0xbe, 0xef]);
+    expect(mysql.escapeValue(buf)).toBe("X'0001deadbeef'");
+    expect(sqlite.escapeValue(buf)).toBe("X'0001deadbeef'");
+    expect(pg.escapeValue(buf)).toBe("'\\x0001deadbeef'");
+  });
+
   it('buildInsertSql 复用同一转义规则', () => {
     const rows = [{ name: "O'Brien\\x" }];
     expect(pg.buildInsertSql(rows, ['name'], 't')).toContain("'O''Brien\\x'");

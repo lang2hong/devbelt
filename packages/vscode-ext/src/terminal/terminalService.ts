@@ -31,16 +31,16 @@ export class TerminalService {
     terminal.sendText(cmd.cmd);
   }
 
-  private static buildCommand(conn: SavedConnection, database?: string): { cmd: string; env: Record<string, string> } | undefined {
+  static buildCommand(conn: SavedConnection, database?: string): { cmd: string; env: Record<string, string> } | undefined {
     switch (conn.dbType) {
       case DatabaseType.MYSQL:
         return {
-          cmd: `mysql -u ${shellQuote(conn.user)} -h ${shellQuote(conn.host)} -P ${conn.port} ${database ? shellQuote(database) : ''}`,
+          cmd: `mysql -u ${shellQuote(conn.user)} -h ${shellQuote(conn.host)} -P ${shellQuote(String(conn.port ?? ''))} ${database ? shellQuote(database) : ''}`,
           env: conn.password ? { MYSQL_PWD: conn.password } : {},
         };
       case DatabaseType.PG:
         return {
-          cmd: `psql -U ${shellQuote(conn.user)} -h ${shellQuote(conn.host)} -p ${conn.port} ${database ? shellQuote(database) : ''}`,
+          cmd: `psql -U ${shellQuote(conn.user)} -h ${shellQuote(conn.host)} -p ${shellQuote(String(conn.port ?? ''))} ${database ? shellQuote(database) : ''}`,
           env: conn.password ? { PGPASSWORD: conn.password } : {},
         };
       case DatabaseType.SQLITE:

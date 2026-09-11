@@ -84,10 +84,12 @@ export class DataDiffService {
     const targetMap = new Map<string, Record<string, unknown>>();
 
     const wrap = (id: string) => sourceQuery.dialect.wrap(id);
+    const targetWrap = (id: string) => targetQuery.dialect.wrap(id);
     const qualifiedSource = sourceDb ? `${wrap(sourceDb)}.${wrap(table)}` : wrap(table);
-    const qualifiedTarget = targetDb ? `${wrap(targetDb)}.${wrap(table)}` : wrap(table);
+    const qualifiedTarget = targetDb ? `${targetWrap(targetDb)}.${targetWrap(table)}` : targetWrap(table);
 
     const colList = columnNames.map((c) => wrap(c)).join(', ');
+    const targetColList = columnNames.map((c) => targetWrap(c)).join(', ');
 
     for (let offset = 0; ; offset += this.BATCH_SIZE) {
       const sql = sourceQuery.dialect.getPagedSql(
@@ -104,7 +106,7 @@ export class DataDiffService {
 
     for (let offset = 0; ; offset += this.BATCH_SIZE) {
       const sql = targetQuery.dialect.getPagedSql(
-        `SELECT ${colList} FROM ${qualifiedTarget} ORDER BY ${pkColumns.map(wrap).join(', ')}`,
+        `SELECT ${targetColList} FROM ${qualifiedTarget} ORDER BY ${pkColumns.map(targetWrap).join(', ')}`,
         offset, this.BATCH_SIZE,
       );
       const result = await targetQuery.query(sql);
@@ -144,17 +146,18 @@ export class DataDiffService {
     return true;
   }
 
-  static generateSyncSql(diffs: DataDiffResult, targetDb: string, sourceQuery: QueryService): string {
+  static generateSyncSql(diffs: DataDiffResult, targetDb: string, targetQuery: QueryService): string {
     const parts: string[] = [];
     parts.push(`-- Data sync: ${diffs.sourceDb} → ${diffs.targetDb}`);
     parts.push('');
 
     for (const td of diffs.diffs) {
       if (!td.rows.length) continue;
-      const wrap = (id: string) => sourceQuery.dialect.wrap(id);
-      // 值转义走方言：此处曾用文件级私有 escapeValue，只处理单引号而漏掉反斜杠，
-      // MySQL 下 `C:\tmp` 中的 `\t` 会被解释成制表符，同步过去的数据与源库不一致。
-      const esc = (v: unknown) => sourceQuery.dialect.escapeValue(v);
+      const wrap = (id: string) => targetQuery.dialect.wrap(id);
+      // 值/标识符转义必须走**目标**方言：同步产物写进目标库，字符串字面量与
+      // 标识符引用规则以目标为准。此处曾用源方言（MySQL→PG 时往 PG 发反引号
+      // + 反斜杠倍增，目标库拒绝或数据损坏）。
+      const esc = (v: unknown) => targetQuery.dialect.escapeValue(v);
       const qualifiedTarget = targetDb ? `${wrap(targetDb)}.${wrap(td.tableName)}` : wrap(td.tableName);
       const colList = td.columnNames.map(wrap).join(', ');
 
