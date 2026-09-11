@@ -74,6 +74,14 @@ export class MysqlOrderRepo implements IOrderRepo {
     return rows[0] ? mapOrder(rows[0]) : undefined;
   }
 
+  async expirePending(now: Date, limit: number): Promise<number> {
+    const [result] = await this.db().query<any>(
+      `UPDATE orders SET status = 'expired' WHERE status = 'pending' AND expires_time < ? LIMIT ?`,
+      [now, limit],
+    );
+    return result.affectedRows;
+  }
+
   private async findById(id: number): Promise<Order | undefined> {
     const [rows] = await this.db().query<any[]>('SELECT * FROM orders WHERE id = ?', [id]);
     return rows[0] ? mapOrder(rows[0]) : undefined;

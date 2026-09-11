@@ -24,11 +24,31 @@ import {
 } from '../domain/errors.js';
 import { AuditWriter } from './auditWriter.js';
 import { auditDto, toCsv } from './auditSerialize.js';
+import type { RateLimitService } from './rateLimitService.js';
 
 /** 平台审计导出单次上限（§6）。 */
 const MAX_EXPORT_ROWS = 10_000;
 /** 审计查询最大时间跨度（§6）。 */
 const MAX_AUDIT_SPAN_MS = 31 * 24 * 3600 * 1000;
+/** 组织席位上限：与 migrations/006 SMALLINT UNSIGNED 列一致（上限 65535）。 */
+export const MAX_SEAT_LIMIT = 65535;
+
+/**
+ * 校验订阅到期时间与周期起点的关系（服务层最终边界）。
+ *
+ * 拒绝「已过期」与「早于周期起点」的到期时间：否则 status='active' 的订阅会
+ * 带一个已失效或倒置的权益窗口，权益展示与业务语义脱节。`null`（永久/未设
+ * 到期）放行。
+ */
+function assertValidPeriodEnd(periodStartTime: Date, periodEndTime: Date | null): void {
+  if (periodEndTime === null) return;
+  if (periodEndTime.getTime() <= Date.now()) {
+    throw new ValidationError('periodEndTime must be in the future');
+  }
+  if (periodEndTime.getTime() < periodStartTime.getTime()) {
+    throw new ValidationError('periodEndTime must not be earlier than periodStartTime');
+  }
+}
 
 export interface AuditExport {
   content: string;
@@ -47,6 +67,8 @@ export interface ConsoleAdminDeps {
   membershipRepo: IMembershipRepo;
   auditRepo: IAuditRepo;
   auditWriter: AuditWriter;
+  /** 可选：用于受限读审计按 5min 窗口聚合（防高频读刷爆审计表）。 */
+  rateLimiter?: RateLimitService;
 }
 
 export interface Page<T> {
@@ -70,6 +92,7 @@ export class ConsoleAdminService {
   private readonly membershipRepo: IMembershipRepo;
   private readonly auditRepo: IAuditRepo;
   private readonly auditWriter: AuditWriter;
+  private readonly rateLimiter?: RateLimitService;
 
   constructor(deps: ConsoleAdminDeps) {
     this.userRepo = deps.userRepo;
@@ -82,9 +105,28 @@ export class ConsoleAdminService {
     this.membershipRepo = deps.membershipRepo;
     this.auditRepo = deps.auditRepo;
     this.auditWriter = deps.auditWriter;
+    this.rateLimiter = deps.rateLimiter;
   }
 
   // ── 用户 ──
+
+  /**
+   * 受限读审计按 5min 窗口聚合：同一管理员、同一读类型在窗口内只落一条审计，
+   * 防止高频受限读刷爆审计表。未注入 rateLimiter 时退化为逐请求写（测试装配）。
+   */
+  private async auditRestrictedRead(
+    actorUserId: number,
+    eventType: 'admin.users.read' | 'admin.organizations.read' | 'admin.audit.read',
+  ): Promise<void> {
+    if (!this.rateLimiter) {
+      this.auditWriter.write({ eventType, result: 'success', actorUserId, actorRole: 'platform_admin' });
+      return;
+    }
+    const count = await this.rateLimiter.increment(`admin-read-audit:${actorUserId}:${eventType}`, 300);
+    if (count === 1) {
+      this.auditWriter.write({ eventType, result: 'success', actorUserId, actorRole: 'platform_admin' });
+    }
+  }
 
   async listUsers(actorUserId: number, input: {
     emailExact?: string;
@@ -99,7 +141,7 @@ export class ConsoleAdminService {
     const rows = await this.userRepo.listUsers({ ...input, limit: input.limit + 1 });
     const hasMore = rows.length > input.limit;
     const items = hasMore ? rows.slice(0, input.limit) : rows;
-    this.auditWriter.write({ eventType: 'admin.users.read', result: 'success', actorUserId, actorRole: 'platform_admin' });
+    await this.auditRestrictedRead(actorUserId, 'admin.users.read');
     return { items, nextId: hasMore ? items[items.length - 1].userId : null };
   }
 
@@ -180,6 +222,7 @@ export class ConsoleAdminService {
     const sub = await this.personalSubscriptionRepo.findByUserIdForUpdate(tx, targetUserId);
     if (!sub) throw new EntityNotFoundError('subscription', targetUserId);
     if (params.expectedVersion !== sub.version) throw new SubscriptionVersionConflictError(sub.version);
+    assertValidPeriodEnd(sub.periodStartTime, params.periodEndTime);
 
     const ok = await this.personalSubscriptionRepo.update(tx, {
       id: sub.id,
@@ -215,7 +258,7 @@ export class ConsoleAdminService {
     const rows = await this.organizationRepo.listForAdmin({ ...input, limit: input.limit + 1 });
     const hasMore = rows.length > input.limit;
     const items = hasMore ? rows.slice(0, input.limit) : rows;
-    this.auditWriter.write({ eventType: 'admin.organizations.read', result: 'success', actorUserId, actorRole: 'platform_admin' });
+    await this.auditRestrictedRead(actorUserId, 'admin.organizations.read');
     return { items, nextId: hasMore ? items[items.length - 1].organizationId : null };
   }
 
@@ -237,6 +280,8 @@ export class ConsoleAdminService {
     const sub = await this.organizationSubscriptionRepo.findByOrganizationIdForUpdate(tx, organizationId);
     if (!sub) throw new EntityNotFoundError('organization subscription', organizationId);
     if (params.expectedVersion !== sub.version) throw new SubscriptionVersionConflictError(sub.version);
+    if (params.seatLimit > MAX_SEAT_LIMIT) throw new ValidationError('seatLimit exceeds maximum 65535');
+    assertValidPeriodEnd(sub.periodStartTime, params.periodEndTime);
 
     const activeMembers = await this.membershipRepo.countActive(tx, organizationId);
     const validInvited = await this.membershipRepo.countValidInvited(tx, organizationId, new Date());
@@ -288,7 +333,7 @@ export class ConsoleAdminService {
     const rows = await this.auditRepo.search({ ...filter, limit: input.limit + 1 });
     const hasMore = rows.length > input.limit;
     const items = hasMore ? rows.slice(0, input.limit) : rows;
-    this.auditWriter.write({ eventType: 'admin.audit.read', result: 'success', actorUserId, actorRole: 'platform_admin' });
+    await this.auditRestrictedRead(actorUserId, 'admin.audit.read');
     return { items, nextId: hasMore ? items[items.length - 1].id : null };
   }
 

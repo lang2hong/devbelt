@@ -25,7 +25,8 @@ function makeDeps() {
   const syncResetHandoffRepo = new FakeSyncResetHandoffRepo();
   const mailFlowRepo = new FakeMailFlowRepo();
   const idempotencyReceiptRepo = new FakeIdempotencyReceiptRepo();
-  return { refreshTokenRepo, emailVerificationTokenRepo, syncMutationRepo, syncResetTokenRepo, syncResetHandoffRepo, mailFlowRepo, idempotencyReceiptRepo, exec };
+  const orderRepo = { expirePending: async () => 0 } as any;
+  return { refreshTokenRepo, emailVerificationTokenRepo, syncMutationRepo, syncResetTokenRepo, syncResetHandoffRepo, mailFlowRepo, idempotencyReceiptRepo, orderRepo, exec };
 }
 
 describe('retention cleanup', () => {
@@ -273,5 +274,19 @@ describe('retention cleanup', () => {
     expect(deps.syncResetHandoffRepo.store.size).toBe(1);
     const remaining = [...deps.syncResetHandoffRepo.store.values()][0];
     expect(remaining.status).toBe('expired');
+  });
+
+  it('sweeps overdue pending orders to expired', async () => {
+    const deps = makeDeps();
+    let calls = 0;
+    let capturedNow: Date | undefined;
+    deps.orderRepo = {
+      expirePending: async (now: Date) => { calls += 1; capturedNow = now; return 3; },
+    };
+    const c = startRetentionCleanup(deps, {});
+    await c.runOnce();
+    c.stop();
+    expect(calls).toBe(1);
+    expect(capturedNow).toBeInstanceOf(Date);
   });
 });

@@ -1,6 +1,7 @@
 import { createDecipheriv, createSign, createVerify, randomBytes } from 'crypto';
 import type { PaymentGateway, PrepayParams, PaymentCallback } from './paymentChannel.js';
 import type { WechatCredentials } from './paymentCredentials.js';
+import { PaymentCallbackInvalidError } from '../domain/errors.js';
 
 /**
  * 微信支付（API v3 Native）适配器（P4 切片 4B）。
@@ -88,7 +89,7 @@ export class WechatPayGateway implements PaymentGateway {
       resource?: { ciphertext?: string; nonce?: string; associated_data?: string };
     };
     const r = envelope.resource;
-    if (!r || !r.ciphertext || !r.nonce) throw new Error('wechat callback missing resource');
+    if (!r || !r.ciphertext || !r.nonce) throw new PaymentCallbackInvalidError('wechat callback missing resource');
     const plain = this.decryptResource(r.ciphertext, r.nonce, r.associated_data ?? '');
     const data = JSON.parse(plain) as {
       appid?: string;
@@ -101,9 +102,9 @@ export class WechatPayGateway implements PaymentGateway {
     };
     // 身份绑定：解密后的 appid/mchid 必须与配置一致，否则视为解析失败（P1）。
     if (data.appid !== this.creds.appId || data.mchid !== this.creds.mchId) {
-      throw new Error('wechat callback identity mismatch');
+      throw new PaymentCallbackInvalidError('wechat callback identity mismatch');
     }
-    if (!data.out_trade_no || !data.transaction_id) throw new Error('wechat callback missing trade fields');
+    if (!data.out_trade_no || !data.transaction_id) throw new PaymentCallbackInvalidError('wechat callback missing trade fields');
     const summary: Record<string, string> = {
       appid: data.appid,
       mchid: data.mchid,

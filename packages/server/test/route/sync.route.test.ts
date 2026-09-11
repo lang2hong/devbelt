@@ -124,6 +124,22 @@ describe('sync routes smoke', () => {
     await t.close();
   });
 
+  it('rate-limits sync init writes per user', async () => {
+    const t = await buildTestApp({ rateLimit: true });
+    const { token } = await makeUser(t, 'rl-sync@b.com');
+    let last = 0;
+    for (let i = 0; i < 11; i += 1) {
+      const res = await t.app.inject({
+        method: 'PUT', url: '/api/sync/init', headers: t.auth(token),
+        payload: { newState: newStateBody(i) },
+      });
+      last = res.statusCode;
+      if (last === 429) break;
+    }
+    expect(last).toBe(429);
+    await t.close();
+  });
+
   it('records endpoint requires authentication', async () => {
     const t = await buildTestApp();
     const anon = await t.app.inject({ method: 'GET', url: '/api/sync/records' });

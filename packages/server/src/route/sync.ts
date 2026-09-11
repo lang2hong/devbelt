@@ -10,6 +10,7 @@ import {
 } from '../service/syncStateService.js';
 import { SyncRecordService } from '../service/syncRecordService.js';
 import { SyncResetService } from '../service/syncResetService.js';
+import type { RateLimitService } from '../service/rateLimitService.js';
 import type { SmpKdf, RecoveryKdf, SyncEnvelope } from '../domain/entities.js';
 import {
   syncInitBody,
@@ -30,7 +31,22 @@ export interface SyncRouteOptions {
   syncState: SyncStateService;
   syncRecord: SyncRecordService;
   syncReset: SyncResetService;
+  rateLimiter: RateLimitService;
 }
+
+/**
+ * 个人 E2EE 写端点按风险分桶限流（§8）。有效 access token 可持续消耗签名验证、
+ * 数据库事务与存储配额，故写路径必须有按用户限流；读路径（state/records）仅返回
+ * 少量元数据，不设写桶。reset-challenges 已在服务层按 user+IP 每小时 3 次限流。
+ */
+const SYNC_INIT_WINDOW_S = 3600;
+const SYNC_INIT_MAX = 10;
+const SYNC_KEYS_WINDOW_S = 3600;
+const SYNC_KEYS_MAX = 20;
+const SYNC_RECORD_WINDOW_S = 60;
+const SYNC_RECORD_MAX = 600;
+const SYNC_RESET_WINDOW_S = 3600;
+const SYNC_RESET_MAX = 10;
 
 /** 协议/cipher/format 值域由服务层判定（§8：不在支持集 → 400 SYNC_PROTOCOL_UNSUPPORTED）。 */
 function assertProtocolV1(protocolVersion: unknown): void {
@@ -95,6 +111,11 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
     aud: 'extension',
     scope: ['sync'],
     routes: async (child) => {
+      const initLimit = (userId: number) => opts.rateLimiter.hit(`sync:init:user:${userId}`, SYNC_INIT_WINDOW_S, SYNC_INIT_MAX);
+      const keysLimit = (userId: number) => opts.rateLimiter.hit(`sync:keys:user:${userId}`, SYNC_KEYS_WINDOW_S, SYNC_KEYS_MAX);
+      const recordLimit = (userId: number) => opts.rateLimiter.hit(`sync:record:user:${userId}`, SYNC_RECORD_WINDOW_S, SYNC_RECORD_MAX);
+      const resetLimit = (userId: number) => opts.rateLimiter.hit(`sync:reset:user:${userId}`, SYNC_RESET_WINDOW_S, SYNC_RESET_MAX);
+
       child.get('/api/sync/state', async (req, reply) => {
         const userId = (req as any).authUserId as number;
         try {
@@ -105,6 +126,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
       child.put('/api/sync/init', { schema: { body: syncInitBody } }, async (req, reply) => {
         const userId = (req as any).authUserId as number;
         try {
+          await initLimit(userId);
           await opts.syncState.init(userId, decodeNewState((req.body as any).newState));
           reply.code(201).send();
         } catch (e) { sendError(reply, e); }
@@ -114,6 +136,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         const userId = (req as any).authUserId as number;
         const body = req.body as any;
         try {
+          await keysLimit(userId);
           assertProtocolV1(body.protocolVersion);
           reply.send(await opts.syncState.changeKey(userId, {
             keyEpoch: body.keyEpoch,
@@ -131,6 +154,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         const userId = (req as any).authUserId as number;
         const body = req.body as any;
         try {
+          await keysLimit(userId);
           assertProtocolV1(body.protocolVersion);
           reply.send(await opts.syncState.recover(userId, {
             keyEpoch: body.keyEpoch,
@@ -151,6 +175,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         const userId = (req as any).authUserId as number;
         const body = req.body as any;
         try {
+          await keysLimit(userId);
           assertProtocolV1(body.protocolVersion);
           reply.send(await opts.syncState.destroy(userId, {
             keyEpoch: body.keyEpoch,
@@ -182,6 +207,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
           return reply.code(400).send({ message: 'validation failed', code: 'VALIDATION_FAILED' });
         }
         try {
+          await recordLimit(userId);
           assertProtocolV1(body.protocolVersion);
           if (body.cipherSuite !== 'AES-256-GCM' || body.formatVersion !== 1) throw new SyncProtocolUnsupportedError();
           reply.send(await opts.syncRecord.putRecord(userId, {
@@ -208,6 +234,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
           return reply.code(400).send({ message: 'validation failed', code: 'VALIDATION_FAILED' });
         }
         try {
+          await recordLimit(userId);
           assertProtocolV1(body.protocolVersion);
           reply.send(await opts.syncRecord.deleteRecord(userId, {
             keyEpoch: body.keyEpoch,
@@ -232,6 +259,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         const userId = (req as any).authUserId as number;
         const body = req.body as any;
         try {
+          await resetLimit(userId);
           // request_digest 覆盖客户端提交的 newState（JCS），completed 回放比对用。
           reply.send(await opts.syncReset.resetAfterLossWithHandoff(userId, {
             handoffTicket: decodeB64Url(body.handoffTicket, 32, 'handoffTicket'),

@@ -7,6 +7,7 @@ import type {
   ISyncResetHandoffRepo,
   IMailFlowRepo,
   IIdempotencyReceiptRepo,
+  IOrderRepo,
 } from '../repository/interfaces.js';
 import type { AuditWriter } from './auditWriter.js';
 
@@ -53,6 +54,7 @@ export interface RetentionCleanupDeps {
   syncResetHandoffRepo: ISyncResetHandoffRepo;
   mailFlowRepo: IMailFlowRepo;
   idempotencyReceiptRepo: IIdempotencyReceiptRepo;
+  orderRepo: IOrderRepo;
   /** 回执删除的系统审计摘要（§6.1「删除本身写系统审计摘要」）。可选；写失败不阻断清理。 */
   auditWriter?: AuditWriter;
   /** 无状态仓储（sync 两张表 + mail_flows）需要显式连接来源。 */
@@ -111,6 +113,8 @@ export function startRetentionCleanup(
           return deleted;
         },
       ],
+      // 过期 pending 订单 → expired（状态推进，非删除；未支付订单超时收口）。
+      ['orders', () => deps.orderRepo.expirePending(nowDate, batchSize)],
     ];
 
     for (const [table, run] of tasks) {

@@ -377,7 +377,7 @@ const adminOrganizationSubscriptionBody = {
   additionalProperties: false,
   properties: {
     planCode: { type: 'string', minLength: 1, maxLength: 32 },
-    seatLimit: { type: 'integer', minimum: 1, maximum: 100000 },
+    seatLimit: { type: 'integer', minimum: 1, maximum: 65535 },
     periodEndTime: { type: 'string', format: 'date-time' },
     reason: { type: 'string', minLength: 1, maxLength: 500 },
     expectedVersion: { type: 'integer', minimum: 0 },

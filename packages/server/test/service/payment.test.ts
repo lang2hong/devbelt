@@ -57,6 +57,10 @@ class FakeOrderRepo implements IOrderRepo {
   async findPendingByUserAndPlan(userId: number, planCode: string, channel: Order['channel']): Promise<Order | undefined> {
     return [...this.store.values()].find((o) => o.userId === userId && o.planCode === planCode && o.channel === channel && o.status === 'pending');
   }
+
+  async expirePending(_now: Date, _limit: number): Promise<number> {
+    return 0;
+  }
 }
 
 class FakePaymentRepo implements IPaymentRepo {
@@ -99,7 +103,7 @@ class FakeSubsRepo implements IPersonalSubscriptionRepo {
   }
 }
 
-function makeService() {
+function makeService(nonceRepo?: { insertIfAbsent(channel: string, nonceHash: string, expiresTime: Date): Promise<boolean> }) {
   const orderRepo = new FakeOrderRepo();
   const paymentRepo = new FakePaymentRepo();
   const planRepo = new FakePlanRepo();
@@ -113,6 +117,7 @@ function makeService() {
     auditWriter: audit,
     runner: async (fn) => fn({} as Queryable),
     gatewayFor: (channel) => new MemoryPaymentGateway(channel),
+    nonceRepo,
   });
   return { svc, orderRepo, paymentRepo, subsRepo };
 }
@@ -145,6 +150,39 @@ describe('OrderService.createOrder', () => {
     const second = await svc.createOrder(1, 'pro', 'wechat');
     expect(second.orderNo).not.toBe(first.orderNo);
     expect([...orderRepo.store.values()].filter((x) => x.userId === 1 && x.status === 'pending')).toHaveLength(2);
+  });
+
+  it('re-pre-pays the same out_trade_no for a reused pending order (channel idempotency stub)', async () => {
+    const orderRepo = new FakeOrderRepo();
+    const paymentRepo = new FakePaymentRepo();
+    const planRepo = new FakePlanRepo();
+    const subsRepo = new FakeSubsRepo();
+    const prepayOrderNos: string[] = [];
+    const base = new MemoryPaymentGateway('wechat');
+    const capturing: PaymentGateway = {
+      channel: 'wechat',
+      async createPayment(input: { orderNo: string }) {
+        prepayOrderNos.push(input.orderNo);
+        return {};
+      },
+      verifyCallback: base.verifyCallback.bind(base),
+      parseCallback: base.parseCallback.bind(base),
+    };
+    const svc = new OrderService({
+      orderRepo,
+      paymentRepo,
+      personalPlanRepo: planRepo,
+      personalSubscriptionRepo: subsRepo,
+      auditWriter: new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as any),
+      runner: async (fn) => fn({} as Queryable),
+      gatewayFor: () => capturing,
+    });
+
+    const first = await svc.createOrder(1, 'pro', 'wechat');
+    const second = await svc.createOrder(1, 'pro', 'wechat');
+    expect(second.orderNo).toBe(first.orderNo);
+    // 复用 pending 时渠道 prepay 仍用同一 out_trade_no（依赖渠道幂等，而非新建号）。
+    expect(prepayOrderNos).toEqual([first.orderNo, first.orderNo]);
   });
 });
 
@@ -250,6 +288,27 @@ describe('OrderService.handleCallback', () => {
     await svc.handleCallback('wechat', cb.raw, cb.headers);
     const outcome = await svc.handleCallback('wechat', cb.raw, cb.headers);
     expect(outcome.kind).toBe('duplicate');
+  });
+
+  it('rejects a replayed wechat callback by persisted nonce (before business)', async () => {
+    const seen = new Set<string>();
+    const nonceRepo = {
+      insertIfAbsent: async (_channel: string, nonceHash: string) => {
+        if (seen.has(nonceHash)) return false;
+        seen.add(nonceHash);
+        return true;
+      },
+    };
+    const { svc, subsRepo } = makeService(nonceRepo);
+    await subsRepo.create({ userId: 1, planId: 1, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null });
+    const { orderNo } = await svc.createOrder(1, 'pro', 'wechat');
+    const cb = SUCCESS_CALLBACK(orderNo, 'wx-nonce', 9900);
+    cb.headers['wechatpay-nonce'] = 'nonce-abc';
+
+    const first = await svc.handleCallback('wechat', cb.raw, cb.headers);
+    expect(first.kind).toBe('fulfilled');
+    const replay = await svc.handleCallback('wechat', cb.raw, cb.headers);
+    expect(replay.kind).toBe('duplicate');
   });
 
   it('rejected for an unknown orderNo', async () => {

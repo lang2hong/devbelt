@@ -1,6 +1,7 @@
 import { createSign, createVerify } from 'crypto';
 import type { PaymentGateway, PrepayParams, PaymentCallback } from './paymentChannel.js';
 import type { AlipayCredentials } from './paymentCredentials.js';
+import { PaymentCallbackInvalidError } from '../domain/errors.js';
 
 /**
  * 支付宝（网页 H5）适配器（P4 切片 4B）。
@@ -174,10 +175,10 @@ export class AlipayGateway implements PaymentGateway {
   parseCallback(rawBody: Buffer): PaymentCallback {
     const form = this.parseForm(rawBody.toString('utf8'));
     // 身份绑定：回调的 app_id 必须与配置一致，否则视为解析失败（P1）。
-    if (form.app_id !== this.creds.appId) throw new Error('alipay callback identity mismatch');
+    if (form.app_id !== this.creds.appId) throw new PaymentCallbackInvalidError('alipay callback identity mismatch');
     const orderNo = form.out_trade_no;
     const tradeNo = form.trade_no;
-    if (!orderNo || !tradeNo) throw new Error('alipay callback missing trade fields');
+    if (!orderNo || !tradeNo) throw new PaymentCallbackInvalidError('alipay callback missing trade fields');
     return {
       orderNo,
       channelTradeNo: tradeNo,

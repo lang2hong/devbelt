@@ -223,6 +223,60 @@ describe('console admin routes', () => {
     await b.app.close();
   });
 
+  it('rejects a past periodEndTime on user subscription', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    const target = await b.userRepo.create('sub2@b.com', 'hash');
+    await b.personalSubscriptionRepo.create({ userId: target.id, planId: 1, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null });
+
+    const res = await b.app.inject({
+      method: 'PATCH',
+      url: `/api/console/admin/users/${target.id}/subscription`,
+      headers: await b.writeHeaders(admin.id),
+      payload: { planCode: 'free', reason: 'extend', expectedVersion: 0, periodEndTime: new Date(Date.now() - 3600 * 1000).toISOString() },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('VALIDATION_FAILED');
+    await b.app.close();
+  });
+
+  it('rejects a periodEndTime earlier than periodStartTime', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    const target = await b.userRepo.create('sub3@b.com', 'hash');
+    const start = new Date(Date.now() + 48 * 3600 * 1000);
+    await b.personalSubscriptionRepo.create({ userId: target.id, planId: 1, status: 'active', entitlementSnapshot: {}, periodStartTime: start, periodEndTime: null });
+
+    const res = await b.app.inject({
+      method: 'PATCH',
+      url: `/api/console/admin/users/${target.id}/subscription`,
+      headers: await b.writeHeaders(admin.id),
+      payload: { planCode: 'free', reason: 'x', expectedVersion: 0, periodEndTime: new Date(start.getTime() - 24 * 3600 * 1000).toISOString() },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('VALIDATION_FAILED');
+    await b.app.close();
+  });
+
+  it('rejects seatLimit above SMALLINT UNSIGNED max (65536)', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    const org = await b.organizationRepo.create({} as Queryable, { name: 'Acme2' });
+    await b.organizationSubscriptionRepo.create({} as Queryable, {
+      organizationId: org.id, planId: 1, seatLimit: 10, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null,
+    });
+
+    const res = await b.app.inject({
+      method: 'PATCH',
+      url: `/api/console/admin/organizations/${org.id}/subscription`,
+      headers: await b.writeHeaders(admin.id),
+      payload: { planCode: 'organization_free', seatLimit: 65536, reason: 'grow', expectedVersion: 0 },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('VALIDATION_FAILED');
+    await b.app.close();
+  });
+
   it('audit export above cap is rejected', async () => {
     const b = await build();
     const admin = await b.makeAdmin();

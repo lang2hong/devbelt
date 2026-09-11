@@ -1,4 +1,4 @@
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import {
   EntityNotFoundError,
   OrderInvalidStateError,
@@ -11,6 +11,7 @@ import type { PaymentChannel } from '../domain/enums.js';
 import type {
   IOrderRepo,
   IPaymentRepo,
+  IPaymentCallbackNonceRepo,
   IPersonalPlanRepo,
   IPersonalSubscriptionRepo,
 } from '../repository/interfaces.js';
@@ -47,6 +48,8 @@ export interface OrderServiceDeps {
   auditWriter: AuditWriter;
   runner: TxRunner;
   gatewayFor: (channel: PaymentChannel) => PaymentGateway;
+  /** 可选：回调 nonce 持久化去重（重放防护）。 */
+  nonceRepo?: IPaymentCallbackNonceRepo;
 }
 
 /**
@@ -64,6 +67,7 @@ export class OrderService {
   private readonly auditWriter: AuditWriter;
   private readonly runner: TxRunner;
   private readonly gatewayFor: (channel: PaymentChannel) => PaymentGateway;
+  private readonly nonceRepo?: IPaymentCallbackNonceRepo;
 
   constructor(deps: OrderServiceDeps) {
     this.orderRepo = deps.orderRepo;
@@ -73,6 +77,7 @@ export class OrderService {
     this.auditWriter = deps.auditWriter;
     this.runner = deps.runner;
     this.gatewayFor = deps.gatewayFor;
+    this.nonceRepo = deps.nonceRepo;
   }
 
   /** 下单：优先复用同 (user, plan, channel) 未过期 pending 订单，否则建新订单并预下单。 */
@@ -126,6 +131,16 @@ export class OrderService {
     const gateway = this.gatewayFor(channel);
     if (!gateway.verifyCallback(rawBody, headers)) {
       throw new PaymentSignatureInvalidError();
+    }
+    // 微信回调重放防护：nonce 持久化去重（freshness 窗口内同一回调可被重放）。首次记录，
+    // 重复即重放，直接判 duplicate 终止，不落业务流水（channel_trade_no 唯一键只防重复处理）。
+    if (channel === 'wechat' && this.nonceRepo) {
+      const nonce = headers['wechatpay-nonce'];
+      if (typeof nonce === 'string' && nonce) {
+        const nonceHash = createHash('sha256').update(nonce).digest('hex');
+        const fresh = await this.nonceRepo.insertIfAbsent(channel, nonceHash, new Date(Date.now() + 30 * 60 * 1000));
+        if (!fresh) return { kind: 'duplicate' };
+      }
     }
     const parsed = gateway.parseCallback(rawBody);
     // 敏感信息边界：只落渠道适配器产出的白名单脱敏摘要，绝不落原始回调 body/加密信封/完整表单。

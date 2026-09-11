@@ -143,6 +143,7 @@ export function errorStatus(code: string): number {
       return 409;
     case 'PAYMENT_AMOUNT_MISMATCH':
     case 'PAYMENT_SIGNATURE_INVALID':
+    case 'PAYMENT_CALLBACK_INVALID':
     case 'UNKNOWN_PLAN':
     case 'UNKNOWN_CHANNEL':
       return 400;

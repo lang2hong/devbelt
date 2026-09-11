@@ -12,6 +12,7 @@ import {
   PersonalFeatureRequiredError,
   EntityNotFoundError,
   RateLimitedError,
+  InvalidCurrentPasswordError,
 } from '../domain/errors.js';
 import type { User, Device } from '../domain/entities.js';
 import { EXTENSION_SCOPES } from '../domain/enums.js';
@@ -24,6 +25,7 @@ import type {
   IRegistrationRepo,
 } from '../repository/interfaces.js';
 import type { Queryable, TxRunner } from '../repository/mysql/db.js';
+import type { AuditWriter } from './auditWriter.js';
 
 /** 登录/刷新请求携带的设备字段（实施规格 §5.2 DeviceFields）。 */
 export interface DeviceFields {
@@ -94,6 +96,7 @@ export class AuthService {
     private readonly emailSender: EmailSender,
     private readonly rateLimiter: RateLimitService,
     private readonly runner: TxRunner,
+    private readonly auditWriter?: AuditWriter,
   ) {}
 
   /** 注册：事务建 user + Free 订阅 + 验证 token，事务提交后发验证邮件。 */
@@ -137,6 +140,7 @@ export class AuthService {
     const tokenHash = this.tokenService.hashToken(token);
     const pre = await this.emailVerificationTokenRepo.findByHash(tokenHash);
     if (!pre || pre.consumedTime || pre.expiresTime <= new Date()) {
+      this.auditWriter?.write({ eventType: 'email.verify.failed', result: 'failure', targetType: 'email_verification_token' });
       throw new UnauthorizedError('invalid or expired verification token');
     }
     await this.runner(async (tx) => {
@@ -151,6 +155,7 @@ export class AuthService {
       await this.emailVerificationTokenRepo.consume(tx, record.id, now);
       await this.userRepo.markEmailVerified(tx, user.id, now);
     });
+    this.auditWriter?.write({ eventType: 'email.verify.consumed', result: 'success', actorUserId: pre.userId, targetType: 'email_verification_token' });
     return { ok: true };
   }
 
@@ -373,9 +378,9 @@ export class AuthService {
     await this.runner(async (tx) => {
       const user = await this.userRepo.lockById(tx, userId);
       if (!user) throw new UnauthorizedError();
-      if (!currentOk) throw new UnauthorizedError();
+      if (!currentOk) throw new InvalidCurrentPasswordError();
       // 锁内复核校验依据未被并发改密取代（防两个改密请求都基于同一旧 hash 通过）。
-      if (user.passwordHash !== verifiedAgainstHash) throw new UnauthorizedError();
+      if (user.passwordHash !== verifiedAgainstHash) throw new InvalidCurrentPasswordError();
       await this.userRepo.updatePassword(tx, userId, newHash);
       // 改密使所有存量会话失效：session_version +1 让 access token 立即失效（§4.1），
       // 再撤销全部 refresh family 让 refresh 也无法续期。

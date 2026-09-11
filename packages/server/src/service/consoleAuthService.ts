@@ -7,6 +7,7 @@ import { CONSOLE_SCOPES } from '../domain/enums.js';
 import { RateLimitedError, UnauthorizedError, UserDisabledError, ValidationError } from '../domain/errors.js';
 import type { IUserRepo, IDeviceRepo, IRefreshTokenRepo } from '../repository/interfaces.js';
 import type { TxRunner, Queryable } from '../repository/mysql/db.js';
+import type { AuditWriter } from './auditWriter.js';
 
 /** Web Console 设备槽位（§4.1：每用户最多一个 active web 设备，不计入 maxDevices）。 */
 const WEB_PLATFORM = 'web';
@@ -35,6 +36,7 @@ export class ConsoleAuthService {
     private readonly tokenService: TokenService,
     private readonly rateLimiter: RateLimitService,
     private readonly runner: TxRunner,
+    private readonly auditWriter?: AuditWriter,
   ) {}
 
   async login(emailRaw: string, password: string, deviceKey: string, ip?: string): Promise<ConsoleLoginResult> {
@@ -147,6 +149,14 @@ export class ConsoleAuthService {
 
     if (outcome.kind === 'reuse') {
       await this.runner((tx) => this.refreshTokenRepo.revokeFamily(tx, outcome.familyId, new Date()));
+      // refresh token 复用通常意味着令牌被盗/泄漏：作为安全事件落审计（不阻断撤销）。
+      this.auditWriter?.write({
+        eventType: 'console.auth.refresh.reuse',
+        result: 'failure',
+        actorUserId: preUserId,
+        targetType: 'refresh_family',
+        targetId: outcome.familyId,
+      });
       throw new UnauthorizedError('refresh token reuse detected');
     }
 

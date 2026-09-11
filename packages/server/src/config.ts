@@ -2,6 +2,16 @@ import { resolveSigningKeys, type SigningKeys } from './service/signingKeys.js';
 import { resolveConsoleOrigin } from './service/consoleOrigin.js';
 
 /**
+ * 统一布尔开关解析：`false`/`0`/`off` 视为关，缺省 undefined 视为关
+ * （与 featureFlags.parseOff 同口径）；调用方按需取反表示「默认开」。
+ */
+function parseOff(raw: string | undefined): boolean {
+  if (raw === undefined) return false;
+  const v = raw.trim().toLowerCase();
+  return v === 'false' || v === '0' || v === 'off';
+}
+
+/**
  * 解析 `TRUST_PROXY`。取值语义见 docs/开发指南.md；`true` 被显式拒绝（左段
  * XFF 可由客户端伪造，使按 IP 的限流失效）。默认跳数 1（nginx 反代之后）。
  */
@@ -79,7 +89,7 @@ export const config = {
     database: process.env.MYSQL_DATABASE || 'db_client',
   },
   trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
-  rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== 'false',
+  rateLimitEnabled: !parseOff(process.env.RATE_LIMIT_ENABLED),
   /** 控制台公开页/邮件流接口允许的同源 Origin（生产/预发必须为 HTTPS SMTP_BASE_URL 源）。 */
   consoleOrigin: resolveConsoleOrigin(),
   /** 平台管理员引导邮箱（规范化后，供启动受控提升）。 */

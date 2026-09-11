@@ -18,6 +18,8 @@ import { idempotencyReceiptLongtextMigration } from './016_idempotency_receipt_l
 import { syncResetHandoffsMigration } from './017_sync_reset_handoffs.js';
 import { paymentMigration } from './018_payment.js';
 import { invoiceOrderUniqueMigration } from './019_invoice_order_unique.js';
+import { cleanupIndexesMigration } from './020_cleanup_indexes.js';
+import { paymentNonceMigration } from './021_payment_callback_nonces.js';
 
 /** 新库启动时按固定依赖顺序执行的 migration 集合。 */
 export const migrations: readonly Migration[] = [
@@ -40,4 +42,6 @@ export const migrations: readonly Migration[] = [
   syncResetHandoffsMigration,
   paymentMigration,
   invoiceOrderUniqueMigration,
+  cleanupIndexesMigration,
+  paymentNonceMigration,
 ];

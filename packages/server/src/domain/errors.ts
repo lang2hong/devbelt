@@ -26,6 +26,14 @@ export class UnauthorizedError extends DomainError {
   }
 }
 
+/** 改密时当前密码不正确 → 400 INVALID_CURRENT_PASSWORD（区分于「会话过期」的 401，已认证无枚举风险）。 */
+export class InvalidCurrentPasswordError extends DomainError {
+  constructor() {
+    super('current password is incorrect', 'INVALID_CURRENT_PASSWORD');
+    this.name = 'InvalidCurrentPasswordError';
+  }
+}
+
 /** 用户被禁用 → 403 USER_DISABLED */
 export class UserDisabledError extends DomainError {
   constructor(public readonly userId: number) {
@@ -346,6 +354,14 @@ export class PaymentSignatureInvalidError extends DomainError {
   constructor() {
     super('payment callback signature verification failed', 'PAYMENT_SIGNATURE_INVALID');
     this.name = 'PaymentSignatureInvalidError';
+  }
+}
+
+/** 支付回调解析/身份绑定失败（app_id/mchid/交易字段不符或缺失）→ 400 PAYMENT_CALLBACK_INVALID。 */
+export class PaymentCallbackInvalidError extends DomainError {
+  constructor(message = 'payment callback invalid') {
+    super(message, 'PAYMENT_CALLBACK_INVALID');
+    this.name = 'PaymentCallbackInvalidError';
   }
 }
 

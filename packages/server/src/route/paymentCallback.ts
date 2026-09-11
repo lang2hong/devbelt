@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { registerConsoleErrorHandler } from '../middleware/consoleError.js';
 import type { OrderService } from '../service/paymentService.js';
 import type { PaymentChannel } from '../domain/enums.js';
-import { FeatureTemporarilyDisabledError, PaymentSignatureInvalidError } from '../domain/errors.js';
+import { FeatureTemporarilyDisabledError, PaymentSignatureInvalidError, PaymentCallbackInvalidError } from '../domain/errors.js';
 import type { AuditWriter } from '../service/auditWriter.js';
 import type { RateLimitService } from '../service/rateLimitService.js';
 import { PAYMENT_CHANNELS } from '../service/paymentChannel.js';
@@ -95,7 +95,8 @@ export async function paymentCallbackRoutes(app: FastifyInstance, opts: PaymentC
       opts.auditWriter.write({
         eventType: 'payment.callback.failed',
         result: 'failure',
-        failureCode: e instanceof PaymentSignatureInvalidError ? 'PAYMENT_SIGNATURE_INVALID' : null,
+        failureCode: e instanceof PaymentSignatureInvalidError ? 'PAYMENT_SIGNATURE_INVALID'
+          : e instanceof PaymentCallbackInvalidError ? 'PAYMENT_CALLBACK_INVALID' : null,
         sourceIp: req.ip,
         requestId: requestIdOf(req),
       });

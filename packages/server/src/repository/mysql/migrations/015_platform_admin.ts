@@ -28,11 +28,12 @@ export const platformAdminMigration: Migration = {
       'role',
       `ALTER TABLE users ADD COLUMN role VARCHAR(16) NOT NULL DEFAULT 'user'`,
     );
-    await db.query(
+    await addOrVerify(db,
       `ALTER TABLE users ADD CONSTRAINT chk_users_role CHECK (role IN ('user', 'platform_admin'))`,
-    ).catch(() => {
-      // 已存在同名列时 CONNECTION 报错；忽略（guard 与幂等重跑）
-    });
+      `SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+       WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'users'
+         AND CONSTRAINT_NAME = 'chk_users_role'`,
+    );
 
     await ensureColumn(
       'personal_subscriptions',
@@ -46,11 +47,48 @@ export const platformAdminMigration: Migration = {
     );
 
     // 审计平台查询索引（audit_events 已由 012 建表；这里按需补列索引）。
-    await db.query(
+    await addOrVerify(db,
       `CREATE INDEX idx_audit_org ON audit_events (organization_id, event_time)`,
-    ).catch(() => {});
-    await db.query(
+      `SELECT INDEX_NAME FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'audit_events'
+         AND INDEX_NAME = 'idx_audit_org'`,
+    );
+    await addOrVerify(db,
       `CREATE INDEX idx_audit_target ON audit_events (target_type, target_id, event_time)`,
-    ).catch(() => {});
+      `SELECT INDEX_NAME FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'audit_events'
+         AND INDEX_NAME = 'idx_audit_target'`,
+    );
   },
 };
+
+/**
+ * 执行 DDL；若因「对象已存在」失败，则回验目标约束/索引确实存在才吞下。
+ *
+ * 只忽略明确的「重复约束/键名」错误码；权限、语法、连接、锁超时等真实 DDL
+ * 失败一律上抛，禁止 runner 写入版本账本（否则 schema 缺约束/索引却以为迁移完成）。
+ */
+async function addOrVerify(
+  db: { query(sql: string, params?: any[]): Promise<any> },
+  ddl: string,
+  verifySql: string,
+): Promise<void> {
+  try {
+    await db.query(ddl);
+  } catch (e) {
+    if (!isDuplicateObject(e)) throw e;
+    const [rows] = (await db.query(verifySql)) as [Array<unknown>, unknown];
+    if (!rows.length) throw e;
+  }
+}
+
+function isDuplicateObject(err: unknown): boolean {
+  return (
+    !!err &&
+    typeof err === 'object' &&
+    ((err as { code?: string }).code === 'ER_DUP_KEYNAME' ||
+      (err as { errno?: number }).errno === 1061 ||
+      (err as { code?: string }).code === 'ER_DUP_CONSTRAINT' ||
+      (err as { errno?: number }).errno === 3822)
+  );
+}

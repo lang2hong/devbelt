@@ -60,6 +60,7 @@ import { MysqlAuditRepo } from './repository/mysql/auditRepo.js';
 import { MysqlIdempotencyReceiptRepo } from './repository/mysql/idempotencyReceiptRepo.js';
 import { MysqlOrderRepo } from './repository/mysql/orderRepo.js';
 import { MysqlPaymentRepo } from './repository/mysql/paymentRepo.js';
+import { MysqlPaymentCallbackNonceRepo } from './repository/mysql/paymentCallbackNonceRepo.js';
 import type { IUserRepo } from './repository/interfaces.js';
 import { LinkFlowService } from './service/linkFlowService.js';
 import { AuditWriter } from './service/auditWriter.js';
@@ -153,12 +154,14 @@ export async function createApp() {
   const idempotencyReceiptRepo = new MysqlIdempotencyReceiptRepo(getMysql);
   const orderRepo = new MysqlOrderRepo(getMysql);
   const paymentRepo = new MysqlPaymentRepo();
+  const paymentNonceRepo = new MysqlPaymentCallbackNonceRepo(getMysql);
   const invoiceRepo = new MysqlInvoiceRepo(getMysql);
 
   // service 层
   const tokenService = new TokenService(signingKeys, config.accessTokenExpiresIn, config.refreshTokenExpiresMs);
   const rateLimiter = new RateLimitService(rateLimitRepo, config.rateLimitEnabled);
   const emailSender = resolveEmailSender(process.env);
+  const auditWriter = new AuditWriter(auditRepo, (msg, data) => app.log.warn({ data }, msg));
   const authService = new AuthService(
     userRepo,
     emailVerificationTokenRepo,
@@ -170,6 +173,7 @@ export async function createApp() {
     emailSender,
     rateLimiter,
     (fn) => withTransaction(app.mysql, fn),
+    auditWriter,
   );
   const organizationService = new OrganizationService(
     userRepo,
@@ -182,6 +186,7 @@ export async function createApp() {
     tokenService,
     emailSender,
     (fn) => withTransaction(app.mysql, fn),
+    auditWriter,
   );
   const resourceService = new OrganizationResourceService(
     organizationRepo,
@@ -206,7 +211,6 @@ export async function createApp() {
     (fn) => withTransaction(app.mysql, fn),
   );
   const csrfService = new CsrfService(deriveCsrfKey());
-  const auditWriter = new AuditWriter(auditRepo, (msg, data) => app.log.warn({ data }, msg));
   const syncResetService = new SyncResetService(
     syncStateRepo,
     syncRecordRepo,
@@ -240,6 +244,7 @@ export async function createApp() {
     tokenService,
     rateLimiter,
     (fn) => withTransaction(app.mysql, fn),
+    auditWriter,
   );
   const adminService = new ConsoleAdminService({
     userRepo,
@@ -252,6 +257,7 @@ export async function createApp() {
     membershipRepo,
     auditRepo,
     auditWriter,
+    rateLimiter,
   });
   const cursorService = new CursorService(deriveCursorKey());
 
@@ -265,6 +271,7 @@ export async function createApp() {
     auditWriter,
     runner: (fn) => withTransaction(app.mysql, fn),
     gatewayFor: (channel) => resolvePaymentGateway(channel),
+    nonceRepo: paymentNonceRepo,
   });
   const featureFlags = resolveFeatureFlags();
   // opt-in：凭据齐全 + 显式 FEATURE_PAYMENT=true 才注册真支付路由，否则仅注册只读订单路由。
@@ -285,6 +292,7 @@ export async function createApp() {
     syncResetHandoffRepo,
     mailFlowRepo,
     idempotencyReceiptRepo,
+    orderRepo,
     auditWriter,
     exec: () => app.mysql,
   });
@@ -311,7 +319,7 @@ export async function createApp() {
   app.register(personalRoutes, { tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin: config.consoleOrigin, deviceRepo, idempotencyService, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId), revokeDeviceInTx: (tx, userId, deviceId) => authService.revokeDeviceInTx(tx, userId, deviceId) });
   app.register(organizationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin: config.consoleOrigin, organizationService, resourceService, organizationRepo, membershipRepo, auditWriter, idempotencyService, sendInvitation: (o) => organizationService.sendInvitation(o) });
   app.register(invitationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin: config.consoleOrigin, organizationService });
-  app.register(syncRoutes, { tokenService, getUser, getSessionActive, syncState: syncStateService, syncRecord: syncRecordService, syncReset: syncResetService });
+  app.register(syncRoutes, { tokenService, getUser, getSessionActive, syncState: syncStateService, syncRecord: syncRecordService, syncReset: syncResetService, rateLimiter });
   app.register(consoleAuthRoutes, {
     csrfService,
     rateLimiter,

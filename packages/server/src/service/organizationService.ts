@@ -24,6 +24,7 @@ import type { TxRunner, Queryable } from '../repository/mysql/db.js';
 import type { RateLimitService } from './rateLimitService.js';
 import type { TokenService } from './tokenService.js';
 import type { EmailSender } from './emailSender.js';
+import type { AuditWriter } from './auditWriter.js';
 import { roleHasPermission, type PermissionCode } from '../authz/permissionCatalog.js';
 
 const ORGANIZATION_FREE = 'organization_free';
@@ -84,6 +85,7 @@ export class OrganizationService {
     private readonly tokenService: TokenService,
     private readonly emailSender: EmailSender,
     private readonly runner: TxRunner,
+    private readonly auditWriter?: AuditWriter,
   ) {}
 
   /** 列出用户 active membership 且组织 active 的组织（含其角色）。 */
@@ -410,7 +412,7 @@ export class OrganizationService {
     const hint = await this.invitationRepo.findByTokenHash(tokenHash);
     if (!hint) throw new InvitationInvalidError();
 
-    return this.runner(async (tx) => {
+    const result = await this.runner(async (tx) => {
       const now = new Date();
       const org = await this.organizationRepo.lockById(tx, hint.organizationId);
       if (!org || org.status !== 'active') throw new InvitationInvalidError();
@@ -446,6 +448,16 @@ export class OrganizationService {
         },
       };
     });
+
+    this.auditWriter?.write({
+      eventType: 'invitation.accept',
+      result: 'success',
+      actorUserId: userId,
+      targetType: 'organization',
+      targetId: String(result.organization.organizationId),
+      organizationId: result.organization.organizationId,
+    });
+    return result;
   }
 
   /**

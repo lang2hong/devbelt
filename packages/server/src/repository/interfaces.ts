@@ -733,6 +733,8 @@ export interface IOrderRepo {
   listByUser(userId: number, cursor: number | undefined, limit: number): Promise<Order[]>;
   /** 同 (user, plan, channel) 未过期 pending 订单（下单去重：复用原订单，防重复付款，§P4）。 */
   findPendingByUserAndPlan(userId: number, planCode: string, channel: Order['channel']): Promise<Order | undefined>;
+  /** 过期 pending 订单 sweep：把超时未支付的 pending 订单批量置为 expired，返回受影响行数。 */
+  expirePending(now: Date, limit: number): Promise<number>;
 }
 
 export interface IPaymentRepo {
@@ -747,6 +749,11 @@ export interface IPaymentRepo {
   }): Promise<Payment>;
   /** 按渠道交易号查流水（回调幂等：重复回调以唯一键兜底 + 此查询判定 duplicate）。 */
   findByChannelTradeNo(exec: Queryable, channel: Payment['channel'], channelTradeNo: string): Promise<Payment | undefined>;
+}
+
+export interface IPaymentCallbackNonceRepo {
+  /** 记录回调 nonce（SHA-256 摘要）；首次记录返回 true，重复（重放）返回 false。 */
+  insertIfAbsent(channel: Payment['channel'], nonceHash: string, expiresTime: Date): Promise<boolean>;
 }
 
 export interface IInvoiceRepo {

@@ -11,6 +11,7 @@ import { sanitizeDisplayName } from '../service/displayName.js';
 import { validateIdempotencyKey, type IdempotencyService } from '../service/idempotencyService.js';
 import { updateDisplayNameBody } from './schemas.js';
 import type { IUserRepo, IPersonalSubscriptionRepo, IPersonalPlanRepo, IMembershipRepo } from '../repository/interfaces.js';
+import type { Queryable } from '../repository/mysql/db.js';
 
 export interface ConsoleMeRouteOptions {
   tokenService: TokenService;
@@ -89,7 +90,6 @@ export async function consoleMeRoutes(app: FastifyInstance, opts: ConsoleMeRoute
           return rejectConsole(reply, 403, 'FORBIDDEN', 'csrf validation failed');
         }
         const userId = (req as unknown as { authUserId: number }).authUserId;
-        await opts.rateLimiter.hit(`console:me:patch:${userId}`, 60, 10);
 
         const { displayName } = req.body as { displayName: string };
         const sanitized = sanitizeDisplayName(displayName);
@@ -103,6 +103,9 @@ export async function consoleMeRoutes(app: FastifyInstance, opts: ConsoleMeRoute
           normalizedPath: '/api/console/me',
           idempotencyKey,
           requestBody: req.body,
+          // 限流必须落在幂等回执事务内（beforeWrite + hitInTx）：已完成回执优先于限流，
+          // 避免已完成请求因限流被提前 429 而无法重放（与 consoleAdmin 写路径同构）。
+          beforeWrite: (tx: Queryable) => opts.rateLimiter.hitInTx(tx, `console:me:patch:${userId}`, 60, 10),
           business: async (tx) => {
             await opts.userRepo.updateDisplayNameInTx(tx, userId, sanitized);
             const updated = await opts.userRepo.findByIdInTx(tx, userId);
