@@ -22,6 +22,7 @@ REMOTE="crewai"                    # ssh config 里的 Host 别名（User/HostNa
 DEPLOY_DIR="/usr/local/l2h/vscode-db-server"  # 服务器上的绝对部署目录
 SERVICE_NAME="dbclient-server"     # systemd 服务名
 HEALTH_URL="http://localhost:3000/health/ready"
+LOG_FILE="${DEPLOY_DIR}/logs/server.log"
 # ────────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -55,6 +56,9 @@ if [[ -z "$NODE_BIN" ]]; then
   exit 1
 fi
 
+# 独立日志目录：systemd 把 stdout/stderr append 到该文件（journalctl 仍保留一份）。
+ssh "$REMOTE" "sudo mkdir -p '$(dirname "$LOG_FILE")'"
+
 ssh "$REMOTE" "sudo tee /etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
 Description=DB Client sync server
@@ -67,6 +71,8 @@ ExecStart=${NODE_BIN} dist/index.cjs
 Restart=on-failure
 RestartSec=3
 Environment=NODE_ENV=production
+StandardOutput=append:${LOG_FILE}
+StandardError=append:${LOG_FILE}
 
 [Install]
 WantedBy=multi-user.target
