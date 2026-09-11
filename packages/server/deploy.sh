@@ -21,7 +21,7 @@ set -euo pipefail
 REMOTE="crewai"                    # ssh config 里的 Host 别名（User/HostName/Port 在 ~/.ssh/config 配好）
 DEPLOY_DIR="/usr/local/l2h/vscode-db-server"  # 服务器上的绝对部署目录
 SERVICE_NAME="dbclient-server"     # systemd 服务名
-HEALTH_URL="http://localhost:3000/health"
+HEALTH_URL="http://localhost:3000/health/ready"
 # ────────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
