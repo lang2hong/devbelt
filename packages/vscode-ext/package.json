@@ -109,16 +109,19 @@
       {
         "command": "dbclient.login",
         "title": "%cmd.login%",
+        "icon": "$(sign-in)",
         "category": "DB Client"
       },
       {
         "command": "dbclient.logout",
         "title": "%cmd.logout%",
+        "icon": "$(sign-out)",
         "category": "DB Client"
       },
       {
         "command": "dbclient.account",
         "title": "%account.title%",
+        "icon": "$(account)",
         "category": "DB Client"
       },
       {
@@ -683,6 +686,16 @@
         {
           "command": "dbclient.org.newQuery",
           "when": "view == dbclient.explorer.organization && dbclient.orgRole == 'admin'",
+          "group": "navigation"
+        },
+        {
+          "command": "dbclient.login",
+          "when": "(view == dbclient.explorer || view == dbclient.explorer.organization) && !dbclient.loggedIn",
+          "group": "navigation"
+        },
+        {
+          "command": "dbclient.account",
+          "when": "(view == dbclient.explorer || view == dbclient.explorer.organization) && dbclient.loggedIn",
           "group": "navigation"
         }
       ],

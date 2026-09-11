@@ -10,6 +10,7 @@ import { isConnectionTemplate, type ConnectionTemplateContent, type Organization
 import type { OrgLocalCredential } from '../org/credentialVault';
 import { OrgTreeNode, OrgTreeDataProvider } from '../tree/orgTreeDataProvider';
 import { l10n } from '../i18n';
+import { DEFAULT_SERVER_URL } from '../sync/authService';
 
 /**
  * 组织 Workspace 命令（实施规格 §6）。
@@ -91,6 +92,11 @@ export function registerOrgCommands(deps: OrgDeps): void {
   );
 
   sub('dbclient.org.refresh', () => tree.refresh());
+
+  // 组织视图空态「创建或加入组织」→ 打开 Web 控制台组织页（浏览器）。
+  sub('dbclient.org.openConsole', () => {
+    void vscode.env.openExternal(vscode.Uri.parse(`${DEFAULT_SERVER_URL}/console/organizations`));
+  });
 
   // ── 连接模板（核心：模板 content + 本地凭据映射）──
   sub('dbclient.org.connectTemplate', async (node: OrgTreeNode) => {

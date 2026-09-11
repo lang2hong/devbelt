@@ -22,9 +22,12 @@ export class OrgTreeNode extends vscode.TreeItem {
     public readonly resource?: ResourceSummaryDto,
     /** 当前用户在该组织内的角色（仅 UX，非授权；从组织根节点向下传播）。 */
     public readonly role?: OrganizationRole,
+    /** 节点的点击动作（info 空态提示用，让「登录/打开组织」可点）。 */
+    command?: vscode.Command,
   ) {
     super(label, collapsible);
     this.contextValue = this.computeContextValue();
+    if (command) this.command = command;
     if (kind === 'organization') {
       this.iconPath = new vscode.ThemeIcon('organization');
     } else if (kind === 'folder') {
@@ -76,7 +79,15 @@ export class OrgTreeDataProvider implements vscode.TreeDataProvider<OrgTreeNode>
   private async roots(): Promise<OrgTreeNode[]> {
     try {
       const orgs = await this.workspace.listOrganizations();
-      if (!orgs.length) return [new OrgTreeNode(l10n('org.tree.noOrganizations'), vscode.TreeItemCollapsibleState.None, 'info')];
+      if (!orgs.length) {
+        return [new OrgTreeNode(
+          l10n('org.tree.noOrganizations'),
+          vscode.TreeItemCollapsibleState.None,
+          'info',
+          undefined, undefined, undefined, undefined,
+          { command: 'dbclient.org.openConsole', title: l10n('org.tree.openConsole') },
+        )];
+      }
       return orgs.map((o) => new OrgTreeNode(
         o.name,
         vscode.TreeItemCollapsibleState.Collapsed,
@@ -87,7 +98,13 @@ export class OrgTreeDataProvider implements vscode.TreeDataProvider<OrgTreeNode>
         o.role,
       ));
     } catch {
-      return [new OrgTreeNode(l10n('org.tree.signInFirst'), vscode.TreeItemCollapsibleState.None, 'info')];
+      return [new OrgTreeNode(
+        l10n('org.tree.signInFirst'),
+        vscode.TreeItemCollapsibleState.None,
+        'info',
+        undefined, undefined, undefined, undefined,
+        { command: 'dbclient.login', title: l10n('org.tree.signIn') },
+      )];
     }
   }
 
