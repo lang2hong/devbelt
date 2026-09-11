@@ -169,7 +169,10 @@ async function confirmSub(): Promise<void> {
 
     <div v-if="subForm" class="form">
       <strong>调整订阅：{{ subForm.email }}</strong>
-      <input v-model="subPlan" type="text" maxlength="32" placeholder="planCode" />
+      <select v-model="subPlan">
+        <option value="free">Free（免费）</option>
+        <option value="pro">Pro（¥99/月）</option>
+      </select>
       <input v-model="subReason" type="text" maxlength="500" placeholder="原因（必填）" />
       <button class="btn" :disabled="busy" @click="confirmSub">确认</button>
       <button class="btn secondary" @click="subForm = null">取消</button>
@@ -183,7 +186,7 @@ async function confirmSub(): Promise<void> {
 .page { max-width: 900px; margin: 0 auto; }
 h2 { font-size: 20px; font-weight: 700; color: #0f172a; }
 .bar { display: flex; gap: 8px; margin: 16px 0; }
-input { box-sizing: border-box; padding: 8px 10px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; }
+input, select { box-sizing: border-box; padding: 8px 10px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; }
 .table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #d0d7de; border-radius: 8px; }
 th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #eaeef2; font-size: 14px; }
 .btn { background: #0969da; color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; }
