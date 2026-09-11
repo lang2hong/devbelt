@@ -12,7 +12,7 @@ describe('createOrder', () => {
       payParams: { codeUrl: 'weixin://wxpay/pay?pr=x' },
     };
     let captured: { method?: string; body?: string; headers?: Record<string, string> } = {};
-    const fetchImpl = async (input: string, init?: RequestInit) => {
+    const fetchImpl = async (_input: string, init?: RequestInit) => {
       captured = { method: init?.method, body: init?.body as string, headers: init?.headers as Record<string, string> };
       return jsonResponse(201, payload);
     };
@@ -21,7 +21,7 @@ describe('createOrder', () => {
     expect(r).toEqual({ kind: 'ok', value: payload });
     expect(captured.method).toBe('POST');
     expect(JSON.parse(captured.body!)).toEqual({ planCode: 'pro', channel: 'wechat' });
-    expect(captured.headers['X-CSRF-Token']).toBe('csrf-tok');
+    expect(captured.headers?.['X-CSRF-Token']).toBe('csrf-tok');
   });
 
   it('returns unauthorized without a token', async () => {
