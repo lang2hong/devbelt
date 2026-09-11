@@ -83,3 +83,49 @@ export async function getOrder(
     return { kind: 'failure' };
   }
 }
+
+/** 支付参数：支付宝返回收银台跳转 URL；微信 native 返回扫码用的 code_url。 */
+export interface PayParams {
+  redirectUrl?: string;
+  codeUrl?: string;
+}
+
+export interface CreateOrderResult {
+  order: ConsoleOrder;
+  payParams: PayParams;
+}
+
+/**
+ * 下单（P4）：服务端按 plan_code 计价并做渠道 prepay，返回支付参数。
+ * 下单不使用 Idempotency-Key（与后端语义一致），但需 CSRF token（会话绑定写）。
+ * 支付功能关闭/渠道未配置时服务端 503，前端按 failure 处理。
+ */
+export async function createOrder(
+  planCode: string,
+  channel: string,
+  csrfToken: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<CreateOrderResult>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(
+      '/api/console/orders',
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          'X-CSRF-Token': csrfToken,
+        },
+        body: JSON.stringify({ planCode, channel }),
+      },
+      fetchImpl,
+    );
+    if (res.ok) return { kind: 'ok', value: (await res.json()) as CreateOrderResult };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}

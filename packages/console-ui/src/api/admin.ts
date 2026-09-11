@@ -63,6 +63,7 @@ export type Result<T> =
   | { kind: 'not-found' }
   | { kind: 'conflict' }
   | { kind: 'in-progress' }
+  | { kind: 'bad-request' }
   | { kind: 'failure' };
 
 type Failure = Exclude<Result<unknown>['kind'], 'ok'>;

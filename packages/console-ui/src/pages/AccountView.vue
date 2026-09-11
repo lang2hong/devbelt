@@ -3,6 +3,7 @@ import { ref } from 'vue';
 import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
 import { updateDisplayName, changePassword, type ConsoleMeUser } from '../api/me';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
+import { navigate } from '../lib/router';
 
 const props = defineProps<{ user: ConsoleMeUser | null; subscription: { planCode: string | null; status: string; periodEndTime: string | null } | null }>();
 
@@ -98,6 +99,7 @@ async function submitPassword(): Promise<void> {
       </p>
       <p class="row" v-if="subscription?.periodEndTime">到期时间：{{ new Date(subscription.periodEndTime).toLocaleString() }}</p>
       <p class="row muted" v-if="!subscription">暂无订阅。</p>
+      <button v-if="subscription?.planCode !== 'pro'" class="btn" @click="navigate('/console/checkout')">升级 Pro</button>
     </div>
 
     <div class="card">

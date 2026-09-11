@@ -24,4 +24,15 @@ describe('resolveErrorKind', () => {
     expect(await resolveErrorKind(jsonRes(409, { error: { code: 'IDEMPOTENCY_KEY_REUSED' } }))).toBe('conflict');
     expect(await resolveErrorKind(jsonRes(409, { message: 'conflict' }))).toBe('conflict');
   });
+
+  it('maps 400/422 to terminal bad-request (not retryable)', async () => {
+    expect(await resolveErrorKind(jsonRes(400, {}))).toBe('bad-request');
+    expect(await resolveErrorKind(jsonRes(422, { code: 'VALIDATION_FAILED' }))).toBe('bad-request');
+  });
+
+  it('keeps 429 and 5xx as retryable failure', async () => {
+    expect(await resolveErrorKind(jsonRes(429, {}))).toBe('failure');
+    expect(await resolveErrorKind(jsonRes(502, {}))).toBe('failure');
+    expect(await resolveErrorKind(jsonRes(503, {}))).toBe('failure');
+  });
 });

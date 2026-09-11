@@ -47,6 +47,7 @@ export type UpdateDisplayNameResult =
   | { kind: 'not-found' }
   | { kind: 'conflict' }
   | { kind: 'in-progress' }
+  | { kind: 'bad-request' }
   | { kind: 'failure' };
 
 function writeHeaders(csrfToken: string, token: string, idempotencyKey: string): Record<string, string> {

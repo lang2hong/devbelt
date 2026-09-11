@@ -10,6 +10,7 @@ import DevicesView from './pages/DevicesView.vue';
 import SyncView from './pages/SyncView.vue';
 import OrdersView from './pages/OrdersView.vue';
 import InvoicesView from './pages/InvoicesView.vue';
+import CheckoutView from './pages/CheckoutView.vue';
 import OrganizationsView from './pages/OrganizationsView.vue';
 import OrganizationDetailView from './pages/OrganizationDetailView.vue';
 import ResourcesView from './pages/ResourcesView.vue';
@@ -25,6 +26,7 @@ const ROUTES: RouteConfig[] = [
   { pattern: '/console/account/sync', name: 'sync' },
   { pattern: '/console/orders', name: 'orders' },
   { pattern: '/console/invoices', name: 'invoices' },
+  { pattern: '/console/checkout', name: 'checkout' },
   { pattern: '/console/organizations', name: 'organizations' },
   { pattern: '/console/organizations/:id', name: 'organization-detail' },
   { pattern: '/console/organizations/:id/resources', name: 'organization-resources' },
@@ -55,6 +57,8 @@ const view = computed<{ comp: Component; props: Record<string, unknown> }>(() =>
       return { comp: OrdersView, props: {} };
     case 'invoices':
       return { comp: InvoicesView, props: {} };
+    case 'checkout':
+      return { comp: CheckoutView, props: { user: me_.value?.user ?? null, subscription: me_.value?.subscription ?? null } };
     case 'organizations':
       return { comp: OrganizationsView, props: {} };
     case 'organization-detail':

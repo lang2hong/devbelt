@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { refreshSession } from './session';
 import { getAccessToken, setAccessToken } from './api/consoleAuth';
 
@@ -23,6 +23,7 @@ function refreshFlow(onRefresh: (n: number) => Promise<Response>) {
 const cookie = () => 'a=1; __Host-dbclient_csrf=tok';
 
 beforeEach(() => setAccessToken(null));
+afterEach(() => vi.unstubAllGlobals());
 
 describe('refreshSession', () => {
   it('refreshes and returns ok, setting the token', async () => {
@@ -64,5 +65,14 @@ describe('refreshSession', () => {
     });
     const r = await refreshSession(fetchImpl, cookie);
     expect(r).toEqual({ kind: 'failure' });
+  });
+
+  it('serializes cross-tab refresh via Web Locks', async () => {
+    const request = vi.fn(async (_name: string, cb: () => Promise<unknown>) => cb());
+    vi.stubGlobal('navigator', { locks: { request } });
+    const { fetchImpl } = refreshFlow(async () => jsonRes(200, { accessToken: 't' }));
+    const r = await refreshSession(fetchImpl, cookie);
+    expect(r.kind).toBe('ok');
+    expect(request).toHaveBeenCalledWith('dbclient.console-refresh', expect.any(Function));
   });
 });

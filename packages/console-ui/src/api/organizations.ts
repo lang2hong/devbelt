@@ -58,6 +58,7 @@ export type Result<T> =
   | { kind: 'not-found' }
   | { kind: 'conflict' }
   | { kind: 'in-progress' }
+  | { kind: 'bad-request' }
   | { kind: 'failure' };
 
 function auth(token: string): Record<string, string> {
