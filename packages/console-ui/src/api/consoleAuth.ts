@@ -53,13 +53,19 @@ export interface ConsoleUser {
   displayName: string | null;
 }
 
+export type RegisterResult =
+  | { kind: 'ok' }
+  | { kind: 'rate-limited' }
+  | { kind: 'validation'; message: string }
+  | { kind: 'failure' };
+
 export async function register(
   email: string,
   password: string,
   displayName: string,
   csrfToken: string,
   fetchImpl: FetchLike = fetch,
-): Promise<Result> {
+): Promise<RegisterResult> {
   try {
     // displayName 可选：留空时从 body 省略，避免触发 schema `displayName.minLength:1`。
     const body: { email: string; password: string; displayName?: string } = { email, password };
@@ -70,8 +76,17 @@ export async function register(
       headers: jsonHeaders(csrfToken),
       body: JSON.stringify(body),
     });
-    if (res.ok) return { kind: 'ok', value: undefined };
+    if (res.ok) return { kind: 'ok' };
     if (res.status === 429) return { kind: 'rate-limited' };
+    if (res.status === 422) {
+      // 透出服务端校验 message（如「password must be 9..128 characters」），不再笼统「注册失败」。
+      try {
+        const body = (await res.json()) as { error?: { message?: string } };
+        return { kind: 'validation', message: body?.error?.message || '输入不符合要求，请检查后重试。' };
+      } catch {
+        return { kind: 'validation', message: '输入不符合要求，请检查后重试。' };
+      }
+    }
     return { kind: 'failure' };
   } catch {
     return { kind: 'failure' };

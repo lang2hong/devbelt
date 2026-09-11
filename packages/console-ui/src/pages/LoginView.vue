@@ -7,6 +7,7 @@ const email = ref('');
 const password = ref('');
 const error = ref('');
 const submitting = ref(false);
+const showPassword = ref(false);
 
 const search = new URLSearchParams(window.location.search);
 const flow = search.get('flow');
@@ -50,7 +51,10 @@ async function submit() {
       <label>邮箱</label>
       <input v-model="email" type="email" autocomplete="username" required />
       <label>密码</label>
-      <input v-model="password" type="password" autocomplete="current-password" required />
+      <div class="pw">
+        <input v-model="password" :type="showPassword ? 'text' : 'password'" autocomplete="current-password" required />
+        <button type="button" class="toggle" :aria-label="showPassword ? '隐藏密码' : '显示密码'" @click="showPassword = !showPassword">{{ showPassword ? '🙈' : '👁' }}</button>
+      </div>
       <p v-if="error" class="error">{{ error }}</p>
       <button type="submit" :disabled="submitting">{{ submitting ? '登录中…' : '登录' }}</button>
     </form>
@@ -64,6 +68,10 @@ h1 { font-size: 20px; font-weight: 700; color: #0f172a; margin: 0 0 16px; }
 label { display: block; font-size: 13px; color: #57606a; margin: 12px 0 4px; }
 input { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; }
 button { margin-top: 20px; width: 100%; background: #0969da; color: #fff; border: none; padding: 12px; border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer; }
+.pw { position: relative; }
+.pw input { width: 100%; padding-right: 38px; }
+.toggle { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); border: none; background: none; cursor: pointer; font-size: 16px; line-height: 1; padding: 2px; opacity: 0.55; }
+.toggle:hover { opacity: 1; }
 button:disabled { opacity: 0.6; cursor: default; }
 .error { color: #cf222e; font-size: 13px; }
 .muted { color: #57606a; font-size: 13px; }

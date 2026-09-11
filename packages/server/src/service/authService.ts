@@ -57,7 +57,7 @@ export interface RefreshResponse {
 }
 
 const VERIFICATION_TOKEN_TTL_MS = 24 * 3600 * 1000; // 24 小时
-const PASSWORD_MIN = 12;
+const PASSWORD_MIN = 9;
 const PASSWORD_MAX = 128;
 
 // 限流阈值（实施规格 §5.2）
@@ -413,7 +413,7 @@ export class AuthService {
     return { ok: true };
   }
 
-  /** 校验密码长度（12..128 Unicode code points）。 */
+  /** 校验密码长度（9..128 Unicode code points）。 */
   private validatePassword(password: string): void {
     const len = Array.from(password).length;
     if (len < PASSWORD_MIN || len > PASSWORD_MAX) {

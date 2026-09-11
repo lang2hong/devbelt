@@ -8,6 +8,7 @@ const displayName = ref('');
 const error = ref('');
 const done = ref(false);
 const submitting = ref(false);
+const showPassword = ref(false);
 
 async function submit() {
   if (submitting.value) return;
@@ -21,6 +22,7 @@ async function submit() {
       return;
     }
     if (result.kind === 'rate-limited') error.value = '注册尝试过于频繁，请稍后再试。';
+    else if (result.kind === 'validation') error.value = result.message;
     else error.value = '注册失败，请检查网络后重试。';
   } finally {
     submitting.value = false;
@@ -35,8 +37,11 @@ async function submit() {
     <form v-else @submit.prevent="submit">
       <label>邮箱</label>
       <input v-model="email" type="email" autocomplete="username" required />
-      <label>密码（12–128 字符）</label>
-      <input v-model="password" type="password" autocomplete="new-password" required />
+      <label>密码（9–128 字符）</label>
+      <div class="pw">
+        <input v-model="password" :type="showPassword ? 'text' : 'password'" autocomplete="new-password" required />
+        <button type="button" class="toggle" :aria-label="showPassword ? '隐藏密码' : '显示密码'" @click="showPassword = !showPassword">{{ showPassword ? '🙈' : '👁' }}</button>
+      </div>
       <label>显示名</label>
       <input v-model="displayName" type="text" />
       <p v-if="error" class="error">{{ error }}</p>
@@ -52,6 +57,10 @@ h1 { font-size: 20px; font-weight: 700; color: #0f172a; margin: 0 0 16px; }
 label { display: block; font-size: 13px; color: #57606a; margin: 12px 0 4px; }
 input { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; }
 button { margin-top: 20px; width: 100%; background: #0969da; color: #fff; border: none; padding: 12px; border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer; }
+.pw { position: relative; }
+.pw input { width: 100%; padding-right: 38px; }
+.toggle { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); border: none; background: none; cursor: pointer; font-size: 16px; line-height: 1; padding: 2px; opacity: 0.55; }
+.toggle:hover { opacity: 1; }
 button:disabled { opacity: 0.6; cursor: default; }
 .error { color: #cf222e; font-size: 13px; }
 .success { color: #1a7f37; font-size: 14px; }

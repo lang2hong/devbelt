@@ -17,6 +17,7 @@ const next = ref('');
 const confirm = ref('');
 const pwError = ref('');
 const pwSubmitting = ref(false);
+const showPassword = ref(false);
 
 const nameWrite = useIdempotencyKey();
 
@@ -105,11 +106,14 @@ async function submitPassword(): Promise<void> {
     <div class="card">
       <h3>修改密码</h3>
       <label>当前密码</label>
-      <input v-model="current" type="password" autocomplete="current-password" required />
-      <label>新密码（12–128 字符）</label>
-      <input v-model="next" type="password" autocomplete="new-password" required />
+      <input v-model="current" :type="showPassword ? 'text' : 'password'" autocomplete="current-password" required />
+      <label>新密码（9–128 字符）</label>
+      <div class="pw">
+        <input v-model="next" :type="showPassword ? 'text' : 'password'" autocomplete="new-password" required />
+        <button type="button" class="toggle" :aria-label="showPassword ? '隐藏密码' : '显示密码'" @click="showPassword = !showPassword">{{ showPassword ? '🙈' : '👁' }}</button>
+      </div>
       <label>确认新密码</label>
-      <input v-model="confirm" type="password" autocomplete="new-password" required />
+      <input v-model="confirm" :type="showPassword ? 'text' : 'password'" autocomplete="new-password" required />
       <p v-if="pwError" class="error">{{ pwError }}</p>
       <p class="muted">修改密码后将退出全部设备，需重新登录。</p>
       <button class="btn danger" :disabled="pwSubmitting" @click="submitPassword">{{ pwSubmitting ? '提交中…' : '修改密码' }}</button>
@@ -125,6 +129,10 @@ h3 { font-size: 15px; font-weight: 600; color: #0f172a; margin: 0 0 12px; }
 .row { margin: 8px 0; color: #24292f; }
 label { display: block; font-size: 13px; color: #57606a; margin: 12px 0 4px; }
 input { width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; }
+.pw { position: relative; }
+.pw input { width: 100%; padding-right: 38px; }
+.toggle { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); border: none; background: none; cursor: pointer; font-size: 16px; line-height: 1; padding: 2px; opacity: 0.55; }
+.toggle:hover { opacity: 1; }
 .btn { margin-top: 16px; background: #0969da; color: #fff; border: none; padding: 9px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
 .btn:disabled { opacity: 0.6; cursor: default; }
 .btn.danger { background: #cf222e; }
