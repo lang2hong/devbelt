@@ -180,6 +180,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       conflictCount: session?.listConflicts().length ?? 0,
     });
     if (status === 'hidden') {
+      // 已登录但未解锁（未初始化或已锁定）：不再隐藏状态栏，显式给出可点击的同步入口，
+      // 点击走 unlockPersonalSync（内部会区分「未初始化」/「已锁定」并引导）。
+      if (auth.isLoggedIn()) {
+        setSyncReady(false);
+        setSyncUnlocked(false);
+        const initialized = session?.localEpoch !== undefined;
+        syncStatusBar.command = initialized ? 'dbclient.unlockPersonalSync' : 'dbclient.initializePersonalSync';
+        syncStatusBar.text = `$(sync) ${l10n('sync.statusLocked')}`;
+        syncStatusBar.tooltip = l10n('sync.statusLocked');
+        syncStatusBar.show();
+        return;
+      }
       syncStatusBar.hide();
       setSyncReady(false);
       setSyncUnlocked(false);
