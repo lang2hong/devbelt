@@ -14,9 +14,10 @@ function parseOff(raw: string | undefined): boolean {
 /**
  * 解析 `TRUST_PROXY`。取值语义见 docs/开发指南.md；`true` 被显式拒绝（左段
  * XFF 可由客户端伪造，使按 IP 的限流失效）。默认跳数 1（nginx 反代之后）。
+ * 返回字符串形（`'1'` 表示信任 1 跳）：Fastify v5.12 起 trustProxy 不再接受 number。
  */
-function parseTrustProxy(raw: string | undefined): boolean | number | string {
-  if (raw === undefined || raw === '') return 1;
+function parseTrustProxy(raw: string | undefined): boolean | string {
+  if (raw === undefined || raw === '') return '1';
   const v = raw.trim();
   if (v === 'false' || v === '0') return false;
   if (v === 'true') {
@@ -25,7 +26,6 @@ function parseTrustProxy(raw: string | undefined): boolean | number | string {
         'which the client fully controls, making per-IP rate limiting bypassable.',
     );
   }
-  if (/^\d+$/.test(v)) return Number(v);
   return v;
 }
 

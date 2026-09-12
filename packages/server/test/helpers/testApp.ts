@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify from 'fastify';
 import helmet from '@fastify/helmet';
 import { generateKeyPairSync } from 'crypto';
 import {
@@ -54,7 +54,7 @@ export interface TestAppOptions {
 }
 
 export interface TestApp {
-  app: FastifyInstance;
+  app: ReturnType<typeof Fastify>;
   repos: {
     userRepo: FakeUserRepo;
     emailVerificationTokenRepo: FakeEmailVerificationTokenRepo;
@@ -102,7 +102,7 @@ function makeSigningKeys(): SigningKeys {
 export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
   const app = Fastify({
     logger: false,
-    trustProxy: 1,
+    trustProxy: '1',
     bodyLimit: 1024 * 1024,
     ajv: { customOptions: { removeAdditional: false } },
   });
