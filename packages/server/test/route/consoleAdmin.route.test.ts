@@ -27,6 +27,7 @@ import {
 } from '../helpers/fakeRepos.js';
 import { FakeAuditRepo } from '../helpers/linkFlowFakes.js';
 import type { Queryable, TxRunner } from '../../src/repository/mysql/db.js';
+import type { IOrderRepo } from '../../src/repository/interfaces.js';
 
 const ORIGIN = 'http://localhost:5173';
 const UUID = '123e4567-e89b-42d3-8456-426614174000';
@@ -47,6 +48,16 @@ async function build(rateLimit = false) {
   const auditRepo = new FakeAuditRepo();
   const idemRepo = new FakeIdempotencyReceiptRepo();
   const auditWriter = new AuditWriter(auditRepo);
+  const orderRepo: IOrderRepo = {
+    create: async () => { throw new Error('unused'); },
+    findByOrderNo: async () => undefined,
+    findByOrderNoForUpdate: async () => undefined,
+    advance: async () => false,
+    listByUser: async () => [],
+    listAll: async () => [],
+    findPendingByUserAndPlan: async () => undefined,
+    expirePending: async () => 0,
+  };
 
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   const keys: SigningKeys = { kid: 'test', privateKey, publicKeys: new Map([['test', publicKey]]) };
@@ -65,6 +76,7 @@ async function build(rateLimit = false) {
     organizationSubscriptionRepo,
     membershipRepo,
     auditRepo,
+    orderRepo,
     auditWriter,
   });
 

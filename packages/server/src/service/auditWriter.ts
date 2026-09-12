@@ -38,6 +38,7 @@ const ALLOWED_EVENT_TYPES = [
   'admin.organization.subscription.changed',
   'admin.audit.read',
   'admin.audit.export',
+  'admin.orders.read',
   'admin.role.granted',
   'sync.reset.handoff.created',
   'sync.reset.handoff.consumed',

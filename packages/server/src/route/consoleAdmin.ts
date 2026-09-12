@@ -13,6 +13,8 @@ import type { AdminUserRow, AdminOrgRow, AuditFilter } from '../repository/inter
 import { ValidationError } from '../domain/errors.js';
 import { auditDto } from '../service/auditSerialize.js';
 import { organizationIdParam } from './schemas.js';
+import type { Order } from '../domain/entities.js';
+import { PAYMENT_CHANNELS } from '../service/paymentChannel.js';
 
 /** 高危平台写回执保留 30 天（§6.1）。 */
 const ADMIN_RETENTION_MS = 30 * 24 * 3600 * 1000;
@@ -106,6 +108,24 @@ function orgDto(r: AdminOrgRow) {
     subscriptionVersion: r.subscriptionVersion,
     periodEndTime: iso(r.periodEndTime),
     createTime: r.createTime.toISOString(),
+  };
+}
+
+const ORDER_STATUSES: readonly string[] = ['pending', 'paid', 'fulfilled', 'failed', 'refunded', 'expired'];
+
+function adminOrderDto(o: Order) {
+  return {
+    orderNo: o.orderNo,
+    userId: String(o.userId),
+    planCode: o.planCode,
+    amountCents: o.amountCents,
+    channel: o.channel,
+    status: o.status,
+    channelTradeNo: o.channelTradeNo ?? null,
+    paidTime: iso(o.paidTime),
+    expiresTime: o.expiresTime.toISOString(),
+    createTime: o.createTime.toISOString(),
+    updateTime: o.updateTime.toISOString(),
   };
 }
 
@@ -249,6 +269,32 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
           },
         });
         reply.code(result.status).send(result.body);
+      });
+
+      // ── 订单 ──
+      child.get('/api/console/admin/orders', async (req, reply) => {
+        await readLimit(req);
+        const q = req.query as Record<string, unknown>;
+        const cursor = parseCursor(opts.cursorService, q.cursor);
+        if (q.cursor !== undefined && q.cursor !== '' && cursor === null) {
+          return rejectConsole(reply, 422, 'INVALID_CURSOR', 'invalid cursor');
+        }
+        const status = q.status !== undefined && q.status !== '' ? String(q.status) : undefined;
+        const channel = q.channel !== undefined && q.channel !== '' ? String(q.channel) : undefined;
+        const page = await svc.listOrders(userIdOf(req), {
+          userId: q.userId ? Number(q.userId) : undefined,
+          status: status && (ORDER_STATUSES as readonly string[]).includes(status) ? (status as Order['status']) : undefined,
+          channel: channel && (PAYMENT_CHANNELS as readonly string[]).includes(channel) ? (channel as Order['channel']) : undefined,
+          planCode: q.planCode ? String(q.planCode) : undefined,
+          createdFrom: parseDate(q.createdFrom),
+          createdTo: parseDate(q.createdTo),
+          cursor: cursor ?? undefined,
+          limit: parseLimit(q.limit),
+        });
+        reply.send({
+          items: page.items.map(adminOrderDto),
+          nextCursor: page.nextId != null ? opts.cursorService.encode(String(page.nextId)) : null,
+        });
       });
 
       // ── 审计 ──

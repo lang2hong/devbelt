@@ -256,6 +256,7 @@ export async function createApp() {
     organizationSubscriptionRepo,
     membershipRepo,
     auditRepo,
+    orderRepo,
     auditWriter,
     rateLimiter,
   });

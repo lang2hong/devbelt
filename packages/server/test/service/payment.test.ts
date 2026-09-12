@@ -61,6 +61,9 @@ class FakeOrderRepo implements IOrderRepo {
   async expirePending(_now: Date, _limit: number): Promise<number> {
     return 0;
   }
+  async listAll(): Promise<Order[]> {
+    return [...this.store.values()];
+  }
 }
 
 class FakePaymentRepo implements IPaymentRepo {

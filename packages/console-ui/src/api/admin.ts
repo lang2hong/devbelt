@@ -297,3 +297,44 @@ export async function exportAudit(
     return { kind: 'failure' };
   }
 }
+
+// ── 订单 ──
+
+export interface AdminOrder {
+  orderNo: string;
+  userId: string;
+  planCode: string;
+  amountCents: number;
+  channel: string;
+  status: string;
+  channelTradeNo: string | null;
+  paidTime: string | null;
+  expiresTime: string;
+  createTime: string;
+  updateTime: string;
+}
+
+export interface OrderFilters {
+  userId?: string;
+  status?: string;
+  channel?: string;
+  planCode?: string;
+  createdFrom?: string;
+  createdTo?: string;
+  cursor?: string;
+}
+
+export async function listAdminOrders(
+  filters: OrderFilters = {},
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<Page<AdminOrder>>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(`/api/console/admin/orders${qs(filters)}`, { headers: auth(token) }, fetchImpl);
+    if (res.ok) return { kind: 'ok', value: await toPage<AdminOrder>(res) };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}

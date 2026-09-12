@@ -8,12 +8,13 @@ import type {
   IOrganizationSubscriptionRepo,
   IMembershipRepo,
   IAuditRepo,
+  IOrderRepo,
   AdminUserRow,
   AdminOrgRow,
   AuditFilter,
 } from '../repository/interfaces.js';
 import type { Queryable } from '../repository/mysql/db.js';
-import type { AuditEvent, PersonalPlan, OrganizationPlan } from '../domain/entities.js';
+import type { AuditEvent, PersonalPlan, OrganizationPlan, Order } from '../domain/entities.js';
 import type { UserStatus } from '../domain/enums.js';
 import {
   EntityNotFoundError,
@@ -66,6 +67,7 @@ export interface ConsoleAdminDeps {
   organizationSubscriptionRepo: IOrganizationSubscriptionRepo;
   membershipRepo: IMembershipRepo;
   auditRepo: IAuditRepo;
+  orderRepo: IOrderRepo;
   auditWriter: AuditWriter;
   /** 可选：用于受限读审计按 5min 窗口聚合（防高频读刷爆审计表）。 */
   rateLimiter?: RateLimitService;
@@ -91,6 +93,7 @@ export class ConsoleAdminService {
   private readonly organizationSubscriptionRepo: IOrganizationSubscriptionRepo;
   private readonly membershipRepo: IMembershipRepo;
   private readonly auditRepo: IAuditRepo;
+  private readonly orderRepo: IOrderRepo;
   private readonly auditWriter: AuditWriter;
   private readonly rateLimiter?: RateLimitService;
 
@@ -104,6 +107,7 @@ export class ConsoleAdminService {
     this.organizationSubscriptionRepo = deps.organizationSubscriptionRepo;
     this.membershipRepo = deps.membershipRepo;
     this.auditRepo = deps.auditRepo;
+    this.orderRepo = deps.orderRepo;
     this.auditWriter = deps.auditWriter;
     this.rateLimiter = deps.rateLimiter;
   }
@@ -116,7 +120,7 @@ export class ConsoleAdminService {
    */
   private async auditRestrictedRead(
     actorUserId: number,
-    eventType: 'admin.users.read' | 'admin.organizations.read' | 'admin.audit.read',
+    eventType: 'admin.users.read' | 'admin.organizations.read' | 'admin.audit.read' | 'admin.orders.read',
   ): Promise<void> {
     if (!this.rateLimiter) {
       this.auditWriter.write({ eventType, result: 'success', actorUserId, actorRole: 'platform_admin' });
@@ -260,6 +264,23 @@ export class ConsoleAdminService {
     const items = hasMore ? rows.slice(0, input.limit) : rows;
     await this.auditRestrictedRead(actorUserId, 'admin.organizations.read');
     return { items, nextId: hasMore ? items[items.length - 1].organizationId : null };
+  }
+
+  async listOrders(actorUserId: number, input: {
+    userId?: number;
+    status?: Order['status'];
+    channel?: Order['channel'];
+    planCode?: string;
+    createdFrom?: Date;
+    createdTo?: Date;
+    cursor?: number;
+    limit: number;
+  }): Promise<Page<Order>> {
+    const rows = await this.orderRepo.listAll({ ...input, limit: input.limit + 1 });
+    const hasMore = rows.length > input.limit;
+    const items = hasMore ? rows.slice(0, input.limit) : rows;
+    await this.auditRestrictedRead(actorUserId, 'admin.orders.read');
+    return { items, nextId: hasMore ? items[items.length - 1].id : null };
   }
 
   async adjustOrganizationSubscriptionInTx(

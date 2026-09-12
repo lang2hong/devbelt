@@ -708,6 +708,18 @@ export interface IIdempotencyReceiptRepo {
 
 // ── 支付（P4）──
 
+/** 平台订单列表过滤（cursor 为上一页最后一条 id，keyset DESC；跨用户，§对账/运营）。 */
+export interface AdminOrderFilter {
+  userId?: number;
+  status?: Order['status'];
+  channel?: Order['channel'];
+  planCode?: string;
+  createdFrom?: Date;
+  createdTo?: Date;
+  cursor?: number;
+  limit: number;
+}
+
 export interface IOrderRepo {
   create(input: {
     orderNo: string;
@@ -731,6 +743,8 @@ export interface IOrderRepo {
   }): Promise<boolean>;
   /** 用户订单历史（keyset cursor，DESC by id）。 */
   listByUser(userId: number, cursor: number | undefined, limit: number): Promise<Order[]>;
+  /** 平台订单列表（跨用户，多维过滤，keyset cursor DESC by id）。 */
+  listAll(input: AdminOrderFilter): Promise<Order[]>;
   /** 同 (user, plan, channel) 未过期 pending 订单（下单去重：复用原订单，防重复付款，§P4）。 */
   findPendingByUserAndPlan(userId: number, planCode: string, channel: Order['channel']): Promise<Order | undefined>;
   /** 过期 pending 订单 sweep：把超时未支付的 pending 订单批量置为 expired，返回受影响行数。 */

@@ -1,4 +1,4 @@
-import type { IOrderRepo } from '../interfaces.js';
+import type { IOrderRepo, AdminOrderFilter } from '../interfaces.js';
 import type { Order } from '../../domain/entities.js';
 import type { OrderStatus, PaymentChannel } from '../../domain/enums.js';
 import type { MysqlDb, Queryable } from './db.js';
@@ -59,6 +59,45 @@ export class MysqlOrderRepo implements IOrderRepo {
     const params = cursor !== undefined ? [userId, cursor] : [userId];
     const [rows] = await this.db().query<any[]>(
       `SELECT * FROM orders WHERE ${where} ORDER BY id DESC LIMIT ${Number(limit)}`,
+      params,
+    );
+    return rows.map(mapOrder);
+  }
+
+  async listAll(input: AdminOrderFilter): Promise<Order[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (input.userId !== undefined) {
+      where.push('user_id = ?');
+      params.push(input.userId);
+    }
+    if (input.status !== undefined) {
+      where.push('status = ?');
+      params.push(input.status);
+    }
+    if (input.channel !== undefined) {
+      where.push('channel = ?');
+      params.push(input.channel);
+    }
+    if (input.planCode !== undefined) {
+      where.push('plan_code = ?');
+      params.push(input.planCode);
+    }
+    if (input.createdFrom) {
+      where.push('create_time >= ?');
+      params.push(input.createdFrom);
+    }
+    if (input.createdTo) {
+      where.push('create_time <= ?');
+      params.push(input.createdTo);
+    }
+    if (input.cursor !== undefined) {
+      where.push('id < ?');
+      params.push(input.cursor);
+    }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const [rows] = await this.db().query<any[]>(
+      `SELECT * FROM orders ${whereSql} ORDER BY id DESC LIMIT ${Number(input.limit)}`,
       params,
     );
     return rows.map(mapOrder);

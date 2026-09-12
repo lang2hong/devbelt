@@ -20,14 +20,33 @@ const orderNo = ref<string | null>(null);
 const payParams = ref<PayParams | null>(null);
 const qrDataUrl = ref<string | null>(null);
 const pollStatus = ref<string | null>(null);
+const pollTimedOut = ref(false);
+const manualBusy = ref(false);
+
+const POLL_MSG: Record<string, string> = {
+  pending: '待支付',
+  paid: '已支付，权益生效中…',
+  fulfilled: '已生效',
+  failed: '支付失败',
+  refunded: '已退款',
+  expired: '已过期',
+};
+
+/** 轮询上限：40 × 3s = 2 分钟，超时停摆提示用户手动确认。 */
+const POLL_MAX_TICKS = 40;
 
 let pollTimer: number | undefined;
+let pollTicks = 0;
 
 function stopPolling(): void {
   if (pollTimer !== undefined) {
     clearInterval(pollTimer);
     pollTimer = undefined;
   }
+}
+
+function statusLabel(s: string | null): string {
+  return s ? (POLL_MSG[s] ?? s) : '';
 }
 
 onUnmounted(stopPolling);
@@ -42,6 +61,7 @@ async function submit(): Promise<void> {
   qrDataUrl.value = null;
   orderNo.value = null;
   pollStatus.value = null;
+  pollTimedOut.value = false;
   try {
     const csrf = await ensureCsrf();
     const r = await createOrder('pro', channel.value, csrf);
@@ -75,8 +95,12 @@ async function submit(): Promise<void> {
 
 /** 轮询订单直到 paid/fulfilled，成功后回跳账户页（订阅已生效）。 */
 function startPolling(no: string): void {
+  stopPolling();
   pollStatus.value = 'pending';
+  pollTimedOut.value = false;
+  pollTicks = 0;
   pollTimer = window.setInterval(async () => {
+    pollTicks += 1;
     const r = await getOrder(no);
     if (r.kind !== 'ok') return;
     const status = r.value.status;
@@ -84,8 +108,39 @@ function startPolling(no: string): void {
     if (status === 'paid' || status === 'fulfilled') {
       stopPolling();
       window.setTimeout(() => window.location.assign('/console/account'), 1500);
+      return;
+    }
+    if (status === 'failed' || status === 'expired' || status === 'refunded') {
+      stopPolling();
+      return;
+    }
+    if (pollTicks >= POLL_MAX_TICKS) {
+      stopPolling();
+      pollTimedOut.value = true;
     }
   }, 3000);
+}
+
+/** 用户从支付渠道返回后手动确认（兜底：跳走/断网后轮询可能丢失）。 */
+async function manualCheck(): Promise<void> {
+  if (!orderNo.value || manualBusy.value) return;
+  manualBusy.value = true;
+  try {
+    const r = await getOrder(orderNo.value);
+    if (r.kind === 'ok') {
+      pollStatus.value = r.value.status;
+      const status = r.value.status;
+      if (status === 'paid' || status === 'fulfilled') {
+        stopPolling();
+        window.setTimeout(() => window.location.assign('/console/account'), 800);
+      } else {
+        pollTimedOut.value = false;
+        startPolling(orderNo.value);
+      }
+    }
+  } finally {
+    manualBusy.value = false;
+  }
 }
 </script>
 
@@ -126,13 +181,19 @@ function startPolling(no: string): void {
       <p class="muted">请用微信「扫一扫」扫码完成支付。下单后 30 分钟内有效。</p>
       <img class="qr" :src="qrDataUrl" alt="支付二维码" />
       <p class="muted">订单号：{{ orderNo }}</p>
-      <p v-if="pollStatus" class="muted">状态：{{ pollStatus }}</p>
     </div>
 
     <div class="card" v-if="payParams?.redirectUrl && !qrDataUrl">
       <h3>支付宝支付</h3>
       <p class="muted">已打开支付宝收银台。若未跳转，<a :href="payParams.redirectUrl">点此前往</a>。</p>
-      <p class="muted">订单号：{{ orderNo }} · 状态：{{ pollStatus }}</p>
+      <p class="muted">订单号：{{ orderNo }}</p>
+    </div>
+
+    <div class="card" v-if="orderNo">
+      <h3>支付状态</h3>
+      <p class="muted">当前状态：{{ statusLabel(pollStatus) || '待支付' }}</p>
+      <p v-if="pollTimedOut" class="warn">长时间未检测到支付，请确认是否已完成支付，或重新下单。</p>
+      <button class="btn secondary" :disabled="manualBusy" @click="manualCheck">{{ manualBusy ? '查询中…' : '我已付款，刷新状态' }}</button>
     </div>
   </section>
 </template>
@@ -149,8 +210,10 @@ label { display: block; font-size: 13px; color: #57606a; margin: 12px 0 4px; }
 .btn { margin-top: 16px; background: #0969da; color: #fff; border: none; padding: 9px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
 .btn:disabled { opacity: 0.6; cursor: default; }
 .btn.link { display: inline-block; text-decoration: none; }
+.btn.secondary { background: #f6f8fa; color: #24292f; border: 1px solid #d0d7de; font-weight: 500; }
 .qr { width: 220px; height: 220px; border: 1px solid #d0d7de; border-radius: 8px; }
 .error { color: #cf222e; font-size: 13px; }
 .ok { color: #1a7f37; font-size: 13px; }
+.warn { color: #9a6700; font-size: 13px; }
 .muted { color: #57606a; font-size: 13px; }
 </style>

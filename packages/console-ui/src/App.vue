@@ -16,6 +16,7 @@ import OrganizationDetailView from './pages/OrganizationDetailView.vue';
 import ResourcesView from './pages/ResourcesView.vue';
 import AdminUsersView from './pages/AdminUsersView.vue';
 import AdminOrganizationsView from './pages/AdminOrganizationsView.vue';
+import AdminOrdersView from './pages/AdminOrdersView.vue';
 import AdminAuditView from './pages/AdminAuditView.vue';
 import AdminVersionView from './pages/AdminVersionView.vue';
 import StatusPage from './pages/StatusPage.vue';
@@ -32,6 +33,7 @@ const ROUTES: RouteConfig[] = [
   { pattern: '/console/organizations/:id/resources', name: 'organization-resources' },
   { pattern: '/console/admin/users', name: 'admin-users' },
   { pattern: '/console/admin/organizations', name: 'admin-organizations' },
+  { pattern: '/console/admin/orders', name: 'admin-orders' },
   { pattern: '/console/admin/audit', name: 'admin-audit' },
   { pattern: '/console/admin/version', name: 'admin-version' },
 ];
@@ -69,6 +71,8 @@ const view = computed<{ comp: Component; props: Record<string, unknown> }>(() =>
       return { comp: AdminUsersView, props: {} };
     case 'admin-organizations':
       return { comp: AdminOrganizationsView, props: {} };
+    case 'admin-orders':
+      return { comp: AdminOrdersView, props: {} };
     case 'admin-audit':
       return { comp: AdminAuditView, props: {} };
     case 'admin-version':
@@ -129,13 +133,13 @@ async function onLogout(): Promise<void> {
     <template v-else-if="me_">
       <nav class="nav">
         <span class="brand">DB Client</span>
-        <a href="/console/account" :class="{ on: router.name === 'account' }">账户</a>
-        <a href="/console/account/devices" :class="{ on: router.name === 'devices' }">设备</a>
-        <a href="/console/account/sync" :class="{ on: router.name === 'sync' }">同步</a>
-        <a href="/console/orders" :class="{ on: router.name === 'orders' }">订单</a>
-        <a href="/console/invoices" :class="{ on: router.name === 'invoices' }">发票</a>
-        <a href="/console/organizations" :class="{ on: router.name === 'organizations' || router.name === 'organization-detail' || router.name === 'organization-resources' }">组织</a>
-        <a v-if="me_.platformAdmin" href="/console/admin/users" :class="{ on: ['admin-users', 'admin-organizations', 'admin-audit', 'admin-version'].includes(router.name ?? '') }">管理</a>
+        <a href="/console/account" @click.prevent="navigate('/console/account')" :class="{ on: router.name === 'account' }">账户</a>
+        <a href="/console/account/devices" @click.prevent="navigate('/console/account/devices')" :class="{ on: router.name === 'devices' }">设备</a>
+        <a href="/console/account/sync" @click.prevent="navigate('/console/account/sync')" :class="{ on: router.name === 'sync' }">同步</a>
+        <a href="/console/orders" @click.prevent="navigate('/console/orders')" :class="{ on: router.name === 'orders' }">订单</a>
+        <a href="/console/invoices" @click.prevent="navigate('/console/invoices')" :class="{ on: router.name === 'invoices' }">发票</a>
+        <a href="/console/organizations" @click.prevent="navigate('/console/organizations')" :class="{ on: router.name === 'organizations' || router.name === 'organization-detail' || router.name === 'organization-resources' }">组织</a>
+        <a v-if="me_.platformAdmin" href="/console/admin/users" @click.prevent="navigate('/console/admin/users')" :class="{ on: ['admin-users', 'admin-organizations', 'admin-orders', 'admin-audit', 'admin-version'].includes(router.name ?? '') }">管理</a>
         <span class="spacer"></span>
         <span class="email">{{ me_.user.email }}</span>
         <button class="btn ghost" @click="onLogout">登出</button>
