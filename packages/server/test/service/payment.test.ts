@@ -209,8 +209,9 @@ describe('OrderService.handleCallback', () => {
 
   it('extends the existing periodEndTime instead of overwriting remaining time', async () => {
     const { svc, subsRepo } = makeService();
+    const startTime = new Date(Date.now() - 5 * 24 * 3600 * 1000); // 5 天前开始
     const existingEnd = new Date(Date.now() + 20 * 24 * 3600 * 1000); // 20 天剩余
-    await subsRepo.create({ userId: 1, planId: 2, status: 'active', entitlementSnapshot: { maxConnectionMetas: 5000 }, periodStartTime: new Date(), periodEndTime: existingEnd });
+    await subsRepo.create({ userId: 1, planId: 2, status: 'active', entitlementSnapshot: { maxConnectionMetas: 5000 }, periodStartTime: startTime, periodEndTime: existingEnd });
     const { orderNo } = await svc.createOrder(1, 'pro', 'wechat');
     const cb = SUCCESS_CALLBACK(orderNo, 'wx-1', 9900);
     await svc.handleCallback('wechat', cb.raw, cb.headers);
@@ -220,6 +221,8 @@ describe('OrderService.handleCallback', () => {
     const expected = existingEnd.getTime() + 30 * 24 * 3600 * 1000;
     expect(sub!.periodEndTime!.getTime()).toBeGreaterThanOrEqual(expected - 1000);
     expect(sub!.periodEndTime!.getTime()).toBeLessThanOrEqual(expected + 1000);
+    // 叠加：周期起点保持原值，不因续费重置为 now。
+    expect(sub!.periodStartTime.getTime()).toBe(startTime.getTime());
   });
 
   it('fulfills an alipay order via its own alipay callback (cross-channel isolation)', async () => {

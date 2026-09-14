@@ -101,11 +101,8 @@ export class OrderService {
     const orderNo = randomBytes(16).toString('hex');
     const expiresTime = new Date(Date.now() + ORDER_EXPIRES_MS);
 
-    // fail-closed：剩余时间太短就无法创建有效外部支付意图（渠道要能设置有效期）。
-    if (expiresTime.getTime() - Date.now() < MIN_ORDER_LIFETIME_MS) {
-      throw new OrderInvalidStateError('too little time remaining to create a payment intent');
-    }
-
+    // 新单固定 ORDER_EXPIRES_MS(=30m) > MIN_ORDER_LIFETIME_MS(=1m)，剩余寿命恒充足，无需重复守卫；
+    // 复用路径的剩余寿命校验见上方 existing 分支。
     await this.orderRepo.create({ orderNo, userId, planCode, amountCents, channel, expiresTime });
     const payParams = await gateway.createPayment({ orderNo, amountCents, expiresTime });
 
