@@ -8,6 +8,7 @@ import { DbTreeDataProvider } from '../tree/dbTreeDataProvider';
 import { QueryExecutor } from '../result/queryExecutor';
 import { HistoryStore } from '../history/historyStore';
 import { AuthService } from '../sync/authService';
+import type { SyncSessionFactory } from '../sync/sessionFactory';
 import { l10n } from '../i18n';
 import type { DatabaseOperation } from '@db-client/core';
 import type { ConnectionSession } from '../connection/connectionManager';
@@ -22,6 +23,8 @@ export interface Deps {
   history: HistoryStore;
   auth: AuthService;
   connCtx: ConnectionContext;
+  /** 同步会话工厂（账户面板读取同步状态用；未建会话时为 undefined）。 */
+  syncFactory: SyncSessionFactory;
 }
 
 export type Sub = (cmd: string, handler: (...args: any[]) => any) => void;

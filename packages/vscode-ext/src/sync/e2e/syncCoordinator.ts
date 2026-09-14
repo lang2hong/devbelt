@@ -113,6 +113,38 @@ export class SyncCoordinator {
     return this._lastRun;
   }
 
+  /** 显式 pull：仅拉取远端 feed（不走 outbox 重放），复用同一串行链。 */
+  async pullNow(): Promise<SyncRunResult | undefined> {
+    return this.runPhase('pull');
+  }
+
+  /** 显式 push：先生成本地变更 mutation，再仅重放出站 outbox。 */
+  async pushNow(): Promise<SyncRunResult | undefined> {
+    return this.runPhase('push', true);
+  }
+
+  /** 分相执行：串行入链（避免与 debounce 轮次并发），通知/退避与 runNow 一致。 */
+  private async runPhase(phase: 'pull' | 'push', reconcile = false): Promise<SyncRunResult | undefined> {
+    let failure: unknown;
+    const run = this.chain.then(async () => {
+      try {
+        if (reconcile) await this.mutator.reconcile();
+        const result = await this.engine.syncPhase(phase);
+        this._lastRun = result;
+        this.notify(result);
+        this.maybeRetry(result);
+      } catch (err) {
+        failure = err;
+        this._lastError = describe(err);
+        this.notify(undefined);
+      }
+    });
+    this.chain = run.catch(() => {});
+    await run;
+    if (failure) throw failure;
+    return this._lastRun;
+  }
+
   /** 立即入链同步（无 debounce、无幂等）；错误经 lastError 与退避体现，不向上抛。 */
   scheduleNow(): void {
     if (this.stopped) return;

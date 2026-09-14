@@ -217,6 +217,18 @@ export class PersonalSyncSession {
     return this.coordinator.runNow();
   }
 
+  /** 显式拉取：仅拉取远端 feed（不推送本地变更）。 */
+  async syncPull() {
+    if (!this.coordinator) throw new Error('sync session is locked');
+    return this.coordinator.pullNow();
+  }
+
+  /** 显式推送：先生成本地变更 mutation，再重放出站。 */
+  async syncPush() {
+    if (!this.coordinator) throw new Error('sync session is locked');
+    return this.coordinator.pushNow();
+  }
+
   /** 立即排一次后台同步（不 await、不抛错）；供命令/窗口聚焦使用。 */
   scheduleNow(): void {
     if (!this.coordinator) throw new Error('sync session is locked');
@@ -235,9 +247,10 @@ export class PersonalSyncSession {
   }
 
   /** B4：三态迁移。cancel 为 noop；local/remote 由 ConflictResolver 原子执行。 */
-  async resolveConflict(recordId: string, decision: 'local' | 'remote' | 'cancel'): Promise<void> {
+  async resolveConflict(recordId: string, decision: 'local' | 'merge' | 'remote' | 'cancel'): Promise<void> {
     if (!this.resolver) throw new Error('sync session is locked');
     if (decision === 'local') await this.resolver.useLocal(recordId);
+    else if (decision === 'merge') await this.resolver.useMerge(recordId);
     else if (decision === 'remote') await this.resolver.useRemote(recordId);
   }
 

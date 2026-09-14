@@ -1,4 +1,4 @@
-import { openRecord } from './recordCodec';
+import { openRecord, encodeEntityPayload, type CodecEntityInput, type RefResolver } from './recordCodec';
 import { applyRecord, type ApplyContext } from './applyRecords';
 import type { RecordMapStore } from './recordMapStore';
 import { PendingMutationStore } from './pendingMutationStore';
@@ -102,6 +102,67 @@ export class ConflictResolver {
     await this.deps.outbox.delete(mutation.mutationId);
   }
 
+  /**
+   * Merge：字段级合并（以远端 payload 为基，本地非空字段覆盖），把合并结果写回本地并将
+   * 该 record 以远端 currentVersion 为 base 重新入 outbox，下轮 push 覆盖远端。
+   *
+   * - 本地 delete 或远端 tombstone：无字段可合并 → 退化为 Use Local（本地 delete）/ Use Remote（远端 tombstone）。
+   * - 远端版本/密文尚未拉取 → 抛错（须先触发一轮 sync 拉取密文）。
+   */
+  async useMerge(recordId: string): Promise<void> {
+    const mutation = this.deps.outbox.list().find((m) => m.recordId === recordId && m.conflict);
+    if (!mutation) return;
+    const conflict = mutation.conflict!;
+    const ref: SyncEntityRef = { type: mutation.type, localId: mutation.localId };
+
+    if (mutation.action === 'record.delete') {
+      await this.useLocal(recordId);
+      return;
+    }
+    if (conflict.remoteTombstone === true) {
+      await this.useRemote(recordId);
+      return;
+    }
+    if (conflict.remoteTombstone !== false) {
+      throw new Error('remote version not yet fetched; sync again before Merge');
+    }
+    if (!conflict.remoteNonce || !conflict.remoteCiphertext || !conflict.remoteTag) {
+      throw new Error('remote ciphertext not yet available; sync again before Merge');
+    }
+    const localEntity = this.deps.entities.get(ref);
+    if (!localEntity) {
+      // 本地实体已不存在：无可合并来源，采用远端。
+      await this.useRemote(recordId);
+      return;
+    }
+
+    const remotePlaintext = openRecord(
+      this.deps.dek(),
+      Buffer.from(conflict.remoteNonce, 'base64url'),
+      Buffer.from(conflict.remoteCiphertext, 'base64url'),
+      Buffer.from(conflict.remoteTag, 'base64url'),
+      { userId: this.deps.userId, keyEpoch: this.deps.keyEpoch, recordId, recordVersion: conflict.remoteRecordVersion },
+    );
+    const remotePayload = JSON.parse(Buffer.from(remotePlaintext).toString('utf8')) as Record<string, unknown>;
+    const resolveRef: RefResolver = (type, localId) => {
+      if (localId === undefined || localId === '') return undefined;
+      return this.deps.mapStore.getByRef({ type, localId })?.recordId;
+    };
+    const localPayload = encodeEntityPayload(
+      { type: mutation.type, entity: localEntity } as unknown as CodecEntityInput,
+      resolveRef,
+    );
+    const merged = mergeRecordPayload(remotePayload, localPayload);
+
+    // 先把合并结果落到本地（复用 decode/构建 + 更新 recordMap 到远端版本），再以远端版本为 base 重新入 outbox。
+    await applyRecord(
+      { recordId, version: conflict.remoteRecordVersion, tombstone: false, payload: merged, force: true },
+      this.ctx(),
+    );
+    const next = this.deps.mutator.rebasePut(recordId, ref, conflict.remoteRecordVersion);
+    await this.deps.outbox.replaceMutation(mutation.mutationId, next);
+  }
+
   private ctx(): ApplyContext {
     return {
       entities: this.deps.entities,
@@ -111,4 +172,19 @@ export class ConflictResolver {
       uniqueId: this.deps.uniqueId,
     };
   }
+}
+
+/**
+ * 字段级合并：以远端 payload 为基，本地非 `undefined` 字段覆盖（本地优先）。
+ * `type` 以本地为准（同一 record 两侧 type 应一致；防止被远端覆盖成他类型）。
+ */
+export function mergeRecordPayload(remote: unknown, local: unknown): Record<string, unknown> {
+  const r = (typeof remote === 'object' && remote !== null) ? (remote as Record<string, unknown>) : {};
+  const l = (typeof local === 'object' && local !== null) ? (local as Record<string, unknown>) : {};
+  const out: Record<string, unknown> = { ...r };
+  for (const [k, v] of Object.entries(l)) {
+    if (v !== undefined) out[k] = v;
+  }
+  if (typeof l.type === 'string') out.type = l.type;
+  return out;
 }

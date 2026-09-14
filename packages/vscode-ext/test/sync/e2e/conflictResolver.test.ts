@@ -203,4 +203,64 @@ describe('ConflictResolver', () => {
     expect(outbox.list()).toHaveLength(0);
     expect(store.get('c-1') as SavedConnection | undefined).toBeUndefined();
   });
+
+  it('useMerge：远端为基、本地非空覆盖，写回本地并替换为无冲突 mutation', async () => {
+    const { resolver, mapStore, outbox, store } = makeResolver({});
+    await mapStore.put(id, { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 100, status: 'confirmed' });
+    const sealed = sealedConnection(id, '7', { dbType: 'mysql', name: 'Remote Name', host: 'rh', port: 3306, user: 'ru', password: 'remote-pw' });
+    const m = putMutation(id, 'c-1', '0');
+    await outbox.put(m);
+    await outbox.setConflict(m.mutationId, {
+      kind: 'version', currentVersion: '7', remoteRecordVersion: '7',
+      remoteNonce: sealed.nonce, remoteCiphertext: sealed.ciphertext, remoteTag: sealed.tag, remoteTombstone: false,
+    });
+
+    await resolver.useMerge(id);
+
+    const c = store.get('c-1') as SavedConnection;
+    expect(c.name).toBe('Local'); // 本地非空优先
+    expect(c.password).toBe('remote-pw'); // 本地缺失的字段取远端
+    const listed = outbox.list();
+    expect(listed).toHaveLength(1);
+    expect(listed[0].baseVersion).toBe('7');
+    expect(listed[0].conflict).toBeUndefined();
+  });
+
+  it('useMerge：本地 delete 冲突退化为 Use Local（保留 record.delete）', async () => {
+    const { resolver, mapStore, outbox } = makeResolver({});
+    await mapStore.put(id, { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 100, status: 'confirmed' });
+    const m = deleteMutation(id, 'c-1', '0');
+    await outbox.put(m);
+    await outbox.setConflict(m.mutationId, { kind: 'version', currentVersion: '7', remoteRecordVersion: '7', remoteTombstone: false });
+
+    await resolver.useMerge(id);
+
+    const listed = outbox.list();
+    expect(listed).toHaveLength(1);
+    expect(listed[0].action).toBe('record.delete');
+    expect(listed[0].baseVersion).toBe('7');
+  });
+
+  it('useMerge：远端 tombstone 退化为 Use Remote（删本地）', async () => {
+    const { resolver, mapStore, outbox, store } = makeResolver({});
+    await mapStore.put(id, { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 100, status: 'confirmed' });
+    const m = putMutation(id, 'c-1', '0');
+    await outbox.put(m);
+    await outbox.setConflict(m.mutationId, { kind: 'version', currentVersion: '7', remoteRecordVersion: '7', remoteTombstone: true });
+
+    await resolver.useMerge(id);
+
+    expect(outbox.list()).toHaveLength(0);
+    expect(store.get('c-1') as SavedConnection | undefined).toBeUndefined();
+  });
+
+  it('useMerge：远端 active 但密文未就绪 → 抛错', async () => {
+    const { resolver, mapStore, outbox } = makeResolver({});
+    await mapStore.put(id, { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 100, status: 'confirmed' });
+    const m = putMutation(id, 'c-1', '0');
+    await outbox.put(m);
+    await outbox.setConflict(m.mutationId, { kind: 'version', currentVersion: '7', remoteRecordVersion: '7', remoteTombstone: false });
+
+    await expect(resolver.useMerge(id)).rejects.toThrowError(/ciphertext not yet available/);
+  });
 });

@@ -371,7 +371,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     origRefresh();
   };
 
-  registerCommands({ context, store, manager, treeProvider, overrideStore, executor, history, auth, connCtx });
+  registerCommands({ context, store, manager, treeProvider, overrideStore, executor, history, auth, connCtx, syncFactory });
 
   // 首次加载即异步重算路径 warning（仅本地 fs 校验，无同步/网络请求）。
   void treeProvider.refreshPathIssues();

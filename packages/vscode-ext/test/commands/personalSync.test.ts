@@ -7,7 +7,7 @@ vi.mock('vscode', () => ({
   commands: { executeCommand: vi.fn(async () => {}) },
 }));
 
-import { initializePersonalSync, unlockPersonalSync, syncEntry, type PersonalSyncCommandDeps, type SyncSessionPort, type SyncUi } from '../../src/commands/personalSync';
+import { initializePersonalSync, unlockPersonalSync, syncEntry, pullPersonalSync, pushPersonalSync, type PersonalSyncCommandDeps, type SyncSessionPort, type SyncUi } from '../../src/commands/personalSync';
 import { SyncApiError } from '../../src/sync/e2e/client';
 import type { InitialSyncMaterial } from '../../src/sync/keyLifecycle';
 import type { StateDto } from '../../src/sync/e2e/types';
@@ -44,6 +44,8 @@ function makeSession(over: Partial<SyncSessionPort> = {}): SyncSessionPort {
     initializeSync: vi.fn(async () => {}),
     unlockFromState: vi.fn(async () => {}),
     syncNow: vi.fn(async () => ({ stage: 'ok' })),
+    syncPull: vi.fn(async () => ({ stage: 'ok' })),
+    syncPush: vi.fn(async () => ({ stage: 'ok' })),
     lock: vi.fn(),
     ...over,
   };
@@ -272,5 +274,24 @@ describe('personal sync B1 commands', () => {
     await syncEntry(deps);
     expect(session.initializeSync).toHaveBeenCalledTimes(1);
     expect(session.unlockFromState).not.toHaveBeenCalled();
+  });
+
+  it('pull/push: locked session warns and does not run', async () => {
+    const session = makeSession({ isUnlocked: false });
+    const { deps, warn } = makeDeps(session, []);
+    await pullPersonalSync(deps);
+    await pushPersonalSync(deps);
+    expect(session.syncPull).not.toHaveBeenCalled();
+    expect(session.syncPush).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it('pull/push: unlocked session invokes the matching phase', async () => {
+    const session = makeSession({ isUnlocked: true });
+    const { deps } = makeDeps(session, []);
+    await pullPersonalSync(deps);
+    await pushPersonalSync(deps);
+    expect(session.syncPull).toHaveBeenCalledTimes(1);
+    expect(session.syncPush).toHaveBeenCalledTimes(1);
   });
 });

@@ -20,6 +20,8 @@ interface SyncSessionPort {
   initializeSync(newState: NewStateDto, dek: Uint8Array): Promise<void>;
   unlockFromState(state: StateDto, dek: Uint8Array): Promise<void>;
   syncNow(): Promise<SyncRun>;
+  syncPull(): Promise<SyncRun>;
+  syncPush(): Promise<SyncRun>;
   lock(): void;
 }
 
@@ -252,6 +254,34 @@ export async function syncEntry(deps: PersonalSyncCommandDeps): Promise<void> {
   else await initializePersonalSync(deps);
 }
 
+/** 显式 pull / push 共用：需解锁，结果经 reportInitialRun 反馈。 */
+async function runExplicitSync(
+  deps: PersonalSyncCommandDeps,
+  run: (session: SyncSessionPort) => Promise<SyncRun>,
+): Promise<void> {
+  const session = await getSession(deps);
+  if (!session) return;
+  if (!session.isUnlocked) {
+    deps.ui.warn(l10n('sync.requiresUnlock'));
+    return;
+  }
+  try {
+    reportInitialRun(deps.ui, await run(session));
+  } catch {
+    deps.ui.warn(l10n('sync.initialSyncPending'));
+  }
+}
+
+/** 仅拉取远端（pull）。 */
+export async function pullPersonalSync(deps: PersonalSyncCommandDeps): Promise<void> {
+  await runExplicitSync(deps, (session) => session.syncPull());
+}
+
+/** 仅推送本地变更（push）。 */
+export async function pushPersonalSync(deps: PersonalSyncCommandDeps): Promise<void> {
+  await runExplicitSync(deps, (session) => session.syncPush());
+}
+
 function vscodeUi(): SyncUi {
   return {
     promptSmp: (prompt) => vscode.window.showInputBox({ prompt, password: true, ignoreFocusOut: true }),
@@ -280,6 +310,8 @@ export function registerPersonalSyncCommands(
     vscode.commands.registerCommand('dbclient.initializePersonalSync', () => initializePersonalSync(deps)),
     vscode.commands.registerCommand('dbclient.unlockPersonalSync', () => unlockPersonalSync(deps)),
     vscode.commands.registerCommand('dbclient.syncEntry', () => syncEntry(deps)),
+    vscode.commands.registerCommand('dbclient.syncPull', () => pullPersonalSync(deps)),
+    vscode.commands.registerCommand('dbclient.syncPush', () => pushPersonalSync(deps)),
   );
 }
 

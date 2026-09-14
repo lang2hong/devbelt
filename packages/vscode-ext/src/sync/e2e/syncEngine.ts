@@ -30,6 +30,9 @@ import { assertRecordId, assertBase64UrlNoPad, assertBase64UrlRange, assertU64De
 
 export type SyncRunStage = 'ok' | 'epoch-mismatch' | 'conflict' | 'error' | 'terminal';
 
+/** 同步分相：`both` 先 push 后 pull（默认）；`push` 仅出站；`pull` 仅入站。 */
+export type SyncPhase = 'both' | 'push' | 'pull';
+
 export interface SyncConflictEntry {
   recordId: string;
   kind: 'version' | 'pending';
@@ -155,8 +158,13 @@ export class SyncEngine {
 
   /** 单飞：并发 sync() 合并进同一轮，失败后清空允许下次重试（不产生未处理 rejection）。 */
   sync(): Promise<SyncRunResult> {
+    return this.syncPhase('both');
+  }
+
+  /** 分相同步：`push` 仅重放出站 outbox；`pull` 仅拉取 feed；`both` 先 push 后 pull。 */
+  syncPhase(phase: SyncPhase): Promise<SyncRunResult> {
     if (this.inflight) return this.inflight;
-    const p = this.run();
+    const p = this.run(phase);
     this.inflight = p;
     void p.then(
       () => {
@@ -169,7 +177,7 @@ export class SyncEngine {
     return p;
   }
 
-  private async run(): Promise<SyncRunResult> {
+  private async run(phase: SyncPhase = 'both'): Promise<SyncRunResult> {
     const limit = this.deps.feedPageLimit ?? 256;
 
     // 1. epoch 对账
@@ -217,7 +225,7 @@ export class SyncEngine {
     const conflicts: SyncConflictEntry[] = [];
     let stalled: SyncStalledEntry | undefined;
     let lastCommitted = local.changeSequence;
-    for (const m of this.deps.outbox.list()) {
+    for (const m of (phase === 'pull' ? [] : this.deps.outbox.list())) {
       // C1：已标记冲突的 mutation 不得再 push（避免每轮重复 409）；把持久化冲突反馈给 UI。
       if (m.conflict) {
         conflicts.push({
@@ -302,6 +310,11 @@ export class SyncEngine {
       // outbox 回放之前捕获，若存在并发 remote record 落于其上，直接提交回执序列会永久
       // 越过该记录（下轮 cursor 已越过其 seq，无法再拉）。cursor 仅由 pull 逐页提交推进，
       // 本轮未拉到的 push record 由下轮幂等重放收敛。
+    }
+
+    // push-only：出站重放完成即返回，不进入 feed 拉取。
+    if (phase === 'push') {
+      return { stage: conflicts.length > 0 ? 'conflict' : 'ok', conflicts, stalled, applied: 0, changeSequence: lastCommitted };
     }
 
     // 3. 分页 feed + 解密 + 应用 + 逐页 cursor

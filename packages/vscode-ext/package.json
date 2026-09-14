@@ -124,6 +124,16 @@
         "category": "DB Client"
       },
       {
+        "command": "dbclient.openConsole",
+        "title": "%cmd.openConsole%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.changeLoginPassword",
+        "title": "%cmd.changeLoginPassword%",
+        "category": "DB Client"
+      },
+      {
         "command": "dbclient.initializePersonalSync",
         "title": "%cmd.initializePersonalSync%",
         "category": "DB Client"
@@ -141,6 +151,16 @@
       {
         "command": "dbclient.syncEntry",
         "title": "%cmd.syncEntry%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.syncPull",
+        "title": "%cmd.syncPull%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.syncPush",
+        "title": "%cmd.syncPush%",
         "category": "DB Client"
       },
       {
@@ -741,6 +761,14 @@
           "when": "dbclient.loggedIn"
         },
         {
+          "command": "dbclient.openConsole",
+          "when": "dbclient.loggedIn"
+        },
+        {
+          "command": "dbclient.changeLoginPassword",
+          "when": "dbclient.loggedIn"
+        },
+        {
           "command": "dbclient.sessions",
           "when": "dbclient.loggedIn"
         },
@@ -759,6 +787,14 @@
         {
           "command": "dbclient.syncEntry",
           "when": "dbclient.loggedIn && !dbclient.sync.unlocked"
+        },
+        {
+          "command": "dbclient.syncPull",
+          "when": "dbclient.sync.ready"
+        },
+        {
+          "command": "dbclient.syncPush",
+          "when": "dbclient.sync.ready"
         },
         {
           "command": "dbclient.fixConnectionPaths",
