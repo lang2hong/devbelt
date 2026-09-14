@@ -90,11 +90,7 @@ onMounted(() => {
         <button class="btn" @click="act('dbclient.changeSyncPassword')">{{ t('account.action.changeSyncPassword') }}</button>
         <button class="btn" @click="act('dbclient.recoverSync')">{{ t('account.action.recoverSync') }}</button>
         <button class="btn" @click="act('dbclient.recoverByAccount')">{{ t('account.action.recoverByAccount') }}</button>
-        <button class="btn" @click="act('dbclient.syncPull')">{{ t('account.action.pull') }}</button>
-        <button class="btn" @click="act('dbclient.syncPush')">{{ t('account.action.push') }}</button>
         <button class="btn" @click="act('dbclient.resetSync')">{{ t('account.action.resetSync') }}</button>
-        <button class="btn" @click="act('dbclient.sessions')">{{ t('account.action.sessions') }}</button>
-        <button class="btn" @click="act('dbclient.openConsole')">{{ t('account.action.openConsole') }}</button>
         <button class="btn danger" @click="act('dbclient.logout')">{{ t('account.action.logout') }}</button>
       </div>
     </template>
