@@ -143,7 +143,8 @@ export function redactIp(ip: string | null | undefined): string | null {
     const groups = expandIpv6(value);
     return `${groups.slice(0, 4).join(':')}::`;
   }
-  return value;
+  // 无法识别（畸形串/异常头）：不原样落库，避免把任意客户端输入写入审计。
+  return null;
 }
 
 function expandIpv6(addr: string): string[] {

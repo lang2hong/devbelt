@@ -218,13 +218,13 @@ export class LinkFlowService {
       const sub = await this.organizationSubscriptionRepo.findByOrganizationIdForUpdate(tx, org.id);
       if (!sub || sub.status !== 'active') throw new InvitationInvalidError();
 
-      // 4. invitation FOR UPDATE（通过 target_record_id）。
+      // 4. membership FOR UPDATE（用预读 membershipId；与组织路径统一锁序：membership → invitation）。
+      const membership = await this.membershipRepo.findByIdForUpdate(tx, invHint.membershipId);
+      if (!membership || membership.organizationId !== org.id) throw new InvitationInvalidError();
+
+      // 5. invitation FOR UPDATE（通过 target_record_id）。
       const inv = await this.invitationRepo.findByIdForUpdate(tx, flow.targetRecordId);
       if (!inv || inv.organizationId !== org.id) throw new InvitationInvalidError();
-
-      // 5. membership FOR UPDATE。
-      const membership = await this.membershipRepo.findByIdForUpdate(tx, inv.membershipId);
-      if (!membership || membership.organizationId !== org.id) throw new InvitationInvalidError();
 
       // 用户 active 且邮箱已验证。
       const user = await this.userRepo.findByIdInTx(tx, userId);

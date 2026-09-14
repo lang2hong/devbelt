@@ -43,9 +43,9 @@ describe('redactIp', () => {
     expect(redactIp('::ffff:192.0.2.1')).toBe('0:0:0:0::');
   });
 
-  it('passes through null and unrecognised values', () => {
+  it('drops null and unrecognised values instead of persisting raw input', () => {
     expect(redactIp(null)).toBeNull();
     expect(redactIp(undefined)).toBeNull();
-    expect(redactIp('not an ip')).toBe('not an ip');
+    expect(redactIp('not an ip')).toBeNull();
   });
 });
