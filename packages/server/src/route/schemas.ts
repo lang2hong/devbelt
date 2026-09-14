@@ -299,7 +299,9 @@ const recoveryKdfSchema = {
 
 const syncNewState = {
   type: 'object',
-  required: ['protocolVersion', 'cipherSuite', 'formatVersion', 'smpKdf', 'recoveryKdf', 'envelopeSmp', 'envelopeRecovery', 'signPub', 'recoverSignPub'],
+  // 账号恢复通道为必填单一契约：envelopeAccount/accountRecoveryKey 一律必填
+  // （无「未启用」态），init/destroy/reset-after-loss 均须携带。
+  required: ['protocolVersion', 'cipherSuite', 'formatVersion', 'smpKdf', 'recoveryKdf', 'envelopeSmp', 'envelopeRecovery', 'envelopeAccount', 'accountRecoveryKey', 'signPub', 'recoverSignPub'],
   additionalProperties: false,
   properties: {
     protocolVersion: protocolV1,
@@ -309,6 +311,8 @@ const syncNewState = {
     recoveryKdf: recoveryKdfSchema,
     envelopeSmp: syncEnvelope,
     envelopeRecovery: syncEnvelope,
+    envelopeAccount: syncEnvelope,
+    accountRecoveryKey: b64url(43, 43),
     signPub: b64url(43, 43),
     recoverSignPub: b64url(43, 43),
   },
@@ -364,6 +368,37 @@ export const syncDestroyBody = {
     ...signedMutationProps,
     expectedStateVersion: u64Str,
     newState: syncNewState,
+  },
+} as const;
+
+/**
+ * 账号恢复材料下发（`POST /api/sync/recover-via-account`）的二次校验口令。
+ * 该端点会下发 DEK 解密原材料，故在普通 access token 之上额外要求账户登录口令
+ * 自证（step-up），防止 token 单独泄露即可离线解密全部同步数据。
+ */
+export const syncRecoverViaAccountBody = {
+  type: 'object',
+  required: ['password'],
+  additionalProperties: false,
+  properties: {
+    password: { type: 'string', maxLength: 256 },
+  },
+} as const;
+
+export const syncAccountRecoverBody = {
+  type: 'object',
+  required: ['protocolVersion', 'keyEpoch', 'mutationId', 'signature', 'expectedStateVersion', 'smpKdf', 'envelopeSmp', 'recoveryKdf', 'envelopeRecovery', 'envelopeAccount', 'accountRecoveryKey', 'recoverSignPub'],
+  additionalProperties: false,
+  properties: {
+    ...signedMutationProps,
+    expectedStateVersion: u64Str,
+    smpKdf: smpKdfSchema,
+    envelopeSmp: syncEnvelope,
+    recoveryKdf: recoveryKdfSchema,
+    envelopeRecovery: syncEnvelope,
+    envelopeAccount: syncEnvelope,
+    accountRecoveryKey: b64url(43, 43),
+    recoverSignPub: b64url(43, 43),
   },
 } as const;
 

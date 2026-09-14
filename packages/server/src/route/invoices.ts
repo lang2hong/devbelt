@@ -41,6 +41,7 @@ function invoiceDto(inv: Invoice) {
     email: inv.email,
     amountCents: inv.amountCents,
     status: inv.status,
+    reason: inv.reason ?? null,
     createTime: inv.createTime.toISOString(),
   };
 }

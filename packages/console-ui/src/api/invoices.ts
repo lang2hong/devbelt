@@ -14,6 +14,7 @@ export interface InvoiceRecord {
   email: string;
   amountCents: number;
   status: string;
+  reason: string | null;
   createTime: string;
 }
 

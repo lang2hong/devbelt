@@ -31,6 +31,8 @@ function makeState(userId: number, overrides: Partial<PersonalSyncState> = {}): 
     recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: buf(16, 3), outputBytes: 32 },
     envelopeSmp: { version: '1', nonce: buf(12, 4), ct: buf(32, 5), tag: buf(16, 6) },
     envelopeRecovery: { version: '1', nonce: buf(12, 7), ct: buf(32, 8), tag: buf(16, 9) },
+    envelopeAccount: { version: '1', nonce: buf(12, 30), ct: buf(32, 31), tag: buf(16, 32) },
+    accountRecoveryKey: buf(32, 33),
     signPub: buf(32, 10),
     recoverSignPub: buf(32, 11),
     recoveryCodeSetTime: null,
@@ -73,7 +75,10 @@ describe.skipIf(!URL)('personal sync repos (real MySQL)', () => {
       expect(await repo.create(tx, base)).toBe(false);
     });
 
-    expect(await repo.findByUserId(userId)).toBeDefined();
+    const persisted = await repo.findByUserId(userId);
+    expect(persisted).toBeDefined();
+    expect(persisted!.envelopeAccount.version).toBe('1');
+    expect(persisted!.accountRecoveryKey.equals(buf(32, 33))).toBe(true);
 
     await withTransaction(db, async (tx) => {
       const locked = await repo.lockByUserId(tx, userId);
@@ -155,7 +160,7 @@ describe.skipIf(!URL)('personal sync repos (real MySQL)', () => {
     await withTransaction(db, async (tx) => {
       await repo.record(tx, {
         userId, keyEpoch: '1', mutationId: mid, requestDigest: digest,
-        action: 'record.put', resultVersion: '1', resultChangeSequence: '1', status: 'applied',
+        action: 'record.put', resultVersion: '1', resultChangeSequence: '1', resultRecoveryCodeSetTime: null, status: 'applied',
         expiresTime: new Date(Date.now() + 3600_000),
       });
       const found = await repo.findByMutationId(tx, userId, '1', mid);

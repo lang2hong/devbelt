@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import { useI18n } from '../composables/useI18n';
+import { formatDateTime } from '../utils/formatTime';
 
 const { post, onMessage } = useVsCode();
 const { t } = useI18n();
@@ -34,10 +35,6 @@ const actionLabels: Record<string, string> = {
   import_data: 'Import',
   export_data: 'Export',
 };
-
-function formatTime(ts: number): string {
-  return new Date(ts).toLocaleString();
-}
 
 function formatSql(sql?: string): string {
   if (!sql) return '';
@@ -73,7 +70,7 @@ onUnmounted(() => {});
         :class="{ selected: selected?.id === e.id }"
         @click="selected = selected?.id === e.id ? null : e"
       >
-        <span class="time">{{ formatTime(e.timestamp) }}</span>
+        <span class="time">{{ formatDateTime(e.timestamp) }}</span>
         <span class="action" :class="e.action">{{ actionLabels[e.action] || e.action }}</span>
         <span class="conn">{{ e.connName }}{{ e.database ? '/' + e.database : '' }}</span>
         <span class="meta" v-if="e.rowCount !== undefined">{{ e.rowCount }} rows</span>

@@ -7,6 +7,7 @@ import {
   register,
   refresh,
   ensureCsrf,
+  logout,
 } from './consoleAuth';
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -85,5 +86,28 @@ describe('ensureCsrf', () => {
   it('reads the csrf token from cookies', async () => {
     const r = await ensureCsrf(async () => jsonResponse(204, null), () => 'a=1; __Host-dbclient_csrf=abc; b=2');
     expect(r).toBe('abc');
+  });
+});
+
+describe('logout', () => {
+  it('returns ok and clears the token on a 2xx response', async () => {
+    setAccessToken('tok');
+    const r = await logout('csrf', async () => jsonResponse(200, {}));
+    expect(r).toEqual({ kind: 'ok' });
+    expect(getAccessToken()).toBeNull();
+  });
+
+  it('returns failure and clears the local token on a non-2xx response', async () => {
+    setAccessToken('tok');
+    const r = await logout('csrf', async () => jsonResponse(500, {}));
+    expect(r).toEqual({ kind: 'failure' });
+    expect(getAccessToken()).toBeNull();
+  });
+
+  it('returns failure and clears the local token when the request throws', async () => {
+    setAccessToken('tok');
+    const r = await logout('csrf', async () => { throw new Error('network'); });
+    expect(r).toEqual({ kind: 'failure' });
+    expect(getAccessToken()).toBeNull();
   });
 });

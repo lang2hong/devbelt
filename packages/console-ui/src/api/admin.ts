@@ -1,6 +1,6 @@
 import { getAccessToken } from './tokenStore';
 import { authedFetch, type FetchLike } from './authedFetch';
-import { resolveErrorKind } from './httpError';
+import { readServerError } from './serverError';
 
 /**
  * 平台运营 API 客户端（P3 §6，切片 4）。只向 platform_admin 开放；写请求带
@@ -64,7 +64,7 @@ export type Result<T> =
   | { kind: 'conflict' }
   | { kind: 'in-progress' }
   | { kind: 'bad-request' }
-  | { kind: 'failure' };
+  | { kind: 'failure'; code?: string; message?: string };
 
 type Failure = Exclude<Result<unknown>['kind'], 'ok'>;
 
@@ -96,8 +96,18 @@ async function toPage<T>(res: Response): Promise<{ items: T[]; nextCursor: strin
   return { items: body.items, nextCursor: body.nextCursor };
 }
 
-async function failure(res: Response): Promise<{ kind: Failure }> {
-  return { kind: await resolveErrorKind(res) as Failure };
+async function failure(res: Response): Promise<{ kind: Failure; code?: string; message?: string }> {
+  const status = res.status;
+  if (status === 401) return { kind: 'unauthorized' };
+  if (status === 403) return { kind: 'forbidden' };
+  if (status === 404) return { kind: 'not-found' };
+  // 400/422/409 及其余：读一次 body 拿 code/message。
+  const err = await readServerError(res);
+  const code = err?.code;
+  const message = err?.message;
+  if (status === 400 || status === 422) return { kind: 'bad-request', code, message };
+  if (status === 409) return { kind: code === 'IDEMPOTENCY_IN_PROGRESS' ? 'in-progress' : 'conflict', code, message };
+  return { kind: 'failure', code, message };
 }
 
 // ── 版本 / 系统状态 ──
@@ -127,8 +137,11 @@ export async function getVersion(
 
 export interface UserFilters {
   emailExact?: string;
+  userId?: string;
   status?: 'active' | 'disabled';
   planCode?: string;
+  createdFrom?: string;
+  createdTo?: string;
   cursor?: string;
 }
 
@@ -333,6 +346,92 @@ export async function listAdminOrders(
   try {
     const res = await authedFetch(`/api/console/admin/orders${qs(filters)}`, { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: await toPage<AdminOrder>(res) };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+/** 人工退款登记：仅 paid/fulfilled 可退，reason 必填（不接支付渠道退款 API）。 */
+export async function refundAdminOrder(
+  orderNo: string,
+  reason: string,
+  idempotencyKey: string,
+  csrfToken: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ orderNo: string; status: string }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(
+      `/api/console/admin/orders/${encodeURIComponent(orderNo)}/refund`,
+      { method: 'PATCH', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify({ reason }) },
+      fetchImpl,
+    );
+    if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+// ── 发票 ──
+
+export interface AdminInvoice {
+  invoiceId: string;
+  userId: string;
+  title: string;
+  taxNo: string | null;
+  email: string;
+  amountCents: number;
+  status: string;
+  reason: string | null;
+  createTime: string;
+}
+
+export interface InvoiceFilters {
+  userId?: string;
+  status?: string;
+  cursor?: string;
+}
+
+export async function listAdminInvoices(
+  filters: InvoiceFilters = {},
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<Page<AdminInvoice>>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(`/api/console/admin/invoices${qs(filters)}`, { headers: auth(token) }, fetchImpl);
+    if (res.ok) return { kind: 'ok', value: await toPage<AdminInvoice>(res) };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+/** 运营处理发票：requested → issued/rejected/failed；rejected/failed 时 reason 必填。 */
+export async function setInvoiceStatus(
+  invoiceId: string,
+  status: 'issued' | 'rejected' | 'failed',
+  reason: string,
+  idempotencyKey: string,
+  csrfToken: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ invoiceId: string; status: string }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(
+      `/api/console/admin/invoices/${invoiceId}`,
+      {
+        method: 'PATCH',
+        headers: write(csrfToken, token, idempotencyKey),
+        body: JSON.stringify({ status, reason: reason.trim() ? reason.trim() : undefined }),
+      },
+      fetchImpl,
+    );
+    if (res.ok) return { kind: 'ok', value: await res.json() };
     return failure(res);
   } catch {
     return { kind: 'failure' };

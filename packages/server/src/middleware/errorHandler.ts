@@ -150,6 +150,7 @@ export function errorStatus(code: string): number {
     case 'SYNC_NOT_INITIALIZED':
     case 'SYNC_PROTOCOL_UNSUPPORTED':
     case 'SYNC_RESET_HANDOFF_INVALID':
+    case 'SYNC_ACCOUNT_RECOVERY_NOT_ENABLED':
       return 400;
     case 'EMAIL_VERIFICATION_INVALID':
       return 401;

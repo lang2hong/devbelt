@@ -10,7 +10,7 @@ import { signEd25519 } from './ed25519';
 
 export const SYNC_DOMAIN = 'dbclient/sync/v1';
 
-export type SyncAction = 'record.put' | 'record.delete' | 'state.change-key' | 'state.recover' | 'state.destroy';
+export type SyncAction = 'record.put' | 'record.delete' | 'state.change-key' | 'state.recover' | 'state.recover-by-account' | 'state.destroy';
 
 export interface SigningCommon {
   userId: string; // 十进制字符串
@@ -30,13 +30,13 @@ export interface StateSigningFields extends SigningCommon {
 
 export type SigningInput =
   | ({ domain: typeof SYNC_DOMAIN; action: 'record.put' | 'record.delete' } & RecordSigningFields)
-  | ({ domain: typeof SYNC_DOMAIN; action: 'state.change-key' | 'state.recover' | 'state.destroy' } & StateSigningFields);
+  | ({ domain: typeof SYNC_DOMAIN; action: 'state.change-key' | 'state.recover' | 'state.recover-by-account' | 'state.destroy' } & StateSigningFields);
 
 export function buildRecordSigningInput(action: 'record.put' | 'record.delete', f: RecordSigningFields): SigningInput {
   return { domain: SYNC_DOMAIN, action, userId: f.userId, keyEpoch: f.keyEpoch, recordId: f.recordId, baseVersion: f.baseVersion, mutationId: f.mutationId, requestDigest: f.requestDigest };
 }
 
-export function buildStateSigningInput(action: 'state.change-key' | 'state.recover' | 'state.destroy', f: StateSigningFields): SigningInput {
+export function buildStateSigningInput(action: 'state.change-key' | 'state.recover' | 'state.recover-by-account' | 'state.destroy', f: StateSigningFields): SigningInput {
   return { domain: SYNC_DOMAIN, action, userId: f.userId, keyEpoch: f.keyEpoch, expectedStateVersion: f.expectedStateVersion, mutationId: f.mutationId, requestDigest: f.requestDigest };
 }
 

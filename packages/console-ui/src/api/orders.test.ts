@@ -32,6 +32,6 @@ describe('createOrder', () => {
   it('surfaces terminal 503 as failure (feature disabled / channel unconfigured)', async () => {
     const fetchImpl = async () => jsonResponse(503, { error: { code: 'FEATURE_TEMPORARILY_DISABLED' } });
     const r = await createOrder('pro', 'alipay', 'csrf-tok', 'access', fetchImpl);
-    expect(r).toEqual({ kind: 'failure' });
+    expect(r).toEqual({ kind: 'failure', code: 'FEATURE_TEMPORARILY_DISABLED', message: '' });
   });
 });

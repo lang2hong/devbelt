@@ -5,6 +5,7 @@ const links = [
   { name: 'admin-users', path: '/console/admin/users', label: '用户' },
   { name: 'admin-organizations', path: '/console/admin/organizations', label: '组织' },
   { name: 'admin-orders', path: '/console/admin/orders', label: '订单' },
+  { name: 'admin-invoices', path: '/console/admin/invoices', label: '发票' },
   { name: 'admin-audit', path: '/console/admin/audit', label: '审计' },
   { name: 'admin-version', path: '/console/admin/version', label: '系统状态' },
 ];

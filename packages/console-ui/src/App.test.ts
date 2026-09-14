@@ -9,7 +9,7 @@ vi.mock('./session', () => ({
 vi.mock('./api/consoleAuth', () => ({
   getAccessToken: vi.fn(() => 'tok'),
   ensureCsrf: vi.fn(async () => ''),
-  logout: vi.fn(async () => {}),
+  logout: vi.fn(async () => ({ kind: 'ok' as const })),
 }));
 
 vi.mock('./api/me', () => ({
@@ -17,6 +17,7 @@ vi.mock('./api/me', () => ({
 }));
 
 import { me } from './api/me';
+import { logout } from './api/consoleAuth';
 import App from './App.vue';
 
 function consoleMe(platformAdmin: boolean) {
@@ -33,6 +34,8 @@ function consoleMe(platformAdmin: boolean) {
 
 beforeEach(() => {
   vi.mocked(me).mockReset();
+  vi.mocked(logout).mockReset();
+  vi.mocked(logout).mockResolvedValue({ kind: 'ok' });
 });
 
 describe('platform admin nav gate', () => {
@@ -48,5 +51,17 @@ describe('platform admin nav gate', () => {
     const wrapper = mount(App);
     await flushPromises();
     expect(wrapper.text()).toContain('管理');
+  });
+
+  it('warns and stays when logout fails (no silent redirect)', async () => {
+    vi.mocked(me).mockResolvedValue(consoleMe(true));
+    vi.mocked(logout).mockResolvedValue({ kind: 'failure' });
+    const wrapper = mount(App);
+    await flushPromises();
+    const btn = wrapper.findAll('button').find((b) => b.text().trim() === '登出');
+    expect(btn).toBeTruthy();
+    await btn!.trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('登出请求未得到服务器确认');
   });
 });

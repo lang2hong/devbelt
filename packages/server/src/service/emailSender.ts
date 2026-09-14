@@ -30,11 +30,19 @@ export interface EmailSender {
     token: string;
     displayName?: string;
   }): Promise<void>;
+  /**
+   * 发送账号恢复材料已下发安全通知（无 token、无口令、无任何同步材料）。
+   * 仅提醒账户所有者「恢复材料刚被访问」，供其判断是否恶意，不含可操作链接。
+   */
+  sendAccountRecoveryActivityEmail(input: {
+    to: string;
+    displayName?: string;
+  }): Promise<void>;
 }
 
 /** 收件箱捕获（测试替身用）：记录发送出去的邮件，供断言。 */
 export interface SentEmail {
-  kind: 'verification' | 'already_registered' | 'invitation' | 'reset_challenge';
+  kind: 'verification' | 'already_registered' | 'invitation' | 'reset_challenge' | 'account_recovery_activity';
   to: string;
   token?: string;
   displayName?: string;
@@ -63,6 +71,10 @@ export class MemoryEmailSender implements EmailSender {
   async sendResetChallengeEmail(input: { to: string; token: string; displayName?: string }): Promise<void> {
     this.sent.push({ kind: 'reset_challenge', to: input.to, token: input.token, displayName: input.displayName });
   }
+
+  async sendAccountRecoveryActivityEmail(input: { to: string; displayName?: string }): Promise<void> {
+    this.sent.push({ kind: 'account_recovery_activity', to: input.to, displayName: input.displayName });
+  }
 }
 
 /**
@@ -85,5 +97,9 @@ export class LogEmailSender implements EmailSender {
 
   async sendResetChallengeEmail(input: { to: string; token: string; displayName?: string }): Promise<void> {
     console.info(`[email:stub] reset challenge email would be sent to ${input.to}`);
+  }
+
+  async sendAccountRecoveryActivityEmail(input: { to: string; displayName?: string }): Promise<void> {
+    console.info(`[email:stub] account recovery activity email would be sent to ${input.to}`);
   }
 }

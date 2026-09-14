@@ -60,6 +60,7 @@ export type SyncAction =
   | 'record.delete'
   | 'state.change-key'
   | 'state.recover'
+  | 'state.recover-by-account'
   | 'state.destroy';
 
 /** mutation receipt 状态。 */
@@ -108,5 +109,5 @@ export type PaymentChannel = 'wechat' | 'alipay';
 /** 支付流水处理结果（回调幂等记录）。duplicate = 重复回调，未推进订单。 */
 export type PaymentResult = 'success' | 'failure' | 'duplicate';
 
-/** 发票申请状态。 */
-export type InvoiceStatus = 'requested' | 'issued' | 'rejected';
+/** 发票申请状态。requested=已申请待处理；issued=已开具；rejected/failed=终态（reason 记录原因）。 */
+export type InvoiceStatus = 'requested' | 'issued' | 'rejected' | 'failed';

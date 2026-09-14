@@ -62,7 +62,7 @@ export async function checkReceipt(
   keyEpoch: string,
   mutationId: string,
   requestDigest: string,
-): Promise<{ resultVersion: string | null; resultChangeSequence: string | null } | undefined> {
+): Promise<{ resultVersion: string | null; resultChangeSequence: string | null; resultRecoveryCodeSetTime: Date | null } | undefined> {
   const mid = decodeB64Url(mutationId, 16, 'mutationId');
   const digest = decodeB64Url(requestDigest, 32, 'requestDigest');
   const existing = await mutationRepo.findByMutationId(tx, userId, keyEpoch, mid);
@@ -70,7 +70,7 @@ export async function checkReceipt(
   // 24h 仅为保留期；过期即按无 receipt 走正常 epoch/签名/版本校验（§7.4）。
   if (existing.expiresTime <= new Date()) return undefined;
   if (existing.requestDigest.equals(digest)) {
-    return { resultVersion: existing.resultVersion, resultChangeSequence: existing.resultChangeSequence };
+    return { resultVersion: existing.resultVersion, resultChangeSequence: existing.resultChangeSequence, resultRecoveryCodeSetTime: existing.resultRecoveryCodeSetTime };
   }
   throw new ConflictError('mutation id reused with different digest');
 }
@@ -86,6 +86,7 @@ export async function recordReceipt(
   action: SyncAction,
   resultVersion: string | null,
   resultChangeSequence: string | null,
+  resultRecoveryCodeSetTime: Date | null = null,
 ): Promise<void> {
   await mutationRepo.record(tx, {
     userId, keyEpoch,
@@ -94,6 +95,7 @@ export async function recordReceipt(
     action,
     resultVersion,
     resultChangeSequence,
+    resultRecoveryCodeSetTime,
     status: 'applied',
     expiresTime: new Date(Date.now() + 24 * 3600 * 1000),
   });

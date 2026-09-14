@@ -33,6 +33,8 @@ function newState(fill = 10): SyncNewState {
     recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: buf(16, 3), outputBytes: 32 },
     envelopeSmp: { version: '1', nonce: buf(12, fill), ct: buf(32, fill + 1), tag: buf(16, fill + 2) },
     envelopeRecovery: { version: '1', nonce: buf(12, fill + 3), ct: buf(32, fill + 4), tag: buf(16, fill + 4) },
+    envelopeAccount: { version: '1', nonce: buf(12, fill + 8), ct: buf(32, fill + 9), tag: buf(16, fill + 10) },
+    accountRecoveryKey: buf(32, fill + 11),
     signPub: buf(32, fill + 6), recoverSignPub: buf(32, fill + 7),
   };
 }
@@ -43,6 +45,7 @@ function makeState(userId: number, changeSequence = '0'): PersonalSyncState {
     userId: userId, keyEpoch: '1', stateVersion: '1', changeSequence,
     protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
     smpKdf: n.smpKdf, recoveryKdf: n.recoveryKdf, envelopeSmp: n.envelopeSmp, envelopeRecovery: n.envelopeRecovery,
+    envelopeAccount: n.envelopeAccount, accountRecoveryKey: n.accountRecoveryKey,
     signPub: n.signPub, recoverSignPub: n.recoverSignPub,
     recoveryCodeSetTime: null, createTime: new Date(), updateTime: new Date(),
   };

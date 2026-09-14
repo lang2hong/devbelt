@@ -5,6 +5,7 @@ import {
   assertBase64UrlRange,
   assertRecordId,
   assertU64Decimal,
+  validateAccountRecoveryMaterial,
   validateNewState,
   validateSyncState,
 } from '../../../src/sync/e2e/types';
@@ -12,13 +13,14 @@ import {
 const smpKdf = { alg: 'argon2id' as const, version: 1 as const, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: 'A'.repeat(22), outputBytes: 32 as const };
 const recoveryKdf = { alg: 'hkdf-sha256' as const, version: 1 as const, salt: 'A'.repeat(22), outputBytes: 32 as const };
 const envelope = { protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const, envelopeVersion: '1', nonce: 'A'.repeat(16), ciphertext: 'A'.repeat(43), tag: 'A'.repeat(22) };
-const newState = { protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const, smpKdf, recoveryKdf, envelopeSmp: envelope, envelopeRecovery: envelope, signPub: 'A'.repeat(43), recoverSignPub: 'A'.repeat(43) };
+const newState = { protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const, smpKdf, recoveryKdf, envelopeSmp: envelope, envelopeRecovery: envelope, envelopeAccount: envelope, accountRecoveryKey: 'A'.repeat(43), signPub: 'A'.repeat(43), recoverSignPub: 'A'.repeat(43) };
 
 const state = {
   protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const,
   keyEpoch: '1', stateVersion: '1', changeSequence: '0',
   signPub: 'A'.repeat(43), recoverSignPub: 'A'.repeat(43),
   smpKdf, recoveryKdf, envelopeSmp: envelope, envelopeRecovery: envelope,
+  envelopeAccountVersion: '1',
   recoveryCodeSetTime: null,
 };
 
@@ -130,5 +132,54 @@ describe('validateSyncState（服务端 /state 响应契约）', () => {
 
   it('额外字段拒绝', () => {
     expect(() => validateSyncState({ ...state, extra: 1 })).toThrow(/unexpected/);
+  });
+
+  it('envelopeAccountVersion 为合法 u64 字符串时通过', () => {
+    expect(validateSyncState({ ...state, envelopeAccountVersion: '1' })).toMatchObject({ envelopeAccountVersion: '1' });
+  });
+
+  it('envelopeAccountVersion 非字符串 / 非法 u64 拒绝', () => {
+    expect(() => validateSyncState({ ...state, envelopeAccountVersion: 1 })).toThrow(/envelopeAccountVersion/);
+    expect(() => validateSyncState({ ...state, envelopeAccountVersion: '01' })).toThrow();
+  });
+
+  it('envelopeAccountVersion 字段缺失时拒绝（必填契约，fail-closed）', () => {
+    const { envelopeAccountVersion: _drop, ...missing } = state;
+    expect(() => validateSyncState(missing)).toThrow(/envelopeAccountVersion/);
+  });
+});
+
+describe('validateAccountRecoveryMaterial（recover-via-account 响应契约，fail-closed）', () => {
+  const material = { accountRecoveryKey: 'A'.repeat(43), envelopeAccount: envelope };
+
+  it('合法材料通过', () => {
+    expect(validateAccountRecoveryMaterial(material)).toEqual(material);
+  });
+
+  it('非对象拒绝', () => {
+    expect(() => validateAccountRecoveryMaterial(null)).toThrow(/must be an object/);
+    expect(() => validateAccountRecoveryMaterial('x')).toThrow(/must be an object/);
+  });
+
+  it('accountRecoveryKey 非字符串 / 长度不符拒绝', () => {
+    expect(() => validateAccountRecoveryMaterial({ ...material, accountRecoveryKey: 1 })).toThrow(/must be a string/);
+    expect(() => validateAccountRecoveryMaterial({ ...material, accountRecoveryKey: 'A'.repeat(10) })).toThrow(/decode/);
+  });
+
+  it('accountRecoveryKey 带 padding 拒绝', () => {
+    expect(() => validateAccountRecoveryMaterial({ ...material, accountRecoveryKey: `${'A'.repeat(43)}=` })).toThrow(/unpadded base64url/);
+  });
+
+  it('envelopeAccount 非法（协议常量错误）拒绝', () => {
+    expect(() => validateAccountRecoveryMaterial({ ...material, envelopeAccount: { ...envelope, cipherSuite: 'AES-128-GCM' as never } })).toThrow(/cipher/);
+  });
+
+  it('缺字段拒绝', () => {
+    const { envelopeAccount: _drop, ...rest } = material;
+    expect(() => validateAccountRecoveryMaterial(rest)).toThrow();
+  });
+
+  it('额外字段拒绝', () => {
+    expect(() => validateAccountRecoveryMaterial({ ...material, bogus: true })).toThrow(/unexpected/);
   });
 });

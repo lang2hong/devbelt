@@ -55,6 +55,8 @@ export interface NewStateDto {
   recoveryKdf: RecoveryKdfDto;
   envelopeSmp: EnvelopeDto;
   envelopeRecovery: EnvelopeDto;
+  envelopeAccount: EnvelopeDto;
+  accountRecoveryKey: string;
   signPub: string;
   recoverSignPub: string;
 }
@@ -172,18 +174,21 @@ export function validateEnvelope(e: unknown, field: string): EnvelopeDto {
 export function validateNewState(ns: unknown): NewStateDto {
   if (typeof ns !== 'object' || ns === null) throw new Error('newState must be an object');
   const obj = ns as Record<string, unknown>;
-  rejectExtraKeys(obj, ['protocolVersion', 'cipherSuite', 'formatVersion', 'smpKdf', 'recoveryKdf', 'envelopeSmp', 'envelopeRecovery', 'signPub', 'recoverSignPub'], 'newState');
+  rejectExtraKeys(obj, ['protocolVersion', 'cipherSuite', 'formatVersion', 'smpKdf', 'recoveryKdf', 'envelopeSmp', 'envelopeRecovery', 'envelopeAccount', 'accountRecoveryKey', 'signPub', 'recoverSignPub'], 'newState');
   if (obj.protocolVersion !== 1 || obj.cipherSuite !== 'AES-256-GCM' || obj.formatVersion !== 1) {
     throw new Error('newState protocol/cipher/format must be 1 / AES-256-GCM / 1');
   }
   assertBase64UrlNoPad(obj.signPub as string, 32, 'newState.signPub');
   assertBase64UrlNoPad(obj.recoverSignPub as string, 32, 'newState.recoverSignPub');
+  assertBase64UrlNoPad(obj.accountRecoveryKey as string, 32, 'newState.accountRecoveryKey');
   return {
     protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
     smpKdf: validateSmpKdf(obj.smpKdf),
     recoveryKdf: validateRecoveryKdf(obj.recoveryKdf),
     envelopeSmp: validateEnvelope(obj.envelopeSmp, 'newState.envelopeSmp'),
     envelopeRecovery: validateEnvelope(obj.envelopeRecovery, 'newState.envelopeRecovery'),
+    envelopeAccount: validateEnvelope(obj.envelopeAccount, 'newState.envelopeAccount'),
+    accountRecoveryKey: obj.accountRecoveryKey as string,
     signPub: obj.signPub as string,
     recoverSignPub: obj.recoverSignPub as string,
   };
@@ -203,6 +208,8 @@ export interface StateDto {
   recoveryKdf: RecoveryKdfDto;
   envelopeSmp: EnvelopeDto;
   envelopeRecovery: EnvelopeDto;
+  /** 账号恢复通道版本号。必填：单一契约下恒存在（init 起 version 单调递增）。 */
+  envelopeAccountVersion: string;
   recoveryCodeSetTime: string | null;
 }
 
@@ -212,7 +219,8 @@ export function validateSyncState(raw: unknown): StateDto {
   const obj = raw as Record<string, unknown>;
   rejectExtraKeys(obj, [
     'protocolVersion', 'cipherSuite', 'formatVersion', 'keyEpoch', 'stateVersion', 'changeSequence',
-    'signPub', 'recoverSignPub', 'smpKdf', 'recoveryKdf', 'envelopeSmp', 'envelopeRecovery', 'recoveryCodeSetTime',
+    'signPub', 'recoverSignPub', 'smpKdf', 'recoveryKdf', 'envelopeSmp', 'envelopeRecovery',
+    'envelopeAccountVersion', 'recoveryCodeSetTime',
   ], 'sync state');
   if (obj.protocolVersion !== 1 || obj.cipherSuite !== 'AES-256-GCM' || obj.formatVersion !== 1) {
     throw new Error('sync state protocol/cipher/format must be 1 / AES-256-GCM / 1');
@@ -231,6 +239,10 @@ export function validateSyncState(raw: unknown): StateDto {
   if (obj.recoveryCodeSetTime !== null && typeof obj.recoveryCodeSetTime !== 'string') {
     throw new Error('state.recoveryCodeSetTime must be a string or null');
   }
+  // 账号恢复通道为必填契约：envelopeAccountVersion 恒存在，缺失即拒绝（fail-closed），
+  // 不再做「缺失 = 未启用」的兼容归一。
+  if (typeof obj.envelopeAccountVersion !== 'string') throw new Error('state.envelopeAccountVersion must be a string');
+  assertU64Decimal(obj.envelopeAccountVersion, 'state.envelopeAccountVersion');
   return {
     protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
     keyEpoch, stateVersion, changeSequence,
@@ -239,6 +251,31 @@ export function validateSyncState(raw: unknown): StateDto {
     recoveryKdf: validateRecoveryKdf(obj.recoveryKdf),
     envelopeSmp: validateEnvelope(obj.envelopeSmp, 'state.envelopeSmp'),
     envelopeRecovery: validateEnvelope(obj.envelopeRecovery, 'state.envelopeRecovery'),
+    envelopeAccountVersion: obj.envelopeAccountVersion,
     recoveryCodeSetTime: obj.recoveryCodeSetTime as string | null,
+  };
+}
+
+/** POST /api/sync/recover-via-account 的响应 DTO（服务端托管账号恢复材料）。 */
+export interface AccountRecoveryMaterialDto {
+  accountRecoveryKey: string;
+  envelopeAccount: EnvelopeDto;
+}
+
+/**
+ * 校验服务端 recover-via-account 响应（fail-closed）：全字段、未知字段拒绝、
+ * accountRecoveryKey 严格 32B base64url、envelopeAccount 走通用 envelope 校验。
+ * 命令层/session 不得直接信任网络 DTO——此前 recoverByAccount() 曾在 open 前才因
+ * base64url/长度错误抛出低层解码异常，未做统一的 fail-closed 前置校验。
+ */
+export function validateAccountRecoveryMaterial(raw: unknown): AccountRecoveryMaterialDto {
+  if (typeof raw !== 'object' || raw === null) throw new Error('account recovery material must be an object');
+  const obj = raw as Record<string, unknown>;
+  rejectExtraKeys(obj, ['accountRecoveryKey', 'envelopeAccount'], 'account recovery material');
+  if (typeof obj.accountRecoveryKey !== 'string') throw new Error('accountRecoveryKey must be a string');
+  assertBase64UrlNoPad(obj.accountRecoveryKey, 32, 'accountRecoveryKey');
+  return {
+    accountRecoveryKey: obj.accountRecoveryKey,
+    envelopeAccount: validateEnvelope(obj.envelopeAccount, 'envelopeAccount'),
   };
 }

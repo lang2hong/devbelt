@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import { useI18n } from '../composables/useI18n';
+import { formatDateTime } from '../utils/formatTime';
 
 const { post, onMessage } = useVsCode();
 const { t } = useI18n();
@@ -51,7 +52,7 @@ async function renderChart() {
   const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
 
   const m = data.value.metrics;
-  const labels = m.activeConnections.map((p) => new Date(p.time).toLocaleTimeString());
+  const labels = m.activeConnections.map((p) => formatDateTime(p.time));
 
   const config: any = {
     type: 'line',

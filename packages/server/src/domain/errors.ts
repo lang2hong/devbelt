@@ -231,6 +231,11 @@ export class SyncStateExistsError extends DomainError {
   constructor() { super('sync state already exists', 'SYNC_STATE_EXISTS'); this.name = 'SyncStateExistsError'; }
 }
 
+/** 账号恢复未启用（state 无 accountRecoveryKey / envelopeAccount）→ 400 SYNC_ACCOUNT_RECOVERY_NOT_ENABLED。 */
+export class SyncAccountRecoveryNotEnabledError extends DomainError {
+  constructor() { super('account recovery not enabled', 'SYNC_ACCOUNT_RECOVERY_NOT_ENABLED'); this.name = 'SyncAccountRecoveryNotEnabledError'; }
+}
+
 /** 请求 keyEpoch ≠ active keyEpoch → 409 SYNC_EPOCH_STALE（附 currentKeyEpoch）。 */
 export class SyncEpochStaleError extends DomainError {
   constructor(public readonly currentKeyEpoch: string) { super('sync epoch stale', 'SYNC_EPOCH_STALE'); this.name = 'SyncEpochStaleError'; }

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { generateKeyPairSync, sign as nodeSign, type KeyObject } from 'crypto';
 import { FakeSyncStateRepo, FakeSyncRecordRepo, FakeSyncMutationRepo } from '../helpers/fakeRepos.js';
 import { SyncStateService } from '../../src/service/syncStateService.js';
@@ -10,6 +10,7 @@ import {
   SyncSignatureInvalidError,
   SyncVersionConflictError,
   ConflictError,
+  ValidationError,
 } from '../../src/domain/errors.js';
 import type { SmpKdf, RecoveryKdf, SyncEnvelope } from '../../src/domain/entities.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
@@ -29,6 +30,7 @@ function recoveryKdf(saltFill = 3): RecoveryKdf {
 function env(version: string, fill = 4): SyncEnvelope {
   return { version, nonce: buf(12, fill), ct: buf(32, fill + 1), tag: buf(16, fill + 2) };
 }
+function accountKey(fill = 99): Buffer { return buf(32, fill); }
 
 function b64kdf(k: SmpKdf | RecoveryKdf): Record<string, unknown> {
   return { ...k, salt: k.salt.toString('base64url') };
@@ -83,7 +85,7 @@ describe('SyncStateService', () => {
     const ns = {
       protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const,
       smpKdf: smpKdf(), recoveryKdf: recoveryKdf(),
-      envelopeSmp: env('1'), envelopeRecovery: env('1'),
+      envelopeSmp: env('1'), envelopeRecovery: env('1'), envelopeAccount: env('1', 90), accountRecoveryKey: accountKey(),
       signPub: keys.signPub, recoverSignPub: keys.recoverPub,
     };
     await svc.init(USER, ns);
@@ -102,7 +104,7 @@ describe('SyncStateService', () => {
     const keys = makeKeys();
     await svc.init(USER, {
       protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
-      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'),
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'), envelopeAccount: env('1', 90), accountRecoveryKey: accountKey(),
       signPub: keys.signPub, recoverSignPub: keys.recoverPub,
     });
 
@@ -137,7 +139,7 @@ describe('SyncStateService', () => {
     const keys = makeKeys();
     await svc.init(USER, {
       protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
-      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'),
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'), envelopeAccount: env('1', 90), accountRecoveryKey: accountKey(),
       signPub: keys.signPub, recoverSignPub: keys.recoverPub,
     });
 
@@ -168,7 +170,7 @@ describe('SyncStateService', () => {
     const keys = makeKeys();
     await svc.init(USER, {
       protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
-      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'),
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'), envelopeAccount: env('1', 90), accountRecoveryKey: accountKey(),
       signPub: keys.signPub, recoverSignPub: keys.recoverPub,
     });
 
@@ -197,7 +199,7 @@ describe('SyncStateService', () => {
     const keys = makeKeys();
     await svc.init(USER, {
       protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
-      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'),
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'), envelopeAccount: env('1', 90), accountRecoveryKey: accountKey(),
       signPub: keys.signPub, recoverSignPub: keys.recoverPub,
     });
 
@@ -215,7 +217,7 @@ describe('SyncStateService', () => {
       newState: {
         protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
         smpKdf: b64kdf(smpKdf(22)), recoveryKdf: b64kdf(recoveryKdf(33)),
-        envelopeSmp: b64env(env('1', 70)), envelopeRecovery: b64env(env('1', 80)),
+        envelopeSmp: b64env(env('1', 70)), envelopeRecovery: b64env(env('1', 80)), envelopeAccount: b64env(env('1', 91)), accountRecoveryKey: accountKey(100).toString('base64url'),
         signPub: newKeys.signPub.toString('base64url'), recoverSignPub: newKeys.recoverPub.toString('base64url'),
       },
     };
@@ -224,7 +226,7 @@ describe('SyncStateService', () => {
       keyEpoch: '1', mutationId: MID, signature: signatureBuf, expectedStateVersion: '1', requestDigest: digest,
       newState: {
         protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const,
-        smpKdf: smpKdf(22), recoveryKdf: recoveryKdf(33), envelopeSmp: env('1', 70), envelopeRecovery: env('1', 80),
+        smpKdf: smpKdf(22), recoveryKdf: recoveryKdf(33), envelopeSmp: env('1', 70), envelopeRecovery: env('1', 80), envelopeAccount: env('1', 91), accountRecoveryKey: accountKey(100),
         signPub: newKeys.signPub, recoverSignPub: newKeys.recoverPub,
       },
     };
@@ -247,7 +249,7 @@ describe('SyncStateService', () => {
     const keys = makeKeys();
     await svc.init(USER, {
       protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
-      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'),
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'), envelopeAccount: env('1', 90), accountRecoveryKey: accountKey(),
       signPub: keys.signPub, recoverSignPub: keys.recoverPub,
     });
 
@@ -257,7 +259,7 @@ describe('SyncStateService', () => {
       newState: {
         protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
         smpKdf: b64kdf(smpKdf(22)), recoveryKdf: b64kdf(recoveryKdf(33)),
-        envelopeSmp: b64env(env('1', 70)), envelopeRecovery: b64env(env('1', 80)),
+        envelopeSmp: b64env(env('1', 70)), envelopeRecovery: b64env(env('1', 80)), envelopeAccount: b64env(env('1', 91)), accountRecoveryKey: accountKey(100).toString('base64url'),
         signPub: newKeys.signPub.toString('base64url'), recoverSignPub: newKeys.recoverPub.toString('base64url'),
       },
     };
@@ -266,7 +268,7 @@ describe('SyncStateService', () => {
       keyEpoch: '1', mutationId: MID, signature: signatureBuf, expectedStateVersion: '1', requestDigest: digest,
       newState: {
         protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const,
-        smpKdf: smpKdf(22), recoveryKdf: recoveryKdf(33), envelopeSmp: env('1', 70), envelopeRecovery: env('1', 80),
+        smpKdf: smpKdf(22), recoveryKdf: recoveryKdf(33), envelopeSmp: env('1', 70), envelopeRecovery: env('1', 80), envelopeAccount: env('1', 91), accountRecoveryKey: accountKey(100),
         signPub: newKeys.signPub, recoverSignPub: newKeys.recoverPub,
       },
     };
@@ -282,14 +284,14 @@ describe('SyncStateService', () => {
     const keys = makeKeys();
     await svc.init(USER, {
       protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
-      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'),
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'), envelopeAccount: env('1', 90), accountRecoveryKey: accountKey(),
       signPub: keys.signPub, recoverSignPub: keys.recoverPub,
     });
 
     // 预置一个已过期、且 digest 不同的 receipt（同 mutationId）。
     await mutationRepo.record({} as Queryable, {
       userId: USER, keyEpoch: '1', mutationId: Buffer.from(MID, 'base64url'),
-      requestDigest: buf(32, 99), action: 'state.change-key', resultVersion: '9', resultChangeSequence: null,
+      requestDigest: buf(32, 99), action: 'state.change-key', resultVersion: '9', resultChangeSequence: null, resultRecoveryCodeSetTime: null,
       status: 'applied', expiresTime: new Date(0),
     });
 
@@ -305,7 +307,210 @@ describe('SyncStateService', () => {
     });
     expect(res.stateVersion).toBe('2');
   });
-});
+it('recover-via-account returns account recovery material after init; not-initialized rejects', async () => {
+    const { svc } = makeStack();
+    const keys = makeKeys();
+    await expect(svc.recoverViaAccount(USER)).rejects.toBeInstanceOf(SyncNotInitializedError);
+
+    await svc.init(USER, {
+      protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(),
+      envelopeSmp: env('1'), envelopeRecovery: env('1'), envelopeAccount: env('1', 90), accountRecoveryKey: accountKey(),
+      signPub: keys.signPub, recoverSignPub: keys.recoverPub,
+    });
+    const r = await svc.recoverViaAccount(USER);
+    expect(r.accountRecoveryKey.toString('hex')).toBe(accountKey().toString('hex'));
+    expect(r.envelopeAccount.version).toBe('1');
+  });
+
+  it('init rejects a newState with invalid account-recovery material (bad key length / nonzero envelope version)', async () => {
+    const { svc } = makeStack();
+    const keys = makeKeys();
+    await expect(svc.init(USER, {
+      protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(),
+      envelopeSmp: env('1'), envelopeRecovery: env('1'), envelopeAccount: env('1', 90), accountRecoveryKey: buf(31, 99),
+      signPub: keys.signPub, recoverSignPub: keys.recoverPub,
+    })).rejects.toBeInstanceOf(ValidationError);
+
+    await expect(svc.init(USER, {
+      protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(),
+      envelopeSmp: env('1'), envelopeRecovery: env('1'), envelopeAccount: env('2', 90), accountRecoveryKey: accountKey(),
+      signPub: keys.signPub, recoverSignPub: keys.recoverPub,
+    })).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('recover-by-account re-rotates all three envelopes using the sync sign key (signPub)', async () => {
+    const { svc } = makeStack();
+    const keys = makeKeys();
+    await svc.init(USER, {
+      protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(),
+      envelopeSmp: env('1'), envelopeRecovery: env('1'), envelopeAccount: env('1', 90), accountRecoveryKey: accountKey(),
+      signPub: keys.signPub, recoverSignPub: keys.recoverPub,
+    });
+
+    const newKeys = makeKeys();
+    const body = {
+      protocolVersion: 1, keyEpoch: '1', mutationId: MID, expectedStateVersion: '1',
+      smpKdf: b64kdf(smpKdf(22)),
+      envelopeSmp: b64env(env('2', 40)),
+      recoveryKdf: b64kdf(recoveryKdf(33)),
+      envelopeRecovery: b64env(env('2', 50)),
+      envelopeAccount: b64env(env('2', 91)),
+      accountRecoveryKey: buf(32, 100).toString('base64url'),
+      recoverSignPub: newKeys.recoverPub.toString('base64url'),
+    };
+    const { digest, signatureBuf } = signBody(keys.signPriv, USER, 'state.recover-by-account', body);
+
+    // 用 recoverSign 私钥签名 → 签名无效（recover-by-account 需要 signPriv，即 DEK 派生的 syncSign）。
+    const { signatureBuf: badSig } = signBody(keys.recoverPriv, USER, 'state.recover-by-account', body);
+    await expect(svc.recoverByAccount(USER, {
+      keyEpoch: '1', mutationId: MID, signature: badSig, expectedStateVersion: '1', requestDigest: digest,
+      smpKdf: smpKdf(22), envelopeSmp: env('2', 40),
+      recoveryKdf: recoveryKdf(33), envelopeRecovery: env('2', 50),
+      envelopeAccount: env('2', 91), accountRecoveryKey: buf(32, 100),
+      recoverSignPub: newKeys.recoverPub,
+    })).rejects.toBeInstanceOf(SyncSignatureInvalidError);
+
+    const res = await svc.recoverByAccount(USER, {
+      keyEpoch: '1', mutationId: MID, signature: signatureBuf, expectedStateVersion: '1', requestDigest: digest,
+      smpKdf: smpKdf(22), envelopeSmp: env('2', 40),
+      recoveryKdf: recoveryKdf(33), envelopeRecovery: env('2', 50),
+      envelopeAccount: env('2', 91), accountRecoveryKey: buf(32, 100),
+      recoverSignPub: newKeys.recoverPub,
+    });
+    expect(res.stateVersion).toBe('2');
+    const state = await svc.getState(USER);
+    expect(state.envelopeRecovery.envelopeVersion).toBe('2');
+    expect(state.envelopeRecovery.ciphertext).toBeTruthy();
+  });
+
+  it('account-recover replay skips the keys rate limit (receipt-first)', async () => {
+    const keys = makeKeys();
+    const stateRepo = new FakeSyncStateRepo();
+    const recordRepo = new FakeSyncRecordRepo();
+    const mutationRepo = new FakeSyncMutationRepo();
+    let limitCalls = 0;
+    const svc = new SyncStateService(stateRepo, recordRepo, mutationRepo, runner, async () => { limitCalls += 1; });
+
+    await svc.init(USER, {
+      protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(),
+      envelopeSmp: env('1'), envelopeRecovery: env('1'), envelopeAccount: env('1', 90), accountRecoveryKey: accountKey(),
+      signPub: keys.signPub, recoverSignPub: keys.recoverPub,
+    });
+
+    const newKeys = makeKeys();
+    const body = {
+      protocolVersion: 1, keyEpoch: '1', mutationId: MID, expectedStateVersion: '1',
+      smpKdf: b64kdf(smpKdf(22)), envelopeSmp: b64env(env('2', 40)),
+      recoveryKdf: b64kdf(recoveryKdf(33)), envelopeRecovery: b64env(env('2', 50)),
+      envelopeAccount: b64env(env('2', 91)), accountRecoveryKey: buf(32, 100).toString('base64url'),
+      recoverSignPub: newKeys.recoverPub.toString('base64url'),
+    };
+    const { digest, signatureBuf } = signBody(keys.signPriv, USER, 'state.recover-by-account', body);
+    const input = {
+      keyEpoch: '1', mutationId: MID, signature: signatureBuf, expectedStateVersion: '1', requestDigest: digest,
+      smpKdf: smpKdf(22), envelopeSmp: env('2', 40),
+      recoveryKdf: recoveryKdf(33), envelopeRecovery: env('2', 50),
+      envelopeAccount: env('2', 91), accountRecoveryKey: buf(32, 100),
+      recoverSignPub: newKeys.recoverPub,
+    };
+
+    const first = await svc.recoverByAccount(USER, input);
+    expect(first.stateVersion).toBe('2');
+    expect(limitCalls).toBe(1);
+
+    const replay = await svc.recoverByAccount(USER, input); // 回执命中，不再计数
+    expect(replay.stateVersion).toBe('2');
+    expect(limitCalls).toBe(1);
+  });
+
+  it('recover-by-account replay returns the original recovery timestamp (not the later state value)', async () => {
+    vi.useFakeTimers();
+    try {
+      const keys = makeKeys();
+      const stateRepo = new FakeSyncStateRepo();
+      const recordRepo = new FakeSyncRecordRepo();
+      const mutationRepo = new FakeSyncMutationRepo();
+      const svc = new SyncStateService(stateRepo, recordRepo, mutationRepo, runner);
+
+      await svc.init(USER, {
+        protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+        smpKdf: smpKdf(), recoveryKdf: recoveryKdf(),
+        envelopeSmp: env('1'), envelopeRecovery: env('1'), envelopeAccount: env('1', 90), accountRecoveryKey: accountKey(),
+        signPub: keys.signPub, recoverSignPub: keys.recoverPub,
+      });
+
+      const t1 = new Date('2026-01-01T00:00:00.000Z');
+      const t2 = new Date('2026-01-01T01:00:00.000Z');
+
+      const mk = (mutationId: string, version: string, fill: number) => {
+        const newKeys = makeKeys();
+        const v = String(Number(version) + 1);
+        const body = {
+          protocolVersion: 1, keyEpoch: '1', mutationId, expectedStateVersion: version,
+          smpKdf: b64kdf(smpKdf(fill)), envelopeSmp: b64env(env(v, fill)),
+          recoveryKdf: b64kdf(recoveryKdf(fill + 1)), envelopeRecovery: b64env(env(v, fill + 1)),
+          envelopeAccount: b64env(env(v, fill + 2)), accountRecoveryKey: buf(32, fill + 80).toString('base64url'),
+          recoverSignPub: newKeys.recoverPub.toString('base64url'),
+        };
+        const { digest, signatureBuf } = signBody(keys.signPriv, USER, 'state.recover-by-account', body);
+        return {
+          keyEpoch: '1', mutationId, signature: signatureBuf, expectedStateVersion: version, requestDigest: digest,
+          smpKdf: smpKdf(fill), envelopeSmp: env(v, fill),
+          recoveryKdf: recoveryKdf(fill + 1), envelopeRecovery: env(v, fill + 1),
+          envelopeAccount: env(v, fill + 2), accountRecoveryKey: buf(32, fill + 80),
+          recoverSignPub: newKeys.recoverPub,
+        };
+      };
+
+      const m1 = Buffer.alloc(16, 9).toString('base64url');
+      const m2 = Buffer.alloc(16, 10).toString('base64url');
+
+      vi.setSystemTime(t1);
+      const input1 = mk(m1, '1', 22);
+      await svc.recoverByAccount(USER, input1); // stateVersion -> 2
+
+      vi.setSystemTime(t2);
+      const input2 = mk(m2, '2', 30);
+      await svc.recoverByAccount(USER, input2); // stateVersion -> 3
+
+      const replay = await svc.recoverByAccount(USER, input1); // 回执命中
+      expect(replay.stateVersion).toBe('2');
+      expect(replay.recoveryCodeSetTime).toBe(t1.toISOString());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('change-key without account material leaves an already-enabled account envelope untouched', async () => {
+    const { svc } = makeStack();
+    const keys = makeKeys();
+    await svc.init(USER, {
+      protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(),
+      envelopeSmp: env('1'), envelopeRecovery: env('1'), envelopeAccount: env('1', 90), accountRecoveryKey: accountKey(),
+      signPub: keys.signPub, recoverSignPub: keys.recoverPub,
+    });
+
+    const body = {
+      protocolVersion: 1, keyEpoch: '1', mutationId: MID, expectedStateVersion: '1',
+      smpKdf: b64kdf(smpKdf(22)), envelopeSmp: b64env(env('2', 40)),
+    };
+    const { digest, signatureBuf } = signBody(keys.signPriv, USER, 'state.change-key', body);
+    await svc.changeKey(USER, {
+      keyEpoch: '1', mutationId: MID, signature: signatureBuf, expectedStateVersion: '1', requestDigest: digest,
+      smpKdf: smpKdf(22), envelopeSmp: env('2', 40),
+    });
+
+    const r = await svc.recoverViaAccount(USER);
+    expect(r.envelopeAccount.version).toBe('1'); // 未轮换
+  });
+
+  });
 
 describe('AES-GCM keystream reuse prevention (envelope freshness)', () => {
   /** 建好一个已 init 的栈，返回 change-key 所需的签名构造器。 */
@@ -314,7 +519,7 @@ describe('AES-GCM keystream reuse prevention (envelope freshness)', () => {
     const keys = makeKeys();
     await stack.svc.init(USER, {
       protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
-      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'),
+      smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'), envelopeAccount: env('1', 90), accountRecoveryKey: accountKey(),
       signPub: keys.signPub, recoverSignPub: keys.recoverPub,
     });
     return { ...stack, keys };
@@ -350,5 +555,31 @@ describe('AES-GCM keystream reuse prevention (envelope freshness)', () => {
     const { svc, keys } = await initialized();
     const res = await svc.changeKey(USER, changeKeyInput(keys, smpKdf(22), env('2', 40)));
     expect(res.stateVersion).toBe('2');
+  });
+
+  it('rejects destroy that reuses the account recovery key / account nonce', async () => {
+    const { svc, keys } = await initialized();
+    const newKeys = makeKeys();
+    const body = {
+      protocolVersion: 1, keyEpoch: '1', mutationId: MID, expectedStateVersion: '1',
+      newState: {
+        protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+        smpKdf: b64kdf(smpKdf(22)), recoveryKdf: b64kdf(recoveryKdf(33)),
+        envelopeSmp: b64env(env('1', 70)), envelopeRecovery: b64env(env('1', 80)),
+        // 复用 init 时的账号信封 nonce 与账号恢复钥匙 → AES-GCM 密钥流复用。
+        envelopeAccount: b64env(env('1', 90)), accountRecoveryKey: accountKey().toString('base64url'),
+        signPub: newKeys.signPub.toString('base64url'), recoverSignPub: newKeys.recoverPub.toString('base64url'),
+      },
+    };
+    const { digest, signatureBuf } = signBody(keys.signPriv, USER, 'state.destroy', body);
+    await expect(svc.destroy(USER, {
+      keyEpoch: '1', mutationId: MID, signature: signatureBuf, expectedStateVersion: '1', requestDigest: digest,
+      newState: {
+        protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const,
+        smpKdf: smpKdf(22), recoveryKdf: recoveryKdf(33), envelopeSmp: env('1', 70), envelopeRecovery: env('1', 80),
+        envelopeAccount: env('1', 90), accountRecoveryKey: accountKey(),
+        signPub: newKeys.signPub, recoverSignPub: newKeys.recoverPub,
+      },
+    })).rejects.toThrow(/account/);
   });
 });

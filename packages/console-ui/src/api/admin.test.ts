@@ -7,6 +7,9 @@ import {
   adjustOrganizationSubscription,
   queryAudit,
   exportAudit,
+  refundAdminOrder,
+  listAdminInvoices,
+  setInvoiceStatus,
 } from './admin';
 
 function jsonRes(status: number, body: unknown): Response {
@@ -114,5 +117,59 @@ describe('exportAudit', () => {
     expect(captured.url).toBe('/api/console/admin/audit/exports');
     expect(captured.headers?.['Idempotency-Key']).toBe('key-1');
     expect(JSON.parse(captured.body ?? '{}')).toEqual({ format: 'csv', filters: { eventType: 'auth.login.failed' } });
+  });
+});
+
+describe('refundAdminOrder', () => {
+  it('PATCHes the refund URL with reason + write headers', async () => {
+    let captured: { url?: string; init?: RequestInit } = {};
+    const r = await refundAdminOrder('ord-1', 'customer request', 'key-1', 'csrf', 'tok', async (url, init) => {
+      captured = { url: String(url), init };
+      return jsonRes(200, { orderNo: 'ord-1', status: 'refunded' });
+    });
+    expect(r).toEqual({ kind: 'ok', value: { orderNo: 'ord-1', status: 'refunded' } });
+    expect(captured.url).toBe('/api/console/admin/orders/ord-1/refund');
+    expect(captured.init?.method).toBe('PATCH');
+    const headers = captured.init?.headers as Record<string, string>;
+    expect(headers['Idempotency-Key']).toBe('key-1');
+    expect(headers['X-CSRF-Token']).toBe('csrf');
+    expect(captured.init?.body).toBe(JSON.stringify({ reason: 'customer request' }));
+  });
+});
+
+describe('listAdminInvoices', () => {
+  it('hits the admin invoices URL', async () => {
+    let url = '';
+    const invoice = { invoiceId: '1', userId: '9', title: 'A', taxNo: null, email: 'b@a.com', amountCents: 9900, status: 'requested', reason: null, createTime: '2026-01-01T00:00:00.000Z' };
+    const r = await listAdminInvoices({ status: 'requested' }, 'tok', async (u) => {
+      url = String(u);
+      return jsonRes(200, { items: [invoice], nextCursor: null });
+    });
+    expect(url).toContain('/api/console/admin/invoices?');
+    expect(url).toContain('status=requested');
+    expect(r).toEqual({ kind: 'ok', value: { items: [invoice], nextCursor: null } });
+  });
+});
+
+describe('setInvoiceStatus', () => {
+  it('PATCHes status and omits empty reason for issued', async () => {
+    let captured: { url?: string; init?: RequestInit } = {};
+    const r = await setInvoiceStatus('1', 'issued', '   ', 'key-1', 'csrf', 'tok', async (url, init) => {
+      captured = { url: String(url), init };
+      return jsonRes(200, { invoiceId: '1', status: 'issued' });
+    });
+    expect(r).toEqual({ kind: 'ok', value: { invoiceId: '1', status: 'issued' } });
+    expect(captured.url).toBe('/api/console/admin/invoices/1');
+    expect(captured.init?.method).toBe('PATCH');
+    expect(captured.init?.body).toBe(JSON.stringify({ status: 'issued' }));
+  });
+
+  it('includes reason for rejected', async () => {
+    let body = '';
+    await setInvoiceStatus('2', 'rejected', 'title mismatch', 'key-2', 'csrf', 'tok', async (_u, init) => {
+      body = String(init?.body);
+      return jsonRes(200, { invoiceId: '2', status: 'rejected' });
+    });
+    expect(JSON.parse(body)).toEqual({ status: 'rejected', reason: 'title mismatch' });
   });
 });

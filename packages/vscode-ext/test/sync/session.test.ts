@@ -11,6 +11,8 @@ import type { CachedEntitlement } from '../../src/sync/authService';
 import type { NewStateDto, StateDto } from '../../src/sync/e2e/types';
 import { deriveSyncSignKeyPair } from '../../src/sync/crypto/keyStore';
 import { encodeBase64Url } from '../../src/sync/crypto/recoveryCode';
+import { sealEnvelope } from '../../src/sync/envelope';
+import { hkdfSha256, SYNC_INFO } from '../../src/sync/crypto/hkdf';
 
 const kl = vi.hoisted(() => ({
   createInitialMaterial: vi.fn(),
@@ -18,6 +20,7 @@ const kl = vi.hoisted(() => ({
   unlockDek: vi.fn(),
   buildChangeKeyMaterial: vi.fn(),
   buildRecoverMaterial: vi.fn(),
+  buildRecoverByAccountMaterial: vi.fn(),
   newStateFromMaterial: vi.fn(),
 }));
 
@@ -28,6 +31,7 @@ vi.mock('../../src/sync/keyLifecycle', () => {
     unlockDek: kl.unlockDek,
     buildChangeKeyMaterial: kl.buildChangeKeyMaterial,
     buildRecoverMaterial: kl.buildRecoverMaterial,
+    buildRecoverByAccountMaterial: kl.buildRecoverByAccountMaterial,
     newStateFromMaterial: kl.newStateFromMaterial,
   };
 });
@@ -72,6 +76,7 @@ function validState(keyEpoch = '1', stateVersion = '1', changeSequence = '0'): S
     recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: 'A'.repeat(22), outputBytes: 32 },
     envelopeSmp: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: 'A'.repeat(16), ciphertext: 'A'.repeat(43), tag: 'A'.repeat(22) },
     envelopeRecovery: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: 'A'.repeat(16), ciphertext: 'A'.repeat(43), tag: 'A'.repeat(22) },
+    envelopeAccountVersion: '1',
     recoveryCodeSetTime: null,
   };
 }
@@ -319,6 +324,7 @@ describe('PersonalSyncSession', () => {
         recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: 'A'.repeat(22), outputBytes: 32 },
         envelopeSmp: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: 'A'.repeat(16), ciphertext: 'A'.repeat(43), tag: 'A'.repeat(22) },
         envelopeRecovery: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: 'A'.repeat(16), ciphertext: 'A'.repeat(43), tag: 'A'.repeat(22) },
+        envelopeAccountVersion: '1',
         recoveryCodeSetTime: null,
       }),
       getRecords: async () => ({ snapshotSequence: '0', records: [] }),
@@ -407,6 +413,8 @@ function fixedMaterial() {
     recoveryKdf: { alg: 'hkdf-sha256' as const, version: 1, salt: 'E'.repeat(22), outputBytes: 32 },
     envelopeSmp: { protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const, envelopeVersion: '1', nonce: 'F'.repeat(16), ciphertext: 'G'.repeat(43), tag: 'H'.repeat(22) },
     envelopeRecovery: { protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const, envelopeVersion: '1', nonce: 'F'.repeat(16), ciphertext: 'G'.repeat(43), tag: 'H'.repeat(22) },
+    envelopeAccount: { protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const, envelopeVersion: '1', nonce: 'I'.repeat(16), ciphertext: 'J'.repeat(43), tag: 'K'.repeat(22) },
+    accountRecoveryKey: new Uint8Array(32).fill(8),
   };
 }
 
@@ -437,6 +445,7 @@ describe('PersonalSyncSession B5 生命周期', () => {
     kl.unlockDek.mockReset();
     kl.buildChangeKeyMaterial.mockReset();
     kl.buildRecoverMaterial.mockReset();
+    kl.buildRecoverByAccountMaterial.mockReset();
     kl.newStateFromMaterial.mockReset();
     kl.newRecoveryCode.mockReturnValue({ code: 'NEWCODE', raw: new Uint8Array(32).fill(5) });
   });
@@ -502,6 +511,64 @@ describe('PersonalSyncSession B5 生命周期', () => {
     const s = new PersonalSyncSession('7', makeMemento(), makeDekStore().store, makeStore().store, client);
     s.unlock('1', FIX_DEK);
     await expect(s.recoverSync('A'.repeat(43), 'new-smp')).rejects.toThrowError(/already unlocked/);
+  });
+
+  it('recoverByAccount 成功后保存 DEK、更新 snapshot、解锁并返回新恢复码', async () => {
+    const accountRawKey = new Uint8Array(32).fill(3);
+    const kekAccount = hkdfSha256(accountRawKey, new Uint8Array(0), SYNC_INFO.kekAccount);
+    const envelopeAccount = sealEnvelope(kekAccount, FIX_DEK, '7', '1', 'account', '1');
+    const state = { ...validState(), signPub: encodeBase64Url(deriveSyncSignKeyPair(FIX_DEK).publicKey) };
+    const recoverViaAccount = vi.fn(async () => ({ accountRecoveryKey: encodeBase64Url(accountRawKey), envelopeAccount }));
+    const accountRecover = vi.fn(async () => ({}));
+    const getState = vi.fn(async () => state);
+    const client = { recoverViaAccount, accountRecover, getState } as unknown as PersonalSyncClient;
+    const { store, secrets } = makeDekStore();
+    const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, client);
+    kl.buildRecoverByAccountMaterial.mockResolvedValue({
+      smpKdf: { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: 'D'.repeat(22), outputBytes: 32 },
+      envelopeSmp: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '2', nonce: 'F'.repeat(16), ciphertext: 'G'.repeat(43), tag: 'H'.repeat(22) },
+      recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: 'E'.repeat(22), outputBytes: 32 },
+      envelopeRecovery: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '2', nonce: 'F'.repeat(16), ciphertext: 'G'.repeat(43), tag: 'H'.repeat(22) },
+      envelopeAccount: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '2', nonce: 'F'.repeat(16), ciphertext: 'G'.repeat(43), tag: 'H'.repeat(22) },
+      accountRecoveryKey: new Uint8Array(32).fill(4),
+      recoverSignPub: 'C'.repeat(43),
+      signSeed: new Uint8Array(32).fill(5),
+    });
+
+    const code = await s.recoverByAccount('login-password', 'new-smp');
+
+    expect(code).toBe('NEWCODE');
+    expect(recoverViaAccount).toHaveBeenCalledTimes(1);
+    expect(recoverViaAccount).toHaveBeenCalledWith('login-password');
+    expect(accountRecover).toHaveBeenCalledTimes(1);
+    expect(secrets.store).toHaveBeenCalledWith('dbclient.sync.dek.7.1', expect.any(String));
+    expect(s.isUnlocked).toBe(true);
+    expect(s.getStateStore().getSnapshot()).toEqual({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+  });
+
+  it('recoverByAccount 已解锁态抛错', async () => {
+    const client = { recoverViaAccount: vi.fn(), getState: vi.fn(async () => validState()) } as unknown as PersonalSyncClient;
+    const s = new PersonalSyncSession('7', makeMemento(), makeDekStore().store, makeStore().store, client);
+    s.unlock('1', FIX_DEK);
+    await expect(s.recoverByAccount('login-password', 'new-smp')).rejects.toThrowError(/already unlocked/);
+  });
+
+  it('recoverByAccount 恢复出的 DEK 与 state.signPub 不一致 → 拒绝、不写 DEK、不调用 accountRecover', async () => {
+    // envelopeAccount 用 FIX_DEK 封装，但 state.signPub 保持默认（不匹配 FIX_DEK 派生的公钥）。
+    const accountRawKey = new Uint8Array(32).fill(3);
+    const kekAccount = hkdfSha256(accountRawKey, new Uint8Array(0), SYNC_INFO.kekAccount);
+    const envelopeAccount = sealEnvelope(kekAccount, FIX_DEK, '7', '1', 'account', '1');
+    const recoverViaAccount = vi.fn(async () => ({ accountRecoveryKey: encodeBase64Url(accountRawKey), envelopeAccount }));
+    const accountRecover = vi.fn(async () => ({}));
+    const getState = vi.fn(async () => validState());
+    const client = { recoverViaAccount, accountRecover, getState } as unknown as PersonalSyncClient;
+    const { store, secrets } = makeDekStore();
+    const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, client);
+
+    await expect(s.recoverByAccount('login-password', 'new-smp')).rejects.toThrowError(/does not match sync state/);
+    expect(accountRecover).not.toHaveBeenCalled();
+    expect(secrets.store).not.toHaveBeenCalled();
+    expect(s.isUnlocked).toBe(false);
   });
 
   it('destroySync 成功后走 epoch transition：清理旧 epoch、存新 DEK、解锁新 epoch', async () => {

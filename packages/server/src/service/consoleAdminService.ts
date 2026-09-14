@@ -9,19 +9,21 @@ import type {
   IMembershipRepo,
   IAuditRepo,
   IOrderRepo,
+  IInvoiceRepo,
   AdminUserRow,
   AdminOrgRow,
   AuditFilter,
 } from '../repository/interfaces.js';
 import type { Queryable } from '../repository/mysql/db.js';
-import type { AuditEvent, PersonalPlan, OrganizationPlan, Order } from '../domain/entities.js';
-import type { UserStatus } from '../domain/enums.js';
+import type { AuditEvent, PersonalPlan, OrganizationPlan, Order, Invoice } from '../domain/entities.js';
+import type { UserStatus, InvoiceStatus } from '../domain/enums.js';
 import {
   EntityNotFoundError,
   ForbiddenError,
   SubscriptionVersionConflictError,
   ExportTooLargeError,
   ValidationError,
+  OrderInvalidStateError,
 } from '../domain/errors.js';
 import { AuditWriter } from './auditWriter.js';
 import { auditDto, toCsv } from './auditSerialize.js';
@@ -68,6 +70,7 @@ export interface ConsoleAdminDeps {
   membershipRepo: IMembershipRepo;
   auditRepo: IAuditRepo;
   orderRepo: IOrderRepo;
+  invoiceRepo: IInvoiceRepo;
   auditWriter: AuditWriter;
   /** 可选：用于受限读审计按 5min 窗口聚合（防高频读刷爆审计表）。 */
   rateLimiter?: RateLimitService;
@@ -94,6 +97,7 @@ export class ConsoleAdminService {
   private readonly membershipRepo: IMembershipRepo;
   private readonly auditRepo: IAuditRepo;
   private readonly orderRepo: IOrderRepo;
+  private readonly invoiceRepo: IInvoiceRepo;
   private readonly auditWriter: AuditWriter;
   private readonly rateLimiter?: RateLimitService;
 
@@ -108,6 +112,7 @@ export class ConsoleAdminService {
     this.membershipRepo = deps.membershipRepo;
     this.auditRepo = deps.auditRepo;
     this.orderRepo = deps.orderRepo;
+    this.invoiceRepo = deps.invoiceRepo;
     this.auditWriter = deps.auditWriter;
     this.rateLimiter = deps.rateLimiter;
   }
@@ -120,7 +125,7 @@ export class ConsoleAdminService {
    */
   private async auditRestrictedRead(
     actorUserId: number,
-    eventType: 'admin.users.read' | 'admin.organizations.read' | 'admin.audit.read' | 'admin.orders.read',
+    eventType: 'admin.users.read' | 'admin.organizations.read' | 'admin.audit.read' | 'admin.orders.read' | 'admin.invoices.read',
   ): Promise<void> {
     if (!this.rateLimiter) {
       this.auditWriter.write({ eventType, result: 'success', actorUserId, actorRole: 'platform_admin' });
@@ -281,6 +286,115 @@ export class ConsoleAdminService {
     const items = hasMore ? rows.slice(0, input.limit) : rows;
     await this.auditRestrictedRead(actorUserId, 'admin.orders.read');
     return { items, nextId: hasMore ? items[items.length - 1].id : null };
+  }
+
+  /**
+   * 人工退款登记（§状态机）：仅 `paid` / `fulfilled` 可退，置为 `refunded` 并登记 reason。
+   * 只改本地状态、不调用任何支付渠道退款 API（真实退款走部署后人工验收）。
+   */
+  async refundOrderInTx(
+    tx: Queryable,
+    actorUserId: number,
+    orderNo: string,
+    reason: string,
+  ): Promise<{ orderNo: string; status: Order['status'] }> {
+    const normalizedReason = (reason ?? '').trim();
+    if (!normalizedReason) {
+      throw new ValidationError('refund reason is required');
+    }
+    const order = await this.orderRepo.findByOrderNoForUpdate(tx, orderNo);
+    if (!order) throw new EntityNotFoundError('order', orderNo);
+    if (order.status !== 'paid' && order.status !== 'fulfilled') {
+      throw new OrderInvalidStateError('only paid or fulfilled orders can be refunded');
+    }
+    // 已开具(issued)发票的订单不得直接退款：否则形成「订单已退款 + 发票已开具」的矛盾账。
+    // 业务上需先冲红/作废发票（当前不实现，直接拒绝并提示运营人工处理）。
+    if (await this.invoiceRepo.hasIssuedForOrder(tx, order.id)) {
+      throw new OrderInvalidStateError('order has an issued invoice and cannot be refunded directly');
+    }
+    const ok = await this.orderRepo.advance(tx, {
+      id: order.id,
+      expectedStatus: order.status,
+      status: 'refunded',
+      channelTradeNo: null,
+      paidTime: null,
+    });
+    if (!ok) throw new OrderInvalidStateError('order changed concurrently');
+    await this.auditWriter.writeInTx(tx, {
+      eventType: 'admin.order.refunded',
+      result: 'success',
+      actorUserId,
+      actorRole: 'platform_admin',
+      targetType: 'order',
+      targetId: orderNo,
+      reason: normalizedReason,
+    });
+    return { orderNo, status: 'refunded' };
+  }
+
+  // ── 发票 ──
+
+  async listInvoicesForAdmin(actorUserId: number, input: {
+    userId?: number;
+    status?: InvoiceStatus;
+    cursor?: number;
+    limit: number;
+  }): Promise<Page<Invoice>> {
+    const rows = await this.invoiceRepo.listAll({ ...input, limit: input.limit + 1 });
+    const hasMore = rows.length > input.limit;
+    const items = hasMore ? rows.slice(0, input.limit) : rows;
+    await this.auditRestrictedRead(actorUserId, 'admin.invoices.read');
+    return { items, nextId: hasMore ? items[items.length - 1].id : null };
+  }
+
+  /**
+   * 运营处理发票：`requested → issued | rejected | failed`。`rejected`/`failed` 必须给
+   * reason（记录并展示给用户）；只改状态 + 原因，不生成发票文件本身。
+   */
+  async setInvoiceStatusInTx(
+    tx: Queryable,
+    actorUserId: number,
+    invoiceId: number,
+    status: 'issued' | 'rejected' | 'failed',
+    reason: string | null,
+  ): Promise<{ invoiceId: string; status: InvoiceStatus }> {
+    const inv = await this.invoiceRepo.findByIdForUpdate(tx, invoiceId);
+    if (!inv) throw new EntityNotFoundError('invoice', invoiceId);
+    if (inv.status !== 'requested') throw new OrderInvalidStateError('only a requested invoice can be processed');
+
+    // 开具前校验归属订单仍为 fulfilled：退款/失效后不得再开票（发票申请时的 fulfilled 校验见
+    // invoiceService）。无订单归属（orderId == null）的人工记录不受此约束。
+    if (status === 'issued' && inv.orderId != null) {
+      const order = await this.orderRepo.findByIdForUpdate(tx, inv.orderId);
+      if (!order || order.status !== 'fulfilled') {
+        throw new OrderInvalidStateError('invoice order is no longer fulfilled');
+      }
+    }
+
+    const finalReason = (reason ?? '').trim();
+    if ((status === 'rejected' || status === 'failed') && !finalReason) {
+      throw new ValidationError('reason is required when rejecting or failing an invoice');
+    }
+
+    const ok = await this.invoiceRepo.advance(tx, {
+      id: inv.id,
+      expectedStatus: 'requested',
+      status,
+      reason: status === 'issued' ? null : finalReason,
+    });
+    if (!ok) throw new OrderInvalidStateError('invoice changed concurrently');
+
+    const eventType = status === 'issued' ? 'admin.invoice.issued' : (status === 'rejected' ? 'admin.invoice.rejected' : 'admin.invoice.failed');
+    await this.auditWriter.writeInTx(tx, {
+      eventType,
+      result: 'success',
+      actorUserId,
+      actorRole: 'platform_admin',
+      targetType: 'invoice',
+      targetId: String(inv.id),
+      reason: status === 'issued' ? undefined : finalReason,
+    });
+    return { invoiceId: String(inv.id), status };
   }
 
   async adjustOrganizationSubscriptionInTx(

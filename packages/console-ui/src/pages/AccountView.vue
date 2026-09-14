@@ -4,6 +4,7 @@ import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
 import { updateDisplayName, changePassword, type ConsoleMeUser } from '../api/me';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { navigate } from '../lib/router';
+import { formatDateTime } from '../lib/formatTime';
 
 const props = defineProps<{ user: ConsoleMeUser | null; subscription: { planCode: string | null; status: string; periodEndTime: string | null } | null }>();
 
@@ -98,7 +99,7 @@ async function submitPassword(): Promise<void> {
         当前套餐：<strong>{{ subscription.planCode === 'pro' ? 'Pro' : (subscription.planCode ?? '—') }}</strong>
         <span class="muted">（{{ subscription.status === 'active' ? '生效中' : subscription.status }}）</span>
       </p>
-      <p class="row" v-if="subscription?.periodEndTime">到期时间：{{ new Date(subscription.periodEndTime).toLocaleString() }}</p>
+      <p class="row" v-if="subscription?.periodEndTime">到期时间：{{ formatDateTime(subscription.periodEndTime) }}</p>
       <p class="row muted" v-if="!subscription">暂无订阅。</p>
       <button v-if="subscription?.planCode !== 'pro'" class="btn" @click="navigate('/console/checkout')">升级 Pro</button>
     </div>

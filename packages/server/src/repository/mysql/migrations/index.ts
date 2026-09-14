@@ -20,6 +20,9 @@ import { paymentMigration } from './018_payment.js';
 import { invoiceOrderUniqueMigration } from './019_invoice_order_unique.js';
 import { cleanupIndexesMigration } from './020_cleanup_indexes.js';
 import { paymentNonceMigration } from './021_payment_callback_nonces.js';
+import { accountRecoveryMigration } from './022_account_recovery.js';
+import { invoiceStatusReasonMigration } from './023_invoice_status_reason.js';
+import { syncMutationRecoveryTimeMigration } from './024_sync_mutation_recovery_time.js';
 
 /** 新库启动时按固定依赖顺序执行的 migration 集合。 */
 export const migrations: readonly Migration[] = [
@@ -44,4 +47,7 @@ export const migrations: readonly Migration[] = [
   invoiceOrderUniqueMigration,
   cleanupIndexesMigration,
   paymentNonceMigration,
+  accountRecoveryMigration,
+  invoiceStatusReasonMigration,
+  syncMutationRecoveryTimeMigration,
 ];

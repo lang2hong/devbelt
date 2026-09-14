@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import { useI18n } from '../composables/useI18n';
+import { formatDateTime } from '../utils/formatTime';
 
 /**
  * 设备管理（Vue 版）：展示当前用户全部设备（平台/客户端版本/最后活跃/状态），
@@ -28,14 +29,6 @@ const canRevoke = ref(true);
 const errorMsg = ref('');
 
 const boundCount = computed(() => devices.value.filter((d) => d.status === 'active').length);
-
-function fmt(s?: string | null): string {
-  if (!s) return '';
-  const d = new Date(s);
-  if (isNaN(d.getTime())) return s;
-  const p = (n: number) => (n < 10 ? '0' : '') + n;
-  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
-}
 
 function isBound(d: DeviceItem): boolean {
   return d.status === 'active';
@@ -86,7 +79,7 @@ onMounted(() => {
             </span>
           </div>
           <div v-if="d.clientVersion" class="d-meta">v{{ d.clientVersion }}</div>
-          <div v-if="d.lastUsedTime" class="d-last">{{ t('sessions.lastUsed') }} · {{ fmt(d.lastUsedTime) }}</div>
+          <div v-if="d.lastUsedTime" class="d-last">{{ t('sessions.lastUsed') }} · {{ formatDateTime(d.lastUsedTime) }}</div>
         </div>
         <div class="d-action">
           <button v-if="canRevoke" class="revoke-btn" @click="revoke(d.deviceId)">{{ t('sessions.kick') }}</button>

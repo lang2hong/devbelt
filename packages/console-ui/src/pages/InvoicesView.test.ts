@@ -31,7 +31,7 @@ function seed() {
   vi.mocked(listInvoices).mockResolvedValue({
     kind: 'ok',
     value: {
-      items: [{ invoiceId: '1', title: 'Acme', taxNo: null, email: 'billing@a.com', amountCents: 9900, status: 'requested', createTime: '2026-01-01T00:00:00.000Z' }],
+      items: [{ invoiceId: '1', title: 'Acme', taxNo: null, email: 'billing@a.com', amountCents: 9900, status: 'requested', reason: null, createTime: '2026-01-01T00:00:00.000Z' }],
       nextCursor: null,
     },
   });

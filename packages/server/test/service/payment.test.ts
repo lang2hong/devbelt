@@ -40,6 +40,7 @@ class FakeOrderRepo implements IOrderRepo {
   }
   async findByOrderNo(orderNo: string): Promise<Order | undefined> { return this.store.get(orderNo); }
   async findByOrderNoForUpdate(_exec: Queryable, orderNo: string): Promise<Order | undefined> { return this.store.get(orderNo); }
+  async findByIdForUpdate(_exec: Queryable, id: number): Promise<Order | undefined> { return [...this.store.values()].find((o) => o.id === id); }
   async advance(_exec: Queryable, input: { id: number; expectedStatus: Order['status']; status: Order['status']; channelTradeNo: string | null; paidTime: Date | null }): Promise<boolean> {
     for (const o of this.store.values()) {
       if (o.id === input.id && o.status === input.expectedStatus) {

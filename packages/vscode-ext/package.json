@@ -139,6 +139,11 @@
         "category": "DB Client"
       },
       {
+        "command": "dbclient.syncEntry",
+        "title": "%cmd.syncEntry%",
+        "category": "DB Client"
+      },
+      {
         "command": "dbclient.fixConnectionPaths",
         "title": "%cmd.fixConnectionPaths%",
         "category": "DB Client"
@@ -161,6 +166,11 @@
       {
         "command": "dbclient.recoverSync",
         "title": "%cmd.recoverSync%",
+        "category": "DB Client"
+      },
+      {
+        "command": "dbclient.recoverByAccount",
+        "title": "%cmd.recoverByAccount%",
         "category": "DB Client"
       },
       {
@@ -691,11 +701,6 @@
           "command": "dbclient.login",
           "when": "(view == dbclient.explorer || view == dbclient.explorer.organization) && !dbclient.loggedIn",
           "group": "navigation"
-        },
-        {
-          "command": "dbclient.account",
-          "when": "(view == dbclient.explorer || view == dbclient.explorer.organization) && dbclient.loggedIn",
-          "group": "navigation"
         }
       ],
       "editor/title/run": [
@@ -752,6 +757,10 @@
           "when": "dbclient.sync.ready"
         },
         {
+          "command": "dbclient.syncEntry",
+          "when": "dbclient.loggedIn && !dbclient.sync.unlocked"
+        },
+        {
           "command": "dbclient.fixConnectionPaths",
           "when": "false"
         },
@@ -769,6 +778,10 @@
         },
         {
           "command": "dbclient.recoverSync",
+          "when": "dbclient.loggedIn && !dbclient.sync.unlocked"
+        },
+        {
+          "command": "dbclient.recoverByAccount",
           "when": "dbclient.loggedIn && !dbclient.sync.unlocked"
         },
         {

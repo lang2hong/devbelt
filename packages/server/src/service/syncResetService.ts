@@ -18,6 +18,7 @@ import {
 } from '../domain/errors.js';
 import { incU64 } from '../domain/syncU64.js';
 import { validateNewState, toState, toDto, type SyncNewState, type StateDto } from './syncStateService.js';
+import { assertEnvelopeFreshness } from './syncShared.js';
 import type { EmailSender } from './emailSender.js';
 import type { RateLimitService } from './rateLimitService.js';
 import type { AuditWriter } from './auditWriter.js';
@@ -244,6 +245,13 @@ export class SyncResetService {
         let next: ReturnType<typeof toState>;
         const state = await this.stateRepo.lockByUserId(tx, userId);
         if (state) {
+          // 用 newState 整体替换账号恢复材料：须对账号信封做 (钥匙盐, nonce) 新鲜度校验，
+          // 否则「重置后用同 accountRecoveryKey + 同 nonce 重建」会复用 AES-GCM 密钥流。
+          assertEnvelopeFreshness(
+            { salt: state.accountRecoveryKey, nonce: state.envelopeAccount.nonce },
+            { salt: input.newState.accountRecoveryKey, nonce: input.newState.envelopeAccount.nonce },
+            'account',
+          );
           let seq = state.changeSequence;
           const active = await this.recordRepo.listActiveByEpoch(tx, userId, state.keyEpoch);
           for (const r of active) {

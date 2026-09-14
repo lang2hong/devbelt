@@ -31,7 +31,7 @@ function makeService(orders: Map<string, Order>, opts: { dupOnCreate?: boolean; 
         e.code = 'ER_DUP_ENTRY';
         throw e;
       }
-      const i = { id: inv.length + 1, ...input, status: 'requested' as const, createTime: new Date(), updateTime: new Date() };
+      const i = { id: inv.length + 1, ...input, status: 'requested' as const, reason: null as string | null, createTime: new Date(), updateTime: new Date() };
       inv.push(i);
       return i;
     },

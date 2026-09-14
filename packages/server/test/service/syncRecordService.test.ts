@@ -83,7 +83,7 @@ async function init(stack: ReturnType<typeof makeStack>) {
   const keys = makeKeys();
   await stack.stateSvc.init(USER, {
     protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,
-    smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'),
+    smpKdf: smpKdf(), recoveryKdf: recoveryKdf(), envelopeSmp: env('1'), envelopeRecovery: env('1'), envelopeAccount: env('1'), accountRecoveryKey: buf(32, 99),
     signPub: keys.signPub, recoverSignPub: keys.signPub,
   });
   return keys;

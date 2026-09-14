@@ -36,6 +36,7 @@ export function registerCommands(deps: Deps): void {
       items.push(
         { label: l10n('account.title'), value: 'account' },
         { label: l10n('sessions.title'), value: 'sessions' },
+        { label: l10n('sync.statusLabel'), value: 'sync' },
         { label: l10n('cmd.logout'), value: 'logout' },
       );
     } else {
@@ -49,6 +50,7 @@ export function registerCommands(deps: Deps): void {
       login: 'dbclient.login',
       account: 'dbclient.account',
       sessions: 'dbclient.sessions',
+      sync: 'dbclient.syncEntry',
       logout: 'dbclient.logout',
     } as Record<string, string>)[picked.value];
     if (cmd) await vscode.commands.executeCommand(cmd);

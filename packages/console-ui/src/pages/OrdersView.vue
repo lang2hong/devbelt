@@ -2,9 +2,11 @@
 import { computed, onMounted, ref } from 'vue';
 import { listOrders, type ConsoleOrder } from '../api/orders';
 import { setAccessToken } from '../api/consoleAuth';
+import { formatDateTime } from '../lib/formatTime';
 
 const orders = ref<ConsoleOrder[]>([]);
 const state = ref<'loading' | 'ready' | 'error'>('loading');
+const loadError = ref('');
 const statusFilter = ref('');
 const nextCursor = ref<string | null>(null);
 const expandedOrderNo = ref<string | null>(null);
@@ -28,10 +30,6 @@ function fmtCents(cents: number): string {
   return (cents / 100).toFixed(2);
 }
 
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleString();
-}
-
 function channelLabel(ch: string): string {
   return ch === 'wechat' ? '微信' : '支付宝';
 }
@@ -42,6 +40,7 @@ function toggle(o: ConsoleOrder): void {
 
 async function load(reset = true): Promise<void> {
   state.value = 'loading';
+  loadError.value = '';
   const r = await listOrders(reset ? undefined : (nextCursor.value ?? undefined));
   if (r.kind === 'ok') {
     orders.value = reset ? r.value.items : [...orders.value, ...r.value.items];
@@ -52,6 +51,7 @@ async function load(reset = true): Promise<void> {
     window.location.assign('/login');
   } else {
     state.value = 'error';
+    loadError.value = r.kind === 'failure' ? (r.message || r.code || '加载失败，请刷新重试。') : '加载失败，请刷新重试。';
   }
 }
 
@@ -70,7 +70,7 @@ onMounted(() => load());
     </div>
 
     <p class="muted" v-if="state === 'loading'">加载中…</p>
-    <p class="error" v-if="state === 'error'">加载失败，请刷新重试。</p>
+    <p class="error" v-if="state === 'error'">{{ loadError || '加载失败，请刷新重试。' }}</p>
 
     <ul v-if="state === 'ready'" class="list">
       <li v-for="o in visible" :key="o.orderNo" class="item">
@@ -79,7 +79,7 @@ onMounted(() => load());
             <strong>{{ o.planCode === 'pro' ? 'Pro' : o.planCode }}</strong>
             <span class="badge" :class="o.status">{{ STATUS_LABEL[o.status] ?? o.status }}</span>
           </span>
-          <span class="muted">¥{{ fmtCents(o.amountCents) }} · {{ channelLabel(o.channel) }} · {{ fmtTime(o.createTime) }}</span>
+          <span class="muted">¥{{ fmtCents(o.amountCents) }} · {{ channelLabel(o.channel) }} · {{ formatDateTime(o.createTime) }}</span>
         </button>
         <div v-if="expandedOrderNo === o.orderNo" class="detail">
           <dl>
@@ -87,9 +87,9 @@ onMounted(() => load());
             <dt>状态</dt><dd>{{ STATUS_LABEL[o.status] ?? o.status }}</dd>
             <dt>金额</dt><dd>¥{{ fmtCents(o.amountCents) }}</dd>
             <dt>渠道</dt><dd>{{ channelLabel(o.channel) }}</dd>
-            <dt>创建时间</dt><dd>{{ fmtTime(o.createTime) }}</dd>
-            <dt>过期时间</dt><dd>{{ fmtTime(o.expiresTime) }}</dd>
-            <dt>支付时间</dt><dd>{{ o.paidTime ? fmtTime(o.paidTime) : '—' }}</dd>
+            <dt>创建时间</dt><dd>{{ formatDateTime(o.createTime) }}</dd>
+            <dt>过期时间</dt><dd>{{ formatDateTime(o.expiresTime) }}</dd>
+            <dt>支付时间</dt><dd>{{ o.paidTime ? formatDateTime(o.paidTime) : '—' }}</dd>
           </dl>
         </div>
       </li>

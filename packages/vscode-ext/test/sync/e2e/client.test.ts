@@ -12,13 +12,13 @@ function seed(): Uint8Array {
 const smpKdf = { alg: 'argon2id' as const, version: 1 as const, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: 'A'.repeat(22), outputBytes: 32 as const };
 const recoveryKdf = { alg: 'hkdf-sha256' as const, version: 1 as const, salt: 'A'.repeat(22), outputBytes: 32 as const };
 const envelope = { protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const, envelopeVersion: '1', nonce: 'A'.repeat(16), ciphertext: 'A'.repeat(43), tag: 'A'.repeat(22) };
-const newState = { protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const, smpKdf, recoveryKdf, envelopeSmp: envelope, envelopeRecovery: envelope, signPub: 'A'.repeat(43), recoverSignPub: 'A'.repeat(43) };
+const newState = { protocolVersion: 1 as const, cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const, smpKdf, recoveryKdf, envelopeSmp: envelope, envelopeRecovery: envelope, envelopeAccount: envelope, accountRecoveryKey: 'A'.repeat(43), signPub: 'A'.repeat(43), recoverSignPub: 'A'.repeat(43) };
 
 describe('PersonalSyncClient 无签名方法', () => {
   it('getState → GET /api/sync/state', async () => {
     const http = makeHttp();
     await new PersonalSyncClient(http).getState();
-    expect(http.requestRaw).toHaveBeenCalledWith('GET', '/api/sync/state', undefined, undefined);
+    expect(http.requestRaw).toHaveBeenCalledWith('GET', '/api/sync/state', undefined, { retry: undefined });
   });
 
   it('init → PUT，retry=false，newState 已校验', async () => {
@@ -42,7 +42,7 @@ describe('PersonalSyncClient 无签名方法', () => {
   it('resetChallenges → POST，默认重试', async () => {
     const http = makeHttp();
     await new PersonalSyncClient(http).resetChallenges();
-    expect(http.requestRaw).toHaveBeenCalledWith('POST', '/api/sync/reset-challenges', undefined, undefined);
+    expect(http.requestRaw).toHaveBeenCalledWith('POST', '/api/sync/reset-challenges', undefined, { retry: undefined });
   });
 
   it('resetAfterLossWithHandoff → POST，默认重试（无 retry=false）', async () => {
@@ -55,7 +55,7 @@ describe('PersonalSyncClient 无签名方法', () => {
       handoffTicket: 'A'.repeat(43),
       newState,
     });
-    expect(opts).toBeUndefined();
+    expect(opts).toEqual({ retry: undefined });
   });
 });
 
@@ -70,7 +70,7 @@ describe('PersonalSyncClient 签名方法', () => {
     expect(method).toBe('PUT');
     expect(path).toBe(`/api/sync/records/${'A'.repeat(22)}`);
     expect(body.signature).toMatch(/^[A-Za-z0-9_-]{86}$/);
-    expect(opts).toBeUndefined();
+    expect(opts).toEqual({ retry: undefined });
   });
 
   it('deleteRecord → DELETE path', async () => {
@@ -91,6 +91,8 @@ describe('PersonalSyncClient 签名方法', () => {
     expect(path).toBe('/api/sync/change-key');
     expect(body).toHaveProperty('signature');
     expect(body).not.toHaveProperty('requestDigest');
+    expect(body).not.toHaveProperty('envelopeAccount');
+    expect(body).not.toHaveProperty('accountRecoveryKey');
   });
 
   it('recover → POST /api/sync/recover', async () => {
@@ -108,6 +110,75 @@ describe('PersonalSyncClient 签名方法', () => {
       userId: '7', keyEpoch: '1', mutationId: 'A'.repeat(22), expectedStateVersion: '3', newState, seed: seed(),
     });
     expect(http.requestRaw.mock.calls[0][1]).toBe('/api/sync/destroy');
+  });
+
+  it('accountRecover → POST /api/sync/account-recover，签名字段集正确', async () => {
+    const http = makeHttp();
+    await new PersonalSyncClient(http).accountRecover({
+      userId: '7', keyEpoch: '1', mutationId: 'A'.repeat(22), expectedStateVersion: '3',
+      smpKdf, envelopeSmp: envelope, recoveryKdf, envelopeRecovery: envelope,
+      envelopeAccount: envelope, accountRecoveryKey: 'A'.repeat(43), recoverSignPub: 'A'.repeat(43), seed: seed(),
+    });
+    const [method, path, body, opts] = http.requestRaw.mock.calls[0];
+    expect(method).toBe('POST');
+    expect(path).toBe('/api/sync/account-recover');
+    expect(body).toHaveProperty('signature');
+    expect(body.envelopeAccount).toEqual(envelope);
+    expect(body.accountRecoveryKey).toBe('A'.repeat(43));
+    expect(opts).toEqual({ retry: undefined });
+  });
+});
+
+describe('PersonalSyncClient recoverViaAccount（网络响应 fail-closed 校验）', () => {
+  it('recoverViaAccount → POST /api/sync/recover-via-account，携带 step-up 口令，返回值经严格校验', async () => {
+    const http = {
+      requestRaw: vi.fn(async () => ({
+        status: 200,
+        body: { accountRecoveryKey: 'A'.repeat(43), envelopeAccount: envelope },
+      })),
+    } as any;
+    const r = await new PersonalSyncClient(http).recoverViaAccount('login-password');
+    expect(http.requestRaw).toHaveBeenCalledWith(
+      'POST', '/api/sync/recover-via-account', { password: 'login-password' },
+      { retry: false },
+    );
+    expect(r.accountRecoveryKey).toBe('A'.repeat(43));
+    expect(r.envelopeAccount).toEqual(envelope);
+  });
+
+  it('accountRecoveryKey 长度不对（非 32B）→ 拒绝，不信任网络 DTO', async () => {
+    const http = {
+      requestRaw: vi.fn(async () => ({
+        status: 200,
+        body: { accountRecoveryKey: 'A'.repeat(10), envelopeAccount: envelope },
+      })),
+    } as any;
+    await expect(new PersonalSyncClient(http).recoverViaAccount('login-password')).rejects.toThrowError(/accountRecoveryKey/);
+  });
+
+  it('envelopeAccount 缺字段 → 拒绝', async () => {
+    const http = {
+      requestRaw: vi.fn(async () => ({
+        status: 200,
+        body: { accountRecoveryKey: 'A'.repeat(43), envelopeAccount: { ...envelope, tag: undefined } },
+      })),
+    } as any;
+    await expect(new PersonalSyncClient(http).recoverViaAccount('login-password')).rejects.toThrow();
+  });
+
+  it('响应含未知字段 → 拒绝', async () => {
+    const http = {
+      requestRaw: vi.fn(async () => ({
+        status: 200,
+        body: { accountRecoveryKey: 'A'.repeat(43), envelopeAccount: envelope, bogus: true },
+      })),
+    } as any;
+    await expect(new PersonalSyncClient(http).recoverViaAccount('login-password')).rejects.toThrowError(/unexpected key/);
+  });
+
+  it('响应非对象 → 拒绝', async () => {
+    const http = { requestRaw: vi.fn(async () => ({ status: 200, body: null })) } as any;
+    await expect(new PersonalSyncClient(http).recoverViaAccount('login-password')).rejects.toThrowError(/must be an object/);
   });
 });
 

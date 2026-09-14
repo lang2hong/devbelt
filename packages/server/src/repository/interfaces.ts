@@ -588,6 +588,7 @@ export interface ISyncMutationRepo {
     action: SyncAction;
     resultVersion: string | null;
     resultChangeSequence: string | null;
+    resultRecoveryCodeSetTime: Date | null;
     status: SyncMutation['status'];
     expiresTime: Date;
   }): Promise<void>;
@@ -733,6 +734,8 @@ export interface IOrderRepo {
   findByOrderNo(orderNo: string): Promise<Order | undefined>;
   /** 事务内按 order_no 锁定订单行（回调/状态推进的序列化点，§状态机）。 */
   findByOrderNoForUpdate(exec: Queryable, orderNo: string): Promise<Order | undefined>;
+  /** 事务内按主键 id 锁定订单行（发票开具前校验订单仍为 fulfilled 的序列化点）。 */
+  findByIdForUpdate(exec: Queryable, id: number): Promise<Order | undefined>;
   /** 事务内推进状态：`WHERE id=? AND status=expectedStatus`，返回是否命中（幂等防重复回调）。 */
   advance(exec: Queryable, input: {
     id: number;
@@ -781,4 +784,25 @@ export interface IInvoiceRepo {
   }): Promise<Invoice>;
   /** 用户发票申请历史（keyset cursor，DESC by id）。 */
   listByUser(userId: number, cursor: number | undefined, limit: number): Promise<Invoice[]>;
+  /** 事务内按 id 锁定发票行（运营处理的序列化点）。 */
+  findByIdForUpdate(exec: Queryable, id: number): Promise<Invoice | undefined>;
+  /** 事务内推进状态并登记原因：`WHERE id=? AND status=expectedStatus`，返回是否命中。 */
+  advance(exec: Queryable, input: {
+    id: number;
+    expectedStatus: Invoice['status'];
+    status: Invoice['status'];
+    reason: string | null;
+  }): Promise<boolean>;
+  /** 该订单是否已存在 `issued` 状态的发票（退款前校验，锁订单行后调用防矛盾账）。 */
+  hasIssuedForOrder(exec: Queryable, orderId: number): Promise<boolean>;
+  /** 平台发票列表（跨用户，多维过滤，keyset cursor DESC by id）。 */
+  listAll(input: AdminInvoiceFilter): Promise<Invoice[]>;
+}
+
+/** 平台发票列表过滤（cursor 为上一页最后一条 id，keyset DESC；跨用户，§对账/运营）。 */
+export interface AdminInvoiceFilter {
+  userId?: number;
+  status?: Invoice['status'];
+  cursor?: number;
+  limit: number;
 }

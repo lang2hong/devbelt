@@ -17,6 +17,7 @@ vi.mock('vscode', () => ({
 import {
   changeSyncPassword,
   recoverSync,
+  recoverByAccountCommand,
   destroySync,
   resetSync,
   resetSyncFromHandoff,
@@ -31,6 +32,7 @@ function makeSession(over: Record<string, unknown> = {}): Record<string, any> {
     pendingCleanup: undefined,
     changeSyncPassword: vi.fn(async () => {}),
     recoverSync: vi.fn(async () => 'NEWCODE'),
+    recoverByAccount: vi.fn(async () => 'NEWCODE'),
     destroySync: vi.fn(async () => 'NEWCODE'),
     requestResetChallenge: vi.fn(async () => {}),
     resetSyncAfterLoss: vi.fn(async () => 'NEWCODE'),
@@ -121,6 +123,57 @@ describe('syncLifecycle 命令（B5）', () => {
     ui.promptText.mockResolvedValue('x');
     ui.promptSmp.mockResolvedValueOnce('new-passphrase-123').mockResolvedValueOnce('new-passphrase-123');
     await recoverSync(deps);
+    expect(ui.error).toHaveBeenCalled();
+    expect(ui.confirmRecoveryCode).not.toHaveBeenCalled();
+  });
+
+  it('recoverByAccountCommand：未登录 → 告警且不调用 session', async () => {
+    const session = makeSession({ isUnlocked: false });
+    const { deps, ui } = makeDeps(session, { loggedIn: false });
+    await recoverByAccountCommand(deps);
+    expect(session.recoverByAccount).not.toHaveBeenCalled();
+    expect(ui.warn).toHaveBeenCalled();
+  });
+
+  it('recoverByAccountCommand：已解锁 → 提示已解锁，不调用 session', async () => {
+    const session = makeSession({ isUnlocked: true });
+    const { deps, ui } = makeDeps(session);
+    await recoverByAccountCommand(deps);
+    expect(session.recoverByAccount).not.toHaveBeenCalled();
+    expect(ui.info).toHaveBeenCalled();
+  });
+
+  it('recoverByAccountCommand：账户登录口令取消 → 中止，不调用 session', async () => {
+    const session = makeSession({ isUnlocked: false });
+    const { deps, ui } = makeDeps(session);
+    ui.promptSmp.mockResolvedValue(undefined);
+    await recoverByAccountCommand(deps);
+    expect(session.recoverByAccount).not.toHaveBeenCalled();
+  });
+
+  it('recoverByAccountCommand：新口令取消 → 中止，不调用 session', async () => {
+    const session = makeSession({ isUnlocked: false });
+    const { deps, ui } = makeDeps(session);
+    ui.promptSmp.mockResolvedValueOnce('account-password').mockResolvedValue(undefined);
+    await recoverByAccountCommand(deps);
+    expect(session.recoverByAccount).not.toHaveBeenCalled();
+  });
+
+  it('recoverByAccountCommand：成功 → 展示新恢复码并确认后解锁提示', async () => {
+    const session = makeSession({ isUnlocked: false, recoverByAccount: vi.fn(async () => 'CODE-ACCT') });
+    const { deps, ui } = makeDeps(session);
+    ui.promptSmp.mockResolvedValueOnce('account-password').mockResolvedValueOnce('new-passphrase-123').mockResolvedValueOnce('new-passphrase-123');
+    await recoverByAccountCommand(deps);
+    expect(session.recoverByAccount).toHaveBeenCalledWith('account-password', 'new-passphrase-123');
+    expect(ui.confirmRecoveryCode).toHaveBeenCalledWith('CODE-ACCT');
+    expect(ui.info).toHaveBeenCalled();
+  });
+
+  it('recoverByAccountCommand：失败 → 固定错误，不展示恢复码', async () => {
+    const session = makeSession({ isUnlocked: false, recoverByAccount: vi.fn(async () => { throw new Error('boom'); }) });
+    const { deps, ui } = makeDeps(session);
+    ui.promptSmp.mockResolvedValueOnce('account-password').mockResolvedValueOnce('new-passphrase-123').mockResolvedValueOnce('new-passphrase-123');
+    await recoverByAccountCommand(deps);
     expect(ui.error).toHaveBeenCalled();
     expect(ui.confirmRecoveryCode).not.toHaveBeenCalled();
   });

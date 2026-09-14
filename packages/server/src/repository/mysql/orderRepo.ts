@@ -38,6 +38,11 @@ export class MysqlOrderRepo implements IOrderRepo {
     return rows[0] ? mapOrder(rows[0]) : undefined;
   }
 
+  async findByIdForUpdate(exec: Queryable, id: number): Promise<Order | undefined> {
+    const [rows] = await exec.query<any[]>('SELECT * FROM orders WHERE id = ? FOR UPDATE', [id]);
+    return rows[0] ? mapOrder(rows[0]) : undefined;
+  }
+
   async advance(exec: Queryable, input: {
     id: number;
     expectedStatus: OrderStatus;

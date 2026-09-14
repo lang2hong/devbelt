@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue';
 import { listDevices, revokeDevice, type Device } from '../api/devices';
 import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
+import { formatDateTime } from '../lib/formatTime';
 
 const devices = ref<Device[]>([]);
 const state = ref<'loading' | 'ready' | 'error'>('loading');
@@ -81,7 +82,7 @@ async function confirmRevoke(d: Device): Promise<void> {
         <li v-for="d in devices" :key="d.deviceId" class="item">
           <div class="meta">
             <strong>{{ d.deviceName || d.devicePlatform }}</strong>
-            <span class="muted">{{ d.devicePlatform }} · 上次使用 {{ d.lastUsedTime ? new Date(d.lastUsedTime).toLocaleString() : '—' }}</span>
+            <span class="muted">{{ d.devicePlatform }} · 上次使用 {{ formatDateTime(d.lastUsedTime) }}</span>
           </div>
           <div v-if="confirming === d.deviceId" class="confirm">
             <span class="muted">撤销该设备？</span>

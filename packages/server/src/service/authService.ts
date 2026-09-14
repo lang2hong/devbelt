@@ -390,6 +390,22 @@ export class AuthService {
     return { ok: true };
   }
 
+  /**
+   * 账号恢复第二步（step-up）登临：`POST /api/sync/recover-via-account` 会把数据
+   * 解密的原材料（accountRecoveryKey + envelopeAccount）下发给调用者，其安全边界
+   * 因此不能仅凭一个普通 sync access token —— token 泄露者即使拿不到用户的账号
+   * 登录口令，也能凭 token 拿到 DEK 材料并离线解密全部同步数据。故此处强制再复核
+   * 一次账户登录口令（调用者已登录，但需重新输入口令自证身份）。
+   *
+   * 校验失败抛 INVALID_CURRENT_PASSWORD（400，已认证用户无账号枚举风险），
+   * 与改密的现有语义一致；账户不存在/未认证则抛 UNAUTHORIZED。
+   */
+  async verifyPasswordStepUp(userId: number, password: string): Promise<void> {
+    const user = await this.userRepo.findById(userId);
+    if (!user) throw new UnauthorizedError();
+    if (!(await verifyPassword(password, user.passwordHash))) throw new InvalidCurrentPasswordError();
+  }
+
   /** 列出本人设备（不含 token/hash）。 */
   async listDevices(userId: number): Promise<Device[]> {
     return this.deviceRepo.listByUser(userId);

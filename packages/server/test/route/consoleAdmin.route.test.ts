@@ -27,7 +27,8 @@ import {
 } from '../helpers/fakeRepos.js';
 import { FakeAuditRepo } from '../helpers/linkFlowFakes.js';
 import type { Queryable, TxRunner } from '../../src/repository/mysql/db.js';
-import type { IOrderRepo } from '../../src/repository/interfaces.js';
+import type { IOrderRepo, IInvoiceRepo } from '../../src/repository/interfaces.js';
+import type { Order, Invoice } from '../../src/domain/entities.js';
 
 const ORIGIN = 'http://localhost:5173';
 const UUID = '123e4567-e89b-42d3-8456-426614174000';
@@ -48,15 +49,44 @@ async function build(rateLimit = false) {
   const auditRepo = new FakeAuditRepo();
   const idemRepo = new FakeIdempotencyReceiptRepo();
   const auditWriter = new AuditWriter(auditRepo);
+  const orders = new Map<string, Order>();
   const orderRepo: IOrderRepo = {
     create: async () => { throw new Error('unused'); },
-    findByOrderNo: async () => undefined,
-    findByOrderNoForUpdate: async () => undefined,
-    advance: async () => false,
+    findByOrderNo: async (orderNo) => orders.get(orderNo),
+    findByOrderNoForUpdate: async (_exec, orderNo) => orders.get(orderNo),
+    findByIdForUpdate: async (_exec, id) => [...orders.values()].find((x) => x.id === id),
+    advance: async (_exec, input) => {
+      const o = [...orders.values()].find((x) => x.id === input.id);
+      if (!o || o.status !== input.expectedStatus) return false;
+      orders.set(o.orderNo, { ...o, status: input.status, channelTradeNo: input.channelTradeNo ?? o.channelTradeNo, paidTime: input.paidTime ?? o.paidTime });
+      return true;
+    },
     listByUser: async () => [],
     listAll: async () => [],
     findPendingByUserAndPlan: async () => undefined,
     expirePending: async () => 0,
+  };
+
+  const invoices: Invoice[] = [];
+  const invoiceRepo: IInvoiceRepo = {
+    create: async () => { throw new Error('unused'); },
+    listByUser: async () => [],
+    findByIdForUpdate: async (_exec, id) => invoices.find((i) => i.id === id),
+    advance: async (_exec, input) => {
+      const i = invoices.find((x) => x.id === input.id);
+      if (!i || i.status !== input.expectedStatus) return false;
+      i.status = input.status;
+      i.reason = input.reason;
+      return true;
+    },
+    hasIssuedForOrder: async (_exec, orderId) => invoices.some((i) => i.orderId === orderId && i.status === 'issued'),
+    listAll: async (input) => {
+      let items = invoices;
+      if (input.userId !== undefined) items = items.filter((i) => i.userId === input.userId);
+      if (input.status !== undefined) items = items.filter((i) => i.status === input.status);
+      if (input.cursor !== undefined) items = items.filter((i) => i.id < input.cursor!);
+      return items.slice(0, input.limit);
+    },
   };
 
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
@@ -77,6 +107,7 @@ async function build(rateLimit = false) {
     membershipRepo,
     auditRepo,
     orderRepo,
+    invoiceRepo,
     auditWriter,
   });
 
@@ -123,9 +154,46 @@ async function build(rateLimit = false) {
     organizationSubscriptionRepo,
     membershipRepo,
     auditRepo,
+    orders,
+    invoices,
     makeAdmin,
     consoleToken,
     writeHeaders,
+  };
+}
+
+function makeOrder(overrides: Partial<Order> = {}): Order {
+  return {
+    id: 1,
+    orderNo: 'ord-1',
+    userId: 99,
+    planCode: 'pro',
+    amountCents: 9900,
+    channel: 'wechat',
+    status: 'paid',
+    channelTradeNo: 'wx-1',
+    paidTime: new Date(),
+    expiresTime: new Date(Date.now() + 100000),
+    createTime: new Date(),
+    updateTime: new Date(),
+    ...overrides,
+  };
+}
+
+function makeInvoice(overrides: Partial<Invoice> = {}): Invoice {
+  return {
+    id: 1,
+    userId: 99,
+    orderId: null,
+    title: 'Acme Inc.',
+    taxNo: null,
+    email: 'billing@b.com',
+    amountCents: 9900,
+    status: 'requested',
+    reason: null,
+    createTime: new Date(),
+    updateTime: new Date(),
+    ...overrides,
   };
 }
 
@@ -428,6 +496,243 @@ describe('console admin routes', () => {
       headers: { authorization: `Bearer ${await b.consoleToken(nobody.id)}`, accept: 'application/json' },
     });
     expect(denied.statusCode).toBe(403);
+    await b.app.close();
+  });
+
+  it('refund: paid → refunded (reason recorded)', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    b.orders.set('ord-1', makeOrder({ id: 1, orderNo: 'ord-1', status: 'paid' }));
+    const res = await b.app.inject({
+      method: 'PATCH',
+      url: '/api/console/admin/orders/ord-1/refund',
+      headers: await b.writeHeaders(admin.id),
+      payload: { reason: 'customer request' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe('refunded');
+    expect(b.orders.get('ord-1')?.status).toBe('refunded');
+    await b.app.close();
+  });
+
+  it('refund: fulfilled → refunded', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    b.orders.set('ord-2', makeOrder({ id: 2, orderNo: 'ord-2', status: 'fulfilled' }));
+    const res = await b.app.inject({
+      method: 'PATCH',
+      url: '/api/console/admin/orders/ord-2/refund',
+      headers: await b.writeHeaders(admin.id),
+      payload: { reason: 'duplicate charge' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(b.orders.get('ord-2')?.status).toBe('refunded');
+    await b.app.close();
+  });
+
+  it('refund: non-paid/fulfilled order is rejected 409', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    b.orders.set('ord-3', makeOrder({ id: 3, orderNo: 'ord-3', status: 'pending' }));
+    const res = await b.app.inject({
+      method: 'PATCH',
+      url: '/api/console/admin/orders/ord-3/refund',
+      headers: await b.writeHeaders(admin.id),
+      payload: { reason: 'x' },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe('ORDER_INVALID_STATE');
+    await b.app.close();
+  });
+
+  it('refund: order with an issued invoice is rejected 409', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    b.orders.set('ord-9', makeOrder({ id: 9, orderNo: 'ord-9', status: 'fulfilled' }));
+    b.invoices.push(makeInvoice({ id: 9, orderId: 9, status: 'issued' }));
+    const res = await b.app.inject({
+      method: 'PATCH',
+      url: '/api/console/admin/orders/ord-9/refund',
+      headers: await b.writeHeaders(admin.id),
+      payload: { reason: 'x' },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe('ORDER_INVALID_STATE');
+    expect(b.orders.get('ord-9')?.status).toBe('fulfilled');
+    await b.app.close();
+  });
+
+  it('refund: unknown order is 404', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    const res = await b.app.inject({
+      method: 'PATCH',
+      url: '/api/console/admin/orders/nope/refund',
+      headers: await b.writeHeaders(admin.id),
+      payload: { reason: 'x' },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error.code).toBe('NOT_FOUND');
+    await b.app.close();
+  });
+
+  it('refund: missing reason is rejected by schema', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    b.orders.set('ord-1', makeOrder({ id: 1, orderNo: 'ord-1', status: 'paid' }));
+    const res = await b.app.inject({
+      method: 'PATCH',
+      url: '/api/console/admin/orders/ord-1/refund',
+      headers: await b.writeHeaders(admin.id),
+      payload: {},
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('VALIDATION_FAILED');
+    await b.app.close();
+  });
+
+  it('refund: whitespace-only reason is rejected without mutating the order', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    b.orders.set('ord-1', makeOrder({ id: 1, orderNo: 'ord-1', status: 'paid' }));
+    const res = await b.app.inject({
+      method: 'PATCH',
+      url: '/api/console/admin/orders/ord-1/refund',
+      headers: await b.writeHeaders(admin.id),
+      payload: { reason: '   ' },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('VALIDATION_FAILED');
+    expect(b.orders.get('ord-1')?.status).toBe('paid');
+    await b.app.close();
+  });
+
+  it('invoice: requested → issued without reason', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    b.invoices.push(makeInvoice({ id: 1, status: 'requested' }));
+    const res = await b.app.inject({
+      method: 'PATCH',
+      url: '/api/console/admin/invoices/1',
+      headers: await b.writeHeaders(admin.id),
+      payload: { status: 'issued' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe('issued');
+    expect(b.invoices[0].status).toBe('issued');
+    await b.app.close();
+  });
+
+  it('invoice: requested → rejected/failed requires reason', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    b.invoices.push(makeInvoice({ id: 1, status: 'requested' }));
+
+    const noReason = await b.app.inject({
+      method: 'PATCH',
+      url: '/api/console/admin/invoices/1',
+      headers: await b.writeHeaders(admin.id),
+      payload: { status: 'rejected' },
+    });
+    expect(noReason.statusCode).toBe(422);
+    expect(noReason.json().error.code).toBe('VALIDATION_FAILED');
+
+    const ok = await b.app.inject({
+      method: 'PATCH',
+      url: '/api/console/admin/invoices/1',
+      headers: await b.writeHeaders(admin.id, randomUUID()),
+      payload: { status: 'failed', reason: 'backend failed' },
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().status).toBe('failed');
+    expect(b.invoices[0].status).toBe('failed');
+    expect(b.invoices[0].reason).toBe('backend failed');
+    await b.app.close();
+  });
+
+  it('invoice: non-requested invoice cannot be processed', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    b.invoices.push(makeInvoice({ id: 1, status: 'issued' }));
+    const res = await b.app.inject({
+      method: 'PATCH',
+      url: '/api/console/admin/invoices/1',
+      headers: await b.writeHeaders(admin.id),
+      payload: { status: 'failed', reason: 'x' },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe('ORDER_INVALID_STATE');
+    await b.app.close();
+  });
+
+  it('invoice: admin lists invoices across users', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    b.invoices.push(makeInvoice({ id: 1, userId: 10, title: 'A' }));
+    b.invoices.push(makeInvoice({ id: 2, userId: 20, title: 'B', status: 'issued' }));
+    const res = await b.app.inject({
+      method: 'GET',
+      url: '/api/console/admin/invoices',
+      headers: { authorization: `Bearer ${await b.consoleToken(admin.id)}`, accept: 'application/json' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items).toHaveLength(2);
+    await b.app.close();
+  });
+
+  it('invoice: non-positive-int userId filter is rejected 422', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    const res = await b.app.inject({
+      method: 'GET',
+      url: '/api/console/admin/invoices?userId=abc',
+      headers: { authorization: `Bearer ${await b.consoleToken(admin.id)}`, accept: 'application/json' },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('VALIDATION_FAILED');
+    await b.app.close();
+  });
+
+  it('invoice: unknown status filter is rejected 422', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    const res = await b.app.inject({
+      method: 'GET',
+      url: '/api/console/admin/invoices?status=typo',
+      headers: { authorization: `Bearer ${await b.consoleToken(admin.id)}`, accept: 'application/json' },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('VALIDATION_FAILED');
+    await b.app.close();
+  });
+
+  it('invoice: requested invoice cannot be issued after its order is refunded', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    b.orders.set('ord-5', makeOrder({ id: 5, orderNo: 'ord-5', status: 'refunded' }));
+    b.invoices.push(makeInvoice({ id: 1, orderId: 5, status: 'requested' }));
+    const res = await b.app.inject({
+      method: 'PATCH',
+      url: '/api/console/admin/invoices/1',
+      headers: await b.writeHeaders(admin.id),
+      payload: { status: 'issued' },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe('ORDER_INVALID_STATE');
+    expect(b.invoices[0].status).toBe('requested');
+    await b.app.close();
+  });
+
+  it('orders: non-positive-int userId filter is rejected 422', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    const res = await b.app.inject({
+      method: 'GET',
+      url: '/api/console/admin/orders?userId=abc',
+      headers: { authorization: `Bearer ${await b.consoleToken(admin.id)}`, accept: 'application/json' },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('VALIDATION_FAILED');
     await b.app.close();
   });
 });

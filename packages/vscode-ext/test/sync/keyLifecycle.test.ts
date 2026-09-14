@@ -7,12 +7,14 @@ import {
   newRecoveryCode,
   buildChangeKeyMaterial,
   buildRecoverMaterial,
+  buildRecoverByAccountMaterial,
   newStateFromMaterial,
   type InitialSyncMaterial,
 } from '../../src/sync/keyLifecycle';
 import { openEnvelope } from '../../src/sync/envelope';
 import { deriveKekRecovery } from '../../src/sync/crypto/recoveryCode';
 import { decodeBase64Url } from '../../src/sync/crypto/recoveryCode';
+import { hkdfSha256, SYNC_INFO } from '../../src/sync/crypto/hkdf';
 
 const workerBuilt = existsSync(join(__dirname, '../../out/argon2Worker.js'));
 const itWorker = workerBuilt ? it : it.skip;
@@ -100,6 +102,8 @@ describe('B5 生命周期材料', () => {
       recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: b64(16), outputBytes: 32 },
       envelopeSmp: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: b64(12), ciphertext: b64(32), tag: b64(16) },
       envelopeRecovery: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: b64(12), ciphertext: b64(32), tag: b64(16) },
+      envelopeAccount: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: b64(12), ciphertext: b64(32), tag: b64(16) },
+      accountRecoveryKey: new Uint8Array(32),
     };
     const ns = newStateFromMaterial(material);
     expect(ns.signPub).toBe(material.signPub);
@@ -111,4 +115,23 @@ describe('B5 生命周期材料', () => {
     expect(ns.protocolVersion).toBe(1);
     expect(ns.cipherSuite).toBe('AES-256-GCM');
   });
+
+  itWorker('buildRecoverByAccountMaterial：DEK 不变、三条 envelope 版本 +1、新账号钥匙可解', async () => {
+    const material = await createInitialMaterial(userId, keyEpoch, 'smp-password', recoveryRaw);
+    const newRecovery = newRecoveryCode();
+    const newAccountRaw = new Uint8Array(32).fill(9);
+    const rm = await buildRecoverByAccountMaterial(
+      userId, keyEpoch, material.dek,
+      material.envelopeSmp.envelopeVersion, material.envelopeRecovery.envelopeVersion, material.envelopeAccount.envelopeVersion,
+      'new-smp', newRecovery.raw, newAccountRaw,
+    );
+    expect(rm.envelopeSmp.envelopeVersion).toBe('2');
+    expect(rm.envelopeRecovery.envelopeVersion).toBe('2');
+    expect(rm.envelopeAccount.envelopeVersion).toBe('2');
+    expect(rm.recoverSignPub).not.toBe(material.recoverSignPub);
+
+    const kekAccount = hkdfSha256(newAccountRaw, new Uint8Array(0), SYNC_INFO.kekAccount);
+    expect(Buffer.from(openEnvelope(kekAccount, rm.envelopeAccount, userId, keyEpoch, 'account')).toString('hex'))
+      .toBe(Buffer.from(material.dek).toString('hex'));
+  }, 60000);
 });

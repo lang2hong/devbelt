@@ -9,6 +9,7 @@ const SELECT_COLS = `
   mutation_id, request_digest, action,
   CAST(result_version AS CHAR) AS result_version,
   CAST(result_change_sequence AS CHAR) AS result_change_sequence,
+  result_recovery_code_set_time,
   status, expires_time, create_time
 `;
 
@@ -21,6 +22,7 @@ function mapMutation(r: any): SyncMutation {
     action: r.action as SyncAction,
     resultVersion: r.result_version != null ? String(r.result_version) : null,
     resultChangeSequence: r.result_change_sequence != null ? String(r.result_change_sequence) : null,
+    resultRecoveryCodeSetTime: r.result_recovery_code_set_time ? new Date(r.result_recovery_code_set_time) : null,
     status: r.status as SyncMutationStatus,
     expiresTime: new Date(r.expires_time),
     createTime: new Date(r.create_time),
@@ -44,23 +46,25 @@ export class MysqlSyncMutationRepo implements ISyncMutationRepo {
     action: SyncAction;
     resultVersion: string | null;
     resultChangeSequence: string | null;
+    resultRecoveryCodeSetTime: Date | null;
     status: SyncMutation['status'];
     expiresTime: Date;
   }): Promise<void> {
     await exec.query(
       `INSERT INTO personal_sync_mutations
-         (user_id, key_epoch, mutation_id, request_digest, action, result_version, result_change_sequence, status, expires_time)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (user_id, key_epoch, mutation_id, request_digest, action, result_version, result_change_sequence, result_recovery_code_set_time, status, expires_time)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
          request_digest = VALUES(request_digest),
          action = VALUES(action),
          result_version = VALUES(result_version),
          result_change_sequence = VALUES(result_change_sequence),
+         result_recovery_code_set_time = VALUES(result_recovery_code_set_time),
          status = VALUES(status),
          expires_time = VALUES(expires_time)`,
       [
         input.userId, input.keyEpoch, input.mutationId, input.requestDigest, input.action,
-        input.resultVersion, input.resultChangeSequence, input.status, input.expiresTime,
+        input.resultVersion, input.resultChangeSequence, input.resultRecoveryCodeSetTime, input.status, input.expiresTime,
       ],
     );
   }

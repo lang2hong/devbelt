@@ -40,6 +40,8 @@ function makeState(userId: number, keys: ReturnType<typeof makeKeys>): PersonalS
     recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: buf(16, 3), outputBytes: 32 },
     envelopeSmp: { version: '1', nonce: buf(12, 4), ct: buf(32, 5), tag: buf(16, 6) },
     envelopeRecovery: { version: '1', nonce: buf(12, 7), ct: buf(32, 8), tag: buf(16, 9) },
+    envelopeAccount: { version: '1', nonce: buf(12, 10), ct: buf(32, 11), tag: buf(16, 12) },
+    accountRecoveryKey: buf(32, 13),
     signPub: keys.signPub, recoverSignPub: keys.recoverPub,
     recoveryCodeSetTime: null, createTime: new Date(), updateTime: new Date(),
   };
@@ -58,6 +60,8 @@ function newState(fill = 20): SyncNewState {
     recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: buf(16, fill + 9), outputBytes: 32 },
     envelopeSmp: { version: '1', nonce: buf(12, fill), ct: buf(32, fill + 1), tag: buf(16, fill + 2) },
     envelopeRecovery: { version: '1', nonce: buf(12, fill + 3), ct: buf(32, fill + 4), tag: buf(16, fill + 5) },
+    envelopeAccount: { version: '1', nonce: buf(12, fill + 8), ct: buf(32, fill + 9), tag: buf(16, fill + 10) },
+    accountRecoveryKey: buf(32, fill + 11),
     signPub: buf(32, fill + 6), recoverSignPub: buf(32, fill + 7),
   };
 }

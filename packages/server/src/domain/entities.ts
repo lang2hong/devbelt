@@ -282,6 +282,10 @@ export interface PersonalSyncState {
   recoveryKdf: RecoveryKdf;
   envelopeSmp: SyncEnvelope;
   envelopeRecovery: SyncEnvelope;
+  /** 账号恢复信封（第三把钥匙包裹的 DEK）；init 起必填，凡写入必非空。 */
+  envelopeAccount: SyncEnvelope;
+  /** 账号恢复钥匙（32B 明文托管，折中方案）；init 起必填。 */
+  accountRecoveryKey: Buffer;
   signPub: Buffer;
   recoverSignPub: Buffer;
   recoveryCodeSetTime: Date | null;
@@ -315,6 +319,8 @@ export interface SyncMutation {
   action: SyncAction;
   resultVersion: string | null;
   resultChangeSequence: string | null;
+  /** 该次 mutation 落实的恢复码设置时间（recover/recover-by-account 时记录；重放原样返回）。 */
+  resultRecoveryCodeSetTime: Date | null;
   status: SyncMutationStatus;
   expiresTime: Date;
   createTime: Date;
@@ -458,6 +464,8 @@ export interface Invoice {
   email: string;
   amountCents: number;
   status: InvoiceStatus;
+  /** 驳回/失败原因（rejected/failed 时必填，其余为 null）。 */
+  reason: string | null;
   createTime: Date;
   updateTime: Date;
 }

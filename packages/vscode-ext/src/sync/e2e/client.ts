@@ -6,10 +6,12 @@ import {
   assertBase64UrlRange,
   assertRecordId,
   assertU64Decimal,
+  validateAccountRecoveryMaterial,
   validateEnvelope,
   validateNewState,
   validateRecoveryKdf,
   validateSmpKdf,
+  type AccountRecoveryMaterialDto,
   type EnvelopeDto,
   type NewStateDto,
   type RecoveryKdfDto,
@@ -79,6 +81,20 @@ export interface RecoverOpts extends MutateOptsBase {
   envelopeRecovery: EnvelopeDto;
   recoverSignPub: string;
 }
+
+export interface RecoverByAccountOpts extends MutateOptsBase {
+  expectedStateVersion: string;
+  smpKdf: SmpKdfDto;
+  envelopeSmp: EnvelopeDto;
+  recoveryKdf: RecoveryKdfDto;
+  envelopeRecovery: EnvelopeDto;
+  envelopeAccount: EnvelopeDto;
+  accountRecoveryKey: string;
+  recoverSignPub: string;
+}
+
+/** recover-via-account 下发的账号恢复材料（= 校验器返回的 DTO，避免重复定义）。 */
+export type AccountRecoveryMaterial = AccountRecoveryMaterialDto;
 
 export interface DestroyOpts extends MutateOptsBase {
   expectedStateVersion: string;
@@ -292,6 +308,39 @@ export class PersonalSyncClient {
     return this.call<RecoverResult>('POST', '/api/sync/recover', body);
   }
 
+  /** 服务端下发的账号恢复材料在返回前经严格校验（fail-closed），不直接信任网络 DTO。 */
+  async recoverViaAccount(accountPassword: string): Promise<AccountRecoveryMaterial> {
+    // 该端点按用户限流（step-up 配额 5/小时）且无回执幂等，禁止自动重试，避免一次
+    // 模糊网络失败被重试多次、耗尽配额把账号锁定一小时。
+    const raw = await this.call<unknown>('POST', '/api/sync/recover-via-account', { password: accountPassword }, { retry: false });
+    return validateAccountRecoveryMaterial(raw);
+  }
+
+  async accountRecover(o: RecoverByAccountOpts): Promise<RecoverResult> {
+    assertU64Decimal(o.keyEpoch, 'keyEpoch');
+    assertU64Decimal(o.expectedStateVersion, 'expectedStateVersion');
+    assertBase64UrlNoPad(o.mutationId, 16, 'mutationId');
+    assertBase64UrlNoPad(o.recoverSignPub, 32, 'recoverSignPub');
+    assertBase64UrlNoPad(o.accountRecoveryKey, 32, 'accountRecoveryKey');
+    const body: Record<string, unknown> = {
+      protocolVersion: 1,
+      keyEpoch: o.keyEpoch,
+      mutationId: o.mutationId,
+      expectedStateVersion: o.expectedStateVersion,
+      smpKdf: validateSmpKdf(o.smpKdf),
+      envelopeSmp: validateEnvelope(o.envelopeSmp, 'envelopeSmp'),
+      recoveryKdf: validateRecoveryKdf(o.recoveryKdf),
+      envelopeRecovery: validateEnvelope(o.envelopeRecovery, 'envelopeRecovery'),
+      envelopeAccount: validateEnvelope(o.envelopeAccount, 'envelopeAccount'),
+      accountRecoveryKey: o.accountRecoveryKey,
+      recoverSignPub: o.recoverSignPub,
+    };
+    body.signature = this.signMutation('state.recover-by-account', o, body);
+    // account-recover 有 mutation receipt 幂等，且服务端回执优先于 sync:keys 限流（见 syncStateService），
+    // 响应丢失时自动重试会命中回执并返回首次结果，不再误报失败、也不丢恢复码。
+    return this.call<RecoverResult>('POST', '/api/sync/account-recover', body);
+  }
+
   async destroy(o: DestroyOpts): Promise<DestroyResult> {
     assertU64Decimal(o.keyEpoch, 'keyEpoch');
     assertU64Decimal(o.expectedStateVersion, 'expectedStateVersion');
@@ -317,7 +366,7 @@ export class PersonalSyncClient {
   }
 
   private async call<T = unknown>(method: string, path: string, body?: unknown, opts?: { retry?: boolean }): Promise<T> {
-    const res = await this.http.requestRaw(method, path, body, opts);
+    const res = await this.http.requestRaw(method, path, body, { retry: opts?.retry });
     if (res.status >= 200 && res.status < 300) return res.body as T;
     const b = (res.body ?? {}) as { code?: string; message?: string; currentVersion?: string; currentKeyEpoch?: string };
     throw new SyncApiError(res.status, b.code, b.currentVersion, b.currentKeyEpoch, b.message);

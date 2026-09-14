@@ -15,10 +15,12 @@ export const SYNC_INFO = {
   recoverSigning: 'dbclient/sync/v1/recover-signing',
   /** KEK_recovery 派生 */
   kekRecovery: 'dbclient/sync/v1/kek/recovery',
+  /** KEK_account 派生（账号恢复钥匙 → 包裹 DEK 的 KEK） */
+  kekAccount: 'dbclient/sync/v1/kek/account',
 } as const;
 
 /** envelope purpose 值域（§7.1） */
-export type EnvelopePurpose = 'smp' | 'recovery';
+export type EnvelopePurpose = 'smp' | 'recovery' | 'account';
 
 /**
  * envelope 每版专用 AEAD 派生的 info（§7.1）。

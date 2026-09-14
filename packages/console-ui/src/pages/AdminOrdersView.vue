@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { listAdminOrders, type AdminOrder } from '../api/admin';
-import { setAccessToken } from '../api/consoleAuth';
+import { listAdminOrders, refundAdminOrder, type AdminOrder } from '../api/admin';
+import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
+import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
+import { formatDateTime } from '../lib/formatTime';
 import AdminNav from './AdminNav.vue';
+import Modal from '../components/Modal.vue';
 
 const orders = ref<AdminOrder[]>([]);
 const state = ref<'loading' | 'ready' | 'error'>('loading');
@@ -11,6 +14,13 @@ const status = ref('');
 const channel = ref('');
 const planCode = ref('');
 const nextCursor = ref<string | null>(null);
+
+const error = ref('');
+const loadError = ref('');
+const busy = ref(false);
+const refundWrite = useIdempotencyKey();
+const refundForm = ref<AdminOrder | null>(null);
+const refundReason = ref('');
 
 const STATUS_LABEL: Record<string, string> = {
   pending: '待支付',
@@ -32,29 +42,50 @@ function fmtCents(cents: number): string {
   return (cents / 100).toFixed(2);
 }
 
-function fmtTime(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleString() : '—';
-}
+let loadSeq = 0;
+let paging = false;
 
 function channelLabel(ch: string): string {
   return ch === 'wechat' ? '微信' : '支付宝';
 }
 
 async function load(reset = true): Promise<void> {
-  state.value = 'loading';
-  const r = await listAdminOrders({
-    userId: userId.value || undefined,
-    status: status.value || undefined,
-    channel: channel.value || undefined,
-    planCode: planCode.value || undefined,
-    cursor: reset ? undefined : (nextCursor.value ?? undefined),
-  });
-  if (r.kind === 'ok') {
-    orders.value = reset ? r.value.items : [...orders.value, ...r.value.items];
-    nextCursor.value = r.value.nextCursor;
-    state.value = 'ready';
-  } else if (r.kind === 'unauthorized') relogin();
-  else state.value = 'error';
+  if (!reset && paging) return;
+  const seq = ++loadSeq;
+  if (reset) paging = false;
+  else paging = true;
+  try {
+    state.value = 'loading';
+    loadError.value = '';
+    const rawUserId = userId.value.trim();
+    if (rawUserId) {
+      const uidNum = Number(rawUserId);
+      if (!/^[0-9]+$/.test(rawUserId) || !Number.isSafeInteger(uidNum) || uidNum <= 0) {
+        state.value = 'error';
+        loadError.value = '用户 ID 必须为正整数。';
+        return;
+      }
+    }
+    const r = await listAdminOrders({
+      userId: rawUserId || undefined,
+      status: status.value || undefined,
+      channel: channel.value || undefined,
+      planCode: planCode.value || undefined,
+      cursor: reset ? undefined : (nextCursor.value ?? undefined),
+    });
+    if (seq !== loadSeq) return;
+    if (r.kind === 'ok') {
+      orders.value = reset ? r.value.items : [...orders.value, ...r.value.items];
+      nextCursor.value = r.value.nextCursor;
+      state.value = 'ready';
+    } else if (r.kind === 'unauthorized') relogin();
+    else {
+      state.value = 'error';
+      loadError.value = '加载失败。';
+    }
+  } finally {
+    if (!reset) paging = false;
+  }
 }
 
 onMounted(() => load());
@@ -63,6 +94,49 @@ function search(): void {
   orders.value = [];
   nextCursor.value = null;
   void load(true);
+}
+
+function openRefund(o: AdminOrder): void {
+  refundForm.value = o;
+  refundReason.value = '';
+  error.value = '';
+}
+
+function closeRefund(): void {
+  if (busy.value) return;
+  refundForm.value = null;
+}
+
+async function confirmRefund(): Promise<void> {
+  if (!refundForm.value || busy.value) return;
+  const o = refundForm.value;
+  const reasonValue = refundReason.value.trim();
+  if (!reasonValue) {
+    error.value = '请填写退款原因。';
+    return;
+  }
+  const tag = `refund:${o.orderNo}:${reasonValue}`;
+  busy.value = true;
+  error.value = '';
+  try {
+    const csrf = await ensureCsrf();
+    const r = await refundAdminOrder(o.orderNo, reasonValue, refundWrite.ensure(tag), csrf);
+    if (r.kind === 'ok') {
+      refundWrite.reset(tag);
+      refundForm.value = null;
+      await load(true);
+    } else if (r.kind === 'unauthorized') {
+      refundWrite.reset(tag);
+      relogin();
+    } else if (isRetryableFailure(r.kind)) {
+      error.value = '操作失败，请重试。';
+    } else {
+      refundWrite.reset(tag);
+      error.value = '操作失败：仅已支付/已生效订单可退款。';
+    }
+  } finally {
+    busy.value = false;
+  }
 }
 </script>
 
@@ -87,11 +161,12 @@ function search(): void {
     </div>
 
     <p class="muted" v-if="state === 'loading'">加载中…</p>
-    <p class="error" v-if="state === 'error'">加载失败。</p>
+    <p class="error" v-if="state === 'error'">{{ loadError || '加载失败。' }}</p>
+    <p v-if="error" class="error">{{ error }}</p>
 
     <table v-if="state === 'ready'" class="table">
       <thead>
-        <tr><th>订单号</th><th>用户ID</th><th>套餐</th><th>金额</th><th>渠道</th><th>状态</th><th>渠道单号</th><th>创建时间</th><th>过期时间</th><th>支付时间</th></tr>
+        <tr><th>订单号</th><th>用户ID</th><th>套餐</th><th>金额</th><th>渠道</th><th>状态</th><th>渠道单号</th><th>创建时间</th><th>过期时间</th><th>支付时间</th><th></th></tr>
       </thead>
       <tbody>
         <tr v-for="o in orders" :key="o.orderNo">
@@ -102,15 +177,28 @@ function search(): void {
           <td>{{ channelLabel(o.channel) }}</td>
           <td><span class="badge" :class="o.status">{{ STATUS_LABEL[o.status] ?? o.status }}</span></td>
           <td class="mono">{{ o.channelTradeNo ?? '—' }}</td>
-          <td>{{ fmtTime(o.createTime) }}</td>
-          <td>{{ fmtTime(o.expiresTime) }}</td>
-          <td>{{ fmtTime(o.paidTime) }}</td>
+          <td>{{ formatDateTime(o.createTime) }}</td>
+          <td>{{ formatDateTime(o.expiresTime) }}</td>
+          <td>{{ formatDateTime(o.paidTime) }}</td>
+          <td class="actions">
+            <button v-if="o.status === 'paid' || o.status === 'fulfilled'" class="btn small danger" :disabled="busy" @click="openRefund(o)">退款</button>
+          </td>
         </tr>
-        <tr v-if="orders.length === 0"><td colspan="10" class="muted">无匹配订单。</td></tr>
+        <tr v-if="orders.length === 0"><td colspan="11" class="muted">无匹配订单。</td></tr>
       </tbody>
     </table>
 
     <p v-if="nextCursor" class="load-more"><button class="btn secondary" @click="load(false)">加载更多</button></p>
+
+    <Modal v-if="refundForm" title="退款登记" :closable="!busy" @close="closeRefund">
+      <p class="muted">{{ refundForm.orderNo }} · ¥{{ fmtCents(refundForm.amountCents) }}</p>
+      <input v-model="refundReason" type="text" maxlength="500" placeholder="退款原因（必填）" />
+      <p v-if="error" class="error">{{ error }}</p>
+      <div class="modal-actions">
+        <button class="btn danger" :disabled="busy" @click="confirmRefund">确认退款</button>
+        <button class="btn secondary" :disabled="busy" @click="closeRefund">取消</button>
+      </div>
+    </Modal>
   </section>
 </template>
 
@@ -130,6 +218,11 @@ th { white-space: nowrap; color: #57606a; font-weight: 600; }
 .badge.failed, .badge.expired, .badge.refunded { background: #ffebe9; color: #cf222e; }
 .btn { background: #0969da; color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; }
 .btn.secondary { background: #f6f8fa; color: #24292f; border: 1px solid #d0d7de; }
+.btn.small { padding: 5px 10px; font-size: 13px; }
+.btn.danger { background: #cf222e; }
+.btn:disabled { opacity: 0.6; cursor: default; }
+.actions { display: flex; gap: 6px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
 .muted { color: #57606a; font-size: 13px; }
 .error { color: #cf222e; font-size: 13px; }
 .load-more { margin: 16px 0; }

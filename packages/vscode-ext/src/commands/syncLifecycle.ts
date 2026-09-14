@@ -17,6 +17,7 @@ interface SyncLifecycleSessionPort {
   readonly pendingCleanup: { fromKeyEpoch: string; toKeyEpoch: string } | undefined;
   changeSyncPassword(oldSmp: string, newSmp: string): Promise<void>;
   recoverSync(recoveryCode: string, newSmp: string): Promise<string>;
+  recoverByAccount(accountPassword: string, newSmp: string): Promise<string>;
   destroySync(smp: string): Promise<string>;
   requestResetChallenge(): Promise<void>;
   resetSyncAfterLoss(handoffTicket: string, newSmp: string): Promise<string>;
@@ -49,7 +50,7 @@ function validateNewSmp(smp: string, ui: SyncLifecycleUi): boolean {
     return false;
   }
   const codePoints = [...smp].length;
-  if (codePoints < 12 || codePoints > 128) {
+  if (codePoints < 9 || codePoints > 128) {
     ui.error(l10n('sync.passphraseLength'));
     return false;
   }
@@ -130,6 +131,34 @@ export async function recoverSync(deps: SyncLifecycleCommandDeps): Promise<void>
     newRecovery = await session.recoverSync(code, newSmp);
   } catch {
     deps.ui.error(l10n('sync.recoverFailed'));
+    return;
+  }
+  await confirmNewRecoveryCode(deps.ui, newRecovery);
+  deps.ui.info(l10n('sync.unlocked'));
+}
+
+/**
+ * 通过账号恢复（锁定态，忘记口令+恢复码）：先以账户登录口令自证 → 服务端下发账号
+ * 钥匙 → 解 DEK → 新口令双输入 → 重设三把钥匙并恢复，成功后展示新恢复码。数据不丢。
+ */
+export async function recoverByAccountCommand(deps: SyncLifecycleCommandDeps): Promise<void> {
+  const session = await getSession(deps);
+  if (!session) return;
+  if (session.isUnlocked) {
+    deps.ui.info(l10n('sync.alreadyUnlocked'));
+    return;
+  }
+  // 账号恢复会经由服务端下发 DEK 解密原材料，必须先以账户登录口令自证身份，
+  // 防止仅有 sync token 的泄露者离线解密全部同步数据。
+  const accountPassword = await deps.ui.promptSmp(l10n('sync.accountRecoveryPassword'));
+  if (!accountPassword) return;
+  const newSmp = await promptNewSmpTwice(deps.ui);
+  if (!newSmp) return;
+  let newRecovery: string;
+  try {
+    newRecovery = await session.recoverByAccount(accountPassword, newSmp);
+  } catch {
+    deps.ui.error(l10n('sync.recoverByAccountFailed'));
     return;
   }
   await confirmNewRecoveryCode(deps.ui, newRecovery);
@@ -261,6 +290,7 @@ export function registerSyncLifecycleCommands(
   context.subscriptions.push(
     vscode.commands.registerCommand('dbclient.changeSyncPassword', () => changeSyncPassword(deps)),
     vscode.commands.registerCommand('dbclient.recoverSync', () => recoverSync(deps)),
+    vscode.commands.registerCommand('dbclient.recoverByAccount', () => recoverByAccountCommand(deps)),
     vscode.commands.registerCommand('dbclient.destroySync', () => destroySync(deps)),
     vscode.commands.registerCommand('dbclient.resetSync', () => resetSync(deps)),
     vscode.commands.registerCommand('dbclient.clearLocalSync', () => clearLocalSync(deps)),

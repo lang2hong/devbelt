@@ -1,6 +1,6 @@
 import { getAccessToken } from './tokenStore';
 import { authedFetch, type FetchLike } from './authedFetch';
-import { resolveErrorKind } from './httpError';
+import { readServerError } from './serverError';
 
 /**
  * 支付订单 API 客户端（P4 切片 3）。只读（列表/详情）；下单（POST）受支付网关
@@ -28,7 +28,7 @@ export type Result<T> =
   | { kind: 'unauthorized' }
   | { kind: 'forbidden' }
   | { kind: 'not-found' }
-  | { kind: 'failure' };
+  | { kind: 'failure'; code?: string; message?: string };
 
 function auth(token: string): Record<string, string> {
   return { Accept: 'application/json', Authorization: `Bearer ${token}` };
@@ -43,12 +43,13 @@ function qs(params: object): string {
   return s ? `?${s}` : '';
 }
 
-async function failure(res: Response): Promise<{ kind: 'unauthorized' } | { kind: 'forbidden' } | { kind: 'not-found' } | { kind: 'failure' }> {
-  const k = await resolveErrorKind(res);
-  if (k === 'unauthorized') return { kind: 'unauthorized' };
-  if (k === 'forbidden') return { kind: 'forbidden' };
-  if (k === 'not-found') return { kind: 'not-found' };
-  return { kind: 'failure' };
+async function failure(res: Response): Promise<{ kind: 'unauthorized' } | { kind: 'forbidden' } | { kind: 'not-found' } | { kind: 'failure'; code?: string; message?: string }> {
+  const status = res.status;
+  if (status === 401) return { kind: 'unauthorized' };
+  if (status === 403) return { kind: 'forbidden' };
+  if (status === 404) return { kind: 'not-found' };
+  const err = await readServerError(res);
+  return { kind: 'failure', code: err?.code, message: err?.message };
 }
 
 export async function listOrders(

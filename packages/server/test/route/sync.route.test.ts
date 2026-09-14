@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { createHash, generateKeyPairSync, sign as nodeSign, type KeyObject } from 'crypto';
 import { buildTestApp, type TestApp } from '../helpers/testApp.js';
 import { jcs, requestDigestOf } from '../../src/service/syncCrypto.js';
+import { hashPassword } from '../../src/service/password.js';
 
 function b64(n: number, fill: number): string {
   return Buffer.alloc(n, fill).toString('base64url');
@@ -65,6 +66,8 @@ function newStateBody(seed = 0) {
     recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: b64(16, 3 + seed), outputBytes: 32 },
     envelopeSmp: envelope('1', 4 + seed),
     envelopeRecovery: envelope('1', 7 + seed),
+    envelopeAccount: envelope('1', 10 + seed),
+    accountRecoveryKey: b64(32, 12 + seed),
     signPub: b64(32, 10),
     recoverSignPub: b64(32, 11),
   };
@@ -72,6 +75,21 @@ function newStateBody(seed = 0) {
 
 async function makeUser(t: TestApp, email: string) {
   const user = await t.repos.userRepo.create(email, 'hash', undefined);
+  await t.repos.userRepo.markEmailVerified({} as any, user.id, new Date());
+  const token = await t.tokenFor(user.id);
+  return { token, userId: user.id };
+}
+
+/** 账号恢复 step-up 口令（recover-via-account 现在要求复核账户登录口令）。 */
+const ACCOUNT_PASSWORD = 'correct-horse-battery';
+let sharedPasswordHash: string;
+beforeAll(async () => {
+  sharedPasswordHash = await hashPassword(ACCOUNT_PASSWORD);
+});
+
+/** 带可复核口令的用户（recover-via-account 会用 argon2 验口令，口令需真实可验）。 */
+async function makeUserWithPassword(t: TestApp, email: string) {
+  const user = await t.repos.userRepo.create(email, sharedPasswordHash, undefined);
   await t.repos.userRepo.markEmailVerified({} as any, user.id, new Date());
   const token = await t.tokenFor(user.id);
   return { token, userId: user.id };
@@ -121,6 +139,17 @@ describe('sync routes smoke', () => {
     const records = await t.app.inject({ method: 'GET', url: '/api/sync/records', headers: t.auth(token) });
     expect(records.statusCode).toBe(200);
     expect(records.json().records).toEqual([]);
+    await t.close();
+  });
+
+  it('getState always returns envelopeAccountVersion (single contract, no capability negotiation)', async () => {
+    const t = await buildTestApp();
+    const { token } = await makeUser(t, 'sync-cap@b.com');
+    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: newStateBody() } });
+
+    const state = await t.app.inject({ method: 'GET', url: '/api/sync/state', headers: t.auth(token) });
+    expect(state.statusCode).toBe(200);
+    expect(state.json()).toHaveProperty('envelopeAccountVersion', '1');
     await t.close();
   });
 
@@ -368,6 +397,168 @@ describe('sync routes smoke', () => {
     const recRes = await t.app.inject({ method: 'PUT', url: `/api/sync/records/${rec.recordId}`, headers: t.auth(token), payload: rec });
     expect(recRes.statusCode).toBe(400);
     expect(recRes.json().code).toBe('SYNC_PROTOCOL_UNSUPPORTED');
+    await t.close();
+  });
+
+  it('init rejects a newState missing envelopeAccount/accountRecoveryKey (required contract)', async () => {
+    const t = await buildTestApp();
+    const { token } = await makeUser(t, 'sync-legacy@b.com');
+    const missing = newStateBody() as any;
+    delete missing.envelopeAccount;
+    delete missing.accountRecoveryKey;
+
+    const init = await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: missing } });
+    expect(init.statusCode).toBe(400);
+    expect(init.json().code).toBe('VALIDATION_FAILED');
+    await t.close();
+  });
+
+  it('recover-via-account requires init (not initialized → 400 SYNC_NOT_INITIALIZED)', async () => {
+    const t = await buildTestApp();
+    const { token } = await makeUserWithPassword(t, 'sync-rva@b.com');
+
+    const anon = await t.app.inject({ method: 'POST', url: '/api/sync/recover-via-account' });
+    expect(anon.statusCode).toBe(401);
+
+    const beforeInit = await t.app.inject({ method: 'POST', url: '/api/sync/recover-via-account', headers: t.auth(token), payload: { password: ACCOUNT_PASSWORD } });
+    expect(beforeInit.statusCode).toBe(400);
+    expect(beforeInit.json().code).toBe('SYNC_NOT_INITIALIZED');
+    await t.close();
+  });
+
+  it('recover-via-account rejects a wrong account password (step-up) even when recovery is enabled', async () => {
+    const t = await buildTestApp();
+    const { token } = await makeUserWithPassword(t, 'sync-rva-wrongpw@b.com');
+    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: newStateBody() } });
+
+    const wrong = await t.app.inject({ method: 'POST', url: '/api/sync/recover-via-account', headers: t.auth(token), payload: { password: 'wrong-password' } });
+    expect(wrong.statusCode).toBe(400);
+    expect(wrong.json().code).toBe('INVALID_CURRENT_PASSWORD');
+    await t.close();
+  });
+
+  it('recover-via-account sends a non-sensitive security notification to the verified email on success', async () => {
+    const t = await buildTestApp();
+    const { token } = await makeUserWithPassword(t, 'sync-rva-notify@b.com');
+    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: newStateBody() } });
+
+    const res = await t.app.inject({ method: 'POST', url: '/api/sync/recover-via-account', headers: t.auth(token), payload: { password: ACCOUNT_PASSWORD } });
+    expect(res.statusCode).toBe(200);
+
+    await new Promise((r) => setTimeout(r, 0));
+    const sent = t.services.emailSender.sent.filter((e) => e.kind === 'account_recovery_activity');
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toBe('sync-rva-notify@b.com');
+    expect(sent[0].token).toBeUndefined();
+    expect(sent[0].organizationName).toBeUndefined();
+    expect(sent[0].expiresTime).toBeUndefined();
+    await t.close();
+  });
+
+  it('recover-via-account does not notify on step-up failure (wrong password)', async () => {
+    const t = await buildTestApp();
+    const { token } = await makeUserWithPassword(t, 'sync-rva-nonotify@b.com');
+    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: newStateBody() } });
+
+    const res = await t.app.inject({ method: 'POST', url: '/api/sync/recover-via-account', headers: t.auth(token), payload: { password: 'wrong-password' } });
+    expect(res.statusCode).toBe(400);
+    expect(t.services.emailSender.sent.filter((e) => e.kind === 'account_recovery_activity')).toHaveLength(0);
+    await t.close();
+  });
+
+  it('recover-via-account does not notify an unverified email', async () => {
+    const t = await buildTestApp();
+    const user = await t.repos.userRepo.create('sync-rva-unverified@b.com', sharedPasswordHash, undefined);
+    const token = await t.tokenFor(user.id);
+    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: newStateBody() } });
+
+    const res = await t.app.inject({ method: 'POST', url: '/api/sync/recover-via-account', headers: t.auth(token), payload: { password: ACCOUNT_PASSWORD } });
+    expect(res.statusCode).toBe(200);
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(t.services.emailSender.sent.filter((e) => e.kind === 'account_recovery_activity')).toHaveLength(0);
+    await t.close();
+  });
+
+  it('recover-via-account still returns material when the security notification fails', async () => {
+    const t = await buildTestApp();
+    const { token } = await makeUserWithPassword(t, 'sync-rva-mailfail@b.com');
+    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: newStateBody() } });
+
+    t.services.emailSender.sendAccountRecoveryActivityEmail = async () => { throw new Error('smtp down'); };
+
+    const res = await t.app.inject({ method: 'POST', url: '/api/sync/recover-via-account', headers: t.auth(token), payload: { password: ACCOUNT_PASSWORD } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().accountRecoveryKey).toMatch(/^[A-Za-z0-9_-]+$/);
+    await t.close();
+  });
+
+  it('recover-via-account returns material after init; account-recover (signed with signPriv) re-rotates all three envelopes', async () => {
+    const t = await buildTestApp();
+    const { token, userId } = await makeUserWithPassword(t, 'sync-account-recover@b.com');
+    const keys = makeKeys();
+    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: withKeys(newStateBody(), keys) } });
+
+    const material = await t.app.inject({ method: 'POST', url: '/api/sync/recover-via-account', headers: t.auth(token), payload: { password: ACCOUNT_PASSWORD } });
+    expect(material.statusCode).toBe(200);
+    expect(material.json().accountRecoveryKey).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(material.json().envelopeAccount.envelopeVersion).toBe('1');
+
+    const newKeys = makeKeys();
+    const body = {
+      protocolVersion: 1, keyEpoch: '1', mutationId: b64(16, 15), expectedStateVersion: '1',
+      smpKdf: { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: b64(16, 70), outputBytes: 32 },
+      envelopeSmp: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '2', nonce: b64(12, 71), ciphertext: b64(32, 72), tag: b64(16, 73) },
+      recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: b64(16, 74), outputBytes: 32 },
+      envelopeRecovery: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '2', nonce: b64(12, 75), ciphertext: b64(32, 76), tag: b64(16, 77) },
+      envelopeAccount: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '2', nonce: b64(12, 78), ciphertext: b64(32, 79), tag: b64(16, 80) },
+      accountRecoveryKey: b64(32, 81),
+      recoverSignPub: newKeys.recoverPub.toString('base64url'),
+    };
+    // recover-by-account 用 DEK 派生的 syncSign（signPriv）验签，不是 recoverPriv：用错的私钥签名必须 403。
+    const wrongSigner = await t.app.inject({
+      method: 'POST', url: '/api/sync/account-recover', headers: t.auth(token),
+      payload: signState(keys.recoverPriv, userId, 'state.recover-by-account', body),
+    });
+    expect(wrongSigner.statusCode).toBe(403);
+    expect(wrongSigner.json().code).toBe('SYNC_SIGNATURE_INVALID');
+
+    const res = await t.app.inject({
+      method: 'POST', url: '/api/sync/account-recover', headers: t.auth(token),
+      payload: signState(keys.signPriv, userId, 'state.recover-by-account', body),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().stateVersion).toBe('2');
+
+    const state = await t.app.inject({ method: 'GET', url: '/api/sync/state', headers: t.auth(token) });
+    expect(state.json().envelopeSmp.envelopeVersion).toBe('2');
+    expect(state.json().envelopeRecovery.envelopeVersion).toBe('2');
+    await t.close();
+  });
+
+  it('account-recover rejects unknown fields (strict schema)', async () => {
+    const t = await buildTestApp();
+    const { token, userId } = await makeUser(t, 'sync-account-recover-strict@b.com');
+    const keys = makeKeys();
+    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: withKeys(newStateBody(), keys) } });
+
+    const body: any = {
+      protocolVersion: 1, keyEpoch: '1', mutationId: b64(16, 16), expectedStateVersion: '1',
+      smpKdf: { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: b64(16, 70), outputBytes: 32 },
+      envelopeSmp: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '2', nonce: b64(12, 71), ciphertext: b64(32, 72), tag: b64(16, 73) },
+      recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: b64(16, 74), outputBytes: 32 },
+      envelopeRecovery: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '2', nonce: b64(12, 75), ciphertext: b64(32, 76), tag: b64(16, 77) },
+      envelopeAccount: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '2', nonce: b64(12, 78), ciphertext: b64(32, 79), tag: b64(16, 80) },
+      accountRecoveryKey: b64(32, 81),
+      recoverSignPub: makeKeys().recoverPub.toString('base64url'),
+      bogus: true,
+    };
+    const res = await t.app.inject({
+      method: 'POST', url: '/api/sync/account-recover', headers: t.auth(token),
+      payload: signState(keys.signPriv, userId, 'state.recover-by-account', body),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('VALIDATION_FAILED');
     await t.close();
   });
 });

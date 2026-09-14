@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { syncOverview, type SyncOverview } from '../api/sync';
 import { setAccessToken } from '../api/consoleAuth';
+import { formatDateTime } from '../lib/formatTime';
 
 const overview = ref<SyncOverview | null>(null);
 const state = ref<'loading' | 'ready' | 'error'>('loading');
@@ -45,7 +46,7 @@ onMounted(async () => {
         <div><dt>密文体积</dt><dd>{{ formatBytes(overview.ciphertextBytes) }}</dd></div>
         <div><dt>记录配额</dt><dd>{{ overview.recordLimit ? overview.recordLimit : '不限' }}</dd></div>
         <div><dt>存储配额</dt><dd>{{ formatBytes(overview.storageLimit) }}</dd></div>
-        <div><dt>最近活动</dt><dd>{{ overview.lastActivityTime ? new Date(overview.lastActivityTime).toLocaleString() : '—' }}</dd></div>
+        <div><dt>最近活动</dt><dd>{{ formatDateTime(overview.lastActivityTime) }}</dd></div>
       </dl>
     </div>
   </section>

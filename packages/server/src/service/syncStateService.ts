@@ -10,6 +10,7 @@ import {
   SyncStateExistsError,
   SyncVersionConflictError,
   SyncProtocolUnsupportedError,
+  SyncAccountRecoveryNotEnabledError,
   ValidationError,
 } from '../domain/errors.js';
 import { incU64 } from '../domain/syncU64.js';
@@ -27,6 +28,10 @@ export interface SyncNewState {
   recoveryKdf: RecoveryKdf;
   envelopeSmp: SyncEnvelope;
   envelopeRecovery: SyncEnvelope;
+  /** 账号恢复信封（KEK_account 包裹 DEK）。必填：单一契约，init/destroy/reset 恒携带。 */
+  envelopeAccount: SyncEnvelope;
+  /** 账号恢复钥匙（32B 明文托管）。必填。 */
+  accountRecoveryKey: Buffer;
   signPub: Buffer;
   recoverSignPub: Buffer;
 }
@@ -39,10 +44,18 @@ interface SignedStateMutation {
   requestDigest: string;    // Base64Url43
 }
 
-export type ChangeKeyInput = SignedStateMutation & { smpKdf: SmpKdf; envelopeSmp: SyncEnvelope };
+export type ChangeKeyInput = SignedStateMutation & {
+  smpKdf: SmpKdf; envelopeSmp: SyncEnvelope;
+};
 export type RecoverInput = SignedStateMutation & {
   smpKdf: SmpKdf; envelopeSmp: SyncEnvelope;
   recoveryKdf: RecoveryKdf; envelopeRecovery: SyncEnvelope; recoverSignPub: Buffer;
+};
+export type RecoverByAccountInput = SignedStateMutation & {
+  smpKdf: SmpKdf; envelopeSmp: SyncEnvelope;
+  recoveryKdf: RecoveryKdf; envelopeRecovery: SyncEnvelope;
+  envelopeAccount: SyncEnvelope; accountRecoveryKey: Buffer;
+  recoverSignPub: Buffer;
 };
 export type DestroyInput = SignedStateMutation & { newState: SyncNewState };
 
@@ -59,6 +72,8 @@ export interface StateDto {
   recoveryKdf: Record<string, unknown>;
   envelopeSmp: EnvelopeDto;
   envelopeRecovery: EnvelopeDto;
+  /** 账号恢复通道版本号。必填：单一契约下恒存在（init 起 version 单调递增）。 */
+  envelopeAccountVersion: string;
   recoveryCodeSetTime: string | null;
 }
 
@@ -101,6 +116,10 @@ export function validateNewState(n: SyncNewState): void {
   }
   if (n.envelopeSmp.nonce.length !== 12 || n.envelopeSmp.ct.length !== 32 || n.envelopeSmp.tag.length !== 16) throw new ValidationError('invalid smp envelope');
   if (n.envelopeRecovery.nonce.length !== 12 || n.envelopeRecovery.ct.length !== 32 || n.envelopeRecovery.tag.length !== 16) throw new ValidationError('invalid recovery envelope');
+  // 账号恢复材料必填：newState 恒携带账号信封（version '1'）与 32B 钥匙，不再有「未启用」态。
+  if (n.envelopeAccount.version !== '1') throw new ValidationError('new-state envelopes must start at version 1');
+  if (n.envelopeAccount.nonce.length !== 12 || n.envelopeAccount.ct.length !== 32 || n.envelopeAccount.tag.length !== 16) throw new ValidationError('invalid account envelope');
+  if (n.accountRecoveryKey.length !== 32) throw new ValidationError('invalid account recovery key length');
   if (n.signPub.length !== 32 || n.recoverSignPub.length !== 32) throw new ValidationError('invalid sync public key length');
 }
 
@@ -110,6 +129,7 @@ export function toState(userId: number, keyEpoch: string, stateVersion: string, 
     protocolVersion: n.protocolVersion, cipherSuite: n.cipherSuite, formatVersion: n.formatVersion,
     smpKdf: n.smpKdf, recoveryKdf: n.recoveryKdf,
     envelopeSmp: n.envelopeSmp, envelopeRecovery: n.envelopeRecovery,
+    envelopeAccount: n.envelopeAccount, accountRecoveryKey: n.accountRecoveryKey,
     signPub: n.signPub, recoverSignPub: n.recoverSignPub, recoveryCodeSetTime,
   };
 }
@@ -120,12 +140,22 @@ export class SyncStateService {
     private readonly recordRepo: ISyncRecordRepo,
     private readonly mutationRepo: ISyncMutationRepo,
     private readonly runner: TxRunner,
+    /** 状态密钥 mutation 的按用户限流（回执优先于限流：仅真正执行写时才计数）。 */
+    private readonly keysLimitInTx?: (tx: Queryable, userId: number) => Promise<void>,
   ) {}
 
   async getState(userId: number): Promise<StateDto> {
     const state = await this.stateRepo.findByUserId(userId);
     if (!state) throw new SyncNotInitializedError();
     return toDto(state);
+  }
+
+  /** 下发账号恢复钥匙与账号信封（登录态调用；折中方案：服务端托管恢复钥匙）。 */
+  async recoverViaAccount(userId: number): Promise<{ accountRecoveryKey: Buffer; envelopeAccount: SyncEnvelope }> {
+    const state = await this.stateRepo.findByUserId(userId);
+    if (!state) throw new SyncNotInitializedError();
+    if (!state.envelopeAccount || !state.accountRecoveryKey) throw new SyncAccountRecoveryNotEnabledError();
+    return { accountRecoveryKey: state.accountRecoveryKey, envelopeAccount: state.envelopeAccount };
   }
 
   async init(userId: number, newState: SyncNewState): Promise<void> {
@@ -164,6 +194,7 @@ export class SyncStateService {
         'smp',
       );
 
+      // 账号恢复材料在换 SMP 口令时不动：DEK 与钥匙未变，账号信封/钥匙沿用 state。
       const next = {
         userId,
         keyEpoch: state.keyEpoch,
@@ -176,6 +207,8 @@ export class SyncStateService {
         recoveryKdf: state.recoveryKdf,
         envelopeSmp: input.envelopeSmp,
         envelopeRecovery: state.envelopeRecovery,
+        envelopeAccount: state.envelopeAccount,
+        accountRecoveryKey: state.accountRecoveryKey,
         signPub: state.signPub,
         recoverSignPub: state.recoverSignPub,
         recoveryCodeSetTime: state.recoveryCodeSetTime,
@@ -200,7 +233,7 @@ export class SyncStateService {
       this.assertSignature(state.recoverSignPub, userId, input, 'state.recover');
 
       const receipt = await checkReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest);
-      if (receipt) return { keyEpoch: input.keyEpoch, stateVersion: receipt.resultVersion ?? state.stateVersion, recoveryCodeSetTime: state.recoveryCodeSetTime ? state.recoveryCodeSetTime.toISOString() : null };
+      if (receipt) return { keyEpoch: input.keyEpoch, stateVersion: receipt.resultVersion ?? state.stateVersion, recoveryCodeSetTime: receipt.resultRecoveryCodeSetTime ? receipt.resultRecoveryCodeSetTime.toISOString() : null };
 
       this.assertExpectedVersion(state, input.expectedStateVersion);
 
@@ -234,6 +267,8 @@ export class SyncStateService {
         recoveryKdf: input.recoveryKdf,
         envelopeSmp: input.envelopeSmp,
         envelopeRecovery: input.envelopeRecovery,
+        envelopeAccount: state.envelopeAccount,
+        accountRecoveryKey: state.accountRecoveryKey,
         signPub: state.signPub,
         recoverSignPub: input.recoverSignPub,
         recoveryCodeSetTime: now,
@@ -241,7 +276,87 @@ export class SyncStateService {
       const ok = await this.stateRepo.update(tx, userId, state.stateVersion, next);
       if (!ok) throw new SyncVersionConflictError(state.stateVersion);
 
-      await recordReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest, 'state.recover', next.stateVersion, null);
+      await recordReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest, 'state.recover', next.stateVersion, null, now);
+      return { keyEpoch: next.keyEpoch, stateVersion: next.stateVersion, recoveryCodeSetTime: now.toISOString() };
+    });
+  }
+
+  /**
+   * 用账号恢复钥匙找回 DEK 后重设三把钥匙（保留同一 keyEpoch 与全部 record，不 tombstone）。
+   * 用 signPub 验签（DEK 已恢复 → 可派生 syncSign）；重写 smp/recovery/account 三条 envelope
+   * 与 accountRecoveryKey、recoverSignPub。
+   */
+  async recoverByAccount(userId: number, input: RecoverByAccountInput): Promise<{ keyEpoch: string; stateVersion: string; recoveryCodeSetTime: string | null }> {
+    assertU64(input.keyEpoch, 'keyEpoch');
+    assertU64(input.expectedStateVersion, 'expectedStateVersion');
+    assertU64(input.envelopeSmp.version, 'envelopeSmp.version');
+    assertU64(input.envelopeRecovery.version, 'envelopeRecovery.version');
+    assertU64(input.envelopeAccount.version, 'envelopeAccount.version');
+    return this.runner(async (tx) => {
+      const state = await this.lockActive(tx, userId);
+      assertEpoch(state, input.keyEpoch);
+      this.assertSignature(state.signPub, userId, input, 'state.recover-by-account');
+
+      const receipt = await checkReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest);
+      if (receipt) return { keyEpoch: input.keyEpoch, stateVersion: receipt.resultVersion ?? state.stateVersion, recoveryCodeSetTime: receipt.resultRecoveryCodeSetTime ? receipt.resultRecoveryCodeSetTime.toISOString() : null };
+
+      // 回执未命中的重放不应被限流拦在门外（否则「已提交 + 响应丢失」会被误报失败并丢恢复码），
+      // 故限流只在确认要真正执行状态写时才计数（§recover-by-account 回执优先于限流）。
+      if (this.keysLimitInTx) await this.keysLimitInTx(tx, userId);
+
+      this.assertExpectedVersion(state, input.expectedStateVersion);
+
+      if (!state.envelopeAccount || !state.accountRecoveryKey) throw new SyncAccountRecoveryNotEnabledError();
+      validateSmpKdf(input.smpKdf);
+      validateRecoveryKdf(input.recoveryKdf);
+      if (input.recoverSignPub.length !== 32) throw new ValidationError('invalid recoverSignPub length');
+      if (input.accountRecoveryKey.length !== 32) throw new ValidationError('invalid account recovery key length');
+      if (input.envelopeSmp.version !== incU64(state.envelopeSmp.version)) throw new ValidationError('smp envelope version must be increment of stored');
+      if (input.envelopeRecovery.version !== incU64(state.envelopeRecovery.version)) throw new ValidationError('recovery envelope version must be increment of stored');
+      if (input.envelopeAccount.version !== incU64(state.envelopeAccount.version)) throw new ValidationError('account envelope version must be increment of stored');
+      if (input.envelopeAccount.nonce.length !== 12 || input.envelopeAccount.ct.length !== 32 || input.envelopeAccount.tag.length !== 16) throw new ValidationError('invalid account envelope');
+
+      // smp/recovery 的 salt+nonce 换新；account 信封以 accountRecoveryKey 当「盐」换新（密钥换新后即使
+      // nonce 一致也不构成密钥流复用，但仍强制换新作纵深防御）。
+      assertEnvelopeFreshness(
+        { salt: state.smpKdf.salt, nonce: state.envelopeSmp.nonce },
+        { salt: input.smpKdf.salt, nonce: input.envelopeSmp.nonce },
+        'smp',
+      );
+      assertEnvelopeFreshness(
+        { salt: state.recoveryKdf.salt, nonce: state.envelopeRecovery.nonce },
+        { salt: input.recoveryKdf.salt, nonce: input.envelopeRecovery.nonce },
+        'recovery',
+      );
+      assertEnvelopeFreshness(
+        { salt: state.accountRecoveryKey, nonce: state.envelopeAccount.nonce },
+        { salt: input.accountRecoveryKey, nonce: input.envelopeAccount.nonce },
+        'account',
+      );
+
+      const now = new Date();
+      const next = {
+        userId,
+        keyEpoch: state.keyEpoch,
+        stateVersion: incU64(state.stateVersion),
+        changeSequence: state.changeSequence,
+        protocolVersion: state.protocolVersion,
+        cipherSuite: state.cipherSuite,
+        formatVersion: state.formatVersion,
+        smpKdf: input.smpKdf,
+        recoveryKdf: input.recoveryKdf,
+        envelopeSmp: input.envelopeSmp,
+        envelopeRecovery: input.envelopeRecovery,
+        envelopeAccount: input.envelopeAccount,
+        accountRecoveryKey: input.accountRecoveryKey,
+        signPub: state.signPub,
+        recoverSignPub: input.recoverSignPub,
+        recoveryCodeSetTime: now,
+      };
+      const ok = await this.stateRepo.update(tx, userId, state.stateVersion, next);
+      if (!ok) throw new SyncVersionConflictError(state.stateVersion);
+
+      await recordReceipt(tx, this.mutationRepo, userId, input.keyEpoch, input.mutationId, input.requestDigest, 'state.recover-by-account', next.stateVersion, null, now);
       return { keyEpoch: next.keyEpoch, stateVersion: next.stateVersion, recoveryCodeSetTime: now.toISOString() };
     });
   }
@@ -277,7 +392,7 @@ export class SyncStateService {
       this.assertSignature(state.signPub, userId, input, 'state.destroy');
       this.assertExpectedVersion(state, input.expectedStateVersion);
 
-      // destroy 用 newState 整体替换两条 envelope。validateNewState 只校验长度，
+      // destroy 用 newState 整体替换三条 envelope。validateNewState 只校验长度，
       // 不比对旧值，故此处仍需新鲜度校验：否则「销毁后用同 salt+nonce 重建」
       // 会与销毁前的 envelope 构成密钥流复用。
       assertEnvelopeFreshness(
@@ -289,6 +404,11 @@ export class SyncStateService {
         { salt: state.recoveryKdf.salt, nonce: state.envelopeRecovery.nonce },
         { salt: input.newState.recoveryKdf.salt, nonce: input.newState.envelopeRecovery.nonce },
         'recovery',
+      );
+      assertEnvelopeFreshness(
+        { salt: state.accountRecoveryKey, nonce: state.envelopeAccount.nonce },
+        { salt: input.newState.accountRecoveryKey, nonce: input.newState.envelopeAccount.nonce },
+        'account',
       );
 
       const now = new Date();
@@ -350,6 +470,7 @@ export function toDto(s: Omit<PersonalSyncState, 'createTime' | 'updateTime'>): 
     recoveryKdf: { alg: s.recoveryKdf.alg, version: 1, salt: s.recoveryKdf.salt.toString('base64url'), outputBytes: 32 },
     envelopeSmp: toEnvelopeDto(s.envelopeSmp),
     envelopeRecovery: toEnvelopeDto(s.envelopeRecovery),
+    envelopeAccountVersion: s.envelopeAccount.version,
     recoveryCodeSetTime: s.recoveryCodeSetTime ? s.recoveryCodeSetTime.toISOString() : null,
   };
 }

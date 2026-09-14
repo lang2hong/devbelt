@@ -13,7 +13,8 @@ import type { AdminUserRow, AdminOrgRow, AuditFilter } from '../repository/inter
 import { ValidationError } from '../domain/errors.js';
 import { auditDto } from '../service/auditSerialize.js';
 import { organizationIdParam } from './schemas.js';
-import type { Order } from '../domain/entities.js';
+import type { Order, Invoice } from '../domain/entities.js';
+import type { InvoiceStatus } from '../domain/enums.js';
 import { PAYMENT_CHANNELS } from '../service/paymentChannel.js';
 
 /** 高危平台写回执保留 30 天（§6.1）。 */
@@ -112,6 +113,7 @@ function orgDto(r: AdminOrgRow) {
 }
 
 const ORDER_STATUSES: readonly string[] = ['pending', 'paid', 'fulfilled', 'failed', 'refunded', 'expired'];
+const INVOICE_STATUSES: readonly string[] = ['requested', 'issued', 'rejected', 'failed'];
 
 function adminOrderDto(o: Order) {
   return {
@@ -126,6 +128,20 @@ function adminOrderDto(o: Order) {
     expiresTime: o.expiresTime.toISOString(),
     createTime: o.createTime.toISOString(),
     updateTime: o.updateTime.toISOString(),
+  };
+}
+
+function adminInvoiceDto(inv: Invoice) {
+  return {
+    invoiceId: String(inv.id),
+    userId: String(inv.userId),
+    title: inv.title,
+    taxNo: inv.taxNo ?? null,
+    email: inv.email,
+    amountCents: inv.amountCents,
+    status: inv.status,
+    reason: inv.reason ?? null,
+    createTime: inv.createTime.toISOString(),
   };
 }
 
@@ -281,8 +297,17 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
         }
         const status = q.status !== undefined && q.status !== '' ? String(q.status) : undefined;
         const channel = q.channel !== undefined && q.channel !== '' ? String(q.channel) : undefined;
+        const rawUserId = q.userId !== undefined && q.userId !== '' ? String(q.userId) : undefined;
+        let filterUserId: number | undefined;
+        if (rawUserId !== undefined) {
+          const n = Number(rawUserId);
+          if (!/^[0-9]+$/.test(rawUserId) || !Number.isSafeInteger(n) || n <= 0) {
+            return rejectConsole(reply, 422, 'VALIDATION_FAILED', 'invalid userId');
+          }
+          filterUserId = n;
+        }
         const page = await svc.listOrders(userIdOf(req), {
-          userId: q.userId ? Number(q.userId) : undefined,
+          userId: filterUserId,
           status: status && (ORDER_STATUSES as readonly string[]).includes(status) ? (status as Order['status']) : undefined,
           channel: channel && (PAYMENT_CHANNELS as readonly string[]).includes(channel) ? (channel as Order['channel']) : undefined,
           planCode: q.planCode ? String(q.planCode) : undefined,
@@ -295,6 +320,83 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
           items: page.items.map(adminOrderDto),
           nextCursor: page.nextId != null ? opts.cursorService.encode(String(page.nextId)) : null,
         });
+      });
+
+      child.patch('/api/console/admin/orders/:orderNo/refund', { schema: { params: adminOrderNoParam, body: adminOrderRefundBody } }, async (req, reply) => {
+        if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
+        const actor = userIdOf(req);
+        const orderNo = (req.params as Record<string, unknown>).orderNo as string;
+        const { reason } = req.body as { reason: string };
+        const result = await opts.idempotencyService.run({
+          actorUserId: actor,
+          sessionId: sessionIdOf(req),
+          method: 'PATCH',
+          normalizedPath: `/api/console/admin/orders/${orderNo}/refund`,
+          idempotencyKey: adminWriteKey(req),
+          requestBody: req.body,
+          retentionMs: ADMIN_RETENTION_MS,
+          beforeWrite: (tx: Queryable) => writeLimitInTx(tx, req),
+          business: async (tx: Queryable) => {
+            const r = await svc.refundOrderInTx(tx, actor, orderNo, reason);
+            return { status: 200, body: r };
+          },
+        });
+        reply.code(result.status).send(result.body);
+      });
+
+      // ── 发票 ──
+      child.get('/api/console/admin/invoices', async (req, reply) => {
+        await readLimit(req);
+        const q = req.query as Record<string, unknown>;
+        const cursor = parseCursor(opts.cursorService, q.cursor);
+        if (q.cursor !== undefined && q.cursor !== '' && cursor === null) {
+          return rejectConsole(reply, 422, 'INVALID_CURSOR', 'invalid cursor');
+        }
+        const status = q.status !== undefined && q.status !== '' ? String(q.status) : undefined;
+        if (status !== undefined && !(INVOICE_STATUSES as readonly string[]).includes(status)) {
+          return rejectConsole(reply, 422, 'VALIDATION_FAILED', 'invalid status');
+        }
+        const rawUserId = q.userId !== undefined && q.userId !== '' ? String(q.userId) : undefined;
+        let filterUserId: number | undefined;
+        if (rawUserId !== undefined) {
+          const n = Number(rawUserId);
+          if (!/^[0-9]+$/.test(rawUserId) || !Number.isSafeInteger(n) || n <= 0) {
+            return rejectConsole(reply, 422, 'VALIDATION_FAILED', 'invalid userId');
+          }
+          filterUserId = n;
+        }
+        const page = await svc.listInvoicesForAdmin(userIdOf(req), {
+          userId: filterUserId,
+          status: status as InvoiceStatus | undefined,
+          cursor: cursor ?? undefined,
+          limit: parseLimit(q.limit),
+        });
+        reply.send({
+          items: page.items.map(adminInvoiceDto),
+          nextCursor: page.nextId != null ? opts.cursorService.encode(String(page.nextId)) : null,
+        });
+      });
+
+      child.patch('/api/console/admin/invoices/:invoiceId', { schema: { params: adminInvoiceIdParam, body: adminInvoiceStatusBody } }, async (req, reply) => {
+        if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
+        const actor = userIdOf(req);
+        const invoiceId = Number((req.params as Record<string, unknown>).invoiceId);
+        const { status, reason } = req.body as { status: 'issued' | 'rejected' | 'failed'; reason?: string };
+        const result = await opts.idempotencyService.run({
+          actorUserId: actor,
+          sessionId: sessionIdOf(req),
+          method: 'PATCH',
+          normalizedPath: `/api/console/admin/invoices/${invoiceId}`,
+          idempotencyKey: adminWriteKey(req),
+          requestBody: req.body,
+          retentionMs: ADMIN_RETENTION_MS,
+          beforeWrite: (tx: Queryable) => writeLimitInTx(tx, req),
+          business: async (tx: Queryable) => {
+            const r = await svc.setInvoiceStatusInTx(tx, actor, invoiceId, status, reason ?? null);
+            return { status: 200, body: r };
+          },
+        });
+        reply.code(result.status).send(result.body);
       });
 
       // ── 审计 ──
@@ -393,6 +495,37 @@ const adminUserIdParam = {
   required: ['userId'],
   additionalProperties: false,
   properties: { userId: { type: 'string', pattern: '^[0-9]+$' } },
+} as const;
+
+const adminOrderNoParam = {
+  type: 'object',
+  required: ['orderNo'],
+  additionalProperties: false,
+  properties: { orderNo: { type: 'string', minLength: 1, maxLength: 64 } },
+} as const;
+
+const adminOrderRefundBody = {
+  type: 'object',
+  required: ['reason'],
+  additionalProperties: false,
+  properties: { reason: { type: 'string', minLength: 1, maxLength: 500 } },
+} as const;
+
+const adminInvoiceIdParam = {
+  type: 'object',
+  required: ['invoiceId'],
+  additionalProperties: false,
+  properties: { invoiceId: { type: 'string', pattern: '^[0-9]+$' } },
+} as const;
+
+const adminInvoiceStatusBody = {
+  type: 'object',
+  required: ['status'],
+  additionalProperties: false,
+  properties: {
+    status: { type: 'string', enum: ['issued', 'rejected', 'failed'] },
+    reason: { type: 'string', maxLength: 500 },
+  },
 } as const;
 
 const adminUserStatusBody = {

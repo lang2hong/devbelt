@@ -3,6 +3,8 @@ import { onMounted, ref } from 'vue';
 import { queryAudit, exportAudit, type AdminAuditEvent } from '../api/admin';
 import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
 import { useIdempotencyKey } from '../lib/idempotentWrite';
+import { formatDateTime } from '../lib/formatTime';
+import { toFromIso, toInclusiveEndIso } from '../lib/dateRange';
 import AdminNav from './AdminNav.vue';
 
 const events = ref<AdminAuditEvent[]>([]);
@@ -16,7 +18,25 @@ const targetType = ref('');
 const organizationId = ref('');
 const nextCursor = ref<string | null>(null);
 
+const EVENT_TYPE_SUGGESTIONS = [
+  'admin.users.read', 'admin.user.disabled', 'admin.user.enabled', 'admin.user.subscription.changed',
+  'admin.organizations.read', 'admin.organization.subscription.changed', 'admin.orders.read',
+  'admin.audit.read', 'admin.audit.export', 'admin.role.granted',
+  'payment.order.created', 'payment.order.paid', 'payment.order.fulfilled', 'payment.callback.failed',
+  'invoice.requested', 'auth.login.success', 'auth.login.failed', 'auth.logout', 'auth.password.changed',
+  'account.displayName.changed', 'organization.created', 'organization.renamed', 'organization.closed',
+  'invitation.create', 'invitation.revoke', 'invitation.accept',
+  'organization.member.role_changed', 'organization.member.removed', 'organization.member.left',
+  'sync.reset.handoff.created', 'sync.reset.handoff.consumed', 'sync.reset.handoff.failed',
+  'system.receipts.cleanup', 'console.auth.refresh.reuse',
+];
+
+const TARGET_TYPE_SUGGESTIONS = ['user', 'order', 'organization', 'invitation', 'membership', 'subscription', 'device', 'idempotency_receipts'];
+
 const exportWrite = useIdempotencyKey();
+
+let loadSeq = 0;
+let paging = false;
 
 function relogin(): void {
   setAccessToken(null);
@@ -24,22 +44,31 @@ function relogin(): void {
 }
 
 async function load(reset = true): Promise<void> {
-  state.value = 'loading';
-  const r = await queryAudit({
-    fromTime: fromTime.value || undefined,
-    toTime: toTime.value || undefined,
-    eventType: eventType.value || undefined,
-    actorUserId: actorUserId.value || undefined,
-    targetType: targetType.value || undefined,
-    organizationId: organizationId.value || undefined,
-    cursor: reset ? undefined : (nextCursor.value ?? undefined),
-  });
-  if (r.kind === 'ok') {
-    events.value = reset ? r.value.items : [...events.value, ...r.value.items];
-    nextCursor.value = r.value.nextCursor;
-    state.value = 'ready';
-  } else if (r.kind === 'unauthorized') relogin();
-  else state.value = 'error';
+  if (!reset && paging) return;
+  const seq = ++loadSeq;
+  if (reset) paging = false;
+  else paging = true;
+  try {
+    state.value = 'loading';
+    const r = await queryAudit({
+      fromTime: toFromIso(fromTime.value),
+      toTime: toInclusiveEndIso(toTime.value),
+      eventType: eventType.value || undefined,
+      actorUserId: actorUserId.value || undefined,
+      targetType: targetType.value || undefined,
+      organizationId: organizationId.value || undefined,
+      cursor: reset ? undefined : (nextCursor.value ?? undefined),
+    });
+    if (seq !== loadSeq) return;
+    if (r.kind === 'ok') {
+      events.value = reset ? r.value.items : [...events.value, ...r.value.items];
+      nextCursor.value = r.value.nextCursor;
+      state.value = 'ready';
+    } else if (r.kind === 'unauthorized') relogin();
+    else state.value = 'error';
+  } finally {
+    if (!reset) paging = false;
+  }
 }
 
 onMounted(() => load());
@@ -57,8 +86,8 @@ async function doExport(format: 'csv' | 'json'): Promise<void> {
   try {
     const csrf = await ensureCsrf();
     const r = await exportAudit(format, {
-      fromTime: fromTime.value || undefined,
-      toTime: toTime.value || undefined,
+      fromTime: toFromIso(fromTime.value),
+      toTime: toInclusiveEndIso(toTime.value),
       eventType: eventType.value || undefined,
       actorUserId: actorUserId.value || undefined,
       targetType: targetType.value || undefined,
@@ -91,11 +120,17 @@ async function doExport(format: 'csv' | 'json'): Promise<void> {
     <h2>审计日志</h2>
 
     <div class="bar">
-      <input v-model="fromTime" type="text" placeholder="起始时间(ISO)" />
-      <input v-model="toTime" type="text" placeholder="结束时间(ISO)" />
-      <input v-model="eventType" type="text" placeholder="eventType" />
+      <input v-model="fromTime" type="datetime-local" />
+      <input v-model="toTime" type="datetime-local" />
+      <input v-model="eventType" type="text" placeholder="eventType" list="event-type-suggestions" />
+      <datalist id="event-type-suggestions">
+        <option v-for="et in EVENT_TYPE_SUGGESTIONS" :key="et" :value="et" />
+      </datalist>
       <input v-model="actorUserId" type="text" placeholder="actorUserId" />
-      <input v-model="targetType" type="text" placeholder="targetType" />
+      <input v-model="targetType" type="text" placeholder="targetType" list="target-type-suggestions" />
+      <datalist id="target-type-suggestions">
+        <option v-for="tt in TARGET_TYPE_SUGGESTIONS" :key="tt" :value="tt" />
+      </datalist>
       <input v-model="organizationId" type="text" placeholder="organizationId" />
       <button class="btn" @click="search">查询</button>
       <button class="btn secondary" @click="doExport('json')">导出 JSON</button>
@@ -112,7 +147,7 @@ async function doExport(format: 'csv' | 'json'): Promise<void> {
       </thead>
       <tbody>
         <tr v-for="e in events" :key="e.eventId">
-          <td>{{ new Date(e.eventTime).toLocaleString() }}</td>
+          <td>{{ formatDateTime(e.eventTime) }}</td>
           <td>{{ e.actorRole ?? '-' }}#{{ e.actorUserId ?? '-' }}</td>
           <td>{{ e.eventType }}</td>
           <td>{{ e.targetType ?? '' }}:{{ e.targetId ?? '' }}</td>

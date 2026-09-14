@@ -18,10 +18,14 @@ import {
   unlockDek,
   buildChangeKeyMaterial,
   buildRecoverMaterial,
+  buildRecoverByAccountMaterial,
   newStateFromMaterial,
   type InitialSyncMaterial,
   type RecoverMaterial,
+  type RecoverByAccountMaterial,
 } from './keyLifecycle';
+import { hkdfSha256, SYNC_INFO } from './crypto/hkdf';
+import { openEnvelope } from './envelope';
 import type { ConnectionStore } from '../connection/connectionStore';
 import type { CachedEntitlement } from './authService';
 import { uniqueId } from '../utils/id';
@@ -247,7 +251,9 @@ export class PersonalSyncSession {
     if (!this.dek || !this.keyEpoch || !this.signSeed) throw new Error('sync session is locked');
     const state = await this.getRemoteState();
     if (state.keyEpoch !== this.keyEpoch) throw new Error('sync epoch mismatch');
-    const material = await buildChangeKeyMaterial(this.userId, this.keyEpoch, oldSmp, state.smpKdf, state.envelopeSmp, newSmp);
+    const material = await buildChangeKeyMaterial(
+      this.userId, this.keyEpoch, oldSmp, state.smpKdf, state.envelopeSmp, newSmp,
+    );
     try {
       if (!byteEq(material.verifiedDek, this.dek)) throw new Error('sync passphrase mismatch');
       const local = this.stateStore.getSnapshot();
@@ -308,6 +314,70 @@ export class PersonalSyncSession {
   }
 
   /**
+   * 账号恢复（锁定态）：先以账户登录口令自证（服务端 step-up 复核），服务端下发
+   * accountRecoveryKey + envelopeAccount → 解 DEK → 用 DEK 派生 syncSign 从新重设
+   * 口令/恢复码/账号钥匙，数据不丢。返回新恢复码。
+   */
+  async recoverByAccount(accountPassword: string, newSmp: string): Promise<string> {
+    if (this.isUnlocked) throw new Error('sync session already unlocked');
+    const state = await this.getRemoteState();
+    const accountMaterial = await this.client.recoverViaAccount(accountPassword);
+    const oldAccountKey = decodeBase64Url(accountMaterial.accountRecoveryKey);
+    const kekAccount = hkdfSha256(oldAccountKey, new Uint8Array(0), SYNC_INFO.kekAccount);
+    let dek: Uint8Array;
+    try {
+      dek = openEnvelope(kekAccount, accountMaterial.envelopeAccount, this.userId, state.keyEpoch, 'account');
+    } finally {
+      kekAccount.fill(0);
+      oldAccountKey.fill(0);
+    }
+    // 恢复出的 DEK 必须确属该 state（signPub 一致性），否则拒绝。
+    if (encodeBase64Url(deriveSyncSignKeyPair(dek).publicKey) !== state.signPub) {
+      dek.fill(0);
+      throw new Error('account recovery key does not match sync state');
+    }
+
+    const newRecovery = newRecoveryCode();
+    const newAccountRaw = new Uint8Array(randomBytes(32));
+    let material: RecoverByAccountMaterial | undefined;
+    try {
+      material = await buildRecoverByAccountMaterial(
+        this.userId,
+        state.keyEpoch,
+        dek,
+        state.envelopeSmp.envelopeVersion,
+        state.envelopeRecovery.envelopeVersion,
+        accountMaterial.envelopeAccount.envelopeVersion,
+        newSmp,
+        newRecovery.raw,
+        newAccountRaw,
+      );
+      await this.client.accountRecover({
+        userId: this.userId,
+        keyEpoch: state.keyEpoch,
+        mutationId: this.mintMutationId(),
+        seed: material.signSeed,
+        expectedStateVersion: state.stateVersion,
+        smpKdf: material.smpKdf,
+        envelopeSmp: material.envelopeSmp,
+        recoveryKdf: material.recoveryKdf,
+        envelopeRecovery: material.envelopeRecovery,
+        envelopeAccount: material.envelopeAccount,
+        accountRecoveryKey: encodeBase64Url(newAccountRaw),
+        recoverSignPub: material.recoverSignPub,
+      });
+      const newState = await this.getRemoteState();
+      await this.unlockFromState(newState, dek);
+      return newRecovery.code;
+    } finally {
+      dek.fill(0);
+      newRecovery.raw.fill(0);
+      newAccountRaw.fill(0);
+      material?.signSeed.fill(0);
+    }
+  }
+
+  /**
    * 销毁同步数据（解锁态）：当前 SMP 验证 + 全新 epoch 材料，走 epoch transition 幂等收敛。
    * 返回新恢复码（一次性展示）；旧 epoch DEK/store 被清理。
    */
@@ -348,6 +418,7 @@ export class PersonalSyncSession {
     } finally {
       newRecovery.raw.fill(0);
       material?.dek.fill(0);
+      material?.accountRecoveryKey.fill(0);
     }
   }
 
@@ -427,6 +498,7 @@ export class PersonalSyncSession {
     } finally {
       newRecovery.raw.fill(0);
       material?.dek.fill(0);
+      material?.accountRecoveryKey.fill(0);
     }
   }
 

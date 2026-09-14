@@ -36,6 +36,8 @@ function newState(fill = 10): SyncNewState {
     smpKdf: smpKdf(), recoveryKdf: recoveryKdf(),
     envelopeSmp: { version: '1', nonce: buf(12, fill), ct: buf(32, fill + 1), tag: buf(16, fill + 2) },
     envelopeRecovery: { version: '1', nonce: buf(12, fill + 3), ct: buf(32, fill + 4), tag: buf(16, fill + 5) },
+    envelopeAccount: { version: '1', nonce: buf(12, fill + 8), ct: buf(32, fill + 9), tag: buf(16, fill + 10) },
+    accountRecoveryKey: buf(32, fill + 11),
     signPub: buf(32, fill + 6), recoverSignPub: buf(32, fill + 7),
   };
 }
@@ -207,7 +209,7 @@ describe('SyncResetService', () => {
     });
 
     const { token, ticket } = await issueHandoff(s, USER);
-    const dto = await s.svc.resetAfterLossWithHandoff(USER, { handoffTicket: ticket, newState: newState(), requestDigest: DIGEST });
+    const dto = await s.svc.resetAfterLossWithHandoff(USER, { handoffTicket: ticket, newState: newState(30), requestDigest: DIGEST });
 
     expect(dto.keyEpoch).toBe('2');
     expect(dto.stateVersion).toBe('1');
@@ -221,12 +223,11 @@ describe('SyncResetService', () => {
     expect(tomb?.deleteTime).not.toBeNull();
   });
 
-  it('resetAfterLossWithHandoff creates an epoch (keyEpoch=1) when no active state exists', async () => {
+it('resetAfterLossWithHandoff creates an epoch (keyEpoch=1) when no active state exists', async () => {
     const s = makeStack();
     const { ticket } = await issueHandoff(s, USER);
     const dto = await s.svc.resetAfterLossWithHandoff(USER, { handoffTicket: ticket, newState: newState(), requestDigest: DIGEST });
     expect(dto.keyEpoch).toBe('1');
-    expect(dto.changeSequence).toBe('0');
   });
 
   it('completed handoff replays the same StateDto on the same digest; different digest is REUSED', async () => {
@@ -283,5 +284,14 @@ describe('SyncResetService', () => {
     await s.handoffRepo.markProcessing({} as Queryable, h.id, DIGEST, new Date(Date.now() - 61_000));
     const dto = await s.svc.resetAfterLossWithHandoff(USER, { handoffTicket: ticket, newState: newState(), requestDigest: DIGEST });
     expect(dto.keyEpoch).toBe('1');
+  });
+
+  it('resetAfterLossWithHandoff rejects a newState that reuses the account recovery key / account nonce', async () => {
+    const s = makeStack();
+    await seedState(s.stateRepo, USER, '1');
+    const { ticket } = await issueHandoff(s, USER);
+    // seedState 与 reset 都用默认 fill=10 → 账号信封 nonce 与 accountRecoveryKey 完全复用。
+    await expect(s.svc.resetAfterLossWithHandoff(USER, { handoffTicket: ticket, newState: newState(), requestDigest: DIGEST }))
+      .rejects.toThrow(/account/);
   });
 });

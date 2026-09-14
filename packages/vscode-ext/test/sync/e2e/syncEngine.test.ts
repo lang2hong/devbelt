@@ -77,6 +77,7 @@ function stateDto(over: Partial<StateDto> = {}): StateDto {
     recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: b64(16), outputBytes: 32 },
     envelopeSmp: envelope(),
     envelopeRecovery: envelope(),
+    envelopeAccountVersion: '1',
     recoveryCodeSetTime: null,
     ...over,
   };

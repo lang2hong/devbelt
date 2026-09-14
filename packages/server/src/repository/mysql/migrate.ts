@@ -44,6 +44,11 @@ export async function runMigrations(db: MigrationDb, migrations: Migration[]): P
   for (const migration of migrations) {
     if (applied.has(migration.version)) continue;
     await migration.up(db);
-    await db.query('INSERT INTO schema_migrations (version, applied_time) VALUES (?, NOW())', [migration.version]);
+    // 多实例并发启动时，两个进程可能同时判定「未应用」并各自跑完幂等 UP，随后都在此记账；
+    // ON DUPLICATE KEY UPDATE 使同版本重复插入退化为 no-op，避免后到者因主键冲突而启动失败。
+    await db.query(
+      'INSERT INTO schema_migrations (version, applied_time) VALUES (?, NOW()) ON DUPLICATE KEY UPDATE applied_time = applied_time',
+      [migration.version],
+    );
   }
 }

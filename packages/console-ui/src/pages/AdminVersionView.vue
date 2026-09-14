@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { getVersion, type ConsoleVersion } from '../api/admin';
 import { setAccessToken } from '../api/consoleAuth';
+import { formatDateTime } from '../lib/formatTime';
 import AdminNav from './AdminNav.vue';
 
 const version = ref<ConsoleVersion | null>(null);
@@ -32,7 +33,7 @@ onMounted(async () => {
         <tr><th>Console API 版本</th><td>{{ version.consoleApiVersion }}</td></tr>
         <tr><th>服务端版本</th><td>{{ version.serverVersion }}</td></tr>
         <tr><th>前端构建号</th><td>{{ version.consoleBuildId ?? '—' }}</td></tr>
-        <tr><th>构建时间</th><td>{{ version.buildTime ? new Date(version.buildTime).toLocaleString() : '—' }}</td></tr>
+        <tr><th>构建时间</th><td>{{ formatDateTime(version.buildTime) }}</td></tr>
       </tbody>
     </table>
   </section>

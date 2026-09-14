@@ -4,6 +4,7 @@ import { SyncApiError } from '../sync/e2e/client';
 import type { StateDto, NewStateDto } from '../sync/e2e/types';
 import type { InitialSyncMaterial } from '../sync/keyLifecycle';
 import { createInitialMaterial, newRecoveryCode, unlockDek } from '../sync/keyLifecycle';
+import { encodeBase64Url } from '../sync/crypto/recoveryCode';
 import type { SyncSessionFactory } from '../sync/sessionFactory';
 import { l10n } from '../i18n';
 
@@ -53,6 +54,8 @@ function newStateFrom(material: InitialSyncMaterial): NewStateDto {
     recoveryKdf: material.recoveryKdf,
     envelopeSmp: material.envelopeSmp,
     envelopeRecovery: material.envelopeRecovery,
+    envelopeAccount: material.envelopeAccount,
+    accountRecoveryKey: encodeBase64Url(material.accountRecoveryKey),
     signPub: material.signPub,
     recoverSignPub: material.recoverSignPub,
   };
@@ -107,7 +110,7 @@ function validateNewSmp(smp: string, ui: SyncUi): boolean {
     return false;
   }
   const codePoints = [...smp].length;
-  if (codePoints < 12 || codePoints > 128) {
+  if (codePoints < 9 || codePoints > 128) {
     ui.error(l10n('sync.passphraseLength'));
     return false;
   }
@@ -162,6 +165,7 @@ export async function initializePersonalSync(deps: PersonalSyncCommandDeps): Pro
     // session 已复制其拥有的 DEK；命令层材料和恢复码熵随后不应继续驻留。
     recovery.raw.fill(0);
     material?.dek.fill(0);
+    material?.accountRecoveryKey.fill(0);
   }
   // Recovery code is only available in this in-memory flow. A dismissed modal is not confirmation:
   // keep prompting until the user explicitly acknowledges saving it before reporting success.
@@ -223,6 +227,31 @@ export async function unlockPersonalSync(deps: PersonalSyncCommandDeps): Promise
   deps.ui.info(l10n('sync.unlocked'));
 }
 
+/** 智能同步入口（树视图「⋯」菜单的「同步」项）：已解锁→立即同步；已初始化锁定→解锁；未初始化→初始化。 */
+export async function syncEntry(deps: PersonalSyncCommandDeps): Promise<void> {
+  const session = await getSession(deps);
+  if (!session) return;
+  if (session.isUnlocked) {
+    try {
+      reportInitialRun(deps.ui, await session.syncNow());
+    } catch {
+      deps.ui.warn(l10n('sync.initialSyncPending'));
+    }
+    return;
+  }
+  // 本地 localEpoch 只是本机是否已持久化的指示，不能可靠区分「已初始化但本机无快照（第二台设备）」
+  // 与「从未初始化」。这里探测远端 state 决定走解锁还是初始化。
+  let state: StateDto | undefined;
+  try {
+    state = await existingState(session);
+  } catch {
+    deps.ui.error(l10n('sync.stateInvalid'));
+    return;
+  }
+  if (state) await unlockPersonalSync(deps);
+  else await initializePersonalSync(deps);
+}
+
 function vscodeUi(): SyncUi {
   return {
     promptSmp: (prompt) => vscode.window.showInputBox({ prompt, password: true, ignoreFocusOut: true }),
@@ -250,6 +279,7 @@ export function registerPersonalSyncCommands(
   context.subscriptions.push(
     vscode.commands.registerCommand('dbclient.initializePersonalSync', () => initializePersonalSync(deps)),
     vscode.commands.registerCommand('dbclient.unlockPersonalSync', () => unlockPersonalSync(deps)),
+    vscode.commands.registerCommand('dbclient.syncEntry', () => syncEntry(deps)),
   );
 }
 

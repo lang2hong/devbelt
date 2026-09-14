@@ -201,6 +201,9 @@ export async function createApp() {
     syncRecordRepo,
     syncMutationRepo,
     (fn) => withTransaction(app.mysql, fn),
+    // 状态密钥 mutation 的按用户限流（回执优先于限流，仅 account-recover 在真正写时计数）。
+    // 窗口/上限与 route/sync.ts 的 SYNC_KEYS_WINDOW_S / SYNC_KEYS_MAX 保持一致。
+    (tx, userId) => rateLimiter.hitInTx(tx, `sync:keys:user:${userId}`, 3600, 20),
   );
   const syncRecordService = new SyncRecordService(
     syncStateRepo,
@@ -257,6 +260,7 @@ export async function createApp() {
     membershipRepo,
     auditRepo,
     orderRepo,
+    invoiceRepo,
     auditWriter,
     rateLimiter,
   });
@@ -320,7 +324,7 @@ export async function createApp() {
   app.register(personalRoutes, { tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin: config.consoleOrigin, deviceRepo, idempotencyService, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId), revokeDeviceInTx: (tx, userId, deviceId) => authService.revokeDeviceInTx(tx, userId, deviceId) });
   app.register(organizationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin: config.consoleOrigin, organizationService, resourceService, organizationRepo, membershipRepo, auditWriter, idempotencyService, sendInvitation: (o) => organizationService.sendInvitation(o) });
   app.register(invitationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin: config.consoleOrigin, organizationService });
-  app.register(syncRoutes, { tokenService, getUser, getSessionActive, syncState: syncStateService, syncRecord: syncRecordService, syncReset: syncResetService, rateLimiter });
+  app.register(syncRoutes, { tokenService, getUser, getSessionActive, syncState: syncStateService, syncRecord: syncRecordService, syncReset: syncResetService, rateLimiter, verifyAccountRecoveryPassword: (userId, password) => authService.verifyPasswordStepUp(userId, password), auditWriter, emailSender, userRepo });
   app.register(consoleAuthRoutes, {
     csrfService,
     rateLimiter,

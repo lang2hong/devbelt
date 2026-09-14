@@ -17,6 +17,7 @@ import ResourcesView from './pages/ResourcesView.vue';
 import AdminUsersView from './pages/AdminUsersView.vue';
 import AdminOrganizationsView from './pages/AdminOrganizationsView.vue';
 import AdminOrdersView from './pages/AdminOrdersView.vue';
+import AdminInvoicesView from './pages/AdminInvoicesView.vue';
 import AdminAuditView from './pages/AdminAuditView.vue';
 import AdminVersionView from './pages/AdminVersionView.vue';
 import StatusPage from './pages/StatusPage.vue';
@@ -34,6 +35,7 @@ const ROUTES: RouteConfig[] = [
   { pattern: '/console/admin/users', name: 'admin-users' },
   { pattern: '/console/admin/organizations', name: 'admin-organizations' },
   { pattern: '/console/admin/orders', name: 'admin-orders' },
+  { pattern: '/console/admin/invoices', name: 'admin-invoices' },
   { pattern: '/console/admin/audit', name: 'admin-audit' },
   { pattern: '/console/admin/version', name: 'admin-version' },
 ];
@@ -42,6 +44,7 @@ installRouter(ROUTES);
 
 const state = ref<'loading' | 'ready' | 'error'>('loading');
 const me_ = ref<ConsoleMe | null>(null);
+const logoutError = ref(false);
 
 const view = computed<{ comp: Component; props: Record<string, unknown> }>(() => {
   // 防御纵深：即使直接导航到 /console/admin/*，非平台管理员也只看到 403（服务端同样拒绝）。
@@ -73,6 +76,8 @@ const view = computed<{ comp: Component; props: Record<string, unknown> }>(() =>
       return { comp: AdminOrganizationsView, props: {} };
     case 'admin-orders':
       return { comp: AdminOrdersView, props: {} };
+    case 'admin-invoices':
+      return { comp: AdminInvoicesView, props: {} };
     case 'admin-audit':
       return { comp: AdminAuditView, props: {} };
     case 'admin-version':
@@ -116,9 +121,15 @@ onMounted(async () => {
 });
 
 async function onLogout(): Promise<void> {
+  logoutError.value = false;
   const csrf = await ensureCsrf();
-  await logout(csrf);
-  window.location.assign('/login');
+  const r = await logout(csrf);
+  if (r.kind === 'ok') {
+    window.location.assign('/login');
+    return;
+  }
+  // 本机 token 已清除，但服务器 refresh-cookie 会话未被确认注销：提示并允许重试，避免静默假登出。
+  logoutError.value = true;
 }
 </script>
 
@@ -139,11 +150,16 @@ async function onLogout(): Promise<void> {
         <a href="/console/orders" @click.prevent="navigate('/console/orders')" :class="{ on: router.name === 'orders' }">订单</a>
         <a href="/console/invoices" @click.prevent="navigate('/console/invoices')" :class="{ on: router.name === 'invoices' }">发票</a>
         <a href="/console/organizations" @click.prevent="navigate('/console/organizations')" :class="{ on: router.name === 'organizations' || router.name === 'organization-detail' || router.name === 'organization-resources' }">组织</a>
-        <a v-if="me_.platformAdmin" href="/console/admin/users" @click.prevent="navigate('/console/admin/users')" :class="{ on: ['admin-users', 'admin-organizations', 'admin-orders', 'admin-audit', 'admin-version'].includes(router.name ?? '') }">管理</a>
+        <a v-if="me_.platformAdmin" href="/console/admin/users" @click.prevent="navigate('/console/admin/users')" :class="{ on: ['admin-users', 'admin-organizations', 'admin-orders', 'admin-invoices', 'admin-audit', 'admin-version'].includes(router.name ?? '') }">管理</a>
         <span class="spacer"></span>
         <span class="email">{{ me_.user.email }}</span>
         <button class="btn ghost" @click="onLogout">登出</button>
       </nav>
+
+      <div v-if="logoutError" class="logout-warn" role="alert">
+        <span>登出请求未得到服务器确认，本机登录态已清除。建议重试或关闭浏览器。</span>
+        <button class="btn ghost" @click="onLogout">重试</button>
+      </div>
 
       <div class="body">
         <component :is="view.comp" v-bind="view.props" />
@@ -166,4 +182,6 @@ async function onLogout(): Promise<void> {
 .muted { color: #57606a; }
 .error { color: #cf222e; }
 .error-box { padding: 80px 24px; text-align: center; }
+.logout-warn { display: flex; align-items: center; gap: 12px; max-width: 860px; margin: 0 auto; padding: 10px 24px; background: #fff8c5; border-bottom: 1px solid #d4a72c; color: #9a6700; font-size: 13px; }
+.logout-warn .btn { padding: 5px 12px; }
 </style>

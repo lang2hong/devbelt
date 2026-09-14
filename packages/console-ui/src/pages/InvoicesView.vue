@@ -18,7 +18,7 @@ const requesting = ref(false);
 
 const requestWrite = useIdempotencyKey();
 
-const STATUS_LABEL: Record<string, string> = { requested: '已申请', issued: '已开具', rejected: '已驳回' };
+const STATUS_LABEL: Record<string, string> = { requested: '已申请', issued: '已开具', rejected: '已驳回', failed: '失败' };
 
 function fmtCents(cents: number): string {
   return (cents / 100).toFixed(2);
@@ -99,6 +99,7 @@ async function request(): Promise<void> {
           <span class="badge">{{ STATUS_LABEL[i.status] ?? i.status }}</span>
         </div>
         <div class="muted">¥{{ fmtCents(i.amountCents) }} · {{ i.email }}<span v-if="i.taxNo"> · {{ i.taxNo }}</span></div>
+        <div v-if="(i.status === 'rejected' || i.status === 'failed') && i.reason" class="muted">原因：{{ i.reason }}</div>
       </li>
       <li v-if="invoices.length === 0" class="muted">暂无发票申请。</li>
     </ul>

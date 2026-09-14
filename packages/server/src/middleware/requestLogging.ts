@@ -134,8 +134,11 @@ export function serializeError(err: unknown): unknown {
 export function buildLoggerOptions(): {
   // pino 的 SerializerFn 形参是 any；这里保持同构以便直接作为 Fastify logger 选项传入。
   serializers: { [key: string]: (value: any) => unknown };
+  timestamp: () => string;
 } {
   return {
+    // 日志时间戳统一为北京时间 `YYYY-MM-DD HH:mm:ss`（与展示层 / 支付宝时间格式一致）。
+    timestamp: () => `,"time":"${formatLogTime(new Date())}"`,
     serializers: {
       req: (req: FastifyRequest) => ({
         method: req.method,
@@ -145,4 +148,11 @@ export function buildLoggerOptions(): {
       err: (err: unknown) => serializeError(err),
     },
   };
+}
+
+/** 北京时间 `YYYY-MM-DD HH:mm:ss`（+08:00，不依赖服务器 TZ 配置）。 */
+function formatLogTime(now: Date): string {
+  const sh = new Date(now.getTime() + 8 * 3600 * 1000);
+  const p = (n: number): string => String(n).padStart(2, '0');
+  return `${sh.getUTCFullYear()}-${p(sh.getUTCMonth() + 1)}-${p(sh.getUTCDate())} ${p(sh.getUTCHours())}:${p(sh.getUTCMinutes())}:${p(sh.getUTCSeconds())}`;
 }

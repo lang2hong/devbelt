@@ -101,7 +101,7 @@ export class SmtpEmailSender implements EmailSender {
     });
   }
 
-  async sendResetChallengeEmail(input: { to: string; token: string; displayName?: string }): Promise<void> {
+async sendResetChallengeEmail(input: { to: string; token: string; displayName?: string }): Promise<void> {
     const greeting = `Hi${input.displayName ? ` ${input.displayName}` : ''}`;
     const url = this.resetUrl(input.token);
     await this.transporter.sendMail({
@@ -118,6 +118,27 @@ export class SmtpEmailSender implements EmailSender {
         this.heading('同步重置确认', greeting) +
         '<p style="margin:12px 0 0;color:#57606a;font-size:14px;line-height:1.7;">你的账号请求了一次同步重置。点击下方按钮确认，链接 <b>24 小时内</b>有效。</p>' +
         this.button('确认重置', url),
+      ),
+    });
+  }
+
+  async sendAccountRecoveryActivityEmail(input: { to: string; displayName?: string }): Promise<void> {
+    const greeting = `Hi${input.displayName ? ` ${input.displayName}` : ''}`;
+    // 安全通知：刻意不包含任何 token / 恢复材料 / 口令 / 链接，仅告知事件发生。
+    await this.transporter.sendMail({
+      from: this.from,
+      to: input.to,
+      subject: 'DB Client 账号同步恢复已使用',
+      text:
+        '账号同步恢复提醒\n\n' +
+        `${greeting}，你好：\n\n` +
+        '你的 DB Client 账号刚刚执行了一次「账号同步恢复」，服务端已向该请求签发云端同步数据的恢复材料。\n\n' +
+        '如果这是你本人操作，可忽略本邮件。\n\n' +
+        '如果不是你本人操作，说明你的账号登录可能已泄露，请立即修改账户密码，并检查账号安全。',
+      html: this.wrap(
+        this.heading('账号同步恢复提醒', greeting) +
+        '<p style="margin:12px 0 0;color:#57606a;font-size:14px;line-height:1.7;">你的账号刚刚执行了一次「账号同步恢复」，服务端已签发云端同步数据的恢复材料。</p>' +
+        '<p style="margin:8px 0 0;color:#57606a;font-size:14px;line-height:1.7;">如果这不是你的操作，请立即修改账户密码，并检查账号安全。</p>',
       ),
     });
   }

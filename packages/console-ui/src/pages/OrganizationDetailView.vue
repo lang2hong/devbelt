@@ -18,6 +18,8 @@ import {
 import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
 import { navigate } from '../lib/router';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
+import { formatDateTime } from '../lib/formatTime';
+import Modal from '../components/Modal.vue';
 
 const props = defineProps<{ organizationId: string }>();
 
@@ -33,7 +35,7 @@ const busy = ref(false);
 
 const inviteEmail = ref('');
 const inviteRole = ref<'admin' | 'member'>('member');
-const memberConfirm = ref<string | null>(null);
+const memberConfirm = ref<Member | null>(null);
 const closeConfirm = ref(false);
 const leaveConfirm = ref(false);
 
@@ -45,6 +47,8 @@ const inviteWrite = useIdempotencyKey();
 
 const isAdmin = (): boolean => org.value?.role === 'admin';
 
+let loadSeq = 0;
+
 function relogin(): void {
   setAccessToken(null);
   window.location.assign('/login');
@@ -55,8 +59,16 @@ function invalidContext(): void {
 }
 
 async function load(): Promise<void> {
+  const seq = ++loadSeq;
+  const id = props.organizationId;
   state.value = 'loading';
-  const o = await getOrganization(props.organizationId);
+  error.value = '';
+  // 切组织/重载时先清空旧组织数据，避免前一个组织的成员/邀请串到新组织页面。
+  org.value = null;
+  members.value = [];
+  invitations.value = [];
+  const o = await getOrganization(id);
+  if (seq !== loadSeq || props.organizationId !== id) return;
   if (o.kind !== 'ok') {
     if (o.kind === 'unauthorized') return relogin();
     if (o.kind === 'forbidden' || o.kind === 'not-found') return invalidContext();
@@ -64,7 +76,8 @@ async function load(): Promise<void> {
     return;
   }
   org.value = o.value;
-  const m = await listMembers(props.organizationId);
+  const m = await listMembers(id);
+  if (seq !== loadSeq || props.organizationId !== id) return;
   if (m.kind !== 'ok') {
     if (m.kind === 'unauthorized') return relogin();
     if (m.kind === 'forbidden' || m.kind === 'not-found') return invalidContext();
@@ -73,8 +86,15 @@ async function load(): Promise<void> {
   }
   members.value = m.value;
   if (isAdmin()) {
-    const inv = await listInvitations(props.organizationId);
-    if (inv.kind === 'ok') invitations.value = inv.value;
+    const inv = await listInvitations(id);
+    if (seq !== loadSeq || props.organizationId !== id) return;
+    if (inv.kind !== 'ok') {
+      if (inv.kind === 'unauthorized') return relogin();
+      if (inv.kind === 'forbidden' || inv.kind === 'not-found') return invalidContext();
+      error.value = '邀请列表加载失败，请刷新重试。';
+    } else {
+      invitations.value = inv.value;
+    }
   }
   state.value = 'ready';
 }
@@ -82,22 +102,32 @@ async function load(): Promise<void> {
 onMounted(load);
 
 watch(() => props.organizationId, () => {
+  // 组织切换时立刻关闭一切待确认的对话框/表单：这些控件绑定的操作函数在触发时
+  // 才读取 props.organizationId，若路由切换发生在「打开确认框」与「点击确认」
+  // 之间，用户看着 A 组织的确认文案，点下去却会作用于此刻已成为当前路由的 B 组织。
+  renameMode.value = false;
+  closeConfirm.value = false;
+  leaveConfirm.value = false;
+  memberConfirm.value = null;
+  inviteEmail.value = '';
+  error.value = '';
   void load();
 });
 
 async function saveRename(): Promise<void> {
   if (busy.value || !renameValue.value.trim()) return;
   const value = renameValue.value.trim();
+  const id = props.organizationId;
   const tag = `rename:${value}`;
   busy.value = true;
   error.value = '';
   try {
     const csrf = await ensureCsrf();
-    const r = await updateOrganization(props.organizationId, value, renameWrite.ensure(tag), csrf);
+    const r = await updateOrganization(id, value, renameWrite.ensure(tag), csrf);
     if (r.kind === 'ok') {
       renameWrite.reset(tag);
       renameMode.value = false;
-      await load();
+      if (props.organizationId === id) await load();
     } else if (r.kind === 'unauthorized') {
       renameWrite.reset(tag);
       relogin();
@@ -117,12 +147,13 @@ async function saveRename(): Promise<void> {
 
 async function closeOrg(): Promise<void> {
   if (busy.value) return;
+  const id = props.organizationId;
   const tag = 'close';
   busy.value = true;
   error.value = '';
   try {
     const csrf = await ensureCsrf();
-    const r = await closeOrganization(props.organizationId, closeWrite.ensure(tag), csrf);
+    const r = await closeOrganization(id, closeWrite.ensure(tag), csrf);
     if (r.kind === 'ok') {
       closeWrite.reset(tag);
       navigate('/console/organizations');
@@ -145,12 +176,13 @@ async function closeOrg(): Promise<void> {
 
 async function leaveOrg(): Promise<void> {
   if (busy.value) return;
+  const id = props.organizationId;
   const tag = 'leave';
   busy.value = true;
   error.value = '';
   try {
     const csrf = await ensureCsrf();
-    const r = await leaveOrganization(props.organizationId, leaveWrite.ensure(tag), csrf);
+    const r = await leaveOrganization(id, leaveWrite.ensure(tag), csrf);
     if (r.kind === 'ok') {
       leaveWrite.reset(tag);
       navigate('/console/organizations');
@@ -173,15 +205,16 @@ async function leaveOrg(): Promise<void> {
 
 async function changeRole(m: Member, role: 'admin' | 'member'): Promise<void> {
   if (busy.value) return;
+  const id = props.organizationId;
   const tag = `role:${m.membershipId}:${role}`;
   busy.value = true;
   error.value = '';
   try {
     const csrf = await ensureCsrf();
-    const r = await assignRole(props.organizationId, m.membershipId, role, memberWrite.ensure(tag), csrf);
+    const r = await assignRole(id, m.membershipId, role, memberWrite.ensure(tag), csrf);
     if (r.kind === 'ok') {
       memberWrite.reset(tag);
-      await load();
+      if (props.organizationId === id) await load();
     } else if (r.kind === 'unauthorized') {
       memberWrite.reset(tag);
       relogin();
@@ -199,18 +232,19 @@ async function changeRole(m: Member, role: 'admin' | 'member'): Promise<void> {
   }
 }
 
-async function doRemove(m: Member): Promise<void> {
-  if (busy.value) return;
+async function doRemove(m: Member | null): Promise<void> {
+  if (!m || busy.value) return;
+  const id = props.organizationId;
   const tag = `remove:${m.membershipId}`;
   busy.value = true;
   memberConfirm.value = null;
   error.value = '';
   try {
     const csrf = await ensureCsrf();
-    const r = await removeMember(props.organizationId, m.membershipId, memberWrite.ensure(tag), csrf);
+    const r = await removeMember(id, m.membershipId, memberWrite.ensure(tag), csrf);
     if (r.kind === 'ok') {
       memberWrite.reset(tag);
-      await load();
+      if (props.organizationId === id) await load();
     } else if (r.kind === 'unauthorized') {
       memberWrite.reset(tag);
       relogin();
@@ -231,16 +265,17 @@ async function doRemove(m: Member): Promise<void> {
 async function invite(): Promise<void> {
   if (busy.value || !inviteEmail.value.trim()) return;
   const email = inviteEmail.value.trim();
+  const id = props.organizationId;
   const tag = `invite:${email}:${inviteRole.value}`;
   busy.value = true;
   error.value = '';
   try {
     const csrf = await ensureCsrf();
-    const r = await inviteMember(props.organizationId, email, inviteRole.value, inviteWrite.ensure(tag), csrf);
+    const r = await inviteMember(id, email, inviteRole.value, inviteWrite.ensure(tag), csrf);
     if (r.kind === 'ok') {
       inviteWrite.reset(tag);
       inviteEmail.value = '';
-      await load();
+      if (props.organizationId === id) await load();
     } else if (r.kind === 'unauthorized') {
       inviteWrite.reset(tag);
       relogin();
@@ -260,15 +295,16 @@ async function invite(): Promise<void> {
 
 async function revoke(inv: Invitation): Promise<void> {
   if (busy.value) return;
+  const id = props.organizationId;
   const tag = `revoke:${inv.invitationId}`;
   busy.value = true;
   error.value = '';
   try {
     const csrf = await ensureCsrf();
-    const r = await revokeInvitation(props.organizationId, inv.invitationId, memberWrite.ensure(tag), csrf);
+    const r = await revokeInvitation(id, inv.invitationId, memberWrite.ensure(tag), csrf);
     if (r.kind === 'ok') {
       memberWrite.reset(tag);
-      await load();
+      if (props.organizationId === id) await load();
     } else if (r.kind === 'unauthorized') {
       memberWrite.reset(tag);
       relogin();
@@ -307,19 +343,10 @@ async function revoke(inv: Invitation): Promise<void> {
             <button class="btn" :disabled="busy" @click="saveRename">保存</button>
             <button class="btn secondary" @click="renameMode = false">取消</button>
           </template>
-          <button v-if="!closeConfirm" class="btn danger" @click="closeConfirm = true">关闭组织</button>
-          <template v-else>
-            <span class="muted">确认关闭？</span>
-            <button class="btn danger" :disabled="busy" @click="closeOrg">确认</button>
-            <button class="btn secondary" @click="closeConfirm = false">取消</button>
-          </template>
+          <button class="btn danger" @click="closeConfirm = true; error = ''">关闭组织</button>
         </div>
         <div v-else>
-          <button v-if="!leaveConfirm" class="btn secondary" @click="leaveConfirm = true">退出组织</button>
-          <template v-else>
-            <button class="btn danger" :disabled="busy" @click="leaveOrg">确认退出</button>
-            <button class="btn secondary" @click="leaveConfirm = false">取消</button>
-          </template>
+          <button class="btn secondary" @click="leaveConfirm = true; error = ''">退出组织</button>
         </div>
       </header>
 
@@ -332,15 +359,9 @@ async function revoke(inv: Invitation): Promise<void> {
               <span class="muted">{{ m.role }}<template v-if="m.email"> · {{ m.email }}</template></span>
             </div>
             <div v-if="isAdmin()" class="mem-actions">
-              <template v-if="memberConfirm === m.membershipId">
-                <button class="btn danger" :disabled="busy" @click="doRemove(m)">移除</button>
-                <button class="btn secondary" @click="memberConfirm = null">取消</button>
-              </template>
-              <template v-else>
-                <button v-if="m.role === 'member'" class="btn secondary" :disabled="busy" @click="changeRole(m, 'admin')">设为管理员</button>
-                <button v-else class="btn secondary" :disabled="busy" @click="changeRole(m, 'member')">降为成员</button>
-                <button class="btn secondary" @click="memberConfirm = m.membershipId">移除</button>
-              </template>
+              <button v-if="m.role === 'member'" class="btn secondary" :disabled="busy" @click="changeRole(m, 'admin')">设为管理员</button>
+              <button v-else class="btn secondary" :disabled="busy" @click="changeRole(m, 'member')">降为成员</button>
+              <button class="btn secondary" @click="memberConfirm = m; error = ''">移除</button>
             </div>
           </li>
         </ul>
@@ -360,7 +381,7 @@ async function revoke(inv: Invitation): Promise<void> {
           <li v-for="inv in invitations" :key="inv.invitationId" class="item">
             <div class="meta">
               <strong>{{ inv.email }}</strong>
-              <span class="muted">{{ inv.role }} · 过期 {{ new Date(inv.expiresTime).toLocaleString() }}</span>
+              <span class="muted">{{ inv.role }} · 过期 {{ formatDateTime(inv.expiresTime) }}</span>
             </div>
             <button class="btn secondary" :disabled="busy" @click="revoke(inv)">撤销</button>
           </li>
@@ -369,6 +390,33 @@ async function revoke(inv: Invitation): Promise<void> {
 
       <p v-if="error" class="error">{{ error }}</p>
     </template>
+
+    <Modal v-if="closeConfirm" title="关闭组织" :closable="!busy" @close="closeConfirm = false">
+      <p class="muted">确认关闭「{{ org?.name }}」？关闭后成员将无法访问。</p>
+      <p v-if="error" class="error">{{ error }}</p>
+      <div class="modal-actions">
+        <button class="btn danger" :disabled="busy" @click="closeOrg">确认关闭</button>
+        <button class="btn secondary" :disabled="busy" @click="closeConfirm = false">取消</button>
+      </div>
+    </Modal>
+
+    <Modal v-if="leaveConfirm" title="退出组织" :closable="!busy" @close="leaveConfirm = false">
+      <p class="muted">确认退出「{{ org?.name }}」？退出后将失去组织资源的访问权限。</p>
+      <p v-if="error" class="error">{{ error }}</p>
+      <div class="modal-actions">
+        <button class="btn danger" :disabled="busy" @click="leaveOrg">确认退出</button>
+        <button class="btn secondary" :disabled="busy" @click="leaveConfirm = false">取消</button>
+      </div>
+    </Modal>
+
+    <Modal v-if="memberConfirm" title="移除成员" :closable="!busy" @close="memberConfirm = null">
+      <p class="muted">确认移除「{{ memberConfirm.displayName || memberConfirm.email || '该成员' }}」？</p>
+      <p v-if="error" class="error">{{ error }}</p>
+      <div class="modal-actions">
+        <button class="btn danger" :disabled="busy" @click="doRemove(memberConfirm)">移除</button>
+        <button class="btn secondary" :disabled="busy" @click="memberConfirm = null">取消</button>
+      </div>
+    </Modal>
   </section>
 </template>
 
@@ -396,4 +444,5 @@ input { flex: 1; }
 .link { background: none; border: none; color: #0969da; cursor: pointer; padding: 0; }
 .muted { color: #57606a; font-size: 13px; }
 .error { color: #cf222e; font-size: 13px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
 </style>

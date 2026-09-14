@@ -78,7 +78,7 @@ describe('retention cleanup', () => {
   it('prunes expired sync mutation receipts (the expires_time column nobody consumed)', async () => {
     const deps = makeDeps();
     const now = Date.now();
-    const base = { userId: 1, keyEpoch: '1', requestDigest: Buffer.alloc(32, 1), action: 'record.put' as const, resultVersion: '1', resultChangeSequence: '1', status: 'applied' as const };
+    const base = { userId: 1, keyEpoch: '1', requestDigest: Buffer.alloc(32, 1), action: 'record.put' as const, resultVersion: '1', resultChangeSequence: '1', resultRecoveryCodeSetTime: null, status: 'applied' as const };
     await deps.syncMutationRepo.record(exec(), { ...base, mutationId: Buffer.alloc(16, 1), expiresTime: new Date(now - HOUR) });
     await deps.syncMutationRepo.record(exec(), { ...base, mutationId: Buffer.alloc(16, 2), expiresTime: new Date(now + HOUR) });
 

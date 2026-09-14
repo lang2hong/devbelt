@@ -12,11 +12,16 @@ import { SyncRecordService } from '../service/syncRecordService.js';
 import { SyncResetService } from '../service/syncResetService.js';
 import type { RateLimitService } from '../service/rateLimitService.js';
 import type { SmpKdf, RecoveryKdf, SyncEnvelope } from '../domain/entities.js';
+import type { AuditWriter } from '../service/auditWriter.js';
+import type { EmailSender } from '../service/emailSender.js';
+import type { IUserRepo } from '../repository/interfaces.js';
 import {
   syncInitBody,
   syncChangeKeyBody,
   syncRecoverBody,
   syncDestroyBody,
+  syncAccountRecoverBody,
+  syncRecoverViaAccountBody,
   syncPutRecordBody,
   syncDeleteRecordBody,
   syncRecordIdParam,
@@ -32,6 +37,13 @@ export interface SyncRouteOptions {
   syncRecord: SyncRecordService;
   syncReset: SyncResetService;
   rateLimiter: RateLimitService;
+  /** 账号恢复 step-up：复核账户登录口令（任意 sync token 不得单凭待解码材料）。 */
+  verifyAccountRecoveryPassword: (userId: number, password: string) => Promise<void>;
+  auditWriter?: AuditWriter;
+  /** 账号恢复材料下发后的安全通知投递（无 token/材料/口令），失败不阻断恢复。 */
+  emailSender?: EmailSender;
+  /** 安全通知收件人：查账户已验证邮箱（未验证则静默不发，与 reset-challenge 一致）。 */
+  userRepo?: IUserRepo;
 }
 
 /**
@@ -47,6 +59,9 @@ const SYNC_RECORD_WINDOW_S = 60;
 const SYNC_RECORD_MAX = 600;
 const SYNC_RESET_WINDOW_S = 3600;
 const SYNC_RESET_MAX = 10;
+/** 账号恢复 step-up 口令的按用户限流（每次尝试计数），防止 token 泄露者离线撞库。 */
+const SYNC_ACCOUNT_RECOVERY_STEPUP_WINDOW_S = 3600;
+const SYNC_ACCOUNT_RECOVERY_STEPUP_MAX = 5;
 
 /** 协议/cipher/format 值域由服务层判定（§8：不在支持集 → 400 SYNC_PROTOCOL_UNSUPPORTED）。 */
 function assertProtocolV1(protocolVersion: unknown): void {
@@ -89,8 +104,26 @@ function decodeNewState(ns: any): SyncNewState {
     recoveryKdf: decodeRecoveryKdf(ns.recoveryKdf),
     envelopeSmp: decodeEnvelope(ns.envelopeSmp),
     envelopeRecovery: decodeEnvelope(ns.envelopeRecovery),
+    envelopeAccount: decodeEnvelope(ns.envelopeAccount),
+    accountRecoveryKey: decodeB64Url(ns.accountRecoveryKey, 32, 'accountRecoveryKey'),
     signPub: decodeB64Url(ns.signPub, 32, 'signPub'),
     recoverSignPub: decodeB64Url(ns.recoverSignPub, 32, 'recoverSignPub'),
+  };
+}
+
+/** 账号恢复材料出站序列化（base64url）。 */
+function accountRecoveryDto(r: { accountRecoveryKey: Buffer; envelopeAccount: SyncEnvelope }) {
+  return {
+    accountRecoveryKey: r.accountRecoveryKey.toString('base64url'),
+    envelopeAccount: {
+      protocolVersion: 1,
+      cipherSuite: 'AES-256-GCM',
+      formatVersion: 1,
+      envelopeVersion: r.envelopeAccount.version,
+      nonce: r.envelopeAccount.nonce.toString('base64url'),
+      ciphertext: r.envelopeAccount.ct.toString('base64url'),
+      tag: r.envelopeAccount.tag.toString('base64url'),
+    },
   };
 }
 
@@ -99,6 +132,31 @@ function digestOf(body: Record<string, unknown>): string {
   const withoutSig: Record<string, unknown> = { ...body };
   delete withoutSig.signature;
   return requestDigestOf(withoutSig);
+}
+
+/**
+ * 账号恢复材料下发后的安全通知：向账户的已验证邮箱投递「恢复刚被访问」提醒。
+ * - 只发已验证邮箱（未验证则静默跳过），与 reset-challenge 一致，避免打扰不可达地址。
+ * - 通知不含任何 token / 恢复材料 / 口令 / 链接；失败仅记日志，绝不阻断恢复响应或回滚结果。
+ */
+async function notifyAccountRecoveryActivity(
+  emailSender: EmailSender | undefined,
+  userRepo: IUserRepo | undefined,
+  userId: number,
+): Promise<void> {
+  if (!emailSender || !userRepo) return;
+  let user;
+  try {
+    user = await userRepo.findById(userId);
+  } catch {
+    return;
+  }
+  if (!user || !user.email || !user.emailVerifiedTime) return;
+  try {
+    await emailSender.sendAccountRecoveryActivityEmail({ to: user.email, displayName: user.displayName });
+  } catch (err) {
+    console.warn('[sync] account recovery activity email failed', { err: String(err) });
+  }
 }
 
 /** 个人 E2E 同步状态侧路由（§7.5：GET state / PUT init / POST change-key·recover·destroy）。 */
@@ -115,6 +173,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
       const keysLimit = (userId: number) => opts.rateLimiter.hit(`sync:keys:user:${userId}`, SYNC_KEYS_WINDOW_S, SYNC_KEYS_MAX);
       const recordLimit = (userId: number) => opts.rateLimiter.hit(`sync:record:user:${userId}`, SYNC_RECORD_WINDOW_S, SYNC_RECORD_MAX);
       const resetLimit = (userId: number) => opts.rateLimiter.hit(`sync:reset:user:${userId}`, SYNC_RESET_WINDOW_S, SYNC_RESET_MAX);
+      const accountRecoveryStepUpLimit = (userId: number) => opts.rateLimiter.hit(`sync:account-recovery-stepup:user:${userId}`, SYNC_ACCOUNT_RECOVERY_STEPUP_WINDOW_S, SYNC_ACCOUNT_RECOVERY_STEPUP_MAX);
 
       child.get('/api/sync/state', async (req, reply) => {
         const userId = (req as any).authUserId as number;
@@ -184,6 +243,64 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
             expectedStateVersion: body.expectedStateVersion,
             requestDigest: digestOf(body),
             newState: decodeNewState(body.newState),
+          }));
+        } catch (e) { sendError(reply, e); }
+      });
+
+      child.post('/api/sync/recover-via-account', { schema: { body: syncRecoverViaAccountBody } }, async (req, reply) => {
+        const userId = (req as any).authUserId as number;
+        const body = req.body as any;
+        try {
+          // 该端点下发 DEK 解密原材料，安全边界不能只靠一个普通 sync token：
+          // 先在按用户限流内复核账户登录口令（step-up），失败不计入下发路径并落审计。
+          await accountRecoveryStepUpLimit(userId);
+          try {
+            await opts.verifyAccountRecoveryPassword(userId, body.password);
+          } catch (e) {
+            opts.auditWriter?.write({
+              eventType: 'sync.account.recovery.material_failed',
+              result: 'failure',
+              failureCode: (e as { code?: string })?.code ?? null,
+              actorUserId: userId,
+              targetType: 'sync_state',
+              sourceIp: req.ip,
+            });
+            throw e;
+          }
+          const material = await opts.syncState.recoverViaAccount(userId);
+          opts.auditWriter?.write({
+            eventType: 'sync.account.recovery.material_released',
+            result: 'success',
+            actorUserId: userId,
+            targetType: 'sync_state',
+            sourceIp: req.ip,
+          });
+          // 安全通知：材料已下发，异步提醒账户所有者（helper 已吞掉所有异常，失败不阻断、不回滚已审计的成功结果）。
+          void notifyAccountRecoveryActivity(opts.emailSender, opts.userRepo, userId);
+          reply.send(accountRecoveryDto(material));
+        } catch (e) { sendError(reply, e); }
+      });
+
+      child.post('/api/sync/account-recover', { schema: { body: syncAccountRecoverBody } }, async (req, reply) => {
+        const userId = (req as any).authUserId as number;
+        const body = req.body as any;
+        try {
+          // 限流在服务层（回执优先于限流）：此处不再前置 keysLimit，否则「已提交 + 响应丢失」的
+          // 重放会在配额边界被 429 拦截而无法命中回执，导致恢复码误丢。
+          assertProtocolV1(body.protocolVersion);
+          reply.send(await opts.syncState.recoverByAccount(userId, {
+            keyEpoch: body.keyEpoch,
+            mutationId: body.mutationId,
+            signature: decodeB64Url(body.signature, 64, 'signature'),
+            expectedStateVersion: body.expectedStateVersion,
+            requestDigest: digestOf(body),
+            smpKdf: decodeSmpKdf(body.smpKdf),
+            envelopeSmp: decodeEnvelope(body.envelopeSmp),
+            recoveryKdf: decodeRecoveryKdf(body.recoveryKdf),
+            envelopeRecovery: decodeEnvelope(body.envelopeRecovery),
+            envelopeAccount: decodeEnvelope(body.envelopeAccount),
+            accountRecoveryKey: decodeB64Url(body.accountRecoveryKey, 32, 'accountRecoveryKey'),
+            recoverSignPub: decodeB64Url(body.recoverSignPub, 32, 'recoverSignPub'),
           }));
         } catch (e) { sendError(reply, e); }
       });

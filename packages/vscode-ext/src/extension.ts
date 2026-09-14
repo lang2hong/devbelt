@@ -185,8 +185,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (auth.isLoggedIn()) {
         setSyncReady(false);
         setSyncUnlocked(false);
-        const initialized = session?.localEpoch !== undefined;
-        syncStatusBar.command = initialized ? 'dbclient.unlockPersonalSync' : 'dbclient.initializePersonalSync';
+        syncStatusBar.command = 'dbclient.syncEntry';
         syncStatusBar.text = `$(sync) ${l10n('sync.statusLocked')}`;
         syncStatusBar.tooltip = l10n('sync.statusLocked');
         syncStatusBar.show();
@@ -249,13 +248,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     createClient: () => new PersonalSyncClient(auth.client),
   });
   context.subscriptions.push({ dispose: () => syncFactory.dispose() });
-  const onLogoutInvalidate = eventBus.subscribe(AuthEvent, (e) => {
-    if (e.kind === 'logout') {
-      syncFactory.invalidate();
-      refreshSyncStatusBar();
-    }
+  const onAuthChange = eventBus.subscribe(AuthEvent, (e) => {
+    if (e.kind === 'logout') syncFactory.invalidate();
+    refreshSyncStatusBar();
   });
-  context.subscriptions.push(onLogoutInvalidate);
+  context.subscriptions.push(onAuthChange);
   // 立即同步命令（解锁态才可用，when=dbclient.sync.ready）+ 窗口聚焦补同步。
   context.subscriptions.push(
     vscode.commands.registerCommand('dbclient.syncNow', () => {

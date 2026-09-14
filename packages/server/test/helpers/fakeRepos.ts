@@ -1311,11 +1311,13 @@ export class FakeSyncMutationRepo implements ISyncMutationRepo {
   async record(_exec: Queryable, input: {
     userId: number; keyEpoch: string; mutationId: Buffer; requestDigest: Buffer;
     action: SyncAction; resultVersion: string | null; resultChangeSequence: string | null;
+    resultRecoveryCodeSetTime: Date | null;
     status: SyncMutationStatus; expiresTime: Date;
   }): Promise<void> {
     this.store.set(this.key(input.userId, input.keyEpoch, input.mutationId), {
       userId: input.userId, keyEpoch: input.keyEpoch, mutationId: input.mutationId, requestDigest: input.requestDigest,
       action: input.action, resultVersion: input.resultVersion, resultChangeSequence: input.resultChangeSequence,
+      resultRecoveryCodeSetTime: input.resultRecoveryCodeSetTime,
       status: input.status, expiresTime: input.expiresTime, createTime: new Date(),
     });
   }

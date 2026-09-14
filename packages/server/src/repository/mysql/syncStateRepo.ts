@@ -19,6 +19,9 @@ const SELECT_COLS = `
   envelope_smp_nonce, envelope_smp_ct, envelope_smp_tag,
   CAST(envelope_recovery_version AS CHAR) AS envelope_recovery_version,
   envelope_recovery_nonce, envelope_recovery_ct, envelope_recovery_tag,
+  CAST(envelope_account_version AS CHAR) AS envelope_account_version,
+  envelope_account_nonce, envelope_account_ct, envelope_account_tag,
+  account_recovery_key,
   sign_pub, recover_sign_pub, recovery_code_set_time,
   create_time, update_time
 `;
@@ -29,6 +32,8 @@ const INSERT_COLS = [
   'smp_kdf_json', 'recovery_kdf_json',
   'envelope_smp_version', 'envelope_smp_nonce', 'envelope_smp_ct', 'envelope_smp_tag',
   'envelope_recovery_version', 'envelope_recovery_nonce', 'envelope_recovery_ct', 'envelope_recovery_tag',
+  'envelope_account_version', 'envelope_account_nonce', 'envelope_account_ct', 'envelope_account_tag',
+  'account_recovery_key',
   'sign_pub', 'recover_sign_pub', 'recovery_code_set_time',
 ].join(', ');
 
@@ -53,6 +58,8 @@ function params(s: StateInput): unknown[] {
     JSON.stringify(serializeRecoveryKdf(s.recoveryKdf)),
     s.envelopeSmp.version, s.envelopeSmp.nonce, s.envelopeSmp.ct, s.envelopeSmp.tag,
     s.envelopeRecovery.version, s.envelopeRecovery.nonce, s.envelopeRecovery.ct, s.envelopeRecovery.tag,
+    s.envelopeAccount.version, s.envelopeAccount.nonce, s.envelopeAccount.ct, s.envelopeAccount.tag,
+    s.accountRecoveryKey,
     s.signPub, s.recoverSignPub, s.recoveryCodeSetTime,
   ];
 }
@@ -77,6 +84,8 @@ function mapState(r: any): PersonalSyncState {
     },
     envelopeSmp: { version: String(r.envelope_smp_version), nonce: r.envelope_smp_nonce, ct: r.envelope_smp_ct, tag: r.envelope_smp_tag },
     envelopeRecovery: { version: String(r.envelope_recovery_version), nonce: r.envelope_recovery_nonce, ct: r.envelope_recovery_ct, tag: r.envelope_recovery_tag },
+    envelopeAccount: { version: String(r.envelope_account_version), nonce: r.envelope_account_nonce, ct: r.envelope_account_ct, tag: r.envelope_account_tag },
+    accountRecoveryKey: r.account_recovery_key,
     signPub: r.sign_pub,
     recoverSignPub: r.recover_sign_pub,
     recoveryCodeSetTime: r.recovery_code_set_time ? new Date(r.recovery_code_set_time) : null,
@@ -101,7 +110,7 @@ export class MysqlSyncStateRepo implements ISyncStateRepo {
   async create(exec: Queryable, state: StateInput): Promise<boolean> {
     try {
       await exec.query<any>(
-        `INSERT INTO personal_sync_state (${INSERT_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO personal_sync_state (${INSERT_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         params(state),
       );
       return true;
@@ -119,6 +128,8 @@ export class MysqlSyncStateRepo implements ISyncStateRepo {
            smp_kdf_json = ?, recovery_kdf_json = ?,
            envelope_smp_version = ?, envelope_smp_nonce = ?, envelope_smp_ct = ?, envelope_smp_tag = ?,
            envelope_recovery_version = ?, envelope_recovery_nonce = ?, envelope_recovery_ct = ?, envelope_recovery_tag = ?,
+           envelope_account_version = ?, envelope_account_nonce = ?, envelope_account_ct = ?, envelope_account_tag = ?,
+           account_recovery_key = ?,
            sign_pub = ?, recover_sign_pub = ?, recovery_code_set_time = ?
        WHERE user_id = ? AND state_version = ?`,
       [
@@ -128,6 +139,8 @@ export class MysqlSyncStateRepo implements ISyncStateRepo {
         JSON.stringify(serializeRecoveryKdf(state.recoveryKdf)),
         state.envelopeSmp.version, state.envelopeSmp.nonce, state.envelopeSmp.ct, state.envelopeSmp.tag,
         state.envelopeRecovery.version, state.envelopeRecovery.nonce, state.envelopeRecovery.ct, state.envelopeRecovery.tag,
+        state.envelopeAccount.version, state.envelopeAccount.nonce, state.envelopeAccount.ct, state.envelopeAccount.tag,
+        state.accountRecoveryKey,
         state.signPub, state.recoverSignPub, state.recoveryCodeSetTime,
         userId, expectedStateVersion,
       ],

@@ -140,12 +140,27 @@ export async function refresh(csrfToken: string, fetchImpl: FetchLike = fetch): 
   }
 }
 
-export async function logout(csrfToken: string, fetchImpl: FetchLike = fetch): Promise<void> {
+export type LogoutResult = { kind: 'ok' } | { kind: 'failure' };
+
+/**
+ * 登出：仅在服务端明确返回 2xx（refresh cookie 已被撤销）时才算成功。
+ * 网络错误 / 非 2xx 时仍清除本端 token（避免本地残留），但返回 failure，
+ * 由调用方提示“服务器会话未确认注销”，而不是静默当作已登出。
+ */
+export async function logout(csrfToken: string, fetchImpl: FetchLike = fetch): Promise<LogoutResult> {
   try {
-    await fetchImpl('/api/console/auth/logout', { method: 'POST', headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken } });
-  } catch {
-    // 登出本端兜底：即使网络失败也清内存 token。
-  } finally {
+    const res = await fetchImpl('/api/console/auth/logout', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken },
+    });
+    if (res.ok) {
+      setAccessToken(null);
+      return { kind: 'ok' };
+    }
     setAccessToken(null);
+    return { kind: 'failure' };
+  } catch {
+    setAccessToken(null);
+    return { kind: 'failure' };
   }
 }

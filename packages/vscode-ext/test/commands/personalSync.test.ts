@@ -7,7 +7,7 @@ vi.mock('vscode', () => ({
   commands: { executeCommand: vi.fn(async () => {}) },
 }));
 
-import { initializePersonalSync, unlockPersonalSync, type PersonalSyncCommandDeps, type SyncSessionPort, type SyncUi } from '../../src/commands/personalSync';
+import { initializePersonalSync, unlockPersonalSync, syncEntry, type PersonalSyncCommandDeps, type SyncSessionPort, type SyncUi } from '../../src/commands/personalSync';
 import { SyncApiError } from '../../src/sync/e2e/client';
 import type { InitialSyncMaterial } from '../../src/sync/keyLifecycle';
 import type { StateDto } from '../../src/sync/e2e/types';
@@ -20,6 +20,7 @@ const state: StateDto = {
   recoveryKdf: { alg: 'hkdf-sha256', version: 1, salt: 'D'.repeat(22), outputBytes: 32 },
   envelopeSmp: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: 'E'.repeat(16), ciphertext: 'F'.repeat(43), tag: 'G'.repeat(22) },
   envelopeRecovery: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: 'H'.repeat(16), ciphertext: 'I'.repeat(43), tag: 'J'.repeat(22) },
+  envelopeAccountVersion: '1',
   recoveryCodeSetTime: null,
 };
 
@@ -28,6 +29,7 @@ function makeMaterial(): InitialSyncMaterial {
     dek: new Uint8Array(32).fill(7), signPub: 'A'.repeat(43), recoverSignPub: 'B'.repeat(43),
     smpKdf: state.smpKdf, recoveryKdf: state.recoveryKdf,
     envelopeSmp: state.envelopeSmp, envelopeRecovery: state.envelopeRecovery,
+    envelopeAccount: state.envelopeSmp, accountRecoveryKey: new Uint8Array(32).fill(8),
   };
 }
 
@@ -241,5 +243,34 @@ describe('personal sync B1 commands', () => {
     await unlockPersonalSync(deps);
 
     expect(errorAction).toHaveBeenCalled();
+  });
+
+  it('syncEntry: unlocked → immediate syncNow', async () => {
+    const session = makeSession({ isUnlocked: true });
+    const { deps } = makeDeps(session, []);
+    await syncEntry(deps);
+    expect(session.syncNow).toHaveBeenCalledTimes(1);
+    expect(deps.ui.promptSmp).not.toHaveBeenCalled();
+  });
+
+  it('syncEntry: locked with a remote state (second device) → unlock flow, not initialize', async () => {
+    const session = makeSession({ isUnlocked: false, localEpoch: undefined });
+    const { deps } = makeDeps(session, ['sync secret!']);
+    await syncEntry(deps);
+    expect(session.initializeSync).not.toHaveBeenCalled();
+    expect(deps.ui.promptSmp).toHaveBeenCalled();
+    expect(session.unlockFromState).toHaveBeenCalledWith(state, expect.any(Uint8Array));
+  });
+
+  it('syncEntry: locked with no remote state → initialize flow', async () => {
+    const session = makeSession({
+      isUnlocked: false,
+      localEpoch: undefined,
+      getRemoteState: vi.fn(async () => { throw new SyncApiError(400, 'SYNC_NOT_INITIALIZED'); }),
+    });
+    const { deps } = makeDeps(session);
+    await syncEntry(deps);
+    expect(session.initializeSync).toHaveBeenCalledTimes(1);
+    expect(session.unlockFromState).not.toHaveBeenCalled();
   });
 });
