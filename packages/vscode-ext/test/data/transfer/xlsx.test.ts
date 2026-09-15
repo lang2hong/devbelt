@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { columnName, parseXlsx, serializeXlsx } from '../../../src/data/transfer/xlsx';
+import { deflateRawSync } from 'zlib';
+import { MAX_ENTRY_BYTES, columnName, parseXlsx, serializeXlsx } from '../../../src/data/transfer/xlsx';
 
 /**
  * xlsx 读写自实现的回归测试。
@@ -217,3 +218,72 @@ function writeStoredZip(files: Map<string, Buffer>): Buffer {
   end.writeUInt32LE(offset, 16);
   return Buffer.concat([...locals, directory, end]);
 }
+
+/** 用 deflate（method 8）打包，便于构造高压缩比的条目。 */
+function writeDeflatedZip(files: Map<string, Buffer>): Buffer {
+  const crcTable: number[] = [];
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    crcTable.push(c >>> 0);
+  }
+  const crc32 = (b: Buffer): number => {
+    let crc = 0xffffffff;
+    for (const byte of b) crc = (crc >>> 8) ^ crcTable[(crc ^ byte) & 0xff];
+    return (crc ^ 0xffffffff) >>> 0;
+  };
+
+  const locals: Buffer[] = [];
+  const central: Buffer[] = [];
+  let offset = 0;
+  for (const [name, raw] of files) {
+    const nameBuf = Buffer.from(name, 'utf8');
+    const data = deflateRawSync(raw);
+    const crc = crc32(raw);
+
+    const header = Buffer.alloc(30);
+    header.writeUInt32LE(0x04034b50, 0);
+    header.writeUInt16LE(20, 4);
+    header.writeUInt16LE(8, 8); // method = deflate
+    header.writeUInt32LE(crc, 14);
+    header.writeUInt32LE(data.length, 18);
+    header.writeUInt32LE(raw.length, 22);
+    header.writeUInt16LE(nameBuf.length, 26);
+    locals.push(header, nameBuf, data);
+
+    const record = Buffer.alloc(46);
+    record.writeUInt32LE(0x02014b50, 0);
+    record.writeUInt16LE(20, 4);
+    record.writeUInt16LE(20, 6);
+    record.writeUInt16LE(8, 10); // method = deflate
+    record.writeUInt32LE(crc, 16);
+    record.writeUInt32LE(data.length, 20);
+    record.writeUInt32LE(raw.length, 24);
+    record.writeUInt16LE(nameBuf.length, 28);
+    record.writeUInt32LE(offset, 42);
+    central.push(record, nameBuf);
+    offset += header.length + nameBuf.length + data.length;
+  }
+
+  const directory = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(files.size, 8);
+  end.writeUInt16LE(files.size, 10);
+  end.writeUInt32LE(directory.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, directory, end]);
+}
+
+describe('xlsx 解压上限（zip bomb 防护）', () => {
+  it('过短的 buffer 明确报错，而不是 RangeError', () => {
+    expect(() => parseXlsx(Buffer.from([1, 2, 3]))).toThrow(/too small/);
+  });
+
+  it('声明的解压尺寸超过上限时 fail-fast', () => {
+    // 65 MiB 零字节：压缩后很小，但声明尺寸超过 MAX_ENTRY_BYTES。
+    const bomb = Buffer.alloc(MAX_ENTRY_BYTES + 1024);
+    const zip = writeDeflatedZip(new Map([['xl/worksheets/sheet1.xml', bomb]]));
+    expect(() => parseXlsx(zip)).toThrow(/decompression size limit/);
+  });
+});

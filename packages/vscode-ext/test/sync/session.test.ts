@@ -300,6 +300,40 @@ describe('PersonalSyncSession', () => {
     expect(memento.get('dbclient.sync.epochCleanup.7')).toEqual({ fromKeyEpoch: '2', toKeyEpoch: '3' });
   });
 
+  it('clearLocalState 清本机同步数据/DEK/快照并回到未解锁态（纯本地）', async () => {
+    const memento = makeMemento();
+    const { store: dekStore, secrets } = makeDekStore();
+    const s = new PersonalSyncSession('7', memento, dekStore, makeStore().store, makeClient());
+
+    await s.getStateStore().setSnapshot({ keyEpoch: '2', stateVersion: '1', changeSequence: '3' });
+    await new RecordMapStore(memento, '7', '2').put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await new PendingMutationStore(memento, '7', '2').put(makePutMutation());
+
+    await s.clearLocalState();
+
+    expect(s.getStateStore().getSnapshot()).toBeUndefined();
+    expect(s.localEpoch).toBeUndefined();
+    expect(s.isUnlocked).toBe(false);
+    expect(new RecordMapStore(memento, '7', '2').getByRecordId('A'.repeat(22))).toBeUndefined();
+    expect(new PendingMutationStore(memento, '7', '2').list()).toEqual([]);
+    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.2');
+  });
+
+  it('clearLocalState 也清理残留 cleanup intent 涉及的 epoch（无快照时）', async () => {
+    const memento = makeMemento();
+    const { store: dekStore, secrets } = makeDekStore();
+    await new RecordMapStore(memento, '7', '2').put('B'.repeat(22), { type: 'connection', localId: 'c-2', recordVersion: '1', revision: 0, status: 'confirmed' });
+    await memento.update('dbclient.sync.epochCleanup.7', { fromKeyEpoch: '2', toKeyEpoch: '3' });
+    const s = new PersonalSyncSession('7', memento, dekStore, makeStore().store, makeClient());
+
+    await s.clearLocalState();
+
+    expect(new RecordMapStore(memento, '7', '2').getByRecordId('B'.repeat(22))).toBeUndefined();
+    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.2');
+    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.3');
+    expect(memento.get('dbclient.sync.epochCleanup.7')).toBeUndefined();
+  });
+
   it('scheduleNow / scheduleInitialSync 未解锁抛错（fail-closed）', () => {
     const s = new PersonalSyncSession('7', makeMemento(), makeDekStore().store, makeStore().store, makeClient());
     expect(() => s.scheduleNow()).toThrowError(/locked/);
@@ -866,31 +900,6 @@ describe('PersonalSyncSession B5 生命周期', () => {
     expect(conns.get('c-new')).toEqual({ id: 'c-new' }); // 未同步连接未删除
   });
 
-  it('clearLocalSyncData：purge 已同步实体（snapshot 与 intent 两个 epoch 并集），保留未同步，回未初始化', async () => {
-    const memento = makeMemento();
-    const { store, removedIds, conns } = makeEntityStore(['c-1', 'c-2', 'c-new']);
-    const { store: dekStore, secrets } = makeDekStore();
-    const s = new PersonalSyncSession('7', memento, dekStore, store, makeClient());
-    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
-    // snapshot 指向 epoch1（c-1 confirmed）；journal {1→2} 让 epoch2 也进清理集合（c-2 confirmed）
-    await new RecordMapStore(memento, '7', '1').put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
-    await new RecordMapStore(memento, '7', '2').put('B'.repeat(22), { type: 'connection', localId: 'c-2', recordVersion: '1', revision: 0, status: 'confirmed' });
-    await memento.update('dbclient.sync.epochCleanup.7', { fromKeyEpoch: '1', toKeyEpoch: '2' });
-
-    await s.clearLocalSyncData();
-
-    expect(removedIds).toEqual(expect.arrayContaining(['c-1', 'c-2']));
-    expect(removedIds).not.toContain('c-new');
-    expect(conns.get('c-new')).toEqual({ id: 'c-new' });
-    expect(s.getStateStore().getSnapshot()).toBeUndefined();
-    expect(new RecordMapStore(memento, '7', '1').getByRecordId('A'.repeat(22))).toBeUndefined();
-    expect(new RecordMapStore(memento, '7', '2').getByRecordId('B'.repeat(22))).toBeUndefined();
-    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.1');
-    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.2');
-    expect(memento.get('dbclient.sync.epochCleanup.7')).toBeUndefined();
-    expect(s.isUnlocked).toBe(false);
-  });
-
   it('清除 confirmed connection 级联删除其 unmapped query/folder（依赖闭包）', async () => {
     const memento = makeMemento();
     const conns = new Map<string, { id: string; deleted?: boolean }>([['c-1', { id: 'c-1' }]]);
@@ -934,5 +943,54 @@ describe('PersonalSyncSession B5 生命周期', () => {
     expect(conns.get('c-1')!.deleted).toBe(true);
     expect(folders.get('f-1')!.deleted).toBe(true); // 依赖闭包：unmapped folder 随 confirmed connection 删除
     expect(queries.get('q-1')!.deleted).toBe(true); // 依赖闭包：unmapped query 随 confirmed connection 删除
+  });
+
+  it('tryRestoreUnlock：有 snapshot + DEK 且 signPub 匹配 → 自动解锁（免口令）', async () => {
+    const memento = makeMemento();
+    const dek = new Uint8Array(32).fill(7);
+    const secrets = {
+      get: vi.fn(async (k: string) => (k === 'dbclient.sync.dek.7.1' ? encodeBase64Url(dek) : undefined)),
+      store: vi.fn(async () => {}),
+      delete: vi.fn(async () => {}),
+    };
+    const dekStore = new DekStore(secrets as never);
+    const getState = vi.fn(async () => ({ ...validState('1', '2', '5'), signPub: encodeBase64Url(deriveSyncSignKeyPair(dek).publicKey) }));
+    const client = { getState, getRecords: async () => ({ snapshotSequence: '0', records: [] }) } as unknown as PersonalSyncClient;
+    const s = new PersonalSyncSession('7', memento, dekStore, makeStore().store, client);
+    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+
+    await expect(s.tryRestoreUnlock()).resolves.toBe(true);
+    expect(s.isUnlocked).toBe(true);
+  });
+
+  it('tryRestoreUnlock：无本地 snapshot → 返回 false', async () => {
+    const { store } = makeDekStore();
+    const s = new PersonalSyncSession('7', makeMemento(), store, makeStore().store, makeClient());
+    await expect(s.tryRestoreUnlock()).resolves.toBe(false);
+    expect(s.isUnlocked).toBe(false);
+  });
+
+  it('tryRestoreUnlock：SecretStorage 无 DEK → 返回 false', async () => {
+    const memento = makeMemento();
+    const { store } = makeDekStore(); // get 返回 undefined
+    const s = new PersonalSyncSession('7', memento, store, makeStore().store, makeClient());
+    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+    await expect(s.tryRestoreUnlock()).resolves.toBe(false);
+    expect(s.isUnlocked).toBe(false);
+  });
+
+  it('tryRestoreUnlock：DEK 与远端 signPub 不匹配 → 返回 false（不落盘不解锁）', async () => {
+    const memento = makeMemento();
+    const dek = new Uint8Array(32).fill(9);
+    const secrets = {
+      get: vi.fn(async (k: string) => (k === 'dbclient.sync.dek.7.1' ? encodeBase64Url(dek) : undefined)),
+      store: vi.fn(async () => {}),
+      delete: vi.fn(async () => {}),
+    };
+    const dekStore = new DekStore(secrets as never);
+    const s = new PersonalSyncSession('7', memento, dekStore, makeStore().store, makeClient()); // makeClient getState 返回 signPub='A'.repeat(43)
+    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
+    await expect(s.tryRestoreUnlock()).resolves.toBe(false);
+    expect(s.isUnlocked).toBe(false);
   });
 });

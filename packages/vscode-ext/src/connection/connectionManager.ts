@@ -63,6 +63,16 @@ export class ConnectionManager {
   private readonly sessionEntries = new Map<string, SessionEntry>();
   private readonly explicit = new Set<string>();
   private readonly connecting = new Map<string, Promise<ConnectionSession>>();
+  /**
+   * 连接代际：每次 dispose 递增。在途建连完成后若代际已变，说明用户
+   * 已关闭/删除该连接 —— 必须建成即销毁，不能留下幽灵会话与 SSH 隧道。
+   *
+   * 注意：条目**有意不清理**。`disposeConn` 会先删掉 `connecting` 标记以允许立即重连，
+   * 此时若清理该 id 的代际会重置为 0，让在途建连的代际比对相等而不自毁
+   * （幽灵会话 + SSH 隧道泄漏）。条目数上界是历史连接 id 数，非时间增长型泄漏。
+   * 如需回收，必须先把 `connecting` 改为携带代际并保留 in-flight 记录。
+   */
+  private readonly generations = new Map<string, number>();
   private readonly config: PoolConfig;
   private healthCheckTimer?: ReturnType<typeof setInterval>;
   private disposing = false;
@@ -86,6 +96,11 @@ export class ConnectionManager {
 
   private effective(conn: SavedConnection): SavedConnection {
     return this.resolveEffective ? this.resolveEffective(conn) : conn;
+  }
+
+  /** 当前连接代际（未记录为 0）。 */
+  private generation(id: string): number {
+    return this.generations.get(id) ?? 0;
   }
 
   /** 标记该连接为用户显式打开，关闭查询/预览面板时不做自动释放。 */
@@ -124,10 +139,16 @@ export class ConnectionManager {
     const inflight = this.connecting.get(conn.id);
     if (inflight) return inflight;
 
+    const generation = this.generation(conn.id);
     const promise = this.doConnect(conn);
     this.connecting.set(conn.id, promise);
     try {
       const session = await promise;
+      // disposeConn 可能发生在 await 期间：此时 buildSession 已自行回收，
+      // 或会话已被关闭。两种情况下都不能把连接当作可用返回。
+      if (this.generation(conn.id) !== generation || this.sessions.get(conn.id) !== session) {
+        throw new Error('connection was closed while it was being established');
+      }
       if (!this.healthCheckTimer) this.startHealthCheck();
       return session;
     } finally {
@@ -156,6 +177,7 @@ export class ConnectionManager {
   private async doConnect(conn: SavedConnection): Promise<ConnectionSession> {
     this.evictIfNeeded();
 
+    const generation = this.generation(conn.id);
     // 有效配置（本机覆盖优先）用作建连与路径校验的唯一依据。
     const effective = this.effective(conn);
 
@@ -178,7 +200,7 @@ export class ConnectionManager {
     }
 
     try {
-      return await this.buildSession(effective, host, port);
+      return await this.buildSession(effective, host, port, generation);
     } catch (err) {
       if (tunnelOpened) SshTunnel.close(effective.id);
       throw err;
@@ -190,6 +212,7 @@ export class ConnectionManager {
     conn: SavedConnection,
     host: string,
     port: number,
+    generation: number,
   ): Promise<ConnectionSession> {
     const { connection, dialect } = ConnectionFactory.createWithDialect(
       conn.dbType as DatabaseType,
@@ -218,6 +241,14 @@ export class ConnectionManager {
     await new Promise<void>((resolve, reject) => {
       connection.connect((err) => (err ? reject(err) : resolve()));
     });
+
+    // 建连期间用户关闭/删除该连接（或管理器整体销毁）：建成即销毁，
+    // 绝不写入 sessions、绝不留下无人持有的连接与隧道。隧道由 doConnect 的
+    // catch 统一关闭（此处只负责断开驱动连接）。
+    if (this.disposing || this.generation(conn.id) !== generation) {
+      connection.end();
+      throw new Error('connection was closed before it could be established');
+    }
 
     // 观察者挂在 QueryService 上，于是这条会话上**任何**修改性语句都会进历史，
     // 无论它来自编辑器、结果网格、表设计器还是树右键命令。
@@ -248,6 +279,8 @@ export class ConnectionManager {
 
   /** 关闭指定连接会话 */
   disposeConn(id: string): void {
+    // 递增代际：在途建连完成后会据此自毁，不会留下幽灵会话/隧道。
+    this.generations.set(id, this.generation(id) + 1);
     this.explicit.delete(id);
     this.connecting.delete(id);
     const session = this.sessions.get(id);

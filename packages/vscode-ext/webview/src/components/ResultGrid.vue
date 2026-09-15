@@ -449,7 +449,7 @@ const activeFilterSummary = computed(() => {
 });
 
 /** 与表导出（commands/database.ts）保持同一格式集合。 */
-type ExportFormat = 'sql' | 'csv' | 'json' | 'xlsx' | 'xml';
+type ExportFormat = 'sql' | 'csv' | 'txt' | 'json' | 'xlsx' | 'xml';
 
 /**
  * 可用导出格式。Excel 由扩展端自实现 xlsx 写入（无第三方依赖），
@@ -458,6 +458,7 @@ type ExportFormat = 'sql' | 'csv' | 'json' | 'xlsx' | 'xml';
 const EXPORT_FORMATS: { format: ExportFormat; label: string }[] = [
   { format: 'sql', label: 'SQL' },
   { format: 'csv', label: 'CSV' },
+  { format: 'txt', label: 'Text' },
   { format: 'json', label: 'JSON' },
   { format: 'xlsx', label: 'Excel' },
   { format: 'xml', label: 'XML' },

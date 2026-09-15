@@ -2,9 +2,30 @@ import type { SavedConnection } from '../connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from './baseWebView';
 import { DialectRegistry, validateIdent } from '@db-client/core';
+import type { ColumnSpec } from '@db-client/core';
+import { validateColumnType } from '@db-client/core';
 import { DataChangeEvent, eventBus } from '../utils/event';
 import { AuditLogger } from '../utils/auditLogger';
+import { confirmSqlExecution } from '../utils/sqlSafety';
 import { l10n } from '../i18n';
+
+/**
+ * 把来自 webview 的 `msg.spec` 规整为 ColumnSpec。
+ * 只取白名单字段并校验类型，避免 `as ColumnSpec` 把任意 JSON 直接塞进 DDL 构造。
+ */
+function toColumnSpec(raw: unknown): ColumnSpec {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('Invalid column definition.');
+  }
+  const s = raw as Record<string, unknown>;
+  const spec: ColumnSpec = { type: validateColumnType(String(s.type ?? '')) };
+  if (s.notNull !== undefined) spec.notNull = Boolean(s.notNull);
+  if (s.isPrimary !== undefined) spec.isPrimary = Boolean(s.isPrimary);
+  if (s.autoIncrement !== undefined) spec.autoIncrement = Boolean(s.autoIncrement);
+  if (s.defaultValue != null) spec.defaultValue = String(s.defaultValue);
+  if (s.comment != null) spec.comment = String(s.comment);
+  return spec;
+}
 
 export class TableDesignView extends BaseWebView {
   private static current?: TableDesignView;
@@ -83,10 +104,9 @@ export class TableDesignView extends BaseWebView {
     if (!this.table) return;
     if (msg.type === 'addColumn') {
       this.validateDesignIdent(msg.column, 'column');
-      this.validateDefinition(msg.definition, 'column');
       await this.mutate(`ALTER TABLE ${this.table} ADD COLUMN ${msg.column}`, async () => {
         const session = await this.session();
-        await session.table.addColumn(this.table, msg.column, msg.definition, this.database);
+        await session.table.addColumn(this.table, msg.column, toColumnSpec(msg.spec), this.database);
       });
       return;
     }
@@ -100,10 +120,9 @@ export class TableDesignView extends BaseWebView {
     }
     if (msg.type === 'modifyColumn') {
       this.validateDesignIdent(msg.column, 'column');
-      this.validateDefinition(msg.definition, 'column');
       await this.mutate(`ALTER TABLE ${this.table} MODIFY COLUMN ${msg.column}`, async () => {
         const session = await this.session();
-        await session.table.modifyColumn(this.table, msg.column, msg.definition, this.database);
+        await session.table.modifyColumn(this.table, msg.column, toColumnSpec(msg.spec), this.database);
       });
       return;
     }
@@ -161,7 +180,6 @@ export class TableDesignView extends BaseWebView {
       const columnName = String(c.name ?? '').trim();
       this.validateDesignIdent(columnName, 'column');
       const type = String(c.type ?? '').trim();
-      this.validateDefinition(type, 'column');
       return {
         name: columnName,
         type,
@@ -202,9 +220,10 @@ export class TableDesignView extends BaseWebView {
    * 审计与事件在这里统一发出，避免每个 msg 分支各写一遍（漏一处就少一条痕迹）。
    * schema_change 与 DataChangeEvent('ddl') 此前都没有任何写入点。
    *
-   * 设计器内的列/索引增删改**不再二次确认**：用户是在一个专门的结构编辑界面里
-   * 主动点的按钮，每次都弹模态框反而是噪音。只读连接拦截仍然保留 ——
-   * 那是能力边界，不是提示。
+   * 设计器内的列/索引增删改**不在开发环境重复确认**：用户是在一个专门的结构
+   * 编辑界面里主动点的按钮，每次都弹模态框反而是噪音。只读连接拦截仍然保留 ——
+   * 那是能力边界，不是提示。**生产环境例外**：结构变更与其它 DDL 同口径，
+   * 需要模态确认后才执行。
    */
   private async mutate(op: string, fn: () => Promise<unknown>): Promise<void> {
     try {
@@ -214,6 +233,9 @@ export class TableDesignView extends BaseWebView {
           type: 'error',
           message: l10n('conn.readOnlyBlocked', { name: this.conn.name || this.conn.host }),
         });
+        return;
+      }
+      if (this.conn.environment === 'production' && !(await confirmSqlExecution(this.conn, op))) {
         return;
       }
       await fn();
@@ -236,30 +258,6 @@ export class TableDesignView extends BaseWebView {
       throw new Error(`Invalid ${context} name`);
     }
     validateIdent(name);
-  }
-
-  /**
-   * 校验列定义片段。
-   *
-   * 定义串由本视图自行拼装（类型 + NOT NULL + DEFAULT + COMMENT），其中
-   * DEFAULT 与 COMMENT 的字符串字面量必然带单引号。此前一律拒绝 `'`，
-   * 导致任何字符串默认值或列注释都无法保存。
-   *
-   * 改为拒绝语句分隔符与注释起始符，并要求单引号成对闭合（内部 `''` 为转义），
-   * 从而在允许合法字面量的同时阻止跳出定义上下文。
-   */
-  private validateDefinition(def: string, context: string): void {
-    if (!def || typeof def !== 'string' || def.length > 500) {
-      throw new Error(`Invalid ${context} definition`);
-    }
-    if (/;|--|\/\*|\*\//.test(def)) {
-      throw new Error(`${context} definition contains invalid characters`);
-    }
-    // 去掉转义的 '' 后，剩余单引号数量必须为偶数（全部成对闭合）
-    const quotes = def.replace(/''/g, '').match(/'/g)?.length ?? 0;
-    if (quotes % 2 !== 0) {
-      throw new Error(`${context} definition has an unterminated string literal`);
-    }
   }
 
   private async loadData(): Promise<void> {

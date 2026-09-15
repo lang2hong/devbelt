@@ -2,8 +2,23 @@ import * as vscode from 'vscode';
 import { DatabaseType } from '@db-client/core';
 import type { SavedConnection } from '../connection/connectionStore';
 
-function shellQuote(s: string): string {
-  return `'${String(s).replace(/'/g, "'\\''")}'`;
+/**
+ * 按平台引用 shell 参数。
+ *
+ * POSIX：`'...'`，内嵌 `'` 用 `'\''`。
+ * Windows：VS Code 默认 shell 是 PowerShell，单引号内为字面量（内嵌 `'` 用 `''`）。
+ * 但若值含 cmd 元字符（`& | < > ^ % ! "`），在用户把默认 shell 配成 cmd 时单引号
+ * 并不防护 —— 此时 **fail-closed 拒绝**，而不是拼出可注入的命令行。
+ */
+function shellQuote(value: unknown): string {
+  const s = String(value ?? '');
+  if (process.platform === 'win32') {
+    if (/[&|<>^%!"]/.test(s)) {
+      throw new Error('Value contains characters that are unsafe to quote for a Windows shell.');
+    }
+    return `'${s.replace(/'/g, "''")}'`;
+  }
+  return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
 /**
@@ -17,7 +32,13 @@ export class TerminalService {
   /** 打开数据库 CLI 终端 */
   static open(conn: SavedConnection, database?: string): void {
     const db = database || conn.database;
-    const cmd = TerminalService.buildCommand(conn, db);
+    let cmd: { cmd: string; env: Record<string, string> } | undefined;
+    try {
+      cmd = TerminalService.buildCommand(conn, db);
+    } catch (err) {
+      vscode.window.showWarningMessage(`Terminal not supported: ${(err as Error).message}`);
+      return;
+    }
     if (!cmd) {
       vscode.window.showWarningMessage(`Terminal not supported for ${conn.dbType}`);
       return;

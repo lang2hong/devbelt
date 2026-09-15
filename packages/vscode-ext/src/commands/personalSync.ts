@@ -19,10 +19,13 @@ interface SyncSessionPort {
   getRemoteState(): Promise<StateDto>;
   initializeSync(newState: NewStateDto, dek: Uint8Array): Promise<void>;
   unlockFromState(state: StateDto, dek: Uint8Array): Promise<void>;
+  tryRestoreUnlock(): Promise<boolean>;
   syncNow(): Promise<SyncRun>;
   syncPull(): Promise<SyncRun>;
   syncPush(): Promise<SyncRun>;
   lock(): void;
+  /** 纯本地重置：清空本机同步数据与 DEK，不发起任何 sync API 请求。 */
+  clearLocalState(): Promise<void>;
 }
 
 interface SyncFactoryPort {
@@ -35,7 +38,8 @@ interface SyncUi {
   info(message: string): void;
   warn(message: string): void;
   error(message: string): void;
-  errorAction?(message: string, actionLabel: string): PromiseLike<string | undefined>;
+  /** 带多个动作按钮的错误提示；返回用户点中的按钮 label（未点返回 undefined）。 */
+  errorAction?(message: string, actions: string[]): PromiseLike<string | undefined>;
 }
 
 export interface PersonalSyncCommandDeps {
@@ -70,6 +74,26 @@ async function getSession(deps: PersonalSyncCommandDeps): Promise<SyncSessionPor
   }
   // 先刷新权益和派生 userId；失败时 factory 会保持零 session/零 sync 请求。
   await deps.auth.refreshEntitlement();
+  let session: SyncSessionPort | undefined;
+  try {
+    session = await deps.factory.ensureSession();
+  } catch {
+    deps.ui.error(l10n('sync.sessionUnavailable'));
+    return undefined;
+  }
+  if (!session) deps.ui.warn(l10n('sync.loginRequired'));
+  return session;
+}
+
+/**
+ * 本地重置用的会话解析：**不刷新权益**（refreshEntitlement 会打网络），
+ * 以便远端不可达时仍能清本机状态。仅从已登录态与本地工厂派生。
+ */
+async function getSessionForLocalReset(deps: PersonalSyncCommandDeps): Promise<SyncSessionPort | undefined> {
+  if (!deps.auth.isLoggedIn()) {
+    deps.ui.warn(l10n('sync.loginRequired'));
+    return undefined;
+  }
   let session: SyncSessionPort | undefined;
   try {
     session = await deps.factory.ensureSession();
@@ -189,6 +213,11 @@ export async function unlockPersonalSync(deps: PersonalSyncCommandDeps): Promise
     // 远端 epoch 已前进（他设备 destroy/reset）：先 lock 丢弃旧 epoch 的 DEK，再走下方 SMP 重新解锁。
     session.lock();
   }
+  // 方案 B：先尝试从本地安全存储自动解锁（重启后免输口令）；失败再走口令解锁。
+  if (await session.tryRestoreUnlock()) {
+    deps.ui.info(l10n('sync.autoUnlocked'));
+    return;
+  }
   let state: StateDto | undefined;
   try {
     state = await existingState(session);
@@ -210,15 +239,31 @@ export async function unlockPersonalSync(deps: PersonalSyncCommandDeps): Promise
     await session.unlockFromState(state, dek);
     if (hadPendingCleanup) deps.ui.info(l10n('sync.cleanupResumed'));
   } catch {
-    // reset 场景：他设备旧 SMP 解封新 epoch 必然 GCM 失败——给出本地清理逃生舱入口。
-    // epochStale 依赖 coordinator.lastRun，重启后恒 false；补 localEpoch < remote 的判定覆盖常见实例。
+    // 解锁失败分两类：
+    //  - epoch 前进（他设备 destroy/reset）：旧口令对应旧数据，恢复码/账号也救不回，只能重置同步。
+    //  - 口令不一致/输错（epoch 未变）：给出口令不一致 + 重新输入/恢复码/账号/重置四个动作。
     const staleHint = session.epochStale
       || (session.localEpoch !== undefined && BigInt(session.localEpoch) < BigInt(state.keyEpoch));
-    if (staleHint && deps.ui.errorAction) {
-      const act = await deps.ui.errorAction(l10n('sync.unlockEpochStale'), l10n('sync.clearLocalAction'));
-      if (act) void vscode.commands.executeCommand('dbclient.clearLocalSync');
+    if (deps.ui.errorAction) {
+      if (staleHint) {
+        const act = await deps.ui.errorAction(l10n('sync.unlockEpochStale'), [
+          l10n('sync.resetSyncAction'), l10n('sync.resetLocalAction'),
+        ]);
+        if (act === l10n('sync.resetLocalAction')) void vscode.commands.executeCommand('dbclient.resetLocalSync');
+        else if (act) void vscode.commands.executeCommand('dbclient.resetSync');
+      } else {
+        const act = await deps.ui.errorAction(l10n('sync.unlockPassphraseMismatch'), [
+          l10n('sync.retryEnter'), l10n('sync.useRecoveryCode'), l10n('sync.useAccount'),
+          l10n('sync.resetSyncAction'), l10n('sync.resetLocalAction'),
+        ]);
+        if (act === l10n('sync.retryEnter')) await unlockPersonalSync(deps);
+        else if (act === l10n('sync.useRecoveryCode')) void vscode.commands.executeCommand('dbclient.recoverSync');
+        else if (act === l10n('sync.useAccount')) void vscode.commands.executeCommand('dbclient.recoverByAccount');
+        else if (act === l10n('sync.resetLocalAction')) void vscode.commands.executeCommand('dbclient.resetLocalSync');
+        else if (act === l10n('sync.resetSyncAction')) void vscode.commands.executeCommand('dbclient.resetSync');
+      }
     } else {
-      deps.ui.error(l10n('sync.unlockFailed'));
+      deps.ui.error(staleHint ? l10n('sync.unlockEpochStale') : l10n('sync.unlockFailed'));
     }
     return;
   } finally {
@@ -282,6 +327,22 @@ export async function pushPersonalSync(deps: PersonalSyncCommandDeps): Promise<v
   await runExplicitSync(deps, (session) => session.syncPush());
 }
 
+/**
+ * 本地重置：清本机同步数据与 DEK，回到未初始化态；不联系服务器。
+ * 与远端 resetSync（需浏览器 handoff）并列，供远端不可达 / stale-epoch 时逃生。
+ */
+export async function resetLocalSync(deps: PersonalSyncCommandDeps): Promise<void> {
+  const session = await getSessionForLocalReset(deps);
+  if (!session) return;
+  const action = l10n('sync.resetLocalAction');
+  const confirmed = deps.ui.errorAction
+    ? await deps.ui.errorAction(l10n('sync.resetLocalConfirm'), [action])
+    : undefined;
+  if (confirmed !== action) return;
+  await session.clearLocalState();
+  deps.ui.info(l10n('sync.resetLocalDone'));
+}
+
 function vscodeUi(): SyncUi {
   return {
     promptSmp: (prompt) => vscode.window.showInputBox({ prompt, password: true, ignoreFocusOut: true }),
@@ -296,7 +357,7 @@ function vscodeUi(): SyncUi {
     info: (message) => { void vscode.window.showInformationMessage(message); },
     warn: (message) => { void vscode.window.showWarningMessage(message); },
     error: (message) => { void vscode.window.showErrorMessage(message); },
-    errorAction: (message, actionLabel) => vscode.window.showErrorMessage(message, actionLabel),
+    errorAction: (message, actions) => vscode.window.showErrorMessage(message, ...actions),
   };
 }
 
@@ -312,6 +373,10 @@ export function registerPersonalSyncCommands(
     vscode.commands.registerCommand('dbclient.syncEntry', () => syncEntry(deps)),
     vscode.commands.registerCommand('dbclient.syncPull', () => pullPersonalSync(deps)),
     vscode.commands.registerCommand('dbclient.syncPush', () => pushPersonalSync(deps)),
+    vscode.commands.registerCommand('dbclient.resetLocalSync', () => resetLocalSync(deps)),
+    // legacy alias：该命令曾叫 clearLocalSync，用户可能已绑快捷键/引用此 id。
+    // 保留注册以免重命名后旧快捷键静默失效（不在 package.json 声明，故不出现在命令面板）。
+    vscode.commands.registerCommand('dbclient.clearLocalSync', () => resetLocalSync(deps)),
   );
 }
 

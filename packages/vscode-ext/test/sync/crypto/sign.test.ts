@@ -8,7 +8,7 @@ import {
 } from '../../../src/sync/crypto/sign';
 import { requestDigestOf } from '../../../src/sync/crypto/digest';
 import { deriveEd25519KeyPair, signEd25519 } from '../../../src/sync/crypto/ed25519';
-import { SYNC_SIGN_TEST_VECTOR } from '@db-client/core/dist/sync/signVector.js';
+import { SYNC_SIGN_TEST_VECTOR } from '@db-client/core/testing';
 
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 

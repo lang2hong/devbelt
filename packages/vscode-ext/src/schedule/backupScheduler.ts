@@ -1,4 +1,7 @@
 import * as vscode from 'vscode';
+import { createWriteStream } from 'fs';
+import { mkdir } from 'fs/promises';
+import { once } from 'events';
 import { BackupService } from '@db-client/core';
 import { ConnectionManager } from '../connection/connectionManager';
 import type { ConnectionStore } from '../connection/connectionStore';
@@ -94,13 +97,32 @@ export class BackupScheduler {
     const conn = this.store.get(entry.connId);
     if (!conn) return;
     const session = await this.manager.connect(conn);
-    const content = await BackupService.databaseDump(
-      session.query, session.metadata, session.table,
-      entry.database, { includeData: entry.includeData },
-    );
     const fileName = `${entry.database}_${new Date().toISOString().slice(0, 10)}.sql`;
     const uri = vscode.Uri.joinPath(vscode.Uri.file(entry.outputDir), fileName);
-    await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
+
+    // 流式写盘：dump 不再整份驻留内存，内存占用只与单表数据量相关。
+    await mkdir(entry.outputDir, { recursive: true });
+    const stream = createWriteStream(uri.fsPath, { encoding: 'utf8' });
+    const streamError = new Promise<never>((_, reject) => stream.once('error', reject));
+    try {
+      await Promise.race([
+        BackupService.writeDatabaseDump(
+          session.query, session.metadata, session.table, entry.database,
+          async (chunk) => {
+            if (!stream.write(chunk)) await once(stream, 'drain');
+          },
+          { includeData: entry.includeData },
+        ),
+        streamError,
+      ]);
+      await new Promise<void>((resolve, reject) => {
+        stream.end(() => resolve());
+        stream.once('error', reject);
+      });
+    } catch (err) {
+      stream.destroy();
+      throw err;
+    }
     vscode.window.showInformationMessage(`Backup complete: ${fileName}`);
   }
 }

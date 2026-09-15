@@ -1,13 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 
+const mocks = vi.hoisted(() => ({ executeCommand: vi.fn(async () => {}) }));
+
 vi.mock('vscode', () => ({
   env: { language: 'en' },
   workspace: { getConfiguration: () => ({ get: () => 'en' }) },
   window: {},
-  commands: { executeCommand: vi.fn(async () => {}) },
+  commands: { executeCommand: mocks.executeCommand },
 }));
 
-import { initializePersonalSync, unlockPersonalSync, syncEntry, pullPersonalSync, pushPersonalSync, type PersonalSyncCommandDeps, type SyncSessionPort, type SyncUi } from '../../src/commands/personalSync';
+import { initializePersonalSync, unlockPersonalSync, syncEntry, pullPersonalSync, pushPersonalSync, resetLocalSync, type PersonalSyncCommandDeps, type SyncSessionPort, type SyncUi } from '../../src/commands/personalSync';
 import { SyncApiError } from '../../src/sync/e2e/client';
 import type { InitialSyncMaterial } from '../../src/sync/keyLifecycle';
 import type { StateDto } from '../../src/sync/e2e/types';
@@ -43,10 +45,12 @@ function makeSession(over: Partial<SyncSessionPort> = {}): SyncSessionPort {
     getRemoteState: vi.fn(async () => state),
     initializeSync: vi.fn(async () => {}),
     unlockFromState: vi.fn(async () => {}),
+    tryRestoreUnlock: vi.fn(async () => false),
     syncNow: vi.fn(async () => ({ stage: 'ok' })),
     syncPull: vi.fn(async () => ({ stage: 'ok' })),
     syncPush: vi.fn(async () => ({ stage: 'ok' })),
     lock: vi.fn(),
+    clearLocalState: vi.fn(async () => {}),
     ...over,
   };
 }
@@ -139,6 +143,14 @@ describe('personal sync B1 commands', () => {
     expect(session.initializeSync).not.toHaveBeenCalled();
   });
 
+  it('unlockPersonalSync: tryRestoreUnlock succeeds → no passphrase prompt', async () => {
+    const session = makeSession({ tryRestoreUnlock: vi.fn(async () => true) });
+    const { deps, info } = makeDeps(session, []);
+    await unlockPersonalSync(deps);
+    expect(deps.ui.promptSmp).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith('Personal sync unlocked automatically (no passphrase needed).');
+  });
+
   it('unlocks only after a valid state and DEK are available', async () => {
     const session = makeSession({ pendingCleanup: { fromKeyEpoch: '1', toKeyEpoch: '2' } });
     const { deps, info } = makeDeps(session, ['sync secret!']);
@@ -176,7 +188,9 @@ describe('personal sync B1 commands', () => {
     const second = makeDeps(encrypted, ['wrong secret']);
     second.deps.unlockDek = vi.fn(async () => { throw new Error('GCM authentication failed'); });
     await unlockPersonalSync(second.deps);
-    expect(second.error).toHaveBeenCalledWith('Personal sync could not be unlocked. Check the sync passphrase or encrypted state.');
+    expect(second.errorAction).toHaveBeenCalledWith('Sync passphrase mismatch. It may have been changed on another device.', [
+      'Re-enter', 'Use Recovery Code', 'Use Account', 'Reset Sync', 'Reset Local Sync',
+    ]);
     expect(encrypted.unlockFromState).not.toHaveBeenCalled();
     expect(encrypted.syncNow).not.toHaveBeenCalled();
   });
@@ -219,18 +233,19 @@ describe('personal sync B1 commands', () => {
     expect(session.unlockFromState).toHaveBeenCalledWith(state, expect.any(Uint8Array));
   });
 
-  it('epoch-stale 且解锁失败 → 提供 Clear Local Sync 逃生舱按钮', async () => {
+  it('epoch-stale 且解锁失败 → 提示数据已重置并触发 resetSync', async () => {
     const session = makeSession({ isUnlocked: false, epochStale: true });
     const { deps, errorAction } = makeDeps(session, ['sync secret!']);
     deps.unlockDek = vi.fn(async () => { throw new Error('gcm'); });
-    errorAction.mockResolvedValue('Clear Local Sync Data');
+    errorAction.mockResolvedValue('Reset Sync');
 
     await unlockPersonalSync(deps);
 
     expect(errorAction).toHaveBeenCalled();
+    expect(mocks.executeCommand).toHaveBeenCalledWith('dbclient.resetSync');
   });
 
-  it('重启后（无 coordinator）本地 epoch 落后 + 解锁失败 → 仍提供逃生舱（R1）', async () => {
+  it('重启后（无 coordinator）本地 epoch 落后 + 解锁失败 → 仍触发 resetSync（R1）', async () => {
     const remoteState = { ...state, keyEpoch: '2' };
     const session = makeSession({
       isUnlocked: false,
@@ -240,11 +255,26 @@ describe('personal sync B1 commands', () => {
     });
     const { deps, errorAction } = makeDeps(session, ['sync secret!']);
     deps.unlockDek = vi.fn(async () => { throw new Error('gcm'); });
-    errorAction.mockResolvedValue('Clear Local Sync Data');
+    errorAction.mockResolvedValue('Reset Sync');
 
     await unlockPersonalSync(deps);
 
     expect(errorAction).toHaveBeenCalled();
+    expect(mocks.executeCommand).toHaveBeenCalledWith('dbclient.resetSync');
+  });
+
+  it('口令不一致（非 epoch 前进）→ 弹 4 按钮并分发', async () => {
+    const session = makeSession({ isUnlocked: false });
+    const { deps, errorAction } = makeDeps(session, ['sync secret!']);
+    deps.unlockDek = vi.fn(async () => { throw new Error('gcm'); });
+    errorAction.mockResolvedValue('Use Recovery Code');
+
+    await unlockPersonalSync(deps);
+
+    expect(errorAction).toHaveBeenCalledWith('Sync passphrase mismatch. It may have been changed on another device.', [
+      'Re-enter', 'Use Recovery Code', 'Use Account', 'Reset Sync', 'Reset Local Sync',
+    ]);
+    expect(mocks.executeCommand).toHaveBeenCalledWith('dbclient.recoverSync');
   });
 
   it('syncEntry: unlocked → immediate syncNow', async () => {
@@ -293,5 +323,29 @@ describe('personal sync B1 commands', () => {
     await pushPersonalSync(deps);
     expect(session.syncPull).toHaveBeenCalledTimes(1);
     expect(session.syncPush).toHaveBeenCalledTimes(1);
+  });
+
+  it('resetLocalSync: confirms locally, clears local state, and makes zero sync requests', async () => {
+    const session = makeSession();
+    const { deps, errorAction, info } = makeDeps(session, []);
+    errorAction.mockResolvedValue('Reset Local Sync');
+
+    await resetLocalSync(deps);
+
+    expect(session.clearLocalState).toHaveBeenCalledTimes(1);
+    expect(session.getRemoteState).not.toHaveBeenCalled();
+    expect(session.syncNow).not.toHaveBeenCalled();
+    expect(deps.auth.refreshEntitlement).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith('Local sync data cleared.');
+  });
+
+  it('resetLocalSync: dismissing the confirmation does nothing', async () => {
+    const session = makeSession();
+    const { deps, errorAction } = makeDeps(session, []);
+    errorAction.mockResolvedValue(undefined);
+
+    await resetLocalSync(deps);
+
+    expect(session.clearLocalState).not.toHaveBeenCalled();
   });
 });

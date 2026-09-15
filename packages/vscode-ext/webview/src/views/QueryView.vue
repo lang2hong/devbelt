@@ -50,6 +50,9 @@ const viewMode = ref<'table' | 'chart'>('table');
 
 const totalPages = computed(() => total.value === undefined ? 0 : Math.max(1, Math.ceil(total.value / limit.value)));
 const currentPage = computed(() => total.value === undefined ? 0 : Math.floor(offset.value / limit.value) + 1);
+/** 跳页输入框：随当前页变化同步显示。 */
+const pageInput = ref(1);
+watch(currentPage, (p) => { pageInput.value = p; });
 
 /**
  * EXPLAIN 只对「有执行计划可看」的查询语句有意义（SELECT/WITH/VALUES/TABLE）。
@@ -240,6 +243,29 @@ function prevPage() {
   post({ type: 'prevPage' });
 }
 
+/** 随机跳页：offset = (page-1)*limit 后重跑当前查询。 */
+function gotoPage() {
+  const pages = totalPages.value;
+  if (!pages) return;
+  const p = Math.min(Math.max(1, Math.floor(Number(pageInput.value) || 1)), pages);
+  pageInput.value = p;
+  offset.value = (p - 1) * limit.value;
+  post({ type: 'gotoPage', page: p });
+}
+
+function firstPage() {
+  if (currentPage.value <= 1) return;
+  offset.value = 0;
+  post({ type: 'gotoPage', page: 1 });
+}
+
+function lastPage() {
+  const pages = totalPages.value;
+  if (!pages || currentPage.value >= pages) return;
+  offset.value = (pages - 1) * limit.value;
+  post({ type: 'gotoPage', page: pages });
+}
+
 function setLimit(noRun = false) {
   const n = toLimit(limit.value);
   limit.value = n;
@@ -400,8 +426,15 @@ function onKeydown(e: KeyboardEvent) {
       </span>
       <span v-if="hasTable" class="page-info">{{ t('wv.query.limit') }}</span>
       <input v-if="hasTable" type="number" v-model.number="limit" class="limit-input" min="1" @change="setLimit()" />
+      <button v-if="hasTable" class="btn" :disabled="currentPage <= 1" @click="firstPage" :title="t('wv.query.firstPage')"></button>
       <button v-if="hasTable" class="btn" :disabled="currentPage <= 1" @click="prevPage">◀ Prev</button>
+      <template v-if="hasTable && total !== undefined">
+        <span class="page-info">{{ t('wv.query.gotoPage') }}</span>
+        <input type="number" v-model.number="pageInput" class="limit-input" min="1" :max="totalPages" @change="gotoPage" />
+        <span class="page-info">/ {{ totalPages }}</span>
+      </template>
       <button v-if="hasTable" class="btn" :disabled="currentPage >= totalPages" @click="nextPage">Next ▶</button>
+      <button v-if="hasTable" class="btn" :disabled="currentPage >= totalPages" @click="lastPage" :title="t('wv.query.lastPage')"></button>
     </div>
     <!--
       结果标签页对表面板同样生效：表面板里执行写语句会走多结果分支，

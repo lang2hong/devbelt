@@ -342,6 +342,18 @@ export function registerOrgCommands(deps: OrgDeps): void {
  * SSL：require → useSSL=true/rejectUnauthorized=false；verify-ca/verify-full →
  * useSSL=true/rejectUnauthorized=true（配合 cred.caPath）；disable → 不启用 SSL。
  */
+/** 组织连接模板的 databaseType → 引擎；未知值 fail-closed（不静默当 MySQL）。 */
+function databaseTypeOf(raw: string): DatabaseType {
+  switch (raw.toLowerCase()) {
+    case 'mysql': return DatabaseType.MYSQL;
+    case 'postgresql':
+    case 'postgres':
+    case 'pg': return DatabaseType.PG;
+    case 'sqlite': return DatabaseType.SQLITE;
+    default: throw new Error(`Unsupported databaseType in connection template: ${raw}`);
+  }
+}
+
 export function toSavedConnection(
   orgId: string,
   resourceId: string,
@@ -351,15 +363,15 @@ export function toSavedConnection(
 ): SavedConnection {
   const mode = c.ssl?.mode;
   const useSSL = mode === 'require' || mode === 'verify-ca' || mode === 'verify-full';
-  const rejectUnauthorized = mode === 'verify-ca' || mode === 'verify-full'
+  const rejectUnauthorized = c.ssl?.rejectUnauthorized ?? (mode === 'verify-ca' || mode === 'verify-full'
     ? true
     : mode === 'require'
       ? false
-      : undefined;
+      : undefined);
   return {
     id: `${ORG_CONNECTION_ID_PREFIX}${orgId}:${resourceId}`,
     name,
-    dbType: DatabaseType.MYSQL,
+    dbType: databaseTypeOf(c.databaseType),
     host: c.host,
     port: c.port,
     user: cred.username ?? c.username ?? '',

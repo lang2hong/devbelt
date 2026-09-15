@@ -205,6 +205,14 @@ export class TableQueryView extends BaseWebView {
       case 'prevPage':
         this.runner.offset = Math.max(0, this.runner.offset - this.runner.limit); await this.runner.execute(this.runner.buildSelect());
         break;
+      case 'gotoPage': {
+        if (!this.hasTable) return;
+        const page = Math.floor(Number(msg.page));
+        if (!Number.isFinite(page) || page < 1) return;
+        this.runner.offset = (page - 1) * this.runner.limit;
+        await this.runner.execute(this.runner.buildSelect());
+        break;
+      }
       case 'setLimit': {
         const n = Number(msg.limit);
         if (Number.isFinite(n) && n > 0) {

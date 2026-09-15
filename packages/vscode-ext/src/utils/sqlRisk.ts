@@ -1,3 +1,5 @@
+import { scanSql, sqlSkeleton, type SqlScanOptions } from '@db-client/core/sql';
+
 export type SqlRiskLevel = 'none' | 'write' | 'critical';
 
 export interface SqlRisk {
@@ -6,57 +8,15 @@ export interface SqlRisk {
   reason?: string;
 }
 
+const DDL_RE = /\b(CREATE|ALTER|DROP|TRUNCATE|RENAME|GRANT|REVOKE)\b/;
+const DML_RE = /\b(INSERT|UPDATE|DELETE|MERGE|REPLACE)\b/;
+const UPDATE_OR_DELETE_RE = /\b(UPDATE|DELETE)\b/;
+const WHERE_RE = /\bWHERE\b/;
 /**
- * 剥离 SQL 中的注释与字符串/标识符字面量，只留下语法骨架用于关键字分类。
- *
- * 必须剥离字面量：分类是全文 `\b关键字\b` 匹配，不做语法分析。若把
- * `SELECT 'DROP TABLE users'` 里的字面量一起看，会判成 DDL/critical，
- * 而 `confirmSqlExecution` 在 `isWrite` 为真时**不会早退**，只读连接会直接
- * 报错拦截 —— 一条纯 SELECT 因为字符串里有 DROP 字样就被禁止执行。
- *
- * 被剥离的部分替换为空格而非删除，避免 `a'x'b` 粘连成新词。
- * 反斜杠转义按 MySQL 语义处理（`\'` 不结束字面量），PG/SQLite 用双写 `''`
- * 结束再立即开始，本函数把它看作两段字面量，结果相同。
+ * 过程/动态执行控制语句：其真正执行的内容可能在 dollar 引用体里（被骨架空白化），
+ * 无法静态判定，一律按 critical 处理（fail-closed）。
  */
-function stripLiteralsAndComments(sql: string): string {
-  let out = '';
-  let i = 0;
-  while (i < sql.length) {
-    const ch = sql[i];
-    const next = sql[i + 1];
-
-    // 块注释
-    if (ch === '/' && next === '*') {
-      const end = sql.indexOf('*/', i + 2);
-      out += ' ';
-      i = end === -1 ? sql.length : end + 2;
-      continue;
-    }
-    // 行注释（-- 与 MySQL 的 #）
-    if ((ch === '-' && next === '-') || ch === '#') {
-      const nl = sql.indexOf('\n', i);
-      out += ' ';
-      i = nl === -1 ? sql.length : nl;
-      continue;
-    }
-    // 字符串 / 引号标识符字面量
-    if (ch === "'" || ch === '"' || ch === '`') {
-      const quote = ch;
-      i++;
-      while (i < sql.length) {
-        // MySQL 风格反斜杠转义：跳过被转义的下一个字符
-        if (sql[i] === '\\' && quote !== '`') { i += 2; continue; }
-        if (sql[i] === quote) { i++; break; }
-        i++;
-      }
-      out += ' ';
-      continue;
-    }
-    out += ch;
-    i++;
-  }
-  return out;
-}
+const PROCEDURAL_RE = /\b(DO|CALL|EXECUTE)\b/;
 
 /**
  * 写语句动作类型，供结果面板区分「影响行数」与「成功」两类展示：
@@ -64,27 +24,52 @@ function stripLiteralsAndComments(sql: string): string {
  * DDL（CREATE/ALTER/DROP/TRUNCATE/RENAME/GRANT/REVOKE）与其余控制语句没有，
  * 展示「成功」而非误导性的「0 行受影响」。
  */
-export function classifyWriteKind(sql: string): 'dml' | 'ddl' | 'other' {
-  const normalized = stripLiteralsAndComments(sql).trim().toUpperCase();
-  if (/\b(CREATE|ALTER|DROP|TRUNCATE|RENAME|GRANT|REVOKE)\b/.test(normalized)) return 'ddl';
-  if (/\b(INSERT|UPDATE|DELETE|MERGE|REPLACE)\b/.test(normalized)) return 'dml';
+export function classifyWriteKind(sql: string, options?: SqlScanOptions): 'dml' | 'ddl' | 'other' {
+  const normalized = sqlSkeleton(sql, options).trim().toUpperCase();
+  if (DDL_RE.test(normalized)) return 'ddl';
+  if (DML_RE.test(normalized)) return 'dml';
   return 'other';
 }
 
-/** A conservative, dependency-free classifier used by every execution surface. */
-export function analyzeSqlRisk(sql: string): SqlRisk {
-  const normalized = stripLiteralsAndComments(sql).trim().toUpperCase();
-  if (!normalized) return { level: 'none', isWrite: false };
+/**
+ * 保守、零依赖的风险分类器，供所有执行面共用。
+ *
+ * 对**语法骨架**做关键字匹配，并按分号逐条判定；此外对两类「骨架看不到内容」
+ * 的输入 fail-closed：
+ *  - 过程/动态执行控制语句（`DO` / `CALL` / `EXECUTE`）——真正执行体可能在
+ *    dollar 引用里被空白化，如 `DO $$ BEGIN DELETE FROM users; END $$`；
+ *  - 含美元引用体（`$$…$$` / `$tag$…$tag$`）的语句——内容不可静态判定。
+ * 二者都会让 `confirmSqlExecution` 认定 isWrite 从而施加只读/生产确认，
+ * 避免旧实现（不识别 `$` 时 DELETE 可见会被拦）被回归绕过。
+ */
+export function analyzeSqlRisk(sql: string, options?: SqlScanOptions): SqlRisk {
+  const segments = scanSql(sql, options);
+  const skeleton = sqlSkeleton(sql, options);
+  const opaqueBody = segments.some((s) => s.kind === 'dollar');
 
-  const isDdl = /\b(CREATE|ALTER|DROP|TRUNCATE|RENAME|GRANT|REVOKE)\b/.test(normalized);
-  const isWrite = isDdl || /\b(INSERT|UPDATE|DELETE|MERGE|REPLACE)\b/.test(normalized);
-  if (!isWrite) return { level: 'none', isWrite: false };
-  if (isDdl) return { level: 'critical', isWrite: true, reason: 'DDL or permission change' };
-
-  const updateOrDelete = /\b(UPDATE|DELETE)\b/.test(normalized);
-  if (updateOrDelete && !/\bWHERE\b/.test(normalized)) {
-    return { level: 'critical', isWrite: true, reason: 'UPDATE or DELETE without WHERE' };
+  if (!skeleton.trim()) {
+    return opaqueBody
+      ? { level: 'write', isWrite: true, reason: 'opaque dollar-quoted body' }
+      : { level: 'none', isWrite: false };
   }
-  // INSERT/DELETE/UPDATE even with WHERE is still a write operation
-  return { level: 'write', isWrite: true };
+
+  let hasWrite = false;
+  for (const rawStmt of skeleton.split(';')) {
+    const stmt = rawStmt.trim().toUpperCase();
+    if (!stmt) continue;
+
+    if (DDL_RE.test(stmt)) {
+      return { level: 'critical', isWrite: true, reason: 'DDL or permission change' };
+    }
+    if (PROCEDURAL_RE.test(stmt)) {
+      return { level: 'critical', isWrite: true, reason: 'procedural or dynamic execution' };
+    }
+    if (DML_RE.test(stmt)) hasWrite = true;
+    if (UPDATE_OR_DELETE_RE.test(stmt) && !WHERE_RE.test(stmt)) {
+      return { level: 'critical', isWrite: true, reason: 'UPDATE or DELETE without WHERE' };
+    }
+  }
+
+  if (opaqueBody) return { level: 'write', isWrite: true, reason: 'opaque dollar-quoted body' };
+  return hasWrite ? { level: 'write', isWrite: true } : { level: 'none', isWrite: false };
 }

@@ -47,6 +47,13 @@ describe('toSavedConnection (组织连接模板 → 临时 SavedConnection)', ()
     expect(conn.user).toBe('tpl');
   });
 
+  it('databaseType 决定引擎；未知值 fail-closed', () => {
+    expect(toSavedConnection('o', 'r', 'n', template({ databaseType: 'postgresql' }), { password: 'p' }).dbType).toBe('PG');
+    expect(toSavedConnection('o', 'r', 'n', template({ databaseType: 'sqlite' }), { password: 'p' }).dbType).toBe('SQLITE');
+    expect(() => toSavedConnection('o', 'r', 'n', template({ databaseType: 'oracle' }), { password: 'p' }))
+      .toThrow(/Unsupported databaseType/);
+  });
+
   it('SSL disable / 无 ssl 字段 → 不启用 SSL、无 rejectUnauthorized', () => {
     for (const c of [template({ ssl: { mode: 'disable' } }), template()]) {
       const conn = toSavedConnection('o1', 'r1', 'n', c, cred);

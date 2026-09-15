@@ -36,6 +36,7 @@ import { deriveSyncStatus } from './sync/syncStatus';
 import { registerPersonalSyncCommands } from './commands/personalSync';
 import { registerConflictCommands } from './commands/syncConflicts';
 import { registerSyncLifecycleCommands, registerSyncResetUriHandler } from './commands/syncLifecycle';
+import { SshTunnel } from './connection/sshTunnel';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const store = new ConnectionStore(context.globalState, context.secrets);
@@ -53,6 +54,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const auditLogger = AuditLogger.init(context.globalState);
   const executor = new QueryExecutor(manager, history, auditLogger);
   const connCtx = new ConnectionContext(context, store);
+
+  // SSH 主机密钥裁决：tofu（默认）对未知主机弹指纹确认并写入插件自管 known_hosts；
+  // strict 只信任既有 known_hosts。密钥不匹配/revoked 由 gate 硬失败。
+  SshTunnel.configureHostKeyGate({
+    policy: () => (vscode.workspace.getConfiguration('dbclient').get<string>('ssh.hostKeyPolicy') === 'strict' ? 'strict' : 'tofu'),
+    storeFile: vscode.Uri.joinPath(context.globalStorageUri, 'ssh_known_hosts').fsPath,
+    prompt: async (host, port, fingerprint, keyType) => {
+      const target = port === 22 ? host : `${host}:${port}`;
+      const answer = await vscode.window.showWarningMessage(
+        l10n('ssh.hostKey.unknown', { host: target, keyType, fingerprint }),
+        { modal: true },
+        l10n('ssh.hostKey.trust'),
+      );
+      return answer === l10n('ssh.hostKey.trust');
+    },
+  });
 
   // 定时备份：从 globalState 恢复已保存的计划
   const backupScheduler = new BackupScheduler(manager, store, context.globalState);
@@ -291,7 +308,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     ),
     vscode.languages.registerCodeLensProvider(
       { language: 'sql' },
-      new SqlCodeLensProvider(),
+      new SqlCodeLensProvider((uri) => connCtx.getForDoc(uri)?.conn.dbType),
     ),
     // Terminal 集成
     vscode.commands.registerCommand('dbclient.openTerminal', (node: any) => {

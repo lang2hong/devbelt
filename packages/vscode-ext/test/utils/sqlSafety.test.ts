@@ -96,8 +96,36 @@ describe('analyzeSqlRisk', () => {
       expect(analyzeSqlRisk("SELECT 'O''Brien DROP TABLE' AS s")).toEqual({ level: 'none', isWrite: false });
     });
 
-    it('# 行注释里的关键字被剥离（MySQL 语法）', () => {
-      expect(analyzeSqlRisk('SELECT 1 # DROP TABLE users')).toEqual({ level: 'none', isWrite: false });
+    it('# 行注释里的关键字被剥离（MySQL 显式开启 hashComment）', () => {
+      expect(analyzeSqlRisk('SELECT 1 # DROP TABLE users', { hashComment: true })).toEqual({ level: 'none', isWrite: false });
+    });
+
+    /**
+     * 回归：PG 里 `#` 是运算符，不能按注释处理。默认方言下
+     * `SELECT 1 # 2; DROP TABLE t` 的 DROP 必须可见（PG simple query 会执行两条）。
+     */
+    it('默认方言下 # 是代码，其后的写必须可见（防 PG 只读绕过）', () => {
+      expect(analyzeSqlRisk('SELECT 1 # 2; DROP TABLE t')).toMatchObject({
+        level: 'critical', isWrite: true,
+      });
+      expect(analyzeSqlRisk('SELECT 1 # DROP TABLE users')).toMatchObject({ isWrite: true });
+    });
+
+    /**
+     * 回归：分类器与切分器曾对 `#` 注释规则不一致，导致
+     * `SELECT 1 #; DROP TABLE users` 被判只读、切分后仍执行 DROP。
+     * 两者现在共用 `@db-client/core/sql` 的 lexer；这里锁定分类侧仍把 `#` 后内容视为注释。
+     */
+    it('MySQL 可执行注释 /*! */ 内的写必须被识别，不得当惰性注释', () => {
+      expect(analyzeSqlRisk('/*!50000 DROP TABLE users */')).toMatchObject({
+        level: 'critical', isWrite: true,
+      });
+    });
+
+    it('追加带 WHERE 的语句不能把前面的 DELETE 从 critical 降级', () => {
+      expect(analyzeSqlRisk('DELETE FROM users; SELECT 1 WHERE 1=0')).toMatchObject({
+        level: 'critical', isWrite: true, reason: 'UPDATE or DELETE without WHERE',
+      });
     });
 
     it('剥离字面量后真实的写操作仍被识别', () => {
@@ -200,6 +228,35 @@ describe('confirmSqlExecution', () => {
       confirmSqlExecution(conn({ readOnly: true, environment: 'production' }), 'DROP TABLE t'),
     ).resolves.toBe(false);
     expect(shown.warnings).toEqual([]);
+    expect(shown.errors).toHaveLength(1);
+  });
+
+  it('PG 只读连接：`#` 运算符后的 DROP 必须被拦截（不被当注释）', async () => {
+    await expect(
+      confirmSqlExecution(conn({ dbType: 'PG', readOnly: true }), 'SELECT 1 # 2; DROP TABLE t'),
+    ).resolves.toBe(false);
+    expect(shown.errors).toHaveLength(1);
+  });
+});
+
+describe('过程体 / 美元引用 fail-closed（防 DO 逃逸）', () => {
+  it('DO $$…DELETE…$$ 视为 critical（dollar 体不可静态判定）', () => {
+    expect(analyzeSqlRisk('DO $$ BEGIN DELETE FROM users; END $$')).toMatchObject({
+      level: 'critical', isWrite: true, reason: 'procedural or dynamic execution',
+    });
+  });
+
+  it('CALL / EXECUTE 视为 critical', () => {
+    expect(analyzeSqlRisk('CALL cleanup_all()')).toMatchObject({ level: 'critical', isWrite: true });
+    expect(analyzeSqlRisk('EXECUTE stmt')).toMatchObject({ level: 'critical', isWrite: true });
+  });
+
+  it('仅含美元引用体的语句按写处理（fail-closed）', () => {
+    expect(analyzeSqlRisk('SELECT $$x$$')).toMatchObject({ isWrite: true });
+  });
+
+  it('只读连接拦截 DO 过程体（不早退）', async () => {
+    await expect(confirmSqlExecution(conn({ readOnly: true }), 'DO $$ BEGIN DELETE FROM users; END $$')).resolves.toBe(false);
     expect(shown.errors).toHaveLength(1);
   });
 });

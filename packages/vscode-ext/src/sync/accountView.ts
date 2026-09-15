@@ -12,6 +12,8 @@ import type { SyncSessionFactory } from './sessionFactory';
  * `action` 为下表中的命令 id 白名单，webview 不能借此触发任意命令。
  */
 const ACTION_COMMANDS = new Set<string>([
+  'dbclient.initializePersonalSync',
+  'dbclient.unlockPersonalSync',
   'dbclient.changeLoginPassword',
   'dbclient.changeSyncPassword',
   'dbclient.recoverSync',
@@ -19,6 +21,8 @@ const ACTION_COMMANDS = new Set<string>([
   'dbclient.resetSync',
   'dbclient.syncPull',
   'dbclient.syncPush',
+  'dbclient.exportConnections',
+  'dbclient.importConnections',
   'dbclient.sessions',
   'dbclient.openConsole',
   'dbclient.logout',

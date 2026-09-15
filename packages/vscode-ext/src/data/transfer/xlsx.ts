@@ -23,6 +23,14 @@ interface ZipEntry {
   data: Buffer;
 }
 
+/**
+ * 解压上限：防止「zip bomb」——一个几十 KB 的 .xlsx 解压出数 GB，撑爆扩展宿主内存。
+ * 数值按正常工作簿留足余量，可按需调整。
+ */
+export const MAX_ENTRY_BYTES = 64 * 1024 * 1024;
+export const MAX_TOTAL_BYTES = 256 * 1024 * 1024;
+export const MAX_ENTRIES = 4096;
+
 let crcTable: Int32Array | undefined;
 
 function crc32(buf: Buffer): number {
@@ -105,6 +113,10 @@ function zip(entries: ZipEntry[]): Buffer {
 
 /** 从尾部回扫 End Of Central Directory 签名（注释最长 64KB）。 */
 function findEndOfCentralDirectory(buf: Buffer): number {
+  // EOCD 记录最小 22 字节；过短的 buffer 下面 readUInt32LE 会拿到负偏移抛 RangeError。
+  if (buf.length < 22) {
+    throw new Error('Not a valid .xlsx file (too small to contain a ZIP end-of-directory record).');
+  }
   const min = Math.max(0, buf.length - 0xffff - 22);
   for (let i = buf.length - 22; i >= min; i--) {
     if (buf.readUInt32LE(i) === 0x06054b50) return i;
@@ -116,8 +128,12 @@ function unzip(buf: Buffer): Map<string, Buffer> {
   const eocd = findEndOfCentralDirectory(buf);
   const count = buf.readUInt16LE(eocd + 10);
   if (count === 0xffff) throw new Error('ZIP64 .xlsx files are not supported.');
+  if (count > MAX_ENTRIES) {
+    throw new Error(`.xlsx has too many entries (${count} > ${MAX_ENTRIES}).`);
+  }
   let pointer = buf.readUInt32LE(eocd + 16);
   const files = new Map<string, Buffer>();
+  let totalBytes = 0;
 
   for (let i = 0; i < count; i++) {
     if (pointer + 46 > buf.length || buf.readUInt32LE(pointer) !== 0x02014b50) break;
@@ -126,11 +142,17 @@ function unzip(buf: Buffer): Map<string, Buffer> {
     if (flags & 0x1) throw new Error('Encrypted .xlsx files are not supported.');
     const method = buf.readUInt16LE(pointer + 10);
     const compressedSize = buf.readUInt32LE(pointer + 20);
+    const uncompressedSize = buf.readUInt32LE(pointer + 24);
     const nameLength = buf.readUInt16LE(pointer + 28);
     const extraLength = buf.readUInt16LE(pointer + 30);
     const commentLength = buf.readUInt16LE(pointer + 32);
     const localOffset = buf.readUInt32LE(pointer + 42);
     const name = buf.toString('utf8', pointer + 46, pointer + 46 + nameLength);
+
+    // 声明尺寸超上限就 fail-fast，避免在 inflate 时才耗尽内存。
+    if (uncompressedSize > MAX_ENTRY_BYTES || totalBytes + uncompressedSize > MAX_TOTAL_BYTES) {
+      throw new Error('.xlsx exceeds the decompression size limit.');
+    }
 
     // 数据偏移必须按**本地头**里的名字/额外字段长度算：两者可与中央目录不同
     const localNameLength = buf.readUInt16LE(localOffset + 26);
@@ -140,7 +162,14 @@ function unzip(buf: Buffer): Map<string, Buffer> {
     if (method !== 0 && method !== 8) {
       throw new Error(`Unsupported ZIP compression method ${method} in .xlsx file.`);
     }
-    files.set(name, method === 0 ? Buffer.from(raw) : inflateRawSync(raw));
+    const data = method === 0
+      ? Buffer.from(raw)
+      : inflateRawSync(raw, { maxOutputLength: MAX_ENTRY_BYTES });
+    totalBytes += data.length;
+    if (data.length > MAX_ENTRY_BYTES || totalBytes > MAX_TOTAL_BYTES) {
+      throw new Error('.xlsx exceeds the decompression size limit.');
+    }
+    files.set(name, data);
     pointer += 46 + nameLength + extraLength + commentLength;
   }
   return files;

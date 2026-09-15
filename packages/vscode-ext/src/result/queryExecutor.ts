@@ -5,6 +5,8 @@ import { HistoryStore } from '../history/historyStore';
 import type { AuditLogger } from '../utils/auditLogger';
 import { QueryExecutedEvent, DataChangeEvent, eventBus } from '../utils/event';
 import { classifyWriteKind } from '../utils/sqlRisk';
+import { dialectScanOptions } from '../utils/sqlDialectOptions';
+import { containsSecretSql } from '../utils/sqlSecret';
 
 export type QueryExecutionMode = 'reuse' | 'new';
 
@@ -36,43 +38,49 @@ export class QueryExecutor {
     mode: QueryExecutionMode = 'reuse',
   ): Promise<void> {
     const start = Date.now();
+    // 含明文口令的语句绝不落历史/审计（与 QueryHistoryRecorder 共用同一判定）。
+    const secret = containsSecretSql(sql);
     await TableQueryView.openForQuery(conn, this.manager, sql, database, async (result, error) => {
       // 历史记录回调
       if (result) {
         const costTime = Date.now() - start;
         const rowCount = result.rows?.length ?? 0;
-        await this.history?.add({
-          sql,
-          connection: conn.name || conn.host,
-          connectionId: conn.id,
-          database,
-          costTime,
-          rowCount,
-        });
-        this.audit?.log({
-          action: 'query_execute',
-          connName: conn.name || conn.host,
-          database,
-          sql: sql.length > AUDIT_SQL_MAX ? `${sql.slice(0, AUDIT_SQL_MAX)}…` : sql,
-          rowCount,
-          costTime,
-        });
+        if (!secret) {
+          await this.history?.add({
+            sql,
+            connection: conn.name || conn.host,
+            connectionId: conn.id,
+            database,
+            costTime,
+            rowCount,
+          });
+          this.audit?.log({
+            action: 'query_execute',
+            connName: conn.name || conn.host,
+            database,
+            sql: sql.length > AUDIT_SQL_MAX ? `${sql.slice(0, AUDIT_SQL_MAX)}…` : sql,
+            rowCount,
+            costTime,
+          });
+        }
         // DDL 会改变库/表结构：发布数据变更事件让树刷新（DataChangeEvent 缺订阅者时
         // 树从不会在 SQL 编辑器跑完 DDL 后刷新，新表不可见）。
-        if (classifyWriteKind(sql) === 'ddl') {
+        if (classifyWriteKind(sql, dialectScanOptions(conn.dbType)) === 'ddl') {
           void eventBus.publish(new DataChangeEvent(conn.id, database ?? '', '', 'ddl'));
         }
         // QueryExecutedEvent 此前只有类型定义、从无发布点
         void eventBus.publish(new QueryExecutedEvent(conn.id, sql, costTime, rowCount));
       } else if (error) {
         const costTime = Date.now() - start;
-        await this.history?.add({
-          sql,
-          connection: conn.name || conn.host,
-          connectionId: conn.id,
-          database,
-          costTime,
-        });
+        if (!secret) {
+          await this.history?.add({
+            sql,
+            connection: conn.name || conn.host,
+            connectionId: conn.id,
+            database,
+            costTime,
+          });
+        }
         void eventBus.publish(new QueryExecutedEvent(conn.id, sql, costTime, 0, error.message));
       }
     }, mode);

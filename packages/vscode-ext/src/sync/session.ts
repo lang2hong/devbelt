@@ -211,6 +211,27 @@ export class PersonalSyncSession {
     }
   }
 
+  /**
+   * 自动恢复解锁（方案 B）：重启后若本地已持久化 DEK（SecretStorage）且与远端 state 匹配，
+   * 直接解锁，跳过「输入同步口令」。任何条件不满足或异常都返回 false，回退到口令解锁。
+   * 门禁：signPub 不匹配会使 unlockFromState 抛错（fail-closed）；epoch 差异走
+   * reconcileEpochTransition 收敛，不抛错。无 DEK / 无快照则此处直接返回 false。
+   */
+  async tryRestoreUnlock(): Promise<boolean> {
+    if (this.isUnlocked) return false;
+    const local = this.stateStore.getSnapshot();
+    if (!local) return false;
+    try {
+      const dek = await this.dekStore.load(this.userId, BigInt(local.keyEpoch));
+      if (!dek) return false;
+      const state = await this.getRemoteState();
+      await this.unlockFromState(state, dek);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** 解锁后的首次/手动同步，复用 coordinator 的单飞链。 */
   async syncNow() {
     if (!this.coordinator) throw new Error('sync session is locked');
@@ -441,35 +462,6 @@ export class PersonalSyncSession {
   }
 
   /**
-   * 清除本地同步数据（纯本地，无服务端调用）：对 snapshot / cleanup intent 涉及的每个 epoch
-   * 先 wipe 已同步本地实体，再清 recordMap/outbox/unresolved/DEK，最后清 state 快照与 intent、
-   * 重置运行时，回到未初始化态。从未同步的本地新建实体保留（供 init/reset 播种）。
-   * 用于 reset 场景他设备旧 SMP 解锁失败后的逃生舱，或同步状态损坏时的清理。
-   */
-  async clearLocalSyncData(): Promise<void> {
-    this.coordinator?.stop();
-    const epochs = new Set<string>();
-    const snap = this.stateStore.getSnapshot();
-    if (snap) epochs.add(snap.keyEpoch);
-    const intent = this.readIntent();
-    if (intent) {
-      epochs.add(intent.fromKeyEpoch);
-      epochs.add(intent.toKeyEpoch);
-    }
-    for (const epoch of epochs) {
-      // 先 purge 该 epoch 映射实体（used 关闭 F1 逃逸：保留实体 + 清 map = 重推复活），再清 store。
-      await this.clearLocalSyncedEntities(epoch);
-      await new RecordMapStore(this.memento, this.userId, epoch).clear();
-      await new PendingMutationStore(this.memento, this.userId, epoch).clear();
-      await new UnresolvedRefStore(this.memento, this.userId, epoch).clear();
-      await this.dekStore.delete(this.userId, BigInt(epoch));
-    }
-    await this.stateStore.clear();
-    await this.clearIntent();
-    this.resetRuntime();
-  }
-
-  /**
    * 丢失 SMP 重置（锁定态）：凭浏览器交接的一次性 handoff ticket + 新 SMP。
    * 旧数据不可恢复。若本地有旧 epoch 则走 transition 清理；否则直接落新 epoch。
    * 服务端返回完整 StateDto；本方法只取三字段快照（新 DEK 在本地由新材料派生）。
@@ -634,6 +626,43 @@ export class PersonalSyncSession {
     this.dek = undefined;
     this.signSeed = undefined;
     this.opts.onSessionState?.();
+  }
+
+  /**
+   * 纯本地重置：清空本机同步数据与持久化 DEK，回到未初始化态。
+   *
+   * 与远端 `resetSync`（需 handoff）不同，这里**不发起任何 sync API 请求**，
+   * 供远端不可达 / stale-epoch 时逃生。仅清 sync 自有存储：
+   *  - 该 epoch 映射到的本地实体（软删 source='sync'，级联子树）；
+   *  - recordMap / pendingMutation / unresolved 三个 epoch 存储；
+   *  - 持久化 DEK、状态快照、残留 cleanup intent。
+   * 连接/查询等业务数据不在 sync 存储内，天然保留。幂等。
+   */
+  async clearLocalState(): Promise<void> {
+    this.coordinator?.stop();
+
+    // 需要清理的 epoch = 快照 epoch + 残留 cleanup intent 的 from/to。
+    // 只清快照 epoch 会漏掉 intent 涉及的旧 epoch（其 recordMap/outbox/unresolved/DEK 成为孤儿）。
+    const epochs = new Set<string>();
+    const snap = this.stateStore.getSnapshot();
+    if (snap) epochs.add(snap.keyEpoch);
+    const intent = this.readIntent();
+    if (intent) {
+      epochs.add(intent.fromKeyEpoch);
+      epochs.add(intent.toKeyEpoch);
+    }
+
+    for (const epoch of epochs) {
+      await this.clearLocalSyncedEntities(epoch);
+      await new RecordMapStore(this.memento, this.userId, epoch).clear();
+      await new PendingMutationStore(this.memento, this.userId, epoch).clear();
+      await new UnresolvedRefStore(this.memento, this.userId, epoch).clear();
+      await this.dekStore.delete(this.userId, BigInt(epoch));
+    }
+
+    await this.stateStore.clear();
+    await this.clearIntent();
+    this.resetRuntime();
   }
 
   /** 停用：extension deactivate 时经 context.subscriptions 触发。 */

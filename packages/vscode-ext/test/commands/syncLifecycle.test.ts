@@ -21,7 +21,6 @@ import {
   destroySync,
   resetSync,
   resetSyncFromHandoff,
-  clearLocalSync,
   registerSyncResetUriHandler,
   type SyncLifecycleCommandDeps,
 } from '../../src/commands/syncLifecycle';
@@ -36,7 +35,6 @@ function makeSession(over: Record<string, unknown> = {}): Record<string, any> {
     destroySync: vi.fn(async () => 'NEWCODE'),
     requestResetChallenge: vi.fn(async () => {}),
     resetSyncAfterLoss: vi.fn(async () => 'NEWCODE'),
-    clearLocalSyncData: vi.fn(async () => {}),
     ...over,
   };
 }
@@ -271,39 +269,6 @@ describe('syncLifecycle 命令（B5）', () => {
     await resetSync(deps);
     expect(session.requestResetChallenge).not.toHaveBeenCalled();
     expect(session.resetSyncAfterLoss).not.toHaveBeenCalled();
-    expect(ui.warn).toHaveBeenCalled();
-  });
-
-  it('clearLocalSync：取消二次确认 → 不调用 session', async () => {
-    const session = makeSession();
-    const { deps, ui } = makeDeps(session);
-    ui.confirmIrreversible.mockResolvedValue(false);
-    await clearLocalSync(deps);
-    expect(session.clearLocalSyncData).not.toHaveBeenCalled();
-  });
-
-  it('clearLocalSync：确认后调用 session 并提示完成', async () => {
-    const session = makeSession();
-    const { deps, ui } = makeDeps(session);
-    ui.confirmIrreversible.mockResolvedValue(true);
-    await clearLocalSync(deps);
-    expect(session.clearLocalSyncData).toHaveBeenCalledTimes(1);
-    expect(ui.info).toHaveBeenCalled();
-  });
-
-  it('clearLocalSync：session 失败 → 固定错误', async () => {
-    const session = makeSession({ clearLocalSyncData: vi.fn(async () => { throw new Error('x'); }) });
-    const { deps, ui } = makeDeps(session);
-    ui.confirmIrreversible.mockResolvedValue(true);
-    await clearLocalSync(deps);
-    expect(ui.error).toHaveBeenCalled();
-  });
-
-  it('clearLocalSync：解锁态 → 告警且不调用 session', async () => {
-    const session = makeSession({ isUnlocked: true });
-    const { deps, ui } = makeDeps(session);
-    await clearLocalSync(deps);
-    expect(session.clearLocalSyncData).not.toHaveBeenCalled();
     expect(ui.warn).toHaveBeenCalled();
   });
 });

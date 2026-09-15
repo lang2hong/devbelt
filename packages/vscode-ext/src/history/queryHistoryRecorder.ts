@@ -1,20 +1,13 @@
 import type { ExecutedStatement, QueryObserver } from '@db-client/core';
 import type { SavedConnection } from '../connection/connectionStore';
 import { analyzeSqlRisk } from '../utils/sqlRisk';
+import { dialectScanOptions } from '../utils/sqlDialectOptions';
+import { containsSecretSql } from '../utils/sqlSecret';
 import type { HistoryStore } from './historyStore';
 
 /** 从 `USE <db>` / `SET search_path TO <schema>` 中取出切换到的库名。 */
 const USE_DB = /^\s*USE\s+[`"[]?([\w$-]+)[`"\]]?\s*;?\s*$/i;
-const SET_SEARCH_PATH = /^\s*SET\s+search_path\s+(?:TO|=)\s+[`"]?([\w$-]+)[`"]?/i;
-
-/**
- * 含密码的语句特征。
- *
- * 这类 SQL 一旦进历史就会被持久化到 globalState 并参与云同步，明文密码会离开
- * 本机。db-core 里的用户管理方法已经带 `skipHistory`，这里是第二道防线 ——
- * 万一将来有人在别处手拼一条 `CREATE USER`，也不会漏出去。
- */
-const SECRET_SQL = /\b(IDENTIFIED\s+(BY|WITH)|PASSWORD\s*=?\s*'|WITH\s+(LOGIN\s+)?PASSWORD)/i;
+const SET_SEARCH_PATH = /^\s*SET\s+search_path\s+(?:TO|=)\s*[`"]?([\w$-]+)[`"]?/i;
 
 /**
  * 语句级查询历史记录器。
@@ -53,8 +46,8 @@ export class QueryHistoryRecorder {
       this.currentDatabase = switched;
       return;
     }
-    if (!analyzeSqlRisk(info.sql).isWrite) return;
-    if (SECRET_SQL.test(info.sql)) return;
+    if (!analyzeSqlRisk(info.sql, dialectScanOptions(this.conn.dbType)).isWrite) return;
+    if (containsSecretSql(info.sql)) return;
 
     // 历史写入是旁路的 best-effort：失败绝不能冒泡到已经成功的语句上，
     // 否则用户会看到「DDL 报错」而库里其实已经改完了。

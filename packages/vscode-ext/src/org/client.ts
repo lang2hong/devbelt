@@ -87,39 +87,39 @@ export class OrgClient {
 
   // ── 目录 ──
   async listFolders(organizationId: string): Promise<FolderDto[]> {
-    return (await this.req<FoldersResponse>('GET', `/api/organizations/${organizationId}/folders`)).folders;
+    return (await this.req<FoldersResponse>('GET', `/api/organizations/${encodeURIComponent(organizationId)}/folders`)).folders;
   }
 
   async createFolder(organizationId: string, name: string, parentId?: string | null): Promise<FolderDto> {
-    return (await this.req<FolderResponse>('POST', `/api/organizations/${organizationId}/folders`, { name, parentId })).folder;
+    return (await this.req<FolderResponse>('POST', `/api/organizations/${encodeURIComponent(organizationId)}/folders`, { name, parentId })).folder;
   }
 
   async updateFolder(organizationId: string, folderId: string, input: UpdateFolderInput): Promise<FolderDto> {
-    return (await this.req<FolderResponse>('PATCH', `/api/organizations/${organizationId}/folders/${folderId}`, input)).folder;
+    return (await this.req<FolderResponse>('PATCH', `/api/organizations/${encodeURIComponent(organizationId)}/folders/${encodeURIComponent(folderId)}`, input)).folder;
   }
 
   async deleteFolder(organizationId: string, folderId: string): Promise<void> {
-    await this.req('DELETE', `/api/organizations/${organizationId}/folders/${folderId}`);
+    await this.req('DELETE', `/api/organizations/${encodeURIComponent(organizationId)}/folders/${encodeURIComponent(folderId)}`);
   }
 
   // ── 资源 ──
   async listResources(organizationId: string): Promise<ResourceSummaryDto[]> {
-    return (await this.req<ResourcesResponse>('GET', `/api/organizations/${organizationId}/resources`)).resources;
+    return (await this.req<ResourcesResponse>('GET', `/api/organizations/${encodeURIComponent(organizationId)}/resources`)).resources;
   }
 
   async getResource(organizationId: string, resourceId: string): Promise<ResourceDetailDto> {
-    return (await this.req<ResourceResponse>('GET', `/api/organizations/${organizationId}/resources/${resourceId}`)).resource as ResourceDetailDto;
+    return (await this.req<ResourceResponse>('GET', `/api/organizations/${encodeURIComponent(organizationId)}/resources/${encodeURIComponent(resourceId)}`)).resource as ResourceDetailDto;
   }
 
   async createResource(organizationId: string, input: CreateResourceInput): Promise<ResourceSummaryDto> {
-    return (await this.req<ResourceResponse>('POST', `/api/organizations/${organizationId}/resources`, input)).resource as ResourceSummaryDto;
+    return (await this.req<ResourceResponse>('POST', `/api/organizations/${encodeURIComponent(organizationId)}/resources`, input)).resource as ResourceSummaryDto;
   }
 
   async updateResource(organizationId: string, resourceId: string, input: UpdateResourceInput): Promise<ResourceSummaryDto> {
-    return (await this.req<ResourceResponse>('PATCH', `/api/organizations/${organizationId}/resources/${resourceId}`, input)).resource as ResourceSummaryDto;
+    return (await this.req<ResourceResponse>('PATCH', `/api/organizations/${encodeURIComponent(organizationId)}/resources/${encodeURIComponent(resourceId)}`, input)).resource as ResourceSummaryDto;
   }
 
   async deleteResource(organizationId: string, resourceId: string): Promise<void> {
-    await this.req('DELETE', `/api/organizations/${organizationId}/resources/${resourceId}`);
+    await this.req('DELETE', `/api/organizations/${encodeURIComponent(organizationId)}/resources/${encodeURIComponent(resourceId)}`);
   }
 }

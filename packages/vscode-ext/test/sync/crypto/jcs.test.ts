@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { jcs } from '../../../src/sync/crypto/jcs';
-import { INVALID_JCS_VALUES, JCS_VECTORS, NORMALIZED_JCS_VECTORS } from '@db-client/core/dist/sync/jcsVectors.js';
+import { INVALID_JCS_VALUES, JCS_VECTORS, NORMALIZED_JCS_VECTORS } from '@db-client/core/testing';
 
 describe('jcs（镜像服务端，共享向量双向锚定）', () => {
   it.each(JCS_VECTORS)('$name', ({ value, expected }) => {

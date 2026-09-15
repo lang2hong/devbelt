@@ -1,10 +1,12 @@
 import { DatabaseType, validateIdent } from '@db-client/core';
 import type { QueryService } from '@db-client/core';
+import { sqlSkeleton } from '@db-client/core/sql';
 import type { ConnectionManager } from '../connection/connectionManager';
 import type { SavedConnection } from '../connection/connectionStore';
 import { splitSqlStatements } from '../utils/sql';
 import { confirmSqlExecution } from '../utils/sqlSafety';
 import { classifyWriteKind } from '../utils/sqlRisk';
+import { dialectScanOptions } from '../utils/sqlDialectOptions';
 import { buildCountSql, buildTableSelect, type ColumnTypeMap, type FilterCondition } from './tableQuerySql';
 import { diagError } from '../utils/diagnostics';
 import { l10n } from '../i18n';
@@ -121,14 +123,17 @@ export class QueryRunner {
       if (database && this.conn.dbType === DatabaseType.MYSQL) {
         await session.query.query(`USE ${session.query.wrap(validateIdent(database))}`);
       }
-      const stmts = splitSqlStatements(sql);
+      const scanOpts = dialectScanOptions(this.conn.dbType);
+      const stmts = splitSqlStatements(sql, scanOpts);
       // 有 onExecuted 时由 QueryExecutor 记一条「整段 SQL」的历史，这里逐条上报会重复；
       // 没有 onExecuted 时（结果面板内改 SQL 再运行）交给观察者逐条记录 ——
       // 那条路径过去完全不进历史。
       const stmtOpts = onExecuted ? { skipHistory: true } : undefined;
       const results: any[] = [];
       for (const stmt of stmts) {
-        const upper = stmt.trim().replace(/--.*$/gm, '').replace(/#.*$/gm, '').toUpperCase().trim();
+        // 用方言词法器剥离注释：`#` 只在 MySQL 是注释，PG/SQLite 里是运算符，
+        // 旧的无条件 `.replace(/#.*$/gm)` 会把 `SELECT 1 # 2` 截断。
+        const upper = sqlSkeleton(stmt, scanOpts).toUpperCase().trim();
         if (upper === 'BEGIN' || upper.startsWith('START TRANSACTION')) {
           await session.query.query(stmt, undefined, stmtOpts);
           transactionState = 'active';
@@ -142,7 +147,7 @@ export class QueryRunner {
           continue;
         }
         const r = await session.query.query(stmt, undefined, stmtOpts);
-        results.push({ ...r, kind: classifyWriteKind(stmt) });
+        results.push({ ...r, kind: classifyWriteKind(stmt, scanOpts) });
       }
       const result = results[results.length - 1];
       // 表面板里也会执行 UPDATE/INSERT/DELETE/DDL。这类语句没有结果集，
@@ -229,13 +234,13 @@ export class QueryRunner {
       //  - MySQL/PG 用不带 ANALYZE 的 EXPLAIN：只生成计划不执行，避免 PG 的
       //    EXPLAIN ANALYZE 对 INSERT/UPDATE/DELETE 产生真实写库副作用。
       const prefix = this.conn.dbType === DatabaseType.SQLITE ? 'EXPLAIN QUERY PLAN ' : 'EXPLAIN ';
-      const stmts = splitSqlStatements(sql);
+      const stmts = splitSqlStatements(sql, dialectScanOptions(this.conn.dbType));
       const results: any[] = [];
       let skippedDdl = false;
       for (const stmt of stmts) {
         // DDL 没有执行计划可解释（EXPLAIN CREATE/ALTER/DROP 在 MySQL/PG 是语法错误，
         // SQLite 则静默），遇到即跳过，不让数据库抛一句晦涩的语法错误。
-        if (classifyWriteKind(stmt) === 'ddl') {
+        if (classifyWriteKind(stmt, dialectScanOptions(this.conn.dbType)) === 'ddl') {
           skippedDdl = true;
           continue;
         }

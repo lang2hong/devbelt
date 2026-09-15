@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { SchemaDiffService, BackupService, DataTransferService, DatabaseType, validateIdent } from '@db-client/core';
 import { DbTreeNode } from '../tree/dbTreeNode';
 import { wrapIdentForConn, splitSqlStatements } from '../utils/sql';
+import { dialectScanOptions } from '../utils/sqlDialectOptions';
 import { confirmSqlExecution, ensureWritable } from '../utils/sqlSafety';
 import { parseCsv } from '../data/transfer/csv';
 import { parseJson } from '../data/transfer/json';
@@ -11,11 +12,11 @@ import { autoMapFields, type FieldMapping } from '../data/transfer/fieldMapper';
 import {
   exportFileName,
   exportFilters,
-  exportTable,
-  toFileBytes,
+  writeTableExport,
   TransferCancelledError,
   type TransferFormat,
 } from '../data/transfer/exportService';
+import { writeChunksToFile } from '../utils/writeChunks';
 import { importRows } from '../data/transfer/importService';
 import { AuditLogger } from '../utils/auditLogger';
 import { l10n } from '../i18n';
@@ -66,6 +67,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
       await importSqlScript(node, text, deps);
       return;
     }
+    if (format === 'txt') return; // txt 仅导出
     await importStructuredData(node, format, text, deps);
   });
 
@@ -93,7 +95,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (confirmed !== 'Restore') return;
     const session = await manager.connect(node.conn);
     const content = Buffer.from(await vscode.workspace.fs.readFile(uri[0])).toString('utf8');
-    const statements = splitSqlStatements(content);
+    const statements = splitSqlStatements(content, dialectScanOptions(node.conn.dbType));
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'Restoring database...', cancellable: true },
       async (progress, token) => {
@@ -139,6 +141,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
       await importSqlScript(node, text, deps);
       return;
     }
+    if (format === 'txt') return; // txt 仅导出
     await importStructuredData(node, format, text, deps, node.label);
   });
 
@@ -282,7 +285,9 @@ export async function runExportWizard(
       for (let index = 0; index < tables.length; index++) {
         const table = tables[index];
         progress.report({ message: `${table} (${index + 1}/${tables.length})` });
-        const content = await exportTable({
+        const target = tables.length === 1 ? destination : vscode.Uri.joinPath(destination, exportFileName(table, format));
+        // 流式写盘：逐页读取、逐块写出，避免整表驻留内存。
+        await writeChunksToFile(target.fsPath, (write) => writeTableExport({
           source: { query: session.query, metadata: session.metadata, table: session.table },
           format,
           table,
@@ -292,10 +297,7 @@ export async function runExportWizard(
           serverInfo,
           isCancelled: () => token.isCancellationRequested,
           onProgress: ({ rows }) => progress.report({ message: `${table}: ${rows} row(s)` }),
-        });
-        const target = tables.length === 1 ? destination : vscode.Uri.joinPath(destination, exportFileName(table, format));
-        // xlsx 是二进制，必须按字节写；此前统一按 utf8 写会产出无法打开的文件。
-        await vscode.workspace.fs.writeFile(target, toFileBytes(content));
+        }, write));
       }
     });
     AuditLogger.tryLog({
@@ -330,7 +332,7 @@ async function importSqlScript(
   if (database && conn.dbType === DatabaseType.MYSQL) {
     await session.query.query(`USE ${wrapIdentForConn(conn, validateIdent(database))}`);
   }
-  const statements = splitSqlStatements(sql);
+  const statements = splitSqlStatements(sql, dialectScanOptions(conn.dbType));
   let done = 0;
   let insertedRows = 0;
   let hasAffectedInfo = false;
@@ -369,7 +371,7 @@ async function importSqlScript(
 
 async function importStructuredData(
   node: DbTreeNode,
-  format: Exclude<TransferFormat, 'sql'>,
+  format: Exclude<TransferFormat, 'sql' | 'txt'>,
   text: string,
   deps: Deps,
   fixedTable?: string,
@@ -517,6 +519,8 @@ async function pickFormat(action: 'import' | 'export'): Promise<TransferFormat |
     { label: 'SQL', description: action === 'import' ? l10n('import.formatSql') : l10n('export.formatSql'), value: 'sql' },
     { label: 'CSV', description: action === 'import' ? l10n('import.formatCsv') : l10n('export.formatCsv'), value: 'csv' },
     { label: 'JSON', description: action === 'import' ? l10n('import.formatJson') : l10n('export.formatJson'), value: 'json' },
+    // Text（.txt，制表符分隔）仅导出提供；导入不支持。
+    ...(action === 'export' ? [{ label: 'Text', description: '.txt', value: 'txt' as const }] : []),
     { label: 'Excel', description: '.xlsx', value: 'xlsx' },
     { label: 'XML', description: '.xml', value: 'xml' },
   ];

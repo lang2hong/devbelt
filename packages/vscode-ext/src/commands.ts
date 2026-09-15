@@ -31,14 +31,25 @@ export function registerCommands(deps: Deps): void {
     const items: { label: string; value: string }[] = [
       { label: l10n('cmd.groups'), value: 'addGroup' },
       { label: l10n('cmd.showHistory'), value: 'showHistory' },
+      { label: l10n('account.action.importConnections'), value: 'importConnections' },
+      { label: l10n('account.action.exportConnections'), value: 'exportConnections' },
     ];
     if (deps.auth.isLoggedIn()) {
+      const session = await deps.syncFactory.ensureSession().catch(() => undefined);
+      const unlocked = session?.isUnlocked ?? false;
       items.push(
         { label: l10n('account.title'), value: 'account' },
         { label: l10n('sessions.title'), value: 'sessions' },
         { label: l10n('sync.statusLabel'), value: 'sync' },
-        { label: l10n('account.action.pull'), value: 'syncPull' },
-        { label: l10n('account.action.push'), value: 'syncPush' },
+      );
+      // 拉取/推送仅已解锁时可用，避免锁定态点了被命令内部拒绝。
+      if (unlocked) {
+        items.push(
+          { label: l10n('account.action.pull'), value: 'syncPull' },
+          { label: l10n('account.action.push'), value: 'syncPush' },
+        );
+      }
+      items.push(
         { label: l10n('account.action.openConsole'), value: 'openConsole' },
         { label: l10n('cmd.logout'), value: 'logout' },
       );
@@ -50,6 +61,8 @@ export function registerCommands(deps: Deps): void {
     const cmd: string | undefined = ({
       addGroup: 'dbclient.addGroup',
       showHistory: 'dbclient.showHistory',
+      importConnections: 'dbclient.importConnections',
+      exportConnections: 'dbclient.exportConnections',
       login: 'dbclient.login',
       account: 'dbclient.account',
       sessions: 'dbclient.sessions',

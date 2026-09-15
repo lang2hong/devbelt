@@ -204,8 +204,8 @@
         "category": "DB Client"
       },
       {
-        "command": "dbclient.clearLocalSync",
-        "title": "%cmd.clearLocalSync%",
+        "command": "dbclient.resetLocalSync",
+        "title": "%cmd.resetLocalSync%",
         "category": "DB Client"
       },
       {
@@ -829,8 +829,8 @@
           "when": "dbclient.loggedIn && !dbclient.sync.unlocked"
         },
         {
-          "command": "dbclient.clearLocalSync",
-          "when": "dbclient.loggedIn && !dbclient.sync.unlocked"
+          "command": "dbclient.resetLocalSync",
+          "when": "dbclient.loggedIn"
         },
         {
           "command": "dbclient.scheduleBackup",
@@ -1581,6 +1581,16 @@
           "default": "upper",
           "description": "SQL formatting keyword case.",
           "markdownDescription": "SQL 格式化关键字大小写。"
+        },
+        "dbclient.ssh.hostKeyPolicy": {
+          "type": "string",
+          "enum": [
+            "tofu",
+            "strict"
+          ],
+          "default": "tofu",
+          "description": "SSH host key policy. tofu: ask and remember unknown host keys; strict: only trust hosts already in known_hosts.",
+          "markdownDescription": "SSH 主机密钥策略。`tofu`：未知主机弹指纹确认并记住；`strict`：只信任 `known_hosts` 中已有的主机。密钥变更始终拒绝。"
         }
       }
     },
@@ -1665,7 +1675,6 @@
     "mysql2": "^3.23.2",
     "pg": "^8.22.0",
     "sql-formatter": "^15.8.2",
-    "ssh2": "^1.16.1",
     "typescript": "^5.9.3",
     "vite": "^6.0.7",
     "vitest": "^4.1.10",

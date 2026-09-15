@@ -3,13 +3,16 @@ export interface JsonData {
   rows: Record<string, unknown>[];
 }
 
+/** 按列顺序投影一行（缺失列补 null），供 JSON 序列化/流式导出共用。 */
+export function projectRow(columns: string[], row: Record<string, unknown>): Record<string, unknown> {
+  const projected: Record<string, unknown> = {};
+  for (const column of columns) projected[column] = row[column] ?? null;
+  return projected;
+}
+
 /** Serializes tabular values as readable JSON without changing column order. */
 export function serializeJson(columns: string[], rows: Record<string, unknown>[]): string {
-  return JSON.stringify(rows.map((row) => {
-    const projected: Record<string, unknown> = {};
-    for (const column of columns) projected[column] = row[column] ?? null;
-    return projected;
-  }), null, 2) + '\n';
+  return JSON.stringify(rows.map((row) => projectRow(columns, row)), null, 2) + '\n';
 }
 
 /** Accepts an object or an array of objects, matching common Navicat JSON exports. */

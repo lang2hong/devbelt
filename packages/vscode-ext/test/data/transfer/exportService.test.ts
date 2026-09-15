@@ -83,6 +83,18 @@ describe('exportRows', () => {
     expect(content).not.toContain('BEGIN;');
     expect(content).toContain('INSERT INTO `users`');
   });
+
+  it('dump 头里的不可信文本无法逃出注释上下文', () => {
+    const content = exportRows({
+      format: 'sql', columns: ['id'], rows: [], table: 'users',
+      database: 'app\nDROP',
+      dialect: mysqlDialect as any,
+      sqlDump: { serverInfo: { name: 'n */ DROP', dbType: 'MYSQL' as any, host: 'h', port: 3306 } },
+    }) as string;
+    expect(content).not.toContain('*/ DROP');
+    expect(content).toContain('* / DROP');
+    expect(content).toContain('Source Schema         : app DROP');
+  });
 });
 
 describe('导出文件名与过滤器（两端共用）', () => {
@@ -96,6 +108,7 @@ describe('导出文件名与过滤器（两端共用）', () => {
     expect(exportFilters('json')).toEqual({ JSON: ['json'] });
     expect(exportFilters('xlsx')).toEqual({ Excel: ['xlsx'] });
     expect(exportFilters('xml')).toEqual({ XML: ['xml'] });
+    expect(exportFilters('txt')).toEqual({ Text: ['txt'] });
     expect(exportFilters('sql')).toEqual({ SQL: ['sql'] });
   });
 
@@ -191,5 +204,74 @@ describe('exportTable', () => {
       pageSize: 2,
     });
     expect(Buffer.isBuffer(content)).toBe(true);
+  });
+});
+
+describe('txt 导出（制表符分隔）', () => {
+  it('表头+行以 \\t 分隔、CRLF 结尾，公式前缀被抑制，制表/换行替换为空格', () => {
+    const out = exportRows({
+      format: 'txt',
+      columns: ['id', 'name'],
+      rows: [{ id: 1, name: 'a\tb' }, { id: 2, name: '=SUM(A1)' }],
+    }) as string;
+    expect(out).toBe("id\tname\r\n1\ta b\r\n2\t'=SUM(A1)\r\n");
+  });
+
+  it('writeTableExport 流式产出多块（含表头与数据）', async () => {
+    const rows = [{ id: 1, name: 'a' }, { id: 2, name: 'b' }];
+    const pageSize = 1;
+    const source = {
+      query: {
+        dialect: {
+          dbType: 'MYSQL' as const,
+          wrap: (n: string) => `\`${n}\``,
+          getPagedSql: (sql: string, offset: number, limit: number) => `${sql} LIMIT ${limit} OFFSET ${offset}`,
+          getKeysetSql: (sql: string) => `${sql} LIMIT ${pageSize}`,
+        },
+        query: async (sql: string) => ({ rows: sql.includes('OFFSET 0') ? [rows[0]] : sql.includes('OFFSET 1') ? [rows[1]] : [] }),
+      },
+      metadata: { getColumns: async () => [{ name: 'id', isPrimary: false }, { name: 'name', isPrimary: false }] },
+      table: { getCreateSql: async () => 'CREATE TABLE `t` (`id` int)' },
+    } as never;
+    const { writeTableExport } = await import('../../../src/data/transfer/exportService');
+    const chunks: string[] = [];
+    await writeTableExport(
+      { source, format: 'txt', table: 't', database: 'd', pageSize },
+      (c) => { chunks.push(String(c)); },
+    );
+    expect(chunks[0]).toBe('id\tname\r\n');
+    expect(chunks.join('')).toContain('1\ta\r\n');
+    expect(chunks.join('')).toContain('2\tb\r\n');
+    expect(chunks.length).toBeGreaterThan(2);
+  });
+});
+
+describe('writeTableExport keyset 走真实方言（不 mock getKeysetSql）', () => {
+  it('有主键时生成展开式标量比较 SQL（兼容 MySQL 复合主键）', async () => {
+    const { MysqlDialect } = await import('@db-client/core');
+    const executed: string[] = [];
+    const pages: Array<Array<Record<string, unknown>>> = [[{ id: 1, name: 'a' }], [{ id: 2, name: 'b' }], []];
+    const source = {
+      query: {
+        dialect: new MysqlDialect(),
+        query: async (sql: string) => {
+          executed.push(sql);
+          return { rows: pages.shift() ?? [] };
+        },
+      },
+      metadata: {
+        getColumns: async () => [{ name: 'id', isPrimary: true }, { name: 'name', isPrimary: false }],
+      },
+      table: { getCreateSql: async () => 'CREATE TABLE `t` (`id` int)' },
+    } as never;
+    const { writeTableExport } = await import('../../../src/data/transfer/exportService');
+    const chunks: string[] = [];
+    await writeTableExport(
+      { source, format: 'txt', table: 't', database: 'd', pageSize: 1 },
+      (c) => { chunks.push(String(c)); },
+    );
+    expect(executed[0]).toContain('ORDER BY `id` LIMIT 1');
+    expect(executed[1]).toMatch(/WHERE \(`id` > 1\)/);
+    expect(chunks.join('')).toContain('2\tb\r\n');
   });
 });

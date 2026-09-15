@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { SavedConnection } from '../connection/connectionStore';
 import { l10n } from '../i18n';
 import { analyzeSqlRisk } from './sqlRisk';
+import { dialectScanOptions } from './sqlDialectOptions';
 
 export { analyzeSqlRisk } from './sqlRisk';
 export type { SqlRisk, SqlRiskLevel } from './sqlRisk';
@@ -27,7 +28,7 @@ export function ensureWritable(conn: SavedConnection): boolean {
  * provider, including future AI providers, shares the same guardrail.
  */
 export async function confirmSqlExecution(conn: SavedConnection, sql: string): Promise<boolean> {
-  const risk = analyzeSqlRisk(sql);
+  const risk = analyzeSqlRisk(sql, dialectScanOptions(conn.dbType));
   if (!risk.isWrite) return true;
   if (!ensureWritable(conn)) return false;
   if (risk.level !== 'critical' && conn.environment !== 'production') return true;

@@ -88,7 +88,10 @@ export class ExportHandler {
   private async exportEntireTable(format: TransferFormat): Promise<void> {
     const table = this.table!;
     const session = await this.manager.connect(this.conn);
-    const { exportTable } = await import('../data/transfer/exportService');
+    const [{ writeTableExport }, { writeChunksToFile }] = await Promise.all([
+      import('../data/transfer/exportService'),
+      import('../utils/writeChunks'),
+    ]);
     const allColumns = (await session.metadata.getColumns(table, this.database)).map((c: any) => c.name);
     const picked = await vscode.window.showQuickPick(
       allColumns.map((c: string) => ({ label: c, picked: true })),
@@ -97,7 +100,8 @@ export class ExportHandler {
     if (!picked?.length) return;
     const uri = await this.askDestination(format);
     if (!uri) return;
-    const content = await exportTable({
+    // 流式写盘：大表不再整表驻留内存。
+    await writeChunksToFile(uri.fsPath, (write) => writeTableExport({
       source: { query: session.query, metadata: session.metadata, table: session.table },
       format,
       table,
@@ -105,8 +109,7 @@ export class ExportHandler {
       columns: picked.map((p) => p.label),
       includeStructure: format === 'sql',
       serverInfo: this.serverInfo(),
-    });
-    await vscode.workspace.fs.writeFile(uri, toFileBytes(content));
+    }, write));
     this.post({ type: 'exported', message: vscode.l10n.t('Exported to {path}', { path: uri.fsPath }) });
   }
 

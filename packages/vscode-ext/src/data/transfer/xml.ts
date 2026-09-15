@@ -26,18 +26,34 @@ function sanitizeXmlName(name: string): string {
   return /^[A-Za-z_]/.test(s) ? s : `c_${s}`;
 }
 
-export function serializeXml(columns: string[], rows: Record<string, unknown>[]): string {
+function escapeXmlValue(value: unknown): string {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/** XML 头（声明 + <rows>）。 */
+export function xmlHeader(): string {
+  return '<?xml version="1.0" encoding="UTF-8"?>\n<rows>';
+}
+
+/** 单行 <row>…</row>。 */
+export function xmlRow(columns: string[], row: Record<string, unknown>): string {
   const tags = columns.map((col) => sanitizeXmlName(col));
-  const parts: string[] = ['<?xml version="1.0" encoding="UTF-8"?>', '<rows>'];
-  for (const row of rows) {
-    parts.push('  <row>');
-    columns.forEach((col, index) => {
-      const val = row[col] ?? '';
-      const escaped = String(val).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-      parts.push(`    <${tags[index]}>${escaped}</${tags[index]}>`);
-    });
-    parts.push('  </row>');
-  }
-  parts.push('</rows>');
+  const parts: string[] = ['  <row>'];
+  columns.forEach((col, index) => {
+    parts.push(`    <${tags[index]}>${escapeXmlValue(row[col])}</${tags[index]}>`);
+  });
+  parts.push('  </row>');
+  return parts.join('\n');
+}
+
+/** XML 尾。 */
+export function xmlFooter(): string {
+  return '</rows>';
+}
+
+export function serializeXml(columns: string[], rows: Record<string, unknown>[]): string {
+  const parts: string[] = [xmlHeader()];
+  for (const row of rows) parts.push(xmlRow(columns, row));
+  parts.push(xmlFooter());
   return parts.join('\n') + '\n';
 }

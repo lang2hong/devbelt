@@ -29,11 +29,21 @@ function escapeCell(value: unknown): string {
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
+/** 表头行（含行尾 CRLF）。 */
+export function csvHeaderLine(columns: string[]): string {
+  return columns.map(escapeCell).join(',') + '\r\n';
+}
+
+/** 单数据行（含行尾 CRLF），供流式导出逐行写出。 */
+export function csvDataLine(columns: string[], row: Record<string, unknown>): string {
+  return columns.map((column) => escapeCell(row[column])).join(',') + '\r\n';
+}
+
 /** Serializes tabular data as RFC 4180-compatible UTF-8 CSV. */
 export function serializeCsv(columns: string[], rows: Record<string, unknown>[]): string {
-  const lines = [columns.map(escapeCell).join(',')];
-  for (const row of rows) lines.push(columns.map((column) => escapeCell(row[column])).join(','));
-  return lines.join('\r\n') + '\r\n';
+  let out = csvHeaderLine(columns);
+  for (const row of rows) out += csvDataLine(columns, row);
+  return out;
 }
 
 /**

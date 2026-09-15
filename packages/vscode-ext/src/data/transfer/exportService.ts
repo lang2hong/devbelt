@@ -1,11 +1,13 @@
 import type { ColumnMeta, QueryService } from '@db-client/core';
-import { DatabaseType } from '@db-client/core';
-import { serializeCsv } from './csv';
-import { serializeJson } from './json';
+import { DatabaseType, streamRowsByKeyset } from '@db-client/core';
+import { sqlCommentSafe } from '@db-client/core/sql';
+import { serializeCsv, csvHeaderLine, csvDataLine } from './csv';
+import { serializeJson, projectRow } from './json';
 import { serializeXlsx } from './xlsx';
-import { serializeXml } from './xml';
+import { serializeXml, xmlHeader, xmlRow, xmlFooter } from './xml';
+import { serializeTxt, txtHeaderLine, txtDataLine } from './txt';
 
-export type TransferFormat = 'sql' | 'csv' | 'json' | 'xlsx' | 'xml';
+export type TransferFormat = 'sql' | 'csv' | 'txt' | 'json' | 'xlsx' | 'xml';
 
 export interface ServerInfo {
   name: string;
@@ -82,6 +84,7 @@ export function isBinaryFormat(format: TransferFormat): boolean {
 export function exportRows(options: ExportRowsOptions): string | Buffer {
   const { format, columns, rows, table, database, dialect, sqlDump } = options;
   if (format === 'csv') return serializeCsv(columns, rows);
+  if (format === 'txt') return serializeTxt(columns, rows);
   if (format === 'json') return serializeJson(columns, rows);
   if (format === 'xlsx') return serializeXlsx(columns, rows);
   if (format === 'xml') return serializeXml(columns, rows);
@@ -133,35 +136,138 @@ export function exportFilters(format: TransferFormat): Record<string, string[]> 
     case 'json': return { JSON: ['json'] };
     case 'xlsx': return { Excel: ['xlsx'] };
     case 'xml': return { XML: ['xml'] };
+    case 'txt': return { Text: ['txt'] };
     default: return { SQL: ['sql'] };
   }
 }
 
-/** Reads a full table in bounded pages instead of inheriting the result-view row limit. */
-export async function exportTable(options: ExportTableOptions): Promise<string | Buffer> {
+/**
+ * 流式导出整表：边读边把块交给 `write`，不再把整表行数据驻留内存。
+ *
+ * - csv/json/xml/sql：逐页读取、逐页（或逐行）写出；
+ * - xlsx：zip 容器需汇总中央目录，暂整表缓冲后再写（Excel 大表较少见）。
+ * 主键在所选列内时用 keyset 深分页，否则回退 OFFSET。
+ */
+export async function writeTableExport(
+  options: ExportTableOptions,
+  write: (chunk: string | Uint8Array) => void | Promise<void>,
+): Promise<void> {
   const { source, format, table, database, includeStructure = false, includeData = true, columns: selectedColumns, pageSize = 1000, onProgress, isCancelled, serverInfo } = options;
   const dialect = source.query.dialect;
   const qualified = database ? `${dialect.wrap(database)}.${dialect.wrap(table)}` : dialect.wrap(table);
-  const allColumns = includeData ? (await source.metadata.getColumns(table, database)).map((column) => column.name) : [];
+
+  const columnMeta = includeData ? await source.metadata.getColumns(table, database) : [];
+  const allColumns = columnMeta.map((column) => column.name);
   const columns = includeData
     ? (selectedColumns && selectedColumns.length ? selectedColumns.filter((c) => allColumns.includes(c)) : allColumns)
     : [];
-  const colList = columns.map((c) => dialect.wrap(c)).join(', ');
-  const selectCols = colList || '*';
-  const rows: Record<string, unknown>[] = [];
-  if (includeData) {
-    for (let offset = 0;; offset += pageSize) {
-      if (isCancelled?.()) throw new TransferCancelledError();
-      const page = await source.query.query(dialect.getPagedSql(`SELECT ${selectCols} FROM ${qualified}`, offset, pageSize));
-      rows.push(...page.rows);
-      onProgress?.({ rows: rows.length });
-      if (page.rows.length < pageSize) break;
+  const pkColumns = columnMeta.filter((c) => c.isPrimary).map((c) => c.name);
+  const keysetColumns = pkColumns.length > 0 && pkColumns.every((c) => columns.includes(c)) ? pkColumns : [];
+  const selectCols = columns.map((c) => dialect.wrap(c)).join(', ') || '*';
+
+  const forEachPage = async (onRows: (rows: Record<string, unknown>[]) => void | Promise<void>): Promise<void> => {
+    let seen = 0;
+    for await (const rows of streamRowsByKeyset(
+      source.query, dialect, `SELECT ${selectCols} FROM ${qualified}`, keysetColumns, pageSize,
+      { isCancelled, cancelError: () => new TransferCancelledError() },
+    )) {
+      await onRows(rows);
+      seen += rows.length;
+      onProgress?.({ rows: seen });
     }
+  };
+
+  // 非 SQL 格式在 includeData=false 时不产出内容（与旧行为一致）。
+  if (!includeData && format !== 'sql') return;
+
+  if (format === 'csv') {
+    await write(csvHeaderLine(columns));
+    await forEachPage(async (rows) => {
+      for (const row of rows) await write(csvDataLine(columns, row));
+    });
+    return;
   }
-  const data = includeData ? exportRows({ format, columns, rows, table, database, dialect }) : '';
-  if (format !== 'sql') return data;
-  const ddl = includeStructure ? (await source.table.getCreateSql(table, database)) : '';
-  return buildSqlDump({ serverInfo, dialect, database, table, qualified, ddl, data: String(data), includeStructure, includeData });
+
+  if (format === 'txt') {
+    await write(txtHeaderLine(columns));
+    await forEachPage(async (rows) => {
+      for (const row of rows) await write(txtDataLine(columns, row));
+    });
+    return;
+  }
+
+  if (format === 'json') {
+    await write('[\n');
+    let first = true;
+    if (includeData) {
+      await forEachPage(async (rows) => {
+        for (const row of rows) {
+          const pretty = JSON.stringify(projectRow(columns, row), null, 2).split('\n').join('\n  ');
+          await write(`${first ? '' : ',\n'}  ${pretty}`);
+          first = false;
+        }
+      });
+    }
+    await write(first ? ']\n' : '\n]\n');
+    return;
+  }
+
+  if (format === 'xml') {
+    await write(xmlHeader() + '\n');
+    if (includeData) {
+      await forEachPage(async (rows) => {
+        for (const row of rows) await write(xmlRow(columns, row) + '\n');
+      });
+    }
+    await write(xmlFooter() + '\n');
+    return;
+  }
+
+  if (format === 'xlsx') {
+    const rows: Record<string, unknown>[] = [];
+    if (includeData) await forEachPage((pageRows) => { rows.push(...pageRows); });
+    await write(serializeXlsx(columns, rows));
+    return;
+  }
+
+  // SQL
+  if (serverInfo) await write(buildDumpHeader(serverInfo, database, dialect.dbType) + '\n\n');
+  const prelude = sqlPrelude(dialect.dbType);
+  if (prelude) await write(prelude + '\n\n');
+  if (includeStructure) {
+    const ddl = await source.table.getCreateSql(table, database);
+    await write(
+      '-- ----------------------------\n'
+      + `-- Table structure for ${sqlCommentSafe(table)}\n`
+      + '-- ----------------------------\n'
+      + `DROP TABLE IF EXISTS ${qualified};\n`
+      + `${ddl.replace(/;\s*$/, '')};\n\n`,
+    );
+  }
+  if (includeData) {
+    await write(
+      '-- ----------------------------\n'
+      + `-- Records of ${sqlCommentSafe(table)}\n`
+      + '-- ----------------------------\n'
+      + 'BEGIN;\n',
+    );
+    await forEachPage(async (rows) => {
+      if (rows.length) await write(dialect.buildInsertSql(rows, columns, table, database).replace(/\n$/, '') + '\n');
+    });
+    await write('COMMIT;\n\n');
+  }
+  const epilogue = sqlEpilogue(dialect.dbType);
+  if (epilogue) await write(epilogue + '\n');
+}
+
+/** 读取整表并一次性返回内容（内部走 `writeTableExport`）。大表请用流式版本。 */
+export async function exportTable(options: ExportTableOptions): Promise<string | Buffer> {
+  const chunks: (string | Uint8Array)[] = [];
+  await writeTableExport(options, (chunk) => { chunks.push(chunk); });
+  if (chunks.some((c) => Buffer.isBuffer(c))) {
+    return Buffer.concat(chunks.map((c) => (Buffer.isBuffer(c) ? c : Buffer.from(c))));
+  }
+  return chunks.join('');
 }
 
 interface SqlDumpParams {
@@ -189,7 +295,7 @@ function buildSqlDump(params: SqlDumpParams): string {
 
   if (includeStructure) {
     parts.push('-- ----------------------------');
-    parts.push(`-- Table structure for ${table}`);
+    parts.push(`-- Table structure for ${sqlCommentSafe(table)}`);
     parts.push('-- ----------------------------');
     parts.push(`DROP TABLE IF EXISTS ${qualified};`);
     parts.push(`${ddl.replace(/;\s*$/, '')};`);
@@ -197,7 +303,7 @@ function buildSqlDump(params: SqlDumpParams): string {
 
   if (includeData && data) {
     parts.push('-- ----------------------------');
-    parts.push(`-- Records of ${table}`);
+    parts.push(`-- Records of ${sqlCommentSafe(table)}`);
     parts.push('-- ----------------------------');
     parts.push('BEGIN;');
     parts.push(data.replace(/\n$/, ''));
@@ -212,11 +318,11 @@ function buildSqlDump(params: SqlDumpParams): string {
 
 function buildDumpHeader(info: ServerInfo, database: string | undefined, dbType: DatabaseType): string {
   const lines: string[] = ['/*', ' DB Client Pro Dump SQL', ''];
-  lines.push(` Source Server         : ${info.name || ''}`);
+  lines.push(` Source Server         : ${sqlCommentSafe(info.name)}`);
   lines.push(` Source Server Type    : ${dbType}`);
-  if (info.version) lines.push(` Source Server Version : ${info.version}`);
-  if (info.host) lines.push(` Source Host           : ${info.host}${info.port ? `:${info.port}` : ''}`);
-  if (database) lines.push(` Source Schema         : ${database}`);
+  if (info.version) lines.push(` Source Server Version : ${sqlCommentSafe(info.version)}`);
+  if (info.host) lines.push(` Source Host           : ${sqlCommentSafe(info.host)}${info.port ? `:${info.port}` : ''}`);
+  if (database) lines.push(` Source Schema         : ${sqlCommentSafe(database)}`);
   lines.push('');
   lines.push(` Target Server Type    : ${dbType}`);
   lines.push(' File Encoding         : 65001');

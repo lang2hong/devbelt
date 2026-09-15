@@ -29,6 +29,16 @@ describe('OrgClient', () => {
     await expect(client.getUserId()).resolves.toBe('42');
   });
 
+  it('encodes path params so ids cannot alter the request path', async () => {
+    const t = makeTransport();
+    t.set(() => ({ status: 200, body: { folders: [], resource: {} } }));
+    const client = new OrgClient(t);
+    await client.listFolders('9/../../x');
+    await client.getResource('9', 'a/b?c');
+    expect(t.calls[0].path).toBe('/api/organizations/9%2F..%2F..%2Fx/folders');
+    expect(t.calls[1].path).toBe('/api/organizations/9/resources/a%2Fb%3Fc');
+  });
+
   it('maps 404 organization-not-found to typed error', async () => {
     const t = makeTransport();
     t.set(() => ({ status: 404, body: { code: 'ORGANIZATION_NOT_FOUND', message: 'nope' } }));

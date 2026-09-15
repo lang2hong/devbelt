@@ -201,7 +201,7 @@ function saveEdit() {
   const f = editingCol.value;
   if (!f) return;
   if (!f.type.trim()) return notify(t('wv.design.columnTypeRequired'));
-  post({ type: 'modifyColumn', column: f.name, definition: buildDef(f) });
+  post({ type: 'modifyColumn', column: f.name, spec: toSpec(f) });
   editingCol.value = null;
   editingName.value = '';
   clearNotice();
@@ -212,7 +212,7 @@ function saveAdd() {
   const type = (f.type || defaultType.value).trim();
   if (!f.name.trim()) return notify(t('wv.design.columnNameRequired'));
   if (!type) return notify(t('wv.design.columnTypeRequired'));
-  post({ type: 'addColumn', column: f.name.trim(), definition: buildDef({ ...f, type }) });
+  post({ type: 'addColumn', column: f.name.trim(), spec: toSpec({ ...f, type }) });
   newRow.value = { name: '', type: '', notNull: false, defaultVal: '', comment: '' };
   clearNotice();
 }
@@ -240,19 +240,22 @@ function dropCol(col: any) {
   post({ type: 'dropColumn', column: col.name });
 }
 
-function buildDef(f: ColForm): string {
-  let s = f.type.trim();
-  s += f.notNull ? ' NOT NULL' : ' NULL';
+/**
+ * 列定义以**结构化字段**下发，SQL 片段一律由 db-core 合成。
+ *
+ * 过去前端拼 `type NOT NULL DEFAULT '...' COMMENT '...'` 字符串，转义与类型校验
+ * 都靠扩展端黑名单，既容易漏（`#`/换行）又让方言差异散落在前端。现在只传原文，
+ * 由 db-core 做类型白名单校验、标识符/值转义（COMMENT 仅 MySQL 生效由方言决定）。
+ */
+function toSpec(f: ColForm) {
   const dv = f.defaultVal.trim();
-  if (dv !== '') {
-    const raw = /^-?\d+(\.\d+)?$/.test(dv) || /^(CURRENT_TIMESTAMP|CURRENT_DATE|CURRENT_TIME|NULL)$/i.test(dv);
-    s += ` DEFAULT ${raw ? dv : `'${dv.replace(/'/g, "''")}'`}`;
-  }
-  // 列内联 COMMENT 是 MySQL 语法；PG/SQLite 的 ALTER TABLE 不接受，附加会导致语法错误。
-  if (f.comment.trim() && dbType.value === 'MYSQL') {
-    s += ` COMMENT '${f.comment.trim().replace(/'/g, "''")}'`;
-  }
-  return s;
+  const cmt = f.comment.trim();
+  return {
+    type: f.type.trim(),
+    notNull: f.notNull,
+    defaultValue: dv === '' ? undefined : dv,
+    comment: cmt === '' ? undefined : cmt,
+  };
 }
 
 // ── 索引 ──
