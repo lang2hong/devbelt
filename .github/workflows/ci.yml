@@ -195,3 +195,30 @@ jobs:
           PORT: '5173'
           E2E_BASE_URL: http://localhost:5173
         run: pnpm -C packages/e2e e2e
+
+  # VSIX 安装 smoke：真实 vsce 打包 → 真实安装 → 真实启动并断言扩展激活/命令注册。
+  # 独立 job：需下载 VS Code（stable）与 xvfb（Linux 无显示），成本高，不塞进 build matrix。
+  # 覆盖 .vscodeignore 漏文件、main 路径错、激活失败等只有真装才暴露的问题。
+  vsix-smoke:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      # 扩展 bundle（out/）+ webview dist 必须先就绪，vsce 才能打进 vsix。
+      - name: Build extension
+        run: pnpm -C packages/db-core build && pnpm -C packages/vscode-ext build
+
+      - name: Run VSIX install smoke
+        run: xvfb-run -a pnpm -C packages/vscode-ext vsix:smoke

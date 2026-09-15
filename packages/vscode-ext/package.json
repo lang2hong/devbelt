@@ -1655,7 +1655,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "lint": "tsc --noEmit -p tsconfig.test.json",
     "test": "pnpm -C ../db-core build && cd webview && npx vite build && cd .. && node esbuild.js && vitest run",
-    "package": "vsce package --no-dependencies"
+    "package": "vsce package --no-dependencies",
+    "vsix:smoke": "node scripts/vsix-smoke.mjs"
   },
   "dependencies": {
     "@noble/curves": "2.4.0",
@@ -1671,6 +1672,7 @@
     "@types/vscode": "^1.85.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "@vscode/vsce": "^3.9.2",
+    "@vscode/test-electron": "^2.4.1",
     "esbuild": "^0.24.0",
     "mysql2": "^3.23.2",
     "pg": "^8.22.0",
