@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  scanOptionsForDbType,
   scanSql,
   sqlSkeleton,
   splitExecutableStatements,
   splitSqlWithRanges,
   usesDelimiterDirective,
 } from '../../src/sql';
+import { DatabaseType } from '../../src/types/connection';
 
 describe('scanSql / sqlSkeleton', () => {
   it('classifies code, strings, comments, executable comments and dollar literals', () => {
@@ -133,5 +135,25 @@ describe('美元引用 tag 首字规则', () => {
   });
   it('$1$ 不是美元引用（tag 不得以数字开头）', () => {
     expect(kinds('SELECT $1$; DROP TABLE t; --$1$')).not.toContain('dollar');
+  });
+});
+
+describe('scanOptionsForDbType：方言扫描选项单一来源（F1 回归）', () => {
+  it('MySQL / 其它方言的选项差异', () => {
+    expect(scanOptionsForDbType(DatabaseType.MYSQL)).toEqual({ hashComment: true, dashDashRequiresSpace: true, backslashEscapes: true });
+    expect(scanOptionsForDbType(DatabaseType.PG)).toEqual({ hashComment: false, dashDashRequiresSpace: false, backslashEscapes: false });
+    expect(scanOptionsForDbType(undefined)).toEqual({ hashComment: false, dashDashRequiresSpace: false, backslashEscapes: false });
+  });
+
+  it('MySQL SHOW CREATE 里 COMMENT 的 \\\' 不会误切后续语句', () => {
+    // 源库 SHOW CREATE TABLE 会把注释里的引号渲染为 \' 转义。
+    const sql = String.raw`CREATE TABLE t (c INT COMMENT 'don\'t');
+INSERT INTO t VALUES (1);`;
+    // 标准（默认/PG）语义下反斜杠不转义：首条字符串提前结束、边界漂移，后续 INSERT 被吞。
+    expect(splitExecutableStatements(sql)).toHaveLength(1);
+    // MySQL 选项：正确切出两条。
+    const stmts = splitExecutableStatements(sql, scanOptionsForDbType(DatabaseType.MYSQL));
+    expect(stmts).toHaveLength(2);
+    expect(stmts[1]).toBe('INSERT INTO t VALUES (1)');
   });
 });

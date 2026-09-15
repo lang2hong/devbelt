@@ -3,7 +3,7 @@ import { DataDiffService } from './dataDiffService.js';
 import type { QueryService, QueryOptions } from './queryService.js';
 import type { MetadataService } from './metadataService.js';
 import type { TableService } from './tableService.js';
-import { splitExecutableStatements } from '../sql/index.js';
+import { splitExecutableStatements, scanOptionsForDbType } from '../sql/index.js';
 
 /**
  * 库间传输的每条语句都不进查询历史。
@@ -62,7 +62,7 @@ export class DataTransferService {
           const syncSql = await SchemaDiffService.generateSyncSql(
             [diff], targetDb, sourceTable, sourceDb,
           );
-          const statements = splitExecutableStatements(syncSql);
+          const statements = splitExecutableStatements(syncSql, scanOptionsForDbType(targetQuery.dialect.dbType));
           for (const stmt of statements) {
             if (stmt.trim()) await targetQuery.query(stmt.trim(), undefined, SKIP);
           }
@@ -112,7 +112,7 @@ export class DataTransferService {
       targetDb,
       targetQuery,
     );
-    const statements = splitExecutableStatements(syncSql);
+    const statements = splitExecutableStatements(syncSql, scanOptionsForDbType(targetQuery.dialect.dbType));
     for (const stmt of statements) {
       if (options.isCancelled?.()) throw new Error('Transfer cancelled.');
       const trimmed = stmt.trim();

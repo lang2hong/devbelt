@@ -10,3 +10,4 @@ export type { SqlSegment, SqlSegmentKind, SqlScanOptions } from './lexer.js';
 export { splitSqlWithRanges, splitExecutableStatements } from './split.js';
 export type { SqlStatementRange } from './split.js';
 export { sqlCommentSafe } from './comment.js';
+export { scanOptionsForDbType } from './scanOptions.js';
