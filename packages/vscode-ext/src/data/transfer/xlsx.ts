@@ -62,6 +62,14 @@ function crc32(buf: Buffer): number {
 const DOS_DATE = 0x0021;
 const DOS_TIME = 0;
 
+/** ZIP32 字段上限：超出需 ZIP64（本实现不支持）。显式抛错，避免静默产出损坏文件。 */
+const ZIP32_MAX = 0xffffffff;
+function assertZip32(value: number, what: string): void {
+  if (value > ZIP32_MAX) {
+    throw new Error(`.xlsx export exceeds ZIP32 limits (${what} > 4 GiB); ZIP64 is not supported.`);
+  }
+}
+
 function zip(entries: ZipEntry[]): Buffer {
   const locals: Buffer[] = [];
   const central: Buffer[] = [];
@@ -71,6 +79,9 @@ function zip(entries: ZipEntry[]): Buffer {
     const name = Buffer.from(entry.name, 'utf8');
     const compressed = deflateRawSync(entry.data);
     const crc = crc32(entry.data);
+    assertZip32(entry.data.length, `entry ${entry.name} uncompressed size`);
+    assertZip32(compressed.length, `entry ${entry.name} compressed size`);
+    assertZip32(offset, 'local header offset');
 
     const header = Buffer.alloc(30);
     header.writeUInt32LE(0x04034b50, 0);
@@ -407,6 +418,9 @@ export async function writeXlsx(
     const name = Buffer.from(entry.name, 'utf8');
     const compressed = deflateRawSync(entry.data);
     const crc = crc32(entry.data);
+    assertZip32(entry.data.length, `entry ${entry.name} uncompressed size`);
+    assertZip32(compressed.length, `entry ${entry.name} compressed size`);
+    assertZip32(offset, 'local header offset');
     const localOffset = offset;
     await writeBuf(zipLocalHeader(name, 0, crc, compressed.length, entry.data.length));
     await writeBuf(name);
@@ -451,6 +465,8 @@ export async function writeXlsx(
   await consumer;
 
   const crc = (crcState ^ -1) >>> 0;
+  assertZip32(compressedSize, 'worksheet compressed size');
+  assertZip32(uncompressedSize, 'worksheet uncompressed size');
   const descriptor = Buffer.alloc(16);
   descriptor.writeUInt32LE(0x08074b50, 0); // data descriptor signature
   descriptor.writeUInt32LE(crc, 4);
@@ -461,6 +477,7 @@ export async function writeXlsx(
 
   const directory = Buffer.concat(central);
   const directoryOffset = offset;
+  assertZip32(directoryOffset, 'central directory offset');
   await writeBuf(directory);
 
   const end = Buffer.alloc(22);

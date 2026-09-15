@@ -231,9 +231,9 @@ export async function writeTableExport(
   }
 
   if (format === 'xlsx') {
-    // 流式：逐页写入工作表，避免大表整表驻留内存。无数据时走内存版空表。
-    if (includeData) await writeXlsx(columns, forEachPage, write);
-    else await write(serializeXlsx(columns, []));
+    // 流式：逐页写入工作表，避免大表整表驻留内存。
+    // （`!includeData` 的 xlsx 已在上方早退，故此处必为有数据。）
+    await writeXlsx(columns, forEachPage, write);
     return;
   }
 
