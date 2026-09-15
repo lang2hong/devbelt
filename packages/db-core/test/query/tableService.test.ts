@@ -302,7 +302,7 @@ describe('validateColumnType / 结构化 addColumn / modifyColumn', () => {
   });
 
   it('拒绝注入形状：分隔符/注释/换行/引号逃逸', () => {
-    for (const t of ['INT; DROP TABLE users', 'INT -- x', 'INT # x', 'INT /* x */', 'INT\nDROP', 'INT`x', 'INT"x', 'INT\\x', "VARCHAR(10", "INT)"]) {
+    for (const t of ['INT; DROP TABLE users', 'INT -- x', 'INT # x', 'INT /* x */', 'INT\nDROP', 'INT`x', 'INT"x', 'INT\\x', "VARCHAR(10", "INT)", 'INT[', 'INT]']) {
       expect(() => validateColumnType(t)).toThrow();
     }
   });

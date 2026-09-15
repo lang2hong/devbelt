@@ -44,6 +44,17 @@ export function validateColumnType(raw: string): string {
   }
   if (depth !== 0) throw new Error('Column type has unbalanced parentheses.');
 
+  // `[]` 用于 PG 数组类型（integer[]、text[][]）；同样要求配平，避免半截形状。
+  let brackets = 0;
+  for (const ch of type) {
+    if (ch === '[') brackets++;
+    else if (ch === ']') {
+      brackets--;
+      if (brackets < 0) throw new Error('Column type has unbalanced brackets.');
+    }
+  }
+  if (brackets !== 0) throw new Error('Column type has unbalanced brackets.');
+
   const quotes = type.replace(/''/g, '').match(/'/g)?.length ?? 0;
   if (quotes % 2 !== 0) throw new Error('Column type has an unterminated string literal.');
 
