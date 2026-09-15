@@ -21,15 +21,15 @@ export interface NewColumnSpec extends ColumnSpec {
  *
  * 列类型是唯一无法参数化、必须拼进 SQL 的用户输入（其余走标识符转义 / 值转义）。
  * 因此这里用**白名单 + 结构检查**而不是黑名单：只允许字母/数字/下划线/空格/括号/
- * 逗号/点/连字符/单引号，且括号闭合、单引号成对；显式拒绝语句分隔符、注释起始符、
- * 换行、反引号/双引号/反斜杠。
+ * 逗号/点/连字符/单引号/方括号（PG 数组类型如 `integer[]`），且括号闭合、单引号成对；
+ * 显式拒绝语句分隔符、注释起始符、换行、反引号/双引号/反斜杠。
  */
 export function validateColumnType(raw: string): string {
   const type = String(raw ?? '').trim();
   if (!type) throw new Error('Column type is required.');
   if (type.length > 64) throw new Error('Column type is too long (max 64 characters).');
   if (!/^[A-Za-z]/.test(type)) throw new Error('Column type must start with a letter.');
-  if (!/^[A-Za-z0-9_ (),.'-]+$/.test(type)) {
+  if (!/^[A-Za-z0-9_ (),.'\[\]-]+$/.test(type)) {
     throw new Error('Column type contains invalid characters.');
   }
   if (/--/.test(type)) throw new Error('Column type contains invalid characters.');

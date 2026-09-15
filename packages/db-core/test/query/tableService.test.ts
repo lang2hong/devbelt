@@ -296,7 +296,7 @@ describe('TableService.changeColumn / renameColumn', () => {
 
 describe('validateColumnType / 结构化 addColumn / modifyColumn', () => {
   it('接受常见合法类型', () => {
-    for (const t of ['INT', 'VARCHAR(255)', 'DECIMAL(10,2)', "ENUM('a','b')", "SET('x')", 'TIMESTAMP(6) WITH TIME ZONE', 'CHARACTER SET utf8mb4']) {
+    for (const t of ['INT', 'VARCHAR(255)', 'DECIMAL(10,2)', "ENUM('a','b')", "SET('x')", 'TIMESTAMP(6) WITH TIME ZONE', 'CHARACTER SET utf8mb4', 'integer[]', 'text[][]']) {
       expect(validateColumnType(t)).toBe(t);
     }
   });
