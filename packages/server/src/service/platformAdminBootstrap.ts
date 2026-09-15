@@ -54,6 +54,8 @@ export async function promotePlatformAdmin(
   }
 
   await userRepo.setRole(user.id, 'platform_admin');
+  // actorUserId 为 null 表示**系统引导**发起（无人类操作者），与真人提权区分；
+  // CLI `admin:promote` 复用同一路径，语义一致。
   auditWriter.write({
     eventType: 'admin.role.granted',
     result: 'success',
