@@ -195,24 +195,37 @@ export class PostgreSqlDialect implements SqlDialect {
 
   getColumnsSql(table: string): string {
     validateIdent(table, 63);
-    return `SELECT column_name AS name,
-        data_type AS simple_type,
+    // 主键经 table_constraints/key_column_usage 判定并输出 MySQL 风格的 key='PRI'：
+    // 过去用 `'' AS key`，normalizeColumnMeta 因此对 PG 永远 isPrimary=false，
+    // 使 keyset 分页在「无主键回退全列」时把可空列当游标 → `col > NULL` 恒 UNKNOWN 静默丢行。
+    return `SELECT c.column_name AS name,
+        c.data_type AS simple_type,
         CASE
-          WHEN data_type IN ('character varying', 'character') AND character_maximum_length IS NOT NULL
-            THEN data_type || '(' || character_maximum_length || ')'
-          WHEN data_type = 'numeric' AND numeric_precision IS NOT NULL
-            THEN data_type || '(' || numeric_precision || ',' || COALESCE(numeric_scale, 0) || ')'
-          WHEN data_type = 'USER-DEFINED' AND udt_name IS NOT NULL
-            THEN udt_name
-          ELSE data_type
+          WHEN c.data_type IN ('character varying', 'character') AND c.character_maximum_length IS NOT NULL
+            THEN c.data_type || '(' || c.character_maximum_length || ')'
+          WHEN c.data_type = 'numeric' AND c.numeric_precision IS NOT NULL
+            THEN c.data_type || '(' || c.numeric_precision || ',' || COALESCE(c.numeric_scale, 0) || ')'
+          WHEN c.data_type = 'USER-DEFINED' AND c.udt_name IS NOT NULL
+            THEN c.udt_name
+          ELSE c.data_type
         END AS type,
-        COALESCE(column_default, '') AS default_value,
-        is_nullable AS nullable,
+        COALESCE(c.column_default, '') AS default_value,
+        c.is_nullable AS nullable,
         '' AS comment,
-        '' AS key
-      FROM information_schema.columns
-      WHERE table_name = '${table}' AND table_schema = current_schema()
-      ORDER BY ordinal_position`;
+        CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS key
+      FROM information_schema.columns c
+      LEFT JOIN (
+        SELECT kcu.column_name
+          FROM information_schema.table_constraints tc
+          JOIN information_schema.key_column_usage kcu
+            ON tc.constraint_name = kcu.constraint_name
+           AND tc.table_schema = kcu.table_schema
+         WHERE tc.constraint_type = 'PRIMARY KEY'
+           AND tc.table_name = '${table}'
+           AND tc.table_schema = current_schema()
+      ) pk ON pk.column_name = c.column_name
+      WHERE c.table_name = '${table}' AND c.table_schema = current_schema()
+      ORDER BY c.ordinal_position`;
   }
 
   parseTableList(rows: any[]): TableMeta[] {

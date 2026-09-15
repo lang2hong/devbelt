@@ -329,6 +329,8 @@ export class TableService {
       throw new Error(`${dbType} does not support reordering columns.`);
     }
     const def = await this.getFullColumnDef(table, column, database);
+    // def 来自**同库** SHOW CREATE TABLE 解析（相对可信，与跨库 information_schema 不同）；
+    // 若将来允许自定义/跨库定义，须同 schemaDiffService 一样过 validateColumnType。
     const position = afterColumn ? ` AFTER ${this.wrap(afterColumn)}` : ' FIRST';
     return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} CHANGE COLUMN ${this.wrap(column)} ${this.wrap(column)} ${def}${position}`);
   }

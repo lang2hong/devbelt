@@ -2,6 +2,7 @@ import type { MetadataService } from './metadataService.js';
 import type { TableService } from './tableService.js';
 import type { ColumnMeta } from '../types/meta.js';
 import { validateIdent } from '../utils/validate.js';
+import { validateColumnType } from './columnSpec.js';
 
 /** 列差异 */
 export interface ColumnDiff {
@@ -139,12 +140,14 @@ export class SchemaDiffService {
         const changes: string[] = [];
         for (const c of d.columns) {
           const colIdent = validateIdent(c.columnName);
+          // sourceType 来自源库 information_schema 列元数据，属**跨信任面**（源库可能不可信）。
+          // 类型是必须裸拼进 DDL 的部分，故与用户输入路径同一门槛校验（括号/引号闭合、白名单字符）。
           if (c.status === 'added') {
-            changes.push(`  ADD COLUMN \`${colIdent}\` ${c.sourceType || 'TEXT'}`);
+            changes.push(`  ADD COLUMN \`${colIdent}\` ${validateColumnType(c.sourceType || 'TEXT')}`);
           } else if (c.status === 'removed') {
             changes.push(`  DROP COLUMN \`${colIdent}\``);
           } else if (c.status === 'changed') {
-            changes.push(`  MODIFY COLUMN \`${colIdent}\` ${c.sourceType || 'TEXT'}`);
+            changes.push(`  MODIFY COLUMN \`${colIdent}\` ${validateColumnType(c.sourceType || 'TEXT')}`);
           }
         }
         if (changes.length) {

@@ -260,3 +260,26 @@ describe('过程体 / 美元引用 fail-closed（防 DO 逃逸）', () => {
     expect(shown.errors).toHaveLength(1);
   });
 });
+
+describe('写/危险关键字补全（#2）', () => {
+  it.each([
+    "COPY t TO STDOUT",
+    "COPY t FROM '/tmp/x.csv'",
+    "LOAD DATA INFILE '/tmp/x.csv' INTO TABLE t",
+    "SELECT * FROM t INTO OUTFILE '/tmp/x'",
+    "SELECT * FROM t INTO DUMPFILE '/tmp/x'",
+  ])('%s 判为 critical', (sql) => {
+    expect(analyzeSqlRisk(sql)).toMatchObject({ level: 'critical', isWrite: true });
+  });
+
+  it('VACUUM / REINDEX / SET GLOBAL 判为 write', () => {
+    expect(analyzeSqlRisk('VACUUM t')).toMatchObject({ level: 'write', isWrite: true });
+    expect(analyzeSqlRisk('REINDEX TABLE t')).toMatchObject({ level: 'write', isWrite: true });
+    expect(analyzeSqlRisk('SET GLOBAL max_connections = 1')).toMatchObject({ level: 'write', isWrite: true });
+  });
+
+  it('只读连接拦截 COPY 与 INTO OUTFILE（不早退）', async () => {
+    await expect(confirmSqlExecution(conn({ readOnly: true }), "COPY t TO STDOUT")).resolves.toBe(false);
+    await expect(confirmSqlExecution(conn({ readOnly: true }), "SELECT * FROM t INTO OUTFILE '/tmp/x'")).resolves.toBe(false);
+  });
+});

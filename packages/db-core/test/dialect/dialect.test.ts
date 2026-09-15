@@ -245,3 +245,18 @@ describe('getKeysetSql（keyset 深分页）', () => {
     expect(() => d.getKeysetSql('SELECT * FROM `t`', ['id'], [1, 2], 10)).toThrow(/length/);
   });
 });
+
+describe('PG 主键探测 / keyset 游标 NULL 防护', () => {
+  it('PG getColumnsSql 通过 information_schema 约束输出 key=PRI（根因：过去恒为空）', () => {
+    const sql = new PostgreSqlDialect().getColumnsSql('users');
+    expect(sql).toContain('PRIMARY KEY');
+    expect(sql).toContain("THEN 'PRI'");
+    expect(sql).toContain('information_schema.table_constraints');
+  });
+
+  it('keyset afterValues 含 null/undefined 时 fail-closed 抛错', () => {
+    const d = new MysqlDialect();
+    expect(() => d.getKeysetSql('SELECT * FROM `t`', ['id'], [null], 10)).toThrow(/null/);
+    expect(() => d.getKeysetSql('SELECT * FROM `t`', ['id'], [undefined], 10)).toThrow(/null/);
+  });
+});

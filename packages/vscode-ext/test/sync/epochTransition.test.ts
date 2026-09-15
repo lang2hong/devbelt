@@ -84,3 +84,11 @@ describe('EpochTransitionCoordinator', () => {
     await expect(tx.reconcile('1', '2', snapshot('3'))).rejects.toThrow(/does not match/);
   });
 });
+describe('EpochTransitionCoordinator.resume 分支 4', () => {
+  it('keyEpoch 既不等于 from/to 也不 > to → fail-closed 抛错且保留 intent', async () => {
+    const { tx } = makeCoordinator();
+    await tx.writePending({ fromKeyEpoch: '1', toKeyEpoch: '3' });
+    await expect(tx.resume(snapshot('2'))).rejects.toThrow(/does not match intent/);
+    expect(tx.pending).toEqual({ fromKeyEpoch: '1', toKeyEpoch: '3' });
+  });
+});

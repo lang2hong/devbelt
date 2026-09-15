@@ -17,6 +17,16 @@ const WHERE_RE = /\bWHERE\b/;
  * 无法静态判定，一律按 critical 处理（fail-closed）。
  */
 const PROCEDURAL_RE = /\b(DO|CALL|EXECUTE)\b/;
+/**
+ * 服务端文件写出/批量装载：`SELECT … INTO OUTFILE/DUMPFILE`、`COPY … FROM/TO`、
+ * `LOAD DATA INFILE`。可能读写 DB 主机文件或整表装载，按 critical 处理。
+ */
+const SERVER_FILE_RE = /\bINTO\s+(OUTFILE|DUMPFILE)\b/;
+const COPY_RE = /\bCOPY\b/;
+const LOAD_RE = /\bLOAD\b/;
+/** 维护/全局设置类写动作：`VACUUM`/`REINDEX`、`SET GLOBAL`。 */
+const MAINTENANCE_RE = /\b(VACUUM|REINDEX)\b/;
+const GLOBAL_SET_RE = /\bSET\s+GLOBAL\b/;
 
 /**
  * 写语句动作类型，供结果面板区分「影响行数」与「成功」两类展示：
@@ -41,6 +51,10 @@ export function classifyWriteKind(sql: string, options?: SqlScanOptions): 'dml' 
  *  - 含美元引用体（`$$…$$` / `$tag$…$tag$`）的语句——内容不可静态判定。
  * 二者都会让 `confirmSqlExecution` 认定 isWrite 从而施加只读/生产确认，
  * 避免旧实现（不识别 `$` 时 DELETE 可见会被拦）被回归绕过。
+ *
+ * 边界：这是**正向关键字匹配**，不可能穷尽所有写路径（自定义函数副作用、
+ * 未被列出的方言语句等）。真实安全边界是连接所用 DB 账号的 ACL；本分类器
+ * 只用于对只读/生产连接追加确认，不宣称是完备的写检测。
  */
 export function analyzeSqlRisk(sql: string, options?: SqlScanOptions): SqlRisk {
   const segments = scanSql(sql, options);
@@ -64,6 +78,10 @@ export function analyzeSqlRisk(sql: string, options?: SqlScanOptions): SqlRisk {
     if (PROCEDURAL_RE.test(stmt)) {
       return { level: 'critical', isWrite: true, reason: 'procedural or dynamic execution' };
     }
+    if (SERVER_FILE_RE.test(stmt) || COPY_RE.test(stmt) || LOAD_RE.test(stmt)) {
+      return { level: 'critical', isWrite: true, reason: 'server-side file or bulk load' };
+    }
+    if (MAINTENANCE_RE.test(stmt) || GLOBAL_SET_RE.test(stmt)) hasWrite = true;
     if (DML_RE.test(stmt)) hasWrite = true;
     if (UPDATE_OR_DELETE_RE.test(stmt) && !WHERE_RE.test(stmt)) {
       return { level: 'critical', isWrite: true, reason: 'UPDATE or DELETE without WHERE' };

@@ -10,6 +10,7 @@ import type { QueryCallback } from '../../src/types/query';
 class FakeConnection extends IConnection {
   private responses: any[] = [];
   private idx = 0;
+  readonly sqls: string[] = [];
   constructor() {
     super({ host: 'localhost', port: 3306, user: 'root', database: 'test' });
   }
@@ -21,6 +22,7 @@ class FakeConnection extends IConnection {
   query(_sql: string, values: any, callback?: QueryCallback): void;
   query(_sql: string, values?: any, callback?: any): void {
     const cb = callback || values;
+    this.sqls.push(_sql);
     const r = this.responses[this.idx] || { rows: [] };
     this.idx++;
     cb(null, r, []);
@@ -193,5 +195,45 @@ describe('DataDiffService', () => {
     // PG 不翻倍反斜杠（standard_conforming_strings），也不发反引号
     expect(sql).toContain("'C:\\tmp'");
     expect(sql).not.toContain('`');
+  });
+});
+describe('DataDiffService 分页策略（PG keyset 丢行回归）', () => {
+  function makeQueryService(conn: FakeConnection): QueryService {
+    return new QueryService(conn, new MysqlDialect());
+  }
+  function meta(cols: { name: string; isPrimary?: boolean }[]): MetadataService {
+    return {
+      getTables: async () => cols.map((c) => ({ name: c.name })),
+      getColumns: async () => cols.map((c) => ({ name: c.name, isPrimary: c.isPrimary || false })),
+    } as unknown as MetadataService;
+  }
+
+  it('无主键：回退 OFFSET 分页，绝不把可空全列当 keyset 游标', async () => {
+    const sourceConn = new FakeConnection();
+    sourceConn.setResponses([{ rows: [{ a: 1, b: null }] }, { rows: [] }]);
+    const targetConn = new FakeConnection();
+    targetConn.setResponses([{ rows: [] }, { rows: [] }]);
+    const result = await DataDiffService.diff(
+      makeQueryService(sourceConn), meta([{ name: 'a' }, { name: 'b' }]), 's',
+      makeQueryService(targetConn), 't', ['users'],
+    );
+    const sql = sourceConn.sqls.join('\n');
+    expect(sql).toContain('LIMIT 0,'); // MySQL OFFSET 分页
+    expect(sql).not.toMatch(/WHERE \(/); // 未使用 keyset
+    expect(result.diffs[0].rows[0].status).toBe('added');
+  });
+
+  it('有主键：走 keyset（ORDER BY 主键），不用 OFFSET', async () => {
+    const sourceConn = new FakeConnection();
+    sourceConn.setResponses([{ rows: [{ id: 1, name: 'Alice' }] }]);
+    const targetConn = new FakeConnection();
+    targetConn.setResponses([{ rows: [] }]);
+    await DataDiffService.diff(
+      makeQueryService(sourceConn), meta([{ name: 'id', isPrimary: true }, { name: 'name' }]), 's',
+      makeQueryService(targetConn), 't', ['users'],
+    );
+    const sql = sourceConn.sqls.join('\n');
+    expect(sql).toContain('ORDER BY `id` LIMIT');
+    expect(sql).not.toContain('LIMIT 0,');
   });
 });

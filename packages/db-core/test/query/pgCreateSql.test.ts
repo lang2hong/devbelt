@@ -134,7 +134,7 @@ describe('其他方言的 getCreateSql 未受影响', () => {
 describe('PG getColumnsSql 带长度/精度', () => {
   it('type 列拼接 character/numeric 的长度精度，供 schema diff 捕捉变化', () => {
     const sql = new PostgreSqlDialect().getColumnsSql('t1');
-    expect(sql).toContain("data_type || '(' || character_maximum_length || ')'");
+    expect(sql).toContain("c.data_type || '(' || c.character_maximum_length || ')'");
     expect(sql).toContain("numeric_precision");
     expect(sql).toContain('numeric_scale');
     expect(sql).toContain('udt_name');

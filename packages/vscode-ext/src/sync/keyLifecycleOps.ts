@@ -230,7 +230,14 @@ export class KeyLifecycleOps {
       });
       const ownedDek = material.dek.slice();
       const newSnapshot = this.assertEpochAdvanceReceipt(res, newKeyEpoch);
-      await this.deps.installNewEpoch(fromKeyEpoch, newSnapshot, ownedDek);
+      try {
+        await this.deps.installNewEpoch(fromKeyEpoch, newSnapshot, ownedDek);
+      } catch (err) {
+        // installNewEpoch 成功时 ownedDek 成为 live DEK（不零化）；失败路径兜底清零，
+        // 不依赖其内部实现是否清零，避免抛错时这份拷贝泄漏。
+        ownedDek.fill(0);
+        throw err;
+      }
       return newRecovery.code;
     } finally {
       newRecovery.raw.fill(0);
@@ -281,7 +288,12 @@ export class KeyLifecycleOps {
       const ownedDek = material.dek.slice();
       const newSnapshot = this.assertEpochAdvanceReceipt(res, newKeyEpoch);
       const fromKeyEpoch = hasLocalEpoch ? (localEpoch as string) : undefined;
-      await this.deps.installNewEpoch(fromKeyEpoch, newSnapshot, ownedDek);
+      try {
+        await this.deps.installNewEpoch(fromKeyEpoch, newSnapshot, ownedDek);
+      } catch (err) {
+        ownedDek.fill(0);
+        throw err;
+      }
       return newRecovery.code;
     } finally {
       newRecovery.raw.fill(0);

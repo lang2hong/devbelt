@@ -470,3 +470,89 @@ describe('OrderService.handleCallback', () => {
     expect(seenRawBody!.equals(full)).toBe(true);
   });
 });
+describe('wechat nonce 与订单操作同事务（P2 回归保护）', () => {
+  const order: Order = {
+    id: 1, orderNo: 'o1', userId: 1, planCode: 'pro', amountCents: 9900, channel: 'wechat',
+    status: 'pending', channelTradeNo: null, paidTime: null,
+    expiresTime: new Date(Date.now() + 3_600_000), createTime: new Date(), updateTime: new Date(),
+  };
+  const sub: PersonalSubscription = {
+    id: 1, userId: 1, planId: 2, status: 'active', entitlementSnapshot: {},
+    periodStartTime: new Date(), periodEndTime: null, version: 0, createTime: new Date(), updateTime: new Date(),
+  };
+
+  function build(opts: { committed: Set<string>; failFirstAdvance?: boolean; execs: Queryable[] }) {
+    let local = new Set<string>();
+    let lastTx: Queryable | undefined;
+    let advanceCalls = 0;
+    const nonceRepo = {
+      insertIfAbsent: async (exec: Queryable, _c: string, nonceHash: string) => {
+        opts.execs.push(exec);
+        if (opts.committed.has(nonceHash) || local.has(nonceHash)) return false;
+        local.add(nonceHash);
+        return true;
+      },
+    };
+    const orderRepo = {
+      findByOrderNoForUpdate: async (exec: Queryable) => { opts.execs.push(exec); return order; },
+      advance: async (exec: Queryable) => {
+        opts.execs.push(exec);
+        advanceCalls += 1;
+        if (opts.failFirstAdvance && advanceCalls === 1) throw new Error('business failure');
+        return true;
+      },
+    };
+    const paymentRepo = {
+      findByChannelTradeNo: async (exec: Queryable) => { opts.execs.push(exec); return undefined; },
+      create: async (exec: Queryable) => { opts.execs.push(exec); return {}; },
+    };
+    const planRepo = { findByCodeInTx: async (exec: Queryable) => { opts.execs.push(exec); return PLAN; } };
+    const subsRepo = {
+      findByUserIdForUpdate: async (exec: Queryable) => { opts.execs.push(exec); return sub; },
+      update: async (exec: Queryable) => { opts.execs.push(exec); return true; },
+    };
+    const audit = new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as any);
+    const svc = new OrderService({
+      orderRepo: orderRepo as any,
+      paymentRepo: paymentRepo as any,
+      personalPlanRepo: planRepo as any,
+      personalSubscriptionRepo: subsRepo as any,
+      auditWriter: audit,
+      // 事务模型：fn 内写入 local；成功才提交到 committed，抛错即丢弃（回滚）。
+      runner: async (fn) => {
+        local = new Set<string>();
+        lastTx = {} as Queryable;
+        const r = await fn(lastTx);
+        for (const h of local) opts.committed.add(h);
+        return r;
+      },
+      gatewayFor: (c) => new MemoryPaymentGateway(c),
+      nonceRepo,
+    });
+    return { svc, lastTx: () => lastTx };
+  }
+
+  it('insertIfAbsent 收到与订单锁/推进完全相同的 tx（回归：移出事务将失败）', async () => {
+    const execs: Queryable[] = [];
+    const { svc, lastTx } = build({ committed: new Set<string>(), execs });
+    const cb = SUCCESS_CALLBACK('o1', 'wx-1', 9900);
+    cb.headers['wechatpay-nonce'] = 'n1';
+    const r = await svc.handleCallback('wechat', cb.raw, cb.headers);
+    expect(r.kind).toBe('fulfilled');
+    const tx = lastTx();
+    expect(execs.length).toBeGreaterThan(0);
+    expect(execs.every((e) => e === tx)).toBe(true);
+  });
+
+  it('业务失败回滚后 nonce 不提交，渠道重试可成功处理（不误判重放）', async () => {
+    const committed = new Set<string>();
+    const { svc } = build({ committed, failFirstAdvance: true, execs: [] });
+    const cb = SUCCESS_CALLBACK('o1', 'wx-1', 9900);
+    cb.headers['wechatpay-nonce'] = 'n1';
+    await expect(svc.handleCallback('wechat', cb.raw, cb.headers)).rejects.toThrow('business failure');
+    expect(committed.has('n1')).toBe(false);
+    const retry = await svc.handleCallback('wechat', cb.raw, cb.headers);
+    expect(retry.kind).toBe('fulfilled');
+    expect(committed.size).toBe(1); // 重试成功后才提交
+  });
+});

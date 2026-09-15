@@ -39,12 +39,15 @@ export class DataDiffService {
     const diffs: TableDataDiff[] = [];
 
     for (const table of tableList) {
-      const pkColumns = await this.getPkColumns(sourceMeta, table, sourceDb);
+      // 排序/游标列必须是真实主键（NOT NULL 且唯一）；无主键时留空 → OFFSET 分页（完整）。
+      // 行匹配键列则回退全列（无主键表的身份），但绝不拿它当 keyset 游标（可空列会静默丢行）。
+      const orderColumns = await this.getPkColumns(sourceMeta, table, sourceDb);
+      const keyColumns = orderColumns.length ? orderColumns : await this.getKeyColumns(sourceMeta, table, sourceDb);
       const columnNames = await this.getColumnNames(sourceMeta, table, sourceDb);
-      if (!pkColumns.length) continue;
+      if (!keyColumns.length) continue;
 
       const diff = await this.diffTable(
-        sourceQuery, table, sourceDb, pkColumns, columnNames,
+        sourceQuery, table, sourceDb, orderColumns, keyColumns, columnNames,
         targetQuery, targetDb,
       );
       diffs.push(diff);
@@ -53,11 +56,21 @@ export class DataDiffService {
     return { diffs, sourceDb, targetDb };
   }
 
+  /** 真实主键列（仅 isPrimary）；无则空数组。 */
   private static async getPkColumns(meta: MetadataService, table: string, db?: string): Promise<string[]> {
     try {
       const cols = await meta.getColumns(table, db);
-      const pks = cols.filter((c) => c.isPrimary).map((c) => c.name);
-      return pks.length ? pks : cols.map((c) => c.name);
+      return cols.filter((c) => c.isPrimary).map((c) => c.name);
+    } catch {
+      return [];
+    }
+  }
+
+  /** 行匹配键列：优先主键，无主键时回退全列（仅供建映射，不作游标）。 */
+  private static async getKeyColumns(meta: MetadataService, table: string, db?: string): Promise<string[]> {
+    try {
+      const cols = await meta.getColumns(table, db);
+      return cols.map((c) => c.name);
     } catch {
       return [];
     }
@@ -76,14 +89,15 @@ export class DataDiffService {
     sourceQuery: QueryService,
     table: string,
     sourceDb: string,
-    pkColumns: string[],
+    orderColumns: string[],
+    keyColumns: string[],
     columnNames: string[],
     targetQuery: QueryService,
     targetDb: string,
   ): Promise<TableDataDiff> {
     // 无键列会退化成 `ORDER BY `（语法错误）且所有行 key 都是空串而互相覆盖，
     // 必须显式拒绝，而不是生成无效 SQL。
-    if (pkColumns.length === 0) {
+    if (keyColumns.length === 0) {
       throw new Error(`data diff requires at least one key column for table ${table}`);
     }
     const sourceMap = new Map<string, Record<string, unknown>>();
@@ -98,19 +112,19 @@ export class DataDiffService {
     const targetColList = columnNames.map((c) => targetWrap(c)).join(', ');
 
     for await (const rows of streamRowsByKeyset(
-      sourceQuery, sourceQuery.dialect, `SELECT ${colList} FROM ${qualifiedSource}`, pkColumns, this.BATCH_SIZE,
+      sourceQuery, sourceQuery.dialect, `SELECT ${colList} FROM ${qualifiedSource}`, orderColumns, this.BATCH_SIZE,
     )) {
       for (const row of rows) {
-        const key = pkColumns.map((c) => String(row[c])).join('|');
+        const key = keyColumns.map((c) => String(row[c])).join('|');
         sourceMap.set(key, row);
       }
     }
 
     for await (const rows of streamRowsByKeyset(
-      targetQuery, targetQuery.dialect, `SELECT ${targetColList} FROM ${qualifiedTarget}`, pkColumns, this.BATCH_SIZE,
+      targetQuery, targetQuery.dialect, `SELECT ${targetColList} FROM ${qualifiedTarget}`, orderColumns, this.BATCH_SIZE,
     )) {
       for (const row of rows) {
-        const key = pkColumns.map((c) => String(row[c])).join('|');
+        const key = keyColumns.map((c) => String(row[c])).join('|');
         targetMap.set(key, row);
       }
     }
@@ -120,19 +134,19 @@ export class DataDiffService {
     for (const [key, srcRow] of sourceMap) {
       const tgtRow = targetMap.get(key);
       if (!tgtRow) {
-        rows.push({ status: 'added', pkValues: extractPk(pkColumns, srcRow), sourceRow: srcRow });
+        rows.push({ status: 'added', pkValues: extractPk(keyColumns, srcRow), sourceRow: srcRow });
       } else if (!this.rowsEqual(srcRow, tgtRow, columnNames)) {
-        rows.push({ status: 'changed', pkValues: extractPk(pkColumns, srcRow), sourceRow: srcRow, targetRow: tgtRow });
+        rows.push({ status: 'changed', pkValues: extractPk(keyColumns, srcRow), sourceRow: srcRow, targetRow: tgtRow });
       }
     }
 
     for (const [key, tgtRow] of targetMap) {
       if (!sourceMap.has(key)) {
-        rows.push({ status: 'removed', pkValues: extractPk(pkColumns, tgtRow), targetRow: tgtRow });
+        rows.push({ status: 'removed', pkValues: extractPk(keyColumns, tgtRow), targetRow: tgtRow });
       }
     }
 
-    return { tableName: table, pkColumns, columnNames, rows };
+    return { tableName: table, pkColumns: keyColumns, columnNames, rows };
   }
 
   private static rowsEqual(a: Record<string, unknown>, b: Record<string, unknown>, cols: string[]): boolean {

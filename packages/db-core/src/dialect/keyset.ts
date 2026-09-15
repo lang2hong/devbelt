@@ -34,6 +34,13 @@ export function buildKeysetSql(
   }
 
   const vals = afterValues.map(escapeValue);
+  for (const v of afterValues) {
+    // keyset 游标列必须是 NOT NULL 且唯一（通常主键）。NULL 参与比较恒为 UNKNOWN，
+    // 会静默跳过「与游标共享该列前缀及其后序」的行 —— 宁可 fail-closed 也不丢行。
+    if (v === null || v === undefined) {
+      throw new Error('keyset afterValues must not contain null/undefined');
+    }
+  }
   const terms: string[] = [];
   for (let i = 0; i < cols.length; i++) {
     const conds: string[] = [];
