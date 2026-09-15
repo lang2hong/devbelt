@@ -220,6 +220,7 @@ export const zh: MessageCatalog = {
   'sessions.empty': '无设备',
   'ssh.hostKey.unknown': '未知 SSH 主机 {host}（{keyType} {fingerprint}）。是否信任并记住？',
   'ssh.hostKey.trust': '信任',
+  'ssh.hostKey.trustOnce': '仅本次',
   'cmd.yes': '是',
   'cmd.no': '否',
   'cmd.updated': '已更新 {table}.{column}',

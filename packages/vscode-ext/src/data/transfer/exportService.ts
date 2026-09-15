@@ -40,6 +40,8 @@ export interface ExportTableOptions {
   onProgress?: (progress: ExportProgress) => void;
   isCancelled?: () => boolean;
   serverInfo?: ServerInfo;
+  /** CSV/TSV 前置 UTF-8 BOM（`\uFEFF`），便于 Excel 正确识别编码。默认关闭。 */
+  withBom?: boolean;
 }
 
 export interface ExportRowsOptions {
@@ -51,6 +53,8 @@ export interface ExportRowsOptions {
   dialect?: QueryService['dialect'];
   /** SQL 格式：附加 dump 头 / DDL / 事务包裹，与表导出产物保持一致。 */
   sqlDump?: SqlDumpOptions;
+  /** CSV/TSV 前置 UTF-8 BOM（`\uFEFF`）。默认关闭。 */
+  withBom?: boolean;
 }
 
 export interface SqlDumpOptions {
@@ -82,9 +86,10 @@ export function isBinaryFormat(format: TransferFormat): boolean {
  * 运行时；现在两者都在包内实现，静态导入让缺失在编译期就暴露。
  */
 export function exportRows(options: ExportRowsOptions): string | Buffer {
-  const { format, columns, rows, table, database, dialect, sqlDump } = options;
-  if (format === 'csv') return serializeCsv(columns, rows);
-  if (format === 'txt') return serializeTxt(columns, rows);
+  const { format, columns, rows, table, database, dialect, sqlDump, withBom } = options;
+  const bom = withBom ? '\uFEFF' : '';
+  if (format === 'csv') return bom + serializeCsv(columns, rows);
+  if (format === 'txt') return bom + serializeTxt(columns, rows);
   if (format === 'json') return serializeJson(columns, rows);
   if (format === 'xlsx') return serializeXlsx(columns, rows);
   if (format === 'xml') return serializeXml(columns, rows);
@@ -152,7 +157,7 @@ export async function writeTableExport(
   options: ExportTableOptions,
   write: (chunk: string | Uint8Array) => void | Promise<void>,
 ): Promise<void> {
-  const { source, format, table, database, includeStructure = false, includeData = true, columns: selectedColumns, pageSize = 1000, onProgress, isCancelled, serverInfo } = options;
+  const { source, format, table, database, includeStructure = false, includeData = true, columns: selectedColumns, pageSize = 1000, onProgress, isCancelled, serverInfo, withBom = false } = options;
   const dialect = source.query.dialect;
   const qualified = database ? `${dialect.wrap(database)}.${dialect.wrap(table)}` : dialect.wrap(table);
 
@@ -181,6 +186,7 @@ export async function writeTableExport(
   if (!includeData && format !== 'sql') return;
 
   if (format === 'csv') {
+    if (withBom) await write('\uFEFF');
     await write(csvHeaderLine(columns));
     await forEachPage(async (rows) => {
       for (const row of rows) await write(csvDataLine(columns, row));
@@ -189,6 +195,7 @@ export async function writeTableExport(
   }
 
   if (format === 'txt') {
+    if (withBom) await write('\uFEFF');
     await write(txtHeaderLine(columns));
     await forEachPage(async (rows) => {
       for (const row of rows) await write(txtDataLine(columns, row));

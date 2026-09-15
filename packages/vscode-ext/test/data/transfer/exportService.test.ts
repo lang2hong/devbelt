@@ -275,3 +275,16 @@ describe('writeTableExport keyset 走真实方言（不 mock getKeysetSql）', (
     expect(chunks.join('')).toContain('2\tb\r\n');
   });
 });
+
+describe('CSV/TSV UTF-8 BOM（opt-in）', () => {
+  const opts = { columns: ['id'], rows: [{ id: 1 }] };
+  it('默认不加 BOM', () => {
+    expect(exportRows({ format: 'csv', ...opts }) as string).not.toMatch(/^\uFEFF/);
+    expect(exportRows({ format: 'txt', ...opts }) as string).not.toMatch(/^\uFEFF/);
+  });
+  it('withBom=true 时前置 BOM，且仅 csv/txt 生效', () => {
+    expect(exportRows({ format: 'csv', ...opts, withBom: true }) as string).toMatch(/^\uFEFFid\r\n/);
+    expect(exportRows({ format: 'txt', ...opts, withBom: true }) as string).toMatch(/^\uFEFFid\r\n/);
+    expect(exportRows({ format: 'json', ...opts, withBom: true }) as string).not.toMatch(/^\uFEFF/);
+  });
+});

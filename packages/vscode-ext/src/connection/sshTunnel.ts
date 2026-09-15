@@ -16,7 +16,7 @@ export interface SshHostKeyGate {
   /** 插件自管 known_hosts 文件（TOFU 接受后写入）。 */
   storeFile: string;
   userKnownHostsFile?: string;
-  prompt: (host: string, port: number, fingerprint: string, keyType: string) => Promise<boolean>;
+  prompt: (host: string, port: number, fingerprint: string, keyType: string) => Promise<boolean | 'once'>;
 }
 
 /**

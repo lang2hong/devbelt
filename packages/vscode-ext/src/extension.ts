@@ -62,12 +62,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     storeFile: vscode.Uri.joinPath(context.globalStorageUri, 'ssh_known_hosts').fsPath,
     prompt: async (host, port, fingerprint, keyType) => {
       const target = port === 22 ? host : `${host}:${port}`;
+      const trust = l10n('ssh.hostKey.trust');
+      const trustOnce = l10n('ssh.hostKey.trustOnce');
       const answer = await vscode.window.showWarningMessage(
         l10n('ssh.hostKey.unknown', { host: target, keyType, fingerprint }),
         { modal: true },
-        l10n('ssh.hostKey.trust'),
+        trust,
+        trustOnce,
       );
-      return answer === l10n('ssh.hostKey.trust');
+      if (answer === trust) return true;
+      if (answer === trustOnce) return 'once';
+      return false;
     },
   });
 

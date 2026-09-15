@@ -178,8 +178,8 @@ export interface VerifyHostKeyOptions {
   pluginStoreFile: string;
   /** 用户 known_hosts；缺省用 `knownHostsPath()`。 */
   userKnownHostsFile?: string;
-  /** 未知主机且 policy=tofu 时询问；返回是否信任。 */
-  prompt: (host: string, port: number, fingerprint: string, keyType: string) => Promise<boolean>;
+  /** 未知主机且 policy=tofu 时询问：`true`=信任并记住，`'once'`=仅本次（不写入），`false`=拒绝。 */
+  prompt: (host: string, port: number, fingerprint: string, keyType: string) => Promise<boolean | 'once'>;
 }
 
 /**
@@ -189,7 +189,8 @@ export interface VerifyHostKeyOptions {
  *  1. 已信任（用户或插件 known_hosts 命中且未吊销）→ true；
  *  2. 该主机已有条目但密钥不匹配，或命中 `@revoked` → **false（硬失败）**，
  *     即便 policy=tofu 也不 TOFU 覆盖（防密钥替换型 MITM）；
- *  3. 未知主机：strict → false；tofu → 询问用户，接受则写入插件自管文件并 true。
+ *  3. 未知主机：strict → false；tofu → 询问用户，`true` 写入插件自管文件并 true，
+ *     `'once'` 仅本次放行（不落盘，下次仍需裁决）。
  */
 export async function verifyHostKey(opts: VerifyHostKeyOptions): Promise<boolean> {
   const userEntries = loadKnownHosts(opts.userKnownHostsFile);
@@ -208,6 +209,7 @@ export async function verifyHostKey(opts: VerifyHostKeyOptions): Promise<boolean
     hostKeyType(opts.keyBlob),
   );
   if (!accepted) return false;
+  if (accepted === 'once') return true; // 仅本次：不写入 known_hosts，下次重新裁决
   appendPluginKnownHost(opts.pluginStoreFile, opts.host, opts.port, hostKeyType(opts.keyBlob), opts.keyBlob);
   return true;
 }

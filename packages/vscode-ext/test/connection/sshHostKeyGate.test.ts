@@ -92,3 +92,28 @@ describe('verifyHostKey', () => {
     expect(await verifyHostKey(opts({ keyBlob: blob }))).toBe(false);
   });
 });
+describe("verifyHostKey '仅本次'（不持久化）", () => {
+  it("prompt 返回 'once'：放行但不写入 known_hosts，下次仍询问", async () => {
+    const dirOnce = fs.mkdtempSync(path.join(os.tmpdir(), 'sshgate-once-'));
+    const store = path.join(dirOnce, 'plugin_known_hosts');
+    const user = path.join(dirOnce, 'user_known_hosts');
+    const base = {
+      policy: 'tofu' as const,
+      host: 'db.example.com',
+      port: 22,
+      keyBlob: keyBlob(),
+      pluginStoreFile: store,
+      userKnownHostsFile: user,
+      prompt: vi.fn(async () => 'once' as const),
+    };
+    try {
+      expect(await verifyHostKey(base)).toBe(true);
+      expect(fs.existsSync(store) ? fs.readFileSync(store, 'utf8') : '').toBe('');
+      const again = { ...base, prompt: vi.fn(async () => 'once' as const) };
+      expect(await verifyHostKey(again)).toBe(true);
+      expect(again.prompt).toHaveBeenCalledTimes(1);
+    } finally {
+      fs.rmSync(dirOnce, { recursive: true, force: true });
+    }
+  });
+});

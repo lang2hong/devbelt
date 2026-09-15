@@ -239,6 +239,7 @@ export const en: MessageCatalog = {
   'sessions.empty': 'No devices',
   'ssh.hostKey.unknown': 'Unknown SSH host {host} ({keyType} {fingerprint}). Trust and remember it?',
   'ssh.hostKey.trust': 'Trust',
+  'ssh.hostKey.trustOnce': 'Trust once',
   'cmd.yes': 'Yes',
   'cmd.no': 'No',
   'cmd.updated': 'Updated {table}.{column}',
