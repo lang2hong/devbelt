@@ -3,7 +3,7 @@ import { DatabaseType, streamRowsByKeyset } from '@db-client/core';
 import { sqlCommentSafe } from '@db-client/core/sql';
 import { serializeCsv, csvHeaderLine, csvDataLine } from './csv';
 import { serializeJson, projectRow } from './json';
-import { serializeXlsx } from './xlsx';
+import { serializeXlsx, writeXlsx } from './xlsx';
 import { serializeXml, xmlHeader, xmlRow, xmlFooter } from './xml';
 import { serializeTxt, txtHeaderLine, txtDataLine } from './txt';
 
@@ -231,9 +231,9 @@ export async function writeTableExport(
   }
 
   if (format === 'xlsx') {
-    const rows: Record<string, unknown>[] = [];
-    if (includeData) await forEachPage((pageRows) => { rows.push(...pageRows); });
-    await write(serializeXlsx(columns, rows));
+    // 流式：逐页写入工作表，避免大表整表驻留内存。无数据时走内存版空表。
+    if (includeData) await writeXlsx(columns, forEachPage, write);
+    else await write(serializeXlsx(columns, []));
     return;
   }
 

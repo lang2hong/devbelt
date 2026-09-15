@@ -1,4 +1,5 @@
-import { deflateRawSync, inflateRawSync } from 'zlib';
+import { deflateRawSync, inflateRawSync, createDeflateRaw } from 'zlib';
+import { once } from 'events';
 
 /**
  * Excel (.xlsx) 读写。
@@ -33,7 +34,7 @@ export const MAX_ENTRIES = 4096;
 
 let crcTable: Int32Array | undefined;
 
-function crc32(buf: Buffer): number {
+function ensureCrcTable(): Int32Array {
   if (!crcTable) {
     crcTable = new Int32Array(256);
     for (let i = 0; i < 256; i++) {
@@ -42,9 +43,19 @@ function crc32(buf: Buffer): number {
       crcTable[i] = c;
     }
   }
-  let crc = -1;
-  for (let i = 0; i < buf.length; i++) crc = (crc >>> 8) ^ crcTable[(crc ^ buf[i]) & 0xff];
-  return (crc ^ -1) >>> 0;
+  return crcTable;
+}
+
+/** 增量 CRC32 运行态（初值 -1，终值 `(state ^ -1) >>> 0`）。 */
+function crc32Update(state: number, buf: Buffer): number {
+  const table = ensureCrcTable();
+  let crc = state;
+  for (let i = 0; i < buf.length; i++) crc = (crc >>> 8) ^ table[(crc ^ buf[i]) & 0xff];
+  return crc;
+}
+
+function crc32(buf: Buffer): number {
+  return (crc32Update(-1, buf) ^ -1) >>> 0;
 }
 
 /** DOS 时间戳：0 不是合法日期，统一写 1980-01-01 00:00 让产物可复现。 */
@@ -254,26 +265,34 @@ function cellXml(ref: string, value: unknown): string {
   return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(text)}</t></is></c>`;
 }
 
+const SHEET_HEADER_PREFIX = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+  + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>';
+
+function sheetHeader(columns: string[]): string {
+  return SHEET_HEADER_PREFIX
+    + `<row r="1">${columns.map((c, i) => cellXml(`${columnName(i)}1`, c)).join('')}</row>`;
+}
+
+function sheetRowXml(columns: string[], row: Record<string, unknown>, rowIndex: number): string {
+  const cells = columns
+    .map((column, columnIndex) => cellXml(`${columnName(columnIndex)}${rowIndex + 2}`, row[column]))
+    .join('');
+  return `<row r="${rowIndex + 2}">${cells}</row>`;
+}
+
+const SHEET_FOOTER = '</sheetData></worksheet>';
+
 function sheetXml(columns: string[], rows: Record<string, unknown>[]): string {
-  const parts: string[] = [
-    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
-    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>',
-  ];
-  parts.push(`<row r="1">${columns.map((c, i) => cellXml(`${columnName(i)}1`, c)).join('')}</row>`);
-  rows.forEach((row, rowIndex) => {
-    const cells = columns
-      .map((column, columnIndex) => cellXml(`${columnName(columnIndex)}${rowIndex + 2}`, row[column]))
-      .join('');
-    parts.push(`<row r="${rowIndex + 2}">${cells}</row>`);
-  });
-  parts.push('</sheetData></worksheet>');
+  const parts: string[] = [sheetHeader(columns)];
+  rows.forEach((row, rowIndex) => parts.push(sheetRowXml(columns, row, rowIndex)));
+  parts.push(SHEET_FOOTER);
   return parts.join('');
 }
 
-/** 序列化为 .xlsx 字节。返回 Buffer —— 二进制格式不能当文本写盘。 */
-export function serializeXlsx(columns: string[], rows: Record<string, unknown>[]): Buffer {
+/** 除工作表外的 4 个固定小条目（内存版与流式版共用）。 */
+function staticEntries(): ZipEntry[] {
   const utf8 = (text: string): Buffer => Buffer.from(text, 'utf8');
-  return zip([
+  return [
     {
       name: '[Content_Types].xml',
       data: utf8(
@@ -314,8 +333,146 @@ export function serializeXlsx(columns: string[], rows: Record<string, unknown>[]
         + '</Relationships>',
       ),
     },
-    { name: 'xl/worksheets/sheet1.xml', data: utf8(sheetXml(columns, rows)) },
+  ];
+}
+
+/** 序列化为 .xlsx 字节（内存版，供小数据 exportRows）。返回 Buffer —— 二进制格式不能当文本写盘。 */
+export function serializeXlsx(columns: string[], rows: Record<string, unknown>[]): Buffer {
+  return zip([
+    ...staticEntries(),
+    { name: 'xl/worksheets/sheet1.xml', data: Buffer.from(sheetXml(columns, rows), 'utf8') },
   ]);
+}
+
+function zipLocalHeader(name: Buffer, flags: number, crc: number, compressedSize: number, uncompressedSize: number): Buffer {
+  const header = Buffer.alloc(30);
+  header.writeUInt32LE(0x04034b50, 0);
+  header.writeUInt16LE(20, 4); // version needed
+  header.writeUInt16LE(flags, 6);
+  header.writeUInt16LE(8, 8); // method: deflate
+  header.writeUInt16LE(DOS_TIME, 10);
+  header.writeUInt16LE(DOS_DATE, 12);
+  header.writeUInt32LE(crc, 14);
+  header.writeUInt32LE(compressedSize, 18);
+  header.writeUInt32LE(uncompressedSize, 22);
+  header.writeUInt16LE(name.length, 26);
+  header.writeUInt16LE(0, 28); // extra
+  return header;
+}
+
+function zipCentralRecord(name: Buffer, flags: number, crc: number, compressedSize: number, uncompressedSize: number, localOffset: number): Buffer {
+  const record = Buffer.alloc(46);
+  record.writeUInt32LE(0x02014b50, 0);
+  record.writeUInt16LE(20, 4); // version made by
+  record.writeUInt16LE(20, 6); // version needed
+  record.writeUInt16LE(flags, 8);
+  record.writeUInt16LE(8, 10);
+  record.writeUInt16LE(DOS_TIME, 12);
+  record.writeUInt16LE(DOS_DATE, 14);
+  record.writeUInt32LE(crc, 16);
+  record.writeUInt32LE(compressedSize, 20);
+  record.writeUInt32LE(uncompressedSize, 24);
+  record.writeUInt16LE(name.length, 28);
+  record.writeUInt16LE(0, 30); // extra
+  record.writeUInt16LE(0, 32); // comment
+  record.writeUInt16LE(0, 34); // disk
+  record.writeUInt16LE(0, 36); // internal attrs
+  record.writeUInt32LE(0, 38); // external attrs
+  record.writeUInt32LE(localOffset, 42);
+  return record;
+}
+
+/**
+ * 流式序列化 .xlsx：工作表 `sheet1.xml` 逐页压缩写出，不再整表驻留内存。
+ *
+ * 4 个固定小条目先写；工作表条目用 **deflate 流 + 数据描述符**（GP bit3）：
+ * 本地头尺寸先置 0，压缩数据后写 `[签名][crc][压缩大小][原始大小]`，中央目录按
+ * 最终值回填。CRC 与原始大小在喂入未压缩分块时增量累计。
+ */
+export async function writeXlsx(
+  columns: string[],
+  forEachPage: (onRows: (rows: Record<string, unknown>[]) => void | Promise<void>) => Promise<void>,
+  write: (chunk: Uint8Array) => void | Promise<void>,
+): Promise<void> {
+  let offset = 0;
+  const central: Buffer[] = [];
+  const totalEntries = staticEntries().length + 1;
+
+  const writeBuf = async (buf: Buffer): Promise<void> => {
+    await write(buf);
+    offset += buf.length;
+  };
+
+  for (const entry of staticEntries()) {
+    const name = Buffer.from(entry.name, 'utf8');
+    const compressed = deflateRawSync(entry.data);
+    const crc = crc32(entry.data);
+    const localOffset = offset;
+    await writeBuf(zipLocalHeader(name, 0, crc, compressed.length, entry.data.length));
+    await writeBuf(name);
+    await writeBuf(compressed);
+    central.push(zipCentralRecord(name, 0, crc, compressed.length, entry.data.length, localOffset), name);
+  }
+
+  const name = Buffer.from('xl/worksheets/sheet1.xml', 'utf8');
+  const localOffset = offset;
+  // flags 0x0808：bit3=数据描述符（尺寸后置）+ bit11=UTF-8 名称。
+  await writeBuf(zipLocalHeader(name, 0x0808, 0, 0, 0));
+  await writeBuf(name);
+
+  const deflate = createDeflateRaw();
+  let compressedSize = 0;
+  const consumer = (async (): Promise<void> => {
+    for await (const chunk of deflate) {
+      compressedSize += (chunk as Buffer).length;
+      await writeBuf(Buffer.from(chunk as Buffer));
+    }
+  })();
+
+  let crcState = -1;
+  let uncompressedSize = 0;
+  const feed = async (text: string): Promise<void> => {
+    const buf = Buffer.from(text, 'utf8');
+    crcState = crc32Update(crcState, buf);
+    uncompressedSize += buf.length;
+    if (!deflate.write(buf)) await once(deflate, 'drain');
+  };
+
+  await feed(sheetHeader(columns));
+  let rowIndex = 0;
+  await forEachPage(async (rows) => {
+    for (const row of rows) {
+      await feed(sheetRowXml(columns, row, rowIndex));
+      rowIndex += 1;
+    }
+  });
+  await feed(SHEET_FOOTER);
+  deflate.end();
+  await consumer;
+
+  const crc = (crcState ^ -1) >>> 0;
+  const descriptor = Buffer.alloc(16);
+  descriptor.writeUInt32LE(0x08074b50, 0); // data descriptor signature
+  descriptor.writeUInt32LE(crc, 4);
+  descriptor.writeUInt32LE(compressedSize, 8);
+  descriptor.writeUInt32LE(uncompressedSize, 12);
+  await writeBuf(descriptor);
+  central.push(zipCentralRecord(name, 0x0808, crc, compressedSize, uncompressedSize, localOffset), name);
+
+  const directory = Buffer.concat(central);
+  const directoryOffset = offset;
+  await writeBuf(directory);
+
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(0, 4); // this disk
+  end.writeUInt16LE(0, 6); // disk with directory
+  end.writeUInt16LE(totalEntries, 8);
+  end.writeUInt16LE(totalEntries, 10);
+  end.writeUInt32LE(directory.length, 12);
+  end.writeUInt32LE(directoryOffset, 16);
+  end.writeUInt16LE(0, 20); // comment length
+  await writeBuf(end);
 }
 
 // ─── 读 ───

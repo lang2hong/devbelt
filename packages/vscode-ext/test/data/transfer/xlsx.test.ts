@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { deflateRawSync } from 'zlib';
-import { MAX_ENTRY_BYTES, columnName, parseXlsx, serializeXlsx } from '../../../src/data/transfer/xlsx';
+import { MAX_ENTRY_BYTES, columnName, parseXlsx, serializeXlsx, writeXlsx } from '../../../src/data/transfer/xlsx';
 
 /**
  * xlsx 读写自实现的回归测试。
@@ -285,5 +285,22 @@ describe('xlsx 解压上限（zip bomb 防护）', () => {
     const bomb = Buffer.alloc(MAX_ENTRY_BYTES + 1024);
     const zip = writeDeflatedZip(new Map([['xl/worksheets/sheet1.xml', bomb]]));
     expect(() => parseXlsx(zip)).toThrow(/decompression size limit/);
+  });
+});
+
+describe('xlsx 流式写（writeXlsx）', () => {
+  it('多页产出可被 parseXlsx 读回，内容与内存版一致', async () => {
+    const columns = ['id', 'name'];
+    const rows = [{ id: 1, name: 'a' }, { id: 2, name: 'b' }, { id: 3, name: 'c' }];
+    const chunks: Uint8Array[] = [];
+    await writeXlsx(columns, async (onRows) => {
+      await onRows(rows.slice(0, 1));
+      await onRows(rows.slice(1, 2));
+      await onRows(rows.slice(2));
+      await onRows([]);
+    }, (c) => { chunks.push(c); });
+    const buf = Buffer.concat(chunks.map((c) => Buffer.from(c)));
+    expect(buf.subarray(0, 4).toString('latin1')).toBe('PK\x03\x04');
+    expect(parseXlsx(buf)).toEqual(rows);
   });
 });
