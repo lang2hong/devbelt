@@ -30,6 +30,7 @@ import type { ConnectionStore } from '../connection/connectionStore';
 import type { CachedEntitlement } from './authService';
 import { uniqueId } from '../utils/id';
 import { randomBytes } from 'crypto';
+import { EpochTransitionCoordinator } from './epochTransition';
 
 const LOCAL_ID_PREFIX: Record<SyncEntityType, string> = {
   connection: 'c',
@@ -67,14 +68,7 @@ export interface SyncSessionOptions {
   onSessionState?: () => void;
 }
 
-interface EpochCleanupIntent {
-  fromKeyEpoch: string;
-  toKeyEpoch: string;
-}
-
 export class PersonalSyncSession {
-  private static readonly EPOCH_CLEANUP_KEY = 'dbclient.sync.epochCleanup';
-
   private readonly stateStore: StateStore;
   private entities: EntityStore;
   private unresolved?: UnresolvedRefStore;
@@ -87,6 +81,7 @@ export class PersonalSyncSession {
   private dek?: Uint8Array;
   private signSeed?: Uint8Array;
   private keyEpoch?: string;
+  private readonly epochTx: EpochTransitionCoordinator;
 
   constructor(
     private readonly userId: string,
@@ -98,6 +93,16 @@ export class PersonalSyncSession {
   ) {
     this.stateStore = new StateStore(memento, userId);
     this.entities = new EntityStore(store);
+    this.epochTx = new EpochTransitionCoordinator({
+      memento,
+      userId,
+      dekStore,
+      stateStore: this.stateStore,
+      entities: this.entities,
+      currentEpoch: () => this.keyEpoch,
+      stopCoordinator: () => this.coordinator?.stop(),
+      resetRuntime: () => this.resetRuntime(),
+    });
   }
 
   private uniqueEntityId(type: SyncEntityType): string {
@@ -149,8 +154,7 @@ export class PersonalSyncSession {
 
   /** 当前 epoch 的待续跑 cleanup intent（有则说明上次切换中断）。 */
   get pendingCleanup(): { fromKeyEpoch: string; toKeyEpoch: string } | undefined {
-    const i = this.readIntent();
-    return i ? { fromKeyEpoch: i.fromKeyEpoch, toKeyEpoch: i.toKeyEpoch } : undefined;
+    return this.epochTx.pending;
   }
 
   getStateStore(): StateStore {
@@ -436,7 +440,7 @@ export class PersonalSyncSession {
       if (!local) throw new Error('sync session has no local state');
       // 不可逆请求前先落 durable transition intent：即使回执丢失/响应中断，重启后可据远端 state
       // 判定提交结果（toKeyEpoch 命中 → 清理；fromKeyEpoch 命中 → 撤销）收敛旧 epoch。
-      await this.writeIntent({ fromKeyEpoch, toKeyEpoch: newKeyEpoch });
+      await this.epochTx.writePending({ fromKeyEpoch, toKeyEpoch: newKeyEpoch });
       const res = await this.client.destroy({
         userId: this.userId,
         keyEpoch: fromKeyEpoch,
@@ -493,7 +497,7 @@ export class PersonalSyncSession {
       material = await createInitialMaterial(this.userId, newKeyEpoch, newSmp, newRecovery.raw);
       // 本地下有旧 epoch 时才须清理；请求前先落 durable intent 覆盖「远端已提交、ticket 已消费、
       // 回执丢失」的未知结果窗口（同 ticket 同 newState 重试仅 3 次，且 ticket 单次消费）。
-      if (hasLocalEpoch) await this.writeIntent({ fromKeyEpoch: localEpoch as string, toKeyEpoch: newKeyEpoch });
+      if (hasLocalEpoch) await this.epochTx.writePending({ fromKeyEpoch: localEpoch as string, toKeyEpoch: newKeyEpoch });
       const res = await this.client.resetAfterLossWithHandoff(handoffTicket, newStateFromMaterial(material));
       const ownedDek = material.dek.slice();
       const newSnapshot = this.assertEpochAdvanceReceipt(res, newKeyEpoch);
@@ -646,22 +650,18 @@ export class PersonalSyncSession {
     const epochs = new Set<string>();
     const snap = this.stateStore.getSnapshot();
     if (snap) epochs.add(snap.keyEpoch);
-    const intent = this.readIntent();
+    const intent = this.epochTx.pending;
     if (intent) {
       epochs.add(intent.fromKeyEpoch);
       epochs.add(intent.toKeyEpoch);
     }
 
     for (const epoch of epochs) {
-      await this.clearLocalSyncedEntities(epoch);
-      await new RecordMapStore(this.memento, this.userId, epoch).clear();
-      await new PendingMutationStore(this.memento, this.userId, epoch).clear();
-      await new UnresolvedRefStore(this.memento, this.userId, epoch).clear();
-      await this.dekStore.delete(this.userId, BigInt(epoch));
+      await this.epochTx.clearEpoch(epoch);
     }
 
     await this.stateStore.clear();
-    await this.clearIntent();
+    await this.epochTx.clearPending();
     this.resetRuntime();
   }
 
@@ -671,93 +671,19 @@ export class PersonalSyncSession {
   }
 
   /**
-   * epoch 切换清理：写 durable intent → （可选）存新 epoch DEK → 持久化新 snapshot →
-   * 清旧 epoch recordMap/outbox → 删旧 epoch DEK → 清 intent，带可重放 cleanup intent；
-   * 失败中途留下 intent，由 resumeEpochTransition 完整幂等重放。intent 是第一个持久化动作，
+   * epoch 切换清理（委托 EpochTransitionCoordinator）：写 durable intent → （可选）存新 epoch DEK →
+   * 持久化新 snapshot → 清旧 epoch 实体/recordMap/outbox/unresolved → 删旧 epoch DEK → 清 intent。
+   * 失败中途留下 intent，由 resumeEpochTransition 完整幂等重放；intent 是第一个持久化动作，
    * 保证「新 DEK 落盘」等任何可存活步骤之前已有恢复标记（§7.4 崩溃窗口收敛）。
-   * 删 DEK 只用 fromKeyEpoch（绝不误删新 epoch DEK）。参数 fail-closed：两个 epoch 须为
-   * 规范 u64、toKeyEpoch > fromKeyEpoch、newSnapshot.keyEpoch === toKeyEpoch。
-   * 清理始终按 fromKeyEpoch 显式构造旧 epoch store（不依赖会话内存字段），故重启后 resume
-   * 也能清除旧 epoch 的持久化 recordMap/outbox。
+   * 参数 fail-closed：两个 epoch 须为规范 u64、toKeyEpoch > fromKeyEpoch、newSnapshot.keyEpoch === toKeyEpoch。
    */
   async reconcileEpochTransition(fromKeyEpoch: string, toKeyEpoch: string, newSnapshot: SyncStateSnapshot, newDek?: Uint8Array): Promise<void> {
-    assertU64Decimal(fromKeyEpoch, 'fromKeyEpoch');
-    assertU64Decimal(toKeyEpoch, 'toKeyEpoch');
-    assertU64Decimal(newSnapshot.keyEpoch, 'newSnapshot.keyEpoch');
-    if (!(BigInt(toKeyEpoch) > BigInt(fromKeyEpoch))) {
-      throw new Error('epoch transition toKeyEpoch must be greater than fromKeyEpoch');
-    }
-    if (newSnapshot.keyEpoch !== toKeyEpoch) {
-      throw new Error('epoch transition snapshot keyEpoch does not match toKeyEpoch');
-    }
-    if (this.keyEpoch !== undefined && this.keyEpoch !== fromKeyEpoch) {
-      throw new Error('epoch transition fromKeyEpoch mismatch');
-    }
-    this.coordinator?.stop();
-
-    await this.writeIntent({ fromKeyEpoch, toKeyEpoch });
-    if (newDek) await this.dekStore.store(this.userId, BigInt(toKeyEpoch), newDek);
-    await this.stateStore.setSnapshot(newSnapshot);
-    // Gap-1（Option 1 严格清空）：进入新 epoch 前清除旧 epoch 的本地已同步实体，
-    // 避免 destroy/reset/跨设备迁移后本地实体被当作「从未同步」而全量重推（重复/复活）。
-    await this.clearLocalSyncedEntities(fromKeyEpoch);
-    await new RecordMapStore(this.memento, this.userId, fromKeyEpoch).clear();
-    await new PendingMutationStore(this.memento, this.userId, fromKeyEpoch).clear();
-    await new UnresolvedRefStore(this.memento, this.userId, fromKeyEpoch).clear();
-    await this.dekStore.delete(this.userId, BigInt(fromKeyEpoch));
-    await this.clearIntent();
-
-    this.resetRuntime();
-  }
-
-  /**
-   * 清除指定 epoch 映射到的本地实体（软删，source='sync'，级联由 store 承担）。
-   *
-   * 依赖闭包规则（Gap-1 Option 1）：记录在本 epoch recordMap 里的实体（含 confirmed 与
-   * pending 预留）都清除；pending 对应远端旧 epoch 的入站残留，存活会作为「从未同步」被重推。
-   * 删除 confirmed 父实体时，store 级联其依赖子树（连接 tombstone → 级联其 query/folder），
-   * 即使子项未映射——这是明确的依赖闭包，避免留下引用已清除连接的孤儿 query/folder。
-   * 未映射的独立实体与组织连接（org:）不在此映射内，天然保留。
-   */
-  private async clearLocalSyncedEntities(fromKeyEpoch: string): Promise<void> {
-    const entries = new RecordMapStore(this.memento, this.userId, fromKeyEpoch).list();
-    for (const e of entries) {
-      await this.entities.remove({ type: e.type, localId: e.localId }, 'sync');
-    }
+    return this.epochTx.reconcile(fromKeyEpoch, toKeyEpoch, newSnapshot, newDek);
   }
 
   /** 检测到 cleanup intent 时完整幂等重放（clear/delete 幂等、setSnapshot 等值不抛）。 */
   async resumeEpochTransition(newSnapshot: SyncStateSnapshot): Promise<boolean> {
-    const intent = this.readIntent();
-    if (!intent) return false;
-    assertU64Decimal(newSnapshot.keyEpoch, 'newSnapshot.keyEpoch');
-    if (newSnapshot.keyEpoch === intent.toKeyEpoch) {
-      // 提交成功：清理旧 epoch。
-      await this.reconcileEpochTransition(intent.fromKeyEpoch, intent.toKeyEpoch, newSnapshot);
-      return true;
-    }
-    if (newSnapshot.keyEpoch === intent.fromKeyEpoch) {
-      // 提交前 journal：远端仍在旧 epoch（destroy/reset 未成功或响应丢失前已崩溃）——
-      // 撤销 journal，继续正常解锁旧 epoch。
-      await this.clearIntent();
-      return false;
-    }
-    if (BigInt(newSnapshot.keyEpoch) > BigInt(intent.toKeyEpoch)) {
-      // 复合故障死角：本地 journal {from→to} 残留期间，他设备已把远端进一步推进到 > to。
-      // 视为「已提交且被超越」：from 与 to 两个 epoch 的旧 transition 都可能已持久化部分产物
-      // （实体/DEK/map/outbox/unresolved），先 purge 映射实体、再清 store 与 DEK，最后撤销
-      // journal，按远端实际 snapshot 继续（防止被越过时旧实体重推复活）。
-      for (const epoch of [intent.fromKeyEpoch, intent.toKeyEpoch]) {
-        await this.clearLocalSyncedEntities(epoch);
-        await new RecordMapStore(this.memento, this.userId, epoch).clear();
-        await new PendingMutationStore(this.memento, this.userId, epoch).clear();
-        await new UnresolvedRefStore(this.memento, this.userId, epoch).clear();
-        await this.dekStore.delete(this.userId, BigInt(epoch));
-      }
-      await this.clearIntent();
-      return false;
-    }
-    throw new Error('resume snapshot keyEpoch does not match intent toKeyEpoch');
+    return this.epochTx.resume(newSnapshot);
   }
 
   private dekThunk = (): Uint8Array => {
@@ -782,25 +708,6 @@ export class PersonalSyncSession {
     this.signSeed = undefined;
     this.keyEpoch = undefined;
     this.opts.onSessionState?.();
-  }
-
-  private readIntent(): EpochCleanupIntent | undefined {
-    const raw = this.memento.get<unknown>(PersonalSyncSession.EPOCH_CLEANUP_KEY + '.' + this.userId);
-    if (raw === undefined) return undefined;
-    if (typeof raw !== 'object' || raw === null) throw new Error('corrupt epoch cleanup intent');
-    const o = raw as Record<string, unknown>;
-    if (typeof o.fromKeyEpoch !== 'string' || typeof o.toKeyEpoch !== 'string') {
-      throw new Error('corrupt epoch cleanup intent');
-    }
-    return { fromKeyEpoch: o.fromKeyEpoch, toKeyEpoch: o.toKeyEpoch };
-  }
-
-  private async writeIntent(i: EpochCleanupIntent): Promise<void> {
-    await this.memento.update(PersonalSyncSession.EPOCH_CLEANUP_KEY + '.' + this.userId, i);
-  }
-
-  private async clearIntent(): Promise<void> {
-    await this.memento.update(PersonalSyncSession.EPOCH_CLEANUP_KEY + '.' + this.userId, undefined);
   }
 }
 
