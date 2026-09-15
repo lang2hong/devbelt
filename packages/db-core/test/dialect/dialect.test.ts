@@ -212,3 +212,36 @@ describe('方言模板（加列 / 改列）', () => {
     }
   });
 });
+describe('getKeysetSql（keyset 深分页）', () => {
+  it('MySQL：首页仅 ORDER BY，续页展开为标量比较（兼容复合主键）', () => {
+    const d = new MysqlDialect();
+    expect(d.getKeysetSql('SELECT * FROM `t`', ['id'], undefined, 100))
+      .toBe('SELECT * FROM `t` ORDER BY `id` LIMIT 100');
+    expect(d.getKeysetSql('SELECT * FROM `t`', ['id'], [42], 100))
+      .toBe('SELECT * FROM `t` WHERE (`id` > 42) ORDER BY `id` LIMIT 100');
+  });
+
+  it('MySQL：复合主键展开为 (a>v1) OR (a=v1 AND b>v2)，不使用行值构造器', () => {
+    const d = new MysqlDialect();
+    expect(d.getKeysetSql('SELECT * FROM `t`', ['a', 'b'], [1, "x'y"], 50))
+      .toBe("SELECT * FROM `t` WHERE (`a` > 1) OR (`a` = 1 AND `b` > 'x''y') ORDER BY `a`, `b` LIMIT 50");
+  });
+
+  it('PG：复合主键同样展开 + 值转义', () => {
+    const d = new PostgreSqlDialect();
+    expect(d.getKeysetSql('SELECT * FROM "t"', ['a', 'b'], [1, "x'y"], 50))
+      .toBe(`SELECT * FROM "t" WHERE ("a" > 1) OR ("a" = 1 AND "b" > 'x''y') ORDER BY "a", "b" LIMIT 50`);
+  });
+
+  it('SQLite：首页与续页', () => {
+    const d = new SqliteDialect();
+    expect(d.getKeysetSql('SELECT * FROM "t"', ['id'], [7], 10))
+      .toBe('SELECT * FROM "t" WHERE ("id" > 7) ORDER BY "id" LIMIT 10');
+  });
+
+  it('非法 limit / afterValues 长度不符时抛错', () => {
+    const d = new MysqlDialect();
+    expect(() => d.getKeysetSql('SELECT * FROM `t`', ['id'], undefined, 0)).toThrow(/positive integer/);
+    expect(() => d.getKeysetSql('SELECT * FROM `t`', ['id'], [1, 2], 10)).toThrow(/length/);
+  });
+});

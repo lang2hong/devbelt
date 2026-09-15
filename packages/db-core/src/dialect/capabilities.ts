@@ -1,4 +1,4 @@
-import type { DatabaseType } from '../types/connection';
+import type { DatabaseType } from '../types/connection.js';
 
 /** Operations that must be explicitly implemented by a database dialect. */
 export type DatabaseOperation =

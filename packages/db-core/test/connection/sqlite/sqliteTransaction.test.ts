@@ -8,13 +8,12 @@ import { SqliteDialect } from '../../../src/dialect/sqliteDialect';
 import { BackupService } from '../../../src/query/backupService';
 
 /**
- * Real CLI integration: the SQLite driver spawns one sqlite3 process per query().
- * These tests assert that a single query() carrying BEGIN/COMMIT/ROLLBACK keeps
- * the whole transaction inside one process.
+ * Real CLI integration: the SQLite driver keeps one persistent sqlite3 process per
+ * connection, so a transaction spanning several query() calls stays open. The whole
+ * batch (`BEGIN; …; COMMIT;` in one query) also runs in that one process.
  *
- * 注意：单进程只是原子性的**必要**条件。sqlite3 CLI 从 stdin 读 SQL 时默认不会
- * 在报错处中止（需 `-bail`），因此一条语句失败后它仍会执行到 `COMMIT;`，把先前
- * 的写入提交掉。真正的原子性还欠 `-bail`，见技术文档「遗留」。
+ * 原子性由 `-bail` 保证：批处理内任一语句失败即中止退出、隐式回滚，不会执行到
+ * `COMMIT;` 把先前写入提交掉。
  */
 describe('SQLite single-process transaction (real sqlite3 CLI)', () => {
   const dbPath = path.join(os.tmpdir(), `db-transfer-${Date.now()}.db`);
@@ -34,30 +33,24 @@ describe('SQLite single-process transaction (real sqlite3 CLI)', () => {
     expect(Number((result as any).rows[0].c)).toBe(2);
   });
 
-  it('drops BEGIN when statements are sent as separate queries (the reason for singleStatement)', async () => {
+  it('separate queries share the persistent process, so BEGIN stays open across calls', async () => {
     const sqlite = new SQLite(dbPath, 'sqlite3');
-    // 分开发送：BEGIN 随第一个进程退出即失效，后续 INSERT 自动提交
+    // 常驻进程下 BEGIN 不再随进程退出失效：跨 query() 的事务成立。
     await sqlite.query('BEGIN;');
     await sqlite.query("INSERT INTO t VALUES(5,'e');");
-    // 新进程里已无活动事务，ROLLBACK 直接报错 —— 逐句执行拿不到事务语义
-    await expect(sqlite.query('ROLLBACK;')).rejects.toThrow('no transaction is active');
+    await sqlite.query('ROLLBACK;');
     const result = await sqlite.query('SELECT COUNT(*) AS c FROM t;');
-    // 那一行留了下来，ROLLBACK 什么也没撤销
-    expect(Number((result as any).rows[0].c)).toBe(3);
+    // 5 被 ROLLBACK 撤销，仍为此前提交的 2 行。
+    expect(Number((result as any).rows[0].c)).toBe(2);
   });
 });
 
 /**
- * sqlite3 CLI 的 `-bail` 缺陷实证（不加该参数时批处理非原子）：
+ * sqlite3 CLI 的 `-bail` 语义实证：
  *
- * sqlite3 从 stdin 读 SQL 默认在**语法错误处不中止**，而是打印错误后继续执行到
- * `COMMIT;`。因此 `BEGIN; INSERT A; INSERT B; INSERT bad; COMMIT;` 会把 A、B
- * 提交掉。`SQLite.query` 当前 spawn 参数（[-header,-nullvalue,-cmd,.mode tcl]）
- * 不含 `-bail`，所以同样的问题存在于：
- *  - BackupService.restore 的 singleStatement（F33 只保证事务不被进程边界切断）
- *  - importService.importRowsBatched 声称的「事务原子性」
- *
- * 加 `-bail` 后失败即中止并回滚，残留 0 行。此对照把缺陷固定为可回归验证。
+ * 不带 `-bail` 时，CLI 从 stdin 读 SQL 在语法错误处**不中止**，会继续执行到
+ * `COMMIT;`，把先前写入提交掉（批处理非原子）。SQLite.query 的 spawn 参数
+ * 已含 `-bail`，因此失败即中止退出并隐式回滚。此处用对照把该不变量钉住。
  */
 describe('sqlite3 CLI -bail 影响事务原子性', () => {
   const sql = 'CREATE TABLE t(id INTEGER);\nBEGIN;\nINSERT INTO t VALUES(1);\nINSERT INTO t VALUES(2);\nINSERT INTO bad;\nCOMMIT;\n';

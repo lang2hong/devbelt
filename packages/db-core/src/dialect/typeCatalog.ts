@@ -1,4 +1,4 @@
-import { DatabaseType } from '../types/connection';
+import { DatabaseType } from '../types/connection.js';
 
 /**
  * 各方言的列类型候选表（表设计器类型下拉用）。

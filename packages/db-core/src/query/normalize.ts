@@ -1,5 +1,5 @@
-import type { ColumnMeta } from '../types/meta';
-import { toBool } from '../utils/coerce';
+import type { ColumnMeta } from '../types/meta.js';
+import { toBool } from '../utils/coerce.js';
 
 /**
  * 归一化列元数据行（兼容 MySQL/PG/SQLite 返回格式）。

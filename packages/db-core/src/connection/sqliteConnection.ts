@@ -1,8 +1,8 @@
 import { EventEmitter } from 'events';
-import { IConnection } from './connection';
-import { SQLite } from './sqlite';
-import type { ConnectionConfig } from '../types/connection';
-import type { QueryCallback } from '../types/query';
+import { IConnection } from './connection.js';
+import { SQLite } from './sqlite/index.js';
+import type { ConnectionConfig } from '../types/connection.js';
+import type { QueryCallback } from '../types/query.js';
 
 /**
  * SQLite 连接适配器。
@@ -106,13 +106,11 @@ export class SqliteConnection extends IConnection {
   }
 
   /**
-   * SQLite 不支持跨语句事务：每次 query 起一个独立的 sqlite3 CLI 子进程，
-   * 进程退出即隐式提交，随后的 ROLLBACK 落在另一个进程上，什么也回滚不了。
-   *
-   * 原实现执行 `BEGIN` 后回调 `null`，让调用方以为事务已开启 —— 失败时静默
-   * 产生部分写入。这里改为显式失败：需要原子性的调用方必须把整批语句拼成
-   * 单条 `BEGIN; …; COMMIT;` 交给一个进程执行（见 importRowsBatched 与
-   * BackupService.restore 的 singleStatement 选项）。
+   * 连接层不暴露跨语句事务：底层虽是常驻 CLI 进程、技术上可跨 query 保持事务，
+   * 但这里仍显式失败，要求调用方把整批语句拼成单条 `BEGIN; …; COMMIT;` 交给
+   * 一次 `query()` 执行（见 importRowsBatched 与 BackupService.restore 的
+   * singleStatement 选项）——保持与其它方言一致的「显式批处理」语义，
+   * 避免会话层在各服务间共享连接时误留未提交事务。
    */
   beginTransaction(callback: (err: any) => void): void {
     callback(new Error(

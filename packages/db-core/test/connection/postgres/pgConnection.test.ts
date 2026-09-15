@@ -166,3 +166,11 @@ describe('abortQuery', () => {
     }
   });
 });
+
+describe('convertToDump (PG 转义)', () => {
+  it('只翻倍单引号，不翻倍反斜杠（standard_conforming_strings=on）', () => {
+    const c = new PostgreSqlConnection({ ...base });
+    expect(c.convertToDump({ a: 'C:\\tmp', b: "O'Brien", n: null, i: 42 }))
+      .toEqual({ a: "'C:\\tmp'", b: "'O''Brien'", n: 'NULL', i: '42' });
+  });
+});

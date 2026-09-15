@@ -4,44 +4,47 @@
  */
 
 // 类型（领域模型）
-export * from './types/connection';
-export * from './types/meta';
-export * from './types/query';
+export * from './types/connection.js';
+export * from './types/meta.js';
+export * from './types/query.js';
 
 // 连接抽象与适配器
-export { IConnection } from './connection/connection';
-export { MysqlConnection } from './connection/mysqlConnection';
-export { PostgreSqlConnection } from './connection/postgreSqlConnection';
-export { SqliteConnection } from './connection/sqliteConnection';
+export { IConnection } from './connection/connection.js';
+export { MysqlConnection } from './connection/mysqlConnection.js';
+export { PostgreSqlConnection } from './connection/postgreSqlConnection.js';
+export { SqliteConnection } from './connection/sqliteConnection.js';
 
 // 方言（策略模式）
-export { SqlDialect } from './dialect/sqlDialect';
-export { MysqlDialect } from './dialect/mysqlDialect';
-export { PostgreSqlDialect } from './dialect/postgreSqlDialect';
-export { SqliteDialect } from './dialect/sqliteDialect';
-export { DialectRegistry } from './dialect/dialectRegistry';
-export { supportsOperation, unsupportedOperationMessage } from './dialect/capabilities';
-export type { DatabaseCapabilities, DatabaseOperation } from './dialect/capabilities';
+export { SqlDialect } from './dialect/sqlDialect.js';
+export { MysqlDialect } from './dialect/mysqlDialect.js';
+export { PostgreSqlDialect } from './dialect/postgreSqlDialect.js';
+export { SqliteDialect } from './dialect/sqliteDialect.js';
+export { DialectRegistry } from './dialect/dialectRegistry.js';
+export { supportsOperation, unsupportedOperationMessage } from './dialect/capabilities.js';
+export type { DatabaseCapabilities, DatabaseOperation } from './dialect/capabilities.js';
 
 // 工厂
-export { ConnectionFactory } from './factory/connectionFactory';
+export { ConnectionFactory } from './factory/connectionFactory.js';
 
 // 工具
-export { validateIdent } from './utils/validate';
-export { toBool } from './utils/coerce';
-export { columnTypesFor } from './dialect/typeCatalog';
+export { validateIdent } from './utils/validate.js';
+export { toBool } from './utils/coerce.js';
+export { columnTypesFor } from './dialect/typeCatalog.js';
 
 // 查询层
-export { QueryService, QueryError } from './query/queryService';
-export type { QueryOptions, ExecutedStatement, QueryObserver } from './query/queryService';
-export { MetadataService } from './query/metadataService';
-export { DataService } from './query/dataService';
-export { TableService } from './query/tableService';
-export { SchemaDiffService } from './query/schemaDiffService';
-export type { TableDiff, ColumnDiff } from './query/schemaDiffService';
-export { DataDiffService } from './query/dataDiffService';
-export type { DataDiffResult, TableDataDiff, RowDiff, RowDiffStatus } from './query/dataDiffService';
-export { BackupService } from './query/backupService';
-export type { BackupOptions, BackupProgress, RestoreOptions, RestoreProgress } from './query/backupService';
-export { DataTransferService } from './query/dataTransferService';
-export type { TransferOptions, TransferProgress } from './query/dataTransferService';
+export { QueryService, QueryError } from './query/queryService.js';
+export type { QueryOptions, ExecutedStatement, QueryObserver } from './query/queryService.js';
+export { MetadataService } from './query/metadataService.js';
+export { DataService } from './query/dataService.js';
+export { TableService, validateColumnType } from './query/tableService.js';
+export type { NewColumnSpec, ColumnSpec } from './query/tableService.js';
+export { SchemaDiffService } from './query/schemaDiffService.js';
+export type { TableDiff, ColumnDiff } from './query/schemaDiffService.js';
+export { DataDiffService } from './query/dataDiffService.js';
+export type { DataDiffResult, TableDataDiff, RowDiff, RowDiffStatus } from './query/dataDiffService.js';
+export { BackupService } from './query/backupService.js';
+export type { BackupOptions, BackupProgress, RestoreOptions, RestoreProgress } from './query/backupService.js';
+export { streamRowsByKeyset } from './query/paging.js';
+export type { KeysetQuerySource } from './query/paging.js';
+export { DataTransferService } from './query/dataTransferService.js';
+export type { TransferOptions, TransferProgress } from './query/dataTransferService.js';

@@ -1,10 +1,11 @@
-import { DatabaseType } from '../types/connection';
-import { validateIdent } from '../utils/validate';
-import { toBool } from '../utils/coerce';
-import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta } from '../types/meta';
-import type { SqlDialect } from './sqlDialect';
-import type { DatabaseCapabilities } from './capabilities';
-import { columnTypesFor } from './typeCatalog';
+import { DatabaseType } from '../types/connection.js';
+import { validateIdent } from '../utils/validate.js';
+import { toBool } from '../utils/coerce.js';
+import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta } from '../types/meta.js';
+import type { SqlDialect } from './sqlDialect.js';
+import type { DatabaseCapabilities } from './capabilities.js';
+import { columnTypesFor } from './typeCatalog.js';
+import { buildKeysetSql } from './keyset.js';
 
 /**
  * PostgreSQL 方言实现。
@@ -55,6 +56,10 @@ export class PostgreSqlDialect implements SqlDialect {
 
   getPagedSql(sql: string, offset: number, limit: number): string {
     return `${sql} LIMIT ${limit} OFFSET ${offset}`;
+  }
+
+  getKeysetSql(sql: string, orderColumns: string[], afterValues: unknown[] | undefined, limit: number): string {
+    return buildKeysetSql(sql, orderColumns, afterValues, limit, (c) => this.wrap(c), (v) => this.escapeValue(v));
   }
 
   getDatabaseListSql(): string {

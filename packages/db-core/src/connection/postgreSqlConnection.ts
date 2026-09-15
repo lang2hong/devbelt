@@ -1,9 +1,9 @@
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as pg from 'pg';
-import { IConnection } from './connection';
-import type { ConnectionConfig } from '../types/connection';
-import type { QueryCallback } from '../types/query';
+import { IConnection } from './connection.js';
+import type { ConnectionConfig } from '../types/connection.js';
+import type { QueryCallback } from '../types/query.js';
 
 export class PostgreSqlConnection extends IConnection {
   private client: pg.Client;
@@ -212,9 +212,11 @@ export class PostgreSqlConnection extends IConnection {
       const element = row[key];
       if (element == null) {
         out[key] = 'NULL';
-      } else if (typeof element === 'string') {
-        out[key] = `'${element.replace(/\\/g, '\\\\').replace(/'/g, "''")}'`;
-      } else {
+} else if (typeof element === 'string') {
+      // PG 默认 standard_conforming_strings=on：反斜杠是普通字符，只有单引号需翻倍。
+      // 此前按 MySQL 规则把 `\` 翻倍，会把一个反斜杠写成两个字面反斜杠（数据损坏）。
+      out[key] = `'${element.replace(/'/g, "''")}'`;
+    } else {
         out[key] = String(element);
       }
     }

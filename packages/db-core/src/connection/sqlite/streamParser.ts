@@ -1,23 +1,10 @@
-import { Writable } from 'stream';
-
+/**
+ * 分块解析器接口。
+ *
+ * 常驻 sqlite3 进程下，输出不再以「进程 finish」为界，改由哨兵按查询切分窗口后，
+ * 直接对窗口调用 `push` 再 `done()`。这里只保留接口定义。
+ */
 export interface ChunksParser<T> {
   push: (chunk: string) => void;
   done: () => T;
-}
-
-export class StreamParser<T> extends Writable {
-  constructor(private parser: ChunksParser<T>) {
-    super();
-
-    this.once('finish', () => {
-      this.emit('done', parser.done());
-    });
-  }
-
-  _write(chunk: any, encoding: string, callback: (err?: Error) => void) {
-    void encoding;
-    const data = chunk.toString();
-    this.parser.push(data);
-    callback();
-  }
 }

@@ -1,6 +1,6 @@
-import { QueryService } from './queryService';
-import { normalizeColumnMeta } from './normalize';
-import type { ColumnMeta, TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta } from '../types/meta';
+import { QueryService } from './queryService.js';
+import { normalizeColumnMeta } from './normalize.js';
+import type { ColumnMeta, TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta } from '../types/meta.js';
 
 /**
  * 元数据服务（复用查询服务 + 方言）。

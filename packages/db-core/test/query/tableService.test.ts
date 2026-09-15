@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TableService } from '../../src/query/tableService';
+import { TableService, validateColumnType } from '../../src/query/tableService';
 import { QueryService } from '../../src/query/queryService';
 import { IConnection } from '../../src/connection/connection';
 import { MysqlDialect } from '../../src/dialect/mysqlDialect';
@@ -177,7 +177,7 @@ describe('TableService.createTable', () => {
   it('缺类型的列被拒绝', async () => {
     const conn = new CaptureConnection();
     const svc = new TableService(new QueryService(conn, new MysqlDialect()));
-    await expect(svc.createTable('t', [{ name: 'a', type: '  ' }])).rejects.toThrow(/requires a type/);
+    await expect(svc.createTable('t', [{ name: 'a', type: '  ' }])).rejects.toThrow(/type is required/i);
   });
 });
 
@@ -240,7 +240,7 @@ describe('TableService.changeColumn / renameColumn', () => {
   it('MySQL 用 CHANGE COLUMN，可同时改名与改定义', async () => {
     const conn = new CaptureConnection();
     const svc = new TableService(new QueryService(conn, new MysqlDialect()));
-    await svc.changeColumn('users', 'name', 'full_name', 'VARCHAR(255) NOT NULL', 'test');
+    await svc.changeColumn('users', 'name', 'full_name', { type: 'VARCHAR(255)', notNull: true }, 'test');
     expect(conn.sqls[0]).toBe(
       'ALTER TABLE `test`.`users` CHANGE COLUMN `name` `full_name` VARCHAR(255) NOT NULL',
     );
@@ -249,14 +249,14 @@ describe('TableService.changeColumn / renameColumn', () => {
   it('MySQL 不改名时同样用 CHANGE COLUMN（旧名=新名）', async () => {
     const conn = new CaptureConnection();
     const svc = new TableService(new QueryService(conn, new MysqlDialect()));
-    await svc.changeColumn('users', 'name', 'name', 'VARCHAR(64)');
+    await svc.changeColumn('users', 'name', 'name', { type: 'VARCHAR(64)' });
     expect(conn.sqls[0]).toBe('ALTER TABLE `users` CHANGE COLUMN `name` `name` VARCHAR(64)');
   });
 
   it('PG 拆成 RENAME + ALTER TYPE 两步', async () => {
     const conn = new CaptureConnection();
     const svc = new TableService(new QueryService(conn, new PostgreSqlDialect()));
-    await svc.changeColumn('users', 'name', 'full_name', 'text');
+    await svc.changeColumn('users', 'name', 'full_name', { type: 'text' });
     expect(conn.sqls).toEqual([
       'ALTER TABLE "users" RENAME COLUMN "name" TO "full_name"',
       'ALTER TABLE "users" ALTER COLUMN "full_name" TYPE text',
@@ -266,16 +266,16 @@ describe('TableService.changeColumn / renameColumn', () => {
   it('PG 不改名时只发 ALTER TYPE', async () => {
     const conn = new CaptureConnection();
     const svc = new TableService(new QueryService(conn, new PostgreSqlDialect()));
-    await svc.changeColumn('users', 'name', 'name', 'text');
+    await svc.changeColumn('users', 'name', 'name', { type: 'text' });
     expect(conn.sqls).toEqual(['ALTER TABLE "users" ALTER COLUMN "name" TYPE text']);
   });
 
   it('SQLite 只能改名；仅改类型时明确报错', async () => {
     const conn = new CaptureConnection();
     const svc = new TableService(new QueryService(conn, new SqliteDialect()));
-    await svc.changeColumn('users', 'name', 'full_name', 'TEXT');
+    await svc.changeColumn('users', 'name', 'full_name', { type: 'TEXT' });
     expect(conn.sqls[0]).toBe('ALTER TABLE "users" RENAME COLUMN "name" TO "full_name"');
-    await expect(svc.changeColumn('users', 'name', 'name', 'TEXT'))
+    await expect(svc.changeColumn('users', 'name', 'name', { type: 'TEXT' }))
       .rejects.toThrow(/does not support altering a column type/);
   });
 
@@ -286,10 +286,48 @@ describe('TableService.changeColumn / renameColumn', () => {
     expect(conn.sqls[0]).toBe('ALTER TABLE `test`.`users` RENAME COLUMN `name` TO `full_name`');
   });
 
-  it('空定义与非法标识符被拒绝', async () => {
+  it('空类型与非法标识符被拒绝', async () => {
     const conn = new CaptureConnection();
     const svc = new TableService(new QueryService(conn, new MysqlDialect()));
-    await expect(svc.changeColumn('users', 'name', 'n2', '   ')).rejects.toThrow(/definition is required/);
+    await expect(svc.changeColumn('users', 'name', 'n2', { type: '   ' })).rejects.toThrow(/type is required/i);
     await expect(svc.renameColumn('users', 'name', 'a`b')).rejects.toThrow();
+  });
+});
+
+describe('validateColumnType / 结构化 addColumn / modifyColumn', () => {
+  it('接受常见合法类型', () => {
+    for (const t of ['INT', 'VARCHAR(255)', 'DECIMAL(10,2)', "ENUM('a','b')", "SET('x')", 'TIMESTAMP(6) WITH TIME ZONE', 'CHARACTER SET utf8mb4']) {
+      expect(validateColumnType(t)).toBe(t);
+    }
+  });
+
+  it('拒绝注入形状：分隔符/注释/换行/引号逃逸', () => {
+    for (const t of ['INT; DROP TABLE users', 'INT -- x', 'INT # x', 'INT /* x */', 'INT\nDROP', 'INT`x', 'INT"x', 'INT\\x', "VARCHAR(10", "INT)"]) {
+      expect(() => validateColumnType(t)).toThrow();
+    }
+  });
+
+  it('addColumn 由结构化 spec 合成并转义默认值/注释', async () => {
+    const conn = new CaptureConnection();
+    const svc = new TableService(new QueryService(conn, new MysqlDialect()));
+    await svc.addColumn('users', 'age', { type: 'INT', notNull: true, defaultValue: "12'34", comment: "a'b" }, 'test');
+    expect(conn.sqls[0]).toContain('ADD COLUMN `age`');
+    expect(conn.sqls[0]).toContain('INT');
+    expect(conn.sqls[0]).toContain("DEFAULT '12''34'");
+    expect(conn.sqls[0]).toContain("COMMENT 'a''b'");
+  });
+
+  it('addColumn 拒绝注入型 type，不发出任何 SQL', async () => {
+    const conn = new CaptureConnection();
+    const svc = new TableService(new QueryService(conn, new MysqlDialect()));
+    await expect(svc.addColumn('users', 'age', { type: 'INT; DROP TABLE users' }, 'test')).rejects.toThrow(/invalid characters|start with/i);
+    expect(conn.sqls).toEqual([]);
+  });
+
+  it('modifyColumn 拒绝注入型 type', async () => {
+    const conn = new CaptureConnection();
+    const svc = new TableService(new QueryService(conn, new MysqlDialect()));
+    await expect(svc.modifyColumn('users', 'age', { type: 'INT -- x' }, 'test')).rejects.toThrow();
+    expect(conn.sqls).toEqual([]);
   });
 });

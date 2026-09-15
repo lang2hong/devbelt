@@ -1,7 +1,7 @@
-import type { MetadataService } from './metadataService';
-import type { TableService } from './tableService';
-import type { ColumnMeta } from '../types/meta';
-import { validateIdent } from '../utils/validate';
+import type { MetadataService } from './metadataService.js';
+import type { TableService } from './tableService.js';
+import type { ColumnMeta } from '../types/meta.js';
+import { validateIdent } from '../utils/validate.js';
 
 /** 列差异 */
 export interface ColumnDiff {

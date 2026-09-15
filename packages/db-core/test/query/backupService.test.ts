@@ -97,6 +97,54 @@ describe('BackupService', () => {
     expect(dump).toContain("'C:\\\\tmp'");
   });
 
+  it('dump 头的库名无法逃出注释（换行 / 块注释结束符被中和）', async () => {
+    const conn = new FakeConnection();
+    conn.setResponses([{ rows: [] }]);
+    const query = makeQueryService(conn, new MysqlDialect());
+    const metaNoTables = { getTables: async () => [], getColumns: async () => [] } as unknown as MetadataService;
+    const dump = await BackupService.databaseDump(query, metaNoTables, makeTableService(), 'app\nDROP */ TABLE');
+    expect(dump).toContain('-- Database: app DROP * / TABLE');
+    expect(dump).not.toContain('*/ TABLE');
+  });
+
+  it('writeDatabaseDump 分块产出（header / table / epilogue），可边生成边写盘', async () => {
+    const conn = new FakeConnection();
+    conn.setResponses([{ rows: [{ id: 1, name: 'Alice' }] }]);
+    const query = makeQueryService(conn, new MysqlDialect());
+    const chunks: string[] = [];
+    await BackupService.writeDatabaseDump(
+      query, makeMetadataService(), makeTableService(), 'test',
+      (chunk) => { chunks.push(chunk); },
+      { includeData: true },
+    );
+
+    expect(chunks.length).toBeGreaterThanOrEqual(2);
+    const joined = chunks.join('');
+    expect(joined).toContain('-- DB Client Pro Dump');
+    expect(joined).toContain('INSERT INTO');
+    expect(joined).toContain('SET FOREIGN_KEY_CHECKS = 1');
+  });
+
+  it('writeDatabaseDump 有主键时用 keyset 深分页（不随页数变慢）', async () => {
+    const conn = new FakeConnection();
+    conn.setResponses([
+      { rows: [{ id: 1, name: 'a' }] },
+      { rows: [{ id: 2, name: 'b' }] },
+      { rows: [] },
+    ]);
+    const query = makeQueryService(conn, new MysqlDialect());
+    const meta = {
+      getTables: async () => [{ name: 'users' }],
+      getColumns: async () => [{ name: 'id', isPrimary: true }, { name: 'name', isPrimary: false }],
+    } as unknown as MetadataService;
+
+    await BackupService.writeDatabaseDump(query, meta, makeTableService(), 'test', () => {}, { includeData: true, pageSize: 1 });
+
+    expect(conn.executed[0]).toContain('ORDER BY `id` LIMIT 1');
+    expect(conn.executed[1]).toContain('WHERE (`id` > 1)');
+    expect(conn.executed[2]).toContain('WHERE (`id` > 2)');
+  });
+
   it('databaseDump 转义单引号与 NULL', async () => {
     const conn = new FakeConnection();
     conn.setResponses([

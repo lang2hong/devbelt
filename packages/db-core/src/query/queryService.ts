@@ -1,7 +1,7 @@
-import { IConnection } from '../connection/connection';
-import type { SqlDialect } from '../dialect/sqlDialect';
-import type { QueryCallback, QueryResult } from '../types/query';
-import type { FieldInfo } from '../types/meta';
+import { IConnection } from '../connection/connection.js';
+import type { SqlDialect } from '../dialect/sqlDialect.js';
+import type { QueryCallback, QueryResult } from '../types/query.js';
+import type { FieldInfo } from '../types/meta.js';
 
 /**
  * 密码赋值的字面量。

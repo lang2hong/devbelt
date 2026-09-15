@@ -1,5 +1,6 @@
-import type { QueryService } from './queryService';
-import type { MetadataService } from './metadataService';
+import type { QueryService } from './queryService.js';
+import type { MetadataService } from './metadataService.js';
+import { streamRowsByKeyset } from './paging.js';
 
 export type RowDiffStatus = 'added' | 'removed' | 'changed' | 'unchanged';
 
@@ -80,6 +81,11 @@ export class DataDiffService {
     targetQuery: QueryService,
     targetDb: string,
   ): Promise<TableDataDiff> {
+    // 无键列会退化成 `ORDER BY `（语法错误）且所有行 key 都是空串而互相覆盖，
+    // 必须显式拒绝，而不是生成无效 SQL。
+    if (pkColumns.length === 0) {
+      throw new Error(`data diff requires at least one key column for table ${table}`);
+    }
     const sourceMap = new Map<string, Record<string, unknown>>();
     const targetMap = new Map<string, Record<string, unknown>>();
 
@@ -91,30 +97,22 @@ export class DataDiffService {
     const colList = columnNames.map((c) => wrap(c)).join(', ');
     const targetColList = columnNames.map((c) => targetWrap(c)).join(', ');
 
-    for (let offset = 0; ; offset += this.BATCH_SIZE) {
-      const sql = sourceQuery.dialect.getPagedSql(
-        `SELECT ${colList} FROM ${qualifiedSource} ORDER BY ${pkColumns.map(wrap).join(', ')}`,
-        offset, this.BATCH_SIZE,
-      );
-      const result = await sourceQuery.query(sql);
-      for (const row of result.rows as Record<string, unknown>[]) {
+    for await (const rows of streamRowsByKeyset(
+      sourceQuery, sourceQuery.dialect, `SELECT ${colList} FROM ${qualifiedSource}`, pkColumns, this.BATCH_SIZE,
+    )) {
+      for (const row of rows) {
         const key = pkColumns.map((c) => String(row[c])).join('|');
         sourceMap.set(key, row);
       }
-      if (result.rows.length < this.BATCH_SIZE) break;
     }
 
-    for (let offset = 0; ; offset += this.BATCH_SIZE) {
-      const sql = targetQuery.dialect.getPagedSql(
-        `SELECT ${targetColList} FROM ${qualifiedTarget} ORDER BY ${pkColumns.map(targetWrap).join(', ')}`,
-        offset, this.BATCH_SIZE,
-      );
-      const result = await targetQuery.query(sql);
-      for (const row of result.rows as Record<string, unknown>[]) {
+    for await (const rows of streamRowsByKeyset(
+      targetQuery, targetQuery.dialect, `SELECT ${targetColList} FROM ${qualifiedTarget}`, pkColumns, this.BATCH_SIZE,
+    )) {
+      for (const row of rows) {
         const key = pkColumns.map((c) => String(row[c])).join('|');
         targetMap.set(key, row);
       }
-      if (result.rows.length < this.BATCH_SIZE) break;
     }
 
     const rows: RowDiff[] = [];

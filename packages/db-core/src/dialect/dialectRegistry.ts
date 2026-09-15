@@ -1,8 +1,8 @@
-import { DatabaseType } from '../types/connection';
-import type { SqlDialect } from './sqlDialect';
-import { MysqlDialect } from './mysqlDialect';
-import { PostgreSqlDialect } from './postgreSqlDialect';
-import { SqliteDialect } from './sqliteDialect';
+import { DatabaseType } from '../types/connection.js';
+import type { SqlDialect } from './sqlDialect.js';
+import { MysqlDialect } from './mysqlDialect.js';
+import { PostgreSqlDialect } from './postgreSqlDialect.js';
+import { SqliteDialect } from './sqliteDialect.js';
 
 /**
  * 方言注册表（注册表模式）。

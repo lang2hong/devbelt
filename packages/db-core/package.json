@@ -6,14 +6,31 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./sql": {
+      "types": "./dist/sql/index.d.ts",
+      "import": "./dist/sql/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "lint": "tsc --noEmit -p tsconfig.test.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs"
   },
   "dependencies": {
-    "command-exists": "^1.2.9",
     "mysql2": "^3.23.2",
     "pg": "^8.22.0",
     "sqlstring": "^2.3.3"

@@ -1,4 +1,4 @@
-import type { FieldInfo } from './meta';
+import type { FieldInfo } from './meta.js';
 
 /** 单条查询结果 */
 export interface QueryResult {

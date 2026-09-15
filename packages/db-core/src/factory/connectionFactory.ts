@@ -1,10 +1,10 @@
-import { DatabaseType, ConnectionConfig } from '../types/connection';
-import { IConnection } from '../connection/connection';
-import { MysqlConnection } from '../connection/mysqlConnection';
-import { PostgreSqlConnection } from '../connection/postgreSqlConnection';
-import { SqliteConnection } from '../connection/sqliteConnection';
-import { DialectRegistry } from '../dialect/dialectRegistry';
-import type { SqlDialect } from '../dialect/sqlDialect';
+import { DatabaseType, ConnectionConfig } from '../types/connection.js';
+import { IConnection } from '../connection/connection.js';
+import { MysqlConnection } from '../connection/mysqlConnection.js';
+import { PostgreSqlConnection } from '../connection/postgreSqlConnection.js';
+import { SqliteConnection } from '../connection/sqliteConnection.js';
+import { DialectRegistry } from '../dialect/dialectRegistry.js';
+import type { SqlDialect } from '../dialect/sqlDialect.js';
 
 /**
  * 连接工厂（工厂模式）。

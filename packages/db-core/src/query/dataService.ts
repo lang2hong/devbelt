@@ -1,6 +1,6 @@
-import { validateIdent } from '../utils/validate';
-import { QueryService } from './queryService';
-import type { QueryResult } from '../types/query';
+import { validateIdent } from '../utils/validate.js';
+import { QueryService } from './queryService.js';
+import type { QueryResult } from '../types/query.js';
 
 /**
  * 数据编辑服务：基于主键构造 UPDATE 语句更新单元格。

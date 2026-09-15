@@ -1,8 +1,8 @@
 import { EventEmitter } from 'events';
 import * as sqlstring from 'sqlstring';
-import type { ConnectionConfig } from '../types/connection';
-import type { FieldInfo } from '../types/meta';
-import type { QueryCallback } from '../types/query';
+import type { ConnectionConfig } from '../types/connection.js';
+import type { FieldInfo } from '../types/meta.js';
+import type { QueryCallback } from '../types/query.js';
 
 /**
  * 数据库连接抽象。

@@ -1,6 +1,6 @@
-import type { DatabaseType } from '../types/connection';
-import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta } from '../types/meta';
-import type { DatabaseCapabilities } from './capabilities';
+import type { DatabaseType } from '../types/connection.js';
+import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta } from '../types/meta.js';
+import type { DatabaseCapabilities } from './capabilities.js';
 
 /**
  * 方言行为抽象（策略模式）。
@@ -92,6 +92,18 @@ export interface SqlDialect {
    * @param limit 每页行数
    */
   getPagedSql(sql: string, offset: number, limit: number): string;
+
+  /**
+   * keyset 分页：按 `orderColumns` 排序，取严格大于上一页末行 `afterValues` 的下一批。
+   * `afterValues` 省略即首页。相比 OFFSET，深分页不随页数线性变慢。
+   *
+   * - `baseSql` 必须是「列选择 + FROM（可含 JOIN）」的基本 SELECT，**不得**自带
+   *   WHERE / GROUP BY / ORDER BY / LIMIT（本方法会追加这些子句）。
+   * - `orderColumns` 必须唯一且非空（通常用主键）；`afterValues` 长度须与其一致。
+   * - `limit` 必须为正整数。
+   * - 比较采用展开式而非行值构造器，兼容 MySQL 复合主键（MySQL 不支持 `(a,b) > (...)`）。
+   */
+  getKeysetSql(baseSql: string, orderColumns: string[], afterValues: unknown[] | undefined, limit: number): string;
 
   /** 查询当前连接下的数据库列表 SQL */
   getDatabaseListSql(): string;

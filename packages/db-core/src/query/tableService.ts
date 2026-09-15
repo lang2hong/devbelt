@@ -1,16 +1,15 @@
-import { validateIdent } from '../utils/validate';
-import { QueryService } from './queryService';
-import type { QueryOptions } from './queryService';
-import { supportsOperation, unsupportedOperationMessage } from '../dialect/capabilities';
-import type { DatabaseOperation } from '../dialect/capabilities';
-import { normalizeColumnMeta } from './normalize';
-import type { QueryResult } from '../types/query';
-import type { ColumnMeta } from '../types/meta';
+import { validateIdent } from '../utils/validate.js';
+import { QueryService } from './queryService.js';
+import type { QueryOptions } from './queryService.js';
+import { supportsOperation, unsupportedOperationMessage } from '../dialect/capabilities.js';
+import type { DatabaseOperation } from '../dialect/capabilities.js';
+import { normalizeColumnMeta } from './normalize.js';
+import type { QueryResult } from '../types/query.js';
+import type { ColumnMeta } from '../types/meta.js';
 
-/** 建表时的单列定义（由设计器逐项填写，SQL 由方言合成）。 */
-export interface NewColumnSpec {
-  name: string;
-  /** 列类型原文，如 `VARCHAR(255)`、`INT`。 */
+/** 结构化列定义（不含列名），供新增/修改列使用。 */
+export interface ColumnSpec {
+  /** 列类型原文，如 `VARCHAR(255)`、`INT`、`ENUM('a','b')`。经严格校验后才拼入 SQL。 */
   type: string;
   notNull?: boolean;
   isPrimary?: boolean;
@@ -19,6 +18,45 @@ export interface NewColumnSpec {
   defaultValue?: string;
   /** 列注释（仅 MySQL 支持列内联 COMMENT，其余方言忽略）。 */
   comment?: string;
+}
+
+/** 建表时的单列定义（含列名）。 */
+export interface NewColumnSpec extends ColumnSpec {
+  name: string;
+}
+
+/**
+ * 列类型文法校验。
+ *
+ * 列类型是唯一无法参数化、必须拼进 SQL 的用户输入（其余走标识符转义 / 值转义）。
+ * 因此这里用**白名单 + 结构检查**而不是黑名单：只允许字母/数字/下划线/空格/括号/
+ * 逗号/点/连字符/单引号，且括号闭合、单引号成对；显式拒绝语句分隔符、注释起始符、
+ * 换行、反引号/双引号/反斜杠。
+ */
+export function validateColumnType(raw: string): string {
+  const type = String(raw ?? '').trim();
+  if (!type) throw new Error('Column type is required.');
+  if (type.length > 64) throw new Error('Column type is too long (max 64 characters).');
+  if (!/^[A-Za-z]/.test(type)) throw new Error('Column type must start with a letter.');
+  if (!/^[A-Za-z0-9_ (),.'-]+$/.test(type)) {
+    throw new Error('Column type contains invalid characters.');
+  }
+  if (/--/.test(type)) throw new Error('Column type contains invalid characters.');
+
+  let depth = 0;
+  for (const ch of type) {
+    if (ch === '(') depth++;
+    else if (ch === ')') {
+      depth--;
+      if (depth < 0) throw new Error('Column type has unbalanced parentheses.');
+    }
+  }
+  if (depth !== 0) throw new Error('Column type has unbalanced parentheses.');
+
+  const quotes = type.replace(/''/g, '').match(/'/g)?.length ?? 0;
+  if (quotes % 2 !== 0) throw new Error('Column type has an unterminated string literal.');
+
+  return type;
 }
 
 /**
@@ -61,9 +99,13 @@ export class TableService {
 
   private columnDefinition(col: NewColumnSpec, dbType: string, sqliteInlinePk: boolean): string {
     validateIdent(col.name);
-    const type = (col.type || '').trim();
-    if (!type) throw new Error(`Column "${col.name}" requires a type.`);
-    const parts: string[] = [this.wrap(col.name)];
+    return `${this.wrap(col.name)} ${this.columnAttributes(col, dbType, sqliteInlinePk)}`;
+  }
+
+  /** 列属性（类型 + 约束 + 默认值 + 注释），不含列名。类型经白名单校验，值经方言转义。 */
+  private columnAttributes(col: ColumnSpec, dbType: string, sqliteInlinePk: boolean): string {
+    const type = validateColumnType(col.type);
+    const parts: string[] = [];
 
     if (col.autoIncrement && dbType === 'PG') {
       parts.push(/big/i.test(type) ? 'BIGSERIAL' : 'SERIAL');
@@ -237,13 +279,12 @@ export class TableService {
     return this.ddl(sql);
   }
 
-  /** 新增列 */
-  async addColumn(table: string, column: string, definition: string, database?: string): Promise<QueryResult> {
+  /** 新增列。定义由结构化 spec 合成，类型经白名单校验、值与标识符经方言转义。 */
+  async addColumn(table: string, column: string, spec: ColumnSpec, database?: string): Promise<QueryResult> {
     this.require('alterTable');
     validateIdent(table);
     validateIdent(column);
-    const def = definition.trim();
-    if (!def) throw new Error('Column definition is required.');
+    const def = this.columnAttributes(spec, this.queryService.dialect.dbType, false);
     return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} ADD COLUMN ${this.wrap(column)} ${def}`);
   }
 
@@ -267,28 +308,28 @@ export class TableService {
     table: string,
     column: string,
     newName: string,
-    definition: string,
+    spec: ColumnSpec,
     database?: string,
   ): Promise<QueryResult> {
     this.require('alterTable');
     validateIdent(table);
     validateIdent(column);
     validateIdent(newName);
-    const def = definition.trim();
-    if (!def) throw new Error('Column definition is required.');
     const qualified = this.wrapQualified(table, database);
     const dbType = this.queryService.dialect.dbType;
 
     if (dbType === 'MYSQL') {
+      const def = this.columnAttributes(spec, 'MYSQL', false);
       return this.ddl(
         `ALTER TABLE ${qualified} CHANGE COLUMN ${this.wrap(column)} ${this.wrap(newName)} ${def}`,
       );
     }
     if (dbType === 'PG') {
+      const type = validateColumnType(spec.type);
       if (newName !== column) {
         await this.ddl(`ALTER TABLE ${qualified} RENAME COLUMN ${this.wrap(column)} TO ${this.wrap(newName)}`);
       }
-      return this.ddl(`ALTER TABLE ${qualified} ALTER COLUMN ${this.wrap(newName)} TYPE ${def}`);
+      return this.ddl(`ALTER TABLE ${qualified} ALTER COLUMN ${this.wrap(newName)} TYPE ${type}`);
     }
     if (newName === column) {
       throw new Error(`${dbType} does not support altering a column type.`);
@@ -308,18 +349,18 @@ export class TableService {
   }
 
   /** 修改列定义。MySQL 用 MODIFY COLUMN；PG 用 ALTER COLUMN TYPE；SQLite 不支持改类型 */
-  async modifyColumn(table: string, column: string, definition: string, database?: string): Promise<QueryResult> {
+  async modifyColumn(table: string, column: string, spec: ColumnSpec, database?: string): Promise<QueryResult> {
     this.require('alterTable');
     validateIdent(table);
     validateIdent(column);
-    const def = definition.trim();
-    if (!def) throw new Error('Column definition is required.');
     const dbType = this.queryService.dialect.dbType;
     if (dbType === 'MYSQL') {
+      const def = this.columnAttributes(spec, 'MYSQL', false);
       return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} MODIFY COLUMN ${this.wrap(column)} ${def}`);
     }
     if (dbType === 'PG') {
-      return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} ALTER COLUMN ${this.wrap(column)} TYPE ${def}`);
+      const type = validateColumnType(spec.type);
+      return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} ALTER COLUMN ${this.wrap(column)} TYPE ${type}`);
     }
     throw new Error(`${dbType} does not support altering a column type.`);
   }

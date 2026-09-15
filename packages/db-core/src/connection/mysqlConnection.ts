@@ -1,9 +1,9 @@
 import * as fs from 'fs';
 import * as mysql from 'mysql2';
 import type { TypeCastField } from 'mysql2';
-import { IConnection } from './connection';
-import type { ConnectionConfig } from '../types/connection';
-import type { QueryCallback } from '../types/query';
+import { IConnection } from './connection.js';
+import type { ConnectionConfig } from '../types/connection.js';
+import type { QueryCallback } from '../types/query.js';
 
 /**
  * 类型名与「二进制 or 文本」存在多义的类型。

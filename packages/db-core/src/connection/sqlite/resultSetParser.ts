@@ -1,6 +1,6 @@
-import { replaceEscapedOctetsWithChar } from './common/utils';
-import type { ChunksParser } from './streamParser';
-import type { ResultSet } from './common';
+import { replaceEscapedOctetsWithChar } from './common/utils.js';
+import type { ChunksParser } from './streamParser.js';
+import type { ResultSet } from './common/index.js';
 
 /**
  * 解析 sqlite3 CLI 输出的 TCL 模式结果流。
