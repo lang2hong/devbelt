@@ -157,12 +157,29 @@ function scanCore(sql: string, opts: CoreOptions): SqlSegment[] {
  *
  * 先以「`$` 当普通字符」扫一遍，并把非代码段（字符串/注释）替换为空格再匹配，
  * 避免字符串/注释里出现的 `DELIMITER` 误关 PG 美元引用。
+ *
+ * 结果按 SQL 原文缓存：`scanSql` 与 `sqlSkeleton` 会对同一 SQL 各调用一次本函数，
+ * 缓存省掉重复的整串扫描。仅缓存有限长度的 SQL 并对条目数设上限，避免大脚本占内存。
  */
+const DELIMITER_CACHE = new Map<string, boolean>();
+const DELIMITER_CACHE_MAX = 256;
+const DELIMITER_CACHE_MAX_SQL = 8192;
+
 export function usesDelimiterDirective(sql: string): boolean {
+  const cached = DELIMITER_CACHE.get(sql);
+  if (cached !== undefined) return cached;
   const masked = scanCore(sql, { hashComment: false, dashDashSpace: false, dollarQuotes: false, backslashEscapes: true })
     .map((seg) => (seg.kind === 'code' ? sql.slice(seg.start, seg.end) : ' '))
     .join('');
-  return /(^|\n)[ \t]*DELIMITER[ \t]+\S/i.test(masked);
+  const result = /(^|\n)[ \t]*DELIMITER[ \t]+\S/i.test(masked);
+  if (sql.length <= DELIMITER_CACHE_MAX_SQL) {
+    if (DELIMITER_CACHE.size >= DELIMITER_CACHE_MAX) {
+      const oldest = DELIMITER_CACHE.keys().next().value;
+      if (oldest !== undefined) DELIMITER_CACHE.delete(oldest);
+    }
+    DELIMITER_CACHE.set(sql, result);
+  }
+  return result;
 }
 
 /**
