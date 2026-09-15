@@ -43,9 +43,10 @@ export interface SqlScanOptions {
   /**
    * 字符串里反斜杠是否转义下一个字符。
    *
-   * MySQL 默认开（`'a\'b'` 里 `\'` 不是结束）；PG 在默认
-   * `standard_conforming_strings=on` 与 SQLite 下反斜杠是普通字符，`'a\'` 已在
-   * `'` 处结束。默认 `true` 保持旧行为，PG/SQLite 需显式传 `false`。
+   * **默认 `false`（SQL 标准）**：PG 在默认 `standard_conforming_strings=on` 与
+   * SQLite 下反斜杠是普通字符，`'a\'` 已在 `'` 处结束。MySQL 需显式传 `true`
+   * （经 `dialectScanOptions` 派生）。此前默认 `true` 会让「忘记传选项」的 PG
+   * 路径按 MySQL 语义误判。
    */
   backslashEscapes?: boolean;
 }
@@ -190,7 +191,7 @@ export function scanSql(sql: string, options: SqlScanOptions = {}): SqlSegment[]
     hashComment: options.hashComment === true,
     dashDashSpace: options.dashDashRequiresSpace === true,
     dollarQuotes: !usesDelimiterDirective(sql),
-    backslashEscapes: options.backslashEscapes !== false,
+    backslashEscapes: options.backslashEscapes === true,
   });
 }
 

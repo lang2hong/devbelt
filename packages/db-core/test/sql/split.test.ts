@@ -106,9 +106,15 @@ describe('DELIMITER 前置注释', () => {
 });
 
 describe('反斜杠转义的方向性', () => {
-  it("MySQL（默认）：\\' 转义，字符串不提前结束", () => {
+  it("默认（SQL 标准 / PG）：\\' 结束字符串", () => {
     const sql = String.raw`SELECT 'a\'b' AS c`;
-    expect(scanSql(sql).filter((s) => s.kind === 'string')).toHaveLength(1);
+    // 标准下反斜杠是普通字符，第一个单引号在 '\'' 处结束；'b' 是新字符串。
+    expect(scanSql(sql).filter((s) => s.kind === 'string').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("MySQL（backslashEscapes:true）：\\' 转义，字符串不提前结束", () => {
+    const sql = String.raw`SELECT 'a\'b' AS c`;
+    expect(scanSql(sql, { backslashEscapes: true }).filter((s) => s.kind === 'string')).toHaveLength(1);
   });
 
   it("backslashEscapes=false（PG/SQLite）：\\' 结束字符串，后续分号正常切分", () => {

@@ -88,8 +88,8 @@ describe('analyzeSqlRisk', () => {
       expect(analyzeSqlRisk('SELECT `drop` FROM `alter`')).toEqual({ level: 'none', isWrite: false });
     });
 
-    it('MySQL 反斜杠转义不会提前结束字面量', () => {
-      expect(analyzeSqlRisk("SELECT 'it\\'s DROP TABLE' AS s")).toEqual({ level: 'none', isWrite: false });
+    it('MySQL 反斜杠转义不会提前结束字面量（需显式开启 backslashEscapes）', () => {
+      expect(analyzeSqlRisk("SELECT 'it\\'s DROP TABLE' AS s", { backslashEscapes: true })).toEqual({ level: 'none', isWrite: false });
     });
 
     it('PG/SQLite 双写引号的字面量同样被剥离', () => {
