@@ -27,6 +27,12 @@ export class ExportHandler {
     private readonly post: (msg: any) => void,
   ) {}
 
+  /** 是否给 CSV/TSV 前置 UTF-8 BOM：由 `dbclient.export.addUtf8Bom` 设置控制（默认关）。 */
+  private withBom(format: TransferFormat): boolean {
+    if (format !== 'csv' && format !== 'txt') return false;
+    return vscode.workspace.getConfiguration('dbclient').get<boolean>('export.addUtf8Bom') === true;
+  }
+
   async exportData(format: TransferFormat, columns: string[], rows: Record<string, any>[]): Promise<void> {
     try {
       if (format === 'sql' && !this.table) {
@@ -71,6 +77,7 @@ export class ExportHandler {
         database: this.database,
         dialect,
         sqlDump: format === 'sql' ? { serverInfo: this.serverInfo() } : undefined,
+        withBom: this.withBom(format),
       });
       const uri = await this.askDestination(format);
       if (!uri) return;
@@ -109,6 +116,7 @@ export class ExportHandler {
       columns: picked.map((p) => p.label),
       includeStructure: format === 'sql',
       serverInfo: this.serverInfo(),
+      withBom: this.withBom(format),
     }, write));
     this.post({ type: 'exported', message: vscode.l10n.t('Exported to {path}', { path: uri.fsPath }) });
   }

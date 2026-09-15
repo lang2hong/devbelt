@@ -276,6 +276,8 @@ export async function runExportWizard(
     version = Object.values(vr.rows[0] ?? {})[0] as string | undefined;
   } catch { version = undefined; }
   const serverInfo = { name: conn.name, dbType: conn.dbType, host: conn.host, port: conn.port, version };
+  const withBom = (format === 'csv' || format === 'txt')
+    && vscode.workspace.getConfiguration('dbclient').get<boolean>('export.addUtf8Bom') === true;
   try {
     await vscode.window.withProgress({
       location: vscode.ProgressLocation.Notification,
@@ -295,6 +297,7 @@ export async function runExportWizard(
           includeStructure: exportContents.includeStructure,
           includeData: exportContents.includeData,
           serverInfo,
+          withBom,
           isCancelled: () => token.isCancellationRequested,
           onProgress: ({ rows }) => progress.report({ message: `${table}: ${rows} row(s)` }),
         }, write));

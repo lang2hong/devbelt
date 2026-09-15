@@ -1591,6 +1591,12 @@
           "default": "tofu",
           "description": "SSH host key policy. tofu: ask and remember unknown host keys; strict: only trust hosts already in known_hosts.",
           "markdownDescription": "SSH 主机密钥策略。`tofu`：未知主机弹指纹确认并记住；`strict`：只信任 `known_hosts` 中已有的主机。密钥变更始终拒绝。"
+        },
+        "dbclient.export.addUtf8Bom": {
+          "type": "boolean",
+          "default": false,
+          "description": "Prefix CSV/TSV exports with a UTF-8 BOM (helps Excel detect encoding).",
+          "markdownDescription": "CSV/TSV 导出前置 UTF-8 BOM（便于 Excel 正确识别编码）。"
         }
       }
     },
