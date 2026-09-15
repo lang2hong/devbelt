@@ -86,6 +86,8 @@ export interface IPaymentCallbackNonceRepo {
    * 渠道重试会被误判为重放而返回 ack，订单永远停在 pending。
    */
   insertIfAbsent(exec: Queryable, channel: Payment['channel'], nonceHash: string, expiresTime: Date): Promise<boolean>;
+  /** 删除 `expires_time < NOW()` 的过期 nonce（重放去重记录，属垃圾行）。返回删除行数。 */
+  purgeExpired(exec: Queryable): Promise<number>;
 }
 
 export interface IInvoiceRepo {

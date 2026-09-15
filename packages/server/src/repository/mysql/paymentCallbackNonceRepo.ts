@@ -14,4 +14,10 @@ export class MysqlPaymentCallbackNonceRepo implements IPaymentCallbackNonceRepo 
     );
     return result.affectedRows === 1;
   }
+
+  /** 物理删除过期重放去重记录（TTL 30 分钟是回调重放窗口，过期即垃圾）。 */
+  async purgeExpired(exec: Queryable): Promise<number> {
+    const [result] = await exec.query<any>(`DELETE FROM payment_callback_nonces WHERE expires_time < NOW()`);
+    return result.affectedRows ?? 0;
+  }
 }

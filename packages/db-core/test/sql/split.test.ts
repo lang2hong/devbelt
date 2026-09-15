@@ -117,3 +117,15 @@ describe('反斜杠转义的方向性', () => {
     expect(stmts.some((s) => s.includes('DROP TABLE t'))).toBe(true);
   });
 });
+
+describe('美元引用 tag 首字规则', () => {
+  const kinds = (sql: string) => scanSql(sql).map((s) => s.kind);
+  it('$$ / $tag$ / $t1$ 识别为 dollar', () => {
+    expect(kinds('SELECT $$a;b$$')).toContain('dollar');
+    expect(kinds('SELECT $tag$a;b$tag$')).toContain('dollar');
+    expect(kinds('SELECT $t1$a;b$t1$')).toContain('dollar');
+  });
+  it('$1$ 不是美元引用（tag 不得以数字开头）', () => {
+    expect(kinds('SELECT $1$; DROP TABLE t; --$1$')).not.toContain('dollar');
+  });
+});

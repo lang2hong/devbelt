@@ -3,7 +3,7 @@ import { createHmac } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { isHostKeyTrusted, loadKnownHosts, type KnownHostEntry } from '../../src/connection/sshHostKey';
+import { appendPluginKnownHost, isHostKeyTrusted, loadKnownHosts, type KnownHostEntry } from '../../src/connection/sshHostKey';
 
 const KEY = Buffer.from('fake-host-key-blob');
 const KEY_B64 = KEY.toString('base64');
@@ -74,5 +74,20 @@ describe('loadKnownHosts', () => {
 
   it('returns an empty list when the file is missing', () => {
     expect(loadKnownHosts(path.join(os.tmpdir(), 'definitely-missing-known-hosts'))).toEqual([]);
+  });
+});
+
+describe('appendPluginKnownHost 权限收紧', () => {
+  it('写入后 chmod 0600（Windows 跳过）', () => {
+    if (process.platform === 'win32') return;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'known-hosts-test-'));
+    const file = path.join(dir, 'known_hosts');
+    try {
+      appendPluginKnownHost(file, 'db.example.com', 22, 'ssh-ed25519', KEY);
+      const mode = fs.statSync(file).mode & 0o777;
+      expect(mode).toBe(0o600);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

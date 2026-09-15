@@ -57,9 +57,9 @@ interface CoreOptions {
   backslashEscapes: boolean;
 }
 
-/** 匹配 `$` 处的美元引用起始标记（`$$` 或 `$tag$`）；不匹配返回 undefined。 */
+/** 匹配 `$` 处的美元引用起始标记（`$$` 或 `$tag$`）。tag 须以字母/下划线开头（SQL 标识符规则）。 */
 function matchDollarTag(sql: string, at: number): string | undefined {
-  const m = /^\$[A-Za-z_0-9]*\$/.exec(sql.slice(at));
+  const m = /^\$([A-Za-z_][A-Za-z_0-9]*)?\$/.exec(sql.slice(at));
   return m ? m[0] : undefined;
 }
 

@@ -38,6 +38,7 @@ import { SyncResetService } from './service/syncResetService.js';
 import { RateLimitService } from './service/rateLimitService.js';
 import { startRateLimitCleanup } from './service/rateLimitCleanup.js';
 import { startInvitationCleanup } from './service/invitationCleanup.js';
+import { startNonceCleanup } from './service/nonceCleanup.js';
 import { startRetentionCleanup } from './service/retentionCleanup.js';
 import { resolveEmailSender } from './service/resolveEmailSender.js';
 import { authRoutes } from './route/auth.js';
@@ -290,6 +291,7 @@ export async function createApp() {
   const cleanupHandles = [
     startRateLimitCleanup(rateLimitRepo),
     startInvitationCleanup(() => organizationService.expireInvitations()),
+    startNonceCleanup(async () => { await paymentNonceRepo.purgeExpired(app.mysql); }),
     startRetentionCleanup({
       refreshTokenRepo,
       emailVerificationTokenRepo,

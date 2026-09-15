@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { MysqlOrderRepo } from '../../src/repository/mysql/orderRepo.js';
 import { MysqlPaymentRepo } from '../../src/repository/mysql/paymentRepo.js';
+import { MysqlPaymentCallbackNonceRepo } from '../../src/repository/mysql/paymentCallbackNonceRepo.js';
 import type { MysqlDb } from '../../src/repository/mysql/db.js';
 
 /**
@@ -145,5 +146,20 @@ describe('payment channel_trade_no uniqueness metadata', () => {
     expect(capturedSql).toContain('channel_trade_no');
     expect(capturedParams).toContain('wx-trade-1');
     expect(capturedParams).toContain(0); // signature_verified=false → 0
+  });
+});
+describe('payment callback nonce purge', () => {
+  it('purgeExpired 在传入 exec 上删除过期行并返回 affectedRows', async () => {
+    const seen: string[] = [];
+    const exec = {
+      query: async <T = any>(sql: string): Promise<T> => {
+        seen.push(sql);
+        return [{ affectedRows: 3 }, undefined] as unknown as T;
+      },
+    };
+    const repo = new MysqlPaymentCallbackNonceRepo();
+    const n = await repo.purgeExpired(exec);
+    expect(n).toBe(3);
+    expect(seen[0]).toMatch(/DELETE FROM payment_callback_nonces WHERE expires_time < NOW\(\)/);
   });
 });

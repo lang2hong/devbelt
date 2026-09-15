@@ -154,9 +154,18 @@ export function appendPluginKnownHost(
   const line = `${knownHostsHost(host, port)} ${keyType} ${keyBlob.toString('base64')}`;
   // 幂等：同一条主机密钥重复接受时不再追加，避免 known_hosts 里堆重复行。
   // （追加写本身走 O_APPEND，短行写入对并发进程是原子的。）
+  // 插件自管文件（非用户 ~/.ssh/known_hosts）：收紧为 0600。Windows 上 chmod 无效，
+// 失败不阻断 TOFU（best-effort）。
+  const tighten = (): void => {
+    try { fs.chmodSync(file, 0o600); } catch { /* Windows / 文件系统不支持 */ }
+  };
   const existing = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
-  if (existing.split('\n').some((l) => l.trim() === line)) return;
+  if (existing.split('\n').some((l) => l.trim() === line)) {
+    tighten();
+    return;
+  }
   fs.appendFileSync(file, `${line}\n`);
+  tighten();
 }
 
 export interface VerifyHostKeyOptions {

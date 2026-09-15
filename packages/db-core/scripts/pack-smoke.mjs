@@ -1,42 +1,66 @@
 /**
  * db-core 发布边界 smoke。
  *
- * 验证两件事，避免「本地 import 通过、发布后外部消费者解析失败」：
- *  1. `npm pack` 的 allowlist（files）/`exports` 映射指向的文件确实被打包；
- *  2. Node 原生 ESM 能按 `exports` 解析 `.` / `./sql` / `./testing`。
+ * 验证真实发布产物（**npm pack 出的 tarball**，而非工作区）：
+ *  1. `exports` 各条件指向的文件确实在解包后的树里存在；
+ *  2. Node 原生 ESM 在解包目录内能自引用解析 `.` / `./sql` / `./testing`。
+ *
+ * 用真实 pack + 解包（过去只 `--dry-run` 看文件列表，无法发现
+ * 目标缺失/路径不一致/解包后结构错位）。临时目录与 tarball 用后清理。
  *
  * 前置：先 `pnpm -C packages/db-core build`（产物在 dist/）。
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync, rmSync, mkdtempSync, symlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 import path from 'node:path';
 
 const pkgDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(readFileSync(path.join(pkgDir, 'package.json'), 'utf8'));
 
-const raw = execFileSync('npm', ['pack', '--dry-run', '--json'], { cwd: pkgDir, encoding: 'utf8' });
-const [info] = JSON.parse(raw);
-const packaged = new Set((info.files ?? []).map((f) => f.path));
+const tmp = mkdtempSync(path.join(os.tmpdir(), 'db-core-pack-smoke-'));
+try {
+  const raw = execFileSync('npm', ['pack', '--json', '--pack-destination', tmp], {
+    cwd: pkgDir,
+    encoding: 'utf8',
+  });
+  const [info] = JSON.parse(raw);
+  const tarball = path.join(tmp, info.filename);
+  const extractDir = path.join(tmp, 'extract');
+  execFileSync('mkdir', ['-p', extractDir]);
+  execFileSync('tar', ['-xzf', tarball, '-C', extractDir]);
+  const unpackedPkgDir = path.join(extractDir, 'package');
 
-const targets = [];
-for (const [subpath, value] of Object.entries(pkg.exports ?? {})) {
-  const conditions = typeof value === 'string' ? { default: value } : value;
-  for (const [condition, file] of Object.entries(conditions)) {
-    targets.push([`${subpath} (${condition})`, String(file).replace(/^\.\//, '')]);
+  // exports 条件 → 目标文件（相对包根）。
+  const targets = [];
+  for (const [subpath, value] of Object.entries(pkg.exports ?? {})) {
+    const conditions = typeof value === 'string' ? { default: value } : value;
+    for (const [condition, file] of Object.entries(conditions)) {
+      targets.push([`${subpath} (${condition})`, String(file).replace(/^\.\//, '')]);
+    }
   }
-}
 
-const missing = targets.filter(([, file]) => !packaged.has(file));
-if (missing.length > 0) {
-  console.error('pack smoke: exports target missing from tarball:');
-  for (const [label, file] of missing) console.error(`  - ${label} -> ${file}`);
-  process.exit(1);
-}
+  const missing = targets.filter(([, file]) => !existsSync(path.join(unpackedPkgDir, file)));
+  if (missing.length > 0) {
+    console.error('pack smoke: exports target missing from unpacked tarball:');
+    for (const [label, file] of missing) console.error(`  - ${label} -> ${file}`);
+    process.exit(1);
+  }
 
-// 自引用 import：Node 依据 package.json 的 exports 解析这些说明符。
-for (const specifier of ['@db-client/core', '@db-client/core/sql', '@db-client/core/testing']) {
-  await import(specifier);
-}
+  // 自引用 import：在解包目录内运行 Node，走真实 package.json exports 解析。
+  // tarball 不含 node_modules（依赖由消费者安装），故把工作区 node_modules 软链进来，
+  // 让入口能解析到 mysql2/pg/sqlstring；这不影响对「tarball 内文件/exports 映射」的校验。
+  const nodeModules = [path.join(pkgDir, 'node_modules'), path.resolve(pkgDir, '..', '..', 'node_modules')]
+    .find((p) => existsSync(p));
+  if (nodeModules) symlinkSync(nodeModules, path.join(unpackedPkgDir, 'node_modules'));
+  execFileSync(
+    process.execPath,
+    ['--input-type=module', '-e', "await import('@db-client/core'); await import('@db-client/core/sql'); await import('@db-client/core/testing');"],
+    { cwd: unpackedPkgDir, stdio: 'inherit' },
+  );
 
-console.log(`pack smoke OK (${packaged.size} files packaged, ${targets.length} export targets, 3 subpaths resolvable)`);
+  console.log(`pack smoke OK (${info.files?.length ?? 0} files packaged, ${targets.length} export targets, 3 subpaths resolvable)`);
+} finally {
+  rmSync(tmp, { recursive: true, force: true });
+}

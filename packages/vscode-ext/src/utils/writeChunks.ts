@@ -1,4 +1,4 @@
-import { createWriteStream } from 'fs';
+import { createWriteStream, rmSync } from 'fs';
 import { mkdir } from 'fs/promises';
 import { dirname } from 'path';
 import { once } from 'events';
@@ -29,6 +29,8 @@ export async function writeChunksToFile(
     });
   } catch (err) {
     stream.destroy();
+    // 取消/失败不留半截文件：删掉已写出的部分（best-effort，不吞原始错误）。
+    try { rmSync(fsPath, { force: true }); } catch { /* 忽略清理失败 */ }
     throw err;
   }
 }
