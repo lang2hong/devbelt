@@ -23,6 +23,11 @@ export interface PaymentCallbackRouteOptions {
   paymentFeatureEnabled?: () => boolean;
   /** 该渠道是否已配置（未配置 → 503，而非落 generic 异常）。 */
   channelConfigured?: (channel: PaymentChannel) => boolean;
+  /**
+   * 是否转发测试 stub 签名头 `x-payment-signature`。默认 false（生产不转发；
+   * 真渠道不发该头，内存 stub 网关的测试组合显式开启）。
+   */
+  allowStubSignature?: boolean;
 }
 
 /** 各渠道回调验签所需的标准化头转发白名单（验签输入，不外泄无关头）。 */
@@ -84,8 +89,12 @@ export async function paymentCallbackRoutes(app: FastifyInstance, opts: PaymentC
       const v = headerOf(req, name);
       if (v !== undefined) headers[name] = v;
     }
-    const stubSig = headerOf(req, 'x-payment-signature');
-    if (stubSig !== undefined) headers['x-payment-signature'] = stubSig;
+    // 另保留 x-payment-signature 给内存测试 stub 使用；仅在显式开启时转发，
+    // 生产组合默认关闭（真渠道不发送、也不引入多余可伪造面）。
+    if (opts.allowStubSignature === true) {
+      const stubSig = headerOf(req, 'x-payment-signature');
+      if (stubSig !== undefined) headers['x-payment-signature'] = stubSig;
+    }
 
     let outcome;
     try {

@@ -101,6 +101,19 @@ async function createRecord(keys: ReturnType<typeof makeKeys>, stack: ReturnType
 }
 
 describe('SyncRecordService', () => {
+  it('rejects a non-canonical recordId (padded / aliased base64url)', async () => {
+    const stack = makeStack();
+    const keys = await init(stack);
+    const mMid = mid(77);
+    const badId = `${RID}=`;
+    const body = putBody(mMid, badId, 70, 71, '0');
+    const s = signRecord(keys.signPriv, USER, 'record.put', body);
+    await expect(stack.recordSvc.putRecord(USER, {
+      keyEpoch: '1', mutationId: mMid, signature: s.signatureBuf, baseVersion: '0', requestDigest: s.digest,
+      recordId: badId, cipherSuite: 'AES-256-GCM', formatVersion: 1, ...decodeBody(body),
+    })).rejects.toThrow(/base64url/i);
+  });
+
   it('creates, pulls, updates optimistically, and deletes (tombstone)', async () => {
     const stack = makeStack();
     const keys = await init(stack);

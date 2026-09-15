@@ -14,12 +14,17 @@ import { PaymentCallbackInvalidError } from '../domain/errors.js';
  * 真实到微信沙箱的端到端联调属部署后人工验收（§83/§84）；本适配器的密码学逻辑用
  * 测试密钥可离线验证，真实 HTTP 由 `fetchImpl` 注入以便测试 stub。
  */
-export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<Response>;
+export type FetchLike = (
+  url: string,
+  init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal },
+) => Promise<Response>;
 
 /** API 绝对地址（仅作 fetch 目标）。 */
 const NATIVE_ORDER_URL = 'https://api.mch.weixin.qq.com/v3/pay/transactions/native';
 /** v3 请求签名使用的 canonical URI（不含 scheme/host，§请求签名规范）。 */
 const NATIVE_CANONICAL_PATH = '/v3/pay/transactions/native';
+/** 下单 HTTP 超时：渠道不响应时不能无限挂起请求处理。 */
+const DEFAULT_ORDER_TIMEOUT_MS = 10_000;
 
 export class WechatPayGateway implements PaymentGateway {
   readonly channel = 'wechat' as const;
@@ -30,6 +35,7 @@ export class WechatPayGateway implements PaymentGateway {
   constructor(
     private readonly creds: WechatCredentials,
     private readonly fetchImpl: FetchLike = fetch as unknown as FetchLike,
+    private readonly orderTimeoutMs: number = DEFAULT_ORDER_TIMEOUT_MS,
   ) {}
 
   async createPayment(input: { orderNo: string; amountCents: number; expiresTime: Date }): Promise<PrepayParams> {
@@ -52,6 +58,12 @@ export class WechatPayGateway implements PaymentGateway {
         Authorization: this.authorizationHeader(timestamp, nonce, signature),
       },
       body,
+      signal: AbortSignal.timeout(this.orderTimeoutMs),
+    }).catch((err: unknown) => {
+      if (err instanceof Error && err.name === 'TimeoutError') {
+        throw new Error('wechat native order timed out');
+      }
+      throw err;
     });
     if (!res.ok) {
       throw new Error(`wechat native order failed: HTTP ${res.status}`);

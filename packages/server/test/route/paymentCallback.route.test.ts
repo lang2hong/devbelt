@@ -32,9 +32,10 @@ const PLAN: PersonalPlan = {
 class CaptureGateway implements PaymentGateway {
   readonly channel: PaymentChannel;
   captured: Buffer | undefined;
+  capturedHeaders: Record<string, string> = {};
   constructor(channel: PaymentChannel) { this.channel = channel; }
   async createPayment(_i: { orderNo: string; amountCents: number; expiresTime: Date }): Promise<PrepayParams> { return {}; }
-  verifyCallback(rawBody: Buffer): boolean { this.captured = rawBody; return true; }
+  verifyCallback(rawBody: Buffer, headers: Record<string, string> = {}): boolean { this.captured = rawBody; this.capturedHeaders = headers; return true; }
   parseCallback(rawBody: Buffer): PaymentCallback { return JSON.parse(rawBody.toString('utf8')) as PaymentCallback; }
 }
 
@@ -59,7 +60,7 @@ const noopSubRepo = {
   update: async () => true,
 };
 
-async function build(gateway: PaymentGateway) {
+async function build(gateway: PaymentGateway, allowStubSignature = true) {
   const app = Fastify({ logger: false });
   registerErrorHandler(app);
   await app.register(requestId);
@@ -76,6 +77,7 @@ async function build(gateway: PaymentGateway) {
     orderService,
     auditWriter: new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as never),
     rateLimiter: new RateLimitService({ increment: async () => 1, peek: async () => 0 } as never, false),
+    allowStubSignature,
   });
   await app.ready();
   return app;
@@ -99,6 +101,22 @@ describe('payment callback route raw bytes', () => {
     expect(gateway.captured).toBeDefined();
     expect(gateway.captured!.equals(raw)).toBe(true);
 
+    await app.close();
+  });
+
+  it('does not forward the stub signature header unless explicitly enabled', async () => {
+    const gateway = new CaptureGateway('wechat');
+    const app = await build(gateway, false); // allowStubSignature 关闭（生产默认）
+    const raw = Buffer.from('{"orderNo":"ord1","channelTradeNo":"wx-1","amountCents":9900,"status":"success"}');
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/public/payment-callback/wechat',
+      headers: { 'content-type': 'application/json', 'x-payment-signature': signMemoryCallback(raw) },
+      payload: raw,
+    });
+
+    expect(gateway.capturedHeaders['x-payment-signature']).toBeUndefined();
     await app.close();
   });
 

@@ -4,6 +4,7 @@ import {
   linkFlowCookieName,
   csrfCookieName,
   serializeCookie,
+  readCookie,
 } from '../../src/middleware/cookies.js';
 
 const OLD_NODE_ENV = process.env.NODE_ENV;
@@ -44,5 +45,26 @@ describe('cookie security profile', () => {
     expect(secureCookiesEnabled()).toBe(true);
     expect(linkFlowCookieName()).toBe('__Host-dbclient_link_flow');
     expect(csrfCookieName()).toBe('__Host-dbclient_csrf');
+  });
+});
+describe('readCookie', () => {
+  const req = (cookie: string) => ({ headers: { cookie } }) as never;
+
+  it('returns the decoded value', () => {
+    expect(readCookie(req('a=1; session=abc'), 'session')).toBe('abc');
+  });
+
+  it('returns undefined (no throw) for malformed percent-encoding', () => {
+    expect(readCookie(req('session=%'), 'session')).toBeUndefined();
+    expect(readCookie(req('session=%zz'), 'session')).toBeUndefined();
+  });
+
+  it('returns undefined for values containing control characters', () => {
+    expect(readCookie(req('session=a%0Ab'), 'session')).toBeUndefined();
+  });
+
+  it('returns undefined when the cookie is absent or the header is missing', () => {
+    expect(readCookie(req('other=1'), 'session')).toBeUndefined();
+    expect(readCookie({ headers: {} } as never, 'session')).toBeUndefined();
   });
 });

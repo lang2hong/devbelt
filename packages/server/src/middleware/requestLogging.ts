@@ -61,27 +61,10 @@ export function redactUrl(rawUrl: string): string {
 }
 
 /**
- * mysql2 在每个失败的查询对象上挂 `sql`，而本项目一律用 `query(sql, params)`
- * （客户端插值），所以那个 `sql` 是**参数已内联**的完整语句。pino 默认的 err
- * 序列化器会拷贝 error 的所有可枚举自有属性，于是任何一次查询失败都会把
- * `password_hash`、各类 `token_hash`、明文邮箱、E2E `ciphertext` 原样写进日志 ——
- * 与 §8「日志不得包含 token」直接冲突。
+ * 保留字段：mysql2 诊断码 + 堆栈。这是 error 序列化的**白名单**，
+ * 白名单之外的任何自有属性一律丢弃 —— pino 默认会拷贝全部可枚举属性，
+ * 未来任何依赖新增的 `accessToken`/`apiKey` 等标量都会随之泄露。
  *
- * 这些键一律不进日志。`sqlMessage` 同样可能回显违规的字段值（例如
- * ER_DATA_TOO_LONG 会带上被截断的内容）。
- */
-const ERR_DROP_KEYS: ReadonlySet<string> = new Set([
-  'sql',
-  'sqlMessage',
-  'parameters',
-  'values',
-  'query',
-  'rows',
-  'fields',
-]);
-
-/**
- * 保留字段：mysql2 诊断码 + 堆栈。
  * `stack` 只含代码位置、不含行数据，是排查 500 的主要线索，故保留。
  */
 const ERR_KEEP_KEYS: readonly string[] = ['code', 'errno', 'sqlState', 'fatal'];
@@ -109,17 +92,6 @@ export function serializeError(err: unknown): unknown {
     if (e[k] !== undefined) out[k] = e[k];
   }
   if (typeof e.stack === 'string') out.stack = e.stack;
-
-  // 其余自有属性按白名单外一律丢弃，避免将来新增字段意外带出数据。
-  for (const k of Object.keys(e)) {
-    if (ERR_DROP_KEYS.has(k) || ERR_KEEP_KEYS.includes(k)) continue;
-    if (k === 'name' || k === 'message' || k === 'stack') continue;
-    const v = e[k];
-    // 只放行标量；对象/数组可能是承载行数据的结构（如 rows、fields）。
-    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
-      out[k] = typeof v === 'string' && v.length > 200 ? `${v.slice(0, 200)}…` : v;
-    }
-  }
 
   return out;
 }

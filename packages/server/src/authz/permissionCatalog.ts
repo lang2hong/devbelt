@@ -54,5 +54,7 @@ const ROLE_PERMISSIONS: Record<OrganizationRole, readonly PermissionCode[]> = {
 };
 
 export function roleHasPermission(role: OrganizationRole, permission: PermissionCode): boolean {
-  return ROLE_PERMISSIONS[role].includes(permission);
+  // 未知角色（数据异常/未来新增角色）一律 deny，不抛错：抛错会把 500 暴露成一个探测面。
+  const permissions = ROLE_PERMISSIONS[role] as readonly PermissionCode[] | undefined;
+  return permissions ? permissions.includes(permission) : false;
 }

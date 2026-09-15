@@ -1,4 +1,5 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { redactUrl } from './requestLogging.js';
 import {
   DomainError,
   RateLimitedError,
@@ -80,7 +81,9 @@ export function registerErrorHandler(app: FastifyInstance): void {
       return;
     }
 
-    req.log.error({ err, url: req.url, method: req.method }, 'unhandled route error');
+    // url 必须走 redactUrl：/api/auth/email-verifications/:token/confirm 等
+    // 路径把 token 放在 path 段，直接写 req.url 会把它带进错误日志。
+    req.log.error({ err, url: redactUrl(req.url), method: req.method }, 'unhandled route error');
     reply.code(500).send({ message: 'Internal server error' });
   });
 

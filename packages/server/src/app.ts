@@ -61,9 +61,9 @@ import { MysqlIdempotencyReceiptRepo } from './repository/mysql/idempotencyRecei
 import { MysqlOrderRepo } from './repository/mysql/orderRepo.js';
 import { MysqlPaymentRepo } from './repository/mysql/paymentRepo.js';
 import { MysqlPaymentCallbackNonceRepo } from './repository/mysql/paymentCallbackNonceRepo.js';
-import type { IUserRepo } from './repository/interfaces.js';
 import { LinkFlowService } from './service/linkFlowService.js';
 import { AuditWriter } from './service/auditWriter.js';
+import { bootstrapPlatformAdmins } from './service/platformAdminBootstrap.js';
 import { IdempotencyService } from './service/idempotencyService.js';
 import { CsrfService, deriveCsrfKey } from './service/csrfService.js';
 import { linkFlowRoutes } from './route/linkFlows.js';
@@ -154,7 +154,7 @@ export async function createApp() {
   const idempotencyReceiptRepo = new MysqlIdempotencyReceiptRepo(getMysql);
   const orderRepo = new MysqlOrderRepo(getMysql);
   const paymentRepo = new MysqlPaymentRepo();
-  const paymentNonceRepo = new MysqlPaymentCallbackNonceRepo(getMysql);
+  const paymentNonceRepo = new MysqlPaymentCallbackNonceRepo();
   const invoiceRepo = new MysqlInvoiceRepo(getMysql);
 
   // service 层
@@ -283,23 +283,30 @@ export async function createApp() {
   const paymentEnabled = paymentRoutesEnabled();
 
   // 受控限流清理任务（实施规格 §3）：过期桶由周期任务删除，不依赖请求
-  startRateLimitCleanup(rateLimitRepo);
   // 受控邀请过期清理任务（实施规格 §3）：过期邀请释放容量，不依赖成员再次操作
-  startInvitationCleanup(() => organizationService.expireInvitations());
-  // 过期数据保留清理：refresh_tokens / email_verification_tokens /
-  // personal_sync_mutations / personal_sync_reset_tokens 四张表原本只增不减
-  // （其中三张自带 expires_time 却无人消费）。
-  startRetentionCleanup({
-    refreshTokenRepo,
-    emailVerificationTokenRepo,
-    syncMutationRepo,
-    syncResetTokenRepo,
-    syncResetHandoffRepo,
-    mailFlowRepo,
-    idempotencyReceiptRepo,
-    orderRepo,
-    auditWriter,
-    exec: () => app.mysql,
+  // 过期数据保留清理（refresh_tokens / email_verification_tokens /
+  // personal_sync_mutations / personal_sync_reset_tokens 等表原本只增不减）。
+  // 三者返回 { stop }：绑定到 app.close()，避免测试/嵌入式多实例里定时器持续打已关闭的池。
+  const cleanupHandles = [
+    startRateLimitCleanup(rateLimitRepo),
+    startInvitationCleanup(() => organizationService.expireInvitations()),
+    startRetentionCleanup({
+      refreshTokenRepo,
+      emailVerificationTokenRepo,
+      syncMutationRepo,
+      syncResetTokenRepo,
+      syncResetHandoffRepo,
+      mailFlowRepo,
+      idempotencyReceiptRepo,
+      orderRepo,
+      auditWriter,
+      exec: () => app.mysql,
+    }),
+  ];
+  app.addHook('onClose', async () => {
+    for (const handle of cleanupHandles) {
+      try { handle.stop(); } catch { /* 已停止 */ }
+    }
   });
 
   // route 层
@@ -463,33 +470,6 @@ export async function createApp() {
   await bootstrapPlatformAdmins(userRepo, auditWriter, config.platformAdminEmails, app.log.warn.bind(app.log));
 
   return app;
-}
-
-/**
- * 把 PLATFORM_ADMIN_EMAILS（逗号分隔）列出的已存在用户提升为 platform_admin。
- * 幂等：沿用注册/登录的 trim + lowercase 规范化，重复启动不重复发审计。
- */
-async function bootstrapPlatformAdmins(
-  userRepo: IUserRepo,
-  auditWriter: AuditWriter,
-  emails: readonly string[],
-  warn: (msg: string, data?: unknown) => void,
-): Promise<void> {
-  if (emails.length === 0) {
-    warn('PLATFORM_ADMIN_EMAILS not configured; platform admin surface is fail-closed');
-    return;
-  }
-  for (const email of emails) {
-    const user = await userRepo.findByEmail(email);
-    // env 打错字/用户尚未注册 = 静默无管理员的事故，必须告警；移除 env 不降级，
-    // 已提升账号需重启后再次触发（本函数幂等）。
-    if (!user) {
-      warn('PLATFORM_ADMIN_EMAILS entry matches no registered user', { email });
-      continue;
-    }
-    await userRepo.setRole(user.id, 'platform_admin');
-    auditWriter.write({ eventType: 'admin.role.granted', result: 'success', actorUserId: null, targetType: 'user', targetId: String(user.id) });
-  }
 }
 
 /**

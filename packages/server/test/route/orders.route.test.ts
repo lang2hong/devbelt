@@ -94,7 +94,7 @@ async function build() {
   };
   await app.register(ordersReadRoutes, orderOpts);
   await app.register(ordersWriteRoutes, orderOpts);
-  await app.register(paymentCallbackRoutes, { orderService, auditWriter, rateLimiter });
+  await app.register(paymentCallbackRoutes, { orderService, auditWriter, rateLimiter, allowStubSignature: true });
   await app.ready();
 
   const consoleToken = (userId: number) => tokenService.signAccessToken({ userId, aud: 'console', scope: [...CONSOLE_SCOPES], sessionId: 'ws', sessionVersion: 0 });

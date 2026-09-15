@@ -1,5 +1,6 @@
 import { resolveSigningKeys, type SigningKeys } from './service/signingKeys.js';
 import { resolveConsoleOrigin } from './service/consoleOrigin.js';
+import { resolveMysqlCreds } from './mysqlCreds.js';
 
 /**
  * 统一布尔开关解析：`false`/`0`/`off` 视为关，缺省 undefined 视为关
@@ -81,13 +82,7 @@ export const config = {
   accessTokenExpiresIn: accessTtl.raw,
   refreshTokenExpiresIn: refreshTtl.raw,
   refreshTokenExpiresMs: refreshTtl.ms,
-  mysql: {
-    host: process.env.MYSQL_HOST || '127.0.0.1',
-    port: Number(process.env.MYSQL_PORT || 3306),
-    user: process.env.MYSQL_USER || 'dbclient',
-    password: process.env.MYSQL_PASSWORD || '',
-    database: process.env.MYSQL_DATABASE || 'db_client',
-  },
+  mysql: resolveMysqlCreds(process.env),
   trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
   rateLimitEnabled: !parseOff(process.env.RATE_LIMIT_ENABLED),
   /** 控制台公开页/邮件流接口允许的同源 Origin（生产/预发必须为 HTTPS SMTP_BASE_URL 源）。 */

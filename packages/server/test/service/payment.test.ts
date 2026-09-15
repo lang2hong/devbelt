@@ -107,7 +107,7 @@ class FakeSubsRepo implements IPersonalSubscriptionRepo {
   }
 }
 
-function makeService(nonceRepo?: { insertIfAbsent(channel: string, nonceHash: string, expiresTime: Date): Promise<boolean> }) {
+function makeService(nonceRepo?: { insertIfAbsent(exec: Queryable, channel: string, nonceHash: string, expiresTime: Date): Promise<boolean> }) {
   const orderRepo = new FakeOrderRepo();
   const paymentRepo = new FakePaymentRepo();
   const planRepo = new FakePlanRepo();
@@ -300,7 +300,7 @@ describe('OrderService.handleCallback', () => {
   it('rejects a replayed wechat callback by persisted nonce (before business)', async () => {
     const seen = new Set<string>();
     const nonceRepo = {
-      insertIfAbsent: async (_channel: string, nonceHash: string) => {
+      insertIfAbsent: async (_exec: Queryable, _channel: string, nonceHash: string) => {
         if (seen.has(nonceHash)) return false;
         seen.add(nonceHash);
         return true;

@@ -16,6 +16,7 @@ import {
   ValidationError,
 } from '../domain/errors.js';
 import { incU64, parseU64 } from '../domain/syncU64.js';
+import { decodeB64UrlRange } from './syncCrypto.js';
 import { SYNC_DOMAIN, assertU64, assertEpoch, verifySignature, checkReceipt, recordReceipt } from './syncShared.js';
 
 const MAX_RECORD_CIPHERTEXT_BYTES = 256 * 1024; // 单个 record 密文上限
@@ -62,14 +63,9 @@ export interface PullResult {
 }
 
 function decodeRecordId(recordId: string): Buffer {
-  let buf: Buffer;
-  try {
-    buf = Buffer.from(recordId, 'base64url');
-  } catch {
-    throw new ValidationError('recordId is not valid base64url');
-  }
-  if (buf.length < 1 || buf.length > 128) throw new ValidationError('recordId must be 1..128 bytes');
-  return buf;
+  // canonical base64url：拒绝带 padding / 末字符低位等非规范形态，否则不同字符串
+  // 可能解码出同一批字节，同一物理记录可挂到多个各自合法签名的身份下。
+  return decodeB64UrlRange(recordId, 1, 128, 'recordId');
 }
 
 function withSeq(state: PersonalSyncState, changeSequence: string): Omit<PersonalSyncState, 'createTime' | 'updateTime'> {

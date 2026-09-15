@@ -769,8 +769,13 @@ export interface IPaymentRepo {
 }
 
 export interface IPaymentCallbackNonceRepo {
-  /** 记录回调 nonce（SHA-256 摘要）；首次记录返回 true，重复（重放）返回 false。 */
-  insertIfAbsent(channel: Payment['channel'], nonceHash: string, expiresTime: Date): Promise<boolean>;
+  /**
+   * 在**调用方事务内**记录回调 nonce（SHA-256 摘要）；首次记录返回 true，重复（重放）返回 false。
+   *
+   * 必须与订单推进同事务：若在事务外先落 nonce，业务步骤失败后 nonce 已提交，
+   * 渠道重试会被误判为重放而返回 ack，订单永远停在 pending。
+   */
+  insertIfAbsent(exec: Queryable, channel: Payment['channel'], nonceHash: string, expiresTime: Date): Promise<boolean>;
 }
 
 export interface IInvoiceRepo {

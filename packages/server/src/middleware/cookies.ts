@@ -32,7 +32,7 @@ export const csrfCookieName = (): string =>
 export const refreshCookieName = (): string =>
   secureCookiesEnabled() ? '__Host-dbclient_refresh' : 'dev_dbrefresh';
 
-/** 从请求 Cookie 头读取指定 cookie 的值。 */
+/** 从请求 Cookie 头读取指定 cookie 的值。畸形百分号编码/控制字符一律视为未提供。 */
 export function readCookie(req: FastifyRequest, name: string): string | undefined {
   const header = req.headers.cookie;
   if (!header) return undefined;
@@ -40,7 +40,17 @@ export function readCookie(req: FastifyRequest, name: string): string | undefine
   for (const part of header.split(';')) {
     const p = part.trim();
     if (p.startsWith(prefix)) {
-      return decodeURIComponent(p.slice(prefix.length));
+      let value: string;
+      try {
+        value = decodeURIComponent(p.slice(prefix.length));
+      } catch {
+        // `%` 后接非法十六进制等畸形输入：不能抛错（否则匿名请求即可打 500）。
+        return undefined;
+      }
+      // 控制字符不应出现在合法 cookie 值中，出现即视为无效。
+      // eslint-disable-next-line no-control-regex
+      if (/[\u0000-\u001f\u007f]/.test(value)) return undefined;
+      return value;
     }
   }
   return undefined;

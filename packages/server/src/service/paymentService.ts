@@ -129,21 +129,22 @@ export class OrderService {
     if (!gateway.verifyCallback(rawBody, headers)) {
       throw new PaymentSignatureInvalidError();
     }
-    // 微信回调重放防护：nonce 持久化去重（freshness 窗口内同一回调可被重放）。首次记录，
-    // 重复即重放，直接判 duplicate 终止，不落业务流水（channel_trade_no 唯一键只防重复处理）。
-    if (channel === 'wechat' && this.nonceRepo) {
-      const nonce = headers['wechatpay-nonce'];
-      if (typeof nonce === 'string' && nonce) {
-        const nonceHash = createHash('sha256').update(nonce).digest('hex');
-        const fresh = await this.nonceRepo.insertIfAbsent(channel, nonceHash, new Date(Date.now() + 30 * 60 * 1000));
-        if (!fresh) return { kind: 'duplicate' };
-      }
-    }
     const parsed = gateway.parseCallback(rawBody);
     // 敏感信息边界：只落渠道适配器产出的白名单脱敏摘要，绝不落原始回调 body/加密信封/完整表单。
     const notification = JSON.stringify(parsed.summary ?? {});
 
     return this.runner(async (tx) => {
+      // 微信回调重放防护：nonce 持久化去重。必须在**同一事务内**记录 —— 若在事务外
+      // 先落 nonce，业务步骤失败后 nonce 已提交，渠道重试会被误判为重放并回 ack，
+      // 订单永远停在 pending、权益不生效。重复 nonce 直接判 duplicate 终止。
+      if (channel === 'wechat' && this.nonceRepo) {
+        const nonce = headers['wechatpay-nonce'];
+        if (typeof nonce === 'string' && nonce) {
+          const nonceHash = createHash('sha256').update(nonce).digest('hex');
+          const fresh = await this.nonceRepo.insertIfAbsent(tx, channel, nonceHash, new Date(Date.now() + 30 * 60 * 1000));
+          if (!fresh) return { kind: 'duplicate' };
+        }
+      }
       const order = await this.orderRepo.findByOrderNoForUpdate(tx, parsed.orderNo);
       if (!order) return { kind: 'rejected', code: 'ORDER_NOT_FOUND' };
       if (order.channel !== channel) return { kind: 'rejected', code: 'ORDER_NOT_FOUND' };

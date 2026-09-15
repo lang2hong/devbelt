@@ -115,6 +115,26 @@ describe('MemoryPaymentGateway is still test-only', () => {
 });
 
 describe('WechatPayGateway', () => {
+  it('aborts with a clear timeout error when the gateway never responds', async () => {
+    const cred = resolveWechatCredentials(wechatEnv())!;
+    const g = new WechatPayGateway(
+      cred,
+      (_url, init) => new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          const e = new Error('aborted');
+          e.name = 'TimeoutError';
+          reject(e);
+        });
+      }),
+      10,
+    );
+    await expect(g.createPayment({
+      orderNo: 'ord-timeout',
+      amountCents: 100,
+      expiresTime: new Date(Date.now() + 30 * 60 * 1000),
+    })).rejects.toThrow(/timed out/);
+  });
+
   it('serializes a Native order with non-empty notify_url and cert serial', async () => {
     const cred = resolveWechatCredentials(wechatEnv())!;
     let capturedBody = '';

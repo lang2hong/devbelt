@@ -5,12 +5,17 @@ import type { Queryable } from '../repository/mysql/db.js';
 /** readiness 探活的数据库查询超时：避免 DB 假死时探针无限挂起、拖垮 k8s/负载均衡摘除。 */
 const DB_PING_TIMEOUT_MS = 2000;
 
-/** 给查询加超时，任一失败（含超时）都按「不可用」处理。 */
-function ping(db: Queryable, sql: string): Promise<unknown> {
-  return Promise.race([
-    db.query(sql),
-    new Promise((_, reject) => setTimeout(() => reject(new Error('db ping timeout')), DB_PING_TIMEOUT_MS)),
-  ]);
+/** 给查询加超时，任一失败（含超时）都按「不可用」处理。定时器必须清理，避免探针累积。 */
+export function pingDb(db: Queryable, sql: string): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('db ping timeout')), DB_PING_TIMEOUT_MS);
+    // 健康探针不应拽住进程退出。
+    timer.unref();
+    db.query(sql).then(
+      (result) => { clearTimeout(timer); resolve(result); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
 }
 
 export interface HealthRoutesOptions {
@@ -39,14 +44,14 @@ export async function registerHealthRoutes(app: FastifyInstance, opts: HealthRou
     let dbOk = false;
     let schemaOk = false;
     try {
-      await ping(db, 'SELECT 1');
+      await pingDb(db, 'SELECT 1');
       dbOk = true;
     } catch {
       dbOk = false;
     }
     if (dbOk) {
       try {
-        const [rows] = (await ping(db, 'SELECT version FROM schema_migrations')) as [Array<{ version: string }>, unknown];
+        const [rows] = (await pingDb(db, 'SELECT version FROM schema_migrations')) as [Array<{ version: string }>, unknown];
         // 与迁移 runner 共用同一份遗留别名归一化（${version}_v3），避免旧账本被误判未迁移而永久 503。
         const applied = normalizeAppliedVersions(rows.map((r) => r.version), opts.migrations);
         const known = new Set(opts.migrations.map((m) => m.version));

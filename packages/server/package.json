@@ -10,7 +10,9 @@
     "lint": "tsc --noEmit -p tsconfig.test.json",
     "test": "node build.cjs && pnpm -C ../db-core build && vitest run",
     "start": "node dist/index.cjs",
-    "dev": "node dev.cjs"
+    "dev": "node dev.cjs",
+    "admin:promote": "node dist/promoteAdmin.cjs",
+    "admin:promote:dev": "tsx src/scripts/promotePlatformAdmin.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
