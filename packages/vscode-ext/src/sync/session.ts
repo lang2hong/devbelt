@@ -2,35 +2,21 @@ import { StateStore, type MementoLike, type SyncStateSnapshot } from './e2e/stat
 import { RecordMapStore } from './e2e/recordMapStore';
 import { PendingMutationStore } from './e2e/pendingMutationStore';
 import { SyncEngine } from './e2e/syncEngine';
-import { SyncMutator } from './e2e/syncMutator';
 import { SyncCoordinator } from './e2e/syncCoordinator';
 import type { SyncRunResult } from './e2e/syncEngine';
 import { ConflictResolver, type ConflictItem } from './e2e/conflictResolver';
 import { EntityStore, UnresolvedRefStore } from './e2e/entityStore';
 import type { SyncEntityType } from './e2e/syncEntity';
-import { SyncApiError, type PersonalSyncClient } from './e2e/client';
-import { assertU64Decimal, validateSyncState, type NewStateDto, type StateDto } from './e2e/types';
+import { type PersonalSyncClient } from './e2e/client';
+import { validateSyncState, type NewStateDto, type StateDto } from './e2e/types';
 import { DekStore, deriveSyncSignKeyPair } from './crypto/keyStore';
-import { encodeBase64Url, decodeBase64Url } from './crypto/recoveryCode';
-import {
-  createInitialMaterial,
-  newRecoveryCode,
-  unlockDek,
-  buildChangeKeyMaterial,
-  buildRecoverMaterial,
-  buildRecoverByAccountMaterial,
-  newStateFromMaterial,
-  type InitialSyncMaterial,
-  type RecoverMaterial,
-  type RecoverByAccountMaterial,
-} from './keyLifecycle';
-import { hkdfSha256, SYNC_INFO } from './crypto/hkdf';
-import { openEnvelope } from './envelope';
+import { encodeBase64Url } from './crypto/recoveryCode';
 import type { ConnectionStore } from '../connection/connectionStore';
 import type { CachedEntitlement } from './authService';
 import { uniqueId } from '../utils/id';
-import { randomBytes } from 'crypto';
 import { EpochTransitionCoordinator } from './epochTransition';
+import { buildSyncRuntime } from './runtimeFactory';
+import { KeyLifecycleOps } from './keyLifecycleOps';
 
 const LOCAL_ID_PREFIX: Record<SyncEntityType, string> = {
   connection: 'c',
@@ -75,13 +61,13 @@ export class PersonalSyncSession {
   private mapStore?: RecordMapStore;
   private outbox?: PendingMutationStore;
   private engine?: SyncEngine;
-  private mutator?: SyncMutator;
   private coordinator?: SyncCoordinator;
   private resolver?: ConflictResolver;
   private dek?: Uint8Array;
   private signSeed?: Uint8Array;
   private keyEpoch?: string;
   private readonly epochTx: EpochTransitionCoordinator;
+  private readonly keyOps: KeyLifecycleOps;
 
   constructor(
     private readonly userId: string,
@@ -102,6 +88,20 @@ export class PersonalSyncSession {
       currentEpoch: () => this.keyEpoch,
       stopCoordinator: () => this.coordinator?.stop(),
       resetRuntime: () => this.resetRuntime(),
+    });
+    this.keyOps = new KeyLifecycleOps({
+      userId,
+      client,
+      stateStore: this.stateStore,
+      isUnlocked: () => this.isUnlocked,
+      dek: () => this.dek,
+      keyEpoch: () => this.keyEpoch,
+      signSeed: () => this.signSeed,
+      pendingCleanup: () => this.pendingCleanup,
+      getRemoteState: () => this.getRemoteState(),
+      unlockFromState: (state, dek) => this.unlockFromState(state, dek),
+      installNewEpoch: (fromKeyEpoch, snapshot, dek) => this.installNewEpoch(fromKeyEpoch, snapshot, dek),
+      writePendingIntent: (intent) => this.epochTx.writePending(intent),
     });
   }
 
@@ -286,30 +286,7 @@ export class PersonalSyncSession {
    * 失败不改本地 snapshot/DEK。签名用当前内存 syncSign（命令层不接触私钥）。
    */
   async changeSyncPassword(oldSmp: string, newSmp: string): Promise<void> {
-    if (!this.dek || !this.keyEpoch || !this.signSeed) throw new Error('sync session is locked');
-    const state = await this.getRemoteState();
-    if (state.keyEpoch !== this.keyEpoch) throw new Error('sync epoch mismatch');
-    const material = await buildChangeKeyMaterial(
-      this.userId, this.keyEpoch, oldSmp, state.smpKdf, state.envelopeSmp, newSmp,
-    );
-    try {
-      if (!byteEq(material.verifiedDek, this.dek)) throw new Error('sync passphrase mismatch');
-      const local = this.stateStore.getSnapshot();
-      if (!local) throw new Error('sync session has no local state');
-      const res = await this.client.changeKey({
-        userId: this.userId,
-        keyEpoch: this.keyEpoch,
-        mutationId: this.mintMutationId(),
-        seed: this.signSeed,
-        expectedStateVersion: local.stateVersion,
-        smpKdf: material.smpKdf,
-        envelopeSmp: material.envelopeSmp,
-      });
-      const stateVersion = this.assertSameEpochReceipt(res, this.keyEpoch);
-      await this.stateStore.setSnapshot({ keyEpoch: this.keyEpoch, stateVersion, changeSequence: local.changeSequence });
-    } finally {
-      material.verifiedDek.fill(0);
-    }
+    return this.keyOps.changeSyncPassword(oldSmp, newSmp);
   }
 
   /**
@@ -317,38 +294,7 @@ export class PersonalSyncSession {
    * 成功后保存 DEK、更新 snapshot、解锁并排首次同步；返回新恢复码（一次性展示）。
    */
   async recoverSync(recoveryCode: string, newSmp: string): Promise<string> {
-    if (this.isUnlocked) throw new Error('sync session already unlocked');
-    const state = await this.getRemoteState();
-    const oldRecoveryRaw = decodeBase64Url(recoveryCode.replace(/\s+/g, ''));
-    const newRecovery = newRecoveryCode();
-    let material: RecoverMaterial | undefined;
-    try {
-      material = await buildRecoverMaterial(
-        this.userId, state.keyEpoch, oldRecoveryRaw, state.recoveryKdf, state.envelopeRecovery,
-        state.envelopeSmp.envelopeVersion, newSmp, newRecovery.raw,
-      );
-      await this.client.recover({
-        userId: this.userId,
-        keyEpoch: state.keyEpoch,
-        mutationId: this.mintMutationId(),
-        seed: material.oldRecoverSignSeed,
-        expectedStateVersion: state.stateVersion,
-        smpKdf: material.smpKdf,
-        envelopeSmp: material.envelopeSmp,
-        recoveryKdf: material.recoveryKdf,
-        envelopeRecovery: material.envelopeRecovery,
-        recoverSignPub: material.recoverSignPub,
-      });
-      const newState = await this.getRemoteState();
-      // 复用 unlockFromState 的 signPub 一致性校验 + 完整解锁语义（验证恢复出的 DEK 确属该 state）。
-      await this.unlockFromState(newState, material.dek);
-      return newRecovery.code;
-    } finally {
-      oldRecoveryRaw.fill(0);
-      newRecovery.raw.fill(0);
-      material?.dek.fill(0);
-      material?.oldRecoverSignSeed.fill(0);
-    }
+    return this.keyOps.recoverSync(recoveryCode, newSmp);
   }
 
   /**
@@ -357,62 +303,7 @@ export class PersonalSyncSession {
    * 口令/恢复码/账号钥匙，数据不丢。返回新恢复码。
    */
   async recoverByAccount(accountPassword: string, newSmp: string): Promise<string> {
-    if (this.isUnlocked) throw new Error('sync session already unlocked');
-    const state = await this.getRemoteState();
-    const accountMaterial = await this.client.recoverViaAccount(accountPassword);
-    const oldAccountKey = decodeBase64Url(accountMaterial.accountRecoveryKey);
-    const kekAccount = hkdfSha256(oldAccountKey, new Uint8Array(0), SYNC_INFO.kekAccount);
-    let dek: Uint8Array;
-    try {
-      dek = openEnvelope(kekAccount, accountMaterial.envelopeAccount, this.userId, state.keyEpoch, 'account');
-    } finally {
-      kekAccount.fill(0);
-      oldAccountKey.fill(0);
-    }
-    // 恢复出的 DEK 必须确属该 state（signPub 一致性），否则拒绝。
-    if (encodeBase64Url(deriveSyncSignKeyPair(dek).publicKey) !== state.signPub) {
-      dek.fill(0);
-      throw new Error('account recovery key does not match sync state');
-    }
-
-    const newRecovery = newRecoveryCode();
-    const newAccountRaw = new Uint8Array(randomBytes(32));
-    let material: RecoverByAccountMaterial | undefined;
-    try {
-      material = await buildRecoverByAccountMaterial(
-        this.userId,
-        state.keyEpoch,
-        dek,
-        state.envelopeSmp.envelopeVersion,
-        state.envelopeRecovery.envelopeVersion,
-        accountMaterial.envelopeAccount.envelopeVersion,
-        newSmp,
-        newRecovery.raw,
-        newAccountRaw,
-      );
-      await this.client.accountRecover({
-        userId: this.userId,
-        keyEpoch: state.keyEpoch,
-        mutationId: this.mintMutationId(),
-        seed: material.signSeed,
-        expectedStateVersion: state.stateVersion,
-        smpKdf: material.smpKdf,
-        envelopeSmp: material.envelopeSmp,
-        recoveryKdf: material.recoveryKdf,
-        envelopeRecovery: material.envelopeRecovery,
-        envelopeAccount: material.envelopeAccount,
-        accountRecoveryKey: encodeBase64Url(newAccountRaw),
-        recoverSignPub: material.recoverSignPub,
-      });
-      const newState = await this.getRemoteState();
-      await this.unlockFromState(newState, dek);
-      return newRecovery.code;
-    } finally {
-      dek.fill(0);
-      newRecovery.raw.fill(0);
-      newAccountRaw.fill(0);
-      material?.signSeed.fill(0);
-    }
+    return this.keyOps.recoverByAccount(accountPassword, newSmp);
   }
 
   /**
@@ -420,49 +311,12 @@ export class PersonalSyncSession {
    * 返回新恢复码（一次性展示）；旧 epoch DEK/store 被清理。
    */
   async destroySync(smp: string): Promise<string> {
-    if (!this.dek || !this.keyEpoch || !this.signSeed) throw new Error('sync session is locked');
-    const state = await this.getRemoteState();
-    if (state.keyEpoch !== this.keyEpoch) throw new Error('sync epoch mismatch');
-    const verified = await unlockDek(this.userId, this.keyEpoch, smp, state.smpKdf, state.envelopeSmp);
-    try {
-      if (!byteEq(verified, this.dek)) throw new Error('sync passphrase mismatch');
-    } finally {
-      verified.fill(0);
-    }
-
-    const fromKeyEpoch = this.keyEpoch;
-    const newKeyEpoch = String(BigInt(fromKeyEpoch) + 1n);
-    const newRecovery = newRecoveryCode();
-    let material: InitialSyncMaterial | undefined;
-    try {
-      material = await createInitialMaterial(this.userId, newKeyEpoch, smp, newRecovery.raw);
-      const local = this.stateStore.getSnapshot();
-      if (!local) throw new Error('sync session has no local state');
-      // 不可逆请求前先落 durable transition intent：即使回执丢失/响应中断，重启后可据远端 state
-      // 判定提交结果（toKeyEpoch 命中 → 清理；fromKeyEpoch 命中 → 撤销）收敛旧 epoch。
-      await this.epochTx.writePending({ fromKeyEpoch, toKeyEpoch: newKeyEpoch });
-      const res = await this.client.destroy({
-        userId: this.userId,
-        keyEpoch: fromKeyEpoch,
-        mutationId: this.mintMutationId(),
-        seed: this.signSeed,
-        expectedStateVersion: local.stateVersion,
-        newState: newStateFromMaterial(material),
-      });
-      const ownedDek = material.dek.slice();
-      const newSnapshot = this.assertEpochAdvanceReceipt(res, newKeyEpoch);
-      await this.installNewEpoch(fromKeyEpoch, newSnapshot, ownedDek);
-      return newRecovery.code;
-    } finally {
-      newRecovery.raw.fill(0);
-      material?.dek.fill(0);
-      material?.accountRecoveryKey.fill(0);
-    }
+    return this.keyOps.destroySync(smp);
   }
 
   /** 请求丢失 SMP 重置的邮件挑战（锁定态；服务端限流 + 防枚举恒同响应）。 */
   async requestResetChallenge(): Promise<void> {
-    await this.client.resetChallenges();
+    return this.keyOps.requestResetChallenge();
   }
 
   /**
@@ -472,47 +326,7 @@ export class PersonalSyncSession {
    * 返回新恢复码。
    */
   async resetSyncAfterLoss(handoffTicket: string, newSmp: string): Promise<string> {
-    if (this.isUnlocked) throw new Error('sync session already unlocked; use destroy instead');
-    // 已有未收敛的 epoch-cleanup journal 时拒绝 reset：否则会用新 intent 覆盖旧的单键 journal，
-    // 使更旧 epoch 的本地状态（recordMap/outbox/unresolved/DEK）失去清理入口而永久残留。
-    if (this.pendingCleanup) {
-      throw new Error('pending sync cleanup in progress; unlock to finish it before resetting');
-    }
-    let newKeyEpoch: string;
-    try {
-      const remote = await this.getRemoteState();
-      newKeyEpoch = String(BigInt(remote.keyEpoch) + 1n);
-    } catch (err) {
-      if (err instanceof SyncApiError && err.status === 400 && err.code === 'SYNC_NOT_INITIALIZED') {
-        newKeyEpoch = '1';
-      } else {
-        throw err;
-      }
-    }
-    const localEpoch = this.stateStore.getSnapshot()?.keyEpoch;
-    const hasLocalEpoch = localEpoch !== undefined && BigInt(localEpoch) < BigInt(newKeyEpoch);
-    const newRecovery = newRecoveryCode();
-    let material: InitialSyncMaterial | undefined;
-    try {
-      material = await createInitialMaterial(this.userId, newKeyEpoch, newSmp, newRecovery.raw);
-      // 本地下有旧 epoch 时才须清理；请求前先落 durable intent 覆盖「远端已提交、ticket 已消费、
-      // 回执丢失」的未知结果窗口（同 ticket 同 newState 重试仅 3 次，且 ticket 单次消费）。
-      if (hasLocalEpoch) await this.epochTx.writePending({ fromKeyEpoch: localEpoch as string, toKeyEpoch: newKeyEpoch });
-      const res = await this.client.resetAfterLossWithHandoff(handoffTicket, newStateFromMaterial(material));
-      const ownedDek = material.dek.slice();
-      const newSnapshot = this.assertEpochAdvanceReceipt(res, newKeyEpoch);
-      const fromKeyEpoch = hasLocalEpoch ? (localEpoch as string) : undefined;
-      await this.installNewEpoch(fromKeyEpoch, newSnapshot, ownedDek);
-      return newRecovery.code;
-    } finally {
-      newRecovery.raw.fill(0);
-      material?.dek.fill(0);
-      material?.accountRecoveryKey.fill(0);
-    }
-  }
-
-  private mintMutationId(): string {
-    return encodeBase64Url(new Uint8Array(randomBytes(16)));
+    return this.keyOps.resetSyncAfterLoss(handoffTicket, newSmp);
   }
 
   /** 落新 epoch：intent 先行 → 存新 DEK → transition 清旧 epoch → unlock → 首次同步。 */
@@ -538,31 +352,6 @@ export class PersonalSyncSession {
     this.scheduleInitialSync();
   }
 
-  /** 校验「同 epoch 状态变更」回执（change-key），返回新的 stateVersion。 */
-  private assertSameEpochReceipt(res: unknown, expectedKeyEpoch: string): string {
-    if (typeof res !== 'object' || res === null) throw new Error('malformed sync receipt');
-    const o = res as Record<string, unknown>;
-    if (typeof o.keyEpoch !== 'string' || typeof o.stateVersion !== 'string') throw new Error('malformed sync receipt');
-    assertU64Decimal(o.keyEpoch, 'receipt.keyEpoch');
-    assertU64Decimal(o.stateVersion, 'receipt.stateVersion');
-    if (o.keyEpoch !== expectedKeyEpoch) throw new Error('sync receipt epoch mismatch');
-    return o.stateVersion;
-  }
-
-  /** 校验「epoch 前进」回执（destroy/reset），返回三字段快照；epoch 必须等于预期 next。 */
-  private assertEpochAdvanceReceipt(res: unknown, expectedKeyEpoch: string): SyncStateSnapshot {
-    if (typeof res !== 'object' || res === null) throw new Error('malformed sync receipt');
-    const o = res as Record<string, unknown>;
-    if (typeof o.keyEpoch !== 'string' || typeof o.stateVersion !== 'string' || typeof o.changeSequence !== 'string') {
-      throw new Error('malformed sync receipt');
-    }
-    assertU64Decimal(o.keyEpoch, 'receipt.keyEpoch');
-    assertU64Decimal(o.stateVersion, 'receipt.stateVersion', true);
-    assertU64Decimal(o.changeSequence, 'receipt.changeSequence', true);
-    if (o.keyEpoch !== expectedKeyEpoch) throw new Error('sync receipt epoch mismatch');
-    return { keyEpoch: o.keyEpoch, stateVersion: o.stateVersion, changeSequence: o.changeSequence };
-  }
-
   /** 建立当前 epoch 的 recordMap/outbox/unresolved；epoch 与现存 store 不一致时抛错（不得静默沿用）。 */
   ensureStores(keyEpoch: string): void {
     if (this.keyEpoch !== undefined && this.keyEpoch !== keyEpoch) {
@@ -580,45 +369,25 @@ export class PersonalSyncSession {
     this.dek = dek;
     this.signSeed = deriveSyncSignKeyPair(dek).seed;
     if (!this.engine) {
-      this.mutator = new SyncMutator({
-        userId: this.userId,
-        keyEpoch,
-        entities: this.entities,
-        mapStore: this.mapStore!,
-        outbox: this.outbox!,
-        dek: this.dekThunk,
-        signSeed: this.signSeedThunk,
-      });
-      this.engine = new SyncEngine({
+      const runtime = buildSyncRuntime({
         userId: this.userId,
         keyEpoch,
         client: this.client,
         stateStore: this.stateStore,
         mapStore: this.mapStore!,
         outbox: this.outbox!,
-        entities: this.entities,
         unresolved: this.unresolved!,
+        entities: this.entities,
+        store: this.store,
         dek: this.dekThunk,
         signSeed: this.signSeedThunk,
         uniqueId: (type) => this.uniqueEntityId(type),
         entitlement: this.opts.entitlement,
-        seedConflictCarrier: (recordId, ref, baseVersion) => this.mutator!.rebasePut(recordId, ref, baseVersion),
-      });
-      this.coordinator = new SyncCoordinator(this.store, this.mutator, this.engine, {
         onSettled: this.opts.onSyncResult,
       });
-      this.resolver = new ConflictResolver({
-        userId: this.userId,
-        keyEpoch,
-        mapStore: this.mapStore!,
-        outbox: this.outbox!,
-        entities: this.entities,
-        unresolved: this.unresolved!,
-        dek: this.dekThunk,
-        mutator: this.mutator,
-        entitlement: this.opts.entitlement,
-        uniqueId: (type) => this.uniqueEntityId(type),
-      });
+      this.engine = runtime.engine;
+      this.coordinator = runtime.coordinator;
+      this.resolver = runtime.resolver;
     }
     this.coordinator!.start();
     this.opts.onSessionState?.();
@@ -701,7 +470,6 @@ export class PersonalSyncSession {
     this.outbox = undefined;
     this.unresolved = undefined;
     this.engine = undefined;
-    this.mutator = undefined;
     this.coordinator = undefined;
     this.resolver = undefined;
     this.dek = undefined;
@@ -709,12 +477,4 @@ export class PersonalSyncSession {
     this.keyEpoch = undefined;
     this.opts.onSessionState?.();
   }
-}
-
-/** 恒定时间字节比较（密钥/DEK 比对用）。 */
-function byteEq(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false;
-  let d = 0;
-  for (let i = 0; i < a.length; i += 1) d |= a[i] ^ b[i];
-  return d === 0;
 }
