@@ -119,6 +119,9 @@ class SQLite {
     });
     proc.on('error', (err: Error) => this.onExit(err));
     proc.on('close', () => this.onExit(new Error('sqlite process exited unexpectedly')));
+    // 子进程已退出后写 stdin 会异步 emit EPIPE；未处理会冒泡成 unhandled 'error' 事件
+    // （使 Vitest/进程判失败）。仅在仍为当前进程时交给 onExit 结算，避免陈旧进程误伤新查询。
+    proc.stdin!.on('error', (err: Error) => { if (this.proc === proc) this.onExit(err); });
 
     // 写 stdin 规避 unicode 路径问题（见 issues #32, #37）。
     const escapedPath = this.dbPath.replace(/'/g, "''");
