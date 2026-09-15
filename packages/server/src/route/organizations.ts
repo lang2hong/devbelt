@@ -4,7 +4,7 @@ import { organizationAuth, type AuthnOrgRequest } from '../middleware/organizati
 import type { TokenService } from '../service/tokenService.js';
 import type { OrganizationService, InviteOutcome } from '../service/organizationService.js';
 import type { OrganizationResourceService } from '../service/organizationResourceService.js';
-import type { IOrganizationRepo, IMembershipRepo, InvitationDto } from '../repository/interfaces.js';
+import type { IOrganizationRepo, IMembershipRepo } from '../repository/interfaces.js';
 import type { OrganizationRole, ResourceType } from '../domain/enums.js';
 import type { CsrfService } from '../service/csrfService.js';
 import type { AuditWriter } from '../service/auditWriter.js';
@@ -28,6 +28,15 @@ import {
   updateOrganizationBody,
   updateResourceBody,
 } from './schemas.js';
+import {
+  orgDto,
+  toFolderDto,
+  toInvitationDto,
+  toInvitationListItem,
+  toOrgDto,
+  toResourceDetailDto,
+  toResourceSummaryDto,
+} from './organizations/dto.js';
 
 export interface OrganizationRouteOptions {
   tokenService: TokenService;
@@ -544,70 +553,3 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
   });
 }
 
-function toFolderDto(f: { folderId: number; name: string; parentId: number | null }) {
-  return { folderId: String(f.folderId), name: f.name, parentId: f.parentId === null ? null : String(f.parentId) };
-}
-
-function toResourceSummaryDto(r: { resourceId: number; resourceType: ResourceType; name: string; folderId: number | null; version: number; createdByMembershipId: number; updatedByMembershipId: number | null }) {
-  return {
-    resourceId: String(r.resourceId),
-    resourceType: r.resourceType,
-    name: r.name,
-    folderId: r.folderId === null ? null : String(r.folderId),
-    version: r.version,
-    createdByMembershipId: String(r.createdByMembershipId),
-    updatedByMembershipId: r.updatedByMembershipId === null ? null : String(r.updatedByMembershipId),
-  };
-}
-
-function toResourceDetailDto(r: { id: number; organizationId: number; folderId: number | null; resourceType: ResourceType; name: string; content: Record<string, unknown>; version: number; createdByMembershipId: number; updatedByMembershipId: number | null }) {
-  return {
-    resourceId: String(r.id),
-    resourceType: r.resourceType,
-    name: r.name,
-    folderId: r.folderId === null ? null : String(r.folderId),
-    version: r.version,
-    content: r.content,
-    createdByMembershipId: String(r.createdByMembershipId),
-    updatedByMembershipId: r.updatedByMembershipId === null ? null : String(r.updatedByMembershipId),
-  };
-}
-
-function toInvitationListItem(d: InvitationDto) {
-  return {
-    invitationId: String(d.invitationId),
-    email: d.email,
-    role: d.role,
-    expiresTime: d.expiresTime.toISOString(),
-    invitedTime: d.invitedTime.toISOString(),
-  };
-}
-
-function toInvitationDto(r: { invitationId: number; email: string; role: OrganizationRole; expiresTime: Date }) {
-  return {
-    invitationId: String(r.invitationId),
-    email: r.email,
-    role: r.role,
-    expiresTime: r.expiresTime.toISOString(),
-  };
-}
-
-function toOrgDto(o: { organizationId: number; name: string; status: string; closedTime: Date | null; role: OrganizationRole }) {
-  return {
-    organizationId: String(o.organizationId),
-    name: o.name,
-    status: o.status,
-    closedTime: o.closedTime ? o.closedTime.toISOString() : null,
-    role: o.role,
-  };
-}
-
-function orgDto(o: { id: number; name: string; status: string; closedTime: Date | null }, role: OrganizationRole) {
-  return {
-    organizationId: String(o.id),
-    name: o.name,
-    status: o.status,
-    closedTime: o.closedTime ? o.closedTime.toISOString() : null,
-    role,
-  };
-}
