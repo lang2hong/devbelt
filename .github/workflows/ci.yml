@@ -36,6 +36,11 @@ jobs:
       - name: Build
         run: pnpm build
 
+      # db-core 是发布到 npm 的产物：验证 pack 后入口/类型/子路径导出是否齐全
+      # （漏 dist、exports 映射写错等只有真正 pack 才暴露）。放在 Build 之后。
+      - name: Pack smoke (db-core)
+        run: pnpm -C packages/db-core pack:smoke
+
       - name: Type Check
         run: pnpm typecheck
 
