@@ -113,12 +113,17 @@ class SQLite {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    proc.stdout!.on('data', (data: Buffer) => this.onStdout(data.toString()));
-    proc.stderr!.on('data', (data: Buffer) => {
-      if (this.current) this.current.stderr += data.toString();
+    // 所有事件都按进程身份过滤：进程退出后 onExit 会清 this.proc，但关闭/数据事件可能
+    // 迟到；若不判身份，旧进程的 stderr/stdout 会被记到**新查询**的 current 上，
+    // 把旧错误（如 -bail 的语法错误）算到后续查询（偶发、随负载显现）。
+    proc.stdout!.on('data', (data: Buffer) => {
+      if (this.proc === proc) this.onStdout(data.toString());
     });
-    proc.on('error', (err: Error) => this.onExit(err));
-    proc.on('close', () => this.onExit(new Error('sqlite process exited unexpectedly')));
+    proc.stderr!.on('data', (data: Buffer) => {
+      if (this.proc === proc && this.current) this.current.stderr += data.toString();
+    });
+    proc.on('error', (err: Error) => { if (this.proc === proc) this.onExit(err); });
+    proc.on('close', () => { if (this.proc === proc) this.onExit(new Error('sqlite process exited unexpectedly')); });
     // 子进程已退出后写 stdin 会异步 emit EPIPE；未处理会冒泡成 unhandled 'error' 事件
     // （使 Vitest/进程判失败）。仅在仍为当前进程时交给 onExit 结算，避免陈旧进程误伤新查询。
     proc.stdin!.on('error', (err: Error) => { if (this.proc === proc) this.onExit(err); });
