@@ -1,13 +1,13 @@
 import type {
   IUserRepo,
   IEmailVerificationTokenRepo,
-  IPersonalPlanRepo,
   IPersonalSubscriptionRepo,
   IDeviceRepo,
   IRefreshTokenRepo,
   IRateLimitRepo,
   IRegistrationRepo,
-  IOrganizationPlanRepo,
+  IPlanRepo,
+  IPlanFeatureDefRepo,
   IOrganizationRepo,
   IOrganizationSubscriptionRepo,
   IMembershipRepo,
@@ -35,12 +35,12 @@ import type {
 import type {
   User,
   EmailVerificationToken,
-  PersonalPlan,
+  Plan,
+  PlanFeatureDef,
   PersonalSubscription,
   Device,
   RefreshToken,
   Organization,
-  OrganizationPlan,
   OrganizationSubscription,
   OrganizationMembership,
   OrganizationInvitation,
@@ -273,40 +273,125 @@ export class FakeEmailVerificationTokenRepo implements IEmailVerificationTokenRe
   }
 }
 
-export function makeFreePlan(id = nextId()): PersonalPlan {
-  return {
-    id,
-    code: 'free',
-    name: 'Free',
+export function makeFreePlan(id = nextId()): Plan {
+  return makePlan({ id, code: 'free', kind: 'personal', name: 'Free', priceCents: 0, billingUnit: 'month', features: {
     allowedDatabaseTypes: ['mysql', 'sqlite'],
     maxDevices: 0,
     maxConnectionMetas: 500,
     syncStorageBytes: 33554432,
     maxSavedConnections: 10,
     allowConnectionImport: false,
+  } });
+}
+
+export function makeProPlan(id = nextId()): Plan {
+  return makePlan({ id, code: 'pro', kind: 'personal', name: 'Pro', priceCents: 9900, billingUnit: 'month', sortOrder: 20, features: {
+    allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'],
+    maxDevices: 0,
+    maxConnectionMetas: 5000,
+    syncStorageBytes: 268435456,
+    maxSavedConnections: 100,
+    allowConnectionImport: true,
+  } });
+}
+
+export function makePlan(overrides: Partial<Plan> & { code: string; kind: Plan['kind']; features: Record<string, unknown> }): Plan {
+  return {
+    id: nextId(),
+    name: overrides.code,
+    priceCents: 0,
+    billingUnit: overrides.kind === 'organization' ? 'seat-month' : 'month',
+    sortOrder: 0,
     status: 'active',
+    version: 1,
     createTime: new Date(),
     updateTime: new Date(),
+    ...overrides,
   };
 }
 
-export class FakePersonalPlanRepo implements IPersonalPlanRepo {
-  constructor(private readonly plans: PersonalPlan[] = [makeFreePlan()]) {}
+/** 默认套餐集：与 baseline 种子一致（free/pro + organization_free/team）。 */
+export function defaultPlans(): Plan[] {
+  return [
+    makeFreePlan(),
+    makeProPlan(),
+    makeOrganizationFreePlan(),
+    makePlan({ code: 'organization_team', kind: 'organization', name: 'Organization Team', sortOrder: 20, features: {
+      allowedTemplateDatabaseTypes: ['mysql', 'postgresql', 'sqlite'],
+      includedSeats: 10,
+      maxSharedResources: 500,
+      sharedStorageQuotaBytes: 104857600,
+    } }),
+  ];
+}
 
-  async findByCode(code: string): Promise<PersonalPlan | undefined> {
+export class FakePlanRepo implements IPlanRepo {
+  constructor(public plans: Plan[] = defaultPlans()) {}
+
+  async findByCode(code: string): Promise<Plan | undefined> {
     return this.plans.find((p) => p.code === code);
   }
 
-  async findById(id: number): Promise<PersonalPlan | undefined> {
+  async findById(id: number): Promise<Plan | undefined> {
     return this.plans.find((p) => p.id === id);
   }
 
-  async findByCodeInTx(_exec: Queryable, code: string): Promise<PersonalPlan | undefined> {
+  async findByCodeInTx(_exec: Queryable, code: string): Promise<Plan | undefined> {
     return this.findByCode(code);
   }
 
-  async listActive(): Promise<PersonalPlan[]> {
+  async findByIdInTx(_exec: Queryable, id: number): Promise<Plan | undefined> {
+    return this.findById(id);
+  }
+
+  async listActive(): Promise<Plan[]> {
     return this.plans.filter((p) => p.status === 'active');
+  }
+
+  async listAll(): Promise<Plan[]> {
+    return [...this.plans];
+  }
+
+  async replaceFeaturesInTx(_exec: Queryable, planId: number, values: ReadonlyArray<{ featureKey: string; value: unknown }>): Promise<void> {
+    const plan = this.plans.find((p) => p.id === planId);
+    if (!plan) return;
+    plan.features = Object.fromEntries(values.map((v) => [v.featureKey, v.value]));
+    plan.version += 1;
+  }
+
+  async updateMetaInTx(_exec: Queryable, input: {
+    id: number; name: string; priceCents: number; billingUnit: Plan['billingUnit'];
+    sortOrder: number; status: Plan['status']; expectedVersion: number;
+  }): Promise<boolean> {
+    const plan = this.plans.find((p) => p.id === input.id);
+    if (!plan || plan.version !== input.expectedVersion) return false;
+    Object.assign(plan, {
+      name: input.name, priceCents: input.priceCents, billingUnit: input.billingUnit,
+      sortOrder: input.sortOrder, status: input.status,
+    });
+    plan.version += 1;
+    return true;
+  }
+}
+
+export class FakePlanFeatureDefRepo implements IPlanFeatureDefRepo {
+  constructor(public defs: PlanFeatureDef[] = []) {}
+
+  async listAll(): Promise<PlanFeatureDef[]> {
+    return [...this.defs];
+  }
+
+  async findByKey(key: string): Promise<PlanFeatureDef | undefined> {
+    return this.defs.find((d) => d.key === key);
+  }
+
+  async upsertInTx(_exec: Queryable, input: {
+    key: string; kind: PlanFeatureDef['kind']; label: PlanFeatureDef['label'];
+    valueType: PlanFeatureDef['valueType']; unit: string | null; sortOrder: number;
+  }): Promise<void> {
+    const existing = this.defs.find((d) => d.key === input.key);
+    if (existing) Object.assign(existing, input);
+    else this.defs.push({ id: nextId(), ...input });
   }
 }
 
@@ -332,7 +417,6 @@ export class FakePersonalSubscriptionRepo implements IPersonalSubscriptionRepo {
     id: number;
     planId: number;
     status: PersonalSubscription['status'];
-    entitlementSnapshot: Record<string, unknown>;
     periodEndTime: Date | null;
     expectedVersion: number;
   }): Promise<boolean> {
@@ -340,7 +424,6 @@ export class FakePersonalSubscriptionRepo implements IPersonalSubscriptionRepo {
     if (!s || s.version !== input.expectedVersion) return false;
     s.planId = input.planId;
     s.status = input.status;
-    s.entitlementSnapshot = input.entitlementSnapshot;
     s.periodEndTime = input.periodEndTime;
     s.version += 1;
     return true;
@@ -350,7 +433,6 @@ export class FakePersonalSubscriptionRepo implements IPersonalSubscriptionRepo {
     userId: number;
     planId: number;
     status: PersonalSubscription['status'];
-    entitlementSnapshot: Record<string, unknown>;
     periodStartTime: Date;
     periodEndTime: Date | null;
   }): Promise<PersonalSubscription> {
@@ -359,7 +441,6 @@ export class FakePersonalSubscriptionRepo implements IPersonalSubscriptionRepo {
       userId: input.userId,
       planId: input.planId,
       status: input.status,
-      entitlementSnapshot: input.entitlementSnapshot,
       periodStartTime: input.periodStartTime,
       periodEndTime: input.periodEndTime,
       version: 0,
@@ -446,7 +527,6 @@ export class FakeRefreshTokenRepo implements IRefreshTokenRepo {
     deviceId: number | null;
     tokenHash: string;
     familyId: string;
-    replacedByTokenId: number | null;
     expiresTime: Date;
   }): Promise<RefreshToken> {
     const t: RefreshToken = {
@@ -455,7 +535,6 @@ export class FakeRefreshTokenRepo implements IRefreshTokenRepo {
       deviceId: input.deviceId,
       tokenHash: input.tokenHash,
       familyId: input.familyId,
-      replacedByTokenId: input.replacedByTokenId,
       expiresTime: input.expiresTime,
       revokedTime: null,
       lastUsedTime: null,
@@ -548,7 +627,7 @@ export class FakeRateLimitRepo implements IRateLimitRepo {
 
 export class FakeRegistrationRepo implements IRegistrationRepo {
   constructor(
-    private readonly plans: IPersonalPlanRepo,
+    private readonly plans: IPlanRepo,
     private readonly users: IUserRepo,
     private readonly subs: IPersonalSubscriptionRepo,
     private readonly tokens: IEmailVerificationTokenRepo,
@@ -562,17 +641,10 @@ export class FakeRegistrationRepo implements IRegistrationRepo {
       throw new ConflictError(`user already exists: ${input.email}`);
     }
     const user = await this.users.create(input.email, input.passwordHash, input.displayName);
-    const entitlementSnapshot = {
-      allowedDatabaseTypes: freePlan.allowedDatabaseTypes,
-      maxDevices: freePlan.maxDevices,
-      maxConnectionMetas: freePlan.maxConnectionMetas,
-      syncStorageBytes: freePlan.syncStorageBytes,
-    };
     await this.subs.create({
       userId: user.id,
       planId: freePlan.id,
       status: 'active',
-      entitlementSnapshot,
       periodStartTime: new Date(),
       periodEndTime: null,
     });
@@ -586,39 +658,13 @@ export class FakeRegistrationRepo implements IRegistrationRepo {
     return { userId: user.id };
   }
 }
-export function makeOrganizationFreePlan(id = nextId()): OrganizationPlan {
-  return {
-    id,
-    code: 'organization_free',
-    name: 'Organization Free',
+export function makeOrganizationFreePlan(id = nextId()): Plan {
+  return makePlan({ id, code: 'organization_free', kind: 'organization', name: 'Organization Free', features: {
+    allowedTemplateDatabaseTypes: ['mysql'],
     includedSeats: 3,
     maxSharedResources: 50,
     sharedStorageQuotaBytes: 10485760,
-    allowedTemplateDatabaseTypes: ['mysql'],
-    status: 'active',
-    createTime: new Date(),
-    updateTime: new Date(),
-  };
-}
-
-export class FakeOrganizationPlanRepo implements IOrganizationPlanRepo {
-  constructor(private readonly plans: OrganizationPlan[] = [makeOrganizationFreePlan()]) {}
-
-  async findByCode(code: string): Promise<OrganizationPlan | undefined> {
-    return this.plans.find((p) => p.code === code);
-  }
-
-  async findById(id: number): Promise<OrganizationPlan | undefined> {
-    return this.plans.find((p) => p.id === id);
-  }
-
-  async findByCodeForUpdate(_exec: Queryable, code: string): Promise<OrganizationPlan | undefined> {
-    return this.findByCode(code);
-  }
-
-  async listActive(): Promise<OrganizationPlan[]> {
-    return this.plans.filter((p) => p.status === 'active');
-  }
+  } });
 }
 
 export class FakeOrganizationRepo implements IOrganizationRepo {
@@ -705,7 +751,6 @@ export class FakeOrganizationSubscriptionRepo implements IOrganizationSubscripti
     planId: number;
     seatLimit: number;
     status: OrganizationSubscriptionStatus;
-    entitlementSnapshot: Record<string, unknown>;
     periodStartTime: Date;
     periodEndTime: Date | null;
   }): Promise<OrganizationSubscription> {
@@ -715,7 +760,6 @@ export class FakeOrganizationSubscriptionRepo implements IOrganizationSubscripti
       planId: input.planId,
       seatLimit: input.seatLimit,
       status: input.status,
-      entitlementSnapshot: input.entitlementSnapshot,
       periodStartTime: input.periodStartTime,
       periodEndTime: input.periodEndTime,
       version: 0,
@@ -731,7 +775,6 @@ export class FakeOrganizationSubscriptionRepo implements IOrganizationSubscripti
     planId: number;
     seatLimit: number;
     status: OrganizationSubscriptionStatus;
-    entitlementSnapshot: Record<string, unknown>;
     periodEndTime: Date | null;
     expectedVersion: number;
   }): Promise<boolean> {
@@ -740,7 +783,6 @@ export class FakeOrganizationSubscriptionRepo implements IOrganizationSubscripti
     s.planId = input.planId;
     s.seatLimit = input.seatLimit;
     s.status = input.status;
-    s.entitlementSnapshot = input.entitlementSnapshot;
     s.periodEndTime = input.periodEndTime;
     s.version += 1;
     return true;

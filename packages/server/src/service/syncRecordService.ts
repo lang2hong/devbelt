@@ -5,8 +5,10 @@ import type {
   ISyncNonceRepo,
   ISyncMutationRepo,
   IPersonalSubscriptionRepo,
+  IPlanRepo,
 } from '../repository/interfaces.js';
 import type { PersonalSyncState, PersonalConnectionMeta } from '../domain/entities.js';
+import { deriveEntitlement } from './entitlement.js';
 import {
   SyncNotInitializedError,
   SyncVersionConflictError,
@@ -103,6 +105,7 @@ export class SyncRecordService {
     private readonly nonceRepo: ISyncNonceRepo,
     private readonly mutationRepo: ISyncMutationRepo,
     private readonly subscriptionRepo: IPersonalSubscriptionRepo,
+    private readonly planRepo: IPlanRepo,
     private readonly runner: TxRunner,
   ) {}
 
@@ -268,7 +271,9 @@ export class SyncRecordService {
 
   private async assertRecordQuota(tx: Queryable, userId: number, keyEpoch: string, delta: { countDelta: number; bytesDelta: number }): Promise<void> {
     const sub = await this.subscriptionRepo.findByUserIdInTx(tx, userId);
-    const snapshot = (sub?.entitlementSnapshot ?? {}) as Record<string, unknown>;
+    const plan = sub ? await this.planRepo.findByIdInTx(tx, sub.planId) : undefined;
+    const freePlan = await this.planRepo.findByCodeInTx(tx, 'free');
+    const snapshot = deriveEntitlement(sub, plan, freePlan);
     const maxMetas = Number(snapshot.maxConnectionMetas ?? 0);
     const maxBytes = Number(snapshot.syncStorageBytes ?? 0);
     const current = await this.recordRepo.countActive(tx, userId, keyEpoch);

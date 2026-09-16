@@ -5,7 +5,7 @@ import { migrations } from '../../src/repository/mysql/migrations/index.js';
 import { MysqlOrderRepo } from '../../src/repository/mysql/orderRepo.js';
 import { MysqlInvoiceRepo } from '../../src/repository/mysql/invoiceRepo.js';
 import { MysqlUserRepo } from '../../src/repository/mysql/userRepo.js';
-import { MysqlPersonalPlanRepo } from '../../src/repository/mysql/personalPlanRepo.js';
+import { MysqlPlanRepo } from '../../src/repository/mysql/planRepo.js';
 import { MysqlPersonalSubscriptionRepo } from '../../src/repository/mysql/personalSubscriptionRepo.js';
 import { InvoiceService } from '../../src/service/invoiceService.js';
 import { InvoiceAlreadyRequestedError } from '../../src/domain/errors.js';
@@ -18,10 +18,10 @@ const URL = process.env.MYSQL_TEST_URL;
 async function makeUser(db: MysqlDb): Promise<number> {
   const userRepo = new MysqlUserRepo(() => db);
   const user = await userRepo.create(`inv-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`, 'hash', 'INV');
-  const planRepo = new MysqlPersonalPlanRepo(() => db);
+  const planRepo = new MysqlPlanRepo(() => db);
   const subRepo = new MysqlPersonalSubscriptionRepo(() => db);
   const plan = await planRepo.findByCode('free');
-  await subRepo.create({ userId: user.id, planId: plan!.id, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null });
+  await subRepo.create({ userId: user.id, planId: plan!.id, status: 'active', periodStartTime: new Date(), periodEndTime: null });
   return user.id;
 }
 
@@ -41,7 +41,7 @@ describe.skipIf(!URL)('invoice order-unique concurrency (real MySQL)', () => {
       });
 
       // 一个已履约订单（直接写库，绕过支付流程）。
-      const order = await orderRepo.create({ orderNo: `ord-${Date.now()}-${Math.random().toString(16).slice(2)}`, userId, planCode: 'pro', amountCents: 9900, channel: 'wechat', expiresTime: new Date(Date.now() + 60000) });
+      const order = await orderRepo.create({ orderNo: `ord-${Date.now()}-${Math.random().toString(16).slice(2)}`, userId, planCode: 'pro', planVersion: 1, amountCents: 9900, channel: 'wechat', expiresTime: new Date(Date.now() + 60000) });
       await withTransaction(db, async (tx) => {
         await orderRepo.advance(tx, { id: order.id, expectedStatus: 'pending', status: 'paid', channelTradeNo: 'wx-t', paidTime: new Date() });
       });

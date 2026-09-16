@@ -16,9 +16,8 @@ import { CONSOLE_SCOPES } from '../../src/domain/enums.js';
 import {
   FakeUserRepo,
   FakeRefreshTokenRepo,
-  FakePersonalPlanRepo,
+  FakePlanRepo,
   FakePersonalSubscriptionRepo,
-  FakeOrganizationPlanRepo,
   FakeOrganizationRepo,
   FakeOrganizationSubscriptionRepo,
   FakeMembershipRepo,
@@ -40,9 +39,8 @@ async function build(rateLimit = false) {
 
   const userRepo = new FakeUserRepo();
   const refreshTokenRepo = new FakeRefreshTokenRepo();
-  const personalPlanRepo = new FakePersonalPlanRepo();
+  const planRepo = new FakePlanRepo();
   const personalSubscriptionRepo = new FakePersonalSubscriptionRepo();
-  const organizationPlanRepo = new FakeOrganizationPlanRepo();
   const organizationRepo = new FakeOrganizationRepo();
   const organizationSubscriptionRepo = new FakeOrganizationSubscriptionRepo();
   const membershipRepo = new FakeMembershipRepo(userRepo, organizationRepo);
@@ -99,9 +97,8 @@ async function build(rateLimit = false) {
   const adminService = new ConsoleAdminService({
     userRepo,
     refreshTokenRepo,
-    personalPlanRepo,
+    planRepo,
     personalSubscriptionRepo,
-    organizationPlanRepo,
     organizationRepo,
     organizationSubscriptionRepo,
     membershipRepo,
@@ -168,6 +165,7 @@ function makeOrder(overrides: Partial<Order> = {}): Order {
     orderNo: 'ord-1',
     userId: 99,
     planCode: 'pro',
+    planVersion: 1,
     amountCents: 9900,
     channel: 'wechat',
     status: 'paid',
@@ -245,7 +243,7 @@ describe('console admin routes', () => {
     const admin = await b.makeAdmin();
     const target = await b.userRepo.create('target@b.com', 'hash');
     const tok = await b.refreshTokenRepo.create({} as Queryable, {
-      userId: target.id, deviceId: null, tokenHash: 'h', familyId: 'fam', replacedByTokenId: null, expiresTime: new Date(Date.now() + 100000),
+      userId: target.id, deviceId: null, tokenHash: 'h', familyId: 'fam', expiresTime: new Date(Date.now() + 100000),
     });
 
     const res = await b.app.inject({
@@ -268,7 +266,7 @@ describe('console admin routes', () => {
     const b = await build();
     const admin = await b.makeAdmin();
     const target = await b.userRepo.create('sub@b.com', 'hash');
-    await b.personalSubscriptionRepo.create({ userId: target.id, planId: 1, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null });
+    await b.personalSubscriptionRepo.create({ userId: target.id, planId: 1, status: 'active', periodStartTime: new Date(), periodEndTime: null });
 
     const res = await b.app.inject({
       method: 'PATCH',
@@ -286,7 +284,7 @@ describe('console admin routes', () => {
     const admin = await b.makeAdmin();
     const org = await b.organizationRepo.create({} as Queryable, { name: 'Acme' });
     const sub = await b.organizationSubscriptionRepo.create({} as Queryable, {
-      organizationId: org.id, planId: 1, seatLimit: 10, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null,
+      organizationId: org.id, planId: 1, seatLimit: 10, status: 'active', periodStartTime: new Date(), periodEndTime: null,
     });
     void sub;
     const member = await b.userRepo.create('m@b.com', 'hash');
@@ -307,7 +305,7 @@ describe('console admin routes', () => {
     const b = await build();
     const admin = await b.makeAdmin();
     const target = await b.userRepo.create('sub2@b.com', 'hash');
-    await b.personalSubscriptionRepo.create({ userId: target.id, planId: 1, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null });
+    await b.personalSubscriptionRepo.create({ userId: target.id, planId: 1, status: 'active', periodStartTime: new Date(), periodEndTime: null });
 
     const res = await b.app.inject({
       method: 'PATCH',
@@ -325,7 +323,7 @@ describe('console admin routes', () => {
     const admin = await b.makeAdmin();
     const target = await b.userRepo.create('sub3@b.com', 'hash');
     const start = new Date(Date.now() + 48 * 3600 * 1000);
-    await b.personalSubscriptionRepo.create({ userId: target.id, planId: 1, status: 'active', entitlementSnapshot: {}, periodStartTime: start, periodEndTime: null });
+    await b.personalSubscriptionRepo.create({ userId: target.id, planId: 1, status: 'active', periodStartTime: start, periodEndTime: null });
 
     const res = await b.app.inject({
       method: 'PATCH',
@@ -343,7 +341,7 @@ describe('console admin routes', () => {
     const admin = await b.makeAdmin();
     const org = await b.organizationRepo.create({} as Queryable, { name: 'Acme2' });
     await b.organizationSubscriptionRepo.create({} as Queryable, {
-      organizationId: org.id, planId: 1, seatLimit: 10, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null,
+      organizationId: org.id, planId: 1, seatLimit: 10, status: 'active', periodStartTime: new Date(), periodEndTime: null,
     });
 
     const res = await b.app.inject({

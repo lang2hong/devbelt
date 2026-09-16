@@ -1,9 +1,8 @@
 import type {
   IUserRepo,
   IRefreshTokenRepo,
-  IPersonalPlanRepo,
+  IPlanRepo,
   IPersonalSubscriptionRepo,
-  IOrganizationPlanRepo,
   IOrganizationRepo,
   IOrganizationSubscriptionRepo,
   IMembershipRepo,
@@ -15,7 +14,7 @@ import type {
   AuditFilter,
 } from '../repository/interfaces.js';
 import type { Queryable } from '../repository/mysql/db.js';
-import type { AuditEvent, PersonalPlan, OrganizationPlan, Order, Invoice } from '../domain/entities.js';
+import type { AuditEvent, Plan, Order, Invoice } from '../domain/entities.js';
 import type { UserStatus, InvoiceStatus } from '../domain/enums.js';
 import {
   EntityNotFoundError,
@@ -62,9 +61,8 @@ export interface AuditExport {
 export interface ConsoleAdminDeps {
   userRepo: IUserRepo;
   refreshTokenRepo: IRefreshTokenRepo;
-  personalPlanRepo: IPersonalPlanRepo;
+  planRepo: IPlanRepo;
   personalSubscriptionRepo: IPersonalSubscriptionRepo;
-  organizationPlanRepo: IOrganizationPlanRepo;
   organizationRepo: IOrganizationRepo;
   organizationSubscriptionRepo: IOrganizationSubscriptionRepo;
   membershipRepo: IMembershipRepo;
@@ -89,9 +87,8 @@ export interface Page<T> {
 export class ConsoleAdminService {
   private readonly userRepo: IUserRepo;
   private readonly refreshTokenRepo: IRefreshTokenRepo;
-  private readonly personalPlanRepo: IPersonalPlanRepo;
+  private readonly planRepo: IPlanRepo;
   private readonly personalSubscriptionRepo: IPersonalSubscriptionRepo;
-  private readonly organizationPlanRepo: IOrganizationPlanRepo;
   private readonly organizationRepo: IOrganizationRepo;
   private readonly organizationSubscriptionRepo: IOrganizationSubscriptionRepo;
   private readonly membershipRepo: IMembershipRepo;
@@ -104,9 +101,8 @@ export class ConsoleAdminService {
   constructor(deps: ConsoleAdminDeps) {
     this.userRepo = deps.userRepo;
     this.refreshTokenRepo = deps.refreshTokenRepo;
-    this.personalPlanRepo = deps.personalPlanRepo;
+    this.planRepo = deps.planRepo;
     this.personalSubscriptionRepo = deps.personalSubscriptionRepo;
-    this.organizationPlanRepo = deps.organizationPlanRepo;
     this.organizationRepo = deps.organizationRepo;
     this.organizationSubscriptionRepo = deps.organizationSubscriptionRepo;
     this.membershipRepo = deps.membershipRepo;
@@ -154,26 +150,8 @@ export class ConsoleAdminService {
     return { items, nextId: hasMore ? items[items.length - 1].userId : null };
   }
 
-  async resolvePersonalPlanInTx(tx: Queryable, planCode: string): Promise<PersonalPlan> {
-    const plan = await this.personalPlanRepo.findByCodeInTx(tx, planCode);
-    if (!plan || plan.status !== 'active') throw new ValidationError('unknown or inactive plan');
-    return plan;
-  }
-
-  /** 从个人 plan 构造冻结权益快照（与注册时口径一致）。 */
-  personalEntitlementSnapshot(plan: PersonalPlan): Record<string, unknown> {
-    return {
-      allowedDatabaseTypes: plan.allowedDatabaseTypes,
-      maxDevices: plan.maxDevices,
-      maxConnectionMetas: plan.maxConnectionMetas,
-      syncStorageBytes: plan.syncStorageBytes,
-      maxSavedConnections: plan.maxSavedConnections,
-      allowConnectionImport: plan.allowConnectionImport,
-    };
-  }
-
-  async resolveOrganizationPlanInTx(tx: Queryable, planCode: string): Promise<OrganizationPlan> {
-    const plan = await this.organizationPlanRepo.findByCodeForUpdate(tx, planCode);
+  async resolvePlanInTx(tx: Queryable, planCode: string): Promise<Plan> {
+    const plan = await this.planRepo.findByCodeInTx(tx, planCode);
     if (!plan || plan.status !== 'active') throw new ValidationError('unknown or inactive plan');
     return plan;
   }
@@ -222,7 +200,6 @@ export class ConsoleAdminService {
     targetUserId: number,
     params: {
       planId: number;
-      snapshot: Record<string, unknown>;
       periodEndTime: Date | null;
       reason: string;
       expectedVersion: number;
@@ -237,7 +214,6 @@ export class ConsoleAdminService {
       id: sub.id,
       planId: params.planId,
       status: 'active',
-      entitlementSnapshot: params.snapshot,
       periodEndTime: params.periodEndTime,
       expectedVersion: params.expectedVersion,
     });
@@ -404,7 +380,6 @@ export class ConsoleAdminService {
     params: {
       planId: number;
       seatLimit: number;
-      snapshot: Record<string, unknown>;
       periodEndTime: Date | null;
       reason: string;
       expectedVersion: number;
@@ -429,7 +404,6 @@ export class ConsoleAdminService {
       planId: params.planId,
       seatLimit: params.seatLimit,
       status: 'active',
-      entitlementSnapshot: params.snapshot,
       periodEndTime: params.periodEndTime,
       expectedVersion: params.expectedVersion,
     });

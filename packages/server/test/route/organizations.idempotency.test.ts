@@ -14,7 +14,7 @@ import { csrfCookieName } from '../../src/middleware/cookies.js';
 import {
   FakeUserRepo,
   FakeOrganizationRepo,
-  FakeOrganizationPlanRepo,
+  FakePlanRepo,
   FakeOrganizationSubscriptionRepo,
   FakeMembershipRepo,
   FakeInvitationRepo,
@@ -35,7 +35,7 @@ async function build(rateLimitEnabled = false) {
 
   const userRepo = new FakeUserRepo();
   const organizationRepo = new FakeOrganizationRepo();
-  const organizationPlanRepo = new FakeOrganizationPlanRepo();
+  const planRepo = new FakePlanRepo();
   const organizationSubscriptionRepo = new FakeOrganizationSubscriptionRepo();
   const membershipRepo = new FakeMembershipRepo(userRepo, organizationRepo);
   const invitationRepo = new FakeInvitationRepo(membershipRepo);
@@ -51,7 +51,7 @@ async function build(rateLimitEnabled = false) {
 
   const runner: TxRunner = async (fn) => fn({} as Queryable);
   const organizationService = new OrganizationService(
-    userRepo, organizationRepo, organizationPlanRepo, organizationSubscriptionRepo, membershipRepo, invitationRepo,
+    userRepo, organizationRepo, planRepo, organizationSubscriptionRepo, membershipRepo, invitationRepo,
     rateLimiter, tokenService,
     { sendInvitationEmail: async (o: any) => { sentEmails.push(o); } } as any,
     runner,
@@ -90,7 +90,7 @@ async function makeAdmin(b: Built, email = 'admin@b.com') {
   });
   await b.organizationSubscriptionRepo.create({} as Queryable, {
     organizationId: org.id, planId: 1, seatLimit: 3, status: 'active',
-    entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null,
+    periodStartTime: new Date(), periodEndTime: null,
   });
   return { user, org };
 }

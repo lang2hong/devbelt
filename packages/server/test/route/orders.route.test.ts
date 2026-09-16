@@ -15,16 +15,15 @@ import { MemoryPaymentGateway, signMemoryCallback } from '../../src/service/paym
 import { csrfCookieName } from '../../src/middleware/cookies.js';
 import { CONSOLE_SCOPES } from '../../src/domain/enums.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
-import type { Order, Payment, PersonalPlan, PersonalSubscription } from '../../src/domain/entities.js';
+import type { Order, Payment, Plan, PersonalSubscription } from '../../src/domain/entities.js';
 
 const ORIGIN = 'http://localhost:5173';
 
-const PLAN: PersonalPlan = {
-  id: 2, code: 'pro', name: 'Pro',
-  allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'],
-  maxDevices: 0, maxConnectionMetas: 5000, syncStorageBytes: 268435456,
-  maxSavedConnections: 100, allowConnectionImport: true,
-  status: 'active', createTime: new Date(), updateTime: new Date(),
+const PLAN: Plan = {
+  id: 2, code: 'pro', kind: 'personal', name: 'Pro', priceCents: 9900, billingUnit: 'month', sortOrder: 0,
+  status: 'active', version: 1,
+  features: { allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 0, maxConnectionMetas: 5000, syncStorageBytes: 268435456, maxSavedConnections: 100, allowConnectionImport: true },
+  createTime: new Date(), updateTime: new Date(),
 };
 
 class FOrderRepo {
@@ -53,6 +52,11 @@ class FPlanRepo {
   async findByCode(c: string) { return c === 'pro' ? PLAN : undefined; }
   async findById(id: number) { return id === 2 ? PLAN : undefined; }
   async findByCodeInTx(_e: Queryable, c: string) { return c === 'pro' ? PLAN : undefined; }
+  async findByIdInTx(_e: Queryable, id: number) { return id === 2 ? PLAN : undefined; }
+  async listActive() { return [PLAN]; }
+  async listAll() { return [PLAN]; }
+  async replaceFeaturesInTx() {}
+  async updateMetaInTx() { return true; }
 }
 
 class FSubsRepo {
@@ -60,8 +64,8 @@ class FSubsRepo {
   async findByUserId(uid: number) { return [...this.subs.values()].find((s) => s.userId === uid); }
   async findByUserIdInTx(_e: Queryable, uid: number) { return this.findByUserId(uid); }
   async findByUserIdForUpdate(_e: Queryable, uid: number) { return this.findByUserId(uid); }
-  async create(i: any): Promise<PersonalSubscription> { const s = { id: this.subs.size + 1, userId: i.userId, planId: i.planId, status: i.status, entitlementSnapshot: i.entitlementSnapshot, periodStartTime: i.periodStartTime, periodEndTime: i.periodEndTime, version: 0, createTime: new Date(), updateTime: new Date() } as PersonalSubscription; this.subs.set(s.id, s); return s; }
-  async update(_e: Queryable, i: any) { const s = this.subs.get(i.id); if (!s || s.version !== i.expectedVersion) return false; s.planId = i.planId; s.status = i.status; s.entitlementSnapshot = i.entitlementSnapshot; s.periodEndTime = i.periodEndTime; s.version += 1; return true; }
+  async create(i: any): Promise<PersonalSubscription> { const s = { id: this.subs.size + 1, userId: i.userId, planId: i.planId, status: i.status, periodStartTime: i.periodStartTime, periodEndTime: i.periodEndTime, version: 0, createTime: new Date(), updateTime: new Date() } as PersonalSubscription; this.subs.set(s.id, s); return s; }
+  async update(_e: Queryable, i: any) { const s = this.subs.get(i.id); if (!s || s.version !== i.expectedVersion) return false; s.planId = i.planId; s.status = i.status; s.periodEndTime = i.periodEndTime; s.version += 1; return true; }
 }
 
 async function build() {
@@ -76,7 +80,7 @@ async function build() {
   const auditWriter = new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as any);
 
   const orderService = new OrderService({
-    orderRepo, paymentRepo, personalPlanRepo: planRepo, personalSubscriptionRepo: subsRepo,
+    orderRepo, paymentRepo, planRepo, personalSubscriptionRepo: subsRepo,
     auditWriter, runner: async (fn) => fn({} as Queryable),
     gatewayFor: (c) => new MemoryPaymentGateway(c),
   });

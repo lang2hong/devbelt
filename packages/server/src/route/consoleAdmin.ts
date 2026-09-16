@@ -228,9 +228,8 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
           beforeWrite: (tx: Queryable) => writeLimitInTx(tx, req),
           business: async (tx: Queryable) => {
             // 套餐解析放入 business：已完成回执优先于可变套餐状态（套餐停用后重放仍可返回首次结果，§6.1）。
-            const plan = await svc.resolvePersonalPlanInTx(tx, planCode);
-            const snapshot = svc.personalEntitlementSnapshot(plan);
-            const r = await svc.adjustUserSubscriptionInTx(tx, actor, target, { planId: plan.id, snapshot, periodEndTime: periodEnd, reason, expectedVersion });
+            const plan = await svc.resolvePlanInTx(tx, planCode);
+            const r = await svc.adjustUserSubscriptionInTx(tx, actor, target, { planId: plan.id, periodEndTime: periodEnd, reason, expectedVersion });
             return { status: 200, body: r };
           },
         });
@@ -275,14 +274,8 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
           beforeWrite: (tx: Queryable) => writeLimitInTx(tx, req),
           business: async (tx: Queryable) => {
             // 套餐解析放入 business：已完成回执优先于可变套餐状态（§6.1）。
-            const plan = await svc.resolveOrganizationPlanInTx(tx, planCode);
-            const snapshot = {
-              includedSeats: plan.includedSeats,
-              maxSharedResources: plan.maxSharedResources,
-              sharedStorageQuotaBytes: plan.sharedStorageQuotaBytes,
-              allowedTemplateDatabaseTypes: plan.allowedTemplateDatabaseTypes,
-            };
-            const r = await svc.adjustOrganizationSubscriptionInTx(tx, actor, organizationId, { planId: plan.id, seatLimit, snapshot, periodEndTime: periodEnd, reason, expectedVersion });
+            const plan = await svc.resolvePlanInTx(tx, planCode);
+            const r = await svc.adjustOrganizationSubscriptionInTx(tx, actor, organizationId, { planId: plan.id, seatLimit, periodEndTime: periodEnd, reason, expectedVersion });
             return { status: 200, body: r };
           },
         });

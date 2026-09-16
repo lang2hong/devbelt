@@ -7,7 +7,7 @@ import { migrations } from '../../src/repository/mysql/migrations/index.js';
 import type { MysqlDb } from '../../src/repository/mysql/db.js';
 import { withTransaction } from '../../src/repository/mysql/db.js';
 import { MysqlUserRepo } from '../../src/repository/mysql/userRepo.js';
-import { MysqlOrganizationPlanRepo } from '../../src/repository/mysql/organizationPlanRepo.js';
+import { MysqlPlanRepo } from '../../src/repository/mysql/planRepo.js';
 import { MysqlOrganizationRepo } from '../../src/repository/mysql/organizationRepo.js';
 import { MysqlOrganizationSubscriptionRepo } from '../../src/repository/mysql/organizationSubscriptionRepo.js';
 import { MysqlMembershipRepo } from '../../src/repository/mysql/membershipRepo.js';
@@ -46,11 +46,12 @@ async function makeStack(db: MysqlDb) {
   const organizationRepo = new MysqlOrganizationRepo(() => db);
   const organizationSubscriptionRepo = new MysqlOrganizationSubscriptionRepo(() => db);
   const membershipRepo = new MysqlMembershipRepo(() => db);
+  const planRepo = new MysqlPlanRepo(() => db);
 
   const orgSvc = new OrganizationService(
     new MysqlUserRepo(() => db),
     organizationRepo,
-    new MysqlOrganizationPlanRepo(() => db),
+    planRepo,
     organizationSubscriptionRepo,
     membershipRepo,
     new MysqlOrganizationInvitationRepo(() => db),
@@ -63,6 +64,7 @@ async function makeStack(db: MysqlDb) {
   const resourceSvc = new OrganizationResourceService(
     organizationRepo,
     organizationSubscriptionRepo,
+    planRepo,
     membershipRepo,
     new MysqlFolderRepo(() => db),
     new MysqlResourceRepo(() => db),

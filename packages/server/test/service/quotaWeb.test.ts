@@ -3,7 +3,7 @@ import { generateKeyPairSync } from 'crypto';
 import {
   FakeUserRepo,
   FakeEmailVerificationTokenRepo,
-  FakePersonalPlanRepo,
+  FakePlanRepo,
   FakePersonalSubscriptionRepo,
   FakeDeviceRepo,
   FakeRefreshTokenRepo,
@@ -30,7 +30,7 @@ const device = (key: string, platform: string): DeviceFields => ({
 describe('web device quota isolation (§4.1)', () => {
   it('excludes the web slot from extension maxDevices and rejects spoofing', async () => {
     const userRepo = new FakeUserRepo();
-    const personalPlanRepo = new FakePersonalPlanRepo();
+    const planRepo = new FakePlanRepo();
     const personalSubscriptionRepo = new FakePersonalSubscriptionRepo();
     const deviceRepo = new FakeDeviceRepo();
     const refreshTokenRepo = new FakeRefreshTokenRepo();
@@ -45,9 +45,10 @@ describe('web device quota isolation (§4.1)', () => {
       userRepo,
       tokenRepo,
       personalSubscriptionRepo,
+      planRepo,
       deviceRepo,
       refreshTokenRepo,
-      new FakeRegistrationRepo(personalPlanRepo, userRepo, personalSubscriptionRepo, tokenRepo),
+      new FakeRegistrationRepo(planRepo, userRepo, personalSubscriptionRepo, tokenRepo),
       tokenService,
       new MemoryEmailSender(),
       rateLimiter,
@@ -59,13 +60,13 @@ describe('web device quota isolation (§4.1)', () => {
     const u = await userRepo.create('q@b.com', passwordHash, 'Q');
     await userRepo.markEmailVerified({} as Queryable, u.id, new Date());
 
-    // maxDevices = 1（只允许 1 台扩展设备）
-    const plan = (await personalPlanRepo.findByCode('free'))!;
+    // maxDevices = 1（只允许 1 台扩展设备）—— 权益派生自 free plan 特性
+    const plan = (await planRepo.findByCode('free'))!;
+    plan.features = { ...plan.features, maxDevices: 1 };
     await personalSubscriptionRepo.create({
       userId: u.id,
       planId: plan.id,
       status: 'active',
-      entitlementSnapshot: { maxDevices: 1 },
       periodStartTime: new Date(),
       periodEndTime: null,
     });

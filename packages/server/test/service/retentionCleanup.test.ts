@@ -36,12 +36,12 @@ describe('retention cleanup', () => {
     // 已过期很久
     await deps.refreshTokenRepo.create(exec(), {
       userId: 1, deviceId: null, tokenHash: 'old', familyId: 'f1',
-      replacedByTokenId: null, expiresTime: new Date(now - 30 * DAY),
+      expiresTime: new Date(now - 30 * DAY),
     });
     // 仍然有效 —— 绝不能被删
     await deps.refreshTokenRepo.create(exec(), {
       userId: 1, deviceId: null, tokenHash: 'live', familyId: 'f2',
-      replacedByTokenId: null, expiresTime: new Date(now + 30 * DAY),
+      expiresTime: new Date(now + 30 * DAY),
     });
 
     const c = startRetentionCleanup(deps, {});
@@ -57,7 +57,7 @@ describe('retention cleanup', () => {
     const now = Date.now();
     const t = await deps.refreshTokenRepo.create(exec(), {
       userId: 1, deviceId: null, tokenHash: 'justRevoked', familyId: 'f1',
-      replacedByTokenId: null, expiresTime: new Date(now + 30 * DAY),
+      expiresTime: new Date(now + 30 * DAY),
     });
     await deps.refreshTokenRepo.consume(exec(), t.id, new Date(now - HOUR));
 
@@ -126,7 +126,7 @@ describe('retention cleanup', () => {
     for (let i = 0; i < 5; i++) {
       await deps.refreshTokenRepo.create(exec(), {
         userId: 1, deviceId: null, tokenHash: `t${i}`, familyId: 'f',
-        replacedByTokenId: null, expiresTime: new Date(now - 30 * DAY),
+        expiresTime: new Date(now - 30 * DAY),
       });
     }
     const c = startRetentionCleanup(deps, { batchSize: 2 });
@@ -141,7 +141,7 @@ describe('retention cleanup', () => {
     const now = Date.now();
     await deps.refreshTokenRepo.create(exec(), {
       userId: 1, deviceId: null, tokenHash: 'old', familyId: 'f',
-      replacedByTokenId: null, expiresTime: new Date(now - 30 * DAY),
+      expiresTime: new Date(now - 30 * DAY),
     });
     // 让第一张表抛错
     deps.emailVerificationTokenRepo.prune = async () => { throw new Error('boom'); };
@@ -218,7 +218,7 @@ describe('retention cleanup', () => {
     const now = Date.now();
     await deps.refreshTokenRepo.create(exec(), {
       userId: 1, deviceId: null, tokenHash: 'old', familyId: 'f',
-      replacedByTokenId: null, expiresTime: new Date(now - 30 * DAY),
+      expiresTime: new Date(now - 30 * DAY),
     });
     await deps.idempotencyReceiptRepo.createProcessing(exec(), {
       actorUserId: 1, sessionId: 's', method: 'PATCH', normalizedPath: '/x', idempotencyKey: '123e4567-e89b-42d3-8456-426614174000',
@@ -243,7 +243,7 @@ describe('retention cleanup', () => {
     const now = Date.now();
     await deps.refreshTokenRepo.create(exec(), {
       userId: 1, deviceId: null, tokenHash: 'old', familyId: 'f',
-      replacedByTokenId: null, expiresTime: new Date(now - 30 * DAY),
+      expiresTime: new Date(now - 30 * DAY),
     });
     const c = startRetentionCleanup(deps, { intervalMs: 60_000 });
     await new Promise((r) => setTimeout(r, 20));

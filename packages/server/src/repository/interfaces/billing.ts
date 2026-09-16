@@ -36,6 +36,8 @@ export interface IOrderRepo {
     orderNo: string;
     userId: number;
     planCode: string;
+    /** 购买时套餐版本（审计：套餐可编辑，记录买时承诺）。 */
+    planVersion: number;
     amountCents: number;
     channel: Order['channel'];
     expiresTime: Date;
@@ -70,8 +72,7 @@ export interface IPaymentRepo {
     channel: Payment['channel'];
     channelTradeNo: string;
     amountCents: number;
-    rawNotification: string | null;
-    signatureVerified: boolean;
+    notifySummary: string | null;
     result: Payment['result'];
   }): Promise<Payment>;
   /** 按渠道交易号查流水（回调幂等：重复回调以唯一键兜底 + 此查询判定 duplicate）。 */

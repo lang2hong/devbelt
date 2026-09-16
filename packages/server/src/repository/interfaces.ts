@@ -8,6 +8,7 @@
 export * from "./interfaces/admin.js";
 export * from "./interfaces/user.js";
 export * from "./interfaces/organization.js";
+export * from "./interfaces/plan.js";
 export * from "./interfaces/sync.js";
 export * from "./interfaces/billing.js";
 export * from "./interfaces/platform.js";

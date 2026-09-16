@@ -9,6 +9,7 @@ import { withTransaction } from '../../src/repository/mysql/db.js';
 import { MysqlUserRepo } from '../../src/repository/mysql/userRepo.js';
 import { MysqlEmailVerificationTokenRepo } from '../../src/repository/mysql/emailVerificationTokenRepo.js';
 import { MysqlPersonalSubscriptionRepo } from '../../src/repository/mysql/personalSubscriptionRepo.js';
+import { MysqlPlanRepo } from '../../src/repository/mysql/planRepo.js';
 import { MysqlDeviceRepo } from '../../src/repository/mysql/deviceRepo.js';
 import { MysqlRefreshTokenRepo } from '../../src/repository/mysql/refreshTokenRepo.js';
 import { MysqlRateLimitRepo } from '../../src/repository/mysql/rateLimitRepo.js';
@@ -53,6 +54,7 @@ describe.skipIf(!URL)('admin disable kick-out (real MySQL)', () => {
       const userRepo = new MysqlUserRepo(() => db);
       const emailVerificationTokenRepo = new MysqlEmailVerificationTokenRepo(() => db);
       const personalSubscriptionRepo = new MysqlPersonalSubscriptionRepo(() => db);
+      const planRepo = new MysqlPlanRepo(() => db);
       const deviceRepo = new MysqlDeviceRepo(() => db);
       const refreshTokenRepo = new MysqlRefreshTokenRepo(() => db);
       const rateLimitRepo = new MysqlRateLimitRepo(() => db);
@@ -60,7 +62,7 @@ describe.skipIf(!URL)('admin disable kick-out (real MySQL)', () => {
       const tokenService = new TokenService(makeSigningKeys(), '15m', 30 * 24 * 3600 * 1000);
       const sender = new MemoryEmailSender();
       const auth = new AuthService(
-        userRepo, emailVerificationTokenRepo, personalSubscriptionRepo, deviceRepo, refreshTokenRepo,
+        userRepo, emailVerificationTokenRepo, personalSubscriptionRepo, planRepo, deviceRepo, refreshTokenRepo,
         registrationRepo, tokenService, sender, new RateLimitService(rateLimitRepo, false),
         (fn) => withTransaction(db, fn),
       );

@@ -3,7 +3,7 @@ import { generateKeyPairSync } from 'crypto';
 import {
   FakeUserRepo,
   FakeEmailVerificationTokenRepo,
-  FakePersonalPlanRepo,
+  FakePlanRepo,
   FakePersonalSubscriptionRepo,
   FakeDeviceRepo,
   FakeRefreshTokenRepo,
@@ -34,7 +34,7 @@ interface Fixture {
   repos: {
     userRepo: FakeUserRepo;
     emailVerificationTokenRepo: FakeEmailVerificationTokenRepo;
-    personalPlanRepo: FakePersonalPlanRepo;
+    planRepo: FakePlanRepo;
     personalSubscriptionRepo: FakePersonalSubscriptionRepo;
     deviceRepo: FakeDeviceRepo;
     refreshTokenRepo: FakeRefreshTokenRepo;
@@ -46,12 +46,12 @@ interface Fixture {
 function makeFixture(opts: { rateLimit?: boolean } = {}): Fixture {
   const userRepo = new FakeUserRepo();
   const emailVerificationTokenRepo = new FakeEmailVerificationTokenRepo();
-  const personalPlanRepo = new FakePersonalPlanRepo();
+  const planRepo = new FakePlanRepo();
   const personalSubscriptionRepo = new FakePersonalSubscriptionRepo();
   const deviceRepo = new FakeDeviceRepo();
   const refreshTokenRepo = new FakeRefreshTokenRepo();
   const rateLimitRepo = new FakeRateLimitRepo();
-  const registrationRepo = new FakeRegistrationRepo(personalPlanRepo, userRepo, personalSubscriptionRepo, emailVerificationTokenRepo);
+  const registrationRepo = new FakeRegistrationRepo(planRepo, userRepo, personalSubscriptionRepo, emailVerificationTokenRepo);
 
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   const keys: SigningKeys = { kid: 'test', privateKey, publicKeys: new Map([['test', publicKey]]) };
@@ -62,6 +62,7 @@ function makeFixture(opts: { rateLimit?: boolean } = {}): Fixture {
     userRepo,
     emailVerificationTokenRepo,
     personalSubscriptionRepo,
+    planRepo,
     deviceRepo,
     refreshTokenRepo,
     registrationRepo,
@@ -75,7 +76,7 @@ function makeFixture(opts: { rateLimit?: boolean } = {}): Fixture {
     repos: {
       userRepo,
       emailVerificationTokenRepo,
-      personalPlanRepo,
+      planRepo,
       personalSubscriptionRepo,
       deviceRepo,
       refreshTokenRepo,
@@ -109,7 +110,9 @@ describe('AuthService', () => {
     expect(user!.emailVerifiedTime).toBeNull();
     const sub = await f.repos.personalSubscriptionRepo.findByUserId(user!.id);
     expect(sub).toBeTruthy();
-    expect(sub!.entitlementSnapshot).toMatchObject({ maxDevices: 0 });
+    const free = await f.repos.planRepo.findByCode('free');
+    expect(sub!.planId).toBe(free!.id);
+    expect(free!.features.maxDevices).toBe(0);
     expect(f.emailSender.sent.some((m) => m.kind === 'verification')).toBe(true);
   });
 
@@ -162,10 +165,10 @@ describe('AuthService', () => {
   });
 
   it('enforces max_devices entitlement', async () => {
-    const id = await registerAndVerify(f, 'dev@example.com');
-    // 把该用户 entitlement 的 maxDevices 调整为 1
-    const sub = await f.repos.personalSubscriptionRepo.findByUserId(id);
-    sub!.entitlementSnapshot = { ...sub!.entitlementSnapshot, maxDevices: 1 };
+    await registerAndVerify(f, 'dev@example.com');
+    // 把 free plan 的 maxDevices 调整为 1（权益派生自 plan）
+    const free = await f.repos.planRepo.findByCode('free');
+    free!.features = { ...free!.features, maxDevices: 1 };
 
     await f.auth.login('dev@example.com', PASSWORD, device('device-key-00000001'));
     await expect(f.auth.login('dev@example.com', PASSWORD, device('device-key-00000002'))).rejects.toBeInstanceOf(PersonalFeatureRequiredError);

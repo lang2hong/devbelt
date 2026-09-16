@@ -72,7 +72,6 @@ export class ConsoleAuthService {
         deviceId,
         tokenHash: hash,
         familyId,
-        replacedByTokenId: null,
         expiresTime: expiresAt,
       });
       const accessToken = await this.tokenService.signAccessToken({
@@ -133,7 +132,6 @@ export class ConsoleAuthService {
         deviceId: rt.deviceId,
         tokenHash: hash,
         familyId: rt.familyId,
-        replacedByTokenId: rt.id,
         expiresTime: expiresAt,
       });
       const accessToken = await this.tokenService.signAccessToken({

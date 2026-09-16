@@ -16,13 +16,12 @@ export class MysqlRefreshTokenRepo implements IRefreshTokenRepo {
     deviceId: number | null;
     tokenHash: string;
     familyId: string;
-    replacedByTokenId: number | null;
     expiresTime: Date;
   }): Promise<RefreshToken> {
     const [result] = await exec.query<any>(
-      `INSERT INTO refresh_tokens (user_id, device_id, token_hash, family_id, replaced_by_token_id, expires_time, last_used_time)
-       VALUES (?, ?, ?, ?, ?, ?, NULL)`,
-      [input.userId, input.deviceId, input.tokenHash, input.familyId, input.replacedByTokenId, input.expiresTime],
+      `INSERT INTO refresh_tokens (user_id, device_id, token_hash, family_id, expires_time, last_used_time)
+       VALUES (?, ?, ?, ?, ?, NULL)`,
+      [input.userId, input.deviceId, input.tokenHash, input.familyId, input.expiresTime],
     );
     const [rows] = await exec.query<any[]>('SELECT * FROM refresh_tokens WHERE id = ?', [result.insertId]);
     if (!rows[0]) throw new Error('refresh_token insert failed');
@@ -118,7 +117,6 @@ function mapRefreshToken(r: any): RefreshToken {
     deviceId: r.device_id ?? null,
     tokenHash: r.token_hash,
     familyId: r.family_id,
-    replacedByTokenId: r.replaced_by_token_id ?? null,
     expiresTime: new Date(r.expires_time),
     revokedTime: r.revoked_time ? new Date(r.revoked_time) : null,
     lastUsedTime: r.last_used_time ? new Date(r.last_used_time) : null,

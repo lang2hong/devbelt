@@ -28,19 +28,17 @@ export class MysqlOrganizationSubscriptionRepo implements IOrganizationSubscript
     planId: number;
     seatLimit: number;
     status: OrganizationSubscriptionStatus;
-    entitlementSnapshot: Record<string, unknown>;
     periodStartTime: Date;
     periodEndTime: Date | null;
   }): Promise<OrganizationSubscription> {
     const [result] = await exec.query<any>(
-      `INSERT INTO organization_subscriptions (organization_id, plan_id, seat_limit, status, entitlement_snapshot, period_start_time, period_end_time)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO organization_subscriptions (organization_id, plan_id, seat_limit, status, period_start_time, period_end_time)
+       VALUES (?, ?, ?, ?, ?, ?)`,
       [
         input.organizationId,
         input.planId,
         input.seatLimit,
         input.status,
-        JSON.stringify(input.entitlementSnapshot),
         input.periodStartTime,
         input.periodEndTime ?? null,
       ],
@@ -55,19 +53,17 @@ export class MysqlOrganizationSubscriptionRepo implements IOrganizationSubscript
     planId: number;
     seatLimit: number;
     status: OrganizationSubscriptionStatus;
-    entitlementSnapshot: Record<string, unknown>;
     periodEndTime: Date | null;
     expectedVersion: number;
   }): Promise<boolean> {
     const [result] = await exec.query<any>(
       `UPDATE organization_subscriptions
-       SET plan_id = ?, seat_limit = ?, status = ?, entitlement_snapshot = ?, period_end_time = ?, version = version + 1
+       SET plan_id = ?, seat_limit = ?, status = ?, period_end_time = ?, version = version + 1
        WHERE id = ? AND version = ?`,
       [
         input.planId,
         input.seatLimit,
         input.status,
-        JSON.stringify(input.entitlementSnapshot),
         input.periodEndTime ?? null,
         input.id,
         input.expectedVersion,
@@ -78,14 +74,12 @@ export class MysqlOrganizationSubscriptionRepo implements IOrganizationSubscript
 }
 
 function mapSubscription(r: any): OrganizationSubscription {
-  const snapshot = typeof r.entitlement_snapshot === 'string' ? JSON.parse(r.entitlement_snapshot) : r.entitlement_snapshot;
   return {
     id: r.id,
     organizationId: r.organization_id,
     planId: r.plan_id,
     seatLimit: Number(r.seat_limit ?? 0),
     status: r.status as OrganizationSubscriptionStatus,
-    entitlementSnapshot: snapshot ?? {},
     periodStartTime: new Date(r.period_start_time),
     periodEndTime: r.period_end_time ? new Date(r.period_end_time) : null,
     version: Number(r.version ?? 0),

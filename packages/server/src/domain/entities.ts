@@ -1,14 +1,12 @@
 import type {
   UserStatus,
   UserRole,
-  PersonalPlanStatus,
   PersonalSubscriptionStatus,
   DeviceStatus,
   EmailVerificationPurpose,
   OrganizationStatus,
   OrganizationRole,
   OrganizationMembershipStatus,
-  OrganizationPlanStatus,
   OrganizationSubscriptionStatus,
   ResourceType,
   SyncProtocolVersion,
@@ -63,36 +61,45 @@ export interface EmailVerificationToken {
   updateTime: Date;
 }
 
-/** 个人套餐定义。当前只 seed free。 */
-export interface PersonalPlan {
+/** 套餐（个人/组织统一）。特性为纵表派生，见 Plan.features。 */
+export type PlanKind = 'personal' | 'organization';
+export type PlanBillingUnit = 'month' | 'seat-month';
+export type PlanStatus = 'active' | 'archived';
+
+export interface PlanFeatureDef {
+  id: number;
+  key: string;
+  kind: PlanKind | 'both';
+  label: { en: string; zh: string };
+  valueType: 'bool' | 'number' | 'bytes' | 'stringList' | 'enum';
+  unit: string | null;
+  sortOrder: number;
+}
+
+export interface Plan {
   id: number;
   code: string;
+  kind: PlanKind;
   name: string;
-  /** JSON：允许的数据库引擎（个人 Free = mysql/sqlite） */
-  allowedDatabaseTypes: string[];
-  /** 设备数上限；0 = 无限 */
-  maxDevices: number;
-  /** 云端同步连接元数据条数；0 = 无限（§4.2） */
-  maxConnectionMetas: number;
-  /** 云端同步密文总字节配额；0 = 无限（§4.2） */
-  syncStorageBytes: number;
-  /** 本机可保存连接数上限；0 = 无限（连接资产差异点） */
-  maxSavedConnections: number;
-  /** 是否允许导入连接配置（导出恒允许） */
-  allowConnectionImport: boolean;
-  status: PersonalPlanStatus;
+  /** 单价（CNY 分）；0 = 免费/待定价。 */
+  priceCents: number;
+  billingUnit: PlanBillingUnit;
+  sortOrder: number;
+  status: PlanStatus;
+  /** 乐观并发版本；也是派生权益缓存的失效键。 */
+  version: number;
+  /** 纵表派生的特性取值，键为 feature_key。 */
+  features: Record<string, unknown>;
   createTime: Date;
   updateTime: Date;
 }
 
-/** 个人订阅（users 的当前权益）。entitlement_snapshot 冻结套餐权益。 */
+/** 个人订阅：只引用 plan，权益读取时派生（无快照）。 */
 export interface PersonalSubscription {
   id: number;
   userId: number;
   planId: number;
   status: PersonalSubscriptionStatus;
-  /** JSON：不可变权益快照（引擎、设备数等） */
-  entitlementSnapshot: Record<string, unknown>;
   periodStartTime: Date;
   periodEndTime: Date | null;
   /** 乐观并发版本（P3 §6.2 订阅调整）。 */
@@ -122,7 +129,6 @@ export interface RefreshToken {
   deviceId: number | null;
   tokenHash: string;
   familyId: string;
-  replacedByTokenId: number | null;
   expiresTime: Date;
   revokedTime: Date | null;
   lastUsedTime: Date | null;
@@ -153,28 +159,13 @@ export interface Organization {
   updateTime: Date;
 }
 
-/** 组织套餐定义。当前只 seed organization_free。 */
-export interface OrganizationPlan {
-  id: number;
-  code: string;
-  name: string;
-  includedSeats: number;
-  maxSharedResources: number;
-  sharedStorageQuotaBytes: number;
-  allowedTemplateDatabaseTypes: string[];
-  status: OrganizationPlanStatus;
-  createTime: Date;
-  updateTime: Date;
-}
-
-/** 组织订阅（organizations 的当前权益）。 */
+/** 组织订阅（organizations 的当前权益）：只引用 plan，权益派生（无快照）。 */
 export interface OrganizationSubscription {
   id: number;
   organizationId: number;
   planId: number;
   seatLimit: number;
   status: OrganizationSubscriptionStatus;
-  entitlementSnapshot: Record<string, unknown>;
   periodStartTime: Date;
   periodEndTime: Date | null;
   /** 乐观并发版本（P3 §6.2 订阅调整）。 */
@@ -428,6 +419,8 @@ export interface Order {
   orderNo: string;
   userId: number;
   planCode: string;
+  /** 购买时套餐版本（套餐可编辑；金额另由 amountCents 冻结）。 */
+  planVersion: number;
   amountCents: number;
   channel: PaymentChannel;
   status: OrderStatus;
@@ -447,9 +440,8 @@ export interface Payment {
   channel: PaymentChannel;
   channelTradeNo: string;
   amountCents: number;
-  /** 回调原始数据（不含密钥；仅存必要交易信息）。 */
-  rawNotification: string | null;
-  signatureVerified: boolean;
+  /** 渠道白名单脱敏摘要（不含原始信封/表单）。 */
+  notifySummary: string | null;
   result: PaymentResult;
   createTime: Date;
 }

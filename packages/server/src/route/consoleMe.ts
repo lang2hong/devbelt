@@ -10,7 +10,7 @@ import type { GetAuthUser } from '../middleware/requireAuth.js';
 import { sanitizeDisplayName } from '../service/displayName.js';
 import { validateIdempotencyKey, type IdempotencyService } from '../service/idempotencyService.js';
 import { updateDisplayNameBody } from './schemas.js';
-import type { IUserRepo, IPersonalSubscriptionRepo, IPersonalPlanRepo, IMembershipRepo } from '../repository/interfaces.js';
+import type { IUserRepo, IPersonalSubscriptionRepo, IPlanRepo, IMembershipRepo } from '../repository/interfaces.js';
 import type { Queryable } from '../repository/mysql/db.js';
 
 export interface ConsoleMeRouteOptions {
@@ -24,7 +24,7 @@ export interface ConsoleMeRouteOptions {
   consoleOrigin: string;
   userRepo: IUserRepo;
   personalSubscriptionRepo: IPersonalSubscriptionRepo;
-  personalPlanRepo: IPersonalPlanRepo;
+  planRepo: IPlanRepo;
   membershipRepo: IMembershipRepo;
 }
 
@@ -53,7 +53,7 @@ export async function consoleMeRoutes(app: FastifyInstance, opts: ConsoleMeRoute
         const user = await opts.userRepo.findById(userId);
         if (!user) return rejectConsole(reply, 401, 'UNAUTHORIZED', 'unauthorized');
         const subscription = await opts.personalSubscriptionRepo.findByUserId(userId);
-        const plan = subscription ? await opts.personalPlanRepo.findById(subscription.planId) : undefined;
+        const plan = subscription ? await opts.planRepo.findById(subscription.planId) : undefined;
         const organizations = await opts.membershipRepo.listActiveByUserWithOrg(userId);
         reply.send({
           user: {

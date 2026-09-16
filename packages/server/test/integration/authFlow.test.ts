@@ -8,6 +8,7 @@ import { withTransaction } from '../../src/repository/mysql/db.js';
 import { MysqlUserRepo } from '../../src/repository/mysql/userRepo.js';
 import { MysqlEmailVerificationTokenRepo } from '../../src/repository/mysql/emailVerificationTokenRepo.js';
 import { MysqlPersonalSubscriptionRepo } from '../../src/repository/mysql/personalSubscriptionRepo.js';
+import { MysqlPlanRepo } from '../../src/repository/mysql/planRepo.js';
 import { MysqlDeviceRepo } from '../../src/repository/mysql/deviceRepo.js';
 import { MysqlRefreshTokenRepo } from '../../src/repository/mysql/refreshTokenRepo.js';
 import { MysqlRateLimitRepo } from '../../src/repository/mysql/rateLimitRepo.js';
@@ -41,6 +42,7 @@ async function makeAuth(db: MysqlDb, emailSender: MemoryEmailSender) {
   const userRepo = new MysqlUserRepo(() => db);
   const emailVerificationTokenRepo = new MysqlEmailVerificationTokenRepo(() => db);
   const personalSubscriptionRepo = new MysqlPersonalSubscriptionRepo(() => db);
+  const planRepo = new MysqlPlanRepo(() => db);
   const deviceRepo = new MysqlDeviceRepo(() => db);
   const refreshTokenRepo = new MysqlRefreshTokenRepo(() => db);
   const rateLimitRepo = new MysqlRateLimitRepo(() => db);
@@ -50,6 +52,7 @@ async function makeAuth(db: MysqlDb, emailSender: MemoryEmailSender) {
     userRepo,
     emailVerificationTokenRepo,
     personalSubscriptionRepo,
+    planRepo,
     deviceRepo,
     refreshTokenRepo,
     registrationRepo,

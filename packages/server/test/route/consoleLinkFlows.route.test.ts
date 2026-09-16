@@ -86,7 +86,7 @@ async function setupInvited(b: Built, email = 'member@b.com') {
   const org = await b.orgRepo.create({} as Queryable, { name: 'Acme' });
   await b.subscriptionRepo.create({} as Queryable, {
     organizationId: org.id, planId: 1, seatLimit: 3, status: 'active',
-    entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null,
+    periodStartTime: new Date(), periodEndTime: null,
   });
   const membership = await b.membershipRepo.create({} as Queryable, {
     organizationId: org.id, userId: user.id, role: 'member', status: 'invited',

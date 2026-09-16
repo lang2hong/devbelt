@@ -3,10 +3,10 @@ import { OrderService } from '../../src/service/paymentService.js';
 import type {
   IOrderRepo,
   IPaymentRepo,
-  IPersonalPlanRepo,
+  IPlanRepo,
   IPersonalSubscriptionRepo,
 } from '../../src/repository/interfaces.js';
-import type { Order, Payment, PersonalPlan, PersonalSubscription } from '../../src/domain/entities.js';
+import type { Order, Payment, Plan, PersonalSubscription } from '../../src/domain/entities.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 import { AuditWriter } from '../../src/service/auditWriter.js';
 import { MemoryPaymentGateway, signMemoryCallback } from '../../src/service/paymentChannel.js';
@@ -15,26 +15,39 @@ import {
   PaymentSignatureInvalidError,
 } from '../../src/domain/errors.js';
 
-const PLAN: PersonalPlan = {
+const PLAN: Plan = {
   id: 2,
   code: 'pro',
+  kind: 'personal',
   name: 'Pro',
-  allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'],
-  maxDevices: 0,
-  maxConnectionMetas: 5000,
-  syncStorageBytes: 268435456,
-  maxSavedConnections: 100,
-  allowConnectionImport: true,
+  priceCents: 9900,
+  billingUnit: 'month',
+  sortOrder: 0,
   status: 'active',
+  version: 1,
+  features: {
+    allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'],
+    maxDevices: 0,
+    maxConnectionMetas: 5000,
+    syncStorageBytes: 268435456,
+    maxSavedConnections: 100,
+    allowConnectionImport: true,
+  },
   createTime: new Date(),
   updateTime: new Date(),
+};
+
+const FREE: Plan = {
+  id: 1, code: 'free', kind: 'personal', name: 'Free', priceCents: 0, billingUnit: 'month', sortOrder: 0, status: 'active', version: 1,
+  features: { allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 0, maxConnectionMetas: 500, syncStorageBytes: 33554432, maxSavedConnections: 10, allowConnectionImport: false },
+  createTime: new Date(), updateTime: new Date(),
 };
 
 class FakeOrderRepo implements IOrderRepo {
   readonly store = new Map<string, Order>();
   private seq = 0;
-  async create(input: { orderNo: string; userId: number; planCode: string; amountCents: number; channel: Order['channel']; expiresTime: Date }): Promise<Order> {
-    const o: Order = { id: ++this.seq, orderNo: input.orderNo, userId: input.userId, planCode: input.planCode, amountCents: input.amountCents, channel: input.channel, status: 'pending', channelTradeNo: null, paidTime: null, expiresTime: input.expiresTime, createTime: new Date(), updateTime: new Date() };
+  async create(input: { orderNo: string; userId: number; planCode: string; planVersion: number; amountCents: number; channel: Order['channel']; expiresTime: Date }): Promise<Order> {
+    const o: Order = { id: ++this.seq, orderNo: input.orderNo, userId: input.userId, planCode: input.planCode, planVersion: input.planVersion, amountCents: input.amountCents, channel: input.channel, status: 'pending', channelTradeNo: null, paidTime: null, expiresTime: input.expiresTime, createTime: new Date(), updateTime: new Date() };
     this.store.set(input.orderNo, o);
     return o;
   }
@@ -69,8 +82,8 @@ class FakeOrderRepo implements IOrderRepo {
 
 class FakePaymentRepo implements IPaymentRepo {
   readonly store: Payment[] = [];
-  async create(_exec: Queryable, input: { orderId: number; channel: Payment['channel']; channelTradeNo: string; amountCents: number; rawNotification: string | null; signatureVerified: boolean; result: Payment['result'] }): Promise<Payment> {
-    const p: Payment = { id: this.store.length + 1, orderId: input.orderId, channel: input.channel, channelTradeNo: input.channelTradeNo, amountCents: input.amountCents, rawNotification: input.rawNotification, signatureVerified: input.signatureVerified, result: input.result, createTime: new Date() };
+  async create(_exec: Queryable, input: { orderId: number; channel: Payment['channel']; channelTradeNo: string; amountCents: number; notifySummary: string | null; result: Payment['result'] }): Promise<Payment> {
+    const p: Payment = { id: this.store.length + 1, orderId: input.orderId, channel: input.channel, channelTradeNo: input.channelTradeNo, amountCents: input.amountCents, notifySummary: input.notifySummary, result: input.result, createTime: new Date() };
     this.store.push(p);
     return p;
   }
@@ -79,11 +92,15 @@ class FakePaymentRepo implements IPaymentRepo {
   }
 }
 
-class FakePlanRepo implements IPersonalPlanRepo {
-  async findByCode(code: string): Promise<PersonalPlan | undefined> { return code === 'pro' ? PLAN : undefined; }
-  async findById(id: number): Promise<PersonalPlan | undefined> { return id === 2 ? PLAN : undefined; }
-  async findByCodeInTx(_exec: Queryable, code: string): Promise<PersonalPlan | undefined> { return code === 'pro' ? PLAN : undefined; }
-  async listActive(): Promise<PersonalPlan[]> { return [PLAN]; }
+class FakePlanRepo implements IPlanRepo {
+  async findByCode(code: string): Promise<Plan | undefined> { return code === 'pro' ? PLAN : code === 'free' ? FREE : undefined; }
+  async findById(id: number): Promise<Plan | undefined> { return id === 2 ? PLAN : id === 1 ? FREE : undefined; }
+  async findByCodeInTx(_exec: Queryable, code: string): Promise<Plan | undefined> { return this.findByCode(code); }
+  async findByIdInTx(_exec: Queryable, id: number): Promise<Plan | undefined> { return this.findById(id); }
+  async listActive(): Promise<Plan[]> { return [FREE, PLAN]; }
+  async listAll(): Promise<Plan[]> { return [FREE, PLAN]; }
+  async replaceFeaturesInTx(): Promise<void> {}
+  async updateMetaInTx(): Promise<boolean> { return true; }
 }
 
 class FakeSubsRepo implements IPersonalSubscriptionRepo {
@@ -91,17 +108,16 @@ class FakeSubsRepo implements IPersonalSubscriptionRepo {
   async findByUserId(userId: number): Promise<PersonalSubscription | undefined> { return [...this.subs.values()].find((s) => s.userId === userId); }
   async findByUserIdInTx(_e: Queryable, userId: number): Promise<PersonalSubscription | undefined> { return this.findByUserId(userId); }
   async findByUserIdForUpdate(_e: Queryable, userId: number): Promise<PersonalSubscription | undefined> { return this.findByUserId(userId); }
-  async create(input: { userId: number; planId: number; status: PersonalSubscription['status']; entitlementSnapshot: Record<string, unknown>; periodStartTime: Date; periodEndTime: Date | null }): Promise<PersonalSubscription> {
-    const s: PersonalSubscription = { id: this.subs.size + 1, userId: input.userId, planId: input.planId, status: input.status, entitlementSnapshot: input.entitlementSnapshot, periodStartTime: input.periodStartTime, periodEndTime: input.periodEndTime, version: 0, createTime: new Date(), updateTime: new Date() };
+  async create(input: { userId: number; planId: number; status: PersonalSubscription['status']; periodStartTime: Date; periodEndTime: Date | null }): Promise<PersonalSubscription> {
+    const s: PersonalSubscription = { id: this.subs.size + 1, userId: input.userId, planId: input.planId, status: input.status, periodStartTime: input.periodStartTime, periodEndTime: input.periodEndTime, version: 0, createTime: new Date(), updateTime: new Date() };
     this.subs.set(s.id, s);
     return s;
   }
-  async update(_e: Queryable, input: { id: number; planId: number; status: PersonalSubscription['status']; entitlementSnapshot: Record<string, unknown>; periodEndTime: Date | null; expectedVersion: number }): Promise<boolean> {
+  async update(_e: Queryable, input: { id: number; planId: number; status: PersonalSubscription['status']; periodEndTime: Date | null; expectedVersion: number }): Promise<boolean> {
     const s = this.subs.get(input.id);
     if (!s || s.version !== input.expectedVersion) return false;
     s.planId = input.planId;
     s.status = input.status;
-    s.entitlementSnapshot = input.entitlementSnapshot;
     s.periodEndTime = input.periodEndTime;
     s.version += 1;
     return true;
@@ -117,7 +133,7 @@ function makeService(nonceRepo?: { insertIfAbsent(exec: Queryable, channel: stri
   const svc = new OrderService({
     orderRepo,
     paymentRepo,
-    personalPlanRepo: planRepo,
+    planRepo,
     personalSubscriptionRepo: subsRepo,
     auditWriter: audit,
     runner: async (fn) => fn({} as Queryable),
@@ -177,7 +193,7 @@ describe('OrderService.createOrder', () => {
     const svc = new OrderService({
       orderRepo,
       paymentRepo,
-      personalPlanRepo: planRepo,
+      planRepo,
       personalSubscriptionRepo: subsRepo,
       auditWriter: new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as any),
       runner: async (fn) => fn({} as Queryable),
@@ -195,7 +211,7 @@ describe('OrderService.createOrder', () => {
 describe('OrderService.handleCallback', () => {
   it('fulfills: pending → paid → fulfilled and rewrites the subscription', async () => {
     const { svc, orderRepo, subsRepo } = makeService();
-    await subsRepo.create({ userId: 1, planId: 1, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null });
+    await subsRepo.create({ userId: 1, planId: 1, status: 'active', periodStartTime: new Date(), periodEndTime: null });
     const { orderNo } = await svc.createOrder(1, 'pro', 'wechat');
 
     const cb = SUCCESS_CALLBACK(orderNo, 'wx-1', 9900);
@@ -206,14 +222,14 @@ describe('OrderService.handleCallback', () => {
     expect(order!.status).toBe('fulfilled');
     const sub = await subsRepo.findByUserId(1);
     expect(sub!.planId).toBe(2);
-    expect(sub!.entitlementSnapshot).toMatchObject({ maxConnectionMetas: 5000 });
+    expect(PLAN.features.maxConnectionMetas).toBe(5000);
   });
 
   it('extends the existing periodEndTime instead of overwriting remaining time', async () => {
     const { svc, subsRepo } = makeService();
     const startTime = new Date(Date.now() - 5 * 24 * 3600 * 1000); // 5 天前开始
     const existingEnd = new Date(Date.now() + 20 * 24 * 3600 * 1000); // 20 天剩余
-    await subsRepo.create({ userId: 1, planId: 2, status: 'active', entitlementSnapshot: { maxConnectionMetas: 5000 }, periodStartTime: startTime, periodEndTime: existingEnd });
+    await subsRepo.create({ userId: 1, planId: 2, status: 'active', periodStartTime: startTime, periodEndTime: existingEnd });
     const { orderNo } = await svc.createOrder(1, 'pro', 'wechat');
     const cb = SUCCESS_CALLBACK(orderNo, 'wx-1', 9900);
     await svc.handleCallback('wechat', cb.raw, cb.headers);
@@ -229,7 +245,7 @@ describe('OrderService.handleCallback', () => {
 
   it('fulfills an alipay order via its own alipay callback (cross-channel isolation)', async () => {
     const { svc, orderRepo, subsRepo } = makeService();
-    await subsRepo.create({ userId: 1, planId: 1, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null });
+    await subsRepo.create({ userId: 1, planId: 1, status: 'active', periodStartTime: new Date(), periodEndTime: null });
     await svc.createOrder(1, 'pro', 'wechat');
     const alipay = await svc.createOrder(1, 'pro', 'alipay');
 
@@ -244,7 +260,7 @@ describe('OrderService.handleCallback', () => {
 
   it('records (not fulfills) a callback arriving after the local order expiry', async () => {
     const { svc, orderRepo, subsRepo } = makeService();
-    await subsRepo.create({ userId: 1, planId: 1, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null });
+    await subsRepo.create({ userId: 1, planId: 1, status: 'active', periodStartTime: new Date(), periodEndTime: null });
     const { orderNo } = await svc.createOrder(1, 'pro', 'wechat');
     // 伪造订单已过期。
     const order = await orderRepo.findByOrderNo(orderNo);
@@ -291,7 +307,7 @@ describe('OrderService.handleCallback', () => {
 
   it('is idempotent for a duplicate channel_trade_no', async () => {
     const { svc, subsRepo } = makeService();
-    await subsRepo.create({ userId: 1, planId: 1, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null });
+    await subsRepo.create({ userId: 1, planId: 1, status: 'active', periodStartTime: new Date(), periodEndTime: null });
     const { orderNo } = await svc.createOrder(1, 'pro', 'wechat');
     const cb = SUCCESS_CALLBACK(orderNo, 'wx-dup', 9900);
     await svc.handleCallback('wechat', cb.raw, cb.headers);
@@ -310,7 +326,7 @@ describe('OrderService.handleCallback', () => {
       purgeExpired: async () => 0,
     };
     const { svc, subsRepo } = makeService(nonceRepo);
-    await subsRepo.create({ userId: 1, planId: 1, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null });
+    await subsRepo.create({ userId: 1, planId: 1, status: 'active', periodStartTime: new Date(), periodEndTime: null });
     const { orderNo } = await svc.createOrder(1, 'pro', 'wechat');
     const cb = SUCCESS_CALLBACK(orderNo, 'wx-nonce', 9900);
     cb.headers['wechatpay-nonce'] = 'nonce-abc';
@@ -350,12 +366,12 @@ describe('OrderService.handleCallback', () => {
       },
     };
     const svc = new OrderService({
-      orderRepo, paymentRepo, personalPlanRepo: new FakePlanRepo(), personalSubscriptionRepo: subsRepo,
+      orderRepo, paymentRepo, planRepo: new FakePlanRepo(), personalSubscriptionRepo: subsRepo,
       auditWriter: new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as any),
       runner: async (fn) => fn({} as Queryable),
       gatewayFor: () => gateway,
     });
-    await subsRepo.create({ userId: 1, planId: 1, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null });
+    await subsRepo.create({ userId: 1, planId: 1, status: 'active', periodStartTime: new Date(), periodEndTime: null });
     const { orderNo } = await svc.createOrder(1, 'pro', 'wechat');
 
     // 原始 body 含未允许字段（payer.openid）；落库必须只留白名单摘要。
@@ -364,8 +380,8 @@ describe('OrderService.handleCallback', () => {
 
     const p = paymentRepo.store[0];
     expect(p).toBeDefined();
-    expect(p!.rawNotification).toBe(JSON.stringify({ out_trade_no: orderNo, transaction_id: 'wx-1', total: '9900' }));
-    expect(p!.rawNotification).not.toContain('OPENID_SECRET');
+    expect(p!.notifySummary).toBe(JSON.stringify({ out_trade_no: orderNo, transaction_id: 'wx-1', total: '9900' }));
+    expect(p!.notifySummary).not.toContain('OPENID_SECRET');
   });
 
   it('does NOT reuse a pending order across different channels, leaving the prior channel pending', async () => {
@@ -381,7 +397,7 @@ describe('OrderService.handleCallback', () => {
 
   it('fulfills a prior-channel callback after switching channels (no confirmed-but-unfulfilled)', async () => {
     const { svc, orderRepo, subsRepo } = makeService();
-    await subsRepo.create({ userId: 1, planId: 1, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null });
+    await subsRepo.create({ userId: 1, planId: 1, status: 'active', periodStartTime: new Date(), periodEndTime: null });
     const wechat = await svc.createOrder(1, 'pro', 'wechat');
     // 用户切到支付宝，开了第二个订单。
     await svc.createOrder(1, 'pro', 'alipay');
@@ -418,14 +434,14 @@ describe('OrderService.handleCallback', () => {
     const svc = new OrderService({
       orderRepo,
       paymentRepo,
-      personalPlanRepo: planRepo,
+      planRepo,
       personalSubscriptionRepo: subsRepo,
       auditWriter: new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as any),
       runner: async (fn) => fn({} as Queryable),
       gatewayFor: () => capturingGateway,
     });
     const { orderNo } = await svc.createOrder(1, 'pro', 'wechat');
-    await subsRepo.create({ userId: 1, planId: 1, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null });
+    await subsRepo.create({ userId: 1, planId: 1, status: 'active', periodStartTime: new Date(), periodEndTime: null });
     // 非 JSON.stringify 规范化格式：字段乱序 + 多余空白 + 条数重复，验证字节不被重编码。
     const raw = Buffer.from(`{  "amountCents": 9900,\n "status":"success",\n "channelTradeNo":"wx-raw","orderNo":"${orderNo}" }`);
     await svc.handleCallback('wechat', raw, {});
@@ -455,14 +471,14 @@ describe('OrderService.handleCallback', () => {
     const svc = new OrderService({
       orderRepo,
       paymentRepo,
-      personalPlanRepo: planRepo,
+      planRepo,
       personalSubscriptionRepo: subsRepo,
       auditWriter: new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as any),
       runner: async (fn) => fn({} as Queryable),
       gatewayFor: () => capturingGateway,
     });
     const { orderNo } = await svc.createOrder(1, 'pro', 'wechat');
-    await subsRepo.create({ userId: 1, planId: 1, status: 'active', entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null });
+    await subsRepo.create({ userId: 1, planId: 1, status: 'active', periodStartTime: new Date(), periodEndTime: null });
     // 中文「支付成功」占 4 字节/字；在字符序列中间切开，模拟 stream chunk 边界。
     const full = Buffer.from(JSON.stringify({ orderNo, channelTradeNo: 'wx-mb', amountCents: 9900, status: 'success', note: '支付成功✅' }));
     const cut = Math.floor(full.length / 2);
@@ -475,12 +491,12 @@ describe('OrderService.handleCallback', () => {
 });
 describe('wechat nonce 与订单操作同事务（P2 回归保护）', () => {
   const order: Order = {
-    id: 1, orderNo: 'o1', userId: 1, planCode: 'pro', amountCents: 9900, channel: 'wechat',
+    id: 1, orderNo: 'o1', userId: 1, planCode: 'pro', planVersion: 1, amountCents: 9900, channel: 'wechat',
     status: 'pending', channelTradeNo: null, paidTime: null,
     expiresTime: new Date(Date.now() + 3_600_000), createTime: new Date(), updateTime: new Date(),
   };
   const sub: PersonalSubscription = {
-    id: 1, userId: 1, planId: 2, status: 'active', entitlementSnapshot: {},
+    id: 1, userId: 1, planId: 2, status: 'active',
     periodStartTime: new Date(), periodEndTime: null, version: 0, createTime: new Date(), updateTime: new Date(),
   };
 
@@ -519,7 +535,7 @@ describe('wechat nonce 与订单操作同事务（P2 回归保护）', () => {
     const svc = new OrderService({
       orderRepo: orderRepo as any,
       paymentRepo: paymentRepo as any,
-      personalPlanRepo: planRepo as any,
+      planRepo: planRepo as any,
       personalSubscriptionRepo: subsRepo as any,
       auditWriter: audit,
       // 事务模型：fn 内写入 local；成功才提交到 committed，抛错即丢弃（回滚）。

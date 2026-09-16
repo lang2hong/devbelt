@@ -11,6 +11,7 @@ import { CONSOLE_SCOPES } from '../../src/domain/enums.js';
 import {
   FakeUserRepo,
   FakePersonalSubscriptionRepo,
+  FakePlanRepo,
   FakeMembershipRepo,
   FakeOrganizationRepo,
   FakeRateLimitRepo,
@@ -40,6 +41,7 @@ async function build(): Promise<{ app: FastifyInstance; tokenService: TokenServi
     rateLimiter: new RateLimitService(new FakeRateLimitRepo(), false),
     userRepo,
     personalSubscriptionRepo: new FakePersonalSubscriptionRepo(),
+    planRepo: new FakePlanRepo(),
     membershipRepo: memberships,
     organizationRepo: orgRepo,
     syncStateRepo: new FakeSyncStateRepo(),

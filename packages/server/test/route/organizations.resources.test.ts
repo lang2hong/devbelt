@@ -13,7 +13,7 @@ import { OrganizationService } from '../../src/service/organizationService.js';
 import {
   FakeUserRepo,
   FakeOrganizationRepo,
-  FakeOrganizationPlanRepo,
+  FakePlanRepo,
   FakeOrganizationSubscriptionRepo,
   FakeMembershipRepo,
   FakeInvitationRepo,
@@ -57,7 +57,7 @@ describe('organization resource/folder routes', () => {
     const tokenService = new TokenService(keys, '15m', 30 * 24 * 3600 * 1000);
     const runner = async (fn: any) => fn({} as Queryable);
     const organizationService = new OrganizationService(
-      userRepo, organizationRepo, new FakeOrganizationPlanRepo(), new FakeOrganizationSubscriptionRepo(), membershipRepo, new FakeInvitationRepo(membershipRepo),
+      userRepo, organizationRepo, new FakePlanRepo(), new FakeOrganizationSubscriptionRepo(), membershipRepo, new FakeInvitationRepo(membershipRepo),
       new RateLimitService(new FakeRateLimitRepo(), false), tokenService,
       { sendInvitationEmail: async () => {} } as any, runner,
     );

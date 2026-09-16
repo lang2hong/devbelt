@@ -1,6 +1,5 @@
 import type {
   Organization,
-  OrganizationPlan,
   OrganizationSubscription,
   OrganizationMembership,
   OrganizationInvitation,
@@ -20,15 +19,6 @@ import type {
 } from "./admin.js";
 
 /** 仓储接口 · organization（自 interfaces.ts 按聚合拆分，纯类型移动）。 */
-
-export interface IOrganizationPlanRepo {
-  findByCode(code: string): Promise<OrganizationPlan | undefined>;
-  findById(id: number): Promise<OrganizationPlan | undefined>;
-  /** 在事务内锁定 plan 行（创建组织时防 plan 变更）。 */
-  findByCodeForUpdate(exec: Queryable, code: string): Promise<OrganizationPlan | undefined>;
-  /** 列出上架（active）套餐目录，供 /api/plans 展示。 */
-  listActive(): Promise<OrganizationPlan[]>;
-}
 
 export interface IOrganizationRepo {
   findById(id: number): Promise<Organization | undefined>;
@@ -52,7 +42,6 @@ export interface IOrganizationSubscriptionRepo {
     planId: number;
     seatLimit: number;
     status: OrganizationSubscriptionStatus;
-    entitlementSnapshot: Record<string, unknown>;
     periodStartTime: Date;
     periodEndTime: Date | null;
   }): Promise<OrganizationSubscription>;
@@ -62,7 +51,6 @@ export interface IOrganizationSubscriptionRepo {
     planId: number;
     seatLimit: number;
     status: OrganizationSubscriptionStatus;
-    entitlementSnapshot: Record<string, unknown>;
     periodEndTime: Date | null;
     expectedVersion: number;
   }): Promise<boolean>;

@@ -15,16 +15,15 @@ import { MemoryPaymentGateway } from '../../src/service/paymentChannel.js';
 import { csrfCookieName } from '../../src/middleware/cookies.js';
 import { CONSOLE_SCOPES } from '../../src/domain/enums.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
-import type { Order, Payment, PersonalPlan } from '../../src/domain/entities.js';
+import type { Order, Payment, Plan } from '../../src/domain/entities.js';
 
 const ORIGIN = 'http://localhost:5173';
 
-const PLAN: PersonalPlan = {
-  id: 2, code: 'pro', name: 'Pro',
-  allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'],
-  maxDevices: 0, maxConnectionMetas: 5000, syncStorageBytes: 268435456,
-  maxSavedConnections: 100, allowConnectionImport: true,
-  status: 'active', createTime: new Date(), updateTime: new Date(),
+const PLAN: Plan = {
+  id: 2, code: 'pro', kind: 'personal', name: 'Pro', priceCents: 9900, billingUnit: 'month', sortOrder: 0,
+  status: 'active', version: 1,
+  features: { allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 0, maxConnectionMetas: 5000, syncStorageBytes: 268435456, maxSavedConnections: 100, allowConnectionImport: true },
+  createTime: new Date(), updateTime: new Date(),
 };
 
 function noopOrderRepo() {
@@ -49,7 +48,7 @@ async function build(paymentEnabled: boolean) {
   const orderService = new OrderService({
     orderRepo: noopOrderRepo() as never,
     paymentRepo: noopPaymentRepo() as never,
-    personalPlanRepo: { findByCodeInTx: async () => PLAN, findByCode: async () => PLAN, findById: async () => PLAN } as never,
+    planRepo: { findByCodeInTx: async () => PLAN, findByCode: async () => PLAN, findById: async () => PLAN } as never,
     personalSubscriptionRepo: { findByUserIdForUpdate: async () => undefined } as never,
     auditWriter: new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as never),
     runner: async (fn) => fn({} as Queryable),

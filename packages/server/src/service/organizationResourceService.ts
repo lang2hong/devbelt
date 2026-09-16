@@ -14,6 +14,7 @@ import type { ResourceType } from '../domain/enums.js';
 import type {
   IOrganizationRepo,
   IOrganizationSubscriptionRepo,
+  IPlanRepo,
   IMembershipRepo,
   IFolderRepo,
   IResourceRepo,
@@ -25,6 +26,7 @@ import type { TxRunner, Queryable } from '../repository/mysql/db.js';
 import { roleHasPermission, type PermissionCode } from '../authz/permissionCatalog.js';
 import { ForbiddenError } from '../domain/errors.js';
 import { canonicalJsonBytes, validateResourceContent } from './resourceContent.js';
+import { deriveEntitlement, type Entitlement } from './entitlement.js';
 
 /**
  * 组织目录与资源服务。
@@ -38,6 +40,7 @@ export class OrganizationResourceService {
   constructor(
     private readonly organizationRepo: IOrganizationRepo,
     private readonly organizationSubscriptionRepo: IOrganizationSubscriptionRepo,
+    private readonly planRepo: IPlanRepo,
     private readonly membershipRepo: IMembershipRepo,
     private readonly folderRepo: IFolderRepo,
     private readonly resourceRepo: IResourceRepo,
@@ -121,12 +124,13 @@ export class OrganizationResourceService {
     const created = await this.runner(async (tx) => {
       await this.lockOrganization(tx, organizationId);
       const subscription = await this.requireSubscription(tx, organizationId);
+      const entitlement = await this.entitlementFor(tx, subscription);
       // 作者取锁内 membership：中间件传下来的 id 可能已被并发移除。
       const membershipId = (await this.requireActor(tx, organizationId, actorUserId, 'resource.write')).id;
-      this.assertEngineAllowed(subscription, input.resourceType, input.content);
+      this.assertEngineAllowed(entitlement, input.resourceType, input.content);
 
       const folderId = input.folderId == null ? null : (await this.resolveFolder(tx, organizationId, input.folderId)).id;
-      await this.assertResourceQuota(tx, organizationId, subscription, { countDelta: 1, bytesDelta: canonicalJsonBytes(input.content) });
+      await this.assertResourceQuota(tx, organizationId, entitlement, { countDelta: 1, bytesDelta: canonicalJsonBytes(input.content) });
 
       return this.resourceRepo.create(tx, {
         organizationId,
@@ -166,6 +170,7 @@ export class OrganizationResourceService {
     const updated = await this.runner(async (tx) => {
       await this.lockOrganization(tx, organizationId);
       const subscription = await this.requireSubscription(tx, organizationId);
+      const entitlement = await this.entitlementFor(tx, subscription);
       const membershipId = (await this.requireActor(tx, organizationId, actorUserId, 'resource.write')).id;
 
       // 锁序（§6.2）：folder 先于 resource。显式移动到目录时先锁定并校验目标 folder。
@@ -181,8 +186,8 @@ export class OrganizationResourceService {
       const newName = name ?? existing.name;
       const newFolderId = resolvedFolderId !== undefined ? resolvedFolderId : existing.folderId;
 
-      if (input.content !== undefined) this.assertEngineAllowed(subscription, existing.resourceType, newContent);
-      await this.assertResourceQuota(tx, organizationId, subscription, {
+      if (input.content !== undefined) this.assertEngineAllowed(entitlement, existing.resourceType, newContent);
+      await this.assertResourceQuota(tx, organizationId, entitlement, {
         countDelta: 0,
         bytesDelta: canonicalJsonBytes(newContent) - canonicalJsonBytes(existing.content),
       });
@@ -260,24 +265,30 @@ export class OrganizationResourceService {
     return this.requireFolder(tx, organizationId, folderId);
   }
 
-  private assertEngineAllowed(subscription: OrganizationSubscription, resourceType: ResourceType, content: Record<string, unknown>): void {
+  private async entitlementFor(tx: Queryable, subscription: OrganizationSubscription): Promise<Entitlement> {
+    const plan = await this.planRepo.findByIdInTx(tx, subscription.planId);
+    const freePlan = await this.planRepo.findByCodeInTx(tx, 'organization_free');
+    return deriveEntitlement(subscription, plan, freePlan);
+  }
+
+  private assertEngineAllowed(entitlement: Entitlement, resourceType: ResourceType, content: Record<string, unknown>): void {
     if (resourceType !== 'connection_template') return;
-    const allowed = subscription.entitlementSnapshot?.allowedTemplateDatabaseTypes;
+    const allowed = entitlement.allowedTemplateDatabaseTypes;
     const list = Array.isArray(allowed) ? (allowed as string[]) : [];
     if (!list.includes(content.databaseType as string)) {
       throw new OrganizationFeatureRequiredError(`database engine not allowed: ${String(content.databaseType)}`);
     }
   }
 
-  /** §6.2：数量与字节配额在锁内按快照计量；0 表示无限（跳过对应维度）。 */
+  /** §6.2：数量与字节配额在锁内按派生权益计量；0 表示无限（跳过对应维度）。 */
   private async assertResourceQuota(
     tx: Queryable,
     organizationId: number,
-    subscription: OrganizationSubscription,
+    entitlement: Entitlement,
     delta: { countDelta: number; bytesDelta: number },
   ): Promise<void> {
-    const maxRes = subscription.entitlementSnapshot?.maxSharedResources;
-    const maxBytes = subscription.entitlementSnapshot?.sharedStorageQuotaBytes;
+    const maxRes = entitlement.maxSharedResources;
+    const maxBytes = entitlement.sharedStorageQuotaBytes;
     const resourceCap = typeof maxRes === 'number' && maxRes > 0 ? maxRes : 0;
     const byteCap = typeof maxBytes === 'number' && maxBytes > 0 ? maxBytes : 0;
     if (resourceCap === 0 && byteCap === 0) return;

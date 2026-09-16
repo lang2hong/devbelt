@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   FakeOrganizationRepo,
   FakeOrganizationSubscriptionRepo,
+  FakePlanRepo,
+  makePlan,
   FakeMembershipRepo,
   FakeFolderRepo,
   FakeResourceRepo,
@@ -20,28 +22,26 @@ import {
 } from '../../src/domain/errors.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 
-interface Snapshot {
-  maxSharedResources: number;
-  sharedStorageQuotaBytes: number;
-  allowedTemplateDatabaseTypes: string[];
-  [key: string]: unknown;
-}
+/** 权益现由 plan 特性派生：测试用一份 org plan 承载原先的 snapshot 值。 */
+type Features = Record<string, unknown>;
 
-function makeStack(snapshot: Snapshot = { maxSharedResources: 50, sharedStorageQuotaBytes: 10485760, allowedTemplateDatabaseTypes: ['mysql'] }) {
+function makeStack(features: Features = { maxSharedResources: 50, sharedStorageQuotaBytes: 10485760, allowedTemplateDatabaseTypes: ['mysql'] }) {
   const organizationRepo = new FakeOrganizationRepo();
   const organizationSubscriptionRepo = new FakeOrganizationSubscriptionRepo();
+  const planRepo = new FakePlanRepo([makePlan({ code: 'organization_free', kind: 'organization', name: 'Org Free', features })]);
   const membershipRepo = new FakeMembershipRepo();
   const resourceRepo = new FakeResourceRepo();
   const folderRepo = new FakeFolderRepo(resourceRepo);
   const svc = new OrganizationResourceService(
     organizationRepo,
     organizationSubscriptionRepo,
+    planRepo,
     membershipRepo,
     folderRepo,
     resourceRepo,
     async (fn) => fn({} as Queryable),
   );
-  return { svc, organizationRepo, organizationSubscriptionRepo, membershipRepo, folderRepo, resourceRepo, snapshot };
+  return { svc, organizationRepo, organizationSubscriptionRepo, planRepo, planId: planRepo.plans[0].id, membershipRepo, folderRepo, resourceRepo, features };
 }
 
 /** 组织内的 active admin 操作者（写操作在事务内复核其权限）。 */
@@ -51,10 +51,9 @@ async function makeOrg(stack: ReturnType<typeof makeStack>) {
   const org = await stack.organizationRepo.create({} as Queryable, { name: 'Acme' });
   await stack.organizationSubscriptionRepo.create({} as Queryable, {
     organizationId: org.id,
-    planId: 1,
+    planId: stack.planId,
     seatLimit: 3,
     status: 'active',
-    entitlementSnapshot: stack.snapshot,
     periodStartTime: new Date(),
     periodEndTime: null,
   });
@@ -89,8 +88,8 @@ describe('OrganizationResourceService folders', () => {
     const orgA = await makeOrg(stack);
     const orgB = await stack.organizationRepo.create({} as Queryable, { name: 'B' });
     await stack.organizationSubscriptionRepo.create({} as Queryable, {
-      organizationId: orgB.id, planId: 1, seatLimit: 3, status: 'active',
-      entitlementSnapshot: stack.snapshot, periodStartTime: new Date(), periodEndTime: null,
+      organizationId: orgB.id, planId: stack.planId, seatLimit: 3, status: 'active',
+      periodStartTime: new Date(), periodEndTime: null,
     });
     await stack.membershipRepo.create({} as Queryable, {
       organizationId: orgB.id, userId: ADMIN, role: 'admin', status: 'active',
@@ -180,8 +179,8 @@ describe('OrganizationResourceService resources', () => {
     const orgA = await makeOrg(stack);
     const orgB = await stack.organizationRepo.create({} as Queryable, { name: 'B' });
     await stack.organizationSubscriptionRepo.create({} as Queryable, {
-      organizationId: orgB.id, planId: 1, seatLimit: 3, status: 'active',
-      entitlementSnapshot: stack.snapshot, periodStartTime: new Date(), periodEndTime: null,
+      organizationId: orgB.id, planId: stack.planId, seatLimit: 3, status: 'active',
+      periodStartTime: new Date(), periodEndTime: null,
     });
     await stack.membershipRepo.create({} as Queryable, {
       organizationId: orgB.id, userId: ADMIN, role: 'admin', status: 'active',

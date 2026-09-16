@@ -10,7 +10,7 @@ function fulfilledOrder(): Order {
     id: 7,
     orderNo: 'ord-fulfilled',
     userId: 1,
-    planCode: 'pro',
+    planCode: 'pro', planVersion: 1,
     amountCents: 9900,
     channel: 'wechat',
     status: 'fulfilled',

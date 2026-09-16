@@ -11,6 +11,7 @@ import { MysqlSyncRecordRepo } from '../../src/repository/mysql/syncRecordRepo.j
 import { MysqlSyncNonceRepo } from '../../src/repository/mysql/syncNonceRepo.js';
 import { MysqlSyncMutationRepo } from '../../src/repository/mysql/syncMutationRepo.js';
 import { MysqlPersonalSubscriptionRepo } from '../../src/repository/mysql/personalSubscriptionRepo.js';
+import { MysqlPlanRepo } from '../../src/repository/mysql/planRepo.js';
 import { SyncStateService } from '../../src/service/syncStateService.js';
 import { SyncRecordService } from '../../src/service/syncRecordService.js';
 import { jcs } from '../../src/service/syncCrypto.js';
@@ -115,6 +116,7 @@ describe.skipIf(!URL)('sync concurrency (real MySQL)', () => {
       new MysqlSyncNonceRepo(),
       new MysqlSyncMutationRepo(),
       new MysqlPersonalSubscriptionRepo(() => db),
+      new MysqlPlanRepo(() => db),
       (fn) => withTransaction(db, fn),
     );
   }

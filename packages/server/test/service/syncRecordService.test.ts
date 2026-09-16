@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { generateKeyPairSync, sign as nodeSign, type KeyObject } from 'crypto';
 import {
-  FakeSyncStateRepo, FakeSyncRecordRepo, FakeSyncNonceRepo, FakeSyncMutationRepo, FakePersonalSubscriptionRepo,
+  FakeSyncStateRepo, FakeSyncRecordRepo, FakeSyncNonceRepo, FakeSyncMutationRepo, FakePersonalSubscriptionRepo, FakePlanRepo,
 } from '../helpers/fakeRepos.js';
 import { SyncStateService } from '../../src/service/syncStateService.js';
 import { SyncRecordService } from '../../src/service/syncRecordService.js';
@@ -74,9 +74,10 @@ function makeStack() {
   const mutationRepo = new FakeSyncMutationRepo();
   const nonceRepo = new FakeSyncNonceRepo();
   const subscriptionRepo = new FakePersonalSubscriptionRepo();
+  const planRepo = new FakePlanRepo();
   const stateSvc = new SyncStateService(stateRepo, recordRepo, mutationRepo, runner);
-  const recordSvc = new SyncRecordService(stateRepo, recordRepo, nonceRepo, mutationRepo, subscriptionRepo, runner);
-  return { stateSvc, recordSvc, stateRepo, recordRepo, nonceRepo, mutationRepo, subscriptionRepo };
+  const recordSvc = new SyncRecordService(stateRepo, recordRepo, nonceRepo, mutationRepo, subscriptionRepo, planRepo, runner);
+  return { stateSvc, recordSvc, stateRepo, recordRepo, nonceRepo, mutationRepo, subscriptionRepo, planRepo };
 }
 
 async function init(stack: ReturnType<typeof makeStack>) {
@@ -187,9 +188,10 @@ describe('SyncRecordService', () => {
   it('enforces count quota', async () => {
     const stack = makeStack();
     const keys = await init(stack);
+    const free = await stack.planRepo.findByCode('free');
+    free!.features = { ...free!.features, maxConnectionMetas: 1, syncStorageBytes: 33554432 };
     await stack.subscriptionRepo.create({
-      userId: USER, planId: 1, status: 'active',
-      entitlementSnapshot: { allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 0, maxConnectionMetas: 1, syncStorageBytes: 33554432 },
+      userId: USER, planId: free!.id, status: 'active',
       periodStartTime: new Date(), periodEndTime: null,
     });
 
@@ -218,6 +220,36 @@ describe('SyncRecordService', () => {
       return;
     }
     throw new Error('expected SYNC_QUOTA_EXCEEDED');
+  });
+
+  it('expired subscription falls back to free quota instead of unlimited (P0 regression)', async () => {
+    const stack = makeStack();
+    const keys = await init(stack);
+    // free 限额 1；pro 限额高。订阅挂在 pro 但已到期 → 派生应回 free（1），而非 0/unlimited。
+    const free = await stack.planRepo.findByCode('free');
+    free!.features = { ...free!.features, maxConnectionMetas: 1 };
+    const pro = await stack.planRepo.findByCode('pro');
+    await stack.subscriptionRepo.create({
+      userId: USER, planId: pro!.id, status: 'active',
+      periodStartTime: new Date(Date.now() - 60_000), periodEndTime: new Date(Date.now() - 1000),
+    });
+
+    const m1 = mid(3);
+    const b1 = putBody(m1, RID, 70, 71, '0');
+    const s1 = signRecord(keys.signPriv, USER, 'record.put', b1);
+    await stack.recordSvc.putRecord(USER, {
+      keyEpoch: '1', mutationId: m1, signature: s1.signatureBuf, baseVersion: '0', requestDigest: s1.digest,
+      recordId: RID, cipherSuite: 'AES-256-GCM', formatVersion: 1, ...decodeBody(b1),
+    });
+
+    const m2 = mid(2);
+    const rid2 = rid(2);
+    const b2 = putBody(m2, rid2, 73, 74, '0');
+    const s2 = signRecord(keys.signPriv, USER, 'record.put', b2);
+    await expect(stack.recordSvc.putRecord(USER, {
+      keyEpoch: '1', mutationId: m2, signature: s2.signatureBuf, baseVersion: '0', requestDigest: s2.digest,
+      recordId: rid2, cipherSuite: 'AES-256-GCM', formatVersion: 1, ...decodeBody(b2),
+    })).rejects.toBeInstanceOf(SyncQuotaExceededError);
   });
 
   it('rejects stale epoch and enforces idempotent-replay semantics', async () => {

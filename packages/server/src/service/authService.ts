@@ -20,12 +20,14 @@ import type {
   IUserRepo,
   IEmailVerificationTokenRepo,
   IPersonalSubscriptionRepo,
+  IPlanRepo,
   IDeviceRepo,
   IRefreshTokenRepo,
   IRegistrationRepo,
 } from '../repository/interfaces.js';
 import type { Queryable, TxRunner } from '../repository/mysql/db.js';
 import type { AuditWriter } from './auditWriter.js';
+import { deriveEntitlement } from './entitlement.js';
 
 /** 登录/刷新请求携带的设备字段（实施规格 §5.2 DeviceFields）。 */
 export interface DeviceFields {
@@ -89,6 +91,7 @@ export class AuthService {
     private readonly userRepo: IUserRepo,
     private readonly emailVerificationTokenRepo: IEmailVerificationTokenRepo,
     private readonly personalSubscriptionRepo: IPersonalSubscriptionRepo,
+    private readonly planRepo: IPlanRepo,
     private readonly deviceRepo: IDeviceRepo,
     private readonly refreshTokenRepo: IRefreshTokenRepo,
     private readonly registrationRepo: IRegistrationRepo,
@@ -252,7 +255,6 @@ export class AuthService {
           deviceId,
           tokenHash: hash,
           familyId,
-          replacedByTokenId: null,
           expiresTime: expiresAt,
         });
         const accessToken = await this.tokenService.signAccessToken({
@@ -324,7 +326,6 @@ export class AuthService {
           deviceId: rt.deviceId,
           tokenHash: hash,
           familyId: rt.familyId,
-          replacedByTokenId: rt.id,
           expiresTime: expiresAt,
         });
 
@@ -473,7 +474,9 @@ export class AuthService {
    */
   private async maxDevices(exec: Queryable, userId: number): Promise<number> {
     const sub = await this.personalSubscriptionRepo.findByUserIdInTx(exec, userId);
-    const n = sub?.entitlementSnapshot?.maxDevices;
+    const plan = sub ? await this.planRepo.findByIdInTx(exec, sub.planId) : undefined;
+    const freePlan = await this.planRepo.findByCodeInTx(exec, 'free');
+    const n = deriveEntitlement(sub, plan, freePlan).maxDevices;
     return typeof n === 'number' ? n : 0;
   }
 }

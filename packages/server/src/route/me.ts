@@ -2,8 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import { authScope, type GetAuthUser } from '../middleware/requireAuth.js';
 import type { TokenService } from '../service/tokenService.js';
 import { sendError } from '../middleware/errorHandler.js';
-import type { IUserRepo, IPersonalSubscriptionRepo, IPersonalPlanRepo } from '../repository/interfaces.js';
+import type { IUserRepo, IPersonalSubscriptionRepo, IPlanRepo } from '../repository/interfaces.js';
 import type { User } from '../domain/entities.js';
+import { deriveEntitlement } from '../service/entitlement.js';
 
 export interface MeRouteOptions {
   tokenService: TokenService;
@@ -11,7 +12,7 @@ export interface MeRouteOptions {
   getSessionActive: (sessionId: string) => Promise<boolean>;
   userRepo: IUserRepo;
   personalSubscriptionRepo: IPersonalSubscriptionRepo;
-  personalPlanRepo: IPersonalPlanRepo;
+  planRepo: IPlanRepo;
 }
 
 /** /api/me、/api/personal/subscription（需认证）。 */
@@ -29,14 +30,15 @@ export async function meRoutes(app: FastifyInstance, opts: MeRouteOptions): Prom
           const user = await opts.userRepo.findById(userId);
           if (!user) return reply.code(401).send({ message: 'unauthorized', code: 'UNAUTHORIZED' });
           const subscription = await opts.personalSubscriptionRepo.findByUserId(userId);
-          const plan = subscription ? await opts.personalPlanRepo.findById(subscription.planId) : undefined;
+          const plan = subscription ? await opts.planRepo.findById(subscription.planId) : undefined;
+          const freePlan = await opts.planRepo.findByCode('free');
           reply.send({
             user: sanitizeUser(user),
             subscription: subscription
               ? {
                   planCode: plan?.code ?? null,
                   status: subscription.status,
-                  entitlement: subscription.entitlementSnapshot,
+                  entitlement: deriveEntitlement(subscription, plan, freePlan),
                   periodStartTime: subscription.periodStartTime.toISOString(),
                   periodEndTime: subscription.periodEndTime ? subscription.periodEndTime.toISOString() : null,
                 }
@@ -51,11 +53,12 @@ export async function meRoutes(app: FastifyInstance, opts: MeRouteOptions): Prom
         const userId = (req as any).authUserId as number;
         try {
           const subscription = await opts.personalSubscriptionRepo.findByUserId(userId);
-          const plan = subscription ? await opts.personalPlanRepo.findById(subscription.planId) : undefined;
+          const plan = subscription ? await opts.planRepo.findById(subscription.planId) : undefined;
+          const freePlan = await opts.planRepo.findByCode('free');
           reply.send({
             planCode: plan?.code ?? null,
             status: subscription?.status ?? null,
-            entitlement: subscription?.entitlementSnapshot ?? null,
+            entitlement: subscription ? deriveEntitlement(subscription, plan, freePlan) : null,
           });
         } catch (e) {
           sendError(reply, e);

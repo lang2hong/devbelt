@@ -30,7 +30,11 @@ export function normalizeAppliedVersions(appliedVersions: string[], migrations: 
   return new Set(appliedVersions.map((v) => legacyAliases.get(v) ?? v));
 }
 
-export async function runMigrations(db: MigrationDb, migrations: Migration[]): Promise<void> {
+export async function runMigrations(
+  db: MigrationDb,
+  migrations: Migration[],
+  knownLegacyVersions: readonly string[] = [],
+): Promise<void> {
   await db.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version VARCHAR(64) NOT NULL PRIMARY KEY,
@@ -40,6 +44,19 @@ export async function runMigrations(db: MigrationDb, migrations: Migration[]): P
 
   const [rows] = (await db.query('SELECT version FROM schema_migrations')) as [Array<{ version: string }>, unknown];
   const applied = normalizeAppliedVersions(rows.map((r) => r.version), migrations);
+
+  // squash 后账本可能残留历史版本（LEGACY_MIGRATION_VERSIONS 登记）—— 基线会重建这些，
+  // 故放行。但出现「未知版本」（既不在迁移集合、也不是登记的历史版本）时必须 fail-loud，
+  // 绝不能静默重放或被忽略（可能是更高版本链的库，重建会误删其数据）。
+  const known = new Set(migrations.map((m) => m.version));
+  const legacy = new Set(knownLegacyVersions);
+  const unknown = [...applied].filter((v) => !known.has(v) && !legacy.has(v));
+  if (unknown.length > 0) {
+    throw new Error(
+      `schema_migrations 含未知版本（不在迁移集合也不在历史登记）：${unknown.join(', ')}；` +
+        `拒绝启动以免静默重建。若确需重置，请先清空该库。`,
+    );
+  }
 
   for (const migration of migrations) {
     if (applied.has(migration.version)) continue;

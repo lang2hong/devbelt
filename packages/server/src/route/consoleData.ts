@@ -8,12 +8,14 @@ import type { GetAuthUser } from '../middleware/requireAuth.js';
 import type {
   IUserRepo,
   IPersonalSubscriptionRepo,
+  IPlanRepo,
   IMembershipRepo,
   ISyncStateRepo,
   ISyncRecordRepo,
   IOrganizationRepo,
 } from '../repository/interfaces.js';
 import type { Queryable } from '../repository/mysql/db.js';
+import { deriveEntitlement } from '../service/entitlement.js';
 import { organizationIdParam } from './schemas.js';
 
 export interface ConsoleDataRouteOptions {
@@ -24,6 +26,7 @@ export interface ConsoleDataRouteOptions {
   rateLimiter: RateLimitService;
   userRepo: IUserRepo;
   personalSubscriptionRepo: IPersonalSubscriptionRepo;
+  planRepo: IPlanRepo;
   membershipRepo: IMembershipRepo;
   organizationRepo: IOrganizationRepo;
   syncStateRepo: ISyncStateRepo;
@@ -64,7 +67,9 @@ export async function consoleDataRoutes(app: FastifyInstance, opts: ConsoleDataR
         }
         const overview = await opts.syncRecordRepo.overview(opts.db, userId, state.keyEpoch);
         const sub = await opts.personalSubscriptionRepo.findByUserId(userId);
-        const snap = sub?.entitlementSnapshot ?? {};
+        const plan = sub ? await opts.planRepo.findById(sub.planId) : undefined;
+        const freePlan = await opts.planRepo.findByCode('free');
+        const snap = deriveEntitlement(sub, plan, freePlan);
         const recordLimit = normalizeQuota(snap.maxConnectionMetas);
         const storageLimit = normalizeQuota(snap.syncStorageBytes);
         return reply.send({

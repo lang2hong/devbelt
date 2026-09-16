@@ -14,14 +14,15 @@ export class MysqlOrderRepo implements IOrderRepo {
     orderNo: string;
     userId: number;
     planCode: string;
+    planVersion: number;
     amountCents: number;
     channel: PaymentChannel;
     expiresTime: Date;
   }): Promise<Order> {
     const [result] = await this.db().query<any>(
-      `INSERT INTO orders (order_no, user_id, plan_code, amount_cents, channel, status, expires_time)
-       VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
-      [input.orderNo, input.userId, input.planCode, input.amountCents, input.channel, input.expiresTime],
+      `INSERT INTO orders (order_no, user_id, plan_code, plan_version, amount_cents, channel, status, expires_time)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
+      [input.orderNo, input.userId, input.planCode, input.planVersion, input.amountCents, input.channel, input.expiresTime],
     );
     const created = await this.findById(result.insertId);
     if (!created) throw new Error('order insert failed');
@@ -145,6 +146,7 @@ function mapOrder(r: any): Order {
     orderNo: r.order_no,
     userId: r.user_id,
     planCode: r.plan_code,
+    planVersion: Number(r.plan_version ?? 0),
     amountCents: Number(r.amount_cents),
     channel: r.channel as PaymentChannel,
     status: r.status as OrderStatus,

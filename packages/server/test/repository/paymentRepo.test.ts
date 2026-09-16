@@ -36,8 +36,7 @@ const PAYMENT_ROW = {
   channel: 'wechat',
   channel_trade_no: 'wx-trade-1',
   amount_cents: 9900,
-  raw_notification: null,
-  signature_verified: 1,
+  notify_summary: null,
   result: 'success',
   create_time: '2026-09-10T00:00:00.000Z',
 };
@@ -60,8 +59,7 @@ describe('payment repo transaction boundary', () => {
       channel: 'wechat',
       channelTradeNo: 'wx-trade-1',
       amountCents: 9900,
-      rawNotification: null,
-      signatureVerified: true,
+      notifySummary: null,
       result: 'success',
     });
 
@@ -138,14 +136,13 @@ describe('payment channel_trade_no uniqueness metadata', () => {
         channel: 'wechat',
         channelTradeNo: 'wx-trade-1',
         amountCents: 9900,
-        rawNotification: null,
-        signatureVerified: false,
+        notifySummary: null,
         result: 'failure',
       },
     );
     expect(capturedSql).toContain('channel_trade_no');
     expect(capturedParams).toContain('wx-trade-1');
-    expect(capturedParams).toContain(0); // signature_verified=false → 0
+    expect(capturedSql).toContain('notify_summary');
   });
 });
 describe('payment callback nonce purge', () => {

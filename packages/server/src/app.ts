@@ -9,13 +9,12 @@ import { resolveCorsOrigin } from './service/consoleOrigin.js';
 import { buildMysqlPoolOptions } from './mysqlPool.js';
 import { MysqlUserRepo } from './repository/mysql/userRepo.js';
 import { MysqlEmailVerificationTokenRepo } from './repository/mysql/emailVerificationTokenRepo.js';
-import { MysqlPersonalPlanRepo } from './repository/mysql/personalPlanRepo.js';
 import { MysqlPersonalSubscriptionRepo } from './repository/mysql/personalSubscriptionRepo.js';
 import { MysqlDeviceRepo } from './repository/mysql/deviceRepo.js';
 import { MysqlRefreshTokenRepo } from './repository/mysql/refreshTokenRepo.js';
 import { MysqlRateLimitRepo } from './repository/mysql/rateLimitRepo.js';
 import { MysqlRegistrationRepo } from './repository/mysql/registrationRepo.js';
-import { MysqlOrganizationPlanRepo } from './repository/mysql/organizationPlanRepo.js';
+import { MysqlPlanRepo, MysqlPlanFeatureDefRepo } from './repository/mysql/planRepo.js';
 import { MysqlOrganizationRepo } from './repository/mysql/organizationRepo.js';
 import { MysqlOrganizationSubscriptionRepo } from './repository/mysql/organizationSubscriptionRepo.js';
 import { MysqlMembershipRepo } from './repository/mysql/membershipRepo.js';
@@ -52,7 +51,7 @@ import { registerErrorHandler } from './middleware/errorHandler.js';
 import { securityHeaders, globalSecurityHeaders } from './middleware/securityHeaders.js';
 import { buildLoggerOptions } from './middleware/requestLogging.js';
 import { runMigrations } from './repository/mysql/migrate.js';
-import { migrations } from './repository/mysql/migrations/index.js';
+import { migrations, LEGACY_MIGRATION_VERSIONS } from './repository/mysql/migrations/index.js';
 import { mysqlTimeZoneInit } from './repository/mysql/mysqlTimeZoneInit.js';
 import { withTransaction } from './repository/mysql/db.js';
 import { registerHealthRoutes } from './route/health.js';
@@ -132,13 +131,13 @@ export async function createApp() {
   // repository 层
   const userRepo = new MysqlUserRepo(getMysql);
   const emailVerificationTokenRepo = new MysqlEmailVerificationTokenRepo(getMysql);
-  const personalPlanRepo = new MysqlPersonalPlanRepo(getMysql);
+  const planRepo = new MysqlPlanRepo(getMysql);
+  const featureDefRepo = new MysqlPlanFeatureDefRepo(getMysql);
   const personalSubscriptionRepo = new MysqlPersonalSubscriptionRepo(getMysql);
   const deviceRepo = new MysqlDeviceRepo(getMysql);
   const refreshTokenRepo = new MysqlRefreshTokenRepo(getMysql);
   const rateLimitRepo = new MysqlRateLimitRepo(getMysql);
   const registrationRepo = new MysqlRegistrationRepo(getMysql);
-  const organizationPlanRepo = new MysqlOrganizationPlanRepo(getMysql);
   const organizationRepo = new MysqlOrganizationRepo(getMysql);
   const organizationSubscriptionRepo = new MysqlOrganizationSubscriptionRepo(getMysql);
   const membershipRepo = new MysqlMembershipRepo(getMysql);
@@ -168,6 +167,7 @@ export async function createApp() {
     userRepo,
     emailVerificationTokenRepo,
     personalSubscriptionRepo,
+    planRepo,
     deviceRepo,
     refreshTokenRepo,
     registrationRepo,
@@ -180,7 +180,7 @@ export async function createApp() {
   const organizationService = new OrganizationService(
     userRepo,
     organizationRepo,
-    organizationPlanRepo,
+    planRepo,
     organizationSubscriptionRepo,
     membershipRepo,
     invitationRepo,
@@ -193,6 +193,7 @@ export async function createApp() {
   const resourceService = new OrganizationResourceService(
     organizationRepo,
     organizationSubscriptionRepo,
+    planRepo,
     membershipRepo,
     folderRepo,
     resourceRepo,
@@ -213,6 +214,7 @@ export async function createApp() {
     syncNonceRepo,
     syncMutationRepo,
     personalSubscriptionRepo,
+    planRepo,
     (fn) => withTransaction(app.mysql, fn),
   );
   const csrfService = new CsrfService(deriveCsrfKey());
@@ -254,9 +256,8 @@ export async function createApp() {
   const adminService = new ConsoleAdminService({
     userRepo,
     refreshTokenRepo,
-    personalPlanRepo,
+    planRepo,
     personalSubscriptionRepo,
-    organizationPlanRepo,
     organizationRepo,
     organizationSubscriptionRepo,
     membershipRepo,
@@ -273,7 +274,7 @@ export async function createApp() {
   const orderService = new OrderService({
     orderRepo,
     paymentRepo,
-    personalPlanRepo,
+    planRepo,
     personalSubscriptionRepo,
     auditWriter,
     runner: (fn) => withTransaction(app.mysql, fn),
@@ -330,8 +331,8 @@ export async function createApp() {
     mailReady: true,
   });
   app.register(authRoutes, { authService, tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin: config.consoleOrigin });
-  app.register(meRoutes, { tokenService, getUser, getSessionActive, userRepo, personalSubscriptionRepo, personalPlanRepo });
-  app.register(plansRoutes, { tokenService, getUser, getSessionActive, personalPlanRepo, organizationPlanRepo });
+  app.register(meRoutes, { tokenService, getUser, getSessionActive, userRepo, personalSubscriptionRepo, planRepo });
+  app.register(plansRoutes, { tokenService, getUser, getSessionActive, planRepo, featureDefRepo });
   app.register(personalRoutes, { tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin: config.consoleOrigin, deviceRepo, idempotencyService, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId), revokeDeviceInTx: (tx, userId, deviceId) => authService.revokeDeviceInTx(tx, userId, deviceId) });
   app.register(organizationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin: config.consoleOrigin, organizationService, resourceService, organizationRepo, membershipRepo, auditWriter, idempotencyService, sendInvitation: (o) => organizationService.sendInvitation(o) });
   app.register(invitationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin: config.consoleOrigin, organizationService });
@@ -357,10 +358,10 @@ export async function createApp() {
     consoleOrigin: config.consoleOrigin,
     userRepo,
     personalSubscriptionRepo,
-    personalPlanRepo,
+    planRepo,
     membershipRepo,
   });
-  app.register(consolePlansRoutes, { tokenService, getUser, getSessionActive, personalPlanRepo, organizationPlanRepo });
+  app.register(consolePlansRoutes, { tokenService, getUser, getSessionActive, planRepo, featureDefRepo });
   app.register(consoleDataRoutes, {
     tokenService,
     getUser,
@@ -369,6 +370,7 @@ export async function createApp() {
     rateLimiter,
     userRepo,
     personalSubscriptionRepo,
+    planRepo,
     membershipRepo,
     organizationRepo,
     syncStateRepo,
@@ -469,7 +471,7 @@ export async function createApp() {
   await registerConsoleStatic(app);
 
   await app.ready();
-  await runMigrations(app.mysql as any, [...migrations]);
+  await runMigrations(app.mysql as any, [...migrations], LEGACY_MIGRATION_VERSIONS);
   // 平台管理员受控引导（§2.3/§10.4）：PLATFORM_ADMIN_EMAILS 仅作首次引导来源；
   // 缺失时 fail-closed（无人被提升，requireAdmin 一律 403）。
   await bootstrapPlatformAdmins(userRepo, auditWriter, config.platformAdminEmails, app.log.warn.bind(app.log));

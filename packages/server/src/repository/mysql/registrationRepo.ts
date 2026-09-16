@@ -3,11 +3,11 @@ import { withTransaction, type MysqlDb } from './db.js';
 import { ConflictError } from '../../domain/errors.js';
 
 /**
- * 注册账号仓储：单事务原子创建 user + Free 订阅（含 entitlement snapshot）+ 邮箱验证 token。
+ * 注册账号仓储：单事务原子创建 user + Free 订阅 + 邮箱验证 token。
  *
  * 三张表任一失败整体回滚，避免「有 user 无订阅 / 无验证 token」的半套状态。
- * Free 套餐 id 在事务内按 code 查询；缺失即报错（migration 002 必须先播种）。
- * entitlement snapshot 从 free plan 复制，冻结注册时的权益（实施规格 §4.2）。
+ * Free 套餐 id 在事务内按 code 从统一 `plans` 查询；缺失即报错（baseline 必须先播种）。
+ * 权益不落库（读取时由 plan 派生），订阅只引用 plan。
  */
 export class MysqlRegistrationRepo implements IRegistrationRepo {
   constructor(private readonly db: () => MysqlDb) {}
@@ -15,7 +15,7 @@ export class MysqlRegistrationRepo implements IRegistrationRepo {
   async createAccount(input: RegistrationAccountInput): Promise<RegistrationResult> {
     return withTransaction(this.db(), async (tx) => {
       const [planRows] = await tx.query<any[]>(
-        "SELECT * FROM personal_plans WHERE code = 'free' AND status = 'active' LIMIT 1",
+        "SELECT id FROM plans WHERE code = 'free' AND kind = 'personal' AND status = 'active' LIMIT 1",
       );
       const freePlan = planRows[0];
       if (!freePlan) throw new Error('free plan is missing; run migrations before register');
@@ -36,25 +36,11 @@ export class MysqlRegistrationRepo implements IRegistrationRepo {
         throw err;
       }
 
-      const allowedTypes = typeof freePlan.allowed_database_types === 'string'
-        ? JSON.parse(freePlan.allowed_database_types)
-        : freePlan.allowed_database_types;
-      const entitlementSnapshot = {
-        allowedDatabaseTypes: Array.isArray(allowedTypes) ? allowedTypes : [],
-        maxDevices: freePlan.max_devices,
-        // 数值配额列（§4.2）：快照即权威，服务端只读快照不读当前 plan。
-        maxConnectionMetas: Number(freePlan.max_connection_metas ?? 0),
-        syncStorageBytes: Number(freePlan.sync_storage_bytes ?? 0),
-        // 连接资产差异点：快照冻结时把这两个也带走（§6.2）。
-        maxSavedConnections: Number(freePlan.max_saved_connections ?? 0),
-        allowConnectionImport: freePlan.allow_connection_import === 1 || freePlan.allow_connection_import === true,
-      };
       const now = new Date();
-
       await tx.query(
-        `INSERT INTO personal_subscriptions (user_id, plan_id, status, entitlement_snapshot, period_start_time, period_end_time)
-         VALUES (?, ?, 'active', ?, ?, NULL)`,
-        [userId, freePlan.id, JSON.stringify(entitlementSnapshot), now],
+        `INSERT INTO personal_subscriptions (user_id, plan_id, status, period_start_time, period_end_time)
+         VALUES (?, ?, 'active', ?, NULL)`,
+        [userId, freePlan.id, now],
       );
 
       await tx.query(

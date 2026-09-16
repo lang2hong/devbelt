@@ -58,12 +58,11 @@ describe('personal routes smoke', () => {
   it('reports the entitlement shape when a Free subscription exists', async () => {
     const t = await buildTestApp();
     const { id, token } = await makeUser(t, 'ent@b.com');
-    const plan = await t.repos.personalPlanRepo.findByCode('free');
+    const plan = await t.repos.planRepo.findByCode('free');
     await t.repos.personalSubscriptionRepo.create({
       userId: id,
       planId: plan!.id,
       status: 'active',
-      entitlementSnapshot: { allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 0 },
       periodStartTime: new Date(),
       periodEndTime: null,
     });
@@ -71,7 +70,7 @@ describe('personal routes smoke', () => {
     const me = await t.app.inject({ method: 'GET', url: '/api/me', headers: t.auth(token) });
     expect(me.statusCode).toBe(200);
     expect(me.json().subscription.planCode).toBe('free');
-    expect(me.json().subscription.entitlement).toEqual({ allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 0 });
+    expect(me.json().subscription.entitlement).toMatchObject({ allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 0 });
     expect(me.json().subscription.entitlement.maxDevices).toBe(0);
     expect(Object.keys(me.json().subscription).sort()).toEqual([
       'entitlement', 'periodEndTime', 'periodStartTime', 'planCode', 'status',
@@ -79,7 +78,7 @@ describe('personal routes smoke', () => {
 
     const sub = await t.app.inject({ method: 'GET', url: '/api/personal/subscription', headers: t.auth(token) });
     expect(sub.statusCode).toBe(200);
-    expect(sub.json()).toEqual({
+    expect(sub.json()).toMatchObject({
       planCode: 'free',
       status: 'active',
       entitlement: { allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 0 },
@@ -244,7 +243,7 @@ describe('personal routes smoke', () => {
       userId: user.id, deviceKey: 'dk-session', devicePlatform: 'linux', deviceName: 'x', clientVersion: '1', status: 'active', lastUsedTime: null,
     });
     await refreshTokenRepo.create({} as Queryable, {
-      userId: user.id, deviceId: device.id, tokenHash: 'hash', familyId: 'fam', replacedByTokenId: null, expiresTime: new Date(Date.now() + 3600_000),
+      userId: user.id, deviceId: device.id, tokenHash: 'hash', familyId: 'fam', expiresTime: new Date(Date.now() + 3600_000),
     });
     const token = await tokenService.signAccessToken({ userId: user.id, aud: 'extension', scope: ['device'], sessionId: 'fam', deviceId: device.id, sessionVersion: 0 });
 

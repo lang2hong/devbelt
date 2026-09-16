@@ -35,18 +35,16 @@ export class MysqlPersonalSubscriptionRepo implements IPersonalSubscriptionRepo 
     userId: number;
     planId: number;
     status: PersonalSubscriptionStatus;
-    entitlementSnapshot: Record<string, unknown>;
     periodStartTime: Date;
     periodEndTime: Date | null;
   }): Promise<PersonalSubscription> {
     const [result] = await this.db().query<any>(
-      `INSERT INTO personal_subscriptions (user_id, plan_id, status, entitlement_snapshot, period_start_time, period_end_time)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO personal_subscriptions (user_id, plan_id, status, period_start_time, period_end_time)
+       VALUES (?, ?, ?, ?, ?)`,
       [
         input.userId,
         input.planId,
         input.status,
-        JSON.stringify(input.entitlementSnapshot),
         input.periodStartTime,
         input.periodEndTime ?? null,
       ],
@@ -60,18 +58,16 @@ export class MysqlPersonalSubscriptionRepo implements IPersonalSubscriptionRepo 
     id: number;
     planId: number;
     status: PersonalSubscriptionStatus;
-    entitlementSnapshot: Record<string, unknown>;
     periodEndTime: Date | null;
     expectedVersion: number;
   }): Promise<boolean> {
     const [result] = await exec.query<any>(
       `UPDATE personal_subscriptions
-       SET plan_id = ?, status = ?, entitlement_snapshot = ?, period_end_time = ?, version = version + 1
+       SET plan_id = ?, status = ?, period_end_time = ?, version = version + 1
        WHERE id = ? AND version = ?`,
       [
         input.planId,
         input.status,
-        JSON.stringify(input.entitlementSnapshot),
         input.periodEndTime ?? null,
         input.id,
         input.expectedVersion,
@@ -87,13 +83,11 @@ export class MysqlPersonalSubscriptionRepo implements IPersonalSubscriptionRepo 
 }
 
 function mapSubscription(r: any): PersonalSubscription {
-  const snapshot = typeof r.entitlement_snapshot === 'string' ? JSON.parse(r.entitlement_snapshot) : r.entitlement_snapshot;
   return {
     id: r.id,
     userId: r.user_id,
     planId: r.plan_id,
     status: r.status as PersonalSubscriptionStatus,
-    entitlementSnapshot: snapshot ?? {},
     periodStartTime: new Date(r.period_start_time),
     periodEndTime: r.period_end_time ? new Date(r.period_end_time) : null,
     version: Number(r.version ?? 0),

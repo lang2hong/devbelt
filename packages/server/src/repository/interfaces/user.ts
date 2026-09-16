@@ -1,7 +1,6 @@
 import type {
   User,
   EmailVerificationToken,
-  PersonalPlan,
   PersonalSubscription,
   Device,
   RefreshToken,
@@ -80,15 +79,6 @@ export interface IEmailVerificationTokenRepo {
   prune(before: Date, limit: number): Promise<number>;
 }
 
-export interface IPersonalPlanRepo {
-  findByCode(code: string): Promise<PersonalPlan | undefined>;
-  findById(id: number): Promise<PersonalPlan | undefined>;
-  /** 事务内按 code 读（订阅调整在回执事务内解析套餐，§6.2）。 */
-  findByCodeInTx(exec: Queryable, code: string): Promise<PersonalPlan | undefined>;
-  /** 列出上架（active）套餐目录，供 /api/plans 展示。 */
-  listActive(): Promise<PersonalPlan[]>;
-}
-
 export interface IPersonalSubscriptionRepo {
   findByUserId(userId: number): Promise<PersonalSubscription | undefined>;
   /** 事务内按 user_id 读取，用于锁内配额计量。 */
@@ -99,7 +89,6 @@ export interface IPersonalSubscriptionRepo {
     userId: number;
     planId: number;
     status: PersonalSubscription['status'];
-    entitlementSnapshot: Record<string, unknown>;
     periodStartTime: Date;
     periodEndTime: Date | null;
   }): Promise<PersonalSubscription>;
@@ -108,7 +97,6 @@ export interface IPersonalSubscriptionRepo {
     id: number;
     planId: number;
     status: PersonalSubscription['status'];
-    entitlementSnapshot: Record<string, unknown>;
     periodEndTime: Date | null;
     expectedVersion: number;
   }): Promise<boolean>;
@@ -138,7 +126,6 @@ export interface IRefreshTokenRepo {
     deviceId: number | null;
     tokenHash: string;
     familyId: string;
-    replacedByTokenId: number | null;
     expiresTime: Date;
   }): Promise<RefreshToken>;
   findByHash(tokenHash: string): Promise<RefreshToken | undefined>;

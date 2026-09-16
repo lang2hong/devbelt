@@ -180,7 +180,7 @@ describe('LinkFlowService.acceptInvitation', () => {
     const org = await orgRepo.create({} as Queryable, { name: 'Acme' });
     await subscriptionRepo.create({} as Queryable, {
       organizationId: org.id, planId: 1, seatLimit: 3, status: 'active',
-      entitlementSnapshot: {}, periodStartTime: new Date(), periodEndTime: null,
+      periodStartTime: new Date(), periodEndTime: null,
     });
     const membership = await membershipRepo.create({} as Queryable, {
       organizationId: org.id, userId: user.id, role: overrides.role ?? 'member', status: 'invited',

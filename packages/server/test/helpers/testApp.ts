@@ -4,13 +4,13 @@ import { generateKeyPairSync } from 'crypto';
 import {
   FakeUserRepo,
   FakeEmailVerificationTokenRepo,
-  FakePersonalPlanRepo,
+  FakePlanRepo,
+  FakePlanFeatureDefRepo,
   FakePersonalSubscriptionRepo,
   FakeDeviceRepo,
   FakeRefreshTokenRepo,
   FakeRateLimitRepo,
   FakeRegistrationRepo,
-  FakeOrganizationPlanRepo,
   FakeOrganizationRepo,
   FakeOrganizationSubscriptionRepo,
   FakeMembershipRepo,
@@ -58,13 +58,13 @@ export interface TestApp {
   repos: {
     userRepo: FakeUserRepo;
     emailVerificationTokenRepo: FakeEmailVerificationTokenRepo;
-    personalPlanRepo: FakePersonalPlanRepo;
+    planRepo: FakePlanRepo;
+    featureDefRepo: FakePlanFeatureDefRepo;
     personalSubscriptionRepo: FakePersonalSubscriptionRepo;
     deviceRepo: FakeDeviceRepo;
     refreshTokenRepo: FakeRefreshTokenRepo;
     rateLimitRepo: FakeRateLimitRepo;
     registrationRepo: FakeRegistrationRepo;
-    organizationPlanRepo: FakeOrganizationPlanRepo;
     organizationRepo: FakeOrganizationRepo;
     organizationSubscriptionRepo: FakeOrganizationSubscriptionRepo;
     membershipRepo: FakeMembershipRepo;
@@ -112,13 +112,13 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
 
   const userRepo = new FakeUserRepo();
   const emailVerificationTokenRepo = new FakeEmailVerificationTokenRepo();
-  const personalPlanRepo = new FakePersonalPlanRepo();
+  const planRepo = new FakePlanRepo();
+  const featureDefRepo = new FakePlanFeatureDefRepo();
   const personalSubscriptionRepo = new FakePersonalSubscriptionRepo();
   const deviceRepo = new FakeDeviceRepo();
   const refreshTokenRepo = new FakeRefreshTokenRepo();
   const rateLimitRepo = new FakeRateLimitRepo();
-  const registrationRepo = new FakeRegistrationRepo(personalPlanRepo, userRepo, personalSubscriptionRepo, emailVerificationTokenRepo);
-  const organizationPlanRepo = new FakeOrganizationPlanRepo();
+  const registrationRepo = new FakeRegistrationRepo(planRepo, userRepo, personalSubscriptionRepo, emailVerificationTokenRepo);
   const organizationRepo = new FakeOrganizationRepo();
   const organizationSubscriptionRepo = new FakeOrganizationSubscriptionRepo();
   const membershipRepo = new FakeMembershipRepo(userRepo, organizationRepo);
@@ -140,6 +140,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
     userRepo,
     emailVerificationTokenRepo,
     personalSubscriptionRepo,
+    planRepo,
     deviceRepo,
     refreshTokenRepo,
     registrationRepo,
@@ -151,7 +152,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   const organizationService = new OrganizationService(
     userRepo,
     organizationRepo,
-    organizationPlanRepo,
+    planRepo,
     organizationSubscriptionRepo,
     membershipRepo,
     invitationRepo,
@@ -163,6 +164,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   const resourceService = new OrganizationResourceService(
     organizationRepo,
     organizationSubscriptionRepo,
+    planRepo,
     membershipRepo,
     folderRepo,
     resourceRepo,
@@ -180,6 +182,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
     syncNonceRepo,
     syncMutationRepo,
     personalSubscriptionRepo,
+    planRepo,
     async (fn) => fn({} as Queryable),
   );
   const auditWriter = new AuditWriter(new FakeAuditRepo());
@@ -205,7 +208,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
 
   app.get('/health', async () => ({ status: 'ok' }));
   await app.register(authRoutes, { authService, tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin });
-  await app.register(meRoutes, { tokenService, getUser, getSessionActive, userRepo, personalSubscriptionRepo, personalPlanRepo });
+  await app.register(meRoutes, { tokenService, getUser, getSessionActive, userRepo, personalSubscriptionRepo, planRepo });
   await app.register(personalRoutes, { tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin, deviceRepo, idempotencyService: new IdempotencyService(new FakeIdempotencyReceiptRepo(), async (fn) => fn({} as Queryable)), revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId), revokeDeviceInTx: (tx, userId, deviceId) => authService.revokeDeviceInTx(tx, userId, deviceId) });
   await app.register(organizationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin, organizationService, resourceService, organizationRepo, membershipRepo, auditWriter, idempotencyService: new IdempotencyService(new FakeIdempotencyReceiptRepo(), async (fn) => fn({} as Queryable)), sendInvitation: (o) => organizationService.sendInvitation(o) });
   await app.register(invitationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin, organizationService });
@@ -218,13 +221,13 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
     repos: {
       userRepo,
       emailVerificationTokenRepo,
-      personalPlanRepo,
+      planRepo,
+      featureDefRepo,
       personalSubscriptionRepo,
       deviceRepo,
       refreshTokenRepo,
       rateLimitRepo,
       registrationRepo,
-      organizationPlanRepo,
       organizationRepo,
       organizationSubscriptionRepo,
       membershipRepo,

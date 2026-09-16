@@ -14,7 +14,7 @@ import type { OrganizationRole } from '../domain/enums.js';
 import type {
   IUserRepo,
   IOrganizationRepo,
-  IOrganizationPlanRepo,
+  IPlanRepo,
   IOrganizationSubscriptionRepo,
   IMembershipRepo,
   IOrganizationInvitationRepo,
@@ -77,7 +77,7 @@ export class OrganizationService {
   constructor(
     private readonly userRepo: IUserRepo,
     private readonly organizationRepo: IOrganizationRepo,
-    private readonly organizationPlanRepo: IOrganizationPlanRepo,
+    private readonly planRepo: IPlanRepo,
     private readonly organizationSubscriptionRepo: IOrganizationSubscriptionRepo,
     private readonly membershipRepo: IMembershipRepo,
     private readonly invitationRepo: IOrganizationInvitationRepo,
@@ -115,22 +115,21 @@ export class OrganizationService {
     const trimmed = name.trim();
     if (!trimmed || Array.from(trimmed).length > 100) throw new ValidationError('invalid organization name');
 
-    const plan = await this.organizationPlanRepo.findByCodeForUpdate(tx, ORGANIZATION_FREE);
+    const plan = await this.planRepo.findByCodeInTx(tx, ORGANIZATION_FREE);
     if (!plan) throw new Error(`${ORGANIZATION_FREE} plan is missing; run migrations before create`);
+
+    const includedSeats = Number(plan.features.includedSeats ?? 0);
+    if (!Number.isInteger(includedSeats) || includedSeats < 1) {
+      throw new Error(`${ORGANIZATION_FREE} plan has no valid includedSeats feature`);
+    }
 
     const created = await this.organizationRepo.create(tx, { name: trimmed });
     const now = new Date();
     await this.organizationSubscriptionRepo.create(tx, {
       organizationId: created.id,
       planId: plan.id,
-      seatLimit: plan.includedSeats,
+      seatLimit: includedSeats,
       status: 'active',
-      entitlementSnapshot: {
-        includedSeats: plan.includedSeats,
-        maxSharedResources: plan.maxSharedResources,
-        sharedStorageQuotaBytes: plan.sharedStorageQuotaBytes,
-        allowedTemplateDatabaseTypes: plan.allowedTemplateDatabaseTypes,
-      },
       periodStartTime: now,
       periodEndTime: null,
     });

@@ -3,7 +3,7 @@ import { generateKeyPairSync } from 'crypto';
 import {
   FakeUserRepo,
   FakeOrganizationRepo,
-  FakeOrganizationPlanRepo,
+  FakePlanRepo,
   FakeOrganizationSubscriptionRepo,
   FakeMembershipRepo,
   FakeInvitationRepo,
@@ -18,7 +18,7 @@ import type { Queryable } from '../../src/repository/mysql/db.js';
 
 function makeService() {
   const organizationRepo = new FakeOrganizationRepo();
-  const organizationPlanRepo = new FakeOrganizationPlanRepo();
+  const planRepo = new FakePlanRepo();
   const organizationSubscriptionRepo = new FakeOrganizationSubscriptionRepo();
   const userRepo = new FakeUserRepo();
   const membershipRepo = new FakeMembershipRepo(userRepo, organizationRepo);
@@ -29,7 +29,7 @@ function makeService() {
   const svc = new OrganizationService(
     userRepo,
     organizationRepo,
-    organizationPlanRepo,
+    planRepo,
     organizationSubscriptionRepo,
     membershipRepo,
     invitationRepo,

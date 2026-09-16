@@ -6,31 +6,34 @@ import { requestId } from '../../src/middleware/requestId.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
 import { TokenService, type SigningKeys } from '../../src/service/tokenService.js';
 import { CONSOLE_SCOPES } from '../../src/domain/enums.js';
-import type { PersonalPlan } from '../../src/domain/entities.js';
+import type { PlanFeatureDef } from '../../src/domain/entities.js';
 import {
-  FakePersonalPlanRepo,
-  FakeOrganizationPlanRepo,
+  FakePlanRepo,
+  FakePlanFeatureDefRepo,
   FakeUserRepo,
   makeFreePlan,
+  makeProPlan,
   makeOrganizationFreePlan,
 } from '../helpers/fakeRepos.js';
 
 const SESSION = 'test-session-plans';
 
-const PRO: PersonalPlan = {
-  id: 9001,
-  code: 'pro',
-  name: 'Pro',
-  allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'],
-  maxDevices: 0,
-  maxConnectionMetas: 5000,
-  syncStorageBytes: 268435456,
-  maxSavedConnections: 100,
-  allowConnectionImport: true,
-  status: 'active',
-  createTime: new Date(),
-  updateTime: new Date(),
-};
+const DEF = (id: number, key: string, kind: PlanFeatureDef['kind'], valueType: PlanFeatureDef['valueType'], sortOrder: number): PlanFeatureDef => ({
+  id, key, kind, valueType, unit: null, sortOrder, label: { en: key, zh: key },
+});
+
+const FEATURE_DEFS: PlanFeatureDef[] = [
+  DEF(1, 'allowedDatabaseTypes', 'both', 'stringList', 10),
+  DEF(2, 'maxSavedConnections', 'personal', 'number', 20),
+  DEF(3, 'maxConnectionMetas', 'personal', 'number', 30),
+  DEF(4, 'syncStorageBytes', 'personal', 'bytes', 40),
+  DEF(5, 'allowConnectionImport', 'personal', 'bool', 50),
+  DEF(6, 'maxDevices', 'personal', 'number', 60),
+  DEF(7, 'allowedTemplateDatabaseTypes', 'organization', 'stringList', 10),
+  DEF(8, 'includedSeats', 'organization', 'number', 20),
+  DEF(9, 'maxSharedResources', 'organization', 'number', 30),
+  DEF(10, 'sharedStorageQuotaBytes', 'organization', 'bytes', 40),
+];
 
 async function buildApp(): Promise<{ app: FastifyInstance; tokenService: TokenService; userId: number }> {
   const app = Fastify({ logger: false });
@@ -48,8 +51,8 @@ async function buildApp(): Promise<{ app: FastifyInstance; tokenService: TokenSe
     tokenService,
     getUser: async (id: number) => userRepo.findById(id),
     getSessionActive: async () => true,
-    personalPlanRepo: new FakePersonalPlanRepo([makeFreePlan(), PRO]),
-    organizationPlanRepo: new FakeOrganizationPlanRepo([makeOrganizationFreePlan()]),
+    planRepo: new FakePlanRepo([makeFreePlan(), makeProPlan(), makeOrganizationFreePlan()]),
+    featureDefRepo: new FakePlanFeatureDefRepo(FEATURE_DEFS),
   };
   await app.register(plansRoutes, common);
   await app.register(consolePlansRoutes, common);
@@ -81,14 +84,13 @@ describe('plans routes', () => {
     expect(free.billing).toEqual({ unit: 'month', priceCents: 0 });
     expect(pro.billing).toEqual({ unit: 'month', priceCents: 9900 });
 
-    const engines = pro.features.find((f: any) => f.key === 'allowedDatabaseTypes');
-    expect(engines).toEqual({ key: 'allowedDatabaseTypes', type: 'stringList', value: ['mysql', 'postgresql', 'sqlite'] });
-    expect(pro.features.find((f: any) => f.key === 'allowConnectionImport')).toEqual({ key: 'allowConnectionImport', type: 'bool', value: true });
-    expect(pro.features.find((f: any) => f.key === 'syncStorageBytes')).toEqual({ key: 'syncStorageBytes', type: 'bytes', value: 268435456 });
+    expect(pro.features.find((f: any) => f.key === 'allowedDatabaseTypes')).toMatchObject({ type: 'stringList', value: ['mysql', 'postgresql', 'sqlite'] });
+    expect(pro.features.find((f: any) => f.key === 'allowConnectionImport')).toMatchObject({ type: 'bool', value: true });
+    expect(pro.features.find((f: any) => f.key === 'syncStorageBytes')).toMatchObject({ type: 'bytes', value: 268435456 });
 
     const org = body.organization[0];
     expect(org.billing).toEqual({ unit: 'seat-month', priceCents: 0 });
-    expect(org.features.find((f: any) => f.key === 'includedSeats')).toEqual({ key: 'includedSeats', type: 'number', value: 3 });
+    expect(org.features.find((f: any) => f.key === 'includedSeats')).toMatchObject({ type: 'number', value: 3 });
 
     await app.close();
   });

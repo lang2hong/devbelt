@@ -11,20 +11,18 @@ export class MysqlPaymentRepo implements IPaymentRepo {
     channel: PaymentChannel;
     channelTradeNo: string;
     amountCents: number;
-    rawNotification: string | null;
-    signatureVerified: boolean;
+    notifySummary: string | null;
     result: PaymentResult;
   }): Promise<Payment> {
     const [result] = await exec.query<any>(
-      `INSERT INTO payments (order_id, channel, channel_trade_no, amount_cents, raw_notification, signature_verified, result)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO payments (order_id, channel, channel_trade_no, amount_cents, notify_summary, result)
+       VALUES (?, ?, ?, ?, ?, ?)`,
       [
         input.orderId,
         input.channel,
         input.channelTradeNo,
         input.amountCents,
-        input.rawNotification,
-        input.signatureVerified ? 1 : 0,
+        input.notifySummary,
         input.result,
       ],
     );
@@ -50,8 +48,7 @@ function mapPayment(r: any): Payment {
     channel: r.channel as PaymentChannel,
     channelTradeNo: r.channel_trade_no,
     amountCents: Number(r.amount_cents),
-    rawNotification: r.raw_notification ?? null,
-    signatureVerified: r.signature_verified === 1 || r.signature_verified === true,
+    notifySummary: r.notify_summary ?? null,
     result: r.result as PaymentResult,
     createTime: new Date(r.create_time),
   };

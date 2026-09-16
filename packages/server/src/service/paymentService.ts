@@ -6,18 +6,17 @@ import {
   PaymentSignatureInvalidError,
   UnknownPlanError,
 } from '../domain/errors.js';
-import type { Order, PersonalPlan } from '../domain/entities.js';
+import type { Order } from '../domain/entities.js';
 import type { PaymentChannel } from '../domain/enums.js';
 import type {
   IOrderRepo,
   IPaymentRepo,
   IPaymentCallbackNonceRepo,
-  IPersonalPlanRepo,
+  IPlanRepo,
   IPersonalSubscriptionRepo,
 } from '../repository/interfaces.js';
 import type { Queryable, TxRunner } from '../repository/mysql/db.js';
 import type { AuditWriter } from './auditWriter.js';
-import { resolvePriceCents } from './pricing.js';
 import type { PaymentGateway, PrepayParams } from './paymentChannel.js';
 
 /** 下单后未支付的过期时间（P4 §状态机：30 分钟）。 */
@@ -43,7 +42,7 @@ export type CallbackOutcome =
 export interface OrderServiceDeps {
   orderRepo: IOrderRepo;
   paymentRepo: IPaymentRepo;
-  personalPlanRepo: IPersonalPlanRepo;
+  planRepo: IPlanRepo;
   personalSubscriptionRepo: IPersonalSubscriptionRepo;
   auditWriter: AuditWriter;
   runner: TxRunner;
@@ -62,7 +61,7 @@ export interface OrderServiceDeps {
 export class OrderService {
   private readonly orderRepo: IOrderRepo;
   private readonly paymentRepo: IPaymentRepo;
-  private readonly personalPlanRepo: IPersonalPlanRepo;
+  private readonly planRepo: IPlanRepo;
   private readonly personalSubscriptionRepo: IPersonalSubscriptionRepo;
   private readonly auditWriter: AuditWriter;
   private readonly runner: TxRunner;
@@ -72,7 +71,7 @@ export class OrderService {
   constructor(deps: OrderServiceDeps) {
     this.orderRepo = deps.orderRepo;
     this.paymentRepo = deps.paymentRepo;
-    this.personalPlanRepo = deps.personalPlanRepo;
+    this.planRepo = deps.planRepo;
     this.personalSubscriptionRepo = deps.personalSubscriptionRepo;
     this.auditWriter = deps.auditWriter;
     this.runner = deps.runner;
@@ -82,7 +81,11 @@ export class OrderService {
 
   /** 下单：优先复用同 (user, plan, channel) 未过期 pending 订单，否则建新订单并预下单。 */
   async createOrder(userId: number, planCode: string, channel: PaymentChannel, mode?: 'qr' | 'redirect'): Promise<CreateOrderResult> {
-    const amountCents = resolvePriceCents(planCode);
+    // 价格与状态均以库内 plan 为准（不接受前端金额）。
+    const plan = await this.planRepo.findByCode(planCode);
+    if (!plan || plan.kind !== 'personal' || plan.status !== 'active') throw new UnknownPlanError();
+    const amountCents = plan.priceCents;
+    const planVersion = plan.version;
     const gateway = this.gatewayFor(channel);
 
     // P1b：同人同套餐同渠道的未过期 pending 直接复用，避免双击/重试产生重复付款；
@@ -103,7 +106,7 @@ export class OrderService {
 
     // 新单固定 ORDER_EXPIRES_MS(=30m) > MIN_ORDER_LIFETIME_MS(=1m)，剩余寿命恒充足，无需重复守卫；
     // 复用路径的剩余寿命校验见上方 existing 分支。
-    await this.orderRepo.create({ orderNo, userId, planCode, amountCents, channel, expiresTime });
+    await this.orderRepo.create({ orderNo, userId, planCode, planVersion, amountCents, channel, expiresTime });
     const payParams = await gateway.createPayment({ orderNo, amountCents, expiresTime, mode });
 
     this.auditWriter.write({
@@ -161,8 +164,7 @@ export class OrderService {
           channel,
           channelTradeNo: parsed.channelTradeNo,
           amountCents: parsed.amountCents,
-          rawNotification: notification,
-          signatureVerified: true,
+          notifySummary: notification,
           result: 'failure',
         });
         return { kind: 'recorded' };
@@ -175,8 +177,7 @@ export class OrderService {
           channel,
           channelTradeNo: parsed.channelTradeNo,
           amountCents: parsed.amountCents,
-          rawNotification: notification,
-          signatureVerified: true,
+          notifySummary: notification,
           result: 'duplicate',
         });
         return { kind: 'duplicate' };
@@ -189,8 +190,7 @@ export class OrderService {
           channel,
           channelTradeNo: parsed.channelTradeNo,
           amountCents: parsed.amountCents,
-          rawNotification: notification,
-          signatureVerified: true,
+          notifySummary: notification,
           result: 'failure',
         });
         this.auditWriter.writeInTx(tx, {
@@ -214,8 +214,7 @@ export class OrderService {
           channel,
           channelTradeNo: parsed.channelTradeNo,
           amountCents: parsed.amountCents,
-          rawNotification: notification,
-          signatureVerified: true,
+          notifySummary: notification,
           result: 'success',
         });
       } catch (e) {
@@ -280,13 +279,13 @@ export class OrderService {
 
   /** 支付成功后重写订阅权益（同一事务内，锁订阅行 + 乐观版本 CAS）。 */
   private async applyEntitlementInTx(tx: Queryable, order: Order): Promise<void> {
-    const plan = await this.personalPlanRepo.findByCodeInTx(tx, order.planCode);
-    if (!plan || plan.status !== 'active') throw new UnknownPlanError();
+    const plan = await this.planRepo.findByCodeInTx(tx, order.planCode);
+    if (!plan || plan.kind !== 'personal' || plan.status !== 'active') throw new UnknownPlanError();
     const sub = await this.personalSubscriptionRepo.findByUserIdForUpdate(tx, order.userId);
     if (!sub) throw new EntityNotFoundError('subscription', order.userId);
 
-    const snapshot = personalEntitlementSnapshot(plan);
     // P2-C：续购从「当前到期日」往后延，不覆盖存量剩余时长（now 与既有到期日取较晚者）。
+    // 权益不落库（派生），此处只换 plan 与到期时间。
     const now = new Date();
     const base = sub.periodEndTime && sub.periodEndTime > now ? sub.periodEndTime : now;
     const periodEndTime = new Date(base.getTime() + ENTITLEMENT_PERIOD_MS);
@@ -294,7 +293,6 @@ export class OrderService {
       id: sub.id,
       planId: plan.id,
       status: 'active',
-      entitlementSnapshot: snapshot,
       periodEndTime,
       expectedVersion: sub.version,
     });
@@ -312,18 +310,6 @@ export class OrderService {
     if (!order || order.userId !== userId) throw new OrderNotFoundError();
     return order;
   }
-}
-
-/** 从个人 plan 构造冻结权益快照（与注册/admin 调整口径一致）。 */
-export function personalEntitlementSnapshot(plan: PersonalPlan): Record<string, unknown> {
-  return {
-    allowedDatabaseTypes: plan.allowedDatabaseTypes,
-    maxDevices: plan.maxDevices,
-    maxConnectionMetas: plan.maxConnectionMetas,
-    syncStorageBytes: plan.syncStorageBytes,
-    maxSavedConnections: plan.maxSavedConnections,
-    allowConnectionImport: plan.allowConnectionImport,
-  };
 }
 
 /** 唯一键冲突判定（MySQL ER_DUP_ENTRY）。 */

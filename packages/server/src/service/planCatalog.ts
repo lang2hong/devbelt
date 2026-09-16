@@ -1,22 +1,18 @@
 /**
- * 套餐目录（/api/plans）：把 personal_plans / organization_plans 上架档位映射为
- * 对外的 PlanDto 列表。
+ * 套餐目录（/api/plans）：从库内 `plans` + 纵表特性组装对外 PlanDto。
  *
  * ## 动态特征描述符
  *
- * 特征不做固定字段暴露，而是 `features: FeatureDto[]`（key/type/value）。前端按 key
- * 渲染标签与格式，**新增特征维度不需要改接口形状**；未知 key 优雅降级（显示原始值）。
- * `type` 供前端选择格式（bytes → MiB、bool → 是/否、stringList → 标签列表）。
+ * 特征以 `{ key, type, value, label }` 暴露；type 来自 `plan_feature_defs.value_type`，
+ * 前端据此格式化，新增特征维度无需改接口形状。未知 key 优雅降级（无 label 时仅 key）。
  *
  * ## 数值语义
  *
- * 配额列以 `0` 表示**不限**，原样透出，由前端文案表达（不要在服务端折算成别的东西，
- * 否则会丢掉「0=不限」这一约定）。引擎白名单（allowedDatabaseTypes）是动态字符串
- * 列表：新增 es/redis/sls 只是值变化；**能否真正解锁**另由客户端引擎门禁决定。
+ * 配额列以 `0` 表示**不限**，原样透出（消费方以 `if (limit > 0)` 判定）。价格来自
+ * `plans.price_cents`；0 = 免费（个人）或待定价（组织，无自助下单路径）。
  */
-import type { OrganizationPlan, PersonalPlan } from '../domain/entities.js';
-import type { IPersonalPlanRepo, IOrganizationPlanRepo } from '../repository/interfaces.js';
-import { organizationSeatPriceCents, planPriceCents } from './pricing.js';
+import type { Plan, PlanFeatureDef } from '../domain/entities.js';
+import type { IPlanRepo, IPlanFeatureDefRepo } from '../repository/interfaces.js';
 
 /** 特征值类型：决定前端的格式化方式。 */
 export type FeatureType = 'bool' | 'number' | 'bytes' | 'stringList' | 'enum';
@@ -25,6 +21,7 @@ export interface FeatureDto {
   key: string;
   type: FeatureType;
   value: boolean | number | string | string[];
+  label?: { en: string; zh: string };
 }
 
 export type BillingUnit = 'month' | 'seat-month';
@@ -45,47 +42,40 @@ export interface PlanCatalog {
   organization: PlanDto[];
 }
 
-export function personalPlanDto(plan: PersonalPlan): PlanDto {
+export function planDto(plan: Plan, defs: Map<string, PlanFeatureDef>): PlanDto {
+  const features: FeatureDto[] = [];
+  const seen = new Set<string>();
+  // 先按 defs 顺序（仅本 kind 适用的 def），再补 plan.features 里没有 def 的键（降级）。
+  for (const def of [...defs.values()].sort((a, b) => a.sortOrder - b.sortOrder)) {
+    if (def.kind !== 'both' && def.kind !== plan.kind) continue;
+    if (!(def.key in plan.features)) continue;
+    features.push({ key: def.key, type: def.valueType, value: plan.features[def.key] as FeatureDto['value'], label: def.label });
+    seen.add(def.key);
+  }
+  for (const [key, value] of Object.entries(plan.features)) {
+    if (seen.has(key)) continue;
+    features.push({ key, type: inferType(value), value: value as FeatureDto['value'] });
+  }
   return {
     code: plan.code,
     name: plan.name,
-    billing: { unit: 'month', priceCents: planPriceCents(plan.code) },
-    features: [
-      { key: 'allowedDatabaseTypes', type: 'stringList', value: plan.allowedDatabaseTypes },
-      { key: 'maxSavedConnections', type: 'number', value: plan.maxSavedConnections },
-      { key: 'maxConnectionMetas', type: 'number', value: plan.maxConnectionMetas },
-      { key: 'syncStorageBytes', type: 'bytes', value: plan.syncStorageBytes },
-      { key: 'allowConnectionImport', type: 'bool', value: plan.allowConnectionImport },
-      { key: 'maxDevices', type: 'number', value: plan.maxDevices },
-    ],
+    billing: { unit: plan.billingUnit, priceCents: plan.priceCents },
+    features,
   };
 }
 
-export function organizationPlanDto(plan: OrganizationPlan): PlanDto {
+export async function buildPlanCatalog(planRepo: IPlanRepo, defRepo: IPlanFeatureDefRepo): Promise<PlanCatalog> {
+  const [plans, defList] = await Promise.all([planRepo.listActive(), defRepo.listAll()]);
+  const defs = new Map(defList.map((d) => [d.key, d]));
   return {
-    code: plan.code,
-    name: plan.name,
-    billing: { unit: 'seat-month', priceCents: organizationSeatPriceCents(plan.code) },
-    features: [
-      { key: 'includedSeats', type: 'number', value: plan.includedSeats },
-      { key: 'maxSharedResources', type: 'number', value: plan.maxSharedResources },
-      { key: 'sharedStorageQuotaBytes', type: 'bytes', value: plan.sharedStorageQuotaBytes },
-      { key: 'allowedTemplateDatabaseTypes', type: 'stringList', value: plan.allowedTemplateDatabaseTypes },
-    ],
+    personal: plans.filter((p) => p.kind === 'personal').map((p) => planDto(p, defs)),
+    organization: plans.filter((p) => p.kind === 'organization').map((p) => planDto(p, defs)),
   };
 }
 
-/** 拉取上架档位并组装目录（个人 + 组织）。 */
-export async function buildPlanCatalog(
-  personalPlanRepo: IPersonalPlanRepo,
-  organizationPlanRepo: IOrganizationPlanRepo,
-): Promise<PlanCatalog> {
-  const [personal, organization] = await Promise.all([
-    personalPlanRepo.listActive(),
-    organizationPlanRepo.listActive(),
-  ]);
-  return {
-    personal: personal.map(personalPlanDto),
-    organization: organization.map(organizationPlanDto),
-  };
+function inferType(value: unknown): FeatureType {
+  if (typeof value === 'boolean') return 'bool';
+  if (typeof value === 'number') return 'number';
+  if (Array.isArray(value)) return 'stringList';
+  return 'enum';
 }

@@ -13,7 +13,7 @@ import { WechatPayGateway } from '../../src/service/wechatPay.js';
 import { resolveWechatCredentials } from '../../src/service/paymentCredentials.js';
 import type { PaymentChannel } from '../../src/domain/enums.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
-import type { Order, Payment, PersonalPlan, PersonalSubscription } from '../../src/domain/entities.js';
+import type { Order, Payment } from '../../src/domain/entities.js';
 
 /**
  * 回调路由 raw-body parser 的字节保真（P4 P2）：证明「经 Fastify content-type parser」
@@ -21,13 +21,7 @@ import type { Order, Payment, PersonalPlan, PersonalSubscription } from '../../s
  * 与 service 级手工 Buffer.concat 测试互补：那测试只证明 Node Buffer；本测试证明路由层。
  */
 
-const PLAN: PersonalPlan = {
-  id: 2, code: 'pro', name: 'Pro',
-  allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'],
-  maxDevices: 0, maxConnectionMetas: 5000, syncStorageBytes: 268435456,
-  maxSavedConnections: 100, allowConnectionImport: true,
-  status: 'active', createTime: new Date(), updateTime: new Date(),
-};
+
 
 class CaptureGateway implements PaymentGateway {
   readonly channel: PaymentChannel;
@@ -51,12 +45,12 @@ const noopPaymentRepo = {
   findByChannelTradeNo: async () => undefined,
   create: async () => ({} as Payment),
 };
-const noopPlanRepo = { findByCodeInTx: async () => PLAN, findByCode: async () => PLAN, findById: async () => PLAN };
+const noopPlanRepo = { findByCodeInTx: async () => undefined, findByCode: async () => undefined, findById: async () => undefined, findByIdInTx: async () => undefined, listActive: async () => [], listAll: async () => [], replaceFeaturesInTx: async () => {}, updateMetaInTx: async () => true };
 const noopSubRepo = {
   findByUserIdForUpdate: async () => undefined,
   findByUserId: async () => undefined,
   findByUserIdInTx: async () => undefined,
-  create: async () => ({} as PersonalSubscription),
+  create: async () => ({} as never),
   update: async () => true,
 };
 
@@ -67,7 +61,7 @@ async function build(gateway: PaymentGateway, allowStubSignature = true) {
   const orderService = new OrderService({
     orderRepo: noopOrderRepo as never,
     paymentRepo: noopPaymentRepo as never,
-    personalPlanRepo: noopPlanRepo as never,
+    planRepo: noopPlanRepo as never,
     personalSubscriptionRepo: noopSubRepo as never,
     auditWriter: new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as never),
     runner: async (fn) => fn({} as Queryable),
@@ -208,7 +202,7 @@ describe('payment callback route raw bytes', () => {
     const orderService = new OrderService({
       orderRepo: noopOrderRepo as never,
       paymentRepo: noopPaymentRepo as never,
-      personalPlanRepo: noopPlanRepo as never,
+      planRepo: noopPlanRepo as never,
       personalSubscriptionRepo: noopSubRepo as never,
       auditWriter: new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as never),
       runner: async (fn) => fn({} as Queryable),
@@ -247,7 +241,7 @@ describe('payment callback route raw bytes', () => {
     const orderService = new OrderService({
       orderRepo: noopOrderRepo as never,
       paymentRepo: noopPaymentRepo as never,
-      personalPlanRepo: noopPlanRepo as never,
+      planRepo: noopPlanRepo as never,
       personalSubscriptionRepo: noopSubRepo as never,
       auditWriter: new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as never),
       runner: async (fn) => fn({} as Queryable),

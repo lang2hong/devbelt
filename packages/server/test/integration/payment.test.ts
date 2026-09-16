@@ -5,7 +5,7 @@ import { migrations } from '../../src/repository/mysql/migrations/index.js';
 import { MysqlOrderRepo } from '../../src/repository/mysql/orderRepo.js';
 import { MysqlPaymentRepo } from '../../src/repository/mysql/paymentRepo.js';
 import { MysqlUserRepo } from '../../src/repository/mysql/userRepo.js';
-import { MysqlPersonalPlanRepo } from '../../src/repository/mysql/personalPlanRepo.js';
+import { MysqlPlanRepo } from '../../src/repository/mysql/planRepo.js';
 import { MysqlPersonalSubscriptionRepo } from '../../src/repository/mysql/personalSubscriptionRepo.js';
 import { OrderService } from '../../src/service/paymentService.js';
 import { MemoryPaymentGateway, signMemoryCallback } from '../../src/service/paymentChannel.js';
@@ -24,14 +24,13 @@ async function makeUser(db: MysqlDb): Promise<number> {
   );
   // 注册流程（registrationRepo）恒建 Free 订阅；此处直建 user，须补订阅以满足
   // applyEntitlementInTx 的前置（真实用户必有订阅）。
-  const planRepo = new MysqlPersonalPlanRepo(() => db);
+  const planRepo = new MysqlPlanRepo(() => db);
   const subRepo = new MysqlPersonalSubscriptionRepo(() => db);
   const plan = await planRepo.findByCode('free');
   await subRepo.create({
     userId: user.id,
     planId: plan!.id,
     status: 'active',
-    entitlementSnapshot: {},
     periodStartTime: new Date(),
     periodEndTime: null,
   });
@@ -62,6 +61,7 @@ describe.skipIf(!URL)('payment repo (real MySQL)', () => {
         orderNo: `ord-${Date.now()}-${Math.random().toString(16).slice(2)}`,
         userId,
         planCode: 'pro',
+        planVersion: 1,
         amountCents: 9900,
         channel: 'wechat',
         expiresTime: new Date(Date.now() + 30 * 60 * 1000),
@@ -84,8 +84,7 @@ describe.skipIf(!URL)('payment repo (real MySQL)', () => {
           channel: 'wechat',
           channelTradeNo: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
           amountCents: 9900,
-          rawNotification: '{}',
-          signatureVerified: true,
+          notifySummary: '{}',
           result: 'success',
         });
       });
@@ -108,6 +107,7 @@ describe.skipIf(!URL)('payment repo (real MySQL)', () => {
         orderNo: `ord-${Date.now()}-${Math.random().toString(16).slice(2)}`,
         userId,
         planCode: 'pro',
+        planVersion: 1,
         amountCents: 9900,
         channel: 'wechat',
         expiresTime: new Date(Date.now() + 30 * 60 * 1000),
@@ -153,6 +153,7 @@ describe.skipIf(!URL)('payment repo (real MySQL)', () => {
         orderNo: `ord-${Date.now()}-${Math.random().toString(16).slice(2)}`,
         userId,
         planCode: 'pro',
+        planVersion: 1,
         amountCents: 9900,
         channel: 'wechat',
         expiresTime: new Date(Date.now() + 30 * 60 * 1000),
@@ -172,8 +173,7 @@ describe.skipIf(!URL)('payment repo (real MySQL)', () => {
           channel: 'wechat',
           channelTradeNo: tradeNo,
           amountCents: 9900,
-          rawNotification: '{}',
-          signatureVerified: true,
+          notifySummary: '{}',
           result: 'success',
         });
       });
@@ -186,8 +186,7 @@ describe.skipIf(!URL)('payment repo (real MySQL)', () => {
             channel: 'wechat',
             channelTradeNo: tradeNo,
             amountCents: 9900,
-            rawNotification: '{}',
-            signatureVerified: true,
+            notifySummary: '{}',
             result: 'success',
           });
         }),
@@ -205,13 +204,13 @@ describe.skipIf(!URL)('payment repo (real MySQL)', () => {
       const userId = await makeUser(db);
       const orderRepo = new MysqlOrderRepo(() => db);
       const paymentRepo = new MysqlPaymentRepo();
-      const planRepo = new MysqlPersonalPlanRepo(() => db);
+      const planRepo = new MysqlPlanRepo(() => db);
       const subRepo = new MysqlPersonalSubscriptionRepo(() => db);
       const auditWriter = new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as any);
       const svc = new OrderService({
         orderRepo,
         paymentRepo,
-        personalPlanRepo: planRepo,
+        planRepo,
         personalSubscriptionRepo: subRepo,
         auditWriter,
         runner: (fn) => withTransaction(db, fn),
@@ -229,7 +228,8 @@ describe.skipIf(!URL)('payment repo (real MySQL)', () => {
       expect(order!.status).toBe('fulfilled');
       const sub = await subRepo.findByUserId(userId);
       expect(sub!.planId).toBeGreaterThan(0);
-      expect(sub!.entitlementSnapshot).toMatchObject({ maxConnectionMetas: 5000 });
+      const proPlan = await planRepo.findByCode('pro');
+      expect(proPlan!.features.maxConnectionMetas).toBe(5000);
 
       // 重复回调（同 trade_no）→ duplicate，不再推进/改写。
       const dup = await svc.handleCallback('wechat', cbBody, headers);
@@ -247,13 +247,13 @@ describe.skipIf(!URL)('payment repo (real MySQL)', () => {
       const userId = await makeUser(db);
       const orderRepo = new MysqlOrderRepo(() => db);
       const paymentRepo = new MysqlPaymentRepo();
-      const planRepo = new MysqlPersonalPlanRepo(() => db);
+      const planRepo = new MysqlPlanRepo(() => db);
       const subRepo = new MysqlPersonalSubscriptionRepo(() => db);
       const auditWriter = new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as any);
       const svc = new OrderService({
         orderRepo,
         paymentRepo,
-        personalPlanRepo: planRepo,
+        planRepo,
         personalSubscriptionRepo: subRepo,
         auditWriter,
         runner: (fn) => withTransaction(db, fn),
@@ -298,13 +298,13 @@ describe.skipIf(!URL)('payment repo (real MySQL)', () => {
       const userB = await makeUser(db);
       const orderRepo = new MysqlOrderRepo(() => db);
       const paymentRepo = new MysqlPaymentRepo();
-      const planRepo = new MysqlPersonalPlanRepo(() => db);
+      const planRepo = new MysqlPlanRepo(() => db);
       const subRepo = new MysqlPersonalSubscriptionRepo(() => db);
       const auditWriter = new AuditWriter({ insert: async () => ({}), insertInTx: async () => ({}) } as any);
       const svc = new OrderService({
         orderRepo,
         paymentRepo,
-        personalPlanRepo: planRepo,
+        planRepo,
         personalSubscriptionRepo: subRepo,
         auditWriter,
         runner: (fn) => withTransaction(db, fn),

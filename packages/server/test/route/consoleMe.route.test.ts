@@ -14,7 +14,7 @@ import { csrfCookieName } from '../../src/middleware/cookies.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 import {
   FakeUserRepo,
-  FakePersonalPlanRepo,
+  FakePlanRepo,
   FakePersonalSubscriptionRepo,
   FakeMembershipRepo,
   FakeOrganizationRepo,
@@ -33,7 +33,7 @@ async function buildApp(): Promise<{ app: FastifyInstance; tokenService: TokenSe
   const userRepo = new FakeUserRepo();
   await userRepo.create('me@b.com', 'hash', 'Alice');
   const personalSubscriptionRepo = new FakePersonalSubscriptionRepo();
-  const personalPlanRepo = new FakePersonalPlanRepo();
+  const planRepo = new FakePlanRepo();
   const membershipRepo = new FakeMembershipRepo(userRepo, new FakeOrganizationRepo());
 
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
@@ -52,7 +52,7 @@ async function buildApp(): Promise<{ app: FastifyInstance; tokenService: TokenSe
     consoleOrigin: 'http://localhost:5173',
     userRepo,
     personalSubscriptionRepo,
-    personalPlanRepo,
+    planRepo,
     membershipRepo,
   });
 
