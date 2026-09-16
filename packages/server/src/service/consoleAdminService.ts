@@ -231,7 +231,8 @@ export class ConsoleAdminService {
       eventType: 'admin.plan_feature_def.updated', result: 'success', actorUserId, actorRole: 'platform_admin',
       targetType: 'plan_feature_def', targetId: input.key, reason,
     });
-    const def = await this.featureDefRepo.findByKey(input.key);
+    // 必须走事务连接回读：池连接看不到本事务未提交的 INSERT。
+    const def = await this.featureDefRepo.findByKeyInTx(tx, input.key);
     if (!def) throw new EntityNotFoundError('plan feature def', input.key);
     return def;
   }

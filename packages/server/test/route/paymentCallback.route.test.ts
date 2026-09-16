@@ -45,7 +45,7 @@ const noopPaymentRepo = {
   findByChannelTradeNo: async () => undefined,
   create: async () => ({} as Payment),
 };
-const noopPlanRepo = { findByCodeInTx: async () => undefined, findByCode: async () => undefined, findById: async () => undefined, findByIdInTx: async () => undefined, listActive: async () => [], listAll: async () => [], saveInTx: async () => true };
+const noopPlanRepo = { findByCodeInTx: async () => undefined, findByCode: async () => undefined, findById: async () => undefined, findByIdInTx: async () => undefined, listActive: async () => [], listAll: async () => [], saveInTx: async () => true, invalidate: () => {} };
 const noopSubRepo = {
   findByUserIdForUpdate: async () => undefined,
   findByUserId: async () => undefined,

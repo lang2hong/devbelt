@@ -56,6 +56,7 @@ class FPlanRepo {
   async listActive() { return [PLAN]; }
   async listAll() { return [PLAN]; }
   async saveInTx() { return true; }
+  invalidate() {}
 }
 
 class FSubsRepo {

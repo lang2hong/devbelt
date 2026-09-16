@@ -33,6 +33,7 @@ const name = ref('');
 const priceYuan = ref(0);
 const sortOrder = ref(0);
 const status = ref<'active' | 'archived'>('active');
+const reason = ref('admin console plan edit');
 const features = ref<EditableFeature[]>([]);
 
 const idem = useIdempotencyKey();
@@ -113,7 +114,7 @@ async function save(): Promise<void> {
     status: status.value,
     features: features.value.map((f) => ({ featureKey: f.key, value: featureValue(f) })),
     expectedVersion: plan.version,
-    reason: 'admin console plan edit',
+    reason: reason.value.trim() || 'admin console plan edit',
   };
   try {
     const csrf = await ensureCsrf();
@@ -170,6 +171,9 @@ onMounted(load);
 
         <label>排序</label>
         <input v-model.number="sortOrder" type="number" />
+
+        <label>变更原因（审计）</label>
+        <input v-model="reason" type="text" maxlength="500" />
 
         <label>状态</label>
         <select v-model="status">

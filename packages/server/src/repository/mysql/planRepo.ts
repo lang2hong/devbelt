@@ -60,6 +60,13 @@ export class MysqlPlanRepo implements IPlanRepo {
     return this.queryPlans('ORDER BY p.kind, p.sort_order, p.id', []);
   }
 
+  /** 清除进程内缓存（管理端提交后调用）。 */
+  invalidate(planId: number): void {
+    const cached = this.byId.get(planId);
+    if (cached) this.byCode.delete(cached.code);
+    this.byId.delete(planId);
+  }
+
   async saveInTx(
     exec: Queryable,
     input: {
@@ -101,9 +108,12 @@ export class MysqlPlanRepo implements IPlanRepo {
     if (rows.length === 0) return [];
     const features = await this.loadFeatures(q, rows.map((r: any) => Number(r.id)));
     const plans = rows.map((r: any) => mapPlan(r, features.get(Number(r.id)) ?? {}));
-    for (const p of plans) {
-      this.byId.set(p.id, p);
-      this.byCode.set(p.code, p);
+    // 仅池级（已提交）读回填缓存；事务连接可能读到未提交值，写入共享缓存会在回滚后留幻影。
+    if (exec === undefined) {
+      for (const p of plans) {
+        this.byId.set(p.id, p);
+        this.byCode.set(p.code, p);
+      }
     }
     return plans;
   }
@@ -139,6 +149,11 @@ export class MysqlPlanFeatureDefRepo implements IPlanFeatureDefRepo {
 
   async findByKey(key: string): Promise<PlanFeatureDef | undefined> {
     const [rows] = await this.db().query<any[]>('SELECT * FROM plan_feature_defs WHERE feature_key = ?', [key]);
+    return rows[0] ? mapDef(rows[0]) : undefined;
+  }
+
+  async findByKeyInTx(exec: Queryable, key: string): Promise<PlanFeatureDef | undefined> {
+    const [rows] = await exec.query<any[]>('SELECT * FROM plan_feature_defs WHERE feature_key = ?', [key]);
     return rows[0] ? mapDef(rows[0]) : undefined;
   }
 

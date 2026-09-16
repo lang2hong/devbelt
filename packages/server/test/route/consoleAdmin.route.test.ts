@@ -125,6 +125,7 @@ async function build(rateLimit = false) {
     idempotencyService: new IdempotencyService(idemRepo, runner),
     adminService,
     cursorService: new CursorService(Buffer.alloc(32, 7)),
+    planRepo,
     serverVersion: '1.0.0',
     consoleApiVersion: '1',
   });

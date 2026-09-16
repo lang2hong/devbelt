@@ -14,6 +14,7 @@ import { ValidationError } from '../domain/errors.js';
 import { auditDto } from '../service/auditSerialize.js';
 import { organizationIdParam } from './schemas.js';
 import type { Order, Invoice, Plan } from '../domain/entities.js';
+import type { IPlanRepo } from '../repository/interfaces.js';
 import type { InvoiceStatus } from '../domain/enums.js';
 import { PAYMENT_CHANNELS } from '../service/paymentChannel.js';
 
@@ -38,6 +39,8 @@ export interface ConsoleAdminRouteOptions {
   idempotencyService: IdempotencyService;
   adminService: ConsoleAdminService;
   cursorService: CursorService;
+  /** 套餐缓存：PATCH 提交后失效（闭合「提交前失效」竞态窗口）。 */
+  planRepo: IPlanRepo;
   serverVersion: string;
   consoleApiVersion: string;
 }
@@ -500,6 +503,8 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
             return { status: 200, body: { plan: adminPlanDto(plan) } };
           },
         });
+        // 提交后失效：避免窗口内并发读者用「提交前旧值」回填缓存而长期滞留。
+        opts.planRepo.invalidate(planId);
         reply.code(result.status).send(result.body);
       });
 

@@ -13,6 +13,8 @@ export interface IPlanRepo {
   listActive(): Promise<Plan[]>;
   /** 全部套餐（管理端，含 archived）。 */
   listAll(): Promise<Plan[]>;
+  /** 清除某套餐的进程内缓存（管理端提交后调用，闭合「提交前失效」竞态窗口）。 */
+  invalidate(planId: number): void;
   /**
    * 管理端保存（元数据 + 特性整组替换，同一 CAS）：`WHERE id=? AND version=expectedVersion`，
    * 命中则写入并 `version+1`（一次性），返回是否命中。特性键不存在即抛错（不静默丢特性）。
@@ -29,6 +31,8 @@ export interface IPlanRepo {
 export interface IPlanFeatureDefRepo {
   listAll(): Promise<PlanFeatureDef[]>;
   findByKey(key: string): Promise<PlanFeatureDef | undefined>;
+  /** 事务内按 key 读（写事务内回读必须走同一连接，池读看不到未提交行）。 */
+  findByKeyInTx(exec: Queryable, key: string): Promise<PlanFeatureDef | undefined>;
   upsertInTx(exec: Queryable, input: {
     key: string; kind: PlanFeatureDef['kind']; label: PlanFeatureDef['label'];
     valueType: PlanFeatureDef['valueType']; unit: string | null; sortOrder: number;

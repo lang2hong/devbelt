@@ -388,6 +388,7 @@ export async function createApp() {
     idempotencyService,
     adminService,
     cursorService,
+    planRepo,
     serverVersion: '1.0.0',
     consoleApiVersion: '1',
   });

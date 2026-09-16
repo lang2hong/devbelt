@@ -352,6 +352,8 @@ export class FakePlanRepo implements IPlanRepo {
     return [...this.plans];
   }
 
+  invalidate(): void { /* in-memory: nothing to invalidate */ }
+
   async saveInTx(_exec: Queryable, input: {
     id: number; name: string; priceCents: number; billingUnit: Plan['billingUnit'];
     sortOrder: number; status: Plan['status'];
@@ -378,6 +380,10 @@ export class FakePlanFeatureDefRepo implements IPlanFeatureDefRepo {
   }
 
   async findByKey(key: string): Promise<PlanFeatureDef | undefined> {
+    return this.defs.find((d) => d.key === key);
+  }
+
+  async findByKeyInTx(_exec: Queryable, key: string): Promise<PlanFeatureDef | undefined> {
     return this.defs.find((d) => d.key === key);
   }
 

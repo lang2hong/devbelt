@@ -114,6 +114,7 @@ class FakePlanRepo implements IPlanRepo {
   async listActive(): Promise<Plan[]> { return this.plans.filter((p) => p.status === 'active'); }
   async listAll(): Promise<Plan[]> { return [...this.plans]; }
   async saveInTx(): Promise<boolean> { return true; }
+  invalidate(): void {}
 }
 
 class FakeSubsRepo implements IPersonalSubscriptionRepo {

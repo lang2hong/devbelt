@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MysqlPlanRepo } from '../../src/repository/mysql/planRepo.js';
+import { MysqlPlanRepo, MysqlPlanFeatureDefRepo } from '../../src/repository/mysql/planRepo.js';
 
 /** 极简脚本化 exec（saveInTx 只用 exec.query）。 */
 function scriptedExec(affected: number[]) {
@@ -55,10 +55,44 @@ describe('MysqlPlanRepo.saveInTx', () => {
   });
 });
 
-describe('MysqlPlanRepo unsaved instance', () => {
-  it('does not share cache across instances', async () => {
-    const a = new MysqlPlanRepo(() => ({} as never));
-    const b = new MysqlPlanRepo(() => ({} as never));
-    expect(a).not.toBe(b);
+describe('MysqlPlanRepo cache isolation and invalidation', () => {
+  it('cache is per-instance: a second instance still queries the DB', async () => {
+    const planRow = { id: 1, code: 'pro', kind: 'personal', name: 'Pro', price_cents: 9900, billing_unit: 'month', sort_order: 0, status: 'active', version: 0, create_time: new Date(), update_time: new Date() };
+    let calls = 0;
+    const makeDb = () => ({ query: async (sql: string) => { calls += 1; return [sql.includes('FROM plans') ? [planRow] : [], undefined] as any; } });
+
+    const a = new MysqlPlanRepo(() => makeDb() as never);
+    await a.findById(1);
+    const afterA = calls;
+
+    const b = new MysqlPlanRepo(() => makeDb() as never);
+    await b.findById(1);
+    expect(calls).toBeGreaterThan(afterA); // b 未共享 a 的缓存
+  });
+
+  it('invalidate clears the entry so the next read hits the DB', async () => {
+    const planRow = { id: 1, code: 'pro', kind: 'personal', name: 'Pro', price_cents: 9900, billing_unit: 'month', sort_order: 0, status: 'active', version: 0, create_time: new Date(), update_time: new Date() };
+    let calls = 0;
+    const db = { query: async (sql: string) => { calls += 1; return [sql.includes('FROM plans') ? [planRow] : [], undefined] as any; } };
+    const repo = new MysqlPlanRepo(() => db as never);
+    await repo.findById(1);
+    const afterFirst = calls;
+    await repo.findById(1);
+    expect(calls).toBe(afterFirst); // 缓存命中
+    repo.invalidate(1);
+    await repo.findById(1);
+    expect(calls).toBeGreaterThan(afterFirst); // 失效后走库
+  });
+});
+
+describe('MysqlPlanFeatureDefRepo.findByKeyInTx', () => {
+  it('reads through the passed exec, never the pool', async () => {
+    const pool = { query: async () => { throw new Error('pool must not be used inside a tx'); } };
+    const repo = new MysqlPlanFeatureDefRepo(() => pool as never);
+    const exec = {
+      query: async () => [[{ id: 1, feature_key: 'maxSavedConnections', kind: 'personal', label_json: { en: 'Saved', zh: '保存' }, value_type: 'number', unit: 'count', sort_order: 0 }], undefined] as any,
+    };
+    const def = await repo.findByKeyInTx(exec as never, 'maxSavedConnections');
+    expect(def?.key).toBe('maxSavedConnections');
   });
 });
