@@ -423,9 +423,9 @@ async function revoke(inv: Invitation): Promise<void> {
 <style scoped>
 .page { max-width: 680px; margin: 0 auto; }
 .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
-h2 { font-size: 20px; font-weight: 700; color: #0f172a; margin: 0 0 4px; }
-h3 { font-size: 15px; font-weight: 600; color: #0f172a; margin: 0 0 12px; }
-.card { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; }
+h2 { font-size: 20px; font-weight: 700; color: var(--c-text); margin: 0 0 4px; }
+h3 { font-size: 15px; font-weight: 600; color: var(--c-text); margin: 0 0 12px; }
+.card { background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; }
 .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .list { list-style: none; padding: 0; margin: 0; }
 .item { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eaeef2; }
@@ -434,15 +434,15 @@ h3 { font-size: 15px; font-weight: 600; color: #0f172a; margin: 0 0 12px; }
 .mem-actions { display: flex; gap: 8px; }
 .invite { display: flex; gap: 8px; margin-bottom: 12px; }
 .gap { margin: 0 8px; }
-.back { color: #0969da; font-size: 13px; cursor: pointer; }
-input, select { box-sizing: border-box; padding: 8px 10px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; }
+.back { color: var(--c-accent); font-size: 13px; cursor: pointer; }
+input, select { box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--c-border-strong); border-radius: 6px; font-size: 14px; }
 input { flex: 1; }
-.btn { background: #0969da; color: #fff; border: none; padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.btn { background: var(--c-accent); color: var(--c-surface); border: none; padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
 .btn:disabled { opacity: 0.6; cursor: default; }
-.btn.danger { background: #cf222e; }
-.btn.secondary { background: #f6f8fa; color: #24292f; border: 1px solid #d0d7de; }
-.link { background: none; border: none; color: #0969da; cursor: pointer; padding: 0; }
-.muted { color: #57606a; font-size: 13px; }
-.error { color: #cf222e; font-size: 13px; }
+.btn.danger { background: var(--c-danger); }
+.btn.secondary { background: var(--c-surface-muted); color: var(--c-text); border: 1px solid var(--c-border-strong); }
+.link { background: none; border: none; color: var(--c-accent); cursor: pointer; padding: 0; }
+.muted { color: var(--c-text-muted); font-size: 13px; }
+.error { color: var(--c-danger); font-size: 13px; }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
 </style>

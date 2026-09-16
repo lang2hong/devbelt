@@ -361,21 +361,21 @@ onMounted(async () => {
 
 <style scoped>
 .page { max-width: 620px; margin: 0 auto; }
-.card { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; }
-h2 { font-size: 20px; font-weight: 700; color: #0f172a; }
-h3 { font-size: 15px; font-weight: 600; color: #0f172a; margin: 0 0 12px; }
-.row { margin: 8px 0; color: #24292f; }
-label { display: block; font-size: 13px; color: #57606a; margin: 12px 0 4px; }
+.card { background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; }
+h2 { font-size: 20px; font-weight: 700; color: var(--c-text); }
+h3 { font-size: 15px; font-weight: 600; color: var(--c-text); margin: 0 0 12px; }
+.row { margin: 8px 0; color: var(--c-text); }
+label { display: block; font-size: 13px; color: var(--c-text-muted); margin: 12px 0 4px; }
 .channels { display: flex; gap: 16px; margin: 4px 0 8px; }
-.radio { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: #24292f; }
-.btn { margin-top: 16px; background: #0969da; color: #fff; border: none; padding: 9px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.radio { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--c-text); }
+.btn { margin-top: 16px; background: var(--c-accent); color: var(--c-surface); border: none; padding: 9px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
 .btn:disabled { opacity: 0.6; cursor: default; }
 .btn.link { display: inline-block; text-decoration: none; }
-.btn.secondary { background: #f6f8fa; color: #24292f; border: 1px solid #d0d7de; font-weight: 500; }
-.qr { width: 220px; height: 220px; border: 1px solid #d0d7de; border-radius: 8px; }
-.link { display: inline-block; margin-left: 12px; color: #0969da; font-size: 13px; }
-.error { color: #cf222e; font-size: 13px; }
-.ok { color: #1a7f37; font-size: 13px; }
-.warn { color: #9a6700; font-size: 13px; }
-.muted { color: #57606a; font-size: 13px; }
+.btn.secondary { background: var(--c-surface-muted); color: var(--c-text); border: 1px solid var(--c-border-strong); font-weight: 500; }
+.qr { width: 220px; height: 220px; border: 1px solid var(--c-border-strong); border-radius: 8px; }
+.link { display: inline-block; margin-left: 12px; color: var(--c-accent); font-size: 13px; }
+.error { color: var(--c-danger); font-size: 13px; }
+.ok { color: var(--c-success-text); font-size: 13px; }
+.warn { color: var(--c-warn-text); font-size: 13px; }
+.muted { color: var(--c-text-muted); font-size: 13px; }
 </style>

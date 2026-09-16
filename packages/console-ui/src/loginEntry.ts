@@ -1,3 +1,4 @@
+import './styles/theme.css';
 import { createApp } from 'vue';
 import LoginView from './pages/LoginView.vue';
 

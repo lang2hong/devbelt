@@ -25,8 +25,15 @@ const links = [
 </template>
 
 <style scoped>
-.admin-nav { display: flex; gap: 16px; margin: 8px 0 20px; padding: 8px 0; border-bottom: 1px solid #eaeef2; }
-.admin-nav a { color: #57606a; text-decoration: none; font-size: 14px; padding: 2px 0; }
-.admin-nav a:hover { color: #0969da; }
-.admin-nav a.on { color: #0969da; font-weight: 600; border-bottom: 2px solid #0969da; }
+.admin-nav {
+  display: flex; gap: 4px; margin: 0 0 20px; padding: 4px;
+  background: var(--c-surface-muted); border: 1px solid var(--c-border);
+  border-radius: var(--r-md); width: fit-content;
+}
+.admin-nav a {
+  color: var(--c-text-muted); text-decoration: none; font-size: 13px;
+  padding: 6px 14px; border-radius: var(--r-sm);
+}
+.admin-nav a:hover { background: var(--c-surface); color: var(--c-text); }
+.admin-nav a.on { color: var(--c-text); background: var(--c-surface); box-shadow: var(--shadow-sm); font-weight: 600; }
 </style>

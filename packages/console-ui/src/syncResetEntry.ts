@@ -1,3 +1,4 @@
+import './styles/theme.css';
 import { createApp } from 'vue';
 import SyncResetView from './pages/SyncResetView.vue';
 

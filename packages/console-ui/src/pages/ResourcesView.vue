@@ -101,14 +101,14 @@ watch(() => props.organizationId, () => void load());
 <style scoped>
 .page { max-width: 680px; margin: 0 auto; }
 .head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 16px; }
-h2 { font-size: 20px; font-weight: 700; color: #0f172a; margin: 0; }
-h3 { font-size: 15px; font-weight: 600; color: #0f172a; margin: 0 0 12px; }
-.card { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; }
+h2 { font-size: 20px; font-weight: 700; color: var(--c-text); margin: 0; }
+h3 { font-size: 15px; font-weight: 600; color: var(--c-text); margin: 0 0 12px; }
+.card { background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; }
 .list { list-style: none; padding: 0; margin: 0; }
 .item { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eaeef2; }
 .item:last-child { border-bottom: none; }
-.back { color: #0969da; cursor: pointer; font-size: 14px; }
-.link { background: none; border: none; color: #0969da; cursor: pointer; padding: 0; }
-.muted { color: #57606a; font-size: 13px; }
-.error { color: #cf222e; font-size: 13px; }
+.back { color: var(--c-accent); cursor: pointer; font-size: 14px; }
+.link { background: none; border: none; color: var(--c-accent); cursor: pointer; padding: 0; }
+.muted { color: var(--c-text-muted); font-size: 13px; }
+.error { color: var(--c-danger); font-size: 13px; }
 </style>

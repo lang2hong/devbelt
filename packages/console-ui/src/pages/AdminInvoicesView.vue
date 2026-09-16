@@ -188,25 +188,25 @@ async function confirm(): Promise<void> {
 
 <style scoped>
 .page { max-width: 1200px; margin: 0 auto; }
-h2 { font-size: 20px; font-weight: 700; color: #0f172a; }
+h2 { font-size: 20px; font-weight: 700; color: var(--c-text); }
 .bar { display: flex; gap: 8px; margin: 16px 0; flex-wrap: wrap; }
-input, select { box-sizing: border-box; padding: 8px 10px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; }
-label { display: block; font-size: 13px; color: #57606a; margin: 8px 0 4px; }
-.table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #d0d7de; border-radius: 8px; }
+input, select { box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--c-border-strong); border-radius: 6px; font-size: 14px; }
+label { display: block; font-size: 13px; color: var(--c-text-muted); margin: 8px 0 4px; }
+.table { width: 100%; border-collapse: collapse; background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; }
 th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #eaeef2; font-size: 13px; }
-th { white-space: nowrap; color: #57606a; font-weight: 600; }
+th { white-space: nowrap; color: var(--c-text-muted); font-weight: 600; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
-.badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; background: #ddf4ff; color: #0969da; }
-.badge.rejected, .badge.failed { background: #ffebe9; color: #cf222e; }
-.badge.issued { background: #dafbe1; color: #1a7f37; }
-.badge.requested { background: #fff8c5; color: #9a6700; }
+.badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; background: var(--c-accent-bg); color: var(--c-accent); }
+.badge.rejected, .badge.failed { background: #ffebe9; color: var(--c-danger); }
+.badge.issued { background: #dafbe1; color: var(--c-success-text); }
+.badge.requested { background: var(--c-warn-bg); color: var(--c-warn-text); }
 .actions { display: flex; gap: 6px; }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
-.btn { background: #0969da; color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; }
+.btn { background: var(--c-accent); color: var(--c-surface); border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; }
 .btn:disabled { opacity: 0.6; cursor: default; }
 .btn.small { padding: 5px 10px; font-size: 13px; }
-.btn.secondary { background: #f6f8fa; color: #24292f; border: 1px solid #d0d7de; }
-.muted { color: #57606a; font-size: 13px; }
-.error { color: #cf222e; font-size: 13px; }
+.btn.secondary { background: var(--c-surface-muted); color: var(--c-text); border: 1px solid var(--c-border-strong); }
+.muted { color: var(--c-text-muted); font-size: 13px; }
+.error { color: var(--c-danger); font-size: 13px; }
 .load-more { margin: 16px 0; }
 </style>

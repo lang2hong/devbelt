@@ -162,33 +162,33 @@ function readToken(): string | null {
   max-width: 480px;
   margin: 80px auto;
   padding: 28px 32px;
-  background: #ffffff;
-  border: 1px solid #d0d7de;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border-strong);
   border-radius: 8px;
 }
 
 h1 {
   font-size: 20px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--c-text);
   margin: 0 0 4px;
 }
 
 .muted {
-  color: #57606a;
+  color: var(--c-text-muted);
   font-size: 14px;
   line-height: 1.7;
   margin: 12px 0 0;
 }
 
 .success {
-  color: #1a7f37;
+  color: var(--c-success-text);
   font-size: 15px;
   margin: 12px 0 0;
 }
 
 .error {
-  color: #cf222e;
+  color: var(--c-danger);
   font-size: 15px;
   margin: 12px 0 0;
 }
@@ -200,8 +200,8 @@ h1 {
 
 button.primary,
 a.button.primary {
-  background: #0969da;
-  color: #ffffff;
+  background: var(--c-accent);
+  color: var(--c-surface);
   border: none;
   padding: 12px 32px;
   border-radius: 6px;

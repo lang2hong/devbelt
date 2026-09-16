@@ -91,8 +91,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .modal-mask { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); display: flex; align-items: flex-start; justify-content: center; padding-top: 15vh; z-index: 1000; }
-.modal { background: #fff; border-radius: 8px; padding: 20px 24px; min-width: min(360px, 90vw); max-width: 90vw; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2); }
+.modal { background: var(--c-surface); border-radius: 8px; padding: 20px 24px; min-width: min(360px, 90vw); max-width: 90vw; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2); }
 .modal { outline: none; }
-.modal-title { margin: 0 0 12px; font-size: 16px; font-weight: 600; color: #0f172a; }
+.modal-title { margin: 0 0 12px; font-size: 16px; font-weight: 600; color: var(--c-text); }
 .modal-body { display: flex; flex-direction: column; gap: 8px; }
 </style>

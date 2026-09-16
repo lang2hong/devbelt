@@ -21,8 +21,8 @@ const c = content[props.code] ?? content[404];
 
 <style scoped>
 .page { max-width: 620px; margin: 120px auto; text-align: center; }
-h1 { font-size: 56px; font-weight: 700; color: #d0d7de; margin: 0; }
-h2 { font-size: 22px; color: #0f172a; }
-p { color: #57606a; }
-a { color: #0969da; }
+h1 { font-size: 56px; font-weight: 700; color: var(--c-border-strong); margin: 0; }
+h2 { font-size: 22px; color: var(--c-text); }
+p { color: var(--c-text-muted); }
+a { color: var(--c-accent); }
 </style>

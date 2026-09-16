@@ -108,17 +108,17 @@ async function request(): Promise<void> {
 
 <style scoped>
 .page { max-width: 620px; margin: 0 auto; }
-h2 { font-size: 20px; font-weight: 700; color: #0f172a; }
-.card { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; }
-h3 { font-size: 15px; font-weight: 600; color: #0f172a; margin: 0 0 12px; }
-label { display: block; font-size: 13px; color: #57606a; margin: 12px 0 4px; }
-input, select { width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; }
-.btn { margin-top: 16px; background: #0969da; color: #fff; border: none; padding: 9px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+h2 { font-size: 20px; font-weight: 700; color: var(--c-text); }
+.card { background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; }
+h3 { font-size: 15px; font-weight: 600; color: var(--c-text); margin: 0 0 12px; }
+label { display: block; font-size: 13px; color: var(--c-text-muted); margin: 12px 0 4px; }
+input, select { width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--c-border-strong); border-radius: 6px; font-size: 14px; }
+.btn { margin-top: 16px; background: var(--c-accent); color: var(--c-surface); border: none; padding: 9px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
 .btn:disabled { opacity: 0.6; cursor: default; }
 .list { list-style: none; padding: 0; margin: 0; }
-.item { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 14px 16px; margin-bottom: 10px; }
+.item { background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; padding: 14px 16px; margin-bottom: 10px; }
 .meta { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-.badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; font-weight: 600; background: #ddf4ff; color: #0969da; }
-.muted { color: #57606a; font-size: 13px; }
-.error { color: #cf222e; font-size: 13px; }
+.badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; font-weight: 600; background: var(--c-accent-bg); color: var(--c-accent); }
+.muted { color: var(--c-text-muted); font-size: 13px; }
+.error { color: var(--c-danger); font-size: 13px; }
 </style>

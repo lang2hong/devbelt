@@ -41,10 +41,10 @@ onMounted(async () => {
 
 <style scoped>
 .page { max-width: 620px; margin: 0 auto; }
-h2 { font-size: 20px; font-weight: 700; color: #0f172a; }
-.table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #d0d7de; border-radius: 8px; }
+h2 { font-size: 20px; font-weight: 700; color: var(--c-text); }
+.table { width: 100%; border-collapse: collapse; background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; }
 th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid #eaeef2; font-size: 14px; }
-th { width: 200px; color: #57606a; font-weight: 600; }
-.muted { color: #57606a; font-size: 13px; }
-.error { color: #cf222e; font-size: 13px; }
+th { width: 200px; color: var(--c-text-muted); font-weight: 600; }
+.muted { color: var(--c-text-muted); font-size: 13px; }
+.error { color: var(--c-danger); font-size: 13px; }
 </style>
