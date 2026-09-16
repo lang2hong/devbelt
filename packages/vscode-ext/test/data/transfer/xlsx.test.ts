@@ -2,6 +2,27 @@ import { describe, expect, it } from 'vitest';
 import { deflateRawSync } from 'zlib';
 import { MAX_ENTRY_BYTES, columnName, parseXlsx, serializeXlsx, writeXlsx } from '../../../src/data/transfer/xlsx';
 
+/** 从 ZIP 中央目录读取指定条目记录的 CRC 字段（用于交叉校验流式与内存版）。 */
+function centralEntryCrc(buf: Buffer, name: string): number | undefined {
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= 0; i -= 1) {
+    if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('EOCD not found');
+  const count = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+  for (let n = 0; n < count; n += 1) {
+    if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error('bad central directory record');
+    const crc = buf.readUInt32LE(p + 16);
+    const nameLen = buf.readUInt16LE(p + 28);
+    const extraLen = buf.readUInt16LE(p + 30);
+    const commentLen = buf.readUInt16LE(p + 32);
+    if (buf.subarray(p + 46, p + 46 + nameLen).toString('utf8') === name) return crc;
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return undefined;
+}
+
 /**
  * xlsx 读写自实现的回归测试。
  *
@@ -302,5 +323,20 @@ describe('xlsx 流式写（writeXlsx）', () => {
     const buf = Buffer.concat(chunks.map((c) => Buffer.from(c)));
     expect(buf.subarray(0, 4).toString('latin1')).toBe('PK\x03\x04');
     expect(parseXlsx(buf)).toEqual(rows);
+  });
+
+  it('流式产物的工作表 CRC 与内存版逐字节一致（锁定增量 CRC）', async () => {
+    const columns = ['id', 'name'];
+    const rows = [{ id: 1, name: 'a' }, { id: 2, name: 'b' }, { id: 3, name: 'c' }];
+    const chunks: Uint8Array[] = [];
+    await writeXlsx(columns, async (onRows) => { await onRows(rows); }, (c) => { chunks.push(c); });
+    const streamed = Buffer.concat(chunks.map((c) => Buffer.from(c)));
+    const memory = serializeXlsx(columns, rows);
+
+    const sheet = 'xl/worksheets/sheet1.xml';
+    const streamedCrc = centralEntryCrc(streamed, sheet);
+    const memoryCrc = centralEntryCrc(memory, sheet);
+    expect(streamedCrc).toBeDefined();
+    expect(streamedCrc).toBe(memoryCrc);
   });
 });

@@ -121,6 +121,7 @@ function zip(entries: ZipEntry[]): Buffer {
   }
 
   const directory = Buffer.concat(central);
+  assertZip32(offset, 'central directory offset');
   const end = Buffer.alloc(22);
   end.writeUInt32LE(0x06054b50, 0);
   end.writeUInt16LE(0, 4); // this disk
@@ -407,14 +408,17 @@ export async function writeXlsx(
 ): Promise<void> {
   let offset = 0;
   const central: Buffer[] = [];
-  const totalEntries = staticEntries().length + 1;
+  const statics = staticEntries();
+  const totalEntries = statics.length + 1;
 
   const writeBuf = async (buf: Buffer): Promise<void> => {
     await write(buf);
     offset += buf.length;
+    // 输出偏移（含中央目录偏移）一旦溢出立即失败，不等写完整表。
+    assertZip32(offset, 'output offset');
   };
 
-  for (const entry of staticEntries()) {
+  for (const entry of statics) {
     const name = Buffer.from(entry.name, 'utf8');
     const compressed = deflateRawSync(entry.data);
     const crc = crc32(entry.data);
@@ -439,9 +443,13 @@ export async function writeXlsx(
   const consumer = (async (): Promise<void> => {
     for await (const chunk of deflate) {
       compressedSize += (chunk as Buffer).length;
+      // 压缩后尺寸越界即抛，避免把 >4GiB 的工作表先完整落盘再报错。
+      assertZip32(compressedSize, 'worksheet compressed size');
       await writeBuf(Buffer.from(chunk as Buffer));
     }
   })();
+  // 失败/取消路径会 destroy(deflate)，consumer 迭代随之结束或拒绝；吞掉拒绝避免 unhandledRejection。
+  consumer.catch(() => {});
 
   let crcState = -1;
   let uncompressedSize = 0;
@@ -449,18 +457,29 @@ export async function writeXlsx(
     const buf = Buffer.from(text, 'utf8');
     crcState = crc32Update(crcState, buf);
     uncompressedSize += buf.length;
+    // 未压缩尺寸越界即抛（fail-fast）。
+    assertZip32(uncompressedSize, 'worksheet uncompressed size');
     if (!deflate.write(buf)) await once(deflate, 'drain');
   };
 
-  await feed(sheetHeader(columns));
-  let rowIndex = 0;
-  await forEachPage(async (rows) => {
-    for (const row of rows) {
-      await feed(sheetRowXml(columns, row, rowIndex));
-      rowIndex += 1;
-    }
-  });
-  await feed(SHEET_FOOTER);
+  let aborted = false;
+  try {
+    await feed(sheetHeader(columns));
+    let rowIndex = 0;
+    await forEachPage(async (rows) => {
+      for (const row of rows) {
+        await feed(sheetRowXml(columns, row, rowIndex));
+        rowIndex += 1;
+      }
+    });
+    await feed(SHEET_FOOTER);
+  } catch (e) {
+    aborted = true;
+    throw e;
+  } finally {
+    // 上游抛错（分页取消/写入失败/越界）时释放 zlib 原生句柄，避免反复取消大表导出累积句柄。
+    if (aborted) deflate.destroy();
+  }
   deflate.end();
   await consumer;
 
