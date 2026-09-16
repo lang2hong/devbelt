@@ -115,10 +115,12 @@ function orgDto(r: AdminOrgRow) {
 const ORDER_STATUSES: readonly string[] = ['pending', 'paid', 'fulfilled', 'failed', 'refunded', 'expired'];
 const INVOICE_STATUSES: readonly string[] = ['requested', 'issued', 'rejected', 'failed'];
 
-function adminOrderDto(o: Order) {
+function adminOrderDto(o: Order & { userEmail?: string | null; userDisplayName?: string | null }) {
   return {
     orderNo: o.orderNo,
     userId: String(o.userId),
+    userEmail: o.userEmail ?? null,
+    userDisplayName: o.userDisplayName ?? null,
     planCode: o.planCode,
     amountCents: o.amountCents,
     channel: o.channel,

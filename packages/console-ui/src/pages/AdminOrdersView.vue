@@ -166,11 +166,12 @@ async function confirmRefund(): Promise<void> {
 
     <table v-if="state === 'ready'" class="table">
       <thead>
-        <tr><th>订单号</th><th>用户ID</th><th>套餐</th><th>金额</th><th>渠道</th><th>状态</th><th>渠道单号</th><th>创建时间</th><th>过期时间</th><th>支付时间</th><th></th></tr>
+        <tr><th>订单号</th><th>支付人</th><th>用户ID</th><th>套餐</th><th>金额</th><th>渠道</th><th>状态</th><th>渠道单号</th><th>创建时间</th><th>过期时间</th><th>支付时间</th><th></th></tr>
       </thead>
       <tbody>
         <tr v-for="o in orders" :key="o.orderNo">
           <td class="mono">{{ o.orderNo }}</td>
+          <td>{{ o.userDisplayName || '—' }}<br /><span class="muted mono">{{ o.userEmail || '—' }}</span></td>
           <td class="mono">{{ o.userId }}</td>
           <td>{{ o.planCode }}</td>
           <td>¥{{ fmtCents(o.amountCents) }}</td>
@@ -184,7 +185,7 @@ async function confirmRefund(): Promise<void> {
             <button v-if="o.status === 'paid' || o.status === 'fulfilled'" class="btn small danger" :disabled="busy" @click="openRefund(o)">退款</button>
           </td>
         </tr>
-        <tr v-if="orders.length === 0"><td colspan="11" class="muted">无匹配订单。</td></tr>
+        <tr v-if="orders.length === 0"><td colspan="12" class="muted">无匹配订单。</td></tr>
       </tbody>
     </table>
 

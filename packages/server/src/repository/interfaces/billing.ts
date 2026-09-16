@@ -56,8 +56,8 @@ export interface IOrderRepo {
   }): Promise<boolean>;
   /** 用户订单历史（keyset cursor，DESC by id）。 */
   listByUser(userId: number, cursor: number | undefined, limit: number): Promise<Order[]>;
-  /** 平台订单列表（跨用户，多维过滤，keyset cursor DESC by id）。 */
-  listAll(input: AdminOrderFilter): Promise<Order[]>;
+  /** 平台订单列表（跨用户，多维过滤，keyset cursor DESC by id）；附支付人邮箱/昵称供运营排查。 */
+  listAll(input: AdminOrderFilter): Promise<Array<Order & { userEmail?: string | null; userDisplayName?: string | null }>>;
   /** 同 (user, plan, channel) 未过期 pending 订单（下单去重：复用原订单，防重复付款，§P4）。 */
   findPendingByUserAndPlan(userId: number, planCode: string, channel: Order['channel']): Promise<Order | undefined>;
   /** 过期 pending 订单 sweep：把超时未支付的 pending 订单批量置为 expired，返回受影响行数。 */

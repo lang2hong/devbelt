@@ -316,6 +316,8 @@ export async function exportAudit(
 export interface AdminOrder {
   orderNo: string;
   userId: string;
+  userEmail: string | null;
+  userDisplayName: string | null;
   planCode: string;
   amountCents: number;
   channel: string;

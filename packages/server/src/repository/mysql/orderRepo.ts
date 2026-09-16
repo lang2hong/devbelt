@@ -69,43 +69,50 @@ export class MysqlOrderRepo implements IOrderRepo {
     return rows.map(mapOrder);
   }
 
-  async listAll(input: AdminOrderFilter): Promise<Order[]> {
+  async listAll(input: AdminOrderFilter): Promise<Array<Order & { userEmail?: string | null; userDisplayName?: string | null }>> {
     const where: string[] = [];
     const params: unknown[] = [];
     if (input.userId !== undefined) {
-      where.push('user_id = ?');
+      where.push('o.user_id = ?');
       params.push(input.userId);
     }
     if (input.status !== undefined) {
-      where.push('status = ?');
+      where.push('o.status = ?');
       params.push(input.status);
     }
     if (input.channel !== undefined) {
-      where.push('channel = ?');
+      where.push('o.channel = ?');
       params.push(input.channel);
     }
     if (input.planCode !== undefined) {
-      where.push('plan_code = ?');
+      where.push('o.plan_code = ?');
       params.push(input.planCode);
     }
     if (input.createdFrom) {
-      where.push('create_time >= ?');
+      where.push('o.create_time >= ?');
       params.push(input.createdFrom);
     }
     if (input.createdTo) {
-      where.push('create_time <= ?');
+      where.push('o.create_time <= ?');
       params.push(input.createdTo);
     }
     if (input.cursor !== undefined) {
-      where.push('id < ?');
+      where.push('o.id < ?');
       params.push(input.cursor);
     }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    // LEFT JOIN users 取「支付人」邮箱/昵称；运营排查用，缺失（异常数据）时为 null。
     const [rows] = await this.db().query<any[]>(
-      `SELECT * FROM orders ${whereSql} ORDER BY id DESC LIMIT ${Number(input.limit)}`,
+      `SELECT o.*, u.email AS user_email, u.display_name AS user_display_name
+       FROM orders o LEFT JOIN users u ON u.id = o.user_id
+       ${whereSql} ORDER BY o.id DESC LIMIT ${Number(input.limit)}`,
       params,
     );
-    return rows.map(mapOrder);
+    return rows.map((r: any) => ({
+      ...mapOrder(r),
+      userEmail: r.user_email ?? null,
+      userDisplayName: r.user_display_name ?? null,
+    }));
   }
 
   async findPendingByUserAndPlan(userId: number, planCode: string, channel: PaymentChannel): Promise<Order | undefined> {
