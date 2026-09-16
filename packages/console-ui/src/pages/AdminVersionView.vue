@@ -25,7 +25,10 @@ onMounted(async () => {
 <template>
   <section class="page">
     <AdminNav />
-    <h2>系统状态</h2>
+    <header class="head">
+      <h2>系统状态</h2>
+      <p class="sub">版本与运行状态。</p>
+    </header>
     <p class="muted" v-if="state === 'loading'">加载中…</p>
     <p class="error" v-if="state === 'error'">加载失败，请刷新重试。</p>
     <table v-if="state === 'ready' && version" class="table">
@@ -40,11 +43,14 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.page { max-width: 620px; margin: 0 auto; }
+.page { max-width: 960px; margin: 0 auto; }
 h2 { font-size: 20px; font-weight: 700; color: var(--c-text); }
 .table { width: 100%; border-collapse: collapse; background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; }
 th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid #eaeef2; font-size: 14px; }
 th { width: 200px; color: var(--c-text-muted); font-weight: 600; }
 .muted { color: var(--c-text-muted); font-size: 13px; }
 .error { color: var(--c-danger); font-size: 13px; }
+.head { margin-bottom: 16px; }
+.head h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+.sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
 </style>

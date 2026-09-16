@@ -130,7 +130,10 @@ async function confirm(): Promise<void> {
 <template>
   <section class="page">
     <AdminNav />
-    <h2>发票</h2>
+    <header class="head">
+      <h2>发票</h2>
+      <p class="sub">平台发票处理。</p>
+    </header>
 
     <div class="bar">
       <input v-model="userId" type="text" placeholder="用户ID" @keyup.enter="search" />
@@ -187,7 +190,7 @@ async function confirm(): Promise<void> {
 </template>
 
 <style scoped>
-.page { max-width: 1200px; margin: 0 auto; }
+.page { max-width: 960px; margin: 0 auto; }
 h2 { font-size: 20px; font-weight: 700; color: var(--c-text); }
 .bar { display: flex; gap: 8px; margin: 16px 0; flex-wrap: wrap; }
 input, select { box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--c-border-strong); border-radius: 6px; font-size: 14px; }
@@ -209,4 +212,7 @@ th { white-space: nowrap; color: var(--c-text-muted); font-weight: 600; }
 .muted { color: var(--c-text-muted); font-size: 13px; }
 .error { color: var(--c-danger); font-size: 13px; }
 .load-more { margin: 16px 0; }
+.head { margin-bottom: 16px; }
+.head h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+.sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
 </style>

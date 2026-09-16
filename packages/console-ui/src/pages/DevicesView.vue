@@ -72,7 +72,10 @@ async function confirmRevoke(d: Device): Promise<void> {
 
 <template>
   <section class="page">
-    <h2>设备</h2>
+    <header class="head">
+      <h2>设备</h2>
+      <p class="sub">查看并撤销已登录的设备。</p>
+    </header>
     <p class="muted" v-if="state === 'loading'">加载中…</p>
     <p class="error" v-if="state === 'error'">加载失败，请刷新重试。</p>
 
@@ -98,7 +101,7 @@ async function confirmRevoke(d: Device): Promise<void> {
 </template>
 
 <style scoped>
-.page { max-width: 620px; margin: 0 auto; }
+.page { max-width: 720px; margin: 0 auto; }
 h2 { font-size: 20px; font-weight: 700; color: var(--c-text); }
 .list { list-style: none; padding: 0; margin: 16px 0 0; }
 .item { display: flex; align-items: center; justify-content: space-between; background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; padding: 14px 16px; margin-bottom: 10px; }
@@ -110,4 +113,7 @@ h2 { font-size: 20px; font-weight: 700; color: var(--c-text); }
 .confirm { display: flex; align-items: center; gap: 8px; }
 .muted { color: var(--c-text-muted); font-size: 13px; }
 .error { color: var(--c-danger); font-size: 13px; }
+.head { margin-bottom: 16px; }
+.head h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+.sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
 </style>

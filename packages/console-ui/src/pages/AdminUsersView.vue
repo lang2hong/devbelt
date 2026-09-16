@@ -179,7 +179,10 @@ async function confirmSub(): Promise<void> {
 <template>
   <section class="page">
     <AdminNav />
-    <h2>用户</h2>
+    <header class="head">
+      <h2>用户</h2>
+      <p class="sub">平台用户与订阅管理。</p>
+    </header>
 
     <div class="bar">
       <input v-model="emailExact" type="email" placeholder="邮箱精确" @keyup.enter="search" />
@@ -268,4 +271,7 @@ th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #eaeef2;
 .muted { color: var(--c-text-muted); font-size: 13px; }
 .error { color: var(--c-danger); font-size: 13px; }
 .load-more { margin: 16px 0; }
+.head { margin-bottom: 16px; }
+.head h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+.sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
 </style>

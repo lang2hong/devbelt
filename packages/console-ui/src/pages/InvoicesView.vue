@@ -68,7 +68,10 @@ async function request(): Promise<void> {
 
 <template>
   <section class="page">
-    <h2>发票</h2>
+    <header class="head">
+      <h2>发票</h2>
+      <p class="sub">申请与查看发票。</p>
+    </header>
 
     <div class="card">
       <h3>申请发票</h3>
@@ -107,7 +110,7 @@ async function request(): Promise<void> {
 </template>
 
 <style scoped>
-.page { max-width: 620px; margin: 0 auto; }
+.page { max-width: 720px; margin: 0 auto; }
 h2 { font-size: 20px; font-weight: 700; color: var(--c-text); }
 .card { background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; }
 h3 { font-size: 15px; font-weight: 600; color: var(--c-text); margin: 0 0 12px; }
@@ -121,4 +124,7 @@ input, select { width: 100%; box-sizing: border-box; padding: 9px 12px; border: 
 .badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; font-weight: 600; background: var(--c-accent-bg); color: var(--c-accent); }
 .muted { color: var(--c-text-muted); font-size: 13px; }
 .error { color: var(--c-danger); font-size: 13px; }
+.head { margin-bottom: 16px; }
+.head h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+.sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
 </style>
