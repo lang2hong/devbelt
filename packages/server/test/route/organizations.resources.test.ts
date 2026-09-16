@@ -80,17 +80,27 @@ describe('organization resource/folder routes', () => {
 
     const extToken = (userId: number) => tokenService.signAccessToken({ userId, aud: 'extension', scope: ['organization'], sessionId: 's1', sessionVersion: 0 });
 
-    async function seedAdmin(): Promise<{ userId: number; orgId: number }> {
-      const user = await userRepo.create('res-admin@b.com', 'hash', undefined);
+    async function seedOrg(): Promise<number> {
       const org = await organizationRepo.create({} as Queryable, { name: 'Acme' });
-      await membershipRepo.create({} as Queryable, {
-        organizationId: org.id, userId: user.id, role: 'admin', status: 'active',
-        invitedByUserId: null, joinedTime: new Date(), removedTime: null,
-      });
-      return { userId: user.id, orgId: org.id };
+      return org.id;
     }
 
-    return { app, extToken, seedAdmin, resourceCalls };
+    async function addMember(orgId: number, role: 'admin' | 'member', email: string): Promise<number> {
+      const user = await userRepo.create(email, 'hash', undefined);
+      await membershipRepo.create({} as Queryable, {
+        organizationId: orgId, userId: user.id, role, status: 'active',
+        invitedByUserId: null, joinedTime: new Date(), removedTime: null,
+      });
+      return user.id;
+    }
+
+    async function seedAdmin(): Promise<{ userId: number; orgId: number }> {
+      const orgId = await seedOrg();
+      const userId = await addMember(orgId, 'admin', 'res-admin@b.com');
+      return { userId, orgId };
+    }
+
+    return { app, extToken, seedAdmin, seedOrg, addMember, resourceCalls, userRepo };
   }
 
   it('GET /folders 返回 DTO 化目录列表', async () => {
@@ -136,14 +146,33 @@ describe('organization resource/folder routes', () => {
     await b.app.close();
   });
 
-  it('非成员访问被拒（授权门禁）', async () => {
+  it('有效用户但非该组织成员 → 404 ORGANIZATION_NOT_FOUND（防枚举）', async () => {
     const b = await build();
-    const { orgId } = await b.seedAdmin();
-    const outsider = await b.app.inject({
+    const orgId = await b.seedOrg();
+    await b.addMember(orgId, 'admin', 'admin-a@b.com');
+    // 另一组织的成员访问本组织：有效用户、无本组织 membership → 404（不泄露组织是否存在）。
+    const otherOrgUser = await b.addMember(await b.seedOrg(), 'admin', 'outsider@b.com');
+    const res = await b.app.inject({
       method: 'GET', url: `/api/organizations/${orgId}/folders`,
-      headers: { authorization: `Bearer ${await b.extToken(999)}` },
+      headers: { authorization: `Bearer ${await b.extToken(otherOrgUser)}` },
     });
-    expect(outsider.statusCode).toBeGreaterThanOrEqual(400);
+    expect(res.statusCode).toBe(404);
+    expect(res.json().code).toBe('ORGANIZATION_NOT_FOUND');
+    await b.app.close();
+  });
+
+  it('成员但权限不足 → 403 FORBIDDEN', async () => {
+    const b = await build();
+    const orgId = await b.seedOrg();
+    await b.addMember(orgId, 'admin', 'admin-b@b.com');
+    const memberUserId = await b.addMember(orgId, 'member', 'member-b@b.com');
+    // member 角色无 resource.delete 权限 → 403（区别于非成员的 404）。
+    const res = await b.app.inject({
+      method: 'DELETE', url: `/api/organizations/${orgId}/resources/9`,
+      headers: { authorization: `Bearer ${await b.extToken(memberUserId)}` },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe('FORBIDDEN');
     await b.app.close();
   });
 });
