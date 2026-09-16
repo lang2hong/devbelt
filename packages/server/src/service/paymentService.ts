@@ -81,7 +81,7 @@ export class OrderService {
   }
 
   /** 下单：优先复用同 (user, plan, channel) 未过期 pending 订单，否则建新订单并预下单。 */
-  async createOrder(userId: number, planCode: string, channel: PaymentChannel): Promise<CreateOrderResult> {
+  async createOrder(userId: number, planCode: string, channel: PaymentChannel, mode?: 'qr' | 'redirect'): Promise<CreateOrderResult> {
     const amountCents = resolvePriceCents(planCode);
     const gateway = this.gatewayFor(channel);
 
@@ -91,7 +91,7 @@ export class OrderService {
     // P1：复用前校验剩余寿命。渠道有效期只能取整分钟向下取整，若剩余不足 1m 就无法表示
     // 不越过本地 deadline 的外部窗口 —— 此时不复用、改建新单（新单有完整 30m 寿命）。
     if (existing && existing.expiresTime.getTime() - Date.now() >= MIN_ORDER_LIFETIME_MS) {
-      const payParams = await gateway.createPayment({ orderNo: existing.orderNo, amountCents: existing.amountCents, expiresTime: existing.expiresTime });
+      const payParams = await gateway.createPayment({ orderNo: existing.orderNo, amountCents: existing.amountCents, expiresTime: existing.expiresTime, mode });
       return { orderNo: existing.orderNo, channel, amountCents: existing.amountCents, payParams };
     }
 
@@ -104,7 +104,7 @@ export class OrderService {
     // 新单固定 ORDER_EXPIRES_MS(=30m) > MIN_ORDER_LIFETIME_MS(=1m)，剩余寿命恒充足，无需重复守卫；
     // 复用路径的剩余寿命校验见上方 existing 分支。
     await this.orderRepo.create({ orderNo, userId, planCode, amountCents, channel, expiresTime });
-    const payParams = await gateway.createPayment({ orderNo, amountCents, expiresTime });
+    const payParams = await gateway.createPayment({ orderNo, amountCents, expiresTime, mode });
 
     this.auditWriter.write({
       eventType: 'payment.order.created',

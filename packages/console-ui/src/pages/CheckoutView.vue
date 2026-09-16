@@ -122,8 +122,10 @@ onUnmounted(() => {
 
 const alreadyPro = props.subscription?.planCode === 'pro';
 
-async function submit(): Promise<void> {
+async function submit(mode?: 'qr' | 'redirect'): Promise<void> {
   if (submitting.value) return;
+  // 微信仅扫码；支付宝支持扫码/跳转（未指定时默认跳转）。
+  const payMode: 'qr' | 'redirect' = channel.value === 'wechat' ? 'qr' : (mode ?? 'redirect');
   submitting.value = true;
   error.value = '';
   stopPolling();
@@ -139,7 +141,7 @@ async function submit(): Promise<void> {
   const gen = generation;
   try {
     const csrf = await ensureCsrf();
-    const r = await createOrder('pro', channel.value, csrf);
+    const r = await createOrder('pro', channel.value, csrf, payMode);
     if (!mounted || gen !== generation) return;
     if (r.kind !== 'ok') {
       if (r.kind === 'unauthorized') {
@@ -298,7 +300,11 @@ onMounted(async () => {
       </div>
 
       <p v-if="error" class="error">{{ error }}</p>
-      <button class="btn" :disabled="submitting" @click="submit">{{ submitting ? '下单中…' : '下单支付' }}</button>
+      <template v-if="channel === 'alipay'">
+        <button class="btn" :disabled="submitting" @click="submit('qr')">{{ submitting ? '下单中…' : '扫码支付' }}</button>
+        <button class="btn secondary" :disabled="submitting" @click="submit('redirect')">{{ submitting ? '下单中…' : '跳转到支付宝' }}</button>
+      </template>
+      <button v-else class="btn" :disabled="submitting" @click="submit('qr')">{{ submitting ? '下单中…' : '下单支付' }}</button>
     </div>
 
     <div class="card" v-if="alreadyPro">
@@ -307,8 +313,8 @@ onMounted(async () => {
     </div>
 
     <div class="card" v-if="qrDataUrl && !orderExpired">
-      <h3>微信扫码支付</h3>
-      <p class="muted">请用微信「扫一扫」扫码完成支付。</p>
+      <h3>{{ channel === 'alipay' ? '支付宝扫码支付' : '微信扫码支付' }}</h3>
+      <p class="muted">请用{{ channel === 'alipay' ? '支付宝' : '微信' }}「扫一扫」扫码完成支付。</p>
       <p class="muted">剩余 <strong>{{ formatRemaining(orderRemaining ?? 0) }}</strong></p>
       <img class="qr" :src="qrDataUrl" alt="支付二维码" />
       <p class="muted">订单号：{{ orderNo }}</p>

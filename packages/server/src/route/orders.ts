@@ -137,12 +137,12 @@ export async function ordersWriteRoutes(app: FastifyInstance, opts: OrdersRouteO
         }
         const actor = userIdOf(req);
         await opts.rateLimiter.hit(`console:order:create:${actor}`, 3600, 10);
-        const { planCode, channel } = req.body as { planCode: string; channel: string };
+        const { planCode, channel, mode } = req.body as { planCode: string; channel: string; mode?: 'qr' | 'redirect' };
         const ch = parseChannel(channel);
         if (opts.channelConfigured && !opts.channelConfigured(ch)) {
           throw new FeatureTemporarilyDisabledError('payment');
         }
-        const r = await svc.createOrder(actor, planCode, ch);
+        const r = await svc.createOrder(actor, planCode, ch, mode);
         const order = await svc.getOrder(actor, r.orderNo);
         reply.code(201).send({ order: orderDto(order), payParams: r.payParams });
       });
@@ -157,5 +157,7 @@ const createOrderBody = {
   properties: {
     planCode: { type: 'string', minLength: 1, maxLength: 32 },
     channel: { type: 'string', enum: [...PAYMENT_CHANNELS] },
+    /** 支付方式：扫码(qr) / 跳转(redirect)。缺省按渠道（微信扫码、支付宝跳转）。 */
+    mode: { type: 'string', enum: ['qr', 'redirect'] },
   },
 } as const;

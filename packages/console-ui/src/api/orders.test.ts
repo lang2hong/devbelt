@@ -17,7 +17,7 @@ describe('createOrder', () => {
       return jsonResponse(201, payload);
     };
 
-    const r = await createOrder('pro', 'wechat', 'csrf-tok', 'access', fetchImpl);
+    const r = await createOrder('pro', 'wechat', 'csrf-tok', undefined, 'access', fetchImpl);
     expect(r).toEqual({ kind: 'ok', value: payload });
     expect(captured.method).toBe('POST');
     expect(JSON.parse(captured.body!)).toEqual({ planCode: 'pro', channel: 'wechat' });
@@ -25,13 +25,13 @@ describe('createOrder', () => {
   });
 
   it('returns unauthorized without a token', async () => {
-    const r = await createOrder('pro', 'alipay', 'csrf-tok', null, (() => { throw new Error('unreachable'); }) as never);
+    const r = await createOrder('pro', 'alipay', 'csrf-tok', undefined, null, (() => { throw new Error('unreachable'); }) as never);
     expect(r).toEqual({ kind: 'unauthorized' });
   });
 
   it('surfaces terminal 503 as failure (feature disabled / channel unconfigured)', async () => {
     const fetchImpl = async () => jsonResponse(503, { error: { code: 'FEATURE_TEMPORARILY_DISABLED' } });
-    const r = await createOrder('pro', 'alipay', 'csrf-tok', 'access', fetchImpl);
+    const r = await createOrder('pro', 'alipay', 'csrf-tok', undefined, 'access', fetchImpl);
     expect(r).toEqual({ kind: 'failure', code: 'FEATURE_TEMPORARILY_DISABLED', message: '' });
   });
 });

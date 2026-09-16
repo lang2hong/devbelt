@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateKeyPairSync, createCipheriv } from 'crypto';
+import { generateKeyPairSync, createCipheriv, createSign } from 'crypto';
 import { resolveWechatCredentials, resolveAlipayCredentials, resolvePaymentCallbackBaseUrl } from '../../src/service/paymentCredentials.js';
 import {
   resolvePaymentGateway,
@@ -533,5 +533,55 @@ describe('alipayTimestamp (Beijing yyyy-MM-dd HH:mm:ss)', () => {
     // 2026-09-11T02:30:00Z = 北京 2026-09-11 10:30:00。
     expect(alipayTimestamp(new Date('2026-09-11T02:30:00Z'))).toBe('2026-09-11 10:30:00');
     expect(alipayTimestamp(new Date('2026-01-01T16:59:59Z'))).toBe('2026-01-02 00:59:59');
+  });
+});
+describe('AlipayGateway precreate (扫码)', () => {
+  function creds() {
+    const app = rsaKeyPair();
+    const alipay = rsaKeyPair();
+    const env = {
+      PAYMENT_CALLBACK_BASE_URL: CALLBACK_BASE,
+      ALIPAY_APP_ID: 'app',
+      ALIPAY_PRIVATE_KEY_B64: b64(rsaPemOf(app, 'private')),
+      ALIPAY_PUBLIC_KEY_B64: b64(rsaPemOf(alipay, 'public')),
+    } as NodeJS.ProcessEnv;
+    return { cred: resolveAlipayCredentials(env)!, alipay };
+  }
+  function signedBody(node: string, alipay: ReturnType<typeof rsaKeyPair>): string {
+    const signer = createSign('RSA-SHA256');
+    signer.update(node, 'utf8');
+    const sign = signer.sign(alipay.privateKey, 'base64');
+    return `{"alipay_trade_precreate_response":${node},"sign":${JSON.stringify(sign)}}`;
+  }
+
+  it('qr 模式：校验响应签名后返回 codeUrl', async () => {
+    const { cred, alipay } = creds();
+    const node = JSON.stringify({ code: '10000', msg: 'Success', out_trade_no: 'ord1', qr_code: 'https://qr.alipay.com/abc' });
+    const body = signedBody(node, alipay);
+    const fetchImpl = (async () => ({ ok: true, text: async () => body })) as unknown as never;
+    const g = new AlipayGateway(cred, fetchImpl);
+    const r = await g.createPayment({ orderNo: 'ord1', amountCents: 9900, expiresTime: new Date(Date.now() + 30 * 60 * 1000), mode: 'qr' });
+    expect(r.codeUrl).toBe('https://qr.alipay.com/abc');
+    expect(r.redirectUrl).toBeUndefined();
+  });
+
+  it('qr 模式：响应签名无效则拒绝', async () => {
+    const { cred } = creds();
+    const node = JSON.stringify({ code: '10000', qr_code: 'https://qr.alipay.com/abc' });
+    const body = `{"alipay_trade_precreate_response":${node},"sign":"AAAA"}`;
+    const fetchImpl = (async () => ({ ok: true, text: async () => body })) as unknown as never;
+    const g = new AlipayGateway(cred, fetchImpl);
+    await expect(g.createPayment({ orderNo: 'ord1', amountCents: 9900, expiresTime: new Date(Date.now() + 30 * 60 * 1000), mode: 'qr' }))
+      .rejects.toThrow(/signature verification failed/);
+  });
+
+  it('qr 模式：渠道返回非 10000 抛错', async () => {
+    const { cred, alipay } = creds();
+    const node = JSON.stringify({ code: '40004', msg: 'Business Failed', sub_code: 'ACQ.TRADE_HAS_CLOSE', sub_msg: 'trade closed' });
+    const body = signedBody(node, alipay);
+    const fetchImpl = (async () => ({ ok: true, text: async () => body })) as unknown as never;
+    const g = new AlipayGateway(cred, fetchImpl);
+    await expect(g.createPayment({ orderNo: 'ord1', amountCents: 9900, expiresTime: new Date(Date.now() + 30 * 60 * 1000), mode: 'qr' }))
+      .rejects.toThrow(/ACQ.TRADE_HAS_CLOSE/);
   });
 });

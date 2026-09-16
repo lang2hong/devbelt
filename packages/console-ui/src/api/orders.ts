@@ -105,6 +105,7 @@ export async function createOrder(
   planCode: string,
   channel: string,
   csrfToken: string,
+  mode?: 'qr' | 'redirect',
   token: string | null = getAccessToken(),
   fetchImpl: FetchLike = fetch,
 ): Promise<Result<CreateOrderResult>> {
@@ -120,7 +121,7 @@ export async function createOrder(
           Authorization: `Bearer ${token}`,
           'X-CSRF-Token': csrfToken,
         },
-        body: JSON.stringify({ planCode, channel }),
+        body: JSON.stringify(mode ? { planCode, channel, mode } : { planCode, channel }),
       },
       fetchImpl,
     );

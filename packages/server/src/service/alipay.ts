@@ -14,7 +14,7 @@ import { PaymentCallbackInvalidError } from '../domain/errors.js';
  * 真实到支付宝沙箱的端到端联调属部署后人工验收（§83/§84）；本适配器密码学逻辑用
  * 测试密钥可离线验证，真实 HTTP 由 `fetchImpl` 注入以便测试 stub。
  */
-export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<Response>;
+export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal }) => Promise<Response>;
 
 const ALIPAY_ORDER_URL = 'https://openapi.alipay.com/gateway.do';
 
@@ -115,15 +115,119 @@ export function buildAlipaySignContent(params: Record<string, string>, opts: { i
     .join('&');
 }
 
+/** 预下单 HTTP 默认超时。 */
+const DEFAULT_ORDER_TIMEOUT_MS = 10_000;
+
+/**
+ * 从网关响应的**原始文本**中截取某个响应节点的精确 JSON 子串。
+ * 支付宝要求对响应节点文本本身验签，不能 `JSON.parse` 后再序列化（键序/空白会变）。
+ */
+function extractResponseNode(raw: string, key: string): string | undefined {
+  const at = raw.indexOf(`"${key}"`);
+  if (at < 0) return undefined;
+  const colon = raw.indexOf(':', at + key.length + 2);
+  if (colon < 0) return undefined;
+  let i = colon + 1;
+  while (i < raw.length && /\s/.test(raw[i])) i++;
+  if (raw[i] !== '{') return undefined;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let j = i; j < raw.length; j++) {
+    const ch = raw[j];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return raw.slice(i, j + 1);
+    }
+  }
+  return undefined;
+}
+
 export class AlipayGateway implements PaymentGateway {
   readonly channel = 'alipay' as const;
 
   /** 回调时间戳新鲜度窗口（§54 防重放）：±5 分钟。 */
   static readonly FRESHNESS_WINDOW_MS = 5 * 60 * 1000;
 
-  constructor(private readonly creds: AlipayCredentials) {}
+  constructor(
+    private readonly creds: AlipayCredentials,
+    private readonly fetchImpl: FetchLike = fetch as unknown as FetchLike,
+    private readonly orderTimeoutMs: number = DEFAULT_ORDER_TIMEOUT_MS,
+  ) {}
 
-  async createPayment(input: { orderNo: string; amountCents: number; expiresTime: Date }): Promise<PrepayParams> {
+  async createPayment(input: { orderNo: string; amountCents: number; expiresTime: Date; mode?: 'qr' | 'redirect' }): Promise<PrepayParams> {
+    // 支付宝扫码用 `alipay.trade.precreate`（返回 qr_code）；跳转用 `alipay.trade.page.pay`。
+    if (input.mode === 'qr') return this.createQr(input);
+    return this.createPage(input);
+  }
+
+  /** 扫码支付：`alipay.trade.precreate` → `qr_code`（服务端 HTTP 调用 + 响应验签）。 */
+  private async createQr(input: { orderNo: string; amountCents: number; expiresTime: Date }): Promise<PrepayParams> {
+    const biz = {
+      out_trade_no: input.orderNo,
+      total_amount: yuanFromCents(input.amountCents),
+      subject: 'DB Client Pro subscription',
+      timeout_express: timeoutExpress(input.expiresTime),
+    };
+    const params: Record<string, string> = {
+      app_id: this.creds.appId,
+      method: 'alipay.trade.precreate',
+      format: 'JSON',
+      charset: 'utf-8',
+      sign_type: 'RSA2',
+      timestamp: alipayTimestamp(),
+      version: '1.0',
+      notify_url: this.creds.callbackUrl,
+      biz_content: JSON.stringify(biz),
+    };
+    const sign = this.sign(params);
+    const body = this.toFormBody({ ...params, sign });
+    const res = await this.fetchImpl(ALIPAY_ORDER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+      signal: AbortSignal.timeout(this.orderTimeoutMs),
+    }).catch((err: unknown) => {
+      if (err instanceof Error && err.name === 'TimeoutError') throw new Error('alipay precreate timed out');
+      throw err;
+    });
+    if (!res.ok) throw new Error(`alipay precreate failed: HTTP ${res.status}`);
+    const text = await res.text();
+    const node = extractResponseNode(text, 'alipay_trade_precreate_response');
+    if (!node) throw new Error('alipay precreate returned no response node');
+    let outer: { sign?: string };
+    try {
+      outer = JSON.parse(text) as { sign?: string };
+    } catch {
+      throw new Error('alipay precreate returned malformed JSON');
+    }
+    if (!outer.sign || !this.verifyNode(node, outer.sign)) {
+      throw new Error('alipay precreate response signature verification failed');
+    }
+    const parsed = JSON.parse(node) as { code?: string; msg?: string; sub_code?: string; sub_msg?: string; qr_code?: string };
+    if (parsed.code !== '10000' || !parsed.qr_code) {
+      throw new Error(`alipay precreate rejected: ${parsed.sub_code ?? parsed.code ?? 'unknown'} ${parsed.sub_msg ?? parsed.msg ?? ''}`.trim());
+    }
+    return { codeUrl: parsed.qr_code };
+  }
+
+  /** 对响应节点文本用支付宝公钥做 RSA2 验签。 */
+  private verifyNode(nodeText: string, sign: string): boolean {
+    const verifier = createVerify('RSA-SHA256');
+    verifier.update(nodeText, 'utf8');
+    return verifier.verify(this.creds.alipayPublicKey, sign, 'base64');
+  }
+
+  /** 跳转支付：`alipay.trade.page.pay` 签名表单 URL（无服务端 HTTP 调用）。 */
+  private createPage(input: { orderNo: string; amountCents: number; expiresTime: Date }): PrepayParams {
     const biz = {
       out_trade_no: input.orderNo,
       total_amount: yuanFromCents(input.amountCents),

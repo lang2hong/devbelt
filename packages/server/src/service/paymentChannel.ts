@@ -39,8 +39,9 @@ export interface PaymentCallback {
  */
 export interface PaymentGateway {
   readonly channel: PaymentChannel;
-  /** 向渠道发起预下单，返回支付参数（二维码/跳转链接等）。`expiresTime` 为权威本地过期时刻，渠道据此设置外部支付有效期，避免「本地过期后仍可付款但无权益」。 */
-  createPayment(input: { orderNo: string; amountCents: number; expiresTime: Date }): Promise<PrepayParams>;
+  /** 向渠道发起预下单，返回支付参数（二维码/跳转链接等）。`expiresTime` 为权威本地过期时刻，渠道据此设置外部支付有效期，避免「本地过期后仍可付款但无权益」。
+   *  `mode`：`qr`=扫码（返回 codeUrl），`redirect`=跳转收银台（返回 redirectUrl）；缺省由渠道自定。 */
+  createPayment(input: { orderNo: string; amountCents: number; expiresTime: Date; mode?: 'qr' | 'redirect' }): Promise<PrepayParams>;
   /** 校验回调签名。false = 拒绝（服务层抛 PAYMENT_SIGNATURE_INVALID）。 */
   verifyCallback(rawBody: Buffer, headers: Record<string, string>): boolean;
   /** 验签通过后解析归一化交易信息。 */
@@ -63,14 +64,18 @@ export function signMemoryCallback(rawBody: Buffer): string {
 export class MemoryPaymentGateway implements PaymentGateway {
   constructor(readonly channel: PaymentChannel) {}
 
-  async createPayment(input: { orderNo: string; amountCents: number; expiresTime: Date }): Promise<PrepayParams> {
-    return {
+  async createPayment(input: { orderNo: string; amountCents: number; expiresTime: Date; mode?: 'qr' | 'redirect' }): Promise<PrepayParams> {
+    // stub：qr 模式返回 code_url，redirect 模式返回跳转链接；缺省按渠道（微信默认扫码、支付宝默认跳转）。
+    const mode = input.mode ?? (this.channel === 'wechat' ? 'qr' : 'redirect');
+    const common = {
       orderNo: input.orderNo,
       amountCents: input.amountCents,
       expiresTime: input.expiresTime.toISOString(),
       channel: this.channel,
-      mock: this.channel === 'wechat' ? 'weixin://wxpay/mock-code-url' : 'https://openapi.alipay.com/mock-redirect',
     };
+    return mode === 'qr'
+      ? { ...common, codeUrl: this.channel === 'wechat' ? 'weixin://wxpay/mock-code-url' : 'https://openapi.alipay.com/mock-qr' }
+      : { ...common, redirectUrl: this.channel === 'wechat' ? 'https://wx.tenpay.com/mock-h5-redirect' : 'https://openapi.alipay.com/mock-redirect' };
   }
 
   verifyCallback(rawBody: Buffer, headers: Record<string, string>): boolean {
@@ -130,7 +135,7 @@ export function resolvePaymentGateway(
   if (!creds) {
     throw new Error('alipay payment gateway is not configured; provide ALIPAY_* credentials (P4 slice 4)');
   }
-  return new AlipayGateway(creds);
+  return new AlipayGateway(creds, fetchImpl as never);
 }
 
 /** 支持的全部渠道。 */
