@@ -4,7 +4,6 @@ import { listAdminInvoices, setInvoiceStatus, type AdminInvoice } from '../api/a
 import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { formatDateTime } from '../lib/formatTime';
-import AdminNav from './AdminNav.vue';
 import Modal from '../components/Modal.vue';
 
 const invoices = ref<AdminInvoice[]>([]);
@@ -129,7 +128,6 @@ async function confirm(): Promise<void> {
 
 <template>
   <section class="page">
-    <AdminNav />
     <header class="head">
       <h2>发票</h2>
       <p class="sub">平台发票处理。</p>

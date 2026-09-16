@@ -26,9 +26,10 @@ const links = [
 
 <style scoped>
 .admin-nav {
-  display: flex; gap: 4px; margin: 0 0 20px; padding: 4px;
-  background: var(--c-surface-muted); border: 1px solid var(--c-border);
-  border-radius: var(--r-md); width: fit-content;
+  position: sticky; top: 54px; z-index: 9;
+  display: flex; gap: 4px; margin: 0 0 20px; padding: 6px;
+  background: var(--c-surface); border: 1px solid var(--c-border);
+  border-radius: var(--r-md); width: 100%;
 }
 .admin-nav a {
   color: var(--c-text-muted); text-decoration: none; font-size: 13px;

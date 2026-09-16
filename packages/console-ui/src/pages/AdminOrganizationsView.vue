@@ -3,7 +3,6 @@ import { onMounted, ref } from 'vue';
 import { listOrganizations, adjustOrganizationSubscription, type AdminOrganization } from '../api/admin';
 import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
-import AdminNav from './AdminNav.vue';
 import Modal from '../components/Modal.vue';
 
 const orgs = ref<AdminOrganization[]>([]);
@@ -128,7 +127,6 @@ async function confirmSub(): Promise<void> {
 
 <template>
   <section class="page">
-    <AdminNav />
     <header class="head">
       <h2>组织</h2>
       <p class="sub">平台组织与订阅管理。</p>

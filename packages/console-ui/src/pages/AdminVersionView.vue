@@ -3,7 +3,6 @@ import { onMounted, ref } from 'vue';
 import { getVersion, type ConsoleVersion } from '../api/admin';
 import { setAccessToken } from '../api/consoleAuth';
 import { formatDateTime } from '../lib/formatTime';
-import AdminNav from './AdminNav.vue';
 
 const version = ref<ConsoleVersion | null>(null);
 const state = ref<'loading' | 'ready' | 'error'>('loading');
@@ -24,7 +23,6 @@ onMounted(async () => {
 
 <template>
   <section class="page">
-    <AdminNav />
     <header class="head">
       <h2>系统状态</h2>
       <p class="sub">版本与运行状态。</p>

@@ -3,7 +3,6 @@ import { computed, onMounted, ref } from 'vue';
 import { ensureCsrf } from '../api/consoleAuth';
 import { listPlans, updatePlan, upsertFeatureDef, type AdminFeatureDef, type AdminPlan } from '../api/admin';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
-import AdminNav from './AdminNav.vue';
 
 /**
  * 套餐管理：顶部标签页（套餐 / 特性定义）。
@@ -274,7 +273,6 @@ onMounted(load);
 
 <template>
   <section class="page">
-    <AdminNav />
 
     <header class="head">
       <div>

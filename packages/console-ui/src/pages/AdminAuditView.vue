@@ -5,7 +5,6 @@ import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
 import { useIdempotencyKey } from '../lib/idempotentWrite';
 import { formatDateTime } from '../lib/formatTime';
 import { toFromIso, toInclusiveEndIso } from '../lib/dateRange';
-import AdminNav from './AdminNav.vue';
 
 const events = ref<AdminAuditEvent[]>([]);
 const state = ref<'loading' | 'ready' | 'error'>('loading');
@@ -116,7 +115,6 @@ async function doExport(format: 'csv' | 'json'): Promise<void> {
 
 <template>
   <section class="page">
-    <AdminNav />
     <header class="head">
       <h2>审计日志</h2>
       <p class="sub">平台操作审计记录。</p>

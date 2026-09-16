@@ -4,7 +4,6 @@ import { listAdminOrders, refundAdminOrder, type AdminOrder } from '../api/admin
 import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { formatDateTime } from '../lib/formatTime';
-import AdminNav from './AdminNav.vue';
 import Modal from '../components/Modal.vue';
 
 const orders = ref<AdminOrder[]>([]);
@@ -142,7 +141,6 @@ async function confirmRefund(): Promise<void> {
 
 <template>
   <section class="page">
-    <AdminNav />
     <header class="head">
       <h2>订单</h2>
       <p class="sub">平台订单查询与退款。</p>

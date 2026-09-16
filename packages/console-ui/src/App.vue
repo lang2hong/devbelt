@@ -21,6 +21,7 @@ import AdminOrdersView from './pages/AdminOrdersView.vue';
 import AdminInvoicesView from './pages/AdminInvoicesView.vue';
 import AdminAuditView from './pages/AdminAuditView.vue';
 import AdminVersionView from './pages/AdminVersionView.vue';
+import AdminNav from './pages/AdminNav.vue';
 import AdminPlansView from './pages/AdminPlansView.vue';
 import StatusPage from './pages/StatusPage.vue';
 
@@ -49,6 +50,8 @@ installRouter(ROUTES);
 const state = ref<'loading' | 'ready' | 'error'>('loading');
 const me_ = ref<ConsoleMe | null>(null);
 const logoutError = ref(false);
+
+const isAdminRoute = computed(() => (router.name ?? '').startsWith('admin-'));
 
 const view = computed<{ comp: Component; props: Record<string, unknown> }>(() => {
   // 防御纵深：即使直接导航到 /console/admin/*，非平台管理员也只看到 403（服务端同样拒绝）。
@@ -171,6 +174,7 @@ async function onLogout(): Promise<void> {
       </div>
 
       <div class="body">
+        <AdminNav v-if="isAdminRoute" />
         <component :is="view.comp" v-bind="view.props" />
       </div>
     </template>

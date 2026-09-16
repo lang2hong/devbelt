@@ -4,7 +4,6 @@ import { listUsers, setUserStatus, adjustUserSubscription, type AdminUser } from
 import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { toFromIso, toInclusiveEndIso } from '../lib/dateRange';
-import AdminNav from './AdminNav.vue';
 import Modal from '../components/Modal.vue';
 
 const users = ref<AdminUser[]>([]);
@@ -178,7 +177,6 @@ async function confirmSub(): Promise<void> {
 
 <template>
   <section class="page">
-    <AdminNav />
     <header class="head">
       <h2>用户</h2>
       <p class="sub">平台用户与订阅管理。</p>
