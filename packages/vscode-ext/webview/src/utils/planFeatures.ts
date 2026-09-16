@@ -64,7 +64,7 @@ function formatEngineList(value: string[]): string {
 }
 
 export function formatFeature(feature: PlanFeatureDto): string {
-  if (feature.type === 'bool') return feature.value ? t('plan.supported') : t('plan.unsupported');
+  if (feature.type === 'bool') return feature.value === true ? t('plan.supported') : t('plan.unsupported');
   if (feature.type === 'bytes') return formatBytes(Number(feature.value) || 0);
   if (feature.type === 'stringList') {
     const list = Array.isArray(feature.value) ? feature.value : [];

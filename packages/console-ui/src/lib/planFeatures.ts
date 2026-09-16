@@ -66,7 +66,7 @@ function formatEngineList(value: string[]): string {
 
 /** 把单个特征格式化为展示文本。0 表示「不限」；未知 key 按 type 通用处理。 */
 export function formatFeature(feature: FeatureDto): string {
-  if (feature.type === 'bool') return feature.value ? '支持' : '不支持';
+  if (feature.type === 'bool') return feature.value === true ? '支持' : '不支持';
   if (feature.type === 'bytes') return formatBytes(Number(feature.value) || 0);
   if (feature.type === 'stringList') {
     const list = Array.isArray(feature.value) ? feature.value : [];

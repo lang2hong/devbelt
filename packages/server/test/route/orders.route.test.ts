@@ -151,6 +151,41 @@ describe('orders routes', () => {
     });
     expect(res.statusCode).toBe(422);
   });
+
+  async function createOrder(payload: Record<string, unknown>) {
+    const b = await build();
+    const csrf = b.csrfService.issue('ws');
+    const res = await b.app.inject({
+      method: 'POST',
+      url: '/api/console/orders',
+      headers: {
+        authorization: `Bearer ${await b.consoleToken(1)}`, origin: ORIGIN,
+        'x-csrf-token': csrf, cookie: `${csrfCookieName()}=${csrf}`,
+        'content-type': 'application/json', accept: 'application/json',
+      },
+      payload,
+    });
+    return res;
+  }
+
+  it('passes mode:qr through to the gateway (alipay codeUrl)', async () => {
+    const res = await createOrder({ planCode: 'pro', channel: 'alipay', mode: 'qr' });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().payParams.codeUrl).toBeTruthy();
+    expect(res.json().payParams.redirectUrl).toBeUndefined();
+  });
+
+  it('passes mode:redirect through to the gateway (alipay redirectUrl)', async () => {
+    const res = await createOrder({ planCode: 'pro', channel: 'alipay', mode: 'redirect' });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().payParams.redirectUrl).toBeTruthy();
+    expect(res.json().payParams.codeUrl).toBeUndefined();
+  });
+
+  it('rejects an invalid mode with 422', async () => {
+    const res = await createOrder({ planCode: 'pro', channel: 'alipay', mode: 'popup' });
+    expect(res.statusCode).toBe(422);
+  });
 });
 
 describe('payment callback route', () => {

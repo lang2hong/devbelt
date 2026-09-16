@@ -38,6 +38,7 @@ export class WechatPayGateway implements PaymentGateway {
     private readonly orderTimeoutMs: number = DEFAULT_ORDER_TIMEOUT_MS,
   ) {}
 
+  /** 微信 Native 下单：仅扫码（返回 code_url），故忽略 `mode`（接口允许但其语义不适用）。 */
   async createPayment(input: { orderNo: string; amountCents: number; expiresTime: Date }): Promise<PrepayParams> {
     const body = JSON.stringify({
       appid: this.creds.appId,

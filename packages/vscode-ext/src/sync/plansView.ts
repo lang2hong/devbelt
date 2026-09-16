@@ -53,8 +53,8 @@ export class PlansView extends BaseWebView {
       return;
     }
     try {
-      // 刷新权益缓存，确保「当前套餐」是最新值（失败静默降级到缓存/Free）。
-      void this.auth.refreshEntitlement();
+      // 刷新权益缓存，确保「当前套餐」是最新值（refreshEntitlement 内部吞错，失败降级到缓存/Free）。
+      await this.auth.refreshEntitlement();
       const plans = await this.auth.client.getPlans();
       const current = this.auth.getCachedEntitlement()?.planCode ?? 'free';
       this.post({ type: 'plans', plans, current, loggedIn: true });

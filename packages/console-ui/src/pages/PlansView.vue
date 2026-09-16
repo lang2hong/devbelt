@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { listPlans } from '../api/plans';
+import { setAccessToken } from '../api/consoleAuth';
 import { navigate } from '../lib/router';
 import { featureLabel, formatFeature, formatPrice, type PlanDto } from '../lib/planFeatures';
 
@@ -23,6 +24,7 @@ const currentCode = computed<string>(() => props.subscription?.planCode ?? 'free
 onMounted(async () => {
   const r = await listPlans();
   if (r.kind === 'unauthorized') {
+    setAccessToken(null);
     window.location.assign('/login');
     return;
   }
