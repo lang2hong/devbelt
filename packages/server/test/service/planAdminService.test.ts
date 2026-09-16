@@ -87,6 +87,16 @@ describe('ConsoleAdminService.updatePlanInTx', () => {
     })).rejects.toBeInstanceOf(ValidationError);
   });
 
+  it('rejects duplicate feature keys', async () => {
+    const { svc, planRepo } = makeService();
+    const pro = (await planRepo.findByCode('pro'))!;
+    await expect(svc.updatePlanInTx(TX, 1, {
+      id: pro.id, name: 'Pro', priceCents: 9900, billingUnit: 'month', sortOrder: 0, status: 'active',
+      features: [{ featureKey: 'maxSavedConnections', value: 1 }, { featureKey: 'maxSavedConnections', value: 2 }],
+      expectedVersion: pro.version, reason: 'x',
+    })).rejects.toBeInstanceOf(ValidationError);
+  });
+
   it('rejects a feature that does not apply to the plan kind', async () => {
     const { svc, planRepo } = makeService();
     const pro = (await planRepo.findByCode('pro'))!;

@@ -195,7 +195,10 @@ export class ConsoleAdminService {
     if (input.billingUnit !== 'month' && input.billingUnit !== 'seat-month') throw new ValidationError('invalid billing unit');
     if (!Number.isInteger(input.sortOrder)) throw new ValidationError('invalid sort order');
     if (input.status !== 'active' && input.status !== 'archived') throw new ValidationError('invalid status');
+    const seen = new Set<string>();
     for (const f of input.features) {
+      if (seen.has(f.featureKey)) throw new ValidationError(`duplicate feature: ${f.featureKey}`);
+      seen.add(f.featureKey);
       const def = await this.featureDefRepo.findByKey(f.featureKey);
       if (!def) throw new ValidationError(`unknown feature: ${f.featureKey}`);
       if (def.kind !== 'both' && def.kind !== plan.kind) {
