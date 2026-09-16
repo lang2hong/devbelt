@@ -150,6 +150,8 @@ export function errorStatus(code: string): number {
     case 'UNKNOWN_PLAN':
     case 'UNKNOWN_CHANNEL':
       return 400;
+    case 'PAYMENT_GATEWAY_ERROR':
+      return 502;
     case 'SYNC_NOT_INITIALIZED':
     case 'SYNC_PROTOCOL_UNSUPPORTED':
     case 'SYNC_RESET_HANDOFF_INVALID':

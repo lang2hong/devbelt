@@ -18,6 +18,14 @@ export class ValidationError extends DomainError {
   }
 }
 
+/** 支付网关调用/响应失败（HTTP 错误、响应验签失败、渠道业务拒绝）→ 502。 */
+export class PaymentGatewayError extends DomainError {
+  constructor(message: string) {
+    super(message, 'PAYMENT_GATEWAY_ERROR');
+    this.name = 'PaymentGatewayError';
+  }
+}
+
 /** 未认证或凭据无效 → 401。未知邮箱、错密码、未验证邮箱、被禁用统一此码。 */
 export class UnauthorizedError extends DomainError {
   constructor(message = 'unauthorized') {

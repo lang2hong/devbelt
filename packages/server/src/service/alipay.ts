@@ -1,7 +1,7 @@
 import { createSign, createVerify } from 'crypto';
 import type { PaymentGateway, PrepayParams, PaymentCallback } from './paymentChannel.js';
 import type { AlipayCredentials } from './paymentCredentials.js';
-import { PaymentCallbackInvalidError } from '../domain/errors.js';
+import { PaymentCallbackInvalidError, PaymentGatewayError } from '../domain/errors.js';
 
 /**
  * 支付宝（网页 H5）适配器（P4 切片 4B）。
@@ -192,29 +192,33 @@ export class AlipayGateway implements PaymentGateway {
     const body = this.toFormBody({ ...params, sign });
     const res = await this.fetchImpl(ALIPAY_ORDER_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      // 必须显式带 charset：支付宝按请求 Content-Type 决定**响应**字符集；缺省时
+      // 返回 GBK 字节，按 UTF-8 解码会破坏响应文本（含中文/错误信息）导致验签失败。
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8' },
       body,
       signal: AbortSignal.timeout(this.orderTimeoutMs),
     }).catch((err: unknown) => {
-      if (err instanceof Error && err.name === 'TimeoutError') throw new Error('alipay precreate timed out');
-      throw err;
+      if (err instanceof Error && err.name === 'TimeoutError') throw new PaymentGatewayError('alipay precreate timed out');
+      throw new PaymentGatewayError(`alipay precreate request failed: ${err instanceof Error ? err.message : String(err)}`);
     });
-    if (!res.ok) throw new Error(`alipay precreate failed: HTTP ${res.status}`);
+    if (!res.ok) throw new PaymentGatewayError(`alipay precreate failed: HTTP ${res.status}`);
     const text = await res.text();
     const node = extractResponseNode(text, 'alipay_trade_precreate_response');
-    if (!node) throw new Error('alipay precreate returned no response node');
+    if (!node) throw new PaymentGatewayError('alipay precreate returned no response node');
     let outer: { sign?: string };
     try {
       outer = JSON.parse(text) as { sign?: string };
     } catch {
-      throw new Error('alipay precreate returned malformed JSON');
+      throw new PaymentGatewayError('alipay precreate returned malformed JSON');
     }
     if (!outer.sign || !this.verifyNode(node, outer.sign)) {
-      throw new Error('alipay precreate response signature verification failed');
+      throw new PaymentGatewayError('alipay precreate response signature verification failed');
     }
     const parsed = JSON.parse(node) as { code?: string; msg?: string; sub_code?: string; sub_msg?: string; qr_code?: string };
     if (parsed.code !== '10000' || !parsed.qr_code) {
-      throw new Error(`alipay precreate rejected: ${parsed.sub_code ?? parsed.code ?? 'unknown'} ${parsed.sub_msg ?? parsed.msg ?? ''}`.trim());
+      throw new PaymentGatewayError(
+        `alipay precreate rejected: ${parsed.sub_code ?? parsed.code ?? 'unknown'} ${parsed.sub_msg ?? parsed.msg ?? ''}`.trim(),
+      );
     }
     return { codeUrl: parsed.qr_code };
   }
