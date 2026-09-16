@@ -15,6 +15,8 @@
 #   ssh $REMOTE "cd $DEPLOY_DIR \
 #     && tar xzf backups/dist-<时间戳>.tar.gz \
 #     && sudo systemctl restart $SERVICE_NAME"
+# 控制台静态回滚（$CONSOLE_DIR/backups/）：
+#   ssh $REMOTE "cd $CONSOLE_DIR && tar xzf backups/dist-<时间戳>.tar.gz"
 set -euo pipefail
 
 # ── 部署目标（部署前填写）──────────────────────────────────────────
@@ -27,12 +29,19 @@ LOG_FILE="${DEPLOY_DIR}/logs/server.log"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# 控制台静态目录：与 server 的 consoleDistDir() 默认（`<cwd>/../console-ui/dist`）一致。
+CONSOLE_DIR="$(dirname "$DEPLOY_DIR")/console-ui"
+CONSOLE_SRC="$REPO_ROOT/packages/console-ui"
 
-echo "==> [1/4] 清理并构建 server -> packages/server/dist"
+echo "==> [1/6] 清理并构建 server -> packages/server/dist"
 rm -rf "$SCRIPT_DIR/dist"
 (cd "$REPO_ROOT" && pnpm --filter @db-client/server build)
 
-echo "==> [2/4] 推送产物到 ${REMOTE}:${DEPLOY_DIR}"
+echo "==> [2/6] 清理并构建 console-ui -> packages/console-ui/dist"
+rm -rf "$CONSOLE_SRC/dist"
+(cd "$REPO_ROOT" && pnpm --filter @db-client/console-ui build)
+
+echo "==> [3/6] 推送 server 产物到 ${REMOTE}:${DEPLOY_DIR}"
 ssh "$REMOTE" "mkdir -p '$DEPLOY_DIR/backups'"
 # 备份当前版本（首次部署 dist 不存在，tar 失败时静默跳过）
 ssh "$REMOTE" \
@@ -47,7 +56,16 @@ tar czf - -C "$SCRIPT_DIR" dist | ssh "$REMOTE" "cd '$DEPLOY_DIR' && tar xzf -"
 # 服务端 dotenv 只读工作目录下的 .env
 scp "$SCRIPT_DIR/.env.production" "$REMOTE:$DEPLOY_DIR/.env"
 
-echo "==> [3/4] 写 systemd 服务"
+echo "==> [4/6] 推送 console-ui 产物到 ${REMOTE}:${CONSOLE_DIR}/dist"
+ssh "$REMOTE" "mkdir -p '$CONSOLE_DIR/backups'"
+# 备份当前控制台静态（首次不存在时静默跳过）
+ssh "$REMOTE" \
+  "cd '$CONSOLE_DIR' && tar czf \"backups/dist-\$(date +%Y%m%d%H%M%S).tar.gz\" dist 2>/dev/null || true"
+# 先删旧目录，避免移除的 hash 资源/页面残留；再流式推送新 dist。
+ssh "$REMOTE" "rm -rf '$CONSOLE_DIR/dist'"
+tar czf - -C "$CONSOLE_SRC" dist | ssh "$REMOTE" "cd '$CONSOLE_DIR' && tar xzf -"
+
+echo "==> [5/6] 写 systemd 服务"
 # bundle 自包含全部依赖，服务器无需 npm install（不再推 package.json / 装 node_modules）。
 # 只需定位 node 可执行文件用于 systemd ExecStart。
 NODE_BIN="$(ssh "$REMOTE" '. "$HOME/.nvm/nvm.sh" >/dev/null 2>&1 && command -v node')"
@@ -78,7 +96,7 @@ StandardError=append:${LOG_FILE}
 WantedBy=multi-user.target
 EOF
 
-echo "==> [4/4] 重启服务并健康检查"
+echo "==> [6/6] 重启服务并健康检查"
 ssh "$REMOTE" \
   "sudo systemctl daemon-reload \
    && sudo systemctl enable --now '$SERVICE_NAME' \
