@@ -8,6 +8,10 @@ import {
   isOrganizationConnectionId,
   maxSavedConnections,
   canImportConnections,
+  maxConcurrentConnections,
+  canExportConnections,
+  canUseErDiagram,
+  canUseDataSync,
 } from '../../src/sync/entitlementGate';
 
 const free = { planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 2, maxSavedConnections: 10, allowConnectionImport: false };
@@ -110,5 +114,21 @@ describe('连接资产门禁 (maxSavedConnections / canImportConnections)', () =
   it('缺 maxSavedConnections 字段回落到默认 10', () => {
     const missing = { planCode: 'x', allowedDatabaseTypes: [], maxDevices: 0 } as unknown as Parameters<typeof maxSavedConnections>[0];
     expect(maxSavedConnections(missing)).toBe(10);
+  });
+});
+
+describe('并发/导出/ER/数据同步 门禁', () => {
+  it('maxConcurrentConnections 缺省 0=不限，读取缓存值', () => {
+    expect(maxConcurrentConnections(undefined)).toBe(0);
+    expect(maxConcurrentConnections({ planCode: 'free', allowedDatabaseTypes: [], maxDevices: 0, maxSavedConnections: 10, allowConnectionImport: false, maxConcurrentConnections: 5 })).toBe(5);
+  });
+
+  it('导出/ER/数据同步：缺省允许，显式 false 才禁用', () => {
+    expect(canExportConnections(undefined)).toBe(true);
+    expect(canExportConnections({ planCode: 'free', allowedDatabaseTypes: [], maxDevices: 0, maxSavedConnections: 10, allowConnectionImport: false, allowConnectionExport: false })).toBe(false);
+    expect(canUseErDiagram({ planCode: 'free', allowedDatabaseTypes: [], maxDevices: 0, maxSavedConnections: 10, allowConnectionImport: false, allowErDiagram: false })).toBe(false);
+    expect(canUseDataSync({ planCode: 'free', allowedDatabaseTypes: [], maxDevices: 0, maxSavedConnections: 10, allowConnectionImport: false, allowDataSync: false })).toBe(false);
+    expect(canUseErDiagram(undefined)).toBe(true);
+    expect(canUseDataSync(undefined)).toBe(true);
   });
 });

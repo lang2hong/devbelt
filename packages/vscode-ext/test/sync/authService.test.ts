@@ -102,7 +102,7 @@ describe('AuthService.refreshEntitlement', () => {
     await auth.init();
     await auth.refreshEntitlement();
 
-    const expected = { planCode: 'pro', allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 5, maxSavedConnections: 100, allowConnectionImport: true };
+    const expected = { planCode: 'pro', allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 5, maxSavedConnections: 100, allowConnectionImport: true, maxConcurrentConnections: 0, allowConnectionExport: true, allowErDiagram: true, allowDataSync: true };
     expect(auth.getCachedEntitlement()).toEqual(expected);
     expect(memento.values.get(ENTITLEMENT_KEY)).toEqual(expected);
   });
@@ -117,7 +117,7 @@ describe('AuthService.refreshEntitlement', () => {
     await auth.init();
     await auth.refreshEntitlement();
 
-    expect(auth.getCachedEntitlement()).toEqual({ planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 0, maxSavedConnections: 10, allowConnectionImport: false });
+    expect(auth.getCachedEntitlement()).toEqual({ planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 0, maxSavedConnections: 10, allowConnectionImport: false, maxConcurrentConnections: 0, allowConnectionExport: true, allowErDiagram: true, allowDataSync: true });
   });
 
   it('getMe 失败静默降级：不抛、不写缓存', async () => {
@@ -163,7 +163,7 @@ describe('AuthService.refreshEntitlement', () => {
     const auth = new AuthService(secrets as any, 'http://localhost:3000', memento as any);
     await auth.init();
     await vi.waitFor(() => {
-      expect(auth.getCachedEntitlement()).toEqual({ planCode: 'pro', allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 5, maxSavedConnections: 100, allowConnectionImport: true });
+      expect(auth.getCachedEntitlement()).toEqual({ planCode: 'pro', allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 5, maxSavedConnections: 100, allowConnectionImport: true, maxConcurrentConnections: 0, allowConnectionExport: true, allowErDiagram: true, allowDataSync: true });
     });
     // init 后台刷新只应触发一次 /api/me（无需调用方再显式刷新）
     expect(fetchCalls.filter((u) => u.endsWith('/api/me'))).toHaveLength(1);

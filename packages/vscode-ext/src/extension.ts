@@ -21,6 +21,7 @@ import { AuthService, DEFAULT_SERVER_URL } from './sync/authService';
 import { PersonalSyncClient } from './sync/e2e/client';
 import { eventBus, ConnectionChangedEvent, DataChangeEvent, AuthEvent } from './utils/event';
 import { invalidateLanguage, l10n, LANGUAGE_CONFIG_KEY } from './i18n';
+import { canUseErDiagram } from './sync/entitlementGate';
 import { registerCommands } from './commands';
 import { SqlCompletionProvider } from './completion/sqlCompletionProvider';
 import { SqlCodeLensProvider } from './completion/sqlCodeLensProvider';
@@ -345,6 +346,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     // ER 图
     vscode.commands.registerCommand('dbclient.showERDiagram', (node: any) => {
+      if (!canUseErDiagram(auth.getCachedEntitlement())) {
+        vscode.window.showWarningMessage(l10n('entitlement.erRequired'));
+        return;
+      }
       if (node?.conn && node?.database) {
         ERDiagramView.open(node.conn, node.database, manager);
       }

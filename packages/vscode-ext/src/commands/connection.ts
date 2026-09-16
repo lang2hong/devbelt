@@ -11,7 +11,9 @@ import type { Deps, Sub } from './shared';
 import { confirm } from './shared';
 import {
   canImportConnections,
+  canExportConnections,
   maxSavedConnections,
+  maxConcurrentConnections,
   isOrganizationConnectionId,
 } from '../sync/entitlementGate';
 
@@ -90,6 +92,12 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.openConnection', async (conn: SavedConnection) => {
     if (!conn?.id) return;
+    // 并发连接数门禁：已打开则不算新增；0 = 不限。
+    const maxConcurrent = maxConcurrentConnections(auth.getCachedEntitlement());
+    if (maxConcurrent > 0 && !manager.peek(conn.id) && manager.openCount() >= maxConcurrent) {
+      vscode.window.showWarningMessage(l10n('entitlement.maxConnections', { max: maxConcurrent }));
+      return;
+    }
     treeProvider.markOpen(conn.id);
     connCtx.setLast(conn);
     treeProvider.refresh();
@@ -133,6 +141,10 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
   sub('dbclient.refresh', () => treeProvider.refresh());
 
   sub('dbclient.exportConnections', async (node?: DbTreeNode) => {
+    if (!canExportConnections(auth.getCachedEntitlement())) {
+      vscode.window.showWarningMessage(l10n('entitlement.exportRequired'));
+      return;
+    }
     const all = store.list();
     if (!all.length) {
       vscode.window.showInformationMessage(l10n('conn.exportNone'));

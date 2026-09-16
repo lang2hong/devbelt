@@ -99,3 +99,23 @@ export function filterPersonalConnectionsByEntitlement<
   }
   return { allowed, skipped };
 }
+/** 可同时打开的最大连接数；0 = 不限（free 默认不限制）。 */
+export function maxConcurrentConnections(entitlement?: CachedEntitlement | null): number {
+  const v = entitlement?.maxConcurrentConnections;
+  return typeof v === 'number' && v >= 0 ? v : 0;
+}
+
+/** 是否允许导出连接配置；默认允许（free 不限制）。 */
+export function canExportConnections(entitlement?: CachedEntitlement | null): boolean {
+  return entitlement?.allowConnectionExport !== false;
+}
+
+/** 是否允许 ER 图；默认允许。 */
+export function canUseErDiagram(entitlement?: CachedEntitlement | null): boolean {
+  return entitlement?.allowErDiagram !== false;
+}
+
+/** 是否允许数据同步；默认允许。 */
+export function canUseDataSync(entitlement?: CachedEntitlement | null): boolean {
+  return entitlement?.allowDataSync !== false;
+}

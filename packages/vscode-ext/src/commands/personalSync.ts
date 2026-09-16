@@ -304,6 +304,12 @@ async function runExplicitSync(
   deps: PersonalSyncCommandDeps,
   run: (session: SyncSessionPort) => Promise<SyncRun>,
 ): Promise<void> {
+  // 数据同步门禁：仅当权益明确禁用时拦截（默认允许）。
+  const getEnt = (deps.auth as { getCachedEntitlement?: () => { allowDataSync?: boolean } | undefined }).getCachedEntitlement;
+  if (typeof getEnt === 'function' && getEnt.call(deps.auth)?.allowDataSync === false) {
+    deps.ui.warn(l10n('entitlement.dataSyncRequired'));
+    return;
+  }
   const session = await getSession(deps);
   if (!session) return;
   if (!session.isUnlocked) {

@@ -19,8 +19,16 @@ export interface CachedEntitlement {
   maxDevices: number;
   /** 本机可保存连接数上限；0 = 不限。 */
   maxSavedConnections: number;
-  /** 是否允许导入连接配置（导出恒允许）。 */
+  /** 是否允许导入连接配置。 */
   allowConnectionImport: boolean;
+  /** 可同时打开的连接数；0 = 不限。缺省视为 0（不限）。 */
+  maxConcurrentConnections?: number;
+  /** 是否允许导出连接配置。缺省视为允许。 */
+  allowConnectionExport?: boolean;
+  /** 是否允许 ER 图。缺省视为允许。 */
+  allowErDiagram?: boolean;
+  /** 是否允许数据同步。缺省视为允许。 */
+  allowDataSync?: boolean;
 }
 
 let _osMachineId: string | undefined;
@@ -155,6 +163,10 @@ export class AuthService {
       maxDevices: sub?.entitlement?.maxDevices ?? 0,
       maxSavedConnections: sub?.entitlement?.maxSavedConnections ?? DEFAULT_FREE_MAX_CONNECTIONS,
       allowConnectionImport: sub?.entitlement?.allowConnectionImport === true,
+      maxConcurrentConnections: sub?.entitlement?.maxConcurrentConnections ?? 0,
+      allowConnectionExport: sub?.entitlement?.allowConnectionExport !== false,
+      allowErDiagram: sub?.entitlement?.allowErDiagram !== false,
+      allowDataSync: sub?.entitlement?.allowDataSync !== false,
     });
     this.cachedUserId = me.user.userId;
     return me;

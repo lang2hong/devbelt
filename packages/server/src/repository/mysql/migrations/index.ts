@@ -1,11 +1,12 @@
 import type { Migration } from '../migrate.js';
 import { baselineMigration } from './001_baseline.js';
+import { planFeaturesV2Migration } from './002_plan_features_v2.js';
 
 /**
  * 迁移集合（开发阶段 squash：原 001–024 已合并为单一基线）。
  * 新库/旧库均由基线重建；旧库的历史版本由 LEGACY_MIGRATION_VERSIONS 识别并放行。
  */
-export const migrations: readonly Migration[] = [baselineMigration];
+export const migrations: readonly Migration[] = [baselineMigration, planFeaturesV2Migration];
 
 /**
  * squash 前的历史版本登记（001–024）。基线会重建这些表；

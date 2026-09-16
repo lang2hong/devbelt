@@ -118,6 +118,11 @@ export class ConnectionManager {
     return this.sessions.get(id);
   }
 
+  /** 当前已打开（持有会话）的连接数，用于并发连接数门禁。 */
+  openCount(): number {
+    return this.sessions.size;
+  }
+
   /** 该连接是否为用户显式打开。 */
   isExplicit(id: string): boolean {
     return this.explicit.has(id);

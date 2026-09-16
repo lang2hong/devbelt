@@ -43,8 +43,16 @@ export interface PersonalEntitlement {
   maxDevices: number;
   /** 本机可保存连接数上限；0 = 不限。 */
   maxSavedConnections: number;
-  /** 是否允许导入连接配置（导出恒允许）。 */
+  /** 是否允许导入连接配置。 */
   allowConnectionImport: boolean;
+  /** 可同时打开的连接数；0 = 不限。 */
+  maxConcurrentConnections?: number;
+  /** 是否允许导出连接配置。 */
+  allowConnectionExport?: boolean;
+  /** 是否允许 ER 图。 */
+  allowErDiagram?: boolean;
+  /** 是否允许数据同步。 */
+  allowDataSync?: boolean;
 }
 
 export interface MeResponse {
