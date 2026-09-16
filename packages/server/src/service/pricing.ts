@@ -26,3 +26,19 @@ export function resolvePriceCents(planCode: string): number {
   if (cents === undefined) throw new UnknownPlanError();
   return cents;
 }
+
+/** 目录展示用：返回套餐月单价（分）；免费/未知 → 0（不抛错，仅展示）。 */
+export function planPriceCents(planCode: string): number {
+  return PLAN_PRICE_CENTS[planCode] ?? 0;
+}
+
+/**
+ * 组织档位席位单价（CNY 分）。**占位**：组织套餐当前由运营改订阅，无自助支付，
+ * 正式费率确定后在此登记；目录接口据此展示。
+ */
+const ORGANIZATION_SEAT_PRICE_CENTS: Readonly<Record<string, number>> = {};
+
+/** 目录展示用：组织档位席位单价（分）；未知 → 0（待运营定价）。 */
+export function organizationSeatPriceCents(planCode: string): number {
+  return ORGANIZATION_SEAT_PRICE_CENTS[planCode] ?? 0;
+}

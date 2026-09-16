@@ -304,6 +304,10 @@ export class FakePersonalPlanRepo implements IPersonalPlanRepo {
   async findByCodeInTx(_exec: Queryable, code: string): Promise<PersonalPlan | undefined> {
     return this.findByCode(code);
   }
+
+  async listActive(): Promise<PersonalPlan[]> {
+    return this.plans.filter((p) => p.status === 'active');
+  }
 }
 
 export class FakePersonalSubscriptionRepo implements IPersonalSubscriptionRepo {
@@ -610,6 +614,10 @@ export class FakeOrganizationPlanRepo implements IOrganizationPlanRepo {
 
   async findByCodeForUpdate(_exec: Queryable, code: string): Promise<OrganizationPlan | undefined> {
     return this.findByCode(code);
+  }
+
+  async listActive(): Promise<OrganizationPlan[]> {
+    return this.plans.filter((p) => p.status === 'active');
   }
 }
 

@@ -83,6 +83,7 @@ class FakePlanRepo implements IPersonalPlanRepo {
   async findByCode(code: string): Promise<PersonalPlan | undefined> { return code === 'pro' ? PLAN : undefined; }
   async findById(id: number): Promise<PersonalPlan | undefined> { return id === 2 ? PLAN : undefined; }
   async findByCodeInTx(_exec: Queryable, code: string): Promise<PersonalPlan | undefined> { return code === 'pro' ? PLAN : undefined; }
+  async listActive(): Promise<PersonalPlan[]> { return [PLAN]; }
 }
 
 class FakeSubsRepo implements IPersonalSubscriptionRepo {

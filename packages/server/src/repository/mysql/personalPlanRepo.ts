@@ -21,6 +21,14 @@ export class MysqlPersonalPlanRepo implements IPersonalPlanRepo {
     const [rows] = await exec.query<any[]>('SELECT * FROM personal_plans WHERE code = ?', [code]);
     return rows[0] ? mapPlan(rows[0]) : undefined;
   }
+
+  async listActive(): Promise<PersonalPlan[]> {
+    const [rows] = await this.db().query<any[]>(
+      'SELECT * FROM personal_plans WHERE status = ? ORDER BY id',
+      ['active'],
+    );
+    return rows.map(mapPlan);
+  }
 }
 
 function mapPlan(r: any): PersonalPlan {

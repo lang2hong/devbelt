@@ -85,6 +85,8 @@ export interface IPersonalPlanRepo {
   findById(id: number): Promise<PersonalPlan | undefined>;
   /** 事务内按 code 读（订阅调整在回执事务内解析套餐，§6.2）。 */
   findByCodeInTx(exec: Queryable, code: string): Promise<PersonalPlan | undefined>;
+  /** 列出上架（active）套餐目录，供 /api/plans 展示。 */
+  listActive(): Promise<PersonalPlan[]>;
 }
 
 export interface IPersonalSubscriptionRepo {

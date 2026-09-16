@@ -21,6 +21,14 @@ export class MysqlOrganizationPlanRepo implements IOrganizationPlanRepo {
     const [rows] = await exec.query<any[]>('SELECT * FROM organization_plans WHERE code = ? FOR UPDATE', [code]);
     return rows[0] ? mapPlan(rows[0]) : undefined;
   }
+
+  async listActive(): Promise<OrganizationPlan[]> {
+    const [rows] = await this.db().query<any[]>(
+      'SELECT * FROM organization_plans WHERE status = ? ORDER BY id',
+      ['active'],
+    );
+    return rows.map(mapPlan);
+  }
 }
 
 function mapPlan(r: any): OrganizationPlan {

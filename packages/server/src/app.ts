@@ -43,6 +43,7 @@ import { startRetentionCleanup } from './service/retentionCleanup.js';
 import { resolveEmailSender } from './service/resolveEmailSender.js';
 import { authRoutes } from './route/auth.js';
 import { meRoutes } from './route/me.js';
+import { plansRoutes, consolePlansRoutes } from './route/plans.js';
 import { personalRoutes } from './route/personal.js';
 import { organizationRoutes } from './route/organizations.js';
 import { invitationRoutes } from './route/invitations.js';
@@ -330,6 +331,7 @@ export async function createApp() {
   });
   app.register(authRoutes, { authService, tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin: config.consoleOrigin });
   app.register(meRoutes, { tokenService, getUser, getSessionActive, userRepo, personalSubscriptionRepo, personalPlanRepo });
+  app.register(plansRoutes, { tokenService, getUser, getSessionActive, personalPlanRepo, organizationPlanRepo });
   app.register(personalRoutes, { tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin: config.consoleOrigin, deviceRepo, idempotencyService, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId), revokeDeviceInTx: (tx, userId, deviceId) => authService.revokeDeviceInTx(tx, userId, deviceId) });
   app.register(organizationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin: config.consoleOrigin, organizationService, resourceService, organizationRepo, membershipRepo, auditWriter, idempotencyService, sendInvitation: (o) => organizationService.sendInvitation(o) });
   app.register(invitationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin: config.consoleOrigin, organizationService });
@@ -358,6 +360,7 @@ export async function createApp() {
     personalPlanRepo,
     membershipRepo,
   });
+  app.register(consolePlansRoutes, { tokenService, getUser, getSessionActive, personalPlanRepo, organizationPlanRepo });
   app.register(consoleDataRoutes, {
     tokenService,
     getUser,

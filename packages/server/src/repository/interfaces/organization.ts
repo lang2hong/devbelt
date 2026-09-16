@@ -26,6 +26,8 @@ export interface IOrganizationPlanRepo {
   findById(id: number): Promise<OrganizationPlan | undefined>;
   /** 在事务内锁定 plan 行（创建组织时防 plan 变更）。 */
   findByCodeForUpdate(exec: Queryable, code: string): Promise<OrganizationPlan | undefined>;
+  /** 列出上架（active）套餐目录，供 /api/plans 展示。 */
+  listActive(): Promise<OrganizationPlan[]>;
 }
 
 export interface IOrganizationRepo {
