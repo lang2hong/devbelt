@@ -11,6 +11,7 @@ import SyncView from './pages/SyncView.vue';
 import OrdersView from './pages/OrdersView.vue';
 import InvoicesView from './pages/InvoicesView.vue';
 import CheckoutView from './pages/CheckoutView.vue';
+import PlansView from './pages/PlansView.vue';
 import OrganizationsView from './pages/OrganizationsView.vue';
 import OrganizationDetailView from './pages/OrganizationDetailView.vue';
 import ResourcesView from './pages/ResourcesView.vue';
@@ -26,6 +27,7 @@ const ROUTES: RouteConfig[] = [
   { pattern: '/console/account', name: 'account' },
   { pattern: '/console/account/devices', name: 'devices' },
   { pattern: '/console/account/sync', name: 'sync' },
+  { pattern: '/console/plans', name: 'plans' },
   { pattern: '/console/orders', name: 'orders' },
   { pattern: '/console/invoices', name: 'invoices' },
   { pattern: '/console/checkout', name: 'checkout' },
@@ -58,6 +60,8 @@ const view = computed<{ comp: Component; props: Record<string, unknown> }>(() =>
       return { comp: DevicesView, props: {} };
     case 'sync':
       return { comp: SyncView, props: {} };
+    case 'plans':
+      return { comp: PlansView, props: { subscription: me_.value?.subscription ?? null } };
     case 'orders':
       return { comp: OrdersView, props: {} };
     case 'invoices':
@@ -147,6 +151,7 @@ async function onLogout(): Promise<void> {
         <a href="/console/account" @click.prevent="navigate('/console/account')" :class="{ on: router.name === 'account' }">账户</a>
         <a href="/console/account/devices" @click.prevent="navigate('/console/account/devices')" :class="{ on: router.name === 'devices' }">设备</a>
         <a href="/console/account/sync" @click.prevent="navigate('/console/account/sync')" :class="{ on: router.name === 'sync' }">同步</a>
+        <a href="/console/plans" @click.prevent="navigate('/console/plans')" :class="{ on: router.name === 'plans' }">套餐</a>
         <a href="/console/orders" @click.prevent="navigate('/console/orders')" :class="{ on: router.name === 'orders' }">订单</a>
         <a href="/console/invoices" @click.prevent="navigate('/console/invoices')" :class="{ on: router.name === 'invoices' }">发票</a>
         <a href="/console/organizations" @click.prevent="navigate('/console/organizations')" :class="{ on: router.name === 'organizations' || router.name === 'organization-detail' || router.name === 'organization-resources' }">组织</a>
