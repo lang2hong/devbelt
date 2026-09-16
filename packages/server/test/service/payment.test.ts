@@ -142,7 +142,8 @@ describe('OrderService.createOrder', () => {
     expect(order).toBeDefined();
     expect(order!.status).toBe('pending');
     expect(order!.channel).toBe('wechat');
-    expect(r.payParams.orderNo).toBe(r.orderNo);
+    expect(r.payParams.codeUrl).toBeTruthy();
+    expect(r.payParams).toEqual({ codeUrl: expect.any(String) });
   });
 
   it('creates a fresh order instead of reusing a nearly-expired pending order', async () => {

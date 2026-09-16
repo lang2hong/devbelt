@@ -9,7 +9,7 @@ import type { RateLimitService } from '../service/rateLimitService.js';
 import type { CursorService } from '../service/cursor.js';
 import type { Order } from '../domain/entities.js';
 import { FeatureTemporarilyDisabledError, ValidationError } from '../domain/errors.js';
-import { PAYMENT_CHANNELS } from '../service/paymentChannel.js';
+import { PAYMENT_CHANNELS, clientPayParams } from '../service/paymentChannel.js';
 
 /**
  * 支付订单路由（P4 切片 2，console-only）。
@@ -144,7 +144,7 @@ export async function ordersWriteRoutes(app: FastifyInstance, opts: OrdersRouteO
         }
         const r = await svc.createOrder(actor, planCode, ch, mode);
         const order = await svc.getOrder(actor, r.orderNo);
-        reply.code(201).send({ order: orderDto(order), payParams: r.payParams });
+        reply.code(201).send({ order: orderDto(order), payParams: clientPayParams(r.payParams) });
       });
     },
   });

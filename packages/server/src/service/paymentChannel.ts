@@ -15,9 +15,20 @@ import { AlipayGateway } from './alipay.js';
  * 只供测试直接依赖注入，绝不进组合根。
  */
 
-/** 下单返回给前端/扩展的支付参数（微信扫码 code_url / 支付宝跳转 url 等）。 */
+/** 下单返回给前端/扩展的支付参数：仅白名单字段，防止适配器回传多余数据外泄给客户端。 */
 export interface PrepayParams {
-  [key: string]: unknown;
+  /** 扫码模式：二维码内容/链接。 */
+  codeUrl?: string;
+  /** 跳转模式：收银台 URL。 */
+  redirectUrl?: string;
+}
+
+/** 边界白名单：只透出 codeUrl/redirectUrl，忽略适配器可能附加的其它字段。 */
+export function clientPayParams(params: PrepayParams): PrepayParams {
+  const out: PrepayParams = {};
+  if (typeof params.codeUrl === 'string') out.codeUrl = params.codeUrl;
+  if (typeof params.redirectUrl === 'string') out.redirectUrl = params.redirectUrl;
+  return out;
 }
 
 /** 回调解析后的归一化交易信息（校验通过后由 parse 产出）。 */
@@ -67,15 +78,9 @@ export class MemoryPaymentGateway implements PaymentGateway {
   async createPayment(input: { orderNo: string; amountCents: number; expiresTime: Date; mode?: 'qr' | 'redirect' }): Promise<PrepayParams> {
     // stub：qr 模式返回 code_url，redirect 模式返回跳转链接；缺省按渠道（微信默认扫码、支付宝默认跳转）。
     const mode = input.mode ?? (this.channel === 'wechat' ? 'qr' : 'redirect');
-    const common = {
-      orderNo: input.orderNo,
-      amountCents: input.amountCents,
-      expiresTime: input.expiresTime.toISOString(),
-      channel: this.channel,
-    };
     return mode === 'qr'
-      ? { ...common, codeUrl: this.channel === 'wechat' ? 'weixin://wxpay/mock-code-url' : 'https://openapi.alipay.com/mock-qr' }
-      : { ...common, redirectUrl: this.channel === 'wechat' ? 'https://wx.tenpay.com/mock-h5-redirect' : 'https://openapi.alipay.com/mock-redirect' };
+      ? { codeUrl: this.channel === 'wechat' ? 'weixin://wxpay/mock-code-url' : 'https://openapi.alipay.com/mock-qr' }
+      : { redirectUrl: this.channel === 'wechat' ? 'https://wx.tenpay.com/mock-h5-redirect' : 'https://openapi.alipay.com/mock-redirect' };
   }
 
   verifyCallback(rawBody: Buffer, headers: Record<string, string>): boolean {

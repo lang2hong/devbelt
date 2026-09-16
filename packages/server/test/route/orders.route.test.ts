@@ -122,7 +122,8 @@ describe('orders routes', () => {
     const body = res.json();
     expect(body.order.status).toBe('pending');
     expect(body.order.amountCents).toBe(9900);
-    expect(body.payParams.orderNo).toBe(body.order.orderNo);
+    expect(body.payParams.codeUrl).toBeTruthy();
+    expect(body.payParams).toEqual({ codeUrl: expect.any(String) });
   });
 
   it('rejects a create without CSRF/origin with 403', async () => {
