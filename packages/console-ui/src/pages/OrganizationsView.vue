@@ -59,14 +59,18 @@ async function create(): Promise<void> {
 
 <template>
   <section class="page">
-    <h2>组织</h2>
+    <header class="head">
+      <h2>组织</h2>
+      <p class="sub">创建并管理你的协作组织。</p>
+    </header>
 
     <div class="card">
       <h3>创建组织</h3>
-      <label>名称</label>
-      <input v-model="name" type="text" maxlength="100" placeholder="组织名称" />
+      <div class="inline">
+        <input v-model="name" type="text" maxlength="100" placeholder="组织名称" />
+        <button class="btn accent" :disabled="creating" @click="create">{{ creating ? '创建中…' : '创建' }}</button>
+      </div>
       <p v-if="error" class="error">{{ error }}</p>
-      <button class="btn" :disabled="creating" @click="create">{{ creating ? '创建中…' : '创建' }}</button>
     </div>
 
     <p class="muted" v-if="state === 'loading'">加载中…</p>
@@ -85,14 +89,19 @@ async function create(): Promise<void> {
 </template>
 
 <style scoped>
-.page { max-width: 620px; margin: 0 auto; }
-h2 { font-size: 20px; font-weight: 700; color: var(--c-text); }
-.card { background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; }
-h3 { font-size: 15px; font-weight: 600; color: var(--c-text); margin: 0 0 12px; }
-label { display: block; font-size: 13px; color: var(--c-text-muted); margin: 0 0 4px; }
-input { width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--c-border-strong); border-radius: 6px; font-size: 14px; }
-.btn { margin-top: 12px; background: var(--c-accent); color: var(--c-surface); border: none; padding: 9px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.page { max-width: 640px; margin: 0 auto; }
+.head { margin-bottom: 20px; }
+.head h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+.sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
+.card { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); padding: 20px 22px; margin-bottom: 16px; }
+h3 { font-size: 14px; font-weight: 600; color: var(--c-text); margin: 0 0 12px; }
+.inline { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+input { width: 100%; box-sizing: border-box; }
+.btn { height: 34px; padding: 0 16px; background: var(--c-success); color: #fff; border: none; border-radius: var(--r-md); font-size: 13px; font-weight: 600; cursor: pointer; }
+.btn.accent { background: var(--c-accent); }
 .btn:disabled { opacity: 0.6; cursor: default; }
+.item { transition: border-color .15s; }
+.item:hover { border-color: var(--c-accent); }
 .list { list-style: none; padding: 0; margin: 0; }
 .item { background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; margin-bottom: 10px; }
 .link { display: flex; flex-direction: column; gap: 2px; padding: 14px 16px; cursor: pointer; }

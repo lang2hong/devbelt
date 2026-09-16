@@ -76,69 +76,82 @@ async function submitPassword(): Promise<void> {
 
 <template>
   <section class="page">
-    <h2>账户</h2>
+    <header class="head">
+      <h2>账户</h2>
+      <p class="sub">管理你的登录信息与订阅。</p>
+    </header>
 
     <div class="card">
       <h3>基本信息</h3>
-      <p class="row">邮箱：{{ user?.email ?? '' }}</p>
-      <p class="row" v-if="user">
-        验证状态：
-        <span v-if="user.emailVerified" class="ok">已验证</span>
-        <span v-else class="warn">未验证</span>
-      </p>
-      <label>显示名</label>
-      <input v-model="displayName" type="text" maxlength="100" />
+      <div class="kv"><span class="k">邮箱</span><span class="v">{{ user?.email ?? '' }}</span></div>
+      <div class="kv" v-if="user">
+        <span class="k">验证状态</span>
+        <span class="v"><span class="badge" :class="user.emailVerified ? 'ok' : 'warn'">{{ user.emailVerified ? '已验证' : '未验证' }}</span></span>
+      </div>
+      <div class="field">
+        <label>显示名</label>
+        <input v-model="displayName" type="text" maxlength="100" />
+      </div>
       <p v-if="nameError" class="error">{{ nameError }}</p>
       <p v-if="nameSaved" class="ok">已保存。</p>
-      <button class="btn" :disabled="nameSaving" @click="saveName">{{ nameSaving ? '保存中…' : '保存' }}</button>
+      <div class="actions"><button class="btn" :disabled="nameSaving" @click="saveName">{{ nameSaving ? '保存中…' : '保存' }}</button></div>
     </div>
 
     <div class="card">
       <h3>订阅</h3>
-      <p class="row" v-if="subscription">
-        当前套餐：<strong>{{ subscription.planCode === 'pro' ? 'Pro' : (subscription.planCode ?? '—') }}</strong>
-        <span class="muted">（{{ subscription.status === 'active' ? '生效中' : subscription.status }}）</span>
-      </p>
-      <p class="row" v-if="subscription?.periodEndTime">到期时间：{{ formatDateTime(subscription.periodEndTime) }}</p>
-      <p class="row muted" v-if="!subscription">暂无订阅。</p>
-      <button v-if="subscription?.planCode !== 'pro'" class="btn" @click="navigate('/console/checkout')">升级 Pro</button>
+      <template v-if="subscription">
+        <div class="kv"><span class="k">当前套餐</span><span class="v"><strong>{{ subscription.planCode === 'pro' ? 'Pro' : (subscription.planCode ?? '—') }}</strong> <span class="badge" :class="subscription.status === 'active' ? 'ok' : ''">{{ subscription.status === 'active' ? '生效中' : subscription.status }}</span></span></div>
+        <div class="kv" v-if="subscription.periodEndTime"><span class="k">到期时间</span><span class="v">{{ formatDateTime(subscription.periodEndTime) }}</span></div>
+      </template>
+      <p class="muted" v-else>暂无订阅。</p>
+      <div class="actions" v-if="subscription?.planCode !== 'pro'"><button class="btn accent" @click="navigate('/console/checkout')">升级 Pro</button></div>
     </div>
 
     <div class="card">
       <h3>修改密码</h3>
-      <label>当前密码</label>
-      <input v-model="current" :type="showPassword ? 'text' : 'password'" autocomplete="current-password" required />
-      <label>新密码（9–128 字符）</label>
-      <div class="pw">
-        <input v-model="next" :type="showPassword ? 'text' : 'password'" autocomplete="new-password" required />
-        <button type="button" class="toggle" :aria-label="showPassword ? '隐藏密码' : '显示密码'" @click="showPassword = !showPassword">{{ showPassword ? '🙈' : '👁' }}</button>
+      <div class="field"><label>当前密码</label><input v-model="current" :type="showPassword ? 'text' : 'password'" autocomplete="current-password" required /></div>
+      <div class="field">
+        <label>新密码（9–128 字符）</label>
+        <div class="pw">
+          <input v-model="next" :type="showPassword ? 'text' : 'password'" autocomplete="new-password" required />
+          <button type="button" class="toggle" :aria-label="showPassword ? '隐藏密码' : '显示密码'" @click="showPassword = !showPassword">{{ showPassword ? '🙈' : '' }}</button>
+        </div>
       </div>
-      <label>确认新密码</label>
-      <input v-model="confirm" :type="showPassword ? 'text' : 'password'" autocomplete="new-password" required />
+      <div class="field"><label>确认新密码</label><input v-model="confirm" :type="showPassword ? 'text' : 'password'" autocomplete="new-password" required /></div>
       <p v-if="pwError" class="error">{{ pwError }}</p>
-      <p class="muted">修改密码后将退出全部设备，需重新登录。</p>
-      <button class="btn danger" :disabled="pwSubmitting" @click="submitPassword">{{ pwSubmitting ? '提交中…' : '修改密码' }}</button>
+      <p class="muted small">修改密码后将退出全部设备，需重新登录。</p>
+      <div class="actions"><button class="btn danger" :disabled="pwSubmitting" @click="submitPassword">{{ pwSubmitting ? '提交中…' : '修改密码' }}</button></div>
     </div>
   </section>
 </template>
 
 <style scoped>
-.page { max-width: 620px; margin: 0 auto; }
-.card { background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; }
-h2 { font-size: 20px; font-weight: 700; color: var(--c-text); }
-h3 { font-size: 15px; font-weight: 600; color: var(--c-text); margin: 0 0 12px; }
-.row { margin: 8px 0; color: var(--c-text); }
-label { display: block; font-size: 13px; color: var(--c-text-muted); margin: 12px 0 4px; }
-input { width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--c-border-strong); border-radius: 6px; font-size: 14px; }
+.page { max-width: 640px; margin: 0 auto; }
+.head { margin-bottom: 20px; }
+.head h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+.sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
+.card { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); padding: 20px 22px; margin-bottom: 16px; }
+h3 { font-size: 14px; font-weight: 600; margin: 0 0 14px; }
+.kv { display: grid; grid-template-columns: 96px 1fr; gap: 12px; align-items: center; padding: 6px 0; }
+.kv .k { color: var(--c-text-muted); font-size: 13px; }
+.kv .v { font-size: 13.5px; }
+.field { display: flex; flex-direction: column; gap: 5px; margin-top: 12px; }
+label { font-size: 12px; color: var(--c-text-muted); }
+input { width: 100%; box-sizing: border-box; }
 .pw { position: relative; }
-.pw input { width: 100%; padding-right: 38px; }
-.toggle { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); border: none; background: none; cursor: pointer; font-size: 16px; line-height: 1; padding: 2px; opacity: 0.55; }
+.pw input { padding-right: 38px; }
+.toggle { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); border: none; background: none; cursor: pointer; font-size: 15px; line-height: 1; padding: 2px; opacity: .55; }
 .toggle:hover { opacity: 1; }
-.btn { margin-top: 16px; background: var(--c-accent); color: var(--c-surface); border: none; padding: 9px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
-.btn:disabled { opacity: 0.6; cursor: default; }
+.actions { margin-top: 16px; }
+.btn { height: 34px; padding: 0 16px; border: none; border-radius: var(--r-md); font-size: 13px; font-weight: 600; cursor: pointer; background: var(--c-success); color: #fff; }
+.btn.accent { background: var(--c-accent); }
 .btn.danger { background: var(--c-danger); }
+.btn:disabled { opacity: .6; cursor: default; }
+.badge { display: inline-flex; padding: 1px 8px; border-radius: var(--r-pill); font-size: 12px; background: #eaeef2; color: var(--c-text-muted); }
+.badge.ok { background: var(--c-success-bg); color: var(--c-success-text); }
+.badge.warn { background: var(--c-warn-bg); color: var(--c-warn-text); }
 .error { color: var(--c-danger); font-size: 13px; }
 .ok { color: var(--c-success-text); font-size: 13px; }
-.warn { color: var(--c-warn-text); font-size: 13px; }
 .muted { color: var(--c-text-muted); font-size: 13px; }
+.small { font-size: 12px; }
 </style>

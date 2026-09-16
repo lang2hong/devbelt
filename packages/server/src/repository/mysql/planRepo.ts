@@ -143,7 +143,7 @@ export class MysqlPlanFeatureDefRepo implements IPlanFeatureDefRepo {
   constructor(private readonly db: () => MysqlDb) {}
 
   async listAll(): Promise<PlanFeatureDef[]> {
-    const [rows] = await this.db().query<any[]>('SELECT * FROM plan_feature_defs ORDER BY kind, sort_order, id');
+    const [rows] = await this.db().query<any[]>('SELECT * FROM plan_feature_defs ORDER BY sort_order, kind, id');
     return rows.map(mapDef);
   }
 

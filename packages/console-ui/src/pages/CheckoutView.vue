@@ -292,7 +292,10 @@ onMounted(async () => {
 
 <template>
   <section class="page">
-    <h2>升级订阅</h2>
+    <header class="head">
+      <h2>升级订阅</h2>
+      <p class="sub">选择支付方式完成 Pro 订阅。</p>
+    </header>
 
     <div class="card">
       <h3>当前套餐</h3>
@@ -360,10 +363,15 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.page { max-width: 620px; margin: 0 auto; }
-.card { background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; }
-h2 { font-size: 20px; font-weight: 700; color: var(--c-text); }
-h3 { font-size: 15px; font-weight: 600; color: var(--c-text); margin: 0 0 12px; }
+.page { max-width: 640px; margin: 0 auto; }
+.head { margin-bottom: 20px; }
+.head h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+.sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
+.card { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); padding: 20px 22px; margin-bottom: 16px; }
+h3 { font-size: 14px; font-weight: 600; color: var(--c-text); margin: 0 0 12px; }
+.channels { display: flex; gap: 8px; margin: 4px 0 10px; }
+.radio { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--c-text); padding: 6px 12px; border: 1px solid var(--c-border-strong); border-radius: var(--r-sm); cursor: pointer; }
+.radio:has(input:checked) { border-color: var(--c-accent); background: var(--c-accent-bg); color: var(--c-accent-text); }
 .row { margin: 8px 0; color: var(--c-text); }
 label { display: block; font-size: 13px; color: var(--c-text-muted); margin: 12px 0 4px; }
 .channels { display: flex; gap: 16px; margin: 4px 0 8px; }

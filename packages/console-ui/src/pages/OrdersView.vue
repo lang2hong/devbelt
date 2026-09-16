@@ -76,7 +76,10 @@ onMounted(() => load());
 
 <template>
   <section class="page">
-    <h2>订单</h2>
+    <header class="head">
+      <h2>订单</h2>
+      <p class="sub">查看历史订单与支付状态。</p>
+    </header>
 
     <div class="bar">
       <select v-model="statusFilter">
@@ -125,9 +128,16 @@ onMounted(() => load());
 </template>
 
 <style scoped>
-.page { max-width: 620px; margin: 0 auto; }
-h2 { font-size: 20px; font-weight: 700; color: var(--c-text); }
-.bar { display: flex; gap: 8px; margin: 16px 0; }
+.page { max-width: 720px; margin: 0 auto; }
+.head { margin-bottom: 16px; }
+.head h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+.sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
+.bar { display: flex; gap: 8px; margin: 0 0 16px; }
+.bar select { max-width: 180px; }
+.item { transition: border-color .15s; }
+.item:hover { border-color: var(--c-border-strong); }
+.reorder .btn { background: var(--c-surface-muted); color: var(--c-text); border: 1px solid var(--c-border-strong); font-weight: 500; }
+.load-more .btn { background: var(--c-surface-muted); color: var(--c-text); border: 1px solid var(--c-border-strong); font-weight: 500; }
 select { box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--c-border-strong); border-radius: 6px; font-size: 14px; }
 .list { list-style: none; padding: 0; margin: 16px 0 0; }
 .item { background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
