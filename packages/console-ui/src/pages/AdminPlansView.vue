@@ -6,10 +6,10 @@ import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import AdminNav from './AdminNav.vue';
 
 /**
- * 套餐管理：编辑 name/价格/上下架/排序 + 特性值（按 value_type 渲染专用控件），
- * 以及「特性定义」目录（en/zh 标签、类型、单位、排序）的维护。
- * 保存为整组事务替换 + 乐观锁（version）；冲突提示刷新后重试。
- * 兜底档（free/organization_free）不可归档——服务端会拒，前端同时禁用归档选项。
+ * 套餐管理：顶部标签页（套餐 / 特性定义）。
+ * - 套餐：分段切换个人/组织 → 套餐胶囊选择 → 全宽表单（基本信息 / 特性）→ 粘性保存栏。
+ * - 特性定义：表格列出，选中后在下方编辑 en/zh 标签、类型、单位、排序。
+ * 保存为整组事务替换 + 乐观锁；兜底档（free/organization_free）不可归档。
  */
 
 const ENGINE_KEYS = new Set(['allowedDatabaseTypes', 'allowedTemplateDatabaseTypes']);
@@ -33,6 +33,9 @@ interface EditableFeature {
   bytesUnit: 'MiB' | 'GiB';
 }
 
+const tab = ref<'plans' | 'defs'>('plans');
+const kindTab = ref<'personal' | 'organization'>('personal');
+
 const state = ref<'loading' | 'ready' | 'error'>('loading');
 const plans = ref<AdminPlan[]>([]);
 const featureDefs = ref<AdminFeatureDef[]>([]);
@@ -48,7 +51,7 @@ const status = ref<'active' | 'archived'>('active');
 const reason = ref('admin console plan edit');
 const features = ref<EditableFeature[]>([]);
 
-// 特性定义编辑
+const editingDef = ref(false);
 const defKey = ref('');
 const defKind = ref('personal');
 const defEn = ref('');
@@ -64,20 +67,18 @@ const defError = ref('');
 const idem = useIdempotencyKey();
 const defIdem = useIdempotencyKey();
 
+const plansOfKind = computed(() => plans.value.filter((p) => p.kind === kindTab.value));
 const selected = computed(() => plans.value.find((p) => p.id === selectedId.value) ?? null);
 const isFallback = computed(() => selected.value != null && ['free', 'organization_free'].includes(selected.value.code));
+const defsOfKind = computed(() => featureDefs.value.filter((d) => d.kind === 'both' || d.kind === kindTab.value));
 
 function labelOf(f: { label?: { en: string; zh: string }; key: string }): string {
   return f.label?.zh || f.label?.en || f.key;
 }
 
-function defsForPlan(plan: AdminPlan): AdminFeatureDef[] {
-  return featureDefs.value.filter((d) => d.kind === 'both' || d.kind === plan.kind);
-}
-
 function toEditable(plan: AdminPlan): EditableFeature[] {
-  return defsForPlan(plan)
-    .filter((d) => d.key in plan.features)
+  return featureDefs.value
+    .filter((d) => (d.kind === 'both' || d.kind === plan.kind) && d.key in plan.features)
     .map((d) => {
       const v = plan.features[d.key];
       const engines = ENGINE_KEYS.has(d.key) && Array.isArray(v) ? (v as string[]) : [];
@@ -100,6 +101,7 @@ function toEditable(plan: AdminPlan): EditableFeature[] {
 
 function select(plan: AdminPlan): void {
   selectedId.value = plan.id;
+  kindTab.value = plan.kind === 'organization' ? 'organization' : 'personal';
   name.value = plan.name;
   priceYuan.value = plan.priceCents / 100;
   sortOrder.value = plan.sortOrder;
@@ -107,6 +109,16 @@ function select(plan: AdminPlan): void {
   features.value = toEditable(plan);
   errorMsg.value = '';
   okMsg.value = '';
+}
+
+function switchKind(kind: 'personal' | 'organization'): void {
+  kindTab.value = kind;
+  const first = plans.value.find((p) => p.kind === kind);
+  if (first) select(first);
+}
+
+function toggleStatus(e: Event): void {
+  status.value = (e.target as HTMLInputElement).checked ? 'active' : 'archived';
 }
 
 function isEngineFeature(f: EditableFeature): boolean {
@@ -119,10 +131,7 @@ function toggleEngine(f: EditableFeature, engine: string): void {
 
 function featureValue(f: EditableFeature): unknown {
   if (f.valueType === 'bool') return f.boolValue;
-  if (f.valueType === 'bytes') {
-    const factor = f.bytesUnit === 'GiB' ? BYTES_PER_GIB : BYTES_PER_MIB;
-    return Math.round(Number(f.numberValue) * factor);
-  }
+  if (f.valueType === 'bytes') return Math.round(Number(f.numberValue) * (f.bytesUnit === 'GiB' ? BYTES_PER_GIB : BYTES_PER_MIB));
   if (f.valueType === 'number') return Number(f.numberValue);
   if (f.valueType === 'stringList') {
     if (isEngineFeature(f)) return f.engines;
@@ -149,7 +158,7 @@ async function refresh(): Promise<void> {
 async function load(): Promise<void> {
   state.value = 'loading';
   await refresh();
-  if (state.value === 'ready' && plans.value.length > 0) select(plans.value[0]);
+  if (state.value === 'ready' && plans.value.length > 0) select(plans.value.find((p) => p.kind === 'personal') ?? plans.value[0]);
 }
 
 async function save(): Promise<void> {
@@ -195,7 +204,21 @@ async function save(): Promise<void> {
   }
 }
 
+function startNewDef(): void {
+  editingDef.value = true;
+  defKey.value = '';
+  defKind.value = kindTab.value;
+  defEn.value = '';
+  defZh.value = '';
+  defType.value = 'number';
+  defUnit.value = '';
+  defSort.value = 0;
+  defMsg.value = '';
+  defError.value = '';
+}
+
 function editDef(d: AdminFeatureDef): void {
+  editingDef.value = true;
   defKey.value = d.key;
   defKind.value = d.kind;
   defEn.value = d.label.en;
@@ -232,6 +255,7 @@ async function saveDef(): Promise<void> {
     if (r.kind === 'ok') {
       defIdem.reset(tag);
       defMsg.value = '特性定义已保存。';
+      editingDef.value = false;
       await refresh();
     } else if (r.kind === 'bad-request') {
       defIdem.reset(tag);
@@ -251,133 +275,276 @@ onMounted(load);
 <template>
   <section class="page">
     <AdminNav />
-    <h2>套餐</h2>
-    <p class="muted">编辑套餐价格、上下架与特性值。兜底档（Free）不可归档。</p>
+
+    <header class="head">
+      <div>
+        <h1>套餐</h1>
+        <p class="sub">配置各套餐的价格与能力。特性改动会立即作用于对应订阅者。</p>
+      </div>
+      <div class="tabs">
+        <button :class="{ on: tab === 'plans' }" @click="tab = 'plans'">套餐</button>
+        <button :class="{ on: tab === 'defs' }" @click="tab = 'defs'">特性定义</button>
+      </div>
+    </header>
 
     <p v-if="state === 'loading'" class="muted">加载中…</p>
     <p v-else-if="state === 'error'" class="error">加载失败。</p>
 
-    <template v-else>
-      <div class="layout">
-        <ul class="list">
-          <li v-for="p in plans" :key="p.id" :class="{ on: p.id === selectedId }" @click="select(p)">
-            <span class="code">{{ p.name }}</span>
-            <span class="muted">{{ p.code }} · v{{ p.version }} · {{ p.status === 'active' ? '上架' : '下架' }}</span>
-          </li>
-        </ul>
+    <!-- ── 套餐 ── -->
+    <template v-else-if="tab === 'plans'">
+      <div class="toolbar">
+        <div class="segmented">
+          <button :class="{ on: kindTab === 'personal' }" @click="switchKind('personal')">个人</button>
+          <button :class="{ on: kindTab === 'organization' }" @click="switchKind('organization')">组织</button>
+        </div>
+        <div class="pills">
+          <button
+            v-for="p in plansOfKind"
+            :key="p.id"
+            class="pill"
+            :class="{ on: p.id === selectedId }"
+            @click="select(p)"
+          >
+            <span class="dot" :class="p.status"></span>{{ p.name }}
+          </button>
+        </div>
+      </div>
 
-        <div v-if="selected" class="editor">
-          <label>名称</label>
-          <input v-model="name" type="text" maxlength="64" />
-
-          <label>价格（元）</label>
-          <input v-model.number="priceYuan" type="number" min="0" step="0.01" />
-
-          <label>排序</label>
-          <input v-model.number="sortOrder" type="number" />
-
-          <label>变更原因（审计）</label>
-          <input v-model="reason" type="text" maxlength="500" data-testid="reason" />
-
-          <label>状态</label>
-          <select v-model="status">
-            <option value="active">上架</option>
-            <option value="archived" :disabled="isFallback">下架</option>
-          </select>
-
-          <h3>特性</h3>
-          <div v-for="f in features" :key="f.key" class="feature">
-            <span class="flabel">{{ labelOf(f) }}<span class="keyhint">{{ f.key }}</span><span class="muted" v-if="f.unit">（{{ f.unit }}）</span></span>
-
-            <div v-if="isEngineFeature(f)" class="engines">
-              <label v-for="e in f.engineOptions" :key="e" class="chk">
-                <input type="checkbox" :checked="f.engines.includes(e)" @change="toggleEngine(f, e)" /> {{ e }}
+      <template v-if="selected">
+        <section class="card">
+          <div class="card-head">基本信息</div>
+          <div class="grid">
+            <div class="field">
+              <label>名称</label>
+              <input v-model="name" type="text" maxlength="64" />
+            </div>
+            <div class="field">
+              <label>价格</label>
+              <div class="suffix">
+                <input v-model.number="priceYuan" type="number" min="0" step="0.01" />
+                <span>元 / {{ selected.billingUnit === 'seat-month' ? '席·月' : '月' }}</span>
+              </div>
+            </div>
+            <div class="field">
+              <label>排序</label>
+              <input v-model.number="sortOrder" type="number" />
+            </div>
+            <div class="field">
+              <label>状态</label>
+              <label class="switch">
+                <input type="checkbox" :checked="status === 'active'" :disabled="isFallback" @change="toggleStatus" />
+                <span class="track"><span class="thumb"></span></span>
+                <span class="switch-label">{{ status === 'active' ? '上架' : '下架' }}</span>
               </label>
             </div>
-
-            <input v-else-if="f.valueType === 'bool'" v-model="f.boolValue" type="checkbox" />
-
-            <div v-else-if="f.valueType === 'bytes'" class="bytes">
-              <input v-model.number="f.numberValue" type="number" min="0" step="1" />
-              <select v-model="f.bytesUnit">
-                <option value="MiB">MiB</option>
-                <option value="GiB">GiB</option>
-              </select>
+            <div class="field span2">
+              <label>变更原因（审计）</label>
+              <input v-model="reason" type="text" maxlength="500" data-testid="reason" />
             </div>
-
-            <input v-else-if="f.valueType === 'number'" v-model.number="f.numberValue" type="number" min="0" step="1" />
-
-            <input v-else-if="f.valueType === 'stringList'" v-model="f.listValue" type="text" placeholder="逗号分隔" />
-
-            <input v-else v-model="f.stringValue" type="text" />
           </div>
+        </section>
 
-          <p v-if="errorMsg" class="error">{{ errorMsg }}</p>
-          <p v-if="okMsg" class="ok">{{ okMsg }}</p>
+        <section class="card">
+          <div class="card-head">特性</div>
+          <div class="rows">
+            <div v-for="f in features" :key="f.key" class="row">
+              <div class="row-label">
+                <span class="row-name">{{ labelOf(f) }}</span>
+                <span class="row-key">{{ f.key }}<template v-if="f.unit"> · {{ f.unit }}</template></span>
+              </div>
+              <div class="row-control">
+                <div v-if="isEngineFeature(f)" class="chips">
+                  <button
+                    v-for="e in f.engineOptions"
+                    :key="e"
+                    class="chip"
+                    :class="{ on: f.engines.includes(e) }"
+                    @click="toggleEngine(f, e)"
+                  >{{ e }}</button>
+                </div>
+
+                <label v-else-if="f.valueType === 'bool'" class="switch">
+                  <input type="checkbox" v-model="f.boolValue" />
+                  <span class="track"><span class="thumb"></span></span>
+                  <span class="switch-label">{{ f.boolValue ? '允许' : '不允许' }}</span>
+                </label>
+
+                <div v-else-if="f.valueType === 'bytes'" class="suffix narrow">
+                  <input v-model.number="f.numberValue" type="number" min="0" step="1" />
+                  <select v-model="f.bytesUnit"><option value="MiB">MiB</option><option value="GiB">GiB</option></select>
+                </div>
+
+                <div v-else-if="f.valueType === 'number'" class="suffix narrow">
+                  <input v-model.number="f.numberValue" type="number" min="0" step="1" />
+                  <span>{{ f.numberValue === 0 ? '不限' : '' }}</span>
+                </div>
+
+                <input v-else-if="f.valueType === 'stringList'" v-model="f.listValue" type="text" placeholder="逗号分隔" />
+
+                <input v-else v-model="f.stringValue" type="text" />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="savebar">
+          <span v-if="errorMsg" class="error">{{ errorMsg }}</span>
+          <span v-else-if="okMsg" class="ok">{{ okMsg }}</span>
+          <span v-else class="muted">版本 v{{ selected.version }}</span>
+          <span class="spacer"></span>
           <button class="btn" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
         </div>
+      </template>
+    </template>
+
+    <!-- ── 特性定义 ── -->
+    <template v-else>
+      <div class="toolbar">
+        <div class="segmented">
+          <button :class="{ on: kindTab === 'personal' }" @click="switchKind('personal')">个人</button>
+          <button :class="{ on: kindTab === 'organization' }" @click="switchKind('organization')">组织</button>
+        </div>
+        <span class="spacer"></span>
+        <button class="btn ghost" @click="startNewDef">新增特性</button>
       </div>
 
-      <div class="card">
-        <h3>特性定义</h3>
-        <p class="muted">维护特性的中文/英文标签、类型、单位与排序。key 一旦创建不建议更改。</p>
-        <div class="defLayout">
-          <ul class="list defs">
-            <li v-for="d in featureDefs" :key="d.key" :class="{ on: d.key === defKey }" @click="editDef(d)">
-              <span class="code">{{ labelOf(d) }}</span>
-              <span class="muted">{{ d.key }} · {{ d.kind }} · {{ d.valueType }}</span>
-            </li>
-          </ul>
-          <div class="editor">
+      <div class="card table-wrap">
+        <table class="table">
+          <thead>
+            <tr><th>标签</th><th>key</th><th>类型</th><th>单位</th><th>排序</th><th></th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="d in defsOfKind" :key="d.key" :class="{ on: d.key === defKey && editingDef }">
+              <td>{{ labelOf(d) }}</td>
+              <td class="mono">{{ d.key }}</td>
+              <td>{{ d.valueType }}</td>
+              <td>{{ d.unit ?? '—' }}</td>
+              <td>{{ d.sortOrder }}</td>
+              <td><button class="link" @click="editDef(d)">编辑</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <section v-if="editingDef" class="card">
+        <div class="card-head">{{ defKey ? `编辑：${defKey}` : '新增特性' }}</div>
+        <div class="grid">
+          <div class="field">
             <label>key</label>
             <input v-model="defKey" type="text" maxlength="64" />
+          </div>
+          <div class="field">
             <label>适用档位</label>
             <select v-model="defKind"><option v-for="k in KINDS" :key="k" :value="k">{{ k }}</option></select>
+          </div>
+          <div class="field">
             <label>中文标签</label>
             <input v-model="defZh" type="text" maxlength="64" />
+          </div>
+          <div class="field">
             <label>英文标签</label>
             <input v-model="defEn" type="text" maxlength="64" />
+          </div>
+          <div class="field">
             <label>值类型</label>
             <select v-model="defType"><option v-for="t in VALUE_TYPES" :key="t" :value="t">{{ t }}</option></select>
+          </div>
+          <div class="field">
             <label>单位（可空）</label>
             <input v-model="defUnit" type="text" maxlength="16" />
+          </div>
+          <div class="field">
             <label>排序</label>
             <input v-model.number="defSort" type="number" />
+          </div>
+          <div class="field">
             <label>变更原因（审计）</label>
             <input v-model="defReason" type="text" maxlength="500" />
-            <p v-if="defError" class="error">{{ defError }}</p>
-            <p v-if="defMsg" class="ok">{{ defMsg }}</p>
-            <button class="btn" :disabled="defSaving" @click="saveDef">{{ defSaving ? '保存中…' : '保存特性定义' }}</button>
           </div>
         </div>
-      </div>
+        <div class="savebar inline">
+          <span v-if="defError" class="error">{{ defError }}</span>
+          <span v-else-if="defMsg" class="ok">{{ defMsg }}</span>
+          <span class="spacer"></span>
+          <button class="btn ghost" @click="editingDef = false">取消</button>
+          <button class="btn" :disabled="defSaving" @click="saveDef">{{ defSaving ? '保存中…' : '保存' }}</button>
+        </div>
+      </section>
     </template>
   </section>
 </template>
 
 <style scoped>
-.page { max-width: 900px; margin: 0 auto; }
-h2 { font-size: 20px; font-weight: 700; color: #0f172a; }
-h3 { font-size: 14px; font-weight: 600; margin: 18px 0 8px; }
-.layout, .defLayout { display: flex; gap: 24px; margin-top: 12px; }
-.list { list-style: none; padding: 0; margin: 0; width: 260px; }
-.list li { padding: 10px 12px; border: 1px solid #d0d7de; border-radius: 6px; margin-bottom: 8px; cursor: pointer; display: flex; flex-direction: column; }
-.list li.on { border-color: #0969da; background: #f0f6ff; }
-.code { font-weight: 600; color: #0f172a; }
-.editor { flex: 1; background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 18px 20px; }
-.card { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 18px 20px; margin-top: 24px; }
-label { display: block; font-size: 13px; color: #57606a; margin: 10px 0 4px; }
-input[type='text'], input[type='number'], select { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; }
-.feature { display: grid; grid-template-columns: 240px 1fr; align-items: center; gap: 12px; margin: 6px 0; }
-.flabel { font-size: 13px; color: #24292f; }
-.keyhint { margin-left: 8px; font-size: 11px; color: #8c959f; font-family: monospace; }
-.engines { display: flex; flex-wrap: wrap; gap: 14px; }
-.chk { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; color: #24292f; }
-.chk input { width: auto; }
-.bytes { display: grid; grid-template-columns: 1fr 110px; gap: 8px; }
-.btn { margin-top: 16px; background: #0969da; color: #fff; border: none; padding: 9px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
-.btn:disabled { opacity: 0.6; }
+.page { max-width: 960px; margin: 0 auto; color: #1f2328; }
+.head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin: 8px 0 16px; }
+h1 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+.sub { margin: 4px 0 0; font-size: 13px; color: #656d76; }
+
+.tabs { display: inline-flex; gap: 4px; background: #eaeef2; padding: 3px; border-radius: 8px; }
+.tabs button { border: none; background: transparent; padding: 6px 14px; border-radius: 6px; font-size: 13px; color: #57606a; cursor: pointer; }
+.tabs button.on { background: #fff; color: #1f2328; box-shadow: 0 1px 2px rgba(31,35,40,.12); font-weight: 600; }
+
+.toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.segmented { display: inline-flex; gap: 4px; background: #eaeef2; padding: 3px; border-radius: 8px; }
+.segmented button { border: none; background: transparent; padding: 5px 14px; border-radius: 6px; font-size: 13px; color: #57606a; cursor: pointer; }
+.segmented button.on { background: #fff; color: #1f2328; box-shadow: 0 1px 2px rgba(31,35,40,.12); font-weight: 600; }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #d0d7de; background: #fff; color: #24292f; padding: 6px 14px; border-radius: 999px; font-size: 13px; cursor: pointer; }
+.pill.on { border-color: #0969da; background: #ddf4ff; color: #0550ae; font-weight: 600; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: #8c959f; }
+.dot.active { background: #1a7f37; }
+
+.card { background: #fff; border: 1px solid #d8dee4; border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
+.card-head { font-size: 14px; font-weight: 600; margin-bottom: 14px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; }
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.field.span2 { grid-column: 1 / -1; }
+.field label { font-size: 12px; color: #656d76; }
+input[type='text'], input[type='number'], select { width: 100%; box-sizing: border-box; height: 34px; padding: 0 11px; border: 1px solid #d0d7de; border-radius: 7px; font-size: 13px; background: #fff; color: inherit; }
+input:focus, select:focus { outline: none; border-color: #0969da; box-shadow: 0 0 0 3px rgba(9,105,218,.15); }
+.suffix { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; }
+.suffix > span { font-size: 12px; color: #656d76; white-space: nowrap; }
+.suffix.narrow { max-width: 280px; }
+.suffix select { width: 92px; }
+
+.rows { border: 1px solid #d8dee4; border-radius: 8px; overflow: hidden; }
+.row { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(280px, 1.2fr); gap: 16px; align-items: center; padding: 12px 16px; }
+.row + .row { border-top: 1px solid #eaeef2; }
+.row-label { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.row-name { font-size: 13px; font-weight: 500; }
+.row-key { font-size: 11px; color: #8c959f; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.row-control { display: flex; justify-content: flex-end; }
+.row-control > input { max-width: 280px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { border: 1px solid #d0d7de; background: #fff; color: #57606a; padding: 4px 12px; border-radius: 999px; font-size: 12px; cursor: pointer; }
+.chip.on { border-color: #0969da; background: #ddf4ff; color: #0550ae; font-weight: 600; }
+
+.switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: #24292f; }
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch .track { width: 36px; height: 20px; border-radius: 999px; background: #cfd8e3; position: relative; transition: background .15s; flex: none; }
+.switch .thumb { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(31,35,40,.25); transition: transform .15s; }
+.switch input:checked + .track { background: #1f883d; }
+.switch input:checked + .track .thumb { transform: translateX(16px); }
+.switch input:disabled + .track { opacity: .5; }
+
+.savebar { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 12px 0; margin-top: 4px; background: linear-gradient(#f6f8fa00, #f6f8fa 40%); }
+.savebar.inline { position: static; margin-top: 16px; background: none; }
+.spacer { flex: 1; }
+.btn { background: #1f883d; color: #fff; border: none; height: 34px; padding: 0 18px; border-radius: 7px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.btn:hover { background: #1a7f37; }
+.btn:disabled { opacity: .6; cursor: default; }
+.btn.ghost { background: #f6f8fa; color: #24292f; border: 1px solid #d0d7de; font-weight: 500; }
+
+.table-wrap { padding: 0; overflow: hidden; }
+.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table th { text-align: left; font-weight: 600; color: #656d76; font-size: 12px; padding: 10px 16px; background: #f6f8fa; border-bottom: 1px solid #d8dee4; }
+.table td { padding: 11px 16px; border-bottom: 1px solid #eaeef2; }
+.table tr:last-child td { border-bottom: none; }
+.table tr.on td { background: #ddf4ff; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #57606a; }
+.link { border: none; background: none; color: #0969da; cursor: pointer; font-size: 13px; padding: 0; }
 .error { color: #cf222e; font-size: 13px; }
 .ok { color: #1a7f37; font-size: 13px; }
-.muted { color: #57606a; font-size: 12px; }
+.muted { color: #656d76; font-size: 12px; }
 </style>
