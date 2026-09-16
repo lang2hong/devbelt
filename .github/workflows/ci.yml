@@ -1,9 +1,8 @@
 name: CI
 
 on:
+  # 临时：仅 main 触发 CI，其他分支与 PR 一律不跑。恢复：把 branches 改回 ['**'] 并恢复 pull_request 段。
   push:
-    branches: ['**']
-  pull_request:
     branches: [main]
 
 jobs:
