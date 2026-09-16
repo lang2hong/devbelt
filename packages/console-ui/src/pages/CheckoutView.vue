@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { ensureCsrf } from '../api/consoleAuth';
 import { createOrder, getOrder, type PayParams } from '../api/orders';
 import QRCode from 'qrcode';
 import { formatDateTime } from '../lib/formatTime';
+import { formatRemaining, useNow } from '../lib/useNow';
 
 /** 个人订阅快照（与 AccountView 同口径）。 */
 interface Subscription {
@@ -23,6 +24,14 @@ const qrDataUrl = ref<string | null>(null);
 const pollStatus = ref<string | null>(null);
 const pollTimedOut = ref(false);
 const manualBusy = ref(false);
+const now = useNow();
+/** 当前订单的本地有效期（epoch ms）；用于倒计时与过期提示。 */
+const orderExpires = ref<number | null>(null);
+
+const orderRemaining = computed<number | null>(() =>
+  orderExpires.value === null ? null : orderExpires.value - now.value,
+);
+const orderExpired = computed<boolean>(() => orderRemaining.value !== null && orderRemaining.value <= 0);
 
 const POLL_MSG: Record<string, string> = {
   pending: '待支付',
@@ -143,6 +152,7 @@ async function submit(): Promise<void> {
     const newOrderNo = r.value.order.orderNo;
     payParams.value = r.value.payParams;
     orderNo.value = newOrderNo;
+    orderExpires.value = new Date(r.value.order.expiresTime).getTime();
     writePendingOrder(newOrderNo);
     if (r.value.payParams.redirectUrl) {
       // 支付宝电脑网站支付：跳到支付宝收银台（页面内含二维码，可扫码或登录账户付）。
@@ -250,6 +260,7 @@ onMounted(async () => {
     return;
   }
   pollStatus.value = r.value.status;
+  orderExpires.value = new Date(r.value.expiresTime).getTime();
   if (r.value.status === 'paid' || r.value.status === 'fulfilled') {
     clearPendingOrder();
     scheduleJump(1500);
@@ -295,22 +306,32 @@ onMounted(async () => {
       <a class="btn link" href="/console/orders">查看订单</a>
     </div>
 
-    <div class="card" v-if="qrDataUrl">
+    <div class="card" v-if="qrDataUrl && !orderExpired">
       <h3>微信扫码支付</h3>
-      <p class="muted">请用微信「扫一扫」扫码完成支付。下单后 30 分钟内有效。</p>
+      <p class="muted">请用微信「扫一扫」扫码完成支付。</p>
+      <p class="muted">剩余 <strong>{{ formatRemaining(orderRemaining ?? 0) }}</strong></p>
       <img class="qr" :src="qrDataUrl" alt="支付二维码" />
       <p class="muted">订单号：{{ orderNo }}</p>
     </div>
 
-    <div class="card" v-if="payParams?.redirectUrl && !qrDataUrl">
+    <div class="card" v-if="payParams?.redirectUrl && !qrDataUrl && !orderExpired">
       <h3>支付宝支付</h3>
       <p class="muted">已打开支付宝收银台。若未跳转，<a :href="payParams.redirectUrl">点此前往</a>。</p>
+      <p class="muted">剩余 <strong>{{ formatRemaining(orderRemaining ?? 0) }}</strong></p>
       <p class="muted">订单号：{{ orderNo }}</p>
     </div>
 
-    <div class="card" v-if="orderNo">
+    <div class="card" v-if="orderNo && orderExpired">
+      <h3>订单已过期</h3>
+      <p class="warn">该订单超过 30 分钟未支付已失效，请重新下单。</p>
+      <button class="btn" :disabled="submitting" @click="submit">{{ submitting ? '下单中…' : '重新下单' }}</button>
+      <a class="btn link" href="/console/orders">查看订单</a>
+    </div>
+
+    <div class="card" v-if="orderNo && !orderExpired">
       <h3>支付状态</h3>
       <p class="muted">当前状态：{{ statusLabel(pollStatus) || '待支付' }}</p>
+      <p class="muted">剩余 <strong>{{ formatRemaining(orderRemaining ?? 0) }}</strong></p>
       <p v-if="pollTimedOut" class="warn">长时间未检测到支付，请确认是否已完成支付，或重新下单。</p>
       <button class="btn secondary" :disabled="manualBusy" @click="manualCheck">{{ manualBusy ? '查询中…' : '我已付款，刷新状态' }}</button>
       <a class="link" href="/console/orders">查看订单</a>

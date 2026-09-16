@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { listOrders, type ConsoleOrder } from '../api/orders';
 import { setAccessToken } from '../api/consoleAuth';
 import { formatDateTime } from '../lib/formatTime';
+import { formatRemaining, useNow } from '../lib/useNow';
 
 const orders = ref<ConsoleOrder[]>([]);
 const state = ref<'loading' | 'ready' | 'error'>('loading');
@@ -10,6 +11,15 @@ const loadError = ref('');
 const statusFilter = ref('');
 const nextCursor = ref<string | null>(null);
 const expandedOrderNo = ref<string | null>(null);
+const now = useNow();
+
+/** pending 订单剩余毫秒（<=0 即已过本地有效期）。 */
+function remainingMs(o: ConsoleOrder): number {
+  return new Date(o.expiresTime).getTime() - now.value;
+}
+function isPayable(o: ConsoleOrder): boolean {
+  return o.status === 'pending' && remainingMs(o) > 0;
+}
 
 const STATUS_LABEL: Record<string, string> = {
   pending: '待支付',
@@ -80,6 +90,9 @@ onMounted(() => load());
             <span class="badge" :class="o.status">{{ STATUS_LABEL[o.status] ?? o.status }}</span>
           </span>
           <span class="muted">¥{{ fmtCents(o.amountCents) }} · {{ channelLabel(o.channel) }} · {{ formatDateTime(o.createTime) }}</span>
+          <span v-if="o.status === 'pending'" class="muted">
+            {{ isPayable(o) ? '剩余 ' + formatRemaining(remainingMs(o)) : '已过期，可重新下单' }}
+          </span>
         </button>
         <div v-if="expandedOrderNo === o.orderNo" class="detail">
           <dl>
@@ -89,6 +102,11 @@ onMounted(() => load());
             <dt>渠道</dt><dd>{{ channelLabel(o.channel) }}</dd>
             <dt>创建时间</dt><dd>{{ formatDateTime(o.createTime) }}</dd>
             <dt>过期时间</dt><dd>{{ formatDateTime(o.expiresTime) }}</dd>
+            <dt v-if="o.status === 'pending'">有效期</dt>
+            <dd v-if="o.status === 'pending'">
+              {{ isPayable(o) ? '剩余 ' + formatRemaining(remainingMs(o)) : '已过期' }}
+              <a v-if="!isPayable(o)" class="relink" href="/console/checkout">重新下单</a>
+            </dd>
             <dt>支付时间</dt><dd>{{ o.paidTime ? formatDateTime(o.paidTime) : '—' }}</dd>
           </dl>
         </div>
@@ -119,6 +137,7 @@ select { box-sizing: border-box; padding: 8px 10px; border: 1px solid #d0d7de; b
 .detail dl { margin: 0; display: grid; grid-template-columns: 92px 1fr; gap: 6px 12px; }
 .detail dt { color: #57606a; font-size: 13px; }
 .detail dd { margin: 0; font-size: 13px; color: #24292f; word-break: break-all; }
+.relink { color: #0969da; margin-left: 6px; }
 .muted { color: #57606a; font-size: 13px; }
 .error { color: #cf222e; font-size: 13px; }
 .load-more { margin: 16px 0; }

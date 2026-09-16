@@ -29,7 +29,7 @@ function order(status: string, no = 'o1') {
     channel: 'wechat',
     status,
     paidTime: null,
-    expiresTime: '2026-01-01T00:00:00.000Z',
+    expiresTime: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
     createTime: '2026-01-01T00:00:00.000Z',
   };
 }
