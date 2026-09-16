@@ -55,20 +55,19 @@ export class MysqlMembershipRepo implements IMembershipRepo {
 
   async listActiveByUserWithOrg(userId: number): Promise<OrganizationSummary[]> {
     const [rows] = await this.db().query<any[]>(
-      // organizations 的「已关闭」现在只由 delete_time 表达（NULL = active）。
-      // status / closedTime 在下面按它派生，出站 DTO 形状不变。
-      `SELECT o.id, o.name, o.delete_time, m.role
+      // 组织生命周期现为 status('active','closed') + closed_time。
+      `SELECT o.id, o.name, o.status, o.closed_time, m.role
        FROM organization_memberships m
        JOIN organizations o ON o.id = m.organization_id
-       WHERE m.user_id = ? AND m.status = 'active' AND o.delete_time IS NULL
+       WHERE m.user_id = ? AND m.status = 'active' AND o.status = 'active'
        ORDER BY o.id`,
       [userId],
     );
     return rows.map((r: any) => ({
       organizationId: r.id,
       name: r.name,
-      status: r.delete_time ? 'closed' : 'active',
-      closedTime: r.delete_time ? new Date(r.delete_time) : null,
+      status: r.status,
+      closedTime: r.closed_time ? new Date(r.closed_time) : null,
       role: r.role as OrganizationRole,
     }));
   }

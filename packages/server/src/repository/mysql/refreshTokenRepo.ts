@@ -3,7 +3,7 @@ import type { RefreshToken } from '../../domain/entities.js';
 import type { MysqlDb, Queryable } from './db.js';
 
 /**
- * Refresh token 仓储：family 复用检测 + 轮换链 replaced_by_token_id。
+ * Refresh token 仓储：family 复用检测（轮换链列已删）。
  *
  * 事务方法（带 exec 参数）支持 refresh 的原子轮换：`FOR UPDATE` 锁定 +
  * 消费旧 + 写新都在同一事务连接上，避免并发复用下签出两条活跃会话。
@@ -96,7 +96,7 @@ export class MysqlRefreshTokenRepo implements IRefreshTokenRepo {
    * 轮换语义让这张表只增不减：每次刷新插一条新行，旧行只被置 revoked_time。
    * access token 15 分钟过期即触发轮换，单个活跃用户约 2900 行/月。
    * 删「已过期」或「撤销已久」的行；LIMIT 分批，避免一次删太多长时间持锁。
-   * replaced_by_token_id 指向的旧行被删后成为悬挂引用 —— 无妨：复用检测走
+   * （旧轮换链列已删除）复用检测走
    * family_id，不依赖这条链，且该列已无外键约束。
    */
   async prune(before: Date, limit: number): Promise<number> {

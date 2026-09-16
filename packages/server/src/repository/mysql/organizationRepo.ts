@@ -31,9 +31,9 @@ export class MysqlOrganizationRepo implements IOrganizationRepo {
     await exec.query('UPDATE organizations SET name = ? WHERE id = ?', [name, id]);
   }
 
-  /** 关闭组织 = 软删除。只写 delete_time；status/closedTime 由 mapper 派生。 */
+  /** 关闭组织（终态、不可逆）：status='closed' + closed_time。 */
   async close(exec: Queryable, id: number, closedTime: Date): Promise<void> {
-    await exec.query('UPDATE organizations SET delete_time = ? WHERE id = ? AND delete_time IS NULL', [closedTime, id]);
+    await exec.query("UPDATE organizations SET status = 'closed', closed_time = ? WHERE id = ? AND status = 'active'", [closedTime, id]);
   }
 
   async listForAdmin(input: AdminOrgFilter): Promise<AdminOrgRow[]> {
@@ -49,28 +49,23 @@ export class MysqlOrganizationRepo implements IOrganizationRepo {
   }
 }
 
-/**
- * 行 → 实体。`status` / `closedTime` 是**派生**字段：库里只有 delete_time 一列，
- * 这样不可能出现两列互相矛盾。领域层与 API 的形状保持不变。
- */
+/** 行 → 实体。状态直接来自 `status` / `closed_time`（CHECK 保证二者一致）。 */
 function mapOrganization(r: any): Organization {
-  const deleteTime = r.delete_time ? new Date(r.delete_time) : null;
   return {
     id: r.id,
     name: r.name,
-    status: (deleteTime ? 'closed' : 'active') as OrganizationStatus,
-    closedTime: deleteTime,
+    status: r.status as OrganizationStatus,
+    closedTime: r.closed_time ? new Date(r.closed_time) : null,
     createTime: new Date(r.create_time),
     updateTime: new Date(r.update_time),
   };
 }
 
 function mapAdminOrgRow(r: any): AdminOrgRow {
-  const closed = r.delete_time != null;
   return {
     organizationId: r.id,
     name: r.name,
-    status: (closed ? 'closed' : 'active') as OrganizationStatus,
+    status: r.status as OrganizationStatus,
     planCode: r.plan_code ?? null,
     seatLimit: r.seat_limit == null ? null : Number(r.seat_limit),
     activeMemberCount: Number(r.active_members ?? 0),
@@ -89,10 +84,10 @@ function buildAdminOrgFilter(input: Omit<AdminOrgFilter, 'cursor' | 'limit'> & {
     where.push('o.name LIKE ?');
     params.push(`${input.namePrefix}%`);
   }
-  if (input.status === 'active') where.push('o.delete_time IS NULL');
-  else if (input.status === 'closed') where.push('o.delete_time IS NOT NULL');
+  if (input.status === 'active') where.push("o.status = 'active'");
+  else if (input.status === 'closed') where.push("o.status = 'closed'");
   if (input.planCode) {
-    where.push('o.id IN (SELECT os.organization_id FROM organization_subscriptions os JOIN organization_plans op ON op.id = os.plan_id WHERE op.code = ?)');
+    where.push('o.id IN (SELECT os.organization_id FROM organization_subscriptions os JOIN plans pl ON pl.id = os.plan_id WHERE pl.code = ?)');
     params.push(input.planCode);
   }
   if (input.cursor !== undefined) {
@@ -106,13 +101,13 @@ function buildAdminOrgFilter(input: Omit<AdminOrgFilter, 'cursor' | 'limit'> & {
   }
 
   const sql = `
-    SELECT o.id, o.name, o.delete_time, o.create_time, op.code AS plan_code, os.seat_limit,
+    SELECT o.id, o.name, o.status, o.closed_time, o.create_time, pl.code AS plan_code, os.seat_limit,
            os.version AS subscription_version, os.period_end_time AS period_end_time,
            (SELECT COUNT(*) FROM organization_memberships m WHERE m.organization_id = o.id AND m.status = 'active') AS active_members,
            (SELECT COUNT(*) FROM organization_memberships m WHERE m.organization_id = o.id AND m.status = 'invited') AS invited_count
     FROM organizations o
     LEFT JOIN organization_subscriptions os ON os.organization_id = o.id
-    LEFT JOIN organization_plans op ON op.id = os.plan_id
+    LEFT JOIN plans pl ON pl.id = os.plan_id
     ${whereSql}
     ORDER BY o.id DESC
     LIMIT ${Number(input.limit ?? 50)}

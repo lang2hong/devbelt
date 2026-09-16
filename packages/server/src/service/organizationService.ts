@@ -162,7 +162,7 @@ export class OrganizationService {
   }
 
   /**
-   * 关闭组织（§6.1）：单一事务内写 delete_time（= 已关闭）、撤销全部有效 invitations 行，
+   * 关闭组织（§6.1）：单一事务内写 status='closed' + closed_time、撤销全部有效 invitations 行，
    * 并把该组织全部 invited membership 置 removed。已 active 的 membership 保留。不可撤销。
    */
   async closeOrganization(organizationId: number, actorUserId: number): Promise<{ ok: true }> {

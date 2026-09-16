@@ -292,7 +292,7 @@ export class AlipayGateway implements PaymentGateway {
       channelTradeNo: tradeNo,
       amountCents: centsFromYuan(form.total_amount ?? ''),
       status: form.trade_status === 'TRADE_SUCCESS' || form.trade_status === 'TRADE_FINISHED' ? 'success' : 'failure',
-      // 脱敏摘要：仅白名单字段落库 raw_notification，绝不存完整表单（P1 敏感信息边界）。
+      // 脱敏摘要：仅白名单字段落库 notify_summary，绝不存完整表单（P1 敏感信息边界）。
       summary: alipaySummary(form),
     };
   }

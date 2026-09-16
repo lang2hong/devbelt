@@ -39,7 +39,7 @@ export interface PaymentCallback {
   amountCents: number;
   /** 渠道侧交易结果。failure 表示支付失败/关闭，不推进为 paid。 */
   status: 'success' | 'failure';
-  /** 渠道白名单脱敏摘要（仅允许字段），落库 raw_notification；不含原始信封/表单。 */
+  /** 渠道白名单脱敏摘要（仅允许字段），落库 notify_summary（payments.notify_summary）；不含原始信封/表单。 */
   summary?: Record<string, string>;
 }
 

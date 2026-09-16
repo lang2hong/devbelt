@@ -150,7 +150,7 @@ function buildUserFilter(input: Omit<AdminUserFilter, 'cursor' | 'limit'> & { cu
     params.push(input.createdTo);
   }
   if (input.planCode) {
-    where.push('u.id IN (SELECT ps.user_id FROM personal_subscriptions ps JOIN personal_plans pp ON pp.id = ps.plan_id WHERE pp.code = ?)');
+    where.push('u.id IN (SELECT ps.user_id FROM personal_subscriptions ps JOIN plans pp ON pp.id = ps.plan_id WHERE pp.code = ?)');
     params.push(input.planCode);
   }
   if (input.cursor !== undefined) {
@@ -170,7 +170,7 @@ function buildUserFilter(input: Omit<AdminUserFilter, 'cursor' | 'limit'> & { cu
            (SELECT COUNT(*) FROM devices d WHERE d.user_id = u.id AND d.status = 'active') AS device_count
     FROM users u
     LEFT JOIN personal_subscriptions ps ON ps.user_id = u.id
-    LEFT JOIN personal_plans pp ON pp.id = ps.plan_id
+    LEFT JOIN plans pp ON pp.id = ps.plan_id
     ${whereSql}
     ORDER BY u.id DESC
     LIMIT ${Number(input.limit ?? 50)}

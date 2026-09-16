@@ -132,7 +132,7 @@ export class WechatPayGateway implements PaymentGateway {
       channelTradeNo: data.transaction_id,
       amountCents: data.amount?.total ?? 0,
       status: data.trade_state === 'SUCCESS' ? 'success' : 'failure',
-      // 脱敏摘要：仅白名单字段落库 raw_notification，绝不存完整加密信封（P1 敏感信息边界）。
+      // 脱敏摘要：仅白名单字段落库 notify_summary，绝不存完整加密信封（P1 敏感信息边界）。
       summary,
     };
   }
