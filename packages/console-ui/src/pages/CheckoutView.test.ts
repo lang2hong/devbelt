@@ -258,4 +258,23 @@ expect(sessionStorage.getItem(KEY)).toBe('o2'); // 旧响应未清除新订单�
     expect(createOrder).toHaveBeenCalledWith('pro', 'alipay', 'csrf', 'redirect');
     wrapper.unmount();
   });
+
+  it('恢复到的 pending 订单本地已过期时不再轮询并清暂存', async () => {
+    vi.useFakeTimers();
+    sessionStorage.setItem(KEY, 'o1');
+    const expired = { ...order('pending', 'o1'), expiresTime: new Date(Date.now() - 1000).toISOString() };
+    vi.mocked(getOrder).mockResolvedValue({ kind: 'ok', value: expired });
+
+    const wrapper = mount(CheckoutView, { props: { user: null, subscription: null } });
+    await flushPromises();
+
+    expect(getOrder).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem(KEY)).toBeNull();
+
+    vi.advanceTimersByTime(10000);
+    await flushPromises();
+    expect(getOrder).toHaveBeenCalledTimes(1); // 到期后不再轮询
+    expect(assignSpy).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
 });

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { ensureCsrf } from '../api/consoleAuth';
 import { createOrder, getOrder, type PayParams } from '../api/orders';
 import QRCode from 'qrcode';
@@ -32,6 +32,13 @@ const orderRemaining = computed<number | null>(() =>
   orderExpires.value === null ? null : orderExpires.value - now.value,
 );
 const orderExpired = computed<boolean>(() => orderRemaining.value !== null && orderRemaining.value <= 0);
+
+// 本地到期即停止轮询并清暂存：过期后不可能再支付，继续轮询纯属空转（服务端状态仍权威）。
+watch(orderExpired, (expired) => {
+  if (!expired) return;
+  stopPolling();
+  clearPendingOrder();
+});
 
 const POLL_MSG: Record<string, string> = {
   pending: '待支付',
@@ -271,6 +278,11 @@ onMounted(async () => {
     return;
   }
   if (TERMINAL_STATUSES.has(r.value.status)) {
+    clearPendingOrder();
+    return;
+  }
+  // 恢复到的 pending 订单本地已过期：清暂存、不启轮询。
+  if (orderExpired.value) {
     clearPendingOrder();
     return;
   }
