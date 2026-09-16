@@ -125,7 +125,9 @@ const alreadyPro = props.subscription?.planCode === 'pro';
 async function submit(mode?: 'qr' | 'redirect'): Promise<void> {
   if (submitting.value) return;
   // 微信仅扫码；支付宝支持扫码/跳转（未指定时默认跳转）。
-  const payMode: 'qr' | 'redirect' = channel.value === 'wechat' ? 'qr' : (mode ?? 'redirect');
+  // 只接受显式枚举值：避免 DOM 事件等非字符串实参被当成 mode 透传（服务端 enum 会 422）。
+  const requested: 'qr' | 'redirect' = mode === 'qr' || mode === 'redirect' ? mode : 'redirect';
+  const payMode: 'qr' | 'redirect' = channel.value === 'wechat' ? 'qr' : requested;
   submitting.value = true;
   error.value = '';
   stopPolling();
@@ -330,7 +332,7 @@ onMounted(async () => {
     <div class="card" v-if="orderNo && orderExpired">
       <h3>订单已过期</h3>
       <p class="warn">该订单超过 30 分钟未支付已失效，请重新下单。</p>
-      <button class="btn" :disabled="submitting" @click="submit">{{ submitting ? '下单中…' : '重新下单' }}</button>
+      <button class="btn" :disabled="submitting" @click="submit()">{{ submitting ? '下单中…' : '重新下单' }}</button>
       <a class="btn link" href="/console/orders">查看订单</a>
     </div>
 

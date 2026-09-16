@@ -238,4 +238,24 @@ expect(sessionStorage.getItem(KEY)).toBe('o2'); // 旧响应未清除新订单�
     expect(assignSpy).toHaveBeenCalledWith('/console/account');
     wrapper.unmount();
   });
+
+  it('过期订单点「重新下单」按支付宝默认跳转模式下单（mode 不被事件对象污染）', async () => {
+    vi.useFakeTimers();
+    sessionStorage.setItem(KEY, 'o1');
+    const expired = { ...order('pending', 'o1'), expiresTime: new Date(Date.now() - 1000).toISOString() };
+    vi.mocked(getOrder).mockResolvedValue({ kind: 'ok', value: expired });
+    vi.mocked(createOrder).mockResolvedValue({ kind: 'failure' });
+
+    const wrapper = mount(CheckoutView, { props: { user: null, subscription: null } });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('订单已过期');
+
+    const reorder = wrapper.findAll('button').find((b) => b.text().trim() === '重新下单')!;
+    await reorder.trigger('click');
+    await flushPromises();
+
+    expect(createOrder).toHaveBeenCalledWith('pro', 'alipay', 'csrf', 'redirect');
+    wrapper.unmount();
+  });
 });
