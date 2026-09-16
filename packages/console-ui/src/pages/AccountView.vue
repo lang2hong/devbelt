@@ -81,6 +81,7 @@ async function submitPassword(): Promise<void> {
       <p class="sub">管理你的登录信息与订阅。</p>
     </header>
 
+    <div class="cards">
     <div class="card">
       <h3>基本信息</h3>
       <div class="kv"><span class="k">邮箱</span><span class="v">{{ user?.email ?? '' }}</span></div>
@@ -107,6 +108,8 @@ async function submitPassword(): Promise<void> {
       <div class="actions" v-if="subscription?.planCode !== 'pro'"><button class="btn accent" @click="navigate('/console/checkout')">升级 Pro</button></div>
     </div>
 
+    </div>
+
     <div class="card">
       <h3>修改密码</h3>
       <div class="field"><label>当前密码</label><input v-model="current" :type="showPassword ? 'text' : 'password'" autocomplete="current-password" required /></div>
@@ -126,11 +129,14 @@ async function submitPassword(): Promise<void> {
 </template>
 
 <style scoped>
-.page { max-width: 640px; margin: 0 auto; }
+.page { max-width: 840px; margin: 0 auto; }
+.cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+@media (max-width: 720px) { .cards { grid-template-columns: 1fr; } }
 .head { margin-bottom: 20px; }
 .head h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
 .sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
 .card { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); padding: 20px 22px; margin-bottom: 16px; }
+.cards .card { margin-bottom: 0; }
 h3 { font-size: 14px; font-weight: 600; margin: 0 0 14px; }
 .kv { display: grid; grid-template-columns: 96px 1fr; gap: 12px; align-items: center; padding: 6px 0; }
 .kv .k { color: var(--c-text-muted); font-size: 13px; }
