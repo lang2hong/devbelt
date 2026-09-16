@@ -41,6 +41,16 @@ export function deriveEntitlement(
   freePlan: Plan | undefined,
   now: Date = new Date(),
 ): Entitlement {
-  if (!sub || !isSubscriptionActive(sub, now)) return planEntitlement(freePlan);
-  return planEntitlement(plan ?? freePlan);
+  if (!sub || !isSubscriptionActive(sub, now)) return planEntitlement(requireFree(freePlan));
+  return planEntitlement(plan ?? requireFree(freePlan));
+}
+
+/**
+ * free 档是失效回落的最终兜底：缺失会返回 `{}`，而 `0 = 不限` 的语义会让配额**反向全开**。
+ * 因此 free 缺失视为不变量破坏，直接抛错（fail-closed），而不是静默放行。
+ * free 档也不得被 archived（批 2 管理端写入校验）。
+ */
+function requireFree(freePlan: Plan | undefined): Plan {
+  if (!freePlan) throw new Error('free plan is missing; cannot derive fallback entitlement');
+  return freePlan;
 }

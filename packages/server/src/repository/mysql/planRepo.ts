@@ -138,7 +138,19 @@ export class MysqlPlanFeatureDefRepo implements IPlanFeatureDefRepo {
 function coerceFeature(value: unknown, valueType: string): unknown {
   if (valueType === 'bool') return value === true || value === 1 || value === '1' || value === 'true';
   if (valueType === 'number' || valueType === 'bytes') return typeof value === 'number' ? value : Number(value);
-  if (valueType === 'stringList') return Array.isArray(value) ? value : [];
+  if (valueType === 'stringList') {
+    if (Array.isArray(value)) return value;
+    // 对称兜底：驱动若以字符串返回 JSON 列（如开启 jsonStrings），仍解析而非静默归 []。
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  }
   return String(value);
 }
 

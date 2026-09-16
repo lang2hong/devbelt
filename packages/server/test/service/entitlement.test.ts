@@ -71,4 +71,9 @@ describe('deriveEntitlement（失效/缺失回 free）', () => {
   it('planEntitlement of an absent plan is empty (no features defined)', () => {
     expect(planEntitlement(undefined)).toEqual({});
   });
+
+  it('throws when the free fallback plan is missing (fail-closed, never silently empty)', () => {
+    expect(() => deriveEntitlement({ status: 'canceled', periodEndTime: null }, undefined, undefined)).toThrow(/free plan is missing/);
+    expect(() => deriveEntitlement({ status: 'active', periodEndTime: null }, undefined, undefined)).toThrow(/free plan is missing/);
+  });
 });

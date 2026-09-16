@@ -12,6 +12,7 @@ import { MemoryPaymentGateway, signMemoryCallback } from '../../src/service/paym
 import { AuditWriter } from '../../src/service/auditWriter.js';
 import type { MysqlDb } from '../../src/repository/mysql/db.js';
 import { withTransaction } from '../../src/repository/mysql/db.js';
+import { deriveEntitlement } from '../../src/service/entitlement.js';
 
 const URL = process.env.MYSQL_TEST_URL;
 
@@ -227,9 +228,13 @@ describe.skipIf(!URL)('payment repo (real MySQL)', () => {
       const order = await orderRepo.findByOrderNo(orderNo);
       expect(order!.status).toBe('fulfilled');
       const sub = await subRepo.findByUserId(userId);
-      expect(sub!.planId).toBeGreaterThan(0);
       const proPlan = await planRepo.findByCode('pro');
-      expect(proPlan!.features.maxConnectionMetas).toBe(5000);
+      const freePlan = await planRepo.findByCode('free');
+      // 行为断言：履约把订阅切到 pro，权益由该 plan 派生（非夹具回声）。
+      expect(sub!.planId).toBe(proPlan!.id);
+      expect(sub!.planId).not.toBe(freePlan!.id);
+      expect(sub!.periodEndTime).not.toBeNull();
+      expect(deriveEntitlement(sub, proPlan, freePlan).maxConnectionMetas).toBe(5000);
 
       // 重复回调（同 trade_no）→ duplicate，不再推进/改写。
       const dup = await svc.handleCallback('wechat', cbBody, headers);

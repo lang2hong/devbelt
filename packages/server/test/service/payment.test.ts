@@ -13,7 +13,9 @@ import { MemoryPaymentGateway, signMemoryCallback } from '../../src/service/paym
 import type { PaymentGateway, PaymentCallback } from '../../src/service/paymentChannel.js';
 import {
   PaymentSignatureInvalidError,
+  UnknownPlanError,
 } from '../../src/domain/errors.js';
+import { deriveEntitlement } from '../../src/service/entitlement.js';
 
 const PLAN: Plan = {
   id: 2,
@@ -40,6 +42,12 @@ const PLAN: Plan = {
 const FREE: Plan = {
   id: 1, code: 'free', kind: 'personal', name: 'Free', priceCents: 0, billingUnit: 'month', sortOrder: 0, status: 'active', version: 1,
   features: { allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 0, maxConnectionMetas: 500, syncStorageBytes: 33554432, maxSavedConnections: 10, allowConnectionImport: false },
+  createTime: new Date(), updateTime: new Date(),
+};
+
+const ORG: Plan = {
+  id: 3, code: 'organization_free', kind: 'organization', name: 'Organization Free', priceCents: 0, billingUnit: 'seat-month', sortOrder: 0, status: 'active', version: 1,
+  features: { includedSeats: 3, maxSharedResources: 50 },
   createTime: new Date(), updateTime: new Date(),
 };
 
@@ -93,12 +101,18 @@ class FakePaymentRepo implements IPaymentRepo {
 }
 
 class FakePlanRepo implements IPlanRepo {
-  async findByCode(code: string): Promise<Plan | undefined> { return code === 'pro' ? PLAN : code === 'free' ? FREE : undefined; }
-  async findById(id: number): Promise<Plan | undefined> { return id === 2 ? PLAN : id === 1 ? FREE : undefined; }
+  // 每个实例用独立副本，避免某个用例改 status 污染其它用例。
+  private readonly plans: Plan[] = [
+    { ...FREE, features: { ...FREE.features } },
+    { ...PLAN, features: { ...PLAN.features } },
+    { ...ORG, features: { ...ORG.features } },
+  ];
+  async findByCode(code: string): Promise<Plan | undefined> { return this.plans.find((p) => p.code === code); }
+  async findById(id: number): Promise<Plan | undefined> { return this.plans.find((p) => p.id === id); }
   async findByCodeInTx(_exec: Queryable, code: string): Promise<Plan | undefined> { return this.findByCode(code); }
   async findByIdInTx(_exec: Queryable, id: number): Promise<Plan | undefined> { return this.findById(id); }
-  async listActive(): Promise<Plan[]> { return [FREE, PLAN]; }
-  async listAll(): Promise<Plan[]> { return [FREE, PLAN]; }
+  async listActive(): Promise<Plan[]> { return this.plans.filter((p) => p.status === 'active'); }
+  async listAll(): Promise<Plan[]> { return [...this.plans]; }
   async replaceFeaturesInTx(): Promise<void> {}
   async updateMetaInTx(): Promise<boolean> { return true; }
 }
@@ -140,7 +154,7 @@ function makeService(nonceRepo?: { insertIfAbsent(exec: Queryable, channel: stri
     gatewayFor: (channel) => new MemoryPaymentGateway(channel),
     nonceRepo,
   });
-  return { svc, orderRepo, paymentRepo, subsRepo };
+  return { svc, orderRepo, paymentRepo, subsRepo, planRepo };
 }
 
 const SUCCESS_CALLBACK = (orderNo: string, channelTradeNo: string, amountCents: number) => {
@@ -208,9 +222,29 @@ describe('OrderService.createOrder', () => {
   });
 });
 
+describe('OrderService.createOrder plan guards', () => {
+  it('rejects free (price 0) with UnknownPlanError', async () => {
+    const { svc } = makeService();
+    await expect(svc.createOrder(1, 'free', 'wechat')).rejects.toBeInstanceOf(UnknownPlanError);
+  });
+  it('rejects an unknown plan code', async () => {
+    const { svc } = makeService();
+    await expect(svc.createOrder(1, 'nope', 'wechat')).rejects.toBeInstanceOf(UnknownPlanError);
+  });
+  it('rejects an organization plan (no self-serve checkout)', async () => {
+    const { svc } = makeService();
+    await expect(svc.createOrder(1, 'organization_free', 'wechat')).rejects.toBeInstanceOf(UnknownPlanError);
+  });
+  it('rejects an archived plan', async () => {
+    const { svc, planRepo } = makeService();
+    (await planRepo.findByCode('pro'))!.status = 'archived';
+    await expect(svc.createOrder(1, 'pro', 'wechat')).rejects.toBeInstanceOf(UnknownPlanError);
+  });
+});
+
 describe('OrderService.handleCallback', () => {
   it('fulfills: pending → paid → fulfilled and rewrites the subscription', async () => {
-    const { svc, orderRepo, subsRepo } = makeService();
+    const { svc, orderRepo, subsRepo, planRepo } = makeService();
     await subsRepo.create({ userId: 1, planId: 1, status: 'active', periodStartTime: new Date(), periodEndTime: null });
     const { orderNo } = await svc.createOrder(1, 'pro', 'wechat');
 
@@ -222,7 +256,10 @@ describe('OrderService.handleCallback', () => {
     expect(order!.status).toBe('fulfilled');
     const sub = await subsRepo.findByUserId(1);
     expect(sub!.planId).toBe(2);
-    expect(PLAN.features.maxConnectionMetas).toBe(5000);
+    // 行为断言：履约后权益由「订阅指向的 pro plan」派生，而非测试夹具常量。
+    const derived = deriveEntitlement(sub, await planRepo.findByCode('pro'), await planRepo.findByCode('free'));
+    expect(derived.maxConnectionMetas).toBe(5000);
+    expect(derived.maxDevices).toBe(0);
   });
 
   it('extends the existing periodEndTime instead of overwriting remaining time', async () => {
