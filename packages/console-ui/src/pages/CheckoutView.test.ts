@@ -134,7 +134,7 @@ describe('CheckoutView 未完成订单恢复', () => {
     const wrapper = mount(CheckoutView, { props: { user: null, subscription: null } });
     await flushPromises();
 
-    const submitBtn = () => wrapper.findAll('button').find((b) => b.text().trim() === '下单支付')!;
+    const submitBtn = () => wrapper.findAll('button').find((b) => b.text().trim() === '跳转到支付宝')!;
     await submitBtn().trigger('click');
     await flushPromises();
     vi.advanceTimersByTime(3000); // 第一次轮询 tick 挂起（oldPromise）
@@ -155,7 +155,7 @@ expect(sessionStorage.getItem(KEY)).toBe('o2'); // 旧响应未清除新订单�
   it('提交新订单期间，仍在途的旧 getOrder 迟到 paid 响应不得覆盖新订单/触发跳转', async () => {
     vi.useFakeTimers();
     sessionStorage.setItem(KEY, 'o1');
-    // 恢复流程的 getOrder('o1') 挂起（模拟慢网络），此时用户点击「下单支付」。
+    // 恢复流程的 getOrder('o1') 挂起（模拟慢网络），此时用户点击「跳转到支付宝」。
     let resolveRecoveryCheck!: (v: unknown) => void;
     vi.mocked(getOrder).mockReturnValue(new Promise((r) => { resolveRecoveryCheck = r; }) as never);
     vi.mocked(createOrder).mockResolvedValue({
@@ -165,7 +165,7 @@ expect(sessionStorage.getItem(KEY)).toBe('o2'); // 旧响应未清除新订单�
     const wrapper = mount(CheckoutView, { props: { user: null, subscription: null } });
     await flushPromises(); // 恢复检查已发出且挂起（generation=1）
 
-    const submitBtn = () => wrapper.findAll('button').find((b) => b.text().trim() === '下单支付')!;
+    const submitBtn = () => wrapper.findAll('button').find((b) => b.text().trim() === '跳转到支付宝')!;
     await submitBtn().trigger('click'); // submit() 立即令 generation=2，随后 createOrder 落地
     await flushPromises();
 
@@ -189,7 +189,7 @@ expect(sessionStorage.getItem(KEY)).toBe('o2'); // 旧响应未清除新订单�
     const wrapper = mount(CheckoutView, { props: { user: null, subscription: null } });
     await flushPromises();
 
-    await wrapper.findAll('button').find((b) => b.text().trim() === '下单支付')!.trigger('click');
+    await wrapper.findAll('button').find((b) => b.text().trim() === '跳转到支付宝')!.trigger('click');
     await flushPromises();
     wrapper.unmount(); // mounted=false
 
@@ -215,7 +215,7 @@ expect(sessionStorage.getItem(KEY)).toBe('o2'); // 旧响应未清除新订单�
     const wrapper = mount(CheckoutView, { props: { user: null, subscription: null } });
     await flushPromises();
 
-    await wrapper.findAll('button').find((b) => b.text().trim() === '下单支付')!.trigger('click');
+    await wrapper.findAll('button').find((b) => b.text().trim() === '跳转到支付宝')!.trigger('click');
     await flushPromises();
 
     vi.advanceTimersByTime(3000); // 第一轮 tick：getOrder 挂起（call=1）
