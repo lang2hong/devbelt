@@ -120,6 +120,7 @@ function mapAudit(r: any): AuditEvent {
     result: r.result,
     failureCode: r.failure_code ?? null,
     reason: r.reason ?? null,
-    createTime: new Date(r.create_time),
+    // audit_events 现只有单一时间列 event_time（create_time 已随 baseline 移除）。
+    createTime: new Date(r.event_time),
   };
 }
