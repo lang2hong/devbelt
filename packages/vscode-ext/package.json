@@ -600,6 +600,11 @@
         "category": "DB Client"
       },
       {
+        "command": "dbclient.plans",
+        "title": "%cmd.plans%",
+        "category": "DB Client"
+      },
+      {
         "command": "dbclient.syncDatabase",
         "title": "Sync Database",
         "category": "DB Client"
@@ -770,6 +775,10 @@
         },
         {
           "command": "dbclient.sessions",
+          "when": "dbclient.loggedIn"
+        },
+        {
+          "command": "dbclient.plans",
           "when": "dbclient.loggedIn"
         },
         {

@@ -516,3 +516,25 @@ describe('getMe（个人权益）', () => {
     expect(me.subscription?.entitlement).toEqual({ allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 0 });
   });
 });
+
+describe('getPlans（套餐目录）', () => {
+  it('命中 /api/plans 并返回个人 + 组织目录', async () => {
+    const calls: { url: string; method: string }[] = [];
+    const catalog = {
+      personal: [{ code: 'free', name: 'Free', billing: { unit: 'month', priceCents: 0 }, features: [{ key: 'maxDevices', type: 'number', value: 0 }] }],
+      organization: [],
+    };
+    const fetchMock = vi.fn(async (url: unknown, init: any) => {
+      calls.push({ url: String(url), method: init?.method ?? 'GET' });
+      return jsonRes(200, catalog);
+    });
+    const client = new SyncClient('http://x', () => 'access-1', () => 'refresh-1', undefined, undefined, fetchMock as any);
+
+    const plans = await client.getPlans();
+
+    expect(calls[0].url).toBe('http://x/api/plans');
+    expect(calls[0].method).toBe('GET');
+    expect(plans.personal[0].code).toBe('free');
+    expect(plans.organization).toEqual([]);
+  });
+});

@@ -21,6 +21,7 @@
   "cmd.cloneConnection": "克隆连接",
   "cmd.renameView": "重命名视图",
   "cmd.sessions": "管理设备会话",
+  "cmd.plans": "套餐",
   "cmd.changeSyncPassword": "修改同步密码",
   "cmd.recoverSync": "使用恢复码恢复",
   "cmd.recoverByAccount": "使用账号恢复",

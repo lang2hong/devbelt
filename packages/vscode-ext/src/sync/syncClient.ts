@@ -68,6 +68,25 @@ export interface DeviceItem {
   createTime: string;
 }
 
+/** 套餐特征描述符（/api/plans）；type 决定展示格式，未知 key 优雅降级。 */
+export interface PlanFeatureDto {
+  key: string;
+  type: 'bool' | 'number' | 'bytes' | 'stringList' | 'enum';
+  value: boolean | number | string | string[];
+}
+
+export interface PlanDto {
+  code: string;
+  name: string;
+  billing: { unit: 'month' | 'seat-month'; priceCents: number };
+  features: PlanFeatureDto[];
+}
+
+export interface PlanCatalog {
+  personal: PlanDto[];
+  organization: PlanDto[];
+}
+
 
 
 export class SyncClient {
@@ -193,6 +212,13 @@ export class SyncClient {
       throw new Error(errBody.message || `List devices failed: ${res.status}`);
     }
     return res.json() as Promise<{ devices: DeviceItem[] }>;
+  }
+
+  /** 套餐目录（个人 + 组织）。 */
+  async getPlans(): Promise<PlanCatalog> {
+    const res = await this.request('GET', '/api/plans', undefined, true);
+    if (!res.ok) throw new Error(`Get plans failed: ${res.status}`);
+    return res.json() as Promise<PlanCatalog>;
   }
 
   /** 撤销本人设备（§5.2 /api/personal/devices；Free 无配额，撤销恒允许）。 */

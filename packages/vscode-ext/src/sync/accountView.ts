@@ -24,6 +24,7 @@ const ACTION_COMMANDS = new Set<string>([
   'dbclient.exportConnections',
   'dbclient.importConnections',
   'dbclient.sessions',
+  'dbclient.plans',
   'dbclient.openConsole',
   'dbclient.logout',
 ]);

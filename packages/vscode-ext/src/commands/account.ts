@@ -3,6 +3,7 @@ import type { Deps, Sub } from './shared';
 import { LoginFormView } from '../sync/loginFormView';
 import { AccountView } from '../sync/accountView';
 import { SessionView } from '../sync/sessionView';
+import { PlansView } from '../sync/plansView';
 import { DEFAULT_SERVER_URL } from '../sync/authService';
 import { l10n } from '../i18n';
 
@@ -73,6 +74,10 @@ export function registerAccountCommands(deps: Deps, sub: Sub): void {
 
   sub('dbclient.sessions', () => {
     SessionView.open(deps.auth);
+  });
+
+  sub('dbclient.plans', () => {
+    PlansView.open(deps.auth);
   });
 
   sub('dbclient.openConsole', () => {

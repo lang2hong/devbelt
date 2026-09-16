@@ -15,9 +15,10 @@ import PoolStatusView from './views/PoolStatusView.vue';
 import LoginFormView from './views/LoginFormView.vue';
 import SessionView from './views/SessionView.vue';
 import AccountView from './views/AccountView.vue';
+import PlansView from './views/PlansView.vue';
 
 const { onMessage } = useVsCode();
-const mode = ref<'query' | 'design' | 'status' | 'er' | 'connectionForm' | 'userManage' | 'dataDiff' | 'dashboard' | 'auditLog' | 'poolStatus' | 'loginForm' | 'session' | 'account'>('query');
+const mode = ref<'query' | 'design' | 'status' | 'er' | 'connectionForm' | 'userManage' | 'dataDiff' | 'dashboard' | 'auditLog' | 'poolStatus' | 'loginForm' | 'session' | 'account' | 'plans'>('query');
 
 let cleanup: (() => void) | undefined;
 onMounted(() => {
@@ -46,5 +47,6 @@ onUnmounted(() => cleanup?.());
       <LoginFormView v-else-if="mode === 'loginForm'" />
       <SessionView v-else-if="mode === 'session'" />
       <AccountView v-else-if="mode === 'account'" />
+      <PlansView v-else-if="mode === 'plans'" />
       <ERDiagramView v-else />
 </template>

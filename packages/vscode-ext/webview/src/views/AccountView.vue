@@ -145,6 +145,7 @@ onMounted(() => {
         <div class="actions">
           <button class="btn" @click="act('dbclient.changeLoginPassword')">{{ t('account.action.changeLoginPassword') }}</button>
           <button class="btn" @click="act('dbclient.sessions')">{{ t('account.action.sessions') }}</button>
+          <button class="btn" @click="act('dbclient.plans')">{{ t('account.action.plans') }}</button>
           <button class="btn" @click="act('dbclient.openConsole')">{{ t('account.action.openConsole') }}</button>
           <button class="btn danger" @click="act('dbclient.logout')">{{ t('account.action.logout') }}</button>
         </div>

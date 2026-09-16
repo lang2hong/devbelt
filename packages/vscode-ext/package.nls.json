@@ -21,6 +21,7 @@
   "cmd.cloneConnection": "Clone Connection",
   "cmd.renameView": "Rename View",
   "cmd.sessions": "Manage Device Sessions",
+  "cmd.plans": "Plans",
   "cmd.changeSyncPassword": "Change Sync Password",
   "cmd.recoverSync": "Recover with Recovery Code",
   "cmd.recoverByAccount": "Recover with Account",

@@ -40,6 +40,7 @@ export function registerCommands(deps: Deps): void {
       items.push(
         { label: l10n('account.title'), value: 'account' },
         { label: l10n('sessions.title'), value: 'sessions' },
+        { label: l10n('account.action.plans'), value: 'plans' },
         { label: l10n('sync.statusLabel'), value: 'sync' },
       );
       // 拉取/推送仅已解锁时可用，避免锁定态点了被命令内部拒绝。
@@ -66,6 +67,7 @@ export function registerCommands(deps: Deps): void {
       login: 'dbclient.login',
       account: 'dbclient.account',
       sessions: 'dbclient.sessions',
+      plans: 'dbclient.plans',
       sync: 'dbclient.syncEntry',
       syncPull: 'dbclient.syncPull',
       syncPush: 'dbclient.syncPush',
