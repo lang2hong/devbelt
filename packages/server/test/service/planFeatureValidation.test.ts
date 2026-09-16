@@ -31,4 +31,11 @@ describe('validateFeatureValue', () => {
     expect(() => validateFeatureValue(def('l', 'stringList'), ['ok', 1])).toThrow(ValidationError);
     expect(() => validateFeatureValue(def('l', 'stringList'), [''])).toThrow(ValidationError);
   });
+
+  it('rejects oversized values and unsafe integers', () => {
+    expect(() => validateFeatureValue(def('n', 'number'), Number.MAX_SAFE_INTEGER + 1)).toThrow(ValidationError);
+    expect(() => validateFeatureValue(def('l', 'stringList'), Array.from({ length: 65 }, () => 'x'))).toThrow(ValidationError);
+    expect(() => validateFeatureValue(def('l', 'stringList'), ['x'.repeat(65)])).toThrow(ValidationError);
+    expect(() => validateFeatureValue(def('e', 'enum'), 'x'.repeat(65))).toThrow(ValidationError);
+  });
 });

@@ -15,18 +15,24 @@ export function validateFeatureValue(def: PlanFeatureDef, value: unknown): void 
       return;
     case 'number':
     case 'bytes':
-      if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
-        throw new ValidationError(`feature ${def.key} expects a non-negative integer`);
+      if (
+        typeof value !== 'number' || !Number.isFinite(value) || !Number.isInteger(value) ||
+        value < 0 || value > Number.MAX_SAFE_INTEGER
+      ) {
+        throw new ValidationError(`feature ${def.key} expects a non-negative safe integer`);
       }
       return;
     case 'stringList':
-      if (!Array.isArray(value) || value.some((v) => typeof v !== 'string' || v.length === 0)) {
-        throw new ValidationError(`feature ${def.key} expects an array of non-empty strings`);
+      if (
+        !Array.isArray(value) || value.length > 64 ||
+        value.some((v) => typeof v !== 'string' || v.length === 0 || v.length > 64)
+      ) {
+        throw new ValidationError(`feature ${def.key} expects an array (<=64) of non-empty strings (<=64 chars)`);
       }
       return;
     case 'enum':
-      if (typeof value !== 'string' || value.length === 0) {
-        throw new ValidationError(`feature ${def.key} expects a non-empty string`);
+      if (typeof value !== 'string' || value.length === 0 || value.length > 64) {
+        throw new ValidationError(`feature ${def.key} expects a non-empty string (<=64 chars)`);
       }
       return;
     default:

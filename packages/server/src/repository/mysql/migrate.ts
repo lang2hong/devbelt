@@ -24,6 +24,11 @@ export interface Migration {
  * 遗留账本兼容：历史 `${version}_v3` 键（旧补丁式建表时代遗留）视为已应用同名迁移。
  * 该归一化是迁移 runner 与就绪检查（/health/ready 的 schema 比对）共用的口径，
  * 二者必须一致，否则旧库升级后会被就绪检查永久判为「未迁移」而 503。
+ *
+ * 注意：squash 为单基线后，`LEGACY_MIGRATION_VERSIONS` 是**无后缀**的放行名单
+ * （001_users_auth … 024_sync_mutation_recovery_time）。带 `_v3` 等未知后缀的版本
+ * 走此归一化后若仍不在迁移集合与 legacy 名单内，会触发 fail-loud ——
+ * 本机旧测试库需手动 drop（生产为破坏性重建，见 001_baseline）。
  */
 export function normalizeAppliedVersions(appliedVersions: string[], migrations: readonly Migration[]): Set<string> {
   const legacyAliases = new Map(migrations.map((m) => [`${m.version}_v3`, m.version]));

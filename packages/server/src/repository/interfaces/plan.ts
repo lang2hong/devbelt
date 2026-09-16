@@ -33,6 +33,10 @@ export interface IPlanFeatureDefRepo {
   findByKey(key: string): Promise<PlanFeatureDef | undefined>;
   /** 事务内按 key 读（写事务内回读必须走同一连接，池读看不到未提交行）。 */
   findByKeyInTx(exec: Queryable, key: string): Promise<PlanFeatureDef | undefined>;
+  /**
+   * 新增/更新特性定义。**无乐观锁**（`ON DUPLICATE KEY UPDATE`，并发同 key 编辑
+   * last-write-wins）——元数据可接受，变更由审计留痕；如需并发保护再加 version。
+   */
   upsertInTx(exec: Queryable, input: {
     key: string; kind: PlanFeatureDef['kind']; label: PlanFeatureDef['label'];
     valueType: PlanFeatureDef['valueType']; unit: string | null; sortOrder: number;

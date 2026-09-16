@@ -118,6 +118,8 @@ export class OrganizationService {
     const plan = await this.planRepo.findByCodeInTx(tx, ORGANIZATION_FREE);
     if (!plan) throw new Error(`${ORGANIZATION_FREE} plan is missing; run migrations before create`);
 
+    // seat_limit 是**订阅级强制值**：创建时取自套餐的 includedSeats 作为默认，
+    // 之后管理端可独立调整且不受套餐约束（includedSeats 仅作目录/默认展示）。
     const includedSeats = Number(plan.features.includedSeats ?? 0);
     if (!Number.isInteger(includedSeats) || includedSeats < 1) {
       throw new Error(`${ORGANIZATION_FREE} plan has no valid includedSeats feature`);

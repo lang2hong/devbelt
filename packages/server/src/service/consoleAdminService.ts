@@ -198,6 +198,9 @@ export class ConsoleAdminService {
     for (const f of input.features) {
       const def = await this.featureDefRepo.findByKey(f.featureKey);
       if (!def) throw new ValidationError(`unknown feature: ${f.featureKey}`);
+      if (def.kind !== 'both' && def.kind !== plan.kind) {
+        throw new ValidationError(`feature ${f.featureKey} does not apply to ${plan.kind} plans`);
+      }
       validateFeatureValue(def, f.value);
     }
 
@@ -454,6 +457,10 @@ export class ConsoleAdminService {
     return { invoiceId: String(inv.id), status };
   }
 
+  /**
+   * 调整组织订阅。`seatLimit` 为订阅级强制值，独立于套餐的 `includedSeats`（后者仅目录默认）。
+   * 席位数不得低于「活跃成员 + 有效邀请」。
+   */
   async adjustOrganizationSubscriptionInTx(
     tx: Queryable,
     actorUserId: number,

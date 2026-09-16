@@ -122,10 +122,10 @@ async function save(): Promise<void> {
     const r = await updatePlan(plan.id, payload, idem.ensure(tag), csrf);
     if (r.kind === 'ok') {
       idem.reset(tag);
-      okMsg.value = '已保存。';
       const idx = plans.value.findIndex((p) => p.id === plan.id);
       if (idx >= 0) plans.value[idx] = r.value.plan;
       select(r.value.plan);
+      okMsg.value = '已保存。';
     } else if (r.kind === 'conflict') {
       idem.reset(tag);
       errorMsg.value = '版本冲突：该套餐已被其他管理员修改，请刷新后重试。';
@@ -173,7 +173,7 @@ onMounted(load);
         <input v-model.number="sortOrder" type="number" />
 
         <label>变更原因（审计）</label>
-        <input v-model="reason" type="text" maxlength="500" />
+        <input v-model="reason" type="text" maxlength="500" data-testid="reason" />
 
         <label>状态</label>
         <select v-model="status">
