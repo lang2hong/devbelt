@@ -328,6 +328,14 @@ export class SubscriptionVersionConflictError extends DomainError {
   }
 }
 
+/** 套餐保存的乐观锁冲突 → 409 PLAN_VERSION_CONFLICT。 */
+export class PlanVersionConflictError extends DomainError {
+  constructor(public readonly currentVersion: number) {
+    super('plan version conflict', 'PLAN_VERSION_CONFLICT');
+    this.name = 'PlanVersionConflictError';
+  }
+}
+
 /** 审计导出超出单次上限 → 422 EXPORT_TOO_LARGE（§6 导出边界）。 */
 export class ExportTooLargeError extends DomainError {
   constructor() {

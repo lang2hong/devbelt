@@ -17,6 +17,7 @@ import {
   FakeUserRepo,
   FakeRefreshTokenRepo,
   FakePlanRepo,
+  FakePlanFeatureDefRepo,
   FakePersonalSubscriptionRepo,
   FakeOrganizationRepo,
   FakeOrganizationSubscriptionRepo,
@@ -27,9 +28,13 @@ import {
 import { FakeAuditRepo } from '../helpers/linkFlowFakes.js';
 import type { Queryable, TxRunner } from '../../src/repository/mysql/db.js';
 import type { IOrderRepo, IInvoiceRepo } from '../../src/repository/interfaces.js';
-import type { Order, Invoice } from '../../src/domain/entities.js';
+import type { Order, Invoice, PlanFeatureDef } from '../../src/domain/entities.js';
 
 const ORIGIN = 'http://localhost:5173';
+
+const ADMIN_FEATURE_DEFS: PlanFeatureDef[] = [
+  { id: 1, key: 'maxSavedConnections', kind: 'personal', label: { en: 'Saved', zh: '保存' }, valueType: 'number', unit: 'count', sortOrder: 10 },
+];
 const UUID = '123e4567-e89b-42d3-8456-426614174000';
 
 async function build(rateLimit = false) {
@@ -40,6 +45,7 @@ async function build(rateLimit = false) {
   const userRepo = new FakeUserRepo();
   const refreshTokenRepo = new FakeRefreshTokenRepo();
   const planRepo = new FakePlanRepo();
+  const featureDefRepo = new FakePlanFeatureDefRepo(ADMIN_FEATURE_DEFS);
   const personalSubscriptionRepo = new FakePersonalSubscriptionRepo();
   const organizationRepo = new FakeOrganizationRepo();
   const organizationSubscriptionRepo = new FakeOrganizationSubscriptionRepo();
@@ -98,6 +104,7 @@ async function build(rateLimit = false) {
     userRepo,
     refreshTokenRepo,
     planRepo,
+    featureDefRepo,
     personalSubscriptionRepo,
     organizationRepo,
     organizationSubscriptionRepo,

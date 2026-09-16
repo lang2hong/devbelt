@@ -55,8 +55,7 @@ class FPlanRepo {
   async findByIdInTx(_e: Queryable, id: number) { return id === 2 ? PLAN : undefined; }
   async listActive() { return [PLAN]; }
   async listAll() { return [PLAN]; }
-  async replaceFeaturesInTx() {}
-  async updateMetaInTx() { return true; }
+  async saveInTx() { return true; }
 }
 
 class FSubsRepo {

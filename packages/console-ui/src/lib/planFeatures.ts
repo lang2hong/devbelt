@@ -10,6 +10,8 @@ export interface FeatureDto {
   key: string;
   type: FeatureType;
   value: boolean | number | string | string[];
+  /** 服务端特性定义标签（单源）；缺失时回退本地 i18n 映射。 */
+  label?: { en: string; zh: string };
 }
 
 export type BillingUnit = 'month' | 'seat-month';
@@ -49,7 +51,9 @@ const ENGINE_LABELS: Record<string, string> = {
 
 const ENGINE_KEYS = new Set(['allowedDatabaseTypes', 'allowedTemplateDatabaseTypes']);
 
-export function featureLabel(key: string): string {
+export function featureLabel(key: string, label?: { en: string; zh: string }): string {
+  // 服务端定义优先（单源）；控制台为中文，取 zh。
+  if (label?.zh) return label.zh;
   return FEATURE_LABELS[key] ?? key;
 }
 

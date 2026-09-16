@@ -21,6 +21,7 @@ import AdminOrdersView from './pages/AdminOrdersView.vue';
 import AdminInvoicesView from './pages/AdminInvoicesView.vue';
 import AdminAuditView from './pages/AdminAuditView.vue';
 import AdminVersionView from './pages/AdminVersionView.vue';
+import AdminPlansView from './pages/AdminPlansView.vue';
 import StatusPage from './pages/StatusPage.vue';
 
 const ROUTES: RouteConfig[] = [
@@ -39,6 +40,7 @@ const ROUTES: RouteConfig[] = [
   { pattern: '/console/admin/orders', name: 'admin-orders' },
   { pattern: '/console/admin/invoices', name: 'admin-invoices' },
   { pattern: '/console/admin/audit', name: 'admin-audit' },
+  { pattern: '/console/admin/plans', name: 'admin-plans' },
   { pattern: '/console/admin/version', name: 'admin-version' },
 ];
 
@@ -84,6 +86,8 @@ const view = computed<{ comp: Component; props: Record<string, unknown> }>(() =>
       return { comp: AdminInvoicesView, props: {} };
     case 'admin-audit':
       return { comp: AdminAuditView, props: {} };
+    case 'admin-plans':
+      return { comp: AdminPlansView, props: {} };
     case 'admin-version':
       return { comp: AdminVersionView, props: {} };
     default:
@@ -155,7 +159,7 @@ async function onLogout(): Promise<void> {
         <a href="/console/orders" @click.prevent="navigate('/console/orders')" :class="{ on: router.name === 'orders' }">订单</a>
         <a href="/console/invoices" @click.prevent="navigate('/console/invoices')" :class="{ on: router.name === 'invoices' }">发票</a>
         <a href="/console/organizations" @click.prevent="navigate('/console/organizations')" :class="{ on: router.name === 'organizations' || router.name === 'organization-detail' || router.name === 'organization-resources' }">组织</a>
-        <a v-if="me_.platformAdmin" href="/console/admin/users" @click.prevent="navigate('/console/admin/users')" :class="{ on: ['admin-users', 'admin-organizations', 'admin-orders', 'admin-invoices', 'admin-audit', 'admin-version'].includes(router.name ?? '') }">管理</a>
+        <a v-if="me_.platformAdmin" href="/console/admin/users" @click.prevent="navigate('/console/admin/users')" :class="{ on: ['admin-users', 'admin-organizations', 'admin-orders', 'admin-invoices', 'admin-audit', 'admin-plans', 'admin-version'].includes(router.name ?? '') }">管理</a>
         <span class="spacer"></span>
         <span class="email">{{ me_.user.email }}</span>
         <button class="btn ghost" @click="onLogout">登出</button>

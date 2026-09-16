@@ -1,4 +1,4 @@
-import { t } from '../composables/useI18n';
+import { t, isZhRef } from '../composables/useI18n';
 
 /**
  * 套餐特征展示（webview 侧）：与 console-ui/src/lib/planFeatures.ts 同口径，
@@ -12,6 +12,8 @@ export interface PlanFeatureDto {
   key: string;
   type: FeatureType;
   value: boolean | number | string | string[];
+  /** 服务端特性定义标签（单源）；缺失时回退本地 i18n 映射。 */
+  label?: { en: string; zh: string };
 }
 
 export interface PlanDto {
@@ -48,7 +50,9 @@ const ENGINE_LABELS: Record<string, string> = {
 
 const ENGINE_KEYS = new Set(['allowedDatabaseTypes', 'allowedTemplateDatabaseTypes']);
 
-export function featureLabel(key: string): string {
+export function featureLabel(key: string, label?: { en: string; zh: string }): string {
+  // 服务端定义优先（单源），按当前语言取；缺失时回退本地 i18n 映射。
+  if (label) return isZhRef.value ? (label.zh || label.en) : (label.en || label.zh);
   return FEATURE_KEYS.has(key) ? t(`plan.feature.${key}`) : key;
 }
 

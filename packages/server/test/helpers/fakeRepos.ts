@@ -352,22 +352,18 @@ export class FakePlanRepo implements IPlanRepo {
     return [...this.plans];
   }
 
-  async replaceFeaturesInTx(_exec: Queryable, planId: number, values: ReadonlyArray<{ featureKey: string; value: unknown }>): Promise<void> {
-    const plan = this.plans.find((p) => p.id === planId);
-    if (!plan) return;
-    plan.features = Object.fromEntries(values.map((v) => [v.featureKey, v.value]));
-    plan.version += 1;
-  }
-
-  async updateMetaInTx(_exec: Queryable, input: {
+  async saveInTx(_exec: Queryable, input: {
     id: number; name: string; priceCents: number; billingUnit: Plan['billingUnit'];
-    sortOrder: number; status: Plan['status']; expectedVersion: number;
+    sortOrder: number; status: Plan['status'];
+    features: ReadonlyArray<{ featureKey: string; value: unknown }>;
+    expectedVersion: number;
   }): Promise<boolean> {
     const plan = this.plans.find((p) => p.id === input.id);
     if (!plan || plan.version !== input.expectedVersion) return false;
     Object.assign(plan, {
       name: input.name, priceCents: input.priceCents, billingUnit: input.billingUnit,
       sortOrder: input.sortOrder, status: input.status,
+      features: Object.fromEntries(input.features.map((f) => [f.featureKey, f.value])),
     });
     plan.version += 1;
     return true;

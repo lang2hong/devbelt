@@ -113,8 +113,7 @@ class FakePlanRepo implements IPlanRepo {
   async findByIdInTx(_exec: Queryable, id: number): Promise<Plan | undefined> { return this.findById(id); }
   async listActive(): Promise<Plan[]> { return this.plans.filter((p) => p.status === 'active'); }
   async listAll(): Promise<Plan[]> { return [...this.plans]; }
-  async replaceFeaturesInTx(): Promise<void> {}
-  async updateMetaInTx(): Promise<boolean> { return true; }
+  async saveInTx(): Promise<boolean> { return true; }
 }
 
 class FakeSubsRepo implements IPersonalSubscriptionRepo {

@@ -2,6 +2,7 @@ import type {
   IUserRepo,
   IRefreshTokenRepo,
   IPlanRepo,
+  IPlanFeatureDefRepo,
   IPersonalSubscriptionRepo,
   IOrganizationRepo,
   IOrganizationSubscriptionRepo,
@@ -14,18 +15,20 @@ import type {
   AuditFilter,
 } from '../repository/interfaces.js';
 import type { Queryable } from '../repository/mysql/db.js';
-import type { AuditEvent, Plan, Order, Invoice } from '../domain/entities.js';
+import type { AuditEvent, Plan, PlanFeatureDef, Order, Invoice } from '../domain/entities.js';
 import type { UserStatus, InvoiceStatus } from '../domain/enums.js';
 import {
   EntityNotFoundError,
   ForbiddenError,
   SubscriptionVersionConflictError,
+  PlanVersionConflictError,
   ExportTooLargeError,
   ValidationError,
   OrderInvalidStateError,
 } from '../domain/errors.js';
 import { AuditWriter } from './auditWriter.js';
 import { auditDto, toCsv } from './auditSerialize.js';
+import { validateFeatureValue, FREE_PLAN_CODES } from './planFeatureValidation.js';
 import type { RateLimitService } from './rateLimitService.js';
 
 /** 平台审计导出单次上限（§6）。 */
@@ -62,6 +65,7 @@ export interface ConsoleAdminDeps {
   userRepo: IUserRepo;
   refreshTokenRepo: IRefreshTokenRepo;
   planRepo: IPlanRepo;
+  featureDefRepo: IPlanFeatureDefRepo;
   personalSubscriptionRepo: IPersonalSubscriptionRepo;
   organizationRepo: IOrganizationRepo;
   organizationSubscriptionRepo: IOrganizationSubscriptionRepo;
@@ -88,6 +92,7 @@ export class ConsoleAdminService {
   private readonly userRepo: IUserRepo;
   private readonly refreshTokenRepo: IRefreshTokenRepo;
   private readonly planRepo: IPlanRepo;
+  private readonly featureDefRepo: IPlanFeatureDefRepo;
   private readonly personalSubscriptionRepo: IPersonalSubscriptionRepo;
   private readonly organizationRepo: IOrganizationRepo;
   private readonly organizationSubscriptionRepo: IOrganizationSubscriptionRepo;
@@ -102,6 +107,7 @@ export class ConsoleAdminService {
     this.userRepo = deps.userRepo;
     this.refreshTokenRepo = deps.refreshTokenRepo;
     this.planRepo = deps.planRepo;
+    this.featureDefRepo = deps.featureDefRepo;
     this.personalSubscriptionRepo = deps.personalSubscriptionRepo;
     this.organizationRepo = deps.organizationRepo;
     this.organizationSubscriptionRepo = deps.organizationSubscriptionRepo;
@@ -121,7 +127,7 @@ export class ConsoleAdminService {
    */
   private async auditRestrictedRead(
     actorUserId: number,
-    eventType: 'admin.users.read' | 'admin.organizations.read' | 'admin.audit.read' | 'admin.orders.read' | 'admin.invoices.read',
+    eventType: 'admin.users.read' | 'admin.organizations.read' | 'admin.audit.read' | 'admin.orders.read' | 'admin.invoices.read' | 'admin.plans.read',
   ): Promise<void> {
     if (!this.rateLimiter) {
       this.auditWriter.write({ eventType, result: 'success', actorUserId, actorRole: 'platform_admin' });
@@ -154,6 +160,80 @@ export class ConsoleAdminService {
     const plan = await this.planRepo.findByCodeInTx(tx, planCode);
     if (!plan || plan.status !== 'active') throw new ValidationError('unknown or inactive plan');
     return plan;
+  }
+
+  // ── 套餐管理（平台运营）──
+
+  async listPlansForAdmin(actorUserId: number): Promise<Plan[]> {
+    await this.auditRestrictedRead(actorUserId, 'admin.plans.read');
+    return this.planRepo.listAll();
+  }
+
+  async listFeatureDefs(): Promise<PlanFeatureDef[]> {
+    return this.featureDefRepo.listAll();
+  }
+
+  /**
+   * 保存套餐（元数据 + 特性整组替换，单次 version CAS）。
+   * 兜底档（free/organization_free）不可归档——否则权益派生 fail-closed 会让全站读路径 500。
+   * 特性键必须已定义、取值按 def 的 value_type 校验（禁止 NaN/负数/字符串布尔）。
+   */
+  async updatePlanInTx(tx: Queryable, actorUserId: number, input: {
+    id: number; name: string; priceCents: number; billingUnit: Plan['billingUnit'];
+    sortOrder: number; status: Plan['status'];
+    features: ReadonlyArray<{ featureKey: string; value: unknown }>;
+    expectedVersion: number;
+    reason: string;
+  }): Promise<Plan> {
+    const plan = await this.planRepo.findByIdInTx(tx, input.id);
+    if (!plan) throw new EntityNotFoundError('plan', input.id);
+    if (FREE_PLAN_CODES.has(plan.code) && input.status !== 'active') {
+      throw new ValidationError('fallback plan cannot be archived');
+    }
+    if (!input.name || input.name.length > 64) throw new ValidationError('invalid plan name');
+    if (!Number.isInteger(input.priceCents) || input.priceCents < 0) throw new ValidationError('invalid price');
+    if (input.billingUnit !== 'month' && input.billingUnit !== 'seat-month') throw new ValidationError('invalid billing unit');
+    if (!Number.isInteger(input.sortOrder)) throw new ValidationError('invalid sort order');
+    if (input.status !== 'active' && input.status !== 'archived') throw new ValidationError('invalid status');
+    for (const f of input.features) {
+      const def = await this.featureDefRepo.findByKey(f.featureKey);
+      if (!def) throw new ValidationError(`unknown feature: ${f.featureKey}`);
+      validateFeatureValue(def, f.value);
+    }
+
+    const ok = await this.planRepo.saveInTx(tx, {
+      id: plan.id, name: input.name, priceCents: input.priceCents, billingUnit: input.billingUnit,
+      sortOrder: input.sortOrder, status: input.status, features: input.features, expectedVersion: input.expectedVersion,
+    });
+    if (!ok) throw new PlanVersionConflictError(plan.version);
+    await this.auditWriter.writeInTx(tx, {
+      eventType: 'admin.plan.updated', result: 'success', actorUserId, actorRole: 'platform_admin',
+      targetType: 'plan', targetId: String(plan.id), reason: input.reason,
+    });
+    const updated = await this.planRepo.findByIdInTx(tx, plan.id);
+    if (!updated) throw new EntityNotFoundError('plan', plan.id);
+    return updated;
+  }
+
+  async upsertFeatureDefInTx(tx: Queryable, actorUserId: number, input: {
+    key: string; kind: PlanFeatureDef['kind']; label: PlanFeatureDef['label'];
+    valueType: PlanFeatureDef['valueType']; unit: string | null; sortOrder: number;
+    reason: string;
+  }): Promise<PlanFeatureDef> {
+    if (!/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(input.key)) throw new ValidationError('invalid feature key');
+    if (!['personal', 'organization', 'both'].includes(input.kind)) throw new ValidationError('invalid feature kind');
+    if (!['bool', 'number', 'bytes', 'stringList', 'enum'].includes(input.valueType)) throw new ValidationError('invalid value type');
+    if (!Number.isInteger(input.sortOrder)) throw new ValidationError('invalid sort order');
+    if (!input.label?.en || !input.label?.zh) throw new ValidationError('label requires en and zh');
+    const { reason, ...defInput } = input;
+    await this.featureDefRepo.upsertInTx(tx, defInput);
+    await this.auditWriter.writeInTx(tx, {
+      eventType: 'admin.plan_feature_def.updated', result: 'success', actorUserId, actorRole: 'platform_admin',
+      targetType: 'plan_feature_def', targetId: input.key, reason,
+    });
+    const def = await this.featureDefRepo.findByKey(input.key);
+    if (!def) throw new EntityNotFoundError('plan feature def', input.key);
+    return def;
   }
 
   // ── 用户状态（禁用撤销会话）──

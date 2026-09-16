@@ -9,6 +9,7 @@ import {
   SyncVersionConflictError,
   SyncQuotaExceededError,
   SubscriptionVersionConflictError,
+  PlanVersionConflictError,
   SyncResetInProgressError,
 } from '../domain/errors.js';
 
@@ -17,6 +18,7 @@ function domainErrorBody(e: DomainError): Record<string, unknown> {
   const body: Record<string, unknown> = { message: e.message, code: e.code };
   if (e instanceof ResourceVersionConflictError) body.currentVersion = e.currentVersion;
   if (e instanceof SubscriptionVersionConflictError) body.currentVersion = e.currentVersion;
+  if (e instanceof PlanVersionConflictError) body.currentVersion = e.currentVersion;
   if (e instanceof SyncVersionConflictError) body.currentVersion = e.currentVersion;
   if (e instanceof SyncEpochStaleError) body.currentKeyEpoch = e.currentKeyEpoch;
   if (e instanceof SyncQuotaExceededError) {
@@ -116,6 +118,7 @@ export function errorStatus(code: string): number {
     case 'ORGANIZATION_QUOTA_EXCEEDED':
     case 'RESOURCE_VERSION_CONFLICT':
     case 'SUBSCRIPTION_VERSION_CONFLICT':
+    case 'PLAN_VERSION_CONFLICT':
     case 'FOLDER_NOT_EMPTY':
     case 'FOLDER_MOVE_CYCLE':
     case 'ORGANIZATION_ADMIN_REQUIRED':

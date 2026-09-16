@@ -439,3 +439,99 @@ export async function setInvoiceStatus(
     return { kind: 'failure' };
   }
 }
+// ── 套餐管理 ──
+
+export interface AdminFeatureDef {
+  id: number;
+  key: string;
+  kind: string;
+  label: { en: string; zh: string };
+  valueType: string;
+  unit: string | null;
+  sortOrder: number;
+}
+
+export interface AdminPlan {
+  id: number;
+  code: string;
+  kind: string;
+  name: string;
+  priceCents: number;
+  billingUnit: string;
+  sortOrder: number;
+  status: string;
+  version: number;
+  features: Record<string, unknown>;
+}
+
+/** 列套餐目录（含特性定义，供按类型渲染/校验）。 */
+export async function listPlans(
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ items: AdminPlan[]; featureDefs: AdminFeatureDef[] }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch('/api/console/admin/plans', { headers: auth(token) }, fetchImpl);
+    if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+export interface UpdatePlanInput {
+  name: string;
+  priceCents: number;
+  billingUnit: 'month' | 'seat-month';
+  sortOrder: number;
+  status: 'active' | 'archived';
+  features: Array<{ featureKey: string; value: unknown }>;
+  expectedVersion: number;
+  reason: string;
+}
+
+/** 保存套餐（元数据 + 特性整组替换，乐观锁 expectedVersion）。 */
+export async function updatePlan(
+  planId: number,
+  input: UpdatePlanInput,
+  idempotencyKey: string,
+  csrfToken: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ plan: AdminPlan }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(
+      `/api/console/admin/plans/${planId}`,
+      { method: 'PATCH', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify(input) },
+      fetchImpl,
+    );
+    if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+/** 新增/更新特性定义。 */
+export async function upsertFeatureDef(
+  key: string,
+  input: { kind: string; label: { en: string; zh: string }; valueType: string; unit: string | null; sortOrder: number; reason: string },
+  idempotencyKey: string,
+  csrfToken: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ featureDef: AdminFeatureDef }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(
+      `/api/console/admin/plan-feature-defs/${encodeURIComponent(key)}`,
+      { method: 'PUT', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify(input) },
+      fetchImpl,
+    );
+    if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}

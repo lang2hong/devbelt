@@ -70,7 +70,7 @@ onMounted(() => {
           <p class="price">{{ formatPrice(plan.billing) }}</p>
           <ul class="features">
             <li v-for="f in plan.features" :key="f.key">
-              <span class="label">{{ featureLabel(f.key) }}</span>
+              <span class="label">{{ featureLabel(f.key, f.label) }}</span>
               <span class="value">{{ formatFeature(f) }}</span>
             </li>
           </ul>
@@ -87,7 +87,7 @@ onMounted(() => {
           <p class="price">{{ formatPrice(plan.billing) }}</p>
           <ul class="features">
             <li v-for="f in plan.features" :key="f.key">
-              <span class="label">{{ featureLabel(f.key) }}</span>
+              <span class="label">{{ featureLabel(f.key, f.label) }}</span>
               <span class="value">{{ formatFeature(f) }}</span>
             </li>
           </ul>

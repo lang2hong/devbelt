@@ -7,6 +7,7 @@ const links = [
   { name: 'admin-orders', path: '/console/admin/orders', label: '订单' },
   { name: 'admin-invoices', path: '/console/admin/invoices', label: '发票' },
   { name: 'admin-audit', path: '/console/admin/audit', label: '审计' },
+  { name: 'admin-plans', path: '/console/admin/plans', label: '套餐' },
   { name: 'admin-version', path: '/console/admin/version', label: '系统状态' },
 ];
 </script>

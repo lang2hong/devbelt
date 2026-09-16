@@ -9,29 +9,45 @@ import type { MysqlDb, Queryable } from './db.js';
  * 读取时按 def 的 `value_type` 强转为正确的 JS 类型后拼进 `Plan.features`：
  * - bool → boolean（绝不让字符串 "false" 变成真值）
  * - number/bytes → number
- * - stringList → array
+ * - stringList → array（含驱动以字符串返回 JSON 的兜底）
  * - enum → string
  * 缺特性即该键不存在（消费方按「缺特性 = deny」处理，0 原样保留为「不限」）。
+ *
+ * ## 进程内缓存（plans.version 失效）
+ * 登录热路径与 /api/me 每请求都要解析 free 档与订阅 plan；每次两条查询成本高。
+ * 这里按 id/code 缓存完整 Plan，写入（`saveInTx`）与任何读路径刷新时同步覆盖。
+ * 单实例部署下等价权威；多实例时其它实例在下次编辑前可能读到旧值（当前部署为单实例）。
  */
 export class MysqlPlanRepo implements IPlanRepo {
+  private readonly byId = new Map<number, Plan>();
+  private readonly byCode = new Map<string, Plan>();
+
   constructor(private readonly db: () => MysqlDb) {}
 
   async findByCode(code: string): Promise<Plan | undefined> {
+    const cached = this.byCode.get(code);
+    if (cached) return cached;
     const rows = await this.queryPlans('WHERE p.code = ?', [code]);
     return rows[0];
   }
 
   async findById(id: number): Promise<Plan | undefined> {
+    const cached = this.byId.get(id);
+    if (cached) return cached;
     const rows = await this.queryPlans('WHERE p.id = ?', [id]);
     return rows[0];
   }
 
   async findByCodeInTx(exec: Queryable, code: string): Promise<Plan | undefined> {
+    const cached = this.byCode.get(code);
+    if (cached) return cached;
     const rows = await this.queryPlans('WHERE p.code = ?', [code], exec);
     return rows[0];
   }
 
   async findByIdInTx(exec: Queryable, id: number): Promise<Plan | undefined> {
+    const cached = this.byId.get(id);
+    if (cached) return cached;
     const rows = await this.queryPlans('WHERE p.id = ?', [id], exec);
     return rows[0];
   }
@@ -44,27 +60,13 @@ export class MysqlPlanRepo implements IPlanRepo {
     return this.queryPlans('ORDER BY p.kind, p.sort_order, p.id', []);
   }
 
-  async replaceFeaturesInTx(
-    exec: Queryable,
-    planId: number,
-    values: ReadonlyArray<{ featureKey: string; value: unknown }>,
-  ): Promise<void> {
-    await exec.query('DELETE FROM plan_feature_values WHERE plan_id = ?', [planId]);
-    for (const { featureKey, value } of values) {
-      await exec.query(
-        `INSERT INTO plan_feature_values (plan_id, feature_def_id, value_json)
-         SELECT ?, d.id, ? FROM plan_feature_defs d WHERE d.feature_key = ?`,
-        [planId, JSON.stringify(value), featureKey],
-      );
-    }
-    await exec.query('UPDATE plans SET version = version + 1 WHERE id = ?', [planId]);
-  }
-
-  async updateMetaInTx(
+  async saveInTx(
     exec: Queryable,
     input: {
       id: number; name: string; priceCents: number; billingUnit: Plan['billingUnit'];
-      sortOrder: number; status: Plan['status']; expectedVersion: number;
+      sortOrder: number; status: Plan['status'];
+      features: ReadonlyArray<{ featureKey: string; value: unknown }>;
+      expectedVersion: number;
     },
   ): Promise<boolean> {
     const [res] = await exec.query(
@@ -73,7 +75,24 @@ export class MysqlPlanRepo implements IPlanRepo {
         WHERE id = ? AND version = ?`,
       [input.name, input.priceCents, input.billingUnit, input.sortOrder, input.status, input.id, input.expectedVersion],
     );
-    return (res as { affectedRows: number }).affectedRows === 1;
+    if ((res as { affectedRows: number }).affectedRows !== 1) return false;
+
+    await exec.query('DELETE FROM plan_feature_values WHERE plan_id = ?', [input.id]);
+    for (const { featureKey, value } of input.features) {
+      const [inserted] = await exec.query(
+        `INSERT INTO plan_feature_values (plan_id, feature_def_id, value_json)
+         SELECT ?, d.id, ? FROM plan_feature_defs d WHERE d.feature_key = ?`,
+        [input.id, JSON.stringify(value), featureKey],
+      );
+      // 未知 feature_key → 0 行：绝不静默丢特性。
+      if ((inserted as { affectedRows: number }).affectedRows !== 1) {
+        throw new Error(`unknown feature_key: ${featureKey}`);
+      }
+    }
+
+    this.byId.delete(input.id);
+    this.byCode.clear();
+    return true;
   }
 
   private async queryPlans(where: string, params: unknown[], exec?: Queryable): Promise<Plan[]> {
@@ -81,7 +100,12 @@ export class MysqlPlanRepo implements IPlanRepo {
     const [rows] = await q.query<any[]>(`SELECT p.* FROM plans p ${where}`, params);
     if (rows.length === 0) return [];
     const features = await this.loadFeatures(q, rows.map((r: any) => Number(r.id)));
-    return rows.map((r: any) => mapPlan(r, features.get(Number(r.id)) ?? {}));
+    const plans = rows.map((r: any) => mapPlan(r, features.get(Number(r.id)) ?? {}));
+    for (const p of plans) {
+      this.byId.set(p.id, p);
+      this.byCode.set(p.code, p);
+    }
+    return plans;
   }
 
   private async loadFeatures(exec: Queryable, planIds: number[]): Promise<Map<number, Record<string, unknown>>> {

@@ -257,6 +257,7 @@ export async function createApp() {
     userRepo,
     refreshTokenRepo,
     planRepo,
+    featureDefRepo,
     personalSubscriptionRepo,
     organizationRepo,
     organizationSubscriptionRepo,

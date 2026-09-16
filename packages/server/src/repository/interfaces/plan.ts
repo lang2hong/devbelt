@@ -13,12 +13,15 @@ export interface IPlanRepo {
   listActive(): Promise<Plan[]>;
   /** 全部套餐（管理端，含 archived）。 */
   listAll(): Promise<Plan[]>;
-  /** 管理端保存特性：整组事务替换（delete + insert），并自增 version。 */
-  replaceFeaturesInTx(exec: Queryable, planId: number, values: ReadonlyArray<{ featureKey: string; value: unknown }>): Promise<void>;
-  /** 管理端更新套餐元数据（name/price/status/sort），version 乐观锁。 */
-  updateMetaInTx(exec: Queryable, input: {
+  /**
+   * 管理端保存（元数据 + 特性整组替换，同一 CAS）：`WHERE id=? AND version=expectedVersion`，
+   * 命中则写入并 `version+1`（一次性），返回是否命中。特性键不存在即抛错（不静默丢特性）。
+   */
+  saveInTx(exec: Queryable, input: {
     id: number; name: string; priceCents: number; billingUnit: Plan['billingUnit'];
-    sortOrder: number; status: Plan['status']; expectedVersion: number;
+    sortOrder: number; status: Plan['status'];
+    features: ReadonlyArray<{ featureKey: string; value: unknown }>;
+    expectedVersion: number;
   }): Promise<boolean>;
 }
 
