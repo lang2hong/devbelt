@@ -48,10 +48,14 @@ ssh "$REMOTE" \
   "cd '$DEPLOY_DIR' && tar czf \"backups/dist-\$(date +%Y%m%d%H%M%S).tar.gz\" dist 2>/dev/null || true"
 
 # 保证移除的路由和管理页面产物不会留在目标服务器。
-ssh "$REMOTE" "rm -rf '$DEPLOY_DIR/dist' '$DEPLOY_DIR/public'"
-
-# dist 用 tar 流式传输，绕开 OpenSSH 9 scp 对「目录/.」的兼容问题
-tar czf - -C "$SCRIPT_DIR" dist | ssh "$REMOTE" "cd '$DEPLOY_DIR' && tar xzf -"
+# 先解到 staging，成功后再原子替换 dist；tar 流中断时旧 dist 仍在（不再先删导致 404）。
+ssh "$REMOTE" "rm -rf '$DEPLOY_DIR/.dist.staging' && mkdir -p '$DEPLOY_DIR/.dist.staging'"
+tar czf - -C "$SCRIPT_DIR" dist | ssh "$REMOTE" "tar xzf - -C '$DEPLOY_DIR/.dist.staging'"
+ssh "$REMOTE" "cd '$DEPLOY_DIR' \
+  && rm -rf dist.old public \
+  && if [ -d dist ]; then mv dist dist.old; fi \
+  && mv .dist.staging/dist dist \
+  && rm -rf dist.old .dist.staging"
 
 # 服务端 dotenv 只读工作目录下的 .env
 scp "$SCRIPT_DIR/.env.production" "$REMOTE:$DEPLOY_DIR/.env"
@@ -61,9 +65,14 @@ ssh "$REMOTE" "mkdir -p '$CONSOLE_DIR/backups'"
 # 备份当前控制台静态（首次不存在时静默跳过）
 ssh "$REMOTE" \
   "cd '$CONSOLE_DIR' && tar czf \"backups/dist-\$(date +%Y%m%d%H%M%S).tar.gz\" dist 2>/dev/null || true"
-# 先删旧目录，避免移除的 hash 资源/页面残留；再流式推送新 dist。
-ssh "$REMOTE" "rm -rf '$CONSOLE_DIR/dist'"
-tar czf - -C "$CONSOLE_SRC" dist | ssh "$REMOTE" "cd '$CONSOLE_DIR' && tar xzf -"
+# 先解到 staging，成功后再原子替换 dist（tar 流中断不丢旧静态）。
+ssh "$REMOTE" "rm -rf '$CONSOLE_DIR/.dist.staging' && mkdir -p '$CONSOLE_DIR/.dist.staging'"
+tar czf - -C "$CONSOLE_SRC" dist | ssh "$REMOTE" "tar xzf - -C '$CONSOLE_DIR/.dist.staging'"
+ssh "$REMOTE" "cd '$CONSOLE_DIR' \
+  && rm -rf dist.old \
+  && if [ -d dist ]; then mv dist dist.old; fi \
+  && mv .dist.staging/dist dist \
+  && rm -rf dist.old .dist.staging"
 
 echo "==> [5/6] 写 systemd 服务"
 # bundle 自包含全部依赖，服务器无需 npm install（不再推 package.json / 装 node_modules）。
@@ -103,5 +112,7 @@ ssh "$REMOTE" \
    && sudo systemctl restart '$SERVICE_NAME'"
 ssh "$REMOTE" "sleep 1; systemctl --no-pager --full status '$SERVICE_NAME' || true"
 ssh "$REMOTE" "curl -sf '$HEALTH_URL' && echo '  <- /health OK'"
+# 静态资源健康检查：控制台 shell 可访问（dist 缺失/损坏时 fail-visible）。
+ssh "$REMOTE" "curl -sf 'http://localhost:3000/console/' >/dev/null && echo '  <- console static OK'"
 
 echo "部署完成"
