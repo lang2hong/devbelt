@@ -21,9 +21,10 @@ function remainingMs(o: ConsoleOrder): number {
 function displayStatus(o: ConsoleOrder): string {
   return o.status === 'pending' && remainingMs(o) <= 0 ? 'expired' : o.status;
 }
-/** 可重新下单：展示态为过期（含 pending 已超时与 sweep 后的 expired）。 */
+/** 可重新下单：已过期（含 pending 超时与 sweep 后 expired）或支付失败。 */
 function canReorder(o: ConsoleOrder): boolean {
-  return displayStatus(o) === 'expired';
+  const s = displayStatus(o);
+  return s === 'expired' || s === 'failed';
 }
 
 const STATUS_LABEL: Record<string, string> = {
