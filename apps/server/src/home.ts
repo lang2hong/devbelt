@@ -33,6 +33,7 @@ export const HOME_HTML = `<!doctype html>
       <p class="sub">开发者工具套件</p>
       <div class="cards">
         <a class="card" href="/db/"><strong>DB 控制台</strong><span>连接、同步、套餐与组织</span></a>
+        <a class="card" href="/admin/"><strong>平台后台</strong><span>运营与审计</span></a>
         <a class="card" href="/login"><strong>登录</strong><span>进入你的账户</span></a>
       </div>
     </main>

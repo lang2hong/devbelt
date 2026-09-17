@@ -15,14 +15,6 @@ import PlansView from './pages/PlansView.vue';
 import OrganizationsView from './pages/OrganizationsView.vue';
 import OrganizationDetailView from './pages/OrganizationDetailView.vue';
 import ResourcesView from './pages/ResourcesView.vue';
-import AdminUsersView from './pages/AdminUsersView.vue';
-import AdminOrganizationsView from './pages/AdminOrganizationsView.vue';
-import AdminOrdersView from './pages/AdminOrdersView.vue';
-import AdminInvoicesView from './pages/AdminInvoicesView.vue';
-import AdminAuditView from './pages/AdminAuditView.vue';
-import AdminVersionView from './pages/AdminVersionView.vue';
-import AdminNav from './pages/AdminNav.vue';
-import AdminPlansView from './pages/AdminPlansView.vue';
 import StatusPage from './pages/StatusPage.vue';
 
 const ROUTES: RouteConfig[] = [
@@ -36,13 +28,12 @@ const ROUTES: RouteConfig[] = [
   { pattern: '/organizations', name: 'organizations' },
   { pattern: '/organizations/:id', name: 'organization-detail' },
   { pattern: '/organizations/:id/resources', name: 'organization-resources' },
-  { pattern: '/admin/users', name: 'admin-users' },
-  { pattern: '/admin/organizations', name: 'admin-organizations' },
-  { pattern: '/admin/orders', name: 'admin-orders' },
-  { pattern: '/admin/invoices', name: 'admin-invoices' },
-  { pattern: '/admin/audit', name: 'admin-audit' },
-  { pattern: '/admin/plans', name: 'admin-plans' },
-  { pattern: '/admin/version', name: 'admin-version' },
+
+
+
+
+
+
 ];
 
 installRouter(ROUTES);
@@ -51,13 +42,8 @@ const state = ref<'loading' | 'ready' | 'error'>('loading');
 const me_ = ref<ConsoleMe | null>(null);
 const logoutError = ref(false);
 
-const isAdminRoute = computed(() => (router.name ?? '').startsWith('admin-'));
 
 const view = computed<{ comp: Component; props: Record<string, unknown> }>(() => {
-  // 防御纵深：即使直接导航到 /admin/*，非平台管理员也只看到 403（服务端同样拒绝）。
-  if (router.name && router.name.startsWith('admin-') && !me_.value?.platformAdmin) {
-    return { comp: StatusPage, props: { code: 403 } };
-  }
   switch (router.name) {
     case 'account':
       return { comp: AccountView, props: { user: me_.value?.user ?? null, subscription: me_.value?.subscription ?? null } };
@@ -79,20 +65,6 @@ const view = computed<{ comp: Component; props: Record<string, unknown> }>(() =>
       return { comp: OrganizationDetailView, props: { organizationId: router.params.id } };
     case 'organization-resources':
       return { comp: ResourcesView, props: { organizationId: router.params.id } };
-    case 'admin-users':
-      return { comp: AdminUsersView, props: {} };
-    case 'admin-organizations':
-      return { comp: AdminOrganizationsView, props: {} };
-    case 'admin-orders':
-      return { comp: AdminOrdersView, props: {} };
-    case 'admin-invoices':
-      return { comp: AdminInvoicesView, props: {} };
-    case 'admin-audit':
-      return { comp: AdminAuditView, props: {} };
-    case 'admin-plans':
-      return { comp: AdminPlansView, props: {} };
-    case 'admin-version':
-      return { comp: AdminVersionView, props: {} };
     default:
       return { comp: StatusPage, props: { code: 404 } };
   }
@@ -127,8 +99,7 @@ onMounted(async () => {
   me_.value = result.value;
   state.value = 'ready';
   const p = stripBase(window.location.pathname);
-  if (p === '/console' || p === '/') navigate('/account');
-  if (p === '/admin' || p === '/admin/') navigate('/admin/users');
+  if (p === '/') navigate('/account');
 });
 
 async function onLogout(): Promise<void> {
@@ -162,7 +133,6 @@ async function onLogout(): Promise<void> {
         <a :href="withBase('/orders')" @click.prevent="navigate('/orders')" :class="{ on: router.name === 'orders' }">订单</a>
         <a :href="withBase('/invoices')" @click.prevent="navigate('/invoices')" :class="{ on: router.name === 'invoices' }">发票</a>
         <a :href="withBase('/organizations')" @click.prevent="navigate('/organizations')" :class="{ on: router.name === 'organizations' || router.name === 'organization-detail' || router.name === 'organization-resources' }">组织</a>
-        <a v-if="me_.platformAdmin" :href="withBase('/admin/users')" @click.prevent="navigate('/admin/users')" :class="{ on: ['admin-users', 'admin-organizations', 'admin-orders', 'admin-invoices', 'admin-audit', 'admin-plans', 'admin-version'].includes(router.name ?? '') }">管理</a>
         <span class="spacer"></span>
         <span class="email">{{ me_.user.email }}</span>
         <button class="btn ghost" @click="onLogout">登出</button>
@@ -174,7 +144,6 @@ async function onLogout(): Promise<void> {
       </div>
 
       <div class="body">
-        <AdminNav v-if="isAdminRoute" />
         <component :is="view.comp" v-bind="view.props" />
       </div>
     </template>

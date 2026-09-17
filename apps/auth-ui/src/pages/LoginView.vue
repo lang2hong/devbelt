@@ -36,7 +36,9 @@ async function submit() {
         window.location.assign(`${DB_BASE}/sync-reset`);
         return;
       }
-      window.location.assign(`${DB_BASE}${returnTo}`);
+      // returnTo 可能是 DB 控制台的应用相对路径（如 /account），也可能是平台后台的
+      // 绝对路径（如 /admin/users）；前者补 DB base，后者原样跳转。
+      window.location.assign(returnTo.startsWith('/admin') ? returnTo : `${DB_BASE}${returnTo}`);
       return;
     }
     if (result.kind === 'invalid-credentials') error.value = '邮箱或密码错误，或邮箱尚未验证。';

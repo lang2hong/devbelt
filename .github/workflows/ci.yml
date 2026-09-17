@@ -165,7 +165,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Build server + db-ui
-        run: pnpm -C apps/server build && CONSOLE_BASE=/db/ pnpm -C apps/db-ui build && AUTH_BASE=/ pnpm -C apps/auth-ui build
+        run: pnpm -C apps/server build && CONSOLE_BASE=/db/ pnpm -C apps/db-ui build && AUTH_BASE=/ pnpm -C apps/auth-ui build && ADMIN_BASE=/admin/ pnpm -C apps/admin-ui build
 
       - name: Prepare Ed25519 signing keys
         run: |

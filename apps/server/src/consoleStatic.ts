@@ -20,6 +20,11 @@ function consoleDistDir(): string {
   return process.env.CONSOLE_DIST_DIR || path.resolve(process.cwd(), '../db-ui/dist');
 }
 
+/** 平台后台（admin-ui）dist：`/admin/` 下的 SPA。 */
+function adminDistDir(): string {
+  return process.env.ADMIN_DIST_DIR || path.resolve(process.cwd(), '../admin-ui/dist');
+}
+
 function notFound(_req: FastifyRequest, reply: FastifyReply): void {
   reply.code(404).type('text/plain').send('not found');
 }
@@ -38,11 +43,14 @@ function notFound(_req: FastifyRequest, reply: FastifyReply): void {
 export async function registerConsoleStatic(app: FastifyInstance): Promise<void> {
   const authDist = authDistDir();
   const consoleDist = consoleDistDir();
+  const adminDist = adminDistDir();
   const authReady = existsSync(authDist);
   const consoleReady = existsSync(consoleDist);
+  const adminReady = existsSync(adminDist);
 
   if (!authReady) app.log.warn(`[static] auth-ui dist not found at ${authDist}; identity pages unavailable`);
   if (!consoleReady) app.log.warn(`[static] db-ui dist not found at ${consoleDist}; console unavailable`);
+  if (!adminReady) app.log.warn(`[static] admin-ui dist not found at ${adminDist}; admin console unavailable`);
 
   if (authReady) {
     await app.register(fastifyStatic, {
@@ -60,6 +68,18 @@ export async function registerConsoleStatic(app: FastifyInstance): Promise<void>
     await app.register(fastifyStatic, {
       root: path.join(consoleDist, 'assets'),
       prefix: '/db/assets/',
+      decorateReply: false,
+      index: false,
+      setHeaders: (res) => {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      },
+    });
+  }
+
+  if (adminReady) {
+    await app.register(fastifyStatic, {
+      root: path.join(adminDist, 'assets'),
+      prefix: '/admin/assets/',
       decorateReply: false,
       index: false,
       setHeaders: (res) => {
@@ -126,5 +146,20 @@ export async function registerConsoleStatic(app: FastifyInstance): Promise<void>
       return notFound(req, reply);
     }
     return serveHtml(shellHtml)(req, reply);
+  });
+
+  // 平台后台（admin-ui，`/admin` 前缀）
+  const adminShell = adminReady ? readHtml(adminDist, 'index.html') : null;
+  app.get('/admin', async (_req, reply) => {
+    reply.redirect('/admin/');
+  });
+  app.get('/admin/', serveHtml(adminShell));
+  app.get('/admin/*', async (req, reply) => {
+    const url = (req.url ?? '').split('?')[0];
+    const rel = url.replace(/^\/admin\/?/, '');
+    if (/\.[A-Za-z0-9]+$/.test(rel)) {
+      return notFound(req, reply);
+    }
+    return serveHtml(adminShell)(req, reply);
   });
 }

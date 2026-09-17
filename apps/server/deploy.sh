@@ -35,15 +35,18 @@ CONSOLE_DIR="$(dirname "$DEPLOY_DIR")/db-ui"
 CONSOLE_SRC="$REPO_ROOT/apps/db-ui"
 AUTH_DIR="$(dirname "$DEPLOY_DIR")/auth-ui"
 AUTH_SRC="$REPO_ROOT/apps/auth-ui"
+ADMIN_DIR="$(dirname "$DEPLOY_DIR")/admin-ui"
+ADMIN_SRC="$REPO_ROOT/apps/admin-ui"
 
 echo "==> [1/6] 清理并构建 server -> apps/server/dist"
 rm -rf "$SCRIPT_DIR/dist"
 (cd "$REPO_ROOT" && pnpm --filter @devkit/server build)
 
 echo "==> [2/6] 清理并构建 db-ui（base /db/）与 auth-ui（base /）"
-rm -rf "$CONSOLE_SRC/dist" "$AUTH_SRC/dist"
+rm -rf "$CONSOLE_SRC/dist" "$AUTH_SRC/dist" "$ADMIN_SRC/dist"
 (cd "$REPO_ROOT" && CONSOLE_BASE="${CONSOLE_BASE:-/db/}" pnpm --filter @devkit/db-ui build)
 (cd "$REPO_ROOT" && AUTH_BASE="${AUTH_BASE:-/}" pnpm --filter @devkit/auth-ui build)
+(cd "$REPO_ROOT" && ADMIN_BASE="${ADMIN_BASE:-/admin/}" pnpm --filter @devkit/admin-ui build)
 
 echo "==> [3/6] 推送 server 产物到 ${REMOTE}:${DEPLOY_DIR}"
 ssh "$REMOTE" "mkdir -p '$DEPLOY_DIR/backups'"
@@ -85,6 +88,18 @@ ssh "$REMOTE" \
 ssh "$REMOTE" "rm -rf '$AUTH_DIR/.dist.staging' && mkdir -p '$AUTH_DIR/.dist.staging'"
 tar czf - -C "$AUTH_SRC" dist | ssh "$REMOTE" "tar xzf - -C '$AUTH_DIR/.dist.staging'"
 ssh "$REMOTE" "cd '$AUTH_DIR' \
+  && rm -rf dist.old \
+  && if [ -d dist ]; then mv dist dist.old; fi \
+  && mv .dist.staging/dist dist \
+  && rm -rf dist.old .dist.staging"
+
+echo "==> [4c/6] 推送 admin-ui 产物到 ${REMOTE}:${ADMIN_DIR}/dist"
+ssh "$REMOTE" "mkdir -p '$ADMIN_DIR/backups'"
+ssh "$REMOTE" \
+  "cd '$ADMIN_DIR' && tar czf \"backups/dist-\$(date +%Y%m%d%H%M%S).tar.gz\" dist 2>/dev/null || true"
+ssh "$REMOTE" "rm -rf '$ADMIN_DIR/.dist.staging' && mkdir -p '$ADMIN_DIR/.dist.staging'"
+tar czf - -C "$ADMIN_SRC" dist | ssh "$REMOTE" "tar xzf - -C '$ADMIN_DIR/.dist.staging'"
+ssh "$REMOTE" "cd '$ADMIN_DIR' \
   && rm -rf dist.old \
   && if [ -d dist ]; then mv dist dist.old; fi \
   && mv .dist.staging/dist dist \

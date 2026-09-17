@@ -36,21 +36,7 @@ beforeEach(() => {
   vi.mocked(logout).mockResolvedValue({ kind: 'ok' });
 });
 
-describe('platform admin nav gate', () => {
-  it('does not render the admin entry for a non-admin', async () => {
-    vi.mocked(me).mockResolvedValue(consoleMe(false));
-    const wrapper = mount(App);
-    await flushPromises();
-    expect(wrapper.findAll('a').filter((a) => a.text().trim() === '管理')).toHaveLength(0);
-  });
-
-  it('renders the admin entry for a platform admin', async () => {
-    vi.mocked(me).mockResolvedValue(consoleMe(true));
-    const wrapper = mount(App);
-    await flushPromises();
-    expect(wrapper.findAll('a').filter((a) => a.text().trim() === '管理')).toHaveLength(1);
-  });
-
+describe('logout', () => {
   it('warns and stays when logout fails (no silent redirect)', async () => {
     vi.mocked(me).mockResolvedValue(consoleMe(true));
     vi.mocked(logout).mockResolvedValue({ kind: 'failure' });

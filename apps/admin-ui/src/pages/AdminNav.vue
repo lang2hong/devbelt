@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { router, navigate } from '../lib/router';
+import { router, navigate, withBase } from '../lib/router';
 
 const links = [
-  { name: 'admin-users', path: '/admin/users', label: '用户' },
-  { name: 'admin-organizations', path: '/admin/organizations', label: '组织' },
-  { name: 'admin-orders', path: '/admin/orders', label: '订单' },
-  { name: 'admin-invoices', path: '/admin/invoices', label: '发票' },
-  { name: 'admin-audit', path: '/admin/audit', label: '审计' },
-  { name: 'admin-plans', path: '/admin/plans', label: '套餐' },
-  { name: 'admin-version', path: '/admin/version', label: '系统状态' },
+  { name: 'admin-users', path: '/users', label: '用户' },
+  { name: 'admin-organizations', path: '/organizations', label: '组织' },
+  { name: 'admin-orders', path: '/orders', label: '订单' },
+  { name: 'admin-invoices', path: '/invoices', label: '发票' },
+  { name: 'admin-audit', path: '/audit', label: '审计' },
+  { name: 'admin-plans', path: '/plans', label: '套餐' },
+  { name: 'admin-version', path: '/version', label: '系统状态' },
 ];
 </script>
 
@@ -17,7 +17,7 @@ const links = [
     <a
       v-for="l in links"
       :key="l.name"
-      :href="l.path"
+      :href="withBase(l.path)"
       @click.prevent="navigate(l.path)"
       :class="{ on: router.name === l.name }"
     >{{ l.label }}</a>
