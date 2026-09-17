@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { withBase } from '../lib/router';
 import { syncOverview, type SyncOverview } from '../api/sync';
-import { setAccessToken } from '../api/consoleAuth';
+import { setAccessToken } from '@devkit/auth-client';
 import { formatDateTime } from '../lib/formatTime';
 
 const overview = ref<SyncOverview | null>(null);

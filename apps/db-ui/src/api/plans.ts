@@ -1,6 +1,6 @@
-import { getAccessToken } from './tokenStore';
-import { authedFetch } from './authedFetch';
-import type { FetchLike } from './consoleAuth';
+import { getAccessToken } from '@devkit/auth-client';
+import { authedFetch } from '@devkit/auth-client';
+import type { FetchLike } from '@devkit/auth-client';
 import type { PlanCatalog } from '../lib/planFeatures';
 
 /** /api/db/console/plans：个人 + 组织套餐目录（认证，只读）。 */

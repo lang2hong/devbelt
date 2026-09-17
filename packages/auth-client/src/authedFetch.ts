@@ -1,6 +1,6 @@
-import { refreshSession } from '../session';
+import { refreshSession } from './session';
 import { getAccessToken } from './tokenStore';
-import type { RefreshOutcome } from '../session';
+import type { RefreshOutcome } from './session';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 export type RefreshAccessToken = (fetchImpl: FetchLike) => Promise<RefreshOutcome>;

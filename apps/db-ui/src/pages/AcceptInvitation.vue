@@ -7,7 +7,7 @@ import {
   bindMailFlow,
   type AcceptInvitationOrganization,
 } from '../api/linkFlows';
-import { ensureCsrf, refresh, getAccessToken } from '../api/consoleAuth';
+import { ensureCsrf, refresh, getAccessToken } from '@devkit/auth-client';
 
 const TEXT = {
   title: '接受组织邀请',

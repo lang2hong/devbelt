@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { withBase } from '../lib/router';
 import { listUsers, setUserStatus, adjustUserSubscription, type AdminUser } from '../api/admin';
-import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
+import { ensureCsrf, setAccessToken } from '@devkit/auth-client';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { toFromIso, toInclusiveEndIso } from '../lib/dateRange';
 import Modal from '../components/Modal.vue';

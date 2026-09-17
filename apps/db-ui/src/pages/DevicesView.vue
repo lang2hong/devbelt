@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { withBase } from '../lib/router';
 import { listDevices, revokeDevice, type Device } from '../api/devices';
-import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
+import { ensureCsrf, setAccessToken } from '@devkit/auth-client';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { formatDateTime } from '../lib/formatTime';
 

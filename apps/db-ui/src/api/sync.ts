@@ -1,5 +1,5 @@
-import { getAccessToken } from './tokenStore';
-import { authedFetch, type FetchLike } from './authedFetch';
+import { getAccessToken } from '@devkit/auth-client';
+import { authedFetch, type FetchLike } from '@devkit/auth-client';
 
 /**
  * 同步概览 API 客户端（P3 §6）。只读聚合元数据：不返回 record 密文/密钥/E2EE 材料。

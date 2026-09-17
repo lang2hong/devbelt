@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { withBase } from '../lib/router';
 import { claimLinkFlow, bindMailFlow, createSyncResetHandoff } from '../api/linkFlows';
-import { ensureCsrf, refresh, getAccessToken } from '../api/consoleAuth';
+import { ensureCsrf, refresh, getAccessToken } from '@devkit/auth-client';
 
 const TEXT = {
   title: '同步重置',

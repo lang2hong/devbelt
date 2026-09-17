@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { withBase } from '../lib/router';
 import { listOrders, type ConsoleOrder } from '../api/orders';
-import { setAccessToken } from '../api/consoleAuth';
+import { setAccessToken } from '@devkit/auth-client';
 import { formatDateTime } from '../lib/formatTime';
 import { formatRemaining, useNow } from '../lib/useNow';
 

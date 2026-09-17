@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
+import { ensureCsrf, setAccessToken } from '@devkit/auth-client';
 import { updateDisplayName, changePassword, type ConsoleMeUser } from '../api/me';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { navigate, withBase } from '../lib/router';

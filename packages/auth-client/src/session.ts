@@ -1,8 +1,8 @@
-import { ensureCsrf, refresh, type FetchLike } from './api/consoleAuth';
+import { ensureCsrf, refresh, type FetchLike } from './consoleAuth';
 
 export type RefreshOutcome = { kind: 'ok' } | { kind: 'unauthorized' } | { kind: 'failure' };
 
-const REFRESH_LOCK = 'dbclient.console-refresh';
+const REFRESH_LOCK = 'devbelt.console-refresh';
 
 function defaultCookie(): string {
   return typeof document === 'undefined' ? '' : document.cookie;

@@ -1,6 +1,6 @@
-import { getAccessToken } from './tokenStore';
-import { authedFetch, type FetchLike } from './authedFetch';
-import { resolveErrorKind, type FailureKind } from './httpError';
+import { getAccessToken } from '@devkit/auth-client';
+import { authedFetch, type FetchLike } from '@devkit/auth-client';
+import { resolveErrorKind, type FailureKind } from '@devkit/auth-client';
 
 /**
  * 发票申请 API 客户端（P4 切片 3）。申请 = console 受控写（CSRF + Idempotency-Key），

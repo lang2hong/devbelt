@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from 'vitest';
-import { setAccessToken } from './consoleAuth';
+import { setAccessToken } from '@devkit/auth-client';
 import { me, updateDisplayName, changePassword } from './me';
 
 function jsonResponse(status: number, body: unknown): Response {

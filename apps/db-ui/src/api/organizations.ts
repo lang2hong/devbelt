@@ -1,6 +1,6 @@
-import { getAccessToken } from './tokenStore';
-import { authedFetch, type FetchLike } from './authedFetch';
-import { resolveErrorKind } from './httpError';
+import { getAccessToken } from '@devkit/auth-client';
+import { authedFetch, type FetchLike } from '@devkit/auth-client';
+import { resolveErrorKind } from '@devkit/auth-client';
 
 /**
  * 组织 API 客户端（P3 §6）。写请求（create/update/close/leave/assignRole/removeMember/

@@ -24,6 +24,7 @@
     "vue": "^3.5.13"
   },
   "dependencies": {
+    "@devkit/auth-client": "workspace:*",
     "qrcode": "^1.5.4"
   }
 }

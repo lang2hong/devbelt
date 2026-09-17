@@ -1,0 +1,22 @@
+{
+  "name": "@devkit/auth-client",
+  "version": "0.1.0",
+  "description": "Browser-side identity/session client shared by devkit web apps (auth-ui, db-ui, admin-ui)",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "lint": "tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

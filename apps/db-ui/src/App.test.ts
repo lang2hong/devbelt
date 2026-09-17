@@ -2,11 +2,9 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 
-vi.mock('./session', () => ({
+vi.mock('@devkit/auth-client', async (importOriginal) => ({
+  ...(await importOriginal()),
   refreshSession: vi.fn(async () => ({ kind: 'ok' })),
-}));
-
-vi.mock('./api/consoleAuth', () => ({
   getAccessToken: vi.fn(() => 'tok'),
   ensureCsrf: vi.fn(async () => ''),
   logout: vi.fn(async () => ({ kind: 'ok' as const })),
@@ -17,7 +15,7 @@ vi.mock('./api/me', () => ({
 }));
 
 import { me } from './api/me';
-import { logout } from './api/consoleAuth';
+import { logout } from '@devkit/auth-client';
 import App from './App.vue';
 
 function consoleMe(platformAdmin: boolean) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { claimLinkFlow, verifyEmail, resendVerification, acceptInvitation, bindMailFlow, createSyncResetHandoff, type FetchLike } from './linkFlows';
-import { readCsrfToken } from './csrf';
+import { readCsrfToken } from '@devkit/auth-client';
 
 function jsonResponse(status: number, body: unknown, headers?: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {

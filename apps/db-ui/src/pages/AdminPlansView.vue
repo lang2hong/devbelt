@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { withBase } from '../lib/router';
-import { ensureCsrf } from '../api/consoleAuth';
+import { ensureCsrf } from '@devkit/auth-client';
 import { listPlans, updatePlan, upsertFeatureDef, type AdminFeatureDef, type AdminPlan } from '../api/admin';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 

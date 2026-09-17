@@ -1,7 +1,7 @@
-import { getAccessToken } from './tokenStore';
-import { authedFetch } from './authedFetch';
-import { resolveErrorKind } from './httpError';
-import type { ConsoleUser, FetchLike } from './consoleAuth';
+import { getAccessToken } from '@devkit/auth-client';
+import { authedFetch } from '@devkit/auth-client';
+import { resolveErrorKind } from '@devkit/auth-client';
+import type { ConsoleUser, FetchLike } from '@devkit/auth-client';
 
 /**
  * /api/console/me 相关客户端：取我、改显示名（幂等写）、改密（共享端点）。

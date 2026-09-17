@@ -1,6 +1,6 @@
-import { getAccessToken } from './tokenStore';
-import { authedFetch, type FetchLike } from './authedFetch';
-import { resolveErrorKind } from './httpError';
+import { getAccessToken } from '@devkit/auth-client';
+import { authedFetch, type FetchLike } from '@devkit/auth-client';
+import { resolveErrorKind } from '@devkit/auth-client';
 
 /**
  * 本人设备 API 客户端（P3 §5.2）。撤销为 console 写请求，幂等键由调用方铸定；

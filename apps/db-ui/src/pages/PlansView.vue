@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { listPlans } from '../api/plans';
-import { setAccessToken } from '../api/consoleAuth';
+import { setAccessToken } from '@devkit/auth-client';
 import { navigate, withBase } from '../lib/router';
 import { featureLabel, formatFeature, formatPrice, type PlanDto } from '../lib/planFeatures';
 

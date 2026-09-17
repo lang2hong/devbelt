@@ -8,14 +8,15 @@ vi.mock('../api/linkFlows', () => ({
   bindMailFlow: vi.fn(),
 }));
 
-vi.mock('../api/consoleAuth', () => ({
+vi.mock('@devkit/auth-client', async (importOriginal) => ({
+  ...(await importOriginal()),
   ensureCsrf: vi.fn(async () => 'csrf'),
   refresh: vi.fn(async () => ({ kind: 'ok' })),
   getAccessToken: vi.fn(() => 'at'),
 }));
 
 import { claimLinkFlow, acceptInvitation, bindMailFlow } from '../api/linkFlows';
-import { refresh } from '../api/consoleAuth';
+import { refresh } from '@devkit/auth-client';
 
 function setLocation(path: string): void {
   window.history.replaceState(null, '', path);

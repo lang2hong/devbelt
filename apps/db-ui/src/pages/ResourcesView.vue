@@ -8,7 +8,7 @@ import {
   type ResourceSummary,
   type OrgSummary,
 } from '../api/organizations';
-import { setAccessToken } from '../api/consoleAuth';
+import { setAccessToken } from '@devkit/auth-client';
 import { navigate, withBase } from '../lib/router';
 
 const props = defineProps<{ organizationId: string }>();

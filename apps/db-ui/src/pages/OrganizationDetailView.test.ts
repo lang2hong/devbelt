@@ -16,7 +16,8 @@ vi.mock('../api/organizations', () => ({
   revokeInvitation: vi.fn(),
 }));
 
-vi.mock('../api/consoleAuth', () => ({
+vi.mock('@devkit/auth-client', async (importOriginal) => ({
+  ...(await importOriginal()),
   ensureCsrf: vi.fn(),
   setAccessToken: vi.fn(),
 }));
@@ -27,7 +28,7 @@ import {
   listInvitations,
   closeOrganization,
 } from '../api/organizations';
-import { ensureCsrf } from '../api/consoleAuth';
+import { ensureCsrf } from '@devkit/auth-client';
 import OrganizationDetailView from './OrganizationDetailView.vue';
 
 function org(name: string, role: string): OrgSummary {

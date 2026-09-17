@@ -11,14 +11,15 @@ vi.mock('../api/orders', () => ({
   listOrders: vi.fn(),
 }));
 
-vi.mock('../api/consoleAuth', () => ({
+vi.mock('@devkit/auth-client', async (importOriginal) => ({
+  ...(await importOriginal()),
   setAccessToken: vi.fn(),
   ensureCsrf: vi.fn(async () => 'csrf'),
 }));
 
 import { listInvoices, requestInvoice } from '../api/invoices';
 import { listOrders } from '../api/orders';
-import { setAccessToken } from '../api/consoleAuth';
+import { setAccessToken } from '@devkit/auth-client';
 
 beforeEach(() => {
   vi.mocked(listInvoices).mockReset();

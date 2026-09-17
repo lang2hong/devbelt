@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { refreshSession } from './session';
-import { getAccessToken, setAccessToken } from './api/consoleAuth';
+import { getAccessToken, setAccessToken } from './consoleAuth';
 
 function jsonRes(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -73,6 +73,6 @@ describe('refreshSession', () => {
     const { fetchImpl } = refreshFlow(async () => jsonRes(200, { accessToken: 't' }));
     const r = await refreshSession(fetchImpl, cookie);
     expect(r.kind).toBe('ok');
-    expect(request).toHaveBeenCalledWith('dbclient.console-refresh', expect.any(Function));
+    expect(request).toHaveBeenCalledWith('devbelt.console-refresh', expect.any(Function));
   });
 });

@@ -10,7 +10,8 @@ vi.mock('../api/admin', () => ({
   adjustUserSubscription: vi.fn(),
 }));
 
-vi.mock('../api/consoleAuth', () => ({
+vi.mock('@devkit/auth-client', async (importOriginal) => ({
+  ...(await importOriginal()),
   ensureCsrf: vi.fn(async () => 'csrf'),
   setAccessToken: vi.fn(),
 }));
