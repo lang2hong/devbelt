@@ -182,11 +182,11 @@ describe('bindMailFlow', () => {
 
 describe('readCsrfToken', () => {
   it('reads the production prefixed cookie name', () => {
-    expect(readCsrfToken('a=1; __Host-dbclient_csrf=abc; b=2')).toBe('abc');
+    expect(readCsrfToken('a=1; __Host-devbelt_csrf=abc; b=2')).toBe('abc');
   });
 
   it('reads the dev cookie name', () => {
-    expect(readCsrfToken('dev_dbcsrf=xyz')).toBe('xyz');
+    expect(readCsrfToken('dev_devbelt_csrf=xyz')).toBe('xyz');
   });
 
   it('returns null when absent', () => {
@@ -198,9 +198,9 @@ describe('readCsrfToken', () => {
 describe('createSyncResetHandoff', () => {
   it('resolves success with openUri and expiresTime on HTTP 200', async () => {
     const r = await createSyncResetHandoff('csrf', 'token', async () =>
-      jsonResponse(200, { openUri: 'vscode://dbclient.sync/reset-after-loss?handoffTicket=abc', expiresTime: '2026-09-09T00:00:00.000Z' }),
+      jsonResponse(200, { openUri: 'vscode://devbelt.sync/reset-after-loss?handoffTicket=abc', expiresTime: '2026-09-09T00:00:00.000Z' }),
     );
-    expect(r).toEqual({ kind: 'success', openUri: 'vscode://dbclient.sync/reset-after-loss?handoffTicket=abc', expiresTime: '2026-09-09T00:00:00.000Z' });
+    expect(r).toEqual({ kind: 'success', openUri: 'vscode://devbelt.sync/reset-after-loss?handoffTicket=abc', expiresTime: '2026-09-09T00:00:00.000Z' });
   });
 
   it('resolves invalid on HTTP 400', async () => {

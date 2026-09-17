@@ -65,7 +65,7 @@ function allContextValues(): Set<string> {
 }
 
 /**
- * 组织树（dbclient.explorer.organization）能产生的全部 contextValue。
+ * 组织树（devbelt.explorer.organization）能产生的全部 contextValue。
  * 与个人信息来源树分离，见 OrgTreeNode.computeContextValue。
  */
 function allOrgContextValues(): Set<string> {
@@ -111,14 +111,14 @@ function viewItemMatcher(when: string): ((value: string) => boolean) | undefined
 
 describe('树右键菜单 when 表达式', () => {
   /**
-   * 回归：数据库类型曾经通过 `setContext('dbclient.dbType')` 传递，而那个键由
+   * 回归：数据库类型曾经通过 `setContext('devbelt.dbType')` 传递，而那个键由
    * 树的「选中变化」事件异步写入。右键未选中项、或右键与选中项不同时，键里还是
    * 上一个节点的值：在 SQLite 表上会看到 MySQL 专属命令，该出现的命令反而不出现。
    * 类型现在编码进 contextValue，菜单不得再依赖这些全局键。
    */
-  it('不再依赖 dbclient.dbType / dbclient.has* 上下文键', () => {
+  it('不再依赖 devbelt.dbType / devbelt.has* 上下文键', () => {
     const offenders = contextMenus()
-      .filter((e) => /dbclient\.(dbType|has[A-Z])/.test(e.when || ''))
+      .filter((e) => /devbelt\.(dbType|has[A-Z])/.test(e.when || ''))
       .map((e) => `${e.command}: ${e.when}`);
     expect(offenders).toEqual([]);
   });
@@ -186,8 +186,8 @@ describe('树右键菜单 when 表达式', () => {
       const has = (cmd: string): boolean =>
         menus.some((e) => e.command === cmd && viewItemMatcher(e.when || '')?.(applicable[0]));
 
-      expect(has('dbclient.refreshNode'), `${base} 缺 refresh`).toBe(true);
-      expect(has('dbclient.copyNodeName'), `${base} 缺 copy`).toBe(true);
+      expect(has('devbelt.refreshNode'), `${base} 缺 refresh`).toBe(true);
+      expect(has('devbelt.copyNodeName'), `${base} 缺 copy`).toBe(true);
     }
   });
 });
@@ -198,35 +198,35 @@ describe('组织菜单角色门控（per-node role，杜绝多组织串角色）
     !!viewItemMatcher(entry.when || '')?.(value);
 
   it('deleteResource 仅对 .admin resource 可见', () => {
-    const entries = menus.filter((e) => e.command === 'dbclient.org.deleteResource');
+    const entries = menus.filter((e) => e.command === 'devbelt.org.deleteResource');
     expect(entries.length).toBeGreaterThan(0);
-    expect(entries.some((e) => matchValue(e, 'dbclient.org.resource.query.admin'))).toBe(true);
-    expect(entries.some((e) => matchValue(e, 'dbclient.org.resource.query.member'))).toBe(false);
+    expect(entries.some((e) => matchValue(e, 'devbelt.org.resource.query.admin'))).toBe(true);
+    expect(entries.some((e) => matchValue(e, 'devbelt.org.resource.query.member'))).toBe(false);
   });
 
   it('deleteFolder / newFolder / newQuery 仅对 .admin organization|folder 可见', () => {
-    for (const cmd of ['dbclient.org.deleteFolder', 'dbclient.org.newFolder', 'dbclient.org.newQuery']) {
+    for (const cmd of ['devbelt.org.deleteFolder', 'devbelt.org.newFolder', 'devbelt.org.newQuery']) {
       const entries = menus.filter((e) => e.command === cmd);
       expect(entries.length, cmd).toBeGreaterThan(0);
-      expect(entries.every((e) => !matchValue(e, 'dbclient.org.folder.member')), cmd).toBe(true);
-      expect(entries.every((e) => !matchValue(e, 'dbclient.org.organization.member')), cmd).toBe(true);
+      expect(entries.every((e) => !matchValue(e, 'devbelt.org.folder.member')), cmd).toBe(true);
+      expect(entries.every((e) => !matchValue(e, 'devbelt.org.organization.member')), cmd).toBe(true);
       expect(
-        entries.some((e) => matchValue(e, 'dbclient.org.folder.admin') || matchValue(e, 'dbclient.org.organization.admin')),
+        entries.some((e) => matchValue(e, 'devbelt.org.folder.admin') || matchValue(e, 'devbelt.org.organization.admin')),
         cmd,
       ).toBe(true);
     }
   });
 
   it('只读命令（openResource/connectTemplate）对 admin 与 member 均可见', () => {
-    for (const cmd of ['dbclient.org.openResource', 'dbclient.org.connectTemplate']) {
+    for (const cmd of ['devbelt.org.openResource', 'devbelt.org.connectTemplate']) {
       const entries = menus.filter((e) => e.command === cmd);
       expect(entries.length, cmd).toBeGreaterThan(0);
       const adminHit = entries.some((e) =>
-        matchValue(e, 'dbclient.org.resource.query.admin')
-        || matchValue(e, 'dbclient.org.resource.connection_template.admin'));
+        matchValue(e, 'devbelt.org.resource.query.admin')
+        || matchValue(e, 'devbelt.org.resource.connection_template.admin'));
       const memberHit = entries.some((e) =>
-        matchValue(e, 'dbclient.org.resource.query.member')
-        || matchValue(e, 'dbclient.org.resource.connection_template.member'));
+        matchValue(e, 'devbelt.org.resource.query.member')
+        || matchValue(e, 'devbelt.org.resource.connection_template.member'));
       expect(adminHit, cmd).toBe(true);
       expect(memberHit, cmd).toBe(true);
     }
@@ -234,13 +234,13 @@ describe('组织菜单角色门控（per-node role，杜绝多组织串角色）
 });
 
 describe('组织编辑器标题栏命令 context', () => {
-  it('saveResource 引用 dbclient.orgResourceEditor + 绑定组织角色，runQuery 引用 dbclient.orgSessionEditor', () => {
+  it('saveResource 引用 devbelt.orgResourceEditor + 绑定组织角色，runQuery 引用 devbelt.orgSessionEditor', () => {
     const runMenus = editorRunMenus();
-    const save = runMenus.find((e) => e.command === 'dbclient.org.saveResource');
-    const run = runMenus.find((e) => e.command === 'dbclient.org.runQuery');
-    expect(save?.when).toContain('dbclient.orgResourceEditor');
-    expect(save?.when).toContain("dbclient.orgResourceEditorRole == 'admin'");
-    expect(run?.when).toContain('dbclient.orgSessionEditor');
-    expect(run?.when).not.toContain('dbclient.orgResourceEditor');
+    const save = runMenus.find((e) => e.command === 'devbelt.org.saveResource');
+    const run = runMenus.find((e) => e.command === 'devbelt.org.runQuery');
+    expect(save?.when).toContain('devbelt.orgResourceEditor');
+    expect(save?.when).toContain("devbelt.orgResourceEditorRole == 'admin'");
+    expect(run?.when).toContain('devbelt.orgSessionEditor');
+    expect(run?.when).not.toContain('devbelt.orgResourceEditor');
   });
 });

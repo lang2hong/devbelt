@@ -35,7 +35,7 @@ export class ConnectionForm extends BaseWebView {
     editing?: SavedConnection,
     presetGroupId?: string,
   ) {
-    super('dbclient.connectionForm', editing ? 'Edit Connection' : 'New Connection');
+    super('devbelt.connectionForm', editing ? 'Edit Connection' : 'New Connection');
     this.groups = groups;
     this.onSaved = onSaved;
     this.editing = editing;

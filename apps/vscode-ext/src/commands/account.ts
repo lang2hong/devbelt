@@ -12,7 +12,7 @@ import { l10n } from '../i18n';
  *
  * 这四条命令曾随 V2 同步删除而悬空（有声明无 handler）：登录/注册、账户面板、
  * 会话/设备管理、登出。这里重新接到现有 webview 与 `AuthService`。
- * 登录态上下文 `dbclient.loggedIn` 由 `extension.ts` 的 AuthEvent 订阅统一刷新。
+ * 登录态上下文 `devbelt.loggedIn` 由 `extension.ts` 的 AuthEvent 订阅统一刷新。
  */
 
 /** 登录密码最小长度（与 server `PASSWORD_MIN` 一致）。 */
@@ -64,31 +64,31 @@ export async function changeLoginPassword(deps: Deps): Promise<void> {
 }
 
 export function registerAccountCommands(deps: Deps, sub: Sub): void {
-  sub('dbclient.login', () => {
+  sub('devbelt.login', () => {
     LoginFormView.open(deps.auth);
   });
 
-  sub('dbclient.account', () => {
+  sub('devbelt.account', () => {
     AccountView.open(deps.auth, deps.syncFactory);
   });
 
-  sub('dbclient.sessions', () => {
+  sub('devbelt.sessions', () => {
     SessionView.open(deps.auth);
   });
 
-  sub('dbclient.plans', () => {
+  sub('devbelt.plans', () => {
     PlansView.open(deps.auth);
   });
 
-  sub('dbclient.openConsole', () => {
+  sub('devbelt.openConsole', () => {
     openConsole();
   });
 
-  sub('dbclient.changeLoginPassword', () => {
+  sub('devbelt.changeLoginPassword', () => {
     void changeLoginPassword(deps);
   });
 
-  sub('dbclient.logout', async () => {
+  sub('devbelt.logout', async () => {
     await deps.auth.logout();
   });
 }

@@ -39,10 +39,10 @@ export class OrgTreeNode extends vscode.TreeItem {
 
   private computeContextValue(): string {
     switch (this.kind) {
-      case 'organization': return `dbclient.org.organization.${this.role ?? 'unknown'}`;
-      case 'folder': return `dbclient.org.folder.${this.role ?? 'unknown'}`;
-      case 'resource': return `dbclient.org.resource.${this.resource?.resourceType ?? 'unknown'}.${this.role ?? 'unknown'}`;
-      default: return 'dbclient.org.info';
+      case 'organization': return `devbelt.org.organization.${this.role ?? 'unknown'}`;
+      case 'folder': return `devbelt.org.folder.${this.role ?? 'unknown'}`;
+      case 'resource': return `devbelt.org.resource.${this.resource?.resourceType ?? 'unknown'}.${this.role ?? 'unknown'}`;
+      default: return 'devbelt.org.info';
     }
   }
 }
@@ -85,7 +85,7 @@ export class OrgTreeDataProvider implements vscode.TreeDataProvider<OrgTreeNode>
           vscode.TreeItemCollapsibleState.None,
           'info',
           undefined, undefined, undefined, undefined,
-          { command: 'dbclient.org.openConsole', title: l10n('org.tree.openConsole') },
+          { command: 'devbelt.org.openConsole', title: l10n('org.tree.openConsole') },
         )];
       }
       return orgs.map((o) => new OrgTreeNode(
@@ -103,7 +103,7 @@ export class OrgTreeDataProvider implements vscode.TreeDataProvider<OrgTreeNode>
         vscode.TreeItemCollapsibleState.None,
         'info',
         undefined, undefined, undefined, undefined,
-        { command: 'dbclient.login', title: l10n('org.tree.signIn') },
+        { command: 'devbelt.login', title: l10n('org.tree.signIn') },
       )];
     }
   }

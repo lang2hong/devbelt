@@ -157,7 +157,7 @@ describe('PersonalSyncSession', () => {
     await s.initializeSync({} as NewStateDto, dek32());
 
     expect(init).toHaveBeenCalledTimes(1);
-    expect(secrets.store).toHaveBeenCalledWith('dbclient.sync.dek.7.1', expect.any(String));
+    expect(secrets.store).toHaveBeenCalledWith('devbelt.sync.dek.7.1', expect.any(String));
     expect(s.getStateStore().getSnapshot()).toEqual({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
     expect(s.isUnlocked).toBe(true);
   });
@@ -174,7 +174,7 @@ describe('PersonalSyncSession', () => {
 
     const dek = dek32();
     await s.unlockFromState({ keyEpoch: '2', stateVersion: '3', changeSequence: '4', signPub: encodeBase64Url(deriveSyncSignKeyPair(dek).publicKey) } as StateDto, dek);
-    expect(secrets.store).toHaveBeenCalledWith('dbclient.sync.dek.7.2', expect.any(String));
+    expect(secrets.store).toHaveBeenCalledWith('devbelt.sync.dek.7.2', expect.any(String));
     expect(s.getStateStore().getSnapshot()).toEqual({ keyEpoch: '2', stateVersion: '3', changeSequence: '4' });
     expect(s.isUnlocked).toBe(true);
   });
@@ -211,7 +211,7 @@ describe('PersonalSyncSession', () => {
 
     await s.resumeEpochTransition(newSnapshot);
     expect(s.pendingCleanup).toBeUndefined();
-    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.2');
+    expect(secrets.delete).toHaveBeenCalledWith('devbelt.sync.dek.7.2');
     expect(s.isUnlocked).toBe(false);
   });
 
@@ -276,7 +276,7 @@ describe('PersonalSyncSession', () => {
     // 旧 epoch=2 的持久化 store 留数据 + cleanup intent（模拟上一次切换崩在清 store 前）
     await new RecordMapStore(memento, '7', '2').put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
     await new PendingMutationStore(memento, '7', '2').put(makePutMutation());
-    await memento.update('dbclient.sync.epochCleanup.7', { fromKeyEpoch: '2', toKeyEpoch: '3' });
+    await memento.update('devbelt.sync.epochCleanup.7', { fromKeyEpoch: '2', toKeyEpoch: '3' });
 
     // 新会话（未 unlock，内存 mapStore/outbox 均为 undefined）= 扩展重启
     const s = new PersonalSyncSession('7', memento, dekStore, makeStore().store, makeClient());
@@ -284,20 +284,20 @@ describe('PersonalSyncSession', () => {
 
     expect(new RecordMapStore(memento, '7', '2').getByRecordId('A'.repeat(22))).toBeUndefined();
     expect(new PendingMutationStore(memento, '7', '2').list()).toEqual([]);
-    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.2');
-    expect(memento.get('dbclient.sync.epochCleanup.7')).toBeUndefined();
+    expect(secrets.delete).toHaveBeenCalledWith('devbelt.sync.dek.7.2');
+    expect(memento.get('devbelt.sync.epochCleanup.7')).toBeUndefined();
   });
 
   it('resume 拒绝：snapshot keyEpoch 倒退（< fromKeyEpoch）fail-closed', async () => {
     const memento = makeMemento();
     const { store: dekStore, secrets } = makeDekStore();
-    await memento.update('dbclient.sync.epochCleanup.7', { fromKeyEpoch: '2', toKeyEpoch: '3' });
+    await memento.update('devbelt.sync.epochCleanup.7', { fromKeyEpoch: '2', toKeyEpoch: '3' });
 
     const s = new PersonalSyncSession('7', memento, dekStore, makeStore().store, makeClient());
     await expect(s.resumeEpochTransition({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' }))
       .rejects.toThrowError(/resume snapshot keyEpoch does not match/);
     expect(secrets.delete).not.toHaveBeenCalled();
-    expect(memento.get('dbclient.sync.epochCleanup.7')).toEqual({ fromKeyEpoch: '2', toKeyEpoch: '3' });
+    expect(memento.get('devbelt.sync.epochCleanup.7')).toEqual({ fromKeyEpoch: '2', toKeyEpoch: '3' });
   });
 
   it('clearLocalState 清本机同步数据/DEK/快照并回到未解锁态（纯本地）', async () => {
@@ -316,22 +316,22 @@ describe('PersonalSyncSession', () => {
     expect(s.isUnlocked).toBe(false);
     expect(new RecordMapStore(memento, '7', '2').getByRecordId('A'.repeat(22))).toBeUndefined();
     expect(new PendingMutationStore(memento, '7', '2').list()).toEqual([]);
-    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.2');
+    expect(secrets.delete).toHaveBeenCalledWith('devbelt.sync.dek.7.2');
   });
 
   it('clearLocalState 也清理残留 cleanup intent 涉及的 epoch（无快照时）', async () => {
     const memento = makeMemento();
     const { store: dekStore, secrets } = makeDekStore();
     await new RecordMapStore(memento, '7', '2').put('B'.repeat(22), { type: 'connection', localId: 'c-2', recordVersion: '1', revision: 0, status: 'confirmed' });
-    await memento.update('dbclient.sync.epochCleanup.7', { fromKeyEpoch: '2', toKeyEpoch: '3' });
+    await memento.update('devbelt.sync.epochCleanup.7', { fromKeyEpoch: '2', toKeyEpoch: '3' });
     const s = new PersonalSyncSession('7', memento, dekStore, makeStore().store, makeClient());
 
     await s.clearLocalState();
 
     expect(new RecordMapStore(memento, '7', '2').getByRecordId('B'.repeat(22))).toBeUndefined();
-    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.2');
-    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.3');
-    expect(memento.get('dbclient.sync.epochCleanup.7')).toBeUndefined();
+    expect(secrets.delete).toHaveBeenCalledWith('devbelt.sync.dek.7.2');
+    expect(secrets.delete).toHaveBeenCalledWith('devbelt.sync.dek.7.3');
+    expect(memento.get('devbelt.sync.epochCleanup.7')).toBeUndefined();
   });
 
   it('scheduleNow / scheduleInitialSync 未解锁抛错（fail-closed）', () => {
@@ -535,7 +535,7 @@ describe('PersonalSyncSession B5 生命周期', () => {
 
     expect(code).toBe('NEWCODE');
     expect(recover).toHaveBeenCalledTimes(1);
-    expect(secrets.store).toHaveBeenCalledWith('dbclient.sync.dek.7.1', expect.any(String));
+    expect(secrets.store).toHaveBeenCalledWith('devbelt.sync.dek.7.1', expect.any(String));
     expect(s.isUnlocked).toBe(true);
     expect(s.getStateStore().getSnapshot()).toEqual({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
   });
@@ -575,7 +575,7 @@ describe('PersonalSyncSession B5 生命周期', () => {
     expect(recoverViaAccount).toHaveBeenCalledTimes(1);
     expect(recoverViaAccount).toHaveBeenCalledWith('login-password');
     expect(accountRecover).toHaveBeenCalledTimes(1);
-    expect(secrets.store).toHaveBeenCalledWith('dbclient.sync.dek.7.1', expect.any(String));
+    expect(secrets.store).toHaveBeenCalledWith('devbelt.sync.dek.7.1', expect.any(String));
     expect(s.isUnlocked).toBe(true);
     expect(s.getStateStore().getSnapshot()).toEqual({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
   });
@@ -624,8 +624,8 @@ describe('PersonalSyncSession B5 生命周期', () => {
     expect(code).toBe('NEWCODE');
     expect(destroy).toHaveBeenCalledTimes(1);
     expect(new RecordMapStore(memento, '7', '1').getByRecordId('A'.repeat(22))).toBeUndefined();
-    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.1');
-    expect(secrets.store).toHaveBeenCalledWith('dbclient.sync.dek.7.2', expect.any(String));
+    expect(secrets.delete).toHaveBeenCalledWith('devbelt.sync.dek.7.1');
+    expect(secrets.store).toHaveBeenCalledWith('devbelt.sync.dek.7.2', expect.any(String));
     expect(s.isUnlocked).toBe(true);
     expect(s.getStateStore().getSnapshot()).toEqual({ keyEpoch: '2', stateVersion: '1', changeSequence: '0' });
   });
@@ -657,7 +657,7 @@ describe('PersonalSyncSession B5 生命周期', () => {
 
     expect(code).toBe('NEWCODE');
     expect(reset).toHaveBeenCalledTimes(1);
-    expect(secrets.store).toHaveBeenCalledWith('dbclient.sync.dek.7.1', expect.any(String));
+    expect(secrets.store).toHaveBeenCalledWith('devbelt.sync.dek.7.1', expect.any(String));
     expect(s.isUnlocked).toBe(true);
   });
 
@@ -691,7 +691,7 @@ describe('PersonalSyncSession B5 生命周期', () => {
     await s.resumeEpochTransition({ keyEpoch: '2', stateVersion: '1', changeSequence: '0' });
     expect(s.pendingCleanup).toBeUndefined();
     expect(new RecordMapStore(memento, '7', '1').getByRecordId('A'.repeat(22))).toBeUndefined();
-    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.1');
+    expect(secrets.delete).toHaveBeenCalledWith('devbelt.sync.dek.7.1');
   });
 
   it('destroy 回执 epoch ≠ 预期 next → fail-closed 不写本地', async () => {
@@ -795,7 +795,7 @@ describe('PersonalSyncSession B5 生命周期', () => {
     const state2 = { ...validState('1'), signPub: encodeBase64Url(deriveSyncSignKeyPair(dek).publicKey) } as StateDto;
     await s2.unlockFromState(state2, dek);
     expect(s2.pendingCleanup).toBeUndefined();
-    expect(memento.get('dbclient.sync.epochCleanup.7')).toBeUndefined();
+    expect(memento.get('devbelt.sync.epochCleanup.7')).toBeUndefined();
     expect(s2.isUnlocked).toBe(true);
     expect(secrets.delete).not.toHaveBeenCalled(); // 未提交成功，不清理旧 epoch
   });
@@ -803,18 +803,18 @@ describe('PersonalSyncSession B5 生命周期', () => {
   it('resumeEpochTransition：远端停留 fromKeyEpoch → 撤销 journal 返回 false', async () => {
     const memento = makeMemento();
     const { store: dekStore, secrets } = makeDekStore();
-    await memento.update('dbclient.sync.epochCleanup.7', { fromKeyEpoch: '1', toKeyEpoch: '2' });
+    await memento.update('devbelt.sync.epochCleanup.7', { fromKeyEpoch: '1', toKeyEpoch: '2' });
     const s = new PersonalSyncSession('7', memento, dekStore, makeStore().store, makeClient());
     const r = await s.resumeEpochTransition({ keyEpoch: '1', stateVersion: '1', changeSequence: '0' });
     expect(r).toBe(false);
     expect(s.pendingCleanup).toBeUndefined();
-    expect(memento.get('dbclient.sync.epochCleanup.7')).toBeUndefined();
+    expect(memento.get('devbelt.sync.epochCleanup.7')).toBeUndefined();
     expect(secrets.delete).not.toHaveBeenCalled();
   });
 
   it('reset 时已有 pendingCleanup → fail-closed：不发 reset 也不替换 intent', async () => {
     const memento = makeMemento();
-    await memento.update('dbclient.sync.epochCleanup.7', { fromKeyEpoch: '1', toKeyEpoch: '2' });
+    await memento.update('devbelt.sync.epochCleanup.7', { fromKeyEpoch: '1', toKeyEpoch: '2' });
     const resetAfterLossWithHandoff = vi.fn(async () => ({ keyEpoch: '3', stateVersion: '1', changeSequence: '0' }));
     const getState = vi.fn(async () => validState('2'));
     const client = { resetAfterLossWithHandoff, getState } as unknown as PersonalSyncClient;
@@ -823,7 +823,7 @@ describe('PersonalSyncSession B5 生命周期', () => {
     await expect(s.resetSyncAfterLoss('token', 'new-smp')).rejects.toThrowError(/pending sync cleanup/);
     expect(resetAfterLossWithHandoff).not.toHaveBeenCalled();
     expect(getState).not.toHaveBeenCalled();
-    expect(memento.get('dbclient.sync.epochCleanup.7')).toEqual({ fromKeyEpoch: '1', toKeyEpoch: '2' });
+    expect(memento.get('devbelt.sync.epochCleanup.7')).toEqual({ fromKeyEpoch: '1', toKeyEpoch: '2' });
   });
 
   it('unlockFromState：本地 epoch 落后于远端 → 清理旧 epoch 并解锁新 epoch', async () => {
@@ -838,7 +838,7 @@ describe('PersonalSyncSession B5 生命周期', () => {
     await s.unlockFromState(state2, dek);
 
     expect(new RecordMapStore(memento, '7', '1').getByRecordId('A'.repeat(22))).toBeUndefined();
-    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.1');
+    expect(secrets.delete).toHaveBeenCalledWith('devbelt.sync.dek.7.1');
     expect(s.isUnlocked).toBe(true);
     expect(s.getStateStore().getSnapshot()).toEqual({ keyEpoch: '2', stateVersion: '1', changeSequence: '0' });
   });
@@ -847,7 +847,7 @@ describe('PersonalSyncSession B5 生命周期', () => {
     const memento = makeMemento();
     const { store: dekStore, secrets } = makeDekStore();
     const { store, removedIds } = makeEntityStore(['c-1', 'c-2', 'c-new']);
-    await memento.update('dbclient.sync.epochCleanup.7', { fromKeyEpoch: '1', toKeyEpoch: '2' });
+    await memento.update('devbelt.sync.epochCleanup.7', { fromKeyEpoch: '1', toKeyEpoch: '2' });
     // 中断 transition 已把 from(1) 与 to(2) 两个 epoch 的产物都持久化了一部分
     await new RecordMapStore(memento, '7', '1').put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
     await new RecordMapStore(memento, '7', '2').put('B'.repeat(22), { type: 'connection', localId: 'c-2', recordVersion: '1', revision: 0, status: 'pending' });
@@ -860,9 +860,9 @@ describe('PersonalSyncSession B5 生命周期', () => {
     expect(new RecordMapStore(memento, '7', '1').getByRecordId('A'.repeat(22))).toBeUndefined();
     expect(new RecordMapStore(memento, '7', '2').getByRecordId('B'.repeat(22))).toBeUndefined();
     expect(new PendingMutationStore(memento, '7', '2').list()).toEqual([]);
-    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.1');
-    expect(secrets.delete).toHaveBeenCalledWith('dbclient.sync.dek.7.2');
-    expect(memento.get('dbclient.sync.epochCleanup.7')).toBeUndefined();
+    expect(secrets.delete).toHaveBeenCalledWith('devbelt.sync.dek.7.1');
+    expect(secrets.delete).toHaveBeenCalledWith('devbelt.sync.dek.7.2');
+    expect(memento.get('devbelt.sync.epochCleanup.7')).toBeUndefined();
     // 两个 epoch 的映射实体（含 pending）都被 wipe，从未映射的 c-new 保留
     expect(removedIds).toEqual(expect.arrayContaining(['c-1', 'c-2']));
     expect(removedIds).not.toContain('c-new');
@@ -949,7 +949,7 @@ describe('PersonalSyncSession B5 生命周期', () => {
     const memento = makeMemento();
     const dek = new Uint8Array(32).fill(7);
     const secrets = {
-      get: vi.fn(async (k: string) => (k === 'dbclient.sync.dek.7.1' ? encodeBase64Url(dek) : undefined)),
+      get: vi.fn(async (k: string) => (k === 'devbelt.sync.dek.7.1' ? encodeBase64Url(dek) : undefined)),
       store: vi.fn(async () => {}),
       delete: vi.fn(async () => {}),
     };
@@ -983,7 +983,7 @@ describe('PersonalSyncSession B5 生命周期', () => {
     const memento = makeMemento();
     const dek = new Uint8Array(32).fill(9);
     const secrets = {
-      get: vi.fn(async (k: string) => (k === 'dbclient.sync.dek.7.1' ? encodeBase64Url(dek) : undefined)),
+      get: vi.fn(async (k: string) => (k === 'devbelt.sync.dek.7.1' ? encodeBase64Url(dek) : undefined)),
       store: vi.fn(async () => {}),
       delete: vi.fn(async () => {}),
     };

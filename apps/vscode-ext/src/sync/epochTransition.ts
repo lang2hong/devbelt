@@ -32,7 +32,7 @@ export interface EpochTransitionDeps {
  * 生命周期（停协调器/重置运行组件/广播）通过 deps 端口回注，本模块不感知会话其余状态。
  */
 export class EpochTransitionCoordinator {
-  private static readonly EPOCH_CLEANUP_KEY = 'dbclient.sync.epochCleanup';
+  private static readonly EPOCH_CLEANUP_KEY = 'devbelt.sync.epochCleanup';
 
   constructor(private readonly deps: EpochTransitionDeps) {}
 

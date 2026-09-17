@@ -6,7 +6,7 @@ import { ConflictError, SyncEpochStaleError, SyncSignatureInvalidError, Validati
 import { parseU64 } from '../../../domain/syncU64.js';
 import { jcs, verifyEd25519, decodeB64Url } from './syncCrypto.js';
 
-export const SYNC_DOMAIN = 'dbclient/sync/v1';
+export const SYNC_DOMAIN = 'devbelt/sync/v1';
 
 /** u64 输入字段经 parseU64 校验（拒前导零/越界），非法→400 VALIDATION_FAILED。 */
 export function assertU64(value: string, field: string): void {

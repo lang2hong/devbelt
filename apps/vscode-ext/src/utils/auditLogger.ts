@@ -26,7 +26,7 @@ export interface AuditEntry {
 }
 
 const MAX_ENTRIES = 1000;
-const STORAGE_KEY = 'dbclient.auditLog';
+const STORAGE_KEY = 'devbelt.auditLog';
 
 export class AuditLogger {
   private static instance: AuditLogger | undefined;

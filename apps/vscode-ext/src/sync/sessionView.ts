@@ -20,7 +20,7 @@ export class SessionView extends BaseWebView {
   private readonly auth: AuthService;
 
   private constructor(auth: AuthService) {
-    super('dbclient.sessions', l10n('sessions.title'));
+    super('devbelt.sessions', l10n('sessions.title'));
     this.auth = auth;
   }
 

@@ -56,5 +56,5 @@ export function deriveCsrfKey(env: NodeJS.ProcessEnv = process.env): Buffer {
   if (!b64) {
     throw new Error('TOKEN_SIGNING_KEY_B64 is required to derive the CSRF signing key');
   }
-  return createHash('sha256').update(`dbclient:csrf:${b64}`).digest();
+  return createHash('sha256').update(`devbelt:csrf:${b64}`).digest();
 }

@@ -41,7 +41,7 @@ export class TableDesignView extends BaseWebView {
     private readonly onMutate?: () => void,
   ) {
     super(
-      'dbclient.tableDesign',
+      'devbelt.tableDesign',
       table
         ? `Design: ${conn.name || conn.host} › ${database} › ${table}`
         : `New Table: ${conn.name || conn.host} › ${database}`,

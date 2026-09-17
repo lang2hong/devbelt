@@ -242,7 +242,7 @@ describe('personal sync B1 commands', () => {
     await unlockPersonalSync(deps);
 
     expect(errorAction).toHaveBeenCalled();
-    expect(mocks.executeCommand).toHaveBeenCalledWith('dbclient.resetSync');
+    expect(mocks.executeCommand).toHaveBeenCalledWith('devbelt.resetSync');
   });
 
   it('重启后（无 coordinator）本地 epoch 落后 + 解锁失败 → 仍触发 resetSync（R1）', async () => {
@@ -260,7 +260,7 @@ describe('personal sync B1 commands', () => {
     await unlockPersonalSync(deps);
 
     expect(errorAction).toHaveBeenCalled();
-    expect(mocks.executeCommand).toHaveBeenCalledWith('dbclient.resetSync');
+    expect(mocks.executeCommand).toHaveBeenCalledWith('devbelt.resetSync');
   });
 
   it('口令不一致（非 epoch 前进）→ 弹 4 按钮并分发', async () => {
@@ -274,7 +274,7 @@ describe('personal sync B1 commands', () => {
     expect(errorAction).toHaveBeenCalledWith('Sync passphrase mismatch. It may have been changed on another device.', [
       'Re-enter', 'Use Recovery Code', 'Use Account', 'Reset Sync', 'Reset Local Sync',
     ]);
-    expect(mocks.executeCommand).toHaveBeenCalledWith('dbclient.recoverSync');
+    expect(mocks.executeCommand).toHaveBeenCalledWith('devbelt.recoverSync');
   });
 
   it('syncEntry: unlocked → immediate syncNow', async () => {

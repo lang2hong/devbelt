@@ -25,43 +25,43 @@ const GUARDS = ['ensureWritable', 'confirmSqlExecution'];
 /** 会真正落库的命令 → 所在文件。仅列「直接执行」的，不含只打开 SQL 模板的。 */
 const WRITE_COMMANDS: Record<string, string[]> = {
   'table.ts': [
-    'dbclient.dropTable',
-    'dbclient.renameTable',
-    'dbclient.renameView',
-    'dbclient.truncateTable',
-    'dbclient.dupTable',
-    'dbclient.copyTable',
-    'dbclient.mockData',
-    'dbclient.dropView',
-    'dbclient.dropRoutine',
-    'dbclient.dropEvent',
-    'dbclient.addColumn',
-    'dbclient.modifyColumn',
-    'dbclient.renameColumn',
-    'dbclient.dropColumn',
+    'devbelt.dropTable',
+    'devbelt.renameTable',
+    'devbelt.renameView',
+    'devbelt.truncateTable',
+    'devbelt.dupTable',
+    'devbelt.copyTable',
+    'devbelt.mockData',
+    'devbelt.dropView',
+    'devbelt.dropRoutine',
+    'devbelt.dropEvent',
+    'devbelt.addColumn',
+    'devbelt.modifyColumn',
+    'devbelt.renameColumn',
+    'devbelt.dropColumn',
   ],
   'database.ts': [
-    'dbclient.createDatabase',
-    'dbclient.dropDatabase',
-    'dbclient.restoreDatabase',
-    'dbclient.importData',
-    'dbclient.importTable',
+    'devbelt.createDatabase',
+    'devbelt.dropDatabase',
+    'devbelt.restoreDatabase',
+    'devbelt.importData',
+    'devbelt.importTable',
     // 写目标连接而非 node.conn，守卫参数是 target.value
-    'dbclient.syncDatabase',
+    'devbelt.syncDatabase',
   ],
   'ddl.ts': [
-    'dbclient.addIndex',
-    'dbclient.modifyIndex',
-    'dbclient.dropIndex',
-    'dbclient.dropTrigger',
-    'dbclient.addForeignKey',
-    'dbclient.dropForeignKey',
+    'devbelt.addIndex',
+    'devbelt.modifyIndex',
+    'devbelt.dropIndex',
+    'devbelt.dropTrigger',
+    'devbelt.addForeignKey',
+    'devbelt.dropForeignKey',
   ],
-  // query.ts 原本不在扫描范围内 —— 这正是 dbclient.updateCell 长期漏掉守卫的原因。
+  // query.ts 原本不在扫描范围内 —— 这正是 devbelt.updateCell 长期漏掉守卫的原因。
   // 它是个已注册命令，任何 executeCommand 调用方（其他扩展、webview 消息）都能
   // 直接触发，绕过 RowEditor 那条带确认的路径。
   'query.ts': [
-    'dbclient.updateCell',
+    'devbelt.updateCell',
   ],
 };
 
@@ -229,7 +229,7 @@ describe('写命令必须调用只读/危险语句闸门', () => {
 
     for (const file of Object.keys(WRITE_COMMANDS)) {
       const text = read(file);
-      for (const m of text.matchAll(/sub\('(dbclient\.\w+)'/g)) {
+      for (const m of text.matchAll(/sub\('(devbelt\.\w+)'/g)) {
         const command = m[1];
         if (listed.has(command)) continue;
         const body = handlerBody(text, command);

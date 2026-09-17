@@ -41,7 +41,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 }
 
 export class RecordMapStore {
-  private static readonly KEY_PREFIX = 'dbclient.sync.recordMap';
+  private static readonly KEY_PREFIX = 'devbelt.sync.recordMap';
 
   private readonly key: string;
   private writeChain: Promise<void> = Promise.resolve();

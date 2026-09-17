@@ -84,7 +84,7 @@ describe('refresh', () => {
 
 describe('ensureCsrf', () => {
   it('reads the csrf token from cookies', async () => {
-    const r = await ensureCsrf(async () => jsonResponse(204, null), () => 'a=1; __Host-dbclient_csrf=abc; b=2');
+    const r = await ensureCsrf(async () => jsonResponse(204, null), () => 'a=1; __Host-devbelt_csrf=abc; b=2');
     expect(r).toBe('abc');
   });
 });

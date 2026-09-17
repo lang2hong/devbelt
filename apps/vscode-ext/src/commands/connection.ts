@@ -44,7 +44,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     return cap > 0 && activeConnectionCount() >= cap;
   };
 
-  sub('dbclient.addConnection', (node?: DbTreeNode) => {
+  sub('devbelt.addConnection', (node?: DbTreeNode) => {
     if (atConnectionCap()) {
       void vscode.window.showWarningMessage(l10n('conn.capReached', { count: connectionCap() }));
       return;
@@ -53,11 +53,11 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     ConnectionForm.open(store, () => treeProvider.refresh(), gid);
   });
 
-  sub('dbclient.editConnection', (node: DbTreeNode) => {
+  sub('devbelt.editConnection', (node: DbTreeNode) => {
     if (node?.conn) ConnectionForm.open(store, () => treeProvider.refresh(), undefined, node.conn);
   });
 
-  sub('dbclient.cloneConnection', (node: DbTreeNode) => {
+  sub('devbelt.cloneConnection', (node: DbTreeNode) => {
     if (!node?.conn) return;
     if (atConnectionCap()) {
       void vscode.window.showWarningMessage(l10n('conn.capReached', { count: connectionCap() }));
@@ -68,7 +68,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     ConnectionForm.open(store, () => treeProvider.refresh(), undefined, cloned);
   });
 
-  sub('dbclient.searchConnections', async () => {
+  sub('devbelt.searchConnections', async () => {
     const list = store.list();
     if (!list.length) {
       vscode.window.showInformationMessage(l10n('cmd.noConnection'));
@@ -79,10 +79,10 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
       { placeHolder: l10n('search.connectionsPlaceholder'), matchOnDescription: true },
     );
     if (!picked) return;
-    vscode.commands.executeCommand('dbclient.openConnection', picked.conn);
+    vscode.commands.executeCommand('devbelt.openConnection', picked.conn);
   });
 
-  sub('dbclient.deleteConnection', async (node: DbTreeNode) => {
+  sub('devbelt.deleteConnection', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     if (!(await confirm('conn.deleteConfirm', 'table.delete', node.conn.name || node.conn.host))) return;
     await store.remove(node.conn.id);
@@ -90,7 +90,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     treeProvider.refresh();
   });
 
-  sub('dbclient.openConnection', async (conn: SavedConnection) => {
+  sub('devbelt.openConnection', async (conn: SavedConnection) => {
     if (!conn?.id) return;
     // 并发连接数门禁：已打开则不算新增；0 = 不限。
     const maxConcurrent = maxConcurrentConnections(auth.getCachedEntitlement());
@@ -116,7 +116,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
           l10n('sync.fixPathsAction'),
         );
         if (picked === l10n('sync.fixPathsAction')) {
-          await vscode.commands.executeCommand('dbclient.fixConnectionPaths', conn);
+          await vscode.commands.executeCommand('devbelt.fixConnectionPaths', conn);
         }
       } else {
         vscode.window.showErrorMessage(`Open connection failed: ${(err as Error).message}`);
@@ -124,7 +124,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     }
   });
 
-  sub('dbclient.closeConnection', (node: DbTreeNode) => {
+  sub('devbelt.closeConnection', (node: DbTreeNode) => {
     if (!node?.conn) return;
     manager.disposeConn(node.conn.id);
     treeProvider.markClosed(node.conn.id);
@@ -133,14 +133,14 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     vscode.window.showInformationMessage(l10n('conn.closed', { name: node.conn.name || node.conn.host }));
   });
 
-  sub('dbclient.refreshConnection', (node: DbTreeNode) => {
+  sub('devbelt.refreshConnection', (node: DbTreeNode) => {
     if (node?.conn) manager.disposeConn(node.conn.id);
     treeProvider.refresh();
   });
 
-  sub('dbclient.refresh', () => treeProvider.refresh());
+  sub('devbelt.refresh', () => treeProvider.refresh());
 
-  sub('dbclient.exportConnections', async (node?: DbTreeNode) => {
+  sub('devbelt.exportConnections', async (node?: DbTreeNode) => {
     if (!canExportConnections(auth.getCachedEntitlement())) {
       vscode.window.showWarningMessage(l10n('entitlement.exportRequired'));
       return;
@@ -215,7 +215,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     vscode.window.showInformationMessage(l10n('conn.exportDone', { count: selected.length }));
   });
 
-  sub('dbclient.importConnections', async () => {
+  sub('devbelt.importConnections', async () => {
     if (!canImportConnections(auth.getCachedEntitlement())) {
       void vscode.window.showWarningMessage(l10n('conn.importUpgrade'));
       return;

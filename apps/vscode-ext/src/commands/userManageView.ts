@@ -46,7 +46,7 @@ export class UserManageView extends BaseWebView {
     private readonly conn: SavedConnection,
     private readonly deps: Deps,
   ) {
-    super('dbclient.userManage', `${l10n('user.manageTitle')} @ ${conn.name || conn.host}`);
+    super('devbelt.userManage', `${l10n('user.manageTitle')} @ ${conn.name || conn.host}`);
   }
 
   static open(deps: Deps, node: DbTreeNode): void {

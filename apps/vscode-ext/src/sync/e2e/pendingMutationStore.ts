@@ -139,7 +139,7 @@ function assertConflict(c: unknown): void {
 }
 
 export class PendingMutationStore {
-  private static readonly KEY_PREFIX = 'dbclient.sync.outbox';
+  private static readonly KEY_PREFIX = 'devbelt.sync.outbox';
 
   private readonly key: string;
   private writeChain: Promise<void> = Promise.resolve();

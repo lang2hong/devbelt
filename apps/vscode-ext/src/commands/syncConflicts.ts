@@ -13,7 +13,7 @@ interface ConflictPick extends vscode.QuickPickItem {
 
 export function registerConflictCommands(context: vscode.ExtensionContext, factory: SyncSessionFactory): void {
   context.subscriptions.push(
-    vscode.commands.registerCommand('dbclient.resolveConflicts', () => resolveConflicts(factory)),
+    vscode.commands.registerCommand('devbelt.resolveConflicts', () => resolveConflicts(factory)),
   );
 }
 

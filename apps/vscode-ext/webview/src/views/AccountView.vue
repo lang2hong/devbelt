@@ -107,20 +107,20 @@ onMounted(() => {
 
         <!-- 未初始化 -->
         <div v-if="!status?.initialized" class="actions">
-          <button class="btn primary" @click="act('dbclient.initializePersonalSync')">{{ t('account.action.initialize') }}</button>
+          <button class="btn primary" @click="act('devbelt.initializePersonalSync')">{{ t('account.action.initialize') }}</button>
         </div>
         <!-- 已锁定 -->
         <div v-else-if="!status?.unlocked" class="actions">
-          <button class="btn primary" @click="act('dbclient.unlockPersonalSync')">{{ t('account.action.unlock') }}</button>
-          <button class="btn" @click="act('dbclient.recoverSync')">{{ t('account.action.recoverSync') }}</button>
-          <button class="btn" @click="act('dbclient.recoverByAccount')">{{ t('account.action.recoverByAccount') }}</button>
-          <button class="btn" @click="act('dbclient.resetSync')">{{ t('account.action.resetSync') }}</button>
+          <button class="btn primary" @click="act('devbelt.unlockPersonalSync')">{{ t('account.action.unlock') }}</button>
+          <button class="btn" @click="act('devbelt.recoverSync')">{{ t('account.action.recoverSync') }}</button>
+          <button class="btn" @click="act('devbelt.recoverByAccount')">{{ t('account.action.recoverByAccount') }}</button>
+          <button class="btn" @click="act('devbelt.resetSync')">{{ t('account.action.resetSync') }}</button>
         </div>
         <!-- 已解锁 -->
         <div v-else class="actions">
-          <button class="btn" @click="act('dbclient.syncPull')">{{ t('account.action.pull') }}</button>
-          <button class="btn" @click="act('dbclient.syncPush')">{{ t('account.action.push') }}</button>
-          <button class="btn" @click="act('dbclient.changeSyncPassword')">{{ t('account.action.changeSyncPassword') }}</button>
+          <button class="btn" @click="act('devbelt.syncPull')">{{ t('account.action.pull') }}</button>
+          <button class="btn" @click="act('devbelt.syncPush')">{{ t('account.action.push') }}</button>
+          <button class="btn" @click="act('devbelt.changeSyncPassword')">{{ t('account.action.changeSyncPassword') }}</button>
         </div>
       </section>
 
@@ -131,8 +131,8 @@ onMounted(() => {
           <div class="title">{{ t('account.card.data') }}</div>
         </header>
         <div class="actions">
-          <button class="btn" @click="act('dbclient.importConnections')">{{ t('account.action.importConnections') }}</button>
-          <button class="btn" @click="act('dbclient.exportConnections')">{{ t('account.action.exportConnections') }}</button>
+          <button class="btn" @click="act('devbelt.importConnections')">{{ t('account.action.importConnections') }}</button>
+          <button class="btn" @click="act('devbelt.exportConnections')">{{ t('account.action.exportConnections') }}</button>
         </div>
       </section>
 
@@ -143,11 +143,11 @@ onMounted(() => {
           <div class="title">{{ t('account.card.accountOps') }}</div>
         </header>
         <div class="actions">
-          <button class="btn" @click="act('dbclient.changeLoginPassword')">{{ t('account.action.changeLoginPassword') }}</button>
-          <button class="btn" @click="act('dbclient.sessions')">{{ t('account.action.sessions') }}</button>
-          <button class="btn" @click="act('dbclient.plans')">{{ t('account.action.plans') }}</button>
-          <button class="btn" @click="act('dbclient.openConsole')">{{ t('account.action.openConsole') }}</button>
-          <button class="btn danger" @click="act('dbclient.logout')">{{ t('account.action.logout') }}</button>
+          <button class="btn" @click="act('devbelt.changeLoginPassword')">{{ t('account.action.changeLoginPassword') }}</button>
+          <button class="btn" @click="act('devbelt.sessions')">{{ t('account.action.sessions') }}</button>
+          <button class="btn" @click="act('devbelt.plans')">{{ t('account.action.plans') }}</button>
+          <button class="btn" @click="act('devbelt.openConsole')">{{ t('account.action.openConsole') }}</button>
+          <button class="btn danger" @click="act('devbelt.logout')">{{ t('account.action.logout') }}</button>
         </div>
       </section>
     </template>

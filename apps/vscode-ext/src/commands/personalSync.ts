@@ -249,18 +249,18 @@ export async function unlockPersonalSync(deps: PersonalSyncCommandDeps): Promise
         const act = await deps.ui.errorAction(l10n('sync.unlockEpochStale'), [
           l10n('sync.resetSyncAction'), l10n('sync.resetLocalAction'),
         ]);
-        if (act === l10n('sync.resetLocalAction')) void vscode.commands.executeCommand('dbclient.resetLocalSync');
-        else if (act) void vscode.commands.executeCommand('dbclient.resetSync');
+        if (act === l10n('sync.resetLocalAction')) void vscode.commands.executeCommand('devbelt.resetLocalSync');
+        else if (act) void vscode.commands.executeCommand('devbelt.resetSync');
       } else {
         const act = await deps.ui.errorAction(l10n('sync.unlockPassphraseMismatch'), [
           l10n('sync.retryEnter'), l10n('sync.useRecoveryCode'), l10n('sync.useAccount'),
           l10n('sync.resetSyncAction'), l10n('sync.resetLocalAction'),
         ]);
         if (act === l10n('sync.retryEnter')) await unlockPersonalSync(deps);
-        else if (act === l10n('sync.useRecoveryCode')) void vscode.commands.executeCommand('dbclient.recoverSync');
-        else if (act === l10n('sync.useAccount')) void vscode.commands.executeCommand('dbclient.recoverByAccount');
-        else if (act === l10n('sync.resetLocalAction')) void vscode.commands.executeCommand('dbclient.resetLocalSync');
-        else if (act === l10n('sync.resetSyncAction')) void vscode.commands.executeCommand('dbclient.resetSync');
+        else if (act === l10n('sync.useRecoveryCode')) void vscode.commands.executeCommand('devbelt.recoverSync');
+        else if (act === l10n('sync.useAccount')) void vscode.commands.executeCommand('devbelt.recoverByAccount');
+        else if (act === l10n('sync.resetLocalAction')) void vscode.commands.executeCommand('devbelt.resetLocalSync');
+        else if (act === l10n('sync.resetSyncAction')) void vscode.commands.executeCommand('devbelt.resetSync');
       }
     } else {
       deps.ui.error(staleHint ? l10n('sync.unlockEpochStale') : l10n('sync.unlockFailed'));
@@ -374,15 +374,15 @@ export function registerPersonalSyncCommands(
 ): void {
   const deps: PersonalSyncCommandDeps = { auth, factory, ui: vscodeUi() };
   context.subscriptions.push(
-    vscode.commands.registerCommand('dbclient.initializePersonalSync', () => initializePersonalSync(deps)),
-    vscode.commands.registerCommand('dbclient.unlockPersonalSync', () => unlockPersonalSync(deps)),
-    vscode.commands.registerCommand('dbclient.syncEntry', () => syncEntry(deps)),
-    vscode.commands.registerCommand('dbclient.syncPull', () => pullPersonalSync(deps)),
-    vscode.commands.registerCommand('dbclient.syncPush', () => pushPersonalSync(deps)),
-    vscode.commands.registerCommand('dbclient.resetLocalSync', () => resetLocalSync(deps)),
+    vscode.commands.registerCommand('devbelt.initializePersonalSync', () => initializePersonalSync(deps)),
+    vscode.commands.registerCommand('devbelt.unlockPersonalSync', () => unlockPersonalSync(deps)),
+    vscode.commands.registerCommand('devbelt.syncEntry', () => syncEntry(deps)),
+    vscode.commands.registerCommand('devbelt.syncPull', () => pullPersonalSync(deps)),
+    vscode.commands.registerCommand('devbelt.syncPush', () => pushPersonalSync(deps)),
+    vscode.commands.registerCommand('devbelt.resetLocalSync', () => resetLocalSync(deps)),
     // legacy alias：该命令曾叫 clearLocalSync，用户可能已绑快捷键/引用此 id。
     // 保留注册以免重命名后旧快捷键静默失效（不在 package.json 声明，故不出现在命令面板）。
-    vscode.commands.registerCommand('dbclient.clearLocalSync', () => resetLocalSync(deps)),
+    vscode.commands.registerCommand('devbelt.clearLocalSync', () => resetLocalSync(deps)),
   );
 }
 

@@ -72,7 +72,7 @@ async function build(opts: BuildOpts = {}) {
     auditWriter: new AuditWriter(auditRepo),
     rateLimiter,
     consoleOrigin: ORIGIN,
-    createSyncResetHandoff: opts.createSyncResetHandoff ?? (async () => ({ openUri: 'vscode://dbclient.sync/reset-after-loss?handoffTicket=test', expiresTime: new Date().toISOString() })),
+    createSyncResetHandoff: opts.createSyncResetHandoff ?? (async () => ({ openUri: 'vscode://devbelt.sync/reset-after-loss?handoffTicket=test', expiresTime: new Date().toISOString() })),
   });
   await app.ready();
   return { app, tokenService, csrfService, userRepo, orgRepo, membershipRepo, invitationRepo, subscriptionRepo, linkFlowService, auditRepo, mailFlowRepo };
@@ -284,7 +284,7 @@ describe('console link-flow accept-invitation route', () => {
 describe('console link-flow create-sync-reset-handoff route', () => {
   it('returns openUri for a console session with CSRF + mail-flow cookie', async () => {
     const b = await build({
-      createSyncResetHandoff: async () => ({ openUri: 'vscode://dbclient.sync/reset-after-loss?handoffTicket=abc', expiresTime: '2026-09-09T00:00:00.000Z' }),
+      createSyncResetHandoff: async () => ({ openUri: 'vscode://devbelt.sync/reset-after-loss?handoffTicket=abc', expiresTime: '2026-09-09T00:00:00.000Z' }),
     });
     const user = await b.userRepo.create('sr@b.com', 'hash', 'S');
     await b.userRepo.markEmailVerified({} as Queryable, user.id, new Date());
@@ -298,7 +298,7 @@ describe('console link-flow create-sync-reset-handoff route', () => {
       payload: {},
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json().openUri).toBe('vscode://dbclient.sync/reset-after-loss?handoffTicket=abc');
+    expect(res.json().openUri).toBe('vscode://devbelt.sync/reset-after-loss?handoffTicket=abc');
     expect(res.json().expiresTime).toBe('2026-09-09T00:00:00.000Z');
     await b.app.close();
   });

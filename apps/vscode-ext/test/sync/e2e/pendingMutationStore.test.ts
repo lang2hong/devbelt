@@ -90,13 +90,13 @@ describe('PendingMutationStore', () => {
   });
 
   it('list 对非数组损坏 fail-closed', () => {
-    const key = 'dbclient.sync.outbox.7.1';
+    const key = 'devbelt.sync.outbox.7.1';
     const s = new PendingMutationStore(makeMemento({ [key]: 'not-an-array' }), '7', '1');
     expect(() => s.list()).toThrowError(/corrupt outbox/);
   });
 
   it('list 对非法元素形状 fail-closed', () => {
-    const key = 'dbclient.sync.outbox.7.1';
+    const key = 'devbelt.sync.outbox.7.1';
     const badAction = new PendingMutationStore(makeMemento({ [key]: [{ action: 'nope' }] }), '7', '1');
     expect(() => badAction.list()).toThrowError(/corrupt outbox entry/);
 
@@ -105,7 +105,7 @@ describe('PendingMutationStore', () => {
   });
 
   it('list 对类型合法但协议非法的元素 fail-closed', () => {
-    const key = 'dbclient.sync.outbox.7.1';
+    const key = 'devbelt.sync.outbox.7.1';
     const badRecordId = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), recordId: '!' }] }), '7', '1');
     expect(() => badRecordId.list()).toThrowError(/recordId/);
 

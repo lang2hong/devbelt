@@ -8,7 +8,7 @@ import { decodeBase64Url, encodeBase64Url } from './recoveryCode';
  * DEK 生成与落盘（§7.1）。
  *
  * DEK 是随 keyEpoch 轮换的 32B CSPRNG，是客户端唯一需要持久化的对称密钥根。
- * 落盘介质仅 SecretStorage，key 按账户 + epoch 隔离：`dbclient.sync.dek.<userId>.<keyEpoch>`。
+ * 落盘介质仅 SecretStorage，key 按账户 + epoch 隔离：`devbelt.sync.dek.<userId>.<keyEpoch>`。
  * 本模块**只提供 load/store/delete 原语**；换钥、旧 epoch 清理、远端状态提交后的
  * 编排层负责跨存储原子性。logout 不删 DEK；destroy / reset-after-loss 成功后删除旧 epoch DEK。
  */
@@ -28,7 +28,7 @@ export function deriveSyncSignKeyPair(dek: Uint8Array): Ed25519KeyPair {
 
 /** DEK 的 SecretStorage 存取（account + epoch 隔离）。 */
 export class DekStore {
-  private static readonly KEY_PREFIX = 'dbclient.sync.dek';
+  private static readonly KEY_PREFIX = 'devbelt.sync.dek';
 
   constructor(private readonly secrets: SecretStorage) {}
 

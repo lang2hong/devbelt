@@ -46,7 +46,7 @@ describe('MetadataNodeBuilder', () => {
     expect(nodes[0].description).toBe('42 rows');
     expect(nodes[1].description).toBe('审计表');
     expect(nodes[2].description).toBeUndefined();
-    expect(nodes[0].command?.command).toBe('dbclient.previewTable');
+    expect(nodes[0].command?.command).toBe('devbelt.previewTable');
     expect(nodes[0].collapsible).toBe(TreeItemCollapsibleState.Collapsed);
   });
 
@@ -55,7 +55,7 @@ describe('MetadataNodeBuilder', () => {
     expect(nodes).toHaveLength(1);
     expect(nodes[0].kind).toBe(NodeKind.View);
     expect(nodes[0].collapsible).toBe(TreeItemCollapsibleState.None);
-    expect(nodes[0].command?.command).toBe('dbclient.previewView');
+    expect(nodes[0].command?.command).toBe('devbelt.previewView');
   });
 
   it('function 节点携带 routineType + openRoutine command', async () => {
@@ -63,14 +63,14 @@ describe('MetadataNodeBuilder', () => {
     expect(nodes).toHaveLength(1);
     expect(nodes[0].kind).toBe(NodeKind.Routine);
     expect(nodes[0].routineType).toBe('PROCEDURE');
-    expect(nodes[0].command?.command).toBe('dbclient.openRoutine');
+    expect(nodes[0].command?.command).toBe('devbelt.openRoutine');
   });
 
   it('event 节点 + openEvent command', async () => {
     const nodes = await builder.build('event', conn, 'test', parent);
     expect(nodes).toHaveLength(1);
     expect(nodes[0].kind).toBe(NodeKind.Event);
-    expect(nodes[0].command?.command).toBe('dbclient.openEvent');
+    expect(nodes[0].command?.command).toBe('devbelt.openEvent');
   });
 
   /**

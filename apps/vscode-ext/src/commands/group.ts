@@ -8,7 +8,7 @@ import { confirm, openQueryFile } from './shared';
 export function registerSavedQueryCommands(deps: Deps, sub: Sub): void {
   const { store, treeProvider } = deps;
 
-  sub('dbclient.newQuery', async (node: DbTreeNode) => {
+  sub('devbelt.newQuery', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     const name = await vscode.window.showInputBox({ prompt: l10n('query.namePrompt') });
     if (!name) return;
@@ -20,12 +20,12 @@ export function registerSavedQueryCommands(deps: Deps, sub: Sub): void {
     await openQueryFile(deps, node.conn, node.database, id);
   });
 
-  sub('dbclient.openQuery', async (node: DbTreeNode) => {
+  sub('devbelt.openQuery', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.queryId) return;
     await openQueryFile(deps, node.conn, node.database, node.queryId);
   });
 
-  sub('dbclient.editQuery', async (node: DbTreeNode) => {
+  sub('devbelt.editQuery', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.queryId) return;
     const q = store.getQueries(node.conn.id, node.database).find((x) => x.id === node.queryId);
     if (!q) return;
@@ -37,7 +37,7 @@ export function registerSavedQueryCommands(deps: Deps, sub: Sub): void {
     treeProvider.refresh();
   });
 
-  sub('dbclient.deleteQuery', async (node: DbTreeNode) => {
+  sub('devbelt.deleteQuery', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.queryId) return;
     const q = store.getQueries(node.conn.id, node.database).find((x) => x.id === node.queryId);
     if (!q) return;
@@ -50,7 +50,7 @@ export function registerSavedQueryCommands(deps: Deps, sub: Sub): void {
 export function registerQueryFolderCommands(deps: Deps, sub: Sub): void {
   const { store, treeProvider } = deps;
 
-  sub('dbclient.newQueryFolder', async (node?: DbTreeNode) => {
+  sub('devbelt.newQueryFolder', async (node?: DbTreeNode) => {
     const name = await vscode.window.showInputBox({ prompt: 'Query folder name' });
     if (!name) return;
     // v2：文件夹跟随连接，需在连接上下文触发；阶段 A 命令口径暂以节点连接为准。
@@ -73,7 +73,7 @@ export function registerQueryFolderCommands(deps: Deps, sub: Sub): void {
     treeProvider.refresh();
   });
 
-  sub('dbclient.renameQueryFolder', async (node: DbTreeNode) => {
+  sub('devbelt.renameQueryFolder', async (node: DbTreeNode) => {
     if (!node?.queryFolderId) return;
     const name = await vscode.window.showInputBox({ prompt: 'Query folder name', value: node.label, valueSelection: [0, node.label.length] });
     if (!name || name === node.label) return;
@@ -81,7 +81,7 @@ export function registerQueryFolderCommands(deps: Deps, sub: Sub): void {
     treeProvider.refresh();
   });
 
-  sub('dbclient.deleteQueryFolder', async (node: DbTreeNode) => {
+  sub('devbelt.deleteQueryFolder', async (node: DbTreeNode) => {
     if (!node?.queryFolderId) return;
     if (!(await confirm('query.deleteFolderConfirm', 'query.delete', node.label))) return;
     await store.removeQueryFolder(node.queryFolderId);
@@ -92,14 +92,14 @@ export function registerQueryFolderCommands(deps: Deps, sub: Sub): void {
 export function registerGroupCommands(deps: Deps, sub: Sub): void {
   const { store, treeProvider } = deps;
 
-  sub('dbclient.addGroup', async (node?: DbTreeNode) => {
+  sub('devbelt.addGroup', async (node?: DbTreeNode) => {
     const name = await vscode.window.showInputBox({ prompt: l10n('tree.addGroup') });
     if (!name) return;
     await store.addGroup(name, node?.kind === NodeKind.Group ? node.groupId : undefined);
     treeProvider.refresh();
   });
 
-  sub('dbclient.renameGroup', async (node: DbTreeNode) => {
+  sub('devbelt.renameGroup', async (node: DbTreeNode) => {
     if (!node?.groupId) return;
     const name = await vscode.window.showInputBox({ prompt: 'Group name', value: node.label, valueSelection: [0, node.label.length] });
     if (!name || name === node.label) return;
@@ -107,14 +107,14 @@ export function registerGroupCommands(deps: Deps, sub: Sub): void {
     treeProvider.refresh();
   });
 
-  sub('dbclient.removeGroup', async (node: DbTreeNode) => {
+  sub('devbelt.removeGroup', async (node: DbTreeNode) => {
     if (!node?.groupId) return;
     if (!(await confirm('tree.deleteGroupTitle', 'tree.deleteGroupConfirm', node.label))) return;
     await store.removeGroup(node.groupId);
     treeProvider.refresh();
   });
 
-  sub('dbclient.moveToGroup', async (node: DbTreeNode) => {
+  sub('devbelt.moveToGroup', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     const items: { label: string; target: string | undefined }[] = [
       { label: '$(close) ' + l10n('tree.ungroup'), target: undefined },

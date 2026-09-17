@@ -47,7 +47,7 @@ describe('SyncResetView state machine', () => {
       .mockResolvedValue({ kind: 'ok' });
     vi.mocked(createSyncResetHandoff).mockResolvedValue({
       kind: 'success',
-      openUri: 'vscode://dbclient.sync/reset-after-loss?handoffTicket=abc',
+      openUri: 'vscode://devbelt.sync/reset-after-loss?handoffTicket=abc',
       expiresTime: new Date(Date.now() + 900_000).toISOString(),
     });
 
@@ -71,7 +71,7 @@ describe('SyncResetView state machine', () => {
     setLocation('/sync-reset');
     vi.mocked(createSyncResetHandoff).mockResolvedValue({
       kind: 'success',
-      openUri: 'vscode://dbclient.sync/reset-after-loss?handoffTicket=abc',
+      openUri: 'vscode://devbelt.sync/reset-after-loss?handoffTicket=abc',
       expiresTime: new Date(Date.now() + 900_000).toISOString(),
     });
 
@@ -88,7 +88,7 @@ describe('SyncResetView state machine', () => {
     setLocation('/sync-reset');
     vi.mocked(createSyncResetHandoff).mockResolvedValue({
       kind: 'success',
-      openUri: 'vscode://dbclient.sync/reset-after-loss?handoffTicket=tick',
+      openUri: 'vscode://devbelt.sync/reset-after-loss?handoffTicket=tick',
       expiresTime: new Date(Date.now() + 900_000).toISOString(),
     });
     const assign = vi.fn();
@@ -100,7 +100,7 @@ describe('SyncResetView state machine', () => {
     const openBtn = wrapper.findAll('button').find((b) => b.text().includes('在 VS Code 中继续'))!;
     await openBtn.trigger('click');
     await flushPromises();
-    expect(assign).toHaveBeenCalledWith('vscode://dbclient.sync/reset-after-loss?handoffTicket=tick');
+    expect(assign).toHaveBeenCalledWith('vscode://devbelt.sync/reset-after-loss?handoffTicket=tick');
 
     const retryBtn = wrapper.findAll('button').find((b) => b.text().includes('我已打开 VS Code，重试'))!;
     expect(retryBtn).toBeTruthy();
@@ -137,7 +137,7 @@ describe('SyncResetView state machine', () => {
     setLocation('/sync-reset');
     vi.mocked(createSyncResetHandoff).mockResolvedValue({
       kind: 'success',
-      openUri: 'vscode://dbclient.sync/reset-after-loss?handoffTicket=old',
+      openUri: 'vscode://devbelt.sync/reset-after-loss?handoffTicket=old',
       expiresTime: new Date(Date.now() - 1000).toISOString(),
     });
     const assign = vi.fn();
@@ -159,7 +159,7 @@ describe('SyncResetView state machine', () => {
     vi.mocked(ensureCsrf).mockRejectedValueOnce(new Error('network')).mockResolvedValue('csrf');
     vi.mocked(createSyncResetHandoff).mockResolvedValue({
       kind: 'success',
-      openUri: 'vscode://dbclient.sync/reset-after-loss?handoffTicket=r',
+      openUri: 'vscode://devbelt.sync/reset-after-loss?handoffTicket=r',
       expiresTime: new Date(Date.now() + 900_000).toISOString(),
     });
 

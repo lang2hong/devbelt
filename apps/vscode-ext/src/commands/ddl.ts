@@ -26,7 +26,7 @@ export function registerDdlCommands(deps: Deps, sub: Sub): void {
   };
 
   // 新建索引（从 index 分类节点触发，父为表）
-  sub('dbclient.addIndex', async (node: DbTreeNode) => {
+  sub('devbelt.addIndex', async (node: DbTreeNode) => {
     const ctx = DbTreeNode.tableContext(node);
     if (!ctx?.conn || !ctx.table) return;
     const session = await manager.connect(ctx.conn);
@@ -65,7 +65,7 @@ export function registerDdlCommands(deps: Deps, sub: Sub): void {
    * 索引没有 ALTER 语法，只能先删再建；主键走 `DROP PRIMARY KEY, ADD PRIMARY KEY`
    * 的单语句形式，避免中间态没有主键。
    */
-  sub('dbclient.modifyIndex', async (node: DbTreeNode) => {
+  sub('devbelt.modifyIndex', async (node: DbTreeNode) => {
     const ctx = DbTreeNode.tableContext(node);
     if (!ctx?.conn || !ctx.table) return;
     const session = await manager.connect(ctx.conn);
@@ -119,7 +119,7 @@ export function registerDdlCommands(deps: Deps, sub: Sub): void {
   });
 
   // 删除索引
-  sub('dbclient.dropIndex', async (node: DbTreeNode) => {
+  sub('devbelt.dropIndex', async (node: DbTreeNode) => {
     const ctx = DbTreeNode.tableContext(node);
     if (!ctx?.conn || !ctx.table) return;
     if (!(await confirm('ddl.dropIndexConfirm', 'common.delete', node.label))) return;
@@ -135,7 +135,7 @@ export function registerDdlCommands(deps: Deps, sub: Sub): void {
   });
 
   // 查看触发器定义
-  sub('dbclient.viewTrigger', async (node: DbTreeNode) => {
+  sub('devbelt.viewTrigger', async (node: DbTreeNode) => {
     const ctx = DbTreeNode.tableContext(node);
     if (!ctx?.conn) return;
     const session = await manager.connect(ctx.conn);
@@ -144,7 +144,7 @@ export function registerDdlCommands(deps: Deps, sub: Sub): void {
   });
 
   // 删除触发器
-  sub('dbclient.dropTrigger', async (node: DbTreeNode) => {
+  sub('devbelt.dropTrigger', async (node: DbTreeNode) => {
     const ctx = DbTreeNode.tableContext(node);
     if (!ctx?.conn || !ctx.table) return;
     if (!(await confirm('ddl.dropTriggerConfirm', 'common.delete', node.label))) return;
@@ -156,7 +156,7 @@ export function registerDdlCommands(deps: Deps, sub: Sub): void {
   });
 
   // 新建触发器（SQL 编辑器模板，可运行）
-  sub('dbclient.addTrigger', async (node: DbTreeNode) => {
+  sub('devbelt.addTrigger', async (node: DbTreeNode) => {
     const ctx = DbTreeNode.tableContext(node);
     if (!ctx?.conn || !ctx.table) return;
     const useDb = ctx.database ? `USE ${wrapIdentForConn(ctx.conn, ctx.database)};\n\n` : '';
@@ -166,7 +166,7 @@ export function registerDdlCommands(deps: Deps, sub: Sub): void {
   });
 
   // 修改触发器（打开定义到 SQL 编辑器，可改可运行）
-  sub('dbclient.modifyTrigger', async (node: DbTreeNode) => {
+  sub('devbelt.modifyTrigger', async (node: DbTreeNode) => {
     const ctx = DbTreeNode.tableContext(node);
     if (!ctx?.conn) return;
     const session = await manager.connect(ctx.conn);
@@ -184,7 +184,7 @@ export function registerDdlCommands(deps: Deps, sub: Sub): void {
    * 建完刷新外键分类节点并给出结果提示：过去成功与失败都毫无反馈，
    * 加上整树刷新会折叠所有节点，看起来就是「操作完没有创建外键」。
    */
-  sub('dbclient.addForeignKey', async (node: DbTreeNode) => {
+  sub('devbelt.addForeignKey', async (node: DbTreeNode) => {
     const ctx = DbTreeNode.tableContext(node);
     if (!ctx?.conn || !ctx.table) return;
     const session = await manager.connect(ctx.conn);
@@ -239,7 +239,7 @@ export function registerDdlCommands(deps: Deps, sub: Sub): void {
   });
 
   // 删除外键
-  sub('dbclient.dropForeignKey', async (node: DbTreeNode) => {
+  sub('devbelt.dropForeignKey', async (node: DbTreeNode) => {
     const ctx = DbTreeNode.tableContext(node);
     if (!ctx?.conn || !ctx.table) return;
     if (!node.constraintName) { vscode.window.showErrorMessage(l10n('ddl.fkNoConstraintName')); return; }

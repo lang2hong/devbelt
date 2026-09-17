@@ -8,7 +8,7 @@ import { signEd25519 } from './ed25519';
  * recover 使用恢复码派生的 seed，其余操作使用 DEK 派生的 syncSign seed。
  */
 
-export const SYNC_DOMAIN = 'dbclient/sync/v1';
+export const SYNC_DOMAIN = 'devbelt/sync/v1';
 
 export type SyncAction = 'record.put' | 'record.delete' | 'state.change-key' | 'state.recover' | 'state.recover-by-account' | 'state.destroy';
 

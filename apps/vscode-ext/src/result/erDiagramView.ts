@@ -13,7 +13,7 @@ export class ERDiagramView extends BaseWebView {
     private readonly database: string,
     private readonly manager: ConnectionManager,
   ) {
-    super('dbclient.erDiagram', `ER Diagram @ ${database}`);
+    super('devbelt.erDiagram', `ER Diagram @ ${database}`);
   }
 
   static init(extensionUri: import('vscode').Uri): void { BaseWebView.init(extensionUri); }

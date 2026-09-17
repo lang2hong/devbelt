@@ -9,11 +9,11 @@ import type { Deps, Sub } from './shared';
 /**
  * B3 needsConfig 补齐命令。
  *
- * `dbclient.fixConnectionPaths`：对有效配置（覆盖优先）路径缺失/不可读的连接，逐字段引导
+ * `devbelt.fixConnectionPaths`：对有效配置（覆盖优先）路径缺失/不可读的连接，逐字段引导
  * 补齐（文件类走文件选择器、字符串类走输入框）。用户取消某字段时保留已写入的前序覆盖并
  * 继续呈现剩余缺失项；空输入等同清除该字段覆盖。
  *
- * `dbclient.removeConnectionPathOverrides`：清除该连接全部本机覆盖，恢复同步源值。
+ * `devbelt.removeConnectionPathOverrides`：清除该连接全部本机覆盖，恢复同步源值。
  */
 
 const FILE_FIELDS = ['dbPath', 'caPath', 'clientCertPath', 'clientKeyPath', 'sshPrivateKeyPath', 'sqliteCommand'] as const;
@@ -47,7 +47,7 @@ async function promptForPath(field: string): Promise<string | undefined> {
 export function registerConnectionPathFixCommands(deps: Deps, sub: Sub): void {
   const { treeProvider, overrideStore } = deps;
 
-  sub('dbclient.fixConnectionPaths', async (arg?: unknown) => {
+  sub('devbelt.fixConnectionPaths', async (arg?: unknown) => {
     const conn = asConnection(arg);
     if (!conn?.id) return;
 
@@ -66,7 +66,7 @@ export function registerConnectionPathFixCommands(deps: Deps, sub: Sub): void {
     await treeProvider.refreshPathIssues(conn.id);
   });
 
-  sub('dbclient.removeConnectionPathOverrides', async (arg?: unknown) => {
+  sub('devbelt.removeConnectionPathOverrides', async (arg?: unknown) => {
     const conn = asConnection(arg);
     if (!conn?.id) return;
     await overrideStore.clear(conn.id);

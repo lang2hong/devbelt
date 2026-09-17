@@ -39,653 +39,653 @@
   "contributes": {
     "commands": [
       {
-        "command": "dbclient.addConnection",
+        "command": "devbelt.addConnection",
         "title": "%cmd.addConnection%",
         "category": "DB Client",
         "icon": "$(add)"
       },
       {
-        "command": "dbclient.refresh",
+        "command": "devbelt.refresh",
         "title": "%cmd.refresh%",
         "category": "DB Client",
         "icon": "$(refresh)"
       },
       {
-        "command": "dbclient.refreshNode",
+        "command": "devbelt.refreshNode",
         "title": "Refresh",
         "category": "DB Client",
         "icon": "$(refresh)"
       },
       {
-        "command": "dbclient.runQuery",
+        "command": "devbelt.runQuery",
         "title": "%cmd.runQuery%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.runQueryInNewPanel",
+        "command": "devbelt.runQueryInNewPanel",
         "title": "Run Query in New Panel",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.explainQuery",
+        "command": "devbelt.explainQuery",
         "title": "Explain Query",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.runStatement",
+        "command": "devbelt.runStatement",
         "title": "Run SQL Statement",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.runSqlFile",
+        "command": "devbelt.runSqlFile",
         "title": "Run SQL File",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.previewTable",
+        "command": "devbelt.previewTable",
         "title": "%cmd.previewTable%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.addGroup",
+        "command": "devbelt.addGroup",
         "title": "%cmd.addGroup%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.renameGroup",
+        "command": "devbelt.renameGroup",
         "title": "%cmd.renameGroup%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.removeGroup",
+        "command": "devbelt.removeGroup",
         "title": "%cmd.removeGroup%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.moveToGroup",
+        "command": "devbelt.moveToGroup",
         "title": "%cmd.moveToGroup%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.login",
+        "command": "devbelt.login",
         "title": "%cmd.login%",
         "icon": "$(sign-in)",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.logout",
+        "command": "devbelt.logout",
         "title": "%cmd.logout%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.account",
+        "command": "devbelt.account",
         "title": "%account.title%",
         "icon": "$(account)",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.openConsole",
+        "command": "devbelt.openConsole",
         "title": "%cmd.openConsole%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.changeLoginPassword",
+        "command": "devbelt.changeLoginPassword",
         "title": "%cmd.changeLoginPassword%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.initializePersonalSync",
+        "command": "devbelt.initializePersonalSync",
         "title": "%cmd.initializePersonalSync%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.unlockPersonalSync",
+        "command": "devbelt.unlockPersonalSync",
         "title": "%cmd.unlockPersonalSync%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.syncNow",
+        "command": "devbelt.syncNow",
         "title": "%cmd.syncNow%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.syncEntry",
+        "command": "devbelt.syncEntry",
         "title": "%cmd.syncEntry%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.syncPull",
+        "command": "devbelt.syncPull",
         "title": "%cmd.syncPull%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.syncPush",
+        "command": "devbelt.syncPush",
         "title": "%cmd.syncPush%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.fixConnectionPaths",
+        "command": "devbelt.fixConnectionPaths",
         "title": "%cmd.fixConnectionPaths%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.removeConnectionPathOverrides",
+        "command": "devbelt.removeConnectionPathOverrides",
         "title": "%cmd.removeConnectionPathOverrides%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.resolveConflicts",
+        "command": "devbelt.resolveConflicts",
         "title": "%cmd.resolveConflicts%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.changeSyncPassword",
+        "command": "devbelt.changeSyncPassword",
         "title": "%cmd.changeSyncPassword%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.recoverSync",
+        "command": "devbelt.recoverSync",
         "title": "%cmd.recoverSync%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.recoverByAccount",
+        "command": "devbelt.recoverByAccount",
         "title": "%cmd.recoverByAccount%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.destroySync",
+        "command": "devbelt.destroySync",
         "title": "%cmd.destroySync%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.resetSync",
+        "command": "devbelt.resetSync",
         "title": "%cmd.resetSync%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.resetLocalSync",
+        "command": "devbelt.resetLocalSync",
         "title": "%cmd.resetLocalSync%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.addIndex",
+        "command": "devbelt.addIndex",
         "title": "Add Index",
         "category": "DB Client",
         "icon": "$(add)"
       },
       {
-        "command": "dbclient.dropIndex",
+        "command": "devbelt.dropIndex",
         "title": "Drop Index",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.viewTrigger",
+        "command": "devbelt.viewTrigger",
         "title": "View Trigger",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.dropTrigger",
+        "command": "devbelt.dropTrigger",
         "title": "Drop Trigger",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.addTrigger",
+        "command": "devbelt.addTrigger",
         "title": "Add Trigger",
         "category": "DB Client",
         "icon": "$(add)"
       },
       {
-        "command": "dbclient.modifyTrigger",
+        "command": "devbelt.modifyTrigger",
         "title": "Modify Trigger",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.addForeignKey",
+        "command": "devbelt.addForeignKey",
         "title": "Add Foreign Key",
         "category": "DB Client",
         "icon": "$(add)"
       },
       {
-        "command": "dbclient.dropForeignKey",
+        "command": "devbelt.dropForeignKey",
         "title": "Drop Foreign Key",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.newRoutine",
+        "command": "devbelt.newRoutine",
         "title": "New Routine",
         "category": "DB Client",
         "icon": "$(add)"
       },
       {
-        "command": "dbclient.modifyRoutine",
+        "command": "devbelt.modifyRoutine",
         "title": "Modify Routine",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.newEvent",
+        "command": "devbelt.newEvent",
         "title": "New Event",
         "category": "DB Client",
         "icon": "$(add)"
       },
       {
-        "command": "dbclient.modifyEvent",
+        "command": "devbelt.modifyEvent",
         "title": "Modify Event",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.formatSql",
+        "command": "devbelt.formatSql",
         "title": "%cmd.formatSql%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.showHistory",
+        "command": "devbelt.showHistory",
         "title": "%cmd.showHistory%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.updateCell",
+        "command": "devbelt.updateCell",
         "title": "%cmd.updateCell%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.newTable",
+        "command": "devbelt.newTable",
         "title": "New Table (SQL)",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.newTableDesigner",
+        "command": "devbelt.newTableDesigner",
         "title": "New Table",
         "category": "DB Client",
         "icon": "$(add)"
       },
       {
-        "command": "dbclient.dropTable",
+        "command": "devbelt.dropTable",
         "title": "Delete Table",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.renameTable",
+        "command": "devbelt.renameTable",
         "title": "Rename Table",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.truncateTable",
+        "command": "devbelt.truncateTable",
         "title": "Truncate Table",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.dupTable",
+        "command": "devbelt.dupTable",
         "title": "Duplicate Table",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.viewTableStructure",
+        "command": "devbelt.viewTableStructure",
         "title": "View Table Structure",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.editConnection",
+        "command": "devbelt.editConnection",
         "title": "Edit Connection",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.deleteConnection",
+        "command": "devbelt.deleteConnection",
         "title": "Delete Connection",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.closeConnection",
+        "command": "devbelt.closeConnection",
         "title": "Close Connection",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.openConnection",
+        "command": "devbelt.openConnection",
         "title": "Open Connection",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.explorerMenu",
+        "command": "devbelt.explorerMenu",
         "title": "%cmd.explorerMenu%",
         "category": "DB Client",
         "icon": "$(kebab-horizontal)"
       },
       {
-        "command": "dbclient.previewView",
+        "command": "devbelt.previewView",
         "title": "View Data",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.dropView",
+        "command": "devbelt.dropView",
         "title": "Delete View",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.newView",
+        "command": "devbelt.newView",
         "title": "New View",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.modifyView",
+        "command": "devbelt.modifyView",
         "title": "Modify View",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.openRoutine",
+        "command": "devbelt.openRoutine",
         "title": "View Definition",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.dropRoutine",
+        "command": "devbelt.dropRoutine",
         "title": "Delete Routine",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.openEvent",
+        "command": "devbelt.openEvent",
         "title": "View Definition",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.dropEvent",
+        "command": "devbelt.dropEvent",
         "title": "Delete Event",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.newQuery",
+        "command": "devbelt.newQuery",
         "title": "New Query",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.openQuery",
+        "command": "devbelt.openQuery",
         "title": "Open Query",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.editQuery",
+        "command": "devbelt.editQuery",
         "title": "Edit Query",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.designTable",
+        "command": "devbelt.designTable",
         "title": "Design Table",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.openTerminal",
+        "command": "devbelt.openTerminal",
         "title": "Open Terminal",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.serverStatus",
+        "command": "devbelt.serverStatus",
         "title": "Server Status",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.compareSchema",
+        "command": "devbelt.compareSchema",
         "title": "Compare Schema",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.showERDiagram",
+        "command": "devbelt.showERDiagram",
         "title": "Show ER Diagram",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.viewTableSource",
+        "command": "devbelt.viewTableSource",
         "title": "View DDL",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.copyTable",
+        "command": "devbelt.copyTable",
         "title": "Copy Table",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.mockData",
+        "command": "devbelt.mockData",
         "title": "Generate Mock Data",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.manageUsers",
+        "command": "devbelt.manageUsers",
         "title": "%cmd.manageUsers%",
         "category": "DB Client",
         "icon": "$(organization)"
       },
       {
-        "command": "dbclient.createDatabase",
+        "command": "devbelt.createDatabase",
         "title": "New Database",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.dropDatabase",
+        "command": "devbelt.dropDatabase",
         "title": "Drop Database",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.refreshConnection",
+        "command": "devbelt.refreshConnection",
         "title": "Refresh Connection",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.newQueryFromConn",
+        "command": "devbelt.newQueryFromConn",
         "title": "New Query",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.importData",
+        "command": "devbelt.importData",
         "title": "Import",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.exportConnection",
+        "command": "devbelt.exportConnection",
         "title": "Export",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.importTable",
+        "command": "devbelt.importTable",
         "title": "Import",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.exportTable",
+        "command": "devbelt.exportTable",
         "title": "Export",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.newQueryForDb",
+        "command": "devbelt.newQueryForDb",
         "title": "Run SQL",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.addColumn",
+        "command": "devbelt.addColumn",
         "title": "Add Column",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.modifyColumn",
+        "command": "devbelt.modifyColumn",
         "title": "Modify Column",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.addColumnSql",
+        "command": "devbelt.addColumnSql",
         "title": "Add Column (SQL)",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.modifyColumnSql",
+        "command": "devbelt.modifyColumnSql",
         "title": "Modify Column (SQL)",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.renameColumn",
+        "command": "devbelt.renameColumn",
         "title": "Rename Column",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.modifyIndex",
+        "command": "devbelt.modifyIndex",
         "title": "Modify Index",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.dropColumn",
+        "command": "devbelt.dropColumn",
         "title": "Drop Column",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.copyNodeName",
+        "command": "devbelt.copyNodeName",
         "title": "%cmd.copyName%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.deleteQuery",
+        "command": "devbelt.deleteQuery",
         "title": "Delete Query",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.newQueryFolder",
+        "command": "devbelt.newQueryFolder",
         "title": "New Query Folder",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.renameQueryFolder",
+        "command": "devbelt.renameQueryFolder",
         "title": "Rename Query Folder",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.deleteQueryFolder",
+        "command": "devbelt.deleteQueryFolder",
         "title": "Delete Query Folder",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.exportConnections",
+        "command": "devbelt.exportConnections",
         "title": "Export Connections",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.importConnections",
+        "command": "devbelt.importConnections",
         "title": "Import Connections",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.searchObjects",
+        "command": "devbelt.searchObjects",
         "title": "%cmd.searchObjects%",
         "category": "DB Client",
         "icon": "$(search)"
       },
       {
-        "command": "dbclient.jumpToRefTable",
+        "command": "devbelt.jumpToRefTable",
         "title": "%cmd.jumpToRefTable%",
         "category": "DB Client",
         "icon": "$(link)"
       },
       {
-        "command": "dbclient.searchConnections",
+        "command": "devbelt.searchConnections",
         "title": "%cmd.searchConnections%",
         "category": "DB Client",
         "icon": "$(search)"
       },
       {
-        "command": "dbclient.cloneConnection",
+        "command": "devbelt.cloneConnection",
         "title": "%cmd.cloneConnection%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.renameView",
+        "command": "devbelt.renameView",
         "title": "%cmd.renameView%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.sessions",
+        "command": "devbelt.sessions",
         "title": "%cmd.sessions%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.plans",
+        "command": "devbelt.plans",
         "title": "%cmd.plans%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.syncDatabase",
+        "command": "devbelt.syncDatabase",
         "title": "Sync Database",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.restoreDatabase",
+        "command": "devbelt.restoreDatabase",
         "title": "Restore from SQL Dump",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.dashboard",
+        "command": "devbelt.dashboard",
         "title": "Performance Dashboard",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.compareData",
+        "command": "devbelt.compareData",
         "title": "Compare Data",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.showAuditLog",
+        "command": "devbelt.showAuditLog",
         "title": "Show Audit Log",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.showPoolStatus",
+        "command": "devbelt.showPoolStatus",
         "title": "Show Connection Pool Status",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.scheduleBackup",
+        "command": "devbelt.scheduleBackup",
         "title": "Schedule Backup",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.org.refresh",
+        "command": "devbelt.org.refresh",
         "title": "%cmd.org.refresh%",
         "category": "DB Client",
         "icon": "$(refresh)"
       },
       {
-        "command": "dbclient.org.newFolder",
+        "command": "devbelt.org.newFolder",
         "title": "%cmd.org.newFolder%",
         "category": "DB Client",
         "icon": "$(new-folder)"
       },
       {
-        "command": "dbclient.org.deleteFolder",
+        "command": "devbelt.org.deleteFolder",
         "title": "%cmd.org.deleteFolder%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.org.newQuery",
+        "command": "devbelt.org.newQuery",
         "title": "%cmd.org.newQuery%",
         "category": "DB Client",
         "icon": "$(new-file)"
       },
       {
-        "command": "dbclient.org.openResource",
+        "command": "devbelt.org.openResource",
         "title": "%cmd.org.openResource%",
         "category": "DB Client",
         "icon": "$(eye)"
       },
       {
-        "command": "dbclient.org.saveResource",
+        "command": "devbelt.org.saveResource",
         "title": "%cmd.org.saveResource%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.org.deleteResource",
+        "command": "devbelt.org.deleteResource",
         "title": "%cmd.org.deleteResource%",
         "category": "DB Client"
       },
       {
-        "command": "dbclient.org.connectTemplate",
+        "command": "devbelt.org.connectTemplate",
         "title": "%cmd.org.connectTemplate%",
         "category": "DB Client",
         "icon": "$(plug)"
       },
       {
-        "command": "dbclient.org.runQuery",
+        "command": "devbelt.org.runQuery",
         "title": "%cmd.org.runQuery%",
         "category": "DB Client"
       }
@@ -693,867 +693,867 @@
     "menus": {
       "view/title": [
         {
-          "command": "dbclient.addConnection",
-          "when": "view == dbclient.explorer",
+          "command": "devbelt.addConnection",
+          "when": "view == devbelt.explorer",
           "group": "navigation"
         },
         {
-          "command": "dbclient.searchObjects",
-          "when": "view == dbclient.explorer",
+          "command": "devbelt.searchObjects",
+          "when": "view == devbelt.explorer",
           "group": "navigation"
         },
         {
-          "command": "dbclient.explorerMenu",
-          "when": "view == dbclient.explorer",
+          "command": "devbelt.explorerMenu",
+          "when": "view == devbelt.explorer",
           "group": "navigation"
         },
         {
-          "command": "dbclient.org.refresh",
-          "when": "view == dbclient.explorer.organization",
+          "command": "devbelt.org.refresh",
+          "when": "view == devbelt.explorer.organization",
           "group": "navigation"
         },
         {
-          "command": "dbclient.org.newFolder",
-          "when": "view == dbclient.explorer.organization && dbclient.orgRole == 'admin'",
+          "command": "devbelt.org.newFolder",
+          "when": "view == devbelt.explorer.organization && devbelt.orgRole == 'admin'",
           "group": "navigation"
         },
         {
-          "command": "dbclient.org.newQuery",
-          "when": "view == dbclient.explorer.organization && dbclient.orgRole == 'admin'",
+          "command": "devbelt.org.newQuery",
+          "when": "view == devbelt.explorer.organization && devbelt.orgRole == 'admin'",
           "group": "navigation"
         },
         {
-          "command": "dbclient.login",
-          "when": "(view == dbclient.explorer || view == dbclient.explorer.organization) && !dbclient.loggedIn",
+          "command": "devbelt.login",
+          "when": "(view == devbelt.explorer || view == devbelt.explorer.organization) && !devbelt.loggedIn",
           "group": "navigation"
         }
       ],
       "editor/title/run": [
         {
-          "command": "dbclient.runSqlFile",
+          "command": "devbelt.runSqlFile",
           "when": "resourceLangId == sql",
           "group": "navigation"
         },
         {
-          "command": "dbclient.org.saveResource",
-          "when": "dbclient.orgResourceEditor && dbclient.orgResourceEditorRole == 'admin'",
+          "command": "devbelt.org.saveResource",
+          "when": "devbelt.orgResourceEditor && devbelt.orgResourceEditorRole == 'admin'",
           "group": "navigation"
         },
         {
-          "command": "dbclient.org.runQuery",
-          "when": "dbclient.orgSessionEditor",
+          "command": "devbelt.org.runQuery",
+          "when": "devbelt.orgSessionEditor",
           "group": "navigation"
         }
       ],
       "resourceContext": [
         {
-          "command": "dbclient.runSqlFile",
+          "command": "devbelt.runSqlFile",
           "when": "resourceLangId == sql",
-          "group": "1_dbclient"
+          "group": "1_devbelt"
         }
       ],
       "commandPalette": [
         {
-          "command": "dbclient.login",
-          "when": "!dbclient.loggedIn"
+          "command": "devbelt.login",
+          "when": "!devbelt.loggedIn"
         },
         {
-          "command": "dbclient.logout",
-          "when": "dbclient.loggedIn"
+          "command": "devbelt.logout",
+          "when": "devbelt.loggedIn"
         },
         {
-          "command": "dbclient.account",
-          "when": "dbclient.loggedIn"
+          "command": "devbelt.account",
+          "when": "devbelt.loggedIn"
         },
         {
-          "command": "dbclient.openConsole",
-          "when": "dbclient.loggedIn"
+          "command": "devbelt.openConsole",
+          "when": "devbelt.loggedIn"
         },
         {
-          "command": "dbclient.changeLoginPassword",
-          "when": "dbclient.loggedIn"
+          "command": "devbelt.changeLoginPassword",
+          "when": "devbelt.loggedIn"
         },
         {
-          "command": "dbclient.sessions",
-          "when": "dbclient.loggedIn"
+          "command": "devbelt.sessions",
+          "when": "devbelt.loggedIn"
         },
         {
-          "command": "dbclient.plans",
-          "when": "dbclient.loggedIn"
+          "command": "devbelt.plans",
+          "when": "devbelt.loggedIn"
         },
         {
-          "command": "dbclient.initializePersonalSync",
-          "when": "dbclient.loggedIn"
+          "command": "devbelt.initializePersonalSync",
+          "when": "devbelt.loggedIn"
         },
         {
-          "command": "dbclient.unlockPersonalSync",
-          "when": "dbclient.loggedIn"
+          "command": "devbelt.unlockPersonalSync",
+          "when": "devbelt.loggedIn"
         },
         {
-          "command": "dbclient.syncNow",
-          "when": "dbclient.sync.ready"
+          "command": "devbelt.syncNow",
+          "when": "devbelt.sync.ready"
         },
         {
-          "command": "dbclient.syncEntry",
-          "when": "dbclient.loggedIn && !dbclient.sync.unlocked"
+          "command": "devbelt.syncEntry",
+          "when": "devbelt.loggedIn && !devbelt.sync.unlocked"
         },
         {
-          "command": "dbclient.syncPull",
-          "when": "dbclient.sync.ready"
+          "command": "devbelt.syncPull",
+          "when": "devbelt.sync.ready"
         },
         {
-          "command": "dbclient.syncPush",
-          "when": "dbclient.sync.ready"
+          "command": "devbelt.syncPush",
+          "when": "devbelt.sync.ready"
         },
         {
-          "command": "dbclient.fixConnectionPaths",
+          "command": "devbelt.fixConnectionPaths",
           "when": "false"
         },
         {
-          "command": "dbclient.removeConnectionPathOverrides",
+          "command": "devbelt.removeConnectionPathOverrides",
           "when": "false"
         },
         {
-          "command": "dbclient.resolveConflicts",
-          "when": "dbclient.sync.ready"
+          "command": "devbelt.resolveConflicts",
+          "when": "devbelt.sync.ready"
         },
         {
-          "command": "dbclient.changeSyncPassword",
-          "when": "dbclient.sync.unlocked"
+          "command": "devbelt.changeSyncPassword",
+          "when": "devbelt.sync.unlocked"
         },
         {
-          "command": "dbclient.recoverSync",
-          "when": "dbclient.loggedIn && !dbclient.sync.unlocked"
+          "command": "devbelt.recoverSync",
+          "when": "devbelt.loggedIn && !devbelt.sync.unlocked"
         },
         {
-          "command": "dbclient.recoverByAccount",
-          "when": "dbclient.loggedIn && !dbclient.sync.unlocked"
+          "command": "devbelt.recoverByAccount",
+          "when": "devbelt.loggedIn && !devbelt.sync.unlocked"
         },
         {
-          "command": "dbclient.destroySync",
-          "when": "dbclient.sync.unlocked"
+          "command": "devbelt.destroySync",
+          "when": "devbelt.sync.unlocked"
         },
         {
-          "command": "dbclient.resetSync",
-          "when": "dbclient.loggedIn && !dbclient.sync.unlocked"
+          "command": "devbelt.resetSync",
+          "when": "devbelt.loggedIn && !devbelt.sync.unlocked"
         },
         {
-          "command": "dbclient.resetLocalSync",
-          "when": "dbclient.loggedIn"
+          "command": "devbelt.resetLocalSync",
+          "when": "devbelt.loggedIn"
         },
         {
-          "command": "dbclient.scheduleBackup",
+          "command": "devbelt.scheduleBackup",
           "when": "false"
         },
         {
-          "command": "dbclient.org.refresh",
-          "when": "dbclient.loggedIn && dbclient.orgRole"
+          "command": "devbelt.org.refresh",
+          "when": "devbelt.loggedIn && devbelt.orgRole"
         },
         {
-          "command": "dbclient.org.newFolder",
-          "when": "dbclient.loggedIn && dbclient.orgRole == 'admin'"
+          "command": "devbelt.org.newFolder",
+          "when": "devbelt.loggedIn && devbelt.orgRole == 'admin'"
         },
         {
-          "command": "dbclient.org.deleteFolder",
-          "when": "dbclient.loggedIn && dbclient.orgRole == 'admin'"
+          "command": "devbelt.org.deleteFolder",
+          "when": "devbelt.loggedIn && devbelt.orgRole == 'admin'"
         },
         {
-          "command": "dbclient.org.newQuery",
-          "when": "dbclient.loggedIn && dbclient.orgRole == 'admin'"
+          "command": "devbelt.org.newQuery",
+          "when": "devbelt.loggedIn && devbelt.orgRole == 'admin'"
         },
         {
-          "command": "dbclient.org.openResource",
-          "when": "dbclient.loggedIn && dbclient.orgRole"
+          "command": "devbelt.org.openResource",
+          "when": "devbelt.loggedIn && devbelt.orgRole"
         },
         {
-          "command": "dbclient.org.saveResource",
-          "when": "dbclient.loggedIn && dbclient.orgRole == 'admin'"
+          "command": "devbelt.org.saveResource",
+          "when": "devbelt.loggedIn && devbelt.orgRole == 'admin'"
         },
         {
-          "command": "dbclient.org.deleteResource",
-          "when": "dbclient.loggedIn && dbclient.orgRole == 'admin'"
+          "command": "devbelt.org.deleteResource",
+          "when": "devbelt.loggedIn && devbelt.orgRole == 'admin'"
         },
         {
-          "command": "dbclient.org.connectTemplate",
-          "when": "dbclient.loggedIn && dbclient.orgRole"
+          "command": "devbelt.org.connectTemplate",
+          "when": "devbelt.loggedIn && devbelt.orgRole"
         },
         {
-          "command": "dbclient.org.runQuery",
-          "when": "dbclient.loggedIn && dbclient.orgRole"
+          "command": "devbelt.org.runQuery",
+          "when": "devbelt.loggedIn && devbelt.orgRole"
         }
       ],
       "view/item/context": [
         {
-          "command": "dbclient.org.connectTemplate",
-          "when": "view == dbclient.explorer.organization && viewItem =~ /^dbclient\\.org\\.resource\\.connection_template\\./",
+          "command": "devbelt.org.connectTemplate",
+          "when": "view == devbelt.explorer.organization && viewItem =~ /^devbelt\\.org\\.resource\\.connection_template\\./",
           "group": "inline"
         },
         {
-          "command": "dbclient.org.openResource",
-          "when": "view == dbclient.explorer.organization && viewItem =~ /^dbclient\\.org\\.resource\\./",
+          "command": "devbelt.org.openResource",
+          "when": "view == devbelt.explorer.organization && viewItem =~ /^devbelt\\.org\\.resource\\./",
           "group": "inline"
         },
         {
-          "command": "dbclient.org.deleteResource",
-          "when": "view == dbclient.explorer.organization && viewItem =~ /^dbclient\\.org\\.resource\\..*\\.admin$/",
+          "command": "devbelt.org.deleteResource",
+          "when": "view == devbelt.explorer.organization && viewItem =~ /^devbelt\\.org\\.resource\\..*\\.admin$/",
           "group": "1_modify"
         },
         {
-          "command": "dbclient.org.newQuery",
-          "when": "view == dbclient.explorer.organization && viewItem =~ /^(dbclient\\.org\\.organization|dbclient\\.org\\.folder)\\.admin$/",
+          "command": "devbelt.org.newQuery",
+          "when": "view == devbelt.explorer.organization && viewItem =~ /^(devbelt\\.org\\.organization|devbelt\\.org\\.folder)\\.admin$/",
           "group": "1_create"
         },
         {
-          "command": "dbclient.org.newFolder",
-          "when": "view == dbclient.explorer.organization && viewItem =~ /^(dbclient\\.org\\.organization|dbclient\\.org\\.folder)\\.admin$/",
+          "command": "devbelt.org.newFolder",
+          "when": "view == devbelt.explorer.organization && viewItem =~ /^(devbelt\\.org\\.organization|devbelt\\.org\\.folder)\\.admin$/",
           "group": "1_create"
         },
         {
-          "command": "dbclient.org.deleteFolder",
-          "when": "view == dbclient.explorer.organization && viewItem == dbclient.org.folder.admin",
+          "command": "devbelt.org.deleteFolder",
+          "when": "view == devbelt.explorer.organization && viewItem == devbelt.org.folder.admin",
           "group": "1_modify"
         },
         {
-          "command": "dbclient.previewTable",
-          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
+          "command": "devbelt.previewTable",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
           "group": "inline"
         },
         {
-          "command": "dbclient.refreshNode",
+          "command": "devbelt.refreshNode",
           "title": "Refresh",
-          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.viewTableStructure",
-          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
+          "command": "devbelt.viewTableStructure",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
           "group": "1_view"
         },
         {
-          "command": "dbclient.viewTableSource",
-          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
+          "command": "devbelt.viewTableSource",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
           "group": "1_view"
         },
         {
-          "command": "dbclient.designTable",
-          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
+          "command": "devbelt.designTable",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
           "group": "1_view"
         },
         {
-          "command": "dbclient.importTable",
-          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
+          "command": "devbelt.importTable",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
           "group": "4_data"
         },
         {
-          "command": "dbclient.exportTable",
-          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
+          "command": "devbelt.exportTable",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
           "group": "4_data"
         },
         {
-          "command": "dbclient.mockData",
-          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
+          "command": "devbelt.mockData",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
           "group": "4_data"
         },
         {
-          "command": "dbclient.newTableDesigner",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_table\\./",
+          "command": "devbelt.newTableDesigner",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_table\\./",
           "group": "inline"
         },
         {
-          "command": "dbclient.newTable",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_table\\./",
+          "command": "devbelt.newTable",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_table\\./",
           "group": "2_new"
         },
         {
-          "command": "dbclient.refreshNode",
+          "command": "devbelt.refreshNode",
           "title": "Refresh",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_table\\./",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_table\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.refreshNode",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_view\\./",
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_view\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.refreshNode",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_function\\./",
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_function\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.refreshNode",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_event\\./",
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_event\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.refreshNode",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_query\\./",
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_query\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.importData",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_table\\./",
+          "command": "devbelt.importData",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_table\\./",
           "group": "4_data"
         },
         {
-          "command": "dbclient.exportConnection",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_table\\./",
+          "command": "devbelt.exportConnection",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_table\\./",
           "group": "4_data"
         },
         {
-          "command": "dbclient.restoreDatabase",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_table\\.(MYSQL|PG)$/",
+          "command": "devbelt.restoreDatabase",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_table\\.(MYSQL|PG)$/",
           "group": "4_data"
         },
         {
-          "command": "dbclient.renameTable",
-          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
+          "command": "devbelt.renameTable",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
           "group": "3_edit"
         },
         {
-          "command": "dbclient.copyTable",
-          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
+          "command": "devbelt.copyTable",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
           "group": "3_edit"
         },
         {
-          "command": "dbclient.dupTable",
-          "when": "view == dbclient.explorer && viewItem == table.MYSQL",
+          "command": "devbelt.dupTable",
+          "when": "view == devbelt.explorer && viewItem == table.MYSQL",
           "group": "3_edit"
         },
         {
-          "command": "dbclient.addColumn",
-          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
+          "command": "devbelt.addColumn",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
           "group": "3_edit"
         },
         {
-          "command": "dbclient.addColumnSql",
-          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
+          "command": "devbelt.addColumnSql",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
           "group": "3_edit"
         },
         {
-          "command": "dbclient.truncateTable",
-          "when": "view == dbclient.explorer && viewItem =~ /^table\\.(MYSQL|PG)$/",
+          "command": "devbelt.truncateTable",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\.(MYSQL|PG)$/",
           "group": "8_danger"
         },
         {
-          "command": "dbclient.dropTable",
-          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
+          "command": "devbelt.dropTable",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
           "group": "8_danger"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^table\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.addColumn",
-          "when": "view == dbclient.explorer && viewItem =~ /^column\\./",
+          "command": "devbelt.addColumn",
+          "when": "view == devbelt.explorer && viewItem =~ /^column\\./",
           "group": "2_col@1"
         },
         {
-          "command": "dbclient.addColumnSql",
-          "when": "view == dbclient.explorer && viewItem =~ /^column\\./",
+          "command": "devbelt.addColumnSql",
+          "when": "view == devbelt.explorer && viewItem =~ /^column\\./",
           "group": "2_col@2"
         },
         {
-          "command": "dbclient.modifyColumn",
-          "when": "view == dbclient.explorer && viewItem =~ /^column\\./",
+          "command": "devbelt.modifyColumn",
+          "when": "view == devbelt.explorer && viewItem =~ /^column\\./",
           "group": "2_col@3"
         },
         {
-          "command": "dbclient.modifyColumnSql",
-          "when": "view == dbclient.explorer && viewItem =~ /^column\\./",
+          "command": "devbelt.modifyColumnSql",
+          "when": "view == devbelt.explorer && viewItem =~ /^column\\./",
           "group": "2_col@4"
         },
         {
-          "command": "dbclient.renameColumn",
-          "when": "view == dbclient.explorer && viewItem =~ /^column\\./",
+          "command": "devbelt.renameColumn",
+          "when": "view == devbelt.explorer && viewItem =~ /^column\\./",
           "group": "2_col@5"
         },
         {
-          "command": "dbclient.dropColumn",
-          "when": "view == dbclient.explorer && viewItem =~ /^column\\./",
+          "command": "devbelt.dropColumn",
+          "when": "view == devbelt.explorer && viewItem =~ /^column\\./",
           "group": "3_danger"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^column\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^column\\./",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.refreshNode",
+          "command": "devbelt.refreshNode",
           "title": "Refresh",
-          "when": "view == dbclient.explorer && viewItem =~ /^database\\./",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.newQueryFromConn",
-          "when": "view == dbclient.explorer && viewItem =~ /^database\\./",
+          "command": "devbelt.newQueryFromConn",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\./",
           "group": "1_view"
         },
         {
-          "command": "dbclient.newQueryForDb",
-          "when": "view == dbclient.explorer && viewItem =~ /^database\\./",
+          "command": "devbelt.newQueryForDb",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\./",
           "group": "1_view"
         },
         {
-          "command": "dbclient.openTerminal",
-          "when": "view == dbclient.explorer && viewItem =~ /^database\\./",
+          "command": "devbelt.openTerminal",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\./",
           "group": "5_tools"
         },
         {
-          "command": "dbclient.showERDiagram",
-          "when": "view == dbclient.explorer && viewItem =~ /^database\\./",
+          "command": "devbelt.showERDiagram",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\./",
           "group": "5_tools"
         },
         {
-          "command": "dbclient.compareData",
-          "when": "view == dbclient.explorer && viewItem == database.MYSQL",
+          "command": "devbelt.compareData",
+          "when": "view == devbelt.explorer && viewItem == database.MYSQL",
           "group": "5_tools"
         },
         {
-          "command": "dbclient.importData",
-          "when": "view == dbclient.explorer && viewItem =~ /^database\\./",
+          "command": "devbelt.importData",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\./",
           "group": "4_data"
         },
         {
-          "command": "dbclient.exportConnection",
-          "when": "view == dbclient.explorer && viewItem =~ /^database\\./",
+          "command": "devbelt.exportConnection",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\./",
           "group": "4_data"
         },
         {
-          "command": "dbclient.restoreDatabase",
-          "when": "view == dbclient.explorer && viewItem =~ /^database\\.(MYSQL|PG)$/",
+          "command": "devbelt.restoreDatabase",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\.(MYSQL|PG)$/",
           "group": "4_data"
         },
         {
-          "command": "dbclient.syncDatabase",
-          "when": "view == dbclient.explorer && viewItem == database.MYSQL",
+          "command": "devbelt.syncDatabase",
+          "when": "view == devbelt.explorer && viewItem == database.MYSQL",
           "group": "4_data"
         },
         {
-          "command": "dbclient.scheduleBackup",
-          "when": "view == dbclient.explorer && viewItem =~ /^database\\.(MYSQL|PG)$/",
+          "command": "devbelt.scheduleBackup",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\.(MYSQL|PG)$/",
           "group": "4_data"
         },
         {
-          "command": "dbclient.dropDatabase",
-          "when": "view == dbclient.explorer && viewItem =~ /^database\\.(MYSQL|PG)$/",
+          "command": "devbelt.dropDatabase",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\.(MYSQL|PG)$/",
           "group": "8_danger"
         },
         {
-          "command": "dbclient.dashboard",
-          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\./",
+          "command": "devbelt.dashboard",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\./",
           "group": "5_tools"
         },
         {
-          "command": "dbclient.previewView",
-          "when": "view == dbclient.explorer && viewItem =~ /^view\\./",
+          "command": "devbelt.previewView",
+          "when": "view == devbelt.explorer && viewItem =~ /^view\\./",
           "group": "inline"
         },
         {
-          "command": "dbclient.modifyView",
-          "when": "view == dbclient.explorer && viewItem =~ /^view\\./",
+          "command": "devbelt.modifyView",
+          "when": "view == devbelt.explorer && viewItem =~ /^view\\./",
           "group": "1_view"
         },
         {
-          "command": "dbclient.renameView",
-          "when": "view == dbclient.explorer && viewItem =~ /^view\\.(MYSQL|PG)$/",
+          "command": "devbelt.renameView",
+          "when": "view == devbelt.explorer && viewItem =~ /^view\\.(MYSQL|PG)$/",
           "group": "1_view"
         },
         {
-          "command": "dbclient.newView",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_view\\./",
+          "command": "devbelt.newView",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_view\\./",
           "group": "inline"
         },
         {
-          "command": "dbclient.dropView",
-          "when": "view == dbclient.explorer && viewItem =~ /^view\\./",
+          "command": "devbelt.dropView",
+          "when": "view == devbelt.explorer && viewItem =~ /^view\\./",
           "group": "2_danger"
         },
         {
-          "command": "dbclient.openRoutine",
-          "when": "view == dbclient.explorer && viewItem =~ /^routine\\.(MYSQL|PG)$/",
+          "command": "devbelt.openRoutine",
+          "when": "view == devbelt.explorer && viewItem =~ /^routine\\.(MYSQL|PG)$/",
           "group": "inline"
         },
         {
-          "command": "dbclient.dropRoutine",
-          "when": "view == dbclient.explorer && viewItem =~ /^routine\\.(MYSQL|PG)$/",
+          "command": "devbelt.dropRoutine",
+          "when": "view == devbelt.explorer && viewItem =~ /^routine\\.(MYSQL|PG)$/",
           "group": "2_danger"
         },
         {
-          "command": "dbclient.openEvent",
-          "when": "view == dbclient.explorer && viewItem == event.MYSQL",
+          "command": "devbelt.openEvent",
+          "when": "view == devbelt.explorer && viewItem == event.MYSQL",
           "group": "inline"
         },
         {
-          "command": "dbclient.dropEvent",
-          "when": "view == dbclient.explorer && viewItem == event.MYSQL",
+          "command": "devbelt.dropEvent",
+          "when": "view == devbelt.explorer && viewItem == event.MYSQL",
           "group": "2_danger"
         },
         {
-          "command": "dbclient.modifyEvent",
-          "when": "view == dbclient.explorer && viewItem == event.MYSQL",
+          "command": "devbelt.modifyEvent",
+          "when": "view == devbelt.explorer && viewItem == event.MYSQL",
           "group": "1_view"
         },
         {
-          "command": "dbclient.modifyRoutine",
-          "when": "view == dbclient.explorer && viewItem =~ /^routine\\.(MYSQL|PG)$/",
+          "command": "devbelt.modifyRoutine",
+          "when": "view == devbelt.explorer && viewItem =~ /^routine\\.(MYSQL|PG)$/",
           "group": "1_view"
         },
         {
-          "command": "dbclient.newRoutine",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_function\\.(MYSQL|PG)$/",
+          "command": "devbelt.newRoutine",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_function\\.(MYSQL|PG)$/",
           "group": "inline"
         },
         {
-          "command": "dbclient.newEvent",
-          "when": "view == dbclient.explorer && viewItem == category_event.MYSQL",
+          "command": "devbelt.newEvent",
+          "when": "view == devbelt.explorer && viewItem == category_event.MYSQL",
           "group": "inline"
         },
         {
-          "command": "dbclient.addIndex",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_index\\./",
+          "command": "devbelt.addIndex",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_index\\./",
           "group": "inline"
         },
         {
-          "command": "dbclient.addTrigger",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_trigger\\.(MYSQL|PG)$/",
+          "command": "devbelt.addTrigger",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_trigger\\.(MYSQL|PG)$/",
           "group": "inline"
         },
         {
-          "command": "dbclient.modifyTrigger",
-          "when": "view == dbclient.explorer && viewItem =~ /^trigger\\.(MYSQL|PG)$/",
+          "command": "devbelt.modifyTrigger",
+          "when": "view == devbelt.explorer && viewItem =~ /^trigger\\.(MYSQL|PG)$/",
           "group": "1_view"
         },
         {
-          "command": "dbclient.addForeignKey",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_foreignKey\\.(MYSQL|PG)$/",
+          "command": "devbelt.addForeignKey",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_foreignKey\\.(MYSQL|PG)$/",
           "group": "inline"
         },
         {
-          "command": "dbclient.modifyIndex",
-          "when": "view == dbclient.explorer && viewItem =~ /^index\\./",
+          "command": "devbelt.modifyIndex",
+          "when": "view == devbelt.explorer && viewItem =~ /^index\\./",
           "group": "1_index"
         },
         {
-          "command": "dbclient.dropIndex",
-          "when": "view == dbclient.explorer && viewItem =~ /^index\\./",
+          "command": "devbelt.dropIndex",
+          "when": "view == devbelt.explorer && viewItem =~ /^index\\./",
           "group": "2_danger"
         },
         {
-          "command": "dbclient.dropTrigger",
-          "when": "view == dbclient.explorer && viewItem =~ /^trigger\\.(MYSQL|PG)$/",
+          "command": "devbelt.dropTrigger",
+          "when": "view == devbelt.explorer && viewItem =~ /^trigger\\.(MYSQL|PG)$/",
           "group": "2_danger"
         },
         {
-          "command": "dbclient.jumpToRefTable",
-          "when": "view == dbclient.explorer && viewItem =~ /^foreignKey\\./",
+          "command": "devbelt.jumpToRefTable",
+          "when": "view == devbelt.explorer && viewItem =~ /^foreignKey\\./",
           "group": "1_fk"
         },
         {
-          "command": "dbclient.dropForeignKey",
-          "when": "view == dbclient.explorer && viewItem =~ /^foreignKey\\./",
+          "command": "devbelt.dropForeignKey",
+          "when": "view == devbelt.explorer && viewItem =~ /^foreignKey\\./",
           "group": "2_danger"
         },
         {
-          "command": "dbclient.newQuery",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_query\\./",
+          "command": "devbelt.newQuery",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_query\\./",
           "group": "inline"
         },
         {
-          "command": "dbclient.manageUsers",
-          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG)$/",
+          "command": "devbelt.manageUsers",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG)$/",
           "group": "5_tools"
         },
         {
-          "command": "dbclient.openQuery",
-          "when": "view == dbclient.explorer && viewItem =~ /^savedQuery\\./",
+          "command": "devbelt.openQuery",
+          "when": "view == devbelt.explorer && viewItem =~ /^savedQuery\\./",
           "group": "inline"
         },
         {
-          "command": "dbclient.editQuery",
-          "when": "view == dbclient.explorer && viewItem =~ /^savedQuery\\./",
+          "command": "devbelt.editQuery",
+          "when": "view == devbelt.explorer && viewItem =~ /^savedQuery\\./",
           "group": "1_query"
         },
         {
-          "command": "dbclient.deleteQuery",
-          "when": "view == dbclient.explorer && viewItem =~ /^savedQuery\\./",
+          "command": "devbelt.deleteQuery",
+          "when": "view == devbelt.explorer && viewItem =~ /^savedQuery\\./",
           "group": "2_danger"
         },
         {
-          "command": "dbclient.newQueryFolder",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_query\\./",
+          "command": "devbelt.newQueryFolder",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_query\\./",
           "group": "2_new"
         },
         {
-          "command": "dbclient.newQuery",
-          "when": "view == dbclient.explorer && viewItem =~ /^queryFolder\\./",
+          "command": "devbelt.newQuery",
+          "when": "view == devbelt.explorer && viewItem =~ /^queryFolder\\./",
           "group": "inline"
         },
         {
-          "command": "dbclient.renameQueryFolder",
-          "when": "view == dbclient.explorer && viewItem =~ /^queryFolder\\./",
+          "command": "devbelt.renameQueryFolder",
+          "when": "view == devbelt.explorer && viewItem =~ /^queryFolder\\./",
           "group": "1_query"
         },
         {
-          "command": "dbclient.deleteQueryFolder",
-          "when": "view == dbclient.explorer && viewItem =~ /^queryFolder\\./",
+          "command": "devbelt.deleteQueryFolder",
+          "when": "view == devbelt.explorer && viewItem =~ /^queryFolder\\./",
           "group": "2_danger"
         },
         {
-          "command": "dbclient.addGroup",
-          "when": "view == dbclient.explorer && viewItem =~ /^group\\./",
+          "command": "devbelt.addGroup",
+          "when": "view == devbelt.explorer && viewItem =~ /^group\\./",
           "group": "inline"
         },
         {
-          "command": "dbclient.addConnection",
-          "when": "view == dbclient.explorer && viewItem =~ /^group\\./",
+          "command": "devbelt.addConnection",
+          "when": "view == devbelt.explorer && viewItem =~ /^group\\./",
           "group": "2_new"
         },
         {
-          "command": "dbclient.renameGroup",
-          "when": "view == dbclient.explorer && viewItem =~ /^group\\./",
+          "command": "devbelt.renameGroup",
+          "when": "view == devbelt.explorer && viewItem =~ /^group\\./",
           "group": "3_edit"
         },
         {
-          "command": "dbclient.removeGroup",
-          "when": "view == dbclient.explorer && viewItem =~ /^group\\./",
+          "command": "devbelt.removeGroup",
+          "when": "view == devbelt.explorer && viewItem =~ /^group\\./",
           "group": "8_danger"
         },
         {
-          "command": "dbclient.openConnection",
-          "when": "view == dbclient.explorer && viewItem =~ /^connectionClosed\\./",
+          "command": "devbelt.openConnection",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionClosed\\./",
           "group": "1_view"
         },
         {
-          "command": "dbclient.closeConnection",
-          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\./",
+          "command": "devbelt.closeConnection",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\./",
           "group": "1_view"
         },
         {
-          "command": "dbclient.refreshConnection",
-          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\./",
+          "command": "devbelt.refreshConnection",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.editConnection",
-          "when": "view == dbclient.explorer && viewItem =~ /^connection/",
+          "command": "devbelt.editConnection",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
           "group": "3_edit"
         },
         {
-          "command": "dbclient.fixConnectionPaths",
-          "when": "view == dbclient.explorer && viewItem =~ /^connection/",
+          "command": "devbelt.fixConnectionPaths",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
           "group": "3_edit"
         },
         {
-          "command": "dbclient.removeConnectionPathOverrides",
-          "when": "view == dbclient.explorer && viewItem =~ /^connection/",
+          "command": "devbelt.removeConnectionPathOverrides",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
           "group": "3_edit"
         },
         {
-          "command": "dbclient.cloneConnection",
-          "when": "view == dbclient.explorer && viewItem =~ /^connection/",
+          "command": "devbelt.cloneConnection",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
           "group": "3_edit"
         },
         {
-          "command": "dbclient.newQueryFromConn",
-          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\./",
+          "command": "devbelt.newQueryFromConn",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\./",
           "group": "2_new"
         },
         {
-          "command": "dbclient.createDatabase",
-          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\./",
+          "command": "devbelt.createDatabase",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\./",
           "group": "2_new"
         },
         {
-          "command": "dbclient.openTerminal",
-          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\./",
+          "command": "devbelt.openTerminal",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\./",
           "group": "5_tools"
         },
         {
-          "command": "dbclient.serverStatus",
-          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\./",
+          "command": "devbelt.serverStatus",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\./",
           "group": "5_tools"
         },
         {
-          "command": "dbclient.importData",
-          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\./",
+          "command": "devbelt.importData",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\./",
           "group": "4_data"
         },
         {
-          "command": "dbclient.exportConnection",
-          "when": "view == dbclient.explorer && viewItem =~ /^connectionOpen\\./",
+          "command": "devbelt.exportConnection",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\./",
           "group": "4_data"
         },
         {
-          "command": "dbclient.moveToGroup",
-          "when": "view == dbclient.explorer && viewItem =~ /^connection/",
+          "command": "devbelt.moveToGroup",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
           "group": "3_edit"
         },
         {
-          "command": "dbclient.deleteConnection",
-          "when": "view == dbclient.explorer && viewItem =~ /^connection/",
+          "command": "devbelt.deleteConnection",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
           "group": "8_danger"
         },
         {
-          "command": "dbclient.refreshNode",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_index\\./",
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_index\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.refreshNode",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_trigger\\./",
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_trigger\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.refreshNode",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_foreignKey\\./",
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_foreignKey\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.refreshNode",
-          "when": "view == dbclient.explorer && viewItem =~ /^view\\./",
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && viewItem =~ /^view\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.refreshNode",
-          "when": "view == dbclient.explorer && viewItem =~ /^column\\./",
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && viewItem =~ /^column\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.refreshNode",
-          "when": "view == dbclient.explorer && viewItem =~ /^index\\./",
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && viewItem =~ /^index\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.refreshNode",
-          "when": "view == dbclient.explorer && viewItem =~ /^trigger\\./",
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && viewItem =~ /^trigger\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.refreshNode",
-          "when": "view == dbclient.explorer && viewItem =~ /^foreignKey\\./",
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && viewItem =~ /^foreignKey\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.refreshNode",
-          "when": "view == dbclient.explorer && viewItem =~ /^routine\\./",
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && viewItem =~ /^routine\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.refreshNode",
-          "when": "view == dbclient.explorer && viewItem =~ /^event\\./",
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && viewItem =~ /^event\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.refreshNode",
-          "when": "view == dbclient.explorer && viewItem =~ /^savedQuery\\./",
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && viewItem =~ /^savedQuery\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.refreshNode",
-          "when": "view == dbclient.explorer && viewItem =~ /^queryFolder\\./",
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && viewItem =~ /^queryFolder\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.refreshNode",
-          "when": "view == dbclient.explorer && viewItem =~ /^group\\./",
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && viewItem =~ /^group\\./",
           "group": "0_refresh"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^connection/",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^database\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\./",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_table\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_table\\./",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_view\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_view\\./",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_function\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_function\\./",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_event\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_event\\./",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_query\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_query\\./",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_index\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_index\\./",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_trigger\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_trigger\\./",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^category_foreignKey\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_foreignKey\\./",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^view\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^view\\./",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^index\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^index\\./",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^trigger\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^trigger\\./",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^foreignKey\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^foreignKey\\./",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^routine\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^routine\\./",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^event\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^event\\./",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^savedQuery\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^savedQuery\\./",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^queryFolder\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^queryFolder\\./",
           "group": "9_copy"
         },
         {
-          "command": "dbclient.copyNodeName",
-          "when": "view == dbclient.explorer && viewItem =~ /^group\\./",
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^group\\./",
           "group": "9_copy"
         }
       ]
@@ -1561,7 +1561,7 @@
     "configuration": {
       "title": "DB Client",
       "properties": {
-        "dbclient.language": {
+        "devbelt.language": {
           "type": "string",
           "enum": [
             "auto",
@@ -1572,7 +1572,7 @@
           "description": "Extension language. auto follows VS Code display language.",
           "markdownDescription": "扩展语言。`auto` 跟随 VS Code 显示语言。"
         },
-        "dbclient.format.indent": {
+        "devbelt.format.indent": {
           "type": "number",
           "default": 2,
           "minimum": 0,
@@ -1580,7 +1580,7 @@
           "description": "SQL formatting indent width (spaces).",
           "markdownDescription": "SQL 格式化缩进宽度（空格数）。"
         },
-        "dbclient.format.keywordCase": {
+        "devbelt.format.keywordCase": {
           "type": "string",
           "enum": [
             "preserve",
@@ -1591,7 +1591,7 @@
           "description": "SQL formatting keyword case.",
           "markdownDescription": "SQL 格式化关键字大小写。"
         },
-        "dbclient.ssh.hostKeyPolicy": {
+        "devbelt.ssh.hostKeyPolicy": {
           "type": "string",
           "enum": [
             "tofu",
@@ -1601,7 +1601,7 @@
           "description": "SSH host key policy. tofu: ask and remember unknown host keys; strict: only trust hosts already in known_hosts.",
           "markdownDescription": "SSH 主机密钥策略。`tofu`：未知主机弹指纹确认并记住；`strict`：只信任 `known_hosts` 中已有的主机。密钥变更始终拒绝。"
         },
-        "dbclient.export.addUtf8Bom": {
+        "devbelt.export.addUtf8Bom": {
           "type": "boolean",
           "default": false,
           "description": "Prefix CSV/TSV exports with a UTF-8 BOM (helps Excel detect encoding).",
@@ -1612,50 +1612,50 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "dbclient",
+          "id": "devbelt",
           "title": "DB Client",
           "icon": "resources/logo.svg"
         }
       ]
     },
     "views": {
-      "dbclient": [
+      "devbelt": [
         {
-          "id": "dbclient.explorer",
+          "id": "devbelt.explorer",
           "name": "%view.explorer%"
         },
         {
-          "id": "dbclient.explorer.organization",
+          "id": "devbelt.explorer.organization",
           "name": "Organization Resources"
         }
       ]
     },
     "keybindings": [
       {
-        "command": "dbclient.runQuery",
+        "command": "devbelt.runQuery",
         "key": "ctrl+enter",
         "mac": "cmd+enter",
         "when": "editorTextFocus"
       },
       {
-        "command": "dbclient.runQueryInNewPanel",
+        "command": "devbelt.runQueryInNewPanel",
         "key": "ctrl+alt+enter",
         "mac": "cmd+ctrl+enter",
         "when": "editorTextFocus"
       },
       {
-        "command": "dbclient.explainQuery",
+        "command": "devbelt.explainQuery",
         "key": "ctrl+shift+e",
         "mac": "cmd+shift+e",
         "when": "editorTextFocus"
       },
       {
-        "command": "dbclient.searchObjects",
+        "command": "devbelt.searchObjects",
         "key": "ctrl+alt+f",
         "mac": "cmd+alt+f"
       },
       {
-        "command": "dbclient.searchConnections",
+        "command": "devbelt.searchConnections",
         "key": "ctrl+alt+c",
         "mac": "cmd+alt+c"
       }

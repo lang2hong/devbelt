@@ -48,10 +48,10 @@ describe('CredentialVault', () => {
     await vault.set('org1', 'res1', { password: 'p' });
 
     for (const key of store.keys()) {
-      expect(key.startsWith('dbclient.org.credential.')).toBe(true);
-      expect(key).not.toContain('dbclient.connections');
+      expect(key.startsWith('devbelt.org.credential.')).toBe(true);
+      expect(key).not.toContain('devbelt.connections');
     }
-    expect(CredentialVault.key('org1', 'res1')).toBe('dbclient.org.credential.org1.res1');
+    expect(CredentialVault.key('org1', 'res1')).toBe('devbelt.org.credential.org1.res1');
   });
 
   it('returns undefined for missing credentials and deletes them', async () => {
@@ -78,14 +78,14 @@ describe('CredentialVault', () => {
     await vault.set('org1', 'res1', { password: 'p1' });
     await vault.set('org2', 'res2', { password: 'p2' });
 
-    const keys = index.get('dbclient.org.credential.index');
-    expect(keys).toContain('dbclient.org.credential.org1.res1');
-    expect(keys).toContain('dbclient.org.credential.org2.res2');
+    const keys = index.get('devbelt.org.credential.index');
+    expect(keys).toContain('devbelt.org.credential.org1.res1');
+    expect(keys).toContain('devbelt.org.credential.org2.res2');
 
     await vault.delete('org1', 'res1');
-    const afterDelete = index.get('dbclient.org.credential.index');
-    expect(afterDelete).not.toContain('dbclient.org.credential.org1.res1');
-    expect(afterDelete).toContain('dbclient.org.credential.org2.res2');
+    const afterDelete = index.get('devbelt.org.credential.index');
+    expect(afterDelete).not.toContain('devbelt.org.credential.org1.res1');
+    expect(afterDelete).toContain('devbelt.org.credential.org2.res2');
   });
 
   it('clearAll 删除全部凭据并清空 index', async () => {
@@ -98,7 +98,7 @@ describe('CredentialVault', () => {
     await vault.clearAll();
 
     expect(store.size).toBe(0);
-    expect(index.get('dbclient.org.credential.index')).toEqual([]);
+    expect(index.get('devbelt.org.credential.index')).toEqual([]);
   });
 
   it('clearAll 删除失败时保留失败 key', async () => {
@@ -119,8 +119,8 @@ describe('CredentialVault', () => {
     await vault.clearAll();
 
     // org1 删除成功；org2 失败，其 key 保留在 index 中供后续重试。
-    expect(store.has('dbclient.org.credential.org1.res1')).toBe(false);
-    expect(store.has('dbclient.org.credential.org2.res2')).toBe(true);
-    expect(index.get('dbclient.org.credential.index')).toEqual(['dbclient.org.credential.org2.res2']);
+    expect(store.has('devbelt.org.credential.org1.res1')).toBe(false);
+    expect(store.has('devbelt.org.credential.org2.res2')).toBe(true);
+    expect(index.get('devbelt.org.credential.index')).toEqual(['devbelt.org.credential.org2.res2']);
   });
 });

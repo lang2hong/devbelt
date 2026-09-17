@@ -20,7 +20,7 @@ vi.mock('@devkit/auth-client', async (importOriginal) => ({
 import { getOrder, createOrder } from '../api/orders';
 import CheckoutView from './CheckoutView.vue';
 
-const KEY = 'dbclient.console.pendingOrder';
+const KEY = 'devbelt.console.pendingOrder';
 
 function order(status: string, no = 'o1') {
   return {

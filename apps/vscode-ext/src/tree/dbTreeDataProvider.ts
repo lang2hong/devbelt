@@ -233,7 +233,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
             undefined,
             q.id,
           );
-          n.command = { command: 'dbclient.openQuery', title: 'Open', arguments: [n] };
+          n.command = { command: 'devbelt.openQuery', title: 'Open', arguments: [n] };
           return n;
         },
       );
@@ -283,7 +283,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     return triggers.map((t: any) => {
       const node = new DbTreeNode(t.name, TreeItemCollapsibleState.None, NodeKind.Trigger, conn, undefined, element, undefined, db);
       node.description = [t.timing, t.event].filter(Boolean).join(' ');
-      node.command = { command: 'dbclient.viewTrigger', title: 'View', arguments: [node] };
+      node.command = { command: 'devbelt.viewTrigger', title: 'View', arguments: [node] };
       return node;
     });
   }
@@ -309,7 +309,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         node.refTable = f.refTable;
         node.refColumn = f.refColumn;
         node.constraintName = f.constraintName;
-        node.command = { command: 'dbclient.jumpToRefTable', title: 'Open', arguments: [node] };
+        node.command = { command: 'devbelt.jumpToRefTable', title: 'Open', arguments: [node] };
         return node;
       });
   }
@@ -333,7 +333,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
           undefined,
           q.id,
         );
-        n.command = { command: 'dbclient.openQuery', title: 'Open', arguments: [n] };
+        n.command = { command: 'devbelt.openQuery', title: 'Open', arguments: [n] };
         return n;
       },
     );
@@ -441,7 +441,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     if (!isOpen) {
       node.id = `closed_${conn.id}`;
       node.command = {
-        command: 'dbclient.openConnection',
+        command: 'devbelt.openConnection',
         title: 'Open',
         arguments: [conn],
       };

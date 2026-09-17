@@ -12,21 +12,21 @@ import type { SyncSessionFactory } from './sessionFactory';
  * `action` 为下表中的命令 id 白名单，webview 不能借此触发任意命令。
  */
 const ACTION_COMMANDS = new Set<string>([
-  'dbclient.initializePersonalSync',
-  'dbclient.unlockPersonalSync',
-  'dbclient.changeLoginPassword',
-  'dbclient.changeSyncPassword',
-  'dbclient.recoverSync',
-  'dbclient.recoverByAccount',
-  'dbclient.resetSync',
-  'dbclient.syncPull',
-  'dbclient.syncPush',
-  'dbclient.exportConnections',
-  'dbclient.importConnections',
-  'dbclient.sessions',
-  'dbclient.plans',
-  'dbclient.openConsole',
-  'dbclient.logout',
+  'devbelt.initializePersonalSync',
+  'devbelt.unlockPersonalSync',
+  'devbelt.changeLoginPassword',
+  'devbelt.changeSyncPassword',
+  'devbelt.recoverSync',
+  'devbelt.recoverByAccount',
+  'devbelt.resetSync',
+  'devbelt.syncPull',
+  'devbelt.syncPush',
+  'devbelt.exportConnections',
+  'devbelt.importConnections',
+  'devbelt.sessions',
+  'devbelt.plans',
+  'devbelt.openConsole',
+  'devbelt.logout',
 ]);
 
 interface SyncStatusSummary {
@@ -44,7 +44,7 @@ export class AccountView extends BaseWebView {
   private initSent = false;
 
   private constructor(auth: AuthService, factory: SyncSessionFactory) {
-    super('dbclient.account', l10n('account.title'));
+    super('devbelt.account', l10n('account.title'));
     this.auth = auth;
     this.factory = factory;
   }

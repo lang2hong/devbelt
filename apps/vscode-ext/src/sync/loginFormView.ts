@@ -20,7 +20,7 @@ export class LoginFormView extends BaseWebView {
   private readonly onLoggedIn?: () => void;
 
   private constructor(auth: AuthService, onLoggedIn?: () => void) {
-    super('dbclient.login', l10n('login.title'));
+    super('devbelt.login', l10n('login.title'));
     this.auth = auth;
     this.onLoggedIn = onLoggedIn;
   }

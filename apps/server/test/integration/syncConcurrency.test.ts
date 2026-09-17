@@ -69,7 +69,7 @@ function newState(fill = 20): SyncNewState {
 
 function signRecord(priv: KeyObject, userId: number, action: string, body: { keyEpoch: string; baseVersion: string; recordId: string; mutationId: string; requestDigest: string }): Buffer {
   const signingInput = {
-    domain: 'dbclient/sync/v1', action, userId: String(userId),
+    domain: 'devbelt/sync/v1', action, userId: String(userId),
     keyEpoch: body.keyEpoch, baseVersion: body.baseVersion, recordId: body.recordId,
     mutationId: body.mutationId, requestDigest: body.requestDigest,
   };
@@ -78,7 +78,7 @@ function signRecord(priv: KeyObject, userId: number, action: string, body: { key
 
 function signState(priv: KeyObject, userId: number, action: string, body: { keyEpoch: string; expectedStateVersion: string; mutationId: string; requestDigest: string }): Buffer {
   const signingInput = {
-    domain: 'dbclient/sync/v1', action, userId: String(userId),
+    domain: 'devbelt/sync/v1', action, userId: String(userId),
     keyEpoch: body.keyEpoch, expectedStateVersion: body.expectedStateVersion,
     mutationId: body.mutationId, requestDigest: body.requestDigest,
   };

@@ -10,13 +10,13 @@ import { hkdfSync } from 'crypto';
 /** 三个固定 info（UTF-8），见 §7.1。 */
 export const SYNC_INFO = {
   /** syncSignPriv 派生 */
-  signing: 'dbclient/sync/v1/signing',
+  signing: 'devbelt/sync/v1/signing',
   /** recoverSignPriv 派生 */
-  recoverSigning: 'dbclient/sync/v1/recover-signing',
+  recoverSigning: 'devbelt/sync/v1/recover-signing',
   /** KEK_recovery 派生 */
-  kekRecovery: 'dbclient/sync/v1/kek/recovery',
+  kekRecovery: 'devbelt/sync/v1/kek/recovery',
   /** KEK_account 派生（账号恢复钥匙 → 包裹 DEK 的 KEK） */
-  kekAccount: 'dbclient/sync/v1/kek/account',
+  kekAccount: 'devbelt/sync/v1/kek/account',
 } as const;
 
 /** envelope purpose 值域（§7.1） */
@@ -31,7 +31,7 @@ export type EnvelopePurpose = 'smp' | 'recovery' | 'account';
 export function envelopeInfo(keyEpoch: bigint, purpose: EnvelopePurpose, envelopeVersion: bigint): string {
   if (keyEpoch < 1n) throw new Error(`keyEpoch must be >= 1, got ${keyEpoch}`);
   if (envelopeVersion < 1n) throw new Error(`envelopeVersion must be >= 1, got ${envelopeVersion}`);
-  return `dbclient/sync/v1/envelope/${keyEpoch.toString(10)}/${purpose}/${envelopeVersion.toString(10)}`;
+  return `devbelt/sync/v1/envelope/${keyEpoch.toString(10)}/${purpose}/${envelopeVersion.toString(10)}`;
 }
 
 /** HKDF-SHA-256，返回指定长度字节。salt 传空（0 长）表示「空 salt」。 */

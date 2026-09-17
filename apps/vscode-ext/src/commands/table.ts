@@ -13,7 +13,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
   const { manager, treeProvider, executor, connCtx } = deps;
 
   // ── 外键跳转 ──
-  sub('dbclient.jumpToRefTable', async (node: DbTreeNode) => {
+  sub('devbelt.jumpToRefTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node.refTable) return;
     TableQueryView.open(node.conn, node.refTable, node.database ?? node.conn.database ?? '', manager, {
       objectType: 'table',
@@ -21,7 +21,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
   });
 
   // ── 表 ──
-  sub('dbclient.newTable', async (node: DbTreeNode) => {
+  sub('devbelt.newTable', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     connCtx.setLast(node.conn, node.database);
     // 模板由方言给出：自增主键的写法三家不同，过去统一发 MySQL 语法，
@@ -39,7 +39,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
   });
 
-  sub('dbclient.dropTable', async (node: DbTreeNode) => {
+  sub('devbelt.dropTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     if (!ensureWritable(node.conn)) return;
     if (!(await confirm('table.dropConfirm', 'table.delete', node.label))) return;
@@ -48,7 +48,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     treeProvider.refresh();
   });
 
-  sub('dbclient.renameTable', async (node: DbTreeNode) => {
+  sub('devbelt.renameTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     if (!ensureWritable(node.conn)) return;
     const newName = await vscode.window.showInputBox({ prompt: l10n('table.renamePrompt'), value: node.label, valueSelection: [0, node.label.length] });
@@ -59,7 +59,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     treeProvider.refresh();
   });
 
-  sub('dbclient.renameView', async (node: DbTreeNode) => {
+  sub('devbelt.renameView', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     if (!ensureWritable(node.conn)) return;
     const newName = await vscode.window.showInputBox({ prompt: l10n('view.renamePrompt'), value: node.label, valueSelection: [0, node.label.length] });
@@ -70,7 +70,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     treeProvider.refresh();
   });
 
-  sub('dbclient.truncateTable', async (node: DbTreeNode) => {
+  sub('devbelt.truncateTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     if (!ensureWritable(node.conn)) return;
     if (!(await confirm('table.truncateConfirm', 'table.truncate', node.label))) return;
@@ -79,7 +79,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     await session.table.truncateTable(node.label, node.database);
   });
 
-  sub('dbclient.dupTable', async (node: DbTreeNode) => {
+  sub('devbelt.dupTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     if (!ensureWritable(node.conn)) return;
     const newName = await vscode.window.showInputBox({ prompt: l10n('table.dupPrompt', { name: node.label }), value: `${node.label}_copy` });
@@ -96,7 +96,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
    * 与 Duplicate Table 的区别就在这个选择上 —— 后者只复制结构。
    * SQLite 走 `CREATE TABLE AS SELECT`，不保留主键/索引/约束，需要提前说明。
    */
-  sub('dbclient.copyTable', async (node: DbTreeNode) => {
+  sub('devbelt.copyTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     const session = await manager.connect(node.conn);
     if (!requireCapability(session, 'duplicateTable') || !ensureWritable(node.conn)) return;
@@ -131,7 +131,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     }
   });
 
-  sub('dbclient.viewTableStructure', async (node: DbTreeNode) => {
+  sub('devbelt.viewTableStructure', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     connCtx.setLast(node.conn, node.database);
     const session = await manager.connect(node.conn);
@@ -140,7 +140,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     executor.openStructure(node.conn, node.label, node.database, columns as any[]);
   });
 
-  sub('dbclient.viewTableSource', async (node: DbTreeNode) => {
+  sub('devbelt.viewTableSource', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     const session = await manager.connect(node.conn);
     if (!requireCapability(session, 'getTableDefinition')) return;
@@ -148,7 +148,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     await openSqlDoc(ddl || '-- No DDL found');
   });
 
-  sub('dbclient.mockData', async (node: DbTreeNode) => {
+  sub('devbelt.mockData', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     if (!ensureWritable(node.conn)) return;
     const input = await vscode.window.showInputBox({
@@ -169,7 +169,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
   });
 
   // ── 视图/函数/事件 ──
-  sub('dbclient.dropView', async (node: DbTreeNode) => {
+  sub('devbelt.dropView', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     if (!ensureWritable(node.conn)) return;
     if (!(await confirm('view.deleteConfirm', 'view.delete', node.label))) return;
@@ -178,7 +178,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     treeProvider.refresh();
   });
 
-  sub('dbclient.newView', async (node: DbTreeNode) => {
+  sub('devbelt.newView', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     connCtx.setLast(node.conn, node.database);
     const useDb = node.database ? `USE ${wrapIdentForConn(node.conn, node.database)};\n\n` : '';
@@ -187,7 +187,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
   });
 
-  sub('dbclient.modifyView', async (node: DbTreeNode) => {
+  sub('devbelt.modifyView', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     connCtx.setLast(node.conn, node.database);
     const session = await manager.connect(node.conn);
@@ -199,14 +199,14 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
   });
 
-  sub('dbclient.openRoutine', async (node: DbTreeNode) => {
+  sub('devbelt.openRoutine', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     const session = await manager.connect(node.conn);
     const def = await session.metadata.getRoutineDefinition(node.label, node.routineType || 'FUNCTION', node.database);
     await openSqlDoc(def || '-- No definition found');
   });
 
-  sub('dbclient.dropRoutine', async (node: DbTreeNode) => {
+  sub('devbelt.dropRoutine', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     if (!ensureWritable(node.conn)) return;
     if (!(await confirm('routine.deleteConfirm', 'routine.delete', node.label))) return;
@@ -216,14 +216,14 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     treeProvider.refresh();
   });
 
-  sub('dbclient.openEvent', async (node: DbTreeNode) => {
+  sub('devbelt.openEvent', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     const session = await manager.connect(node.conn);
     const def = await session.metadata.getEventDefinition(node.label, node.database);
     await openSqlDoc(def || '-- No definition found');
   });
 
-  sub('dbclient.dropEvent', async (node: DbTreeNode) => {
+  sub('devbelt.dropEvent', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     if (!ensureWritable(node.conn)) return;
     if (!(await confirm('event.deleteConfirm', 'event.delete', node.label))) return;
@@ -234,7 +234,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
   });
 
   // ── 函数/事件 新建与修改（SQL 编辑器模板，可编辑可运行） ──
-  sub('dbclient.newRoutine', async (node: DbTreeNode) => {
+  sub('devbelt.newRoutine', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     connCtx.setLast(node.conn, node.database);
     // 例程模板由方言给出：`DELIMITER` 是 MySQL 客户端命令，PG 不认它，
@@ -253,7 +253,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
   });
 
-  sub('dbclient.modifyRoutine', async (node: DbTreeNode) => {
+  sub('devbelt.modifyRoutine', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     const session = await manager.connect(node.conn);
     const def = await session.metadata.getRoutineDefinition(node.label, node.routineType || 'FUNCTION', node.database);
@@ -262,7 +262,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
   });
 
-  sub('dbclient.newEvent', async (node: DbTreeNode) => {
+  sub('devbelt.newEvent', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     connCtx.setLast(node.conn, node.database);
     const useDb = node.database ? `USE ${wrapIdentForConn(node.conn, node.database)};\n\n` : '';
@@ -271,7 +271,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
   });
 
-  sub('dbclient.modifyEvent', async (node: DbTreeNode) => {
+  sub('devbelt.modifyEvent', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     const session = await manager.connect(node.conn);
     const def = await session.metadata.getEventDefinition(node.label, node.database);
@@ -299,7 +299,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     else treeProvider.refresh();
   };
 
-  sub('dbclient.addColumn', async (node: DbTreeNode) => {
+  sub('devbelt.addColumn', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     const table = columnTable(node);
     if (!table) return;
@@ -308,7 +308,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     TableDesignView.open(node.conn, table, node.database, manager, () => refreshColumnParent(node));
   });
 
-  sub('dbclient.addColumnSql', async (node: DbTreeNode) => {
+  sub('devbelt.addColumnSql', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     const table = columnTable(node);
     if (!table) return;
@@ -325,13 +325,13 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
   });
 
-  sub('dbclient.modifyColumn', async (node: DbTreeNode) => {
+  sub('devbelt.modifyColumn', async (node: DbTreeNode) => {
     if (!node?.conn || node.kind !== NodeKind.Column || !node.parent || !node.database) return;
     if (!ensureWritable(node.conn)) return;
     TableDesignView.open(node.conn, node.parent.label, node.database, manager, () => refreshColumnParent(node));
   });
 
-  sub('dbclient.modifyColumnSql', async (node: DbTreeNode) => {
+  sub('devbelt.modifyColumnSql', async (node: DbTreeNode) => {
     if (!node?.conn || node.kind !== NodeKind.Column || !node.parent || !node.database) return;
     const table = node.parent.label;
     connCtx.setLast(node.conn, node.database);
@@ -359,7 +359,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (editor) connCtx.setForDoc(editor.document.uri.toString(), node.conn, node.database);
   });
 
-  sub('dbclient.renameColumn', async (node: DbTreeNode) => {
+  sub('devbelt.renameColumn', async (node: DbTreeNode) => {
     if (!node?.conn || node.kind !== NodeKind.Column || !node.parent) return;
     const session = await manager.connect(node.conn);
     if (!requireCapability(session, 'alterTable') || !ensureWritable(node.conn)) return;
@@ -385,7 +385,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
    * 过去只是把 `ALTER TABLE ... DROP COLUMN` 丢到编辑器里，用户还得自己去点运行，
    * 而树已经先刷新了一遍，看起来像「删了但没删掉」。
    */
-  sub('dbclient.dropColumn', async (node: DbTreeNode) => {
+  sub('devbelt.dropColumn', async (node: DbTreeNode) => {
     if (!node?.conn || node.kind !== NodeKind.Column || !node.parent) return;
     const session = await manager.connect(node.conn);
     if (!requireCapability(session, 'alterTable') || !ensureWritable(node.conn)) return;
@@ -399,7 +399,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     }
   });
 
-  sub('dbclient.copyNodeName', async (node: DbTreeNode) => {
+  sub('devbelt.copyNodeName', async (node: DbTreeNode) => {
     if (!node?.label) return;
     await vscode.env.clipboard.writeText(node.label);
     vscode.window.showInformationMessage(l10n('common.copied', { name: node.label }));

@@ -57,7 +57,7 @@ const POLL_MAX_TICKS = 40;
  * 未完成订单号仅存非敏感标识，写入 sessionStorage 以便支付宝跳转（同标签页导航）
  * 或页面刷新后恢复支付状态；不落 localStorage、不持久化含签名/令牌的支付参数。
  */
-const PENDING_ORDER_KEY = 'dbclient.console.pendingOrder';
+const PENDING_ORDER_KEY = 'devbelt.console.pendingOrder';
 
 function readPendingOrder(): string | null {
   try {

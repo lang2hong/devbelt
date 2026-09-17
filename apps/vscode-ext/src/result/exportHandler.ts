@@ -27,10 +27,10 @@ export class ExportHandler {
     private readonly post: (msg: any) => void,
   ) {}
 
-  /** 是否给 CSV/TSV 前置 UTF-8 BOM：由 `dbclient.export.addUtf8Bom` 设置控制（默认关）。 */
+  /** 是否给 CSV/TSV 前置 UTF-8 BOM：由 `devbelt.export.addUtf8Bom` 设置控制（默认关）。 */
   private withBom(format: TransferFormat): boolean {
     if (format !== 'csv' && format !== 'txt') return false;
-    return vscode.workspace.getConfiguration('dbclient').get<boolean>('export.addUtf8Bom') === true;
+    return vscode.workspace.getConfiguration('devbelt').get<boolean>('export.addUtf8Bom') === true;
   }
 
   async exportData(format: TransferFormat, columns: string[], rows: Record<string, any>[]): Promise<void> {

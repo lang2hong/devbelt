@@ -13,7 +13,7 @@ import { ConnectionStore } from './connectionStore';
 export class ConnectionContext {
   private readonly editorMap = new Map<string, { connId: string; db?: string }>();
   private readonly savedQueryMap = new WeakMap<vscode.TextDocument, string>();
-  private readonly wsKey = 'dbclient.lastConn';
+  private readonly wsKey = 'devbelt.lastConn';
 
   constructor(
     private readonly context: vscode.ExtensionContext,

@@ -10,9 +10,9 @@ const vscode = require('vscode');
  */
 const EXT_ID = 'lang2hong.devbelt';
 const EXPECTED_COMMANDS = [
-  'dbclient.openConnection',
-  'dbclient.newQuery',
-  'dbclient.designTable',
+  'devbelt.openConnection',
+  'devbelt.newQuery',
+  'devbelt.designTable',
 ];
 
 async function run() {

@@ -10,7 +10,7 @@ import { UserManageView } from './userManageView';
  * 都重复显示同一份列表。应用账号（登录/账户/设备/登出）见 `account.ts`。
  */
 export function registerUserCommands(deps: Deps, sub: Sub): void {
-  sub('dbclient.manageUsers', async (node: DbTreeNode) => {
+  sub('devbelt.manageUsers', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     UserManageView.open(deps, node);
   });

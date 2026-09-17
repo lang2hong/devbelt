@@ -26,7 +26,7 @@ import { confirm, openSqlDoc, recordBulkHistory, requireCapability } from './sha
 export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
   const { manager, treeProvider, connCtx } = deps;
 
-  sub('dbclient.createDatabase', async (node: DbTreeNode) => {
+  sub('devbelt.createDatabase', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     if (!ensureWritable(node.conn)) return;
     const name = await vscode.window.showInputBox({ prompt: l10n('db.createPrompt') });
@@ -39,7 +39,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     vscode.window.showInformationMessage(l10n('db.created', { name }));
   });
 
-  sub('dbclient.dropDatabase', async (node: DbTreeNode) => {
+  sub('devbelt.dropDatabase', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     if (!ensureWritable(node.conn)) return;
     if (!(await confirm('db.dropConfirm', 'db.drop', node.label))) return;
@@ -50,7 +50,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     treeProvider.refresh();
   });
 
-  sub('dbclient.importData', async (node: DbTreeNode) => {
+  sub('devbelt.importData', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     const format = await pickFormat('import');
     if (!format) return;
@@ -71,13 +71,13 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     await importStructuredData(node, format, text, deps);
   });
 
-  sub('dbclient.exportConnection', async (node: DbTreeNode) => {
+  sub('devbelt.exportConnection', async (node: DbTreeNode) => {
     if (!node?.conn) return;
 
     await runExportWizard(node, manager, connCtx);
   });
 
-  sub('dbclient.restoreDatabase', async (node: DbTreeNode) => {
+  sub('devbelt.restoreDatabase', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     const conn = node.conn;
     if (!ensureWritable(conn)) return;
@@ -124,7 +124,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     );
   });
 
-  sub('dbclient.importTable', async (node: DbTreeNode) => {
+  sub('devbelt.importTable', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     const format = await pickFormat('import');
     if (!format) return;
@@ -145,13 +145,13 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     await importStructuredData(node, format, text, deps, node.label);
   });
 
-  sub('dbclient.exportTable', async (node: DbTreeNode) => {
+  sub('devbelt.exportTable', async (node: DbTreeNode) => {
     if (!node?.conn) return;
 
     await runExportWizard(node, manager, connCtx, node.label);
   });
 
-  sub('dbclient.compareSchema', async (node: DbTreeNode) => {
+  sub('devbelt.compareSchema', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     const session = await manager.connect(node.conn);
     if (!requireCapability(session, 'schemaSync')) return;
@@ -175,7 +175,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     await openSqlDoc(header + syncSql);
   });
 
-  sub('dbclient.syncDatabase', async (node: DbTreeNode) => {
+  sub('devbelt.syncDatabase', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
 
     const conns = deps.store.getVisibleTreeData().connections.filter((c) => c.id !== node.conn!.id);
@@ -277,7 +277,7 @@ export async function runExportWizard(
   } catch { version = undefined; }
   const serverInfo = { name: conn.name, dbType: conn.dbType, host: conn.host, port: conn.port, version };
   const withBom = (format === 'csv' || format === 'txt')
-    && vscode.workspace.getConfiguration('dbclient').get<boolean>('export.addUtf8Bom') === true;
+    && vscode.workspace.getConfiguration('devbelt').get<boolean>('export.addUtf8Bom') === true;
   try {
     await vscode.window.withProgress({
       location: vscode.ProgressLocation.Notification,

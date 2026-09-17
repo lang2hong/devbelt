@@ -24,7 +24,7 @@ export interface QueryHistoryEntry {
  * 查询历史存储：记录最近执行的 SQL，持久化到全局状态。
  */
 export class HistoryStore {
-  private static readonly KEY = 'dbclient.history';
+  private static readonly KEY = 'devbelt.history';
   private static readonly DEFAULT_MAX_ENTRIES = 100;
   private static idCounter = 0;
 

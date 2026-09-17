@@ -269,11 +269,11 @@ export function registerSyncLifecycleCommands(
 ): void {
   const deps: SyncLifecycleCommandDeps = { auth, factory, ui: vscodeUi() };
   context.subscriptions.push(
-    vscode.commands.registerCommand('dbclient.changeSyncPassword', () => changeSyncPassword(deps)),
-    vscode.commands.registerCommand('dbclient.recoverSync', () => recoverSync(deps)),
-    vscode.commands.registerCommand('dbclient.recoverByAccount', () => recoverByAccountCommand(deps)),
-    vscode.commands.registerCommand('dbclient.destroySync', () => destroySync(deps)),
-    vscode.commands.registerCommand('dbclient.resetSync', () => resetSync(deps)),
+    vscode.commands.registerCommand('devbelt.changeSyncPassword', () => changeSyncPassword(deps)),
+    vscode.commands.registerCommand('devbelt.recoverSync', () => recoverSync(deps)),
+    vscode.commands.registerCommand('devbelt.recoverByAccount', () => recoverByAccountCommand(deps)),
+    vscode.commands.registerCommand('devbelt.destroySync', () => destroySync(deps)),
+    vscode.commands.registerCommand('devbelt.resetSync', () => resetSync(deps)),
   );
 }
 

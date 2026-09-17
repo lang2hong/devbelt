@@ -30,7 +30,7 @@ describe('命令/视图注册完整性（§9 P0：命令到 handler 自动核查
 
   it('每条 contributes.commands 均有注册调用点（sub/registerCommand，三种引号）', () => {
     const registered = new Set<string>();
-    for (const m of src.matchAll(/(?:sub|registerCommand)\(\s*(['"`])(dbclient\.[A-Za-z.]+)\1/g)) {
+    for (const m of src.matchAll(/(?:sub|registerCommand)\(\s*(['"`])(devbelt\.[A-Za-z.]+)\1/g)) {
       registered.add(m[2]);
     }
     const missing = [...declared].filter((c) => !registered.has(c));

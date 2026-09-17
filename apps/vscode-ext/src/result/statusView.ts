@@ -21,7 +21,7 @@ export class StatusView extends BaseWebView {
     private readonly conn: SavedConnection,
     private readonly manager: ConnectionManager,
   ) {
-    super('dbclient.serverStatus', `Status @ ${conn.name || conn.host}`);
+    super('devbelt.serverStatus', `Status @ ${conn.name || conn.host}`);
   }
 
   static init(extensionUri: import('vscode').Uri): void { BaseWebView.init(extensionUri); }

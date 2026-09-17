@@ -97,10 +97,10 @@ function buildDeviceInfo(): DeviceInfo {
  * 401 时 SyncClient 自动用 refresh 换新 access（onTokensRefreshed 回调存回）。
  */
 export class AuthService {
-  private static readonly ACCESS_TOKEN_KEY = 'dbclient.auth.accessToken';
-  private static readonly REFRESH_TOKEN_KEY = 'dbclient.auth.refreshToken';
-  private static readonly USER_EMAIL_KEY = 'dbclient.auth.email';
-  private static readonly ENTITLEMENT_CACHE_KEY = 'dbclient.sync.cachedEntitlement';
+  private static readonly ACCESS_TOKEN_KEY = 'devbelt.auth.accessToken';
+  private static readonly REFRESH_TOKEN_KEY = 'devbelt.auth.refreshToken';
+  private static readonly USER_EMAIL_KEY = 'devbelt.auth.email';
+  private static readonly ENTITLEMENT_CACHE_KEY = 'devbelt.sync.cachedEntitlement';
 
   /** 同步客户端（token 通过 getter 实时读取） */
   readonly client: SyncClient;

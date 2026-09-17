@@ -33,8 +33,8 @@ interface MementoLike {
  * v2：QueryFolder 增加 `connId` 归属，`getQueryFolders` 按连接过滤。
  */
 export class QueryStore {
-  private static readonly QKEY = 'dbclient.queries';
-  private static readonly FKEY = 'dbclient.queryFolders';
+  private static readonly QKEY = 'devbelt.queries';
+  private static readonly FKEY = 'devbelt.queryFolders';
 
   private readonly changedEmitter = new EventEmitter<ChangeSource>();
   /** 数据变更事件（新增/更新/删除/合并），供自动同步订阅；source 区分本地/同步。 */

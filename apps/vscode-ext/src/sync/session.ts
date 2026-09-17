@@ -40,7 +40,7 @@ const LOCAL_ID_PREFIX: Record<SyncEntityType, string> = {
  * epoch 切换（destroy/reset-after-loss）：
  *   reconcileEpochTransition(fromKeyEpoch, toKeyEpoch, newSnapshot) 自己按
  *   ③ 持久化新 snapshot → ④ 清旧 epoch recordMap/outbox → ⑤ 删旧 epoch DEK 执行，写入
- *   可重放 cleanup intent（dbclient.sync.epochCleanup.<userId>），任一中断后由
+ *   可重放 cleanup intent（devbelt.sync.epochCleanup.<userId>），任一中断后由
  *   resumeEpochTransition() 完整幂等重放（clear/delete 幂等、setSnapshot 等值重放不抛）。
  *   changeSequence 全局不回退、绝不本地重置（§7.3）。
  */

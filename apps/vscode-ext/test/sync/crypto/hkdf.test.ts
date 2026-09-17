@@ -3,9 +3,9 @@ import { envelopeInfo, hkdfSha256, SYNC_INFO } from '../../../src/sync/crypto/hk
 
 describe('hkdf', () => {
   it('envelopeInfo 十进制无前导零拼接', () => {
-    expect(envelopeInfo(1n, 'smp', 2n)).toBe('dbclient/sync/v1/envelope/1/smp/2');
-    expect(envelopeInfo(3n, 'recovery', 10n)).toBe('dbclient/sync/v1/envelope/3/recovery/10');
-    expect(envelopeInfo(18446744073709551615n, 'smp', 1n)).toBe('dbclient/sync/v1/envelope/18446744073709551615/smp/1');
+    expect(envelopeInfo(1n, 'smp', 2n)).toBe('devbelt/sync/v1/envelope/1/smp/2');
+    expect(envelopeInfo(3n, 'recovery', 10n)).toBe('devbelt/sync/v1/envelope/3/recovery/10');
+    expect(envelopeInfo(18446744073709551615n, 'smp', 1n)).toBe('devbelt/sync/v1/envelope/18446744073709551615/smp/1');
   });
 
   it('envelopeInfo 拒绝非正 keyEpoch / envelopeVersion', () => {

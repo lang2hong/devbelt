@@ -130,7 +130,7 @@ interface UnresolvedData {
 }
 
 export class UnresolvedRefStore {
-  private static readonly KEY_PREFIX = 'dbclient.sync.unresolved';
+  private static readonly KEY_PREFIX = 'devbelt.sync.unresolved';
 
   private readonly key: string;
   private writeChain: Promise<void> = Promise.resolve();

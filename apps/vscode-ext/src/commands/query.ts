@@ -26,7 +26,7 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
     await executor.run(conn, sql, ctx?.db, mode);
   };
 
-  sub('dbclient.runStatement', async (sql: string) => {
+  sub('devbelt.runStatement', async (sql: string) => {
     if (!sql) return;
     const editor = vscode.window.activeTextEditor;
     const ctx = editor ? connCtx.getForDoc(editor.document.uri.toString()) : undefined;
@@ -35,15 +35,15 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
     await executor.run(conn, sql, ctx?.db);
   });
 
-  sub('dbclient.runQuery', async () => {
+  sub('devbelt.runQuery', async () => {
     await runActiveQuery('reuse');
   });
 
-  sub('dbclient.runQueryInNewPanel', async () => {
+  sub('devbelt.runQueryInNewPanel', async () => {
     await runActiveQuery('new');
   });
 
-  sub('dbclient.explainQuery', async () => {
+  sub('devbelt.explainQuery', async () => {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
     const ctx = connCtx.getForDoc(editor.document.uri.toString());
@@ -55,7 +55,7 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
     await executor.explain(conn, sql, ctx?.db);
   });
 
-  sub('dbclient.runSqlFile', async (uri: vscode.Uri) => {
+  sub('devbelt.runSqlFile', async (uri: vscode.Uri) => {
     if (!uri) return;
     const conn = await pickConnection(store);
     if (!conn) return;
@@ -64,18 +64,18 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
     await executor.run(conn, doc.getText());
   });
 
-  sub('dbclient.previewTable', (node: DbTreeNode) => {
+  sub('devbelt.previewTable', (node: DbTreeNode) => {
     if (node?.conn && node?.database) {
       connCtx.setLast(node.conn, node.database);
       TableQueryView.open(node.conn, node.label, node.database, manager, { objectType: 'table' });
     }
   });
 
-  sub('dbclient.refreshNode', (node: DbTreeNode) => {
+  sub('devbelt.refreshNode', (node: DbTreeNode) => {
     if (node) treeProvider.refreshNode(node);
   });
 
-  sub('dbclient.previewView', (node: DbTreeNode) => {
+  sub('devbelt.previewView', (node: DbTreeNode) => {
     if (node?.conn && node?.database) {
       connCtx.setLast(node.conn, node.database);
       // 视图只读：objectType 'view' 会关闭单元格编辑、插入行与复制 INSERT
@@ -83,7 +83,7 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
     }
   });
 
-  sub('dbclient.formatSql', async () => {
+  sub('devbelt.formatSql', async () => {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
     const range = editor.selection.isEmpty
@@ -92,7 +92,7 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
     await editor.edit((edit) => edit.replace(range, formatSql(editor.document.getText(range))));
   });
 
-  sub('dbclient.showHistory', async () => {
+  sub('devbelt.showHistory', async () => {
     const list = history.list();
     if (!list.length) {
       vscode.window.showInformationMessage(l10n('cmd.noHistory'));
@@ -118,7 +118,7 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
   /**
    * 单元格更新的命令入口。
    *
-   * 这是个**已注册命令**，不只有结果面板会用：任何 `executeCommand('dbclient.updateCell', ...)`
+   * 这是个**已注册命令**，不只有结果面板会用：任何 `executeCommand('devbelt.updateCell', ...)`
    * 的调用方（其他扩展、webview 消息、按键绑定）都能直接触发，且连接对象由调用方
    * 整个传进来。所以只读拦截与危险语句确认必须在这里做 —— 不能依赖
    * RowEditor.updateCell 那条路径上的守卫，那条路径可以被绕开。
@@ -126,7 +126,7 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
    * 守卫顺序与 RowEditor 一致：先确认，再连接。反过来的话，即使用户点了取消，
    * 连接也已经建立了。
    */
-  sub('dbclient.updateCell', async (args: {
+  sub('devbelt.updateCell', async (args: {
     conn: import('../connection/connectionStore').SavedConnection;
     table: string; pkColumns: string[]; pkValues: any[]; column: string; value: any;
   }) => {
@@ -143,7 +143,7 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
     }
   });
 
-  sub('dbclient.newQueryFromConn', async (node: DbTreeNode) => {
+  sub('devbelt.newQueryFromConn', async (node: DbTreeNode) => {
     if (!node?.conn) return;
     const name = await vscode.window.showInputBox({ prompt: l10n('query.namePrompt') });
     if (!name) return;
@@ -153,7 +153,7 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
     await openQueryFile(deps, node.conn, node.database, queryId);
   });
 
-  sub('dbclient.newQueryForDb', async (node: DbTreeNode) => {
+  sub('devbelt.newQueryForDb', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     connCtx.setLast(node.conn, node.database);
     const editor = await openSqlDocEditor('');

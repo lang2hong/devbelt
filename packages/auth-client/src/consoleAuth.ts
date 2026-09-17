@@ -18,7 +18,7 @@ export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
 
 type Result<T = undefined> = { kind: 'ok'; value: T } | { kind: 'invalid-credentials' } | { kind: 'rate-limited' } | { kind: 'failure' };
 
-const DEVICE_KEY_STORAGE = 'dbclient.web.deviceKey';
+const DEVICE_KEY_STORAGE = 'devbelt.web.deviceKey';
 
 export function getOrCreateDeviceKey(storage: Pick<Storage, 'getItem' | 'setItem'> = localStorage): string {
   const existing = storage.getItem(DEVICE_KEY_STORAGE);

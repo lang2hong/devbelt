@@ -39,7 +39,7 @@ function rid(n: number): string { return Buffer.alloc(16, n).toString('base64url
 function signRecord(priv: KeyObject, userId: number, action: 'record.put' | 'record.delete', body: Record<string, unknown>) {
   const digest = requestDigestOf(body);
   const signingInput = {
-    domain: 'dbclient/sync/v1', action, userId: String(userId),
+    domain: 'devbelt/sync/v1', action, userId: String(userId),
     keyEpoch: body.keyEpoch, baseVersion: body.baseVersion, recordId: body.recordId,
     mutationId: body.mutationId, requestDigest: digest,
   };

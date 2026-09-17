@@ -53,7 +53,7 @@ function register(session: Session): () => Promise<void> {
   windowMock.showInformationMessage.mockReset();
   windowMock.showWarningMessage.mockReset();
   registerConflictCommands({ subscriptions: [] } as never, { current: session } as never as SyncSessionFactory);
-  const handler = commandHandlers.get('dbclient.resolveConflicts');
+  const handler = commandHandlers.get('devbelt.resolveConflicts');
   if (!handler) throw new Error('resolveConflicts handler not registered');
   return () => Promise.resolve(handler());
 }

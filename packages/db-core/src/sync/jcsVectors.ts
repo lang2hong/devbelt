@@ -30,7 +30,7 @@ export const JCS_VECTORS: JcsVector[] = [
   {
     name: 'signingInput record.put 结构',
     value: {
-      domain: 'dbclient/sync/v1',
+      domain: 'devbelt/sync/v1',
       action: 'record.put',
       userId: '7',
       keyEpoch: '1',
@@ -40,12 +40,12 @@ export const JCS_VECTORS: JcsVector[] = [
       requestDigest: 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
     },
     expected:
-      '{"action":"record.put","baseVersion":"0","domain":"dbclient/sync/v1","keyEpoch":"1","mutationId":"AAAAAAAAAAAAAAAAAAAAAA","recordId":"rcid","requestDigest":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB","userId":"7"}',
+      '{"action":"record.put","baseVersion":"0","domain":"devbelt/sync/v1","keyEpoch":"1","mutationId":"AAAAAAAAAAAAAAAAAAAAAA","recordId":"rcid","requestDigest":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB","userId":"7"}',
   },
   {
     name: 'signingInput state.change-key 结构',
     value: {
-      domain: 'dbclient/sync/v1',
+      domain: 'devbelt/sync/v1',
       action: 'state.change-key',
       userId: '7',
       keyEpoch: '1',
@@ -54,7 +54,7 @@ export const JCS_VECTORS: JcsVector[] = [
       requestDigest: 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
     },
     expected:
-      '{"action":"state.change-key","domain":"dbclient/sync/v1","expectedStateVersion":"3","keyEpoch":"1","mutationId":"AAAAAAAAAAAAAAAAAAAAAA","requestDigest":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB","userId":"7"}',
+      '{"action":"state.change-key","domain":"devbelt/sync/v1","expectedStateVersion":"3","keyEpoch":"1","mutationId":"AAAAAAAAAAAAAAAAAAAAAA","requestDigest":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB","userId":"7"}',
   },
 ];
 

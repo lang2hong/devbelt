@@ -15,8 +15,8 @@ vi.mock('undici', () => ({
 
 import { AuthService } from '../../src/sync/authService';
 
-const ACCESS_KEY = 'dbclient.auth.accessToken';
-const ENTITLEMENT_KEY = 'dbclient.sync.cachedEntitlement';
+const ACCESS_KEY = 'devbelt.auth.accessToken';
+const ENTITLEMENT_KEY = 'devbelt.sync.cachedEntitlement';
 
 function makeSecrets() {
   const values = new Map<string, string>();

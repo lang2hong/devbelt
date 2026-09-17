@@ -57,7 +57,7 @@ export class MetadataNodeBuilder {
         node.description = t.comment;
       }
       node.tooltip = formatTableTooltip(t);
-      node.command = { command: 'dbclient.previewTable', title: 'Preview', arguments: [node] };
+      node.command = { command: 'devbelt.previewTable', title: 'Preview', arguments: [node] };
       return node;
     });
   }
@@ -75,7 +75,7 @@ export class MetadataNodeBuilder {
         undefined,
         database,
       );
-      node.command = { command: 'dbclient.previewView', title: 'Preview', arguments: [node] };
+      node.command = { command: 'devbelt.previewView', title: 'Preview', arguments: [node] };
       return node;
     });
   }
@@ -94,7 +94,7 @@ export class MetadataNodeBuilder {
         database,
         r.type,
       );
-      node.command = { command: 'dbclient.openRoutine', title: 'Open', arguments: [node] };
+      node.command = { command: 'devbelt.openRoutine', title: 'Open', arguments: [node] };
       return node;
     });
   }
@@ -112,7 +112,7 @@ export class MetadataNodeBuilder {
         undefined,
         database,
       );
-      node.command = { command: 'dbclient.openEvent', title: 'Open', arguments: [node] };
+      node.command = { command: 'devbelt.openEvent', title: 'Open', arguments: [node] };
       return node;
     });
   }

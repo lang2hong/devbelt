@@ -171,7 +171,7 @@ describe('RecordMapStore', () => {
   });
 
   it('read 对损坏形状 fail-closed', () => {
-    const key = 'dbclient.sync.recordMap.7.1';
+    const key = 'devbelt.sync.recordMap.7.1';
 
     const nonObject = new RecordMapStore(makeMemento({ [key]: 'garbage' }), '7', '1');
     expect(() => nonObject.getByRecordId('A'.repeat(22))).toThrowError(/corrupt record map/);
@@ -186,7 +186,7 @@ describe('RecordMapStore', () => {
   });
 
   it('read 对语义非法值与反向索引错配 fail-closed', () => {
-    const key = 'dbclient.sync.recordMap.7.1';
+    const key = 'devbelt.sync.recordMap.7.1';
     const rid = 'A'.repeat(22);
 
     const orgConn = new RecordMapStore(makeMemento({
@@ -206,7 +206,7 @@ describe('RecordMapStore', () => {
   });
 
   it('缺失 status 抛错（fail-closed）', () => {
-    const key = 'dbclient.sync.recordMap.7.1';
+    const key = 'devbelt.sync.recordMap.7.1';
     const rid = 'A'.repeat(22);
     const s = new RecordMapStore(makeMemento({
       [key]: { byRecordId: { [rid]: { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 42 } }, byLocal: { 'connection:c-1': rid } },

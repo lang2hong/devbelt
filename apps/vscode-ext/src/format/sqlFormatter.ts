@@ -6,7 +6,7 @@ import { DatabaseType } from '@devkit/db-core';
  * SQL 格式化：按数据库方言调用 sql-formatter，indent/keywordCase 可配置。
  */
 export function formatSql(sql: string, dbType?: DatabaseType): string {
-  const cfg = vscode.workspace.getConfiguration('dbclient.format');
+  const cfg = vscode.workspace.getConfiguration('devbelt.format');
   const tabWidth = cfg.get<number>('indent', 2);
   const keywordCase = cfg.get<'preserve' | 'upper' | 'lower'>('keywordCase', 'upper');
   let dialect: SqlLanguage = 'sql';

@@ -20,7 +20,7 @@ function refreshFlow(onRefresh: (n: number) => Promise<Response>) {
   return { fetchImpl, count };
 }
 
-const cookie = () => 'a=1; __Host-dbclient_csrf=tok';
+const cookie = () => 'a=1; __Host-devbelt_csrf=tok';
 
 beforeEach(() => setAccessToken(null));
 afterEach(() => vi.unstubAllGlobals());

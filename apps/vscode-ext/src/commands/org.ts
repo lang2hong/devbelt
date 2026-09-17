@@ -72,11 +72,11 @@ export function registerOrgCommands(deps: OrgDeps): void {
   const refreshEditorContext = (): void => {
     const active = vscode.window.activeTextEditor?.document.uri.toString();
     const state = active ? bindings.get(active) : undefined;
-    void vscode.commands.executeCommand('setContext', 'dbclient.orgResourceEditor', state?.kind === 'resource');
-    void vscode.commands.executeCommand('setContext', 'dbclient.orgSessionEditor', state?.kind === 'session');
+    void vscode.commands.executeCommand('setContext', 'devbelt.orgResourceEditor', state?.kind === 'resource');
+    void vscode.commands.executeCommand('setContext', 'devbelt.orgSessionEditor', state?.kind === 'session');
     void vscode.commands.executeCommand(
       'setContext',
-      'dbclient.orgResourceEditorRole',
+      'devbelt.orgResourceEditorRole',
       state?.kind === 'resource' ? state.role : undefined,
     );
   };
@@ -91,15 +91,15 @@ export function registerOrgCommands(deps: OrgDeps): void {
     }),
   );
 
-  sub('dbclient.org.refresh', () => tree.refresh());
+  sub('devbelt.org.refresh', () => tree.refresh());
 
   // 组织视图空态「创建或加入组织」→ 打开 Web 控制台组织页（浏览器）。
-  sub('dbclient.org.openConsole', () => {
+  sub('devbelt.org.openConsole', () => {
     void vscode.env.openExternal(vscode.Uri.parse(`${DEFAULT_SERVER_URL}/db/organizations`));
   });
 
   // ── 连接模板（核心：模板 content + 本地凭据映射）──
-  sub('dbclient.org.connectTemplate', async (node: OrgTreeNode) => {
+  sub('devbelt.org.connectTemplate', async (node: OrgTreeNode) => {
     const orgId = node?.orgId;
     const resource = node?.resource;
     if (!orgId || !resource) return;
@@ -168,7 +168,7 @@ export function registerOrgCommands(deps: OrgDeps): void {
   });
 
   // ── 运行组织连接模板会话上的 SQL ──
-  sub('dbclient.org.runQuery', async () => {
+  sub('devbelt.org.runQuery', async () => {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
     const state = bindings.get(editor.document.uri.toString());
@@ -181,7 +181,7 @@ export function registerOrgCommands(deps: OrgDeps): void {
   });
 
   // ── 打开资源（query → SQL 编辑器；template → JSON 只读）──
-  sub('dbclient.org.openResource', async (node: OrgTreeNode) => {
+  sub('devbelt.org.openResource', async (node: OrgTreeNode) => {
     const orgId = node?.orgId;
     const resource = node?.resource;
     if (!orgId || !resource) return;
@@ -213,7 +213,7 @@ export function registerOrgCommands(deps: OrgDeps): void {
   });
 
   // ── 新建 query 资源 ──
-  sub('dbclient.org.newQuery', async (node: OrgTreeNode) => {
+  sub('devbelt.org.newQuery', async (node: OrgTreeNode) => {
     const pickedOrg = node?.orgId ? undefined : await pickOrgId(workspace);
     const orgId = node?.orgId ?? pickedOrg?.orgId;
     if (!orgId) return;
@@ -240,7 +240,7 @@ export function registerOrgCommands(deps: OrgDeps): void {
   });
 
   // ── 保存资源（create/update；409 冲突弹三选）──
-  sub('dbclient.org.saveResource', async () => {
+  sub('devbelt.org.saveResource', async () => {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
     const state = bindings.get(editor.document.uri.toString());
@@ -304,7 +304,7 @@ export function registerOrgCommands(deps: OrgDeps): void {
   });
 
   // ── 删除资源 ──
-  sub('dbclient.org.deleteResource', async (node: OrgTreeNode) => {
+  sub('devbelt.org.deleteResource', async (node: OrgTreeNode) => {
     const orgId = node?.orgId;
     const resource = node?.resource;
     if (!orgId || !resource) return;
@@ -315,7 +315,7 @@ export function registerOrgCommands(deps: OrgDeps): void {
   });
 
   // ── 新建目录 ──
-  sub('dbclient.org.newFolder', async (node: OrgTreeNode) => {
+  sub('devbelt.org.newFolder', async (node: OrgTreeNode) => {
     const orgId = node?.orgId ?? (await pickOrgId(workspace))?.orgId;
     if (!orgId) return;
     const name = await vscode.window.showInputBox({ prompt: l10n('org.folderNamePrompt') });
@@ -325,7 +325,7 @@ export function registerOrgCommands(deps: OrgDeps): void {
   });
 
   // ── 删除目录 ──
-  sub('dbclient.org.deleteFolder', async (node: OrgTreeNode) => {
+  sub('devbelt.org.deleteFolder', async (node: OrgTreeNode) => {
     const orgId = node?.orgId;
     const folderId = node?.folderId;
     if (!orgId || !folderId) return;

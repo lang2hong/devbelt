@@ -7,7 +7,7 @@ import { dialectScanOptions } from '../utils/sqlDialectOptions';
  * SQL CodeLens 提供者。
  *
  * 在每段 SQL 语句（分号分隔）上方显示 "▶ Run" 按钮。
- * 点击后触发 dbclient.runStatement 命令执行对应 SQL 段。
+ * 点击后触发 devbelt.runStatement 命令执行对应 SQL 段。
  *
  * 语句切分复用 `utils/sql.splitSqlWithRanges`，且必须传入与执行侧一致的方言
  * 选项：若 CodeLens 用默认（非 MySQL）切分，MySQL 文档里 `SELECT 1 # note; DROP`
@@ -30,7 +30,7 @@ export class SqlCodeLensProvider implements vscode.CodeLensProvider {
       lenses.push(
         new vscode.CodeLens(range, {
           title: '$(play) Run SQL',
-          command: 'dbclient.runStatement',
+          command: 'devbelt.runStatement',
           arguments: [seg.sql],
         }),
       );

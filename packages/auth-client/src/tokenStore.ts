@@ -7,7 +7,7 @@
  * 环境回退模块内存。
  */
 
-const KEY = 'dbclient.console.accessToken';
+const KEY = 'devbelt.console.accessToken';
 let memoryToken: string | null = null;
 
 function storage(): Storage | null {

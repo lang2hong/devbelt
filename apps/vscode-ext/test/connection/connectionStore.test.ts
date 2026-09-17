@@ -10,7 +10,7 @@ vi.mock('vscode', () => ({
 }));
 
 function createMemento(data: ConnectionTreeData) {
-  const values = new Map<string, unknown>([['dbclient.connections', data]]);
+  const values = new Map<string, unknown>([['devbelt.connections', data]]);
   return {
     get<T>(key: string): T | undefined {
       return values.get(key) as T | undefined;
@@ -46,8 +46,8 @@ describe('ConnectionStore sync model', () => {
 
     await store.init();
 
-    expect(memento.get<ConnectionTreeData>('dbclient.connections')!.connections[0]).not.toHaveProperty('password');
-    expect(await secrets.get('dbclient.connection.primary.password')).toBe('db-secret');
+    expect(memento.get<ConnectionTreeData>('devbelt.connections')!.connections[0]).not.toHaveProperty('password');
+    expect(await secrets.get('devbelt.connection.primary.password')).toBe('db-secret');
     expect(store.get('primary')!.password).toBe('db-secret');
   });
 
@@ -69,7 +69,7 @@ it('clears an existing password when saving an empty value', async () => {
 
     await store.save(conn({ password: '' }));
 
-    expect(await secrets.get('dbclient.connection.primary.password')).toBeUndefined();
+    expect(await secrets.get('devbelt.connection.primary.password')).toBeUndefined();
     expect(store.get('primary')!.password).toBeUndefined();
   });
 });
@@ -172,8 +172,8 @@ describe('ConnectionStore.removeGroup', () => {
     expect(data.connections.find((c) => c.id === 'c2')!.groupId).toBeUndefined();
     expect(data.connections.find((c) => c.id === 'c3')!.deleted).toBe(false);
     // 凭据保留（连接未被删除）
-    expect(await secrets.get('dbclient.connection.c1.password')).toBe('p1');
-    expect(await secrets.get('dbclient.connection.c2.password')).toBe('p2');
+    expect(await secrets.get('devbelt.connection.c1.password')).toBe('p1');
+    expect(await secrets.get('devbelt.connection.c2.password')).toBe('p2');
     expect(store.getVisibleTreeData().connections.map((c) => c.id).sort()).toEqual(['c1', 'c2', 'c3']);
   });
 });

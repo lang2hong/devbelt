@@ -90,7 +90,7 @@ export type { QueryFolder } from './queryStore';
  * 密码存于 SecretStorage，同步时随 E2EE payload 一并materialize/还原。
  */
 export class ConnectionStore {
-  private static readonly KEY = 'dbclient.connections';
+  private static readonly KEY = 'devbelt.connections';
   static readonly SENSITIVE_FIELDS = ['password', 'sshPassword', 'sshPassphrase'] as const;
   private readonly secretCache = new Map<string, string>();
   private readonly queryStore: QueryStore;
@@ -367,7 +367,7 @@ export class ConnectionStore {
   }
 
   private secretKey(id: string, field: typeof ConnectionStore.SENSITIVE_FIELDS[number]): string {
-    return `dbclient.connection.${id}.${field}`;
+    return `devbelt.connection.${id}.${field}`;
   }
 
   private async clearSecrets(id: string): Promise<void> {

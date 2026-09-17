@@ -44,7 +44,7 @@ const STRING_FIELDS = [
 const BOOL_FIELDS = ['useConnectionString'] as const;
 
 export class ConnectionPathOverrideStore {
-  private static readonly KEY = 'dbclient.connectionPathOverrides';
+  private static readonly KEY = 'devbelt.connectionPathOverrides';
 
   constructor(private readonly memento: MementoLike) {}
 

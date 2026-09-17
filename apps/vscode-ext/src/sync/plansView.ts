@@ -20,7 +20,7 @@ export class PlansView extends BaseWebView {
   private initSent = false;
 
   private constructor(private readonly auth: AuthService) {
-    super('dbclient.plans', l10n('plan.title'));
+    super('devbelt.plans', l10n('plan.title'));
   }
 
   static open(auth: AuthService): void {

@@ -47,7 +47,7 @@ export class DashboardView extends BaseWebView {
     private readonly conn: SavedConnection,
     private readonly manager: ConnectionManager,
   ) {
-    super('dbclient.dashboard', `Dashboard @ ${conn.name || conn.host}`);
+    super('devbelt.dashboard', `Dashboard @ ${conn.name || conn.host}`);
   }
 
   static init(extensionUri: import('vscode').Uri): void { BaseWebView.init(extensionUri); }

@@ -16,7 +16,7 @@ export class PoolStatusView extends BaseWebView {
   private timer?: ReturnType<typeof setInterval>;
 
   private constructor(private readonly manager: ConnectionManager) {
-    super('dbclient.poolStatus', 'Connection Pool');
+    super('devbelt.poolStatus', 'Connection Pool');
   }
 
   static open(manager: ConnectionManager): void {

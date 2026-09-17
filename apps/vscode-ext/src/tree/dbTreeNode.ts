@@ -90,7 +90,7 @@ export class DbTreeNode extends TreeItem {
     } else {
       base = kind;
     }
-    // 数据库类型编进 contextValue，而不是靠 `setContext('dbclient.dbType')`。
+    // 数据库类型编进 contextValue，而不是靠 `setContext('devbelt.dbType')`。
     //
     // 那个键由树的「选中变化」事件异步写入，右键时可能仍是上一个节点的值：
     // 在 SQLite 表上会看到 MySQL 专属命令，或该出现的命令反而不出现。

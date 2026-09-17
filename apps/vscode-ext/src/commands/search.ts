@@ -15,7 +15,7 @@ interface SearchHit {
 type SearchPickItem = vscode.QuickPickItem & { hit: SearchHit };
 
 export function registerSearchCommands(deps: Deps, sub: Sub): void {
-  sub('dbclient.searchObjects', async () => {
+  sub('devbelt.searchObjects', async () => {
     const openIds = deps.treeProvider.getOpenConnIds();
     if (!openIds.length) {
       vscode.window.showInformationMessage(l10n('cmd.noConnection'));

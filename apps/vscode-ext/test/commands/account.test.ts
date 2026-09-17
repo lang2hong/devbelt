@@ -56,7 +56,7 @@ beforeEach(() => {
 describe('account commands', () => {
   it('openConsole opens the current user console page', async () => {
     const handlers = register(makeDeps());
-    await handlers.get('dbclient.openConsole')!();
+    await handlers.get('devbelt.openConsole')!();
     expect(mocks.env.openExternal).toHaveBeenCalledTimes(1);
     const url = String((mocks.env.openExternal as any).mock.calls[0][0]);
     expect(url).toContain('/db/account');

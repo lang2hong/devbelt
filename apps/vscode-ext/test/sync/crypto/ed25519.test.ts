@@ -26,7 +26,7 @@ describe('ed25519', () => {
   it('sign → verify roundtrip', () => {
     const seed = hx(SEED_HEX);
     const kp = deriveEd25519KeyPair(seed);
-    const msg = new TextEncoder().encode('hello dbclient sync');
+    const msg = new TextEncoder().encode('hello devbelt sync');
     const sig = signEd25519(msg, seed);
     expect(sig.length).toBe(ED25519_SIGNATURE_BYTES);
     expect(verifyEd25519(sig, msg, kp.publicKey)).toBe(true);

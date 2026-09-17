@@ -60,7 +60,7 @@ export interface PaymentGateway {
 }
 
 /** 内存 stub 的 HMAC 密钥（仅测试用）。 */
-const MEMORY_GATEWAY_KEY = 'dbclient.memory-payment-gateway.test-only';
+const MEMORY_GATEWAY_KEY = 'devbelt.memory-payment-gateway.test-only';
 
 /** 内存 stub 回调签名：HMAC-SHA256 over 原始回调字节（供测试构造合法回调）。 */
 export function signMemoryCallback(rawBody: Buffer): string {

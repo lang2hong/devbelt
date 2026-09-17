@@ -13,7 +13,7 @@ export class DataDiffView extends BaseWebView {
     private readonly targetDb: string,
     private readonly manager: ConnectionManager,
   ) {
-    super('dbclient.dataDiff', `Data Diff: ${sourceDb} → ${targetDb}`);
+    super('devbelt.dataDiff', `Data Diff: ${sourceDb} → ${targetDb}`);
   }
 
   static init(extensionUri: import('vscode').Uri): void { BaseWebView.init(extensionUri); }

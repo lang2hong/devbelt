@@ -8,7 +8,7 @@ import { en, zh, type MessageCatalog } from './catalog';
  * 这里只负责「当前该用哪种语言」以及取词。
  *
  * 语言解析优先级（从高到低）：
- *  1. 用户显式设置 dbclient.language = zh / en（覆盖）
+ *  1. 用户显式设置 devbelt.language = zh / en（覆盖）
  *  2. VSCode 界面语言（默认，auto）
  *  3. 兜底英文
  *
@@ -18,7 +18,7 @@ import { en, zh, type MessageCatalog } from './catalog';
  */
 
 /** 语言设置项 id 与取值 */
-export const LANGUAGE_CONFIG_KEY = 'dbclient.language';
+export const LANGUAGE_CONFIG_KEY = 'devbelt.language';
 export type LanguageSetting = 'auto' | 'zh' | 'en';
 
 export { en, zh };

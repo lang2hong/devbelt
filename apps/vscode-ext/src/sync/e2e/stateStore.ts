@@ -22,7 +22,7 @@ export interface MementoLike {
 }
 
 export class StateStore {
-  private static readonly KEY_PREFIX = 'dbclient.sync.state';
+  private static readonly KEY_PREFIX = 'devbelt.sync.state';
 
   private readonly key: string;
 

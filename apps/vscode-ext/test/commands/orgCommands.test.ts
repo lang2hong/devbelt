@@ -106,7 +106,7 @@ function installEditorMocks(): void {
   mocks.window.activeTextEditor = undefined;
 }
 
-describe('dbclient.org.connectTemplate 行为', () => {
+describe('devbelt.org.connectTemplate 行为', () => {
   let workspace: any;
   let manager: any;
   let vault: any;
@@ -149,7 +149,7 @@ describe('dbclient.org.connectTemplate 行为', () => {
     });
     mocks.window.showWarningMessage.mockResolvedValue(undefined);
 
-    await handlers.get('dbclient.org.connectTemplate')!(tplNode());
+    await handlers.get('devbelt.org.connectTemplate')!(tplNode());
 
     expect(mocks.window.showWarningMessage).toHaveBeenCalled();
     expect(vault.get).not.toHaveBeenCalled();
@@ -164,7 +164,7 @@ describe('dbclient.org.connectTemplate 行为', () => {
     mocks.window.showInputBox.mockResolvedValue('u');
     mocks.window.showOpenDialog.mockResolvedValue(undefined);
 
-    await handlers.get('dbclient.org.connectTemplate')!(tplNode());
+    await handlers.get('devbelt.org.connectTemplate')!(tplNode());
 
     expect(vault.set).not.toHaveBeenCalled();
     expect(manager.connect).not.toHaveBeenCalled();
@@ -178,14 +178,14 @@ describe('dbclient.org.connectTemplate 行为', () => {
     vault.get.mockResolvedValue({ password: 'p' });
     manager.connect.mockRejectedValue(new Error('auth failed'));
 
-    await handlers.get('dbclient.org.connectTemplate')!(tplNode());
+    await handlers.get('devbelt.org.connectTemplate')!(tplNode());
 
     expect(vault.delete).toHaveBeenCalledWith('o1', 'r1');
     expect(mocks.window.showErrorMessage).toHaveBeenCalled();
   });
 });
 
-describe('dbclient.org.saveResource 409 冲突行为', () => {
+describe('devbelt.org.saveResource 409 冲突行为', () => {
   let workspace: any;
   let vault: any;
   let handlers: Map<string, (...a: any[]) => any>;
@@ -216,7 +216,7 @@ describe('dbclient.org.saveResource 409 冲突行为', () => {
 
   async function openQuery(role: 'admin' | 'member' = 'admin'): Promise<void> {
     workspace.getResource.mockResolvedValueOnce({ ...querySummary, content: { sql: 'select 1' } });
-    await handlers.get('dbclient.org.openResource')!(queryNode(role));
+    await handlers.get('devbelt.org.openResource')!(queryNode(role));
   }
 
   it('Overwrite：以 currentVersion 为重发 baseVersion', async () => {
@@ -226,7 +226,7 @@ describe('dbclient.org.saveResource 409 冲突行为', () => {
       .mockResolvedValueOnce({ resourceId: 'r1', version: 10 });
     mocks.window.showWarningMessage.mockResolvedValue('Overwrite');
 
-    await handlers.get('dbclient.org.saveResource')!();
+    await handlers.get('devbelt.org.saveResource')!();
 
     expect(workspace.updateResource).toHaveBeenCalledTimes(2);
     expect(workspace.updateResource.mock.calls[1][2].baseVersion).toBe(9);
@@ -238,7 +238,7 @@ describe('dbclient.org.saveResource 409 冲突行为', () => {
     workspace.updateResource.mockRejectedValue(new OrgApiError(409, 'RESOURCE_VERSION_CONFLICT', 'stale', 9));
     mocks.window.showWarningMessage.mockResolvedValue(undefined);
 
-    await handlers.get('dbclient.org.saveResource')!();
+    await handlers.get('devbelt.org.saveResource')!();
 
     expect(workspace.updateResource).toHaveBeenCalledTimes(1);
   });
@@ -249,7 +249,7 @@ describe('dbclient.org.saveResource 409 冲突行为', () => {
     workspace.getResource.mockResolvedValue({ ...querySummary, version: 10, content: { sql: 'select 999' } });
     mocks.window.showWarningMessage.mockResolvedValue('Refresh');
 
-    await handlers.get('dbclient.org.saveResource')!();
+    await handlers.get('devbelt.org.saveResource')!();
 
     expect(workspace.getResource).toHaveBeenCalledWith('o1', 'r1', true);
     expect(mocks.window.activeTextEditor.document.getText()).toBe('select 999');
@@ -260,7 +260,7 @@ describe('dbclient.org.saveResource 409 冲突行为', () => {
     workspace.updateResource.mockRejectedValue(new OrgApiError(409, 'RESOURCE_VERSION_CONFLICT', 'stale', 9));
     mocks.window.showWarningMessage.mockResolvedValue('Overwrite');
 
-    await expect(handlers.get('dbclient.org.saveResource')!()).resolves.toBeUndefined();
+    await expect(handlers.get('devbelt.org.saveResource')!()).resolves.toBeUndefined();
     expect(mocks.window.showErrorMessage).toHaveBeenCalled();
   });
 
@@ -270,7 +270,7 @@ describe('dbclient.org.saveResource 409 冲突行为', () => {
     workspace.getResource.mockRejectedValue(new OrgApiError(403, 'FORBIDDEN', 'denied'));
     mocks.window.showWarningMessage.mockResolvedValue('Refresh');
 
-    await expect(handlers.get('dbclient.org.saveResource')!()).resolves.toBeUndefined();
+    await expect(handlers.get('devbelt.org.saveResource')!()).resolves.toBeUndefined();
     expect(mocks.window.showErrorMessage).toHaveBeenCalled();
   });
 });

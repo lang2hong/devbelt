@@ -3,7 +3,7 @@
  *
  * 三段硬保证：
  *  1. 只写 vscode.SecretStorage（个人密钥存储），绝不写个人 ConnectionStore；
- *  2. 键为 `dbclient.org.credential.<organizationId>.<resourceId>`，不含服务器 content；
+ *  2. 键为 `devbelt.org.credential.<organizationId>.<resourceId>`，不含服务器 content；
  *  3. 凭据只用于本地建连（材料化为临时 ConnectionConfig），绝不进任何 HTTP 请求体 ——
  *     该保证由 OrgClient 的结构保证（发送字段不含凭据），见 client.ts。
  */
@@ -24,8 +24,8 @@ export interface OrgLocalCredential {
   caPath?: string;
 }
 
-const KEY_PREFIX = 'dbclient.org.credential';
-const INDEX_KEY = 'dbclient.org.credential.index';
+const KEY_PREFIX = 'devbelt.org.credential';
+const INDEX_KEY = 'devbelt.org.credential.index';
 
 export class CredentialVault {
   constructor(

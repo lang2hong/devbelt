@@ -89,7 +89,7 @@ describe('ConnectionPathOverrideStore', () => {
 
   it('allowlist 过滤：get 返回时丢弃非法字段', async () => {
     const m = makeMemento();
-    await m.update('dbclient.connectionPathOverrides', {
+    await m.update('devbelt.connectionPathOverrides', {
       'c-1': { dbPath: '/ok', bogus: 42, dbType: 'PG', connectionUrl: '' },
     });
     const store = new ConnectionPathOverrideStore(m);

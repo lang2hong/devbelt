@@ -59,7 +59,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // SSH 主机密钥裁决：tofu（默认）对未知主机弹指纹确认并写入插件自管 known_hosts；
   // strict 只信任既有 known_hosts。密钥不匹配/revoked 由 gate 硬失败。
   SshTunnel.configureHostKeyGate({
-    policy: () => (vscode.workspace.getConfiguration('dbclient').get<string>('ssh.hostKeyPolicy') === 'strict' ? 'strict' : 'tofu'),
+    policy: () => (vscode.workspace.getConfiguration('devbelt').get<string>('ssh.hostKeyPolicy') === 'strict' ? 'strict' : 'tofu'),
     storeFile: vscode.Uri.joinPath(context.globalStorageUri, 'ssh_known_hosts').fsPath,
     prompt: async (host, port, fingerprint, keyType) => {
       const target = port === 22 ? host : `${host}:${port}`;
@@ -88,7 +88,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // AuthService 订阅了 SecretStorage 变更（多窗口 token 同步），必须随扩展一起释放
   context.subscriptions.push(auth);
   await auth.init();
-  // package.json 的 commandPalette 用 dbclient.loggedIn 控制 login/logout/account/sessions
+  // package.json 的 commandPalette 用 devbelt.loggedIn 控制 login/logout/account/sessions
   // 的可见性。此前从未及时 setContext，导致 logout/account/sessions 永久不可见、login 永久可见；
   // AuthEvent 订阅（下方）在登录/登出后刷新此上下文保持同步。
   void syncLoggedInContext(auth);
@@ -116,7 +116,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.workspace.onDidCloseTextDocument((document) => connCtx.clearForDoc(document.uri.toString())),
   );
 
-  const treeView = vscode.window.createTreeView('dbclient.explorer', {
+  const treeView = vscode.window.createTreeView('devbelt.explorer', {
     treeDataProvider: treeProvider,
     showCollapseAll: true,
   });
@@ -127,28 +127,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const orgVault = new CredentialVault(context.secrets, context.globalState);
   const orgWorkspace = new OrgWorkspace(orgClient, orgVault);
   const orgTreeProvider = new OrgTreeDataProvider(orgWorkspace);
-  const orgTreeView = vscode.window.createTreeView('dbclient.explorer.organization', {
+  const orgTreeView = vscode.window.createTreeView('devbelt.explorer.organization', {
     treeDataProvider: orgTreeProvider,
     showCollapseAll: true,
   });
 
-  // 当前 workspace 角色 → dbclient.orgRole context（驱动 commandPalette / view-title 门控）。
+  // 当前 workspace 角色 → devbelt.orgRole context（驱动 commandPalette / view-title 门控）。
   const syncOrgRoleContext = (): void => {
     const ws = orgWorkspace.workspace;
     const role = ws.kind === 'organization' ? ws.role : undefined;
-    void vscode.commands.executeCommand('setContext', 'dbclient.orgRole', role);
+    void vscode.commands.executeCommand('setContext', 'devbelt.orgRole', role);
   };
 
   context.subscriptions.push(
     orgTreeView,
-    // 登录/登出 → 刷新 dbclient.loggedIn；登录 → 选默认组织；登出 → 清认证/凭据/role。
+    // 登录/登出 → 刷新 devbelt.loggedIn；登录 → 选默认组织；登出 → 清认证/凭据/role。
     eventBus.subscribe(AuthEvent, async (e) => {
       if (e.kind === 'login') {
         await orgWorkspace.selectDefaultOrg();
       } else {
         // 登出：等待凭据清理完成后才宣告完成，保证「登出即清空」。
         await orgWorkspace.clearAuth();
-        void vscode.commands.executeCommand('setContext', 'dbclient.orgRole', undefined);
+        void vscode.commands.executeCommand('setContext', 'devbelt.orgRole', undefined);
         orgTreeProvider.refresh();
       }
       void syncLoggedInContext(auth);
@@ -160,7 +160,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // 会话过期：弹「登录已过期」并清 role context（主动 logout 不经此路径）。
     orgWorkspace.onAuthFailure(() => {
       vscode.window.showErrorMessage(l10n('org.error.authExpired'));
-      void vscode.commands.executeCommand('setContext', 'dbclient.orgRole', undefined);
+      void vscode.commands.executeCommand('setContext', 'devbelt.orgRole', undefined);
     }),
     // 点击树中任一带 orgId+role 的节点 → 以 silent 方式同步该组织为当前工作组织，
     // 使 commandPalette/view-title 的 role 与当前工作组织一致；不触发 changed（避免全树
@@ -180,15 +180,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 阶段 B 才接入初始化/解锁命令；此处只挂生命周期：logout → 丢弃 session，dispose → 清理。
   // ===== B2：状态栏 + 立即同步命令 + 窗口聚焦触发 =====
   const syncStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-  syncStatusBar.command = 'dbclient.syncNow';
+  syncStatusBar.command = 'devbelt.syncNow';
   syncStatusBar.hide();
   context.subscriptions.push(syncStatusBar);
 
   const setSyncReady = (ready: boolean): void => {
-    void vscode.commands.executeCommand('setContext', 'dbclient.sync.ready', ready);
+    void vscode.commands.executeCommand('setContext', 'devbelt.sync.ready', ready);
   };
   const setSyncUnlocked = (unlocked: boolean): void => {
-    void vscode.commands.executeCommand('setContext', 'dbclient.sync.unlocked', unlocked);
+    void vscode.commands.executeCommand('setContext', 'devbelt.sync.unlocked', unlocked);
   };
 
   // 依赖 syncFactory，但只在 onSyncResult / 聚焦 / logout 等异步回调中被调用，彼时已构造完毕。
@@ -208,7 +208,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (auth.isLoggedIn()) {
         setSyncReady(false);
         setSyncUnlocked(false);
-        syncStatusBar.command = 'dbclient.syncEntry';
+        syncStatusBar.command = 'devbelt.syncEntry';
         syncStatusBar.text = `$(sync) ${l10n('sync.statusLocked')}`;
         syncStatusBar.tooltip = l10n('sync.statusLocked');
         syncStatusBar.show();
@@ -223,16 +223,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     setSyncUnlocked(session?.isUnlocked ?? false);
     syncStatusBar.show();
     const reason = session!.lastError ?? session!.lastRun?.reason;
-    syncStatusBar.command = 'dbclient.syncNow';
+    syncStatusBar.command = 'devbelt.syncNow';
     switch (status) {
       case 'conflict':
-        syncStatusBar.command = 'dbclient.resolveConflicts';
+        syncStatusBar.command = 'devbelt.resolveConflicts';
         syncStatusBar.text = `$(warning) ${l10n('sync.statusConflict', { count: session!.listConflicts().length })}`;
         syncStatusBar.tooltip = l10n('sync.statusConflictTooltip');
         break;
       case 'stalled':
         if (session!.epochStale) {
-          syncStatusBar.command = 'dbclient.unlockPersonalSync';
+          syncStatusBar.command = 'devbelt.unlockPersonalSync';
           syncStatusBar.text = `$(warning) ${l10n('sync.statusLabel')}`;
           syncStatusBar.tooltip = l10n('sync.statusEpochStale');
           break;
@@ -276,9 +276,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     refreshSyncStatusBar();
   });
   context.subscriptions.push(onAuthChange);
-  // 立即同步命令（解锁态才可用，when=dbclient.sync.ready）+ 窗口聚焦补同步。
+  // 立即同步命令（解锁态才可用，when=devbelt.sync.ready）+ 窗口聚焦补同步。
   context.subscriptions.push(
-    vscode.commands.registerCommand('dbclient.syncNow', () => {
+    vscode.commands.registerCommand('devbelt.syncNow', () => {
       const session = syncFactory.current;
       if (session?.isUnlocked) session.scheduleNow();
     }),
@@ -286,7 +286,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (!e.focused) return;
       const session = syncFactory.current;
       // stalled 后跳过自动聚焦同步，避免冲突/终止性错误在切窗时被反复自动重发；
-      // 用户仍可通过 dbclient.syncNow 手动重试。
+      // 用户仍可通过 devbelt.syncNow 手动重试。
       if (!session?.isUnlocked || session.stalled) return;
       session.scheduleNow();
     }),
@@ -299,7 +299,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   registerSyncLifecycleCommands(context, auth, syncFactory);
   // 切片 5：sync-reset 深链 UriHandler（浏览器 handoff → 扩展最终 reset）。
   registerSyncResetUriHandler(context, auth, syncFactory);
-  // 这里原先用 onDidChangeSelection 往 `dbclient.dbType` / `dbclient.has*` 写
+  // 这里原先用 onDidChangeSelection 往 `devbelt.dbType` / `devbelt.has*` 写
   // context key，供菜单 when 判断数据库类型。那是竞态的：右键未选中项、或右键
   // 与当前选中项不同时，键里还是上一个节点的值 —— 在 SQLite 表上会看到 MySQL
   // 专属命令，该出现的命令反而不出现。
@@ -317,11 +317,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       new SqlCodeLensProvider((uri) => connCtx.getForDoc(uri)?.conn.dbType),
     ),
     // Terminal 集成
-    vscode.commands.registerCommand('dbclient.openTerminal', (node: any) => {
+    vscode.commands.registerCommand('devbelt.openTerminal', (node: any) => {
       if (node?.conn) TerminalService.open(node.conn, node.database);
     }),
     // 表设计视图
-    vscode.commands.registerCommand('dbclient.designTable', async (node: any) => {
+    vscode.commands.registerCommand('devbelt.designTable', async (node: any) => {
       if (node?.conn && node?.database) {
         const session = await manager.connect(node.conn);
         if (!session.capabilities.operations.includes('getTableDefinition')) {
@@ -333,19 +333,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     // 新建表（webview 表单）：比丢一段 CREATE TABLE 模板到编辑器更直接，
     // 且建完可以接着在同一面板里加列/加索引。
-    vscode.commands.registerCommand('dbclient.newTableDesigner', async (node: any) => {
+    vscode.commands.registerCommand('devbelt.newTableDesigner', async (node: any) => {
       const database = node?.database ?? node?.conn?.database;
       if (!node?.conn || !database) return;
       void TableDesignView.openNew(node.conn, database, manager, () => treeProvider.refreshNode(node));
     }),
     // Server 状态面板
-    vscode.commands.registerCommand('dbclient.serverStatus', (node: any) => {
+    vscode.commands.registerCommand('devbelt.serverStatus', (node: any) => {
       if (node?.conn) {
         StatusView.open(node.conn, manager);
       }
     }),
     // ER 图
-    vscode.commands.registerCommand('dbclient.showERDiagram', (node: any) => {
+    vscode.commands.registerCommand('devbelt.showERDiagram', (node: any) => {
       if (!canUseErDiagram(auth.getCachedEntitlement())) {
         vscode.window.showWarningMessage(l10n('entitlement.erRequired'));
         return;
@@ -355,7 +355,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
     // 数据对比
-    vscode.commands.registerCommand('dbclient.compareData', async (node: any) => {
+    vscode.commands.registerCommand('devbelt.compareData', async (node: any) => {
       if (!node?.conn || !node?.database) return;
       const session = await manager.connect(node.conn);
       const targetDbs = (await session.metadata.getDatabases()).filter((d: string) => d !== node.database);
@@ -371,21 +371,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       void DataDiffView.open(node.conn, node.database, node.conn, target.value, manager);
     }),
     // 性能仪表盘
-    vscode.commands.registerCommand('dbclient.dashboard', (node: any) => {
+    vscode.commands.registerCommand('devbelt.dashboard', (node: any) => {
       if (node?.conn) {
         DashboardView.open(node.conn, manager);
       }
     }),
     // 审计日志
-    vscode.commands.registerCommand('dbclient.showAuditLog', () => {
+    vscode.commands.registerCommand('devbelt.showAuditLog', () => {
       AuditLogView.open(auditLogger);
     }),
     // 连接池状态
-    vscode.commands.registerCommand('dbclient.showPoolStatus', () => {
+    vscode.commands.registerCommand('devbelt.showPoolStatus', () => {
       PoolStatusView.open(manager);
     }),
     // 定时备份
-    vscode.commands.registerCommand('dbclient.scheduleBackup', async (node: any) => {
+    vscode.commands.registerCommand('devbelt.scheduleBackup', async (node: any) => {
       if (!node?.conn || !node?.database) return;
       await configureBackupSchedule(backupScheduler, node.conn.id, node.database);
     }),
@@ -405,13 +405,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 /**
- * 把登录态同步到 `dbclient.loggedIn` 上下文键。
+ * 把登录态同步到 `devbelt.loggedIn` 上下文键。
  *
  * package.json 的 commandPalette 靠它控制 login / logout / account / sessions
  * 四条命令的可见性，登录/登出后必须重新调用，否则命令面板显示的是旧状态。
  */
 export async function syncLoggedInContext(auth: { isLoggedIn(): boolean }): Promise<void> {
-  await vscode.commands.executeCommand('setContext', 'dbclient.loggedIn', auth.isLoggedIn());
+  await vscode.commands.executeCommand('setContext', 'devbelt.loggedIn', auth.isLoggedIn());
 }
 
 /** 定时备份配置向导：已有计划则提供运行/修改/删除，否则询问周期与输出目录 */

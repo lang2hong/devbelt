@@ -24,13 +24,13 @@ function isLoopbackConsoleHost(): boolean {
 }
 
 export const linkFlowCookieName = (): string =>
-  secureCookiesEnabled() ? '__Host-dbclient_link_flow' : 'dev_dblink_flow';
+  secureCookiesEnabled() ? '__Host-devbelt_link_flow' : 'dev_devbelt_link_flow';
 
 export const csrfCookieName = (): string =>
-  secureCookiesEnabled() ? '__Host-dbclient_csrf' : 'dev_dbcsrf';
+  secureCookiesEnabled() ? '__Host-devbelt_csrf' : 'dev_devbelt_csrf';
 
 export const refreshCookieName = (): string =>
-  secureCookiesEnabled() ? '__Host-dbclient_refresh' : 'dev_dbrefresh';
+  secureCookiesEnabled() ? '__Host-devbelt_refresh' : 'dev_devbelt_refresh';
 
 /** 从请求 Cookie 头读取指定 cookie 的值。畸形百分号编码/控制字符一律视为未提供。 */
 export function readCookie(req: FastifyRequest, name: string): string | undefined {

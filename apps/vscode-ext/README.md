@@ -9,11 +9,11 @@
 - 结果编辑、导入导出、表设计、DDL、ER 图和 Schema 对比。
 - 组织 Workspace、共享查询和连接模板。
 
-个人连接同步：底层密码学、协议与运行时/UI 均已实现（`dbclient.syncNow` 等命令已注册），待双设备安装版验证；本地连接不走权益门禁。
+个人连接同步：底层密码学、协议与运行时/UI 均已实现（`devbelt.syncNow` 等命令已注册），待双设备安装版验证；本地连接不走权益门禁。
 
 ## SSH 主机密钥校验
 
-SSH 隧道按 `dbclient.ssh.hostKeyPolicy` 校验服务端主机密钥：
+SSH 隧道按 `devbelt.ssh.hostKeyPolicy` 校验服务端主机密钥：
 
 - `tofu`（默认）：未知主机弹出 **SHA256 指纹**确认，接受后写入插件自管 `known_hosts`，之后静默信任；
 - `strict`：只信任 `known_hosts` 中已有主机，未知主机直接拒绝。

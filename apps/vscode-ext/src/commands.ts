@@ -27,7 +27,7 @@ export function registerCommands(deps: Deps): void {
   registerGroupCommands(deps, sub);
   registerDdlCommands(deps, sub);
   registerSearchCommands(deps, sub);
-  sub('dbclient.explorerMenu', async () => {
+  sub('devbelt.explorerMenu', async () => {
     const items: { label: string; value: string }[] = [
       { label: l10n('cmd.groups'), value: 'addGroup' },
       { label: l10n('cmd.showHistory'), value: 'showHistory' },
@@ -60,19 +60,19 @@ export function registerCommands(deps: Deps): void {
     const picked = await vscode.window.showQuickPick(items, { placeHolder: l10n('cmd.explorerMenu') });
     if (!picked) return;
     const cmd: string | undefined = ({
-      addGroup: 'dbclient.addGroup',
-      showHistory: 'dbclient.showHistory',
-      importConnections: 'dbclient.importConnections',
-      exportConnections: 'dbclient.exportConnections',
-      login: 'dbclient.login',
-      account: 'dbclient.account',
-      sessions: 'dbclient.sessions',
-      plans: 'dbclient.plans',
-      sync: 'dbclient.syncEntry',
-      syncPull: 'dbclient.syncPull',
-      syncPush: 'dbclient.syncPush',
-      openConsole: 'dbclient.openConsole',
-      logout: 'dbclient.logout',
+      addGroup: 'devbelt.addGroup',
+      showHistory: 'devbelt.showHistory',
+      importConnections: 'devbelt.importConnections',
+      exportConnections: 'devbelt.exportConnections',
+      login: 'devbelt.login',
+      account: 'devbelt.account',
+      sessions: 'devbelt.sessions',
+      plans: 'devbelt.plans',
+      sync: 'devbelt.syncEntry',
+      syncPull: 'devbelt.syncPull',
+      syncPush: 'devbelt.syncPush',
+      openConsole: 'devbelt.openConsole',
+      logout: 'devbelt.logout',
     } as Record<string, string>)[picked.value];
     if (cmd) await vscode.commands.executeCommand(cmd);
   });

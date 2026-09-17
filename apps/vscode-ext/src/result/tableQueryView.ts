@@ -52,7 +52,7 @@ export class TableQueryView extends BaseWebView {
     title?: string,
   ) {
     super(
-      'dbclient.tableQuery',
+      'devbelt.tableQuery',
       title ?? (table
         ? `${conn.name || conn.host} › ${database || ''} › ${table}`
         : `Query @ ${conn.name || conn.host}`),

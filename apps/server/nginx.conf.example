@@ -9,7 +9,7 @@
 # 那一段完全由客户端控制 —— 攻击者每个请求换一个伪造 IP 就能绕开所有按 IP
 # 的限流。因此 server 端的 config.ts 直接拒绝 `TRUST_PROXY=true` 启动。
 #
-# 用法：复制到 /etc/nginx/conf.d/dbclient.conf，改掉 server_name 与证书路径。
+# 用法：复制到 /etc/nginx/conf.d/devbelt.conf，改掉 server_name 与证书路径。
 
 upstream dbclient_server {
     # 单实例部署。server 只监听回环地址，不要把 3000 暴露到公网 ——

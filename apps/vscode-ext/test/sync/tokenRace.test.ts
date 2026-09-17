@@ -59,8 +59,8 @@ function createSharedSecrets() {
   };
 }
 
-const REFRESH_KEY = 'dbclient.auth.refreshToken';
-const ACCESS_KEY = 'dbclient.auth.accessToken';
+const REFRESH_KEY = 'devbelt.auth.refreshToken';
+const ACCESS_KEY = 'devbelt.auth.accessToken';
 
 let fetchCalls: Array<{ url: string; refreshToken?: string }> = [];
 const realFetch = globalThis.fetch;

@@ -41,5 +41,5 @@ export class CursorService {
 export function deriveCursorKey(env: NodeJS.ProcessEnv = process.env): Buffer {
   const b64 = (env.TOKEN_SIGNING_KEY_B64 || '').trim();
   if (!b64) throw new Error('TOKEN_SIGNING_KEY_B64 is required to derive the cursor signing key');
-  return createHash('sha256').update(`dbclient:cursor:${b64}`).digest();
+  return createHash('sha256').update(`devbelt:cursor:${b64}`).digest();
 }

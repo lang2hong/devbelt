@@ -16,7 +16,7 @@ export class AuditLogView extends BaseWebView {
   private filter?: AuditAction;
 
   private constructor(private readonly logger: AuditLogger) {
-    super('dbclient.auditLog', 'Audit Log');
+    super('devbelt.auditLog', 'Audit Log');
   }
 
   static open(logger: AuditLogger): void {

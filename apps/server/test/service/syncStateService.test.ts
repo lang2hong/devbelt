@@ -57,7 +57,7 @@ function makeKeys() {
 function signBody(priv: KeyObject, userId: number, action: string, body: Record<string, unknown>) {
   const digest = requestDigestOf(body);
   const signingInput = {
-    domain: 'dbclient/sync/v1', action, userId: String(userId),
+    domain: 'devbelt/sync/v1', action, userId: String(userId),
     keyEpoch: body.keyEpoch, expectedStateVersion: body.expectedStateVersion,
     mutationId: body.mutationId, requestDigest: digest,
   };

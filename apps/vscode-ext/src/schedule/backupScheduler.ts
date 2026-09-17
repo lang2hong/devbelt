@@ -17,7 +17,7 @@ interface ScheduleEntry {
 
 export class BackupScheduler {
   private readonly timers = new Map<string, ReturnType<typeof setInterval>>();
-  private readonly storageKey = 'dbclient.backup.schedules';
+  private readonly storageKey = 'devbelt.backup.schedules';
 
   constructor(
     private readonly manager: ConnectionManager,

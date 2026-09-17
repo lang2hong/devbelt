@@ -23,8 +23,8 @@ describe('cookie security profile', () => {
     process.env.SMTP_BASE_URL = 'http://localhost:5173';
 
     expect(secureCookiesEnabled()).toBe(false);
-    expect(linkFlowCookieName()).toBe('dev_dblink_flow');
-    expect(csrfCookieName()).toBe('dev_dbcsrf');
+    expect(linkFlowCookieName()).toBe('dev_devbelt_link_flow');
+    expect(csrfCookieName()).toBe('dev_devbelt_csrf');
     expect(serializeCookie(linkFlowCookieName(), 'n', { httpOnly: true })).not.toContain('Secure');
   });
 
@@ -33,7 +33,7 @@ describe('cookie security profile', () => {
     process.env.SMTP_BASE_URL = 'http://console.example';
 
     expect(secureCookiesEnabled()).toBe(true);
-    expect(linkFlowCookieName()).toBe('__Host-dbclient_link_flow');
+    expect(linkFlowCookieName()).toBe('__Host-devbelt_link_flow');
     expect(serializeCookie(linkFlowCookieName(), 'n', { httpOnly: true })).toContain('Secure');
     expect(serializeCookie(linkFlowCookieName(), 'n', { httpOnly: true })).toContain('HttpOnly');
   });
@@ -43,8 +43,8 @@ describe('cookie security profile', () => {
     process.env.SMTP_BASE_URL = 'http://localhost:5173';
 
     expect(secureCookiesEnabled()).toBe(true);
-    expect(linkFlowCookieName()).toBe('__Host-dbclient_link_flow');
-    expect(csrfCookieName()).toBe('__Host-dbclient_csrf');
+    expect(linkFlowCookieName()).toBe('__Host-devbelt_link_flow');
+    expect(csrfCookieName()).toBe('__Host-devbelt_csrf');
   });
 });
 describe('readCookie', () => {
