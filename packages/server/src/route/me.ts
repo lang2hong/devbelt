@@ -15,7 +15,7 @@ export interface MeRouteOptions {
   planRepo: IPlanRepo;
 }
 
-/** /api/me、/api/personal/subscription（需认证）。 */
+/** /api/db/me、/api/db/personal/subscription（需认证）。 */
 export async function meRoutes(app: FastifyInstance, opts: MeRouteOptions): Promise<void> {
   app.register(authScope, {
     tokenService: opts.tokenService,
@@ -24,7 +24,7 @@ export async function meRoutes(app: FastifyInstance, opts: MeRouteOptions): Prom
     aud: ['extension', 'console'],
     scope: ['account'],
     routes: async (child) => {
-      child.get('/api/me', async (req, reply) => {
+      child.get('/api/db/me', async (req, reply) => {
         const userId = (req as any).authUserId as number;
         try {
           const user = await opts.userRepo.findById(userId);
@@ -49,7 +49,7 @@ export async function meRoutes(app: FastifyInstance, opts: MeRouteOptions): Prom
         }
       });
 
-      child.get('/api/personal/subscription', async (req, reply) => {
+      child.get('/api/db/personal/subscription', async (req, reply) => {
         const userId = (req as any).authUserId as number;
         try {
           const subscription = await opts.personalSubscriptionRepo.findByUserId(userId);

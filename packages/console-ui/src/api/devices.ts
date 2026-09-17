@@ -43,7 +43,7 @@ export async function listDevices(
 ): Promise<ListDevicesResult> {
   if (!token) return { kind: 'unauthorized' };
   try {
-    const res = await authedFetch('/api/personal/devices', { headers: auth(token) }, fetchImpl);
+    const res = await authedFetch('/api/db/personal/devices', { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', devices: (await res.json()).devices };
     if (res.status === 401) return { kind: 'unauthorized' };
     return { kind: 'failure' };
@@ -62,7 +62,7 @@ export async function revokeDevice(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      `/api/personal/devices/${deviceId}`,
+      `/api/db/personal/devices/${deviceId}`,
       {
         method: 'DELETE',
         headers: {

@@ -13,7 +13,7 @@ export interface PlansRouteOptions {
   featureDefRepo: IPlanFeatureDefRepo;
 }
 
-/** GET /api/plans（扩展/控制台 token，scope account，同 /api/me）：个人 + 组织套餐目录。 */
+/** GET /api/db/plans（扩展/控制台 token，scope account，同 /api/db/me）：个人 + 组织套餐目录。 */
 export async function plansRoutes(app: FastifyInstance, opts: PlansRouteOptions): Promise<void> {
   app.register(authScope, {
     tokenService: opts.tokenService,
@@ -22,14 +22,14 @@ export async function plansRoutes(app: FastifyInstance, opts: PlansRouteOptions)
     aud: ['extension', 'console'],
     scope: ['account'],
     routes: async (child) => {
-      child.get('/api/plans', async (_req, reply) => {
+      child.get('/api/db/plans', async (_req, reply) => {
         reply.send(await buildPlanCatalog(opts.planRepo, opts.featureDefRepo));
       });
     },
   });
 }
 
-/** GET /api/console/plans（console session，scope console）：控制台套餐目录。 */
+/** GET /api/db/console/plans（console session，scope console）：控制台套餐目录。 */
 export async function consolePlansRoutes(app: FastifyInstance, opts: PlansRouteOptions): Promise<void> {
   registerConsoleErrorHandler(app);
 
@@ -40,7 +40,7 @@ export async function consolePlansRoutes(app: FastifyInstance, opts: PlansRouteO
     aud: 'console',
     scope: ['console'],
     routes: async (child) => {
-      child.get('/api/console/plans', async (_req, reply) => {
+      child.get('/api/db/console/plans', async (_req, reply) => {
         reply.send(await buildPlanCatalog(opts.planRepo, opts.featureDefRepo));
       });
     },

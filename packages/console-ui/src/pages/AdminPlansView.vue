@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { withBase } from '../lib/router';
 import { ensureCsrf } from '../api/consoleAuth';
 import { listPlans, updatePlan, upsertFeatureDef, type AdminFeatureDef, type AdminPlan } from '../api/admin';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
@@ -142,7 +143,7 @@ function featureValue(f: EditableFeature): unknown {
 async function refresh(): Promise<void> {
   const r = await listPlans();
   if (r.kind === 'unauthorized') {
-    window.location.assign('/login');
+    window.location.assign(withBase('/login'));
     return;
   }
   if (r.kind !== 'ok') {

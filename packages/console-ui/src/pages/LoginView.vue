@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+import { withBase } from '../lib/router';
 import { login, ensureCsrf, getOrCreateDeviceKey } from '../api/consoleAuth';
 import { safeReturnTo } from '../lib/returnTo';
 
@@ -25,11 +26,11 @@ async function submit() {
       // accept-invitation / sync-reset 邮件流：登录成功后回到干净落地页（不含 token）
       // 继续认领交接；服务端已在登录时绑定 held mail-flow。
       if (flow === 'accept-invitation') {
-        window.location.assign('/accept-invitation');
+        window.location.assign(withBase('/accept-invitation'));
         return;
       }
       if (flow === 'sync-reset') {
-        window.location.assign('/sync-reset');
+        window.location.assign(withBase('/sync-reset'));
         return;
       }
       window.location.assign(returnTo);
@@ -58,7 +59,7 @@ async function submit() {
       <p v-if="error" class="error">{{ error }}</p>
       <button type="submit" :disabled="submitting">{{ submitting ? '登录中…' : '登录' }}</button>
     </form>
-    <p class="muted">还没有账号？<a href="/register">注册</a></p>
+    <p class="muted">还没有账号？<a :href="withBase('/register')">注册</a></p>
   </div>
 </template>
 

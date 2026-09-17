@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+import { withBase } from '../lib/router';
 import { register, ensureCsrf } from '../api/consoleAuth';
 
 const email = ref('');
@@ -47,7 +48,7 @@ async function submit() {
       <p v-if="error" class="error">{{ error }}</p>
       <button type="submit" :disabled="submitting">{{ submitting ? '注册中…' : '注册' }}</button>
     </form>
-    <p class="muted"><a href="/login">返回登录</a></p>
+    <p class="muted"><a :href="withBase('/login')">返回登录</a></p>
   </div>
 </template>
 

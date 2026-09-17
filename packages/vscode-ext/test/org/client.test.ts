@@ -19,10 +19,10 @@ describe('OrgClient', () => {
 
     const orgs = await client.listOrganizations();
     expect(orgs).toEqual([{ organizationId: '9', name: 'Acme', status: 'active', closedTime: null, role: 'admin' }]);
-    expect(t.calls[0].path).toBe('/api/organizations');
+    expect(t.calls[0].path).toBe('/api/db/organizations');
   });
 
-  it('returns userId from /api/me', async () => {
+  it('returns userId from /api/db/me', async () => {
     const t = makeTransport();
     t.set(() => ({ status: 200, body: { user: { userId: '42', email: 'a@b.c', status: 'active' } } }));
     const client = new OrgClient(t);
@@ -35,8 +35,8 @@ describe('OrgClient', () => {
     const client = new OrgClient(t);
     await client.listFolders('9/../../x');
     await client.getResource('9', 'a/b?c');
-    expect(t.calls[0].path).toBe('/api/organizations/9%2F..%2F..%2Fx/folders');
-    expect(t.calls[1].path).toBe('/api/organizations/9/resources/a%2Fb%3Fc');
+    expect(t.calls[0].path).toBe('/api/db/organizations/9%2F..%2F..%2Fx/folders');
+    expect(t.calls[1].path).toBe('/api/db/organizations/9/resources/a%2Fb%3Fc');
   });
 
   it('maps 404 organization-not-found to typed error', async () => {
@@ -87,7 +87,7 @@ describe('OrgClient', () => {
     await client.createResource('9', input);
 
     expect(t.calls[0].method).toBe('POST');
-    expect(t.calls[0].path).toBe('/api/organizations/9/resources');
+    expect(t.calls[0].path).toBe('/api/db/organizations/9/resources');
     expect(t.calls[0].body).toEqual(input);
     expect(JSON.stringify(t.calls[0].body)).not.toContain('password');
   });

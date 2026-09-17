@@ -10,7 +10,8 @@ import vue from '@vitejs/plugin-vue';
  */
 export default defineConfig({
   plugins: [vue()],
-  base: '/',
+  // 部署基路径：默认 '/'；迁到 devkit.l2hi.com/db 时以 CONSOLE_BASE=/db/ 构建。
+  base: process.env.CONSOLE_BASE || '/',
   build: {
     rollupOptions: {
       input: {

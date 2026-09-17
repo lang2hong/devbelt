@@ -92,7 +92,7 @@ export function resolveWechatCredentials(env: NodeJS.ProcessEnv = process.env): 
     merchantPrivateKey: createPrivateKey({ key: decodePem(keyB64, 'WECHAT_PRIVATE_KEY_B64'), format: 'pem' }),
     platformPublicKey: createPublicKey({ key: decodePem(certB64, 'WECHAT_PLATFORM_CERT_B64'), format: 'pem' }),
     apiV3Key,
-    callbackUrl: `${callbackBase}/api/public/payment-callback/wechat`,
+    callbackUrl: `${callbackBase}/api/db/public/payment-callback/wechat`,
   };
 }
 
@@ -110,6 +110,6 @@ export function resolveAlipayCredentials(env: NodeJS.ProcessEnv = process.env): 
     appId,
     appPrivateKey: createPrivateKey({ key: decodePem(keyB64, 'ALIPAY_PRIVATE_KEY_B64'), format: 'pem' }),
     alipayPublicKey: createPublicKey({ key: decodePem(pubB64, 'ALIPAY_PUBLIC_KEY_B64'), format: 'pem' }),
-    callbackUrl: `${callbackBase}/api/public/payment-callback/alipay`,
+    callbackUrl: `${callbackBase}/api/db/public/payment-callback/alipay`,
   };
 }

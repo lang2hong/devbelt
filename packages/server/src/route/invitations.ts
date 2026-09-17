@@ -17,7 +17,7 @@ export interface InvitationRouteOptions {
 }
 
 /**
- * 邀请接受路由（§6.4）：`POST /api/organization-invitations/:token/accept`。
+ * 邀请接受路由（§6.4）：`POST /api/db/organization-invitations/:token/accept`。
  *
  * 只需认证（authScope），组织作用域由邀请 token 反查 —— 这个路由的 URL 里没有
  * `:organizationId`，授权不能走 organizationAuth。
@@ -30,7 +30,7 @@ export async function invitationRoutes(app: FastifyInstance, opts: InvitationRou
     aud: ['extension', 'console'],
     scope: ['organization'],
     routes: async (auth) => {
-      auth.post('/api/organization-invitations/:token/accept', { schema: { params: invitationTokenParam } }, async (req, reply) => {
+      auth.post('/api/db/organization-invitations/:token/accept', { schema: { params: invitationTokenParam } }, async (req, reply) => {
         if (isConsoleAudience(req) && !consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) {
           return reply.code(403).send({ message: 'forbidden', code: 'FORBIDDEN' });
         }

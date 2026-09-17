@@ -1,5 +1,5 @@
 /**
- * 套餐目录（/api/plans）：从库内 `plans` + 纵表特性组装对外 PlanDto。
+ * 套餐目录（/api/db/plans）：从库内 `plans` + 纵表特性组装对外 PlanDto。
  *
  * ## 动态特征描述符
  *

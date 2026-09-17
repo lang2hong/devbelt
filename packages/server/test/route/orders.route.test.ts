@@ -111,7 +111,7 @@ describe('orders routes', () => {
     const csrf = b.csrfService.issue('ws');
     const res = await b.app.inject({
       method: 'POST',
-      url: '/api/console/orders',
+      url: '/api/db/console/orders',
       headers: {
         authorization: `Bearer ${await b.consoleToken(1)}`,
         origin: ORIGIN,
@@ -134,7 +134,7 @@ describe('orders routes', () => {
     const b = await build();
     const res = await b.app.inject({
       method: 'POST',
-      url: '/api/console/orders',
+      url: '/api/db/console/orders',
       headers: { authorization: `Bearer ${await b.consoleToken(1)}`, 'content-type': 'application/json', accept: 'application/json' },
       payload: { planCode: 'pro', channel: 'wechat' },
     });
@@ -146,7 +146,7 @@ describe('orders routes', () => {
     const csrf = b.csrfService.issue('ws');
     const res = await b.app.inject({
       method: 'POST',
-      url: '/api/console/orders',
+      url: '/api/db/console/orders',
       headers: {
         authorization: `Bearer ${await b.consoleToken(1)}`, origin: ORIGIN,
         'x-csrf-token': csrf, cookie: `${csrfCookieName()}=${csrf}`,
@@ -162,7 +162,7 @@ describe('orders routes', () => {
     const csrf = b.csrfService.issue('ws');
     const res = await b.app.inject({
       method: 'POST',
-      url: '/api/console/orders',
+      url: '/api/db/console/orders',
       headers: {
         authorization: `Bearer ${await b.consoleToken(1)}`, origin: ORIGIN,
         'x-csrf-token': csrf, cookie: `${csrfCookieName()}=${csrf}`,
@@ -200,7 +200,7 @@ describe('payment callback route', () => {
     void order;
     const res = await b.app.inject({
       method: 'POST',
-      url: '/api/public/payment-callback/wechat',
+      url: '/api/db/public/payment-callback/wechat',
       headers: { 'content-type': 'application/json', 'x-payment-signature': 'bad' },
       payload: { orderNo: 'x'.repeat(43), channelTradeNo: 'wx-1', amountCents: 9900, status: 'success' },
     });
@@ -213,7 +213,7 @@ describe('payment callback route', () => {
     const raw = Buffer.from(JSON.stringify({ orderNo: 'x'.repeat(43), channelTradeNo: 'wx-1', amountCents: 9900, status: 'success' }));
     const res = await b.app.inject({
       method: 'POST',
-      url: '/api/public/payment-callback/wechat',
+      url: '/api/db/public/payment-callback/wechat',
       headers: { 'content-type': 'application/json', 'x-payment-signature': signMemoryCallback(raw) },
       payload: raw,
     });
@@ -226,7 +226,7 @@ describe('payment callback route', () => {
     const b = await build();
     const res = await b.app.inject({
       method: 'POST',
-      url: '/api/public/payment-callback/paypal',
+      url: '/api/db/public/payment-callback/paypal',
       headers: { 'content-type': 'application/json' },
       payload: {},
     });

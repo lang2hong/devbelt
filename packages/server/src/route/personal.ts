@@ -32,7 +32,7 @@ export async function personalRoutes(app: FastifyInstance, opts: PersonalRouteOp
     aud: ['extension', 'console'],
     scope: ['device'],
     routes: async (child) => {
-      child.get('/api/personal/devices', async (req, reply) => {
+      child.get('/api/db/personal/devices', async (req, reply) => {
         const userId = (req as any).authUserId as number;
         try {
           const devices = await opts.deviceRepo.listByUser(userId);
@@ -52,7 +52,7 @@ export async function personalRoutes(app: FastifyInstance, opts: PersonalRouteOp
         }
       });
 
-      child.delete('/api/personal/devices/:deviceId', { schema: { params: deviceIdParam } }, async (req, reply) => {
+      child.delete('/api/db/personal/devices/:deviceId', { schema: { params: deviceIdParam } }, async (req, reply) => {
         if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) {
           return reply.code(403).send({ message: 'forbidden', code: 'FORBIDDEN' });
         }
@@ -92,7 +92,7 @@ export async function personalRoutes(app: FastifyInstance, opts: PersonalRouteOp
             actorUserId: userId,
             sessionId,
             method: 'DELETE',
-            normalizedPath: `/api/personal/devices/${deviceId}`,
+            normalizedPath: `/api/db/personal/devices/${deviceId}`,
             idempotencyKey,
             business: async (tx) => {
               await opts.revokeDeviceInTx(tx, userId, deviceId);

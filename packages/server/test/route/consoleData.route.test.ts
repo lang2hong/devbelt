@@ -61,7 +61,7 @@ describe('console data routes', () => {
     const { app, tokenService, userRepo } = await build();
     const u = await userRepo.create('sync@b.com', 'hash', 'S');
     const token = await consoleToken(tokenService, u.id);
-    const res = await app.inject({ method: 'GET', url: '/api/console/sync/overview', headers: { authorization: `Bearer ${token}`, accept: 'application/json' } });
+    const res = await app.inject({ method: 'GET', url: '/api/db/console/sync/overview', headers: { authorization: `Bearer ${token}`, accept: 'application/json' } });
     expect(res.statusCode).toBe(200);
     expect(res.json().initialized).toBe(false);
     expect(res.json().activeRecordCount).toBe(0);
@@ -78,7 +78,7 @@ describe('console data routes', () => {
 
     const adminRes = await app.inject({
       method: 'GET',
-      url: `/api/console/organizations/${org.id}/members`,
+      url: `/api/db/console/organizations/${org.id}/members`,
       headers: { authorization: `Bearer ${await consoleToken(tokenService, admin.id)}`, accept: 'application/json' },
     });
     expect(adminRes.statusCode).toBe(200);
@@ -86,7 +86,7 @@ describe('console data routes', () => {
 
     const memberRes = await app.inject({
       method: 'GET',
-      url: `/api/console/organizations/${org.id}/members`,
+      url: `/api/db/console/organizations/${org.id}/members`,
       headers: { authorization: `Bearer ${await consoleToken(tokenService, member.id)}`, accept: 'application/json' },
     });
     expect(memberRes.statusCode).toBe(200);
@@ -103,7 +103,7 @@ describe('console data routes', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: `/api/console/organizations/${org.id}/members`,
+      url: `/api/db/console/organizations/${org.id}/members`,
       headers: { authorization: `Bearer ${await consoleToken(tokenService, admin.id)}`, accept: 'application/json' },
     });
     expect(res.statusCode).toBe(404);
@@ -114,7 +114,7 @@ describe('console data routes', () => {
     const { app, tokenService, userRepo } = await build();
     const u = await userRepo.create('noaccept@b.com', 'hash', 'N');
     const token = await consoleToken(tokenService, u.id);
-    const res = await app.inject({ method: 'GET', url: '/api/console/sync/overview', headers: { authorization: `Bearer ${token}` } });
+    const res = await app.inject({ method: 'GET', url: '/api/db/console/sync/overview', headers: { authorization: `Bearer ${token}` } });
     expect(res.statusCode).toBe(406);
     expect(res.json().error.code).toBe('NOT_ACCEPTABLE');
     await app.close();
@@ -126,7 +126,7 @@ describe('console data routes', () => {
     const token = await consoleToken(tokenService, u.id);
     const res = await app.inject({
       method: 'GET',
-      url: '/api/console/sync/overview',
+      url: '/api/db/console/sync/overview',
       headers: { authorization: `Bearer ${token}`, accept: 'text/html' },
     });
     expect(res.statusCode).toBe(406);
@@ -140,7 +140,7 @@ describe('console data routes', () => {
     const token = await consoleToken(tokenService, u.id);
     const res = await app.inject({
       method: 'GET',
-      url: '/api/console/sync/overview',
+      url: '/api/db/console/sync/overview',
       headers: { authorization: `Bearer ${token}`, accept: 'application/json' },
     });
     expect(res.statusCode).toBe(200);
@@ -155,7 +155,7 @@ describe('console data routes', () => {
 
     await app.inject({
       method: 'GET',
-      url: `/api/console/organizations/${org.id}/members`,
+      url: `/api/db/console/organizations/${org.id}/members`,
       remoteAddress: '198.51.100.23',
       headers: { authorization: `Bearer ${await consoleToken(tokenService, admin.id)}`, accept: 'application/json' },
     });
@@ -176,7 +176,7 @@ describe('console data routes', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: `/api/console/organizations/${org.id}/members`,
+      url: `/api/db/console/organizations/${org.id}/members`,
       headers: { authorization: `Bearer ${await consoleToken(tokenService, member.id)}`, accept: 'application/json' },
     });
     expect(res.statusCode).toBe(200);

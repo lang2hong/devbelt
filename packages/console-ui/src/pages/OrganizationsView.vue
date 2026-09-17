@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { listOrganizations, createOrganization, type OrgSummary } from '../api/organizations';
 import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
-import { navigate } from '../lib/router';
+import { navigate, withBase } from '../lib/router';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 
 const orgs = ref<OrgSummary[]>([]);
@@ -21,7 +21,7 @@ async function load(): Promise<void> {
     state.value = 'ready';
   } else if (r.kind === 'unauthorized') {
     setAccessToken(null);
-    window.location.assign('/login');
+    window.location.assign(withBase('/login'));
   } else {
     state.value = 'error';
   }
@@ -44,7 +44,7 @@ async function create(): Promise<void> {
     } else if (r.kind === 'unauthorized') {
       createWrite.reset(tag);
       setAccessToken(null);
-      window.location.assign('/login');
+      window.location.assign(withBase('/login'));
     } else if (isRetryableFailure(r.kind)) {
       error.value = '创建失败，请重试。';
     } else {

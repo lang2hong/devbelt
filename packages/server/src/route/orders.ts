@@ -86,7 +86,7 @@ export async function ordersReadRoutes(app: FastifyInstance, opts: OrdersRouteOp
     aud: 'console',
     scope: ['console'],
     routes: async (child) => {
-      child.get('/api/console/orders', async (req, reply) => {
+      child.get('/api/db/console/orders', async (req, reply) => {
         const actor = userIdOf(req);
         await opts.rateLimiter.hit(`console:order:read:${actor}`, 60, 60);
         const q = req.query as Record<string, unknown>;
@@ -104,7 +104,7 @@ export async function ordersReadRoutes(app: FastifyInstance, opts: OrdersRouteOp
         });
       });
 
-      child.get('/api/console/orders/:orderNo', async (req, reply) => {
+      child.get('/api/db/console/orders/:orderNo', async (req, reply) => {
         const actor = userIdOf(req);
         await opts.rateLimiter.hit(`console:order:read:${actor}`, 60, 60);
         const orderNo = (req.params as Record<string, unknown>).orderNo;
@@ -128,7 +128,7 @@ export async function ordersWriteRoutes(app: FastifyInstance, opts: OrdersRouteO
     aud: 'console',
     scope: ['console'],
     routes: async (child) => {
-      child.post('/api/console/orders', { schema: { body: createOrderBody } }, async (req, reply) => {
+      child.post('/api/db/console/orders', { schema: { body: createOrderBody } }, async (req, reply) => {
         if (opts.paymentFeatureEnabled && !opts.paymentFeatureEnabled()) {
           throw new FeatureTemporarilyDisabledError('payment');
         }

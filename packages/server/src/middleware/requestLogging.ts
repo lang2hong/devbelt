@@ -3,7 +3,7 @@
  *
  * 邮箱验证 token 与组织邀请 token 出现在 URL path 中
  * （`/api/auth/email-verifications/:token/confirm`、
- *  `/api/organization-invitations/:token/accept`），
+ *  `/api/db/organization-invitations/:token/accept`），
  * 而 Fastify 默认的 req 序列化器会把完整 URL 写进访问日志。
  * 实施规格 §8 要求日志不得包含 token，因此这里统一在写日志前替换掉 token 段，
  * 并抹掉常见的 token 查询参数。
@@ -17,7 +17,7 @@ const REDACTED = '[redacted]';
 /** URL path 中承载 token 的位置：保留前缀分组，替换其后的单个段。 */
 const PATH_TOKEN_PATTERNS: readonly RegExp[] = [
   /(\/api\/auth\/email-verifications\/)[^/?#]+/,
-  /(\/api\/organization-invitations\/)[^/?#]+/,
+  /(\/api\/db\/organization-invitations\/)[^/?#]+/,
 ];
 
 /** 查询参数名（小写比较）：命中即整体替换值。 */

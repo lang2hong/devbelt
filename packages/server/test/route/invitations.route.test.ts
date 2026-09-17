@@ -35,17 +35,17 @@ describe('invitation routes', () => {
     await makeVerifiedUser(t, 'target@x.com');
 
     const create = await t.app.inject({
-      method: 'POST', url: '/api/organizations', headers: t.auth(admin.token), payload: { name: 'Acme' },
+      method: 'POST', url: '/api/db/organizations', headers: t.auth(admin.token), payload: { name: 'Acme' },
     });
     const orgId = create.json().organization.organizationId;
 
     const invite = await t.app.inject({
-      method: 'POST', url: `/api/organizations/${orgId}/invitations`, headers: t.auth(admin.token), payload: { email: 'target@x.com' },
+      method: 'POST', url: `/api/db/organizations/${orgId}/invitations`, headers: t.auth(admin.token), payload: { email: 'target@x.com' },
     });
     expect(invite.statusCode).toBe(201);
     const invitationId = invite.json().invitation.invitationId;
 
-    const list = await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}/invitations`, headers: t.auth(admin.token) });
+    const list = await t.app.inject({ method: 'GET', url: `/api/db/organizations/${orgId}/invitations`, headers: t.auth(admin.token) });
     expect(list.statusCode).toBe(200);
     expect(list.json().invitations).toHaveLength(1);
     expect(list.json().invitations[0].email).toBe('target@x.com');
@@ -54,16 +54,16 @@ describe('invitation routes', () => {
     const member = await makeUser(t, 'member@x.com');
     await addMembership(t, Number(orgId), member.id, 'member');
     const memberInvite = await t.app.inject({
-      method: 'POST', url: `/api/organizations/${orgId}/invitations`, headers: t.auth(member.token), payload: { email: 'other@x.com' },
+      method: 'POST', url: `/api/db/organizations/${orgId}/invitations`, headers: t.auth(member.token), payload: { email: 'other@x.com' },
     });
     expect(memberInvite.statusCode).toBe(403);
 
     const revoke = await t.app.inject({
-      method: 'DELETE', url: `/api/organizations/${orgId}/invitations/${invitationId}`, headers: t.auth(admin.token),
+      method: 'DELETE', url: `/api/db/organizations/${orgId}/invitations/${invitationId}`, headers: t.auth(admin.token),
     });
     expect(revoke.statusCode).toBe(200);
 
-    const listAfter = await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}/invitations`, headers: t.auth(admin.token) });
+    const listAfter = await t.app.inject({ method: 'GET', url: `/api/db/organizations/${orgId}/invitations`, headers: t.auth(admin.token) });
     expect(listAfter.json().invitations).toHaveLength(0);
     await t.close();
   });
@@ -74,23 +74,23 @@ describe('invitation routes', () => {
     const target = await makeVerifiedUser(t, 'target@x.com');
 
     const create = await t.app.inject({
-      method: 'POST', url: '/api/organizations', headers: t.auth(admin.token), payload: { name: 'Acme' },
+      method: 'POST', url: '/api/db/organizations', headers: t.auth(admin.token), payload: { name: 'Acme' },
     });
     const orgId = create.json().organization.organizationId;
 
     await t.app.inject({
-      method: 'POST', url: `/api/organizations/${orgId}/invitations`, headers: t.auth(admin.token), payload: { email: 'target@x.com' },
+      method: 'POST', url: `/api/db/organizations/${orgId}/invitations`, headers: t.auth(admin.token), payload: { email: 'target@x.com' },
     });
     const token = t.services.emailSender.sent.find((m) => m.kind === 'invitation')!.token!;
 
     const accept = await t.app.inject({
-      method: 'POST', url: `/api/organization-invitations/${token}/accept`, headers: t.auth(target.token),
+      method: 'POST', url: `/api/db/organization-invitations/${token}/accept`, headers: t.auth(target.token),
     });
     expect(accept.statusCode).toBe(200);
     expect(accept.json().organization.organizationId).toBe(orgId);
     expect(accept.json().organization.role).toBe('member');
 
-    const members = await t.app.inject({ method: 'GET', url: `/api/organizations/${orgId}/members`, headers: t.auth(admin.token) });
+    const members = await t.app.inject({ method: 'GET', url: `/api/db/organizations/${orgId}/members`, headers: t.auth(admin.token) });
     const invitedOrJoined = members.json().members.find((m: any) => m.status === 'active');
     expect(invitedOrJoined).toBeTruthy();
     await t.close();
@@ -98,7 +98,7 @@ describe('invitation routes', () => {
 
   it('accept without auth returns 401', async () => {
     const t = await buildTestApp();
-    const res = await t.app.inject({ method: 'POST', url: '/api/organization-invitations/whatever/accept' });
+    const res = await t.app.inject({ method: 'POST', url: '/api/db/organization-invitations/whatever/accept' });
     expect(res.statusCode).toBe(401);
     await t.close();
   });

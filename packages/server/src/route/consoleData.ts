@@ -51,7 +51,7 @@ export async function consoleDataRoutes(app: FastifyInstance, opts: ConsoleDataR
     scope: ['console'],
     routes: async (child) => {
       // 同步概览（§6）：仅聚合元数据，不返回任何 record/密文/E2EE 材料。
-      child.get('/api/console/sync/overview', async (req, reply) => {
+      child.get('/api/db/console/sync/overview', async (req, reply) => {
         const userId = (req as unknown as { authUserId: number }).authUserId;
         await opts.rateLimiter.hit(`console:sync-overview:${userId}`, 60, 30);
         const state = await opts.syncStateRepo.findByUserId(userId);
@@ -83,7 +83,7 @@ export async function consoleDataRoutes(app: FastifyInstance, opts: ConsoleDataR
       });
 
       // 组织成员（§6）：active org + active membership；member 无 email；admin 可见 email 并写受限读审计。
-      child.get('/api/console/organizations/:organizationId/members', { schema: { params: organizationIdParam } }, async (req, reply) => {
+      child.get('/api/db/console/organizations/:organizationId/members', { schema: { params: organizationIdParam } }, async (req, reply) => {
         const userId = (req as unknown as { authUserId: number }).authUserId;
         const organizationId = Number((req.params as Record<string, unknown>).organizationId);
         await opts.rateLimiter.hit(`console:org-members:${userId}`, 60, 60);

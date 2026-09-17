@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import { withBase } from '../lib/router';
 import { syncOverview, type SyncOverview } from '../api/sync';
 import { setAccessToken } from '../api/consoleAuth';
 import { formatDateTime } from '../lib/formatTime';
@@ -26,7 +27,7 @@ onMounted(async () => {
     state.value = 'ready';
   } else if (r.kind === 'unauthorized') {
     setAccessToken(null);
-    window.location.assign('/login');
+    window.location.assign(withBase('/login'));
   } else {
     state.value = 'error';
   }

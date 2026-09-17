@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { withBase } from '../lib/router';
 import { claimLinkFlow, bindMailFlow, createSyncResetHandoff } from '../api/linkFlows';
 import { ensureCsrf, refresh, getAccessToken } from '../api/consoleAuth';
 
@@ -88,7 +89,7 @@ async function authenticateAndHandoff() {
   const refreshed = await refresh(csrf);
   if (refreshed.kind === 'invalid-credentials') {
     // 未登录：跳登录页，登录成功后回到干净的 /sync-reset（不含 token）。
-    window.location.assign('/login?flow=sync-reset');
+    window.location.assign(withBase('/login?flow=sync-reset'));
     return;
   }
   if (refreshed.kind !== 'ok') {
@@ -111,7 +112,7 @@ async function authenticateAndHandoff() {
     return;
   }
   if (bound.kind === 'unauthorized') {
-    window.location.assign('/login?flow=sync-reset');
+    window.location.assign(withBase('/login?flow=sync-reset'));
     return;
   }
   if (bound.kind === 'failure') {
@@ -135,7 +136,7 @@ async function doHandoff(accessToken: string, csrf: string) {
   } else if (result.kind === 'invalid') {
     state.value = 'invalid';
   } else if (result.kind === 'unauthorized') {
-    window.location.assign('/login?flow=sync-reset');
+    window.location.assign(withBase('/login?flow=sync-reset'));
   } else if (result.kind === 'rate-limited') {
     rateLimitSeconds.value = result.retryAfter;
     state.value = 'rate-limited';

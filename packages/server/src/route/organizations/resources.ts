@@ -9,7 +9,7 @@ import type { OrgRoutesContext } from './context.js';
 export async function registerResourceRoutes(org: FastifyInstance, ctx: OrgRoutesContext): Promise<void> {
   const { resources } = ctx;
 
-  org.get('/api/organizations/:organizationId/resources', { config: { permission: 'resource.read' }, schema: { params: organizationIdParam } }, async (req, reply) => {
+  org.get('/api/db/organizations/:organizationId/resources', { config: { permission: 'resource.read' }, schema: { params: organizationIdParam } }, async (req, reply) => {
     const organizationId = (req as any).authOrganizationId as number;
     try {
       const list = await resources.listResources(organizationId);
@@ -19,7 +19,7 @@ export async function registerResourceRoutes(org: FastifyInstance, ctx: OrgRoute
     }
   });
 
-  org.post('/api/organizations/:organizationId/resources', { config: { permission: 'resource.write', aud: 'extension' }, schema: { params: organizationIdParam, body: createResourceBody } }, async (req, reply) => {
+  org.post('/api/db/organizations/:organizationId/resources', { config: { permission: 'resource.write', aud: 'extension' }, schema: { params: organizationIdParam, body: createResourceBody } }, async (req, reply) => {
     const organizationId = (req as any).authOrganizationId as number;
     const actorUserId = (req as any).authUserId as number;
     const body = req.body as any;
@@ -32,7 +32,7 @@ export async function registerResourceRoutes(org: FastifyInstance, ctx: OrgRoute
     }
   });
 
-  org.get('/api/organizations/:organizationId/resources/:resourceId', { config: { permission: 'resource.read', aud: 'extension' }, schema: { params: resourceIdParam } }, async (req, reply) => {
+  org.get('/api/db/organizations/:organizationId/resources/:resourceId', { config: { permission: 'resource.read', aud: 'extension' }, schema: { params: resourceIdParam } }, async (req, reply) => {
     const organizationId = (req as any).authOrganizationId as number;
     const resourceId = Number((req.params as any).resourceId);
     try {
@@ -43,7 +43,7 @@ export async function registerResourceRoutes(org: FastifyInstance, ctx: OrgRoute
     }
   });
 
-  org.patch('/api/organizations/:organizationId/resources/:resourceId', { config: { permission: 'resource.write', aud: 'extension' }, schema: { params: resourceIdParam, body: updateResourceBody } }, async (req, reply) => {
+  org.patch('/api/db/organizations/:organizationId/resources/:resourceId', { config: { permission: 'resource.write', aud: 'extension' }, schema: { params: resourceIdParam, body: updateResourceBody } }, async (req, reply) => {
     const organizationId = (req as any).authOrganizationId as number;
     const resourceId = Number((req.params as any).resourceId);
     const actorUserId = (req as any).authUserId as number;
@@ -57,7 +57,7 @@ export async function registerResourceRoutes(org: FastifyInstance, ctx: OrgRoute
     }
   });
 
-  org.delete('/api/organizations/:organizationId/resources/:resourceId', { config: { permission: 'resource.delete', aud: 'extension' }, schema: { params: resourceIdParam } }, async (req, reply) => {
+  org.delete('/api/db/organizations/:organizationId/resources/:resourceId', { config: { permission: 'resource.delete', aud: 'extension' }, schema: { params: resourceIdParam } }, async (req, reply) => {
     const organizationId = (req as any).authOrganizationId as number;
     const resourceId = Number((req.params as any).resourceId);
     const actorUserId = (req as any).authUserId as number;

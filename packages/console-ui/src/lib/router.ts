@@ -44,6 +44,29 @@ export function matchRoute(pathname: string, routes: RouteConfig[]): ResolvedRou
   return null;
 }
 
+/** 应用部署基路径（vite base）：'/' 或 '/db/'。构建时由 CONSOLE_BASE 注入。 */
+const BASE: string = (() => {
+  const b = (import.meta.env?.BASE_URL as string | undefined) ?? '/';
+  return b.endsWith('/') ? b : `${b}/`;
+})();
+
+/** 把应用内绝对路径拼上基路径（保留 query/hash）。 */
+export function withBase(path: string): string {
+  if (BASE === '/') return path;
+  const prefix = BASE.replace(/\/$/, '');
+  if (!path.startsWith('/')) path = `/${path}`;
+  return `${prefix}${path}`;
+}
+
+/** 从浏览器 pathname 还原应用内路径（去掉基路径前缀）。 */
+export function stripBase(pathname: string): string {
+  if (BASE === '/') return pathname;
+  const prefix = BASE.replace(/\/$/, '');
+  if (pathname === prefix) return '/';
+  if (pathname.startsWith(`${prefix}/`)) return pathname.slice(prefix.length);
+  return pathname;
+}
+
 export const router = reactive({
   pathname: '',
   name: null as string | null,
@@ -52,7 +75,8 @@ export const router = reactive({
 
 const routes: RouteConfig[] = [];
 
-function resolve(pathname: string): void {
+function resolve(rawPathname: string): void {
+  const pathname = stripBase(rawPathname);
   const r = matchRoute(pathname, routes);
   router.pathname = pathname;
   router.name = r?.name ?? null;
@@ -66,7 +90,8 @@ export function installRouter(config: RouteConfig[]): void {
 }
 
 export function navigate(path: string): void {
-  if (window.location.pathname === path) return;
-  window.history.pushState(null, '', path);
-  resolve(path);
+  const full = withBase(path);
+  if (window.location.pathname === full) return;
+  window.history.pushState(null, '', full);
+  resolve(full);
 }

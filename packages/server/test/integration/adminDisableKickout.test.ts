@@ -90,13 +90,13 @@ describe.skipIf(!URL)('admin disable kick-out (real MySQL)', () => {
         aud: 'extension',
         scope: ['sync'],
         routes: (child) => {
-          child.get('/api/sync/state', async () => ({ ok: true }));
+          child.get('/api/db/sync/state', async () => ({ ok: true }));
         },
       });
       await app.ready();
 
       const headers = { authorization: `Bearer ${accessToken}` };
-      expect((await app.inject({ method: 'GET', url: '/api/sync/state', headers })).statusCode).toBe(200);
+      expect((await app.inject({ method: 'GET', url: '/api/db/sync/state', headers })).statusCode).toBe(200);
 
       // admin 禁用：更新状态 + session_version+1 + 撤销全部 refresh。
       const adminSvc = new ConsoleAdminService({
@@ -108,7 +108,7 @@ describe.skipIf(!URL)('admin disable kick-out (real MySQL)', () => {
 
       // 旧 access token 签名仍有效，但用户已 disabled → 403 USER_DISABLED（而非 401 过期）。
       expect(await tokenService.verifyAccessToken(accessToken)).toBeTruthy();
-      const res = await app.inject({ method: 'GET', url: '/api/sync/state', headers });
+      const res = await app.inject({ method: 'GET', url: '/api/db/sync/state', headers });
       expect(res.statusCode).toBe(403);
       expect(res.json().code).toBe('USER_DISABLED');
 

@@ -107,7 +107,7 @@ describe('organization resource/folder routes', () => {
     const b = await build();
     const { userId, orgId } = await b.seedAdmin();
     const res = await b.app.inject({
-      method: 'GET', url: `/api/organizations/${orgId}/folders`,
+      method: 'GET', url: `/api/db/organizations/${orgId}/folders`,
       headers: { authorization: `Bearer ${await b.extToken(userId)}` },
     });
     expect(res.statusCode).toBe(200);
@@ -123,7 +123,7 @@ describe('organization resource/folder routes', () => {
     const b = await build();
     const { userId, orgId } = await b.seedAdmin();
     const res = await b.app.inject({
-      method: 'GET', url: `/api/organizations/${orgId}/resources`,
+      method: 'GET', url: `/api/db/organizations/${orgId}/resources`,
       headers: { authorization: `Bearer ${await b.extToken(userId)}` },
     });
     expect(res.statusCode).toBe(200);
@@ -137,7 +137,7 @@ describe('organization resource/folder routes', () => {
     const b = await build();
     const { userId, orgId } = await b.seedAdmin();
     const res = await b.app.inject({
-      method: 'DELETE', url: `/api/organizations/${orgId}/resources/9`,
+      method: 'DELETE', url: `/api/db/organizations/${orgId}/resources/9`,
       headers: { authorization: `Bearer ${await b.extToken(userId)}` },
     });
     expect(res.statusCode).toBe(200);
@@ -153,7 +153,7 @@ describe('organization resource/folder routes', () => {
     // 另一组织的成员访问本组织：有效用户、无本组织 membership → 404（不泄露组织是否存在）。
     const otherOrgUser = await b.addMember(await b.seedOrg(), 'admin', 'outsider@b.com');
     const res = await b.app.inject({
-      method: 'GET', url: `/api/organizations/${orgId}/folders`,
+      method: 'GET', url: `/api/db/organizations/${orgId}/folders`,
       headers: { authorization: `Bearer ${await b.extToken(otherOrgUser)}` },
     });
     expect(res.statusCode).toBe(404);
@@ -168,7 +168,7 @@ describe('organization resource/folder routes', () => {
     const memberUserId = await b.addMember(orgId, 'member', 'member-b@b.com');
     // member 角色无 resource.delete 权限 → 403（区别于非成员的 404）。
     const res = await b.app.inject({
-      method: 'DELETE', url: `/api/organizations/${orgId}/resources/9`,
+      method: 'DELETE', url: `/api/db/organizations/${orgId}/resources/9`,
       headers: { authorization: `Bearer ${await b.extToken(memberUserId)}` },
     });
     expect(res.statusCode).toBe(403);

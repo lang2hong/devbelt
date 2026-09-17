@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import { withBase } from '../lib/router';
 import {
   claimLinkFlow,
   acceptInvitation,
@@ -68,7 +69,7 @@ async function authenticateAndAccept() {
   const refreshed = await refresh(csrf);
   if (refreshed.kind === 'invalid-credentials') {
     // 未登录：跳登录页，登录成功后回到干净的 /accept-invitation（不含 token）。
-    window.location.assign('/login?flow=accept-invitation');
+    window.location.assign(withBase('/login?flow=accept-invitation'));
     return;
   }
   if (refreshed.kind !== 'ok') {
@@ -90,7 +91,7 @@ async function authenticateAndAccept() {
     return;
   }
   if (bound.kind === 'unauthorized') {
-    window.location.assign('/login?flow=accept-invitation');
+    window.location.assign(withBase('/login?flow=accept-invitation'));
     return;
   }
   if (bound.kind === 'failure') {
@@ -115,7 +116,7 @@ async function doAccept(accessToken: string, csrf: string) {
   } else if (result.kind === 'invalid') {
     state.value = 'invalid';
   } else if (result.kind === 'unauthorized') {
-    window.location.assign('/login?flow=accept-invitation');
+    window.location.assign(withBase('/login?flow=accept-invitation'));
   } else {
     state.value = 'failure';
     canRetry.value = true;
@@ -143,7 +144,7 @@ function readToken(): string | null {
     <template v-else-if="state === 'success' || state === 'already-accepted'">
       <p class="success">{{ state === 'success' ? TEXT.success : TEXT.alreadyAccepted }}</p>
       <p v-if="organization" class="muted">组织：{{ organization.name }}</p>
-      <a class="button primary" href="/console/organizations">{{ TEXT.enter }}</a>
+      <a class="button primary" :href="withBase('/console/organizations')">{{ TEXT.enter }}</a>
     </template>
 
     <template v-else-if="state === 'failure'">

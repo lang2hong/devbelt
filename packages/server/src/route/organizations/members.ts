@@ -9,7 +9,7 @@ import { idempotencyMode, requestIdOf, sessionIdOf, type OrgRoutesContext } from
 export async function registerMemberRoutes(org: FastifyInstance, ctx: OrgRoutesContext): Promise<void> {
   const { svc, opts } = ctx;
 
-  org.get('/api/organizations/:organizationId/members', { config: { permission: 'member.read' }, schema: { params: organizationIdParam } }, async (req, reply) => {
+  org.get('/api/db/organizations/:organizationId/members', { config: { permission: 'member.read' }, schema: { params: organizationIdParam } }, async (req, reply) => {
     const organizationId = (req as any).authOrganizationId as number;
     try {
       const members = await svc.listMembers(organizationId);
@@ -27,7 +27,7 @@ export async function registerMemberRoutes(org: FastifyInstance, ctx: OrgRoutesC
     }
   });
 
-  org.patch('/api/organizations/:organizationId/members/:membershipId', { config: { permission: 'member.role.assign' }, schema: { params: membershipIdParam, body: assignRoleBody } }, async (req, reply) => {
+  org.patch('/api/db/organizations/:organizationId/members/:membershipId', { config: { permission: 'member.role.assign' }, schema: { params: membershipIdParam, body: assignRoleBody } }, async (req, reply) => {
     const organizationId = (req as any).authOrganizationId as number;
     const userId = (req as any).authUserId as number;
     const membershipId = Number((req.params as any).membershipId);
@@ -46,7 +46,7 @@ export async function registerMemberRoutes(org: FastifyInstance, ctx: OrgRoutesC
       }
       const result = await opts.idempotencyService.run({
         actorUserId: userId, sessionId: sessionIdOf(req), method: 'PATCH',
-        normalizedPath: `/api/organizations/${organizationId}/members/${membershipId}`,
+        normalizedPath: `/api/db/organizations/${organizationId}/members/${membershipId}`,
         idempotencyKey: mode.idempotencyKey, requestBody: req.body,
         business: async (tx: Queryable) => {
           const r = await svc.assignRoleInTx(tx, organizationId, membershipId, role as OrganizationRole, userId);
@@ -64,7 +64,7 @@ export async function registerMemberRoutes(org: FastifyInstance, ctx: OrgRoutesC
     }
   });
 
-  org.delete('/api/organizations/:organizationId/members/:membershipId', { config: { permission: 'member.remove' }, schema: { params: membershipIdParam } }, async (req, reply) => {
+  org.delete('/api/db/organizations/:organizationId/members/:membershipId', { config: { permission: 'member.remove' }, schema: { params: membershipIdParam } }, async (req, reply) => {
     const organizationId = (req as any).authOrganizationId as number;
     const userId = (req as any).authUserId as number;
     const membershipId = Number((req.params as any).membershipId);
@@ -82,7 +82,7 @@ export async function registerMemberRoutes(org: FastifyInstance, ctx: OrgRoutesC
       }
       const result = await opts.idempotencyService.run({
         actorUserId: userId, sessionId: sessionIdOf(req), method: 'DELETE',
-        normalizedPath: `/api/organizations/${organizationId}/members/${membershipId}`,
+        normalizedPath: `/api/db/organizations/${organizationId}/members/${membershipId}`,
         idempotencyKey: mode.idempotencyKey,
         business: async (tx: Queryable) => {
           const r = await svc.removeMemberInTx(tx, organizationId, membershipId, userId);
@@ -100,7 +100,7 @@ export async function registerMemberRoutes(org: FastifyInstance, ctx: OrgRoutesC
     }
   });
 
-  org.post('/api/organizations/:organizationId/leave', { schema: { params: organizationIdParam } }, async (req, reply) => {
+  org.post('/api/db/organizations/:organizationId/leave', { schema: { params: organizationIdParam } }, async (req, reply) => {
     const organizationId = (req as any).authOrganizationId as number;
     const userId = (req as any).authUserId as number;
     try {
@@ -117,7 +117,7 @@ export async function registerMemberRoutes(org: FastifyInstance, ctx: OrgRoutesC
       }
       const result = await opts.idempotencyService.run({
         actorUserId: userId, sessionId: sessionIdOf(req), method: 'POST',
-        normalizedPath: `/api/organizations/${organizationId}/leave`,
+        normalizedPath: `/api/db/organizations/${organizationId}/leave`,
         idempotencyKey: mode.idempotencyKey,
         business: async (tx: Queryable) => {
           const r = await svc.leaveOrganizationInTx(tx, organizationId, userId);

@@ -28,13 +28,13 @@ async function makeUser(t: TestApp, email: string) {
 }
 
 describe('personal routes smoke', () => {
-  it('GET /api/me requires auth and returns the user', async () => {
+  it('GET /api/db/me requires auth and returns the user', async () => {
     const t = await buildTestApp();
-    const anon = await t.app.inject({ method: 'GET', url: '/api/me' });
+    const anon = await t.app.inject({ method: 'GET', url: '/api/db/me' });
     expect(anon.statusCode).toBe(401);
 
     const { token } = await makeUser(t, 'me@b.com');
-    const res = await t.app.inject({ method: 'GET', url: '/api/me', headers: t.auth(token) });
+    const res = await t.app.inject({ method: 'GET', url: '/api/db/me', headers: t.auth(token) });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(typeof body.user.userId).toBe('string');
@@ -43,13 +43,13 @@ describe('personal routes smoke', () => {
     await t.close();
   });
 
-  it('GET /api/personal/subscription requires auth and returns nulls without a subscription', async () => {
+  it('GET /api/db/personal/subscription requires auth and returns nulls without a subscription', async () => {
     const t = await buildTestApp();
-    const anon = await t.app.inject({ method: 'GET', url: '/api/personal/subscription' });
+    const anon = await t.app.inject({ method: 'GET', url: '/api/db/personal/subscription' });
     expect(anon.statusCode).toBe(401);
 
     const { token } = await makeUser(t, 'sub@b.com');
-    const res = await t.app.inject({ method: 'GET', url: '/api/personal/subscription', headers: t.auth(token) });
+    const res = await t.app.inject({ method: 'GET', url: '/api/db/personal/subscription', headers: t.auth(token) });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ planCode: null, status: null, entitlement: null });
     await t.close();
@@ -67,7 +67,7 @@ describe('personal routes smoke', () => {
       periodEndTime: null,
     });
 
-    const me = await t.app.inject({ method: 'GET', url: '/api/me', headers: t.auth(token) });
+    const me = await t.app.inject({ method: 'GET', url: '/api/db/me', headers: t.auth(token) });
     expect(me.statusCode).toBe(200);
     expect(me.json().subscription.planCode).toBe('free');
     expect(me.json().subscription.entitlement).toMatchObject({ allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 0 });
@@ -76,7 +76,7 @@ describe('personal routes smoke', () => {
       'entitlement', 'periodEndTime', 'periodStartTime', 'planCode', 'status',
     ]);
 
-    const sub = await t.app.inject({ method: 'GET', url: '/api/personal/subscription', headers: t.auth(token) });
+    const sub = await t.app.inject({ method: 'GET', url: '/api/db/personal/subscription', headers: t.auth(token) });
     expect(sub.statusCode).toBe(200);
     expect(sub.json()).toMatchObject({
       planCode: 'free',
@@ -86,16 +86,16 @@ describe('personal routes smoke', () => {
     await t.close();
   });
 
-  it('GET/DELETE /api/personal/devices lists and revokes a device', async () => {
+  it('GET/DELETE /api/db/personal/devices lists and revokes a device', async () => {
     const t = await buildTestApp();
-    const anon = await t.app.inject({ method: 'GET', url: '/api/personal/devices' });
+    const anon = await t.app.inject({ method: 'GET', url: '/api/db/personal/devices' });
     expect(anon.statusCode).toBe(401);
 
-    const anonDel = await t.app.inject({ method: 'DELETE', url: '/api/personal/devices/1' });
+    const anonDel = await t.app.inject({ method: 'DELETE', url: '/api/db/personal/devices/1' });
     expect(anonDel.statusCode).toBe(401);
 
     const { id, token } = await makeUser(t, 'dev@b.com');
-    const empty = await t.app.inject({ method: 'GET', url: '/api/personal/devices', headers: t.auth(token) });
+    const empty = await t.app.inject({ method: 'GET', url: '/api/db/personal/devices', headers: t.auth(token) });
     expect(empty.json().devices).toEqual([]);
 
     const device = await t.repos.deviceRepo.upsert({} as Queryable, {
@@ -108,7 +108,7 @@ describe('personal routes smoke', () => {
       lastUsedTime: null,
     });
 
-    const list = await t.app.inject({ method: 'GET', url: '/api/personal/devices', headers: t.auth(token) });
+    const list = await t.app.inject({ method: 'GET', url: '/api/db/personal/devices', headers: t.auth(token) });
     expect(list.json().devices).toHaveLength(1);
     const dto = list.json().devices[0];
     expect(String(dto.deviceId)).toBe(String(device.id));
@@ -116,11 +116,11 @@ describe('personal routes smoke', () => {
       'clientVersion', 'createTime', 'deviceId', 'deviceName', 'devicePlatform', 'lastUsedTime', 'status',
     ]);
 
-    const del = await t.app.inject({ method: 'DELETE', url: `/api/personal/devices/${device.id}`, headers: { ...t.auth(token), 'idempotency-key': '123e4567-e89b-42d3-8456-426614174000' } });
+    const del = await t.app.inject({ method: 'DELETE', url: `/api/db/personal/devices/${device.id}`, headers: { ...t.auth(token), 'idempotency-key': '123e4567-e89b-42d3-8456-426614174000' } });
     expect(del.statusCode).toBe(200);
     expect(del.json()).toEqual({ ok: true });
 
-    const after = await t.app.inject({ method: 'GET', url: '/api/personal/devices', headers: t.auth(token) });
+    const after = await t.app.inject({ method: 'GET', url: '/api/db/personal/devices', headers: t.auth(token) });
     expect(after.json().devices[0].status).toBe('revoked');
     await t.close();
   });
@@ -149,16 +149,16 @@ describe('personal routes smoke', () => {
       lastUsedTime: null,
     });
 
-    const list = await t.app.inject({ method: 'GET', url: '/api/personal/devices', headers: t.auth(first.token) });
+    const list = await t.app.inject({ method: 'GET', url: '/api/db/personal/devices', headers: t.auth(first.token) });
     expect(list.statusCode).toBe(200);
     const ids = list.json().devices.map((d: any) => String(d.deviceId));
     expect(ids).toEqual([String(firstDevice.id)]);
 
-    const crossDel = await t.app.inject({ method: 'DELETE', url: `/api/personal/devices/${secondDevice.id}`, headers: { ...t.auth(first.token), 'idempotency-key': '123e4567-e89b-42d3-8456-426614174000' } });
+    const crossDel = await t.app.inject({ method: 'DELETE', url: `/api/db/personal/devices/${secondDevice.id}`, headers: { ...t.auth(first.token), 'idempotency-key': '123e4567-e89b-42d3-8456-426614174000' } });
     expect(crossDel.statusCode).toBe(404);
     expect(crossDel.json().code).toBe('NOT_FOUND');
 
-    const secondList = await t.app.inject({ method: 'GET', url: '/api/personal/devices', headers: t.auth(second.token) });
+    const secondList = await t.app.inject({ method: 'GET', url: '/api/db/personal/devices', headers: t.auth(second.token) });
     expect(secondList.statusCode).toBe(200);
     expect(secondList.json().devices).toHaveLength(1);
     expect(secondList.json().devices[0].status).toBe('active');
@@ -174,7 +174,7 @@ describe('personal routes smoke', () => {
 
     // 扩展无 key → 沿用原撤销行为，200。
     const extToken = await t.tokenFor(user.id);
-    const ext = await t.app.inject({ method: 'DELETE', url: `/api/personal/devices/${device.id}`, headers: t.auth(extToken) });
+    const ext = await t.app.inject({ method: 'DELETE', url: `/api/db/personal/devices/${device.id}`, headers: t.auth(extToken) });
     expect(ext.statusCode).toBe(200);
     expect(ext.json()).toEqual({ ok: true });
 
@@ -183,7 +183,7 @@ describe('personal routes smoke', () => {
       userId: user.id, deviceKey: 'dk-aud2', devicePlatform: 'linux', deviceName: 'x', clientVersion: '1', status: 'active', lastUsedTime: null,
     });
     const extKeyed = await t.app.inject({
-      method: 'DELETE', url: `/api/personal/devices/${device2.id}`,
+      method: 'DELETE', url: `/api/db/personal/devices/${device2.id}`,
       headers: { ...t.auth(extToken), 'idempotency-key': '123e4567-e89b-42d3-8456-426614174000' },
     });
     expect(extKeyed.statusCode).toBe(200);
@@ -193,7 +193,7 @@ describe('personal routes smoke', () => {
     const consoleToken = await t.tokenService.signAccessToken({ userId: user.id, aud: 'console', scope: ['device'], sessionId: 'ws', sessionVersion: 0 });
     const csrf = t.csrfService.issue('ws');
     const con = await t.app.inject({
-      method: 'DELETE', url: `/api/personal/devices/${device2.id}`,
+      method: 'DELETE', url: `/api/db/personal/devices/${device2.id}`,
       headers: { origin: ORIGIN, authorization: `Bearer ${consoleToken}`, 'x-csrf-token': csrf, cookie: `${csrfCookieName()}=${csrf}` },
     });
     expect(con.statusCode).toBe(400);
@@ -247,13 +247,13 @@ describe('personal routes smoke', () => {
     });
     const token = await tokenService.signAccessToken({ userId: user.id, aud: 'extension', scope: ['device'], sessionId: 'fam', deviceId: device.id, sessionVersion: 0 });
 
-    const first = await app.inject({ method: 'DELETE', url: `/api/personal/devices/${device.id}`, headers: { authorization: `Bearer ${token}` } });
+    const first = await app.inject({ method: 'DELETE', url: `/api/db/personal/devices/${device.id}`, headers: { authorization: `Bearer ${token}` } });
     expect(first.statusCode).toBe(200);
     expect(first.json().code).toBe('CURRENT_SESSION_REVOKED');
     expect(deviceRepo.store.get(device.id)!.status).toBe('revoked');
 
     // 相同 access token 重试：refresh family 已撤销 → session-active 校验拒绝为 401，到不了回执重放。
-    const retry = await app.inject({ method: 'DELETE', url: `/api/personal/devices/${device.id}`, headers: { authorization: `Bearer ${token}` } });
+    const retry = await app.inject({ method: 'DELETE', url: `/api/db/personal/devices/${device.id}`, headers: { authorization: `Bearer ${token}` } });
     expect(retry.statusCode).toBe(401);
     await app.close();
   });

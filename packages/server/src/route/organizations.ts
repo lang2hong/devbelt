@@ -41,7 +41,7 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
     aud: ['extension', 'console'],
     scope: ['organization'],
     routes: async (auth) => {
-      auth.get('/api/organizations', async (req, reply) => {
+      auth.get('/api/db/organizations', async (req, reply) => {
         const userId = (req as any).authUserId as number;
         try {
           const orgs = await svc.listOrganizations(userId);
@@ -51,7 +51,7 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
         }
       });
 
-      auth.post('/api/organizations', { schema: { body: createOrganizationBody } }, async (req, reply) => {
+      auth.post('/api/db/organizations', { schema: { body: createOrganizationBody } }, async (req, reply) => {
         if (isConsoleAudience(req) && !consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) {
           return reply.code(403).send({ message: 'forbidden', code: 'FORBIDDEN' });
         }
@@ -70,7 +70,7 @@ export async function organizationRoutes(app: FastifyInstance, opts: Organizatio
             return;
           }
           const result = await opts.idempotencyService.run({
-            actorUserId: userId, sessionId: sessionIdOf(req), method: 'POST', normalizedPath: '/api/organizations',
+            actorUserId: userId, sessionId: sessionIdOf(req), method: 'POST', normalizedPath: '/api/db/organizations',
             idempotencyKey: mode.idempotencyKey, requestBody: req.body,
             // 限流在 createProcessing 之后、business 之前的同一事务内计数（随事务回滚）。
             beforeWrite: (tx) => svc.throttleCreateOrganizationInTx(tx, userId),

@@ -469,8 +469,8 @@ describe('change-password / confirm 单次消费契约', () => {
   });
 });
 
-describe('设备管理（/api/personal/devices）', () => {
-  it('listDevices 命中 /api/personal/devices 并解析 DTO', async () => {
+describe('设备管理（/api/db/personal/devices）', () => {
+  it('listDevices 命中 /api/db/personal/devices 并解析 DTO', async () => {
     const calls: { url: string; method: string }[] = [];
     const device = { deviceId: 'd1', devicePlatform: 'linux', deviceName: 'host', clientVersion: '1.90.0', status: 'active', lastUsedTime: null, createTime: '2024-01-01T00:00:00.000Z' };
     const fetchMock = vi.fn(async (url: unknown, init: any) => {
@@ -481,12 +481,12 @@ describe('设备管理（/api/personal/devices）', () => {
 
     const { devices } = await client.listDevices();
 
-    expect(calls[0].url).toBe('http://x/api/personal/devices');
+    expect(calls[0].url).toBe('http://x/api/db/personal/devices');
     expect(calls[0].method).toBe('GET');
     expect(devices[0]).toEqual({ deviceId: 'd1', devicePlatform: 'linux', deviceName: 'host', clientVersion: '1.90.0', status: 'active', lastUsedTime: null, createTime: '2024-01-01T00:00:00.000Z' });
   });
 
-  it('revokeDevice 命中 /api/personal/devices/:id', async () => {
+  it('revokeDevice 命中 /api/db/personal/devices/:id', async () => {
     const calls: { url: string; method: string }[] = [];
     const fetchMock = vi.fn(async (url: unknown, init: any) => {
       calls.push({ url: String(url), method: init?.method ?? 'DELETE' });
@@ -496,7 +496,7 @@ describe('设备管理（/api/personal/devices）', () => {
 
     await client.revokeDevice('d1');
 
-    expect(calls[0].url).toBe('http://x/api/personal/devices/d1');
+    expect(calls[0].url).toBe('http://x/api/db/personal/devices/d1');
     expect(calls[0].method).toBe('DELETE');
   });
 });
@@ -518,7 +518,7 @@ describe('getMe（个人权益）', () => {
 });
 
 describe('getPlans（套餐目录）', () => {
-  it('命中 /api/plans 并返回个人 + 组织目录', async () => {
+  it('命中 /api/db/plans 并返回个人 + 组织目录', async () => {
     const calls: { url: string; method: string }[] = [];
     const catalog = {
       personal: [{ code: 'free', name: 'Free', billing: { unit: 'month', priceCents: 0 }, features: [{ key: 'maxDevices', type: 'number', value: 0 }] }],
@@ -532,7 +532,7 @@ describe('getPlans（套餐目录）', () => {
 
     const plans = await client.getPlans();
 
-    expect(calls[0].url).toBe('http://x/api/plans');
+    expect(calls[0].url).toBe('http://x/api/db/plans');
     expect(calls[0].method).toBe('GET');
     expect(plans.personal[0].code).toBe('free');
     expect(plans.organization).toEqual([]);

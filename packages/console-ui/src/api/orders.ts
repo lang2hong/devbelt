@@ -59,7 +59,7 @@ export async function listOrders(
 ): Promise<Result<Page<ConsoleOrder>>> {
   if (!token) return { kind: 'unauthorized' };
   try {
-    const res = await authedFetch(`/api/console/orders${qs({ cursor })}`, { headers: auth(token) }, fetchImpl);
+    const res = await authedFetch(`/api/db/console/orders${qs({ cursor })}`, { headers: auth(token) }, fetchImpl);
     if (res.ok) {
       const body = (await res.json()) as Page<ConsoleOrder>;
       return { kind: 'ok', value: body };
@@ -77,7 +77,7 @@ export async function getOrder(
 ): Promise<Result<ConsoleOrder>> {
   if (!token) return { kind: 'unauthorized' };
   try {
-    const res = await authedFetch(`/api/console/orders/${encodeURIComponent(orderNo)}`, { headers: auth(token) }, fetchImpl);
+    const res = await authedFetch(`/api/db/console/orders/${encodeURIComponent(orderNo)}`, { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: (await res.json()) as ConsoleOrder };
     return failure(res);
   } catch {
@@ -112,7 +112,7 @@ export async function createOrder(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      '/api/console/orders',
+      '/api/db/console/orders',
       {
         method: 'POST',
         headers: {

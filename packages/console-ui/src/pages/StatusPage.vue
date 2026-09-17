@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { withBase } from '../lib/router';
+
 const props = defineProps<{ code: number }>();
 
 const content: Record<number, { title: string; message: string }> = {
@@ -15,7 +17,7 @@ const c = content[props.code] ?? content[404];
     <h1>{{ props.code }}</h1>
     <h2>{{ c.title }}</h2>
     <p>{{ c.message }}</p>
-    <a href="/console/account">返回账户</a>
+    <a :href="withBase('/console/account')">返回账户</a>
   </section>
 </template>
 

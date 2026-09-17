@@ -14,7 +14,7 @@ import type { MysqlDb, Queryable } from './db.js';
  * 缺特性即该键不存在（消费方按「缺特性 = deny」处理，0 原样保留为「不限」）。
  *
  * ## 进程内缓存（plans.version 失效）
- * 登录热路径与 /api/me 每请求都要解析 free 档与订阅 plan；每次两条查询成本高。
+ * 登录热路径与 /api/db/me 每请求都要解析 free 档与订阅 plan；每次两条查询成本高。
  * 这里按 id/code 缓存完整 Plan，写入（`saveInTx`）与任何读路径刷新时同步覆盖。
  * 单实例部署下等价权威；多实例时其它实例在下次编辑前可能读到旧值（当前部署为单实例）。
  */

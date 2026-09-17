@@ -35,7 +35,7 @@ describe('createOrganization', () => {
       return jsonRes(201, { organization: org });
     });
     expect(r).toEqual({ kind: 'ok', value: org });
-    expect(captured.url).toBe('/api/organizations');
+    expect(captured.url).toBe('/api/db/organizations');
     expect(captured.init?.method).toBe('POST');
     const headers = captured.init?.headers as Record<string, string>;
     expect(headers['Idempotency-Key']).toBe('fixed-key');
@@ -86,7 +86,7 @@ describe('folder/resource metadata (read-only)', () => {
       url = String(u);
       return jsonRes(200, { folders: [{ folderId: '2', name: 'A', parentId: null }] });
     });
-    expect(url).toBe('/api/organizations/1/folders');
+    expect(url).toBe('/api/db/organizations/1/folders');
     expect(r).toEqual({ kind: 'ok', value: [{ folderId: '2', name: 'A', parentId: null }] });
   });
 
@@ -105,7 +105,7 @@ describe('folder/resource metadata (read-only)', () => {
       url = String(u);
       return jsonRes(200, { resources: [summary] });
     });
-    expect(url).toBe('/api/organizations/1/resources');
+    expect(url).toBe('/api/db/organizations/1/resources');
     expect(r.kind).toBe('ok');
     const value = r.kind === 'ok' ? r.value : [];
     expect(value[0]).toEqual(summary);

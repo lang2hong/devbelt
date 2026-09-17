@@ -82,7 +82,7 @@ describe('payment feature flag (503)', () => {
     const csrf = b.csrfService.issue('ws');
     const res = await b.app.inject({
       method: 'POST',
-      url: '/api/console/orders',
+      url: '/api/db/console/orders',
       headers: {
         authorization: `Bearer ${await b.consoleToken(1)}`,
         origin: ORIGIN, 'x-csrf-token': csrf, cookie: `${csrfCookieName()}=${csrf}`,
@@ -99,7 +99,7 @@ describe('payment feature flag (503)', () => {
     const b = await build(false);
     const res = await b.app.inject({
       method: 'POST',
-      url: '/api/public/payment-callback/wechat',
+      url: '/api/db/public/payment-callback/wechat',
       headers: { 'content-type': 'application/json', 'x-payment-signature': 'x' },
       payload: {},
     });
@@ -113,7 +113,7 @@ describe('payment feature flag (503)', () => {
     const csrf = b.csrfService.issue('ws');
     const res = await b.app.inject({
       method: 'POST',
-      url: '/api/console/orders',
+      url: '/api/db/console/orders',
       headers: {
         authorization: `Bearer ${await b.consoleToken(1)}`,
         origin: ORIGIN, 'x-csrf-token': csrf, cookie: `${csrfCookieName()}=${csrf}`,

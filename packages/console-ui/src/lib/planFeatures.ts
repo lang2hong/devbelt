@@ -1,5 +1,5 @@
 /**
- * 套餐特征展示：服务端 /api/plans 下发 `features: {key,type,value}` 描述符，这里按 key
+ * 套餐特征展示：服务端 /api/db/plans 下发 `features: {key,type,value}` 描述符，这里按 key
  * 渲染中文标签与格式化文本。未知 key 优雅降级（标签用 key、按 type 通用格式化），
  * 因此服务端新增特征维度时前端无需改动即可展示。
  */

@@ -98,7 +98,7 @@ describe('auth routes', () => {
 
   it('devices endpoint requires authentication', async () => {
     const t = await buildTestApp();
-    const res = await t.app.inject({ method: 'GET', url: '/api/personal/devices' });
+    const res = await t.app.inject({ method: 'GET', url: '/api/db/personal/devices' });
     expect(res.statusCode).toBe(401);
     await t.close();
   });

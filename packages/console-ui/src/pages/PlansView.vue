@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { listPlans } from '../api/plans';
 import { setAccessToken } from '../api/consoleAuth';
-import { navigate } from '../lib/router';
+import { navigate, withBase } from '../lib/router';
 import { featureLabel, formatFeature, formatPrice, type PlanDto } from '../lib/planFeatures';
 
 /** 个人订阅快照（与 AccountView / CheckoutView 同口径）。 */
@@ -25,7 +25,7 @@ onMounted(async () => {
   const r = await listPlans();
   if (r.kind === 'unauthorized') {
     setAccessToken(null);
-    window.location.assign('/login');
+    window.location.assign(withBase('/login'));
     return;
   }
   if (r.kind === 'failure') {

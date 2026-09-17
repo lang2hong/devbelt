@@ -175,14 +175,14 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
       const resetLimit = (userId: number) => opts.rateLimiter.hit(`sync:reset:user:${userId}`, SYNC_RESET_WINDOW_S, SYNC_RESET_MAX);
       const accountRecoveryStepUpLimit = (userId: number) => opts.rateLimiter.hit(`sync:account-recovery-stepup:user:${userId}`, SYNC_ACCOUNT_RECOVERY_STEPUP_WINDOW_S, SYNC_ACCOUNT_RECOVERY_STEPUP_MAX);
 
-      child.get('/api/sync/state', async (req, reply) => {
+      child.get('/api/db/sync/state', async (req, reply) => {
         const userId = (req as any).authUserId as number;
         try {
           reply.send(await opts.syncState.getState(userId));
         } catch (e) { sendError(reply, e); }
       });
 
-      child.put('/api/sync/init', { schema: { body: syncInitBody } }, async (req, reply) => {
+      child.put('/api/db/sync/init', { schema: { body: syncInitBody } }, async (req, reply) => {
         const userId = (req as any).authUserId as number;
         try {
           await initLimit(userId);
@@ -191,7 +191,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         } catch (e) { sendError(reply, e); }
       });
 
-      child.post('/api/sync/change-key', { schema: { body: syncChangeKeyBody } }, async (req, reply) => {
+      child.post('/api/db/sync/change-key', { schema: { body: syncChangeKeyBody } }, async (req, reply) => {
         const userId = (req as any).authUserId as number;
         const body = req.body as any;
         try {
@@ -209,7 +209,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         } catch (e) { sendError(reply, e); }
       });
 
-      child.post('/api/sync/recover', { schema: { body: syncRecoverBody } }, async (req, reply) => {
+      child.post('/api/db/sync/recover', { schema: { body: syncRecoverBody } }, async (req, reply) => {
         const userId = (req as any).authUserId as number;
         const body = req.body as any;
         try {
@@ -230,7 +230,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         } catch (e) { sendError(reply, e); }
       });
 
-      child.post('/api/sync/destroy', { schema: { body: syncDestroyBody } }, async (req, reply) => {
+      child.post('/api/db/sync/destroy', { schema: { body: syncDestroyBody } }, async (req, reply) => {
         const userId = (req as any).authUserId as number;
         const body = req.body as any;
         try {
@@ -247,7 +247,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         } catch (e) { sendError(reply, e); }
       });
 
-      child.post('/api/sync/recover-via-account', { schema: { body: syncRecoverViaAccountBody } }, async (req, reply) => {
+      child.post('/api/db/sync/recover-via-account', { schema: { body: syncRecoverViaAccountBody } }, async (req, reply) => {
         const userId = (req as any).authUserId as number;
         const body = req.body as any;
         try {
@@ -281,7 +281,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         } catch (e) { sendError(reply, e); }
       });
 
-      child.post('/api/sync/account-recover', { schema: { body: syncAccountRecoverBody } }, async (req, reply) => {
+      child.post('/api/db/sync/account-recover', { schema: { body: syncAccountRecoverBody } }, async (req, reply) => {
         const userId = (req as any).authUserId as number;
         const body = req.body as any;
         try {
@@ -305,7 +305,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         } catch (e) { sendError(reply, e); }
       });
 
-      child.get('/api/sync/records', { schema: { querystring: syncRecordsQuery } }, async (req, reply) => {
+      child.get('/api/db/sync/records', { schema: { querystring: syncRecordsQuery } }, async (req, reply) => {
         const userId = (req as any).authUserId as number;
         const q = (req.query ?? {}) as Record<string, unknown>;
         const after = typeof q.after === 'string' ? q.after : '0';
@@ -316,7 +316,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         } catch (e) { sendError(reply, e); }
       });
 
-      child.put('/api/sync/records/:recordId', { schema: { params: syncRecordIdParam, body: syncPutRecordBody } }, async (req, reply) => {
+      child.put('/api/db/sync/records/:recordId', { schema: { params: syncRecordIdParam, body: syncPutRecordBody } }, async (req, reply) => {
         const userId = (req as any).authUserId as number;
         const body = req.body as any;
         const pathId = (req.params as any).recordId as string;
@@ -343,7 +343,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         } catch (e) { sendError(reply, e); }
       });
 
-      child.delete('/api/sync/records/:recordId', { schema: { params: syncRecordIdParam, body: syncDeleteRecordBody } }, async (req, reply) => {
+      child.delete('/api/db/sync/records/:recordId', { schema: { params: syncRecordIdParam, body: syncDeleteRecordBody } }, async (req, reply) => {
         const userId = (req as any).authUserId as number;
         const body = req.body as any;
         const pathId = (req.params as any).recordId as string;
@@ -364,7 +364,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         } catch (e) { sendError(reply, e); }
       });
 
-      child.post('/api/sync/reset-challenges', async (req, reply) => {
+      child.post('/api/db/sync/reset-challenges', async (req, reply) => {
         const userId = (req as any).authUserId as number;
         try {
           await opts.syncReset.requestResetChallenge(userId, req.ip);
@@ -372,7 +372,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
         } catch (e) { sendError(reply, e); }
       });
 
-      child.post('/api/sync/reset-after-loss', { schema: { body: syncResetAfterLossBody } }, async (req, reply) => {
+      child.post('/api/db/sync/reset-after-loss', { schema: { body: syncResetAfterLossBody } }, async (req, reply) => {
         const userId = (req as any).authUserId as number;
         const body = req.body as any;
         try {

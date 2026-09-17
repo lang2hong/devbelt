@@ -13,7 +13,7 @@ describe('MetricsRegistry', () => {
 
   it('builds the canonical (method, route, status) key', () => {
     const m = new MetricsRegistry();
-    expect(m.requestKey('GET', '/api/sync/state', 200)).toBe('http:GET:/api/sync/state:200');
+    expect(m.requestKey('GET', '/api/db/sync/state', 200)).toBe('http:GET:/api/db/sync/state:200');
   });
 });
 

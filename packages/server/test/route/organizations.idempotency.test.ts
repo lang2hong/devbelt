@@ -100,7 +100,7 @@ describe('organization write idempotency', () => {
     const b = await build();
     const user = await b.userRepo.create('ext@b.com', 'hash', undefined);
     const res = await b.app.inject({
-      method: 'POST', url: '/api/organizations',
+      method: 'POST', url: '/api/db/organizations',
       headers: { authorization: `Bearer ${await b.extToken(user.id)}` },
       payload: { name: 'Acme' },
     });
@@ -115,7 +115,7 @@ describe('organization write idempotency', () => {
     const token = await b.consoleToken(user.id);
     const csrf = b.csrfService.issue('ws');
     const res = await b.app.inject({
-      method: 'POST', url: '/api/organizations',
+      method: 'POST', url: '/api/db/organizations',
       headers: { origin: ORIGIN, authorization: `Bearer ${token}`, 'x-csrf-token': csrf, cookie: `${csrfCookieName()}=${csrf}` },
       payload: { name: 'Acme' },
     });
@@ -130,11 +130,11 @@ describe('organization write idempotency', () => {
     const token = await b.extToken(user.id);
     const headers = { authorization: `Bearer ${token}`, 'idempotency-key': UUID_V4 };
 
-    const first = await b.app.inject({ method: 'POST', url: '/api/organizations', headers, payload: { name: 'Acme' } });
+    const first = await b.app.inject({ method: 'POST', url: '/api/db/organizations', headers, payload: { name: 'Acme' } });
     expect(first.statusCode).toBe(201);
     const orgId = first.json().organization.organizationId;
 
-    const second = await b.app.inject({ method: 'POST', url: '/api/organizations', headers, payload: { name: 'Acme' } });
+    const second = await b.app.inject({ method: 'POST', url: '/api/db/organizations', headers, payload: { name: 'Acme' } });
     expect(second.statusCode).toBe(201);
     expect(second.json().organization.organizationId).toBe(orgId);
     expect(b.organizationRepo.store.size).toBe(1);
@@ -150,8 +150,8 @@ describe('organization write idempotency', () => {
     const token = await b.extToken(user.id);
     const headers = { authorization: `Bearer ${token}`, 'idempotency-key': UUID_V4 };
 
-    await b.app.inject({ method: 'POST', url: '/api/organizations', headers, payload: { name: 'Acme' } });
-    const res = await b.app.inject({ method: 'POST', url: '/api/organizations', headers, payload: { name: 'Other' } });
+    await b.app.inject({ method: 'POST', url: '/api/db/organizations', headers, payload: { name: 'Acme' } });
+    const res = await b.app.inject({ method: 'POST', url: '/api/db/organizations', headers, payload: { name: 'Other' } });
     expect(res.statusCode).toBe(409);
     expect(res.json().code).toBe('IDEMPOTENCY_KEY_REUSED');
     await b.app.close();
@@ -162,12 +162,12 @@ describe('organization write idempotency', () => {
     const { user, org } = await makeAdmin(b);
     const token = await b.extToken(user.id);
     const res = await b.app.inject({
-      method: 'POST', url: `/api/organizations/${org.id}/close`,
+      method: 'POST', url: `/api/db/organizations/${org.id}/close`,
       headers: { authorization: `Bearer ${token}`, 'idempotency-key': UUID_V4 },
     });
     expect(res.statusCode).toBe(200);
 
-    const receipt = await b.idemRepo.findByKey(user.id, 's1', 'POST', `/api/organizations/${org.id}/close`, UUID_V4);
+    const receipt = await b.idemRepo.findByKey(user.id, 's1', 'POST', `/api/db/organizations/${org.id}/close`, UUID_V4);
     expect(receipt).toBeDefined();
     expect(receipt!.expiresTime.getTime() - Date.now()).toBeGreaterThan(29 * DAY);
     await b.app.close();
@@ -182,14 +182,14 @@ describe('organization write idempotency', () => {
     const headers = { authorization: `Bearer ${token}`, 'idempotency-key': UUID_V4 };
 
     const first = await b.app.inject({
-      method: 'POST', url: `/api/organizations/${org.id}/invitations`,
+      method: 'POST', url: `/api/db/organizations/${org.id}/invitations`,
       headers, payload: { email: 'target@b.com', role: 'member' },
     });
     expect(first.statusCode).toBe(201);
     expect(b.sentEmails).toHaveLength(1);
 
     const second = await b.app.inject({
-      method: 'POST', url: `/api/organizations/${org.id}/invitations`,
+      method: 'POST', url: `/api/db/organizations/${org.id}/invitations`,
       headers, payload: { email: 'target@b.com', role: 'member' },
     });
     expect(second.statusCode).toBe(201);
@@ -208,11 +208,11 @@ describe('organization write idempotency', () => {
     const token = await b.extToken(user.id);
     const headers = { authorization: `Bearer ${token}`, 'idempotency-key': UUID_V4 };
 
-    const first = await b.app.inject({ method: 'POST', url: `/api/organizations/${org.id}/close`, headers });
+    const first = await b.app.inject({ method: 'POST', url: `/api/db/organizations/${org.id}/close`, headers });
     expect(first.statusCode).toBe(200);
 
     // 组织已关闭：同 key 重试仍须重放首个 200，而非组织状态 404。
-    const retry = await b.app.inject({ method: 'POST', url: `/api/organizations/${org.id}/close`, headers });
+    const retry = await b.app.inject({ method: 'POST', url: `/api/db/organizations/${org.id}/close`, headers });
     expect(retry.statusCode).toBe(200);
     expect(retry.json()).toEqual(first.json());
     await b.app.close();
@@ -229,11 +229,11 @@ describe('organization write idempotency', () => {
     const token = await b.extToken(member.id);
     const headers = { authorization: `Bearer ${token}`, 'idempotency-key': UUID_V4 };
 
-    const first = await b.app.inject({ method: 'POST', url: `/api/organizations/${org.id}/leave`, headers });
+    const first = await b.app.inject({ method: 'POST', url: `/api/db/organizations/${org.id}/leave`, headers });
     expect(first.statusCode).toBe(200);
 
     // 成员已退出：同 key 重试仍须重放 200，而非 membership 404。
-    const retry = await b.app.inject({ method: 'POST', url: `/api/organizations/${org.id}/leave`, headers });
+    const retry = await b.app.inject({ method: 'POST', url: `/api/db/organizations/${org.id}/leave`, headers });
     expect(retry.statusCode).toBe(200);
     expect(retry.json()).toEqual(first.json());
     await b.app.close();
@@ -252,7 +252,7 @@ describe('organization write idempotency', () => {
     const headers = { authorization: `Bearer ${token}`, 'idempotency-key': UUID_V4 };
 
     const first = await b.app.inject({
-      method: 'PATCH', url: `/api/organizations/${org.id}/members/${targetM.id}`,
+      method: 'PATCH', url: `/api/db/organizations/${org.id}/members/${targetM.id}`,
       headers, payload: { role: 'admin' },
     });
     expect(first.statusCode).toBe(200);
@@ -260,7 +260,7 @@ describe('organization write idempotency', () => {
     // 操作者随后被移除：同 key 重放仍须返回首个 200，而非 404/403。
     await b.membershipRepo.remove({} as Queryable, ownerM!.id, new Date());
     const retry = await b.app.inject({
-      method: 'PATCH', url: `/api/organizations/${org.id}/members/${targetM.id}`,
+      method: 'PATCH', url: `/api/db/organizations/${org.id}/members/${targetM.id}`,
       headers, payload: { role: 'admin' },
     });
     expect(retry.statusCode).toBe(200);
@@ -275,7 +275,7 @@ describe('organization write idempotency', () => {
 
     // 首次创建（占 1 次配额）+ 收到回执。
     const first = await b.app.inject({
-      method: 'POST', url: '/api/organizations', headers: { authorization: `Bearer ${token}`, 'idempotency-key': UUID_V4 }, payload: { name: 'A' },
+      method: 'POST', url: '/api/db/organizations', headers: { authorization: `Bearer ${token}`, 'idempotency-key': UUID_V4 }, payload: { name: 'A' },
     });
     expect(first.statusCode).toBe(201);
 
@@ -286,13 +286,13 @@ describe('organization write idempotency', () => {
 
     // 同 key 重放 → 201（回执优先，不消耗新增配额）。
     const replay = await b.app.inject({
-      method: 'POST', url: '/api/organizations', headers: { authorization: `Bearer ${token}`, 'idempotency-key': UUID_V4 }, payload: { name: 'A' },
+      method: 'POST', url: '/api/db/organizations', headers: { authorization: `Bearer ${token}`, 'idempotency-key': UUID_V4 }, payload: { name: 'A' },
     });
     expect(replay.statusCode).toBe(201);
 
     // 新 key → 429。
     const fresh = await b.app.inject({
-      method: 'POST', url: '/api/organizations', headers: { authorization: `Bearer ${token}`, 'idempotency-key': '223e4567-e89b-42d3-8456-426614174000' }, payload: { name: 'B' },
+      method: 'POST', url: '/api/db/organizations', headers: { authorization: `Bearer ${token}`, 'idempotency-key': '223e4567-e89b-42d3-8456-426614174000' }, payload: { name: 'B' },
     });
     expect(fresh.statusCode).toBe(429);
     await b.app.close();

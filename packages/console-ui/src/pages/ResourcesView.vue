@@ -9,7 +9,7 @@ import {
   type OrgSummary,
 } from '../api/organizations';
 import { setAccessToken } from '../api/consoleAuth';
-import { navigate } from '../lib/router';
+import { navigate, withBase } from '../lib/router';
 
 const props = defineProps<{ organizationId: string }>();
 
@@ -20,7 +20,7 @@ const resources = ref<ResourceSummary[]>([]);
 
 function relogin(): void {
   setAccessToken(null);
-  window.location.assign('/login');
+  window.location.assign(withBase('/login'));
 }
 
 function invalidContext(): void {

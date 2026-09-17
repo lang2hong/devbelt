@@ -26,7 +26,7 @@ export async function syncOverview(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      '/api/console/sync/overview',
+      '/api/db/console/sync/overview',
       { headers: { Accept: 'application/json', Authorization: `Bearer ${token}` } },
       fetchImpl,
     );

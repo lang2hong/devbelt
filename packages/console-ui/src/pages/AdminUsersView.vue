@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import { withBase } from '../lib/router';
 import { listUsers, setUserStatus, adjustUserSubscription, type AdminUser } from '../api/admin';
 import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
@@ -33,7 +34,7 @@ let paging = false;
 
 function relogin(): void {
   setAccessToken(null);
-  window.location.assign('/login');
+  window.location.assign(withBase('/login'));
 }
 
 function serverMsg(r: { message?: string; code?: string }): string {

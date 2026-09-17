@@ -107,24 +107,24 @@ describe('sync routes smoke', () => {
   it('requires auth and runs an init round-trip', async () => {
     const t = await buildTestApp();
 
-    const anon = await t.app.inject({ method: 'GET', url: '/api/sync/state' });
+    const anon = await t.app.inject({ method: 'GET', url: '/api/db/sync/state' });
     expect(anon.statusCode).toBe(401);
 
     const { token } = await makeUser(t, 'sync@b.com');
     const init = await t.app.inject({
-      method: 'PUT', url: '/api/sync/init', headers: t.auth(token),
+      method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token),
       payload: { newState: newStateBody() },
     });
     expect(init.statusCode).toBe(201);
 
     const again = await t.app.inject({
-      method: 'PUT', url: '/api/sync/init', headers: t.auth(token),
+      method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token),
       payload: { newState: newStateBody() },
     });
     expect(again.statusCode).toBe(409);
     expect(again.json().code).toBe('SYNC_STATE_EXISTS');
 
-    const state = await t.app.inject({ method: 'GET', url: '/api/sync/state', headers: t.auth(token) });
+    const state = await t.app.inject({ method: 'GET', url: '/api/db/sync/state', headers: t.auth(token) });
     expect(state.statusCode).toBe(200);
     expect(state.json().keyEpoch).toBe('1');
     expect(state.json().stateVersion).toBe('1');
@@ -136,7 +136,7 @@ describe('sync routes smoke', () => {
     expect(state.json().envelopeSmp).not.toHaveProperty('version');
     expect(state.json().envelopeSmp).not.toHaveProperty('ct');
 
-    const records = await t.app.inject({ method: 'GET', url: '/api/sync/records', headers: t.auth(token) });
+    const records = await t.app.inject({ method: 'GET', url: '/api/db/sync/records', headers: t.auth(token) });
     expect(records.statusCode).toBe(200);
     expect(records.json().records).toEqual([]);
     await t.close();
@@ -145,9 +145,9 @@ describe('sync routes smoke', () => {
   it('getState always returns envelopeAccountVersion (single contract, no capability negotiation)', async () => {
     const t = await buildTestApp();
     const { token } = await makeUser(t, 'sync-cap@b.com');
-    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: newStateBody() } });
+    await t.app.inject({ method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token), payload: { newState: newStateBody() } });
 
-    const state = await t.app.inject({ method: 'GET', url: '/api/sync/state', headers: t.auth(token) });
+    const state = await t.app.inject({ method: 'GET', url: '/api/db/sync/state', headers: t.auth(token) });
     expect(state.statusCode).toBe(200);
     expect(state.json()).toHaveProperty('envelopeAccountVersion', '1');
     await t.close();
@@ -159,7 +159,7 @@ describe('sync routes smoke', () => {
     let last = 0;
     for (let i = 0; i < 11; i += 1) {
       const res = await t.app.inject({
-        method: 'PUT', url: '/api/sync/init', headers: t.auth(token),
+        method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token),
         payload: { newState: newStateBody(i) },
       });
       last = res.statusCode;
@@ -171,7 +171,7 @@ describe('sync routes smoke', () => {
 
   it('records endpoint requires authentication', async () => {
     const t = await buildTestApp();
-    const anon = await t.app.inject({ method: 'GET', url: '/api/sync/records' });
+    const anon = await t.app.inject({ method: 'GET', url: '/api/db/sync/records' });
     expect(anon.statusCode).toBe(401);
     await t.close();
   });
@@ -182,7 +182,7 @@ describe('sync routes smoke', () => {
     const nstate = newStateBody() as any;
     nstate.bogus = true;
     const res = await t.app.inject({
-      method: 'PUT', url: '/api/sync/init', headers: t.auth(token),
+      method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token),
       payload: { newState: nstate },
     });
     expect(res.statusCode).toBe(400);
@@ -193,11 +193,11 @@ describe('sync routes smoke', () => {
   it('reset-challenges requires auth and returns 202', async () => {
     const t = await buildTestApp();
 
-    const anon = await t.app.inject({ method: 'POST', url: '/api/sync/reset-challenges' });
+    const anon = await t.app.inject({ method: 'POST', url: '/api/db/sync/reset-challenges' });
     expect(anon.statusCode).toBe(401);
 
     const { token } = await makeUser(t, 'reset@b.com');
-    const chall = await t.app.inject({ method: 'POST', url: '/api/sync/reset-challenges', headers: t.auth(token) });
+    const chall = await t.app.inject({ method: 'POST', url: '/api/db/sync/reset-challenges', headers: t.auth(token) });
     expect(chall.statusCode).toBe(202);
 
     const sent = t.services.emailSender.sent.filter((e) => e.kind === 'reset_challenge');
@@ -211,18 +211,18 @@ describe('sync routes smoke', () => {
     const { ticket } = await seedHandoff(t, userId, Buffer.alloc(32, 90));
 
     const payload = { handoffTicket: ticket.toString('base64url'), newState: newStateBody() };
-    const res = await t.app.inject({ method: 'POST', url: '/api/sync/reset-after-loss', headers: t.auth(token), payload });
+    const res = await t.app.inject({ method: 'POST', url: '/api/db/sync/reset-after-loss', headers: t.auth(token), payload });
     expect(res.statusCode).toBe(200);
     expect(res.json().keyEpoch).toBe('1');
 
     // 同 ticket + 同 newState：completed 回放返回首次结果。
-    const replay = await t.app.inject({ method: 'POST', url: '/api/sync/reset-after-loss', headers: t.auth(token), payload });
+    const replay = await t.app.inject({ method: 'POST', url: '/api/db/sync/reset-after-loss', headers: t.auth(token), payload });
     expect(replay.statusCode).toBe(200);
     expect(replay.json().keyEpoch).toBe('1');
 
     // 同 ticket + 不同 newState（seed=1 改变 salt/nonce）→ 409 REUSED。
     const changed = { handoffTicket: ticket.toString('base64url'), newState: newStateBody(1) };
-    const reused = await t.app.inject({ method: 'POST', url: '/api/sync/reset-after-loss', headers: t.auth(token), payload: changed });
+    const reused = await t.app.inject({ method: 'POST', url: '/api/db/sync/reset-after-loss', headers: t.auth(token), payload: changed });
     expect(reused.statusCode).toBe(409);
     expect(reused.json().code).toBe('SYNC_RESET_HANDOFF_REUSED');
     await t.close();
@@ -232,7 +232,7 @@ describe('sync routes smoke', () => {
     const t = await buildTestApp();
     const { token } = await makeUser(t, 'reset-strict@b.com');
     const payload: any = { handoffTicket: b64(32, 9), newState: newStateBody(), bogus: true };
-    const res = await t.app.inject({ method: 'POST', url: '/api/sync/reset-after-loss', headers: t.auth(token), payload });
+    const res = await t.app.inject({ method: 'POST', url: '/api/db/sync/reset-after-loss', headers: t.auth(token), payload });
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('VALIDATION_FAILED');
     await t.close();
@@ -246,7 +246,7 @@ describe('sync routes smoke', () => {
 
     const expected = { message: 'sync reset handoff invalid', code: 'SYNC_RESET_HANDOFF_INVALID' };
     const post = (token: string, ticketB64: string) =>
-      t.app.inject({ method: 'POST', url: '/api/sync/reset-after-loss', headers: t.auth(token), payload: { handoffTicket: ticketB64, newState: newStateBody() } });
+      t.app.inject({ method: 'POST', url: '/api/db/sync/reset-after-loss', headers: t.auth(token), payload: { handoffTicket: ticketB64, newState: newStateBody() } });
 
     // 未知 ticket
     let res = await post(a.token, b64(32, 1));
@@ -277,7 +277,7 @@ describe('sync routes smoke', () => {
     const { token, userId } = await makeUser(t, 'sync-sign@b.com');
     const keys = makeKeys();
     const init = await t.app.inject({
-      method: 'PUT', url: '/api/sync/init', headers: t.auth(token),
+      method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token),
       payload: { newState: withKeys(newStateBody(), keys) },
     });
     expect(init.statusCode).toBe(201);
@@ -288,14 +288,14 @@ describe('sync routes smoke', () => {
       cipherSuite: 'AES-256-GCM', formatVersion: 1,
       nonce: b64(12, 8), ciphertext: b64(48, 90), tag: b64(16, 8),
     });
-    const putRes = await t.app.inject({ method: 'PUT', url: `/api/sync/records/${recordId}`, headers: t.auth(token), payload: create });
+    const putRes = await t.app.inject({ method: 'PUT', url: `/api/db/sync/records/${recordId}`, headers: t.auth(token), payload: create });
     expect(putRes.statusCode).toBe(200);
     expect(putRes.json().version).toBe('1');
 
     const del = signRecord(keys.signPriv, userId, 'record.delete', {
       protocolVersion: 1, keyEpoch: '1', mutationId: b64(16, 10), recordId, baseVersion: '1',
     });
-    const delRes = await t.app.inject({ method: 'DELETE', url: `/api/sync/records/${recordId}`, headers: t.auth(token), payload: del });
+    const delRes = await t.app.inject({ method: 'DELETE', url: `/api/db/sync/records/${recordId}`, headers: t.auth(token), payload: del });
     expect(delRes.statusCode).toBe(200);
     expect(delRes.json().version).toBe('2');
     await t.close();
@@ -305,7 +305,7 @@ describe('sync routes smoke', () => {
     const t = await buildTestApp();
     const { token, userId } = await makeUser(t, 'sync-big@b.com');
     const keys = makeKeys();
-    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: withKeys(newStateBody(), keys) } });
+    await t.app.inject({ method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token), payload: { newState: withKeys(newStateBody(), keys) } });
 
     const recordId = b64(8, 6);
     const big = signRecord(keys.signPriv, userId, 'record.put', {
@@ -313,7 +313,7 @@ describe('sync routes smoke', () => {
       cipherSuite: 'AES-256-GCM', formatVersion: 1,
       nonce: b64(12, 8), ciphertext: Buffer.alloc(256 * 1024 + 1, 7).toString('base64url'), tag: b64(16, 8),
     });
-    const res = await t.app.inject({ method: 'PUT', url: `/api/sync/records/${recordId}`, headers: t.auth(token), payload: big });
+    const res = await t.app.inject({ method: 'PUT', url: `/api/db/sync/records/${recordId}`, headers: t.auth(token), payload: big });
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('VALIDATION_FAILED');
     await t.close();
@@ -323,18 +323,18 @@ describe('sync routes smoke', () => {
     const t = await buildTestApp();
     const { token, userId } = await makeUser(t, 'sync-ck@b.com');
     const keys = makeKeys();
-    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: withKeys(newStateBody(), keys) } });
+    await t.app.inject({ method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token), payload: { newState: withKeys(newStateBody(), keys) } });
 
     const body = {
       protocolVersion: 1, keyEpoch: '1', mutationId: b64(16, 12), expectedStateVersion: '1',
       smpKdf: { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: b64(16, 22), outputBytes: 32 },
       envelopeSmp: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '2', nonce: b64(12, 40), ciphertext: b64(32, 41), tag: b64(16, 42) },
     };
-    const res = await t.app.inject({ method: 'POST', url: '/api/sync/change-key', headers: t.auth(token), payload: signState(keys.signPriv, userId, 'state.change-key', body) });
+    const res = await t.app.inject({ method: 'POST', url: '/api/db/sync/change-key', headers: t.auth(token), payload: signState(keys.signPriv, userId, 'state.change-key', body) });
     expect(res.statusCode).toBe(200);
     expect(res.json().stateVersion).toBe('2');
 
-    const staleRes = await t.app.inject({ method: 'POST', url: '/api/sync/change-key', headers: t.auth(token), payload: signState(keys.signPriv, userId, 'state.change-key', { ...body, keyEpoch: '2' }) });
+    const staleRes = await t.app.inject({ method: 'POST', url: '/api/db/sync/change-key', headers: t.auth(token), payload: signState(keys.signPriv, userId, 'state.change-key', { ...body, keyEpoch: '2' }) });
     expect(staleRes.statusCode).toBe(409);
     expect(staleRes.json().code).toBe('SYNC_EPOCH_STALE');
     await t.close();
@@ -344,13 +344,13 @@ describe('sync routes smoke', () => {
     const t = await buildTestApp();
     const { token, userId } = await makeUser(t, 'sync-destroy@b.com');
     const keys = makeKeys();
-    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: withKeys(newStateBody(), keys) } });
+    await t.app.inject({ method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token), payload: { newState: withKeys(newStateBody(), keys) } });
 
     const body = {
       protocolVersion: 1, keyEpoch: '1', mutationId: b64(16, 13), expectedStateVersion: '1',
       newState: withKeys(newStateBody(100), makeKeys()),
     };
-    const res = await t.app.inject({ method: 'POST', url: '/api/sync/destroy', headers: t.auth(token), payload: signState(keys.signPriv, userId, 'state.destroy', body) });
+    const res = await t.app.inject({ method: 'POST', url: '/api/db/sync/destroy', headers: t.auth(token), payload: signState(keys.signPriv, userId, 'state.destroy', body) });
     expect(res.statusCode).toBe(200);
     expect(res.json().keyEpoch).toBe('2');
     expect(res.json().stateVersion).toBe('1');
@@ -362,7 +362,7 @@ describe('sync routes smoke', () => {
     const t = await buildTestApp();
     const { token, userId } = await makeUser(t, 'sync-recover@b.com');
     const keys = makeKeys();
-    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: withKeys(newStateBody(), keys) } });
+    await t.app.inject({ method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token), payload: { newState: withKeys(newStateBody(), keys) } });
 
     const body = {
       protocolVersion: 1, keyEpoch: '1', mutationId: b64(16, 14), expectedStateVersion: '1',
@@ -372,7 +372,7 @@ describe('sync routes smoke', () => {
       envelopeRecovery: { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '2', nonce: b64(12, 60), ciphertext: b64(32, 61), tag: b64(16, 62) },
       recoverSignPub: makeKeys().recoverPub.toString('base64url'),
     };
-    const res = await t.app.inject({ method: 'POST', url: '/api/sync/recover', headers: t.auth(token), payload: signState(keys.recoverPriv, userId, 'state.recover', body) });
+    const res = await t.app.inject({ method: 'POST', url: '/api/db/sync/recover', headers: t.auth(token), payload: signState(keys.recoverPriv, userId, 'state.recover', body) });
     expect(res.statusCode).toBe(200);
     expect(res.json().stateVersion).toBe('2');
     await t.close();
@@ -384,17 +384,17 @@ describe('sync routes smoke', () => {
 
     const bad = newStateBody() as any;
     bad.protocolVersion = 2;
-    const initBad = await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: bad } });
+    const initBad = await t.app.inject({ method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token), payload: { newState: bad } });
     expect(initBad.statusCode).toBe(400);
     expect(initBad.json().code).toBe('SYNC_PROTOCOL_UNSUPPORTED');
 
     const keys = makeKeys();
-    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: withKeys(newStateBody(), keys) } });
+    await t.app.inject({ method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token), payload: { newState: withKeys(newStateBody(), keys) } });
     const rec = {
       protocolVersion: 1, keyEpoch: '1', mutationId: b64(16, 9), signature: b64(64, 1), recordId: b64(8, 6), baseVersion: '0',
       cipherSuite: 'CHACHA20', formatVersion: 1, nonce: b64(12, 8), ciphertext: b64(48, 90), tag: b64(16, 8),
     };
-    const recRes = await t.app.inject({ method: 'PUT', url: `/api/sync/records/${rec.recordId}`, headers: t.auth(token), payload: rec });
+    const recRes = await t.app.inject({ method: 'PUT', url: `/api/db/sync/records/${rec.recordId}`, headers: t.auth(token), payload: rec });
     expect(recRes.statusCode).toBe(400);
     expect(recRes.json().code).toBe('SYNC_PROTOCOL_UNSUPPORTED');
     await t.close();
@@ -407,7 +407,7 @@ describe('sync routes smoke', () => {
     delete missing.envelopeAccount;
     delete missing.accountRecoveryKey;
 
-    const init = await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: missing } });
+    const init = await t.app.inject({ method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token), payload: { newState: missing } });
     expect(init.statusCode).toBe(400);
     expect(init.json().code).toBe('VALIDATION_FAILED');
     await t.close();
@@ -417,10 +417,10 @@ describe('sync routes smoke', () => {
     const t = await buildTestApp();
     const { token } = await makeUserWithPassword(t, 'sync-rva@b.com');
 
-    const anon = await t.app.inject({ method: 'POST', url: '/api/sync/recover-via-account' });
+    const anon = await t.app.inject({ method: 'POST', url: '/api/db/sync/recover-via-account' });
     expect(anon.statusCode).toBe(401);
 
-    const beforeInit = await t.app.inject({ method: 'POST', url: '/api/sync/recover-via-account', headers: t.auth(token), payload: { password: ACCOUNT_PASSWORD } });
+    const beforeInit = await t.app.inject({ method: 'POST', url: '/api/db/sync/recover-via-account', headers: t.auth(token), payload: { password: ACCOUNT_PASSWORD } });
     expect(beforeInit.statusCode).toBe(400);
     expect(beforeInit.json().code).toBe('SYNC_NOT_INITIALIZED');
     await t.close();
@@ -429,9 +429,9 @@ describe('sync routes smoke', () => {
   it('recover-via-account rejects a wrong account password (step-up) even when recovery is enabled', async () => {
     const t = await buildTestApp();
     const { token } = await makeUserWithPassword(t, 'sync-rva-wrongpw@b.com');
-    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: newStateBody() } });
+    await t.app.inject({ method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token), payload: { newState: newStateBody() } });
 
-    const wrong = await t.app.inject({ method: 'POST', url: '/api/sync/recover-via-account', headers: t.auth(token), payload: { password: 'wrong-password' } });
+    const wrong = await t.app.inject({ method: 'POST', url: '/api/db/sync/recover-via-account', headers: t.auth(token), payload: { password: 'wrong-password' } });
     expect(wrong.statusCode).toBe(400);
     expect(wrong.json().code).toBe('INVALID_CURRENT_PASSWORD');
     await t.close();
@@ -440,9 +440,9 @@ describe('sync routes smoke', () => {
   it('recover-via-account sends a non-sensitive security notification to the verified email on success', async () => {
     const t = await buildTestApp();
     const { token } = await makeUserWithPassword(t, 'sync-rva-notify@b.com');
-    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: newStateBody() } });
+    await t.app.inject({ method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token), payload: { newState: newStateBody() } });
 
-    const res = await t.app.inject({ method: 'POST', url: '/api/sync/recover-via-account', headers: t.auth(token), payload: { password: ACCOUNT_PASSWORD } });
+    const res = await t.app.inject({ method: 'POST', url: '/api/db/sync/recover-via-account', headers: t.auth(token), payload: { password: ACCOUNT_PASSWORD } });
     expect(res.statusCode).toBe(200);
 
     await new Promise((r) => setTimeout(r, 0));
@@ -458,9 +458,9 @@ describe('sync routes smoke', () => {
   it('recover-via-account does not notify on step-up failure (wrong password)', async () => {
     const t = await buildTestApp();
     const { token } = await makeUserWithPassword(t, 'sync-rva-nonotify@b.com');
-    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: newStateBody() } });
+    await t.app.inject({ method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token), payload: { newState: newStateBody() } });
 
-    const res = await t.app.inject({ method: 'POST', url: '/api/sync/recover-via-account', headers: t.auth(token), payload: { password: 'wrong-password' } });
+    const res = await t.app.inject({ method: 'POST', url: '/api/db/sync/recover-via-account', headers: t.auth(token), payload: { password: 'wrong-password' } });
     expect(res.statusCode).toBe(400);
     expect(t.services.emailSender.sent.filter((e) => e.kind === 'account_recovery_activity')).toHaveLength(0);
     await t.close();
@@ -470,9 +470,9 @@ describe('sync routes smoke', () => {
     const t = await buildTestApp();
     const user = await t.repos.userRepo.create('sync-rva-unverified@b.com', sharedPasswordHash, undefined);
     const token = await t.tokenFor(user.id);
-    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: newStateBody() } });
+    await t.app.inject({ method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token), payload: { newState: newStateBody() } });
 
-    const res = await t.app.inject({ method: 'POST', url: '/api/sync/recover-via-account', headers: t.auth(token), payload: { password: ACCOUNT_PASSWORD } });
+    const res = await t.app.inject({ method: 'POST', url: '/api/db/sync/recover-via-account', headers: t.auth(token), payload: { password: ACCOUNT_PASSWORD } });
     expect(res.statusCode).toBe(200);
 
     await new Promise((r) => setTimeout(r, 0));
@@ -483,11 +483,11 @@ describe('sync routes smoke', () => {
   it('recover-via-account still returns material when the security notification fails', async () => {
     const t = await buildTestApp();
     const { token } = await makeUserWithPassword(t, 'sync-rva-mailfail@b.com');
-    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: newStateBody() } });
+    await t.app.inject({ method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token), payload: { newState: newStateBody() } });
 
     t.services.emailSender.sendAccountRecoveryActivityEmail = async () => { throw new Error('smtp down'); };
 
-    const res = await t.app.inject({ method: 'POST', url: '/api/sync/recover-via-account', headers: t.auth(token), payload: { password: ACCOUNT_PASSWORD } });
+    const res = await t.app.inject({ method: 'POST', url: '/api/db/sync/recover-via-account', headers: t.auth(token), payload: { password: ACCOUNT_PASSWORD } });
     expect(res.statusCode).toBe(200);
     expect(res.json().accountRecoveryKey).toMatch(/^[A-Za-z0-9_-]+$/);
     await t.close();
@@ -497,9 +497,9 @@ describe('sync routes smoke', () => {
     const t = await buildTestApp();
     const { token, userId } = await makeUserWithPassword(t, 'sync-account-recover@b.com');
     const keys = makeKeys();
-    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: withKeys(newStateBody(), keys) } });
+    await t.app.inject({ method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token), payload: { newState: withKeys(newStateBody(), keys) } });
 
-    const material = await t.app.inject({ method: 'POST', url: '/api/sync/recover-via-account', headers: t.auth(token), payload: { password: ACCOUNT_PASSWORD } });
+    const material = await t.app.inject({ method: 'POST', url: '/api/db/sync/recover-via-account', headers: t.auth(token), payload: { password: ACCOUNT_PASSWORD } });
     expect(material.statusCode).toBe(200);
     expect(material.json().accountRecoveryKey).toMatch(/^[A-Za-z0-9_-]+$/);
     expect(material.json().envelopeAccount.envelopeVersion).toBe('1');
@@ -517,20 +517,20 @@ describe('sync routes smoke', () => {
     };
     // recover-by-account 用 DEK 派生的 syncSign（signPriv）验签，不是 recoverPriv：用错的私钥签名必须 403。
     const wrongSigner = await t.app.inject({
-      method: 'POST', url: '/api/sync/account-recover', headers: t.auth(token),
+      method: 'POST', url: '/api/db/sync/account-recover', headers: t.auth(token),
       payload: signState(keys.recoverPriv, userId, 'state.recover-by-account', body),
     });
     expect(wrongSigner.statusCode).toBe(403);
     expect(wrongSigner.json().code).toBe('SYNC_SIGNATURE_INVALID');
 
     const res = await t.app.inject({
-      method: 'POST', url: '/api/sync/account-recover', headers: t.auth(token),
+      method: 'POST', url: '/api/db/sync/account-recover', headers: t.auth(token),
       payload: signState(keys.signPriv, userId, 'state.recover-by-account', body),
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().stateVersion).toBe('2');
 
-    const state = await t.app.inject({ method: 'GET', url: '/api/sync/state', headers: t.auth(token) });
+    const state = await t.app.inject({ method: 'GET', url: '/api/db/sync/state', headers: t.auth(token) });
     expect(state.json().envelopeSmp.envelopeVersion).toBe('2');
     expect(state.json().envelopeRecovery.envelopeVersion).toBe('2');
     await t.close();
@@ -540,7 +540,7 @@ describe('sync routes smoke', () => {
     const t = await buildTestApp();
     const { token, userId } = await makeUser(t, 'sync-account-recover-strict@b.com');
     const keys = makeKeys();
-    await t.app.inject({ method: 'PUT', url: '/api/sync/init', headers: t.auth(token), payload: { newState: withKeys(newStateBody(), keys) } });
+    await t.app.inject({ method: 'PUT', url: '/api/db/sync/init', headers: t.auth(token), payload: { newState: withKeys(newStateBody(), keys) } });
 
     const body: any = {
       protocolVersion: 1, keyEpoch: '1', mutationId: b64(16, 16), expectedStateVersion: '1',
@@ -554,7 +554,7 @@ describe('sync routes smoke', () => {
       bogus: true,
     };
     const res = await t.app.inject({
-      method: 'POST', url: '/api/sync/account-recover', headers: t.auth(token),
+      method: 'POST', url: '/api/db/sync/account-recover', headers: t.auth(token),
       payload: signState(keys.signPriv, userId, 'state.recover-by-account', body),
     });
     expect(res.statusCode).toBe(400);

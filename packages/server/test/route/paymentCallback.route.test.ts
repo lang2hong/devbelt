@@ -86,7 +86,7 @@ describe('payment callback route raw bytes', () => {
     const raw = Buffer.from('{  "orderNo":"ord1","channelTradeNo":"wx-1","amountCents":9900,"status":"success","note":"支付成功💳" }');
     const res = await app.inject({
       method: 'POST',
-      url: '/api/public/payment-callback/wechat',
+      url: '/api/db/public/payment-callback/wechat',
       headers: { 'content-type': 'application/json', 'x-payment-signature': signMemoryCallback(raw) },
       payload: raw,
     });
@@ -105,7 +105,7 @@ describe('payment callback route raw bytes', () => {
 
     await app.inject({
       method: 'POST',
-      url: '/api/public/payment-callback/wechat',
+      url: '/api/db/public/payment-callback/wechat',
       headers: { 'content-type': 'application/json', 'x-payment-signature': signMemoryCallback(raw) },
       payload: raw,
     });
@@ -126,7 +126,7 @@ describe('payment callback route raw bytes', () => {
 
     const res = await app.inject({
       method: 'POST',
-      url: '/api/public/payment-callback/wechat',
+      url: '/api/db/public/payment-callback/wechat',
       headers: { 'content-type': 'application/json', 'x-payment-signature': signMemoryCallback(raw) },
       payload: Readable.from([head, mid, tail]),
     });
@@ -175,7 +175,7 @@ describe('payment callback route raw bytes', () => {
 
     const res = await app.inject({
       method: 'POST',
-      url: '/api/public/payment-callback/wechat',
+      url: '/api/db/public/payment-callback/wechat',
       headers: {
         'content-type': 'application/json',
         'wechatpay-timestamp': timestamp,
@@ -218,7 +218,7 @@ describe('payment callback route raw bytes', () => {
 
     const res = await app.inject({
       method: 'POST',
-      url: '/api/public/payment-callback/wechat',
+      url: '/api/db/public/payment-callback/wechat',
       headers: { 'content-type': 'application/json' },
       payload: {},
     });
@@ -256,7 +256,7 @@ describe('payment callback route raw bytes', () => {
 
     const res = await app.inject({
       method: 'POST',
-      url: '/api/public/payment-callback/alipay',
+      url: '/api/db/public/payment-callback/alipay',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       payload: 'out_trade_no=ord1&trade_no=ali-t-1&total_amount=99.00&trade_status=TRADE_SUCCESS',
     });

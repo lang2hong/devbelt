@@ -80,7 +80,7 @@ export async function listInvoices(
 ): Promise<ListInvoicesResult> {
   if (!token) return { kind: 'unauthorized' };
   try {
-    const res = await authedFetch(`/api/console/invoices${qs({ cursor })}`, { headers: auth(token) }, fetchImpl);
+    const res = await authedFetch(`/api/db/console/invoices${qs({ cursor })}`, { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: (await res.json()) as Page<InvoiceRecord> };
     return readFailure(await failure(res));
   } catch {
@@ -101,7 +101,7 @@ export async function requestInvoice(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      '/api/console/invoices',
+      '/api/db/console/invoices',
       {
         method: 'POST',
         headers: write(csrfToken, token, idempotencyKey),

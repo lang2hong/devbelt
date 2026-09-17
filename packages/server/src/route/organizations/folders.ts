@@ -8,7 +8,7 @@ import type { OrgRoutesContext } from './context.js';
 export async function registerFolderRoutes(org: FastifyInstance, ctx: OrgRoutesContext): Promise<void> {
   const { resources } = ctx;
 
-  org.get('/api/organizations/:organizationId/folders', { config: { permission: 'folder.read' }, schema: { params: organizationIdParam } }, async (req, reply) => {
+  org.get('/api/db/organizations/:organizationId/folders', { config: { permission: 'folder.read' }, schema: { params: organizationIdParam } }, async (req, reply) => {
     const organizationId = (req as any).authOrganizationId as number;
     try {
       const list = await resources.listFolders(organizationId);
@@ -18,7 +18,7 @@ export async function registerFolderRoutes(org: FastifyInstance, ctx: OrgRoutesC
     }
   });
 
-  org.post('/api/organizations/:organizationId/folders', { config: { permission: 'folder.manage', aud: 'extension' }, schema: { params: organizationIdParam, body: createFolderBody } }, async (req, reply) => {
+  org.post('/api/db/organizations/:organizationId/folders', { config: { permission: 'folder.manage', aud: 'extension' }, schema: { params: organizationIdParam, body: createFolderBody } }, async (req, reply) => {
     const organizationId = (req as any).authOrganizationId as number;
     const actorUserId = (req as any).authUserId as number;
     const body = req.body as any;
@@ -30,7 +30,7 @@ export async function registerFolderRoutes(org: FastifyInstance, ctx: OrgRoutesC
     }
   });
 
-  org.patch('/api/organizations/:organizationId/folders/:folderId', { config: { permission: 'folder.manage', aud: 'extension' }, schema: { params: folderIdParam, body: updateFolderBody } }, async (req, reply) => {
+  org.patch('/api/db/organizations/:organizationId/folders/:folderId', { config: { permission: 'folder.manage', aud: 'extension' }, schema: { params: folderIdParam, body: updateFolderBody } }, async (req, reply) => {
     const organizationId = (req as any).authOrganizationId as number;
     const actorUserId = (req as any).authUserId as number;
     const folderId = Number((req.params as any).folderId);
@@ -44,7 +44,7 @@ export async function registerFolderRoutes(org: FastifyInstance, ctx: OrgRoutesC
     }
   });
 
-  org.delete('/api/organizations/:organizationId/folders/:folderId', { config: { permission: 'folder.manage', aud: 'extension' }, schema: { params: folderIdParam } }, async (req, reply) => {
+  org.delete('/api/db/organizations/:organizationId/folders/:folderId', { config: { permission: 'folder.manage', aud: 'extension' }, schema: { params: folderIdParam } }, async (req, reply) => {
     const organizationId = (req as any).authOrganizationId as number;
     const actorUserId = (req as any).authUserId as number;
     const folderId = Number((req.params as any).folderId);

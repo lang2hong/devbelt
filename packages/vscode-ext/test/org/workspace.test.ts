@@ -24,9 +24,9 @@ describe('OrgWorkspace (错误驱动的缓存失效)', () => {
     let folderCalls = 0;
     let resourceCalls = 0;
     const { workspace, requestRaw } = makeWorkspace((_m, p) => {
-      if (p === '/api/me') return me();
-      if (p === '/api/organizations/org1/folders') { folderCalls++; return { status: 200, body: { folders: [{ folderId: 'f1', name: 'F', parentId: null }] } }; }
-      if (p === '/api/organizations/org1/resources') { resourceCalls++; return { status: 200, body: { resources: [{ resourceId: 'r1', resourceType: 'query', name: 'q', folderId: null, version: 1, createdByMembershipId: '1', updatedByMembershipId: null }] } }; }
+      if (p === '/api/db/me') return me();
+      if (p === '/api/db/organizations/org1/folders') { folderCalls++; return { status: 200, body: { folders: [{ folderId: 'f1', name: 'F', parentId: null }] } }; }
+      if (p === '/api/db/organizations/org1/resources') { resourceCalls++; return { status: 200, body: { resources: [{ resourceId: 'r1', resourceType: 'query', name: 'q', folderId: null, version: 1, createdByMembershipId: '1', updatedByMembershipId: null }] } }; }
       return { status: 200, body: {} };
     });
 
@@ -43,9 +43,9 @@ describe('OrgWorkspace (错误驱动的缓存失效)', () => {
   it('401 → clearAuth: 清认证并回退 personal，缓存清空', async () => {
     let unauthorized = false;
     const { workspace } = makeWorkspace((_m, p) => {
-      if (p === '/api/me') return me();
-      if (p === '/api/organizations/org1/resources' && unauthorized) return { status: 401, body: { code: 'UNAUTHORIZED' } };
-      if (p === '/api/organizations/org1/resources') return { status: 200, body: { resources: [{ resourceId: 'r1', resourceType: 'query', name: 'q', folderId: null, version: 1, createdByMembershipId: '1', updatedByMembershipId: null }] } };
+      if (p === '/api/db/me') return me();
+      if (p === '/api/db/organizations/org1/resources' && unauthorized) return { status: 401, body: { code: 'UNAUTHORIZED' } };
+      if (p === '/api/db/organizations/org1/resources') return { status: 200, body: { resources: [{ resourceId: 'r1', resourceType: 'query', name: 'q', folderId: null, version: 1, createdByMembershipId: '1', updatedByMembershipId: null }] } };
       return { status: 200, body: {} };
     });
 
@@ -63,10 +63,10 @@ describe('OrgWorkspace (错误驱动的缓存失效)', () => {
   it('404 RESOURCE_NOT_FOUND → invalidateResource（仅该资源）', async () => {
     let detail404 = false;
     const { workspace } = makeWorkspace((_m, p) => {
-      if (p === '/api/me') return me();
-      if (p === '/api/organizations/org1/resources') return { status: 200, body: { resources: [{ resourceId: 'r1', resourceType: 'query', name: 'q', folderId: null, version: 1, createdByMembershipId: '1', updatedByMembershipId: null }, { resourceId: 'r2', resourceType: 'query', name: 'q2', folderId: null, version: 1, createdByMembershipId: '1', updatedByMembershipId: null }] } };
-      if (p === '/api/organizations/org1/resources/r1' && detail404) return { status: 404, body: { code: 'RESOURCE_NOT_FOUND' } };
-      if (p === '/api/organizations/org1/resources/r1') return { status: 200, body: { resource: { resourceId: 'r1', resourceType: 'query', name: 'q', folderId: null, version: 1, createdByMembershipId: '1', updatedByMembershipId: null, content: { sql: 'select 1' } } } };
+      if (p === '/api/db/me') return me();
+      if (p === '/api/db/organizations/org1/resources') return { status: 200, body: { resources: [{ resourceId: 'r1', resourceType: 'query', name: 'q', folderId: null, version: 1, createdByMembershipId: '1', updatedByMembershipId: null }, { resourceId: 'r2', resourceType: 'query', name: 'q2', folderId: null, version: 1, createdByMembershipId: '1', updatedByMembershipId: null }] } };
+      if (p === '/api/db/organizations/org1/resources/r1' && detail404) return { status: 404, body: { code: 'RESOURCE_NOT_FOUND' } };
+      if (p === '/api/db/organizations/org1/resources/r1') return { status: 200, body: { resource: { resourceId: 'r1', resourceType: 'query', name: 'q', folderId: null, version: 1, createdByMembershipId: '1', updatedByMembershipId: null, content: { sql: 'select 1' } } } };
       return { status: 200, body: {} };
     });
 
@@ -84,10 +84,10 @@ describe('OrgWorkspace (错误驱动的缓存失效)', () => {
   it('403 / 404 组织级 → invalidateOrg（整组织驱逐）', async () => {
     let forbid = false;
     const { workspace } = makeWorkspace((_m, p) => {
-      if (p === '/api/me') return me();
-      if (p === '/api/organizations/org1/resources') return { status: 200, body: { resources: [{ resourceId: 'r1', resourceType: 'query', name: 'q', folderId: null, version: 1, createdByMembershipId: '1', updatedByMembershipId: null }] } };
-      if (p === '/api/organizations/org1/folders' && forbid) return { status: 403, body: { code: 'FORBIDDEN' } };
-      if (p === '/api/organizations/org1/folders') return { status: 200, body: { folders: [] } };
+      if (p === '/api/db/me') return me();
+      if (p === '/api/db/organizations/org1/resources') return { status: 200, body: { resources: [{ resourceId: 'r1', resourceType: 'query', name: 'q', folderId: null, version: 1, createdByMembershipId: '1', updatedByMembershipId: null }] } };
+      if (p === '/api/db/organizations/org1/folders' && forbid) return { status: 403, body: { code: 'FORBIDDEN' } };
+      if (p === '/api/db/organizations/org1/folders') return { status: 200, body: { folders: [] } };
       return { status: 200, body: {} };
     });
 
@@ -101,9 +101,9 @@ describe('OrgWorkspace (错误驱动的缓存失效)', () => {
 
   it('409 版本冲突 → 不驱逐缓存，currentVersion 抛出', async () => {
     const { workspace } = makeWorkspace((m, p) => {
-      if (p === '/api/me') return me();
-      if (p === '/api/organizations/org1/resources') return { status: 200, body: { resources: [{ resourceId: 'r1', resourceType: 'query', name: 'q', folderId: null, version: 1, createdByMembershipId: '1', updatedByMembershipId: null }] } };
-      if (p === '/api/organizations/org1/resources/r1' && m === 'PATCH') return { status: 409, body: { code: 'RESOURCE_VERSION_CONFLICT', message: 'stale', currentVersion: 9 } };
+      if (p === '/api/db/me') return me();
+      if (p === '/api/db/organizations/org1/resources') return { status: 200, body: { resources: [{ resourceId: 'r1', resourceType: 'query', name: 'q', folderId: null, version: 1, createdByMembershipId: '1', updatedByMembershipId: null }] } };
+      if (p === '/api/db/organizations/org1/resources/r1' && m === 'PATCH') return { status: 409, body: { code: 'RESOURCE_VERSION_CONFLICT', message: 'stale', currentVersion: 9 } };
       return { status: 200, body: {} };
     });
 
@@ -120,8 +120,8 @@ describe('OrgWorkspace (错误驱动的缓存失效)', () => {
   it('成员状态/角色变更 → invalidateOrganization 立即失效并触发重拉', async () => {
     let resourceCalls = 0;
     const { workspace } = makeWorkspace((_m, p) => {
-      if (p === '/api/me') return me();
-      if (p === '/api/organizations/org1/resources') { resourceCalls++; return { status: 200, body: { resources: [] } }; }
+      if (p === '/api/db/me') return me();
+      if (p === '/api/db/organizations/org1/resources') { resourceCalls++; return { status: 200, body: { resources: [] } }; }
       return { status: 200, body: {} };
     });
 
@@ -136,8 +136,8 @@ describe('OrgWorkspace (错误驱动的缓存失效)', () => {
 
   it('登出事件（AuthEvent logout）由 clearAuth 清空全部', async () => {
     const { workspace } = makeWorkspace((_m, p) => {
-      if (p === '/api/me') return me();
-      if (p === '/api/organizations/org1/resources') return { status: 200, body: { resources: [{ resourceId: 'r1', resourceType: 'query', name: 'q', folderId: null, version: 1, createdByMembershipId: '1', updatedByMembershipId: null }] } };
+      if (p === '/api/db/me') return me();
+      if (p === '/api/db/organizations/org1/resources') return { status: 200, body: { resources: [{ resourceId: 'r1', resourceType: 'query', name: 'q', folderId: null, version: 1, createdByMembershipId: '1', updatedByMembershipId: null }] } };
       return { status: 200, body: {} };
     });
     await workspace.listResources('org1');
@@ -151,7 +151,7 @@ describe('OrgWorkspace (错误驱动的缓存失效)', () => {
 
   it('selectDefaultOrg 选择第一个 active 组织并暴露角色', async () => {
     const { workspace } = makeWorkspace((_m, p) => {
-      if (p === '/api/organizations') {
+      if (p === '/api/db/organizations') {
         return {
           status: 200,
           body: {
@@ -172,7 +172,7 @@ describe('OrgWorkspace (错误驱动的缓存失效)', () => {
   it('selectDefaultOrg 无活跃组织或请求失败时回退 personal', async () => {
     let fail = false;
     const { workspace } = makeWorkspace((_m, p) => {
-      if (p === '/api/organizations') {
+      if (p === '/api/db/organizations') {
         if (fail) return { status: 500, body: {} };
         return {
           status: 200,
@@ -200,9 +200,9 @@ describe('OrgWorkspace (错误驱动的缓存失效)', () => {
   it('401 触发 onAuthFailure 事件（而非主动 logout）', async () => {
     let unauthorized = false;
     const { workspace } = makeWorkspace((_m, p) => {
-      if (p === '/api/me') return me();
-      if (p === '/api/organizations/org1/resources' && unauthorized) return { status: 401, body: { code: 'UNAUTHORIZED' } };
-      if (p === '/api/organizations/org1/resources') return { status: 200, body: { resources: [] } };
+      if (p === '/api/db/me') return me();
+      if (p === '/api/db/organizations/org1/resources' && unauthorized) return { status: 401, body: { code: 'UNAUTHORIZED' } };
+      if (p === '/api/db/organizations/org1/resources') return { status: 200, body: { resources: [] } };
       return { status: 200, body: {} };
     });
     const handler = vi.fn();
@@ -218,9 +218,9 @@ describe('OrgWorkspace (错误驱动的缓存失效)', () => {
   it('并发 401（folders+resources）只触发一次 onAuthFailure', async () => {
     let unauthorized = false;
     const { workspace } = makeWorkspace((_m, p) => {
-      if (p === '/api/me') return me();
-      if (p === '/api/organizations/org1/folders') return unauthorized ? { status: 401, body: { code: 'UNAUTHORIZED' } } : { status: 200, body: { folders: [] } };
-      if (p === '/api/organizations/org1/resources') return unauthorized ? { status: 401, body: { code: 'UNAUTHORIZED' } } : { status: 200, body: { resources: [] } };
+      if (p === '/api/db/me') return me();
+      if (p === '/api/db/organizations/org1/folders') return unauthorized ? { status: 401, body: { code: 'UNAUTHORIZED' } } : { status: 200, body: { folders: [] } };
+      if (p === '/api/db/organizations/org1/resources') return unauthorized ? { status: 401, body: { code: 'UNAUTHORIZED' } } : { status: 200, body: { resources: [] } };
       return { status: 200, body: {} };
     });
     const handler = vi.fn();

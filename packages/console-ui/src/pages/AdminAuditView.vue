@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import { withBase } from '../lib/router';
 import { queryAudit, exportAudit, type AdminAuditEvent } from '../api/admin';
 import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
 import { useIdempotencyKey } from '../lib/idempotentWrite';
@@ -39,7 +40,7 @@ let paging = false;
 
 function relogin(): void {
   setAccessToken(null);
-  window.location.assign('/login');
+  window.location.assign(withBase('/login'));
 }
 
 async function load(reset = true): Promise<void> {

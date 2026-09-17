@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import { withBase } from '../lib/router';
 import { listAdminOrders, refundAdminOrder, type AdminOrder } from '../api/admin';
 import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
@@ -34,7 +35,7 @@ const STATUS_OPTIONS = ['pending', 'paid', 'fulfilled', 'failed', 'refunded', 'e
 
 function relogin(): void {
   setAccessToken(null);
-  window.location.assign('/login');
+  window.location.assign(withBase('/login'));
 }
 
 function fmtCents(cents: number): string {

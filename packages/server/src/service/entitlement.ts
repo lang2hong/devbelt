@@ -10,7 +10,7 @@ import type { Plan } from '../domain/entities.js';
  *   对应 free 档权益**（D2「到期回 free」）——绝不返回空对象，否则消费方以
  *   `limit > 0` 判定配额时会把 0 当作「不限」而反向全开。
  *
- * 所有消费方（/api/me、consoleData、authService、syncRecordService、
+ * 所有消费方（/api/db/me、consoleData、authService、syncRecordService、
  * organizationResourceService 等）必须经此，不得各自判断到期或复制特性。
  *
  * 数值语义：配额以 `0 = 不限` 表达，派生**原样透出**（消费方以 `if (limit > 0)` 判定）。

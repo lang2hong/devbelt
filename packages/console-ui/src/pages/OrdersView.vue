@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { withBase } from '../lib/router';
 import { listOrders, type ConsoleOrder } from '../api/orders';
 import { setAccessToken } from '../api/consoleAuth';
 import { formatDateTime } from '../lib/formatTime';
@@ -64,7 +65,7 @@ async function load(reset = true): Promise<void> {
     state.value = 'ready';
   } else if (r.kind === 'unauthorized') {
     setAccessToken(null);
-    window.location.assign('/login');
+    window.location.assign(withBase('/login'));
   } else {
     state.value = 'error';
     loadError.value = r.kind === 'failure' ? (r.message || r.code || '加载失败，请刷新重试。') : '加载失败，请刷新重试。';
@@ -104,7 +105,7 @@ onMounted(() => load());
           </span>
         </button>
         <div v-if="canReorder(o)" class="reorder">
-          <a class="btn small" href="/console/checkout">重新下单</a>
+          <a class="btn small" :href="withBase('/console/checkout')">重新下单</a>
         </div>
         <div v-if="expandedOrderNo === o.orderNo" class="detail">
           <dl>

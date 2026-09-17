@@ -70,9 +70,9 @@ function consoleToken(tokenService: TokenService, userId: number): Promise<strin
 }
 
 describe('plans routes', () => {
-  it('GET /api/plans returns personal + organization catalog with feature descriptors and prices', async () => {
+  it('GET /api/db/plans returns personal + organization catalog with feature descriptors and prices', async () => {
     const { app, tokenService, userId } = await buildApp();
-    const res = await app.inject({ method: 'GET', url: '/api/plans', headers: { authorization: `Bearer ${await extToken(tokenService, userId)}` } });
+    const res = await app.inject({ method: 'GET', url: '/api/db/plans', headers: { authorization: `Bearer ${await extToken(tokenService, userId)}` } });
     expect(res.statusCode).toBe(200);
     const body = res.json();
 
@@ -95,24 +95,24 @@ describe('plans routes', () => {
     await app.close();
   });
 
-  it('GET /api/plans requires authentication', async () => {
+  it('GET /api/db/plans requires authentication', async () => {
     const { app } = await buildApp();
-    const res = await app.inject({ method: 'GET', url: '/api/plans' });
+    const res = await app.inject({ method: 'GET', url: '/api/db/plans' });
     expect(res.statusCode).toBe(401);
     await app.close();
   });
 
-  it('GET /api/console/plans accepts the console audience', async () => {
+  it('GET /api/db/console/plans accepts the console audience', async () => {
     const { app, tokenService, userId } = await buildApp();
-    const res = await app.inject({ method: 'GET', url: '/api/console/plans', headers: { authorization: `Bearer ${await consoleToken(tokenService, userId)}`, accept: 'application/json' } });
+    const res = await app.inject({ method: 'GET', url: '/api/db/console/plans', headers: { authorization: `Bearer ${await consoleToken(tokenService, userId)}`, accept: 'application/json' } });
     expect(res.statusCode).toBe(200);
     expect(Array.isArray(res.json().personal)).toBe(true);
     await app.close();
   });
 
-  it('rejects an extension token on /api/console/plans', async () => {
+  it('rejects an extension token on /api/db/console/plans', async () => {
     const { app, tokenService, userId } = await buildApp();
-    const res = await app.inject({ method: 'GET', url: '/api/console/plans', headers: { authorization: `Bearer ${await extToken(tokenService, userId)}` } });
+    const res = await app.inject({ method: 'GET', url: '/api/db/console/plans', headers: { authorization: `Bearer ${await extToken(tokenService, userId)}` } });
     expect(res.statusCode).toBe(403);
     expect(res.json().error.code).toBe('TOKEN_AUDIENCE_FORBIDDEN');
     await app.close();

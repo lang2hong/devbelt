@@ -131,11 +131,11 @@ export class PersonalSyncClient {
   // ── 无签名 ──
 
   getState(): Promise<StateDto> {
-    return this.call<StateDto>('GET', '/api/sync/state');
+    return this.call<StateDto>('GET', '/api/db/sync/state');
   }
 
   async init(newState: NewStateDto): Promise<void> {
-    return this.call<void>('PUT', '/api/sync/init', { newState: validateNewState(newState) }, { retry: false });
+    return this.call<void>('PUT', '/api/db/sync/init', { newState: validateNewState(newState) }, { retry: false });
   }
 
   async getRecords(after: string, snapshotSequence: string | undefined, limit: number): Promise<unknown> {
@@ -145,11 +145,11 @@ export class PersonalSyncClient {
     if (after !== '0') q.set('after', after);
     if (snapshotSequence !== undefined) q.set('snapshotSequence', snapshotSequence);
     q.set('limit', String(limit));
-    return this.call('GET', `/api/sync/records?${q.toString()}`);
+    return this.call('GET', `/api/db/sync/records?${q.toString()}`);
   }
 
   resetChallenges(): Promise<unknown> {
-    return this.call('POST', '/api/sync/reset-challenges');
+    return this.call('POST', '/api/db/sync/reset-challenges');
   }
 
   /**
@@ -159,7 +159,7 @@ export class PersonalSyncClient {
    */
   async resetAfterLossWithHandoff(handoffTicket: string, newState: NewStateDto): Promise<StateDto> {
     assertBase64UrlNoPad(handoffTicket, 32, 'handoffTicket');
-    return this.call<StateDto>('POST', '/api/sync/reset-after-loss', {
+    return this.call<StateDto>('POST', '/api/db/sync/reset-after-loss', {
       handoffTicket,
       newState: validateNewState(newState),
     });
@@ -188,7 +188,7 @@ export class PersonalSyncClient {
       tag: o.tag,
     };
     body.signature = this.signMutation('record.put', o, body);
-    return this.call<RecordReceipt>('PUT', `/api/sync/records/${encodeURIComponent(o.recordId)}`, body);
+    return this.call<RecordReceipt>('PUT', `/api/db/sync/records/${encodeURIComponent(o.recordId)}`, body);
   }
 
   async deleteRecord(o: DeleteRecordOpts): Promise<RecordReceipt> {
@@ -204,7 +204,7 @@ export class PersonalSyncClient {
       baseVersion: o.baseVersion,
     };
     body.signature = this.signMutation('record.delete', o, body);
-    return this.call<RecordReceipt>('DELETE', `/api/sync/records/${encodeURIComponent(o.recordId)}`, body);
+    return this.call<RecordReceipt>('DELETE', `/api/db/sync/records/${encodeURIComponent(o.recordId)}`, body);
   }
 
   // ── 已签名 mutation 直发（重放专用，不做签名，逐字复用持久化 signature/digest）──
@@ -243,7 +243,7 @@ export class PersonalSyncClient {
     };
     if (requestDigestOf(body) !== o.requestDigest) throw new Error('outbox mutation digest mismatch');
     body.signature = o.signature;
-    return this.call<RecordReceipt>('PUT', `/api/sync/records/${encodeURIComponent(o.recordId)}`, body);
+    return this.call<RecordReceipt>('PUT', `/api/db/sync/records/${encodeURIComponent(o.recordId)}`, body);
   }
 
   async deleteRecordSigned(o: {
@@ -269,7 +269,7 @@ export class PersonalSyncClient {
     };
     if (requestDigestOf(body) !== o.requestDigest) throw new Error('outbox mutation digest mismatch');
     body.signature = o.signature;
-    return this.call<RecordReceipt>('DELETE', `/api/sync/records/${encodeURIComponent(o.recordId)}`, body);
+    return this.call<RecordReceipt>('DELETE', `/api/db/sync/records/${encodeURIComponent(o.recordId)}`, body);
   }
 
   async changeKey(o: ChangeKeyOpts): Promise<ChangeKeyResult> {
@@ -285,7 +285,7 @@ export class PersonalSyncClient {
       envelopeSmp: validateEnvelope(o.envelopeSmp, 'envelopeSmp'),
     };
     body.signature = this.signMutation('state.change-key', o, body);
-    return this.call<ChangeKeyResult>('POST', '/api/sync/change-key', body);
+    return this.call<ChangeKeyResult>('POST', '/api/db/sync/change-key', body);
   }
 
   async recover(o: RecoverOpts): Promise<RecoverResult> {
@@ -305,14 +305,14 @@ export class PersonalSyncClient {
       recoverSignPub: o.recoverSignPub,
     };
     body.signature = this.signMutation('state.recover', o, body);
-    return this.call<RecoverResult>('POST', '/api/sync/recover', body);
+    return this.call<RecoverResult>('POST', '/api/db/sync/recover', body);
   }
 
   /** 服务端下发的账号恢复材料在返回前经严格校验（fail-closed），不直接信任网络 DTO。 */
   async recoverViaAccount(accountPassword: string): Promise<AccountRecoveryMaterial> {
     // 该端点按用户限流（step-up 配额 5/小时）且无回执幂等，禁止自动重试，避免一次
     // 模糊网络失败被重试多次、耗尽配额把账号锁定一小时。
-    const raw = await this.call<unknown>('POST', '/api/sync/recover-via-account', { password: accountPassword }, { retry: false });
+    const raw = await this.call<unknown>('POST', '/api/db/sync/recover-via-account', { password: accountPassword }, { retry: false });
     return validateAccountRecoveryMaterial(raw);
   }
 
@@ -338,7 +338,7 @@ export class PersonalSyncClient {
     body.signature = this.signMutation('state.recover-by-account', o, body);
     // account-recover 有 mutation receipt 幂等，且服务端回执优先于 sync:keys 限流（见 syncStateService），
     // 响应丢失时自动重试会命中回执并返回首次结果，不再误报失败、也不丢恢复码。
-    return this.call<RecoverResult>('POST', '/api/sync/account-recover', body);
+    return this.call<RecoverResult>('POST', '/api/db/sync/account-recover', body);
   }
 
   async destroy(o: DestroyOpts): Promise<DestroyResult> {
@@ -353,7 +353,7 @@ export class PersonalSyncClient {
       newState: validateNewState(o.newState),
     };
     body.signature = this.signMutation('state.destroy', o, body);
-    return this.call<DestroyResult>('POST', '/api/sync/destroy', body);
+    return this.call<DestroyResult>('POST', '/api/db/sync/destroy', body);
   }
 
   private signMutation(action: SyncAction, o: { userId: string; keyEpoch: string; mutationId: string; seed: Uint8Array }, body: Record<string, unknown>): string {

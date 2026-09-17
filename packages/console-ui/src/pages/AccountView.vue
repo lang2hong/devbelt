@@ -3,7 +3,7 @@ import { ref } from 'vue';
 import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
 import { updateDisplayName, changePassword, type ConsoleMeUser } from '../api/me';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
-import { navigate } from '../lib/router';
+import { navigate, withBase } from '../lib/router';
 import { formatDateTime } from '../lib/formatTime';
 
 const props = defineProps<{ user: ConsoleMeUser | null; subscription: { planCode: string | null; status: string; periodEndTime: string | null } | null }>();
@@ -24,7 +24,7 @@ const nameWrite = useIdempotencyKey();
 
 function forceRelogin(): void {
   setAccessToken(null);
-  window.location.assign('/login');
+  window.location.assign(withBase('/login'));
 }
 
 async function saveName(): Promise<void> {

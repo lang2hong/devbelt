@@ -92,7 +92,7 @@ function installFetch(handler: (url: string) => { status: number; body: unknown 
 afterEach(() => { globalThis.fetch = realFetch; });
 
 describe('AuthService.refreshEntitlement', () => {
-  it('拉取 /api/me 并把 Pro 权益写进内存与 globalState', async () => {
+  it('拉取 /api/db/me 并把 Pro 权益写进内存与 globalState', async () => {
     const secrets = makeSecrets();
     const memento = makeMemento();
     await secrets.store(ACCESS_KEY, 'A1');
@@ -143,18 +143,18 @@ describe('AuthService.refreshEntitlement', () => {
     expect(auth.getCachedEntitlement()).toBeUndefined();
   });
 
-  it('init 仅在已登录时拉取权益（未登录不发 /api/me）', async () => {
+  it('init 仅在已登录时拉取权益（未登录不发 /api/db/me）', async () => {
     const secrets = makeSecrets();
     const memento = makeMemento();
     installFetch(() => ({ status: 200, body: meResponse(proSub) }));
 
     const auth = new AuthService(secrets as any, 'http://localhost:3000', memento as any);
     await auth.init();
-    // 未登录：init 不应触发 refreshEntitlement，因此不应有 /api/me 请求
-    expect(fetchCalls.filter((u) => u.endsWith('/api/me'))).toEqual([]);
+    // 未登录：init 不应触发 refreshEntitlement，因此不应有 /api/db/me 请求
+    expect(fetchCalls.filter((u) => u.endsWith('/api/db/me'))).toEqual([]);
   });
 
-  it('已登录 init() 触发一次 /api/me 并把权益写进缓存', async () => {
+  it('已登录 init() 触发一次 /api/db/me 并把权益写进缓存', async () => {
     const secrets = makeSecrets();
     const memento = makeMemento();
     await secrets.store(ACCESS_KEY, 'A1');
@@ -165,17 +165,17 @@ describe('AuthService.refreshEntitlement', () => {
     await vi.waitFor(() => {
       expect(auth.getCachedEntitlement()).toEqual({ planCode: 'pro', allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 5, maxSavedConnections: 100, allowConnectionImport: true, maxConcurrentConnections: 0, allowConnectionExport: true, allowErDiagram: true, allowDataSync: true });
     });
-    // init 后台刷新只应触发一次 /api/me（无需调用方再显式刷新）
-    expect(fetchCalls.filter((u) => u.endsWith('/api/me'))).toHaveLength(1);
+    // init 后台刷新只应触发一次 /api/db/me（无需调用方再显式刷新）
+    expect(fetchCalls.filter((u) => u.endsWith('/api/db/me'))).toHaveLength(1);
   });
 
-  it('飞行中的 /api/me 在身份变更后丢弃（换号/登出守卫）', async () => {
+  it('飞行中的 /api/db/me 在身份变更后丢弃（换号/登出守卫）', async () => {
     const secrets = makeSecrets();
     const memento = makeMemento();
     let pendingMe: ((v: unknown) => void) | undefined;
     globalThis.fetch = (async (url: any) => {
       const u = String(url);
-      if (u.endsWith('/api/me')) {
+      if (u.endsWith('/api/db/me')) {
         return new Promise<Response>((resolve) => {
           pendingMe = (v) => resolve(new Response(JSON.stringify(v), { status: 200, headers: { 'content-type': 'application/json' } }));
         });
@@ -193,13 +193,13 @@ describe('AuthService.refreshEntitlement', () => {
     expect(memento.values.get(ENTITLEMENT_KEY)).toBeUndefined();
   });
 
-  it('跨窗口 token 变更（onDidChange）使飞行中 /api/me 失效且清除身份缓存', async () => {
+  it('跨窗口 token 变更（onDidChange）使飞行中 /api/db/me 失效且清除身份缓存', async () => {
     const secrets = makeSharedSecrets();
     const memento = makeMemento();
     let pendingMe: ((v: unknown) => void) | undefined;
     globalThis.fetch = (async (url: any) => {
       const u = String(url);
-      if (u.endsWith('/api/me')) {
+      if (u.endsWith('/api/db/me')) {
         return new Promise<Response>((resolve) => {
           pendingMe = (v) => resolve(new Response(JSON.stringify(v), { status: 200, headers: { 'content-type': 'application/json' } }));
         });

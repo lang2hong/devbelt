@@ -372,7 +372,7 @@ export const syncDestroyBody = {
 } as const;
 
 /**
- * 账号恢复材料下发（`POST /api/sync/recover-via-account`）的二次校验口令。
+ * 账号恢复材料下发（`POST /api/db/sync/recover-via-account`）的二次校验口令。
  * 该端点会下发 DEK 解密原材料，故在普通 access token 之上额外要求账户登录口令
  * 自证（step-up），防止 token 单独泄露即可离线解密全部同步数据。
  */

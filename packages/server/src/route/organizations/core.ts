@@ -16,7 +16,7 @@ import {
 export async function registerCoreRoutes(org: FastifyInstance, ctx: OrgRoutesContext): Promise<void> {
   const { svc, opts } = ctx;
 
-  org.get('/api/organizations/:organizationId', { config: { permission: 'organization.read' }, schema: { params: organizationIdParam } }, async (req, reply) => {
+  org.get('/api/db/organizations/:organizationId', { config: { permission: 'organization.read' }, schema: { params: organizationIdParam } }, async (req, reply) => {
     const { authOrganization, authMembershipRole } = req as unknown as AuthnOrgRequest;
     try {
       reply.send({ organization: orgDto(authOrganization, authMembershipRole) });
@@ -25,7 +25,7 @@ export async function registerCoreRoutes(org: FastifyInstance, ctx: OrgRoutesCon
     }
   });
 
-  org.patch('/api/organizations/:organizationId', { config: { permission: 'organization.update' }, schema: { params: organizationIdParam, body: updateOrganizationBody } }, async (req, reply) => {
+  org.patch('/api/db/organizations/:organizationId', { config: { permission: 'organization.update' }, schema: { params: organizationIdParam, body: updateOrganizationBody } }, async (req, reply) => {
     const organizationId = (req as any).authOrganizationId as number;
     const actorUserId = (req as any).authUserId as number;
     const { name } = req.body as any;
@@ -42,7 +42,7 @@ export async function registerCoreRoutes(org: FastifyInstance, ctx: OrgRoutesCon
         return;
       }
       const result = await opts.idempotencyService.run({
-        actorUserId, sessionId: sessionIdOf(req), method: 'PATCH', normalizedPath: `/api/organizations/${organizationId}`,
+        actorUserId, sessionId: sessionIdOf(req), method: 'PATCH', normalizedPath: `/api/db/organizations/${organizationId}`,
         idempotencyKey: mode.idempotencyKey, requestBody: req.body,
         business: async (tx: Queryable) => {
           const r = await svc.updateOrganizationInTx(tx, organizationId, actorUserId, name);
@@ -60,7 +60,7 @@ export async function registerCoreRoutes(org: FastifyInstance, ctx: OrgRoutesCon
     }
   });
 
-  org.post('/api/organizations/:organizationId/close', { config: { permission: 'organization.close' }, schema: { params: organizationIdParam } }, async (req, reply) => {
+  org.post('/api/db/organizations/:organizationId/close', { config: { permission: 'organization.close' }, schema: { params: organizationIdParam } }, async (req, reply) => {
     const organizationId = (req as any).authOrganizationId as number;
     const actorUserId = (req as any).authUserId as number;
     try {
@@ -76,7 +76,7 @@ export async function registerCoreRoutes(org: FastifyInstance, ctx: OrgRoutesCon
         return;
       }
       const result = await opts.idempotencyService.run({
-        actorUserId, sessionId: sessionIdOf(req), method: 'POST', normalizedPath: `/api/organizations/${organizationId}/close`,
+        actorUserId, sessionId: sessionIdOf(req), method: 'POST', normalizedPath: `/api/db/organizations/${organizationId}/close`,
         idempotencyKey: mode.idempotencyKey, retentionMs: CLOSE_ORG_RETENTION_MS,
         business: async (tx: Queryable) => {
           const r = await svc.closeOrganizationInTx(tx, organizationId, actorUserId);

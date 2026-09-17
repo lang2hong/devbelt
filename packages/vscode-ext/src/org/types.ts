@@ -8,7 +8,7 @@
 export type OrganizationRole = 'admin' | 'member';
 export type ResourceType = 'connection_template' | 'query';
 
-/** GET /api/organizations 返回的组织摘要（含调用者角色）。 */
+/** GET /api/db/organizations 返回的组织摘要（含调用者角色）。 */
 export interface OrganizationSummaryDto {
   organizationId: string;
   name: string;
@@ -17,7 +17,7 @@ export interface OrganizationSummaryDto {
   role: OrganizationRole;
 }
 
-/** GET /api/organizations/:orgId/folders 返回的目录项。 */
+/** GET /api/db/organizations/:orgId/folders 返回的目录项。 */
 export interface FolderDto {
   folderId: string;
   name: string;

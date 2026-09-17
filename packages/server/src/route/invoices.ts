@@ -73,7 +73,7 @@ export async function invoiceRoutes(app: FastifyInstance, opts: InvoiceRouteOpti
     aud: 'console',
     scope: ['console'],
     routes: async (child) => {
-      child.get('/api/console/invoices', async (req, reply) => {
+      child.get('/api/db/console/invoices', async (req, reply) => {
         const actor = userIdOf(req);
         await opts.rateLimiter.hit(`console:invoice:read:${actor}`, 60, 60);
         const q = req.query as Record<string, unknown>;
@@ -91,7 +91,7 @@ export async function invoiceRoutes(app: FastifyInstance, opts: InvoiceRouteOpti
         });
       });
 
-      child.post('/api/console/invoices', { schema: { body: createInvoiceBody } }, async (req, reply) => {
+      child.post('/api/db/console/invoices', { schema: { body: createInvoiceBody } }, async (req, reply) => {
         if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) {
           return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
         }
@@ -101,7 +101,7 @@ export async function invoiceRoutes(app: FastifyInstance, opts: InvoiceRouteOpti
           actorUserId: actor,
           sessionId: sessionIdOf(req),
           method: 'POST',
-          normalizedPath: '/api/console/invoices',
+          normalizedPath: '/api/db/console/invoices',
           idempotencyKey: validateIdempotencyKey(req.headers['idempotency-key']),
           requestBody: req.body,
           retentionMs: INVOICE_RETENTION_MS,

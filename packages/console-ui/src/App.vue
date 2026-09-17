@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, type Component } from 'vue';
-import { router, installRouter, navigate, type RouteConfig } from './lib/router';
+import { router, installRouter, navigate, withBase, stripBase, type RouteConfig } from './lib/router';
 import { safeReturnTo } from './lib/returnTo';
 import { refreshSession } from './session';
 import { getAccessToken, ensureCsrf, logout } from './api/consoleAuth';
@@ -99,8 +99,8 @@ const view = computed<{ comp: Component; props: Record<string, unknown> }>(() =>
 });
 
 function redirectToLogin(): void {
-  const returnTo = safeReturnTo(window.location.pathname);
-  window.location.assign(`/login?returnTo=${encodeURIComponent(returnTo)}`);
+  const returnTo = safeReturnTo(stripBase(window.location.pathname));
+  window.location.assign(withBase(`/login?returnTo=${encodeURIComponent(returnTo)}`));
 }
 
 onMounted(async () => {
@@ -126,7 +126,7 @@ onMounted(async () => {
   }
   me_.value = result.value;
   state.value = 'ready';
-  const p = window.location.pathname;
+  const p = stripBase(window.location.pathname);
   if (p === '/console' || p === '/console/') navigate('/console/account');
   if (p === '/console/admin' || p === '/console/admin/') navigate('/console/admin/users');
 });
@@ -136,7 +136,7 @@ async function onLogout(): Promise<void> {
   const csrf = await ensureCsrf();
   const r = await logout(csrf);
   if (r.kind === 'ok') {
-    window.location.assign('/login');
+    window.location.assign(withBase('/login'));
     return;
   }
   // 本机 token 已清除，但服务器 refresh-cookie 会话未被确认注销：提示并允许重试，避免静默假登出。
@@ -149,20 +149,20 @@ async function onLogout(): Promise<void> {
     <p v-if="state === 'loading'" class="muted">加载中…</p>
     <div v-else-if="state === 'error'" class="error-box">
       <p class="error">加载失败。</p>
-      <a href="/login">返回登录</a>
+      <a :href="withBase('/login')">返回登录</a>
     </div>
 
     <template v-else-if="me_">
       <nav class="nav">
         <span class="brand">DB Client</span>
-        <a href="/console/account" @click.prevent="navigate('/console/account')" :class="{ on: router.name === 'account' }">账户</a>
-        <a href="/console/account/devices" @click.prevent="navigate('/console/account/devices')" :class="{ on: router.name === 'devices' }">设备</a>
-        <a href="/console/account/sync" @click.prevent="navigate('/console/account/sync')" :class="{ on: router.name === 'sync' }">同步</a>
-        <a href="/console/plans" @click.prevent="navigate('/console/plans')" :class="{ on: router.name === 'plans' }">套餐</a>
-        <a href="/console/orders" @click.prevent="navigate('/console/orders')" :class="{ on: router.name === 'orders' }">订单</a>
-        <a href="/console/invoices" @click.prevent="navigate('/console/invoices')" :class="{ on: router.name === 'invoices' }">发票</a>
-        <a href="/console/organizations" @click.prevent="navigate('/console/organizations')" :class="{ on: router.name === 'organizations' || router.name === 'organization-detail' || router.name === 'organization-resources' }">组织</a>
-        <a v-if="me_.platformAdmin" href="/console/admin/users" @click.prevent="navigate('/console/admin/users')" :class="{ on: ['admin-users', 'admin-organizations', 'admin-orders', 'admin-invoices', 'admin-audit', 'admin-plans', 'admin-version'].includes(router.name ?? '') }">管理</a>
+        <a :href="withBase('/console/account')" @click.prevent="navigate('/console/account')" :class="{ on: router.name === 'account' }">账户</a>
+        <a :href="withBase('/console/account/devices')" @click.prevent="navigate('/console/account/devices')" :class="{ on: router.name === 'devices' }">设备</a>
+        <a :href="withBase('/console/account/sync')" @click.prevent="navigate('/console/account/sync')" :class="{ on: router.name === 'sync' }">同步</a>
+        <a :href="withBase('/console/plans')" @click.prevent="navigate('/console/plans')" :class="{ on: router.name === 'plans' }">套餐</a>
+        <a :href="withBase('/console/orders')" @click.prevent="navigate('/console/orders')" :class="{ on: router.name === 'orders' }">订单</a>
+        <a :href="withBase('/console/invoices')" @click.prevent="navigate('/console/invoices')" :class="{ on: router.name === 'invoices' }">发票</a>
+        <a :href="withBase('/console/organizations')" @click.prevent="navigate('/console/organizations')" :class="{ on: router.name === 'organizations' || router.name === 'organization-detail' || router.name === 'organization-resources' }">组织</a>
+        <a v-if="me_.platformAdmin" :href="withBase('/console/admin/users')" @click.prevent="navigate('/console/admin/users')" :class="{ on: ['admin-users', 'admin-organizations', 'admin-orders', 'admin-invoices', 'admin-audit', 'admin-plans', 'admin-version'].includes(router.name ?? '') }">管理</a>
         <span class="spacer"></span>
         <span class="email">{{ me_.user.email }}</span>
         <button class="btn ghost" @click="onLogout">登出</button>

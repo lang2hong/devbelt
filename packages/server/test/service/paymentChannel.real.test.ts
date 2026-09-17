@@ -150,7 +150,7 @@ describe('WechatPayGateway', () => {
     expect(r.codeUrl).toBe('weixin://wxpay/code');
 
     const body = JSON.parse(capturedBody);
-    expect(body.notify_url).toBe('https://pay.example.com/api/public/payment-callback/wechat');
+    expect(body.notify_url).toBe('https://pay.example.com/api/db/public/payment-callback/wechat');
     expect(body.out_trade_no).toBe('ord1');
     expect(body.amount.total).toBe(9900);
     // 渠道外部有效期必须等于本地订单过期时刻（RFC3339，无毫秒）。
@@ -341,7 +341,7 @@ describe('AlipayGateway', () => {
     expect(typeof r.redirectUrl).toBe('string');
     const url = r.redirectUrl as string;
     expect(url.startsWith('https://openapi.alipay.com/gateway.do?')).toBe(true);
-    expect(url).toContain(encodeURIComponent(CALLBACK_BASE + '/api/public/payment-callback/alipay'));
+    expect(url).toContain(encodeURIComponent(CALLBACK_BASE + '/api/db/public/payment-callback/alipay'));
 
     // timeout_express 向下取整推导：外部窗口不超本地 deadline。刚建 30m 订单因创建后可能跨
     // 毫秒，floor 结果只可能是 29m 或 30m —— 断言「不超 30m」而非「必然精确 30m」（防竞态）。

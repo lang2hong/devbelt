@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import { withBase } from '../lib/router';
 import { listAdminInvoices, setInvoiceStatus, type AdminInvoice } from '../api/admin';
 import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
@@ -26,7 +27,7 @@ const PROCESS_OPTIONS: Array<'issued' | 'rejected' | 'failed'> = ['issued', 'rej
 
 function relogin(): void {
   setAccessToken(null);
-  window.location.assign('/login');
+  window.location.assign(withBase('/login'));
 }
 
 function fmtCents(cents: number): string {

@@ -81,7 +81,7 @@ export async function listOrganizations(
 ): Promise<Result<OrgSummary[]>> {
   if (!token) return { kind: 'unauthorized' };
   try {
-    const res = await authedFetch('/api/organizations', { headers: auth(token) }, fetchImpl);
+    const res = await authedFetch('/api/db/organizations', { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: (await res.json()).organizations as OrgSummary[] };
     return { kind: await resolveErrorKind(res) };
   } catch {
@@ -99,7 +99,7 @@ export async function createOrganization(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      '/api/organizations',
+      '/api/db/organizations',
       { method: 'POST', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify({ name }) },
       fetchImpl,
     );
@@ -117,7 +117,7 @@ export async function getOrganization(
 ): Promise<Result<OrgSummary>> {
   if (!token) return { kind: 'unauthorized' };
   try {
-    const res = await authedFetch(`/api/organizations/${organizationId}`, { headers: auth(token) }, fetchImpl);
+    const res = await authedFetch(`/api/db/organizations/${organizationId}`, { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: (await res.json()).organization as OrgSummary };
     return { kind: await resolveErrorKind(res) };
   } catch {
@@ -136,7 +136,7 @@ export async function updateOrganization(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      `/api/organizations/${organizationId}`,
+      `/api/db/organizations/${organizationId}`,
       { method: 'PATCH', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify({ name }) },
       fetchImpl,
     );
@@ -157,7 +157,7 @@ export async function closeOrganization(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      `/api/organizations/${organizationId}/close`,
+      `/api/db/organizations/${organizationId}/close`,
       { method: 'POST', headers: write(csrfToken, token, idempotencyKey) },
       fetchImpl,
     );
@@ -178,7 +178,7 @@ export async function leaveOrganization(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      `/api/organizations/${organizationId}/leave`,
+      `/api/db/organizations/${organizationId}/leave`,
       { method: 'POST', headers: write(csrfToken, token, idempotencyKey) },
       fetchImpl,
     );
@@ -197,7 +197,7 @@ export async function listMembers(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      `/api/console/organizations/${organizationId}/members`,
+      `/api/db/console/organizations/${organizationId}/members`,
       { headers: auth(token) },
       fetchImpl,
     );
@@ -220,7 +220,7 @@ export async function assignRole(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      `/api/organizations/${organizationId}/members/${membershipId}`,
+      `/api/db/organizations/${organizationId}/members/${membershipId}`,
       { method: 'PATCH', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify({ role }) },
       fetchImpl,
     );
@@ -242,7 +242,7 @@ export async function removeMember(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      `/api/organizations/${organizationId}/members/${membershipId}`,
+      `/api/db/organizations/${organizationId}/members/${membershipId}`,
       { method: 'DELETE', headers: write(csrfToken, token, idempotencyKey) },
       fetchImpl,
     );
@@ -261,7 +261,7 @@ export async function listInvitations(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      `/api/organizations/${organizationId}/invitations`,
+      `/api/db/organizations/${organizationId}/invitations`,
       { headers: auth(token) },
       fetchImpl,
     );
@@ -284,7 +284,7 @@ export async function inviteMember(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      `/api/organizations/${organizationId}/invitations`,
+      `/api/db/organizations/${organizationId}/invitations`,
       { method: 'POST', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify({ email, role }) },
       fetchImpl,
     );
@@ -306,7 +306,7 @@ export async function revokeInvitation(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      `/api/organizations/${organizationId}/invitations/${invitationId}`,
+      `/api/db/organizations/${organizationId}/invitations/${invitationId}`,
       { method: 'DELETE', headers: write(csrfToken, token, idempotencyKey) },
       fetchImpl,
     );
@@ -324,7 +324,7 @@ export async function listFolders(
 ): Promise<Result<Folder[]>> {
   if (!token) return { kind: 'unauthorized' };
   try {
-    const res = await authedFetch(`/api/organizations/${organizationId}/folders`, { headers: auth(token) }, fetchImpl);
+    const res = await authedFetch(`/api/db/organizations/${organizationId}/folders`, { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: (await res.json()).folders as Folder[] };
     return { kind: await resolveErrorKind(res) };
   } catch {
@@ -339,7 +339,7 @@ export async function listResources(
 ): Promise<Result<ResourceSummary[]>> {
   if (!token) return { kind: 'unauthorized' };
   try {
-    const res = await authedFetch(`/api/organizations/${organizationId}/resources`, { headers: auth(token) }, fetchImpl);
+    const res = await authedFetch(`/api/db/organizations/${organizationId}/resources`, { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: (await res.json()).resources as ResourceSummary[] };
     return { kind: await resolveErrorKind(res) };
   } catch {

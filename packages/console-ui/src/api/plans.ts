@@ -3,7 +3,7 @@ import { authedFetch } from './authedFetch';
 import type { FetchLike } from './consoleAuth';
 import type { PlanCatalog } from '../lib/planFeatures';
 
-/** /api/console/plans：个人 + 组织套餐目录（认证，只读）。 */
+/** /api/db/console/plans：个人 + 组织套餐目录（认证，只读）。 */
 
 export type PlansResult = { kind: 'ok'; value: PlanCatalog } | { kind: 'unauthorized' } | { kind: 'failure' };
 
@@ -14,7 +14,7 @@ export async function listPlans(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      '/api/console/plans',
+      '/api/db/console/plans',
       { headers: { Accept: 'application/json', Authorization: `Bearer ${token}` } },
       fetchImpl,
     );

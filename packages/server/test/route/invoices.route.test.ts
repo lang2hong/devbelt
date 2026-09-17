@@ -97,7 +97,7 @@ describe('invoice routes', () => {
     const b = await build();
     const res = await b.app.inject({
       method: 'GET',
-      url: '/api/console/invoices',
+      url: '/api/db/console/invoices',
       headers: { accept: 'application/json' },
     });
     expect(res.statusCode).toBe(401);
@@ -107,7 +107,7 @@ describe('invoice routes', () => {
     const b = await build();
     const res = await b.app.inject({
       method: 'POST',
-      url: '/api/console/invoices',
+      url: '/api/db/console/invoices',
       headers: { ...(await authHeader(b, 1)), 'content-type': 'application/json', accept: 'application/json', 'idempotency-key': UUID },
       payload: { orderNo: 'o1', title: 'X', email: 'x@a.com' },
     });
@@ -119,7 +119,7 @@ describe('invoice routes', () => {
     const csrf = b.csrfService.issue('ws');
     const res = await b.app.inject({
       method: 'POST',
-      url: '/api/console/invoices',
+      url: '/api/db/console/invoices',
       headers: { ...(await authHeader(b, 1)), ...b.writeHeaders(1, csrf) },
       payload: { orderNo: 'o1', title: 'X', email: 'x@a.com' },
     });
@@ -132,7 +132,7 @@ describe('invoice routes', () => {
     const csrf = b.csrfService.issue('ws');
     const res = await b.app.inject({
       method: 'POST',
-      url: '/api/console/invoices',
+      url: '/api/db/console/invoices',
       headers: { ...(await authHeader(b, 1)), ...b.writeHeaders(1, csrf), 'idempotency-key': UUID },
       payload: { orderNo: 'ord-fulfilled', title: 'Acme', email: 'billing@a.com' },
     });
@@ -146,7 +146,7 @@ describe('invoice routes', () => {
 
     const list = await b.app.inject({
       method: 'GET',
-      url: '/api/console/invoices',
+      url: '/api/db/console/invoices',
       headers: { ...(await authHeader(b, 1)), accept: 'application/json' },
     });
     expect(list.statusCode).toBe(200);
@@ -160,7 +160,7 @@ describe('invoice routes', () => {
     const csrf = b.csrfService.issue('ws');
     const res = await b.app.inject({
       method: 'POST',
-      url: '/api/console/invoices',
+      url: '/api/db/console/invoices',
       headers: { ...(await authHeader(b, 1)), ...b.writeHeaders(1, csrf), 'idempotency-key': UUID },
       payload: { orderNo: 'ord-pending', title: 'Acme', email: 'billing@a.com' },
     });
@@ -173,7 +173,7 @@ describe('invoice routes', () => {
     const csrf = b.csrfService.issue('ws');
     const res = await b.app.inject({
       method: 'POST',
-      url: '/api/console/invoices',
+      url: '/api/db/console/invoices',
       headers: { ...(await authHeader(b, 1)), ...b.writeHeaders(1, csrf), 'idempotency-key': UUID },
       payload: { orderNo: 'ord-fulfilled', title: 'Acme', email: 'billing@a.com' },
     });

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import { withBase } from '../lib/router';
 import { listInvoices, requestInvoice, type InvoiceRecord } from '../api/invoices';
 import { listOrders, type ConsoleOrder } from '../api/orders';
 import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
@@ -29,7 +30,7 @@ async function load(): Promise<void> {
   const [invs, ords] = await Promise.all([listInvoices(), listOrders()]);
   if (invs.kind === 'unauthorized' || ords.kind === 'unauthorized') {
     setAccessToken(null);
-    window.location.assign('/login');
+    window.location.assign(withBase('/login'));
     return;
   }
   invoices.value = invs.kind === 'ok' ? invs.value.items : [];
@@ -53,7 +54,7 @@ async function request(): Promise<void> {
     } else if (r.kind === 'unauthorized') {
       requestWrite.reset(tag);
       setAccessToken(null);
-      window.location.assign('/login');
+      window.location.assign(withBase('/login'));
     } else if (isRetryableFailure(r.kind)) {
       error.value = '申请失败，请重试。';
     } else {

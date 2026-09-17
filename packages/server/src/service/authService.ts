@@ -392,7 +392,7 @@ export class AuthService {
   }
 
   /**
-   * 账号恢复第二步（step-up）登临：`POST /api/sync/recover-via-account` 会把数据
+   * 账号恢复第二步（step-up）登临：`POST /api/db/sync/recover-via-account` 会把数据
    * 解密的原材料（accountRecoveryKey + envelopeAccount）下发给调用者，其安全边界
    * 因此不能仅凭一个普通 sync access token —— token 泄露者即使拿不到用户的账号
    * 登录口令，也能凭 token 拿到 DEK 材料并离线解密全部同步数据。故此处强制再复核

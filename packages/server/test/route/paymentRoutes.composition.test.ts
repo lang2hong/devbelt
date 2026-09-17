@@ -17,10 +17,10 @@ describe('payment routes fail-closed composition', () => {
     });
     await app.ready();
 
-    const create = await app.inject({ method: 'POST', url: '/api/console/orders', payload: {} });
+    const create = await app.inject({ method: 'POST', url: '/api/db/console/orders', payload: {} });
     expect(create.statusCode).toBe(404);
 
-    const callback = await app.inject({ method: 'POST', url: '/api/public/payment-callback/wechat', payload: {} });
+    const callback = await app.inject({ method: 'POST', url: '/api/db/public/payment-callback/wechat', payload: {} });
     expect(callback.statusCode).toBe(404);
 
     await app.close();

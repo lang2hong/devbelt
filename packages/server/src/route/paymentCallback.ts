@@ -65,7 +65,7 @@ export async function paymentCallbackRoutes(app: FastifyInstance, opts: PaymentC
     });
   }
 
-  app.post('/api/public/payment-callback/:channel', async (req, reply) => {
+  app.post('/api/db/public/payment-callback/:channel', async (req, reply) => {
     if (opts.paymentFeatureEnabled && !opts.paymentFeatureEnabled()) {
       throw new FeatureTemporarilyDisabledError('payment');
     }

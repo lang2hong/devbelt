@@ -76,7 +76,7 @@ export interface DeviceItem {
   createTime: string;
 }
 
-/** 套餐特征描述符（/api/plans）；type 决定展示格式，未知 key 优雅降级。 */
+/** 套餐特征描述符（/api/db/plans）；type 决定展示格式，未知 key 优雅降级。 */
 export interface PlanFeatureDto {
   key: string;
   type: 'bool' | 'number' | 'bytes' | 'stringList' | 'enum';
@@ -207,14 +207,14 @@ export class SyncClient {
 
   /** 当前用户 + 套餐 + 订阅 + 配额用量 */
   async getMe(): Promise<MeResponse> {
-    const res = await this.request('GET', '/api/me', undefined, true);
+    const res = await this.request('GET', '/api/db/me', undefined, true);
     if (!res.ok) throw new Error(`Get me failed: ${res.status}`);
     return res.json() as Promise<MeResponse>;
   }
 
   /** 列当前用户全部设备。 */
   async listDevices(): Promise<{ devices: DeviceItem[] }> {
-    const res = await this.request('GET', '/api/personal/devices', undefined, true);
+    const res = await this.request('GET', '/api/db/personal/devices', undefined, true);
     if (!res.ok) {
       const errBody = (await res.json().catch(() => ({}))) as { message?: string };
       throw new Error(errBody.message || `List devices failed: ${res.status}`);
@@ -224,14 +224,14 @@ export class SyncClient {
 
   /** 套餐目录（个人 + 组织）。 */
   async getPlans(): Promise<PlanCatalog> {
-    const res = await this.request('GET', '/api/plans', undefined, true);
+    const res = await this.request('GET', '/api/db/plans', undefined, true);
     if (!res.ok) throw new Error(`Get plans failed: ${res.status}`);
     return res.json() as Promise<PlanCatalog>;
   }
 
-  /** 撤销本人设备（§5.2 /api/personal/devices；Free 无配额，撤销恒允许）。 */
+  /** 撤销本人设备（§5.2 /api/db/personal/devices；Free 无配额，撤销恒允许）。 */
   async revokeDevice(deviceId: string): Promise<void> {
-    const res = await this.request('DELETE', `/api/personal/devices/${encodeURIComponent(deviceId)}`, undefined, true);
+    const res = await this.request('DELETE', `/api/db/personal/devices/${encodeURIComponent(deviceId)}`, undefined, true);
     if (!res.ok) {
       const errBody = (await res.json().catch(() => ({}))) as { message?: string };
       throw new Error(errBody.message || `Revoke failed: ${res.status}`);

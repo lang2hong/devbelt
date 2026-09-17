@@ -11,7 +11,7 @@ import { idempotencyMode, requestIdOf, sessionIdOf, type OrgRoutesContext } from
 export async function registerInvitationRoutes(org: FastifyInstance, ctx: OrgRoutesContext): Promise<void> {
   const { svc, opts } = ctx;
 
-  org.post('/api/organizations/:organizationId/invitations', { config: { permission: 'member.invite' }, schema: { params: organizationIdParam, body: createInvitationBody } }, async (req, reply) => {
+  org.post('/api/db/organizations/:organizationId/invitations', { config: { permission: 'member.invite' }, schema: { params: organizationIdParam, body: createInvitationBody } }, async (req, reply) => {
     const organizationId = (req as any).authOrganizationId as number;
     const actorUserId = (req as any).authUserId as number;
     const { email, role } = req.body as any;
@@ -30,7 +30,7 @@ export async function registerInvitationRoutes(org: FastifyInstance, ctx: OrgRou
       let outcome: InviteOutcome | undefined;
       const result = await opts.idempotencyService.run({
         actorUserId, sessionId: sessionIdOf(req), method: 'POST',
-        normalizedPath: `/api/organizations/${organizationId}/invitations`,
+        normalizedPath: `/api/db/organizations/${organizationId}/invitations`,
         idempotencyKey: mode.idempotencyKey, requestBody: req.body,
         business: async (tx: Queryable) => {
           outcome = await svc.inviteMemberInTx(tx, organizationId, actorUserId, email, role as OrganizationRole | undefined);
@@ -50,7 +50,7 @@ export async function registerInvitationRoutes(org: FastifyInstance, ctx: OrgRou
     }
   });
 
-  org.get('/api/organizations/:organizationId/invitations', { config: { permission: 'member.invite' }, schema: { params: organizationIdParam } }, async (req, reply) => {
+  org.get('/api/db/organizations/:organizationId/invitations', { config: { permission: 'member.invite' }, schema: { params: organizationIdParam } }, async (req, reply) => {
     const organizationId = (req as any).authOrganizationId as number;
     try {
       const list = await svc.listInvitations(organizationId);
@@ -60,7 +60,7 @@ export async function registerInvitationRoutes(org: FastifyInstance, ctx: OrgRou
     }
   });
 
-  org.delete('/api/organizations/:organizationId/invitations/:invitationId', { config: { permission: 'member.invite' }, schema: { params: invitationIdParam } }, async (req, reply) => {
+  org.delete('/api/db/organizations/:organizationId/invitations/:invitationId', { config: { permission: 'member.invite' }, schema: { params: invitationIdParam } }, async (req, reply) => {
     const organizationId = (req as any).authOrganizationId as number;
     const actorUserId = (req as any).authUserId as number;
     const invitationId = Number((req.params as any).invitationId);
@@ -79,7 +79,7 @@ export async function registerInvitationRoutes(org: FastifyInstance, ctx: OrgRou
       const membershipId = await svc.invitationMembershipId(invitationId, organizationId);
       const result = await opts.idempotencyService.run({
         actorUserId, sessionId: sessionIdOf(req), method: 'DELETE',
-        normalizedPath: `/api/organizations/${organizationId}/invitations/${invitationId}`,
+        normalizedPath: `/api/db/organizations/${organizationId}/invitations/${invitationId}`,
         idempotencyKey: mode.idempotencyKey,
         business: async (tx: Queryable) => {
           const r = await svc.revokeInvitationInTx(tx, organizationId, actorUserId, invitationId, membershipId);

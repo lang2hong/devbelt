@@ -194,7 +194,7 @@ export function validateNewState(ns: unknown): NewStateDto {
   };
 }
 
-/** 服务端 GET /api/sync/state 的响应 DTO（对齐 server StateDto / toDto 输出）。 */
+/** 服务端 GET /api/db/sync/state 的响应 DTO（对齐 server StateDto / toDto 输出）。 */
 export interface StateDto {
   protocolVersion: 1;
   cipherSuite: 'AES-256-GCM';
@@ -256,7 +256,7 @@ export function validateSyncState(raw: unknown): StateDto {
   };
 }
 
-/** POST /api/sync/recover-via-account 的响应 DTO（服务端托管账号恢复材料）。 */
+/** POST /api/db/sync/recover-via-account 的响应 DTO（服务端托管账号恢复材料）。 */
 export interface AccountRecoveryMaterialDto {
   accountRecoveryKey: string;
   envelopeAccount: EnvelopeDto;

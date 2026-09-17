@@ -39,7 +39,8 @@ rm -rf "$SCRIPT_DIR/dist"
 
 echo "==> [2/6] 清理并构建 console-ui -> packages/console-ui/dist"
 rm -rf "$CONSOLE_SRC/dist"
-(cd "$REPO_ROOT" && pnpm --filter @db-client/console-ui build)
+# 控制台基路径：迁到 devkit.l2hi.com/db（CONSOLE_BASE=/db/）；留空则根路径。
+(cd "$REPO_ROOT" && CONSOLE_BASE="${CONSOLE_BASE:-}" pnpm --filter @db-client/console-ui build)
 
 echo "==> [3/6] 推送 server 产物到 ${REMOTE}:${DEPLOY_DIR}"
 ssh "$REMOTE" "mkdir -p '$DEPLOY_DIR/backups'"

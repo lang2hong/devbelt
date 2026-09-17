@@ -16,7 +16,7 @@ import { CredentialVault } from './credentialVault';
 import type { FolderDto, OrganizationSummaryDto, ResourceDetailDto, ResourceSummaryDto } from './types';
 import { EventEmitter, type Event } from '../utils/event';
 
-/** 客户端本地 UI 概念（非服务端 DTO）：role 由 /api/organizations 的 role 派生，仅供展示，不做授权。 */
+/** 客户端本地 UI 概念（非服务端 DTO）：role 由 /api/db/organizations 的 role 派生，仅供展示，不做授权。 */
 export type WorkspaceRef =
   | { kind: 'personal' }
   | { kind: 'organization'; organizationId: string; role: 'admin' | 'member' };

@@ -109,9 +109,9 @@ export class AuthService {
   private refreshToken?: string;
   /** 缓存的个人权益，持久化到 globalState 供重启后弱网回退。 */
   private cachedEntitlement?: CachedEntitlement;
-  /** 缓存的规范 userId（来源 GET /api/me），登出清空。 */
+  /** 缓存的规范 userId（来源 GET /api/db/me），登出清空。 */
   private cachedUserId?: string;
-  /** 认证身份变更计数：login/logout 递增。用于丢弃飞行中 /api/me 的过期结果（换号/登出竞态）。 */
+  /** 认证身份变更计数：login/logout 递增。用于丢弃飞行中 /api/db/me 的过期结果（换号/登出竞态）。 */
   private authGeneration = 0;
 
   /** 读取当前用户规范 userId；缓存到内存，登出清空。 */
@@ -144,7 +144,7 @@ export class AuthService {
   }
 
   /**
-   * 拉取 /api/me、写权益缓存并返回规范化结果。所有 me 拉取点应走本方法，
+   * 拉取 /api/db/me、写权益缓存并返回规范化结果。所有 me 拉取点应走本方法，
    * 由它统一落盘权益（旧实现各调用方只 getMe 不写缓存导致权益恒空）。
    *
    * 身份一致性：请求前捕获 authGeneration，响应返回时若身份已变（登出/换号）
@@ -154,7 +154,7 @@ export class AuthService {
     const generation = this.authGeneration;
     const me = await this.client.getMe();
     if (generation !== this.authGeneration) {
-      throw new Error('session changed during /api/me');
+      throw new Error('session changed during /api/db/me');
     }
     const sub = me.subscription;
     this.setCachedEntitlement({
@@ -173,7 +173,7 @@ export class AuthService {
   }
 
   /**
-   * 拉取 /api/me 并刷新权益缓存。登录态建立后（init）、账户/设备面板打开时调用。
+   * 拉取 /api/db/me 并刷新权益缓存。登录态建立后（init）、账户/设备面板打开时调用。
    *
    * 未登录直接返回；失败（网络/鉴权/换号）静默降级：不阻塞登录，权益缓存保持原值
    * （无缓存即 fail-closed 到 Free）。
@@ -221,7 +221,7 @@ export class AuthService {
       } else if (e.key === AuthService.REFRESH_TOKEN_KEY) {
         void this.secrets.get(AuthService.REFRESH_TOKEN_KEY).then((v) => { this.refreshToken = v; });
       }
-      // 跨窗口 token 变更可能代表换号（另一窗口 A→B）：使飞行中的 /api/me 失效并清除
+      // 跨窗口 token 变更可能代表换号（另一窗口 A→B）：使飞行中的 /api/db/me 失效并清除
       // 派生身份缓存，避免账户 A 的权益/ userId 落进已持账户 B token 的本实例。
       if (e.key === AuthService.ACCESS_TOKEN_KEY || e.key === AuthService.REFRESH_TOKEN_KEY) {
         this.invalidateCachedIdentity();
@@ -229,7 +229,7 @@ export class AuthService {
     });
   }
 
-  /** 使认证身份缓存失效：任何飞行中 /api/me 结果作废，已缓存的 userId/权益清空。 */
+  /** 使认证身份缓存失效：任何飞行中 /api/db/me 结果作废，已缓存的 userId/权益清空。 */
   private invalidateCachedIdentity(): void {
     this.authGeneration += 1;
     this.cachedUserId = undefined;

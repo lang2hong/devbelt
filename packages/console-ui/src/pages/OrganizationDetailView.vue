@@ -16,7 +16,7 @@ import {
   type Invitation,
 } from '../api/organizations';
 import { ensureCsrf, setAccessToken } from '../api/consoleAuth';
-import { navigate } from '../lib/router';
+import { navigate, withBase } from '../lib/router';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { formatDateTime } from '../lib/formatTime';
 import Modal from '../components/Modal.vue';
@@ -51,7 +51,7 @@ let loadSeq = 0;
 
 function relogin(): void {
   setAccessToken(null);
-  window.location.assign('/login');
+  window.location.assign(withBase('/login'));
 }
 
 function invalidContext(): void {
