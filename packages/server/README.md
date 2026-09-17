@@ -1,4 +1,4 @@
-# @db-client/server
+# @devkit/server
 
 Fastify + MySQL 8 服务，负责身份、个人权益、设备、组织、资源和个人同步协议。
 

@@ -435,7 +435,7 @@ describe('AlipayGateway', () => {
     const nowCn = new Date(Date.now() + 8 * 3600 * 1000);
     const p = (n: number) => String(n).padStart(2, '0');
     const fmt = (d: Date) => `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
-    const fields = { app_id: 'app', out_trade_no: 'ord1', trade_no: 'ali-t-1', total_amount: '99.00', trade_status: 'TRADE_SUCCESS', notify_time: fmt(nowCn), subject: 'DB Client Pro' };
+    const fields = { app_id: 'app', out_trade_no: 'ord1', trade_no: 'ali-t-1', total_amount: '99.00', trade_status: 'TRADE_SUCCESS', notify_time: fmt(nowCn), subject: 'DevKit' };
     const content = Object.keys(fields).filter((k) => k !== 'sign' && k !== 'sign_type').sort().map((k) => `${k}=${fields[k as keyof typeof fields]}`).join('&');
     const signer = createSign('RSA-SHA256');
     signer.update(content);

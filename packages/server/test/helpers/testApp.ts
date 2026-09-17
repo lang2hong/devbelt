@@ -197,7 +197,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
     mailFlowRepo,
     syncResetHandoffRepo,
     auditWriter,
-    'lang2hong.vscode-db-client',
+    'lang2hong.devkit',
   );
 
   const getUser = async (id: number) => userRepo.findById(id);

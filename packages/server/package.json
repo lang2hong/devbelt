@@ -1,5 +1,5 @@
 {
-  "name": "@db-client/server",
+  "name": "@devkit/server",
   "version": "0.1.0",
   "description": "DB Client server (Fastify + MySQL + Ed25519 + Argon2id)",
   "private": true,
@@ -28,7 +28,7 @@
     "nodemailer": "^9.0.5"
   },
   "devDependencies": {
-    "@db-client/core": "workspace:*",
+    "@devkit/core": "workspace:*",
     "@types/node": "^20.0.0",
     "@types/nodemailer": "^8.0.1",
     "esbuild": "^0.28.1",

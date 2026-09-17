@@ -1,8 +1,8 @@
 {
-  "name": "vscode-db-client",
+  "name": "devkit",
   "version": "0.1.0",
   "private": true,
-  "description": "All-in-one Database Client for VS Code (monorepo)",
+  "description": "devkit — unified developer toolkit monorepo (VS Code DB client, web console, server)",
   "license": "MIT",
   "engines": {
     "node": ">=20"
@@ -12,7 +12,7 @@
     "test": "pnpm -r run test",
     "typecheck": "pnpm -r run typecheck",
     "lint": "pnpm -r run lint",
-    "dev": "pnpm --filter ./packages/vscode-ext run dev"
+    "dev": "pnpm --filter ./packages/extension run dev"
   },
   "devDependencies": {
     "@vscode/vsce": "^3.9.2",

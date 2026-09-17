@@ -21,26 +21,26 @@ set -euo pipefail
 
 # ── 部署目标（部署前填写）──────────────────────────────────────────
 REMOTE="crewai"                    # ssh config 里的 Host 别名（User/HostName/Port 在 ~/.ssh/config 配好）
-DEPLOY_DIR="/usr/local/l2h/vscode-db-server"  # 服务器上的绝对部署目录
-SERVICE_NAME="dbclient-server"     # systemd 服务名
+DEPLOY_DIR="/usr/local/l2h/devkit/server"  # 服务器上的绝对部署目录
+SERVICE_NAME="devkit-server"     # systemd 服务名
 HEALTH_URL="http://localhost:3000/health/ready"
 LOG_FILE="${DEPLOY_DIR}/logs/server.log"
 # ────────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-# 控制台静态目录：与 server 的 consoleDistDir() 默认（`<cwd>/../console-ui/dist`）一致。
-CONSOLE_DIR="$(dirname "$DEPLOY_DIR")/console-ui"
-CONSOLE_SRC="$REPO_ROOT/packages/console-ui"
+# 控制台静态目录：与 server 的 consoleDistDir() 默认（`<cwd>/../db-ui/dist`）一致。
+CONSOLE_DIR="$(dirname "$DEPLOY_DIR")/db-ui"
+CONSOLE_SRC="$REPO_ROOT/packages/db-ui"
 
 echo "==> [1/6] 清理并构建 server -> packages/server/dist"
 rm -rf "$SCRIPT_DIR/dist"
-(cd "$REPO_ROOT" && pnpm --filter @db-client/server build)
+(cd "$REPO_ROOT" && pnpm --filter @devkit/server build)
 
-echo "==> [2/6] 清理并构建 console-ui -> packages/console-ui/dist"
+echo "==> [2/6] 清理并构建 db-ui -> packages/db-ui/dist"
 rm -rf "$CONSOLE_SRC/dist"
 # 控制台基路径：迁到 devkit.l2hi.com/db（CONSOLE_BASE=/db/）；留空则根路径。
-(cd "$REPO_ROOT" && CONSOLE_BASE="${CONSOLE_BASE:-}" pnpm --filter @db-client/console-ui build)
+(cd "$REPO_ROOT" && CONSOLE_BASE="${CONSOLE_BASE:-}" pnpm --filter @devkit/db-ui build)
 
 echo "==> [3/6] 推送 server 产物到 ${REMOTE}:${DEPLOY_DIR}"
 ssh "$REMOTE" "mkdir -p '$DEPLOY_DIR/backups'"
@@ -61,7 +61,7 @@ ssh "$REMOTE" "cd '$DEPLOY_DIR' \
 # 服务端 dotenv 只读工作目录下的 .env
 scp "$SCRIPT_DIR/.env.production" "$REMOTE:$DEPLOY_DIR/.env"
 
-echo "==> [4/6] 推送 console-ui 产物到 ${REMOTE}:${CONSOLE_DIR}/dist"
+echo "==> [4/6] 推送 db-ui 产物到 ${REMOTE}:${CONSOLE_DIR}/dist"
 ssh "$REMOTE" "mkdir -p '$CONSOLE_DIR/backups'"
 # 备份当前控制台静态（首次不存在时静默跳过）
 ssh "$REMOTE" \

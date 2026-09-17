@@ -15,7 +15,32 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
-  packages/console-ui:
+  packages/core:
+    dependencies:
+      mysql2:
+        specifier: ^3.23.2
+        version: 3.23.2(@types/node@26.1.2)
+      pg:
+        specifier: ^8.22.0
+        version: 8.22.0
+      sqlstring:
+        specifier: ^2.3.3
+        version: 2.3.3
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.20.4
+        version: 8.20.4
+      '@types/sqlstring':
+        specifier: ^2.3.2
+        version: 2.3.2
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@types/node@26.1.2)(happy-dom@20.14.0)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.1)(tsx@4.23.8))
+
+  packages/db-ui:
     dependencies:
       qrcode:
         specifier: ^1.5.4
@@ -46,96 +71,13 @@ importers:
         specifier: ^3.5.13
         version: 3.5.41(typescript@5.9.3)
 
-  packages/db-core:
-    dependencies:
-      mysql2:
-        specifier: ^3.23.2
-        version: 3.23.2(@types/node@26.1.2)
-      pg:
-        specifier: ^8.22.0
-        version: 8.22.0
-      sqlstring:
-        specifier: ^2.3.3
-        version: 2.3.3
-    devDependencies:
-      '@types/pg':
-        specifier: ^8.20.4
-        version: 8.20.4
-      '@types/sqlstring':
-        specifier: ^2.3.2
-        version: 2.3.2
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.10(@types/node@26.1.2)(happy-dom@20.14.0)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.1)(tsx@4.23.8))
-
   packages/e2e:
     devDependencies:
       '@playwright/test':
         specifier: ^1.48.0
         version: 1.63.0
 
-  packages/server:
-    dependencies:
-      '@fastify/cors':
-        specifier: ^11.3.0
-        version: 11.3.0
-      '@fastify/helmet':
-        specifier: 13.1.0
-        version: 13.1.0
-      '@fastify/mysql':
-        specifier: ^5.0.2
-        version: 5.0.2(@types/node@20.19.43)
-      '@fastify/sensible':
-        specifier: ^6.0.3
-        version: 6.0.4
-      '@fastify/static':
-        specifier: 8.3.0
-        version: 8.3.0
-      '@noble/hashes':
-        specifier: ^2.3.0
-        version: 2.3.0
-      dotenv:
-        specifier: ^17.4.2
-        version: 17.4.2
-      fastify:
-        specifier: ^5.12.4
-        version: 5.12.4
-      jose:
-        specifier: ^6.2.10
-        version: 6.2.10
-      mysql2:
-        specifier: 3.23.2
-        version: 3.23.2(@types/node@20.19.43)
-      nodemailer:
-        specifier: ^9.0.5
-        version: 9.0.5
-    devDependencies:
-      '@db-client/core':
-        specifier: workspace:*
-        version: link:../db-core
-      '@types/node':
-        specifier: ^20.0.0
-        version: 20.19.43
-      '@types/nodemailer':
-        specifier: ^8.0.1
-        version: 8.0.1
-      esbuild:
-        specifier: ^0.28.1
-        version: 0.28.1
-      tsx:
-        specifier: ^4.19.0
-        version: 4.23.8
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.10(@types/node@20.19.43)(happy-dom@20.14.0)(vite@8.2.0(@types/node@20.19.43)(esbuild@0.28.1)(tsx@4.23.8))
-
-  packages/vscode-ext:
+  packages/extension:
     dependencies:
       '@noble/curves':
         specifier: 2.4.0
@@ -153,9 +95,9 @@ importers:
         specifier: ^7.29.0
         version: 7.29.0
     devDependencies:
-      '@db-client/core':
+      '@devkit/core':
         specifier: workspace:*
-        version: link:../db-core
+        version: link:../core
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.43
@@ -198,6 +140,64 @@ importers:
       vue:
         specifier: ^3.5.13
         version: 3.5.41(typescript@5.9.3)
+
+  packages/server:
+    dependencies:
+      '@fastify/cors':
+        specifier: ^11.3.0
+        version: 11.3.0
+      '@fastify/helmet':
+        specifier: 13.1.0
+        version: 13.1.0
+      '@fastify/mysql':
+        specifier: ^5.0.2
+        version: 5.0.2(@types/node@20.19.43)
+      '@fastify/sensible':
+        specifier: ^6.0.3
+        version: 6.0.4
+      '@fastify/static':
+        specifier: 8.3.0
+        version: 8.3.0
+      '@noble/hashes':
+        specifier: ^2.3.0
+        version: 2.3.0
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
+      fastify:
+        specifier: ^5.12.4
+        version: 5.12.4
+      jose:
+        specifier: ^6.2.10
+        version: 6.2.10
+      mysql2:
+        specifier: 3.23.2
+        version: 3.23.2(@types/node@20.19.43)
+      nodemailer:
+        specifier: ^9.0.5
+        version: 9.0.5
+    devDependencies:
+      '@devkit/core':
+        specifier: workspace:*
+        version: link:../core
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.43
+      '@types/nodemailer':
+        specifier: ^8.0.1
+        version: 8.0.1
+      esbuild:
+        specifier: ^0.28.1
+        version: 0.28.1
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.8
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@types/node@20.19.43)(happy-dom@20.14.0)(vite@8.2.0(@types/node@20.19.43)(esbuild@0.28.1)(tsx@4.23.8))
 
 packages:
 
@@ -3866,7 +3866,7 @@ snapshots:
 
   '@types/pg@8.20.4':
     dependencies:
-      '@types/node': 26.1.2
+      '@types/node': 20.19.43
       pg-protocol: 1.15.0
       pg-types: 2.2.0
 

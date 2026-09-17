@@ -69,9 +69,9 @@ jobs:
         image: mysql:8
         env:
           MYSQL_ROOT_PASSWORD: ci-root-pass
-          # mysqlSchema / mysqlReal 都硬编码库名 dbclient_verify，
+          # mysqlSchema / mysqlReal 都硬编码库名 devkit_verify，
           # 由 container 直接建好，测试自己不建库
-          MYSQL_DATABASE: dbclient_verify
+          MYSQL_DATABASE: devkit_verify
         ports:
           - 3306:3306
         # 没有 health check 的话测试会在 MySQL 还没起来时就连，随机失败
@@ -85,7 +85,7 @@ jobs:
         image: postgres:16
         env:
           POSTGRES_PASSWORD: ci-pg-pass
-          POSTGRES_DB: dbclient_verify
+          POSTGRES_DB: devkit_verify
         ports:
           - 5432:5432
         options: >-
@@ -117,7 +117,7 @@ jobs:
       - name: Integration tests (db-core)
         env:
           MYSQL_TEST_URL: mysql://root:ci-root-pass@127.0.0.1:3306
-          PG_TEST_URL: postgres://postgres:ci-pg-pass@127.0.0.1:5432/dbclient_verify
+          PG_TEST_URL: postgres://postgres:ci-pg-pass@127.0.0.1:5432/devkit_verify
         run: pnpm -C packages/db-core test
 
       - name: Integration tests (server)
@@ -126,7 +126,7 @@ jobs:
         run: pnpm -C packages/server test
 
   # 浏览器 e2e：注册/登录/邮箱验证/邀请全链路（Playwright + Mailpit 真发信 + 真实 MySQL）。
-  # 独立 job：需要构建 server（bundle）+ console-ui（dist）+ 起服务 + 装浏览器，成本高，
+  # 独立 job：需要构建 server（bundle）+ db-ui（dist）+ 起服务 + 装浏览器，成本高，
   # 不塞进 build matrix。Mailpit SMTP sink（1025）收 server 真发的邮件，8025 提供 HTTP API 取信。
   e2e:
     runs-on: ubuntu-latest
@@ -136,7 +136,7 @@ jobs:
         image: mysql:8
         env:
           MYSQL_ROOT_PASSWORD: e2e-root-pass
-          MYSQL_DATABASE: dbclient_e2e
+          MYSQL_DATABASE: devkit_e2e
         ports:
           - 3306:3306
         options: >-
@@ -164,8 +164,8 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Build server + console-ui
-        run: pnpm -C packages/server build && pnpm -C packages/console-ui build
+      - name: Build server + db-ui
+        run: pnpm -C packages/server build && pnpm -C packages/db-ui build
 
       - name: Prepare Ed25519 signing keys
         run: |
@@ -190,7 +190,7 @@ jobs:
           MYSQL_PORT: '3306'
           MYSQL_USER: root
           MYSQL_PASSWORD: e2e-root-pass
-          MYSQL_DATABASE: dbclient_e2e
+          MYSQL_DATABASE: devkit_e2e
           PORT: '5173'
           E2E_BASE_URL: http://localhost:5173
         run: pnpm -C packages/e2e e2e

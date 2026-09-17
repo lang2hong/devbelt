@@ -43,7 +43,7 @@ export class WechatPayGateway implements PaymentGateway {
     const body = JSON.stringify({
       appid: this.creds.appId,
       mchid: this.creds.mchId,
-      description: 'DB Client Pro subscription',
+      description: 'DevKit subscription',
       out_trade_no: input.orderNo,
       time_expire: input.expiresTime.toISOString().replace(/\.\d{3}Z$/, 'Z'),
       amount: { total: input.amountCents, currency: 'CNY' },

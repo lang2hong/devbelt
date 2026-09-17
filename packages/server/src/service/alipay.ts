@@ -174,7 +174,7 @@ export class AlipayGateway implements PaymentGateway {
     const biz = {
       out_trade_no: input.orderNo,
       total_amount: yuanFromCents(input.amountCents),
-      subject: 'DB Client Pro subscription',
+      subject: 'DevKit subscription',
       timeout_express: timeoutExpress(input.expiresTime),
     };
     const params: Record<string, string> = {
@@ -235,7 +235,7 @@ export class AlipayGateway implements PaymentGateway {
     const biz = {
       out_trade_no: input.orderNo,
       total_amount: yuanFromCents(input.amountCents),
-      subject: 'DB Client Pro subscription',
+      subject: 'DevKit subscription',
       product_code: 'FAST_INSTANT_TRADE_PAY',
       timeout_express: timeoutExpress(input.expiresTime),
     };

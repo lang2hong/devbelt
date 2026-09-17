@@ -10,7 +10,7 @@ const PUBLIC_CSP =
   "frame-ancestors 'none'; form-action 'self'; object-src 'none'";
 
 function consoleDistDir(): string {
-  return process.env.CONSOLE_DIST_DIR || path.resolve(process.cwd(), '../console-ui/dist');
+  return process.env.CONSOLE_DIST_DIR || path.resolve(process.cwd(), '../db-ui/dist');
 }
 
 function notFound(_req: FastifyRequest, reply: FastifyReply): void {
@@ -29,7 +29,7 @@ export async function registerConsoleStatic(app: FastifyInstance): Promise<void>
   const dist = consoleDistDir();
 
   if (!existsSync(dist)) {
-    app.log.warn(`[console] console-ui dist not found at ${dist}; public pages unavailable`);
+    app.log.warn(`[console] db-ui dist not found at ${dist}; public pages unavailable`);
     app.get('/verify-email', notFound);
     app.get('/login', notFound);
     app.get('/register', notFound);

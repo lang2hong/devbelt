@@ -88,7 +88,7 @@ describe.skipIf(!URL)('sync reset-after-loss handoff (real MySQL)', () => {
     const svc = new SyncResetService(
       stateRepo, recordRepo, resetTokenRepo, userRepo,
       (fn) => withTransaction(db, fn), emailSender, rateLimiter,
-      mailFlowRepo, handoffRepo, auditWriter, 'lang2hong.vscode-db-client',
+      mailFlowRepo, handoffRepo, auditWriter, 'lang2hong.devkit',
     );
     return { stateRepo, recordRepo, resetTokenRepo, mailFlowRepo, svc };
   }
