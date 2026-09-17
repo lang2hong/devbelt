@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { claimLinkFlow, verifyEmail, resendVerification } from '../api/linkFlows';
+import { claimLinkFlow, verifyEmail, resendVerification } from '@devkit/auth-client';
 import { readCsrfToken } from '@devkit/auth-client';
 
 // 文案常量，与验证邮件正文语言一致（本片不做双语切换）。

@@ -16,11 +16,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         index: new URL('./index.html', import.meta.url).pathname,
-        'verify-email': new URL('./verify-email.html', import.meta.url).pathname,
-        'accept-invitation': new URL('./accept-invitation.html', import.meta.url).pathname,
         'sync-reset': new URL('./sync-reset.html', import.meta.url).pathname,
-        login: new URL('./login.html', import.meta.url).pathname,
-        register: new URL('./register.html', import.meta.url).pathname,
       },
     },
   },

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { withBase } from '../lib/router';
-import { claimLinkFlow, bindMailFlow, createSyncResetHandoff } from '../api/linkFlows';
+import { claimLinkFlow, bindMailFlow, createSyncResetHandoff } from '@devkit/auth-client';
 import { ensureCsrf, refresh, getAccessToken } from '@devkit/auth-client';
 
 const TEXT = {

@@ -2,20 +2,17 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 
-vi.mock('../api/linkFlows', () => ({
+vi.mock('@devkit/auth-client', async (importOriginal) => ({
+  ...(await importOriginal()),
   claimLinkFlow: vi.fn(),
   acceptInvitation: vi.fn(),
   bindMailFlow: vi.fn(),
-}));
-
-vi.mock('@devkit/auth-client', async (importOriginal) => ({
-  ...(await importOriginal()),
   ensureCsrf: vi.fn(async () => 'csrf'),
   refresh: vi.fn(async () => ({ kind: 'ok' })),
   getAccessToken: vi.fn(() => 'at'),
 }));
 
-import { claimLinkFlow, acceptInvitation, bindMailFlow } from '../api/linkFlows';
+import { claimLinkFlow, acceptInvitation, bindMailFlow } from '@devkit/auth-client';
 import { refresh } from '@devkit/auth-client';
 
 function setLocation(path: string): void {

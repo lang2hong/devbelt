@@ -1,0 +1,135 @@
+/**
+ * Console 设计基座（GitHub/Linear 风）：设计 tokens + 少量基础元素样式。
+ *
+ * 纯样式，不含逻辑。各页面可继续用 scoped 样式，但应优先消费这里的 CSS 变量，
+ * 以保证全站配色/圆角/间距一致。变量名稳定，改这里即全局生效。
+ */
+:root {
+  /* 颜色 */
+  --c-bg: #f6f8fa;
+  --c-surface: #ffffff;
+  --c-surface-muted: #f6f8fa;
+  --c-text: #1f2328;
+  --c-text-muted: #656d76;
+  --c-text-subtle: #8c959f;
+  --c-border: #d8dee4;
+  --c-border-strong: #d0d7de;
+  --c-accent: #0969da;
+  --c-accent-bg: #ddf4ff;
+  --c-accent-text: #0550ae;
+  --c-success: #1f883d;
+  --c-success-bg: #dafbe1;
+  --c-success-text: #1a7f37;
+  --c-danger: #cf222e;
+  --c-warn-bg: #fff8c5;
+  --c-warn-border: #d4a72c;
+  --c-warn-text: #9a6700;
+
+  /* 圆角 / 阴影 / 间距 */
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 10px;
+  --r-pill: 999px;
+  --shadow-sm: 0 1px 2px rgba(31, 35, 40, 0.12);
+  --shadow-md: 0 3px 12px rgba(31, 35, 40, 0.12);
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+
+  /* 字体 */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--c-text);
+  background: var(--c-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4 { color: var(--c-text); }
+h1 { font-size: 22px; letter-spacing: -0.01em; }
+h2 { font-size: 20px; }
+h3 { font-size: 15px; margin: 0 0 var(--sp-3); }
+
+a { color: var(--c-accent); }
+code, .mono { font-family: var(--font-mono); }
+
+::selection { background: var(--c-accent-bg); }
+
+/* 焦点可见性（键盘可达） */
+:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 1px; }
+
+/* 基础控件默认样式（页面可覆盖） */
+input[type="text"], input[type="number"], input[type="email"], input[type="password"], select, textarea {
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--c-text);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--r-sm);
+  padding: 7px 10px;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.15);
+}
+
+/* 通用工具类（可选采用） */
+.card {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  padding: var(--sp-5);
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  height: 34px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--c-success);
+  color: #fff;
+}
+.btn:hover { filter: brightness(0.96); }
+.btn:disabled { opacity: 0.6; cursor: default; }
+.btn.ghost { background: var(--c-surface-muted); color: var(--c-text); border-color: var(--c-border-strong); font-weight: 500; }
+.btn.accent { background: var(--c-accent); }
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  background: #eaeef2;
+  color: var(--c-text-muted);
+}
+.badge.ok { background: var(--c-success-bg); color: var(--c-success-text); }
+.badge.warn { background: var(--c-warn-bg); color: var(--c-warn-text); }
+.badge.danger { background: #ffebe9; color: var(--c-danger); }
+.muted { color: var(--c-text-muted); }
+.error { color: var(--c-danger); }
+.ok { color: var(--c-success-text); }

@@ -6,7 +6,7 @@ import {
   acceptInvitation,
   bindMailFlow,
   type AcceptInvitationOrganization,
-} from '../api/linkFlows';
+} from '@devkit/auth-client';
 import { ensureCsrf, refresh, getAccessToken } from '@devkit/auth-client';
 
 const TEXT = {
