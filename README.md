@@ -41,10 +41,13 @@ pnpm test
 包结构：
 
 ```
-packages/
-├── db-core/     # 数据库驱动、方言、连接、查询和元数据
-├── vscode-ext/  # VS Code 扩展：命令、树视图、webview、组织 Workspace
-└── server/      # Fastify 服务：认证、组织、同步 API、MySQL 持久化
+apps/            # 可部署单元
+├── server/      # Fastify 服务：认证、组织、同步 API、MySQL 持久化、静态托管
+├── vscode-ext/  # VS Code 宿主：命令、树视图、webview、组织 Workspace
+├── db-ui/       # /db 控制台（Vue 3 + Vite）
+└── e2e/         # Playwright 端到端
+packages/        # 仅被多方 import 的库
+└── db-core/     # 数据库驱动、方言、连接、查询与同步密码学（宿主无关）
 ```
 
 ## 许可

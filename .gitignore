@@ -5,10 +5,10 @@ out/
 .DS_Store
 .vscode/
 *.tsbuildinfo
-packages/server/public/
+apps/server/public/
 .env
 .env.local
 .env.production
 *.vsix
-db-client-connections.json
+devkit-connections.json
 docs/archive/

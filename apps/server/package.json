@@ -1,0 +1,39 @@
+{
+  "name": "@devkit/server",
+  "version": "0.1.0",
+  "description": "DB Client server (Fastify + MySQL + Ed25519 + Argon2id)",
+  "private": true,
+  "main": "./dist/index.cjs",
+  "scripts": {
+    "build": "node build.cjs",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "lint": "tsc --noEmit -p tsconfig.test.json",
+    "test": "node build.cjs && pnpm -C ../db-core build && vitest run",
+    "start": "node dist/index.cjs",
+    "dev": "node dev.cjs",
+    "admin:promote": "node dist/promoteAdmin.cjs",
+    "admin:promote:dev": "tsx src/scripts/promotePlatformAdmin.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@fastify/helmet": "13.1.0",
+    "@fastify/mysql": "^5.0.2",
+    "@fastify/sensible": "^6.0.3",
+    "@fastify/static": "8.3.0",
+    "@noble/hashes": "^2.3.0",
+    "dotenv": "^17.4.2",
+    "fastify": "^5.12.4",
+    "jose": "^6.2.10",
+    "mysql2": "3.23.2",
+    "nodemailer": "^9.0.5"
+  },
+  "devDependencies": {
+    "@devkit/db-core": "workspace:*",
+    "@types/node": "^20.0.0",
+    "@types/nodemailer": "^8.0.1",
+    "esbuild": "^0.28.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

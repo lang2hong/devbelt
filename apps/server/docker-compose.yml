@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: dbclient-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: db_client
+      # server 以 dbclient 身份连接，必须让镜像把这个用户创建出来，
+      # 否则启动即认证失败。官方镜像会自动授予该用户 MYSQL_DATABASE 的全部权限，
+      # 因此 ensureDatabase() 也不再需要建库权限。
+      # 注意：仅在首次初始化空数据目录时生效，已有 mysql-data 卷需手工建用户，
+      # 见 README「启动」小节。
+      MYSQL_USER: dbclient
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  server:
+    build:
+      context: ../..
+      dockerfile: apps/server/Dockerfile
+    container_name: dbclient-server
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: dbclient
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+      MYSQL_DATABASE: db_client
+      # Ed25519 签名密钥（实施规格 §5.1）。`:?` 让缺失在 compose
+      # 阶段就失败，而不是留到运行时。TOKEN_VERIFY_KEYS_JSON 需包含 TOKEN_SIGNING_KID
+      # 对应的公钥。见 .env.example 的生成命令。
+      TOKEN_SIGNING_KEY_B64: ${TOKEN_SIGNING_KEY_B64:?TOKEN_SIGNING_KEY_B64 is required}
+      TOKEN_VERIFY_KEYS_JSON: ${TOKEN_VERIFY_KEYS_JSON:?TOKEN_VERIFY_KEYS_JSON is required}
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+
+volumes:
+  mysql-data:

@@ -54,7 +54,7 @@ jobs:
       # 存在，所以必须放在 Build 之后 —— 实测删掉 out/ 后它会报
       # "Extension entrypoint(s) missing" 并失败。
       - name: Package extension
-        run: pnpm -C packages/vscode-ext package
+        run: pnpm -C apps/vscode-ext package
   # 需要真实数据库的测试。四个文件全是 describe.skipIf(!URL)，本地无库时
   # 整体跳过，所以 `pnpm test` 在任何机器上都能过 —— 代价是它们在 CI 里
   # 也从未跑过。这个 job 用 service container 把门禁打开。
@@ -123,7 +123,7 @@ jobs:
       - name: Integration tests (server)
         env:
           MYSQL_TEST_URL: mysql://root:ci-root-pass@127.0.0.1:3306
-        run: pnpm -C packages/server test
+        run: pnpm -C apps/server test
 
   # 浏览器 e2e：注册/登录/邮箱验证/邀请全链路（Playwright + Mailpit 真发信 + 真实 MySQL）。
   # 独立 job：需要构建 server（bundle）+ db-ui（dist）+ 起服务 + 装浏览器，成本高，
@@ -165,7 +165,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Build server + db-ui
-        run: pnpm -C packages/server build && pnpm -C packages/db-ui build
+        run: pnpm -C apps/server build && pnpm -C apps/db-ui build
 
       - name: Prepare Ed25519 signing keys
         run: |
@@ -175,7 +175,7 @@ jobs:
           echo "TOKEN_VERIFY_KEYS_JSON={\"k1\":\"$(base64 -w0 /tmp/k1.pub.pem)\"}" >> "$GITHUB_ENV"
 
       - name: Install Playwright browser
-        run: pnpm -C packages/e2e exec playwright install --with-deps chromium
+        run: pnpm -C apps/e2e exec playwright install --with-deps chromium
 
       - name: Run e2e
         env:
@@ -193,7 +193,7 @@ jobs:
           MYSQL_DATABASE: devkit_e2e
           PORT: '5173'
           E2E_BASE_URL: http://localhost:5173
-        run: pnpm -C packages/e2e e2e
+        run: pnpm -C apps/e2e e2e
 
   # VSIX 安装 smoke：真实 vsce 打包 → 真实安装 → 真实启动并断言扩展激活/命令注册。
   # 独立 job：需下载 VS Code（stable）与 xvfb（Linux 无显示），成本高，不塞进 build matrix。
@@ -217,7 +217,7 @@ jobs:
 
       # 扩展 bundle（out/）+ webview dist 必须先就绪，vsce 才能打进 vsix。
       - name: Build extension
-        run: pnpm -C packages/db-core build && pnpm -C packages/vscode-ext build
+        run: pnpm -C packages/db-core build && pnpm -C apps/vscode-ext build
 
       - name: Run VSIX install smoke
-        run: xvfb-run -a pnpm -C packages/vscode-ext vsix:smoke
+        run: xvfb-run -a pnpm -C apps/vscode-ext vsix:smoke
