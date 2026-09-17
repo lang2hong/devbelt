@@ -209,7 +209,7 @@ describe('console admin routes', () => {
     const u = await b.userRepo.create('nobody@b.com', 'hash');
     const res = await b.app.inject({
       method: 'GET',
-      url: '/api/console/admin/users',
+      url: '/api/admin/users',
       headers: { authorization: `Bearer ${await b.consoleToken(u.id)}`, accept: 'application/json' },
     });
     expect(res.statusCode).toBe(403);
@@ -222,7 +222,7 @@ describe('console admin routes', () => {
     const admin = await b.makeAdmin('admin@b.com');
     const res = await b.app.inject({
       method: 'GET',
-      url: '/api/console/admin/users',
+      url: '/api/admin/users',
       headers: { authorization: `Bearer ${await b.consoleToken(admin.id)}`, accept: 'application/json' },
     });
     expect(res.statusCode).toBe(200);
@@ -238,7 +238,7 @@ describe('console admin routes', () => {
     const admin = await b.makeAdmin();
     const res = await b.app.inject({
       method: 'GET',
-      url: '/api/console/admin/users?cursor=garbage',
+      url: '/api/admin/users?cursor=garbage',
       headers: { authorization: `Bearer ${await b.consoleToken(admin.id)}`, accept: 'application/json' },
     });
     expect(res.statusCode).toBe(422);
@@ -256,7 +256,7 @@ describe('console admin routes', () => {
 
     const res = await b.app.inject({
       method: 'PATCH',
-      url: `/api/console/admin/users/${target.id}/status`,
+      url: `/api/admin/users/${target.id}/status`,
       headers: await b.writeHeaders(admin.id),
       payload: { status: 'disabled', reason: 'abuse' },
     });
@@ -278,7 +278,7 @@ describe('console admin routes', () => {
 
     const res = await b.app.inject({
       method: 'PATCH',
-      url: `/api/console/admin/users/${target.id}/subscription`,
+      url: `/api/admin/users/${target.id}/subscription`,
       headers: await b.writeHeaders(admin.id),
       payload: { planCode: 'free', reason: 'upgrade', expectedVersion: 999 },
     });
@@ -300,7 +300,7 @@ describe('console admin routes', () => {
 
     const res = await b.app.inject({
       method: 'PATCH',
-      url: `/api/console/admin/organizations/${org.id}/subscription`,
+      url: `/api/admin/organizations/${org.id}/subscription`,
       headers: await b.writeHeaders(admin.id),
       payload: { planCode: 'organization_free', seatLimit: 0, reason: 'cut', expectedVersion: 0 },
     });
@@ -317,7 +317,7 @@ describe('console admin routes', () => {
 
     const res = await b.app.inject({
       method: 'PATCH',
-      url: `/api/console/admin/users/${target.id}/subscription`,
+      url: `/api/admin/users/${target.id}/subscription`,
       headers: await b.writeHeaders(admin.id),
       payload: { planCode: 'free', reason: 'extend', expectedVersion: 0, periodEndTime: new Date(Date.now() - 3600 * 1000).toISOString() },
     });
@@ -335,7 +335,7 @@ describe('console admin routes', () => {
 
     const res = await b.app.inject({
       method: 'PATCH',
-      url: `/api/console/admin/users/${target.id}/subscription`,
+      url: `/api/admin/users/${target.id}/subscription`,
       headers: await b.writeHeaders(admin.id),
       payload: { planCode: 'free', reason: 'x', expectedVersion: 0, periodEndTime: new Date(start.getTime() - 24 * 3600 * 1000).toISOString() },
     });
@@ -354,7 +354,7 @@ describe('console admin routes', () => {
 
     const res = await b.app.inject({
       method: 'PATCH',
-      url: `/api/console/admin/organizations/${org.id}/subscription`,
+      url: `/api/admin/organizations/${org.id}/subscription`,
       headers: await b.writeHeaders(admin.id),
       payload: { planCode: 'organization_free', seatLimit: 65536, reason: 'grow', expectedVersion: 0 },
     });
@@ -368,7 +368,7 @@ describe('console admin routes', () => {
     const admin = await b.makeAdmin();
     const res = await b.app.inject({
       method: 'POST',
-      url: '/api/console/admin/audit/exports',
+      url: '/api/admin/audit/exports',
       headers: await b.writeHeaders(admin.id),
       payload: { format: 'json', filters: {}, expectedCountUpperBound: 10001 },
     });
@@ -383,7 +383,7 @@ describe('console admin routes', () => {
     const ancientFrom = new Date(Date.now() - 40 * 24 * 3600 * 1000).toISOString();
     const res = await b.app.inject({
       method: 'GET',
-      url: `/api/console/admin/audit?fromTime=${encodeURIComponent(ancientFrom)}`,
+      url: `/api/admin/audit?fromTime=${encodeURIComponent(ancientFrom)}`,
       headers: { authorization: `Bearer ${await b.consoleToken(admin.id)}`, accept: 'application/json' },
     });
     expect(res.statusCode).toBe(422);
@@ -399,7 +399,7 @@ describe('console admin routes', () => {
     void _;
     const res = await b.app.inject({
       method: 'POST',
-      url: '/api/console/admin/audit/exports',
+      url: '/api/admin/audit/exports',
       headers,
       payload: { format: 'json', filters: {} },
     });
@@ -427,11 +427,11 @@ describe('console admin routes', () => {
     const headers = await b.writeHeaders(admin.id);
     const payload = { format: 'json', filters: {} };
 
-    const first = await b.app.inject({ method: 'POST', url: '/api/console/admin/audit/exports', headers, payload });
+    const first = await b.app.inject({ method: 'POST', url: '/api/admin/audit/exports', headers, payload });
     expect(first.statusCode).toBe(200);
     expect(first.headers['content-disposition']).toContain('attachment');
 
-    const second = await b.app.inject({ method: 'POST', url: '/api/console/admin/audit/exports', headers, payload });
+    const second = await b.app.inject({ method: 'POST', url: '/api/admin/audit/exports', headers, payload });
     expect(second.statusCode).toBe(200);
     expect(second.body).toBe(first.body);
 
@@ -446,7 +446,7 @@ describe('console admin routes', () => {
     const payload = { format: 'json', filters: {} };
     const doExport = async (key: string) => {
       const headers = await b.writeHeaders(admin.id, key);
-      return b.app.inject({ method: 'POST', url: '/api/console/admin/audit/exports', headers, payload });
+      return b.app.inject({ method: 'POST', url: '/api/admin/audit/exports', headers, payload });
     };
 
     const firstKey = randomUUID();
@@ -511,7 +511,7 @@ describe('console admin routes', () => {
     b.orders.set('ord-1', makeOrder({ id: 1, orderNo: 'ord-1', status: 'paid' }));
     const res = await b.app.inject({
       method: 'PATCH',
-      url: '/api/console/admin/orders/ord-1/refund',
+      url: '/api/admin/orders/ord-1/refund',
       headers: await b.writeHeaders(admin.id),
       payload: { reason: 'customer request' },
     });
@@ -527,7 +527,7 @@ describe('console admin routes', () => {
     b.orders.set('ord-2', makeOrder({ id: 2, orderNo: 'ord-2', status: 'fulfilled' }));
     const res = await b.app.inject({
       method: 'PATCH',
-      url: '/api/console/admin/orders/ord-2/refund',
+      url: '/api/admin/orders/ord-2/refund',
       headers: await b.writeHeaders(admin.id),
       payload: { reason: 'duplicate charge' },
     });
@@ -542,7 +542,7 @@ describe('console admin routes', () => {
     b.orders.set('ord-3', makeOrder({ id: 3, orderNo: 'ord-3', status: 'pending' }));
     const res = await b.app.inject({
       method: 'PATCH',
-      url: '/api/console/admin/orders/ord-3/refund',
+      url: '/api/admin/orders/ord-3/refund',
       headers: await b.writeHeaders(admin.id),
       payload: { reason: 'x' },
     });
@@ -558,7 +558,7 @@ describe('console admin routes', () => {
     b.invoices.push(makeInvoice({ id: 9, orderId: 9, status: 'issued' }));
     const res = await b.app.inject({
       method: 'PATCH',
-      url: '/api/console/admin/orders/ord-9/refund',
+      url: '/api/admin/orders/ord-9/refund',
       headers: await b.writeHeaders(admin.id),
       payload: { reason: 'x' },
     });
@@ -573,7 +573,7 @@ describe('console admin routes', () => {
     const admin = await b.makeAdmin();
     const res = await b.app.inject({
       method: 'PATCH',
-      url: '/api/console/admin/orders/nope/refund',
+      url: '/api/admin/orders/nope/refund',
       headers: await b.writeHeaders(admin.id),
       payload: { reason: 'x' },
     });
@@ -588,7 +588,7 @@ describe('console admin routes', () => {
     b.orders.set('ord-1', makeOrder({ id: 1, orderNo: 'ord-1', status: 'paid' }));
     const res = await b.app.inject({
       method: 'PATCH',
-      url: '/api/console/admin/orders/ord-1/refund',
+      url: '/api/admin/orders/ord-1/refund',
       headers: await b.writeHeaders(admin.id),
       payload: {},
     });
@@ -603,7 +603,7 @@ describe('console admin routes', () => {
     b.orders.set('ord-1', makeOrder({ id: 1, orderNo: 'ord-1', status: 'paid' }));
     const res = await b.app.inject({
       method: 'PATCH',
-      url: '/api/console/admin/orders/ord-1/refund',
+      url: '/api/admin/orders/ord-1/refund',
       headers: await b.writeHeaders(admin.id),
       payload: { reason: '   ' },
     });
@@ -619,7 +619,7 @@ describe('console admin routes', () => {
     b.invoices.push(makeInvoice({ id: 1, status: 'requested' }));
     const res = await b.app.inject({
       method: 'PATCH',
-      url: '/api/console/admin/invoices/1',
+      url: '/api/admin/invoices/1',
       headers: await b.writeHeaders(admin.id),
       payload: { status: 'issued' },
     });
@@ -636,7 +636,7 @@ describe('console admin routes', () => {
 
     const noReason = await b.app.inject({
       method: 'PATCH',
-      url: '/api/console/admin/invoices/1',
+      url: '/api/admin/invoices/1',
       headers: await b.writeHeaders(admin.id),
       payload: { status: 'rejected' },
     });
@@ -645,7 +645,7 @@ describe('console admin routes', () => {
 
     const ok = await b.app.inject({
       method: 'PATCH',
-      url: '/api/console/admin/invoices/1',
+      url: '/api/admin/invoices/1',
       headers: await b.writeHeaders(admin.id, randomUUID()),
       payload: { status: 'failed', reason: 'backend failed' },
     });
@@ -662,7 +662,7 @@ describe('console admin routes', () => {
     b.invoices.push(makeInvoice({ id: 1, status: 'issued' }));
     const res = await b.app.inject({
       method: 'PATCH',
-      url: '/api/console/admin/invoices/1',
+      url: '/api/admin/invoices/1',
       headers: await b.writeHeaders(admin.id),
       payload: { status: 'failed', reason: 'x' },
     });
@@ -678,7 +678,7 @@ describe('console admin routes', () => {
     b.invoices.push(makeInvoice({ id: 2, userId: 20, title: 'B', status: 'issued' }));
     const res = await b.app.inject({
       method: 'GET',
-      url: '/api/console/admin/invoices',
+      url: '/api/admin/invoices',
       headers: { authorization: `Bearer ${await b.consoleToken(admin.id)}`, accept: 'application/json' },
     });
     expect(res.statusCode).toBe(200);
@@ -691,7 +691,7 @@ describe('console admin routes', () => {
     const admin = await b.makeAdmin();
     const res = await b.app.inject({
       method: 'GET',
-      url: '/api/console/admin/invoices?userId=abc',
+      url: '/api/admin/invoices?userId=abc',
       headers: { authorization: `Bearer ${await b.consoleToken(admin.id)}`, accept: 'application/json' },
     });
     expect(res.statusCode).toBe(422);
@@ -704,7 +704,7 @@ describe('console admin routes', () => {
     const admin = await b.makeAdmin();
     const res = await b.app.inject({
       method: 'GET',
-      url: '/api/console/admin/invoices?status=typo',
+      url: '/api/admin/invoices?status=typo',
       headers: { authorization: `Bearer ${await b.consoleToken(admin.id)}`, accept: 'application/json' },
     });
     expect(res.statusCode).toBe(422);
@@ -719,7 +719,7 @@ describe('console admin routes', () => {
     b.invoices.push(makeInvoice({ id: 1, orderId: 5, status: 'requested' }));
     const res = await b.app.inject({
       method: 'PATCH',
-      url: '/api/console/admin/invoices/1',
+      url: '/api/admin/invoices/1',
       headers: await b.writeHeaders(admin.id),
       payload: { status: 'issued' },
     });
@@ -734,7 +734,7 @@ describe('console admin routes', () => {
     const admin = await b.makeAdmin();
     const res = await b.app.inject({
       method: 'GET',
-      url: '/api/console/admin/orders?userId=abc',
+      url: '/api/admin/orders?userId=abc',
       headers: { authorization: `Bearer ${await b.consoleToken(admin.id)}`, accept: 'application/json' },
     });
     expect(res.statusCode).toBe(422);

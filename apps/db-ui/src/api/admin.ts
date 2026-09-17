@@ -152,7 +152,7 @@ export async function listUsers(
 ): Promise<Result<Page<AdminUser>>> {
   if (!token) return { kind: 'unauthorized' };
   try {
-    const res = await authedFetch(`/api/console/admin/users${qs(filters)}`, { headers: auth(token) }, fetchImpl);
+    const res = await authedFetch(`/api/admin/users${qs(filters)}`, { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: await toPage<AdminUser>(res) };
     return failure(res);
   } catch {
@@ -172,7 +172,7 @@ export async function setUserStatus(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      `/api/console/admin/users/${userId}/status`,
+      `/api/admin/users/${userId}/status`,
       { method: 'PATCH', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify({ status, reason }) },
       fetchImpl,
     );
@@ -196,7 +196,7 @@ export async function adjustUserSubscription(
   if (input.periodEndTime) body.periodEndTime = input.periodEndTime;
   try {
     const res = await authedFetch(
-      `/api/console/admin/users/${userId}/subscription`,
+      `/api/admin/users/${userId}/subscription`,
       { method: 'PATCH', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify(body) },
       fetchImpl,
     );
@@ -223,7 +223,7 @@ export async function listOrganizations(
 ): Promise<Result<Page<AdminOrganization>>> {
   if (!token) return { kind: 'unauthorized' };
   try {
-    const res = await authedFetch(`/api/console/admin/organizations${qs(filters)}`, { headers: auth(token) }, fetchImpl);
+    const res = await authedFetch(`/api/admin/organizations${qs(filters)}`, { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: await toPage<AdminOrganization>(res) };
     return failure(res);
   } catch {
@@ -244,7 +244,7 @@ export async function adjustOrganizationSubscription(
   if (input.periodEndTime) body.periodEndTime = input.periodEndTime;
   try {
     const res = await authedFetch(
-      `/api/console/admin/organizations/${organizationId}/subscription`,
+      `/api/admin/organizations/${organizationId}/subscription`,
       { method: 'PATCH', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify(body) },
       fetchImpl,
     );
@@ -274,7 +274,7 @@ export async function queryAudit(
 ): Promise<Result<Page<AdminAuditEvent>>> {
   if (!token) return { kind: 'unauthorized' };
   try {
-    const res = await authedFetch(`/api/console/admin/audit${qs(filters)}`, { headers: auth(token) }, fetchImpl);
+    const res = await authedFetch(`/api/admin/audit${qs(filters)}`, { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: await toPage<AdminAuditEvent>(res) };
     return failure(res);
   } catch {
@@ -300,7 +300,7 @@ export async function exportAudit(
   if (filters.organizationId) f.organizationId = Number(filters.organizationId);
   try {
     const res = await authedFetch(
-      '/api/console/admin/audit/exports',
+      '/api/admin/audit/exports',
       { method: 'POST', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify({ format, filters: f }) },
       fetchImpl,
     );
@@ -346,7 +346,7 @@ export async function listAdminOrders(
 ): Promise<Result<Page<AdminOrder>>> {
   if (!token) return { kind: 'unauthorized' };
   try {
-    const res = await authedFetch(`/api/console/admin/orders${qs(filters)}`, { headers: auth(token) }, fetchImpl);
+    const res = await authedFetch(`/api/admin/orders${qs(filters)}`, { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: await toPage<AdminOrder>(res) };
     return failure(res);
   } catch {
@@ -366,7 +366,7 @@ export async function refundAdminOrder(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      `/api/console/admin/orders/${encodeURIComponent(orderNo)}/refund`,
+      `/api/admin/orders/${encodeURIComponent(orderNo)}/refund`,
       { method: 'PATCH', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify({ reason }) },
       fetchImpl,
     );
@@ -404,7 +404,7 @@ export async function listAdminInvoices(
 ): Promise<Result<Page<AdminInvoice>>> {
   if (!token) return { kind: 'unauthorized' };
   try {
-    const res = await authedFetch(`/api/console/admin/invoices${qs(filters)}`, { headers: auth(token) }, fetchImpl);
+    const res = await authedFetch(`/api/admin/invoices${qs(filters)}`, { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: await toPage<AdminInvoice>(res) };
     return failure(res);
   } catch {
@@ -425,7 +425,7 @@ export async function setInvoiceStatus(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      `/api/console/admin/invoices/${invoiceId}`,
+      `/api/admin/invoices/${invoiceId}`,
       {
         method: 'PATCH',
         headers: write(csrfToken, token, idempotencyKey),
@@ -471,7 +471,7 @@ export async function listPlans(
 ): Promise<Result<{ items: AdminPlan[]; featureDefs: AdminFeatureDef[] }>> {
   if (!token) return { kind: 'unauthorized' };
   try {
-    const res = await authedFetch('/api/console/admin/plans', { headers: auth(token) }, fetchImpl);
+    const res = await authedFetch('/api/admin/plans', { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: await res.json() };
     return failure(res);
   } catch {
@@ -502,7 +502,7 @@ export async function updatePlan(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      `/api/console/admin/plans/${planId}`,
+      `/api/admin/plans/${planId}`,
       { method: 'PATCH', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify(input) },
       fetchImpl,
     );
@@ -525,7 +525,7 @@ export async function upsertFeatureDef(
   if (!token) return { kind: 'unauthorized' };
   try {
     const res = await authedFetch(
-      `/api/console/admin/plan-feature-defs/${encodeURIComponent(key)}`,
+      `/api/admin/plan-feature-defs/${encodeURIComponent(key)}`,
       { method: 'PUT', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify(input) },
       fetchImpl,
     );

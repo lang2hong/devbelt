@@ -178,7 +178,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
     requireAdmin: true,
     routes: async (child) => {
       // ── 用户 ──
-      child.get('/api/console/admin/users', async (req, reply) => {
+      child.get('/api/admin/users', async (req, reply) => {
         await readLimit(req);
         const q = req.query as Record<string, unknown>;
         const cursor = parseCursor(opts.cursorService, q.cursor);
@@ -201,7 +201,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
         });
       });
 
-      child.patch('/api/console/admin/users/:userId/status', { schema: { params: adminUserIdParam, body: adminUserStatusBody } }, async (req, reply) => {
+      child.patch('/api/admin/users/:userId/status', { schema: { params: adminUserIdParam, body: adminUserStatusBody } }, async (req, reply) => {
         if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
         const actor = userIdOf(req);
         const target = Number((req.params as Record<string, unknown>).userId);
@@ -210,7 +210,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
           actorUserId: actor,
           sessionId: sessionIdOf(req),
           method: 'PATCH',
-          normalizedPath: `/api/console/admin/users/${target}/status`,
+          normalizedPath: `/api/admin/users/${target}/status`,
           idempotencyKey: adminWriteKey(req),
           requestBody: req.body,
           retentionMs: ADMIN_RETENTION_MS,
@@ -223,7 +223,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
         reply.code(result.status).send(result.body);
       });
 
-      child.patch('/api/console/admin/users/:userId/subscription', { schema: { params: adminUserIdParam, body: adminUserSubscriptionBody } }, async (req, reply) => {
+      child.patch('/api/admin/users/:userId/subscription', { schema: { params: adminUserIdParam, body: adminUserSubscriptionBody } }, async (req, reply) => {
         if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
         const actor = userIdOf(req);
         const target = Number((req.params as Record<string, unknown>).userId);
@@ -233,7 +233,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
           actorUserId: actor,
           sessionId: sessionIdOf(req),
           method: 'PATCH',
-          normalizedPath: `/api/console/admin/users/${target}/subscription`,
+          normalizedPath: `/api/admin/users/${target}/subscription`,
           idempotencyKey: adminWriteKey(req),
           requestBody: req.body,
           retentionMs: ADMIN_RETENTION_MS,
@@ -249,7 +249,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
       });
 
       // ── 组织 ──
-      child.get('/api/console/admin/organizations', async (req, reply) => {
+      child.get('/api/admin/organizations', async (req, reply) => {
         await readLimit(req);
         const q = req.query as Record<string, unknown>;
         const cursor = parseCursor(opts.cursorService, q.cursor);
@@ -269,7 +269,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
         });
       });
 
-      child.patch('/api/console/admin/organizations/:organizationId/subscription', { schema: { params: organizationIdParam, body: adminOrganizationSubscriptionBody } }, async (req, reply) => {
+      child.patch('/api/admin/organizations/:organizationId/subscription', { schema: { params: organizationIdParam, body: adminOrganizationSubscriptionBody } }, async (req, reply) => {
         if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
         const actor = userIdOf(req);
         const organizationId = Number((req.params as Record<string, unknown>).organizationId);
@@ -279,7 +279,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
           actorUserId: actor,
           sessionId: sessionIdOf(req),
           method: 'PATCH',
-          normalizedPath: `/api/console/admin/organizations/${organizationId}/subscription`,
+          normalizedPath: `/api/admin/organizations/${organizationId}/subscription`,
           idempotencyKey: adminWriteKey(req),
           requestBody: req.body,
           retentionMs: ADMIN_RETENTION_MS,
@@ -295,7 +295,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
       });
 
       // ── 订单 ──
-      child.get('/api/console/admin/orders', async (req, reply) => {
+      child.get('/api/admin/orders', async (req, reply) => {
         await readLimit(req);
         const q = req.query as Record<string, unknown>;
         const cursor = parseCursor(opts.cursorService, q.cursor);
@@ -329,7 +329,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
         });
       });
 
-      child.patch('/api/console/admin/orders/:orderNo/refund', { schema: { params: adminOrderNoParam, body: adminOrderRefundBody } }, async (req, reply) => {
+      child.patch('/api/admin/orders/:orderNo/refund', { schema: { params: adminOrderNoParam, body: adminOrderRefundBody } }, async (req, reply) => {
         if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
         const actor = userIdOf(req);
         const orderNo = (req.params as Record<string, unknown>).orderNo as string;
@@ -338,7 +338,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
           actorUserId: actor,
           sessionId: sessionIdOf(req),
           method: 'PATCH',
-          normalizedPath: `/api/console/admin/orders/${orderNo}/refund`,
+          normalizedPath: `/api/admin/orders/${orderNo}/refund`,
           idempotencyKey: adminWriteKey(req),
           requestBody: req.body,
           retentionMs: ADMIN_RETENTION_MS,
@@ -352,7 +352,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
       });
 
       // ── 发票 ──
-      child.get('/api/console/admin/invoices', async (req, reply) => {
+      child.get('/api/admin/invoices', async (req, reply) => {
         await readLimit(req);
         const q = req.query as Record<string, unknown>;
         const cursor = parseCursor(opts.cursorService, q.cursor);
@@ -384,7 +384,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
         });
       });
 
-      child.patch('/api/console/admin/invoices/:invoiceId', { schema: { params: adminInvoiceIdParam, body: adminInvoiceStatusBody } }, async (req, reply) => {
+      child.patch('/api/admin/invoices/:invoiceId', { schema: { params: adminInvoiceIdParam, body: adminInvoiceStatusBody } }, async (req, reply) => {
         if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
         const actor = userIdOf(req);
         const invoiceId = Number((req.params as Record<string, unknown>).invoiceId);
@@ -393,7 +393,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
           actorUserId: actor,
           sessionId: sessionIdOf(req),
           method: 'PATCH',
-          normalizedPath: `/api/console/admin/invoices/${invoiceId}`,
+          normalizedPath: `/api/admin/invoices/${invoiceId}`,
           idempotencyKey: adminWriteKey(req),
           requestBody: req.body,
           retentionMs: ADMIN_RETENTION_MS,
@@ -407,7 +407,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
       });
 
       // ── 审计 ──
-      child.get('/api/console/admin/audit', async (req, reply) => {
+      child.get('/api/admin/audit', async (req, reply) => {
         await readLimit(req);
         const q = req.query as Record<string, unknown>;
         const cursor = parseCursor(opts.cursorService, q.cursor);
@@ -431,7 +431,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
         });
       });
 
-      child.post('/api/console/admin/audit/exports', { schema: { body: adminAuditExportBody } }, async (req, reply) => {
+      child.post('/api/admin/audit/exports', { schema: { body: adminAuditExportBody } }, async (req, reply) => {
         if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
         const { format, filters, expectedCountUpperBound } = req.body as {
           format: 'csv' | 'json';
@@ -456,7 +456,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
           actorUserId: actor,
           sessionId: sessionIdOf(req),
           method: 'POST',
-          normalizedPath: '/api/console/admin/audit/exports',
+          normalizedPath: '/api/admin/audit/exports',
           idempotencyKey: adminWriteKey(req),
           requestBody: req.body,
           retentionMs: ADMIN_RETENTION_MS,
@@ -473,14 +473,14 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
       });
 
       // ── 套餐 ─
-      child.get('/api/console/admin/plans', async (req, reply) => {
+      child.get('/api/admin/plans', async (req, reply) => {
         await readLimit(req);
         const items = await svc.listPlansForAdmin(userIdOf(req));
         const featureDefs = await svc.listFeatureDefs();
         reply.send({ items: items.map(adminPlanDto), featureDefs });
       });
 
-      child.patch('/api/console/admin/plans/:planId', { schema: { params: adminPlanIdParam, body: adminPlanBody } }, async (req, reply) => {
+      child.patch('/api/admin/plans/:planId', { schema: { params: adminPlanIdParam, body: adminPlanBody } }, async (req, reply) => {
         if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
         const actor = userIdOf(req);
         const planId = Number((req.params as Record<string, unknown>).planId);
@@ -493,7 +493,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
           actorUserId: actor,
           sessionId: sessionIdOf(req),
           method: 'PATCH',
-          normalizedPath: `/api/console/admin/plans/${planId}`,
+          normalizedPath: `/api/admin/plans/${planId}`,
           idempotencyKey: adminWriteKey(req),
           requestBody: req.body,
           retentionMs: ADMIN_RETENTION_MS,
@@ -508,7 +508,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
         reply.code(result.status).send(result.body);
       });
 
-      child.put('/api/console/admin/plan-feature-defs/:key', { schema: { params: adminFeatureDefKeyParam, body: adminFeatureDefBody } }, async (req, reply) => {
+      child.put('/api/admin/plan-feature-defs/:key', { schema: { params: adminFeatureDefKeyParam, body: adminFeatureDefBody } }, async (req, reply) => {
         if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
         const actor = userIdOf(req);
         const key = String((req.params as Record<string, unknown>).key);
@@ -521,7 +521,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
           actorUserId: actor,
           sessionId: sessionIdOf(req),
           method: 'PUT',
-          normalizedPath: `/api/console/admin/plan-feature-defs/${key}`,
+          normalizedPath: `/api/admin/plan-feature-defs/${key}`,
           idempotencyKey: adminWriteKey(req),
           requestBody: req.body,
           retentionMs: ADMIN_RETENTION_MS,

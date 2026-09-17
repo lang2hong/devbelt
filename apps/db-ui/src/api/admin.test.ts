@@ -28,7 +28,7 @@ describe('listUsers', () => {
       url = String(u);
       return jsonRes(200, { items: [user], nextCursor: null });
     });
-    expect(url).toContain('/api/console/admin/users?');
+    expect(url).toContain('/api/admin/users?');
     expect(url).toContain('emailExact=a%40b.com');
     expect(r).toEqual({ kind: 'ok', value: { items: [user], nextCursor: null } });
   });
@@ -47,7 +47,7 @@ describe('setUserStatus', () => {
       return jsonRes(200, { user: { userId: '5', status: 'disabled' } });
     });
     expect(r).toEqual({ kind: 'ok', value: { userId: '5', status: 'disabled' } });
-    expect(captured.url).toBe('/api/console/admin/users/5/status');
+    expect(captured.url).toBe('/api/admin/users/5/status');
     expect(captured.init?.method).toBe('PATCH');
     const headers = captured.init?.headers as Record<string, string>;
     expect(headers['Idempotency-Key']).toBe('key-1');
@@ -75,7 +75,7 @@ describe('listOrganizations', () => {
       url = String(u);
       return jsonRes(200, { items: [], nextCursor: null });
     });
-    expect(url).toContain('/api/console/admin/organizations?');
+    expect(url).toContain('/api/admin/organizations?');
     expect(url).toContain('namePrefix=Ac');
     expect(url).toContain('status=active');
   });
@@ -89,7 +89,7 @@ describe('adjustOrganizationSubscription', () => {
       return jsonRes(200, { subscriptionVersion: 3 });
     });
     expect(r).toEqual({ kind: 'ok', value: { subscriptionVersion: 3 } });
-    expect(captured.url).toBe('/api/console/admin/organizations/9/subscription');
+    expect(captured.url).toBe('/api/admin/organizations/9/subscription');
     expect(JSON.parse(captured.body ?? '{}')).toEqual({ planCode: 'organization_free', seatLimit: 10, reason: 'scale', expectedVersion: 2 });
   });
 });
@@ -101,7 +101,7 @@ describe('queryAudit', () => {
       url = String(u);
       return jsonRes(200, { items: [], nextCursor: null });
     });
-    expect(url).toContain('/api/console/admin/audit?');
+    expect(url).toContain('/api/admin/audit?');
     expect(url).toContain('eventType=auth.login.success');
   });
 });
@@ -114,7 +114,7 @@ describe('exportAudit', () => {
       return textRes(200, 'a,b\n1,2');
     });
     expect(r).toEqual({ kind: 'ok', value: 'a,b\n1,2' });
-    expect(captured.url).toBe('/api/console/admin/audit/exports');
+    expect(captured.url).toBe('/api/admin/audit/exports');
     expect(captured.headers?.['Idempotency-Key']).toBe('key-1');
     expect(JSON.parse(captured.body ?? '{}')).toEqual({ format: 'csv', filters: { eventType: 'auth.login.failed' } });
   });
@@ -128,7 +128,7 @@ describe('refundAdminOrder', () => {
       return jsonRes(200, { orderNo: 'ord-1', status: 'refunded' });
     });
     expect(r).toEqual({ kind: 'ok', value: { orderNo: 'ord-1', status: 'refunded' } });
-    expect(captured.url).toBe('/api/console/admin/orders/ord-1/refund');
+    expect(captured.url).toBe('/api/admin/orders/ord-1/refund');
     expect(captured.init?.method).toBe('PATCH');
     const headers = captured.init?.headers as Record<string, string>;
     expect(headers['Idempotency-Key']).toBe('key-1');
@@ -145,7 +145,7 @@ describe('listAdminInvoices', () => {
       url = String(u);
       return jsonRes(200, { items: [invoice], nextCursor: null });
     });
-    expect(url).toContain('/api/console/admin/invoices?');
+    expect(url).toContain('/api/admin/invoices?');
     expect(url).toContain('status=requested');
     expect(r).toEqual({ kind: 'ok', value: { items: [invoice], nextCursor: null } });
   });
@@ -159,7 +159,7 @@ describe('setInvoiceStatus', () => {
       return jsonRes(200, { invoiceId: '1', status: 'issued' });
     });
     expect(r).toEqual({ kind: 'ok', value: { invoiceId: '1', status: 'issued' } });
-    expect(captured.url).toBe('/api/console/admin/invoices/1');
+    expect(captured.url).toBe('/api/admin/invoices/1');
     expect(captured.init?.method).toBe('PATCH');
     expect(captured.init?.body).toBe(JSON.stringify({ status: 'issued' }));
   });
