@@ -1,7 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { generateKeyPairSync } from 'crypto';
-import { consoleDataRoutes } from '../../src/route/consoleData.js';
+import { consoleDataRoutes } from '../../src/modules/db/route/consoleData.js';
 import { requestId } from '../../src/middleware/requestId.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
 import { TokenService, type SigningKeys } from '../../src/service/tokenService.js';

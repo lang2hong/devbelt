@@ -5,11 +5,11 @@ import { runMigrations } from '../../src/repository/mysql/migrate.js';
 import { migrations } from '../../src/repository/mysql/migrations/index.js';
 import type { MysqlDb } from '../../src/repository/mysql/db.js';
 import { withTransaction } from '../../src/repository/mysql/db.js';
-import { MysqlSyncStateRepo } from '../../src/repository/mysql/syncStateRepo.js';
-import { MysqlSyncRecordRepo } from '../../src/repository/mysql/syncRecordRepo.js';
-import { MysqlSyncNonceRepo } from '../../src/repository/mysql/syncNonceRepo.js';
-import { MysqlSyncMutationRepo } from '../../src/repository/mysql/syncMutationRepo.js';
-import { MysqlSyncResetTokenRepo } from '../../src/repository/mysql/syncResetTokenRepo.js';
+import { MysqlSyncStateRepo } from '../../src/modules/db/repository/syncStateRepo.js';
+import { MysqlSyncRecordRepo } from '../../src/modules/db/repository/syncRecordRepo.js';
+import { MysqlSyncNonceRepo } from '../../src/modules/db/repository/syncNonceRepo.js';
+import { MysqlSyncMutationRepo } from '../../src/modules/db/repository/syncMutationRepo.js';
+import { MysqlSyncResetTokenRepo } from '../../src/modules/db/repository/syncResetTokenRepo.js';
 import type { PersonalSyncState } from '../../src/domain/entities.js';
 
 const URL = process.env.MYSQL_TEST_URL;

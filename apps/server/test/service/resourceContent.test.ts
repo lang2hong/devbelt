@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canonicalJson, canonicalJsonBytes, validateResourceContent } from '../../src/service/resourceContent.js';
+import { canonicalJson, canonicalJsonBytes, validateResourceContent } from '../../src/modules/organization/service/resourceContent.js';
 import { ResourceContentInvalidError } from '../../src/domain/errors.js';
 
 describe('canonicalJson', () => {

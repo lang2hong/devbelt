@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MysqlPlanRepo, MysqlPlanFeatureDefRepo } from '../../src/repository/mysql/planRepo.js';
+import { MysqlPlanRepo, MysqlPlanFeatureDefRepo } from '../../src/modules/billing/repository/planRepo.js';
 
 /** 极简脚本化 exec（saveInTx 只用 exec.query）。 */
 function scriptedExec(affected: number[]) {

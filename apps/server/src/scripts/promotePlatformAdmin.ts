@@ -9,7 +9,7 @@
  */
 import 'dotenv/config';
 import { createAdminDeps } from '../bootstrap/mysqlDeps.js';
-import { promotePlatformAdmin } from '../service/platformAdminBootstrap.js';
+import { promotePlatformAdmin } from '../modules/auth/service/platformAdminBootstrap.js';
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(name);

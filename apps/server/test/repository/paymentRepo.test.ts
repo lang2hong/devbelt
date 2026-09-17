@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { MysqlOrderRepo } from '../../src/repository/mysql/orderRepo.js';
-import { MysqlPaymentRepo } from '../../src/repository/mysql/paymentRepo.js';
-import { MysqlPaymentCallbackNonceRepo } from '../../src/repository/mysql/paymentCallbackNonceRepo.js';
+import { MysqlOrderRepo } from '../../src/modules/billing/repository/orderRepo.js';
+import { MysqlPaymentRepo } from '../../src/modules/billing/repository/paymentRepo.js';
+import { MysqlPaymentCallbackNonceRepo } from '../../src/modules/billing/repository/paymentCallbackNonceRepo.js';
 import type { MysqlDb } from '../../src/repository/mysql/db.js';
 
 /**

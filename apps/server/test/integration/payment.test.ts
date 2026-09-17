@@ -2,17 +2,17 @@ import { describe, it, expect } from 'vitest';
 import { createTestPool } from './testDb.js';
 import { runMigrations } from '../../src/repository/mysql/migrate.js';
 import { migrations } from '../../src/repository/mysql/migrations/index.js';
-import { MysqlOrderRepo } from '../../src/repository/mysql/orderRepo.js';
-import { MysqlPaymentRepo } from '../../src/repository/mysql/paymentRepo.js';
-import { MysqlUserRepo } from '../../src/repository/mysql/userRepo.js';
-import { MysqlPlanRepo } from '../../src/repository/mysql/planRepo.js';
-import { MysqlPersonalSubscriptionRepo } from '../../src/repository/mysql/personalSubscriptionRepo.js';
-import { OrderService } from '../../src/service/paymentService.js';
-import { MemoryPaymentGateway, signMemoryCallback } from '../../src/service/paymentChannel.js';
+import { MysqlOrderRepo } from '../../src/modules/billing/repository/orderRepo.js';
+import { MysqlPaymentRepo } from '../../src/modules/billing/repository/paymentRepo.js';
+import { MysqlUserRepo } from '../../src/modules/auth/repository/userRepo.js';
+import { MysqlPlanRepo } from '../../src/modules/billing/repository/planRepo.js';
+import { MysqlPersonalSubscriptionRepo } from '../../src/modules/billing/repository/personalSubscriptionRepo.js';
+import { OrderService } from '../../src/modules/billing/service/paymentService.js';
+import { MemoryPaymentGateway, signMemoryCallback } from '../../src/modules/billing/service/paymentChannel.js';
 import { AuditWriter } from '../../src/service/auditWriter.js';
 import type { MysqlDb } from '../../src/repository/mysql/db.js';
 import { withTransaction } from '../../src/repository/mysql/db.js';
-import { deriveEntitlement } from '../../src/service/entitlement.js';
+import { deriveEntitlement } from '../../src/modules/billing/service/entitlement.js';
 
 const URL = process.env.MYSQL_TEST_URL;
 

@@ -6,21 +6,21 @@ import { runMigrations } from '../../src/repository/mysql/migrate.js';
 import { migrations } from '../../src/repository/mysql/migrations/index.js';
 import type { MysqlDb } from '../../src/repository/mysql/db.js';
 import { withTransaction } from '../../src/repository/mysql/db.js';
-import { MysqlUserRepo } from '../../src/repository/mysql/userRepo.js';
-import { MysqlPlanRepo } from '../../src/repository/mysql/planRepo.js';
-import { MysqlOrganizationRepo } from '../../src/repository/mysql/organizationRepo.js';
-import { MysqlOrganizationSubscriptionRepo } from '../../src/repository/mysql/organizationSubscriptionRepo.js';
-import { MysqlMembershipRepo } from '../../src/repository/mysql/membershipRepo.js';
-import { MysqlOrganizationInvitationRepo } from '../../src/repository/mysql/invitationRepo.js';
+import { MysqlUserRepo } from '../../src/modules/auth/repository/userRepo.js';
+import { MysqlPlanRepo } from '../../src/modules/billing/repository/planRepo.js';
+import { MysqlOrganizationRepo } from '../../src/modules/organization/repository/organizationRepo.js';
+import { MysqlOrganizationSubscriptionRepo } from '../../src/modules/billing/repository/organizationSubscriptionRepo.js';
+import { MysqlMembershipRepo } from '../../src/modules/organization/repository/membershipRepo.js';
+import { MysqlOrganizationInvitationRepo } from '../../src/modules/organization/repository/invitationRepo.js';
 import { MysqlRateLimitRepo } from '../../src/repository/mysql/rateLimitRepo.js';
-import { MysqlFolderRepo } from '../../src/repository/mysql/folderRepo.js';
-import { MysqlResourceRepo } from '../../src/repository/mysql/resourceRepo.js';
-import { OrganizationService } from '../../src/service/organizationService.js';
-import { OrganizationResourceService } from '../../src/service/organizationResourceService.js';
+import { MysqlFolderRepo } from '../../src/modules/organization/repository/folderRepo.js';
+import { MysqlResourceRepo } from '../../src/modules/organization/repository/resourceRepo.js';
+import { OrganizationService } from '../../src/modules/organization/service/organizationService.js';
+import { OrganizationResourceService } from '../../src/modules/organization/service/organizationResourceService.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
 import { TokenService } from '../../src/service/tokenService.js';
-import { MemoryEmailSender } from '../../src/service/emailSender.js';
-import { canonicalJsonBytes } from '../../src/service/resourceContent.js';
+import { MemoryEmailSender } from '../../src/modules/auth/service/emailSender.js';
+import { canonicalJsonBytes } from '../../src/modules/organization/service/resourceContent.js';
 import {
   ResourceNotFoundError,
   ResourceVersionConflictError,

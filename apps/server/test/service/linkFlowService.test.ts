@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { describe, expect, it } from 'vitest';
-import { LinkFlowService } from '../../src/service/linkFlowService.js';
+import { LinkFlowService } from '../../src/modules/auth/service/linkFlowService.js';
 import { FakeMailFlowRepo } from '../helpers/linkFlowFakes.js';
 import { FakeEmailVerificationTokenRepo, FakeUserRepo, FakeRateLimitRepo, FakeOrganizationRepo, FakeOrganizationSubscriptionRepo, FakeMembershipRepo, FakeInvitationRepo, FakeSyncResetTokenRepo } from '../helpers/fakeRepos.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';

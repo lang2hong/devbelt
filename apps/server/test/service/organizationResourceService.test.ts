@@ -8,7 +8,7 @@ import {
   FakeFolderRepo,
   FakeResourceRepo,
 } from '../helpers/fakeRepos.js';
-import { OrganizationResourceService } from '../../src/service/organizationResourceService.js';
+import { OrganizationResourceService } from '../../src/modules/organization/service/organizationResourceService.js';
 import {
   EntityNotFoundError,
   ForbiddenError,

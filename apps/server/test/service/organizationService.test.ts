@@ -9,10 +9,10 @@ import {
   FakeInvitationRepo,
   FakeRateLimitRepo,
 } from '../helpers/fakeRepos.js';
-import { OrganizationService } from '../../src/service/organizationService.js';
+import { OrganizationService } from '../../src/modules/organization/service/organizationService.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
 import { TokenService } from '../../src/service/tokenService.js';
-import { MemoryEmailSender } from '../../src/service/emailSender.js';
+import { MemoryEmailSender } from '../../src/modules/auth/service/emailSender.js';
 import { OrganizationAdminRequiredError, ForbiddenError, EntityNotFoundError, ValidationError, OrganizationNotFoundError } from '../../src/domain/errors.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 

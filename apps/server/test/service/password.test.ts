@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hashPassword, verifyPassword } from '../../src/service/password.js';
+import { hashPassword, verifyPassword } from '../../src/modules/auth/service/password.js';
 
 describe('password (Argon2id)', () => {
   const pw = 'correct-horse-battery-staple';

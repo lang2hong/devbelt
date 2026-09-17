@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { createHash, generateKeyPairSync, sign as nodeSign, type KeyObject } from 'crypto';
 import { buildTestApp, type TestApp } from '../helpers/testApp.js';
-import { jcs, requestDigestOf } from '../../src/service/syncCrypto.js';
-import { hashPassword } from '../../src/service/password.js';
+import { jcs, requestDigestOf } from '../../src/modules/db/service/syncCrypto.js';
+import { hashPassword } from '../../src/modules/auth/service/password.js';
 
 function b64(n: number, fill: number): string {
   return Buffer.alloc(n, fill).toString('base64url');

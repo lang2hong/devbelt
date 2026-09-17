@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveEntitlement, isSubscriptionActive, planEntitlement } from '../../src/service/entitlement.js';
+import { deriveEntitlement, isSubscriptionActive, planEntitlement } from '../../src/modules/billing/service/entitlement.js';
 import type { Plan } from '../../src/domain/entities.js';
 
 function plan(code: string, features: Record<string, unknown>): Plan {

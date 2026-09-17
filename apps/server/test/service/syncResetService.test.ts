@@ -9,9 +9,9 @@ import {
   FakeUserRepo,
 } from '../helpers/fakeRepos.js';
 import { FakeMailFlowRepo, FakeAuditRepo } from '../helpers/linkFlowFakes.js';
-import { SyncResetService } from '../../src/service/syncResetService.js';
-import { toState, type SyncNewState } from '../../src/service/syncStateService.js';
-import { MemoryEmailSender } from '../../src/service/emailSender.js';
+import { SyncResetService } from '../../src/modules/db/service/syncResetService.js';
+import { toState, type SyncNewState } from '../../src/modules/db/service/syncStateService.js';
+import { MemoryEmailSender } from '../../src/modules/auth/service/emailSender.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
 import { AuditWriter } from '../../src/service/auditWriter.js';
 import { RateLimitedError, SyncResetHandoffInvalidError, SyncResetHandoffReusedError, SyncResetInProgressError } from '../../src/domain/errors.js';

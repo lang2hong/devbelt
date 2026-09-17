@@ -4,7 +4,7 @@ import { generateKeyPairSync } from 'crypto';
 import { buildTestApp, type TestApp } from '../helpers/testApp.js';
 import { requestId } from '../../src/middleware/requestId.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
-import { personalRoutes } from '../../src/route/personal.js';
+import { personalRoutes } from '../../src/modules/db/route/personal.js';
 import { TokenService, type SigningKeys } from '../../src/service/tokenService.js';
 import { CsrfService } from '../../src/service/csrfService.js';
 import { AuditWriter } from '../../src/service/auditWriter.js';

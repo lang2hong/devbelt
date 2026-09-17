@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { IUserRepo } from '../../src/repository/interfaces.js';
 import type { User, AuditEvent } from '../../src/domain/entities.js';
 import { AuditWriter } from '../../src/service/auditWriter.js';
-import { bootstrapPlatformAdmins, promotePlatformAdmin, normalizeEmail } from '../../src/service/platformAdminBootstrap.js';
+import { bootstrapPlatformAdmins, promotePlatformAdmin, normalizeEmail } from '../../src/modules/auth/service/platformAdminBootstrap.js';
 
 function makeUser(over: Partial<User> = {}): User {
   return {

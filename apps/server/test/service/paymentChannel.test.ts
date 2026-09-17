@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolvePaymentGateway, paymentGatewayConfigured, MemoryPaymentGateway, signMemoryCallback } from '../../src/service/paymentChannel.js';
+import { resolvePaymentGateway, paymentGatewayConfigured, MemoryPaymentGateway, signMemoryCallback } from '../../src/modules/billing/service/paymentChannel.js';
 
 describe('paymentChannel fail-closed', () => {
   it('is NOT configured in development (no real adapter yet)', async () => {

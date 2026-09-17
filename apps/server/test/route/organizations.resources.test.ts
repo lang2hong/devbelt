@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import Fastify from 'fastify';
 import { generateKeyPairSync } from 'crypto';
-import { organizationRoutes } from '../../src/route/organizations.js';
+import { organizationRoutes } from '../../src/modules/organization/route/organizations.js';
 import { requestId } from '../../src/middleware/requestId.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
 import { TokenService, type SigningKeys } from '../../src/service/tokenService.js';
@@ -9,7 +9,7 @@ import { CsrfService } from '../../src/service/csrfService.js';
 import { AuditWriter } from '../../src/service/auditWriter.js';
 import { IdempotencyService } from '../../src/service/idempotencyService.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
-import { OrganizationService } from '../../src/service/organizationService.js';
+import { OrganizationService } from '../../src/modules/organization/service/organizationService.js';
 import {
   FakeUserRepo,
   FakeOrganizationRepo,

@@ -2,8 +2,8 @@ import mysql from 'mysql2/promise';
 import { buildMysqlPoolOptions } from '../mysqlPool.js';
 import { resolveMysqlCreds } from '../mysqlCreds.js';
 import type { MysqlDb } from '../repository/mysql/db.js';
-import { MysqlUserRepo } from '../repository/mysql/userRepo.js';
-import { MysqlAuditRepo } from '../repository/mysql/auditRepo.js';
+import { MysqlUserRepo } from '../modules/auth/repository/userRepo.js';
+import { MysqlAuditRepo } from '../modules/auth/repository/auditRepo.js';
 import { AuditWriter } from '../service/auditWriter.js';
 
 export interface AdminDeps {

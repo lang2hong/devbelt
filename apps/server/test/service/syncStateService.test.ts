@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { generateKeyPairSync, sign as nodeSign, type KeyObject } from 'crypto';
 import { FakeSyncStateRepo, FakeSyncRecordRepo, FakeSyncMutationRepo } from '../helpers/fakeRepos.js';
-import { SyncStateService } from '../../src/service/syncStateService.js';
-import { jcs, requestDigestOf } from '../../src/service/syncCrypto.js';
+import { SyncStateService } from '../../src/modules/db/service/syncStateService.js';
+import { jcs, requestDigestOf } from '../../src/modules/db/service/syncCrypto.js';
 import {
   SyncNotInitializedError,
   SyncStateExistsError,

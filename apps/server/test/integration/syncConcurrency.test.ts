@@ -6,17 +6,17 @@ import { runMigrations } from '../../src/repository/mysql/migrate.js';
 import { migrations } from '../../src/repository/mysql/migrations/index.js';
 import type { MysqlDb } from '../../src/repository/mysql/db.js';
 import { withTransaction } from '../../src/repository/mysql/db.js';
-import { MysqlSyncStateRepo } from '../../src/repository/mysql/syncStateRepo.js';
-import { MysqlSyncRecordRepo } from '../../src/repository/mysql/syncRecordRepo.js';
-import { MysqlSyncNonceRepo } from '../../src/repository/mysql/syncNonceRepo.js';
-import { MysqlSyncMutationRepo } from '../../src/repository/mysql/syncMutationRepo.js';
-import { MysqlPersonalSubscriptionRepo } from '../../src/repository/mysql/personalSubscriptionRepo.js';
-import { MysqlPlanRepo } from '../../src/repository/mysql/planRepo.js';
-import { SyncStateService } from '../../src/service/syncStateService.js';
-import { SyncRecordService } from '../../src/service/syncRecordService.js';
-import { jcs } from '../../src/service/syncCrypto.js';
+import { MysqlSyncStateRepo } from '../../src/modules/db/repository/syncStateRepo.js';
+import { MysqlSyncRecordRepo } from '../../src/modules/db/repository/syncRecordRepo.js';
+import { MysqlSyncNonceRepo } from '../../src/modules/db/repository/syncNonceRepo.js';
+import { MysqlSyncMutationRepo } from '../../src/modules/db/repository/syncMutationRepo.js';
+import { MysqlPersonalSubscriptionRepo } from '../../src/modules/billing/repository/personalSubscriptionRepo.js';
+import { MysqlPlanRepo } from '../../src/modules/billing/repository/planRepo.js';
+import { SyncStateService } from '../../src/modules/db/service/syncStateService.js';
+import { SyncRecordService } from '../../src/modules/db/service/syncRecordService.js';
+import { jcs } from '../../src/modules/db/service/syncCrypto.js';
 import type { PersonalSyncState } from '../../src/domain/entities.js';
-import type { SyncNewState } from '../../src/service/syncStateService.js';
+import type { SyncNewState } from '../../src/modules/db/service/syncStateService.js';
 
 const URL = process.env.MYSQL_TEST_URL;
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ConsoleAdminService } from '../../src/service/consoleAdminService.js';
+import { ConsoleAdminService } from '../../src/modules/admin/service/consoleAdminService.js';
 import { AuditWriter } from '../../src/service/auditWriter.js';
 import { ValidationError, PlanVersionConflictError } from '../../src/domain/errors.js';
 import type { PlanFeatureDef } from '../../src/domain/entities.js';

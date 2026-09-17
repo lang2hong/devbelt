@@ -25,7 +25,7 @@ const path = require('path');
 const esbuildOptions = {
   entryPoints: {
     index: path.resolve(__dirname, 'src/index.ts'),
-    passwordWorker: path.resolve(__dirname, 'src/service/passwordWorker.ts'),
+    passwordWorker: path.resolve(__dirname, 'src/modules/auth/service/passwordWorker.ts'),
     promoteAdmin: path.resolve(__dirname, 'src/scripts/promotePlatformAdmin.ts'),
   },
   bundle: true,

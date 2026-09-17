@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeDisplayName } from '../../src/service/displayName.js';
+import { sanitizeDisplayName } from '../../src/modules/auth/service/displayName.js';
 
 describe('sanitizeDisplayName', () => {
   it('trims and strips control/zero-width characters', () => {

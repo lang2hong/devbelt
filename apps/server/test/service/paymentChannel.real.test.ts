@@ -1,15 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { generateKeyPairSync, createCipheriv, createSign } from 'crypto';
-import { resolveWechatCredentials, resolveAlipayCredentials, resolvePaymentCallbackBaseUrl } from '../../src/service/paymentCredentials.js';
+import { resolveWechatCredentials, resolveAlipayCredentials, resolvePaymentCallbackBaseUrl } from '../../src/modules/billing/service/paymentCredentials.js';
 import {
   resolvePaymentGateway,
   paymentGatewayConfigured,
   paymentRoutesEnabled,
   resolveConfiguredChannels,
   MemoryPaymentGateway,
-} from '../../src/service/paymentChannel.js';
-import { WechatPayGateway } from '../../src/service/wechatPay.js';
-import { AlipayGateway, alipayTimeoutExpress, buildAlipaySignContent, alipayTimestamp } from '../../src/service/alipay.js';
+} from '../../src/modules/billing/service/paymentChannel.js';
+import { WechatPayGateway } from '../../src/modules/billing/service/wechatPay.js';
+import { AlipayGateway, alipayTimeoutExpress, buildAlipaySignContent, alipayTimestamp } from '../../src/modules/billing/service/alipay.js';
 
 function rsaKeyPair() {
   return generateKeyPairSync('rsa', { modulusLength: 2048 });

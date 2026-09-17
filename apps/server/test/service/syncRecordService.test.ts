@@ -3,9 +3,9 @@ import { generateKeyPairSync, sign as nodeSign, type KeyObject } from 'crypto';
 import {
   FakeSyncStateRepo, FakeSyncRecordRepo, FakeSyncNonceRepo, FakeSyncMutationRepo, FakePersonalSubscriptionRepo, FakePlanRepo,
 } from '../helpers/fakeRepos.js';
-import { SyncStateService } from '../../src/service/syncStateService.js';
-import { SyncRecordService } from '../../src/service/syncRecordService.js';
-import { jcs, requestDigestOf } from '../../src/service/syncCrypto.js';
+import { SyncStateService } from '../../src/modules/db/service/syncStateService.js';
+import { SyncRecordService } from '../../src/modules/db/service/syncRecordService.js';
+import { jcs, requestDigestOf } from '../../src/modules/db/service/syncCrypto.js';
 import {
   SyncVersionConflictError,
   SyncNonceReusedError,

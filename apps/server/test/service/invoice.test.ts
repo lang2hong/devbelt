@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { InvoiceService } from '../../src/service/invoiceService.js';
+import { InvoiceService } from '../../src/modules/billing/service/invoiceService.js';
 import { EntityNotFoundError, InvoiceAlreadyRequestedError, OrderInvalidStateError } from '../../src/domain/errors.js';
 import type { Invoice, Order } from '../../src/domain/entities.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';

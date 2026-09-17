@@ -1,15 +1,15 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { generateKeyPairSync } from 'crypto';
-import { consoleAuthRoutes } from '../../src/route/consoleAuth.js';
+import { consoleAuthRoutes } from '../../src/modules/auth/route/consoleAuth.js';
 import { requestId } from '../../src/middleware/requestId.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
 import { TokenService, type SigningKeys } from '../../src/service/tokenService.js';
-import { ConsoleAuthService } from '../../src/service/consoleAuthService.js';
+import { ConsoleAuthService } from '../../src/modules/auth/service/consoleAuthService.js';
 import { CsrfService } from '../../src/service/csrfService.js';
 import { AuditWriter } from '../../src/service/auditWriter.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
-import { hashPassword } from '../../src/service/password.js';
+import { hashPassword } from '../../src/modules/auth/service/password.js';
 import { csrfCookieName, refreshCookieName } from '../../src/middleware/cookies.js';
 import { FakeUserRepo, FakeDeviceRepo, FakeRefreshTokenRepo, FakeRateLimitRepo } from '../helpers/fakeRepos.js';
 import { FakeAuditRepo } from '../helpers/linkFlowFakes.js';

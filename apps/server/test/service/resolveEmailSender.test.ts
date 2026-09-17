@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { resolveEmailSender } from '../../src/service/resolveEmailSender.js';
-import { LogEmailSender } from '../../src/service/emailSender.js';
-import { SmtpEmailSender } from '../../src/service/smtpEmailSender.js';
+import { resolveEmailSender } from '../../src/modules/auth/service/resolveEmailSender.js';
+import { LogEmailSender } from '../../src/modules/auth/service/emailSender.js';
+import { SmtpEmailSender } from '../../src/modules/auth/service/smtpEmailSender.js';
 
 describe('resolveEmailSender', () => {
   it('throws in production without SMTP_HOST', () => {

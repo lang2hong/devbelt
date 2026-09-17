@@ -1,14 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import Fastify from 'fastify';
 import { generateKeyPairSync, randomUUID } from 'crypto';
-import { consoleAdminRoutes } from '../../src/route/consoleAdmin.js';
+import { consoleAdminRoutes } from '../../src/modules/admin/route/consoleAdmin.js';
 import { requestId } from '../../src/middleware/requestId.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
 import { TokenService, type SigningKeys } from '../../src/service/tokenService.js';
 import { CsrfService } from '../../src/service/csrfService.js';
 import { AuditWriter } from '../../src/service/auditWriter.js';
 import { IdempotencyService } from '../../src/service/idempotencyService.js';
-import { ConsoleAdminService } from '../../src/service/consoleAdminService.js';
+import { ConsoleAdminService } from '../../src/modules/admin/service/consoleAdminService.js';
 import { CursorService } from '../../src/service/cursor.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
 import { csrfCookieName } from '../../src/middleware/cookies.js';

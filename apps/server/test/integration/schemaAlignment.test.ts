@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { createTestPool } from './testDb.js';
 import { runMigrations } from '../../src/repository/mysql/migrate.js';
 import { migrations } from '../../src/repository/mysql/migrations/index.js';
-import { MysqlUserRepo } from '../../src/repository/mysql/userRepo.js';
-import { MysqlOrganizationRepo } from '../../src/repository/mysql/organizationRepo.js';
-import { MysqlMembershipRepo } from '../../src/repository/mysql/membershipRepo.js';
-import { MysqlOrganizationSubscriptionRepo } from '../../src/repository/mysql/organizationSubscriptionRepo.js';
-import { MysqlAuditRepo } from '../../src/repository/mysql/auditRepo.js';
+import { MysqlUserRepo } from '../../src/modules/auth/repository/userRepo.js';
+import { MysqlOrganizationRepo } from '../../src/modules/organization/repository/organizationRepo.js';
+import { MysqlMembershipRepo } from '../../src/modules/organization/repository/membershipRepo.js';
+import { MysqlOrganizationSubscriptionRepo } from '../../src/modules/billing/repository/organizationSubscriptionRepo.js';
+import { MysqlAuditRepo } from '../../src/modules/auth/repository/auditRepo.js';
 import type { MysqlDb, Queryable } from '../../src/repository/mysql/db.js';
 
 const URL = process.env.MYSQL_TEST_URL;

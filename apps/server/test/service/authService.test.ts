@@ -11,9 +11,9 @@ import {
   FakeRegistrationRepo,
 } from '../helpers/fakeRepos.js';
 import { TokenService, type SigningKeys } from '../../src/service/tokenService.js';
-import { AuthService, type DeviceFields } from '../../src/service/authService.js';
+import { AuthService, type DeviceFields } from '../../src/modules/auth/service/authService.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
-import { MemoryEmailSender } from '../../src/service/emailSender.js';
+import { MemoryEmailSender } from '../../src/modules/auth/service/emailSender.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 import {
   UnauthorizedError,

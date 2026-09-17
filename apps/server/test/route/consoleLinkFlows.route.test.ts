@@ -1,14 +1,14 @@
 import Fastify from 'fastify';
 import { createHash, generateKeyPairSync } from 'crypto';
 import { describe, expect, it } from 'vitest';
-import { consoleLinkFlowRoutes } from '../../src/route/consoleLinkFlows.js';
+import { consoleLinkFlowRoutes } from '../../src/modules/auth/route/consoleLinkFlows.js';
 import { requestId } from '../../src/middleware/requestId.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
 import { TokenService, type SigningKeys } from '../../src/service/tokenService.js';
 import { CsrfService } from '../../src/service/csrfService.js';
 import { AuditWriter } from '../../src/service/auditWriter.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
-import { LinkFlowService } from '../../src/service/linkFlowService.js';
+import { LinkFlowService } from '../../src/modules/auth/service/linkFlowService.js';
 import { CONSOLE_SCOPES } from '../../src/domain/enums.js';
 import { csrfCookieName, linkFlowCookieName } from '../../src/middleware/cookies.js';
 import { FakeMailFlowRepo, FakeAuditRepo } from '../helpers/linkFlowFakes.js';

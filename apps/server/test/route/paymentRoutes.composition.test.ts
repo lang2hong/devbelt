@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import Fastify from 'fastify';
-import { registerPaymentRoutes } from '../../src/route/paymentRoutes.js';
+import { registerPaymentRoutes } from '../../src/modules/billing/route/paymentRoutes.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
-import type { OrdersRouteOptions } from '../../src/route/orders.js';
-import type { PaymentCallbackRouteOptions } from '../../src/route/paymentCallback.js';
+import type { OrdersRouteOptions } from '../../src/modules/billing/route/orders.js';
+import type { PaymentCallbackRouteOptions } from '../../src/modules/billing/route/paymentCallback.js';
 
 describe('payment routes fail-closed composition', () => {
   it('registers nothing when disabled → both endpoints 404 even in development', async () => {

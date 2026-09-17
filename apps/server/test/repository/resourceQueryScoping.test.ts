@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { MysqlFolderRepo } from '../../src/repository/mysql/folderRepo.js';
-import { MysqlResourceRepo } from '../../src/repository/mysql/resourceRepo.js';
+import { MysqlFolderRepo } from '../../src/modules/organization/repository/folderRepo.js';
+import { MysqlResourceRepo } from '../../src/modules/organization/repository/resourceRepo.js';
 import type { MysqlDb } from '../../src/repository/mysql/db.js';
 
 /**

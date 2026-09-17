@@ -1,10 +1,10 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { linkFlowRoutes } from '../../src/route/linkFlows.js';
-import { consoleAuthRoutes } from '../../src/route/consoleAuth.js';
+import { linkFlowRoutes } from '../../src/modules/auth/route/linkFlows.js';
+import { consoleAuthRoutes } from '../../src/modules/auth/route/consoleAuth.js';
 import { requestId } from '../../src/middleware/requestId.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
-import { LinkFlowService } from '../../src/service/linkFlowService.js';
+import { LinkFlowService } from '../../src/modules/auth/service/linkFlowService.js';
 import { CsrfService } from '../../src/service/csrfService.js';
 import { AuditWriter } from '../../src/service/auditWriter.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';

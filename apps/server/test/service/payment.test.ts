@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { OrderService } from '../../src/service/paymentService.js';
+import { OrderService } from '../../src/modules/billing/service/paymentService.js';
 import type {
   IOrderRepo,
   IPaymentRepo,
@@ -9,13 +9,13 @@ import type {
 import type { Order, Payment, Plan, PersonalSubscription } from '../../src/domain/entities.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 import { AuditWriter } from '../../src/service/auditWriter.js';
-import { MemoryPaymentGateway, signMemoryCallback } from '../../src/service/paymentChannel.js';
-import type { PaymentGateway, PaymentCallback } from '../../src/service/paymentChannel.js';
+import { MemoryPaymentGateway, signMemoryCallback } from '../../src/modules/billing/service/paymentChannel.js';
+import type { PaymentGateway, PaymentCallback } from '../../src/modules/billing/service/paymentChannel.js';
 import {
   PaymentSignatureInvalidError,
   UnknownPlanError,
 } from '../../src/domain/errors.js';
-import { deriveEntitlement } from '../../src/service/entitlement.js';
+import { deriveEntitlement } from '../../src/modules/billing/service/entitlement.js';
 
 const PLAN: Plan = {
   id: 2,

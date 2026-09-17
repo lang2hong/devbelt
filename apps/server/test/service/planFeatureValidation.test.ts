@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateFeatureValue } from '../../src/service/planFeatureValidation.js';
+import { validateFeatureValue } from '../../src/modules/billing/service/planFeatureValidation.js';
 import { ValidationError } from '../../src/domain/errors.js';
 import type { PlanFeatureDef } from '../../src/domain/entities.js';
 

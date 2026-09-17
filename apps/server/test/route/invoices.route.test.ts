@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import Fastify from 'fastify';
 import { generateKeyPairSync } from 'crypto';
-import { invoiceRoutes } from '../../src/route/invoices.js';
+import { invoiceRoutes } from '../../src/modules/billing/route/invoices.js';
 import { requestId } from '../../src/middleware/requestId.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
 import { TokenService, type SigningKeys } from '../../src/service/tokenService.js';
@@ -10,7 +10,7 @@ import { AuditWriter } from '../../src/service/auditWriter.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
 import { IdempotencyService } from '../../src/service/idempotencyService.js';
 import { CursorService } from '../../src/service/cursor.js';
-import { InvoiceService } from '../../src/service/invoiceService.js';
+import { InvoiceService } from '../../src/modules/billing/service/invoiceService.js';
 import { csrfCookieName } from '../../src/middleware/cookies.js';
 import { CONSOLE_SCOPES } from '../../src/domain/enums.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';

@@ -11,11 +11,11 @@ import {
   FakeRegistrationRepo,
 } from '../helpers/fakeRepos.js';
 import { TokenService, type SigningKeys } from '../../src/service/tokenService.js';
-import { AuthService, type DeviceFields } from '../../src/service/authService.js';
-import { ConsoleAuthService } from '../../src/service/consoleAuthService.js';
+import { AuthService, type DeviceFields } from '../../src/modules/auth/service/authService.js';
+import { ConsoleAuthService } from '../../src/modules/auth/service/consoleAuthService.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
-import { MemoryEmailSender } from '../../src/service/emailSender.js';
-import { hashPassword } from '../../src/service/password.js';
+import { MemoryEmailSender } from '../../src/modules/auth/service/emailSender.js';
+import { hashPassword } from '../../src/modules/auth/service/password.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 
 const PASSWORD = 'correct-horse-battery';
