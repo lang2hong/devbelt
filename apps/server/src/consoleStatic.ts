@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'fs';
 import path from 'path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
+import { HOME_HTML } from './home.js';
 
 /** 公开页/邮件入口/控制台壳的严格 CSP（无第三方、无 eval，只放行构建产物）。 */
 const PUBLIC_CSP =
@@ -98,9 +99,13 @@ export async function registerConsoleStatic(app: FastifyInstance): Promise<void>
     app.get(route, serveHtml(authReady ? readHtml(authDist, file) : null));
   }
 
-  // 套件首页占位（P3 换正式首页）
+  // 套件首页
   app.get('/', async (_req, reply) => {
-    reply.redirect('/login');
+    reply
+      .header('Cache-Control', 'no-store')
+      .header('Content-Security-Policy', PUBLIC_CSP)
+      .type('text/html')
+      .send(HOME_HTML);
   });
 
   // 控制台（db-ui，`/db` 前缀）
