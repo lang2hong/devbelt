@@ -25,9 +25,9 @@ test('login persists across reload; logout returns to login', async ({ page }) =
   await page.locator('input[type="password"]').fill(PASSWORD);
   await page.getByRole('button', { name: '登录' }).click();
 
-  // 登录成功回落 /console/*，随后刷新仍保持登录（HttpOnly refresh cookie 续期）。
-  await page.waitForURL(/\/console\//);
+  // 登录成功回落 /db/*，随后刷新仍保持登录（HttpOnly refresh cookie 续期）。
+  await page.waitForURL(/\/db\//);
   await page.reload();
-  await page.waitForURL(/\/console\//);
-  expect(page.url()).toContain('/console');
+  await page.waitForURL(/\/db\//);
+  expect(page.url()).toContain('/db');
 });

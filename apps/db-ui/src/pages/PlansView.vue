@@ -25,7 +25,7 @@ onMounted(async () => {
   const r = await listPlans();
   if (r.kind === 'unauthorized') {
     setAccessToken(null);
-    window.location.assign(withBase('/login'));
+    window.location.assign('/login');
     return;
   }
   if (r.kind === 'failure') {
@@ -69,7 +69,7 @@ function canUpgrade(plan: PlanDto): boolean {
               <span class="value">{{ formatFeature(f) }}</span>
             </li>
           </ul>
-          <button v-if="canUpgrade(plan)" class="btn" @click="navigate('/console/checkout')">升级 {{ plan.name }}</button>
+          <button v-if="canUpgrade(plan)" class="btn" @click="navigate('/checkout')">升级 {{ plan.name }}</button>
           <p v-else-if="isCurrent(plan)" class="ok">已在使用</p>
         </div>
       </div>

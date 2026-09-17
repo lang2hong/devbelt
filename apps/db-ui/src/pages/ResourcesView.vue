@@ -20,11 +20,11 @@ const resources = ref<ResourceSummary[]>([]);
 
 function relogin(): void {
   setAccessToken(null);
-  window.location.assign(withBase('/login'));
+  window.location.assign('/login');
 }
 
 function invalidContext(): void {
-  navigate('/console/organizations');
+  navigate('/organizations');
 }
 
 async function load(): Promise<void> {
@@ -71,7 +71,7 @@ watch(() => props.organizationId, () => void load());
     <template v-if="state === 'ready' && org">
       <header class="head">
         <h2>资源 · {{ org.name }}</h2>
-        <a class="back" @click.prevent="navigate('/console/organizations/' + props.organizationId)">返回组织</a>
+        <a class="back" @click.prevent="navigate('/organizations/' + props.organizationId)">返回组织</a>
       </header>
 
       <div class="card">

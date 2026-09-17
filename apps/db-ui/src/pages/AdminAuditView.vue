@@ -40,7 +40,7 @@ let paging = false;
 
 function relogin(): void {
   setAccessToken(null);
-  window.location.assign(withBase('/login'));
+  window.location.assign('/login');
 }
 
 async function load(reset = true): Promise<void> {

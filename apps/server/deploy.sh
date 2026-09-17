@@ -29,18 +29,21 @@ LOG_FILE="${DEPLOY_DIR}/logs/server.log"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-# 控制台静态目录：与 server 的 consoleDistDir() 默认（`<cwd>/../db-ui/dist`）一致。
+# 前端静态目录：与 server 的 consoleDistDir()/authDistDir() 默认一致
+# （`<cwd>/../db-ui/dist`、`<cwd>/../auth-ui/dist`）。
 CONSOLE_DIR="$(dirname "$DEPLOY_DIR")/db-ui"
 CONSOLE_SRC="$REPO_ROOT/apps/db-ui"
+AUTH_DIR="$(dirname "$DEPLOY_DIR")/auth-ui"
+AUTH_SRC="$REPO_ROOT/apps/auth-ui"
 
 echo "==> [1/6] 清理并构建 server -> apps/server/dist"
 rm -rf "$SCRIPT_DIR/dist"
 (cd "$REPO_ROOT" && pnpm --filter @devkit/server build)
 
-echo "==> [2/6] 清理并构建 db-ui -> apps/db-ui/dist"
-rm -rf "$CONSOLE_SRC/dist"
-# 控制台基路径：迁到 devkit.l2hi.com/db（CONSOLE_BASE=/db/）；留空则根路径。
-(cd "$REPO_ROOT" && CONSOLE_BASE="${CONSOLE_BASE:-}" pnpm --filter @devkit/db-ui build)
+echo "==> [2/6] 清理并构建 db-ui（base /db/）与 auth-ui（base /）"
+rm -rf "$CONSOLE_SRC/dist" "$AUTH_SRC/dist"
+(cd "$REPO_ROOT" && CONSOLE_BASE="${CONSOLE_BASE:-/db/}" pnpm --filter @devkit/db-ui build)
+(cd "$REPO_ROOT" && AUTH_BASE="${AUTH_BASE:-/}" pnpm --filter @devkit/auth-ui build)
 
 echo "==> [3/6] 推送 server 产物到 ${REMOTE}:${DEPLOY_DIR}"
 ssh "$REMOTE" "mkdir -p '$DEPLOY_DIR/backups'"
@@ -70,6 +73,18 @@ ssh "$REMOTE" \
 ssh "$REMOTE" "rm -rf '$CONSOLE_DIR/.dist.staging' && mkdir -p '$CONSOLE_DIR/.dist.staging'"
 tar czf - -C "$CONSOLE_SRC" dist | ssh "$REMOTE" "tar xzf - -C '$CONSOLE_DIR/.dist.staging'"
 ssh "$REMOTE" "cd '$CONSOLE_DIR' \
+  && rm -rf dist.old \
+  && if [ -d dist ]; then mv dist dist.old; fi \
+  && mv .dist.staging/dist dist \
+  && rm -rf dist.old .dist.staging"
+
+echo "==> [4b/6] 推送 auth-ui 产物到 ${REMOTE}:${AUTH_DIR}/dist"
+ssh "$REMOTE" "mkdir -p '$AUTH_DIR/backups'"
+ssh "$REMOTE" \
+  "cd '$AUTH_DIR' && tar czf \"backups/dist-\$(date +%Y%m%d%H%M%S).tar.gz\" dist 2>/dev/null || true"
+ssh "$REMOTE" "rm -rf '$AUTH_DIR/.dist.staging' && mkdir -p '$AUTH_DIR/.dist.staging'"
+tar czf - -C "$AUTH_SRC" dist | ssh "$REMOTE" "tar xzf - -C '$AUTH_DIR/.dist.staging'"
+ssh "$REMOTE" "cd '$AUTH_DIR' \
   && rm -rf dist.old \
   && if [ -d dist ]; then mv dist dist.old; fi \
   && mv .dist.staging/dist dist \

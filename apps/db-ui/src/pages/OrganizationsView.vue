@@ -21,7 +21,7 @@ async function load(): Promise<void> {
     state.value = 'ready';
   } else if (r.kind === 'unauthorized') {
     setAccessToken(null);
-    window.location.assign(withBase('/login'));
+    window.location.assign('/login');
   } else {
     state.value = 'error';
   }
@@ -40,11 +40,11 @@ async function create(): Promise<void> {
     const r = await createOrganization(value, createWrite.ensure(tag), csrf);
     if (r.kind === 'ok') {
       createWrite.reset(tag);
-      navigate(`/console/organizations/${r.value.organizationId}`);
+      navigate(`/organizations/${r.value.organizationId}`);
     } else if (r.kind === 'unauthorized') {
       createWrite.reset(tag);
       setAccessToken(null);
-      window.location.assign(withBase('/login'));
+      window.location.assign('/login');
     } else if (isRetryableFailure(r.kind)) {
       error.value = '创建失败，请重试。';
     } else {
@@ -78,7 +78,7 @@ async function create(): Promise<void> {
 
     <ul v-if="state === 'ready'" class="list">
       <li v-for="o in orgs" :key="o.organizationId" class="item">
-        <a class="link" @click.prevent="navigate('/console/organizations/' + o.organizationId)">
+        <a class="link" @click.prevent="navigate('/organizations/' + o.organizationId)">
           <strong>{{ o.name }}</strong>
           <span class="muted">{{ o.role }}<span v-if="o.status !== 'active'"> · 已关闭</span></span>
         </a>

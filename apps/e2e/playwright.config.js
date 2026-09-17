@@ -4,12 +4,12 @@ import { fileURLToPath } from 'node:url';
 
 const BASE_URL = process.env.E2E_BASE_URL ?? 'http://localhost:5173';
 // config 所在目录 = apps/e2e：webServer 命令相对此 cwd 起服务，
-// 服务端 consoleStatic 也据此解析 ../console-ui/dist。
+// 服务端 consoleStatic 也据此解析 ../auth-ui/dist 与 ../db-ui/dist。
 const e2eDir = dirname(fileURLToPath(import.meta.url));
 
 /**
  * 浏览器 e2e（P3 切片 5 部署门禁自动化）：注册/登录/邮箱验证全链路。
- * server 已由 CI 构建（apps/server/dist + console-ui/dist），webServer 负责起服务并
+ * server 与两个前端已由 CI 构建（apps/server/dist + apps/auth-ui/dist + apps/db-ui/dist），webServer 负责起服务并
  * 等 /health/live 就绪；MYSQL/密钥/MAILER 等 env 由 CI job 注入并被子进程继承。
  */
 export default defineConfig({

@@ -30,7 +30,7 @@ async function load(): Promise<void> {
   const [invs, ords] = await Promise.all([listInvoices(), listOrders()]);
   if (invs.kind === 'unauthorized' || ords.kind === 'unauthorized') {
     setAccessToken(null);
-    window.location.assign(withBase('/login'));
+    window.location.assign('/login');
     return;
   }
   invoices.value = invs.kind === 'ok' ? invs.value.items : [];
@@ -54,7 +54,7 @@ async function request(): Promise<void> {
     } else if (r.kind === 'unauthorized') {
       requestWrite.reset(tag);
       setAccessToken(null);
-      window.location.assign(withBase('/login'));
+      window.location.assign('/login');
     } else if (isRetryableFailure(r.kind)) {
       error.value = '申请失败，请重试。';
     } else {

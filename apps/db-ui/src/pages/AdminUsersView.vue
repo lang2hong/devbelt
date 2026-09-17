@@ -34,7 +34,7 @@ let paging = false;
 
 function relogin(): void {
   setAccessToken(null);
-  window.location.assign(withBase('/login'));
+  window.location.assign('/login');
 }
 
 function serverMsg(r: { message?: string; code?: string }): string {

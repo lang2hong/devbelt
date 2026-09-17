@@ -41,14 +41,14 @@ describe('platform admin nav gate', () => {
     vi.mocked(me).mockResolvedValue(consoleMe(false));
     const wrapper = mount(App);
     await flushPromises();
-    expect(wrapper.text()).not.toContain('管理');
+    expect(wrapper.findAll('a').filter((a) => a.text().trim() === '管理')).toHaveLength(0);
   });
 
   it('renders the admin entry for a platform admin', async () => {
     vi.mocked(me).mockResolvedValue(consoleMe(true));
     const wrapper = mount(App);
     await flushPromises();
-    expect(wrapper.text()).toContain('管理');
+    expect(wrapper.findAll('a').filter((a) => a.text().trim() === '管理')).toHaveLength(1);
   });
 
   it('warns and stays when logout fails (no silent redirect)', async () => {

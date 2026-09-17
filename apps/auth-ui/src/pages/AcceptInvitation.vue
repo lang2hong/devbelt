@@ -9,6 +9,9 @@ import {
 } from '@devkit/auth-client';
 import { ensureCsrf, refresh, getAccessToken } from '@devkit/auth-client';
 
+/** DB 控制台（db-ui）的挂载 base；身份页在根。 */
+const DB_BASE = '/db';
+
 const TEXT = {
   title: '接受组织邀请',
   processing: '正在处理…',
@@ -144,7 +147,7 @@ function readToken(): string | null {
     <template v-else-if="state === 'success' || state === 'already-accepted'">
       <p class="success">{{ state === 'success' ? TEXT.success : TEXT.alreadyAccepted }}</p>
       <p v-if="organization" class="muted">组织：{{ organization.name }}</p>
-      <a class="button primary" :href="withBase('/console/organizations')">{{ TEXT.enter }}</a>
+      <a class="button primary" :href="`${DB_BASE}/organizations`">{{ TEXT.enter }}</a>
     </template>
 
     <template v-else-if="state === 'failure'">

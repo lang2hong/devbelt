@@ -13,7 +13,7 @@ import { DEFAULT_SERVER_URL, type AuthService } from './authService';
  * 目录来自 GET /api/db/plans（需登录）；当前套餐取 AuthService 的权益缓存（/api/db/me 落盘）。
  * 升级/联系等动作只允许打开浏览器控制台的固定路径（白名单，webview 不能借此打开任意 URL）。
  */
-const CONSOLE_PATHS = new Set<string>(['/console/plans', '/console/checkout']);
+const CONSOLE_PATHS = new Set<string>(['/db/plans', '/db/checkout']);
 
 export class PlansView extends BaseWebView {
   private static current?: PlansView;

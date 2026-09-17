@@ -70,7 +70,7 @@ describe('PlansView', () => {
   it('opens the browser console only for whitelisted paths', async () => {
     const view = makeView(makeAuth());
 
-    await view.handleMessage({ type: 'openConsole', path: '/console/checkout' });
+    await view.handleMessage({ type: 'openConsole', path: '/db/checkout' });
     expect(vscode.env.openExternal).toHaveBeenCalledTimes(1);
 
     await view.handleMessage({ type: 'openConsole', path: 'https://evil.example/x' });

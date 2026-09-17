@@ -22,7 +22,7 @@ async function load(): Promise<void> {
     state.value = 'ready';
   } else if (r.kind === 'unauthorized') {
     setAccessToken(null);
-    window.location.assign(withBase('/login'));
+    window.location.assign('/login');
   } else {
     state.value = 'error';
   }
@@ -51,14 +51,14 @@ async function confirmRevoke(d: Device): Promise<void> {
       confirming.value = null;
       if (r.currentSessionRevoked) {
         setAccessToken(null);
-        window.location.assign(withBase('/login'));
+        window.location.assign('/login');
         return;
       }
       await load();
     } else if (r.kind === 'unauthorized') {
       revokeWrite.reset(tag);
       setAccessToken(null);
-      window.location.assign(withBase('/login'));
+      window.location.assign('/login');
     } else if (isRetryableFailure(r.kind)) {
       error.value = '撤销失败，请重试。';
     } else {

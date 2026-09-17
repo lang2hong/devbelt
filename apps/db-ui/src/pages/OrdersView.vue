@@ -65,7 +65,7 @@ async function load(reset = true): Promise<void> {
     state.value = 'ready';
   } else if (r.kind === 'unauthorized') {
     setAccessToken(null);
-    window.location.assign(withBase('/login'));
+    window.location.assign('/login');
   } else {
     state.value = 'error';
     loadError.value = r.kind === 'failure' ? (r.message || r.code || '加载失败，请刷新重试。') : '加载失败，请刷新重试。';
@@ -105,7 +105,7 @@ onMounted(() => load());
           </span>
         </button>
         <div v-if="canReorder(o)" class="reorder">
-          <a class="btn small" :href="withBase('/console/checkout')">重新下单</a>
+          <a class="btn small" :href="withBase('/checkout')">重新下单</a>
         </div>
         <div v-if="expandedOrderNo === o.orderNo" class="detail">
           <dl>

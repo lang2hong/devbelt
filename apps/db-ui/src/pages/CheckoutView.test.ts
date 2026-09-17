@@ -74,7 +74,7 @@ describe('CheckoutView 未完成订单恢复', () => {
 
     expect(sessionStorage.getItem(KEY)).toBeNull();
     vi.advanceTimersByTime(1500);
-    expect(assignSpy).toHaveBeenCalledWith('/console/account');
+    expect(assignSpy).toHaveBeenCalledWith('/account');
     wrapper.unmount();
   });
 
@@ -236,7 +236,7 @@ expect(sessionStorage.getItem(KEY)).toBe('o2'); // 旧响应未清除新订单�
     expect(call).toBe(1); // 终态后停止轮询，不再发起新请求
 
     vi.advanceTimersByTime(2000);
-    expect(assignSpy).toHaveBeenCalledWith('/console/account');
+    expect(assignSpy).toHaveBeenCalledWith('/account');
     wrapper.unmount();
   });
 

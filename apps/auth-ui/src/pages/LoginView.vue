@@ -10,6 +10,9 @@ const error = ref('');
 const submitting = ref(false);
 const showPassword = ref(false);
 
+/** DB 控制台（db-ui）的挂载 base；身份页在根，登录后回到 /db 下的应用相对路径。 */
+const DB_BASE = '/db';
+
 const search = new URLSearchParams(window.location.search);
 const flow = search.get('flow');
 const returnTo = safeReturnTo(search.get('returnTo'));
@@ -30,10 +33,10 @@ async function submit() {
         return;
       }
       if (flow === 'sync-reset') {
-        window.location.assign(withBase('/sync-reset'));
+        window.location.assign(`${DB_BASE}/sync-reset`);
         return;
       }
-      window.location.assign(returnTo);
+      window.location.assign(`${DB_BASE}${returnTo}`);
       return;
     }
     if (result.kind === 'invalid-credentials') error.value = '邮箱或密码错误，或邮箱尚未验证。';

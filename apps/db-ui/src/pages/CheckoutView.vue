@@ -114,7 +114,7 @@ function scheduleJump(delay: number): void {
   clearPendingJump();
   pendingJump = window.setTimeout(() => {
     pendingJump = undefined;
-    window.location.assign(withBase('/console/account'));
+    window.location.assign(withBase('/account'));
   }, delay);
 }
 
@@ -155,7 +155,7 @@ async function submit(mode?: 'qr' | 'redirect'): Promise<void> {
     if (!mounted || gen !== generation) return;
     if (r.kind !== 'ok') {
       if (r.kind === 'unauthorized') {
-        window.location.assign(withBase('/login'));
+        window.location.assign('/login');
         return;
       }
       error.value = r.kind === 'failure' ? (r.message || r.code || '下单失败，请重试。') : '下单失败，请重试。';
@@ -327,7 +327,7 @@ onMounted(async () => {
 
     <div class="card" v-if="alreadyPro">
       <p class="ok">你已是 Pro 用户。</p>
-      <a class="btn link" :href="withBase('/console/orders')">查看订单</a>
+      <a class="btn link" :href="withBase('/orders')">查看订单</a>
     </div>
 
     <div class="card" v-if="qrDataUrl && !orderExpired">
@@ -349,7 +349,7 @@ onMounted(async () => {
       <h3>订单已过期</h3>
       <p class="warn">该订单超过 30 分钟未支付已失效，请重新下单。</p>
       <button class="btn" :disabled="submitting" @click="submit()">{{ submitting ? '下单中…' : '重新下单' }}</button>
-      <a class="btn link" :href="withBase('/console/orders')">查看订单</a>
+      <a class="btn link" :href="withBase('/orders')">查看订单</a>
     </div>
 
     <div class="card" v-if="orderNo && !orderExpired">
@@ -358,7 +358,7 @@ onMounted(async () => {
       <p class="muted">剩余 <strong>{{ formatRemaining(orderRemaining ?? 0) }}</strong></p>
       <p v-if="pollTimedOut" class="warn">长时间未检测到支付，请确认是否已完成支付，或重新下单。</p>
       <button class="btn secondary" :disabled="manualBusy" @click="manualCheck">{{ manualBusy ? '查询中…' : '我已付款，刷新状态' }}</button>
-      <a class="link" :href="withBase('/console/orders')">查看订单</a>
+      <a class="link" :href="withBase('/orders')">查看订单</a>
     </div>
   </section>
 </template>

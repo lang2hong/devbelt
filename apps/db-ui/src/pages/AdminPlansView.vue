@@ -143,7 +143,7 @@ function featureValue(f: EditableFeature): unknown {
 async function refresh(): Promise<void> {
   const r = await listPlans();
   if (r.kind === 'unauthorized') {
-    window.location.assign(withBase('/login'));
+    window.location.assign('/login');
     return;
   }
   if (r.kind !== 'ok') {

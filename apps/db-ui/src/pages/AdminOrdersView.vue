@@ -35,7 +35,7 @@ const STATUS_OPTIONS = ['pending', 'paid', 'fulfilled', 'failed', 'refunded', 'e
 
 function relogin(): void {
   setAccessToken(null);
-  window.location.assign(withBase('/login'));
+  window.location.assign('/login');
 }
 
 function fmtCents(cents: number): string {

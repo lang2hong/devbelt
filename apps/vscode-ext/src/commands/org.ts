@@ -95,7 +95,7 @@ export function registerOrgCommands(deps: OrgDeps): void {
 
   // 组织视图空态「创建或加入组织」→ 打开 Web 控制台组织页（浏览器）。
   sub('dbclient.org.openConsole', () => {
-    void vscode.env.openExternal(vscode.Uri.parse(`${DEFAULT_SERVER_URL}/console/organizations`));
+    void vscode.env.openExternal(vscode.Uri.parse(`${DEFAULT_SERVER_URL}/db/organizations`));
   });
 
   // ── 连接模板（核心：模板 content + 本地凭据映射）──

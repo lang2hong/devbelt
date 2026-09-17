@@ -59,7 +59,7 @@ describe('account commands', () => {
     await handlers.get('dbclient.openConsole')!();
     expect(mocks.env.openExternal).toHaveBeenCalledTimes(1);
     const url = String((mocks.env.openExternal as any).mock.calls[0][0]);
-    expect(url).toContain('/console/account');
+    expect(url).toContain('/db/account');
   });
 
   it('changeLoginPassword: success logs out and prompts re-login', async () => {

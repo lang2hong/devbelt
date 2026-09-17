@@ -74,7 +74,7 @@ onMounted(() => {
               <span class="value">{{ formatFeature(f) }}</span>
             </li>
           </ul>
-          <button v-if="canUpgrade(plan)" class="btn" @click="openConsole('/console/checkout')">{{ t('plan.upgrade', { name: plan.name }) }}</button>
+          <button v-if="canUpgrade(plan)" class="btn" @click="openConsole('/db/checkout')">{{ t('plan.upgrade', { name: plan.name }) }}</button>
           <p v-else-if="isCurrent(plan)" class="ok">{{ t('plan.inUse') }}</p>
         </div>
       </div>

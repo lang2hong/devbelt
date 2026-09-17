@@ -27,7 +27,7 @@ const PROCESS_OPTIONS: Array<'issued' | 'rejected' | 'failed'> = ['issued', 'rej
 
 function relogin(): void {
   setAccessToken(null);
-  window.location.assign(withBase('/login'));
+  window.location.assign('/login');
 }
 
 function fmtCents(cents: number): string {

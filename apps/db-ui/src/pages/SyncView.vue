@@ -27,7 +27,7 @@ onMounted(async () => {
     state.value = 'ready';
   } else if (r.kind === 'unauthorized') {
     setAccessToken(null);
-    window.location.assign(withBase('/login'));
+    window.location.assign('/login');
   } else {
     state.value = 'error';
   }

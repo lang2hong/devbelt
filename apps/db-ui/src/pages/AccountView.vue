@@ -24,7 +24,7 @@ const nameWrite = useIdempotencyKey();
 
 function forceRelogin(): void {
   setAccessToken(null);
-  window.location.assign(withBase('/login'));
+  window.location.assign('/login');
 }
 
 async function saveName(): Promise<void> {
@@ -105,7 +105,7 @@ async function submitPassword(): Promise<void> {
         <div class="kv" v-if="subscription.periodEndTime"><span class="k">到期时间</span><span class="v">{{ formatDateTime(subscription.periodEndTime) }}</span></div>
       </template>
       <p class="muted" v-else>暂无订阅。</p>
-      <div class="actions" v-if="subscription?.planCode !== 'pro'"><button class="btn accent" @click="navigate('/console/checkout')">升级 Pro</button></div>
+      <div class="actions" v-if="subscription?.planCode !== 'pro'"><button class="btn accent" @click="navigate('/checkout')">升级 Pro</button></div>
     </div>
 
     </div>

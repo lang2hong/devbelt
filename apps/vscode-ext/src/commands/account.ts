@@ -20,7 +20,7 @@ const PASSWORD_MIN = 9;
 
 /** 打开当前用户的管理后台（浏览器）；控制台登录态在浏览器侧，未登录需自行登录。 */
 export function openConsole(): void {
-  void vscode.env.openExternal(vscode.Uri.parse(`${DEFAULT_SERVER_URL}/console/account`));
+  void vscode.env.openExternal(vscode.Uri.parse(`${DEFAULT_SERVER_URL}/db/account`));
 }
 
 /**

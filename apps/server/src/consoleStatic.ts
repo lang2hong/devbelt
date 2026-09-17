@@ -9,6 +9,12 @@ const PUBLIC_CSP =
   "img-src 'self' data:; connect-src 'self'; base-uri 'none'; " +
   "frame-ancestors 'none'; form-action 'self'; object-src 'none'";
 
+/** 身份页（auth-ui）dist：站点根，`/login`、`/register`、`/verify-email`、`/accept-invitation`。 */
+function authDistDir(): string {
+  return process.env.AUTH_DIST_DIR || path.resolve(process.cwd(), '../auth-ui/dist');
+}
+
+/** DB 控制台（db-ui）dist：`/db/` 下的 SPA 与 `/db/sync-reset`。 */
 function consoleDistDir(): string {
   return process.env.CONSOLE_DIST_DIR || path.resolve(process.cwd(), '../db-ui/dist');
 }
@@ -18,43 +24,54 @@ function notFound(_req: FastifyRequest, reply: FastifyReply): void {
 }
 
 /**
- * 控制台静态托管（P3 §8，切片 3 完整形态）。
+ * 前端静态托管（P2）。
  *
- * 路由优先级：`/api/*`（Fastify 显式路由自然优先）→ 公开/邮件页 → 已存在静态资源
- * （/assets/*）→ `/console/*` SPA fallback → 其余 404。`/console` 恒 302 `/console/`。
- * 带文件扩展名的不存在路径不落 SPA fallback。HTML 均 `no-store` + 严格 CSP；
- * hash 静态资源 immutable 一年缓存。
+ * 两个构建产物同源托管：
+ *   - auth-ui（base `/`）：根身份页 `/login`、`/register`、`/verify-email`、`/accept-invitation`，
+ *     资源在 `/assets/*`。
+ *   - db-ui（base `/db/`）：`/db/` 控制台 SPA（未知子路径回落壳，带扩展名者除外），
+ *     `/db/sync-reset` 邮件落地页，资源在 `/db/assets/*`。
+ * `/` 暂 302 到 `/login`（P3 换套件首页）。HTML 均 `no-store` + 严格 CSP；
+ * hash 资源 immutable 一年缓存；`/api/*` 由 Fastify 显式路由优先。
  */
 export async function registerConsoleStatic(app: FastifyInstance): Promise<void> {
-  const dist = consoleDistDir();
+  const authDist = authDistDir();
+  const consoleDist = consoleDistDir();
+  const authReady = existsSync(authDist);
+  const consoleReady = existsSync(consoleDist);
 
-  if (!existsSync(dist)) {
-    app.log.warn(`[console] db-ui dist not found at ${dist}; public pages unavailable`);
-    app.get('/verify-email', notFound);
-    app.get('/login', notFound);
-    app.get('/register', notFound);
-    app.get('/accept-invitation', notFound);
-    app.get('/sync-reset', notFound);
-    app.get('/', notFound);
-    app.get('/console/*', notFound);
-    return;
+  if (!authReady) app.log.warn(`[static] auth-ui dist not found at ${authDist}; identity pages unavailable`);
+  if (!consoleReady) app.log.warn(`[static] db-ui dist not found at ${consoleDist}; console unavailable`);
+
+  if (authReady) {
+    await app.register(fastifyStatic, {
+      root: path.join(authDist, 'assets'),
+      prefix: '/assets/',
+      decorateReply: false,
+      index: false,
+      setHeaders: (res) => {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      },
+    });
   }
 
-  await app.register(fastifyStatic, {
-    root: path.join(dist, 'assets'),
-    prefix: '/assets/',
-    decorateReply: false,
-    index: false,
-    setHeaders: (res) => {
-      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-    },
-  });
+  if (consoleReady) {
+    await app.register(fastifyStatic, {
+      root: path.join(consoleDist, 'assets'),
+      prefix: '/db/assets/',
+      decorateReply: false,
+      index: false,
+      setHeaders: (res) => {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      },
+    });
+  }
 
-  function readHtml(name: string): string | null {
+  function readHtml(dist: string, name: string): string | null {
     try {
       return readFileSync(path.join(dist, name), 'utf8');
     } catch {
-      app.log.warn(`[console] ${name} missing in ${dist}`);
+      app.log.warn(`[static] ${name} missing in ${dist}`);
       return null;
     }
   }
@@ -70,30 +87,36 @@ export async function registerConsoleStatic(app: FastifyInstance): Promise<void>
     };
   }
 
-  const entries: Array<[string, string]> = [
+  // 身份页（auth-ui，根路径）
+  const authEntries: Array<[string, string]> = [
     ['/verify-email', 'verify-email.html'],
     ['/login', 'login.html'],
     ['/register', 'register.html'],
     ['/accept-invitation', 'accept-invitation.html'],
-    ['/sync-reset', 'sync-reset.html'],
-    ['/', 'index.html'],
   ];
-  for (const [route, file] of entries) {
-    app.get(route, serveHtml(readHtml(file)));
+  for (const [route, file] of authEntries) {
+    app.get(route, serveHtml(authReady ? readHtml(authDist, file) : null));
   }
 
-  const shellHtml = readHtml('index.html');
-
-  app.get('/console', async (_req, reply) => {
-    reply.redirect('/console/');
+  // 套件首页占位（P3 换正式首页）
+  app.get('/', async (_req, reply) => {
+    reply.redirect('/login');
   });
 
-  app.get('/console/', serveHtml(shellHtml));
+  // 控制台（db-ui，`/db` 前缀）
+  const shellHtml = consoleReady ? readHtml(consoleDist, 'index.html') : null;
+  const syncResetHtml = consoleReady ? readHtml(consoleDist, 'sync-reset.html') : null;
+
+  app.get('/db', async (_req, reply) => {
+    reply.redirect('/db/');
+  });
+  app.get('/db/', serveHtml(shellHtml));
+  app.get('/db/sync-reset', serveHtml(syncResetHtml));
 
   // SPA fallback：客户端路由。带扩展名的路径不落 fallback（避免把不存在的静态资源当页面）。
-  app.get('/console/*', async (req, reply) => {
+  app.get('/db/*', async (req, reply) => {
     const url = (req.url ?? '').split('?')[0];
-    const rel = url.replace(/^\/console\/?/, '');
+    const rel = url.replace(/^\/db\/?/, '');
     if (/\.[A-Za-z0-9]+$/.test(rel)) {
       return notFound(req, reply);
     }

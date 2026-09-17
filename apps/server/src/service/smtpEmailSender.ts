@@ -154,7 +154,7 @@ async sendResetChallengeEmail(input: { to: string; token: string; displayName?: 
   }
 
   private resetUrl(token: string): string {
-    return `${this.baseUrl}/sync-reset?token=${encodeURIComponent(token)}`;
+    return `${this.baseUrl}/db/sync-reset?token=${encodeURIComponent(token)}`;
   }
 
   // ── HTML 生成 ──

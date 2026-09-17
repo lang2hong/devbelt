@@ -51,11 +51,11 @@ let loadSeq = 0;
 
 function relogin(): void {
   setAccessToken(null);
-  window.location.assign(withBase('/login'));
+  window.location.assign('/login');
 }
 
 function invalidContext(): void {
-  navigate('/console/organizations');
+  navigate('/organizations');
 }
 
 async function load(): Promise<void> {
@@ -156,7 +156,7 @@ async function closeOrg(): Promise<void> {
     const r = await closeOrganization(id, closeWrite.ensure(tag), csrf);
     if (r.kind === 'ok') {
       closeWrite.reset(tag);
-      navigate('/console/organizations');
+      navigate('/organizations');
     } else if (r.kind === 'unauthorized') {
       closeWrite.reset(tag);
       relogin();
@@ -185,7 +185,7 @@ async function leaveOrg(): Promise<void> {
     const r = await leaveOrganization(id, leaveWrite.ensure(tag), csrf);
     if (r.kind === 'ok') {
       leaveWrite.reset(tag);
-      navigate('/console/organizations');
+      navigate('/organizations');
     } else if (r.kind === 'unauthorized') {
       leaveWrite.reset(tag);
       relogin();
@@ -334,7 +334,7 @@ async function revoke(inv: Invitation): Promise<void> {
           <h2>{{ org.name }}</h2>
           <span class="muted">角色：{{ org.role }}</span>
           <span class="gap"></span>
-          <a class="back" @click.prevent="navigate('/console/organizations/' + props.organizationId + '/resources')">资源</a>
+          <a class="back" @click.prevent="navigate('/organizations/' + props.organizationId + '/resources')">资源</a>
         </div>
         <div v-if="isAdmin()" class="actions">
           <button v-if="!renameMode" class="btn secondary" @click="renameMode = true; renameValue = org.name">重命名</button>
