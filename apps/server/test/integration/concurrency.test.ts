@@ -112,9 +112,14 @@ describe.skipIf(!URL)('concurrency (real MySQL)', () => {
       const email = uniqueEmail();
       await registerAndVerify(emailSender, auth, email);
       const user = await userRepo.findByEmail(email);
-      // Free 的 max_devices=0（无限）；此处把该用户 entitlement 收紧为 1，验证并发不超额
+      // Free 的 max_devices=0（无限）；此处把该用户**所用 plan 的 maxDevices 特性**收紧为 1，
+      // 验证并发不超额。权益由 plan 派生（baseline 已删除 entitlement_snapshot 列）。
       await db.query(
-        "UPDATE personal_subscriptions SET entitlement_snapshot = JSON_SET(entitlement_snapshot, '$.maxDevices', 1) WHERE user_id = ?",
+        `UPDATE plan_feature_values pfv
+         JOIN plan_feature_defs d ON d.id = pfv.feature_def_id
+         JOIN personal_subscriptions s ON s.plan_id = pfv.plan_id
+         SET pfv.value_json = '1'
+         WHERE s.user_id = ? AND d.feature_key = 'maxDevices'`,
         [user!.id],
       );
 

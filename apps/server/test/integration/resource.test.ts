@@ -85,8 +85,21 @@ async function makeOrg(stack: Awaited<ReturnType<typeof makeStack>>, db: MysqlDb
   return { org, adminUserId: admin.id };
 }
 
-async function setSnapshot(db: MysqlDb, orgId: number, snapshot: Record<string, unknown>) {
-  await db.query('UPDATE organization_subscriptions SET entitlement_snapshot = ? WHERE organization_id = ?', [JSON.stringify(snapshot), orgId]);
+/**
+ * 收紧组织的套餐特性（权益由 plan 派生；baseline 已删除 entitlement_snapshot 列）。
+ * 逐个 feature_key 写入 value_json。
+ */
+async function setPlanFeatures(db: MysqlDb, orgId: number, features: Record<string, unknown>) {
+  for (const [key, value] of Object.entries(features)) {
+    await db.query(
+      `UPDATE plan_feature_values pfv
+       JOIN plan_feature_defs d ON d.id = pfv.feature_def_id
+       JOIN organization_subscriptions s ON s.plan_id = pfv.plan_id
+       SET pfv.value_json = ?
+       WHERE s.organization_id = ? AND d.feature_key = ?`,
+      [JSON.stringify(value), orgId, key],
+    );
+  }
 }
 
 describe.skipIf(!URL)('organization resources (real MySQL)', () => {
@@ -139,7 +152,7 @@ describe.skipIf(!URL)('organization resources (real MySQL)', () => {
       const { org, adminUserId } = await makeOrg(stack, db);
 
       const bytes = canonicalJsonBytes(QUERY);
-      await setSnapshot(db, org.organizationId, { includedSeats: 3, maxSharedResources: 1, sharedStorageQuotaBytes: bytes, allowedTemplateDatabaseTypes: ['mysql'] });
+      await setPlanFeatures(db, org.organizationId, { includedSeats: 3, maxSharedResources: 1, sharedStorageQuotaBytes: bytes, allowedTemplateDatabaseTypes: ['mysql'] });
       const q1 = await stack.resourceSvc.createResource(org.organizationId, adminUserId, { resourceType: 'query', name: 'q1', content: QUERY });
       // 数量维度：第二个即超限
       await expect(stack.resourceSvc.createResource(org.organizationId, adminUserId, { resourceType: 'query', name: 'q2', content: QUERY }))
@@ -147,7 +160,7 @@ describe.skipIf(!URL)('organization resources (real MySQL)', () => {
 
       // 软删释放后，字节维度：放开数量，字节配额恰好等于一条的 canonical 大小
       await stack.resourceSvc.deleteResource(org.organizationId, adminUserId, q1.resourceId);
-      await setSnapshot(db, org.organizationId, { includedSeats: 3, maxSharedResources: 0, sharedStorageQuotaBytes: bytes, allowedTemplateDatabaseTypes: ['mysql'] });
+      await setPlanFeatures(db, org.organizationId, { includedSeats: 3, maxSharedResources: 0, sharedStorageQuotaBytes: bytes, allowedTemplateDatabaseTypes: ['mysql'] });
       const first = await stack.resourceSvc.createResource(org.organizationId, adminUserId, { resourceType: 'query', name: 'q3', content: QUERY });
       expect(first.resourceId).toBeTruthy();
       await expect(stack.resourceSvc.createResource(org.organizationId, adminUserId, { resourceType: 'query', name: 'q4', content: QUERY }))
