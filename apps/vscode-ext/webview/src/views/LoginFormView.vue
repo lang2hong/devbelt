@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import { useI18n } from '../composables/useI18n';
 
@@ -15,6 +15,7 @@ import { useI18n } from '../composables/useI18n';
  * 验证通过后再用同一邮箱密码登录。
  */
 const { post, onMessage } = useVsCode();
+let __offMsg: (() => void) | undefined;
 const { t } = useI18n();
 
 const mode = ref<'login' | 'register' | 'verify'>('login');
@@ -54,7 +55,7 @@ function resend() {
 
 onMounted(() => {
   post({ type: 'ready' });
-  onMessage((msg: any) => {
+  __offMsg = onMessage((msg: any) => {
     submitting.value = false;
     if (msg.type === 'error') errorMsg.value = msg.message;
     else if (msg.type === 'success') successMsg.value = msg.message;
@@ -71,6 +72,8 @@ onMounted(() => {
     }
   });
 });
+
+onUnmounted(() => { __offMsg?.(); });
 </script>
 
 <template>

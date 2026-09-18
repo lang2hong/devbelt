@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, onUnmounted } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import { useI18n } from '../composables/useI18n';
 import { featureLabel, formatFeature, formatPrice, type PlanCatalog, type PlanDto } from '../utils/planFeatures';
@@ -11,6 +11,7 @@ import { featureLabel, formatFeature, formatPrice, type PlanCatalog, type PlanDt
  *   ext → webview: plans{plans,current,loggedIn} | error{message}
  */
 const { post, onMessage } = useVsCode();
+let __offMsg: (() => void) | undefined;
 const { t } = useI18n();
 
 const state = ref<'loading' | 'ready' | 'error' | 'loginRequired'>('loading');
@@ -34,7 +35,7 @@ function openConsole(path: string): void {
 
 onMounted(() => {
   post({ type: 'ready' });
-  onMessage((msg: any) => {
+  __offMsg = onMessage((msg: any) => {
     if (msg.type === 'plans') {
       if (!msg.loggedIn) {
         state.value = 'loginRequired';
@@ -48,6 +49,8 @@ onMounted(() => {
     }
   });
 });
+
+onUnmounted(() => { __offMsg?.(); });
 </script>
 
 <template>

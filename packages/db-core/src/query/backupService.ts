@@ -178,17 +178,22 @@ export class BackupService {
     options: RestoreOptions = {},
   ): Promise<RestoreProgress> {
     const { onProgress, isCancelled, singleStatement = false } = options;
+    // 剥离 dump 自带的事务控制语句：恢复自身已用 BEGIN/COMMIT 包裹，dump 内再出现
+    // COMMIT 会提前提交外层事务（回滚失效），BEGIN 则会嵌套。DDL 在 MySQL 会隐式
+    // 提交，仍无法完全原子（已记入台账）。
+    const txControl = /^(BEGIN|START\s+TRANSACTION|COMMIT|ROLLBACK|END)\s*;?\s*$/i;
+    const cleaned = statements.filter((s) => !txControl.test(s.trim()));
     if (singleStatement) {
-      return BackupService.restoreAsSingleStatement(query, statements, options);
+      return BackupService.restoreAsSingleStatement(query, cleaned, options);
     }
 
-    const total = statements.length;
+    const total = cleaned.length;
     let completed = 0;
     const last: RestoreProgress = { statement: '', completed, total };
 
     try {
       await query.query('BEGIN', undefined, SKIP);
-      for (const stmt of statements) {
+      for (const stmt of cleaned) {
         if (isCancelled?.()) throw new Error('Restore cancelled.');
         const trimmed = stmt.trim();
         if (!trimmed) continue;

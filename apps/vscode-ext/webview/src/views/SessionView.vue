@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import { useI18n } from '../composables/useI18n';
 import { formatDateTime } from '../utils/formatTime';
@@ -12,6 +12,7 @@ import { formatDateTime } from '../utils/formatTime';
  *   ext → webview: init{mode:'session'} | devices{devices,canRevoke} | error{message}
  */
 const { post, onMessage } = useVsCode();
+let __offMsg: (() => void) | undefined;
 const { t } = useI18n();
 
 interface DeviceItem {
@@ -47,7 +48,7 @@ function revoke(deviceId: string) {
 
 onMounted(() => {
   post({ type: 'ready' });
-  onMessage((msg: any) => {
+  __offMsg = onMessage((msg: any) => {
     if (msg.type === 'devices') {
       devices.value = msg.devices ?? [];
       canRevoke.value = msg.canRevoke !== false;
@@ -57,6 +58,8 @@ onMounted(() => {
     }
   });
 });
+
+onUnmounted(() => { __offMsg?.(); });
 </script>
 
 <template>

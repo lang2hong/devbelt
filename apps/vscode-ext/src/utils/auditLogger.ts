@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { diagWarn } from './diagnostics';
 import { uniqueId } from '@devkit/db-host/utils/id';
 
 export type AuditAction =
@@ -68,7 +69,7 @@ export class AuditLogger {
     };
     entries.unshift(record);
     if (entries.length > MAX_ENTRIES) entries.length = MAX_ENTRIES;
-    this.state.update(STORAGE_KEY, entries);
+    void this.state.update(STORAGE_KEY, entries).then(undefined, (e) => diagWarn('audit persist failed', String(e)));
   }
 
   getEntries(limit = 100, action?: AuditAction): AuditEntry[] {

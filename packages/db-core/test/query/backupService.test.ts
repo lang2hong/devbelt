@@ -435,3 +435,18 @@ describe('BackupService.restore — singleStatement 路径（SQLite）', () => {
     expect(seen).toEqual([{ completed: 3, total: 3 }]);
   });
 });
+describe('BackupService.restore 事务控制', () => {
+  it('剥离 dump 自带的 BEGIN/COMMIT，避免提前提交外层事务', async () => {
+    const conn = new FakeConnection();
+    const query = makeQueryService(conn, new MysqlDialect());
+
+    await BackupService.restore(query, ['BEGIN', 'INSERT INTO t VALUES (1)', 'COMMIT']);
+
+    const begins = conn.executed.filter((s) => /^BEGIN$/i.test(s.trim()));
+    const commits = conn.executed.filter((s) => /^COMMIT$/i.test(s.trim()));
+    // 仅恢复自身包裹的一对 BEGIN/COMMIT，dump 内的控制语句被剥离。
+    expect(begins).toHaveLength(1);
+    expect(commits).toHaveLength(1);
+    expect(conn.executed.some((s) => s.includes('INSERT INTO t VALUES (1)'))).toBe(true);
+  });
+});

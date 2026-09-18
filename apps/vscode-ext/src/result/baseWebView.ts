@@ -28,9 +28,13 @@ export abstract class BaseWebView {
       { enableScripts: true, retainContextWhenHidden: true, ...options },
     );
     this.panel.webview.html = getWebviewHtml(this.panel.webview, BaseWebView._extensionUri);
-    this.msgDisp = this.panel.webview.onDidReceiveMessage((msg) =>
-      void this.handleMessage(msg).catch((e) => diagError('webview message handler', String(e))),
-    );
+    this.msgDisp = this.panel.webview.onDidReceiveMessage((msg) => {
+      void this.handleMessage(msg).catch((e) => {
+        diagError('webview message handler', String(e));
+        // 统一错误边界：子类未捕获时也给用户可见反馈，而不是「点了没反应」。
+        try { this.post({ type: 'error', message: (e as Error)?.message ?? String(e) }); } catch { /* panel disposed */ }
+      });
+    });
     this.panelDisp = this.panel.onDidDispose(() => this.onDispose());
   }
 

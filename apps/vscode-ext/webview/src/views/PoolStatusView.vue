@@ -4,6 +4,7 @@ import { useVsCode } from '../composables/useVsCode';
 import { useI18n } from '../composables/useI18n';
 
 const { post, onMessage } = useVsCode();
+let __offMsg: (() => void) | undefined;
 const { t } = useI18n();
 
 interface PoolSession {
@@ -42,14 +43,14 @@ function usagePercent(): number {
 
 onMounted(() => {
   post({ type: 'ready' });
-  onMessage((msg: any) => {
+  __offMsg = onMessage((msg: any) => {
     if (msg.type === 'stats') {
       stats.value = msg.stats;
     }
   });
 });
 
-onUnmounted(() => {});
+onUnmounted(() => { __offMsg?.(); });
 </script>
 
 <template>

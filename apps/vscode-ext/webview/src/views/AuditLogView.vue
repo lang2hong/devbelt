@@ -5,6 +5,7 @@ import { useI18n } from '../composables/useI18n';
 import { formatDateTime } from '../utils/formatTime';
 
 const { post, onMessage } = useVsCode();
+let __offMsg: (() => void) | undefined;
 const { t } = useI18n();
 
 interface AuditEntry {
@@ -43,14 +44,14 @@ function formatSql(sql?: string): string {
 
 onMounted(() => {
   post({ type: 'ready' });
-  onMessage((msg: any) => {
+  __offMsg = onMessage((msg: any) => {
     if (msg.type === 'entries') {
       entries.value = msg.entries;
     }
   });
 });
 
-onUnmounted(() => {});
+onUnmounted(() => { __offMsg?.(); });
 </script>
 
 <template>

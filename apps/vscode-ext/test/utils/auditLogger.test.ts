@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// auditLogger → utils/diagnostics → vscode。
+vi.mock('vscode', () => ({
+  window: { createOutputChannel: () => ({ info: () => {}, warn: () => {}, error: () => {}, dispose: () => {} }) },
+}));
 import { AuditLogger, type AuditAction } from '../../src/utils/auditLogger';
 
 function memento() {

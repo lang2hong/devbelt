@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import { useI18n } from '../composables/useI18n';
 
@@ -12,6 +12,7 @@ import { useI18n } from '../composables/useI18n';
  *   ext → webview: me{me} | syncStatus{status} | error{message}
  */
 const { post, onMessage } = useVsCode();
+let __offMsg: (() => void) | undefined;
 const { t } = useI18n();
 
 interface Me {
@@ -60,12 +61,14 @@ function act(action: string): void {
 
 onMounted(() => {
   post({ type: 'ready' });
-  onMessage((msg: any) => {
+  __offMsg = onMessage((msg: any) => {
     if (msg.type === 'me') { me.value = msg.me; loaded.value = true; errorMsg.value = ''; }
     else if (msg.type === 'syncStatus') status.value = msg.status;
     else if (msg.type === 'error') errorMsg.value = msg.message;
   });
 });
+
+onUnmounted(() => { __offMsg?.(); });
 </script>
 
 <template>

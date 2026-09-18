@@ -4,6 +4,7 @@ import { mkdir, rename, rm } from 'fs/promises';
 import { once } from 'events';
 import { BackupService } from '@devkit/db-core';
 import { ConnectionManager } from '../connection/connectionManager';
+import { diagWarn } from '../utils/diagnostics';
 import type { ConnectionStore } from '@devkit/db-host/connection/connectionStore';
 
 interface ScheduleEntry {
@@ -52,7 +53,7 @@ export class BackupScheduler {
     } else {
       entries.push(entry);
     }
-    this.state.update(this.storageKey, entries);
+    void this.state.update(this.storageKey, entries).then(undefined, (e) => diagWarn('backup schedule persist failed', String(e)));
     this.stopTimer(entry.id);
     this.scheduleEntry(entry);
   }
@@ -62,7 +63,7 @@ export class BackupScheduler {
     this.stopTimer(key);
     const entries = this.state.get<ScheduleEntry[]>(this.storageKey, [])
       .filter((e) => e.connId !== connId || e.database !== database);
-    this.state.update(this.storageKey, entries);
+    void this.state.update(this.storageKey, entries).then(undefined, (e) => diagWarn('backup schedule persist failed', String(e)));
   }
 
   getSchedules(): ScheduleEntry[] {

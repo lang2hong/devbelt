@@ -28,7 +28,7 @@ export class ConnectionContext {
 
   /** 设置 workspace 级别最后活跃连接（持久化） */
   setLast(conn: SavedConnection, db?: string): void {
-    void this.context.workspaceState.update(this.wsKey, { connId: conn.id, db });
+    void this.context.workspaceState.update(this.wsKey, { connId: conn.id, db }).then(undefined, () => {});
   }
 
   /** 获取文档关联的连接。未绑定的文档必须由调用方要求用户选择连接。 */
