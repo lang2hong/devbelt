@@ -25,6 +25,8 @@ const props = defineProps<{
   columnWidths?: Record<string, number>;
   tableName?: string;
   dbName?: string;
+  /** 方言（MYSQL/PG/SQLITE）：决定复制 INSERT 时的标识符引用方式。 */
+  dbType?: string;
   hiddenColumns?: string[];
   /**
    * 结果是否可写。视图（VIEW）结果为 false：单元格不可编辑、不提供插入行与
@@ -521,7 +523,8 @@ function copyAsInsert() {
   const targets = selectedRows.value.length ? selectedRows.value : props.rows;
   const cols = visibleFields.value.map((f) => f.name);
   const esc = (v: any): string => (v === null || v === undefined) ? 'NULL' : `'${String(v).replace(/'/g, "''")}'`;
-  const q = (name: string) => `\`${name}\``;
+  // 标识符引用随方言：MySQL 反引号；PG/SQLite 双引号（旧实现恒用反引号，PG 上非法）。
+  const q = (name: string) => (props.dbType === 'MYSQL' ? `\`${name}\`` : `"${name.replace(/"/g, '""')}"`);
   const target = props.dbName ? `${q(props.dbName)}.${q(props.tableName)}` : q(props.tableName);
   const sql = targets.map((row) => {
     const vals = cols.map((c) => esc(row[c])).join(', ');

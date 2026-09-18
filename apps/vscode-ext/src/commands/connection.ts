@@ -81,7 +81,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
       { placeHolder: l10n('search.connectionsPlaceholder'), matchOnDescription: true },
     );
     if (!picked) return;
-    vscode.commands.executeCommand('devbelt.openConnection', picked.conn);
+    void vscode.commands.executeCommand('devbelt.openConnection', picked.conn).then(undefined, () => {});
   });
 
   sub('devbelt.deleteConnection', async (node: DbTreeNode) => {

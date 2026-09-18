@@ -45,6 +45,7 @@ const limit = ref(100);
 const total = ref<number | undefined>(undefined);
 const tableName = ref('');
 const dbName = ref('');
+const dbType = ref('');
 const running = ref(false);
 const viewMode = ref<'table' | 'chart'>('table');
 
@@ -127,6 +128,7 @@ onMounted(() => {
       if (msg.columnWidths) columnWidths.value = msg.columnWidths;
       syncLimitFromSql(msg.sql);
       error.value = '';
+      if (msg.dbType) dbType.value = msg.dbType;
       meta.value = describeResult(msg.result);
     } else if (msg.type === 'results') {
       const list = msg.results || [];
@@ -136,6 +138,7 @@ onMounted(() => {
       }));
       results.value = results.value.concat(batch);
       if (results.value.length > 20) results.value = results.value.slice(-20);
+      if (msg.dbType) dbType.value = msg.dbType;
       activeResultIndex.value = results.value.length - 1;
       const cur = results.value[activeResultIndex.value];
       if (cur) {
@@ -468,6 +471,7 @@ function onKeydown(e: KeyboardEvent) {
       :column-order="columnOrder"
       :column-widths="columnWidths"
       :table-name="tableName"
+      :db-type="dbType"
       :db-name="dbName"
       :hidden-columns="hiddenColumns"
       :can-edit="canEdit"

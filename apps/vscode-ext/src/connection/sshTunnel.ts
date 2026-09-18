@@ -40,6 +40,10 @@ export class SshTunnel {
     sshPort: number;
     remoteHost: string;
     remotePort: number;
+    sshUser?: string;
+    sshPassword?: string;
+    sshPrivateKeyPath?: string;
+    sshPassphrase?: string;
   }>();
 
   /** 主机密钥裁决器（扩展激活时注入）。未注入时回退严格判定。 */
@@ -71,11 +75,17 @@ export class SshTunnel {
     // 复用已有隧道；但主机/端口改动后旧隧道指向错误目标，须重建。
     const existing = this.tunnels.get(conn.id);
     if (existing) {
+      // 除目标外还要比较认证身份：换了 SSH 用户/密码/私钥后复用旧隧道会用错身份，
+      // 造成权限错配或认证失败。
       const sameTarget =
         existing.sshHost === sshHost &&
         existing.sshPort === sshPort &&
         existing.remoteHost === conn.host &&
-        existing.remotePort === conn.port;
+        existing.remotePort === conn.port &&
+        existing.sshUser === conn.sshUser &&
+        existing.sshPassword === conn.sshPassword &&
+        existing.sshPrivateKeyPath === conn.sshPrivateKeyPath &&
+        existing.sshPassphrase === conn.sshPassphrase;
       if (sameTarget) return existing.port;
       this.closeTunnel(existing, conn.id);
     }
@@ -161,7 +171,11 @@ export class SshTunnel {
           }
           settled = true;
           if (timer) clearTimeout(timer);
-          this.tunnels.set(conn.id, { ssh, server, port, sshHost, sshPort, remoteHost: conn.host, remotePort: conn.port });
+          this.tunnels.set(conn.id, {
+            ssh, server, port, sshHost, sshPort, remoteHost: conn.host, remotePort: conn.port,
+            sshUser: conn.sshUser, sshPassword: conn.sshPassword,
+            sshPrivateKeyPath: conn.sshPrivateKeyPath, sshPassphrase: conn.sshPassphrase,
+          });
           resolve(port);
         });
       });

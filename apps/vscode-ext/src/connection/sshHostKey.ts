@@ -64,9 +64,10 @@ export function loadKnownHosts(file: string = knownHostsPath()): KnownHostEntry[
 
 /** 非默认端口时 known_hosts 用 `[host]:port` 形式。 */
 function hostCandidates(host: string, port: number): string[] {
-  const list = [host];
-  if (port && port !== 22) list.push(`[${host}]:${port}`);
-  return list;
+  // OpenSSH 语义：非默认端口**只**认 `[host]:port`。旧实现同时返回裸 host，
+  // 会让 22 端口的已知主机错误地信任其它端口上的同一主机名（弱化身份绑定）。
+  if (port && port !== 22) return [`[${host}]:${port}`];
+  return [host];
 }
 
 /** 匹配 OpenSSH 哈希主机名 `|1|saltBase64|hmacBase64`（HMAC-SHA1）。 */

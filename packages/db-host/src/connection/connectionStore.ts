@@ -106,6 +106,13 @@ export class ConnectionStore {
     },
     private readonly secrets: SecureStorageLike,
   ) {
+    // 跨窗口密钥变更：刷新缓存，避免本窗口用陈旧密码（并把它写回覆盖新值）。
+    this.secrets.onDidChange?.((e) => {
+      void Promise.resolve(this.secrets.get(e.key)).then((value) => {
+        if (value === undefined) this.secretCache.delete(e.key);
+        else this.secretCache.set(e.key, value);
+      }).catch(() => { /* 读失败保持原缓存 */ });
+    });
     this.queryStore = new QueryStore(memento);
     this.queryStore.onChanged((source) => {
       this.changedEmitter.fire(source);

@@ -208,14 +208,14 @@ export class QueryRunner {
           return { name: f.name, simpleType: c?.simpleType, type: c?.type };
         });
         this.post({
-          type: 'result', result: { ...result, fields: fieldsWithType }, pkColumns: pkCols, total, sql,
+          type: 'result', result: { ...result, fields: fieldsWithType }, pkColumns: pkCols, total, sql, dbType: this.conn.dbType,
         });
       } else {
         // 写语句/DDL：交给多结果分支展示受影响行数，并保留上一次的列布局
         // （lastFields 不覆盖，否则重新查询后列宽/列序会被判定为过期而丢弃）。
         if (!this.table) this.lastFields = (result?.fields || []).map((f: any) => f.name);
         this.post({
-          type: 'results', results, sql, transactionState,
+          type: 'results', results, sql, transactionState, dbType: this.conn.dbType,
         });
       }
       onExecuted?.(result);

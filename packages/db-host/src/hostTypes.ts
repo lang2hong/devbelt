@@ -21,4 +21,9 @@ export interface SecureStorageLike {
   get(key: string): PromiseLike<string | undefined>;
   store(key: string, value: string): PromiseLike<void>;
   delete(key: string): PromiseLike<void>;
+  /**
+   * 存储变更通知（可选）。VS Code 的 SecretStorage 跨窗口共享，B 窗口改密后
+   * 需据此刷新本窗口缓存，否则会用旧密码登录并把它写回。
+   */
+  onDidChange?(listener: (e: { key: string }) => void): { dispose(): void };
 }
