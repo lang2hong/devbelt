@@ -30,15 +30,15 @@ describe.skipIf(!URL)('schema alignment (real MySQL)', () => {
       const auditRepo = new MysqlAuditRepo(() => db);
 
       const user = await userRepo.create(`align-${Date.now()}@example.com`, 'hash', 'Align');
-      const org = await orgRepo.create({} as Queryable, { name: 'Align Org' });
+      const org = await orgRepo.create(db as unknown as Queryable, { name: 'Align Org' });
 
       // 组织订阅（plan_id FK → plans）取组织兜底档
       const [planRows] = (await db.query("SELECT id FROM plans WHERE code = 'organization_free' LIMIT 1")) as [Array<{ id: number }>, unknown];
-      await orgSubRepo.create({} as Queryable, {
+      await orgSubRepo.create(db as unknown as Queryable, {
         organizationId: org.id, planId: Number(planRows[0].id), seatLimit: 3, status: 'active',
         periodStartTime: new Date(), periodEndTime: null,
       });
-      await membershipRepo.create({} as Queryable, {
+      await membershipRepo.create(db as unknown as Queryable, {
         organizationId: org.id, userId: user.id, role: 'admin', status: 'active',
         invitedByUserId: null, joinedTime: new Date(), removedTime: null,
       });

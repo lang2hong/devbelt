@@ -256,10 +256,11 @@ describe.skipIf(!URL)('organization (real MySQL)', () => {
       // 唯一一处显式开启限流的地方（makeService 默认关闭，见其文档）。
       const svc = await makeService(db, true);
 
-      // rate_limit_entries 由所有集成测试文件共享（各文件连同一个测试库，
-      // userId 都从 1 开始），故取一个业务不会产生的 id 做专属桶并清零，
-      // 使本测试不依赖执行顺序。限流只按桶键计数，不要求 user 行存在。
-      const rlUserId = 990_001;
+      // rate_limit_entries 由所有集成测试文件共享，故用专属用户做专属桶并清零，
+      // 使本测试不依赖执行顺序。createOrganization 会写 organization_memberships，
+      // 其 user_id 有外键 → 必须用**真实存在**的用户，不能自造 id。
+      const user = await new MysqlUserRepo(() => db).create(`rl-${Date.now()}@example.com`, 'hash');
+      const rlUserId = user.id;
       const storedKey = MysqlRateLimitRepo.storageKey(`org:create:user:${rlUserId}`);
       await db.query('DELETE FROM rate_limit_entries WHERE bucket_key = ?', [storedKey]);
 
