@@ -66,7 +66,7 @@ function makeDeps(session: SyncSessionPort, inputs: Array<string | undefined> = 
     info, warn, error, errorAction,
   };
   const deps: PersonalSyncCommandDeps = {
-    auth: { isLoggedIn: () => true, refreshEntitlement: vi.fn(async () => {}) },
+    auth: { isLoggedIn: () => true, refreshEntitlement: vi.fn(async () => {}), getCachedEntitlement: () => undefined },
     factory: { ensureSession: vi.fn(async () => session) },
     ui,
     createMaterial: vi.fn(async () => makeMaterial()),

@@ -222,6 +222,25 @@ describe('SyncRecordService', () => {
     throw new Error('expected SYNC_QUOTA_EXCEEDED');
   });
 
+  it('enforces allowDataSync=false server-side (client gate is bypassable)', async () => {
+    const stack = makeStack();
+    const keys = await init(stack);
+    const free = await stack.planRepo.findByCode('free');
+    free!.features = { ...free!.features, allowDataSync: false };
+    await stack.subscriptionRepo.create({
+      userId: USER, planId: free!.id, status: 'active',
+      periodStartTime: new Date(), periodEndTime: null,
+    });
+
+    const m1 = mid(3);
+    const b1 = putBody(m1, RID, 70, 71, '0');
+    const s1 = signRecord(keys.signPriv, USER, 'record.put', b1);
+    await expect(stack.recordSvc.putRecord(USER, {
+      keyEpoch: '1', mutationId: m1, signature: s1.signatureBuf, baseVersion: '0', requestDigest: s1.digest,
+      recordId: RID, cipherSuite: 'AES-256-GCM', formatVersion: 1, ...decodeBody(b1),
+    })).rejects.toMatchObject({ code: 'PERSONAL_FEATURE_REQUIRED', feature: 'allowDataSync' });
+  });
+
   it('expired subscription falls back to free quota instead of unlimited (P0 regression)', async () => {
     const stack = makeStack();
     const keys = await init(stack);

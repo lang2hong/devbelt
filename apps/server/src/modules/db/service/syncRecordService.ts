@@ -9,6 +9,7 @@ import type {
 } from '../../../repository/interfaces.js';
 import type { PersonalSyncState, PersonalConnectionMeta } from '../../../domain/entities.js';
 import { deriveEntitlement } from '../../billing/service/entitlement.js';
+import { PersonalFeatureRequiredError } from '../../../domain/errors.js';
 import {
   SyncNotInitializedError,
   SyncVersionConflictError,
@@ -274,6 +275,9 @@ export class SyncRecordService {
     const plan = sub ? await this.planRepo.findByIdInTx(tx, sub.planId) : undefined;
     const freePlan = await this.planRepo.findByCodeInTx(tx, 'free');
     const snapshot = deriveEntitlement(sub, plan, freePlan);
+    // 服务端强制功能开关：客户端门禁可被绕过（旧版/改内存），故在此校验。
+    // 仅当套餐**明确禁用**数据同步时拒绝（free/pro 当前均为 true，行为不变）。
+    if (snapshot.allowDataSync === false) throw new PersonalFeatureRequiredError('allowDataSync');
     const maxMetas = Number(snapshot.maxConnectionMetas ?? 0);
     const maxBytes = Number(snapshot.syncStorageBytes ?? 0);
     const current = await this.recordRepo.countActive(tx, userId, keyEpoch);

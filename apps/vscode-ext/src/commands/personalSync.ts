@@ -6,6 +6,7 @@ import type { InitialSyncMaterial } from '@devkit/db-host/sync/keyLifecycle';
 import { createInitialMaterial, newRecoveryCode, unlockDek } from '@devkit/db-host/sync/keyLifecycle';
 import { encodeBase64Url } from '@devkit/db-host/sync/crypto/recoveryCode';
 import type { SyncSessionFactory } from '@devkit/db-host/sync/sessionFactory';
+import { canUseDataSync } from '@devkit/db-host/sync/entitlementGate';
 import { l10n } from '../i18n';
 
 type SyncRun = { stage: string } | undefined;
@@ -43,7 +44,7 @@ interface SyncUi {
 }
 
 export interface PersonalSyncCommandDeps {
-  auth: Pick<AuthService, 'isLoggedIn' | 'refreshEntitlement'>;
+  auth: Pick<AuthService, 'isLoggedIn' | 'refreshEntitlement' | 'getCachedEntitlement'>;
   factory: SyncFactoryPort;
   ui: SyncUi;
   newRecoveryCode?: () => { code: string; raw: Uint8Array };
@@ -304,9 +305,8 @@ async function runExplicitSync(
   deps: PersonalSyncCommandDeps,
   run: (session: SyncSessionPort) => Promise<SyncRun>,
 ): Promise<void> {
-  // 数据同步门禁：仅当权益明确禁用时拦截（默认允许）。
-  const getEnt = (deps.auth as { getCachedEntitlement?: () => { allowDataSync?: boolean } | undefined }).getCachedEntitlement;
-  if (typeof getEnt === 'function' && getEnt.call(deps.auth)?.allowDataSync === false) {
+  // 数据同步门禁：走统一 gate（仅当权益明确禁用时拦截，默认允许），不再用动态 cast。
+  if (!canUseDataSync(deps.auth.getCachedEntitlement())) {
     deps.ui.warn(l10n('entitlement.dataSyncRequired'));
     return;
   }
