@@ -197,7 +197,7 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
     mailFlowRepo,
     syncResetHandoffRepo,
     auditWriter,
-    'lang2hong.devbelt',
+    'lang2hong.devbelt-db-client',
   );
 
   const getUser = async (id: number) => userRepo.findById(id);

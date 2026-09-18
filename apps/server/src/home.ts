@@ -66,8 +66,8 @@ const TOOLS: readonly HomeTool[] = [
     badge: 'VS Code 扩展',
   },
   {
-    name: 'db-client',
-    desc: '正在开发的新版数据库客户端。',
+    name: 'DevBelt DB Client',
+    desc: '正在开发的数据库客户端（lang2hong.devbelt-db-client）。',
     href: '',
     badge: '开发中',
   },

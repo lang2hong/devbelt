@@ -1,6 +1,6 @@
 {
-  "name": "devbelt",
-  "displayName": "DevBelt",
+  "name": "devbelt-db-client",
+  "displayName": "DevBelt DB Client",
   "description": "DevBelt — developer toolkit for VS Code. Database client for MySQL, PostgreSQL and SQLite: query, edit data, design schemas, ER diagrams, import/export and SSH tunnels.",
   "version": "0.1.0",
   "publisher": "lang2hong",

@@ -91,11 +91,11 @@ export const config = {
   platformAdminEmails: parsePlatformAdminEmails(process.env.PLATFORM_ADMIN_EMAILS),
   /**
    * sync-reset 深链目标扩展 id（`vscode://<id>/reset-after-loss`）。
-   * 深链按扩展的 publisher.name 路由；当前扩展 manifest 为 lang2hong.devbelt，
+   * 深链按扩展的 publisher.name 路由；当前扩展 manifest 为 lang2hong.devbelt-db-client，
    * 故默认取此实际 id（开箱即用）。若日后以 <publisher>.<name> 替换扩展 id，部署时
    * 用 SYNC_EXTENSION_ID 覆盖。
    */
-  syncExtensionId: process.env.SYNC_EXTENSION_ID || 'lang2hong.devbelt',
+  syncExtensionId: process.env.SYNC_EXTENSION_ID || 'lang2hong.devbelt-db-client',
 };
 
 export { parseTrustProxy };

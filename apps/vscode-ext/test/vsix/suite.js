@@ -8,7 +8,7 @@ const vscode = require('vscode');
  * extensions 目录 → 启动 VS Code。本文件只断言「安装后的 vsix 能被解析并激活」，
  * 不触碰数据库连接/同步（无需凭据）。
  */
-const EXT_ID = 'lang2hong.devbelt';
+const EXT_ID = 'lang2hong.devbelt-db-client';
 const EXPECTED_COMMANDS = [
   'devbelt.openConnection',
   'devbelt.newQuery',
