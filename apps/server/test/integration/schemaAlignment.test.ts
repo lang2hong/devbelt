@@ -69,7 +69,7 @@ describe.skipIf(!URL)('schema alignment (real MySQL)', () => {
       expect(events[0].createTime instanceof Date).toBe(true);
 
       // 关闭组织走 status='closed'
-      await orgRepo.close({} as Queryable, org.id, new Date());
+      await orgRepo.close(db as unknown as Queryable, org.id, new Date());
       const after = await membershipRepo.listActiveByUserWithOrg(user.id);
       expect(after).toHaveLength(0);
     } finally {
