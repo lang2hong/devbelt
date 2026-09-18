@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseCsv, serializeCsv } from '../../../src/data/transfer/csv';
+import { parseCsv, serializeCsv, unguardFormula } from '../../../src/data/transfer/csv';
 
 describe('CSV transfer codec', () => {
   it('round-trips commas, quotes, newlines, and typed display values', () => {
@@ -44,5 +44,25 @@ describe('CSV transfer codec', () => {
     expect(text).toBe(
       "v\r\n'=1+1\r\n'+SUM(A1:A2)\r\n'-2+3\r\n'@cmd\r\n'\tx\r\n-5\r\n3.14\r\n",
     );
+  });
+});
+
+describe('CSV 公式防护导入还原', () => {
+  it('导出→导入往返：公式前缀被还原', () => {
+    expect(unguardFormula("'=SUM(A1)")).toBe('=SUM(A1)');
+    expect(unguardFormula("'@cmd")).toBe('@cmd');
+    expect(unguardFormula("'+not-a-number")).toBe('+not-a-number');
+  });
+
+  it('保留普通内容与真实前导单引号', () => {
+    expect(unguardFormula('plain')).toBe('plain');
+    expect(unguardFormula("'hello")).toBe("'hello");      // 非防护形态
+    expect(unguardFormula("'+123")).toBe("'+123");        // 数值，非防护
+  });
+
+  it('parseCsv 应用还原', () => {
+    const csv = 'a\r\n' + '"\'=1+1"';
+    const parsed = parseCsv(csv, true);
+    expect(parsed.rows[0].a).toBe('=1+1');
   });
 });

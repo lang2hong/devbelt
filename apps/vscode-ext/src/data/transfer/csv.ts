@@ -24,6 +24,19 @@ function guardFormula(text: string): string {
   return text;
 }
 
+/**
+ * 导入时还原导出加入的公式防护前缀：`'=SUM(A1)` → `=SUM(A1)`。
+ * 只剥离**符合防护形态**的那一层（`'` 后接 `= @ tab CR`，或非数值的 `+ -`），
+ * 避免误伤用户真实存储的前导单引号。
+ */
+export function unguardFormula(text: string): string {
+  if (!text.startsWith("'")) return text;
+  const rest = text.slice(1);
+  if (/^[=@\t\r]/.test(rest)) return rest;
+  if (/^[+-]/.test(rest) && !NUMERIC.test(rest)) return rest;
+  return text;
+}
+
 function escapeCell(value: unknown): string {
   const text = guardFormula(formatValue(value));
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
@@ -104,7 +117,7 @@ export function parseCsv(text: string, hasHeader = true): CsvData {
     columns,
     rows: values.filter((record) => record.some((cell) => cell !== '')).map((record) => {
       const out: Record<string, string> = {};
-      columns.forEach((column, index) => { out[column] = record[index] ?? ''; });
+      columns.forEach((column, index) => { out[column] = unguardFormula(record[index] ?? ''); });
       return out;
     }),
   };
