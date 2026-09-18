@@ -591,6 +591,7 @@ export const en: MessageCatalog = {
   'wv.grid.selectRowsFirst': 'Select at least one row to delete.',
   'wv.grid.cannotDeleteNoPk': 'Cannot delete: selected row(s) have no primary key or usable locator column.',
   'wv.grid.nothingToExport': 'Nothing to export: the result set is empty.',
+  'wv.grid.insertNoValues': 'Fill at least one column before inserting.',
   'wv.grid.nothingToCopy': 'Nothing to copy: the result set is empty.',
   'wv.grid.copyNeedsTable': 'Copy as INSERT requires a single-table result.',
   'wv.grid.copiedInserts': 'Copied {count} INSERT statement(s)',

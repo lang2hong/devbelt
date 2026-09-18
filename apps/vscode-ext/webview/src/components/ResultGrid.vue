@@ -157,7 +157,9 @@ function startColumnResize(name: string, event: PointerEvent) {
 
 function getPk(row: Row): { columns: string[]; values: any[] } | null {
   // 无主键时用所有可见列作为定位列（编辑/删除可用，可能影响多行）
-  const cols = props.pkColumns.length ? props.pkColumns : visibleFields.value.map((f) => f.name);
+  // 无主键时用**全部列**（含隐藏列）作为定位列：只看可见列会让隐藏列不参与
+  // WHERE，可能匹配到多行造成静默多行更新/删除。
+  const cols = props.pkColumns.length ? props.pkColumns : props.fields.map((f) => f.name);
   if (!cols.length) return null;
   const values = cols.map((c) => row[c]);
   if (values.some((v) => v === undefined)) return null;
@@ -216,7 +218,7 @@ function commitEdit(row: Row, field: Field) {
   // 否则每次打开选择器都会被判定为「改过」而白跑一条 UPDATE
   const nextVal = editKind.value ? toSqlValue(editKind.value, editValue.value) : editValue.value;
   if (nextVal !== oldVal && nextVal !== 'NULL') {
-    post({ type: 'updateCell', pkColumns: pk.columns, pkValues: pk.values, column: field.name, value: nextVal });
+    emit('updateCell', pk.columns, pk.values, field.name, nextVal);
   }
   cancelEdit();
 }
@@ -239,6 +241,10 @@ function onDocMouseDown(e: MouseEvent) {
   }
   if (editingRow && editingField) commitEdit(editingRow, editingField);
 }
+
+// 刷新/翻页/重跑后 props.rows 整体替换：旧的行对象已不在结果集中，
+// 若继续保留 selectedRows，会出现「勾选态全空但 Delete (N) 仍可点」→ 误删上一页的行。
+watch(() => props.rows, () => { selectedRows.value = []; });
 
 onMounted(() => document.addEventListener('mousedown', onDocMouseDown));
 onUnmounted(() => document.removeEventListener('mousedown', onDocMouseDown));
@@ -271,7 +277,7 @@ function confirmDelete() {
   const rows = pendingDelete.value;
   if (!rows.length) return;
   pendingDelete.value = [];
-  post({ type: 'deleteRows', rows });
+  emit('deleteRows', rows);
   selectedRows.value = [];
 }
 
@@ -488,11 +494,23 @@ function cancelInsert() {
 }
 
 function saveInsert() {
-  const cols = visibleFields.value.map((f) => f.name);
-  const values = cols.map((c) => {
-    const v = newRow.value[c];
-    return v === undefined || v === '' ? null : v;
-  });
+  const cols: string[] = [];
+  const values: (string | null)[] = [];
+  for (const f of visibleFields.value) {
+    const raw = newRow.value[f.name];
+    // 留空 = 不提交该列：交给数据库默认值/自增/可空默认。
+    // 旧实现把未填列显式写 NULL，导致 DEFAULT/NOW() 失效，且 PG 的 serial/identity
+    // 主键收到显式 NULL 直接违反 NOT NULL 报错。
+    if (raw === undefined || raw === '') continue;
+    const text = String(raw);
+    cols.push(f.name);
+    // 约定：字面 `NULL`（大小写不敏感）= SQL NULL；其它按字面字符串写入。
+    values.push(/^null$/i.test(text) ? null : text);
+  }
+  if (cols.length === 0) {
+    showToast(t('wv.grid.insertNoValues'));
+    return;
+  }
   emit('insertRow', cols, values);
   inserting.value = false;
 }

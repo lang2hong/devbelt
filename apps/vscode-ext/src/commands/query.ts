@@ -6,11 +6,22 @@ import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
 import { openQueryFile, openSqlDocEditor, pickConnection } from './shared';
 import { confirmSqlExecution, ensureWritable } from '../utils/sqlSafety';
+import { splitSqlWithRanges } from '../utils/sql';
+import { dialectScanOptions } from '../utils/sqlDialectOptions';
 
 export function registerQueryCommands(deps: Deps, sub: Sub): void {
   const { store, manager, executor, history, connCtx, treeProvider } = deps;
 
-  const runActiveQuery = async (mode: import('../result/queryExecutor').QueryExecutionMode) => {
+  /** 光标所在的 SQL 语句（复用与执行侧一致的方言切分）；无则返回 undefined。 */
+  const statementAtCursor = (editor: vscode.TextEditor, dbType?: import('@devkit/db-core').DatabaseType): string | undefined => {
+    const pos = editor.document.offsetAt(editor.selection.active);
+    for (const seg of splitSqlWithRanges(editor.document.getText(), dialectScanOptions(dbType))) {
+      if (pos >= seg.start && pos <= seg.end) return seg.sql;
+    }
+    return undefined;
+  };
+
+  const runActiveQuery = async (mode: import('../result/queryExecutor').QueryExecutionMode, scope: 'statement' | 'all' = 'statement') => {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       vscode.window.showInformationMessage(l10n('cmd.openEditorFirst'));
@@ -20,9 +31,13 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
     const conn = ctx?.conn || await pickConnection(store);
     if (!conn) return;
     if (!ctx) connCtx.setForDoc(editor.document.uri.toString(), conn);
-    const sql = editor.selection.isEmpty
-      ? editor.document.getText()
-      : editor.document.getText(editor.selection);
+    // 有选区 → 执行选区；否则默认执行光标所在语句（Ctrl+Enter 的直觉语义）。
+    // 「执行整篇」是独立命令 runAllQueries。
+    const sql = !editor.selection.isEmpty
+      ? editor.document.getText(editor.selection)
+      : scope === 'all'
+        ? editor.document.getText()
+        : (statementAtCursor(editor, ctx?.conn.dbType) ?? editor.document.getText());
     await executor.run(conn, sql, ctx?.db, mode);
   };
 
@@ -41,6 +56,10 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.runQueryInNewPanel', async () => {
     await runActiveQuery('new');
+  });
+
+  sub('devbelt.runAllQueries', async () => {
+    await runActiveQuery('reuse', 'all');
   });
 
   sub('devbelt.explainQuery', async () => {
@@ -86,10 +105,12 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
   sub('devbelt.formatSql', async () => {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
+    const ctx = connCtx.getForDoc(editor.document.uri.toString());
+    // 整篇格式化：结束点取最后一行的真实行尾，`(lineCount-1, 0)` 会漏掉最后一行。
     const range = editor.selection.isEmpty
-      ? new vscode.Range(0, 0, editor.document.lineCount - 1, 0)
+      ? new vscode.Range(editor.document.positionAt(0), editor.document.lineAt(editor.document.lineCount - 1).range.end)
       : editor.selection;
-    await editor.edit((edit) => edit.replace(range, formatSql(editor.document.getText(range))));
+    await editor.edit((edit) => edit.replace(range, formatSql(editor.document.getText(range), ctx?.conn.dbType)));
   });
 
   sub('devbelt.showHistory', async () => {

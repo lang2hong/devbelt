@@ -2,6 +2,7 @@
   "cmd.addConnection": "Add Connection",
   "cmd.refresh": "Refresh",
   "cmd.runQuery": "Run Query",
+  "cmd.runAllQueries": "Run All Queries",
   "cmd.previewTable": "Preview Table",
   "cmd.addGroup": "New Group",
   "cmd.renameGroup": "Rename Group",

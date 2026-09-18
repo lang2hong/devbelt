@@ -141,3 +141,26 @@ describe('QueryRunner.dispose 事务隔离', () => {
     expect(calls).toEqual([]);
   });
 });
+
+/**
+ * 回归：表面板一次运行多条 SELECT 时，旧实现只保留最后一条，前面的结果被丢弃。
+ * 多结果集应走 results 分支全部展示；仅「恰好一个结果集」才走单结果+分页分支。
+ */
+describe('QueryRunner 多结果集', () => {
+  it('表模式下两条 SELECT 全部上报（不再只留最后一条）', async () => {
+    const query = {
+      query: async (sql: string) => ({ rows: [{ n: sql }], fields: [{ name: 'n' }], sql }),
+      wrap: (id: string) => `\`${id}\``,
+      cancel: () => true,
+    };
+    const manager: any = { connect: async () => ({ query, metadata: { getColumns: async () => [] } }), disposeConn: () => {} };
+    const { runner, posted } = makeRunner(manager);
+
+    await runner.execute('SELECT 1; SELECT 2');
+
+    const results = posted.find((m) => m.type === 'results');
+    expect(results).toBeDefined();
+    expect(results.results).toHaveLength(2);
+    expect(posted.some((m) => m.type === 'result')).toBe(false);
+  });
+});

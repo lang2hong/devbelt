@@ -40,21 +40,20 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
     const line = text.split('\n')[position.line] || '';
     const before = line.slice(0, position.character);
 
-    // 触发词匹配 snippet（如 sel/del/ins/upd/joi）
+    // 触发词匹配 snippet（如 sel/del/ins/upd/joi）。
+    // 作为候选之一与关键字/表/列合并，而不是命中即 return —— 否则输入 `se`
+    // 只得到 SELECT 片段，看不到 SET/SELECT 关键字，表列名同前缀也被吞掉。
+    const snippetItems: vscode.CompletionItem[] = [];
     const snippetMatch = before.match(/(\w+)$/);
     if (snippetMatch) {
-      const snippets = SQL_SNIPPETS.filter((s) =>
-        s.trigger.startsWith(snippetMatch[1].toLowerCase()),
-      );
-      if (snippets.length) {
-        return snippets.map((s) => {
-          const item = new vscode.CompletionItem(s.trigger, vscode.CompletionItemKind.Snippet);
-          item.label = `${s.trigger} (${s.label})`;
-          item.insertText = new vscode.SnippetString(s.body);
-          item.detail = s.description;
-          item.documentation = s.description;
-          return item;
-        });
+      for (const snip of SQL_SNIPPETS.filter((s) => s.trigger.startsWith(snippetMatch[1].toLowerCase()))) {
+        const item = new vscode.CompletionItem(snip.trigger, vscode.CompletionItemKind.Snippet);
+        item.label = `${snip.trigger} (${snip.label})`;
+        item.insertText = new vscode.SnippetString(snip.body);
+        item.detail = snip.description;
+        item.documentation = snip.description;
+        item.sortText = `0_${snip.trigger}`;
+        snippetItems.push(item);
       }
     }
 
@@ -75,7 +74,7 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
     }
 
     const candidates = buildCandidates(sqlCtx, { tables, columns, fromTable });
-    return candidates.map((c) => this.toItem(c, db));
+    return [...snippetItems, ...candidates.map((c) => this.toItem(c, db))];
   }
 
   /** 候选 → VS Code CompletionItem，表名带库名限定。 */

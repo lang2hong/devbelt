@@ -2,6 +2,7 @@
   "cmd.addConnection": "添加连接",
   "cmd.refresh": "刷新",
   "cmd.runQuery": "运行查询",
+  "cmd.runAllQueries": "运行全部查询",
   "cmd.previewTable": "预览表",
   "cmd.addGroup": "新建分组",
   "cmd.renameGroup": "重命名分组",

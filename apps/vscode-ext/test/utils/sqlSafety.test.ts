@@ -48,6 +48,14 @@ describe('analyzeSqlRisk', () => {
     });
   });
 
+  it('only treats statement-leading COPY as a bulk-load risk (no false positive on a column named copy)', () => {
+    expect(analyzeSqlRisk('SELECT copy FROM users')).toEqual({ level: 'none', isWrite: false });
+    expect(analyzeSqlRisk('COPY users FROM \'/tmp/u.csv\'')).toMatchObject({
+      level: 'critical',
+      reason: 'server-side file or bulk load',
+    });
+  });
+
   it('marks DDL as critical after stripping comments', () => {
     expect(analyzeSqlRisk('-- cleanup\nDROP TABLE users')).toMatchObject({
       level: 'critical',

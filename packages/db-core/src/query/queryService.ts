@@ -76,6 +76,17 @@ export interface QueryOptions {
    *    这类操作由命令层补一条汇总记录。
    */
   skipHistory?: boolean;
+  /**
+   * 本查询的单独取消句柄。`query()` 会把该次查询的 cancel 接到此对象的
+   * `cancel` 上，调用方据此只取消自己这一条查询，而不牵连同一会话上的
+   * 其它在途查询（元数据/补全/其它面板）。
+   */
+  token?: QueryCancelToken;
+}
+
+/** 由调用方传入、`query()` 回填的可取消句柄。 */
+export interface QueryCancelToken {
+  cancel?: () => void;
 }
 
 /** 一条已执行语句的观测信息。 */
@@ -168,6 +179,7 @@ export class QueryService {
         reject(new QueryError('Query cancelled', sql, Date.now() - start));
       };
       this.activeCancels.set(id, cancel);
+      if (options?.token) options.token.cancel = cancel;
       const timer = QueryService.queryTimeout > 0
         ? setTimeout(() => {
             if (!settled) {
@@ -214,10 +226,9 @@ export class QueryService {
   /** Stops delivery of the current result and lets the caller close its session. */
   cancel(): boolean {
     if (this.activeCancels.size === 0) return false;
-    const cancels = [...this.activeCancels.values()];
-    this.activeCancels.clear();
-    for (const cancelFn of cancels) cancelFn();
-    this.connection.abortQuery();
+    // 每个 cancel 闭包自身会 abortQuery 并从 activeCancels 移除；这里不再重复 abort，
+    // 避免一次取消对该物理连接发起 N+1 次中止。
+    for (const cancelFn of [...this.activeCancels.values()]) cancelFn();
     return true;
   }
 

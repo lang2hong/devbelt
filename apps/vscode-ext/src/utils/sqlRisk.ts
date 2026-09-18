@@ -22,7 +22,9 @@ const PROCEDURAL_RE = /\b(DO|CALL|EXECUTE)\b/;
  * `LOAD DATA INFILE`。可能读写 DB 主机文件或整表装载，按 critical 处理。
  */
 const SERVER_FILE_RE = /\bINTO\s+(OUTFILE|DUMPFILE)\b/;
-const COPY_RE = /\bCOPY\b/;
+// 仅语句起始的 COPY（PostgreSQL `COPY t FROM/TO`）才算危险；
+// 旧的 `/\bCOPY\b/` 会把 `SELECT copy FROM t` 之类误判为 critical。
+const COPY_RE = /^\s*COPY\b/i;
 const LOAD_RE = /\bLOAD\b/;
 /** 维护/全局设置类写动作：`VACUUM`/`REINDEX`、`SET GLOBAL`。 */
 const MAINTENANCE_RE = /\b(VACUUM|REINDEX)\b/;

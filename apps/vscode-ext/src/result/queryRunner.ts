@@ -1,5 +1,5 @@
 import { DatabaseType, validateIdent } from '@devkit/db-core';
-import type { QueryService } from '@devkit/db-core';
+import type { QueryCancelToken } from '@devkit/db-core';
 import { sqlSkeleton } from '@devkit/db-core/sql';
 import type { ConnectionManager } from '../connection/connectionManager';
 import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
@@ -25,7 +25,6 @@ export class QueryRunner {
   filterConditions: FilterCondition[] = [];
   lastFields: string[] = [];
   limit = 100;
-  private runningQuery?: QueryService;
   private execQueue: Promise<unknown> = Promise.resolve();
   private disposed = false;
   /**
@@ -34,6 +33,8 @@ export class QueryRunner {
    * `BEGIN`/`SET AUTOCOMMIT=0` 打开的事务，关闭时才有权 ROLLBACK。
    */
   private openTransaction = false;
+  /** 当前在途语句的取消句柄（只取消本 runner 这一条，不牵连共享会话上的其它查询）。 */
+  private runningToken?: QueryCancelToken;
 
   /**
    * 列名 → 列类型，由每次执行时已取到的元数据填充。
@@ -82,7 +83,7 @@ export class QueryRunner {
   }
 
   cancel(): void {
-    this.runningQuery?.cancel();
+    this.runningToken?.cancel?.();
   }
 
   reset(): void {
@@ -100,7 +101,7 @@ export class QueryRunner {
    */
   dispose(): void {
     this.disposed = true;
-    this.runningQuery?.cancel();
+    this.runningToken?.cancel?.();
     // 仅回滚**本面板自己开的事务**：会话与 SQL 编辑器/其它面板共享，无条件 ROLLBACK
     // 会静默回滚他人未提交的事务（数据丢失）。
     if (this.table && this.openTransaction) {
@@ -128,16 +129,17 @@ export class QueryRunner {
       if (!(await confirmSqlExecution(this.conn, sql))) return;
       this.post({ type: 'running' });
       session = await this.manager.connect(this.conn);
-      this.runningQuery = session.query;
+      const token: QueryCancelToken = {};
+      this.runningToken = token;
       if (database && this.conn.dbType === DatabaseType.MYSQL) {
-        await session.query.query(`USE ${session.query.wrap(validateIdent(database))}`);
+        await session.query.query(`USE ${session.query.wrap(validateIdent(database))}`, undefined, { token });
       }
       const scanOpts = dialectScanOptions(this.conn.dbType);
       const stmts = splitSqlStatements(sql, scanOpts);
       // 有 onExecuted 时由 QueryExecutor 记一条「整段 SQL」的历史，这里逐条上报会重复；
       // 没有 onExecuted 时（结果面板内改 SQL 再运行）交给观察者逐条记录 ——
       // 那条路径过去完全不进历史。
-      const stmtOpts = onExecuted ? { skipHistory: true } : undefined;
+      const stmtOpts = { ...(onExecuted ? { skipHistory: true } : {}), token };
       const results: any[] = [];
       for (const stmt of stmts) {
         // 用方言词法器剥离注释：`#` 只在 MySQL 是注释，PG/SQLite 里是运算符，
@@ -181,20 +183,24 @@ export class QueryRunner {
           );
         } catch {}
       }
+      // 多结果集（一次运行多条 SELECT）时结果全部保留，交由多结果分支展示；
+      // 只有「表模式且恰好一个结果集」才走单结果 + 分页/计数的分支。
+      const resultSetCount = results.filter((r: any) => Array.isArray(r?.fields) && r.fields.length > 0).length;
+      const singleResultSet = this.table && resultSetCount === 1;
       let total: number | undefined;
       // 写语句后不查 COUNT：既无意义，又会白跑一条查询。
-      if (this.table && isResultSet) {
+      if (singleResultSet) {
         const countSql = this.getCountSql();
         if (countSql) {
           try {
-            const countResult = await session.query.query(countSql);
+            const countResult = await session.query.query(countSql, undefined, { token });
             const countRow = countResult?.rows?.[0];
             total = countRow ? Number(countRow.total ?? countRow.count ?? countRow.COUNT) : undefined;
           } catch { /* COUNT 失败不阻塞结果展示 */ }
         }
       }
       if (transactionState) this.post({ type: 'transaction', state: transactionState });
-      if (this.table && isResultSet) {
+      if (singleResultSet) {
         this.lastFields = (result?.fields || []).map((f: any) => f.name);
         const colMap = new Map(cols.map((c: any) => [c.name, c]));
         const fieldsWithType = (result?.fields || []).map((f: any) => {
@@ -224,7 +230,7 @@ export class QueryRunner {
         this.openTransaction = false;
       }
     } finally {
-      this.runningQuery = undefined;
+      this.runningToken = undefined;
       this.post({ type: 'finished' });
     }
   }
@@ -235,10 +241,11 @@ export class QueryRunner {
       if (!(await confirmSqlExecution(this.conn, sql))) return;
       this.post({ type: 'running' });
       const session = await this.manager.connect(this.conn);
-      this.runningQuery = session.query;
+      const token: QueryCancelToken = {};
+      this.runningToken = token;
       const database = this.database || this.conn.database;
       if (database && this.conn.dbType === DatabaseType.MYSQL) {
-        await session.query.query(`USE ${session.query.wrap(validateIdent(database))}`);
+        await session.query.query(`USE ${session.query.wrap(validateIdent(database))}`, undefined, { token });
       }
       // 方言 EXPLAIN 前缀：
       //  - SQLite 用 EXPLAIN QUERY PLAN 输出人类可读计划（裸 EXPLAIN 只吐 VM 字节码，
@@ -257,7 +264,7 @@ export class QueryRunner {
           continue;
         }
         const explainSql = `${prefix}${stmt}`;
-        results.push(await session.query.query(explainSql));
+        results.push(await session.query.query(explainSql, undefined, { token }));
       }
       if (results.length === 0 && skippedDdl) {
         this.post({ type: 'error', message: l10n('wv.query.explainUnsupported') });
@@ -268,7 +275,7 @@ export class QueryRunner {
       diagError('explain failed', (err as Error).message);
       this.post({ type: 'error', message: (err as Error).message });
     } finally {
-      this.runningQuery = undefined;
+      this.runningToken = undefined;
       this.post({ type: 'finished' });
     }
   }

@@ -275,21 +275,26 @@ function setLimit(noRun = false) {
   else post({ type: 'setLimit', limit: n, noRun: true });
 }
 
+/** 与 db-core QueryService.maxResultRows 对齐：超出会被静默截断，UI 不应允许。 */
+const MAX_RESULT_ROWS = 10000;
+
 function toLimit(v: any): number {
   const n = Number(v);
   if (!Number.isFinite(n) || n <= 0) return 100;
-  return Math.min(100000, Math.floor(n));
+  return Math.min(MAX_RESULT_ROWS, Math.floor(n));
 }
 
 function applyLimitToSql(sqlText: string, n: number): string {
   if (!sqlText) return sqlText;
-  const re = /\bLIMIT\s+\d+(?:\s+OFFSET\s+\d+)?/i;
+  // 只替换 LIMIT 的数字，保留 OFFSET（旧实现会把 `LIMIT n OFFSET m` 整个换掉，丢掉分页偏移）。
+  const re = /\bLIMIT\s+\d+/i;
   if (re.test(sqlText)) return sqlText.replace(re, `LIMIT ${n}`);
   return `${sqlText.trim()} LIMIT ${n}`;
 }
 
 function syncLimitFromSql(sqlText?: string) {
-  if (!sqlText) return;
+  // 只对表浏览的 SELECT 同步 limit；任意查询的 SQL 不应被静默改写。
+  if (!sqlText || !hasTable.value) return;
   const m = sqlText.match(/\bLIMIT\s+(\d+)/i);
   if (!m) return;
   const n = toLimit(m[1]);
@@ -310,11 +315,11 @@ function handleFilter(conditions: { column: string; op: string; value?: string }
   post({ type: 'filter', conditions });
 }
 
-function handleUpdateCell(pkCol: string, pkVal: any, col: string, val: string) {
-  post({ type: 'updateCell', pkColumn: pkCol, rowId: pkVal, column: col, value: val });
+function handleUpdateCell(pkColumns: string[], pkValues: any[], col: string, val: string) {
+  post({ type: 'updateCell', pkColumns, pkValues, column: col, value: val });
 }
 
-function handleDeleteRows(rows: { pkColumn: string; pkValue: any }[]) {
+function handleDeleteRows(rows: { pkColumns: string[]; pkValues: any[] }[]) {
   post({ type: 'deleteRows', rows });
 }
 

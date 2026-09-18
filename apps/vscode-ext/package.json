@@ -62,6 +62,11 @@
         "category": "DB Client"
       },
       {
+        "command": "devbelt.runAllQueries",
+        "title": "%cmd.runAllQueries%",
+        "category": "DB Client"
+      },
+      {
         "command": "devbelt.runQueryInNewPanel",
         "title": "Run Query in New Panel",
         "category": "DB Client"
@@ -1641,6 +1646,12 @@
         "command": "devbelt.runQueryInNewPanel",
         "key": "ctrl+alt+enter",
         "mac": "cmd+ctrl+enter",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "devbelt.runAllQueries",
+        "key": "ctrl+shift+enter",
+        "mac": "cmd+shift+enter",
         "when": "editorTextFocus"
       },
       {
