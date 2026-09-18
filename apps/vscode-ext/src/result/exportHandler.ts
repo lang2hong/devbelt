@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { l10n } from '../i18n';
 import type { ConnectionManager } from '../connection/connectionManager';
 import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import {
@@ -44,11 +45,11 @@ export class ExportHandler {
 
       // 范围选择：当前页 / 全表
       const rangeOptions: { label: string; value: 'page' | 'all' }[] = [
-        { label: vscode.l10n.t('Current page') + ` (${rows.length} rows)`, value: 'page' },
+        { label: l10n('export.currentPage') + ` (${rows.length} rows)`, value: 'page' },
       ];
-      if (this.table) rangeOptions.unshift({ label: vscode.l10n.t('Entire table'), value: 'all' as const });
+      if (this.table) rangeOptions.unshift({ label: l10n('export.entireTable'), value: 'all' as const });
       const range = rangeOptions.length > 1
-        ? (await vscode.window.showQuickPick(rangeOptions, { placeHolder: vscode.l10n.t('Export range') }))?.value
+        ? (await vscode.window.showQuickPick(rangeOptions, { placeHolder: l10n('export.range') }))?.value
         : 'page';
       if (!range) return;
 
@@ -60,7 +61,7 @@ export class ExportHandler {
       // 当前页：字段勾选
       const picked = await vscode.window.showQuickPick(
         columns.map((c) => ({ label: c, picked: true })),
-        { canPickMany: true, placeHolder: vscode.l10n.t('Select columns to export') },
+        { canPickMany: true, placeHolder: l10n('export.selectColumns') },
       );
       if (!picked?.length) return;
       const exportColumns = picked.map((p) => p.label);
@@ -84,7 +85,7 @@ export class ExportHandler {
       await vscode.workspace.fs.writeFile(uri, toFileBytes(content));
       this.post({
         type: 'exported',
-        message: vscode.l10n.t('Exported {count} row(s) to {path}', { count: projectedRows.length, path: uri.fsPath }),
+        message: l10n('export.doneRows', { count: projectedRows.length, path: uri.fsPath }),
       });
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
@@ -102,7 +103,7 @@ export class ExportHandler {
     const allColumns = (await session.metadata.getColumns(table, this.database)).map((c: any) => c.name);
     const picked = await vscode.window.showQuickPick(
       allColumns.map((c: string) => ({ label: c, picked: true })),
-      { canPickMany: true, placeHolder: vscode.l10n.t('Select columns to export') },
+      { canPickMany: true, placeHolder: l10n('export.selectColumns') },
     );
     if (!picked?.length) return;
     const uri = await this.askDestination(format);
@@ -118,7 +119,7 @@ export class ExportHandler {
       serverInfo: this.serverInfo(),
       withBom: this.withBom(format),
     }, write));
-    this.post({ type: 'exported', message: vscode.l10n.t('Exported to {path}', { path: uri.fsPath }) });
+    this.post({ type: 'exported', message: l10n('export.donePath', { path: uri.fsPath }) });
   }
 
   private async askDestination(format: TransferFormat): Promise<vscode.Uri | undefined> {

@@ -19,11 +19,15 @@ import {
  * 查询元数据带缓存，映射为 VS Code CompletionItem。
  * VS Code 引擎自带前缀过滤（基于 label），无需手动过滤。
  */
+/** 元数据缓存有效期（ms）：DDL 后最多陈旧这么久。 */
+const CACHE_TTL_MS = 60_000;
+
 export class SqlCompletionProvider implements vscode.CompletionItemProvider {
   /** 表名缓存：connId:db → tableName[] */
-  private tableCache = new Map<string, string[]>();
+  // 带 TTL 的元数据缓存：DDL 改表后补全不应长期返回陈旧表/列。
+  private tableCache = new Map<string, { names: string[]; at: number }>();
   /** 列名缓存：connId:db:table → columnName[] */
-  private columnCache = new Map<string, string[]>();
+  private columnCache = new Map<string, { names: string[]; at: number }>();
 
   constructor(
     private readonly context: ConnectionContext,
@@ -105,12 +109,12 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
   private async getTables(conn: SavedConnection, database?: string): Promise<string[]> {
     const key = `${conn.id}:${database || ''}`;
     const cached = this.tableCache.get(key);
-    if (cached) return cached;
+    if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.names;
     try {
       const session = await this.manager.connect(conn);
       const tables = await session.metadata.getTables(database);
       const names = tables.map((t) => t.name);
-      this.tableCache.set(key, names);
+      this.tableCache.set(key, { names, at: Date.now() });
       return names;
     } catch (err) {
       diagError('Completion: getTables failed', { connId: conn.id, database, error: (err as Error).message });
@@ -122,12 +126,12 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
   private async getColumns(conn: SavedConnection, table: string, database?: string): Promise<string[]> {
     const key = `${conn.id}:${database || ''}:${table}`;
     const cached = this.columnCache.get(key);
-    if (cached) return cached;
+    if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.names;
     try {
       const session = await this.manager.connect(conn);
       const columns = await session.metadata.getColumns(table, database);
       const names = columns.map((c) => c.name);
-      this.columnCache.set(key, names);
+      this.columnCache.set(key, { names, at: Date.now() });
       return names;
     } catch (err) {
       diagError('Completion: getColumns failed', { connId: conn.id, table, database, error: (err as Error).message });
