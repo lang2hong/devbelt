@@ -890,17 +890,17 @@
       "view/item/context": [
         {
           "command": "devbelt.org.connectTemplate",
-          "when": "false",
+          "when": "view == devbelt.explorer.organization && viewItem =~ /^devbelt\\.org\\.resource\\.connection_template\\./",
           "group": "inline"
         },
         {
           "command": "devbelt.org.openResource",
-          "when": "false",
+          "when": "view == devbelt.explorer.organization && viewItem =~ /^devbelt\\.org\\.resource\\./",
           "group": "inline"
         },
         {
           "command": "devbelt.org.deleteResource",
-          "when": "false",
+          "when": "view == devbelt.explorer.organization && viewItem =~ /^devbelt\\.org\\.resource\\..*\\.admin$/",
           "group": "1_modify"
         },
         {
@@ -915,7 +915,7 @@
         },
         {
           "command": "devbelt.org.deleteFolder",
-          "when": "false",
+          "when": "view == devbelt.explorer.organization && viewItem == devbelt.org.folder.admin",
           "group": "1_modify"
         },
         {
