@@ -8,6 +8,7 @@ import {
   toInputValue, toSqlValue,
   type TemporalKind,
 } from '../utils/temporal';
+import { buildInsertPayload, buildInsertStatement } from '../utils/gridOps';
 
 interface Field { name: string; simpleType?: string; type?: string }
 interface Row { [key: string]: any }
@@ -496,24 +497,12 @@ function cancelInsert() {
 }
 
 function saveInsert() {
-  const cols: string[] = [];
-  const values: (string | null)[] = [];
-  for (const f of visibleFields.value) {
-    const raw = newRow.value[f.name];
-    // 留空 = 不提交该列：交给数据库默认值/自增/可空默认。
-    // 旧实现把未填列显式写 NULL，导致 DEFAULT/NOW() 失效，且 PG 的 serial/identity
-    // 主键收到显式 NULL 直接违反 NOT NULL 报错。
-    if (raw === undefined || raw === '') continue;
-    const text = String(raw);
-    cols.push(f.name);
-    // 约定：字面 `NULL`（大小写不敏感）= SQL NULL；其它按字面字符串写入。
-    values.push(/^null$/i.test(text) ? null : text);
-  }
-  if (cols.length === 0) {
+  const { columns, values } = buildInsertPayload(visibleFields.value.map((f) => f.name), newRow.value);
+  if (columns.length === 0) {
     showToast(t('wv.grid.insertNoValues'));
     return;
   }
-  emit('insertRow', cols, values);
+  emit('insertRow', columns, values);
   inserting.value = false;
 }
 
@@ -522,14 +511,7 @@ function copyAsInsert() {
   if (!props.rows.length) return showToast(t('wv.grid.nothingToCopy'));
   const targets = selectedRows.value.length ? selectedRows.value : props.rows;
   const cols = visibleFields.value.map((f) => f.name);
-  const esc = (v: any): string => (v === null || v === undefined) ? 'NULL' : `'${String(v).replace(/'/g, "''")}'`;
-  // 标识符引用随方言：MySQL 反引号；PG/SQLite 双引号（旧实现恒用反引号，PG 上非法）。
-  const q = (name: string) => (props.dbType === 'MYSQL' ? `\`${name}\`` : `"${name.replace(/"/g, '""')}"`);
-  const target = props.dbName ? `${q(props.dbName)}.${q(props.tableName)}` : q(props.tableName);
-  const sql = targets.map((row) => {
-    const vals = cols.map((c) => esc(row[c])).join(', ');
-    return `INSERT INTO ${target} (${cols.map(q).join(', ')}) VALUES (${vals});`;
-  }).join('\n');
+  const sql = buildInsertStatement(props.tableName, props.dbName, cols, targets, props.dbType);
   void navigator.clipboard.writeText(sql).then(() => {
     showToast(t('wv.grid.copiedInserts', { count: targets.length }));
   });
