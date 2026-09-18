@@ -45,12 +45,13 @@ describe('套件首页渲染', () => {
 
   it('工具段列出已发布扩展与待开发项，并带 Marketplace 链接', () => {
     const html = renderHome(PLANS);
-    for (const tool of ['DB Client', 'REST NEO', 'l2h-harness']) {
+    for (const tool of ['DB Client', 'db-client', 'REST NEO', 'l2h-harness']) {
       expect(html).toContain(tool);
     }
     expect(html).toContain('https://marketplace.visualstudio.com/items?itemName=lang2hong.db-client');
     expect(html).toContain('https://marketplace.visualstudio.com/items?itemName=lang2hong.rest-client-neo');
     expect(html).toContain('待开发');
+    expect(html).toContain('开发中');
   });
 
   it('渲染个人与组织套餐，并格式化价格', () => {

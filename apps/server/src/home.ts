@@ -66,6 +66,12 @@ const TOOLS: readonly HomeTool[] = [
     badge: 'VS Code 扩展',
   },
   {
+    name: 'db-client',
+    desc: '正在开发的新版数据库客户端。',
+    href: '',
+    badge: '开发中',
+  },
+  {
     name: 'REST NEO',
     desc: 'VS Code REST 客户端：在编辑器内编写并发送 HTTP 请求、管理环境与响应。',
     href: 'https://marketplace.visualstudio.com/items?itemName=lang2hong.rest-client-neo',
