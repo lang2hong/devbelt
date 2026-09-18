@@ -29,15 +29,22 @@ const PLANS: HomePlan[] = [
 ];
 
 describe('套件首页渲染', () => {
-  it('包含介绍/工具/套餐/入口四段', () => {
+  it('包含介绍/工具/套餐三段，且不再有独立入口段', () => {
     const html = renderHome(PLANS);
     expect(html).toContain('开发者工具套件');
     expect(html).toContain('id="tools"');
     expect(html).toContain('id="pricing"');
-    expect(html).toContain('id="entrances"');
-    for (const tool of ['VS Code 数据库客户端', 'DB 控制台', '组织协作', '端到端加密同步', '平台后台']) {
+    expect(html).not.toContain('id="entrances"');
+  });
+
+  it('工具段列出已发布扩展与待开发项，并带 Marketplace 链接', () => {
+    const html = renderHome(PLANS);
+    for (const tool of ['DB Client', 'REST NEO', 'l2h-harness']) {
       expect(html).toContain(tool);
     }
+    expect(html).toContain('https://marketplace.visualstudio.com/items?itemName=lang2hong.db-client');
+    expect(html).toContain('https://marketplace.visualstudio.com/items?itemName=lang2hong.rest-client-neo');
+    expect(html).toContain('待开发');
   });
 
   it('渲染个人与组织套餐，并格式化价格', () => {

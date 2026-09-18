@@ -50,20 +50,41 @@ function planCard(plan: HomePlan): string {
         </article>`;
 }
 
-const TOOLS: ReadonlyArray<[string, string, string]> = [
-  ['VS Code 数据库客户端', '连接 MySQL / PostgreSQL / SQLite，SQL 编辑、结果面板、ER 图、表设计、备份与导入导出。', '/db/'],
-  ['DB 控制台', '在浏览器里管理连接与查询、查看套餐与用量、管理设备与同步。', '/db/'],
-  ['组织协作', '共享连接模板与资源、成员与权限、邀请与审计。', '/db/'],
-  ['端到端加密同步', '连接与查询经 E2EE 跨设备同步；密钥只在你本地派生（Argon2id + Ed25519）。', '/db/'],
-  ['平台后台', '运营视角的用户、组织、订单、发票、套餐与审计。', '/admin/'],
+interface HomeTool {
+  name: string;
+  desc: string;
+  /** 外部链接；空表示尚未发布（「待开发」）。 */
+  href: string;
+  badge: string;
+}
+
+const TOOLS: readonly HomeTool[] = [
+  {
+    name: 'DB Client',
+    desc: 'VS Code 数据库客户端：连接 MySQL / PostgreSQL / SQLite，SQL 编辑、结果面板、ER 图、表设计、备份与导入导出。',
+    href: 'https://marketplace.visualstudio.com/items?itemName=lang2hong.db-client',
+    badge: 'VS Code 扩展',
+  },
+  {
+    name: 'REST NEO',
+    desc: 'VS Code REST 客户端：在编辑器内编写并发送 HTTP 请求、管理环境与响应。',
+    href: 'https://marketplace.visualstudio.com/items?itemName=lang2hong.rest-client-neo',
+    badge: 'VS Code 扩展',
+  },
+  {
+    name: 'l2h-harness',
+    desc: '开发中的新工具。',
+    href: '',
+    badge: '待开发',
+  },
 ];
 
-const ENTRIES: ReadonlyArray<[string, string, string]> = [
-  ['登录', '进入你的账户', '/login'],
-  ['注册', '创建新账户', '/register'],
-  ['DB 控制台', '连接、同步、套餐与组织', '/db/'],
-  ['平台后台', '运营与审计', '/admin/'],
-];
+function toolCard(tool: HomeTool): string {
+  const inner = `<strong>${escapeHtml(tool.name)}<span class="badge">${escapeHtml(tool.badge)}</span></strong><span>${escapeHtml(tool.desc)}</span>`;
+  return tool.href
+    ? `<a class="tool" href="${tool.href}" target="_blank" rel="noopener noreferrer">${inner}</a>`
+    : `<div class="tool soon">${inner}</div>`;
+}
 
 export function renderHome(plans: HomePlan[] | null): string {
   const personal = plans?.filter((p) => p.kind === 'personal') ?? [];
@@ -111,10 +132,13 @@ export function renderHome(plans: HomePlan[] | null): string {
       section > h2 { font-size: 1.5rem; margin: 0 0 6px; }
       section > p.section-sub { color: var(--muted); margin: 0 0 24px; }
       .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
-      .tool { padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+      .tool { display: block; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); text-decoration: none; color: inherit; }
+      a.tool:hover { border-color: var(--accent); }
       .tool strong { display: block; margin-bottom: 6px; }
-      .tool span { color: var(--muted); font-size: .92rem; }
-      .tool a { color: var(--accent); font-size: .9rem; text-decoration: none; }
+      .tool span { display: block; color: var(--muted); font-size: .92rem; }
+      .tool .badge { display: inline-block; margin-left: 8px; padding: 1px 6px; border: 1px solid var(--line);
+        border-radius: 6px; color: var(--accent); font-size: .72rem; vertical-align: middle; }
+      .tool.soon { opacity: .6; }
       .plan-group { margin-bottom: 24px; }
       .plan-group h3 { font-size: 1.05rem; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
       .plans { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
@@ -155,12 +179,9 @@ export function renderHome(plans: HomePlan[] | null): string {
 
       <section id="tools">
         <h2>工具</h2>
-        <p class="section-sub">一个套件，覆盖从本地开发到组织协作与运营。</p>
+        <p class="section-sub">已发布与开发中的工具，更多陆续添加。</p>
         <div class="grid">
-          ${TOOLS.map(
-            ([name, desc, href]) =>
-              `<div class="tool"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(desc)}</span><br /><a href="${href}">进入 →</a></div>`,
-          ).join('\n          ')}
+          ${TOOLS.map(toolCard).join('\n          ')}
         </div>
       </section>
 
@@ -170,16 +191,7 @@ export function renderHome(plans: HomePlan[] | null): string {
         ${pricing}
       </section>
 
-      <section id="entrances">
-        <h2>入口</h2>
-        <p class="section-sub">以上工具的直达入口。</p>
-        <div class="grid">
-          ${ENTRIES.map(
-            ([name, desc, href]) =>
-              `<a class="tool" href="${href}"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(desc)}</span></a>`,
-          ).join('\n          ')}
-        </div>
-      </section>
+      
 
       <footer>DevBelt · 开发者工具套件</footer>
     </div>
