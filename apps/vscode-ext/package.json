@@ -860,7 +860,7 @@
         },
         {
           "command": "devbelt.org.deleteFolder",
-          "when": "devbelt.loggedIn && devbelt.orgRole == 'admin'"
+          "when": "false"
         },
         {
           "command": "devbelt.org.newQuery",
@@ -868,7 +868,7 @@
         },
         {
           "command": "devbelt.org.openResource",
-          "when": "devbelt.loggedIn && devbelt.orgRole"
+          "when": "false"
         },
         {
           "command": "devbelt.org.saveResource",
@@ -876,11 +876,11 @@
         },
         {
           "command": "devbelt.org.deleteResource",
-          "when": "devbelt.loggedIn && devbelt.orgRole == 'admin'"
+          "when": "false"
         },
         {
           "command": "devbelt.org.connectTemplate",
-          "when": "devbelt.loggedIn && devbelt.orgRole"
+          "when": "false"
         },
         {
           "command": "devbelt.org.runQuery",
@@ -890,17 +890,17 @@
       "view/item/context": [
         {
           "command": "devbelt.org.connectTemplate",
-          "when": "view == devbelt.explorer.organization && viewItem =~ /^devbelt\\.org\\.resource\\.connection_template\\./",
+          "when": "false",
           "group": "inline"
         },
         {
           "command": "devbelt.org.openResource",
-          "when": "view == devbelt.explorer.organization && viewItem =~ /^devbelt\\.org\\.resource\\./",
+          "when": "false",
           "group": "inline"
         },
         {
           "command": "devbelt.org.deleteResource",
-          "when": "view == devbelt.explorer.organization && viewItem =~ /^devbelt\\.org\\.resource\\..*\\.admin$/",
+          "when": "false",
           "group": "1_modify"
         },
         {
@@ -915,7 +915,7 @@
         },
         {
           "command": "devbelt.org.deleteFolder",
-          "when": "view == devbelt.explorer.organization && viewItem == devbelt.org.folder.admin",
+          "when": "false",
           "group": "1_modify"
         },
         {
