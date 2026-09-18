@@ -111,3 +111,48 @@ describe.skipIf(!URL)('db-core PostgreSQL dialect (real db)', () => {
     }
   });
 }, 30_000);
+/**
+ * 本阶段（S2-4）修复的 PG 时间类型：DATE/TIMESTAMP 必须原样文本返回，
+ * 而不是 pg 默认的 JS Date（经 webview 序列化后会变成 UTC/ISO，DATE 在东八区差一天）。
+ * 实库验证，CI 由 PG_TEST_URL 开启。
+ */
+describe.skipIf(!URL)('db-core PostgreSQL temporal (real db)', () => {
+  it('DATE/TIMESTAMP 以原始文本返回（dateStrings 语义）', async () => {
+    const client = new Client({ connectionString: URL! });
+    await client.connect();
+    const schema = `ztest_ts_${Date.now()}`;
+    await client.query(`CREATE SCHEMA ${schema}`);
+    try {
+      await client.query(`SET search_path TO ${schema}`);
+      await client.query('CREATE TABLE ts_test (d date, ts timestamp, tstz timestamptz)');
+      await client.query("INSERT INTO ts_test VALUES ('2024-01-14', '2024-01-14 16:00:00', '2024-01-14 16:00:00+08')");
+
+      const res = await client.query('SELECT d, ts, tstz FROM ts_test');
+      const row = res.rows[0];
+      expect(row.d).toBe('2024-01-14');
+      expect(row.ts).toBe('2024-01-14 16:00:00');
+      expect(typeof row.d).toBe('string');
+      expect(typeof row.ts).toBe('string');
+      // 不得是 Date / ISO 串（旧实现会得到 2024-01-14T16:00:00.000Z）
+      expect(String(row.ts)).not.toMatch(/T.*Z$/);
+    } finally {
+      await client.query(`DROP SCHEMA ${schema} CASCADE`);
+      await client.end();
+    }
+  });
+});
+
+/**
+ * S4 待修（PG 方言正确性）——先落成 skip，实库跑通后再实现并启用：
+ *  1) PG 的 `database` 被当作 schema 用 → 限定名 `"db"."table"` 指向不存在的 schema。
+ *  2) 「修改列」只改类型，notNull/default/comment 被静默丢弃。
+ */
+describe.skipIf(!URL)('db-core PostgreSQL dialect S4 (pending fix)', () => {
+  it.skip('S4: DDL 限定名应使用 schema（或 current_schema），而非 database', async () => {
+    // 修复后启用：对 buildPostgresCreateTable / getCreateSql 断言限定名不是 "database"."table"
+  });
+
+  it.skip('S4: modifyColumn 应同时应用 NOT NULL / DEFAULT', async () => {
+    // 修复后启用：ALTER COLUMN SET/DROP NOT NULL、SET/DROP DEFAULT
+  });
+});

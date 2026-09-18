@@ -13,6 +13,11 @@ const EXPECTED_COMMANDS = [
   'devbelt.openConnection',
   'devbelt.newQuery',
   'devbelt.designTable',
+  // 本阶段新增/关键的编辑器与结果命令：确认安装后仍注册（防止注册表回归）。
+  'devbelt.runQuery',
+  'devbelt.runAllQueries',
+  'devbelt.formatSql',
+  'devbelt.explainQuery',
 ];
 
 async function run() {
