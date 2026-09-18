@@ -64,10 +64,12 @@ describe('PG getCreateSql', () => {
    */
   it('指定 schema 时生成字符串字面量而非双引号标识符', async () => {
     const { con, table } = pgSvc();
-    await table.getCreateSql('t1', 'myschema');
+    // 传库名（非 schema）时不应把它当 nspname，应回退 current_schema()。
+    await table.getCreateSql('t1', 'somedb');
     const sql = con.sqls[0];
     expect(sql).not.toMatch(/quote_literal\s*\(\s*"/);
-    expect(sql).toMatch(/n\.nspname\s*=\s*'myschema'/);
+    expect(sql).toMatch(/n\.nspname\s*=\s*current_schema\(\)/);
+    expect(sql).not.toMatch(/'somedb'/);
   });
 
   it('未指定 schema 时用 current_schema()', async () => {
@@ -138,5 +140,24 @@ describe('PG getColumnsSql 带长度/精度', () => {
     expect(sql).toContain("numeric_precision");
     expect(sql).toContain('numeric_scale');
     expect(sql).toContain('udt_name');
+  });
+});
+
+describe('PG modifyColumn', () => {
+  it('同时应用 TYPE / NOT NULL / DEFAULT（旧实现只改 TYPE）', async () => {
+    const { con, table } = pgSvc();
+    await table.modifyColumn('t1', 'c1', { type: 'varchar(20)', notNull: true, defaultValue: 'x' } as never);
+    const sqls = con.sqls.join('\n');
+    expect(sqls).toMatch(/ALTER COLUMN "c1" TYPE varchar\(20\)/);
+    expect(sqls).toMatch(/ALTER COLUMN "c1" SET NOT NULL/);
+    expect(sqls).toMatch(/ALTER COLUMN "c1" SET DEFAULT 'x'/);
+  });
+
+  it('清空默认值走 DROP DEFAULT，nullable 走 DROP NOT NULL', async () => {
+    const { con, table } = pgSvc();
+    await table.modifyColumn('t1', 'c1', { type: 'int', notNull: false, defaultValue: '' } as never);
+    const sqls = con.sqls.join('\n');
+    expect(sqls).toMatch(/ALTER COLUMN "c1" DROP NOT NULL/);
+    expect(sqls).toMatch(/ALTER COLUMN "c1" DROP DEFAULT/);
   });
 });

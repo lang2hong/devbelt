@@ -58,6 +58,13 @@ export class PostgreSqlConnection extends IConnection {
       });
     }
 
+    // PG 的 schema 通过启动参数 search_path 生效；旧实现完全忽略 config.schema，
+    // 用户在表单里设的 schema 从未起作用。仅接受简单标识符，避免拼接注入。
+    if (config.schema && /^[A-Za-z_][A-Za-z0-9_$]*$/.test(config.schema)) {
+      const opt = `-c search_path=${config.schema}`;
+      conf.options = conf.options ? `${conf.options} ${opt}` : opt;
+    }
+
     if (config.useSSL) {
       conf.ssl = {
         ca: this.readCert(config.caPath, 'CA certificate'),

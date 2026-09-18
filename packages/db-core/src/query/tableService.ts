@@ -315,7 +315,17 @@ export class TableService {
     }
     if (dbType === 'PG') {
       const type = validateColumnType(spec.type);
-      return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} ALTER COLUMN ${this.wrap(column)} TYPE ${type}`);
+      const q = this.wrapQualified(table, database);
+      const c = this.wrap(column);
+      // 旧实现只改 TYPE，表单里的 NOT NULL / DEFAULT 被静默丢弃（用户以为已生效）。
+      let result = await this.ddl(`ALTER TABLE ${q} ALTER COLUMN ${c} TYPE ${type}`);
+      result = await this.ddl(`ALTER TABLE ${q} ALTER COLUMN ${c} ${spec.notNull ? 'SET' : 'DROP'} NOT NULL`);
+      if (spec.defaultValue !== undefined && spec.defaultValue !== '') {
+        result = await this.ddl(`ALTER TABLE ${q} ALTER COLUMN ${c} SET DEFAULT ${this.defaultLiteral(spec.defaultValue)}`);
+      } else if (spec.defaultValue === '') {
+        result = await this.ddl(`ALTER TABLE ${q} ALTER COLUMN ${c} DROP DEFAULT`);
+      }
+      return result;
     }
     throw new Error(`${dbType} does not support altering a column type.`);
   }
@@ -570,6 +580,11 @@ export class TableService {
     validateIdent(name);
     if (!database) return this.wrap(name);
     validateIdent(database);
+    // PostgreSQL 是「一个连接一个库」，没有跨库限定名；此处的 database 参数
+    // 传的是库名（树节点），不是 schema。旧的 `"db"."table"` 会指向不存在的
+    // schema，导致 PG 上 DROP/ALTER/TRUNCATE/CREATE 全部失败。这里不限定，
+    // 交由连接的 search_path（默认 public / 用户设置的 schema）解析。
+    if (this.queryService.dialect.dbType === 'PG') return this.wrap(name);
     return `${this.wrap(database)}.${this.wrap(name)}`;
   }
 
@@ -602,9 +617,9 @@ export class TableService {
          *    对象的列混在一起；而 string_agg 不保证输入顺序，不排序时生成的
          *    DDL 列顺序随机 —— 拿它去别处建表，按位置赋值的 INSERT 就错列。
          */
-        const schema = database
-          ? this.esc(validateIdent(database, 63))
-          : 'current_schema()';
+        // 这里的 `database` 是库名（树节点），PG 里不是 schema —— 用它当 nspname
+        // 会查不到任何列，生成的建表语句为空。统一按连接的 current_schema() 解析。
+        const schema = 'current_schema()';
         return `SELECT
             'CREATE TABLE ' || quote_ident(c.relname) || ' (' || chr(10) ||
             string_agg(

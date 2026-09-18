@@ -121,11 +121,15 @@ export class PostgreSqlDialect implements SqlDialect {
 
   getIndexListSql(table: string): string {
     validateIdent(table, 63);
-    return `SELECT indexname AS name, indexdef AS definition, 
-      CASE WHEN indexdef LIKE '%UNIQUE%' THEN true ELSE false END AS is_unique,
-      CASE WHEN indexname = '${table}_pkey' THEN true ELSE false END AS is_primary
-      FROM pg_indexes
-      WHERE schemaname = current_schema() AND tablename = '${table}'`;
+    // 主键判定必须用 pg_index.indisprimary，而不是猜 `<table>_pkey` 名字：
+    // 自定义约束名下主键会被误判为普通唯一索引（编辑主键会生成非法 SQL）。
+    return `SELECT c.relname AS name, pg_get_indexdef(i.indexrelid) AS definition,
+      i.indisunique AS is_unique, i.indisprimary AS is_primary
+      FROM pg_index i
+      JOIN pg_class c ON c.oid = i.indexrelid
+      JOIN pg_class t ON t.oid = i.indrelid
+      JOIN pg_namespace n ON n.oid = t.relnamespace
+      WHERE n.nspname = current_schema() AND t.relname = '${table}'`;
   }
 
   getUserListSql(): string {

@@ -143,16 +143,27 @@ describe.skipIf(!URL)('db-core PostgreSQL temporal (real db)', () => {
 });
 
 /**
- * S4 待修（PG 方言正确性）——先落成 skip，实库跑通后再实现并启用：
- *  1) PG 的 `database` 被当作 schema 用 → 限定名 `"db"."table"` 指向不存在的 schema。
- *  2) 「修改列」只改类型，notNull/default/comment 被静默丢弃。
+ * S4 实库真实用例（此前为 skip 占位）：主键识别必须基于 pg_index.indisprimary，
+ * 而不是猜 `<table>_pkey` 名字——自定义约束名下主键会被误判为普通唯一索引。
  */
-describe.skipIf(!URL)('db-core PostgreSQL dialect S4 (pending fix)', () => {
-  it.skip('S4: DDL 限定名应使用 schema（或 current_schema），而非 database', async () => {
-    // 修复后启用：对 buildPostgresCreateTable / getCreateSql 断言限定名不是 "database"."table"
-  });
+describe.skipIf(!URL)('db-core PostgreSQL dialect S4 (real db)', () => {
+  const dialect = new PostgreSqlDialect();
 
-  it.skip('S4: modifyColumn 应同时应用 NOT NULL / DEFAULT', async () => {
-    // 修复后启用：ALTER COLUMN SET/DROP NOT NULL、SET/DROP DEFAULT
+  it('自定义约束名的主键通过 indisprimary 被识别为主键', async () => {
+    const client = new Client({ connectionString: URL! });
+    await client.connect();
+    const schema = `ztest_pk_${Date.now()}`;
+    await client.query(`CREATE SCHEMA ${schema}`);
+    try {
+      await client.query(`SET search_path TO ${schema}`);
+      await client.query('CREATE TABLE pk_test (id int, CONSTRAINT pk_custom PRIMARY KEY (id), v text)');
+      const res = await client.query(dialect.getIndexListSql('pk_test'));
+      const pk = res.rows.filter((r: any) => dialect.parseIndexList([r])[0]?.isPrimary);
+      expect(pk.length).toBe(1);
+      expect(pk[0].name).toBe('pk_custom');
+    } finally {
+      await client.query(`DROP SCHEMA ${schema} CASCADE`);
+      await client.end();
+    }
   });
 });
