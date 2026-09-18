@@ -160,7 +160,8 @@ export class SshTunnel {
           );
         });
 
-        server.on('error', fail);
+        // ready 之后 settled=true，用 fail 会被吞掉；转发 server 的错误必须清理并记录。
+        server.on('error', (err: Error) => { diagError('ssh forward server error', err.message); teardown(); });
         server.listen(0, '127.0.0.1', () => {
           if (settled) { server.close(); return; }
           const addr = server.address();

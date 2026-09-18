@@ -60,7 +60,8 @@ describe('QueryService 按查询取消', () => {
     p2.catch(() => {});
 
     expect(svc.cancel()).toBe(true);
-    expect(conn.aborts).toBe(2);
+    // 会话级取消只对该物理连接中止一次（不再每个在途查询各中止一次）。
+    expect(conn.aborts).toBe(1);
   });
 });
 describe('QueryService 会话级超时覆盖', () => {

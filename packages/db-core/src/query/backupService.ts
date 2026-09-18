@@ -137,9 +137,10 @@ export class BackupService {
     }
 
     // 视图：整库备份过去只含基表（getTables 只返回 BASE TABLE），视图全部缺失。
-    // 这里补视图定义；例程/事件/触发器需要方言的 SHOW CREATE 能力，尚未实现（记入台账）。
+    // 仅在**整库备份**（未指定 tables）时附带视图；只备份选定表时不应写入整库视图。
+    // 例程/事件/触发器需要方言的 SHOW CREATE 能力，尚未实现（记入台账）。
     try {
-      const views = await meta.getViews(database);
+      const views = options.tables ? [] : await meta.getViews(database);
       for (const v of views) {
         if (isCancelled?.()) throw new Error('Backup cancelled.');
         try {

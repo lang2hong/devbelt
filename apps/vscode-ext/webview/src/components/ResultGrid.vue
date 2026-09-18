@@ -681,6 +681,7 @@ watch(() => props.filterConditions, (conds) => {
           <td>
             <button class="btn primary" @click="saveInsert">{{ t('wv.common.save') }}</button>
             <button class="btn" @click="cancelInsert">{{ t('wv.common.cancel') }}</button>
+            <small class="insert-hint">{{ t('wv.grid.insertHint') }}</small>
           </td>
         </tr>
         <tr v-for="(row, idx) in rows" :key="idx" :class="{ 'row-selected': isRowSelected(row) }">
@@ -826,4 +827,5 @@ input[type="date"], input[type="time"], input[type="datetime-local"] {
 .vscode-dark input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
   opacity: 1;
 }
+.insert-hint { display: block; margin-top: 4px; opacity: .7; font-size: 11px; }
 </style>

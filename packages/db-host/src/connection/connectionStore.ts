@@ -92,6 +92,8 @@ export type { QueryFolder } from './queryStore.js';
  */
 export class ConnectionStore {
   private static readonly KEY = 'devbelt.connections';
+  /** secrets.onDidChange 订阅句柄（连接 store 销毁时释放）。 */
+  private hostEvents?: { dispose(): void };
   static readonly SENSITIVE_FIELDS = ['password', 'sshPassword', 'sshPassphrase'] as const;
   private readonly secretCache = new Map<string, string>();
   private readonly queryStore: QueryStore;
@@ -107,7 +109,7 @@ export class ConnectionStore {
     private readonly secrets: SecureStorageLike,
   ) {
     // 跨窗口密钥变更：刷新缓存，避免本窗口用陈旧密码（并把它写回覆盖新值）。
-    this.secrets.onDidChange?.((e) => {
+    this.hostEvents = this.secrets.onDidChange?.((e) => {
       void Promise.resolve(this.secrets.get(e.key)).then((value) => {
         if (value === undefined) this.secretCache.delete(e.key);
         else this.secretCache.set(e.key, value);
@@ -339,6 +341,13 @@ export class ConnectionStore {
 
   private async cascadeConnectionDelete(connId: string, source: ChangeSource): Promise<void> {
     await this.queryStore.cascadeDeleteByConnection(connId, source);
+  }
+
+  /** 释放跨窗口订阅（扩展停用时调用）。 */
+  dispose(): void {
+    this.hostEvents?.dispose();
+    this.hostEvents = undefined;
+    this.secretCache.clear();
   }
 
   private async sanitize(connection: SavedConnection): Promise<{ connection: SavedConnection; changed: boolean }> {

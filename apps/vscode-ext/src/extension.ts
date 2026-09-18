@@ -41,6 +41,7 @@ import { SshTunnel } from './connection/sshTunnel';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const store = new ConnectionStore(context.globalState, context.secrets);
+  context.subscriptions.push({ dispose: () => store.dispose() });
   await store.init();
   const serverUrl = DEFAULT_SERVER_URL;
   const auth = new AuthService(context.secrets, serverUrl, context.globalState);

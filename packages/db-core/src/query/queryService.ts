@@ -178,22 +178,26 @@ export class QueryService {
     return new Promise<QueryResult>((resolve, reject) => {
       let settled = false;
       const finish = (): void => {
-        if (this.activeCancels.get(id) === cancel) this.activeCancels.delete(id);
+        if (this.activeCancels.get(id) === cancelReject) this.activeCancels.delete(id);
         if (timer) clearTimeout(timer);
       };
-      const cancel = (): void => {
+      // 只负责“拒绝并清理”，物理中止由调用方统一发起（见 cancel()/token），
+      // 避免会话级取消时对同一物理连接发起 N 次 abort。
+      const cancelReject = (): void => {
         if (settled) return;
         settled = true;
         finish();
-        this.connection.abortQuery();
         reject(new QueryError('Query cancelled', sql, Date.now() - start));
       };
-      this.activeCancels.set(id, cancel);
-      if (options?.token) options.token.cancel = cancel;
+      this.activeCancels.set(id, cancelReject);
+      if (options?.token) {
+        options.token.cancel = () => { cancelReject(); this.connection.abortQuery(); };
+      }
       const timeoutMs = this.timeoutMs;
       const timer = timeoutMs > 0
         ? setTimeout(() => {
             if (!settled) {
+              // 超时是独立终态：直接以 timeout 文案结算，不经过 cancelReject（后者会改成 "cancelled"）。
               settled = true;
               finish();
               this.connection.abortQuery();
@@ -237,9 +241,9 @@ export class QueryService {
   /** Stops delivery of the current result and lets the caller close its session. */
   cancel(): boolean {
     if (this.activeCancels.size === 0) return false;
-    // 每个 cancel 闭包自身会 abortQuery 并从 activeCancels 移除；这里不再重复 abort，
-    // 避免一次取消对该物理连接发起 N+1 次中止。
+    // cancel 闭包只拒绝并清理；物理中止对整条连接只发一次。
     for (const cancelFn of [...this.activeCancels.values()]) cancelFn();
+    this.connection.abortQuery();
     return true;
   }
 

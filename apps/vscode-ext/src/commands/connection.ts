@@ -8,7 +8,8 @@ import { l10n } from '../i18n';
 import { AuditLogger } from '../utils/auditLogger';
 import { flattenGroups } from '../utils/groupTree';
 import { hasUrlCredentials, stripUrlCredentials } from '../utils/connectionUrl';
-import { writeFile } from 'node:fs/promises';
+import { diagWarn } from '../utils/diagnostics';
+import { chmod, writeFile } from 'node:fs/promises';
 import type { Deps, Sub } from './shared';
 import { confirm } from './shared';
 import {
@@ -221,7 +222,10 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     // 含密码时为明文敏感文件：以 0600 写入；非 file scheme 回退到 workspace.fs。
     const json = JSON.stringify(payload, null, 2);
     if (uri.scheme === 'file') {
+      // mode 只在新建文件时生效：覆盖已存在的宽松权限文件时需显式 chmod，
+      // 否则明文凭据可能仍是 0644，同机其他用户可读。
       await writeFile(uri.fsPath, json, { encoding: 'utf8', mode: 0o600 });
+      await chmod(uri.fsPath, 0o600).catch((e) => diagWarn('chmod connection export failed', String(e)));
     } else {
       await vscode.workspace.fs.writeFile(uri, Buffer.from(json, 'utf8'));
     }

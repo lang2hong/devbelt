@@ -572,6 +572,7 @@ export const zh: MessageCatalog = {
   'wv.grid.cannotDeleteNoPk': '无法删除：选中行没有主键或可用的定位字段。',
   'wv.grid.nothingToExport': '无可导出内容：结果集为空。',
   'wv.grid.insertNoValues': '请至少填写一列再插入。',
+  'wv.grid.insertHint': '留空=使用默认值；输入 NULL 表示显式空值。',
   'wv.grid.nothingToCopy': '无可复制内容：结果集为空。',
   'wv.grid.copyNeedsTable': '复制 INSERT 需要单表查询结果。',
   'wv.grid.copiedInserts': '已复制 {count} 条 INSERT 语句',
