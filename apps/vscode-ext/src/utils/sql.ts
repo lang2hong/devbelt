@@ -1,6 +1,7 @@
 import { DatabaseType } from '@devkit/db-core';
 import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import { splitSqlWithRanges } from '@devkit/db-core/sql';
+import { createReadStream } from 'node:fs';
 import type { SqlScanOptions } from '@devkit/db-core/sql';
 
 /**
@@ -52,6 +53,30 @@ export type { SqlStatementRange } from '@devkit/db-core/sql';
  */
 export function splitSqlStatements(sql: string, options?: SqlScanOptions): string[] {
   return splitSqlWithRanges(sql, options).map((s) => s.sql);
+}
+
+/**
+ * 流式拆分 SQL 文件：分块读取、增量切分，恢复大 dump 时不再把整个文件读进内存。
+ *
+ * 每读到一块就重切「上一块遗留 + 本块」，吐出除最后一段外的所有语句（最后一段可能
+ * 正好结束、也可能只是尚未闭合的语句，留到下一块或文件末尾再吐）。因切分器已感知
+ * 引号/注释/美元引用/DELIMITER，跨块语句不会被误切。
+ */
+export async function* streamSqlStatements(
+  filePath: string,
+  options?: SqlScanOptions,
+  chunkSize = 1 << 20,
+): AsyncGenerator<string> {
+  const stream = createReadStream(filePath, { encoding: 'utf8', highWaterMark: chunkSize });
+  let buffer = '';
+  for await (const chunk of stream) {
+    buffer += chunk as string;
+    const segments = splitSqlWithRanges(buffer, options);
+    if (segments.length === 0) continue;
+    for (let i = 0; i < segments.length - 1; i++) yield segments[i].sql;
+    buffer = segments[segments.length - 1].sql;
+  }
+  if (buffer.trim()) yield buffer;
 }
 
 /**

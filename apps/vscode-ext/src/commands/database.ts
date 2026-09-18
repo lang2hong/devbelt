@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { SchemaDiffService, BackupService, DataTransferService, DatabaseType, validateIdent } from '@devkit/db-core';
 import { DbTreeNode } from '../tree/dbTreeNode';
-import { wrapIdentForConn, splitSqlStatements } from '../utils/sql';
+import { wrapIdentForConn, splitSqlStatements, streamSqlStatements } from '../utils/sql';
 import { dialectScanOptions } from '../utils/sqlDialectOptions';
 import { confirmSqlExecution, ensureWritable } from '../utils/sqlSafety';
 import { parseCsv } from '../data/transfer/csv';
@@ -87,20 +87,23 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
       openLabel: 'Select SQL Dump File',
     });
     if (!uri?.length) return;
+    // 恢复自身用事务包裹，但 MySQL 的 DDL 会隐式提交：中途失败无法回滚已执行的
+    // CREATE/ALTER/DROP。确认框必须讲清楚，避免用户以为失败即「什么都没变」。
     const confirmed = await vscode.window.showWarningMessage(
-      `Restore SQL dump to "${node.database || node.conn.database}"? This will overwrite existing data.`,
+      `Restore SQL dump to "${node.database || node.conn.database}"? This will overwrite existing data. `
+      + 'If it fails midway, statements already executed (DDL included) may not be rolled back.',
       { modal: true },
       'Restore',
     );
     if (confirmed !== 'Restore') return;
     const session = await manager.connect(node.conn);
-    const content = Buffer.from(await vscode.workspace.fs.readFile(uri[0])).toString('utf8');
-    const statements = splitSqlStatements(content, dialectScanOptions(node.conn.dbType));
+    // 流式读取 + 增量切分：过去整文件读进内存再一次性切分，GB 级 dump 会 OOM。
+    const statements = streamSqlStatements(uri[0].fsPath, dialectScanOptions(node.conn.dbType));
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'Restoring database...', cancellable: true },
       async (progress, token) => {
+        let completed = 0;
         try {
-          let completed = 0;
           await BackupService.restore(session.query, statements, {
             onProgress: (p: any) => {
               completed = p.completed;
@@ -118,7 +121,11 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
           vscode.window.showInformationMessage(`Restore complete: ${completed} statements executed.`);
           treeProvider.refresh();
         } catch (err) {
-          vscode.window.showErrorMessage(`Restore failed: ${(err as Error).message}`);
+          // 报出已执行条数：失败可能停在中途，用户需要知道目标库已改到什么程度。
+          vscode.window.showErrorMessage(
+            `Restore failed after ${completed} statement(s): ${(err as Error).message}. `
+            + 'Statements already executed may remain in the target database; verify before retrying.',
+          );
         }
       },
     );

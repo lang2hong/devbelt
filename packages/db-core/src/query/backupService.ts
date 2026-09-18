@@ -99,9 +99,10 @@ export class BackupService {
       onProgress?.({ table, completed: i, total: tableList.length });
 
       const ddl = await tableService.getCreateSql(table, database);
-      const qualified = dbType === DatabaseType.SQLITE
-        ? query.dialect.wrap(table)
-        : `${query.dialect.wrap(database)}.${query.dialect.wrap(table)}`;
+      // 不带库前缀：dump 过去把源库名写死（`"srcdb"."t"`），在目标库上恢复时会
+      // 写回**源库**（且确认框显示的是目标库），是数据写错库。不限定即恢复到
+      // 当前连接选中的库，dump 也因此可在库之间迁移。
+      const qualified = query.dialect.wrap(table);
       const block: string[] = ['', `DROP TABLE IF EXISTS ${qualified};`, ddl.replace(/;\s*$/, '') + ';'];
 
       if (includeData) {
@@ -138,20 +139,76 @@ export class BackupService {
 
     // 视图：整库备份过去只含基表（getTables 只返回 BASE TABLE），视图全部缺失。
     // 仅在**整库备份**（未指定 tables）时附带视图；只备份选定表时不应写入整库视图。
-    // 例程/事件/触发器需要方言的 SHOW CREATE 能力，尚未实现（记入台账）。
     try {
       const views = options.tables ? [] : await meta.getViews(database);
       for (const v of views) {
         if (isCancelled?.()) throw new Error('Backup cancelled.');
         try {
           const def = (await meta.getViewDefinition(v.name, database)).trim().replace(/;\s*$/, '');
-          const qualified = dbType === DatabaseType.SQLITE
-            ? query.dialect.wrap(v.name)
-            : `${query.dialect.wrap(database)}.${query.dialect.wrap(v.name)}`;
+          const qualified = query.dialect.wrap(v.name);
           await write(`\nDROP VIEW IF EXISTS ${qualified};\n${def};\n`);
         } catch { /* 单个视图定义取不到则跳过，不使整库 dump 失败 */ }
       }
     } catch { /* 视图列表取不到则跳过 */ }
+
+    // 例程/事件：仅在整库备份时附带。过去 dump 只写表 + 视图，存储过程/函数/事件
+    // 全部丢失，恢复后应用的业务逻辑缺失（静默）。方言已有定义查询能力，这里补上。
+    if (!options.tables) {
+      try {
+        for (const r of await meta.getFunctions(database)) {
+          if (isCancelled?.()) throw new Error('Backup cancelled.');
+          try {
+            const raw = (await meta.getRoutineDefinition(r.name, r.type, database)).trim();
+            if (!raw) continue;
+            const kind = /PROCEDURE/i.test(r.type) ? 'PROCEDURE' : 'FUNCTION';
+            const body = stripTrailingSemicolon(removeDefiner(raw));
+            const q = query.dialect.wrap(r.name);
+            if (dbType === DatabaseType.PG) {
+              // pg_get_functiondef 返回 CREATE OR REPLACE，直接可重跑。
+              await write(`\n${body};\n`);
+            } else {
+              // MySQL SHOW CREATE：需先 DROP（同名已存在会报错），并剥掉绑定源账号的
+              // DEFINER；正文含分号，必须用 DELIMITER 包裹（切分器已支持）。
+              await write(`\nDROP ${kind} IF EXISTS ${q};\nDELIMITER $$\n${body}$$\nDELIMITER ;\n`);
+            }
+          } catch { /* 单个例程取不到则跳过，不使整库 dump 失败 */ }
+        }
+      } catch { /* 例程列表取不到则跳过 */ }
+      try {
+        for (const e of await meta.getEvents(database)) {
+          if (isCancelled?.()) throw new Error('Backup cancelled.');
+          try {
+            const raw = (await meta.getEventDefinition(e.name, database)).trim();
+            if (!raw) continue;
+            const body = stripTrailingSemicolon(removeDefiner(raw));
+            await write(`\nDROP EVENT IF EXISTS ${query.dialect.wrap(e.name)};\nDELIMITER $$\n${body}$$\nDELIMITER ;\n`);
+          } catch { /* 单个事件取不到则跳过 */ }
+        }
+      } catch { /* 事件列表取不到则跳过 */ }
+    }
+
+    // 触发器：属于表，必须在表之后写。整库对每张表；只备份选定表时也带上这些表的触发器。
+    try {
+      for (const table of tableList) {
+        for (const t of await meta.getTriggers(table, database)) {
+          if (isCancelled?.()) throw new Error('Backup cancelled.');
+          try {
+            const raw = (await meta.getTriggerDefinition(t.name, database)).trim();
+            if (!raw) continue;
+            const body = stripTrailingSemicolon(removeDefiner(raw));
+            const q = query.dialect.wrap(t.name);
+            // PG 的 DROP TRIGGER 必须带 ON <table>；MySQL/SQLite 不带。
+            const drop = dbType === DatabaseType.PG
+              ? `DROP TRIGGER IF EXISTS ${q} ON ${query.dialect.wrap(table)};`
+              : `DROP TRIGGER IF EXISTS ${q};`;
+            const wrapDelimiter = dbType === DatabaseType.MYSQL;
+            await write(wrapDelimiter
+              ? `\n${drop}\nDELIMITER $$\n${body}$$\nDELIMITER ;\n`
+              : `\n${drop}\n${body};\n`);
+          } catch { /* 单个触发器取不到则跳过 */ }
+        }
+      }
+    } catch { /* 触发器列表取不到则跳过 */ }
 
     const epilogue = this.sqlEpilogue(dbType);
     if (epilogue) await write('\n' + epilogue + ';\n');
@@ -175,7 +232,7 @@ export class BackupService {
 
   static async restore(
     query: QueryService,
-    statements: string[],
+    statements: Iterable<string> | AsyncIterable<string>,
     options: RestoreOptions = {},
   ): Promise<RestoreProgress> {
     const { onProgress, isCancelled, singleStatement = false } = options;
@@ -183,36 +240,50 @@ export class BackupService {
     // COMMIT 会提前提交外层事务（回滚失效），BEGIN 则会嵌套。DDL 在 MySQL 会隐式
     // 提交，仍无法完全原子（已记入台账）。
     const txControl = /^(BEGIN|START\s+TRANSACTION|COMMIT|ROLLBACK|END)\s*;?\s*$/i;
-    const cleaned = statements.filter((s) => !txControl.test(s.trim()));
+    // 数组输入可预知总数（进度显示 N/M，旧行为）；流式输入（大文件不整读内存）
+    // 只有在执行过程中才知道进度，总数按已完成数报。
+    const isArray = Array.isArray(statements);
+    const source: Iterable<string> | AsyncIterable<string> = isArray
+      ? (statements as string[]).filter((s) => !txControl.test(s.trim()))
+      : statements;
+    const knownTotal = isArray ? (source as string[]).length : -1;
+
     if (singleStatement) {
-      return BackupService.restoreAsSingleStatement(query, cleaned, options);
+      const arr: string[] = [];
+      if (isArray) {
+        arr.push(...(source as string[]));
+      } else {
+        for await (const s of source as AsyncIterable<string>) {
+          if (!txControl.test(s.trim())) arr.push(s);
+        }
+      }
+      return BackupService.restoreAsSingleStatement(query, arr, options);
     }
 
-    const total = cleaned.length;
     let completed = 0;
-    const last: RestoreProgress = { statement: '', completed, total };
+    const last: RestoreProgress = { statement: '', completed, total: knownTotal < 0 ? 0 : knownTotal };
+    const report = (statement: string, error?: string) => {
+      const total = knownTotal < 0 ? completed : knownTotal;
+      const progress: RestoreProgress = { statement, completed, total, ...(error ? { error } : {}) };
+      onProgress?.(progress);
+      last.statement = statement;
+      last.completed = completed;
+      last.total = total;
+      if (error) last.error = error;
+    };
 
     try {
       await query.query('BEGIN', undefined, SKIP);
-      for (const stmt of cleaned) {
+      for await (const stmt of source as AsyncIterable<string>) {
         if (isCancelled?.()) throw new Error('Restore cancelled.');
         const trimmed = stmt.trim();
-        if (!trimmed) continue;
+        if (!trimmed || txControl.test(trimmed)) continue;
         try {
           await query.query(trimmed, undefined, SKIP);
           completed++;
-          const progress: RestoreProgress = { statement: trimmed.slice(0, 100), completed, total };
-          onProgress?.(progress);
-          last.statement = progress.statement;
-          last.completed = completed;
+          report(trimmed.slice(0, 100));
         } catch (err) {
-          const progress: RestoreProgress = {
-            statement: trimmed.slice(0, 100),
-            completed,
-            total,
-            error: (err as Error).message,
-          };
-          onProgress?.(progress);
+          report(trimmed.slice(0, 100), (err as Error).message);
           throw err;
         }
       }
@@ -272,3 +343,17 @@ export class BackupService {
     return done;
   }
 }
+
+/** 去掉末尾分号（写入时统一补一个）。 */
+function stripTrailingSemicolon(sql: string): string {
+  return sql.replace(/;\s*$/, '');
+}
+
+/**
+ * 剥掉 `CREATE DEFINER=user@host`：它绑定 dump 来源账号，恢复到其他实例/账号时
+ * 会因权限或用户不存在而失败（与视图 normalizeViewAlterSql 同样的原因）。
+ */
+function removeDefiner(sql: string): string {
+  return sql.replace(/^CREATE\s+DEFINER=\S+\s+/i, 'CREATE ');
+}
+

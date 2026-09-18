@@ -450,3 +450,75 @@ describe('BackupService.restore 事务控制', () => {
     expect(conn.executed.some((s) => s.includes('INSERT INTO t VALUES (1)'))).toBe(true);
   });
 });
+
+describe('BackupService.databaseDump 限定名', () => {
+  it('不带源库前缀：恢复到目标库而非写回源库', async () => {
+    const conn = new FakeConnection();
+    const query = makeQueryService(conn, new MysqlDialect());
+    const dump = await BackupService.databaseDump(query, makeMetadataService(), makeTableService(), 'srcdb', { includeData: false });
+    expect(dump).toContain('DROP TABLE IF EXISTS `users`');
+    expect(dump).not.toContain('`srcdb`.');
+  });
+});
+
+function makeRoutineMeta(dbType: 'mysql' | 'pg'): MetadataService {
+  const isPg = dbType === 'pg';
+  return {
+    getTables: async () => [{ name: 'users' }],
+    getColumns: async () => [{ name: 'id' }],
+    getViews: async () => [],
+    getFunctions: async () => (isPg ? [{ name: 'f1', type: 'FUNCTION' }] : [{ name: 'p1', type: 'PROCEDURE' }]),
+    getEvents: async () => (isPg ? [] : [{ name: 'e1' }]),
+    getTriggers: async () => [{ name: 'tr1' }],
+    getRoutineDefinition: async () => (isPg
+      ? 'CREATE OR REPLACE FUNCTION f1() RETURNS int AS $$ SELECT 1 $$ LANGUAGE sql'
+      : 'CREATE DEFINER=`root`@`%` PROCEDURE `p1`() BEGIN SELECT 1; END'),
+    getEventDefinition: async () => 'CREATE DEFINER=`root`@`%` EVENT `e1` ON SCHEDULE EVERY 1 DAY DO SELECT 1',
+    getTriggerDefinition: async () => (isPg
+      ? 'CREATE TRIGGER tr1 BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION f()'
+      : 'CREATE DEFINER=`root`@`%` TRIGGER `tr1` BEFORE INSERT ON `users` FOR EACH ROW SET NEW.id = 1'),
+  } as unknown as MetadataService;
+}
+
+describe('BackupService.databaseDump 例程/事件/触发器', () => {
+  it('MySQL：写入例程/事件/触发器，剥 DEFINER 并用 DELIMITER 包裹', async () => {
+    const query = makeQueryService(new FakeConnection(), new MysqlDialect());
+    const dump = await BackupService.databaseDump(query, makeRoutineMeta('mysql'), makeTableService(), 'test', { includeData: false });
+    expect(dump).toContain('DROP PROCEDURE IF EXISTS `p1`;');
+    expect(dump).toContain('CREATE PROCEDURE `p1`()');
+    expect(dump).toContain('DROP EVENT IF EXISTS `e1`;');
+    expect(dump).toContain('DROP TRIGGER IF EXISTS `tr1`;');
+    expect(dump).toContain('DELIMITER $$');
+    expect(dump).not.toContain('DEFINER=');
+  });
+
+  it('PG：触发器 DROP 带 ON，例程为 CREATE OR REPLACE 不额外 DROP', async () => {
+    const query = makeQueryService(new FakeConnection(), new PostgreSqlDialect());
+    const dump = await BackupService.databaseDump(query, makeRoutineMeta('pg'), makeTableService(), 'test', { includeData: false });
+    expect(dump).toContain('DROP TRIGGER IF EXISTS "tr1" ON "users";');
+    expect(dump).toContain('CREATE OR REPLACE FUNCTION f1()');
+    expect(dump).not.toContain('DROP FUNCTION');
+  });
+
+  it('只备份选定表时不写整库例程/事件，但保留这些表的触发器', async () => {
+    const query = makeQueryService(new FakeConnection(), new MysqlDialect());
+    const dump = await BackupService.databaseDump(query, makeRoutineMeta('mysql'), makeTableService(), 'test', { includeData: false, tables: ['users'] });
+    expect(dump).not.toContain('DROP PROCEDURE');
+    expect(dump).not.toContain('DROP EVENT');
+    expect(dump).toContain('DROP TRIGGER IF EXISTS `tr1`;');
+  });
+});
+
+describe('BackupService.restore 流式输入', () => {
+  it('接受异步语句流（大文件不整读内存）', async () => {
+    const conn = new FakeConnection();
+    const query = makeQueryService(conn, new MysqlDialect());
+    async function* gen() {
+      yield 'CREATE TABLE a (id int)';
+      yield 'INSERT INTO a VALUES (1)';
+    }
+    const res = await BackupService.restore(query, gen());
+    expect(res.completed).toBe(2);
+    expect(conn.executed.some((s) => /INSERT INTO a/.test(s))).toBe(true);
+  });
+});

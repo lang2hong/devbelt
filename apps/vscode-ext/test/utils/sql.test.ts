@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { DatabaseType } from '@devkit/db-core';
-import { escapeSqlString, statementTextAt, wrapIdent } from '../../src/utils/sql';
+import { escapeSqlString, statementTextAt, streamSqlStatements, wrapIdent } from '../../src/utils/sql';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 /**
  * 本包只保留 vscode 特有的标识符/字面量转义。
@@ -50,5 +53,49 @@ describe('statementTextAt（补全上下文）', () => {
   it('光标在分号后的空白处返回空串', () => {
     const text = 'SELECT 1;\n\n';
     expect(statementTextAt(text, text.length)).toBe('');
+  });
+});
+
+describe('streamSqlStatements', () => {
+  function write(sql: string): string {
+    const dir = mkdtempSync(join(tmpdir(), 'devbelt-stream-sql-'));
+    const file = join(dir, 'dump.sql');
+    writeFileSync(file, sql);
+    return file;
+  }
+
+  it('小块读取时跨块不断句，MySQL DELIMITER 例程不被切碎', async () => {
+    // 注意：DELIMITER 与 PG 美元引用不能混写——切分器按「出现 DELIMITER」判定为
+    // MySQL 语义并关闭美元引用识别（真实 dump 按方言二选一，见 split.ts 注释）。
+    const file = write([
+      'INSERT INTO t VALUES (1);',
+      'INSERT INTO t VALUES (2);',
+      'DELIMITER $$',
+      'CREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END$$',
+      'DELIMITER ;',
+    ].join('\n'));
+    try {
+      const out: string[] = [];
+      for await (const stmt of streamSqlStatements(file, undefined, 16)) out.push(stmt);
+      expect(out.length).toBe(3);
+      expect(out.join('\n')).toContain('SELECT 2');
+    } finally {
+      rmSync(join(file, '..'), { recursive: true, force: true });
+    }
+  });
+
+  it('小块读取时 PG 命名美元引用（$function$）不被切断', async () => {
+    const file = write([
+      'INSERT INTO t VALUES (1);',
+      'CREATE FUNCTION f() RETURNS int AS $function$ SELECT 1; SELECT 2; $function$ LANGUAGE sql;',
+    ].join('\n'));
+    try {
+      const out: string[] = [];
+      for await (const stmt of streamSqlStatements(file, undefined, 24)) out.push(stmt);
+      expect(out.length).toBe(2);
+      expect(out.join('\n')).toContain('SELECT 2');
+    } finally {
+      rmSync(join(file, '..'), { recursive: true, force: true });
+    }
   });
 });
