@@ -53,3 +53,21 @@ export type { SqlStatementRange } from '@devkit/db-core/sql';
 export function splitSqlStatements(sql: string, options?: SqlScanOptions): string[] {
   return splitSqlWithRanges(sql, options).map((s) => s.sql);
 }
+
+/**
+ * 光标所在语句的文本（含光标前的部分即可满足补全上下文）。
+ *
+ * 补全过去对整篇文档解析 FROM/JOIN，多语句文件里会取到**第一个** FROM，
+ * 导致第二段之后（尤其是复制的脚本）补全候选错位。这里限定到光标所在语句。
+ * 光标落在语句间隙（分号后空白）时返回空串。
+ */
+export function statementTextAt(
+  text: string,
+  offset: number,
+  options?: SqlScanOptions,
+): string {
+  for (const seg of splitSqlWithRanges(text, options)) {
+    if (offset >= seg.start && offset <= seg.end) return seg.sql;
+  }
+  return '';
+}

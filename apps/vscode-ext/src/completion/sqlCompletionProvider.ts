@@ -3,6 +3,8 @@ import type { ConnectionManager } from '../connection/connectionManager';
 import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import type { ConnectionContext } from '../connection/connectionContext';
 import { diagError } from '../utils/diagnostics';
+import { statementTextAt } from '../utils/sql';
+import { dialectScanOptions } from '../utils/sqlDialectOptions';
 import { SQL_SNIPPETS } from './sqlSnippets';
 import {
   buildCandidates,
@@ -68,7 +70,9 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
     let fromTable: string | undefined;
     if (conn) {
       tables = await this.getTables(conn, db);
-      fromTable = extractFromTable(text);
+      // 仅解析光标所在语句的 FROM，避免多语句文件取到首个 FROM。
+      const stmtText = statementTextAt(text, document.offsetAt(position), dialectScanOptions(conn.dbType));
+      fromTable = extractFromTable(stmtText);
       if (sqlCtx === 'dot_column') {
         const m = before.match(/(\w+)\.\w*$/);
         if (m) columns = await this.getColumns(conn, m[1], db);

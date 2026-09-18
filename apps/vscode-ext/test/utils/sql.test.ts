@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DatabaseType } from '@devkit/db-core';
-import { escapeSqlString, wrapIdent } from '../../src/utils/sql';
+import { escapeSqlString, statementTextAt, wrapIdent } from '../../src/utils/sql';
 
 /**
  * 本包只保留 vscode 特有的标识符/字面量转义。
@@ -36,5 +36,19 @@ describe('escapeSqlString', () => {
   it('注入形状不逃出字面量', () => {
     expect(escapeSqlString("x' OR 1=1 -- ", DatabaseType.MYSQL)).toBe("x'' OR 1=1 -- ");
     expect(escapeSqlString("x' OR 1=1 -- ", DatabaseType.PG)).toBe("x'' OR 1=1 -- ");
+  });
+});
+describe('statementTextAt（补全上下文）', () => {
+  it('返回光标所在语句，而非整篇的首个 FROM', () => {
+    const text = 'SELECT * FROM first;\nSELECT * FROM second WHERE';
+    const offset = text.indexOf('WHERE');
+    const stmt = statementTextAt(text, offset);
+    expect(stmt).toContain('second');
+    expect(stmt).not.toContain('first');
+  });
+
+  it('光标在分号后的空白处返回空串', () => {
+    const text = 'SELECT 1;\n\n';
+    expect(statementTextAt(text, text.length)).toBe('');
   });
 });
