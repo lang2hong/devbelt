@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { DatabaseType } from '@devkit/db-core';
 import { ConnectionFactory } from '@devkit/db-core';
 import type { IConnection } from '@devkit/db-core';
-import { stripSecrets, type SavedConnection, type ConnectionGroup } from '@devkit/db-host/connection/connectionStore';
+import { ConnectionStore, stripSecrets, type SavedConnection, type ConnectionGroup } from '@devkit/db-host/connection/connectionStore';
 import { SshTunnel } from './sshTunnel';
 import { l10n } from '../i18n';
 import { uniqueId } from '@devkit/db-host/utils/id';
@@ -68,7 +68,8 @@ export class ConnectionForm extends BaseWebView {
     try {
       switch (msg.type) {
         case 'test': {
-          const conn = decodeConnection(msg.payload);
+          // 编辑连接时表单不回传未改动的密钥（留空=保留），测试需回退到已保存值。
+          const conn = mergeSecretsFromStored(decodeConnection(msg.payload), this.editing);
           const okMsg = await this.testConnection(conn);
           this.post({ type: 'testResult', ...okMsg });
           break;
@@ -158,6 +159,22 @@ function defaultPort(dbType: DatabaseType): number {
     case DatabaseType.SQLITE: return 0;
     default: return 3306;
   }
+}
+
+/**
+ * 表单未提交的敏感字段回退到已保存连接的值。
+ *
+ * webview 在编辑态对未改动的密钥「留空且不发送」（见 ConnectionFormView.collect）；
+ * 因此测试连接时需用已存密钥补齐。显式清除会发送空串，此时 `''` 优先，不被覆盖。
+ * 保存路径无需此合并：db-host 的 `sanitize` 对缺省字段保留、对 `''` 删除。
+ */
+export function mergeSecretsFromStored(decoded: SavedConnection, stored?: SavedConnection): SavedConnection {
+  if (!stored) return decoded;
+  const out = { ...decoded } as Record<string, unknown>;
+  for (const field of ConnectionStore.SENSITIVE_FIELDS) {
+    if (out[field] === undefined && stored[field] !== undefined) out[field] = stored[field];
+  }
+  return out as unknown as SavedConnection;
 }
 
 /** 将 webview 表单负载解码为 SavedConnection */

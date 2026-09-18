@@ -45,7 +45,17 @@ const defaultForm = {
   sshPassword: '',
   sshPrivateKeyPath: '',
   sshPassphrase: '',
+  clearPassword: false,
+  clearSshPassword: false,
+  clearSshPassphrase: false,
 };
+
+const SECRET_KEYS = ['password', 'sshPassword', 'sshPassphrase'] as const;
+type SecretKey = typeof SECRET_KEYS[number];
+
+function clearFlagKey(key: SecretKey): string {
+  return `clear${key[0].toUpperCase()}${key.slice(1)}`;
+}
 const form = reactive({ ...defaultForm });
 
 const showPassword = ref(false);
@@ -65,9 +75,21 @@ function syncType(): void {
 function collect(): Record<string, unknown> {
   const result: Record<string, unknown> = { id: editingId.value };
   for (const key of Object.keys(form)) {
+    if (key.startsWith('clear')) continue;
     result[key] = (form as any)[key];
   }
+  // 敏感字段：编辑时留空 = 保留已存密钥（不发送），只有点「清除」才发空串触发删除。
+  for (const key of SECRET_KEYS) {
+    if ((form as any)[clearFlagKey(key)]) result[key] = '';
+    else if (result[key] === '') delete result[key];
+  }
   return result;
+}
+
+/** 标记清除某个已保存密钥（发送空串；否则留空将保留原值）。 */
+function clearSecret(key: SecretKey): void {
+  (form as any)[key] = '';
+  (form as any)[clearFlagKey(key)] = true;
 }
 
 function prefill(c: Record<string, any>): void {
@@ -169,7 +191,10 @@ function save(): void {
         <div class="pw">
           <input :type="showPassword ? 'text' : 'password'" v-model="form.password">
           <button type="button" class="toggle" @click="showPassword = !showPassword">{{ showPassword ? t('wv.form.hide') : t('wv.form.show') }}</button>
+          <button v-if="editingId" type="button" class="toggle" @click="clearSecret('password')">{{ t('wv.form.clear') }}</button>
         </div>
+        <p v-if="editingId && form.clearPassword" class="hint">{{ t('wv.form.willClear') }}</p>
+        <p v-else-if="editingId && !form.password" class="hint">{{ t('wv.form.secretSaved') }}</p>
       </div>
     </div>
 
@@ -195,11 +220,15 @@ function save(): void {
       <div class="field"><label>{{ t('wv.form.sshPort') }}</label><input v-model="form.sshPort" type="number"></div>
       <div class="field"><label>{{ t('wv.form.sshUser') }}</label><input v-model="form.sshUser"></div>
       <div class="field"><label>{{ t('wv.form.sshPass') }}</label>
-        <div class="pw"><input :type="showSshPassword ? 'text' : 'password'" v-model="form.sshPassword"><button type="button" class="toggle" @click="showSshPassword = !showSshPassword">{{ showSshPassword ? t('wv.form.hide') : t('wv.form.show') }}</button></div>
+        <div class="pw"><input :type="showSshPassword ? 'text' : 'password'" v-model="form.sshPassword"><button type="button" class="toggle" @click="showSshPassword = !showSshPassword">{{ showSshPassword ? t('wv.form.hide') : t('wv.form.show') }}</button><button v-if="editingId" type="button" class="toggle" @click="clearSecret('sshPassword')">{{ t('wv.form.clear') }}</button></div>
+        <p v-if="editingId && form.clearSshPassword" class="hint">{{ t('wv.form.willClear') }}</p>
+        <p v-else-if="editingId && !form.sshPassword" class="hint">{{ t('wv.form.secretSaved') }}</p>
       </div>
       <div class="field"><label>{{ t('wv.form.sshKey') }}</label><input v-model="form.sshPrivateKeyPath"></div>
       <div class="field"><label>{{ t('wv.form.sshPhrase') }}</label>
-        <div class="pw"><input :type="showSshPassphrase ? 'text' : 'password'" v-model="form.sshPassphrase"><button type="button" class="toggle" @click="showSshPassphrase = !showSshPassphrase">{{ showSshPassphrase ? t('wv.form.hide') : t('wv.form.show') }}</button></div>
+        <div class="pw"><input :type="showSshPassphrase ? 'text' : 'password'" v-model="form.sshPassphrase"><button type="button" class="toggle" @click="showSshPassphrase = !showSshPassphrase">{{ showSshPassphrase ? t('wv.form.hide') : t('wv.form.show') }}</button><button v-if="editingId" type="button" class="toggle" @click="clearSecret('sshPassphrase')">{{ t('wv.form.clear') }}</button></div>
+        <p v-if="editingId && form.clearSshPassphrase" class="hint">{{ t('wv.form.willClear') }}</p>
+        <p v-else-if="editingId && !form.sshPassphrase" class="hint">{{ t('wv.form.secretSaved') }}</p>
       </div>
     </details>
 
@@ -257,6 +286,7 @@ input:focus, select:focus { outline: none; border-color: var(--vscode-focusBorde
 .row { display: flex; gap: 12px; }
 .row .field { flex: 1; }
 .pw { display: flex; gap: 6px; align-items: center; }
+.hint { margin: 4px 0 0; font-size: 11px; color: var(--vscode-descriptionForeground, #808080); }
 .pw input { flex: 1; }
 .pw .toggle { flex: 0 0 auto; padding: 7px 10px; cursor: pointer; border: 1px solid var(--vscode-input-border, rgba(255,255,255,0.15)); border-radius: 4px; background: var(--vscode-button-secondaryBackground, #3a3d41); color: var(--vscode-button-secondaryForeground, #ffffff); font-size: 12px; }
 .pw .toggle:hover { background: var(--vscode-button-secondaryHoverBackground, #45494e); }

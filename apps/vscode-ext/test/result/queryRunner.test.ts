@@ -94,3 +94,50 @@ describe('QueryRunner', () => {
     expect(() => runner.cancel()).not.toThrow();
   });
 });
+/**
+ * 回归：会话在 SQL 编辑器与多个表面板之间共享。过去 dispose() 无条件下发
+ * ROLLBACK，关闭任一表面板就会静默回滚其他面板/编辑器未提交的事务（数据丢失）。
+ * 现在只有本面板自己 BEGIN 开启的事务才会被回滚。
+ */
+describe('QueryRunner.dispose 事务隔离', () => {
+  function setup(): { runner: QueryRunner; calls: string[] } {
+    const calls: string[] = [];
+    const query = {
+      query: async (sql: string) => { calls.push(sql); return { rows: [], fields: [] }; },
+      wrap: (id: string) => `"${id}"`,
+      cancel: () => true,
+    };
+    const manager: any = {
+      connect: async () => ({ query, metadata: { getColumns: async () => [] } }),
+      peek: () => ({ query }),
+      disposeConn: () => {},
+    };
+    const runner = new QueryRunner(conn, manager, 'users', 'test', () => {});
+    return { runner, calls };
+  }
+
+  it('未开启事务时 dispose 不回滚（不误伤共享会话）', async () => {
+    const { runner, calls } = setup();
+    await runner.execute('UPDATE users SET name = \'x\' WHERE id = 1');
+    calls.length = 0;
+    runner.dispose();
+    expect(calls).toEqual([]);
+  });
+
+  it('本面板 BEGIN 后 dispose 回滚自己开启的事务', async () => {
+    const { runner, calls } = setup();
+    await runner.execute('BEGIN');
+    calls.length = 0;
+    runner.dispose();
+    expect(calls).toContain('ROLLBACK');
+  });
+
+  it('本面板 COMMIT 后 dispose 不再回滚', async () => {
+    const { runner, calls } = setup();
+    await runner.execute('BEGIN');
+    await runner.execute('COMMIT');
+    calls.length = 0;
+    runner.dispose();
+    expect(calls).toEqual([]);
+  });
+});

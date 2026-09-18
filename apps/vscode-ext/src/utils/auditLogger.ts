@@ -7,6 +7,7 @@ export type AuditAction =
   | 'data_edit'
   | 'data_delete'
   | 'data_insert'
+  | 'data_sync'
   | 'schema_change'
   | 'connection_open'
   | 'connection_close'

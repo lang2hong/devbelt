@@ -26,7 +26,7 @@ describe('QueryRunner.dispose 连接生命周期', () => {
     expect(connect).not.toHaveBeenCalled();
   });
 
-  it('已有会话时对其发送 ROLLBACK', () => {
+  it('未开启事务时 dispose 不回滚（保护共享会话中的他人事务）', () => {
     const query = vi.fn(async () => ({ rows: [], fields: [] }));
     const manager: any = {
       connect: vi.fn(async () => ({})),
@@ -35,6 +35,28 @@ describe('QueryRunner.dispose 连接生命周期', () => {
     };
     const runner = new QueryRunner(conn, manager, 'users', 'test', () => {});
 
+    runner.dispose();
+
+    expect(query).not.toHaveBeenCalled();
+    expect(manager.connect).not.toHaveBeenCalled();
+  });
+
+  it('本面板开启事务后 dispose 才发送 ROLLBACK', async () => {
+    const query = vi.fn(async (_sql: string) => ({ rows: [], fields: [] }));
+    const session: any = {
+      query: { query, wrap: (id: string) => `\`${id}\``, cancel: () => true },
+      metadata: { getColumns: async () => [] },
+    };
+    const manager: any = {
+      connect: vi.fn(async () => session),
+      peek: () => session,
+      disposeConn: () => {},
+    };
+    const runner = new QueryRunner(conn, manager, 'users', 'test', () => {});
+
+    await runner.execute('BEGIN');
+    query.mockClear();
+    manager.connect.mockClear();
     runner.dispose();
 
     expect(query).toHaveBeenCalledWith('ROLLBACK');

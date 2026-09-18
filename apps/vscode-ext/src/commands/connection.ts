@@ -7,6 +7,8 @@ import type { SavedConnection } from '@devkit/db-host/connection/connectionStore
 import { l10n } from '../i18n';
 import { AuditLogger } from '../utils/auditLogger';
 import { flattenGroups } from '../utils/groupTree';
+import { hasUrlCredentials, stripUrlCredentials } from '../utils/connectionUrl';
+import { writeFile } from 'node:fs/promises';
 import type { Deps, Sub } from './shared';
 import { confirm } from './shared';
 import {
@@ -196,6 +198,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     });
     if (!uri) return;
     const selected = all.filter((c) => picked.some((p) => p.value === c.id));
+    let urlCredsStripped = false;
     const payload = {
       version: 1,
       exportedAt: new Date().toISOString(),
@@ -207,11 +210,24 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
           delete out.password;
           delete out.sshPassword;
           delete out.sshPassphrase;
+          if (typeof out.connectionUrl === 'string' && hasUrlCredentials(out.connectionUrl)) {
+            out.connectionUrl = stripUrlCredentials(out.connectionUrl);
+            urlCredsStripped = true;
+          }
         }
         return out;
       }),
     };
-    await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(payload, null, 2), 'utf8'));
+    // 含密码时为明文敏感文件：以 0600 写入；非 file scheme 回退到 workspace.fs。
+    const json = JSON.stringify(payload, null, 2);
+    if (uri.scheme === 'file') {
+      await writeFile(uri.fsPath, json, { encoding: 'utf8', mode: 0o600 });
+    } else {
+      await vscode.workspace.fs.writeFile(uri, Buffer.from(json, 'utf8'));
+    }
+    if (urlCredsStripped) {
+      void vscode.window.showWarningMessage(l10n('conn.exportUrlSecretsStripped'));
+    }
     vscode.window.showInformationMessage(l10n('conn.exportDone', { count: selected.length }));
   });
 

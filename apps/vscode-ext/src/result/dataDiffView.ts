@@ -2,6 +2,9 @@ import { DataDiffService, type DataDiffResult } from '@devkit/db-core';
 import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from './baseWebView';
+import { confirmSqlExecution } from '../utils/sqlSafety';
+import { l10n } from '../i18n';
+import { AuditLogger } from '../utils/auditLogger';
 
 export class DataDiffView extends BaseWebView {
   private static current?: DataDiffView;
@@ -44,10 +47,23 @@ export class DataDiffView extends BaseWebView {
     }
     if (msg.type === 'applySync') {
       try {
-        const session = await this.manager.connect(this.targetConn);
         const diff = await this.computeDiff();
+        const session = await this.manager.connect(this.targetConn);
         const sql = DataDiffService.generateSyncSql(diff, this.targetDb, session.query);
+        // 破坏性 DML：先经只读/生产/高危确认门禁，再执行并审计。
+        if (!(await confirmSqlExecution(this.targetConn, sql))) {
+          this.post({ type: 'error', message: l10n('transfer.cancelled') });
+          return;
+        }
+        const started = Date.now();
         await session.query.query(sql);
+        AuditLogger.tryLog({
+          action: 'data_sync',
+          connName: this.targetConn.name || this.targetConn.host,
+          database: this.targetDb,
+          sql,
+          costTime: Date.now() - started,
+        });
         this.post({ type: 'applied' });
         this.dispose();
       } catch (err) {

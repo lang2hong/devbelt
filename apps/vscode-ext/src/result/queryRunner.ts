@@ -28,6 +28,12 @@ export class QueryRunner {
   private runningQuery?: QueryService;
   private execQueue: Promise<unknown> = Promise.resolve();
   private disposed = false;
+  /**
+   * 本 runner 是否开着一个自己发起、尚未结束的事务。
+   * 连接会话是共享的（SQL 编辑器与多个表面板同一会话），只有确实由本面板
+   * `BEGIN`/`SET AUTOCOMMIT=0` 打开的事务，关闭时才有权 ROLLBACK。
+   */
+  private openTransaction = false;
 
   /**
    * 列名 → 列类型，由每次执行时已取到的元数据填充。
@@ -95,9 +101,12 @@ export class QueryRunner {
   dispose(): void {
     this.disposed = true;
     this.runningQuery?.cancel();
-    if (this.table) {
+    // 仅回滚**本面板自己开的事务**：会话与 SQL 编辑器/其它面板共享，无条件 ROLLBACK
+    // 会静默回滚他人未提交的事务（数据丢失）。
+    if (this.table && this.openTransaction) {
       const session = this.manager.peek(this.conn.id);
       session?.query.query('ROLLBACK').catch(() => {});
+      this.openTransaction = false;
     }
   }
 
@@ -137,13 +146,15 @@ export class QueryRunner {
         if (upper === 'BEGIN' || upper.startsWith('START TRANSACTION')) {
           await session.query.query(stmt, undefined, stmtOpts);
           transactionState = 'active';
+          this.openTransaction = true;
           continue;
         }
-        if (upper === 'COMMIT') { await session.query.query(stmt, undefined, stmtOpts); transactionState = 'committed'; continue; }
-        if (upper === 'ROLLBACK') { await session.query.query(stmt, undefined, stmtOpts); transactionState = 'rolledback'; continue; }
+        if (upper === 'COMMIT') { await session.query.query(stmt, undefined, stmtOpts); transactionState = 'committed'; this.openTransaction = false; continue; }
+        if (upper === 'ROLLBACK') { await session.query.query(stmt, undefined, stmtOpts); transactionState = 'rolledback'; this.openTransaction = false; continue; }
         if (upper.startsWith('SET AUTOCOMMIT')) {
           await session.query.query(stmt, undefined, stmtOpts);
-          if (upper.includes('= 0') || upper.includes('=0')) transactionState = 'active';
+          if (upper.includes('= 0') || upper.includes('=0')) { transactionState = 'active'; this.openTransaction = true; }
+          else this.openTransaction = false;
           continue;
         }
         const r = await session.query.query(stmt, undefined, stmtOpts);
@@ -210,6 +221,7 @@ export class QueryRunner {
         try {
           await session.query.query('ROLLBACK');
         } catch { /* best-effort rollback */ }
+        this.openTransaction = false;
       }
     } finally {
       this.runningQuery = undefined;
