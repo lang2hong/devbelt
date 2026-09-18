@@ -43,6 +43,8 @@ import { resolveEmailSender } from './modules/auth/service/resolveEmailSender.js
 import { authRoutes } from './modules/auth/route/auth.js';
 import { meRoutes } from './modules/db/route/me.js';
 import { plansRoutes, consolePlansRoutes } from './modules/billing/route/plans.js';
+import { buildPlanCatalog, type FeatureDto, type PlanCatalog, type PlanDto } from './modules/billing/service/planCatalog.js';
+import type { HomePlan } from './home.js';
 import { personalRoutes } from './modules/db/route/personal.js';
 import { organizationRoutes } from './modules/organization/route/organizations.js';
 import { invitationRoutes } from './modules/organization/route/invitations.js';
@@ -93,6 +95,62 @@ import { registerConsoleStatic } from './consoleStatic.js';
  *
  * EmailSender 按 SMTP_* 环境变量选择（生产 SMTP / 开发 log）。
  */
+/** 首页套餐卡片展示的特性 key（按此顺序取前若干项）。 */
+const HOME_PLAN_FEATURE_KEYS: readonly string[] = [
+  'allowedDatabaseTypes',
+  'allowedTemplateDatabaseTypes',
+  'maxSavedConnections',
+  'maxDevices',
+  'includedSeats',
+  'maxSharedResources',
+  'syncStorageBytes',
+  'sharedStorageQuotaBytes',
+  'allowDataSync',
+  'allowConnectionImport',
+];
+
+function humanBytes(bytes: number): string {
+  if (bytes <= 0) return '不限';
+  const gb = bytes / 1024 / 1024 / 1024;
+  if (gb >= 1) return `${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB`;
+  return `${Math.round(bytes / 1024 / 1024)} MB`;
+}
+
+function formatFeature(f: FeatureDto): string {
+  const label = f.label?.zh ?? f.key;
+  if (typeof f.value === 'boolean') return f.value ? label : `不含${label}`;
+  if (Array.isArray(f.value)) return `${label}：${f.value.join(' / ')}`;
+  if (typeof f.value === 'number') {
+    if (f.type === 'bytes') return `${label}：${humanBytes(f.value)}`;
+    return `${label}：${f.value === 0 ? '不限' : f.value}`;
+  }
+  return `${label}：${String(f.value)}`;
+}
+
+function toHomePlan(dto: PlanDto, kind: HomePlan['kind']): HomePlan {
+  const byKey = new Map(dto.features.map((f) => [f.key, f]));
+  const highlights = HOME_PLAN_FEATURE_KEYS.flatMap((key) => {
+    const f = byKey.get(key);
+    return f ? [formatFeature(f)] : [];
+  }).slice(0, 5);
+  return {
+    code: dto.code,
+    name: dto.name,
+    kind,
+    priceCents: dto.billing.priceCents,
+    unit: dto.billing.unit,
+    highlights,
+  };
+}
+
+/** 组合根适配：billing 套餐目录 → 首页展示模型（home.ts 不依赖 modules）。 */
+function toHomePlans(catalog: PlanCatalog): HomePlan[] {
+  return [
+    ...catalog.personal.map((p) => toHomePlan(p, 'personal')),
+    ...catalog.organization.map((p) => toHomePlan(p, 'organization')),
+  ];
+}
+
 export async function createApp() {
   const app = Fastify({
     // 自定义 req 序列化器：URL 里的邮箱验证 / 邀请 token 不得进日志（§8）。
@@ -470,7 +528,9 @@ export async function createApp() {
     cursorService,
     invoiceService,
   });
-  await registerConsoleStatic(app);
+  await registerConsoleStatic(app, {
+    getHomePlans: async () => toHomePlans(await buildPlanCatalog(planRepo, featureDefRepo)),
+  });
 
   await app.ready();
   await runMigrations(app.mysql as any, [...migrations], LEGACY_MIGRATION_VERSIONS);

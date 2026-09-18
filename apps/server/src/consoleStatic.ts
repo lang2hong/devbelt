@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'fs';
 import path from 'path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
-import { HOME_HTML } from './home.js';
+import { renderHome, type HomePlan } from './home.js';
 
 /** 公开页/邮件入口/控制台壳的严格 CSP（无第三方、无 eval，只放行构建产物）。 */
 const PUBLIC_CSP =
@@ -40,7 +40,12 @@ function notFound(_req: FastifyRequest, reply: FastifyReply): void {
  * `/` 暂 302 到 `/login`（P3 换套件首页）。HTML 均 `no-store` + 严格 CSP；
  * hash 资源 immutable 一年缓存；`/api/*` 由 Fastify 显式路由优先。
  */
-export async function registerConsoleStatic(app: FastifyInstance): Promise<void> {
+export interface ConsoleStaticOptions {
+  /** 套件首页的套餐数据来源（由组合根注入；缺省则首页不含套餐区）。 */
+  getHomePlans?: () => Promise<HomePlan[]>;
+}
+
+export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleStaticOptions = {}): Promise<void> {
   const authDist = authDistDir();
   const consoleDist = consoleDistDir();
   const adminDist = adminDistDir();
@@ -119,13 +124,21 @@ export async function registerConsoleStatic(app: FastifyInstance): Promise<void>
     app.get(route, serveHtml(authReady ? readHtml(authDist, file) : null));
   }
 
-  // 套件首页
+  // 套件首页（套餐为服务端渲染；数据源失败时降级为不含套餐的页面）
   app.get('/', async (_req, reply) => {
+    let plans: HomePlan[] | null = null;
+    if (opts.getHomePlans) {
+      try {
+        plans = await opts.getHomePlans();
+      } catch (err) {
+        app.log.warn(`[home] plan catalog unavailable: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
     reply
       .header('Cache-Control', 'no-store')
       .header('Content-Security-Policy', PUBLIC_CSP)
       .type('text/html')
-      .send(HOME_HTML);
+      .send(renderHome(plans));
   });
 
   // 控制台（db-ui，`/db` 前缀）

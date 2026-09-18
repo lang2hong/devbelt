@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, type Component } from 'vue';
-import { router, installRouter, navigate, withBase, stripBase, type RouteConfig } from './lib/router';
+import { router, installRouter, navigate, withBase, stripBase } from './lib/router';
+import { ADMIN_DEFAULT_PATH, ADMIN_ROUTES } from './routes';
 import { refreshSession, getAccessToken, logout } from '@devkit/auth-client';
 import { me, type ConsoleMe } from './api/me';
 import AdminNav from './pages/AdminNav.vue';
@@ -12,17 +13,10 @@ import AdminAuditView from './pages/AdminAuditView.vue';
 import AdminPlansView from './pages/AdminPlansView.vue';
 import AdminVersionView from './pages/AdminVersionView.vue';
 
-const ROUTES: RouteConfig[] = [
-  { pattern: '/users', name: 'admin-users' },
-  { pattern: '/organizations', name: 'admin-organizations' },
-  { pattern: '/orders', name: 'admin-orders' },
-  { pattern: '/invoices', name: 'admin-invoices' },
-  { pattern: '/audit', name: 'admin-audit' },
-  { pattern: '/plans', name: 'admin-plans' },
-  { pattern: '/version', name: 'admin-version' },
-];
+installRouter(ADMIN_ROUTES);
 
-installRouter(ROUTES);
+// `/admin/`（应用内路径 `/`）规范化到默认落地页，避免停在非规范 URL。
+if (router.pathname === '/') navigate(ADMIN_DEFAULT_PATH);
 
 const state = ref<'loading' | 'ready' | 'forbidden' | 'error'>('loading');
 const me_ = ref<ConsoleMe | null>(null);
