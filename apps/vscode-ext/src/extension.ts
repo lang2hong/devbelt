@@ -128,6 +128,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const orgVault = new CredentialVault(context.secrets, context.globalState);
   const orgWorkspace = new OrgWorkspace(orgClient, orgVault);
   const orgTreeProvider = new OrgTreeDataProvider(orgWorkspace);
+  context.subscriptions.push(orgTreeProvider);
   const orgTreeView = vscode.window.createTreeView('devbelt.explorer.organization', {
     treeDataProvider: orgTreeProvider,
     showCollapseAll: true,

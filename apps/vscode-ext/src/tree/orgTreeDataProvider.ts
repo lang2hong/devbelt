@@ -51,8 +51,17 @@ export class OrgTreeDataProvider implements vscode.TreeDataProvider<OrgTreeNode>
   private readonly emitter = new vscode.EventEmitter<OrgTreeNode | undefined>();
   readonly onDidChangeTreeData: vscode.Event<OrgTreeNode | undefined> = this.emitter.event;
 
+  /** workspace 变更订阅句柄（dispose 时释放，避免 provider 解绑后仍被回调）。 */
+  private readonly workspaceSub: vscode.Disposable;
+
   constructor(private readonly workspace: OrgWorkspace) {
-    workspace.onDidChange(() => this.refresh());
+    this.workspaceSub = workspace.onDidChange(() => this.refresh());
+  }
+
+  /** 释放事件发射器与订阅（纳入 extension subscriptions）。 */
+  dispose(): void {
+    this.workspaceSub.dispose();
+    this.emitter.dispose();
   }
 
   refresh(): void {
