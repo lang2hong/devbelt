@@ -132,8 +132,18 @@ export class QueryService {
     dialect: SqlDialect,
     /** 可选语句观察者（vscode-ext 用它写查询历史）。 */
     private readonly observer?: QueryObserver,
+    /**
+     * 本次会话的查询超时（ms，0 = 不超时）。缺省回落到静态 `queryTimeout`。
+     * 让每个连接可用各自的 `requestTimeout` 覆盖全局默认（MySQL/SQLite 过去完全无效）。
+     */
+    private readonly timeoutMsOverride?: number,
   ) {
     this.dialect = dialect;
+  }
+
+  /** 生效的查询超时：会话级覆盖优先，否则全局默认。 */
+  private get timeoutMs(): number {
+    return this.timeoutMsOverride ?? QueryService.queryTimeout;
   }
 
   /**
@@ -180,15 +190,16 @@ export class QueryService {
       };
       this.activeCancels.set(id, cancel);
       if (options?.token) options.token.cancel = cancel;
-      const timer = QueryService.queryTimeout > 0
+      const timeoutMs = this.timeoutMs;
+      const timer = timeoutMs > 0
         ? setTimeout(() => {
             if (!settled) {
               settled = true;
               finish();
               this.connection.abortQuery();
-              reject(new QueryError(`Query timeout (${QueryService.queryTimeout}ms)`, sql, Date.now() - start));
+              reject(new QueryError(`Query timeout (${timeoutMs}ms)`, sql, Date.now() - start));
             }
-          }, QueryService.queryTimeout)
+          }, timeoutMs)
         : null;
       const callback: QueryCallback = (err, results, fields) => {
         if (settled) return;

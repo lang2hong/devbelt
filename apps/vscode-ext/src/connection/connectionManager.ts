@@ -258,7 +258,7 @@ export class ConnectionManager {
     // 观察者挂在 QueryService 上，于是这条会话上**任何**修改性语句都会进历史，
     // 无论它来自编辑器、结果网格、表设计器还是树右键命令。
     const recorder = this.history ? new QueryHistoryRecorder(conn, this.history) : undefined;
-    const query = new QueryService(connection, dialect, recorder?.observer());
+    const query = new QueryService(connection, dialect, recorder?.observer(), conn.requestTimeout);
     const session: ConnectionSession = {
       capabilities: dialect.capabilities,
       query,

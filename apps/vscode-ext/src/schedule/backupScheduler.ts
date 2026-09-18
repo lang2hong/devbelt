@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { createWriteStream } from 'fs';
-import { mkdir } from 'fs/promises';
+import { mkdir, rename, rm } from 'fs/promises';
 import { once } from 'events';
 import { BackupService } from '@devkit/db-core';
 import { ConnectionManager } from '../connection/connectionManager';
@@ -97,12 +97,16 @@ export class BackupScheduler {
     const conn = this.store.get(entry.connId);
     if (!conn) return;
     const session = await this.manager.connect(conn);
-    const fileName = `${entry.database}_${new Date().toISOString().slice(0, 10)}.sql`;
+    // 文件名带日期 + 时间：只到「日」时，同一天多次/每小时备份会互相覆盖，历史静默丢失。
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const fileName = `${entry.database}_${stamp}.sql`;
     const uri = vscode.Uri.joinPath(vscode.Uri.file(entry.outputDir), fileName);
 
     // 流式写盘：dump 不再整份驻留内存，内存占用只与单表数据量相关。
+    // 先写 .tmp 再原子改名：中途失败不会留下半截 dump 被当成有效备份。
     await mkdir(entry.outputDir, { recursive: true });
-    const stream = createWriteStream(uri.fsPath, { encoding: 'utf8' });
+    const tmpPath = `${uri.fsPath}.tmp`;
+    const stream = createWriteStream(tmpPath, { encoding: 'utf8' });
     const streamError = new Promise<never>((_, reject) => stream.once('error', reject));
     try {
       await Promise.race([
@@ -119,8 +123,10 @@ export class BackupScheduler {
         stream.end(() => resolve());
         stream.once('error', reject);
       });
+      await rename(tmpPath, uri.fsPath);
     } catch (err) {
       stream.destroy();
+      await rm(tmpPath, { force: true }).catch(() => {});
       throw err;
     }
     vscode.window.showInformationMessage(`Backup complete: ${fileName}`);

@@ -63,3 +63,11 @@ describe('QueryService 按查询取消', () => {
     expect(conn.aborts).toBe(2);
   });
 });
+describe('QueryService 会话级超时覆盖', () => {
+  it('会话级 timeoutMs 覆盖全局默认并按该值超时', async () => {
+    const conn = new PendingConnection();
+    const svc = new QueryService(conn, new MysqlDialect(), undefined, 5);
+    await expect(svc.query('SELECT 1')).rejects.toThrow(/timeout \(5ms\)/);
+    expect(conn.aborts).toBe(1);
+  });
+});

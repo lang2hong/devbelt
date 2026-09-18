@@ -3,6 +3,7 @@ import * as fs from 'fs/promises';
 import { Client } from 'ssh2';
 import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import { isHostKeyTrusted, loadKnownHosts, knownHostsHint, verifyHostKey } from './sshHostKey';
+import { diagError } from '../utils/diagnostics';
 
 /** SSH 隧道建立超时（ms），避免连接既不 ready 也不 error 时永久挂起。 */
 const SSH_TUNNEL_TIMEOUT = 15_000;
@@ -118,9 +119,21 @@ export class SshTunnel {
         fail(err);
       };
 
+      /** 隧道建立后断线/报错时的清理：关闭本地 server 与 ssh 连接并移出 map。 */
+      const teardown = (): void => {
+        const t = this.tunnels.get(conn.id);
+        if (!t) return;
+        this.tunnels.delete(conn.id);
+        try { t.server.close(); } catch { /* already closed */ }
+        try { t.ssh.end(); } catch { /* already ended */ }
+      };
+
       ssh.on('ready', () => {
         if (settled) return;
-        ssh.removeListener('error', onError);
+        // 不摘除 error 监听：ready 之后连接中断时若无监听者，ssh2 的 'error'
+        // 会变成 Node 未捕获异常，且隧道会残留。这里改为记录并清理。
+        ssh.on('error', (err: Error) => { diagError('ssh tunnel dropped', err.message); teardown(); });
+        ssh.on('close', teardown);
         const server = net.createServer((socket) => {
           ssh.forwardOut(
             socket.remoteAddress || '127.0.0.1',

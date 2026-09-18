@@ -1,4 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// connectionManager → sshTunnel → utils/diagnostics 会 import vscode。
+vi.mock('vscode', () => ({
+  window: { createOutputChannel: () => ({ info: () => {}, warn: () => {}, error: () => {}, dispose: () => {} }) },
+}));
+
 import { DatabaseType } from '@devkit/db-core';
 import { ConnectionManager } from '../../src/connection/connectionManager';
 import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';

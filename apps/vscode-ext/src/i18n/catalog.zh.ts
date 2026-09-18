@@ -273,6 +273,8 @@ export const zh: MessageCatalog = {
 
   // 组织协作（P1）
   'org.tree.noOrganizations': '暂无组织，可创建或加入组织。',
+  'org.tree.openConsole': '打开控制台',
+  'org.tree.signIn': '登录',
   'org.tree.signInFirst': '请先登录后查看组织。',
   'org.noOrganizations': '请先登录并加入组织以管理资源。',
   'org.selectOrganization': '选择组织',

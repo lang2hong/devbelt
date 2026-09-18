@@ -136,6 +136,22 @@ export class BackupService {
       await write(block.join('\n') + '\n');
     }
 
+    // 视图：整库备份过去只含基表（getTables 只返回 BASE TABLE），视图全部缺失。
+    // 这里补视图定义；例程/事件/触发器需要方言的 SHOW CREATE 能力，尚未实现（记入台账）。
+    try {
+      const views = await meta.getViews(database);
+      for (const v of views) {
+        if (isCancelled?.()) throw new Error('Backup cancelled.');
+        try {
+          const def = (await meta.getViewDefinition(v.name, database)).trim().replace(/;\s*$/, '');
+          const qualified = dbType === DatabaseType.SQLITE
+            ? query.dialect.wrap(v.name)
+            : `${query.dialect.wrap(database)}.${query.dialect.wrap(v.name)}`;
+          await write(`\nDROP VIEW IF EXISTS ${qualified};\n${def};\n`);
+        } catch { /* 单个视图定义取不到则跳过，不使整库 dump 失败 */ }
+      }
+    } catch { /* 视图列表取不到则跳过 */ }
+
     const epilogue = this.sqlEpilogue(dbType);
     if (epilogue) await write('\n' + epilogue + ';\n');
 

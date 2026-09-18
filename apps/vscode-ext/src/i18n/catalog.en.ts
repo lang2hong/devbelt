@@ -292,6 +292,8 @@ export const en: MessageCatalog = {
 
   // 组织协作（P1）
   'org.tree.noOrganizations': 'No organizations — create or join one to get started.',
+  'org.tree.openConsole': 'Open Console',
+  'org.tree.signIn': 'Sign In',
   'org.tree.signInFirst': 'Sign in to view organizations.',
   'org.noOrganizations': 'Sign in and join an organization to manage resources.',
   'org.selectOrganization': 'Select organization',

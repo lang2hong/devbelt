@@ -87,7 +87,12 @@ export function registerOrgCommands(deps: OrgDeps): void {
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor(() => refreshEditorContext()),
     vscode.workspace.onDidCloseTextDocument((document) => {
-      if (bindings.delete(document.uri.toString())) refreshEditorContext();
+      const state = bindings.get(document.uri.toString());
+      if (!bindings.delete(document.uri.toString())) return;
+      // 组织模板会话（含 SSH 隧道）只登记在 bindings：文档关闭时若不主动释放，
+      // 会一直存活到扩展停用（连接/隧道泄漏）。
+      if (state?.kind === 'session') void manager.disposeConn(state.conn.id);
+      refreshEditorContext();
     }),
   );
 

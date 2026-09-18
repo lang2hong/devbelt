@@ -59,3 +59,35 @@ describe('i18n catalog', () => {
     expect(wvEn.sort()).toEqual(wvZh.sort());
   });
 });
+
+/**
+ * 代码引用的键必须存在。
+ *
+ * 回退链 `catalog[key] || en[key] || key` 会把缺失键原样显示（如
+ * `org.tree.openConsole`），运行时不报错。此前这两个键就是这么漏出来的。
+ */
+describe('i18n 键引用完整性', () => {
+  it('src 中所有 l10n(\'...\') 的键都在 catalog 中', async () => {
+    const { readFileSync, readdirSync, statSync } = await import('node:fs');
+    const path = await import('node:path');
+    const root = path.resolve(__dirname, '../../src');
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      for (const name of readdirSync(dir)) {
+        const p = path.join(dir, name);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (p.endsWith('.ts') && !p.endsWith('.test.ts') && !/catalog\.(en|zh)\.ts$/.test(p)) files.push(p);
+      }
+    };
+    walk(root);
+
+    const missing: string[] = [];
+    for (const file of files) {
+      const text = readFileSync(file, 'utf8');
+      for (const m of text.matchAll(/l10n\(\s*'([^']+)'/g)) {
+        if (!(m[1] in en)) missing.push(`${m[1]} (${path.relative(root, file)})`);
+      }
+    }
+    expect(missing, `缺失键：${missing.join(', ')}`).toEqual([]);
+  });
+});

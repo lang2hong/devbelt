@@ -5,6 +5,23 @@ import { IConnection } from './connection.js';
 import type { ConnectionConfig } from '../types/connection.js';
 import type { QueryCallback } from '../types/query.js';
 
+/**
+ * PostgreSQL 时间类型 OID：DATE/TIME/TIMESTAMP/TIMESTAMPTZ/TIMETZ。
+ *
+ * `pg` 默认把 DATE/TIMESTAMP 解析成 JS `Date`，经 webview 序列化后按 UTC/ISO 显示，
+ * 与库中值不一致（DATE 在东八区会显示成前一天），且无法按原文本编辑回写。
+ * MySQL 适配器用 `dateStrings: true` 返回字符串——这里对齐同一口径：原样返回驱动给
+ * 的文本，保留偏移量与精度。
+ */
+const PG_TEMPORAL_OIDS = [1082, 1083, 1114, 1184, 1266] as const;
+
+/** 为 pg 的 types 注册时间类型解析器（暴露以便单测；模块加载时自动应用）。 */
+export function configurePgTemporalParsers(types: { setTypeParser(oid: number, fn: (v: string) => string): void }): void {
+  for (const oid of PG_TEMPORAL_OIDS) types.setTypeParser(oid, (v: string) => v);
+}
+
+configurePgTemporalParsers(pg.types);
+
 export class PostgreSqlConnection extends IConnection {
   private client: pg.Client;
   private connected = false;
