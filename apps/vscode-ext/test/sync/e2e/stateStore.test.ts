@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { StateStore, type SyncStateSnapshot } from '../../../src/sync/e2e/stateStore';
+import { StateStore, type SyncStateSnapshot } from '@devkit/db-host/sync/e2e/stateStore';
 
 function makeMemento(seed?: Record<string, unknown>) {
   const m = new Map<string, unknown>(Object.entries(seed ?? {}));

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import type { ConnectionManager } from '../connection/connectionManager';
-import type { SavedConnection } from '../connection/connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import {
   exportFileName,
   exportFilters,

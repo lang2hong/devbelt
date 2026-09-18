@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { DatabaseType } from '@devkit/db-core';
-import { SyncMutator } from '../../../src/sync/e2e/syncMutator';
-import { RecordMapStore } from '../../../src/sync/e2e/recordMapStore';
-import { PendingMutationStore, type PendingPutMutation, type PendingDeleteMutation } from '../../../src/sync/e2e/pendingMutationStore';
-import { EntityStore } from '../../../src/sync/e2e/entityStore';
-import { openRecord } from '../../../src/sync/e2e/recordCodec';
-import type { SavedConnection, ConnectionGroup, ConnectionStore } from '../../../src/connection/connectionStore';
-import type { QueryFolder } from '../../../src/connection/queryStore';
+import { SyncMutator } from '@devkit/db-host/sync/e2e/syncMutator';
+import { RecordMapStore } from '@devkit/db-host/sync/e2e/recordMapStore';
+import { PendingMutationStore, type PendingPutMutation, type PendingDeleteMutation } from '@devkit/db-host/sync/e2e/pendingMutationStore';
+import { EntityStore } from '@devkit/db-host/sync/e2e/entityStore';
+import { openRecord } from '@devkit/db-host/sync/e2e/recordCodec';
+import type { SavedConnection, ConnectionGroup, ConnectionStore } from '@devkit/db-host/connection/connectionStore';
+import type { QueryFolder } from '@devkit/db-host/connection/queryStore';
 import type { SavedQuery } from '@devkit/db-core';
 
 function makeMemento() {

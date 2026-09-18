@@ -1669,16 +1669,14 @@
     "dev:webview": "cd webview && npx vite build --watch",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "lint": "tsc --noEmit -p tsconfig.test.json",
-    "test": "pnpm -C ../db-core build && cd webview && npx vite build && cd .. && node esbuild.js && vitest run",
+    "test": "pnpm -C ../../packages/db-core build && pnpm -C ../../packages/db-host build && cd webview && npx vite build && cd .. && node esbuild.js && vitest run",
     "package": "vsce package --no-dependencies",
     "vsix:smoke": "node scripts/vsix-smoke.mjs"
   },
   "dependencies": {
-    "@noble/curves": "2.4.0",
     "chart.js": "^4.4.0",
-    "hash-wasm": "4.12.0",
     "ssh2": "^1.16.1",
-    "undici": "^7.29.0"
+    "@devkit/db-host": "workspace:*"
   },
   "devDependencies": {
     "@devkit/db-core": "workspace:*",

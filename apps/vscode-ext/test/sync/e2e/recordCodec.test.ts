@@ -9,7 +9,7 @@ import {
   recordAad,
   sealRecord,
   SQL_MAX_BYTES,
-} from '../../../src/sync/e2e/recordCodec';
+} from '@devkit/db-host/sync/e2e/recordCodec';
 
 const noRef = () => undefined;
 

@@ -3,7 +3,7 @@ import { toSavedConnection, isSupportedTemplateType, classifyOrgError } from '..
 import { OrgApiError } from '../../src/org/client';
 import type { ConnectionTemplateContent } from '../../src/org/types';
 import type { OrgLocalCredential } from '../../src/org/credentialVault';
-import { ORG_CONNECTION_ID_PREFIX } from '../../src/sync/entitlementGate';
+import { ORG_CONNECTION_ID_PREFIX } from '@devkit/db-host/sync/entitlementGate';
 
 // org.ts 顶层 `import * as vscode` 会连同 orgTreeDataProvider 一起被加载，
 // 而后者 `extends vscode.TreeItem` 在类定义期就需要 TreeItem。这里的 mock 与

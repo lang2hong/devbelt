@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { jcs } from '../../../src/sync/crypto/jcs';
+import { jcs } from '@devkit/db-host/sync/crypto/jcs';
 import { INVALID_JCS_VALUES, JCS_VECTORS, NORMALIZED_JCS_VECTORS } from '@devkit/db-core/testing';
 
 describe('jcs（镜像服务端，共享向量双向锚定）', () => {

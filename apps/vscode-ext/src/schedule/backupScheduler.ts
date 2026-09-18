@@ -4,7 +4,7 @@ import { mkdir } from 'fs/promises';
 import { once } from 'events';
 import { BackupService } from '@devkit/db-core';
 import { ConnectionManager } from '../connection/connectionManager';
-import type { ConnectionStore } from '../connection/connectionStore';
+import type { ConnectionStore } from '@devkit/db-host/connection/connectionStore';
 
 interface ScheduleEntry {
   id: string;

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { uniqueId } from './id';
+import { uniqueId } from '@devkit/db-host/utils/id';
 
 export type AuditAction =
   | 'query_execute'

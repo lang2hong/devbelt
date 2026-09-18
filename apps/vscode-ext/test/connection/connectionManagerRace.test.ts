@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { SavedConnection } from '../../src/connection/connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 
 /** 由 mock 的 FakeConnection.connect 注入，模拟"建连尚未完成"。 */
 let resolveConnect: (() => void) | undefined;

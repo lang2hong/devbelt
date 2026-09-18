@@ -1,18 +1,18 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { EventEmitter } from '../../src/utils/event';
-import { PersonalSyncSession } from '../../src/sync/session';
-import { SyncApiError } from '../../src/sync/e2e/client';
-import { DekStore } from '../../src/sync/crypto/keyStore';
-import { RecordMapStore } from '../../src/sync/e2e/recordMapStore';
-import { PendingMutationStore, type PendingPutMutation } from '../../src/sync/e2e/pendingMutationStore';
-import type { PersonalSyncClient } from '../../src/sync/e2e/client';
-import type { ConnectionStore } from '../../src/connection/connectionStore';
+import { EventEmitter } from '@devkit/db-host/utils/event';
+import { PersonalSyncSession } from '@devkit/db-host/sync/session';
+import { SyncApiError } from '@devkit/db-host/sync/e2e/client';
+import { DekStore } from '@devkit/db-host/sync/crypto/keyStore';
+import { RecordMapStore } from '@devkit/db-host/sync/e2e/recordMapStore';
+import { PendingMutationStore, type PendingPutMutation } from '@devkit/db-host/sync/e2e/pendingMutationStore';
+import type { PersonalSyncClient } from '@devkit/db-host/sync/e2e/client';
+import type { ConnectionStore } from '@devkit/db-host/connection/connectionStore';
 import type { CachedEntitlement } from '../../src/sync/authService';
-import type { NewStateDto, StateDto } from '../../src/sync/e2e/types';
-import { deriveSyncSignKeyPair } from '../../src/sync/crypto/keyStore';
-import { encodeBase64Url } from '../../src/sync/crypto/recoveryCode';
-import { sealEnvelope } from '../../src/sync/envelope';
-import { hkdfSha256, SYNC_INFO } from '../../src/sync/crypto/hkdf';
+import type { NewStateDto, StateDto } from '@devkit/db-host/sync/e2e/types';
+import { deriveSyncSignKeyPair } from '@devkit/db-host/sync/crypto/keyStore';
+import { encodeBase64Url } from '@devkit/db-host/sync/crypto/recoveryCode';
+import { sealEnvelope } from '@devkit/db-host/sync/envelope';
+import { hkdfSha256, SYNC_INFO } from '@devkit/db-host/sync/crypto/hkdf';
 
 const kl = vi.hoisted(() => ({
   createInitialMaterial: vi.fn(),
@@ -24,7 +24,7 @@ const kl = vi.hoisted(() => ({
   newStateFromMaterial: vi.fn(),
 }));
 
-vi.mock('../../src/sync/keyLifecycle', () => {
+vi.mock('@devkit/db-host/sync/keyLifecycle', () => {
   return {
     createInitialMaterial: kl.createInitialMaterial,
     newRecoveryCode: kl.newRecoveryCode,

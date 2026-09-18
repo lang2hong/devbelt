@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DatabaseType } from '@devkit/db-core';
 import { ConnectionPathOverrideStore } from '../../src/connection/connectionPathOverrideStore';
 import { validateConnectionPaths } from '../../src/connection/connectionPathValidator';
-import type { SavedConnection } from '../../src/connection/connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 
 function makeMemento() {
   const m = new Map<string, unknown>();

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { PersonalSyncClient } from '../../../src/sync/e2e/client';
+import { PersonalSyncClient } from '@devkit/db-host/sync/e2e/client';
 
 function makeHttp(status = 200) {
   return { requestRaw: vi.fn(async () => ({ status, body: {} })) } as any;

@@ -1,5 +1,5 @@
 import type { ConnectionManager, ConnectionSession } from '../connection/connectionManager';
-import type { SavedConnection } from '../connection/connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import { buildCandidates, detectContext, extractFromTable, type SqlContext } from '../completion/sqlCompletionEngine';
 import { diagWarn } from '../utils/diagnostics';
 

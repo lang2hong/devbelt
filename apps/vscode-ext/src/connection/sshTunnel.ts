@@ -1,7 +1,7 @@
 import * as net from 'net';
 import * as fs from 'fs/promises';
 import { Client } from 'ssh2';
-import type { SavedConnection } from './connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import { isHostKeyTrusted, loadKnownHosts, knownHostsHint, verifyHostKey } from './sshHostKey';
 
 /** SSH 隧道建立超时（ms），避免连接既不 ready 也不 error 时永久挂起。 */

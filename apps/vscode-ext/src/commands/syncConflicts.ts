@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { l10n } from '../i18n';
-import type { SyncSessionFactory } from '../sync/sessionFactory';
+import type { SyncSessionFactory } from '@devkit/db-host/sync/sessionFactory';
 
 /**
  * B4 冲突面板（QuickPick）：列出未解决冲突，逐条或批量执行 Use Local / Use Remote / Cancel。

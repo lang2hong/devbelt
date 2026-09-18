@@ -1,7 +1,7 @@
 import { ConnectionFactory, QueryService, MetadataService, DataService, TableService } from '@devkit/db-core';
 import type { DatabaseType } from '@devkit/db-core';
 import type { DatabaseCapabilities } from '@devkit/db-core';
-import type { SavedConnection } from './connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import type { HistoryStore } from '../history/historyStore';
 import { QueryHistoryRecorder } from '../history/queryHistoryRecorder';
 import { SshTunnel } from './sshTunnel';

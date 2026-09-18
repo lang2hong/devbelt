@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { DatabaseType } from '@devkit/db-core';
-import { sealRecord } from '../../../src/sync/e2e/recordCodec';
-import { ConflictResolver } from '../../../src/sync/e2e/conflictResolver';
-import { RecordMapStore } from '../../../src/sync/e2e/recordMapStore';
-import { PendingMutationStore, type PendingDeleteMutation, type PendingPutMutation } from '../../../src/sync/e2e/pendingMutationStore';
-import { EntityStore, UnresolvedRefStore } from '../../../src/sync/e2e/entityStore';
-import { SyncMutator } from '../../../src/sync/e2e/syncMutator';
-import type { ConnectionStore, SavedConnection } from '../../../src/connection/connectionStore';
+import { sealRecord } from '@devkit/db-host/sync/e2e/recordCodec';
+import { ConflictResolver } from '@devkit/db-host/sync/e2e/conflictResolver';
+import { RecordMapStore } from '@devkit/db-host/sync/e2e/recordMapStore';
+import { PendingMutationStore, type PendingDeleteMutation, type PendingPutMutation } from '@devkit/db-host/sync/e2e/pendingMutationStore';
+import { EntityStore, UnresolvedRefStore } from '@devkit/db-host/sync/e2e/entityStore';
+import { SyncMutator } from '@devkit/db-host/sync/e2e/syncMutator';
+import type { ConnectionStore, SavedConnection } from '@devkit/db-host/connection/connectionStore';
 
 function makeMemento() {
   const m = new Map<string, unknown>();

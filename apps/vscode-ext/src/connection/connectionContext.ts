@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import type { SavedConnection } from './connectionStore';
-import { ConnectionStore } from './connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
+import { ConnectionStore } from '@devkit/db-host/connection/connectionStore';
 
 /**
  * 连接上下文跟踪器（参考 database-client 的 getByActiveFile + activeNode）。

@@ -1,5 +1,5 @@
 import { DatabaseType } from '@devkit/db-core';
-import type { SavedConnection } from '../connection/connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from './baseWebView';
 

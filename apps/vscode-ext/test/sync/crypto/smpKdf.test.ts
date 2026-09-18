@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { deriveKekSmpInWorker, type WorkerLike } from '../../../src/sync/crypto/smpKdf';
-import { deriveKekSmp } from '../../../src/sync/crypto/argon2';
-import { ARGON2ID_SALT_BYTES, type SmpKdfParams } from '../../../src/sync/crypto/smpKdfParams';
-import { encodeBase64Url } from '../../../src/sync/crypto/recoveryCode';
+import { deriveKekSmpInWorker, type WorkerLike } from '@devkit/db-host/sync/crypto/smpKdf';
+import { deriveKekSmp } from '@devkit/db-host/sync/crypto/argon2';
+import { ARGON2ID_SALT_BYTES, type SmpKdfParams } from '@devkit/db-host/sync/crypto/smpKdfParams';
+import { encodeBase64Url } from '@devkit/db-host/sync/crypto/recoveryCode';
 
 const valid: SmpKdfParams = {
   alg: 'argon2id',

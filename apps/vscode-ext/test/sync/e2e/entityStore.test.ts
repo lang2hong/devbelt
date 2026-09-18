@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { DatabaseType } from '@devkit/db-core';
-import { EntityStore, UnresolvedRefStore } from '../../../src/sync/e2e/entityStore';
-import type { SavedConnection, ConnectionGroup, ConnectionStore } from '../../../src/connection/connectionStore';
-import type { QueryFolder } from '../../../src/connection/queryStore';
+import { EntityStore, UnresolvedRefStore } from '@devkit/db-host/sync/e2e/entityStore';
+import type { SavedConnection, ConnectionGroup, ConnectionStore } from '@devkit/db-host/connection/connectionStore';
+import type { QueryFolder } from '@devkit/db-host/connection/queryStore';
 import type { SavedQuery } from '@devkit/db-core';
-import { applyOrder } from '../../../src/sync/e2e/entityStore';
+import { applyOrder } from '@devkit/db-host/sync/e2e/entityStore';
 
 function makeMemento() {
   const m = new Map<string, unknown>();

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, afterEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('vscode', () => ({
   version: '1.90.0',
@@ -7,13 +7,17 @@ vi.mock('vscode', () => ({
   ConfigurationTarget: { Global: 1 },
 }));
 
-// 与 tokenRace 相同：把 undici fetch 委托回 globalThis.fetch，使安装的桩生效。
-vi.mock('undici', () => ({
-  Agent: class {},
-  fetch: (url: any, init?: any) => globalThis.fetch(url, init),
-}));
-
 import { AuthService } from '../../src/sync/authService';
+import { syncFetch } from '@devkit/db-host/sync/syncClient';
+
+// db-host 在测试包之外，vi.mock('undici') 无法拦截其内部 import；
+// 用 syncFetch seam 把请求导向 globalThis.fetch，使安装的桩生效。
+const realSyncFetch = syncFetch.impl;
+
+// 让所有用例（含直接替换 globalThis.fetch 的飞行中请求用例）都经 seam 走桩。
+beforeEach(() => {
+  syncFetch.impl = ((url: any, init?: any) => globalThis.fetch(url, init)) as any;
+});
 
 const ACCESS_KEY = 'devbelt.auth.accessToken';
 const ENTITLEMENT_KEY = 'devbelt.sync.cachedEntitlement';
@@ -81,6 +85,7 @@ let fetchCalls: string[] = [];
 /** 安装 fetch 桩；handler 按 URL 决定响应。 */
 function installFetch(handler: (url: string) => { status: number; body: unknown }) {
   fetchCalls = [];
+  syncFetch.impl = ((url: any, init?: any) => globalThis.fetch(url, init)) as any;
   globalThis.fetch = (async (url: any) => {
     const u = String(url);
     fetchCalls.push(u);
@@ -89,7 +94,7 @@ function installFetch(handler: (url: string) => { status: number; body: unknown 
   }) as any;
 }
 
-afterEach(() => { globalThis.fetch = realFetch; });
+afterEach(() => { globalThis.fetch = realFetch; syncFetch.impl = realSyncFetch; });
 
 describe('AuthService.refreshEntitlement', () => {
   it('拉取 /api/db/me 并把 Pro 权益写进内存与 globalState', async () => {

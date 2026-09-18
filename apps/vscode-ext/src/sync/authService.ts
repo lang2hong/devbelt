@@ -2,9 +2,9 @@ import * as vscode from 'vscode';
 import { execSync } from 'child_process';
 import { readFileSync } from 'fs';
 import { hostname, platform, arch, release } from 'os';
-import { SyncClient, AuthResult, DeviceInfo, MeResponse } from './syncClient';
-import { eventBus, AuthEvent } from '../utils/event';
-import { DEFAULT_FREE_ENGINES, DEFAULT_FREE_MAX_CONNECTIONS } from './entitlementGate';
+import { SyncClient, AuthResult, DeviceInfo, MeResponse } from '@devkit/db-host/sync/syncClient';
+import { eventBus, AuthEvent } from '@devkit/db-host/utils/event';
+import { DEFAULT_FREE_ENGINES, DEFAULT_FREE_MAX_CONNECTIONS } from '@devkit/db-host/sync/entitlementGate';
 
 // 由 esbuild 构建时从 .env / .env.production 注入（见 esbuild.js 的 define）；测试环境由 vitest.config.ts 提供同名字段
 declare const __SYNC_SERVER_URL__: string;
@@ -12,24 +12,10 @@ declare const __SYNC_SERVER_URL__: string;
 /** 默认同步服务器地址（构建时由 esbuild 从 .env / .env.production 注入） */
 export const DEFAULT_SERVER_URL = __SYNC_SERVER_URL__;
 
-/** 缓存的个人权益（personal_plans entitlement_snapshot，不含时间字段）。 */
-export interface CachedEntitlement {
-  planCode: string;
-  allowedDatabaseTypes: string[];
-  maxDevices: number;
-  /** 本机可保存连接数上限；0 = 不限。 */
-  maxSavedConnections: number;
-  /** 是否允许导入连接配置。 */
-  allowConnectionImport: boolean;
-  /** 可同时打开的连接数；0 = 不限。缺省视为 0（不限）。 */
-  maxConcurrentConnections?: number;
-  /** 是否允许导出连接配置。缺省视为允许。 */
-  allowConnectionExport?: boolean;
-  /** 是否允许 ER 图。缺省视为允许。 */
-  allowErDiagram?: boolean;
-  /** 是否允许数据同步。缺省视为允许。 */
-  allowDataSync?: boolean;
-}
+// CachedEntitlement 定义已下沉到 @devkit/db-host（宿主无关）；此处 re-export 保持旧导入路径可用。
+import type { CachedEntitlement } from '@devkit/db-host/sync/entitlementGate';
+export type { CachedEntitlement };
+
 
 let _osMachineId: string | undefined;
 

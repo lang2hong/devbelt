@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('vscode', () => ({}));
 
 import { TerminalService } from '../../src/terminal/terminalService';
-import type { SavedConnection } from '../../src/connection/connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import { DatabaseType } from '@devkit/db-core';
 
 describe('TerminalService.buildCommand', () => {

@@ -3,7 +3,7 @@ import { DatabaseType } from '@devkit/db-core';
 import { DbTreeNode, NodeKind } from '../tree/dbTreeNode';
 import { ConnectionForm } from '../connection/connectionForm';
 import { ConnectionPathError } from '../connection/connectionManager';
-import type { SavedConnection } from '../connection/connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import { l10n } from '../i18n';
 import { AuditLogger } from '../utils/auditLogger';
 import { flattenGroups } from '../utils/groupTree';
@@ -15,7 +15,7 @@ import {
   maxSavedConnections,
   maxConcurrentConnections,
   isOrganizationConnectionId,
-} from '../sync/entitlementGate';
+} from '@devkit/db-host/sync/entitlementGate';
 
 async function queryServerVersion(session: any, dbType: string): Promise<string> {
   try {

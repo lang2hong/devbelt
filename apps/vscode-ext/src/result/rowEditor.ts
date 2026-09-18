@@ -1,8 +1,8 @@
 import type { QueryResult } from '@devkit/db-core';
 import type { ConnectionManager } from '../connection/connectionManager';
-import type { SavedConnection } from '../connection/connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import { confirmSqlExecution } from '../utils/sqlSafety';
-import { DataChangeEvent, eventBus } from '../utils/event';
+import { DataChangeEvent, eventBus } from '@devkit/db-host/utils/event';
 import { AuditLogger } from '../utils/auditLogger';
 
 export interface RowEditorOptions {

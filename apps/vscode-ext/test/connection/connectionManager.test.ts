@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { DatabaseType } from '@devkit/db-core';
 import { ConnectionManager } from '../../src/connection/connectionManager';
-import type { SavedConnection } from '../../src/connection/connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 
 function conn(over: Partial<SavedConnection> = {}): SavedConnection {
   return { id: 'c-1', name: 'n', dbType: DatabaseType.MYSQL, host: 'h', port: 3306, user: 'u', ...over } as SavedConnection;

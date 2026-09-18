@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { SyncClient } from '../../src/sync/syncClient';
+import { SyncClient } from '@devkit/db-host/sync/syncClient';
 
 /**
  * SyncClient 的 401 刷新路径。

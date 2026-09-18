@@ -5,7 +5,7 @@ import {
   openAes256Gcm,
   randomNonce,
   sealAes256Gcm,
-} from '../../../src/sync/crypto/aead';
+} from '@devkit/db-host/sync/crypto/aead';
 
 const key = new Uint8Array(32).fill(1);
 const nonce = new Uint8Array(12).fill(2);

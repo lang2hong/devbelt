@@ -2,7 +2,7 @@ import { DatabaseType, validateIdent } from '@devkit/db-core';
 import type { QueryService } from '@devkit/db-core';
 import { sqlSkeleton } from '@devkit/db-core/sql';
 import type { ConnectionManager } from '../connection/connectionManager';
-import type { SavedConnection } from '../connection/connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import { splitSqlStatements } from '../utils/sql';
 import { confirmSqlExecution } from '../utils/sqlSafety';
 import { classifyWriteKind } from '../utils/sqlRisk';

@@ -1,11 +1,11 @@
 import * as vscode from 'vscode';
 import type { AuthService } from '../sync/authService';
-import { SyncApiError } from '../sync/e2e/client';
-import type { StateDto, NewStateDto } from '../sync/e2e/types';
-import type { InitialSyncMaterial } from '../sync/keyLifecycle';
-import { createInitialMaterial, newRecoveryCode, unlockDek } from '../sync/keyLifecycle';
-import { encodeBase64Url } from '../sync/crypto/recoveryCode';
-import type { SyncSessionFactory } from '../sync/sessionFactory';
+import { SyncApiError } from '@devkit/db-host/sync/e2e/client';
+import type { StateDto, NewStateDto } from '@devkit/db-host/sync/e2e/types';
+import type { InitialSyncMaterial } from '@devkit/db-host/sync/keyLifecycle';
+import { createInitialMaterial, newRecoveryCode, unlockDek } from '@devkit/db-host/sync/keyLifecycle';
+import { encodeBase64Url } from '@devkit/db-host/sync/crypto/recoveryCode';
+import type { SyncSessionFactory } from '@devkit/db-host/sync/sessionFactory';
 import { l10n } from '../i18n';
 
 type SyncRun = { stage: string } | undefined;

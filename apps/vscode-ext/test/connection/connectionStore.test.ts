@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ConnectionStore, stripSecrets, type ConnectionTreeData, type SavedConnection } from '../../src/connection/connectionStore';
+import { ConnectionStore, stripSecrets, type ConnectionTreeData, type SavedConnection } from '@devkit/db-host/connection/connectionStore';
 
 vi.mock('vscode', () => ({
   window: {

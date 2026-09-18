@@ -1,9 +1,9 @@
 import { ConnectionManager } from '../connection/connectionManager';
-import type { SavedConnection } from '../connection/connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import { TableQueryView } from './tableQueryView';
 import { HistoryStore } from '../history/historyStore';
 import type { AuditLogger } from '../utils/auditLogger';
-import { QueryExecutedEvent, DataChangeEvent, eventBus } from '../utils/event';
+import { QueryExecutedEvent, DataChangeEvent, eventBus } from '@devkit/db-host/utils/event';
 import { classifyWriteKind } from '../utils/sqlRisk';
 import { dialectScanOptions } from '../utils/sqlDialectOptions';
 import { containsSecretSql } from '../utils/sqlSecret';

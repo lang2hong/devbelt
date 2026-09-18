@@ -2,10 +2,10 @@ import * as vscode from 'vscode';
 import { DatabaseType } from '@devkit/db-core';
 import { ConnectionFactory } from '@devkit/db-core';
 import type { IConnection } from '@devkit/db-core';
-import { stripSecrets, type SavedConnection, type ConnectionGroup } from './connectionStore';
+import { stripSecrets, type SavedConnection, type ConnectionGroup } from '@devkit/db-host/connection/connectionStore';
 import { SshTunnel } from './sshTunnel';
 import { l10n } from '../i18n';
-import { uniqueId } from '../utils/id';
+import { uniqueId } from '@devkit/db-host/utils/id';
 import { flattenGroups } from '../utils/groupTree';
 import { BaseWebView } from '../result/baseWebView';
 

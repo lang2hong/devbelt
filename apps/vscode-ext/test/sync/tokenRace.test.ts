@@ -7,14 +7,12 @@ vi.mock('vscode', () => ({
   ConfigurationTarget: { Global: 1 },
 }));
 
-// SyncClient 静态 import undici 的 fetch，绕过 VS Code 对 globalThis.fetch 的代理。
-// 测试里让它委托回 globalThis.fetch，这样 installServerStub 替换 global fetch 即可生效。
-vi.mock('undici', () => ({
-  Agent: class {},
-  fetch: (url: any, init?: any) => globalThis.fetch(url, init),
-}));
-
 import { AuthService } from '../../src/sync/authService';
+import { syncFetch } from '@devkit/db-host/sync/syncClient';
+
+// db-host 在测试包之外，vi.mock('undici') 无法拦截其内部 import；
+// 用 syncFetch seam 让请求委托回 globalThis.fetch，这样服务端桩即可生效。
+const realSyncFetch = syncFetch.impl;
 
 /**
  * 多窗口 refresh token 轮换竞态。
@@ -71,6 +69,7 @@ function installServerStub(): { consumed: Set<string>; reuseDetected: () => bool
   let reuse = false;
   let seq = 1;
 
+  syncFetch.impl = ((url: any, init?: any) => globalThis.fetch(url, init)) as any;
   globalThis.fetch = (async (url: any, init?: any) => {
     const u = String(url);
     const body = init?.body ? JSON.parse(init.body) : undefined;
@@ -97,7 +96,7 @@ function installServerStub(): { consumed: Set<string>; reuseDetected: () => bool
 }
 
 beforeEach(() => { fetchCalls = []; });
-afterEach(() => { globalThis.fetch = realFetch; });
+afterEach(() => { globalThis.fetch = realFetch; syncFetch.impl = realSyncFetch; });
 
 describe('多窗口共享 SecretStorage 时的 refresh 轮换', () => {
   it('B 窗口刷新时使用 A 窗口轮换后的最新 token，不触发重用检测', async () => {

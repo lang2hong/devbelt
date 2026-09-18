@@ -12,7 +12,7 @@ import {
   canExportConnections,
   canUseErDiagram,
   canUseDataSync,
-} from '../../src/sync/entitlementGate';
+} from '@devkit/db-host/sync/entitlementGate';
 
 const free = { planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 2, maxSavedConnections: 10, allowConnectionImport: false };
 const pro = { planCode: 'pro', allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 5, maxSavedConnections: 100, allowConnectionImport: true };

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { BaseWebView } from '../result/baseWebView';
 import { DbTreeNode } from '../tree/dbTreeNode';
-import type { SavedConnection } from '../connection/connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import type { Deps } from './shared';
 import { recordBulkHistory, requireCapability } from './shared';
 import { l10n } from '../i18n';

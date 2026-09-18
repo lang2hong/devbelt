@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { uniqueId } from '../../src/utils/id';
+import { uniqueId } from '@devkit/db-host/utils/id';
 
 /**
  * 回归：同毫秒内不得碰撞。

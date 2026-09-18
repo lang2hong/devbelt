@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { EpochTransitionCoordinator } from '../../src/sync/epochTransition';
-import type { SyncStateSnapshot } from '../../src/sync/e2e/stateStore';
+import { EpochTransitionCoordinator } from '@devkit/db-host/sync/epochTransition';
+import type { SyncStateSnapshot } from '@devkit/db-host/sync/e2e/stateStore';
 
 function makeMemento() {
   const m = new Map<string, unknown>();

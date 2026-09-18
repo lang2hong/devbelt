@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { BaseWebView } from '../result/baseWebView';
 import { l10n } from '../i18n';
 import type { AuthService } from './authService';
-import type { SyncSessionFactory } from './sessionFactory';
+import type { SyncSessionFactory } from '@devkit/db-host/sync/sessionFactory';
 
 /**
  * 账户面板消息协议：

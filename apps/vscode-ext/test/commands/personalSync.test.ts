@@ -10,9 +10,9 @@ vi.mock('vscode', () => ({
 }));
 
 import { initializePersonalSync, unlockPersonalSync, syncEntry, pullPersonalSync, pushPersonalSync, resetLocalSync, type PersonalSyncCommandDeps, type SyncSessionPort, type SyncUi } from '../../src/commands/personalSync';
-import { SyncApiError } from '../../src/sync/e2e/client';
-import type { InitialSyncMaterial } from '../../src/sync/keyLifecycle';
-import type { StateDto } from '../../src/sync/e2e/types';
+import { SyncApiError } from '@devkit/db-host/sync/e2e/client';
+import type { InitialSyncMaterial } from '@devkit/db-host/sync/keyLifecycle';
+import type { StateDto } from '@devkit/db-host/sync/e2e/types';
 
 const state: StateDto = {
   protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1,

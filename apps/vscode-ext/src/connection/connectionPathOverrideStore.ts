@@ -1,5 +1,5 @@
 import { DatabaseType } from '@devkit/db-core';
-import type { SavedConnection } from './connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 
 /**
  * 本机路径覆盖（B3 · needsConfig）。

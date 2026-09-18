@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { DbTreeNode } from '../tree/dbTreeNode';
-import type { SavedConnection } from '../connection/connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import type { PathOverrideFields } from '../connection/connectionPathOverrideStore';
 import { validateConnectionPaths } from '../connection/connectionPathValidator';
 import { l10n } from '../i18n';

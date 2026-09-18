@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { DatabaseType } from '@devkit/db-core';
-import { applyRecord, reconcileUnresolved, assertSafeGroupParent } from '../../../src/sync/e2e/applyRecords';
-import { RecordMapStore } from '../../../src/sync/e2e/recordMapStore';
-import { EntityStore, UnresolvedRefStore } from '../../../src/sync/e2e/entityStore';
-import { RecordConflictError } from '../../../src/sync/e2e/errors';
-import type { SavedConnection, ConnectionGroup, ConnectionStore } from '../../../src/connection/connectionStore';
-import type { QueryFolder } from '../../../src/connection/queryStore';
+import { applyRecord, reconcileUnresolved, assertSafeGroupParent } from '@devkit/db-host/sync/e2e/applyRecords';
+import { RecordMapStore } from '@devkit/db-host/sync/e2e/recordMapStore';
+import { EntityStore, UnresolvedRefStore } from '@devkit/db-host/sync/e2e/entityStore';
+import { RecordConflictError } from '@devkit/db-host/sync/e2e/errors';
+import type { SavedConnection, ConnectionGroup, ConnectionStore } from '@devkit/db-host/connection/connectionStore';
+import type { QueryFolder } from '@devkit/db-host/connection/queryStore';
 import type { SavedQuery } from '@devkit/db-core';
 
 function makeMemento() {

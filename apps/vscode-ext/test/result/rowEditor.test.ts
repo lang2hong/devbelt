@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { RowEditor } from '../../src/result/rowEditor';
-import { DataChangeEvent, eventBus } from '../../src/utils/event';
+import { DataChangeEvent, eventBus } from '@devkit/db-host/utils/event';
 import { AuditLogger } from '../../src/utils/auditLogger';
 
 vi.mock('vscode', () => ({ window: { showErrorMessage: () => {} } }));

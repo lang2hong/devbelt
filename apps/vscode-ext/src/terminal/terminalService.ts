@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { DatabaseType } from '@devkit/db-core';
-import type { SavedConnection } from '../connection/connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 
 /**
  * 按平台引用 shell 参数。

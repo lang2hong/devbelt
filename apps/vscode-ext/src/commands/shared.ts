@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { ConnectionStore } from '../connection/connectionStore';
-import type { SavedConnection } from '../connection/connectionStore';
+import { ConnectionStore } from '@devkit/db-host/connection/connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { ConnectionPathOverrideStore } from '../connection/connectionPathOverrideStore';
 import { ConnectionContext } from '../connection/connectionContext';
@@ -8,7 +8,7 @@ import { DbTreeDataProvider } from '../tree/dbTreeDataProvider';
 import { QueryExecutor } from '../result/queryExecutor';
 import { HistoryStore } from '../history/historyStore';
 import { AuthService } from '../sync/authService';
-import type { SyncSessionFactory } from '../sync/sessionFactory';
+import type { SyncSessionFactory } from '@devkit/db-host/sync/sessionFactory';
 import { l10n } from '../i18n';
 import type { DatabaseOperation } from '@devkit/db-core';
 import type { ConnectionSession } from '../connection/connectionManager';

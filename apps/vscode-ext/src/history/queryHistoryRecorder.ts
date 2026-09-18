@@ -1,5 +1,5 @@
 import type { ExecutedStatement, QueryObserver } from '@devkit/db-core';
-import type { SavedConnection } from '../connection/connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import { analyzeSqlRisk } from '../utils/sqlRisk';
 import { dialectScanOptions } from '../utils/sqlDialectOptions';
 import { containsSecretSql } from '../utils/sqlSecret';

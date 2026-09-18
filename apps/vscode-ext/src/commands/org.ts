@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import { DatabaseType } from '@devkit/db-core';
-import type { SavedConnection } from '../connection/connectionStore';
+import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import type { ConnectionManager } from '../connection/connectionManager';
-import { ORG_CONNECTION_ID_PREFIX } from '../sync/entitlementGate';
+import { ORG_CONNECTION_ID_PREFIX } from '@devkit/db-host/sync/entitlementGate';
 import type { QueryExecutor } from '../result/queryExecutor';
 import { OrgWorkspace } from '../org/workspace';
 import { OrgApiError } from '../org/client';
