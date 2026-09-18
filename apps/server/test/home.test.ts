@@ -37,6 +37,12 @@ describe('套件首页渲染', () => {
     expect(html).not.toContain('id="entrances"');
   });
 
+  it('顶部 header 吸顶', () => {
+    const html = renderHome(PLANS);
+    expect(html).toMatch(/header\.top\s*\{[^}]*position:\s*sticky/);
+    expect(html).toMatch(/header\.top\s*\{[^}]*top:\s*0/);
+  });
+
   it('工具段列出已发布扩展与待开发项，并带 Marketplace 链接', () => {
     const html = renderHome(PLANS);
     for (const tool of ['DB Client', 'REST NEO', 'l2h-harness']) {

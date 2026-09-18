@@ -116,7 +116,8 @@ export function renderHome(plans: HomePlan[] | null): string {
         font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; line-height: 1.6; }
       a { color: inherit; }
       .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
-      header.top { display: flex; align-items: center; gap: 16px; padding: 20px 0; }
+      header.top { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 16px; padding: 20px 0;
+        background: rgba(11,16,32,.85); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
       header.top .brand { font-weight: 700; font-size: 1.15rem; letter-spacing: -0.01em; }
       header.top .spacer { flex: 1; }
       header.top nav a { color: var(--muted); text-decoration: none; margin-left: 18px; font-size: .95rem; }
