@@ -100,6 +100,9 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
 
       await expect(runMigrations(pool as any, [...migrations], LEGACY_MIGRATION_VERSIONS)).rejects.toThrow(/未知版本/);
     } finally {
+      // 必须清理：该用例把 999_future 写进共享测试库的 schema_migrations，
+      // 若残留会令后续用例的 runMigrations 拒绝启动（unknown version），级联失败。
+      await dropAll(pool);
       await pool.end();
     }
   });
