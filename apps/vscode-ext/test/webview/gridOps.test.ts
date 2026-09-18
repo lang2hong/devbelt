@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   buildInsertPayload,
   buildInsertStatement,
+  deleteRowsMessage,
   identifierQuote,
   quoteLiteral,
+  updateCellMessage,
 } from '../../webview/src/utils/gridOps';
 
 describe('gridOps 方言引用', () => {
@@ -52,5 +54,20 @@ describe('gridOps 复制 INSERT', () => {
   it('无表或空行时返回空串', () => {
     expect(buildInsertStatement(undefined, 'd', ['a'], [{ a: 1 }], 'PG')).toBe('');
     expect(buildInsertStatement('t', 'd', ['a'], [], 'PG')).toBe('');
+  });
+});
+
+describe('gridOps 消息契约', () => {
+  it('updateCell 使用 pkColumns/pkValues（不是 pkColumn/rowId）', () => {
+    const msg = updateCellMessage(['id', 'k'], [1, 'a'], 'name', 'x');
+    expect(msg).toEqual({ type: 'updateCell', pkColumns: ['id', 'k'], pkValues: [1, 'a'], column: 'name', value: 'x' });
+    // 与扩展侧 tableQueryView 读取的字段一致
+    expect(msg).toHaveProperty('pkColumns');
+    expect(msg).toHaveProperty('pkValues');
+  });
+
+  it('deleteRows 逐行携带 pkColumns/pkValues', () => {
+    const msg = deleteRowsMessage([{ pkColumns: ['id'], pkValues: [1] }]);
+    expect(msg.rows[0]).toEqual({ pkColumns: ['id'], pkValues: [1] });
   });
 });

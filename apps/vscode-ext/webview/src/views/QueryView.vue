@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import { useI18n } from '../composables/useI18n';
 import ResultGrid from '../components/ResultGrid.vue';
+import { deleteRowsMessage, updateCellMessage } from '../utils/gridOps';
 import ResultChart from '../components/ResultChart.vue';
 
 const { post, onMessage } = useVsCode();
@@ -319,11 +320,11 @@ function handleFilter(conditions: { column: string; op: string; value?: string }
 }
 
 function handleUpdateCell(pkColumns: string[], pkValues: any[], col: string, val: string) {
-  post({ type: 'updateCell', pkColumns, pkValues, column: col, value: val });
+  post(updateCellMessage(pkColumns, pkValues, col, val));
 }
 
 function handleDeleteRows(rows: { pkColumns: string[]; pkValues: any[] }[]) {
-  post({ type: 'deleteRows', rows });
+  post(deleteRowsMessage(rows));
 }
 
 function handleInsertRow(columns: string[], values: (string | null)[]) {

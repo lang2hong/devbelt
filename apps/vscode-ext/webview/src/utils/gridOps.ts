@@ -56,3 +56,23 @@ export function buildInsertStatement(
     .map((row) => `INSERT INTO ${target} (${colList}) VALUES (${columns.map((c) => fmt(row[c])).join(', ')});`)
     .join('\n');
 }
+/** 网格 → 扩展的消息负载（抽出以便契约单测，避免字段名悄悄错位）。 */
+export interface UpdateCellMessage {
+  type: 'updateCell';
+  pkColumns: string[];
+  pkValues: unknown[];
+  column: string;
+  value: string;
+}
+export interface DeleteRowsMessage {
+  type: 'deleteRows';
+  rows: { pkColumns: string[]; pkValues: unknown[] }[];
+}
+
+export function updateCellMessage(pkColumns: string[], pkValues: unknown[], column: string, value: string): UpdateCellMessage {
+  return { type: 'updateCell', pkColumns, pkValues, column, value };
+}
+
+export function deleteRowsMessage(rows: { pkColumns: string[]; pkValues: unknown[] }[]): DeleteRowsMessage {
+  return { type: 'deleteRows', rows };
+}
