@@ -44,6 +44,7 @@ pnpm test
 apps/            # 可部署单元
 ├── server/      # Fastify 服务：认证、组织、同步 API、MySQL 持久化、静态托管
 ├── vscode-ext/  # VS Code 宿主：命令、树视图、webview、组织 Workspace
+├── db-hostd/    # db-host 的 stdio JSON-RPC sidecar（非 VS Code 宿主复用）
 ├── db-ui/       # /db 控制台（Vue 3 + Vite）
 ├── auth-ui/     # 身份页（Vue 3 + Vite）
 ├── admin-ui/    # /admin 平台后台（Vue 3 + Vite）

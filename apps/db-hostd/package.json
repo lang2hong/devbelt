@@ -1,0 +1,26 @@
+{
+  "name": "@devkit/db-hostd",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Host-agnostic sidecar exposing @devkit/db-host over stdio JSON-RPC (NDJSON)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "db-hostd": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "lint": "tsc --noEmit -p tsconfig.test.json",
+    "test": "pnpm -C ../../packages/db-host build && tsc -p tsconfig.json && vitest run"
+  },
+  "dependencies": {
+    "@devkit/db-core": "workspace:*",
+    "@devkit/db-host": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

@@ -12,3 +12,4 @@ apps/server/public/
 *.vsix
 devkit-connections.json
 docs/archive/
+.db-hostd/
