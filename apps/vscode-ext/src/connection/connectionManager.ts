@@ -372,6 +372,8 @@ export class ConnectionManager {
     let oldest: SessionEntry | undefined;
     for (const entry of this.sessionEntries.values()) {
       if (this.explicit.has(entry.connId)) continue;
+      // 跳过有在途查询的会话：淘汰会 end() 连接，使长查询中途失败并可能留下未定义事务。
+      if (entry.session.query.inFlightCount > 0) continue;
       if (!oldest || entry.lastUsed < oldest.lastUsed) {
         oldest = entry;
       }
@@ -392,8 +394,12 @@ export class ConnectionManager {
       const now = Date.now();
       const toDispose: string[] = [];
       for (const [id, entry] of this.sessionEntries) {
-        if (this.explicit.has(id)) continue;
-        if (now - entry.lastUsed > this.config.idleTimeoutMs || !entry.session.isAlive()) {
+        // 有在途查询的会话一律跳过：健康检查不应中断正在执行的语句。
+        if (entry.session.query.inFlightCount > 0) continue;
+        // 显式打开的连接豁免「空闲超时」，但仍要检测存活：SSH 断开/DB 掉线后
+        // 过去会一直显示为已打开、反复失败，只能手动关闭。
+        const idle = !this.explicit.has(id) && now - entry.lastUsed > this.config.idleTimeoutMs;
+        if (idle || !entry.session.isAlive()) {
           toDispose.push(id);
         }
       }
