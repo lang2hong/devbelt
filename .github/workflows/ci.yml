@@ -117,12 +117,15 @@ jobs:
       - name: Integration tests (db-core)
         env:
           MYSQL_TEST_URL: mysql://root:ci-root-pass@127.0.0.1:3306
+          # 服务容器建的库是 devkit_verify；不设 MYSQL_TEST_DB 时测试默认 dbclient_verify → ER_BAD_DB_ERROR。
+          MYSQL_TEST_DB: devkit_verify
           PG_TEST_URL: postgres://postgres:ci-pg-pass@127.0.0.1:5432/devkit_verify
         run: pnpm -C packages/db-core test
 
       - name: Integration tests (server)
         env:
           MYSQL_TEST_URL: mysql://root:ci-root-pass@127.0.0.1:3306
+          MYSQL_TEST_DB: devkit_verify
         run: pnpm -C apps/server test
 
   # 浏览器 e2e：注册/登录/邮箱验证/邀请全链路（Playwright + Mailpit 真发信 + 真实 MySQL）。
