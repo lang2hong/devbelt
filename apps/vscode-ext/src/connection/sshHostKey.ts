@@ -143,6 +143,26 @@ export function hostEntryExists(host: string, port: number, entries: KnownHostEn
   ));
 }
 
+/**
+ * 该主机是否存在**指定密钥类型**的条目。
+ *
+ * 判断「密钥不匹配」只能按同一 key type 比：服务器新增一种算法（如 ssh-rsa 之外
+ * 再提供 ssh-ed25519）时，旧条目里没有该类型的记录，若按「该主机有任意条目」
+ * 就硬失败，则永远无法 TOFU 新算法——连接直接断而不是弹确认。
+ * 同一类型已有条目却不匹配，才是真正的密钥替换，须硬失败。
+ */
+export function hostEntryExistsForType(
+  host: string,
+  port: number,
+  keyType: string,
+  entries: KnownHostEntry[],
+): boolean {
+  const candidates = hostCandidates(host, port);
+  return entries.some((e) => e.keyType === keyType && e.hostPatterns.some(
+    (p) => matchesHashedPattern(p, candidates) || candidates.includes(p),
+  ));
+}
+
 /** 把信任的主机密钥追加到插件自管 known_hosts（目录不存在则创建）。 */
 export function appendPluginKnownHost(
   file: string,
@@ -199,8 +219,10 @@ export async function verifyHostKey(opts: VerifyHostKeyOptions): Promise<boolean
   const entries = [...userEntries, ...pluginEntries];
 
   if (isHostKeyTrusted(opts.host, opts.port, opts.keyBlob, entries)) return true;
-  // 已有该主机条目但当前密钥不被信任 = 密钥不匹配或 revoked → 硬失败。
-  if (hostEntryExists(opts.host, opts.port, entries)) return false;
+  // 同一主机 + 同一密钥类型已有条目却不被信任 = 密钥不匹配或 revoked → 硬失败。
+  // 只按类型判定：该主机只有另一种算法（如 ssh-rsa）的条目时，应视为未知并走 TOFU，
+  // 而不是硬失败（否则服务器升级算法后连接永远失败）。
+  if (hostEntryExistsForType(opts.host, opts.port, hostKeyType(opts.keyBlob), entries)) return false;
   if (opts.policy === 'strict') return false;
 
   const accepted = await opts.prompt(

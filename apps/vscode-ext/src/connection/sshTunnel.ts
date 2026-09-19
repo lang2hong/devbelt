@@ -183,10 +183,19 @@ export class SshTunnel {
 
       ssh.on('error', onError);
 
-      // 超时保护：SSH 连接既不 ready 也不 error 时，中止并反馈明确错误
-      timer = setTimeout(() => {
-        fail(new Error('SSH tunnel connection timed out'));
-      }, SSH_TUNNEL_TIMEOUT);
+      // 超时保护：SSH 连接既不 ready 也不 error 时，中止并反馈明确错误。
+      // 注意与 TOFU 弹窗的竞争：等待用户确认主机密钥可能超过 15s，若计时器照跑，
+      // 用户还在弹窗上时就被「连接超时」中止。故等待确认期间暂停计时，确认后再重新计时。
+      const armTimeout = (): void => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          fail(new Error('SSH tunnel connection timed out'));
+        }, SSH_TUNNEL_TIMEOUT);
+      };
+      const pauseTimeout = (): void => {
+        if (timer) { clearTimeout(timer); timer = undefined; }
+      };
+      armTimeout();
 
       // SSH 连接配置
       const config: any = {
@@ -203,6 +212,8 @@ export class SshTunnel {
             callback(hostKeyTrusted);
             return;
           }
+          // 用户可能长时间停留在确认弹窗上：期间不计入 15s 建连超时。
+          pauseTimeout();
           verifyHostKey({
             policy: gate.policy(),
             host: sshHost,
@@ -212,8 +223,8 @@ export class SshTunnel {
             userKnownHostsFile: gate.userKnownHostsFile,
             prompt: gate.prompt,
           })
-            .then((ok) => { hostKeyTrusted = ok; callback(ok); })
-            .catch(() => { hostKeyTrusted = false; callback(false); });
+            .then((ok) => { hostKeyTrusted = ok; if (!settled) armTimeout(); callback(ok); })
+            .catch(() => { hostKeyTrusted = false; if (!settled) armTimeout(); callback(false); });
         },
       };
       if (privateKey) {

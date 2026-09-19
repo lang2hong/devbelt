@@ -98,6 +98,11 @@ export class ConnectionManager {
     return this.resolveEffective ? this.resolveEffective(conn) : conn;
   }
 
+  /** 建连所用的有效配置（本机路径覆盖优先）。供「测试连接」等复用同一套解析。 */
+  effectiveConnection(conn: SavedConnection): SavedConnection {
+    return this.effective(conn);
+  }
+
   /** 当前连接代际（未记录为 0）。 */
   private generation(id: string): number {
     return this.generations.get(id) ?? 0;
@@ -118,9 +123,15 @@ export class ConnectionManager {
     return this.sessions.get(id);
   }
 
-  /** 当前已打开（持有会话）的连接数，用于并发连接数门禁。 */
+  /**
+   * 当前「已打开 + 正在建连」的连接数，用于并发连接数门禁。
+   *
+   * 只数 `sessions` 会漏掉建连中的会话：建连是异步的，用户连点/并发打开时
+   * 多个 connect 都还没写入 sessions，门禁看不到它们，实际会超出套餐上限。
+   * `connecting` 是同一 id 的建连去重表，计入即可保守拦下超额请求。
+   */
   openCount(): number {
-    return this.sessions.size;
+    return this.sessions.size + this.connecting.size;
   }
 
   /** 该连接是否为用户显式打开。 */

@@ -10,6 +10,7 @@ import { flattenGroups } from '../utils/groupTree';
 import { hasUrlCredentials, stripUrlCredentials } from '../utils/connectionUrl';
 import { diagWarn } from '../utils/diagnostics';
 import { chmod, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import type { Deps, Sub } from './shared';
 import { confirm } from './shared';
 import {
@@ -53,11 +54,11 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
       return;
     }
     const gid = node?.kind === NodeKind.Group ? node.groupId : undefined;
-    ConnectionForm.open(store, () => treeProvider.refresh(), gid);
+    ConnectionForm.open(store, () => treeProvider.refresh(), gid, undefined, (c) => manager.effectiveConnection(c));
   });
 
   sub('devbelt.editConnection', (node: DbTreeNode) => {
-    if (node?.conn) ConnectionForm.open(store, () => treeProvider.refresh(), undefined, node.conn);
+    if (node?.conn) ConnectionForm.open(store, () => treeProvider.refresh(), undefined, node.conn, (c) => manager.effectiveConnection(c));
   });
 
   sub('devbelt.cloneConnection', (node: DbTreeNode) => {
@@ -68,7 +69,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     }
     const src = node.conn;
     const cloned: SavedConnection = { ...src, id: '', name: `${src.name || src.host} (copy)` };
-    ConnectionForm.open(store, () => treeProvider.refresh(), undefined, cloned);
+    ConnectionForm.open(store, () => treeProvider.refresh(), undefined, cloned, (c) => manager.effectiveConnection(c));
   });
 
   sub('devbelt.searchConnections', async () => {
@@ -266,15 +267,31 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
         }
       }
     }
+    // 导入同样受「本机保存连接数」门禁：add/clone 都校验，导入不校验即可无限落库。
+    const cap = connectionCap();
+    const usedIds = new Set(store.list().map((c) => c.id));
     let imported = 0;
+    let skippedCap = 0;
     for (const conn of payload.connections) {
       if (!conn?.name && !conn?.host) continue;
-      const existing = store.get(conn.id);
-      const finalConn = existing ? { ...existing, ...conn } : conn;
-      await store.save(finalConn);
+      const existing = conn.id ? store.get(conn.id) : undefined;
+      if (existing) {
+        await store.save({ ...existing, ...conn });
+        imported++;
+        continue;
+      }
+      if (cap > 0 && activeConnectionCount() >= cap) { skippedCap++; continue; }
+      // id 缺失/重复：空 id 或与已有（或本文件前面）连接撞 id 时，两条连接会共用同一个
+      // SecretStorage 键，密码互相覆盖。这里为新增项分配新 id；已有 id 且不冲突则保留。
+      const id = conn.id && !usedIds.has(conn.id) ? conn.id : randomUUID();
+      usedIds.add(id);
+      await store.save({ ...conn, id });
       imported++;
     }
     treeProvider.refresh();
+    if (skippedCap > 0) {
+      void vscode.window.showWarningMessage(l10n('conn.capReached', { count: cap }));
+    }
     vscode.window.showInformationMessage(l10n('conn.importDone', { count: imported }));
   });
 }

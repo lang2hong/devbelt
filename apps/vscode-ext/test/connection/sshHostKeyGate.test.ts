@@ -117,3 +117,21 @@ describe("verifyHostKey '仅本次'（不持久化）", () => {
     }
   });
 });
+
+describe('verifyHostKey 新算法（不同 key type）', () => {
+  it('该主机仅存在另一种算法的条目时，仍可 TOFU 新算法而不是硬失败', async () => {
+    appendPluginKnownHost(storeFile, 'db.example.com', 22, 'ssh-rsa', keyBlob('ssh-rsa', Buffer.from([9])));
+    const prompt = vi.fn(async () => true as const);
+    const ok = await verifyHostKey({
+      policy: 'tofu',
+      host: 'db.example.com',
+      port: 22,
+      keyBlob: keyBlob('ssh-ed25519'),
+      pluginStoreFile: storeFile,
+      userKnownHostsFile: userFile,
+      prompt,
+    });
+    expect(ok).toBe(true);
+    expect(prompt).toHaveBeenCalledTimes(1);
+  });
+});

@@ -83,6 +83,20 @@ describe('ConnectionManager dispose/connect race', () => {
     expect(manager.activeConnections).toBe(0);
   });
 
+  it('openCount 计入在建连会话（并发门禁不被绕过）', async () => {
+    const manager = new ConnectionManager();
+    managers.push(manager);
+
+    expect(manager.openCount()).toBe(0);
+    const pending = manager.connect(conn());
+    await waitForConnect();
+    // 尚未 resolve，sessions 里还没有它；门禁若不数在建连就会放行超出套餐的连接。
+    expect(manager.openCount()).toBe(1);
+    resolveConnect!();
+    await pending;
+    expect(manager.openCount()).toBe(1);
+  });
+
   it('can reconnect cleanly after a disposed in-flight attempt', async () => {
     const manager = new ConnectionManager();
     managers.push(manager);

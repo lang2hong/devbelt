@@ -4,6 +4,7 @@ import { ConnectionFactory } from '@devkit/db-core';
 import type { IConnection } from '@devkit/db-core';
 import { ConnectionStore, stripSecrets, type SavedConnection, type ConnectionGroup } from '@devkit/db-host/connection/connectionStore';
 import { SshTunnel } from './sshTunnel';
+import { validateConnectionPaths } from './connectionPathValidator';
 import { l10n } from '../i18n';
 import { uniqueId } from '@devkit/db-host/utils/id';
 import { flattenGroups } from '../utils/groupTree';
@@ -34,6 +35,7 @@ export class ConnectionForm extends BaseWebView {
     onSaved?: () => void,
     editing?: SavedConnection,
     presetGroupId?: string,
+    private resolveEffective?: (conn: SavedConnection) => SavedConnection,
   ) {
     super('devbelt.connectionForm', editing ? 'Edit Connection' : 'New Connection');
     this.groups = groups;
@@ -48,16 +50,18 @@ export class ConnectionForm extends BaseWebView {
     onSaved?: () => void,
     presetGroupId?: string,
     editing?: SavedConnection,
+    resolveEffective?: (conn: SavedConnection) => SavedConnection,
   ): void {
     if (ConnectionForm.current) {
       ConnectionForm.current.panel.reveal(vscode.ViewColumn.Active);
       ConnectionForm.current.onSaved = onSaved;
       ConnectionForm.current.editing = editing;
       ConnectionForm.current.presetGroupId = presetGroupId;
+      ConnectionForm.current.resolveEffective = resolveEffective;
       ConnectionForm.current.sendInit();
       return;
     }
-    ConnectionForm.current = new ConnectionForm(store, store.getGroups(), onSaved, editing, presetGroupId);
+    ConnectionForm.current = new ConnectionForm(store, store.getGroups(), onSaved, editing, presetGroupId, resolveEffective);
   }
 
   protected async handleMessage(msg: any): Promise<void> {
@@ -120,15 +124,24 @@ export class ConnectionForm extends BaseWebView {
     const start = Date.now();
     const testId = `test-${Date.now()}-${++ConnectionForm.testIdCounter}`;
     let connection: IConnection | undefined;
+    let effective = conn;
     try {
-      let host = conn.host;
-      let port = conn.port;
-      if (conn.sshHost) {
-        const localPort = await SshTunnel.create({ ...conn, id: testId });
+      // 用与真正建连相同的有效配置（本机路径覆盖优先）并做同样的路径硬校验：
+      // 旧实现直接拿表单原始值建连，覆盖了路径/缺文件时「测试成功」而打开必然失败。
+      effective = this.resolveEffective ? this.resolveEffective(conn) : conn;
+      const pathCheck = await validateConnectionPaths(effective);
+      if (!pathCheck.valid) {
+        const fields = pathCheck.issues.map((i) => `${i.field}(${i.reason})`).join(', ');
+        return { ok: false, message: l10n('sync.pathInvalid', { fields }) };
+      }
+      let host = effective.host;
+      let port = effective.port;
+      if (effective.sshHost) {
+        const localPort = await SshTunnel.create({ ...effective, id: testId });
         if (localPort) { host = '127.0.0.1'; port = localPort; }
       }
       const { connection: conn1 } = ConnectionFactory.createWithDialect(dbType, {
-        ...conn,
+        ...effective,
         host,
         port,
       });
@@ -142,7 +155,7 @@ export class ConnectionForm extends BaseWebView {
       return { ok: false, message: (err as Error).message };
     } finally {
       connection?.end();
-      if (conn.sshHost) SshTunnel.close(testId);
+      if (effective.sshHost) SshTunnel.close(testId);
     }
   }
 }
