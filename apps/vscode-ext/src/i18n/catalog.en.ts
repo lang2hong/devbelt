@@ -797,4 +797,5 @@ export const en: MessageCatalog = {
   'backup.contentsPlaceholder': 'What should the dump contain?',
   'backup.schemaAndData': 'Schema and data',
   'backup.schemaOnly': 'Schema only',
+  'schema.pgCrossDbUnsupported': 'PostgreSQL connections are bound to a single database; cross-database schema compare/sync is not supported.',
 };

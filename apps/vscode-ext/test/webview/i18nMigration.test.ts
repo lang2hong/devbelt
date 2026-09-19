@@ -83,7 +83,7 @@ describe('webview i18n 迁移完整性', () => {
   it('App.vue 在切换 mode 前调用 setLanguage（保证首次渲染语言正确）', () => {
     const app = sources.get(path.join(WEBVIEW_SRC, 'App.vue'))!;
     const iSet = app.indexOf('setLanguage(');
-    const iMode = app.indexOf('mode.value = msg.mode');
+    const iMode = app.indexOf('mode.value =');
     expect(iSet).toBeGreaterThan(-1);
     expect(iSet).toBeLessThan(iMode);
   });

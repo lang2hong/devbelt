@@ -5,6 +5,7 @@ import { QueryService } from '../../src/query/queryService';
 import type { MetadataService } from '../../src/query/metadataService';
 import type { TableService } from '../../src/query/tableService';
 import { MysqlDialect } from '../../src/dialect/mysqlDialect';
+import { PostgreSqlDialect } from '../../src/dialect/postgreSqlDialect';
 import { IConnection } from '../../src/connection/connection';
 import type { QueryCallback } from '../../src/types/query';
 
@@ -81,6 +82,25 @@ describe('DataTransferService.transferDatabase', () => {
     // 目标库应收到 INSERT（数据阶段真的跑了）
     const insertStmts = targetConn.executed.filter((s) => /INSERT INTO/i.test(s));
     expect(insertStmts.length).toBeGreaterThan(0);
+  });
+
+  it('跨引擎：结构同步被拒绝，但数据阶段仍执行', async () => {
+    const sourceConn = new FakeConnection();
+    const targetConn = new FakeConnection();
+    sourceConn.setResponses([{ rows: [{ id: 1, name: 'Alice' }] }, { rows: [] }]);
+
+    const sourceQuery = new QueryService(sourceConn, new MysqlDialect());
+    const targetQuery = new QueryService(targetConn, new PostgreSqlDialect());
+
+    const result = await DataTransferService.transferDatabase(
+      sourceQuery, meta(['t'], ['id', 'name']), tableSvc(), 'src',
+      targetQuery, meta([], ['id', 'name']), 'dst',
+      { tables: ['t'], includeData: true },
+    );
+
+    // 结构：跨引擎被拒并记录错误；数据：仍应写入目标库（过去 continue 会连数据一起跳过）。
+    expect(result.errors.some((e) => /cross-database-type/.test(e))).toBe(true);
+    expect(targetConn.executed.filter((s) => /INSERT INTO/i.test(s)).length).toBeGreaterThan(0);
   });
 
   it('includeData=false 时只同步结构，不发 INSERT', async () => {

@@ -775,4 +775,5 @@ export const zh: MessageCatalog = {
   'backup.contentsPlaceholder': '导出内容包含什么？',
   'backup.schemaAndData': '结构与数据',
   'backup.schemaOnly': '仅结构',
+  'schema.pgCrossDbUnsupported': 'PostgreSQL 连接绑定单个数据库，暂不支持跨库结构对比/同步。',
 };

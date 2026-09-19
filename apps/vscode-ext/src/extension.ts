@@ -10,6 +10,7 @@ import { TableQueryView } from './result/tableQueryView';
 import { AuditLogger } from './utils/auditLogger';
 import { BackupScheduler } from './schedule/backupScheduler';
 import { registerViewCommands } from './commands/viewCommands';
+import { createSyncStatusBar } from './sync/syncStatusBar';
 import { HistoryStore } from './history/historyStore';
 import { AuthService, DEFAULT_SERVER_URL } from './sync/authService';
 import { PersonalSyncClient } from '@devkit/db-host/sync/e2e/client';
@@ -25,7 +26,7 @@ import { OrgTreeDataProvider } from './tree/orgTreeDataProvider';
 import { registerOrgCommands } from './commands/org';
 import { SyncSessionFactory } from '@devkit/db-host/sync/sessionFactory';
 import { DekStore } from '@devkit/db-host/sync/crypto/keyStore';
-import { deriveSyncStatus } from '@devkit/db-host/sync/syncStatus';
+
 import { registerPersonalSyncCommands } from './commands/personalSync';
 import { registerConflictCommands } from './commands/syncConflicts';
 import { registerSyncLifecycleCommands, registerSyncResetUriHandler } from './commands/syncLifecycle';
@@ -173,81 +174,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 受控同步 session 工厂（阶段 A 无 UI）：activation/locked 态零请求，仅经工厂懒建。
   // 阶段 B 才接入初始化/解锁命令；此处只挂生命周期：logout → 丢弃 session，dispose → 清理。
   // ===== B2：状态栏 + 立即同步命令 + 窗口聚焦触发 =====
-  const syncStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-  syncStatusBar.command = 'devbelt.syncNow';
-  syncStatusBar.hide();
-  context.subscriptions.push(syncStatusBar);
-
-  const setSyncReady = (ready: boolean): void => {
-    void vscode.commands.executeCommand('setContext', 'devbelt.sync.ready', ready);
-  };
-  const setSyncUnlocked = (unlocked: boolean): void => {
-    void vscode.commands.executeCommand('setContext', 'devbelt.sync.unlocked', unlocked);
-  };
-
-  // 依赖 syncFactory，但只在 onSyncResult / 聚焦 / logout 等异步回调中被调用，彼时已构造完毕。
-  function refreshSyncStatusBar(): void {
-    const session = syncFactory.current;
-    const status = deriveSyncStatus({
-      isUnlocked: session?.isUnlocked ?? false,
-      stalled: session?.stalled ?? false,
-      retrying: session?.retrying ?? false,
-      lastError: session?.lastError,
-      lastRun: session?.lastRun,
-      conflictCount: session?.listConflicts().length ?? 0,
-    });
-    if (status === 'hidden') {
-      // 已登录但未解锁（未初始化或已锁定）：不再隐藏状态栏，显式给出可点击的同步入口，
-      // 点击走 unlockPersonalSync（内部会区分「未初始化」/「已锁定」并引导）。
-      if (auth.isLoggedIn()) {
-        setSyncReady(false);
-        setSyncUnlocked(false);
-        syncStatusBar.command = 'devbelt.syncEntry';
-        syncStatusBar.text = `$(sync) ${l10n('sync.statusLocked')}`;
-        syncStatusBar.tooltip = l10n('sync.statusLocked');
-        syncStatusBar.show();
-        return;
-      }
-      syncStatusBar.hide();
-      setSyncReady(false);
-      setSyncUnlocked(false);
-      return;
-    }
-    setSyncReady(true);
-    setSyncUnlocked(session?.isUnlocked ?? false);
-    syncStatusBar.show();
-    const reason = session!.lastError ?? session!.lastRun?.reason;
-    syncStatusBar.command = 'devbelt.syncNow';
-    switch (status) {
-      case 'conflict':
-        syncStatusBar.command = 'devbelt.resolveConflicts';
-        syncStatusBar.text = `$(warning) ${l10n('sync.statusConflict', { count: session!.listConflicts().length })}`;
-        syncStatusBar.tooltip = l10n('sync.statusConflictTooltip');
-        break;
-      case 'stalled':
-        if (session!.epochStale) {
-          syncStatusBar.command = 'devbelt.unlockPersonalSync';
-          syncStatusBar.text = `$(warning) ${l10n('sync.statusLabel')}`;
-          syncStatusBar.tooltip = l10n('sync.statusEpochStale');
-          break;
-        }
-        syncStatusBar.text = `$(warning) ${l10n('sync.statusLabel')}`;
-        syncStatusBar.tooltip = l10n('sync.statusStalled');
-        break;
-      case 'retrying':
-        syncStatusBar.text = `$(sync~spin) ${l10n('sync.statusLabel')}`;
-        syncStatusBar.tooltip = `${l10n('sync.statusError')}: ${reason ?? ''}`;
-        break;
-      case 'error':
-        syncStatusBar.text = `$(error) ${l10n('sync.statusLabel')}`;
-        syncStatusBar.tooltip = `${l10n('sync.statusError')}: ${reason ?? ''}`;
-        break;
-      default:
-        syncStatusBar.text = `$(sync) ${l10n('sync.statusLabel')}`;
-        syncStatusBar.tooltip = l10n('sync.statusIdle');
-        break;
-    }
-  }
+  const syncStatusBar = createSyncStatusBar(context, auth, () => syncFactory.current);
 
   const syncFactory = new SyncSessionFactory({
     connectionStore: store,
@@ -259,15 +186,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // 入站 pull 应用了变更才刷树（避免每次空同步都整树刷新），并重算路径 warning；
       // 其余情况仅刷新状态栏。
       if (result && result.applied > 0) void treeProvider.refreshPathIssues();
-      refreshSyncStatusBar();
+      syncStatusBar.refresh();
     },
-    onSessionState: () => refreshSyncStatusBar(),
+    onSessionState: () => syncStatusBar.refresh(),
     createClient: () => new PersonalSyncClient(auth.client),
   });
   context.subscriptions.push({ dispose: () => syncFactory.dispose() });
   const onAuthChange = eventBus.subscribe(AuthEvent, (e) => {
     if (e.kind === 'logout') syncFactory.invalidate();
-    refreshSyncStatusBar();
+    syncStatusBar.refresh();
   });
   context.subscriptions.push(onAuthChange);
   // 立即同步命令（解锁态才可用，when=devbelt.sync.ready）+ 窗口聚焦补同步。

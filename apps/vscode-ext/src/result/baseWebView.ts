@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { getWebviewHtml } from '../webview/html';
 import { diagError } from '../utils/diagnostics';
 import { isZh } from '../i18n';
+import type { WebviewErrorMessage, WebviewInitMessage, WebviewMessage } from './protocol';
 
 /**
  * Webview 面板基类：统一处理 panel 创建、HTML 注入、消息监听器 dispose。
@@ -41,7 +42,10 @@ export abstract class BaseWebView {
       void this.handleMessage(msg).catch((e) => {
         diagError('webview message handler', String(e));
         // 统一错误边界：子类未捕获时也给用户可见反馈，而不是「点了没反应」。
-        try { this.post({ type: 'error', message: (e as Error)?.message ?? String(e) }); } catch { /* panel disposed */ }
+        try {
+          const err: WebviewErrorMessage = { type: 'error', message: (e as Error)?.message ?? String(e) };
+          this.post(err);
+        } catch { /* panel disposed */ }
       });
     });
     this.panelDisp = this.panel.onDidDispose(() => this.onDispose());
@@ -62,8 +66,8 @@ export abstract class BaseWebView {
    * connectionForm 与 userForm 传了，其余视图因此永远是英文）。
    * 子类若已显式给出 isZh 则保留其值。
    */
-  protected post(msg: any): void {
-    const payload = msg && msg.type === 'init' && msg.isZh === undefined
+  protected post(msg: WebviewMessage | WebviewInitMessage): void {
+    const payload = msg && msg.type === 'init' && (msg as WebviewInitMessage).isZh === undefined
       ? { ...msg, isZh: isZh() }
       : msg;
     void this.panel.webview.postMessage(payload);

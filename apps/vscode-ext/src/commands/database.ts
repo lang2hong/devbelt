@@ -161,6 +161,12 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (!node?.conn || !node?.database) return;
     const session = await manager.connect(node.conn);
     if (!requireCapability(session, 'schemaSync')) return;
+    // PG 连接绑定单个数据库（无 USE），同一连接上的「另一个库」取不到其元数据：
+    // 对比会退化成拿库和自己比、恒输出无差异。明确拒绝，而不是给出误导结果。
+    if (node.conn.dbType === DatabaseType.PG) {
+      vscode.window.showWarningMessage(l10n('schema.pgCrossDbUnsupported'));
+      return;
+    }
     const targetDbs = (await session.metadata.getDatabases()).filter((d) => d !== node.database);
     if (!targetDbs.length) {
       vscode.window.showWarningMessage(l10n('compare.noOtherDatabases'));
@@ -183,6 +189,11 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.syncDatabase', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    // 同 compareSchema：PG 无法在单连接上跨库同步结构（见上）。
+    if (node.conn.dbType === DatabaseType.PG) {
+      vscode.window.showWarningMessage(l10n('schema.pgCrossDbUnsupported'));
+      return;
+    }
 
     const conns = deps.store.getVisibleTreeData().connections.filter((c) => c.id !== node.conn!.id);
     if (!conns.length) {

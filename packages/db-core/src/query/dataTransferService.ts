@@ -58,13 +58,12 @@ export class DataTransferService {
 
       const diff = schemaDiffs.find((d) => d.tableName === table);
       if (diff && diff.status !== 'unchanged') {
-        // 跨引擎 schema 同步会拿源方言 DDL 去目标库执行（如 MySQL 反引号发给 PG）。
-        // 明确拒绝，而不是执行错误的 SQL。
-        if (sourceTable.dbType !== targetQuery.dialect.dbType) {
-          errors.push(`${table}: schema sync failed - cross-database-type schema sync is not supported`);
-          continue;
-        }
         try {
+          // 跨引擎 schema 同步会拿源方言 DDL 去目标库执行（如 MySQL 反引号发给 PG）。
+          // 明确拒绝，而不是执行错误的 SQL。
+          if (sourceTable.dbType !== targetQuery.dialect.dbType) {
+            throw new Error('cross-database-type schema sync is not supported');
+          }
           const syncSql = await SchemaDiffService.generateSyncSql(
             [diff], targetDb, sourceTable, sourceDb,
           );
@@ -73,8 +72,9 @@ export class DataTransferService {
             if (stmt.trim()) await targetQuery.query(stmt.trim(), undefined, SKIP);
           }
         } catch (err) {
+          // 结构同步失败只记录错误：**不**跳过下面的数据阶段（跨引擎时结构本就跳过，
+          // 数据仍应同步；过去这里 continue 会让数据也一起没了）。
           errors.push(`${table}: schema sync failed - ${(err as Error).message}`);
-          continue;
         }
       }
 
