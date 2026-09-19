@@ -10,6 +10,7 @@ import { HistoryStore } from '../history/historyStore';
 import { AuthService } from '../sync/authService';
 import type { SyncSessionFactory } from '@devkit/db-host/sync/sessionFactory';
 import { l10n } from '../i18n';
+import { diagError } from '../utils/diagnostics';
 import type { DatabaseOperation } from '@devkit/db-core';
 import type { ConnectionSession } from '../connection/connectionManager';
 
@@ -29,8 +30,25 @@ export interface Deps {
 
 export type Sub = (cmd: string, handler: (...args: any[]) => any) => void;
 
+/**
+ * 命令注册统一入口。
+ *
+ * VS Code 不会处理命令处理器返回的 rejected promise：处理器里未捕获的异常只会变成
+ * 一条无人管的拒绝（控制台可见、用户不可见），表现为「点了没反应」或是「部分完成但
+ * 没有报错」。这里统一兜底：记录诊断并给出可读错误；取消类异常不报错。
+ */
 export function makeSub(context: vscode.ExtensionContext): Sub {
-  return (cmd, handler) => context.subscriptions.push(vscode.commands.registerCommand(cmd, handler));
+  return (cmd, handler) => context.subscriptions.push(vscode.commands.registerCommand(cmd, async (...args: any[]) => {
+    try {
+      return await handler(...args);
+    } catch (err) {
+      if (err instanceof Error && err.name === 'TransferCancelledError') return undefined;
+      diagError(`command ${cmd} failed`, String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      void vscode.window.showErrorMessage(l10n('cmd.failed', { command: cmd, message }));
+      return undefined;
+    }
+  }));
 }
 
 export async function confirm(msgKey: string, btnKey: string, name: string): Promise<boolean> {

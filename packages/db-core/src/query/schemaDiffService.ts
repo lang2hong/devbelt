@@ -3,6 +3,7 @@ import type { TableService } from './tableService.js';
 import type { ColumnMeta } from '../types/meta.js';
 import { validateIdent } from '../utils/validate.js';
 import { validateColumnType } from './columnSpec.js';
+import { DatabaseType } from '../types/connection.js';
 
 /** 列差异 */
 export interface ColumnDiff {
@@ -120,7 +121,12 @@ export class SchemaDiffService {
     sourceDb: string,
   ): Promise<string> {
     if (!sourceTableService.supports('schemaSync')) {
-      throw new Error('Schema sync SQL is currently supported for MySQL only');
+      throw new Error('Schema sync SQL is not supported for this database');
+    }
+    // PG 走自己的 DDL 生成：标识符用双引号、不限定库名（走 search_path），
+    // 改列用 ALTER COLUMN TYPE / SET|DROP NOT NULL，而非 MySQL 的 MODIFY。
+    if (sourceTableService.dbType === DatabaseType.PG) {
+      return this.generatePgSyncSql(diffs, targetDb, sourceTableService, sourceDb);
     }
     const targetDbIdent = validateIdent(targetDb);
     const parts: string[] = [];
@@ -167,6 +173,59 @@ export class SchemaDiffService {
       parts.push('-- No differences found. Schemas are in sync.');
     }
 
+    return parts.join('\n');
+  }
+
+  /**
+   * 生成 PG 的 schema 同步 DDL。
+   *
+   * 不限定库名（PG 的「库」不能跨库引用，目标由连接的 search_path 决定）；改列
+   * 分为「改类型」与「SET/DROP NOT NULL」两步，ADD/DROP 列同理。
+   */
+  private static async generatePgSyncSql(
+    diffs: TableDiff[],
+    _targetDb: string,
+    sourceTableService: TableService,
+    sourceDb: string,
+  ): Promise<string> {
+    const wrap = (id: string) => sourceTableService.wrapIdentifier(id);
+    const parts: string[] = [`-- Schema sync: ${sourceDb} → target`, ''];
+    for (const d of diffs) {
+      const table = wrap(d.tableName);
+      if (d.status === 'added') {
+        const ddl = await sourceTableService.getCreateSql(d.tableName, sourceDb);
+        parts.push(`-- Add table: ${d.tableName}`);
+        parts.push(`DROP TABLE IF EXISTS ${table};`);
+        parts.push(ddl.replace(/;\s*$/, '') + ';');
+        parts.push('');
+      } else if (d.status === 'removed') {
+        parts.push(`-- Drop table: ${d.tableName}`);
+        parts.push(`DROP TABLE IF EXISTS ${table};`);
+        parts.push('');
+      } else if (d.status === 'changed') {
+        const actions: string[] = [];
+        for (const c of d.columns) {
+          const col = wrap(c.columnName);
+          const type = validateColumnType(c.sourceType || 'text');
+          if (c.status === 'added') {
+            actions.push(`ADD COLUMN ${col} ${type}${c.sourceNotNull ? ' NOT NULL' : ''}`);
+          } else if (c.status === 'removed') {
+            actions.push(`DROP COLUMN ${col}`);
+          } else if (c.status === 'changed') {
+            actions.push(`ALTER COLUMN ${col} TYPE ${type}`);
+            actions.push(`ALTER COLUMN ${col} ${c.sourceNotNull ? 'SET' : 'DROP'} NOT NULL`);
+          }
+        }
+        if (actions.length) {
+          parts.push(`-- Alter table: ${d.tableName}`);
+          parts.push(`ALTER TABLE ${table} ${actions.join(', ')};`);
+          parts.push('');
+        }
+      }
+    }
+    if (parts.length <= 2) {
+      parts.push('-- No differences found. Schemas are in sync.');
+    }
     return parts.join('\n');
   }
 }

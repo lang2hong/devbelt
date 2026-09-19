@@ -39,7 +39,7 @@ describe('方言策略（策略模式）', () => {
   it('为每个方言显式声明对象与操作能力', () => {
     expect(new MysqlDialect().capabilities.operations).toContain('schemaSync');
     expect(new PostgreSqlDialect().capabilities.operations).toContain('renameTable');
-    expect(new PostgreSqlDialect().capabilities.operations).not.toContain('schemaSync');
+    expect(new PostgreSqlDialect().capabilities.operations).toContain('schemaSync');
     expect(new PostgreSqlDialect().capabilities.multiDatabaseExplorer).toBe(false);
     expect(new MysqlDialect().capabilities.multiDatabaseExplorer).toBe(true);
     expect(new SqliteDialect().capabilities.events).toBe(false);

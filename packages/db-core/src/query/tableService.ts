@@ -559,6 +559,16 @@ export class TableService {
     return supportsOperation(this.queryService.dialect.capabilities, operation);
   }
 
+  /** 方言类型（schema 同步按方言生成 DDL 时判断用）。 */
+  get dbType() {
+    return this.queryService.dialect.dbType;
+  }
+
+  /** 方言标识符包裹（校验后）。供 schema 同步生成 DDL 复用。 */
+  wrapIdentifier(identifier: string): string {
+    return this.wrap(validateIdent(identifier));
+  }
+
   private require(operation: DatabaseOperation): void {
     if (!this.supports(operation)) {
       throw new Error(unsupportedOperationMessage(this.queryService.dialect.dbType, operation));

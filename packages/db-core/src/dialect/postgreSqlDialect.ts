@@ -43,6 +43,7 @@ export class PostgreSqlDialect implements SqlDialect {
       // 于是「复制表」在 PG 上被一路拒到底
       'duplicateTable',
       'getTableDefinition', 'alterTable', 'manageIndexes', 'manageRoutines', 'manageUsers',
+      'schemaSync',
     ],
   };
 

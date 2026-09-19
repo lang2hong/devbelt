@@ -3,6 +3,8 @@ import { SchemaDiffService } from '../../src/query/schemaDiffService';
 import type { MetadataService } from '../../src/query/metadataService';
 import type { TableService } from '../../src/query/tableService';
 import { MysqlDialect } from '../../src/dialect/mysqlDialect';
+import { PostgreSqlDialect } from '../../src/dialect/postgreSqlDialect';
+import { DatabaseType } from '../../src/types/connection';
 import { QueryService } from '../../src/query/queryService';
 import { IConnection } from '../../src/connection/connection';
 import type { QueryCallback } from '../../src/types/query';
@@ -165,6 +167,33 @@ describe('SchemaDiffService', () => {
         'sourceDb',
       ),
     ).rejects.toThrow('Invalid SQL identifier');
+  });
+
+  it('generateSyncSql 生成 PG DDL（双引号、ALTER COLUMN TYPE、SET/DROP NOT NULL）', async () => {
+    const pg = new PostgreSqlDialect();
+    const tableService = {
+      dbType: DatabaseType.PG,
+      wrapIdentifier: (id: string) => pg.wrap(id),
+      getCreateSql: async () => 'CREATE TABLE "users" (\n  "id" integer NOT NULL\n)',
+      supports: () => true,
+    } as unknown as TableService;
+    const diffs = [{
+      tableName: 'users',
+      status: 'changed' as const,
+      columns: [
+        { columnName: 'name', status: 'changed' as const, sourceType: 'character varying(255)', sourceNotNull: true },
+        { columnName: 'age', status: 'added' as const, sourceType: 'integer' },
+        { columnName: 'old', status: 'removed' as const },
+      ],
+    }];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'targetDb', tableService, 'sourceDb');
+    expect(sql).toContain('ALTER TABLE "users"');
+    expect(sql).toContain('ALTER COLUMN "name" TYPE character varying(255)');
+    expect(sql).toContain('ALTER COLUMN "name" SET NOT NULL');
+    expect(sql).toContain('ADD COLUMN "age" integer');
+    expect(sql).toContain('DROP COLUMN "old"');
+    expect(sql).not.toContain('MODIFY COLUMN');
+    expect(sql).not.toContain('`');
   });
 
   it('generateSyncSql 无差异时输出提示', async () => {

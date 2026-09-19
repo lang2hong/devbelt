@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DataTransferService } from '../../src/query/dataTransferService';
+import { DatabaseType } from '../../src/types/connection';
 import { QueryService } from '../../src/query/queryService';
 import type { MetadataService } from '../../src/query/metadataService';
 import type { TableService } from '../../src/query/tableService';
@@ -46,9 +47,10 @@ function meta(tables: string[], cols: string[]): MetadataService {
 function tableSvc(): TableService {
   return {
     getCreateSql: async () => 'CREATE TABLE `t` (`id` int)',
-    // SchemaDiffService.generateSyncSql 会先查能力，缺这个方法会抛 TypeError
-    // 被 schema catch 吞掉并 continue，从而跳过数据阶段（掩盖被测行为）
+    // SchemaDiffService.generateSyncSql 会先查能力与方言，缺这些会抛 TypeError
+    // 被 schema catch 吞掉并 continue，从而跳过数据阶段（掩盖被测行为）。
     supports: () => true,
+    dbType: DatabaseType.MYSQL,
   } as unknown as TableService;
 }
 

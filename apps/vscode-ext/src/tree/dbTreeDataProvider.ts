@@ -26,6 +26,10 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   readonly onDidChangeTreeData: Event<DbTreeNode | undefined> =
     this.onDidChangeTreeDataEmitter.event;
 
+  /** 整树刷新事件：供外部（如补全缓存）订阅，替代对 refresh 的猴补丁。 */
+  private readonly refreshEmitter = new EventEmitter<void>();
+  readonly onDidRefresh: Event<void> = this.refreshEmitter.event;
+
   /** 已打开的连接 id 集合（默认全部未打开，需右键"打开连接"） */
   private readonly openConns = new Set<string>();
 
@@ -44,6 +48,12 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   /** 刷新整棵树 */
   refresh(): void {
     this.onDidChangeTreeDataEmitter.fire(undefined);
+    this.refreshEmitter.fire();
+  }
+
+  dispose(): void {
+    this.refreshEmitter.dispose();
+    this.onDidChangeTreeDataEmitter.dispose();
   }
 
   /**

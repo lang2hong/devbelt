@@ -693,6 +693,12 @@
         "command": "devbelt.org.runQuery",
         "title": "%cmd.org.runQuery%",
         "category": "DB Client"
+      },
+      {
+        "command": "devbelt.org.openConsole",
+        "title": "%cmd.org.openConsole%",
+        "category": "DB Client",
+        "icon": "$(link-external)"
       }
     ],
     "menus": {
@@ -885,6 +891,10 @@
         {
           "command": "devbelt.org.runQuery",
           "when": "devbelt.loggedIn && devbelt.orgRole"
+        },
+        {
+          "command": "devbelt.org.openConsole",
+          "when": "devbelt.loggedIn"
         },
         {
           "command": "devbelt.deleteConnection",

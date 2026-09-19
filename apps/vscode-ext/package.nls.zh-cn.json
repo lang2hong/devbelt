@@ -10,8 +10,8 @@
   "cmd.moveToGroup": "移动到分组",
   "cmd.login": "登录 / 注册",
   "cmd.logout": "登出",
-  "cmd.syncPull": "从云端拉取",
-  "cmd.syncPush": "推送到云端",
+  "cmd.syncPull": "拉取远端变更",
+  "cmd.syncPush": "推送本地变更",
   "cmd.formatSql": "格式化 SQL",
   "cmd.showHistory": "查看历史",
   "cmd.updateCell": "更新单元格",
@@ -33,8 +33,6 @@
   "cmd.unlockPersonalSync": "解锁个人同步",
   "cmd.syncNow": "立即同步",
   "cmd.syncEntry": "个人同步（智能入口）",
-  "cmd.syncPull": "拉取远端变更",
-  "cmd.syncPush": "推送本地变更",
   "cmd.fixConnectionPaths": "补齐连接路径",
   "cmd.removeConnectionPathOverrides": "移除路径覆盖",
   "cmd.resolveConflicts": "解决同步冲突",
@@ -53,5 +51,6 @@
   "cmd.org.saveResource": "保存资源",
   "cmd.org.deleteResource": "删除资源",
   "cmd.org.connectTemplate": "连接",
-  "cmd.org.runQuery": "在组织连接上运行查询"
+  "cmd.org.runQuery": "在组织连接上运行查询",
+  "cmd.org.openConsole": "打开组织控制台"
 }

@@ -7,25 +7,17 @@ import { DbTreeDataProvider } from './tree/dbTreeDataProvider';
 import { QueryExecutor } from './result/queryExecutor';
 import { BaseWebView } from './result/baseWebView';
 import { TableQueryView } from './result/tableQueryView';
-import { TableDesignView } from './result/tableDesignView';
-import { StatusView } from './result/statusView';
-import { ERDiagramView } from './result/erDiagramView';
-import { DataDiffView } from './result/dataDiffView';
-import { DashboardView } from './result/dashboardView';
-import { AuditLogView } from './result/auditLogView';
-import { PoolStatusView } from './result/poolStatusView';
 import { AuditLogger } from './utils/auditLogger';
 import { BackupScheduler } from './schedule/backupScheduler';
+import { registerViewCommands } from './commands/viewCommands';
 import { HistoryStore } from './history/historyStore';
 import { AuthService, DEFAULT_SERVER_URL } from './sync/authService';
 import { PersonalSyncClient } from '@devkit/db-host/sync/e2e/client';
 import { eventBus, ConnectionChangedEvent, DataChangeEvent, AuthEvent } from '@devkit/db-host/utils/event';
 import { invalidateLanguage, l10n, LANGUAGE_CONFIG_KEY } from './i18n';
-import { canUseErDiagram } from '@devkit/db-host/sync/entitlementGate';
 import { registerCommands } from './commands';
 import { SqlCompletionProvider } from './completion/sqlCompletionProvider';
 import { SqlCodeLensProvider } from './completion/sqlCodeLensProvider';
-import { TerminalService } from './terminal/terminalService';
 import { OrgClient } from './org/client';
 import { CredentialVault } from './org/credentialVault';
 import { OrgWorkspace } from './org/workspace';
@@ -121,7 +113,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     treeDataProvider: treeProvider,
     showCollapseAll: true,
   });
-  context.subscriptions.push(treeView);
+  context.subscriptions.push(treeView, treeProvider);
 
   // 组织 Workspace 使用独立数据源，与个人连接树和同步完全分离。
   const orgClient = new OrgClient(auth.client);
@@ -318,87 +310,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       { language: 'sql' },
       new SqlCodeLensProvider((uri) => connCtx.getForDoc(uri)?.conn.dbType),
     ),
-    // Terminal 集成
-    vscode.commands.registerCommand('devbelt.openTerminal', (node: any) => {
-      if (node?.conn) TerminalService.open(node.conn, node.database);
-    }),
-    // 表设计视图
-    vscode.commands.registerCommand('devbelt.designTable', async (node: any) => {
-      if (node?.conn && node?.database) {
-        const session = await manager.connect(node.conn);
-        if (!session.capabilities.operations.includes('getTableDefinition')) {
-          vscode.window.showWarningMessage(l10n('design.unsupported'));
-          return;
-        }
-        void TableDesignView.open(node.conn, node.label, node.database, manager, () => treeProvider.refreshNode(node));
-      }
-    }),
-    // 新建表（webview 表单）：比丢一段 CREATE TABLE 模板到编辑器更直接，
-    // 且建完可以接着在同一面板里加列/加索引。
-    vscode.commands.registerCommand('devbelt.newTableDesigner', async (node: any) => {
-      const database = node?.database ?? node?.conn?.database;
-      if (!node?.conn || !database) return;
-      void TableDesignView.openNew(node.conn, database, manager, () => treeProvider.refreshNode(node));
-    }),
-    // Server 状态面板
-    vscode.commands.registerCommand('devbelt.serverStatus', (node: any) => {
-      if (node?.conn) {
-        StatusView.open(node.conn, manager);
-      }
-    }),
-    // ER 图
-    vscode.commands.registerCommand('devbelt.showERDiagram', (node: any) => {
-      if (!canUseErDiagram(auth.getCachedEntitlement())) {
-        vscode.window.showWarningMessage(l10n('entitlement.erRequired'));
-        return;
-      }
-      if (node?.conn && node?.database) {
-        ERDiagramView.open(node.conn, node.database, manager);
-      }
-    }),
-    // 数据对比
-    vscode.commands.registerCommand('devbelt.compareData', async (node: any) => {
-      if (!node?.conn || !node?.database) return;
-      const session = await manager.connect(node.conn);
-      const targetDbs = (await session.metadata.getDatabases()).filter((d: string) => d !== node.database);
-      if (!targetDbs.length) {
-        vscode.window.showWarningMessage(l10n('compare.noOtherDatabases'));
-        return;
-      }
-      const target = await vscode.window.showQuickPick(
-        targetDbs.map((d: string) => ({ label: d, value: d })),
-        { placeHolder: l10n('compare.chooseData', { database: node.database ?? '' }) },
-      );
-      if (!target) return;
-      void DataDiffView.open(node.conn, node.database, node.conn, target.value, manager);
-    }),
-    // 性能仪表盘
-    vscode.commands.registerCommand('devbelt.dashboard', (node: any) => {
-      if (node?.conn) {
-        DashboardView.open(node.conn, manager);
-      }
-    }),
-    // 审计日志
-    vscode.commands.registerCommand('devbelt.showAuditLog', () => {
-      AuditLogView.open(auditLogger);
-    }),
-    // 连接池状态
-    vscode.commands.registerCommand('devbelt.showPoolStatus', () => {
-      PoolStatusView.open(manager);
-    }),
-    // 定时备份
-    vscode.commands.registerCommand('devbelt.scheduleBackup', async (node: any) => {
-      if (!node?.conn || !node?.database) return;
-      await configureBackupSchedule(backupScheduler, node.conn.id, node.database);
-    }),
   );
 
-  // 表结构变更时清除补全缓存
-  const origRefresh = treeProvider.refresh.bind(treeProvider);
-  treeProvider.refresh = () => {
-    completionProvider.invalidate();
-    origRefresh();
-  };
+  registerViewCommands({ context, manager, treeProvider, auth, backupScheduler, auditLogger });
+
+  // 表结构变更时清除补全缓存（事件订阅，替代对 treeProvider.refresh 的猴补丁）。
+  context.subscriptions.push(treeProvider.onDidRefresh(() => completionProvider.invalidate()));
 
   registerCommands({ context, store, manager, treeProvider, overrideStore, executor, history, auth, connCtx, syncFactory });
 
@@ -414,69 +331,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
  */
 export async function syncLoggedInContext(auth: { isLoggedIn(): boolean }): Promise<void> {
   await vscode.commands.executeCommand('setContext', 'devbelt.loggedIn', auth.isLoggedIn());
-}
-
-/** 定时备份配置向导：已有计划则提供运行/修改/删除，否则询问周期与输出目录 */
-async function configureBackupSchedule(
-  scheduler: BackupScheduler,
-  connId: string,
-  database: string,
-): Promise<void> {
-  const existing = scheduler.getSchedules().find((s) => s.connId === connId && s.database === database);
-  if (existing) {
-    const action = await vscode.window.showQuickPick(
-      [
-        { label: 'Run Backup Now', value: 'run' },
-        { label: 'Change Schedule', value: 'change' },
-        { label: 'Remove Schedule', value: 'remove' },
-      ],
-      { placeHolder: l10n('backup.scheduleInfo', { database, hours: Math.round(existing.intervalMs / 3600000), dir: existing.outputDir }) },
-    );
-    if (!action) return;
-    if (action.value === 'run') {
-      await scheduler.runNow(connId, database);
-      return;
-    }
-    if (action.value === 'remove') {
-      scheduler.removeSchedule(connId, database);
-      vscode.window.showInformationMessage(l10n('backup.scheduleRemoved', { database }));
-      return;
-    }
-  }
-
-  const interval = await vscode.window.showQuickPick(
-    [
-      { label: 'Every hour', value: 3600000 },
-      { label: 'Every 6 hours', value: 6 * 3600000 },
-      { label: 'Every day', value: 24 * 3600000 },
-      { label: 'Every week', value: 7 * 24 * 3600000 },
-    ],
-    { placeHolder: l10n('backup.scheduleInterval', { database }) },
-  );
-  if (!interval) return;
-
-  const folders = await vscode.window.showOpenDialog({
-    canSelectFiles: false,
-    canSelectFolders: true,
-    canSelectMany: false,
-    openLabel: l10n('backup.selectFolder'),
-    defaultUri: existing ? vscode.Uri.file(existing.outputDir) : undefined,
-  });
-  if (!folders?.length) return;
-
-  const includeData = await vscode.window.showQuickPick(
-    [
-      { label: 'Schema and data', value: true },
-      { label: 'Schema only', value: false },
-    ],
-    { placeHolder: 'What should the dump contain?' },
-  );
-  if (!includeData) return;
-
-  scheduler.addSchedule(connId, database, interval.value, folders[0].fsPath, includeData.value);
-  vscode.window.showInformationMessage(
-    `"${database}" will be backed up ${interval.label.toLowerCase()} to ${folders[0].fsPath}.`,
-  );
 }
 
 export function deactivate(): void {

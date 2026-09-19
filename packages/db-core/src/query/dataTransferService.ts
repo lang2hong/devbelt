@@ -58,6 +58,12 @@ export class DataTransferService {
 
       const diff = schemaDiffs.find((d) => d.tableName === table);
       if (diff && diff.status !== 'unchanged') {
+        // 跨引擎 schema 同步会拿源方言 DDL 去目标库执行（如 MySQL 反引号发给 PG）。
+        // 明确拒绝，而不是执行错误的 SQL。
+        if (sourceTable.dbType !== targetQuery.dialect.dbType) {
+          errors.push(`${table}: schema sync failed - cross-database-type schema sync is not supported`);
+          continue;
+        }
         try {
           const syncSql = await SchemaDiffService.generateSyncSql(
             [diff], targetDb, sourceTable, sourceDb,

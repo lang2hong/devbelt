@@ -33,10 +33,10 @@ export async function confirmSqlExecution(conn: SavedConnection, sql: string): P
   if (!ensureWritable(conn)) return false;
   if (risk.level !== 'critical' && conn.environment !== 'production') return true;
 
-  const detail = risk.reason || 'Write statement on a production connection';
-  const action = 'Run SQL';
+  const detail = risk.reason || l10n('sql.productionWrite');
+  const action = l10n('sql.runAction');
   return (await vscode.window.showWarningMessage(
-    `${detail}. Review the SQL before continuing.`,
+    l10n('sql.reviewBeforeRun', { detail }),
     { modal: true },
     action,
   )) === action;

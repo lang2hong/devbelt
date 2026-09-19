@@ -89,13 +89,13 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (!uri?.length) return;
     // 恢复自身用事务包裹，但 MySQL 的 DDL 会隐式提交：中途失败无法回滚已执行的
     // CREATE/ALTER/DROP。确认框必须讲清楚，避免用户以为失败即「什么都没变」。
+    const restoreBtn = l10n('restore.confirmAction');
     const confirmed = await vscode.window.showWarningMessage(
-      `Restore SQL dump to "${node.database || node.conn.database}"? This will overwrite existing data. `
-      + 'If it fails midway, statements already executed (DDL included) may not be rolled back.',
+      l10n('restore.confirm', { database: node.database ?? node.conn.database ?? '' }),
       { modal: true },
-      'Restore',
+      restoreBtn,
     );
-    if (confirmed !== 'Restore') return;
+    if (confirmed !== restoreBtn) return;
     const session = await manager.connect(node.conn);
     // 流式读取 + 增量切分：过去整文件读进内存再一次性切分，GB 级 dump 会 OOM。
     const statements = streamSqlStatements(uri[0].fsPath, dialectScanOptions(node.conn.dbType));
@@ -123,8 +123,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
         } catch (err) {
           // 报出已执行条数：失败可能停在中途，用户需要知道目标库已改到什么程度。
           vscode.window.showErrorMessage(
-            `Restore failed after ${completed} statement(s): ${(err as Error).message}. `
-            + 'Statements already executed may remain in the target database; verify before retrying.',
+            l10n('restore.failed', { count: completed, message: (err as Error).message }),
           );
         }
       },
@@ -205,15 +204,20 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
       { placeHolder: l10n('sync.chooseDatabase') },
     );
     if (!targetDb) return;
+    const syncBtn = l10n('sync.confirmAction');
     const confirmed = await vscode.window.showWarningMessage(
-      `Sync "${node.database}" → "${targetDb.value}" on "${target.value.name || target.value.host}"? This will modify target database.`,
+      l10n('sync.confirm', {
+        database: node.database ?? '',
+        target: targetDb.value,
+        conn: target.value.name || target.value.host,
+      }),
       { modal: true },
-      'Sync',
+      syncBtn,
     );
-    if (confirmed !== 'Sync') return;
+    if (confirmed !== syncBtn) return;
     const sourceSession = await manager.connect(node.conn);
     await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: 'Syncing database...', cancellable: true },
+      { location: vscode.ProgressLocation.Notification, title: l10n('sync.progressTitle'), cancellable: true },
       async (progress, token) => {
         const result = await DataTransferService.transferDatabase(
           sourceSession.query, sourceSession.metadata, sourceSession.table, node.database!,
@@ -225,7 +229,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
         );
         if (result.errors.length) {
           vscode.window.showWarningMessage(
-            `Sync complete with ${result.errors.length} errors. ${result.tablesSynced} tables synced.`,
+            l10n('sync.doneErrors', { errors: result.errors.length, count: result.tablesSynced }),
           );
         } else {
           vscode.window.showInformationMessage(l10n('sync.done', { count: result.tablesSynced }));

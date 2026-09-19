@@ -10,8 +10,8 @@
   "cmd.moveToGroup": "Move to Group",
   "cmd.login": "Login / Register",
   "cmd.logout": "Logout",
-  "cmd.syncPull": "Pull from Cloud",
-  "cmd.syncPush": "Push to Cloud",
+  "cmd.syncPull": "Pull Remote Changes",
+  "cmd.syncPush": "Push Local Changes",
   "cmd.formatSql": "Format SQL",
   "cmd.showHistory": "Show History",
   "cmd.updateCell": "Update Cell",
@@ -33,8 +33,6 @@
   "cmd.unlockPersonalSync": "Unlock Personal Sync",
   "cmd.syncNow": "Sync Now",
   "cmd.syncEntry": "Personal Sync (Smart Entry)",
-  "cmd.syncPull": "Pull Remote Changes",
-  "cmd.syncPush": "Push Local Changes",
   "cmd.fixConnectionPaths": "Fix Connection Paths",
   "cmd.removeConnectionPathOverrides": "Remove Path Overrides",
   "cmd.resolveConflicts": "Resolve Sync Conflicts",
@@ -53,5 +51,6 @@
   "cmd.org.saveResource": "Save Resource",
   "cmd.org.deleteResource": "Delete Resource",
   "cmd.org.connectTemplate": "Connect",
-  "cmd.org.runQuery": "Run Query on Organization Connection"
+  "cmd.org.runQuery": "Run Query on Organization Connection",
+  "cmd.org.openConsole": "Open Organization Console"
 }
