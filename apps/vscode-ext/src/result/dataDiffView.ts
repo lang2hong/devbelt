@@ -17,6 +17,8 @@ export class DataDiffView extends BaseWebView {
     private readonly manager: ConnectionManager,
   ) {
     super('devbelt.dataDiff', `Data Diff: ${sourceDb} → ${targetDb}`);
+    this.manager.retain(sourceConn.id);
+    this.manager.retain(targetConn.id);
   }
 
   static init(extensionUri: import('vscode').Uri): void { BaseWebView.init(extensionUri); }
@@ -93,11 +95,7 @@ export class DataDiffView extends BaseWebView {
   protected onDispose(): void {
     super.onDispose();
     if (DataDiffView.current === this) DataDiffView.current = undefined;
-    if (!this.manager.isExplicit(this.sourceConn.id)) {
-      this.manager.disposeConn(this.sourceConn.id);
-    }
-    if (!this.manager.isExplicit(this.targetConn.id)) {
-      this.manager.disposeConn(this.targetConn.id);
-    }
+    this.manager.release(this.sourceConn.id);
+    this.manager.release(this.targetConn.id);
   }
 }

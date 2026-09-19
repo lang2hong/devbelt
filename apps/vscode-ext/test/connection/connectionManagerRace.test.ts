@@ -83,6 +83,38 @@ describe('ConnectionManager dispose/connect race', () => {
     expect(manager.activeConnections).toBe(0);
   });
 
+  it('retain/release 引用计数：归零且非显式才关闭', async () => {
+    const manager = new ConnectionManager();
+    managers.push(manager);
+    const pending = manager.connect(conn());
+    await waitForConnect();
+    resolveConnect!();
+    await pending;
+
+    manager.retain('c-1');
+    manager.retain('c-1');
+    manager.release('c-1');
+    // 仍有另一个持有者 → 不关闭。
+    expect(manager.activeConnections).toBe(1);
+    manager.release('c-1');
+    expect(manager.activeConnections).toBe(0);
+    expect(endCalled).toBeGreaterThan(0);
+  });
+
+  it('显式打开的连接 release 归零也不关闭', async () => {
+    const manager = new ConnectionManager();
+    managers.push(manager);
+    const pending = manager.connect(conn());
+    await waitForConnect();
+    resolveConnect!();
+    await pending;
+
+    manager.markExplicit('c-1');
+    manager.retain('c-1');
+    manager.release('c-1');
+    expect(manager.activeConnections).toBe(1);
+  });
+
   it('openCount 计入在建连会话（并发门禁不被绕过）', async () => {
     const manager = new ConnectionManager();
     managers.push(manager);

@@ -13,6 +13,7 @@ export class ERDiagramView extends BaseWebView {
     private readonly manager: ConnectionManager,
   ) {
     super('devbelt.erDiagram', `ER Diagram @ ${database}`);
+    this.manager.retain(conn.id);
   }
 
   static init(extensionUri: import('vscode').Uri): void { BaseWebView.init(extensionUri); }
@@ -62,8 +63,6 @@ export class ERDiagramView extends BaseWebView {
   protected onDispose(): void {
     super.onDispose();
     if (ERDiagramView.current === this) ERDiagramView.current = undefined;
-    if (!this.manager.isExplicit(this.conn.id)) {
-      this.manager.disposeConn(this.conn.id);
-    }
+    this.manager.release(this.conn.id);
   }
 }

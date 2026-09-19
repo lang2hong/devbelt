@@ -47,6 +47,7 @@ export class TableDesignView extends BaseWebView {
         : `New Table: ${conn.name || conn.host} › ${database}`,
     );
     this.table = table;
+    this.manager.retain(conn.id);
   }
 
   static init(extensionUri: import('vscode').Uri): void { BaseWebView.init(extensionUri); }
@@ -277,8 +278,6 @@ export class TableDesignView extends BaseWebView {
   protected onDispose(): void {
     super.onDispose();
     if (TableDesignView.current === this) TableDesignView.current = undefined;
-    if (!this.manager.isExplicit(this.conn.id)) {
-      this.manager.disposeConn(this.conn.id);
-    }
+    this.manager.release(this.conn.id);
   }
 }

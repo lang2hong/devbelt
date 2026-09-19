@@ -46,6 +46,8 @@ function managerFor(session: ReturnType<typeof fakeSession>) {
     connect: vi.fn(async () => session),
     isExplicit: () => true,
     disposeConn: vi.fn(),
+    retain: vi.fn(),
+    release: vi.fn(),
   } as any;
 }
 

@@ -25,6 +25,7 @@ export class StatusView extends BaseWebView {
     private readonly manager: ConnectionManager,
   ) {
     super('devbelt.serverStatus', `Status @ ${conn.name || conn.host}`);
+    this.manager.retain(conn.id);
   }
 
   static init(extensionUri: import('vscode').Uri): void { BaseWebView.init(extensionUri); }
@@ -115,8 +116,6 @@ export class StatusView extends BaseWebView {
   protected onDispose(): void {
     super.onDispose();
     if (StatusView.current === this) StatusView.current = undefined;
-    if (!this.manager.isExplicit(this.conn.id)) {
-      this.manager.disposeConn(this.conn.id);
-    }
+    this.manager.release(this.conn.id);
   }
 }

@@ -60,6 +60,8 @@ export interface ConnectOptions {
  */
 export class ConnectionManager {
   private readonly sessions = new Map<string, ConnectionSession>();
+  /** 长生命周期持有者的引用计数（见 retain/release）。 */
+  private readonly retains = new Map<string, number>();
   private readonly sessionEntries = new Map<string, SessionEntry>();
   private readonly explicit = new Set<string>();
   private readonly connecting = new Map<string, Promise<ConnectionSession>>();
@@ -293,8 +295,31 @@ export class ConnectionManager {
     return session;
   }
 
+  /**
+   * 登记一个长生命周期持有者（视图/面板）对连接的引用。
+   *
+   * 视图过去在关闭时直接 disposeConn：若同一连接同时被另一视图/查询使用，会把
+   * 别人的会话一并杀掉（各自重新建连，浪费且可能中断在途查询）。改为引用计数：
+   * release 到 0 且非用户显式打开时才真正关闭。
+   */
+  retain(id: string): void {
+    this.retains.set(id, (this.retains.get(id) ?? 0) + 1);
+  }
+
+  /** 释放一次 retain；计数归零且非显式打开时关闭会话。 */
+  release(id: string): void {
+    const next = (this.retains.get(id) ?? 0) - 1;
+    if (next > 0) {
+      this.retains.set(id, next);
+      return;
+    }
+    this.retains.delete(id);
+    if (!this.explicit.has(id)) this.disposeConn(id);
+  }
+
   /** 关闭指定连接会话 */
   disposeConn(id: string): void {
+    this.retains.delete(id);
     // 递增代际：在途建连完成后会据此自毁，不会留下幽灵会话/隧道。
     this.generations.set(id, this.generation(id) + 1);
     this.explicit.delete(id);

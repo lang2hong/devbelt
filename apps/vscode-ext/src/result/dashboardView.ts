@@ -48,6 +48,7 @@ export class DashboardView extends BaseWebView {
     private readonly manager: ConnectionManager,
   ) {
     super('devbelt.dashboard', `Dashboard @ ${conn.name || conn.host}`);
+    this.manager.retain(conn.id);
   }
 
   static init(extensionUri: import('vscode').Uri): void { BaseWebView.init(extensionUri); }
@@ -178,8 +179,6 @@ export class DashboardView extends BaseWebView {
     this.disposed = true;
     if (this.collectTimer) { clearInterval(this.collectTimer); this.collectTimer = undefined; }
     if (DashboardView.current === this) DashboardView.current = undefined;
-    if (!this.manager.isExplicit(this.conn.id)) {
-      this.manager.disposeConn(this.conn.id);
-    }
+    this.manager.release(this.conn.id);
   }
 }
