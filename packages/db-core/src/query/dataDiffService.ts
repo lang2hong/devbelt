@@ -100,7 +100,9 @@ export class DataDiffService {
     if (keyColumns.length === 0) {
       throw new Error(`data diff requires at least one key column for table ${table}`);
     }
-    const sourceMap = new Map<string, Record<string, unknown>>();
+    // 只把目标端全量放进内存（用于按键随机比对与识别 removed）；源端直接流式比对，
+    // 命中即从 targetMap 删除，剩下的就是 removed。相比过去同时持有两张全量表，
+    // 内存约减半，且输出顺序（added/changed 按源序、removed 按目标序）保持不变。
     const targetMap = new Map<string, Record<string, unknown>>();
 
     const wrap = (id: string) => sourceQuery.dialect.wrap(id);
@@ -111,19 +113,10 @@ export class DataDiffService {
     const colList = columnNames.map((c) => wrap(c)).join(', ');
     const targetColList = columnNames.map((c) => targetWrap(c)).join(', ');
 
-    for await (const rows of streamRowsByKeyset(
-      sourceQuery, sourceQuery.dialect, `SELECT ${colList} FROM ${qualifiedSource}`, orderColumns, this.BATCH_SIZE,
-    )) {
-      for (const row of rows) {
-        const key = keyColumns.map((c) => String(row[c])).join('|');
-        sourceMap.set(key, row);
-      }
-    }
-
-    for await (const rows of streamRowsByKeyset(
+    for await (const page of streamRowsByKeyset(
       targetQuery, targetQuery.dialect, `SELECT ${targetColList} FROM ${qualifiedTarget}`, orderColumns, this.BATCH_SIZE,
     )) {
-      for (const row of rows) {
+      for (const row of page) {
         const key = keyColumns.map((c) => String(row[c])).join('|');
         targetMap.set(key, row);
       }
@@ -131,19 +124,25 @@ export class DataDiffService {
 
     const rows: RowDiff[] = [];
 
-    for (const [key, srcRow] of sourceMap) {
-      const tgtRow = targetMap.get(key);
-      if (!tgtRow) {
-        rows.push({ status: 'added', pkValues: extractPk(keyColumns, srcRow), sourceRow: srcRow });
-      } else if (!this.rowsEqual(srcRow, tgtRow, columnNames)) {
-        rows.push({ status: 'changed', pkValues: extractPk(keyColumns, srcRow), sourceRow: srcRow, targetRow: tgtRow });
+    for await (const page of streamRowsByKeyset(
+      sourceQuery, sourceQuery.dialect, `SELECT ${colList} FROM ${qualifiedSource}`, orderColumns, this.BATCH_SIZE,
+    )) {
+      for (const srcRow of page) {
+        const key = keyColumns.map((c) => String(srcRow[c])).join('|');
+        const tgtRow = targetMap.get(key);
+        if (!tgtRow) {
+          rows.push({ status: 'added', pkValues: extractPk(keyColumns, srcRow), sourceRow: srcRow });
+        } else {
+          targetMap.delete(key);
+          if (!this.rowsEqual(srcRow, tgtRow, columnNames)) {
+            rows.push({ status: 'changed', pkValues: extractPk(keyColumns, srcRow), sourceRow: srcRow, targetRow: tgtRow });
+          }
+        }
       }
     }
 
-    for (const [key, tgtRow] of targetMap) {
-      if (!sourceMap.has(key)) {
-        rows.push({ status: 'removed', pkValues: extractPk(keyColumns, tgtRow), targetRow: tgtRow });
-      }
+    for (const tgtRow of targetMap.values()) {
+      rows.push({ status: 'removed', pkValues: extractPk(keyColumns, tgtRow), targetRow: tgtRow });
     }
 
     return { tableName: table, pkColumns: keyColumns, columnNames, rows };
