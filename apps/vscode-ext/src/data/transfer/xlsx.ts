@@ -526,7 +526,7 @@ function parseSharedStrings(xml: string | undefined): string[] {
 }
 
 /** 解析工作表的行；每行是「列下标 → 值」。 */
-function parseSheetRows(xml: string, shared: string[]): Map<number, unknown>[] {
+function parseSheetRows(xml: string, shared: string[], dateStyles: Set<number>): Map<number, unknown>[] {
   const rows: Map<number, unknown>[] = [];
   for (const rowMatch of xml.matchAll(/<row\b[^>]*(?:\/>|>([\s\S]*?)<\/row>)/g)) {
     const inner = rowMatch[1] ?? '';
@@ -540,14 +540,60 @@ function parseSheetRows(xml: string, shared: string[]): Map<number, unknown>[] {
       const index = ref ? columnIndexOf(ref) : -1;
       const column = index >= 0 ? index : fallbackIndex;
       fallbackIndex = column + 1;
-      cells.set(column, cellValue(type, body, shared));
+      const styleIndex = Number(/\bs="(\d+)"/.exec(attrs)?.[1] ?? NaN);
+      cells.set(column, cellValue(type, body, shared, dateStyles, styleIndex));
     }
     rows.push(cells);
   }
   return rows;
 }
 
-function cellValue(type: string, body: string, shared: string[]): unknown {
+/** 内置的日期/时间格式 id（ECMA-376 保留区）。 */
+const BUILTIN_DATE_FORMATS = new Set([14, 15, 16, 17, 18, 19, 20, 21, 22, 27, 30, 36, 45, 46, 47, 50, 57]);
+
+/**
+ * 从 styles.xml 解析「哪些单元格样式是日期格式」。
+ *
+ * Excel 把日期存成数字序列号，靠单元格的 numFmtId 表达「这是日期」。不处理样式时，
+ * 日期读回是一串数字（45292），导入数据库就变成错误数据。这里把日期样式的索引集合
+ * 找出来，cellValue 据此把序列号转成日期字符串。
+ */
+function parseDateStyles(stylesXml: string | undefined): Set<number> {
+  const result = new Set<number>();
+  if (!stylesXml) return result;
+  const customDateIds = new Set<number>();
+  for (const m of stylesXml.matchAll(/<numFmt\b[^>]*\bnumFmtId="(\d+)"[^>]*\bformatCode="([^"]*)"/g)) {
+    const code = unescapeXml(m[2]).replace(/\[[^\]]*\]/g, '').replace(/"[^"]*"/g, '');
+    // 含日期/时间占位符即视为日期格式（排除纯数字/文本格式）。
+    if (/[ymdhs]/i.test(code)) customDateIds.add(Number(m[1]));
+  }
+  const cellXfs = /<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/.exec(stylesXml)?.[1] ?? '';
+  let index = 0;
+  for (const xf of cellXfs.matchAll(/<xf\b([^>]*?)(?:\/>|>[\s\S]*?<\/xf>)/g)) {
+    const id = Number(/\bnumFmtId="(\d+)"/.exec(xf[1])?.[1] ?? NaN);
+    if (BUILTIN_DATE_FORMATS.has(id) || customDateIds.has(id)) result.add(index);
+    index++;
+  }
+  return result;
+}
+
+/**
+ * Excel 序列号 → 日期字符串。
+ *
+ * 以 1899-12-30 为原点（对齐 Excel 的 1900 闰年 bug）：1970-01-01 = 序列号 25569。
+ * 含小数部分表示时间。用 UTC 计算避免本机时区把日期挪一天。
+ */
+function excelSerialToDate(serial: number): string {
+  const ms = Math.round((serial - 25569) * 86400000);
+  const d = new Date(ms);
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  const date = `${d.getUTCFullYear()}-${p2(d.getUTCMonth() + 1)}-${p2(d.getUTCDate())}`;
+  const hasTime = Math.abs(serial - Math.floor(serial)) > 1e-9;
+  if (!hasTime) return date;
+  return `${date} ${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}:${p2(d.getUTCSeconds())}`;
+}
+
+function cellValue(type: string, body: string, shared: string[], dateStyles: Set<number>, styleIndex: number): unknown {
   const raw = /<v\b[^>]*>([\s\S]*?)<\/v>/.exec(body)?.[1];
   switch (type) {
     case 's': {
@@ -568,7 +614,10 @@ function cellValue(type: string, body: string, shared: string[]): unknown {
     default: {
       if (raw === undefined || raw === '') return null;
       const num = Number(raw);
-      return Number.isFinite(num) ? num : unescapeXml(raw);
+      if (Number.isFinite(num)) {
+        return dateStyles.has(styleIndex) ? excelSerialToDate(num) : num;
+      }
+      return unescapeXml(raw);
     }
   }
 }
@@ -599,8 +648,9 @@ function firstSheetPath(files: Map<string, Buffer>): string {
 export function parseXlsx(buffer: Buffer): Record<string, unknown>[] {
   const files = unzip(buffer);
   const shared = parseSharedStrings(files.get('xl/sharedStrings.xml')?.toString('utf8'));
+  const dateStyles = parseDateStyles(files.get('xl/styles.xml')?.toString('utf8'));
   const sheet = files.get(firstSheetPath(files))!.toString('utf8');
-  const rows = parseSheetRows(sheet, shared);
+  const rows = parseSheetRows(sheet, shared, dateStyles);
   if (!rows.length) return [];
 
   const header = rows[0];

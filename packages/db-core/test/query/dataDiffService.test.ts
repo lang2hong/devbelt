@@ -236,4 +236,30 @@ describe('DataDiffService 分页策略（PG keyset 丢行回归）', () => {
     expect(sql).toContain('ORDER BY `id` LIMIT');
     expect(sql).not.toContain('LIMIT 0,');
   });
+
+  it('跨方言值比较：数值与数值型字符串视为相等（不误报 changed）', async () => {
+    const sourceConn = new FakeConnection();
+    sourceConn.setResponses([{ rows: [{ id: 1, v: '1' }] }]);
+    const targetConn = new FakeConnection();
+    targetConn.setResponses([{ rows: [{ id: 1, v: 1 }] }]);
+    const result = await DataDiffService.diff(
+      makeQueryService(sourceConn), meta([{ name: 'id', isPrimary: true }, { name: 'v' }]), 's',
+      makeQueryService(targetConn), 't', ['users'],
+    );
+    // '1' 与 1 语义相同 → 无差异（旧实现 String 比较也会相等，但 null/日期等需归一）。
+    expect(result.diffs[0].rows).toEqual([]);
+  });
+
+  it('跨方言值比较：null 与 undefined 等价，Date 与等价时间戳相等', async () => {
+    const sourceConn = new FakeConnection();
+    sourceConn.setResponses([{ rows: [{ id: 1, v: null, t: new Date('2024-01-01T00:00:00Z') }] }]);
+    const targetConn = new FakeConnection();
+    targetConn.setResponses([{ rows: [{ id: 1, t: '2024-01-01 00:00:00' }] }]);
+    const result = await DataDiffService.diff(
+      makeQueryService(sourceConn), meta([{ name: 'id', isPrimary: true }, { name: 'v' }, { name: 't' }]), 's',
+      makeQueryService(targetConn), 't', ['users'],
+    );
+    // v: null vs 缺失等价；t: Date(2024-01-01T00:00:00Z) 与 '2024-01-01 00:00:00' 归一后相等。
+    expect(result.diffs[0].rows).toEqual([]);
+  });
 });

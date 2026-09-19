@@ -131,6 +131,36 @@ describe('xlsx 解析健壮性', () => {
     expect(parseXlsx(buf)).toEqual([{ colA: 'Hello', b: 7 }]);
   });
 
+  it('日期样式的序列号转为日期字符串（而非裸数字）', () => {
+    const styles = '<styleSheet><cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="14"/></cellXfs></styleSheet>';
+    const sheet = '<worksheet><sheetData>'
+      + '<row r="1"><c r="A1" t="inlineStr"><is><t>d</t></is></c></row>'
+      + '<row r="2"><c r="A2" s="1"><v>45292</v></c></row>'
+      + '<row r="3"><c r="A3" s="0"><v>42</v></c></row>'
+      + '</sheetData></worksheet>';
+    // A2 是日期样式 → 2024-01-01；A3 是普通数字样式 → 仍为 42。
+    expect(parseXlsx(buildWorkbook(sheet, undefined, styles))).toEqual([{ d: '2024-01-01' }, { d: 42 }]);
+  });
+
+  it('日期样式带时间部分输出完整时间', () => {
+    const styles = '<styleSheet><cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="22"/></cellXfs></styleSheet>';
+    const sheet = '<worksheet><sheetData>'
+      + '<row r="1"><c r="A1" t="inlineStr"><is><t>d</t></is></c></row>'
+      + '<row r="2"><c r="A2" s="1"><v>45292.5</v></c></row>'
+      + '</sheetData></worksheet>';
+    expect(parseXlsx(buildWorkbook(sheet, undefined, styles))).toEqual([{ d: '2024-01-01 12:00:00' }]);
+  });
+
+  it('自定义日期格式（formatCode）也识别', () => {
+    const styles = '<styleSheet><numFmts><numFmt numFmtId="164" formatCode="yyyy\u5e74m\u6708d\u65e5"/></numFmts>'
+      + '<cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="164"/></cellXfs></styleSheet>';
+    const sheet = '<worksheet><sheetData>'
+      + '<row r="1"><c r="A1" t="inlineStr"><is><t>d</t></is></c></row>'
+      + '<row r="2"><c r="A2" s="1"><v>45292</v></c></row>'
+      + '</sheetData></worksheet>';
+    expect(parseXlsx(buildWorkbook(sheet, undefined, styles))).toEqual([{ d: '2024-01-01' }]);
+  });
+
   it('公式错误单元格读作 null', () => {
     const sheet = '<worksheet><sheetData>'
       + '<row r="1"><c r="A1" t="inlineStr"><is><t>v</t></is></c></row>'
@@ -145,13 +175,14 @@ describe('xlsx 解析健壮性', () => {
  * 用本模块的 ZIP 写入能力包一份自定义 sheet XML，
  * 以便测试「别的工具产出的 xlsx」（sharedStrings / 错误值等写法）。
  */
-function buildWorkbook(sheetXml: string, sharedStringsXml?: string): Buffer {
+function buildWorkbook(sheetXml: string, sharedStringsXml?: string, stylesXml?: string): Buffer {
   // 先产出一份标准工作簿，再把其中的 sheet 部件替换掉：
   // 这样不必在测试里重复一遍 ZIP 细节。
   const base = serializeXlsx(['placeholder'], []);
   const files = readZip(base);
   files.set('xl/worksheets/sheet1.xml', Buffer.from(sheetXml, 'utf8'));
   if (sharedStringsXml) files.set('xl/sharedStrings.xml', Buffer.from(sharedStringsXml, 'utf8'));
+  if (stylesXml) files.set('xl/styles.xml', Buffer.from(stylesXml, 'utf8'));
   return writeStoredZip(files);
 }
 

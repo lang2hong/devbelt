@@ -1,6 +1,7 @@
 export interface CsvData {
   columns: string[];
-  rows: Record<string, string>[];
+  /** 值为 null 表示 CSV 里的未加引号空字段（NULL）；`''` 表示显式空串（`""`）。 */
+  rows: Record<string, string | null>[];
 }
 
 function formatValue(value: unknown): string {
@@ -38,6 +39,10 @@ export function unguardFormula(text: string): string {
 }
 
 function escapeCell(value: unknown): string {
+  // NULL 与空串必须可区分：NULL 写未加引号的空字段，空串写 `""`。否则导出后再导入，
+  // 两者都变成同一个值（此前都是空，NULL 与 '' 丢失其一）。
+  if (value === null || value === undefined) return '';
+  if (value === '') return '""';
   const text = guardFormula(formatValue(value));
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
@@ -65,10 +70,12 @@ export function serializeCsv(columns: string[], rows: Record<string, unknown>[])
  * they represent an empty value or NULL in the destination table.
  */
 export function parseCsv(text: string, hasHeader = true): CsvData {
-  const records: string[][] = [];
-  let row: string[] = [];
+  // 记录每个字段是否被引号包裹：`""`（空串）与未加引号的空字段（NULL）要能区分。
+  const records: { value: string; quoted: boolean }[][] = [];
+  let row: { value: string; quoted: boolean }[] = [];
   let value = '';
   let quoted = false;
+  let cellQuoted = false;
 
   for (let index = 0; index < text.length; index++) {
     const ch = text[index];
@@ -86,28 +93,34 @@ export function parseCsv(text: string, hasHeader = true): CsvData {
     if (ch === '"') {
       if (value) throw new Error('Invalid CSV: quote must start a field.');
       quoted = true;
+      cellQuoted = true;
     } else if (ch === ',') {
-      row.push(value);
+      row.push({ value, quoted: cellQuoted });
       value = '';
+      cellQuoted = false;
     } else if (ch === '\n' || ch === '\r') {
       if (ch === '\r' && text[index + 1] === '\n') index++;
-      row.push(value);
+      row.push({ value, quoted: cellQuoted });
       records.push(row);
       row = [];
       value = '';
+      cellQuoted = false;
     } else {
       value += ch;
     }
   }
   if (quoted) throw new Error('Invalid CSV: unterminated quoted field.');
-  if (value || row.length) {
-    row.push(value);
+  if (value || row.length || cellQuoted) {
+    row.push({ value, quoted: cellQuoted });
     records.push(row);
   }
-  if (records.length && records[0].length === 1 && records[0][0] === '') records.shift();
+  if (records.length && records[0].length === 1 && records[0][0].value === '' && !records[0][0].quoted) records.shift();
   if (!records.length) return { columns: [], rows: [] };
 
-  const first = records[0].map((cell, index) => index === 0 ? cell.replace(/^\uFEFF/, '') : cell);
+  const first = records[0].map((cell, index) => {
+    const text2 = index === 0 ? cell.value.replace(/^\uFEFF/, '') : cell.value;
+    return text2;
+  });
   const columns = hasHeader ? first : first.map((_, index) => `Column ${index + 1}`);
   if (columns.some((column) => !column.trim())) throw new Error('CSV headers cannot be empty.');
   if (new Set(columns).size !== columns.length) throw new Error('CSV headers must be unique.');
@@ -115,9 +128,15 @@ export function parseCsv(text: string, hasHeader = true): CsvData {
   const values = hasHeader ? records.slice(1) : records;
   return {
     columns,
-    rows: values.filter((record) => record.some((cell) => cell !== '')).map((record) => {
-      const out: Record<string, string> = {};
-      columns.forEach((column, index) => { out[column] = unguardFormula(record[index] ?? ''); });
+    // 整行都没内容（且无显式空串）的行跳过，避免尾随空行变成全 NULL 记录。
+    rows: values.filter((record) => record.some((cell) => cell.value !== '' || cell.quoted)).map((record) => {
+      const out: Record<string, string | null> = {};
+      columns.forEach((column, index) => {
+        const cell = record[index];
+        if (!cell) { out[column] = null; return; }
+        // 未加引号的空字段 → NULL；其余（含 `""`）→ 文本。
+        out[column] = cell.value === '' && !cell.quoted ? null : unguardFormula(cell.value);
+      });
       return out;
     }),
   };

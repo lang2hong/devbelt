@@ -109,7 +109,14 @@ export class SqliteDialect implements SqlDialect {
 
   getIndexListSql(table: string): string {
     validateIdent(table);
-    return `SELECT name AS name, 0 AS is_unique, name LIKE 'sqlite_autoindex%' AS is_primary FROM sqlite_master WHERE type = 'index' AND tbl_name = '${table}'`;
+    // 用 pragma_index_list/信息表拿真实元数据：过去列恒空、is_unique 恒 0，且把所有
+    // `sqlite_autoindex%` 当成主键——唯一约束自动索引被误标为主键。这里按 origin
+    // 判定主键（origin='pk'），unique 取真实值，列经 pragma_index_info 展开。
+    return `SELECT il.name AS name, il."unique" AS is_unique, (il.origin = 'pk') AS is_primary,
+      ii.name AS col
+      FROM pragma_index_list(${this.wrap(table)}) il
+      JOIN pragma_index_info(il.name) ii
+      ORDER BY il.name, ii.seqno`;
   }
 
   getUserListSql(): string { return ''; }
@@ -176,14 +183,22 @@ export class SqliteDialect implements SqlDialect {
     return [];
   }
 
-  /** 解析索引列表；标志位过 toBool，避免字符串 `"0"` 被判为真。 */
+  /**
+   * 解析索引列表；标志位过 toBool，避免字符串 `"0"` 被判为真。
+   * SQL 每列一行，按索引名归并并保序收集列。
+   */
   parseIndexList(rows: any[]): IndexMeta[] {
-    return rows.map((row) => ({
-      name: row.name,
-      columns: [],
-      isUnique: toBool(row.is_unique),
-      isPrimary: toBool(row.is_primary),
-    }));
+    const map = new Map<string, IndexMeta>();
+    for (const row of rows) {
+      const name = String(row.name);
+      let entry = map.get(name);
+      if (!entry) {
+        entry = { name, columns: [], isUnique: toBool(row.is_unique), isPrimary: toBool(row.is_primary) };
+        map.set(name, entry);
+      }
+      if (row.col != null) entry.columns.push(String(row.col));
+    }
+    return Array.from(map.values());
   }
 
   parseTriggerList(rows: any[]): TriggerMeta[] {

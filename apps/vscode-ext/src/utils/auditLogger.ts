@@ -14,7 +14,8 @@ export type AuditAction =
   | 'connection_close'
   | 'user_manage'
   | 'import_data'
-  | 'export_data';
+  | 'export_data'
+  | 'process_kill';
 
 export interface AuditEntry {
   id: string;

@@ -9,8 +9,15 @@ describe('CSV transfer codec', () => {
     expect(text).toBe('id,note,empty,details\r\n1,"a, ""quoted""\nvalue",,"{""active"":true}"\r\n');
     expect(parseCsv(text)).toEqual({
       columns: ['id', 'note', 'empty', 'details'],
-      rows: [{ id: '1', note: 'a, "quoted"\nvalue', empty: '', details: '{"active":true}' }],
+      // null 写未加引号空字段，读回仍是 null（不被当成空串）。
+      rows: [{ id: '1', note: 'a, "quoted"\nvalue', empty: null, details: '{"active":true}' }],
     });
+  });
+
+  it('NULL 与空串可区分：null ↔ 空字段，空串 ↔ `""`', () => {
+    const text = serializeCsv(['a', 'b'], [{ a: null, b: '' }]);
+    expect(text).toBe('a,b\r\n,\"\"\r\n');
+    expect(parseCsv(text)).toEqual({ columns: ['a', 'b'], rows: [{ a: null, b: '' }] });
   });
 
   it('handles BOM and can generate source names for headerless files', () => {

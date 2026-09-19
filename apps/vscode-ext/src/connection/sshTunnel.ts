@@ -129,8 +129,13 @@ export class SshTunnel {
         fail(err);
       };
 
-      /** 隧道建立后断线/报错时的清理：关闭本地 server 与 ssh 连接并移出 map。 */
+      /** 已接入的本地转发 socket：隧道断开时需一并 destroy，否则连接会悬空。 */
+      const liveSockets = new Set<import('net').Socket>();
+
+      /** 隧道建立后断线/报错时的清理：关闭转发 socket、本地 server 与 ssh 连接并移出 map。 */
       const teardown = (): void => {
+        for (const s of liveSockets) { try { s.destroy(); } catch { /* already destroyed */ } }
+        liveSockets.clear();
         const t = this.tunnels.get(conn.id);
         if (!t) return;
         this.tunnels.delete(conn.id);
@@ -145,6 +150,9 @@ export class SshTunnel {
         ssh.on('error', (err: Error) => { diagError('ssh tunnel dropped', err.message); teardown(); });
         ssh.on('close', teardown);
         const server = net.createServer((socket) => {
+          // 记录活动 socket，隧道断开时统一 destroy；否则已建立的转发连接会残留。
+          liveSockets.add(socket);
+          socket.on('close', () => liveSockets.delete(socket));
           ssh.forwardOut(
             socket.remoteAddress || '127.0.0.1',
             socket.remotePort || 0,

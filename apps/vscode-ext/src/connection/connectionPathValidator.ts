@@ -13,6 +13,8 @@ import { isOrganizationConnectionId } from '@devkit/db-host/sync/entitlementGate
  * 前强制校验；树 warning 图标 / tooltip / 补齐表单属阶段 B。
  */
 
+import { dirname } from 'node:path';
+
 export interface PathValidationIssue {
   /** 出问题的字段名（dbPath / caPath / clientCertPath / clientKeyPath / sshPrivateKeyPath / socketPath）。 */
   field: string;
@@ -63,6 +65,14 @@ export async function validateConnectionPaths(
   }
   for (const { field, value } of pathFieldsOf(conn)) {
     if (!value) continue; // 未配置则不校验，交给方言默认行为
+    if (field === 'dbPath' && conn.dbType === DatabaseType.SQLITE) {
+      // SQLite 的 dbPath 可以指向**尚不存在**的库文件：新建库正是「路径不存在」。
+      // 旧逻辑要求文件必须可读，导致无法新建库文件。存在即可读则通过；否则只要
+      // 父目录可写（能创建文件）也算通过。
+      if (await readableOrCreatable(value, access)) continue;
+      issues.push({ field, reason: 'not-readable' });
+      continue;
+    }
     let ok = false;
     try {
       await access(value, 4 /* R_OK */);
@@ -75,6 +85,23 @@ export async function validateConnectionPaths(
     }
   }
   return { valid: issues.length === 0, issues };
+}
+
+/** 文件可读，或其父目录可写（可新建）。 */
+async function readableOrCreatable(
+  filePath: string,
+  access: (path: string, mode: number) => Promise<void>,
+): Promise<boolean> {
+  try {
+    await access(filePath, 4 /* R_OK */);
+    return true;
+  } catch { /* 不存在 */ }
+  try {
+    await access(dirname(filePath), 2 /* W_OK */);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function defaultAccess(path: string, mode: number): Promise<void> {

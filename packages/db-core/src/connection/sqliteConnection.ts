@@ -136,7 +136,9 @@ export class SqliteConnection extends IConnection {
   }
 
   isAlive(): boolean {
-    return this.connected;
+    // 不仅看「曾经连上」，还要看常驻 CLI 进程是否仍在：进程崩溃后仍报存活会让
+    // 上层复用死会话。
+    return this.connected && this.sqlite.isProcessAlive();
   }
 
   /** Override base class to use SQLite-compatible escaping. */

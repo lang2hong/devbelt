@@ -49,6 +49,16 @@ class SQLite {
     this.sqliteCommand = sqliteCommand ? validateSqliteCommand(sqliteCommand) : getSqliteBinariesPath();
   }
 
+  /**
+   * 常驻 CLI 进程是否仍存活。
+   *
+   * 连接层的 `isAlive()` 过去只看一个「曾经 connect 成功」的布尔量：进程后来退出
+   * （崩溃/被杀）仍报存活，上层复用这条会话时查询才失败。这里按真实进程状态判定。
+   */
+  isProcessAlive(): boolean {
+    return !!this.proc && !this.proc.killed && this.proc.exitCode === null && this.proc.signalCode === null;
+  }
+
   /** 终止常驻进程并拒绝在途查询（连接关闭/取消时调用）。 */
   killAll(): void {
     this.killProc(new Error('sqlite query cancelled'));
@@ -104,8 +114,8 @@ class SQLite {
 
   /** 惰性启动/复用常驻进程；启动失败抛错。 */
   private ensureProc(): child_process.ChildProcess {
-    if (this.proc && !this.proc.killed && this.proc.exitCode === null && this.proc.signalCode === null) {
-      return this.proc;
+    if (this.isProcessAlive()) {
+      return this.proc!;
     }
 
     const args = ['-bail', '-header', '-nullvalue', 'NULL', '-cmd', '.mode tcl'];

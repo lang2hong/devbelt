@@ -151,11 +151,58 @@ export class DataDiffService {
 
   private static rowsEqual(a: Record<string, unknown>, b: Record<string, unknown>, cols: string[]): boolean {
     for (const c of cols) {
-      const va = a[c] ?? null;
-      const vb = b[c] ?? null;
-      if (String(va) !== String(vb)) return false;
+      if (!DataDiffService.valuesEqual(a[c], b[c])) return false;
     }
     return true;
+  }
+
+  /**
+   * 跨方言值比较。
+   *
+   * 直接 `String(a) !== String(b)` 会把同值判成不同：MySQL 可能给 `'1'`、PG 给 `1`；
+   * 日期在两端的文本形态不同（`2024-01-01T00:00:00.000Z` vs `2024-01-01 00:00:00`）。
+   * 这里按语义归一：null/undefined 等价；Date 比时间戳；Buffer 比字节；数值与数值型
+   * 字符串按数值比；其余退回字符串比较。
+   */
+  private static valuesEqual(va: unknown, vb: unknown): boolean {
+    if (va === vb) return true;
+    const a = va === undefined ? null : va;
+    const b = vb === undefined ? null : vb;
+    if (a === null || b === null) return a === b;
+    if (Buffer.isBuffer(a) || Buffer.isBuffer(b)) {
+      return Buffer.isBuffer(a) && Buffer.isBuffer(b) && a.equals(b);
+    }
+    // 日期形态归一：Date 对象与 'YYYY-MM-DD[ T]HH:mm:ss[.sss][Z]' 文本统一成同一
+    // 规范形式，避免 ISO（2024-01-01T00:00:00.000Z）与数据库文本（2024-01-01 00:00:00）
+    // 被误判为差异。必须先于「Date vs 数字时间戳」分支：否则与字符串比较时
+    // Number('2024-01-01 00:00:00') 为 NaN 直接判不等。
+    const da = DataDiffService.canonicalDate(a);
+    const db = DataDiffService.canonicalDate(b);
+    if (da !== null && db !== null) return da === db;
+    if (a instanceof Date || b instanceof Date) {
+      const ta = a instanceof Date ? a.getTime() : Number(a);
+      const tb = b instanceof Date ? b.getTime() : Number(b);
+      return Number.isFinite(ta) && Number.isFinite(tb) && ta === tb;
+    }
+    const sa = String(a);
+    const sb = String(b);
+    if (sa === sb) return true;
+    // 数值型字符串等价（'1' vs 1、'1.0' vs 1）。
+    if (sa.trim() !== '' && sb.trim() !== '') {
+      const na = Number(sa);
+      const nb = Number(sb);
+      if (Number.isFinite(na) && Number.isFinite(nb)) return na === nb;
+    }
+    return false;
+  }
+
+  /** 把 Date 或常见日期时间文本规整为 `YYYY-MM-DD HH:mm:ss`；无法识别返回 null。 */
+  private static canonicalDate(v: unknown): string | null {
+    const text = v instanceof Date ? v.toISOString() : (typeof v === 'string' ? v : null);
+    if (text === null) return null;
+    const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?)?Z?$/.exec(text.trim());
+    if (!m) return null;
+    return `${m[1]}-${m[2]}-${m[3]} ${m[4] ?? '00'}:${m[5] ?? '00'}:${m[6] ?? '00'}`;
   }
 
   static generateSyncSql(diffs: DataDiffResult, targetDb: string, targetQuery: QueryService): string {

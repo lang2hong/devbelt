@@ -750,4 +750,7 @@ export const zh: MessageCatalog = {
   'backup.scheduleInfo': '"{database}" 每 {hours} 小时备份到 {dir}',
   'backup.scheduleInterval': '"{database}" 多久备份一次？',
   'backup.selectFolder': '选择备份文件夹',
+
+  'status.killConfirm': '结束进程 {id}？',
+  'status.kill': '结束进程',
 };

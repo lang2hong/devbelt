@@ -53,6 +53,20 @@ describe('parseIndexList 布尔归一化', () => {
     expect(indexes[0].isUnique).toBe(false);
     expect(indexes[1].isUnique).toBe(true);
   });
+
+  it('SQLite：按索引名归并列，origin=pk 才是主键', () => {
+    const indexes = new SqliteDialect().parseIndexList([
+      { name: 'idx_a', is_unique: 0, is_primary: 0, col: 'a' },
+      { name: 'idx_a', is_unique: 0, is_primary: 0, col: 'b' },
+      { name: 'sqlite_autoindex_t_1', is_unique: 1, is_primary: 1, col: 'id' },
+    ]);
+    expect(indexes.map((i) => i.name)).toEqual(['idx_a', 'sqlite_autoindex_t_1']);
+    // 过去列恒空（UI 看不到索引列），unique 恒 0。
+    expect(indexes[0].columns).toEqual(['a', 'b']);
+    expect(indexes[0].isPrimary).toBe(false);
+    expect(indexes[1].isPrimary).toBe(true);
+    expect(indexes[1].isUnique).toBe(true);
+  });
 });
 
 describe('PG parseIndexList 列名提取', () => {

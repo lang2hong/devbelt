@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
+import * as path from 'path';
 import * as pg from 'pg';
 import { IConnection } from './connection.js';
 import type { ConnectionConfig } from '../types/connection.js';
@@ -58,10 +59,26 @@ export class PostgreSqlConnection extends IConnection {
       });
     }
 
+    // 本机 unix socket：pg 用 `host` 表示 socket **目录**（服务端按 port 找
+    // `.s.PGSQL.<port>`）。用户填的可能是完整 socket 文件路径，取出目录。旧实现
+    // 完全忽略 socketPath，填了也照 TCP 连。
+    if (config.socketPath) {
+      conf.host = /\.s\.PGSQL\.\d+$/.test(config.socketPath)
+        ? path.dirname(config.socketPath)
+        : config.socketPath;
+    }
+
     // PG 的 schema 通过启动参数 search_path 生效；旧实现完全忽略 config.schema，
     // 用户在表单里设的 schema 从未起作用。仅接受简单标识符，避免拼接注入。
     if (config.schema && /^[A-Za-z_][A-Za-z0-9_$]*$/.test(config.schema)) {
       const opt = `-c search_path=${config.schema}`;
+      conf.options = conf.options ? `${conf.options} ${opt}` : opt;
+    }
+
+    // 时区：pg 无独立字段，用启动参数 `-c TimeZone=`。旧实现忽略 config.timezone。
+    // 只接受时区名安全字符，避免注入 options 串。
+    if (config.timezone && /^[A-Za-z0-9_+\-/]+$/.test(config.timezone)) {
+      const opt = `-c TimeZone=${config.timezone}`;
       conf.options = conf.options ? `${conf.options} ${opt}` : opt;
     }
 

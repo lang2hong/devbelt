@@ -51,6 +51,19 @@ describe('importRows', () => {
     });
     expect(query.statements).toEqual(['BEGIN', 'INSERT 1', 'INSERT 2', 'ROLLBACK']);
   });
+
+  it('rowOffset 让报错行号对齐源文件行（带表头）', async () => {
+    const query = makeQuery('INSERT 2');
+    const result = await importRows({
+      query: query as any,
+      table: 'users',
+      rows: [{ source_id: 1 }, { source_id: 2 }],
+      mappings,
+      rowOffset: 1,
+    });
+    // 第 2 条数据失败 → 映射后第 2 条，源文件第 3 行（表头占第 1 行）。
+    expect(result.errors).toEqual([{ row: 3, message: 'duplicate key' }]);
+  });
 });
 
 describe('importRows (batchWrites)', () => {

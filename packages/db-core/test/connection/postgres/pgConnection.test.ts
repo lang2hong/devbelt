@@ -174,3 +174,31 @@ describe('convertToDump (PG 转义)', () => {
       .toEqual({ a: "'C:\\tmp'", b: "'O''Brien'", n: 'NULL', i: '42' });
   });
 });
+
+describe('schema / socketPath / timezone', () => {
+  it('schema 与 timezone 通过启动参数生效，socketPath 作为 host 目录', () => {
+    new PostgreSqlConnection({
+      ...base,
+      host: 'ignored-by-socket',
+      schema: 'myschema',
+      timezone: 'Asia/Shanghai',
+      socketPath: '/var/run/postgresql/.s.PGSQL.5432',
+    } as any);
+    const { conf } = created[0];
+    expect(conf.host).toBe('/var/run/postgresql');
+    expect(conf.options).toContain('-c search_path=myschema');
+    expect(conf.options).toContain('-c TimeZone=Asia/Shanghai');
+  });
+
+  it('socketPath 已是目录时原样使用；非法标识符不被拼接', () => {
+    new PostgreSqlConnection({
+      ...base,
+      socketPath: '/var/run/postgresql',
+      schema: 'bad name',
+      timezone: 'Asia/Shanghai; DROP',
+    } as any);
+    const { conf } = created[0];
+    expect(conf.host).toBe('/var/run/postgresql');
+    expect(conf.options).toBeUndefined();
+  });
+});

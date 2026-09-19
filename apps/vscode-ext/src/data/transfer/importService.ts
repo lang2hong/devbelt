@@ -40,6 +40,11 @@ export interface ImportRowsOptions {
    * 否则事务语句无法在同一连接内保持。
    */
   batchWrites?: boolean;
+  /**
+   * 首个数据行在源文件中的行号偏移（如带表头的 CSV/xlsx，首行数据是第 2 行 → 1）。
+   * 报错行号按源文件行显示，而不是「映射后第几条」，用户才能定位到文件。
+   */
+  rowOffset?: number;
 }
 
 /**
@@ -47,10 +52,10 @@ export interface ImportRowsOptions {
  * complete data set, preventing the partial writes common in one-row-at-a-time importers.
  */
 export async function importRows(options: ImportRowsOptions): Promise<ImportResult> {
-  const { query, table, database, rows, mappings, onProgress, isCancelled, batchWrites = false } = options;
+  const { query, table, database, rows, mappings, onProgress, isCancelled, batchWrites = false, rowOffset = 0 } = options;
   const mapped = mapRows(rows, mappings);
   if (!mapped.rows.length) return { imported: 0, rolledBack: false, errors: [] };
-  if (batchWrites) return importRowsBatched({ query, table, database, mapped, onProgress, isCancelled });
+  if (batchWrites) return importRowsBatched({ query, table, database, mapped, onProgress, isCancelled, rowOffset });
   let started = false;
   let completed = 0;
   try {
@@ -77,7 +82,7 @@ export async function importRows(options: ImportRowsOptions): Promise<ImportResu
     return {
       imported: 0,
       rolledBack: rollbackSucceeded,
-      errors: [{ row: completed + 1, message: (error as Error).message }],
+      errors: [{ row: completed + 1 + rowOffset, message: (error as Error).message }],
     };
   }
 }
@@ -87,9 +92,9 @@ export async function importRows(options: ImportRowsOptions): Promise<ImportResu
  * 失败时在进程内追加 ROLLBACK 后重试一次，保证事务原子性。
  */
 async function importRowsBatched(
-  options: Pick<ImportRowsOptions, 'query' | 'table' | 'database' | 'onProgress' | 'isCancelled'> & { mapped: { columns: string[]; rows: Record<string, unknown>[] } },
+  options: Pick<ImportRowsOptions, 'query' | 'table' | 'database' | 'onProgress' | 'isCancelled'> & { mapped: { columns: string[]; rows: Record<string, unknown>[] }; rowOffset?: number },
 ): Promise<ImportResult> {
-  const { query, table, database, mapped, onProgress, isCancelled } = options;
+  const { query, table, database, mapped, onProgress, isCancelled, rowOffset = 0 } = options;
   if (isCancelled?.()) throw new TransferCancelledError();
   const { columns, rows: dataRows } = mapped;
   const inserts = dataRows.map((row) => query.dialect.buildInsertSql([row], columns, table, database).trim());
@@ -108,7 +113,7 @@ async function importRowsBatched(
     return {
       imported: 0,
       rolledBack: rollbackSucceeded,
-      errors: [{ row: 1, message: (error as Error).message }],
+      errors: [{ row: 1 + rowOffset, message: (error as Error).message }],
     };
   }
 }

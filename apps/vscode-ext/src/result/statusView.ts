@@ -3,6 +3,9 @@ import { DatabaseType } from '@devkit/db-core';
 import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from './baseWebView';
+import { ensureWritable } from '../utils/sqlSafety';
+import { AuditLogger } from '../utils/auditLogger';
+import { l10n } from '../i18n';
 
 export interface ServerSummary {
   dbType: string;
@@ -37,10 +40,12 @@ export class StatusView extends BaseWebView {
     if (msg.type === 'killProcess') {
       const id = Number(msg.id);
       if (!Number.isFinite(id)) return;
+      // 结束服务端进程是写操作：只读连接必须被拦截（此前直接放行）。
+      if (!ensureWritable(this.conn)) return;
       const confirmed = await vscode.window.showWarningMessage(
-        `Kill process ${id}?`, { modal: true }, 'Kill',
+        l10n('status.killConfirm', { id }), { modal: true }, l10n('status.kill'),
       );
-      if (confirmed !== 'Kill') return;
+      if (confirmed !== l10n('status.kill')) return;
       try {
         const session = await this.manager.connect(this.conn);
         const dbType = session.query.dialect.dbType;
@@ -49,6 +54,13 @@ export class StatusView extends BaseWebView {
         } else if (dbType === DatabaseType.MYSQL) {
           await session.query.query(`KILL ${id}`);
         }
+        // 记审计：结束进程是破坏性管理动作，此前无任何留痕。
+        AuditLogger.tryLog({
+          action: 'process_kill',
+          connName: this.conn.name || this.conn.host,
+          database: this.conn.database,
+          sql: `kill ${id}`,
+        });
         const processList = await session.metadata.getProcessList();
         this.post({ type: 'processList', processList });
       } catch (err) {

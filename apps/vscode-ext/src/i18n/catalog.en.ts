@@ -772,4 +772,7 @@ export const en: MessageCatalog = {
   'backup.scheduleInfo': '"{database}" backs up every {hours}h to {dir}',
   'backup.scheduleInterval': 'How often should "{database}" be backed up?',
   'backup.selectFolder': 'Select backup folder',
+
+  'status.killConfirm': 'Kill process {id}?',
+  'status.kill': 'Kill',
 };

@@ -71,6 +71,17 @@ describe('SchemaDiffService', () => {
     expect(changed[0].targetType).toBe('varchar(100)');
   });
 
+  it('仅 NOT NULL 变化也算 changed，并带出 sourceNotNull', async () => {
+    const source = mockMetaService(['users'], { users: [{ name: 'id', type: 'int(11)', isNotNull: true } as any] });
+    const target = mockMetaService(['users'], { users: [{ name: 'id', type: 'int(11)', isNotNull: false } as any] });
+    const diffs = await SchemaDiffService.diff(source, 'sourceDb', target, 'targetDb');
+    const users = diffs.find((d) => d.tableName === 'users')!;
+    expect(users.status).toBe('changed');
+    const id = users.columns.find((c) => c.columnName === 'id')!;
+    expect(id.status).toBe('changed');
+    expect(id.sourceNotNull).toBe(true);
+  });
+
   it('发现新增列和删除列', async () => {
     const source = mockMetaService(
       ['users'],

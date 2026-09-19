@@ -456,9 +456,14 @@ export class TableService {
       let offset = 0;
       let totalRows = 0;
       const qualified = this.wrapQualified(table, database);
+      // 无 ORDER BY 的 LIMIT/OFFSET 分页顺序不确定：服务端可返回任意顺序，翻页时行会
+      // 漂移，导致导出丢行/重复。先探列，再按全部列排序，保证分页稳定。
+      const probe = await this.queryService.query(`SELECT * FROM ${qualified} LIMIT 0`);
+      const orderColumns = probe.fields.map((f: any) => this.wrap(f.name));
+      const orderBy = orderColumns.length ? ` ORDER BY ${orderColumns.join(', ')}` : '';
       for (;;) {
         const page = await this.queryService.query(
-          `SELECT * FROM ${qualified} LIMIT ${DUMP_BATCH} OFFSET ${offset}`,
+          `SELECT * FROM ${qualified}${orderBy} LIMIT ${DUMP_BATCH} OFFSET ${offset}`,
         );
         if (page.rows.length === 0) break;
         if (totalRows === 0) {

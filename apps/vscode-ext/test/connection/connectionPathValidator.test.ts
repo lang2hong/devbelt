@@ -37,6 +37,12 @@ describe('validateConnectionPaths', () => {
     expect((await validateConnectionPaths(c, accessWith(['/ok/db.sqlite']))).valid).toBe(true);
   });
 
+  it('SQLite dbPath 文件不存在但父目录可写 → valid（可新建库文件）', async () => {
+    const c = conn({ dbType: DatabaseType.SQLITE, dbPath: '/ok/new.sqlite' });
+    // 父目录 /ok 可访问，文件本身不在存在集合里。
+    expect((await validateConnectionPaths(c, accessWith(['/ok']))).valid).toBe(true);
+  });
+
   it('MySQL useSSL 证书路径缺一不可（ca/cert/key 各自校验）', async () => {
     const c = conn({ useSSL: true, caPath: '/ca', clientCertPath: '/cert', clientKeyPath: '/key' });
     const r = await validateConnectionPaths(c, accessWith(['/ca']));

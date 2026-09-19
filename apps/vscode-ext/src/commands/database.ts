@@ -342,11 +342,18 @@ async function importSqlScript(
   if (database && conn.dbType === DatabaseType.MYSQL) {
     await session.query.query(`USE ${wrapIdentForConn(conn, validateIdent(database))}`);
   }
-  const statements = splitSqlStatements(sql, dialectScanOptions(conn.dbType));
+  const txControl = /^(BEGIN|START\s+TRANSACTION|COMMIT|ROLLBACK|END)\s*;?\s*$/i;
+  const statements = splitSqlStatements(sql, dialectScanOptions(conn.dbType))
+    .filter((st) => !txControl.test(st.trim()));
+  // 脚本导入过去逐句直接执行，中途失败会留下半截数据。除 SQLite（CLI 驱动每句独立
+  // 进程、无法跨语句事务）外，用事务包裹，失败整体回滚。MySQL 的 DDL 会隐式提交，
+  // 仍无法完全原子，但 DML 脚本可回滚。
+  const transactional = conn.dbType !== DatabaseType.SQLITE;
   let done = 0;
   let insertedRows = 0;
   let hasAffectedInfo = false;
   try {
+    if (transactional) await session.query.query('BEGIN');
     await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: l10n('import.progress'), cancellable: true }, async (progress, token) => {
       for (const statement of statements) {
         if (token.isCancellationRequested) throw new TransferCancelledError();
@@ -365,6 +372,7 @@ async function importSqlScript(
         progress.report({ message: `${done}/${statements.length}` });
       }
     });
+    if (transactional) await session.query.query('COMMIT');
     const importedCount = hasAffectedInfo ? insertedRows : done;
     await recordBulkHistory(
       deps, conn,
@@ -374,6 +382,9 @@ async function importSqlScript(
     vscode.window.showInformationMessage(l10n('import.rowsDone', { count: importedCount }));
     treeProvider.refresh();
   } catch (error) {
+    if (transactional) {
+      try { await session.query.query('ROLLBACK'); } catch { /* 事务可能已被服务端结束 */ }
+    }
     if (error instanceof TransferCancelledError) vscode.window.showInformationMessage(l10n('transfer.cancelled'));
     else vscode.window.showErrorMessage(l10n('import.failedStatement', { count: done, message: (error as Error).message }));
   }
@@ -390,6 +401,8 @@ async function importStructuredData(
   const conn = node.conn;
   if (!conn) return;
   let source: { columns: string[]; rows: Record<string, unknown>[] };
+  // 报错行号：带表头时首个数据行是文件第 2 行。xlsx 的表头恒为工作表第 1 行。
+  let rowOffset = 0;
   try {
     if (format === 'csv') {
       const header = await vscode.window.showQuickPick(
@@ -398,12 +411,14 @@ async function importStructuredData(
       );
       if (!header) return;
       source = parseCsv(text, header.value);
+      rowOffset = header.value ? 1 : 0;
     } else if (format === 'json') {
       source = parseJson(text);
     } else if (format === 'xlsx') {
       // 解析一次即可：此前同一份 buffer 被解了三遍
       const parsed = parseXlsx(Buffer.from(text, 'base64'));
       source = { columns: parsed.length ? Object.keys(parsed[0]) : [], rows: parsed };
+      rowOffset = 1;
     } else if (format === 'xml') {
       const parsed = parseXml(text);
       source = { columns: parsed.length ? Object.keys(parsed[0]) : [], rows: parsed };
@@ -446,6 +461,7 @@ async function importStructuredData(
       rows: source.rows,
       mappings,
       batchWrites: conn.dbType === DatabaseType.SQLITE,
+      rowOffset,
       isCancelled: () => token.isCancellationRequested,
       onProgress: ({ completed, total }) => progress.report({ message: `${completed}/${total}`, increment: total ? 100 / total : 0 }),
     }));

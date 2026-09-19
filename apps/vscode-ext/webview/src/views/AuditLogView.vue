@@ -34,6 +34,7 @@ const actionLabels: Record<string, string> = {
   connection_close: 'Disconnect',
   user_manage: 'User',
   import_data: 'Import',
+  process_kill: 'Kill Process',
   export_data: 'Export',
 };
 
