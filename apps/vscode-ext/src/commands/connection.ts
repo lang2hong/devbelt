@@ -123,7 +123,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
           await vscode.commands.executeCommand('devbelt.fixConnectionPaths', conn);
         }
       } else {
-        vscode.window.showErrorMessage(`Open connection failed: ${(err as Error).message}`);
+        vscode.window.showErrorMessage(l10n('conn.openFailed', { message: (err as Error).message }));
       }
     }
   });

@@ -15,7 +15,6 @@ import type { AuthService } from './authService';
  */
 export class LoginFormView extends BaseWebView {
   private static current?: LoginFormView;
-  private initSent = false;
   private readonly auth: AuthService;
   private readonly onLoggedIn?: () => void;
 

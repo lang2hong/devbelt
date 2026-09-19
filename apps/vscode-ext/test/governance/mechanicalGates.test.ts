@@ -40,6 +40,28 @@ describe('机械门禁', () => {
     expect(visible, `这些命令需要树节点，命令面板应隐藏：${visible.join(', ')}`).toEqual([]);
   });
 
+  /**
+   * 派生自源码：凡是处理器签名要求 `node: DbTreeNode|OrgTreeNode` 的命令，都需要一个
+   * 树节点才能工作；命令面板调用时 node 为 undefined，处理器只会静默 return，看起来
+   * 就是「点了没反应」。这类命令必须在 commandPalette 里 `when:false`，只能从树上下文
+   * 进入。新增节点命令若忘记隐藏，此测试会失败。
+   */
+  it('节点必需命令一律不在命令面板', () => {
+    const tolerant = new Set(['devbelt.org.newQuery', 'devbelt.org.newFolder']);
+    const commands = new Set<string>();
+    for (const f of walk(SRC)) {
+      const text = readFileSync(f, 'utf8');
+      for (const m of text.matchAll(/sub\(\s*.(devbelt[\w.]+).\s*,\s*async\s*\(\s*node\s*:\s*(?:DbTreeNode|OrgTreeNode)/g)) {
+        commands.add(m[1]);
+      }
+    }
+    const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
+    const palette = new Map((pkg.contributes.menus.commandPalette as { command: string; when?: string }[])
+      .map((e) => [e.command, e.when]));
+    const visible = [...commands].filter((c) => !tolerant.has(c) && palette.get(c) !== 'false');
+    expect(visible, `这些命令需要树节点，命令面板应 when:false：${visible.join(', ')}`).toEqual([]);
+  });
+
   it('view/item/context 的 when 均含 viewItem 条件（防上下文键错配）', () => {
     const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
     const menus = pkg.contributes.menus['view/item/context'] as { command: string; when?: string }[];

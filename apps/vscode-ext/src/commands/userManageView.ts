@@ -40,7 +40,6 @@ const PRIVILEGES = [
 export class UserManageView extends BaseWebView {
   private static readonly views = new Map<string, UserManageView>();
   /** 首个 ready 只用于切换视图模式，详见 handleMessage。 */
-  private initSent = false;
 
   private constructor(
     private readonly conn: SavedConnection,

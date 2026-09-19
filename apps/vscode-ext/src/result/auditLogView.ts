@@ -12,7 +12,6 @@ const PAGE_SIZE = 200;
  */
 export class AuditLogView extends BaseWebView {
   private static current?: AuditLogView;
-  private initSent = false;
   private filter?: AuditAction;
 
   private constructor(private readonly logger: AuditLogger) {

@@ -68,7 +68,7 @@ export async function recordBulkHistory(
 
 export function requireCapability(session: ConnectionSession, operation: DatabaseOperation): boolean {
   if (session.capabilities.operations.includes(operation)) return true;
-  vscode.window.showWarningMessage(`${session.capabilities ? 'This database' : 'Connection'} does not support ${operation}.`);
+  vscode.window.showWarningMessage(l10n(session.capabilities ? 'capability.unsupportedDatabase' : 'capability.unsupportedConnection', { operation }));
   return false;
 }
 

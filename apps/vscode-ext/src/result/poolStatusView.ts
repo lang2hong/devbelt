@@ -12,7 +12,6 @@ const REFRESH_INTERVAL_MS = 5000;
  */
 export class PoolStatusView extends BaseWebView {
   private static current?: PoolStatusView;
-  private initSent = false;
   private timer?: ReturnType<typeof setInterval>;
 
   private constructor(private readonly manager: ConnectionManager) {

@@ -84,7 +84,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     const uri = await vscode.window.showOpenDialog({
       filters: { 'SQL Files': ['sql'] },
       canSelectMany: false,
-      openLabel: 'Select SQL Dump File',
+      openLabel: l10n('restore.selectFile'),
     });
     if (!uri?.length) return;
     // 恢复自身用事务包裹，但 MySQL 的 DDL 会隐式提交：中途失败无法回滚已执行的
@@ -118,7 +118,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
             l10n('history.restore', { count: completed }),
             node.database || node.conn!.database,
           );
-          vscode.window.showInformationMessage(`Restore complete: ${completed} statements executed.`);
+          vscode.window.showInformationMessage(l10n('restore.done', { count: completed }));
           treeProvider.refresh();
         } catch (err) {
           // 报出已执行条数：失败可能停在中途，用户需要知道目标库已改到什么程度。
@@ -164,12 +164,12 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (!requireCapability(session, 'schemaSync')) return;
     const targetDbs = (await session.metadata.getDatabases()).filter((d) => d !== node.database);
     if (!targetDbs.length) {
-      vscode.window.showWarningMessage('No other databases to compare.');
+      vscode.window.showWarningMessage(l10n('compare.noOtherDatabases'));
       return;
     }
     const target = await vscode.window.showQuickPick(
       targetDbs.map((d) => ({ label: d, value: d })),
-      { placeHolder: `Compare "${node.database}" with which database?` },
+      { placeHolder: l10n('compare.chooseDatabase', { database: node.database ?? '' }) },
     );
     if (!target) return;
 
@@ -187,12 +187,12 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
 
     const conns = deps.store.getVisibleTreeData().connections.filter((c) => c.id !== node.conn!.id);
     if (!conns.length) {
-      vscode.window.showWarningMessage('No other connections to sync to.');
+      vscode.window.showWarningMessage(l10n('sync.noOtherConnections'));
       return;
     }
     const target = await vscode.window.showQuickPick(
       conns.map((c) => ({ label: c.name || c.host, description: c.dbType, value: c })),
-      { placeHolder: `Sync "${node.database}" to which connection?` },
+      { placeHolder: l10n('sync.chooseConnection', { database: node.database ?? '' }) },
     );
     if (!target) return;
     // 写的是**目标**连接，不是 node.conn —— 只读标记必须查目标，
@@ -202,7 +202,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     const targetDbs = await targetSession.metadata.getDatabases();
     const targetDb = await vscode.window.showQuickPick(
       targetDbs.map((d: string) => ({ label: d, value: d })),
-      { placeHolder: `Sync to which database?` },
+      { placeHolder: l10n('sync.chooseDatabase') },
     );
     if (!targetDb) return;
     const confirmed = await vscode.window.showWarningMessage(
@@ -228,7 +228,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
             `Sync complete with ${result.errors.length} errors. ${result.tablesSynced} tables synced.`,
           );
         } else {
-          vscode.window.showInformationMessage(`Sync complete: ${result.tablesSynced} tables synced.`);
+          vscode.window.showInformationMessage(l10n('sync.done', { count: result.tablesSynced }));
         }
         await recordBulkHistory(
           deps, node.conn!,

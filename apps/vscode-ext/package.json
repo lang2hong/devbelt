@@ -885,6 +885,246 @@
         {
           "command": "devbelt.org.runQuery",
           "when": "devbelt.loggedIn && devbelt.orgRole"
+        },
+        {
+          "command": "devbelt.deleteConnection",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.createDatabase",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.dropDatabase",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.importData",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.exportConnection",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.restoreDatabase",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.importTable",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.exportTable",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.compareSchema",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.syncDatabase",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.addIndex",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.modifyIndex",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.dropIndex",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.viewTrigger",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.dropTrigger",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.addTrigger",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.modifyTrigger",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.addForeignKey",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.dropForeignKey",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.newQuery",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.openQuery",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.editQuery",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.deleteQuery",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.renameQueryFolder",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.deleteQueryFolder",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.renameGroup",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.removeGroup",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.moveToGroup",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.newQueryFromConn",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.newQueryForDb",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.jumpToRefTable",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.newTable",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.dropTable",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.renameTable",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.renameView",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.truncateTable",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.dupTable",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.copyTable",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.viewTableStructure",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.viewTableSource",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.mockData",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.dropView",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.newView",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.modifyView",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.openRoutine",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.dropRoutine",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.openEvent",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.dropEvent",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.newRoutine",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.modifyRoutine",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.newEvent",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.modifyEvent",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.addColumn",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.addColumnSql",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.modifyColumn",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.modifyColumnSql",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.renameColumn",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.dropColumn",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.copyNodeName",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.manageUsers",
+          "when": "false"
         }
       ],
       "view/item/context": [
@@ -1223,12 +1463,12 @@
         },
         {
           "command": "devbelt.addTrigger",
-          "when": "view == devbelt.explorer && viewItem =~ /^category_trigger\\.(MYSQL|PG)$/",
+          "when": "view == devbelt.explorer && viewItem =~ /^category_trigger\\.(MYSQL|PG|SQLITE)$/",
           "group": "inline"
         },
         {
           "command": "devbelt.modifyTrigger",
-          "when": "view == devbelt.explorer && viewItem =~ /^trigger\\.(MYSQL|PG)$/",
+          "when": "view == devbelt.explorer && viewItem =~ /^trigger\\.(MYSQL|PG|SQLITE)$/",
           "group": "1_view"
         },
         {
@@ -1248,7 +1488,7 @@
         },
         {
           "command": "devbelt.dropTrigger",
-          "when": "view == devbelt.explorer && viewItem =~ /^trigger\\.(MYSQL|PG)$/",
+          "when": "view == devbelt.explorer && viewItem =~ /^trigger\\.(MYSQL|PG|SQLITE)$/",
           "group": "2_danger"
         },
         {

@@ -191,8 +191,6 @@ export class ConnectionManager {
    * 那些路径会泄漏隧道。这里统一用 try/catch 兜住建隧道之后的全部逻辑。
    */
   private async doConnect(conn: SavedConnection): Promise<ConnectionSession> {
-    this.evictIfNeeded();
-
     const generation = this.generation(conn.id);
     // 有效配置（本机覆盖优先）用作建连与路径校验的唯一依据。
     const effective = this.effective(conn);
@@ -290,6 +288,8 @@ export class ConnectionManager {
       session.close();
       throw new Error('ConnectionManager is disposing');
     }
+    // 入池后再按上限淘汰，保护刚建好的会话。
+    this.evictIfNeeded(conn.id);
     return session;
   }
 
@@ -369,9 +369,16 @@ export class ConnectionManager {
     if (entry) entry.lastUsed = Date.now();
   }
 
-  private evictIfNeeded(): void {
-    while (this.sessions.size >= this.config.maxConnections) {
-      const victim = this.findLruVictim();
+  /**
+   * 池满淘汰 LRU。
+   *
+   * 过去在建连**之前**调用：池已满时先淘汰一个可用会话，再去建新连接；新连接若失败，
+   * 被淘汰的会话白白断掉（抖动）。改为建连成功、新会话入池后再淘汰，并保护新会话本身，
+   * 使失败路径不影响既有会话。
+   */
+  private evictIfNeeded(protectId?: string): void {
+    while (this.sessions.size > this.config.maxConnections) {
+      const victim = this.findLruVictim(protectId);
       if (!victim) break;
       this.sessions.delete(victim.connId);
       this.sessionEntries.delete(victim.connId);
@@ -379,9 +386,10 @@ export class ConnectionManager {
     }
   }
 
-  private findLruVictim(): SessionEntry | undefined {
+  private findLruVictim(protectId?: string): SessionEntry | undefined {
     let oldest: SessionEntry | undefined;
     for (const entry of this.sessionEntries.values()) {
+      if (entry.connId === protectId) continue;
       if (this.explicit.has(entry.connId)) continue;
       // 跳过有在途查询的会话：淘汰会 end() 连接，使长查询中途失败并可能留下未定义事务。
       if (entry.session.query.inFlightCount > 0) continue;

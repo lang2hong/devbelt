@@ -51,14 +51,14 @@ export function registerQueryFolderCommands(deps: Deps, sub: Sub): void {
   const { store, treeProvider } = deps;
 
   sub('devbelt.newQueryFolder', async (node?: DbTreeNode) => {
-    const name = await vscode.window.showInputBox({ prompt: 'Query folder name' });
+    const name = await vscode.window.showInputBox({ prompt: l10n('group.folderNamePrompt') });
     if (!name) return;
     // v2：文件夹跟随连接，需在连接上下文触发；阶段 A 命令口径暂以节点连接为准。
     const connId = node?.conn?.id;
     if (!connId) {
       const conns = store.list().filter((c) => !c.deleted);
       if (conns.length === 0) {
-        void vscode.window.showWarningMessage('No connection to attach the folder to.');
+        void vscode.window.showWarningMessage(l10n('group.noConnection'));
         return;
       }
       const picked = await vscode.window.showQuickPick(
@@ -75,7 +75,7 @@ export function registerQueryFolderCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.renameQueryFolder', async (node: DbTreeNode) => {
     if (!node?.queryFolderId) return;
-    const name = await vscode.window.showInputBox({ prompt: 'Query folder name', value: node.label, valueSelection: [0, node.label.length] });
+    const name = await vscode.window.showInputBox({ prompt: l10n('group.folderNamePrompt'), value: node.label, valueSelection: [0, node.label.length] });
     if (!name || name === node.label) return;
     await store.renameQueryFolder(node.queryFolderId, name);
     treeProvider.refresh();
@@ -101,7 +101,7 @@ export function registerGroupCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.renameGroup', async (node: DbTreeNode) => {
     if (!node?.groupId) return;
-    const name = await vscode.window.showInputBox({ prompt: 'Group name', value: node.label, valueSelection: [0, node.label.length] });
+    const name = await vscode.window.showInputBox({ prompt: l10n('group.groupNamePrompt'), value: node.label, valueSelection: [0, node.label.length] });
     if (!name || name === node.label) return;
     await store.renameGroup(node.groupId, name);
     treeProvider.refresh();

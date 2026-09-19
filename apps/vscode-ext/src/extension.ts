@@ -327,7 +327,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (node?.conn && node?.database) {
         const session = await manager.connect(node.conn);
         if (!session.capabilities.operations.includes('getTableDefinition')) {
-          vscode.window.showWarningMessage('Table design is not supported for this database yet.');
+          vscode.window.showWarningMessage(l10n('design.unsupported'));
           return;
         }
         void TableDesignView.open(node.conn, node.label, node.database, manager, () => treeProvider.refreshNode(node));
@@ -362,12 +362,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const session = await manager.connect(node.conn);
       const targetDbs = (await session.metadata.getDatabases()).filter((d: string) => d !== node.database);
       if (!targetDbs.length) {
-        vscode.window.showWarningMessage('No other databases to compare.');
+        vscode.window.showWarningMessage(l10n('compare.noOtherDatabases'));
         return;
       }
       const target = await vscode.window.showQuickPick(
         targetDbs.map((d: string) => ({ label: d, value: d })),
-        { placeHolder: `Compare data of "${node.database}" with which database?` },
+        { placeHolder: l10n('compare.chooseData', { database: node.database ?? '' }) },
       );
       if (!target) return;
       void DataDiffView.open(node.conn, node.database, node.conn, target.value, manager);
@@ -430,7 +430,7 @@ async function configureBackupSchedule(
         { label: 'Change Schedule', value: 'change' },
         { label: 'Remove Schedule', value: 'remove' },
       ],
-      { placeHolder: `"${database}" backs up every ${Math.round(existing.intervalMs / 3600000)}h to ${existing.outputDir}` },
+      { placeHolder: l10n('backup.scheduleInfo', { database, hours: Math.round(existing.intervalMs / 3600000), dir: existing.outputDir }) },
     );
     if (!action) return;
     if (action.value === 'run') {
@@ -439,7 +439,7 @@ async function configureBackupSchedule(
     }
     if (action.value === 'remove') {
       scheduler.removeSchedule(connId, database);
-      vscode.window.showInformationMessage(`Backup schedule removed for "${database}".`);
+      vscode.window.showInformationMessage(l10n('backup.scheduleRemoved', { database }));
       return;
     }
   }
@@ -451,7 +451,7 @@ async function configureBackupSchedule(
       { label: 'Every day', value: 24 * 3600000 },
       { label: 'Every week', value: 7 * 24 * 3600000 },
     ],
-    { placeHolder: `How often should "${database}" be backed up?` },
+    { placeHolder: l10n('backup.scheduleInterval', { database }) },
   );
   if (!interval) return;
 
@@ -459,7 +459,7 @@ async function configureBackupSchedule(
     canSelectFiles: false,
     canSelectFolders: true,
     canSelectMany: false,
-    openLabel: 'Select backup folder',
+    openLabel: l10n('backup.selectFolder'),
     defaultUri: existing ? vscode.Uri.file(existing.outputDir) : undefined,
   });
   if (!folders?.length) return;

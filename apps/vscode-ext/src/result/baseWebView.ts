@@ -16,6 +16,9 @@ export abstract class BaseWebView {
   protected readonly panel: vscode.WebviewPanel;
   private readonly msgDisp: vscode.Disposable;
   private readonly panelDisp: vscode.Disposable;
+  /** 「两次 ready」协议状态；面板重载时按 webview 加载轮次重置。 */
+  protected initSent = false;
+  private currentLoad?: string;
 
   constructor(
     viewType: string,
@@ -29,6 +32,12 @@ export abstract class BaseWebView {
     );
     this.panel.webview.html = getWebviewHtml(this.panel.webview, BaseWebView._extensionUri);
     this.msgDisp = this.panel.webview.onDidReceiveMessage((msg) => {
+      // 新一轮 webview 加载（面板重载）：重置两次 ready 状态，否则扩展会把重载后的
+      // 第一个 ready 当成「第二次」，给尚未挂载的目标视图推数据 → 消息丢失、面板卡死。
+      if (msg && typeof msg.__load === 'string' && msg.__load !== this.currentLoad) {
+        this.currentLoad = msg.__load;
+        this.initSent = false;
+      }
       void this.handleMessage(msg).catch((e) => {
         diagError('webview message handler', String(e));
         // 统一错误边界：子类未捕获时也给用户可见反馈，而不是「点了没反应」。

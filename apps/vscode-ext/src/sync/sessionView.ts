@@ -16,7 +16,6 @@ import type { AuthService } from './authService';
  */
 export class SessionView extends BaseWebView {
   private static current?: SessionView;
-  private initSent = false;
   private readonly auth: AuthService;
 
   private constructor(auth: AuthService) {

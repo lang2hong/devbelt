@@ -6,7 +6,6 @@ export class ERDiagramView extends BaseWebView {
   private static current?: ERDiagramView;
 
   /** 见 handleMessage 的两次-ready 协议 */
-  private initSent = false;
 
   private constructor(
     private readonly conn: SavedConnection,

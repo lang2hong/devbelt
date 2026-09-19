@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { DatabaseType } from '@devkit/db-core';
 import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
+import { l10n } from '../i18n';
 
 /**
  * 按平台引用 shell 参数。
@@ -36,11 +37,11 @@ export class TerminalService {
     try {
       cmd = TerminalService.buildCommand(conn, db);
     } catch (err) {
-      vscode.window.showWarningMessage(`Terminal not supported: ${(err as Error).message}`);
+      vscode.window.showWarningMessage(l10n('terminal.notSupported', { message: (err as Error).message }));
       return;
     }
     if (!cmd) {
-      vscode.window.showWarningMessage(`Terminal not supported for ${conn.dbType}`);
+      vscode.window.showWarningMessage(l10n('terminal.notSupportedFor', { dbType: conn.dbType }));
       return;
     }
     const terminal = vscode.window.createTerminal({

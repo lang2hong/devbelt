@@ -41,7 +41,6 @@ export class AccountView extends BaseWebView {
   private static current?: AccountView;
   private readonly auth: AuthService;
   private readonly factory: SyncSessionFactory;
-  private initSent = false;
 
   private constructor(auth: AuthService, factory: SyncSessionFactory) {
     super('devbelt.account', l10n('account.title'));

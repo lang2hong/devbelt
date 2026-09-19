@@ -58,7 +58,6 @@ export class DashboardView extends BaseWebView {
     DashboardView.current = view;
   }
 
-  private initSent = false;
 
   protected async handleMessage(msg: any): Promise<void> {
     if (msg.type !== 'ready') return;

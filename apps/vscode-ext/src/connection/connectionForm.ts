@@ -24,7 +24,7 @@ import { BaseWebView } from '../result/baseWebView';
  */
 export class ConnectionForm extends BaseWebView {
   private static current?: ConnectionForm;
-  private readonly groups: ConnectionGroup[];
+  private groups: ConnectionGroup[];
   private editing?: SavedConnection;
   private presetGroupId?: string;
   private onSaved?: () => void;
@@ -101,6 +101,9 @@ export class ConnectionForm extends BaseWebView {
   }
 
   private sendInit(): void {
+    // 打开表单期间分组可能被别处增删：构造时缓存的分组会过期，下拉选项陈旧。
+    // 发送前从存储重新读取。
+    this.groups = this.store.getGroups();
     this.post({
       type: 'init',
       mode: 'connectionForm',

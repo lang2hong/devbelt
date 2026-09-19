@@ -17,7 +17,6 @@ const CONSOLE_PATHS = new Set<string>(['/db/plans', '/db/checkout']);
 
 export class PlansView extends BaseWebView {
   private static current?: PlansView;
-  private initSent = false;
 
   private constructor(private readonly auth: AuthService) {
     super('devbelt.plans', l10n('plan.title'));

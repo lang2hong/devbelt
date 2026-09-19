@@ -32,7 +32,6 @@ export class StatusView extends BaseWebView {
     StatusView.current = view;
   }
 
-  private initSent = false;
 
   protected async handleMessage(msg: any): Promise<void> {
     if (msg.type === 'killProcess') {

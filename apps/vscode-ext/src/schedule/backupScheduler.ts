@@ -6,6 +6,7 @@ import { BackupService } from '@devkit/db-core';
 import { ConnectionManager } from '../connection/connectionManager';
 import { diagWarn } from '../utils/diagnostics';
 import type { ConnectionStore } from '@devkit/db-host/connection/connectionStore';
+import { l10n } from '../i18n';
 
 interface ScheduleEntry {
   id: string;
@@ -88,7 +89,7 @@ export class BackupScheduler {
       try {
         await this.executeBackup(entry);
       } catch (err) {
-        vscode.window.showErrorMessage(`Backup failed: ${(err as Error).message}`);
+        vscode.window.showErrorMessage(l10n('backup.failed', { message: (err as Error).message }));
       }
     }, entry.intervalMs);
     this.timers.set(key, timer);
@@ -130,6 +131,6 @@ export class BackupScheduler {
       await rm(tmpPath, { force: true }).catch(() => {});
       throw err;
     }
-    vscode.window.showInformationMessage(`Backup complete: ${fileName}`);
+    vscode.window.showInformationMessage(l10n('backup.complete', { name: fileName }));
   }
 }
