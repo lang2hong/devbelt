@@ -130,6 +130,14 @@ describe('analyzeSqlRisk', () => {
       });
     });
 
+    it('版本号紧贴关键字（无空格）也必须被识别', () => {
+      // `/*!50000DROP` 里数字与字母无 \b 边界，曾让整个写语句漏判。
+      expect(analyzeSqlRisk('/*!50000DROP TABLE users*/')).toMatchObject({
+        level: 'critical', isWrite: true,
+      });
+      expect(analyzeSqlRisk('/*!50000DELETE FROM users*/')).toMatchObject({ isWrite: true });
+    });
+
     it('追加带 WHERE 的语句不能把前面的 DELETE 从 critical 降级', () => {
       expect(analyzeSqlRisk('DELETE FROM users; SELECT 1 WHERE 1=0')).toMatchObject({
         level: 'critical', isWrite: true, reason: 'UPDATE or DELETE without WHERE',
@@ -249,6 +257,16 @@ describe('confirmSqlExecution', () => {
   it('PG 只读连接：E 串里的 DELETE 必须被拦截（不被吞进字符串）', async () => {
     await expect(
       confirmSqlExecution(conn({ dbType: 'PG', readOnly: true }), String.raw`SELECT E'\''; DELETE FROM t`),
+    ).resolves.toBe(false);
+    expect(shown.errors).toHaveLength(1);
+    expect(shown.warnings).toEqual([]);
+  });
+
+  it('MySQL 只读连接：未建连（scanOptions 缺省）时反斜杠隐藏的 DROP 也必须被拦截', async () => {
+    // 门禁发生在建连前，此时服务端是否 NO_BACKSLASH_ESCAPES 未知：
+    // 必须对两种转义解读取更严，否则 NBE 服务端会执行隐藏语句。
+    await expect(
+      confirmSqlExecution(conn({ readOnly: true }), "SELECT 'a\\'; DROP TABLE t"),
     ).resolves.toBe(false);
     expect(shown.errors).toHaveLength(1);
     expect(shown.warnings).toEqual([]);

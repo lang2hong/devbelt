@@ -1,5 +1,5 @@
 import type { ColumnMeta, QueryService } from '@devkit/db-core';
-import { DatabaseType, streamRowsByKeyset } from '@devkit/db-core';
+import { DatabaseType, qualifyTable, streamRowsByKeyset } from '@devkit/db-core';
 import { sqlCommentSafe } from '@devkit/db-core/sql';
 import { serializeCsv, csvHeaderLine, csvDataLine } from './csv';
 import { serializeJson, projectRow } from './json';
@@ -96,7 +96,8 @@ export function exportRows(options: ExportRowsOptions): string | Buffer {
   if (!table || !dialect) throw new Error('SQL export requires a target table and database dialect.');
   const inserts = dialect.buildInsertSql(rows, columns, table, database);
   if (!sqlDump) return inserts;
-  const qualified = database ? `${dialect.wrap(database)}.${dialect.wrap(table)}` : dialect.wrap(table);
+  // PG 一个连接一个库：`database` 是库名而非 schema，限定会被当 schema 解析（见 qualifyTable）。
+  const qualified = qualifyTable(dialect.dbType, dialect.wrap(table), database ? dialect.wrap(database) : undefined);
   return buildSqlDump({
     serverInfo: sqlDump.serverInfo,
     dialect,
@@ -159,7 +160,8 @@ export async function writeTableExport(
 ): Promise<void> {
   const { source, format, table, database, includeStructure = false, includeData = true, columns: selectedColumns, pageSize = 1000, onProgress, isCancelled, serverInfo, withBom = false } = options;
   const dialect = source.query.dialect;
-  const qualified = database ? `${dialect.wrap(database)}.${dialect.wrap(table)}` : dialect.wrap(table);
+  // PG 一个连接一个库：`database` 是库名而非 schema，限定会被当 schema 解析（见 qualifyTable）。
+  const qualified = qualifyTable(dialect.dbType, dialect.wrap(table), database ? dialect.wrap(database) : undefined);
 
   const columnMeta = includeData ? await source.metadata.getColumns(table, database) : [];
   const allColumns = columnMeta.map((column) => column.name);

@@ -118,8 +118,10 @@ export class QueryStore {
   async upsertQuery(query: SavedQuery, source: ChangeSource = 'sync'): Promise<void> {
     const all = this.memento.get<SavedQuery[]>(QueryStore.QKEY) || [];
     const idx = all.findIndex((q) => q.id === query.id);
-    if (idx >= 0) all[idx] = query;
-    else all.push(query);
+    // updateTime 为本地同步 revision，不随 payload 同步；写入时由 store 打点（见 upsertGroup）。
+    const stored: SavedQuery = { ...query, updateTime: Date.now() };
+    if (idx >= 0) all[idx] = stored;
+    else all.push(stored);
     await this.memento.update(QueryStore.QKEY, all);
     this.changedEmitter.fire(source);
   }
@@ -164,8 +166,10 @@ export class QueryStore {
   async upsertFolder(folder: QueryFolder, source: ChangeSource = 'sync'): Promise<void> {
     const all = this.memento.get<QueryFolder[]>(QueryStore.FKEY) || [];
     const idx = all.findIndex((f) => f.id === folder.id);
-    if (idx >= 0) all[idx] = folder;
-    else all.push(folder);
+    // updateTime 为本地同步 revision，不随 payload 同步；写入时由 store 打点（见 upsertGroup）。
+    const stored: QueryFolder = { ...folder, updateTime: Date.now() };
+    if (idx >= 0) all[idx] = stored;
+    else all.push(stored);
     await this.memento.update(QueryStore.FKEY, all);
     this.changedEmitter.fire(source);
   }

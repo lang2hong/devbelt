@@ -39,13 +39,24 @@ const MAINTENANCE_RE = /\b(VACUUM|REINDEX|CLUSTER|ANALYZE|REFRESH\s+MATERIALIZED
 const GLOBAL_SET_RE = /\bSET\s+(?:GLOBAL|PERSIST|@@GLOBAL)\b/i;
 
 /**
+ * MySQL 可执行注释 `/*!50000 ... *\/` 的版本号会紧贴关键字（`/*!50000DROP`）。
+ * 数字与字母之间没有 `\b` 边界，关键字正则匹配不到，于是写语句被漏判。
+ * 把 `/*!<digits>` 归一为 `/*! ` 恢复词边界；注释体仍保留，判定语义不变。
+ */
+const EXEC_COMMENT_VERSION = /\/\*!\d{0,6}/g;
+
+function neutralizeExecCommentVersion(skeleton: string): string {
+  return skeleton.replace(EXEC_COMMENT_VERSION, '/*! ');
+}
+
+/**
  * 写语句动作类型，供结果面板区分「影响行数」与「成功」两类展示：
  * DML（INSERT/UPDATE/DELETE/REPLACE/MERGE）有受影响行数的语义；
  * DDL（CREATE/ALTER/DROP/TRUNCATE/RENAME/GRANT/REVOKE）与其余控制语句没有，
  * 展示「成功」而非误导性的「0 行受影响」。
  */
 export function classifyWriteKind(sql: string, options?: SqlScanOptions): 'dml' | 'ddl' | 'other' {
-  const normalized = sqlSkeleton(sql, options).trim().toUpperCase();
+  const normalized = neutralizeExecCommentVersion(sqlSkeleton(sql, options)).trim().toUpperCase();
   if (DDL_RE.test(normalized)) return 'ddl';
   if (DML_RE.test(normalized)) return 'dml';
   return 'other';
@@ -68,7 +79,7 @@ export function classifyWriteKind(sql: string, options?: SqlScanOptions): 'dml' 
  */
 export function analyzeSqlRisk(sql: string, options?: SqlScanOptions): SqlRisk {
   const segments = scanSql(sql, options);
-  const skeleton = sqlSkeleton(sql, options);
+  const skeleton = neutralizeExecCommentVersion(sqlSkeleton(sql, options));
   const opaqueBody = segments.some((s) => s.kind === 'dollar');
 
   if (!skeleton.trim()) {

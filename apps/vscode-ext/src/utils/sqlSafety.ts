@@ -1,11 +1,37 @@
 import * as vscode from 'vscode';
+import { DatabaseType } from '@devkit/db-core';
+import type { SqlScanOptions } from '@devkit/db-core/sql';
 import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import { l10n } from '../i18n';
 import { analyzeSqlRisk } from './sqlRisk';
+import type { SqlRisk } from './sqlRisk';
 import { dialectScanOptions } from './sqlDialectOptions';
 
 export { analyzeSqlRisk } from './sqlRisk';
 export type { SqlRisk, SqlRiskLevel } from './sqlRisk';
+
+const RISK_RANK: Record<SqlRisk['level'], number> = { none: 0, write: 1, critical: 2 };
+
+/**
+ * 判定 SQL 风险（取最严）。
+ *
+ * MySQL 的反斜杠转义取决于会话 `sql_mode`（NO_BACKSLASH_ESCAPES），而门禁往往发生在
+ * **建连之前**（`ConnectionManager` 只有在建连后才知道该模式）。若只按默认解读判定，
+ * `SELECT 'a\'; DROP TABLE t` 在 NBE 服务端会被当作两条语句执行，却在客户端被评为只读而放行。
+ * 故对 `backslashEscapes` 两种取值各判一次并取更严者，使门禁 fail-closed，不依赖建连时序。
+ * PG/SQLite 与转义模式无关，按传入选项直接判定。
+ */
+function analyzeRiskConservative(conn: SavedConnection, sql: string, scanOptions?: SqlScanOptions): SqlRisk {
+  if (conn.dbType !== DatabaseType.MYSQL) {
+    return analyzeSqlRisk(sql, scanOptions ?? dialectScanOptions(conn.dbType));
+  }
+  const base = scanOptions ?? dialectScanOptions(conn.dbType);
+  return [
+    analyzeSqlRisk(sql, base),
+    analyzeSqlRisk(sql, { ...base, backslashEscapes: true }),
+    analyzeSqlRisk(sql, { ...base, backslashEscapes: false }),
+  ].reduce((a, b) => (RISK_RANK[b.level] > RISK_RANK[a.level] ? b : a));
+}
 
 /**
  * 只读连接拦截。
@@ -32,7 +58,7 @@ export async function confirmSqlExecution(
   sql: string,
   scanOptions?: import('@devkit/db-core/sql').SqlScanOptions,
 ): Promise<boolean> {
-  const risk = analyzeSqlRisk(sql, scanOptions ?? dialectScanOptions(conn.dbType));
+  const risk = analyzeRiskConservative(conn, sql, scanOptions);
   if (!risk.isWrite) return true;
   if (!ensureWritable(conn)) return false;
   if (risk.level !== 'critical' && conn.environment !== 'production') return true;

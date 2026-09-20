@@ -198,8 +198,11 @@ export class ConnectionStore {
   async upsertGroup(group: ConnectionGroup, source: ChangeSource = 'sync'): Promise<void> {
     const data = this.getTreeData();
     const idx = data.groups.findIndex((g) => g.id === group.id);
-    if (idx >= 0) data.groups[idx] = group;
-    else data.groups.push(group);
+    // updateTime 是本地同步 revision，不随 payload 同步（见 recordCodec 分组字段）；
+    // 写入时必须由 store 打点，否则 applyRecords 的 hasUpdateTime 守卫会拒绝该实体。
+    const stored: ConnectionGroup = { ...group, updateTime: Date.now() };
+    if (idx >= 0) data.groups[idx] = stored;
+    else data.groups.push(stored);
     await this.memento.update(ConnectionStore.KEY, data);
     this.changedEmitter.fire(source);
     void eventBus.publish(new ConnectionChangedEvent('group', idx >= 0 ? 'update' : 'create', group.id));

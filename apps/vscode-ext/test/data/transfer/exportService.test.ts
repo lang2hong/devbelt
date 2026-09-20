@@ -84,6 +84,23 @@ describe('exportRows', () => {
     expect(content).toContain('INSERT INTO `users`');
   });
 
+  it('PG 导出不把库名当 schema 限定（database 是库名而非 schema）', () => {
+    const pgDialect = {
+      dbType: 'PG' as const,
+      wrap: (name: string) => `"${name}"`,
+      buildInsertSql: (rows: Record<string, unknown>[], cols: string[], table: string) =>
+        rows.map(() => `INSERT INTO "${table}" (${cols.join(',')}) VALUES (...);`).join('\n'),
+    };
+    const content = exportRows({
+      format: 'sql', columns: ['id'], rows, table: 'users', database: 'app',
+      dialect: pgDialect as any,
+      sqlDump: { serverInfo: { name: 'local', dbType: 'PG' as any, host: 'h', port: 5432 } },
+    }) as string;
+    // PG 上 `"app"."users"` 会把 app 当 schema 解析而失败
+    expect(content).not.toContain('"app"."users"');
+    expect(content).toContain('"users"');
+  });
+
   it('dump 头里的不可信文本无法逃出注释上下文', () => {
     const content = exportRows({
       format: 'sql', columns: ['id'], rows: [], table: 'users',
