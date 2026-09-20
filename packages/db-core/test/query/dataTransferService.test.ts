@@ -120,6 +120,34 @@ describe('DataTransferService.transferDatabase', () => {
     expect(targetConn.executed.filter((s) => /INSERT INTO/i.test(s))).toHaveLength(0);
   });
 
+  it('同一张表结构与数据都失败时 tablesSynced 不为负', async () => {
+    const sourceConn = new FakeConnection();
+    sourceConn.setResponses([{ rows: [{ id: 1 }] }, { rows: [] }]);
+    const targetConn = new FakeConnection();
+    const origQuery = targetConn.query.bind(targetConn);
+    (targetConn as any).query = (sql: string, ...rest: any[]) => {
+      if (/INSERT INTO/i.test(sql)) {
+        const cb = rest[rest.length - 1];
+        cb(new Error('insert boom'));
+        return;
+      }
+      return (origQuery as any)(sql, ...rest);
+    };
+
+    const sourceQuery = new QueryService(sourceConn, new MysqlDialect());
+    // 跨引擎 → 结构阶段报错；目标 INSERT 抛错 → 数据阶段也报错。同表两次失败。
+    const targetQuery = new QueryService(targetConn, new PostgreSqlDialect());
+
+    const result = await DataTransferService.transferDatabase(
+      sourceQuery, meta(['t'], ['id']), tableSvc(), 'src',
+      targetQuery, meta([], ['id']), 'dst',
+      { tables: ['t'], includeData: true },
+    );
+
+    expect(result.errors.length).toBeGreaterThanOrEqual(2);
+    expect(result.tablesSynced).toBe(0);
+  });
+
   it('isCancelled 立即抛出，不执行任何语句', async () => {
     const sourceConn = new FakeConnection();
     const targetConn = new FakeConnection();

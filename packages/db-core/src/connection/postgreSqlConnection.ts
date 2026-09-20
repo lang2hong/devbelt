@@ -179,7 +179,10 @@ export class PostgreSqlConnection extends IConnection {
 
   adaptResult(res: pg.QueryArrayResult<any>) {
     if (res.command === 'DELETE' || res.command === 'UPDATE' || res.command === 'INSERT') {
-      return { affectedRows: res.rowCount };
+      // `INSERT/UPDATE/DELETE ... RETURNING` 的行必须一并带出：只回 affectedRows
+      // 会让调用方拿不到返回值，而 QueryService.normalizeResult 已支持 { affectedRows, rows }。
+      // 无 RETURNING 时 res.rows 为空数组，行为与过去一致。
+      return { affectedRows: res.rowCount, rows: res.rows };
     }
     return res.rows;
   }

@@ -473,7 +473,12 @@ export class SyncEngine {
       }
       return { recordId, version, changeSequence, deleteTime };
     });
-    return { snapshotSequence, nextAfter: typeof o.nextAfter === 'string' ? o.nextAfter : undefined, records };
+    // nextAfter 缺省 = 已是最后一页；但若字段存在却不是字符串，说明页面契约被破坏，
+    // 静默当作"结束"会悄悄漏掉后续记录，必须 fail-closed。
+    if (o.nextAfter !== undefined && typeof o.nextAfter !== 'string') {
+      throw new FeedProtocolError('nextAfter must be a string');
+    }
+    return { snapshotSequence, nextAfter: o.nextAfter, records };
   }
 
   private readU64(o: Record<string, unknown>, key: string, allowZero = false): string {

@@ -175,6 +175,25 @@ describe('convertToDump (PG 转义)', () => {
   });
 });
 
+describe('adaptResult (RETURNING 行不得丢失)', () => {
+  it('INSERT/UPDATE/DELETE 带 RETURNING 时同时带出 affectedRows 与 rows', () => {
+    const c = new PostgreSqlConnection({ ...base });
+    expect(c.adaptResult({ command: 'INSERT', rowCount: 2, rows: [{ id: 1 }, { id: 2 }] } as any))
+      .toEqual({ affectedRows: 2, rows: [{ id: 1 }, { id: 2 }] });
+  });
+
+  it('无 RETURNING 的 DML：rows 为空数组，affectedRows 保留', () => {
+    const c = new PostgreSqlConnection({ ...base });
+    expect(c.adaptResult({ command: 'UPDATE', rowCount: 3, rows: [] } as any))
+      .toEqual({ affectedRows: 3, rows: [] });
+  });
+
+  it('SELECT 仍返回行数组', () => {
+    const c = new PostgreSqlConnection({ ...base });
+    expect(c.adaptResult({ command: 'SELECT', rowCount: 1, rows: [{ a: 1 }] } as any)).toEqual([{ a: 1 }]);
+  });
+});
+
 describe('schema / socketPath / timezone', () => {
   it('schema 与 timezone 通过启动参数生效，socketPath 作为 host 目录', () => {
     new PostgreSqlConnection({

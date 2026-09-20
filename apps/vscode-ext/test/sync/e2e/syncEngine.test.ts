@@ -642,6 +642,21 @@ describe('SyncEngine', () => {
     expect(r.reason).toContain('protocol unsupported');
   });
 
+  it('parsePage 拒绝非字符串 nextAfter（不得静默当作结束页） → terminal', async () => {
+    const client = clientWith({
+      getState: vi.fn(async () => stateDto({ changeSequence: '1' })),
+      getRecords: vi.fn(async () => ({
+        snapshotSequence: '1',
+        nextAfter: 123,
+        records: [{ recordId: 'A'.repeat(22), version: '1', changeSequence: '1', deleteTime: null, cipherSuite: 'AES-256-GCM', formatVersion: 1, nonce: 'C'.repeat(16), ciphertext: 'YQ', tag: 'D'.repeat(22) }],
+      })),
+    });
+    const eng = engine({ client, snap: SNAP, mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox: new PendingMutationStore(makeMemento(), '7', '1') });
+    const r = await eng.sync();
+    expect(r.stage).toBe('terminal');
+    expect(r.reason).toContain('nextAfter must be a string');
+  });
+
   it('pending 入站冲突无 outbox 条目 → 构造 conflict carrier 持久化（可被 listConflicts 发现）', async () => {
     const id = 'A'.repeat(22);
     const memento = makeMemento();
