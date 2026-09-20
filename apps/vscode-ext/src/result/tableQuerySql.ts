@@ -1,4 +1,4 @@
-import { DatabaseType, validateIdent } from '@devkit/db-core';
+import { DatabaseType, validateIdent, qualifyTable } from '@devkit/db-core';
 import {
   BETWEEN, EQ, GTE, GT, IN, IS_NULL, IS_NOT_NULL, LIKE, LTE, LT, NE,
   NOT_BETWEEN, NOT_IN, NOT_LIKE,
@@ -51,7 +51,8 @@ function qualifiedTable(dbType: DatabaseType, table: string, database?: string):
   validateIdent(table);
   const tbl = wrapIdent(dbType, table);
   if (database) validateIdent(database);
-  return database ? `${wrapIdent(dbType, database)}.${tbl}` : tbl;
+  // PG 一个连接一个库：`database` 是库名而非 schema，限定会被当成 schema（见 db-core qualifyTable）。
+  return qualifyTable(dbType, tbl, database ? wrapIdent(dbType, database) : undefined);
 }
 
 /**

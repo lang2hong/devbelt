@@ -146,10 +146,15 @@ export class WechatPayGateway implements PaymentGateway {
     }
     const tag = ct.subarray(ct.length - 16);
     const body = ct.subarray(0, ct.length - 16);
-    const decipher = createDecipheriv('aes-256-gcm', this.creds.apiV3Key, Buffer.from(nonce));
-    decipher.setAuthTag(tag);
-    decipher.setAAD(Buffer.from(associatedData, 'utf8'));
-    return Buffer.concat([decipher.update(body), decipher.final()]).toString('utf8');
+    try {
+      const decipher = createDecipheriv('aes-256-gcm', this.creds.apiV3Key, Buffer.from(nonce));
+      decipher.setAuthTag(tag);
+      decipher.setAAD(Buffer.from(associatedData, 'utf8'));
+      return Buffer.concat([decipher.update(body), decipher.final()]).toString('utf8');
+    } catch {
+      // tag/nonce 不匹配、密文损坏等：统一映射为 400，不应泄漏为 500。
+      throw new PaymentCallbackInvalidError('wechat callback resource decryption failed');
+    }
   }
 
   private signRequest(method: string, url: string, body: string): { signature: string; timestamp: string; nonce: string } {

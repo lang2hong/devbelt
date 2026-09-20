@@ -1,5 +1,6 @@
 import { DatabaseType } from '../types/connection.js';
 import { validateIdent } from '../utils/validate.js';
+import { qualifyTable } from '../utils/qualify.js';
 import { toBool } from '../utils/coerce.js';
 import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta } from '../types/meta.js';
 import type { SqlDialect } from './sqlDialect.js';
@@ -116,7 +117,7 @@ export class PostgreSqlDialect implements SqlDialect {
   /** pg_get_viewdef 返回纯 SELECT，包上 CREATE OR REPLACE VIEW 外壳。 */
   normalizeViewAlterSql(raw: string, name: string, database?: string): string {
     const select = (raw || '').replace(/;?\s*$/, '').trim();
-    const q = database ? `${this.wrap(validateIdent(database, 63))}.${this.wrap(validateIdent(name, 63))}` : this.wrap(validateIdent(name, 63));
+    const q = qualifyTable(DatabaseType.PG, this.wrap(validateIdent(name, 63)), database ? this.wrap(validateIdent(database, 63)) : undefined);
     return `CREATE OR REPLACE VIEW ${q} AS\n${select};`;
   }
 
@@ -292,9 +293,7 @@ export class PostgreSqlDialect implements SqlDialect {
 
   buildInsertSql(rows: Record<string, any>[], columns: string[], table: string, database?: string): string {
     const validTable = validateIdent(table, 63);
-    const qualified = database
-      ? `${this.wrap(validateIdent(database, 63))}.${this.wrap(validTable)}`
-      : this.wrap(validTable);
+    const qualified = qualifyTable(DatabaseType.PG, this.wrap(validTable), database ? this.wrap(validateIdent(database, 63)) : undefined);
     const colList = columns.map((c) => this.wrap(validateIdent(c, 63))).join(', ');
     let out = '';
     for (const row of rows) {

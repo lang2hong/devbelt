@@ -77,9 +77,10 @@ describe('方言策略（策略模式）', () => {
       expect(sql).not.toContain('`app`');
     });
 
-    it('PostgreSQL 用双引号并限定 schema，不转义反斜杠', () => {
+    it('PostgreSQL 用双引号且不限定库名（database 是库名不是 schema），不转义反斜杠', () => {
       const sql = new PostgreSqlDialect().buildInsertSql(rows, columns, 'users', 'public');
-      expect(sql).toContain('INSERT INTO "public"."users" ("id", "name", "bio", "score", "flag")');
+      expect(sql).toContain('INSERT INTO "users" ("id", "name", "bio", "score", "flag")');
+      expect(sql).not.toContain('"public".');
       expect(sql).toContain("'O''Brien'");
       expect(sql).toContain("'back\\slash'");
       expect(sql).toContain('TRUE');
@@ -97,6 +98,12 @@ describe('方言策略（策略模式）', () => {
 
     it('空行只产出空字符串', () => {
       expect(new MysqlDialect().buildInsertSql([], columns, 'users', 'app')).toBe('');
+    });
+
+    it('PostgreSQL normalizeViewAlterSql 不限定库名', () => {
+      const sql = new PostgreSqlDialect().normalizeViewAlterSql('SELECT 1', 'v', 'mydb');
+      expect(sql).toContain('CREATE OR REPLACE VIEW "v" AS');
+      expect(sql).not.toContain('"mydb".');
     });
   });
 

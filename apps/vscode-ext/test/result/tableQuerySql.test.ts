@@ -10,9 +10,9 @@ describe('tableQuerySql', () => {
     );
   });
 
-  it('builds a paginated SELECT with PostgreSQL identifiers', () => {
+  it('builds a paginated SELECT with PostgreSQL identifiers (no db qualification)', () => {
     expect(buildTableSelect(DatabaseType.PG, 'users', 'public', [], 'id', 'ASC', 0, 100)).toBe(
-      'SELECT * FROM "public"."users" ORDER BY "id" ASC LIMIT 100 OFFSET 0',
+      'SELECT * FROM "users" ORDER BY "id" ASC LIMIT 100 OFFSET 0',
     );
   });
 

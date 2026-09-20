@@ -142,6 +142,13 @@ describe('WechatPayGateway', () => {
     expect(() => (g as any).decryptResource('AAAA', 'nonce', '')).toThrow(PaymentCallbackInvalidError);
   });
 
+  it('合法长度但 tag 校验失败也映射为 PaymentCallbackInvalidError（不 500）', () => {
+    const cred = resolveWechatCredentials(wechatEnv())!;
+    const g = new WechatPayGateway(cred);
+    const badTag = Buffer.from('0123456789abcdef').toString('base64'); // 16B，但 tag 必然不匹配
+    expect(() => (g as any).decryptResource(badTag, 'nonce', '')).toThrow(PaymentCallbackInvalidError);
+  });
+
   it('serializes a Native order with non-empty notify_url and cert serial', async () => {
     const cred = resolveWechatCredentials(wechatEnv())!;
     let capturedBody = '';
