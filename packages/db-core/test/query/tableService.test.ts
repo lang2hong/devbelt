@@ -75,6 +75,22 @@ describe('TableService（表操作）', () => {
     const svc = new TableService(new QueryService(conn, new SqliteDialect()));
     await expect(svc.truncateTable('users')).rejects.toThrow(/does not support truncateTable/);
   });
+
+  it('recreatePrimaryKey：MySQL 用 DROP+ADD 单语句', async () => {
+    const conn = new CaptureConnection();
+    const svc = new TableService(new QueryService(conn, new MysqlDialect()));
+    await svc.recreatePrimaryKey('users', ['id', 'tenant']);
+    expect(conn.sqls[0]).toBe('ALTER TABLE `users` DROP PRIMARY KEY, ADD PRIMARY KEY (`id`, `tenant`)');
+  });
+
+  it('recreatePrimaryKey：PG/SQLite 明确报不支持，不发 MySQL 语法', async () => {
+    for (const dialect of [new PostgreSqlDialect(), new SqliteDialect()]) {
+      const conn = new CaptureConnection();
+      const svc = new TableService(new QueryService(conn, dialect));
+      await expect(svc.recreatePrimaryKey('users', ['id'])).rejects.toThrow(/not supported/);
+      expect(conn.sqls).toHaveLength(0);
+    }
+  });
 });
 
 /**

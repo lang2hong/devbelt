@@ -41,10 +41,21 @@ describe('i18n catalog', () => {
     }
   });
 
-  it('无重复键（对象字面量里重复键会静默覆盖）', () => {
-    // Object.keys 天然去重，这里改为断言源文件里每个键只出现一次
-    expect(new Set(enKeys).size).toBe(enKeys.length);
-    expect(new Set(zhKeys).size).toBe(zhKeys.length);
+  it('无重复键（对象字面量里重复键会静默覆盖）', async () => {
+    // `Object.keys` 天然去重，看不出源文件里的重复键，必须扫描源文本逐键计数。
+    const { readFileSync } = await import('node:fs');
+    const path = await import('node:path');
+    for (const [file, exported] of [['catalog.en.ts', enKeys], ['catalog.zh.ts', zhKeys]] as const) {
+      const text = readFileSync(path.resolve(__dirname, '../../src/i18n', file), 'utf8');
+      const counts = new Map<string, number>();
+      for (const m of text.matchAll(/^\s*'([^']+)'\s*:/gm)) {
+        counts.set(m[1], (counts.get(m[1]) ?? 0) + 1);
+      }
+      const dupes = [...counts].filter(([, c]) => c > 1).map(([k]) => k);
+      expect(dupes, `${file} 重复键`).toEqual([]);
+      // 扫描到的键数应与导出对象一致（防止正则漏配而让上面的检查空转）
+      expect(counts.size, `${file} 扫描键数`).toBe(exported.length);
+    }
   });
 
   it('zh 词条确实是中文（防止漏翻直接复制英文）', () => {

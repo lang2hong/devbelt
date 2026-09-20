@@ -10,6 +10,7 @@ import type { ColumnMeta } from '../types/meta.js';
 import { validateColumnType, renderColumnAttributes, renderDefaultLiteral } from './columnSpec.js';
 import type { ColumnSpec, NewColumnSpec } from './columnSpec.js';
 import { mockValue } from './mockData.js';
+import { DatabaseType } from '../types/connection.js';
 
 // 列定义与类型校验已下沉 columnSpec.ts；此处 re-export 保持既有 import 站点不变。
 export { validateColumnType } from './columnSpec.js';
@@ -188,6 +189,13 @@ export class TableService {
   /** 重建主键（编辑主键索引时：DROP + ADD 单语句） */
   async recreatePrimaryKey(table: string, columns: string[], database?: string): Promise<QueryResult> {
     this.require('manageIndexes');
+    // PG 需先按名 DROP 现有 PK 约束（名字可能自定义），SQLite 需整表重建；
+    // 两者都无法用一条通用语句完成。过去无条件发 MySQL 语法 → PG/SQLite 上是非法 SQL。
+    if (this.queryService.dialect.dbType !== DatabaseType.MYSQL) {
+      throw new Error(
+        `Recreating a primary key is not supported for ${this.queryService.dialect.dbType}; drop and re-add it with explicit SQL.`,
+      );
+    }
     const qualifiedTable = this.wrapQualified(table, database);
     const colList = columns.map((c) => this.wrap(c)).join(', ');
     return this.ddl(`ALTER TABLE ${qualifiedTable} DROP PRIMARY KEY, ADD PRIMARY KEY (${colList})`);

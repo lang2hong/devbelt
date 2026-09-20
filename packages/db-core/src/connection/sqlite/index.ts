@@ -118,6 +118,14 @@ class SQLite {
       return this.proc!;
     }
 
+    // SQLite shell 的 dot-command 参数解析无法表达含单引号的路径：
+    // `'.open 'a''b''`、双引号、反斜杠三种写法实测（sqlite 3.45）都会拆词并打开
+    // **错误的文件**；含换行/回车还会截断 dot-command。静默打开错误的库比报错更危险，
+    // 故在启动子进程前 fail-closed。正常路径（无引号/换行）不受影响。
+    if (/['\n\r]/.test(this.dbPath)) {
+      throw new Error('SQLite database path must not contain a quote, newline, or carriage return');
+    }
+
     const args = ['-bail', '-header', '-nullvalue', 'NULL', '-cmd', '.mode tcl'];
     const proc = child_process.spawn(this.sqliteCommand as string, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -139,10 +147,10 @@ class SQLite {
     proc.stdin!.on('error', (err: Error) => { if (this.proc === proc) this.onExit(err); });
 
     // 写 stdin 规避 unicode 路径问题（见 issues #32, #37）。
-    const escapedPath = this.dbPath.replace(/'/g, "''");
     // 先关 echo 再 .open，避免启动噪声混入第一条查询的输出窗口。
+    // 路径中的引号/换行已在 spawn 前拒绝，此处可安全单引号包裹。
     proc.stdin!.write(`.echo off${EOL}`);
-    proc.stdin!.write(`.open '${escapedPath}'${EOL}`);
+    proc.stdin!.write(`.open '${this.dbPath}'${EOL}`);
     proc.stdin!.write(`.echo on${EOL}`);
 
     this.proc = proc;

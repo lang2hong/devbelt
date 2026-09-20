@@ -281,8 +281,12 @@ export class QueryService {
 
   /** 执行分页查询 */
   async queryPage(sql: string, offset: number, limit: number): Promise<QueryResult> {
+    // 入参可能来自 UI/计算路径，可能为 NaN/负数/小数/超大值；方言的 getPagedSql 是直接内插，
+    // 必须先归一为合法整数，否则会拼出非法 SQL（`LIMIT NaN`）或意外的行数。
+    const safeOffset = Number.isFinite(offset) ? Math.max(0, Math.trunc(offset)) : 0;
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : QueryService.maxResultRows;
     // 分页读取（导出、备份、数据对比）同样不进历史。
-    return this.query(this.dialect.getPagedSql(sql, offset, limit), undefined, { skipHistory: true });
+    return this.query(this.dialect.getPagedSql(sql, safeOffset, safeLimit), undefined, { skipHistory: true });
   }
 
   /** 包裹标识符（复用方言规则） */

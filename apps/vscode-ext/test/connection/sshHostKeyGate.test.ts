@@ -36,7 +36,11 @@ describe('sshHostKey 辅助', () => {
     const blob = keyBlob('ssh-ed25519');
     expect(hostKeyType(blob)).toBe('ssh-ed25519');
     expect(fingerprintSha256(blob)).toMatch(/^SHA256:[A-Za-z0-9+/]+$/);
-    expect(fingerprintSha256(blob)).toBe(fingerprintSha256(blob));
+    // 固定 blob 的黄金值（独立用 node:crypto 计算），确保指纹算法本身正确，
+    // 而不是上一次「自己等于自己」的恒真断言。
+    expect(fingerprintSha256(blob)).toBe('SHA256:3Hsnk6QpWN8KsgnXzuWXiIHu2w47b1U6phcPznoSfCc');
+    // 不同密钥必须得到不同指纹
+    expect(fingerprintSha256(keyBlob('ssh-ed25519', Buffer.from([9])))).not.toBe(fingerprintSha256(blob));
   });
 
   it('knownHostsHost uses [host]:port for non-default ports', () => {

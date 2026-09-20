@@ -54,6 +54,23 @@ describe('QueryService（查询执行）', () => {
     expect(conn.executed[0]).toBe('SELECT * FROM users LIMIT 20, 10');
   });
 
+  it('分页入参归一：NaN/负数/小数/Infinity 不产生非法 LIMIT', async () => {
+    const conn = new FakeConnection();
+    const svc = new QueryService(conn, new MysqlDialect());
+
+    await svc.queryPage('SELECT 1', Number.NaN, Number.NaN);
+    expect(conn.executed.at(-1)).toBe('SELECT 1 LIMIT 0, 10000');
+
+    await svc.queryPage('SELECT 1', -5, -3);
+    expect(conn.executed.at(-1)).toBe('SELECT 1 LIMIT 0, 1');
+
+    await svc.queryPage('SELECT 1', 10.9, 5.9);
+    expect(conn.executed.at(-1)).toBe('SELECT 1 LIMIT 10, 5');
+
+    await svc.queryPage('SELECT 1', Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
+    expect(conn.executed.at(-1)).toBe('SELECT 1 LIMIT 0, 10000');
+  });
+
   it('DML 返回受影响行数', async () => {
     const conn = new FakeConnection();
     conn.result = { affectedRows: 3 };

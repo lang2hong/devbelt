@@ -43,8 +43,10 @@ export class SqliteConnection extends IConnection {
     // `Parse error near "SELECT"` —— SQLite 上的单元格编辑、插入行、删除行
     // 全部失败。先剥掉尾部已有的分号与空白再统一补，两种输入都合法。
     const isDml = /^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i.test(sql);
+    // 末尾补 `\n` 再拼 `; SELECT changes()`：SQL 若以 `-- 行注释` 结尾，中间没有换行时
+    // 注释会把 `; SELECT changes()` 一并吞掉，affectedRows 恒缺失；换行可终止行注释。
     const effectiveSql = isDml
-      ? `${sql.replace(/[\s;]+$/, '')}; SELECT changes()`
+      ? `${sql.replace(/[\s;]+$/, '')}\n; SELECT changes()`
       : sql;
     this.sqlite
       .query(effectiveSql + ';')
