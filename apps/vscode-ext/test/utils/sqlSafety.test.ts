@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { analyzeSqlRisk } from '../../src/utils/sqlRisk';
-import { confirmSqlExecution, ensureWritable } from '../../src/utils/sqlSafety';
+import { confirmSqlExecution, ensureWritable, confirmProductionWrite } from '../../src/utils/sqlSafety';
 
 /** 记录 vscode 弹窗调用，供断言「是否弹了模态」。 */
 const shown = {
@@ -318,5 +318,32 @@ describe('写/危险关键字补全（#2）', () => {
     expect(analyzeSqlRisk("COMMENT ON TABLE t IS 'x'")).toMatchObject({ level: 'write', isWrite: true });
     expect(analyzeSqlRisk('SET PERSIST max_connections = 1')).toMatchObject({ level: 'write', isWrite: true });
     expect(analyzeSqlRisk('SET @@GLOBAL.max_connections = 1')).toMatchObject({ level: 'write', isWrite: true });
+  });
+});
+
+describe('confirmProductionWrite（用户/权限 DDL 生产确认）', () => {
+  it('只读连接一律拒绝且不弹窗', async () => {
+    await expect(confirmProductionWrite(conn({ readOnly: true }), 'DROP USER a')).resolves.toBe(false);
+    expect(shown.warnings).toEqual([]);
+    expect(shown.errors).toHaveLength(1);
+  });
+
+  it('开发环境直接放行，不弹窗', async () => {
+    await expect(confirmProductionWrite(conn(), 'CREATE USER a')).resolves.toBe(true);
+    expect(shown.warnings).toEqual([]);
+  });
+
+  it('生产环境弹模态，确认后放行', async () => {
+    warningAnswer = '__ACTION__';
+    await expect(confirmProductionWrite(conn({ environment: 'production' }), 'GRANT ALL TO a')).resolves.toBe(true);
+    expect(shown.warnings).toHaveLength(1);
+    expect(shown.warnings[0].modal).toBe(true);
+    expect(shown.warnings[0].message).toContain('GRANT ALL TO a');
+  });
+
+  it('生产环境取消则拒绝', async () => {
+    warningAnswer = undefined;
+    await expect(confirmProductionWrite(conn({ environment: 'production' }), 'DROP USER a')).resolves.toBe(false);
+    expect(shown.warnings).toHaveLength(1);
   });
 });

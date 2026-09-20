@@ -28,6 +28,22 @@ export interface ColumnDiff {
   sourceAutoIncrement?: boolean;
   /** 源列注释。 */
   sourceComment?: string;
+  /** 目标列是否 NOT NULL（判断是否需要 SET/DROP NOT NULL）。 */
+  targetNotNull?: boolean;
+  /** 目标列默认值（判断 PG SET DEFAULT / DROP DEFAULT）。 */
+  targetDefault?: any;
+  /** 目标列注释（判断 PG COMMENT ON COLUMN）。 */
+  targetComment?: string;
+}
+
+/** 默认值归一化：null/undefined → ''，去首尾空白。 */
+function normDefault(v: unknown): string {
+  return v === undefined || v === null ? '' : String(v).trim();
+}
+
+/** 注释归一化：null/undefined → ''。 */
+function normComment(v: unknown): string {
+  return v === undefined || v === null ? '' : String(v);
 }
 
 /** 表差异 */
@@ -111,11 +127,30 @@ export class SchemaDiffService {
       const notNull = !!srcCol.isNotNull;
       if (!tgtCol) {
         diffs.push({ columnName: name, status: 'added', sourceType: srcCol.type, sourceNotNull: notNull, ...attrs(srcCol) });
-      } else if (String(srcCol.type) !== String(tgtCol.type) || !!tgtCol.isNotNull !== notNull) {
-        // 过去只比类型：NOT NULL 变化被判为「无差异」，同步也不会补约束。
-        diffs.push({ columnName: name, status: 'changed', sourceType: srcCol.type, targetType: tgtCol.type, sourceNotNull: notNull, ...attrs(srcCol) });
       } else {
-        diffs.push({ columnName: name, status: 'unchanged' });
+        // 变更判定：类型 / NOT NULL / 自增 / 默认值 / 注释（后三者此前未比较，
+        // 只改默认值或注释会被误判 unchanged、永不同步）。
+        const changed =
+          String(srcCol.type) !== String(tgtCol.type)
+          || !!tgtCol.isNotNull !== notNull
+          || !!srcCol.isAutoIncrement !== !!tgtCol.isAutoIncrement
+          || normDefault(srcCol.defaultValue) !== normDefault(tgtCol.defaultValue)
+          || normComment(srcCol.comment) !== normComment(tgtCol.comment);
+        if (changed) {
+          diffs.push({
+            columnName: name,
+            status: 'changed',
+            sourceType: srcCol.type,
+            targetType: tgtCol.type,
+            sourceNotNull: notNull,
+            targetNotNull: !!tgtCol.isNotNull,
+            targetDefault: tgtCol.defaultValue,
+            targetComment: tgtCol.comment,
+            ...attrs(srcCol),
+          });
+        } else {
+          diffs.push({ columnName: name, status: 'unchanged' });
+        }
       }
     }
     for (const [name, tgtCol] of targetMap) {
@@ -252,6 +287,7 @@ export class SchemaDiffService {
       } else if (d.status === 'changed') {
         const actions: string[] = [];
         const warnings: string[] = [];
+        const extra: string[] = [];
         for (const c of d.columns) {
           const col = wrap(c.columnName);
           const type = validateColumnType(c.sourceType || 'text');
@@ -273,18 +309,33 @@ export class SchemaDiffService {
           } else if (c.status === 'removed') {
             actions.push(`DROP COLUMN ${col}`);
           } else if (c.status === 'changed') {
-            actions.push(`ALTER COLUMN ${col} TYPE ${type}`);
-            actions.push(`ALTER COLUMN ${col} ${c.sourceNotNull ? 'SET' : 'DROP'} NOT NULL`);
             const base = (t?: string) => String(t || '').toLowerCase().split('(')[0].trim();
-            if (base(c.targetType) && base(c.sourceType) && base(c.targetType) !== base(c.sourceType)) {
-              warnings.push(`-- WARN: type of "${c.columnName}" changes ${c.targetType} → ${c.sourceType}; may require USING / data cleanup.`);
+            if (base(c.targetType) !== base(c.sourceType)) {
+              actions.push(`ALTER COLUMN ${col} TYPE ${type}`);
+              if (base(c.targetType) && base(c.sourceType)) {
+                warnings.push(`-- WARN: type of "${c.columnName}" changes ${c.targetType} → ${c.sourceType}; may require USING / data cleanup.`);
+              }
+            }
+            if (!!c.sourceNotNull !== !!c.targetNotNull) {
+              actions.push(`ALTER COLUMN ${col} ${c.sourceNotNull ? 'SET' : 'DROP'} NOT NULL`);
+            }
+            // 默认值差异：源为 PG，表达式原样可用；无默认值则 DROP。
+            if (normDefault(c.sourceDefault) !== normDefault(c.targetDefault)) {
+              actions.push(normDefault(c.sourceDefault) !== ''
+                ? `ALTER COLUMN ${col} SET DEFAULT ${String(c.sourceDefault)}`
+                : `ALTER COLUMN ${col} DROP DEFAULT`);
+            }
+            // 注释是独立语句，不能并入 ALTER TABLE 子命令列表。
+            if (normComment(c.sourceComment) !== normComment(c.targetComment)) {
+              extra.push(`COMMENT ON COLUMN ${table}.${col} IS ${normComment(c.sourceComment) !== '' ? PG_ESC(c.sourceComment) : 'NULL'};`);
             }
           }
         }
-        if (actions.length) {
+        if (actions.length || extra.length) {
           parts.push(`-- Alter table: ${d.tableName}`);
           parts.push(...warnings);
-          parts.push(`ALTER TABLE ${table} ${actions.join(', ')};`);
+          if (actions.length) parts.push(`ALTER TABLE ${table} ${actions.join(', ')};`);
+          parts.push(...extra);
           parts.push('');
         }
       }
@@ -331,7 +382,12 @@ export class SchemaDiffService {
           } else if (c.status === 'removed') {
             actions.push(`ALTER TABLE ${table} DROP COLUMN ${col};`);
           } else if (c.status === 'changed') {
-            parts.push(`-- Cannot alter column "${c.columnName}" on SQLite (${c.targetType} → ${c.sourceType}); table rebuild required.`);
+            const what: string[] = [];
+            if (String(c.targetType) !== String(c.sourceType)) what.push(`${c.targetType} → ${c.sourceType}`);
+            if (!!c.targetNotNull !== !!c.sourceNotNull) what.push('NOT NULL');
+            if (normDefault(c.targetDefault) !== normDefault(c.sourceDefault)) what.push('DEFAULT');
+            if (normComment(c.targetComment) !== normComment(c.sourceComment)) what.push('COMMENT');
+            parts.push(`-- Cannot alter column "${c.columnName}" on SQLite (${what.join(', ') || 'attributes'}); table rebuild required.`);
           }
         }
         if (actions.length) {

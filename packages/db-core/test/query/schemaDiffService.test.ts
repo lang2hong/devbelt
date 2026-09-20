@@ -198,6 +198,90 @@ describe('SchemaDiffService', () => {
     expect(sql).not.toContain('`');
   });
 
+  it('默认值/注释变化被判为 changed 并带出目标值', async () => {
+    const source = mockMetaService(['users'], { users: [{ name: 'flag', type: 'boolean', defaultValue: 'true', comment: 'c1' } as any] });
+    const target = mockMetaService(['users'], { users: [{ name: 'flag', type: 'boolean', defaultValue: 'false', comment: 'c2' } as any] });
+    const diffs = await SchemaDiffService.diff(source, 's', target, 't');
+    const flag = diffs.find((d) => d.tableName === 'users')!.columns.find((c) => c.columnName === 'flag')!;
+    expect(flag.status).toBe('changed');
+    expect(flag.targetDefault).toBe('false');
+    expect(flag.targetComment).toBe('c2');
+  });
+
+  it('PG 仅默认值变化：SET/DROP DEFAULT（类型/约束相同不重发）', async () => {
+    const pg = new PostgreSqlDialect();
+    const tableService = {
+      dbType: DatabaseType.PG,
+      wrapIdentifier: (id: string) => pg.wrap(id),
+      getCreateSql: async () => '',
+      supports: () => true,
+    } as unknown as TableService;
+    const diffs = [{
+      tableName: 'users',
+      status: 'changed' as const,
+      columns: [
+        { columnName: 'flag', status: 'changed' as const, sourceType: 'boolean', targetType: 'boolean', sourceNotNull: false, targetNotNull: false, sourceDefault: 'true', targetDefault: 'false' },
+        { columnName: 'note', status: 'changed' as const, sourceType: 'text', targetType: 'text', sourceNotNull: false, targetNotNull: false, sourceDefault: undefined, targetDefault: "'x'" },
+      ],
+    }];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'targetDb', tableService, 'sourceDb');
+    expect(sql).toContain('ALTER COLUMN "flag" SET DEFAULT true');
+    expect(sql).toContain('ALTER COLUMN "note" DROP DEFAULT');
+    expect(sql).not.toContain('ALTER COLUMN "flag" TYPE');
+    expect(sql).not.toContain('ALTER COLUMN "flag" SET NOT NULL');
+  });
+
+  it('PG 仅注释变化：COMMENT ON COLUMN 独立语句（不并入 ALTER TABLE）', async () => {
+    const pg = new PostgreSqlDialect();
+    const tableService = {
+      dbType: DatabaseType.PG,
+      wrapIdentifier: (id: string) => pg.wrap(id),
+      getCreateSql: async () => '',
+      supports: () => true,
+    } as unknown as TableService;
+    const diffs = [{
+      tableName: 'users',
+      status: 'changed' as const,
+      columns: [
+        { columnName: 'name', status: 'changed' as const, sourceType: 'text', targetType: 'text', sourceNotNull: false, targetNotNull: false, sourceComment: "it's", targetComment: 'old' },
+      ],
+    }];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'targetDb', tableService, 'sourceDb');
+    expect(sql).toContain(`COMMENT ON COLUMN "users"."name" IS 'it''s';`);
+    expect(sql).not.toContain('ALTER TABLE "users" ');
+  });
+
+  it('MySQL 仅默认值变化：MODIFY COLUMN 全量重渲染（带 DEFAULT）', async () => {
+    const tableService = { getCreateSql: async () => '', supports: () => true, require: () => {} } as unknown as TableService;
+    const diffs = [{
+      tableName: 'users',
+      status: 'changed' as const,
+      columns: [{ columnName: 'flag', status: 'changed' as const, sourceType: 'tinyint(1)', sourceNotNull: false, sourceDefault: '1' }],
+    }];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'targetDb', tableService, 'sourceDb');
+    expect(sql).toContain('MODIFY COLUMN `flag`');
+    expect(sql).toContain('DEFAULT');
+  });
+
+  it('SQLite 默认值变化：仅提示重建，不发不可执行 DDL', async () => {
+    const sq = new SqliteDialect();
+    const tableService = {
+      dbType: DatabaseType.SQLITE,
+      wrapIdentifier: (id: string) => sq.wrap(id),
+      getCreateSql: async () => '',
+      supports: () => true,
+    } as unknown as TableService;
+    const diffs = [{
+      tableName: 't',
+      status: 'changed' as const,
+      columns: [{ columnName: 'a', status: 'changed' as const, sourceType: 'INTEGER', targetType: 'INTEGER', sourceNotNull: false, targetNotNull: false, sourceDefault: '1', targetDefault: '2' }],
+    }];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 't2', tableService, 's');
+    expect(sql).toContain('table rebuild required');
+    expect(sql).toContain('DEFAULT');
+    expect(sql).not.toContain('ALTER TABLE "t" ALTER');
+  });
+
   it('generateSyncSql 生成 SQLite DDL（ADD/DROP COLUMN，改类型仅注释）', async () => {
     const sq = new SqliteDialect();
     const tableService = {

@@ -6,7 +6,7 @@ import type { Deps } from './shared';
 import { recordBulkHistory, requireCapability } from './shared';
 import { l10n } from '../i18n';
 import { AuditLogger } from '../utils/auditLogger';
-import { ensureWritable } from '../utils/sqlSafety';
+import { confirmProductionWrite } from '../utils/sqlSafety';
 
 /**
  * 可授予的权限白名单。
@@ -152,7 +152,8 @@ export class UserManageView extends BaseWebView {
     action: string,
     fn: (session: Awaited<ReturnType<Deps['manager']['connect']>>) => Promise<void>,
   ): Promise<void> {
-    if (!ensureWritable(this.conn)) return;
+    // 只读拦截 + 生产环境二次确认（用户/权限 DDL 属破坏性变更）。
+    if (!(await confirmProductionWrite(this.conn, action))) return;
     const session = await this.deps.manager.connect(this.conn);
     if (!requireCapability(session, 'manageUsers')) return;
     await fn(session);

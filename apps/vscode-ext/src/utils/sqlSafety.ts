@@ -41,3 +41,21 @@ export async function confirmSqlExecution(conn: SavedConnection, sql: string): P
     action,
   )) === action;
 }
+
+/**
+ * 破坏性 / 权限变更的**生产确认**。
+ *
+ * 与 `confirmSqlExecution` 的区别：不做 SQL 风险分类，只做「只读拦截 + 生产环境
+ * 二次确认」；供那些有意跳过常规风险提示的交互式面板（用户管理）使用。开发环境
+ * 直接放行，只读连接一律拒绝。
+ */
+export async function confirmProductionWrite(conn: SavedConnection, detail: string): Promise<boolean> {
+  if (!ensureWritable(conn)) return false;
+  if (conn.environment !== 'production') return true;
+  const action = l10n('sql.runAction');
+  return (await vscode.window.showWarningMessage(
+    l10n('sql.reviewBeforeRun', { detail }),
+    { modal: true },
+    action,
+  )) === action;
+}
