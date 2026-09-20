@@ -10,6 +10,7 @@ import {
   buildCandidates,
   detectContext,
   extractFromTable,
+  extractTableAliases,
   type CompKind,
   type CompletionCandidate,
 } from './sqlCompletionEngine';
@@ -75,7 +76,11 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
       fromTable = extractFromTable(stmtText);
       if (sqlCtx === 'dot_column') {
         const m = before.match(/(\w+)\.\w*$/);
-        if (m) columns = await this.getColumns(conn, m[1], db);
+        if (m) {
+          // `u.` 里的 u 可能是别名：解析出真实表再取列，否则永远查不到。
+          const aliases = extractTableAliases(stmtText);
+          columns = await this.getColumns(conn, aliases.get(m[1]) ?? m[1], db);
+        }
       } else if (fromTable) {
         columns = await this.getColumns(conn, fromTable, db);
       }

@@ -4,6 +4,7 @@ import {
   buildCandidates,
   filterByPrefix,
   extractFromTable,
+  extractTableAliases,
   SQL_KEYWORDS,
 } from '../../src/completion/sqlCompletionEngine';
 
@@ -154,5 +155,22 @@ describe('SQL_KEYWORDS', () => {
     expect(SQL_KEYWORDS.clause).toContain('FROM');
     expect(SQL_KEYWORDS.operator).toContain('AND');
     expect(SQL_KEYWORDS.functions).toContain('COUNT');
+  });
+});
+
+describe('extractTableAliases', () => {
+  it('解析 FROM/JOIN 的表与别名映射，忽略保留字', () => {
+    const sql = 'SELECT u.name FROM `users` u LEFT JOIN orders AS o ON o.uid = u.id WHERE x = 1';
+    const map = extractTableAliases(sql);
+    expect(map.get('u')).toBe('users');
+    expect(map.get('o')).toBe('orders');
+    expect(map.get('users')).toBe('users');
+    expect(map.has('LEFT')).toBe(false);
+    expect(map.has('WHERE')).toBe(false);
+  });
+
+  it('无别名时映射回表名自身', () => {
+    const map = extractTableAliases('SELECT * FROM db1.accounts');
+    expect(map.get('accounts')).toBe('accounts');
   });
 });

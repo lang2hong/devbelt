@@ -111,6 +111,28 @@ export function extractFromTable(text: string): string | undefined {
   return m[1].split('.').pop();
 }
 
+/** 别名/表名保留字：误当作别名会把 `FROM t LEFT JOIN u ON ...` 的 LEFT 当别名。 */
+const NOT_ALIAS = /^(ON|USING|WHERE|GROUP|ORDER|LIMIT|OFFSET|HAVING|JOIN|LEFT|RIGHT|INNER|OUTER|CROSS|FULL|NATURAL|SET|VALUES|UNION|AS|AND|OR)$/i;
+
+/**
+ * 解析语句里 FROM/JOIN 的 `别名 → 表名` 映射（含表名自身）。
+ *
+ * `SELECT u.` 这类补全过去拿 `u` 当表名查列、必然查不到；这里先建立别名映射，
+ * 再据别名取真实表的列。
+ */
+export function extractTableAliases(text: string): Map<string, string> {
+  const map = new Map<string, string>();
+  const re = /\b(?:FROM|JOIN)\s+`?([\w.]+)`?(?:\s+(?:AS\s+)?`?([\w]+)`?)?/gi;
+  for (const m of text.matchAll(re)) {
+    const table = (m[1] ?? '').split('.').pop();
+    if (!table) continue;
+    map.set(table, table);
+    const alias = m[2];
+    if (alias && !NOT_ALIAS.test(alias)) map.set(alias, table);
+  }
+  return map;
+}
+
 /**
  * 按上下文组合候选集（带类别）。
  * 调用方注入元数据：tables（当前库表名）、columns（FROM 表列名）、fromTable。

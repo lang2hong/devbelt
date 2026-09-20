@@ -1,7 +1,10 @@
 import type { ConnectionManager, ConnectionSession } from '../connection/connectionManager';
 import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
-import { buildCandidates, detectContext, extractFromTable, type SqlContext } from '../completion/sqlCompletionEngine';
+import { buildCandidates, detectContext, extractFromTable, extractTableAliases, type SqlContext } from '../completion/sqlCompletionEngine';
 import { diagWarn } from '../utils/diagnostics';
+
+/** 元数据缓存 TTL：DDL 改表后补全不应长期返回陈旧表/列。 */
+const CACHE_TTL_MS = 60_000;
 
 const CONTEXTS_NEEDING_TABLES: SqlContext[] = ['statement_start', 'from_table_typing'];
 const CONTEXTS_NEEDING_COLUMNS: SqlContext[] = [
@@ -17,8 +20,8 @@ const CONTEXTS_NEEDING_COLUMNS: SqlContext[] = [
  * 无元数据需求的上下文（如 where_operator）跳过 DB 查询，避免无谓击库。
  */
 export class CompletionService {
-  private readonly tableCache = new Map<string, string[]>();
-  private readonly columnCache = new Map<string, string[]>();
+  private readonly tableCache = new Map<string, { names: string[]; at: number }>();
+  private readonly columnCache = new Map<string, { names: string[]; at: number }>();
 
   constructor(
     private readonly manager: ConnectionManager,
@@ -31,7 +34,9 @@ export class CompletionService {
   async handle(before: string, text: string): Promise<void> {
     try {
       const ctx = detectContext(before);
-      const fromTable = extractFromTable(text);
+      // 只解析光标所在语句的 FROM：多语句文件里取首个 FROM 会补错表。
+      const stmtText = text.slice(before.lastIndexOf(';') + 1);
+      const fromTable = extractFromTable(stmtText);
       const db = this.database || this.conn.database;
 
       let tables: string[] = [];
@@ -45,7 +50,10 @@ export class CompletionService {
         if (CONTEXTS_NEEDING_COLUMNS.includes(ctx)) {
           if (ctx === 'dot_column') {
             const m = before.match(/(\w+)\.\w*$/);
-            if (m) columns = await this.getColumns(session, m[1], db);
+            if (m) {
+              const aliases = extractTableAliases(stmtText);
+              columns = await this.getColumns(session, aliases.get(m[1]) ?? m[1], db);
+            }
           } else if (fromTable) {
             columns = await this.getColumns(session, fromTable, db);
           }
@@ -63,10 +71,10 @@ export class CompletionService {
   private async getTables(session: ConnectionSession, db?: string): Promise<string[]> {
     const key = db || '';
     const cached = this.tableCache.get(key);
-    if (cached) return cached;
+    if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.names;
     try {
       const tables = (await session.metadata.getTables(db)).map((t: any) => t.name);
-      this.tableCache.set(key, tables);
+      this.tableCache.set(key, { names: tables, at: Date.now() });
       return tables;
     } catch (err) {
       diagWarn('completion getTables failed', (err as Error).message);
@@ -77,10 +85,10 @@ export class CompletionService {
   private async getColumns(session: ConnectionSession, table: string, db?: string): Promise<string[]> {
     const key = `${db || ''}:${table}`;
     const cached = this.columnCache.get(key);
-    if (cached) return cached;
+    if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.names;
     try {
       const columns = (await session.metadata.getColumns(table, db)).map((c: any) => c.name);
-      this.columnCache.set(key, columns);
+      this.columnCache.set(key, { names: columns, at: Date.now() });
       return columns;
     } catch (err) {
       diagWarn('completion getColumns failed', table, (err as Error).message);
