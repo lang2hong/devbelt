@@ -1,9 +1,9 @@
-import { ConnectionFactory, QueryService, MetadataService, DataService, TableService } from '@devkit/db-core';
+import { ConnectionFactory, QueryService, MetadataService, DataService, TableService, DialectRegistry } from '@devkit/db-core';
 import type { DatabaseType } from '@devkit/db-core';
 import type { DatabaseCapabilities } from '@devkit/db-core';
 import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import type { HistoryStore } from '../history/historyStore';
-import type { SqlScanOptions } from '@devkit/db-core/sql';
+import { parseNoBackslashEscapes, type SqlScanOptions } from '@devkit/db-core/sql';
 import { dialectScanOptions } from '../utils/sqlDialectOptions';
 import { QueryHistoryRecorder } from '../history/queryHistoryRecorder';
 import { SshTunnel } from './sshTunnel';
@@ -157,6 +157,14 @@ export class ConnectionManager {
     return dialectScanOptions(conn.dbType, { noBackslashEscapes: this.noBackslashEscapes.get(conn.id) === true });
   }
 
+  /**
+   * 该连接是否处于 MySQL NO_BACKSLASH_ESCAPES 模式。
+   * 供值转义（字面量/LIKE）路径判断是否翻倍反斜杠；非 MySQL 恒为 false。
+   */
+  noBackslashEscapesFor(conn: SavedConnection): boolean {
+    return this.noBackslashEscapes.get(conn.id) === true;
+  }
+
   async connect(conn: SavedConnection, opts?: ConnectOptions): Promise<ConnectionSession> {
     void opts; // scope 仅为调用方语义标记（组织调用方传入 'organization'），当前不参与建连逻辑
     const existing = this.sessions.get(conn.id);
@@ -286,12 +294,15 @@ export class ConnectionManager {
     const query = new QueryService(connection, dialect, recorder?.observer(), conn.requestTimeout);
 
     // MySQL：读一次 @@sql_mode。NO_BACKSLASH_ESCAPES 会反转字符串转义语义，
-    // 影响语句切分与只读判定；读失败不阻断建连，退回默认（反斜杠转义）。
+    // 影响语句切分、只读判定与值转义；读失败不阻断建连，退回默认（反斜杠转义）。
     if (dialect.dbType === 'MYSQL') {
       try {
         const r = await query.query('SELECT @@sql_mode AS mode');
         const mode = String((r.rows?.[0] as { mode?: unknown } | undefined)?.mode ?? '');
-        this.noBackslashEscapes.set(conn.id, /NO_BACKSLASH_ESCAPES/i.test(mode));
+        const nbe = parseNoBackslashEscapes(mode);
+        this.noBackslashEscapes.set(conn.id, nbe);
+        // 值转义按连接换用方言变体：各服务层在调用点取 query.dialect，替换即全局生效。
+        query.setDialect(DialectRegistry.getFor(conn.dbType, { noBackslashEscapes: nbe }));
       } catch {
         /* 保持默认 */
       }

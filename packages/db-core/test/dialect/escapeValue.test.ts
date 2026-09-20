@@ -105,3 +105,31 @@ describe('方言值转义（escapeValue）', () => {
     expect(mysql.buildInsertSql(rows, ['name'], 't')).toContain("'O''Brien\\\\x'");
   });
 });
+
+describe('MySQL NO_BACKSLASH_ESCAPES 下的值转义', () => {
+  const nbe = new MysqlDialect({ noBackslashEscapes: true });
+
+  it('反斜杠不再翻倍，单引号仍翻倍', () => {
+    expect(nbe.escapeValue('a\\b')).toBe("'a\\b'");
+    expect(nbe.escapeValue("a'b")).toBe("'a''b'");
+    // 注入形状：反斜杠是普通字符，闭合只看单引号
+    expect(nbe.escapeValue("x\\' OR 1=1 -- ")).toBe("'x\\'' OR 1=1 -- '");
+  });
+
+  it('对象 JSON 同样只翻倍单引号', () => {
+    const value = { path: 'C:\\tmp', quote: "it's" };
+    expect(nbe.escapeValue(value)).toBe(`'${JSON.stringify(value).replace(/'/g, "''")}'`);
+  });
+
+  it('Date/Buffer/数字/布尔与默认方言一致', () => {
+    expect(nbe.escapeValue(new Date('2026-08-13T00:00:00.000Z'))).toBe("'2026-08-13T00:00:00.000Z'");
+    expect(nbe.escapeValue(Buffer.from([0x00, 0x01, 0xde, 0xad, 0xbe, 0xef]))).toBe("X'0001deadbeef'");
+    expect(nbe.escapeValue(42)).toBe('42');
+    expect(nbe.escapeValue(true)).toBe('1');
+  });
+
+  it('默认方言行为不变（对照）', () => {
+    expect(mysql.escapeValue('a\\b')).toBe("'a\\\\b'");
+    expect(mysql.escapeValue("a'b")).toBe("'a''b'");
+  });
+});

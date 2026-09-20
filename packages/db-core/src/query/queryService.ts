@@ -123,7 +123,7 @@ export type QueryObserver = (info: ExecutedStatement) => void;
  * 上层（vscode-ext）只需持有本服务，无需直接接触原始驱动回调。
  */
 export class QueryService {
-  readonly dialect: SqlDialect;
+  dialect: SqlDialect;
   /** 在途查询的取消句柄（多槽，支持并发查询各自取消）。 */
   private readonly activeCancels = new Map<number, () => void>();
   private nextQueryId = 1;
@@ -145,6 +145,17 @@ export class QueryService {
   /** 生效的查询超时：会话级覆盖优先，否则全局默认。 */
   private get timeoutMs(): number {
     return this.timeoutMsOverride ?? QueryService.queryTimeout;
+  }
+
+  /**
+   * 替换本次会话的方言实例。
+   *
+   * 连接层读到 `@@sql_mode` 含 NO_BACKSLASH_ESCAPES 后，换用不做反斜杠转义的
+   * MySQL 方言变体。各服务层都在调用点取 `queryService.dialect`，故替换对全部
+   * 值转义（data/table/backup/dataDiff/keyset）一次性生效。
+   */
+  setDialect(dialect: SqlDialect): void {
+    this.dialect = dialect;
   }
 
   /**

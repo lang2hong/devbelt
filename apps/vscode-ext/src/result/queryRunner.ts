@@ -58,15 +58,17 @@ export class QueryRunner {
 
   buildSelect(): string {
     if (!this.table) return '';
+    const nbe = this.manager.noBackslashEscapesFor?.(this.conn) === true;
     return buildTableSelect(
       this.conn.dbType, this.table, this.database, this.filterConditions,
-      this.sortCol, this.sortDir, this.offset, this.limit, this.columnTypes,
+      this.sortCol, this.sortDir, this.offset, this.limit, this.columnTypes, nbe,
     );
   }
 
   getCountSql(): string {
     if (!this.table) return '';
-    return buildCountSql(this.conn.dbType, this.table, this.database, this.filterConditions, this.columnTypes);
+    const nbe = this.manager.noBackslashEscapesFor?.(this.conn) === true;
+    return buildCountSql(this.conn.dbType, this.table, this.database, this.filterConditions, this.columnTypes, nbe);
   }
 
   execute(

@@ -11,3 +11,4 @@ export { splitSqlWithRanges, splitExecutableStatements, stripSqlComments, Stream
 export type { SqlStatementRange } from './split.js';
 export { sqlCommentSafe } from './comment.js';
 export { scanOptionsForDbType } from './scanOptions.js';
+export { parseNoBackslashEscapes } from './scanOptions.js';

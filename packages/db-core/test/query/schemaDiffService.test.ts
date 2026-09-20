@@ -152,6 +152,39 @@ describe('SchemaDiffService', () => {
     expect(sql).not.toContain('`targetDb`.`name`');
   });
 
+  it('generateSyncSql：目标 MySQL NO_BACKSLASH_ESCAPES 时默认值/注释不再翻倍反斜杠', async () => {
+    const tableService = {
+      getCreateSql: async () => '',
+      supports: () => true,
+      require: () => {},
+    } as unknown as TableService;
+    const diffs = [{
+      tableName: 'users',
+      status: 'changed' as const,
+      columns: [{
+        columnName: 'path',
+        status: 'added' as const,
+        sourceType: 'varchar(255)',
+        sourceDefault: 'C:\\tmp',
+        sourceComment: "it's a path",
+      }],
+    }];
+
+    const dflt = await SchemaDiffService.generateSyncSql(diffs, 'targetDb', tableService, 'sourceDb');
+    const nbe = await SchemaDiffService.generateSyncSql(
+      diffs, 'targetDb', tableService, 'sourceDb', new MysqlDialect({ noBackslashEscapes: true }),
+    );
+
+    // 默认模式：反斜杠翻倍
+    expect(dflt).toContain("DEFAULT 'C:\\\\tmp'");
+    // NO_BACKSLASH_ESCAPES：反斜杠原样
+    expect(nbe).toContain("DEFAULT 'C:\\tmp'");
+    expect(nbe).not.toContain('C:\\\\tmp');
+    // 单引号两种模式都必须翻倍
+    expect(dflt).toContain("COMMENT 'it''s a path'");
+    expect(nbe).toContain("COMMENT 'it''s a path'");
+  });
+
   it('generateSyncSql 拒绝含反引号的库名/表名（SQL 注入防线）', async () => {
     const tableService = {
       getCreateSql: async () => '',

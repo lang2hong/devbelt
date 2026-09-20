@@ -36,6 +36,13 @@ describe('escapeSqlString', () => {
     expect(escapeSqlString('C:\\tmp', DatabaseType.SQLITE)).toBe('C:\\tmp');
   });
 
+  it('MySQL NO_BACKSLASH_ESCAPES 下反斜杠不翻倍，单引号仍翻倍', () => {
+    expect(escapeSqlString('C:\\tmp', DatabaseType.MYSQL, true)).toBe('C:\\tmp');
+    expect(escapeSqlString("O'Brien\\x", DatabaseType.MYSQL, true)).toBe("O''Brien\\x");
+    // 非 MySQL 不受该开关影响
+    expect(escapeSqlString('C:\\tmp', DatabaseType.PG, true)).toBe('C:\\tmp');
+  });
+
   it('注入形状不逃出字面量', () => {
     expect(escapeSqlString("x' OR 1=1 -- ", DatabaseType.MYSQL)).toBe("x'' OR 1=1 -- ");
     expect(escapeSqlString("x' OR 1=1 -- ", DatabaseType.PG)).toBe("x'' OR 1=1 -- ");

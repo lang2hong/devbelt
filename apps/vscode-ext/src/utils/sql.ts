@@ -30,10 +30,13 @@ export function wrapIdentForConn(conn: SavedConnection, name: string): string {
  *
  * `dbType` 是**必填**：原先可省略并默认按 MySQL 处理，一旦调用方漏传，
  * PG/SQLite 上就会静默过度转义。方言差异不该有「默认值」。
+ *
+ * `noBackslashEscapes`：MySQL 服务端 sql_mode 含 NO_BACKSLASH_ESCAPES 时反斜杠
+ * 是普通字符，此时**只**翻倍单引号，否则会把一个反斜杠写成两个。
  */
-export function escapeSqlString(value: string, dbType: DatabaseType): string {
+export function escapeSqlString(value: string, dbType: DatabaseType, noBackslashEscapes = false): string {
   const escaped = String(value).replace(/'/g, "''");
-  return dbType === DatabaseType.MYSQL
+  return dbType === DatabaseType.MYSQL && !noBackslashEscapes
     ? escaped.replace(/\\/g, '\\\\')
     : escaped;
 }

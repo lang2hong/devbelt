@@ -59,8 +59,8 @@ function qualifiedTable(dbType: DatabaseType, table: string, database?: string):
  * 转义 LIKE 模式：先按方言转义字面量，再把通配符 `%`/`_` 前缀反斜杠。
  * 反斜杠只有在配套 ESCAPE 子句下才生效，见 likeEscapeClause。
  */
-function escapeLike(val: string, dbType: DatabaseType): string {
-  return escapeSqlString(val, dbType).replace(/%/g, '\\%').replace(/_/g, '\\_');
+function escapeLike(val: string, dbType: DatabaseType, noBackslashEscapes: boolean): string {
+  return escapeSqlString(val, dbType, noBackslashEscapes).replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
 /**
@@ -68,22 +68,23 @@ function escapeLike(val: string, dbType: DatabaseType): string {
  *
  * SQLite 的 LIKE 没有默认转义字符，不显式声明则 `\%` 中的 `%` 仍按通配符解释；
  * MySQL/PG 虽有默认 `\`，显式声明可去掉对默认值的隐式依赖。
- * MySQL 字符串字面量内反斜杠需翻倍。
+ * MySQL 字符串字面量内反斜杠需翻倍；NO_BACKSLASH_ESCAPES 下反斜杠是普通字符，
+ * `'\\'` 会变成两个反斜杠（非法 ESCAPE），此时用单个 `'\'`。
  */
-function likeEscapeClause(dbType: DatabaseType): string {
-  return dbType === DatabaseType.MYSQL ? " ESCAPE '\\\\'" : " ESCAPE '\\'";
+function likeEscapeClause(dbType: DatabaseType, noBackslashEscapes: boolean): string {
+  return dbType === DatabaseType.MYSQL && !noBackslashEscapes ? " ESCAPE '\\\\'" : " ESCAPE '\\'";
 }
 
 /**
  * 逗号分隔值 → 元素列表（过滤空项）。
  * 每一项与其他操作符走同一套引号规则：数值列的数字字面量裸写，其余加引号。
  */
-function commaList(val: string, dbType: DatabaseType, columnType?: string): string {
+function commaList(val: string, dbType: DatabaseType, noBackslashEscapes: boolean, columnType?: string): string {
   return val
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s !== '')
-    .map((s) => quoteValFor(dbType, columnType, s))
+    .map((s) => quoteValFor(dbType, columnType, s, noBackslashEscapes))
     .join(', ');
 }
 
@@ -102,9 +103,9 @@ function isNumericVal(v: string): boolean {
  * 类型未知时选择加引号：数值列写 `'1'` 在 MySQL/PG/SQLite 都会隐式转数字，
  * 结果不变；而字符列写裸 `1` 则会改变语义。所以引号是安全的默认。
  */
-function quoteValFor(dbType: DatabaseType, columnType: string | undefined, raw: string): string {
+function quoteValFor(dbType: DatabaseType, columnType: string | undefined, raw: string, noBackslashEscapes: boolean): string {
   if (isNumericColumn(columnType) && isNumericVal(raw)) return raw;
-  return `'${escapeSqlString(raw, dbType)}'`;
+  return `'${escapeSqlString(raw, dbType, noBackslashEscapes)}'`;
 }
 
 /** 构建单个过滤条件的 SQL 片段。 */
@@ -112,6 +113,7 @@ export function buildCondition(
   dbType: DatabaseType,
   condition: FilterCondition,
   columnTypes: ColumnTypeMap = {},
+  noBackslashEscapes = false,
 ): string {
   try {
     validateIdent(condition.column);
@@ -122,17 +124,17 @@ export function buildCondition(
   const v = condition.value ?? '';
   const v2 = condition.value2 ?? '';
   const columnType = columnTypes[condition.column];
-  const quoteVal = (raw: string) => quoteValFor(dbType, columnType, raw);
-  const esc = likeEscapeClause(dbType);
+  const quoteVal = (raw: string) => quoteValFor(dbType, columnType, raw, noBackslashEscapes);
+  const esc = likeEscapeClause(dbType, noBackslashEscapes);
   switch (condition.op) {
     case FILTER_OP.eq: return `${w} ${EQ} ${quoteVal(v)}`;
     case FILTER_OP.ne: return `${w} ${NE} ${quoteVal(v)}`;
-    case FILTER_OP.contains: return `${w} ${LIKE} '%${escapeLike(v, dbType)}%'${esc}`;
-    case FILTER_OP.notContains: return `${w} ${NOT_LIKE} '%${escapeLike(v, dbType)}%'${esc}`;
-    case FILTER_OP.startsWith: return `${w} ${LIKE} '${escapeLike(v, dbType)}%'${esc}`;
-    case FILTER_OP.notStartsWith: return `${w} ${NOT_LIKE} '${escapeLike(v, dbType)}%'${esc}`;
-    case FILTER_OP.endsWith: return `${w} ${LIKE} '%${escapeLike(v, dbType)}'${esc}`;
-    case FILTER_OP.notEndsWith: return `${w} ${NOT_LIKE} '%${escapeLike(v, dbType)}'${esc}`;
+    case FILTER_OP.contains: return `${w} ${LIKE} '%${escapeLike(v, dbType, noBackslashEscapes)}%'${esc}`;
+    case FILTER_OP.notContains: return `${w} ${NOT_LIKE} '%${escapeLike(v, dbType, noBackslashEscapes)}%'${esc}`;
+    case FILTER_OP.startsWith: return `${w} ${LIKE} '${escapeLike(v, dbType, noBackslashEscapes)}%'${esc}`;
+    case FILTER_OP.notStartsWith: return `${w} ${NOT_LIKE} '${escapeLike(v, dbType, noBackslashEscapes)}%'${esc}`;
+    case FILTER_OP.endsWith: return `${w} ${LIKE} '%${escapeLike(v, dbType, noBackslashEscapes)}'${esc}`;
+    case FILTER_OP.notEndsWith: return `${w} ${NOT_LIKE} '%${escapeLike(v, dbType, noBackslashEscapes)}'${esc}`;
     case FILTER_OP.gt: return `${w} ${GT} ${quoteVal(v)}`;
     case FILTER_OP.gte: return `${w} ${GTE} ${quoteVal(v)}`;
     case FILTER_OP.lt: return `${w} ${LT} ${quoteVal(v)}`;
@@ -144,11 +146,11 @@ export function buildCondition(
     case FILTER_OP.isEmpty: return `${w} ${EQ} ''`;
     case FILTER_OP.notEmpty: return `${w} ${NE} ''`;
     case FILTER_OP.in: {
-      const items = commaList(v, dbType, columnType);
+      const items = commaList(v, dbType, noBackslashEscapes, columnType);
       return items ? `${w} ${IN} (${items})` : '';
     }
     case FILTER_OP.notIn: {
-      const items = commaList(v, dbType, columnType);
+      const items = commaList(v, dbType, noBackslashEscapes, columnType);
       return items ? `${w} ${NOT_IN} (${items})` : '';
     }
     default: return '';
@@ -160,10 +162,11 @@ export function buildWhereAll(
   dbType: DatabaseType,
   conditions: FilterCondition[],
   columnTypes: ColumnTypeMap = {},
+  noBackslashEscapes = false,
 ): string {
   const parts = conditions
     .filter((c) => c.column)
-    .map((c) => buildCondition(dbType, c, columnTypes))
+    .map((c) => buildCondition(dbType, c, columnTypes, noBackslashEscapes))
     .filter(Boolean);
   return parts.join(' AND ');
 }
@@ -178,11 +181,12 @@ export function buildTableSelect(
   offset: number,
   limit: number,
   columnTypes: ColumnTypeMap = {},
+  noBackslashEscapes = false,
 ): string {
   const safeOffset = Math.max(0, Math.min(offset, 1_000_000));
   const safeLimit = Math.max(1, Math.min(limit, 100_000));
   let sql = `SELECT * FROM ${qualifiedTable(dbType, table, database)}`;
-  const where = buildWhereAll(dbType, conditions, columnTypes);
+  const where = buildWhereAll(dbType, conditions, columnTypes, noBackslashEscapes);
   if (where) sql += ` WHERE ${where}`;
   if (sortCol && sortDir) {
     validateIdent(sortCol);
@@ -202,9 +206,10 @@ export function buildCountSql(
   database: string | undefined,
   conditions: FilterCondition[],
   columnTypes: ColumnTypeMap = {},
+  noBackslashEscapes = false,
 ): string {
   let sql = `SELECT COUNT(*) AS total FROM ${qualifiedTable(dbType, table, database)}`;
-  const where = buildWhereAll(dbType, conditions, columnTypes);
+  const where = buildWhereAll(dbType, conditions, columnTypes, noBackslashEscapes);
   if (where) sql += ` WHERE ${where}`;
   return sql;
 }

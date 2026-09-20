@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createPool } from 'mysql2/promise';
+import { createPool, createConnection } from 'mysql2/promise';
 import { MysqlDialect } from '../../src/dialect/mysqlDialect';
+import { parseNoBackslashEscapes } from '../../src/sql/index';
 import { resolveTestDb, parseMysqlUrl } from './testDb.js';
 
 
@@ -158,6 +159,51 @@ describe.skipIf(!URL)('db-core MySQL dialect (real db)', () => {
     } finally {
       await pool.query(`DROP TABLE IF EXISTS ${qT}`);
       await pool.end();
+    }
+  });
+}, 30_000);
+
+/**
+ * NO_BACKSLASH_ESCAPES 真库验证。
+ *
+ * 默认 MySQL 服务端 sql_mode 不含该模式，所以这条用例在**专用单连接**上
+ * 显式 `SET SESSION sql_mode` 打开它，模拟管理员配置了该模式的服务器：
+ * 反斜杠不再是转义符，值转义必须只靠 `''`，否则 `C:\tmp` 会被写成 `C:\\tmp`
+ * （库里存两个反斜杠）。会话级设置只影响本连接，不会污染其它测试。
+ */
+describe.skipIf(!URL)('db-core MySQL NO_BACKSLASH_ESCAPES (real db, session)', () => {
+  it('session 打开 NBE 后 escapeValue 写读逐字节一致，且 parse 识别该模式', async () => {
+    const { host, port, user, password } = parseMysqlUrl(URL!);
+    const conn = await createConnection({ host, port, user, password, database: DB });
+    const T = `z_verify_nbe_${Date.now()}`;
+    const qT = `\`${T}\``;
+    try {
+      await conn.query("SET SESSION sql_mode = CONCAT(@@sql_mode, ',NO_BACKSLASH_ESCAPES')");
+      const [modeRows]: any[] = await conn.query('SELECT @@sql_mode AS mode');
+      const mode = String((modeRows[0] as any).mode ?? '');
+      expect(parseNoBackslashEscapes(mode)).toBe(true);
+
+      const dialect = new MysqlDialect({ noBackslashEscapes: parseNoBackslashEscapes(mode) });
+      await conn.query(`CREATE TABLE ${qT} (id INT PRIMARY KEY, s varchar(255)) ENGINE=InnoDB`);
+      const samples = [
+        'C:' + String.fromCharCode(92) + 'tmp',
+        'a' + String.fromCharCode(92) + 'nb',
+        String.fromCharCode(92) + String.fromCharCode(92),
+        "O'Brien" + String.fromCharCode(92),
+        String.fromCharCode(92) + "'; DROP TABLE x; --",
+      ];
+      for (let i = 0; i < samples.length; i++) {
+        await conn.query(`INSERT INTO ${qT} (id, s) VALUES (${dialect.escapeValue(i)}, ${dialect.escapeValue(samples[i])})`);
+      }
+      const [rows]: any[] = await conn.query(`SELECT id, s FROM ${qT} ORDER BY id`);
+      expect(rows).toHaveLength(samples.length);
+      for (let i = 0; i < samples.length; i++) {
+        expect([...rows[i].s].map((c: string) => c.charCodeAt(0)))
+          .toEqual([...samples[i]].map((c) => c.charCodeAt(0)));
+      }
+    } finally {
+      await conn.query(`DROP TABLE IF EXISTS ${qT}`).catch(() => { /* best-effort cleanup */ });
+      await conn.end();
     }
   });
 }, 30_000);

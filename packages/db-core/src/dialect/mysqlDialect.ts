@@ -14,6 +14,19 @@ export class MysqlDialect implements SqlDialect {
   readonly dbType = DatabaseType.MYSQL;
   readonly columnTypes = columnTypesFor(DatabaseType.MYSQL);
 
+  /**
+   * 服务端 sql_mode 是否含 `NO_BACKSLASH_ESCAPES`。
+   *
+   * 该模式下反斜杠是普通字符、不再转义下一个字符，字符串字面量只能靠 `''`
+   * 转义单引号。值转义必须随此开关切换，否则 `C:\tmp` 会被写成 `C:\\tmp`
+   * （库里存成两个反斜杠）。
+   */
+  readonly noBackslashEscapes: boolean;
+
+  constructor(opts: { noBackslashEscapes?: boolean } = {}) {
+    this.noBackslashEscapes = opts.noBackslashEscapes === true;
+  }
+
   createTableTemplate(table: string): string {
     return `CREATE TABLE IF NOT EXISTS ${table} (\n  \`id\` INT AUTO_INCREMENT PRIMARY KEY,\n  \`name\` VARCHAR(255)\n);`;
   }
@@ -353,17 +366,26 @@ export class MysqlDialect implements SqlDialect {
     return out;
   }
 
-  /** MySQL 字符串字面量：反斜杠与单引号都需转义。 */
+  /** MySQL 字符串字面量：默认反斜杠与单引号都需转义；NO_BACKSLASH_ESCAPES 下反斜杠是普通字符。 */
   escapeValue(value: any): string {
     if (value === null || value === undefined) return 'NULL';
     if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NULL';
     if (typeof value === 'boolean') return value ? '1' : '0';
-    if (value instanceof Date) return `'${value.toISOString().replace(/'/g, "''").replace(/\\/g, '\\\\')}'`;
+    if (value instanceof Date) return `'${value.toISOString().replace(/'/g, "''")}'`;
     if (Buffer.isBuffer(value)) return `X'${value.toString('hex')}'`;
     if (typeof value === 'object') {
-      const json = JSON.stringify(value).replace(/\\/g, '\\\\').replace(/'/g, "''");
-      return `'${json}'`;
+      return `'${this.escapeString(JSON.stringify(value))}'`;
     }
-    return `'${String(value).replace(/\\/g, '\\\\').replace(/'/g, "''").replace(/\0/g, '\\0')}'`;
+    return `'${this.escapeString(String(value))}'`;
+  }
+
+  /**
+   * 转义字符串字面量内容（不含外层引号）。
+   * - 默认：`'`→`''`、`\`→`\\`、NUL→`\0`（MySQL 反斜杠转义）。
+   * - NO_BACKSLASH_ESCAPES：`\` 与 NUL 均按原字节保留，只翻倍 `'`。
+   */
+  private escapeString(raw: string): string {
+    const quoted = raw.replace(/'/g, "''");
+    return this.noBackslashEscapes ? quoted : quoted.replace(/\\/g, '\\\\').replace(/\0/g, '\\0');
   }
 }

@@ -8,6 +8,7 @@ import { renderColumnAttributes } from './columnSpec.js';
 import { DatabaseType } from '../types/connection.js';
 import { MysqlDialect } from '../dialect/mysqlDialect.js';
 import { PostgreSqlDialect } from '../dialect/postgreSqlDialect.js';
+import type { SqlDialect } from '../dialect/sqlDialect.js';
 
 const MYSQL_DIALECT = new MysqlDialect();
 const PG_DIALECT = new PostgreSqlDialect();
@@ -174,6 +175,7 @@ export class SchemaDiffService {
     targetDb: string,
     sourceTableService: TableService,
     sourceDb: string,
+    targetDialect?: SqlDialect,
   ): Promise<string> {
     if (!sourceTableService.supports('schemaSync')) {
       throw new Error('Schema sync SQL is not supported for this database');
@@ -187,6 +189,8 @@ export class SchemaDiffService {
       return this.generateSqliteSyncSql(diffs, sourceTableService, sourceDb);
     }
     const targetDbIdent = validateIdent(targetDb);
+    // 目标 MySQL 若是 NO_BACKSLASH_ESCAPES，默认值/注释的字面量必须按该模式转义。
+    const mysqlEsc = targetDialect ? (v: any) => targetDialect.escapeValue(v) : MYSQL_ESC;
     const parts: string[] = [];
     parts.push(`-- Schema sync: ${sourceDb} → ${targetDb}`);
     parts.push('');
@@ -222,10 +226,10 @@ export class SchemaDiffService {
             // 有数据的表上 `ADD COLUMN ... NOT NULL` 无默认值会失败（暗含默认值不可靠）；
             // 降级为可空列并给出告警，而不是发出不可执行的 DDL。
             if (spec.notNull && hasNoDefault(spec) && !spec.autoIncrement) {
-              changes.push(`  ADD COLUMN \`${colIdent}\` ${renderColumnAttributes({ ...spec, notNull: false }, DatabaseType.MYSQL, MYSQL_ESC)}`);
+              changes.push(`  ADD COLUMN \`${colIdent}\` ${renderColumnAttributes({ ...spec, notNull: false }, DatabaseType.MYSQL, mysqlEsc)}`);
               warnings.push(`-- WARN: "${c.columnName}" is NOT NULL on the source but has no default; add a DEFAULT or backfill values, then enforce NOT NULL.`);
             } else {
-              changes.push(`  ADD COLUMN \`${colIdent}\` ${renderColumnAttributes(spec, DatabaseType.MYSQL, MYSQL_ESC)}`);
+              changes.push(`  ADD COLUMN \`${colIdent}\` ${renderColumnAttributes(spec, DatabaseType.MYSQL, mysqlEsc)}`);
             }
           } else if (c.status === 'removed') {
             changes.push(`  DROP COLUMN \`${colIdent}\``);
@@ -239,7 +243,7 @@ export class SchemaDiffService {
               defaultValue: c.sourceDefault,
               comment: c.sourceComment,
             };
-            changes.push(`  MODIFY COLUMN \`${colIdent}\` ${renderColumnAttributes(spec, DatabaseType.MYSQL, MYSQL_ESC)}`);
+            changes.push(`  MODIFY COLUMN \`${colIdent}\` ${renderColumnAttributes(spec, DatabaseType.MYSQL, mysqlEsc)}`);
           }
         }
         if (changes.length) {

@@ -189,7 +189,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (!target) return;
 
     const diffs = await SchemaDiffService.diff(session.metadata, node.database, session.metadata, target.value);
-    const syncSql = await SchemaDiffService.generateSyncSql(diffs, target.value, session.table, node.database);
+    const syncSql = await SchemaDiffService.generateSyncSql(diffs, target.value, session.table, node.database, session.query.dialect);
     const added = diffs.filter((d) => d.status === 'added').length;
     const removed = diffs.filter((d) => d.status === 'removed').length;
     const changed = diffs.filter((d) => d.status === 'changed').length;

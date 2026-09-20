@@ -70,7 +70,7 @@ export class DataTransferService {
             throw new Error('cross-database-type schema sync is not supported');
           }
           const syncSql = await SchemaDiffService.generateSyncSql(
-            [diff], targetDb, sourceTable, sourceDb,
+            [diff], targetDb, sourceTable, sourceDb, targetQuery.dialect,
           );
           const statements = splitExecutableStatements(syncSql, scanOptionsForDbType(targetQuery.dialect.dbType));
           for (const stmt of statements) {

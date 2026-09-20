@@ -83,6 +83,18 @@ describe('tableQuerySql', () => {
     expect(buildCondition(DatabaseType.SQLITE, cond)).toBe('"name" = \'x\\\'\' OR 1=1 -- \'');
   });
 
+  /**
+   * MySQL NO_BACKSLASH_ESCAPES：反斜杠是普通字符，字面量只翻倍单引号；
+   * ESCAPE 子句也必须用单个反斜杠（`'\\'` 在该模式下是两个字符，非法）。
+   */
+  it('MySQL NO_BACKSLASH_ESCAPES 下不翻倍反斜杠，ESCAPE 用单反斜杠', () => {
+    const eq: FilterCondition = { column: 'path', op: 'eq', value: 'C:\\tmp' };
+    expect(buildCondition(DatabaseType.MYSQL, eq, {}, true)).toBe('`path` = \'C:\\tmp\'');
+
+    const like: FilterCondition = { column: 'name', op: 'contains', value: '50%' };
+    expect(buildCondition(DatabaseType.MYSQL, like, {}, true)).toBe("`name` LIKE '%50\\%%' ESCAPE '\\'");
+  });
+
   /** SQLite 的 LIKE 没有默认转义字符，必须显式 ESCAPE 才能把 `\%` 当字面 `%`。 */
   it('LIKE 附带方言正确的 ESCAPE 子句', () => {
     const cond: FilterCondition = { column: 'name', op: 'contains', value: '50%' };

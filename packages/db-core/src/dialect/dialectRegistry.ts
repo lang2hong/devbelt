@@ -13,6 +13,8 @@ import { SqliteDialect } from './sqliteDialect.js';
  */
 export class DialectRegistry {
   private static readonly dialects: Map<DatabaseType, SqlDialect> = new Map();
+  /** MySQL 在 NO_BACKSLASH_ESCAPES 下的方言变体（无状态、可共享）。 */
+  private static readonly mysqlNoBackslash = new MysqlDialect({ noBackslashEscapes: true });
 
   /** 注册内置方言（幂等） */
   static register(dialect: SqlDialect): void {
@@ -26,6 +28,17 @@ export class DialectRegistry {
       throw new Error(`Unsupported database type: ${dbType}`);
     }
     return dialect;
+  }
+
+  /**
+   * 按连接语义取方言：MySQL 且 NO_BACKSLASH_ESCAPES 时返回反斜杠不转义的变体，
+   * 其余情况返回共享单例。调用方（连接层）读到 `@@sql_mode` 后据此替换 `QueryService.dialect`。
+   */
+  static getFor(dbType: DatabaseType, opts: { noBackslashEscapes?: boolean } = {}): SqlDialect {
+    if (dbType === DatabaseType.MYSQL && opts.noBackslashEscapes === true) {
+      return this.mysqlNoBackslash;
+    }
+    return this.get(dbType);
   }
 
   /** 是否已注册 */

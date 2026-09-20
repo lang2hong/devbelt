@@ -26,3 +26,13 @@ export function scanOptionsForDbType(
     escapeStringPrefix: dbType === DatabaseType.PG,
   };
 }
+
+/**
+ * 解析 MySQL `@@sql_mode` 是否含 NO_BACKSLASH_ESCAPES（大小写不敏感）。
+ *
+ * 单一来源：连接层读到模式后据此决定扫描选项与值转义方言，避免各处
+ * 各写一份正则而漂移。
+ */
+export function parseNoBackslashEscapes(sqlMode: string | null | undefined): boolean {
+  return /NO_BACKSLASH_ESCAPES/i.test(sqlMode ?? '');
+}
