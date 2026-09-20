@@ -45,10 +45,15 @@ export class DataDiffService {
       const keyColumns = orderColumns.length ? orderColumns : await this.getKeyColumns(sourceMeta, table, sourceDb);
       const columnNames = await this.getColumnNames(sourceMeta, table, sourceDb);
       if (!keyColumns.length) continue;
+      // 仅当主键列是数值型且两侧同方言时才做有序归并：文本主键的 ORDER BY 受 collation
+      // 影响，JS 比较未必与 DB 一致，归并会错位。
+      const mergeSafe = orderColumns.length > 0
+        && sourceQuery.dialect.dbType === targetQuery.dialect.dbType
+        && await this.pkColumnsNumeric(sourceMeta, table, orderColumns, sourceDb);
 
       const diff = await this.diffTable(
         sourceQuery, table, sourceDb, orderColumns, keyColumns, columnNames,
-        targetQuery, targetDb,
+        targetQuery, targetDb, mergeSafe,
       );
       diffs.push(diff);
     }
@@ -63,6 +68,19 @@ export class DataDiffService {
       return cols.filter((c) => c.isPrimary).map((c) => c.name);
     } catch {
       return [];
+    }
+  }
+
+  /** 主键列是否全为数值型（决定能否安全做 JS 有序归并）。 */
+  private static async pkColumnsNumeric(meta: MetadataService, table: string, pkColumns: string[], db?: string): Promise<boolean> {
+    try {
+      const cols = await meta.getColumns(table, db);
+      return pkColumns.every((name) => {
+        const col = cols.find((c) => c.name === name);
+        return !!col && /int|serial|numeric|decimal|real|double|float|bigint/i.test(String(col.type));
+      });
+    } catch {
+      return false;
     }
   }
 
@@ -94,17 +112,13 @@ export class DataDiffService {
     columnNames: string[],
     targetQuery: QueryService,
     targetDb: string,
+    mergeSafe = false,
   ): Promise<TableDataDiff> {
     // 无键列会退化成 `ORDER BY `（语法错误）且所有行 key 都是空串而互相覆盖，
     // 必须显式拒绝，而不是生成无效 SQL。
     if (keyColumns.length === 0) {
       throw new Error(`data diff requires at least one key column for table ${table}`);
     }
-    // 只把目标端全量放进内存（用于按键随机比对与识别 removed）；源端直接流式比对，
-    // 命中即从 targetMap 删除，剩下的就是 removed。相比过去同时持有两张全量表，
-    // 内存约减半，且输出顺序（added/changed 按源序、removed 按目标序）保持不变。
-    const targetMap = new Map<string, Record<string, unknown>>();
-
     const wrap = (id: string) => sourceQuery.dialect.wrap(id);
     const targetWrap = (id: string) => targetQuery.dialect.wrap(id);
     const qualifiedSource = sourceDb ? `${wrap(sourceDb)}.${wrap(table)}` : wrap(table);
@@ -112,6 +126,17 @@ export class DataDiffService {
 
     const colList = columnNames.map((c) => wrap(c)).join(', ');
     const targetColList = columnNames.map((c) => targetWrap(c)).join(', ');
+
+    if (mergeSafe) {
+      return this.mergeDiff(
+        sourceQuery, `SELECT ${colList} FROM ${qualifiedSource}`, orderColumns, keyColumns, columnNames,
+        targetQuery, `SELECT ${targetColList} FROM ${qualifiedTarget}`, table,
+      );
+    }
+
+    // 文本主键或跨方言：只把目标端全量放进内存（按键随机比对与识别 removed）；源端直接
+    // 流式比对，命中即从 targetMap 删除，剩下的就是 removed（内存约为原来的 1/2）。
+    const targetMap = new Map<string, Record<string, unknown>>();
 
     for await (const page of streamRowsByKeyset(
       targetQuery, targetQuery.dialect, `SELECT ${targetColList} FROM ${qualifiedTarget}`, orderColumns, this.BATCH_SIZE,
@@ -146,6 +171,79 @@ export class DataDiffService {
     }
 
     return { tableName: table, pkColumns: keyColumns, columnNames, rows };
+  }
+
+  /**
+   * 有序归并比较两路已 ORDER BY 主键的流（仅数值主键、同方言时使用）。
+   *
+   * 内存只与结果行数相关，不再驻留整表：两侧各缓冲一页，按主键推进。
+   */
+  private static async mergeDiff(
+    sourceQuery: QueryService, sourceSelect: string,
+    orderColumns: string[], keyColumns: string[], columnNames: string[],
+    targetQuery: QueryService, targetSelect: string,
+    table: string,
+  ): Promise<TableDataDiff> {
+    const src = DataDiffService.mergeReader(sourceQuery, sourceSelect, orderColumns);
+    const tgt = DataDiffService.mergeReader(targetQuery, targetSelect, orderColumns);
+    const rows: RowDiff[] = [];
+    let a = await src.next();
+    let b = await tgt.next();
+    while (a && b) {
+      const c = DataDiffService.compareKeyRows(a, b, orderColumns);
+      if (c === 0) {
+        if (!DataDiffService.rowsEqual(a, b, columnNames)) {
+          rows.push({ status: 'changed', pkValues: extractPk(keyColumns, a), sourceRow: a, targetRow: b });
+        }
+        a = await src.next();
+        b = await tgt.next();
+      } else if (c < 0) {
+        rows.push({ status: 'added', pkValues: extractPk(keyColumns, a), sourceRow: a });
+        a = await src.next();
+      } else {
+        rows.push({ status: 'removed', pkValues: extractPk(keyColumns, b), targetRow: b });
+        b = await tgt.next();
+      }
+    }
+    while (a) { rows.push({ status: 'added', pkValues: extractPk(keyColumns, a), sourceRow: a }); a = await src.next(); }
+    while (b) { rows.push({ status: 'removed', pkValues: extractPk(keyColumns, b), targetRow: b }); b = await tgt.next(); }
+    return { tableName: table, pkColumns: keyColumns, columnNames, rows };
+  }
+
+  /** 把分页异步流包装成「逐行 next」，供归并使用。 */
+  private static mergeReader(q: QueryService, sql: string, orderColumns: string[]): { next(): Promise<Record<string, unknown> | undefined> } {
+    const it = streamRowsByKeyset(q, q.dialect, sql, orderColumns, DataDiffService.BATCH_SIZE)[Symbol.asyncIterator]();
+    let page: Record<string, unknown>[] = [];
+    let idx = 0;
+    return {
+      async next(): Promise<Record<string, unknown> | undefined> {
+        for (;;) {
+          if (idx < page.length) return page[idx++];
+          const n = await it.next();
+          if (n.done) return undefined;
+          page = n.value;
+          idx = 0;
+        }
+      },
+    };
+  }
+
+  /** 按主键列比较两行（数值优先，其余按字符串）。 */
+  private static compareKeyRows(a: Record<string, unknown>, b: Record<string, unknown>, cols: string[]): number {
+    for (const col of cols) {
+      const va = a[col];
+      const vb = b[col];
+      const na = Number(va);
+      const nb = Number(vb);
+      if (String(va).trim() !== '' && String(vb).trim() !== '' && Number.isFinite(na) && Number.isFinite(nb)) {
+        if (na !== nb) return na < nb ? -1 : 1;
+        continue;
+      }
+      const sa = String(va);
+      const sb = String(vb);
+      if (sa !== sb) return sa < sb ? -1 : 1;
+    }
+    return 0;
   }
 
   private static rowsEqual(a: Record<string, unknown>, b: Record<string, unknown>, cols: string[]): boolean {

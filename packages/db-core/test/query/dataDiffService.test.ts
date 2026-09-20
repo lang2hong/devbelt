@@ -237,6 +237,26 @@ describe('DataDiffService 分页策略（PG keyset 丢行回归）', () => {
     expect(sql).not.toContain('LIMIT 0,');
   });
 
+  it('数值主键同方言：有序归并（流式）结果与按键比对一致', async () => {
+    const numericMeta = (cols: { name: string; type: string; isPrimary?: boolean }[]): MetadataService => ({
+      getTables: async () => cols.map((c) => ({ name: c.name })),
+      getColumns: async () => cols,
+    } as unknown as MetadataService);
+    const sourceConn = new FakeConnection();
+    sourceConn.setResponses([{ rows: [{ id: 1, v: 'a' }, { id: 2, v: 'b' }, { id: 4, v: 'd' }] }]);
+    const targetConn = new FakeConnection();
+    targetConn.setResponses([{ rows: [{ id: 1, v: 'a' }, { id: 3, v: 'c' }] }]);
+    const cols = [{ name: 'id', type: 'int(11)', isPrimary: true }, { name: 'v', type: 'varchar(10)' }];
+    const result = await DataDiffService.diff(
+      makeQueryService(sourceConn), numericMeta(cols), 's',
+      makeQueryService(targetConn), 't', ['users'],
+    );
+    const rows = result.diffs[0].rows;
+    expect(rows.filter((r) => r.status === 'added').map((r) => r.pkValues.id)).toEqual([2, 4]);
+    expect(rows.filter((r) => r.status === 'removed').map((r) => r.pkValues.id)).toEqual([3]);
+    expect(sourceConn.sqls.join('\n')).toContain('ORDER BY `id`');
+  });
+
   it('跨方言值比较：数值与数值型字符串视为相等（不误报 changed）', async () => {
     const sourceConn = new FakeConnection();
     sourceConn.setResponses([{ rows: [{ id: 1, v: '1' }] }]);
