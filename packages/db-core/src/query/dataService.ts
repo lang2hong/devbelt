@@ -1,4 +1,5 @@
 import { validateIdent } from '../utils/validate.js';
+import { qualifyTable } from '../utils/qualify.js';
 import { QueryService } from './queryService.js';
 import type { QueryResult } from '../types/query.js';
 
@@ -29,7 +30,7 @@ export class DataService {
     for (const pk of pkColumns) validateIdent(pk);
     validateIdent(column);
     const w = this.queryService.dialect.wrap.bind(this.queryService.dialect);
-    const qualified = database ? `${w(validateIdent(database))}.${w(table)}` : w(table);
+    const qualified = qualifyTable(this.queryService.dialect.dbType, w(table), database ? w(validateIdent(database)) : undefined);
     const setValue = value === null ? 'NULL' : this.esc(value);
     const where = pkColumns
       .map((pk, i) => {
@@ -55,7 +56,7 @@ export class DataService {
     validateIdent(table);
     for (const pk of pkColumns) validateIdent(pk);
     const w = this.queryService.dialect.wrap.bind(this.queryService.dialect);
-    const qualified = database ? `${w(validateIdent(database))}.${w(table)}` : w(table);
+    const qualified = qualifyTable(this.queryService.dialect.dbType, w(table), database ? w(validateIdent(database)) : undefined);
     const where = rows
       .map(
         (row) =>
@@ -86,7 +87,7 @@ export class DataService {
     if (!values || values.length !== columns.length) throw new Error(`insertRow: columns/values length mismatch (${columns.length} vs ${values?.length ?? 0})`);
     validateIdent(table);
     const w = this.queryService.dialect.wrap.bind(this.queryService.dialect);
-    const qualified = database ? `${w(validateIdent(database))}.${w(table)}` : w(table);
+    const qualified = qualifyTable(this.queryService.dialect.dbType, w(table), database ? w(validateIdent(database)) : undefined);
     const cols = columns.map((c) => w(validateIdent(c))).join(', ');
     const vals = values.map((v) =>
       v === null || v === undefined ? 'NULL' : this.esc(v),

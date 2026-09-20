@@ -106,4 +106,22 @@ describe('DataService（数据编辑）', () => {
       "DELETE FROM `orders` WHERE (`tenant_id` = 7 AND `order_no` = 'A123') OR (`tenant_id` = 7 AND `order_no` = 'B456')",
     );
   });
+
+  it('PG 下不生成跨库限定名（database 是库名而非 schema）', async () => {
+    const conn = new CaptureConnection();
+    const svc = new DataService(new QueryService(conn, new PostgreSqlDialect()));
+    await svc.updateCell('users', ['id'], [5], 'name', 'x', 'mydb');
+    expect(conn.sqls[0]).toBe('UPDATE "users" SET "name" = \'x\' WHERE "id" = 5');
+    await svc.insertRow('users', ['name'], ['x'], 'mydb');
+    expect(conn.sqls[1]).toBe('INSERT INTO "users" ("name") VALUES (\'x\')');
+    await svc.deleteRows('users', ['id'], [[5]], 'mydb');
+    expect(conn.sqls[2]).toBe('DELETE FROM "users" WHERE ("id" = 5)');
+  });
+
+  it('MySQL 仍生成库限定名（回归）', async () => {
+    const conn = new CaptureConnection();
+    const svc = new DataService(new QueryService(conn, new MysqlDialect()));
+    await svc.updateCell('users', ['id'], [5], 'name', 'x', 'mydb');
+    expect(conn.sqls[0]).toBe('UPDATE `mydb`.`users` SET `name` = \'x\' WHERE `id` = 5');
+  });
 });

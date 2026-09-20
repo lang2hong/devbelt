@@ -14,5 +14,11 @@ import type { SqlScanOptions } from './lexer.js';
  */
 export function scanOptionsForDbType(dbType: DatabaseType | undefined): SqlScanOptions {
   const mysql = dbType === DatabaseType.MYSQL;
-  return { hashComment: mysql, dashDashRequiresSpace: mysql, backslashEscapes: mysql };
+  return {
+    hashComment: mysql,
+    dashDashRequiresSpace: mysql,
+    backslashEscapes: mysql,
+    // PG 的 `E'...'` 串始终启用反斜杠转义，与 standard_conforming_strings 无关。
+    escapeStringPrefix: dbType === DatabaseType.PG,
+  };
 }

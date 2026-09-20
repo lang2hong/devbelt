@@ -140,9 +140,9 @@ describe('美元引用 tag 首字规则', () => {
 
 describe('scanOptionsForDbType：方言扫描选项单一来源（F1 回归）', () => {
   it('MySQL / 其它方言的选项差异', () => {
-    expect(scanOptionsForDbType(DatabaseType.MYSQL)).toEqual({ hashComment: true, dashDashRequiresSpace: true, backslashEscapes: true });
-    expect(scanOptionsForDbType(DatabaseType.PG)).toEqual({ hashComment: false, dashDashRequiresSpace: false, backslashEscapes: false });
-    expect(scanOptionsForDbType(undefined)).toEqual({ hashComment: false, dashDashRequiresSpace: false, backslashEscapes: false });
+    expect(scanOptionsForDbType(DatabaseType.MYSQL)).toEqual({ hashComment: true, dashDashRequiresSpace: true, backslashEscapes: true, escapeStringPrefix: false });
+    expect(scanOptionsForDbType(DatabaseType.PG)).toEqual({ hashComment: false, dashDashRequiresSpace: false, backslashEscapes: false, escapeStringPrefix: true });
+    expect(scanOptionsForDbType(undefined)).toEqual({ hashComment: false, dashDashRequiresSpace: false, backslashEscapes: false, escapeStringPrefix: false });
   });
 
   it('MySQL SHOW CREATE 里 COMMENT 的 \\\' 不会误切后续语句', () => {
@@ -155,5 +155,36 @@ INSERT INTO t VALUES (1);`;
     const stmts = splitExecutableStatements(sql, scanOptionsForDbType(DatabaseType.MYSQL));
     expect(stmts).toHaveLength(2);
     expect(stmts[1]).toBe('INSERT INTO t VALUES (1)');
+  });
+});
+
+describe('PG E 串（escapeStringPrefix）：反斜杠引号不吞后续写语句', () => {
+  const pg = scanOptionsForDbType(DatabaseType.PG);
+
+  it('E 串内 \\\' 不闭合字符串，隐藏的 DELETE 仍被切出并进入骨架', () => {
+    const sql = String.raw`SELECT E'\''; DELETE FROM t`;
+    expect(splitSqlWithRanges(sql, pg).map((r) => r.sql)).toEqual([String.raw`SELECT E'\''`, 'DELETE FROM t']);
+    expect(sqlSkeleton(sql, pg)).toContain('DELETE FROM t');
+  });
+
+  it('标准串里的反斜杠不转义（引号处正常闭合）', () => {
+    const sql = String.raw`SELECT 'a\'; DELETE FROM t`;
+    expect(splitSqlWithRanges(sql, pg).map((r) => r.sql)).toEqual([String.raw`SELECT 'a\'`, 'DELETE FROM t']);
+  });
+
+  it('E 前是指识符字符时不当作 E 串（NAME\\\' 保持原语义）', () => {
+    // `NAME'...'` 不是 E 串：反斜杠不转义，引号处闭合。
+    const sql = String.raw`SELECT NAME'a\'; DELETE FROM t`;
+    expect(splitSqlWithRanges(sql, pg)).toHaveLength(2);
+  });
+
+  it('MySQL 选项下 backslashEscapes 仍生效（回归）', () => {
+    const sql = String.raw`SELECT 'a\'; DELETE FROM t`;
+    expect(splitSqlWithRanges(sql, { backslashEscapes: true })).toHaveLength(1);
+  });
+
+  it('未开启该选项时保持旧行为（仅 PG 开启）', () => {
+    const sql = String.raw`SELECT E'\''; DELETE FROM t`;
+    expect(splitSqlWithRanges(sql)).toHaveLength(1);
   });
 });

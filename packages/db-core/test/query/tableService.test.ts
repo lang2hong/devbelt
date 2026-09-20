@@ -331,3 +331,26 @@ describe('validateColumnType / 结构化 addColumn / modifyColumn', () => {
     expect(conn.sqls).toEqual([]);
   });
 });
+
+describe('TableService.dropIndex 方言化', () => {
+  it('MySQL 生成 ON 语法并带库限定', async () => {
+    const conn = new CaptureConnection();
+    const svc = new TableService(new QueryService(conn, new MysqlDialect()));
+    await svc.dropIndex('idx_name', 'users', 'test');
+    expect(conn.sqls[0]).toBe('DROP INDEX `idx_name` ON `test`.`users`');
+  });
+
+  it('PG 生成 DROP INDEX（无 ON、不限定库）', async () => {
+    const conn = new CaptureConnection();
+    const svc = new TableService(new QueryService(conn, new PostgreSqlDialect()));
+    await svc.dropIndex('idx_name', 'users', 'mydb');
+    expect(conn.sqls[0]).toBe('DROP INDEX IF EXISTS "idx_name"');
+  });
+
+  it('SQLite 生成 DROP INDEX（无 ON）', async () => {
+    const conn = new CaptureConnection();
+    const svc = new TableService(new QueryService(conn, new SqliteDialect()));
+    await svc.dropIndex('idx_name', 'users', 'main');
+    expect(conn.sqls[0]).toBe('DROP INDEX IF EXISTS "idx_name"');
+  });
+});

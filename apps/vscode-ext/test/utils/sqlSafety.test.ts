@@ -245,6 +245,14 @@ describe('confirmSqlExecution', () => {
     ).resolves.toBe(false);
     expect(shown.errors).toHaveLength(1);
   });
+
+  it('PG 只读连接：E 串里的 DELETE 必须被拦截（不被吞进字符串）', async () => {
+    await expect(
+      confirmSqlExecution(conn({ dbType: 'PG', readOnly: true }), String.raw`SELECT E'\''; DELETE FROM t`),
+    ).resolves.toBe(false);
+    expect(shown.errors).toHaveLength(1);
+    expect(shown.warnings).toEqual([]);
+  });
 });
 
 describe('过程体 / 美元引用 fail-closed（防 DO 逃逸）', () => {
