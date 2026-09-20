@@ -4,6 +4,7 @@ import type { MetadataService } from '../../src/query/metadataService';
 import type { TableService } from '../../src/query/tableService';
 import { MysqlDialect } from '../../src/dialect/mysqlDialect';
 import { PostgreSqlDialect } from '../../src/dialect/postgreSqlDialect';
+import { SqliteDialect } from '../../src/dialect/sqliteDialect';
 import { DatabaseType } from '../../src/types/connection';
 import { QueryService } from '../../src/query/queryService';
 import { IConnection } from '../../src/connection/connection';
@@ -194,6 +195,30 @@ describe('SchemaDiffService', () => {
     expect(sql).toContain('DROP COLUMN "old"');
     expect(sql).not.toContain('MODIFY COLUMN');
     expect(sql).not.toContain('`');
+  });
+
+  it('generateSyncSql 生成 SQLite DDL（ADD/DROP COLUMN，改类型仅注释）', async () => {
+    const sq = new SqliteDialect();
+    const tableService = {
+      dbType: DatabaseType.SQLITE,
+      wrapIdentifier: (id: string) => sq.wrap(id),
+      getCreateSql: async () => 'CREATE TABLE "t" ("id" INTEGER)',
+      supports: () => true,
+    } as unknown as TableService;
+    const diffs = [{
+      tableName: 't',
+      status: 'changed' as const,
+      columns: [
+        { columnName: 'a', status: 'added' as const, sourceType: 'TEXT' },
+        { columnName: 'b', status: 'removed' as const },
+        { columnName: 'c', status: 'changed' as const, sourceType: 'INTEGER', targetType: 'TEXT' },
+      ],
+    }];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 't2', tableService, 's');
+    expect(sql).toContain('ALTER TABLE "t" ADD COLUMN "a" TEXT;');
+    expect(sql).toContain('ALTER TABLE "t" DROP COLUMN "b";');
+    expect(sql).toContain('table rebuild required');
+    expect(sql).not.toContain('MODIFY COLUMN');
   });
 
   it('generateSyncSql 无差异时输出提示', async () => {

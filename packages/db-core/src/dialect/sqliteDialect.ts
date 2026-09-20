@@ -43,7 +43,7 @@ export class SqliteDialect implements SqlDialect {
     users: false,
     // duplicateTable 走 `CREATE TABLE AS SELECT`：能复制结构与数据，
     // 但不保留主键/索引/约束，调用方需向用户说明
-    operations: ['renameTable', 'duplicateTable', 'getTableDefinition', 'alterTable', 'manageIndexes', 'dumpTable'],
+    operations: ['renameTable', 'duplicateTable', 'getTableDefinition', 'alterTable', 'manageIndexes', 'dumpTable', 'schemaSync'],
   };
 
   /**

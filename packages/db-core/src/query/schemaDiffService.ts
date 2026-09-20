@@ -128,6 +128,9 @@ export class SchemaDiffService {
     if (sourceTableService.dbType === DatabaseType.PG) {
       return this.generatePgSyncSql(diffs, targetDb, sourceTableService, sourceDb);
     }
+    if (sourceTableService.dbType === DatabaseType.SQLITE) {
+      return this.generateSqliteSyncSql(diffs, sourceTableService, sourceDb);
+    }
     const targetDbIdent = validateIdent(targetDb);
     const parts: string[] = [];
     parts.push(`-- Schema sync: ${sourceDb} → ${targetDb}`);
@@ -219,6 +222,58 @@ export class SchemaDiffService {
         if (actions.length) {
           parts.push(`-- Alter table: ${d.tableName}`);
           parts.push(`ALTER TABLE ${table} ${actions.join(', ')};`);
+          parts.push('');
+        }
+      }
+    }
+    if (parts.length <= 2) {
+      parts.push('-- No differences found. Schemas are in sync.');
+    }
+    return parts.join('\n');
+  }
+
+  /**
+   * 生成 SQLite 的 schema 同步 DDL。
+   *
+   * SQLite 只支持有限的 ALTER：ADD COLUMN、DROP COLUMN（3.35+）、RENAME。改类型/约束
+   * 需要重建表，这里**不生成**、只留注释说明（避免发出不可执行/损坏的 SQL）。表的新增/
+   * 删除按不限定名（恢复到当前库）。
+   */
+  private static async generateSqliteSyncSql(
+    diffs: TableDiff[],
+    sourceTableService: TableService,
+    sourceDb: string,
+  ): Promise<string> {
+    const wrap = (id: string) => sourceTableService.wrapIdentifier(id);
+    const parts: string[] = [`-- Schema sync: ${sourceDb} → target (SQLite)`, ''];
+    for (const d of diffs) {
+      const table = wrap(d.tableName);
+      if (d.status === 'added') {
+        const ddl = await sourceTableService.getCreateSql(d.tableName, sourceDb);
+        parts.push(`-- Add table: ${d.tableName}`);
+        parts.push(`DROP TABLE IF EXISTS ${table};`);
+        parts.push(ddl.replace(/;\s*$/, '') + ';');
+        parts.push('');
+      } else if (d.status === 'removed') {
+        parts.push(`-- Drop table: ${d.tableName}`);
+        parts.push(`DROP TABLE IF EXISTS ${table};`);
+        parts.push('');
+      } else if (d.status === 'changed') {
+        const actions: string[] = [];
+        for (const c of d.columns) {
+          const col = wrap(c.columnName);
+          if (c.status === 'added') {
+            // 注意：SQLite 的 ADD COLUMN 不允许 NOT NULL 且无默认值的列；有默认值时可加。
+            actions.push(`ALTER TABLE ${table} ADD COLUMN ${col} ${validateColumnType(c.sourceType || 'TEXT')};`);
+          } else if (c.status === 'removed') {
+            actions.push(`ALTER TABLE ${table} DROP COLUMN ${col};`);
+          } else if (c.status === 'changed') {
+            parts.push(`-- Cannot alter column "${c.columnName}" on SQLite (${c.targetType} → ${c.sourceType}); table rebuild required.`);
+          }
+        }
+        if (actions.length) {
+          parts.push(`-- Alter table: ${d.tableName}`);
+          parts.push(...actions);
           parts.push('');
         }
       }
