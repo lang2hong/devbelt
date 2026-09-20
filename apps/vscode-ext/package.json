@@ -52,7 +52,7 @@
       },
       {
         "command": "devbelt.refreshNode",
-        "title": "Refresh",
+        "title": "%cmd.refreshNode%",
         "category": "DB Client",
         "icon": "$(refresh)"
       },
@@ -68,22 +68,22 @@
       },
       {
         "command": "devbelt.runQueryInNewPanel",
-        "title": "Run Query in New Panel",
+        "title": "%cmd.runQueryInNewPanel%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.explainQuery",
-        "title": "Explain Query",
+        "title": "%cmd.explainQuery%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.runStatement",
-        "title": "Run SQL Statement",
+        "title": "%cmd.runStatement%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.runSqlFile",
-        "title": "Run SQL File",
+        "title": "%cmd.runSqlFile%",
         "category": "DB Client"
       },
       {
@@ -215,67 +215,67 @@
       },
       {
         "command": "devbelt.addIndex",
-        "title": "Add Index",
+        "title": "%cmd.addIndex%",
         "category": "DB Client",
         "icon": "$(add)"
       },
       {
         "command": "devbelt.dropIndex",
-        "title": "Drop Index",
+        "title": "%cmd.dropIndex%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.viewTrigger",
-        "title": "View Trigger",
+        "title": "%cmd.viewTrigger%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.dropTrigger",
-        "title": "Drop Trigger",
+        "title": "%cmd.dropTrigger%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.addTrigger",
-        "title": "Add Trigger",
+        "title": "%cmd.addTrigger%",
         "category": "DB Client",
         "icon": "$(add)"
       },
       {
         "command": "devbelt.modifyTrigger",
-        "title": "Modify Trigger",
+        "title": "%cmd.modifyTrigger%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.addForeignKey",
-        "title": "Add Foreign Key",
+        "title": "%cmd.addForeignKey%",
         "category": "DB Client",
         "icon": "$(add)"
       },
       {
         "command": "devbelt.dropForeignKey",
-        "title": "Drop Foreign Key",
+        "title": "%cmd.dropForeignKey%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.newRoutine",
-        "title": "New Routine",
+        "title": "%cmd.newRoutine%",
         "category": "DB Client",
         "icon": "$(add)"
       },
       {
         "command": "devbelt.modifyRoutine",
-        "title": "Modify Routine",
+        "title": "%cmd.modifyRoutine%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.newEvent",
-        "title": "New Event",
+        "title": "%cmd.newEvent%",
         "category": "DB Client",
         "icon": "$(add)"
       },
       {
         "command": "devbelt.modifyEvent",
-        "title": "Modify Event",
+        "title": "%cmd.modifyEvent%",
         "category": "DB Client"
       },
       {
@@ -295,58 +295,58 @@
       },
       {
         "command": "devbelt.newTable",
-        "title": "New Table (SQL)",
+        "title": "%cmd.newTable%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.newTableDesigner",
-        "title": "New Table",
+        "title": "%cmd.newTableDesigner%",
         "category": "DB Client",
         "icon": "$(add)"
       },
       {
         "command": "devbelt.dropTable",
-        "title": "Delete Table",
+        "title": "%cmd.dropTable%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.renameTable",
-        "title": "Rename Table",
+        "title": "%cmd.renameTable%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.truncateTable",
-        "title": "Truncate Table",
+        "title": "%cmd.truncateTable%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.dupTable",
-        "title": "Duplicate Table",
+        "title": "%cmd.dupTable%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.viewTableStructure",
-        "title": "View Table Structure",
+        "title": "%cmd.viewTableStructure%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.editConnection",
-        "title": "Edit Connection",
+        "title": "%cmd.editConnection%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.deleteConnection",
-        "title": "Delete Connection",
+        "title": "%cmd.deleteConnection%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.closeConnection",
-        "title": "Close Connection",
+        "title": "%cmd.closeConnection%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.openConnection",
-        "title": "Open Connection",
+        "title": "%cmd.openConnection%",
         "category": "DB Client"
       },
       {
@@ -357,97 +357,97 @@
       },
       {
         "command": "devbelt.previewView",
-        "title": "View Data",
+        "title": "%cmd.previewView%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.dropView",
-        "title": "Delete View",
+        "title": "%cmd.dropView%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.newView",
-        "title": "New View",
+        "title": "%cmd.newView%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.modifyView",
-        "title": "Modify View",
+        "title": "%cmd.modifyView%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.openRoutine",
-        "title": "View Definition",
+        "title": "%cmd.openRoutine%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.dropRoutine",
-        "title": "Delete Routine",
+        "title": "%cmd.dropRoutine%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.openEvent",
-        "title": "View Definition",
+        "title": "%cmd.openEvent%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.dropEvent",
-        "title": "Delete Event",
+        "title": "%cmd.dropEvent%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.newQuery",
-        "title": "New Query",
+        "title": "%cmd.newQuery%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.openQuery",
-        "title": "Open Query",
+        "title": "%cmd.openQuery%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.editQuery",
-        "title": "Edit Query",
+        "title": "%cmd.editQuery%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.designTable",
-        "title": "Design Table",
+        "title": "%cmd.designTable%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.openTerminal",
-        "title": "Open Terminal",
+        "title": "%cmd.openTerminal%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.serverStatus",
-        "title": "Server Status",
+        "title": "%cmd.serverStatus%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.compareSchema",
-        "title": "Compare Schema",
+        "title": "%cmd.compareSchema%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.showERDiagram",
-        "title": "Show ER Diagram",
+        "title": "%cmd.showERDiagram%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.viewTableSource",
-        "title": "View DDL",
+        "title": "%cmd.viewTableSource%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.copyTable",
-        "title": "Copy Table",
+        "title": "%cmd.copyTable%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.mockData",
-        "title": "Generate Mock Data",
+        "title": "%cmd.mockData%",
         "category": "DB Client"
       },
       {
@@ -458,82 +458,82 @@
       },
       {
         "command": "devbelt.createDatabase",
-        "title": "New Database",
+        "title": "%cmd.createDatabase%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.dropDatabase",
-        "title": "Drop Database",
+        "title": "%cmd.dropDatabase%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.refreshConnection",
-        "title": "Refresh Connection",
+        "title": "%cmd.refreshConnection%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.newQueryFromConn",
-        "title": "New Query",
+        "title": "%cmd.newQueryFromConn%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.importData",
-        "title": "Import",
+        "title": "%cmd.importData%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.exportConnection",
-        "title": "Export",
+        "title": "%cmd.exportConnection%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.importTable",
-        "title": "Import",
+        "title": "%cmd.importTable%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.exportTable",
-        "title": "Export",
+        "title": "%cmd.exportTable%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.newQueryForDb",
-        "title": "Run SQL",
+        "title": "%cmd.newQueryForDb%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.addColumn",
-        "title": "Add Column",
+        "title": "%cmd.addColumn%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.modifyColumn",
-        "title": "Modify Column",
+        "title": "%cmd.modifyColumn%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.addColumnSql",
-        "title": "Add Column (SQL)",
+        "title": "%cmd.addColumnSql%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.modifyColumnSql",
-        "title": "Modify Column (SQL)",
+        "title": "%cmd.modifyColumnSql%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.renameColumn",
-        "title": "Rename Column",
+        "title": "%cmd.renameColumn%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.modifyIndex",
-        "title": "Modify Index",
+        "title": "%cmd.modifyIndex%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.dropColumn",
-        "title": "Drop Column",
+        "title": "%cmd.dropColumn%",
         "category": "DB Client"
       },
       {
@@ -543,32 +543,32 @@
       },
       {
         "command": "devbelt.deleteQuery",
-        "title": "Delete Query",
+        "title": "%cmd.deleteQuery%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.newQueryFolder",
-        "title": "New Query Folder",
+        "title": "%cmd.newQueryFolder%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.renameQueryFolder",
-        "title": "Rename Query Folder",
+        "title": "%cmd.renameQueryFolder%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.deleteQueryFolder",
-        "title": "Delete Query Folder",
+        "title": "%cmd.deleteQueryFolder%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.exportConnections",
-        "title": "Export Connections",
+        "title": "%cmd.exportConnections%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.importConnections",
-        "title": "Import Connections",
+        "title": "%cmd.importConnections%",
         "category": "DB Client"
       },
       {
@@ -611,37 +611,37 @@
       },
       {
         "command": "devbelt.syncDatabase",
-        "title": "Sync Database",
+        "title": "%cmd.syncDatabase%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.restoreDatabase",
-        "title": "Restore from SQL Dump",
+        "title": "%cmd.restoreDatabase%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.dashboard",
-        "title": "Performance Dashboard",
+        "title": "%cmd.dashboard%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.compareData",
-        "title": "Compare Data",
+        "title": "%cmd.compareData%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.showAuditLog",
-        "title": "Show Audit Log",
+        "title": "%cmd.showAuditLog%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.showPoolStatus",
-        "title": "Show Connection Pool Status",
+        "title": "%cmd.showPoolStatus%",
         "category": "DB Client"
       },
       {
         "command": "devbelt.scheduleBackup",
-        "title": "Schedule Backup",
+        "title": "%cmd.scheduleBackup%",
         "category": "DB Client"
       },
       {
@@ -1175,7 +1175,7 @@
         },
         {
           "command": "devbelt.refreshNode",
-          "title": "Refresh",
+          "title": "%cmd.refreshNode%",
           "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
           "group": "0_refresh"
         },
@@ -1221,7 +1221,7 @@
         },
         {
           "command": "devbelt.refreshNode",
-          "title": "Refresh",
+          "title": "%cmd.refreshNode%",
           "when": "view == devbelt.explorer && viewItem =~ /^category_table\\./",
           "group": "0_refresh"
         },
@@ -1337,7 +1337,7 @@
         },
         {
           "command": "devbelt.refreshNode",
-          "title": "Refresh",
+          "title": "%cmd.refreshNode%",
           "when": "view == devbelt.explorer && viewItem =~ /^database\\./",
           "group": "0_refresh"
         },
