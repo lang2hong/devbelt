@@ -112,6 +112,11 @@ function updateTimeOf(entity: unknown): number {
   return (entity as { updateTime?: number })?.updateTime ?? 0;
 }
 
+/** 实体是否回报了数值型 updateTime（缺省不得被静默当作 0 接受）。 */
+function hasUpdateTime(entity: unknown): boolean {
+  return typeof (entity as { updateTime?: unknown })?.updateTime === 'number';
+}
+
 export async function applyRecord(input: ApplyRecordInput, ctx: ApplyContext): Promise<ApplyRecordResult> {
   assertRecordId(input.recordId);
   const version = assertU64Decimal(input.version, 'version');
@@ -185,7 +190,7 @@ async function applyActive(
     const targetRef: SyncEntityRef = { type, localId: local ? existing.localId : ctx.uniqueId(type) };
     await writeEntity(targetRef, decoded, ctx);
     const saved = ctx.entities.get(targetRef);
-    if (!saved || updateTimeOf(saved) === undefined) {
+    if (!saved || !hasUpdateTime(saved)) {
       throw new Error('entity save did not report updateTime');
     }
     try {
@@ -217,7 +222,7 @@ async function applyActive(
     throw causeError;
   }
   const saved = ctx.entities.get({ type, localId: newId });
-  if (!saved || updateTimeOf(saved) === undefined) {
+  if (!saved || !hasUpdateTime(saved)) {
     await ctx.mapStore.deleteByRecordId(recordId).catch(() => {});
     throw new Error('entity save did not report updateTime');
   }

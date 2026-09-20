@@ -45,4 +45,15 @@ describe('ConnectionStore 跨窗口密钥缓存', () => {
 
     expect(store.get('c1')!.password).toBe('new');
   });
+
+  it('dispose 解除 QueryStore 变更转发（销毁后不再收到事件）', async () => {
+    const store = new ConnectionStore(memento() as never, secretsWithEvents());
+    const seen: string[] = [];
+    store.onChanged((s) => seen.push(s));
+    await store.saveQuery({ name: 'q1', sql: 'SELECT 1', connId: 'c1', database: 'd' } as never);
+    expect(seen.length).toBe(1);
+    store.dispose();
+    await store.saveQuery({ name: 'q2', sql: 'SELECT 2', connId: 'c1', database: 'd' } as never);
+    expect(seen.length).toBe(1);
+  });
 });

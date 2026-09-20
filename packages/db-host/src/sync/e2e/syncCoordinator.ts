@@ -165,6 +165,7 @@ export class SyncCoordinator {
       this.debounceTimer = undefined;
       this.enqueue();
     }, SyncCoordinator.DEBOUNCE_MS);
+    this.debounceTimer.unref?.();
   }
 
   private enqueue(): void {
@@ -226,6 +227,7 @@ export class SyncCoordinator {
       this.retryTimer = undefined;
       if (!this.stopped) this.enqueue();
     }, delay);
+    this.retryTimer.unref?.();
   }
 
   private clearRetry(): void {

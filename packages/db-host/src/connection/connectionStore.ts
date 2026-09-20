@@ -94,6 +94,8 @@ export class ConnectionStore {
   private static readonly KEY = 'devbelt.connections';
   /** secrets.onDidChange 订阅句柄（连接 store 销毁时释放）。 */
   private hostEvents?: { dispose(): void };
+  /** QueryStore 变更转发订阅句柄（连接 store 销毁时释放）。 */
+  private queryStoreEvents?: { dispose(): void };
   static readonly SENSITIVE_FIELDS = ['password', 'sshPassword', 'sshPassphrase'] as const;
   private readonly secretCache = new Map<string, string>();
   private readonly queryStore: QueryStore;
@@ -116,7 +118,7 @@ export class ConnectionStore {
       }).catch(() => { /* 读失败保持原缓存 */ });
     });
     this.queryStore = new QueryStore(memento);
-    this.queryStore.onChanged((source) => {
+    this.queryStoreEvents = this.queryStore.onChanged((source) => {
       this.changedEmitter.fire(source);
       void eventBus.publish(new ConnectionChangedEvent('connection', 'update'));
     });
@@ -347,6 +349,8 @@ export class ConnectionStore {
   dispose(): void {
     this.hostEvents?.dispose();
     this.hostEvents = undefined;
+    this.queryStoreEvents?.dispose();
+    this.queryStoreEvents = undefined;
     this.secretCache.clear();
   }
 

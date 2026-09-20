@@ -95,6 +95,17 @@ describe('applyRecord（连接）', () => {
     expect(s.connections.size).toBe(1);
   });
 
+  it('实体 save 未回报 updateTime 时抛错并回滚预留映射', async () => {
+    const s = setup();
+    const id = 'B'.repeat(22);
+    // 模拟宿主 save 不回填 updateTime：守卫必须 fail（此前 `?? 0` 让该守卫成死代码）。
+    (s.entities as any).get = () => ({ type: 'connection', localId: 'c-x', data: {} });
+    await expect(
+      applyRecord({ recordId: id, version: '1', tombstone: false, payload: connPayload }, s),
+    ).rejects.toThrow(/did not report updateTime/);
+    expect(s.mapStore.getByRecordId(id)).toBeUndefined();
+  });
+
   it('更高 version 干净更新，连接数不变', async () => {
     const s = setup();
     const id = 'A'.repeat(22);

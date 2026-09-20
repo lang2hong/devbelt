@@ -9,6 +9,7 @@ import {
   MemoryPaymentGateway,
 } from '../../src/modules/billing/service/paymentChannel.js';
 import { WechatPayGateway } from '../../src/modules/billing/service/wechatPay.js';
+import { PaymentCallbackInvalidError } from '../../src/domain/errors.js';
 import { AlipayGateway, alipayTimeoutExpress, buildAlipaySignContent, alipayTimestamp } from '../../src/modules/billing/service/alipay.js';
 
 function rsaKeyPair() {
@@ -133,6 +134,12 @@ describe('WechatPayGateway', () => {
       amountCents: 100,
       expiresTime: new Date(Date.now() + 30 * 60 * 1000),
     })).rejects.toThrow(/timed out/);
+  });
+
+  it('密文短于 GCM tag 长度时抛 PaymentCallbackInvalidError（稳定 400，而非 500）', () => {
+    const cred = resolveWechatCredentials(wechatEnv())!;
+    const g = new WechatPayGateway(cred);
+    expect(() => (g as any).decryptResource('AAAA', 'nonce', '')).toThrow(PaymentCallbackInvalidError);
   });
 
   it('serializes a Native order with non-empty notify_url and cert serial', async () => {

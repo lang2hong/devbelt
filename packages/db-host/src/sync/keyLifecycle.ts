@@ -83,7 +83,12 @@ export async function createInitialMaterial(
 
   const smpKdf = newSmpKdf();
   const kekSmp = await deriveKekSmpInWorker(smp, smpKdfDtoToParams(smpKdf));
-  const envelopeSmp = sealEnvelope(kekSmp, dek, userId, keyEpoch, 'smp', '1');
+  let envelopeSmp: EnvelopeDto;
+  try {
+    envelopeSmp = sealEnvelope(kekSmp, dek, userId, keyEpoch, 'smp', '1');
+  } finally {
+    kekSmp.fill(0);
+  }
 
   const recoveryKdf = newRecoveryKdf();
   const kekRecovery = deriveKekRecovery(recoveryRaw, {
@@ -92,7 +97,12 @@ export async function createInitialMaterial(
     salt: new Uint8Array(Buffer.from(recoveryKdf.salt, 'base64url')),
     outputBytes: 32,
   });
-  const envelopeRecovery = sealEnvelope(kekRecovery, dek, userId, keyEpoch, 'recovery', '1');
+  let envelopeRecovery: EnvelopeDto;
+  try {
+    envelopeRecovery = sealEnvelope(kekRecovery, dek, userId, keyEpoch, 'recovery', '1');
+  } finally {
+    kekRecovery.fill(0);
+  }
 
   const accountRecoveryKey = new Uint8Array(randomBytes(32));
   const kekAccount = hkdfSha256(accountRecoveryKey, new Uint8Array(0), SYNC_INFO.kekAccount);
@@ -114,7 +124,11 @@ export async function unlockDek(
   envelopeSmp: EnvelopeDto,
 ): Promise<Uint8Array> {
   const kekSmp = await deriveKekSmpInWorker(smp, smpKdfDtoToParams(smpKdf));
-  return openEnvelope(kekSmp, envelopeSmp, userId, keyEpoch, 'smp');
+  try {
+    return openEnvelope(kekSmp, envelopeSmp, userId, keyEpoch, 'smp');
+  } finally {
+    kekSmp.fill(0);
+  }
 }
 
 function incU64(v: string): string {

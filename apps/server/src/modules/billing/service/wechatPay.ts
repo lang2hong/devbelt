@@ -139,6 +139,11 @@ export class WechatPayGateway implements PaymentGateway {
 
   private decryptResource(ciphertext: string, nonce: string, associatedData: string): string {
     const ct = Buffer.from(ciphertext, 'base64');
+    // GCM 末尾 16 字节是认证 tag。长度不足时再 `subarray(length-16)` 会产生负索引，
+    // `setAuthTag` 随之抛非 DomainError → 500；畸形回执应稳定映射为 400。
+    if (ct.length < 16) {
+      throw new PaymentCallbackInvalidError('wechat callback resource ciphertext too short');
+    }
     const tag = ct.subarray(ct.length - 16);
     const body = ct.subarray(0, ct.length - 16);
     const decipher = createDecipheriv('aes-256-gcm', this.creds.apiV3Key, Buffer.from(nonce));

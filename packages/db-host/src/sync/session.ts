@@ -186,8 +186,13 @@ export class PersonalSyncSession {
    * 的 DEK/snapshot；任一步失败都不会启动 coordinator。
    */
   async unlockFromState(state: StateDto, dek: Uint8Array): Promise<void> {
-    if (encodeBase64Url(deriveSyncSignKeyPair(dek).publicKey) !== state.signPub) {
-      throw new Error('sync state signing key does not match decrypted key');
+    const signPair = deriveSyncSignKeyPair(dek);
+    try {
+      if (encodeBase64Url(signPair.publicKey) !== state.signPub) {
+        throw new Error('sync state signing key does not match decrypted key');
+      }
+    } finally {
+      signPair.seed.fill(0);
     }
     const snapshot: SyncStateSnapshot = {
       keyEpoch: state.keyEpoch,
