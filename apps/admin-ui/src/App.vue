@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, type Component } from 'vue';
 import { router, installRouter, navigate, withBase, stripBase } from './lib/router';
+import { safeReturnTo } from './lib/returnTo';
 import { ADMIN_DEFAULT_PATH, ADMIN_ROUTES } from './routes';
 import { refreshSession, getAccessToken, logout } from '@devkit/auth-client';
 import { me, type ConsoleMe } from './api/me';
@@ -37,7 +38,8 @@ const view = computed<{ comp: Component | null; props: Record<string, unknown> }
 
 function redirectToLogin(): void {
   const p = stripBase(window.location.pathname);
-  const ret = p === '/' ? '/users' : p;
+  // 本地先过 safeReturnTo，不依赖登录页兜底：即使登录页未来漏了校验，也不会带出开放重定向。
+  const ret = safeReturnTo(p === '/' ? '/users' : p);
   window.location.assign(`/login?returnTo=${encodeURIComponent(`/admin${ret}`)}`);
 }
 

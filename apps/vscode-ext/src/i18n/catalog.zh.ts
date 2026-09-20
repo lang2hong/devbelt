@@ -31,6 +31,7 @@ export const zh: MessageCatalog = {
   'tree.deleteGroupConfirm': '删除',
 
   'cmd.openEditorFirst': '请先打开 SQL 编辑器。',
+  'cmd.placeCursorInStatement': '请把光标放到某条语句内，或先选中要执行的 SQL。',
   'cmd.noConnection': '暂无连接，请先添加。',
   'cmd.selectConnection': '选择连接',
   'cmd.noHistory': '暂无历史。',

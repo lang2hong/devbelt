@@ -1,4 +1,4 @@
-import { scanSql, type SqlScanOptions } from './lexer.js';
+import { scanSql, type SqlScanOptions, type SqlScannedSegment } from './lexer.js';
 
 /**
  * 两套切分适配器，共用 `./lexer` 的词法规则：
@@ -100,6 +100,123 @@ export function splitSqlWithRanges(sql: string, options?: SqlScanOptions): SqlSt
 
   flush(sql.length);
   return result;
+}
+
+/**
+ * 去掉普通注释（`--`、`#`、`/* … *\/`）后的文本，保留可执行注释（`/*! … *\/`）与
+ * 字符串/美元引用原文。供补全侧扫描 FROM/JOIN：语句前的注释里若出现 `FROM`，
+ * 会污染表名/别名解析，取到错误表。
+ */
+export function stripSqlComments(sql: string, options?: SqlScanOptions): string {
+  let out = '';
+  for (const seg of scanSql(sql, options)) {
+    // 用空格而非直接删除：否则 `SELECT/*x*/FROM` 会粘连成 `SELECTFROM`，破坏词边界。
+    if (seg.kind === 'comment') { out += ' '; continue; }
+    out += sql.slice(seg.start, seg.end);
+  }
+  return out;
+}
+
+/**
+ * 增量语句切分器：消费 `SqlScanner` 的分段，按结束符与 `DELIMITER` 指令切分。
+ *
+ * 语义对齐 `splitSqlWithRanges`（保留注释、丢弃 `DELIMITER` 指令、可执行注释内不切分），
+ * 但每块只处理新增文本，供流式切分避免 O(n²)。
+ */
+export class StreamingStatementSplitter {
+  private pieces: string[] = [];
+  private delimiter = ';';
+  private sawCode = false;
+  /** 可能是结束符前缀的代码尾巴（跨分段）。 */
+  private codeCarry = '';
+
+  push(seg: SqlScannedSegment, final = false): string[] {
+    if (seg.kind !== 'code') {
+      // 暂存的分隔符前缀是真实代码字符，非代码段打断时须先归位，不能丢弃。
+      if (this.codeCarry) { this.pieces.push(this.codeCarry); this.codeCarry = ''; }
+      this.pieces.push(seg.text);
+      return [];
+    }
+    return this.feedCode(seg.text, final);
+  }
+
+  finish(): string[] {
+    const out = this.feedCode('', true);
+    const stmt = this.pieces.join('').trim();
+    this.pieces = [];
+    this.codeCarry = '';
+    this.sawCode = false;
+    if (stmt) out.push(stmt);
+    return out;
+  }
+
+  private feedCode(text: string, final: boolean): string[] {
+    const combined = this.codeCarry + text;
+    this.codeCarry = '';
+    if (combined === '') return [];
+    const out: string[] = [];
+    let p = 0;
+    let run = '';
+    while (p < combined.length) {
+      // 语句起始处可能是 DELIMITER 指令（且会被分块截断）：每个语句起点都探测，
+      // 整行到手再判定。逐字符判会因 `DELIMITER $` 未拿到完整 token 而误判，且首字符
+      // 会过早把 sawCode 置真。
+      if (!this.sawCode) {
+        const probe = combined.slice(p);
+        const stripped = probe.replace(/^[ \t\r\n]*/, '');
+        const up = stripped.toUpperCase();
+        const maybeDirective = up === ''
+          ? true
+          : up.length <= 'DELIMITER'.length
+            ? 'DELIMITER'.startsWith(up)
+            : /^DELIMITER$/i.test(stripped) || /^DELIMITER[ \t]/.test(stripped);
+        if (maybeDirective) {
+          // 指令行是否已到齐：看候选文本（去掉前导空白）里有没有换行。
+          if (!final && stripped.indexOf('\n') === -1) {
+            if (run) { this.pieces.push(run); run = ''; }
+            this.codeCarry = probe;
+            return out;
+          }
+          const lead = probe.length - stripped.length;
+          const directive = matchDelimiterDirective(probe, lead);
+          if (directive) {
+            this.pieces = [];
+            this.delimiter = directive.delimiter;
+            run = '';
+            p += directive.next;
+            continue;
+          }
+        }
+      }
+      if (this.delimiter && combined.startsWith(this.delimiter, p)) {
+        this.pieces.push(run);
+        run = '';
+        const stmt = this.pieces.join('').trim();
+        if (stmt) out.push(stmt);
+        this.pieces = [];
+        this.sawCode = false;
+        p += this.delimiter.length;
+        continue;
+      }
+      const ch = combined[p];
+      run += ch;
+      if (!/\s/.test(ch)) this.sawCode = true;
+      p++;
+    }
+    // 结束符前缀跨分段的尾巴：暂存到下一次，不计入语句文本/sawCode。
+    if (!final && this.delimiter.length > 1 && run.length > 0) {
+      const maxKeep = Math.min(run.length, this.delimiter.length - 1);
+      for (let k = maxKeep; k >= 1; k--) {
+        if (this.delimiter.startsWith(run.slice(-k))) {
+          this.codeCarry = run.slice(-k);
+          run = run.slice(0, -k);
+          break;
+        }
+      }
+    }
+    this.pieces.push(run);
+    return out;
+  }
 }
 
 /**

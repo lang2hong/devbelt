@@ -1,9 +1,10 @@
 name: CI
 
 on:
-  # 临时：仅 main 触发 CI，其他分支与 PR 一律不跑。恢复：把 branches 改回 ['**'] 并恢复 pull_request 段。
+  # 所有分支的 push 与 PR 都跑：机械门禁/架构边界/typecheck 必须覆盖到这些改动本身。
   push:
-    branches: [main]
+    branches: ['**']
+  pull_request:
 
 jobs:
   build:

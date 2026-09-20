@@ -21,7 +21,7 @@ const ALLOWED: Record<string, string[]> = {
 
 /** 组合根：允许 import 任意模块（装配各模块依赖）。 */
 const COMPOSITION_ROOTS = ['app.ts', 'index.ts'];
-const COMPOSITION_DIRS = ['bootstrap', 'scripts', 'modules'];
+const COMPOSITION_DIRS = ['bootstrap', 'scripts'];
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {

@@ -179,6 +179,9 @@ export class QueryService {
       let settled = false;
       const finish = (): void => {
         if (this.activeCancels.get(id) === cancelReject) this.activeCancels.delete(id);
+        // 清空回填的 handle：查询结束后残留的 cancel 一旦被调用会误 abort 连接上
+        // 正在执行的**其他**查询（abortQuery 是连接级的）。
+        if (options?.token && options.token.cancel === tokenCancel) options.token.cancel = undefined;
         if (timer) clearTimeout(timer);
       };
       // 只负责“拒绝并清理”，物理中止由调用方统一发起（见 cancel()/token），
@@ -189,9 +192,15 @@ export class QueryService {
         finish();
         reject(new QueryError('Query cancelled', sql, Date.now() - start));
       };
+      // 单查询取消：仅当这次查询仍在活跃集合中才物理中止，避免陈旧 token 牵连他人。
+      const tokenCancel = (): void => {
+        if (!this.activeCancels.has(id)) return;
+        cancelReject();
+        this.connection.abortQuery();
+      };
       this.activeCancels.set(id, cancelReject);
       if (options?.token) {
-        options.token.cancel = () => { cancelReject(); this.connection.abortQuery(); };
+        options.token.cancel = tokenCancel;
       }
       const timeoutMs = this.timeoutMs;
       const timer = timeoutMs > 0

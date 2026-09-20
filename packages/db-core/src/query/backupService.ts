@@ -144,9 +144,13 @@ export class BackupService {
       for (const v of views) {
         if (isCancelled?.()) throw new Error('Backup cancelled.');
         try {
-          const def = (await meta.getViewDefinition(v.name, database)).trim().replace(/;\s*$/, '');
+          // 必须走方言 normalizeViewAlterSql：PG 的 getViewDefinition 只返回纯 SELECT，
+          // 原样写出会先 DROP 再执行一个 SELECT —— 视图被删且永不重建。该方法同时
+          // 为 MySQL 剥离绑定源账号的 ALGORITHM/DEFINER，并把 SQLite 转成 DROP+CREATE。
+          const raw = await meta.getViewDefinition(v.name, database);
+          const alter = query.dialect.normalizeViewAlterSql(raw, v.name);
           const qualified = query.dialect.wrap(v.name);
-          await write(`\nDROP VIEW IF EXISTS ${qualified};\n${def};\n`);
+          await write(`\nDROP VIEW IF EXISTS ${qualified};\n${alter}\n`);
         } catch { /* 单个视图定义取不到则跳过，不使整库 dump 失败 */ }
       }
     } catch { /* 视图列表取不到则跳过 */ }
@@ -188,27 +192,30 @@ export class BackupService {
     }
 
     // 触发器：属于表，必须在表之后写。整库对每张表；只备份选定表时也带上这些表的触发器。
-    try {
-      for (const table of tableList) {
-        for (const t of await meta.getTriggers(table, database)) {
-          if (isCancelled?.()) throw new Error('Backup cancelled.');
-          try {
-            const raw = (await meta.getTriggerDefinition(t.name, database)).trim();
-            if (!raw) continue;
-            const body = stripTrailingSemicolon(removeDefiner(raw));
-            const q = query.dialect.wrap(t.name);
-            // PG 的 DROP TRIGGER 必须带 ON <table>；MySQL/SQLite 不带。
-            const drop = dbType === DatabaseType.PG
-              ? `DROP TRIGGER IF EXISTS ${q} ON ${query.dialect.wrap(table)};`
-              : `DROP TRIGGER IF EXISTS ${q};`;
-            const wrapDelimiter = dbType === DatabaseType.MYSQL;
-            await write(wrapDelimiter
-              ? `\n${drop}\nDELIMITER $$\n${body}$$\nDELIMITER ;\n`
-              : `\n${drop}\n${body};\n`);
-          } catch { /* 单个触发器取不到则跳过 */ }
-        }
+    for (const table of tableList) {
+      // 每张表单独取触发器列表：某张表失败（权限/视图/临时表）不应让其余表的触发器全部丢失。
+      let triggers: Awaited<ReturnType<MetadataService['getTriggers']>>;
+      try {
+        triggers = await meta.getTriggers(table, database);
+      } catch { continue; }
+      for (const t of triggers) {
+        if (isCancelled?.()) throw new Error('Backup cancelled.');
+        try {
+          const raw = (await meta.getTriggerDefinition(t.name, database)).trim();
+          if (!raw) continue;
+          const body = stripTrailingSemicolon(removeDefiner(raw));
+          const q = query.dialect.wrap(t.name);
+          // PG 的 DROP TRIGGER 必须带 ON <table>；MySQL/SQLite 不带。
+          const drop = dbType === DatabaseType.PG
+            ? `DROP TRIGGER IF EXISTS ${q} ON ${query.dialect.wrap(table)};`
+            : `DROP TRIGGER IF EXISTS ${q};`;
+          const wrapDelimiter = dbType === DatabaseType.MYSQL;
+          await write(wrapDelimiter
+            ? `\n${drop}\nDELIMITER $$\n${body}$$\nDELIMITER ;\n`
+            : `\n${drop}\n${body};\n`);
+        } catch { /* 单个触发器取不到则跳过 */ }
       }
-    } catch { /* 触发器列表取不到则跳过 */ }
+    }
 
     const epilogue = this.sqlEpilogue(dbType);
     if (epilogue) await write('\n' + epilogue + ';\n');

@@ -51,6 +51,7 @@ export class JsonValueScanner {
   private inStr = false;
   private esc = false;
   private start = -1;
+  private arrayClosed = false;
   /** 已扫描到的位置（相对 buf）。必须持久：buf 跨块累积，从头重扫会把已消费的开括号再计一次。 */
   private pos = 0;
 
@@ -64,6 +65,13 @@ export class JsonValueScanner {
         if (ch === '[') { this.mode = 'array'; this.pos++; continue; }
         if (ch === '{') { this.mode = 'single'; this.start = this.pos; this.depth = 1; this.inStr = false; this.esc = false; this.pos++; continue; }
         throw new Error('JSON import requires an object or an array of objects.');
+      }
+      if (this.mode === 'array' && this.depth === 0 && !this.inStr) {
+        // 数组元素必须是对象：吞掉标量/嵌套数组会让导入「成功」却丢数据，必须显式报错。
+        if (/\s/.test(ch) || ch === ',') { this.pos++; continue; }
+        if (ch === '{') { this.start = this.pos; this.depth = 1; this.inStr = false; this.esc = false; this.pos++; continue; }
+        if (ch === ']') { this.mode = 'done'; this.arrayClosed = true; this.pos++; continue; }
+        throw new Error(`Invalid JSON: unexpected token '${ch}' in array.`);
       }
       if (this.inStr) {
         if (this.esc) this.esc = false;
@@ -104,8 +112,12 @@ export class JsonValueScanner {
 
   end(): void {
     if (this.mode === 'done') return;
+    if (this.inStr) throw new Error('Invalid JSON: unterminated string.');
+    // 对象/数组未闭合（depth>0），或顶层数组未遇到 `]` —— 都不能当作正常结束。
+    if (this.depth > 0) throw new Error('Invalid JSON: unexpected end of input.');
+    if (this.mode === 'array' && !this.arrayClosed) throw new Error('Invalid JSON: unexpected end of input.');
     const rest = this.buf.slice(this.pos).trim();
-    if (rest === '' || rest === ']') return;
+    if (rest === '') return;
     throw new Error('Invalid JSON: unexpected end of input.');
   }
 }

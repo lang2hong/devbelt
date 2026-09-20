@@ -16,9 +16,10 @@ Fastify + MySQL 8 服务，负责身份、个人权益、设备、组织、资�
 | 范围 | 路由 |
 |---|---|
 | 认证 | `/api/auth/*` |
-| 个人 | `/api/me`、`/api/personal/subscription`、`/api/personal/devices` |
-| 组织 | `/api/organizations/*`、`/api/organization-invitations/*` |
-| 同步 | `/api/sync/state`、`/init`、`/records`、`/change-key`、`/recover`、`/destroy`、重置路由 |
+| 个人 | `/api/db/me`、`/api/db/personal/subscription`、`/api/db/personal/devices` |
+| 组织 | `/api/db/organizations/*`、`/api/db/organization-invitations/*` |
+| 同步 | `/api/db/sync/init`、`/records`、`/change-key`、`/account-recover`、`/destroy`、重置路由 |
+| 控制台 | `/api/db/plans`、`/api/db/console/*`、`/api/console/*` |
 
 字段、授权和错误语义见[P2 阶段文档](../../docs/阶段/P2-个人同步-v1.md)和[架构](../../docs/架构.md)。
 

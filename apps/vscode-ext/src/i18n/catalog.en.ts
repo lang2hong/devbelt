@@ -50,6 +50,7 @@ export const en: MessageCatalog = {
 
   // 命令
   'cmd.openEditorFirst': 'Open a SQL editor first.',
+  'cmd.placeCursorInStatement': 'Place the cursor inside a statement, or select the SQL to run.',
   'cmd.noConnection': 'No connection yet. Add one first.',
   'cmd.selectConnection': 'Select connection',
   'cmd.noHistory': 'No history.',

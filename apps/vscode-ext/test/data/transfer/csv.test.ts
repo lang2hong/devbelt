@@ -93,6 +93,61 @@ describe('CSV 流式解析', () => {
     }
   });
 
+  it('跨块的双引号转义（""）不被误判为收尾引号', async () => {
+    const { streamCsvRows } = await import('../../../src/data/transfer/csv');
+    const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const text = 'id,val\r\n1,"a""b"\r\n';
+    const dir = mkdtempSync(join(tmpdir(), 'csv-quote-'));
+    const file = join(dir, 'd.csv');
+    writeFileSync(file, text);
+    try {
+      // 13 字节块恰好把 `""` 切在两个引号之间。
+      const streamed: unknown[] = [];
+      for await (const row of streamCsvRows(file, true, 13)) streamed.push(row);
+      expect(streamed).toEqual([{ id: '1', val: 'a"b' }]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('跳过空白行后，行对象仍带真实物理行号', async () => {
+    const { streamCsvRows, CSV_ROW_LINE } = await import('../../../src/data/transfer/csv');
+    const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'csv-line-'));
+    const file = join(dir, 'd.csv');
+    writeFileSync(file, 'a,b\r\n1,x\r\n\r\n2,y\r\n');
+    try {
+      const lines: number[] = [];
+      for await (const row of streamCsvRows(file, true, 4)) lines.push((row as any)[CSV_ROW_LINE]);
+      // 第 3 行是空白行被跳过，第 4 行数据仍报 4（而不是映射后的 2）。
+      expect(lines).toEqual([2, 4]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('引号内 CRLF 跨块时物理行号不多算', async () => {
+    const { streamCsvRows, CSV_ROW_LINE } = await import('../../../src/data/transfer/csv');
+    const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'csv-crlf-'));
+    const file = join(dir, 'd.csv');
+    writeFileSync(file, 'a,b\r\n1,"x\r\ny"\r\n2,z\r\n');
+    try {
+      const lines: number[] = [];
+      // 10 字节块会把引号内的 CRLF 切在 CR 与 LF 之间。
+      for await (const row of streamCsvRows(file, true, 10)) lines.push((row as any)[CSV_ROW_LINE]);
+      expect(lines).toEqual([2, 4]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('readCsvSample 只取表头与样本行', async () => {
     const { readCsvSample } = await import('../../../src/data/transfer/csv');
     const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');

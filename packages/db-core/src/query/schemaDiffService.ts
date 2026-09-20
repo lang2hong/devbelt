@@ -3,7 +3,16 @@ import type { TableService } from './tableService.js';
 import type { ColumnMeta } from '../types/meta.js';
 import { validateIdent } from '../utils/validate.js';
 import { validateColumnType } from './columnSpec.js';
+import type { ColumnSpec } from './columnSpec.js';
+import { renderColumnAttributes } from './columnSpec.js';
 import { DatabaseType } from '../types/connection.js';
+import { MysqlDialect } from '../dialect/mysqlDialect.js';
+import { PostgreSqlDialect } from '../dialect/postgreSqlDialect.js';
+
+const MYSQL_DIALECT = new MysqlDialect();
+const PG_DIALECT = new PostgreSqlDialect();
+const MYSQL_ESC = (v: any): string => MYSQL_DIALECT.escapeValue(v);
+const PG_ESC = (v: any): string => PG_DIALECT.escapeValue(v);
 
 /** 列差异 */
 export interface ColumnDiff {
@@ -13,6 +22,12 @@ export interface ColumnDiff {
   targetType?: string;
   /** 源列是否 NOT NULL（生成同步 DDL 时需要一并带上，否则只同步类型会丢约束）。 */
   sourceNotNull?: boolean;
+  /** 源列默认值；新增/改列时一并同步，避免只发类型导致默认值丢失。 */
+  sourceDefault?: any;
+  /** 源列是否自增（MySQL AUTO_INCREMENT）。 */
+  sourceAutoIncrement?: boolean;
+  /** 源列注释。 */
+  sourceComment?: string;
 }
 
 /** 表差异 */
@@ -86,14 +101,19 @@ export class SchemaDiffService {
     const targetMap = new Map(target.map((c) => [c.name, c]));
     const diffs: ColumnDiff[] = [];
 
+    const attrs = (c: ColumnMeta) => ({
+        sourceDefault: c.defaultValue,
+        sourceAutoIncrement: !!c.isAutoIncrement,
+        sourceComment: c.comment,
+      });
     for (const [name, srcCol] of sourceMap) {
       const tgtCol = targetMap.get(name);
       const notNull = !!srcCol.isNotNull;
       if (!tgtCol) {
-        diffs.push({ columnName: name, status: 'added', sourceType: srcCol.type, sourceNotNull: notNull });
+        diffs.push({ columnName: name, status: 'added', sourceType: srcCol.type, sourceNotNull: notNull, ...attrs(srcCol) });
       } else if (String(srcCol.type) !== String(tgtCol.type) || !!tgtCol.isNotNull !== notNull) {
         // 过去只比类型：NOT NULL 变化被判为「无差异」，同步也不会补约束。
-        diffs.push({ columnName: name, status: 'changed', sourceType: srcCol.type, targetType: tgtCol.type, sourceNotNull: notNull });
+        diffs.push({ columnName: name, status: 'changed', sourceType: srcCol.type, targetType: tgtCol.type, sourceNotNull: notNull, ...attrs(srcCol) });
       } else {
         diffs.push({ columnName: name, status: 'unchanged' });
       }
@@ -151,21 +171,45 @@ export class SchemaDiffService {
         parts.push('');
       } else if (d.status === 'changed') {
         const changes: string[] = [];
+        const warnings: string[] = [];
         for (const c of d.columns) {
           const colIdent = validateIdent(c.columnName);
           // sourceType 来自源库 information_schema 列元数据，属**跨信任面**（源库可能不可信）。
           // 类型是必须裸拼进 DDL 的部分，故与用户输入路径同一门槛校验（括号/引号闭合、白名单字符）。
           if (c.status === 'added') {
-            changes.push(`  ADD COLUMN \`${colIdent}\` ${validateColumnType(c.sourceType || 'TEXT')}${c.sourceNotNull ? ' NOT NULL' : ''}`);
+            const spec: ColumnSpec = {
+              type: c.sourceType || 'TEXT',
+              notNull: c.sourceNotNull,
+              autoIncrement: c.sourceAutoIncrement,
+              defaultValue: c.sourceDefault,
+              comment: c.sourceComment,
+            };
+            // 有数据的表上 `ADD COLUMN ... NOT NULL` 无默认值会失败（暗含默认值不可靠）；
+            // 降级为可空列并给出告警，而不是发出不可执行的 DDL。
+            if (spec.notNull && hasNoDefault(spec) && !spec.autoIncrement) {
+              changes.push(`  ADD COLUMN \`${colIdent}\` ${renderColumnAttributes({ ...spec, notNull: false }, DatabaseType.MYSQL, MYSQL_ESC)}`);
+              warnings.push(`-- WARN: "${c.columnName}" is NOT NULL on the source but has no default; add a DEFAULT or backfill values, then enforce NOT NULL.`);
+            } else {
+              changes.push(`  ADD COLUMN \`${colIdent}\` ${renderColumnAttributes(spec, DatabaseType.MYSQL, MYSQL_ESC)}`);
+            }
           } else if (c.status === 'removed') {
             changes.push(`  DROP COLUMN \`${colIdent}\``);
           } else if (c.status === 'changed') {
-            // 类型或 NOT NULL 变化：MODIFY 必须写全，否则只给定类型会把 NOT NULL 丢掉。
-            changes.push(`  MODIFY COLUMN \`${colIdent}\` ${validateColumnType(c.sourceType || 'TEXT')}${c.sourceNotNull ? ' NOT NULL' : ' NULL'}`);
+            // MODIFY 必须写全（类型 + NULL/NOT NULL + DEFAULT + AUTO_INCREMENT + COMMENT），
+            // 否则只给类型会把这些属性静默丢弃。
+            const spec: ColumnSpec = {
+              type: c.sourceType || 'TEXT',
+              notNull: c.sourceNotNull,
+              autoIncrement: c.sourceAutoIncrement,
+              defaultValue: c.sourceDefault,
+              comment: c.sourceComment,
+            };
+            changes.push(`  MODIFY COLUMN \`${colIdent}\` ${renderColumnAttributes(spec, DatabaseType.MYSQL, MYSQL_ESC)}`);
           }
         }
         if (changes.length) {
           parts.push(`-- Alter table: ${d.tableName}`);
+          parts.push(...warnings);
           parts.push(`ALTER TABLE \`${targetDbIdent}\`.\`${tableIdent}\` ` + changes.join(',\n') + ';');
           parts.push('');
         }
@@ -207,20 +251,39 @@ export class SchemaDiffService {
         parts.push('');
       } else if (d.status === 'changed') {
         const actions: string[] = [];
+        const warnings: string[] = [];
         for (const c of d.columns) {
           const col = wrap(c.columnName);
           const type = validateColumnType(c.sourceType || 'text');
           if (c.status === 'added') {
-            actions.push(`ADD COLUMN ${col} ${type}${c.sourceNotNull ? ' NOT NULL' : ''}`);
+            const spec: ColumnSpec = {
+              type: c.sourceType || 'text',
+              notNull: c.sourceNotNull,
+              autoIncrement: c.sourceAutoIncrement,
+              defaultValue: c.sourceDefault,
+              comment: c.sourceComment,
+            };
+            // PG 在有数据的表上加 NOT NULL 且无默认值会直接失败。
+            if (spec.notNull && hasNoDefault(spec) && !spec.autoIncrement) {
+              actions.push(`ADD COLUMN ${col} ${renderColumnAttributes({ ...spec, notNull: false }, DatabaseType.PG, PG_ESC, false, true)}`);
+              warnings.push(`-- WARN: "${c.columnName}" is NOT NULL on the source but has no default; add a DEFAULT or backfill values, then enforce NOT NULL.`);
+            } else {
+              actions.push(`ADD COLUMN ${col} ${renderColumnAttributes(spec, DatabaseType.PG, PG_ESC, false, true)}`);
+            }
           } else if (c.status === 'removed') {
             actions.push(`DROP COLUMN ${col}`);
           } else if (c.status === 'changed') {
             actions.push(`ALTER COLUMN ${col} TYPE ${type}`);
             actions.push(`ALTER COLUMN ${col} ${c.sourceNotNull ? 'SET' : 'DROP'} NOT NULL`);
+            const base = (t?: string) => String(t || '').toLowerCase().split('(')[0].trim();
+            if (base(c.targetType) && base(c.sourceType) && base(c.targetType) !== base(c.sourceType)) {
+              warnings.push(`-- WARN: type of "${c.columnName}" changes ${c.targetType} → ${c.sourceType}; may require USING / data cleanup.`);
+            }
           }
         }
         if (actions.length) {
           parts.push(`-- Alter table: ${d.tableName}`);
+          parts.push(...warnings);
           parts.push(`ALTER TABLE ${table} ${actions.join(', ')};`);
           parts.push('');
         }
@@ -283,4 +346,9 @@ export class SchemaDiffService {
     }
     return parts.join('\n');
   }
+}
+
+/** 列规格是否「没有默认值」（空串/null/undefined 都算无）。 */
+function hasNoDefault(spec: ColumnSpec): boolean {
+  return spec.defaultValue === undefined || spec.defaultValue === null || spec.defaultValue === '';
 }

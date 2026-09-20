@@ -509,6 +509,33 @@ describe('BackupService.databaseDump 例程/事件/触发器', () => {
   });
 });
 
+describe('BackupService.databaseDump 视图', () => {
+  function viewMeta(definition: string): MetadataService {
+    return {
+      getTables: async () => [],
+      getColumns: async () => [],
+      getViews: async () => [{ name: 'v1' }],
+      getViewDefinition: async () => definition,
+    } as unknown as MetadataService;
+  }
+
+  it('PG 视图包成 CREATE OR REPLACE VIEW（不再只写纯 SELECT 导致视图丢失）', async () => {
+    const query = makeQueryService(new FakeConnection(), new PostgreSqlDialect());
+    const dump = await BackupService.databaseDump(query, viewMeta('SELECT id\nFROM base;'), makeTableService(), 'test', { includeData: false });
+    expect(dump).toContain('CREATE OR REPLACE VIEW "v1" AS');
+    expect(dump).toContain('DROP VIEW IF EXISTS "v1"');
+    expect(dump).toContain('FROM base');
+  });
+
+  it('MySQL 视图剥离 ALGORITHM/DEFINER', async () => {
+    const query = makeQueryService(new FakeConnection(), new MysqlDialect());
+    const raw = 'CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`%` SQL SECURITY DEFINER VIEW `v1` AS select 1 AS `c`';
+    const dump = await BackupService.databaseDump(query, viewMeta(raw), makeTableService(), 'test', { includeData: false });
+    expect(dump).toContain('CREATE OR REPLACE VIEW `v1` AS');
+    expect(dump).not.toContain('DEFINER=');
+  });
+});
+
 describe('BackupService.restore 流式输入', () => {
   it('接受异步语句流（大文件不整读内存）', async () => {
     const conn = new FakeConnection();

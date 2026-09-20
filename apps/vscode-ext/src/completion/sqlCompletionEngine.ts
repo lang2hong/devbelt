@@ -123,12 +123,20 @@ const NOT_ALIAS = /^(ON|USING|WHERE|GROUP|ORDER|LIMIT|OFFSET|HAVING|JOIN|LEFT|RI
 export function extractTableAliases(text: string): Map<string, string> {
   const map = new Map<string, string>();
   const re = /\b(?:FROM|JOIN)\s+`?([\w.]+)`?(?:\s+(?:AS\s+)?`?([\w]+)`?)?/gi;
-  for (const m of text.matchAll(re)) {
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
     const table = (m[1] ?? '').split('.').pop();
     if (!table) continue;
     map.set(table, table);
     const alias = m[2];
-    if (alias && !NOT_ALIAS.test(alias)) map.set(alias, table);
+    if (!alias) continue;
+    if (!NOT_ALIAS.test(alias)) {
+      map.set(alias, table);
+    } else {
+      // 捕获到的「别名」其实是 JOIN/ON/WHERE 等保留字：它不是别名。回退游标让它重新
+      // 参与 FROM/JOIN 扫描，否则 `FROM a JOIN b` 里的第二个表会被整段吞掉。
+      re.lastIndex = m.index + m[0].lastIndexOf(alias);
+    }
   }
   return map;
 }

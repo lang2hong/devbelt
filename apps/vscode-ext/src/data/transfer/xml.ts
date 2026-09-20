@@ -103,16 +103,22 @@ export function serializeXml(columns: string[], rows: Record<string, unknown>[])
 async function* readXmlRowFragments(filePath: string, chunkSize: number): AsyncGenerator<string> {
   const stream = createReadStream(filePath, { encoding: 'utf8', highWaterMark: chunkSize });
   let buffer = '';
+  // 维护一份小写副本，避免 while 内对剩余 buffer 反复 toLowerCase（O(rows×chunk)）。
+  let lower = '';
   for await (const chunk of stream) {
     buffer += chunk as string;
+    lower += (chunk as string).toLowerCase();
     let idx: number;
-    while ((idx = buffer.indexOf('</row>')) !== -1) {
+    // 大小写不敏感：解析器（parseXml）用 /i，若这里只认小写，`<ROW>` 文档会一行都切不出并静默丢空。
+    while ((idx = lower.indexOf('</row>')) !== -1) {
       const end = idx + '</row>'.length;
       yield buffer.slice(0, end);
       buffer = buffer.slice(end);
+      lower = lower.slice(end);
     }
   }
-  if (buffer.includes('<row')) yield buffer;
+  // 残留一个未闭合的 <row>：报错而不是静默丢弃最后一行。
+  if (/<row\b/i.test(buffer)) throw new Error('Invalid XML: unterminated <row> element.');
 }
 
 /** 只读前若干行 + 列名，用于导入向导预览。 */

@@ -408,4 +408,19 @@ describe('xlsx 流式解析', () => {
       expect(streamed).toEqual([{ d: '2024-01-01' }]);
     });
   });
+
+  it('跳过工作表开头的空行：空行不被当成表头导致后续全为 {}', async () => {
+    const { streamXlsxRows } = await import('../../../src/data/transfer/xlsx');
+    const sheet = '<worksheet><sheetData>'
+      + '<row r="1"/>'
+      + '<row r="2"><c r="A2" t="inlineStr"><is><t>id</t></is></c></row>'
+      + '<row r="3"><c r="A3" t="inlineStr"><is><t>1</t></is></c></row>'
+      + '</sheetData></worksheet>';
+    const buf = buildWorkbook(sheet);
+    await withFile(buf, async (file) => {
+      const streamed: unknown[] = [];
+      for await (const row of streamXlsxRows(file)) streamed.push(row);
+      expect(streamed).toEqual([{ id: '1' }]);
+    });
+  });
 });

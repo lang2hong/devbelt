@@ -11,7 +11,7 @@ function makeQuery(failSql?: string) {
       return { rows: [], fields: [], sql, costTime: 0 };
     },
     dialect: {
-      buildInsertSql: (rows: Record<string, unknown>[]) => `INSERT ${String(rows[0].id)}`,
+      buildInsertSql: (rows: Record<string, unknown>[]) => rows.map((r) => `INSERT ${String(r.id)}`).join('\n'),
     },
   };
 }
@@ -50,6 +50,20 @@ describe('importRows', () => {
       errors: [{ row: 2, message: 'duplicate key' }],
     });
     expect(query.statements).toEqual(['BEGIN', 'INSERT 1', 'INSERT 2', 'ROLLBACK']);
+  });
+
+  it('源行附带物理行号时按真实行号报错（CSV 跳过空行不影响）', async () => {
+    const { CSV_ROW_LINE } = await import('../../../src/data/transfer/csv');
+    const query = makeQuery('INSERT 2');
+    const rows: Record<string, unknown>[] = [{ source_id: 1 }, { source_id: 2 }];
+    Object.defineProperty(rows[1], CSV_ROW_LINE, { value: 42, enumerable: false });
+    const result = await importRows({
+      query: query as any,
+      table: 'users',
+      rows,
+      mappings,
+    });
+    expect(result.errors).toEqual([{ row: 42, message: 'duplicate key' }]);
   });
 
   it('rowOffset 让报错行号对齐源文件行（带表头）', async () => {

@@ -3,6 +3,20 @@ import { createReadStream, fstatSync, openSync, readSync, closeSync } from 'fs';
 import { once } from 'events';
 
 /**
+ * 从 `position` 起读满 `buf`。
+ *
+ * `readSync` 允许短读（被信号中断等），直接以「返回值 != 请求长度」判截断会把合法文件误报损坏。
+ */
+function readExactSync(fd: number, buf: Buffer, position: number): void {
+  let off = 0;
+  while (off < buf.length) {
+    const n = readSync(fd, buf, off, buf.length - off, position + off);
+    if (n <= 0) throw new Error('Invalid .xlsx: unexpected end of file.');
+    off += n;
+  }
+}
+
+/**
  * Excel (.xlsx) 读写。
  *
  * 自己实现而不是依赖 `xlsx` 包：该包此前是**可选依赖且从未安装**，
@@ -441,6 +455,7 @@ export async function writeXlsx(
 
   const deflate = createDeflateRaw();
   let compressedSize = 0;
+  let consumerError: unknown;
   const consumer = (async (): Promise<void> => {
     for await (const chunk of deflate) {
       compressedSize += (chunk as Buffer).length;
@@ -449,8 +464,9 @@ export async function writeXlsx(
       await writeBuf(Buffer.from(chunk as Buffer));
     }
   })();
-  // 失败/取消路径会 destroy(deflate)，consumer 迭代随之结束或拒绝；吞掉拒绝避免 unhandledRejection。
-  consumer.catch(() => {});
+  // 失败/取消路径会 destroy(deflate)，consumer 迭代随之结束或拒绝。这里捕获原始
+  // 错误（如磁盘写失败），而不是让它在 feed 侧被 zlib 的 "operation aborted" 掩盖。
+  consumer.catch((err) => { consumerError = err; });
 
   let crcState = -1;
   let uncompressedSize = 0;
@@ -476,13 +492,16 @@ export async function writeXlsx(
     await feed(SHEET_FOOTER);
   } catch (e) {
     aborted = true;
-    throw e;
+    // 让 consumer 的 .catch 微任务先落地，尽量暴露原始写盘错误而非 zlib 的 "operation aborted"。
+    await Promise.resolve();
+    throw consumerError ?? e;
   } finally {
     // 上游抛错（分页取消/写入失败/越界）时释放 zlib 原生句柄，避免反复取消大表导出累积句柄。
     if (aborted) deflate.destroy();
   }
   deflate.end();
   await consumer;
+  if (consumerError) throw consumerError;
 
   const crc = (crcState ^ -1) >>> 0;
   assertZip32(compressedSize, 'worksheet compressed size');
@@ -686,15 +705,17 @@ function readZipDirectory(filePath: string): Map<string, ZipDirEntry> {
     const size = fstatSync(fd).size;
     const tailLen = Math.min(size, 65_557);
     const tail = Buffer.allocUnsafe(tailLen);
-    readSync(fd, tail, 0, tailLen, size - tailLen);
+    readExactSync(fd, tail, size - tailLen);
     const eocd = findEndOfCentralDirectory(tail);
     const count = tail.readUInt16LE(eocd + 10);
     if (count === 0xffff) throw new Error('ZIP64 .xlsx files are not supported.');
     if (count > MAX_ENTRIES) throw new Error(`.xlsx has too many entries (${count} > ${MAX_ENTRIES}).`);
     const cdSize = tail.readUInt32LE(eocd + 12);
     const cdOffset = tail.readUInt32LE(eocd + 16);
+    if (cdSize === 0xffffffff || cdOffset === 0xffffffff) throw new Error('ZIP64 .xlsx files are not supported.');
+    if (cdOffset + cdSize > size) throw new Error('Invalid .xlsx: central directory out of range.');
     const cd = Buffer.allocUnsafe(cdSize);
-    readSync(fd, cd, 0, cdSize, cdOffset);
+    readExactSync(fd, cd, cdOffset);
     const map = new Map<string, ZipDirEntry>();
     let p = 0;
     for (let i = 0; i < count && p + 46 <= cd.length; i++) {
@@ -708,6 +729,11 @@ function readZipDirectory(filePath: string): Map<string, ZipDirEntry> {
       const extraLen = cd.readUInt16LE(p + 30);
       const commentLen = cd.readUInt16LE(p + 32);
       const localOffset = cd.readUInt32LE(p + 42);
+      // ZIP64 哨兵值必须显式拒绝：0xffffffff 会被当成真实偏移/长度，导致超大分配或错位读取。
+      if (compSize === 0xffffffff || uncompressedSize === 0xffffffff || localOffset === 0xffffffff
+        || nameLen === 0xffff || extraLen === 0xffff || commentLen === 0xffff) {
+        throw new Error('ZIP64 .xlsx files are not supported.');
+      }
       const name = cd.toString('utf8', p + 46, p + 46 + nameLen);
       if (uncompressedSize > MAX_ENTRY_BYTES) throw new Error('.xlsx exceeds the decompression size limit.');
       map.set(name, { name, method, compSize, localOffset });
@@ -724,7 +750,7 @@ function entryDataRange(filePath: string, entry: ZipDirEntry): { start: number; 
   const fd = openSync(filePath, 'r');
   try {
     const lh = Buffer.allocUnsafe(30);
-    readSync(fd, lh, 0, 30, entry.localOffset);
+    readExactSync(fd, lh, entry.localOffset);
     const nameLen = lh.readUInt16LE(26);
     const extraLen = lh.readUInt16LE(28);
     const start = entry.localOffset + 30 + nameLen + extraLen;
@@ -740,7 +766,7 @@ function readEntryFully(filePath: string, entry: ZipDirEntry): Buffer {
   const fd = openSync(filePath, 'r');
   try {
     const raw = Buffer.allocUnsafe(end - start + 1);
-    readSync(fd, raw, 0, raw.length, start);
+    readExactSync(fd, raw, start);
     if (entry.method === 0) return raw;
     if (entry.method !== 8) throw new Error(`Unsupported ZIP compression method ${entry.method} in .xlsx file.`);
     return inflateRawSync(raw, { maxOutputLength: MAX_ENTRY_BYTES });
@@ -753,15 +779,24 @@ function readEntryFully(filePath: string, entry: ZipDirEntry): Buffer {
 async function* streamEntryChunks(filePath: string, entry: ZipDirEntry): AsyncGenerator<Buffer> {
   const { start, end } = entryDataRange(filePath, entry);
   const rs = createReadStream(filePath, { start, end, highWaterMark: 64 * 1024 });
-  if (entry.method === 0) {
-    for await (const chunk of rs) yield chunk as Buffer;
-    return;
+  try {
+    if (entry.method === 0) {
+      for await (const chunk of rs) yield chunk as Buffer;
+      return;
+    }
+    if (entry.method !== 8) throw new Error(`Unsupported ZIP compression method ${entry.method} in .xlsx file.`);
+    const inflate = createInflateRaw({ maxOutputLength: MAX_ENTRY_BYTES });
+    rs.pipe(inflate);
+    rs.on('error', (err) => inflate.destroy(err));
+    try {
+      for await (const chunk of inflate) yield chunk as Buffer;
+    } finally {
+      // 预览提前 break 或 inflate 报错时必须释放 sink；否则源文件流会继续读到 EOF，泄漏句柄。
+      inflate.destroy();
+    }
+  } finally {
+    rs.destroy();
   }
-  if (entry.method !== 8) throw new Error(`Unsupported ZIP compression method ${entry.method} in .xlsx file.`);
-  const inflate = createInflateRaw({ maxOutputLength: MAX_ENTRY_BYTES });
-  rs.pipe(inflate);
-  rs.on('error', (err) => inflate.destroy(err));
-  for await (const chunk of inflate) yield chunk as Buffer;
 }
 
 /** 确定首个工作表路径（复用 firstSheetPath 的规则；失败时回退到目录里的第一个 worksheet）。 */
@@ -826,6 +861,8 @@ export async function* streamXlsxRows(filePath: string): AsyncGenerator<Record<s
   const handleRow = (inner: string): Record<string, unknown> | undefined => {
     const cells = parseRowCells(inner, shared, dateStyles);
     if (!headerDone) {
+      // 首个非空行才是表头：以空行当表头会把列宽算成 0，之后所有数据行都变成 `{}`。
+      if (isBlankCells(cells)) return undefined;
       headerDone = true;
       const width = Math.max(0, ...[...cells.keys()].map((k) => k + 1));
       columns = [];

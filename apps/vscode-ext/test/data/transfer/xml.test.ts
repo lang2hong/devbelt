@@ -53,4 +53,37 @@ describe('XML 流式解析', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('大小写不同的 <ROW> 也能切分（不再静默丢空）', async () => {
+    const { streamXmlRows } = await import('../../../src/data/transfer/xml');
+    const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const xml = '<ROWS><ROW><col name="id">1</col></ROW><ROW><col name="id">2</col></ROW></ROWS>';
+    const dir = mkdtempSync(join(tmpdir(), 'xml-case-'));
+    const file = join(dir, 'd.xml');
+    writeFileSync(file, xml);
+    try {
+      const streamed: unknown[] = [];
+      for await (const row of streamXmlRows(file, 8)) streamed.push(row);
+      expect(streamed).toEqual([{ id: '1' }, { id: '2' }]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('未闭合的尾行报错，而不是静默丢弃', async () => {
+    const { streamXmlRows } = await import('../../../src/data/transfer/xml');
+    const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'xml-trunc-'));
+    const file = join(dir, 'd.xml');
+    writeFileSync(file, '<rows><row><col name="id">1</col></row><row><col name="id">2</col>');
+    try {
+      await expect((async () => { for await (const _ of streamXmlRows(file, 8)) void _; })()).rejects.toThrow(/unterminated <row>/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

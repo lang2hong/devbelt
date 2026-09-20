@@ -6,6 +6,7 @@ import { MysqlDialect } from '../../src/dialect/mysqlDialect';
 import { PostgreSqlDialect } from '../../src/dialect/postgreSqlDialect';
 import { SqliteDialect } from '../../src/dialect/sqliteDialect';
 import { DatabaseType } from '../../src/types/connection';
+import { normalizeColumnMeta } from '../../src/query/normalize';
 import { QueryService } from '../../src/query/queryService';
 import { IConnection } from '../../src/connection/connection';
 import type { QueryCallback } from '../../src/types/query';
@@ -239,5 +240,74 @@ describe('SchemaDiffService', () => {
     await expect(
       SchemaDiffService.generateSyncSql([], 'targetDb', tableService, 'sourceDb'),
     ).rejects.toThrow();
+  });
+
+  it('新增 NOT NULL 列带默认值：DDL 带 DEFAULT', async () => {
+    const tableService = { getCreateSql: async () => '', supports: () => true, require: () => {} } as unknown as TableService;
+    const diffs = [{
+      tableName: 'users',
+      status: 'changed' as const,
+      columns: [{ columnName: 'age', status: 'added' as const, sourceType: 'int(11)', sourceNotNull: true, sourceDefault: '18' }],
+    }];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'targetDb', tableService, 'sourceDb');
+    expect(sql).toContain('ADD COLUMN `age` int(11) NOT NULL DEFAULT 18');
+  });
+
+  it('新增 NOT NULL 列无默认值：降级为可空并告警，不发出不可执行 DDL', async () => {
+    const tableService = { getCreateSql: async () => '', supports: () => true, require: () => {} } as unknown as TableService;
+    const diffs = [{
+      tableName: 'users',
+      status: 'changed' as const,
+      columns: [{ columnName: 'age', status: 'added' as const, sourceType: 'int(11)', sourceNotNull: true }],
+    }];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'targetDb', tableService, 'sourceDb');
+    expect(sql).toContain('ADD COLUMN `age` int(11)');
+    expect(sql).not.toContain('`age` int(11) NOT NULL');
+    expect(sql).toContain('WARN');
+  });
+
+  it('MODIFY COLUMN 保留默认值/注释等属性，不再静默丢弃', async () => {
+    const tableService = { getCreateSql: async () => '', supports: () => true, require: () => {} } as unknown as TableService;
+    const diffs = [{
+      tableName: 'users',
+      status: 'changed' as const,
+      columns: [{
+        columnName: 'email', status: 'changed' as const,
+        sourceType: 'varchar(255)', targetType: 'varchar(100)',
+        sourceNotNull: true, sourceDefault: 'x', sourceComment: 'c',
+      }],
+    }];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'targetDb', tableService, 'sourceDb');
+    expect(sql).toContain("MODIFY COLUMN `email` varchar(255) NOT NULL DEFAULT 'x' COMMENT 'c'");
+  });
+
+  it('PG 新增列默认值原样透传（表达式不做字符串转义）', async () => {
+    const pg = new PostgreSqlDialect();
+    const tableService = {
+      dbType: DatabaseType.PG,
+      wrapIdentifier: (id: string) => pg.wrap(id),
+      getCreateSql: async () => '',
+      supports: () => true,
+    } as unknown as TableService;
+    const diffs = [{
+      tableName: 't',
+      status: 'changed' as const,
+      columns: [
+        { columnName: 'x', status: 'added' as const, sourceType: 'text', sourceDefault: "'x'::character varying" },
+        { columnName: 'id', status: 'added' as const, sourceType: 'integer', sourceDefault: "nextval('t_id_seq'::regclass)" },
+      ],
+    }];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'targetDb', tableService, 's');
+    expect(sql).toContain("ADD COLUMN \"x\" text DEFAULT 'x'::character varying");
+    expect(sql).toContain("ADD COLUMN \"id\" integer DEFAULT nextval('t_id_seq'::regclass)");
+    expect(sql).not.toContain("''x''::character varying");
+  });
+
+  it('normalizeColumnMeta 识别 SQLite PRAGMA 的 notnull/dflt_value', () => {
+    const col = normalizeColumnMeta({ name: 'id', type: 'INTEGER', notnull: 1, dflt_value: '0' } as any);
+    expect(col.isNotNull).toBe(true);
+    expect(col.defaultValue).toBe('0');
+    const nullable = normalizeColumnMeta({ name: 'n', type: 'TEXT', notnull: 0 } as any);
+    expect(nullable.isNotNull).toBe(false);
   });
 });

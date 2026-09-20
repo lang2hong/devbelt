@@ -190,7 +190,9 @@ describe('DataDiffService', () => {
       }],
     };
     const sql = DataDiffService.generateSyncSql(diff, 'b', pgQuery);
-    expect(sql).toContain('INSERT INTO "b"."users"');
+    // PG 一个连接一个库：database 是库名而非 schema，不得生成 "b"."users"。
+    expect(sql).toContain('INSERT INTO "users"');
+    expect(sql).not.toContain('"b".');
     expect(sql).toContain('"id", "path"');
     // PG 不翻倍反斜杠（standard_conforming_strings），也不发反引号
     expect(sql).toContain("'C:\\tmp'");
@@ -268,6 +270,63 @@ describe('DataDiffService 分页策略（PG keyset 丢行回归）', () => {
     );
     // '1' 与 1 语义相同 → 无差异（旧实现 String 比较也会相等，但 null/日期等需归一）。
     expect(result.diffs[0].rows).toEqual([]);
+  });
+
+  it('超大 BIGINT 主键归并：不因 Number() 折叠而漏判（993 vs 992）', async () => {
+    const numericMeta = (cols: { name: string; type: string; isPrimary?: boolean }[]): MetadataService => ({
+      getTables: async () => cols.map((c) => ({ name: c.name })),
+      getColumns: async () => cols,
+    } as unknown as MetadataService);
+    const sourceConn = new FakeConnection();
+    sourceConn.setResponses([{ rows: [{ id: '9007199254740993', v: 'same' }] }]);
+    const targetConn = new FakeConnection();
+    targetConn.setResponses([{ rows: [{ id: '9007199254740992', v: 'same' }] }]);
+    const cols = [{ name: 'id', type: 'bigint', isPrimary: true }, { name: 'v', type: 'varchar(10)' }];
+    const result = await DataDiffService.diff(
+      makeQueryService(sourceConn), numericMeta(cols), 's',
+      makeQueryService(targetConn), 't', ['users'],
+    );
+    const rows = result.diffs[0].rows;
+    // 两个不同主键：一个 added、一个 removed；旧实现会把它们当同一行（Number 折叠）。
+    expect(rows.filter((r) => r.status === 'added').map((r) => String(r.pkValues.id))).toEqual(['9007199254740993']);
+    expect(rows.filter((r) => r.status === 'removed').map((r) => String(r.pkValues.id))).toEqual(['9007199254740992']);
+    expect(sourceConn.sqls.join('\n')).toContain('ORDER BY `id`');
+  });
+
+  it('DECIMAL 值比较：超过 2^53 的精度差异必须判为 changed', async () => {
+    const sourceConn = new FakeConnection();
+    sourceConn.setResponses([{ rows: [{ k: 'r1', n: '9007199254740993' }] }]);
+    const targetConn = new FakeConnection();
+    targetConn.setResponses([{ rows: [{ k: 'r1', n: '9007199254740992' }] }]);
+    const result = await DataDiffService.diff(
+      makeQueryService(sourceConn), meta([{ name: 'k', isPrimary: true }, { name: 'n' }]), 's',
+      makeQueryService(targetConn), 't', ['users'],
+    );
+    expect(result.diffs[0].rows.map((r) => r.status)).toEqual(['changed']);
+  });
+
+  it('日期比较：小数秒与带时区偏移的同一时刻应归一相等', async () => {
+    const sourceConn = new FakeConnection();
+    sourceConn.setResponses([{ rows: [{ k: 'r1', t: '2024-01-01T08:00:00+08:00' }] }]);
+    const targetConn = new FakeConnection();
+    targetConn.setResponses([{ rows: [{ k: 'r1', t: '2024-01-01T00:00:00Z' }] }]);
+    const result = await DataDiffService.diff(
+      makeQueryService(sourceConn), meta([{ name: 'k', isPrimary: true }, { name: 't' }]), 's',
+      makeQueryService(targetConn), 't', ['users'],
+    );
+    expect(result.diffs[0].rows).toEqual([]);
+  });
+
+  it('日期比较：毫秒差异必须判为 changed（不截断小数秒）', async () => {
+    const sourceConn = new FakeConnection();
+    sourceConn.setResponses([{ rows: [{ k: 'r1', t: '2024-01-01T00:00:00.500Z' }] }]);
+    const targetConn = new FakeConnection();
+    targetConn.setResponses([{ rows: [{ k: 'r1', t: '2024-01-01T00:00:00.400Z' }] }]);
+    const result = await DataDiffService.diff(
+      makeQueryService(sourceConn), meta([{ name: 'k', isPrimary: true }, { name: 't' }]), 's',
+      makeQueryService(targetConn), 't', ['users'],
+    );
+    expect(result.diffs[0].rows.map((r) => r.status)).toEqual(['changed']);
   });
 
   it('跨方言值比较：null 与 undefined 等价，Date 与等价时间戳相等', async () => {

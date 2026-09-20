@@ -1,6 +1,6 @@
 import { DatabaseType } from '@devkit/db-core';
 import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
-import { splitSqlWithRanges } from '@devkit/db-core/sql';
+import { splitSqlWithRanges, stripSqlComments, SqlScanner, StreamingStatementSplitter } from '@devkit/db-core/sql';
 import { createReadStream } from 'node:fs';
 import type { SqlScanOptions } from '@devkit/db-core/sql';
 
@@ -58,25 +58,68 @@ export function splitSqlStatements(sql: string, options?: SqlScanOptions): strin
 /**
  * 流式拆分 SQL 文件：分块读取、增量切分，恢复大 dump 时不再把整个文件读进内存。
  *
- * 每读到一块就重切「上一块遗留 + 本块」，吐出除最后一段外的所有语句（最后一段可能
- * 正好结束、也可能只是尚未闭合的语句，留到下一块或文件末尾再吐）。因切分器已感知
- * 引号/注释/美元引用/DELIMITER，跨块语句不会被误切。
+ * 用有状态的 `SqlScanner` + `StreamingStatementSplitter` 增量切分：每块只处理新增文本
+ * （不再对累积 buffer 反复全量 `splitSqlWithRanges`，消除大单语句下的 O(n²)）。
+ * 词法规则仍来自 db-core 的同一实现，跨块引号/注释/美元引用/DELIMITER 不会被误切。
  */
+const DELIMITER_LINE = /^[ \t]*DELIMITER[ \t]+\S/i;
+
+/**
+ * 预扫描判定脚本是否在代码区使用 `DELIMITER` 指令。
+ *
+ * 与 db-core 全量 `usesDelimiterDirective` 同口径（非代码段掩成单个空格、按行首匹配）。
+ * 必须**先**判定再切分：`$$` 在 `DELIMITER $$` 里是结束符，在 PG 里是美元引用，
+ * 逐块即时判定会因「scanner 已把 `$$` 当美元引用消费」而错过（且结果随块大小变化）。
+ */
+async function usesDelimiterDirectiveStream(
+  filePath: string,
+  options: SqlScanOptions | undefined,
+  chunkSize: number,
+): Promise<boolean> {
+  const stream = createReadStream(filePath, { encoding: 'utf8', highWaterMark: chunkSize });
+  const scanner = new SqlScanner(options, false);
+  let line = '';
+  let found = false;
+  const consume = (masked: string): void => {
+    let start = 0;
+    for (let i = 0; i < masked.length; i++) {
+      if (masked[i] === '\n') {
+        line += masked.slice(start, i);
+        if (DELIMITER_LINE.test(line)) found = true;
+        line = '';
+        start = i + 1;
+      }
+    }
+    line += masked.slice(start);
+  };
+  for await (const chunk of stream) {
+    for (const seg of scanner.push(chunk as string)) consume(seg.kind === 'code' ? seg.text : ' ');
+  }
+  for (const seg of scanner.finish()) consume(seg.kind === 'code' ? seg.text : ' ');
+  if (DELIMITER_LINE.test(line)) found = true;
+  return found;
+}
+
+/** 流式切分 SQL 文件（见 `streamSqlStatements`）。 */
 export async function* streamSqlStatements(
   filePath: string,
   options?: SqlScanOptions,
   chunkSize = 1 << 20,
 ): AsyncGenerator<string> {
+  // 先判定 DELIMITER（决定 `$$` 语义），再正式切分，保证与全量 splitSqlWithRanges 一致。
+  const dollarQuotes = !(await usesDelimiterDirectiveStream(filePath, options, chunkSize));
   const stream = createReadStream(filePath, { encoding: 'utf8', highWaterMark: chunkSize });
-  let buffer = '';
+  const scanner = new SqlScanner(options, dollarQuotes);
+  const splitter = new StreamingStatementSplitter();
   for await (const chunk of stream) {
-    buffer += chunk as string;
-    const segments = splitSqlWithRanges(buffer, options);
-    if (segments.length === 0) continue;
-    for (let i = 0; i < segments.length - 1; i++) yield segments[i].sql;
-    buffer = segments[segments.length - 1].sql;
+    for (const seg of scanner.push(chunk as string)) {
+      for (const stmt of splitter.push(seg)) yield stmt;
+    }
   }
-  if (buffer.trim()) yield buffer;
+  for (const seg of scanner.finish()) {
+    for (const stmt of splitter.push(seg, true)) yield stmt;
+  }
+  for (const stmt of splitter.finish()) yield stmt;
 }
 
 /**
@@ -85,6 +128,9 @@ export async function* streamSqlStatements(
  * 补全过去对整篇文档解析 FROM/JOIN，多语句文件里会取到**第一个** FROM，
  * 导致第二段之后（尤其是复制的脚本）补全候选错位。这里限定到光标所在语句。
  * 光标落在语句间隙（分号后空白）时返回空串。
+ *
+ * 返回值已剥离普通注释：`splitSqlWithRanges` 为 CodeLens 保留注释，而 `seg.sql`
+ * 会连同语句前的注释一起返回；若注释里出现 `FROM`/`JOIN`，补全会解析到错误表。
  */
 export function statementTextAt(
   text: string,
@@ -92,7 +138,7 @@ export function statementTextAt(
   options?: SqlScanOptions,
 ): string {
   for (const seg of splitSqlWithRanges(text, options)) {
-    if (offset >= seg.start && offset <= seg.end) return seg.sql;
+    if (offset >= seg.start && offset <= seg.end) return stripSqlComments(seg.sql, options);
   }
   return '';
 }

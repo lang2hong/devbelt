@@ -60,3 +60,55 @@ export function validateColumnType(raw: string): string {
 
   return type;
 }
+
+/** 默认值字面量：数字与时间关键字原样写入，其余按方言规则转义为字符串。 */
+export function renderDefaultLiteral(value: string, esc: (value: any) => string): string {
+  const keyword = /^(CURRENT_TIMESTAMP(\(\d*\))?|CURRENT_DATE|CURRENT_TIME|NULL|TRUE|FALSE)$/i;
+  return /^-?\d+(\.\d+)?$/.test(value) || keyword.test(value) ? value : esc(value);
+}
+
+/**
+ * 列属性（类型 + 约束 + 默认值 + 注释），不含列名。类型经白名单校验，值经方言转义。
+ *
+ * 由 TableService（建表/改列）与 SchemaDiffService（结构同步）共用，避免两份实现漂移：
+ * 同步侧曾只发「类型 + NULL/NOT NULL」，把 DEFAULT/自增/注释/字符集静默丢弃。
+ */
+export function renderColumnAttributes(
+  col: ColumnSpec,
+  dbType: string,
+  esc: (value: any) => string,
+  sqliteInlinePk = false,
+  /**
+   * 默认值已由源库给成**表达式原文**（PG 的 `column_default` 如
+   * `'x'::character varying` / `nextval('t_id_seq'::regclass)`），需原样透传，
+   * 不能按字符串字面量再转义。仅结构同步的 PG 分支使用。
+   */
+  rawDefault = false,
+): string {
+  const type = validateColumnType(col.type);
+  const parts: string[] = [];
+
+  if (col.autoIncrement && dbType === 'PG') {
+    parts.push(/big/i.test(type) ? 'BIGSERIAL' : 'SERIAL');
+  } else if (col.autoIncrement && dbType === 'SQLITE') {
+    parts.push('INTEGER');
+  } else {
+    parts.push(type);
+  }
+
+  if (sqliteInlinePk && col.autoIncrement) {
+    parts.push('PRIMARY KEY AUTOINCREMENT');
+    return parts.join(' ');
+  }
+  // PG 的 SERIAL 已隐含 NOT NULL，再写一遍合法但冗余
+  if ((col.notNull || col.isPrimary) && !(col.autoIncrement && dbType === 'PG')) {
+    parts.push('NOT NULL');
+  }
+  if (col.autoIncrement && dbType === 'MYSQL') parts.push('AUTO_INCREMENT');
+  if (col.defaultValue !== undefined && col.defaultValue !== '' && !col.autoIncrement) {
+    parts.push(`DEFAULT ${rawDefault ? String(col.defaultValue) : renderDefaultLiteral(col.defaultValue, esc)}`);
+  }
+  // 列内联 COMMENT 是 MySQL 语法，PG/SQLite 的 CREATE TABLE 不接受
+  if (col.comment && dbType === 'MYSQL') parts.push(`COMMENT ${esc(col.comment)}`);
+  return parts.join(' ');
+}

@@ -1,4 +1,5 @@
 import { validateIdent } from '../utils/validate.js';
+import { qualifyTable } from '../utils/qualify.js';
 import { QueryService } from './queryService.js';
 import type { QueryOptions } from './queryService.js';
 import { supportsOperation, unsupportedOperationMessage } from '../dialect/capabilities.js';
@@ -6,7 +7,7 @@ import type { DatabaseOperation } from '../dialect/capabilities.js';
 import { normalizeColumnMeta } from './normalize.js';
 import type { QueryResult } from '../types/query.js';
 import type { ColumnMeta } from '../types/meta.js';
-import { validateColumnType } from './columnSpec.js';
+import { validateColumnType, renderColumnAttributes, renderDefaultLiteral } from './columnSpec.js';
 import type { ColumnSpec, NewColumnSpec } from './columnSpec.js';
 import { mockValue } from './mockData.js';
 
@@ -57,40 +58,14 @@ export class TableService {
     return `${this.wrap(col.name)} ${this.columnAttributes(col, dbType, sqliteInlinePk)}`;
   }
 
-  /** 列属性（类型 + 约束 + 默认值 + 注释），不含列名。类型经白名单校验，值经方言转义。 */
+  /** 列属性（类型 + 约束 + 默认值 + 注释），不含列名。与结构同步共用同一渲染器。 */
   private columnAttributes(col: ColumnSpec, dbType: string, sqliteInlinePk: boolean): string {
-    const type = validateColumnType(col.type);
-    const parts: string[] = [];
-
-    if (col.autoIncrement && dbType === 'PG') {
-      parts.push(/big/i.test(type) ? 'BIGSERIAL' : 'SERIAL');
-    } else if (col.autoIncrement && dbType === 'SQLITE') {
-      parts.push('INTEGER');
-    } else {
-      parts.push(type);
-    }
-
-    if (sqliteInlinePk && col.autoIncrement) {
-      parts.push('PRIMARY KEY AUTOINCREMENT');
-      return parts.join(' ');
-    }
-    // PG 的 SERIAL 已隐含 NOT NULL，再写一遍合法但冗余
-    if ((col.notNull || col.isPrimary) && !(col.autoIncrement && dbType === 'PG')) {
-      parts.push('NOT NULL');
-    }
-    if (col.autoIncrement && dbType === 'MYSQL') parts.push('AUTO_INCREMENT');
-    if (col.defaultValue !== undefined && col.defaultValue !== '' && !col.autoIncrement) {
-      parts.push(`DEFAULT ${this.defaultLiteral(col.defaultValue)}`);
-    }
-    // 列内联 COMMENT 是 MySQL 语法，PG/SQLite 的 CREATE TABLE 不接受
-    if (col.comment && dbType === 'MYSQL') parts.push(`COMMENT ${this.esc(col.comment)}`);
-    return parts.join(' ');
+    return renderColumnAttributes(col, dbType, (v) => this.esc(v), sqliteInlinePk);
   }
 
   /** 默认值字面量：数字与时间关键字原样写入，其余按方言规则转义为字符串。 */
   private defaultLiteral(value: string): string {
-    const keyword = /^(CURRENT_TIMESTAMP(\(\d*\))?|CURRENT_DATE|CURRENT_TIME|NULL|TRUE|FALSE)$/i;
-    return /^-?\d+(\.\d+)?$/.test(value) || keyword.test(value) ? value : this.esc(value);
+    return renderDefaultLiteral(value, (v) => this.esc(v));
   }
 
   /** 删除表（危险操作） */
@@ -196,7 +171,7 @@ export class TableService {
     if (indexName.toUpperCase() === 'PRIMARY') {
       return this.ddl(`ALTER TABLE ${qualifiedTable} DROP PRIMARY KEY`);
     }
-    return this.ddl(`DROP INDEX ${this.wrap(indexName)} ON ${qualifiedTable}`);
+    return this.ddl(this.queryService.dialect.dropIndexSql(indexName, table, database));
   }
 
   /** 创建索引（主键走 ALTER TABLE ADD PRIMARY KEY） */
@@ -595,12 +570,8 @@ export class TableService {
     validateIdent(name);
     if (!database) return this.wrap(name);
     validateIdent(database);
-    // PostgreSQL 是「一个连接一个库」，没有跨库限定名；此处的 database 参数
-    // 传的是库名（树节点），不是 schema。旧的 `"db"."table"` 会指向不存在的
-    // schema，导致 PG 上 DROP/ALTER/TRUNCATE/CREATE 全部失败。这里不限定，
-    // 交由连接的 search_path（默认 public / 用户设置的 schema）解析。
-    if (this.queryService.dialect.dbType === 'PG') return this.wrap(name);
-    return `${this.wrap(database)}.${this.wrap(name)}`;
+    // PostgreSQL 无跨库限定名（`database` 是库名而非 schema，见 qualifyTable）。
+    return qualifyTable(this.queryService.dialect.dbType, this.wrap(name), this.wrap(database));
   }
 
   /** 按方言生成查询建表语句的 SQL */

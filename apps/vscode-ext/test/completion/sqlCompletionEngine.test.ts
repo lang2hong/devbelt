@@ -173,4 +173,17 @@ describe('extractTableAliases', () => {
     const map = extractTableAliases('SELECT * FROM db1.accounts');
     expect(map.get('accounts')).toBe('accounts');
   });
+
+  it('无显式别名时不会把 JOIN 当别名而吞掉第二张表', () => {
+    const map = extractTableAliases('SELECT * FROM users JOIN orders ON orders.uid = users.id');
+    expect(map.get('users')).toBe('users');
+    expect(map.get('orders')).toBe('orders');
+    expect(map.has('JOIN')).toBe(false);
+  });
+
+  it('无显式别名时 JOIN 后的表带别名仍被解析', () => {
+    const map = extractTableAliases('SELECT * FROM users JOIN orders o ON o.uid = users.id');
+    expect(map.get('o')).toBe('orders');
+    expect(map.get('orders')).toBe('orders');
+  });
 });

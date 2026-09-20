@@ -1,6 +1,12 @@
 import type { QueryOptions, QueryService } from '@devkit/db-core';
 import { mapRows, validateMappings, type FieldMapping } from './fieldMapper';
 import { TransferCancelledError } from './exportService';
+import { CSV_ROW_LINE } from './csv';
+
+/** 源行附带的物理行号（CSV 才有）；无则回退到「已完成数 + 偏移」。 */
+function sourceLineOf(row: Record<string, unknown>): number | undefined {
+  return (row as Record<PropertyKey, unknown>)[CSV_ROW_LINE] as number | undefined;
+}
 
 /**
  * 导入的每条语句都不进查询历史。
@@ -63,6 +69,7 @@ export async function importRows(options: ImportRowsOptions): Promise<ImportResu
   }
   let started = false;
   let completed = 0;
+  let lastLine: number | undefined;
   const total = rows.length;
   try {
     await query.query('BEGIN', undefined, SKIP);
@@ -71,6 +78,7 @@ export async function importRows(options: ImportRowsOptions): Promise<ImportResu
     // 非批处理路径每次只用一个映射行。
     for (const row of rows) {
       if (isCancelled?.()) throw new TransferCancelledError();
+      lastLine = sourceLineOf(row);
       const mappedRow: Record<string, unknown> = {};
       for (const mapping of selected) mappedRow[mapping.target] = row[mapping.source];
       const sql = query.dialect.buildInsertSql([mappedRow], columns, table, database);
@@ -92,7 +100,7 @@ export async function importRows(options: ImportRowsOptions): Promise<ImportResu
     return {
       imported: 0,
       rolledBack: rollbackSucceeded,
-      errors: [{ row: completed + 1 + rowOffset, message: (error as Error).message }],
+      errors: [{ row: lastLine ?? completed + 1 + rowOffset, message: (error as Error).message }],
     };
   }
 }
@@ -108,20 +116,22 @@ export async function importRowsStream(
 ): Promise<ImportResult> {
   const { query, table, database, rows, mappings, onProgress, isCancelled, batchWrites = false, rowOffset = 0 } = options;
   if (batchWrites) {
-    const collected: Record<string, unknown>[] = [];
-    for await (const row of rows) collected.push(row);
-    return importRows({ query, table, database, rows: collected, mappings, onProgress, isCancelled, batchWrites, rowOffset });
+    // 边读边映射边拼批，不再先把整份源数据收集成数组（SQLite 单进程驱动要求单次
+    // query 内完成事务，故仍须把语句拼成一条，但省掉源行与映射副本的双份驻留）。
+    return importRowsStreamBatched({ query, table, database, rows, mappings, onProgress, isCancelled, rowOffset });
   }
 
   const selected = validateMappings(mappings);
   const columns = selected.map((mapping) => mapping.target);
   let started = false;
   let completed = 0;
+  let lastLine: number | undefined;
   try {
     await query.query('BEGIN', undefined, SKIP);
     started = true;
     for await (const sourceRow of rows) {
       if (isCancelled?.()) throw new TransferCancelledError();
+      lastLine = sourceLineOf(sourceRow);
       const mappedRow: Record<string, unknown> = {};
       for (const mapping of selected) mappedRow[mapping.target] = sourceRow[mapping.source];
       const sql = query.dialect.buildInsertSql([mappedRow], columns, table, database);
@@ -141,7 +151,7 @@ export async function importRowsStream(
     return {
       imported: 0,
       rolledBack: rollbackSucceeded,
-      errors: [{ row: completed + 1 + rowOffset, message: (error as Error).message }],
+      errors: [{ row: lastLine ?? completed + 1 + rowOffset, message: (error as Error).message }],
     };
   }
 }
@@ -156,8 +166,11 @@ async function importRowsBatched(
   const { query, table, database, mapped, onProgress, isCancelled, rowOffset = 0 } = options;
   if (isCancelled?.()) throw new TransferCancelledError();
   const { columns, rows: dataRows } = mapped;
-  const inserts = dataRows.map((row) => query.dialect.buildInsertSql([row], columns, table, database).trim());
-  const sql = `BEGIN; ${inserts.join('\n')} COMMIT;`;
+  const statements: string[] = [];
+  for (let i = 0; i < dataRows.length; i += BATCH_ROWS) {
+    statements.push(query.dialect.buildInsertSql(dataRows.slice(i, i + BATCH_ROWS), columns, table, database).trim());
+  }
+  const sql = `BEGIN; ${statements.join('\n')} COMMIT;`;
   try {
     await query.query(sql, undefined, SKIP);
     onProgress?.({ completed: dataRows.length, total: dataRows.length });
@@ -173,6 +186,60 @@ async function importRowsBatched(
       imported: 0,
       rolledBack: rollbackSucceeded,
       errors: [{ row: 1 + rowOffset, message: (error as Error).message }],
+    };
+  }
+}
+
+/** 批处理每批行数：限制单批拼接的峰值与语句数量，避免一行一条的巨大语句数组。 */
+const BATCH_ROWS = 200;
+
+/**
+ * 流式批处理导入（SQLite 等单进程驱动）：边迭代边映射，按批拼接多值语句，最后一次 query
+ * 发送 `BEGIN; …; COMMIT;` 保持原子性；不再先收集整份源数据。
+ */
+async function importRowsStreamBatched(
+  options: Omit<ImportRowsOptions, 'rows'> & { rows: AsyncIterable<Record<string, unknown>> },
+): Promise<ImportResult> {
+  const { query, table, database, rows, mappings, onProgress, isCancelled, rowOffset = 0 } = options;
+  const selected = validateMappings(mappings);
+  const columns = selected.map((mapping) => mapping.target);
+  const statements: string[] = [];
+  let chunk: Record<string, unknown>[] = [];
+  let completed = 0;
+  let firstLine: number | undefined;
+  const flush = (): void => {
+    if (!chunk.length) return;
+    statements.push(query.dialect.buildInsertSql(chunk, columns, table, database).trim());
+    completed += chunk.length;
+    chunk = [];
+  };
+  try {
+    for await (const sourceRow of rows) {
+      if (isCancelled?.()) throw new TransferCancelledError();
+      // 批处理无法逐行定位，但至少报出首个源行的物理行（CSV 有）而非固定 1。
+      if (firstLine === undefined) firstLine = sourceLineOf(sourceRow);
+      const mappedRow: Record<string, unknown> = {};
+      for (const mapping of selected) mappedRow[mapping.target] = sourceRow[mapping.source];
+      chunk.push(mappedRow);
+      if (chunk.length >= BATCH_ROWS) flush();
+    }
+    flush();
+    if (!statements.length) return { imported: 0, rolledBack: false, errors: [] };
+    const sql = `BEGIN; ${statements.join('\n')} COMMIT;`;
+    await query.query(sql, undefined, SKIP);
+    onProgress?.({ completed, total: completed });
+    return { imported: completed, rolledBack: false, errors: [] };
+  } catch (error) {
+    if (error instanceof TransferCancelledError) throw error;
+    let rollbackSucceeded = false;
+    try {
+      await query.query('ROLLBACK', undefined, SKIP);
+      rollbackSucceeded = true;
+    } catch { /* Preserve the original failure. */ }
+    return {
+      imported: 0,
+      rolledBack: rollbackSucceeded,
+      errors: [{ row: firstLine ?? 1 + rowOffset, message: (error as Error).message }],
     };
   }
 }

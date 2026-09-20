@@ -133,7 +133,10 @@ export class ConnectionManager {
    * `connecting` 是同一 id 的建连去重表，计入即可保守拦下超额请求。
    */
   openCount(): number {
-    return this.sessions.size + this.connecting.size;
+    // 同一 id 在「已入池但 finally 尚未清 connecting」的微任务窗口会同时出现在两张表，
+    // 按 id 并集计数，避免瞬时双计把并发门禁误判为超限。
+    const ids = new Set<string>([...this.sessions.keys(), ...this.connecting.keys()]);
+    return ids.size;
   }
 
   /** 该连接是否为用户显式打开。 */
@@ -170,7 +173,9 @@ export class ConnectionManager {
       if (!this.healthCheckTimer) this.startHealthCheck();
       return session;
     } finally {
-      this.connecting.delete(conn.id);
+      // 只删除自己登记的那个 promise：disposeConn 会先清掉 connecting 允许立即重连，
+      // 若此处无条件 delete，会把「重连后的新 promise」误删，导致后续并发建连绕过去重。
+      if (this.connecting.get(conn.id) === promise) this.connecting.delete(conn.id);
     }
   }
 
@@ -308,7 +313,10 @@ export class ConnectionManager {
 
   /** 释放一次 retain；计数归零且非显式打开时关闭会话。 */
   release(id: string): void {
-    const next = (this.retains.get(id) ?? 0) - 1;
+    const current = this.retains.get(id);
+    // 未持有或重复释放：忽略而不是从 0 减成负数（否则会误关别人仍持有的会话）。
+    if (current === undefined || current <= 0) return;
+    const next = current - 1;
     if (next > 0) {
       this.retains.set(id, next);
       return;
@@ -416,6 +424,8 @@ export class ConnectionManager {
     for (const entry of this.sessionEntries.values()) {
       if (entry.connId === protectId) continue;
       if (this.explicit.has(entry.connId)) continue;
+      // 被视图/面板 retain 的连接不能淘汰：否则持有者仍在用，会话却被关掉。
+      if (this.retains.has(entry.connId)) continue;
       // 跳过有在途查询的会话：淘汰会 end() 连接，使长查询中途失败并可能留下未定义事务。
       if (entry.session.query.inFlightCount > 0) continue;
       if (!oldest || entry.lastUsed < oldest.lastUsed) {
@@ -440,9 +450,9 @@ export class ConnectionManager {
       for (const [id, entry] of this.sessionEntries) {
         // 有在途查询的会话一律跳过：健康检查不应中断正在执行的语句。
         if (entry.session.query.inFlightCount > 0) continue;
-        // 显式打开的连接豁免「空闲超时」，但仍要检测存活：SSH 断开/DB 掉线后
-        // 过去会一直显示为已打开、反复失败，只能手动关闭。
-        const idle = !this.explicit.has(id) && now - entry.lastUsed > this.config.idleTimeoutMs;
+        // 显式打开的连接与被持有（retain）的连接豁免「空闲超时」，但仍要检测存活：
+        // SSH 断开/DB 掉线后过去会一直显示为已打开、反复失败，只能手动关闭。
+        const idle = !this.explicit.has(id) && !this.retains.has(id) && now - entry.lastUsed > this.config.idleTimeoutMs;
         if (idle || !entry.session.isAlive()) {
           toDispose.push(id);
         }

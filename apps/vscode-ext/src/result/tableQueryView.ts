@@ -23,7 +23,6 @@ export interface TableQueryViewOptions {
  */
 export class TableQueryView extends BaseWebView {
   private static readonly queryViews = new Map<string, TableQueryView>();
-  private static readonly connRefs = new Map<string, number>();
   private readonly runner: QueryRunner;
   /** 结构面板要展示的现成结果（不经 SQL 执行）。 */
   private structurePayload?: { rows: any[]; fields: { name: string }[] };
@@ -58,8 +57,9 @@ export class TableQueryView extends BaseWebView {
         : `Query @ ${conn.name || conn.host}`),
       viewColumn,
     );
-    // 引用计数：同一连接被多个视图共享，最后一个视图关闭时才释放连接。
-    TableQueryView.connRefs.set(this.conn.id, (TableQueryView.connRefs.get(this.conn.id) ?? 0) + 1);
+    // 引用计数：同一连接被多个视图共享，最后一个视图关闭时才释放连接。用管理器的
+// retain/release（而非各自维护的私有计数），这样其它视图/查询的持有同样被尊重。
+    this.manager.retain(this.conn.id);
     this.runner = new QueryRunner(conn, manager, table, database, (msg) => this.post(msg));
     this.completionService = new CompletionService(manager, conn, database, (msg) => this.post(msg));
     if (table) {
@@ -282,16 +282,8 @@ export class TableQueryView extends BaseWebView {
     if (TableQueryView.queryViews.get(this.conn.id) === this) {
       TableQueryView.queryViews.delete(this.conn.id);
     }
-    // 引用计数归零：最后一个该连接的视图关闭时，释放底层连接（除非用户显式打开了该连接）。
-    const refs = TableQueryView.connRefs.get(this.conn.id) ?? 0;
-    if (refs <= 1) {
-      TableQueryView.connRefs.delete(this.conn.id);
-      if (!this.manager.isExplicit(this.conn.id)) {
-        this.manager.disposeConn(this.conn.id);
-      }
-    } else {
-      TableQueryView.connRefs.set(this.conn.id, refs - 1);
-    }
+    // 释放本视图的持有：计数归零且非显式打开时，管理器才真正关闭连接。
+    this.manager.release(this.conn.id);
   }
 
   private async sendInit(): Promise<void> {

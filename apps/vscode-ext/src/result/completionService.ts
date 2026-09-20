@@ -1,6 +1,7 @@
 import type { ConnectionManager, ConnectionSession } from '../connection/connectionManager';
 import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import { buildCandidates, detectContext, extractFromTable, extractTableAliases, type SqlContext } from '../completion/sqlCompletionEngine';
+import { stripSqlComments } from '@devkit/db-core/sql';
 import { diagWarn } from '../utils/diagnostics';
 
 /** 元数据缓存 TTL：DDL 改表后补全不应长期返回陈旧表/列。 */
@@ -35,7 +36,8 @@ export class CompletionService {
     try {
       const ctx = detectContext(before);
       // 只解析光标所在语句的 FROM：多语句文件里取首个 FROM 会补错表。
-      const stmtText = text.slice(before.lastIndexOf(';') + 1);
+      // 剥离注释：注释里出现的 FROM/JOIN 会污染表名解析。
+      const stmtText = stripSqlComments(text.slice(before.lastIndexOf(';') + 1));
       const fromTable = extractFromTable(stmtText);
       const db = this.database || this.conn.database;
 
@@ -72,6 +74,7 @@ export class CompletionService {
     const key = db || '';
     const cached = this.tableCache.get(key);
     if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.names;
+    if (cached) this.tableCache.delete(key);
     try {
       const tables = (await session.metadata.getTables(db)).map((t: any) => t.name);
       this.tableCache.set(key, { names: tables, at: Date.now() });
@@ -86,6 +89,7 @@ export class CompletionService {
     const key = `${db || ''}:${table}`;
     const cached = this.columnCache.get(key);
     if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.names;
+    if (cached) this.columnCache.delete(key);
     try {
       const columns = (await session.metadata.getColumns(table, db)).map((c: any) => c.name);
       this.columnCache.set(key, { names: columns, at: Date.now() });

@@ -119,6 +119,7 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
     const key = `${conn.id}:${database || ''}`;
     const cached = this.tableCache.get(key);
     if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.names;
+    if (cached) this.tableCache.delete(key);
     try {
       const session = await this.manager.connect(conn);
       const tables = await session.metadata.getTables(database);
@@ -136,6 +137,7 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
     const key = `${conn.id}:${database || ''}:${table}`;
     const cached = this.columnCache.get(key);
     if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.names;
+    if (cached) this.columnCache.delete(key);
     try {
       const session = await this.manager.connect(conn);
       const columns = await session.metadata.getColumns(table, database);

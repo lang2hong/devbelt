@@ -48,4 +48,37 @@ describe('JSON 流式解析', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('流式拒绝数组里的标量/垃圾，不再静默丢弃', async () => {
+    const { streamJsonRows } = await import('../../../src/data/transfer/json');
+    const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'json-reject-'));
+    const scalars = join(dir, 's.json');
+    const mixed = join(dir, 'm.json');
+    writeFileSync(scalars, '[1,2,3]');
+    writeFileSync(mixed, '[{"a":1},5,{"a":2}]');
+    try {
+      await expect((async () => { for await (const _ of streamJsonRows(scalars, 3)) void _; })()).rejects.toThrow(/unexpected token/);
+      await expect((async () => { for await (const _ of streamJsonRows(mixed, 3)) void _; })()).rejects.toThrow(/unexpected token/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('流式拒绝未闭合的数组（截断文件）', async () => {
+    const { streamJsonRows } = await import('../../../src/data/transfer/json');
+    const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'json-trunc-'));
+    const file = join(dir, 't.json');
+    writeFileSync(file, '[{"a":1}');
+    try {
+      await expect((async () => { for await (const _ of streamJsonRows(file, 4)) void _; })()).rejects.toThrow(/unexpected end of input/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

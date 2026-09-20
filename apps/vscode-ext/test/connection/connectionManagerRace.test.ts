@@ -3,6 +3,8 @@ import type { SavedConnection } from '@devkit/db-host/connection/connectionStore
 
 /** 由 mock 的 FakeConnection.connect 注入，模拟"建连尚未完成"。 */
 let resolveConnect: (() => void) | undefined;
+/** 每次建连的独立 resolver，便于在并发场景中分别放行。 */
+const resolvers: Array<() => void> = [];
 let endCalled = 0;
 let tunnelClosed = 0;
 
@@ -17,7 +19,11 @@ vi.mock('../../src/connection/sshTunnel', () => ({
 vi.mock('@devkit/db-core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@devkit/db-core')>();
   class FakeConnection {
-    connect(cb: (err: unknown) => void): void { resolveConnect = () => cb(null); }
+    connect(cb: (err: unknown) => void): void {
+      const resolve = () => cb(null);
+      resolvers.push(resolve);
+      resolveConnect = resolve;
+    }
     end(): void { endCalled++; }
     isAlive(): boolean { return true; }
     query(): void { /* noop */ }
@@ -50,6 +56,7 @@ describe('ConnectionManager dispose/connect race', () => {
   afterEach(() => {
     managers.forEach((m) => m.disposeAll());
     resolveConnect = undefined;
+    resolvers.length = 0;
     endCalled = 0;
     tunnelClosed = 0;
   });
@@ -127,6 +134,53 @@ describe('ConnectionManager dispose/connect race', () => {
     resolveConnect!();
     await pending;
     expect(manager.openCount()).toBe(1);
+  });
+
+  it('旧连接的 finally 不会误删重连后的 connecting 标记（去重不被绕过）', async () => {
+    const manager = new ConnectionManager();
+    managers.push(manager);
+
+    const a = manager.connect(conn());
+    await waitForConnect();
+    manager.disposeConn('c-1'); // 清掉 connecting 以允许重连
+    const b = manager.connect(conn());
+    await vi.waitFor(() => {
+      if (resolvers.length < 2) throw new Error('reconnect not started');
+    });
+
+    // 放行 A：代际不匹配应自毁，且其 finally 不得删除 B 的标记。
+    resolvers[0]();
+    await expect(a).rejects.toThrow(/closed/i);
+    // 标记仍在 → 再次 connect 复用 B，不会发起第三次真实建连。
+    const c = manager.connect(conn());
+    expect(resolvers.length).toBe(2);
+
+    resolvers[1]();
+    const session = await b;
+    expect(await c).toBe(session);
+    expect(manager.activeConnections).toBe(1);
+  });
+
+  it('被 retain 的连接不被 LRU 淘汰', async () => {
+    const manager = new ConnectionManager({ maxConnections: 1 });
+    managers.push(manager);
+
+    const p1 = manager.connect(conn({ id: 'c-1' }));
+    await waitForConnect();
+    resolvers[0]();
+    await p1;
+    manager.retain('c-1');
+
+    // 连第二个连接触发淘汰：被持有的 c-1 必须豁免。
+    const p2 = manager.connect(conn({ id: 'c-2' }));
+    await vi.waitFor(() => {
+      if (resolvers.length < 2) throw new Error('second connect not started');
+    });
+    resolvers[1]();
+    await p2;
+
+    expect(manager.peek('c-1')).toBeTruthy();
+    expect(manager.peek('c-2')).toBeTruthy();
   });
 
   it('can reconnect cleanly after a disposed in-flight attempt', async () => {

@@ -72,6 +72,15 @@ export interface CsvCell {
   quoted: boolean;
 }
 
+/** 一条完整记录：单元格 + 其在源文件中的物理起始行（1-based）。 */
+export interface CsvRecord {
+  cells: CsvCell[];
+  line: number;
+}
+
+/** 行对象上附带源文件物理行号的隐藏键（供导入错误定位；不参与列映射/SQL 生成）。 */
+export const CSV_ROW_LINE = Symbol('csvRowLine');
+
 /**
  * 增量 CSV 记录解析器（RFC 4180）：逐块喂入，跨块保持引号/转义状态。
  *
@@ -84,22 +93,53 @@ export class CsvRecordParser {
   private quoted = false;
   private cellQuoted = false;
   private pendingCR = false;
+  /** 上一块末尾遇到 `"`，尚不能判断它是收尾引号还是 `""` 转义的前半（跨块）。 */
+  private pendingQuote = false;
+  /** 引号内上一块末尾遇到 `\r`，需下一块首字符判断是 CRLF 还是独立 CR（避免行号多算 1）。 */
+  private pendingQuotedCR = false;
+  private line = 1;
+  private recordStartLine = 1;
+  private atRecordStart = true;
 
   /** 喂入一块文本，返回本次完成的记录（可能为空数组）。 */
-  feed(chunk: string): CsvCell[][] {
-    const done: CsvCell[][] = [];
+  feed(chunk: string): CsvRecord[] {
+    const done: CsvRecord[] = [];
     for (let i = 0; i < chunk.length; i++) {
       const ch = chunk[i];
+      if (this.pendingQuotedCR) {
+        this.pendingQuotedCR = false;
+        if (ch === '\n') { this.value += ch; this.line++; continue; } // 引号内 CRLF 跨块
+        this.line++; // 独立 CR 行尾，继续按引号内内容处理当前字符
+      }
+      if (this.pendingQuote) {
+        this.pendingQuote = false;
+        if (ch === '"') { this.value += '"'; continue; } // 跨块 `""` → 转义引号
+        this.quoted = false; // 前一字符是收尾引号，当前字符按未引用状态处理
+      }
       if (this.pendingCR) {
         this.pendingCR = false;
-        if (ch === '\n') continue; // CRLF 的 LF 已随 CR 结束记录
+        if (ch === '\n') { this.line++; continue; } // CRLF 的 LF 已随 CR 结束记录
+        this.line++; // 独立 CR 行尾
+      }
+      if (this.atRecordStart && ch !== '\n' && ch !== '\r') {
+        this.recordStartLine = this.line;
+        this.atRecordStart = false;
       }
       if (this.quoted) {
         if (ch === '"') {
-          if (chunk[i + 1] === '"') { this.value += '"'; i++; }
-          else this.quoted = false;
+          if (i + 1 < chunk.length) {
+            if (chunk[i + 1] === '"') { this.value += '"'; i++; }
+            else this.quoted = false;
+          } else {
+            this.pendingQuote = true;
+          }
         } else {
           this.value += ch;
+          if (ch === '\n') this.line++;
+          else if (ch === '\r') {
+            if (i + 1 >= chunk.length) this.pendingQuotedCR = true;
+            else if (chunk[i + 1] !== '\n') this.line++;
+          }
         }
         continue;
       }
@@ -113,11 +153,13 @@ export class CsvRecordParser {
         this.cellQuoted = false;
       } else if (ch === '\n' || ch === '\r') {
         this.row.push({ value: this.value, quoted: this.cellQuoted });
-        done.push(this.row);
+        done.push({ cells: this.row, line: this.recordStartLine });
         this.row = [];
         this.value = '';
         this.cellQuoted = false;
+        this.atRecordStart = true;
         if (ch === '\r') this.pendingCR = true;
+        else this.line++;
       } else {
         this.value += ch;
       }
@@ -126,15 +168,17 @@ export class CsvRecordParser {
   }
 
   /** 结束解析：返回最后一条未终止的记录；引号未闭合则报错。 */
-  end(): CsvCell[][] {
+  end(): CsvRecord[] {
+    if (this.pendingQuote) { this.pendingQuote = false; this.quoted = false; }
     if (this.quoted) throw new Error('Invalid CSV: unterminated quoted field.');
     if (this.value || this.row.length || this.cellQuoted) {
+      if (this.atRecordStart) { this.recordStartLine = this.line; this.atRecordStart = false; }
       this.row.push({ value: this.value, quoted: this.cellQuoted });
       const last = this.row;
       this.row = [];
       this.value = '';
       this.cellQuoted = false;
-      return [last];
+      return [{ cells: last, line: this.recordStartLine }];
     }
     return [];
   }
@@ -152,12 +196,15 @@ function columnsFromRecord(record: CsvCell[], hasHeader: boolean): string[] {
 }
 
 /** 把一条记录转为行对象：未加引号空字段 → null，`""` → ''，其余 unguardFormula。 */
-function recordToRow(columns: string[], record: CsvCell[]): Record<string, string | null> {
+function recordToRow(columns: string[], record: CsvCell[], line?: number): Record<string, string | null> {
   const out: Record<string, string | null> = {};
   columns.forEach((column, index) => {
     const cell = record[index];
     out[column] = !cell || (cell.value === '' && !cell.quoted) ? null : unguardFormula(cell.value);
   });
+  // 附带物理行号：跳过的空白行不会让导入错误行号偏移。用不可枚举的 symbol 键，
+  // 既不会被列映射/SQL 生成看到，也不影响对行对象做深比较。
+  if (line !== undefined) Object.defineProperty(out, CSV_ROW_LINE, { value: line, enumerable: false });
   return out;
 }
 
@@ -174,17 +221,17 @@ export function parseCsv(text: string, hasHeader = true): CsvData {
   const parser = new CsvRecordParser();
   const records = [...parser.feed(text), ...parser.end()];
   // 去掉文件开头「仅一个空字段」的空行（原行为）。
-  if (records.length && records[0].length === 1 && records[0][0].value === '' && !records[0][0].quoted) records.shift();
+  if (records.length && records[0].cells.length === 1 && records[0].cells[0].value === '' && !records[0].cells[0].quoted) records.shift();
   if (!records.length) return { columns: [], rows: [] };
 
-  const columns = columnsFromRecord(records[0], hasHeader);
+  const columns = columnsFromRecord(records[0].cells, hasHeader);
   validateColumns(columns);
   const values = hasHeader ? records.slice(1) : records;
-  return { columns, rows: values.filter((record) => !isBlankRecord(record)).map((record) => recordToRow(columns, record)) };
+  return { columns, rows: values.filter((r) => !isBlankRecord(r.cells)).map((r) => recordToRow(columns, r.cells)) };
 }
 
 /** 逐块产出 CSV 记录（跨块保持引号状态），不把整文件读入内存。 */
-async function* readCsvRecords(filePath: string, chunkSize: number): AsyncGenerator<CsvCell[]> {
+async function* readCsvRecords(filePath: string, chunkSize: number): AsyncGenerator<CsvRecord> {
   const stream = createReadStream(filePath, { encoding: 'utf8', highWaterMark: chunkSize });
   const parser = new CsvRecordParser();
   for await (const chunk of stream) {
@@ -208,13 +255,13 @@ export async function* streamCsvRows(
   for await (const record of readCsvRecords(filePath, chunkSize)) {
     if (first) {
       first = false;
-      if (record.length === 1 && record[0].value === '' && !record[0].quoted) continue; // 开头空行
-      columns = columnsFromRecord(record, hasHeader);
+      if (record.cells.length === 1 && record.cells[0].value === '' && !record.cells[0].quoted) continue; // 开头空行
+      columns = columnsFromRecord(record.cells, hasHeader);
       validateColumns(columns);
       if (hasHeader) continue;
     }
-    if (!columns || isBlankRecord(record)) continue;
-    yield recordToRow(columns, record);
+    if (!columns || isBlankRecord(record.cells)) continue;
+    yield recordToRow(columns, record.cells, record.line);
   }
 }
 
@@ -233,13 +280,13 @@ export async function readCsvSample(
   for await (const record of readCsvRecords(filePath, chunkSize)) {
     if (first) {
       first = false;
-      if (record.length === 1 && record[0].value === '' && !record[0].quoted) continue;
-      columns = columnsFromRecord(record, hasHeader);
+      if (record.cells.length === 1 && record.cells[0].value === '' && !record.cells[0].quoted) continue;
+      columns = columnsFromRecord(record.cells, hasHeader);
       validateColumns(columns);
       if (hasHeader) continue;
     }
-    if (!columns || isBlankRecord(record)) continue;
-    rows.push(recordToRow(columns, record));
+    if (!columns || isBlankRecord(record.cells)) continue;
+    rows.push(recordToRow(columns, record.cells, record.line));
     if (rows.length >= sampleSize) break;
   }
   return { columns: columns ?? [], rows };

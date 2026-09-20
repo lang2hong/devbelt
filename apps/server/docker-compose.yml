@@ -44,6 +44,10 @@ services:
       TOKEN_SIGNING_KEY_B64: ${TOKEN_SIGNING_KEY_B64:?TOKEN_SIGNING_KEY_B64 is required}
       TOKEN_VERIFY_KEYS_JSON: ${TOKEN_VERIFY_KEYS_JSON:?TOKEN_VERIFY_KEYS_JSON is required}
       PORT: 3000
+      # 容器内需绑 0.0.0.0 才能接受端口映射；未经过反向代理，故显式关闭 TRUST_PROXY，
+      # 否则服务会拒绝以非回环地址启动（防 XFF 伪造）。
+      HOST: 0.0.0.0
+      TRUST_PROXY: "false"
     ports:
       - "3000:3000"
     env_file:

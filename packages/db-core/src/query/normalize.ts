@@ -12,11 +12,13 @@ export function normalizeColumnMeta(row: any): ColumnMeta {
   const name = row.name ?? row.Field ?? row.column_name ?? row['name'];
   const type = row.type ?? row.Type ?? row.data_type ?? row['type'];
   const key = row.key ?? row.Key ?? row['key'] ?? '';
-  const nullable = row.nullable ?? row.Null ?? row.is_nullable ?? '';
+  // SQLite 的 PRAGMA table_info 用 `notnull`（无 isNotNull/nullable 字段），必须一并识别，
+  // 否则 SQLite 列的 NOT NULL 永远解析为 false，结构比对会漏判约束并生成丢约束的 DDL。
+  const nullable = row.nullable ?? row.Null ?? row.is_nullable ?? (row.notnull !== undefined ? (toBool(row.notnull) ? 'NO' : 'YES') : '');
   const isPrimary = String(key).toUpperCase() === 'PRI' || toBool(row.isPrimary) || toBool(row.pk);
   const isNotNull = row.isNotNull !== undefined
     ? toBool(row.isNotNull)
-    : String(nullable).toUpperCase() === 'NO';
+    : (row.notnull !== undefined ? toBool(row.notnull) : String(nullable).toUpperCase() === 'NO');
   const extra = row.extra ?? row.Extra ?? '';
   return {
     name,
@@ -26,7 +28,7 @@ export function normalizeColumnMeta(row: any): ColumnMeta {
     key,
     nullable,
     maxLength: row.maxLength ?? '',
-    defaultValue: row.defaultValue ?? row.Default ?? row.column_default ?? '',
+    defaultValue: row.defaultValue ?? row.Default ?? row.column_default ?? row.dflt_value ?? row.default_value ?? '',
     extra,
     isNotNull,
     isAutoIncrement: String(extra).toLowerCase().includes('auto_increment'),

@@ -144,6 +144,6 @@ ssh "$REMOTE" \
 ssh "$REMOTE" "sleep 1; systemctl --no-pager --full status '$SERVICE_NAME' || true"
 ssh "$REMOTE" "curl -sf '$HEALTH_URL' && echo '  <- /health OK'"
 # 静态资源健康检查：控制台 shell 可访问（dist 缺失/损坏时 fail-visible）。
-ssh "$REMOTE" "curl -sf 'http://localhost:3000/console/' >/dev/null && echo '  <- console static OK'"
+ssh "$REMOTE" "curl -sf 'http://localhost:3000/db/' >/dev/null && echo '  <- console static OK'"
 
 echo "部署完成"

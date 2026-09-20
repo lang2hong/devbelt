@@ -24,4 +24,20 @@ describe('connectionUrl 凭据处理', () => {
     expect(stripUrlCredentials('not a url')).toBe('not a url');
     expect(hasUrlCredentials('not a url')).toBe(false);
   });
+
+  it('识别并脱敏 libpq 关键词 DSN 的 password=', () => {
+    const dsn = 'host=h port=5432 user=u password=p dbname=d';
+    expect(hasUrlCredentials(dsn)).toBe(true);
+    const out = stripUrlCredentials(dsn);
+    expect(out).not.toContain('password=p');
+    expect(out).toContain('password=***');
+  });
+
+  it('识别并脱敏 JDBC 的 user:pass@', () => {
+    const jdbc = 'jdbc:mysql://user:pass@host:3306/db';
+    expect(hasUrlCredentials(jdbc)).toBe(true);
+    const out = stripUrlCredentials(jdbc);
+    expect(out).not.toContain('pass');
+    expect(out).toContain('jdbc:mysql://user@host:3306/db');
+  });
 });

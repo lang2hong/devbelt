@@ -6,20 +6,11 @@ import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
 import { openQueryFile, openSqlDocEditor, pickConnection } from './shared';
 import { confirmSqlExecution, ensureWritable } from '../utils/sqlSafety';
-import { splitSqlWithRanges } from '../utils/sql';
+import { statementTextAt } from '../utils/sql';
 import { dialectScanOptions } from '../utils/sqlDialectOptions';
 
 export function registerQueryCommands(deps: Deps, sub: Sub): void {
   const { store, manager, executor, history, connCtx, treeProvider } = deps;
-
-  /** 光标所在的 SQL 语句（复用与执行侧一致的方言切分）；无则返回 undefined。 */
-  const statementAtCursor = (editor: vscode.TextEditor, dbType?: import('@devkit/db-core').DatabaseType): string | undefined => {
-    const pos = editor.document.offsetAt(editor.selection.active);
-    for (const seg of splitSqlWithRanges(editor.document.getText(), dialectScanOptions(dbType))) {
-      if (pos >= seg.start && pos <= seg.end) return seg.sql;
-    }
-    return undefined;
-  };
 
   const runActiveQuery = async (mode: import('../result/queryExecutor').QueryExecutionMode, scope: 'statement' | 'all' = 'statement') => {
     const editor = vscode.window.activeTextEditor;
@@ -32,12 +23,17 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
     if (!conn) return;
     if (!ctx) connCtx.setForDoc(editor.document.uri.toString(), conn);
     // 有选区 → 执行选区；否则默认执行光标所在语句（Ctrl+Enter 的直觉语义）。
-    // 「执行整篇」是独立命令 runAllQueries。
+    // 「执行整篇」是独立命令 runAllQueries。光标不在任何语句内（空行/分号后）时
+    // 绝不能回退到整篇文档：用户停在空行上会意外执行整个脚本（含破坏性语句）。
     const sql = !editor.selection.isEmpty
       ? editor.document.getText(editor.selection)
       : scope === 'all'
         ? editor.document.getText()
-        : (statementAtCursor(editor, ctx?.conn.dbType) ?? editor.document.getText());
+        : statementTextAt(editor.document.getText(), editor.document.offsetAt(editor.selection.active), dialectScanOptions(ctx?.conn.dbType));
+    if (!sql || !sql.trim()) {
+      vscode.window.showInformationMessage(l10n('cmd.placeCursorInStatement'));
+      return;
+    }
     await executor.run(conn, sql, ctx?.db, mode);
   };
 

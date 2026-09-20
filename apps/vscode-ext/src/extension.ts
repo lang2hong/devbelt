@@ -8,6 +8,7 @@ import { QueryExecutor } from './result/queryExecutor';
 import { BaseWebView } from './result/baseWebView';
 import { TableQueryView } from './result/tableQueryView';
 import { AuditLogger } from './utils/auditLogger';
+import { diagDispose } from './utils/diagnostics';
 import { BackupScheduler } from './schedule/backupScheduler';
 import { registerViewCommands } from './commands/viewCommands';
 import { createSyncStatusBar } from './sync/syncStatusBar';
@@ -261,5 +262,6 @@ export async function syncLoggedInContext(auth: { isLoggedIn(): boolean }): Prom
 }
 
 export function deactivate(): void {
-  // cleanup handled by context.subscriptions; empty body is safe
+  // 释放诊断输出通道（否则扩展卸载/重载后旧的 OutputChannel 句柄不会回收）。
+  diagDispose();
 }

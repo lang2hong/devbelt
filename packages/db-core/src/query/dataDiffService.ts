@@ -1,6 +1,13 @@
 import type { QueryService } from './queryService.js';
 import type { MetadataService } from './metadataService.js';
 import { streamRowsByKeyset } from './paging.js';
+import { qualifyTable } from '../utils/qualify.js';
+
+/**
+ * 数值主键类型白名单（词边界匹配）。不能用 `/int/` 这种子串正则：`interval`/`point`
+ * 会被误判为数值型，从而走上 JS 有序归并（其 ORDER BY 语义与 JS 比较不一致）。
+ */
+const NUMERIC_PK_RE = /\b(?:tinyint|smallint|mediumint|int|integer|bigint|int2|int4|int8|serial|bigserial|smallserial|decimal|numeric|dec|real|double|float4|float8|float)\b/i;
 
 export type RowDiffStatus = 'added' | 'removed' | 'changed' | 'unchanged';
 
@@ -77,7 +84,7 @@ export class DataDiffService {
       const cols = await meta.getColumns(table, db);
       return pkColumns.every((name) => {
         const col = cols.find((c) => c.name === name);
-        return !!col && /int|serial|numeric|decimal|real|double|float|bigint/i.test(String(col.type));
+        return !!col && NUMERIC_PK_RE.test(String(col.simpleType || col.type));
       });
     } catch {
       return false;
@@ -121,8 +128,8 @@ export class DataDiffService {
     }
     const wrap = (id: string) => sourceQuery.dialect.wrap(id);
     const targetWrap = (id: string) => targetQuery.dialect.wrap(id);
-    const qualifiedSource = sourceDb ? `${wrap(sourceDb)}.${wrap(table)}` : wrap(table);
-    const qualifiedTarget = targetDb ? `${targetWrap(targetDb)}.${targetWrap(table)}` : targetWrap(table);
+    const qualifiedSource = qualifyTable(sourceQuery.dialect.dbType, wrap(table), sourceDb ? wrap(sourceDb) : undefined);
+    const qualifiedTarget = qualifyTable(targetQuery.dialect.dbType, targetWrap(table), targetDb ? targetWrap(targetDb) : undefined);
 
     const colList = columnNames.map((c) => wrap(c)).join(', ');
     const targetColList = columnNames.map((c) => targetWrap(c)).join(', ');
@@ -228,15 +235,14 @@ export class DataDiffService {
     };
   }
 
-  /** 按主键列比较两行（数值优先，其余按字符串）。 */
+  /** 按主键列比较两行（精确数值优先，其余按字符串）。 */
   private static compareKeyRows(a: Record<string, unknown>, b: Record<string, unknown>, cols: string[]): number {
     for (const col of cols) {
       const va = a[col];
       const vb = b[col];
-      const na = Number(va);
-      const nb = Number(vb);
-      if (String(va).trim() !== '' && String(vb).trim() !== '' && Number.isFinite(na) && Number.isFinite(nb)) {
-        if (na !== nb) return na < nb ? -1 : 1;
+      const cmp = compareNumericStrings(va, vb);
+      if (cmp !== null) {
+        if (cmp !== 0) return cmp;
         continue;
       }
       const sa = String(va);
@@ -284,22 +290,33 @@ export class DataDiffService {
     const sa = String(a);
     const sb = String(b);
     if (sa === sb) return true;
-    // 数值型字符串等价（'1' vs 1、'1.0' vs 1）。
-    if (sa.trim() !== '' && sb.trim() !== '') {
-      const na = Number(sa);
-      const nb = Number(sb);
-      if (Number.isFinite(na) && Number.isFinite(nb)) return na === nb;
-    }
+    // 数值型字符串等价（'1' vs 1、'1.0' vs 1）。必须精确比较：Number() 会把
+    // 超过 2^53 的 BIGINT/DECIMAL 字符串折叠，导致真实差异被判为相等。
+    const cmp = compareNumericStrings(sa, sb);
+    if (cmp !== null) return cmp === 0;
     return false;
   }
 
-  /** 把 Date 或常见日期时间文本规整为 `YYYY-MM-DD HH:mm:ss`；无法识别返回 null。 */
+  /** 把 Date 或常见日期时间文本规整为 UTC ISO（含毫秒）；无法识别返回 null。 */
   private static canonicalDate(v: unknown): string | null {
-    const text = v instanceof Date ? v.toISOString() : (typeof v === 'string' ? v : null);
+    const text = v instanceof Date ? v.toISOString() : (typeof v === 'string' ? v.trim() : null);
     if (text === null) return null;
-    const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?)?Z?$/.exec(text.trim());
+    const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3})\d*)?)?\s*(Z|[+-]\d{2}:?\d{2})?$/.exec(text);
     if (!m) return null;
-    return `${m[1]}-${m[2]}-${m[3]} ${m[4] ?? '00'}:${m[5] ?? '00'}:${m[6] ?? '00'}`;
+    let offsetMinutes = 0;
+    if (m[8] && m[8] !== 'Z') {
+      const sign = m[8][0] === '-' ? -1 : 1;
+      const parts = /(\d{2}):?(\d{2})/.exec(m[8]);
+      offsetMinutes = parts ? sign * (Number(parts[1]) * 60 + Number(parts[2])) : 0;
+    }
+    const ms = Date.UTC(
+      Number(m[1]), Number(m[2]) - 1, Number(m[3]),
+      Number(m[4] ?? 0), Number(m[5] ?? 0), Number(m[6] ?? 0),
+      Number((m[7] ?? '0').padEnd(3, '0')),
+    );
+    if (!Number.isFinite(ms)) return null;
+    // 带时区偏移的输入换算到 UTC 后统一比较；Date.UTC 以毫秒精度保留小数秒。
+    return new Date(ms - offsetMinutes * 60000).toISOString();
   }
 
   static generateSyncSql(diffs: DataDiffResult, targetDb: string, targetQuery: QueryService): string {
@@ -314,7 +331,7 @@ export class DataDiffService {
       // 标识符引用规则以目标为准。此处曾用源方言（MySQL→PG 时往 PG 发反引号
       // + 反斜杠倍增，目标库拒绝或数据损坏）。
       const esc = (v: unknown) => targetQuery.dialect.escapeValue(v);
-      const qualifiedTarget = targetDb ? `${wrap(targetDb)}.${wrap(td.tableName)}` : wrap(td.tableName);
+      const qualifiedTarget = qualifyTable(targetQuery.dialect.dbType, wrap(td.tableName), targetDb ? wrap(targetDb) : undefined);
       const colList = td.columnNames.map(wrap).join(', ');
 
       const added = td.rows.filter((r) => r.status === 'added');
@@ -355,6 +372,51 @@ export class DataDiffService {
     }
     return parts.join('\n');
   }
+}
+
+/**
+ * 精确解析数值字面量为 `mantissa * 10^exponent`（mantissa 为 bigint）。
+ *
+ * `Number()` 对 BIGINT/DECIMAL 字符串会丢精度（`'9007199254740993'` 与 `'...992'`
+ * 折叠为同一 double），驱动默认就把大整数以字符串返回，因此比较必须走 BigInt。
+ * 非数值字面量返回 null，由调用方回退字符串比较。
+ */
+function parseNumericLiteral(value: unknown): { mantissa: bigint; exponent: number } | null {
+  const text = typeof value === 'number'
+    ? (Number.isFinite(value) ? String(value) : null)
+    : (typeof value === 'string' ? value.trim() : null);
+  if (text === null || text === '') return null;
+  const m = /^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/.exec(text);
+  if (!m) return null;
+  const intPart = m[2] ?? '';
+  const fracPart = m[3] ?? '';
+  if (intPart === '' && fracPart === '') return null;
+  const exp = m[4] ? Number(m[4]) : 0;
+  if (!Number.isFinite(exp) || Math.abs(exp) > 10000) return null;
+  let mantissa = BigInt((intPart + fracPart) || '0');
+  if (m[1] === '-') mantissa = -mantissa;
+  let exponent = exp - fracPart.length;
+  // 去掉尾随零，使 `'1.0'`/`'1.00'`/`'1'` 归一为同一表示（指数已 10000 上限保护）。
+  while (mantissa !== 0n && mantissa % 10n === 0n) {
+    mantissa /= 10n;
+    exponent += 1;
+  }
+  return { mantissa, exponent };
+}
+
+/** 精确比较两个数值字面量；任一非数值返回 null。 */
+function compareNumericStrings(a: unknown, b: unknown): number | null {
+  const x = parseNumericLiteral(a);
+  const y = parseNumericLiteral(b);
+  if (!x || !y) return null;
+  const minExp = Math.min(x.exponent, y.exponent);
+  const shiftX = x.exponent - minExp;
+  const shiftY = y.exponent - minExp;
+  // 指数差过大时不做 10^n 放大，避免构造超大 bigint；退回字符串比较。
+  if (shiftX > 1000 || shiftY > 1000) return null;
+  const mx = x.mantissa * 10n ** BigInt(shiftX);
+  const my = y.mantissa * 10n ** BigInt(shiftY);
+  return mx < my ? -1 : mx > my ? 1 : 0;
 }
 
 function extractPk(pkColumns: string[], row: Record<string, unknown>): Record<string, unknown> {
