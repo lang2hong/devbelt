@@ -27,8 +27,12 @@ export function ensureWritable(conn: SavedConnection): boolean {
  * statements or any production write. This is intentionally local so every
  * provider, including future AI providers, shares the same guardrail.
  */
-export async function confirmSqlExecution(conn: SavedConnection, sql: string): Promise<boolean> {
-  const risk = analyzeSqlRisk(sql, dialectScanOptions(conn.dbType));
+export async function confirmSqlExecution(
+  conn: SavedConnection,
+  sql: string,
+  scanOptions?: import('@devkit/db-core/sql').SqlScanOptions,
+): Promise<boolean> {
+  const risk = analyzeSqlRisk(sql, scanOptions ?? dialectScanOptions(conn.dbType));
   if (!risk.isWrite) return true;
   if (!ensureWritable(conn)) return false;
   if (risk.level !== 'critical' && conn.environment !== 'production') return true;

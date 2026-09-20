@@ -3,6 +3,8 @@ import type { DatabaseType } from '@devkit/db-core';
 import type { DatabaseCapabilities } from '@devkit/db-core';
 import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import type { HistoryStore } from '../history/historyStore';
+import type { SqlScanOptions } from '@devkit/db-core/sql';
+import { dialectScanOptions } from '../utils/sqlDialectOptions';
 import { QueryHistoryRecorder } from '../history/queryHistoryRecorder';
 import { SshTunnel } from './sshTunnel';
 import { validateConnectionPaths, type PathValidationResult } from './connectionPathValidator';
@@ -75,6 +77,8 @@ export class ConnectionManager {
    * 如需回收，必须先把 `connecting` 改为携带代际并保留 in-flight 记录。
    */
   private readonly generations = new Map<string, number>();
+  /** MySQL 服务端是否 NO_BACKSLASH_ESCAPES（按连接缓存，供切分/只读分类）。 */
+  private readonly noBackslashEscapes = new Map<string, boolean>();
   private readonly config: PoolConfig;
   private healthCheckTimer?: ReturnType<typeof setInterval>;
   private disposing = false;
@@ -148,6 +152,11 @@ export class ConnectionManager {
    * 建立连接会话并缓存。
    * @param conn 已保存连接配置
    */
+  /** 该连接适用的 SQL 扫描选项（含 MySQL sql_mode 的 NO_BACKSLASH_ESCAPES 影响）。 */
+  scanOptionsFor(conn: SavedConnection): SqlScanOptions {
+    return dialectScanOptions(conn.dbType, { noBackslashEscapes: this.noBackslashEscapes.get(conn.id) === true });
+  }
+
   async connect(conn: SavedConnection, opts?: ConnectOptions): Promise<ConnectionSession> {
     void opts; // scope 仅为调用方语义标记（组织调用方传入 'organization'），当前不参与建连逻辑
     const existing = this.sessions.get(conn.id);
@@ -275,6 +284,19 @@ export class ConnectionManager {
     // 无论它来自编辑器、结果网格、表设计器还是树右键命令。
     const recorder = this.history ? new QueryHistoryRecorder(conn, this.history) : undefined;
     const query = new QueryService(connection, dialect, recorder?.observer(), conn.requestTimeout);
+
+    // MySQL：读一次 @@sql_mode。NO_BACKSLASH_ESCAPES 会反转字符串转义语义，
+    // 影响语句切分与只读判定；读失败不阻断建连，退回默认（反斜杠转义）。
+    if (dialect.dbType === 'MYSQL') {
+      try {
+        const r = await query.query('SELECT @@sql_mode AS mode');
+        const mode = String((r.rows?.[0] as { mode?: unknown } | undefined)?.mode ?? '');
+        this.noBackslashEscapes.set(conn.id, /NO_BACKSLASH_ESCAPES/i.test(mode));
+      } catch {
+        /* 保持默认 */
+      }
+    }
+
     const session: ConnectionSession = {
       capabilities: dialect.capabilities,
       query,
@@ -286,6 +308,7 @@ export class ConnectionManager {
         connection.end();
         this.sessions.delete(conn.id);
         this.sessionEntries.delete(conn.id);
+        this.noBackslashEscapes.delete(conn.id);
         if (conn.sshHost) SshTunnel.close(conn.id);
       },
     };

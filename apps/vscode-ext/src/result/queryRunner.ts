@@ -6,7 +6,6 @@ import type { SavedConnection } from '@devkit/db-host/connection/connectionStore
 import { splitSqlStatements } from '../utils/sql';
 import { confirmSqlExecution } from '../utils/sqlSafety';
 import { classifyWriteKind } from '../utils/sqlRisk';
-import { dialectScanOptions } from '../utils/sqlDialectOptions';
 import { buildCountSql, buildTableSelect, type ColumnTypeMap, type FilterCondition } from './tableQuerySql';
 import { diagError } from '../utils/diagnostics';
 import { l10n } from '../i18n';
@@ -126,7 +125,7 @@ export class QueryRunner {
     let transactionState: 'active' | 'committed' | 'rolledback' | undefined;
     let session: any = undefined;
     try {
-      if (!(await confirmSqlExecution(this.conn, sql))) return;
+      if (!(await confirmSqlExecution(this.conn, sql, this.manager.scanOptionsFor?.(this.conn)))) return;
       this.post({ type: 'running' });
       session = await this.manager.connect(this.conn);
       const token: QueryCancelToken = {};
@@ -134,7 +133,7 @@ export class QueryRunner {
       if (database && this.conn.dbType === DatabaseType.MYSQL) {
         await session.query.query(`USE ${session.query.wrap(validateIdent(database))}`, undefined, { token });
       }
-      const scanOpts = dialectScanOptions(this.conn.dbType);
+      const scanOpts = this.manager.scanOptionsFor?.(this.conn);
       const stmts = splitSqlStatements(sql, scanOpts);
       // 有 onExecuted 时由 QueryExecutor 记一条「整段 SQL」的历史，这里逐条上报会重复；
       // 没有 onExecuted 时（结果面板内改 SQL 再运行）交给观察者逐条记录 ——
@@ -238,7 +237,7 @@ export class QueryRunner {
   private async doExplain(sql: string): Promise<void> {
     if (this.disposed) return;
     try {
-      if (!(await confirmSqlExecution(this.conn, sql))) return;
+      if (!(await confirmSqlExecution(this.conn, sql, this.manager.scanOptionsFor?.(this.conn)))) return;
       this.post({ type: 'running' });
       const session = await this.manager.connect(this.conn);
       const token: QueryCancelToken = {};
@@ -253,13 +252,13 @@ export class QueryRunner {
       //  - MySQL/PG 用不带 ANALYZE 的 EXPLAIN：只生成计划不执行，避免 PG 的
       //    EXPLAIN ANALYZE 对 INSERT/UPDATE/DELETE 产生真实写库副作用。
       const prefix = this.conn.dbType === DatabaseType.SQLITE ? 'EXPLAIN QUERY PLAN ' : 'EXPLAIN ';
-      const stmts = splitSqlStatements(sql, dialectScanOptions(this.conn.dbType));
+      const stmts = splitSqlStatements(sql, this.manager.scanOptionsFor?.(this.conn));
       const results: any[] = [];
       let skippedDdl = false;
       for (const stmt of stmts) {
         // DDL 没有执行计划可解释（EXPLAIN CREATE/ALTER/DROP 在 MySQL/PG 是语法错误，
         // SQLite 则静默），遇到即跳过，不让数据库抛一句晦涩的语法错误。
-        if (classifyWriteKind(stmt, dialectScanOptions(this.conn.dbType)) === 'ddl') {
+        if (classifyWriteKind(stmt, this.manager.scanOptionsFor?.(this.conn)) === 'ddl') {
           skippedDdl = true;
           continue;
         }

@@ -236,7 +236,7 @@ export class TableDesignView extends BaseWebView {
         });
         return;
       }
-      if (this.conn.environment === 'production' && !(await confirmSqlExecution(this.conn, op))) {
+      if (this.conn.environment === 'production' && !(await confirmSqlExecution(this.conn, op, this.manager.scanOptionsFor?.(this.conn)))) {
         return;
       }
       await fn();

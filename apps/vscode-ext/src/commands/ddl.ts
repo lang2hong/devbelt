@@ -150,7 +150,7 @@ export function registerDdlCommands(deps: Deps, sub: Sub): void {
     if (!(await confirm('ddl.dropTriggerConfirm', 'common.delete', node.label))) return;
     const session = await manager.connect(ctx.conn);
     const sql = session.metadata.dropTriggerSql(node.label, ctx.table, ctx.database);
-    if (!(await confirmSqlExecution(ctx.conn, sql))) return;
+    if (!(await confirmSqlExecution(ctx.conn, sql, manager.scanOptionsFor?.(ctx.conn)))) return;
     await session.query.query(sql);
     refreshParent(node);
   });

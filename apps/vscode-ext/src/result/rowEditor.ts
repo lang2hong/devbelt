@@ -34,7 +34,7 @@ export class RowEditor {
         this.post({ type: 'error', message: 'No identifying columns for this row.' });
         return;
       }
-      if (!(await confirmSqlExecution(this.conn, `UPDATE ${this.table} SET ${col} = ? WHERE ${pkColumns.join(', ')} = ?`))) return;
+      if (!(await confirmSqlExecution(this.conn, `UPDATE ${this.table} SET ${col} = ? WHERE ${pkColumns.join(', ')} = ?`, this.manager.scanOptionsFor?.(this.conn)))) return;
       const session = await this.manager.connect(this.conn);
       const result = await session.data.updateCell(this.table, pkColumns, pkValues, col, val, this.database);
       this.post({ type: 'cellUpdated' });
@@ -53,7 +53,7 @@ export class RowEditor {
         this.post({ type: 'error', message: 'No identifying columns for row deletion.' });
         return;
       }
-      if (!(await confirmSqlExecution(this.conn, `DELETE FROM ${this.table} WHERE ${cols.join(', ')} = ?`))) return;
+      if (!(await confirmSqlExecution(this.conn, `DELETE FROM ${this.table} WHERE ${cols.join(', ')} = ?`, this.manager.scanOptionsFor?.(this.conn)))) return;
       const session = await this.manager.connect(this.conn);
       const result = await session.data.deleteRows(
         this.table,
@@ -71,7 +71,7 @@ export class RowEditor {
 
   async insertRow(columns: string[], values: (string | null)[]): Promise<void> {
     try {
-      if (!(await confirmSqlExecution(this.conn, `INSERT INTO ${this.table} ...`))) return;
+      if (!(await confirmSqlExecution(this.conn, `INSERT INTO ${this.table} ...`, this.manager.scanOptionsFor?.(this.conn)))) return;
       const session = await this.manager.connect(this.conn);
       const result = await session.data.insertRow(this.table, columns, values, this.database);
       this.notify('insert', result, `INSERT INTO ${this.table} (${columns.join(', ')})`, 1);

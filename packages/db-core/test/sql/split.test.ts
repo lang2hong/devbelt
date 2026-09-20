@@ -143,6 +143,13 @@ describe('scanOptionsForDbType：方言扫描选项单一来源（F1 回归）',
     expect(scanOptionsForDbType(DatabaseType.MYSQL)).toEqual({ hashComment: true, dashDashRequiresSpace: true, backslashEscapes: true, escapeStringPrefix: false });
     expect(scanOptionsForDbType(DatabaseType.PG)).toEqual({ hashComment: false, dashDashRequiresSpace: false, backslashEscapes: false, escapeStringPrefix: true });
     expect(scanOptionsForDbType(undefined)).toEqual({ hashComment: false, dashDashRequiresSpace: false, backslashEscapes: false, escapeStringPrefix: false });
+    expect(scanOptionsForDbType(DatabaseType.MYSQL, { noBackslashEscapes: true })).toEqual({ hashComment: true, dashDashRequiresSpace: true, backslashEscapes: false, escapeStringPrefix: false });
+  });
+
+  it('MySQL NO_BACKSLASH_ESCAPES：反斜杠不转义，隐藏的 DROP 被切出', () => {
+    const opts = scanOptionsForDbType(DatabaseType.MYSQL, { noBackslashEscapes: true });
+    expect(splitSqlWithRanges(String.raw`SELECT 'a\'; DROP TABLE t`, opts).map((r) => r.sql))
+      .toEqual([String.raw`SELECT 'a\'`, 'DROP TABLE t']);
   });
 
   it('MySQL SHOW CREATE 里 COMMENT 的 \\\' 不会误切后续语句', () => {

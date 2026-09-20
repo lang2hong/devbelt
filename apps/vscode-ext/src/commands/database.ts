@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import { SchemaDiffService, BackupService, DataTransferService, DatabaseType, validateIdent } from '@devkit/db-core';
 import { DbTreeNode } from '../tree/dbTreeNode';
 import { wrapIdentForConn, splitSqlStatements, streamSqlStatements } from '../utils/sql';
-import { dialectScanOptions } from '../utils/sqlDialectOptions';
 import { confirmSqlExecution, ensureWritable } from '../utils/sqlSafety';
 import { parseCsv, readCsvSample, streamCsvRows } from '../data/transfer/csv';
 import { readJsonSample, streamJsonRows } from '../data/transfer/json';
@@ -105,7 +104,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (confirmed !== restoreBtn) return;
     const session = await manager.connect(node.conn);
     // 流式读取 + 增量切分：过去整文件读进内存再一次性切分，GB 级 dump 会 OOM。
-    const statements = streamSqlStatements(uri[0].fsPath, dialectScanOptions(node.conn.dbType));
+    const statements = streamSqlStatements(uri[0].fsPath, manager.scanOptionsFor?.(node.conn));
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'Restoring database...', cancellable: true },
       async (progress, token) => {
@@ -361,7 +360,7 @@ async function importSqlScript(
   const { manager, treeProvider, connCtx } = deps;
   const conn = node.conn;
   if (!conn) return;
-  if (!(await confirmSqlExecution(conn, sql))) return;
+  if (!(await confirmSqlExecution(conn, sql, manager.scanOptionsFor?.(conn)))) return;
   const session = await manager.connect(conn);
   const database = node.database;
   connCtx.setLast(conn, database);
@@ -369,7 +368,7 @@ async function importSqlScript(
     await session.query.query(`USE ${wrapIdentForConn(conn, validateIdent(database))}`);
   }
   const txControl = /^(BEGIN|START\s+TRANSACTION|COMMIT|ROLLBACK|END)\s*;?\s*$/i;
-  const statements = splitSqlStatements(sql, dialectScanOptions(conn.dbType))
+  const statements = splitSqlStatements(sql, manager.scanOptionsFor?.(conn))
     .filter((st) => !txControl.test(st.trim()));
   // 脚本导入过去逐句直接执行，中途失败会留下半截数据。除 SQLite（CLI 驱动每句独立
   // 进程、无法跨语句事务）外，用事务包裹，失败整体回滚。MySQL 的 DDL 会隐式提交，
@@ -499,7 +498,7 @@ async function importStructuredData(
   const firstTarget = selected[0].target;
   if (!firstTarget) return;
   const insertPreview = session.query.dialect.buildInsertSql([{ [firstTarget]: source.rows[0][selected[0].source] }], [firstTarget], table.label, database);
-  if (!(await confirmSqlExecution(conn, insertPreview))) return;
+  if (!(await confirmSqlExecution(conn, insertPreview, manager.scanOptionsFor?.(conn)))) return;
   connCtx.setLast(conn, database);
   try {
     const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: l10n('import.progress'), cancellable: true }, (progress, token) => {

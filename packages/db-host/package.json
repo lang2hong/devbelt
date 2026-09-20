@@ -1,6 +1,7 @@
 {
   "name": "@devkit/db-host",
   "version": "0.1.0",
+  "private": true,
   "description": "Host-agnostic editor/sync logic shared across hosts (no vscode dependency)",
   "license": "MIT",
   "engines": { "node": ">=20" },

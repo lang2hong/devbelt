@@ -151,7 +151,7 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
       if (!args?.conn || !args.table || !args.pkColumns?.length) return;
       if (!ensureWritable(args.conn)) return;
       const preview = `UPDATE ${args.table} SET ${args.column} = ? WHERE ${args.pkColumns.join(', ')} = ?`;
-      if (!(await confirmSqlExecution(args.conn, preview))) return;
+      if (!(await confirmSqlExecution(args.conn, preview, manager.scanOptionsFor?.(args.conn)))) return;
       const session = await manager.connect(args.conn);
       await session.data.updateCell(args.table, args.pkColumns, args.pkValues, args.column, args.value);
       vscode.window.showInformationMessage(l10n('cmd.updated', { table: args.table, column: args.column }));
