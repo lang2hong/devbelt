@@ -339,6 +339,13 @@ export class SyncEngine {
     } catch (err) {
       return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `deferred drain failed: ${describe(err)}` };
     }
+    // drain 可能把此前"引用被延迟"的连接落地；立即收敛 unresolved，
+    // 否则升级后若 feed 为空（常见），依赖方（查询/文件夹）的 connId 会一直解析不了。
+    try {
+      await reconcileUnresolved(ctx);
+    } catch (err) {
+      return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `reconcile unresolved failed: ${describe(err)}` };
+    }
 
     for (let pages = 0; ; pages++) {
       if (pages >= MAX_PAGES) {
@@ -371,8 +378,8 @@ export class SyncEngine {
         for (const { rec } of typed) {
           try {
             const disposition = await this.applyRemote(rec, this.deps.keyEpoch, ctx);
-            // 仅「未授权且尚未映射」才 defer；版本重放的 skipped 已有映射，不得入队。
-            if (disposition === 'skipped' && this.deps.deferred && !this.deps.mapStore.getByRecordId(rec.recordId)) {
+            // 权益跳过一律入 deferred（无论是否已映射）；版本重放的 'skipped' 不入队。
+            if (disposition === 'skipped-entitlement' && this.deps.deferred) {
               await this.deps.deferred.put({
                 recordId: rec.recordId,
                 version: rec.version,
@@ -593,7 +600,8 @@ export class SyncEngine {
 
   /**
    * 重放上一轮因权益被跳过的记录：权益放开后落地并移除；仍被拒则保留。
-   * 冲突并入本轮回 conflicts（不吞掉用户可见冲突）；解密/协议错误丢弃以免每轮卡死。
+   * 冲突并入本轮回 conflicts（不吞掉用户可见冲突）；解密/写盘等错误**保留条目**重试，
+   * 不再静默丢弃（游标已越过，删掉即永久丢失）。
    */
   private async drainDeferred(ctx: ApplyContext, conflicts: SyncConflictEntry[]): Promise<number> {
     const deferred = this.deps.deferred;
@@ -611,7 +619,7 @@ export class SyncEngine {
       };
       try {
         const disposition = await this.applyRemote(rec, this.deps.keyEpoch, ctx);
-        if (disposition === 'skipped') continue; // 仍无权益：保留待下次
+        if (disposition === 'skipped-entitlement') continue; // 仍无权益：保留待下次
         await deferred.delete(entry.recordId);
         drained += 1;
       } catch (err) {
@@ -629,8 +637,11 @@ export class SyncEngine {
           } catch {
             /* best-effort */
           }
+          // 冲突已并入本轮回 conflicts，删除条目避免每轮重复。
+          await deferred.delete(entry.recordId).catch(() => {});
         }
-        await deferred.delete(entry.recordId).catch(() => {});
+        // 其他错误（解密、写盘等）：保留条目，不静默丢弃 —— 记录入队时游标已越过，
+        // 删掉就永久丢失；下次同步重试，条目上限（1000）兜底增长。
       }
     }
     return drained;

@@ -51,7 +51,7 @@ export function mockValue(col: ColumnMeta, seq: number, esc: (value: string) => 
     val = enumVals[seq % enumVals.length];
   } else if (!isNumeric && name.includes('email')) {
     val = `user${seq}@example.com`;
-  } else if (!isNumeric && name.includes('phone') || name.includes('mobile')) {
+  } else if (!isNumeric && (name.includes('phone') || name.includes('mobile'))) {
     val = `1${String(Math.floor(Math.random() * 9e9)).padStart(9, '0')}`;
   } else if (!isNumeric && name.includes('name')) {
     val = randomName();
@@ -59,9 +59,9 @@ export function mockValue(col: ColumnMeta, seq: number, esc: (value: string) => 
     val = randomAddress();
   } else if (!isNumeric && name.includes('city')) {
     val = randomCity();
-  } else if (!isNumeric && name.includes('url') || name.includes('website')) {
+  } else if (!isNumeric && (name.includes('url') || name.includes('website'))) {
     val = `https://example.com/${seq}`;
-  } else if (!isNumeric && name.includes('avatar') || name.includes('image')) {
+  } else if (!isNumeric && (name.includes('avatar') || name.includes('image'))) {
     val = `https://example.com/avatar/${seq}.png`;
   } else if (!isNumeric && name.includes('password')) {
     val = randomString(12);
@@ -73,7 +73,7 @@ export function mockValue(col: ColumnMeta, seq: number, esc: (value: string) => 
     val = ['active', 'inactive', 'pending'][seq % 3];
   } else if (!isNumeric && name.includes('code')) {
     val = randomString(8).toUpperCase();
-  } else if (!isNumeric && name.includes('desc') || name.includes('content') || name.includes('comment')) {
+  } else if (!isNumeric && (name.includes('desc') || name.includes('content') || name.includes('comment'))) {
     val = `Mock data ${seq}`;
   } else if (type.includes('int') || type.includes('bigint') || type.includes('serial')) {
     val = String(seq + 1);

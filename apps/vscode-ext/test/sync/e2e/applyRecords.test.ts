@@ -148,7 +148,7 @@ describe('applyRecord（连接）', () => {
   it('引擎门禁（free + postgresql）跳过', async () => {
     const s = setup();
     const ctx = { ...s, entitlement: { planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 2, maxSavedConnections: 10, allowConnectionImport: false } };
-    expect(await applyRecord({ recordId: 'A'.repeat(22), version: '1', tombstone: false, payload: { ...connPayload, dbType: 'postgresql' } }, ctx)).toMatchObject({ disposition: 'skipped' });
+    expect(await applyRecord({ recordId: 'A'.repeat(22), version: '1', tombstone: false, payload: { ...connPayload, dbType: 'postgresql' } }, ctx)).toMatchObject({ disposition: 'skipped-entitlement' });
     expect(s.connections.size).toBe(0);
   });
 

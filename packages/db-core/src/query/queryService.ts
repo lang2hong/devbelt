@@ -16,7 +16,7 @@ import type { FieldInfo } from '../types/meta.js';
  * 字面量内部允许 SQL 的双写转义（`''`）与反斜杠转义。
  */
 const PASSWORD_LITERAL = new RegExp(
-  String.raw`(\b(?:identified\s+(?:with\s+\S+\s+)?by|(?:encrypted\s+)?password)\s*=?\s*)`
+  String.raw`(\b(?:identified\s+with\s+\S+\s+as|identified\s+(?:with\s+\S+\s+)?by|set\s+password\s+for\s+[^\n;=]*|(?:encrypted\s+)?password)\s*=?\s*)`
   + String.raw`('(?:[^']|'')*'|"(?:[^"]|"")*")`,
   'gi',
 );

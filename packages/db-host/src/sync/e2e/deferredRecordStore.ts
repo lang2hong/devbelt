@@ -94,11 +94,12 @@ export class DeferredRecordStore {
 
   private read(): DeferredData {
     const raw = this.memento.get<unknown>(this.key);
-    if (raw === undefined) return { records: {} };
+    if (raw === undefined) return { records: Object.create(null) };
     if (!isPlainObject(raw) || !isPlainObject(raw.records)) {
       throw new Error('corrupt deferred store: expected { records }');
     }
-    const records: Record<string, StoredRecord> = {};
+    // null 原型：recordId 是不可信输入，`__proto__` 对普通对象会走原型 setter 而丢失。
+    const records: Record<string, StoredRecord> = Object.create(null);
     for (const [recordId, entry] of Object.entries(raw.records)) {
       records[recordId] = validateStored(recordId, entry);
     }
@@ -127,12 +128,16 @@ export class DeferredRecordStore {
     const stored = validateStored(rec.recordId, rec);
     return this.mutate(async () => {
       const current = this.read();
-      const records: Record<string, StoredRecord> = { ...current.records };
+      const records: Record<string, StoredRecord> = Object.assign(Object.create(null), current.records);
       records[rec.recordId] = stored;
       const ids = Object.keys(records);
       if (ids.length > MAX_DEFERRED_RECORDS) {
-        // 丢最旧：changeSequence 最小者。
-        ids.sort((a, b) => (BigInt(records[a].changeSequence) < BigInt(records[b].changeSequence) ? -1 : 1));
+        // 丢最旧：changeSequence 最小者（全序比较，相等返回 0）。
+        ids.sort((a, b) => {
+          const ca = BigInt(records[a].changeSequence);
+          const cb = BigInt(records[b].changeSequence);
+          return ca < cb ? -1 : ca > cb ? 1 : 0;
+        });
         for (const id of ids.slice(0, ids.length - MAX_DEFERRED_RECORDS)) delete records[id];
       }
       await this.write({ records });
@@ -144,7 +149,7 @@ export class DeferredRecordStore {
     return this.mutate(async () => {
       const current = this.read();
       if (!(recordId in current.records)) return;
-      const records: Record<string, StoredRecord> = { ...current.records };
+      const records: Record<string, StoredRecord> = Object.assign(Object.create(null), current.records);
       delete records[recordId];
       await this.write({ records });
     });

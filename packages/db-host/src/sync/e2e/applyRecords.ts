@@ -29,7 +29,7 @@ import type { SyncEntityType, SyncEntityRef } from './syncEntity.js';
  * - 指向 org: 连接的查询整条跳过（§三/N7）。
  */
 
-export type ApplyDisposition = 'skipped' | 'created' | 'updated' | 'deleted' | 'ignored-tombstone';
+export type ApplyDisposition = 'skipped' | 'skipped-entitlement' | 'created' | 'updated' | 'deleted' | 'ignored-tombstone';
 
 export interface ApplyRecordInput {
   recordId: string;
@@ -175,7 +175,9 @@ async function applyActive(
       ctx.entitlement,
     );
     if (skipped.length > 0) {
-      return { recordId, disposition: 'skipped' };
+      // 与「版本重放的 skipped」区分：这类必须入 deferred 等权益放开后重放，
+      // 无论该记录是否已有本地映射（降级时已映射的记录同样会漏更新）。
+      return { recordId, disposition: 'skipped-entitlement' };
     }
   }
 

@@ -697,15 +697,15 @@ describe('SyncEngine · deferred（权益跳过的连接记录）', () => {
   const FREE = { planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 2, maxSavedConnections: 10, allowConnectionImport: false };
   const PRO = { ...FREE, allowedDatabaseTypes: ['mysql', 'sqlite', 'postgresql'] };
 
-  function remotePg() {
+  function remotePg(version = '1') {
     const recordId = 'A'.repeat(22);
     const dek = new Uint8Array(32);
     const nonce = new Uint8Array(12).fill(1);
     const plaintext = Buffer.from(JSON.stringify({ type: 'connection', name: 'pg', dbType: 'postgresql', host: 'h', port: 5432, user: 'u', password: 'p' }), 'utf8');
-    const box = sealRecord(dek, nonce, plaintext, { userId: '7', keyEpoch: '1', recordId, recordVersion: '1' });
+    const box = sealRecord(dek, nonce, plaintext, { userId: '7', keyEpoch: '1', recordId, recordVersion: version });
     return {
       recordId,
-      version: '1',
+      version,
       changeSequence: '5',
       deleteTime: null,
       cipherSuite: 'AES-256-GCM',
@@ -758,6 +758,49 @@ describe('SyncEngine · deferred（权益跳过的连接记录）', () => {
     const conns = store.listForSync().filter((c) => !(c as unknown as { deleted?: boolean }).deleted);
     expect(conns).toHaveLength(1);
     expect(conns[0].name).toBe('pg');
+  });
+
+  it('已映射的 PG 连接在 free 下也入 deferred；升级后 drain 更新该连接', async () => {
+    const store = makeStore([{ id: 'c-old', name: 'pg-old', dbType: 'postgresql' as never, host: 'h', port: 5432, user: 'u', updateTime: 100 } as SavedConnection]);
+    const memento = makeMemento();
+    const entities = new EntityStore(store);
+    const mapStore = new RecordMapStore(makeMemento(), '7', '1');
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    const unresolved = new UnresolvedRefStore(memento, '7', '1');
+    const deferred = new DeferredRecordStore(memento, '7', '1');
+    const rec = remotePg('2');
+    // 已有 confirmed 映射（recordVersion 1 < 远端 2）；revision 取大值，避免本地 updateTime 触发脏冲突。
+    await mapStore.put(rec.recordId, { type: 'connection', localId: 'c-old', recordVersion: '1', revision: 9_999_999_999_999, status: 'confirmed' });
+
+    let entitlement = FREE;
+    const build = (client: PersonalSyncClient) =>
+      new SyncEngine({
+        userId: '7', keyEpoch: '1', client,
+        stateStore: makeStateStore(SNAP) as never,
+        mapStore, outbox, entities, unresolved, deferred,
+        dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueId: () => 'c-new-1',
+        entitlement: () => entitlement,
+        seedConflictCarrier: seedConflictStub,
+      });
+
+    const client1 = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [rec] })),
+    });
+    const r1 = await build(client1).sync();
+    expect(r1.stage).toBe('ok');
+    // 关键：已映射的权益跳过也必须入 deferred，否则游标越过后永久丢失更新。
+    expect(deferred.list()).toHaveLength(1);
+
+    entitlement = PRO;
+    const client2 = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [] })),
+    });
+    const r2 = await build(client2).sync();
+    expect(r2.stage).toBe('ok');
+    expect(deferred.list()).toHaveLength(0);
+    expect(store.listForSync().find((c) => c.id === 'c-old')?.name).toBe('pg');
   });
 
   it('deferred 中的墓碑（未落地）不被物化', async () => {

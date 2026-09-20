@@ -45,6 +45,8 @@ describe('QueryError 脱敏', () => {
     ['MySQL CREATE USER', `CREATE USER 'bob'@'%' IDENTIFIED BY '${SECRET}'`],
     ['MySQL ALTER USER', `ALTER USER 'bob'@'%' IDENTIFIED BY '${SECRET}'`],
     ['MySQL IDENTIFIED WITH', `CREATE USER 'bob'@'%' IDENTIFIED WITH mysql_native_password BY '${SECRET}'`],
+    ['MySQL IDENTIFIED WITH AS', `CREATE USER 'bob'@'%' IDENTIFIED WITH caching_sha2_password AS '${SECRET}'`],
+    ['MySQL SET PASSWORD FOR', `SET PASSWORD FOR 'bob'@'%' = '${SECRET}'`],
     ['PG CREATE ROLE', `CREATE ROLE "bob" WITH LOGIN PASSWORD '${SECRET}'`],
     ['PG ALTER ROLE', `ALTER ROLE "bob" WITH PASSWORD '${SECRET}'`],
     ['PG ENCRYPTED', `CREATE ROLE "bob" WITH ENCRYPTED PASSWORD '${SECRET}'`],

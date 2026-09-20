@@ -231,6 +231,28 @@ describe('SchemaDiffService', () => {
     expect(sql).not.toContain('`');
   });
 
+  it('PG 仅长度/精度变化：发出 ALTER COLUMN TYPE（此前被 base() 漏发）', async () => {
+    const pg = new PostgreSqlDialect();
+    const tableService = {
+      dbType: DatabaseType.PG,
+      wrapIdentifier: (id: string) => pg.wrap(id),
+      getCreateSql: async () => '',
+      supports: () => true,
+    } as unknown as TableService;
+    const diffs = [{
+      tableName: 'users',
+      status: 'changed' as const,
+      columns: [
+        { columnName: 'name', status: 'changed' as const, sourceType: 'character varying(255)', targetType: 'character varying(100)', sourceNotNull: false, targetNotNull: false },
+      ],
+    }];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'targetDb', tableService, 'sourceDb');
+    expect(sql).toContain('ALTER COLUMN "name" TYPE character varying(255)');
+    expect(sql).not.toContain('No differences found');
+    // 仅长度变化不触发 USING 告警
+    expect(sql).not.toContain('may require USING');
+  });
+
   it('默认值/注释变化被判为 changed 并带出目标值', async () => {
     const source = mockMetaService(['users'], { users: [{ name: 'flag', type: 'boolean', defaultValue: 'true', comment: 'c1' } as any] });
     const target = mockMetaService(['users'], { users: [{ name: 'flag', type: 'boolean', defaultValue: 'false', comment: 'c2' } as any] });

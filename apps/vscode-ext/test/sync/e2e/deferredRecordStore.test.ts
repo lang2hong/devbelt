@@ -69,4 +69,12 @@ describe('DeferredRecordStore', () => {
     await m.update('devbelt.sync.deferred.7.1', { records: { [REC_ID]: { version: 'x' } } });
     expect(() => s.list()).toThrow();
   });
+
+  it('recordId 为 __proto__ 时仍可存取（不得被对象原型 setter 静默丢弃）', async () => {
+    const s = new DeferredRecordStore(mem(), '7', '1');
+    await s.put(rec({ recordId: '__proto__' }));
+    expect(s.list().map((r) => r.recordId)).toContain('__proto__');
+    await s.delete('__proto__');
+    expect(s.list()).toHaveLength(0);
+  });
 });

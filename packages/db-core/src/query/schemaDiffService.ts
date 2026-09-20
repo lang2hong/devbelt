@@ -313,10 +313,14 @@ export class SchemaDiffService {
           } else if (c.status === 'removed') {
             actions.push(`DROP COLUMN ${col}`);
           } else if (c.status === 'changed') {
-            const base = (t?: string) => String(t || '').toLowerCase().split('(')[0].trim();
-            if (base(c.targetType) !== base(c.sourceType)) {
+            const normalize = (t?: string) => String(t || '').trim().toLowerCase();
+            const base = (t?: string) => normalize(t).split('(')[0].trim();
+            // 完整类型（含长度/精度）不同就必须改类型：仅 `varchar(100) → varchar(255)`
+            // 这类差异此前被 base() 抹平，diffColumns 判了 changed 却不生成任何动作。
+            if (normalize(c.targetType) !== normalize(c.sourceType)) {
               actions.push(`ALTER COLUMN ${col} TYPE ${type}`);
-              if (base(c.targetType) && base(c.sourceType)) {
+              // 仅基础类型不同才提示可能需要 USING/数据清理；纯长度/精度变化一般可安全转换。
+              if (base(c.targetType) && base(c.sourceType) && base(c.targetType) !== base(c.sourceType)) {
                 warnings.push(`-- WARN: type of "${c.columnName}" changes ${c.targetType} → ${c.sourceType}; may require USING / data cleanup.`);
               }
             }

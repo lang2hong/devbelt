@@ -42,4 +42,12 @@ describe('mockValue', () => {
   it('整型列产出递增数字', () => {
     expect(mockValue(col({ name: 'qty', simpleType: 'int', type: 'int' }), 4, esc)).toBe('5');
   });
+
+  it('数值列名含 website/comment/image 时仍走数值分支（优先级回归）', () => {
+    // `!isNumeric && a || b` 曾让数值列命中字符串分支并被裸写（非法 SQL）。
+    for (const name of ['website', 'comment', 'image', 'content', 'mobile']) {
+      const v = mockValue(col({ name, simpleType: 'int', type: 'int' }), 0, esc);
+      expect(v, name).toMatch(/^-?\d+$/);
+    }
+  });
 });
