@@ -15,7 +15,7 @@ export { PostgreSqlConnection } from './connection/postgreSqlConnection.js';
 export { SqliteConnection } from './connection/sqliteConnection.js';
 
 // 方言（策略模式）
-export { SqlDialect } from './dialect/sqlDialect.js';
+export type { SqlDialect } from './dialect/sqlDialect.js';
 export { MysqlDialect } from './dialect/mysqlDialect.js';
 export { PostgreSqlDialect } from './dialect/postgreSqlDialect.js';
 export { SqliteDialect } from './dialect/sqliteDialect.js';

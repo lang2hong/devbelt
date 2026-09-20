@@ -41,7 +41,6 @@
   "cmd.changeLoginPassword": "修改登录密码",
   "cmd.copyName": "复制名称",
   "cmd.manageUsers": "管理用户",
-  "cmd.pats": "管理访问令牌",
   "view.explorer": "连接",
   "cmd.org.refresh": "刷新组织",
   "cmd.org.newFolder": "新建目录",

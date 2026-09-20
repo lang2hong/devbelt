@@ -1,4 +1,6 @@
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const vscode = require('vscode');
 
 /**
@@ -25,6 +27,12 @@ async function run() {
   assert.ok(ext, `extension ${EXT_ID} not found after vsix install (manifest id mismatch or not packaged)`);
   await ext.activate();
   assert.strictEqual(ext.isActive, true, 'extension failed to activate');
+
+  // 打包后 webview 资源必须存在：`.vscodeignore` 误排除 out/webview/** 时这里直接报红
+  //（此前只断言激活/命令，漏文件不会被发现）。
+  const webviewEntry = path.join(ext.extensionPath, 'out', 'webview', 'index.js');
+  assert.ok(fs.existsSync(webviewEntry), `packaged vsix is missing out/webview/index.js (${webviewEntry})`);
+
   const cmds = await vscode.commands.getCommands(true);
   for (const id of EXPECTED_COMMANDS) {
     assert.ok(cmds.includes(id), `command not registered after activation: ${id}`);

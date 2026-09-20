@@ -18,9 +18,6 @@ export type DeviceStatus = 'active' | 'revoked';
 /** 邮箱验证 token 用途。当前注册使用 initial。 */
 export type EmailVerificationPurpose = 'initial' | 'email_change';
 
-/** 个人免费套餐引擎权益：MySQL / SQLite（见实施规格 §4.2）。 */
-export const PERSONAL_FREE_DATABASE_TYPES = ['mysql', 'sqlite'] as const;
-
 // ── 组织域 ──
 
 /** 组织状态（organizations.status）。closed 表示不可恢复的关闭状态。 */

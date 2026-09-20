@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Host-agnostic editor/sync logic shared across hosts (no vscode dependency)",
   "license": "MIT",
+  "engines": { "node": ">=20" },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
