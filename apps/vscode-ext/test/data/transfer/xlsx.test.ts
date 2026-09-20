@@ -371,3 +371,41 @@ describe('xlsx 流式写（writeXlsx）', () => {
     expect(streamedCrc).toBe(memoryCrc);
   });
 });
+
+describe('xlsx 流式解析', () => {
+  async function withFile(buf: Buffer, fn: (file: string, cleanup: () => void) => Promise<void>) {
+    const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'xlsx-stream-'));
+    const file = join(dir, 'd.xlsx');
+    writeFileSync(file, buf);
+    try { await fn(file, () => rmSync(dir, { recursive: true, force: true })); }
+    finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+
+  it('流式结果与 parseXlsx 一致（deflate 条目）', async () => {
+    const { streamXlsxRows } = await import('../../../src/data/transfer/xlsx');
+    const buf = serializeXlsx(['id', 'name', 'active'], [{ id: 1, name: 'a', active: true }, { id: 2, name: '', active: false }]);
+    await withFile(buf, async (file) => {
+      const streamed: unknown[] = [];
+      for await (const row of streamXlsxRows(file)) streamed.push(row);
+      expect(streamed).toEqual(parseXlsx(buf));
+    });
+  });
+
+  it('流式也识别日期样式（且用存储方式打包）', async () => {
+    const { streamXlsxRows } = await import('../../../src/data/transfer/xlsx');
+    const styles = '<styleSheet><cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="14"/></cellXfs></styleSheet>';
+    const sheet = '<worksheet><sheetData>'
+      + '<row r="1"><c r="A1" t="inlineStr"><is><t>d</t></is></c></row>'
+      + '<row r="2"><c r="A2" s="1"><v>45292</v></c></row>'
+      + '</sheetData></worksheet>';
+    const buf = buildWorkbook(sheet, undefined, styles);
+    await withFile(buf, async (file) => {
+      const streamed: unknown[] = [];
+      for await (const row of streamXlsxRows(file)) streamed.push(row);
+      expect(streamed).toEqual([{ d: '2024-01-01' }]);
+    });
+  });
+});

@@ -4,9 +4,11 @@ import { DbTreeNode } from '../tree/dbTreeNode';
 import { wrapIdentForConn, splitSqlStatements, streamSqlStatements } from '../utils/sql';
 import { dialectScanOptions } from '../utils/sqlDialectOptions';
 import { confirmSqlExecution, ensureWritable } from '../utils/sqlSafety';
-import { parseCsv } from '../data/transfer/csv';
+import { parseCsv, readCsvSample, streamCsvRows } from '../data/transfer/csv';
+import { readJsonSample, streamJsonRows } from '../data/transfer/json';
+import { parseXlsx, readXlsxSample, streamXlsxRows } from '../data/transfer/xlsx';
+import { readXmlSample, streamXmlRows } from '../data/transfer/xml';
 import { parseJson } from '../data/transfer/json';
-import { parseXlsx } from '../data/transfer/xlsx';
 import { parseXml } from '../data/transfer/xml';
 import { autoMapFields, type FieldMapping } from '../data/transfer/fieldMapper';
 import {
@@ -17,7 +19,7 @@ import {
   type TransferFormat,
 } from '../data/transfer/exportService';
 import { writeChunksToFile } from '../utils/writeChunks';
-import { importRows } from '../data/transfer/importService';
+import { importRows, importRowsStream } from '../data/transfer/importService';
 import { AuditLogger } from '../utils/auditLogger';
 import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
@@ -61,8 +63,13 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
       openLabel: l10n('import.selectFile'),
     });
     if (!uri?.[0]) return;
+    // 结构化格式统一走流式：传路径而不整文件读入（大文件 OOM）。
+    if (format === 'csv' || format === 'json' || format === 'xml' || format === 'xlsx') {
+      await importStructuredData(node, format, '', deps, undefined, uri[0].fsPath);
+      return;
+    }
     const raw = await vscode.workspace.fs.readFile(uri[0]);
-    const text = format === 'xlsx' ? Buffer.from(raw).toString('base64') : Buffer.from(raw).toString('utf8');
+    const text = Buffer.from(raw).toString('utf8');
     if (format === 'sql') {
       await importSqlScript(node, text, deps);
       return;
@@ -141,8 +148,12 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
       openLabel: l10n('import.selectFile'),
     });
     if (!uri?.[0]) return;
+    if (format === 'csv' || format === 'json' || format === 'xml' || format === 'xlsx') {
+      await importStructuredData(node, format, '', deps, node.label, uri[0].fsPath);
+      return;
+    }
     const raw = await vscode.workspace.fs.readFile(uri[0]);
-    const text = format === 'xlsx' ? Buffer.from(raw).toString('base64') : Buffer.from(raw).toString('utf8');
+    const text = Buffer.from(raw).toString('utf8');
     if (format === 'sql') {
       await importSqlScript(node, text, deps);
       return;
@@ -411,6 +422,7 @@ async function importStructuredData(
   text: string,
   deps: Deps,
   fixedTable?: string,
+  filePath?: string,
 ): Promise<void> {
   const { manager, treeProvider, connCtx } = deps;
   const conn = node.conn;
@@ -418,6 +430,8 @@ async function importStructuredData(
   let source: { columns: string[]; rows: Record<string, unknown>[] };
   // 报错行号：带表头时首个数据行是文件第 2 行。xlsx 的表头恒为工作表第 1 行。
   let rowOffset = 0;
+  // CSV/JSON/XML：只读表头 + 样本用于预览/映射，真正的导入走流式（见下方 importRowsStream）。
+  let streamRows: (() => AsyncIterable<Record<string, unknown>>) | undefined;
   try {
     if (format === 'csv') {
       const header = await vscode.window.showQuickPick(
@@ -425,18 +439,37 @@ async function importStructuredData(
         { placeHolder: l10n('import.headerChoice') },
       );
       if (!header) return;
-      source = parseCsv(text, header.value);
+      if (filePath) {
+        source = await readCsvSample(filePath, header.value);
+        streamRows = () => streamCsvRows(filePath, header.value);
+      } else {
+        source = parseCsv(text, header.value);
+      }
       rowOffset = header.value ? 1 : 0;
     } else if (format === 'json') {
-      source = parseJson(text);
+      if (filePath) {
+        source = await readJsonSample(filePath);
+        streamRows = () => streamJsonRows(filePath);
+      } else {
+        source = parseJson(text);
+      }
     } else if (format === 'xlsx') {
-      // 解析一次即可：此前同一份 buffer 被解了三遍
-      const parsed = parseXlsx(Buffer.from(text, 'base64'));
-      source = { columns: parsed.length ? Object.keys(parsed[0]) : [], rows: parsed };
       rowOffset = 1;
+      if (filePath) {
+        source = await readXlsxSample(filePath);
+        streamRows = () => streamXlsxRows(filePath);
+      } else {
+        const parsed = parseXlsx(Buffer.from(text, 'base64'));
+        source = { columns: parsed.length ? Object.keys(parsed[0]) : [], rows: parsed };
+      }
     } else if (format === 'xml') {
-      const parsed = parseXml(text);
-      source = { columns: parsed.length ? Object.keys(parsed[0]) : [], rows: parsed };
+      if (filePath) {
+        source = await readXmlSample(filePath);
+        streamRows = () => streamXmlRows(filePath);
+      } else {
+        const parsed = parseXml(text);
+        source = { columns: parsed.length ? Object.keys(parsed[0]) : [], rows: parsed };
+      }
     } else {
       throw new Error(`Unsupported format: ${format}`);
     }
@@ -469,17 +502,22 @@ async function importStructuredData(
   if (!(await confirmSqlExecution(conn, insertPreview))) return;
   connCtx.setLast(conn, database);
   try {
-    const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: l10n('import.progress'), cancellable: true }, (progress, token) => importRows({
-      query: session.query,
-      table: table.label,
-      database,
-      rows: source.rows,
-      mappings,
-      batchWrites: conn.dbType === DatabaseType.SQLITE,
-      rowOffset,
-      isCancelled: () => token.isCancellationRequested,
-      onProgress: ({ completed, total }) => progress.report({ message: `${completed}/${total}`, increment: total ? 100 / total : 0 }),
-    }));
+    const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: l10n('import.progress'), cancellable: true }, (progress, token) => {
+      const common = {
+        query: session.query,
+        table: table.label,
+        database,
+        mappings,
+        batchWrites: conn.dbType === DatabaseType.SQLITE,
+        rowOffset,
+        isCancelled: () => token.isCancellationRequested,
+        onProgress: ({ completed, total }: { completed: number; total: number }) => progress.report({ message: `${completed}/${total}`, increment: total ? 100 / total : 0 }),
+      };
+      // CSV 流式：逐行解析+插入，不整文件驻留；其余格式沿用数组导入。
+      return streamRows
+        ? importRowsStream({ ...common, rows: streamRows() })
+        : importRows({ ...common, rows: source.rows });
+    });
     if (result.errors.length) {
       await showImportReport(result.errors[0].row, result.errors[0].message);
       vscode.window.showErrorMessage(l10n('import.rolledBack', { row: result.errors[0].row }));

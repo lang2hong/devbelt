@@ -1,5 +1,5 @@
 import type { QueryOptions, QueryService } from '@devkit/db-core';
-import { mapRows, type FieldMapping } from './fieldMapper';
+import { mapRows, validateMappings, type FieldMapping } from './fieldMapper';
 import { TransferCancelledError } from './exportService';
 
 /**
@@ -53,20 +53,30 @@ export interface ImportRowsOptions {
  */
 export async function importRows(options: ImportRowsOptions): Promise<ImportResult> {
   const { query, table, database, rows, mappings, onProgress, isCancelled, batchWrites = false, rowOffset = 0 } = options;
-  const mapped = mapRows(rows, mappings);
-  if (!mapped.rows.length) return { imported: 0, rolledBack: false, errors: [] };
-  if (batchWrites) return importRowsBatched({ query, table, database, mapped, onProgress, isCancelled, rowOffset });
+  const selected = validateMappings(mappings);
+  const columns = selected.map((mapping) => mapping.target);
+  if (!rows.length) return { imported: 0, rolledBack: false, errors: [] };
+  if (batchWrites) {
+    // 批处理路径要把整批拼成一条 SQL，无法逐行释放，仍需完整映射副本。
+    const mapped = mapRows(rows, mappings);
+    return importRowsBatched({ query, table, database, mapped, onProgress, isCancelled, rowOffset });
+  }
   let started = false;
   let completed = 0;
+  const total = rows.length;
   try {
     await query.query('BEGIN', undefined, SKIP);
     started = true;
-    for (const row of mapped.rows) {
+    // 逐行即时映射：过去先 mapRows 生成整份映射副本再逐行插入，大文件下内存翻倍。
+    // 非批处理路径每次只用一个映射行。
+    for (const row of rows) {
       if (isCancelled?.()) throw new TransferCancelledError();
-      const sql = query.dialect.buildInsertSql([row], mapped.columns, table, database);
+      const mappedRow: Record<string, unknown> = {};
+      for (const mapping of selected) mappedRow[mapping.target] = row[mapping.source];
+      const sql = query.dialect.buildInsertSql([mappedRow], columns, table, database);
       await query.query(sql, undefined, SKIP);
       completed++;
-      onProgress?.({ completed, total: mapped.rows.length });
+      onProgress?.({ completed, total });
     }
     await query.query('COMMIT', undefined, SKIP);
     return { imported: completed, rolledBack: false, errors: [] };
@@ -77,6 +87,55 @@ export async function importRows(options: ImportRowsOptions): Promise<ImportResu
         await query.query('ROLLBACK', undefined, SKIP);
         rollbackSucceeded = true;
       } catch { /* Preserve the original failure. */ }
+    }
+    if (error instanceof TransferCancelledError) throw error;
+    return {
+      imported: 0,
+      rolledBack: rollbackSucceeded,
+      errors: [{ row: completed + 1 + rowOffset, message: (error as Error).message }],
+    };
+  }
+}
+
+/**
+ * 流式导入：源行来自异步迭代器（如逐块解析的 CSV），非批处理路径下逐行映射并插入，
+ * 不把整份源数据或整份映射副本放进内存；整个导入仍在单个事务内，失败回滚。
+ *
+ * SQLite（batchWrites）需要把整批拼成一条 SQL，无法逐行释放，因此先收集再走原导入。
+ */
+export async function importRowsStream(
+  options: Omit<ImportRowsOptions, 'rows'> & { rows: AsyncIterable<Record<string, unknown>> },
+): Promise<ImportResult> {
+  const { query, table, database, rows, mappings, onProgress, isCancelled, batchWrites = false, rowOffset = 0 } = options;
+  if (batchWrites) {
+    const collected: Record<string, unknown>[] = [];
+    for await (const row of rows) collected.push(row);
+    return importRows({ query, table, database, rows: collected, mappings, onProgress, isCancelled, batchWrites, rowOffset });
+  }
+
+  const selected = validateMappings(mappings);
+  const columns = selected.map((mapping) => mapping.target);
+  let started = false;
+  let completed = 0;
+  try {
+    await query.query('BEGIN', undefined, SKIP);
+    started = true;
+    for await (const sourceRow of rows) {
+      if (isCancelled?.()) throw new TransferCancelledError();
+      const mappedRow: Record<string, unknown> = {};
+      for (const mapping of selected) mappedRow[mapping.target] = sourceRow[mapping.source];
+      const sql = query.dialect.buildInsertSql([mappedRow], columns, table, database);
+      await query.query(sql, undefined, SKIP);
+      completed++;
+      // 流式来源总数未知，按已完成数上报（与恢复流式一致）。
+      onProgress?.({ completed, total: completed });
+    }
+    await query.query('COMMIT', undefined, SKIP);
+    return { imported: completed, rolledBack: false, errors: [] };
+  } catch (error) {
+    let rollbackSucceeded = false;
+    if (started) {
+      try { await query.query('ROLLBACK', undefined, SKIP); rollbackSucceeded = true; } catch { /* preserve original */ }
     }
     if (error instanceof TransferCancelledError) throw error;
     return {

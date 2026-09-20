@@ -1,3 +1,5 @@
+import { createReadStream } from 'node:fs';
+
 /**
  * 简易 XML 导入/导出（`<rows><row>…</row></rows>`）。
  *
@@ -95,4 +97,42 @@ export function serializeXml(columns: string[], rows: Record<string, unknown>[])
   for (const row of rows) parts.push(xmlRow(columns, row));
   parts.push(xmlFooter());
   return parts.join('\n') + '\n';
+}
+
+/** 逐块产出完整的 `<row>…</row>` 片段（跨块拼接），不整文件读入。 */
+async function* readXmlRowFragments(filePath: string, chunkSize: number): AsyncGenerator<string> {
+  const stream = createReadStream(filePath, { encoding: 'utf8', highWaterMark: chunkSize });
+  let buffer = '';
+  for await (const chunk of stream) {
+    buffer += chunk as string;
+    let idx: number;
+    while ((idx = buffer.indexOf('</row>')) !== -1) {
+      const end = idx + '</row>'.length;
+      yield buffer.slice(0, end);
+      buffer = buffer.slice(end);
+    }
+  }
+  if (buffer.includes('<row')) yield buffer;
+}
+
+/** 只读前若干行 + 列名，用于导入向导预览。 */
+export async function readXmlSample(filePath: string, sampleSize = 200, chunkSize = 1 << 20): Promise<{ columns: string[]; rows: Record<string, unknown>[] }> {
+  const rows: Record<string, unknown>[] = [];
+  let columns: string[] = [];
+  for await (const fragment of readXmlRowFragments(filePath, chunkSize)) {
+    const parsed = parseXml(fragment);
+    if (!parsed.length) continue;
+    if (!columns.length) columns = Object.keys(parsed[0]);
+    rows.push(parsed[0]);
+    if (rows.length >= sampleSize) break;
+  }
+  return { columns, rows };
+}
+
+/** 流式读取 XML 行（逐行 yield），供大文件导入。 */
+export async function* streamXmlRows(filePath: string, chunkSize = 1 << 20): AsyncGenerator<Record<string, unknown>> {
+  for await (const fragment of readXmlRowFragments(filePath, chunkSize)) {
+    const parsed = parseXml(fragment);
+    if (parsed.length) yield parsed[0];
+  }
 }

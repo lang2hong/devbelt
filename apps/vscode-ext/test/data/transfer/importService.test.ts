@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { importRows } from '../../../src/data/transfer/importService';
+import { importRows, importRowsStream } from '../../../src/data/transfer/importService';
 
 function makeQuery(failSql?: string) {
   const statements: string[] = [];
@@ -99,5 +99,26 @@ describe('importRows (batchWrites)', () => {
       errors: [{ row: 1, message: 'duplicate key' }],
     });
     expect(query.statements).toEqual(['BEGIN; INSERT 1\nINSERT 2 COMMIT;', 'ROLLBACK']);
+  });
+});
+
+describe('importRowsStream', () => {
+  const mappings = [{ source: 'source_id', target: 'id' }];
+
+  it('逐行流式导入并在单事务内提交', async () => {
+    const query = makeQuery();
+    async function* gen() { yield { source_id: 1 }; yield { source_id: 2 }; }
+    const result = await importRowsStream({ query: query as any, table: 'users', rows: gen(), mappings });
+    expect(result).toEqual({ imported: 2, rolledBack: false, errors: [] });
+    expect(query.statements).toEqual(['BEGIN', 'INSERT 1', 'INSERT 2', 'COMMIT']);
+  });
+
+  it('失败回滚，并按 rowOffset 报源文件行号', async () => {
+    const query = makeQuery('INSERT 2');
+    async function* gen() { yield { source_id: 1 }; yield { source_id: 2 }; }
+    const result = await importRowsStream({ query: query as any, table: 'users', rows: gen(), mappings, rowOffset: 1 });
+    expect(result.rolledBack).toBe(true);
+    expect(result.errors).toEqual([{ row: 3, message: 'duplicate key' }]);
+    expect(query.statements).toEqual(['BEGIN', 'INSERT 1', 'INSERT 2', 'ROLLBACK']);
   });
 });

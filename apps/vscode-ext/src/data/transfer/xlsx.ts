@@ -1,4 +1,5 @@
-import { deflateRawSync, inflateRawSync, createDeflateRaw } from 'zlib';
+import { deflateRawSync, inflateRawSync, createDeflateRaw, createInflateRaw } from 'zlib';
+import { createReadStream, fstatSync, openSync, readSync, closeSync } from 'fs';
 import { once } from 'events';
 
 /**
@@ -526,24 +527,27 @@ function parseSharedStrings(xml: string | undefined): string[] {
 }
 
 /** 解析工作表的行；每行是「列下标 → 值」。 */
+function parseRowCells(inner: string, shared: string[], dateStyles: Set<number>): Map<number, unknown> {
+  const cells = new Map<number, unknown>();
+  let fallbackIndex = 0;
+  for (const cellMatch of inner.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+    const attrs = cellMatch[1] ?? '';
+    const body = cellMatch[2] ?? '';
+    const ref = /\br="([^"]+)"/.exec(attrs)?.[1] ?? '';
+    const type = /\bt="([^"]+)"/.exec(attrs)?.[1] ?? 'n';
+    const index = ref ? columnIndexOf(ref) : -1;
+    const column = index >= 0 ? index : fallbackIndex;
+    fallbackIndex = column + 1;
+    const styleIndex = Number(/\bs="(\d+)"/.exec(attrs)?.[1] ?? NaN);
+    cells.set(column, cellValue(type, body, shared, dateStyles, styleIndex));
+  }
+  return cells;
+}
+
 function parseSheetRows(xml: string, shared: string[], dateStyles: Set<number>): Map<number, unknown>[] {
   const rows: Map<number, unknown>[] = [];
   for (const rowMatch of xml.matchAll(/<row\b[^>]*(?:\/>|>([\s\S]*?)<\/row>)/g)) {
-    const inner = rowMatch[1] ?? '';
-    const cells = new Map<number, unknown>();
-    let fallbackIndex = 0;
-    for (const cellMatch of inner.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
-      const attrs = cellMatch[1] ?? '';
-      const body = cellMatch[2] ?? '';
-      const ref = /\br="([^"]+)"/.exec(attrs)?.[1] ?? '';
-      const type = /\bt="([^"]+)"/.exec(attrs)?.[1] ?? 'n';
-      const index = ref ? columnIndexOf(ref) : -1;
-      const column = index >= 0 ? index : fallbackIndex;
-      fallbackIndex = column + 1;
-      const styleIndex = Number(/\bs="(\d+)"/.exec(attrs)?.[1] ?? NaN);
-      cells.set(column, cellValue(type, body, shared, dateStyles, styleIndex));
-    }
-    rows.push(cells);
+    rows.push(parseRowCells(rowMatch[1] ?? '', shared, dateStyles));
   }
   return rows;
 }
@@ -669,4 +673,199 @@ export function parseXlsx(buffer: Buffer): Record<string, unknown>[] {
       columns.forEach((column, index) => { out[column] = row.get(index) ?? null; });
       return out;
     });
+}
+
+// ─── 流式读取（大文件不整包解压） ───
+
+interface ZipDirEntry { name: string; method: number; compSize: number; localOffset: number }
+
+/** 读取 ZIP 中央目录（只读文件尾部与目录区，不整文件读入）。 */
+function readZipDirectory(filePath: string): Map<string, ZipDirEntry> {
+  const fd = openSync(filePath, 'r');
+  try {
+    const size = fstatSync(fd).size;
+    const tailLen = Math.min(size, 65_557);
+    const tail = Buffer.allocUnsafe(tailLen);
+    readSync(fd, tail, 0, tailLen, size - tailLen);
+    const eocd = findEndOfCentralDirectory(tail);
+    const count = tail.readUInt16LE(eocd + 10);
+    if (count === 0xffff) throw new Error('ZIP64 .xlsx files are not supported.');
+    if (count > MAX_ENTRIES) throw new Error(`.xlsx has too many entries (${count} > ${MAX_ENTRIES}).`);
+    const cdSize = tail.readUInt32LE(eocd + 12);
+    const cdOffset = tail.readUInt32LE(eocd + 16);
+    const cd = Buffer.allocUnsafe(cdSize);
+    readSync(fd, cd, 0, cdSize, cdOffset);
+    const map = new Map<string, ZipDirEntry>();
+    let p = 0;
+    for (let i = 0; i < count && p + 46 <= cd.length; i++) {
+      if (cd.readUInt32LE(p) !== 0x02014b50) break;
+      const flags = cd.readUInt16LE(p + 8);
+      if (flags & 0x1) throw new Error('Encrypted .xlsx files are not supported.');
+      const method = cd.readUInt16LE(p + 10);
+      const compSize = cd.readUInt32LE(p + 20);
+      const uncompressedSize = cd.readUInt32LE(p + 24);
+      const nameLen = cd.readUInt16LE(p + 28);
+      const extraLen = cd.readUInt16LE(p + 30);
+      const commentLen = cd.readUInt16LE(p + 32);
+      const localOffset = cd.readUInt32LE(p + 42);
+      const name = cd.toString('utf8', p + 46, p + 46 + nameLen);
+      if (uncompressedSize > MAX_ENTRY_BYTES) throw new Error('.xlsx exceeds the decompression size limit.');
+      map.set(name, { name, method, compSize, localOffset });
+      p += 46 + nameLen + extraLen + commentLen;
+    }
+    return map;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** 计算条目数据在文件中的偏移（本地头的名字/额外字段长度可与中央目录不同）。 */
+function entryDataRange(filePath: string, entry: ZipDirEntry): { start: number; end: number } {
+  const fd = openSync(filePath, 'r');
+  try {
+    const lh = Buffer.allocUnsafe(30);
+    readSync(fd, lh, 0, 30, entry.localOffset);
+    const nameLen = lh.readUInt16LE(26);
+    const extraLen = lh.readUInt16LE(28);
+    const start = entry.localOffset + 30 + nameLen + extraLen;
+    return { start, end: start + entry.compSize - 1 };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** 完整读取一个小条目（sharedStrings/styles/workbook 等）。 */
+function readEntryFully(filePath: string, entry: ZipDirEntry): Buffer {
+  const { start, end } = entryDataRange(filePath, entry);
+  const fd = openSync(filePath, 'r');
+  try {
+    const raw = Buffer.allocUnsafe(end - start + 1);
+    readSync(fd, raw, 0, raw.length, start);
+    if (entry.method === 0) return raw;
+    if (entry.method !== 8) throw new Error(`Unsupported ZIP compression method ${entry.method} in .xlsx file.`);
+    return inflateRawSync(raw, { maxOutputLength: MAX_ENTRY_BYTES });
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** 流式读取一个条目：逐块产出解压后的内容。 */
+async function* streamEntryChunks(filePath: string, entry: ZipDirEntry): AsyncGenerator<Buffer> {
+  const { start, end } = entryDataRange(filePath, entry);
+  const rs = createReadStream(filePath, { start, end, highWaterMark: 64 * 1024 });
+  if (entry.method === 0) {
+    for await (const chunk of rs) yield chunk as Buffer;
+    return;
+  }
+  if (entry.method !== 8) throw new Error(`Unsupported ZIP compression method ${entry.method} in .xlsx file.`);
+  const inflate = createInflateRaw({ maxOutputLength: MAX_ENTRY_BYTES });
+  rs.pipe(inflate);
+  rs.on('error', (err) => inflate.destroy(err));
+  for await (const chunk of inflate) yield chunk as Buffer;
+}
+
+/** 确定首个工作表路径（复用 firstSheetPath 的规则；失败时回退到目录里的第一个 worksheet）。 */
+function firstSheetPathFromDir(filePath: string, dir: Map<string, ZipDirEntry>): string {
+  const meta = new Map<string, Buffer>();
+  for (const name of ['xl/workbook.xml', 'xl/_rels/workbook.xml.rels']) {
+    const entry = dir.get(name);
+    if (entry) meta.set(name, readEntryFully(filePath, entry));
+  }
+  try {
+    return firstSheetPath(meta);
+  } catch {
+    const fallback = [...dir.keys()].find((name) => /^xl\/worksheets\/.+\.xml$/.test(name));
+    if (!fallback) throw new Error('No worksheet found in .xlsx file.');
+    return fallback;
+  }
+}
+
+/** 从流式 XML 缓冲中切出完整 <row> 元素。 */
+function takeNextRow(buffer: string): { inner: string; rest: string } | undefined {
+  const start = buffer.indexOf('<row');
+  if (start === -1) return undefined;
+  const gt = buffer.indexOf('>', start);
+  if (gt === -1) return undefined;
+  if (buffer[gt - 1] === '/') return { inner: '', rest: buffer.slice(gt + 1) };
+  const close = buffer.indexOf('</row>', gt);
+  if (close === -1) return undefined;
+  return { inner: buffer.slice(gt + 1, close), rest: buffer.slice(close + '</row>'.length) };
+}
+
+/** 一条记录转为行对象（表头列名 + 缺失列补 null）。 */
+function rowToObject(columns: string[], cells: Map<number, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  columns.forEach((column, index) => { out[column] = cells.get(index) ?? null; });
+  return out;
+}
+
+function isBlankCells(cells: Map<number, unknown>): boolean {
+  for (const v of cells.values()) if (v !== null && v !== undefined && v !== '') return false;
+  return true;
+}
+
+/**
+ * 流式读取 .xlsx 首个工作表：按中央目录定位 sheet 条目，流式 inflate 并逐行解析，
+ * 不再整包解压/整表驻留。第一行是表头。
+ */
+export async function* streamXlsxRows(filePath: string): AsyncGenerator<Record<string, unknown>> {
+  const dir = readZipDirectory(filePath);
+  const sharedEntry = dir.get('xl/sharedStrings.xml');
+  const shared = parseSharedStrings(sharedEntry ? readEntryFully(filePath, sharedEntry).toString('utf8') : undefined);
+  const stylesEntry = dir.get('xl/styles.xml');
+  const dateStyles = parseDateStyles(stylesEntry ? readEntryFully(filePath, stylesEntry).toString('utf8') : undefined);
+  const sheetPath = firstSheetPathFromDir(filePath, dir);
+  const sheetEntry = dir.get(sheetPath);
+  if (!sheetEntry) throw new Error('No worksheet found in .xlsx file.');
+
+  let buffer = '';
+  let columns: string[] | undefined;
+  let headerDone = false;
+
+  /** 处理一条 <row>：首行作表头，其余（非空行）产出对象。 */
+  const handleRow = (inner: string): Record<string, unknown> | undefined => {
+    const cells = parseRowCells(inner, shared, dateStyles);
+    if (!headerDone) {
+      headerDone = true;
+      const width = Math.max(0, ...[...cells.keys()].map((k) => k + 1));
+      columns = [];
+      for (let i = 0; i < width; i++) {
+        const name = cells.get(i);
+        columns.push(name === null || name === undefined || name === '' ? columnName(i) : String(name));
+      }
+      return undefined;
+    }
+    if (!columns || isBlankCells(cells)) return undefined;
+    return rowToObject(columns, cells);
+  };
+
+  const drain = (): Record<string, unknown>[] => {
+    const out: Record<string, unknown>[] = [];
+    for (;;) {
+      const taken = takeNextRow(buffer);
+      if (!taken) break;
+      buffer = taken.rest;
+      const row = handleRow(taken.inner);
+      if (row) out.push(row);
+    }
+    return out;
+  };
+
+  for await (const chunk of streamEntryChunks(filePath, sheetEntry)) {
+    buffer += chunk.toString('utf8');
+    for (const row of drain()) yield row;
+  }
+  for (const row of drain()) yield row;
+}
+
+/** 只读前若干行 + 列名，用于导入向导预览。 */
+export async function readXlsxSample(filePath: string, sampleSize = 200): Promise<{ columns: string[]; rows: Record<string, unknown>[] }> {
+  const rows: Record<string, unknown>[] = [];
+  let columns: string[] = [];
+  for await (const row of streamXlsxRows(filePath)) {
+    if (!columns.length) columns = Object.keys(row);
+    rows.push(row);
+    if (rows.length >= sampleSize) break;
+  }
+  return { columns, rows };
 }

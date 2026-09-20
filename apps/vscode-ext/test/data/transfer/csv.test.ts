@@ -73,3 +73,40 @@ describe('CSV 公式防护导入还原', () => {
     expect(parsed.rows[0].a).toBe('=1+1');
   });
 });
+
+describe('CSV 流式解析', () => {
+  it('分块读取与整份解析结果一致（含跨块引号/换行）', async () => {
+    const { streamCsvRows, parseCsv } = await import('../../../src/data/transfer/csv');
+    const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const sqlText = 'id,note,empty\r\n1,"a, ""quoted""\nvalue",\r\n2,plain,""\r\n'
+    const dir = mkdtempSync(join(tmpdir(), 'csv-stream-'));
+    const file = join(dir, 'd.csv');
+    writeFileSync(file, sqlText);
+    try {
+      const streamed: unknown[] = [];
+      for await (const row of streamCsvRows(file, true, 7)) streamed.push(row);
+      expect(streamed).toEqual(parseCsv(sqlText).rows);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('readCsvSample 只取表头与样本行', async () => {
+    const { readCsvSample } = await import('../../../src/data/transfer/csv');
+    const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'csv-sample-'));
+    const file = join(dir, 'd.csv');
+    writeFileSync(file, 'a,b\n1,x\n2,y\n3,z\n');
+    try {
+      const sample = await readCsvSample(file, true, 2);
+      expect(sample.columns).toEqual(['a', 'b']);
+      expect(sample.rows).toEqual([{ a: '1', b: 'x' }, { a: '2', b: 'y' }]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

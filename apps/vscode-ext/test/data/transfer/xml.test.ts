@@ -32,3 +32,25 @@ describe('XML 往返', () => {
     expect(parseXml(legacy)).toEqual([{ id: '1', name: 'Ada' }]);
   });
 });
+describe('XML 流式解析', () => {
+  it('分块读取与整份解析一致', async () => {
+    const { streamXmlRows, readXmlSample } = await import('../../../src/data/transfer/xml');
+    const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const xml = '<?xml version="1.0"?>\n<rows>\n  <row><col name="id">1</col><col name="n">a&lt;b</col></row>\n  <row><col name="id">2</col><col name="n" nil="true"></col></row>\n</rows>\n';
+    const dir = mkdtempSync(join(tmpdir(), 'xml-stream-'));
+    const file = join(dir, 'd.xml');
+    writeFileSync(file, xml);
+    try {
+      const streamed: unknown[] = [];
+      for await (const row of streamXmlRows(file, 13)) streamed.push(row);
+      expect(streamed).toEqual(parseXml(xml));
+      const sample = await readXmlSample(file, 1);
+      expect(sample.columns).toEqual(['id', 'n']);
+      expect(sample.rows).toEqual([{ id: '1', n: 'a<b' }]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
