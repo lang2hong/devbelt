@@ -1,5 +1,6 @@
 import { DatabaseType } from '../types/connection.js';
 import type { SqlScanOptions } from './lexer.js';
+import type { SqlDialect } from '../dialect/sqlDialect.js';
 
 /**
  * 由方言派生 SQL 扫描选项（**单一来源**）。
@@ -25,6 +26,16 @@ export function scanOptionsForDbType(
     // PG 的 `E'...'` 串始终启用反斜杠转义，与 standard_conforming_strings 无关。
     escapeStringPrefix: dbType === DatabaseType.PG,
   };
+}
+
+/**
+ * 由方言实例派生扫描选项：带上该方言的 `noBackslashEscapes`（MySQL 变体）。
+ * db-core 内部生成 SQL 的切分应经此，避免只传 dbType 而丢掉连接级模式。
+ */
+export function scanOptionsForDialect(
+  dialect: Pick<SqlDialect, 'dbType' | 'noBackslashEscapes'>,
+): SqlScanOptions {
+  return scanOptionsForDbType(dialect.dbType, { noBackslashEscapes: dialect.noBackslashEscapes === true });
 }
 
 /**

@@ -41,6 +41,7 @@
     "sqlstring": "^2.3.3"
   },
   "devDependencies": {
+    "@types/node": "^20.0.0",
     "@types/pg": "^8.20.4",
     "@types/sqlstring": "^2.3.2",
     "vitest": "^4.1.10",

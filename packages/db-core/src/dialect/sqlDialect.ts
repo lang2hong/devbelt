@@ -15,6 +15,11 @@ import type { DatabaseCapabilities } from './capabilities.js';
 export interface SqlDialect {
   /** 数据库类型标识 */
   readonly dbType: DatabaseType;
+  /**
+   * 会话是否处于 MySQL `NO_BACKSLASH_ESCAPES`（仅 MySQL 相关）。
+   * 供切分/值转义按连接语义派生选项；其它方言不实现（视为 false）。
+   */
+  readonly noBackslashEscapes?: boolean;
   /** Explicitly declared database and object-management capabilities. */
   readonly capabilities: DatabaseCapabilities;
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { parseNoBackslashEscapes, scanOptionsForDbType } from '../../src/sql/index';
+import { parseNoBackslashEscapes, scanOptionsForDbType, scanOptionsForDialect } from '../../src/sql/index';
 import { DatabaseType } from '../../src/types/connection';
+import { MysqlDialect } from '../../src/dialect/mysqlDialect';
 
 describe('parseNoBackslashEscapes', () => {
   it('识别 NO_BACKSLASH_ESCAPES（大小写、组合、单独）', () => {
@@ -21,5 +22,10 @@ describe('parseNoBackslashEscapes', () => {
     expect(scanOptionsForDbType(DatabaseType.MYSQL, { noBackslashEscapes: nbe }).backslashEscapes).toBe(false);
     expect(scanOptionsForDbType(DatabaseType.MYSQL).backslashEscapes).toBe(true);
     expect(scanOptionsForDbType(DatabaseType.MYSQL, { noBackslashEscapes: false }).backslashEscapes).toBe(true);
+  });
+
+  it('scanOptionsForDialect 带上方言实例的 NBE 开关', () => {
+    expect(scanOptionsForDialect(new MysqlDialect()).backslashEscapes).toBe(true);
+    expect(scanOptionsForDialect(new MysqlDialect({ noBackslashEscapes: true })).backslashEscapes).toBe(false);
   });
 });

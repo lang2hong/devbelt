@@ -107,4 +107,17 @@ describe('QueryHistoryRecorder', () => {
     const observer = new QueryHistoryRecorder(conn, history).observer();
     expect(() => observer({ sql: 'DROP TABLE t', costTime: 1, rowCount: 0 })).not.toThrow();
   });
+
+  /**
+   * MySQL NO_BACKSLASH_ESCAPES 下 `\'` 不转义，隐藏的写语句必须与执行侧判定一致地被记录。
+   * 扫描选项由连接层注入，缺省回退方言默认（此模式下会漏记）。
+   */
+  it('NBE 扫描选项下，反斜杠隐藏的写被记录', () => {
+    const added: any[] = [];
+    const history: any = { add: async (e: any) => { added.push(e); } };
+    const nbeOptions = { hashComment: true, dashDashRequiresSpace: true, backslashEscapes: false, escapeStringPrefix: false };
+    const observer = new QueryHistoryRecorder(conn, history, () => nbeOptions).observer();
+    observer({ sql: "SELECT 'a\\'; DROP TABLE t", costTime: 1, rowCount: 0 });
+    expect(added).toHaveLength(1);
+  });
 });

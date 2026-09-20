@@ -1,4 +1,5 @@
 import type { ExecutedStatement, QueryObserver } from '@devkit/db-core';
+import type { SqlScanOptions } from '@devkit/db-core/sql';
 import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import { analyzeSqlRisk } from '../utils/sqlRisk';
 import { dialectScanOptions } from '../utils/sqlDialectOptions';
@@ -31,6 +32,11 @@ export class QueryHistoryRecorder {
   constructor(
     private readonly conn: SavedConnection,
     private readonly history: HistoryStore,
+    /**
+     * 该连接的扫描选项（含 MySQL NO_BACKSLASH_ESCAPES）。惰性调用，建连后才有缓存值；
+     * 缺省回退方言默认选项。用于让"是否写语句"的判定与执行侧一致。
+     */
+    private readonly scanOptionsFor?: (conn: SavedConnection) => SqlScanOptions,
   ) {
     this.currentDatabase = conn.database;
   }
@@ -46,7 +52,7 @@ export class QueryHistoryRecorder {
       this.currentDatabase = switched;
       return;
     }
-    if (!analyzeSqlRisk(info.sql, dialectScanOptions(this.conn.dbType)).isWrite) return;
+    if (!analyzeSqlRisk(info.sql, this.scanOptionsFor?.(this.conn) ?? dialectScanOptions(this.conn.dbType)).isWrite) return;
     if (containsSecretSql(info.sql)) return;
 
     // 历史写入是旁路的 best-effort：失败绝不能冒泡到已经成功的语句上，

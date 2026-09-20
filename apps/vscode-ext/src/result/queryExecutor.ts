@@ -65,7 +65,7 @@ export class QueryExecutor {
         }
         // DDL 会改变库/表结构：发布数据变更事件让树刷新（DataChangeEvent 缺订阅者时
         // 树从不会在 SQL 编辑器跑完 DDL 后刷新，新表不可见）。
-        if (classifyWriteKind(sql, dialectScanOptions(conn.dbType)) === 'ddl') {
+        if (classifyWriteKind(sql, this.manager.scanOptionsFor?.(conn) ?? dialectScanOptions(conn.dbType)) === 'ddl') {
           void eventBus.publish(new DataChangeEvent(conn.id, database ?? '', '', 'ddl'));
         }
         // QueryExecutedEvent 此前只有类型定义、从无发布点

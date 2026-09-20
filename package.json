@@ -21,9 +21,5 @@
     "typecheck": "pnpm -r run typecheck",
     "lint": "pnpm -r run lint",
     "dev": "pnpm --filter ./apps/vscode-ext run dev"
-  },
-  "devDependencies": {
-    "@vscode/vsce": "^3.9.2",
-    "typescript": "^5.9.3"
   }
 }
