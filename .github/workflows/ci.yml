@@ -1,10 +1,9 @@
 name: CI
 
 on:
-  # 所有分支的 push 与 PR 都跑：机械门禁/架构边界/typecheck 必须覆盖到这些改动本身。
+  # 专用 CI 分支：仅推送到 ci 触发；main 保持自身配置，其他分支/PR 不跑。
   push:
-    branches: ['**']
-  pull_request:
+    branches: [ci]
 
 jobs:
   build:

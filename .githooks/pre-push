@@ -1,0 +1,35 @@
+#!/bin/sh
+#
+# pre-push 推送策略（按远端 URL 匹配，remote 改名不影响判定）。
+#   github (lang2hong/devbelt)        → 禁止任何推送
+#   mirror (lang2hong/devbelt-mirror) → 禁止推送 ci 分支
+#   cigit  (wfxhy/devbelt)            → 仅允许 ci 分支
+# 其他远端（gitee origin 等）不限制。
+#
+# 启用：git config core.hooksPath .githooks
+# （本仓库 root package.json 的 prepare 会在安装后自动设置）
+
+remote_url="$2"
+
+reject() {
+  echo "pre-push: 拒绝推送到 ${remote_url}：$1" >&2
+  exit 1
+}
+
+case "$remote_url" in
+  *github.com:lang2hong/devbelt.git | *github.com/lang2hong/devbelt.git)
+    reject "github 仓库禁止任何推送"
+    ;;
+  *github.com:lang2hong/devbelt-mirror.git | *github.com/lang2hong/devbelt-mirror.git)
+    while read -r _local_ref _local_sha remote_ref _remote_sha; do
+      [ "$remote_ref" = "refs/heads/ci" ] && reject "mirror 禁止推送 ci 分支"
+    done
+    ;;
+  *github.com:wfxhy/devbelt.git | *github.com/wfxhy/devbelt.git)
+    while read -r _local_ref _local_sha remote_ref _remote_sha; do
+      [ "$remote_ref" != "refs/heads/ci" ] && reject "cigit 只允许推送 ci 分支（收到 ${remote_ref}）"
+    done
+    ;;
+esac
+
+exit 0
