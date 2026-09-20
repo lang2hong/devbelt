@@ -1,6 +1,7 @@
 import { StateStore, type MementoLike, type SyncStateSnapshot } from './e2e/stateStore.js';
 import { RecordMapStore } from './e2e/recordMapStore.js';
 import { PendingMutationStore } from './e2e/pendingMutationStore.js';
+import { DeferredRecordStore } from './e2e/deferredRecordStore.js';
 import { SyncEngine } from './e2e/syncEngine.js';
 import { SyncCoordinator } from './e2e/syncCoordinator.js';
 import type { SyncRunResult } from './e2e/syncEngine.js';
@@ -58,6 +59,7 @@ export class PersonalSyncSession {
   private readonly stateStore: StateStore;
   private entities: EntityStore;
   private unresolved?: UnresolvedRefStore;
+  private deferred?: DeferredRecordStore;
   private mapStore?: RecordMapStore;
   private outbox?: PendingMutationStore;
   private engine?: SyncEngine;
@@ -357,7 +359,7 @@ export class PersonalSyncSession {
     this.scheduleInitialSync();
   }
 
-  /** 建立当前 epoch 的 recordMap/outbox/unresolved；epoch 与现存 store 不一致时抛错（不得静默沿用）。 */
+  /** 建立当前 epoch 的 recordMap/outbox/unresolved/deferred；epoch 与现存 store 不一致时抛错（不得静默沿用）。 */
   ensureStores(keyEpoch: string): void {
     if (this.keyEpoch !== undefined && this.keyEpoch !== keyEpoch) {
       throw new Error('sync session epoch mismatch');
@@ -366,6 +368,7 @@ export class PersonalSyncSession {
     if (!this.mapStore) this.mapStore = new RecordMapStore(this.memento, this.userId, keyEpoch);
     if (!this.outbox) this.outbox = new PendingMutationStore(this.memento, this.userId, keyEpoch);
     if (!this.unresolved) this.unresolved = new UnresolvedRefStore(this.memento, this.userId, keyEpoch);
+    if (!this.deferred) this.deferred = new DeferredRecordStore(this.memento, this.userId, keyEpoch);
   }
 
   /** 载入 DEK 后建立并启动运行组件；epoch 与已构造 engine 不一致时抛错（须先走 transition）。 */
@@ -382,6 +385,7 @@ export class PersonalSyncSession {
         mapStore: this.mapStore!,
         outbox: this.outbox!,
         unresolved: this.unresolved!,
+        deferred: this.deferred!,
         entities: this.entities,
         store: this.store,
         dek: this.dekThunk,
@@ -412,7 +416,7 @@ export class PersonalSyncSession {
    * 与远端 `resetSync`（需 handoff）不同，这里**不发起任何 sync API 请求**，
    * 供远端不可达 / stale-epoch 时逃生。仅清 sync 自有存储：
    *  - 该 epoch 映射到的本地实体（软删 source='sync'，级联子树）；
-   *  - recordMap / pendingMutation / unresolved 三个 epoch 存储；
+   *  - recordMap / pendingMutation / unresolved / deferred 四个 epoch 存储；
    *  - 持久化 DEK、状态快照、残留 cleanup intent。
    * 连接/查询等业务数据不在 sync 存储内，天然保留。幂等。
    */
@@ -474,6 +478,7 @@ export class PersonalSyncSession {
     this.mapStore = undefined;
     this.outbox = undefined;
     this.unresolved = undefined;
+    this.deferred = undefined;
     this.engine = undefined;
     this.coordinator = undefined;
     this.resolver = undefined;

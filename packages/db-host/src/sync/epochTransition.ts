@@ -2,6 +2,7 @@ import type { StateStore, MementoLike, SyncStateSnapshot } from './e2e/stateStor
 import { RecordMapStore } from './e2e/recordMapStore.js';
 import { PendingMutationStore } from './e2e/pendingMutationStore.js';
 import { UnresolvedRefStore, type EntityStore } from './e2e/entityStore.js';
+import { DeferredRecordStore } from './e2e/deferredRecordStore.js';
 import type { DekStore } from './crypto/keyStore.js';
 import { assertU64Decimal } from './e2e/types.js';
 
@@ -136,6 +137,7 @@ export class EpochTransitionCoordinator {
     await new RecordMapStore(this.deps.memento, this.deps.userId, epoch).clear();
     await new PendingMutationStore(this.deps.memento, this.deps.userId, epoch).clear();
     await new UnresolvedRefStore(this.deps.memento, this.deps.userId, epoch).clear();
+    await new DeferredRecordStore(this.deps.memento, this.deps.userId, epoch).clear();
     await this.deps.dekStore.delete(this.deps.userId, BigInt(epoch));
   }
 

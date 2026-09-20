@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { sealRecord } from '@devkit/db-host/sync/e2e/recordCodec';
+import { DeferredRecordStore } from '@devkit/db-host/sync/e2e/deferredRecordStore';
 import { SyncEngine } from '@devkit/db-host/sync/e2e/syncEngine';
 import { SyncApiError, type PersonalSyncClient } from '@devkit/db-host/sync/e2e/client';
 import { RecordMapStore } from '@devkit/db-host/sync/e2e/recordMapStore';
@@ -673,5 +675,101 @@ describe('SyncEngine', () => {
     const listed = outbox.list();
     expect(listed).toHaveLength(1);
     expect(listed[0].conflict).toMatchObject({ kind: 'pending', remoteTombstone: true });
+  });
+});
+
+describe('SyncEngine · deferred（权益跳过的连接记录）', () => {
+  const FREE = { planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 2, maxSavedConnections: 10, allowConnectionImport: false };
+  const PRO = { ...FREE, allowedDatabaseTypes: ['mysql', 'sqlite', 'postgresql'] };
+
+  function remotePg() {
+    const recordId = 'A'.repeat(22);
+    const dek = new Uint8Array(32);
+    const nonce = new Uint8Array(12).fill(1);
+    const plaintext = Buffer.from(JSON.stringify({ type: 'connection', name: 'pg', dbType: 'postgresql', host: 'h', port: 5432, user: 'u', password: 'p' }), 'utf8');
+    const box = sealRecord(dek, nonce, plaintext, { userId: '7', keyEpoch: '1', recordId, recordVersion: '1' });
+    return {
+      recordId,
+      version: '1',
+      changeSequence: '5',
+      deleteTime: null,
+      cipherSuite: 'AES-256-GCM',
+      formatVersion: 1,
+      nonce: Buffer.from(nonce).toString('base64url'),
+      ciphertext: Buffer.from(box.ciphertext).toString('base64url'),
+      tag: Buffer.from(box.tag).toString('base64url'),
+    };
+  }
+
+  it('free 用户 PG 连接入 deferred 且不落地；升级后下一轮 drain 落地', async () => {
+    const store = makeStore();
+    const memento = makeMemento();
+    const entities = new EntityStore(store);
+    const mapStore = new RecordMapStore(makeMemento(), '7', '1');
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    const unresolved = new UnresolvedRefStore(memento, '7', '1');
+    const deferred = new DeferredRecordStore(memento, '7', '1');
+    const dek = new Uint8Array(32);
+    const rec = remotePg();
+
+    let entitlement = FREE;
+    const build = (client: PersonalSyncClient) =>
+      new SyncEngine({
+        userId: '7', keyEpoch: '1', client,
+        stateStore: makeStateStore(SNAP) as never,
+        mapStore, outbox, entities, unresolved, deferred,
+        dek: () => dek, signSeed: () => new Uint8Array(32), uniqueId: () => 'c-new-1',
+        entitlement: () => entitlement,
+        seedConflictCarrier: seedConflictStub,
+      });
+
+    const client1 = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [rec] })),
+    });
+    const r1 = await build(client1).sync();
+    expect(r1.stage).toBe('ok');
+    expect(deferred.list()).toHaveLength(1);
+    expect(store.listForSync().filter((c) => !(c as unknown as { deleted?: boolean }).deleted)).toHaveLength(0);
+
+    entitlement = PRO;
+    const client2 = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [] })),
+    });
+    const r2 = await build(client2).sync();
+    expect(r2.stage).toBe('ok');
+    expect(deferred.list()).toHaveLength(0);
+    const conns = store.listForSync().filter((c) => !(c as unknown as { deleted?: boolean }).deleted);
+    expect(conns).toHaveLength(1);
+    expect(conns[0].name).toBe('pg');
+  });
+
+  it('deferred 中的墓碑（未落地）不被物化', async () => {
+    const store = makeStore();
+    const memento = makeMemento();
+    const deferred = new DeferredRecordStore(memento, '7', '1');
+    // 直接写入一条已删除记录的墓碑，模拟「跳过期间远端已删」。
+    await deferred.put({ recordId: 'A'.repeat(22), version: '2', changeSequence: '6', deleteTime: '2026-01-01T00:00:00.000Z' });
+    const eng = new SyncEngine({
+      userId: '7', keyEpoch: '1',
+      client: clientWith({
+        getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '6' })),
+        getRecords: vi.fn(async () => ({ snapshotSequence: '6', records: [] })),
+      }),
+      stateStore: makeStateStore(SNAP) as never,
+      mapStore: new RecordMapStore(makeMemento(), '7', '1'),
+      outbox: new PendingMutationStore(makeMemento(), '7', '1'),
+      entities: new EntityStore(store),
+      unresolved: new UnresolvedRefStore(memento, '7', '1'),
+      deferred,
+      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueId: () => 'c-new-1',
+      entitlement: () => PRO,
+      seedConflictCarrier: seedConflictStub,
+    });
+    const r = await eng.sync();
+    expect(r.stage).toBe('ok');
+    expect(deferred.list()).toHaveLength(0);
+    expect(store.listForSync().filter((c) => !(c as unknown as { deleted?: boolean }).deleted)).toHaveLength(0);
   });
 });

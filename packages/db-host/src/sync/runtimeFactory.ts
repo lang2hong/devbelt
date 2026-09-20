@@ -5,6 +5,7 @@ import { ConflictResolver } from './e2e/conflictResolver.js';
 import type { PersonalSyncClient } from './e2e/client.js';
 import type { StateStore } from './e2e/stateStore.js';
 import type { RecordMapStore } from './e2e/recordMapStore.js';
+import type { DeferredRecordStore } from './e2e/deferredRecordStore.js';
 import type { PendingMutationStore } from './e2e/pendingMutationStore.js';
 import type { EntityStore, UnresolvedRefStore } from './e2e/entityStore.js';
 import type { SyncEntityType } from './e2e/syncEntity.js';
@@ -26,6 +27,7 @@ export interface BuildSyncRuntimeDeps {
   mapStore: RecordMapStore;
   outbox: PendingMutationStore;
   unresolved: UnresolvedRefStore;
+  deferred: DeferredRecordStore;
   entities: EntityStore;
   store: ConnectionStore;
   /** 内存 DEK / signSeed 取值器（未解锁时抛出，由会话负责零化与生命周期）。 */
@@ -62,6 +64,7 @@ export function buildSyncRuntime(deps: BuildSyncRuntimeDeps): SyncRuntime {
     outbox: deps.outbox,
     entities: deps.entities,
     unresolved: deps.unresolved,
+    deferred: deps.deferred,
     dek: deps.dek,
     signSeed: deps.signSeed,
     uniqueId: deps.uniqueId,

@@ -1,8 +1,9 @@
 import { PersonalSyncClient, SyncApiError } from './client.js';
 import { openRecord } from './recordCodec.js';
-import { applyRecord, reconcileUnresolved, type ApplyContext } from './applyRecords.js';
+import { applyRecord, reconcileUnresolved, type ApplyContext, type ApplyDisposition } from './applyRecords.js';
 import { RecordConflictError } from './errors.js';
 import type { RecordMapStore } from './recordMapStore.js';
+import type { DeferredRecordStore } from './deferredRecordStore.js';
 import { PendingMutationStore, type PendingMutation } from './pendingMutationStore.js';
 import type { StateStore } from './stateStore.js';
 import { EntityStore, UnresolvedRefStore, applyOrder } from './entityStore.js';
@@ -131,6 +132,8 @@ export interface SyncEngineDeps {
   outbox: PendingMutationStore;
   entities: EntityStore;
   unresolved: UnresolvedRefStore;
+  /** 被权益门禁跳过的入站记录（升级后重放）；缺省则不 defer（旧调用方兼容）。 */
+  deferred?: DeferredRecordStore;
   /** DEK 数据加密密钥（解密 feed record）。 */
   dek: () => Uint8Array;
   /** 仅供任务 3「本地变更→mutation」首次签名；本轮 outbox 重放不调用。 */
@@ -330,6 +333,13 @@ export class SyncEngine {
     let cursor = local.changeSequence;
     let applied = 0;
 
+    // 先重放上一轮被权益跳过的记录：升级后无需重拉即可落地。
+    try {
+      applied += await this.drainDeferred(ctx, conflicts);
+    } catch (err) {
+      return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `deferred drain failed: ${describe(err)}` };
+    }
+
     for (let pages = 0; ; pages++) {
       if (pages >= MAX_PAGES) {
         return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: 'paging exceeded limit' };
@@ -360,7 +370,19 @@ export class SyncEngine {
         typed.sort((a, b) => applyOrder(a.type) - applyOrder(b.type));
         for (const { rec } of typed) {
           try {
-            await this.applyRemote(rec, this.deps.keyEpoch, ctx);
+            const disposition = await this.applyRemote(rec, this.deps.keyEpoch, ctx);
+            // 仅「未授权且尚未映射」才 defer；版本重放的 skipped 已有映射，不得入队。
+            if (disposition === 'skipped' && this.deps.deferred && !this.deps.mapStore.getByRecordId(rec.recordId)) {
+              await this.deps.deferred.put({
+                recordId: rec.recordId,
+                version: rec.version,
+                changeSequence: rec.changeSequence,
+                deleteTime: rec.deleteTime,
+                nonce: rec.nonce,
+                ciphertext: rec.ciphertext,
+                tag: rec.tag,
+              });
+            }
             applied += 1;
           } catch (err) {
             if (err instanceof RecordConflictError) {
@@ -546,10 +568,9 @@ export class SyncEngine {
     throw new FeedProtocolError('record payload missing valid type');
   }
 
-  private async applyRemote(rec: RemoteRecord, keyEpoch: string, ctx: ApplyContext): Promise<void> {
+  private async applyRemote(rec: RemoteRecord, keyEpoch: string, ctx: ApplyContext): Promise<ApplyDisposition> {
     if (rec.deleteTime != null) {
-      await applyRecord({ recordId: rec.recordId, version: rec.version, tombstone: true }, ctx);
-      return;
+      return (await applyRecord({ recordId: rec.recordId, version: rec.version, tombstone: true }, ctx)).disposition;
     }
     const dek = this.deps.dek();
     const plaintext = openRecord(
@@ -559,10 +580,55 @@ export class SyncEngine {
       Buffer.from(rec.tag!, 'base64url'),
       { userId: this.deps.userId, keyEpoch, recordId: rec.recordId, recordVersion: rec.version },
     );
-    await applyRecord(
+    return (await applyRecord(
       { recordId: rec.recordId, version: rec.version, tombstone: false, payload: JSON.parse(Buffer.from(plaintext).toString('utf8')) },
       ctx,
-    );
+    )).disposition;
+  }
+
+  /**
+   * 重放上一轮因权益被跳过的记录：权益放开后落地并移除；仍被拒则保留。
+   * 冲突并入本轮回 conflicts（不吞掉用户可见冲突）；解密/协议错误丢弃以免每轮卡死。
+   */
+  private async drainDeferred(ctx: ApplyContext, conflicts: SyncConflictEntry[]): Promise<number> {
+    const deferred = this.deps.deferred;
+    if (!deferred) return 0;
+    let drained = 0;
+    for (const entry of deferred.list()) {
+      const rec: RemoteRecord = {
+        recordId: entry.recordId,
+        version: entry.version,
+        changeSequence: entry.changeSequence,
+        deleteTime: entry.deleteTime,
+        nonce: entry.nonce,
+        ciphertext: entry.ciphertext,
+        tag: entry.tag,
+      };
+      try {
+        const disposition = await this.applyRemote(rec, this.deps.keyEpoch, ctx);
+        if (disposition === 'skipped') continue; // 仍无权益：保留待下次
+        await deferred.delete(entry.recordId);
+        drained += 1;
+      } catch (err) {
+        if (err instanceof RecordConflictError) {
+          conflicts.push({
+            recordId: rec.recordId,
+            kind: err.kind,
+            remoteNonce: rec.nonce,
+            remoteCiphertext: rec.ciphertext,
+            remoteTag: rec.tag,
+            remoteVersion: rec.version,
+          });
+          try {
+            await this.persistConflict(rec, err);
+          } catch {
+            /* best-effort */
+          }
+        }
+        await deferred.delete(entry.recordId).catch(() => {});
+      }
+    }
+    return drained;
   }
 
   private async commitCursor(keyEpoch: string, stateVersion: string, changeSequence: string): Promise<void> {
