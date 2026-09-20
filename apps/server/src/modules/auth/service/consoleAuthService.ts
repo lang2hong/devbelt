@@ -178,7 +178,9 @@ export class ConsoleAuthService {
   async sessionIdOf(refreshTokenStr: string): Promise<string | undefined> {
     const tokenHash = this.tokenService.hashToken(refreshTokenStr);
     const rt = await this.refreshTokenRepo.findByHash(tokenHash);
-    return rt?.familyId;
+    // 已撤销/过期的 refresh token 不得再换取会话绑定 CSRF token（fail-closed）。
+    if (!rt || rt.revokedTime || rt.expiresTime <= new Date()) return undefined;
+    return rt.familyId;
   }
 
   /**

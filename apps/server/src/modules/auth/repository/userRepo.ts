@@ -2,6 +2,7 @@ import type { IUserRepo, AdminUserFilter, AdminUserRow } from '../../../reposito
 import type { User } from '../../../domain/entities.js';
 import type { UserStatus, UserRole } from '../../../domain/enums.js';
 import type { MysqlDb, Queryable } from '../../../repository/mysql/db.js';
+import { safeLimit } from '../../../repository/sqlLimit.js';
 
 /** 用户仓储。邮箱验证由 email_verified_time 表达。 */
 export class MysqlUserRepo implements IUserRepo {
@@ -173,7 +174,7 @@ function buildUserFilter(input: Omit<AdminUserFilter, 'cursor' | 'limit'> & { cu
     LEFT JOIN plans pp ON pp.id = ps.plan_id
     ${whereSql}
     ORDER BY u.id DESC
-    LIMIT ${Number(input.limit ?? 50)}
+    LIMIT ${safeLimit(input.limit)}
   `;
   return { sql, params };
 }

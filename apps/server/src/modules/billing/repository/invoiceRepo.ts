@@ -2,6 +2,7 @@ import type { IInvoiceRepo, AdminInvoiceFilter } from '../../../repository/inter
 import type { Invoice } from '../../../domain/entities.js';
 import type { InvoiceStatus } from '../../../domain/enums.js';
 import type { MysqlDb, Queryable } from '../../../repository/mysql/db.js';
+import { safeLimit } from '../../../repository/sqlLimit.js';
 
 /** 发票申请仓储（只登记申请记录与状态，不生成发票文件本身，见 P4 §数据模型）。 */
 export class MysqlInvoiceRepo implements IInvoiceRepo {
@@ -33,7 +34,7 @@ export class MysqlInvoiceRepo implements IInvoiceRepo {
     const where = cursor !== undefined ? 'user_id = ? AND id < ?' : 'user_id = ?';
     const params = cursor !== undefined ? [userId, cursor] : [userId];
     const [rows] = await this.db().query<any[]>(
-      `SELECT * FROM invoices WHERE ${where} ORDER BY id DESC LIMIT ${Number(limit)}`,
+      `SELECT * FROM invoices WHERE ${where} ORDER BY id DESC LIMIT ${safeLimit(limit)}`,
       params,
     );
     return rows.map(mapInvoice);
@@ -82,7 +83,7 @@ export class MysqlInvoiceRepo implements IInvoiceRepo {
     }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const [rows] = await this.db().query<any[]>(
-      `SELECT * FROM invoices ${whereSql} ORDER BY id DESC LIMIT ${Number(input.limit)}`,
+      `SELECT * FROM invoices ${whereSql} ORDER BY id DESC LIMIT ${safeLimit(input.limit)}`,
       params,
     );
     return rows.map(mapInvoice);

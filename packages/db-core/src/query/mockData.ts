@@ -49,31 +49,31 @@ export function mockValue(col: ColumnMeta, seq: number, esc: (value: string) => 
   const enumVals = parseEnum(fullType);
   if (enumVals.length) {
     val = enumVals[seq % enumVals.length];
-  } else if (name.includes('email')) {
+  } else if (!isNumeric && name.includes('email')) {
     val = `user${seq}@example.com`;
-  } else if (name.includes('phone') || name.includes('mobile')) {
+  } else if (!isNumeric && name.includes('phone') || name.includes('mobile')) {
     val = `1${String(Math.floor(Math.random() * 9e9)).padStart(9, '0')}`;
-  } else if (name.includes('name')) {
+  } else if (!isNumeric && name.includes('name')) {
     val = randomName();
-  } else if (name.includes('address')) {
+  } else if (!isNumeric && name.includes('address')) {
     val = randomAddress();
-  } else if (name.includes('city')) {
+  } else if (!isNumeric && name.includes('city')) {
     val = randomCity();
-  } else if (name.includes('url') || name.includes('website')) {
+  } else if (!isNumeric && name.includes('url') || name.includes('website')) {
     val = `https://example.com/${seq}`;
-  } else if (name.includes('avatar') || name.includes('image')) {
+  } else if (!isNumeric && name.includes('avatar') || name.includes('image')) {
     val = `https://example.com/avatar/${seq}.png`;
-  } else if (name.includes('password')) {
+  } else if (!isNumeric && name.includes('password')) {
     val = randomString(12);
-  } else if (name.includes('token')) {
+  } else if (!isNumeric && name.includes('token')) {
     val = randomString(32);
-  } else if (name.includes('ip')) {
+  } else if (!isNumeric && name.includes('ip')) {
     val = `${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
-  } else if (name.includes('status')) {
+  } else if (!isNumeric && name.includes('status')) {
     val = ['active', 'inactive', 'pending'][seq % 3];
-  } else if (name.includes('code')) {
+  } else if (!isNumeric && name.includes('code')) {
     val = randomString(8).toUpperCase();
-  } else if (name.includes('desc') || name.includes('content') || name.includes('comment')) {
+  } else if (!isNumeric && name.includes('desc') || name.includes('content') || name.includes('comment')) {
     val = `Mock data ${seq}`;
   } else if (type.includes('int') || type.includes('bigint') || type.includes('serial')) {
     val = String(seq + 1);

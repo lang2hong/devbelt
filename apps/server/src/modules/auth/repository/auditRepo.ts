@@ -1,6 +1,7 @@
 import type { IAuditRepo, AuditFilter } from '../../../repository/interfaces.js';
 import type { AuditEvent } from '../../../domain/entities.js';
 import type { MysqlDb, Queryable } from '../../../repository/mysql/db.js';
+import { safeLimit } from '../../../repository/sqlLimit.js';
 
 /** 审计事件仓储：append-only，只 INSERT + SELECT，不提供 UPDATE/DELETE。 */
 export class MysqlAuditRepo implements IAuditRepo {
@@ -101,7 +102,7 @@ function buildFilter(input: Omit<AuditFilter, 'cursor' | 'limit'> & { cursor?: n
     return { sql: `SELECT COUNT(*) AS cnt FROM audit_events ${whereSql}`, params };
   }
 
-  const sql = `SELECT * FROM audit_events ${whereSql} ORDER BY id DESC LIMIT ${Number(input.limit ?? 50)}`;
+  const sql = `SELECT * FROM audit_events ${whereSql} ORDER BY id DESC LIMIT ${safeLimit(input.limit)}`;
   return { sql, params };
 }
 

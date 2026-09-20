@@ -177,6 +177,23 @@ describe('DataDiffService', () => {
     expect(sql).toContain('NULL');
   });
 
+  it('无主键 NULL 键生成 IS NULL（不再 `col = NULL` 空操作）', () => {
+    const conn = new FakeConnection();
+    const query = makeQueryService(conn);
+    const diff: any = {
+      sourceDb: 'a', targetDb: 'b',
+      diffs: [{
+        tableName: 't',
+        pkColumns: ['a', 'b'],
+        columnNames: ['a', 'b'],
+        rows: [{ status: 'removed', pkValues: { a: 1, b: null } }],
+      }],
+    };
+    const sql = DataDiffService.generateSyncSql(diff, 'b', query);
+    expect(sql).toContain('`b` IS NULL');
+    expect(sql).not.toContain('`b` = NULL');
+  });
+
   it('generateSyncSql 用目标方言引号/转义（MySQL 源 → PG 目标）', () => {
     const pgConn = new FakeConnection();
     const pgQuery = new QueryService(pgConn, new PostgreSqlDialect());

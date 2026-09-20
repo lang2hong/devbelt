@@ -338,10 +338,20 @@ export class DataDiffService {
       const changed = td.rows.filter((r) => r.status === 'changed');
       const removed = td.rows.filter((r) => r.status === 'removed');
 
+      // 无主键表的 keyColumns 回退为全列，其中可能有 NULL；`col = NULL` 永不匹配，
+      // 必须写 `IS NULL`，否则生成的 DELETE/UPDATE 影响 0 行且无告警。
+      const keyWhere = (pkValues: Record<string, unknown>): string =>
+        td.pkColumns
+          .map((c) => {
+            const v = pkValues[c];
+            return v === null || v === undefined ? `${wrap(c)} IS NULL` : `${wrap(c)} = ${esc(v)}`;
+          })
+          .join(' AND ');
+
       if (removed.length) {
         parts.push(`-- ${td.tableName}: ${removed.length} row(s) to delete`);
         for (const r of removed) {
-          const where = td.pkColumns.map((c) => `${wrap(c)} = ${esc(r.pkValues[c])}`).join(' AND ');
+          const where = keyWhere(r.pkValues);
           parts.push(`DELETE FROM ${qualifiedTarget} WHERE ${where};`);
         }
         parts.push('');
@@ -360,7 +370,7 @@ export class DataDiffService {
         parts.push(`-- ${td.tableName}: ${changed.length} row(s) to update`);
         for (const r of changed) {
           const set = td.columnNames.map((c) => `${wrap(c)} = ${esc(r.sourceRow?.[c])}`).join(', ');
-          const where = td.pkColumns.map((c) => `${wrap(c)} = ${esc(r.pkValues[c])}`).join(' AND ');
+          const where = keyWhere(r.pkValues);
           parts.push(`UPDATE ${qualifiedTarget} SET ${set} WHERE ${where};`);
         }
         parts.push('');

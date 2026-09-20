@@ -61,6 +61,15 @@ describe('ConsoleAuthService', () => {
     expect(f.refreshTokenRepo.hasActiveToken(r.familyId)).resolves.toBe(true);
   });
 
+  it('sessionIdOf 忽略已撤销的 refresh token（fail-closed）', async () => {
+    const f = makeFixture();
+    await makeLoginableUser(f);
+    const r = await f.svc.login('web@b.com', PASSWORD, 'browser-key-1');
+    expect(await f.svc.sessionIdOf(r.refreshToken)).toBe(r.familyId);
+    await f.refreshTokenRepo.revokeFamily({} as Queryable, r.familyId, new Date());
+    expect(await f.svc.sessionIdOf(r.refreshToken)).toBeUndefined();
+  });
+
   it('a new device key claims the single web slot and revokes the old family', async () => {
     const f = makeFixture();
     const userId = await makeLoginableUser(f, 'slot@b.com');

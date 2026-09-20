@@ -2,6 +2,7 @@ import type { IOrderRepo, AdminOrderFilter } from '../../../repository/interface
 import type { Order } from '../../../domain/entities.js';
 import type { OrderStatus, PaymentChannel } from '../../../domain/enums.js';
 import type { MysqlDb, Queryable } from '../../../repository/mysql/db.js';
+import { safeLimit } from '../../../repository/sqlLimit.js';
 
 /**
  * 支付订单仓储。金额/状态推进由服务层在行锁内序列化；本仓储只提供读写原语。
@@ -64,7 +65,7 @@ export class MysqlOrderRepo implements IOrderRepo {
     const where = cursor !== undefined ? 'user_id = ? AND id < ?' : 'user_id = ?';
     const params = cursor !== undefined ? [userId, cursor] : [userId];
     const [rows] = await this.db().query<any[]>(
-      `SELECT * FROM orders WHERE ${where} ORDER BY id DESC LIMIT ${Number(limit)}`,
+      `SELECT * FROM orders WHERE ${where} ORDER BY id DESC LIMIT ${safeLimit(limit)}`,
       params,
     );
     return rows.map(mapOrder);
@@ -106,7 +107,7 @@ export class MysqlOrderRepo implements IOrderRepo {
     const [rows] = await this.db().query<any[]>(
       `SELECT o.*, u.email AS user_email, u.display_name AS user_display_name
        FROM orders o LEFT JOIN users u ON u.id = o.user_id
-       ${whereSql} ORDER BY o.id DESC LIMIT ${Number(input.limit)}`,
+       ${whereSql} ORDER BY o.id DESC LIMIT ${safeLimit(input.limit)}`,
       params,
     );
     return rows.map((r: any) => ({

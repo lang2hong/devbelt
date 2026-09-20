@@ -2,6 +2,12 @@ import type { IOrganizationRepo, AdminOrgFilter, AdminOrgRow } from '../../../re
 import type { Organization } from '../../../domain/entities.js';
 import type { OrganizationStatus } from '../../../domain/enums.js';
 import type { MysqlDb, Queryable } from '../../../repository/mysql/db.js';
+import { safeLimit } from '../../../repository/sqlLimit.js';
+
+/** 转义 LIKE 模式里的 `\` `%` `_`，配合 `ESCAPE '\'` 让前缀按字面匹配。 */
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
 
 /** 组织仓储。成员变更 / 关闭通过 `lockById` 锁组织行串行化。 */
 export class MysqlOrganizationRepo implements IOrganizationRepo {
@@ -81,8 +87,9 @@ function buildAdminOrgFilter(input: Omit<AdminOrgFilter, 'cursor' | 'limit'> & {
   const params: unknown[] = [];
 
   if (input.namePrefix) {
-    where.push('o.name LIKE ?');
-    params.push(`${input.namePrefix}%`);
+    // `%`/`_` 是 LIKE 通配符：前缀搜索须按字面匹配，转义后再拼 `%`。
+    where.push("o.name LIKE ? ESCAPE '\\\\'");
+    params.push(`${escapeLike(input.namePrefix)}%`);
   }
   if (input.status === 'active') where.push("o.status = 'active'");
   else if (input.status === 'closed') where.push("o.status = 'closed'");
@@ -110,7 +117,7 @@ function buildAdminOrgFilter(input: Omit<AdminOrgFilter, 'cursor' | 'limit'> & {
     LEFT JOIN plans pl ON pl.id = os.plan_id
     ${whereSql}
     ORDER BY o.id DESC
-    LIMIT ${Number(input.limit ?? 50)}
+    LIMIT ${safeLimit(input.limit)}
   `;
   return { sql, params };
 }
