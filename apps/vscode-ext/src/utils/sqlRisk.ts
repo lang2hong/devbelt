@@ -22,13 +22,21 @@ const PROCEDURAL_RE = /\b(DO|CALL|EXECUTE)\b/;
  * `LOAD DATA INFILE`。可能读写 DB 主机文件或整表装载，按 critical 处理。
  */
 const SERVER_FILE_RE = /\bINTO\s+(OUTFILE|DUMPFILE)\b/;
+/**
+ * PostgreSQL `SELECT ... INTO <table>`（CTAS）与 `SELECT ... INTO var` 会建表/赋值，
+ * 属写动作。仅当语句以 SELECT/WITH 开头时判定，避免把 `INSERT ... INTO` 误当。
+ */
+const SELECT_START_RE = /^(SELECT|WITH)\b/;
+const SELECT_INTO_RE = /\bINTO\b/;
 // 仅语句起始的 COPY（PostgreSQL `COPY t FROM/TO`）才算危险；
 // 旧的 `/\bCOPY\b/` 会把 `SELECT copy FROM t` 之类误判为 critical。
 const COPY_RE = /^\s*COPY\b/i;
 const LOAD_RE = /\bLOAD\b/;
-/** 维护/全局设置类写动作：`VACUUM`/`REINDEX`、`SET GLOBAL`。 */
-const MAINTENANCE_RE = /\b(VACUUM|REINDEX)\b/;
-const GLOBAL_SET_RE = /\bSET\s+GLOBAL\b/;
+/** 维护/全局设置类写动作：`VACUUM`/`REINDEX`、`CLUSTER`/`ANALYZE`、
+ *  `REFRESH MATERIALIZED VIEW`、`COMMENT ON`。 */
+const MAINTENANCE_RE = /\b(VACUUM|REINDEX|CLUSTER|ANALYZE|REFRESH\s+MATERIALIZED\s+VIEW|COMMENT\s+ON)\b/;
+/** MySQL `SET GLOBAL` / `SET PERSIST` 与 `SET @@GLOBAL.*` 会持久化服务器配置。 */
+const GLOBAL_SET_RE = /\bSET\s+(?:GLOBAL|PERSIST|@@GLOBAL)\b/i;
 
 /**
  * 写语句动作类型，供结果面板区分「影响行数」与「成功」两类展示：
@@ -82,6 +90,9 @@ export function analyzeSqlRisk(sql: string, options?: SqlScanOptions): SqlRisk {
     }
     if (SERVER_FILE_RE.test(stmt) || COPY_RE.test(stmt) || LOAD_RE.test(stmt)) {
       return { level: 'critical', isWrite: true, reason: 'server-side file or bulk load' };
+    }
+    if (SELECT_START_RE.test(stmt) && SELECT_INTO_RE.test(stmt)) {
+      return { level: 'critical', isWrite: true, reason: 'SELECT INTO (table creation or server-side file)' };
     }
     if (MAINTENANCE_RE.test(stmt) || GLOBAL_SET_RE.test(stmt)) hasWrite = true;
     if (DML_RE.test(stmt)) hasWrite = true;

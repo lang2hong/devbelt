@@ -7,6 +7,7 @@ import { ConnectionManager } from '../connection/connectionManager';
 import { diagWarn } from '../utils/diagnostics';
 import type { ConnectionStore } from '@devkit/db-host/connection/connectionStore';
 import { l10n } from '../i18n';
+import { backupFileName } from './backupFileName';
 
 interface ScheduleEntry {
   id: string;
@@ -101,7 +102,7 @@ export class BackupScheduler {
     const session = await this.manager.connect(conn);
     // 文件名带日期 + 时间：只到「日」时，同一天多次/每小时备份会互相覆盖，历史静默丢失。
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-    const fileName = `${entry.database}_${stamp}.sql`;
+    const fileName = backupFileName(entry.database, stamp);
     const uri = vscode.Uri.joinPath(vscode.Uri.file(entry.outputDir), fileName);
 
     // 流式写盘：dump 不再整份驻留内存，内存占用只与单表数据量相关。

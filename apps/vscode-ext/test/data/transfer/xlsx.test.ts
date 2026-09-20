@@ -169,6 +169,15 @@ describe('xlsx 解析健壮性', () => {
       + '</sheetData></worksheet>';
     expect(parseXlsx(buildWorkbook(sheet))).toEqual([{ v: 'x' }]);
   });
+
+  it('超宽/非法列引用（ZZZZZZ1）不触发巨量列分配', () => {
+    // 修复前 `ZZZZZZ` 会被算成 ~3.2 亿列并分配巨大数组（几 KB 的 sheet 即可 DoS）。
+    const sheet = '<worksheet><sheetData>'
+      + '<row r="1"><c r="ZZZZZZ1" t="inlineStr"><is><t>a</t></is></c></row>'
+      + '<row r="2"><c r="ZZZZZZ2"><v>1</v></c></row>'
+      + '</sheetData></worksheet>';
+    expect(parseXlsx(buildWorkbook(sheet))).toEqual([{ a: 1 }]);
+  });
 });
 
 /**

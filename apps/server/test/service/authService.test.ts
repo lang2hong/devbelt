@@ -164,6 +164,14 @@ describe('AuthService', () => {
     await expect(f.auth.login('cp@example.com', 'new-password-1234', device())).resolves.toBeTruthy();
   });
 
+  it('changePassword 写入改密限流桶（限流先于 Argon2id）', async () => {
+    const rl = makeFixture({ rateLimit: true });
+    const id = await registerAndVerify(rl, 'cp-rl@example.com');
+    await rl.auth.changePassword(id, PASSWORD, 'new-password-1234');
+    const keys = [...rl.repos.rateLimitRepo.store.keys()];
+    expect(keys.some((k) => k.startsWith(`change-password:user:${id}|`))).toBe(true);
+  });
+
   it('enforces max_devices entitlement', async () => {
     await registerAndVerify(f, 'dev@example.com');
     // 把 free plan 的 maxDevices 调整为 1（权益派生自 plan）

@@ -7,15 +7,16 @@ import type { FieldInfo } from '../types/meta.js';
  * 密码赋值的字面量。
  *
  * 覆盖 MySQL 的 `IDENTIFIED BY '…'` / `IDENTIFIED WITH plugin BY '…'` 与
- * PG 的 `[ENCRYPTED] PASSWORD '…'`（含 `WITH LOGIN PASSWORD`）。
- * 匹配的是 **关键字 + 紧跟的字符串字面量** 这个结构，所以
+ * PG 的 `[ENCRYPTED] PASSWORD '…'`（含 `WITH LOGIN PASSWORD`），以及
+ * `SET PASSWORD = '…'`（`=` 形式，此前因关键字与字面量之间存在 `=` 而漏网）。
+ * 匹配的是 **关键字 +（可选 `=`）+ 紧跟的字符串字面量** 这个结构，所以
  * `SELECT PASSWORD FROM legacy_users` 或备注里出现 "password" 都不会被误伤 ——
  * 报错里的 SQL 是主要排查线索，误伤等于把有用信息一起抹掉。
  *
  * 字面量内部允许 SQL 的双写转义（`''`）与反斜杠转义。
  */
 const PASSWORD_LITERAL = new RegExp(
-  String.raw`(\b(?:identified\s+(?:with\s+\S+\s+)?by|(?:encrypted\s+)?password)\s+)`
+  String.raw`(\b(?:identified\s+(?:with\s+\S+\s+)?by|(?:encrypted\s+)?password)\s*=?\s*)`
   + String.raw`('(?:[^']|'')*'|"(?:[^"]|"")*")`,
   'gi',
 );

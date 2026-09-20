@@ -63,6 +63,14 @@ describe('QueryError 脱敏', () => {
     });
   }
 
+  it('MySQL SET PASSWORD =：`=` 形式不再漏网', async () => {
+    const s = svc(new Error('driver failed'));
+    const err = await s.query(`SET PASSWORD = '${SECRET}'`).catch((e) => e as QueryError);
+    expect(err).toBeInstanceOf(QueryError);
+    expect(err.sql).not.toContain(SECRET);
+    expect(err.sql).toContain("PASSWORD = '***'");
+  });
+
   it('驱动 message 里回显的密码也被脱敏', async () => {
     const s = svc(new Error(
       `You have an error in your SQL syntax near 'IDENTIFIED BY '${SECRET}'' at line 1`,

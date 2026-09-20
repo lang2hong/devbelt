@@ -261,13 +261,18 @@ export function columnName(index: number): string {
   return name;
 }
 
-/** `C12` → 2（列下标）。无法解析时返回 -1，由调用方按出现顺序兜底。 */
+/** Excel 最大列数（XFD = 16384 列）。超过即视为非法引用，避免被构造的超宽引用撑爆内存。 */
+const MAX_COLUMNS = 16384;
+
+/** `C12` → 2（列下标）。无法解析或越界（如 `ZZZZZZ1`）时返回 -1，由调用方按出现顺序兜底。 */
 function columnIndexOf(ref: string): number {
   const letters = /^([A-Za-z]+)/.exec(ref)?.[1];
-  if (!letters) return -1;
+  // XFD 为 3 个字母；更长的引用不是合法 Excel 列，且逐字符累积会产生巨大下标。
+  if (!letters || letters.length > 3) return -1;
   let index = 0;
   for (const ch of letters.toUpperCase()) index = index * 26 + (ch.charCodeAt(0) - 64);
-  return index - 1;
+  const column = index - 1;
+  return column < MAX_COLUMNS ? column : -1;
 }
 
 // ─── 写 ───
@@ -678,6 +683,7 @@ export function parseXlsx(buffer: Buffer): Record<string, unknown>[] {
 
   const header = rows[0];
   const width = Math.max(0, ...rows.map((row) => Math.max(-1, ...row.keys()) + 1));
+  if (width > MAX_COLUMNS) throw new Error(`.xlsx sheet has too many columns (${width} > ${MAX_COLUMNS}).`);
   const columns: string[] = [];
   for (let i = 0; i < width; i++) {
     const name = header.get(i);
@@ -865,6 +871,7 @@ export async function* streamXlsxRows(filePath: string): AsyncGenerator<Record<s
       if (isBlankCells(cells)) return undefined;
       headerDone = true;
       const width = Math.max(0, ...[...cells.keys()].map((k) => k + 1));
+      if (width > MAX_COLUMNS) throw new Error(`.xlsx sheet has too many columns (${width} > ${MAX_COLUMNS}).`);
       columns = [];
       for (let i = 0; i < width; i++) {
         const name = cells.get(i);

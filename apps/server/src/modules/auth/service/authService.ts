@@ -75,6 +75,12 @@ const REGISTER_WINDOW_S = 3600;
 const REGISTER_MAX = 10;
 const VERIFY_RESEND_WINDOW_S = 3600;
 const VERIFY_RESEND_MAX = 3;
+/**
+ * 改密限流：本端点每次都会做 Argon2id（慢），已认证者反复调用会持续占用
+ * CPU/worker，必须按用户节流。
+ */
+const CHANGE_PASSWORD_WINDOW_S = 15 * 60;
+const CHANGE_PASSWORD_MAX = 10;
 
 /**
  * 认证服务（Facade）。
@@ -366,15 +372,18 @@ export class AuthService {
 
   /** 改密：同一事务内锁用户 → 重新校验当前密码 → 更新 hash → 撤销全部 refresh token（§5.1）。 */
   async changePassword(userId: number, currentPassword: string, newPassword: string): Promise<{ ok: true }> {
+    // 限流先于任何 Argon2id：否则已认证者可反复触发慢哈希（见 CHANGE_PASSWORD_*）。
+    await this.rateLimiter.hit(`change-password:user:${userId}`, CHANGE_PASSWORD_WINDOW_S, CHANGE_PASSWORD_MAX);
     this.validatePassword(newPassword);
-    const newHash = await hashPassword(newPassword); // Argon2id 慢（worker 内算），事务外预计算
 
-    // 旧密码校验同样移到事务外（与 login 一致）：两次 Argon2id 各约 2.5s，
-    // 放在锁内会让用户行锁与池连接被占用约 5s。
+    // 先校验旧密码、再计算新 hash：旧密码错误时只需一次 Argon2id 而非两次。
+    // 两次哈希都放在事务外（与 login 一致）：放入锁内会让用户行锁与池连接被占用约 5s。
     const current = await this.userRepo.findById(userId);
     if (!current) throw new UnauthorizedError();
     const currentOk = await verifyPassword(currentPassword, current.passwordHash);
     const verifiedAgainstHash = current.passwordHash;
+    // 旧密码错误时不再计算新 hash：失败路径少一次 Argon2id（真正的护栏是上面的限流）。
+    const newHash = currentOk ? await hashPassword(newPassword) : '';
 
     await this.runner(async (tx) => {
       const user = await this.userRepo.lockById(tx, userId);

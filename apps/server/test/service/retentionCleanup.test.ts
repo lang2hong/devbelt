@@ -213,6 +213,25 @@ describe('retention cleanup', () => {
     expect(auditRepo.events.filter((e) => e.eventType === 'system.receipts.cleanup')).toHaveLength(0);
   });
 
+  it('重入闸：上一轮未结束时跳过本轮（不叠加连接占用）', async () => {
+    const deps = makeDeps();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let orderCalls = 0;
+    deps.orderRepo = {
+      expirePending: async () => { orderCalls += 1; await gate; return 0; },
+    } as any;
+
+    const c = startRetentionCleanup(deps, {});
+    const first = c.runOnce();
+    // 第一轮仍卡在 orderRepo：第二次调用应立即返回且不执行任务。
+    await expect(c.runOnce()).resolves.toBeUndefined();
+    release();
+    await first;
+    c.stop();
+    expect(orderCalls).toBe(1);
+  });
+
   it('audit write failure does not block the cleanup of other tables', async () => {
     const deps = makeDeps();
     const now = Date.now();

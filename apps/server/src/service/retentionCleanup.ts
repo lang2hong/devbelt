@@ -71,7 +71,7 @@ export function startRetentionCleanup(
   const tokenRetentionMs = opts.tokenRetentionMs ?? 86_400_000;
 
   /** 逐表清理；任一表失败不影响其余表。 */
-  const runOnce = async (): Promise<void> => {
+  const runCleanup = async (): Promise<void> => {
     const now = Date.now();
     const refreshBefore = new Date(now - refreshRetentionMs);
     const tokenBefore = new Date(now - tokenRetentionMs);
@@ -125,6 +125,19 @@ export function startRetentionCleanup(
         // （mysql2 会把内联参数挂在 err.sql 上），故只取消息文本。
         console.warn(`[retention] cleanup failed for ${table}`, String(err instanceof Error ? err.message : err));
       }
+    }
+  };
+
+  // 重入闸：上一轮未结束则跳过本轮，避免周期任务与自身重叠叠加连接占用
+  //（过期语义幂等，重叠不会写坏数据，但会同批占用连接）。
+  let running = false;
+  const runOnce = async (): Promise<void> => {
+    if (running) return;
+    running = true;
+    try {
+      await runCleanup();
+    } finally {
+      running = false;
     }
   };
 

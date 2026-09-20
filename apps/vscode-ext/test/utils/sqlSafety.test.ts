@@ -298,4 +298,25 @@ describe('写/危险关键字补全（#2）', () => {
     await expect(confirmSqlExecution(conn({ readOnly: true }), "COPY t TO STDOUT")).resolves.toBe(false);
     await expect(confirmSqlExecution(conn({ readOnly: true }), "SELECT * FROM t INTO OUTFILE '/tmp/x'")).resolves.toBe(false);
   });
+
+  it.each([
+    'SELECT * INTO newtab FROM t',
+    'SELECT 1 INTO x',
+    'WITH c AS (SELECT 1) SELECT * INTO t2 FROM c',
+  ])('SELECT … INTO（CTAS）判为 critical：%s', (sql) => {
+    expect(analyzeSqlRisk(sql)).toMatchObject({ level: 'critical', isWrite: true });
+  });
+
+  it('INSERT … INTO 不因 SELECT-INTO 规则被重复判级（仍是 DML write）', () => {
+    expect(analyzeSqlRisk('INSERT INTO t VALUES (1)')).toMatchObject({ level: 'write', isWrite: true });
+  });
+
+  it('REFRESH / CLUSTER / ANALYZE / COMMENT ON / SET PERSIST 判为 write', () => {
+    expect(analyzeSqlRisk('REFRESH MATERIALIZED VIEW mv')).toMatchObject({ level: 'write', isWrite: true });
+    expect(analyzeSqlRisk('CLUSTER t')).toMatchObject({ level: 'write', isWrite: true });
+    expect(analyzeSqlRisk('ANALYZE t')).toMatchObject({ level: 'write', isWrite: true });
+    expect(analyzeSqlRisk("COMMENT ON TABLE t IS 'x'")).toMatchObject({ level: 'write', isWrite: true });
+    expect(analyzeSqlRisk('SET PERSIST max_connections = 1')).toMatchObject({ level: 'write', isWrite: true });
+    expect(analyzeSqlRisk('SET @@GLOBAL.max_connections = 1')).toMatchObject({ level: 'write', isWrite: true });
+  });
 });
