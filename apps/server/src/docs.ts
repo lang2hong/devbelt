@@ -345,7 +345,7 @@ function shell(title: string, body: string, opts: DocsRenderOptions): string {
         </nav>
       </header>
       ${body}
-      <footer>DevBelt · 开发者工具套件</footer>
+      <footer>DevBelt</footer>
     </div>
   </body>
 </html>`;

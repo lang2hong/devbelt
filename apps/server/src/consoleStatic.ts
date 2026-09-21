@@ -155,8 +155,7 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
 
   // 套件首页（套餐为服务端渲染；数据源失败时降级为不含套餐的页面）
   app.get('/', async (req, reply) => {
-    const [plans, loggedIn] = await Promise.all([loadHomePlans(), loadLoggedIn(req)]);
-    sendHtml(reply, renderHome(plans, { loggedIn }));
+    sendHtml(reply, renderHome({ loggedIn: await loadLoggedIn(req) }));
   });
 
   // 公开套餐页（/plans，无需登录）

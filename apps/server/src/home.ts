@@ -102,38 +102,50 @@ export interface HomeRenderOptions {
   loggedIn?: boolean;
 }
 
-export function renderHome(plans: HomePlan[] | null, opts: HomeRenderOptions = {}): string {
-  const personal = plans?.filter((p) => p.kind === 'personal') ?? [];
-  const organization = plans?.filter((p) => p.kind === 'organization') ?? [];
+/** 首页「介绍」区的能力卡片。 */
+const FEATURES: readonly { title: string; desc: string }[] = [
+  {
+    title: '本地数据库客户端',
+    desc: '在 VS Code 内连接 MySQL / PostgreSQL / SQLite，享受 SQL 编辑补全、结果面板、ER 图、表设计与导入导出。',
+  },
+  {
+    title: '端到端加密同步',
+    desc: '连接、分组与保存查询在本机加密后跨设备同步，服务端只保存密文，无法读取明文。',
+  },
+  {
+    title: '组织协作',
+    desc: '共享目录、共享查询与连接模板；本机凭据映射，密码等敏感字段不上传服务端。',
+  },
+  {
+    title: 'Web 控制台',
+    desc: '在浏览器内管理账户、设备与组织，查看与升级套餐、导出审计记录。',
+  },
+];
+
+function featureCard(f: { title: string; desc: string }): string {
+  return `<div class="tool"><strong>${escapeHtml(f.title)}</strong><span>${escapeHtml(f.desc)}</span></div>`;
+}
+
+export function renderHome(opts: HomeRenderOptions = {}): string {
   // 登录态决定 header 右侧与 hero CTA：已登录不再显示「登录/注册」，改为进入控制台。
   const navAuth = opts.loggedIn
     ? `<a href="/db/">控制台</a>`
     : `<a href="/login">登录</a>
           <a href="/register">注册</a>`;
   const heroCta = opts.loggedIn
-    ? `<a class="btn primary" href="/db/">进入控制台</a>`
+    ? `<a class="btn primary" href="/db/">进入控制台</a>
+          <a class="btn ghost" href="/db/docs">查看文档</a>`
     : `<a class="btn primary" href="/register">免费开始</a>
-          <a class="btn ghost" href="/login">已有账户，登录</a>`;
-  const pricing =
-    personal.length + organization.length > 0
-      ? `
-      <div class="plan-group">
-        <h3>个人</h3>
-        <div class="plans">${personal.map(planCard).join('')}</div>
-      </div>
-      <div class="plan-group">
-        <h3>组织</h3>
-        <div class="plans">${organization.map(planCard).join('')}</div>
-      </div>`
-      : `<p class="muted">套餐信息暂时不可用，请稍后再试。</p>`;
+          <a class="btn ghost" href="/login">已有账户，登录</a>
+          <a class="btn ghost" href="/db/docs">查看文档</a>`;
 
   return `<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DevBelt · 开发者工具套件</title>
-    <meta name="description" content="DevBelt：数据库客户端、控制台与端到端加密同步的开发者工具套件。" />
+    <title>DevBelt</title>
+    <meta name="description" content="DevBelt：VS Code 数据库客户端、Web 控制台与端到端加密同步。" />
     <style>
       :root { color-scheme: dark; --bg:#0b1020; --panel:#131a30; --line:#232a44; --fg:#e6e9f2; --muted:#9aa4bf; --accent:#3d6bff; }
       * { box-sizing: border-box; }
@@ -165,18 +177,6 @@ export function renderHome(plans: HomePlan[] | null, opts: HomeRenderOptions = {
       .tool .badge { display: inline-block; margin-left: 8px; padding: 1px 6px; border: 1px solid var(--line);
         border-radius: 6px; color: var(--accent); font-size: .72rem; vertical-align: middle; }
       .tool.soon { opacity: .6; }
-      .plan-group { margin-bottom: 24px; }
-      .plan-group h3 { font-size: 1.05rem; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
-      .plans { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-      .plan { padding: 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); display: flex; flex-direction: column; }
-      .plan h4 { margin: 0 0 8px; font-size: 1.1rem; }
-      .plan .price { font-size: 1.6rem; font-weight: 700; margin: 0 0 14px; }
-      .plan .price span { font-size: .85rem; font-weight: 400; color: var(--muted); margin-left: 4px; }
-      .plan ul { list-style: none; padding: 0; margin: 0 0 18px; flex: 1; }
-      .plan li { color: var(--muted); font-size: .92rem; padding: 3px 0 3px 16px; position: relative; }
-      .plan li::before { content: "✓"; position: absolute; left: 0; color: var(--accent); }
-      .plan-cta { text-align: center; padding: 9px 14px; border: 1px solid var(--line); border-radius: 9px; text-decoration: none; font-size: .92rem; }
-      .plan-cta:hover { border-color: var(--accent); }
       .muted { color: var(--muted); }
       footer { color: var(--muted); font-size: .85rem; padding: 28px 0 40px; border-top: 1px solid var(--line); }
     </style>
@@ -187,6 +187,7 @@ export function renderHome(plans: HomePlan[] | null, opts: HomeRenderOptions = {
         <a class="brand" href="/">DevBelt</a>
         <span class="spacer"></span>
         <nav>
+          <a href="#intro">介绍</a>
           <a href="#tools">工具</a>
           <a href="/plans">套餐</a>
           <a href="/db/docs">文档</a>
@@ -195,12 +196,20 @@ export function renderHome(plans: HomePlan[] | null, opts: HomeRenderOptions = {
       </header>
 
       <div class="hero">
-        <h1>开发者工具套件</h1>
-        <p>DevBelt 把数据库客户端、Web 控制台与端到端加密同步整合在一起：本地管理连接与查询，跨设备安全同步，组织内共享资源，运营侧统一治理。</p>
+        <h1>欢迎使用 DevBelt</h1>
+        <p>DevBelt 是面向开发者的工具套件：在 VS Code 中管理数据库连接与查询，跨设备端到端加密同步，组织内共享资源，并在 Web 控制台统一治理。</p>
         <div class="cta">
           ${heroCta}
         </div>
       </div>
+
+      <section id="intro">
+        <h2>介绍</h2>
+        <p class="section-sub">DevBelt 把常用开发工具与协作能力整合到一个套件里，减少在编辑器与独立工具之间的切换。</p>
+        <div class="grid">
+          ${FEATURES.map(featureCard).join('\n          ')}
+        </div>
+      </section>
 
       <section id="tools">
         <h2>工具</h2>
@@ -210,15 +219,7 @@ export function renderHome(plans: HomePlan[] | null, opts: HomeRenderOptions = {
         </div>
       </section>
 
-      <section id="pricing">
-        <h2>套餐</h2>
-        <p class="section-sub">个人与组织两档，按需选择；配额与引擎范围见各档说明。</p>
-        ${pricing}
-      </section>
-
-      
-
-      <footer>DevBelt · 开发者工具套件</footer>
+      <footer>DevBelt</footer>
     </div>
   </body>
 </html>`;
@@ -300,7 +301,7 @@ export function renderPlansPage(plans: HomePlan[] | null, opts: { loggedIn?: boo
         <p class="sub">个人与组织两档，按需选择；配额与引擎范围见各档说明。</p>
         ${groups}
       </main>
-      <footer>DevBelt · 开发者工具套件</footer>
+      <footer>DevBelt</footer>
     </div>
   </body>
 </html>`;
