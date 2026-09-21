@@ -6,6 +6,7 @@ import type { SqlDialect } from './sqlDialect.js';
 import type { DatabaseCapabilities } from './capabilities.js';
 import { columnTypesFor } from './typeCatalog.js';
 import { buildKeysetSql } from './keyset.js';
+import { escapeStringLiteralContent } from '../sql/escapeLiteral.js';
 
 /**
  * SQLite 方言实现。
@@ -237,12 +238,11 @@ export class SqliteDialect implements SqlDialect {
     if (value === null || value === undefined) return 'NULL';
     if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NULL';
     if (typeof value === 'boolean') return value ? '1' : '0';
-    if (value instanceof Date) return `'${value.toISOString().replace(/'/g, "''")}'`;
+    if (value instanceof Date) return `'${escapeStringLiteralContent(value.toISOString())}'`;
     if (Buffer.isBuffer(value)) return `X'${value.toString('hex')}'`;
     if (typeof value === 'object') {
-      const json = JSON.stringify(value).replace(/'/g, "''");
-      return `'${json}'`;
+      return `'${escapeStringLiteralContent(JSON.stringify(value))}'`;
     }
-    return `'${String(value).replace(/'/g, "''")}'`;
+    return `'${escapeStringLiteralContent(String(value))}'`;
   }
 }

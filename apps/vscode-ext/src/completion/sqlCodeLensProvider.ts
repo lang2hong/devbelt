@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { DatabaseType } from '@devkit/db-core';
+import type { SqlScanOptions } from '@devkit/db-core/sql';
 import { splitSqlWithRanges } from '../utils/sql';
 import { dialectScanOptions } from '../utils/sqlDialectOptions';
 
@@ -13,15 +14,21 @@ import { dialectScanOptions } from '../utils/sqlDialectOptions';
  * 选项：若 CodeLens 用默认（非 MySQL）切分，MySQL 文档里 `SELECT 1 # note; DROP`
  * 会把 `#` 注释内的分号切开，多出一个 "Run SQL" 并把 `DROP` 片段交给执行命令。
  * 方言由注入的 `resolveDbType(documentUri)` 解析（扩展侧接 ConnectionContext）。
+ * 连接已建时优先用 `resolveScanOptions(documentUri)`（含 MySQL NO_BACKSLASH_ESCAPES），
+ * 保证切分与实际执行同源。
  */
 export class SqlCodeLensProvider implements vscode.CodeLensProvider {
-  constructor(private readonly resolveDbType?: (uri: string) => DatabaseType | undefined) {}
+  constructor(
+    private readonly resolveDbType?: (uri: string) => DatabaseType | undefined,
+    private readonly resolveScanOptions?: (uri: string) => SqlScanOptions | undefined,
+  ) {}
 
   async provideCodeLenses(
     document: vscode.TextDocument,
   ): Promise<vscode.CodeLens[]> {
     const lenses: vscode.CodeLens[] = [];
-    const options = dialectScanOptions(this.resolveDbType?.(document.uri.toString()));
+    const uri = document.uri.toString();
+    const options = this.resolveScanOptions?.(uri) ?? dialectScanOptions(this.resolveDbType?.(uri));
     for (const seg of splitSqlWithRanges(document.getText(), options)) {
       const range = new vscode.Range(
         document.positionAt(seg.start),

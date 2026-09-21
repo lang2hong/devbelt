@@ -1,6 +1,6 @@
 import { DatabaseType } from '@devkit/db-core';
 import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
-import { splitSqlWithRanges, stripSqlComments, SqlScanner, StreamingStatementSplitter } from '@devkit/db-core/sql';
+import { splitSqlWithRanges, stripSqlComments, SqlScanner, StreamingStatementSplitter, escapeStringLiteralContent } from '@devkit/db-core/sql';
 import { createReadStream } from 'node:fs';
 import type { SqlScanOptions } from '@devkit/db-core/sql';
 
@@ -35,10 +35,8 @@ export function wrapIdentForConn(conn: SavedConnection, name: string): string {
  * 是普通字符，此时**只**翻倍单引号，否则会把一个反斜杠写成两个。
  */
 export function escapeSqlString(value: string, dbType: DatabaseType, noBackslashEscapes = false): string {
-  const escaped = String(value).replace(/'/g, "''");
-  return dbType === DatabaseType.MYSQL && !noBackslashEscapes
-    ? escaped.replace(/\\/g, '\\\\')
-    : escaped;
+  // 规则下沉到 db-core 的单一来源（`escapeStringLiteralContent`），与方言 escapeValue 同源。
+  return escapeStringLiteralContent(String(value), dbType === DatabaseType.MYSQL && !noBackslashEscapes);
 }
 
 /**

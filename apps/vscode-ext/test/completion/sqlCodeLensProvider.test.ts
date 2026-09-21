@@ -41,4 +41,23 @@ describe('SqlCodeLensProvider 方言化切分', () => {
     const lenses = await provider.provideCodeLenses(doc(MYSQL_TEXT));
     expect(lenses).toHaveLength(2);
   });
+
+  /**
+   * MySQL NO_BACKSLASH_ESCAPES 下 `\'` 不转义：连接已建时必须用连接的扫描选项切分，
+   * 否则 CodeLens 的语句边界与实际执行不一致（多/少一个 Run）。
+   */
+  it('注入 resolveScanOptions（NBE）后，切分与执行侧一致', async () => {
+    const text = "SELECT 'a\\'; DROP TABLE t";
+    // 默认（反斜杠转义）：`\'` 转义引号 → 字符串未闭合，整段是一条语句
+    const base = new SqlCodeLensProvider(() => DatabaseType.MYSQL);
+    expect(await base.provideCodeLenses(doc(text))).toHaveLength(1);
+    // NBE：反斜杠不转义 → `'a\'` 闭合，DROP 成为第二条语句
+    const nbe = new SqlCodeLensProvider(
+      () => DatabaseType.MYSQL,
+      () => ({ hashComment: true, dashDashRequiresSpace: true, backslashEscapes: false, escapeStringPrefix: false }),
+    );
+    const lenses = await nbe.provideCodeLenses(doc(text));
+    expect(lenses).toHaveLength(2);
+    expect((lenses[1].command as any).arguments[0]).toContain('DROP TABLE t');
+  });
 });

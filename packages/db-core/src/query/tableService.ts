@@ -400,8 +400,11 @@ export class TableService {
       throw new Error(`Invalid privilege: "${privilege}"`);
     }
     if (this.queryService.dialect.dbType === 'PG') {
-      if (!database) throw new Error('PostgreSQL requires a schema name for grant.');
-      return this.ddl(`GRANT ${privilege} ON ALL TABLES IN SCHEMA ${this.wrap(validateIdent(database))} TO ${this.wrap(validateIdent(name))}`);
+      // PG 里 `database` 是库名，与 schema 是两层（见 qualifyTable）：把库名当 schema
+      // 会授权到不存在的 `"库名"` schema。`GRANT ... IN SCHEMA` 只接受标识符，
+      // `current_schema()` 在这里是语法错误，故先查出当前 schema 名再内插。
+      const schema = await this.currentSchema();
+      return this.ddl(`GRANT ${privilege} ON ALL TABLES IN SCHEMA ${this.wrap(validateIdent(schema))} TO ${this.wrap(validateIdent(name))}`);
     }
     const target = database ? `${this.wrap(validateIdent(database))}.*` : '*.*';
     return this.ddl(`GRANT ${privilege} ON ${target} TO ${this.esc(name)}@${this.esc(host)}`);
@@ -414,8 +417,9 @@ export class TableService {
       throw new Error(`Invalid privilege: "${privilege}"`);
     }
     if (this.queryService.dialect.dbType === 'PG') {
-      if (!database) throw new Error('PostgreSQL requires a schema name for revoke.');
-      return this.ddl(`REVOKE ${privilege} ON ALL TABLES IN SCHEMA ${this.wrap(validateIdent(database))} FROM ${this.wrap(validateIdent(name))}`);
+      // 同 grantPrivilege：目标是 schema（当前 schema），不是库名。
+      const schema = await this.currentSchema();
+      return this.ddl(`REVOKE ${privilege} ON ALL TABLES IN SCHEMA ${this.wrap(validateIdent(schema))} FROM ${this.wrap(validateIdent(name))}`);
     }
     const target = database ? `${this.wrap(validateIdent(database))}.*` : '*.*';
     return this.ddl(`REVOKE ${privilege} ON ${target} FROM ${this.esc(name)}@${this.esc(host)}`);
@@ -526,6 +530,20 @@ export class TableService {
 
   private async ddl(sql: string, options?: QueryOptions): Promise<QueryResult> {
     return this.queryService.query(sql, undefined, options);
+  }
+
+  /**
+   * 解析 PG 当前 schema 名。
+   *
+   * 授权目标必须是 schema（`GRANT ... IN SCHEMA <name>` 只接受标识符，不能写
+   * `current_schema()` 表达式），而连接层提供的 `database` 是库名。其它解析
+   * 调用点（建表语句、列解析）统一按 `current_schema()` 语义，这里取同名值。
+   */
+  private async currentSchema(): Promise<string> {
+    const result = await this.queryService.queryAll('SELECT current_schema() AS schema');
+    const schema = String(result.rows?.[0]?.schema ?? '');
+    if (!schema) throw new Error('Unable to resolve the current PostgreSQL schema.');
+    return schema;
   }
 
   /**

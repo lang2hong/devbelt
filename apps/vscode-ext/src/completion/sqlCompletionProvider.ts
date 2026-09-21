@@ -72,7 +72,10 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
     if (conn) {
       tables = await this.getTables(conn, db);
       // 仅解析光标所在语句的 FROM，避免多语句文件取到首个 FROM。
-      const stmtText = statementTextAt(text, document.offsetAt(position), dialectScanOptions(conn.dbType));
+      // 与执行侧同源：连接已建则用其扫描选项（含 MySQL NO_BACKSLASH_ESCAPES），
+      // 否则回退方言默认，避免"光标所在语句"与实际执行的语句边界不一致。
+      const scanOpts = this.manager.scanOptionsFor?.(conn) ?? dialectScanOptions(conn.dbType);
+      const stmtText = statementTextAt(text, document.offsetAt(position), scanOpts);
       fromTable = extractFromTable(stmtText);
       if (sqlCtx === 'dot_column') {
         const m = before.match(/(\w+)\.\w*$/);

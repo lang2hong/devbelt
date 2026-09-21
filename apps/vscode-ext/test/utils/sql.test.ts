@@ -43,6 +43,12 @@ describe('escapeSqlString', () => {
     expect(escapeSqlString('C:\\tmp', DatabaseType.PG, true)).toBe('C:\\tmp');
   });
 
+  it('MySQL 转义 NUL，PG/SQLite 不转义（与方言 escapeValue 单一来源一致）', () => {
+    expect(escapeSqlString('a\0b', DatabaseType.MYSQL)).toBe('a\\0b');
+    expect(escapeSqlString('a\0b', DatabaseType.PG)).toBe('a\0b');
+    expect(escapeSqlString('a\0b', DatabaseType.SQLITE)).toBe('a\0b');
+  });
+
   it('注入形状不逃出字面量', () => {
     expect(escapeSqlString("x' OR 1=1 -- ", DatabaseType.MYSQL)).toBe("x'' OR 1=1 -- ");
     expect(escapeSqlString("x' OR 1=1 -- ", DatabaseType.PG)).toBe("x'' OR 1=1 -- ");

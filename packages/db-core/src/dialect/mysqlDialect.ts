@@ -6,6 +6,7 @@ import type { SqlDialect } from './sqlDialect.js';
 import type { DatabaseCapabilities } from './capabilities.js';
 import { columnTypesFor } from './typeCatalog.js';
 import { buildKeysetSql } from './keyset.js';
+import { escapeStringLiteralContent } from '../sql/escapeLiteral.js';
 
 /**
  * MySQL 方言实现。
@@ -385,7 +386,6 @@ export class MysqlDialect implements SqlDialect {
    * - NO_BACKSLASH_ESCAPES：`\` 与 NUL 均按原字节保留，只翻倍 `'`。
    */
   private escapeString(raw: string): string {
-    const quoted = raw.replace(/'/g, "''");
-    return this.noBackslashEscapes ? quoted : quoted.replace(/\\/g, '\\\\').replace(/\0/g, '\\0');
+    return escapeStringLiteralContent(raw, !this.noBackslashEscapes);
   }
 }

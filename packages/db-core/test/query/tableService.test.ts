@@ -10,6 +10,8 @@ import type { QueryCallback } from '../../src/types/query';
 /** 内存假连接捕获 SQL */
 class CaptureConnection extends IConnection {
   public sqls: string[] = [];
+  /** 命中该正则的 SQL 返回指定 rows（如 `SELECT current_schema()`）；否则返回空 rows。 */
+  public rowsFor?: { match: RegExp; rows: any[] };
   constructor() {
     super({ host: 'localhost', port: 3306, user: 'root', database: 'test' });
   }
@@ -18,6 +20,10 @@ class CaptureConnection extends IConnection {
   query(sql: string, values?: any, callback?: any): void {
     this.sqls.push(sql);
     const cb = callback || values;
+    if (this.rowsFor?.match.test(sql)) {
+      cb(null, { rows: this.rowsFor.rows, affectedRows: 0 }, []);
+      return;
+    }
     cb(null, { rows: [], affectedRows: 1 }, []);
   }
   connect(cb: (err: any) => void): void {
@@ -74,6 +80,35 @@ describe('TableService（表操作）', () => {
     const conn = new CaptureConnection();
     const svc = new TableService(new QueryService(conn, new SqliteDialect()));
     await expect(svc.truncateTable('users')).rejects.toThrow(/does not support truncateTable/);
+  });
+
+  /**
+   * PG 的库名 != schema：此前把 `database` 当 schema 包裹，生成 `IN SCHEMA "库名"`，
+   * 授权到不存在的 schema。现在先查 current_schema() 再以标识符内插。
+   */
+  it('PG 授权目标为 current_schema() 解析出的 schema，而非库名', async () => {
+    const conn = new CaptureConnection();
+    conn.rowsFor = { match: /current_schema\(\)/, rows: [{ schema: 'public' }] };
+    const svc = new TableService(new QueryService(conn, new PostgreSqlDialect()));
+    await svc.grantPrivilege('alice', 'SELECT', 'mydb');
+    expect(conn.sqls[0]).toContain('current_schema()');
+    expect(conn.sqls[1]).toBe('GRANT SELECT ON ALL TABLES IN SCHEMA "public" TO "alice"');
+    expect(conn.sqls[1]).not.toContain('mydb');
+  });
+
+  it('PG 撤销权限同样按 current_schema() 解析', async () => {
+    const conn = new CaptureConnection();
+    conn.rowsFor = { match: /current_schema\(\)/, rows: [{ schema: 'reporting' }] };
+    const svc = new TableService(new QueryService(conn, new PostgreSqlDialect()));
+    await svc.revokePrivilege('alice', 'SELECT', 'mydb');
+    expect(conn.sqls[1]).toBe('REVOKE SELECT ON ALL TABLES IN SCHEMA "reporting" FROM "alice"');
+  });
+
+  it('MySQL 授权仍按 库.* 生成（不受 PG 改动影响）', async () => {
+    const conn = new CaptureConnection();
+    const svc = new TableService(new QueryService(conn, new MysqlDialect()));
+    await svc.grantPrivilege('alice', 'SELECT', 'mydb', '%');
+    expect(conn.sqls[0]).toBe("GRANT SELECT ON `mydb`.* TO 'alice'@'%'");
   });
 
   it('recreatePrimaryKey：MySQL 用 DROP+ADD 单语句', async () => {

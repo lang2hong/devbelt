@@ -236,7 +236,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     ),
     vscode.languages.registerCodeLensProvider(
       { language: 'sql' },
-      new SqlCodeLensProvider((uri) => connCtx.getForDoc(uri)?.conn.dbType),
+      new SqlCodeLensProvider(
+        (uri) => connCtx.getForDoc(uri)?.conn.dbType,
+        (uri) => {
+          const conn = connCtx.getForDoc(uri)?.conn;
+          return conn ? manager.scanOptionsFor?.(conn) : undefined;
+        },
+      ),
     ),
   );
 
