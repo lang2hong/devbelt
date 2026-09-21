@@ -129,14 +129,6 @@ function reportInitialRun(ui: SyncUi, result: SyncRun): void {
   }
 }
 
-async function runFirstSync(session: SyncSessionPort, ui: SyncUi): Promise<void> {
-  try {
-    reportInitialRun(ui, await session.syncNow());
-  } catch {
-    ui.warn(l10n('sync.initialSyncPending'));
-  }
-}
-
 function validateNewSmp(smp: string, ui: SyncUi): boolean {
   if (smp.trim().length === 0) {
     ui.error(l10n('sync.passphraseEmpty'));
@@ -205,7 +197,8 @@ export async function initializePersonalSync(deps: PersonalSyncCommandDeps): Pro
   while (!await deps.ui.confirmRecoveryCode(recovery.code)) {
     deps.ui.warn(l10n('sync.recoveryCodeMustConfirm'));
   }
-  await runFirstSync(session, deps.ui);
+  // 初始化是纯初始化：不自动同步。是否/何时同步由自动同步开关或显式命令决定。
+  deps.ui.info(l10n('sync.initialized'));
 }
 
 /** 解锁路径：先严格校验远端 state，再通过 SMP 解开 DEK，任何失败均保持 session locked。 */
@@ -276,21 +269,19 @@ export async function unlockPersonalSync(deps: PersonalSyncCommandDeps): Promise
   } finally {
     dek?.fill(0);
   }
-  // 解锁即由 unlockFromState 内部排首次后台同步（scheduleInitialSync）；
-  // 命令层不再重复 syncNow（避免双轮），同步结果经状态栏/onSyncResult 异步反馈。
+  // 解锁是纯解锁：不自动同步。是否/何时同步由自动同步开关（聚焦/本地变更）或显式命令决定。
   deps.ui.info(l10n('sync.unlocked'));
 }
 
-/** 智能同步入口（树视图「⋯」菜单的「同步」项）：已解锁→立即同步；已初始化锁定→解锁；未初始化→初始化。 */
+/**
+ * 智能入口（「启用同步」）：按远端状态自动路由——远端有 state→解锁；无 state→初始化。
+ * 二者都是纯动作，不自动同步（自动同步由开关或显式命令负责）。
+ */
 export async function syncEntry(deps: PersonalSyncCommandDeps): Promise<void> {
   const session = await getSession(deps);
   if (!session) return;
   if (session.isUnlocked) {
-    try {
-      reportInitialRun(deps.ui, await session.syncNow());
-    } catch {
-      deps.ui.warn(l10n('sync.initialSyncPending'));
-    }
+    deps.ui.info(l10n('sync.alreadyUnlocked'));
     return;
   }
   // 本地 localEpoch 只是本机是否已持久化的指示，不能可靠区分「已初始化但本机无快照（第二台设备）」

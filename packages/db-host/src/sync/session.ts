@@ -216,8 +216,7 @@ export class PersonalSyncSession {
       await this.dekStore.store(this.userId, BigInt(snapshot.keyEpoch), ownedDek);
       await this.stateStore.setSnapshot(snapshot);
       this.unlock(snapshot.keyEpoch, ownedDek);
-      // 解锁路径即排首次同步（幂等）；初始化路径走 initializeSync，不在此触发（等恢复码确认）。
-      this.scheduleInitialSync();
+      // 解锁是纯解锁：不在此排同步。是否/何时同步由自动同步开关（聚焦/本地变更）或显式命令决定。
     } catch (err) {
       ownedDek.fill(0);
       throw err;
@@ -267,12 +266,6 @@ export class PersonalSyncSession {
   scheduleNow(): void {
     if (!this.coordinator) throw new Error('sync session is locked');
     this.coordinator.scheduleNow();
-  }
-
-  /** 解锁后的首次同步（幂等）；供扩展层在解锁/首次聚焦时保证至少同步一次。 */
-  scheduleInitialSync(): void {
-    if (!this.coordinator) throw new Error('sync session is locked');
-    this.coordinator.scheduleInitialSync();
   }
 
   /** B4：当前未解决冲突（来自 outbox 的 conflict 字段）。 */
@@ -358,7 +351,7 @@ export class PersonalSyncSession {
       newDek.fill(0);
       throw err;
     }
-    this.scheduleInitialSync();
+    // 换钥/恢复同样是纯生命周期动作：不自动同步，交由开关/显式命令。
   }
 
   /** 建立当前 epoch 的 recordMap/outbox/unresolved/deferred；epoch 与现存 store 不一致时抛错（不得静默沿用）。 */

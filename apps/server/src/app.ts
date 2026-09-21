@@ -86,6 +86,7 @@ import { resolvePaymentGateway, paymentRoutesEnabled, isChannelConfigured } from
 import { resolveFeatureFlags } from './service/featureFlags.js';
 import { CursorService, deriveCursorKey } from './service/cursor.js';
 import { requestId } from './middleware/requestId.js';
+import { readCookie, refreshCookieName } from './middleware/cookies.js';
 import { registerConsoleStatic } from './consoleStatic.js';
 
 /**
@@ -530,6 +531,16 @@ export async function createApp() {
   });
   await registerConsoleStatic(app, {
     getHomePlans: async () => toHomePlans(await buildPlanCatalog(planRepo, featureDefRepo)),
+    // 首页登录态：仅当带 refresh cookie 时按 token-hash 查一次（已撤销/过期 fail-closed）。
+    isLoggedIn: async (req) => {
+      const raw = readCookie(req, refreshCookieName());
+      if (!raw) return false;
+      try {
+        return (await consoleAuthService.sessionIdOf(raw)) !== undefined;
+      } catch {
+        return false;
+      }
+    },
   });
 
   await app.ready();

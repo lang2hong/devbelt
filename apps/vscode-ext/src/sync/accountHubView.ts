@@ -21,6 +21,8 @@ import type { HubTab } from '../result/protocol';
 
 /** webview 可触发的命令白名单（`action` 不能借此执行任意命令）。 */
 const ACTION_COMMANDS = new Set<string>([
+  // 单一「启用同步」入口：按远端状态自动路由（有→解锁，无→初始化），不自动同步。
+  'devbelt.syncEntry',
   'devbelt.initializePersonalSync',
   'devbelt.unlockPersonalSync',
   'devbelt.changeLoginPassword',
@@ -28,6 +30,7 @@ const ACTION_COMMANDS = new Set<string>([
   'devbelt.recoverSync',
   'devbelt.recoverByAccount',
   'devbelt.resetSync',
+  'devbelt.syncNow',
   'devbelt.syncPull',
   'devbelt.syncPush',
   'devbelt.exportConnections',

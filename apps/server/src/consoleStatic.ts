@@ -43,6 +43,8 @@ function notFound(_req: FastifyRequest, reply: FastifyReply): void {
 export interface ConsoleStaticOptions {
   /** 套件首页的套餐数据来源（由组合根注入；缺省则首页不含套餐区）。 */
   getHomePlans?: () => Promise<HomePlan[]>;
+  /** 首页登录态判定（由组合根按 refresh cookie 注入；缺省视为未登录）。 */
+  isLoggedIn?: (req: FastifyRequest) => Promise<boolean>;
 }
 
 export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleStaticOptions = {}): Promise<void> {
@@ -125,7 +127,7 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
   }
 
   // 套件首页（套餐为服务端渲染；数据源失败时降级为不含套餐的页面）
-  app.get('/', async (_req, reply) => {
+  app.get('/', async (req, reply) => {
     let plans: HomePlan[] | null = null;
     if (opts.getHomePlans) {
       try {
@@ -134,11 +136,20 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
         app.log.warn(`[home] plan catalog unavailable: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
+    let loggedIn = false;
+    if (opts.isLoggedIn) {
+      try {
+        loggedIn = await opts.isLoggedIn(req);
+      } catch (err) {
+        // 登录态判定失败不阻断首页：按未登录渲染。
+        app.log.warn(`[home] session check failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
     reply
       .header('Cache-Control', 'no-store')
       .header('Content-Security-Policy', PUBLIC_CSP)
       .type('text/html')
-      .send(renderHome(plans));
+      .send(renderHome(plans, { loggedIn }));
   });
 
   // 控制台（db-ui，`/db` 前缀）

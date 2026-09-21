@@ -21,8 +21,8 @@ export interface SyncCoordinatorOptions {
   /** 每个 drain 轮结束（含失败）后回调，供上层刷树/更新状态栏；回调异常不阻断同步链。 */
   onSettled?: (result: SyncRunResult | undefined) => void;
   /**
-   * 自动同步开关（按机器）。返回 false 时：`onChanged` 与 `scheduleInitialSync` 不再自动触发
-   * 后台同步；显式 `scheduleNow`/`runNow`/分相仍可用。缺省视为开启（兼容既有调用方）。
+   * 自动同步开关（按机器）。返回 false 时：`onChanged` 不再自动触发后台同步；显式
+   * `scheduleNow`/`runNow`/分相仍可用。缺省视为开启（兼容既有调用方）。
    */
   autoSyncEnabled?: () => boolean;
 }
@@ -42,7 +42,6 @@ export class SyncCoordinator {
   private _lastRun?: SyncRunResult;
   private _stalled = false;
   private retryDelay = SyncCoordinator.RETRY_BASE_MS;
-  private initialSyncTriggered = false;
 
   /** 最近一次后台协调失败的原因（不含秘密）；不阻断链，后续 user 变更仍能重调度。 */
   get lastError(): string | undefined {
@@ -78,7 +77,6 @@ export class SyncCoordinator {
     this._stalled = false;
     this._lastError = undefined;
     this.retryDelay = SyncCoordinator.RETRY_BASE_MS;
-    this.initialSyncTriggered = false;
     this.clearRetry();
     this.subscription = this.store.onChanged((source) => {
       if (source !== 'user') return;
@@ -159,14 +157,6 @@ export class SyncCoordinator {
   /** 立即入链同步（无 debounce、无幂等）；错误经 lastError 与退避体现，不向上抛。 */
   scheduleNow(): void {
     if (this.stopped) return;
-    this.enqueue();
-  }
-
-  /** 解锁后的首次同步：幂等，仅触发一次（与聚焦/命令触发的后续同步去重）。自动同步关闭时不触发。 */
-  scheduleInitialSync(): void {
-    if (this.stopped || this.initialSyncTriggered) return;
-    if (!this.autoSyncOn()) return;
-    this.initialSyncTriggered = true;
     this.enqueue();
   }
 

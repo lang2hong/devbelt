@@ -69,6 +69,23 @@ describe('套件首页渲染', () => {
     expect(html).toContain('套餐信息暂时不可用');
   });
 
+  it('未登录：header 与 hero 显示登录/注册入口', () => {
+    const html = renderHome(PLANS);
+    expect(html).toContain('href="/login"');
+    expect(html).toContain('href="/register"');
+    expect(html).toContain('免费开始');
+    expect(html).not.toContain('href="/db/"');
+  });
+
+  it('已登录：header 与 hero 改为控制台入口，不再显示登录/注册', () => {
+    const html = renderHome(PLANS, { loggedIn: true });
+    expect(html).toContain('href="/db/"');
+    expect(html).toContain('进入控制台');
+    expect(html).not.toContain('href="/login"');
+    expect(html).not.toContain('href="/register"');
+    expect(html).not.toContain('免费开始');
+  });
+
   it('对套餐名做 HTML 转义（防注入）', () => {
     const html = renderHome([
       { code: 'x', name: '<script>alert(1)</script>', kind: 'personal', priceCents: 0, unit: 'month', highlights: [] },

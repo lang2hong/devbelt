@@ -37,16 +37,20 @@ function formatUnit(plan: HomePlan): string {
   return plan.unit === 'seat-month' ? '/席·月' : '/月';
 }
 
-function planCard(plan: HomePlan): string {
+function planCard(plan: HomePlan, loggedIn: boolean): string {
   const highlights = plan.highlights
     .map((h) => `<li>${escapeHtml(h)}</li>`)
     .join('');
+  // 未登录 → 引导注册；已登录 → 不再显示「注册」，改为去控制台看/升级套餐。
+  const cta = loggedIn
+    ? `<a class="plan-cta" href="/db/plans">查看套餐</a>`
+    : `<a class="plan-cta" href="/register">开始使用</a>`;
   return `
         <article class="plan">
           <h4>${escapeHtml(plan.name)}</h4>
           <p class="price">${escapeHtml(formatPrice(plan))}<span>${escapeHtml(formatUnit(plan))}</span></p>
           <ul>${highlights}</ul>
-          <a class="plan-cta" href="/register">开始使用</a>
+          ${cta}
         </article>`;
 }
 
@@ -92,19 +96,33 @@ function toolCard(tool: HomeTool): string {
     : `<div class="tool soon">${inner}</div>`;
 }
 
-export function renderHome(plans: HomePlan[] | null): string {
+export interface HomeRenderOptions {
+  /** 请求是否已登录（由服务端按 refresh cookie 判定）。登录时 header/CTA 改为控制台入口。 */
+  loggedIn?: boolean;
+}
+
+export function renderHome(plans: HomePlan[] | null, opts: HomeRenderOptions = {}): string {
   const personal = plans?.filter((p) => p.kind === 'personal') ?? [];
   const organization = plans?.filter((p) => p.kind === 'organization') ?? [];
+  // 登录态决定 header 右侧与 hero CTA：已登录不再显示「登录/注册」，改为进入控制台。
+  const navAuth = opts.loggedIn
+    ? `<a href="/db/">控制台</a>`
+    : `<a href="/login">登录</a>
+          <a href="/register">注册</a>`;
+  const heroCta = opts.loggedIn
+    ? `<a class="btn primary" href="/db/">进入控制台</a>`
+    : `<a class="btn primary" href="/register">免费开始</a>
+          <a class="btn ghost" href="/login">已有账户，登录</a>`;
   const pricing =
     personal.length + organization.length > 0
       ? `
       <div class="plan-group">
         <h3>个人</h3>
-        <div class="plans">${personal.map(planCard).join('')}</div>
+        <div class="plans">${personal.map((p) => planCard(p, opts.loggedIn ?? false)).join('')}</div>
       </div>
       <div class="plan-group">
         <h3>组织</h3>
-        <div class="plans">${organization.map(planCard).join('')}</div>
+        <div class="plans">${organization.map((p) => planCard(p, opts.loggedIn ?? false)).join('')}</div>
       </div>`
       : `<p class="muted">套餐信息暂时不可用，请稍后再试。</p>`;
 
@@ -170,8 +188,7 @@ export function renderHome(plans: HomePlan[] | null): string {
         <nav>
           <a href="#tools">工具</a>
           <a href="#pricing">套餐</a>
-          <a href="/login">登录</a>
-          <a href="/register">注册</a>
+          ${navAuth}
         </nav>
       </header>
 
@@ -179,8 +196,7 @@ export function renderHome(plans: HomePlan[] | null): string {
         <h1>开发者工具套件</h1>
         <p>DevBelt 把数据库客户端、Web 控制台与端到端加密同步整合在一起：本地管理连接与查询，跨设备安全同步，组织内共享资源，运营侧统一治理。</p>
         <div class="cta">
-          <a class="btn primary" href="/register">免费开始</a>
-          <a class="btn ghost" href="/login">已有账户，登录</a>
+          ${heroCta}
         </div>
       </div>
 

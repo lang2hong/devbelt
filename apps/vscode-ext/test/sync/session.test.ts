@@ -255,11 +255,12 @@ describe('PersonalSyncSession', () => {
     const { store: dekStore } = makeDekStore();
     const s = new PersonalSyncSession('7', makeMemento(), dekStore, store, client);
     const dek = dek32();
-    // unlockFromState 解锁即 scheduleInitialSync → 首次 drain 阻塞在 getRecords（在途）
+    // 解锁不再自动同步：显式排一次，制造在途 drain（阻塞在 getRecords）
     await s.unlockFromState({ keyEpoch: '1', stateVersion: '1', changeSequence: '0', signPub: encodeBase64Url(deriveSyncSignKeyPair(dek).publicKey) } as StateDto, dek);
+    s.scheduleNow();
 
     await vi.advanceTimersByTimeAsync(0);
-    await vi.advanceTimersByTimeAsync(0); // 确保首次 drain 已进入在途 getRecords
+    await vi.advanceTimersByTimeAsync(0); // 确保 drain 已进入在途 getRecords
     s.lock(); // 清 DEK，stop 不等待在途 drain
     releaseRecords({ snapshotSequence: '1', records: [{ recordId: 'A'.repeat(22), version: '1', changeSequence: '1', deleteTime: null, cipherSuite: 'AES-256-GCM', formatVersion: 1, nonce: 'C'.repeat(16), ciphertext: 'YQ', tag: 'D'.repeat(22) }] });
     await vi.advanceTimersByTimeAsync(0);
@@ -334,10 +335,9 @@ describe('PersonalSyncSession', () => {
     expect(memento.get('devbelt.sync.epochCleanup.7')).toBeUndefined();
   });
 
-  it('scheduleNow / scheduleInitialSync 未解锁抛错（fail-closed）', () => {
+  it('scheduleNow 未解锁抛错（fail-closed）', () => {
     const s = new PersonalSyncSession('7', makeMemento(), makeDekStore().store, makeStore().store, makeClient());
     expect(() => s.scheduleNow()).toThrowError(/locked/);
-    expect(() => s.scheduleInitialSync()).toThrowError(/locked/);
     expect(s.stalled).toBe(false);
   });
 
@@ -389,11 +389,11 @@ describe('PersonalSyncSession', () => {
 
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(0);
-    expect(getState).not.toHaveBeenCalled(); // 初始化路径不自动同步，等命令层确认恢复码后 syncNow
+    expect(getState).not.toHaveBeenCalled(); // 初始化路径不自动同步（初始化也不再 syncNow）
     vi.useRealTimers();
   });
 
-  it('unlockFromState 触发首次同步恰好一次', async () => {
+  it('unlockFromState 为纯解锁：不自动同步，显式 scheduleNow 才同步一次', async () => {
     vi.useFakeTimers();
     const getState = vi.fn(async () => validState());
     const client = { getState, getRecords: async () => ({ snapshotSequence: '0', records: [] }) } as unknown as PersonalSyncClient;
@@ -403,7 +403,12 @@ describe('PersonalSyncSession', () => {
 
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(0);
-    expect(getState).toHaveBeenCalledTimes(1); // 解锁即首次同步，且仅一次
+    expect(getState).not.toHaveBeenCalled(); // 解锁不自动同步
+
+    s.scheduleNow();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getState).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
 });

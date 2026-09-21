@@ -140,22 +140,6 @@ describe('SyncCoordinator', () => {
     coordinator.stop();
   });
 
-  it('scheduleInitialSync 幂等：只入链一次', async () => {
-    vi.useFakeTimers();
-    const store = { onChanged: () => ({ dispose: () => {} }) } as unknown as ConnectionStore;
-    const reconcile = vi.fn(async () => ({ generated: 0, pendingSkipped: [], skipped: [] }));
-    const sync = vi.fn(async () => ({ stage: 'ok' as const, conflicts: [], applied: 0 }));
-    const coordinator = new SyncCoordinator(store, { reconcile } as unknown as SyncMutator, { sync } as unknown as SyncEngine);
-    coordinator.start();
-
-    coordinator.scheduleInitialSync();
-    coordinator.scheduleInitialSync();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(sync).toHaveBeenCalledTimes(1);
-
-    coordinator.stop();
-  });
-
   it('stage=error 触发指数退避重试（1s→2s），成功复位', async () => {
     vi.useFakeTimers();
     const events = new EventEmitter<'user' | 'sync'>();
@@ -303,7 +287,7 @@ describe('SyncCoordinator', () => {
     coordinator.stop();
   });
 
-  it('autoSyncEnabled=false：onChanged/initial 不自动触发，scheduleNow 仍可用', async () => {
+  it('autoSyncEnabled=false：onChanged 不自动触发，scheduleNow 仍可用', async () => {
     vi.useFakeTimers();
     const events = new EventEmitter<'user' | 'sync'>();
     const store = { onChanged: events.event } as unknown as ConnectionStore;
@@ -318,7 +302,6 @@ describe('SyncCoordinator', () => {
     coordinator.start();
 
     events.fire('user');
-    coordinator.scheduleInitialSync();
     await vi.advanceTimersByTimeAsync(300);
     expect(sync).not.toHaveBeenCalled();
 
@@ -330,7 +313,7 @@ describe('SyncCoordinator', () => {
     coordinator.stop();
   });
 
-  it('autoSyncEnabled 由 false 变 true 后 onChanged/initial 恢复自动触发', async () => {
+  it('autoSyncEnabled 由 false 变 true 后 onChanged 恢复自动触发', async () => {
     vi.useFakeTimers();
     const events = new EventEmitter<'user' | 'sync'>();
     const store = { onChanged: events.event } as unknown as ConnectionStore;
@@ -345,42 +328,15 @@ describe('SyncCoordinator', () => {
     );
     coordinator.start();
 
-    // 关闭期间 initial 被跳过且不置位
-    coordinator.scheduleInitialSync();
-    await vi.advanceTimersByTimeAsync(0);
+    // 关闭期间 onChanged 不触发
+    events.fire('user');
+    await vi.advanceTimersByTimeAsync(300);
     expect(sync).not.toHaveBeenCalled();
 
     auto = true;
-    coordinator.scheduleInitialSync();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(sync).toHaveBeenCalledTimes(1);
-
     events.fire('user');
     await vi.advanceTimersByTimeAsync(300);
-    expect(sync).toHaveBeenCalledTimes(2);
-
-    coordinator.stop();
-  });
-
-  it('stop→start 后 scheduleInitialSync 重新生效（initialSyncTriggered 复位）', async () => {
-    vi.useFakeTimers();
-    const store = { onChanged: () => ({ dispose: () => {} }) } as unknown as ConnectionStore;
-    const reconcile = vi.fn(async () => ({ generated: 0, pendingSkipped: [], skipped: [] }));
-    const sync = vi.fn(async () => ({ stage: 'ok' as const, conflicts: [], applied: 0 }));
-    const coordinator = new SyncCoordinator(store, { reconcile } as unknown as SyncMutator, { sync } as unknown as SyncEngine);
-    coordinator.start();
-
-    coordinator.scheduleInitialSync();
-    coordinator.scheduleInitialSync(); // 幂等，第二次不排
-    await vi.advanceTimersByTimeAsync(0);
     expect(sync).toHaveBeenCalledTimes(1);
-
-    coordinator.stop();
-    coordinator.start();
-
-    coordinator.scheduleInitialSync(); // 重入后重新生效
-    await vi.advanceTimersByTimeAsync(0);
-    expect(sync).toHaveBeenCalledTimes(2);
 
     coordinator.stop();
   });

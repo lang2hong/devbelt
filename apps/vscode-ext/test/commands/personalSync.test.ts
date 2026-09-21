@@ -76,7 +76,7 @@ function makeDeps(session: SyncSessionPort, inputs: Array<string | undefined> = 
 }
 
 describe('personal sync B1 commands', () => {
-  it('400 SYNC_NOT_INITIALIZED initializes before showing the recovery code, then starts the first sync', async () => {
+  it('400 SYNC_NOT_INITIALIZED initializes and shows the recovery code, without auto-syncing', async () => {
     const callOrder: string[] = [];
     const session = makeSession({
       getRemoteState: vi.fn(async () => { throw new SyncApiError(400, 'SYNC_NOT_INITIALIZED'); }),
@@ -91,7 +91,8 @@ describe('personal sync B1 commands', () => {
     expect(ui.confirmRecoveryCode).toHaveBeenCalledTimes(1);
     expect(callOrder).toEqual(['initialize', 'recovery']);
     expect(session.initializeSync).toHaveBeenCalledWith(expect.objectContaining({ protocolVersion: 1, signPub: 'A'.repeat(43) }), expect.any(Uint8Array));
-    expect(session.syncNow).toHaveBeenCalledTimes(1);
+    // 初始化是纯初始化：不自动同步
+    expect(session.syncNow).not.toHaveBeenCalled();
   });
 
   it('does not show recovery code when initialization fails, and zeroes temporary material', async () => {
@@ -124,13 +125,12 @@ describe('personal sync B1 commands', () => {
 
     expect(warn).toHaveBeenCalledWith('Save the recovery code and select “I saved it” to finish setup.');
     expect(session.syncNow).not.toHaveBeenCalled();
-    expect(info).not.toHaveBeenCalledWith('Personal sync is unlocked and up to date.');
 
     confirm(true);
     await initializing;
 
-    expect(session.syncNow).toHaveBeenCalledTimes(1);
-    expect(info).toHaveBeenCalledWith('Personal sync is unlocked and up to date.');
+    expect(session.syncNow).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith('Personal sync initialized.');
   });
 
   it('rejects initialization when a remote state already exists', async () => {
@@ -160,9 +160,9 @@ describe('personal sync B1 commands', () => {
     expect(deps.auth.refreshEntitlement).toHaveBeenCalledBefore(deps.factory.ensureSession as any);
     expect(deps.unlockDek).toHaveBeenCalledWith('7', '1', 'sync secret!', state);
     expect(session.unlockFromState).toHaveBeenCalledWith(state, expect.any(Uint8Array));
-    expect(session.syncNow).not.toHaveBeenCalled(); // 解锁由 unlockFromState 内部调度首次同步，命令层不再重复
+    expect(session.syncNow).not.toHaveBeenCalled(); // 解锁是纯解锁：不自动同步
     expect(info).toHaveBeenCalledWith('Completed pending personal sync cleanup.');
-    expect(info).toHaveBeenCalledWith('Personal sync is unlocked. Starting first sync in the background.');
+    expect(info).toHaveBeenCalledWith('Personal sync unlocked.');
   });
 
   it('zeros the command-owned decrypted DEK after the session accepts it', async () => {
@@ -277,11 +277,12 @@ describe('personal sync B1 commands', () => {
     expect(mocks.executeCommand).toHaveBeenCalledWith('devbelt.recoverSync');
   });
 
-  it('syncEntry: unlocked → immediate syncNow', async () => {
+  it('syncEntry: already unlocked → informs, does not auto-sync', async () => {
     const session = makeSession({ isUnlocked: true });
-    const { deps } = makeDeps(session, []);
+    const { deps, info } = makeDeps(session, []);
     await syncEntry(deps);
-    expect(session.syncNow).toHaveBeenCalledTimes(1);
+    expect(session.syncNow).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith('Personal sync is already unlocked and running.');
     expect(deps.ui.promptSmp).not.toHaveBeenCalled();
   });
 
@@ -338,17 +339,6 @@ describe('personal sync B1 commands', () => {
     await pushPersonalSync(deps);
 
     expect(mocks.executeCommand).toHaveBeenCalledTimes(2);
-    expect(mocks.executeCommand).toHaveBeenCalledWith('devbelt.resolveConflicts');
-    expect(warn).not.toHaveBeenCalled();
-  });
-
-  it('syncEntry: conflict on immediate sync opens the conflict resolver', async () => {
-    const session = makeSession({ isUnlocked: true, syncNow: vi.fn(async () => ({ stage: 'conflict' })) });
-    const { deps, warn } = makeDeps(session, []);
-    mocks.executeCommand.mockClear();
-
-    await syncEntry(deps);
-
     expect(mocks.executeCommand).toHaveBeenCalledWith('devbelt.resolveConflicts');
     expect(warn).not.toHaveBeenCalled();
   });

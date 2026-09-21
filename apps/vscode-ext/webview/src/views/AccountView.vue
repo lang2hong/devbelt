@@ -44,8 +44,8 @@ function maxDevices(v: number | null | undefined): string {
 }
 
 function syncStateLabel(s: SyncStatus | null): string {
-  if (!s || !s.initialized) return t('account.sync.notInitialized');
-  return s.unlocked ? t('account.sync.unlocked') : t('account.sync.locked');
+  // 统一入口后不再用本机 initialized 判定（第二台设备会误判）；只看解锁态。
+  return s?.unlocked ? t('account.sync.unlocked') : t('account.sync.locked');
 }
 
 /** 状态灯：绿=已解锁，橙=已锁定，灰=未初始化。 */
@@ -108,19 +108,16 @@ onUnmounted(() => { __offMsg?.(); });
           <li><span>{{ t('account.sync.conflicts') }}</span><b>{{ status?.conflicts ?? 0 }}</b></li>
         </ul>
 
-        <!-- 未初始化 -->
-        <div v-if="!status?.initialized" class="actions">
-          <button class="btn primary" @click="act('devbelt.initializePersonalSync')">{{ t('account.action.initialize') }}</button>
-        </div>
-        <!-- 已锁定 -->
-        <div v-else-if="!status?.unlocked" class="actions">
-          <button class="btn primary" @click="act('devbelt.unlockPersonalSync')">{{ t('account.action.unlock') }}</button>
+        <!-- 未解锁（未初始化或已锁定）：单一入口，按远端状态自动路由（有→解锁，无→初始化） -->
+        <div v-if="!status?.unlocked" class="actions">
+          <button class="btn primary" @click="act('devbelt.syncEntry')">{{ t('account.action.unlockOrInitialize') }}</button>
           <button class="btn" @click="act('devbelt.recoverSync')">{{ t('account.action.recoverSync') }}</button>
           <button class="btn" @click="act('devbelt.recoverByAccount')">{{ t('account.action.recoverByAccount') }}</button>
           <button class="btn" @click="act('devbelt.resetSync')">{{ t('account.action.resetSync') }}</button>
         </div>
-        <!-- 已解锁 -->
+        <!-- 已解锁：手动同步（自动同步由开关/聚焦/本地变更负责） -->
         <div v-else class="actions">
+          <button class="btn" @click="act('devbelt.syncNow')">{{ t('account.action.syncNow') }}</button>
           <button class="btn" @click="act('devbelt.syncPull')">{{ t('account.action.pull') }}</button>
           <button class="btn" @click="act('devbelt.syncPush')">{{ t('account.action.push') }}</button>
           <button class="btn" @click="act('devbelt.changeSyncPassword')">{{ t('account.action.changeSyncPassword') }}</button>

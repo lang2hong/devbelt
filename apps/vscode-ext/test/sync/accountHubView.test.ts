@@ -98,13 +98,17 @@ describe('AccountHubView', () => {
     expect((auth as any).client.getPlans).not.toHaveBeenCalled();
   });
 
-  it('whitelisted action executes the command; unknown action ignored', async () => {
+  it('whitelisted actions execute; unknown action ignored', async () => {
     const view = makeView('account');
+    await view.handleMessage({ type: 'action', action: 'devbelt.syncEntry' });
+    await view.handleMessage({ type: 'action', action: 'devbelt.syncNow' });
     await view.handleMessage({ type: 'action', action: 'devbelt.syncPull' });
+    expect((vscode.commands as any).executeCommand).toHaveBeenCalledWith('devbelt.syncEntry');
+    expect((vscode.commands as any).executeCommand).toHaveBeenCalledWith('devbelt.syncNow');
     expect((vscode.commands as any).executeCommand).toHaveBeenCalledWith('devbelt.syncPull');
 
     await view.handleMessage({ type: 'action', action: 'workbench.action.terminal' });
-    expect((vscode.commands as any).executeCommand).toHaveBeenCalledTimes(1);
+    expect((vscode.commands as any).executeCommand).toHaveBeenCalledTimes(3);
   });
 
   it('revoke revokes the device then refreshes devices', async () => {
