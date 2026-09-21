@@ -392,8 +392,10 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   /** 根节点：顶层分组 + 未分组连接（不含软删除墓碑） */
   private buildRootChildren(): DbTreeNode[] {
     const data = this.store.getVisibleTreeData();
-    const topGroups = data.groups.filter((g) => !g.parentId);
-    const ungrouped = data.connections.filter((c) => !c.groupId);
+    // 分组/连接引用无法解析（缺失或已删除）时按顶层处理，避免导入/同步产生的孤儿被静默隐藏。
+    const visibleGroupIds = new Set(data.groups.map((g) => g.id));
+    const topGroups = data.groups.filter((g) => !g.parentId || !visibleGroupIds.has(g.parentId));
+    const ungrouped = data.connections.filter((c) => !c.groupId || !visibleGroupIds.has(c.groupId));
     const gNodes = topGroups.map(
       (g) =>
         new DbTreeNode(

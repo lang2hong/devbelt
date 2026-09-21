@@ -259,25 +259,29 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
       vscode.window.showErrorMessage(l10n('conn.importInvalid'));
       return;
     }
-    // 重建分组（保留原 id 与父级，维持连接归属）；旧文件无 groups 字段则跳过
+    // 重建分组（保留原 id 与父级，维持连接归属）；旧文件无 groups 字段则跳过。
+    // 同 id 分组为墓碑时会被复活（否则连接会因分组不可见而“导入成功却不显示”）。
+    let groupsRevived = 0;
     if (Array.isArray(payload.groups)) {
       for (const g of payload.groups) {
         if (g?.id && typeof g.name === 'string') {
-          await store.addGroupRaw(g.id, g.name, g.parentId);
+          if (await store.addGroupRaw(g.id, g.name, g.parentId) === 'revived') groupsRevived++;
         }
       }
     }
     // 导入同样受「本机保存连接数」门禁：add/clone 都校验，导入不校验即可无限落库。
     const cap = connectionCap();
     const usedIds = new Set(store.list().map((c) => c.id));
-    let imported = 0;
+    let created = 0;
+    let updated = 0;
     let skippedCap = 0;
+    let invalid = 0;
     for (const conn of payload.connections) {
-      if (!conn?.name && !conn?.host) continue;
+      if (!conn?.name && !conn?.host) { invalid++; continue; }
       const existing = conn.id ? store.get(conn.id) : undefined;
       if (existing) {
         await store.save({ ...existing, ...conn });
-        imported++;
+        updated++;
         continue;
       }
       if (cap > 0 && activeConnectionCount() >= cap) { skippedCap++; continue; }
@@ -286,12 +290,13 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
       const id = conn.id && !usedIds.has(conn.id) ? conn.id : randomUUID();
       usedIds.add(id);
       await store.save({ ...conn, id });
-      imported++;
+      created++;
     }
     treeProvider.refresh();
     if (skippedCap > 0) {
       void vscode.window.showWarningMessage(l10n('conn.capReached', { count: cap }));
     }
-    vscode.window.showInformationMessage(l10n('conn.importDone', { count: imported }));
+    // 分项报告，避免「导入成功却不显示」这类问题无从判断。
+    vscode.window.showInformationMessage(l10n('conn.importDone', { count: created, updated, skipped: skippedCap, invalid, revived: groupsRevived }));
   });
 }

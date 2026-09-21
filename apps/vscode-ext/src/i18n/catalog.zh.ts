@@ -514,7 +514,7 @@ export const zh: MessageCatalog = {
   'conn.exportUrlSecretsStripped': '导出不含密码：已剥离连接串中的内嵌凭据。',
   'conn.importOpen': '选择连接文件',
   'conn.importInvalid': '连接文件无效。',
-  'conn.importDone': '已导入 {count} 个连接。',
+  'conn.importDone': '导入完成：新增 {count}、更新 {updated}、跳过 {skipped}、无效 {invalid}；复活分组 {revived}。',
   'conn.importUpgrade': '导入连接是 Pro 功能，请升级套餐后再导入。',
   'conn.capReached': '免费套餐最多保存 {count} 个连接，升级到 Pro 可添加更多。',
 

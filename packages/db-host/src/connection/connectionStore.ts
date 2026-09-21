@@ -307,16 +307,32 @@ export class ConnectionStore {
     return group.id;
   }
 
-  /** 以指定 id 创建分组（导入用，保留原 id 以维持连接归属） */
-  async addGroupRaw(id: string, name: string, parentId?: string, source: ChangeSource = 'user'): Promise<void> {
-    if (!id) return;
+  /**
+   * 以指定 id 创建分组（导入用，保留原 id 以维持连接归属）。
+   * 若同 id 分组存在但已是软删除墓碑，则**复活**它（否则导入的连接会因分组不可见而
+   * “导入成功却不显示”）。返回本次动作，供导入统计。
+   */
+  async addGroupRaw(id: string, name: string, parentId?: string, source: ChangeSource = 'user'): Promise<'created' | 'revived' | 'unchanged'> {
+    if (!id) return 'unchanged';
     const data = this.getTreeData();
-    if (data.groups.some((g) => g.id === id)) return;
+    const existing = data.groups.find((g) => g.id === id);
     const now = Date.now();
+    if (existing) {
+      if (!existing.deleted) return 'unchanged';
+      existing.deleted = false;
+      existing.name = name;
+      existing.parentId = parentId;
+      existing.updateTime = now;
+      await this.memento.update(ConnectionStore.KEY, data);
+      this.changedEmitter.fire(source);
+      void eventBus.publish(new ConnectionChangedEvent('group', 'update', id));
+      return 'revived';
+    }
     data.groups.push({ id, name, parentId, createTime: now, updateTime: now, deleted: false });
     await this.memento.update(ConnectionStore.KEY, data);
     this.changedEmitter.fire(source);
     void eventBus.publish(new ConnectionChangedEvent('group', 'create', id));
+    return 'created';
   }
 
   /** 重命名分组 */

@@ -536,7 +536,7 @@ export const en: MessageCatalog = {
   'conn.exportUrlSecretsStripped': 'Exported without passwords: credentials embedded in the connection URL were stripped.',
   'conn.importOpen': 'Select connection file',
   'conn.importInvalid': 'Invalid connection file.',
-  'conn.importDone': 'Imported {count} connection(s).',
+  'conn.importDone': 'Import done: {count} added, {updated} updated, {skipped} skipped, {invalid} invalid; {revived} groups restored.',
   'conn.importUpgrade': 'Importing connections is a Pro feature. Upgrade your plan to import.',
   'conn.capReached': 'Free plan allows {count} saved connections. Upgrade to Pro to add more.',
 

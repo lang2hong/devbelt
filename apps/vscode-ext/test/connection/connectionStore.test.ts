@@ -267,6 +267,33 @@ describe('ConnectionStore change source', () => {
   });
 });
 
+describe('ConnectionStore.addGroupRaw（导入复活墓碑）', () => {
+  it('同 id 分组为墓碑时复活，组内连接随之可见', async () => {
+    const store = new ConnectionStore(createMemento({
+      groups: [{ id: 'g-1', name: 'Old', deleted: true }],
+      connections: [conn({ id: 'c-1', groupId: 'g-1' })],
+    }), createSecrets() as any);
+
+    expect(await store.addGroupRaw('g-1', 'New Name', undefined)).toBe('revived');
+
+    const g = store.getTreeData().groups.find((x) => x.id === 'g-1')!;
+    expect(g.deleted).toBe(false);
+    expect(g.name).toBe('New Name');
+    expect(store.getVisibleTreeData().groups.map((x) => x.id)).toContain('g-1');
+    expect(store.getVisibleTreeData().connections.map((x) => x.id)).toContain('c-1');
+  });
+
+  it('同 id 分组存活时返回 unchanged 且不改名', async () => {
+    const store = new ConnectionStore(createMemento({
+      groups: [{ id: 'g-1', name: 'Live', deleted: false }],
+      connections: [],
+    }), createSecrets() as any);
+
+    expect(await store.addGroupRaw('g-1', 'Other')).toBe('unchanged');
+    expect(store.getGroupById('g-1')!.name).toBe('Live');
+  });
+});
+
 describe('stripSecrets', () => {
   it('剥离 password/sshPassword/sshPassphrase，保留其余字段与原对象', () => {
     const c = conn({ password: 'p', sshHost: 'h', sshPassword: 'sp', sshPassphrase: 'pass' });
