@@ -51,7 +51,18 @@ describe('套件首页渲染', () => {
     expect(html).toContain('https://marketplace.visualstudio.com/items?itemName=lang2hong.db-client');
     expect(html).toContain('https://marketplace.visualstudio.com/items?itemName=lang2hong.rest-client-neo');
     expect(html).toContain('待开发');
-    expect(html).toContain('开发中');
+  });
+
+  it('DevBelt DB Client 卡片链接到公开文档 /docs（站内，不新开标签）', () => {
+    const html = renderHome(PLANS);
+    expect(html).toContain('href="/docs"');
+    expect(html).not.toContain('href="/docs" target="_blank"');
+    expect(html).toContain('文档');
+  });
+
+  it('套餐 CTA 指向公开 /plans（登录与否一致）', () => {
+    expect(renderHome(PLANS)).toContain('href="/plans"');
+    expect(renderHome(PLANS, { loggedIn: true })).toContain('href="/plans"');
   });
 
   it('渲染个人与组织套餐，并格式化价格', () => {

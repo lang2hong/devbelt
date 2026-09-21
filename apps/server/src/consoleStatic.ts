@@ -2,7 +2,8 @@ import { existsSync, readFileSync } from 'fs';
 import path from 'path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
-import { renderHome, type HomePlan } from './home.js';
+import { renderHome, renderPlansPage, type HomePlan } from './home.js';
+import { renderDocsIndex, renderDocPage } from './docs.js';
 
 /** 公开页/邮件入口/控制台壳的严格 CSP（无第三方、无 eval，只放行构建产物）。 */
 const PUBLIC_CSP =
@@ -104,15 +105,30 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
     }
   }
 
+  function sendHtml(reply: FastifyReply, html: string): void {
+    reply
+      .header('Cache-Control', 'no-store')
+      .header('Content-Security-Policy', PUBLIC_CSP)
+      .type('text/html')
+      .send(html);
+  }
+
   function serveHtml(html: string | null) {
     return async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
       if (html == null) return notFound(req, reply);
-      reply
-        .header('Cache-Control', 'no-store')
-        .header('Content-Security-Policy', PUBLIC_CSP)
-        .type('text/html')
-        .send(html);
+      sendHtml(reply, html);
     };
+  }
+
+  /** 首页/套餐页共用的套餐数据源（失败降级为不含套餐）。 */
+  async function loadHomePlans(): Promise<HomePlan[] | null> {
+    if (!opts.getHomePlans) return null;
+    try {
+      return await opts.getHomePlans();
+    } catch (err) {
+      app.log.warn(`[home] plan catalog unavailable: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
   }
 
   // 身份页（auth-ui，根路径）
@@ -128,14 +144,7 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
 
   // 套件首页（套餐为服务端渲染；数据源失败时降级为不含套餐的页面）
   app.get('/', async (req, reply) => {
-    let plans: HomePlan[] | null = null;
-    if (opts.getHomePlans) {
-      try {
-        plans = await opts.getHomePlans();
-      } catch (err) {
-        app.log.warn(`[home] plan catalog unavailable: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
+    const plans = await loadHomePlans();
     let loggedIn = false;
     if (opts.isLoggedIn) {
       try {
@@ -145,11 +154,23 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
         app.log.warn(`[home] session check failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
-    reply
-      .header('Cache-Control', 'no-store')
-      .header('Content-Security-Policy', PUBLIC_CSP)
-      .type('text/html')
-      .send(renderHome(plans, { loggedIn }));
+    sendHtml(reply, renderHome(plans, { loggedIn }));
+  });
+
+  // 公开套餐页（/plans，无需登录）
+  app.get('/plans', async (_req, reply) => {
+    sendHtml(reply, renderPlansPage(await loadHomePlans()));
+  });
+
+  // 公开文档中心（/docs，无需登录）
+  app.get('/docs', async (_req, reply) => {
+    sendHtml(reply, renderDocsIndex());
+  });
+  app.get('/docs/:slug', async (req, reply) => {
+    const { slug } = req.params as { slug: string };
+    const html = renderDocPage(slug);
+    if (html == null) return notFound(req, reply);
+    sendHtml(reply, html);
   });
 
   // 控制台（db-ui，`/db` 前缀）

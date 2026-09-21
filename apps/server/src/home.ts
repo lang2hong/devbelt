@@ -37,14 +37,13 @@ function formatUnit(plan: HomePlan): string {
   return plan.unit === 'seat-month' ? '/席·月' : '/月';
 }
 
-function planCard(plan: HomePlan, loggedIn: boolean): string {
+function planCard(plan: HomePlan): string {
   const highlights = plan.highlights
     .map((h) => `<li>${escapeHtml(h)}</li>`)
     .join('');
   // 未登录 → 引导注册；已登录 → 不再显示「注册」，改为去控制台看/升级套餐。
-  const cta = loggedIn
-    ? `<a class="plan-cta" href="/db/plans">查看套餐</a>`
-    : `<a class="plan-cta" href="/register">开始使用</a>`;
+  // 套餐页公开（无需登录），统一指向 /plans。
+  const cta = `<a class="plan-cta" href="/plans">查看套餐</a>`;
   return `
         <article class="plan">
           <h4>${escapeHtml(plan.name)}</h4>
@@ -71,9 +70,9 @@ const TOOLS: readonly HomeTool[] = [
   },
   {
     name: 'DevBelt DB Client',
-    desc: '正在开发的数据库客户端（lang2hong.devbelt-db-client）。',
-    href: '',
-    badge: '开发中',
+    desc: '正在开发的数据库客户端（lang2hong.devbelt-db-client）：查看使用文档。',
+    href: '/docs',
+    badge: '文档',
   },
   {
     name: 'REST NEO',
@@ -91,9 +90,11 @@ const TOOLS: readonly HomeTool[] = [
 
 function toolCard(tool: HomeTool): string {
   const inner = `<strong>${escapeHtml(tool.name)}<span class="badge">${escapeHtml(tool.badge)}</span></strong><span>${escapeHtml(tool.desc)}</span>`;
-  return tool.href
+  if (!tool.href) return `<div class="tool soon">${inner}</div>`;
+  // 站内相对链接（如 /docs）不新开标签页；外部链接新开并带 noreferrer。
+  return /^https?:\/\//.test(tool.href)
     ? `<a class="tool" href="${tool.href}" target="_blank" rel="noopener noreferrer">${inner}</a>`
-    : `<div class="tool soon">${inner}</div>`;
+    : `<a class="tool" href="${tool.href}">${inner}</a>`;
 }
 
 export interface HomeRenderOptions {
@@ -118,11 +119,11 @@ export function renderHome(plans: HomePlan[] | null, opts: HomeRenderOptions = {
       ? `
       <div class="plan-group">
         <h3>个人</h3>
-        <div class="plans">${personal.map((p) => planCard(p, opts.loggedIn ?? false)).join('')}</div>
+        <div class="plans">${personal.map(planCard).join('')}</div>
       </div>
       <div class="plan-group">
         <h3>组织</h3>
-        <div class="plans">${organization.map((p) => planCard(p, opts.loggedIn ?? false)).join('')}</div>
+        <div class="plans">${organization.map(planCard).join('')}</div>
       </div>`
       : `<p class="muted">套餐信息暂时不可用，请稍后再试。</p>`;
 
@@ -188,6 +189,7 @@ export function renderHome(plans: HomePlan[] | null, opts: HomeRenderOptions = {
         <nav>
           <a href="#tools">工具</a>
           <a href="#pricing">套餐</a>
+          <a href="/docs">文档</a>
           ${navAuth}
         </nav>
       </header>
@@ -216,6 +218,87 @@ export function renderHome(plans: HomePlan[] | null, opts: HomeRenderOptions = {
 
       
 
+      <footer>DevBelt · 开发者工具套件</footer>
+    </div>
+  </body>
+</html>`;
+}
+
+/**
+ * 公开套餐页（`/plans`）：无需登录，服务端渲染套餐目录。
+ *
+ * 与首页 `#pricing` 同源同款卡片；未登录用户也可查看并前往注册。
+ */
+export function renderPlansPage(plans: HomePlan[] | null): string {
+  const personal = plans?.filter((p) => p.kind === 'personal') ?? [];
+  const organization = plans?.filter((p) => p.kind === 'organization') ?? [];
+  const groups =
+    personal.length + organization.length > 0
+      ? `
+        <div class="plan-group">
+          <h3>个人</h3>
+          <div class="plans">${personal.map(planCard).join('')}</div>
+        </div>
+        <div class="plan-group">
+          <h3>组织</h3>
+          <div class="plans">${organization.map(planCard).join('')}</div>
+        </div>`
+      : `<p class="muted">套餐信息暂时不可用，请稍后再试。</p>`;
+  return `<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>套餐 · DevBelt</title>
+    <meta name="description" content="DevBelt 个人与组织套餐。" />
+    <style>
+      :root { color-scheme: dark; --bg:#0b1020; --panel:#131a30; --line:#232a44; --fg:#e6e9f2; --muted:#9aa4bf; --accent:#3d6bff; }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--fg);
+        font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; line-height: 1.6; }
+      a { color: inherit; }
+      .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+      header.top { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 16px; padding: 18px 0;
+        background: rgba(11,16,32,.85); border-bottom: 1px solid var(--line); }
+      header.top .brand { font-weight: 700; font-size: 1.1rem; text-decoration: none; }
+      header.top .spacer { flex: 1; }
+      header.top nav a { color: var(--muted); text-decoration: none; margin-left: 18px; font-size: .95rem; }
+      header.top nav a:hover { color: var(--fg); }
+      main { padding: 32px 0 56px; }
+      h1 { font-size: 1.9rem; margin: 0 0 4px; }
+      .sub { color: var(--muted); margin: 0 0 24px; }
+      .plan-group { margin-bottom: 24px; }
+      .plan-group h3 { font-size: 1.05rem; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+      .plans { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+      .plan { padding: 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); display: flex; flex-direction: column; }
+      .plan h4 { margin: 0 0 8px; font-size: 1.1rem; }
+      .plan .price { font-size: 1.6rem; font-weight: 700; margin: 0 0 14px; }
+      .plan .price span { font-size: .85rem; font-weight: 400; color: var(--muted); margin-left: 4px; }
+      .plan ul { list-style: none; padding: 0; margin: 0 0 18px; flex: 1; }
+      .plan li { color: var(--muted); font-size: .92rem; padding: 3px 0 3px 16px; position: relative; }
+      .plan li::before { content: "✓"; position: absolute; left: 0; color: var(--accent); }
+      .plan-cta { text-align: center; padding: 9px 14px; border: 1px solid var(--line); border-radius: 9px; text-decoration: none; font-size: .92rem; }
+      .plan-cta:hover { border-color: var(--accent); }
+      .muted { color: var(--muted); }
+      footer { color: var(--muted); font-size: .85rem; padding: 24px 0 40px; border-top: 1px solid var(--line); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <a class="brand" href="/">DevBelt</a>
+        <span class="spacer"></span>
+        <nav>
+          <a href="/docs">文档</a>
+          <a href="/plans">套餐</a>
+          <a href="/login">登录</a>
+        </nav>
+      </header>
+      <main>
+        <h1>套餐</h1>
+        <p class="sub">个人与组织两档，按需选择；配额与引擎范围见各档说明。</p>
+        ${groups}
+      </main>
       <footer>DevBelt · 开发者工具套件</footer>
     </div>
   </body>
