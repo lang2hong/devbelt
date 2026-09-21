@@ -133,3 +133,29 @@ describe('MySQL NO_BACKSLASH_ESCAPES 下的值转义', () => {
     expect(mysql.escapeValue("a'b")).toBe("'a''b'");
   });
 });
+
+describe('PG standard_conforming_strings=off 下的值转义', () => {
+  const pgOff = new PostgreSqlDialect({ standardConformingStrings: false });
+
+  it('反斜杠翻倍（off 时普通串里 `\\` 是转义字符），单引号仍翻倍', () => {
+    expect(pgOff.escapeValue('a\\b')).toBe("'a\\\\b'");
+    expect(pgOff.escapeValue("a'b")).toBe("'a''b'");
+    expect(pgOff.escapeValue("x\\' OR 1=1 -- ")).toBe("'x\\\\'' OR 1=1 -- '");
+  });
+
+  it('对象 JSON 与 Date 同样翻倍反斜杠', () => {
+    const value = { path: 'C:\\tmp', quote: "it's" };
+    const json = JSON.stringify(value).replace(/'/g, "''").replace(/\\/g, '\\\\');
+    expect(pgOff.escapeValue(value)).toBe(`'${json}'`);
+  });
+
+  it('默认（on）方言行为不变（对照）', () => {
+    expect(pg.escapeValue('a\\b')).toBe("'a\\b'");
+    expect(pgOff.escapeValue(42)).toBe('42');
+  });
+
+  it('构造器默认 on：不传选项时 standardConformingStrings=true', () => {
+    expect(new PostgreSqlDialect().standardConformingStrings).toBe(true);
+    expect(pgOff.standardConformingStrings).toBe(false);
+  });
+});

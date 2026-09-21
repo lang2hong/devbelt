@@ -8,7 +8,7 @@ import { scanOptionsForDbType } from '@devkit/db-core/sql';
  */
 export function dialectScanOptions(
   dbType: DatabaseType | undefined,
-  opts?: { noBackslashEscapes?: boolean },
+  opts?: { noBackslashEscapes?: boolean; standardConformingStrings?: boolean },
 ): SqlScanOptions {
   return scanOptionsForDbType(dbType, opts);
 }

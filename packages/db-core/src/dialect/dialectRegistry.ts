@@ -15,6 +15,8 @@ export class DialectRegistry {
   private static readonly dialects: Map<DatabaseType, SqlDialect> = new Map();
   /** MySQL 在 NO_BACKSLASH_ESCAPES 下的方言变体（无状态、可共享）。 */
   private static readonly mysqlNoBackslash = new MysqlDialect({ noBackslashEscapes: true });
+  /** PG 在 standard_conforming_strings=off 下的方言变体（无状态、可共享）。 */
+  private static readonly pgStdOff = new PostgreSqlDialect({ standardConformingStrings: false });
 
   /** 注册内置方言（幂等） */
   static register(dialect: SqlDialect): void {
@@ -31,12 +33,19 @@ export class DialectRegistry {
   }
 
   /**
-   * 按连接语义取方言：MySQL 且 NO_BACKSLASH_ESCAPES 时返回反斜杠不转义的变体，
-   * 其余情况返回共享单例。调用方（连接层）读到 `@@sql_mode` 后据此替换 `QueryService.dialect`。
+   * 按连接语义取方言：MySQL 且 NO_BACKSLASH_ESCAPES、或 PG 且
+   * standard_conforming_strings=off 时返回对应变体，其余返回共享单例。
+   * 调用方（连接层）读到会话设置后据此替换 `QueryService.dialect`。
    */
-  static getFor(dbType: DatabaseType, opts: { noBackslashEscapes?: boolean } = {}): SqlDialect {
+  static getFor(
+    dbType: DatabaseType,
+    opts: { noBackslashEscapes?: boolean; standardConformingStrings?: boolean } = {},
+  ): SqlDialect {
     if (dbType === DatabaseType.MYSQL && opts.noBackslashEscapes === true) {
       return this.mysqlNoBackslash;
+    }
+    if (dbType === DatabaseType.PG && opts.standardConformingStrings === false) {
+      return this.pgStdOff;
     }
     return this.get(dbType);
   }

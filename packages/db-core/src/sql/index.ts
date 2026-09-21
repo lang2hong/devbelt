@@ -13,4 +13,5 @@ export { sqlCommentSafe } from './comment.js';
 export { scanOptionsForDbType } from './scanOptions.js';
 export { scanOptionsForDialect } from './scanOptions.js';
 export { parseNoBackslashEscapes } from './scanOptions.js';
+export { parseStandardConformingStringsOff } from './scanOptions.js';
 export { escapeStringLiteralContent } from './escapeLiteral.js';

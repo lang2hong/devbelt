@@ -20,6 +20,11 @@ export interface SqlDialect {
    * 供切分/值转义按连接语义派生选项；其它方言不实现（视为 false）。
    */
   readonly noBackslashEscapes?: boolean;
+  /**
+   * 会话是否 `standard_conforming_strings=on`（仅 PG 相关）。
+   * off 时普通 `'...'` 串里反斜杠是转义字符；其它方言不实现（视为 on）。
+   */
+  readonly standardConformingStrings?: boolean;
   /** Explicitly declared database and object-management capabilities. */
   readonly capabilities: DatabaseCapabilities;
 

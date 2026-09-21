@@ -16,6 +16,17 @@ export class PostgreSqlDialect implements SqlDialect {
   readonly dbType = DatabaseType.PG;
   readonly columnTypes = columnTypesFor(DatabaseType.PG);
 
+  /**
+   * 本会话是否 `standard_conforming_strings=on`（PG 自 9.1 起默认 on）。
+   * off 时普通 `'...'` 串里反斜杠是转义字符，值转义需翻倍反斜杠；连接层读到该 GUC 后
+   * 换用本方言变体（见 DialectRegistry.getFor），默认不变。
+   */
+  readonly standardConformingStrings: boolean;
+
+  constructor(opts: { standardConformingStrings?: boolean } = {}) {
+    this.standardConformingStrings = opts.standardConformingStrings !== false;
+  }
+
   createTableTemplate(table: string): string {
     return `CREATE TABLE IF NOT EXISTS ${table} (\n  "id" SERIAL PRIMARY KEY,\n  "name" VARCHAR(255)\n);`;
   }
@@ -304,17 +315,18 @@ export class PostgreSqlDialect implements SqlDialect {
     return out;
   }
 
-  /** PostgreSQL 标准字符串：仅单引号翻倍，不转义反斜杠。 */
+  /** PostgreSQL 标准字符串：仅单引号翻倍；standard_conforming_strings=off 时反斜杠也需翻倍。 */
   escapeValue(value: any): string {
     if (value === null || value === undefined) return 'NULL';
     if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NULL';
     if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
-    if (value instanceof Date) return `'${escapeStringLiteralContent(value.toISOString())}'`;
+    const backslashEscapes = !this.standardConformingStrings;
+    if (value instanceof Date) return `'${escapeStringLiteralContent(value.toISOString(), backslashEscapes)}'`;
     if (Buffer.isBuffer(value)) return `'\\x${value.toString('hex')}'`;
     if (typeof value === 'object') {
-      return `'${escapeStringLiteralContent(JSON.stringify(value))}'`;
+      return `'${escapeStringLiteralContent(JSON.stringify(value), backslashEscapes)}'`;
     }
-    return `'${escapeStringLiteralContent(String(value))}'`;
+    return `'${escapeStringLiteralContent(String(value), backslashEscapes)}'`;
   }
 }
 

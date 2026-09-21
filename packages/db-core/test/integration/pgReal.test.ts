@@ -110,6 +110,37 @@ describe.skipIf(!URL)('db-core PostgreSQL dialect (real db)', () => {
       await client.end();
     }
   });
+
+  /**
+   * standard_conforming_strings=off 时普通 `'...'` 串里反斜杠是转义字符。
+   * 若仍按 on 语义（只翻倍单引号）生成字面量，`a\b` 会写成 `'a\b'`，
+   * PG 解析成退格 + 裸字节 → 读回不一致。off 变体翻倍反斜杠后逐字节一致。
+   */
+  it('standard_conforming_strings=off 时 escapeValue 写读逐字节一致', async () => {
+    const client = new Client({ connectionString: URL! });
+    await client.connect();
+    const schema = `ztest_scs_${Date.now()}`;
+    await client.query(`CREATE SCHEMA ${schema}`);
+    try {
+      await client.query(`SET search_path TO ${schema}`);
+      await client.query('CREATE TABLE t (id int PRIMARY KEY, s varchar(255))');
+      await client.query('SET standard_conforming_strings = off');
+
+      const offDialect = new PostgreSqlDialect({ standardConformingStrings: false });
+      const samples = ['a\\b', "x\\' OR 1=1 -- ", 'back\\slash\\', "quote'and\\back"];
+      for (let i = 0; i < samples.length; i++) {
+        await client.query(`INSERT INTO t VALUES (${i}, ${offDialect.escapeValue(samples[i])})`);
+      }
+      const { rows } = await client.query('SELECT id, s FROM t ORDER BY id');
+      expect(rows.map((r) => r.s)).toEqual(samples);
+
+      // 对照：on 变体在该会话里只翻倍单引号，反斜杠会被当转义（故需连接期探测换变体）
+      expect(new PostgreSqlDialect().escapeValue('a\\b')).toBe("'a\\b'");
+    } finally {
+      await client.query(`DROP SCHEMA ${schema} CASCADE`);
+      await client.end();
+    }
+  });
 }, 30_000);
 /**
  * 本阶段（S2-4）修复的 PG 时间类型：DATE/TIMESTAMP 必须原样文本返回，

@@ -15,27 +15,35 @@ import type { SqlDialect } from '../dialect/sqlDialect.js';
  */
 export function scanOptionsForDbType(
   dbType: DatabaseType | undefined,
-  opts: { noBackslashEscapes?: boolean } = {},
+  opts: { noBackslashEscapes?: boolean; standardConformingStrings?: boolean } = {},
 ): SqlScanOptions {
   const mysql = dbType === DatabaseType.MYSQL;
+  const pg = dbType === DatabaseType.PG;
   return {
     hashComment: mysql,
     dashDashRequiresSpace: mysql,
-    // MySQL 默认把 `\` 当转义；服务端 sql_mode 含 NO_BACKSLASH_ESCAPES 时不然。
-    backslashEscapes: mysql && opts.noBackslashEscapes !== true,
+    // MySQL 默认把 `\` 当转义；NO_BACKSLASH_ESCAPES 时不然。
+    // PG 默认不然（standard_conforming_strings=on）；该 GUC 为 off 时普通串里 `\` 是转义。
+    backslashEscapes:
+      (mysql && opts.noBackslashEscapes !== true) ||
+      (pg && opts.standardConformingStrings === false),
     // PG 的 `E'...'` 串始终启用反斜杠转义，与 standard_conforming_strings 无关。
-    escapeStringPrefix: dbType === DatabaseType.PG,
+    escapeStringPrefix: pg,
   };
 }
 
 /**
- * 由方言实例派生扫描选项：带上该方言的 `noBackslashEscapes`（MySQL 变体）。
- * db-core 内部生成 SQL 的切分应经此，避免只传 dbType 而丢掉连接级模式。
+ * 由方言实例派生扫描选项：带上连接级模式（MySQL `noBackslashEscapes`、
+ * PG `standardConformingStrings`）。db-core 内部生成 SQL 的切分应经此，
+ * 避免只传 dbType 而丢掉连接级语义。
  */
 export function scanOptionsForDialect(
-  dialect: Pick<SqlDialect, 'dbType' | 'noBackslashEscapes'>,
+  dialect: Pick<SqlDialect, 'dbType' | 'noBackslashEscapes' | 'standardConformingStrings'>,
 ): SqlScanOptions {
-  return scanOptionsForDbType(dialect.dbType, { noBackslashEscapes: dialect.noBackslashEscapes === true });
+  return scanOptionsForDbType(dialect.dbType, {
+    noBackslashEscapes: dialect.noBackslashEscapes === true,
+    standardConformingStrings: dialect.standardConformingStrings,
+  });
 }
 
 /**
@@ -46,4 +54,14 @@ export function scanOptionsForDialect(
  */
 export function parseNoBackslashEscapes(sqlMode: string | null | undefined): boolean {
   return /NO_BACKSLASH_ESCAPES/i.test(sqlMode ?? '');
+}
+
+/**
+ * 解析 PG `standard_conforming_strings` 是否为 off（默认 on）。
+ *
+ * 单一来源：连接层读到该 GUC 后据此决定扫描选项与值转义方言，避免各处
+ * 各写一份判断而漂移。
+ */
+export function parseStandardConformingStringsOff(value: string | null | undefined): boolean {
+  return /^\s*off\s*$/i.test(String(value ?? ''));
 }

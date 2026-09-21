@@ -3,7 +3,7 @@ import type { DatabaseType } from '@devkit/db-core';
 import type { DatabaseCapabilities } from '@devkit/db-core';
 import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
 import type { HistoryStore } from '../history/historyStore';
-import { parseNoBackslashEscapes, type SqlScanOptions } from '@devkit/db-core/sql';
+import { parseNoBackslashEscapes, parseStandardConformingStringsOff, type SqlScanOptions } from '@devkit/db-core/sql';
 import { dialectScanOptions } from '../utils/sqlDialectOptions';
 import { QueryHistoryRecorder } from '../history/queryHistoryRecorder';
 import { SshTunnel } from './sshTunnel';
@@ -79,6 +79,8 @@ export class ConnectionManager {
   private readonly generations = new Map<string, number>();
   /** MySQL 服务端是否 NO_BACKSLASH_ESCAPES（按连接缓存，供切分/只读分类）。 */
   private readonly noBackslashEscapes = new Map<string, boolean>();
+  /** PG 会话是否 standard_conforming_strings=off（按连接缓存，同上）。 */
+  private readonly pgStdOff = new Map<string, boolean>();
   private readonly config: PoolConfig;
   private healthCheckTimer?: ReturnType<typeof setInterval>;
   private disposing = false;
@@ -152,9 +154,12 @@ export class ConnectionManager {
    * 建立连接会话并缓存。
    * @param conn 已保存连接配置
    */
-  /** 该连接适用的 SQL 扫描选项（含 MySQL sql_mode 的 NO_BACKSLASH_ESCAPES 影响）。 */
+  /** 该连接适用的 SQL 扫描选项（含 MySQL sql_mode / PG standard_conforming_strings 影响）。 */
   scanOptionsFor(conn: SavedConnection): SqlScanOptions {
-    return dialectScanOptions(conn.dbType, { noBackslashEscapes: this.noBackslashEscapes.get(conn.id) === true });
+    return dialectScanOptions(conn.dbType, {
+      noBackslashEscapes: this.noBackslashEscapes.get(conn.id) === true,
+      standardConformingStrings: this.pgStdOff.get(conn.id) !== true,
+    });
   }
 
   /**
@@ -308,6 +313,20 @@ export class ConnectionManager {
       }
     }
 
+    // PG：读一次 standard_conforming_strings。off 时普通 `'...'` 串里反斜杠是转义字符，
+    // 影响语句切分与值转义；读失败不阻断建连，退回默认（on，PG 自 9.1 起默认）。
+    if (dialect.dbType === 'PG') {
+      try {
+        const r = await query.query('SHOW standard_conforming_strings');
+        const raw = String((r.rows?.[0] as { standard_conforming_strings?: unknown } | undefined)?.standard_conforming_strings ?? '');
+        const off = parseStandardConformingStringsOff(raw);
+        this.pgStdOff.set(conn.id, off);
+        query.setDialect(DialectRegistry.getFor(conn.dbType, { standardConformingStrings: !off }));
+      } catch {
+        /* 保持默认 */
+      }
+    }
+
     const session: ConnectionSession = {
       capabilities: dialect.capabilities,
       query,
@@ -320,6 +339,7 @@ export class ConnectionManager {
         this.sessions.delete(conn.id);
         this.sessionEntries.delete(conn.id);
         this.noBackslashEscapes.delete(conn.id);
+        this.pgStdOff.delete(conn.id);
         if (conn.sshHost) SshTunnel.close(conn.id);
       },
     };
