@@ -20,7 +20,12 @@ export type WebviewMode =
   | 'loginForm'
   | 'session'
   | 'account'
-  | 'plans';
+  | 'plans'
+  /** 账户中心：单面板 + 标签页（账户 / 设备 / 套餐）。 */
+  | 'accountHub';
+
+/** 账户中心标签。 */
+export type HubTab = 'account' | 'session' | 'plans';
 
 /** 所有消息的松散基类：`type` 为判别字段，其余按具体消息扩展。 */
 export interface WebviewMessage {
@@ -33,6 +38,8 @@ export interface WebviewInitMessage extends WebviewMessage {
   type: 'init';
   mode?: WebviewMode;
   isZh?: boolean;
+  /** accountHub 初始标签。 */
+  tab?: HubTab;
 }
 
 /**

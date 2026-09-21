@@ -80,6 +80,21 @@ export function emptyTreeData(): ConnectionTreeData {
   return { groups: [], connections: [] };
 }
 
+/**
+ * 收集分组子树（含自身）的所有分组 id。
+ * 环检测：parentId 自指或回环直接终止（安全必需，防递归死循环）。
+ */
+function collectGroupSubtree(data: ConnectionTreeData, id: string): Set<string> {
+  const toDelete = new Set<string>();
+  const collect = (gid: string) => {
+    if (toDelete.has(gid)) return;
+    toDelete.add(gid);
+    data.groups.filter((x) => x.parentId === gid && x.id !== gid).forEach((child) => collect(child.id));
+  };
+  collect(id);
+  return toDelete;
+}
+
 /** 保存查询文件夹（本地存储）。 */
 export type { QueryFolder } from './queryStore.js';
 
@@ -317,17 +332,21 @@ export class ConnectionStore {
     }
   }
 
+  /**
+   * 分组删除影响面（删除前告知用户）：子树内子分组数（不含分组自身）与存活连接数。
+   */
+  getGroupRemovalStats(id: string): { groups: number; connections: number } {
+    const data = this.getTreeData();
+    const toDelete = collectGroupSubtree(data, id);
+    const groups = data.groups.filter((g) => !g.deleted && g.id !== id && toDelete.has(g.id)).length;
+    const connections = data.connections.filter((c) => !c.deleted && c.groupId && toDelete.has(c.groupId)).length;
+    return { groups, connections };
+  }
+
   /** 删除分组（v2：仅 tombstone 分组树，直接成员连接移除分组而非删除；不做连接级联） */
   async removeGroup(id: string, source: ChangeSource = 'user'): Promise<void> {
     const data = this.getTreeData();
-    const toDelete = new Set<string>();
-    const collect = (gid: string) => {
-      // 环检测：parentId 自指或回环直接终止（安全必需，防递归死循环）。
-      if (toDelete.has(gid)) return;
-      toDelete.add(gid);
-      data.groups.filter((x) => x.parentId === gid && x.id !== gid).forEach((child) => collect(child.id));
-    };
-    collect(id);
+    const toDelete = collectGroupSubtree(data, id);
     const now = Date.now();
     data.groups.forEach((g) => {
       if (toDelete.has(g.id)) { g.deleted = true; g.updateTime = now; }
@@ -342,6 +361,35 @@ export class ConnectionStore {
     await this.memento.update(ConnectionStore.KEY, data);
     this.changedEmitter.fire(source);
     void eventBus.publish(new ConnectionChangedEvent('group', 'delete', id));
+  }
+
+  /**
+   * 删除分组并级联删除组内（含子分组）连接及其保存查询/文件夹/凭据。
+   * 仅用于 UI 显式选择「连同连接删除」；同步入站的分组 tombstone 走 `removeGroup`（只移未分组），
+   * 避免某设备的远端分组删除把其他设备的连接一并删掉。
+   *
+   * 返回被删除的连接 id 列表，供命令层关闭其运行时连接会话（与 deleteConnection 一致）。
+   */
+  async removeGroupWithConnections(id: string, source: ChangeSource = 'user'): Promise<string[]> {
+    const data = this.getTreeData();
+    const toDelete = collectGroupSubtree(data, id);
+    const memberIds = data.connections
+      .filter((c) => !c.deleted && c.groupId && toDelete.has(c.groupId))
+      .map((c) => c.id);
+    // 逐个走 remove()：tombstone + 清理凭据 + 级联其查询/文件夹；每个都产生同步 tombstone。
+    for (const connId of memberIds) {
+      await this.remove(connId, source);
+    }
+    // remove() 会重写 memento，故重新读取后再 tombstone 分组，避免用旧快照覆盖。
+    const next = this.getTreeData();
+    const now = Date.now();
+    next.groups.forEach((g) => {
+      if (toDelete.has(g.id)) { g.deleted = true; g.updateTime = now; }
+    });
+    await this.memento.update(ConnectionStore.KEY, next);
+    this.changedEmitter.fire(source);
+    void eventBus.publish(new ConnectionChangedEvent('group', 'delete', id));
+    return memberIds;
   }
 
   private async cascadeConnectionDelete(connId: string, source: ChangeSource): Promise<void> {

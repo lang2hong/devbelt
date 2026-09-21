@@ -90,7 +90,7 @@ export function registerQueryFolderCommands(deps: Deps, sub: Sub): void {
 }
 
 export function registerGroupCommands(deps: Deps, sub: Sub): void {
-  const { store, treeProvider } = deps;
+  const { store, manager, treeProvider } = deps;
 
   sub('devbelt.addGroup', async (node?: DbTreeNode) => {
     const name = await vscode.window.showInputBox({ prompt: l10n('tree.addGroup') });
@@ -109,8 +109,36 @@ export function registerGroupCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.removeGroup', async (node: DbTreeNode) => {
     if (!node?.groupId) return;
-    if (!(await confirm('tree.deleteGroupTitle', 'tree.deleteGroupConfirm', node.label))) return;
-    await store.removeGroup(node.groupId);
+    const { groups, connections } = store.getGroupRemovalStats(node.groupId);
+    if (connections === 0) {
+      // 无连接：只需确认（有子分组时在文案里点明），无「连接去留」可问。
+      const message = groups > 0
+        ? l10n('tree.deleteGroupWithSubgroups', { name: node.label, groups })
+        : l10n('tree.deleteGroupEmpty', { name: node.label });
+      const confirmLabel = l10n('tree.deleteGroupConfirm');
+      if ((await vscode.window.showWarningMessage(message, { modal: true }, confirmLabel)) !== confirmLabel) return;
+      await store.removeGroup(node.groupId);
+      treeProvider.refresh();
+      return;
+    }
+    // 有连接：让用户明确决定组内连接的去留，按钮文案即结果（不静默保留或删除）。
+    const keep = l10n('tree.deleteGroupKeepConnections');
+    const removeAll = l10n('tree.deleteGroupDeleteConnections');
+    const picked = await vscode.window.showWarningMessage(
+      l10n('tree.deleteGroupNonEmpty', { name: node.label, groups, connections }),
+      { modal: true },
+      keep,
+      removeAll,
+    );
+    if (picked === keep) {
+      await store.removeGroup(node.groupId);
+    } else if (picked === removeAll) {
+      // 与 deleteConnection 一致：关闭被级联删除连接的运行时会话（连接池/SSH 隧道）。
+      const deleted = await store.removeGroupWithConnections(node.groupId);
+      for (const connId of deleted) manager.disposeConn(connId);
+    } else {
+      return; // 取消/关闭
+    }
     treeProvider.refresh();
   });
 

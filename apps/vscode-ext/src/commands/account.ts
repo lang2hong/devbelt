@@ -1,9 +1,7 @@
 import * as vscode from 'vscode';
 import type { Deps, Sub } from './shared';
 import { LoginFormView } from '../sync/loginFormView';
-import { AccountView } from '../sync/accountView';
-import { SessionView } from '../sync/sessionView';
-import { PlansView } from '../sync/plansView';
+import { AccountHubView } from '../sync/accountHubView';
 import { DEFAULT_SERVER_URL } from '../sync/authService';
 import { l10n } from '../i18n';
 
@@ -69,15 +67,15 @@ export function registerAccountCommands(deps: Deps, sub: Sub): void {
   });
 
   sub('devbelt.account', () => {
-    AccountView.open(deps.auth, deps.syncFactory);
+    AccountHubView.open(deps.auth, deps.syncFactory, 'account');
   });
 
   sub('devbelt.sessions', () => {
-    SessionView.open(deps.auth);
+    AccountHubView.open(deps.auth, deps.syncFactory, 'session');
   });
 
   sub('devbelt.plans', () => {
-    PlansView.open(deps.auth);
+    AccountHubView.open(deps.auth, deps.syncFactory, 'plans');
   });
 
   sub('devbelt.openConsole', () => {

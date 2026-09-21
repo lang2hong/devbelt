@@ -96,3 +96,22 @@ async function onLogout(): Promise<void> {
     <div v-if="logoutError" class="logout-warn" role="alert">登出请求未得到服务器确认。</div>
   </div>
 </template>
+
+<style scoped>
+.shell { min-height: 100vh; background: var(--c-bg); }
+.topbar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 4px;
+  height: 54px; padding: 0 24px;
+  background: var(--c-surface); border-bottom: 1px solid var(--c-border);
+}
+.brand { font-weight: 700; font-size: 15px; color: var(--c-text); margin-right: 16px; letter-spacing: -0.01em; }
+.spacer { flex: 1; }
+.email { color: var(--c-text-muted); font-size: 13px; margin-right: 4px; }
+.body { max-width: 1200px; margin: 0 auto; padding: 32px 24px 64px; }
+.logout-warn {
+  display: flex; align-items: center; gap: 12px; max-width: 1200px; margin: 0 auto;
+  padding: 10px 24px; background: var(--c-warn-bg); border-bottom: 1px solid var(--c-warn-border);
+  color: var(--c-warn-text); font-size: 13px;
+}
+</style>

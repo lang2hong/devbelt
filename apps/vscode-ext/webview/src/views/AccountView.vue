@@ -60,7 +60,7 @@ function act(action: string): void {
 }
 
 onMounted(() => {
-  post({ type: 'ready' });
+  post({ type: 'ready', view: 'account' });
   __offMsg = onMessage((msg: any) => {
     if (msg.type === 'me') { me.value = msg.me; loaded.value = true; errorMsg.value = ''; }
     else if (msg.type === 'syncStatus') status.value = msg.status;

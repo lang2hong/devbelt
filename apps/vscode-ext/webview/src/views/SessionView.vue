@@ -47,7 +47,7 @@ function revoke(deviceId: string) {
 }
 
 onMounted(() => {
-  post({ type: 'ready' });
+  post({ type: 'ready', view: 'session' });
   __offMsg = onMessage((msg: any) => {
     if (msg.type === 'devices') {
       devices.value = msg.devices ?? [];

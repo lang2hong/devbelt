@@ -45,7 +45,11 @@ export const en: MessageCatalog = {
   'tree.addGroup': 'Group name',
   'tree.moveGroup': 'Move connection to group',
   'tree.ungroup': 'Ungroup',
-  'tree.deleteGroupTitle': 'Delete group "{name}"? Child groups and their connections will be deleted too.',
+  'tree.deleteGroupEmpty': 'Delete group "{name}"?',
+  'tree.deleteGroupWithSubgroups': 'Delete group "{name}" and its {groups} subgroup(s)?',
+  'tree.deleteGroupNonEmpty': 'Group "{name}" has {connections} connection(s) and {groups} subgroup(s). What should happen to its connections?',
+  'tree.deleteGroupKeepConnections': 'Keep connections (move to ungrouped)',
+  'tree.deleteGroupDeleteConnections': 'Delete connections',
   'tree.deleteGroupConfirm': 'Delete',
 
   // 命令
@@ -92,6 +96,10 @@ export const en: MessageCatalog = {
   'sync.ready': 'Personal sync is unlocked and up to date.',
   'sync.initialSyncPending': 'Personal sync is unlocked, but the first sync needs retrying.',
   'sync.statusLabel': 'Sync',
+  'sync.autoOn': 'Auto sync is on',
+  'sync.autoOff': 'Auto sync is off (manual only)',
+  'sync.autoEnable': 'Turn on auto sync',
+  'sync.autoDisable': 'Turn off auto sync',
   'sync.statusIdle': 'Personal sync is up to date.',
   'sync.statusLocked': 'Sync is locked — click to unlock or initialize.',
   'sync.statusError': 'Personal sync error',
@@ -176,6 +184,7 @@ export const en: MessageCatalog = {
   'account.action.sessions': 'Manage devices',
   'account.action.initialize': 'Initialize sync',
   'account.action.unlock': 'Enter sync passphrase',
+  'account.action.unlockOrInitialize': 'Unlock / initialize',
   'account.action.importConnections': 'Import connections',
   'account.action.exportConnections': 'Export connections',
   'account.action.logout': 'Log out',
@@ -280,6 +289,9 @@ export const en: MessageCatalog = {
   'cmd.groups': 'New Group',
   'cmd.showHistory': 'Show History',
   'cmd.explorerMenu': 'More Actions',
+  'explorer.section.connection': 'Connections',
+  'explorer.section.sync': 'Sync',
+  'explorer.section.account': 'Account',
 
   // 全局对象搜索
   'search.prompt': 'Search tables and views by name',

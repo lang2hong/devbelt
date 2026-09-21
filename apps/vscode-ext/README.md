@@ -11,6 +11,8 @@
 
 个人连接同步：底层密码学、协议与运行时/UI 均已实现（`devbelt.syncNow` 等命令已注册），待双设备安装版验证；本地连接不走权益门禁。
 
+**自动同步默认关闭**（设置 `devbelt.sync.autoSync`，或命令 `Toggle Auto Sync`）：开启后本地变更（连接/分组/保存查询/查询文件夹）自动同步；关闭时仅在「立即同步 / 拉取 / 推送」时同步。
+
 ## SSH 主机密钥校验
 
 SSH 隧道按 `devbelt.ssh.hostKeyPolicy` 校验服务端主机密钥：

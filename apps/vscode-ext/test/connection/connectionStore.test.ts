@@ -178,6 +178,61 @@ describe('ConnectionStore.removeGroup', () => {
   });
 });
 
+describe('ConnectionStore.removeGroupWithConnections', () => {
+  it('级联删除组内（含子分组）连接并清理凭据，组外连接不受影响', async () => {
+    const secrets = createSecrets();
+    const store = new ConnectionStore(createMemento({
+      groups: [
+        { id: 'root', name: 'Root' },
+        { id: 'child', name: 'Child', parentId: 'root' },
+      ],
+      connections: [
+        conn({ id: 'c1', groupId: 'root', password: 'p1', sshPassword: 's1' }),
+        conn({ id: 'c2', groupId: 'child', password: 'p2' }),
+        conn({ id: 'c3' }),
+      ],
+    }), secrets as any);
+    await store.init();
+
+    const deleted = await store.removeGroupWithConnections('root');
+
+    // 返回被删连接 id，供命令层关闭运行时会话
+    expect(deleted.sort()).toEqual(['c1', 'c2']);
+    const data = store.getTreeData();
+    expect(data.groups.find((g) => g.id === 'root')!.deleted).toBe(true);
+    expect(data.groups.find((g) => g.id === 'child')!.deleted).toBe(true);
+    expect(data.connections.find((c) => c.id === 'c1')!.deleted).toBe(true);
+    expect(data.connections.find((c) => c.id === 'c2')!.deleted).toBe(true);
+    expect(data.connections.find((c) => c.id === 'c3')!.deleted).toBe(false);
+    // 凭据随连接删除一并清理
+    expect(await secrets.get('devbelt.connection.c1.password')).toBeUndefined();
+    expect(await secrets.get('devbelt.connection.c1.sshPassword')).toBeUndefined();
+    expect(await secrets.get('devbelt.connection.c2.password')).toBeUndefined();
+    // 组内连接与分组均不可见，组外连接保留
+    expect(store.getVisibleTreeData().groups).toHaveLength(0);
+    expect(store.getVisibleTreeData().connections.map((c) => c.id)).toEqual(['c3']);
+  });
+
+  it('getGroupRemovalStats 统计子树内子分组与存活连接', async () => {
+    const store = new ConnectionStore(createMemento({
+      groups: [
+        { id: 'root', name: 'Root' },
+        { id: 'child', name: 'Child', parentId: 'root' },
+      ],
+      connections: [
+        conn({ id: 'c1', groupId: 'root' }),
+        conn({ id: 'c2', groupId: 'child' }),
+        conn({ id: 'c3' }),
+      ],
+    }), createSecrets() as any);
+    await store.init();
+
+    expect(store.getGroupRemovalStats('root')).toEqual({ groups: 1, connections: 2 });
+    // 空分组：不计自身
+    expect(store.getGroupRemovalStats('child')).toEqual({ groups: 0, connections: 1 });
+  });
+});
+
 describe('ConnectionStore change source', () => {
   it('group and move methods preserve an explicit sync source', async () => {
     const store = new ConnectionStore(createMemento({

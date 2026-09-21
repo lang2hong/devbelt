@@ -53,6 +53,8 @@ export interface SyncSessionOptions {
   onSyncResult?: (result: SyncRunResult | undefined) => void;
   /** 会话锁定态变化（unlock/lock/epoch transition）后同步回调；供命令门控 context 即时刷新。 */
   onSessionState?: () => void;
+  /** 自动同步开关（按机器）；返回 false 时不自动同步（解锁首同步/本地变更/聚焦），仅显式命令触发。缺省开启。 */
+  autoSyncEnabled?: () => boolean;
 }
 
 export class PersonalSyncSession {
@@ -393,6 +395,7 @@ export class PersonalSyncSession {
         uniqueId: (type) => this.uniqueEntityId(type),
         entitlement: this.opts.entitlement,
         onSettled: this.opts.onSyncResult,
+        autoSyncEnabled: this.opts.autoSyncEnabled,
       });
       this.engine = runtime.engine;
       this.coordinator = runtime.coordinator;

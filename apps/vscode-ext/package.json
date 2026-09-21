@@ -214,6 +214,11 @@
         "category": "DB Client"
       },
       {
+        "command": "devbelt.toggleAutoSync",
+        "title": "%cmd.toggleAutoSync%",
+        "category": "DB Client"
+      },
+      {
         "command": "devbelt.addIndex",
         "title": "%cmd.addIndex%",
         "category": "DB Client",
@@ -815,6 +820,10 @@
         {
           "command": "devbelt.syncPush",
           "when": "devbelt.sync.ready"
+        },
+        {
+          "command": "devbelt.toggleAutoSync",
+          "when": "devbelt.sync.unlocked"
         },
         {
           "command": "devbelt.fixConnectionPaths",
@@ -1861,6 +1870,12 @@
           "default": false,
           "description": "Prefix CSV/TSV exports with a UTF-8 BOM (helps Excel detect encoding).",
           "markdownDescription": "CSV/TSV 导出前置 UTF-8 BOM（便于 Excel 正确识别编码）。"
+        },
+        "devbelt.sync.autoSync": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically sync personal connections/groups/queries when unlocked. When off, sync only runs on explicit Sync Now / Pull / Push.",
+          "markdownDescription": "解锁后自动同步个人连接/分组/查询。关闭时仅在手动「立即同步 / 拉取 / 推送」时同步。"
         }
       }
     },

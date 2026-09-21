@@ -28,7 +28,10 @@ export function registerCommands(deps: Deps): void {
   registerDdlCommands(deps, sub);
   registerSearchCommands(deps, sub);
   sub('devbelt.explorerMenu', async () => {
-    const items: { label: string; value: string }[] = [
+    // 用分隔线分组（连接内容 / 同步 / 账户），避免扁平列表把树操作与账号操作混排。
+    const section = (label: string): vscode.QuickPickItem => ({ label, kind: vscode.QuickPickItemKind.Separator });
+    const items: (vscode.QuickPickItem & { value?: string })[] = [
+      section(l10n('explorer.section.connection')),
       { label: l10n('cmd.groups'), value: 'addGroup' },
       { label: l10n('cmd.showHistory'), value: 'showHistory' },
       { label: l10n('account.action.importConnections'), value: 'importConnections' },
@@ -38,27 +41,31 @@ export function registerCommands(deps: Deps): void {
       const session = await deps.syncFactory.ensureSession().catch(() => undefined);
       const unlocked = session?.isUnlocked ?? false;
       items.push(
-        { label: l10n('account.title'), value: 'account' },
-        { label: l10n('sessions.title'), value: 'sessions' },
-        { label: l10n('account.action.plans'), value: 'plans' },
-        { label: l10n('sync.statusLabel'), value: 'sync' },
+        section(l10n('explorer.section.sync')),
+        { label: unlocked ? l10n('sync.statusLabel') : l10n('account.action.unlockOrInitialize'), value: 'sync' },
       );
-      // 拉取/推送仅已解锁时可用，避免锁定态点了被命令内部拒绝。
+      // 拉取/推送/自动同步开关仅已解锁时可用，避免锁定态点了被命令内部拒绝。
       if (unlocked) {
+        const autoOn = vscode.workspace.getConfiguration().get<boolean>('devbelt.sync.autoSync', false);
         items.push(
           { label: l10n('account.action.pull'), value: 'syncPull' },
           { label: l10n('account.action.push'), value: 'syncPush' },
+          { label: autoOn ? l10n('sync.autoDisable') : l10n('sync.autoEnable'), value: 'toggleAutoSync' },
         );
       }
+      // 账户面板已含设备/套餐/管理后台/登出/改密，菜单不再重复列出。
       items.push(
-        { label: l10n('account.action.openConsole'), value: 'openConsole' },
-        { label: l10n('cmd.logout'), value: 'logout' },
+        section(l10n('explorer.section.account')),
+        { label: l10n('account.title'), value: 'account' },
       );
     } else {
-      items.push({ label: l10n('cmd.login'), value: 'login' });
+      items.push(
+        section(l10n('explorer.section.account')),
+        { label: l10n('cmd.login'), value: 'login' },
+      );
     }
     const picked = await vscode.window.showQuickPick(items, { placeHolder: l10n('cmd.explorerMenu') });
-    if (!picked) return;
+    if (!picked?.value) return;
     const cmd: string | undefined = ({
       addGroup: 'devbelt.addGroup',
       showHistory: 'devbelt.showHistory',
@@ -66,13 +73,10 @@ export function registerCommands(deps: Deps): void {
       exportConnections: 'devbelt.exportConnections',
       login: 'devbelt.login',
       account: 'devbelt.account',
-      sessions: 'devbelt.sessions',
-      plans: 'devbelt.plans',
       sync: 'devbelt.syncEntry',
       syncPull: 'devbelt.syncPull',
       syncPush: 'devbelt.syncPush',
-      openConsole: 'devbelt.openConsole',
-      logout: 'devbelt.logout',
+      toggleAutoSync: 'devbelt.toggleAutoSync',
     } as Record<string, string>)[picked.value];
     if (cmd) await vscode.commands.executeCommand(cmd);
   });

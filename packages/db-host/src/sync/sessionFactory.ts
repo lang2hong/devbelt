@@ -27,6 +27,8 @@ export interface SyncSessionFactoryDeps {
   readonly onSyncResult?: (result: SyncRunResult | undefined) => void;
   /** 会话锁定态变化后同步回调；供命令门控 context 即时刷新。 */
   readonly onSessionState?: () => void;
+  /** 自动同步开关（按机器）；缺省开启。 */
+  readonly autoSyncEnabled?: () => boolean;
   /** 受控建连接口：仅登录后调用。 */
   readonly createClient: () => PersonalSyncClient;
 }
@@ -55,7 +57,7 @@ export class SyncSessionFactory {
       this.deps.dekStore,
       this.deps.connectionStore,
       this.deps.createClient(),
-      { entitlement: this.deps.entitlement, onSyncResult: this.deps.onSyncResult, onSessionState: this.deps.onSessionState },
+      { entitlement: this.deps.entitlement, onSyncResult: this.deps.onSyncResult, onSessionState: this.deps.onSessionState, autoSyncEnabled: this.deps.autoSyncEnabled },
     );
     return this.session;
   }

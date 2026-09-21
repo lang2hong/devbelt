@@ -34,7 +34,7 @@ function openConsole(path: string): void {
 }
 
 onMounted(() => {
-  post({ type: 'ready' });
+  post({ type: 'ready', view: 'plans' });
   __offMsg = onMessage((msg: any) => {
     if (msg.type === 'plans') {
       if (!msg.loggedIn) {

@@ -29,6 +29,7 @@
   "cmd.destroySync": "Destroy Sync Data",
   "cmd.resetSync": "Reset Sync (Forgot Passphrase)",
   "cmd.resetLocalSync": "Reset Local Sync (This Device)",
+  "cmd.toggleAutoSync": "Toggle Auto Sync",
   "cmd.initializePersonalSync": "Initialize Personal Sync",
   "cmd.unlockPersonalSync": "Unlock Personal Sync",
   "cmd.syncNow": "Sync Now",

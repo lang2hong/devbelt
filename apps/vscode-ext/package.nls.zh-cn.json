@@ -29,6 +29,7 @@
   "cmd.destroySync": "销毁同步数据",
   "cmd.resetSync": "重置同步（忘记口令）",
   "cmd.resetLocalSync": "本地重置同步（仅此设备）",
+  "cmd.toggleAutoSync": "切换自动同步",
   "cmd.initializePersonalSync": "初始化个人同步",
   "cmd.unlockPersonalSync": "解锁个人同步",
   "cmd.syncNow": "立即同步",

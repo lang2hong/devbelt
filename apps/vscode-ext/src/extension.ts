@@ -33,6 +33,9 @@ import { registerConflictCommands } from './commands/syncConflicts';
 import { registerSyncLifecycleCommands, registerSyncResetUriHandler } from './commands/syncLifecycle';
 import { SshTunnel } from './connection/sshTunnel';
 
+/** 自动同步开关（按机器）：默认关闭，仅显式开启后才自动同步。 */
+const SYNC_AUTO_SYNC_KEY = 'devbelt.sync.autoSync';
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const store = new ConnectionStore(context.globalState, context.secrets);
   context.subscriptions.push({ dispose: () => store.dispose() });
@@ -175,7 +178,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 受控同步 session 工厂（阶段 A 无 UI）：activation/locked 态零请求，仅经工厂懒建。
   // 阶段 B 才接入初始化/解锁命令；此处只挂生命周期：logout → 丢弃 session，dispose → 清理。
   // ===== B2：状态栏 + 立即同步命令 + 窗口聚焦触发 =====
-  const syncStatusBar = createSyncStatusBar(context, auth, () => syncFactory.current);
+  // 自动同步开关按机器生效（读配置，实时判定）；关闭时不自动同步（含解锁首同步），仅显式命令触发。
+  const isAutoSyncEnabled = (): boolean =>
+    vscode.workspace.getConfiguration().get<boolean>(SYNC_AUTO_SYNC_KEY, false);
+
+  const syncStatusBar = createSyncStatusBar(context, auth, () => syncFactory.current, isAutoSyncEnabled);
 
   const syncFactory = new SyncSessionFactory({
     connectionStore: store,
@@ -183,6 +190,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     memento: context.globalState,
     getUserId: async () => (auth.isLoggedIn() ? auth.getUserId() : undefined),
     entitlement: () => auth.getCachedEntitlement(),
+    autoSyncEnabled: isAutoSyncEnabled,
     onSyncResult: (result) => {
       // 入站 pull 应用了变更才刷树（避免每次空同步都整树刷新），并重算路径 warning；
       // 其余情况仅刷新状态栏。
@@ -206,11 +214,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     vscode.window.onDidChangeWindowState((e) => {
       if (!e.focused) return;
+      // 自动同步关闭时不因切窗触发同步（手动命令仍可用）。
+      if (!isAutoSyncEnabled()) return;
       const session = syncFactory.current;
       // stalled 后跳过自动聚焦同步，避免冲突/终止性错误在切窗时被反复自动重发；
       // 用户仍可通过 devbelt.syncNow 手动重试。
       if (!session?.isUnlocked || session.stalled) return;
       session.scheduleNow();
+    }),
+  );
+  // 自动同步开关：命令切换 + 配置变更即时生效（开启时补一次，关闭时停止自动触发）。
+  context.subscriptions.push(
+    vscode.commands.registerCommand('devbelt.toggleAutoSync', async () => {
+      const config = vscode.workspace.getConfiguration();
+      const next = !config.get<boolean>(SYNC_AUTO_SYNC_KEY, false);
+      await config.update(SYNC_AUTO_SYNC_KEY, next, vscode.ConfigurationTarget.Global);
+    }),
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (!e.affectsConfiguration(SYNC_AUTO_SYNC_KEY)) return;
+      syncStatusBar.refresh();
+      if (!isAutoSyncEnabled()) return;
+      const session = syncFactory.current;
+      if (session?.isUnlocked && !session.stalled) session.scheduleNow();
     }),
   );
   // B1 是用户显式入口；注册本身不建 session，命令执行前才刷新权益并懒建。

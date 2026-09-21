@@ -30,6 +30,7 @@ export function createSyncStatusBar(
   context: vscode.ExtensionContext,
   auth: Pick<AuthService, 'isLoggedIn'>,
   getSession: () => SyncStatusSession | undefined,
+  isAutoSyncEnabled: () => boolean = () => true,
 ): SyncStatusBar {
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   item.command = 'devbelt.syncNow';
@@ -60,7 +61,7 @@ export function createSyncStatusBar(
         setReady(false);
         setUnlocked(false);
         item.command = 'devbelt.syncEntry';
-        item.text = `$(sync) ${l10n('sync.statusLocked')}`;
+        item.text = `$(lock) ${l10n('account.action.unlockOrInitialize')}`;
         item.tooltip = l10n('sync.statusLocked');
         item.show();
         return;
@@ -74,34 +75,36 @@ export function createSyncStatusBar(
     setUnlocked(session?.isUnlocked ?? false);
     item.show();
     const reason = session!.lastError ?? session!.lastRun?.reason;
+    // 自动同步开/关状态随 tooltip 呈现（关闭时点击仍是手动「立即同步」）。
+    const autoNote = isAutoSyncEnabled() ? l10n('sync.autoOn') : l10n('sync.autoOff');
     item.command = 'devbelt.syncNow';
     switch (status) {
       case 'conflict':
         item.command = 'devbelt.resolveConflicts';
         item.text = `$(warning) ${l10n('sync.statusConflict', { count: session!.listConflicts().length })}`;
-        item.tooltip = l10n('sync.statusConflictTooltip');
+        item.tooltip = `${l10n('sync.statusConflictTooltip')}\n${autoNote}`;
         break;
       case 'stalled':
         if (session!.epochStale) {
           item.command = 'devbelt.unlockPersonalSync';
           item.text = `$(warning) ${l10n('sync.statusLabel')}`;
-          item.tooltip = l10n('sync.statusEpochStale');
+          item.tooltip = `${l10n('sync.statusEpochStale')}\n${autoNote}`;
           break;
         }
         item.text = `$(warning) ${l10n('sync.statusLabel')}`;
-        item.tooltip = l10n('sync.statusStalled');
+        item.tooltip = `${l10n('sync.statusStalled')}\n${autoNote}`;
         break;
       case 'retrying':
         item.text = `$(sync~spin) ${l10n('sync.statusLabel')}`;
-        item.tooltip = `${l10n('sync.statusError')}: ${reason ?? ''}`;
+        item.tooltip = `${l10n('sync.statusError')}: ${reason ?? ''}\n${autoNote}`;
         break;
       case 'error':
         item.text = `$(error) ${l10n('sync.statusLabel')}`;
-        item.tooltip = `${l10n('sync.statusError')}: ${reason ?? ''}`;
+        item.tooltip = `${l10n('sync.statusError')}: ${reason ?? ''}\n${autoNote}`;
         break;
       default:
         item.text = `$(sync) ${l10n('sync.statusLabel')}`;
-        item.tooltip = l10n('sync.statusIdle');
+        item.tooltip = `${l10n('sync.statusIdle')}\n${autoNote}`;
         break;
     }
   }

@@ -116,6 +116,12 @@ async function existingState(session: SyncSessionPort): Promise<StateDto | undef
 }
 
 function reportInitialRun(ui: SyncUi, result: SyncRun): void {
+  if (result?.stage === 'conflict') {
+    // 显式同步遇冲突：直接打开冲突解决面板（保留本地/合并/使用远端 + 批量），
+    // 而不是笼统的「需要重试」，避免隐藏冲突或让用户误以为重试即可。
+    void vscode.commands.executeCommand('devbelt.resolveConflicts');
+    return;
+  }
   if (result?.stage === 'ok') {
     ui.info(l10n('sync.ready'));
   } else {

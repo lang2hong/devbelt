@@ -325,6 +325,34 @@ describe('personal sync B1 commands', () => {
     expect(session.syncPush).toHaveBeenCalledTimes(1);
   });
 
+  it('pull/push: conflict opens the conflict resolver instead of a retry warning', async () => {
+    const session = makeSession({
+      isUnlocked: true,
+      syncPull: vi.fn(async () => ({ stage: 'conflict' })),
+      syncPush: vi.fn(async () => ({ stage: 'conflict' })),
+    });
+    const { deps, warn } = makeDeps(session, []);
+    mocks.executeCommand.mockClear();
+
+    await pullPersonalSync(deps);
+    await pushPersonalSync(deps);
+
+    expect(mocks.executeCommand).toHaveBeenCalledTimes(2);
+    expect(mocks.executeCommand).toHaveBeenCalledWith('devbelt.resolveConflicts');
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('syncEntry: conflict on immediate sync opens the conflict resolver', async () => {
+    const session = makeSession({ isUnlocked: true, syncNow: vi.fn(async () => ({ stage: 'conflict' })) });
+    const { deps, warn } = makeDeps(session, []);
+    mocks.executeCommand.mockClear();
+
+    await syncEntry(deps);
+
+    expect(mocks.executeCommand).toHaveBeenCalledWith('devbelt.resolveConflicts');
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it('resetLocalSync: confirms locally, clears local state, and makes zero sync requests', async () => {
     const session = makeSession();
     const { deps, errorAction, info } = makeDeps(session, []);

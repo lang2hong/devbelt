@@ -37,6 +37,8 @@ export interface BuildSyncRuntimeDeps {
   uniqueId: (type: SyncEntityType) => string;
   entitlement?: () => CachedEntitlement | undefined;
   onSettled?: (result: SyncRunResult | undefined) => void;
+  /** 自动同步开关（按机器）；缺省开启。 */
+  autoSyncEnabled?: () => boolean;
 }
 
 /**
@@ -73,6 +75,7 @@ export function buildSyncRuntime(deps: BuildSyncRuntimeDeps): SyncRuntime {
   });
   const coordinator = new SyncCoordinator(deps.store, mutator, engine, {
     onSettled: deps.onSettled,
+    autoSyncEnabled: deps.autoSyncEnabled,
   });
   const resolver = new ConflictResolver({
     userId: deps.userId,

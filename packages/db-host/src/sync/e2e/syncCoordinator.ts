@@ -20,6 +20,11 @@ import type { SyncMutator } from './syncMutator.js';
 export interface SyncCoordinatorOptions {
   /** 每个 drain 轮结束（含失败）后回调，供上层刷树/更新状态栏；回调异常不阻断同步链。 */
   onSettled?: (result: SyncRunResult | undefined) => void;
+  /**
+   * 自动同步开关（按机器）。返回 false 时：`onChanged` 与 `scheduleInitialSync` 不再自动触发
+   * 后台同步；显式 `scheduleNow`/`runNow`/分相仍可用。缺省视为开启（兼容既有调用方）。
+   */
+  autoSyncEnabled?: () => boolean;
 }
 
 export class SyncCoordinator {
@@ -77,8 +82,14 @@ export class SyncCoordinator {
     this.clearRetry();
     this.subscription = this.store.onChanged((source) => {
       if (source !== 'user') return;
+      if (!this.autoSyncOn()) return;
       this.schedule();
     });
+  }
+
+  /** 自动同步是否开启（缺省开启，兼容未注入谓词的调用方）。 */
+  private autoSyncOn(): boolean {
+    return this.options.autoSyncEnabled ? this.options.autoSyncEnabled() : true;
   }
 
   stop(): void {
@@ -151,9 +162,10 @@ export class SyncCoordinator {
     this.enqueue();
   }
 
-  /** 解锁后的首次同步：幂等，仅触发一次（与聚焦/命令触发的后续同步去重）。 */
+  /** 解锁后的首次同步：幂等，仅触发一次（与聚焦/命令触发的后续同步去重）。自动同步关闭时不触发。 */
   scheduleInitialSync(): void {
     if (this.stopped || this.initialSyncTriggered) return;
+    if (!this.autoSyncOn()) return;
     this.initialSyncTriggered = true;
     this.enqueue();
   }

@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useVsCode } from './composables/useVsCode';
 import { setLanguage } from './composables/useI18n';
-import type { WebviewMode } from '../../src/result/protocol';
+import type { WebviewMode, HubTab } from '../../src/result/protocol';
 import QueryView from './views/QueryView.vue';
 import DesignView from './views/DesignView.vue';
 import StatusView from './views/StatusView.vue';
@@ -14,12 +14,11 @@ import DashboardView from './views/DashboardView.vue';
 import AuditLogView from './views/AuditLogView.vue';
 import PoolStatusView from './views/PoolStatusView.vue';
 import LoginFormView from './views/LoginFormView.vue';
-import SessionView from './views/SessionView.vue';
-import AccountView from './views/AccountView.vue';
-import PlansView from './views/PlansView.vue';
+import AccountHubView from './views/AccountHubView.vue';
 
 const { onMessage } = useVsCode();
 const mode = ref<WebviewMode>('query');
+const hubTab = ref<HubTab>('account');
 
 let cleanup: (() => void) | undefined;
 onMounted(() => {
@@ -28,7 +27,11 @@ onMounted(() => {
       // 语言在切换视图之前设置：各视图挂载时就能取到正确文案。
       // isZh 由 BaseWebView.post 统一注入，webview 自身拿不到 vscode 配置。
       setLanguage(!!msg.isZh);
+      if (msg.mode === 'accountHub' && msg.tab) hubTab.value = msg.tab as HubTab;
       mode.value = (msg.mode as WebviewMode) || 'query';
+    } else if (msg.type === 'selectTab' && msg.tab) {
+      // 面板已打开时，命令切换标签。
+      hubTab.value = msg.tab as HubTab;
     }
   });
 });
@@ -46,8 +49,6 @@ onUnmounted(() => cleanup?.());
 <AuditLogView v-else-if="mode === 'auditLog'" />
       <PoolStatusView v-else-if="mode === 'poolStatus'" />
       <LoginFormView v-else-if="mode === 'loginForm'" />
-      <SessionView v-else-if="mode === 'session'" />
-      <AccountView v-else-if="mode === 'account'" />
-      <PlansView v-else-if="mode === 'plans'" />
+      <AccountHubView v-else-if="mode === 'accountHub'" :tab="hubTab" />
       <ERDiagramView v-else />
 </template>
