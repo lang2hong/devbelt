@@ -125,7 +125,8 @@ async function onLogout(): Promise<void> {
 
     <template v-else-if="me_">
       <nav class="nav">
-        <span class="brand">DB Client</span>
+        <a class="brand" href="/">DB Client</a>
+        <a class="home" href="/" title="返回 DevBelt 首页">首页</a>
         <a :href="withBase('/account')" @click.prevent="navigate('/account')" :class="{ on: router.name === 'account' }">账户</a>
         <a :href="withBase('/account/devices')" @click.prevent="navigate('/account/devices')" :class="{ on: router.name === 'devices' }">设备</a>
         <a :href="withBase('/account/sync')" @click.prevent="navigate('/account/sync')" :class="{ on: router.name === 'sync' }">同步</a>
@@ -158,7 +159,8 @@ async function onLogout(): Promise<void> {
   height: 54px; padding: 0 24px;
   background: var(--c-surface); border-bottom: 1px solid var(--c-border);
 }
-.brand { font-weight: 700; font-size: 15px; color: var(--c-text); margin-right: 16px; letter-spacing: -0.01em; }
+.nav .brand { font-weight: 700; font-size: 15px; color: var(--c-text); margin-right: 8px; letter-spacing: -0.01em; text-decoration: none; padding: 0; }
+.nav a.home { border-right: 1px solid var(--c-border); border-radius: 0; margin-right: 8px; }
 .nav a {
   color: var(--c-text-muted); text-decoration: none; font-size: 13.5px;
   padding: 6px 12px; border-radius: var(--r-sm);
