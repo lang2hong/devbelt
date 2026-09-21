@@ -5,11 +5,11 @@ const dbHostSrc = fileURLToPath(new URL('../../packages/db-host/src', import.met
 
 export default defineConfig({
   resolve: {
-    // 测试直接跑 @devkit/db-host 源码：既让内部 vi.mock（如 undici）生效，
+    // 测试直接跑 @devbelt/db-host 源码：既让内部 vi.mock（如 undici）生效，
     // 也避免"测试测的是编译产物"。源码内 `./x.js` 由 Vite 解析回 `./x.ts`。
     alias: [
-      { find: /^@devkit\/db-host$/, replacement: `${dbHostSrc}/index.ts` },
-      { find: /^@devkit\/db-host\/(.*)$/, replacement: `${dbHostSrc}/$1` },
+      { find: /^@devbelt\/db-host$/, replacement: `${dbHostSrc}/index.ts` },
+      { find: /^@devbelt\/db-host\/(.*)$/, replacement: `${dbHostSrc}/$1` },
     ],
   },
   test: {

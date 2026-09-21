@@ -1,5 +1,5 @@
 {
-  "name": "@devkit/db-core",
+  "name": "@devbelt/db-core",
   "version": "0.1.0",
   "description": "Pure database connection/query core (no vscode dependency)",
   "license": "MIT",

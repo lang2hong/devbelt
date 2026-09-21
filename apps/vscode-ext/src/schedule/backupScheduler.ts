@@ -2,10 +2,10 @@ import * as vscode from 'vscode';
 import { createWriteStream } from 'fs';
 import { mkdir, rename, rm } from 'fs/promises';
 import { once } from 'events';
-import { BackupService } from '@devkit/db-core';
+import { BackupService } from '@devbelt/db-core';
 import { ConnectionManager } from '../connection/connectionManager';
 import { diagWarn } from '../utils/diagnostics';
-import type { ConnectionStore } from '@devkit/db-host/connection/connectionStore';
+import type { ConnectionStore } from '@devbelt/db-host/connection/connectionStore';
 import { l10n } from '../i18n';
 import { backupFileName } from './backupFileName';
 

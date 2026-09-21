@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { listOrganizations, createOrganization, type OrgSummary } from '../api/organizations';
-import { ensureCsrf, setAccessToken } from '@devkit/auth-client';
+import { ensureCsrf, setAccessToken } from '@devbelt/auth-client';
 import { navigate, withBase } from '../lib/router';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 

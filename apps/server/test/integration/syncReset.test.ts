@@ -21,7 +21,7 @@ import { AuditWriter } from '../../src/service/auditWriter.js';
 import type { SyncNewState } from '../../src/modules/db/service/syncStateService.js';
 import type { PersonalSyncState } from '../../src/domain/entities.js';
 
-const URL = process.env.MYSQL_TEST_URL;
+const URL = process.env.DEVBELT_DB_TEST_MYSQL_URL;
 
 function buf(n: number, fill = 1): Buffer { return Buffer.alloc(n, fill); }
 function sha(raw: Buffer): Buffer { return createHash('sha256').update(raw).digest(); }

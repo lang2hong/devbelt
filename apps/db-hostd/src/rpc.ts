@@ -1,17 +1,17 @@
-import { SyncClient } from '@devkit/db-host/sync/syncClient';
-import { DekStore, generateDek } from '@devkit/db-host/sync/crypto/keyStore';
-import { decodeBase64Url, encodeBase64Url } from '@devkit/db-host/sync/crypto/recoveryCode';
+import { SyncClient } from '@devbelt/db-host/sync/syncClient';
+import { DekStore, generateDek } from '@devbelt/db-host/sync/crypto/keyStore';
+import { decodeBase64Url, encodeBase64Url } from '@devbelt/db-host/sync/crypto/recoveryCode';
 import {
   buildRecordSigningInput,
   buildStateSigningInput,
   signSigningInput,
   SYNC_DOMAIN,
   type SyncAction,
-} from '@devkit/db-host/sync/crypto/sign';
-import { requestDigestOf } from '@devkit/db-host/sync/crypto/digest';
-import { allowedEngines, type CachedEntitlement } from '@devkit/db-host/sync/entitlementGate';
-import type { MementoLike } from '@devkit/db-host/sync/e2e/stateStore';
-import type { SecureStorageLike } from '@devkit/db-host';
+} from '@devbelt/db-host/sync/crypto/sign';
+import { requestDigestOf } from '@devbelt/db-host/sync/crypto/digest';
+import { allowedEngines, type CachedEntitlement } from '@devbelt/db-host/sync/entitlementGate';
+import type { MementoLike } from '@devbelt/db-host/sync/e2e/stateStore';
+import type { SecureStorageLike } from '@devbelt/db-host';
 
 /** 逐行 NDJSON 之上的极简 JSON-RPC（无批处理/无通知：一行一请求一响应）。 */
 export interface RpcRequest {

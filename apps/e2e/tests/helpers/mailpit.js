@@ -9,7 +9,7 @@ export function uniqueEmail() {
 export { PASSWORD };
 
 /** 轮询 Mailpit HTTP API，取发给该邮箱的验证邮件，提取 `/verify-email?token=...` 链接。 */
-export async function getVerificationLink(email, mailpitBase = process.env.MAILPIT_HTTP ?? 'http://localhost:8025') {
+export async function getVerificationLink(email, mailpitBase = process.env.DEVBELT_DB_MAILPIT_HTTP ?? 'http://localhost:8025') {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     try {

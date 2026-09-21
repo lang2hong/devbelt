@@ -1,9 +1,9 @@
 import * as vscode from 'vscode';
-import { DatabaseType } from '@devkit/db-core';
+import { DatabaseType } from '@devbelt/db-core';
 import { DbTreeNode, NodeKind } from '../tree/dbTreeNode';
 import { ConnectionForm } from '../connection/connectionForm';
 import { ConnectionPathError } from '../connection/connectionManager';
-import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
+import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { l10n } from '../i18n';
 import { AuditLogger } from '../utils/auditLogger';
 import { flattenGroups } from '../utils/groupTree';
@@ -19,7 +19,7 @@ import {
   maxSavedConnections,
   maxConcurrentConnections,
   isOrganizationConnectionId,
-} from '@devkit/db-host/sync/entitlementGate';
+} from '@devbelt/db-host/sync/entitlementGate';
 
 async function queryServerVersion(session: any, dbType: string): Promise<string> {
   try {
@@ -195,7 +195,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
       if (ok !== l10n('conn.exportContinue')) return;
     }
     const uri = await vscode.window.showSaveDialog({
-      defaultUri: vscode.Uri.file('devkit-connections.json'),
+      defaultUri: vscode.Uri.file('devbelt-db-connections.json'),
       filters: { JSON: ['json'] },
     });
     if (!uri) return;

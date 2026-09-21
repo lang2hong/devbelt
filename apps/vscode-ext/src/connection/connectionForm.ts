@@ -1,12 +1,12 @@
 import * as vscode from 'vscode';
-import { DatabaseType } from '@devkit/db-core';
-import { ConnectionFactory } from '@devkit/db-core';
-import type { IConnection } from '@devkit/db-core';
-import { ConnectionStore, stripSecrets, type SavedConnection, type ConnectionGroup } from '@devkit/db-host/connection/connectionStore';
+import { DatabaseType } from '@devbelt/db-core';
+import { ConnectionFactory } from '@devbelt/db-core';
+import type { IConnection } from '@devbelt/db-core';
+import { ConnectionStore, stripSecrets, type SavedConnection, type ConnectionGroup } from '@devbelt/db-host/connection/connectionStore';
 import { SshTunnel } from './sshTunnel';
 import { validateConnectionPaths } from './connectionPathValidator';
 import { l10n } from '../i18n';
-import { uniqueId } from '@devkit/db-host/utils/id';
+import { uniqueId } from '@devbelt/db-host/utils/id';
 import { flattenGroups } from '../utils/groupTree';
 import { BaseWebView } from '../result/baseWebView';
 

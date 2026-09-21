@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PendingMutationStore, type PendingPutMutation, type PendingDeleteMutation } from '@devkit/db-host/sync/e2e/pendingMutationStore';
+import { PendingMutationStore, type PendingPutMutation, type PendingDeleteMutation } from '@devbelt/db-host/sync/e2e/pendingMutationStore';
 
 function makeMemento(seed?: Record<string, unknown>) {
   const m = new Map<string, unknown>(Object.entries(seed ?? {}));

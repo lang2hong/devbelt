@@ -6,8 +6,8 @@ import {
   acceptInvitation,
   bindMailFlow,
   type AcceptInvitationOrganization,
-} from '@devkit/auth-client';
-import { ensureCsrf, refresh, getAccessToken } from '@devkit/auth-client';
+} from '@devbelt/auth-client';
+import { ensureCsrf, refresh, getAccessToken } from '@devbelt/auth-client';
 
 /** DB 控制台（db-ui）的挂载 base；身份页在根。 */
 const DB_BASE = '/db';

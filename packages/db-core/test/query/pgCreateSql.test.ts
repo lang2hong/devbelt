@@ -10,7 +10,7 @@ import { IConnection } from '../../src/connection/connection';
  * PG 的 `getCreateSql` 生成的查询。
  *
  * 这里断言 **SQL 文本**而不是执行结果 —— 本机没有 PostgreSQL 实例，
- * `test/integration/pgReal.test.ts` 的门禁（PG_TEST_URL）未开启。
+ * `test/integration/pgReal.test.ts` 的门禁（DEVBELT_DB_TEST_PG_URL）未开启。
  * 好在这三个缺陷都是"语句本身在现代 PG 上跑不起来"，文本级断言足以钉住：
  * 一旦有人把 `pg_get_expr` 换回 `adsrc`，这些用例立刻报红。
  */

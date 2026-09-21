@@ -10,7 +10,7 @@ pg.types.setTypeParser(1082, (val) => val); // DATE
 pg.types.setTypeParser(114, (val) => val); // JSON
 pg.types.setTypeParser(3802, (val) => val); // JSONB
 
-const URL = process.env.PG_TEST_URL;
+const URL = process.env.DEVBELT_DB_TEST_PG_URL;
 
 describe.skipIf(!URL)('db-core PostgreSQL dialect (real db)', () => {
   const dialect = new PostgreSqlDialect();
@@ -145,7 +145,7 @@ describe.skipIf(!URL)('db-core PostgreSQL dialect (real db)', () => {
 /**
  * 本阶段（S2-4）修复的 PG 时间类型：DATE/TIMESTAMP 必须原样文本返回，
  * 而不是 pg 默认的 JS Date（经 webview 序列化后会变成 UTC/ISO，DATE 在东八区差一天）。
- * 实库验证，CI 由 PG_TEST_URL 开启。
+ * 实库验证，CI 由 DEVBELT_DB_TEST_PG_URL 开启。
  */
 describe.skipIf(!URL)('db-core PostgreSQL temporal (real db)', () => {
   it('DATE/TIMESTAMP 以原始文本返回（dateStrings 语义）', async () => {

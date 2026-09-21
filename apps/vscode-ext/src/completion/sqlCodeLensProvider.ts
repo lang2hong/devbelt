@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { DatabaseType } from '@devkit/db-core';
-import type { SqlScanOptions } from '@devkit/db-core/sql';
+import { DatabaseType } from '@devbelt/db-core';
+import type { SqlScanOptions } from '@devbelt/db-core/sql';
 import { splitSqlWithRanges } from '../utils/sql';
 import { dialectScanOptions } from '../utils/sqlDialectOptions';
 

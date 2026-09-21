@@ -1,6 +1,6 @@
-import { getAccessToken } from '@devkit/auth-client';
-import { authedFetch, type FetchLike } from '@devkit/auth-client';
-import { resolveErrorKind } from '@devkit/auth-client';
+import { getAccessToken } from '@devbelt/auth-client';
+import { authedFetch, type FetchLike } from '@devbelt/auth-client';
+import { resolveErrorKind } from '@devbelt/auth-client';
 
 /**
  * 组织 API 客户端（P3 §6）。写请求（create/update/close/leave/assignRole/removeMember/

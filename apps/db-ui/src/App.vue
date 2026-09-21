@@ -2,8 +2,8 @@
 import { computed, onMounted, ref, type Component } from 'vue';
 import { router, installRouter, navigate, withBase, stripBase, type RouteConfig } from './lib/router';
 import { safeReturnTo } from './lib/returnTo';
-import { refreshSession } from '@devkit/auth-client';
-import { getAccessToken, ensureCsrf, logout } from '@devkit/auth-client';
+import { refreshSession } from '@devbelt/auth-client';
+import { getAccessToken, ensureCsrf, logout } from '@devbelt/auth-client';
 import { me, type ConsoleMe } from './api/me';
 import AccountView from './pages/AccountView.vue';
 import DevicesView from './pages/DevicesView.vue';

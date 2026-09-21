@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DEK_BYTES, DekStore, deriveSyncSignKeyPair, generateDek } from '@devkit/db-host/sync/crypto/keyStore';
+import { DEK_BYTES, DekStore, deriveSyncSignKeyPair, generateDek } from '@devbelt/db-host/sync/crypto/keyStore';
 
 function makeSecretStorage(seed?: Record<string, string>) {
   const m = new Map<string, string>(Object.entries(seed ?? {}));

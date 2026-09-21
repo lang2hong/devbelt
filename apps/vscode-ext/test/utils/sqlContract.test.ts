@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { splitExecutableStatements, splitSqlWithRanges } from '@devkit/db-core/sql';
+import { splitExecutableStatements, splitSqlWithRanges } from '@devbelt/db-core/sql';
 import { splitSqlStatements } from '../../src/utils/sql';
 
 /**

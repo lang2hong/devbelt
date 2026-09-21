@@ -122,7 +122,7 @@ describe('analyzeSqlRisk', () => {
     /**
      * 回归：分类器与切分器曾对 `#` 注释规则不一致，导致
      * `SELECT 1 #; DROP TABLE users` 被判只读、切分后仍执行 DROP。
-     * 两者现在共用 `@devkit/db-core/sql` 的 lexer；这里锁定分类侧仍把 `#` 后内容视为注释。
+     * 两者现在共用 `@devbelt/db-core/sql` 的 lexer；这里锁定分类侧仍把 `#` 后内容视为注释。
      */
     it('MySQL 可执行注释 /*! */ 内的写必须被识别，不得当惰性注释', () => {
       expect(analyzeSqlRisk('/*!50000 DROP TABLE users */')).toMatchObject({

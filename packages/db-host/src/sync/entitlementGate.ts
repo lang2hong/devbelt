@@ -1,4 +1,4 @@
-import { DatabaseType } from '@devkit/db-core';
+import { DatabaseType } from '@devbelt/db-core';
 /** 缓存的个人权益（personal_plans entitlement_snapshot，不含时间字段）。 */
 export interface CachedEntitlement {
   planCode: string;

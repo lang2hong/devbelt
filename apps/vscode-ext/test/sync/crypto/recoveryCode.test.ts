@@ -10,7 +10,7 @@ import {
   formatRecoveryCode,
   generateRecoveryCode,
   type RecoveryKdfParams,
-} from '@devkit/db-host/sync/crypto/recoveryCode';
+} from '@devbelt/db-host/sync/crypto/recoveryCode';
 
 describe('recoveryCode', () => {
   it('生成 32B 恢复码 + Base64Url 无 padding', () => {

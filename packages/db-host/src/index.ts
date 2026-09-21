@@ -1,10 +1,10 @@
 /**
- * @devkit/db-host 公共入口。
+ * @devbelt/db-host 公共入口。
  *
  * 宿主无关的编辑器侧逻辑：连接/查询数据层、同步客户端与会话装配、E2EE 同步
  * 引擎与密钥生命周期。所有宿主能力一律通过 `hostTypes` 端口注入。
  *
- * 细粒度模块可用子路径直接引用，例如 `@devkit/db-host/sync/session`。
+ * 细粒度模块可用子路径直接引用，例如 `@devbelt/db-host/sync/session`。
  */
 export * from './hostTypes.js';
 export * from './connection/connectionStore.js';

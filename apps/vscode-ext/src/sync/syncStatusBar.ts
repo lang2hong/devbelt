@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { deriveSyncStatus } from '@devkit/db-host/sync/syncStatus';
-import type { SyncRunResult } from '@devkit/db-host/sync/e2e/syncEngine';
+import { deriveSyncStatus } from '@devbelt/db-host/sync/syncStatus';
+import type { SyncRunResult } from '@devbelt/db-host/sync/e2e/syncEngine';
 import type { AuthService } from './authService';
 import { l10n } from '../i18n';
 

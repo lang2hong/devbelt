@@ -1,4 +1,4 @@
-import type { SavedQuery } from '@devkit/db-core';
+import type { SavedQuery } from '@devbelt/db-core';
 import type { ConnectionStore, SavedConnection, ConnectionGroup } from '../../connection/connectionStore.js';
 import type { QueryFolder, ChangeSource } from '../../connection/queryStore.js';
 import { SYNC_ENTITY_TYPES, type SyncEntityRef, type SyncEntityType } from './syncEntity.js';

@@ -12,7 +12,7 @@ import { DataDiffView } from '../result/dataDiffView';
 import { DashboardView } from '../result/dashboardView';
 import { AuditLogView } from '../result/auditLogView';
 import { PoolStatusView } from '../result/poolStatusView';
-import { canUseErDiagram } from '@devkit/db-host/sync/entitlementGate';
+import { canUseErDiagram } from '@devbelt/db-host/sync/entitlementGate';
 import { configureBackupSchedule } from './backupWizard';
 import { l10n } from '../i18n';
 

@@ -12,7 +12,7 @@ import { MysqlSyncMutationRepo } from '../../src/modules/db/repository/syncMutat
 import { MysqlSyncResetTokenRepo } from '../../src/modules/db/repository/syncResetTokenRepo.js';
 import type { PersonalSyncState } from '../../src/domain/entities.js';
 
-const URL = process.env.MYSQL_TEST_URL;
+const URL = process.env.DEVBELT_DB_TEST_MYSQL_URL;
 
 function buf(n: number, fill = 1): Buffer {
   return Buffer.alloc(n, fill);

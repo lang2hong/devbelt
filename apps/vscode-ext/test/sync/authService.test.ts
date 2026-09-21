@@ -8,7 +8,7 @@ vi.mock('vscode', () => ({
 }));
 
 import { AuthService } from '../../src/sync/authService';
-import { syncFetch } from '@devkit/db-host/sync/syncClient';
+import { syncFetch } from '@devbelt/db-host/sync/syncClient';
 
 // db-host 在测试包之外，vi.mock('undici') 无法拦截其内部 import；
 // 用 syncFetch seam 把请求导向 globalThis.fetch，使安装的桩生效。

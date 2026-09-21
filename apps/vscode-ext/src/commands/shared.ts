@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { ConnectionStore } from '@devkit/db-host/connection/connectionStore';
-import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
+import { ConnectionStore } from '@devbelt/db-host/connection/connectionStore';
+import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { ConnectionPathOverrideStore } from '../connection/connectionPathOverrideStore';
 import { ConnectionContext } from '../connection/connectionContext';
@@ -8,10 +8,10 @@ import { DbTreeDataProvider } from '../tree/dbTreeDataProvider';
 import { QueryExecutor } from '../result/queryExecutor';
 import { HistoryStore } from '../history/historyStore';
 import { AuthService } from '../sync/authService';
-import type { SyncSessionFactory } from '@devkit/db-host/sync/sessionFactory';
+import type { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
 import { l10n } from '../i18n';
 import { diagError } from '../utils/diagnostics';
-import type { DatabaseOperation } from '@devkit/db-core';
+import type { DatabaseOperation } from '@devbelt/db-core';
 import type { ConnectionSession } from '../connection/connectionManager';
 
 export interface Deps {

@@ -1,4 +1,4 @@
-import { scanSql, sqlSkeleton, type SqlScanOptions } from '@devkit/db-core/sql';
+import { scanSql, sqlSkeleton, type SqlScanOptions } from '@devbelt/db-core/sql';
 
 export type SqlRiskLevel = 'none' | 'write' | 'critical';
 

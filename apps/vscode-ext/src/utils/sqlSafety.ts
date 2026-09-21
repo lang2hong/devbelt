@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
-import { DatabaseType } from '@devkit/db-core';
-import type { SqlScanOptions } from '@devkit/db-core/sql';
-import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
+import { DatabaseType } from '@devbelt/db-core';
+import type { SqlScanOptions } from '@devbelt/db-core/sql';
+import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { l10n } from '../i18n';
 import { analyzeSqlRisk } from './sqlRisk';
 import type { SqlRisk } from './sqlRisk';
@@ -56,7 +56,7 @@ export function ensureWritable(conn: SavedConnection): boolean {
 export async function confirmSqlExecution(
   conn: SavedConnection,
   sql: string,
-  scanOptions?: import('@devkit/db-core/sql').SqlScanOptions,
+  scanOptions?: import('@devbelt/db-core/sql').SqlScanOptions,
 ): Promise<boolean> {
   const risk = analyzeRiskConservative(conn, sql, scanOptions);
   if (!risk.isWrite) return true;

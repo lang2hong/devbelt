@@ -15,7 +15,7 @@ export function secureCookiesEnabled(): boolean {
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
 function isLoopbackConsoleHost(): boolean {
-  const base = (process.env.SMTP_BASE_URL || 'http://localhost:5173').trim();
+  const base = (process.env.DEVBELT_DB_SMTP_BASE_URL || 'http://localhost:5173').trim();
   try {
     return LOOPBACK_HOSTS.has(new URL(base).hostname);
   } catch {

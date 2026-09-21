@@ -8,7 +8,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
  * - 匿名（binding 缺省）：只校验签名 + cookie↔header 双提交恒等。
  * - 会话绑定（binding = sessionId）：额外校验 token 携带的 binding 与当前会话一致。
  *
- * 签名密钥由 signing key（TOKEN_SIGNING_KEY_B64）派生，不新增部署变量。
+ * 签名密钥由 signing key（DEVBELT_DB_TOKEN_SIGNING_KEY_B64）派生，不新增部署变量。
  */
 export class CsrfService {
   constructor(private readonly key: Buffer) {}
@@ -52,9 +52,9 @@ export class CsrfService {
 
 /** 从 Ed25519 signing key（基 64 PEM）确定性派生 CSRF HMAC 密钥（零新增部署变量）。 */
 export function deriveCsrfKey(env: NodeJS.ProcessEnv = process.env): Buffer {
-  const b64 = (env.TOKEN_SIGNING_KEY_B64 || '').trim();
+  const b64 = (env.DEVBELT_DB_TOKEN_SIGNING_KEY_B64 || '').trim();
   if (!b64) {
-    throw new Error('TOKEN_SIGNING_KEY_B64 is required to derive the CSRF signing key');
+    throw new Error('DEVBELT_DB_TOKEN_SIGNING_KEY_B64 is required to derive the CSRF signing key');
   }
   return createHash('sha256').update(`devbelt:csrf:${b64}`).digest();
 }

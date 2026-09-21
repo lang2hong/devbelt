@@ -18,7 +18,7 @@ afterAll(async () => {
 describe('db-hostd sidecar 进程冒烟', () => {
   it('拉起真实进程，写一行 JSON-RPC，读到一行响应', async () => {
     const child = spawn(process.execPath, [distEntry], {
-      env: { ...process.env, DEVKIT_HOSTD_HOME: home },
+      env: { ...process.env, DEVBELT_DB_HOSTD_HOME: home },
       stdio: ['pipe', 'pipe', 'inherit'],
     });
 

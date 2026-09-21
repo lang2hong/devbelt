@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { withBase } from '../lib/router';
 import { listAdminOrders, refundAdminOrder, type AdminOrder } from '../api/admin';
-import { ensureCsrf, setAccessToken } from '@devkit/auth-client';
+import { ensureCsrf, setAccessToken } from '@devbelt/auth-client';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { formatDateTime } from '../lib/formatTime';
 import Modal from '../components/Modal.vue';

@@ -141,14 +141,14 @@ describe('payment callback route raw bytes', () => {
   it('accepts a real WeChat v3 signed callback through the route (header forwarding + verify)', async () => {
     const mk = generateKeyPairSync('rsa', { modulusLength: 2048 });
     const env: NodeJS.ProcessEnv = {
-      PAYMENT_CALLBACK_BASE_URL: 'https://pay.example.com',
-      WECHAT_MCH_ID: 'mch',
-      WECHAT_APP_ID: 'app',
-      WECHAT_MERCHANT_CERT_SERIAL: 'ABCDEF1234567890',
-      WECHAT_PLATFORM_CERT_SERIAL: 'FEDCBA0987654321',
-      WECHAT_PRIVATE_KEY_B64: Buffer.from(mk.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()).toString('base64'),
-      WECHAT_PLATFORM_CERT_B64: Buffer.from(mk.publicKey.export({ type: 'spki', format: 'pem' }).toString()).toString('base64'),
-      WECHAT_API_V3_KEY: '0123456789abcdef0123456789abcdef',
+      DEVBELT_DB_PAYMENT_CALLBACK_BASE_URL: 'https://pay.example.com',
+      DEVBELT_DB_WECHAT_MCH_ID: 'mch',
+      DEVBELT_DB_WECHAT_APP_ID: 'app',
+      DEVBELT_DB_WECHAT_MERCHANT_CERT_SERIAL: 'ABCDEF1234567890',
+      DEVBELT_DB_WECHAT_PLATFORM_CERT_SERIAL: 'FEDCBA0987654321',
+      DEVBELT_DB_WECHAT_PRIVATE_KEY_B64: Buffer.from(mk.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()).toString('base64'),
+      DEVBELT_DB_WECHAT_PLATFORM_CERT_B64: Buffer.from(mk.publicKey.export({ type: 'spki', format: 'pem' }).toString()).toString('base64'),
+      DEVBELT_DB_WECHAT_API_V3_KEY: '0123456789abcdef0123456789abcdef',
     };
     const cred = resolveWechatCredentials(env)!;
 

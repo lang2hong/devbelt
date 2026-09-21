@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { withBase } from '../lib/router';
-import { login, ensureCsrf, getOrCreateDeviceKey } from '@devkit/auth-client';
+import { login, ensureCsrf, getOrCreateDeviceKey } from '@devbelt/auth-client';
 import { safeReturnTo } from '../lib/returnTo';
 
 const email = ref('');

@@ -1,11 +1,11 @@
 import { openAes256Gcm, sealAes256Gcm, type SealedBox } from '../crypto/aead.js';
 import { jcs } from '../crypto/jcs.js';
-import { DatabaseType } from '@devkit/db-core';
+import { DatabaseType } from '@devbelt/db-core';
 import { databaseEngineOf } from '../entitlementGate.js';
 import type { SavedConnection } from '../../connection/connectionStore.js';
 import type { ConnectionGroup } from '../../connection/connectionStore.js';
 import type { QueryFolder } from '../../connection/queryStore.js';
-import type { SavedQuery } from '@devkit/db-core';
+import type { SavedQuery } from '@devbelt/db-core';
 import { assertSyncEntityType, type SyncEntityType } from './syncEntity.js';
 
 /**

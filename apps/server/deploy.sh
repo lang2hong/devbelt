@@ -21,8 +21,8 @@ set -euo pipefail
 
 # ── 部署目标（部署前填写）──────────────────────────────────────────
 REMOTE="crewai"                    # ssh config 里的 Host 别名（User/HostName/Port 在 ~/.ssh/config 配好）
-DEPLOY_DIR="/usr/local/l2h/devkit/server"  # 服务器上的绝对部署目录
-SERVICE_NAME="devkit-server"     # systemd 服务名
+DEPLOY_DIR="/usr/local/l2h/devbelt/server"  # 服务器上的绝对部署目录
+SERVICE_NAME="devbelt-server"     # systemd 服务名
 HEALTH_URL="http://localhost:3000/health/ready"
 LOG_FILE="${DEPLOY_DIR}/logs/server.log"
 # ────────────────────────────────────────────────────────────────────
@@ -40,13 +40,13 @@ ADMIN_SRC="$REPO_ROOT/apps/admin-ui"
 
 echo "==> [1/6] 清理并构建 server -> apps/server/dist"
 rm -rf "$SCRIPT_DIR/dist"
-(cd "$REPO_ROOT" && pnpm --filter @devkit/server build)
+(cd "$REPO_ROOT" && pnpm --filter @devbelt/server build)
 
 echo "==> [2/6] 清理并构建 db-ui（base /db/）与 auth-ui（base /）"
 rm -rf "$CONSOLE_SRC/dist" "$AUTH_SRC/dist" "$ADMIN_SRC/dist"
-(cd "$REPO_ROOT" && CONSOLE_BASE="${CONSOLE_BASE:-/db/}" pnpm --filter @devkit/db-ui build)
-(cd "$REPO_ROOT" && AUTH_BASE="${AUTH_BASE:-/}" pnpm --filter @devkit/auth-ui build)
-(cd "$REPO_ROOT" && ADMIN_BASE="${ADMIN_BASE:-/admin/}" pnpm --filter @devkit/admin-ui build)
+(cd "$REPO_ROOT" && DEVBELT_DB_CONSOLE_BASE="${DEVBELT_DB_CONSOLE_BASE:-/db/}" pnpm --filter @devbelt/db-ui build)
+(cd "$REPO_ROOT" && DEVBELT_DB_AUTH_BASE="${DEVBELT_DB_AUTH_BASE:-/}" pnpm --filter @devbelt/auth-ui build)
+(cd "$REPO_ROOT" && DEVBELT_DB_ADMIN_BASE="${DEVBELT_DB_ADMIN_BASE:-/admin/}" pnpm --filter @devbelt/admin-ui build)
 
 echo "==> [3/6] 推送 server 产物到 ${REMOTE}:${DEPLOY_DIR}"
 ssh "$REMOTE" "mkdir -p '$DEPLOY_DIR/backups'"

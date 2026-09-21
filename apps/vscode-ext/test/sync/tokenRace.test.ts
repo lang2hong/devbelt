@@ -8,7 +8,7 @@ vi.mock('vscode', () => ({
 }));
 
 import { AuthService } from '../../src/sync/authService';
-import { syncFetch } from '@devkit/db-host/sync/syncClient';
+import { syncFetch } from '@devbelt/db-host/sync/syncClient';
 
 // db-host 在测试包之外，vi.mock('undici') 无法拦截其内部 import；
 // 用 syncFetch seam 让请求委托回 globalThis.fetch，这样服务端桩即可生效。
@@ -30,7 +30,7 @@ const realSyncFetch = syncFetch.impl;
  *
  * `SyncClient.tryRefresh` 的单飞只在进程内有效，挡不住这个跨进程场景。
  *
- * 这也是为什么把 ACCESS_TOKEN_EXPIRES_IN 从 7d 收到 15m 必须以本修复为前置：
+ * 这也是为什么把 DEVBELT_DB_ACCESS_TOKEN_EXPIRES_IN 从 7d 收到 15m 必须以本修复为前置：
  * 刷新频率会从约每周 1 次涨到每天约 96 次，竞态触发概率放大约 672 倍。
  */
 

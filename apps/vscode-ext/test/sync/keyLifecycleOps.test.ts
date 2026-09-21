@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { KeyLifecycleOps, type KeyLifecycleDeps } from '@devkit/db-host/sync/keyLifecycleOps';
-import type { StateDto } from '@devkit/db-host/sync/e2e/types';
-import type { SyncStateSnapshot } from '@devkit/db-host/sync/e2e/stateStore';
+import { KeyLifecycleOps, type KeyLifecycleDeps } from '@devbelt/db-host/sync/keyLifecycleOps';
+import type { StateDto } from '@devbelt/db-host/sync/e2e/types';
+import type { SyncStateSnapshot } from '@devbelt/db-host/sync/e2e/stateStore';
 
 const kl = vi.hoisted(() => ({
   createInitialMaterial: vi.fn(),
@@ -13,7 +13,7 @@ const kl = vi.hoisted(() => ({
   newStateFromMaterial: vi.fn(),
 }));
 
-vi.mock('@devkit/db-host/sync/keyLifecycle', () => ({
+vi.mock('@devbelt/db-host/sync/keyLifecycle', () => ({
   createInitialMaterial: kl.createInitialMaterial,
   newRecoveryCode: kl.newRecoveryCode,
   unlockDek: kl.unlockDek,

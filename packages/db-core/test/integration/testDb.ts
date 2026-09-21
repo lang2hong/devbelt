@@ -3,13 +3,13 @@
  *
  * ## 为什么需要它
  *
- * 每个 integration 测试文件都从 `MYSQL_TEST_URL` 取连接目标、从
- * `MYSQL_TEST_DB` 取库名（默认 `dbclient_verify`），然后在那个库上
+ * 每个 integration 测试文件都从 `DEVBELT_DB_TEST_MYSQL_URL` 取连接目标、从
+ * `DEVBELT_DB_TEST_MYSQL_DB` 取库名（默认 `devbelt_db_verify`），然后在那个库上
  * **建临时表、写数据、执行 KILL QUERY**。而跑这些测试通常要先
  * `set -a; . ../server/.env; set +a` 拿到连接参数 —— 那一步会把
- * `MYSQL_DATABASE`（生产库）也带进环境，两个变量只差几个字符。
+ * `DEVBELT_DB_MYSQL_DATABASE`（生产库）也带进环境，两个变量只差几个字符。
  *
- * 一次变量写错、一次复制粘贴漏掉 `export MYSQL_TEST_DB`，测试就会把 DDL 和
+ * 一次变量写错、一次复制粘贴漏掉 `export DEVBELT_DB_TEST_MYSQL_DB`，测试就会把 DDL 和
  * 全表 DELETE 打到生产库上。那不是"测试失败"，是数据事故 —— 而且发生时
  * 测试全绿，没有任何人会注意到。
  *
@@ -21,7 +21,7 @@ export function parseMysqlUrl(url: string): {
   host: string; port: number; user: string; password: string;
 } {
   const m = /^mysql:\/\/([^:]+):([^@]*)@([^:/]+)(?::(\d+))?/.exec(url);
-  if (!m) throw new Error(`bad MYSQL_TEST_URL: ${url}`);
+  if (!m) throw new Error(`bad DEVBELT_DB_TEST_MYSQL_URL: ${url}`);
   const [, user, encPwd, host, port] = m;
   return {
     host,
@@ -32,10 +32,10 @@ export function parseMysqlUrl(url: string): {
 }
 
 /**
- * 测试库名。默认 `dbclient_verify`。
+ * 测试库名。默认 `devbelt_db_verify`。
  *
  * 三道拒绝：
- *  1. 与 `MYSQL_DATABASE`（生产库）同名 —— 最容易发生的误配。
+ *  1. 与 `DEVBELT_DB_MYSQL_DATABASE`（生产库）同名 —— 最容易发生的误配。
  *  2. 名字里不含 `verify` / `test` —— 约定测试库必须自带标识，
  *     这样即使有人换了库名也不会误指到一个真实业务库。
  *  3. 空值。
@@ -44,15 +44,15 @@ export function parseMysqlUrl(url: string): {
  * 而这类错误只在造成损失之后才被发现。
  */
 export function resolveTestDb(env: NodeJS.ProcessEnv = process.env): string {
-  const name = (env.MYSQL_TEST_DB || 'dbclient_verify').trim();
-  if (!name) throw new Error('MYSQL_TEST_DB is empty');
+  const name = (env.DEVBELT_DB_TEST_MYSQL_DB || 'devbelt_db_verify').trim();
+  if (!name) throw new Error('DEVBELT_DB_TEST_MYSQL_DB is empty');
 
-  const prod = (env.MYSQL_DATABASE || '').trim();
+  const prod = (env.DEVBELT_DB_MYSQL_DATABASE || '').trim();
   if (prod && name.toLowerCase() === prod.toLowerCase()) {
     throw new Error(
-      `refusing to run integration tests against MYSQL_DATABASE ("${prod}"): `
+      `refusing to run integration tests against DEVBELT_DB_MYSQL_DATABASE ("${prod}"): `
       + 'these tests create and drop tables and kill running queries. '
-      + 'Set MYSQL_TEST_DB to a dedicated verification database.',
+      + 'Set DEVBELT_DB_TEST_MYSQL_DB to a dedicated verification database.',
     );
   }
 

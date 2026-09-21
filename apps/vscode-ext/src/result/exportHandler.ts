@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { l10n } from '../i18n';
 import type { ConnectionManager } from '../connection/connectionManager';
-import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
+import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import {
   exportFileName,
   exportFilters,
@@ -40,7 +40,7 @@ export class ExportHandler {
         this.post({ type: 'error', message: 'SQL export requires a target table.' });
         return;
       }
-      const { DialectRegistry } = await import('@devkit/db-core');
+      const { DialectRegistry } = await import('@devbelt/db-core');
       const dialect = DialectRegistry.get(this.conn.dbType as any);
 
       // 范围选择：当前页 / 全表

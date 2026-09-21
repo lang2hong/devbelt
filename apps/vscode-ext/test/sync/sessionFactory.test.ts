@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { SyncSessionFactory } from '@devkit/db-host/sync/sessionFactory';
-import { DekStore } from '@devkit/db-host/sync/crypto/keyStore';
-import type { PersonalSyncClient } from '@devkit/db-host/sync/e2e/client';
-import type { ConnectionStore } from '@devkit/db-host/connection/connectionStore';
+import { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
+import { DekStore } from '@devbelt/db-host/sync/crypto/keyStore';
+import type { PersonalSyncClient } from '@devbelt/db-host/sync/e2e/client';
+import type { ConnectionStore } from '@devbelt/db-host/connection/connectionStore';
 
 function makeMemento() {
   const m = new Map<string, unknown>();

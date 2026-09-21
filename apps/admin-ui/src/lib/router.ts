@@ -44,7 +44,7 @@ export function matchRoute(pathname: string, routes: RouteConfig[]): ResolvedRou
   return null;
 }
 
-/** 应用部署基路径（vite base）：'/' 或 '/db/'。构建时由 CONSOLE_BASE 注入。 */
+/** 应用部署基路径（vite base）：'/' 或 '/db/'。构建时由 DEVBELT_DB_CONSOLE_BASE 注入。 */
 const BASE: string = (() => {
   const b = (import.meta.env?.BASE_URL as string | undefined) ?? '/';
   return b.endsWith('/') ? b : `${b}/`;

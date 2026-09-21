@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import type { ConnectionManager } from '../connection/connectionManager';
-import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
+import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import type { ConnectionContext } from '../connection/connectionContext';
 import { diagError } from '../utils/diagnostics';
 import { statementTextAt } from '../utils/sql';

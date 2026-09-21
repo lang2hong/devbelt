@@ -23,7 +23,7 @@ import { ConsoleAdminService, type ConsoleAdminDeps } from '../../src/modules/ad
 import { AuditWriter } from '../../src/service/auditWriter.js';
 import { authScope } from '../../src/middleware/requireAuth.js';
 
-const URL = process.env.MYSQL_TEST_URL;
+const URL = process.env.DEVBELT_DB_TEST_MYSQL_URL;
 const PASSWORD = 'correct-horse-battery';
 // 不存在的操作者 id：setUserStatusInTx 只审计 actorUserId、不锁操作者，仅要求 != target。
 const ADMIN_ACTOR = 9000001;

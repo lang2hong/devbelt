@@ -3,7 +3,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 
 vi.mock('../api/admin', () => ({ listPlans: vi.fn(), updatePlan: vi.fn() }));
-vi.mock('@devkit/auth-client', async (importOriginal) => ({
+vi.mock('@devbelt/auth-client', async (importOriginal) => ({
   ...(await importOriginal()), ensureCsrf: vi.fn(async () => 'csrf') }));
 
 import { listPlans, updatePlan } from '../api/admin';

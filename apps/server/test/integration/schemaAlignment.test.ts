@@ -9,7 +9,7 @@ import { MysqlOrganizationSubscriptionRepo } from '../../src/modules/billing/rep
 import { MysqlAuditRepo } from '../../src/modules/auth/repository/auditRepo.js';
 import type { MysqlDb, Queryable } from '../../src/repository/mysql/db.js';
 
-const URL = process.env.MYSQL_TEST_URL;
+const URL = process.env.DEVBELT_DB_TEST_MYSQL_URL;
 
 /**
  * schema 对齐守卫（真库）：squash 后 organization.delete_time / personal_plans /

@@ -19,7 +19,7 @@ import { RateLimitService } from '../../src/service/rateLimitService.js';
 import { MemoryEmailSender } from '../../src/modules/auth/service/emailSender.js';
 import { UnauthorizedError } from '../../src/domain/errors.js';
 
-const URL = process.env.MYSQL_TEST_URL;
+const URL = process.env.DEVBELT_DB_TEST_MYSQL_URL;
 const PASSWORD = 'correct-horse-battery';
 
 const device = (key = 'device-key-00000001'): DeviceFields => ({

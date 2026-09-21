@@ -1,6 +1,6 @@
-import type { ExecutedStatement, QueryObserver } from '@devkit/db-core';
-import type { SqlScanOptions } from '@devkit/db-core/sql';
-import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
+import type { ExecutedStatement, QueryObserver } from '@devbelt/db-core';
+import type { SqlScanOptions } from '@devbelt/db-core/sql';
+import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { analyzeSqlRisk } from '../utils/sqlRisk';
 import { dialectScanOptions } from '../utils/sqlDialectOptions';
 import { containsSecretSql } from '../utils/sqlSecret';

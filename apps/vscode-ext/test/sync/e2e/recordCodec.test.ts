@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DatabaseType } from '@devkit/db-core';
+import { DatabaseType } from '@devbelt/db-core';
 import {
   encodeEntityPayload,
   encodeRecordPayload,
@@ -9,7 +9,7 @@ import {
   recordAad,
   sealRecord,
   SQL_MAX_BYTES,
-} from '@devkit/db-host/sync/e2e/recordCodec';
+} from '@devbelt/db-host/sync/e2e/recordCodec';
 
 const noRef = () => undefined;
 

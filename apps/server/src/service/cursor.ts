@@ -4,7 +4,7 @@ import { createHash, createHmac, timingSafeEqual } from 'crypto';
  * 分页 cursor 编解码（P3 §6：不透明 + 服务端签名，前端不得解析/拼装）。
  *
  * 形态：`<base64url(payload)>.<base64url(HMAC-SHA256(payload))>`。密钥由 Ed25519
- * signing key（TOKEN_SIGNING_KEY_B64）确定性派生，零新增部署变量。签名失败 /
+ * signing key（DEVBELT_DB_TOKEN_SIGNING_KEY_B64）确定性派生，零新增部署变量。签名失败 /
  * 形态非法统一返回 null（由调用方回 422 INVALID_CURSOR）。
  */
 export class CursorService {
@@ -39,7 +39,7 @@ export class CursorService {
 
 /** 从 Ed25519 signing key（基 64 PEM）确定性派生 cursor HMAC 密钥。 */
 export function deriveCursorKey(env: NodeJS.ProcessEnv = process.env): Buffer {
-  const b64 = (env.TOKEN_SIGNING_KEY_B64 || '').trim();
-  if (!b64) throw new Error('TOKEN_SIGNING_KEY_B64 is required to derive the cursor signing key');
+  const b64 = (env.DEVBELT_DB_TOKEN_SIGNING_KEY_B64 || '').trim();
+  if (!b64) throw new Error('DEVBELT_DB_TOKEN_SIGNING_KEY_B64 is required to derive the cursor signing key');
   return createHash('sha256').update(`devbelt:cursor:${b64}`).digest();
 }

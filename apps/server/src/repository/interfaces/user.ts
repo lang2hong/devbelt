@@ -39,7 +39,7 @@ export interface IUserRepo {
   updateStatus(id: number, status: UserStatus): Promise<void>;
   /** 事务内更新用户状态（禁用/启用，与撤销会话同事务）。 */
   updateStatusInTx(exec: Queryable, id: number, status: UserStatus): Promise<void>;
-  /** 置平台角色（仅 PLATFORM_ADMIN_EMAILS 受控引导任务写入）。 */
+  /** 置平台角色（仅 DEVBELT_DB_PLATFORM_ADMIN_EMAILS 受控引导任务写入）。 */
   setRole(id: number, role: UserRole): Promise<void>;
   /** 平台用户列表（filter + keyset cursor，DESC by id）。 */
   listUsers(input: AdminUserFilter): Promise<AdminUserRow[]>;

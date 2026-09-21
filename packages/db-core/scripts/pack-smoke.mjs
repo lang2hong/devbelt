@@ -56,7 +56,7 @@ try {
   if (nodeModules) symlinkSync(nodeModules, path.join(unpackedPkgDir, 'node_modules'));
   execFileSync(
     process.execPath,
-    ['--input-type=module', '-e', "await import('@devkit/db-core'); await import('@devkit/db-core/sql'); await import('@devkit/db-core/testing');"],
+    ['--input-type=module', '-e', "await import('@devbelt/db-core'); await import('@devbelt/db-core/sql'); await import('@devbelt/db-core/testing');"],
     { cwd: unpackedPkgDir, stdio: 'inherit' },
   );
 

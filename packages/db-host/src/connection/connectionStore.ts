@@ -1,7 +1,7 @@
 import type { ThenableLike } from '../hostTypes.js';
-import type { ConnectionConfig } from '@devkit/db-core';
-import { DatabaseType } from '@devkit/db-core';
-import type { SavedQuery } from '@devkit/db-core';
+import type { ConnectionConfig } from '@devbelt/db-core';
+import { DatabaseType } from '@devbelt/db-core';
+import type { SavedQuery } from '@devbelt/db-core';
 import type { SecureStorageLike } from '../hostTypes.js';
 import { QueryStore, type QueryFolder } from './queryStore.js';
 import { uniqueId } from '../utils/id.js';

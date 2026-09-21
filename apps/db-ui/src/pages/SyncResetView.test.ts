@@ -2,7 +2,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 
-vi.mock('@devkit/auth-client', async (importOriginal) => ({
+vi.mock('@devbelt/auth-client', async (importOriginal) => ({
   ...(await importOriginal()),
   claimLinkFlow: vi.fn(),
   bindMailFlow: vi.fn(),
@@ -12,8 +12,8 @@ vi.mock('@devkit/auth-client', async (importOriginal) => ({
   getAccessToken: vi.fn(() => 'at'),
 }));
 
-import { claimLinkFlow, bindMailFlow, createSyncResetHandoff } from '@devkit/auth-client';
-import { refresh, ensureCsrf } from '@devkit/auth-client';
+import { claimLinkFlow, bindMailFlow, createSyncResetHandoff } from '@devbelt/auth-client';
+import { refresh, ensureCsrf } from '@devbelt/auth-client';
 
 function setLocation(path: string): void {
   window.history.replaceState(null, '', path);

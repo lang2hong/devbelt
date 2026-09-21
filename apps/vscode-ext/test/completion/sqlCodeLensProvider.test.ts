@@ -7,7 +7,7 @@ vi.mock('vscode', () => {
   return { Position, Range, CodeLens };
 });
 
-import { DatabaseType } from '@devkit/db-core';
+import { DatabaseType } from '@devbelt/db-core';
 import { SqlCodeLensProvider } from '../../src/completion/sqlCodeLensProvider';
 
 function doc(text: string): any {

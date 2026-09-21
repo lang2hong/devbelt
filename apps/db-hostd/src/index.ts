@@ -7,7 +7,7 @@ import { FileMemento, FileSecureStorage } from './ports.js';
 import { createHandlers, dispatch, type HandlerDeps } from './rpc.js';
 
 /**
- * db-hostd：把 `@devkit/db-host` 暴露为 stdio NDJSON JSON-RPC 服务。
+ * db-hostd：把 `@devbelt/db-host` 暴露为 stdio NDJSON JSON-RPC 服务。
  *
  * 宿主（如未来的 IntelliJ 插件）只需：拉起本进程 → 写一行 JSON 请求 → 读一行 JSON 响应。
  * 逻辑全部复用 db-host，不在宿主侧重写。
@@ -33,7 +33,7 @@ export function runSidecar(readable: Readable, writable: Writable, deps: Handler
   });
 }
 
-export function defaultDeps(home = process.env.DEVKIT_HOSTD_HOME ?? resolve(process.cwd(), '.db-hostd')): HandlerDeps {
+export function defaultDeps(home = process.env.DEVBELT_DB_HOSTD_HOME ?? resolve(process.cwd(), '.devbelt-db-hostd')): HandlerDeps {
   return {
     secrets: new FileSecureStorage(join(home, 'secrets.json')),
     memento: new FileMemento(join(home, 'memento.json')),

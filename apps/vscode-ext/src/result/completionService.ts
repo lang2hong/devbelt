@@ -1,7 +1,7 @@
 import type { ConnectionManager, ConnectionSession } from '../connection/connectionManager';
-import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
+import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { buildCandidates, detectContext, extractFromTable, extractTableAliases, type SqlContext } from '../completion/sqlCompletionEngine';
-import { stripSqlComments } from '@devkit/db-core/sql';
+import { stripSqlComments } from '@devbelt/db-core/sql';
 import { diagWarn } from '../utils/diagnostics';
 
 /** 元数据缓存 TTL：DDL 改表后补全不应长期返回陈旧表/列。 */

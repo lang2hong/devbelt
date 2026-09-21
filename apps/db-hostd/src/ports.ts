@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { SecureStorageLike, ThenableLike } from '@devkit/db-host';
-import type { MementoLike } from '@devkit/db-host/sync/e2e/stateStore';
+import type { SecureStorageLike, ThenableLike } from '@devbelt/db-host';
+import type { MementoLike } from '@devbelt/db-host/sync/e2e/stateStore';
 
 /**
  * 宿主端口（ports）的**文件实现**：让 db-host 在没有 VS Code 的进程里也能运行。

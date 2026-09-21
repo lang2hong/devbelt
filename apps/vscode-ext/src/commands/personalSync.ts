@@ -1,12 +1,12 @@
 import * as vscode from 'vscode';
 import type { AuthService } from '../sync/authService';
-import { SyncApiError } from '@devkit/db-host/sync/e2e/client';
-import type { StateDto, NewStateDto } from '@devkit/db-host/sync/e2e/types';
-import type { InitialSyncMaterial } from '@devkit/db-host/sync/keyLifecycle';
-import { createInitialMaterial, newRecoveryCode, unlockDek } from '@devkit/db-host/sync/keyLifecycle';
-import { encodeBase64Url } from '@devkit/db-host/sync/crypto/recoveryCode';
-import type { SyncSessionFactory } from '@devkit/db-host/sync/sessionFactory';
-import { canUseDataSync } from '@devkit/db-host/sync/entitlementGate';
+import { SyncApiError } from '@devbelt/db-host/sync/e2e/client';
+import type { StateDto, NewStateDto } from '@devbelt/db-host/sync/e2e/types';
+import type { InitialSyncMaterial } from '@devbelt/db-host/sync/keyLifecycle';
+import { createInitialMaterial, newRecoveryCode, unlockDek } from '@devbelt/db-host/sync/keyLifecycle';
+import { encodeBase64Url } from '@devbelt/db-host/sync/crypto/recoveryCode';
+import type { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
+import { canUseDataSync } from '@devbelt/db-host/sync/entitlementGate';
 import { l10n } from '../i18n';
 
 type SyncRun = { stage: string } | undefined;

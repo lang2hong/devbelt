@@ -1,4 +1,4 @@
-import { DatabaseType, validateIdent, qualifyTable } from '@devkit/db-core';
+import { DatabaseType, validateIdent, qualifyTable } from '@devbelt/db-core';
 import {
   BETWEEN, EQ, GTE, GT, IN, IS_NULL, IS_NOT_NULL, LIKE, LTE, LT, NE,
   NOT_BETWEEN, NOT_IN, NOT_LIKE,

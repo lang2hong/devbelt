@@ -12,7 +12,7 @@ import { createPrivateKey, createPublicKey, type KeyObject } from 'crypto';
 
 /** 解析支付回调基础 URL（HTTPS 裸 origin）。非法/缺失返回 undefined。 */
 export function resolvePaymentCallbackBaseUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const raw = (env.PAYMENT_CALLBACK_BASE_URL || '').trim().replace(/\/+$/, '');
+  const raw = (env.DEVBELT_DB_PAYMENT_CALLBACK_BASE_URL || '').trim().replace(/\/+$/, '');
   if (!raw) return undefined;
   let url: URL;
   try {
@@ -69,13 +69,13 @@ export function resolveWechatCredentials(env: NodeJS.ProcessEnv = process.env): 
   const callbackBase = resolvePaymentCallbackBaseUrl(env);
   if (!callbackBase) return undefined;
 
-  const mchId = (env.WECHAT_MCH_ID || '').trim();
-  const appId = (env.WECHAT_APP_ID || '').trim();
-  const serial = (env.WECHAT_MERCHANT_CERT_SERIAL || '').trim();
-  const platformSerial = (env.WECHAT_PLATFORM_CERT_SERIAL || '').trim();
-  const keyB64 = (env.WECHAT_PRIVATE_KEY_B64 || '').trim();
-  const certB64 = (env.WECHAT_PLATFORM_CERT_B64 || '').trim();
-  const apiV3 = (env.WECHAT_API_V3_KEY || '').trim();
+  const mchId = (env.DEVBELT_DB_WECHAT_MCH_ID || '').trim();
+  const appId = (env.DEVBELT_DB_WECHAT_APP_ID || '').trim();
+  const serial = (env.DEVBELT_DB_WECHAT_MERCHANT_CERT_SERIAL || '').trim();
+  const platformSerial = (env.DEVBELT_DB_WECHAT_PLATFORM_CERT_SERIAL || '').trim();
+  const keyB64 = (env.DEVBELT_DB_WECHAT_PRIVATE_KEY_B64 || '').trim();
+  const certB64 = (env.DEVBELT_DB_WECHAT_PLATFORM_CERT_B64 || '').trim();
+  const apiV3 = (env.DEVBELT_DB_WECHAT_API_V3_KEY || '').trim();
   if (!mchId || !appId || !serial || !platformSerial || !keyB64 || !certB64 || !apiV3) return undefined;
   if (!HEX_SERIAL.test(serial)) return undefined;
   if (!HEX_SERIAL.test(platformSerial)) return undefined;
@@ -89,8 +89,8 @@ export function resolveWechatCredentials(env: NodeJS.ProcessEnv = process.env): 
     appId,
     merchantCertSerial: serial,
     platformCertSerial: platformSerial,
-    merchantPrivateKey: createPrivateKey({ key: decodePem(keyB64, 'WECHAT_PRIVATE_KEY_B64'), format: 'pem' }),
-    platformPublicKey: createPublicKey({ key: decodePem(certB64, 'WECHAT_PLATFORM_CERT_B64'), format: 'pem' }),
+    merchantPrivateKey: createPrivateKey({ key: decodePem(keyB64, 'DEVBELT_DB_WECHAT_PRIVATE_KEY_B64'), format: 'pem' }),
+    platformPublicKey: createPublicKey({ key: decodePem(certB64, 'DEVBELT_DB_WECHAT_PLATFORM_CERT_B64'), format: 'pem' }),
     apiV3Key,
     callbackUrl: `${callbackBase}/api/db/public/payment-callback/wechat`,
   };
@@ -101,15 +101,15 @@ export function resolveAlipayCredentials(env: NodeJS.ProcessEnv = process.env): 
   const callbackBase = resolvePaymentCallbackBaseUrl(env);
   if (!callbackBase) return undefined;
 
-  const appId = (env.ALIPAY_APP_ID || '').trim();
-  const keyB64 = (env.ALIPAY_PRIVATE_KEY_B64 || '').trim();
-  const pubB64 = (env.ALIPAY_PUBLIC_KEY_B64 || '').trim();
+  const appId = (env.DEVBELT_DB_ALIPAY_APP_ID || '').trim();
+  const keyB64 = (env.DEVBELT_DB_ALIPAY_PRIVATE_KEY_B64 || '').trim();
+  const pubB64 = (env.DEVBELT_DB_ALIPAY_PUBLIC_KEY_B64 || '').trim();
   if (!appId || !keyB64 || !pubB64) return undefined;
 
   return {
     appId,
-    appPrivateKey: createPrivateKey({ key: decodePem(keyB64, 'ALIPAY_PRIVATE_KEY_B64'), format: 'pem' }),
-    alipayPublicKey: createPublicKey({ key: decodePem(pubB64, 'ALIPAY_PUBLIC_KEY_B64'), format: 'pem' }),
+    appPrivateKey: createPrivateKey({ key: decodePem(keyB64, 'DEVBELT_DB_ALIPAY_PRIVATE_KEY_B64'), format: 'pem' }),
+    alipayPublicKey: createPublicKey({ key: decodePem(pubB64, 'DEVBELT_DB_ALIPAY_PUBLIC_KEY_B64'), format: 'pem' }),
     callbackUrl: `${callbackBase}/api/db/public/payment-callback/alipay`,
   };
 }

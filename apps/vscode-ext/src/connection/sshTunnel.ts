@@ -1,7 +1,7 @@
 import * as net from 'net';
 import * as fs from 'fs/promises';
 import { Client } from 'ssh2';
-import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
+import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { isHostKeyTrusted, loadKnownHosts, knownHostsHint, verifyHostKey } from './sshHostKey';
 import { diagError } from '../utils/diagnostics';
 

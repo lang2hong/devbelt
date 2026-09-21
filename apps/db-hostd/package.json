@@ -1,8 +1,8 @@
 {
-  "name": "@devkit/db-hostd",
+  "name": "@devbelt/db-hostd",
   "version": "0.1.0",
   "private": true,
-  "description": "Host-agnostic sidecar exposing @devkit/db-host over stdio JSON-RPC (NDJSON)",
+  "description": "Host-agnostic sidecar exposing @devbelt/db-host over stdio JSON-RPC (NDJSON)",
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
@@ -15,8 +15,8 @@
     "test": "pnpm -C ../../packages/db-host build && tsc -p tsconfig.json && vitest run"
   },
   "dependencies": {
-    "@devkit/db-core": "workspace:*",
-    "@devkit/db-host": "workspace:*"
+    "@devbelt/db-core": "workspace:*",
+    "@devbelt/db-host": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

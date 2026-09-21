@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { SchemaDiffService, BackupService, DataTransferService, DatabaseType, validateIdent } from '@devkit/db-core';
+import { SchemaDiffService, BackupService, DataTransferService, DatabaseType, validateIdent } from '@devbelt/db-core';
 import { DbTreeNode } from '../tree/dbTreeNode';
 import { wrapIdentForConn, splitSqlStatements, streamSqlStatements } from '../utils/sql';
 import { confirmSqlExecution, ensureWritable } from '../utils/sqlSafety';

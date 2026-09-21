@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DeferredRecordStore } from '@devkit/db-host/sync/e2e/deferredRecordStore';
+import { DeferredRecordStore } from '@devbelt/db-host/sync/e2e/deferredRecordStore';
 
 function mem() {
   const m = new Map<string, unknown>();

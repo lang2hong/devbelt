@@ -19,7 +19,7 @@ import { TokenService } from '../../src/service/tokenService.js';
 import { MemoryEmailSender } from '../../src/modules/auth/service/emailSender.js';
 import { OrganizationAdminRequiredError, EntityNotFoundError, RateLimitedError, OrganizationNotFoundError, ForbiddenError } from '../../src/domain/errors.js';
 
-const URL = process.env.MYSQL_TEST_URL;
+const URL = process.env.DEVBELT_DB_TEST_MYSQL_URL;
 
 /**
  * @param rateLimit 是否启用限流。**默认关闭**。

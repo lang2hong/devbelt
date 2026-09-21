@@ -4,8 +4,8 @@ import type { EmailSender } from './emailSender.js';
 /**
  * SMTP 邮件发送器（生产实现，实施规格 §5.1）。
  *
- * 凭据只来自部署环境变量：SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/SMTP_FROM。
- * 未配置 SMTP_HOST 时应由装配层回退到 LogEmailSender，绝不本类内置凭据回退。
+ * 凭据只来自部署环境变量：DEVBELT_DB_SMTP_HOST/DEVBELT_DB_SMTP_PORT/DEVBELT_DB_SMTP_USER/DEVBELT_DB_SMTP_PASS/DEVBELT_DB_SMTP_FROM。
+ * 未配置 DEVBELT_DB_SMTP_HOST 时应由装配层回退到 LogEmailSender，绝不本类内置凭据回退。
  *
  * 邮件正文：统一品牌外壳 + 主行动按钮 + 一次性链接（纯文本回退），
  * 验证类邮件额外给「可复制验证码」卡片（扩展登录表单需要粘贴 token）。
@@ -16,17 +16,17 @@ export class SmtpEmailSender implements EmailSender {
   private readonly baseUrl: string;
 
   constructor(env: NodeJS.ProcessEnv = process.env, opts: { allowInsecure?: boolean } = {}) {
-    const host = (env.SMTP_HOST || '').trim();
-    if (!host) throw new Error('SMTP_HOST is required to construct SmtpEmailSender');
-    this.from = (env.SMTP_FROM || 'no-reply@localhost').trim();
+    const host = (env.DEVBELT_DB_SMTP_HOST || '').trim();
+    if (!host) throw new Error('DEVBELT_DB_SMTP_HOST is required to construct SmtpEmailSender');
+    this.from = (env.DEVBELT_DB_SMTP_FROM || 'no-reply@localhost').trim();
     // 从注入的 env 读取（不要直读 process.env）：否则构造器的可注入 env 契约被绕过，
     // 测试无法覆盖链接生成，且部署时容易出现「改了 env 但链接还是旧域名」。
-    this.baseUrl = (env.SMTP_BASE_URL || 'http://localhost:5173').trim().replace(/\/$/, '');
+    this.baseUrl = (env.DEVBELT_DB_SMTP_BASE_URL || 'http://localhost:5173').trim().replace(/\/$/, '');
 
-    const secure = (env.SMTP_SECURE || 'false') === 'true';
+    const secure = (env.DEVBELT_DB_SMTP_SECURE || 'false') === 'true';
     this.transporter = nodemailer.createTransport({
       host,
-      port: Number(env.SMTP_PORT || 587),
+      port: Number(env.DEVBELT_DB_SMTP_PORT || 587),
       secure,
       // secure=false（587/STARTTLS）时**必须**强制 TLS。
       // nodemailer 默认是「机会性」升级：服务端不广告 STARTTLS 就静默用明文发送。
@@ -36,8 +36,8 @@ export class SmtpEmailSender implements EmailSender {
       // 唯一例外：本地 Mailpit 联调/e2e（allowInsecure），Mailpit 的 SMTP sink 不提供
       // STARTTLS；仅允许显式开启，生产装配绝不可传该选项。
       requireTLS: opts.allowInsecure ? false : !secure,
-      auth: env.SMTP_USER
-        ? { user: env.SMTP_USER, pass: env.SMTP_PASS || '' }
+      auth: env.DEVBELT_DB_SMTP_USER
+        ? { user: env.DEVBELT_DB_SMTP_USER, pass: env.DEVBELT_DB_SMTP_PASS || '' }
         : undefined,
     });
   }

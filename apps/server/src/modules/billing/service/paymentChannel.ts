@@ -111,7 +111,7 @@ export function paymentGatewayConfigured(env: NodeJS.ProcessEnv = process.env): 
 }
 
 /**
- * 支付路由是否应注册（opt-in）：凭据齐全 **且** 显式 `FEATURE_PAYMENT=true/1/on`。
+ * 支付路由是否应注册（opt-in）：凭据齐全 **且** 显式 `DEVBELT_DB_FEATURE_PAYMENT=true/1/on`。
  * 仅配凭据而缺开关视为关闭——资金面集成中「配凭据」与「开启客户支付」是两次独立上线动作。
  */
 export function paymentRoutesEnabled(env: NodeJS.ProcessEnv = process.env): boolean {

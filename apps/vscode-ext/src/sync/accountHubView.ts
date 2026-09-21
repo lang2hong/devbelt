@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { BaseWebView } from '../result/baseWebView';
 import { l10n } from '../i18n';
 import { DEFAULT_SERVER_URL, type AuthService } from './authService';
-import type { SyncSessionFactory } from '@devkit/db-host/sync/sessionFactory';
+import type { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
 import type { HubTab } from '../result/protocol';
 
 /**

@@ -8,7 +8,7 @@ vi.mock('../api/admin', () => ({
   exportAudit: vi.fn(),
 }));
 
-vi.mock('@devkit/auth-client', async (importOriginal) => ({
+vi.mock('@devbelt/auth-client', async (importOriginal) => ({
   ...(await importOriginal()),
   ensureCsrf: vi.fn(async () => 'csrf'),
   setAccessToken: vi.fn(),

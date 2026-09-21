@@ -11,7 +11,7 @@ vi.mock('../api/orders', () => ({
   listOrders: vi.fn(),
 }));
 
-vi.mock('@devkit/auth-client', async (importOriginal) => ({
+vi.mock('@devbelt/auth-client', async (importOriginal) => ({
   ...(await importOriginal()),
   setAccessToken: vi.fn(),
   ensureCsrf: vi.fn(async () => 'csrf'),
@@ -19,7 +19,7 @@ vi.mock('@devkit/auth-client', async (importOriginal) => ({
 
 import { listInvoices, requestInvoice } from '../api/invoices';
 import { listOrders } from '../api/orders';
-import { setAccessToken } from '@devkit/auth-client';
+import { setAccessToken } from '@devbelt/auth-client';
 
 beforeEach(() => {
   vi.mocked(listInvoices).mockReset();

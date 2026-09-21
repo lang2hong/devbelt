@@ -1,6 +1,6 @@
-import type { ColumnMeta, QueryService } from '@devkit/db-core';
-import { DatabaseType, qualifyTable, streamRowsByKeyset } from '@devkit/db-core';
-import { sqlCommentSafe } from '@devkit/db-core/sql';
+import type { ColumnMeta, QueryService } from '@devbelt/db-core';
+import { DatabaseType, qualifyTable, streamRowsByKeyset } from '@devbelt/db-core';
+import { sqlCommentSafe } from '@devbelt/db-core/sql';
 import { serializeCsv, csvHeaderLine, csvDataLine } from './csv';
 import { serializeJson, projectRow } from './json';
 import { serializeXlsx, writeXlsx } from './xlsx';

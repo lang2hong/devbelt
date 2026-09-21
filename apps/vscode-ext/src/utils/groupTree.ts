@@ -1,4 +1,4 @@
-import type { ConnectionGroup } from '@devkit/db-host/connection/connectionStore';
+import type { ConnectionGroup } from '@devbelt/db-host/connection/connectionStore';
 
 /**
  * 扁平化分组树（按 parentId 深度优先遍历，带缩进层级）。

@@ -342,7 +342,7 @@ export async function createApp() {
     nonceRepo: paymentNonceRepo,
   });
   const featureFlags = resolveFeatureFlags();
-  // opt-in：凭据齐全 + 显式 FEATURE_PAYMENT=true 才注册真支付路由，否则仅注册只读订单路由。
+  // opt-in：凭据齐全 + 显式 DEVBELT_DB_FEATURE_PAYMENT=true 才注册真支付路由，否则仅注册只读订单路由。
   const paymentEnabled = paymentRoutesEnabled();
 
   // 受控限流清理任务（实施规格 §3）：过期桶由周期任务删除，不依赖请求
@@ -545,7 +545,7 @@ export async function createApp() {
 
   await app.ready();
   await runMigrations(app.mysql as any, [...migrations], LEGACY_MIGRATION_VERSIONS);
-  // 平台管理员受控引导（§2.3/§10.4）：PLATFORM_ADMIN_EMAILS 仅作首次引导来源；
+  // 平台管理员受控引导（§2.3/§10.4）：DEVBELT_DB_PLATFORM_ADMIN_EMAILS 仅作首次引导来源；
   // 缺失时 fail-closed（无人被提升，requireAdmin 一律 403）。
   await bootstrapPlatformAdmins(userRepo, auditWriter, config.platformAdminEmails, app.log.warn.bind(app.log));
 

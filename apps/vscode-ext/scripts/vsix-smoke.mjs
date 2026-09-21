@@ -4,7 +4,7 @@
  * 步骤：
  *  1. `vsce package --no-dependencies` 产出 vsix 到临时目录（不落仓库）；
  *  2. 用 @vscode/test-electron 下载 VS Code（默认 stable，可用
- *     VSIX_SMOKE_VSCODE_VERSION 覆盖）；
+ *     DEVBELT_DB_VSIX_SMOKE_VSCODE_VERSION 覆盖）；
  *  3. 以临时 `--extensions-dir`/`--user-data-dir` **安装该 vsix**（走真实安装路径）；
  *  4. `runTests` 启动 VS Code 跑 test/vsix/suite.js 的激活断言；
  *  5. finally 清理临时目录。
@@ -40,7 +40,7 @@ try {
     : ['vsce', 'package', '--no-dependencies', '--out', vsix];
   execFileSync(vsceCmd, vsceArgs, { cwd: pkgDir, stdio: 'inherit' });
 
-  const version = process.env.VSIX_SMOKE_VSCODE_VERSION ?? 'stable';
+  const version = process.env.DEVBELT_DB_VSIX_SMOKE_VSCODE_VERSION ?? 'stable';
   const vscodeExecutablePath = await downloadAndUnzipVSCode(version);
   const [cli, ...cliArgs] = resolveCliArgsFromVSCodeExecutablePath(vscodeExecutablePath);
 

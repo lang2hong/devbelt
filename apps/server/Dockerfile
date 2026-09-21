@@ -3,9 +3,9 @@ FROM node:20-alpine AS build
 WORKDIR /app
 COPY package.json pnpm-lock.yaml* ./
 COPY apps/server/package.json apps/server/
-RUN npm install -g pnpm && pnpm install --filter @devkit/server
+RUN npm install -g pnpm && pnpm install --filter @devbelt/server
 COPY apps/server apps/server
-RUN pnpm --filter @devkit/server run build
+RUN pnpm --filter @devbelt/server run build
 
 FROM node:20-alpine
 WORKDIR /app

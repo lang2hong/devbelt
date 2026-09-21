@@ -70,7 +70,7 @@ export function buildMysqlPoolOptions(
   creds: MysqlCredentials,
   env: Record<string, string | undefined>,
 ): MysqlPoolOptions {
-  const raw = Number(env.MYSQL_POOL_SIZE);
+  const raw = Number(env.DEVBELT_DB_MYSQL_POOL_SIZE);
   // 非法值/0/负数一律回落：连接数为 0 的池永远借不出连接，比配置错误更难查
   const connectionLimit = Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_POOL_SIZE;
 
@@ -91,21 +91,21 @@ export function buildMysqlPoolOptions(
 /**
  * TLS 选项。
  *
- * 不配置任何 `MYSQL_SSL*` 时返回 undefined，保持明文连接（本地 docker / 回环）。
+ * 不配置任何 `DEVBELT_DB_MYSQL_SSL*` 时返回 undefined，保持明文连接（本地 docker / 回环）。
  * 一旦库在网络另一端（托管 RDS 等），明文链路上会经过：握手阶段的账号密码，
  * 以及 payload 里的 `password_hash`、各类 `token_hash`、E2E `ciphertext/nonce/tag`。
  *
  * 取值：
- * - `MYSQL_SSL=true|1`            启用 TLS（不带 CA 时依赖系统根证书）
- * - `MYSQL_SSL_CA`                CA 证书 PEM 内容；给出即隐含启用
- * - `MYSQL_SSL_CA_FILE`           CA 证书路径；给出即隐含启用
- * - `MYSQL_SSL_REJECT_UNAUTHORIZED=false` 关闭证书校验（**不防 MITM**，仅排查用）
- * - `MYSQL_SSL_SERVERNAME`        证书主机名与连接地址不一致时指定
+ * - `DEVBELT_DB_MYSQL_SSL=true|1`            启用 TLS（不带 CA 时依赖系统根证书）
+ * - `DEVBELT_DB_MYSQL_SSL_CA`                CA 证书 PEM 内容；给出即隐含启用
+ * - `DEVBELT_DB_MYSQL_SSL_CA_FILE`           CA 证书路径；给出即隐含启用
+ * - `DEVBELT_DB_MYSQL_SSL_REJECT_UNAUTHORIZED=false` 关闭证书校验（**不防 MITM**，仅排查用）
+ * - `DEVBELT_DB_MYSQL_SSL_SERVERNAME`        证书主机名与连接地址不一致时指定
  */
 function buildSslOptions(env: Record<string, string | undefined>): MysqlSslOptions | undefined {
-  const flag = (env.MYSQL_SSL ?? '').trim().toLowerCase();
-  const caInline = (env.MYSQL_SSL_CA ?? '').trim();
-  const caFile = (env.MYSQL_SSL_CA_FILE ?? '').trim();
+  const flag = (env.DEVBELT_DB_MYSQL_SSL ?? '').trim().toLowerCase();
+  const caInline = (env.DEVBELT_DB_MYSQL_SSL_CA ?? '').trim();
+  const caFile = (env.DEVBELT_DB_MYSQL_SSL_CA_FILE ?? '').trim();
   const enabled = flag === 'true' || flag === '1' || caInline !== '' || caFile !== '';
   if (!enabled) return undefined;
 
@@ -115,10 +115,10 @@ function buildSslOptions(env: Record<string, string | undefined>): MysqlSslOptio
     ca = readFileSync(caFile, 'utf8');
   }
 
-  const rejectRaw = (env.MYSQL_SSL_REJECT_UNAUTHORIZED ?? '').trim().toLowerCase();
+  const rejectRaw = (env.DEVBELT_DB_MYSQL_SSL_REJECT_UNAUTHORIZED ?? '').trim().toLowerCase();
   const rejectUnauthorized = !(rejectRaw === 'false' || rejectRaw === '0');
 
-  const servername = (env.MYSQL_SSL_SERVERNAME ?? '').trim() || undefined;
+  const servername = (env.DEVBELT_DB_MYSQL_SSL_SERVERNAME ?? '').trim() || undefined;
 
   return { ca, rejectUnauthorized, servername };
 }

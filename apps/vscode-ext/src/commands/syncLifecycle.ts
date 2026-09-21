@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { createHash } from 'crypto';
 import type { AuthService } from '../sync/authService';
-import type { SyncSessionFactory } from '@devkit/db-host/sync/sessionFactory';
+import type { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
 import { l10n } from '../i18n';
 
 /**

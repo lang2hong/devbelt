@@ -8,11 +8,11 @@ import { resolveTestDb, parseMysqlUrl } from './testDb.js';
 /**
  * 真实 MySQL（独立测试库）上的 db-core 方言行为验证。
  *
- * 表在测试库内临时创建，结束后 DROP。门禁：MYSQL_TEST_URL
- * （形如 mysql://user:pass@host:port，密码百分号编码；库名 dbclient_verify）。
+ * 表在测试库内临时创建，结束后 DROP。门禁：DEVBELT_DB_TEST_MYSQL_URL
+ * （形如 mysql://user:pass@host:port，密码百分号编码；库名 devbelt_db_verify）。
  * 未设置整体跳过，保证 CI 在无库机器通过。
  */
-const URL = process.env.MYSQL_TEST_URL;
+const URL = process.env.DEVBELT_DB_TEST_MYSQL_URL;
 
 
 const DB = URL ? resolveTestDb() : 'skipped';

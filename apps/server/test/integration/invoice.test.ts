@@ -13,7 +13,7 @@ import { AuditWriter } from '../../src/service/auditWriter.js';
 import type { MysqlDb } from '../../src/repository/mysql/db.js';
 import { withTransaction } from '../../src/repository/mysql/db.js';
 
-const URL = process.env.MYSQL_TEST_URL;
+const URL = process.env.DEVBELT_DB_TEST_MYSQL_URL;
 
 async function makeUser(db: MysqlDb): Promise<number> {
   const userRepo = new MysqlUserRepo(() => db);

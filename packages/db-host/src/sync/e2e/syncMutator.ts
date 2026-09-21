@@ -9,7 +9,7 @@ import { PendingMutationStore, type PendingDeleteMutation, type PendingPutMutati
 import { EntityStore, applyOrder, type EntityValue } from './entityStore.js';
 import { refKey, isOrgLocalId, type SyncEntityRef } from './syncEntity.js';
 import type { SavedConnection } from '../../connection/connectionStore.js';
-import type { SavedQuery } from '@devkit/db-core';
+import type { SavedQuery } from '@devbelt/db-core';
 
 /**
  * 本地实体变更 → 出站 mutation 生成（A4：全类型）。

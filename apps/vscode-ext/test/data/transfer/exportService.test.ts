@@ -265,7 +265,7 @@ describe('txt 导出（制表符分隔）', () => {
 
 describe('writeTableExport keyset 走真实方言（不 mock getKeysetSql）', () => {
   it('有主键时生成展开式标量比较 SQL（兼容 MySQL 复合主键）', async () => {
-    const { MysqlDialect } = await import('@devkit/db-core');
+    const { MysqlDialect } = await import('@devbelt/db-core');
     const executed: string[] = [];
     const pages: Array<Array<Record<string, unknown>>> = [[{ id: 1, name: 'a' }], [{ id: 2, name: 'b' }], []];
     const source = {

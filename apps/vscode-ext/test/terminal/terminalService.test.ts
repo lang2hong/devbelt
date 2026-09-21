@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('vscode', () => ({}));
 
 import { TerminalService } from '../../src/terminal/terminalService';
-import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
-import { DatabaseType } from '@devkit/db-core';
+import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
+import { DatabaseType } from '@devbelt/db-core';
 
 describe('TerminalService.buildCommand', () => {
   const base = { id: 'c1', name: 'c', host: 'localhost', port: 3306, user: 'root' } as unknown as SavedConnection;

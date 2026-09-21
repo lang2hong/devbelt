@@ -11,8 +11,8 @@ import vue from '@vitejs/plugin-vue';
 export default defineConfig({
   plugins: [vue()],
   // 部署基路径：默认 `/db/`（与 server 的挂载点一致，避免裸 `pnpm build` 产出与其它应用
-// 在 `/assets/` 冲突且 404）；可用 CONSOLE_BASE 覆盖。
-  base: process.env.CONSOLE_BASE || '/db/',
+// 在 `/assets/` 冲突且 404）；可用 DEVBELT_DB_CONSOLE_BASE 覆盖。
+  base: process.env.DEVBELT_DB_CONSOLE_BASE || '/db/',
   build: {
     rollupOptions: {
       input: {

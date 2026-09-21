@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { DialectRegistry, type DatabaseType } from '@devkit/db-core';
+import { DialectRegistry, type DatabaseType } from '@devbelt/db-core';
 import { DbTreeNode, NodeKind } from '../tree/dbTreeNode';
 import { wrapIdentForConn } from '../utils/sql';
 import { l10n } from '../i18n';

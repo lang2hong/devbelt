@@ -10,11 +10,11 @@ import {
   buildRecoverByAccountMaterial,
   newStateFromMaterial,
   type InitialSyncMaterial,
-} from '@devkit/db-host/sync/keyLifecycle';
-import { openEnvelope } from '@devkit/db-host/sync/envelope';
-import { deriveKekRecovery } from '@devkit/db-host/sync/crypto/recoveryCode';
-import { decodeBase64Url } from '@devkit/db-host/sync/crypto/recoveryCode';
-import { hkdfSha256, SYNC_INFO } from '@devkit/db-host/sync/crypto/hkdf';
+} from '@devbelt/db-host/sync/keyLifecycle';
+import { openEnvelope } from '@devbelt/db-host/sync/envelope';
+import { deriveKekRecovery } from '@devbelt/db-host/sync/crypto/recoveryCode';
+import { decodeBase64Url } from '@devbelt/db-host/sync/crypto/recoveryCode';
+import { hkdfSha256, SYNC_INFO } from '@devbelt/db-host/sync/crypto/hkdf';
 
 const workerBuilt = existsSync(join(__dirname, '../../out/argon2Worker.js'));
 const itWorker = workerBuilt ? it : it.skip;

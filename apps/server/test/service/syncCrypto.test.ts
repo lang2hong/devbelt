@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { generateKeyPairSync, sign as nodeSign } from 'crypto';
 import { parseU64, isU64, incU64, U64_MAX } from '../../src/domain/syncU64.js';
 import { jcs, requestDigestOf, verifyEd25519, decodeB64Url, decodeB64UrlRange, sha256 } from '../../src/modules/db/service/syncCrypto.js';
-import { JCS_VECTORS, NORMALIZED_JCS_VECTORS, INVALID_JCS_VALUES } from '@devkit/db-core/testing';
-import { SYNC_SIGN_TEST_VECTOR } from '@devkit/db-core/testing';
+import { JCS_VECTORS, NORMALIZED_JCS_VECTORS, INVALID_JCS_VALUES } from '@devbelt/db-core/testing';
+import { SYNC_SIGN_TEST_VECTOR } from '@devbelt/db-core/testing';
 
 describe('syncU64', () => {
   it('parses and rejects boundaries correctly', () => {

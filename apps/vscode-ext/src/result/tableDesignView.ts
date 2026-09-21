@@ -1,10 +1,10 @@
-import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
+import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from './baseWebView';
-import { DialectRegistry, validateIdent } from '@devkit/db-core';
-import type { ColumnSpec } from '@devkit/db-core';
-import { validateColumnType } from '@devkit/db-core';
-import { DataChangeEvent, eventBus } from '@devkit/db-host/utils/event';
+import { DialectRegistry, validateIdent } from '@devbelt/db-core';
+import type { ColumnSpec } from '@devbelt/db-core';
+import { validateColumnType } from '@devbelt/db-core';
+import { DataChangeEvent, eventBus } from '@devbelt/db-host/utils/event';
 import { AuditLogger } from '../utils/auditLogger';
 import { confirmSqlExecution } from '../utils/sqlSafety';
 import { l10n } from '../i18n';

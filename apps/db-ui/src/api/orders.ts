@@ -1,6 +1,6 @@
-import { getAccessToken } from '@devkit/auth-client';
-import { authedFetch, type FetchLike } from '@devkit/auth-client';
-import { readServerError } from '@devkit/auth-client';
+import { getAccessToken } from '@devbelt/auth-client';
+import { authedFetch, type FetchLike } from '@devbelt/auth-client';
+import { readServerError } from '@devbelt/auth-client';
 
 /**
  * 支付订单 API 客户端（P4 切片 3）。只读（列表/详情）；下单（POST）受支付网关

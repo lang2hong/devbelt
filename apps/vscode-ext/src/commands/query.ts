@@ -144,7 +144,7 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
    * 连接也已经建立了。
    */
   sub('devbelt.updateCell', async (args: {
-    conn: import('@devkit/db-host/connection/connectionStore').SavedConnection;
+    conn: import('@devbelt/db-host/connection/connectionStore').SavedConnection;
     table: string; pkColumns: string[]; pkValues: any[]; column: string; value: any;
   }) => {
     try {

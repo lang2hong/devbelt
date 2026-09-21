@@ -10,9 +10,9 @@ import { resolveTestDb, parseMysqlUrl } from './testDb.js';
  *  - 二进制列往返不损坏（mock 只能证明返回了 Buffer，不能证明字节没被驱动改过）
  *  - 取消查询走 KILL QUERY 之后连接**仍然可用**（这是修复的全部意义）
  *
- * 门禁：MYSQL_TEST_URL。
+ * 门禁：DEVBELT_DB_TEST_MYSQL_URL。
  */
-const URL = process.env.MYSQL_TEST_URL;
+const URL = process.env.DEVBELT_DB_TEST_MYSQL_URL;
 const DB = URL ? resolveTestDb() : 'skipped';
 
 

@@ -15,7 +15,7 @@ import {
   type Member,
   type Invitation,
 } from '../api/organizations';
-import { ensureCsrf, setAccessToken } from '@devkit/auth-client';
+import { ensureCsrf, setAccessToken } from '@devbelt/auth-client';
 import { navigate, withBase } from '../lib/router';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { formatDateTime } from '../lib/formatTime';

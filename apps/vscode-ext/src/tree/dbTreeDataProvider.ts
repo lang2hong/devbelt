@@ -1,6 +1,6 @@
 import { Event, EventEmitter, TreeDataProvider, TreeItem, TreeItemCollapsibleState, ThemeIcon, ThemeColor, window } from 'vscode';
-import { DatabaseType, DialectRegistry } from '@devkit/db-core';
-import { ConnectionStore, type SavedConnection } from '@devkit/db-host/connection/connectionStore';
+import { DatabaseType, DialectRegistry } from '@devbelt/db-core';
+import { ConnectionStore, type SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { ConnectionPathOverrideStore } from '../connection/connectionPathOverrideStore';
 import { validateConnectionPaths, type PathValidationResult, type PathValidationIssue } from '../connection/connectionPathValidator';

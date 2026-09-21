@@ -1,5 +1,5 @@
 import type { ThenableLike } from '../hostTypes.js';
-import type { SavedQuery } from '@devkit/db-core';
+import type { SavedQuery } from '@devbelt/db-core';
 import { mergeById } from '../utils/merge.js';
 import { uniqueId } from '../utils/id.js';
 import { EventEmitter, type Event } from '../utils/event.js';

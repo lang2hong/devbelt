@@ -1,9 +1,9 @@
-import { ConnectionFactory, QueryService, MetadataService, DataService, TableService, DialectRegistry } from '@devkit/db-core';
-import type { DatabaseType } from '@devkit/db-core';
-import type { DatabaseCapabilities } from '@devkit/db-core';
-import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
+import { ConnectionFactory, QueryService, MetadataService, DataService, TableService, DialectRegistry } from '@devbelt/db-core';
+import type { DatabaseType } from '@devbelt/db-core';
+import type { DatabaseCapabilities } from '@devbelt/db-core';
+import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import type { HistoryStore } from '../history/historyStore';
-import { parseNoBackslashEscapes, parseStandardConformingStringsOff, type SqlScanOptions } from '@devkit/db-core/sql';
+import { parseNoBackslashEscapes, parseStandardConformingStringsOff, type SqlScanOptions } from '@devbelt/db-core/sql';
 import { dialectScanOptions } from '../utils/sqlDialectOptions';
 import { QueryHistoryRecorder } from '../history/queryHistoryRecorder';
 import { SshTunnel } from './sshTunnel';

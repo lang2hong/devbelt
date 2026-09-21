@@ -1,5 +1,5 @@
-import { DataDiffService, type DataDiffResult } from '@devkit/db-core';
-import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
+import { DataDiffService, type DataDiffResult } from '@devbelt/db-core';
+import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from './baseWebView';
 import { confirmSqlExecution } from '../utils/sqlSafety';

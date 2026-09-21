@@ -1,7 +1,7 @@
 {
-  "name": "@devkit/auth-client",
+  "name": "@devbelt/auth-client",
   "version": "0.1.0",
-  "description": "Browser-side identity/session client shared by devkit web apps (auth-ui, db-ui, admin-ui)",
+  "description": "Browser-side identity/session client shared by devbelt web apps (auth-ui, db-ui, admin-ui)",
   "private": true,
   "license": "MIT",
   "type": "module",

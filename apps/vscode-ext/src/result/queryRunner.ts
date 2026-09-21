@@ -1,8 +1,8 @@
-import { DatabaseType, validateIdent } from '@devkit/db-core';
-import type { QueryCancelToken } from '@devkit/db-core';
-import { sqlSkeleton } from '@devkit/db-core/sql';
+import { DatabaseType, validateIdent } from '@devbelt/db-core';
+import type { QueryCancelToken } from '@devbelt/db-core';
+import { sqlSkeleton } from '@devbelt/db-core/sql';
 import type { ConnectionManager } from '../connection/connectionManager';
-import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
+import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { splitSqlStatements } from '../utils/sql';
 import { confirmSqlExecution } from '../utils/sqlSafety';
 import { classifyWriteKind } from '../utils/sqlRisk';

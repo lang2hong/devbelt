@@ -1,8 +1,8 @@
 {
-  "name": "devkit",
+  "name": "devbelt",
   "version": "0.1.0",
   "private": true,
-  "description": "devkit — unified developer toolkit monorepo (VS Code DB client, web console, server)",
+  "description": "devbelt — unified developer toolkit monorepo (VS Code DB client, web console, server)",
   "license": "MIT",
   "engines": {
     "node": ">=20"

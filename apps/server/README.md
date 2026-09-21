@@ -1,4 +1,4 @@
-# @devkit/server
+# @devbelt/server
 
 Fastify + MySQL 8 服务，负责身份、个人权益、设备、组织、资源和个人同步协议。
 
@@ -27,14 +27,14 @@ Fastify + MySQL 8 服务，负责身份、个人权益、设备、组织、资�
 
 | 变量 | 必填 | 用途 |
 |---|---|---|
-| `MYSQL_PASSWORD` | 是 | MySQL 密码 |
-| `TOKEN_SIGNING_KEY_B64` | 是 | 当前 token 签名私钥 |
-| `TOKEN_VERIFY_KEYS_JSON` | 是 | 按 key ID 提供的验签公钥 |
-| `TOKEN_SIGNING_KID` | 否 | 当前签名 key ID |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | 否 | 邮件投递 |
-| `ACCESS_TOKEN_EXPIRES_IN`, `REFRESH_TOKEN_EXPIRES_IN` | 否 | token 有效期 |
-| `TRUST_PROXY` | 否 | 受信任代理 |
-| `RATE_LIMIT_ENABLED` | 否 | 限流开关 |
+| `DEVBELT_DB_MYSQL_PASSWORD` | 是 | MySQL 密码 |
+| `DEVBELT_DB_TOKEN_SIGNING_KEY_B64` | 是 | 当前 token 签名私钥 |
+| `DEVBELT_DB_TOKEN_VERIFY_KEYS_JSON` | 是 | 按 key ID 提供的验签公钥 |
+| `DEVBELT_DB_TOKEN_SIGNING_KID` | 否 | 当前签名 key ID |
+| `DEVBELT_DB_SMTP_HOST`, `DEVBELT_DB_SMTP_PORT`, `DEVBELT_DB_SMTP_USER`, `DEVBELT_DB_SMTP_PASS`, `DEVBELT_DB_SMTP_FROM` | 否 | 邮件投递 |
+| `DEVBELT_DB_ACCESS_TOKEN_EXPIRES_IN`, `DEVBELT_DB_REFRESH_TOKEN_EXPIRES_IN` | 否 | token 有效期 |
+| `DEVBELT_DB_TRUST_PROXY` | 否 | 受信任代理 |
+| `DEVBELT_DB_RATE_LIMIT_ENABLED` | 否 | 限流开关 |
 
 ## 验证
 
@@ -44,4 +44,4 @@ pnpm -C apps/server test
 pnpm -C apps/server build
 ```
 
-集成测试需要真实 MySQL 8，并通过 `MYSQL_TEST_URL` 指向名称包含 `test` 或 `verify` 的专用数据库。
+集成测试需要真实 MySQL 8，并通过 `DEVBELT_DB_TEST_MYSQL_URL` 指向名称包含 `test` 或 `verify` 的专用数据库。

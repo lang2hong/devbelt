@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
+import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 
 /** 由 mock 的 FakeConnection.connect 注入，模拟"建连尚未完成"。 */
 let resolveConnect: (() => void) | undefined;
@@ -16,8 +16,8 @@ vi.mock('../../src/connection/sshTunnel', () => ({
   },
 }));
 
-vi.mock('@devkit/db-core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@devkit/db-core')>();
+vi.mock('@devbelt/db-core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@devbelt/db-core')>();
   class FakeConnection {
     connect(cb: (err: unknown) => void): void {
       const resolve = () => cb(null);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DatabaseType } from '@devkit/db-core';
+import { DatabaseType } from '@devbelt/db-core';
 import { escapeSqlString, statementTextAt, streamSqlStatements, wrapIdent } from '../../src/utils/sql';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,7 +7,7 @@ import { join } from 'node:path';
 
 /**
  * 本包只保留 vscode 特有的标识符/字面量转义。
- * 语句切分已下沉 `@devkit/db-core/sql`，其行为由 db-core 的
+ * 语句切分已下沉 `@devbelt/db-core/sql`，其行为由 db-core 的
  * `test/sql/split.test.ts` 与本包的 `test/utils/sqlContract.test.ts` 覆盖。
  */
 describe('wrapIdent', () => {
@@ -87,7 +87,7 @@ describe('streamSqlStatements', () => {
   it('小块读取时 MySQL DELIMITER 例程切分与全量一致（DELIMITER 不当成美元引用）', async () => {
     // 注意：DELIMITER 与 PG 美元引用不能混写——切分器按「出现 DELIMITER」判定为
     // MySQL 语义并关闭美元引用识别（真实 dump 按方言二选一，见 split.ts 注释）。
-    const { splitSqlWithRanges } = await import('@devkit/db-core/sql');
+    const { splitSqlWithRanges } = await import('@devbelt/db-core/sql');
     const sql = [
       'INSERT INTO t VALUES (1);',
       'INSERT INTO t VALUES (2);',
@@ -129,7 +129,7 @@ describe('streamSqlStatements', () => {
   });
 
   it('与全量 splitSqlWithRanges 输出一致（多块尺寸 / 注释 / 引号 / CRLF / 未闭合）', async () => {
-    const { splitSqlWithRanges } = await import('@devkit/db-core/sql');
+    const { splitSqlWithRanges } = await import('@devbelt/db-core/sql');
     const samples = [
       "INSERT INTO t VALUES (1);\nINSERT INTO t VALUES (';not a split');\n",
       '-- leading comment\nSELECT 1;\n/* block ; comment */ SELECT 2;\n',
@@ -159,7 +159,7 @@ describe('streamSqlStatements', () => {
   });
 
   it('MySQL 反斜杠转义下与全量一致（跨块转义/引号）', async () => {
-    const { splitSqlWithRanges } = await import('@devkit/db-core/sql');
+    const { splitSqlWithRanges } = await import('@devbelt/db-core/sql');
     const sql = "SELECT 'a\\\\b'; SELECT 'c\\'d';";
     const opts = { backslashEscapes: true };
     const file = write(sql);
@@ -175,7 +175,7 @@ describe('streamSqlStatements', () => {
   });
 
   it('PG E 串跨块与全量一致（含 E 与引号被块边界分开）', async () => {
-    const { splitSqlWithRanges } = await import('@devkit/db-core/sql');
+    const { splitSqlWithRanges } = await import('@devbelt/db-core/sql');
     const sql = String.raw`SELECT E'\''; DELETE FROM t`;
     const opts = { escapeStringPrefix: true };
     const file = write(sql);

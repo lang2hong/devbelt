@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { withBase } from '../lib/router';
 import { queryAudit, exportAudit, type AdminAuditEvent } from '../api/admin';
-import { ensureCsrf, setAccessToken } from '@devkit/auth-client';
+import { ensureCsrf, setAccessToken } from '@devbelt/auth-client';
 import { useIdempotencyKey } from '../lib/idempotentWrite';
 import { formatDateTime } from '../lib/formatTime';
 import { toFromIso, toInclusiveEndIso } from '../lib/dateRange';

@@ -1,6 +1,6 @@
-import { getAccessToken } from '@devkit/auth-client';
-import { authedFetch, type FetchLike } from '@devkit/auth-client';
-import { readServerError } from '@devkit/auth-client';
+import { getAccessToken } from '@devbelt/auth-client';
+import { authedFetch, type FetchLike } from '@devbelt/auth-client';
+import { readServerError } from '@devbelt/auth-client';
 
 /**
  * 平台运营 API 客户端（P3 §6，切片 4）。只向 platform_admin 开放；写请求带

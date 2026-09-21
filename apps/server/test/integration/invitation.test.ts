@@ -19,7 +19,7 @@ import { TokenService } from '../../src/service/tokenService.js';
 import { MemoryEmailSender } from '../../src/modules/auth/service/emailSender.js';
 import { InvitationInvalidError, OrganizationQuotaExceededError, EntityNotFoundError } from '../../src/domain/errors.js';
 
-const URL = process.env.MYSQL_TEST_URL;
+const URL = process.env.DEVBELT_DB_TEST_MYSQL_URL;
 
 function uniqueEmail(prefix = 'inv'): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`;

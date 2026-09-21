@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { EventEmitter } from '@devkit/db-host/utils/event';
-import { SyncCoordinator } from '@devkit/db-host/sync/e2e/syncCoordinator';
-import type { SyncEngine } from '@devkit/db-host/sync/e2e/syncEngine';
-import type { SyncMutator } from '@devkit/db-host/sync/e2e/syncMutator';
-import type { ConnectionStore } from '@devkit/db-host/connection/connectionStore';
+import { EventEmitter } from '@devbelt/db-host/utils/event';
+import { SyncCoordinator } from '@devbelt/db-host/sync/e2e/syncCoordinator';
+import type { SyncEngine } from '@devbelt/db-host/sync/e2e/syncEngine';
+import type { SyncMutator } from '@devbelt/db-host/sync/e2e/syncMutator';
+import type { ConnectionStore } from '@devbelt/db-host/connection/connectionStore';
 
 describe('SyncCoordinator', () => {
   afterEach(() => {

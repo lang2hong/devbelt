@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { withBase } from '../lib/router';
-import { ensureCsrf } from '@devkit/auth-client';
+import { ensureCsrf } from '@devbelt/auth-client';
 import { createOrder, getOrder, type PayParams } from '../api/orders';
 import QRCode from 'qrcode';
 import { formatDateTime } from '../lib/formatTime';

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { deriveSyncStatus } from '@devkit/db-host/sync/syncStatus';
-import type { SyncRunResult } from '@devkit/db-host/sync/e2e/syncEngine';
+import { deriveSyncStatus } from '@devbelt/db-host/sync/syncStatus';
+import type { SyncRunResult } from '@devbelt/db-host/sync/e2e/syncEngine';
 
 function run(stage: SyncRunResult['stage']): SyncRunResult {
   return { stage, conflicts: [], applied: 0 };

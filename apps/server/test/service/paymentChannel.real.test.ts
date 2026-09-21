@@ -31,23 +31,23 @@ const CALLBACK_BASE = 'https://pay.example.com';
 function wechatEnv(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
   const mk = rsaKeyPair();
   return {
-    PAYMENT_CALLBACK_BASE_URL: CALLBACK_BASE,
-    WECHAT_MCH_ID: 'mch',
-    WECHAT_APP_ID: 'app',
-    WECHAT_MERCHANT_CERT_SERIAL: 'ABCDEF1234567890',
-    WECHAT_PLATFORM_CERT_SERIAL: 'FEDCBA0987654321',
-    WECHAT_PRIVATE_KEY_B64: b64(rsaPemOf(mk, 'private')),
-    WECHAT_PLATFORM_CERT_B64: b64(rsaPemOf(mk, 'public')),
-    WECHAT_API_V3_KEY: '0123456789abcdef0123456789abcdef', // exactly 32 bytes
+    DEVBELT_DB_PAYMENT_CALLBACK_BASE_URL: CALLBACK_BASE,
+    DEVBELT_DB_WECHAT_MCH_ID: 'mch',
+    DEVBELT_DB_WECHAT_APP_ID: 'app',
+    DEVBELT_DB_WECHAT_MERCHANT_CERT_SERIAL: 'ABCDEF1234567890',
+    DEVBELT_DB_WECHAT_PLATFORM_CERT_SERIAL: 'FEDCBA0987654321',
+    DEVBELT_DB_WECHAT_PRIVATE_KEY_B64: b64(rsaPemOf(mk, 'private')),
+    DEVBELT_DB_WECHAT_PLATFORM_CERT_B64: b64(rsaPemOf(mk, 'public')),
+    DEVBELT_DB_WECHAT_API_V3_KEY: '0123456789abcdef0123456789abcdef', // exactly 32 bytes
     ...overrides,
   };
 }
 
 describe('payment callback base URL validation', () => {
   it('accepts a bare HTTPS origin and rejects http/path/empty', () => {
-    expect(resolvePaymentCallbackBaseUrl({ PAYMENT_CALLBACK_BASE_URL: 'https://pay.example.com' })).toBe('https://pay.example.com');
-    expect(resolvePaymentCallbackBaseUrl({ PAYMENT_CALLBACK_BASE_URL: 'http://pay.example.com' })).toBeUndefined();
-    expect(resolvePaymentCallbackBaseUrl({ PAYMENT_CALLBACK_BASE_URL: 'https://pay.example.com/sub' })).toBeUndefined();
+    expect(resolvePaymentCallbackBaseUrl({ DEVBELT_DB_PAYMENT_CALLBACK_BASE_URL: 'https://pay.example.com' })).toBe('https://pay.example.com');
+    expect(resolvePaymentCallbackBaseUrl({ DEVBELT_DB_PAYMENT_CALLBACK_BASE_URL: 'http://pay.example.com' })).toBeUndefined();
+    expect(resolvePaymentCallbackBaseUrl({ DEVBELT_DB_PAYMENT_CALLBACK_BASE_URL: 'https://pay.example.com/sub' })).toBeUndefined();
     expect(resolvePaymentCallbackBaseUrl({})).toBeUndefined();
   });
 });
@@ -55,29 +55,29 @@ describe('payment callback base URL validation', () => {
 describe('payment credentials fail-closed', () => {
   it('returns undefined when wechat credentials are incomplete', () => {
     expect(resolveWechatCredentials({})).toBeUndefined();
-    expect(resolveWechatCredentials({ WECHAT_MCH_ID: '1' })).toBeUndefined();
+    expect(resolveWechatCredentials({ DEVBELT_DB_WECHAT_MCH_ID: '1' })).toBeUndefined();
   });
 
   it('requires the callback base URL (empty notify_url → unconfigured)', () => {
     const env = wechatEnv();
-    delete env.PAYMENT_CALLBACK_BASE_URL;
+    delete env.DEVBELT_DB_PAYMENT_CALLBACK_BASE_URL;
     expect(resolveWechatCredentials(env)).toBeUndefined();
   });
 
   it('requires a valid merchant cert serial (empty/invalid → unconfigured)', () => {
-    expect(resolveWechatCredentials(wechatEnv({ WECHAT_MERCHANT_CERT_SERIAL: '' }))).toBeUndefined();
-    expect(resolveWechatCredentials(wechatEnv({ WECHAT_MERCHANT_CERT_SERIAL: 'not-hex!!!' }))).toBeUndefined();
+    expect(resolveWechatCredentials(wechatEnv({ DEVBELT_DB_WECHAT_MERCHANT_CERT_SERIAL: '' }))).toBeUndefined();
+    expect(resolveWechatCredentials(wechatEnv({ DEVBELT_DB_WECHAT_MERCHANT_CERT_SERIAL: 'not-hex!!!' }))).toBeUndefined();
   });
 
   it('requires exactly 32-byte API v3 key (short/long rejected, exact accepted)', () => {
-    expect(resolveWechatCredentials(wechatEnv({ WECHAT_API_V3_KEY: 'short' }))).toBeUndefined();
-    expect(resolveWechatCredentials(wechatEnv({ WECHAT_API_V3_KEY: 'x'.repeat(64) }))).toBeUndefined();
-    expect(resolveWechatCredentials(wechatEnv({ WECHAT_API_V3_KEY: 'a'.repeat(32) }))).toBeDefined();
+    expect(resolveWechatCredentials(wechatEnv({ DEVBELT_DB_WECHAT_API_V3_KEY: 'short' }))).toBeUndefined();
+    expect(resolveWechatCredentials(wechatEnv({ DEVBELT_DB_WECHAT_API_V3_KEY: 'x'.repeat(64) }))).toBeUndefined();
+    expect(resolveWechatCredentials(wechatEnv({ DEVBELT_DB_WECHAT_API_V3_KEY: 'a'.repeat(32) }))).toBeDefined();
   });
 
   it('returns undefined when alipay credentials are incomplete', () => {
     expect(resolveAlipayCredentials({})).toBeUndefined();
-    expect(resolveAlipayCredentials({ ALIPAY_APP_ID: '1' })).toBeUndefined();
+    expect(resolveAlipayCredentials({ DEVBELT_DB_ALIPAY_APP_ID: '1' })).toBeUndefined();
   });
 
   it('resolveConfiguredChannels reports only configured channels', () => {
@@ -93,18 +93,18 @@ describe('payment credentials fail-closed', () => {
     expect(() => resolvePaymentGateway('alipay', {})).toThrow(/not configured/);
   });
 
-  it('paymentRoutesEnabled: credentials alone do not enable; explicit FEATURE_PAYMENT=true is required', () => {
+  it('paymentRoutesEnabled: credentials alone do not enable; explicit DEVBELT_DB_FEATURE_PAYMENT=true is required', () => {
     const env = wechatEnv();
     // 凭据齐全但缺显式开关 → 不启用（默认关闭 opt-in）。
     expect(paymentRoutesEnabled(env)).toBe(false);
     // 无凭据即使显式开 → 不启用。
-    expect(paymentRoutesEnabled({ FEATURE_PAYMENT: 'true' })).toBe(false);
+    expect(paymentRoutesEnabled({ DEVBELT_DB_FEATURE_PAYMENT: 'true' })).toBe(false);
     // 凭据齐全 + 显式 true/1/on → 启用。
-    expect(paymentRoutesEnabled({ ...env, FEATURE_PAYMENT: 'true' })).toBe(true);
-    expect(paymentRoutesEnabled({ ...env, FEATURE_PAYMENT: '1' })).toBe(true);
-    expect(paymentRoutesEnabled({ ...env, FEATURE_PAYMENT: 'on' })).toBe(true);
+    expect(paymentRoutesEnabled({ ...env, DEVBELT_DB_FEATURE_PAYMENT: 'true' })).toBe(true);
+    expect(paymentRoutesEnabled({ ...env, DEVBELT_DB_FEATURE_PAYMENT: '1' })).toBe(true);
+    expect(paymentRoutesEnabled({ ...env, DEVBELT_DB_FEATURE_PAYMENT: 'on' })).toBe(true);
     // 显式 false/0/off → 不启用。
-    expect(paymentRoutesEnabled({ ...env, FEATURE_PAYMENT: 'false' })).toBe(false);
+    expect(paymentRoutesEnabled({ ...env, DEVBELT_DB_FEATURE_PAYMENT: 'false' })).toBe(false);
   });
 });
 
@@ -182,8 +182,8 @@ describe('WechatPayGateway', () => {
   it('verifies a signature and enforces timestamp freshness', async () => {
     const mk = rsaKeyPair();
     const cred = resolveWechatCredentials(wechatEnv({
-      WECHAT_PRIVATE_KEY_B64: b64(rsaPemOf(mk, 'private')),
-      WECHAT_PLATFORM_CERT_B64: b64(rsaPemOf(mk, 'public')),
+      DEVBELT_DB_WECHAT_PRIVATE_KEY_B64: b64(rsaPemOf(mk, 'private')),
+      DEVBELT_DB_WECHAT_PLATFORM_CERT_B64: b64(rsaPemOf(mk, 'public')),
     }))!;
     const g = new WechatPayGateway(cred, async () => { throw new Error('no http'); });
 
@@ -213,8 +213,8 @@ describe('WechatPayGateway', () => {
   it('rejects a callback whose wechatpay-serial does not match the configured platform cert', async () => {
     const mk = rsaKeyPair();
     const cred = resolveWechatCredentials(wechatEnv({
-      WECHAT_PRIVATE_KEY_B64: b64(rsaPemOf(mk, 'private')),
-      WECHAT_PLATFORM_CERT_B64: b64(rsaPemOf(mk, 'public')),
+      DEVBELT_DB_WECHAT_PRIVATE_KEY_B64: b64(rsaPemOf(mk, 'private')),
+      DEVBELT_DB_WECHAT_PLATFORM_CERT_B64: b64(rsaPemOf(mk, 'public')),
     }))!;
     const g = new WechatPayGateway(cred, async () => { throw new Error('no http'); });
     const { createSign } = await import('crypto');
@@ -234,8 +234,8 @@ describe('WechatPayGateway', () => {
   it('signs the canonical v3 path (not the absolute URL)', async () => {
     const mk = rsaKeyPair();
     const cred = resolveWechatCredentials(wechatEnv({
-      WECHAT_PRIVATE_KEY_B64: b64(rsaPemOf(mk, 'private')),
-      WECHAT_PLATFORM_CERT_B64: b64(rsaPemOf(mk, 'public')),
+      DEVBELT_DB_WECHAT_PRIVATE_KEY_B64: b64(rsaPemOf(mk, 'private')),
+      DEVBELT_DB_WECHAT_PLATFORM_CERT_B64: b64(rsaPemOf(mk, 'public')),
     }))!;
     let capturedBody = '';
     let capturedAuth = '';
@@ -336,10 +336,10 @@ describe('AlipayGateway', () => {
     const alipay = rsaKeyPair();
     return {
       env: {
-        PAYMENT_CALLBACK_BASE_URL: CALLBACK_BASE,
-        ALIPAY_APP_ID: 'app',
-        ALIPAY_PRIVATE_KEY_B64: b64(rsaPemOf(app, 'private')),
-        ALIPAY_PUBLIC_KEY_B64: b64(rsaPemOf(alipay, 'public')),
+        DEVBELT_DB_PAYMENT_CALLBACK_BASE_URL: CALLBACK_BASE,
+        DEVBELT_DB_ALIPAY_APP_ID: 'app',
+        DEVBELT_DB_ALIPAY_PRIVATE_KEY_B64: b64(rsaPemOf(app, 'private')),
+        DEVBELT_DB_ALIPAY_PUBLIC_KEY_B64: b64(rsaPemOf(alipay, 'public')),
       } as NodeJS.ProcessEnv,
       app,
       alipay,
@@ -554,10 +554,10 @@ describe('AlipayGateway precreate (扫码)', () => {
     const app = rsaKeyPair();
     const alipay = rsaKeyPair();
     const env = {
-      PAYMENT_CALLBACK_BASE_URL: CALLBACK_BASE,
-      ALIPAY_APP_ID: 'app',
-      ALIPAY_PRIVATE_KEY_B64: b64(rsaPemOf(app, 'private')),
-      ALIPAY_PUBLIC_KEY_B64: b64(rsaPemOf(alipay, 'public')),
+      DEVBELT_DB_PAYMENT_CALLBACK_BASE_URL: CALLBACK_BASE,
+      DEVBELT_DB_ALIPAY_APP_ID: 'app',
+      DEVBELT_DB_ALIPAY_PRIVATE_KEY_B64: b64(rsaPemOf(app, 'private')),
+      DEVBELT_DB_ALIPAY_PUBLIC_KEY_B64: b64(rsaPemOf(alipay, 'public')),
     } as NodeJS.ProcessEnv;
     return { cred: resolveAlipayCredentials(env)!, alipay };
   }

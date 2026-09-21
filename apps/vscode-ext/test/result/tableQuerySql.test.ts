@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DatabaseType } from '@devkit/db-core';
+import { DatabaseType } from '@devbelt/db-core';
 import { buildCountSql, buildTableSelect, buildCondition } from '../../src/result/tableQuerySql';
 import type { FilterCondition } from '../../src/result/tableQuerySql';
 

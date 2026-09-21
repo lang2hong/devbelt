@@ -1,15 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
-import { sealRecord } from '@devkit/db-host/sync/e2e/recordCodec';
-import { DeferredRecordStore } from '@devkit/db-host/sync/e2e/deferredRecordStore';
-import { SyncEngine } from '@devkit/db-host/sync/e2e/syncEngine';
-import { SyncApiError, type PersonalSyncClient } from '@devkit/db-host/sync/e2e/client';
-import { RecordMapStore } from '@devkit/db-host/sync/e2e/recordMapStore';
-import { PendingMutationStore, type PendingDeleteMutation, type PendingPutMutation } from '@devkit/db-host/sync/e2e/pendingMutationStore';
-import type { SyncStateSnapshot } from '@devkit/db-host/sync/e2e/stateStore';
-import { EntityStore, UnresolvedRefStore } from '@devkit/db-host/sync/e2e/entityStore';
-import { SyncMutator } from '@devkit/db-host/sync/e2e/syncMutator';
-import type { SavedConnection, ConnectionStore } from '@devkit/db-host/connection/connectionStore';
-import type { StateDto } from '@devkit/db-host/sync/e2e/types';
+import { sealRecord } from '@devbelt/db-host/sync/e2e/recordCodec';
+import { DeferredRecordStore } from '@devbelt/db-host/sync/e2e/deferredRecordStore';
+import { SyncEngine } from '@devbelt/db-host/sync/e2e/syncEngine';
+import { SyncApiError, type PersonalSyncClient } from '@devbelt/db-host/sync/e2e/client';
+import { RecordMapStore } from '@devbelt/db-host/sync/e2e/recordMapStore';
+import { PendingMutationStore, type PendingDeleteMutation, type PendingPutMutation } from '@devbelt/db-host/sync/e2e/pendingMutationStore';
+import type { SyncStateSnapshot } from '@devbelt/db-host/sync/e2e/stateStore';
+import { EntityStore, UnresolvedRefStore } from '@devbelt/db-host/sync/e2e/entityStore';
+import { SyncMutator } from '@devbelt/db-host/sync/e2e/syncMutator';
+import type { SavedConnection, ConnectionStore } from '@devbelt/db-host/connection/connectionStore';
+import type { StateDto } from '@devbelt/db-host/sync/e2e/types';
 
 function makeMemento() {
   const m = new Map<string, unknown>();

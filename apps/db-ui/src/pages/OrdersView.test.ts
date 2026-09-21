@@ -7,13 +7,13 @@ vi.mock('../api/orders', () => ({
   getOrder: vi.fn(),
 }));
 
-vi.mock('@devkit/auth-client', async (importOriginal) => ({
+vi.mock('@devbelt/auth-client', async (importOriginal) => ({
   ...(await importOriginal()),
   setAccessToken: vi.fn(),
 }));
 
 import { listOrders, type ConsoleOrder } from '../api/orders';
-import { setAccessToken } from '@devkit/auth-client';
+import { setAccessToken } from '@devbelt/auth-client';
 
 beforeEach(() => {
   vi.mocked(listOrders).mockReset();

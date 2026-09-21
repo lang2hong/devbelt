@@ -10,6 +10,5 @@ apps/server/public/
 .env.local
 .env.production
 *.vsix
-devkit-connections.json
-docs/archive/
-.db-hostd/
+devbelt-db-connections.json
+.devbelt-db-hostd/

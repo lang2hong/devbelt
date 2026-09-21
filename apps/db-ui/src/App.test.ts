@@ -2,7 +2,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 
-vi.mock('@devkit/auth-client', async (importOriginal) => ({
+vi.mock('@devbelt/auth-client', async (importOriginal) => ({
   ...(await importOriginal()),
   refreshSession: vi.fn(async () => ({ kind: 'ok' })),
   getAccessToken: vi.fn(() => 'tok'),
@@ -15,7 +15,7 @@ vi.mock('./api/me', () => ({
 }));
 
 import { me } from './api/me';
-import { logout } from '@devkit/auth-client';
+import { logout } from '@devbelt/auth-client';
 import App from './App.vue';
 
 function consoleMe(platformAdmin: boolean) {

@@ -12,17 +12,17 @@ const PUBLIC_CSP =
 
 /** 身份页（auth-ui）dist：站点根，`/login`、`/register`、`/verify-email`、`/accept-invitation`。 */
 function authDistDir(): string {
-  return process.env.AUTH_DIST_DIR || path.resolve(process.cwd(), '../auth-ui/dist');
+  return process.env.DEVBELT_DB_AUTH_DIST_DIR || path.resolve(process.cwd(), '../auth-ui/dist');
 }
 
 /** DB 控制台（db-ui）dist：`/db/` 下的 SPA 与 `/db/sync-reset`。 */
 function consoleDistDir(): string {
-  return process.env.CONSOLE_DIST_DIR || path.resolve(process.cwd(), '../db-ui/dist');
+  return process.env.DEVBELT_DB_CONSOLE_DIST_DIR || path.resolve(process.cwd(), '../db-ui/dist');
 }
 
 /** 平台后台（admin-ui）dist：`/admin/` 下的 SPA。 */
 function adminDistDir(): string {
-  return process.env.ADMIN_DIST_DIR || path.resolve(process.cwd(), '../admin-ui/dist');
+  return process.env.DEVBELT_DB_ADMIN_DIST_DIR || path.resolve(process.cwd(), '../admin-ui/dist');
 }
 
 function notFound(_req: FastifyRequest, reply: FastifyReply): void {

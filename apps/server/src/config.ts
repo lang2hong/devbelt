@@ -13,7 +13,7 @@ function parseOff(raw: string | undefined): boolean {
 }
 
 /**
- * 解析 `TRUST_PROXY`。取值语义见 docs/开发指南.md；`true` 被显式拒绝（左段
+ * 解析 `DEVBELT_DB_TRUST_PROXY`。取值语义见 docs/开发指南.md；`true` 被显式拒绝（左段
  * XFF 可由客户端伪造，使按 IP 的限流失效）。默认跳数 1（nginx 反代之后）。
  * 返回字符串形（`'1'` 表示信任 1 跳）：Fastify v5.12 起 trustProxy 不再接受 number。
  */
@@ -23,7 +23,7 @@ function parseTrustProxy(raw: string | undefined): boolean | string {
   if (v === 'false' || v === '0') return false;
   if (v === 'true') {
     throw new Error(
-      'TRUST_PROXY=true is refused: it reads the leftmost X-Forwarded-For entry, ' +
+      'DEVBELT_DB_TRUST_PROXY=true is refused: it reads the leftmost X-Forwarded-For entry, ' +
         'which the client fully controls, making per-IP rate limiting bypassable.',
     );
   }
@@ -57,8 +57,8 @@ export function parseTokenTtl(
 const MAX_ACCESS_TTL_MS = 60 * 60 * 1000; // 1 小时
 const MAX_REFRESH_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 天
 
-const accessTtl = parseTokenTtl(process.env.ACCESS_TOKEN_EXPIRES_IN || '15m', 'ACCESS_TOKEN_EXPIRES_IN', MAX_ACCESS_TTL_MS);
-const refreshTtl = parseTokenTtl(process.env.REFRESH_TOKEN_EXPIRES_IN || '30d', 'REFRESH_TOKEN_EXPIRES_IN', MAX_REFRESH_TTL_MS);
+const accessTtl = parseTokenTtl(process.env.DEVBELT_DB_ACCESS_TOKEN_EXPIRES_IN || '15m', 'DEVBELT_DB_ACCESS_TOKEN_EXPIRES_IN', MAX_ACCESS_TTL_MS);
+const refreshTtl = parseTokenTtl(process.env.DEVBELT_DB_REFRESH_TOKEN_EXPIRES_IN || '30d', 'DEVBELT_DB_REFRESH_TOKEN_EXPIRES_IN', MAX_REFRESH_TTL_MS);
 
 /**
  * 服务端配置：从环境变量读取，提供默认值。
@@ -78,24 +78,24 @@ function parsePlatformAdminEmails(raw: string | undefined): string[] {
 }
 
 export const config = {
-  port: Number(process.env.PORT || 3000),
+  port: Number(process.env.DEVBELT_DB_PORT || 3000),
   accessTokenExpiresIn: accessTtl.raw,
   refreshTokenExpiresIn: refreshTtl.raw,
   refreshTokenExpiresMs: refreshTtl.ms,
   mysql: resolveMysqlCreds(process.env),
-  trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
-  rateLimitEnabled: !parseOff(process.env.RATE_LIMIT_ENABLED),
-  /** 控制台公开页/邮件流接口允许的同源 Origin（生产/预发必须为 HTTPS SMTP_BASE_URL 源）。 */
+  trustProxy: parseTrustProxy(process.env.DEVBELT_DB_TRUST_PROXY),
+  rateLimitEnabled: !parseOff(process.env.DEVBELT_DB_RATE_LIMIT_ENABLED),
+  /** 控制台公开页/邮件流接口允许的同源 Origin（生产/预发必须为 HTTPS DEVBELT_DB_SMTP_BASE_URL 源）。 */
   consoleOrigin: resolveConsoleOrigin(),
   /** 平台管理员引导邮箱（规范化后，供启动受控提升）。 */
-  platformAdminEmails: parsePlatformAdminEmails(process.env.PLATFORM_ADMIN_EMAILS),
+  platformAdminEmails: parsePlatformAdminEmails(process.env.DEVBELT_DB_PLATFORM_ADMIN_EMAILS),
   /**
    * sync-reset 深链目标扩展 id（`vscode://<id>/reset-after-loss`）。
    * 深链按扩展的 publisher.name 路由；当前扩展 manifest 为 lang2hong.devbelt-db-client，
    * 故默认取此实际 id（开箱即用）。若日后以 <publisher>.<name> 替换扩展 id，部署时
-   * 用 SYNC_EXTENSION_ID 覆盖。
+   * 用 DEVBELT_DB_SYNC_EXTENSION_ID 覆盖。
    */
-  syncExtensionId: process.env.SYNC_EXTENSION_ID || 'lang2hong.devbelt-db-client',
+  syncExtensionId: process.env.DEVBELT_DB_SYNC_EXTENSION_ID || 'lang2hong.devbelt-db-client',
 };
 
 export { parseTrustProxy };

@@ -3,14 +3,14 @@ import { parseMysqlUrl, resolveTestDb } from './testDb.js';
 
 /**
  * 集成测试 globalSetup：在每次 `vitest run --project integration` 开始时清空
- * MYSQL_TEST_DB 的全部表（`SET FOREIGN_KEY_CHECKS = 0` + DROP），消除
+ * DEVBELT_DB_TEST_MYSQL_DB 的全部表（`SET FOREIGN_KEY_CHECKS = 0` + DROP），消除
  * 「需先手动清库」的隐式前提（否则固定邮箱在唯一键上会残留导致重跑失败）。
  *
- * 缺 MYSQL_TEST_URL 时直接返回 —— 集成测试用 `describe.skipIf(!URL)` 跳过。
+ * 缺 DEVBELT_DB_TEST_MYSQL_URL 时直接返回 —— 集成测试用 `describe.skipIf(!URL)` 跳过。
  * 只作用于 resolveTestDb() 判定的测试库，拒绝误指生产库由 resolveTestDb 保证。
  */
 export default async function globalSetup(): Promise<void> {
-  const url = process.env.MYSQL_TEST_URL;
+  const url = process.env.DEVBELT_DB_TEST_MYSQL_URL;
   if (!url) return;
 
   const { host, port, user, password } = parseMysqlUrl(url);

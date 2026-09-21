@@ -3,7 +3,7 @@ import { onMounted, ref } from 'vue';
 import { withBase } from '../lib/router';
 import { listInvoices, requestInvoice, type InvoiceRecord } from '../api/invoices';
 import { listOrders, type ConsoleOrder } from '../api/orders';
-import { ensureCsrf, setAccessToken } from '@devkit/auth-client';
+import { ensureCsrf, setAccessToken } from '@devbelt/auth-client';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 
 const invoices = ref<InvoiceRecord[]>([]);

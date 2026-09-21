@@ -1,5 +1,5 @@
 /**
- * @devkit/db-core 公共入口。
+ * @devbelt/db-core 公共入口。
  * 统一导出连接、方言、工厂、查询与类型，供上层（vscode-ext）使用。
  */
 

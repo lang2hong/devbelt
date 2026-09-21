@@ -1,4 +1,4 @@
-import type { QueryOptions, QueryService } from '@devkit/db-core';
+import type { QueryOptions, QueryService } from '@devbelt/db-core';
 import { mapRows, validateMappings, type FieldMapping } from './fieldMapper';
 import { TransferCancelledError } from './exportService';
 import { CSV_ROW_LINE } from './csv';

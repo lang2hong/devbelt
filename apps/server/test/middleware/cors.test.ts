@@ -13,7 +13,7 @@ async function build(origin: string | false): Promise<FastifyInstance> {
 
 describe('cors origin policy', () => {
   it('development loopback origin is allowed (ACAO echoed)', async () => {
-    const origin = resolveCorsOrigin({ NODE_ENV: 'development', SMTP_BASE_URL: 'http://localhost:5173' });
+    const origin = resolveCorsOrigin({ NODE_ENV: 'development', DEVBELT_DB_SMTP_BASE_URL: 'http://localhost:5173' });
     expect(origin).toBe('http://localhost:5173');
     const app = await build(origin);
     const res = await app.inject({
@@ -26,7 +26,7 @@ describe('cors origin policy', () => {
   });
 
   it('development: a foreign request origin is never reflected', async () => {
-    const origin = resolveCorsOrigin({ NODE_ENV: 'development', SMTP_BASE_URL: 'http://localhost:5173' });
+    const origin = resolveCorsOrigin({ NODE_ENV: 'development', DEVBELT_DB_SMTP_BASE_URL: 'http://localhost:5173' });
     const app = await build(origin);
     const res = await app.inject({
       method: 'GET',
@@ -40,7 +40,7 @@ describe('cors origin policy', () => {
   });
 
   it('production never returns Access-Control-Allow-Origin', async () => {
-    const origin = resolveCorsOrigin({ NODE_ENV: 'production', SMTP_BASE_URL: 'https://console.example' });
+    const origin = resolveCorsOrigin({ NODE_ENV: 'production', DEVBELT_DB_SMTP_BASE_URL: 'https://console.example' });
     expect(origin).toBe(false);
     const app = await build(origin);
     const res = await app.inject({
@@ -53,7 +53,7 @@ describe('cors origin policy', () => {
   });
 
   it('staging never returns Access-Control-Allow-Origin', async () => {
-    const origin = resolveCorsOrigin({ NODE_ENV: 'staging', SMTP_BASE_URL: 'https://console.example' });
+    const origin = resolveCorsOrigin({ NODE_ENV: 'staging', DEVBELT_DB_SMTP_BASE_URL: 'https://console.example' });
     expect(origin).toBe(false);
     const app = await build(origin);
     const res = await app.inject({

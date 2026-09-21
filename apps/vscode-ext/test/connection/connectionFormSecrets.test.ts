@@ -5,7 +5,7 @@ vi.mock('vscode', () => ({
   ViewColumn: { Active: 1 },
 }));
 
-import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
+import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { mergeSecretsFromStored } from '../../src/connection/connectionForm';
 
 function conn(overrides: Partial<SavedConnection>): SavedConnection {

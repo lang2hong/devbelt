@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { withBase } from '../lib/router';
-import { claimLinkFlow, bindMailFlow, createSyncResetHandoff } from '@devkit/auth-client';
-import { ensureCsrf, refresh, getAccessToken } from '@devkit/auth-client';
+import { claimLinkFlow, bindMailFlow, createSyncResetHandoff } from '@devbelt/auth-client';
+import { ensureCsrf, refresh, getAccessToken } from '@devbelt/auth-client';
 
 const TEXT = {
   title: '同步重置',

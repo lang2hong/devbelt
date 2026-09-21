@@ -22,9 +22,9 @@ export interface KnownHostEntry {
   revoked: boolean;
 }
 
-/** known_hosts 路径：优先 `SSH_KNOWN_HOSTS`，否则 `~/.ssh/known_hosts`。 */
+/** known_hosts 路径：优先 `DEVBELT_DB_SSH_KNOWN_HOSTS`，否则 `~/.ssh/known_hosts`。 */
 export function knownHostsPath(): string {
-  return process.env.SSH_KNOWN_HOSTS || path.join(os.homedir(), '.ssh', 'known_hosts');
+  return process.env.DEVBELT_DB_SSH_KNOWN_HOSTS || path.join(os.homedir(), '.ssh', 'known_hosts');
 }
 
 /** 读取并解析 known_hosts；文件不存在/不可读时返回空数组（交由调用方判为不信任）。 */

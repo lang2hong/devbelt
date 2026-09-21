@@ -1,6 +1,6 @@
 import { format, type SqlLanguage } from 'sql-formatter';
 import * as vscode from 'vscode';
-import { DatabaseType } from '@devkit/db-core';
+import { DatabaseType } from '@devbelt/db-core';
 
 /**
  * SQL 格式化：按数据库方言调用 sql-formatter，indent/keywordCase 可配置。

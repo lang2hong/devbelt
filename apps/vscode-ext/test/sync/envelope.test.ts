@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sealEnvelope, openEnvelope } from '@devkit/db-host/sync/envelope';
+import { sealEnvelope, openEnvelope } from '@devbelt/db-host/sync/envelope';
 
 const kek = new Uint8Array(32).fill(1);
 const dek = new Uint8Array(32);

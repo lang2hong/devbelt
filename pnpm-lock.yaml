@@ -10,7 +10,7 @@ importers:
 
   apps/admin-ui:
     dependencies:
-      '@devkit/auth-client':
+      '@devbelt/auth-client':
         specifier: workspace:*
         version: link:../../packages/auth-client
     devDependencies:
@@ -38,7 +38,7 @@ importers:
 
   apps/auth-ui:
     dependencies:
-      '@devkit/auth-client':
+      '@devbelt/auth-client':
         specifier: workspace:*
         version: link:../../packages/auth-client
     devDependencies:
@@ -66,10 +66,10 @@ importers:
 
   apps/db-hostd:
     dependencies:
-      '@devkit/db-core':
+      '@devbelt/db-core':
         specifier: workspace:*
         version: link:../../packages/db-core
-      '@devkit/db-host':
+      '@devbelt/db-host':
         specifier: workspace:*
         version: link:../../packages/db-host
     devDependencies:
@@ -85,7 +85,7 @@ importers:
 
   apps/db-ui:
     dependencies:
-      '@devkit/auth-client':
+      '@devbelt/auth-client':
         specifier: workspace:*
         version: link:../../packages/auth-client
       qrcode:
@@ -159,7 +159,7 @@ importers:
         specifier: ^9.0.5
         version: 9.0.5
     devDependencies:
-      '@devkit/db-core':
+      '@devbelt/db-core':
         specifier: workspace:*
         version: link:../../packages/db-core
       '@types/node':
@@ -183,7 +183,7 @@ importers:
 
   apps/vscode-ext:
     dependencies:
-      '@devkit/db-host':
+      '@devbelt/db-host':
         specifier: workspace:*
         version: link:../../packages/db-host
       chart.js:
@@ -193,7 +193,7 @@ importers:
         specifier: ^1.16.1
         version: 1.17.0
     devDependencies:
-      '@devkit/db-core':
+      '@devbelt/db-core':
         specifier: workspace:*
         version: link:../../packages/db-core
       '@types/node':
@@ -278,7 +278,7 @@ importers:
 
   packages/db-host:
     dependencies:
-      '@devkit/db-core':
+      '@devbelt/db-core':
         specifier: workspace:*
         version: link:../db-core
       '@noble/curves':

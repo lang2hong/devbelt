@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { DatabaseType } from '@devkit/db-core';
-import { applyRecord, reconcileUnresolved, assertSafeGroupParent } from '@devkit/db-host/sync/e2e/applyRecords';
-import { RecordMapStore } from '@devkit/db-host/sync/e2e/recordMapStore';
-import { EntityStore, UnresolvedRefStore } from '@devkit/db-host/sync/e2e/entityStore';
-import { RecordConflictError } from '@devkit/db-host/sync/e2e/errors';
-import type { SavedConnection, ConnectionGroup, ConnectionStore } from '@devkit/db-host/connection/connectionStore';
-import type { QueryFolder } from '@devkit/db-host/connection/queryStore';
-import type { SavedQuery } from '@devkit/db-core';
+import { DatabaseType } from '@devbelt/db-core';
+import { applyRecord, reconcileUnresolved, assertSafeGroupParent } from '@devbelt/db-host/sync/e2e/applyRecords';
+import { RecordMapStore } from '@devbelt/db-host/sync/e2e/recordMapStore';
+import { EntityStore, UnresolvedRefStore } from '@devbelt/db-host/sync/e2e/entityStore';
+import { RecordConflictError } from '@devbelt/db-host/sync/e2e/errors';
+import type { SavedConnection, ConnectionGroup, ConnectionStore } from '@devbelt/db-host/connection/connectionStore';
+import type { QueryFolder } from '@devbelt/db-host/connection/queryStore';
+import type { SavedQuery } from '@devbelt/db-core';
 
 function makeMemento() {
   const m = new Map<string, unknown>();

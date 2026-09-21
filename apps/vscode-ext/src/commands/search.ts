@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { DatabaseType } from '@devkit/db-core';
+import { DatabaseType } from '@devbelt/db-core';
 import type { Deps, Sub } from './shared';
 import { l10n } from '../i18n';
 import { TableQueryView } from '../result/tableQueryView';

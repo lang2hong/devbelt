@@ -2,9 +2,9 @@ import * as vscode from 'vscode';
 import { execSync } from 'child_process';
 import { readFileSync } from 'fs';
 import { hostname, platform, arch, release } from 'os';
-import { SyncClient, AuthResult, DeviceInfo, MeResponse } from '@devkit/db-host/sync/syncClient';
-import { eventBus, AuthEvent } from '@devkit/db-host/utils/event';
-import { DEFAULT_FREE_ENGINES, DEFAULT_FREE_MAX_CONNECTIONS } from '@devkit/db-host/sync/entitlementGate';
+import { SyncClient, AuthResult, DeviceInfo, MeResponse } from '@devbelt/db-host/sync/syncClient';
+import { eventBus, AuthEvent } from '@devbelt/db-host/utils/event';
+import { DEFAULT_FREE_ENGINES, DEFAULT_FREE_MAX_CONNECTIONS } from '@devbelt/db-host/sync/entitlementGate';
 
 // 由 esbuild 构建时从 .env / .env.production 注入（见 esbuild.js 的 define）；测试环境由 vitest.config.ts 提供同名字段
 declare const __SYNC_SERVER_URL__: string;
@@ -12,8 +12,8 @@ declare const __SYNC_SERVER_URL__: string;
 /** 默认同步服务器地址（构建时由 esbuild 从 .env / .env.production 注入） */
 export const DEFAULT_SERVER_URL = __SYNC_SERVER_URL__;
 
-// CachedEntitlement 定义已下沉到 @devkit/db-host（宿主无关）；此处 re-export 保持旧导入路径可用。
-import type { CachedEntitlement } from '@devkit/db-host/sync/entitlementGate';
+// CachedEntitlement 定义已下沉到 @devbelt/db-host（宿主无关）；此处 re-export 保持旧导入路径可用。
+import type { CachedEntitlement } from '@devbelt/db-host/sync/entitlementGate';
 export type { CachedEntitlement };
 
 

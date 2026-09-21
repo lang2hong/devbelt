@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { envelopeInfo, hkdfSha256, SYNC_INFO } from '@devkit/db-host/sync/crypto/hkdf';
+import { envelopeInfo, hkdfSha256, SYNC_INFO } from '@devbelt/db-host/sync/crypto/hkdf';
 
 describe('hkdf', () => {
   it('envelopeInfo 十进制无前导零拼接', () => {

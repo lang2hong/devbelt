@@ -1,4 +1,4 @@
-import { EventEmitter, type Event, eventBus, HistoryChangedEvent } from '@devkit/db-host/utils/event';
+import { EventEmitter, type Event, eventBus, HistoryChangedEvent } from '@devbelt/db-host/utils/event';
 
 /**
  * 查询历史记录。

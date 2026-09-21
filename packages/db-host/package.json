@@ -1,5 +1,5 @@
 {
-  "name": "@devkit/db-host",
+  "name": "@devbelt/db-host",
   "version": "0.1.0",
   "private": true,
   "description": "Host-agnostic editor/sync logic shared across hosts (no vscode dependency)",
@@ -31,7 +31,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@devkit/db-core": "workspace:*",
+    "@devbelt/db-core": "workspace:*",
     "@noble/curves": "2.4.0",
     "hash-wasm": "4.12.0",
     "undici": "^7.29.0"

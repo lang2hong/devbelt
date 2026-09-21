@@ -1,7 +1,7 @@
 {
-  "name": "@devkit/admin-ui",
+  "name": "@devbelt/admin-ui",
   "version": "0.1.0",
-  "description": "devkit platform admin console at /admin",
+  "description": "devbelt platform admin console at /admin",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -23,6 +23,6 @@
     "vue": "^3.5.13"
   },
   "dependencies": {
-    "@devkit/auth-client": "workspace:*"
+    "@devbelt/auth-client": "workspace:*"
   }
 }

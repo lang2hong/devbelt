@@ -14,7 +14,7 @@ import type { MysqlDb } from '../../src/repository/mysql/db.js';
 import { withTransaction } from '../../src/repository/mysql/db.js';
 import { deriveEntitlement } from '../../src/modules/billing/service/entitlement.js';
 
-const URL = process.env.MYSQL_TEST_URL;
+const URL = process.env.DEVBELT_DB_TEST_MYSQL_URL;
 
 async function makeUser(db: MysqlDb): Promise<number> {
   const repo = new MysqlUserRepo(() => db);

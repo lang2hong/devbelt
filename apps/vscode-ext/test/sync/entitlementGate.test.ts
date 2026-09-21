@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DatabaseType } from '@devkit/db-core';
+import { DatabaseType } from '@devbelt/db-core';
 import {
   DEFAULT_FREE_ENGINES,
   allowedEngines,
@@ -12,7 +12,7 @@ import {
   canExportConnections,
   canUseErDiagram,
   canUseDataSync,
-} from '@devkit/db-host/sync/entitlementGate';
+} from '@devbelt/db-host/sync/entitlementGate';
 
 const free = { planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 2, maxSavedConnections: 10, allowConnectionImport: false };
 const pro = { planCode: 'pro', allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 5, maxSavedConnections: 100, allowConnectionImport: true };

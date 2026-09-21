@@ -5,10 +5,10 @@ import {
   buildStateSigningInput,
   signSigningInput,
   SYNC_DOMAIN,
-} from '@devkit/db-host/sync/crypto/sign';
-import { requestDigestOf } from '@devkit/db-host/sync/crypto/digest';
-import { deriveEd25519KeyPair, signEd25519 } from '@devkit/db-host/sync/crypto/ed25519';
-import { SYNC_SIGN_TEST_VECTOR } from '@devkit/db-core/testing';
+} from '@devbelt/db-host/sync/crypto/sign';
+import { requestDigestOf } from '@devbelt/db-host/sync/crypto/digest';
+import { deriveEd25519KeyPair, signEd25519 } from '@devbelt/db-host/sync/crypto/ed25519';
+import { SYNC_SIGN_TEST_VECTOR } from '@devbelt/db-core/testing';
 
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 

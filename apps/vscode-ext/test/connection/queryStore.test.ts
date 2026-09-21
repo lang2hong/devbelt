@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { QueryStore } from '@devkit/db-host/connection/queryStore';
+import { QueryStore } from '@devbelt/db-host/connection/queryStore';
 
 function createMemento() {
   const values = new Map<string, unknown>();

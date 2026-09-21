@@ -1,4 +1,4 @@
-# @devkit/db-core
+# @devbelt/db-core
 
 数据库驱动、SQL 方言、连接、查询和元数据核心，不依赖 VS Code 或服务端领域。
 

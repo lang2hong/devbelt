@@ -1,8 +1,8 @@
-import { DatabaseType } from '@devkit/db-core';
-import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
-import { splitSqlWithRanges, stripSqlComments, SqlScanner, StreamingStatementSplitter, escapeStringLiteralContent } from '@devkit/db-core/sql';
+import { DatabaseType } from '@devbelt/db-core';
+import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
+import { splitSqlWithRanges, stripSqlComments, SqlScanner, StreamingStatementSplitter, escapeStringLiteralContent } from '@devbelt/db-core/sql';
 import { createReadStream } from 'node:fs';
-import type { SqlScanOptions } from '@devkit/db-core/sql';
+import type { SqlScanOptions } from '@devbelt/db-core/sql';
 
 /**
  * SQL 标识符包裹工具（统一 wrapIdent / wrapQualified，消除重复）。
@@ -40,13 +40,13 @@ export function escapeSqlString(value: string, dbType: DatabaseType, noBackslash
 }
 
 /**
- * 语句切分复用 `@devkit/db-core/sql`（全仓唯一词法来源）。
+ * 语句切分复用 `@devbelt/db-core/sql`（全仓唯一词法来源）。
  *
  * 编辑器侧语义：保留注释、带位置（供 CodeLens）。db-core 侧另有
  * `splitExecutableStatements`（丢弃注释），两者共享同一 lexer。
  */
 export { splitSqlWithRanges };
-export type { SqlStatementRange } from '@devkit/db-core/sql';
+export type { SqlStatementRange } from '@devbelt/db-core/sql';
 
 /**
  * 拆分 SQL 语句（按分号，感知引号、注释、美元引用与 DELIMITER）。

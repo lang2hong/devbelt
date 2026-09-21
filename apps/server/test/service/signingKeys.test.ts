@@ -26,21 +26,21 @@ describe('resolveSigningKeys', () => {
   it('resolves a valid Ed25519 key pair', () => {
     const a = ed25519Pair();
     const keys = resolveSigningKeys(
-      env({ TOKEN_SIGNING_KEY_B64: a.priv, TOKEN_VERIFY_KEYS_JSON: JSON.stringify({ k1: a.pub }) }),
+      env({ DEVBELT_DB_TOKEN_SIGNING_KEY_B64: a.priv, DEVBELT_DB_TOKEN_VERIFY_KEYS_JSON: JSON.stringify({ k1: a.pub }) }),
     );
     expect(keys.kid).toBe('k1');
     expect(keys.privateKey.asymmetricKeyType).toBe('ed25519');
   });
 
   it('rejects a missing signing key', () => {
-    expect(() => resolveSigningKeys(env({ TOKEN_VERIFY_KEYS_JSON: '{}' }))).toThrow(/TOKEN_SIGNING_KEY_B64/);
+    expect(() => resolveSigningKeys(env({ DEVBELT_DB_TOKEN_VERIFY_KEYS_JSON: '{}' }))).toThrow(/DEVBELT_DB_TOKEN_SIGNING_KEY_B64/);
   });
 
   it('rejects a non-Ed25519 private key', () => {
     const rsa = rsaPair();
     const a = ed25519Pair();
     expect(() =>
-      resolveSigningKeys(env({ TOKEN_SIGNING_KEY_B64: rsa.priv, TOKEN_VERIFY_KEYS_JSON: JSON.stringify({ k1: a.pub }) })),
+      resolveSigningKeys(env({ DEVBELT_DB_TOKEN_SIGNING_KEY_B64: rsa.priv, DEVBELT_DB_TOKEN_VERIFY_KEYS_JSON: JSON.stringify({ k1: a.pub }) })),
     ).toThrow(/not an Ed25519 key/);
   });
 
@@ -48,7 +48,7 @@ describe('resolveSigningKeys', () => {
     const a = ed25519Pair();
     const rsa = rsaPair();
     expect(() =>
-      resolveSigningKeys(env({ TOKEN_SIGNING_KEY_B64: a.priv, TOKEN_VERIFY_KEYS_JSON: JSON.stringify({ k1: rsa.pub }) })),
+      resolveSigningKeys(env({ DEVBELT_DB_TOKEN_SIGNING_KEY_B64: a.priv, DEVBELT_DB_TOKEN_VERIFY_KEYS_JSON: JSON.stringify({ k1: rsa.pub }) })),
     ).toThrow(/not an Ed25519 key/);
   });
 
@@ -56,7 +56,7 @@ describe('resolveSigningKeys', () => {
     const a = ed25519Pair();
     const b = ed25519Pair();
     expect(() =>
-      resolveSigningKeys(env({ TOKEN_SIGNING_KEY_B64: a.priv, TOKEN_VERIFY_KEYS_JSON: JSON.stringify({ k1: b.pub }) })),
+      resolveSigningKeys(env({ DEVBELT_DB_TOKEN_SIGNING_KEY_B64: a.priv, DEVBELT_DB_TOKEN_VERIFY_KEYS_JSON: JSON.stringify({ k1: b.pub }) })),
     ).toThrow(/private\/public key mismatch/);
   });
 
@@ -64,7 +64,7 @@ describe('resolveSigningKeys', () => {
     const a = ed25519Pair();
     expect(() =>
       resolveSigningKeys(
-        env({ TOKEN_SIGNING_KID: 'k9', TOKEN_SIGNING_KEY_B64: a.priv, TOKEN_VERIFY_KEYS_JSON: JSON.stringify({ k1: a.pub }) }),
+        env({ DEVBELT_DB_TOKEN_SIGNING_KID: 'k9', DEVBELT_DB_TOKEN_SIGNING_KEY_B64: a.priv, DEVBELT_DB_TOKEN_VERIFY_KEYS_JSON: JSON.stringify({ k1: a.pub }) }),
       ),
     ).toThrow(/has no matching public key/);
   });

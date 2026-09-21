@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { deriveKekSmp } from '@devkit/db-host/sync/crypto/argon2';
+import { deriveKekSmp } from '@devbelt/db-host/sync/crypto/argon2';
 import {
   ARGON2ID_SALT_BYTES,
   assertSmpKdfParams,
   type SmpKdfParams,
-} from '@devkit/db-host/sync/crypto/smpKdfParams';
+} from '@devbelt/db-host/sync/crypto/smpKdfParams';
 
 const valid: SmpKdfParams = {
   alg: 'argon2id',

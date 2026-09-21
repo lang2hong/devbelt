@@ -69,9 +69,9 @@ jobs:
         image: mysql:8
         env:
           MYSQL_ROOT_PASSWORD: ci-root-pass
-          # mysqlSchema / mysqlReal 都硬编码库名 devkit_verify，
+          # mysqlSchema / mysqlReal 都硬编码库名 devbelt_db_verify，
           # 由 container 直接建好，测试自己不建库
-          MYSQL_DATABASE: devkit_verify
+          MYSQL_DATABASE: devbelt_db_verify
         ports:
           - 3306:3306
         # 没有 health check 的话测试会在 MySQL 还没起来时就连，随机失败
@@ -85,7 +85,7 @@ jobs:
         image: postgres:16
         env:
           POSTGRES_PASSWORD: ci-pg-pass
-          POSTGRES_DB: devkit_verify
+          POSTGRES_DB: devbelt_db_verify
         ports:
           - 5432:5432
         options: >-
@@ -116,16 +116,16 @@ jobs:
       # 密码里没有特殊字符，但格式上仍按测试要求做百分号编码约定。
       - name: Integration tests (db-core)
         env:
-          MYSQL_TEST_URL: mysql://root:ci-root-pass@127.0.0.1:3306
-          # 服务容器建的库是 devkit_verify；不设 MYSQL_TEST_DB 时测试默认 dbclient_verify → ER_BAD_DB_ERROR。
-          MYSQL_TEST_DB: devkit_verify
-          PG_TEST_URL: postgres://postgres:ci-pg-pass@127.0.0.1:5432/devkit_verify
+          DEVBELT_DB_TEST_MYSQL_URL: mysql://root:ci-root-pass@127.0.0.1:3306
+          # 服务容器建的库是 devbelt_db_verify；不设 DEVBELT_DB_TEST_MYSQL_DB 时测试默认 devbelt_db_verify → ER_BAD_DB_ERROR。
+          DEVBELT_DB_TEST_MYSQL_DB: devbelt_db_verify
+          DEVBELT_DB_TEST_PG_URL: postgres://postgres:ci-pg-pass@127.0.0.1:5432/devbelt_db_verify
         run: pnpm -C packages/db-core test
 
       - name: Integration tests (server)
         env:
-          MYSQL_TEST_URL: mysql://root:ci-root-pass@127.0.0.1:3306
-          MYSQL_TEST_DB: devkit_verify
+          DEVBELT_DB_TEST_MYSQL_URL: mysql://root:ci-root-pass@127.0.0.1:3306
+          DEVBELT_DB_TEST_MYSQL_DB: devbelt_db_verify
         run: pnpm -C apps/server test
 
   # 浏览器 e2e：注册/登录/邮箱验证/邀请全链路（Playwright + Mailpit 真发信 + 真实 MySQL）。
@@ -139,7 +139,7 @@ jobs:
         image: mysql:8
         env:
           MYSQL_ROOT_PASSWORD: e2e-root-pass
-          MYSQL_DATABASE: devkit_e2e
+          MYSQL_DATABASE: devbelt_db_e2e
         ports:
           - 3306:3306
         options: >-
@@ -168,14 +168,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Build server + db-ui
-        run: pnpm -C apps/server build && CONSOLE_BASE=/db/ pnpm -C apps/db-ui build && AUTH_BASE=/ pnpm -C apps/auth-ui build && ADMIN_BASE=/admin/ pnpm -C apps/admin-ui build
+        run: pnpm -C apps/server build && DEVBELT_DB_CONSOLE_BASE=/db/ pnpm -C apps/db-ui build && DEVBELT_DB_AUTH_BASE=/ pnpm -C apps/auth-ui build && DEVBELT_DB_ADMIN_BASE=/admin/ pnpm -C apps/admin-ui build
 
       - name: Prepare Ed25519 signing keys
         run: |
           openssl genpkey -algorithm ed25519 -out /tmp/k1.pem
           openssl pkey -in /tmp/k1.pem -pubout -out /tmp/k1.pub.pem
-          echo "TOKEN_SIGNING_KEY_B64=$(base64 -w0 /tmp/k1.pem)" >> "$GITHUB_ENV"
-          echo "TOKEN_VERIFY_KEYS_JSON={\"k1\":\"$(base64 -w0 /tmp/k1.pub.pem)\"}" >> "$GITHUB_ENV"
+          echo "DEVBELT_DB_TOKEN_SIGNING_KEY_B64=$(base64 -w0 /tmp/k1.pem)" >> "$GITHUB_ENV"
+          echo "DEVBELT_DB_TOKEN_VERIFY_KEYS_JSON={\"k1\":\"$(base64 -w0 /tmp/k1.pub.pem)\"}" >> "$GITHUB_ENV"
 
       - name: Install Playwright browser
         run: pnpm -C apps/e2e exec playwright install --with-deps chromium
@@ -183,19 +183,19 @@ jobs:
       - name: Run e2e
         env:
           NODE_ENV: development
-          SMTP_BASE_URL: http://localhost:5173
-          MAILER: mailpit
-          MAILPIT_HOST: localhost
-          MAILPIT_PORT: '1025'
-          MAILPIT_HTTP: http://localhost:8025
-          SMTP_FROM: no-reply@localhost.test
-          MYSQL_HOST: 127.0.0.1
-          MYSQL_PORT: '3306'
-          MYSQL_USER: root
-          MYSQL_PASSWORD: e2e-root-pass
-          MYSQL_DATABASE: devkit_e2e
-          PORT: '5173'
-          E2E_BASE_URL: http://localhost:5173
+          DEVBELT_DB_SMTP_BASE_URL: http://localhost:5173
+          DEVBELT_DB_MAILER: mailpit
+          DEVBELT_DB_MAILPIT_HOST: localhost
+          DEVBELT_DB_MAILPIT_PORT: '1025'
+          DEVBELT_DB_MAILPIT_HTTP: http://localhost:8025
+          DEVBELT_DB_SMTP_FROM: no-reply@localhost.test
+          DEVBELT_DB_MYSQL_HOST: 127.0.0.1
+          DEVBELT_DB_MYSQL_PORT: '3306'
+          DEVBELT_DB_MYSQL_USER: root
+          DEVBELT_DB_MYSQL_PASSWORD: e2e-root-pass
+          DEVBELT_DB_MYSQL_DATABASE: devbelt_db_e2e
+          DEVBELT_DB_PORT: '5173'
+          DEVBELT_DB_E2E_BASE_URL: http://localhost:5173
         run: pnpm -C apps/e2e e2e
 
   # VSIX 安装 smoke：真实 vsce 打包 → 真实安装 → 真实启动并断言扩展激活/命令注册。

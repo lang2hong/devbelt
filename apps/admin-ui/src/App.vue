@@ -3,7 +3,7 @@ import { computed, onMounted, ref, type Component } from 'vue';
 import { router, installRouter, navigate, withBase, stripBase } from './lib/router';
 import { safeReturnTo } from './lib/returnTo';
 import { ADMIN_DEFAULT_PATH, ADMIN_ROUTES } from './routes';
-import { refreshSession, getAccessToken, logout } from '@devkit/auth-client';
+import { refreshSession, getAccessToken, logout } from '@devbelt/auth-client';
 import { me, type ConsoleMe } from './api/me';
 import AdminNav from './pages/AdminNav.vue';
 import AdminUsersView from './pages/AdminUsersView.vue';

@@ -28,7 +28,7 @@ ssh-keyscan db.example.com >> ~/.ssh/known_hosts
 ssh-keyscan -p 2222 db.example.com >> ~/.ssh/known_hosts
 ```
 
-可用环境变量 `SSH_KNOWN_HOSTS` 指定其它 `known_hosts` 文件。
+可用环境变量 `DEVBELT_DB_SSH_KNOWN_HOSTS` 指定其它 `known_hosts` 文件。
 
 ## 个人同步本地重置
 

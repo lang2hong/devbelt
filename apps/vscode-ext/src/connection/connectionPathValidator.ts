@@ -1,6 +1,6 @@
-import { DatabaseType } from '@devkit/db-core';
-import type { SavedConnection } from '@devkit/db-host/connection/connectionStore';
-import { isOrganizationConnectionId } from '@devkit/db-host/sync/entitlementGate';
+import { DatabaseType } from '@devbelt/db-core';
+import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
+import { isOrganizationConnectionId } from '@devbelt/db-host/sync/entitlementGate';
 
 /**
  * 路径校验 API（阶段 A 附加，无 UI）。

@@ -1,5 +1,5 @@
 /**
- * `@devkit/db-core/sql` 公共入口：SQL 词法 + 两套切分适配器。
+ * `@devbelt/db-core/sql` 公共入口：SQL 词法 + 两套切分适配器。
  *
  * 这里是全仓唯一的 SQL 词法来源。上层（vscode-ext 的 `utils/sql.ts`、
  * `utils/sqlRisk.ts`）从这里取 `scanSql`/`sqlSkeleton`/切分函数，

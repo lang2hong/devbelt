@@ -3,7 +3,7 @@ import { createTestPool } from './testDb.js';
 import { runMigrations } from '../../src/repository/mysql/migrate.js';
 import { migrations, LEGACY_MIGRATION_VERSIONS } from '../../src/repository/mysql/migrations/index.js';
 
-const URL = process.env.MYSQL_TEST_URL;
+const URL = process.env.DEVBELT_DB_TEST_MYSQL_URL;
 
 async function dropAll(pool: any): Promise<void> {
   await pool.query('SET FOREIGN_KEY_CHECKS = 0');

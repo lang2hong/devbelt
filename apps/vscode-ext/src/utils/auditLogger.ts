@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { diagWarn } from './diagnostics';
-import { uniqueId } from '@devkit/db-host/utils/id';
+import { uniqueId } from '@devbelt/db-host/utils/id';
 
 export type AuditAction =
   | 'query_execute'

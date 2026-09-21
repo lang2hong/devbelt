@@ -2,11 +2,11 @@
  * 功能开关服务（P4 切片 4A / Runbook §3）。
  *
  * 三类预留开关默认启用（fail-open，仅显式关闭才生效）：
- *   - `browser-auth`  → env `FEATURE_BROWSER_AUTH`（**预留，未接线**）
- *   - `mail-flow`     → env `FEATURE_MAIL_FLOW`（**预留，未接线**）
- *   - `sync-handoff`  → env `FEATURE_SYNC_HANDOFF`（**预留，未接线**）
+ *   - `browser-auth`  → env `DEVBELT_DB_FEATURE_BROWSER_AUTH`（**预留，未接线**）
+ *   - `mail-flow`     → env `DEVBELT_DB_FEATURE_MAIL_FLOW`（**预留，未接线**）
+ *   - `sync-handoff`  → env `DEVBELT_DB_FEATURE_SYNC_HANDOFF`（**预留，未接线**）
  *
- * `payment` 为 **opt-in 默认关闭**（`FEATURE_PAYMENT=true/1/on` 才启用）：
+ * `payment` 为 **opt-in 默认关闭**（`DEVBELT_DB_FEATURE_PAYMENT=true/1/on` 才启用）：
  * 资金面集成中「配凭据」与「开启客户支付」是两次独立上线动作，仅配凭据不得默认暴露下单/回调路由。
  *
  * 关闭语义（§11.4）：命中开关关闭的请求返回 503 `FEATURE_TEMPORARILY_DISABLED`，
@@ -22,10 +22,10 @@ export interface FeatureFlagSet {
 }
 
 const FLAG_ENV_KEYS: Readonly<Record<keyof FeatureFlagSet, string>> = {
-  'browser-auth': 'FEATURE_BROWSER_AUTH',
-  'mail-flow': 'FEATURE_MAIL_FLOW',
-  'sync-handoff': 'FEATURE_SYNC_HANDOFF',
-  payment: 'FEATURE_PAYMENT',
+  'browser-auth': 'DEVBELT_DB_FEATURE_BROWSER_AUTH',
+  'mail-flow': 'DEVBELT_DB_FEATURE_MAIL_FLOW',
+  'sync-handoff': 'DEVBELT_DB_FEATURE_SYNC_HANDOFF',
+  payment: 'DEVBELT_DB_FEATURE_PAYMENT',
 };
 
 /** 关闭值判定：`false` / `0` / `off`（不分大小写）视为关闭。缺省/其它一律启用。 */

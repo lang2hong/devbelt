@@ -1,7 +1,7 @@
 import type { SavedConnection, ConnectionGroup } from '../../connection/connectionStore.js';
 import type { QueryFolder } from '../../connection/queryStore.js';
-import type { SavedQuery } from '@devkit/db-core';
-import { DatabaseType } from '@devkit/db-core';
+import type { SavedQuery } from '@devbelt/db-core';
+import { DatabaseType } from '@devbelt/db-core';
 import { decodeEntityPayload, type DecodedEntityPayload } from './recordCodec.js';
 import { assertRecordId, assertU64Decimal } from './types.js';
 import { filterPersonalConnectionsByEntitlement, isOrganizationConnectionId } from '../entitlementGate.js';

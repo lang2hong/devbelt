@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RecordMapStore } from '@devkit/db-host/sync/e2e/recordMapStore';
+import { RecordMapStore } from '@devbelt/db-host/sync/e2e/recordMapStore';
 
 function makeMemento(seed?: Record<string, unknown>) {
   const m = new Map<string, unknown>(Object.entries(seed ?? {}));

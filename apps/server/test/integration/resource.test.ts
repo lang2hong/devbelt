@@ -29,7 +29,7 @@ import {
   FolderNotEmptyError,
 } from '../../src/domain/errors.js';
 
-const URL = process.env.MYSQL_TEST_URL;
+const URL = process.env.DEVBELT_DB_TEST_MYSQL_URL;
 
 function uniqueEmail(prefix = 'res'): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`;

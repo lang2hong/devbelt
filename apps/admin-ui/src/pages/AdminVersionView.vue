@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { withBase } from '../lib/router';
 import { getVersion, type ConsoleVersion } from '../api/admin';
-import { setAccessToken } from '@devkit/auth-client';
+import { setAccessToken } from '@devbelt/auth-client';
 import { formatDateTime } from '../lib/formatTime';
 
 const version = ref<ConsoleVersion | null>(null);

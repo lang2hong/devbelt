@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ConnectionStore } from '@devkit/db-host/connection/connectionStore';
+import { ConnectionStore } from '@devbelt/db-host/connection/connectionStore';
 import { ConnectionManager } from './connection/connectionManager';
 import { ConnectionPathOverrideStore } from './connection/connectionPathOverrideStore';
 import { ConnectionContext } from './connection/connectionContext';
@@ -14,8 +14,8 @@ import { registerViewCommands } from './commands/viewCommands';
 import { createSyncStatusBar } from './sync/syncStatusBar';
 import { HistoryStore } from './history/historyStore';
 import { AuthService, DEFAULT_SERVER_URL } from './sync/authService';
-import { PersonalSyncClient } from '@devkit/db-host/sync/e2e/client';
-import { eventBus, ConnectionChangedEvent, DataChangeEvent, AuthEvent } from '@devkit/db-host/utils/event';
+import { PersonalSyncClient } from '@devbelt/db-host/sync/e2e/client';
+import { eventBus, ConnectionChangedEvent, DataChangeEvent, AuthEvent } from '@devbelt/db-host/utils/event';
 import { invalidateLanguage, l10n, LANGUAGE_CONFIG_KEY } from './i18n';
 import { registerCommands } from './commands';
 import { SqlCompletionProvider } from './completion/sqlCompletionProvider';
@@ -25,8 +25,8 @@ import { CredentialVault } from './org/credentialVault';
 import { OrgWorkspace } from './org/workspace';
 import { OrgTreeDataProvider } from './tree/orgTreeDataProvider';
 import { registerOrgCommands } from './commands/org';
-import { SyncSessionFactory } from '@devkit/db-host/sync/sessionFactory';
-import { DekStore } from '@devkit/db-host/sync/crypto/keyStore';
+import { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
+import { DekStore } from '@devbelt/db-host/sync/crypto/keyStore';
 
 import { registerPersonalSyncCommands } from './commands/personalSync';
 import { registerConflictCommands } from './commands/syncConflicts';

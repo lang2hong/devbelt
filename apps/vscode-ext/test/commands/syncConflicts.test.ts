@@ -23,8 +23,8 @@ vi.mock('vscode', () => ({
 }));
 
 import { registerConflictCommands } from '../../src/commands/syncConflicts';
-import type { SyncSessionFactory } from '@devkit/db-host/sync/sessionFactory';
-import type { ConflictItem } from '@devkit/db-host/sync/e2e/conflictResolver';
+import type { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
+import type { ConflictItem } from '@devbelt/db-host/sync/e2e/conflictResolver';
 
 interface Session {
   isUnlocked?: boolean;
