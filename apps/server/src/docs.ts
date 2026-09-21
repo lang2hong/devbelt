@@ -1,8 +1,9 @@
 /**
- * 公开文档中心（`/docs`）：服务端渲染、零构建依赖、**无需登录**。
+ * 公开文档中心（`/db/docs`）：服务端渲染、零构建依赖、**无需登录**。
  *
  * 与 `home.ts` 同一风格（内联 HTML + 严格 CSP），面向用户的产品使用文档；
  * 面向开发者的仓库文档仍在 `docs/`。正文为受信任的静态 HTML，不由用户输入拼装。
+ * 插图为本文件内联 SVG（无外部资源，符合 CSP）。
  */
 
 export interface DocSection {
@@ -14,14 +15,126 @@ export interface DocPage {
   slug: string;
   title: string;
   summary: string;
+  /** 插图 key（见 FIG），渲染在摘要下方。 */
+  figure?: keyof typeof FIG;
   sections: DocSection[];
 }
+
+const svg = (label: string, inner: string): string =>
+  `<svg class="fig" viewBox="0 0 640 340" role="img" aria-label="${label}" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`;
+
+/** 内联 SVG 插图：模拟 VS Code 界面与关键工作流。 */
+export const FIG = {
+  /** VS Code 窗口：活动栏 + 连接树 + 编辑器。 */
+  vscode: svg(
+    'VS Code 中的 DB Client 界面',
+    `<rect x="1" y="1" width="638" height="338" rx="10" fill="#0f1426" stroke="#2b3350"/>
+     <rect x="1" y="1" width="638" height="34" rx="10" fill="#161d33"/>
+     <rect x="1" y="27" width="638" height="8" fill="#161d33"/>
+     <circle cx="22" cy="18" r="5" fill="#ff5f56"/><circle cx="40" cy="18" r="5" fill="#ffbd2e"/><circle cx="58" cy="18" r="5" fill="#27c93f"/>
+     <text x="80" y="22" fill="#8b96b5" font-size="12" font-family="sans-serif">db.sql — DevBelt DB Client</text>
+     <rect x="1" y="35" width="56" height="304" fill="#121831"/>
+     <rect x="18" y="56" width="22" height="22" rx="4" fill="#3d6bff"/>
+     <rect x="22" y="96" width="14" height="14" rx="3" fill="#3a4366"/>
+     <rect x="22" y="122" width="14" height="14" rx="3" fill="#3a4366"/>
+     <rect x="22" y="148" width="14" height="14" rx="3" fill="#3a4366"/>
+     <rect x="57" y="35" width="180" height="304" fill="#141b31"/>
+     <text x="70" y="60" fill="#9aa4bf" font-size="12" font-family="sans-serif">DB CLIENT</text>
+     <rect x="70" y="74" width="150" height="22" rx="4" fill="#1d2742"/>
+     <text x="78" y="89" fill="#cdd4e6" font-size="11" font-family="sans-serif">▾ 本地 MySQL</text>
+     <text x="88" y="112" fill="#8b96b5" font-size="11" font-family="sans-serif">▾ shop</text>
+     <text x="98" y="133" fill="#cdd4e6" font-size="11" font-family="sans-serif">▦ users</text>
+     <text x="98" y="154" fill="#cdd4e6" font-size="11" font-family="sans-serif">▦ orders</text>
+     <text x="88" y="175" fill="#8b96b5" font-size="11" font-family="sans-serif">▸ analytics</text>
+     <rect x="237" y="35" width="44" height="304" fill="#10162b"/>
+     <rect x="245" y="50" width="28" height="18" rx="3" fill="#1d2742"/>
+     <rect x="281" y="35" width="358" height="180" fill="#0f1426"/>
+     <text x="300" y="64" fill="#8b96b5" font-size="11" font-family="monospace">SELECT id, name FROM users LIMIT 3;</text>
+     <text x="300" y="88" fill="#3d6bff" font-size="11" font-family="monospace">SELECT</text><text x="356" y="88" fill="#e6e9f2" font-size="11" font-family="monospace">id, name</text>
+     <text x="300" y="112" fill="#3d6bff" font-size="11" font-family="monospace">FROM</text><text x="356" y="112" fill="#e6e9f2" font-size="11" font-family="monospace">users</text>
+     <rect x="281" y="215" width="358" height="124" fill="#141b31"/>
+     <polygon points="281,215 430,215 470,243 281,243" fill="#1d2742"/>
+     <text x="300" y="233" fill="#8b96b5" font-size="11" font-family="sans-serif">结果</text>
+     <line x1="281" y1="243" x2="639" y2="243" stroke="#2b3350"/>
+     <text x="300" y="265" fill="#8b96b5" font-size="10" font-family="sans-serif">id</text><text x="380" y="265" fill="#8b96b5" font-size="10" font-family="sans-serif">name</text>
+     <text x="300" y="290" fill="#cdd4e6" font-size="11" font-family="sans-serif">1</text><text x="380" y="290" fill="#cdd4e6" font-size="11" font-family="sans-serif">Alice</text>
+     <text x="300" y="313" fill="#cdd4e6" font-size="11" font-family="sans-serif">2</text><text x="380" y="313" fill="#cdd4e6" font-size="11" font-family="sans-serif">Bob</text>`,
+  ),
+  /** 连接 + SSH 隧道。 */
+  connection: svg(
+    '连接与 SSH 隧道',
+    `<rect x="1" y="1" width="638" height="338" rx="10" fill="#0f1426" stroke="#2b3350"/>
+     <rect x="60" y="130" width="150" height="80" rx="10" fill="#1d2742" stroke="#3d6bff"/>
+     <text x="100" y="165" fill="#e6e9f2" font-size="13" font-family="sans-serif">VS Code</text>
+     <text x="86" y="188" fill="#9aa4bf" font-size="11" font-family="sans-serif">DB Client</text>
+     <rect x="270" y="130" width="150" height="80" rx="10" fill="#1d2742" stroke="#3a4366"/>
+     <text x="318" y="165" fill="#e6e9f2" font-size="13" font-family="sans-serif">SSH</text>
+     <text x="300" y="188" fill="#9aa4bf" font-size="11" font-family="sans-serif">跳板机 :22</text>
+     <rect x="480" y="130" width="120" height="80" rx="10" fill="#1d2742" stroke="#3a4366"/>
+     <text x="510" y="165" fill="#e6e9f2" font-size="13" font-family="sans-serif">MySQL</text>
+     <text x="512" y="188" fill="#9aa4bf" font-size="11" font-family="sans-serif">RDS :3306</text>
+     <line x1="210" y1="170" x2="270" y2="170" stroke="#3d6bff" stroke-width="2"/>
+     <line x1="420" y1="170" x2="480" y2="170" stroke="#3d6bff" stroke-width="2"/>
+     <text x="60" y="70" fill="#9aa4bf" font-size="12" font-family="sans-serif">凭据存入 VS Code SecretStorage；SSH 主机密钥按指纹校验</text>`,
+  ),
+  /** 查询编辑与结果网格。 */
+  query: svg(
+    'SQL 编辑器与结果表格',
+    `<rect x="1" y="1" width="638" height="338" rx="10" fill="#0f1426" stroke="#2b3350"/>
+     <rect x="20" y="24" width="600" height="90" rx="8" fill="#141b31"/>
+     <text x="40" y="56" fill="#3d6bff" font-size="12" font-family="monospace">SELECT</text><text x="100" y="56" fill="#e6e9f2" font-size="12" font-family="monospace">o.id, u.name, o.total</text>
+     <text x="40" y="80" fill="#3d6bff" font-size="12" font-family="monospace">FROM</text><text x="100" y="80" fill="#e6e9f2" font-size="12" font-family="monospace">orders o JOIN users u ON u.id = o.user_id</text>
+     <text x="40" y="104" fill="#3d6bff" font-size="12" font-family="monospace">WHERE</text><text x="100" y="104" fill="#e6e9f2" font-size="12" font-family="monospace">o.total &gt; 100</text>
+     <rect x="20" y="130" width="600" height="186" rx="8" fill="#141b31"/>
+     <rect x="20" y="130" width="600" height="30" rx="8" fill="#1d2742"/>
+     <text x="44" y="150" fill="#9aa4bf" font-size="11" font-family="sans-serif">id</text><text x="130" y="150" fill="#9aa4bf" font-size="11" font-family="sans-serif">name</text><text x="300" y="150" fill="#9aa4bf" font-size="11" font-family="sans-serif">total</text>
+     <line x1="20" y1="160" x2="620" y2="160" stroke="#2b3350"/>
+     <text x="44" y="186" fill="#cdd4e6" font-size="12" font-family="sans-serif">1001</text><text x="130" y="186" fill="#cdd4e6" font-size="12" font-family="sans-serif">Alice</text><text x="300" y="186" fill="#cdd4e6" font-size="12" font-family="sans-serif">¥128.00</text>
+     <text x="44" y="216" fill="#cdd4e6" font-size="12" font-family="sans-serif">1002</text><text x="130" y="216" fill="#cdd4e6" font-size="12" font-family="sans-serif">Bob</text><text x="300" y="216" fill="#cdd4e6" font-size="12" font-family="sans-serif">¥260.50</text>
+     <text x="44" y="246" fill="#cdd4e6" font-size="12" font-family="sans-serif">1003</text><text x="130" y="246" fill="#cdd4e6" font-size="12" font-family="sans-serif">Carol</text><text x="300" y="246" fill="#cdd4e6" font-size="12" font-family="sans-serif">¥99.00</text>`,
+  ),
+  /** ER 图。 */
+  er: svg(
+    'ER 图',
+    `<rect x="1" y="1" width="638" height="338" rx="10" fill="#0f1426" stroke="#2b3350"/>
+     <rect x="60" y="60" width="180" height="96" rx="8" fill="#1d2742" stroke="#3d6bff"/>
+     <text x="88" y="86" fill="#e6e9f2" font-size="13" font-family="sans-serif">users 🔑</text>
+     <text x="88" y="110" fill="#9aa4bf" font-size="11" font-family="sans-serif">id · name · email</text>
+     <text x="88" y="132" fill="#9aa4bf" font-size="11" font-family="sans-serif">created_at</text>
+     <rect x="400" y="180" width="180" height="96" rx="8" fill="#1d2742" stroke="#3a4366"/>
+     <text x="428" y="206" fill="#e6e9f2" font-size="13" font-family="sans-serif">orders</text>
+     <text x="428" y="230" fill="#9aa4bf" font-size="11" font-family="sans-serif">id · user_id · total</text>
+     <text x="428" y="252" fill="#9aa4bf" font-size="11" font-family="sans-serif">status</text>
+     <line x1="240" y1="120" x2="400" y2="205" stroke="#3d6bff" stroke-width="2"/>
+     <text x="286" y="150" fill="#3d6bff" font-size="11" font-family="sans-serif">1 ─ n</text>`,
+  ),
+  /** E2EE 同步流。 */
+  sync: svg(
+    '端到端加密同步',
+    `<rect x="1" y="1" width="638" height="338" rx="10" fill="#0f1426" stroke="#2b3350"/>
+     <rect x="40" y="120" width="140" height="90" rx="10" fill="#1d2742" stroke="#3d6bff"/>
+     <text x="70" y="155" fill="#e6e9f2" font-size="13" font-family="sans-serif">设备 A</text>
+     <text x="58" y="178" fill="#9aa4bf" font-size="10" font-family="sans-serif">DEK 加密</text>
+     <rect x="250" y="120" width="140" height="90" rx="10" fill="#1d2742" stroke="#3a4366"/>
+     <text x="286" y="155" fill="#e6e9f2" font-size="13" font-family="sans-serif">服务端</text>
+     <text x="268" y="178" fill="#9aa4bf" font-size="10" font-family="sans-serif">仅存密文</text>
+     <rect x="460" y="120" width="140" height="90" rx="10" fill="#1d2742" stroke="#3d6bff"/>
+     <text x="490" y="155" fill="#e6e9f2" font-size="13" font-family="sans-serif">设备 B</text>
+     <text x="478" y="178" fill="#9aa4bf" font-size="10" font-family="sans-serif">DEK 解密</text>
+     <line x1="180" y1="150" x2="250" y2="150" stroke="#3d6bff" stroke-width="2"/>
+     <line x1="390" y1="150" x2="460" y2="150" stroke="#3d6bff" stroke-width="2"/>
+     <text x="186" y="140" fill="#9aa4bf" font-size="10" font-family="sans-serif">AES-GCM</text>
+     <text x="396" y="140" fill="#9aa4bf" font-size="10" font-family="sans-serif">AES-GCM</text>
+     <text x="40" y="70" fill="#9aa4bf" font-size="12" font-family="sans-serif">连接 / 分组 / 保存查询在客户端加密后同步</text>`,
+  ),
+} as const;
 
 export const DOCS: readonly DocPage[] = [
   {
     slug: 'getting-started',
     title: '快速开始',
     summary: '安装扩展、建立第一个连接、运行第一条查询。',
+    figure: 'vscode',
     sections: [
       {
         heading: '安装',
@@ -45,6 +158,7 @@ export const DOCS: readonly DocPage[] = [
     slug: 'connections',
     title: '连接管理',
     summary: '连接、分组、SSH 隧道与凭据存储。',
+    figure: 'connection',
     sections: [
       {
         heading: '分组与克隆',
@@ -60,6 +174,7 @@ export const DOCS: readonly DocPage[] = [
     slug: 'sql',
     title: 'SQL 编辑器',
     summary: '补全、格式化、执行、取消与 EXPLAIN。',
+    figure: 'query',
     sections: [
       {
         heading: '编辑体验',
@@ -90,6 +205,7 @@ export const DOCS: readonly DocPage[] = [
     slug: 'schema',
     title: '结构工具',
     summary: '表设计器、DDL、ER 图与 Schema 对比。',
+    figure: 'er',
     sections: [
       {
         heading: '表设计器',
@@ -105,6 +221,7 @@ export const DOCS: readonly DocPage[] = [
     slug: 'sync',
     title: '个人同步',
     summary: '端到端加密地在多设备间同步连接、分组与保存查询。',
+    figure: 'sync',
     sections: [
       {
         heading: '原理',
@@ -175,6 +292,7 @@ const STYLE = `
       article code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; font-size: .9em; }
       article p, article li { color: #cdd4e6; }
       article ol, article ul { padding-left: 22px; }
+      .fig { width: 100%; height: auto; margin: 4px 0 24px; border: 1px solid var(--line); border-radius: 12px; background: #0f1426; }
       .cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top: 18px; }
       .card { display: block; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); text-decoration: none; color: inherit; }
       .card:hover { border-color: var(--accent); }
@@ -193,7 +311,18 @@ function escapeHtml(input: string): string {
     .replace(/'/g, '&#39;');
 }
 
-function shell(title: string, body: string): string {
+export interface DocsRenderOptions {
+  /** 请求是否已登录（由服务端按 refresh cookie 判定）。登录时 header 改为控制台入口。 */
+  loggedIn?: boolean;
+}
+
+function navAuth(opts: DocsRenderOptions): string {
+  return opts.loggedIn
+    ? `<a href="/db/">控制台</a>`
+    : `<a href="/login">登录</a>`;
+}
+
+function shell(title: string, body: string, opts: DocsRenderOptions): string {
   return `<!doctype html>
 <html lang="zh-CN">
   <head>
@@ -209,9 +338,10 @@ function shell(title: string, body: string): string {
         <a class="brand" href="/">DevBelt</a>
         <span class="spacer"></span>
         <nav>
-          <a href="/docs">文档</a>
+          <a href="/">首页</a>
+          <a href="/db/docs">文档</a>
           <a href="/plans">套餐</a>
-          <a href="/login">登录</a>
+          ${navAuth(opts)}
         </nav>
       </header>
       ${body}
@@ -223,18 +353,18 @@ function shell(title: string, body: string): string {
 
 function toc(currentSlug?: string): string {
   const links = DOCS.map(
-    (d) => `<a href="/docs/${d.slug}"${d.slug === currentSlug ? ' class="on"' : ''}>${escapeHtml(d.title)}</a>`,
+    (d) => `<a href="/db/docs/${d.slug}"${d.slug === currentSlug ? ' class="on"' : ''}>${escapeHtml(d.title)}</a>`,
   ).join('\n          ');
   return `<nav class="toc">
-          <a href="/docs"${currentSlug === undefined ? ' class="on"' : ''}>文档首页</a>
+          <a href="/db/docs"${currentSlug === undefined ? ' class="on"' : ''}>文档首页</a>
           ${links}
         </nav>`;
 }
 
 /** 文档首页：列出全部文档入口。 */
-export function renderDocsIndex(): string {
+export function renderDocsIndex(opts: DocsRenderOptions = {}): string {
   const cards = DOCS.map(
-    (d) => `<a class="card" href="/docs/${d.slug}"><strong>${escapeHtml(d.title)}</strong><span>${escapeHtml(d.summary)}</span></a>`,
+    (d) => `<a class="card" href="/db/docs/${d.slug}"><strong>${escapeHtml(d.title)}</strong><span>${escapeHtml(d.summary)}</span></a>`,
   ).join('\n          ');
   const body = `<div class="layout">
         ${toc()}
@@ -246,13 +376,14 @@ export function renderDocsIndex(): string {
           </div>
         </article>
       </div>`;
-  return shell('使用文档', body);
+  return shell('使用文档', body, opts);
 }
 
 /** 单篇文档；未知 slug 返回 null（由路由决定 404）。 */
-export function renderDocPage(slug: string): string | null {
+export function renderDocPage(slug: string, opts: DocsRenderOptions = {}): string | null {
   const doc = DOCS.find((d) => d.slug === slug);
   if (!doc) return null;
+  const figure = doc.figure ? `\n          ${FIG[doc.figure]}` : '';
   const sections = doc.sections
     .map((s) => `<h2>${escapeHtml(s.heading)}</h2>\n          ${s.html}`)
     .join('\n          ');
@@ -260,9 +391,9 @@ export function renderDocPage(slug: string): string | null {
         ${toc(doc.slug)}
         <article>
           <h1>${escapeHtml(doc.title)}</h1>
-          <p class="summary">${escapeHtml(doc.summary)}</p>
+          <p class="summary">${escapeHtml(doc.summary)}</p>${figure}
           ${sections}
         </article>
       </div>`;
-  return shell(doc.title, body);
+  return shell(doc.title, body, opts);
 }

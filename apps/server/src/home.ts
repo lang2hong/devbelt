@@ -71,7 +71,7 @@ const TOOLS: readonly HomeTool[] = [
   {
     name: 'DevBelt DB Client',
     desc: '正在开发的数据库客户端（lang2hong.devbelt-db-client）：查看使用文档。',
-    href: '/docs',
+    href: '/db/docs',
     badge: '文档',
   },
   {
@@ -91,7 +91,7 @@ const TOOLS: readonly HomeTool[] = [
 function toolCard(tool: HomeTool): string {
   const inner = `<strong>${escapeHtml(tool.name)}<span class="badge">${escapeHtml(tool.badge)}</span></strong><span>${escapeHtml(tool.desc)}</span>`;
   if (!tool.href) return `<div class="tool soon">${inner}</div>`;
-  // 站内相对链接（如 /docs）不新开标签页；外部链接新开并带 noreferrer。
+  // 站内相对链接（如 /db/docs）不新开标签页；外部链接新开并带 noreferrer。
   return /^https?:\/\//.test(tool.href)
     ? `<a class="tool" href="${tool.href}" target="_blank" rel="noopener noreferrer">${inner}</a>`
     : `<a class="tool" href="${tool.href}">${inner}</a>`;
@@ -143,7 +143,7 @@ export function renderHome(plans: HomePlan[] | null, opts: HomeRenderOptions = {
       .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
       header.top { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 16px; padding: 20px 0;
         background: rgba(11,16,32,.85); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
-      header.top .brand { font-weight: 700; font-size: 1.15rem; letter-spacing: -0.01em; }
+      header.top .brand { font-weight: 700; font-size: 1.15rem; letter-spacing: -0.01em; color: inherit; text-decoration: none; }
       header.top .spacer { flex: 1; }
       header.top nav a { color: var(--muted); text-decoration: none; margin-left: 18px; font-size: .95rem; }
       header.top nav a:hover { color: var(--fg); }
@@ -184,12 +184,12 @@ export function renderHome(plans: HomePlan[] | null, opts: HomeRenderOptions = {
   <body>
     <div class="wrap">
       <header class="top">
-        <span class="brand">DevBelt</span>
+        <a class="brand" href="/">DevBelt</a>
         <span class="spacer"></span>
         <nav>
           <a href="#tools">工具</a>
-          <a href="#pricing">套餐</a>
-          <a href="/docs">文档</a>
+          <a href="/plans">套餐</a>
+          <a href="/db/docs">文档</a>
           ${navAuth}
         </nav>
       </header>
@@ -229,7 +229,7 @@ export function renderHome(plans: HomePlan[] | null, opts: HomeRenderOptions = {
  *
  * 与首页 `#pricing` 同源同款卡片；未登录用户也可查看并前往注册。
  */
-export function renderPlansPage(plans: HomePlan[] | null): string {
+export function renderPlansPage(plans: HomePlan[] | null, opts: { loggedIn?: boolean } = {}): string {
   const personal = plans?.filter((p) => p.kind === 'personal') ?? [];
   const organization = plans?.filter((p) => p.kind === 'organization') ?? [];
   const groups =
@@ -289,9 +289,10 @@ export function renderPlansPage(plans: HomePlan[] | null): string {
         <a class="brand" href="/">DevBelt</a>
         <span class="spacer"></span>
         <nav>
-          <a href="/docs">文档</a>
+          <a href="/">首页</a>
+          <a href="/db/docs">文档</a>
           <a href="/plans">套餐</a>
-          <a href="/login">登录</a>
+          ${opts.loggedIn ? `<a href="/db/">控制台</a>` : `<a href="/login">登录</a>`}
         </nav>
       </header>
       <main>

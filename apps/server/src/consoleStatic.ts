@@ -131,6 +131,17 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
     }
   }
 
+  /** 公开页（首页/套餐/文档）共用的登录态判定；失败按未登录处理，不阻断渲染。 */
+  async function loadLoggedIn(req: FastifyRequest): Promise<boolean> {
+    if (!opts.isLoggedIn) return false;
+    try {
+      return await opts.isLoggedIn(req);
+    } catch (err) {
+      app.log.warn(`[home] session check failed: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  }
+
   // 身份页（auth-ui，根路径）
   const authEntries: Array<[string, string]> = [
     ['/verify-email', 'verify-email.html'],
@@ -144,31 +155,23 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
 
   // 套件首页（套餐为服务端渲染；数据源失败时降级为不含套餐的页面）
   app.get('/', async (req, reply) => {
-    const plans = await loadHomePlans();
-    let loggedIn = false;
-    if (opts.isLoggedIn) {
-      try {
-        loggedIn = await opts.isLoggedIn(req);
-      } catch (err) {
-        // 登录态判定失败不阻断首页：按未登录渲染。
-        app.log.warn(`[home] session check failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
+    const [plans, loggedIn] = await Promise.all([loadHomePlans(), loadLoggedIn(req)]);
     sendHtml(reply, renderHome(plans, { loggedIn }));
   });
 
   // 公开套餐页（/plans，无需登录）
-  app.get('/plans', async (_req, reply) => {
-    sendHtml(reply, renderPlansPage(await loadHomePlans()));
+  app.get('/plans', async (req, reply) => {
+    const [plans, loggedIn] = await Promise.all([loadHomePlans(), loadLoggedIn(req)]);
+    sendHtml(reply, renderPlansPage(plans, { loggedIn }));
   });
 
-  // 公开文档中心（/docs，无需登录）
-  app.get('/docs', async (_req, reply) => {
-    sendHtml(reply, renderDocsIndex());
+  // 公开文档中心（/db/docs，无需登录）。注册为静态路由，优先于下方 /db/* SPA fallback。
+  app.get('/db/docs', async (req, reply) => {
+    sendHtml(reply, renderDocsIndex({ loggedIn: await loadLoggedIn(req) }));
   });
-  app.get('/docs/:slug', async (req, reply) => {
+  app.get('/db/docs/:slug', async (req, reply) => {
     const { slug } = req.params as { slug: string };
-    const html = renderDocPage(slug);
+    const html = renderDocPage(slug, { loggedIn: await loadLoggedIn(req) });
     if (html == null) return notFound(req, reply);
     sendHtml(reply, html);
   });

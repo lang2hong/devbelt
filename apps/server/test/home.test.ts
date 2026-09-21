@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderHome, type HomePlan } from '../src/home.js';
+import { renderHome, renderPlansPage, type HomePlan } from '../src/home.js';
 
 const PLANS: HomePlan[] = [
   {
@@ -53,16 +53,25 @@ describe('套件首页渲染', () => {
     expect(html).toContain('待开发');
   });
 
-  it('DevBelt DB Client 卡片链接到公开文档 /docs（站内，不新开标签）', () => {
+  it('DevBelt DB Client 卡片链接到公开文档 /db/docs（站内，不新开标签）', () => {
     const html = renderHome(PLANS);
-    expect(html).toContain('href="/docs"');
-    expect(html).not.toContain('href="/docs" target="_blank"');
+    expect(html).toContain('href="/db/docs"');
+    expect(html).not.toContain('href="/db/docs" target="_blank"');
     expect(html).toContain('文档');
   });
 
-  it('套餐 CTA 指向公开 /plans（登录与否一致）', () => {
+  it('套餐入口统一指向公开 /plans（登录与否一致）', () => {
     expect(renderHome(PLANS)).toContain('href="/plans"');
     expect(renderHome(PLANS, { loggedIn: true })).toContain('href="/plans"');
+    // header 不再用页内 #pricing 锚点做导航
+    expect(renderHome(PLANS)).not.toContain('href="#pricing"');
+  });
+
+  it('套餐页 header 感知登录态', () => {
+    expect(renderPlansPage(PLANS)).toContain('href="/login"');
+    expect(renderPlansPage(PLANS, { loggedIn: true })).toContain('href="/db/"');
+    expect(renderPlansPage(PLANS, { loggedIn: true })).not.toContain('href="/login"');
+    expect(renderPlansPage(PLANS)).toContain('href="/db/docs"');
   });
 
   it('渲染个人与组织套餐，并格式化价格', () => {

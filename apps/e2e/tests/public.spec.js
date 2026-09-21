@@ -35,12 +35,12 @@ test('DB 控制台壳可达', async ({ page }) => {
   await expect(page.locator('body')).not.toHaveText(/not found/i);
 });
 
-test('公开文档中心 /docs 无需登录', async ({ page }) => {
-  const res = await page.goto('/docs');
+test('公开文档中心 /db/docs 无需登录', async ({ page }) => {
+  const res = await page.goto('/db/docs');
   expect(res?.status()).toBe(200);
   await expect(page.getByRole('heading', { name: '使用文档' })).toBeVisible();
   // 文档卡片可进入单篇
-  await page.goto('/docs/getting-started');
+  await page.goto('/db/docs/getting-started');
   await expect(page.getByRole('heading', { name: '快速开始' })).toBeVisible();
 });
 
