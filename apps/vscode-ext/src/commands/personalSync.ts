@@ -115,17 +115,20 @@ async function existingState(session: SyncSessionPort): Promise<StateDto | undef
   }
 }
 
-function reportInitialRun(ui: SyncUi, result: SyncRun): void {
+type SyncOp = 'sync' | 'pull' | 'push';
+
+function reportInitialRun(ui: SyncUi, result: SyncRun, op: SyncOp): void {
   if (result?.stage === 'conflict') {
     // 显式同步遇冲突：直接打开冲突解决面板（保留本地/合并/使用远端 + 批量），
     // 而不是笼统的「需要重试」，避免隐藏冲突或让用户误以为重试即可。
     void vscode.commands.executeCommand('devbelt.resolveConflicts');
     return;
   }
+  // 按操作类型分别提示：pull / push / 立即同步 不再共用同一句，结果可区分。
   if (result?.stage === 'ok') {
-    ui.info(l10n('sync.ready'));
+    ui.info(l10n(`sync.done.${op}`));
   } else {
-    ui.warn(l10n('sync.initialSyncPending'));
+    ui.warn(l10n(`sync.pending.${op}`));
   }
 }
 
@@ -297,9 +300,10 @@ export async function syncEntry(deps: PersonalSyncCommandDeps): Promise<void> {
   else await initializePersonalSync(deps);
 }
 
-/** 显式 pull / push 共用：需解锁，结果经 reportInitialRun 反馈。 */
+/** 显式 pull / push / 立即同步共用：需解锁，结果按操作类型反馈。 */
 async function runExplicitSync(
   deps: PersonalSyncCommandDeps,
+  op: SyncOp,
   run: (session: SyncSessionPort) => Promise<SyncRun>,
 ): Promise<void> {
   // 数据同步门禁：走统一 gate（仅当权益明确禁用时拦截，默认允许），不再用动态 cast。
@@ -314,20 +318,25 @@ async function runExplicitSync(
     return;
   }
   try {
-    reportInitialRun(deps.ui, await run(session));
+    reportInitialRun(deps.ui, await run(session), op);
   } catch {
-    deps.ui.warn(l10n('sync.initialSyncPending'));
+    deps.ui.warn(l10n(`sync.pending.${op}`));
   }
 }
 
 /** 仅拉取远端（pull）。 */
 export async function pullPersonalSync(deps: PersonalSyncCommandDeps): Promise<void> {
-  await runExplicitSync(deps, (session) => session.syncPull());
+  await runExplicitSync(deps, 'pull', (session) => session.syncPull());
 }
 
 /** 仅推送本地变更（push）。 */
 export async function pushPersonalSync(deps: PersonalSyncCommandDeps): Promise<void> {
-  await runExplicitSync(deps, (session) => session.syncPush());
+  await runExplicitSync(deps, 'push', (session) => session.syncPush());
+}
+
+/** 立即同步（显式，等待并反馈结果）。 */
+export async function syncNowPersonalSync(deps: PersonalSyncCommandDeps): Promise<void> {
+  await runExplicitSync(deps, 'sync', (session) => session.syncNow());
 }
 
 /**
@@ -376,6 +385,7 @@ export function registerPersonalSyncCommands(
     vscode.commands.registerCommand('devbelt.syncEntry', () => syncEntry(deps)),
     vscode.commands.registerCommand('devbelt.syncPull', () => pullPersonalSync(deps)),
     vscode.commands.registerCommand('devbelt.syncPush', () => pushPersonalSync(deps)),
+    vscode.commands.registerCommand('devbelt.syncNow', () => syncNowPersonalSync(deps)),
     vscode.commands.registerCommand('devbelt.resetLocalSync', () => resetLocalSync(deps)),
     // legacy alias：该命令曾叫 clearLocalSync，用户可能已绑快捷键/引用此 id。
     // 保留注册以免重命名后旧快捷键静默失效（不在 package.json 声明，故不出现在命令面板）。

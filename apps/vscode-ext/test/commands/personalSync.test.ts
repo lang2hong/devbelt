@@ -9,7 +9,7 @@ vi.mock('vscode', () => ({
   commands: { executeCommand: mocks.executeCommand },
 }));
 
-import { initializePersonalSync, unlockPersonalSync, syncEntry, pullPersonalSync, pushPersonalSync, resetLocalSync, type PersonalSyncCommandDeps, type SyncSessionPort, type SyncUi } from '../../src/commands/personalSync';
+import { initializePersonalSync, unlockPersonalSync, syncEntry, pullPersonalSync, pushPersonalSync, syncNowPersonalSync, resetLocalSync, type PersonalSyncCommandDeps, type SyncSessionPort, type SyncUi } from '../../src/commands/personalSync';
 import { SyncApiError } from '@devkit/db-host/sync/e2e/client';
 import type { InitialSyncMaterial } from '@devkit/db-host/sync/keyLifecycle';
 import type { StateDto } from '@devkit/db-host/sync/e2e/types';
@@ -317,13 +317,24 @@ describe('personal sync B1 commands', () => {
     expect(warn).toHaveBeenCalled();
   });
 
-  it('pull/push: unlocked session invokes the matching phase', async () => {
+  it('pull/push: unlocked session invokes the matching phase and reports per-op', async () => {
     const session = makeSession({ isUnlocked: true });
-    const { deps } = makeDeps(session, []);
+    const { deps, info } = makeDeps(session, []);
     await pullPersonalSync(deps);
     await pushPersonalSync(deps);
     expect(session.syncPull).toHaveBeenCalledTimes(1);
     expect(session.syncPush).toHaveBeenCalledTimes(1);
+    // 分操作提示，不再共用同一句
+    expect(info).toHaveBeenCalledWith('Pulled remote changes.');
+    expect(info).toHaveBeenCalledWith('Pushed local changes.');
+  });
+
+  it('syncNow: explicit run waits and reports its own result', async () => {
+    const session = makeSession({ isUnlocked: true });
+    const { deps, info } = makeDeps(session, []);
+    await syncNowPersonalSync(deps);
+    expect(session.syncNow).toHaveBeenCalledTimes(1);
+    expect(info).toHaveBeenCalledWith('Sync complete.');
   });
 
   it('pull/push: conflict opens the conflict resolver instead of a retry warning', async () => {

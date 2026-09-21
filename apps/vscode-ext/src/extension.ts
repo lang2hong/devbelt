@@ -206,12 +206,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     syncStatusBar.refresh();
   });
   context.subscriptions.push(onAuthChange);
-  // 立即同步命令（解锁态才可用，when=devbelt.sync.ready）+ 窗口聚焦补同步。
+  // 窗口聚焦补同步（后台、无提示）。显式「立即同步」命令在 personalSync 注册并反馈结果。
   context.subscriptions.push(
-    vscode.commands.registerCommand('devbelt.syncNow', () => {
-      const session = syncFactory.current;
-      if (session?.isUnlocked) session.scheduleNow();
-    }),
     vscode.window.onDidChangeWindowState((e) => {
       if (!e.focused) return;
       // 自动同步关闭时不因切窗触发同步（手动命令仍可用）。
