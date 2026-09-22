@@ -577,4 +577,59 @@ describe('AuthenticatorStore', () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(store.isSecretMissing(id)).toBe(false);
   });
+
+  // ── init canonicalizes whatever SecretStorage holds ──
+  it('init normalizes a non-canonical stored secret (lowercase/padding → canonical)', async () => {
+    const add = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });
+    expect(add.ok).toBe(true);
+    if (!add.ok) return;
+    const id = add.entry.id;
+    // overwrite with a valid-but-non-canonical form (lowercase); canonical is uppercase
+    sec.map.set(`devbelt.authenticator.${id}.secret`, 'jbswy3dpehpk3pxp');
+    store.dispose();
+    const store2 = new AuthenticatorStore(mem, sec as never, auth(false));
+    await store2.init();
+    expect(store2.getSecret(id)).toBe('JBSWY3DPEHPK3PXP');
+    expect(store2.exportAll()).toContain('secret=JBSWY3DPEHPK3PXP');
+    store2.dispose();
+  });
+
+  it('init marks a corrupt stored secret as missing (no per-tick throw)', async () => {
+    const add = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });
+    expect(add.ok).toBe(true);
+    if (!add.ok) return;
+    const id = add.entry.id;
+    sec.map.set(`devbelt.authenticator.${id}.secret`, '000'); // invalid base32 chars
+    store.dispose();
+    const store2 = new AuthenticatorStore(mem, sec as never, auth(false));
+    await store2.init();
+    expect(store2.isSecretMissing(id)).toBe(true);
+    expect(store2.getSecret(id)).toBeUndefined();
+    expect(store2.getCodes([id], Date.now())[id]).toBeUndefined();
+    expect(store2.exportAll()).toBe('');
+    store2.dispose();
+  });
+
+  // ── reorderGroup defensive handling ──
+  it('reorderGroup dedupes ids and appends unlisted groups (complete permutation)', async () => {
+    const a = await store.addGroup('A');
+    const b = await store.addGroup('B');
+    const c = await store.addGroup('C');
+    if (!a.ok || !b.ok || !c.ok) return;
+    // duplicate c, omit b → b appended by its old sortOrder
+    await store.reorderGroup([c.group.id, a.group.id, c.group.id]);
+    expect(store.listGroups().map((g) => g.name)).toEqual(['C', 'A', 'B']);
+    expect(store.listGroups().map((g) => g.sortOrder)).toEqual([10, 20, 30]);
+  });
+
+  it('reorderGroup with an incomplete id list keeps all groups, deterministic order', async () => {
+    const a = await store.addGroup('A');
+    const b = await store.addGroup('B');
+    const c = await store.addGroup('C');
+    if (!a.ok || !b.ok || !c.ok) return;
+    await store.reorderGroup([b.group.id]);
+    // listed first, then the rest (A, C) by their previous sortOrder
+    expect(store.listGroups().map((g) => g.name)).toEqual(['B', 'A', 'C']);
+    expect(store.listGroups().map((g) => g.sortOrder)).toEqual([10, 20, 30]);
+  });
 });

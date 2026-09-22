@@ -153,8 +153,15 @@ export class AuthenticatorStore implements VscodeDisposable {
     await Promise.all(this.entries.map(async (e) => {
       try {
         const v = await this.secrets.get(secretKey(e.id));
-        if (v === undefined) this.missingSecrets.add(e.id);
-        else this.secretCache.set(e.id, v);
+        if (v === undefined) {
+          this.missingSecrets.add(e.id);
+        } else {
+          // 预热时统一归一化：既保证 exportAll 的"大写无 padding"契约不依赖写入来源，
+          // 也把损坏值（非法 base32 / 纯 padding / 空）归入 missingSecrets，而非每秒静默抛错。
+          const canon = canonicalizeSecret(v);
+          if (canon) this.secretCache.set(e.id, canon);
+          else this.missingSecrets.add(e.id);
+        }
       } catch (err) {
         // 单条失败不阻断整批预热，标记为缺失由 UI 显示灰色条
         this.log.warn('authenticator secret preload failed', String(err));
@@ -436,13 +443,26 @@ export class AuthenticatorStore implements VscodeDisposable {
     return { ok: true };
   }
 
-  /** 按传入 id 顺序把 groups 的 sortOrder 重写为 10,20,30,...，避免空隙/重叠。 */
+  /**
+   * 按传入 id 顺序把 groups 的 sortOrder 重写为 10,20,30,...，避免空隙/重叠。
+   * 防御性：对传入 id 去重；未列入的组按原 sortOrder 追加到末尾——
+   * 保证结果始终是完整排列，不会因重复/漏列 id 产生相同 sortOrder 或遗漏组。
+   */
   async reorderGroup(orderedIds: string[]): Promise<void> {
     this.assertInit();
-    orderedIds.forEach((id, idx) => {
-      const g = this.groups.find((x) => x.id === id);
-      if (g) g.sortOrder = (idx + 1) * 10;
-    });
+    const byId = new Map(this.groups.map((g) => [g.id, g]));
+    const seen = new Set<string>();
+    const ordered: AuthenticatorGroup[] = [];
+    for (const id of orderedIds) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const g = byId.get(id);
+      if (g) ordered.push(g);
+    }
+    const rest = this.groups
+      .filter((g) => !seen.has(g.id))
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    [...ordered, ...rest].forEach((g, i) => { g.sortOrder = (i + 1) * 10; });
     this.groups.sort((a, b) => a.sortOrder - b.sortOrder);
     await this.saveGroups();
     this.publish('group', 'update', '*');
