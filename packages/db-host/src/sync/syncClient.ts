@@ -62,6 +62,8 @@ export interface PersonalEntitlement {
   allowErDiagram?: boolean;
   /** 是否允许数据同步。 */
   allowDataSync?: boolean;
+  /** 可保存验证器条目上限；0 = 不限。缺省 fail-closed 到 free 默认。 */
+  maxAuthenticatorEntries?: number;
 }
 
 export interface MeResponse {

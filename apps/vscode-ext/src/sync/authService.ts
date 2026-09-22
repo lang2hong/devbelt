@@ -4,7 +4,7 @@ import { readFileSync } from 'fs';
 import { hostname, platform, arch, release } from 'os';
 import { SyncClient, AuthResult, DeviceInfo, MeResponse } from '@devbelt/db-host/sync/syncClient';
 import { eventBus, AuthEvent } from '@devbelt/db-host/utils/event';
-import { DEFAULT_FREE_ENGINES, DEFAULT_FREE_MAX_CONNECTIONS } from '@devbelt/db-host/sync/entitlementGate';
+import { DEFAULT_FREE_ENGINES, DEFAULT_FREE_MAX_CONNECTIONS, DEFAULT_FREE_MAX_AUTH_ENTRIES } from '@devbelt/db-host/sync/entitlementGate';
 
 // 由 esbuild 构建时从 .env / .env.production 注入（见 esbuild.js 的 define）；测试环境由 vitest.config.ts 提供同名字段
 declare const __SYNC_SERVER_URL__: string;
@@ -153,6 +153,7 @@ export class AuthService {
       allowConnectionExport: sub?.entitlement?.allowConnectionExport !== false,
       allowErDiagram: sub?.entitlement?.allowErDiagram !== false,
       allowDataSync: sub?.entitlement?.allowDataSync !== false,
+      maxAuthenticatorEntries: sub?.entitlement?.maxAuthenticatorEntries ?? DEFAULT_FREE_MAX_AUTH_ENTRIES,
     });
     this.cachedUserId = me.user.userId;
     return me;

@@ -38,7 +38,10 @@ describe('机械门禁', () => {
       for (const m of text.matchAll(/registerCommand\(\s*.(devbelt[\w.]+)./g)) registered.add(m[1]);
     }
     // 有意不声明：历史别名，用户可能已绑快捷键，但不应进命令面板。
-    const intentionalUndeclared = new Set(['devbelt.clearLocalSync']);
+    const intentionalUndeclared = new Set([
+      'devbelt.clearLocalSync',
+      'devbelt.authenticator._smoketest', // S1 临时内部手测命令，S2 引入正式命令时删除
+    ]);
     const undeclared = [...registered].filter((c) => !declared.has(c) && !intentionalUndeclared.has(c));
     const unregistered = [...declared].filter((c) => !registered.has(c));
     expect(undeclared, `注册但未在 package.json 声明：${undeclared.join(', ')}`).toEqual([]);

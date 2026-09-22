@@ -1,0 +1,103 @@
+/**
+ * RFC 4648 §6 base32 编解码（字母表 A–Z、2–7，`=` 作 padding）。
+ *
+ * 仅提供两处入口，配合 `canonicalizeSecret` 使用：
+ *  - `decodeBase32Loose`：容错范围**仅限三类**：
+ *      (a) 忽略 ASCII 空白（空格/制表/换行）；
+ *      (b) 大小写不敏感；
+ *      (c) 末尾缺失 padding 自动补齐。
+ *    除此以外的字符（`0/1/8/9`、全角字母、零宽字符等）一律抛错——
+ *    不做"尽力解码"或跳过非法字符，避免 secret 被静默错解。
+ *  - `encodeBase32UpperCaseNoPadding`：输出大写、无 padding 的规范形态，
+ *    作为 SecretStorage 存储与导出的统一形式。
+ *
+ * 位运算注意：JS 位移受 32 位有符号整数限制，<<32 会溢出回自身，
+ * 因此编解码统一用 BigInt 承载 5 字节→40bit 的中间缓冲。
+ */
+
+const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+const PADDING = '=';
+
+/** 字母 → 5bit 值；大小写均接受。 */
+const DECODE_TABLE: Record<string, number> = /* @__PURE__ */ (() => {
+  const t: Record<string, number> = {};
+  for (let i = 0; i < ALPHABET.length; i++) t[ALPHABET[i]] = i;
+  for (let i = 0; i < ALPHABET.length; i++) t[ALPHABET[i].toLowerCase()] = i;
+  return t;
+})();
+
+function isAsciiWhitespace(c: number): boolean {
+  return c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d;
+}
+
+export function decodeBase32Loose(s: string): Uint8Array {
+  let stripped = '';
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    const code = ch.charCodeAt(0);
+    if (code < 128 && isAsciiWhitespace(code)) continue;
+    if (ch === PADDING) continue;
+    if (!(ch.toUpperCase() in DECODE_TABLE)) {
+      throw new Error(`invalid base32 character: ${ch}`);
+    }
+    stripped += ch.toUpperCase();
+  }
+  if (stripped.length === 0) return new Uint8Array(0);
+  // 补齐末尾 padding 到整组 8 字符
+  const padRemainder = stripped.length % 8;
+  if (padRemainder !== 0) {
+    stripped += PADDING.repeat(8 - padRemainder);
+  }
+  const out: number[] = [];
+  for (let i = 0; i < stripped.length; i += 8) {
+    // 末尾可能是 padding（'='），不在 DECODE_TABLE 中；padding 位按 0 参与运算。
+    const a = DECODE_TABLE[stripped[i]] ?? 0;
+    const b = DECODE_TABLE[stripped[i + 1]] ?? 0;
+    const c = DECODE_TABLE[stripped[i + 2]] ?? 0;
+    const d = DECODE_TABLE[stripped[i + 3]] ?? 0;
+    const e = DECODE_TABLE[stripped[i + 4]] ?? 0;
+    const f = DECODE_TABLE[stripped[i + 5]] ?? 0;
+    const g = DECODE_TABLE[stripped[i + 6]] ?? 0;
+    const h = DECODE_TABLE[stripped[i + 7]] ?? 0;
+    // 统计本组实际字符数（非 '='），据此决定输出字节数：
+    //   2 → 1 字节；4 → 2 字节；5 → 3 字节；7 → 4 字节；8 → 5 字节
+    let nonPad = 8;
+    for (let k = 7; k >= 0; k--) {
+      if (stripped[i + k] === PADDING) nonPad--;
+      else break;
+    }
+    // 40-bit buffer via BigInt to avoid 32-bit shift wrap
+    const buf = (BigInt(a) << 35n) | (BigInt(b) << 30n) | (BigInt(c) << 25n) | (BigInt(d) << 20n) |
+      (BigInt(e) << 15n) | (BigInt(f) << 10n) | (BigInt(g) << 5n) | BigInt(h);
+    out.push(Number((buf >> 32n) & 0xffn));
+    if (nonPad >= 4) out.push(Number((buf >> 24n) & 0xffn));
+    if (nonPad >= 5) out.push(Number((buf >> 16n) & 0xffn));
+    if (nonPad >= 7) out.push(Number((buf >> 8n) & 0xffn));
+    if (nonPad >= 8) out.push(Number(buf & 0xffn));
+  }
+  return new Uint8Array(out);
+}
+
+export function encodeBase32UpperCaseNoPadding(bytes: Uint8Array): string {
+  if (bytes.length === 0) return '';
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 5) {
+    const b0 = bytes[i];
+    const b1 = bytes[i + 1] ?? 0;
+    const b2 = bytes[i + 2] ?? 0;
+    const b3 = bytes[i + 3] ?? 0;
+    const b4 = bytes[i + 4] ?? 0;
+    // 5 bytes → 40 bits via BigInt
+    const buf = (BigInt(b0) << 32n) | (BigInt(b1) << 24n) | (BigInt(b2) << 16n) | (BigInt(b3) << 8n) | BigInt(b4);
+    const remaining = bytes.length - i;
+    out += ALPHABET[Number((buf >> 35n) & 0x1fn)];
+    out += ALPHABET[Number((buf >> 30n) & 0x1fn)];
+    if (remaining >= 2) out += ALPHABET[Number((buf >> 25n) & 0x1fn)];
+    if (remaining >= 2) out += ALPHABET[Number((buf >> 20n) & 0x1fn)];
+    if (remaining >= 3) out += ALPHABET[Number((buf >> 15n) & 0x1fn)];
+    if (remaining >= 4) out += ALPHABET[Number((buf >> 10n) & 0x1fn)];
+    if (remaining >= 4) out += ALPHABET[Number((buf >> 5n) & 0x1fn)];
+    if (remaining >= 5) out += ALPHABET[Number(buf & 0x1fn)];
+  }
+  return out;
+}

@@ -16,6 +16,8 @@ export interface CachedEntitlement {
   allowErDiagram?: boolean;
   /** 是否允许数据同步。缺省视为允许。 */
   allowDataSync?: boolean;
+  /** 可保存验证器条目上限；0 = 不限。缺省 fail-closed 到 DEFAULT_FREE_MAX_AUTH_ENTRIES。 */
+  maxAuthenticatorEntries?: number;
 }
 
 /**
@@ -35,6 +37,9 @@ export const DEFAULT_FREE_ENGINES: readonly string[] = ['mysql', 'sqlite'];
 
 /** free 档本机可保存连接数上限（连接资产差异点）。 */
 export const DEFAULT_FREE_MAX_CONNECTIONS = 10;
+
+/** free 档可保存验证器条目上限（P5 新增）。 */
+export const DEFAULT_FREE_MAX_AUTH_ENTRIES = 10;
 
 const ENGINE_BY_DB_TYPE: Readonly<Partial<Record<DatabaseType, string>>> = {
   [DatabaseType.MYSQL]: 'mysql',
@@ -135,4 +140,10 @@ export function canUseErDiagram(entitlement?: CachedEntitlement | null): boolean
 /** 是否允许数据同步；默认允许。 */
 export function canUseDataSync(entitlement?: CachedEntitlement | null): boolean {
   return entitlement?.allowDataSync !== false;
+}
+
+/** 可保存验证器条目上限；无缓存/无效值 fail-closed 到 free（10）。0 视为不限。 */
+export function maxAuthenticatorEntries(entitlement?: CachedEntitlement | null): number {
+  const v = entitlement?.maxAuthenticatorEntries;
+  return typeof v === 'number' && v >= 0 ? v : DEFAULT_FREE_MAX_AUTH_ENTRIES;
 }

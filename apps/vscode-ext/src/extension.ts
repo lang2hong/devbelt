@@ -8,7 +8,7 @@ import { QueryExecutor } from './result/queryExecutor';
 import { BaseWebView } from './result/baseWebView';
 import { TableQueryView } from './result/tableQueryView';
 import { AuditLogger } from './utils/auditLogger';
-import { diagDispose } from './utils/diagnostics';
+import { diagDispose, diagInfo, diagWarn, diagError } from './utils/diagnostics';
 import { BackupScheduler } from './schedule/backupScheduler';
 import { registerViewCommands } from './commands/viewCommands';
 import { createSyncStatusBar } from './sync/syncStatusBar';
@@ -32,6 +32,7 @@ import { registerPersonalSyncCommands } from './commands/personalSync';
 import { registerConflictCommands } from './commands/syncConflicts';
 import { registerSyncLifecycleCommands, registerSyncResetUriHandler } from './commands/syncLifecycle';
 import { SshTunnel } from './connection/sshTunnel';
+import { AuthenticatorStore } from './authenticator/store.js';
 
 /** 自动同步开关（按机器）：默认关闭，仅显式开启后才自动同步。 */
 const SYNC_AUTO_SYNC_KEY = 'devbelt.sync.autoSync';
@@ -90,6 +91,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 的可见性。此前从未及时 setContext，导致 logout/account/sessions 永久不可见、login 永久可见；
   // AuthEvent 订阅（下方）在登录/登出后刷新此上下文保持同步。
   void syncLoggedInContext(auth);
+
+  // P5 S1：TOTP 验证器存储层——纯后端就绪，S2 才接 UI。init 批量预热 secretCache 后对外可用。
+  const authStore = new AuthenticatorStore(context.globalState, context.secrets, auth, {
+    info: diagInfo, warn: diagWarn, error: diagError,
+  });
+  context.subscriptions.push({ dispose: () => authStore.dispose() });
+  await authStore.init();
+  // S1 临时手测命令（代码注册、不进 package.json，S2 引入正式命令时删除）。
+  context.subscriptions.push(vscode.commands.registerCommand('devbelt.authenticator._smoketest', async () => {
+    const n = authStore.listEntries().length;
+    const now = Date.now();
+    const ids = authStore.listEntries().slice(0, 3).map((e) => e.id);
+    const codes = authStore.getCodes(ids, now);
+    const sample = ids.map((id) => {
+      const e = authStore.listEntries().find((x) => x.id === id)!;
+      const c = codes[id];
+      return `${e.issuer}${e.account ? ':' + e.account : ''} → ${c ? c.code + ' (' + c.secondsLeft + 's)' : 'secret missing'}`;
+    }).join('\n');
+    const msg = `Authenticator: ${n} entries\n${sample || '(empty)'}`;
+    void vscode.window.showInformationMessage(msg);
+  }));
 
   // 事件总线：连接/分组变更时自动刷新树 + 重算路径 warning
   context.subscriptions.push(
