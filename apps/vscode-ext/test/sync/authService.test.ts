@@ -112,6 +112,23 @@ describe('AuthService.refreshEntitlement', () => {
     expect(memento.values.get(ENTITLEMENT_KEY)).toEqual(expected);
   });
 
+  it('服务端提供的 maxAuthenticatorEntries 被透传（非 fail-closed 默认）', async () => {
+    const secrets = makeSecrets();
+    const memento = makeMemento();
+    await secrets.store(ACCESS_KEY, 'A1');
+    const subWithQuota = {
+      ...proSub,
+      entitlement: { ...proSub.entitlement, maxAuthenticatorEntries: 500 },
+    };
+    installFetch(() => ({ status: 200, body: meResponse(subWithQuota as typeof proSub) }));
+
+    const auth = new AuthService(secrets as any, 'http://localhost:3000', memento as any);
+    await auth.init();
+    await auth.refreshEntitlement();
+
+    expect(auth.getCachedEntitlement()?.maxAuthenticatorEntries).toBe(500);
+  });
+
   it('无订阅时降级到 Free（mysql/sqlite）', async () => {
     const secrets = makeSecrets();
     const memento = makeMemento();

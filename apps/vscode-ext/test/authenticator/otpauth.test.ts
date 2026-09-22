@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseOtpauthUri, buildOtpauthUri } from '../../src/authenticator/otpauth.js';
-import { canonicalizeSecret } from '../../src/authenticator/totp.js';
+import { parseOtpauthUri, buildOtpauthUri } from '../../src/authenticator/otpauth';
+import { canonicalizeSecret } from '../../src/authenticator/totp';
 
 describe('parseOtpauthUri', () => {
   it('parses minimal URI (no issuer param, no account)', () => {
@@ -113,5 +113,26 @@ describe('buildOtpauthUri', () => {
     expect(uri).toContain('algorithm=SHA1');
     expect(uri).toContain('digits=6');
     expect(uri).toContain('period=30');
+  });
+
+  it('roundtrips non-ASCII issuer/account (no double-encoding of query issuer)', () => {
+    const secret = canonicalizeSecret('JBSWY3DPEHPK3PXP');
+    const built = buildOtpauthUri({ issuer: '中文', account: '爱丽丝', secret });
+    const reparsed = parseOtpauthUri(built);
+    expect(reparsed.issuer).toBe('中文');
+    expect(reparsed.account).toBe('爱丽丝');
+    expect(reparsed.secret).toBe(secret);
+  });
+
+  it('roundtrips issuer with special characters (/, ?, &, %)', () => {
+    const secret = canonicalizeSecret('JBSWY3DPEHPK3PXP');
+    const tricky = 'A&B/C?x%y';
+    const built = buildOtpauthUri({ issuer: tricky, account: 'u', secret });
+    const reparsed = parseOtpauthUri(built);
+    expect(reparsed.issuer).toBe(tricky);
+  });
+
+  it('parse rejects a label with a stray % (clean error, not URIError)', () => {
+    expect(() => parseOtpauthUri('otpauth://totp/bad%zz?secret=JBSWY3DPEHPK3PXP')).toThrow(/invalid otpauth URI/);
   });
 });

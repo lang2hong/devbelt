@@ -32,7 +32,7 @@ import { registerPersonalSyncCommands } from './commands/personalSync';
 import { registerConflictCommands } from './commands/syncConflicts';
 import { registerSyncLifecycleCommands, registerSyncResetUriHandler } from './commands/syncLifecycle';
 import { SshTunnel } from './connection/sshTunnel';
-import { AuthenticatorStore } from './authenticator/store.js';
+import { AuthenticatorStore } from './authenticator/store';
 
 /** 自动同步开关（按机器）：默认关闭，仅显式开启后才自动同步。 */
 const SYNC_AUTO_SYNC_KEY = 'devbelt.sync.autoSync';

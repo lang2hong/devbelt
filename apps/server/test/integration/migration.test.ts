@@ -40,13 +40,13 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
       )) as [Array<{ COLUMN_NAME: string }>, unknown];
       expect(cols).toHaveLength(0);
 
-      // 种子：4 套餐 + 特性定义/取值（baseline 10/20 + 002 扩展 4/8）。
+      // 种子：4 套餐 + 特性定义/取值（baseline 10/20 + 002 扩展 4/8 + 004 扩展 1/2）。
       const [planCount] = (await pool.query('SELECT COUNT(*) AS c FROM plans')) as [Array<{ c: number }>, unknown];
       expect(Number(planCount[0].c)).toBe(4);
       const [defCount] = (await pool.query('SELECT COUNT(*) AS c FROM plan_feature_defs')) as [Array<{ c: number }>, unknown];
-      expect(Number(defCount[0].c)).toBe(14);
+      expect(Number(defCount[0].c)).toBe(15);
       const [valCount] = (await pool.query('SELECT COUNT(*) AS c FROM plan_feature_values')) as [Array<{ c: number }>, unknown];
-      expect(Number(valCount[0].c)).toBe(28);
+      expect(Number(valCount[0].c)).toBe(30);
 
       // free 的引擎/配额经 EAV 派生正确（数量类型为 number）。
       const [freeFeatures] = (await pool.query(
@@ -83,7 +83,7 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
       expect(tableNames).toContain('plans');
 
       const [ledger] = (await pool.query('SELECT version FROM schema_migrations')) as [Array<{ version: string }>, unknown];
-      expect(ledger.map((r) => r.version)).toEqual(['001_baseline', '002_plan_features_v2', '003_plan_ordering']);
+      expect(ledger.map((r) => r.version)).toEqual(['001_baseline', '002_plan_features_v2', '003_plan_ordering', '004_authenticator_quota']);
     } finally {
       await pool.end();
     }

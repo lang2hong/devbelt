@@ -11,17 +11,21 @@
  */
 
 import { createHmac } from 'node:crypto';
-import { decodeBase32Loose, encodeBase32UpperCaseNoPadding } from './base32.js';
-import type { TotpAlgorithm } from './types.js';
+import { decodeBase32Loose, encodeBase32UpperCaseNoPadding } from './base32';
+import type { TotpAlgorithm } from './types';
 
-export { decodeBase32Loose, encodeBase32UpperCaseNoPadding } from './base32.js';
+export { decodeBase32Loose, encodeBase32UpperCaseNoPadding } from './base32';
 
-/** 零宽字符（otpauth URI 解析入口先剥一次；canonicalize 里再剥普通 \s 兜底）。 */
+/**
+ * 零宽字符（otpauth URI 解析入口先剥一次）。
+ * 注意：JS `\s` 会匹配 `\uFEFF`，但**不**匹配 `\u200B/\u200C/\u200D`，故这里显式兜底。
+ */
 const ZERO_WIDTH_RE = /[\u200B\u200C\u200D\uFEFF]/g;
 
 /**
- * 归一化 secret：剥所有 JS `\s` 空白（含全角空格、粘贴带入零宽残留）→ base32 解码→
- * 重新编码为大写、无 padding 的规范形态。解码非法字符抛错。
+ * 归一化 secret：剥所有 JS `\s` 空白（含全角空格；`\uFEFF` 亦被 `\s` 覆盖）→ base32 解码 →
+ * 重新编码为大写、无 padding 的规范形态。解码非法字符/长度抛错；空串解码为空字节（由调用方
+ * 负责拒绝空 secret）。
  */
 export function canonicalizeSecret(input: string): string {
   const stripped = input.replace(/\s+/g, '');

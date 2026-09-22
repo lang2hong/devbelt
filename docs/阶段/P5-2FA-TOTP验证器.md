@@ -719,7 +719,8 @@ export type AuthenticatorEntry = {
   feature_key = feature_key`（**不要**在 ON DUPLICATE 子句里更新 label_json/value_type/
   sort_order/unit，避免覆盖运营在控制台调过的值）；def 内容：
   `{ key:'maxAuthenticatorEntries', kind:'personal', labelEn:'Authenticator entries',
-  labelZh:'验证器条目', valueType:'number', unit:'条', sortOrder: 95 }`。
+  labelZh:'验证器条目', valueType:'number', unit:'count', sortOrder: 95 }`（unit 用英文 token
+  `count`，与既有 `maxSavedConnections`/`maxConcurrentConnections` 一致；中文由控制台渲染时本地化）。
 - plan 默认值插入：用 `INSERT INTO plan_feature_values ... SELECT ... JOIN ... ON
   DUPLICATE KEY UPDATE value_json = value_json`（同样不覆盖运营已调整的值）；默认值：
   `['free', 'maxAuthenticatorEntries', 10]`、`['pro', 'maxAuthenticatorEntries', 1000]`。

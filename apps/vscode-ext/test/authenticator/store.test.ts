@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { AuthenticatorStore } from '../../src/authenticator/store.js';
-import { encodeBase32UpperCaseNoPadding } from '../../src/authenticator/base32.js';
+import { AuthenticatorStore } from '../../src/authenticator/store';
+import { encodeBase32UpperCaseNoPadding } from '../../src/authenticator/base32';
 
 /** In-memory Memento stub (Map-backed, same shape as vscode.Memento). */
 function memento() {
@@ -92,6 +92,51 @@ describe('AuthenticatorStore', () => {
       const r = await store.addEntry({ issuer: 'A', account: `u${i}`, secret: 'JBSWY3DPEHPK3PXP' });
       expect(r.ok).toBe(true);
     }
+  });
+
+  it('addEntry quota: limit 0 means unlimited even when logged in', async () => {
+    store.dispose();
+    store = new AuthenticatorStore(mem, sec as never, auth(true, 0));
+    await store.init();
+    for (let i = 0; i < 25; i++) {
+      const r = await store.addEntry({ issuer: 'A', account: `u${i}`, secret: 'JBSWY3DPEHPK3PXP' });
+      expect(r.ok).toBe(true);
+    }
+  });
+
+  it('addEntry rejects empty / whitespace-only / padding-only secret', async () => {
+    for (const secret of ['', '   ', '\t\n', '====', '  ==  ']) {
+      const r = await store.addEntry({ issuer: 'A', account: 'a', secret });
+      expect(r.ok).toBe(false);
+      if (r.ok) throw new Error('expected invalidSecret');
+      expect(r.reason).toBe('invalidSecret');
+    }
+  });
+
+  it('updateEntry rejects empty secret (no cache corruption)', async () => {
+    const add = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });
+    expect(add.ok).toBe(true);
+    if (!add.ok) return;
+    const before = store.getSecret(add.entry.id);
+    const upd = await store.updateEntry(add.entry.id, { secret: '' });
+    expect(upd.ok).toBe(false);
+    if (upd.ok) throw new Error('expected invalidSecret');
+    expect(upd.reason).toBe('invalidSecret');
+    expect(store.getSecret(add.entry.id)).toBe(before);
+  });
+
+  it('updateEntry clamps out-of-range digits/period (IPC trust boundary)', async () => {
+    const add = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });
+    expect(add.ok).toBe(true);
+    if (!add.ok) return;
+    const upd = await store.updateEntry(add.entry.id, { digits: 7 as any, period: 45 as any });
+    expect(upd.ok).toBe(true);
+    if (!upd.ok) return;
+    expect(upd.entry.digits).toBe(6);
+    expect(upd.entry.period).toBe(30);
+    // and the code produced respects the clamp
+    const code = store.getCodes([add.entry.id], Date.now())[add.entry.id]?.code;
+    expect(code).toMatch(/^\d{6}$/);
   });
 
   it('addEntry invalid secret returns invalidSecret', async () => {
@@ -203,13 +248,13 @@ describe('AuthenticatorStore', () => {
 
   it('deleteGroup sets entries groupId to undefined (no orphan default group)', async () => {
     const g = await store.addGroup('Work');
-    expect('error' in g ? false : true).toBe(true);
-    if ('error' in g) return;
-    const add = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP', groupId: g.id });
+    expect(g.ok).toBe(true);
+    if (!g.ok) return;
+    const add = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP', groupId: g.group.id });
     expect(add.ok).toBe(true);
     if (!add.ok) return;
-    expect((store.listEntries().find((e) => e.id === add.entry.id)!).groupId).toBe(g.id);
-    const dg = await store.deleteGroup(g.id);
+    expect((store.listEntries().find((e) => e.id === add.entry.id)!).groupId).toBe(g.group.id);
+    const dg = await store.deleteGroup(g.group.id);
     expect(dg.ok).toBe(true);
     expect((store.listEntries().find((e) => e.id === add.entry.id)!).groupId).toBeUndefined();
   });
@@ -230,14 +275,21 @@ describe('AuthenticatorStore', () => {
   it('addGroup/reorderGroup sortOrder properties', async () => {
     const g1 = await store.addGroup('A');
     const g2 = await store.addGroup('B');
-    expect('error' in g1 ? false : g1.sortOrder).toBe(10);
-    expect('error' in g2 ? false : g2.sortOrder).toBe(20);
-    if ('error' in g1 || 'error' in g2) return;
-    await store.reorderGroup([g2.id, g1.id]);
+    expect(g1.ok && g1.group.sortOrder).toBe(10);
+    expect(g2.ok && g2.group.sortOrder).toBe(20);
+    if (!g1.ok || !g2.ok) return;
+    await store.reorderGroup([g2.group.id, g1.group.id]);
     const ordered = store.listGroups();
-    expect(ordered.map((g) => g.id)).toEqual([g2.id, g1.id]);
+    expect(ordered.map((g) => g.id)).toEqual([g2.group.id, g1.group.id]);
     expect(ordered[0].sortOrder).toBe(10);
     expect(ordered[1].sortOrder).toBe(20);
+  });
+
+  it('addGroup rejects empty name with invalidName', async () => {
+    const r = await store.addGroup('   ');
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error('expected invalidName');
+    expect(r.reason).toBe('invalidName');
   });
 
   it('addTag rejects non-whitelist colors', async () => {
@@ -247,9 +299,13 @@ describe('AuthenticatorStore', () => {
     expect(r.reason).toBe('invalidColor');
   });
 
-  it('clearAll fault tolerance: a single failing secret delete keeps others and leaves index intact', async () => {
-    const r1 = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });
-    const r2 = await store.addEntry({ issuer: 'B', account: 'b', secret: 'JBSWY3DPEHPK3PXP' });
+  it('clearAll fault tolerance: failing secret delete keeps entry, and preserves groups/tags (no dangling refs)', async () => {
+    const g = await store.addGroup('Work');
+    const t = await store.addTag('work', 'blue');
+    expect(g.ok && t.ok).toBe(true);
+    if (!g.ok || !t.ok) return;
+    const r1 = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP', groupId: g.group.id, tags: [t.tag.id] });
+    const r2 = await store.addEntry({ issuer: 'B', account: 'b', secret: 'JBSWY3DPEHPK3PXP', groupId: g.group.id, tags: [t.tag.id] });
     expect(r1.ok && r2.ok).toBe(true);
     if (!r1.ok || !r2.ok) return;
     // Make second secret delete throw
@@ -265,18 +321,26 @@ describe('AuthenticatorStore', () => {
     const ids = store.listEntries().map((e) => e.id);
     expect(ids).not.toContain(r1.entry.id);
     expect(ids).toContain(r2.entry.id);
-    expect(store.listGroups()).toHaveLength(0);
-    expect(store.listTags()).toHaveLength(0);
+    // groups/tags preserved because not everything cleared → retained entry's refs stay valid
+    expect(store.listGroups()).toHaveLength(1);
+    expect(store.listTags()).toHaveLength(1);
+    const retained = store.listEntries().find((e) => e.id === r2.entry.id)!;
+    expect(retained.groupId).toBe(g.group.id);
+    expect(retained.tags).toEqual([t.tag.id]);
   });
 
-  it('clearAll: no orphans — memento entries only removed after secret delete succeeds', async () => {
-    // Already covered by above case; add a no-failure path for completeness
-    const r = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });
+  it('clearAll: full success clears entries, groups and tags', async () => {
+    const g = await store.addGroup('Work');
+    const t = await store.addTag('work', 'blue');
+    if (!g.ok || !t.ok) return;
+    const r = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP', groupId: g.group.id, tags: [t.tag.id] });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const res = await store.clearAll();
     expect(res.failed).toHaveLength(0);
     expect(store.listEntries()).toHaveLength(0);
+    expect(store.listGroups()).toHaveLength(0);
+    expect(store.listTags()).toHaveLength(0);
   });
 
   it('getSecret/getCodes throw before init (defensive)', () => {

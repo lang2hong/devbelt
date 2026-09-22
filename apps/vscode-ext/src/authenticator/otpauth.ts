@@ -11,10 +11,15 @@
  * 生成（导出用）：secret 已是规范化形态，直接拼；account 非空时 label 为
  * `issuer:account`，account 为空时只放 issuer（**不**生成带冒号的空 account）；
  * 算法/位数/周期即使是默认值也显式写出（与主流 app 行为一致）。
+ *
+ * 编码注意（曾出错处）：path 里的 label 必须手动 `encodeURIComponent`
+ * （URL 的 path 不会自动编码）；query 里的 issuer 必须传**原始值**给
+ * `URLSearchParams`，由它统一编码——若先 encodeURIComponent 再交给
+ * URLSearchParams 会**双重编码**（`中文` → `%25E4%25B8...`，reimport 丢真值）。
  */
 
-import { canonicalizeSecret, stripZeroWidth } from './totp.js';
-import type { TotpAlgorithm } from './types.js';
+import { canonicalizeSecret, stripZeroWidth } from './totp';
+import type { TotpAlgorithm } from './types';
 
 export interface OtpauthParsed {
   issuer: string;
@@ -29,12 +34,23 @@ const ALLOWED_ALGOS: ReadonlySet<string> = new Set(['SHA1', 'SHA256', 'SHA512'])
 
 export function parseOtpauthUri(uri: string): OtpauthParsed {
   const cleaned = stripZeroWidth(uri.trim());
-  const u = new URL(cleaned);
+  let u: URL;
+  try {
+    u = new URL(cleaned);
+  } catch {
+    throw new Error('invalid otpauth URI');
+  }
   if (u.protocol !== 'otpauth:') throw new Error('invalid otpauth protocol');
   const type = u.host;
   if (type !== 'totp') throw new Error(`unsupported otp type: ${type}`);
-  // pathname 形如 "/Google:alice"，剥掉前导 '/'
-  const rawLabel = decodeURIComponent(u.pathname.replace(/^\//, ''));
+  // pathname 形如 "/Google:alice"，剥掉前导 '/'；label 里的裸 '%' 会让 decodeURIComponent 抛 URIError，
+  // 统一转换成可读错误，避免 S2 收到不透明异常。只切第一个 ':'，避免 account 内冒号被切坏。
+  let rawLabel: string;
+  try {
+    rawLabel = decodeURIComponent(u.pathname.replace(/^\//, ''));
+  } catch {
+    throw new Error('invalid otpauth URI');
+  }
   const colonIdx = rawLabel.indexOf(':');
   let issuerFromLabel = '';
   let account = '';
@@ -69,13 +85,14 @@ export function buildOtpauthUri(input: {
   const algorithm = input.algorithm ?? 'SHA1';
   const digits = input.digits ?? 6;
   const period = input.period ?? 30;
-  const encIssuer = encodeURIComponent(input.issuer);
-  const encAccount = encodeURIComponent(input.account ?? '');
-  // account 非空才拼 "issuer:account"，避免 "issuer:" 形式
-  const label = (input.account ?? '') !== '' ? `${encIssuer}:${encAccount}` : encIssuer;
+  // label 在 path 中，需手动编码；account 非空才拼 "issuer:account"，避免 "issuer:" 形式
+  const label = (input.account ?? '') !== ''
+    ? `${encodeURIComponent(input.issuer)}:${encodeURIComponent(input.account!)}`
+    : encodeURIComponent(input.issuer);
+  // query 参数交给 URLSearchParams 统一编码：issuer 传原始值，**不要**预编码（会双重编码）
   const qs = new URLSearchParams({
     secret: input.secret,
-    issuer: encIssuer,
+    issuer: input.issuer,
     algorithm,
     digits: String(digits),
     period: String(period),

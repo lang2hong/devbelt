@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeBase32Loose, encodeBase32UpperCaseNoPadding } from '../../src/authenticator/base32.js';
+import { decodeBase32Loose, encodeBase32UpperCaseNoPadding } from '../../src/authenticator/base32';
 
 describe('base32', () => {
   it('empty string roundtrips', () => {
@@ -42,6 +42,22 @@ describe('base32', () => {
   it('rejects non-ASCII fullwidth letters', () => {
     // Fullwidth 'Ａ' (U+FF21) is NOT in ASCII range; must reject
     expect(() => decodeBase32Loose('Ａ')).toThrow();
+  });
+
+  it('rejects padding that is not trailing', () => {
+    expect(() => decodeBase32Loose('MZ=XW6YTBOI')).toThrow(/padding/);
+  });
+
+  it('rejects invalid length residue classes (mod 8 ∈ {1,3,6})', () => {
+    expect(() => decodeBase32Loose('M')).toThrow(/length/);       // 1
+    expect(() => decodeBase32Loose('MZX')).toThrow(/length/);     // 3
+    expect(() => decodeBase32Loose('MZXW6Y')).toThrow(/length/);  // 6
+  });
+
+  it('accepts valid length residue classes (mod 8 ∈ {2,4,5,7,0})', () => {
+    for (const s of ['MZ', 'MZXW', 'MZXW6', 'MZXW6YT', 'MZXW6YTB']) {
+      expect(() => decodeBase32Loose(s)).not.toThrow();
+    }
   });
 
   it('roundtrip arbitrary bytes (0x00..0xFF sampled)', () => {

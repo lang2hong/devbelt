@@ -6,8 +6,9 @@
  *      (a) 忽略 ASCII 空白（空格/制表/换行）；
  *      (b) 大小写不敏感；
  *      (c) 末尾缺失 padding 自动补齐。
- *    除此以外的字符（`0/1/8/9`、全角字母、零宽字符等）一律抛错——
- *    不做"尽力解码"或跳过非法字符，避免 secret 被静默错解。
+ *    除此以外一律抛错——`0/1/8/9`、全角字母、零宽字符、**中部 padding**、
+ *    **非法长度残余类（len%8 ∈ {1,3,6}）** 都拒绝，不做"尽力解码"或跳过非法字符，
+ *    避免 secret 被静默错解。
  *  - `encodeBase32UpperCaseNoPadding`：输出大写、无 padding 的规范形态，
  *    作为 SecretStorage 存储与导出的统一形式。
  *
@@ -31,39 +32,52 @@ function isAsciiWhitespace(c: number): boolean {
 }
 
 export function decodeBase32Loose(s: string): Uint8Array {
-  let stripped = '';
+  // 1) 去 ASCII 空白，得到紧凑字符序列（仍可能含尾部 padding）
+  let compact = '';
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
     const code = ch.charCodeAt(0);
     if (code < 128 && isAsciiWhitespace(code)) continue;
-    if (ch === PADDING) continue;
-    if (!(ch.toUpperCase() in DECODE_TABLE)) {
-      throw new Error(`invalid base32 character: ${ch}`);
+    compact += ch;
+  }
+  if (compact.length === 0) return new Uint8Array(0);
+
+  // 2) padding 只允许出现在尾部（中部出现即非法，不静默跳过）
+  const firstPad = compact.indexOf(PADDING);
+  let upper = '';
+  if (firstPad >= 0) {
+    for (let i = firstPad; i < compact.length; i++) {
+      if (compact[i] !== PADDING) throw new Error('invalid base32 padding position');
     }
-    stripped += ch.toUpperCase();
+    const data = compact.slice(0, firstPad);
+    upper = validateAndUpper(data);
+  } else {
+    upper = validateAndUpper(compact);
   }
-  if (stripped.length === 0) return new Uint8Array(0);
-  // 补齐末尾 padding 到整组 8 字符
-  const padRemainder = stripped.length % 8;
-  if (padRemainder !== 0) {
-    stripped += PADDING.repeat(8 - padRemainder);
+
+  // 3) 非法残余类：合法 base32 数据长度 mod 8 ∈ {0,2,4,5,7}
+  const residue = upper.length % 8;
+  if (residue === 1 || residue === 3 || residue === 6) {
+    throw new Error('invalid base32 length');
   }
+  // 补齐到整组 8 字符（缺省 padding）
+  const padded = residue === 0 ? upper : upper + PADDING.repeat(8 - residue);
+
   const out: number[] = [];
-  for (let i = 0; i < stripped.length; i += 8) {
-    // 末尾可能是 padding（'='），不在 DECODE_TABLE 中；padding 位按 0 参与运算。
-    const a = DECODE_TABLE[stripped[i]] ?? 0;
-    const b = DECODE_TABLE[stripped[i + 1]] ?? 0;
-    const c = DECODE_TABLE[stripped[i + 2]] ?? 0;
-    const d = DECODE_TABLE[stripped[i + 3]] ?? 0;
-    const e = DECODE_TABLE[stripped[i + 4]] ?? 0;
-    const f = DECODE_TABLE[stripped[i + 5]] ?? 0;
-    const g = DECODE_TABLE[stripped[i + 6]] ?? 0;
-    const h = DECODE_TABLE[stripped[i + 7]] ?? 0;
-    // 统计本组实际字符数（非 '='），据此决定输出字节数：
+  for (let i = 0; i < padded.length; i += 8) {
+    const a = DECODE_TABLE[padded[i]] ?? 0;
+    const b = DECODE_TABLE[padded[i + 1]] ?? 0;
+    const c = DECODE_TABLE[padded[i + 2]] ?? 0;
+    const d = DECODE_TABLE[padded[i + 3]] ?? 0;
+    const e = DECODE_TABLE[padded[i + 4]] ?? 0;
+    const f = DECODE_TABLE[padded[i + 5]] ?? 0;
+    const g = DECODE_TABLE[padded[i + 6]] ?? 0;
+    const h = DECODE_TABLE[padded[i + 7]] ?? 0;
+    // 统计本组有效字符数（非 '='），据此决定输出字节数：
     //   2 → 1 字节；4 → 2 字节；5 → 3 字节；7 → 4 字节；8 → 5 字节
     let nonPad = 8;
     for (let k = 7; k >= 0; k--) {
-      if (stripped[i + k] === PADDING) nonPad--;
+      if (padded[i + k] === PADDING) nonPad--;
       else break;
     }
     // 40-bit buffer via BigInt to avoid 32-bit shift wrap
@@ -76,6 +90,19 @@ export function decodeBase32Loose(s: string): Uint8Array {
     if (nonPad >= 8) out.push(Number(buf & 0xffn));
   }
   return new Uint8Array(out);
+}
+
+/** 校验每个字符属于字母表并统一大写；非法字符抛错。 */
+function validateAndUpper(data: string): string {
+  let upper = '';
+  for (let i = 0; i < data.length; i++) {
+    const ch = data[i];
+    if (!(ch.toUpperCase() in DECODE_TABLE)) {
+      throw new Error(`invalid base32 character: ${ch}`);
+    }
+    upper += ch.toUpperCase();
+  }
+  return upper;
 }
 
 export function encodeBase32UpperCaseNoPadding(bytes: Uint8Array): string {

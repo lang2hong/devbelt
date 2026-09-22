@@ -18,16 +18,18 @@
  * - **跨窗口同步**：订阅 `secrets.onDidChange`，必须先用 `parseSecretKey` 校验前缀
  *   再反解 entry id（其他模块的密钥变更要忽略），**不要**把 `e.key` 当作 cache key
  *   （cache key 是 entry id，不是完整 SecretStorage 路径），否则会产生脏条目。
- * - **配额**：业务错误（quota / invalidSecret / notFound）用 `{ ok:false, reason }`
- *   结果对象返回，**不要抛错**——`makeSub` 会把抛出的异常兜底成通用"命令失败"
- *   对话框，丢失"升级 Pro"定制按钮。未登录态不限条数（本地存储是 OS 级的，做付费墙没意义）。
+ * - **配额**：业务错误（quota / invalidSecret / invalidField / notFound）用
+ *   `{ ok:false, reason }` 结果对象返回，**不要抛错**——`makeSub` 会把抛出的异常
+ *   兜底成通用"命令失败"对话框，丢失"升级 Pro"定制按钮。未登录态不限条数；
+ *   已登录态上限 `0` 语义为**不限**（`limit > 0 && count >= limit`）。
  * - **事件**：所有写操作成功后 `eventBus.publish(new AuthenticatorChangedEvent(...))`，
  *   由 extension.ts 订阅并刷新 provider；Store 自身不直接通知 provider，保持解耦。
  * - **Disposable**：清理 onDidChange 订阅、清内存缓存；`context.subscriptions` 里
  *   provider 之前 push，反序 dispose 时 provider 先销毁。
  *
  * 实现依赖：`@devbelt/db-host/utils/id` 的 `uniqueId(prefix)`（前缀 `ae`/`ag`/`at`）；
- * 全局 `eventBus` 单例。本文件 vscode 依赖仅用 `import type` 以保持 vitest 可测。
+ * 全局 `eventBus` 单例。本文件 vscode 依赖仅用 `import type`，日志走注入的 StoreLogger，
+ * 以保持 vitest 可测（测试环境无 `vscode` 包）。
  */
 
 import type { Memento, SecretStorage, Disposable as VscodeDisposable } from 'vscode';
@@ -35,10 +37,9 @@ import { uniqueId } from '@devbelt/db-host/utils/id';
 import { eventBus } from '@devbelt/db-host/utils/event';
 import type { CachedEntitlement } from '@devbelt/db-host/sync/entitlementGate';
 import { maxAuthenticatorEntries } from '@devbelt/db-host/sync/entitlementGate';
-import { decodeBase32Loose, encodeBase32UpperCaseNoPadding } from './base32.js';
-import { totpFromSecret } from './totp.js';
-import { buildOtpauthUri } from './otpauth.js';
-import { AuthenticatorChangedEvent } from './events.js';
+import { canonicalizeSecret, totpFromSecret } from './totp';
+import { buildOtpauthUri } from './otpauth';
+import { AuthenticatorChangedEvent } from './events';
 import {
   type AuthenticatorEntry,
   type AuthenticatorGroup,
@@ -51,10 +52,10 @@ import {
   TAGS_KEY,
   secretKey,
   parseSecretKey,
-} from './types.js';
+} from './types';
 
 /**
- * 最小日志句柄——默认走 console，extension.ts 可换成 diagnostics 通道，
+ * 最小日志句柄——默认走 console，extension.ts 换成 diagnostics 通道，
  * 避免 store 直接依赖 vscode 输出通道（否则 vitest 因找不到 `vscode` 包无法跑）。
  */
 export interface StoreLogger {
@@ -79,19 +80,24 @@ export type AddResult =
   | { ok: true; entry: AuthenticatorEntry }
   | { ok: false; reason: 'quota'; limit: number }
   | { ok: false; reason: 'invalidSecret'; field?: string }
+  | { ok: false; reason: 'invalidField'; field: string }
   | { ok: false; reason: 'storageError'; message?: string };
 
 export type UpdateResult =
   | { ok: true; entry: AuthenticatorEntry }
-  | { ok: false; reason: 'invalidSecret' | 'notFound' | 'storageError' };
+  | { ok: false; reason: 'invalidSecret' | 'invalidField' | 'notFound' | 'storageError' };
 
 export type RenameResult =
   | { ok: true }
   | { ok: false; reason: 'invalidName' | 'notFound' };
 
+export type GroupAddResult =
+  | { ok: true; group: AuthenticatorGroup }
+  | { ok: false; reason: 'invalidName' };
+
 export type TagAddResult =
   | { ok: true; tag: AuthenticatorTag }
-  | { ok: false; reason: 'invalidColor' };
+  | { ok: false; reason: 'invalidName' | 'invalidColor' };
 
 export interface CodeResult {
   code: string;
@@ -114,12 +120,6 @@ function clampDigits(d: number): 6 | 8 {
 
 function clampPeriod(p: number): 30 | 60 {
   return p === 60 ? 60 : 30;
-}
-
-/** secret 归一化：剥所有 \s 空白 → base32 解码 → 重编码为大写无 padding 规范形态。 */
-function canonicalize(input: string): string {
-  const stripped = input.replace(/\s+/g, '');
-  return encodeBase32UpperCaseNoPadding(decodeBase32Loose(stripped));
 }
 
 export class AuthenticatorStore implements VscodeDisposable {
@@ -224,26 +224,29 @@ export class AuthenticatorStore implements VscodeDisposable {
     tags?: string[];
   }): Promise<AddResult> {
     this.assertInit();
+    // 空 secret（''/纯空白/纯 '='）会被 canonicalizeSecret 解成空串——不是有效密钥，必须拒绝，
+    // 否则会写入一个空 Keychain 项并产出确定性错码。
     let canonicalSecret: string;
     try {
-      canonicalSecret = canonicalize(input.secret);
+      canonicalSecret = canonicalizeSecret(input.secret);
     } catch {
       return { ok: false, reason: 'invalidSecret', field: 'secret' };
     }
+    if (!canonicalSecret) return { ok: false, reason: 'invalidSecret', field: 'secret' };
     const algorithm = (input.algorithm ?? 'SHA1') as TotpAlgorithm;
-    if (!isTotpAlgorithm(algorithm)) return { ok: false, reason: 'invalidSecret', field: 'algorithm' };
-    // 登录态配额预检：未登录不限；已登录读现场权益，超限直接返回（不抛错，不展开表单）
+    if (!isTotpAlgorithm(algorithm)) return { ok: false, reason: 'invalidField', field: 'algorithm' };
+    // 登录态配额预检：未登录不限；0 表示不限；超限直接返回（不抛错，不展开表单）
     if (this.auth.isLoggedIn()) {
       const limit = maxAuthenticatorEntries(this.auth.getCachedEntitlement());
-      if (this.entries.length >= limit) return { ok: false, reason: 'quota', limit };
+      if (limit > 0 && this.entries.length >= limit) return { ok: false, reason: 'quota', limit };
     }
     const groupId = normalizeGroupId(input.groupId);
     if (groupId !== undefined && !this.groups.some((g) => g.id === groupId)) {
-      return { ok: false, reason: 'invalidSecret', field: 'groupId' };
+      return { ok: false, reason: 'invalidField', field: 'groupId' };
     }
     const tagIds = input.tags ?? [];
     for (const tid of tagIds) {
-      if (!this.tags.some((t) => t.id === tid)) return { ok: false, reason: 'invalidSecret', field: 'tags' };
+      if (!this.tags.some((t) => t.id === tid)) return { ok: false, reason: 'invalidField', field: 'tags' };
     }
     const id = uniqueId('ae');
     const now = Date.now();
@@ -290,23 +293,24 @@ export class AuthenticatorStore implements VscodeDisposable {
     const prev = this.entries[idx];
     let newSecret: string | undefined;
     if (patch.secret !== undefined) {
-      try { newSecret = canonicalize(patch.secret); }
+      try { newSecret = canonicalizeSecret(patch.secret); }
       catch { return { ok: false, reason: 'invalidSecret' }; }
+      if (!newSecret) return { ok: false, reason: 'invalidSecret' };
     }
     let groupId = prev.groupId;
     if (patch.groupId !== undefined) {
       groupId = normalizeGroupId(patch.groupId);
       if (groupId !== undefined && !this.groups.some((g) => g.id === groupId)) {
-        return { ok: false, reason: 'invalidSecret' };
+        return { ok: false, reason: 'invalidField' };
       }
     }
     if (patch.algorithm !== undefined && !isTotpAlgorithm(patch.algorithm)) {
-      return { ok: false, reason: 'invalidSecret' };
+      return { ok: false, reason: 'invalidField' };
     }
     let tags = prev.tags;
     if (patch.tags !== undefined) {
       for (const tid of patch.tags) {
-        if (!this.tags.some((t) => t.id === tid)) return { ok: false, reason: 'invalidSecret' };
+        if (!this.tags.some((t) => t.id === tid)) return { ok: false, reason: 'invalidField' };
       }
       tags = patch.tags;
     }
@@ -325,8 +329,9 @@ export class AuthenticatorStore implements VscodeDisposable {
       issuer: patch.issuer ?? prev.issuer,
       account: patch.account ?? prev.account,
       algorithm: patch.algorithm ?? prev.algorithm,
-      digits: patch.digits ?? prev.digits,
-      period: patch.period ?? prev.period,
+      // 入站 patch 可能是未类型校验的 IPC 数据，这里与 addEntry 一样做 clamp
+      digits: clampDigits(patch.digits ?? prev.digits),
+      period: clampPeriod(patch.period ?? prev.period),
       groupId,
       tags,
       updateTime: Date.now(),
@@ -354,10 +359,10 @@ export class AuthenticatorStore implements VscodeDisposable {
     return { ok: true };
   }
 
-  async addGroup(name: string, afterId?: string): Promise<AuthenticatorGroup | { error: 'invalidName' }> {
+  async addGroup(name: string, afterId?: string): Promise<GroupAddResult> {
     this.assertInit();
     const trimmed = name.trim();
-    if (!trimmed) return { error: 'invalidName' };
+    if (!trimmed) return { ok: false, reason: 'invalidName' };
     // 默认 sortOrder = 当前最大 + 10，留空隙方便 drag 重排；若指定 afterId 则插在后面，
     // 空隙不足（<2）时先重写为 10,20,30... 再插，避免 sortOrder 重叠/浮点。
     let sortOrder: number;
@@ -385,7 +390,7 @@ export class AuthenticatorStore implements VscodeDisposable {
     this.groups.sort((a, b) => a.sortOrder - b.sortOrder);
     await this.saveGroups();
     this.publish('group', 'create', group.id);
-    return group;
+    return { ok: true, group };
   }
 
   async renameGroup(id: string, name: string): Promise<RenameResult> {
@@ -438,7 +443,7 @@ export class AuthenticatorStore implements VscodeDisposable {
   async addTag(name: string, color: TagColorKey): Promise<TagAddResult> {
     this.assertInit();
     const trimmed = name.trim();
-    if (!trimmed) return { ok: false, reason: 'invalidColor' };
+    if (!trimmed) return { ok: false, reason: 'invalidName' };
     // color 必须是 AUTHENTICATOR_TAG_COLORS 白名单值，非白名单拒绝（避免把脏 hex 写进 memento）
     if (!AUTHENTICATOR_TAG_COLORS.includes(color)) return { ok: false, reason: 'invalidColor' };
     const tag: AuthenticatorTag = { id: uniqueId('at'), name: trimmed, color };
@@ -494,15 +499,17 @@ export class AuthenticatorStore implements VscodeDisposable {
   /**
    * 计算指定条目的 TOTP code。**只从 secretCache 读**，不碰 secrets API；
    * cache miss / missingSecrets 的 id 不出现在返回结果里（snapshot 里已标 error）。
+   * 先构建一次 id→entry Map，避免在每秒热路径上对每条 id 线性扫描 entries（O(n²)）。
    */
   getCodes(entryIds: readonly string[], nowMs: number): Record<string, CodeResult> {
     this.assertInit();
     const out: Record<string, CodeResult> = {};
+    const byId = new Map(this.entries.map((e) => [e.id, e]));
     for (const id of entryIds) {
       if (this.missingSecrets.has(id)) continue;
       const secret = this.secretCache.get(id);
       if (secret === undefined) continue;
-      const e = this.entries.find((x) => x.id === id);
+      const e = byId.get(id);
       if (!e) continue;
       try {
         out[id] = totpFromSecret(secret, nowMs, e.period, e.digits, e.algorithm);
@@ -539,6 +546,8 @@ export class AuthenticatorStore implements VscodeDisposable {
   /**
    * 容错清空：遍历 entries 逐个删 secret，成功的从 cache 和 entries 移除，
    * 失败的保留在 memento 里下次重试（对齐 CredentialVault 模式，不丢索引不产生 orphan secret）。
+   * **仅当全部成功**才清空 groups/tags——否则保留 groups/tags，使滞留条目的
+   * groupId/tags 仍是有效引用，不制造悬挂指针。
    */
   async clearAll(): Promise<{ failed: string[] }> {
     this.assertInit();
@@ -556,13 +565,18 @@ export class AuthenticatorStore implements VscodeDisposable {
       }
     }
     this.entries = remainingEntries;
-    this.groups = [];
-    this.tags = [];
+    const allCleared = failed.length === 0;
+    if (allCleared) {
+      this.groups = [];
+      this.tags = [];
+    }
     await Promise.all([this.saveEntries(), this.saveGroups(), this.saveTags()]);
     this.log.info('authenticator clearAll done', String({ remaining: failed.length }));
     this.publish('entry', 'delete', '*');
-    this.publish('group', 'delete', '*');
-    this.publish('tag', 'delete', '*');
+    if (allCleared) {
+      this.publish('group', 'delete', '*');
+      this.publish('tag', 'delete', '*');
+    }
     return { failed };
   }
 
