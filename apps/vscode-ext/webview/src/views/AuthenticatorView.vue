@@ -85,7 +85,11 @@ onUnmounted(() => {
         :key="e.id"
         class="auth-card"
         :class="{ missing: e.error === 'secretMissing', warn: secondsLeft(e) <= 5 }"
+        role="button"
+        tabindex="0"
         @click="copy(e)"
+        @keydown.enter.prevent="copy(e)"
+        @keydown.space.prevent="copy(e)"
       >
         <div class="meta">
           <div class="issuer">{{ nameOf(e) }}</div>
@@ -130,6 +134,7 @@ onUnmounted(() => {
   border: 1px solid var(--vscode-widget-border, transparent);
 }
 .auth-card:hover { background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.16)); }
+.auth-card:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 .auth-card.missing { opacity: 0.7; cursor: default; }
 .auth-card.warn .code { color: var(--vscode-errorForeground); }
 .meta { min-width: 0; display: flex; flex-direction: column; }

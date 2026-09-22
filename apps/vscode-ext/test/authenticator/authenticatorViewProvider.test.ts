@@ -37,7 +37,7 @@ function makeHarness(overrides?: {
   ];
   const missing = overrides?.missing ?? new Set<string>();
   let lastIds: string[] = [];
-  const posted: any[] = [];
+  let posted: any[] = [];
   let handleMsg: ((m: any) => void) | undefined;
   let visibility: (() => void) | undefined;
   let disposeView: (() => void) | undefined;
@@ -56,28 +56,35 @@ function makeHarness(overrides?: {
     },
   } as unknown as AuthenticatorStore;
 
-  const view: FakeView = {
-    visible: true,
-    webview: {
-      options: {},
-      html: '',
-      onDidReceiveMessage: (h) => { handleMsg = h; return { dispose() { /* noop */ } }; },
-      postMessage: async (m) => { posted.push(m); return true; },
-    },
-    onDidChangeVisibility: (h) => { visibility = h; return { dispose() { /* noop */ } }; },
-    onDidDispose: (h) => { disposeView = h; return { dispose() { /* noop */ } }; },
-  };
+  function newView(): FakeView {
+    return {
+      visible: true,
+      webview: {
+        options: {},
+        html: '',
+        onDidReceiveMessage: (h) => { handleMsg = h; return { dispose() { /* noop */ } }; },
+        postMessage: async (m) => { posted.push(m); return true; },
+      },
+      onDidChangeVisibility: (h) => { visibility = h; return { dispose() { /* noop */ } }; },
+      onDidDispose: (h) => { disposeView = h; return { dispose() { /* noop */ } }; },
+    };
+  }
 
   const provider = new AuthenticatorViewProvider({ toString: () => 'uri' } as any, store);
+  let view = newView();
   provider.resolveWebviewView(view as any);
 
-  return {
-    provider, view, posted,
+  const api = {
+    provider,
+    get view() { return view; },
+    get posted() { return posted; },
+    getLastIds: () => lastIds,
     send: (m: any) => handleMsg?.(m),
     setVisible: (v: boolean) => { view.visible = v; visibility?.(); },
     disposeView: () => disposeView?.(),
-    getLastIds: () => lastIds,
+    reResolve: () => { posted = []; view = newView(); provider.resolveWebviewView(view as any); return api; },
   };
+  return api;
 }
 
 describe('AuthenticatorViewProvider', () => {
@@ -182,11 +189,11 @@ describe('AuthenticatorViewProvider', () => {
 
   it('handleMessage error boundary posts a generic error', async () => {
     const h = makeHarness();
-    // make listEntries throw on snapshot
-    (h.provider as any).store.listEntries = () => { throw new Error('boom'); };
     h.send({ type: 'ready', __load: 'L1' });
     await flush();
-    h.send({ type: 'ready', __load: 'L1' });
+    // 让一个 handler 直接抛错，验证 handleMessage 外层边界回发通用 error
+    (h.provider as any).onCopy = () => { throw new Error('boom'); };
+    h.send({ type: 'copy', code: '123456', entryId: 'e1' });
     await flush();
     expect(h.posted.some((m) => m.type === 'error')).toBe(true);
   });
@@ -200,5 +207,62 @@ describe('AuthenticatorViewProvider', () => {
     h.disposeView();
     await expect(h.provider.refresh()).resolves.toBeUndefined();
     expect(() => h.provider.openAddForm()).not.toThrow();
+  });
+
+  it('getCodes throw is swallowed; refresh() resolves (store-not-ready safety)', async () => {
+    const h = makeHarness({ getCodes: () => { throw new Error('store not initialized'); } });
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    // tick 内部抛错被吞：不发 tick，也不冒泡到事件回调
+    expect(h.posted.some((m) => m.type === 'tick')).toBe(false);
+    expect(() => { h.setVisible(false); h.setVisible(true); }).not.toThrow();
+    await expect(h.provider.refresh()).resolves.toBeUndefined();
+  });
+
+  it('re-resolve resets folded state', async () => {
+    const h = makeHarness();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'toggleGroup', groupId: null, folded: true });
+    h.setVisible(false);
+    h.setVisible(true);
+    await flush();
+    expect(h.getLastIds()).toEqual([]); // 未分组已折叠，排除 e1
+
+    h.reResolve();
+    h.send({ type: 'ready', __load: 'L2' });
+    await flush();
+    h.send({ type: 'ready', __load: 'L2' });
+    await flush();
+    expect(h.getLastIds()).toEqual(['e1']); // 折叠态随重载复位
+  });
+
+  it('refresh() posts both snapshot and tick', async () => {
+    const h = makeHarness();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.posted.length = 0;
+    await h.provider.refresh();
+    expect(h.posted.some((m) => m.type === 'snapshot')).toBe(true);
+    expect(h.posted.some((m) => m.type === 'tick')).toBe(true);
+  });
+
+  it('toggleGroup ignores non-boolean folded', async () => {
+    const h = makeHarness();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'toggleGroup', groupId: null, folded: 'yes' });
+    h.setVisible(false);
+    h.setVisible(true);
+    await flush();
+    expect(h.getLastIds()).toEqual(['e1']); // 非法值不改变折叠态
   });
 });

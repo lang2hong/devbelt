@@ -73,10 +73,11 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
     else this.pendingAction = 'openAddForm';
   }
 
-  /** EventBus 订阅入口：条目/分组/标签变更后重发快照。 */
+  /** EventBus 订阅入口：条目/分组/标签变更后重发快照（并立即补一次 tick，口令即时出现）。 */
   async refresh(): Promise<void> {
     if (!this.view || !this.initSent) return;
     this.sendSnapshot();
+    this.tick();
   }
 
   private async handleMessage(raw: any): Promise<void> {
@@ -107,31 +108,40 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
   }
 
   private sendSnapshot(): void {
-    const entries = this.store.listEntries().map((e) => {
-      const { groupId, ...rest } = e;
-      return {
-        ...rest,
-        groupId: groupId ?? null,
-        ...(this.store.isSecretMissing(e.id) ? { error: 'secretMissing' as const } : {}),
-      };
-    });
-    this.post({
-      type: 'snapshot',
-      entries,
-      groups: [...this.store.listGroups()],
-      tags: [...this.store.listTags()],
-    });
+    try {
+      const entries = this.store.listEntries().map((e) => {
+        const { groupId, ...rest } = e;
+        return {
+          ...rest,
+          groupId: groupId ?? null,
+          ...(this.store.isSecretMissing(e.id) ? { error: 'secretMissing' as const } : {}),
+        };
+      });
+      this.post({
+        type: 'snapshot',
+        entries,
+        groups: [...this.store.listGroups()],
+        tags: [...this.store.listTags()],
+      });
+    } catch (e) {
+      // store 未就绪（init 失败）等异常不得冒泡到 VS Code 事件回调里；记录并跳过本次快照。
+      diagError('authenticator snapshot', String(e));
+    }
   }
 
   /** 每秒 tick：只算未折叠组的 codes，合并为一条消息下发。 */
   private tick(): void {
     if (!this.view) return;
-    const nowMs = Date.now();
-    const ids = this.store.listEntries()
-      .filter((e) => !this.foldedGroups.has(e.groupId ?? null))
-      .map((e) => e.id);
-    const codes = this.store.getCodes(ids, nowMs);
-    this.post({ type: 'tick', nowMs, codes });
+    try {
+      const nowMs = Date.now();
+      const ids = this.store.listEntries()
+        .filter((e) => !this.foldedGroups.has(e.groupId ?? null))
+        .map((e) => e.id);
+      const codes = this.store.getCodes(ids, nowMs);
+      this.post({ type: 'tick', nowMs, codes });
+    } catch (e) {
+      diagError('authenticator tick', String(e));
+    }
   }
 
   private async onCopy(msg: Extract<AuthenticatorUpMessage, { type: 'copy' }>): Promise<void> {
@@ -146,6 +156,7 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
   }
 
   private onToggleGroup(msg: Extract<AuthenticatorUpMessage, { type: 'toggleGroup' }>): void {
+    if (typeof msg.folded !== 'boolean') return; // 非法 IPC 值不误判
     const key: string | null = typeof msg.groupId === 'string' ? msg.groupId : null;
     if (msg.folded) this.foldedGroups.add(key);
     else this.foldedGroups.delete(key);
@@ -176,6 +187,8 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
     this.view = undefined;
     this.initSent = false;
     this.currentLoad = undefined;
+    // webview 重载后折叠 UI 复位，主进程折叠态也要复位，避免新卡片因"仍被当作折叠"而不下发 codes。
+    this.foldedGroups.clear();
   }
 
   dispose(): void {
