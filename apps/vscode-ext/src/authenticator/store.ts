@@ -499,20 +499,20 @@ export class AuthenticatorStore implements VscodeDisposable {
   /**
    * 计算指定条目的 TOTP code。**只从 secretCache 读**，不碰 secrets API；
    * cache miss / missingSecrets 的 id 不出现在返回结果里（snapshot 里已标 error）。
-   * 先构建一次 id→entry Map，避免在每秒热路径上对每条 id 线性扫描 entries（O(n²)）。
+   * 单趟遍历 entries、用请求 id 的 Set 过滤：无整表 Map 重建、无索引失效面，
+   * 每秒热路径上只做 O(n) 廉价判断（Pro 上限 1000 条亦无压力）。
    */
   getCodes(entryIds: readonly string[], nowMs: number): Record<string, CodeResult> {
     this.assertInit();
     const out: Record<string, CodeResult> = {};
-    const byId = new Map(this.entries.map((e) => [e.id, e]));
-    for (const id of entryIds) {
-      if (this.missingSecrets.has(id)) continue;
-      const secret = this.secretCache.get(id);
+    const wanted = new Set(entryIds);
+    for (const e of this.entries) {
+      if (!wanted.has(e.id)) continue;
+      if (this.missingSecrets.has(e.id)) continue;
+      const secret = this.secretCache.get(e.id);
       if (secret === undefined) continue;
-      const e = byId.get(id);
-      if (!e) continue;
       try {
-        out[id] = totpFromSecret(secret, nowMs, e.period, e.digits, e.algorithm);
+        out[e.id] = totpFromSecret(secret, nowMs, e.period, e.digits, e.algorithm);
       } catch (err) {
         this.log.warn('authenticator totp compute failed', String(err));
       }

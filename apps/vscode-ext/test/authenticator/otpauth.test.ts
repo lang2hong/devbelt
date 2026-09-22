@@ -132,6 +132,19 @@ describe('buildOtpauthUri', () => {
     expect(reparsed.issuer).toBe(tricky);
   });
 
+  it('encodes query params per RFC 3986 (space → %20, not +)', () => {
+    const secret = canonicalizeSecret('JBSWY3DPEHPK3PXP');
+    const built = buildOtpauthUri({ issuer: 'A B', account: 'c d', secret });
+    expect(built).toContain('issuer=A%20B');
+    expect(built).not.toContain('issuer=A+B');
+    // literal '+' must be %2B, never bare '+'
+    const plus = buildOtpauthUri({ issuer: 'A+B', account: 'c', secret });
+    expect(plus).toContain('issuer=A%2BB');
+    const reparsed = parseOtpauthUri(built);
+    expect(reparsed.issuer).toBe('A B');
+    expect(reparsed.account).toBe('c d');
+  });
+
   it('parse rejects a label with a stray % (clean error, not URIError)', () => {
     expect(() => parseOtpauthUri('otpauth://totp/bad%zz?secret=JBSWY3DPEHPK3PXP')).toThrow(/invalid otpauth URI/);
   });

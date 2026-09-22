@@ -12,10 +12,11 @@
  * `issuer:account`，account 为空时只放 issuer（**不**生成带冒号的空 account）；
  * 算法/位数/周期即使是默认值也显式写出（与主流 app 行为一致）。
  *
- * 编码注意（曾出错处）：path 里的 label 必须手动 `encodeURIComponent`
- * （URL 的 path 不会自动编码）；query 里的 issuer 必须传**原始值**给
- * `URLSearchParams`，由它统一编码——若先 encodeURIComponent 再交给
- * URLSearchParams 会**双重编码**（`中文` → `%25E4%25B8...`，reimport 丢真值）。
+ * 编码注意（两处都曾出错）：
+ *  - path 里的 label 必须手动 `encodeURIComponent`（URL 的 path 不会自动编码）；
+ *  - query 参数逐个 `encodeURIComponent`，严格 RFC 3986。**不要**用 `URLSearchParams`：
+ *    它按 form 约定把空格编成 `+`，且若先 encodeURIComponent 再交给它还会**双重编码**
+ *    （`中文` → `%25E4%25B8...`，reimport 丢真值）。
  */
 
 import { canonicalizeSecret, stripZeroWidth } from './totp';
@@ -89,13 +90,15 @@ export function buildOtpauthUri(input: {
   const label = (input.account ?? '') !== ''
     ? `${encodeURIComponent(input.issuer)}:${encodeURIComponent(input.account!)}`
     : encodeURIComponent(input.issuer);
-  // query 参数交给 URLSearchParams 统一编码：issuer 传原始值，**不要**预编码（会双重编码）
-  const qs = new URLSearchParams({
-    secret: input.secret,
-    issuer: input.issuer,
-    algorithm,
-    digits: String(digits),
-    period: String(period),
-  });
-  return `otpauth://totp/${label}?${qs.toString()}`;
+  // query 参数逐个 encodeURIComponent，严格按 RFC 3986（空格→%20、'+'→%2B）。
+  // 不用 URLSearchParams：它按 application/x-www-form-urlencoded 把空格编成 '+'，
+  // 严格 URI 解析器会把 '+' 读成字面加号，导致第三方验证器 issuer 失真。
+  const qs = [
+    ['secret', input.secret],
+    ['issuer', input.issuer],
+    ['algorithm', algorithm],
+    ['digits', String(digits)],
+    ['period', String(period)],
+  ].map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+  return `otpauth://totp/${label}?${qs}`;
 }
