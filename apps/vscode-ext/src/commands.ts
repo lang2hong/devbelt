@@ -11,6 +11,7 @@ import { registerAccountCommands } from './commands/account';
 import { registerSavedQueryCommands, registerGroupCommands, registerQueryFolderCommands } from './commands/group';
 import { registerDdlCommands } from './commands/ddl';
 import { registerSearchCommands } from './commands/search';
+import { registerAuthenticatorCommands } from './commands/authenticator';
 import { buildExplorerMenu, EXPLORER_MENU_COMMANDS } from './commands/explorerMenu';
 import { l10n } from './i18n';
 
@@ -28,6 +29,7 @@ export function registerCommands(deps: Deps): void {
   registerGroupCommands(deps, sub);
   registerDdlCommands(deps, sub);
   registerSearchCommands(deps, sub);
+  registerAuthenticatorCommands(deps, sub);
   sub('devbelt.explorerMenu', async () => {
     const loggedIn = deps.auth.isLoggedIn();
     const session = loggedIn ? await deps.syncFactory.ensureSession().catch(() => undefined) : undefined;

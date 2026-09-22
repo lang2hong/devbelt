@@ -13,6 +13,8 @@ import { l10n } from '../i18n';
 import { diagError } from '../utils/diagnostics';
 import type { DatabaseOperation } from '@devbelt/db-core';
 import type { ConnectionSession } from '../connection/connectionManager';
+import type { AuthenticatorStore } from '../authenticator/store';
+import type { AuthenticatorViewProvider } from '../authenticator/authenticatorViewProvider';
 
 export interface Deps {
   context: vscode.ExtensionContext;
@@ -26,6 +28,10 @@ export interface Deps {
   connCtx: ConnectionContext;
   /** 同步会话工厂（账户面板读取同步状态用；未建会话时为 undefined）。 */
   syncFactory: SyncSessionFactory;
+  /** P5：2FA/TOTP 验证器存储（S2 起注入）。 */
+  authStore: AuthenticatorStore;
+  /** P5：2FA/TOTP 验证器侧边栏 provider（命令聚焦/refresh 用）。 */
+  authViewProvider: AuthenticatorViewProvider;
 }
 
 export type Sub = (cmd: string, handler: (...args: any[]) => any) => void;

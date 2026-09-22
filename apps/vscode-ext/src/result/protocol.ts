@@ -5,6 +5,14 @@
  * 靠人记。这里集中声明已知消息与视图模式，App.vue 与扩展侧共用，避免漂移。
  */
 
+import type {
+  AuthenticatorEntry,
+  AuthenticatorGroup,
+  AuthenticatorTag,
+  TotpAlgorithm,
+  TagColorKey,
+} from '../authenticator/types';
+
 /** App.vue 顶层视图模式（扩展在 `init` 消息里下发）。 */
 export type WebviewMode =
   | 'query'
@@ -22,7 +30,9 @@ export type WebviewMode =
   | 'account'
   | 'plans'
   /** 账户中心：单面板 + 标签页（账户 / 设备 / 套餐）。 */
-  | 'accountHub';
+  | 'accountHub'
+  /** P5：2FA/TOTP 验证器侧边栏视图。 */
+  | 'authenticator';
 
 /** 账户中心标签。 */
 export type HubTab = 'account' | 'session' | 'plans';
@@ -58,3 +68,51 @@ export interface WebviewErrorMessage extends WebviewMessage {
   type: 'error';
   message: string;
 }
+
+// ────────────────────────── P5：2FA/TOTP 验证器协议 ──────────────────────────
+// 与 AuthenticatorViewProvider / AuthenticatorView.vue 共享的强类型契约。
+// IPC 边界约定：凡"未分组/无目标/不存在"一律用 `null`（而非 undefined，避免 postMessage 丢字段）；
+// 主进程入站时规范化为 Store 的 undefined，下发快照时把 undefined 归一化为 null。
+
+/** 快照里的条目：groupId 用 null 表示未分组；secret 缺失时带 error 标记（UI 灰条）。 */
+export type AuthenticatorSnapshotEntry =
+  Omit<AuthenticatorEntry, 'groupId'> & { groupId: string | null; error?: 'secretMissing' };
+
+/** webview → Extension Host。 */
+export type AuthenticatorUpMessage =
+  | { type: 'ready'; __load?: string }
+  | { type: 'add'; entry: {
+      issuer: string; account?: string; secret: string;
+      algorithm: TotpAlgorithm; digits: 6 | 8; period: 30 | 60;
+      groupId: string | null; tags: string[];
+    } }
+  | { type: 'update'; id: string; patch: {
+      issuer?: string; account?: string; secret?: string;
+      algorithm?: TotpAlgorithm; digits?: 6 | 8; period?: 30 | 60;
+      groupId?: string | null; tags?: string[];
+    } }
+  | { type: 'delete'; id: string }
+  | { type: 'addGroup'; name: string; afterId?: string }
+  | { type: 'updateGroup'; id: string; name: string }
+  | { type: 'deleteGroup'; id: string }
+  | { type: 'moveEntry'; id: string; targetGroupId: string | null }
+  | { type: 'reorderGroup'; orderedGroupIds: string[] }
+  | { type: 'addTag'; name: string; color: TagColorKey }
+  | { type: 'removeTag'; id: string }
+  | { type: 'toggleGroup'; groupId: string | null; folded: boolean }
+  | { type: 'copy'; code: string; entryId: string }
+  | { type: 'export' };
+
+/** Extension Host → webview。 */
+export type AuthenticatorDownMessage =
+  | { type: 'init'; mode: 'authenticator'; isZh: boolean }
+  | { type: 'snapshot';
+      entries: AuthenticatorSnapshotEntry[];
+      groups: AuthenticatorGroup[];
+      tags: AuthenticatorTag[];
+    }
+  | { type: 'tick'; nowMs: number; codes: Record<string, { code: string; secondsLeft: number }> }
+  | { type: 'copyOk'; entryId: string }
+  | { type: 'formError'; field?: string; message: string }
+  | { type: 'openAddForm' }
+  | { type: 'error'; message: string };

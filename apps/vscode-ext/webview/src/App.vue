@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, defineAsyncComponent } from 'vue';
 import { useVsCode } from './composables/useVsCode';
 import { setLanguage } from './composables/useI18n';
 import type { WebviewMode, HubTab } from '../../src/result/protocol';
@@ -15,6 +15,9 @@ import AuditLogView from './views/AuditLogView.vue';
 import PoolStatusView from './views/PoolStatusView.vue';
 import LoginFormView from './views/LoginFormView.vue';
 import AccountHubView from './views/AccountHubView.vue';
+
+// 验证器视图按需加载：单独分片，不把体积压到所有 panel 共用的 index.js 主 bundle。
+const AuthenticatorView = defineAsyncComponent(() => import('./views/AuthenticatorView.vue'));
 
 const { onMessage } = useVsCode();
 const mode = ref<WebviewMode>('query');
@@ -50,5 +53,6 @@ onUnmounted(() => cleanup?.());
       <PoolStatusView v-else-if="mode === 'poolStatus'" />
       <LoginFormView v-else-if="mode === 'loginForm'" />
       <AccountHubView v-else-if="mode === 'accountHub'" :tab="hubTab" />
+      <AuthenticatorView v-else-if="mode === 'authenticator'" />
       <ERDiagramView v-else />
 </template>

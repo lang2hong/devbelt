@@ -544,6 +544,10 @@ export const en: MessageCatalog = {
   'conn.importUpgrade': 'Importing connections is a Pro feature. Upgrade your plan to import.',
   'conn.capReached': 'Free plan allows {count} saved connections. Upgrade to Pro to add more.',
 
+  // ── 2FA/TOTP 验证器（主进程）──
+  'authenticator.error.generic': 'Authenticator operation failed.',
+  'authenticator.copy.invalid': 'Refused to copy an invalid code.',
+
   // ── webview UI 文案（wv.*）──
   'wv.common.save': 'Save',
   'wv.common.cancel': 'Cancel',
@@ -817,4 +821,9 @@ export const en: MessageCatalog = {
   'backup.schemaAndData': 'Schema and data',
   'backup.schemaOnly': 'Schema only',
   'schema.pgCrossDbUnsupported': 'PostgreSQL connections are bound to a single database; cross-database schema compare/sync is not supported.',
+
+  // ── 2FA/TOTP 验证器（webview）──
+  'wv.authenticator.empty': 'No authenticator entries yet. Make sure your system clock is accurate — codes refresh every 30/60 seconds.',
+  'wv.authenticator.secretMissing': 'Secret missing. Remove this entry and add it again.',
+  'wv.authenticator.copied': 'Copied.',
 };

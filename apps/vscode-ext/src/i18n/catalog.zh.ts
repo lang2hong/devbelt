@@ -522,6 +522,10 @@ export const zh: MessageCatalog = {
   'conn.importUpgrade': '导入连接是 Pro 功能，请升级套餐后再导入。',
   'conn.capReached': '免费套餐最多保存 {count} 个连接，升级到 Pro 可添加更多。',
 
+  // ── 2FA/TOTP 验证器（主进程）──
+  'authenticator.error.generic': '验证器操作失败。',
+  'authenticator.copy.invalid': '口令格式非法，已拒绝复制。',
+
   // ── webview UI 文案（wv.*）──
   'wv.common.save': '保存',
   'wv.common.cancel': '取消',
@@ -795,4 +799,9 @@ export const zh: MessageCatalog = {
   'backup.schemaAndData': '结构与数据',
   'backup.schemaOnly': '仅结构',
   'schema.pgCrossDbUnsupported': 'PostgreSQL 连接绑定单个数据库，暂不支持跨库结构对比/同步。',
+
+  // ── 2FA/TOTP 验证器（webview）──
+  'wv.authenticator.empty': '还没有验证器条目。请确保系统时钟准确——口令每 30/60 秒刷新一次。',
+  'wv.authenticator.secretMissing': '密钥丢失。请删除该条目后重新添加。',
+  'wv.authenticator.copied': '已复制。',
 };

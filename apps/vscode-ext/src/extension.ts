@@ -33,6 +33,8 @@ import { registerConflictCommands } from './commands/syncConflicts';
 import { registerSyncLifecycleCommands, registerSyncResetUriHandler } from './commands/syncLifecycle';
 import { SshTunnel } from './connection/sshTunnel';
 import { AuthenticatorStore } from './authenticator/store';
+import { AuthenticatorViewProvider } from './authenticator/authenticatorViewProvider';
+import { AuthenticatorChangedEvent } from './authenticator/events';
 
 /** 自动同步开关（按机器）：默认关闭，仅显式开启后才自动同步。 */
 const SYNC_AUTO_SYNC_KEY = 'devbelt.sync.autoSync';
@@ -92,7 +94,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // AuthEvent 订阅（下方）在登录/登出后刷新此上下文保持同步。
   void syncLoggedInContext(auth);
 
-  // P5 S1：TOTP 验证器存储层——纯后端就绪，S2 才接 UI。init 批量预热 secretCache 后对外可用。
+  // P5：TOTP 验证器——store 先 await init() 完成 secretCache 预热，再建 provider / 注册命令。
   const authStore = new AuthenticatorStore(context.globalState, context.secrets, auth, {
     info: diagInfo, warn: diagWarn, error: diagError,
   });
@@ -103,20 +105,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   } catch (err) {
     diagError('authenticator store init failed', String(err));
   }
-  // S1 临时手测命令（代码注册、不进 package.json，S2 引入正式命令时删除）。
-  context.subscriptions.push(vscode.commands.registerCommand('devbelt.authenticator._smoketest', async () => {
-    const n = authStore.listEntries().length;
-    const now = Date.now();
-    const ids = authStore.listEntries().slice(0, 3).map((e) => e.id);
-    const codes = authStore.getCodes(ids, now);
-    const sample = ids.map((id) => {
-      const e = authStore.listEntries().find((x) => x.id === id)!;
-      const c = codes[id];
-      return `${e.issuer}${e.account ? ':' + e.account : ''} → ${c ? c.code + ' (' + c.secondsLeft + 's)' : 'secret missing'}`;
-    }).join('\n');
-    const msg = `Authenticator: ${n} entries\n${sample || '(empty)'}`;
-    void vscode.window.showInformationMessage(msg);
-  }));
+  // store 先于 provider push：反序 dispose 时 provider 先销毁，避免 tick 回调访问已 dispose 的 store。
+  const authViewProvider = new AuthenticatorViewProvider(context.extensionUri, authStore);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider('devbelt.tools.authenticator', authViewProvider),
+    { dispose: () => authViewProvider.dispose() },
+    // 条目/分组/标签变更 → 重发快照给侧边栏。
+    eventBus.subscribe(AuthenticatorChangedEvent, () => void authViewProvider.refresh()),
+  );
 
   // 事件总线：连接/分组变更时自动刷新树 + 重算路径 warning
   context.subscriptions.push(
@@ -299,7 +295,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 表结构变更时清除补全缓存（事件订阅，替代对 treeProvider.refresh 的猴补丁）。
   context.subscriptions.push(treeProvider.onDidRefresh(() => completionProvider.invalidate()));
 
-  registerCommands({ context, store, manager, treeProvider, overrideStore, executor, history, auth, connCtx, syncFactory });
+  registerCommands({ context, store, manager, treeProvider, overrideStore, executor, history, auth, connCtx, syncFactory, authStore, authViewProvider });
 
   // 首次加载即异步重算路径 warning（仅本地 fs 校验，无同步/网络请求）。
   void treeProvider.refreshPathIssues();

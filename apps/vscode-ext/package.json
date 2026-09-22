@@ -361,6 +361,12 @@
         "icon": "$(kebab-horizontal)"
       },
       {
+        "command": "devbelt.authenticator",
+        "title": "%cmd.authenticator%",
+        "category": "DB Client",
+        "icon": "$(key)"
+      },
+      {
         "command": "devbelt.previewView",
         "title": "%cmd.previewView%",
         "category": "DB Client"
@@ -1885,6 +1891,11 @@
           "id": "devbelt",
           "title": "DB Client",
           "icon": "resources/logo.svg"
+        },
+        {
+          "id": "devbelt-tools",
+          "title": "%viewContainer.tools%",
+          "icon": "resources/tools.svg"
         }
       ]
     },
@@ -1897,6 +1908,13 @@
         {
           "id": "devbelt.explorer.organization",
           "name": "Organization Resources"
+        }
+      ],
+      "devbelt-tools": [
+        {
+          "id": "devbelt.tools.authenticator",
+          "name": "%view.authenticator%",
+          "type": "webview"
         }
       ]
     },
