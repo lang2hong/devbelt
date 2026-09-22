@@ -153,19 +153,11 @@ export class AuthenticatorStore implements VscodeDisposable {
     await Promise.all(this.entries.map(async (e) => {
       try {
         const v = await this.secrets.get(secretKey(e.id));
-        if (v === undefined) {
-          this.missingSecrets.add(e.id);
-        } else {
-          // 预热时统一归一化：既保证 exportAll 的"大写无 padding"契约不依赖写入来源，
-          // 也把损坏值（非法 base32 / 纯 padding / 空）归入 missingSecrets，而非每秒静默抛错。
-          const canon = canonicalizeSecret(v);
-          if (canon) this.secretCache.set(e.id, canon);
-          else this.missingSecrets.add(e.id);
-        }
+        this.applySecretValue(e.id, v);
       } catch (err) {
         // 单条失败不阻断整批预热，标记为缺失由 UI 显示灰色条
         this.log.warn('authenticator secret preload failed', String(err));
-        this.missingSecrets.add(e.id);
+        this.applySecretValue(e.id, undefined);
       }
     }));
     // 跨窗口密钥变更：用 parseSecretKey 校验前缀，合法才更新 cache 并 publish 事件。
@@ -179,18 +171,10 @@ export class AuthenticatorStore implements VscodeDisposable {
         try {
           if (!this.entries.some((x) => x.id === id)) return;
           const v = await this.secrets.get(e.key);
-          const had = this.secretCache.get(id);
-          const wasMissing = this.missingSecrets.has(id);
-          if (v === undefined) {
-            this.secretCache.delete(id);
-            this.missingSecrets.add(id);
-          } else {
-            this.secretCache.set(id, v);
-            this.missingSecrets.delete(id);
-          }
-          const changed = v === undefined ? !wasMissing : (had !== v || wasMissing);
+          const changed = this.applySecretValue(id, v);
           if (changed) await eventBus.publish(new AuthenticatorChangedEvent('entry', 'update', id));
         } catch (err) {
+          // 读失败保持原缓存（对齐 ConnectionStore），不误标 missing
           this.log.warn('authenticator onDidChange refresh failed', String(err));
         }
       })();
@@ -200,6 +184,33 @@ export class AuthenticatorStore implements VscodeDisposable {
 
   private assertInit(): void {
     if (!this.initialized) throw new Error('store not initialized');
+  }
+
+  /**
+   * 归一化并写入 secret 缓存——init 预热与跨窗口 onDidChange 的**唯一入口**。
+   * raw 为 undefined / 空 / 非法 base32 → 归入 missingSecrets；否则缓存规范形态（大写无 padding）。
+   * 返回缓存状态是否发生变化（供 onDidChange 决定是否 publish）。
+   */
+  private applySecretValue(id: string, raw: string | undefined): boolean {
+    const had = this.secretCache.get(id);
+    const wasMissing = this.missingSecrets.has(id);
+    let canon: string | undefined;
+    if (raw !== undefined) {
+      try {
+        const c = canonicalizeSecret(raw);
+        canon = c || undefined;
+      } catch {
+        canon = undefined;
+      }
+    }
+    if (canon === undefined) {
+      this.secretCache.delete(id);
+      this.missingSecrets.add(id);
+    } else {
+      this.secretCache.set(id, canon);
+      this.missingSecrets.delete(id);
+    }
+    return canon === undefined ? !wasMissing : (had !== canon || wasMissing);
   }
 
   listEntries(): readonly AuthenticatorEntry[] { this.assertInit(); return this.entries; }

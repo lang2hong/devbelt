@@ -610,6 +610,34 @@ describe('AuthenticatorStore', () => {
     store2.dispose();
   });
 
+  // ── onDidChange uses the same normalization as init ──
+  it('onDidChange normalizes a non-canonical external value (lowercase → canonical)', async () => {
+    const add = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });
+    expect(add.ok).toBe(true);
+    if (!add.ok) return;
+    const id = add.entry.id;
+    sec.map.set(`devbelt.authenticator.${id}.secret`, 'jbswy3dpehpk3pxp');
+    sec.emit(`devbelt.authenticator.${id}.secret`);
+    await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(store.getSecret(id)).toBe('JBSWY3DPEHPK3PXP');
+    expect(store.exportAll()).toContain('secret=JBSWY3DPEHPK3PXP');
+  });
+
+  it('onDidChange marks a corrupt external value as missing (no throw)', async () => {
+    const add = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });
+    expect(add.ok).toBe(true);
+    if (!add.ok) return;
+    const id = add.entry.id;
+    sec.map.set(`devbelt.authenticator.${id}.secret`, '===='); // padding-only → empty
+    sec.emit(`devbelt.authenticator.${id}.secret`);
+    await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(store.isSecretMissing(id)).toBe(true);
+    expect(store.getSecret(id)).toBeUndefined();
+    expect(store.getCodes([id], Date.now())[id]).toBeUndefined();
+  });
+
   // ── reorderGroup defensive handling ──
   it('reorderGroup dedupes ids and appends unlisted groups (complete permutation)', async () => {
     const a = await store.addGroup('A');
