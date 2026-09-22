@@ -6,13 +6,14 @@ import { encodeBase32UpperCaseNoPadding } from '../../src/authenticator/base32';
 function memento() {
   const store = new Map<string, unknown>();
   return {
+    map: store,
     keys: () => Array.from(store.keys()),
     get: <T>(k: string): T | undefined => store.get(k) as T | undefined,
     update: async (k: string, v: unknown) => { store.set(k, v); },
   };
 }
 
-/** In-memory SecretStorage stub with onDidChange emitter. */
+/** In-memory SecretStorage stub with onDidChange emitter. delete 对不存在的 key 也 resolve（对齐真实 vscode）。 */
 function secretsWithEvents() {
   const map = new Map<string, string>();
   const listeners: Array<(e: { key: string }) => void> = [];
@@ -21,11 +22,7 @@ function secretsWithEvents() {
     emit: (key: string) => listeners.forEach((l) => l({ key })),
     async get(k: string) { return map.get(k); },
     async store(k: string, v: string) { map.set(k, v); },
-    async delete(k: string) {
-      const had = map.has(k);
-      map.delete(k);
-      if (!had) throw new Error('secret not found');
-    },
+    async delete(k: string) { map.delete(k); },
     onDidChange(l: (e: { key: string }) => void) { listeners.push(l); return { dispose() { /* no-op */ } }; },
   };
 }
@@ -113,16 +110,48 @@ describe('AuthenticatorStore', () => {
     }
   });
 
-  it('updateEntry rejects empty secret (no cache corruption)', async () => {
+  it('updateEntry: empty / whitespace-only secret keeps old secret (contract), still updates metadata', async () => {
     const add = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });
     expect(add.ok).toBe(true);
     if (!add.ok) return;
     const before = store.getSecret(add.entry.id);
-    const upd = await store.updateEntry(add.entry.id, { secret: '' });
-    expect(upd.ok).toBe(false);
-    if (upd.ok) throw new Error('expected invalidSecret');
-    expect(upd.reason).toBe('invalidSecret');
+    for (const s of ['', '   ', '\t\n']) {
+      const upd = await store.updateEntry(add.entry.id, { secret: s, issuer: 'A2' });
+      expect(upd.ok).toBe(true);
+      expect(store.getSecret(add.entry.id)).toBe(before);
+    }
+    expect(store.listEntries().find((e) => e.id === add.entry.id)!.issuer).toBe('A2');
+  });
+
+  it('updateEntry: omitted secret keeps old secret', async () => {
+    const add = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });
+    expect(add.ok).toBe(true);
+    if (!add.ok) return;
+    const before = store.getSecret(add.entry.id);
+    const upd = await store.updateEntry(add.entry.id, { issuer: 'B', account: 'b' });
+    expect(upd.ok).toBe(true);
     expect(store.getSecret(add.entry.id)).toBe(before);
+  });
+
+  it('updateEntry: non-empty but invalid secret is rejected and leaves old secret intact', async () => {
+    const add = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });
+    expect(add.ok).toBe(true);
+    if (!add.ok) return;
+    const before = store.getSecret(add.entry.id);
+    for (const bad of ['000', '====', 'hello0']) {
+      const upd = await store.updateEntry(add.entry.id, { secret: bad });
+      expect(upd.ok).toBe(false);
+      if (upd.ok) throw new Error('expected invalidSecret');
+      expect(upd.reason).toBe('invalidSecret');
+    }
+    expect(store.getSecret(add.entry.id)).toBe(before);
+  });
+
+  it('updateEntry: notFound for unknown id', async () => {
+    const upd = await store.updateEntry('nope', { issuer: 'X' });
+    expect(upd.ok).toBe(false);
+    if (upd.ok) throw new Error('expected notFound');
+    expect(upd.reason).toBe('notFound');
   });
 
   it('updateEntry clamps out-of-range digits/period (IPC trust boundary)', async () => {
@@ -375,5 +404,177 @@ describe('AuthenticatorStore', () => {
   it('addEntry rejects unknown groupId', async () => {
     const r = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP', groupId: 'nonexistent' });
     expect(r.ok).toBe(false);
+  });
+
+  // ── exportAll ──
+  it('exportAll emits otpauth lines joined by CRLF with trailing CRLF', async () => {
+    const a = await store.addEntry({ issuer: 'Acme', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });
+    const b = await store.addEntry({ issuer: 'Beta', account: 'b', secret: 'KRSXG5A' });
+    expect(a.ok && b.ok).toBe(true);
+    const out = store.exportAll();
+    expect(out.endsWith('\r\n')).toBe(true);
+    const lines = out.split('\r\n').filter(Boolean);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('otpauth://totp/Acme:a?');
+    expect(lines[1]).toContain('otpauth://totp/Beta:b?');
+    // no bare LF, no bare CR
+    expect(out.replace(/\r\n/g, '')).not.toContain('\n');
+    expect(out.replace(/\r\n/g, '')).not.toContain('\r');
+  });
+
+  it('exportAll skips missing-secret entries; all-missing returns empty string', async () => {
+    const a = await store.addEntry({ issuer: 'Acme', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });
+    const b = await store.addEntry({ issuer: 'Beta', account: 'b', secret: 'KRSXG5A' });
+    expect(a.ok && b.ok).toBe(true);
+    if (!a.ok || !b.ok) return;
+    // externally remove b's secret, then rebuild store so it is flagged missing
+    sec.map.delete(`devbelt.authenticator.${b.entry.id}.secret`);
+    store.dispose();
+    const store2 = new AuthenticatorStore(mem, sec as never, auth(false));
+    await store2.init();
+    const out = store2.exportAll();
+    expect(out).toContain('Acme');
+    expect(out).not.toContain('Beta');
+    // now remove all and rebuild → ''
+    sec.map.delete(`devbelt.authenticator.${a.entry.id}.secret`);
+    store2.dispose();
+    const store3 = new AuthenticatorStore(mem, sec as never, auth(false));
+    await store3.init();
+    expect(store3.exportAll()).toBe('');
+    store3.dispose();
+  });
+
+  // ── addGroup(afterId) / rewriteGroupOrders ──
+  it('addGroup afterId inserts between groups (midpoint) with correct order', async () => {
+    const g1 = await store.addGroup('A');
+    const g2 = await store.addGroup('B');
+    if (!g1.ok || !g2.ok) return;
+    const mid = await store.addGroup('Mid', g1.group.id);
+    expect(mid.ok).toBe(true);
+    if (!mid.ok) return;
+    expect(store.listGroups().map((g) => g.name)).toEqual(['A', 'Mid', 'B']);
+    // midpoint between 10 and 20
+    expect(mid.group.sortOrder).toBeGreaterThan(g1.group.sortOrder);
+    expect(mid.group.sortOrder).toBeLessThan(g2.group.sortOrder);
+  });
+
+  it('addGroup afterId with tight gap triggers rewriteGroupOrders and keeps ordering', async () => {
+    const g1 = await store.addGroup('A');
+    const g2 = await store.addGroup('B');
+    if (!g1.ok || !g2.ok) return;
+    // force tight sortOrders (difference < 2)
+    const groups = store.listGroups() as any[];
+    groups.find((g) => g.id === g1.group.id).sortOrder = 10;
+    groups.find((g) => g.id === g2.group.id).sortOrder = 11;
+    const mid = await store.addGroup('Mid', g1.group.id);
+    expect(mid.ok).toBe(true);
+    if (!mid.ok) return;
+    const ordered = store.listGroups();
+    expect(ordered.map((g) => g.name)).toEqual(['A', 'Mid', 'B']);
+    // tight gap triggers rewriteGroupOrders (10,20) then insert at after+5 → 10,15,20
+    expect(ordered.map((g) => g.sortOrder)).toEqual([10, 15, 20]);
+  });
+
+  it('addGroup afterId not found falls back to max+10', async () => {
+    const g1 = await store.addGroup('A');
+    if (!g1.ok) return;
+    const g2 = await store.addGroup('B', 'nonexistent');
+    expect(g2.ok).toBe(true);
+    if (!g2.ok) return;
+    expect(g2.group.sortOrder).toBe(20);
+  });
+
+  // ── rename/recolor/notFound/invalid ──
+  it('renameGroup: invalidName / notFound / success', async () => {
+    const g = await store.addGroup('A');
+    if (!g.ok) return;
+    expect(await store.renameGroup(g.group.id, '   ')).toMatchObject({ ok: false, reason: 'invalidName' });
+    expect(await store.renameGroup('nope', 'x')).toMatchObject({ ok: false, reason: 'notFound' });
+    expect(await store.renameGroup(g.group.id, ' B ')).toMatchObject({ ok: true });
+    expect(store.listGroups().find((x) => x.id === g.group.id)!.name).toBe('B');
+  });
+
+  it('renameTag: invalidName / notFound / success', async () => {
+    const t = await store.addTag('work', 'blue');
+    if (!t.ok) return;
+    expect(await store.renameTag(t.tag.id, '')).toMatchObject({ ok: false, reason: 'invalidName' });
+    expect(await store.renameTag('nope', 'x')).toMatchObject({ ok: false, reason: 'notFound' });
+    expect(await store.renameTag(t.tag.id, 'job')).toMatchObject({ ok: true });
+    expect(store.listTags().find((x) => x.id === t.tag.id)!.name).toBe('job');
+  });
+
+  it('recolorTag: invalidColor / notFound / success', async () => {
+    const t = await store.addTag('work', 'blue');
+    if (!t.ok) return;
+    expect(await store.recolorTag(t.tag.id, 'hotpink' as any)).toMatchObject({ ok: false, reason: 'invalidColor' });
+    expect(await store.recolorTag('nope', 'red')).toMatchObject({ ok: false, reason: 'notFound' });
+    expect(await store.recolorTag(t.tag.id, 'red')).toMatchObject({ ok: true });
+    expect(store.listTags().find((x) => x.id === t.tag.id)!.color).toBe('red');
+  });
+
+  it('addTag rejects empty name with invalidName', async () => {
+    expect(await store.addTag('   ', 'blue')).toMatchObject({ ok: false, reason: 'invalidName' });
+  });
+
+  it('deleteGroup / deleteTag on unknown id return ok:false', async () => {
+    expect(await store.deleteGroup('nope')).toMatchObject({ ok: false });
+    expect(await store.deleteTag('nope')).toMatchObject({ ok: false });
+    expect(await store.renameGroup('nope', 'x')).toMatchObject({ ok: false, reason: 'notFound' });
+  });
+
+  // ── real SecretStorage.delete semantics (missing secret) ──
+  it('deleteEntry succeeds even when the secret is already gone (delete resolves)', async () => {
+    const add = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });
+    expect(add.ok).toBe(true);
+    if (!add.ok) return;
+    sec.map.delete(`devbelt.authenticator.${add.entry.id}.secret`); // simulate external removal
+    const del = await store.deleteEntry(add.entry.id);
+    expect(del.ok).toBe(true);
+    expect(store.listEntries().some((e) => e.id === add.entry.id)).toBe(false);
+  });
+
+  it('clearAll succeeds when some secrets are already gone', async () => {
+    const a = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });
+    const b = await store.addEntry({ issuer: 'B', account: 'b', secret: 'KRSXG5A' });
+    if (!a.ok || !b.ok) return;
+    sec.map.delete(`devbelt.authenticator.${a.entry.id}.secret`);
+    const res = await store.clearAll();
+    expect(res.failed).toHaveLength(0);
+    expect(store.listEntries()).toHaveLength(0);
+  });
+
+  // ── persistence keys ──
+  it('persists entries/groups/tags under the documented globalState keys', async () => {
+    const g = await store.addGroup('Work');
+    const t = await store.addTag('work', 'blue');
+    const e = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP', groupId: g.ok ? g.group.id : undefined, tags: t.ok ? [t.tag.id] : [] });
+    expect(e.ok).toBe(true);
+    expect(mem.map.has('devbelt.authenticator.entries')).toBe(true);
+    expect(mem.map.has('devbelt.authenticator.groups')).toBe(true);
+    expect(mem.map.has('devbelt.authenticator.tags')).toBe(true);
+    const entries = mem.map.get('devbelt.authenticator.entries') as any[];
+    expect(entries).toHaveLength(1);
+    expect(entries[0].secret).toBeUndefined(); // secret must never be in memento
+    // fresh store re-reads all three
+    store.dispose();
+    const store2 = new AuthenticatorStore(mem, sec as never, auth(false));
+    await store2.init();
+    expect(store2.listEntries()).toHaveLength(1);
+    expect(store2.listGroups()).toHaveLength(1);
+    expect(store2.listTags()).toHaveLength(1);
+    store2.dispose();
+  });
+
+  it('onDidChange does not grow missingSecrets for an id no longer in entries', async () => {
+    const add = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });
+    expect(add.ok).toBe(true);
+    if (!add.ok) return;
+    const id = add.entry.id;
+    await store.deleteEntry(id);
+    // simulate the delayed self-write onDidChange after deletion
+    sec.emit(`devbelt.authenticator.${id}.secret`);
+    await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(store.isSecretMissing(id)).toBe(false);
   });
 });

@@ -97,7 +97,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     info: diagInfo, warn: diagWarn, error: diagError,
   });
   context.subscriptions.push({ dispose: () => authStore.dispose() });
-  await authStore.init();
+  // init 设计为不抛（逐条失败只标记 missingSecrets）；这里兜底，避免极端异常导致整个扩展激活失败。
+  try {
+    await authStore.init();
+  } catch (err) {
+    diagError('authenticator store init failed', String(err));
+  }
   // S1 临时手测命令（代码注册、不进 package.json，S2 引入正式命令时删除）。
   context.subscriptions.push(vscode.commands.registerCommand('devbelt.authenticator._smoketest', async () => {
     const n = authStore.listEntries().length;

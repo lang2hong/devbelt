@@ -161,13 +161,19 @@ export class AuthenticatorStore implements VscodeDisposable {
         this.missingSecrets.add(e.id);
       }
     }));
-    // 跨窗口密钥变更：用 parseSecretKey 校验前缀，合法才更新 cache 并 publish 事件
+    // 跨窗口密钥变更：用 parseSecretKey 校验前缀，合法才更新 cache 并 publish 事件。
+    // VS Code 的 onDidChange 不排除本扩展自身的写入，故：
+    //  1) 条目已不在本 store 时直接忽略（deleteEntry 后的自写回调不污染 missingSecrets）；
+    //  2) 仅当缓存状态确实变化才 publish（addEntry 自写不再产生多余快照刷新）。
     this.secretEventsSub = this.secrets.onDidChange((e) => {
       const id = parseSecretKey(e.key);
       if (id === null) return;
       void (async () => {
         try {
+          if (!this.entries.some((x) => x.id === id)) return;
           const v = await this.secrets.get(e.key);
+          const had = this.secretCache.get(id);
+          const wasMissing = this.missingSecrets.has(id);
           if (v === undefined) {
             this.secretCache.delete(id);
             this.missingSecrets.add(id);
@@ -175,7 +181,8 @@ export class AuthenticatorStore implements VscodeDisposable {
             this.secretCache.set(id, v);
             this.missingSecrets.delete(id);
           }
-          await eventBus.publish(new AuthenticatorChangedEvent('entry', 'update', id));
+          const changed = v === undefined ? !wasMissing : (had !== v || wasMissing);
+          if (changed) await eventBus.publish(new AuthenticatorChangedEvent('entry', 'update', id));
         } catch (err) {
           this.log.warn('authenticator onDidChange refresh failed', String(err));
         }
@@ -258,7 +265,7 @@ export class AuthenticatorStore implements VscodeDisposable {
       digits: clampDigits(input.digits ?? 6),
       period: clampPeriod(input.period ?? 30),
       groupId,
-      tags: tagIds,
+      tags: [...tagIds],
       createTime: now,
       updateTime: now,
     };
@@ -292,10 +299,15 @@ export class AuthenticatorStore implements VscodeDisposable {
     if (idx < 0) return { ok: false, reason: 'notFound' };
     const prev = this.entries[idx];
     let newSecret: string | undefined;
+    // 契约（文档 §二/§协议）：编辑时 secret 缺省或空串/纯空白 => **保留原 secret**，不是错误；
+    // 只有提供了非空值才校验并替换（非空但非法 → invalidSecret）。
     if (patch.secret !== undefined) {
-      try { newSecret = canonicalizeSecret(patch.secret); }
-      catch { return { ok: false, reason: 'invalidSecret' }; }
-      if (!newSecret) return { ok: false, reason: 'invalidSecret' };
+      const raw = patch.secret.trim();
+      if (raw !== '') {
+        try { newSecret = canonicalizeSecret(raw); }
+        catch { return { ok: false, reason: 'invalidSecret' }; }
+        if (!newSecret) return { ok: false, reason: 'invalidSecret' };
+      }
     }
     let groupId = prev.groupId;
     if (patch.groupId !== undefined) {
@@ -312,7 +324,7 @@ export class AuthenticatorStore implements VscodeDisposable {
       for (const tid of patch.tags) {
         if (!this.tags.some((t) => t.id === tid)) return { ok: false, reason: 'invalidField' };
       }
-      tags = patch.tags;
+      tags = [...patch.tags];
     }
     if (newSecret !== undefined) {
       try {
