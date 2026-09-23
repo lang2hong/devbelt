@@ -84,7 +84,7 @@ DevBelt，打开「验证器」面板就能看到此刻的 6 位口令，用来�
 
 - 密钥（secret）**持久化只存在**你自己电脑的操作系统密钥库里（Windows 凭据管理器 /
   macOS Keychain / Linux secret-service——就是 VS Code 的 SecretStorage，和 DevBelt 现有
-  的刷新令牌、组织凭据存在同一个地方）。扩展主进程运行期会把 secret 缓存在 Extension
+  的刷新令牌存在同一个地方）。扩展主进程运行期会把 secret 缓存在 Extension
   Host 内存（`secretCache`）里供每秒 TOTP 计算使用，但 secret 永远不会进入 webview、
   不会写入 globalState、不会写日志。
 - 界面上**只显示 6 位口令，不显示 secret 本身**。编辑时 secret 字段默认留空，要改请重填。
@@ -671,7 +671,6 @@ export type AuthenticatorEntry = {
 - plan 默认值插入：用 `INSERT INTO plan_feature_values ... SELECT ... JOIN ... ON
   DUPLICATE KEY UPDATE value_json = value_json`（同样不覆盖运营已调整的值）；默认值：
   `['free', 'maxAuthenticatorEntries', 10]`、`['pro', 'maxAuthenticatorEntries', 1000]`。
-- 组织套餐不涉及这个 key。
 - 同步更新的客户端位置（**4 处，缺一会导致字段不贯通**）：
   1. `packages/db-host/src/sync/entitlementGate.ts`：
      - `CachedEntitlement` 接口加 `maxAuthenticatorEntries?: number;`
