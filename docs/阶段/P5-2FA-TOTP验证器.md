@@ -12,12 +12,12 @@
 
 你在很多网站和服务上开启两步验证时，对方会给你一张二维码或一串密钥。现在你得再装一个
 手机 App 去存它、显示 6 位动态口令。这个阶段，我们把这件事做进 DevBelt：**把密钥存进
-DevBelt，打开侧边栏就能看到此刻的 6 位口令，用来登录。**
+DevBelt，打开「验证器」面板就能看到此刻的 6 位口令，用来登录。**
 
 就像 Microsoft Authenticator、腾讯身份验证器，但是长在 DevBelt 里。装好扩展、不用登录也
 能用；支持分组、标签、搜索、复制、导出。
 
-一句话：**DevBelt 侧边栏多一个「工具」容器，里面第一个工具就是验证器。**
+一句话：**DevBelt 里多一个「验证器」webview 面板——通过命令面板/命令打开，不占用活动栏图标。**
 
 ## 二、用户能做什么
 
@@ -26,13 +26,13 @@ DevBelt，打开侧边栏就能看到此刻的 6 位口令，用来登录。**
   `otpauth-migration` protobuf 导入。允许 issuer + account 完全相同的重复条目（内部以
   uniqueId 区分，对齐 Google/Microsoft Authenticator 行为），不做联合唯一约束——用户有
   多个同站点账号时可能手动添加多次。
-- **查看**：侧边栏「工具」→「验证器」面板，每个条目显示发行方、账号、6 位口令、倒计时圈；
+- **查看**：「验证器」webview 面板，每个条目显示发行方、账号、6 位口令、倒计时圈；
   分组可折叠，顶部有搜索框和标签筛选。
 - **分组**：一级分组（不嵌套），可新建/重命名/删除/排序；**"未分组"不持久化为一条 group 记录**——
   和 ConnectionStore 保持一致：`groupId` 为 `undefined`（或空串/找不到的孤儿 id）的条目在 UI
   上聚合到一个固定的"未分组"折叠区（标题走 i18n，不可删/不可重命名/不占 sortOrder）；删分组时
   组内条目批量把 `groupId` 设为 `undefined`，自动落到未分组。
-- **标签**：给条目打一个或多个彩色标签；标签是扁平的，不分组；侧边栏顶部可以按标签筛选；
+- **标签**：给条目打一个或多个彩色标签；标签是扁平的，不分组；面板顶部可以按标签筛选；
   标签颜色从**8 色固定调色板**里选，不做自定义色值。调色板 key 固定为：
   `blue / green / yellow / orange / red / purple / cyan / gray`（前端 Vue 样式和 Store 校验
   都按这 8 个 key 对齐，不存 hex）。
@@ -71,12 +71,12 @@ DevBelt，打开侧边栏就能看到此刻的 6 位口令，用来登录。**
 
 ## 四、怎么用（走一遍）
 
-1. DevBelt 活动栏多一个「工具」图标（带 logo 的小方块）；点开后默认显示「验证器」视图。
-2. 顶部：搜索框 + 标签筛选条 + 「＋ 添加」「导出」按钮。
+1. 命令面板执行「验证器」命令（或点「＋ 添加」命令）→ 打开**验证器 webview 面板**（不占用活动栏图标）。
+2. 顶部：搜索框 + 标签筛选条 + 「＋ 添加」「从图片添加」「导出」按钮。
 3. 中间：分组折叠区，每个分组下是条目卡片，卡片上：发行方 / 账号 / 彩色标签 / 6 位大字口令 /
    倒计时圈；点卡片复制口令；点卡片右上「⋯」有编辑/删除菜单项。
-4. 点「＋ 添加」：侧边栏上方/或就地弹一个小表单（同一个 webview 内，不开新窗口），粘贴
-   otpauth 链接或手动填写，保存即加入列表。
+4. 点「＋ 添加」：面板内就地弹一个小表单（同一个 webview 内，不开新窗口），粘贴
+   otpauth 链接/二维码图片或手动填写，保存即加入列表。
 
 装上就能用，不要求登录、不要求主口令。
 
@@ -90,7 +90,7 @@ DevBelt，打开侧边栏就能看到此刻的 6 位口令，用来登录。**
 - 界面上**只显示 6 位口令，不显示 secret 本身**。编辑时 secret 字段默认留空，要改请重填。
 - **我们的服务器永远看不到你的密钥**——本阶段不联网；以后做同步时密钥也会在本地用主口令密
   钥加密成密文再上传。
-- 侧边栏面板（webview）**拿不到 secret**，只从扩展主进程收到「口令 + 剩余秒」。secret 不进
+- 面板（webview）**拿不到 secret**，只从扩展主进程收到「口令 + 剩余秒」。secret 不进
   postMessage 载荷、不下发、不缓存。
 - 明文导出弹 modal 警告；secret 不写日志、不写错误栈、不进 telemetry。
 
@@ -109,28 +109,22 @@ DevBelt，打开侧边栏就能看到此刻的 6 位口令，用来登录。**
 
 - **S1 · 算法和存储层跑通（纯后端，无 UI）**：纯 TOTP/base32/otpauth 函数 + SecretStorage/Memento
   存储层（含内存 secretCache）+ 完整 Vitest 单元测试（算法向量、store CRUD、容错、quota
-  判定、canonicalizeSecret 归一化）。**不**改 `package.json` 的 `viewsContainers`/`views`/
-  `commands`/`menus`，**不**引入 `tools.svg`，**不**实现 `AuthenticatorViewProvider`——
-  S1 不向最终用户暴露任何 UI，只在 `out/extension.js` 里就绪算法和 store 能力；开发期
-  通过单元测试和一个临时内部命令 `devbelt.authenticator._smoketest`（S2 合入前删掉，
-  或 S2 改为正式命令）做本地手测。这一切片**可单独 merge**，合入后不影响现有功能、
-  活动栏不出现新图标。
-- **S2 · 侧边栏 webview 主框架**：引入 UI 容器和基础渲染能力——`package.json` 新增
-  `viewsContainers.activitybar` + `views` 贡献（`resources/tools.svg`），仅注册一个命令
-  `devbelt.authenticator`（聚焦侧边栏），**不**在 S2 注册 `devbelt.authenticator.add` /
-  `devbelt.authenticator.export`，**不**加 `menus.view/title` 的「＋」/导出按钮（避免出现
-  点了没反应的半成品按钮）；实现 `AuthenticatorViewProvider`（resolveWebviewView、两
-  阶段握手、visibility 驱动 tick、单条 tick 消息、copy、post 守卫、错误边界、pending
-  action 队列）、webview 端 `AuthenticatorView.vue` 基础列表渲染（平铺 issuer/account/
-  code/倒计时 + 复制反馈，无添加按钮、无分组标签搜索）、Deps 扩展、store.init()
-  异步预热、S1 临时 smoketest 命令删除。这一切片完成后用户能在活动栏看到「工具」容器、
-  打开侧边栏看到已有条目和实时口令、点卡片复制，但还不能添加/编辑/分组/标签/导出。
-- **S3 · 分组、标签、搜索、增删改、导出**：注册 `devbelt.authenticator.add` /
-  `devbelt.authenticator.export` 两个命令；`menus.view/title` 加入「＋」和导出按钮；
-  分组树折叠/增删改排序、条目增/编/删表单、标签添加/筛选/选色、顶部搜索框（debounce）、
-  导出文件（CRLF、modal 警告、主进程 showSaveDialog+写文件）、超限预检（达上限直接弹
-  升级不展开表单、pending action 里 openAddForm 也走此校验）、折叠/展开通过 toggleGroup
-  消息驱动（未分组用 `groupId: null`）、copyOk 反馈、formError 内联错误。
+  判定、canonicalizeSecret 归一化）。**不**改 `package.json` 的 `commands`/`menus`，
+  **不**实现任何 UI——S1 不向最终用户暴露任何 UI，只在 `out/extension.js` 里就绪算法和 store
+  能力。这一切片**可单独 merge**，合入后不影响现有功能。
+- **S2 · webview 面板主框架**：以 `BaseWebView` 实现**验证器 webview 面板**（`viewType`
+  `devbelt.authenticator`）——**不新增活动栏图标 / `viewsContainers` / `views` 贡献**；仅注册
+  一个命令 `devbelt.authenticator`（打开/聚焦面板），**不**在 S2 注册 `devbelt.authenticator.add`
+  / `.export`；面板内实现两阶段握手、每秒 tick（单条 tick 消息）、copy、错误边界、pending
+  action 队列；webview 端 `AuthenticatorView.vue` 基础列表渲染（平铺 issuer/account/
+  code/倒计时 + 复制反馈，无添加/分组/标签/搜索）。完成后用户可经命令打开面板看到已有条目
+  与实时口令、点卡片复制。
+- **S3 · 分组、标签、搜索、增删改、导出**：注册 `devbelt.authenticator.add` / `.export`
+  两个命令（供命令面板/快捷键；面板内也有「＋」「图片」「导出」按钮）；分组树折叠/增删改
+  排序、条目增/编/删表单、标签添加/筛选/选色、顶部搜索框（debounce，任意结果集本地排序）、
+  导出文件（CRLF、modal 警告、主进程 showSaveDialog+写文件）、二维码**图片**录入（粘贴/拖拽/
+  选择）、粘贴 otpauth 链接、超限预检（达上限直接弹升级不展开表单）、折叠/展开通过
+  toggleGroup 消息驱动（未分组用 `groupId: null`）、copyOk 反馈、formError 内联错误。
 - **S4 · 收尾**：i18n 中/英（命令、按钮、空态、错误文案、升级提示都走 catalog，NLS key
   五个）、三种空态（未添加/搜索无结果/分组下无条目）、删除/导出的 modal/非 modal 确认、
   `pnpm -C apps/vscode-ext package` 打 VSIX 验证。
@@ -156,7 +150,7 @@ namespace 化重构、批量导入。这些不排期、不承诺。
   限了也是绕得过的假限制。
 - **登录态**：`AuthenticatorStore.add()` 前读 `entitlement.maxAuthenticatorEntries`，超限弹
   提示升级 Pro；已经存在的条目（历史/降级后）不删除、继续可见、可复制、可导出，只是禁止新增。
-- **超限预检 UX**：已达上限时，用户点击侧边栏视图标题栏「＋」按钮或命令面板
+- **超限预检 UX**：已达上限时，用户点击面板内「＋」按钮（或命令面板「添加条目」）
   `devbelt.authenticator.add`，**直接弹升级提示**（带「升级 Pro」按钮打开套餐面板），
   不要展开空添加表单让用户填完后再报错——表单白填是坏 UX。只有当前条目数 < 上限时才
   向 webview 发 `openAddForm` 打开表单。
@@ -174,119 +168,72 @@ namespace 化重构、批量导入。这些不排期、不承诺。
 
 package.json `contributes` 改动分两批：
 
-**S2 引入（基础容器 + 聚焦命令）：**
-- `viewsContainers.activitybar` 新增：
-  ```json
-  { "id": "devbelt-tools", "title": "%viewContainer.tools%", "icon": "resources/tools.svg" }
-  ```
-  图标 `resources/tools.svg` 新增（简单工具箱/九宫格 icon，和现有 logo.svg 风格一致）。
-- `views` 新增：
-  ```json
-  "devbelt-tools": [
-    { "id": "devbelt.tools.authenticator", "name": "%view.authenticator%", "type": "webview" }
-  ]
-  ```
-  注意 `"type": "webview"`，这是 VS Code 侧边栏 webview view 的必需声明。
+**S2 引入（打开面板命令）：**
 - `commands` 新增**一个**（category 继续用 `"DB Client"`，不新开分类）：
   - `devbelt.authenticator` — i18n `cmd.authenticator` = `"Authenticator"` / `"验证器"`，
-    handler 调 `vscode.commands.executeCommand('devbelt.tools.authenticator.focus')`
-    聚焦侧边栏并刷新 provider（若 webview 未 ready 则 pendingAction 不设）。
-- S2 **不**加 `menus.view/title` 按钮、**不**注册 `devbelt.authenticator.add` /
-  `devbelt.authenticator.export`，避免出现点了没反应的半成品入口。
+    handler 打开/聚焦「验证器」webview 面板（`AuthenticatorView.open(store)`）。
+- **不新增** `viewsContainers` / `views` 贡献，**不新增活动栏图标**（用户明确要求 2FA 不占左侧图标）。
 - `menus.commandPalette`：`devbelt.authenticator` 直接可见。
 
-**S3 引入（增/导命令 + 标题栏按钮）：**
+**S3 引入（增/导命令）：**
 - `commands` 再新增两个：
-  - `devbelt.authenticator.add` — i18n `cmd.authenticator.add` = `"Add Entry"` / `"添加条目"`，
-    绑到视图标题栏「＋」按钮。handler 逻辑：先判 quota（登录态已达上限 → 直接弹升级
-    提示，不设 pending action、不展开表单）；未超限则先聚焦侧边栏、设置
-    `provider.pendingAction = 'openAddForm'`，在 webview 完成两阶段 ready 后由
-    provider 发 `openAddForm`。
-  - `devbelt.authenticator.export` — 导出；handler 在侧边栏可见时直接调
-    `store.exportAll()` + `vscode.window.showSaveDialog` 写文件（主进程直接处理文件 IO，
-    不下发文件内容给 webview，不依赖 webview 是否 ready）。
-- `menus.view/title`：`devbelt.tools.authenticator` 视图标题栏加「＋」(add)、导出两个按钮。
+  - `devbelt.authenticator.add` — i18n `cmd.authenticator.add` = `"Add Entry"` / `"添加条目"`。
+    handler 逻辑：先判 quota（登录态已达上限 → 直接弹升级、不打开面板表单）；未超限则
+    `AuthenticatorView.openAddForm(store)`（打开/聚焦面板；面板未 ready 时置 pendingAction，
+    第二次 ready 后补发 `openAddForm`）。面板内也有「＋」按钮走同一路径。
+  - `devbelt.authenticator.export` — 导出；handler 直接调 `store.exportAll()` +
+    `vscode.window.showSaveDialog` 写文件（主进程直接处理文件 IO，不下发文件内容给 webview，
+    不依赖面板是否 ready）。面板内「导出」按钮走同一实现。
+- **不加** `menus.view/title`（已无侧边栏视图）。
 - `menus.commandPalette`：`devbelt.authenticator.add` / `devbelt.authenticator.export`
-  设 `"when": "false"`（只走视图按钮/内部调用，不进面板）。
+  设 `"when": "false"`（只走面板按钮/内部调用，不进面板）。
 
 命令注册走 `makeSub(context)`（沿用 `commands/shared.ts` 统一错误处理），新增
 `registerAuthenticatorCommands(deps: Deps, sub: Sub)`，和其它 register* 函数一样签名，
 在 `commands.ts` 聚合器里调用。
 
 接入需要改两个地方：
-1. `apps/vscode-ext/src/commands/shared.ts` 的 `Deps` 接口加两个字段：
-   - `authStore: AuthenticatorStore`（authenticator 存储实例）；
-   - `authViewProvider: AuthenticatorViewProvider`（侧边栏 provider，命令需要能聚焦
-     /refresh）。
-2. `apps/vscode-ext/src/extension.ts` 构造 Deps 字面量的地方（大约第 275 行附近）把
-   这两个字段也传进去。
+1. `apps/vscode-ext/src/commands/shared.ts` 的 `Deps` 接口加一个字段：
+   `authStore: AuthenticatorStore`（authenticator 存储实例）。
+2. `apps/vscode-ext/src/extension.ts` 构造 Deps 字面量处把 `authStore` 传进去；并订阅
+   `AuthenticatorChangedEvent → AuthenticatorView.refreshCurrent()`。
 
-i18n：`package.nls.json` / `package.nls.zh-cn.json` 加 `viewContainer.tools`、
-`view.authenticator`、`cmd.authenticator`、`cmd.authenticator.add`、`cmd.authenticator.export`
-五个 key。扩展主进程提示走 catalog（`authenticator.*` 前缀），webview 文案走 catalog
-（`wv.authenticator.*` 前缀），和现有 catalog 前缀约定保持一致。
+i18n：`package.nls.json` / `package.nls.zh-cn.json` 加 `cmd.authenticator`、
+`cmd.authenticator.add`、`cmd.authenticator.export`（3 个 key；不再有视图相关 key）。
+扩展主进程提示走 catalog（`authenticator.*` 前缀，含 `authenticator.title`），webview 文案走
+catalog（`wv.authenticator.*` 前缀），和现有 catalog 前缀约定保持一致。
 
-### 侧边栏 WebviewViewProvider
+### Webview 面板（BaseWebView 子类）
 
-现有 `BaseWebView` 是硬写 `createWebviewPanel` 的，不能直接复用（panel 与 sidebar view
-生命周期差异见下）；侧边栏 webview 用 `WebviewViewProvider`，实现一个
-`AuthenticatorViewProvider`（放 `apps/vscode-ext/src/authenticator/authenticatorViewProvider.ts`）。
-这是仓库里第一个 `WebviewViewProvider`，要点如下：
+验证器**不是**侧边栏视图，而是与 Query/Design 等一致的 **`WebviewPanel`**：以现有
+`BaseWebView` 为基类实现 `AuthenticatorView`（放
+`apps/vscode-ext/src/authenticator/authenticatorView.ts`），复用其面板创建、HTML 注入、
+`onDidReceiveMessage`/`onDidDispose`、`post`（自动注入 `isZh`）、错误边界与「两次 ready」
+`__load` 重置。要点：
 
-- **构造签名**：`constructor(private readonly extensionUri: vscode.Uri, private readonly store: AuthenticatorStore)`。
-  不要尝试读取 `BaseWebView._extensionUri`——那是 `protected static`，外部类访问不了
-  TS 编译不过。`extensionUri` 由 `extension.ts` 在 `new` 时传 `context.extensionUri`。
-- **外部命令入口**：暴露 `openAddForm(): void` 方法（供 command handler 调用）。方法
-  内部：若当前 `initSent === true` 且 webview 可见 → 直接 `post({type:'openAddForm'})`；
-  若 webview 还没 resolve 或还在第一阶段 ready → 设 `this.pendingAction = 'openAddForm'`，
-  等第二次 ready 后补发（防止视图标题栏「＋」按钮在 webview 尚未挂载时丢消息）。
-  对外还暴露 `refresh(): Promise<void>` 供 EventBus 订阅调用。
-- `resolveWebviewView(webviewView, context, token)` 里：
-  - 保存 `this.currentView = webviewView`；`webviewView.onDidDispose` 里清空引用、清
-    timer、清 message 订阅、清 `initSent = false`。注意：`resolveWebviewView` 可被
-    VS Code 在视图重建时**多次调用**（侧边栏被隐藏到销毁、再显示时会重新 resolve），
-    **不要**用 `private static current` 单例模式阻止二次创建——每次 resolve 都要重新
-    绑定 webview、重置 initSent、重新发 init、重新起 timer。
-  - `webviewView.webview.options = { enableScripts: true }`（CSP/资源路径由 `getWebviewHtml`
-    内的 `cspSource` + `asWebviewUri` 覆盖，不需要显式设 `localResourceRoots`）；
-  - `webviewView.webview.html = getWebviewHtml(webviewView.webview, this.extensionUri)`
-    复用现有函数（它只取 `.webview` 属性的 cspSource/asWebviewUri，类型兼容）；
-  - 订阅 `webviewView.webview.onDidReceiveMessage`、`webviewView.onDidDispose`、
-    `webviewView.onDidChangeVisibility`。所有 disposable 集中管理，dispose 时统一清。
-- **两阶段 ready 握手（与 BaseWebView 一致，但要处理 LOAD_ID 重置与 pendingAction）**：
-  - provider 维护 `initSent = false`；每次 resolveWebviewView 或收到带新 `__load` 的消息
-    时重置 `initSent = false`（侧边栏被隐藏后 webview 上下文会销毁，再次显示会加载新
-    HTML、产生新 LOAD_ID）。
-  - 第一次收到 `ready`：`initSent = true; post({type:'init', mode:'authenticator', isZh})`
-    （`isZh` 对齐 BaseWebView.sendEnriched 的处理，从 `isZh()` 取值）。
-  - 第二次收到 `ready`（App.vue 切换到 AuthenticatorView 后）：
-    1. 调 `this.sendSnapshot()` 下发完整快照；
-    2. 启动 tick timer；
-    3. **如果** `this.pendingAction === 'openAddForm'`，发 `{type:'openAddForm'}` 并清空
-       pendingAction（保证外部命令在 webview 未就绪时设置的动作不会丢）。
-- 在 `extension.ts` activate 里调
-  `vscode.window.registerWebviewViewProvider('devbelt.tools.authenticator', provider)`，
-  返回的 disposable push 到 `context.subscriptions`。**注意顺序**：
-  - `BaseWebView.init(context.extensionUri)` 最先调用（panel webview 仍然需要它）；
-  - 然后构造 `AuthenticatorStore`，**必须 `await store.init()`** 完成 secretCache 预热
-    后再继续（secretCache 未就绪时禁止启动 provider/tick，避免首轮 tick cache miss 导致
-    无码可显示），再 push 到 subscriptions；
-  - 然后构造 `AuthenticatorViewProvider(context.extensionUri, store)`，调用
-    `registerWebviewViewProvider`，push 到 subscriptions（store 先于 provider push，
-    dispose 反序时 provider 先销毁，避免 tick 回调访问已 dispose 的 store）；
-  - `registerCommands` 在 provider 之后调用（Deps 里需要 authStore/authViewProvider，
-    这两个实例此时必须已构造好）。
-  - `activationEvents` 当前是 `onStartupFinished`，扩展启动后即激活，无需额外加 `onView:`。
-- **定时器（可见性驱动，省电）**：
-  - provider 内部 `tick()` 方法遍历未折叠条目，计算 `{code, secondsLeft}`，合并为**一条**
-    消息 `{type:'tick', nowMs: Date.now(), codes: Record<entryId,{code,secondsLeft}>}` 发
-    给 webview（不要一条 entry 一条消息）；折叠组的条目不计算、不下发，组展开瞬间补
-    发该组的 codes。
-  - `setInterval(tick, 1000)` 只在 view 可见时跑；`webviewView.onDidChangeVisibility`
-    隐藏时 `clearInterval`、可见时立刻执行一次 `tick()` 再启动 timer；`onDidDispose`
-    里也要清 timer。参考现有 `PoolStatusView` 的 timer 模式，但补 visibility 处理。
-- **post 守卫**：所有 `this.post(...)` 调用前检查 `if (!this.currentView) return;`，
-  防止 view 已销毁时 post 抛错。
+- **构造签名**：`private constructor(store: AuthenticatorStore) → super('devbelt.authenticator', l10n('authenticator.title'))`。
+  `extensionUri` 由 `BaseWebView.init(context.extensionUri)` 在 `extension.ts` 统一提供，无需外部读取。
+- **单例打开/聚焦**：`static open(store)` 首次 `new`、已存在则 `panel.reveal(ViewColumn.Active)`；
+  `static openAddForm(store)` 打开并请求表单；`static refreshCurrent()` 供事件订阅刷新。
+- **外部命令入口**：`requestAddForm()`（供命令调用）：先在主进程 `store.checkQuota()`，
+  达上限弹升级、不展开表单；否则若已 `initSent` 直接 `post({type:'openAddForm'})`，
+  否则设 `pendingAction='openAddForm'` 待第二次 ready 补发。对外 `refresh(): Promise<void>`
+  供 EventBus 订阅调用。
+- **面板生命周期**：由 `BaseWebView` 统一处理——构造时 `createWebviewPanel` + `getWebviewHtml`，
+  订阅 `onDidReceiveMessage`（含 `__load` 变化即重置 `initSent`）与 `onDidDispose`（清 timer、
+  清单例）。`retainContextWhenHidden:true`（BaseWebView 默认）→ 面板隐藏后仍存活、tick 持续；
+  关闭（`onDispose`）清理。
+- **两阶段 ready**：第一次 ready → `initSent=true; post({type:'init', mode:'authenticator'})`
+  （`isZh` 由 `BaseWebView.post` 自动注入）；第二次 ready（App.vue 切到 AuthenticatorView 后）
+  → `sendSnapshot()` + 起 tick timer + 消费 `pendingAction`。
+- **接入顺序（extension.ts）**：`BaseWebView.init(extensionUri)`（其它面板已调用）→ 构造
+  `AuthenticatorStore` → **`await store.init()`**（secretCache 预热）→ `registerCommands`
+  （Deps 含 `authStore`）→ 订阅 `AuthenticatorChangedEvent → AuthenticatorView.refreshCurrent()`。
+  面板**按需打开**（命令触发），激活时不预建；`activationEvents` 仍为 `onStartupFinished`。
+- **定时器**：`tick()` 遍历未折叠条目，计算 `{code, secondsLeft}`，合并为**一条**
+  `{type:'tick', nowMs, codes}` 下发（不逐条）；折叠组不计算/不下发，组展开瞬间补发该组
+  codes。`setInterval(tick, 1000)` 在第二次 ready 启动，`onDispose` 清除。
+- **post 守卫**：`BaseWebView` 已保证面板销毁后不再调用；`onDispose` 同时清 timer 与单例。
 - **外部刷新入口**：提供 `refresh(): Promise<void>` 方法（extension.ts 在收到
   `AuthenticatorChangedEvent` 时调用），内部重新 listEntries 并 post 快照给 webview。
   快照下发前做 IPC 规范化：`groupId === undefined` → `null`（对齐下行协议）；entry id
@@ -706,8 +653,8 @@ export type AuthenticatorEntry = {
 
 ### 活动栏图标
 
-新增 `apps/vscode-ext/resources/tools.svg`（工具/九宫格风格，和现有 `logo.svg` 线条粗细、颜色
- 单色风格一致）。不需要设计师介入，用一个简洁的 SVG path 即可。
+**不需要**。验证器以 webview 面板打开，**不占用活动栏图标**（无 `resources/tools.svg`、无
+`viewsContainers` 贡献）。
 
 ### 套餐 feature key 迁移
 

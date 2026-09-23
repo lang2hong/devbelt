@@ -523,6 +523,7 @@ export const zh: MessageCatalog = {
   'conn.capReached': '免费套餐最多保存 {count} 个连接，升级到 Pro 可添加更多。',
 
   // ── 2FA/TOTP 验证器（主进程）──
+  'authenticator.title': '验证器',
   'authenticator.error.generic': '验证器操作失败。',
   'authenticator.copy.invalid': '口令格式非法，已拒绝复制。',
   'authenticator.quota.upgrade': '升级 Pro',

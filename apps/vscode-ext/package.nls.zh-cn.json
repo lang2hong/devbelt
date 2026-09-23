@@ -46,8 +46,6 @@
   "cmd.copyName": "复制名称",
   "cmd.manageUsers": "管理用户",
   "view.explorer": "连接",
-  "viewContainer.tools": "工具",
-  "view.authenticator": "验证器",
   "cmd.org.refresh": "刷新组织",
   "cmd.org.newFolder": "新建目录",
   "cmd.org.deleteFolder": "删除目录",

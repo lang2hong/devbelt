@@ -100,7 +100,8 @@ function sortColumn(name: string) {
     suppressSort.value = false;
     return;
   }
-  if (props.hasTable) emit('sort', name);
+  // 任意结果集（非表预览）也允许点列头排序——由上层决定本地排序或服务端重查。
+  emit('sort', name);
 }
 
 function persistLayout() {

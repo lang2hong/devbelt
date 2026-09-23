@@ -545,6 +545,7 @@ export const en: MessageCatalog = {
   'conn.capReached': 'Free plan allows {count} saved connections. Upgrade to Pro to add more.',
 
   // ── 2FA/TOTP 验证器（主进程）──
+  'authenticator.title': 'Authenticator',
   'authenticator.error.generic': 'Authenticator operation failed.',
   'authenticator.copy.invalid': 'Refused to copy an invalid code.',
   'authenticator.quota.upgrade': 'Upgrade to Pro',

@@ -46,8 +46,6 @@
   "cmd.copyName": "Copy Name",
   "cmd.manageUsers": "Manage Users",
   "view.explorer": "Connections",
-  "viewContainer.tools": "Tools",
-  "view.authenticator": "Authenticator",
   "cmd.org.refresh": "Refresh Organizations",
   "cmd.org.newFolder": "New Folder",
   "cmd.org.deleteFolder": "Delete Folder",

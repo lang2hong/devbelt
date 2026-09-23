@@ -50,6 +50,29 @@ const dbType = ref('');
 const running = ref(false);
 const viewMode = ref<'table' | 'chart'>('table');
 
+/**
+ * 任意结果集（非表预览）的本地排序视图：表预览由主进程带 ORDER BY 重查（sortCol/sortDir
+ * 来自后端响应），此处仅对已加载行做本地排序。null/undefined 恒排末尾（不随方向翻转）。
+ */
+const displayRows = computed(() => {
+  if (hasTable.value || !sortCol.value || !sortDir.value) return rows.value;
+  const col = sortCol.value;
+  const dir = sortDir.value === 'DESC' ? -1 : 1;
+  return [...rows.value].sort((x, y) => {
+    const a = x[col];
+    const b = y[col];
+    const an = a == null || a === '';
+    const bn = b == null || b === '';
+    if (an && bn) return 0;
+    if (an) return 1;
+    if (bn) return -1;
+    const na = typeof a === 'number' ? a : Number(a);
+    const nb = typeof b === 'number' ? b : Number(b);
+    if (!Number.isNaN(na) && !Number.isNaN(nb)) return (na < nb ? -1 : na > nb ? 1 : 0) * dir;
+    return String(a).localeCompare(String(b)) * dir;
+  });
+});
+
 const totalPages = computed(() => total.value === undefined ? 0 : Math.max(1, Math.ceil(total.value / limit.value)));
 const currentPage = computed(() => total.value === undefined ? 0 : Math.floor(offset.value / limit.value) + 1);
 /** 跳页输入框：随当前页变化同步显示。 */
@@ -309,8 +332,14 @@ function syncLimitFromSql(sqlText?: string) {
 }
 
 function handleSort(col: string) {
-  if (!hasTable.value) return;
-  post({ type: 'sort', column: col });
+  if (hasTable.value) {
+    // 表预览：交给主进程带 ORDER BY 重查。
+    post({ type: 'sort', column: col });
+    return;
+  }
+  // 任意结果集：本地排序 + 方向切换。
+  if (sortCol.value === col) sortDir.value = sortDir.value === 'ASC' ? 'DESC' : 'ASC';
+  else { sortCol.value = col; sortDir.value = 'ASC'; }
 }
 
 function handleFilter(conditions: { column: string; op: string; value?: string }[]) {
@@ -462,7 +491,7 @@ function onKeydown(e: KeyboardEvent) {
     </div>
     <template v-if="viewMode === 'table' && fields.length > 0">
       <ResultGrid
-      :rows="rows"
+      :rows="displayRows"
       :fields="fields"
       :pk-columns="pkColumns"
       :has-table="hasTable"
