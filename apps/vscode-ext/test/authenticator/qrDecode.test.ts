@@ -36,4 +36,24 @@ describe('decodeOtpauthFromPngDataUrl', () => {
     const dataUrl = await qrPngDataUrl('hello-qr');
     expect(decodeOtpauthFromPngDataUrl(dataUrl)).toBe('hello-qr');
   });
+
+  it('decodes a small QR (exercises the 2x-upscale retry path)', async () => {
+    const uri = 'otpauth://totp/Acme:alice?secret=JBSWY3DPEHPK3PXP&issuer=Acme';
+    const buf = await QRCode.toBuffer(uri, { type: 'png', margin: 1, width: 64 });
+    const dataUrl = `data:image/png;base64,${buf.toString('base64')}`;
+    expect(decodeOtpauthFromPngDataUrl(dataUrl)).toBe(uri);
+  });
+
+  it('rejects payloads over the byte cap (image bomb guard)', () => {
+    // 8MB 字节上限：构造 > 8MB 的 base64（不触达 PNG 解析）
+    const big = 'data:image/png;base64,' + 'A'.repeat(Math.ceil((8 * 1024 * 1024 + 1024) * 4 / 3));
+    expect(() => decodeOtpauthFromPngDataUrl(big)).toThrow(/too large/);
+  });
+
+  it('rejects images over the pixel cap', () => {
+    const png = new PNG({ width: 4100, height: 4100 }); // 16.81M px > 16M
+    png.data.fill(255);
+    const dataUrl = `data:image/png;base64,${PNG.sync.write(png).toString('base64')}`;
+    expect(() => decodeOtpauthFromPngDataUrl(dataUrl)).toThrow(/dimensions too large/);
+  });
 });

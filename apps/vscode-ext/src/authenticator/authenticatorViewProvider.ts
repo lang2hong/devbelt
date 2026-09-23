@@ -96,6 +96,7 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
       case 'copy': await this.onCopy(msg); return;
       case 'toggleGroup': this.onToggleGroup(msg); return;
       case 'requestAddForm': this.openAddForm(); return;
+      case 'addUri': await this.onAddUri(msg); return;
       case 'addImage': await this.onAddImage(msg); return;
       case 'add': await this.onAdd(msg); return;
       case 'update': await this.onUpdate(msg); return;
@@ -173,12 +174,21 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
       return;
     }
     if (!uri) { this.postFormError(undefined, 'authenticator.image.notFound'); return; }
+    await this.addFromUri(uri, 'authenticator.image.invalid');
+  }
+
+  /** 粘贴/图片两条入口共用的"解析 URI 并新增"逻辑。invalidKey 为解析失败时的文案键。 */
+  private async addFromUri(uri: string, invalidKey: string): Promise<void> {
+    if (uri.startsWith('otpauth-migration://')) {
+      this.postFormError(undefined, 'authenticator.uri.migrationUnsupported');
+      return;
+    }
     let parsed: ReturnType<typeof parseOtpauthUri>;
     try {
       parsed = parseOtpauthUri(uri);
     } catch (e) {
-      diagError('authenticator image otpauth parse failed', String(e));
-      this.postFormError(undefined, 'authenticator.image.invalid');
+      diagError('authenticator uri parse failed', String(e));
+      this.postFormError(undefined, invalidKey);
       return;
     }
     const res = await this.store.addEntry({
@@ -193,6 +203,11 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
     if (res.reason === 'quota') { await promptAuthenticatorUpgrade(res.limit); return; }
     if (res.reason === 'invalidSecret') { this.postFormError('secret', 'authenticator.err.invalidSecret'); return; }
     this.post({ type: 'error', message: l10n('authenticator.error.generic') });
+  }
+
+  private async onAddUri(msg: Extract<AuthenticatorUpMessage, { type: 'addUri' }>): Promise<void> {
+    if (typeof msg.uri !== 'string' || !msg.uri) { this.postFormError(undefined, 'authenticator.uri.invalid'); return; }
+    await this.addFromUri(msg.uri, 'authenticator.uri.invalid');
   }
 
   private async onDelete(msg: Extract<AuthenticatorUpMessage, { type: 'delete' }>): Promise<void> {

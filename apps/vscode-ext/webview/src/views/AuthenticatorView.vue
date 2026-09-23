@@ -54,8 +54,11 @@ const menuFor = ref<string | null>(null);
 const groupMenuFor = ref<string | null>(null);
 const confirmDeleteId = ref<string | null>(null);
 const confirmTagDeleteId = ref<string | null>(null);
+const confirmDeleteGroupId = ref<string | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const imgBusy = ref(false);
+const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
+const MAX_IMAGE_SIDE = 1600;
 
 const RING_CIRCUMFERENCE = 2 * Math.PI * 13;
 
@@ -241,11 +244,12 @@ function requestExport(): void { post({ type: 'export' }); }
 function pickImage(): void { fileInput.value?.click(); }
 async function processImage(blob: Blob): Promise<void> {
   if (imgBusy.value) return;
+  if (blob.size > MAX_IMAGE_BYTES) { promptError.value = t('wv.authenticator.image.invalid'); return; }
   imgBusy.value = true;
   promptError.value = '';
   try {
     const bmp = await createImageBitmap(blob);
-    const scale = Math.min(1, 512 / Math.max(bmp.width, bmp.height));
+    const scale = Math.min(1, MAX_IMAGE_SIDE / Math.max(bmp.width, bmp.height));
     const w = Math.max(1, Math.round(bmp.width * scale));
     const h = Math.max(1, Math.round(bmp.height * scale));
     const canvas = document.createElement('canvas');
@@ -268,10 +272,25 @@ function onFileInput(e: Event): void {
   if (f) void processImage(f);
   input.value = '';
 }
+function isTextEntry(el: EventTarget | null): boolean {
+  const e = el as HTMLElement | null;
+  if (!e) return false;
+  const tag = e.tagName?.toLowerCase();
+  return tag === 'input' || tag === 'textarea' || e.isContentEditable === true;
+}
 function onPaste(e: ClipboardEvent): void {
-  const items = e.clipboardData?.items;
-  if (!items) return;
-  for (const it of items) {
+  const dt = e.clipboardData;
+  if (!dt) return;
+  const text = dt.getData('text/plain').trim();
+  // otpauth 链接粘贴：链接语义明确，无论焦点在哪都走"粘贴链接"（secret 不进 webview）。
+  if (text.startsWith('otpauth://') || text.startsWith('otpauth-migration://')) {
+    e.preventDefault();
+    post({ type: 'addUri', uri: text });
+    return;
+  }
+  // 其余情况：输入框内粘贴不劫持，避免吞掉正常文本粘贴。
+  if (isTextEntry(e.target)) return;
+  for (const it of dt.items) {
     if (it.type.startsWith('image/')) {
       const f = it.getAsFile();
       if (f) { e.preventDefault(); void processImage(f); }
@@ -313,6 +332,7 @@ function moveGroup(id: string, dir: -1 | 1): void {
 }
 function requestDeleteGroup(id: string): void {
   groupMenuFor.value = null;
+  confirmDeleteGroupId.value = null;
   if (!groups.value.some((g) => g.id === id)) return;
   post({ type: 'deleteGroup', id });
   errMsg.value = t('wv.authenticator.group.movedToUngrouped');
@@ -360,9 +380,9 @@ onUnmounted(() => {
     <div class="toolbar">
       <input v-model="query" class="search" type="text" :placeholder="t('wv.authenticator.search')" />
       <button class="btn" :title="t('wv.authenticator.add')" @click="requestAdd">＋</button>
-      <button class="btn" :title="t('wv.authenticator.image.pasteHint')" :disabled="imgBusy" @click="pickImage">🖼</button>
+      <button class="btn" :title="t('wv.authenticator.image.button')" :disabled="imgBusy" @click="pickImage">🖼</button>
       <button class="btn" :title="t('wv.authenticator.export')" @click="requestExport">⭳</button>
-      <input ref="fileInput" class="hidden-file" type="file" accept="image/*" @change="onFileInput" />
+      <input ref="fileInput" class="hidden-file" type="file" accept="image/*" :aria-label="t('wv.authenticator.image.pasteHint')" @change="onFileInput" />
     </div>
 
     <div class="tagbar">
@@ -481,7 +501,8 @@ onUnmounted(() => {
                 <button class="menu-item" @click="moveGroup(sec.groupId, -1)">{{ t('wv.authenticator.group.moveUp') }}</button>
                 <button class="menu-item" @click="moveGroup(sec.groupId, 1)">{{ t('wv.authenticator.group.moveDown') }}</button>
                 <button class="menu-item" @click="openGroupPrompt('rename', { id: sec.groupId, name: sec.name })">{{ t('wv.authenticator.group.rename') }}</button>
-                <button class="menu-item danger" @click="requestDeleteGroup(sec.groupId)">{{ t('wv.authenticator.group.delete') }}</button>
+                <button v-if="confirmDeleteGroupId !== sec.groupId" class="menu-item danger" @click="confirmDeleteGroupId = sec.groupId">{{ t('wv.authenticator.group.delete') }}</button>
+                <button v-else class="menu-item danger" @click="requestDeleteGroup(sec.groupId)">✓ {{ t('wv.authenticator.group.delete') }}</button>
               </div>
             </template>
             <button v-else class="icon" :title="t('wv.authenticator.group.new')" @click="openGroupPrompt('new')">＋</button>

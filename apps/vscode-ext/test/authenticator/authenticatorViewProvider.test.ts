@@ -455,4 +455,53 @@ describe('AuthenticatorViewProvider', () => {
     expect(promptAuthenticatorUpgrade).toHaveBeenCalledWith(5);
     expect(decodeOtpauthFromPngDataUrl).not.toHaveBeenCalled();
   });
+
+  // ── addUri (paste otpauth link) ──
+  it('addUri parses and adds the entry', async () => {
+    const h = makeHarness();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'addUri', uri: 'otpauth://totp/Acme:alice?secret=JBSWY3DPEHPK3PXP&issuer=Acme&algorithm=SHA1&digits=6&period=30' });
+    await flush();
+    expect(h.store.addEntry).toHaveBeenCalledWith(expect.objectContaining({ issuer: 'Acme', account: 'alice' }));
+  });
+
+  it('addUri: invalid link → formError uri.invalid', async () => {
+    const h = makeHarness();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'addUri', uri: 'https://example.com/not-otpauth' });
+    await flush();
+    expect(h.posted.some((m) => m.type === 'formError' && /uri\.invalid/.test(m.message))).toBe(true);
+    expect(h.store.addEntry).not.toHaveBeenCalled();
+  });
+
+  it('addUri: otpauth-migration → dedicated unsupported message', async () => {
+    const h = makeHarness();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'addUri', uri: 'otpauth-migration://offline?data=AAAA' });
+    await flush();
+    expect(h.posted.some((m) => m.type === 'formError' && /migrationUnsupported/.test(m.message))).toBe(true);
+    expect(h.store.addEntry).not.toHaveBeenCalled();
+  });
+
+  it('addUri: at cap (store returns quota) → upgrade prompt', async () => {
+    const h = makeHarness({ store: { addEntry: vi.fn(async () => ({ ok: false, reason: 'quota', limit: 3 })) } });
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'addUri', uri: 'otpauth://totp/Acme:alice?secret=JBSWY3DPEHPK3PXP' });
+    await flush();
+    expect(promptAuthenticatorUpgrade).toHaveBeenCalledWith(3);
+  });
+
+  it('addImage: decoded migration QR → unsupported message', async () => {
+    (decodeOtpauthFromPngDataUrl as any).mockReturnValueOnce('otpauth-migration://offline?data=AAAA');
+    const h = makeHarness();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'addImage', dataUrl: 'data:image/png;base64,AAAA' });
+    await flush();
+    expect(h.posted.some((m) => m.type === 'formError' && /migrationUnsupported/.test(m.message))).toBe(true);
+  });
 });

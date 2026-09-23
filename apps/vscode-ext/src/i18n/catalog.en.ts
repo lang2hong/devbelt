@@ -560,6 +560,8 @@ export const en: MessageCatalog = {
   'authenticator.err.notFound': 'Entry not found.',
   'authenticator.image.notFound': 'No QR code found in the image.',
   'authenticator.image.invalid': 'Could not read a valid otpauth link from the image.',
+  'authenticator.uri.invalid': 'Invalid otpauth link.',
+  'authenticator.uri.migrationUnsupported': 'otpauth-migration (bulk export) codes are not supported yet.',
 
   // ── webview UI 文案（wv.*）──
   'wv.common.save': 'Save',

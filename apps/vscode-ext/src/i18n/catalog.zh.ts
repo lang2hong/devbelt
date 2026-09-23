@@ -538,6 +538,8 @@ export const zh: MessageCatalog = {
   'authenticator.err.notFound': '条目不存在。',
   'authenticator.image.notFound': '图片中未找到二维码。',
   'authenticator.image.invalid': '无法从图片中读取有效的 otpauth 链接。',
+  'authenticator.uri.invalid': '无效的 otpauth 链接。',
+  'authenticator.uri.migrationUnsupported': '暂不支持 otpauth-migration 批量迁移二维码。',
 
   // ── webview UI 文案（wv.*）──
   'wv.common.save': '保存',

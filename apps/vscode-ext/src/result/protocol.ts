@@ -101,6 +101,7 @@ export type AuthenticatorUpMessage =
   | { type: 'removeTag'; id: string }
   | { type: 'toggleGroup'; groupId: string | null; folded: boolean }
   | { type: 'requestAddForm' }
+  | { type: 'addUri'; uri: string }
   | { type: 'addImage'; dataUrl: string }
   | { type: 'copy'; code: string; entryId: string }
   | { type: 'export' };
