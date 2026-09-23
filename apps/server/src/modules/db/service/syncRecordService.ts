@@ -40,6 +40,8 @@ export interface PutRecordInput extends SignedRecordMutation {
   nonce: Buffer;
   ciphertext: Buffer;
   tag: Buffer;
+  /** P6：可选明文类型名（entity_kind）；缺省不动/为 null。 */
+  entityKind?: string;
 }
 
 export interface DeleteRecordInput extends SignedRecordMutation {
@@ -198,6 +200,7 @@ export class SyncRecordService {
           cipherSuite: input.cipherSuite, formatVersion: input.formatVersion,
           nonce: input.nonce, ciphertext: input.ciphertext, tag: input.tag,
           version: '1', changeSequence: changeSeq,
+          entityKind: input.entityKind ?? null,
         });
       } else {
         const existing = await this.recordRepo.findForUpdate(tx, userId, input.keyEpoch, recordIdBuf);
@@ -212,6 +215,7 @@ export class SyncRecordService {
           cipherSuite: input.cipherSuite, formatVersion: input.formatVersion,
           nonce: input.nonce, ciphertext: input.ciphertext, tag: input.tag,
           newVersion, changeSequence: changeSeq,
+          entityKind: input.entityKind ?? null,
         });
         if (!ok) throw new SyncVersionConflictError(existing.version);
       }
@@ -290,5 +294,14 @@ export class SyncRecordService {
       const nextBytes = current.bytes + delta.bytesDelta;
       if (nextBytes > maxBytes) throw new SyncQuotaExceededError('bytes', String(maxBytes), String(current.bytes));
     }
+  }
+
+  /**
+   * P6：按明文类型统计 active 记录数。S4 按 `maxAuthenticatorEntries` 拒绝超限、S6 后台统计复用。
+   * 只读，经 runner 在事务内执行。
+   */
+  async countActiveByKind(userId: number, keyEpoch: string, entityKind: string): Promise<number> {
+    assertU64(keyEpoch, 'keyEpoch');
+    return this.runner(async (tx) => this.recordRepo.countActiveByKind(tx, userId, keyEpoch, entityKind));
   }
 }

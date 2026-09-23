@@ -339,6 +339,7 @@ export async function syncRoutes(app: FastifyInstance, opts: SyncRouteOptions): 
             nonce: decodeB64Url(body.nonce, 12, 'nonce'),
             ciphertext: decodeB64UrlRange(body.ciphertext, 1, 256 * 1024, 'ciphertext'),
             tag: decodeB64Url(body.tag, 16, 'tag'),
+            entityKind: typeof body.entityKind === 'string' ? body.entityKind : undefined,
           }));
         } catch (e) { sendError(reply, e); }
       });

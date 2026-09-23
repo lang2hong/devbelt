@@ -440,4 +440,40 @@ describe('SyncRecordService', () => {
     expect(p2.records.map((x) => x.changeSequence)).toEqual(['3']);
     expect(p2.nextAfter).toBeUndefined();
   });
+
+  it('stores optional entityKind, counts by kind, and preserves it on update without the field (P6)', async () => {
+    const stack = makeStack();
+    const keys = await init(stack);
+    const mMid = mid(120);
+    const rId = rid(120);
+    const body = { ...putBody(mMid, rId, 70, 71, '0'), entityKind: 'authenticatorEntry' };
+    const s = signRecord(keys.signPriv, USER, 'record.put', body);
+    await stack.recordSvc.putRecord(USER, {
+      keyEpoch: '1', mutationId: mMid, signature: s.signatureBuf, baseVersion: '0', requestDigest: s.digest,
+      recordId: rId, cipherSuite: 'AES-256-GCM', formatVersion: 1, entityKind: 'authenticatorEntry', ...decodeBody(body),
+    });
+    const rec = await stack.recordRepo.findForUpdate({} as Queryable, USER, '1', Buffer.from(rId, 'base64url'));
+    expect(rec?.entityKind).toBe('authenticatorEntry');
+    expect(await stack.recordSvc.countActiveByKind(USER, '1', 'authenticatorEntry')).toBe(1);
+    expect(await stack.recordSvc.countActiveByKind(USER, '1', 'connection')).toBe(0);
+
+    // 更新不带 entityKind（模拟旧客户端）→ COALESCE 保留原值
+    const uMid = mid(121);
+    const ubody = putBody(uMid, rId, 72, 73, '1');
+    const us = signRecord(keys.signPriv, USER, 'record.put', ubody);
+    await stack.recordSvc.putRecord(USER, {
+      keyEpoch: '1', mutationId: uMid, signature: us.signatureBuf, baseVersion: '1', requestDigest: us.digest,
+      recordId: rId, cipherSuite: 'AES-256-GCM', formatVersion: 1, ...decodeBody(ubody),
+    });
+    expect(await stack.recordSvc.countActiveByKind(USER, '1', 'authenticatorEntry')).toBe(1);
+  });
+
+  it('records without entityKind are null and not counted by kind', async () => {
+    const stack = makeStack();
+    const keys = await init(stack);
+    await createRecord(keys, stack, 130, 130);
+    expect(await stack.recordSvc.countActiveByKind(USER, '1', 'authenticatorEntry')).toBe(0);
+    const rec = await stack.recordRepo.findForUpdate({} as Queryable, USER, '1', Buffer.from(rid(130), 'base64url'));
+    expect(rec?.entityKind ?? null).toBeNull();
+  });
 });

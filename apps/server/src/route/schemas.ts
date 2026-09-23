@@ -427,6 +427,9 @@ export const syncPutRecordBody = {
     nonce: b64url(16, 16),
     ciphertext: b64url(1, 349526),
     tag: b64url(22, 22),
+    // P6：可选明文类型名（仅类型，不含秘密）。**必须可选**：旧服务端会拒新字段，
+    // 故发布顺序为「先上服务端（接受可选字段）再上客户端」。
+    entityKind: { type: 'string', minLength: 1, maxLength: 32 },
   },
 } as const;
 

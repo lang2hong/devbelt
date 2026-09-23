@@ -295,6 +295,8 @@ export interface PersonalConnectionMeta {
   nonce: Buffer;
   ciphertext: Buffer | null;
   tag: Buffer | null;
+  /** P6：明文元数据（仅类型名，便于按类型计数/配额/统计）；旧记录为 null。 */
+  entityKind: string | null;
   version: string;
   changeSequence: string;
   updateTime: Date;

@@ -35,6 +35,8 @@ export interface ISyncRecordRepo {
     tag: Buffer;
     version: string;
     changeSequence: string;
+    /** P6：可选明文类型名；缺省 null。 */
+    entityKind?: string | null;
   }): Promise<PersonalConnectionMeta>;
   /** 事务内按 (user_id, key_epoch, record_id) 锁定 record（FOR UPDATE）。 */
   findForUpdate(exec: Queryable, userId: number, keyEpoch: string, recordId: Buffer): Promise<PersonalConnectionMeta | undefined>;
@@ -51,6 +53,8 @@ export interface ISyncRecordRepo {
     tag: Buffer;
     newVersion: string;
     changeSequence: string;
+    /** P6：可选明文类型名；仅在提供时覆盖（缺省保留原值）。 */
+    entityKind?: string | null;
   }): Promise<boolean>;
   /** 软删 tombstone：清空 ciphertext/tag、写 delete_time 与新 version/change_sequence。 */
   softDelete(exec: Queryable, userId: number, keyEpoch: string, recordId: Buffer, baseVersion: string, newVersion: string, changeSequence: string, now: Date): Promise<boolean>;
@@ -62,6 +66,8 @@ export interface ISyncRecordRepo {
   overview(exec: Queryable, userId: number, keyEpoch: string): Promise<{ count: number; bytes: number; lastActivityTime: Date | null }>;
   /** 列出该 epoch 全部未删 record（destroy/reset 逐个 tombstone 用，持锁内调用）。 */
   listActiveByEpoch(exec: Queryable, userId: number, keyEpoch: string): Promise<PersonalConnectionMeta[]>;
+  /** P6：按明文类型计数（active，不含 tombstone）。用于按类型配额/后台统计。 */
+  countActiveByKind(exec: Queryable, userId: number, keyEpoch: string, entityKind: string): Promise<number>;
 }
 
 export interface ISyncNonceRepo {

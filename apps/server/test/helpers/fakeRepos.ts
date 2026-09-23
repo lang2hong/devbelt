@@ -1261,12 +1261,14 @@ export class FakeSyncRecordRepo implements ISyncRecordRepo {
     userId: number; keyEpoch: string; recordId: Buffer;
     cipherSuite: PersonalConnectionMeta['cipherSuite']; formatVersion: PersonalConnectionMeta['formatVersion'];
     nonce: Buffer; ciphertext: Buffer; tag: Buffer; version: string; changeSequence: string;
+    entityKind?: string | null;
   }): Promise<PersonalConnectionMeta> {
     const meta: PersonalConnectionMeta = {
       id: nextId(),
       userId: input.userId, keyEpoch: input.keyEpoch, recordId: input.recordId,
       cipherSuite: input.cipherSuite, formatVersion: input.formatVersion,
       nonce: input.nonce, ciphertext: input.ciphertext, tag: input.tag,
+      entityKind: input.entityKind ?? null,
       version: input.version, changeSequence: input.changeSequence,
       updateTime: new Date(), deleteTime: null,
     };
@@ -1282,11 +1284,13 @@ export class FakeSyncRecordRepo implements ISyncRecordRepo {
     userId: number; keyEpoch: string; recordId: Buffer; baseVersion: string;
     cipherSuite: PersonalConnectionMeta['cipherSuite']; formatVersion: PersonalConnectionMeta['formatVersion'];
     nonce: Buffer; ciphertext: Buffer; tag: Buffer; newVersion: string; changeSequence: string;
+    entityKind?: string | null;
   }): Promise<boolean> {
     const m = this.store.get(this.key(input.userId, input.keyEpoch, input.recordId));
     if (!m || m.deleteTime || m.version !== input.baseVersion) return false;
     m.cipherSuite = input.cipherSuite; m.formatVersion = input.formatVersion;
     m.nonce = input.nonce; m.ciphertext = input.ciphertext; m.tag = input.tag;
+    if (input.entityKind != null) m.entityKind = input.entityKind;
     m.version = input.newVersion; m.changeSequence = input.changeSequence; m.updateTime = new Date();
     return true;
   }
@@ -1335,6 +1339,14 @@ export class FakeSyncRecordRepo implements ISyncRecordRepo {
     return [...this.store.values()]
       .filter((m) => m.userId === userId && m.keyEpoch === keyEpoch && !m.deleteTime)
       .sort((a, b) => (BigInt(a.changeSequence) > BigInt(b.changeSequence) ? 1 : -1));
+  }
+
+  async countActiveByKind(_exec: Queryable, userId: number, keyEpoch: string, entityKind: string): Promise<number> {
+    let n = 0;
+    for (const m of this.store.values()) {
+      if (m.userId === userId && m.keyEpoch === keyEpoch && !m.deleteTime && m.entityKind === entityKind) n++;
+    }
+    return n;
   }
 }
 

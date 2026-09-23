@@ -6,7 +6,7 @@ import type { Queryable } from '../../../repository/mysql/db.js';
 const SELECT_COLS = `
   id, user_id,
   CAST(key_epoch AS CHAR) AS key_epoch,
-  record_id, cipher_suite, format_version, nonce, ciphertext, tag,
+  record_id, cipher_suite, format_version, nonce, ciphertext, tag, entity_kind,
   CAST(version AS CHAR) AS version,
   CAST(change_sequence AS CHAR) AS change_sequence,
   update_time, delete_time
@@ -23,6 +23,7 @@ function mapMeta(r: any): PersonalConnectionMeta {
     nonce: r.nonce,
     ciphertext: r.ciphertext != null ? (Buffer.isBuffer(r.ciphertext) ? r.ciphertext : Buffer.from(r.ciphertext)) : null,
     tag: r.tag != null ? (Buffer.isBuffer(r.tag) ? r.tag : Buffer.from(r.tag)) : null,
+    entityKind: r.entity_kind ?? null,
     version: String(r.version),
     changeSequence: String(r.change_sequence),
     updateTime: new Date(r.update_time),
@@ -42,13 +43,14 @@ export class MysqlSyncRecordRepo implements ISyncRecordRepo {
     tag: Buffer;
     version: string;
     changeSequence: string;
+    entityKind?: string | null;
   }): Promise<PersonalConnectionMeta> {
     await exec.query(
       `INSERT INTO personal_connection_meta
-         (user_id, key_epoch, record_id, cipher_suite, format_version, nonce, ciphertext, tag, version, change_sequence)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (user_id, key_epoch, record_id, cipher_suite, format_version, nonce, ciphertext, tag, entity_kind, version, change_sequence)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [input.userId, input.keyEpoch, input.recordId, input.cipherSuite, input.formatVersion,
-       input.nonce, input.ciphertext, input.tag, input.version, input.changeSequence],
+       input.nonce, input.ciphertext, input.tag, input.entityKind ?? null, input.version, input.changeSequence],
     );
     const created = await this.findById(exec, input.userId, input.keyEpoch, input.recordId);
     if (!created) throw new Error('personal_connection_meta insert failed');
@@ -83,13 +85,16 @@ export class MysqlSyncRecordRepo implements ISyncRecordRepo {
     tag: Buffer;
     newVersion: string;
     changeSequence: string;
+    entityKind?: string | null;
   }): Promise<boolean> {
     const [result] = await exec.query<any>(
       `UPDATE personal_connection_meta
        SET cipher_suite = ?, format_version = ?, nonce = ?, ciphertext = ?, tag = ?,
+           entity_kind = COALESCE(?, entity_kind),
            version = ?, change_sequence = ?
        WHERE user_id = ? AND key_epoch = ? AND record_id = ? AND version = ? AND delete_time IS NULL`,
       [input.cipherSuite, input.formatVersion, input.nonce, input.ciphertext, input.tag,
+       input.entityKind ?? null,
        input.newVersion, input.changeSequence,
        input.userId, input.keyEpoch, input.recordId, input.baseVersion],
     );
@@ -151,5 +156,14 @@ export class MysqlSyncRecordRepo implements ISyncRecordRepo {
       [userId, keyEpoch],
     );
     return rows.map(mapMeta);
+  }
+
+  async countActiveByKind(exec: Queryable, userId: number, keyEpoch: string, entityKind: string): Promise<number> {
+    const [rows] = await exec.query<any[]>(
+      `SELECT COUNT(*) AS cnt FROM personal_connection_meta
+       WHERE user_id = ? AND key_epoch = ? AND entity_kind = ? AND delete_time IS NULL`,
+      [userId, keyEpoch, entityKind],
+    );
+    return Number(rows[0]?.cnt ?? 0);
   }
 }
