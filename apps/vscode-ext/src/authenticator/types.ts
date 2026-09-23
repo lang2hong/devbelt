@@ -46,6 +46,13 @@ export type AuthenticatorEntry = {
   tags: string[]; // tag id 数组
   createTime: number;
   updateTime: number;
+  /**
+   * P6：仅本地派生态——该条目因配额被服务端拒绝入同步（配合 `syncError:'quota'`）。
+   * **不进同步 payload**（否则会随整条 LWW 被覆盖）。
+   */
+  localOnly?: boolean;
+  /** P6：仅本地派生态——同步被拒原因；**不进同步 payload**。 */
+  syncError?: 'quota';
 };
 // secret 不在 entry 里，单独 SecretStorage
 

@@ -223,6 +223,66 @@ describe('AuthenticatorStore', () => {
     expect(store.getSecret(add.entry.id)).toBeDefined();
   });
 
+  it('upsertFromSync writes explicit id, canonicalizes secret, persists metadata', async () => {
+    await store.upsertFromSync({
+      id: 'ae_sync_1', issuer: 'Sync', account: 'a', algorithm: 'SHA256', digits: 8, period: 60,
+      groupId: undefined, tags: [], createTime: 111, updateTime: 222,
+    }, ' jbs wy3dp ');
+    const stored = store.listEntries().find((e) => e.id === 'ae_sync_1');
+    expect(stored?.issuer).toBe('Sync');
+    expect(stored?.digits).toBe(8);
+    expect(stored?.period).toBe(60);
+    expect(store.getSecret('ae_sync_1')).toBeTruthy();
+    expect(sec.map.get('devbelt.authenticator.ae_sync_1.secret')).toBe(store.getSecret('ae_sync_1'));
+
+    // 跨重启可见（写入 memento）
+    const mem2 = memento();
+    for (const k of mem.keys()) await mem2.update(k, mem.get(k));
+    const store2 = new AuthenticatorStore(mem2, sec as never, auth(false));
+    await store2.init();
+    expect(store2.listEntries().some((e) => e.id === 'ae_sync_1')).toBe(true);
+    store2.dispose();
+  });
+
+  it('upsertFromSync overwrites an existing entry by id (no duplicate)', async () => {
+    const base = { issuer: 'A', algorithm: 'SHA1' as const, digits: 6 as const, period: 30 as const, tags: [], createTime: 1, updateTime: 1 };
+    await store.upsertFromSync({ id: 'ae_sync_2', ...base }, 'JBSWY3DPEHPK3PXP');
+    await store.upsertFromSync({ id: 'ae_sync_2', ...base, issuer: 'B', updateTime: 2 }, 'JBSWY3DPEHPK3PXP');
+    const matches = store.listEntries().filter((e) => e.id === 'ae_sync_2');
+    expect(matches).toHaveLength(1);
+    expect(matches[0].issuer).toBe('B');
+  });
+
+  it('upsertFromSync bypasses local quota', async () => {
+    const mem2 = memento();
+    const sec2 = secretsWithEvents();
+    const capped = new AuthenticatorStore(mem2, sec2 as never, auth(true, 1));
+    await capped.init();
+    expect((await capped.addEntry({ issuer: 'A', secret: 'JBSWY3DPEHPK3PXP' })).ok).toBe(true);
+    expect((await capped.addEntry({ issuer: 'B', secret: 'JBSWY3DPEHPK3PXP' })).ok).toBe(false);
+    await capped.upsertFromSync({
+      id: 'ae_sync_3', issuer: 'C', algorithm: 'SHA1', digits: 6, period: 30, tags: [], createTime: 1, updateTime: 1,
+    }, 'JBSWY3DPEHPK3PXP');
+    expect(capped.listEntries().some((e) => e.id === 'ae_sync_3')).toBe(true);
+    capped.dispose();
+  });
+
+  it('removeFromSync deletes by id and is idempotent', async () => {
+    await store.upsertFromSync({
+      id: 'ae_sync_4', issuer: 'A', algorithm: 'SHA1', digits: 6, period: 30, tags: [], createTime: 1, updateTime: 1,
+    }, 'JBSWY3DPEHPK3PXP');
+    await store.removeFromSync('ae_sync_4');
+    expect(store.listEntries().some((e) => e.id === 'ae_sync_4')).toBe(false);
+    expect(sec.map.has('devbelt.authenticator.ae_sync_4.secret')).toBe(false);
+    await expect(store.removeFromSync('ae_sync_4')).resolves.toBeUndefined();
+  });
+
+  it('upsertFromSync rejects empty id / invalid secret', async () => {
+    const base = { issuer: 'A', algorithm: 'SHA1' as const, digits: 6 as const, period: 30 as const, tags: [], createTime: 1, updateTime: 1 };
+    await expect(store.upsertFromSync({ id: '', ...base }, 'JBSWY3DPEHPK3PXP')).rejects.toThrow();
+    await expect(store.upsertFromSync({ id: 'ae_sync_5', ...base }, '0189')).rejects.toThrow();
+  });
+
   it('deleteEntry: success clears cache and memento', async () => {
     const add = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });
     expect(add.ok).toBe(true);

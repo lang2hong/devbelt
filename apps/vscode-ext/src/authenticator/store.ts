@@ -394,6 +394,45 @@ export class AuthenticatorStore implements VscodeDisposable {
     return { ok: true, entry: next };
   }
 
+  /**
+   * P6 同步摄取：以**远端映射到的本地 id** 写入/覆盖条目（显式 id、**跳过本地配额**、
+   * 直接写 SecretStorage+cache 并发布事件）。secret 由调用方从密文解出，这里统一规范化。
+   */
+  async upsertFromSync(entry: AuthenticatorEntry, secret: string): Promise<void> {
+    this.assertInit();
+    const id = entry.id;
+    if (!id) throw new Error('upsertFromSync requires an explicit id');
+    const canonical = canonicalizeSecret(secret);
+    if (!canonical) throw new Error('upsertFromSync requires a non-empty secret');
+    await this.secrets.store(secretKey(id), canonical);
+    this.secretCache.set(id, canonical);
+    this.missingSecrets.delete(id);
+    const next: AuthenticatorEntry = { ...entry, tags: [...entry.tags] };
+    const idx = this.entries.findIndex((e) => e.id === id);
+    if (idx >= 0) this.entries[idx] = next;
+    else this.entries.push(next);
+    await this.saveEntries();
+    this.publish('entry', 'update', id);
+  }
+
+  /**
+   * P6 墓碑落地：按本地 id 删除条目（幂等）。secret 已不存在时忽略删除错误。
+   */
+  async removeFromSync(id: string): Promise<void> {
+    this.assertInit();
+    try {
+      await this.secrets.delete(secretKey(id));
+    } catch (err) {
+      this.log.warn('authenticator removeFromSync secret delete failed', String(err));
+    }
+    this.secretCache.delete(id);
+    this.missingSecrets.delete(id);
+    const before = this.entries.length;
+    this.entries = this.entries.filter((e) => e.id !== id);
+    if (this.entries.length !== before) await this.saveEntries();
+    this.publish('entry', 'delete', id);
+  }
+
   async deleteEntry(id: string): Promise<{ ok: boolean; reason?: string }> {
     this.assertInit();
     // 事务顺序：先删 secret，成功后再改 memento；secret 删除失败索引不动，避免 orphan secret
