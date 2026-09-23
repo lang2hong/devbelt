@@ -163,7 +163,9 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
   }
 
   private async onAddGroup(msg: Extract<AuthenticatorUpMessage, { type: 'addGroup' }>): Promise<void> {
-    const res = await this.store.addGroup(msg.name, msg.afterId);
+    const res = msg.beforeId !== undefined
+      ? await this.store.addGroupBefore(msg.name, msg.beforeId)
+      : await this.store.addGroup(msg.name, msg.afterId);
     if (!res.ok) this.postFormError('name', 'authenticator.err.invalidName');
   }
 

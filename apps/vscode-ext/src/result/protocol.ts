@@ -92,7 +92,7 @@ export type AuthenticatorUpMessage =
       groupId?: string | null; tags?: string[];
     } }
   | { type: 'delete'; id: string }
-  | { type: 'addGroup'; name: string; afterId?: string }
+  | { type: 'addGroup'; name: string; afterId?: string; beforeId?: string }
   | { type: 'updateGroup'; id: string; name: string }
   | { type: 'deleteGroup'; id: string }
   | { type: 'moveEntry'; id: string; targetGroupId: string | null }

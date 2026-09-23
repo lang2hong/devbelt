@@ -400,30 +400,58 @@ export class AuthenticatorStore implements VscodeDisposable {
   }
 
   async addGroup(name: string, afterId?: string): Promise<GroupAddResult> {
+    return this.insertGroup(name, { afterId });
+  }
+
+  /** 插在 `beforeId` 分组之前（含"首组之前"）。 */
+  async addGroupBefore(name: string, beforeId: string): Promise<GroupAddResult> {
+    return this.insertGroup(name, { beforeId });
+  }
+
+  /**
+   * 分组插入：按 `beforeId`（插在其前）/`afterId`（插在其后）/缺省（追加到末尾）定位。
+   * sortOrder 取相邻中点，空隙不足（<2）时先重写为 10,20,30... 再取中点，避免重叠/浮点。
+   */
+  private async insertGroup(name: string, opts: { afterId?: string; beforeId?: string }): Promise<GroupAddResult> {
     this.assertInit();
     const trimmed = name.trim();
     if (!trimmed) return { ok: false, reason: 'invalidName' };
-    // 默认 sortOrder = 当前最大 + 10，留空隙方便 drag 重排；若指定 afterId 则插在后面，
-    // 空隙不足（<2）时先重写为 10,20,30... 再插，避免 sortOrder 重叠/浮点。
+    const maxOrder = () => this.groups.reduce((m, g) => Math.max(m, g.sortOrder), 0);
     let sortOrder: number;
-    if (afterId !== undefined) {
-      const after = this.groups.find((g) => g.id === afterId);
-      if (after) {
-        const idx = this.groups.indexOf(after);
+    if (opts.beforeId !== undefined) {
+      const anchor = this.groups.find((g) => g.id === opts.beforeId);
+      if (anchor) {
+        const idx = this.groups.indexOf(anchor);
+        const prev = this.groups[idx - 1];
+        const beforeOrder = anchor.sortOrder;
+        const prevOrder = prev ? prev.sortOrder : beforeOrder - 20;
+        sortOrder = (prevOrder + beforeOrder) / 2;
+        if (sortOrder === prevOrder || sortOrder === beforeOrder || (beforeOrder - prevOrder) < 2) {
+          this.rewriteGroupOrders();
+          const anchor2 = this.groups.find((g) => g.id === opts.beforeId);
+          sortOrder = anchor2 ? anchor2.sortOrder - 5 : maxOrder() + 10;
+        }
+      } else {
+        sortOrder = maxOrder() + 10;
+      }
+    } else if (opts.afterId !== undefined) {
+      const anchor = this.groups.find((g) => g.id === opts.afterId);
+      if (anchor) {
+        const idx = this.groups.indexOf(anchor);
         const next = this.groups[idx + 1];
-        const afterOrder = after.sortOrder;
+        const afterOrder = anchor.sortOrder;
         const nextOrder = next ? next.sortOrder : afterOrder + 20;
         sortOrder = (afterOrder + nextOrder) / 2;
         if (sortOrder === afterOrder || sortOrder === nextOrder || (nextOrder - afterOrder) < 2) {
           this.rewriteGroupOrders();
-          const after2 = this.groups.find((g) => g.id === afterId);
-          sortOrder = after2 ? after2.sortOrder + 5 : this.groups.reduce((m, g) => Math.max(m, g.sortOrder), 0) + 10;
+          const anchor2 = this.groups.find((g) => g.id === opts.afterId);
+          sortOrder = anchor2 ? anchor2.sortOrder + 5 : maxOrder() + 10;
         }
       } else {
-        sortOrder = this.groups.reduce((m, g) => Math.max(m, g.sortOrder), 0) + 10;
+        sortOrder = maxOrder() + 10;
       }
     } else {
-      sortOrder = this.groups.reduce((m, g) => Math.max(m, g.sortOrder), 0) + 10;
+      sortOrder = maxOrder() + 10;
     }
     const group: AuthenticatorGroup = { id: uniqueId('ag'), name: trimmed, sortOrder };
     this.groups.push(group);

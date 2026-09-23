@@ -53,7 +53,7 @@ DevBelt，打开侧边栏就能看到此刻的 6 位口令，用来登录。**
   不做批量文件导入。
 
 不做：
-- 不做摄像头扫码、不做 `otpauth-migration` 二维码导入。
+- 不做摄像头扫码（VS Code 无摄像头 API）、不做 `otpauth-migration` 批量二维码导入；单条二维码**图片**录入不在 P5，设计见文末草案。
 - 不做分组嵌套。
 - 不做 DevBelt 自己登录的二次验证（那是另一件事）。
 - 不做网页版、不做团队共享、不做多设备同步（同步留给 P5 之后的增量）。
@@ -138,9 +138,9 @@ DevBelt，打开侧边栏就能看到此刻的 6 位口令，用来登录。**
 P5 四个切片加起来就是"本地好用"。切片之间不跨期、不跨分支，按顺序往 `feat/2FA-TOTP-authenticator`
 分支合。
 
-**P5 之后的未来增量**（不在本阶段，文档里不展开）：多设备同步（authenticator 作为第 5/6 种
-同步实体接入 E2EE）、网页版、二维码图片录入、团队共享、同步内核 namespace 化重构、批量导入。
-这些不排期、不承诺。
+**P5 之后的未来增量**（不在本阶段）：多设备同步（authenticator 作为第 5/6 种
+同步实体接入 E2EE）、网页版、二维码图片录入（设计草案见文末）、团队共享、同步内核
+namespace 化重构、批量导入。这些不排期、不承诺。
 
 ## 八、套餐与条数
 
@@ -759,3 +759,38 @@ init）都不需要改——setCachedEntitlement 是唯一写入点，读走 get
 | 分组（group name/sortOrder） | 一般 | 可入 globalState；未来同步随密文上行；无秘密 |
 | 标签（tag name/color） | 一般 | 可入 globalState；无秘密 |
 | 服务端可见 | — | P5 不联网；服务端仅新增一个 feature key 定义 + 默认值迁移；不新增路由、不改表 |
+
+## 附：未来增量设计草案 —— 二维码图片录入（不在 P5）
+
+**目标**：用户把验证器提供的二维码（截图或图片）通过**粘贴 / 拖拽 / 选择图片文件**交给扩展，
+解析出单条 `otpauth://totp/...` 并新增条目。桌面端有些站点只渲染二维码、不给文本 secret，
+此能力是那种场景下唯一的录入路径。
+
+**不做**：摄像头扫码（VS Code webview 无可靠 camera 权限，Remote/Codespaces 更不可能）、
+`otpauth-migration` 批量二维码（Google 专属 protobuf，属批量导入）、批量文件导入。
+
+**解码位置三选**（核心决策）：
+- A. 主机侧 `showOpenDialog` 选文件 → 主机解码（`jsqr` + `pngjs` + `jpeg-js`）：secret 完全不进
+  webview，但需先把图片存成文件再选，UX 差，依赖最多。
+- B. webview 内 `jsqr` 解码后回传 `otpauth` 文本：1 个依赖、实现最简；但解码出的 secret 文本
+  出现在 webview。
+- C.（**推荐**）webview 用 `createImageBitmap` + canvas 把图片转成 PNG `dataURL` 回传，主机用
+  `pngjs` + `jsqr` 解码：secret 文本只在主机出现，解码管线在主机因而**可单测**，依赖 2 个。
+
+**复用点**：解码得到的文本直接走既有 `parseOtpauthUri()` → `store.addEntry()`；quota 由
+`addEntry` 统一返回，不重复判断。
+
+**实现注意**：
+- `useVsCode.post` 会做 `JSON.parse(JSON.stringify(msg))` 剥 Vue proxy，**typed array/ArrayBuffer
+  会被破坏**，因此只能回传 base64 `dataURL`（字符串安全）。
+- webview CSP 为 `default-src 'none'`；用 `createImageBitmap`（Blob）不触发 `img-src`，无需改
+  CSP；若增加 `<img>` 预览，需在 `webview/html.ts` 的 CSP 补 `img-src ... blob: data:`。
+- 解码前限制 dataURL 字节数与解码后像素尺寸（防图片炸弹）。
+- 二维码内容为 `otpauth-migration://` 时报"暂不支持迁移二维码"；为 `hotp` 或非 `otpauth` 内容时
+  报可读错误。
+
+**安全**：主进程 → webview 的下行 `secret` 边界不变（snapshot/tick 仍不含 secret）；新增的只是
+"用户图片 → 主机"的上行，与 S3 手动填表时 `add` 消息携带用户输入 secret 同理。
+
+**依赖与测试**：`jsqr`、`pngjs`（运行时），`qrcode`（测试用 dev 依赖，生成 PNG fixture）；
+主机解码管线单元测试 + provider `importQr` 用例。

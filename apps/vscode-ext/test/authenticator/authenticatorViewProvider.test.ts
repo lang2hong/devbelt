@@ -56,6 +56,7 @@ function makeHarness(overrides?: {
     updateEntry: vi.fn(async () => ({ ok: true, entry: { id: 'e1' } })),
     deleteEntry: vi.fn(async () => ({ ok: true })),
     addGroup: vi.fn(async () => ({ ok: true, group: { id: 'g', name: 'x', sortOrder: 10 } })),
+    addGroupBefore: vi.fn(async () => ({ ok: true, group: { id: 'g', name: 'x', sortOrder: 5 } })),
     renameGroup: vi.fn(async () => ({ ok: true })),
     deleteGroup: vi.fn(async () => ({ ok: true })),
     reorderGroup: vi.fn(async () => { /* noop */ }),
@@ -377,6 +378,24 @@ describe('AuthenticatorViewProvider', () => {
     h.send({ type: 'requestAddForm' });
     await flush();
     expect(h.posted.some((m) => m.type === 'openAddForm')).toBe(true);
+  });
+
+  it('addGroup beforeId → addGroupBefore; afterId → addGroup; none → addGroup(undefined)', async () => {
+    const h = makeHarness();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'addGroup', name: 'X', beforeId: 'g1' });
+    await flush();
+    expect(h.store.addGroupBefore).toHaveBeenCalledWith('X', 'g1');
+    (h.store.addGroupBefore as any).mockClear();
+    h.send({ type: 'addGroup', name: 'Y', afterId: 'g1' });
+    await flush();
+    expect(h.store.addGroup).toHaveBeenCalledWith('Y', 'g1');
+    expect(h.store.addGroupBefore).not.toHaveBeenCalled();
+    (h.store.addGroup as any).mockClear();
+    h.send({ type: 'addGroup', name: 'Z' });
+    await flush();
+    expect(h.store.addGroup).toHaveBeenCalledWith('Z', undefined);
   });
 
   it('export message calls exportAuthenticatorEntries', async () => {

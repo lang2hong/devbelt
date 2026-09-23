@@ -521,6 +521,23 @@ describe('AuthenticatorStore', () => {
     expect(g2.group.sortOrder).toBe(20);
   });
 
+  it('addGroupBefore inserts before the anchor, including before the first group', async () => {
+    const a = await store.addGroup('A');
+    const b = await store.addGroup('B');
+    const c = await store.addGroup('C');
+    if (!a.ok || !b.ok || !c.ok) return;
+    // before B → A, X, B, C
+    const x = await store.addGroupBefore('X', b.group.id);
+    expect(x.ok).toBe(true);
+    if (!x.ok) return;
+    expect(store.listGroups().map((g) => g.name)).toEqual(['A', 'X', 'B', 'C']);
+    // before first (A) → Y, A, X, B, C
+    const y = await store.addGroupBefore('Y', a.group.id);
+    expect(y.ok).toBe(true);
+    if (!y.ok) return;
+    expect(store.listGroups().map((g) => g.name)).toEqual(['Y', 'A', 'X', 'B', 'C']);
+  });
+
   // ── rename/recolor/notFound/invalid ──
   it('renameGroup: invalidName / notFound / success', async () => {
     const g = await store.addGroup('A');

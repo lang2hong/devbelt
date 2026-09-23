@@ -25,15 +25,20 @@ const tags = ref<AuthenticatorTag[]>([]);
 const codes = ref<Record<string, { code: string; secondsLeft: number }>>({});
 const copiedId = ref<string | null>(null);
 const errMsg = ref('');
+const promptError = ref('');
 
 const query = ref('');
 const debouncedQuery = ref('');
 const activeTag = ref<string | null>(null);
 const folded = ref(new Set<string>());
+/** 筛选期间被自动展开的折叠键；退出筛选时复位。 */
+const autoExpanded = ref(new Set<string>());
 
 const formOpen = ref(false);
 const editingId = ref<string | null>(null);
 const formError = ref('');
+/** 仅在"本次提交后"关闭表单，避免无关快照把正在填写的表单关掉。 */
+const pendingSubmit = ref(false);
 const form = reactive({
   issuer: '', account: '', secret: '',
   algorithm: 'SHA1' as 'SHA1' | 'SHA256' | 'SHA512',
@@ -43,10 +48,12 @@ const form = reactive({
   tags: [] as string[],
 });
 
-const groupPrompt = ref<{ mode: 'new' | 'rename' | 'above' | 'below'; id?: string; afterId?: string; value: string } | null>(null);
+const groupPrompt = ref<{ mode: 'new' | 'rename' | 'above' | 'below'; id?: string; beforeId?: string; afterId?: string; value: string } | null>(null);
 const tagPrompt = ref<{ name: string; color: TagColorKey } | null>(null);
 const menuFor = ref<string | null>(null);
+const groupMenuFor = ref<string | null>(null);
 const confirmDeleteId = ref<string | null>(null);
+const confirmTagDeleteId = ref<string | null>(null);
 
 const RING_CIRCUMFERENCE = 2 * Math.PI * 13;
 
@@ -62,6 +69,24 @@ watch(query, (v) => {
 
 const filterActive = computed(() => !!debouncedQuery.value.trim() || !!activeTag.value);
 
+// 筛选时自动展开折叠组，并通知主进程解除折叠（否则 tick 不下发这些组的 codes）；
+// 退出筛选时按记录复位。
+watch(filterActive, (active) => {
+  if (active) {
+    for (const k of Array.from(folded.value)) {
+      autoExpanded.value.add(k);
+      folded.value.delete(k);
+      post({ type: 'toggleGroup', groupId: k === '' ? null : k, folded: false });
+    }
+  } else {
+    for (const k of Array.from(autoExpanded.value)) {
+      folded.value.add(k);
+      post({ type: 'toggleGroup', groupId: k === '' ? null : k, folded: true });
+    }
+    autoExpanded.value.clear();
+  }
+});
+
 const filteredEntries = computed(() => {
   const q = debouncedQuery.value.trim().toLowerCase();
   return entries.value.filter((e) => {
@@ -74,6 +99,9 @@ const filteredEntries = computed(() => {
   });
 });
 
+const orderedGroupIds = computed(() =>
+  groups.value.slice().sort((a, b) => a.sortOrder - b.sortOrder).map((g) => g.id));
+
 const sections = computed(() => {
   const named = groups.value
     .slice()
@@ -85,10 +113,7 @@ const sections = computed(() => {
 });
 
 function keyOf(gid: string | null): string { return gid ?? ''; }
-function isFolded(gid: string | null): boolean {
-  if (filterActive.value) return false; // 搜索/筛选时自动展开
-  return folded.value.has(keyOf(gid));
-}
+function isFolded(gid: string | null): boolean { return folded.value.has(keyOf(gid)); }
 function toggleFold(gid: string | null): void {
   const k = keyOf(gid);
   const next = !folded.value.has(k);
@@ -118,8 +143,14 @@ function onMsg(msg: any): void {
     entries.value = msg.entries ?? [];
     groups.value = msg.groups ?? [];
     tags.value = msg.tags ?? [];
-    // 成功提交后主进程会经事件下发新快照，借此关闭表单。
-    if (formOpen.value) { formOpen.value = false; editingId.value = null; formError.value = ''; }
+    // 仅"本次提交成功"后的快照才关闭表单（无关变更不应丢弃用户正在填写的内容）。
+    if (formOpen.value && pendingSubmit.value) {
+      formOpen.value = false;
+      editingId.value = null;
+      formError.value = '';
+      pendingSubmit.value = false;
+      form.secret = '';
+    }
   } else if (msg.type === 'tick') {
     codes.value = msg.codes ?? {};
   } else if (msg.type === 'copyOk') {
@@ -127,7 +158,8 @@ function onMsg(msg: any): void {
     if (copiedTimer) clearTimeout(copiedTimer);
     copiedTimer = setTimeout(() => { copiedId.value = null; }, 1200);
   } else if (msg.type === 'formError') {
-    formError.value = msg.message ?? '';
+    if (formOpen.value) { formError.value = msg.message ?? ''; pendingSubmit.value = false; }
+    else promptError.value = msg.message ?? '';
   } else if (msg.type === 'openAddForm') {
     startAdd();
   } else if (msg.type === 'error') {
@@ -145,12 +177,14 @@ function isValidBase32(s: string): boolean {
 function startAdd(): void {
   editingId.value = null;
   formError.value = '';
+  pendingSubmit.value = false;
   Object.assign(form, { issuer: '', account: '', secret: '', algorithm: 'SHA1', digits: 6, period: 30, groupId: '', tags: [] });
   formOpen.value = true;
 }
 function startEdit(e: AuthenticatorSnapshotEntry): void {
   editingId.value = e.id;
   formError.value = '';
+  pendingSubmit.value = false;
   Object.assign(form, {
     issuer: e.issuer, account: e.account ?? '', secret: '',
     algorithm: e.algorithm, digits: e.digits, period: e.period,
@@ -163,6 +197,8 @@ function cancelForm(): void {
   formOpen.value = false;
   editingId.value = null;
   formError.value = '';
+  pendingSubmit.value = false;
+  form.secret = '';
 }
 function toggleFormTag(id: string): void {
   const i = form.tags.indexOf(id);
@@ -174,11 +210,13 @@ function submitForm(): void {
   if (editingId.value === null && !secret) { formError.value = t('wv.authenticator.form.invalidSecret'); return; }
   if (secret && !isValidBase32(secret)) { formError.value = t('wv.authenticator.form.invalidSecret'); return; }
   const groupId = form.groupId || null;
+  pendingSubmit.value = true;
   if (editingId.value) {
     post({
       type: 'update', id: editingId.value,
       patch: {
-        issuer: form.issuer, account: form.account || undefined,
+        issuer: form.issuer,
+        account: form.account, // 空串=清空（store 用 ?? 判定，'' 会真正清空）
         ...(secret ? { secret } : {}),
         algorithm: form.algorithm, digits: form.digits, period: form.period,
         groupId, tags: [...form.tags],
@@ -199,43 +237,59 @@ function submitForm(): void {
 function requestAdd(): void { post({ type: 'requestAddForm' }); }
 function requestExport(): void { post({ type: 'export' }); }
 function requestDelete(id: string): void { post({ type: 'delete', id }); menuFor.value = null; confirmDeleteId.value = null; }
-function requestMove(id: string, targetGroupId: string | null): void { post({ type: 'moveEntry', id, targetGroupId }); }
 
-function openGroupPrompt(mode: 'new' | 'rename' | 'above' | 'below', opts?: { id?: string; afterId?: string; name?: string }): void {
-  groupPrompt.value = { mode, id: opts?.id, afterId: opts?.afterId, value: opts?.name ?? '' };
-  menuFor.value = null;
+function openGroupPrompt(mode: 'new' | 'rename' | 'above' | 'below', opts?: { id?: string; beforeId?: string; afterId?: string; name?: string }): void {
+  promptError.value = '';
+  groupPrompt.value = { mode, id: opts?.id, beforeId: opts?.beforeId, afterId: opts?.afterId, value: opts?.name ?? '' };
+  groupMenuFor.value = null;
 }
 function submitGroupPrompt(): void {
   const p = groupPrompt.value;
   if (!p) return;
   const name = p.value.trim();
   groupPrompt.value = null;
+  promptError.value = '';
   if (!name) return;
   if (p.mode === 'rename' && p.id) post({ type: 'updateGroup', id: p.id, name });
-  else if (p.mode === 'new') post({ type: 'addGroup', name });
-  else if (p.mode === 'above') post({ type: 'addGroup', name, afterId: p.afterId });
-  else post({ type: 'addGroup', name });
+  else if (p.mode === 'above' && p.beforeId) post({ type: 'addGroup', name, beforeId: p.beforeId });
+  else if (p.mode === 'below' && p.afterId) post({ type: 'addGroup', name, afterId: p.afterId });
+  else post({ type: 'addGroup', name }); // new / 缺锚点 → 追加
+}
+function moveGroup(id: string, dir: -1 | 1): void {
+  const ordered = [...orderedGroupIds.value];
+  const i = ordered.indexOf(id);
+  const j = i + dir;
+  groupMenuFor.value = null;
+  if (i < 0 || j < 0 || j >= ordered.length) return;
+  [ordered[i], ordered[j]] = [ordered[j], ordered[i]];
+  post({ type: 'reorderGroup', orderedGroupIds: ordered });
 }
 function requestDeleteGroup(id: string): void {
+  groupMenuFor.value = null;
+  if (!groups.value.some((g) => g.id === id)) return;
   post({ type: 'deleteGroup', id });
-  const msg = t('wv.authenticator.group.movedToUngrouped');
-  errMsg.value = msg;
+  errMsg.value = t('wv.authenticator.group.movedToUngrouped');
   if (errTimer) clearTimeout(errTimer);
   errTimer = setTimeout(() => { errMsg.value = ''; }, 3000);
-  menuFor.value = null;
 }
 
-function openTagPrompt(): void { tagPrompt.value = { name: '', color: 'blue' }; }
+function openTagPrompt(): void { promptError.value = ''; tagPrompt.value = { name: '', color: 'blue' }; }
 function submitTagPrompt(): void {
   const p = tagPrompt.value;
   if (!p) return;
   const name = p.name.trim();
   tagPrompt.value = null;
+  promptError.value = '';
   if (name) post({ type: 'addTag', name, color: p.color });
 }
-function removeTag(id: string): void {
-  post({ type: 'removeTag', id });
-  if (activeTag.value === id) activeTag.value = null;
+function requestDeleteTag(id: string): void {
+  if (confirmTagDeleteId.value === id) {
+    post({ type: 'removeTag', id });
+    confirmTagDeleteId.value = null;
+    if (activeTag.value === id) activeTag.value = null;
+  } else {
+    confirmTagDeleteId.value = id;
+  }
 }
 
 onMounted(() => {
@@ -255,12 +309,7 @@ onUnmounted(() => {
     <div v-if="errMsg" class="auth-err">{{ errMsg }}</div>
 
     <div class="toolbar">
-      <input
-        v-model="query"
-        class="search"
-        type="text"
-        :placeholder="t('wv.authenticator.search')"
-      />
+      <input v-model="query" class="search" type="text" :placeholder="t('wv.authenticator.search')" />
       <button class="btn" :title="t('wv.authenticator.add')" @click="requestAdd">＋</button>
       <button class="btn" :title="t('wv.authenticator.export')" @click="requestExport">⭳</button>
     </div>
@@ -276,9 +325,12 @@ onUnmounted(() => {
         @click="activeTag = tg.id"
       >
         <span class="dot" :style="{ background: TAG_HEX[tg.color] }" />{{ tg.name }}
+        <span class="tag-x" :title="t('wv.authenticator.tag.delete')" @click.stop="requestDeleteTag(tg.id)">{{ confirmTagDeleteId === tg.id ? '✓' : '×' }}</span>
       </button>
       <button class="tagchip add" @click="openTagPrompt">＋{{ t('wv.authenticator.tag.new') }}</button>
     </div>
+
+    <div v-if="promptError" class="form-error">{{ promptError }}</div>
 
     <div v-if="tagPrompt" class="inline-prompt">
       <input v-model="tagPrompt.name" class="inline-input" :placeholder="t('wv.authenticator.tag.new')" />
@@ -370,13 +422,18 @@ onUnmounted(() => {
           <span class="group-name">{{ sec.name }}</span>
           <span class="count">{{ sec.entries.length }}</span>
           <span class="group-actions">
-            <button class="icon" :title="t('wv.authenticator.group.addAbove')" @click="openGroupPrompt('above', { afterId: sec.groupId ?? undefined, name: '' })">↑＋</button>
-            <button class="icon" :title="t('wv.authenticator.group.new')" @click="openGroupPrompt('new')">＋</button>
-            <button class="icon" :title="t('wv.authenticator.group.addBelow')" @click="openGroupPrompt('below', { afterId: sec.groupId ?? undefined, name: '' })">↓＋</button>
             <template v-if="sec.groupId">
-              <button class="icon" :title="t('wv.authenticator.group.rename')" @click="openGroupPrompt('rename', { id: sec.groupId, name: sec.name })">✎</button>
-              <button class="icon" :title="t('wv.authenticator.group.delete')" @click="requestDeleteGroup(sec.groupId)">🗑</button>
+              <button class="icon" :title="t('wv.authenticator.group.menu')" @click="groupMenuFor = groupMenuFor === sec.groupId ? null : sec.groupId">⋯</button>
+              <div v-if="groupMenuFor === sec.groupId" class="menu" @click.stop>
+                <button class="menu-item" @click="openGroupPrompt('above', { beforeId: sec.groupId })">{{ t('wv.authenticator.group.addAbove') }}</button>
+                <button class="menu-item" @click="openGroupPrompt('below', { afterId: sec.groupId })">{{ t('wv.authenticator.group.addBelow') }}</button>
+                <button class="menu-item" @click="moveGroup(sec.groupId, -1)">{{ t('wv.authenticator.group.moveUp') }}</button>
+                <button class="menu-item" @click="moveGroup(sec.groupId, 1)">{{ t('wv.authenticator.group.moveDown') }}</button>
+                <button class="menu-item" @click="openGroupPrompt('rename', { id: sec.groupId, name: sec.name })">{{ t('wv.authenticator.group.rename') }}</button>
+                <button class="menu-item danger" @click="requestDeleteGroup(sec.groupId)">{{ t('wv.authenticator.group.delete') }}</button>
+              </div>
             </template>
+            <button v-else class="icon" :title="t('wv.authenticator.group.new')" @click="openGroupPrompt('new')">＋</button>
           </span>
         </header>
         <ul v-if="!isFolded(sec.groupId)" class="auth-list">
@@ -389,8 +446,8 @@ onUnmounted(() => {
             role="button"
             tabindex="0"
             @click="copy(e)"
-            @keydown.enter.prevent="copy(e)"
-            @keydown.space.prevent="copy(e)"
+            @keydown.enter.self.prevent="copy(e)"
+            @keydown.space.self.prevent="copy(e)"
           >
             <div class="meta">
               <div class="issuer">{{ nameOf(e) }}</div>
@@ -442,6 +499,8 @@ input, select { background: var(--vscode-input-background); color: var(--vscode-
 .tagchip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 1px 6px; border-radius: 10px; border: 1px solid transparent; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
 .tagchip.active { background: var(--vscode-list-activeSelectionBackground, rgba(128,128,128,0.3)); }
 .tagchip .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.tagchip .tag-x { opacity: 0.5; margin-left: 2px; }
+.tagchip .tag-x:hover { opacity: 1; }
 .inline-prompt { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
 .inline-input { flex: 1; min-width: 0; }
 .inline-select { max-width: 120px; }
@@ -458,7 +517,7 @@ input, select { background: var(--vscode-input-background); color: var(--vscode-
 .group-head .fold { background: none; border: none; cursor: pointer; color: inherit; padding: 0 2px; }
 .group-name { font-weight: 600; }
 .group-head .count { opacity: 0.6; font-size: 11px; }
-.group-actions { margin-left: auto; display: flex; gap: 2px; }
+.group-actions { margin-left: auto; position: relative; display: flex; gap: 2px; }
 .icon { background: none; border: none; cursor: pointer; color: inherit; padding: 0 3px; opacity: 0.8; }
 .icon:hover { opacity: 1; }
 .auth-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
