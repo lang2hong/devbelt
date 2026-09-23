@@ -199,8 +199,12 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
     });
     if (res.ok) return; // EventBus → refresh
     if (res.reason === 'quota') { await promptAuthenticatorUpgrade(res.limit); return; }
-    if (res.reason === 'invalidSecret' || res.reason === 'invalidField') {
+    if (res.reason === 'invalidSecret') {
       this.postFormError('secret', 'authenticator.err.invalidSecret', 'external');
+      return;
+    }
+    if (res.reason === 'invalidField') {
+      this.postFormError(res.field, 'authenticator.err.invalidField', 'external');
       return;
     }
     this.post({ type: 'error', message: l10n('authenticator.error.generic') });

@@ -254,12 +254,7 @@ async function processImage(blob: Blob): Promise<void> {
   promptError.value = '';
   try {
     const bmp = await createImageBitmap(blob);
-    if (bmp.width * bmp.height > MAX_DECODE_PIXELS) {
-      bmp.close?.();
-      promptError.value = t('wv.authenticator.image.invalid');
-      imgBusy.value = false;
-      return;
-    }
+    if (bmp.width * bmp.height > MAX_DECODE_PIXELS) { bmp.close?.(); throw new Error('bitmap too large'); }
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('no 2d context');

@@ -331,10 +331,12 @@ export class AuthenticatorStore implements VscodeDisposable {
     if (idx < 0) return { ok: false, reason: 'notFound' };
     const prev = this.entries[idx];
     // issuer/account 至少一个非空（编辑清空两者会得到空白卡片）。
+    // 兼容历史/同步拉入的"本就空"条目：仅当"结果为空且原本非空"才拒，允许对既有空条目继续编辑/移组。
     {
+      const wasBlank = !prev.issuer?.trim() && !prev.account?.trim();
       const effIssuer = patch.issuer ?? prev.issuer;
       const effAccount = patch.account ?? prev.account;
-      if (!effIssuer?.trim() && !effAccount?.trim()) return { ok: false, reason: 'invalidField' };
+      if (!wasBlank && !effIssuer?.trim() && !effAccount?.trim()) return { ok: false, reason: 'invalidField' };
     }
     let newSecret: string | undefined;
     // 契约（文档 §二/§协议）：编辑时 secret 缺省或空串/纯空白 => **保留原 secret**，不是错误；

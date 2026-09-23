@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { AuthenticatorStore } from '../../src/authenticator/store';
+import { ENTRIES_KEY } from '../../src/authenticator/types';
 import { encodeBase32UpperCaseNoPadding } from '../../src/authenticator/base32';
 
 /** In-memory Memento stub (Map-backed, same shape as vscode.Memento). */
@@ -413,6 +414,20 @@ describe('AuthenticatorStore', () => {
       if (r.ok) throw new Error('expected invalidField');
       expect(r.reason).toBe('invalidField');
     }
+  });
+
+  it('updateEntry allows editing a legacy entry that was already blank', async () => {
+    const legacy = {
+      id: 'ae-legacy-1', issuer: '', account: '', algorithm: 'SHA1', digits: 6 as const, period: 30 as const,
+      tags: [] as string[], createTime: 0, updateTime: 0,
+    };
+    (mem.map as Map<string, unknown>).set(ENTRIES_KEY, [legacy]);
+    store.dispose();
+    store = new AuthenticatorStore(mem, sec as never, auth(false));
+    await store.init();
+    // 移组（只传 groupId）应放行，不被"两者皆空"误伤
+    const r = await store.updateEntry('ae-legacy-1', { groupId: null });
+    expect(r.ok).toBe(true);
   });
 
   it('updateEntry rejects clearing both issuer and account', async () => {
