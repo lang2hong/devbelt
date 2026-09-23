@@ -825,6 +825,7 @@ export const zh: MessageCatalog = {
   'wv.authenticator.image.button': '从图片添加',
   'wv.authenticator.image.pasteHint': '粘贴、拖拽或选择二维码图片',
   'wv.authenticator.image.invalid': '无法从该图片中读取二维码。',
+  'wv.authenticator.image.tooLarge': '图片过大，无法处理。',
   'wv.authenticator.ungrouped': '未分组',
   'wv.authenticator.group.new': '新建分组',
   'wv.authenticator.group.addAbove': '在上方新建分组',

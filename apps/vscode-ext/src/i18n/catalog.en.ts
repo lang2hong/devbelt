@@ -847,6 +847,7 @@ export const en: MessageCatalog = {
   'wv.authenticator.image.button': 'Add from image',
   'wv.authenticator.image.pasteHint': 'Paste, drop, or choose a QR code image',
   'wv.authenticator.image.invalid': 'Could not read a QR code from that image.',
+  'wv.authenticator.image.tooLarge': 'That image is too large to process.',
   'wv.authenticator.ungrouped': 'Ungrouped',
   'wv.authenticator.group.new': 'New group',
   'wv.authenticator.group.addAbove': 'New group above',

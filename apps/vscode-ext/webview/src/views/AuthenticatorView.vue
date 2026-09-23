@@ -249,12 +249,12 @@ function requestExport(): void { post({ type: 'export' }); }
 function pickImage(): void { fileInput.value?.click(); }
 async function processImage(blob: Blob): Promise<void> {
   if (imgBusy.value) return;
-  if (blob.size > MAX_IMAGE_BYTES) { promptError.value = t('wv.authenticator.image.invalid'); return; }
+  if (blob.size > MAX_IMAGE_BYTES) { promptError.value = t('wv.authenticator.image.tooLarge'); return; }
   imgBusy.value = true;
   promptError.value = '';
   try {
     const bmp = await createImageBitmap(blob);
-    if (bmp.width * bmp.height > MAX_DECODE_PIXELS) { bmp.close?.(); throw new Error('bitmap too large'); }
+    if (bmp.width * bmp.height > MAX_DECODE_PIXELS) { bmp.close?.(); throw new ImageTooLarge(); }
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('no 2d context');
@@ -274,12 +274,15 @@ async function processImage(blob: Blob): Promise<void> {
     }
     bmp.close?.();
     post({ type: 'addImage', dataUrl });
-  } catch {
-    promptError.value = t('wv.authenticator.image.invalid');
+  } catch (e) {
+    promptError.value = e instanceof ImageTooLarge
+      ? t('wv.authenticator.image.tooLarge')
+      : t('wv.authenticator.image.invalid');
   } finally {
     imgBusy.value = false;
   }
 }
+class ImageTooLarge extends Error {}
 function dataUrlBytes(u: string): number {
   const i = u.indexOf(',');
   if (i < 0) return u.length;
