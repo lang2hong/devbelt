@@ -17,6 +17,8 @@
   "cmd.updateCell": "更新单元格",
   "cmd.explorerMenu": "更多操作",
   "cmd.authenticator": "验证器",
+  "cmd.authenticator.add": "添加验证器条目",
+  "cmd.authenticator.export": "导出验证器条目",
   "cmd.searchObjects": "搜索对象",
   "cmd.jumpToRefTable": "打开关联表",
   "cmd.searchConnections": "搜索连接",

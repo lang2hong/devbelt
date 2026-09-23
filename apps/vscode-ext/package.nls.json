@@ -17,6 +17,8 @@
   "cmd.updateCell": "Update Cell",
   "cmd.explorerMenu": "More Actions",
   "cmd.authenticator": "Authenticator",
+  "cmd.authenticator.add": "Add Authenticator Entry",
+  "cmd.authenticator.export": "Export Authenticator Entries",
   "cmd.searchObjects": "Search Objects",
   "cmd.jumpToRefTable": "Open Referenced Table",
   "cmd.searchConnections": "Search Connections",

@@ -3,6 +3,8 @@ import { getWebviewHtml } from '../webview/html';
 import { diagError } from '../utils/diagnostics';
 import { isZh, l10n } from '../i18n';
 import type { AuthenticatorStore } from './store';
+import { promptAuthenticatorUpgrade } from './quotaPrompt';
+import { exportAuthenticatorEntries } from './exportAll';
 import type { AuthenticatorDownMessage, AuthenticatorUpMessage } from '../result/protocol';
 
 /**
@@ -67,8 +69,13 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
     ];
   }
 
-  /** 外部命令入口（S3 的「＋」/命令面板用）：ready 后直发，否则挂起到第二次 ready 补发。 */
+  /** 外部命令/「＋」入口：先在主进程做配额预检，达上限直接弹升级、不展开表单。 */
   openAddForm(): void {
+    const q = this.store.checkQuota();
+    if (!q.ok) {
+      void promptAuthenticatorUpgrade(q.limit);
+      return;
+    }
     if (this.view && this.initSent) this.post({ type: 'openAddForm' });
     else this.pendingAction = 'openAddForm';
   }
@@ -86,9 +93,106 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
       case 'ready': this.onReady(); return;
       case 'copy': await this.onCopy(msg); return;
       case 'toggleGroup': this.onToggleGroup(msg); return;
-      // S2 只实现以上动作；add/update/delete/addGroup/.../export 属 S3，此处忽略。
+      case 'requestAddForm': this.openAddForm(); return;
+      case 'add': await this.onAdd(msg); return;
+      case 'update': await this.onUpdate(msg); return;
+      case 'delete': await this.onDelete(msg); return;
+      case 'addGroup': await this.onAddGroup(msg); return;
+      case 'updateGroup': await this.onUpdateGroup(msg); return;
+      case 'deleteGroup': await this.onDeleteGroup(msg); return;
+      case 'moveEntry': await this.onMoveEntry(msg); return;
+      case 'reorderGroup': await this.onReorderGroup(msg); return;
+      case 'addTag': await this.onAddTag(msg); return;
+      case 'removeTag': await this.onRemoveTag(msg); return;
+      case 'export': await exportAuthenticatorEntries(this.store); return;
       default: return;
     }
+  }
+
+  /** IPC 边界的 null/'' → 持久化模型语义的 undefined（未分组）。 */
+  private normGroupId(v: string | null | undefined): string | undefined {
+    return v == null || v === '' ? undefined : v;
+  }
+
+  private postFormError(field: string | undefined, key: string): void {
+    this.post({ type: 'formError', field, message: l10n(key) });
+  }
+
+  private async onAdd(msg: Extract<AuthenticatorUpMessage, { type: 'add' }>): Promise<void> {
+    const e = msg.entry;
+    const res = await this.store.addEntry({
+      issuer: e.issuer,
+      account: e.account,
+      secret: e.secret,
+      algorithm: e.algorithm,
+      digits: e.digits,
+      period: e.period,
+      groupId: this.normGroupId(e.groupId),
+      tags: e.tags,
+    });
+    if (res.ok) return; // 成功后 EventBus → refresh 下发快照
+    if (res.reason === 'quota') { await promptAuthenticatorUpgrade(res.limit); return; }
+    if (res.reason === 'invalidSecret') { this.postFormError(res.field ?? 'secret', 'authenticator.err.invalidSecret'); return; }
+    if (res.reason === 'invalidField') { this.postFormError(res.field, 'authenticator.err.invalidField'); return; }
+    this.post({ type: 'error', message: l10n('authenticator.error.generic') });
+  }
+
+  private async onUpdate(msg: Extract<AuthenticatorUpMessage, { type: 'update' }>): Promise<void> {
+    const p = msg.patch;
+    const res = await this.store.updateEntry(msg.id, {
+      issuer: p.issuer,
+      account: p.account,
+      secret: p.secret,
+      algorithm: p.algorithm,
+      digits: p.digits,
+      period: p.period,
+      // 直接把原始值交给 store：store 以 `!== undefined` 判定"是否变更分组"，
+      // undefined=不修改、null/''=移到未分组。若在此预先归一成 undefined 会丢掉"移到未分组"语义。
+      groupId: p.groupId,
+      tags: p.tags,
+    });
+    if (res.ok) return;
+    if (res.reason === 'invalidSecret') { this.postFormError('secret', 'authenticator.err.invalidSecret'); return; }
+    if (res.reason === 'invalidField') { this.postFormError(undefined, 'authenticator.err.invalidField'); return; }
+    this.post({ type: 'error', message: l10n('authenticator.error.generic') });
+  }
+
+  private async onDelete(msg: Extract<AuthenticatorUpMessage, { type: 'delete' }>): Promise<void> {
+    const res = await this.store.deleteEntry(msg.id);
+    if (!res.ok) this.post({ type: 'error', message: l10n('authenticator.error.generic') });
+  }
+
+  private async onAddGroup(msg: Extract<AuthenticatorUpMessage, { type: 'addGroup' }>): Promise<void> {
+    const res = await this.store.addGroup(msg.name, msg.afterId);
+    if (!res.ok) this.postFormError('name', 'authenticator.err.invalidName');
+  }
+
+  private async onUpdateGroup(msg: Extract<AuthenticatorUpMessage, { type: 'updateGroup' }>): Promise<void> {
+    const res = await this.store.renameGroup(msg.id, msg.name);
+    if (!res.ok) this.postFormError('name', res.reason === 'invalidName' ? 'authenticator.err.invalidName' : 'authenticator.err.notFound');
+  }
+
+  private async onDeleteGroup(msg: Extract<AuthenticatorUpMessage, { type: 'deleteGroup' }>): Promise<void> {
+    await this.store.deleteGroup(msg.id);
+  }
+
+  private async onMoveEntry(msg: Extract<AuthenticatorUpMessage, { type: 'moveEntry' }>): Promise<void> {
+    // targetGroupId: null 表示移到未分组——原样交给 store（见 onUpdate 注释）
+    const res = await this.store.updateEntry(msg.id, { groupId: msg.targetGroupId });
+    if (!res.ok) this.post({ type: 'error', message: l10n('authenticator.error.generic') });
+  }
+
+  private async onReorderGroup(msg: Extract<AuthenticatorUpMessage, { type: 'reorderGroup' }>): Promise<void> {
+    await this.store.reorderGroup(msg.orderedGroupIds);
+  }
+
+  private async onAddTag(msg: Extract<AuthenticatorUpMessage, { type: 'addTag' }>): Promise<void> {
+    const res = await this.store.addTag(msg.name, msg.color);
+    if (!res.ok) this.postFormError('name', res.reason === 'invalidName' ? 'authenticator.err.invalidName' : 'authenticator.err.invalidColor');
+  }
+
+  private async onRemoveTag(msg: Extract<AuthenticatorUpMessage, { type: 'removeTag' }>): Promise<void> {
+    await this.store.deleteTag(msg.id);
   }
 
   private onReady(): void {

@@ -229,6 +229,18 @@ export class AuthenticatorStore implements VscodeDisposable {
     return this.missingSecrets.has(id);
   }
 
+  /**
+   * 配额预检（供命令 / provider 在展开添加表单前判断是否符合新增条件）。
+   * 未登录 → 不限；已登录上限 0 → 不限。返回 `{ok:false,limit}` 时 UI 应弹升级而非展开表单。
+   */
+  checkQuota(): { ok: true } | { ok: false; limit: number } {
+    this.assertInit();
+    if (!this.auth.isLoggedIn()) return { ok: true };
+    const limit = maxAuthenticatorEntries(this.auth.getCachedEntitlement());
+    if (limit > 0 && this.entries.length >= limit) return { ok: false, limit };
+    return { ok: true };
+  }
+
   // memento 写入封装：所有写操作最终走这些函数，便于将来加 diff/审计。
   private async saveEntries(): Promise<void> { await this.memento.update(ENTRIES_KEY, this.entries); }
   private async saveGroups(): Promise<void> { await this.memento.update(GROUPS_KEY, this.groups); }
@@ -261,10 +273,8 @@ export class AuthenticatorStore implements VscodeDisposable {
     const algorithm = (input.algorithm ?? 'SHA1') as TotpAlgorithm;
     if (!isTotpAlgorithm(algorithm)) return { ok: false, reason: 'invalidField', field: 'algorithm' };
     // 登录态配额预检：未登录不限；0 表示不限；超限直接返回（不抛错，不展开表单）
-    if (this.auth.isLoggedIn()) {
-      const limit = maxAuthenticatorEntries(this.auth.getCachedEntitlement());
-      if (limit > 0 && this.entries.length >= limit) return { ok: false, reason: 'quota', limit };
-    }
+    const quota = this.checkQuota();
+    if (!quota.ok) return { ok: false, reason: 'quota', limit: quota.limit };
     const groupId = normalizeGroupId(input.groupId);
     if (groupId !== undefined && !this.groups.some((g) => g.id === groupId)) {
       return { ok: false, reason: 'invalidField', field: 'groupId' };

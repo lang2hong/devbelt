@@ -406,6 +406,43 @@ describe('AuthenticatorStore', () => {
     expect(r.ok).toBe(false);
   });
 
+  it('checkQuota: not logged-in → ok; limit 0 → ok; at cap → false', async () => {
+    expect(store.checkQuota()).toEqual({ ok: true });
+
+    store.dispose();
+    store = new AuthenticatorStore(mem, sec as never, auth(true, 2));
+    await store.init();
+    expect(store.checkQuota()).toEqual({ ok: true });
+    await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });
+    await store.addEntry({ issuer: 'B', account: 'b', secret: 'JBSWY3DPEHPK3PXP' });
+    expect(store.checkQuota()).toEqual({ ok: false, limit: 2 });
+
+    store.dispose();
+    store = new AuthenticatorStore(mem, sec as never, auth(true, 0));
+    await store.init();
+    expect(store.checkQuota()).toEqual({ ok: true });
+  });
+
+  it('updateEntry: groupId null/"" → move to ungrouped; omitted → keep group', async () => {
+    const g = await store.addGroup('Work');
+    if (!g.ok) return;
+    const add = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP', groupId: g.group.id });
+    expect(add.ok).toBe(true);
+    if (!add.ok) return;
+    const id = add.entry.id;
+    // omitted → keep
+    await store.updateEntry(id, { issuer: 'X' });
+    expect(store.listEntries().find((e) => e.id === id)!.groupId).toBe(g.group.id);
+    // null → ungroup
+    await store.updateEntry(id, { groupId: null });
+    expect(store.listEntries().find((e) => e.id === id)!.groupId).toBeUndefined();
+    // back to group, then '' → ungroup
+    await store.updateEntry(id, { groupId: g.group.id });
+    expect(store.listEntries().find((e) => e.id === id)!.groupId).toBe(g.group.id);
+    await store.updateEntry(id, { groupId: '' });
+    expect(store.listEntries().find((e) => e.id === id)!.groupId).toBeUndefined();
+  });
+
   // ── exportAll ──
   it('exportAll emits otpauth lines joined by CRLF with trailing CRLF', async () => {
     const a = await store.addEntry({ issuer: 'Acme', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });

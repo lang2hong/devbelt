@@ -367,6 +367,18 @@
         "icon": "$(key)"
       },
       {
+        "command": "devbelt.authenticator.add",
+        "title": "%cmd.authenticator.add%",
+        "category": "DB Client",
+        "icon": "$(add)"
+      },
+      {
+        "command": "devbelt.authenticator.export",
+        "title": "%cmd.authenticator.export%",
+        "category": "DB Client",
+        "icon": "$(desktop-download)"
+      },
+      {
         "command": "devbelt.previewView",
         "title": "%cmd.previewView%",
         "category": "DB Client"
@@ -715,6 +727,16 @@
     "menus": {
       "view/title": [
         {
+          "command": "devbelt.authenticator.add",
+          "when": "view == devbelt.tools.authenticator",
+          "group": "navigation"
+        },
+        {
+          "command": "devbelt.authenticator.export",
+          "when": "view == devbelt.tools.authenticator",
+          "group": "navigation"
+        },
+        {
           "command": "devbelt.addConnection",
           "when": "view == devbelt.explorer",
           "group": "navigation"
@@ -775,6 +797,14 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "devbelt.authenticator.add",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.authenticator.export",
+          "when": "false"
+        },
         {
           "command": "devbelt.login",
           "when": "!devbelt.loggedIn"

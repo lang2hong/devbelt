@@ -100,6 +100,7 @@ export type AuthenticatorUpMessage =
   | { type: 'addTag'; name: string; color: TagColorKey }
   | { type: 'removeTag'; id: string }
   | { type: 'toggleGroup'; groupId: string | null; folded: boolean }
+  | { type: 'requestAddForm' }
   | { type: 'copy'; code: string; entryId: string }
   | { type: 'export' };
 

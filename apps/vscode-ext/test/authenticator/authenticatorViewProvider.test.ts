@@ -11,10 +11,18 @@ vi.mock('../../src/i18n', () => ({
 vi.mock('../../src/utils/diagnostics', () => ({
   diagError: vi.fn(), diagWarn: vi.fn(), diagInfo: vi.fn(),
 }));
+vi.mock('../../src/authenticator/quotaPrompt', () => ({
+  promptAuthenticatorUpgrade: vi.fn(async () => { /* noop */ }),
+}));
+vi.mock('../../src/authenticator/exportAll', () => ({
+  exportAuthenticatorEntries: vi.fn(async () => { /* noop */ }),
+}));
 
 import * as vscode from 'vscode';
 import { AuthenticatorViewProvider } from '../../src/authenticator/authenticatorViewProvider';
 import type { AuthenticatorStore } from '../../src/authenticator/store';
+import { promptAuthenticatorUpgrade } from '../../src/authenticator/quotaPrompt';
+import { exportAuthenticatorEntries } from '../../src/authenticator/exportAll';
 
 function flush(): Promise<void> {
   return new Promise((r) => setTimeout(r, 0));
@@ -31,6 +39,7 @@ function makeHarness(overrides?: {
   entries?: any[];
   missing?: Set<string>;
   getCodes?: (ids: readonly string[], now: number) => Record<string, { code: string; secondsLeft: number }>;
+  store?: Record<string, any>;
 }) {
   const entries = overrides?.entries ?? [
     { id: 'e1', issuer: 'Acme', account: 'a', algorithm: 'SHA1', digits: 6, period: 30, tags: [], createTime: 0, updateTime: 0, groupId: undefined },
@@ -41,6 +50,19 @@ function makeHarness(overrides?: {
   let handleMsg: ((m: any) => void) | undefined;
   let visibility: (() => void) | undefined;
   let disposeView: (() => void) | undefined;
+
+  const mutationFns = {
+    addEntry: vi.fn(async () => ({ ok: true, entry: { id: 'new' } })),
+    updateEntry: vi.fn(async () => ({ ok: true, entry: { id: 'e1' } })),
+    deleteEntry: vi.fn(async () => ({ ok: true })),
+    addGroup: vi.fn(async () => ({ ok: true, group: { id: 'g', name: 'x', sortOrder: 10 } })),
+    renameGroup: vi.fn(async () => ({ ok: true })),
+    deleteGroup: vi.fn(async () => ({ ok: true })),
+    reorderGroup: vi.fn(async () => { /* noop */ }),
+    addTag: vi.fn(async () => ({ ok: true, tag: { id: 't', name: 'x', color: 'blue' } })),
+    deleteTag: vi.fn(async () => ({ ok: true })),
+    checkQuota: vi.fn(() => ({ ok: true })),
+  };
 
   const store = {
     listEntries: () => entries,
@@ -54,6 +76,8 @@ function makeHarness(overrides?: {
       for (const id of ids) out[id] = { code: '123456', secondsLeft: 10 };
       return out;
     },
+    ...mutationFns,
+    ...(overrides?.store ?? {}),
   } as unknown as AuthenticatorStore;
 
   function newView(): FakeView {
@@ -76,6 +100,7 @@ function makeHarness(overrides?: {
 
   const api = {
     provider,
+    store: store as any,
     get view() { return view; },
     get posted() { return posted; },
     getLastIds: () => lastIds,
@@ -90,6 +115,8 @@ function makeHarness(overrides?: {
 describe('AuthenticatorViewProvider', () => {
   beforeEach(() => {
     (vscode.env.clipboard.writeText as any).mockClear();
+    (promptAuthenticatorUpgrade as any).mockClear();
+    (exportAuthenticatorEntries as any).mockClear();
   });
 
   it('two-phase handshake: 1st ready → init; 2nd ready → snapshot + tick', async () => {
@@ -264,5 +291,100 @@ describe('AuthenticatorViewProvider', () => {
     h.setVisible(true);
     await flush();
     expect(h.getLastIds()).toEqual(['e1']); // 非法值不改变折叠态
+  });
+
+  // ── S3 actions ──
+  it('add normalizes groupId null → undefined and calls store.addEntry', async () => {
+    const h = makeHarness();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'add', entry: { issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30, groupId: null, tags: [] } });
+    await flush();
+    expect(h.store.addEntry).toHaveBeenCalledWith(expect.objectContaining({ issuer: 'A', groupId: undefined }));
+  });
+
+  it('add invalidSecret → formError on secret field', async () => {
+    const h = makeHarness({ store: { addEntry: vi.fn(async () => ({ ok: false, reason: 'invalidSecret', field: 'secret' })) } });
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'add', entry: { issuer: 'A', secret: '000', algorithm: 'SHA1', digits: 6, period: 30, groupId: null, tags: [] } });
+    await flush();
+    const fe = h.posted.find((m) => m.type === 'formError');
+    expect(fe).toMatchObject({ field: 'secret' });
+  });
+
+  it('add quota → upgrade prompt (no formError)', async () => {
+    const h = makeHarness({ store: { addEntry: vi.fn(async () => ({ ok: false, reason: 'quota', limit: 10 })) } });
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'add', entry: { issuer: 'A', secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30, groupId: null, tags: [] } });
+    await flush();
+    expect(promptAuthenticatorUpgrade).toHaveBeenCalledWith(10);
+    expect(h.posted.some((m) => m.type === 'formError')).toBe(false);
+  });
+
+  it('update passes groupId undefined when omitted, null when explicitly ungrouped', async () => {
+    const h = makeHarness();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'update', id: 'e1', patch: { issuer: 'X' } });
+    await flush();
+    expect(h.store.updateEntry).toHaveBeenLastCalledWith('e1', expect.objectContaining({ groupId: undefined }));
+    // explicit null → 原样交给 store（store 语义：null = 移到未分组）
+    (h.store.updateEntry as any).mockClear();
+    h.send({ type: 'update', id: 'e1', patch: { groupId: null } });
+    await flush();
+    expect(h.store.updateEntry).toHaveBeenLastCalledWith('e1', expect.objectContaining({ groupId: null }));
+  });
+
+  it('delete calls store.deleteEntry', async () => {
+    const h = makeHarness();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'delete', id: 'e1' });
+    await flush();
+    expect(h.store.deleteEntry).toHaveBeenCalledWith('e1');
+  });
+
+  it('addGroup invalidName → formError; addTag invalidColor → formError', async () => {
+    const h = makeHarness({ store: {
+      addGroup: vi.fn(async () => ({ ok: false, reason: 'invalidName' })),
+      addTag: vi.fn(async () => ({ ok: false, reason: 'invalidColor' })),
+    } });
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'addGroup', name: '   ' });
+    await flush();
+    h.send({ type: 'addTag', name: 'x', color: 'blue' });
+    await flush();
+    expect(h.posted.filter((m) => m.type === 'formError')).toHaveLength(2);
+  });
+
+  it('requestAddForm at cap → upgrade prompt, no openAddForm', async () => {
+    const h = makeHarness({ store: { checkQuota: vi.fn(() => ({ ok: false, limit: 5 })) } });
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'requestAddForm' });
+    await flush();
+    expect(promptAuthenticatorUpgrade).toHaveBeenCalledWith(5);
+    expect(h.posted.some((m) => m.type === 'openAddForm')).toBe(false);
+  });
+
+  it('requestAddForm under cap → openAddForm', async () => {
+    const h = makeHarness();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'requestAddForm' });
+    await flush();
+    expect(h.posted.some((m) => m.type === 'openAddForm')).toBe(true);
+  });
+
+  it('export message calls exportAuthenticatorEntries', async () => {
+    const h = makeHarness();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'export' });
+    await flush();
+    expect(exportAuthenticatorEntries).toHaveBeenCalledWith(h.store);
   });
 });
