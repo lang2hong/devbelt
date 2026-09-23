@@ -12,3 +12,6 @@ apps/server/public/
 *.vsix
 devbelt-db-connections.json
 .devbelt-db-hostd/
+
+# 本地验证用二维码截图（可能含真实 MFA 密钥），禁止入库
+/mfa_*.png

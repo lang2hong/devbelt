@@ -10,9 +10,12 @@ async function qrPngDataUrl(text: string): Promise<string> {
 
 /** 有效 PNG 但无二维码（纯白）。 */
 function blankPngDataUrl(): string {
+  return `data:image/png;base64,${pngBufBlank().toString('base64')}`;
+}
+function pngBufBlank(): Buffer {
   const png = new PNG({ width: 24, height: 24 });
   png.data.fill(255);
-  return `data:image/png;base64,${PNG.sync.write(png).toString('base64')}`;
+  return PNG.sync.write(png);
 }
 
 describe('decodeOtpauthFromPngDataUrl', () => {
@@ -55,5 +58,20 @@ describe('decodeOtpauthFromPngDataUrl', () => {
     png.data.fill(255);
     const dataUrl = `data:image/png;base64,${PNG.sync.write(png).toString('base64')}`;
     expect(() => decodeOtpauthFromPngDataUrl(dataUrl)).toThrow(/dimensions too large/);
+  });
+
+  it('rejects overflowing IHDR dimensions before PNG.sync.read (no allocation)', () => {
+    const buf = pngBufBlank();
+    buf.writeUInt32BE(65536, 16); // width
+    buf.writeUInt32BE(65536, 20); // height
+    const dataUrl = `data:image/png;base64,${buf.toString('base64')}`;
+    expect(() => decodeOtpauthFromPngDataUrl(dataUrl)).toThrow(/dimensions too large/);
+  });
+
+  it('rejects interlaced PNG (pngjs interlace inflate has no cap)', () => {
+    const buf = pngBufBlank();
+    buf[28] = 1; // interlace method
+    const dataUrl = `data:image/png;base64,${buf.toString('base64')}`;
+    expect(() => decodeOtpauthFromPngDataUrl(dataUrl)).toThrow(/interlaced/);
   });
 });

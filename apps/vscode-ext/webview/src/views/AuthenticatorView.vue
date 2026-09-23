@@ -59,6 +59,8 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const imgBusy = ref(false);
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const MAX_IMAGE_SIDE = 1600;
+/** 与主进程 qrDecode 的 base64 上限对齐（8MB），避免"有码却被判无效"。 */
+const HOST_MAX_BYTES = 8 * 1024 * 1024;
 
 const RING_CIRCUMFERENCE = 2 * Math.PI * 13;
 
@@ -249,22 +251,35 @@ async function processImage(blob: Blob): Promise<void> {
   promptError.value = '';
   try {
     const bmp = await createImageBitmap(blob);
-    const scale = Math.min(1, MAX_IMAGE_SIDE / Math.max(bmp.width, bmp.height));
-    const w = Math.max(1, Math.round(bmp.width * scale));
-    const h = Math.max(1, Math.round(bmp.height * scale));
     const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('no 2d context');
-    ctx.drawImage(bmp, 0, 0, w, h);
+    // 逐步降低长边，直到编码后的 dataURL 字节数不超过主进程上限（与 8MB 对齐）。
+    let side = MAX_IMAGE_SIDE;
+    let dataUrl = '';
+    for (;;) {
+      const scale = Math.min(1, side / Math.max(bmp.width, bmp.height));
+      const w = Math.max(1, Math.round(bmp.width * scale));
+      const h = Math.max(1, Math.round(bmp.height * scale));
+      canvas.width = w;
+      canvas.height = h;
+      ctx.drawImage(bmp, 0, 0, w, h);
+      dataUrl = canvas.toDataURL('image/png');
+      if (dataUrlBytes(dataUrl) <= HOST_MAX_BYTES || side <= 512) break;
+      side = Math.max(512, Math.floor(side / 2));
+    }
     bmp.close?.();
-    post({ type: 'addImage', dataUrl: canvas.toDataURL('image/png') });
+    post({ type: 'addImage', dataUrl });
   } catch {
     promptError.value = t('wv.authenticator.image.invalid');
   } finally {
     imgBusy.value = false;
   }
+}
+function dataUrlBytes(u: string): number {
+  const i = u.indexOf(',');
+  if (i < 0) return u.length;
+  return Math.floor(((u.length - i - 1) * 3) / 4);
 }
 function onFileInput(e: Event): void {
   const input = e.target as HTMLInputElement;
@@ -304,6 +319,10 @@ function onDrop(e: DragEvent): void {
 }
 function requestDelete(id: string): void { post({ type: 'delete', id }); menuFor.value = null; confirmDeleteId.value = null; }
 
+function toggleGroupMenu(id: string): void {
+  confirmDeleteGroupId.value = null; // 切换菜单时复位上一个分组的确认态
+  groupMenuFor.value = groupMenuFor.value === id ? null : id;
+}
 function openGroupPrompt(mode: 'new' | 'rename' | 'above' | 'below', opts?: { id?: string; beforeId?: string; afterId?: string; name?: string }): void {
   promptError.value = '';
   groupPrompt.value = { mode, id: opts?.id, beforeId: opts?.beforeId, afterId: opts?.afterId, value: opts?.name ?? '' };
@@ -380,9 +399,9 @@ onUnmounted(() => {
     <div class="toolbar">
       <input v-model="query" class="search" type="text" :placeholder="t('wv.authenticator.search')" />
       <button class="btn" :title="t('wv.authenticator.add')" @click="requestAdd">＋</button>
-      <button class="btn" :title="t('wv.authenticator.image.button')" :disabled="imgBusy" @click="pickImage">🖼</button>
+      <button class="btn" :title="t('wv.authenticator.image.button')" :aria-label="t('wv.authenticator.image.pasteHint')" :disabled="imgBusy" @click="pickImage">🖼</button>
       <button class="btn" :title="t('wv.authenticator.export')" @click="requestExport">⭳</button>
-      <input ref="fileInput" class="hidden-file" type="file" accept="image/*" :aria-label="t('wv.authenticator.image.pasteHint')" @change="onFileInput" />
+      <input ref="fileInput" class="hidden-file" type="file" accept="image/*" @change="onFileInput" />
     </div>
 
     <div class="tagbar">
@@ -494,7 +513,7 @@ onUnmounted(() => {
           <span class="count">{{ sec.entries.length }}</span>
           <span class="group-actions">
             <template v-if="sec.groupId">
-              <button class="icon" :title="t('wv.authenticator.group.menu')" @click="groupMenuFor = groupMenuFor === sec.groupId ? null : sec.groupId">⋯</button>
+              <button class="icon" :title="t('wv.authenticator.group.menu')" @click="toggleGroupMenu(sec.groupId)">⋯</button>
               <div v-if="groupMenuFor === sec.groupId" class="menu" @click.stop>
                 <button class="menu-item" @click="openGroupPrompt('above', { beforeId: sec.groupId })">{{ t('wv.authenticator.group.addAbove') }}</button>
                 <button class="menu-item" @click="openGroupPrompt('below', { afterId: sec.groupId })">{{ t('wv.authenticator.group.addBelow') }}</button>
