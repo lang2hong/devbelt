@@ -17,7 +17,7 @@ import type { Migration } from '../migrate.js';
  */
 interface FeatureDefSeed {
   key: string;
-  kind: 'personal' | 'organization' | 'both';
+  kind: 'personal' | 'both';
   labelEn: string;
   labelZh: string;
   valueType: 'bool' | 'number' | 'bytes' | 'stringList' | 'enum';

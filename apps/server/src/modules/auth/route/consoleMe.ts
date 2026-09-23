@@ -10,7 +10,7 @@ import type { GetAuthUser } from '../../../middleware/requireAuth.js';
 import { sanitizeDisplayName } from '../service/displayName.js';
 import { validateIdempotencyKey, type IdempotencyService } from '../../../service/idempotencyService.js';
 import { updateDisplayNameBody } from '../../../route/schemas.js';
-import type { IUserRepo, IPersonalSubscriptionRepo, IPlanRepo, IMembershipRepo } from '../../../repository/interfaces.js';
+import type { IUserRepo, IPersonalSubscriptionRepo, IPlanRepo } from '../../../repository/interfaces.js';
 import type { Queryable } from '../../../repository/mysql/db.js';
 
 export interface ConsoleMeRouteOptions {
@@ -25,7 +25,6 @@ export interface ConsoleMeRouteOptions {
   userRepo: IUserRepo;
   personalSubscriptionRepo: IPersonalSubscriptionRepo;
   planRepo: IPlanRepo;
-  membershipRepo: IMembershipRepo;
 }
 
 function headerOf(req: FastifyRequest, name: string): string | undefined {
@@ -37,7 +36,7 @@ function sessionIdOf(req: FastifyRequest): string | undefined {
   return (req as unknown as { authSessionId?: string }).authSessionId;
 }
 
-/** /api/console/me（§6）：当前用户、个人订阅、平台角色布尔（切片 4 前恒 false）、组织摘要。 */
+/** /api/console/me（§6）：当前用户、个人订阅、平台角色布尔（切片 4 前恒 false）。 */
 export async function consoleMeRoutes(app: FastifyInstance, opts: ConsoleMeRouteOptions): Promise<void> {
   registerConsoleErrorHandler(app);
 
@@ -54,7 +53,6 @@ export async function consoleMeRoutes(app: FastifyInstance, opts: ConsoleMeRoute
         if (!user) return rejectConsole(reply, 401, 'UNAUTHORIZED', 'unauthorized');
         const subscription = await opts.personalSubscriptionRepo.findByUserId(userId);
         const plan = subscription ? await opts.planRepo.findById(subscription.planId) : undefined;
-        const organizations = await opts.membershipRepo.listActiveByUserWithOrg(userId);
         reply.send({
           user: {
             userId: String(user.id),
@@ -72,11 +70,6 @@ export async function consoleMeRoutes(app: FastifyInstance, opts: ConsoleMeRoute
               }
             : null,
           platformAdmin: user.role === 'platform_admin',
-          organizations: organizations.map((o) => ({
-            organizationId: String(o.organizationId),
-            name: o.name,
-            role: o.role,
-          })),
         });
       });
 

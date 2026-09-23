@@ -22,21 +22,6 @@ export type ResendResult =
   | { kind: 'rate-limited'; retryAfter: number }
   | { kind: 'failure' };
 
-export interface AcceptInvitationOrganization {
-  organizationId: string;
-  name: string;
-  status: string;
-  closedTime: string | null;
-  role: string;
-}
-
-export type AcceptInvitationResult =
-  | { kind: 'success'; organization: AcceptInvitationOrganization }
-  | { kind: 'already-accepted'; organization: AcceptInvitationOrganization }
-  | { kind: 'invalid' }
-  | { kind: 'unauthorized' }
-  | { kind: 'failure' };
-
 export type BindMailFlowResult =
   | { kind: 'ok' }
   | { kind: 'invalid' }
@@ -121,31 +106,6 @@ export async function resendVerification(
   }
 }
 
-/** 接受组织邀请（console-only，§5.3）：凭 link-flow cookie + Bearer + 会话绑定 CSRF。 */
-export async function acceptInvitation(
-  csrfToken: string,
-  accessToken: string,
-  fetchImpl: FetchLike = fetch,
-): Promise<AcceptInvitationResult> {
-  try {
-    const res = await fetchImpl('/api/console/link-flows/accept-invitation', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'X-CSRF-Token': csrfToken,
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
-    if (res.ok) return { kind: 'success', organization: (await res.json()).organization };
-    if (res.status === 409) return { kind: 'already-accepted', organization: (await res.json()).organization };
-    if (res.status === 400) return { kind: 'invalid' };
-    if (res.status === 401 || res.status === 403) return { kind: 'unauthorized' };
-    return { kind: 'failure' };
-  } catch {
-    return { kind: 'failure' };
-  }
-}
-
 /** 把 held mail-flow 显式绑定到当前登录用户（§5.3 消费前置条件）。绑定成功后方可消费。 */
 export async function bindMailFlow(
   csrfToken: string,
@@ -174,7 +134,7 @@ export async function bindMailFlow(
  * 签发扩展交接 handoff（§5.4，console-only）。body 为空；凭 link-flow cookie + 会话绑定
  * CSRF + Bearer。一次性操作（消费 mail_flow），成功返回 `{ openUri, expiresTime }`，其中
  * openUri 含一次性 handoffTicket 仅存于按钮 href 内存，不持久化、不展示、不复制。
- * 错误分派与同文件的 acceptInvitation/bindMailFlow 同构（400 终态 invalid，401/403 未登录，
+ * 错误分派与同文件的 bindMailFlow 同构（400 终态 invalid，401/403 未登录，
  * 429 限流带 Retry-After），不引入第三份私有映射。
  */
 export async function createSyncResetHandoff(

@@ -19,23 +19,11 @@ const ALLOWED_EVENT_TYPES = [
   'auth.password.changed',
   'auth.device.revoked',
   'account.displayName.changed',
-  'organization.created',
-  'organization.renamed',
-  'invitation.create',
-  'invitation.revoke',
-  'invitation.accept',
-  'organization.member.role_changed',
-  'organization.member.removed',
-  'organization.member.left',
-  'organization.closed',
-  'organization.member_email.read',
   'system.receipts.cleanup',
   'admin.users.read',
   'admin.user.disabled',
   'admin.user.enabled',
   'admin.user.subscription.changed',
-  'admin.organizations.read',
-  'admin.organization.subscription.changed',
   'admin.audit.read',
   'admin.audit.export',
   'admin.orders.read',
@@ -71,7 +59,6 @@ export interface AuditWriteInput {
   actorRole?: string | null;
   targetType?: string | null;
   targetId?: string | null;
-  organizationId?: number | null;
   sourceIp?: string | null;
   requestId?: string | null;
   reason?: string | null;
@@ -117,7 +104,6 @@ export class AuditWriter {
       eventType: input.eventType,
       targetType: input.targetType ?? null,
       targetId: input.targetId ?? null,
-      organizationId: input.organizationId ?? null,
       sourceIp: redactIp(input.sourceIp),
       requestId: input.requestId ?? null,
       result: input.result,

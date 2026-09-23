@@ -3,7 +3,7 @@ import { safeReturnTo } from './returnTo';
 
 describe('safeReturnTo', () => {
   it('allows app-relative console paths', () => {
-    expect(safeReturnTo('/organizations')).toBe('/organizations');
+    expect(safeReturnTo('/plans')).toBe('/plans');
     expect(safeReturnTo('/account/devices')).toBe('/account/devices');
   });
 
@@ -24,6 +24,6 @@ describe('safeReturnTo', () => {
   });
 
   it('returns pathname only, dropping query string', () => {
-    expect(safeReturnTo('/organizations?returnTo=/login')).toBe('/organizations');
+    expect(safeReturnTo('/plans?returnTo=/login')).toBe('/plans');
   });
 });

@@ -46,7 +46,7 @@ describe('AdminAuditView 检索竞态', () => {
       value: {
         items: [{
           eventId: '1', eventTime: '2026-01-01T00:00:00.000Z', actorUserId: null, actorRole: null,
-          eventType: 'auth.login.success', targetType: null, targetId: null, organizationId: null,
+          eventType: 'auth.login.success', targetType: null, targetId: null,
           sourceIp: null, requestId: null, result: 'success', failureCode: null, reason: null,
         }],
         nextCursor: null,

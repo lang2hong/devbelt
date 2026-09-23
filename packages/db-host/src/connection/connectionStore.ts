@@ -230,8 +230,7 @@ export class ConnectionStore {
 
   /**
    * 同步专用读取：materialize 后的可见连接（含凭据）+ 软删除墓碑（`deleted=true`，凭据
-   * 已被 `remove` 清除故不含凭据），供全量对账识别 delete。组织连接（`org:`）由同步扫描
-   * 层用 `isOrganizationConnectionId` 显式跳过，不在本方法内过滤。
+   * 已被 `remove` 清除故不含凭据），供全量对账识别 delete。
    */
   listForSync(): SavedConnection[] {
     return this.getTreeData().connections.map((c) => {

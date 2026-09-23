@@ -15,12 +15,6 @@ import { MysqlRefreshTokenRepo } from './modules/auth/repository/refreshTokenRep
 import { MysqlRateLimitRepo } from './repository/mysql/rateLimitRepo.js';
 import { MysqlRegistrationRepo } from './modules/auth/repository/registrationRepo.js';
 import { MysqlPlanRepo, MysqlPlanFeatureDefRepo } from './modules/billing/repository/planRepo.js';
-import { MysqlOrganizationRepo } from './modules/organization/repository/organizationRepo.js';
-import { MysqlOrganizationSubscriptionRepo } from './modules/billing/repository/organizationSubscriptionRepo.js';
-import { MysqlMembershipRepo } from './modules/organization/repository/membershipRepo.js';
-import { MysqlOrganizationInvitationRepo } from './modules/organization/repository/invitationRepo.js';
-import { MysqlFolderRepo } from './modules/organization/repository/folderRepo.js';
-import { MysqlResourceRepo } from './modules/organization/repository/resourceRepo.js';
 import { MysqlSyncStateRepo } from './modules/db/repository/syncStateRepo.js';
 import { MysqlSyncRecordRepo } from './modules/db/repository/syncRecordRepo.js';
 import { MysqlSyncMutationRepo } from './modules/db/repository/syncMutationRepo.js';
@@ -29,14 +23,11 @@ import { MysqlSyncResetTokenRepo } from './modules/db/repository/syncResetTokenR
 import { MysqlSyncResetHandoffRepo } from './modules/db/repository/syncResetHandoffRepo.js';
 import { TokenService } from './service/tokenService.js';
 import { AuthService } from './modules/auth/service/authService.js';
-import { OrganizationService } from './modules/organization/service/organizationService.js';
-import { OrganizationResourceService } from './modules/organization/service/organizationResourceService.js';
 import { SyncStateService } from './modules/db/service/syncStateService.js';
 import { SyncRecordService } from './modules/db/service/syncRecordService.js';
 import { SyncResetService } from './modules/db/service/syncResetService.js';
 import { RateLimitService } from './service/rateLimitService.js';
 import { startRateLimitCleanup } from './service/rateLimitCleanup.js';
-import { startInvitationCleanup } from './service/invitationCleanup.js';
 import { startNonceCleanup } from './service/nonceCleanup.js';
 import { startRetentionCleanup } from './service/retentionCleanup.js';
 import { resolveEmailSender } from './modules/auth/service/resolveEmailSender.js';
@@ -46,8 +37,6 @@ import { plansRoutes, consolePlansRoutes } from './modules/billing/route/plans.j
 import { buildPlanCatalog, type FeatureDto, type PlanCatalog, type PlanDto } from './modules/billing/service/planCatalog.js';
 import type { HomePlan } from './home.js';
 import { personalRoutes } from './modules/db/route/personal.js';
-import { organizationRoutes } from './modules/organization/route/organizations.js';
-import { invitationRoutes } from './modules/organization/route/invitations.js';
 import { syncRoutes } from './modules/db/route/sync.js';
 import { registerErrorHandler } from './middleware/errorHandler.js';
 import { securityHeaders, globalSecurityHeaders } from './middleware/securityHeaders.js';
@@ -146,10 +135,7 @@ function toHomePlan(dto: PlanDto, kind: HomePlan['kind']): HomePlan {
 
 /** 组合根适配：billing 套餐目录 → 首页展示模型（home.ts 不依赖 modules）。 */
 function toHomePlans(catalog: PlanCatalog): HomePlan[] {
-  return [
-    ...catalog.personal.map((p) => toHomePlan(p, 'personal')),
-    ...catalog.organization.map((p) => toHomePlan(p, 'organization')),
-  ];
+  return catalog.personal.map((p) => toHomePlan(p, 'personal'));
 }
 
 export async function createApp() {
@@ -197,12 +183,6 @@ export async function createApp() {
   const refreshTokenRepo = new MysqlRefreshTokenRepo(getMysql);
   const rateLimitRepo = new MysqlRateLimitRepo(getMysql);
   const registrationRepo = new MysqlRegistrationRepo(getMysql);
-  const organizationRepo = new MysqlOrganizationRepo(getMysql);
-  const organizationSubscriptionRepo = new MysqlOrganizationSubscriptionRepo(getMysql);
-  const membershipRepo = new MysqlMembershipRepo(getMysql);
-  const invitationRepo = new MysqlOrganizationInvitationRepo(getMysql);
-  const folderRepo = new MysqlFolderRepo(getMysql);
-  const resourceRepo = new MysqlResourceRepo(getMysql);
   const syncStateRepo = new MysqlSyncStateRepo(getMysql);
   const syncRecordRepo = new MysqlSyncRecordRepo();
   const syncMutationRepo = new MysqlSyncMutationRepo();
@@ -235,28 +215,6 @@ export async function createApp() {
     rateLimiter,
     (fn) => withTransaction(app.mysql, fn),
     auditWriter,
-  );
-  const organizationService = new OrganizationService(
-    userRepo,
-    organizationRepo,
-    planRepo,
-    organizationSubscriptionRepo,
-    membershipRepo,
-    invitationRepo,
-    rateLimiter,
-    tokenService,
-    emailSender,
-    (fn) => withTransaction(app.mysql, fn),
-    auditWriter,
-  );
-  const resourceService = new OrganizationResourceService(
-    organizationRepo,
-    organizationSubscriptionRepo,
-    planRepo,
-    membershipRepo,
-    folderRepo,
-    resourceRepo,
-    (fn) => withTransaction(app.mysql, fn),
   );
   const syncStateService = new SyncStateService(
     syncStateRepo,
@@ -296,10 +254,6 @@ export async function createApp() {
     emailVerificationTokenRepo,
     syncResetTokenRepo,
     userRepo,
-    invitationRepo,
-    organizationRepo,
-    organizationSubscriptionRepo,
-    membershipRepo,
     (fn) => withTransaction(app.mysql, fn),
     rateLimiter,
   );
@@ -318,9 +272,6 @@ export async function createApp() {
     planRepo,
     featureDefRepo,
     personalSubscriptionRepo,
-    organizationRepo,
-    organizationSubscriptionRepo,
-    membershipRepo,
     auditRepo,
     orderRepo,
     invoiceRepo,
@@ -346,13 +297,11 @@ export async function createApp() {
   const paymentEnabled = paymentRoutesEnabled();
 
   // 受控限流清理任务（实施规格 §3）：过期桶由周期任务删除，不依赖请求
-  // 受控邀请过期清理任务（实施规格 §3）：过期邀请释放容量，不依赖成员再次操作
   // 过期数据保留清理（refresh_tokens / email_verification_tokens /
   // personal_sync_mutations / personal_sync_reset_tokens 等表原本只增不减）。
-  // 三者返回 { stop }：绑定到 app.close()，避免测试/嵌入式多实例里定时器持续打已关闭的池。
+  // 返回 { stop }：绑定到 app.close()，避免测试/嵌入式多实例里定时器持续打已关闭的池。
   const cleanupHandles = [
     startRateLimitCleanup(rateLimitRepo),
-    startInvitationCleanup(() => organizationService.expireInvitations()),
     startNonceCleanup(async () => { await paymentNonceRepo.purgeExpired(app.mysql); }),
     startRetentionCleanup({
       refreshTokenRepo,
@@ -394,8 +343,6 @@ export async function createApp() {
   app.register(meRoutes, { tokenService, getUser, getSessionActive, userRepo, personalSubscriptionRepo, planRepo });
   app.register(plansRoutes, { tokenService, getUser, getSessionActive, planRepo, featureDefRepo });
   app.register(personalRoutes, { tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin: config.consoleOrigin, deviceRepo, idempotencyService, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId), revokeDeviceInTx: (tx, userId, deviceId) => authService.revokeDeviceInTx(tx, userId, deviceId) });
-  app.register(organizationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin: config.consoleOrigin, organizationService, resourceService, organizationRepo, membershipRepo, auditWriter, idempotencyService, sendInvitation: (o) => organizationService.sendInvitation(o) });
-  app.register(invitationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin: config.consoleOrigin, organizationService });
   app.register(syncRoutes, { tokenService, getUser, getSessionActive, syncState: syncStateService, syncRecord: syncRecordService, syncReset: syncResetService, rateLimiter, verifyAccountRecoveryPassword: (userId, password) => authService.verifyPasswordStepUp(userId, password), auditWriter, emailSender, userRepo });
   app.register(consoleAuthRoutes, {
     csrfService,
@@ -419,7 +366,6 @@ export async function createApp() {
     userRepo,
     personalSubscriptionRepo,
     planRepo,
-    membershipRepo,
   });
   app.register(consolePlansRoutes, { tokenService, getUser, getSessionActive, planRepo, featureDefRepo });
   app.register(consoleDataRoutes, {
@@ -431,8 +377,6 @@ export async function createApp() {
     userRepo,
     personalSubscriptionRepo,
     planRepo,
-    membershipRepo,
-    organizationRepo,
     syncStateRepo,
     syncRecordRepo,
     db: getMysql(),

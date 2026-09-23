@@ -11,7 +11,6 @@ function event(over: Partial<AuditEvent>): AuditEvent {
     eventType: 'admin.user.disabled',
     targetType: 'user',
     targetId: '5',
-    organizationId: null,
     sourceIp: null,
     requestId: null,
     result: 'success',
@@ -49,7 +48,6 @@ describe('auditDto', () => {
     const dto = auditDto(event({}));
     expect(dto.eventId).toBe('1');
     expect(dto.actorUserId).toBe('2');
-    expect(dto.organizationId).toBeNull();
     expect(dto.eventTime).toBe('2026-01-01T00:00:00.000Z');
   });
 });

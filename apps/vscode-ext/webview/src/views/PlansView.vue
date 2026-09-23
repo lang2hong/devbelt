@@ -5,7 +5,7 @@ import { useI18n } from '../composables/useI18n';
 import { featureLabel, formatFeature, formatPrice, type PlanCatalog, type PlanDto } from '../utils/planFeatures';
 
 /**
- * 套餐面板：展示个人/组织套餐目录与当前个人套餐，升级跳浏览器控制台。
+ * 套餐面板：展示个人套餐目录与当前个人套餐，升级跳浏览器控制台。
  * 消息协议（与 src/sync/plansView.ts 对齐）：
  *   webview → ext: ready | openConsole{path}
  *   ext → webview: plans{plans,current,loggedIn} | error{message}
@@ -19,7 +19,6 @@ const catalog = ref<PlanCatalog | null>(null);
 const current = ref<string>('free');
 
 const personal = computed<PlanDto[]>(() => catalog.value?.personal ?? []);
-const organization = computed<PlanDto[]>(() => catalog.value?.organization ?? []);
 
 function isCurrent(plan: PlanDto): boolean {
   return plan.code === (current.value || 'free');
@@ -79,21 +78,6 @@ onUnmounted(() => { __offMsg?.(); });
           </ul>
           <button v-if="canUpgrade(plan)" class="btn" @click="openConsole('/db/checkout')">{{ t('plan.upgrade', { name: plan.name }) }}</button>
           <p v-else-if="isCurrent(plan)" class="ok">{{ t('plan.inUse') }}</p>
-        </div>
-      </div>
-
-      <h3 class="section">{{ t('plan.section.organization') }}</h3>
-      <p class="muted note">{{ t('plan.orgNote') }}</p>
-      <div class="grid">
-        <div v-for="plan in organization" :key="plan.code" class="card">
-          <div class="head"><span class="name">{{ plan.name }}</span></div>
-          <p class="price">{{ formatPrice(plan.billing) }}</p>
-          <ul class="features">
-            <li v-for="f in plan.features" :key="f.key">
-              <span class="label">{{ featureLabel(f.key, f.label) }}</span>
-              <span class="value">{{ formatFeature(f) }}</span>
-            </li>
-          </ul>
         </div>
       </div>
     </template>

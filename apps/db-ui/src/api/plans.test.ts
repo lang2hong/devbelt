@@ -11,7 +11,6 @@ const CATALOG = {
     { code: 'free', name: 'Free', billing: { unit: 'month' as const, priceCents: 0 }, features: [] },
     { code: 'pro', name: 'Pro', billing: { unit: 'month' as const, priceCents: 9900 }, features: [] },
   ],
-  organization: [],
 };
 
 beforeEach(() => setAccessToken(null));

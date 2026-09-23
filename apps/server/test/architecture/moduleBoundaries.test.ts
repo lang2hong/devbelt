@@ -3,20 +3,19 @@ import { readFileSync, readdirSync, statSync } from 'fs';
 import path from 'path';
 
 const SRC = path.resolve(__dirname, '../../src');
-const MODULES = ['auth', 'organization', 'db', 'billing', 'admin'];
+const MODULES = ['auth', 'db', 'billing', 'admin'];
 
 /**
  * 允许的跨模块依赖方向（值 = 可被该模块 import 的模块）。
  *
- * 现状记录（待收敛）：单体后端中少量服务仍跨模块直连（注册发权益、链接流读同步、
- * 组织资源读套餐额度）。新增跨模块依赖必须先在此登记，避免边界无声腐化。
+ * 现状记录（待收敛）：单体后端中少量服务仍跨模块直连（注册发权益、链接流读同步）。
+ * 新增跨模块依赖必须先在此登记，避免边界无声腐化。
  */
 const ALLOWED: Record<string, string[]> = {
   auth: ['billing', 'db'],
   billing: [],
-  organization: ['auth', 'billing'],
-  db: ['auth', 'billing', 'organization'],
-  admin: ['auth', 'organization', 'db', 'billing'],
+  db: ['auth', 'billing'],
+  admin: ['auth', 'db', 'billing'],
 };
 
 /** 组合根：允许 import 任意模块（装配各模块依赖）。 */

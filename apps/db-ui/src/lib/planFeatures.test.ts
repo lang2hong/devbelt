@@ -45,7 +45,7 @@ describe('formatPrice', () => {
     expect(formatPrice({ unit: 'month', priceCents: 9900 })).toBe('¥99 / 月');
   });
 
-  it('renders organization seat prices and pending placeholder', () => {
+  it('renders seat-month prices and pending placeholder', () => {
     expect(formatPrice({ unit: 'seat-month', priceCents: 0 })).toBe('待定价');
     expect(formatPrice({ unit: 'seat-month', priceCents: 5000 })).toBe('¥50 / 席·月');
   });

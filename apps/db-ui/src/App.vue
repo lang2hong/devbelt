@@ -12,9 +12,6 @@ import OrdersView from './pages/OrdersView.vue';
 import InvoicesView from './pages/InvoicesView.vue';
 import CheckoutView from './pages/CheckoutView.vue';
 import PlansView from './pages/PlansView.vue';
-import OrganizationsView from './pages/OrganizationsView.vue';
-import OrganizationDetailView from './pages/OrganizationDetailView.vue';
-import ResourcesView from './pages/ResourcesView.vue';
 import StatusPage from './pages/StatusPage.vue';
 
 const ROUTES: RouteConfig[] = [
@@ -25,9 +22,6 @@ const ROUTES: RouteConfig[] = [
   { pattern: '/orders', name: 'orders' },
   { pattern: '/invoices', name: 'invoices' },
   { pattern: '/checkout', name: 'checkout' },
-  { pattern: '/organizations', name: 'organizations' },
-  { pattern: '/organizations/:id', name: 'organization-detail' },
-  { pattern: '/organizations/:id/resources', name: 'organization-resources' },
 
 
 
@@ -59,12 +53,6 @@ const view = computed<{ comp: Component; props: Record<string, unknown> }>(() =>
       return { comp: InvoicesView, props: {} };
     case 'checkout':
       return { comp: CheckoutView, props: { user: me_.value?.user ?? null, subscription: me_.value?.subscription ?? null } };
-    case 'organizations':
-      return { comp: OrganizationsView, props: {} };
-    case 'organization-detail':
-      return { comp: OrganizationDetailView, props: { organizationId: router.params.id } };
-    case 'organization-resources':
-      return { comp: ResourcesView, props: { organizationId: router.params.id } };
     default:
       return { comp: StatusPage, props: { code: 404 } };
   }
@@ -133,7 +121,6 @@ async function onLogout(): Promise<void> {
         <a :href="withBase('/plans')" @click.prevent="navigate('/plans')" :class="{ on: router.name === 'plans' }">套餐</a>
         <a :href="withBase('/orders')" @click.prevent="navigate('/orders')" :class="{ on: router.name === 'orders' }">订单</a>
         <a :href="withBase('/invoices')" @click.prevent="navigate('/invoices')" :class="{ on: router.name === 'invoices' }">发票</a>
-        <a :href="withBase('/organizations')" @click.prevent="navigate('/organizations')" :class="{ on: router.name === 'organizations' || router.name === 'organization-detail' || router.name === 'organization-resources' }">组织</a>
         <span class="spacer"></span>
         <span class="email">{{ me_.user.email }}</span>
         <button class="btn ghost" @click="onLogout">登出</button>

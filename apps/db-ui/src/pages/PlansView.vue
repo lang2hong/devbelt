@@ -16,7 +16,6 @@ const props = defineProps<{ subscription: Subscription | null }>();
 
 const state = ref<'loading' | 'ready' | 'error'>('loading');
 const personal = ref<PlanDto[]>([]);
-const organization = ref<PlanDto[]>([]);
 
 /** 免费档为默认权益；无订阅时视为 free。 */
 const currentCode = computed<string>(() => props.subscription?.planCode ?? 'free');
@@ -33,7 +32,6 @@ onMounted(async () => {
     return;
   }
   personal.value = r.value.personal;
-  organization.value = r.value.organization;
   state.value = 'ready';
 });
 
@@ -71,21 +69,6 @@ function canUpgrade(plan: PlanDto): boolean {
           </ul>
           <button v-if="canUpgrade(plan)" class="btn" @click="navigate('/checkout')">升级 {{ plan.name }}</button>
           <p v-else-if="isCurrent(plan)" class="ok">已在使用</p>
-        </div>
-      </div>
-
-      <h3 class="section">组织套餐</h3>
-      <p class="muted note">组织套餐由运营开通与调整；如需升级请联系客服。</p>
-      <div class="grid">
-        <div v-for="plan in organization" :key="plan.code" class="card">
-          <div class="head"><span class="name">{{ plan.name }}</span></div>
-          <p class="price">{{ formatPrice(plan.billing) }}</p>
-          <ul class="features">
-            <li v-for="f in plan.features" :key="f.key">
-              <span class="label">{{ featureLabel(f.key, f.label) }}</span>
-              <span class="value">{{ formatFeature(f) }}</span>
-            </li>
-          </ul>
         </div>
       </div>
     </template>

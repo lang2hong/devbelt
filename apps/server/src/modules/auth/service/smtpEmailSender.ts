@@ -82,26 +82,7 @@ export class SmtpEmailSender implements EmailSender {
     });
   }
 
-  async sendInvitationEmail(input: { to: string; organizationName: string; token: string; displayName?: string; expiresTime: Date }): Promise<void> {
-    const days = Math.max(1, Math.round((input.expiresTime.getTime() - Date.now()) / 86_400_000));
-    const url = this.invitationUrl(input.token);
-    await this.transporter.sendMail({
-      from: this.from,
-      to: input.to,
-      subject: `邀请你加入团队「${input.organizationName}」`,
-      text:
-        `你被邀请加入组织「${input.organizationName}」。\n\n` +
-        `点击下方链接接受邀请（${days} 天内有效）：\n\n${url}\n\n` +
-        '如果你不认识这个组织，请忽略本邮件。',
-      html: this.wrap(
-        this.heading('邀请你加入团队', undefined) +
-        `<p style="margin:12px 0 0;color:#57606a;font-size:14px;line-height:1.7;">你被邀请加入组织「<b>${this.escapeHtml(input.organizationName)}</b>」。点击下方按钮接受邀请，链接 <b>${days} 天</b>内有效。</p>` +
-        this.button('接受邀请', url),
-      ),
-    });
-  }
-
-async sendResetChallengeEmail(input: { to: string; token: string; displayName?: string }): Promise<void> {
+  async sendResetChallengeEmail(input: { to: string; token: string; displayName?: string }): Promise<void> {
     const greeting = `Hi${input.displayName ? ` ${input.displayName}` : ''}`;
     const url = this.resetUrl(input.token);
     await this.transporter.sendMail({
@@ -149,10 +130,6 @@ async sendResetChallengeEmail(input: { to: string; token: string; displayName?: 
     return `${this.baseUrl}/verify-email?token=${encodeURIComponent(token)}`;
   }
 
-  private invitationUrl(token: string): string {
-    return `${this.baseUrl}/accept-invitation?token=${encodeURIComponent(token)}`;
-  }
-
   private resetUrl(token: string): string {
     return `${this.baseUrl}/db/sync-reset?token=${encodeURIComponent(token)}`;
   }
@@ -190,7 +167,7 @@ async sendResetChallengeEmail(input: { to: string; token: string; displayName?: 
       `<div style="padding:12px;background:#f6f8fa;border:1px solid #eaeef2;border-radius:6px;font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;font-size:15px;letter-spacing:1px;text-align:center;word-break:break-all;color:#0f172a;">${this.escapeHtml(token)}</div>`;
   }
 
-  /** 转义用户可控文本，防止 HTML 注入（组织名、展示名等）。 */
+  /** 转义用户可控文本，防止 HTML 注入（展示名等）。 */
   private escapeHtml(s: string): string {
     return s
       .replace(/&/g, '&amp;')

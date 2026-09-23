@@ -54,14 +54,6 @@ export function databaseEngineOf(dbType: DatabaseType): string {
   return engine;
 }
 
-/** 组织连接 id 前缀（与 commands/org.ts 的 toSavedConnection 构造保持一致）。 */
-export const ORG_CONNECTION_ID_PREFIX = 'org:';
-
-/** 依 id 前缀防御性识别组织连接（不含显式 scope）。 */
-export function isOrganizationConnectionId(id?: string): boolean {
-  return id?.startsWith(ORG_CONNECTION_ID_PREFIX) ?? false;
-}
-
 /** 当前允许的引擎集合：有缓存用缓存值，无缓存 fail-closed 到 Free。 */
 export function allowedEngines(entitlement?: CachedEntitlement | null): readonly string[] {
   return entitlement?.allowedDatabaseTypes ?? DEFAULT_FREE_ENGINES;

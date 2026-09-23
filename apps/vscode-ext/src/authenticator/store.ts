@@ -1,5 +1,5 @@
 /**
- * AuthenticatorStore — 条目/分组/标签的持久化层，对齐 CredentialVault 与 ConnectionStore 的模式：
+ * AuthenticatorStore — 条目/分组/标签的持久化层，对齐 ConnectionStore 的模式：
  *
  * - **存储分离**：条目元数据（issuer/account/algorithm/digits/period/groupId/tags/timestamps）
  *   走 `context.globalState`（跨项目持久化，**不要**用 workspaceState）；
@@ -638,7 +638,7 @@ export class AuthenticatorStore implements VscodeDisposable {
 
   /**
    * 容错清空：遍历 entries 逐个删 secret，成功的从 cache 和 entries 移除，
-   * 失败的保留在 memento 里下次重试（对齐 CredentialVault 模式，不丢索引不产生 orphan secret）。
+   * 失败的保留在 memento 里下次重试（不丢索引不产生 orphan secret）。
    * **仅当全部成功**才清空 groups/tags——否则保留 groups/tags，使滞留条目的
    * groupId/tags 仍是有效引用，不制造悬挂指针。
    */

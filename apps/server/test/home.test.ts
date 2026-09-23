@@ -18,14 +18,6 @@ const PLANS: HomePlan[] = [
     unit: 'month',
     highlights: ['支持的数据库：mysql / postgresql / sqlite', '设备数：不限'],
   },
-  {
-    code: 'organization_team',
-    name: 'Organization Team',
-    kind: 'organization',
-    priceCents: 0,
-    unit: 'seat-month',
-    highlights: ['包含席位：10'],
-  },
 ];
 
 describe('套件首页渲染', () => {
@@ -46,7 +38,7 @@ describe('套件首页渲染', () => {
 
   it('介绍段列出能力卡片', () => {
     const html = renderHome();
-    for (const t of ['本地数据库客户端', '端到端加密同步', '组织协作', 'Web 控制台']) {
+    for (const t of ['本地数据库客户端', '端到端加密同步', 'Web 控制台']) {
       expect(html).toContain(t);
     }
   });
@@ -94,13 +86,11 @@ describe('套件首页渲染', () => {
 });
 
 describe('公开套餐页渲染', () => {
-  it('渲染个人与组织套餐，并格式化价格', () => {
+  it('渲染个人套餐，并格式化价格', () => {
     const html = renderPlansPage(PLANS);
     expect(html).toContain('Free');
     expect(html).toContain('Pro');
-    expect(html).toContain('Organization Team');
     expect(html).toContain('¥99');
-    expect(html).toContain('待定价');
     expect(html).toContain('支持的数据库：mysql / postgresql / sqlite');
   });
 

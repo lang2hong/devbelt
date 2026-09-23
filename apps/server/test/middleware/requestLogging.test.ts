@@ -7,11 +7,6 @@ describe('redactUrl', () => {
       .toBe('/api/auth/email-verifications/[redacted]/confirm');
   });
 
-  it('redacts the organization invitation token path segment', () => {
-    expect(redactUrl('/api/db/organization-invitations/tok_ZmFrZS10b2tlbg/accept'))
-      .toBe('/api/db/organization-invitations/[redacted]/accept');
-  });
-
   it('redacts sensitive query parameters case-insensitively', () => {
     expect(redactUrl('/sync-reset?token=secret')).toBe('/sync-reset?token=[redacted]');
     expect(redactUrl('/x?Token=secret&page=2')).toBe('/x?Token=[redacted]&page=2');
@@ -20,14 +15,13 @@ describe('redactUrl', () => {
   });
 
   it('leaves ordinary paths and non-sensitive query parameters untouched', () => {
-    expect(redactUrl('/api/db/organizations/12/members')).toBe('/api/db/organizations/12/members');
     expect(redactUrl('/api/db/sync/records?limit=100&cursor=abc')).toBe('/api/db/sync/records?limit=100&cursor=abc');
     expect(redactUrl('/health')).toBe('/health');
   });
 
   it('drops the fragment and still redacts the path token', () => {
-    expect(redactUrl('/api/db/organization-invitations/secret/accept#frag'))
-      .toBe('/api/db/organization-invitations/[redacted]/accept');
+    expect(redactUrl('/api/auth/email-verifications/secret/confirm#frag'))
+      .toBe('/api/auth/email-verifications/[redacted]/confirm');
   });
 
   it('handles empty and malformed input without throwing', () => {

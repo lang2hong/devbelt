@@ -4,14 +4,10 @@ import type {
   IPlanRepo,
   IPlanFeatureDefRepo,
   IPersonalSubscriptionRepo,
-  IOrganizationRepo,
-  IOrganizationSubscriptionRepo,
-  IMembershipRepo,
   IAuditRepo,
   IOrderRepo,
   IInvoiceRepo,
   AdminUserRow,
-  AdminOrgRow,
   AuditFilter,
 } from '../../../repository/interfaces.js';
 import type { Queryable } from '../../../repository/mysql/db.js';
@@ -35,8 +31,6 @@ import type { RateLimitService } from '../../../service/rateLimitService.js';
 const MAX_EXPORT_ROWS = 10_000;
 /** 审计查询最大时间跨度（§6）。 */
 const MAX_AUDIT_SPAN_MS = 31 * 24 * 3600 * 1000;
-/** 组织席位上限：与 migrations/006 SMALLINT UNSIGNED 列一致（上限 65535）。 */
-export const MAX_SEAT_LIMIT = 65535;
 
 /**
  * 校验订阅到期时间与周期起点的关系（服务层最终边界）。
@@ -67,9 +61,6 @@ export interface ConsoleAdminDeps {
   planRepo: IPlanRepo;
   featureDefRepo: IPlanFeatureDefRepo;
   personalSubscriptionRepo: IPersonalSubscriptionRepo;
-  organizationRepo: IOrganizationRepo;
-  organizationSubscriptionRepo: IOrganizationSubscriptionRepo;
-  membershipRepo: IMembershipRepo;
   auditRepo: IAuditRepo;
   orderRepo: IOrderRepo;
   invoiceRepo: IInvoiceRepo;
@@ -85,7 +76,7 @@ export interface Page<T> {
 }
 
 /**
- * 平台运营业务逻辑（P3 切片 4）：用户/组织/订阅/审计的受限读与高危写。
+ * 平台运营业务逻辑（P3 切片 4）：用户/订阅/审计的受限读与高危写。
  * 读操作逐请求写受限读审计；写操作由路由以幂等回执包裹，本服务提供 *InTx 变体。
  */
 export class ConsoleAdminService {
@@ -94,9 +85,6 @@ export class ConsoleAdminService {
   private readonly planRepo: IPlanRepo;
   private readonly featureDefRepo: IPlanFeatureDefRepo;
   private readonly personalSubscriptionRepo: IPersonalSubscriptionRepo;
-  private readonly organizationRepo: IOrganizationRepo;
-  private readonly organizationSubscriptionRepo: IOrganizationSubscriptionRepo;
-  private readonly membershipRepo: IMembershipRepo;
   private readonly auditRepo: IAuditRepo;
   private readonly orderRepo: IOrderRepo;
   private readonly invoiceRepo: IInvoiceRepo;
@@ -109,9 +97,6 @@ export class ConsoleAdminService {
     this.planRepo = deps.planRepo;
     this.featureDefRepo = deps.featureDefRepo;
     this.personalSubscriptionRepo = deps.personalSubscriptionRepo;
-    this.organizationRepo = deps.organizationRepo;
-    this.organizationSubscriptionRepo = deps.organizationSubscriptionRepo;
-    this.membershipRepo = deps.membershipRepo;
     this.auditRepo = deps.auditRepo;
     this.orderRepo = deps.orderRepo;
     this.invoiceRepo = deps.invoiceRepo;
@@ -127,7 +112,7 @@ export class ConsoleAdminService {
    */
   private async auditRestrictedRead(
     actorUserId: number,
-    eventType: 'admin.users.read' | 'admin.organizations.read' | 'admin.audit.read' | 'admin.orders.read' | 'admin.invoices.read' | 'admin.plans.read',
+    eventType: 'admin.users.read' | 'admin.audit.read' | 'admin.orders.read' | 'admin.invoices.read' | 'admin.plans.read',
   ): Promise<void> {
     if (!this.rateLimiter) {
       this.auditWriter.write({ eventType, result: 'success', actorUserId, actorRole: 'platform_admin' });
@@ -175,7 +160,7 @@ export class ConsoleAdminService {
 
   /**
    * 保存套餐（元数据 + 特性整组替换，单次 version CAS）。
-   * 兜底档（free/organization_free）不可归档——否则权益派生 fail-closed 会让全站读路径 500。
+   * 兜底档（free）不可归档——否则权益派生 fail-closed 会让全站读路径 500。
    * 特性键必须已定义、取值按 def 的 value_type 校验（禁止 NaN/负数/字符串布尔）。
    */
   async updatePlanInTx(tx: Queryable, actorUserId: number, input: {
@@ -227,7 +212,7 @@ export class ConsoleAdminService {
     reason: string;
   }): Promise<PlanFeatureDef> {
     if (!/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(input.key)) throw new ValidationError('invalid feature key');
-    if (!['personal', 'organization', 'both'].includes(input.kind)) throw new ValidationError('invalid feature kind');
+    if (!['personal', 'both'].includes(input.kind)) throw new ValidationError('invalid feature kind');
     if (!['bool', 'number', 'bytes', 'stringList', 'enum'].includes(input.valueType)) throw new ValidationError('invalid value type');
     if (!Number.isInteger(input.sortOrder)) throw new ValidationError('invalid sort order');
     if (!input.label?.en || !input.label?.zh) throw new ValidationError('label requires en and zh');
@@ -318,21 +303,7 @@ export class ConsoleAdminService {
     return { subscriptionVersion: sub.version + 1 };
   }
 
-  // ── 组织 ──
-
-  async listOrganizations(actorUserId: number, input: {
-    namePrefix?: string;
-    status?: 'active' | 'closed';
-    planCode?: string;
-    cursor?: number;
-    limit: number;
-  }): Promise<Page<AdminOrgRow>> {
-    const rows = await this.organizationRepo.listForAdmin({ ...input, limit: input.limit + 1 });
-    const hasMore = rows.length > input.limit;
-    const items = hasMore ? rows.slice(0, input.limit) : rows;
-    await this.auditRestrictedRead(actorUserId, 'admin.organizations.read');
-    return { items, nextId: hasMore ? items[items.length - 1].organizationId : null };
-  }
+  // ── 订单 ──
 
   async listOrders(actorUserId: number, input: {
     userId?: number;
@@ -458,59 +429,6 @@ export class ConsoleAdminService {
       reason: status === 'issued' ? undefined : finalReason,
     });
     return { invoiceId: String(inv.id), status };
-  }
-
-  /**
-   * 调整组织订阅。`seatLimit` 为订阅级强制值，独立于套餐的 `includedSeats`（后者仅目录默认）。
-   * 席位数不得低于「活跃成员 + 有效邀请」。
-   */
-  async adjustOrganizationSubscriptionInTx(
-    tx: Queryable,
-    actorUserId: number,
-    organizationId: number,
-    params: {
-      planId: number;
-      seatLimit: number;
-      periodEndTime: Date | null;
-      reason: string;
-      expectedVersion: number;
-    },
-  ): Promise<{ subscriptionVersion: number }> {
-    const org = await this.organizationRepo.lockById(tx, organizationId);
-    if (!org) throw new EntityNotFoundError('organization', organizationId);
-    const sub = await this.organizationSubscriptionRepo.findByOrganizationIdForUpdate(tx, organizationId);
-    if (!sub) throw new EntityNotFoundError('organization subscription', organizationId);
-    if (params.expectedVersion !== sub.version) throw new SubscriptionVersionConflictError(sub.version);
-    if (params.seatLimit > MAX_SEAT_LIMIT) throw new ValidationError('seatLimit exceeds maximum 65535');
-    assertValidPeriodEnd(sub.periodStartTime, params.periodEndTime);
-
-    const activeMembers = await this.membershipRepo.countActive(tx, organizationId);
-    const validInvited = await this.membershipRepo.countValidInvited(tx, organizationId, new Date());
-    if (params.seatLimit < activeMembers + validInvited) {
-      throw new ValidationError('seatLimit cannot be below occupied seats');
-    }
-
-    const ok = await this.organizationSubscriptionRepo.update(tx, {
-      id: sub.id,
-      planId: params.planId,
-      seatLimit: params.seatLimit,
-      status: 'active',
-      periodEndTime: params.periodEndTime,
-      expectedVersion: params.expectedVersion,
-    });
-    if (!ok) throw new SubscriptionVersionConflictError(sub.version);
-
-    await this.auditWriter.writeInTx(tx, {
-      eventType: 'admin.organization.subscription.changed',
-      result: 'success',
-      actorUserId,
-      actorRole: 'platform_admin',
-      targetType: 'organization',
-      targetId: String(organizationId),
-      organizationId,
-      reason: params.reason,
-    });
-    return { subscriptionVersion: sub.version + 1 };
   }
 
   // ── 审计查询 / 导出 ──

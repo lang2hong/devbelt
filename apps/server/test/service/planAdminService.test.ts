@@ -10,16 +10,12 @@ import {
   FakePlanRepo,
   FakePlanFeatureDefRepo,
   FakePersonalSubscriptionRepo,
-  FakeOrganizationRepo,
-  FakeOrganizationSubscriptionRepo,
-  FakeMembershipRepo,
 } from '../helpers/fakeRepos.js';
 import { FakeAuditRepo } from '../helpers/linkFlowFakes.js';
 
 const DEFS: PlanFeatureDef[] = [
   { id: 1, key: 'maxSavedConnections', kind: 'personal', label: { en: 'Saved', zh: '保存' }, valueType: 'number', unit: 'count', sortOrder: 10 },
   { id: 2, key: 'allowConnectionImport', kind: 'personal', label: { en: 'Import', zh: '导入' }, valueType: 'bool', unit: null, sortOrder: 20 },
-  { id: 3, key: 'includedSeats', kind: 'organization', label: { en: 'Seats', zh: '席位' }, valueType: 'number', unit: 'seat', sortOrder: 30 },
 ];
 
 function makeService() {
@@ -31,9 +27,6 @@ function makeService() {
     planRepo,
     featureDefRepo,
     personalSubscriptionRepo: new FakePersonalSubscriptionRepo(),
-    organizationRepo: new FakeOrganizationRepo(),
-    organizationSubscriptionRepo: new FakeOrganizationSubscriptionRepo(),
-    membershipRepo: new FakeMembershipRepo(),
     auditRepo: new FakeAuditRepo(),
     orderRepo: {} as never,
     invoiceRepo: {} as never,
@@ -94,15 +87,6 @@ describe('ConsoleAdminService.updatePlanInTx', () => {
       id: pro.id, name: 'Pro', priceCents: 9900, billingUnit: 'month', sortOrder: 0, status: 'active',
       features: [{ featureKey: 'maxSavedConnections', value: 1 }, { featureKey: 'maxSavedConnections', value: 2 }],
       expectedVersion: pro.version, reason: 'x',
-    })).rejects.toBeInstanceOf(ValidationError);
-  });
-
-  it('rejects a feature that does not apply to the plan kind', async () => {
-    const { svc, planRepo } = makeService();
-    const pro = (await planRepo.findByCode('pro'))!;
-    await expect(svc.updatePlanInTx(TX, 1, {
-      id: pro.id, name: 'Pro', priceCents: 9900, billingUnit: 'month', sortOrder: 0, status: 'active',
-      features: [{ featureKey: 'includedSeats', value: 3 }], expectedVersion: pro.version, reason: 'x',
     })).rejects.toBeInstanceOf(ValidationError);
   });
 

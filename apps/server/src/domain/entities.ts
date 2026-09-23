@@ -4,11 +4,6 @@ import type {
   PersonalSubscriptionStatus,
   DeviceStatus,
   EmailVerificationPurpose,
-  OrganizationStatus,
-  OrganizationRole,
-  OrganizationMembershipStatus,
-  OrganizationSubscriptionStatus,
-  ResourceType,
   SyncProtocolVersion,
   SyncFormatVersion,
   SyncCipherSuite,
@@ -61,8 +56,8 @@ export interface EmailVerificationToken {
   updateTime: Date;
 }
 
-/** 套餐（个人/组织统一）。特性为纵表派生，见 Plan.features。 */
-export type PlanKind = 'personal' | 'organization';
+/** 套餐（个人）。特性为纵表派生，见 Plan.features。 */
+export type PlanKind = 'personal';
 export type PlanBillingUnit = 'month' | 'seat-month';
 export type PlanStatus = 'active' | 'archived';
 
@@ -145,90 +140,6 @@ export interface DeviceInfoDto {
   status: DeviceStatus;
   lastUsedTime: Date | null;
   createTime: Date;
-}
-
-// ── 组织域 ──
-
-/** 组织（协作空间）。无 Owner 字段；创建组织的用户成为首位 active admin。 */
-export interface Organization {
-  id: number;
-  name: string;
-  status: OrganizationStatus;
-  closedTime: Date | null;
-  createTime: Date;
-  updateTime: Date;
-}
-
-/** 组织订阅（organizations 的当前权益）：只引用 plan，权益派生（无快照）。 */
-export interface OrganizationSubscription {
-  id: number;
-  organizationId: number;
-  planId: number;
-  seatLimit: number;
-  status: OrganizationSubscriptionStatus;
-  periodStartTime: Date;
-  periodEndTime: Date | null;
-  /** 乐观并发版本（P3 §6.2 订阅调整）。 */
-  version: number;
-  createTime: Date;
-  updateTime: Date;
-}
-
-/** 组织成员关系。membership 只存一个 role。 */
-export interface OrganizationMembership {
-  id: number;
-  organizationId: number;
-  userId: number;
-  role: OrganizationRole;
-  status: OrganizationMembershipStatus;
-  invitedByUserId: number | null;
-  joinedTime: Date | null;
-  removedTime: Date | null;
-  createTime: Date;
-  updateTime: Date;
-}
-
-/** 组织邀请。token_hash 只存 SHA-256，有效期 7 天，单次消费。 */
-export interface OrganizationInvitation {
-  id: number;
-  organizationId: number;
-  membershipId: number;
-  email: string;
-  tokenHash: string;
-  expiresTime: Date;
-  acceptedTime: Date | null;
-  revokedTime: Date | null;
-  createTime: Date;
-  updateTime: Date;
-}
-
-// ── 组织资源 ──
-
-/** 组织目录。无作者字段；软删除置 delete_time。 */
-export interface Folder {
-  id: number;
-  organizationId: number;
-  parentId: number | null;
-  name: string;
-  deleteTime: Date | null;
-  createTime: Date;
-  updateTime: Date;
-}
-
-/** 组织资源（connection_template / query）。content 为开放 JSON（4.4 节闭合 schema 校验）。 */
-export interface Resource {
-  id: number;
-  organizationId: number;
-  folderId: number | null;
-  resourceType: ResourceType;
-  name: string;
-  content: Record<string, unknown>;
-  version: number;
-  createdByMembershipId: number;
-  updatedByMembershipId: number | null;
-  deleteTime: Date | null;
-  createTime: Date;
-  updateTime: Date;
 }
 
 // ── 个人端到端同步 ──
@@ -382,7 +293,6 @@ export interface AuditEvent {
   eventType: string;
   targetType: string | null;
   targetId: string | null;
-  organizationId: number | null;
   sourceIp: string | null;
   requestId: string | null;
   result: string;

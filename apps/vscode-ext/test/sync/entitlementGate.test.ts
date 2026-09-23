@@ -5,7 +5,6 @@ import {
   allowedEngines,
   databaseEngineOf,
   filterPersonalConnectionsByEntitlement,
-  isOrganizationConnectionId,
   maxSavedConnections,
   canImportConnections,
   maxConcurrentConnections,
@@ -37,19 +36,6 @@ describe('allowedEngines', () => {
 
   it('有权益时直接用缓存值', () => {
     expect(allowedEngines(pro)).toEqual(['mysql', 'postgresql', 'sqlite']);
-  });
-});
-
-describe('isOrganizationConnectionId', () => {
-  it('组织连接 org: 前缀识别为 true', () => {
-    expect(isOrganizationConnectionId('org:1:2')).toBe(true);
-    expect(isOrganizationConnectionId('org:abc')).toBe(true);
-  });
-
-  it('个人连接 id 与空值识别为 false', () => {
-    expect(isOrganizationConnectionId('c-1-2')).toBe(false);
-    expect(isOrganizationConnectionId(undefined)).toBe(false);
-    expect(isOrganizationConnectionId('')).toBe(false);
   });
 });
 

@@ -27,7 +27,6 @@ import { AccountHubView } from '../../src/sync/accountHubView';
 
 const CATALOG = {
   personal: [{ code: 'pro', name: 'Pro', billing: { unit: 'month', priceCents: 9900 }, features: [] }],
-  organization: [],
 };
 const ME = { user: { email: 'a@b.c' }, subscription: null };
 const DEVICES = [{ deviceId: 'd1', status: 'active' }];

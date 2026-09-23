@@ -5,7 +5,6 @@ import type {
 import type {
   UserStatus,
   UserRole,
-  OrganizationStatus,
 } from "../../domain/enums.js";
 
 /** 仓储接口 · admin（自 interfaces.ts 按聚合拆分，纯类型移动）。 */
@@ -33,28 +32,6 @@ export interface AdminUserFilter {
   planCode?: string;
   createdFrom?: Date;
   createdTo?: Date;
-  cursor?: number;
-  limit: number;
-}
-
-export interface AdminOrgRow {
-  organizationId: number;
-  name: string;
-  status: OrganizationStatus;
-  planCode: string | null;
-  seatLimit: number | null;
-  activeMemberCount: number;
-  invitedCount: number;
-  createTime: Date;
-  /** 组织订阅当前版本（供乐观订阅调整 expectedVersion）。 */
-  subscriptionVersion: number | null;
-  periodEndTime: Date | null;
-}
-
-export interface AdminOrgFilter {
-  namePrefix?: string;
-  status?: OrganizationStatus;
-  planCode?: string;
   cursor?: number;
   limit: number;
 }

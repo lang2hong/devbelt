@@ -15,7 +15,6 @@ describe('admin 路由表', () => {
     const names = ADMIN_ROUTES.map((r) => r.name);
     for (const expected of [
       'admin-users',
-      'admin-organizations',
       'admin-orders',
       'admin-invoices',
       'admin-audit',

@@ -4,7 +4,7 @@ import Fastify from 'fastify';
 /**
  * 核证 Fastify v5 是否把路由级 `{ config: {...} }` 注入 `req.routeOptions.config`。
  *
- * organizationAuth 的收窄逻辑依赖它：
+ * per-route 收窄逻辑依赖它：
  * - `req.routeOptions.config.aud`（per-route audience 收窄）
  * - `req.routeOptions.config.permission`（路由所需权限码）
  *
@@ -18,14 +18,14 @@ describe('Fastify v5 req.routeOptions.config 注入', () => {
     app.addHook('onRequest', async (req) => {
       config = (req.routeOptions as unknown as { config?: Record<string, unknown> }).config ?? {};
     });
-    app.get('/api/orgs/:organizationId', {
-      config: { permission: 'organization.read', aud: 'extension' },
+    app.get('/api/items/:itemId', {
+      config: { permission: 'resource.read', aud: 'extension' },
     }, async () => ({ ok: true }));
     await app.ready();
 
-    const res = await app.inject({ method: 'GET', url: '/api/orgs/1' });
+    const res = await app.inject({ method: 'GET', url: '/api/items/1' });
     expect(res.statusCode).toBe(200);
-    expect(config.permission).toBe('organization.read');
+    expect(config.permission).toBe('resource.read');
     expect(config.aud).toBe('extension');
     await app.close();
   });

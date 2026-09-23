@@ -238,21 +238,6 @@ export const DOCS: readonly DocPage[] = [
     ],
   },
   {
-    slug: 'organizations',
-    title: '组织协作',
-    summary: '共享目录、共享查询与连接模板。',
-    sections: [
-      {
-        heading: '共享资源',
-        html: `<p>登录后组织树展示所属组织、目录、共享查询和连接模板。管理员可新建/删除目录与资源；成员为只读。</p>`,
-      },
-      {
-        heading: '连接模板',
-        html: `<p>使用组织模板时，密码、SSH、证书等敏感字段只存本机（CredentialVault），不上传服务端。</p>`,
-      },
-    ],
-  },
-  {
     slug: 'account',
     title: '账户与套餐',
     summary: '注册登录、设备管理、改密与套餐权益。',

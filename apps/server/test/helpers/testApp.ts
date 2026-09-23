@@ -11,12 +11,6 @@ import {
   FakeRefreshTokenRepo,
   FakeRateLimitRepo,
   FakeRegistrationRepo,
-  FakeOrganizationRepo,
-  FakeOrganizationSubscriptionRepo,
-  FakeMembershipRepo,
-  FakeInvitationRepo,
-  FakeFolderRepo,
-  FakeResourceRepo,
   FakeSyncStateRepo,
   FakeSyncRecordRepo,
   FakeSyncMutationRepo,
@@ -30,16 +24,12 @@ import { securityHeaders } from '../../src/middleware/securityHeaders.js';
 import { TokenService, type SigningKeys } from '../../src/service/tokenService.js';
 import { EXTENSION_SCOPES } from '../../src/domain/enums.js';
 import { AuthService } from '../../src/modules/auth/service/authService.js';
-import { OrganizationService } from '../../src/modules/organization/service/organizationService.js';
-import { OrganizationResourceService } from '../../src/modules/organization/service/organizationResourceService.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
 import { MemoryEmailSender } from '../../src/modules/auth/service/emailSender.js';
 import { authRoutes } from '../../src/modules/auth/route/auth.js';
 import { meRoutes } from '../../src/modules/db/route/me.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 import { personalRoutes } from '../../src/modules/db/route/personal.js';
-import { organizationRoutes } from '../../src/modules/organization/route/organizations.js';
-import { invitationRoutes } from '../../src/modules/organization/route/invitations.js';
 import { syncRoutes } from '../../src/modules/db/route/sync.js';
 import { SyncStateService } from '../../src/modules/db/service/syncStateService.js';
 import { SyncRecordService } from '../../src/modules/db/service/syncRecordService.js';
@@ -65,12 +55,6 @@ export interface TestApp {
     refreshTokenRepo: FakeRefreshTokenRepo;
     rateLimitRepo: FakeRateLimitRepo;
     registrationRepo: FakeRegistrationRepo;
-    organizationRepo: FakeOrganizationRepo;
-    organizationSubscriptionRepo: FakeOrganizationSubscriptionRepo;
-    membershipRepo: FakeMembershipRepo;
-    invitationRepo: FakeInvitationRepo;
-    folderRepo: FakeFolderRepo;
-    resourceRepo: FakeResourceRepo;
     syncResetTokenRepo: FakeSyncResetTokenRepo;
     syncResetHandoffRepo: FakeSyncResetHandoffRepo;
     mailFlowRepo: FakeMailFlowRepo;
@@ -79,8 +63,6 @@ export interface TestApp {
     authService: AuthService;
     emailSender: MemoryEmailSender;
     tokenService: TokenService;
-    organizationService: OrganizationService;
-    resourceService: OrganizationResourceService;
   };
   tokenService: TokenService;
   csrfService: CsrfService;
@@ -119,12 +101,6 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   const refreshTokenRepo = new FakeRefreshTokenRepo();
   const rateLimitRepo = new FakeRateLimitRepo();
   const registrationRepo = new FakeRegistrationRepo(planRepo, userRepo, personalSubscriptionRepo, emailVerificationTokenRepo);
-  const organizationRepo = new FakeOrganizationRepo();
-  const organizationSubscriptionRepo = new FakeOrganizationSubscriptionRepo();
-  const membershipRepo = new FakeMembershipRepo(userRepo, organizationRepo);
-  const invitationRepo = new FakeInvitationRepo(membershipRepo);
-  const resourceRepo = new FakeResourceRepo();
-  const folderRepo = new FakeFolderRepo(resourceRepo);
   const syncStateRepo = new FakeSyncStateRepo();
   const syncRecordRepo = new FakeSyncRecordRepo();
   const syncMutationRepo = new FakeSyncMutationRepo();
@@ -147,27 +123,6 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
     tokenService,
     emailSender,
     rateLimiter,
-    async (fn) => fn({} as Queryable),
-  );
-  const organizationService = new OrganizationService(
-    userRepo,
-    organizationRepo,
-    planRepo,
-    organizationSubscriptionRepo,
-    membershipRepo,
-    invitationRepo,
-    rateLimiter,
-    tokenService,
-    emailSender,
-    async (fn) => fn({} as Queryable),
-  );
-  const resourceService = new OrganizationResourceService(
-    organizationRepo,
-    organizationSubscriptionRepo,
-    planRepo,
-    membershipRepo,
-    folderRepo,
-    resourceRepo,
     async (fn) => fn({} as Queryable),
   );
   const syncStateService = new SyncStateService(
@@ -210,8 +165,6 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
   await app.register(authRoutes, { authService, tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin });
   await app.register(meRoutes, { tokenService, getUser, getSessionActive, userRepo, personalSubscriptionRepo, planRepo });
   await app.register(personalRoutes, { tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin, deviceRepo, idempotencyService: new IdempotencyService(new FakeIdempotencyReceiptRepo(), async (fn) => fn({} as Queryable)), revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId), revokeDeviceInTx: (tx, userId, deviceId) => authService.revokeDeviceInTx(tx, userId, deviceId) });
-  await app.register(organizationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin, organizationService, resourceService, organizationRepo, membershipRepo, auditWriter, idempotencyService: new IdempotencyService(new FakeIdempotencyReceiptRepo(), async (fn) => fn({} as Queryable)), sendInvitation: (o) => organizationService.sendInvitation(o) });
-  await app.register(invitationRoutes, { tokenService, getUser, getSessionActive, csrfService, consoleOrigin, organizationService });
   await app.register(syncRoutes, { tokenService, getUser, getSessionActive, syncState: syncStateService, syncRecord: syncRecordService, syncReset: syncResetService, rateLimiter, verifyAccountRecoveryPassword: (userId, password) => authService.verifyPasswordStepUp(userId, password), auditWriter, emailSender, userRepo });
 
   await app.ready();
@@ -228,17 +181,11 @@ export async function buildTestApp(opts: TestAppOptions = {}): Promise<TestApp> 
       refreshTokenRepo,
       rateLimitRepo,
       registrationRepo,
-      organizationRepo,
-      organizationSubscriptionRepo,
-      membershipRepo,
-      invitationRepo,
-      folderRepo,
-      resourceRepo,
       syncResetTokenRepo,
       syncResetHandoffRepo,
       mailFlowRepo,
     },
-    services: { authService, emailSender, tokenService, organizationService, resourceService },
+    services: { authService, emailSender, tokenService },
     tokenService,
     csrfService,
     tokenFor: (userId) => tokenService.signAccessToken({

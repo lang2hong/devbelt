@@ -102,24 +102,6 @@ export class IdempotencyInProgressError extends DomainError {
   }
 }
 
-/**
- * 组织不存在 / closed / 调用者非 active member → 统一 404（§6.1：不区分，防枚举）。
- */
-export class OrganizationNotFoundError extends DomainError {
-  constructor() {
-    super('organization not found', 'ORGANIZATION_NOT_FOUND');
-    this.name = 'OrganizationNotFoundError';
-  }
-}
-
-/** 操作会导致最后一个 active admin 消失 → 409 ORGANIZATION_ADMIN_REQUIRED（§6.1）。 */
-export class OrganizationAdminRequiredError extends DomainError {
-  constructor() {
-    super('at least one active admin is required', 'ORGANIZATION_ADMIN_REQUIRED');
-    this.name = 'OrganizationAdminRequiredError';
-  }
-}
-
 /** 已认证但对目标资源无权操作 → 403 FORBIDDEN。 */
 export class ForbiddenError extends DomainError {
   constructor(message = 'forbidden') {
@@ -128,87 +110,14 @@ export class ForbiddenError extends DomainError {
   }
 }
 
-/** 邀请 token 无效 / 已消费 / 已撤销 / 已过期 / 邮箱不匹配 / 组织已关闭 → 400 INVITATION_INVALID。 */
-export class InvitationInvalidError extends DomainError {
-  constructor(message = 'invitation invalid') {
-    super(message, 'INVITATION_INVALID');
-    this.name = 'InvitationInvalidError';
-  }
-}
-
 /**
  * 邮件流绑定失败（流缺失/已过期/已绑定他人）→ 400 LINK_FLOW_INVALID。
- * `bindFlowToUser` 同时服务 verify-email / accept-invitation / sync-reset 三种邮件流，
- * 用邀请专用码 `INVITATION_INVALID` 名实不符，故设此中性码（行为不变）。
+ * `bindFlowToUser` 同时服务 verify-email / sync-reset 两种邮件流，故用中性码。
  */
 export class LinkFlowInvalidError extends DomainError {
   constructor(message = 'link flow invalid') {
     super(message, 'LINK_FLOW_INVALID');
     this.name = 'LinkFlowInvalidError';
-  }
-}
-
-/** 邀请目标不满足前置条件（未注册 / 未验证 / 已是成员）→ 400 INVITATION_TARGET_NOT_ELIGIBLE。 */
-export class InvitationTargetNotEligibleError extends DomainError {
-  constructor(message = 'invitation target not eligible') {
-    super(message, 'INVITATION_TARGET_NOT_ELIGIBLE');
-    this.name = 'InvitationTargetNotEligibleError';
-  }
-}
-
-/** 组织容量（seat / 资源数量 / 字节）已满 → 409 ORGANIZATION_QUOTA_EXCEEDED（§4.2/§6.2）。 */
-export class OrganizationQuotaExceededError extends DomainError {
-  constructor(message = 'organization quota exceeded') {
-    super(message, 'ORGANIZATION_QUOTA_EXCEEDED');
-    this.name = 'OrganizationQuotaExceededError';
-  }
-}
-
-/** 组织资源不存在 / 软删除 / 跨组织 → 404 RESOURCE_NOT_FOUND（§8）。 */
-export class ResourceNotFoundError extends DomainError {
-  constructor() {
-    super('resource not found', 'RESOURCE_NOT_FOUND');
-    this.name = 'ResourceNotFoundError';
-  }
-}
-
-/** 资源内容违反 4.4 节闭合 schema → 400 RESOURCE_CONTENT_INVALID。 */
-export class ResourceContentInvalidError extends DomainError {
-  constructor(message = 'resource content invalid') {
-    super(message, 'RESOURCE_CONTENT_INVALID');
-    this.name = 'ResourceContentInvalidError';
-  }
-}
-
-/** 不允许的模板引擎（超出订阅快照白名单）→ 403 ORGANIZATION_FEATURE_REQUIRED。 */
-export class OrganizationFeatureRequiredError extends DomainError {
-  constructor(message = 'organization feature required') {
-    super(message, 'ORGANIZATION_FEATURE_REQUIRED');
-    this.name = 'OrganizationFeatureRequiredError';
-  }
-}
-
-/** 乐观锁版本冲突 → 409 RESOURCE_VERSION_CONFLICT（响应带 currentVersion）。 */
-export class ResourceVersionConflictError extends DomainError {
-  constructor(public readonly currentVersion: number) {
-    super('resource version conflict', 'RESOURCE_VERSION_CONFLICT');
-    this.name = 'ResourceVersionConflictError';
-  }
-}
-
-/** 目录非空（含未删除子目录或资源）不可删除 → 409 FOLDER_NOT_EMPTY。 */
-export class FolderNotEmptyError extends DomainError {
-  constructor() {
-    super('folder not empty', 'FOLDER_NOT_EMPTY');
-    this.name = 'FolderNotEmptyError';
-  }
-}
-
-/** 目录移动成环（parentId=自身或新父为其后代）→ 409 FOLDER_MOVE_CYCLE。 */
-export class FolderMoveCycleError extends DomainError {
-  constructor() {
-    super('folder move would create a cycle', 'FOLDER_MOVE_CYCLE');
-    this.name = 'FolderMoveCycleError';
   }
 }
 

@@ -7,17 +7,17 @@ import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 
 /**
  * 套餐管理：顶部标签页（套餐 / 特性定义）。
- * - 套餐：分段切换个人/组织 → 套餐胶囊选择 → 全宽表单（基本信息 / 特性）→ 粘性保存栏。
+ * - 套餐：套餐胶囊选择 → 全宽表单（基本信息 / 特性）→ 粘性保存栏。
  * - 特性定义：表格列出，选中后在下方编辑 en/zh 标签、类型、单位、排序。
- * 保存为整组事务替换 + 乐观锁；兜底档（free/organization_free）不可归档。
+ * 保存为整组事务替换 + 乐观锁；兜底档（free）不可归档。
  */
 
-const ENGINE_KEYS = new Set(['allowedDatabaseTypes', 'allowedTemplateDatabaseTypes']);
+const ENGINE_KEYS = new Set(['allowedDatabaseTypes']);
 const KNOWN_ENGINES = ['mysql', 'postgresql', 'sqlite'];
 const BYTES_PER_MIB = 1024 * 1024;
 const BYTES_PER_GIB = 1024 * 1024 * 1024;
 const VALUE_TYPES = ['bool', 'number', 'bytes', 'stringList', 'enum'];
-const KINDS = ['personal', 'organization', 'both'];
+const KINDS = ['personal', 'both'];
 
 interface EditableFeature {
   key: string;
@@ -34,7 +34,7 @@ interface EditableFeature {
 }
 
 const tab = ref<'plans' | 'defs'>('plans');
-const kindTab = ref<'personal' | 'organization'>('personal');
+const kindTab = ref<'personal'>('personal');
 
 const state = ref<'loading' | 'ready' | 'error'>('loading');
 const plans = ref<AdminPlan[]>([]);
@@ -69,7 +69,7 @@ const defIdem = useIdempotencyKey();
 
 const plansOfKind = computed(() => plans.value.filter((p) => p.kind === kindTab.value));
 const selected = computed(() => plans.value.find((p) => p.id === selectedId.value) ?? null);
-const isFallback = computed(() => selected.value != null && ['free', 'organization_free'].includes(selected.value.code));
+const isFallback = computed(() => selected.value != null && ['free'].includes(selected.value.code));
 const defsOfKind = computed(() => featureDefs.value.filter((d) => d.kind === 'both' || d.kind === kindTab.value));
 
 function labelOf(f: { label?: { en: string; zh: string }; key: string }): string {
@@ -101,7 +101,6 @@ function toEditable(plan: AdminPlan): EditableFeature[] {
 
 function select(plan: AdminPlan): void {
   selectedId.value = plan.id;
-  kindTab.value = plan.kind === 'organization' ? 'organization' : 'personal';
   name.value = plan.name;
   priceYuan.value = plan.priceCents / 100;
   sortOrder.value = plan.sortOrder;
@@ -109,12 +108,6 @@ function select(plan: AdminPlan): void {
   features.value = toEditable(plan);
   errorMsg.value = '';
   okMsg.value = '';
-}
-
-function switchKind(kind: 'personal' | 'organization'): void {
-  kindTab.value = kind;
-  const first = plans.value.find((p) => p.kind === kind);
-  if (first) select(first);
 }
 
 function toggleStatus(e: Event): void {
@@ -292,10 +285,6 @@ onMounted(load);
     <!-- ── 套餐 ── -->
     <template v-else-if="tab === 'plans'">
       <div class="toolbar">
-        <div class="segmented">
-          <button :class="{ on: kindTab === 'personal' }" @click="switchKind('personal')">个人</button>
-          <button :class="{ on: kindTab === 'organization' }" @click="switchKind('organization')">组织</button>
-        </div>
         <div class="pills">
           <button
             v-for="p in plansOfKind"
@@ -399,10 +388,6 @@ onMounted(load);
     <!-- ── 特性定义 ── -->
     <template v-else>
       <div class="toolbar">
-        <div class="segmented">
-          <button :class="{ on: kindTab === 'personal' }" @click="switchKind('personal')">个人</button>
-          <button :class="{ on: kindTab === 'organization' }" @click="switchKind('organization')">组织</button>
-        </div>
         <span class="spacer"></span>
         <button class="btn ghost" @click="startNewDef">新增特性</button>
       </div>

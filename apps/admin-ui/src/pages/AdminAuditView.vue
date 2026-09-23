@@ -15,23 +15,20 @@ const toTime = ref('');
 const eventType = ref('');
 const actorUserId = ref('');
 const targetType = ref('');
-const organizationId = ref('');
 const nextCursor = ref<string | null>(null);
 
 const EVENT_TYPE_SUGGESTIONS = [
   'admin.users.read', 'admin.user.disabled', 'admin.user.enabled', 'admin.user.subscription.changed',
-  'admin.organizations.read', 'admin.organization.subscription.changed', 'admin.orders.read',
+  'admin.orders.read',
   'admin.audit.read', 'admin.audit.export', 'admin.role.granted',
   'payment.order.created', 'payment.order.paid', 'payment.order.fulfilled', 'payment.callback.failed',
   'invoice.requested', 'auth.login.success', 'auth.login.failed', 'auth.logout', 'auth.password.changed',
-  'account.displayName.changed', 'organization.created', 'organization.renamed', 'organization.closed',
-  'invitation.create', 'invitation.revoke', 'invitation.accept',
-  'organization.member.role_changed', 'organization.member.removed', 'organization.member.left',
+  'account.displayName.changed',
   'sync.reset.handoff.created', 'sync.reset.handoff.consumed', 'sync.reset.handoff.failed',
   'system.receipts.cleanup', 'console.auth.refresh.reuse',
 ];
 
-const TARGET_TYPE_SUGGESTIONS = ['user', 'order', 'organization', 'invitation', 'membership', 'subscription', 'device', 'idempotency_receipts'];
+const TARGET_TYPE_SUGGESTIONS = ['user', 'order', 'subscription', 'device', 'idempotency_receipts'];
 
 const exportWrite = useIdempotencyKey();
 
@@ -56,7 +53,6 @@ async function load(reset = true): Promise<void> {
       eventType: eventType.value || undefined,
       actorUserId: actorUserId.value || undefined,
       targetType: targetType.value || undefined,
-      organizationId: organizationId.value || undefined,
       cursor: reset ? undefined : (nextCursor.value ?? undefined),
     });
     if (seq !== loadSeq) return;
@@ -81,7 +77,7 @@ function search(): void {
 
 async function doExport(format: 'csv' | 'json'): Promise<void> {
   // tag 纳入有效过滤条件：变更筛选即新业务意图，避免「同 key 异 body」触发 KEY_REUSED。
-  const tag = `export:${format}:${fromTime.value}|${toTime.value}|${eventType.value}|${actorUserId.value}|${targetType.value}|${organizationId.value}`;
+  const tag = `export:${format}:${fromTime.value}|${toTime.value}|${eventType.value}|${actorUserId.value}|${targetType.value}`;
   error.value = '';
   try {
     const csrf = await ensureCsrf();
@@ -91,7 +87,6 @@ async function doExport(format: 'csv' | 'json'): Promise<void> {
       eventType: eventType.value || undefined,
       actorUserId: actorUserId.value || undefined,
       targetType: targetType.value || undefined,
-      organizationId: organizationId.value || undefined,
     }, exportWrite.ensure(tag), csrf);
     if (r.kind === 'ok') {
       exportWrite.reset(tag);
@@ -133,7 +128,6 @@ async function doExport(format: 'csv' | 'json'): Promise<void> {
       <datalist id="target-type-suggestions">
         <option v-for="tt in TARGET_TYPE_SUGGESTIONS" :key="tt" :value="tt" />
       </datalist>
-      <input v-model="organizationId" type="text" placeholder="organizationId" />
       <button class="btn" @click="search">查询</button>
       <button class="btn secondary" @click="doExport('json')">导出 JSON</button>
       <button class="btn secondary" @click="doExport('csv')">导出 CSV</button>

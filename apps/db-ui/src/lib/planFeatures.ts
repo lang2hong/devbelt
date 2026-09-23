@@ -25,21 +25,16 @@ export interface PlanDto {
 
 export interface PlanCatalog {
   personal: PlanDto[];
-  organization: PlanDto[];
 }
 
 /** 已知特征标签（缺失时回落为 key）。 */
 const FEATURE_LABELS: Record<string, string> = {
   allowedDatabaseTypes: '支持的数据库',
-  allowedTemplateDatabaseTypes: '模板数据库类型',
   maxSavedConnections: '本机保存连接数',
   maxConnectionMetas: '云端连接元数据',
   syncStorageBytes: '云端同步空间',
   allowConnectionImport: '导入连接配置',
   maxDevices: '设备数',
-  includedSeats: '包含席位',
-  maxSharedResources: '共享资源数',
-  sharedStorageQuotaBytes: '共享存储空间',
 };
 
 /** 已支持的引擎（其余视为「即将支持」，仅展示、不解锁）。 */
@@ -49,7 +44,7 @@ const ENGINE_LABELS: Record<string, string> = {
   sqlite: 'SQLite',
 };
 
-const ENGINE_KEYS = new Set(['allowedDatabaseTypes', 'allowedTemplateDatabaseTypes']);
+const ENGINE_KEYS = new Set(['allowedDatabaseTypes']);
 
 export function featureLabel(key: string, label?: { en: string; zh: string }): string {
   // 服务端定义优先（单源）；控制台为中文，取 zh。

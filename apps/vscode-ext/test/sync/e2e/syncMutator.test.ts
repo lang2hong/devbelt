@@ -104,13 +104,6 @@ describe('SyncMutator（全类型）', () => {
     expect(m.type).toBe('connection');
   });
 
-  it('组织连接跳过（不报错）', async () => {
-    const { mutator, outbox } = setup({ connections: [conn('org:1:2')] });
-    const r = await mutator.reconcile();
-    expect(r.generated).toBe(0);
-    expect(outbox.list()).toHaveLength(0);
-  });
-
   it('四类型各自产生 mutation，引用转 recordId 有序 mint', async () => {
     const { mutator, outbox } = setup({
       groups: [{ id: 'g-1', name: 'Root', updateTime: 100 } as ConnectionGroup],
@@ -141,15 +134,6 @@ describe('SyncMutator（全类型）', () => {
     const queryPayload = JSON.parse(decodePlain(queryPut));
     expect(queryPayload.connId).toBe(connPut.recordId);
     expect(queryPayload.folderId).toBe(floderPut.recordId);
-  });
-
-  it('指向 org: 连接的查询整条跳过', async () => {
-    const { mutator, outbox } = setup({
-      queries: [{ id: 'q-1', name: 'Q', sql: 'SELECT 1', connId: 'org:1:2', updateTime: 100 } as unknown as SavedQuery],
-    });
-    const r = await mutator.reconcile();
-    expect(r.generated).toBe(0);
-    expect(outbox.list()).toHaveLength(0);
   });
 
   it('pending 映射跳过并汇总上报 recordId', async () => {

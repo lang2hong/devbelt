@@ -666,62 +666,6 @@
         "command": "devbelt.scheduleBackup",
         "title": "%cmd.scheduleBackup%",
         "category": "DB Client"
-      },
-      {
-        "command": "devbelt.org.refresh",
-        "title": "%cmd.org.refresh%",
-        "category": "DB Client",
-        "icon": "$(refresh)"
-      },
-      {
-        "command": "devbelt.org.newFolder",
-        "title": "%cmd.org.newFolder%",
-        "category": "DB Client",
-        "icon": "$(new-folder)"
-      },
-      {
-        "command": "devbelt.org.deleteFolder",
-        "title": "%cmd.org.deleteFolder%",
-        "category": "DB Client"
-      },
-      {
-        "command": "devbelt.org.newQuery",
-        "title": "%cmd.org.newQuery%",
-        "category": "DB Client",
-        "icon": "$(new-file)"
-      },
-      {
-        "command": "devbelt.org.openResource",
-        "title": "%cmd.org.openResource%",
-        "category": "DB Client",
-        "icon": "$(eye)"
-      },
-      {
-        "command": "devbelt.org.saveResource",
-        "title": "%cmd.org.saveResource%",
-        "category": "DB Client"
-      },
-      {
-        "command": "devbelt.org.deleteResource",
-        "title": "%cmd.org.deleteResource%",
-        "category": "DB Client"
-      },
-      {
-        "command": "devbelt.org.connectTemplate",
-        "title": "%cmd.org.connectTemplate%",
-        "category": "DB Client",
-        "icon": "$(plug)"
-      },
-      {
-        "command": "devbelt.org.runQuery",
-        "title": "%cmd.org.runQuery%",
-        "category": "DB Client"
-      },
-      {
-        "command": "devbelt.org.openConsole",
-        "title": "%cmd.org.openConsole%",
-        "category": "DB Client",
-        "icon": "$(link-external)"
       }
     ],
     "menus": {
@@ -742,23 +686,8 @@
           "group": "navigation"
         },
         {
-          "command": "devbelt.org.refresh",
-          "when": "view == devbelt.explorer.organization",
-          "group": "navigation"
-        },
-        {
-          "command": "devbelt.org.newFolder",
-          "when": "view == devbelt.explorer.organization && devbelt.orgRole == 'admin'",
-          "group": "navigation"
-        },
-        {
-          "command": "devbelt.org.newQuery",
-          "when": "view == devbelt.explorer.organization && devbelt.orgRole == 'admin'",
-          "group": "navigation"
-        },
-        {
           "command": "devbelt.login",
-          "when": "(view == devbelt.explorer || view == devbelt.explorer.organization) && !devbelt.loggedIn",
+          "when": "view == devbelt.explorer && !devbelt.loggedIn",
           "group": "navigation"
         }
       ],
@@ -766,16 +695,6 @@
         {
           "command": "devbelt.runSqlFile",
           "when": "resourceLangId == sql",
-          "group": "navigation"
-        },
-        {
-          "command": "devbelt.org.saveResource",
-          "when": "devbelt.orgResourceEditor && devbelt.orgResourceEditorRole == 'admin'",
-          "group": "navigation"
-        },
-        {
-          "command": "devbelt.org.runQuery",
-          "when": "devbelt.orgSessionEditor",
           "group": "navigation"
         }
       ],
@@ -890,46 +809,6 @@
         {
           "command": "devbelt.scheduleBackup",
           "when": "false"
-        },
-        {
-          "command": "devbelt.org.refresh",
-          "when": "devbelt.loggedIn && devbelt.orgRole"
-        },
-        {
-          "command": "devbelt.org.newFolder",
-          "when": "devbelt.loggedIn && devbelt.orgRole == 'admin'"
-        },
-        {
-          "command": "devbelt.org.deleteFolder",
-          "when": "false"
-        },
-        {
-          "command": "devbelt.org.newQuery",
-          "when": "devbelt.loggedIn && devbelt.orgRole == 'admin'"
-        },
-        {
-          "command": "devbelt.org.openResource",
-          "when": "false"
-        },
-        {
-          "command": "devbelt.org.saveResource",
-          "when": "devbelt.loggedIn && devbelt.orgRole == 'admin'"
-        },
-        {
-          "command": "devbelt.org.deleteResource",
-          "when": "false"
-        },
-        {
-          "command": "devbelt.org.connectTemplate",
-          "when": "false"
-        },
-        {
-          "command": "devbelt.org.runQuery",
-          "when": "devbelt.loggedIn && devbelt.orgRole"
-        },
-        {
-          "command": "devbelt.org.openConsole",
-          "when": "devbelt.loggedIn"
         },
         {
           "command": "devbelt.deleteConnection",
@@ -1173,36 +1052,6 @@
         }
       ],
       "view/item/context": [
-        {
-          "command": "devbelt.org.connectTemplate",
-          "when": "view == devbelt.explorer.organization && viewItem =~ /^devbelt\\.org\\.resource\\.connection_template\\./",
-          "group": "inline"
-        },
-        {
-          "command": "devbelt.org.openResource",
-          "when": "view == devbelt.explorer.organization && viewItem =~ /^devbelt\\.org\\.resource\\./",
-          "group": "inline"
-        },
-        {
-          "command": "devbelt.org.deleteResource",
-          "when": "view == devbelt.explorer.organization && viewItem =~ /^devbelt\\.org\\.resource\\..*\\.admin$/",
-          "group": "1_modify"
-        },
-        {
-          "command": "devbelt.org.newQuery",
-          "when": "view == devbelt.explorer.organization && viewItem =~ /^(devbelt\\.org\\.organization|devbelt\\.org\\.folder)\\.admin$/",
-          "group": "1_create"
-        },
-        {
-          "command": "devbelt.org.newFolder",
-          "when": "view == devbelt.explorer.organization && viewItem =~ /^(devbelt\\.org\\.organization|devbelt\\.org\\.folder)\\.admin$/",
-          "group": "1_create"
-        },
-        {
-          "command": "devbelt.org.deleteFolder",
-          "when": "view == devbelt.explorer.organization && viewItem == devbelt.org.folder.admin",
-          "group": "1_modify"
-        },
         {
           "command": "devbelt.previewTable",
           "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
@@ -1919,10 +1768,6 @@
         {
           "id": "devbelt.explorer",
           "name": "%view.explorer%"
-        },
-        {
-          "id": "devbelt.explorer.organization",
-          "name": "Organization Resources"
         }
       ]
     },

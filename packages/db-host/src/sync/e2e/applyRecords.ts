@@ -4,7 +4,7 @@ import type { SavedQuery } from '@devbelt/db-core';
 import { DatabaseType } from '@devbelt/db-core';
 import { decodeEntityPayload, type DecodedEntityPayload } from './recordCodec.js';
 import { assertRecordId, assertU64Decimal } from './types.js';
-import { filterPersonalConnectionsByEntitlement, isOrganizationConnectionId } from '../entitlementGate.js';
+import { filterPersonalConnectionsByEntitlement } from '../entitlementGate.js';
 import type { CachedEntitlement } from '../entitlementGate.js';
 import { RecordConflictError } from './errors.js';
 import type { RecordMapStore, RecordMapEntry } from './recordMapStore.js';
@@ -26,7 +26,6 @@ import type { SyncEntityType, SyncEntityRef } from './syncEntity.js';
  * - 级联由 store 承担（§三）：连接 tombstone 级联其查询/文件夹；分组 tombstone 仅解除成员
  *   连接分组；文件夹 tombstone 查询移根级。
  * - 写实体走 `source='sync'`；连接解密后先过引擎门禁（墓碑不走门禁）。
- * - 指向 org: 连接的查询整条跳过（§三/N7）。
  */
 
 export type ApplyDisposition = 'skipped' | 'skipped-entitlement' | 'created' | 'updated' | 'deleted' | 'ignored-tombstone';
@@ -160,14 +159,6 @@ async function applyActive(
   force: boolean,
 ): Promise<ApplyRecordResult> {
   const type = decoded.type;
-
-  // 指向 org: 连接的查询整条跳过（N7）。
-  if (type === 'query') {
-    const connId = resolveLocalId(ctx.mapStore, 'connection', decoded.data.connId);
-    if (connId !== undefined && isOrganizationConnectionId(connId)) {
-      return { recordId, disposition: 'ignored-tombstone' };
-    }
-  }
 
   if (type === 'connection') {
     const { skipped } = filterPersonalConnectionsByEntitlement(

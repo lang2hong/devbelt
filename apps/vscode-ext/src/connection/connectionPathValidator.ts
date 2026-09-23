@@ -1,6 +1,5 @@
 import { DatabaseType } from '@devbelt/db-core';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
-import { isOrganizationConnectionId } from '@devbelt/db-host/sync/entitlementGate';
 
 /**
  * 路径校验 API（阶段 A 附加，无 UI）。
@@ -57,7 +56,6 @@ export async function validateConnectionPaths(
   conn: SavedConnection,
   fsAccess?: (path: string, mode: number) => Promise<void>,
 ): Promise<PathValidationResult> {
-  if (isOrganizationConnectionId(conn.id)) return { valid: true, issues: [] };
   const access = fsAccess ?? defaultAccess;
   const issues: PathValidationIssue[] = [];
   if (conn.useConnectionString && !(conn.connectionUrl && conn.connectionUrl.trim() !== '')) {

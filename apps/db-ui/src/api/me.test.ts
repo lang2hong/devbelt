@@ -14,7 +14,6 @@ describe('me', () => {
       user: { userId: '1', email: 'a@b.com', displayName: null, emailVerified: true, status: 'active', lastLoginTime: null },
       platformAdmin: false,
       subscription: null,
-      organizations: [],
     };
     const r = await me('tok', async () => jsonResponse(200, body));
     expect(r).toEqual({ kind: 'ok', value: body });
@@ -30,7 +29,6 @@ describe('me', () => {
       user: { userId: '1', email: 'a@b.com', displayName: null, emailVerified: true, status: 'active', lastLoginTime: null },
       platformAdmin: false,
       subscription: null,
-      organizations: [],
     };
     let meCalls = 0;
     const fetchImpl = async (input: string): Promise<Response> => {

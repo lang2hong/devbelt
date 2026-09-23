@@ -25,20 +25,15 @@ export interface PlanDto {
 
 export interface PlanCatalog {
   personal: PlanDto[];
-  organization: PlanDto[];
 }
 
 const FEATURE_KEYS = new Set([
   'allowedDatabaseTypes',
-  'allowedTemplateDatabaseTypes',
   'maxSavedConnections',
   'maxConnectionMetas',
   'syncStorageBytes',
   'allowConnectionImport',
   'maxDevices',
-  'includedSeats',
-  'maxSharedResources',
-  'sharedStorageQuotaBytes',
 ]);
 
 /** 已支持的引擎；其余视为「即将支持」（仅展示、不解锁）。 */
@@ -48,7 +43,7 @@ const ENGINE_LABELS: Record<string, string> = {
   sqlite: 'SQLite',
 };
 
-const ENGINE_KEYS = new Set(['allowedDatabaseTypes', 'allowedTemplateDatabaseTypes']);
+const ENGINE_KEYS = new Set(['allowedDatabaseTypes']);
 
 export function featureLabel(key: string, label?: { en: string; zh: string }): string {
   // 服务端定义优先（单源），按当前语言取；缺失时回退本地 i18n 映射。

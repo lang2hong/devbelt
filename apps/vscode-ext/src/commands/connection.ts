@@ -18,7 +18,6 @@ import {
   canExportConnections,
   maxSavedConnections,
   maxConcurrentConnections,
-  isOrganizationConnectionId,
 } from '@devbelt/db-host/sync/entitlementGate';
 
 async function queryServerVersion(session: any, dbType: string): Promise<string> {
@@ -39,9 +38,8 @@ async function queryServerVersion(session: any, dbType: string): Promise<string>
 export function registerConnectionCommands(deps: Deps, sub: Sub): void {
   const { store, manager, treeProvider, connCtx, auth } = deps;
 
-  // 连接资产门禁（§6.2）：本机保存连接数按个人档上限；org: 共享模板不计入。
-  const activeConnectionCount = () =>
-    store.list().filter((c) => !isOrganizationConnectionId(c.id)).length;
+  // 连接资产门禁（§6.2）：本机保存连接数按个人档上限。
+  const activeConnectionCount = () => store.list().length;
   const connectionCap = () => maxSavedConnections(auth.getCachedEntitlement());
   const atConnectionCap = () => {
     const cap = connectionCap();

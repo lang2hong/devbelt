@@ -41,4 +41,4 @@ export function validateFeatureValue(def: PlanFeatureDef, value: unknown): void 
 }
 
 /** 兜底档：不可归档（否则 requireFree 会让全站权益读路径 500）。 */
-export const FREE_PLAN_CODES: ReadonlySet<string> = new Set(['free', 'organization_free']);
+export const FREE_PLAN_CODES: ReadonlySet<string> = new Set(['free']);

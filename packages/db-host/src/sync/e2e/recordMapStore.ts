@@ -1,14 +1,13 @@
 import { assertRecordId, assertU64Decimal } from './types.js';
-import { refKey, assertSyncEntityType, isOrgLocalId, type SyncEntityRef, type SyncEntityType } from './syncEntity.js';
+import { refKey, assertSyncEntityType, type SyncEntityRef, type SyncEntityType } from './syncEntity.js';
 import type { MementoLike } from './stateStore.js';
 
 /**
  * record ↔ 本地实体 的**类型化**双向映射（A1）。
  *
  * 键按 userId + keyEpoch 隔离。持久化 recordId / { type, localId } / 服务端确认的
- * `recordVersion` / 本地实体 revision 标记（updateTime 毫秒). 组织连接（type='connection'
- * 且 localId 以 `org:` 开头）一律拒绝入映射；其余类型（group/query/queryFolder）的 localId
- * 无 org: 概念。**双向不变量**：任何时刻 recordId 与 (type, localId) 一一对应；违反时
+ * `recordVersion` / 本地实体 revision 标记（updateTime 毫秒).
+ * **双向不变量**：任何时刻 recordId 与 (type, localId) 一一对应；违反时
  * fail-closed。写操作异步（await memento.update），读操作同步。
  */
 
@@ -27,9 +26,8 @@ interface RecordMapData {
   byLocal: Record<string, string>;
 }
 
-function assertLocalEntry(type: SyncEntityType, localId: string): void {
+function assertLocalEntry(_type: SyncEntityType, localId: string): void {
   if (!localId) throw new Error('localId must not be empty');
-  if (isOrgLocalId(type, localId)) throw new Error('organization connection must not enter personal sync map');
 }
 
 function assertStatus(status: unknown): asserts status is RecordMapStatus {

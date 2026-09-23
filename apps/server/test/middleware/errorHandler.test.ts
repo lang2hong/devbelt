@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import Fastify from 'fastify';
 import { registerErrorHandler, sendError } from '../../src/middleware/errorHandler.js';
 import { registerConsoleErrorHandler } from '../../src/middleware/consoleError.js';
-import { OrganizationNotFoundError, RateLimitedError, IdempotencyInProgressError, IdempotencyKeyReusedError } from '../../src/domain/errors.js';
+import { OrderNotFoundError, RateLimitedError, IdempotencyInProgressError, IdempotencyKeyReusedError } from '../../src/domain/errors.js';
 
 /**
  * sendError 只映射 DomainError；未知异常必须冒泡到全局 errorHandler，
@@ -22,7 +22,7 @@ async function buildApp() {
 
   app.get('/domain', async (_req, reply) => {
     try {
-      throw new OrganizationNotFoundError();
+      throw new OrderNotFoundError();
     } catch (e) {
       sendError(reply, e);
     }
@@ -62,7 +62,7 @@ describe('sendError', () => {
     try {
       const res = await app.inject({ method: 'GET', url: '/domain' });
       expect(res.statusCode).toBe(404);
-      expect(res.json()).toMatchObject({ code: 'ORGANIZATION_NOT_FOUND' });
+      expect(res.json()).toMatchObject({ code: 'ORDER_NOT_FOUND' });
     } finally {
       await app.close();
     }

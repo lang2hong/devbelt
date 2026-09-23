@@ -50,13 +50,6 @@ describe('PendingMutationStore', () => {
     await expect(s.put({ ...del(), ciphertext: 'YQ' } as never)).rejects.toThrowError(/must not carry ciphertext/);
   });
 
-  it('拒绝 org: connection 入 outbox；query 类型不受影响', async () => {
-    const s = new PendingMutationStore(makeMemento(), '7', '1');
-    await expect(s.put(put({ localId: 'org:1:2' }))).rejects.toThrowError(/organization/);
-    await s.put(put({ type: 'query', localId: 'q-1', recordId: 'C'.repeat(22) }));
-    expect(s.list()).toHaveLength(1);
-  });
-
   it('拒绝非法 mutationId 长度', async () => {
     const s = new PendingMutationStore(makeMemento(), '7', '1');
     await expect(s.put(put({ mutationId: 'short' }))).rejects.toThrowError(/mutationId/);
@@ -111,9 +104,6 @@ describe('PendingMutationStore', () => {
 
     const badBase = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), baseVersion: '-1' }] }), '7', '1');
     expect(() => badBase.list()).toThrowError(/baseVersion/);
-
-    const orgConn = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), localId: 'org:x' }] }), '7', '1');
-    expect(() => orgConn.list()).toThrowError(/organization/);
 
     const badMutationId = new PendingMutationStore(makeMemento({ [key]: [{ ...put(), mutationId: 'short' }] }), '7', '1');
     expect(() => badMutationId.list()).toThrowError(/mutationId/);

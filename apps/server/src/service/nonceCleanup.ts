@@ -4,7 +4,7 @@ export interface NonceCleanupOptions {
 }
 
 /**
- * 支付回调 nonce 过期清理任务（复刻 invitationCleanup 的受控调度）。
+ * 支付回调 nonce 过期清理任务（复刻既有受控调度的模式）。
  *
  * `payment_callback_nonces` 只增不减：每条回调 nonce 一行，30 分钟 TTL 仅用于重放
  * 去重，过期后即垃圾。由周期任务物理删除，不依赖回调再次触发。

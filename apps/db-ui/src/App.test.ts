@@ -25,7 +25,6 @@ function consoleMe(platformAdmin: boolean) {
       user: { userId: '1', email: 'a@b.com', displayName: null, emailVerified: true, status: 'active', lastLoginTime: null },
       platformAdmin,
       subscription: null,
-      organizations: [],
     },
   };
 }

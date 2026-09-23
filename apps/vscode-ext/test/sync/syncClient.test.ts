@@ -518,11 +518,10 @@ describe('getMe（个人权益）', () => {
 });
 
 describe('getPlans（套餐目录）', () => {
-  it('命中 /api/db/plans 并返回个人 + 组织目录', async () => {
+  it('命中 /api/db/plans 并返回个人目录', async () => {
     const calls: { url: string; method: string }[] = [];
     const catalog = {
       personal: [{ code: 'free', name: 'Free', billing: { unit: 'month', priceCents: 0 }, features: [{ key: 'maxDevices', type: 'number', value: 0 }] }],
-      organization: [],
     };
     const fetchMock = vi.fn(async (url: unknown, init: any) => {
       calls.push({ url: String(url), method: init?.method ?? 'GET' });
@@ -535,6 +534,5 @@ describe('getPlans（套餐目录）', () => {
     expect(calls[0].url).toBe('http://x/api/db/plans');
     expect(calls[0].method).toBe('GET');
     expect(plans.personal[0].code).toBe('free');
-    expect(plans.organization).toEqual([]);
   });
 });

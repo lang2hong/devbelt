@@ -9,10 +9,9 @@ import type { TokenService } from '../../../service/tokenService.js';
 import type { CsrfService } from '../../../service/csrfService.js';
 import type { RateLimitService } from '../../../service/rateLimitService.js';
 import type { Queryable } from '../../../repository/mysql/db.js';
-import type { AdminUserRow, AdminOrgRow, AuditFilter } from '../../../repository/interfaces.js';
+import type { AdminUserRow, AuditFilter } from '../../../repository/interfaces.js';
 import { ValidationError } from '../../../domain/errors.js';
 import { auditDto } from '../../../service/auditSerialize.js';
-import { organizationIdParam } from '../../../route/schemas.js';
 import type { Order, Invoice, Plan } from '../../../domain/entities.js';
 import type { IPlanRepo } from '../../../repository/interfaces.js';
 import type { InvoiceStatus } from '../../../domain/enums.js';
@@ -100,21 +99,6 @@ function userDto(r: AdminUserRow) {
   };
 }
 
-function orgDto(r: AdminOrgRow) {
-  return {
-    organizationId: String(r.organizationId),
-    name: r.name,
-    status: r.status,
-    planCode: r.planCode,
-    seatLimit: r.seatLimit,
-    activeMemberCount: r.activeMemberCount,
-    invitedCount: r.invitedCount,
-    subscriptionVersion: r.subscriptionVersion,
-    periodEndTime: iso(r.periodEndTime),
-    createTime: r.createTime.toISOString(),
-  };
-}
-
 const ORDER_STATUSES: readonly string[] = ['pending', 'paid', 'fulfilled', 'failed', 'refunded', 'expired'];
 const INVOICE_STATUSES: readonly string[] = ['requested', 'issued', 'rejected', 'failed'];
 
@@ -164,8 +148,8 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
   registerConsoleErrorHandler(app);
   const svc = opts.adminService;
   const readLimit = (req: FastifyRequest) => opts.rateLimiter.hit(`console:admin:read:${userIdOf(req)}`, RATE_READ_WINDOW_S, RATE_READ_MAX);
-  // 写/导出的限流必须落在幂等回执事务内（beforeWrite + hitInTx），使已完成回执优先于限流；
-  // 与组织创建的 throttleCreateOrganizationInTx 同构，避免已完成请求因限流被提前 429 而无法重放。
+  // 写/导出的限流必须落在幂等回执事务内（beforeWrite + hitInTx），使已完成回执优先于限流，
+  // 避免已完成请求因限流被提前 429 而无法重放。
   const writeLimitInTx = (tx: Queryable, req: FastifyRequest) => opts.rateLimiter.hitInTx(tx, `console:admin:write:${userIdOf(req)}`, RATE_WRITE_WINDOW_S, RATE_WRITE_MAX);
   const exportLimitInTx = (tx: Queryable, req: FastifyRequest) => opts.rateLimiter.hitInTx(tx, `console:admin:export:${userIdOf(req)}`, RATE_EXPORT_WINDOW_S, RATE_EXPORT_MAX);
 
@@ -242,52 +226,6 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
             // 套餐解析放入 business：已完成回执优先于可变套餐状态（套餐停用后重放仍可返回首次结果，§6.1）。
             const plan = await svc.resolvePlanInTx(tx, planCode);
             const r = await svc.adjustUserSubscriptionInTx(tx, actor, target, { planId: plan.id, periodEndTime: periodEnd, reason, expectedVersion });
-            return { status: 200, body: r };
-          },
-        });
-        reply.code(result.status).send(result.body);
-      });
-
-      // ── 组织 ──
-      child.get('/api/admin/organizations', async (req, reply) => {
-        await readLimit(req);
-        const q = req.query as Record<string, unknown>;
-        const cursor = parseCursor(opts.cursorService, q.cursor);
-        if (q.cursor !== undefined && q.cursor !== '' && cursor === null) {
-          return rejectConsole(reply, 422, 'INVALID_CURSOR', 'invalid cursor');
-        }
-        const page = await svc.listOrganizations(userIdOf(req), {
-          namePrefix: q.namePrefix ? String(q.namePrefix) : undefined,
-          status: q.status === 'active' || q.status === 'closed' ? q.status : undefined,
-          planCode: q.planCode ? String(q.planCode) : undefined,
-          cursor: cursor ?? undefined,
-          limit: parseLimit(q.limit),
-        });
-        reply.send({
-          items: page.items.map(orgDto),
-          nextCursor: page.nextId != null ? opts.cursorService.encode(String(page.nextId)) : null,
-        });
-      });
-
-      child.patch('/api/admin/organizations/:organizationId/subscription', { schema: { params: organizationIdParam, body: adminOrganizationSubscriptionBody } }, async (req, reply) => {
-        if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
-        const actor = userIdOf(req);
-        const organizationId = Number((req.params as Record<string, unknown>).organizationId);
-        const { planCode, seatLimit, periodEndTime, reason, expectedVersion } = req.body as { planCode: string; seatLimit: number; periodEndTime: string | null; reason: string; expectedVersion: number };
-        const periodEnd = periodEndTime ? parseDate(periodEndTime) ?? null : null;
-        const result = await opts.idempotencyService.run({
-          actorUserId: actor,
-          sessionId: sessionIdOf(req),
-          method: 'PATCH',
-          normalizedPath: `/api/admin/organizations/${organizationId}/subscription`,
-          idempotencyKey: adminWriteKey(req),
-          requestBody: req.body,
-          retentionMs: ADMIN_RETENTION_MS,
-          beforeWrite: (tx: Queryable) => writeLimitInTx(tx, req),
-          business: async (tx: Queryable) => {
-            // 套餐解析放入 business：已完成回执优先于可变套餐状态（§6.1）。
-            const plan = await svc.resolvePlanInTx(tx, planCode);
-            const r = await svc.adjustOrganizationSubscriptionInTx(tx, actor, organizationId, { planId: plan.id, seatLimit, periodEndTime: periodEnd, reason, expectedVersion });
             return { status: 200, body: r };
           },
         });
@@ -420,7 +358,6 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
           actorUserId: q.actorUserId ? Number(q.actorUserId) : undefined,
           eventType: q.eventType ? String(q.eventType) : undefined,
           targetType: q.targetType ? String(q.targetType) : undefined,
-          organizationId: q.organizationId ? Number(q.organizationId) : undefined,
           cursor: cursor ?? undefined,
           limit: parseLimit(q.limit),
         };
@@ -435,7 +372,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
         if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
         const { format, filters, expectedCountUpperBound } = req.body as {
           format: 'csv' | 'json';
-          filters: { fromTime?: string; toTime?: string; actorUserId?: number; eventType?: string; targetType?: string; organizationId?: number };
+          filters: { fromTime?: string; toTime?: string; actorUserId?: number; eventType?: string; targetType?: string };
           expectedCountUpperBound?: number;
         };
         if (expectedCountUpperBound && expectedCountUpperBound > 10_000) {
@@ -448,7 +385,6 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
           actorUserId: filters?.actorUserId,
           eventType: filters?.eventType,
           targetType: filters?.targetType,
-          organizationId: filters?.organizationId,
         };
         // 导出按 §6 需 Idempotency-Key 且纳入幂等回执：beforeWrite 事务内限流 + business 内
         // 读取/渲染/审计写同事务，同键同摘要重放返回首次文件，不重复读/审计/不重复耗限流额度。
@@ -513,7 +449,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
         const actor = userIdOf(req);
         const key = String((req.params as Record<string, unknown>).key);
         const body = req.body as {
-          kind: 'personal' | 'organization' | 'both'; label: { en: string; zh: string };
+          kind: 'personal' | 'both'; label: { en: string; zh: string };
           valueType: 'bool' | 'number' | 'bytes' | 'stringList' | 'enum';
           unit: string | null; sortOrder: number; reason: string;
         };
@@ -619,19 +555,6 @@ const adminUserSubscriptionBody = {
   },
 } as const;
 
-const adminOrganizationSubscriptionBody = {
-  type: 'object',
-  required: ['planCode', 'seatLimit', 'reason', 'expectedVersion'],
-  additionalProperties: false,
-  properties: {
-    planCode: { type: 'string', minLength: 1, maxLength: 32 },
-    seatLimit: { type: 'integer', minimum: 1, maximum: 65535 },
-    periodEndTime: { type: 'string', format: 'date-time' },
-    reason: { type: 'string', minLength: 1, maxLength: 500 },
-    expectedVersion: { type: 'integer', minimum: 0 },
-  },
-} as const;
-
 const adminPlanIdParam = {
   type: 'object',
   required: ['planId'],
@@ -678,7 +601,7 @@ const adminFeatureDefBody = {
   required: ['kind', 'label', 'valueType', 'sortOrder', 'reason'],
   additionalProperties: false,
   properties: {
-    kind: { type: 'string', enum: ['personal', 'organization', 'both'] },
+    kind: { type: 'string', enum: ['personal', 'both'] },
     label: {
       type: 'object',
       required: ['en', 'zh'],
@@ -708,7 +631,6 @@ const adminAuditExportBody = {
         actorUserId: { type: 'integer' },
         eventType: { type: 'string' },
         targetType: { type: 'string' },
-        organizationId: { type: 'integer' },
       },
     },
   },

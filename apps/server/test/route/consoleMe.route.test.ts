@@ -16,8 +16,6 @@ import {
   FakeUserRepo,
   FakePlanRepo,
   FakePersonalSubscriptionRepo,
-  FakeMembershipRepo,
-  FakeOrganizationRepo,
   FakeRateLimitRepo,
   FakeIdempotencyReceiptRepo,
 } from '../helpers/fakeRepos.js';
@@ -34,7 +32,6 @@ async function buildApp(): Promise<{ app: FastifyInstance; tokenService: TokenSe
   await userRepo.create('me@b.com', 'hash', 'Alice');
   const personalSubscriptionRepo = new FakePersonalSubscriptionRepo();
   const planRepo = new FakePlanRepo();
-  const membershipRepo = new FakeMembershipRepo(userRepo, new FakeOrganizationRepo());
 
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   const keys: SigningKeys = { kid: 'test', privateKey, publicKeys: new Map([['test', publicKey]]) };
@@ -53,7 +50,6 @@ async function buildApp(): Promise<{ app: FastifyInstance; tokenService: TokenSe
     userRepo,
     personalSubscriptionRepo,
     planRepo,
-    membershipRepo,
   });
 
   await app.ready();
@@ -74,7 +70,6 @@ describe('console me routes', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().user.email).toBe('me@b.com');
     expect(res.json().platformAdmin).toBe(false);
-    expect(Array.isArray(res.json().organizations)).toBe(true);
     await app.close();
   });
 

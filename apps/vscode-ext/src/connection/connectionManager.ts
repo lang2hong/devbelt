@@ -48,13 +48,6 @@ interface SessionEntry {
   connId: string;
 }
 
-/** 建连归属。本地连接不再走权益门禁，scope 当前仅为调用方语义标记（组织调用方传入 'organization'）。 */
-export type ConnectScope = 'personal' | 'organization';
-
-export interface ConnectOptions {
-  scope?: ConnectScope;
-}
-
 /**
  * 连接管理器：从已保存配置创建活动连接会话。
  * 内部通过 db-core 的 ConnectionFactory 工厂创建连接并装配方言。
@@ -170,8 +163,7 @@ export class ConnectionManager {
     return this.noBackslashEscapes.get(conn.id) === true;
   }
 
-  async connect(conn: SavedConnection, opts?: ConnectOptions): Promise<ConnectionSession> {
-    void opts; // scope 仅为调用方语义标记（组织调用方传入 'organization'），当前不参与建连逻辑
+  async connect(conn: SavedConnection): Promise<ConnectionSession> {
     const existing = this.sessions.get(conn.id);
     if (existing) {
       this.touch(conn.id);

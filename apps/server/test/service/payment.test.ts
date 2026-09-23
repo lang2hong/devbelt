@@ -45,12 +45,6 @@ const FREE: Plan = {
   createTime: new Date(), updateTime: new Date(),
 };
 
-const ORG: Plan = {
-  id: 3, code: 'organization_free', kind: 'organization', name: 'Organization Free', priceCents: 0, billingUnit: 'seat-month', sortOrder: 0, status: 'active', version: 1,
-  features: { includedSeats: 3, maxSharedResources: 50 },
-  createTime: new Date(), updateTime: new Date(),
-};
-
 class FakeOrderRepo implements IOrderRepo {
   readonly store = new Map<string, Order>();
   private seq = 0;
@@ -105,7 +99,6 @@ class FakePlanRepo implements IPlanRepo {
   private readonly plans: Plan[] = [
     { ...FREE, features: { ...FREE.features } },
     { ...PLAN, features: { ...PLAN.features } },
-    { ...ORG, features: { ...ORG.features } },
   ];
   async findByCode(code: string): Promise<Plan | undefined> { return this.plans.find((p) => p.code === code); }
   async findById(id: number): Promise<Plan | undefined> { return this.plans.find((p) => p.id === id); }
@@ -230,10 +223,6 @@ describe('OrderService.createOrder plan guards', () => {
   it('rejects an unknown plan code', async () => {
     const { svc } = makeService();
     await expect(svc.createOrder(1, 'nope', 'wechat')).rejects.toBeInstanceOf(UnknownPlanError);
-  });
-  it('rejects an organization plan (no self-serve checkout)', async () => {
-    const { svc } = makeService();
-    await expect(svc.createOrder(1, 'organization_free', 'wechat')).rejects.toBeInstanceOf(UnknownPlanError);
   });
   it('rejects an archived plan', async () => {
     const { svc, planRepo } = makeService();

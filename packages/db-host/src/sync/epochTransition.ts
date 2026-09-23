@@ -127,7 +127,7 @@ export class EpochTransitionCoordinator {
    * 清除指定 epoch 的全部本地同步产物：已同步实体 + recordMap/outbox/unresolved + 持久化 DEK。
    * 依赖闭包规则（Gap-1 Option 1）：记录在本 epoch recordMap 里的实体（含 confirmed 与
    * pending 预留）都清除；删除 confirmed 父实体时 store 级联其依赖子树（连接 tombstone →
-   * 级联其 query/folder）。未映射的独立实体与组织连接（org:）不在此映射内，天然保留。
+   * 级联其 query/folder）。未映射的独立实体不在此映射内，天然保留。
    */
   async clearEpoch(epoch: string): Promise<void> {
     const entries = new RecordMapStore(this.deps.memento, this.deps.userId, epoch).list();

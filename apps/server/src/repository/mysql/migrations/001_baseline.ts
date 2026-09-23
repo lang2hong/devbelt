@@ -8,10 +8,9 @@ import type { Migration } from '../migrate.js';
  *
  * ## 相对旧 schema 的结构性变化
  * - 套餐统一为 `plans` + 纵表 `plan_feature_defs` / `plan_feature_values`（原 personal_plans
- *   / organization_plans 双表与固定特性列作废）。
+ *   双表与固定特性列作废）。
  * - 权益**派生**：删除 `*_subscriptions.entitlement_snapshot`，订阅只引用 plan。
  * - 价格入库：`plans.price_cents` + `billing_unit`。
- * - 组织生命周期统一为 `status('active','closed') + closed_time`（去 delete_time）。
  * - 关键链补外键；高写入追加表（audit_events / sync_* / payment_callback_nonces）不补。
  * - 状态列一律 VARCHAR + CHECK（去原生 ENUM）；补清理/查询索引；删写而不读列。
  *
@@ -24,16 +23,14 @@ const LEGACY_TABLES = [
   'payment_callback_nonces', 'invoices', 'payments', 'orders', 'sync_reset_handoffs',
   'idempotency_receipts', 'audit_events', 'mail_flows', 'personal_sync_reset_tokens',
   'personal_sync_mutations', 'personal_sync_nonces', 'personal_connection_meta',
-  'personal_sync_state', 'organization_resources', 'organization_resource_folders',
-  'organization_invitations', 'organization_memberships', 'organization_subscriptions',
-  'organizations', 'organization_plans', 'rate_limit_entries', 'refresh_tokens',
+  'personal_sync_state', 'rate_limit_entries', 'refresh_tokens',
   'devices', 'email_verification_tokens', 'personal_subscriptions', 'personal_plans',
   'users',
 ] as const;
 
 interface FeatureSeed {
   key: string;
-  kind: 'personal' | 'organization' | 'both';
+  kind: 'personal' | 'both';
   labelEn: string;
   labelZh: string;
   valueType: 'bool' | 'number' | 'bytes' | 'stringList' | 'enum';
@@ -48,10 +45,6 @@ const FEATURE_DEFS: readonly FeatureSeed[] = [
   { key: 'syncStorageBytes', kind: 'personal', labelEn: 'Cloud sync storage', labelZh: '云端同步空间', valueType: 'bytes', unit: 'bytes', sortOrder: 40 },
   { key: 'allowConnectionImport', kind: 'personal', labelEn: 'Import connections', labelZh: '导入连接配置', valueType: 'bool', unit: null, sortOrder: 50 },
   { key: 'maxDevices', kind: 'personal', labelEn: 'Devices', labelZh: '设备数', valueType: 'number', unit: 'count', sortOrder: 60 },
-  { key: 'allowedTemplateDatabaseTypes', kind: 'organization', labelEn: 'Template databases', labelZh: '模板数据库类型', valueType: 'stringList', unit: null, sortOrder: 10 },
-  { key: 'includedSeats', kind: 'organization', labelEn: 'Included seats', labelZh: '包含席位', valueType: 'number', unit: 'seat', sortOrder: 20 },
-  { key: 'maxSharedResources', kind: 'organization', labelEn: 'Shared resources', labelZh: '共享资源数', valueType: 'number', unit: 'count', sortOrder: 30 },
-  { key: 'sharedStorageQuotaBytes', kind: 'organization', labelEn: 'Shared storage', labelZh: '共享存储空间', valueType: 'bytes', unit: 'bytes', sortOrder: 40 },
 ];
 
 const ALL_ENGINES = ['mysql', 'postgresql', 'sqlite'] as const;
@@ -103,7 +96,7 @@ export const baselineMigration: Migration = {
         create_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
         update_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
         KEY idx_plans_kind_status (kind, status),
-        CONSTRAINT chk_plans_kind CHECK (kind IN ('personal', 'organization')),
+        CONSTRAINT chk_plans_kind CHECK (kind IN ('personal')),
         CONSTRAINT chk_plans_billing_unit CHECK (billing_unit IN ('month', 'seat-month')),
         CONSTRAINT chk_plans_status CHECK (status IN ('active', 'archived'))
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
@@ -121,7 +114,7 @@ export const baselineMigration: Migration = {
         create_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
         update_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
         KEY idx_feature_defs_kind (kind, sort_order),
-        CONSTRAINT chk_feature_defs_kind CHECK (kind IN ('personal', 'organization', 'both')),
+        CONSTRAINT chk_feature_defs_kind CHECK (kind IN ('personal', 'both')),
         CONSTRAINT chk_feature_defs_value_type CHECK (value_type IN ('bool', 'number', 'bytes', 'stringList', 'enum'))
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
@@ -221,124 +214,6 @@ export const baselineMigration: Migration = {
         create_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
         PRIMARY KEY (bucket_key, window_start_time),
         KEY idx_rate_window (window_start_time)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-    `);
-
-    // ─ 组织 ───────────────────────────────────────────────────
-    await db.query(`
-      CREATE TABLE organizations (
-        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        name VARCHAR(100) NOT NULL,
-        status VARCHAR(16) NOT NULL DEFAULT 'active',
-        closed_time DATETIME(3) NULL,
-        create_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-        update_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-        KEY idx_org_name (name),
-        KEY idx_org_status (status),
-        CONSTRAINT chk_org_status CHECK (status IN ('active', 'closed')),
-        CONSTRAINT chk_org_closed CHECK (
-          (status = 'closed' AND closed_time IS NOT NULL) OR (status = 'active' AND closed_time IS NULL)
-        )
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-    `);
-
-    await db.query(`
-      CREATE TABLE organization_subscriptions (
-        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        organization_id BIGINT UNSIGNED NOT NULL UNIQUE,
-        plan_id BIGINT UNSIGNED NOT NULL,
-        seat_limit SMALLINT UNSIGNED NOT NULL,
-        status VARCHAR(16) NOT NULL DEFAULT 'active',
-        period_start_time DATETIME(3) NOT NULL,
-        period_end_time DATETIME(3) NULL,
-        version INT UNSIGNED NOT NULL DEFAULT 0,
-        create_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-        update_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-        KEY idx_org_sub_plan (plan_id),
-        CONSTRAINT chk_org_sub_status CHECK (status IN ('active', 'expired', 'canceled')),
-        CONSTRAINT fk_org_sub_org FOREIGN KEY (organization_id) REFERENCES organizations(id),
-        CONSTRAINT fk_org_sub_plan FOREIGN KEY (plan_id) REFERENCES plans(id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-    `);
-
-    await db.query(`
-      CREATE TABLE organization_memberships (
-        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        organization_id BIGINT UNSIGNED NOT NULL,
-        user_id BIGINT UNSIGNED NOT NULL,
-        role VARCHAR(16) NOT NULL DEFAULT 'member',
-        status VARCHAR(16) NOT NULL DEFAULT 'active',
-        invited_by_user_id BIGINT UNSIGNED NULL,
-        joined_time DATETIME(3) NULL,
-        removed_time DATETIME(3) NULL,
-        create_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-        update_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-        UNIQUE KEY uq_membership_org_user (organization_id, user_id),
-        KEY idx_membership_user (user_id),
-        CONSTRAINT chk_membership_role CHECK (role IN ('admin', 'member')),
-        CONSTRAINT chk_membership_status CHECK (status IN ('invited', 'active', 'removed')),
-        CONSTRAINT chk_membership_removed CHECK (
-          (status = 'removed' AND removed_time IS NOT NULL) OR (status <> 'removed' AND removed_time IS NULL)
-        ),
-        CONSTRAINT fk_membership_org FOREIGN KEY (organization_id) REFERENCES organizations(id),
-        CONSTRAINT fk_membership_user FOREIGN KEY (user_id) REFERENCES users(id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-    `);
-
-    await db.query(`
-      CREATE TABLE organization_invitations (
-        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        organization_id BIGINT UNSIGNED NOT NULL,
-        membership_id BIGINT UNSIGNED NOT NULL,
-        email VARCHAR(255) NOT NULL,
-        token_hash CHAR(64) NOT NULL UNIQUE,
-        expires_time DATETIME(3) NOT NULL,
-        accepted_time DATETIME(3) NULL,
-        revoked_time DATETIME(3) NULL,
-        create_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-        update_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-        KEY idx_invitation_membership (membership_id),
-        KEY idx_invitation_org (organization_id, expires_time),
-        KEY idx_invitation_expires (expires_time),
-        CONSTRAINT fk_invitation_org FOREIGN KEY (organization_id) REFERENCES organizations(id),
-        CONSTRAINT fk_invitation_membership FOREIGN KEY (membership_id) REFERENCES organization_memberships(id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-    `);
-
-    await db.query(`
-      CREATE TABLE organization_resource_folders (
-        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        organization_id BIGINT UNSIGNED NOT NULL,
-        parent_id BIGINT UNSIGNED NULL,
-        name VARCHAR(200) NOT NULL,
-        delete_time DATETIME(3) NULL,
-        create_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-        update_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-        KEY idx_folder_org (organization_id),
-        KEY idx_folder_parent (parent_id, organization_id),
-        CONSTRAINT fk_folder_org FOREIGN KEY (organization_id) REFERENCES organizations(id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-    `);
-
-    await db.query(`
-      CREATE TABLE organization_resources (
-        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        organization_id BIGINT UNSIGNED NOT NULL,
-        folder_id BIGINT UNSIGNED NULL,
-        resource_type VARCHAR(32) NOT NULL,
-        name VARCHAR(200) NOT NULL,
-        content JSON NOT NULL,
-        version INT UNSIGNED NOT NULL,
-        created_by_membership_id BIGINT UNSIGNED NOT NULL,
-        updated_by_membership_id BIGINT UNSIGNED NULL,
-        delete_time DATETIME(3) NULL,
-        create_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-        update_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-        KEY idx_resource_org (organization_id),
-        KEY idx_resource_folder (folder_id),
-        CONSTRAINT chk_resource_type CHECK (resource_type IN ('connection_template', 'query')),
-        CONSTRAINT fk_resource_org FOREIGN KEY (organization_id) REFERENCES organizations(id),
-        CONSTRAINT fk_resource_folder FOREIGN KEY (folder_id) REFERENCES organization_resource_folders(id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
@@ -459,7 +334,7 @@ export const baselineMigration: Migration = {
         KEY idx_mail_flows_user (user_id, status, expires_time),
         KEY idx_mail_flows_expires (expires_time),
         KEY idx_mail_flows_consumed (consumed_time),
-        CONSTRAINT chk_mail_flows_type CHECK (type IN ('verify-email', 'accept-invitation', 'sync-reset')),
+        CONSTRAINT chk_mail_flows_type CHECK (type IN ('verify-email', 'sync-reset')),
         CONSTRAINT chk_mail_flows_status CHECK (status IN ('issued', 'consumed', 'expired', 'revoked'))
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
@@ -473,7 +348,6 @@ export const baselineMigration: Migration = {
         event_type VARCHAR(64) NOT NULL,
         target_type VARCHAR(32) NULL,
         target_id VARCHAR(64) NULL,
-        organization_id BIGINT UNSIGNED NULL,
         source_ip VARCHAR(64) NULL,
         request_id VARCHAR(64) NULL,
         result VARCHAR(16) NOT NULL,
@@ -482,7 +356,6 @@ export const baselineMigration: Migration = {
         KEY idx_audit_time (event_time),
         KEY idx_audit_actor (actor_user_id, event_time),
         KEY idx_audit_type (event_type, event_time),
-        KEY idx_audit_org (organization_id, event_time),
         KEY idx_audit_target (target_type, target_id, event_time)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
@@ -615,8 +488,6 @@ export const baselineMigration: Migration = {
     const plans: ReadonlyArray<[string, string, string, number, string, number]> = [
       ['free', 'personal', 'Free', 0, 'month', 10],
       ['pro', 'personal', 'Pro', 9900, 'month', 20],
-      ['organization_free', 'organization', 'Organization Free', 0, 'seat-month', 10],
-      ['organization_team', 'organization', 'Organization Team', 0, 'seat-month', 20],
     ];
     for (const [code, kind, name, priceCents, billingUnit, sortOrder] of plans) {
       await db.query(
@@ -647,14 +518,6 @@ export const baselineMigration: Migration = {
       ['pro', 'syncStorageBytes', 268435456],
       ['pro', 'allowConnectionImport', true],
       ['pro', 'maxDevices', 0],
-      ['organization_free', 'allowedTemplateDatabaseTypes', ['mysql']],
-      ['organization_free', 'includedSeats', 3],
-      ['organization_free', 'maxSharedResources', 50],
-      ['organization_free', 'sharedStorageQuotaBytes', 10485760],
-      ['organization_team', 'allowedTemplateDatabaseTypes', ALL_ENGINES],
-      ['organization_team', 'includedSeats', 10],
-      ['organization_team', 'maxSharedResources', 500],
-      ['organization_team', 'sharedStorageQuotaBytes', 104857600],
     ];
     for (const [planCode, featureKey, value] of values) {
       await db.query(

@@ -11,7 +11,7 @@ const PUBLIC_CSP =
   "img-src 'self' data:; connect-src 'self'; base-uri 'none'; " +
   "frame-ancestors 'none'; form-action 'self'; object-src 'none'";
 
-/** 身份页（auth-ui）dist：站点根，`/login`、`/register`、`/verify-email`、`/accept-invitation`。 */
+/** 身份页（auth-ui）dist：站点根，`/login`、`/register`、`/verify-email`。 */
 function authDistDir(): string {
   return process.env.DEVBELT_DB_AUTH_DIST_DIR || path.resolve(process.cwd(), '../auth-ui/dist');
 }
@@ -34,7 +34,7 @@ function notFound(_req: FastifyRequest, reply: FastifyReply): void {
  * 前端静态托管（P2）。
  *
  * 两个构建产物同源托管：
- *   - auth-ui（base `/`）：根身份页 `/login`、`/register`、`/verify-email`、`/accept-invitation`，
+ *   - auth-ui（base `/`）：根身份页 `/login`、`/register`、`/verify-email`，
  *     资源在 `/assets/*`。
  *   - db-ui（base `/db/`）：`/db/` 控制台 SPA（未知子路径回落壳，带扩展名者除外），
  *     `/db/sync-reset` 邮件落地页，资源在 `/db/assets/*`。
@@ -147,7 +147,6 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
     ['/verify-email', 'verify-email.html'],
     ['/login', 'login.html'],
     ['/register', 'register.html'],
-    ['/accept-invitation', 'accept-invitation.html'],
   ];
   for (const [route, file] of authEntries) {
     app.get(route, serveHtml(authReady ? readHtml(authDist, file) : null));

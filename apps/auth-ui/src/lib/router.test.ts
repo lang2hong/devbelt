@@ -3,8 +3,8 @@ import { matchRoute } from './router';
 
 const routes = [
   { pattern: '/console/account', name: 'account' },
-  { pattern: '/console/organizations', name: 'organizations' },
-  { pattern: '/console/organizations/:id', name: 'organization-detail' },
+  { pattern: '/console/orders', name: 'orders' },
+  { pattern: '/console/orders/:id', name: 'order-detail' },
 ];
 
 describe('matchRoute', () => {
@@ -13,12 +13,12 @@ describe('matchRoute', () => {
   });
 
   it('matches a dynamic param', () => {
-    expect(matchRoute('/console/organizations/42', routes)).toEqual({ name: 'organization-detail', params: { id: '42' } });
+    expect(matchRoute('/console/orders/42', routes)).toEqual({ name: 'order-detail', params: { id: '42' } });
   });
 
   it('prefers the static route over a dynamic sibling on exact match', () => {
-    // route order matters: 'organizations' declared before ':id'
-    expect(matchRoute('/console/organizations', routes)).toEqual({ name: 'organizations', params: {} });
+    // route order matters: 'orders' declared before ':id'
+    expect(matchRoute('/console/orders', routes)).toEqual({ name: 'orders', params: {} });
   });
 
   it('returns null on no match', () => {

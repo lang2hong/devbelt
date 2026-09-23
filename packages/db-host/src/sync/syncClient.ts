@@ -103,7 +103,6 @@ export interface PlanDto {
 
 export interface PlanCatalog {
   personal: PlanDto[];
-  organization: PlanDto[];
 }
 
 

@@ -3,13 +3,11 @@ import { encodeEntityPayload, sealRecord, type RefResolver } from './recordCodec
 import { requestDigestOf } from '../crypto/digest.js';
 import { buildRecordSigningInput, signSigningInput } from '../crypto/sign.js';
 import { encodeBase64Url } from '../crypto/recoveryCode.js';
-import { isOrganizationConnectionId } from '../entitlementGate.js';
 import type { RecordMapStore } from './recordMapStore.js';
 import { PendingMutationStore, type PendingDeleteMutation, type PendingPutMutation } from './pendingMutationStore.js';
 import { EntityStore, applyOrder, type EntityValue } from './entityStore.js';
-import { refKey, isOrgLocalId, type SyncEntityRef } from './syncEntity.js';
+import { refKey, type SyncEntityRef } from './syncEntity.js';
 import type { SavedConnection } from '../../connection/connectionStore.js';
-import type { SavedQuery } from '@devbelt/db-core';
 
 /**
  * 本地实体变更 → 出站 mutation 生成（A4：全类型）。
@@ -18,8 +16,6 @@ import type { SavedQuery } from '@devbelt/db-core';
  * 的四类实体（含软删除墓碑），对每个 typed ref 归纳差集，逐个生成已签名 record.put/
  * record.delete 并**只追加**进 outbox。
  *
- * - org 排除：connection 的 localId 为 `org:` 前缀 → 跳过；query 的 connId 经 recordMap /
- *   本地反查为 `org:` 前缀连接 → 整条跳过（§三 / N7）。
  * - `pending` 映射（入站应用未完成）与已有 outbox（每实体至多一个）跳过并汇总上报。
  * - baseVersion：新建 `"0"`；update/delete 取 confirmed 映射 `recordVersion`。
  * - 引用转 recordId：同一轮内先 mint 的父实体 recordId 会被临时记入本轮 resolver，供
@@ -79,9 +75,6 @@ export class SyncMutator {
     const ordered = entities.listForSync().sort((a, b) => applyOrder(a.ref.type) - applyOrder(b.ref.type));
 
     for (const { ref, deleted, updateTime } of ordered) {
-      if (isOrgLocalId(ref.type, ref.localId)) continue;
-      if (ref.type === 'query' && this.isQueryOfOrgConnection(ref, entities)) continue;
-
       const key = refKey(ref);
       if (outboxByRef.get(key)) continue; // 每实体至多一个 in-flight mutation
 
@@ -144,12 +137,6 @@ export class SyncMutator {
     const entity = this.deps.entities.get(ref);
     const revision = (entity as { updateTime?: number }).updateTime ?? 0;
     return this.buildDelete(recordId, ref, newBaseVersion, revision);
-  }
-
-  private isQueryOfOrgConnection(ref: SyncEntityRef, entities: EntityStore): boolean {
-    const q = entities.get(ref) as SavedQuery | undefined;
-    if (!q) return false;
-    return isOrganizationConnectionId(q.connId);
   }
 
   private buildPutOnNew(recordId: string, ref: SyncEntityRef, revision: number, resolveRef: RefResolver): PendingPutMutation {

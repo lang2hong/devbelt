@@ -43,9 +43,9 @@ export class MysqlAuditRepo implements IAuditRepo {
 }
 
 const INSERT_SQL = `INSERT INTO audit_events
-  (event_time, actor_user_id, actor_role, event_type, target_type, target_id, organization_id,
+  (event_time, actor_user_id, actor_role, event_type, target_type, target_id,
    source_ip, request_id, result, failure_code, reason)
- VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 function toParams(event: Omit<AuditEvent, 'id' | 'createTime'>): unknown[] {
   return [
@@ -55,7 +55,6 @@ function toParams(event: Omit<AuditEvent, 'id' | 'createTime'>): unknown[] {
     event.eventType,
     event.targetType,
     event.targetId,
-    event.organizationId,
     event.sourceIp,
     event.requestId,
     event.result,
@@ -88,10 +87,6 @@ function buildFilter(input: Omit<AuditFilter, 'cursor' | 'limit'> & { cursor?: n
     where.push('target_type = ?');
     params.push(input.targetType);
   }
-  if (input.organizationId !== undefined) {
-    where.push('organization_id = ?');
-    params.push(input.organizationId);
-  }
   if (input.cursor !== undefined) {
     where.push('id < ?');
     params.push(input.cursor);
@@ -115,7 +110,6 @@ function mapAudit(r: any): AuditEvent {
     eventType: r.event_type,
     targetType: r.target_type ?? null,
     targetId: r.target_id ?? null,
-    organizationId: r.organization_id ?? null,
     sourceIp: r.source_ip ?? null,
     requestId: r.request_id ?? null,
     result: r.result,

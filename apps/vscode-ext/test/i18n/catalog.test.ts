@@ -75,7 +75,7 @@ describe('i18n catalog', () => {
  * 代码引用的键必须存在。
  *
  * 回退链 `catalog[key] || en[key] || key` 会把缺失键原样显示（如
- * `org.tree.openConsole`），运行时不报错。此前这两个键就是这么漏出来的。
+ * `foo.bar.baz`），运行时不报错。此前就有键这么漏出来。
  */
 describe('i18n 键引用完整性', () => {
   it('src 中所有 l10n(\'...\') 的键都在 catalog 中', async () => {

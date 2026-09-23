@@ -23,14 +23,16 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
       const names = (tableRows as any[]).map((r) => Object.values(r)[0] as string);
       for (const t of [
         'users', 'plans', 'plan_feature_defs', 'plan_feature_values',
-        'personal_subscriptions', 'organization_subscriptions', 'organizations',
+        'personal_subscriptions',
         'orders', 'payments', 'invoices', 'audit_events', 'personal_sync_state',
       ]) {
         expect(names).toContain(t);
       }
-      // 旧表已随 squash 消失
+      // 旧表已随 squash 消失；组织相关表亦已下线。
       expect(names).not.toContain('personal_plans');
       expect(names).not.toContain('organization_plans');
+      expect(names).not.toContain('organizations');
+      expect(names).not.toContain('organization_resources');
 
       // 订阅不再有快照列（权益派生）。
       const [cols] = (await pool.query(
@@ -40,13 +42,13 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
       )) as [Array<{ COLUMN_NAME: string }>, unknown];
       expect(cols).toHaveLength(0);
 
-      // 种子：4 套餐 + 特性定义/取值（baseline 10/20 + 002 扩展 4/8 + 004 扩展 1/2）。
+      // 种子：2 套餐 + 特性定义/取值（baseline 6/12 + 002 扩展 4/8 + 004 扩展 1/2）。
       const [planCount] = (await pool.query('SELECT COUNT(*) AS c FROM plans')) as [Array<{ c: number }>, unknown];
-      expect(Number(planCount[0].c)).toBe(4);
+      expect(Number(planCount[0].c)).toBe(2);
       const [defCount] = (await pool.query('SELECT COUNT(*) AS c FROM plan_feature_defs')) as [Array<{ c: number }>, unknown];
-      expect(Number(defCount[0].c)).toBe(15);
+      expect(Number(defCount[0].c)).toBe(11);
       const [valCount] = (await pool.query('SELECT COUNT(*) AS c FROM plan_feature_values')) as [Array<{ c: number }>, unknown];
-      expect(Number(valCount[0].c)).toBe(30);
+      expect(Number(valCount[0].c)).toBe(22);
 
       // free 的引擎/配额经 EAV 派生正确（数量类型为 number）。
       const [freeFeatures] = (await pool.query(
@@ -83,7 +85,7 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
       expect(tableNames).toContain('plans');
 
       const [ledger] = (await pool.query('SELECT version FROM schema_migrations')) as [Array<{ version: string }>, unknown];
-      expect(ledger.map((r) => r.version)).toEqual(['001_baseline', '002_plan_features_v2', '003_plan_ordering', '004_authenticator_quota', '005_sync_entity_kind']);
+      expect(ledger.map((r) => r.version)).toEqual(['001_baseline', '002_plan_features_v2', '003_plan_ordering', '004_authenticator_quota', '005_sync_entity_kind', '006_drop_organization']);
     } finally {
       await pool.end();
     }

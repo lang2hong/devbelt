@@ -13,7 +13,6 @@ import {
   FakeUserRepo,
   makeFreePlan,
   makeProPlan,
-  makeOrganizationFreePlan,
 } from '../helpers/fakeRepos.js';
 
 const SESSION = 'test-session-plans';
@@ -29,10 +28,6 @@ const FEATURE_DEFS: PlanFeatureDef[] = [
   DEF(4, 'syncStorageBytes', 'personal', 'bytes', 40),
   DEF(5, 'allowConnectionImport', 'personal', 'bool', 50),
   DEF(6, 'maxDevices', 'personal', 'number', 60),
-  DEF(7, 'allowedTemplateDatabaseTypes', 'organization', 'stringList', 10),
-  DEF(8, 'includedSeats', 'organization', 'number', 20),
-  DEF(9, 'maxSharedResources', 'organization', 'number', 30),
-  DEF(10, 'sharedStorageQuotaBytes', 'organization', 'bytes', 40),
 ];
 
 async function buildApp(): Promise<{ app: FastifyInstance; tokenService: TokenService; userId: number }> {
@@ -51,7 +46,7 @@ async function buildApp(): Promise<{ app: FastifyInstance; tokenService: TokenSe
     tokenService,
     getUser: async (id: number) => userRepo.findById(id),
     getSessionActive: async () => true,
-    planRepo: new FakePlanRepo([makeFreePlan(), makeProPlan(), makeOrganizationFreePlan()]),
+    planRepo: new FakePlanRepo([makeFreePlan(), makeProPlan()]),
     featureDefRepo: new FakePlanFeatureDefRepo(FEATURE_DEFS),
   };
   await app.register(plansRoutes, common);
@@ -70,14 +65,13 @@ function consoleToken(tokenService: TokenService, userId: number): Promise<strin
 }
 
 describe('plans routes', () => {
-  it('GET /api/db/plans returns personal + organization catalog with feature descriptors and prices', async () => {
+  it('GET /api/db/plans returns personal catalog with feature descriptors and prices', async () => {
     const { app, tokenService, userId } = await buildApp();
     const res = await app.inject({ method: 'GET', url: '/api/db/plans', headers: { authorization: `Bearer ${await extToken(tokenService, userId)}` } });
     expect(res.statusCode).toBe(200);
     const body = res.json();
 
     expect(body.personal.map((p: any) => p.code)).toEqual(['free', 'pro']);
-    expect(body.organization.map((p: any) => p.code)).toEqual(['organization_free']);
 
     const free = body.personal[0];
     const pro = body.personal[1];
@@ -87,10 +81,6 @@ describe('plans routes', () => {
     expect(pro.features.find((f: any) => f.key === 'allowedDatabaseTypes')).toMatchObject({ type: 'stringList', value: ['mysql', 'postgresql', 'sqlite'] });
     expect(pro.features.find((f: any) => f.key === 'allowConnectionImport')).toMatchObject({ type: 'bool', value: true });
     expect(pro.features.find((f: any) => f.key === 'syncStorageBytes')).toMatchObject({ type: 'bytes', value: 268435456 });
-
-    const org = body.organization[0];
-    expect(org.billing).toEqual({ unit: 'seat-month', priceCents: 0 });
-    expect(org.features.find((f: any) => f.key === 'includedSeats')).toMatchObject({ type: 'number', value: 3 });
 
     await app.close();
   });

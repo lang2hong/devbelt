@@ -28,14 +28,6 @@ describe('RecordMapStore', () => {
     expect(c.getByRecordId('A'.repeat(22))).toBeUndefined();
   });
 
-  it('拒绝 org: connection 入映射；其他类型不受 org 前缀限制', async () => {
-    const s = new RecordMapStore(makeMemento(), '7', '1');
-    await expect(s.put('A'.repeat(22), { type: 'connection', localId: 'org:1:2', recordVersion: '1', revision: 0, status: 'confirmed' })).rejects.toThrowError(/organization/);
-    // query 类型 localId 含 org: 前缀不应被误判为组织连接。
-    await s.put('B'.repeat(22), { type: 'query', localId: 'org-like-query', recordVersion: '1', revision: 0, status: 'confirmed' });
-    expect(s.getByRecordId('B'.repeat(22))!.localId).toBe('org-like-query');
-  });
-
   it('deleteByRecordId 清双向', async () => {
     const s = new RecordMapStore(makeMemento(), '7', '1');
     await s.put('A'.repeat(22), { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 0, status: 'confirmed' });
@@ -188,11 +180,6 @@ describe('RecordMapStore', () => {
   it('read 对语义非法值与反向索引错配 fail-closed', () => {
     const key = 'devbelt.sync.recordMap.7.1';
     const rid = 'A'.repeat(22);
-
-    const orgConn = new RecordMapStore(makeMemento({
-      [key]: { byRecordId: { [rid]: { type: 'connection', localId: 'org:x', recordVersion: '1', revision: 0, status: 'confirmed' } }, byLocal: { 'connection:org:x': rid } },
-    }), '7', '1');
-    expect(() => orgConn.getByRecordId(rid)).toThrowError(/organization/);
 
     const badVersion = new RecordMapStore(makeMemento({
       [key]: { byRecordId: { [rid]: { type: 'connection', localId: 'c-1', recordVersion: 'x', revision: 0, status: 'confirmed' } }, byLocal: { 'connection:c-1': rid } },

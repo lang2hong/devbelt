@@ -450,7 +450,6 @@ describe('sync routes smoke', () => {
     expect(sent).toHaveLength(1);
     expect(sent[0].to).toBe('sync-rva-notify@b.com');
     expect(sent[0].token).toBeUndefined();
-    expect(sent[0].organizationName).toBeUndefined();
     expect(sent[0].expiresTime).toBeUndefined();
     await t.close();
   });

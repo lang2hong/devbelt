@@ -9,7 +9,7 @@
 export interface HomePlan {
   code: string;
   name: string;
-  kind: 'personal' | 'organization';
+  kind: 'personal';
   priceCents: number;
   unit: 'month' | 'seat-month';
   /** 已格式化好的关键特性摘要。 */
@@ -26,14 +26,14 @@ function escapeHtml(input: string): string {
 }
 
 function formatPrice(plan: HomePlan): string {
-  if (plan.priceCents <= 0) return plan.kind === 'personal' ? '免费' : '待定价';
+  if (plan.priceCents <= 0) return '免费';
   const yuan = plan.priceCents / 100;
   const amount = Number.isInteger(yuan) ? String(yuan) : yuan.toFixed(2);
   return `¥${amount}`;
 }
 
 function formatUnit(plan: HomePlan): string {
-  if (plan.priceCents <= 0) return plan.kind === 'personal' ? '' : '按席';
+  if (plan.priceCents <= 0) return '';
   return plan.unit === 'seat-month' ? '/席·月' : '/月';
 }
 
@@ -113,12 +113,8 @@ const FEATURES: readonly { title: string; desc: string }[] = [
     desc: '连接、分组与保存查询在本机加密后跨设备同步，服务端只保存密文，无法读取明文。',
   },
   {
-    title: '组织协作',
-    desc: '共享目录、共享查询与连接模板；本机凭据映射，密码等敏感字段不上传服务端。',
-  },
-  {
     title: 'Web 控制台',
-    desc: '在浏览器内管理账户、设备与组织，查看与升级套餐、导出审计记录。',
+    desc: '在浏览器内管理账户与设备，查看与升级套餐、导出审计记录。',
   },
 ];
 
@@ -197,7 +193,7 @@ export function renderHome(opts: HomeRenderOptions = {}): string {
 
       <div class="hero">
         <h1>欢迎使用 DevBelt</h1>
-        <p>DevBelt 是面向开发者的工具套件：在 VS Code 中管理数据库连接与查询，跨设备端到端加密同步，组织内共享资源，并在 Web 控制台统一治理。</p>
+        <p>DevBelt 是面向开发者的工具套件：在 VS Code 中管理数据库连接与查询，跨设备端到端加密同步，并在 Web 控制台统一治理。</p>
         <div class="cta">
           ${heroCta}
         </div>
@@ -232,17 +228,12 @@ export function renderHome(opts: HomeRenderOptions = {}): string {
  */
 export function renderPlansPage(plans: HomePlan[] | null, opts: { loggedIn?: boolean } = {}): string {
   const personal = plans?.filter((p) => p.kind === 'personal') ?? [];
-  const organization = plans?.filter((p) => p.kind === 'organization') ?? [];
   const groups =
-    personal.length + organization.length > 0
+    personal.length > 0
       ? `
         <div class="plan-group">
           <h3>个人</h3>
           <div class="plans">${personal.map(planCard).join('')}</div>
-        </div>
-        <div class="plan-group">
-          <h3>组织</h3>
-          <div class="plans">${organization.map(planCard).join('')}</div>
         </div>`
       : `<p class="muted">套餐信息暂时不可用，请稍后再试。</p>`;
   return `<!doctype html>
@@ -251,7 +242,7 @@ export function renderPlansPage(plans: HomePlan[] | null, opts: { loggedIn?: boo
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>套餐 · DevBelt</title>
-    <meta name="description" content="DevBelt 个人与组织套餐。" />
+    <meta name="description" content="DevBelt 个人套餐。" />
     <style>
       :root { color-scheme: dark; --bg:#0b1020; --panel:#131a30; --line:#232a44; --fg:#e6e9f2; --muted:#9aa4bf; --accent:#3d6bff; }
       * { box-sizing: border-box; }
@@ -298,7 +289,7 @@ export function renderPlansPage(plans: HomePlan[] | null, opts: { loggedIn?: boo
       </header>
       <main>
         <h1>套餐</h1>
-        <p class="sub">个人与组织两档，按需选择；配额与引擎范围见各档说明。</p>
+        <p class="sub">按需选择；配额与引擎范围见各档说明。</p>
         ${groups}
       </main>
       <footer>DevBelt</footer>

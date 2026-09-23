@@ -96,7 +96,7 @@ describe('IdempotencyService.run', () => {
     expect(repo.store.size).toBe(0);
   });
 
-  it('applies a custom retention window (e.g. close-organization 30d) to the receipt expiry', async () => {
+  it('applies a custom retention window (e.g. admin write 30d) to the receipt expiry', async () => {
     const repo = new FakeIdempotencyReceiptRepo();
     const svc = makeService(repo);
     await svc.run({

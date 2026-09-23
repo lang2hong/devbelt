@@ -3,8 +3,6 @@ import {
   listUsers,
   setUserStatus,
   adjustUserSubscription,
-  listOrganizations,
-  adjustOrganizationSubscription,
   queryAudit,
   exportAudit,
   refundAdminOrder,
@@ -65,32 +63,6 @@ describe('adjustUserSubscription', () => {
     });
     expect(r.kind).toBe('ok');
     expect(JSON.parse(body)).toEqual({ planCode: 'pro', reason: 'upgrade', expectedVersion: 0 });
-  });
-});
-
-describe('listOrganizations', () => {
-  it('hits the admin organizations URL', async () => {
-    let url = '';
-    await listOrganizations({ namePrefix: 'Ac', status: 'active' }, 'tok', async (u) => {
-      url = String(u);
-      return jsonRes(200, { items: [], nextCursor: null });
-    });
-    expect(url).toContain('/api/admin/organizations?');
-    expect(url).toContain('namePrefix=Ac');
-    expect(url).toContain('status=active');
-  });
-});
-
-describe('adjustOrganizationSubscription', () => {
-  it('PATCHes org subscription with seatLimit', async () => {
-    let captured: { url?: string; body?: string } = {};
-    const r = await adjustOrganizationSubscription('9', { planCode: 'organization_free', seatLimit: 10, periodEndTime: null, reason: 'scale', expectedVersion: 2 }, 'key-1', 'csrf', 'tok', async (url, init) => {
-      captured = { url: String(url), body: String(init?.body) };
-      return jsonRes(200, { subscriptionVersion: 3 });
-    });
-    expect(r).toEqual({ kind: 'ok', value: { subscriptionVersion: 3 } });
-    expect(captured.url).toBe('/api/admin/organizations/9/subscription');
-    expect(JSON.parse(captured.body ?? '{}')).toEqual({ planCode: 'organization_free', seatLimit: 10, reason: 'scale', expectedVersion: 2 });
   });
 });
 

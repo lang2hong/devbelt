@@ -25,14 +25,6 @@ const CATALOG = {
       features: [{ key: 'allowedDatabaseTypes', type: 'stringList' as const, value: ['mysql', 'postgresql', 'sqlite'] }],
     },
   ],
-  organization: [
-    {
-      code: 'organization_free',
-      name: 'Organization Free',
-      billing: { unit: 'seat-month' as const, priceCents: 0 },
-      features: [{ key: 'includedSeats', type: 'number' as const, value: 3 }],
-    },
-  ],
 };
 
 beforeEach(() => {
@@ -40,20 +32,17 @@ beforeEach(() => {
 });
 
 describe('PlansView', () => {
-  it('renders personal and organization plans with formatted features', async () => {
+  it('renders personal plans with formatted features', async () => {
     vi.mocked(listPlans).mockResolvedValue({ kind: 'ok', value: CATALOG });
     const wrapper = mount(PlansView, { props: { subscription: null } });
     await flushPromises();
 
     const text = wrapper.text();
     expect(text).toContain('个人套餐');
-    expect(text).toContain('组织套餐');
     expect(text).toContain('支持的数据库');
     expect(text).toContain('MySQL、SQLite');
     expect(text).toContain('32 MiB');
     expect(text).toContain('¥99 / 月');
-    expect(text).toContain('待定价');
-    expect(text).toContain('包含席位');
   });
 
   it('marks the free plan as current when there is no subscription and offers Pro upgrade', async () => {

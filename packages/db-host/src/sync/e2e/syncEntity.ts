@@ -34,11 +34,3 @@ export function assertSyncEntityRef(raw: unknown, field: string): SyncEntityRef 
   if (typeof o.localId !== 'string') throw new Error(`${field}.localId must be a string`);
   return { type: assertSyncEntityType(o.type), localId: o.localId };
 }
-
-/**
- * org: 前缀仅对 connection 类型拒绝。query 是否指向组织连接不在本层判断——由 mutator
- * 经 recordMap 反查其 connId 为 org: 前缀时整条跳过（A4 / §三）。
- */
-export function isOrgLocalId(type: SyncEntityType, localId: string): boolean {
-  return type === 'connection' && localId.startsWith('org:');
-}

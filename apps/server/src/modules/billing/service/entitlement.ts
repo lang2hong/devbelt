@@ -10,8 +10,8 @@ import type { Plan } from '../../../domain/entities.js';
  *   对应 free 档权益**（D2「到期回 free」）——绝不返回空对象，否则消费方以
  *   `limit > 0` 判定配额时会把 0 当作「不限」而反向全开。
  *
- * 所有消费方（/api/db/me、consoleData、authService、syncRecordService、
- * organizationResourceService 等）必须经此，不得各自判断到期或复制特性。
+ * 所有消费方（/api/db/me、consoleData、authService、syncRecordService
+ * 等）必须经此，不得各自判断到期或复制特性。
  *
  * 数值语义：配额以 `0 = 不限` 表达，派生**原样透出**（消费方以 `if (limit > 0)` 判定）。
  */
@@ -33,7 +33,6 @@ export function isSubscriptionActive(
 
 /**
  * 派生订阅当前权益：有效订阅 → 其 plan；失效/缺失订阅或 plan 缺失 → free 档权益。
- * 调用方须按 kind 提供对应 free plan（personal → `free`，organization → `organization_free`）。
  */
 export function deriveEntitlement(
   sub: { status: string; periodEndTime: Date | null } | undefined,

@@ -3,7 +3,6 @@ import { router, navigate, withBase } from '../lib/router';
 
 const links = [
   { name: 'admin-users', path: '/users', label: '用户' },
-  { name: 'admin-organizations', path: '/organizations', label: '组织' },
   { name: 'admin-orders', path: '/orders', label: '订单' },
   { name: 'admin-invoices', path: '/invoices', label: '发票' },
   { name: 'admin-audit', path: '/audit', label: '审计' },

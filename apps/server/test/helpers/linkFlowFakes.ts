@@ -113,7 +113,6 @@ export class FakeAuditRepo implements IAuditRepo {
     if (input.actorUserId !== undefined && e.actorUserId !== input.actorUserId) return false;
     if (input.eventType && e.eventType !== input.eventType) return false;
     if (input.targetType && e.targetType !== input.targetType) return false;
-    if (input.organizationId !== undefined && e.organizationId !== input.organizationId) return false;
     if (input.cursor !== undefined && e.id >= input.cursor) return false;
     return true;
   }

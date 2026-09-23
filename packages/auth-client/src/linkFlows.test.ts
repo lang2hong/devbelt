@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { claimLinkFlow, verifyEmail, resendVerification, acceptInvitation, bindMailFlow, createSyncResetHandoff, type FetchLike } from './linkFlows';
+import { claimLinkFlow, verifyEmail, resendVerification, bindMailFlow, createSyncResetHandoff, type FetchLike } from './linkFlows';
 import { readCsrfToken } from './csrf';
 
 function jsonResponse(status: number, body: unknown, headers?: Record<string, string>): Response {
@@ -94,50 +94,6 @@ describe('resendVerification', () => {
 
   it('resolves failure on network error', async () => {
     const r = await resendVerification('x@b.com', 'csrf', async () => {
-      throw new Error('network');
-    });
-    expect(r).toEqual({ kind: 'failure' });
-  });
-});
-
-describe('acceptInvitation', () => {
-  const org = { organizationId: '7', name: 'Acme', status: 'active', closedTime: null, role: 'member' };
-
-  it('resolves success with organization on HTTP 200', async () => {
-    const r = await acceptInvitation('csrf', 'token', async () => jsonResponse(200, { organization: org }));
-    expect(r).toEqual({ kind: 'success', organization: org });
-  });
-
-  it('resolves already-accepted with organization on HTTP 409', async () => {
-    const r = await acceptInvitation('csrf', 'token', async () => jsonResponse(409, { error: { code: 'INVITATION_ALREADY_ACCEPTED' }, organization: org }));
-    expect(r).toEqual({ kind: 'already-accepted', organization: org });
-  });
-
-  it('resolves invalid on HTTP 400', async () => {
-    const r = await acceptInvitation('csrf', 'token', async () => jsonResponse(400, { error: { code: 'INVITATION_INVALID' } }));
-    expect(r).toEqual({ kind: 'invalid' });
-  });
-
-  it('resolves unauthorized on HTTP 401', async () => {
-    const r = await acceptInvitation('csrf', 'token', async () => jsonResponse(401, { error: { code: 'UNAUTHORIZED' } }));
-    expect(r).toEqual({ kind: 'unauthorized' });
-  });
-
-  it('sends bearer + csrf headers', async () => {
-    let init: RequestInit | undefined;
-    await acceptInvitation('the-csrf', 'the-token', async (_input, i) => {
-      init = i;
-      return jsonResponse(200, { organization: org });
-    });
-    const headers = init?.headers as Record<string, string>;
-    expect(init?.method).toBe('POST');
-    expect(headers.Authorization).toBe('Bearer the-token');
-    expect(headers['X-CSRF-Token']).toBe('the-csrf');
-    expect(headers.Accept).toBe('application/json');
-  });
-
-  it('resolves failure on network error', async () => {
-    const r = await acceptInvitation('csrf', 'token', async () => {
       throw new Error('network');
     });
     expect(r).toEqual({ kind: 'failure' });

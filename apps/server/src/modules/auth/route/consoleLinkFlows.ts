@@ -3,8 +3,8 @@ import { consoleSession, type GetAuthUser } from '../../../middleware/requireAut
 import { registerConsoleErrorHandler, rejectConsole } from '../../../middleware/consoleError.js';
 import { consoleWriteGuard } from '../../../middleware/consoleWrite.js';
 import { linkFlowCookieName, readCookie, serializeCookie } from '../../../middleware/cookies.js';
-import type { LinkFlowService, AcceptInvitationOrganization } from '../service/linkFlowService.js';
-import { DomainError, InvitationInvalidError, LinkFlowInvalidError, SyncResetHandoffInvalidError } from '../../../domain/errors.js';
+import type { LinkFlowService } from '../service/linkFlowService.js';
+import { LinkFlowInvalidError, SyncResetHandoffInvalidError } from '../../../domain/errors.js';
 import type { TokenService } from '../../../service/tokenService.js';
 import type { CsrfService } from '../../../service/csrfService.js';
 import type { AuditWriter } from '../../../service/auditWriter.js';
@@ -34,7 +34,7 @@ function sessionIdOf(req: FastifyRequest): string | undefined {
   return (req as unknown as { authSessionId?: string }).authSessionId;
 }
 
-/** 控制台邮件流消费接口（§5.3）：接受组织邀请。仅凭 mail_flow 记录（非路径 token）作为凭据。 */
+/** 控制台邮件流消费接口（§5.3/§5.4）：绑定 mail-flow、签发同步重置 handoff。 */
 export async function consoleLinkFlowRoutes(app: FastifyInstance, opts: ConsoleLinkFlowRouteOptions): Promise<void> {
   registerConsoleErrorHandler(app);
 
@@ -111,83 +111,10 @@ export async function consoleLinkFlowRoutes(app: FastifyInstance, opts: ConsoleL
           throw e;
         }
       });
-
-      child.post('/api/console/link-flows/accept-invitation', async (req, reply) => {
-        // 控制台写：Origin 同源 + 会话绑定 CSRF（§4.2）。
-        if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) {
-          return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
-        }
-
-        const userId = authUserIdOf(req);
-        const sessionId = sessionIdOf(req);
-        await opts.rateLimiter.hit(`console:accept-invitation:${sessionId ?? userId}`, 600, 5);
-
-        const nonce = readCookie(req, linkFlowCookieName());
-        if (!nonce) {
-          opts.auditWriter.write({
-            eventType: 'invitation.accept',
-            result: 'failure',
-            failureCode: 'INVITATION_INVALID',
-            actorUserId: userId,
-            sourceIp: req.ip,
-            requestId: requestIdOf(req),
-          });
-          return rejectConsole(reply, 400, 'INVITATION_INVALID', 'invitation invalid');
-        }
-
-        try {
-          const result = await opts.linkFlowService.acceptInvitation(nonce, userId);
-          clearLinkFlowCookie(reply);
-          const organization = serializeOrg(result.organization);
-          opts.auditWriter.write({
-            eventType: 'invitation.accept',
-            result: 'success',
-            actorUserId: userId,
-            targetType: 'organization',
-            targetId: String(result.organization.organizationId),
-            organizationId: result.organization.organizationId,
-            sourceIp: req.ip,
-            requestId: requestIdOf(req),
-          });
-          if (result.kind === 'accepted') {
-            return reply.send({ organization });
-          }
-          return reply
-            .code(409)
-            .send({ error: { code: 'INVITATION_ALREADY_ACCEPTED', message: 'invitation already accepted' }, organization });
-        } catch (e) {
-          // 仅业务终态（INVITATION_INVALID）清 Cookie；未知异常/5xx 保留 Cookie，
-          // 使浏览器可在 10 分钟有效期内重试（§5.3）。
-          const terminal = e instanceof InvitationInvalidError;
-          if (terminal) clearLinkFlowCookie(reply);
-          opts.auditWriter.write({
-            eventType: 'invitation.accept',
-            result: 'failure',
-            failureCode: e instanceof DomainError ? e.code : null,
-            actorUserId: userId,
-            sourceIp: req.ip,
-            requestId: requestIdOf(req),
-          });
-          if (terminal) {
-            return rejectConsole(reply, 400, 'INVITATION_INVALID', 'invitation invalid');
-          }
-          throw e;
-        }
-      });
     },
   });
 }
 
 function clearLinkFlowCookie(reply: FastifyReply): void {
   reply.header('Set-Cookie', serializeCookie(linkFlowCookieName(), '', { httpOnly: true, clear: true }));
-}
-
-function serializeOrg(o: AcceptInvitationOrganization) {
-  return {
-    organizationId: String(o.organizationId),
-    name: o.name,
-    status: o.status,
-    closedTime: o.closedTime ? o.closedTime.toISOString() : null,
-    role: o.role,
-  };
 }

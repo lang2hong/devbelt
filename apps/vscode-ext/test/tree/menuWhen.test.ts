@@ -3,7 +3,6 @@ import { TreeItemCollapsibleState } from 'vscode';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DbTreeNode, NodeKind, type CategoryType } from '../../src/tree/dbTreeNode';
-import { OrgTreeNode } from '../../src/tree/orgTreeDataProvider';
 
 vi.mock('vscode', () => ({
   TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
@@ -64,37 +63,11 @@ function allContextValues(): Set<string> {
   return values;
 }
 
-/**
- * 组织树（devbelt.explorer.organization）能产生的全部 contextValue。
- * 与个人信息来源树分离，见 OrgTreeNode.computeContextValue。
- */
-function allOrgContextValues(): Set<string> {
-  const values = new Set<string>();
-  const none = TreeItemCollapsibleState.None as any;
-  const summary = (resourceType: 'connection_template' | 'query') => ({
-    resourceId: 'r', resourceType, name: 'x', folderId: null,
-    version: 1, createdByMembershipId: '1', updatedByMembershipId: null,
-  });
-
-  for (const role of ['admin', 'member'] as const) {
-    values.add(new OrgTreeNode('x', none, 'organization', 'o', undefined, undefined, role).contextValue as string);
-    values.add(new OrgTreeNode('x', none, 'folder', 'o', 'f', undefined, role).contextValue as string);
-    values.add(new OrgTreeNode('x', none, 'resource', 'o', undefined, summary('connection_template'), role).contextValue as string);
-    values.add(new OrgTreeNode('x', none, 'resource', 'o', undefined, summary('query'), role).contextValue as string);
-  }
-  return values;
-}
-
 interface MenuEntry { command: string; when?: string; group?: string }
 
 function contextMenus(): MenuEntry[] {
   const pkg = JSON.parse(readFileSync(resolve(__dirname, '../../package.json'), 'utf8'));
   return pkg.contributes.menus['view/item/context'] as MenuEntry[];
-}
-
-function editorRunMenus(): MenuEntry[] {
-  const pkg = JSON.parse(readFileSync(resolve(__dirname, '../../package.json'), 'utf8'));
-  return pkg.contributes.menus['editor/title/run'] as MenuEntry[];
 }
 
 /** 从 when 表达式中取出 viewItem 条件，编译成对 contextValue 的判定函数。 */
@@ -136,7 +109,7 @@ describe('树右键菜单 when 表达式', () => {
    * 只会表现为命令永远不出现，不会有任何编译或运行时报错。
    */
   it('每条 when 至少匹配一个真实 contextValue', () => {
-    const values = [...allContextValues(), ...allOrgContextValues()];
+    const values = [...allContextValues()];
     const dead = contextMenus()
       .filter((e) => {
         const match = viewItemMatcher(e.when || '');
@@ -189,58 +162,5 @@ describe('树右键菜单 when 表达式', () => {
       expect(has('devbelt.refreshNode'), `${base} 缺 refresh`).toBe(true);
       expect(has('devbelt.copyNodeName'), `${base} 缺 copy`).toBe(true);
     }
-  });
-});
-
-describe('组织菜单角色门控（per-node role，杜绝多组织串角色）', () => {
-  const menus = contextMenus();
-  const matchValue = (entry: MenuEntry, value: string): boolean =>
-    !!viewItemMatcher(entry.when || '')?.(value);
-
-  it('deleteResource 仅对 .admin resource 可见', () => {
-    const entries = menus.filter((e) => e.command === 'devbelt.org.deleteResource');
-    expect(entries.length).toBeGreaterThan(0);
-    expect(entries.some((e) => matchValue(e, 'devbelt.org.resource.query.admin'))).toBe(true);
-    expect(entries.some((e) => matchValue(e, 'devbelt.org.resource.query.member'))).toBe(false);
-  });
-
-  it('deleteFolder / newFolder / newQuery 仅对 .admin organization|folder 可见', () => {
-    for (const cmd of ['devbelt.org.deleteFolder', 'devbelt.org.newFolder', 'devbelt.org.newQuery']) {
-      const entries = menus.filter((e) => e.command === cmd);
-      expect(entries.length, cmd).toBeGreaterThan(0);
-      expect(entries.every((e) => !matchValue(e, 'devbelt.org.folder.member')), cmd).toBe(true);
-      expect(entries.every((e) => !matchValue(e, 'devbelt.org.organization.member')), cmd).toBe(true);
-      expect(
-        entries.some((e) => matchValue(e, 'devbelt.org.folder.admin') || matchValue(e, 'devbelt.org.organization.admin')),
-        cmd,
-      ).toBe(true);
-    }
-  });
-
-  it('只读命令（openResource/connectTemplate）对 admin 与 member 均可见', () => {
-    for (const cmd of ['devbelt.org.openResource', 'devbelt.org.connectTemplate']) {
-      const entries = menus.filter((e) => e.command === cmd);
-      expect(entries.length, cmd).toBeGreaterThan(0);
-      const adminHit = entries.some((e) =>
-        matchValue(e, 'devbelt.org.resource.query.admin')
-        || matchValue(e, 'devbelt.org.resource.connection_template.admin'));
-      const memberHit = entries.some((e) =>
-        matchValue(e, 'devbelt.org.resource.query.member')
-        || matchValue(e, 'devbelt.org.resource.connection_template.member'));
-      expect(adminHit, cmd).toBe(true);
-      expect(memberHit, cmd).toBe(true);
-    }
-  });
-});
-
-describe('组织编辑器标题栏命令 context', () => {
-  it('saveResource 引用 devbelt.orgResourceEditor + 绑定组织角色，runQuery 引用 devbelt.orgSessionEditor', () => {
-    const runMenus = editorRunMenus();
-    const save = runMenus.find((e) => e.command === 'devbelt.org.saveResource');
-    const run = runMenus.find((e) => e.command === 'devbelt.org.runQuery');
-    expect(save?.when).toContain('devbelt.orgResourceEditor');
-    expect(save?.when).toContain("devbelt.orgResourceEditorRole == 'admin'");
-    expect(run?.when).toContain('devbelt.orgSessionEditor');
-    expect(run?.when).not.toContain('devbelt.orgResourceEditor');
   });
 });

@@ -14,7 +14,7 @@ import type { AuditWriter } from './auditWriter.js';
 /**
  * 过期数据保留清理任务。
  *
- * 起因：全库只有 rate_limit_entries 与 organization_invitations 有清理任务，
+ * 起因：全库只有 rate_limit_entries 有清理任务，
  * 而下面这四张表**只增不减**：
  *
  * - `refresh_tokens`：轮换即插新行、旧行只置 revoked_time。access token 15min
@@ -24,7 +24,7 @@ import type { AuditWriter } from './auditWriter.js';
  * - `email_verification_tokens`、`personal_sync_reset_tokens`：同样自带
  *   `expires_time`，同样没人清。
  *
- * 设计要点（与既有的 rateLimitCleanup / invitationCleanup 保持一致）：
+ * 设计要点（与既有 rateLimitCleanup 一致）：
  * - 幂等：全部是 `DELETE ... WHERE <时间列> < ?`，重复执行无副作用。
  * - 分批：每张表每轮最多删 `batchSize` 行，避免单条 DELETE 长时间持锁；
  *   删满一批说明还有积压，下一轮继续（不在本轮内循环，避免长时间占用连接）。

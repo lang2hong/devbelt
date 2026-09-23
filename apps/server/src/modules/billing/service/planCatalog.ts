@@ -9,7 +9,7 @@
  * ## 数值语义
  *
  * 配额列以 `0` 表示**不限**，原样透出（消费方以 `if (limit > 0)` 判定）。价格来自
- * `plans.price_cents`；0 = 免费（个人）或待定价（组织，无自助下单路径）。
+ * `plans.price_cents`；0 = 免费。
  */
 import type { Plan, PlanFeatureDef } from '../../../domain/entities.js';
 import type { IPlanRepo, IPlanFeatureDefRepo } from '../../../repository/interfaces.js';
@@ -39,7 +39,6 @@ export interface PlanDto {
 
 export interface PlanCatalog {
   personal: PlanDto[];
-  organization: PlanDto[];
 }
 
 export function planDto(plan: Plan, defs: Map<string, PlanFeatureDef>): PlanDto {
@@ -69,7 +68,6 @@ export async function buildPlanCatalog(planRepo: IPlanRepo, defRepo: IPlanFeatur
   const defs = new Map(defList.map((d) => [d.key, d]));
   return {
     personal: plans.filter((p) => p.kind === 'personal').map((p) => planDto(p, defs)),
-    organization: plans.filter((p) => p.kind === 'organization').map((p) => planDto(p, defs)),
   };
 }
 

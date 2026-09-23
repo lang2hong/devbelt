@@ -22,19 +22,6 @@ export interface AdminUser {
   createTime: string;
 }
 
-export interface AdminOrganization {
-  organizationId: string;
-  name: string;
-  status: string;
-  planCode: string | null;
-  seatLimit: number | null;
-  activeMemberCount: number;
-  invitedCount: number;
-  subscriptionVersion: number | null;
-  periodEndTime: string | null;
-  createTime: string;
-}
-
 export interface AdminAuditEvent {
   eventId: string;
   eventTime: string;
@@ -43,7 +30,6 @@ export interface AdminAuditEvent {
   eventType: string;
   targetType: string | null;
   targetId: string | null;
-  organizationId: string | null;
   sourceIp: string | null;
   requestId: string | null;
   result: string;
@@ -207,54 +193,6 @@ export async function adjustUserSubscription(
   }
 }
 
-// ── 组织 ──
-
-export interface OrgFilters {
-  namePrefix?: string;
-  status?: 'active' | 'closed';
-  planCode?: string;
-  cursor?: string;
-}
-
-export async function listOrganizations(
-  filters: OrgFilters = {},
-  token: string | null = getAccessToken(),
-  fetchImpl: FetchLike = fetch,
-): Promise<Result<Page<AdminOrganization>>> {
-  if (!token) return { kind: 'unauthorized' };
-  try {
-    const res = await authedFetch(`/api/admin/organizations${qs(filters)}`, { headers: auth(token) }, fetchImpl);
-    if (res.ok) return { kind: 'ok', value: await toPage<AdminOrganization>(res) };
-    return failure(res);
-  } catch {
-    return { kind: 'failure' };
-  }
-}
-
-export async function adjustOrganizationSubscription(
-  organizationId: string,
-  input: { planCode: string; seatLimit: number; periodEndTime: string | null; reason: string; expectedVersion: number },
-  idempotencyKey: string,
-  csrfToken: string,
-  token: string | null = getAccessToken(),
-  fetchImpl: FetchLike = fetch,
-): Promise<Result<{ subscriptionVersion: number }>> {
-  if (!token) return { kind: 'unauthorized' };
-  const body: Record<string, unknown> = { planCode: input.planCode, seatLimit: input.seatLimit, reason: input.reason, expectedVersion: input.expectedVersion };
-  if (input.periodEndTime) body.periodEndTime = input.periodEndTime;
-  try {
-    const res = await authedFetch(
-      `/api/admin/organizations/${organizationId}/subscription`,
-      { method: 'PATCH', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify(body) },
-      fetchImpl,
-    );
-    if (res.ok) return { kind: 'ok', value: await res.json() };
-    return failure(res);
-  } catch {
-    return { kind: 'failure' };
-  }
-}
-
 // ── 审计 ──
 
 export interface AuditFilters {
@@ -263,7 +201,6 @@ export interface AuditFilters {
   actorUserId?: string;
   eventType?: string;
   targetType?: string;
-  organizationId?: string;
   cursor?: string;
 }
 
@@ -284,7 +221,7 @@ export async function queryAudit(
 
 export async function exportAudit(
   format: 'csv' | 'json',
-  filters: { fromTime?: string; toTime?: string; actorUserId?: string; eventType?: string; targetType?: string; organizationId?: string },
+  filters: { fromTime?: string; toTime?: string; actorUserId?: string; eventType?: string; targetType?: string },
   idempotencyKey: string,
   csrfToken: string,
   token: string | null = getAccessToken(),
@@ -297,7 +234,6 @@ export async function exportAudit(
   if (filters.actorUserId) f.actorUserId = Number(filters.actorUserId);
   if (filters.eventType) f.eventType = filters.eventType;
   if (filters.targetType) f.targetType = filters.targetType;
-  if (filters.organizationId) f.organizationId = Number(filters.organizationId);
   try {
     const res = await authedFetch(
       '/api/admin/audit/exports',

@@ -26,12 +26,8 @@ async function submit() {
     const deviceKey = getOrCreateDeviceKey();
     const result = await login(email.value.trim(), password.value, deviceKey, csrf);
     if (result.kind === 'ok') {
-      // accept-invitation / sync-reset 邮件流：登录成功后回到干净落地页（不含 token）
-      // 继续认领交接；服务端已在登录时绑定 held mail-flow。
-      if (flow === 'accept-invitation') {
-        window.location.assign(withBase('/accept-invitation'));
-        return;
-      }
+      // sync-reset 邮件流：登录成功后回到干净落地页（不含 token）继续认领交接；
+      // 服务端已在登录时绑定 held mail-flow。
       if (flow === 'sync-reset') {
         window.location.assign(`${DB_BASE}/sync-reset`);
         return;

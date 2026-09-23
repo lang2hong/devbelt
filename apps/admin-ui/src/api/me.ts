@@ -19,7 +19,6 @@ export interface ConsoleMe {
   user: ConsoleMeUser;
   platformAdmin: boolean;
   subscription: { planCode: string | null; status: string; periodEndTime: string | null } | null;
-  organizations: Array<{ organizationId: string; name: string; role: string }>;
 }
 
 export type MeResult = { kind: 'ok'; value: ConsoleMe } | { kind: 'unauthorized' } | { kind: 'failure' };

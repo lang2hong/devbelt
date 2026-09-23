@@ -50,7 +50,6 @@ export interface AuditFilter {
   actorUserId?: number;
   eventType?: string;
   targetType?: string;
-  organizationId?: number;
   cursor?: number;
   limit: number;
 }

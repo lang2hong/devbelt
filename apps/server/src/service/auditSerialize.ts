@@ -10,7 +10,6 @@ export function auditDto(e: AuditEvent) {
     eventType: e.eventType,
     targetType: e.targetType,
     targetId: e.targetId,
-    organizationId: e.organizationId != null ? String(e.organizationId) : null,
     sourceIp: e.sourceIp,
     requestId: e.requestId,
     result: e.result,

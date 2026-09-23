@@ -4,7 +4,6 @@ import {
   DomainError,
   RateLimitedError,
   IdempotencyInProgressError,
-  ResourceVersionConflictError,
   SyncEpochStaleError,
   SyncVersionConflictError,
   SyncQuotaExceededError,
@@ -16,7 +15,7 @@ import {
 /** 构造 DomainError 的标准响应体；版本/配额/epoch 冲突附带对应上下文字段。 */
 function domainErrorBody(e: DomainError): Record<string, unknown> {
   const body: Record<string, unknown> = { message: e.message, code: e.code };
-  if (e instanceof ResourceVersionConflictError) body.currentVersion = e.currentVersion;
+  if (e instanceof SubscriptionVersionConflictError) body.currentVersion = e.currentVersion;
   if (e instanceof SubscriptionVersionConflictError) body.currentVersion = e.currentVersion;
   if (e instanceof PlanVersionConflictError) body.currentVersion = e.currentVersion;
   if (e instanceof SyncVersionConflictError) body.currentVersion = e.currentVersion;
@@ -105,23 +104,15 @@ export function errorStatus(code: string): number {
     case 'USER_DISABLED':
     case 'PERSONAL_FEATURE_REQUIRED':
     case 'FORBIDDEN':
-    case 'ORGANIZATION_FEATURE_REQUIRED':
       return 403;
     case 'SYNC_SIGNATURE_INVALID':
       return 403;
     case 'TOKEN_AUDIENCE_FORBIDDEN':
       return 403;
-    case 'ORGANIZATION_NOT_FOUND':
     case 'NOT_FOUND':
-    case 'RESOURCE_NOT_FOUND':
       return 404;
-    case 'ORGANIZATION_QUOTA_EXCEEDED':
-    case 'RESOURCE_VERSION_CONFLICT':
     case 'SUBSCRIPTION_VERSION_CONFLICT':
     case 'PLAN_VERSION_CONFLICT':
-    case 'FOLDER_NOT_EMPTY':
-    case 'FOLDER_MOVE_CYCLE':
-    case 'ORGANIZATION_ADMIN_REQUIRED':
     case 'CONFLICT':
       return 409;
     case 'SYNC_STATE_EXISTS':
@@ -135,10 +126,7 @@ export function errorStatus(code: string): number {
     case 'IDEMPOTENCY_KEY_REUSED':
     case 'IDEMPOTENCY_IN_PROGRESS':
       return 409;
-    case 'RESOURCE_CONTENT_INVALID':
-    case 'INVITATION_INVALID':
     case 'LINK_FLOW_INVALID':
-    case 'INVITATION_TARGET_NOT_ELIGIBLE':
     case 'VALIDATION_FAILED':
       return 400;
     case 'ORDER_NOT_FOUND':

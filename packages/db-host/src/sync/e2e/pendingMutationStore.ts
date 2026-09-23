@@ -1,5 +1,5 @@
 import { assertBase64UrlNoPad, assertRecordId, assertU64Decimal } from './types.js';
-import { assertSyncEntityType, isOrgLocalId, type SyncEntityType } from './syncEntity.js';
+import { assertSyncEntityType, type SyncEntityType } from './syncEntity.js';
 import type { MementoLike } from './stateStore.js';
 
 /**
@@ -57,9 +57,8 @@ export interface PendingDeleteMutation extends PendingBase {
 
 export type PendingMutation = PendingPutMutation | PendingDeleteMutation;
 
-function assertLocalEntry(type: SyncEntityType, localId: string): void {
+function assertLocalEntry(_type: SyncEntityType, localId: string): void {
   if (!localId) throw new Error('localId must not be empty');
-  if (isOrgLocalId(type, localId)) throw new Error('organization connection must not enter outbox');
 }
 
 function assertBase(type: SyncEntityType, localId: string, recordId: string, baseVersion: string, mutationId: string, signature: string, requestDigest: string): void {

@@ -94,7 +94,7 @@ export const linkFlowClaimBody = {
   required: ['type', 'token'],
   additionalProperties: false,
   properties: {
-    type: { type: 'string', enum: ['verify-email', 'accept-invitation', 'sync-reset'] },
+    type: { type: 'string', enum: ['verify-email', 'sync-reset'] },
     token: { type: 'string', minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]+$' },
   },
 } as const;
@@ -111,138 +111,6 @@ export const deviceIdParam = {
   type: 'object',
   required: ['deviceId'],
   properties: { deviceId: { type: 'string', pattern: '^[0-9]{1,20}$' } },
-} as const;
-
-// ── 组织域 ──
-
-export const createOrganizationBody = {
-  type: 'object',
-  required: ['name'],
-  additionalProperties: false,
-  properties: { name: { type: 'string', minLength: 1, maxLength: 100 } },
-} as const;
-
-export const updateOrganizationBody = {
-  type: 'object',
-  required: ['name'],
-  additionalProperties: false,
-  properties: { name: { type: 'string', minLength: 1, maxLength: 100 } },
-} as const;
-
-export const assignRoleBody = {
-  type: 'object',
-  required: ['role'],
-  additionalProperties: false,
-  properties: { role: { type: 'string', enum: ['admin', 'member'] } },
-} as const;
-
-export const organizationIdParam = {
-  type: 'object',
-  required: ['organizationId'],
-  properties: { organizationId: { type: 'string', pattern: '^[0-9]{1,20}$' } },
-} as const;
-
-export const membershipIdParam = {
-  type: 'object',
-  required: ['organizationId', 'membershipId'],
-  properties: {
-    organizationId: { type: 'string', pattern: '^[0-9]{1,20}$' },
-    membershipId: { type: 'string', pattern: '^[0-9]{1,20}$' },
-  },
-} as const;
-
-// ── 组织邀请 ──
-
-export const createInvitationBody = {
-  type: 'object',
-  required: ['email'],
-  additionalProperties: false,
-  properties: {
-    email: { type: 'string', minLength: 3, maxLength: 255 },
-    role: { type: 'string', enum: ['admin', 'member'] },
-  },
-} as const;
-
-export const invitationIdParam = {
-  type: 'object',
-  required: ['organizationId', 'invitationId'],
-  properties: {
-    organizationId: { type: 'string', pattern: '^[0-9]{1,20}$' },
-    invitationId: { type: 'string', pattern: '^[0-9]{1,20}$' },
-  },
-} as const;
-
-export const invitationTokenParam = {
-  type: 'object',
-  required: ['token'],
-  properties: { token: { type: 'string', minLength: 1, maxLength: 256 } },
-} as const;
-
-// ── 目录与资源 ──
-
-const nullableId = { anyOf: [{ type: 'string', pattern: '^[0-9]{1,20}$' }, { type: 'null' }] } as const;
-
-export const createFolderBody = {
-  type: 'object',
-  required: ['name'],
-  additionalProperties: false,
-  properties: {
-    name: { type: 'string', minLength: 1, maxLength: 200 },
-    parentId: nullableId,
-  },
-} as const;
-
-export const updateFolderBody = {
-  type: 'object',
-  additionalProperties: false,
-  minProperties: 1,
-  properties: {
-    name: { type: 'string', minLength: 1, maxLength: 200 },
-    parentId: nullableId,
-  },
-} as const;
-
-export const createResourceBody = {
-  type: 'object',
-  required: ['resourceType', 'name', 'content'],
-  additionalProperties: false,
-  properties: {
-    resourceType: { type: 'string', enum: ['connection_template', 'query'] },
-    name: { type: 'string', minLength: 1, maxLength: 200 },
-    folderId: nullableId,
-    content: { type: 'object' },
-  },
-} as const;
-
-export const updateResourceBody = {
-  type: 'object',
-  required: ['baseVersion'],
-  additionalProperties: false,
-  minProperties: 2,
-  properties: {
-    baseVersion: { type: 'integer', minimum: 1 },
-    name: { type: 'string', minLength: 1, maxLength: 200 },
-    folderId: nullableId,
-    content: { type: 'object' },
-  },
-} as const;
-
-export const folderIdParam = {
-  type: 'object',
-  required: ['organizationId', 'folderId'],
-  properties: {
-    organizationId: { type: 'string', pattern: '^[0-9]{1,20}$' },
-    folderId: { type: 'string', pattern: '^[0-9]{1,20}$' },
-  },
-} as const;
-
-export const resourceIdParam = {
-  type: 'object',
-  required: ['organizationId', 'resourceId'],
-  properties: {
-    organizationId: { type: 'string', pattern: '^[0-9]{1,20}$' },
-    resourceId: { type: 'string', pattern: '^[0-9]{1,20}$' },
-  },
 } as const;
 
 // ── 个人 E2E 同步（§7 专项）──

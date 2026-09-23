@@ -19,9 +19,6 @@ import {
   FakePlanRepo,
   FakePlanFeatureDefRepo,
   FakePersonalSubscriptionRepo,
-  FakeOrganizationRepo,
-  FakeOrganizationSubscriptionRepo,
-  FakeMembershipRepo,
   FakeRateLimitRepo,
   FakeIdempotencyReceiptRepo,
 } from '../helpers/fakeRepos.js';
@@ -47,9 +44,6 @@ async function build(rateLimit = false) {
   const planRepo = new FakePlanRepo();
   const featureDefRepo = new FakePlanFeatureDefRepo(ADMIN_FEATURE_DEFS);
   const personalSubscriptionRepo = new FakePersonalSubscriptionRepo();
-  const organizationRepo = new FakeOrganizationRepo();
-  const organizationSubscriptionRepo = new FakeOrganizationSubscriptionRepo();
-  const membershipRepo = new FakeMembershipRepo(userRepo, organizationRepo);
   const auditRepo = new FakeAuditRepo();
   const idemRepo = new FakeIdempotencyReceiptRepo();
   const auditWriter = new AuditWriter(auditRepo);
@@ -106,9 +100,6 @@ async function build(rateLimit = false) {
     planRepo,
     featureDefRepo,
     personalSubscriptionRepo,
-    organizationRepo,
-    organizationSubscriptionRepo,
-    membershipRepo,
     auditRepo,
     orderRepo,
     invoiceRepo,
@@ -155,9 +146,6 @@ async function build(rateLimit = false) {
     userRepo,
     refreshTokenRepo,
     personalSubscriptionRepo,
-    organizationRepo,
-    organizationSubscriptionRepo,
-    membershipRepo,
     auditRepo,
     orders,
     invoices,
@@ -287,28 +275,6 @@ describe('console admin routes', () => {
     await b.app.close();
   });
 
-  it('org subscription seatLimit below occupied seats is rejected', async () => {
-    const b = await build();
-    const admin = await b.makeAdmin();
-    const org = await b.organizationRepo.create({} as Queryable, { name: 'Acme' });
-    const sub = await b.organizationSubscriptionRepo.create({} as Queryable, {
-      organizationId: org.id, planId: 1, seatLimit: 10, status: 'active', periodStartTime: new Date(), periodEndTime: null,
-    });
-    void sub;
-    const member = await b.userRepo.create('m@b.com', 'hash');
-    await b.membershipRepo.create({} as Queryable, { organizationId: org.id, userId: member.id, role: 'member', status: 'active', invitedByUserId: null, joinedTime: new Date(), removedTime: null });
-
-    const res = await b.app.inject({
-      method: 'PATCH',
-      url: `/api/admin/organizations/${org.id}/subscription`,
-      headers: await b.writeHeaders(admin.id),
-      payload: { planCode: 'organization_free', seatLimit: 0, reason: 'cut', expectedVersion: 0 },
-    });
-    expect(res.statusCode).toBe(422);
-    expect(res.json().error.code).toBe('VALIDATION_FAILED');
-    await b.app.close();
-  });
-
   it('rejects a past periodEndTime on user subscription', async () => {
     const b = await build();
     const admin = await b.makeAdmin();
@@ -338,25 +304,6 @@ describe('console admin routes', () => {
       url: `/api/admin/users/${target.id}/subscription`,
       headers: await b.writeHeaders(admin.id),
       payload: { planCode: 'free', reason: 'x', expectedVersion: 0, periodEndTime: new Date(start.getTime() - 24 * 3600 * 1000).toISOString() },
-    });
-    expect(res.statusCode).toBe(422);
-    expect(res.json().error.code).toBe('VALIDATION_FAILED');
-    await b.app.close();
-  });
-
-  it('rejects seatLimit above SMALLINT UNSIGNED max (65536)', async () => {
-    const b = await build();
-    const admin = await b.makeAdmin();
-    const org = await b.organizationRepo.create({} as Queryable, { name: 'Acme2' });
-    await b.organizationSubscriptionRepo.create({} as Queryable, {
-      organizationId: org.id, planId: 1, seatLimit: 10, status: 'active', periodStartTime: new Date(), periodEndTime: null,
-    });
-
-    const res = await b.app.inject({
-      method: 'PATCH',
-      url: `/api/admin/organizations/${org.id}/subscription`,
-      headers: await b.writeHeaders(admin.id),
-      payload: { planCode: 'organization_free', seatLimit: 65536, reason: 'grow', expectedVersion: 0 },
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().error.code).toBe('VALIDATION_FAILED');
@@ -417,7 +364,6 @@ describe('console admin routes', () => {
       eventType: 'auth.login.success',
       targetType: null,
       targetId: null,
-      organizationId: null,
       sourceIp: null,
       requestId: null,
       result: 'success',
