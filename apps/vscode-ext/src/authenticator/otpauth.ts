@@ -86,7 +86,9 @@ export function buildOtpauthUri(input: {
   const algorithm = input.algorithm ?? 'SHA1';
   const digits = input.digits ?? 6;
   const period = input.period ?? 30;
-  // label 在 path 中，需手动编码；account 非空才拼 "issuer:account"，避免 "issuer:" 形式
+  // label 在 path 中，需手动编码；account 非空才拼 "issuer:account"，避免 "issuer:" 形式。
+  // 注意（固有限制）：account 为空时 label 只放 issuer，解析回来会被当作 account——
+  // otpauth 标签格式没有"空 account"的表达方式，导出/回导对 (issuer, account='') 不对称。
   const label = (input.account ?? '') !== ''
     ? `${encodeURIComponent(input.issuer)}:${encodeURIComponent(input.account!)}`
     : encodeURIComponent(input.issuer);

@@ -59,6 +59,8 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const imgBusy = ref(false);
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const MAX_IMAGE_SIDE = 1600;
+/** 位图解码后像素上限（createImageBitmap 之前无法预知；防超大 JPEG 瞬时占用数百 MB）。 */
+const MAX_DECODE_PIXELS = 40_000_000;
 /** 与主进程 qrDecode 的 base64 上限对齐（8MB），避免"有码却被判无效"。 */
 const HOST_MAX_BYTES = 8 * 1024 * 1024;
 
@@ -165,7 +167,8 @@ function onMsg(msg: any): void {
     if (copiedTimer) clearTimeout(copiedTimer);
     copiedTimer = setTimeout(() => { copiedId.value = null; }, 1200);
   } else if (msg.type === 'formError') {
-    if (formOpen.value) { formError.value = msg.message ?? ''; pendingSubmit.value = false; }
+    const external = msg.source === 'external';
+    if (!external && formOpen.value) { formError.value = msg.message ?? ''; pendingSubmit.value = false; }
     else promptError.value = msg.message ?? '';
   } else if (msg.type === 'openAddForm') {
     startAdd();
@@ -251,6 +254,12 @@ async function processImage(blob: Blob): Promise<void> {
   promptError.value = '';
   try {
     const bmp = await createImageBitmap(blob);
+    if (bmp.width * bmp.height > MAX_DECODE_PIXELS) {
+      bmp.close?.();
+      promptError.value = t('wv.authenticator.image.invalid');
+      imgBusy.value = false;
+      return;
+    }
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('no 2d context');
@@ -317,6 +326,10 @@ function onDrop(e: DragEvent): void {
   const f = e.dataTransfer?.files?.[0];
   if (f && f.type.startsWith('image/')) { e.preventDefault(); void processImage(f); }
 }
+function toggleEntryMenu(id: string): void {
+  confirmDeleteId.value = null; // 切换菜单时复位上一个条目的确认态
+  menuFor.value = menuFor.value === id ? null : id;
+}
 function requestDelete(id: string): void { post({ type: 'delete', id }); menuFor.value = null; confirmDeleteId.value = null; }
 
 function toggleGroupMenu(id: string): void {
@@ -354,9 +367,7 @@ function requestDeleteGroup(id: string): void {
   confirmDeleteGroupId.value = null;
   if (!groups.value.some((g) => g.id === id)) return;
   post({ type: 'deleteGroup', id });
-  errMsg.value = t('wv.authenticator.group.movedToUngrouped');
-  if (errTimer) clearTimeout(errTimer);
-  errTimer = setTimeout(() => { errMsg.value = ''; }, 3000);
+  // 不做乐观提示：删除结果由快照体现（条目回落到未分组），避免失败时误报。
 }
 
 function openTagPrompt(): void { promptError.value = ''; tagPrompt.value = { name: '', color: 'blue' }; }
@@ -558,7 +569,7 @@ onUnmounted(() => {
               </template>
             </div>
             <div class="card-menu">
-              <button class="icon" @click.stop="menuFor = menuFor === e.id ? null : e.id">⋯</button>
+              <button class="icon" @click.stop="toggleEntryMenu(e.id)">⋯</button>
               <div v-if="menuFor === e.id" class="menu" @click.stop>
                 <button class="menu-item" @click="startEdit(e)">{{ t('wv.authenticator.entry.edit') }}</button>
                 <button v-if="confirmDeleteId !== e.id" class="menu-item" @click="confirmDeleteId = e.id">{{ t('wv.authenticator.entry.delete') }}</button>

@@ -148,4 +148,13 @@ describe('buildOtpauthUri', () => {
   it('parse rejects a label with a stray % (clean error, not URIError)', () => {
     expect(() => parseOtpauthUri('otpauth://totp/bad%zz?secret=JBSWY3DPEHPK3PXP')).toThrow(/invalid otpauth URI/);
   });
+
+  it('documents the empty-account roundtrip asymmetry (otpauth label format limitation)', () => {
+    const secret = canonicalizeSecret('JBSWY3DPEHPK3PXP');
+    const built = buildOtpauthUri({ issuer: 'Acme', account: '', secret });
+    const p = parseOtpauthUri(built);
+    // label 无冒号 → 解析器把 label 当作 account；这是 otpauth 标签格式的固有限制
+    expect(p.issuer).toBe('Acme');
+    expect(p.account).toBe('Acme');
+  });
 });

@@ -60,12 +60,10 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
         });
       }),
       view.onDidChangeVisibility(() => {
-        if (view.visible) {
-          this.tick();
-          this.startTimer();
-        } else {
-          this.clearTimer();
-        }
+        if (!view.visible) { this.clearTimer(); return; }
+        if (!this.initSent) return; // 未完成握手前不启动 timer（2nd ready 时会启动）
+        this.tick();
+        this.startTimer();
       }),
       view.onDidDispose(() => this.unbind()),
     ];
@@ -118,8 +116,8 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
     return v == null || v === '' ? undefined : v;
   }
 
-  private postFormError(field: string | undefined, key: string): void {
-    this.post({ type: 'formError', field, message: l10n(key) });
+  private postFormError(field: string | undefined, key: string, source: 'form' | 'external' = 'form'): void {
+    this.post({ type: 'formError', field, message: l10n(key), source });
   }
 
   private async onAdd(msg: Extract<AuthenticatorUpMessage, { type: 'add' }>): Promise<void> {
@@ -170,17 +168,17 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
       uri = decodeOtpauthFromPngDataUrl(msg.dataUrl);
     } catch (e) {
       diagError('authenticator image decode failed', String(e));
-      this.postFormError(undefined, 'authenticator.image.invalid');
+      this.postFormError(undefined, 'authenticator.image.invalid', 'external');
       return;
     }
-    if (!uri) { this.postFormError(undefined, 'authenticator.image.notFound'); return; }
+    if (!uri) { this.postFormError(undefined, 'authenticator.image.notFound', 'external'); return; }
     await this.addFromUri(uri, 'authenticator.image.invalid');
   }
 
   /** 粘贴/图片两条入口共用的"解析 URI 并新增"逻辑。invalidKey 为解析失败时的文案键。 */
   private async addFromUri(uri: string, invalidKey: string): Promise<void> {
     if (uri.startsWith('otpauth-migration://')) {
-      this.postFormError(undefined, 'authenticator.uri.migrationUnsupported');
+      this.postFormError(undefined, 'authenticator.uri.migrationUnsupported', 'external');
       return;
     }
     let parsed: ReturnType<typeof parseOtpauthUri>;
@@ -188,7 +186,7 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
       parsed = parseOtpauthUri(uri);
     } catch (e) {
       diagError('authenticator uri parse failed', String(e));
-      this.postFormError(undefined, invalidKey);
+      this.postFormError(undefined, invalidKey, 'external');
       return;
     }
     const res = await this.store.addEntry({
@@ -201,12 +199,15 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
     });
     if (res.ok) return; // EventBus → refresh
     if (res.reason === 'quota') { await promptAuthenticatorUpgrade(res.limit); return; }
-    if (res.reason === 'invalidSecret') { this.postFormError('secret', 'authenticator.err.invalidSecret'); return; }
+    if (res.reason === 'invalidSecret' || res.reason === 'invalidField') {
+      this.postFormError('secret', 'authenticator.err.invalidSecret', 'external');
+      return;
+    }
     this.post({ type: 'error', message: l10n('authenticator.error.generic') });
   }
 
   private async onAddUri(msg: Extract<AuthenticatorUpMessage, { type: 'addUri' }>): Promise<void> {
-    if (typeof msg.uri !== 'string' || !msg.uri) { this.postFormError(undefined, 'authenticator.uri.invalid'); return; }
+    if (typeof msg.uri !== 'string' || !msg.uri) { this.postFormError(undefined, 'authenticator.uri.invalid', 'external'); return; }
     await this.addFromUri(msg.uri, 'authenticator.uri.invalid');
   }
 
@@ -290,7 +291,7 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
 
   /** 每秒 tick：只算未折叠组的 codes，合并为一条消息下发。 */
   private tick(): void {
-    if (!this.view) return;
+    if (!this.view || !this.initSent) return;
     try {
       const nowMs = Date.now();
       const ids = this.store.listEntries()
@@ -307,7 +308,7 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
     const code = typeof msg.code === 'string' ? msg.code : '';
     const entryId = typeof msg.entryId === 'string' ? msg.entryId : '';
     if (!/^(?:\d{6}|\d{8})$/.test(code)) {
-      this.post({ type: 'formError', message: l10n('authenticator.copy.invalid') });
+      this.post({ type: 'formError', message: l10n('authenticator.copy.invalid'), source: 'external' });
       return;
     }
     await vscode.env.clipboard.writeText(code);

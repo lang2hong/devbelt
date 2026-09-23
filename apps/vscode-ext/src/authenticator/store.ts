@@ -272,6 +272,10 @@ export class AuthenticatorStore implements VscodeDisposable {
     if (!canonicalSecret) return { ok: false, reason: 'invalidSecret', field: 'secret' };
     const algorithm = (input.algorithm ?? 'SHA1') as TotpAlgorithm;
     if (!isTotpAlgorithm(algorithm)) return { ok: false, reason: 'invalidField', field: 'algorithm' };
+    // issuer 与 account 至少一个非空，避免落地后出现无法辨识的空白卡片。
+    if (!input.issuer?.trim() && !input.account?.trim()) {
+      return { ok: false, reason: 'invalidField', field: 'issuer' };
+    }
     // 登录态配额预检：未登录不限；0 表示不限；超限直接返回（不抛错，不展开表单）
     const quota = this.checkQuota();
     if (!quota.ok) return { ok: false, reason: 'quota', limit: quota.limit };
@@ -326,6 +330,12 @@ export class AuthenticatorStore implements VscodeDisposable {
     const idx = this.entries.findIndex((e) => e.id === id);
     if (idx < 0) return { ok: false, reason: 'notFound' };
     const prev = this.entries[idx];
+    // issuer/account 至少一个非空（编辑清空两者会得到空白卡片）。
+    {
+      const effIssuer = patch.issuer ?? prev.issuer;
+      const effAccount = patch.account ?? prev.account;
+      if (!effIssuer?.trim() && !effAccount?.trim()) return { ok: false, reason: 'invalidField' };
+    }
     let newSecret: string | undefined;
     // 契约（文档 §二/§协议）：编辑时 secret 缺省或空串/纯空白 => **保留原 secret**，不是错误；
     // 只有提供了非空值才校验并替换（非空但非法 → invalidSecret）。

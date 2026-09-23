@@ -406,6 +406,28 @@ describe('AuthenticatorStore', () => {
     expect(r.ok).toBe(false);
   });
 
+  it('addEntry requires issuer or account non-empty', async () => {
+    for (const [issuer, account] of [['', ''], ['   ', '  '], ['', undefined]] as const) {
+      const r = await store.addEntry({ issuer, account, secret: 'JBSWY3DPEHPK3PXP' });
+      expect(r.ok).toBe(false);
+      if (r.ok) throw new Error('expected invalidField');
+      expect(r.reason).toBe('invalidField');
+    }
+  });
+
+  it('updateEntry rejects clearing both issuer and account', async () => {
+    const add = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP' });
+    expect(add.ok).toBe(true);
+    if (!add.ok) return;
+    const upd = await store.updateEntry(add.entry.id, { issuer: '', account: '' });
+    expect(upd.ok).toBe(false);
+    if (upd.ok) throw new Error('expected invalidField');
+    expect(upd.reason).toBe('invalidField');
+    // 原值保持不变
+    const e = store.listEntries().find((x) => x.id === add.entry.id)!;
+    expect(e.issuer).toBe('A');
+  });
+
   it('checkQuota: not logged-in → ok; limit 0 → ok; at cap → false', async () => {
     expect(store.checkQuota()).toEqual({ ok: true });
 

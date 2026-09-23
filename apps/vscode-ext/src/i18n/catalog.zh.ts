@@ -835,7 +835,6 @@ export const zh: MessageCatalog = {
   'wv.authenticator.group.moveUp': '上移',
   'wv.authenticator.group.moveDown': '下移',
   'wv.authenticator.group.prompt': '分组名称',
-  'wv.authenticator.group.movedToUngrouped': '分组已删除，其中的条目已移至未分组。',
   'wv.authenticator.entry.edit': '编辑',
   'wv.authenticator.entry.delete': '删除',
   'wv.authenticator.tag.all': '全部',

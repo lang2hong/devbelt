@@ -857,7 +857,6 @@ export const en: MessageCatalog = {
   'wv.authenticator.group.moveUp': 'Move up',
   'wv.authenticator.group.moveDown': 'Move down',
   'wv.authenticator.group.prompt': 'Group name',
-  'wv.authenticator.group.movedToUngrouped': 'Group deleted; its entries moved to Ungrouped.',
   'wv.authenticator.entry.edit': 'Edit',
   'wv.authenticator.entry.delete': 'Delete',
   'wv.authenticator.tag.all': 'All',

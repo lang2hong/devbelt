@@ -116,6 +116,6 @@ export type AuthenticatorDownMessage =
     }
   | { type: 'tick'; nowMs: number; codes: Record<string, { code: string; secondsLeft: number }> }
   | { type: 'copyOk'; entryId: string }
-  | { type: 'formError'; field?: string; message: string }
+  | { type: 'formError'; field?: string; message: string; source?: 'form' | 'external' }
   | { type: 'openAddForm' }
   | { type: 'error'; message: string };
