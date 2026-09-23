@@ -76,7 +76,7 @@ export function formatFeature(feature: PlanFeatureDto): string {
   return String(feature.value);
 }
 
-/** 价格文案：个人 0 = 免费；组织席位 0 = 待定价。 */
+/** 价格文案：0 = 免费。 */
 export function formatPrice(billing: PlanDto['billing']): string {
   if (billing.priceCents === 0) {
     return billing.unit === 'month' ? t('plan.free') : t('plan.pendingPrice');

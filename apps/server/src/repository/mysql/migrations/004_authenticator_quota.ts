@@ -5,7 +5,6 @@ import type { Migration } from '../migrate.js';
  *
  * - feature_key: `maxAuthenticatorEntries`（number，个人档）
  * - 默认值：free=10，pro=1000
- * - 组织套餐不涉及。
  *
  * 幂等：defs 用 `ON DUPLICATE KEY UPDATE feature_key = feature_key`（不覆盖运营已调过的 label/unit/sortOrder）；
  *       values 用 `ON DUPLICATE KEY UPDATE value_json = value_json`（不覆盖运营已调整的配额值）。

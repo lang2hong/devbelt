@@ -88,13 +88,9 @@ import { registerConsoleStatic } from './consoleStatic.js';
 /** 首页套餐卡片展示的特性 key（按此顺序取前若干项）。 */
 const HOME_PLAN_FEATURE_KEYS: readonly string[] = [
   'allowedDatabaseTypes',
-  'allowedTemplateDatabaseTypes',
   'maxSavedConnections',
   'maxDevices',
-  'includedSeats',
-  'maxSharedResources',
   'syncStorageBytes',
-  'sharedStorageQuotaBytes',
   'allowDataSync',
   'allowConnectionImport',
 ];
@@ -140,7 +136,7 @@ function toHomePlans(catalog: PlanCatalog): HomePlan[] {
 
 export async function createApp() {
   const app = Fastify({
-    // 自定义 req 序列化器：URL 里的邮箱验证 / 邀请 token 不得进日志（§8）。
+    // 自定义 req 序列化器：URL 里的一次性链接 token 不得进日志（§8）。
     logger: buildLoggerOptions(),
     trustProxy: config.trustProxy,
     bodyLimit: 1024 * 1024,

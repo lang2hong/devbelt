@@ -128,7 +128,7 @@ jobs:
           DEVBELT_DB_TEST_MYSQL_DB: devbelt_db_verify
         run: pnpm -C apps/server test
 
-  # 浏览器 e2e：注册/登录/邮箱验证/邀请全链路（Playwright + Mailpit 真发信 + 真实 MySQL）。
+  # 浏览器 e2e：注册/登录/邮箱验证全链路（Playwright + Mailpit 真发信 + 真实 MySQL）。
   # 独立 job：需要构建 server（bundle）+ db-ui（dist）+ 起服务 + 装浏览器，成本高，
   # 不塞进 build matrix。Mailpit SMTP sink（1025）收 server 真发的邮件，8025 提供 HTTP API 取信。
   e2e:

@@ -12,7 +12,6 @@ import type { Queryable } from '../repository/mysql/db.js';
  * - 登录：按规范化 email 与来源 IP 各 15 分钟 5 次**失败**（成功不计数）
  * - 注册：按 IP 每小时 10 次（每次尝试计数）
  * - 邮箱验证重发：按规范化 email 与来源 IP 每小时 3 次（每次尝试计数）
- * - 组织创建：按用户每小时 10 次（每次尝试计数；已认证，不按 IP）
  */
 export class RateLimitService {
   constructor(

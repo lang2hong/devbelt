@@ -50,10 +50,7 @@ export class UserDisabledError extends DomainError {
   }
 }
 
-/**
- * 个人权益不足（如设备数超限）→ 403 PERSONAL_FEATURE_REQUIRED。
- * 与 ORGANIZATION_FEATURE_REQUIRED / FORBIDDEN 语义分离。
- */
+/** 个人权益不足（如设备数超限）→ 403 PERSONAL_FEATURE_REQUIRED。 */
 export class PersonalFeatureRequiredError extends DomainError {
   constructor(public readonly feature: string) {
     super(`${feature} exceeds the personal Free entitlement`, 'PERSONAL_FEATURE_REQUIRED');

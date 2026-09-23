@@ -1,12 +1,11 @@
 # @devbelt/server
 
-Fastify + MySQL 8 服务，负责身份、个人权益、设备、组织、资源和个人同步协议。
+Fastify + MySQL 8 服务，负责身份、个人权益、设备和个人同步协议。
 
 ## 能力
 
 - 注册、邮箱验证、登录、refresh token 轮换、登出和改密。
 - 个人套餐快照、设备注册和设备撤销。
-- 组织、成员、邀请、目录和资源。
 - 个人同步状态、加密 record、nonce、幂等回执、配额和重置。
 
 服务端不保存或返回个人连接明文、DEK、同步口令、恢复码或签名私钥。
@@ -17,7 +16,6 @@ Fastify + MySQL 8 服务，负责身份、个人权益、设备、组织、资�
 |---|---|
 | 认证 | `/api/auth/*` |
 | 个人 | `/api/db/me`、`/api/db/personal/subscription`、`/api/db/personal/devices` |
-| 组织 | `/api/db/organizations/*`、`/api/db/organization-invitations/*` |
 | 同步 | `/api/db/sync/init`、`/records`、`/change-key`、`/account-recover`、`/destroy`、重置路由 |
 | 控制台 | `/api/db/plans`、`/api/db/console/*`、`/api/console/*` |
 

@@ -3,7 +3,7 @@ import type { Plan, PlanFeatureDef } from '../../../domain/entities.js';
 import type { MysqlDb, Queryable } from '../../../repository/mysql/db.js';
 
 /**
- * 套餐仓储（个人/组织统一）。
+ * 套餐仓储（个人）。
  *
  * 特性存于纵表 `plan_feature_values`（值）+ `plan_feature_defs`（类型/标签）。
  * 读取时按 def 的 `value_type` 强转为正确的 JS 类型后拼进 `Plan.features`：

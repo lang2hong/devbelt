@@ -82,7 +82,7 @@ export class OrderService {
   /** 下单：优先复用同 (user, plan, channel) 未过期 pending 订单，否则建新订单并预下单。 */
   async createOrder(userId: number, planCode: string, channel: PaymentChannel, mode?: 'qr' | 'redirect'): Promise<CreateOrderResult> {
     // 价格、状态与档位均以库内 plan 为准（不接受前端金额）。
-    // priceCents <= 0（free/待定价）不可自助下单；组织档无自助支付路径。
+    // priceCents <= 0（free）不可自助下单。
     const plan = await this.planRepo.findByCode(planCode);
     if (!plan || plan.kind !== 'personal' || plan.status !== 'active' || plan.priceCents <= 0) {
       throw new UnknownPlanError();

@@ -21,10 +21,10 @@ export interface CachedEntitlement {
 }
 
 /**
- * 个人同步的引擎权益过滤（§7.2 引擎门禁）与组织连接 id 辅助。
+ * 个人同步的引擎权益过滤（§7.2 引擎门禁）。
  *
  * 本地连接不在此门禁内：本地引擎支持只看方言是否注册，权益门禁仅作用于
- * 个人同步入站 record 过滤（跨设备同步为 Pro 权益）与组织资源口径。
+ * 个人同步入站 record 过滤（跨设备同步为 Pro 权益）。
  *
  * 过滤 fail-closed：无 `CachedEntitlement`（未登录/权益未拉取）时按
  * `DEFAULT_FREE_ENGINES` 兜底，与服务端匿名口径一致——仅 `postgresql` 被过滤；

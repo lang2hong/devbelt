@@ -30,7 +30,7 @@ export class SmtpEmailSender implements EmailSender {
       secure,
       // secure=false（587/STARTTLS）时**必须**强制 TLS。
       // nodemailer 默认是「机会性」升级：服务端不广告 STARTTLS 就静默用明文发送。
-      // 中间人只要抹掉 STARTTLS 广告，验证 / 邀请 / sync-reset 的一次性 token
+      // 中间人只要抹掉 STARTTLS 广告，验证 / sync-reset 的一次性 token
       // 就会明文过网 —— 那些 token 等同于账号控制权。
       // requireTLS 让升级失败即报错，宁可发不出去也不明文发。
       // 唯一例外：本地 Mailpit 联调/e2e（allowInsecure），Mailpit 的 SMTP sink 不提供

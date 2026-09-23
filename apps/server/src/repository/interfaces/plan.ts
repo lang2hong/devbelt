@@ -1,7 +1,7 @@
 import type { Plan, PlanFeatureDef } from '../../domain/entities.js';
 import type { Queryable } from '../mysql/db.js';
 
-/** 套餐仓储（个人/组织统一）。特性通过纵表派生到 Plan.features。 */
+/** 套餐仓储（个人）。特性通过纵表派生到 Plan.features。 */
 export interface IPlanRepo {
   findByCode(code: string): Promise<Plan | undefined>;
   findById(id: number): Promise<Plan | undefined>;

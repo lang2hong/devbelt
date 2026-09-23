@@ -64,7 +64,7 @@ export function secretKey(id: string): string {
 
 /**
  * 从 SecretStorage key 反解 entry id；不属于 authenticator 命名空间返回 null，
- * 供 secrets.onDidChange 回调过滤其他模块（连接、组织凭据）的密钥变更。
+ * 供 secrets.onDidChange 回调过滤其他模块（连接凭据）的密钥变更。
  */
 export function parseSecretKey(key: string): string | null {
   if (!key.startsWith(SECRET_KEY_PREFIX) || !key.endsWith(SECRET_KEY_SUFFIX)) return null;

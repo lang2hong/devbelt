@@ -9,6 +9,7 @@ import { BaseWebView } from './result/baseWebView';
 import { TableQueryView } from './result/tableQueryView';
 import { AuditLogger } from './utils/auditLogger';
 import { diagDispose, diagInfo, diagWarn, diagError } from './utils/diagnostics';
+import { purgeLegacyOrgCredentials } from './utils/legacyOrgCleanup';
 import { BackupScheduler } from './schedule/backupScheduler';
 import { registerViewCommands } from './commands/viewCommands';
 import { createSyncStatusBar } from './sync/syncStatusBar';
@@ -88,6 +89,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 的可见性。此前从未及时 setContext，导致 logout/account/sessions 永久不可见、login 永久可见；
   // AuthEvent 订阅（下方）在登录/登出后刷新此上下文保持同步。
   void syncLoggedInContext(auth);
+
+  // 组织功能已移除：清理其遗留在 SecretStorage 的凭据（幂等；index 为空时 no-op）。
+  try {
+    await purgeLegacyOrgCredentials(context.globalState, context.secrets);
+  } catch (err) {
+    diagWarn('legacy org credential cleanup failed', String(err));
+  }
 
   // P5：TOTP 验证器——store 先 await init() 完成 secretCache 预热，再注册命令；视图按需打开。
   const authStore = new AuthenticatorStore(context.globalState, context.secrets, auth, {

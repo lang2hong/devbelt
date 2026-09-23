@@ -248,7 +248,7 @@ export const DOCS: readonly DocPage[] = [
       },
       {
         heading: '套餐',
-        html: `<p>个人与组织套餐及配额见 <a href="/plans">套餐页</a>。个人连接同步等能力依权益而定，配额以服务端校验为准。</p>`,
+        html: `<p>个人套餐及配额见 <a href="/plans">套餐页</a>。个人连接同步等能力依权益而定，配额以服务端校验为准。</p>`,
       },
     ],
   },

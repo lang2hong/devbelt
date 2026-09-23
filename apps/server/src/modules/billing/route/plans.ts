@@ -13,7 +13,7 @@ export interface PlansRouteOptions {
   featureDefRepo: IPlanFeatureDefRepo;
 }
 
-/** GET /api/db/plans（扩展/控制台 token，scope account，同 /api/db/me）：个人 + 组织套餐目录。 */
+/** GET /api/db/plans（扩展/控制台 token，scope account，同 /api/db/me）：个人套餐目录。 */
 export async function plansRoutes(app: FastifyInstance, opts: PlansRouteOptions): Promise<void> {
   app.register(authScope, {
     tokenService: opts.tokenService,

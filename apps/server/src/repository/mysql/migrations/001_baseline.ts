@@ -24,6 +24,8 @@ const LEGACY_TABLES = [
   'idempotency_receipts', 'audit_events', 'mail_flows', 'personal_sync_reset_tokens',
   'personal_sync_mutations', 'personal_sync_nonces', 'personal_connection_meta',
   'personal_sync_state', 'rate_limit_entries', 'refresh_tokens',
+  'organization_resources', 'organization_resource_folders', 'organization_invitations',
+  'organization_memberships', 'organization_subscriptions', 'organizations', 'organization_plans',
   'devices', 'email_verification_tokens', 'personal_subscriptions', 'personal_plans',
   'users',
 ] as const;

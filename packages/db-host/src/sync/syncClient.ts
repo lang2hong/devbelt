@@ -195,11 +195,10 @@ export class SyncClient {
   }
 
   /**
-   * 通用鉴权请求（供组织 Workspace 复用）：自动 401 单飞刷新 + 5xx 退避重试，
+   * 通用鉴权请求：自动 401 单飞刷新 + 5xx 退避重试，
    * 返回原始状态码 + 已解析的 JSON body（空 body 为 undefined）。
    *
-   * 不在此处做业务错误码归因，
-   * 组织侧的错误映射由 OrgClient 依据 `code`/`status` 完成。
+   * 不在此处做业务错误码归因，业务错误码映射由调用方依据 `code`/`status` 完成。
    */
   async requestRaw(method: string, path: string, body?: unknown, opts?: { retry?: boolean }): Promise<{ status: number; body: unknown }> {
     const res = await this.request(method, path, body, true, opts?.retry);
@@ -232,7 +231,7 @@ export class SyncClient {
     return res.json() as Promise<{ devices: DeviceItem[] }>;
   }
 
-  /** 套餐目录（个人 + 组织）。 */
+  /** 套餐目录（个人）。 */
   async getPlans(): Promise<PlanCatalog> {
     const res = await this.request('GET', '/api/db/plans', undefined, true);
     if (!res.ok) throw new Error(`Get plans failed: ${res.status}`);

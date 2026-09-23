@@ -47,7 +47,7 @@ function pathFieldsOf(conn: SavedConnection): { field: string; value: string }[]
 }
 
 /**
- * 校验连接的本地路径是否可用（存在/可读）。组织连接（临时凭据映射、无本机路径）跳过。
+ * 校验连接的本地路径是否可用（存在/可读）。
  * `fsAccess` 可注入以便测试（真实环境用 fs.access）。
  *
  * connectionUrl 只做非空校验（连接串模式下必须有值；URL 合法性交给驱动报错，不做 fs 校验）。

@@ -6,7 +6,7 @@
  * 已带 base 的路径，非法一律回退 `/account`，防开放重定向与重复前缀。
  */
 
-const DENIED_PREFIXES = ['/login', '/register', '/verify-email', '/accept-invitation', '/api', '/health', '/db'];
+const DENIED_PREFIXES = ['/login', '/register', '/verify-email', '/api', '/health', '/db'];
 const FALLBACK = '/account';
 
 export function safeReturnTo(raw: string | null | undefined): string {

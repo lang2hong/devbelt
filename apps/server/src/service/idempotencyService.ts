@@ -4,7 +4,7 @@ import type { IIdempotencyReceiptRepo } from '../repository/interfaces.js';
 import type { IdempotencyReceipt } from '../domain/entities.js';
 import type { TxRunner, Queryable } from '../repository/mysql/db.js';
 
-/** 回执在线保留 24 小时（§6.1）。关闭组织经 `retentionMs` 传 30 天（切片 3）；订阅调整/禁用用户的 30 天属切片 4。 */
+/** 回执在线保留 24 小时（§6.1）。需要更长保留（如订阅调整/禁用用户）时经 `retentionMs` 显式传入。 */
 const RECEIPT_RETENTION_MS = 24 * 3600 * 1000;
 
 /** Idempotency-Key：canonical RFC 4122 UUIDv4（version=4，variant=[89ab]）。 */
@@ -19,7 +19,7 @@ export interface IdempotencyRunInput {
   normalizedPath: string;
   idempotencyKey: string;
   requestBody?: unknown;
-  /** 回执保留毫秒数。默认 24h；关闭组织等须 30d（§6.1）。 */
+  /** 回执保留毫秒数。默认 24h；更长保留由调用方显式传入。 */
   retentionMs?: number;
   /**
    * 首次执行前置（例如限流）：在 createProcessing 之后、business 之前，于**同一事务**上执行。

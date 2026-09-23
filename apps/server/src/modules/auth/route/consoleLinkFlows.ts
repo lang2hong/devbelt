@@ -45,7 +45,7 @@ export async function consoleLinkFlowRoutes(app: FastifyInstance, opts: ConsoleL
     aud: 'console',
     scope: ['console'],
     routes: async (child) => {
-      // 显式绑定（§5.3）：已登录用户点击邀请链接、绕过了「登录时绑定」场景时，
+      // 显式绑定（§5.3）：已登录用户点击一次性链接、绕过了「登录时绑定」场景时，
       // 页面必须在消费前先调用此受会话保护 + Origin + session-bound CSRF 的接口，
       // 把 held mail-flow 绑定到当前用户。绑定失败保持 Cookie（业务终态除外）。
       child.post('/api/console/link-flows/bind', async (req, reply) => {

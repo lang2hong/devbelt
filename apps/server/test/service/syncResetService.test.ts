@@ -156,7 +156,6 @@ describe('SyncResetService', () => {
     const failingSender = {
       sendVerificationEmail: async () => {},
       sendAlreadyRegisteredEmail: async () => {},
-      sendInvitationEmail: async () => {},
       sendResetChallengeEmail: async () => { throw new Error('smtp down'); },
     } as any;
     const svc = new SyncResetService(s.stateRepo, s.recordRepo, s.resetTokenRepo, s.userRepo, runner, failingSender, s.rateLimiter, s.mailFlowRepo, s.handoffRepo, new AuditWriter(new FakeAuditRepo()), 'lang2hong.devbelt-db-client');

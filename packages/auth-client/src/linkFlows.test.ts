@@ -107,7 +107,7 @@ describe('bindMailFlow', () => {
   });
 
   it('resolves invalid on HTTP 400', async () => {
-    const r = await bindMailFlow('csrf', 'token', async () => jsonResponse(400, { error: { code: 'INVITATION_INVALID' } }));
+    const r = await bindMailFlow('csrf', 'token', async () => jsonResponse(400, { error: { code: 'LINK_FLOW_INVALID' } }));
     expect(r).toEqual({ kind: 'invalid' });
   });
 

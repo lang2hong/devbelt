@@ -73,7 +73,7 @@ export interface IEmailVerificationTokenRepo {
   findByIdInTx(exec: Queryable, id: number): Promise<EmailVerificationToken | undefined>;
   /** 原子消费：AND consumed_time IS NULL，返回是否由本次调用完成。事务内执行。 */
   consume(exec: Queryable, id: number, now: Date): Promise<boolean>;
-  /** 作废某用户 +(email,purpose) 既有的未消费 token（重发/重新邀请前调用）。事务内执行。 */
+  /** 作废某用户 +(email,purpose) 既有的未消费 token（重发前调用）。事务内执行。 */
   invalidate(exec: Queryable, userId: number, email: string, purpose: EmailVerificationPurpose, now: Date): Promise<void>;
   /** 删除已消费或已过期且超出保留期的 token 行。返回删除行数。 */
   prune(before: Date, limit: number): Promise<number>;

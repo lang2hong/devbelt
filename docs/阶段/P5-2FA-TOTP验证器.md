@@ -383,7 +383,7 @@ export type AuthenticatorDownMessage =
   `{ ok:false, reason }` 时主进程回 `formError`。这种"单向命令 + 事件驱动快照刷新"的模式
   对齐现有 BaseWebView 的 update 流程，避免为每个动作定义单独的 ok/error reply。
 
-### 存储（对齐 CredentialVault/ConnectionStore 模式）
+### 存储（对齐 ConnectionStore 模式）
 
 globalState 键（使用 `context.globalState`——**不要**用 `workspaceState`，条目要跨项目
 持久化；workspaceState 随项目切换丢失）：
@@ -492,7 +492,7 @@ export type AuthenticatorEntry = {
     secret）：先 `await secrets.delete(secretKey(id))`；抛错则中止并返回
     `{ ok:false, reason:'storageError' }`，memento 不动；成功后 `secretCache.delete(id)`、
     `missingSecrets.delete(id)`、从 entries 数组移除、`memento.update` 写回。
-  - `clearAll()`：对齐 CredentialVault 容错循环——遍历 entries 逐个
+  - `clearAll()`：容错循环——遍历 entries 逐个
     `secrets.delete(secretKey(id))`，成功的从 secretCache 和 entries 列表移除，失败的
     收集到 remaining 列表保留（下次重试），最后写回 memento。
   - `secrets.onDidChange` 回调（跨窗口变更同步）：**必须**先用 `parseSecretKey(e.key)`

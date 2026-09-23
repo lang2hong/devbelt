@@ -20,11 +20,6 @@ describe('validateConnectionPaths', () => {
     expect(r.valid).toBe(true);
   });
 
-  it('org 连接跳过校验', async () => {
-    const r = await validateConnectionPaths(conn({ id: 'org:1:2', dbPath: '/missing' }), accessWith([]));
-    expect(r.valid).toBe(true);
-  });
-
   it('SQLite dbPath 缺失 → 不可读', async () => {
     const c = conn({ dbType: DatabaseType.SQLITE, dbPath: '/nope/db.sqlite' });
     const r = await validateConnectionPaths(c, accessWith([]));

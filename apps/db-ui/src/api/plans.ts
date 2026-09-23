@@ -3,7 +3,7 @@ import { authedFetch } from '@devbelt/auth-client';
 import type { FetchLike } from '@devbelt/auth-client';
 import type { PlanCatalog } from '../lib/planFeatures';
 
-/** /api/db/console/plans：个人 + 组织套餐目录（认证，只读）。 */
+/** /api/db/console/plans：个人套餐目录（认证，只读）。 */
 
 export type PlansResult = { kind: 'ok'; value: PlanCatalog } | { kind: 'unauthorized' } | { kind: 'failure' };
 
