@@ -17,12 +17,16 @@ vi.mock('../../src/authenticator/quotaPrompt', () => ({
 vi.mock('../../src/authenticator/exportAll', () => ({
   exportAuthenticatorEntries: vi.fn(async () => { /* noop */ }),
 }));
+vi.mock('../../src/authenticator/qrDecode', () => ({
+  decodeOtpauthFromPngDataUrl: vi.fn(() => 'otpauth://totp/Acme:alice?secret=JBSWY3DPEHPK3PXP&issuer=Acme&algorithm=SHA1&digits=6&period=30'),
+}));
 
 import * as vscode from 'vscode';
 import { AuthenticatorViewProvider } from '../../src/authenticator/authenticatorViewProvider';
 import type { AuthenticatorStore } from '../../src/authenticator/store';
 import { promptAuthenticatorUpgrade } from '../../src/authenticator/quotaPrompt';
 import { exportAuthenticatorEntries } from '../../src/authenticator/exportAll';
+import { decodeOtpauthFromPngDataUrl } from '../../src/authenticator/qrDecode';
 
 function flush(): Promise<void> {
   return new Promise((r) => setTimeout(r, 0));
@@ -118,6 +122,7 @@ describe('AuthenticatorViewProvider', () => {
     (vscode.env.clipboard.writeText as any).mockClear();
     (promptAuthenticatorUpgrade as any).mockClear();
     (exportAuthenticatorEntries as any).mockClear();
+    (decodeOtpauthFromPngDataUrl as any).mockClear();
   });
 
   it('two-phase handshake: 1st ready → init; 2nd ready → snapshot + tick', async () => {
@@ -405,5 +410,49 @@ describe('AuthenticatorViewProvider', () => {
     h.send({ type: 'export' });
     await flush();
     expect(exportAuthenticatorEntries).toHaveBeenCalledWith(h.store);
+  });
+
+  // ── image import ──
+  it('addImage decodes QR → parseOtpauthUri → addEntry with parsed fields', async () => {
+    const h = makeHarness();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'addImage', dataUrl: 'data:image/png;base64,AAAA' });
+    await flush();
+    expect(decodeOtpauthFromPngDataUrl).toHaveBeenCalledWith('data:image/png;base64,AAAA');
+    expect(h.store.addEntry).toHaveBeenCalledWith(expect.objectContaining({
+      issuer: 'Acme', account: 'alice', algorithm: 'SHA1', digits: 6, period: 30,
+    }));
+  });
+
+  it('addImage: no QR found → formError image.notFound', async () => {
+    (decodeOtpauthFromPngDataUrl as any).mockReturnValueOnce(null);
+    const h = makeHarness();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'addImage', dataUrl: 'data:image/png;base64,AAAA' });
+    await flush();
+    expect(h.posted.some((m) => m.type === 'formError' && /image\.notFound/.test(m.message))).toBe(true);
+    expect(h.store.addEntry).not.toHaveBeenCalled();
+  });
+
+  it('addImage: decode throws → formError image.invalid', async () => {
+    (decodeOtpauthFromPngDataUrl as any).mockImplementationOnce(() => { throw new Error('bad png'); });
+    const h = makeHarness();
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'addImage', dataUrl: 'nope' });
+    await flush();
+    expect(h.posted.some((m) => m.type === 'formError' && /image\.invalid/.test(m.message))).toBe(true);
+  });
+
+  it('addImage: at cap → upgrade prompt, decode not attempted', async () => {
+    const h = makeHarness({ store: { checkQuota: vi.fn(() => ({ ok: false, limit: 5 })) } });
+    h.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    h.send({ type: 'addImage', dataUrl: 'data:image/png;base64,AAAA' });
+    await flush();
+    expect(promptAuthenticatorUpgrade).toHaveBeenCalledWith(5);
+    expect(decodeOtpauthFromPngDataUrl).not.toHaveBeenCalled();
   });
 });

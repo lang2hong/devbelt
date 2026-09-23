@@ -54,6 +54,8 @@ const menuFor = ref<string | null>(null);
 const groupMenuFor = ref<string | null>(null);
 const confirmDeleteId = ref<string | null>(null);
 const confirmTagDeleteId = ref<string | null>(null);
+const fileInput = ref<HTMLInputElement | null>(null);
+const imgBusy = ref(false);
 
 const RING_CIRCUMFERENCE = 2 * Math.PI * 13;
 
@@ -236,6 +238,51 @@ function submitForm(): void {
 
 function requestAdd(): void { post({ type: 'requestAddForm' }); }
 function requestExport(): void { post({ type: 'export' }); }
+function pickImage(): void { fileInput.value?.click(); }
+async function processImage(blob: Blob): Promise<void> {
+  if (imgBusy.value) return;
+  imgBusy.value = true;
+  promptError.value = '';
+  try {
+    const bmp = await createImageBitmap(blob);
+    const scale = Math.min(1, 512 / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * scale));
+    const h = Math.max(1, Math.round(bmp.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('no 2d context');
+    ctx.drawImage(bmp, 0, 0, w, h);
+    bmp.close?.();
+    post({ type: 'addImage', dataUrl: canvas.toDataURL('image/png') });
+  } catch {
+    promptError.value = t('wv.authenticator.image.invalid');
+  } finally {
+    imgBusy.value = false;
+  }
+}
+function onFileInput(e: Event): void {
+  const input = e.target as HTMLInputElement;
+  const f = input.files?.[0];
+  if (f) void processImage(f);
+  input.value = '';
+}
+function onPaste(e: ClipboardEvent): void {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const it of items) {
+    if (it.type.startsWith('image/')) {
+      const f = it.getAsFile();
+      if (f) { e.preventDefault(); void processImage(f); }
+      return;
+    }
+  }
+}
+function onDrop(e: DragEvent): void {
+  const f = e.dataTransfer?.files?.[0];
+  if (f && f.type.startsWith('image/')) { e.preventDefault(); void processImage(f); }
+}
 function requestDelete(id: string): void { post({ type: 'delete', id }); menuFor.value = null; confirmDeleteId.value = null; }
 
 function openGroupPrompt(mode: 'new' | 'rename' | 'above' | 'below', opts?: { id?: string; beforeId?: string; afterId?: string; name?: string }): void {
@@ -295,9 +342,11 @@ function requestDeleteTag(id: string): void {
 onMounted(() => {
   post({ type: 'ready' });
   off = onMessage(onMsg);
+  window.addEventListener('paste', onPaste);
 });
 onUnmounted(() => {
   off?.();
+  window.removeEventListener('paste', onPaste);
   if (copiedTimer) clearTimeout(copiedTimer);
   if (errTimer) clearTimeout(errTimer);
   if (debounceTimer) clearTimeout(debounceTimer);
@@ -305,13 +354,15 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="auth">
+  <div class="auth" @dragover.prevent @drop.prevent="onDrop">
     <div v-if="errMsg" class="auth-err">{{ errMsg }}</div>
 
     <div class="toolbar">
       <input v-model="query" class="search" type="text" :placeholder="t('wv.authenticator.search')" />
       <button class="btn" :title="t('wv.authenticator.add')" @click="requestAdd">＋</button>
+      <button class="btn" :title="t('wv.authenticator.image.pasteHint')" :disabled="imgBusy" @click="pickImage">🖼</button>
       <button class="btn" :title="t('wv.authenticator.export')" @click="requestExport">⭳</button>
+      <input ref="fileInput" class="hidden-file" type="file" accept="image/*" @change="onFileInput" />
     </div>
 
     <div class="tagbar">
@@ -491,6 +542,7 @@ onUnmounted(() => {
 }
 .toolbar { display: flex; gap: 6px; margin-bottom: 6px; }
 .search { flex: 1; min-width: 0; }
+.hidden-file { display: none; }
 input, select { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 3px; padding: 3px 6px; }
 .btn { background: var(--vscode-button-secondaryBackground, rgba(128,128,128,0.2)); color: var(--vscode-button-secondaryForeground, inherit); border: none; border-radius: 3px; padding: 3px 8px; cursor: pointer; }
 .btn:hover { background: var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.3)); }

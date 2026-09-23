@@ -536,6 +536,8 @@ export const zh: MessageCatalog = {
   'authenticator.err.invalidName': '名称不能为空。',
   'authenticator.err.invalidColor': '标签颜色非法。',
   'authenticator.err.notFound': '条目不存在。',
+  'authenticator.image.notFound': '图片中未找到二维码。',
+  'authenticator.image.invalid': '无法从图片中读取有效的 otpauth 链接。',
 
   // ── webview UI 文案（wv.*）──
   'wv.common.save': '保存',
@@ -818,6 +820,9 @@ export const zh: MessageCatalog = {
   'wv.authenticator.search': '搜索',
   'wv.authenticator.add': '添加',
   'wv.authenticator.export': '导出',
+  'wv.authenticator.image.button': '从图片添加',
+  'wv.authenticator.image.pasteHint': '粘贴、拖拽或选择二维码图片',
+  'wv.authenticator.image.invalid': '无法从该图片中读取二维码。',
   'wv.authenticator.ungrouped': '未分组',
   'wv.authenticator.group.new': '新建分组',
   'wv.authenticator.group.addAbove': '在上方新建分组',

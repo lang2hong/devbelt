@@ -558,6 +558,8 @@ export const en: MessageCatalog = {
   'authenticator.err.invalidName': 'Name is required.',
   'authenticator.err.invalidColor': 'Invalid tag color.',
   'authenticator.err.notFound': 'Entry not found.',
+  'authenticator.image.notFound': 'No QR code found in the image.',
+  'authenticator.image.invalid': 'Could not read a valid otpauth link from the image.',
 
   // ── webview UI 文案（wv.*）──
   'wv.common.save': 'Save',
@@ -840,6 +842,9 @@ export const en: MessageCatalog = {
   'wv.authenticator.search': 'Search',
   'wv.authenticator.add': 'Add',
   'wv.authenticator.export': 'Export',
+  'wv.authenticator.image.button': 'Add from image',
+  'wv.authenticator.image.pasteHint': 'Paste, drop, or choose a QR code image',
+  'wv.authenticator.image.invalid': 'Could not read a QR code from that image.',
   'wv.authenticator.ungrouped': 'Ungrouped',
   'wv.authenticator.group.new': 'New group',
   'wv.authenticator.group.addAbove': 'New group above',

@@ -5,6 +5,8 @@ import { isZh, l10n } from '../i18n';
 import type { AuthenticatorStore } from './store';
 import { promptAuthenticatorUpgrade } from './quotaPrompt';
 import { exportAuthenticatorEntries } from './exportAll';
+import { decodeOtpauthFromPngDataUrl } from './qrDecode';
+import { parseOtpauthUri } from './otpauth';
 import type { AuthenticatorDownMessage, AuthenticatorUpMessage } from '../result/protocol';
 
 /**
@@ -94,6 +96,7 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
       case 'copy': await this.onCopy(msg); return;
       case 'toggleGroup': this.onToggleGroup(msg); return;
       case 'requestAddForm': this.openAddForm(); return;
+      case 'addImage': await this.onAddImage(msg); return;
       case 'add': await this.onAdd(msg); return;
       case 'update': await this.onUpdate(msg); return;
       case 'delete': await this.onDelete(msg); return;
@@ -154,6 +157,41 @@ export class AuthenticatorViewProvider implements vscode.WebviewViewProvider, vs
     if (res.ok) return;
     if (res.reason === 'invalidSecret') { this.postFormError('secret', 'authenticator.err.invalidSecret'); return; }
     if (res.reason === 'invalidField') { this.postFormError(undefined, 'authenticator.err.invalidField'); return; }
+    this.post({ type: 'error', message: l10n('authenticator.error.generic') });
+  }
+
+  private async onAddImage(msg: Extract<AuthenticatorUpMessage, { type: 'addImage' }>): Promise<void> {
+    // 先做配额预检：达上限直接弹升级，不浪费解码。
+    const quota = this.store.checkQuota();
+    if (!quota.ok) { await promptAuthenticatorUpgrade(quota.limit); return; }
+    let uri: string | null;
+    try {
+      uri = decodeOtpauthFromPngDataUrl(msg.dataUrl);
+    } catch (e) {
+      diagError('authenticator image decode failed', String(e));
+      this.postFormError(undefined, 'authenticator.image.invalid');
+      return;
+    }
+    if (!uri) { this.postFormError(undefined, 'authenticator.image.notFound'); return; }
+    let parsed: ReturnType<typeof parseOtpauthUri>;
+    try {
+      parsed = parseOtpauthUri(uri);
+    } catch (e) {
+      diagError('authenticator image otpauth parse failed', String(e));
+      this.postFormError(undefined, 'authenticator.image.invalid');
+      return;
+    }
+    const res = await this.store.addEntry({
+      issuer: parsed.issuer,
+      account: parsed.account,
+      secret: parsed.secret,
+      algorithm: parsed.algorithm,
+      digits: parsed.digits,
+      period: parsed.period,
+    });
+    if (res.ok) return; // EventBus → refresh
+    if (res.reason === 'quota') { await promptAuthenticatorUpgrade(res.limit); return; }
+    if (res.reason === 'invalidSecret') { this.postFormError('secret', 'authenticator.err.invalidSecret'); return; }
     this.post({ type: 'error', message: l10n('authenticator.error.generic') });
   }
 
