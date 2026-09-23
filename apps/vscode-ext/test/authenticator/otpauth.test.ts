@@ -61,14 +61,21 @@ describe('parseOtpauthUri', () => {
     expect(r.account).toBe('alice');
   });
 
-  it('digits other than 8 default to 6', () => {
-    const r = parseOtpauthUri('otpauth://totp/a?secret=JBSWY3DPEHPK3PXP&digits=7');
-    expect(r.digits).toBe(6);
+  it('rejects invalid digits (must be 6 or 8)', () => {
+    expect(() => parseOtpauthUri('otpauth://totp/a?secret=JBSWY3DPEHPK3PXP&digits=7')).toThrow(/invalid digits/);
   });
 
-  it('period other than 60 defaults to 30', () => {
-    const r = parseOtpauthUri('otpauth://totp/a?secret=JBSWY3DPEHPK3PXP&period=15');
-    expect(r.period).toBe(30);
+  it('rejects invalid period (must be 30 or 60)', () => {
+    expect(() => parseOtpauthUri('otpauth://totp/a?secret=JBSWY3DPEHPK3PXP&period=15')).toThrow(/invalid period/);
+  });
+
+  it('accepts explicit 6/8 digits and 30/60 period', () => {
+    for (const d of ['6', '8'] as const) {
+      expect(parseOtpauthUri(`otpauth://totp/a?secret=JBSWY3DPEHPK3PXP&digits=${d}`).digits).toBe(Number(d));
+    }
+    for (const s of ['30', '60'] as const) {
+      expect(parseOtpauthUri(`otpauth://totp/a?secret=JBSWY3DPEHPK3PXP&period=${s}`).period).toBe(Number(s));
+    }
   });
 });
 

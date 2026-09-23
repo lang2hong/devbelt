@@ -247,12 +247,18 @@ export class AuthenticatorView extends BaseWebView {
     }
   }
 
+  /** 未分组/孤儿 groupId 归一为 null，与 UI sections 的未分组判定一致。 */
+  private effectiveGroupKey(groupId: string | undefined, validGroupIds: Set<string>): string | null {
+    return groupId && validGroupIds.has(groupId) ? groupId : null;
+  }
+
   private tick(): void {
     if (!this.initSent) return;
     try {
       const nowMs = Date.now();
+      const validGroupIds = new Set(this.store.listGroups().map((g) => g.id));
       const ids = this.store.listEntries()
-        .filter((e) => !this.foldedGroups.has(e.groupId ?? null))
+        .filter((e) => !this.foldedGroups.has(this.effectiveGroupKey(e.groupId, validGroupIds)))
         .map((e) => e.id);
       const codes = this.store.getCodes(ids, nowMs);
       this.post({ type: 'tick', nowMs, codes });

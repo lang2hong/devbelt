@@ -112,11 +112,14 @@ const orderedGroupIds = computed(() =>
   groups.value.slice().sort((a, b) => a.sortOrder - b.sortOrder).map((g) => g.id));
 
 const sections = computed(() => {
+  const validGroupIds = new Set(groups.value.map((g) => g.id));
   const named = groups.value
     .slice()
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((g) => ({ key: g.id, name: g.name, groupId: g.id as string | null, entries: filteredEntries.value.filter((e) => e.groupId === g.id) }));
-  const ungrouped = filteredEntries.value.filter((e) => e.groupId == null);
+  // 未分组 = 无 groupId，或 groupId 指向已不存在的分组（孤儿引用回落未分组，
+  // 否则该条目不会出现在任何 section，表现为“条目消失”）。
+  const ungrouped = filteredEntries.value.filter((e) => !e.groupId || !validGroupIds.has(e.groupId));
   named.push({ key: '__ungrouped__', name: t('wv.authenticator.ungrouped'), groupId: null, entries: ungrouped });
   return named;
 });

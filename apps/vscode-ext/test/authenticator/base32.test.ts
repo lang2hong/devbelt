@@ -44,6 +44,13 @@ describe('base32', () => {
     expect(() => decodeBase32Loose('Ａ')).toThrow();
   });
 
+  it('rejects Unicode chars that uppercase-fold to ASCII letters', () => {
+    // U+017F 长 s → 'S'；U+0131 无点 i → 'I'；U+212A Kelvin 号。都不得被静默接受。
+    for (const ch of ['\u017F', '\u0131', '\u212A']) {
+      expect(() => decodeBase32Loose(ch)).toThrow();
+    }
+  });
+
   it('rejects padding that is not trailing', () => {
     expect(() => decodeBase32Loose('MZ=XW6YTBOI')).toThrow(/padding/);
   });

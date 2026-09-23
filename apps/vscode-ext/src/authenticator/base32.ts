@@ -92,14 +92,19 @@ export function decodeBase32Loose(s: string): Uint8Array {
   return new Uint8Array(out);
 }
 
-/** 校验每个字符属于字母表并统一大写；非法字符抛错。 */
+/** 校验每个字符属于 RFC 4648 §6 字母表（A–Z / a–z / 2–7）并统一大写；非法字符抛错。 */
 function validateAndUpper(data: string): string {
   let upper = '';
   for (let i = 0; i < data.length; i++) {
     const ch = data[i];
-    if (!(ch.toUpperCase() in DECODE_TABLE)) {
-      throw new Error(`invalid base32 character: ${ch}`);
-    }
+    const code = ch.charCodeAt(0);
+    // 只接受 ASCII 的 A–Z/a–z 与 2–7（不能依赖 `ch.toUpperCase() in DECODE_TABLE`：
+    // 个别 Unicode 字符如 U+017F 长 s 会被 toUpperCase 折叠成 ASCII 字母而被静默错解）。
+    const isAlphabetChar =
+      (code >= 0x41 && code <= 0x5a) || // A-Z
+      (code >= 0x61 && code <= 0x7a) || // a-z
+      (code >= 0x32 && code <= 0x37);   // 2-7
+    if (!isAlphabetChar) throw new Error(`invalid base32 character: ${ch}`);
     upper += ch.toUpperCase();
   }
   return upper;

@@ -69,9 +69,17 @@ export function parseOtpauthUri(uri: string): OtpauthParsed {
   const algoParam = (qs.get('algorithm') ?? 'SHA1').toUpperCase();
   if (!ALLOWED_ALGOS.has(algoParam)) throw new Error(`invalid algorithm: ${algoParam}`);
   const algorithm = algoParam as TotpAlgorithm;
-  const digits = qs.get('digits') === '8' ? 8 : 6;
-  const periodNum = qs.get('period') ? parseInt(qs.get('period')!, 10) : 30;
-  const period: 30 | 60 = periodNum === 60 ? 60 : 30;
+  // digits/period 若显式给出则必须合法：与 algorithm 一致地严格拒绝，不静默改写语义。
+  const digitsParam = qs.get('digits');
+  if (digitsParam !== null && digitsParam !== '6' && digitsParam !== '8') {
+    throw new Error(`invalid digits: ${digitsParam}`);
+  }
+  const digits: 6 | 8 = digitsParam === '8' ? 8 : 6;
+  const periodParam = qs.get('period');
+  if (periodParam !== null && periodParam !== '30' && periodParam !== '60') {
+    throw new Error(`invalid period: ${periodParam}`);
+  }
+  const period: 30 | 60 = periodParam === '60' ? 60 : 30;
   return { issuer, account, secret, algorithm, digits, period };
 }
 

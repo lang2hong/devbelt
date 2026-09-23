@@ -165,6 +165,31 @@ describe('AuthenticatorView (panel)', () => {
     expect(p.posted.some((m) => m.type === 'formError' && /migrationUnsupported/.test(m.message))).toBe(true);
   });
 
+  it('tick treats orphan groupId as ungrouped', async () => {
+    const p = makePanel();
+    const entries = [
+      { id: 'e1', issuer: 'A', account: 'a', algorithm: 'SHA1', digits: 6, period: 30, tags: [], createTime: 0, updateTime: 0, groupId: undefined },
+      { id: 'e2', issuer: 'B', account: 'b', algorithm: 'SHA1', digits: 6, period: 30, tags: [], createTime: 0, updateTime: 0, groupId: 'ghost' },
+    ];
+    const store = makeStore({ entries, listGroups: () => [] });
+    AuthenticatorView.open(store);
+    p.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    p.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    const first = p.posted.filter((m) => m.type === 'tick').pop();
+    expect(Object.keys(first.codes).sort()).toEqual(['e1', 'e2']);
+
+    p.posted.length = 0;
+    p.send({ type: 'toggleGroup', groupId: null, folded: true });
+    await flush();
+    p.send({ type: 'ready', __load: 'L1' }); // 再次 ready 触发一次 tick
+    await flush();
+    const after = p.posted.filter((m) => m.type === 'tick').pop();
+    expect(after.codes.e1).toBeUndefined();
+    expect(after.codes.e2).toBeUndefined();
+  });
+
   it('export forwards to exportAuthenticatorEntries', async () => {
     const p = makePanel();
     const store = makeStore();
