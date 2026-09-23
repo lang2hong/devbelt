@@ -2,6 +2,21 @@
 
 All notable changes to this extension are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Authenticator (2FA/TOTP)**: local dynamic codes in a webview panel (does not occupy the activity bar). Paste `otpauth://` links or add a single entry from a QR image; groups, colored tags, search, edit/delete, copy-to-clipboard, and plaintext export (modal warning, `0600`). Secrets are stored only in the OS keychain (VS Code `SecretStorage`) and never sent to the webview — only `code + secondsLeft` are pushed each tick.
+
+### Changed
+
+- Organization (team collaboration) feature fully removed across extension, console, and server.
+- Strict base32 / `otpauth` input validation (reject Unicode-confusable characters and invalid `digits`/`period`).
+
+### Notes
+
+- Personal connection sync (P2) and multi-device authenticator sync (P6) remain **in development** and are not part of this release.
+
 ## [0.2.0] - 2026-08-12
 
 ### Added
