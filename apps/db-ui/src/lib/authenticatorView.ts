@@ -156,3 +156,50 @@ export async function refreshCodes(rows: AuthenticatorRow[], nowMs: number, cach
     }
   }
 }
+
+
+// ── 浏览器解锁缓存（localStorage）────────────────────────────────────────────
+// 用户勾选「记住解锁」时把 DEK 存本地，30 天内免再输 SMP。安全口径见
+// docs/P6-安全评审清单.md：DEK 不再「仅内存」，登出/锁定/切号/过期即清。
+
+export const DEK_CACHE_KEY = 'devbelt.authenticator.dek';
+export const DEK_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+export interface DekCacheEntry {
+  dek: Uint8Array;
+  userId: string;
+  keyEpoch: string;
+  exp: number;
+}
+
+function bytesToB64(b: Uint8Array): string {
+  let s = '';
+  for (const x of b) s += String.fromCharCode(x);
+  return btoa(s);
+}
+
+function b64ToBytes(s: string): Uint8Array {
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+export function encodeDekCache(e: DekCacheEntry): string {
+  return JSON.stringify({ v: 1, dek: bytesToB64(e.dek), userId: e.userId, keyEpoch: e.keyEpoch, exp: e.exp });
+}
+
+/** 解析并校验缓存：版本/字段/时效（`exp > now`）/账号匹配/DEK 长度，任一不符返回 undefined。 */
+export function decodeDekCache(raw: string | null | undefined, now: number, userId: string): DekCacheEntry | undefined {
+  if (!raw) return undefined;
+  try {
+    const o = JSON.parse(raw) as { v?: unknown; dek?: unknown; userId?: unknown; keyEpoch?: unknown; exp?: unknown };
+    if (o.v !== 1 || typeof o.dek !== 'string' || typeof o.userId !== 'string' || typeof o.keyEpoch !== 'string' || typeof o.exp !== 'number') return undefined;
+    if (o.userId !== userId || o.exp <= now) return undefined;
+    const dek = b64ToBytes(o.dek);
+    if (dek.length !== 32) return undefined;
+    return { dek, userId: o.userId, keyEpoch: o.keyEpoch, exp: o.exp };
+  } catch {
+    return undefined;
+  }
+}

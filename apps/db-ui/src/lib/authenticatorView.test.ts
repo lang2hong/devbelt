@@ -9,7 +9,8 @@ vi.mock('@devbelt/auth-client', () => ({
 
 import { openCipherRecord, importTotpKey, totpCodeForKey, totpSecondsLeft } from '@devbelt/auth-client';
 import {
-  collectAuthenticatorRows, createTotpCache, refreshCodes, toAuthenticatorRow, toEnvelopeDto, toSmpKdfDto,
+  collectAuthenticatorRows, createTotpCache, decodeDekCache, encodeDekCache, refreshCodes, toAuthenticatorRow, toEnvelopeDto, toSmpKdfDto,
+  DEK_CACHE_TTL_MS,
   type AuthenticatorRow,
 } from './authenticatorView';
 
@@ -155,5 +156,24 @@ describe('refreshCodes', () => {
     await refreshCodes(rows, 31_000, cache);
     expect(rows[0].code).toBe('------');
     expect(cache.has('r1')).toBe(false);
+  });
+});
+
+
+describe('DEK 缓存编解码', () => {
+  const dek = new Uint8Array(32).fill(7);
+  const entry = { dek, userId: '1', keyEpoch: '2', exp: 1_000_000 };
+
+  it('round-trips and validates expiry / userId / malformed input', () => {
+    const raw = encodeDekCache(entry);
+    const ok = decodeDekCache(raw, 999_999, '1');
+    expect(ok?.keyEpoch).toBe('2');
+    expect(Array.from(ok!.dek)).toEqual(Array.from(dek));
+    expect(decodeDekCache(raw, 1_000_000, '1')).toBeUndefined(); // 过期（exp <= now）
+    expect(decodeDekCache(raw, 999_999, '2')).toBeUndefined();   // 账号不匹配
+    expect(decodeDekCache('not json', 0, '1')).toBeUndefined();
+    expect(decodeDekCache(JSON.stringify({ v: 1, dek: 'AA', userId: '1', keyEpoch: '2', exp: 9 }), 0, '1')).toBeUndefined(); // 长度不足
+    expect(decodeDekCache(null, 0, '1')).toBeUndefined();
+    expect(DEK_CACHE_TTL_MS).toBe(30 * 24 * 60 * 60 * 1000);
   });
 });

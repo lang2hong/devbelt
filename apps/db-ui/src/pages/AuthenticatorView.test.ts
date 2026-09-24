@@ -57,6 +57,8 @@ function buttonByText(wrapper: VueWrapper, text: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  try { localStorage.clear(); } catch { /* ignore */ } // 隔离「记住解锁」缓存
+
   mocks.getE2eeParams.mockResolvedValue({ kind: 'ok', value: E2EE_PARAMS });
   mocks.unlock.mockResolvedValue(new Uint8Array(32).fill(1));
   mocks.getSyncRecords.mockResolvedValue({ kind: 'ok', value: { records: [ENTRY_RECORD], nextAfter: undefined } });
@@ -145,10 +147,47 @@ describe('AuthenticatorView', () => {
     await buttonByText(wrapper, '解锁').trigger('click');
     await flushPromises();
 
-    await buttonByText(wrapper, '复制').trigger('click');
+    await wrapper.find('.card').trigger('click');
     await flushPromises();
     expect(writeText).toHaveBeenCalledWith('654321');
     expect(wrapper.text()).toContain('已复制');
+    wrapper.unmount();
+  });
+
+  it('remembers the unlock in localStorage and restores without re-entering SMP', async () => {
+    const w1 = mountView({ userId: '7' });
+    await w1.find('input').setValue('smp');
+    await buttonByText(w1, '解锁').trigger('click');
+    await flushPromises();
+    expect(localStorage.getItem('devbelt.authenticator.dek')).toBeTruthy();
+    w1.unmount();
+
+    mocks.unlock.mockClear();
+    const w2 = mountView({ userId: '7' });
+    await flushPromises();
+    expect(mocks.unlock).not.toHaveBeenCalled(); // 命中缓存，跳过 Argon2id
+    expect(w2.text()).toContain('654321');
+    w2.unmount();
+  });
+
+  it('does not persist when 记住解锁 is unchecked', async () => {
+    const wrapper = mountView({ userId: '7' });
+    await wrapper.find('input[type="checkbox"]').setValue(false);
+    await wrapper.find('input:not([type="checkbox"])').setValue('smp');
+    await buttonByText(wrapper, '解锁').trigger('click');
+    await flushPromises();
+    expect(localStorage.getItem('devbelt.authenticator.dek')).toBeNull();
+    wrapper.unmount();
+  });
+
+  it('clears the saved unlock on explicit lock', async () => {
+    const wrapper = mountView({ userId: '7' });
+    await wrapper.find('input').setValue('smp');
+    await buttonByText(wrapper, '解锁').trigger('click');
+    await flushPromises();
+    expect(localStorage.getItem('devbelt.authenticator.dek')).toBeTruthy();
+    await buttonByText(wrapper, '锁定').trigger('click');
+    expect(localStorage.getItem('devbelt.authenticator.dek')).toBeNull();
     wrapper.unmount();
   });
 
