@@ -19,6 +19,8 @@
 | P4 | [支付闭环](阶段/P4-支付闭环.md) |
 | P5 | [2FA/TOTP 验证器](阶段/P5-2FA-TOTP验证器.md) |
 | P6 | [多设备同步与网页版](阶段/P6-多设备同步与网页版.md) |
+| P7 | [Redis 客户端](阶段/P7-Redis客户端.md) |
+| P8 | [Elasticsearch 客户端](阶段/P8-Elasticsearch客户端.md) |
 
 ## 文档规则
 
