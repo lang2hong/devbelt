@@ -1,24 +1,31 @@
 <script setup lang="ts">
 import { onUnmounted, ref, watch } from 'vue';
-import { unlockDekBrowser, DekSession, totpWeb, type SmpKdfDto, type SmpKdfParams } from '@devbelt/auth-client';
+import { unlockDekBrowser, DekSession, type SmpKdfParams } from '@devbelt/auth-client';
 import { getE2eeParams, getSyncRecords } from '../api/sync';
-import { collectAuthenticatorRows, type AuthenticatorRow, type FeedPage } from '../lib/authenticatorView';
+import {
+  collectAuthenticatorRows, createTotpCache, refreshCodes, toEnvelopeDto, toSmpKdfDto,
+  type AuthenticatorRow, type FeedPage, type TotpCache,
+} from '../lib/authenticatorView';
 
 /**
  * P6-S5c：网页端验证器（只读展示）。
  * 主密码解锁 → Argon2id(Worker) → DEK（仅内存）→ 解密密文 records → 展示/复制口令。
- * 不做写操作；登出/离开页面即清 DEK（并用解锁令牌作废在途解锁）。
+ * 不做写操作；登出/离开页面即清 DEK、TOTP 缓存与定时器（并用解锁令牌作废在途解锁）。
  */
 const props = defineProps<{ user: { userId: string } | null }>();
 
 const smp = ref('');
 const busy = ref(false);
+const loading = ref(false);
 const err = ref('');
 const unlocked = ref(false);
 const rows = ref<AuthenticatorRow[]>([]);
 const truncated = ref(false);
+const copiedId = ref('');
 const session = new DekSession();
+const totpCache: TotpCache = createTotpCache();
 let timer: ReturnType<typeof setInterval> | undefined;
+let copyTimer: ReturnType<typeof setTimeout> | undefined;
 /** 解锁令牌：lock()/登出时自增，令在途的 unlock() 在下一个 await 后放弃。 */
 let unlockAttempt = 0;
 let disposed = false;
@@ -27,6 +34,7 @@ let ticking = false;
 const ARGON2_TIMEOUT_MS = 30_000;
 
 function stopTimer(): void { if (timer !== undefined) { clearInterval(timer); timer = undefined; } }
+function clearCopyTimer(): void { if (copyTimer !== undefined) { clearTimeout(copyTimer); copyTimer = undefined; } }
 
 /** Worker 内执行 Argon2id；挂死时超时终止，避免 busy 永久卡住 / Worker 泄漏。 */
 async function deriveKekViaWorker(smpValue: string, params: SmpKdfParams): Promise<Uint8Array> {
@@ -56,39 +64,10 @@ async function tick(): Promise<void> {
   if (ticking) return;
   ticking = true;
   try {
-    const now = Date.now();
-    for (const r of rows.value) {
-      try {
-        const { code, secondsLeft } = await totpWeb(r.secret, now, r.period, r.digits, r.algorithm);
-        r.code = code;
-        r.secondsLeft = secondsLeft;
-      } catch { r.code = '------'; r.secondsLeft = 0; }
-    }
+    await refreshCodes(rows.value, Date.now(), totpCache);
   } finally {
     ticking = false;
   }
-}
-
-/** 服务端 `smpKdf`（unknown）→ 严格 DTO；非法即抛错（fail-closed）。 */
-function toSmpKdfDto(raw: Record<string, unknown>): SmpKdfDto {
-  const { alg, version, memoryKiB, iterations, parallelism, salt, outputBytes } = raw;
-  if (alg !== 'argon2id' || version !== 1 || outputBytes !== 32 ||
-      typeof memoryKiB !== 'number' || typeof iterations !== 'number' || typeof parallelism !== 'number' || typeof salt !== 'string') {
-    throw new Error('同步 KDF 参数不完整');
-  }
-  return { alg, version, memoryKiB, iterations, parallelism, salt, outputBytes };
-}
-
-/** 服务端 `envelopeSmp`（unknown）→ EnvelopeDto；字段缺失即抛错。 */
-function toEnvelopeDto(raw: Record<string, unknown>): Parameters<typeof unlockDekBrowser>[4] {
-  const { envelopeVersion, nonce, ciphertext, tag } = raw;
-  if (typeof envelopeVersion !== 'string' || !envelopeVersion ||
-      typeof nonce !== 'string' || !nonce ||
-      typeof ciphertext !== 'string' || !ciphertext ||
-      typeof tag !== 'string' || !tag) {
-    throw new Error('同步信封字段不完整');
-  }
-  return { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion, nonce, ciphertext, tag };
 }
 
 async function fetchPage(after: string, limit: number): Promise<FeedPage> {
@@ -113,13 +92,18 @@ async function unlock(): Promise<void> {
     const dek = await unlockDekBrowser(user.userId, v.keyEpoch, smp.value, toSmpKdfDto(v.smpKdf), toEnvelopeDto(v.envelopeSmp), deriveKekViaWorker);
     if (disposed || attempt !== unlockAttempt) { dek.fill(0); return; }
     session.set(dek);
+    dek.fill(0); // session 已持副本；原始 buffer 立即清零
+    const key = session.get();
+    if (!key) throw new Error('未解锁');
     unlocked.value = true;
+    loading.value = true;
     const { rows: loaded, truncated: cut } = await collectAuthenticatorRows(
-      dek, { userId: user.userId, keyEpoch: v.keyEpoch }, fetchPage,
+      key, { userId: user.userId, keyEpoch: v.keyEpoch }, fetchPage,
     );
     if (disposed || attempt !== unlockAttempt) { lock(); return; }
     rows.value = loaded;
     truncated.value = cut;
+    loading.value = false;
     await tick();
     if (disposed || attempt !== unlockAttempt) { lock(); return; }
     stopTimer();
@@ -128,6 +112,7 @@ async function unlock(): Promise<void> {
     if (attempt === unlockAttempt) {
       session.clear();
       unlocked.value = false;
+      loading.value = false;
       rows.value = [];
       truncated.value = false;
       err.value = e instanceof Error ? e.message : String(e);
@@ -141,7 +126,11 @@ async function unlock(): Promise<void> {
 function lock(): void {
   unlockAttempt++;
   busy.value = false;
+  loading.value = false;
   stopTimer();
+  clearCopyTimer();
+  copiedId.value = '';
+  totpCache.clear();
   session.clear();
   unlocked.value = false;
   rows.value = [];
@@ -151,7 +140,12 @@ function lock(): void {
 
 async function copy(r: AuthenticatorRow): Promise<void> {
   if (!r.code || r.code === '------') return;
-  try { await navigator.clipboard.writeText(r.code); } catch { /* 剪贴板不可用时忽略 */ }
+  try {
+    await navigator.clipboard.writeText(r.code);
+    copiedId.value = r.recordId;
+    clearCopyTimer();
+    copyTimer = setTimeout(() => { copiedId.value = ''; copyTimer = undefined; }, 1500);
+  } catch { /* 剪贴板不可用时忽略 */ }
 }
 
 watch(() => props.user?.userId, () => lock());
@@ -166,7 +160,7 @@ onUnmounted(() => { disposed = true; lock(); });
     </header>
 
     <div v-if="!unlocked" class="unlock">
-      <input v-model="smp" type="password" autocomplete="off" :disabled="busy" placeholder="同步主密码（SMP）" @keyup.enter="unlock" />
+      <input v-model="smp" type="password" autocomplete="new-password" :disabled="busy" placeholder="同步主密码（SMP）" @keyup.enter="unlock" />
       <button class="btn" :disabled="busy" @click="unlock">{{ busy ? '解锁中…' : '解锁' }}</button>
     </div>
     <p v-if="err" class="error">{{ err }}</p>
@@ -181,10 +175,11 @@ onUnmounted(() => { disposed = true; lock(); });
             <td>{{ r.issuer || '—' }}</td>
             <td>{{ r.account || '—' }}</td>
             <td><code>{{ r.code }}</code> <span class="muted">{{ r.secondsLeft }}s</span></td>
-            <td><button class="btn secondary small" @click="copy(r)">复制</button></td>
+            <td><button class="btn secondary small" @click="copy(r)">{{ copiedId === r.recordId ? '已复制' : '复制' }}</button></td>
           </tr>
         </tbody>
       </table>
+      <p v-else-if="loading" class="muted">正在解密…</p>
       <p v-else class="muted">暂无验证器条目。</p>
     </template>
   </section>

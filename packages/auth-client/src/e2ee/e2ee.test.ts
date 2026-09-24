@@ -6,7 +6,8 @@ import { encodeBase64Url } from '@devbelt/db-host/sync/crypto/recoveryCode';
 import { unlockDekBrowser, smpKdfDtoToParams, type SmpKdfDto } from './unlock';
 import { openCipherRecord } from './record';
 import { DekSession } from './dekSession';
-import { totpWeb } from './totpWeb';
+import { importTotpKey, totpCodeForKey, totpSecondsLeft, totpWeb } from './totpWeb';
+import { encodeBase32UpperCaseNoPadding } from '@devbelt/db-host/authenticator/base32';
 
 const USER = '7';
 const EPOCH = '1';
@@ -75,5 +76,33 @@ describe('P6-S5b DekSession', () => {
     expect(s.get()).toBeUndefined();
     expect(Array.from(held)).toEqual(new Array(32).fill(0));
     expect(() => s.set(new Uint8Array(16))).toThrow(/32 bytes/);
+  });
+});
+
+describe('P6-S5c totpWeb primitives', () => {
+  const seed = (ascii: string): string => encodeBase32UpperCaseNoPadding(new Uint8Array(Buffer.from(ascii, 'utf8')));
+
+  it('matches RFC 6238 SHA1/SHA256/SHA512 vectors at T=59 (8 digits)', async () => {
+    const sha1 = seed('12345678901234567890');
+    const sha256 = seed('12345678901234567890123456789012');
+    const sha512 = seed('1234567890123456789012345678901234567890123456789012345678901234');
+    expect((await totpWeb(sha1, 59_000, 30, 8, 'SHA1')).code).toBe('94287082');
+    expect((await totpWeb(sha256, 59_000, 30, 8, 'SHA256')).code).toBe('46119246');
+    expect((await totpWeb(sha512, 59_000, 30, 8, 'SHA512')).code).toBe('90693936');
+  });
+
+  it('composes importTotpKey + totpCodeForKey equivalently to totpWeb', async () => {
+    const secret = seed('12345678901234567890');
+    const key = await importTotpKey(secret, 'SHA1');
+    const counter = BigInt(Math.floor(59_000 / 1000 / 30));
+    expect(await totpCodeForKey(key, counter, 8)).toBe('94287082');
+  });
+
+  it('computes secondsLeft boundaries', () => {
+    expect(totpSecondsLeft(0, 30)).toBe(30);
+    expect(totpSecondsLeft(29_000, 30)).toBe(1);
+    expect(totpSecondsLeft(30_000, 30)).toBe(30);
+    expect(totpSecondsLeft(0, 60)).toBe(60);
+    expect(totpSecondsLeft(59_000, 60)).toBe(1);
   });
 });

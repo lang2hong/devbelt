@@ -1,20 +1,42 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
-vi.mock('@devbelt/auth-client', () => ({ openCipherRecord: vi.fn() }));
+vi.mock('@devbelt/auth-client', () => ({
+  openCipherRecord: vi.fn(),
+  importTotpKey: vi.fn(),
+  totpCodeForKey: vi.fn(),
+  totpSecondsLeft: vi.fn(),
+}));
 
-import { openCipherRecord } from '@devbelt/auth-client';
-import { collectAuthenticatorRows, toAuthenticatorRow } from './authenticatorView';
+import { openCipherRecord, importTotpKey, totpCodeForKey, totpSecondsLeft } from '@devbelt/auth-client';
+import {
+  collectAuthenticatorRows, createTotpCache, refreshCodes, toAuthenticatorRow, toEnvelopeDto, toSmpKdfDto,
+  type AuthenticatorRow,
+} from './authenticatorView';
 
 const rec = (recordId: string) => ({ recordId, version: '1', changeSequence: recordId, deleteTime: null });
 const dek = new Uint8Array(32).fill(1);
 const ctx = { userId: '7', keyEpoch: '1' };
 
+function row(over: Partial<AuthenticatorRow> = {}): AuthenticatorRow {
+  return { recordId: 'r1', issuer: 'A', algorithm: 'SHA1', digits: 6, period: 30, secret: 'AAAA', code: '', secondsLeft: 0, ...over };
+}
+
+beforeEach(() => {
+  vi.mocked(openCipherRecord).mockReset();
+  vi.mocked(importTotpKey).mockReset();
+  vi.mocked(importTotpKey).mockResolvedValue({} as CryptoKey);
+  vi.mocked(totpCodeForKey).mockReset();
+  vi.mocked(totpCodeForKey).mockResolvedValue('111111');
+  vi.mocked(totpSecondsLeft).mockReset();
+  vi.mocked(totpSecondsLeft).mockImplementation((nowMs: number, period: 30 | 60 = 30) => period - (Math.floor(nowMs / 1000) % period));
+});
+
 describe('toAuthenticatorRow', () => {
   it('maps a valid authenticatorEntry payload', () => {
-    const row = toAuthenticatorRow('r1', {
+    const r = toAuthenticatorRow('r1', {
       type: 'authenticatorEntry', issuer: 'Acme', account: 'a@b', algorithm: 'SHA256', digits: 8, period: 60, secret: 'ABCD',
     });
-    expect(row).toMatchObject({
+    expect(r).toMatchObject({
       recordId: 'r1', issuer: 'Acme', account: 'a@b', algorithm: 'SHA256', digits: 8, period: 60, secret: 'ABCD', code: '', secondsLeft: 0,
     });
   });
@@ -29,14 +51,32 @@ describe('toAuthenticatorRow', () => {
   });
 
   it('defaults a missing account and tolerates an empty issuer', () => {
-    const row = toAuthenticatorRow('r', { type: 'authenticatorEntry', algorithm: 'SHA1', digits: 6, period: 30, secret: 'A' });
-    expect(row).toMatchObject({ issuer: '', account: undefined });
+    const r = toAuthenticatorRow('r', { type: 'authenticatorEntry', algorithm: 'SHA1', digits: 6, period: 30, secret: 'A' });
+    expect(r).toMatchObject({ issuer: '', account: undefined });
+  });
+});
+
+describe('toSmpKdfDto / toEnvelopeDto', () => {
+  const kdf = { alg: 'argon2id', version: 1, memoryKiB: 65536, iterations: 3, parallelism: 1, salt: 'AAAA', outputBytes: 32 };
+  const env = { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion: '1', nonce: 'n', ciphertext: 'c', tag: 't' };
+
+  it('accepts well-formed server DTOs', () => {
+    expect(toSmpKdfDto(kdf)).toEqual(kdf);
+    expect(toEnvelopeDto(env)).toEqual(env);
+  });
+
+  it('fails closed on malformed server DTOs', () => {
+    expect(() => toSmpKdfDto(null)).toThrow();
+    expect(() => toSmpKdfDto({ ...kdf, alg: 'scrypt' })).toThrow();
+    expect(() => toSmpKdfDto({ ...kdf, outputBytes: 64 })).toThrow();
+    expect(() => toSmpKdfDto({ ...kdf, salt: undefined })).toThrow();
+    expect(() => toEnvelopeDto({})).toThrow();
+    expect(() => toEnvelopeDto({ ...env, nonce: '' })).toThrow();
+    expect(() => toEnvelopeDto({ ...env, tag: undefined })).toThrow();
   });
 });
 
 describe('collectAuthenticatorRows', () => {
-  beforeEach(() => { vi.mocked(openCipherRecord).mockReset(); });
-
   it('collects entries across pages, skipping tombstones and other kinds', async () => {
     const payloads: Record<string, unknown> = {
       a: { type: 'authenticatorEntry', issuer: 'A', algorithm: 'SHA1', digits: 6, period: 30, secret: 'AAAA' },
@@ -76,5 +116,44 @@ describe('collectAuthenticatorRows', () => {
       { maxPages: 3, pageSize: 1 },
     );
     expect(truncated).toBe(true);
+  });
+});
+
+describe('refreshCodes', () => {
+  it('reuses the imported key within a period and recomputes on rollover', async () => {
+    const cache = createTotpCache();
+    const rows = [row()];
+
+    await refreshCodes(rows, 1_000, cache);
+    expect(rows[0].code).toBe('111111');
+    expect(importTotpKey).toHaveBeenCalledTimes(1);
+    expect(totpCodeForKey).toHaveBeenCalledTimes(1);
+
+    await refreshCodes(rows, 2_000, cache); // 同周期
+    expect(importTotpKey).toHaveBeenCalledTimes(1);
+    expect(totpCodeForKey).toHaveBeenCalledTimes(1);
+
+    vi.mocked(totpCodeForKey).mockResolvedValue('222222');
+    await refreshCodes(rows, 31_000, cache); // 跨周期，同一 secret → 复用 key
+    expect(importTotpKey).toHaveBeenCalledTimes(1);
+    expect(totpCodeForKey).toHaveBeenCalledTimes(2);
+    expect(rows[0].code).toBe('222222');
+    expect(rows[0].secondsLeft).toBe(29);
+  });
+
+  it('re-imports when the secret changes and marks failures', async () => {
+    const cache = createTotpCache();
+    const rows = [row({ secret: 'AAAA' })];
+    await refreshCodes(rows, 1_000, cache);
+    expect(importTotpKey).toHaveBeenCalledTimes(1);
+
+    rows[0].secret = 'BBBB';
+    await refreshCodes(rows, 1_000, cache);
+    expect(importTotpKey).toHaveBeenCalledTimes(2);
+
+    vi.mocked(totpCodeForKey).mockRejectedValue(new Error('bad secret'));
+    await refreshCodes(rows, 31_000, cache);
+    expect(rows[0].code).toBe('------');
+    expect(cache.has('r1')).toBe(false);
   });
 });

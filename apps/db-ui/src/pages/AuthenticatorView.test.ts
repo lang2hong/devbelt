@@ -6,7 +6,9 @@ const mocks = vi.hoisted(() => ({
   sessionSet: vi.fn(),
   sessionClear: vi.fn(),
   unlock: vi.fn(),
-  totp: vi.fn(async () => ({ code: '654321', secondsLeft: 12 })),
+  importKey: vi.fn(),
+  totpCode: vi.fn(),
+  totpSecondsLeft: vi.fn(),
   openRecord: vi.fn(),
   getE2eeParams: vi.fn(),
   getSyncRecords: vi.fn(),
@@ -14,7 +16,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@devbelt/auth-client', () => ({
   unlockDekBrowser: mocks.unlock,
-  totpWeb: mocks.totp,
+  importTotpKey: mocks.importKey,
+  totpCodeForKey: mocks.totpCode,
+  totpSecondsLeft: mocks.totpSecondsLeft,
   openCipherRecord: mocks.openRecord,
   DekSession: class {
     set = mocks.sessionSet;
@@ -57,6 +61,9 @@ beforeEach(() => {
   mocks.unlock.mockResolvedValue(new Uint8Array(32).fill(1));
   mocks.getSyncRecords.mockResolvedValue({ kind: 'ok', value: { records: [ENTRY_RECORD], nextAfter: undefined } });
   mocks.openRecord.mockResolvedValue(ENTRY_PAYLOAD);
+  mocks.importKey.mockResolvedValue({} as CryptoKey);
+  mocks.totpCode.mockResolvedValue('654321');
+  mocks.totpSecondsLeft.mockImplementation((nowMs: number, period: 30 | 60 = 30) => period - (Math.floor(nowMs / 1000) % period));
 });
 
 describe('AuthenticatorView', () => {
@@ -70,6 +77,22 @@ describe('AuthenticatorView', () => {
     expect(mocks.sessionSet).toHaveBeenCalledTimes(1);
     expect(wrapper.text()).toContain('Acme');
     expect(wrapper.text()).toContain('654321');
+    wrapper.unmount();
+  });
+
+  it('shows a loading hint until records are decrypted', async () => {
+    let resolvePage!: (v: unknown) => void;
+    mocks.getSyncRecords.mockReturnValue(new Promise((r) => { resolvePage = r; }));
+    const wrapper = mountView({ userId: '7' });
+    await buttonByText(wrapper, '解锁').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('正在解密…');
+    expect(wrapper.text()).not.toContain('暂无验证器条目');
+
+    resolvePage({ kind: 'ok', value: { records: [ENTRY_RECORD], nextAfter: undefined } });
+    await flushPromises();
+    expect(wrapper.text()).toContain('Acme');
     wrapper.unmount();
   });
 
@@ -112,6 +135,20 @@ describe('AuthenticatorView', () => {
     expect(mocks.sessionClear).toHaveBeenCalledTimes(1);
     expect(wrapper.find('input').exists()).toBe(true);
     expect((wrapper.find('input').element as HTMLInputElement).value).toBe('');
+    wrapper.unmount();
+  });
+
+  it('shows copy feedback after copying a code', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const wrapper = mountView({ userId: '7' });
+    await buttonByText(wrapper, '解锁').trigger('click');
+    await flushPromises();
+
+    await buttonByText(wrapper, '复制').trigger('click');
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledWith('654321');
+    expect(wrapper.text()).toContain('已复制');
     wrapper.unmount();
   });
 

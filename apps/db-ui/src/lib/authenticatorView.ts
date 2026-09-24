@@ -1,8 +1,12 @@
-import { openCipherRecord, type CipherRecord } from '@devbelt/auth-client';
+import {
+  openCipherRecord, importTotpKey, totpCodeForKey, totpSecondsLeft,
+  type CipherRecord, type SmpKdfDto, type EnvelopeDto,
+} from '@devbelt/auth-client';
 
 /**
- * P6-S5c：验证器页纯逻辑（无 Vue/无 DOM，便于单测）。
- * 负责「解密后的 record payload → 展示行」的筛选/映射，以及 feed 的分页收集。
+ * P6-S5c：验证器页纯逻辑（无 Vue/无 DOM 依赖，便于单测）。
+ * 负责：解密后的 record payload → 展示行的筛选/映射、feed 分页收集、
+ * 服务端 DTO 的 fail-closed 校验、以及带 CryptoKey 缓存的 TOTP 刷新。
  */
 
 export type AuthAlgorithm = 'SHA1' | 'SHA256' | 'SHA512';
@@ -62,6 +66,31 @@ export function toAuthenticatorRow(recordId: string, payload: unknown): Authenti
   return { recordId, issuer, account, algorithm, digits, period, secret: p.secret, code: '', secondsLeft: 0 };
 }
 
+/** 服务端 `smpKdf`（unknown）→ 严格 DTO；非法即抛错（fail-closed）。范围/盐长仍由 unlockDekBrowser 兜底。 */
+export function toSmpKdfDto(raw: unknown): SmpKdfDto {
+  if (typeof raw !== 'object' || raw === null) throw new Error('同步 KDF 参数不完整');
+  const { alg, version, memoryKiB, iterations, parallelism, salt, outputBytes } = raw as Record<string, unknown>;
+  if (alg !== 'argon2id' || version !== 1 || outputBytes !== 32 ||
+      typeof memoryKiB !== 'number' || typeof iterations !== 'number' ||
+      typeof parallelism !== 'number' || typeof salt !== 'string') {
+    throw new Error('同步 KDF 参数不完整');
+  }
+  return { alg, version, memoryKiB, iterations, parallelism, salt, outputBytes };
+}
+
+/** 服务端 `envelopeSmp`（unknown）→ EnvelopeDto；字段缺失即抛错。 */
+export function toEnvelopeDto(raw: unknown): EnvelopeDto {
+  if (typeof raw !== 'object' || raw === null) throw new Error('同步信封字段不完整');
+  const { envelopeVersion, nonce, ciphertext, tag } = raw as Record<string, unknown>;
+  if (typeof envelopeVersion !== 'string' || !envelopeVersion ||
+      typeof nonce !== 'string' || !nonce ||
+      typeof ciphertext !== 'string' || !ciphertext ||
+      typeof tag !== 'string' || !tag) {
+    throw new Error('同步信封字段不完整');
+  }
+  return { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion, nonce, ciphertext, tag };
+}
+
 /**
  * 逐页拉取 feed 并解密，收集验证器条目（跳过墓碑与其它 entity kind）。
  * `truncated=true` 表示到达 `maxPages` 上限时仍有后续页，UI 应提示「仅显示部分」。
@@ -87,4 +116,43 @@ export async function collectAuthenticatorRows(
     after = nextAfter;
   }
   return { rows, truncated: true };
+}
+
+/** 每条记录的 TOTP 缓存：secret 变化（条目被更新）即失效重导，counter 未变则复用 code。 */
+export interface TotpCacheEntry {
+  secret: string;
+  key: CryptoKey;
+  counter: string;
+  code: string;
+}
+
+export type TotpCache = Map<string, TotpCacheEntry>;
+
+export function createTotpCache(): TotpCache {
+  return new Map();
+}
+
+/**
+ * 刷新展示行的 TOTP：每行都更新 `secondsLeft`；仅在周期翻转或 secret 变化时才做
+ * `importKey` + `sign`，同周期内直接复用缓存 code。单项失败置 `'------'` 并清缓存。
+ */
+export async function refreshCodes(rows: AuthenticatorRow[], nowMs: number, cache: TotpCache): Promise<void> {
+  for (const row of rows) {
+    row.secondsLeft = totpSecondsLeft(nowMs, row.period);
+    const counter = String(Math.floor(nowMs / 1000 / row.period));
+    const entry = cache.get(row.recordId);
+    if (entry && entry.secret === row.secret && entry.counter === counter) {
+      row.code = entry.code;
+      continue;
+    }
+    try {
+      const key = entry && entry.secret === row.secret ? entry.key : await importTotpKey(row.secret, row.algorithm);
+      const code = await totpCodeForKey(key, BigInt(counter), row.digits);
+      cache.set(row.recordId, { secret: row.secret, key, counter, code });
+      row.code = code;
+    } catch {
+      row.code = '------';
+      cache.delete(row.recordId);
+    }
+  }
 }
