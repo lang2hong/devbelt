@@ -40,6 +40,8 @@ async function build(): Promise<{ app: FastifyInstance; tokenService: TokenServi
     planRepo: new FakePlanRepo(),
     syncStateRepo: new FakeSyncStateRepo(),
     syncRecordRepo: new FakeSyncRecordRepo(),
+    syncState: {} as never,
+    syncRecordService: {} as never,
     db: {} as Queryable,
   });
   await app.ready();

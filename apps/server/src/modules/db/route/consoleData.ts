@@ -14,6 +14,8 @@ import type {
 } from '../../../repository/interfaces.js';
 import type { Queryable } from '../../../repository/mysql/db.js';
 import { deriveEntitlement } from '../../billing/service/entitlement.js';
+import type { SyncStateService } from '../service/syncStateService.js';
+import type { SyncRecordService } from '../service/syncRecordService.js';
 
 export interface ConsoleDataRouteOptions {
   tokenService: TokenService;
@@ -26,6 +28,9 @@ export interface ConsoleDataRouteOptions {
   planRepo: IPlanRepo;
   syncStateRepo: ISyncStateRepo;
   syncRecordRepo: ISyncRecordRepo;
+  /** P6-S5a：console 作用域 E2EE 材料与密文 feed 读取。 */
+  syncState: SyncStateService;
+  syncRecordService: SyncRecordService;
   /** 只读 Queryable（同步概览聚合走连接池读；非事务）。 */
   db: Queryable;
 }
@@ -41,6 +46,41 @@ export async function consoleDataRoutes(app: FastifyInstance, opts: ConsoleDataR
     aud: 'console',
     scope: ['console'],
     routes: async (child) => {
+      // P6-S5a：浏览器解锁所需 E2EE 材料（SMP 信封 + KDF 参数 + signPub），**不含 secret**。
+      child.get('/api/db/console/sync/e2ee-params', async (req, reply) => {
+        const userId = (req as unknown as { authUserId: number }).authUserId;
+        await opts.rateLimiter.hit(`console:sync-e2ee-params:${userId}`, 60, 30);
+        const state = await opts.syncStateRepo.findByUserId(userId);
+        if (!state) return reply.send({ initialized: false });
+        const dto = await opts.syncState.getState(userId);
+        return reply.send({
+          initialized: true,
+          protocolVersion: dto.protocolVersion,
+          cipherSuite: dto.cipherSuite,
+          formatVersion: dto.formatVersion,
+          keyEpoch: dto.keyEpoch,
+          stateVersion: dto.stateVersion,
+          changeSequence: dto.changeSequence,
+          signPub: dto.signPub,
+          smpKdf: dto.smpKdf,
+          envelopeSmp: dto.envelopeSmp,
+        });
+      });
+
+      // P6-S5a：当前 epoch 的密文 record feed（服务端不解密、无明文）。
+      child.get('/api/db/console/sync/records', async (req, reply) => {
+        const userId = (req as unknown as { authUserId: number }).authUserId;
+        await opts.rateLimiter.hit(`console:sync-records:${userId}`, 120, 30);
+        const q = req.query as Record<string, unknown>;
+        const after = typeof q.after === 'string' && q.after ? q.after : '0';
+        const limitRaw = Number(q.limit ?? 200);
+        const limit = Number.isInteger(limitRaw) ? Math.min(Math.max(limitRaw, 1), 256) : 200;
+        const state = await opts.syncStateRepo.findByUserId(userId);
+        if (!state) return reply.send({ initialized: false, snapshotSequence: '0', records: [] });
+        const result = await opts.syncRecordService.pull(userId, after, undefined, limit);
+        return reply.send({ initialized: true, ...result });
+      });
+
       // 同步概览（§6）：仅聚合元数据，不返回任何 record/密文/E2EE 材料。
       child.get('/api/db/console/sync/overview', async (req, reply) => {
         const userId = (req as unknown as { authUserId: number }).authUserId;

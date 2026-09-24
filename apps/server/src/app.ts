@@ -377,6 +377,8 @@ export async function createApp() {
     planRepo,
     syncStateRepo,
     syncRecordRepo,
+    syncState: syncStateService,
+    syncRecordService,
     db: getMysql(),
   });
   app.register(consoleAdminRoutes, {
