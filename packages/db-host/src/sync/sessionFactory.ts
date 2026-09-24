@@ -34,6 +34,9 @@ export interface SyncSessionFactoryDeps {
   readonly createClient: () => PersonalSyncClient;
   /** P6：验证器同步实体后端（S3 由扩展注入）；缺省时验证器类型不可同步。 */
   readonly authenticatorBackend?: EntityBackend;
+  /** P6：推送成功 / 配额拒绝回调（扩展接线标 localOnly/syncError）。 */
+  readonly onEntityPushed?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
+  readonly onQuotaRejected?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
 }
 
 export class SyncSessionFactory {
@@ -60,7 +63,7 @@ export class SyncSessionFactory {
       this.deps.dekStore,
       this.deps.connectionStore,
       this.deps.createClient(),
-      { entitlement: this.deps.entitlement, onSyncResult: this.deps.onSyncResult, onSessionState: this.deps.onSessionState, autoSyncEnabled: this.deps.autoSyncEnabled, authenticatorBackend: this.deps.authenticatorBackend },
+      { entitlement: this.deps.entitlement, onSyncResult: this.deps.onSyncResult, onSessionState: this.deps.onSessionState, autoSyncEnabled: this.deps.autoSyncEnabled, authenticatorBackend: this.deps.authenticatorBackend, onEntityPushed: this.deps.onEntityPushed, onQuotaRejected: this.deps.onQuotaRejected },
     );
     return this.session;
   }

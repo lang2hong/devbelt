@@ -486,6 +486,31 @@ export class AuthenticatorStore implements VscodeDisposable {
     this.publish('tag', 'delete', id);
   }
 
+  /** P6：标记条目同步失败（按类型配额拒绝）——仅本地派生态，UI 显示“未同步，升级 Pro”。 */
+  async markSyncError(id: string, reason: 'quota'): Promise<void> {
+    this.assertInit();
+    const e = this.entries.find((x) => x.id === id && !x.deleted);
+    if (!e) return;
+    if (e.localOnly === true && e.syncError === reason) return;
+    e.localOnly = true;
+    e.syncError = reason;
+    e.updateTime = Date.now();
+    await this.saveEntries();
+    this.publish('entry', 'update', id);
+  }
+
+  /** P6：清除条目的同步失败标记（推送成功或升级后重新入队）。 */
+  async clearSyncError(id: string): Promise<void> {
+    this.assertInit();
+    const e = this.entries.find((x) => x.id === id);
+    if (!e || (e.localOnly !== true && e.syncError === undefined)) return;
+    e.localOnly = false;
+    e.syncError = undefined;
+    e.updateTime = Date.now();
+    await this.saveEntries();
+    this.publish('entry', 'update', id);
+  }
+
   async deleteEntry(id: string): Promise<{ ok: boolean; reason?: string }> {
     this.assertInit();
     // 事务顺序：先删 secret，成功后再改 memento；secret 删除失败索引不动，避免 orphan secret

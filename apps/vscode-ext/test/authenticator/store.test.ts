@@ -223,6 +223,19 @@ describe('AuthenticatorStore', () => {
     expect(store.getSecret(add.entry.id)).toBeDefined();
   });
 
+  it('markSyncError/clearSyncError toggle localOnly+syncError', async () => {
+    const added = await store.addEntry({ issuer: 'A', secret: 'JBSWY3DPEHPK3PXP' });
+    if (!added.ok) throw new Error('add failed');
+    await store.markSyncError(added.entry.id, 'quota');
+    const marked = store.listEntries().find((e) => e.id === added.entry.id);
+    expect(marked?.localOnly).toBe(true);
+    expect(marked?.syncError).toBe('quota');
+    await store.clearSyncError(added.entry.id);
+    const cleared = store.listEntries().find((e) => e.id === added.entry.id);
+    expect(cleared?.localOnly).toBe(false);
+    expect(cleared?.syncError).toBeUndefined();
+  });
+
   it('upsertFromSync writes explicit id, canonicalizes secret, persists metadata', async () => {
     await store.upsertFromSync({
       id: 'ae_sync_1', issuer: 'Sync', account: 'a', algorithm: 'SHA256', digits: 8, period: 60,

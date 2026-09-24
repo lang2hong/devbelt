@@ -169,6 +169,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     onSessionState: () => syncStatusBar.refresh(),
     createClient: () => new PersonalSyncClient(auth.client),
     authenticatorBackend: new AuthenticatorSyncBackend(authStore),
+    // P6 §六：按类型配额拒绝 → 标 localOnly/quota；推送成功 → 清除标记。
+    onQuotaRejected: async (ref) => {
+      if (ref.type === 'authenticatorEntry') await authStore.markSyncError(ref.localId, 'quota');
+    },
+    onEntityPushed: async (ref) => {
+      if (ref.type === 'authenticatorEntry') await authStore.clearSyncError(ref.localId);
+    },
   });
   context.subscriptions.push({ dispose: () => syncFactory.dispose() });
   const onAuthChange = eventBus.subscribe(AuthEvent, (e) => {

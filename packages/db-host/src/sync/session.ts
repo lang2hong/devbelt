@@ -60,6 +60,9 @@ export interface SyncSessionOptions {
   autoSyncEnabled?: () => boolean;
   /** P6：验证器同步实体后端（S3 由扩展注入）；缺省时验证器类型不可同步。 */
   authenticatorBackend?: EntityBackend;
+  /** P6：推送成功 / 按类型配额拒绝回调（由扩展接线标记本地实体）。 */
+  onEntityPushed?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
+  onQuotaRejected?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
 }
 
 export class PersonalSyncSession {
@@ -394,6 +397,8 @@ export class PersonalSyncSession {
         entitlement: this.opts.entitlement,
         onSettled: this.opts.onSyncResult,
         autoSyncEnabled: this.opts.autoSyncEnabled,
+        onEntityPushed: this.opts.onEntityPushed,
+        onQuotaRejected: this.opts.onQuotaRejected,
       });
       this.engine = runtime.engine;
       this.coordinator = runtime.coordinator;

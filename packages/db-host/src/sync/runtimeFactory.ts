@@ -39,6 +39,9 @@ export interface BuildSyncRuntimeDeps {
   onSettled?: (result: SyncRunResult | undefined) => void;
   /** 自动同步开关（按机器）；缺省开启。 */
   autoSyncEnabled?: () => boolean;
+  /** P6：推送成功 / 配额拒绝回调（透传到 SyncEngine）。 */
+  onEntityPushed?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
+  onQuotaRejected?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
 }
 
 /**
@@ -72,6 +75,8 @@ export function buildSyncRuntime(deps: BuildSyncRuntimeDeps): SyncRuntime {
     uniqueId: deps.uniqueId,
     entitlement: deps.entitlement,
     seedConflictCarrier: (recordId, ref, baseVersion) => mutator.rebasePut(recordId, ref, baseVersion),
+    onEntityPushed: deps.onEntityPushed,
+    onQuotaRejected: deps.onQuotaRejected,
   });
   const coordinator = new SyncCoordinator(deps.store, mutator, engine, {
     onSettled: deps.onSettled,

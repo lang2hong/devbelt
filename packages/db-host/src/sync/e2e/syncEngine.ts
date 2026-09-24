@@ -143,6 +143,10 @@ export interface SyncEngineDeps {
   uniqueId: (type: import('./syncEntity').SyncEntityType) => string;
   entitlement?: () => CachedEntitlement | undefined;
   feedPageLimit?: number;
+  /** P6：某条 put 推送成功并确认映射后回调（用于清除本地“未同步”标记）。 */
+  onEntityPushed?: (ref: import('./syncEntity').SyncEntityRef) => void | Promise<void>;
+  /** P6：按类型配额拒绝（终态）时回调该记录对应本地实体（用于标 localOnly/syncError）。 */
+  onQuotaRejected?: (ref: import('./syncEntity').SyncEntityRef) => void | Promise<void>;
 }
 
 function describe(err: unknown): string {
@@ -249,6 +253,10 @@ export class SyncEngine {
         if (err instanceof SyncApiError) {
           const cls = classifyError(err);
           if (cls === 'terminal' || cls === 'terminal-state' || cls === 'terminal-epoch') {
+            if (err.code === 'SYNC_QUOTA_EXCEEDED') {
+              // P6 §六：按类型配额拒绝 → 标记本地实体 localOnly/quota（不静默循环；终态已停重试）。
+              try { await this.deps.onQuotaRejected?.({ type: m.type, localId: m.localId }); } catch { /* 回调失败不改变终态 */ }
+            }
             return {
               stage: 'terminal', conflicts, applied: 0,
               terminal: { mutationId: m.mutationId, code: err.code, currentKeyEpoch: err.currentKeyEpoch },
@@ -543,6 +551,7 @@ export class SyncEngine {
         revision: m.revision,
         status: 'confirmed',
       });
+      try { await this.deps.onEntityPushed?.({ type: m.type, localId: m.localId }); } catch { /* 回调失败不影响确认 */ }
     } else {
       await this.deps.mapStore.deleteByRef({ type: m.type, localId: m.localId });
     }
