@@ -749,6 +749,20 @@ export class FakeSyncRecordRepo implements ISyncRecordRepo {
       .sort((a, b) => (BigInt(a.changeSequence) > BigInt(b.changeSequence) ? 1 : -1));
   }
 
+  async overviewByKind(_exec: Queryable, userId: number, keyEpoch: string): Promise<Array<{ entityKind: string | null; count: number; bytes: number; lastActivityTime: Date | null }>> {
+    const acc = new Map<string | null, { entityKind: string | null; count: number; bytes: number; lastActivityTime: Date | null }>();
+    for (const m of this.store.values()) {
+      if (m.userId !== userId || m.keyEpoch !== keyEpoch || m.deleteTime) continue;
+      const k = m.entityKind ?? null;
+      const cur = acc.get(k) ?? { entityKind: k, count: 0, bytes: 0, lastActivityTime: null };
+      cur.count += 1;
+      cur.bytes += (m.ciphertext?.length ?? 0) + (m.tag?.length ?? 0) + (m.nonce?.length ?? 0);
+      if (!cur.lastActivityTime || m.updateTime > cur.lastActivityTime) cur.lastActivityTime = m.updateTime;
+      acc.set(k, cur);
+    }
+    return [...acc.values()];
+  }
+
   async countActiveByKind(_exec: Queryable, userId: number, keyEpoch: string, entityKind: string): Promise<number> {
     let n = 0;
     for (const m of this.store.values()) {

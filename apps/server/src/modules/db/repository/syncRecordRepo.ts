@@ -166,4 +166,23 @@ export class MysqlSyncRecordRepo implements ISyncRecordRepo {
     );
     return Number(rows[0]?.cnt ?? 0);
   }
+
+  async overviewByKind(exec: Queryable, userId: number, keyEpoch: string): Promise<Array<{ entityKind: string | null; count: number; bytes: number; lastActivityTime: Date | null }>> {
+    const [rows] = await exec.query<any[]>(
+      `SELECT entity_kind,
+              COUNT(*) AS cnt,
+              COALESCE(SUM(OCTET_LENGTH(ciphertext) + OCTET_LENGTH(tag) + OCTET_LENGTH(nonce)), 0) AS bytes,
+              MAX(update_time) AS last
+         FROM personal_connection_meta
+        WHERE user_id = ? AND key_epoch = ? AND delete_time IS NULL
+        GROUP BY entity_kind`,
+      [userId, keyEpoch],
+    );
+    return rows.map((r: any) => ({
+      entityKind: r.entity_kind ?? null,
+      count: Number(r.cnt ?? 0),
+      bytes: Number(r.bytes ?? 0),
+      lastActivityTime: r.last ? new Date(r.last) : null,
+    }));
+  }
 }

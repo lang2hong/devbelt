@@ -324,4 +324,13 @@ export class SyncRecordService {
     assertU64(keyEpoch, 'keyEpoch');
     return this.runner(async (tx) => this.recordRepo.countActiveByKind(tx, userId, keyEpoch, entityKind));
   }
+
+  /**
+   * P6：按明文类型聚合 active 记录元数据（条数/密文字节/最近更新时间）。只读，
+   * 供控制台/后台按类型展示；**不含任何明文**（密文对服务端不可见）。
+   */
+  async overviewByKind(userId: number, keyEpoch: string): Promise<Array<{ entityKind: string | null; count: number; bytes: number; lastActivityTime: Date | null }>> {
+    assertU64(keyEpoch, 'keyEpoch');
+    return this.runner(async (tx) => this.recordRepo.overviewByKind(tx, userId, keyEpoch));
+  }
 }

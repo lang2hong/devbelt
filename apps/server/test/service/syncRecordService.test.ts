@@ -477,6 +477,28 @@ describe('SyncRecordService', () => {
     expect(rec?.entityKind ?? null).toBeNull();
   });
 
+  it('overviewByKind aggregates active ciphertext metadata by kind (P6-S6)', async () => {
+    const stack = makeStack();
+    const keys = await init(stack);
+    await createRecord(keys, stack, 150, 150); // 无 kind（null）
+    const putAuth = async (m: number, r: number) => {
+      const mMid = mid(m); const rId = rid(r);
+      const body = { ...putBody(mMid, rId, 60 + m, 61 + m, '0'), entityKind: 'authenticatorEntry' };
+      const s = signRecord(keys.signPriv, USER, 'record.put', body);
+      return stack.recordSvc.putRecord(USER, {
+        keyEpoch: '1', mutationId: mMid, signature: s.signatureBuf, baseVersion: '0', requestDigest: s.digest,
+        recordId: rId, cipherSuite: 'AES-256-GCM', formatVersion: 1, entityKind: 'authenticatorEntry', ...decodeBody(body),
+      });
+    };
+    await putAuth(151, 151);
+    await putAuth(152, 152);
+    const rows = await stack.recordSvc.overviewByKind(USER, '1');
+    const byKind = new Map(rows.map((r) => [r.entityKind, r]));
+    expect(byKind.get(null)?.count).toBe(1);
+    expect(byKind.get('authenticatorEntry')?.count).toBe(2);
+    expect(byKind.get('authenticatorEntry')!.bytes).toBeGreaterThan(0);
+  });
+
   it('enforces per-kind authenticator quota and rejects unknown entityKind (P6-S4)', async () => {
     const stack = makeStack();
     const free = stack.planRepo.plans.find((p) => p.code === 'free')!;

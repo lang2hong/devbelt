@@ -68,6 +68,8 @@ export interface ISyncRecordRepo {
   listActiveByEpoch(exec: Queryable, userId: number, keyEpoch: string): Promise<PersonalConnectionMeta[]>;
   /** P6：按明文类型计数（active，不含 tombstone）。用于按类型配额/后台统计。 */
   countActiveByKind(exec: Queryable, userId: number, keyEpoch: string, entityKind: string): Promise<number>;
+  /** P6：按明文类型聚合 active 记录的条数/密文字节/最近更新时间（后台只读元数据，不含明文）。 */
+  overviewByKind(exec: Queryable, userId: number, keyEpoch: string): Promise<Array<{ entityKind: string | null; count: number; bytes: number; lastActivityTime: Date | null }>>;
 }
 
 export interface ISyncNonceRepo {
