@@ -7,9 +7,14 @@
  * 的统一口径；取代原先散落的 `connectionId` 字符串。
  */
 
-export type SyncEntityType = 'connection' | 'group' | 'queryFolder' | 'query';
+export type SyncEntityType =
+  | 'connection' | 'group' | 'queryFolder' | 'query'
+  | 'authenticatorEntry' | 'authenticatorGroup' | 'authenticatorTag';
 
-export const SYNC_ENTITY_TYPES: readonly SyncEntityType[] = ['connection', 'group', 'queryFolder', 'query'];
+export const SYNC_ENTITY_TYPES: readonly SyncEntityType[] = [
+  'connection', 'group', 'queryFolder', 'query',
+  'authenticatorEntry', 'authenticatorGroup', 'authenticatorTag',
+];
 
 export interface SyncEntityRef {
   type: SyncEntityType;
@@ -22,9 +27,7 @@ export function refKey(ref: SyncEntityRef): string {
 }
 
 export function assertSyncEntityType(t: unknown): SyncEntityType {
-  if (t === 'connection' || t === 'group' || t === 'queryFolder' || t === 'query') {
-    return t;
-  }
+  if (typeof t === 'string' && (SYNC_ENTITY_TYPES as readonly string[]).includes(t)) return t as SyncEntityType;
   throw new Error(`unknown sync entity type: ${String(t)}`);
 }
 

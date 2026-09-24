@@ -79,7 +79,7 @@ function setup() {
   const entities = new EntityStore(store);
   let counter = 0;
   const prefix: Record<string, string> = { connection: 'c', group: 'g', queryFolder: 'qf', query: 'q' };
-  const uniqueId = (type: 'connection' | 'group' | 'queryFolder' | 'query') => `${prefix[type]}-${++counter}`;
+  const uniqueId = (type: string) => `${prefix[type]}-${++counter}`;
   return { store, entities, mapStore, unresolved, uniqueId, connections, groups, folders, queries };
 }
 

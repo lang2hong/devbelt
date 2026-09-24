@@ -2,6 +2,7 @@ import type { SavedQuery } from '@devbelt/db-core';
 import type { ConnectionStore, SavedConnection, ConnectionGroup } from '../../connection/connectionStore.js';
 import type { QueryFolder, ChangeSource } from '../../connection/queryStore.js';
 import { SYNC_ENTITY_TYPES, type SyncEntityRef, type SyncEntityType } from './syncEntity.js';
+import type { SyncAuthenticatorGroup, SyncAuthenticatorTag, SyncAuthenticatorEntryValue } from './authenticatorTypes.js';
 import { assertU64Decimal } from './types.js';
 import type { MementoLike } from './stateStore.js';
 
@@ -27,7 +28,22 @@ export interface EntitySyncRecord {
   updateTime: number;
 }
 
-export type EntityValue = SavedConnection | ConnectionGroup | SavedQuery | QueryFolder;
+export type EntityValue =
+  | SavedConnection | ConnectionGroup | SavedQuery | QueryFolder
+  | SyncAuthenticatorGroup | SyncAuthenticatorTag | SyncAuthenticatorEntryValue;
+
+/**
+ * 同步实体后端（P6）：把一类实体的读写收敛到同一端口，供 EntityStore 按类型分派。
+ * 个人四类由 db-host 内置 `PersonalEntityBackend` 提供；验证器三类由宿主（vscode-ext）
+ * 注入 `AuthenticatorSyncBackend` 实现（db-host 不得反向依赖 vscode-ext）。
+ */
+export interface EntityBackend {
+  /** 该类实体的全量摘要（含墓碑）。 */
+  listForSync(): EntitySyncRecord[];
+  get(ref: SyncEntityRef): EntityValue | undefined;
+  save(ref: SyncEntityRef, entity: EntityValue, source: ChangeSource): Promise<void>;
+  remove(ref: SyncEntityRef, source: ChangeSource): Promise<void>;
+}
 
 /** 供 mutator/apply 读取实体当前的归一化摘要。 */
 export function entitySummary(ref: SyncEntityRef, entity: EntityValue): EntitySyncRecord {
@@ -35,7 +51,8 @@ export function entitySummary(ref: SyncEntityRef, entity: EntityValue): EntitySy
   return { ref, deleted: !!e.deleted, updateTime: e.updateTime ?? 0 };
 }
 
-export class EntityStore {
+/** 个人四类实体后端（包装 ConnectionStore，行为与内置版本一致）。 */
+class PersonalEntityBackend implements EntityBackend {
   constructor(private readonly store: ConnectionStore) {}
 
   /** 各类型全量实体（含墓碑）作为 {ref, deleted, updateTime} 摘要。 */
@@ -56,38 +73,91 @@ export class EntityStore {
     return out;
   }
 
-  /** 按 typed ref 读取本地实体（含墓碑），不存在返回 undefined。 */
   get(ref: SyncEntityRef): EntityValue | undefined {
     switch (ref.type) {
       case 'connection': return this.store.get(ref.localId) ?? this.getConnectionIncludingDeleted(ref.localId);
       case 'group': return this.store.getGroupById(ref.localId);
       case 'queryFolder': return this.store.getFolderById(ref.localId);
       case 'query': return this.store.getQueryById(ref.localId);
+      default: return undefined;
     }
   }
 
-  /** 按 typed ref 写入（含墓碑字段；source 透传）。 */
   async save(ref: SyncEntityRef, entity: EntityValue, source: ChangeSource): Promise<void> {
     switch (ref.type) {
       case 'connection': return this.store.save(entity as SavedConnection, source);
       case 'group': return this.store.upsertGroup(entity as ConnectionGroup, source);
       case 'queryFolder': return this.store.upsertFolder(entity as QueryFolder, source);
       case 'query': return this.store.upsertQuery(entity as SavedQuery, source);
+      default: return undefined;
     }
   }
 
-  /** 按 typed ref tombstone（source 透传，级联语义见类注释）。 */
   async remove(ref: SyncEntityRef, source: ChangeSource): Promise<void> {
     switch (ref.type) {
       case 'connection': return this.store.remove(ref.localId, source);
       case 'group': return this.store.removeGroup(ref.localId, source);
       case 'queryFolder': return this.store.removeQueryFolder(ref.localId, source);
       case 'query': return this.store.removeQuery(ref.localId, source);
+      default: return undefined;
     }
   }
 
   private getConnectionIncludingDeleted(localId: string): SavedConnection | undefined {
     return this.store.listForSync().find((c) => c.id === localId);
+  }
+}
+
+/**
+ * 四类个人实体 + 验证器三类实体的统一适配层（P6 扩展）。
+ *
+ * 按 `SyncEntityRef.type` 分派到后端：个人由内置 `PersonalEntityBackend` 承担；
+ * 验证器由宿主注入的 `EntityBackend` 承担（缺省时访问验证器类型 fail-closed 抛错）。
+ * 删除语义（级联）由各后端自己的 store 承担。
+ */
+export class EntityStore {
+  private readonly personal: EntityBackend;
+
+  constructor(store: ConnectionStore, private readonly authenticator?: EntityBackend) {
+    this.personal = new PersonalEntityBackend(store);
+  }
+
+  private backendOf(type: SyncEntityType): EntityBackend {
+    switch (type) {
+      case 'connection':
+      case 'group':
+      case 'queryFolder':
+      case 'query':
+        return this.personal;
+      case 'authenticatorEntry':
+      case 'authenticatorGroup':
+      case 'authenticatorTag':
+        if (!this.authenticator) throw new Error(`no sync backend for entity type ${type}`);
+        return this.authenticator;
+    }
+  }
+
+  /** 全部后端实体（含墓碑）摘要。 */
+  listForSync(): EntitySyncRecord[] {
+    return [
+      ...this.personal.listForSync(),
+      ...(this.authenticator ? this.authenticator.listForSync() : []),
+    ];
+  }
+
+  /** 按 typed ref 读取本地实体（含墓碑），不存在返回 undefined。 */
+  get(ref: SyncEntityRef): EntityValue | undefined {
+    return this.backendOf(ref.type).get(ref);
+  }
+
+  /** 按 typed ref 写入（含墓碑字段；source 透传）。 */
+  async save(ref: SyncEntityRef, entity: EntityValue, source: ChangeSource): Promise<void> {
+    return this.backendOf(ref.type).save(ref, entity, source);
+  }
+
+  /** 按 typed ref tombstone（source 透传）。 */
+  async remove(ref: SyncEntityRef, source: ChangeSource): Promise<void> {
+    return this.backendOf(ref.type).remove(ref, source);
   }
 }
 
@@ -100,6 +170,10 @@ export function applyOrder(type: SyncEntityType): number {
     case 'connection': return 1;
     case 'queryFolder': return 2;
     case 'query': return 3;
+    // P6：验证器 group/tag 先于 entry（entry 引用二者）。
+    case 'authenticatorGroup': return 0;
+    case 'authenticatorTag': return 0;
+    case 'authenticatorEntry': return 1;
   }
 }
 
@@ -121,8 +195,8 @@ export interface UnresolvedRef {
   /** 依赖方本地实体。 */
   type: SyncEntityType;
   localId: string;
-  /** 依赖方上的字段名：groupId / parentId / connId / folderId。 */
-  field: 'groupId' | 'parentId' | 'connId' | 'folderId';
+  /** 依赖方上的字段名：groupId / parentId / connId / folderId / tags（验证器条目多标签引用）。 */
+  field: 'groupId' | 'parentId' | 'connId' | 'folderId' | 'tags';
 }
 
 interface UnresolvedData {

@@ -6,7 +6,7 @@ import { SyncEngine } from './e2e/syncEngine.js';
 import { SyncCoordinator } from './e2e/syncCoordinator.js';
 import type { SyncRunResult } from './e2e/syncEngine.js';
 import { ConflictResolver, type ConflictItem } from './e2e/conflictResolver.js';
-import { EntityStore, UnresolvedRefStore } from './e2e/entityStore.js';
+import { EntityStore, UnresolvedRefStore, type EntityBackend } from './e2e/entityStore.js';
 import type { SyncEntityType } from './e2e/syncEntity.js';
 import { type PersonalSyncClient } from './e2e/client.js';
 import { validateSyncState, type NewStateDto, type StateDto } from './e2e/types.js';
@@ -24,6 +24,9 @@ const LOCAL_ID_PREFIX: Record<SyncEntityType, string> = {
   group: 'g',
   queryFolder: 'qf',
   query: 'q',
+  authenticatorEntry: 'ae',
+  authenticatorGroup: 'ag',
+  authenticatorTag: 'at',
 };
 
 /**
@@ -55,6 +58,8 @@ export interface SyncSessionOptions {
   onSessionState?: () => void;
   /** 自动同步开关（按机器）；返回 false 时不自动同步（解锁首同步/本地变更/聚焦），仅显式命令触发。缺省开启。 */
   autoSyncEnabled?: () => boolean;
+  /** P6：验证器同步实体后端（S3 由扩展注入）；缺省时验证器类型不可同步。 */
+  authenticatorBackend?: EntityBackend;
 }
 
 export class PersonalSyncSession {
@@ -82,7 +87,7 @@ export class PersonalSyncSession {
     private readonly opts: SyncSessionOptions = {},
   ) {
     this.stateStore = new StateStore(memento, userId);
-    this.entities = new EntityStore(store);
+    this.entities = new EntityStore(store, opts.authenticatorBackend);
     this.epochTx = new EpochTransitionCoordinator({
       memento,
       userId,

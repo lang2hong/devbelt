@@ -7,6 +7,12 @@ import type { ConnectionGroup } from '../../connection/connectionStore.js';
 import type { QueryFolder } from '../../connection/queryStore.js';
 import type { SavedQuery } from '@devbelt/db-core';
 import { assertSyncEntityType, type SyncEntityType } from './syncEntity.js';
+import {
+  assertAuthenticatorAlgorithm, assertAuthenticatorDigits, assertAuthenticatorPeriod,
+  assertAuthenticatorSecret, assertAuthenticatorTagColor,
+  type AuthenticatorAlgorithm, type AuthenticatorTagColor,
+  type SyncAuthenticatorEntryValue, type SyncAuthenticatorGroup, type SyncAuthenticatorTag,
+} from './authenticatorTypes.js';
 
 /**
  * record 密文编解码（A2：四类型 discriminated payload + 引用转 recordId）。
@@ -72,7 +78,10 @@ export type CodecEntityInput =
   | { type: 'connection'; entity: SavedConnection }
   | { type: 'group'; entity: ConnectionGroup }
   | { type: 'queryFolder'; entity: QueryFolder }
-  | { type: 'query'; entity: SavedQuery };
+  | { type: 'query'; entity: SavedQuery }
+  | { type: 'authenticatorGroup'; entity: SyncAuthenticatorGroup }
+  | { type: 'authenticatorTag'; entity: SyncAuthenticatorTag }
+  | { type: 'authenticatorEntry'; entity: SyncAuthenticatorEntryValue };
 
 function assertSqlSize(sql: string): void {
   if (new TextEncoder().encode(sql).length > SQL_MAX_BYTES) {
@@ -135,6 +144,44 @@ export function encodeQueryPayload(query: SavedQuery, resolveRef: RefResolver): 
   return out;
 }
 
+/** 编码「验证器分组」payload：name + sortOrder（无引用）。 */
+export function encodeAuthenticatorGroupPayload(group: SyncAuthenticatorGroup): Record<string, unknown> {
+  return { type: 'authenticatorGroup', name: group.name, sortOrder: group.sortOrder };
+}
+
+/** 编码「验证器标签」payload：name + color（白名单）。 */
+export function encodeAuthenticatorTagPayload(tag: SyncAuthenticatorTag): Record<string, unknown> {
+  return { type: 'authenticatorTag', name: tag.name, color: assertAuthenticatorTagColor(tag.color) };
+}
+
+/**
+ * 编码「验证器条目」payload：issuer/account/算法/位数/周期/时间戳 + secret（规范化 base32）
+ * + groupId（group recordId 引用）+ tags[]（tag recordId 引用）。
+ * `localOnly`/`syncError` 为仅本地派生态，**不编码**。未解析的引用（groupId/tags）省略。
+ */
+export function encodeAuthenticatorEntryPayload(entity: SyncAuthenticatorEntryValue, resolveRef: RefResolver): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    type: 'authenticatorEntry',
+    issuer: entity.issuer,
+    algorithm: assertAuthenticatorAlgorithm(entity.algorithm),
+    digits: assertAuthenticatorDigits(entity.digits),
+    period: assertAuthenticatorPeriod(entity.period),
+    createTime: entity.createTime,
+    updateTime: entity.updateTime,
+  };
+  if (entity.account !== undefined) out.account = entity.account;
+  out.secret = assertAuthenticatorSecret(entity.secret);
+  const groupRecordId = resolveRef('authenticatorGroup', entity.groupId);
+  if (groupRecordId !== undefined) out.groupId = groupRecordId;
+  const tagRecordIds: string[] = [];
+  for (const tagLocalId of entity.tags) {
+    const rec = resolveRef('authenticatorTag', tagLocalId);
+    if (rec !== undefined) tagRecordIds.push(rec);
+  }
+  if (tagRecordIds.length > 0) out.tags = tagRecordIds;
+  return out;
+}
+
 /** 按类型分派编码。 */
 export function encodeEntityPayload(input: CodecEntityInput, resolveRef: RefResolver): Record<string, unknown> {
   switch (input.type) {
@@ -142,6 +189,9 @@ export function encodeEntityPayload(input: CodecEntityInput, resolveRef: RefReso
     case 'group': return encodeGroupPayload(input.entity, resolveRef);
     case 'queryFolder': return encodeQueryFolderPayload(input.entity, resolveRef);
     case 'query': return encodeQueryPayload(input.entity, resolveRef);
+    case 'authenticatorGroup': return encodeAuthenticatorGroupPayload(input.entity);
+    case 'authenticatorTag': return encodeAuthenticatorTagPayload(input.entity);
+    case 'authenticatorEntry': return encodeAuthenticatorEntryPayload(input.entity, resolveRef);
   }
 }
 
@@ -236,11 +286,37 @@ export interface DecodedQueryPayload {
   folderId?: string;
 }
 
+export interface DecodedAuthenticatorGroupPayload {
+  name: string;
+  sortOrder: number;
+}
+
+export interface DecodedAuthenticatorTagPayload {
+  name: string;
+  color: AuthenticatorTagColor;
+}
+
+export interface DecodedAuthenticatorEntryPayload {
+  issuer: string;
+  account?: string;
+  algorithm: AuthenticatorAlgorithm;
+  digits: 6 | 8;
+  period: 30 | 60;
+  secret: string;
+  groupId?: string;
+  tags?: string[];
+  createTime: number;
+  updateTime: number;
+}
+
 export type DecodedEntityPayload =
   | { type: 'connection'; data: DecodedConnectionPayload }
   | { type: 'group'; data: DecodedGroupPayload }
   | { type: 'queryFolder'; data: DecodedQueryFolderPayload }
-  | { type: 'query'; data: DecodedQueryPayload };
+  | { type: 'query'; data: DecodedQueryPayload }
+  | { type: 'authenticatorGroup'; data: DecodedAuthenticatorGroupPayload }
+  | { type: 'authenticatorTag'; data: DecodedAuthenticatorTagPayload }
+  | { type: 'authenticatorEntry'; data: DecodedAuthenticatorEntryPayload };
 
 function rejectExtraKeys(obj: Record<string, unknown>, allowed: readonly string[], field: string): void {
   for (const k of Object.keys(obj)) {
@@ -273,6 +349,20 @@ function boolOf(obj: Record<string, unknown>, key: string): boolean | undefined 
   const v = obj[key];
   if (v === undefined) return undefined;
   if (typeof v !== 'boolean') throw new Error(`record payload.${key} must be a boolean`);
+  return v;
+}
+
+function strArrayOf(obj: Record<string, unknown>, key: string): string[] | undefined {
+  const v = obj[key];
+  if (v === undefined) return undefined;
+  if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) throw new Error(`record payload.${key} must be a string array`);
+  return v as string[];
+}
+
+function nonNegIntOf(obj: Record<string, unknown>, key: string): number | undefined {
+  const v = intOf(obj, key);
+  if (v === undefined) return undefined;
+  if (v < 0) throw new Error(`record payload.${key} must be >= 0`);
   return v;
 }
 
@@ -388,8 +478,61 @@ function decodeQueryPayload(p: unknown): DecodedQueryPayload {
   return { name, sql, database, connId, folderId };
 }
 
+const AUTH_GROUP_PAYLOAD_FIELDS = ['type', 'name', 'sortOrder'] as const;
+const AUTH_TAG_PAYLOAD_FIELDS = ['type', 'name', 'color'] as const;
+const AUTH_ENTRY_PAYLOAD_FIELDS = [
+  'type', 'issuer', 'account', 'algorithm', 'digits', 'period', 'secret', 'groupId', 'tags', 'createTime', 'updateTime',
+] as const;
+
+function decodeAuthenticatorGroupPayload(p: unknown): DecodedAuthenticatorGroupPayload {
+  if (typeof p !== 'object' || p === null) throw new Error('record payload must be an object');
+  const obj = p as Record<string, unknown>;
+  if (obj.type !== 'authenticatorGroup') throw new Error('record payload.type must be authenticatorGroup');
+  rejectExtraKeys(obj, AUTH_GROUP_PAYLOAD_FIELDS, 'record payload');
+  const name = strOf(obj, 'name');
+  if (name === undefined) throw new Error('record payload.name is required');
+  const sortOrder = nonNegIntOf(obj, 'sortOrder');
+  if (sortOrder === undefined) throw new Error('record payload.sortOrder is required');
+  return { name, sortOrder };
+}
+
+function decodeAuthenticatorTagPayload(p: unknown): DecodedAuthenticatorTagPayload {
+  if (typeof p !== 'object' || p === null) throw new Error('record payload must be an object');
+  const obj = p as Record<string, unknown>;
+  if (obj.type !== 'authenticatorTag') throw new Error('record payload.type must be authenticatorTag');
+  rejectExtraKeys(obj, AUTH_TAG_PAYLOAD_FIELDS, 'record payload');
+  const name = strOf(obj, 'name');
+  if (name === undefined) throw new Error('record payload.name is required');
+  return { name, color: assertAuthenticatorTagColor(obj.color) };
+}
+
+function decodeAuthenticatorEntryPayload(p: unknown): DecodedAuthenticatorEntryPayload {
+  if (typeof p !== 'object' || p === null) throw new Error('record payload must be an object');
+  const obj = p as Record<string, unknown>;
+  if (obj.type !== 'authenticatorEntry') throw new Error('record payload.type must be authenticatorEntry');
+  rejectExtraKeys(obj, AUTH_ENTRY_PAYLOAD_FIELDS, 'record payload');
+  const issuer = strOf(obj, 'issuer');
+  if (issuer === undefined) throw new Error('record payload.issuer is required');
+  const createTime = nonNegIntOf(obj, 'createTime');
+  if (createTime === undefined) throw new Error('record payload.createTime is required');
+  const updateTime = nonNegIntOf(obj, 'updateTime');
+  if (updateTime === undefined) throw new Error('record payload.updateTime is required');
+  return {
+    issuer,
+    account: strOf(obj, 'account'),
+    algorithm: assertAuthenticatorAlgorithm(obj.algorithm),
+    digits: assertAuthenticatorDigits(obj.digits),
+    period: assertAuthenticatorPeriod(obj.period),
+    secret: assertAuthenticatorSecret(obj.secret),
+    groupId: strOf(obj, 'groupId'),
+    tags: strArrayOf(obj, 'tags'),
+    createTime,
+    updateTime,
+  };
+}
+
 /**
- * 严格解码 record 明文 payload → 已校验的四类型判别结果。
+ * 严格解码 record 明文 payload → 已校验的判别结果。
  * 引用字段保留 recordId，由 apply 层解析/保留 unresolved。
  * 旧式无 `type` 的 connection payload 视为非法（v2 强制类型判别）。
  */
@@ -401,6 +544,9 @@ export function decodeEntityPayload(p: unknown): DecodedEntityPayload {
     case 'group': return { type: 'group', data: decodeGroupPayload(p) };
     case 'queryFolder': return { type: 'queryFolder', data: decodeQueryFolderPayload(p) };
     case 'query': return { type: 'query', data: decodeQueryPayload(p) };
+    case 'authenticatorGroup': return { type: 'authenticatorGroup', data: decodeAuthenticatorGroupPayload(p) };
+    case 'authenticatorTag': return { type: 'authenticatorTag', data: decodeAuthenticatorTagPayload(p) };
+    case 'authenticatorEntry': return { type: 'authenticatorEntry', data: decodeAuthenticatorEntryPayload(p) };
   }
 }
 

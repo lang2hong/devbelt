@@ -10,6 +10,7 @@ import { RecordConflictError } from './errors.js';
 import type { RecordMapStore, RecordMapEntry } from './recordMapStore.js';
 import { EntityStore, UnresolvedRefStore } from './entityStore.js';
 import type { SyncEntityType, SyncEntityRef } from './syncEntity.js';
+import type { SyncAuthenticatorEntryValue, SyncAuthenticatorGroup, SyncAuthenticatorTag } from './authenticatorTypes.js';
 
 /**
  * 远端 record 的本地应用（A3：四类型 + 拓扑序 + 引用解析 + 环检测 + 级联）。
@@ -76,10 +77,15 @@ export async function reconcileUnresolved(ctx: ApplyContext): Promise<number> {
   return resolved;
 }
 
-async function patchReference(ctx: ApplyContext, uref: { type: SyncEntityType; localId: string; field: 'groupId' | 'parentId' | 'connId' | 'folderId' }, targetLocalId: string): Promise<void> {
+async function patchReference(ctx: ApplyContext, uref: { type: SyncEntityType; localId: string; field: 'groupId' | 'parentId' | 'connId' | 'folderId' | 'tags' }, targetLocalId: string): Promise<void> {
   const ref: SyncEntityRef = { type: uref.type, localId: uref.localId };
   const entity = ctx.entities.get(ref);
-  const patched = { ...(entity as unknown as Record<string, unknown>), [uref.field]: targetLocalId };
+  if (!entity) return;
+  const base = entity as unknown as Record<string, unknown>;
+  // tags 是多值引用：把收敛到的本地 tag id 追加进数组（去重）。
+  const patched = uref.field === 'tags'
+    ? { ...base, tags: Array.from(new Set([...(Array.isArray(base.tags) ? base.tags as string[] : []), targetLocalId])) }
+    : { ...base, [uref.field]: targetLocalId };
   await ctx.entities.save(ref, patched as never, 'sync');
 }
 
@@ -229,6 +235,9 @@ async function restoreEntity(ref: SyncEntityRef, original: unknown, ctx: ApplyCo
     case 'group': return ctx.entities.save(ref, original as ConnectionGroup, 'sync');
     case 'queryFolder': return ctx.entities.save(ref, original as QueryFolder, 'sync');
     case 'query': return ctx.entities.save(ref, original as SavedQuery, 'sync');
+    case 'authenticatorGroup': return ctx.entities.save(ref, original as SyncAuthenticatorGroup, 'sync');
+    case 'authenticatorTag': return ctx.entities.save(ref, original as SyncAuthenticatorTag, 'sync');
+    case 'authenticatorEntry': return ctx.entities.save(ref, original as SyncAuthenticatorEntryValue, 'sync');
   }
 }
 
@@ -274,6 +283,31 @@ async function writeEntity(ref: SyncEntityRef, decoded: DecodedEntityPayload, ct
       await ctx.entities.save(ref, buildQueryFromPayload(decoded.data, ref.localId, connLocalId, folderLocalId), 'sync');
       return;
     }
+    case 'authenticatorGroup': {
+      await ctx.entities.save(ref, buildAuthenticatorGroupFromPayload(decoded.data, ref.localId), 'sync');
+      return;
+    }
+    case 'authenticatorTag': {
+      await ctx.entities.save(ref, buildAuthenticatorTagFromPayload(decoded.data, ref.localId), 'sync');
+      return;
+    }
+    case 'authenticatorEntry': {
+      const groupLocalId = resolveLocalId(ctx.mapStore, 'authenticatorGroup', decoded.data.groupId);
+      if (decoded.data.groupId && groupLocalId === undefined) {
+        await ctx.unresolved.add({ targetRecordId: decoded.data.groupId, type: ref.type, localId: ref.localId, field: 'groupId' });
+      }
+      const tagLocalIds: string[] = [];
+      for (const tagRecordId of decoded.data.tags ?? []) {
+        const tagLocalId = resolveLocalId(ctx.mapStore, 'authenticatorTag', tagRecordId);
+        if (tagLocalId === undefined) {
+          await ctx.unresolved.add({ targetRecordId: tagRecordId, type: ref.type, localId: ref.localId, field: 'tags' });
+        } else {
+          tagLocalIds.push(tagLocalId);
+        }
+      }
+      await ctx.entities.save(ref, buildAuthenticatorEntryFromPayload(decoded.data, ref.localId, groupLocalId, tagLocalIds), 'sync');
+      return;
+    }
   }
 }
 
@@ -313,4 +347,33 @@ function buildQueryFromPayload(p: Extract<DecodedEntityPayload, { type: 'query' 
     database: p.database,
     folderId,
   } as SavedQuery;
+}
+
+function buildAuthenticatorGroupFromPayload(p: Extract<DecodedEntityPayload, { type: 'authenticatorGroup' }>['data'], id: string): SyncAuthenticatorGroup {
+  return { id, name: p.name, sortOrder: p.sortOrder };
+}
+
+function buildAuthenticatorTagFromPayload(p: Extract<DecodedEntityPayload, { type: 'authenticatorTag' }>['data'], id: string): SyncAuthenticatorTag {
+  return { id, name: p.name, color: p.color };
+}
+
+function buildAuthenticatorEntryFromPayload(
+  p: Extract<DecodedEntityPayload, { type: 'authenticatorEntry' }>['data'],
+  id: string,
+  groupId: string | undefined,
+  tags: string[],
+): SyncAuthenticatorEntryValue {
+  return {
+    id,
+    issuer: p.issuer,
+    account: p.account,
+    algorithm: p.algorithm,
+    digits: p.digits,
+    period: p.period,
+    groupId,
+    tags,
+    createTime: p.createTime,
+    updateTime: p.updateTime,
+    secret: p.secret,
+  };
 }
