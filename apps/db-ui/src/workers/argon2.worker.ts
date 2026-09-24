@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
-import { deriveKekSmp, assertSmpKdfParams, type SmpKdfParams } from '@devbelt/auth-client';
+import { assertSmpKdfParams, type SmpKdfParams } from '@devbelt/auth-client';
+import { deriveKekSmp } from '@devbelt/auth-client/e2ee/argon2';
 
 /**
  * Argon2id KDF Worker（P6-S5c）：主线程只传 SMP + 参数，WASM 计算在 Worker 内执行。

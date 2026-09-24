@@ -1,31 +1,43 @@
 <script setup lang="ts">
 import { onUnmounted, ref, watch } from 'vue';
-import { unlockDekBrowser, DekSession, totpWeb, openCipherRecord, type CipherRecord, type SmpKdfDto, type SmpKdfParams } from '@devbelt/auth-client';
+import { unlockDekBrowser, DekSession, totpWeb, type SmpKdfDto, type SmpKdfParams } from '@devbelt/auth-client';
 import { getE2eeParams, getSyncRecords } from '../api/sync';
+import { collectAuthenticatorRows, type AuthenticatorRow, type FeedPage } from '../lib/authenticatorView';
 
 /**
  * P6-S5c：网页端验证器（只读展示）。
  * 主密码解锁 → Argon2id(Worker) → DEK（仅内存）→ 解密密文 records → 展示/复制口令。
- * 不做写操作；登出/离开页面即清 DEK。
+ * 不做写操作；登出/离开页面即清 DEK（并用解锁令牌作废在途解锁）。
  */
 const props = defineProps<{ user: { userId: string } | null }>();
-
-interface Row { issuer: string; account?: string; algorithm: 'SHA1' | 'SHA256' | 'SHA512'; digits: 6 | 8; period: 30 | 60; secret: string; code: string; secondsLeft: number; }
 
 const smp = ref('');
 const busy = ref(false);
 const err = ref('');
 const unlocked = ref(false);
-const rows = ref<Row[]>([]);
+const rows = ref<AuthenticatorRow[]>([]);
+const truncated = ref(false);
 const session = new DekSession();
 let timer: ReturnType<typeof setInterval> | undefined;
+/** 解锁令牌：lock()/登出时自增，令在途的 unlock() 在下一个 await 后放弃。 */
+let unlockAttempt = 0;
+let disposed = false;
+let ticking = false;
+
+const ARGON2_TIMEOUT_MS = 30_000;
 
 function stopTimer(): void { if (timer !== undefined) { clearInterval(timer); timer = undefined; } }
 
+/** Worker 内执行 Argon2id；挂死时超时终止，避免 busy 永久卡住 / Worker 泄漏。 */
 async function deriveKekViaWorker(smpValue: string, params: SmpKdfParams): Promise<Uint8Array> {
   const worker = new Worker(new URL('../workers/argon2.worker.ts', import.meta.url), { type: 'module' });
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     return await new Promise<Uint8Array>((resolve, reject) => {
+      timeout = setTimeout(() => {
+        worker.terminate();
+        reject(new Error('Argon2id 计算超时'));
+      }, ARGON2_TIMEOUT_MS);
       worker.onmessage = (e: MessageEvent) => {
         const d = e.data as { ok: boolean; kek?: Uint8Array; error?: string };
         if (d.ok && d.kek) resolve(new Uint8Array(d.kek));
@@ -35,87 +47,115 @@ async function deriveKekViaWorker(smpValue: string, params: SmpKdfParams): Promi
       worker.postMessage({ smp: smpValue, params });
     });
   } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
     worker.terminate();
   }
 }
 
 async function tick(): Promise<void> {
-  const now = Date.now();
-  for (const r of rows.value) {
-    try {
-      const { code, secondsLeft } = await totpWeb(r.secret, now, r.period, r.digits, r.algorithm);
-      r.code = code;
-      r.secondsLeft = secondsLeft;
-    } catch { r.code = '------'; r.secondsLeft = 0; }
+  if (ticking) return;
+  ticking = true;
+  try {
+    const now = Date.now();
+    for (const r of rows.value) {
+      try {
+        const { code, secondsLeft } = await totpWeb(r.secret, now, r.period, r.digits, r.algorithm);
+        r.code = code;
+        r.secondsLeft = secondsLeft;
+      } catch { r.code = '------'; r.secondsLeft = 0; }
+    }
+  } finally {
+    ticking = false;
   }
 }
 
-async function loadEntries(keyEpoch: string): Promise<void> {
-  const recs: CipherRecord[] = [];
-  let after = '0';
-  for (let i = 0; i < 50; i++) {
-    const page = await getSyncRecords(after, 256);
-    if (page.kind !== 'ok') throw new Error('拉取密文失败');
-    recs.push(...page.value.records);
-    if (!page.value.nextAfter) break;
-    after = page.value.nextAfter;
+/** 服务端 `smpKdf`（unknown）→ 严格 DTO；非法即抛错（fail-closed）。 */
+function toSmpKdfDto(raw: Record<string, unknown>): SmpKdfDto {
+  const { alg, version, memoryKiB, iterations, parallelism, salt, outputBytes } = raw;
+  if (alg !== 'argon2id' || version !== 1 || outputBytes !== 32 ||
+      typeof memoryKiB !== 'number' || typeof iterations !== 'number' || typeof parallelism !== 'number' || typeof salt !== 'string') {
+    throw new Error('同步 KDF 参数不完整');
   }
-  const dek = session.get();
-  if (!dek) throw new Error('未解锁');
-  const out: Row[] = [];
-  for (const rec of recs) {
-    const payload = await openCipherRecord(dek, rec, { userId: props.user!.userId, keyEpoch });
-    if (payload && typeof payload === 'object' && (payload as { type?: string }).type === 'authenticatorEntry') {
-      const e = payload as { issuer: string; account?: string; algorithm: Row['algorithm']; digits: Row['digits']; period: Row['period']; secret: string };
-      out.push({ issuer: e.issuer, account: e.account, algorithm: e.algorithm, digits: e.digits, period: e.period, secret: e.secret, code: '', secondsLeft: 0 });
-    }
+  return { alg, version, memoryKiB, iterations, parallelism, salt, outputBytes };
+}
+
+/** 服务端 `envelopeSmp`（unknown）→ EnvelopeDto；字段缺失即抛错。 */
+function toEnvelopeDto(raw: Record<string, unknown>): Parameters<typeof unlockDekBrowser>[4] {
+  const { envelopeVersion, nonce, ciphertext, tag } = raw;
+  if (typeof envelopeVersion !== 'string' || !envelopeVersion ||
+      typeof nonce !== 'string' || !nonce ||
+      typeof ciphertext !== 'string' || !ciphertext ||
+      typeof tag !== 'string' || !tag) {
+    throw new Error('同步信封字段不完整');
   }
-  rows.value = out;
-  await tick();
+  return { protocolVersion: 1, cipherSuite: 'AES-256-GCM', formatVersion: 1, envelopeVersion, nonce, ciphertext, tag };
+}
+
+async function fetchPage(after: string, limit: number): Promise<FeedPage> {
+  const page = await getSyncRecords(after, limit);
+  if (page.kind !== 'ok') throw new Error('拉取密文失败');
+  return { records: page.value.records, nextAfter: page.value.nextAfter };
 }
 
 async function unlock(): Promise<void> {
-  if (!props.user) { err.value = '请先登录。'; return; }
+  if (busy.value) return;
+  const user = props.user;
+  if (!user) { err.value = '请先登录。'; return; }
+  const attempt = ++unlockAttempt;
   busy.value = true;
   err.value = '';
   try {
     const params = await getE2eeParams();
+    if (disposed || attempt !== unlockAttempt) return;
     if (params.kind !== 'ok') throw new Error('无法获取同步材料');
     const v = params.value;
     if (!v.initialized || !v.smpKdf || !v.envelopeSmp || !v.keyEpoch) throw new Error('该账号未初始化同步');
-    const dek = await unlockDekBrowser(
-      props.user.userId, v.keyEpoch, smp.value,
-      v.smpKdf as unknown as SmpKdfDto, v.envelopeSmp as unknown as never, deriveKekViaWorker,
-    );
+    const dek = await unlockDekBrowser(user.userId, v.keyEpoch, smp.value, toSmpKdfDto(v.smpKdf), toEnvelopeDto(v.envelopeSmp), deriveKekViaWorker);
+    if (disposed || attempt !== unlockAttempt) { dek.fill(0); return; }
     session.set(dek);
     unlocked.value = true;
-    await loadEntries(v.keyEpoch);
+    const { rows: loaded, truncated: cut } = await collectAuthenticatorRows(
+      dek, { userId: user.userId, keyEpoch: v.keyEpoch }, fetchPage,
+    );
+    if (disposed || attempt !== unlockAttempt) { lock(); return; }
+    rows.value = loaded;
+    truncated.value = cut;
+    await tick();
+    if (disposed || attempt !== unlockAttempt) { lock(); return; }
     stopTimer();
     timer = setInterval(() => { void tick(); }, 1000);
   } catch (e) {
-    session.clear();
-    unlocked.value = false;
-    rows.value = [];
-    err.value = e instanceof Error ? e.message : String(e);
+    if (attempt === unlockAttempt) {
+      session.clear();
+      unlocked.value = false;
+      rows.value = [];
+      truncated.value = false;
+      err.value = e instanceof Error ? e.message : String(e);
+    }
   } finally {
-    busy.value = false;
+    if (attempt === unlockAttempt) busy.value = false;
   }
 }
 
+/** 清空所有解锁态并使在途解锁作废（登出/离开/主动锁定共用）。 */
 function lock(): void {
+  unlockAttempt++;
+  busy.value = false;
   stopTimer();
   session.clear();
   unlocked.value = false;
   rows.value = [];
+  truncated.value = false;
   smp.value = '';
 }
 
-async function copy(r: Row): Promise<void> {
+async function copy(r: AuthenticatorRow): Promise<void> {
+  if (!r.code || r.code === '------') return;
   try { await navigator.clipboard.writeText(r.code); } catch { /* 剪贴板不可用时忽略 */ }
 }
 
 watch(() => props.user?.userId, () => lock());
-onUnmounted(() => { stopTimer(); session.clear(); });
+onUnmounted(() => { disposed = true; lock(); });
 </script>
 
 <template>
@@ -126,17 +166,18 @@ onUnmounted(() => { stopTimer(); session.clear(); });
     </header>
 
     <div v-if="!unlocked" class="unlock">
-      <input v-model="smp" type="password" autocomplete="off" placeholder="同步主密码（SMP）" @keyup.enter="unlock" />
+      <input v-model="smp" type="password" autocomplete="off" :disabled="busy" placeholder="同步主密码（SMP）" @keyup.enter="unlock" />
       <button class="btn" :disabled="busy" @click="unlock">{{ busy ? '解锁中…' : '解锁' }}</button>
     </div>
     <p v-if="err" class="error">{{ err }}</p>
 
     <template v-if="unlocked">
       <p class="muted">{{ rows.length }} 个条目 <button class="btn secondary small" @click="lock">锁定</button></p>
+      <p v-if="truncated" class="muted">条目较多，当前仅显示前 {{ rows.length }} 条。</p>
       <table v-if="rows.length" class="table">
         <thead><tr><th>发行方</th><th>账号</th><th>口令</th><th></th></tr></thead>
         <tbody>
-          <tr v-for="(r, i) in rows" :key="i">
+          <tr v-for="r in rows" :key="r.recordId">
             <td>{{ r.issuer || '—' }}</td>
             <td>{{ r.account || '—' }}</td>
             <td><code>{{ r.code }}</code> <span class="muted">{{ r.secondsLeft }}s</span></td>

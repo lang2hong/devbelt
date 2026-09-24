@@ -1,4 +1,3 @@
-import { deriveKekSmp } from '@devbelt/db-host/sync/crypto/argon2';
 import { jcs } from '@devbelt/db-host/sync/crypto/jcs';
 import { assertSmpKdfParams, type SmpKdfParams } from '@devbelt/db-host/sync/crypto/smpKdfParams';
 import { hkdfSha256, aesGcmOpen, b64urlDecode } from './webcrypto';
@@ -7,9 +6,11 @@ import type { EnvelopeDto } from '@devbelt/db-host/sync/e2e/types';
 /**
  * 浏览器侧解锁（P6-S5b）：SMP → Argon2id(KEK_smp) → 解 envelopeSmp → DEK。
  *
- * Argon2id 必须由宿主注入的 `deriveKek` 执行（db-ui 在 **Web Worker** 内调
- * `deriveKekSmp`）；默认实现仅用于测试/Node。AES-GCM/HKDF 用 WebCrypto，与扩展
- * Node 实现逐字节对齐（相同 `smpKdf` 参数、相同 envelope info/AAD）。
+ * Argon2id 必须由宿主**显式注入** `deriveKek`（db-ui 在 **Web Worker** 内调
+ * `deriveKekSmp`）。此处刻意不提供默认实现：否则 `hash-wasm` 会经默认参数被静态
+ * 拉进主线程 bundle，破坏 `db-host/sync/crypto/argon2.ts` 的打包隔离红线。
+ * AES-GCM/HKDF 用 WebCrypto，与扩展 Node 实现逐字节对齐（相同 `smpKdf` 参数、
+ * 相同 envelope info/AAD）。
  */
 export interface SmpKdfDto {
   alg: string;
@@ -53,7 +54,7 @@ export async function unlockDekBrowser(
   smp: string,
   smpKdf: SmpKdfDto,
   envelopeSmp: EnvelopeDto,
-  deriveKek: DeriveKek = deriveKekSmp,
+  deriveKek: DeriveKek,
 ): Promise<Uint8Array> {
   const kek = await deriveKek(smp, smpKdfDtoToParams(smpKdf));
   try {
