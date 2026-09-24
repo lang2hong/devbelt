@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalizeSecret, hotp, totp, totpFromSecret } from '../../src/authenticator/totp';
-import { decodeBase32Loose } from '../../src/authenticator/base32';
+import { decodeBase32Loose } from '@devbelt/db-host/authenticator/base32';
 
 /**
  * RFC 6238 Appendix B 测试向量：

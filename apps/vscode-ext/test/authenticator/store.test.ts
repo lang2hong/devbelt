@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { AuthenticatorStore } from '../../src/authenticator/store';
 import { ENTRIES_KEY } from '../../src/authenticator/types';
-import { encodeBase32UpperCaseNoPadding } from '../../src/authenticator/base32';
+import { encodeBase32UpperCaseNoPadding } from '@devbelt/db-host/authenticator/base32';
 
 /** In-memory Memento stub (Map-backed, same shape as vscode.Memento). */
 function memento() {

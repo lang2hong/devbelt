@@ -13,11 +13,13 @@ import InvoicesView from './pages/InvoicesView.vue';
 import CheckoutView from './pages/CheckoutView.vue';
 import PlansView from './pages/PlansView.vue';
 import StatusPage from './pages/StatusPage.vue';
+import AuthenticatorView from './pages/AuthenticatorView.vue';
 
 const ROUTES: RouteConfig[] = [
   { pattern: '/account', name: 'account' },
   { pattern: '/account/devices', name: 'devices' },
   { pattern: '/account/sync', name: 'sync' },
+  { pattern: '/account/authenticator', name: 'authenticator' },
   { pattern: '/plans', name: 'plans' },
   { pattern: '/orders', name: 'orders' },
   { pattern: '/invoices', name: 'invoices' },
@@ -45,6 +47,8 @@ const view = computed<{ comp: Component; props: Record<string, unknown> }>(() =>
       return { comp: DevicesView, props: {} };
     case 'sync':
       return { comp: SyncView, props: {} };
+    case 'authenticator':
+      return { comp: AuthenticatorView, props: { user: me_.value?.user ?? null } };
     case 'plans':
       return { comp: PlansView, props: { subscription: me_.value?.subscription ?? null } };
     case 'orders':
@@ -118,6 +122,7 @@ async function onLogout(): Promise<void> {
         <a :href="withBase('/account')" @click.prevent="navigate('/account')" :class="{ on: router.name === 'account' }">账户</a>
         <a :href="withBase('/account/devices')" @click.prevent="navigate('/account/devices')" :class="{ on: router.name === 'devices' }">设备</a>
         <a :href="withBase('/account/sync')" @click.prevent="navigate('/account/sync')" :class="{ on: router.name === 'sync' }">同步</a>
+        <a :href="withBase('/account/authenticator')" @click.prevent="navigate('/account/authenticator')" :class="{ on: router.name === 'authenticator' }">验证器</a>
         <a :href="withBase('/plans')" @click.prevent="navigate('/plans')" :class="{ on: router.name === 'plans' }">套餐</a>
         <a :href="withBase('/orders')" @click.prevent="navigate('/orders')" :class="{ on: router.name === 'orders' }">订单</a>
         <a :href="withBase('/invoices')" @click.prevent="navigate('/invoices')" :class="{ on: router.name === 'invoices' }">发票</a>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeBase32Loose, encodeBase32UpperCaseNoPadding } from '../../src/authenticator/base32';
+import { decodeBase32Loose, encodeBase32UpperCaseNoPadding } from '@devbelt/db-host/authenticator/base32';
 
 describe('base32', () => {
   it('empty string roundtrips', () => {

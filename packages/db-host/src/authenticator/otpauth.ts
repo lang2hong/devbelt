@@ -19,7 +19,7 @@
  *    （`中文` → `%25E4%25B8...`，reimport 丢真值）。
  */
 
-import { canonicalizeSecret, stripZeroWidth } from './totp';
+import { canonicalizeSecret, stripZeroWidth } from './canonical';
 import type { TotpAlgorithm } from './types';
 
 export interface OtpauthParsed {

@@ -6,7 +6,7 @@ import type { AuthenticatorStore } from './store';
 import { promptAuthenticatorUpgrade } from './quotaPrompt';
 import { exportAuthenticatorEntries } from './exportAll';
 import { decodeOtpauthFromPngDataUrl } from './qrDecode';
-import { parseOtpauthUri } from './otpauth';
+import { parseOtpauthUri } from '@devbelt/db-host/authenticator/otpauth';
 import type { AuthenticatorUpMessage } from '../result/protocol';
 
 /**

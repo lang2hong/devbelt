@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseOtpauthUri, buildOtpauthUri } from '../../src/authenticator/otpauth';
-import { canonicalizeSecret } from '../../src/authenticator/totp';
+import { parseOtpauthUri, buildOtpauthUri } from '@devbelt/db-host/authenticator/otpauth';
+import { canonicalizeSecret } from '@devbelt/db-host/authenticator/canonical';
 
 describe('parseOtpauthUri', () => {
   it('parses minimal URI (no issuer param, no account)', () => {

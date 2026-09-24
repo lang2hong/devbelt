@@ -37,8 +37,9 @@ import { uniqueId } from '@devbelt/db-host/utils/id';
 import { eventBus } from '@devbelt/db-host/utils/event';
 import type { CachedEntitlement } from '@devbelt/db-host/sync/entitlementGate';
 import { maxAuthenticatorEntries } from '@devbelt/db-host/sync/entitlementGate';
-import { canonicalizeSecret, totpFromSecret } from './totp';
-import { buildOtpauthUri } from './otpauth';
+import { canonicalizeSecret } from '@devbelt/db-host/authenticator/canonical';
+import { totpFromSecret } from './totp';
+import { buildOtpauthUri } from '@devbelt/db-host/authenticator/otpauth';
 import { AuthenticatorChangedEvent } from './events';
 import {
   type AuthenticatorEntry,

@@ -6,6 +6,7 @@ import { encodeBase64Url } from '@devbelt/db-host/sync/crypto/recoveryCode';
 import { unlockDekBrowser, smpKdfDtoToParams, type SmpKdfDto } from './unlock';
 import { openCipherRecord } from './record';
 import { DekSession } from './dekSession';
+import { totpWeb } from './totpWeb';
 
 const USER = '7';
 const EPOCH = '1';
@@ -51,6 +52,14 @@ describe('P6-S5b openCipherRecord', () => {
     expect(await openCipherRecord(DEK, rec, { userId: USER, keyEpoch: EPOCH })).toEqual(payload);
     await expect(openCipherRecord(new Uint8Array(32).fill(4), rec, { userId: USER, keyEpoch: EPOCH })).rejects.toThrow();
     expect(await openCipherRecord(DEK, { ...rec, deleteTime: '2026-01-01T00:00:00.000Z' }, { userId: USER, keyEpoch: EPOCH })).toBeUndefined();
+  });
+});
+
+describe('P6-S5c totpWeb', () => {
+  it('matches RFC 6238 SHA1 8-digit vector at T=59', async () => {
+    const secret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'; // ASCII "12345678901234567890"
+    const { code } = await totpWeb(secret, 59_000, 30, 8, 'SHA1');
+    expect(code).toBe('94287082');
   });
 });
 
