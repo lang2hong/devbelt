@@ -25,6 +25,12 @@ import { SYNC_DOMAIN, assertU64, assertEpoch, verifySignature, checkReceipt, rec
 const MAX_RECORD_CIPHERTEXT_BYTES = 256 * 1024; // 单个 record 密文上限
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;       // feed 分页响应上限
 
+/** P6：可接受的明文类型名白名单（防客户端用任意 kind 规避按类型配额/污染统计）。 */
+const KNOWN_ENTITY_KINDS: ReadonlySet<string> = new Set([
+  'connection', 'group', 'queryFolder', 'query',
+  'authenticatorEntry', 'authenticatorGroup', 'authenticatorTag',
+]);
+
 interface SignedRecordMutation {
   keyEpoch: string;
   mutationId: string;       // Base64Url22
@@ -148,6 +154,9 @@ export class SyncRecordService {
     if (input.nonce.length !== 12) throw new ValidationError('invalid record nonce');
     if (input.tag.length !== 16) throw new ValidationError('invalid record tag');
     const recordIdBuf = decodeRecordId(input.recordId);
+    if (input.entityKind !== undefined && !KNOWN_ENTITY_KINDS.has(input.entityKind)) {
+      throw new ValidationError('unknown entityKind');
+    }
 
     return this.runner(async (tx) => {
       const state = await this.lockActive(tx, userId);
@@ -194,7 +203,7 @@ export class SyncRecordService {
         // 一旦命中，说明客户端状态已错乱（或存在重放），此时静默覆盖墓碑会让
         // 其它设备看到一条「复活」却无从判断是否该信任 —— 报冲突让客户端重新对齐。
         if (existing) throw new SyncVersionConflictError(existing.version);
-        await this.assertRecordQuota(tx, userId, input.keyEpoch, { countDelta: 1, bytesDelta: input.ciphertext.length + 16 + 12 });
+        await this.assertRecordQuota(tx, userId, input.keyEpoch, { countDelta: 1, bytesDelta: input.ciphertext.length + 16 + 12, entityKind: input.entityKind, kindCountDelta: 1 });
         await this.recordRepo.create(tx, {
           userId, keyEpoch: input.keyEpoch, recordId: recordIdBuf,
           cipherSuite: input.cipherSuite, formatVersion: input.formatVersion,
@@ -207,7 +216,7 @@ export class SyncRecordService {
         if (!existing) throw new SyncRecordNotFoundError();
         if (existing.deleteTime) throw new SyncVersionConflictError(existing.version);
         const bytesDelta = (input.ciphertext.length + 16 + 12) - ((existing.ciphertext?.length ?? 0) + 16 + 12);
-        await this.assertRecordQuota(tx, userId, input.keyEpoch, { countDelta: 0, bytesDelta });
+        await this.assertRecordQuota(tx, userId, input.keyEpoch, { countDelta: 0, bytesDelta, entityKind: input.entityKind, kindCountDelta: (input.entityKind === 'authenticatorEntry' && existing.entityKind !== 'authenticatorEntry') ? 1 : 0 });
         const newVersion = incU64(existing.version);
         const ok = await this.recordRepo.update(tx, {
           userId, keyEpoch: input.keyEpoch, recordId: recordIdBuf,
@@ -274,7 +283,7 @@ export class SyncRecordService {
     return state;
   }
 
-  private async assertRecordQuota(tx: Queryable, userId: number, keyEpoch: string, delta: { countDelta: number; bytesDelta: number }): Promise<void> {
+  private async assertRecordQuota(tx: Queryable, userId: number, keyEpoch: string, delta: { countDelta: number; bytesDelta: number; entityKind?: string; kindCountDelta?: number }): Promise<void> {
     const sub = await this.subscriptionRepo.findByUserIdInTx(tx, userId);
     const plan = sub ? await this.planRepo.findByIdInTx(tx, sub.planId) : undefined;
     const freePlan = await this.planRepo.findByCodeInTx(tx, 'free');
@@ -293,6 +302,17 @@ export class SyncRecordService {
     if (quotaEnabled(maxBytes)) {
       const nextBytes = current.bytes + delta.bytesDelta;
       if (nextBytes > maxBytes) throw new SyncQuotaExceededError('bytes', String(maxBytes), String(current.bytes));
+    }
+    // P6：按明文类型强校验验证器条目上限（客户端门禁可被绕过，商业约束以服务端为准）。
+    const kindDelta = delta.kindCountDelta ?? 0;
+    if (kindDelta > 0 && delta.entityKind === 'authenticatorEntry') {
+      const maxAuth = Number(snapshot.maxAuthenticatorEntries ?? 0);
+      if (quotaEnabled(maxAuth)) {
+        const currentKind = await this.recordRepo.countActiveByKind(tx, userId, keyEpoch, 'authenticatorEntry');
+        if (currentKind + kindDelta > maxAuth) {
+          throw new SyncQuotaExceededError('authenticatorEntries', String(maxAuth), String(currentKind));
+        }
+      }
     }
   }
 

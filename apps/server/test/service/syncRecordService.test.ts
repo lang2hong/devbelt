@@ -476,4 +476,34 @@ describe('SyncRecordService', () => {
     const rec = await stack.recordRepo.findForUpdate({} as Queryable, USER, '1', Buffer.from(rid(130), 'base64url'));
     expect(rec?.entityKind ?? null).toBeNull();
   });
+
+  it('enforces per-kind authenticator quota and rejects unknown entityKind (P6-S4)', async () => {
+    const stack = makeStack();
+    const free = stack.planRepo.plans.find((p) => p.code === 'free')!;
+    free.features = { ...free.features, maxAuthenticatorEntries: 1 };
+    const keys = await init(stack);
+
+    const putAuth = async (m: number, r: number) => {
+      const mMid = mid(m);
+      const rId = rid(r);
+      const body = { ...putBody(mMid, rId, 80 + m, 81 + m, '0'), entityKind: 'authenticatorEntry' };
+      const s = signRecord(keys.signPriv, USER, 'record.put', body);
+      return stack.recordSvc.putRecord(USER, {
+        keyEpoch: '1', mutationId: mMid, signature: s.signatureBuf, baseVersion: '0', requestDigest: s.digest,
+        recordId: rId, cipherSuite: 'AES-256-GCM', formatVersion: 1, entityKind: 'authenticatorEntry', ...decodeBody(body),
+      });
+    };
+
+    await expect(putAuth(140, 140)).resolves.toMatchObject({ version: '1' });
+    await expect(putAuth(141, 141)).rejects.toBeInstanceOf(SyncQuotaExceededError);
+
+    const mMid = mid(142);
+    const rId = rid(142);
+    const bad = putBody(mMid, rId, 90, 91, '0');
+    const s = signRecord(keys.signPriv, USER, 'record.put', bad);
+    await expect(stack.recordSvc.putRecord(USER, {
+      keyEpoch: '1', mutationId: mMid, signature: s.signatureBuf, baseVersion: '0', requestDigest: s.digest,
+      recordId: rId, cipherSuite: 'AES-256-GCM', formatVersion: 1, entityKind: 'evil', ...decodeBody(bad),
+    })).rejects.toBeInstanceOf(ValidationError);
+  });
 });

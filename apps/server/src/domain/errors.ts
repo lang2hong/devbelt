@@ -167,7 +167,7 @@ export class SyncNonceReusedError extends DomainError {
 
 /** count/bytes 配额超限 → 409 SYNC_QUOTA_EXCEEDED（附 quota/limit/used）。 */
 export class SyncQuotaExceededError extends DomainError {
-  constructor(public readonly quota: 'count' | 'bytes', public readonly limit: string, public readonly used: string) {
+  constructor(public readonly quota: 'count' | 'bytes' | 'authenticatorEntries', public readonly limit: string, public readonly used: string) {
     super('sync quota exceeded', 'SYNC_QUOTA_EXCEEDED');
     this.name = 'SyncQuotaExceededError';
   }
