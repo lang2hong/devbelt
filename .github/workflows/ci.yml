@@ -1,5 +1,9 @@
 name: CI
 
+# GitHub 正把 JS actions 从 Node20 迁到 Node24；显式 opt-in 消除弃用告警（不改 action 版本）。
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 on:
   # 专用 CI 分支：仅推送到 ci 触发；main 保持自身配置，其他分支/PR 不跑。
   push:

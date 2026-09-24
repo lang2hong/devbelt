@@ -21,15 +21,10 @@ import {
 import { incU64, parseU64 } from '../../../domain/syncU64.js';
 import { decodeB64UrlRange } from './syncCrypto.js';
 import { SYNC_DOMAIN, assertU64, assertEpoch, verifySignature, checkReceipt, recordReceipt } from './syncShared.js';
+import { isEntityKind, type EntityKind } from '../../../domain/entityKind.js';
 
 const MAX_RECORD_CIPHERTEXT_BYTES = 256 * 1024; // 单个 record 密文上限
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;       // feed 分页响应上限
-
-/** P6：可接受的明文类型名白名单（防客户端用任意 kind 规避按类型配额/污染统计）。 */
-const KNOWN_ENTITY_KINDS: ReadonlySet<string> = new Set([
-  'connection', 'group', 'queryFolder', 'query',
-  'authenticatorEntry', 'authenticatorGroup', 'authenticatorTag',
-]);
 
 interface SignedRecordMutation {
   keyEpoch: string;
@@ -154,7 +149,8 @@ export class SyncRecordService {
     if (input.nonce.length !== 12) throw new ValidationError('invalid record nonce');
     if (input.tag.length !== 16) throw new ValidationError('invalid record tag');
     const recordIdBuf = decodeRecordId(input.recordId);
-    if (input.entityKind !== undefined && !KNOWN_ENTITY_KINDS.has(input.entityKind)) {
+    const entityKind = input.entityKind;
+    if (entityKind !== undefined && !isEntityKind(entityKind)) {
       throw new ValidationError('unknown entityKind');
     }
 
@@ -203,20 +199,20 @@ export class SyncRecordService {
         // 一旦命中，说明客户端状态已错乱（或存在重放），此时静默覆盖墓碑会让
         // 其它设备看到一条「复活」却无从判断是否该信任 —— 报冲突让客户端重新对齐。
         if (existing) throw new SyncVersionConflictError(existing.version);
-        await this.assertRecordQuota(tx, userId, input.keyEpoch, { countDelta: 1, bytesDelta: input.ciphertext.length + 16 + 12, entityKind: input.entityKind, kindCountDelta: 1 });
+        await this.assertRecordQuota(tx, userId, input.keyEpoch, { countDelta: 1, bytesDelta: input.ciphertext.length + 16 + 12, entityKind: entityKind, kindCountDelta: 1 });
         await this.recordRepo.create(tx, {
           userId, keyEpoch: input.keyEpoch, recordId: recordIdBuf,
           cipherSuite: input.cipherSuite, formatVersion: input.formatVersion,
           nonce: input.nonce, ciphertext: input.ciphertext, tag: input.tag,
           version: '1', changeSequence: changeSeq,
-          entityKind: input.entityKind ?? null,
+          entityKind: entityKind ?? null,
         });
       } else {
         const existing = await this.recordRepo.findForUpdate(tx, userId, input.keyEpoch, recordIdBuf);
         if (!existing) throw new SyncRecordNotFoundError();
         if (existing.deleteTime) throw new SyncVersionConflictError(existing.version);
         const bytesDelta = (input.ciphertext.length + 16 + 12) - ((existing.ciphertext?.length ?? 0) + 16 + 12);
-        await this.assertRecordQuota(tx, userId, input.keyEpoch, { countDelta: 0, bytesDelta, entityKind: input.entityKind, kindCountDelta: (input.entityKind === 'authenticatorEntry' && existing.entityKind !== 'authenticatorEntry') ? 1 : 0 });
+        await this.assertRecordQuota(tx, userId, input.keyEpoch, { countDelta: 0, bytesDelta, entityKind: entityKind, kindCountDelta: (entityKind === 'authenticatorEntry' && existing.entityKind !== 'authenticatorEntry') ? 1 : 0 });
         const newVersion = incU64(existing.version);
         const ok = await this.recordRepo.update(tx, {
           userId, keyEpoch: input.keyEpoch, recordId: recordIdBuf,
@@ -224,7 +220,7 @@ export class SyncRecordService {
           cipherSuite: input.cipherSuite, formatVersion: input.formatVersion,
           nonce: input.nonce, ciphertext: input.ciphertext, tag: input.tag,
           newVersion, changeSequence: changeSeq,
-          entityKind: input.entityKind ?? null,
+          entityKind: entityKind ?? null,
         });
         if (!ok) throw new SyncVersionConflictError(existing.version);
       }
@@ -283,7 +279,7 @@ export class SyncRecordService {
     return state;
   }
 
-  private async assertRecordQuota(tx: Queryable, userId: number, keyEpoch: string, delta: { countDelta: number; bytesDelta: number; entityKind?: string; kindCountDelta?: number }): Promise<void> {
+  private async assertRecordQuota(tx: Queryable, userId: number, keyEpoch: string, delta: { countDelta: number; bytesDelta: number; entityKind?: EntityKind; kindCountDelta?: number }): Promise<void> {
     const sub = await this.subscriptionRepo.findByUserIdInTx(tx, userId);
     const plan = sub ? await this.planRepo.findByIdInTx(tx, sub.planId) : undefined;
     const freePlan = await this.planRepo.findByCodeInTx(tx, 'free');

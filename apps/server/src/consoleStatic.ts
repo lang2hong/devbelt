@@ -5,10 +5,15 @@ import fastifyStatic from '@fastify/static';
 import { renderHome, renderPlansPage, type HomePlan } from './home.js';
 import { renderDocsIndex, renderDocPage } from './docs.js';
 
-/** 公开页/邮件入口/控制台壳的严格 CSP（无第三方、无 eval，只放行构建产物）。 */
-// P6-S5b：/db 控制台需在浏览器执行 Argon2id WASM（Web Worker）。放行 wasm-unsafe-eval
-// 与 worker-src 'self'；不放开 img-src，也不允许内联/远程脚本。
-const PUBLIC_CSP =
+/** 公开页/身份页/后台的严格 CSP（无第三方、无 eval、无 wasm、无 worker）。 */
+export const BASE_CSP =
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+  "img-src 'self' data:; connect-src 'self'; base-uri 'none'; " +
+  "frame-ancestors 'none'; form-action 'self'; object-src 'none'";
+
+// P6-S5b：仅 db-ui 控制台（`/db/*`）需在浏览器执行 Argon2id WASM（Web Worker）。
+// 单独放行 wasm-unsafe-eval 与 worker-src 'self'；不放开 img-src，也不允许内联/远程脚本。
+export const DB_CSP =
   "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; " +
   "img-src 'self' data:; connect-src 'self'; worker-src 'self'; base-uri 'none'; " +
   "frame-ancestors 'none'; form-action 'self'; object-src 'none'";
@@ -107,18 +112,18 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
     }
   }
 
-  function sendHtml(reply: FastifyReply, html: string): void {
+  function sendHtml(reply: FastifyReply, html: string, csp: string = BASE_CSP): void {
     reply
       .header('Cache-Control', 'no-store')
-      .header('Content-Security-Policy', PUBLIC_CSP)
+      .header('Content-Security-Policy', csp)
       .type('text/html')
       .send(html);
   }
 
-  function serveHtml(html: string | null) {
+  function serveHtml(html: string | null, csp: string = BASE_CSP) {
     return async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
       if (html == null) return notFound(req, reply);
-      sendHtml(reply, html);
+      sendHtml(reply, html, csp);
     };
   }
 
@@ -183,8 +188,8 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
   app.get('/db', async (_req, reply) => {
     reply.redirect('/db/');
   });
-  app.get('/db/', serveHtml(shellHtml));
-  app.get('/db/sync-reset', serveHtml(syncResetHtml));
+  app.get('/db/', serveHtml(shellHtml, DB_CSP));
+  app.get('/db/sync-reset', serveHtml(syncResetHtml, DB_CSP));
 
   // SPA fallback：客户端路由。带扩展名的路径不落 fallback（避免把不存在的静态资源当页面）。
   app.get('/db/*', async (req, reply) => {
@@ -193,7 +198,7 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
     if (/\.[A-Za-z0-9]+$/.test(rel)) {
       return notFound(req, reply);
     }
-    return serveHtml(shellHtml)(req, reply);
+    return serveHtml(shellHtml, DB_CSP)(req, reply);
   });
 
   // 平台后台（admin-ui，`/admin` 前缀）
