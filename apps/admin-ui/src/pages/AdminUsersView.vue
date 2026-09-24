@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { withBase } from '../lib/router';
-import { listUsers, setUserStatus, adjustUserSubscription, type AdminUser } from '../api/admin';
+import { listUsers, setUserStatus, adjustUserSubscription, getSyncOverview, type AdminUser, type AdminSyncKindOverview } from '../api/admin';
 import { ensureCsrf, setAccessToken } from '@devbelt/auth-client';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { toFromIso, toInclusiveEndIso } from '../lib/dateRange';
@@ -23,6 +23,10 @@ const statusWrite = useIdempotencyKey();
 const subWrite = useIdempotencyKey();
 
 const statusForm = ref<{ userId: string; status: 'active' | 'disabled' } | null>(null);
+const syncFor = ref<AdminUser | null>(null);
+const syncRows = ref<AdminSyncKindOverview[]>([]);
+const syncBusy = ref(false);
+const syncError = ref('');
 const reason = ref('');
 const subForm = ref<AdminUser | null>(null);
 const subPlan = ref('free');
@@ -128,6 +132,27 @@ async function confirmStatus(): Promise<void> {
   }
 }
 
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+async function openSync(u: AdminUser): Promise<void> {
+  syncFor.value = u;
+  syncRows.value = [];
+  syncError.value = '';
+  syncBusy.value = true;
+  try {
+    const r = await getSyncOverview(u.userId);
+    if (r.kind === 'ok') syncRows.value = r.value;
+    else if (r.kind === 'unauthorized') relogin();
+    else syncError.value = r.kind === 'failure' ? serverMsg(r) : '加载失败。';
+  } finally {
+    syncBusy.value = false;
+  }
+}
+
 function openSub(u: AdminUser): void {
   subForm.value = u;
   subPlan.value = u.planCode ?? 'free';
@@ -220,6 +245,7 @@ async function confirmSub(): Promise<void> {
             <button v-if="u.status === 'active'" class="btn small danger" :disabled="busy" @click="openStatus(u, 'disabled')">禁用</button>
             <button v-else class="btn small" :disabled="busy" @click="openStatus(u, 'active')">启用</button>
             <button class="btn small secondary" :disabled="busy" @click="openSub(u)">订阅</button>
+            <button class="btn small secondary" :disabled="busy" @click="openSync(u)">同步</button>
           </td>
         </tr>
         <tr v-if="users.length === 0"><td colspan="6" class="muted">无匹配用户。</td></tr>
@@ -249,6 +275,25 @@ async function confirmSub(): Promise<void> {
         <button class="btn" :disabled="busy" @click="confirmSub">确认</button>
         <button class="btn secondary" :disabled="busy" @click="subForm = null">取消</button>
       </div>
+    </Modal>
+
+    <Modal v-if="syncFor" title="同步密文元数据（只读）" :closable="!syncBusy" @close="syncFor = null">
+      <p class="muted">{{ syncFor.email }}</p>
+      <p class="muted">内容端到端加密，后台不可见；以下仅为按类型的密文条数/字节。</p>
+      <p v-if="syncBusy" class="muted">加载中…</p>
+      <p v-else-if="syncError" class="error">{{ syncError }}</p>
+      <table v-else class="table">
+        <thead><tr><th>类型</th><th>条数</th><th>密文字节</th><th>最近更新</th></tr></thead>
+        <tbody>
+          <tr v-for="(r, i) in syncRows" :key="i">
+            <td>{{ r.entityKind ?? '（无类型）' }}</td>
+            <td>{{ r.count }}</td>
+            <td>{{ fmtBytes(r.bytes) }}</td>
+            <td>{{ r.lastActivityTime ? new Date(r.lastActivityTime).toLocaleString() : '—' }}</td>
+          </tr>
+          <tr v-if="syncRows.length === 0"><td colspan="4" class="muted">无同步记录。</td></tr>
+        </tbody>
+      </table>
     </Modal>
   </section>
 </template>

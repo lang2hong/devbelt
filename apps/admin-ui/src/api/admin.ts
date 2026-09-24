@@ -193,6 +193,31 @@ export async function adjustUserSubscription(
   }
 }
 
+// ── 同步元数据（P6-S6，只读，无明文）──
+
+export interface AdminSyncKindOverview {
+  entityKind: string | null;
+  count: number;
+  bytes: number;
+  lastActivityTime: string | null;
+}
+
+/** GET /api/admin/users/:userId/sync-overview：按类型密文元数据（条数/字节/最近更新）。 */
+export async function getSyncOverview(
+  userId: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<AdminSyncKindOverview[]>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(`/api/admin/users/${userId}/sync-overview`, { headers: auth(token) }, fetchImpl);
+    if (res.ok) return { kind: 'ok', value: ((await res.json()).kinds ?? []) as AdminSyncKindOverview[] };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
 // ── 审计 ──
 
 export interface AuditFilters {

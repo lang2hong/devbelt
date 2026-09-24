@@ -8,6 +8,7 @@ import {
   refundAdminOrder,
   listAdminInvoices,
   setInvoiceStatus,
+  getSyncOverview,
 } from './admin';
 
 function jsonRes(status: number, body: unknown): Response {
@@ -33,6 +34,26 @@ describe('listUsers', () => {
 
   it('returns unauthorized without a token', async () => {
     const r = await listUsers({}, null, (() => { throw new Error('unreachable'); }) as never);
+    expect(r).toEqual({ kind: 'unauthorized' });
+  });
+});
+
+describe('getSyncOverview', () => {
+  it('hits the sync-overview URL and returns kinds', async () => {
+    let url = '';
+    const r = await getSyncOverview('42', 'tok', async (u) => {
+      url = String(u);
+      return jsonRes(200, { kinds: [{ entityKind: 'authenticatorEntry', count: 2, bytes: 128, lastActivityTime: null }] });
+    });
+    expect(url).toContain('/api/admin/users/42/sync-overview');
+    expect(r.kind).toBe('ok');
+    if (r.kind === 'ok') {
+      expect(r.value).toEqual([{ entityKind: 'authenticatorEntry', count: 2, bytes: 128, lastActivityTime: null }]);
+    }
+  });
+
+  it('returns unauthorized without a token', async () => {
+    const r = await getSyncOverview('42', null, (() => { throw new Error('unreachable'); }) as never);
     expect(r).toEqual({ kind: 'unauthorized' });
   });
 });
