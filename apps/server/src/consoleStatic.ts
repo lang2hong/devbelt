@@ -6,9 +6,11 @@ import { renderHome, renderPlansPage, type HomePlan } from './home.js';
 import { renderDocsIndex, renderDocPage } from './docs.js';
 
 /** 公开页/邮件入口/控制台壳的严格 CSP（无第三方、无 eval，只放行构建产物）。 */
+// P6-S5b：/db 控制台需在浏览器执行 Argon2id WASM（Web Worker）。放行 wasm-unsafe-eval
+// 与 worker-src 'self'；不放开 img-src，也不允许内联/远程脚本。
 const PUBLIC_CSP =
-  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
-  "img-src 'self' data:; connect-src 'self'; base-uri 'none'; " +
+  "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; " +
+  "img-src 'self' data:; connect-src 'self'; worker-src 'self'; base-uri 'none'; " +
   "frame-ancestors 'none'; form-action 'self'; object-src 'none'";
 
 /** 身份页（auth-ui）dist：站点根，`/login`、`/register`、`/verify-email`。 */

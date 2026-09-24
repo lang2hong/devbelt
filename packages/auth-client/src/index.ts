@@ -13,3 +13,4 @@ export * from './httpError';
 export * from './serverError';
 export * from './session';
 export * from './linkFlows';
+export * from './e2ee/index';

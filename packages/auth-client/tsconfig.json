@@ -1,7 +1,22 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2021", "DOM", "DOM.Iterable"]
+    "lib": [
+      "ES2021",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@devbelt/db-host": [
+        "../db-host/src/index.ts"
+      ],
+      "@devbelt/db-host/*": [
+        "../db-host/src/*"
+      ]
+    }
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }

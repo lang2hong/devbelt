@@ -255,6 +255,10 @@ importers:
         version: 3.5.41(typescript@5.9.3)
 
   packages/auth-client:
+    dependencies:
+      '@devbelt/db-host':
+        specifier: workspace:*
+        version: link:../db-host
     devDependencies:
       typescript:
         specifier: ^5.9.3
