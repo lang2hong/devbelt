@@ -94,9 +94,11 @@ describe.skipIf(!URL)('concurrency (real MySQL)', () => {
       ]);
       const fulfilled = results.filter((r) => r.status === 'fulfilled');
       expect(fulfilled).toHaveLength(1);
-      // 失败者的复用检测撤销了整族，成功者轮换出的新 token 也应失效
+      // 宽限内：失败者仅被拒绝，不再吊销整族 → 成功者轮换出的新 token 仍可继续刷新
+      // （否则并发竞态会把该设备整族登出；见 REFRESH_REUSE_GRACE_MS）
       const newToken = (fulfilled[0] as PromiseFulfilledResult<{ refreshToken: string }>).value.refreshToken;
-      await expect(auth.refresh(newToken, device())).rejects.toThrow();
+      const again = await auth.refresh(newToken, device());
+      expect(again.refreshToken).toBeTruthy();
     } finally {
       await pool.end();
     }
