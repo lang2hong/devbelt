@@ -805,6 +805,7 @@ export const en: MessageCatalog = {
   // ── 2FA/TOTP 验证器（webview）──
   'wv.authenticator.empty': 'No authenticator entries yet. Make sure your system clock is accurate — codes refresh every 30/60 seconds.',
   'wv.authenticator.secretMissing': 'Secret missing. Remove this entry and add it again.',
+  'wv.authenticator.sync.quota': 'Not synced — upgrade to Pro to sync.',
   'wv.authenticator.copied': 'Copied.',
   'wv.authenticator.search': 'Search',
   'wv.authenticator.add': 'Add',

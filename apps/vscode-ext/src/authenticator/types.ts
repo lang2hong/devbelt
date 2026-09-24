@@ -27,12 +27,18 @@ export type AuthenticatorGroup = {
   id: string;
   name: string;
   sortOrder: number;
+  /** P6：持久墓碑（同步出站据此产 record.delete）；UI/`listGroups` 过滤。 */
+  deleted?: boolean;
+  updateTime?: number;
 };
 
 export type AuthenticatorTag = {
   id: string;
   name: string;
   color: TagColorKey; // 8 色 key 之一，Store 校验白名单
+  /** P6：持久墓碑；UI/`listTags` 过滤。 */
+  deleted?: boolean;
+  updateTime?: number;
 };
 
 export type AuthenticatorEntry = {
@@ -53,6 +59,8 @@ export type AuthenticatorEntry = {
   localOnly?: boolean;
   /** P6：仅本地派生态——同步被拒原因；**不进同步 payload**。 */
   syncError?: 'quota';
+  /** P6：持久墓碑（`deleteEntry` 置位；UI/`listEntries` 过滤，同步出站产 record.delete）。 */
+  deleted?: boolean;
 };
 // secret 不在 entry 里，单独 SecretStorage
 

@@ -31,6 +31,7 @@ import { SshTunnel } from './connection/sshTunnel';
 import { AuthenticatorStore } from './authenticator/store';
 import { AuthenticatorView } from './authenticator/authenticatorView';
 import { AuthenticatorChangedEvent } from './authenticator/events';
+import { AuthenticatorSyncBackend } from './authenticator/syncBackend';
 
 /** 自动同步开关（按机器）：默认关闭，仅显式开启后才自动同步。 */
 const SYNC_AUTO_SYNC_KEY = 'devbelt.sync.autoSync';
@@ -167,6 +168,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
     onSessionState: () => syncStatusBar.refresh(),
     createClient: () => new PersonalSyncClient(auth.client),
+    authenticatorBackend: new AuthenticatorSyncBackend(authStore),
   });
   context.subscriptions.push({ dispose: () => syncFactory.dispose() });
   const onAuthChange = eventBus.subscribe(AuthEvent, (e) => {

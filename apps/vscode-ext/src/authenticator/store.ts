@@ -150,7 +150,7 @@ export class AuthenticatorStore implements VscodeDisposable {
     this.tags = this.memento.get<AuthenticatorTag[]>(TAGS_KEY) ?? [];
     this.secretCache.clear();
     this.missingSecrets.clear();
-    await Promise.all(this.entries.map(async (e) => {
+    await Promise.all(this.entries.filter((e) => !e.deleted).map(async (e) => {
       try {
         const v = await this.secrets.get(secretKey(e.id));
         this.applySecretValue(e.id, v);
@@ -169,7 +169,7 @@ export class AuthenticatorStore implements VscodeDisposable {
       if (id === null) return;
       void (async () => {
         try {
-          if (!this.entries.some((x) => x.id === id)) return;
+          if (!this.entries.some((x) => x.id === id && !x.deleted)) return;
           const v = await this.secrets.get(e.key);
           const changed = this.applySecretValue(id, v);
           if (changed) await eventBus.publish(new AuthenticatorChangedEvent('entry', 'update', id));
@@ -213,9 +213,23 @@ export class AuthenticatorStore implements VscodeDisposable {
     return canon === undefined ? !wasMissing : (had !== canon || wasMissing);
   }
 
-  listEntries(): readonly AuthenticatorEntry[] { this.assertInit(); return this.entries; }
-  listGroups(): readonly AuthenticatorGroup[] { this.assertInit(); return this.groups; }
-  listTags(): readonly AuthenticatorTag[] { this.assertInit(); return this.tags; }
+  listEntries(): readonly AuthenticatorEntry[] { this.assertInit(); return this.entries.filter((e) => !e.deleted); }
+  listGroups(): readonly AuthenticatorGroup[] { this.assertInit(); return this.groups.filter((g) => !g.deleted); }
+  listTags(): readonly AuthenticatorTag[] { this.assertInit(); return this.tags.filter((t) => !t.deleted); }
+
+  /** P6 同步读面：**含墓碑**（`deleted:true`），供出站对账识别 delete。 */
+  listEntriesForSync(): readonly AuthenticatorEntry[] { this.assertInit(); return this.entries; }
+  listGroupsForSync(): readonly AuthenticatorGroup[] { this.assertInit(); return this.groups; }
+  listTagsForSync(): readonly AuthenticatorTag[] { this.assertInit(); return this.tags; }
+
+  /** P6：取条目（含规范化 secret）供同步加密；secret 已丢失的条目不带 secret。 */
+  getEntryForSync(id: string): (AuthenticatorEntry & { secret?: string }) | undefined {
+    this.assertInit();
+    const e = this.entries.find((x) => x.id === id);
+    if (!e) return undefined;
+    const secret = this.secretCache.get(id);
+    return secret === undefined ? { ...e } : { ...e, secret };
+  }
 
   /** 从 cache 取规范化 secret；cache miss 或已标记 missing 返回 undefined。 */
   getSecret(id: string): string | undefined {
@@ -237,7 +251,8 @@ export class AuthenticatorStore implements VscodeDisposable {
     this.assertInit();
     if (!this.auth.isLoggedIn()) return { ok: true };
     const limit = maxAuthenticatorEntries(this.auth.getCachedEntitlement());
-    if (limit > 0 && this.entries.length >= limit) return { ok: false, limit };
+    const count = this.entries.filter((e) => !e.deleted).length;
+    if (limit > 0 && count >= limit) return { ok: false, limit };
     return { ok: true };
   }
 
@@ -407,7 +422,7 @@ export class AuthenticatorStore implements VscodeDisposable {
     await this.secrets.store(secretKey(id), canonical);
     this.secretCache.set(id, canonical);
     this.missingSecrets.delete(id);
-    const next: AuthenticatorEntry = { ...entry, tags: [...entry.tags] };
+    const next: AuthenticatorEntry = { ...entry, tags: [...entry.tags], deleted: false };
     const idx = this.entries.findIndex((e) => e.id === id);
     if (idx >= 0) this.entries[idx] = next;
     else this.entries.push(next);
@@ -433,6 +448,44 @@ export class AuthenticatorStore implements VscodeDisposable {
     this.publish('entry', 'delete', id);
   }
 
+  /** P6 同步摄取：写入/覆盖验证器分组（显式 id、跳过校验、置非墓碑）。 */
+  async upsertGroupFromSync(group: AuthenticatorGroup): Promise<void> {
+    this.assertInit();
+    const next: AuthenticatorGroup = { ...group, deleted: false, updateTime: group.updateTime ?? Date.now() };
+    const idx = this.groups.findIndex((g) => g.id === group.id);
+    if (idx >= 0) this.groups[idx] = next; else this.groups.push(next);
+    await this.saveGroups();
+    this.publish('group', 'update', group.id);
+  }
+
+  /** P6 同步摄取：写入/覆盖验证器标签（显式 id、置非墓碑）。 */
+  async upsertTagFromSync(tag: AuthenticatorTag): Promise<void> {
+    this.assertInit();
+    const next: AuthenticatorTag = { ...tag, deleted: false, updateTime: tag.updateTime ?? Date.now() };
+    const idx = this.tags.findIndex((t) => t.id === tag.id);
+    if (idx >= 0) this.tags[idx] = next; else this.tags.push(next);
+    await this.saveTags();
+    this.publish('tag', 'update', tag.id);
+  }
+
+  /** P6 墓碑落地：按本地 id 移除分组（幂等；条目回落未分组由调用方/apply 处理）。 */
+  async removeGroupFromSync(id: string): Promise<void> {
+    this.assertInit();
+    const before = this.groups.length;
+    this.groups = this.groups.filter((g) => g.id !== id);
+    if (this.groups.length !== before) await this.saveGroups();
+    this.publish('group', 'delete', id);
+  }
+
+  /** P6 墓碑落地：按本地 id 移除标签（幂等）。 */
+  async removeTagFromSync(id: string): Promise<void> {
+    this.assertInit();
+    const before = this.tags.length;
+    this.tags = this.tags.filter((t) => t.id !== id);
+    if (this.tags.length !== before) await this.saveTags();
+    this.publish('tag', 'delete', id);
+  }
+
   async deleteEntry(id: string): Promise<{ ok: boolean; reason?: string }> {
     this.assertInit();
     // 事务顺序：先删 secret，成功后再改 memento；secret 删除失败索引不动，避免 orphan secret
@@ -444,7 +497,8 @@ export class AuthenticatorStore implements VscodeDisposable {
     }
     this.secretCache.delete(id);
     this.missingSecrets.delete(id);
-    this.entries = this.entries.filter((e) => e.id !== id);
+    const entry = this.entries.find((e) => e.id === id);
+    if (entry) { entry.deleted = true; entry.updateTime = Date.now(); }
     await this.saveEntries();
     this.publish('entry', 'delete', id);
     return { ok: true };
@@ -504,7 +558,7 @@ export class AuthenticatorStore implements VscodeDisposable {
     } else {
       sortOrder = maxOrder() + 10;
     }
-    const group: AuthenticatorGroup = { id: uniqueId('ag'), name: trimmed, sortOrder };
+    const group: AuthenticatorGroup = { id: uniqueId('ag'), name: trimmed, sortOrder, updateTime: Date.now() };
     this.groups.push(group);
     this.groups.sort((a, b) => a.sortOrder - b.sortOrder);
     await this.saveGroups();
@@ -516,9 +570,10 @@ export class AuthenticatorStore implements VscodeDisposable {
     this.assertInit();
     const trimmed = name.trim();
     if (!trimmed) return { ok: false, reason: 'invalidName' };
-    const g = this.groups.find((x) => x.id === id);
+    const g = this.groups.find((x) => x.id === id && !x.deleted);
     if (!g) return { ok: false, reason: 'notFound' };
     g.name = trimmed;
+    g.updateTime = Date.now();
     await this.saveGroups();
     this.publish('group', 'update', id);
     return { ok: true };
@@ -527,11 +582,13 @@ export class AuthenticatorStore implements VscodeDisposable {
   /** 删分组时该组下条目 groupId 置 undefined（回落到未分组），不制造合成默认组。 */
   async deleteGroup(id: string): Promise<{ ok: boolean }> {
     this.assertInit();
-    if (!this.groups.some((g) => g.id === id)) return { ok: false };
-    this.groups = this.groups.filter((g) => g.id !== id);
+    const group = this.groups.find((g) => g.id === id && !g.deleted);
+    if (!group) return { ok: false };
+    group.deleted = true;
+    group.updateTime = Date.now();
     let changed = false;
     for (const e of this.entries) {
-      if (e.groupId === id) {
+      if (!e.deleted && e.groupId === id) {
         e.groupId = undefined;
         e.updateTime = Date.now();
         changed = true;
@@ -562,7 +619,7 @@ export class AuthenticatorStore implements VscodeDisposable {
     const rest = this.groups
       .filter((g) => !seen.has(g.id))
       .sort((a, b) => a.sortOrder - b.sortOrder);
-    [...ordered, ...rest].forEach((g, i) => { g.sortOrder = (i + 1) * 10; });
+    [...ordered, ...rest].forEach((g, i) => { g.sortOrder = (i + 1) * 10; g.updateTime = Date.now(); });
     this.groups.sort((a, b) => a.sortOrder - b.sortOrder);
     await this.saveGroups();
     this.publish('group', 'update', '*');
@@ -578,7 +635,7 @@ export class AuthenticatorStore implements VscodeDisposable {
     if (!trimmed) return { ok: false, reason: 'invalidName' };
     // color 必须是 AUTHENTICATOR_TAG_COLORS 白名单值，非白名单拒绝（避免把脏 hex 写进 memento）
     if (!AUTHENTICATOR_TAG_COLORS.includes(color)) return { ok: false, reason: 'invalidColor' };
-    const tag: AuthenticatorTag = { id: uniqueId('at'), name: trimmed, color };
+    const tag: AuthenticatorTag = { id: uniqueId('at'), name: trimmed, color, updateTime: Date.now() };
     this.tags.push(tag);
     await this.saveTags();
     this.publish('tag', 'create', tag.id);
@@ -589,9 +646,10 @@ export class AuthenticatorStore implements VscodeDisposable {
     this.assertInit();
     const trimmed = name.trim();
     if (!trimmed) return { ok: false, reason: 'invalidName' };
-    const t = this.tags.find((x) => x.id === id);
+    const t = this.tags.find((x) => x.id === id && !x.deleted);
     if (!t) return { ok: false, reason: 'notFound' };
     t.name = trimmed;
+    t.updateTime = Date.now();
     await this.saveTags();
     this.publish('tag', 'update', id);
     return { ok: true };
@@ -600,9 +658,10 @@ export class AuthenticatorStore implements VscodeDisposable {
   async recolorTag(id: string, color: TagColorKey): Promise<{ ok: boolean; reason?: string }> {
     this.assertInit();
     if (!AUTHENTICATOR_TAG_COLORS.includes(color)) return { ok: false, reason: 'invalidColor' };
-    const t = this.tags.find((x) => x.id === id);
+    const t = this.tags.find((x) => x.id === id && !x.deleted);
     if (!t) return { ok: false, reason: 'notFound' };
     t.color = color;
+    t.updateTime = Date.now();
     await this.saveTags();
     this.publish('tag', 'update', id);
     return { ok: true };
@@ -611,10 +670,13 @@ export class AuthenticatorStore implements VscodeDisposable {
   /** 删 tag 时从所有 entry.tags 中移除该 id，避免 tag 被删后 entry 里留孤儿 id。 */
   async deleteTag(id: string): Promise<{ ok: boolean }> {
     this.assertInit();
-    if (!this.tags.some((t) => t.id === id)) return { ok: false };
-    this.tags = this.tags.filter((t) => t.id !== id);
+    const tag = this.tags.find((t) => t.id === id && !t.deleted);
+    if (!tag) return { ok: false };
+    tag.deleted = true;
+    tag.updateTime = Date.now();
     let changed = false;
     for (const e of this.entries) {
+      if (e.deleted) continue;
       const before = e.tags.length;
       e.tags = e.tags.filter((tid) => tid !== id);
       if (e.tags.length !== before) {
@@ -660,6 +722,7 @@ export class AuthenticatorStore implements VscodeDisposable {
     this.assertInit();
     const lines: string[] = [];
     for (const e of this.entries) {
+      if (e.deleted) continue;
       if (this.missingSecrets.has(e.id)) continue;
       const secret = this.secretCache.get(e.id);
       if (secret === undefined) continue;

@@ -558,6 +558,7 @@ onUnmounted(() => {
               <div v-if="e.tags.length" class="card-tags">
                 <span v-for="tid in e.tags" :key="tid" class="card-tag" :style="{ color: tagOf(tid) ? TAG_HEX[tagOf(tid)!.color] : '' }">{{ tagOf(tid)?.name }}</span>
               </div>
+              <div v-if="e.localOnly || e.syncError === 'quota'" class="sync-flag">{{ t('wv.authenticator.sync.quota') }}</div>
             </div>
             <div class="code-area">
               <span v-if="e.error === 'secretMissing'" class="missing-text">{{ t('wv.authenticator.secretMissing') }}</span>
@@ -641,6 +642,7 @@ input, select { background: var(--vscode-input-background); color: var(--vscode-
 .account { font-size: 11px; opacity: 0.7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
 .card-tag { font-size: 10px; opacity: 0.9; }
+.sync-flag { font-size: 10px; margin-top: 2px; color: var(--vscode-editorWarning-foreground, var(--vscode-errorForeground)); }
 .code-area { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .code { font-family: var(--vscode-editor-font-family, monospace); font-size: 20px; letter-spacing: 2px; }
 .missing-text { font-size: 11px; color: var(--vscode-errorForeground); max-width: 140px; }

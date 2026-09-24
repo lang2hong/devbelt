@@ -783,6 +783,7 @@ export const zh: MessageCatalog = {
   // ── 2FA/TOTP 验证器（webview）──
   'wv.authenticator.empty': '还没有验证器条目。请确保系统时钟准确——口令每 30/60 秒刷新一次。',
   'wv.authenticator.secretMissing': '密钥丢失。请删除该条目后重新添加。',
+  'wv.authenticator.sync.quota': '未同步，升级 Pro 后可同步。',
   'wv.authenticator.copied': '已复制。',
   'wv.authenticator.search': '搜索',
   'wv.authenticator.add': '添加',

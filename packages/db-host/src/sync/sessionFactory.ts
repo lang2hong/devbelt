@@ -4,6 +4,7 @@ import type { SyncRunResult } from './e2e/syncEngine.js';
 import type { MementoLike } from './e2e/stateStore.js';
 import type { DekStore } from './crypto/keyStore.js';
 import type { ConnectionStore } from '../connection/connectionStore.js';
+import type { EntityBackend } from './e2e/entityStore.js';
 import type { CachedEntitlement } from './entitlementGate.js';
 
 /**
@@ -31,6 +32,8 @@ export interface SyncSessionFactoryDeps {
   readonly autoSyncEnabled?: () => boolean;
   /** 受控建连接口：仅登录后调用。 */
   readonly createClient: () => PersonalSyncClient;
+  /** P6：验证器同步实体后端（S3 由扩展注入）；缺省时验证器类型不可同步。 */
+  readonly authenticatorBackend?: EntityBackend;
 }
 
 export class SyncSessionFactory {
@@ -57,7 +60,7 @@ export class SyncSessionFactory {
       this.deps.dekStore,
       this.deps.connectionStore,
       this.deps.createClient(),
-      { entitlement: this.deps.entitlement, onSyncResult: this.deps.onSyncResult, onSessionState: this.deps.onSessionState, autoSyncEnabled: this.deps.autoSyncEnabled },
+      { entitlement: this.deps.entitlement, onSyncResult: this.deps.onSyncResult, onSessionState: this.deps.onSessionState, autoSyncEnabled: this.deps.autoSyncEnabled, authenticatorBackend: this.deps.authenticatorBackend },
     );
     return this.session;
   }
