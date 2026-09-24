@@ -96,6 +96,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     if (!conn?.id) return;
     // 并发连接数门禁：已打开则不算新增；0 = 不限。
     const maxConcurrent = maxConcurrentConnections(auth.getCachedEntitlement());
+    // 「是否已打开」与引擎无关：用 peek()（peekSql 只认 SQL 会话，会在 S2 误判已开的 Redis 连接）。
     if (maxConcurrent > 0 && !manager.peek(conn.id) && manager.openCount() >= maxConcurrent) {
       vscode.window.showWarningMessage(l10n('entitlement.maxConnections', { max: maxConcurrent }));
       return;
@@ -104,7 +105,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     connCtx.setLast(conn);
     treeProvider.refresh();
     try {
-      const session = await manager.connect(conn);
+      const session = await manager.connectSql(conn);
       manager.markExplicit(conn.id);
       const ver = await queryServerVersion(session, conn.dbType);
       treeProvider.setConnVersion(conn.id, `${conn.dbType} ${ver}`.trim());

@@ -33,7 +33,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     const name = await vscode.window.showInputBox({ prompt: l10n('db.createPrompt') });
     if (!name) return;
     connCtx.setLast(node.conn);
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     if (!requireCapability(session, 'createDatabase')) return;
     await session.query.query(`CREATE DATABASE ${wrapIdentForConn(node.conn, validateIdent(name))}`);
     treeProvider.refresh();
@@ -44,7 +44,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (!node?.conn) return;
     if (!ensureWritable(node.conn)) return;
     if (!(await confirm('db.dropConfirm', 'db.drop', node.label))) return;
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     if (!requireCapability(session, 'dropDatabase')) return;
     await session.query.query(`DROP DATABASE ${wrapIdentForConn(node.conn, validateIdent(node.label))}`);
     manager.disposeConn(node.conn.id);
@@ -102,7 +102,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
       restoreBtn,
     );
     if (confirmed !== restoreBtn) return;
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     // 流式读取 + 增量切分：过去整文件读进内存再一次性切分，GB 级 dump 会 OOM。
     const statements = streamSqlStatements(uri[0].fsPath, manager.scanOptionsFor?.(node.conn));
     await vscode.window.withProgress(
@@ -169,7 +169,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.compareSchema', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     if (!requireCapability(session, 'schemaSync')) return;
     // PG 连接绑定单个数据库（无 USE），同一连接上的「另一个库」取不到其元数据：
     // 对比会退化成拿库和自己比、恒输出无差异。明确拒绝，而不是给出误导结果。
@@ -218,7 +218,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     // 写的是**目标**连接，不是 node.conn —— 只读标记必须查目标，
     // 否则「只读」的连接可以作为同步目标被整库覆盖
     if (!ensureWritable(target.value)) return;
-    const targetSession = await manager.connect(target.value);
+    const targetSession = await manager.connectSql(target.value);
     const targetDbs = await targetSession.metadata.getDatabases();
     const targetDb = await vscode.window.showQuickPick(
       targetDbs.map((d: string) => ({ label: d, value: d })),
@@ -236,7 +236,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
       syncBtn,
     );
     if (confirmed !== syncBtn) return;
-    const sourceSession = await manager.connect(node.conn);
+    const sourceSession = await manager.connectSql(node.conn);
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: l10n('sync.progressTitle'), cancellable: true },
       async (progress, token) => {
@@ -279,7 +279,7 @@ export async function runExportWizard(
   if (!node.conn) return;
   const format = await pickFormat('export');
   if (!format) return;
-  const session = await manager.connect(node.conn);
+  const session = await manager.connectSql(node.conn);
   const database = await pickExportDatabase(node, session.metadata.getDatabases.bind(session.metadata));
   if (database === undefined && node.conn.dbType === DatabaseType.MYSQL && !node.database) return;
   const tables = fixedTable ? [fixedTable] : await pickTables(session.metadata.getTables.bind(session.metadata), database);
@@ -361,7 +361,7 @@ async function importSqlScript(
   const conn = node.conn;
   if (!conn) return;
   if (!(await confirmSqlExecution(conn, sql, manager.scanOptionsFor?.(conn)))) return;
-  const session = await manager.connect(conn);
+  const session = await manager.connectSql(conn);
   const database = node.database;
   connCtx.setLast(conn, database);
   if (database && conn.dbType === DatabaseType.MYSQL) {
@@ -480,7 +480,7 @@ async function importStructuredData(
     vscode.window.showWarningMessage(l10n('import.noRows'));
     return;
   }
-  const session = await manager.connect(conn);
+  const session = await manager.connectSql(conn);
   const database = await pickImportDatabase(node, session.metadata.getDatabases.bind(session.metadata));
   if (database === undefined && conn.dbType === DatabaseType.MYSQL && !node.database) return;
   const tables = await session.metadata.getTables(database);

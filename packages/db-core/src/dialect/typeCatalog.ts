@@ -61,6 +61,8 @@ const CATALOG: Record<DatabaseType, readonly string[]> = {
   [DatabaseType.MYSQL]: MYSQL_TYPES,
   [DatabaseType.PG]: PG_TYPES,
   [DatabaseType.SQLITE]: SQLITE_TYPES,
+  // Redis 是 KV/数据结构引擎，无 SQL 列类型概念。
+  [DatabaseType.REDIS]: [],
 };
 
 /** 取指定方言的列类型候选；未知类型回退 MySQL 集合。 */

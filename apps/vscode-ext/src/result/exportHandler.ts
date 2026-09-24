@@ -95,7 +95,7 @@ export class ExportHandler {
   /** 全表导出：分页读取，不受结果面板行数上限约束。 */
   private async exportEntireTable(format: TransferFormat): Promise<void> {
     const table = this.table!;
-    const session = await this.manager.connect(this.conn);
+    const session = await this.manager.connectSql(this.conn);
     const [{ writeTableExport }, { writeChunksToFile }] = await Promise.all([
       import('../data/transfer/exportService'),
       import('../utils/writeChunks'),

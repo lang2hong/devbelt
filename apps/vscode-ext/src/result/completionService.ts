@@ -1,4 +1,5 @@
-import type { ConnectionManager, ConnectionSession } from '../connection/connectionManager';
+import type { ConnectionManager } from '../connection/connectionManager';
+import type { SqlConnectionSession } from '../connection/connectionSession';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { buildCandidates, detectContext, extractFromTable, extractTableAliases, type SqlContext } from '../completion/sqlCompletionEngine';
 import { stripSqlComments } from '@devbelt/db-core/sql';
@@ -45,7 +46,7 @@ export class CompletionService {
       let columns: string[] = [];
 
       if (CONTEXTS_NEEDING_TABLES.includes(ctx) || CONTEXTS_NEEDING_COLUMNS.includes(ctx)) {
-        const session = await this.manager.connect(this.conn);
+        const session = await this.manager.connectSql(this.conn);
         if (CONTEXTS_NEEDING_TABLES.includes(ctx)) {
           tables = await this.getTables(session, db);
         }
@@ -70,7 +71,7 @@ export class CompletionService {
     }
   }
 
-  private async getTables(session: ConnectionSession, db?: string): Promise<string[]> {
+  private async getTables(session: SqlConnectionSession, db?: string): Promise<string[]> {
     const key = db || '';
     const cached = this.tableCache.get(key);
     if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.names;
@@ -85,7 +86,7 @@ export class CompletionService {
     }
   }
 
-  private async getColumns(session: ConnectionSession, table: string, db?: string): Promise<string[]> {
+  private async getColumns(session: SqlConnectionSession, table: string, db?: string): Promise<string[]> {
     const key = `${db || ''}:${table}`;
     const cached = this.columnCache.get(key);
     if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.names;

@@ -19,7 +19,7 @@ function makeService(manager: any, post: (msg: any) => void): CompletionService 
 
 describe('CompletionService', () => {
   it('返回表名候选（FROM 后）', async () => {
-    const manager: any = { connect: async () => ({ metadata: { getTables: async () => [table], getColumns: async () => [column] } }) };
+    const manager: any = { connectSql: async () => ({ metadata: { getTables: async () => [table], getColumns: async () => [column] } }) };
     const posted: any[] = [];
     const svc = makeService(manager, (m) => posted.push(m));
     await svc.handle('SELECT * FROM ', 'SELECT * FROM ');
@@ -30,7 +30,7 @@ describe('CompletionService', () => {
 
   it('缓存表列表，避免重复查询元数据', async () => {
     let calls = 0;
-    const manager: any = { connect: async () => ({ metadata: { getTables: async () => { calls++; return [table]; }, getColumns: async () => [column] } }) };
+    const manager: any = { connectSql: async () => ({ metadata: { getTables: async () => { calls++; return [table]; }, getColumns: async () => [column] } }) };
     const posted: any[] = [];
     const svc = makeService(manager, (m) => posted.push(m));
     await svc.handle('SELECT * FROM ', 'SELECT * FROM ');
@@ -39,7 +39,7 @@ describe('CompletionService', () => {
   });
 
   it('元数据异常时返回空候选而非抛错', async () => {
-    const manager: any = { connect: async () => ({ metadata: { getTables: async () => { throw new Error('boom'); }, getColumns: async () => [column] } }) };
+    const manager: any = { connectSql: async () => ({ metadata: { getTables: async () => { throw new Error('boom'); }, getColumns: async () => [column] } }) };
     const posted: any[] = [];
     const svc = makeService(manager, (m) => posted.push(m));
     await svc.handle('SELECT * FROM ', 'SELECT * FROM ');

@@ -1,6 +1,4 @@
-import { ConnectionFactory, QueryService, MetadataService, DataService, TableService, DialectRegistry } from '@devbelt/db-core';
-import type { DatabaseType } from '@devbelt/db-core';
-import type { DatabaseCapabilities } from '@devbelt/db-core';
+import { ConnectionFactory, QueryService, MetadataService, DataService, TableService, DialectRegistry, DatabaseType } from '@devbelt/db-core';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import type { HistoryStore } from '../history/historyStore';
 import { parseNoBackslashEscapes, parseStandardConformingStringsOff, type SqlScanOptions } from '@devbelt/db-core/sql';
@@ -8,6 +6,7 @@ import { dialectScanOptions } from '../utils/sqlDialectOptions';
 import { QueryHistoryRecorder } from '../history/queryHistoryRecorder';
 import { SshTunnel } from './sshTunnel';
 import { validateConnectionPaths, type PathValidationResult } from './connectionPathValidator';
+import { requireSqlSession, type ConnectionSession, type SqlConnectionSession } from './connectionSession';
 
 /** 建连前路径校验失败：阻断建连（不含完整路径内容）。 */
 export class ConnectionPathError extends Error {
@@ -28,19 +27,6 @@ const DEFAULT_POOL_CONFIG: PoolConfig = {
   idleTimeoutMs: 300_000,
   healthCheckIntervalMs: 60_000,
 };
-
-/**
- * 连接会话：连接 + 查询/元数据/数据编辑/表操作服务的组合。
- */
-export interface ConnectionSession {
-  capabilities: DatabaseCapabilities;
-  query: QueryService;
-  metadata: MetadataService;
-  data: DataService;
-  table: TableService;
-  isAlive: () => boolean;
-  close: () => void;
-}
 
 interface SessionEntry {
   session: ConnectionSession;
@@ -124,6 +110,17 @@ export class ConnectionManager {
     return this.sessions.get(id);
   }
 
+  /** 取已缓存的 SQL 会话（非 SQL 会话返回 undefined）。 */
+  peekSql(id: string): SqlConnectionSession | undefined {
+    const session = this.sessions.get(id);
+    return session && session.kind === 'sql' ? session : undefined;
+  }
+
+  /** SQL 会话在途查询数；非 SQL 会话恒为 0。 */
+  private sqlInFlight(session: ConnectionSession): number {
+    return session.kind === 'sql' ? session.query.inFlightCount : 0;
+  }
+
   /**
    * 当前「已打开 + 正在建连」的连接数，用于并发连接数门禁。
    *
@@ -194,6 +191,14 @@ export class ConnectionManager {
   }
 
   /**
+   * 建立并返回 SQL 会话。Redis 等非 SQL 连接不适用（会抛 NotSqlSessionError）。
+   * SQL 面板路径统一用本方法，避免每处调用点手动收窄。
+   */
+  async connectSql(conn: SavedConnection): Promise<SqlConnectionSession> {
+    return requireSqlSession(await this.connect(conn));
+  }
+
+  /**
    * 建连前路径硬拒绝：已配置但缺失/不可读的本机路径直接拒绝建连，不静默降级。
    * 返回校验结果供调用方（UI 提示）使用；抛 `ConnectionPathError` 阻断建连。
    * 已缓存的活跃会话（isAlive）跳过校验（连接已建立，路径后续变化不影响既有会话）。
@@ -242,13 +247,37 @@ export class ConnectionManager {
     }
   }
 
-  /** 装配连接与四个服务；失败由 doConnect 统一清理隧道。 */
+  /**
+   * 按引擎分派会话装配；失败由 doConnect 统一清理隧道。
+   * SQL 走 buildSqlSession；Redis 本切片为骨架，S2 再接真连接。
+   */
   private async buildSession(
     conn: SavedConnection,
     host: string,
     port: number,
     generation: number,
   ): Promise<ConnectionSession> {
+    if (conn.dbType === DatabaseType.REDIS) {
+      return this.buildRedisSession(conn);
+    }
+    return this.buildSqlSession(conn, host, port, generation);
+  }
+
+  /**
+   * Redis 会话装配骨架（P7 S1）。
+   * 真实连接/TLS/只读切面接线在 S2 完成；此前 Redis 连接不可用。
+   */
+  private async buildRedisSession(conn: SavedConnection): Promise<ConnectionSession> {
+    throw new Error(`Redis session wiring is not implemented yet (P7 S2): ${conn.id}`);
+  }
+
+  /** 装配 SQL 连接与四个服务；失败由 doConnect 统一清理隧道。 */
+  private async buildSqlSession(
+    conn: SavedConnection,
+    host: string,
+    port: number,
+    generation: number,
+  ): Promise<SqlConnectionSession> {
     const { connection, dialect } = ConnectionFactory.createWithDialect(
       conn.dbType as DatabaseType,
       {
@@ -319,7 +348,8 @@ export class ConnectionManager {
       }
     }
 
-    const session: ConnectionSession = {
+    const session: SqlConnectionSession = {
+      kind: 'sql',
       capabilities: dialect.capabilities,
       query,
       metadata: new MetadataService(query),
@@ -421,7 +451,7 @@ export class ConnectionManager {
     const sessions: { id: string; lastUsed: number; isExplicit: boolean; isAlive: boolean; inFlight: number }[] = [];
     let active = 0;
     for (const [id, entry] of this.sessionEntries) {
-      const inFlight = entry.session.query.inFlightCount;
+      const inFlight = this.sqlInFlight(entry.session);
       if (inFlight > 0) active++;
       sessions.push({
         id,
@@ -473,7 +503,7 @@ export class ConnectionManager {
       // 被视图/面板 retain 的连接不能淘汰：否则持有者仍在用，会话却被关掉。
       if (this.retains.has(entry.connId)) continue;
       // 跳过有在途查询的会话：淘汰会 end() 连接，使长查询中途失败并可能留下未定义事务。
-      if (entry.session.query.inFlightCount > 0) continue;
+      if (this.sqlInFlight(entry.session) > 0) continue;
       if (!oldest || entry.lastUsed < oldest.lastUsed) {
         oldest = entry;
       }
@@ -495,7 +525,7 @@ export class ConnectionManager {
       const toDispose: string[] = [];
       for (const [id, entry] of this.sessionEntries) {
         // 有在途查询的会话一律跳过：健康检查不应中断正在执行的语句。
-        if (entry.session.query.inFlightCount > 0) continue;
+        if (this.sqlInFlight(entry.session) > 0) continue;
         // 显式打开的连接与被持有（retain）的连接豁免「空闲超时」，但仍要检测存活：
         // SSH 断开/DB 掉线后过去会一直显示为已打开、反复失败，只能手动关闭。
         const idle = !this.explicit.has(id) && !this.retains.has(id) && now - entry.lastUsed > this.config.idleTimeoutMs;

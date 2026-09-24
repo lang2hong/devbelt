@@ -203,7 +203,7 @@ export class TableDesignView extends BaseWebView {
   }
 
   private async session() {
-    return this.manager.connect(this.conn);
+    return this.manager.connectSql(this.conn);
   }
 
   /** 取本连接方言的列类型候选；方言未注册时返回空列表（前端退化为纯文本输入）。 */
@@ -263,7 +263,7 @@ export class TableDesignView extends BaseWebView {
 
   private async loadData(): Promise<void> {
     try {
-      const session = await this.manager.connect(this.conn);
+      const session = await this.manager.connectSql(this.conn);
       const [columns, indexes, ddl] = await Promise.all([
         session.metadata.getColumns(this.table, this.database),
         session.metadata.getIndexes(this.table, this.database),

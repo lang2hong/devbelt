@@ -50,3 +50,6 @@ export { streamRowsByKeyset } from './query/paging.js';
 export type { KeysetQuerySource } from './query/paging.js';
 export { DataTransferService } from './query/dataTransferService.js';
 export type { TransferOptions, TransferProgress } from './query/dataTransferService.js';
+
+// Redis 客户端（P7）
+export * from './redis/index.js';

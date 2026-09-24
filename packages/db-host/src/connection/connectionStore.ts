@@ -39,6 +39,17 @@ export interface SavedConnection extends ConnectionConfig {
   environment?: 'development' | 'test' | 'staging' | 'production';
   /** Reject write statements before they are sent to the database. */
   readOnly?: boolean;
+
+  /** Redis：默认库号（standalone；cluster 无 SELECT）。 */
+  redisDb?: number;
+  /** Redis：连接模式（缺省 standalone；cluster/sentinel 见 P7 S4）。 */
+  redisMode?: 'standalone' | 'cluster' | 'sentinel';
+  /** Redis：Sentinel master 名称。 */
+  sentinelName?: string;
+  /** Redis：Sentinel 认证密码（敏感字段，走 SecretStorage 持久化）。 */
+  sentinelPassword?: string;
+  /** 连接颜色标签（各引擎共用）。 */
+  color?: string;
   /** 创建时间戳（ms） */
   createTime?: number;
   /** 最近更新时间戳（ms），合并同步按此判定先后 */
@@ -111,7 +122,7 @@ export class ConnectionStore {
   private hostEvents?: { dispose(): void };
   /** QueryStore 变更转发订阅句柄（连接 store 销毁时释放）。 */
   private queryStoreEvents?: { dispose(): void };
-  static readonly SENSITIVE_FIELDS = ['password', 'sshPassword', 'sshPassphrase'] as const;
+  static readonly SENSITIVE_FIELDS = ['password', 'sshPassword', 'sshPassphrase', 'sentinelPassword'] as const;
   private readonly secretCache = new Map<string, string>();
   private readonly queryStore: QueryStore;
   private readonly changedEmitter = new EventEmitter<ChangeSource>();

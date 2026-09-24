@@ -12,7 +12,7 @@ import type { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
 import { l10n } from '../i18n';
 import { diagError } from '../utils/diagnostics';
 import type { DatabaseOperation } from '@devbelt/db-core';
-import type { ConnectionSession } from '../connection/connectionManager';
+import type { ConnectionSession } from '../connection/connectionSession';
 import type { AuthenticatorStore } from '../authenticator/store';
 
 export interface Deps {
@@ -88,6 +88,11 @@ export async function recordBulkHistory(
 }
 
 export function requireCapability(session: ConnectionSession, operation: DatabaseOperation): boolean {
+  // 非 SQL 引擎没有 SQL 能力矩阵：一律视为不支持该操作。
+  if (session.kind !== 'sql') {
+    vscode.window.showWarningMessage(l10n('capability.unsupportedConnection', { operation }));
+    return false;
+  }
   if (session.capabilities.operations.includes(operation)) return true;
   vscode.window.showWarningMessage(l10n(session.capabilities ? 'capability.unsupportedDatabase' : 'capability.unsupportedConnection', { operation }));
   return false;

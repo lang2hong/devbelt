@@ -148,7 +148,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   /** 连接节点子节点：数据库列表 */
   private async buildConnectionChildren(element: DbTreeNode): Promise<DbTreeNode[]> {
     if (!element.conn) return [];
-    const session = await this.manager.connect(element.conn);
+    const session = await this.manager.connectSql(element.conn);
     if (!session.capabilities.multiDatabaseExplorer) {
       return [
         new DbTreeNode(
@@ -250,7 +250,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       return [...folderNodes, ...queryNodes];
     }
 
-    const session = await this.manager.connect(conn);
+    const session = await this.manager.connectSql(conn);
     const builder = new MetadataNodeBuilder(session.metadata);
 
     switch (catType) {
@@ -352,7 +352,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   /** 表节点子节点：列列表 + 索引/触发器/外键子分类 */
   private async buildTableChildren(element: DbTreeNode): Promise<DbTreeNode[]> {
     if (!element.conn) return [];
-    const session = await this.manager.connect(element.conn);
+    const session = await this.manager.connectSql(element.conn);
     const columns = await session.metadata.getColumns(element.label, element.database);
     const colNodes = columns.map((col) => {
       const node = new DbTreeNode(

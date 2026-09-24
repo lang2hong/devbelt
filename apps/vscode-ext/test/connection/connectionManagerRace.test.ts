@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
+import { DatabaseType } from '@devbelt/db-core';
 
 /** 由 mock 的 FakeConnection.connect 注入，模拟"建连尚未完成"。 */
 let resolveConnect: (() => void) | undefined;
@@ -65,13 +66,13 @@ describe('ConnectionManager dispose/connect race', () => {
     const manager = new ConnectionManager();
     managers.push(manager);
 
-    const pending = manager.connect(conn());
+    const pending = manager.connectSql(conn());
     await waitForConnect();
     manager.disposeConn('c-1');
     resolveConnect!();
 
     await expect(pending).rejects.toThrow(/closed/i);
-    expect(manager.peek('c-1')).toBeUndefined();
+    expect(manager.peekSql('c-1')).toBeUndefined();
     expect(manager.activeConnections).toBe(0);
     expect(endCalled).toBeGreaterThan(0);
   });
@@ -80,7 +81,7 @@ describe('ConnectionManager dispose/connect race', () => {
     const manager = new ConnectionManager();
     managers.push(manager);
 
-    const pending = manager.connect(conn({ sshHost: 'jump.example.com', sshUser: 'jump' }));
+    const pending = manager.connectSql(conn({ sshHost: 'jump.example.com', sshUser: 'jump' }));
     await waitForConnect();
     manager.disposeConn('c-1');
     resolveConnect!();
@@ -93,7 +94,7 @@ describe('ConnectionManager dispose/connect race', () => {
   it('retain/release 引用计数：归零且非显式才关闭', async () => {
     const manager = new ConnectionManager();
     managers.push(manager);
-    const pending = manager.connect(conn());
+    const pending = manager.connectSql(conn());
     await waitForConnect();
     resolveConnect!();
     await pending;
@@ -111,7 +112,7 @@ describe('ConnectionManager dispose/connect race', () => {
   it('显式打开的连接 release 归零也不关闭', async () => {
     const manager = new ConnectionManager();
     managers.push(manager);
-    const pending = manager.connect(conn());
+    const pending = manager.connectSql(conn());
     await waitForConnect();
     resolveConnect!();
     await pending;
@@ -127,7 +128,7 @@ describe('ConnectionManager dispose/connect race', () => {
     managers.push(manager);
 
     expect(manager.openCount()).toBe(0);
-    const pending = manager.connect(conn());
+    const pending = manager.connectSql(conn());
     await waitForConnect();
     // 尚未 resolve，sessions 里还没有它；门禁若不数在建连就会放行超出套餐的连接。
     expect(manager.openCount()).toBe(1);
@@ -140,10 +141,10 @@ describe('ConnectionManager dispose/connect race', () => {
     const manager = new ConnectionManager();
     managers.push(manager);
 
-    const a = manager.connect(conn());
+    const a = manager.connectSql(conn());
     await waitForConnect();
     manager.disposeConn('c-1'); // 清掉 connecting 以允许重连
-    const b = manager.connect(conn());
+    const b = manager.connectSql(conn());
     await vi.waitFor(() => {
       if (resolvers.length < 2) throw new Error('reconnect not started');
     });
@@ -152,7 +153,7 @@ describe('ConnectionManager dispose/connect race', () => {
     resolvers[0]();
     await expect(a).rejects.toThrow(/closed/i);
     // 标记仍在 → 再次 connect 复用 B，不会发起第三次真实建连。
-    const c = manager.connect(conn());
+    const c = manager.connectSql(conn());
     expect(resolvers.length).toBe(2);
 
     resolvers[1]();
@@ -165,41 +166,52 @@ describe('ConnectionManager dispose/connect race', () => {
     const manager = new ConnectionManager({ maxConnections: 1 });
     managers.push(manager);
 
-    const p1 = manager.connect(conn({ id: 'c-1' }));
+    const p1 = manager.connectSql(conn({ id: 'c-1' }));
     await waitForConnect();
     resolvers[0]();
     await p1;
     manager.retain('c-1');
 
     // 连第二个连接触发淘汰：被持有的 c-1 必须豁免。
-    const p2 = manager.connect(conn({ id: 'c-2' }));
+    const p2 = manager.connectSql(conn({ id: 'c-2' }));
     await vi.waitFor(() => {
       if (resolvers.length < 2) throw new Error('second connect not started');
     });
     resolvers[1]();
     await p2;
 
-    expect(manager.peek('c-1')).toBeTruthy();
-    expect(manager.peek('c-2')).toBeTruthy();
+    expect(manager.peekSql('c-1')).toBeTruthy();
+    expect(manager.peekSql('c-2')).toBeTruthy();
   });
 
   it('can reconnect cleanly after a disposed in-flight attempt', async () => {
     const manager = new ConnectionManager();
     managers.push(manager);
 
-    const first = manager.connect(conn());
+    const first = manager.connectSql(conn());
     await waitForConnect();
     manager.disposeConn('c-1');
     resolveConnect!();
     await expect(first).rejects.toThrow(/closed/i);
 
     resolveConnect = undefined;
-    const second = manager.connect(conn());
+    const second = manager.connectSql(conn());
     await waitForConnect();
     resolveConnect!();
     const session = await second;
 
     expect(session).toBeTruthy();
     expect(manager.activeConnections).toBe(1);
+  });
+
+  it('REDIS 连接：connectSql 抛 not-implemented，且零会话/零隧道残留', async () => {
+    const manager = new ConnectionManager();
+    managers.push(manager);
+
+    await expect(manager.connectSql(conn({ dbType: DatabaseType.REDIS }))).rejects.toThrow(/not implemented yet/);
+    expect(manager.peekSql('c-1')).toBeUndefined();
+    expect(manager.activeConnections).toBe(0);
+    expect(manager.openCount()).toBe(0);
+    expect(tunnelClosed).toBe(0);
   });
 });

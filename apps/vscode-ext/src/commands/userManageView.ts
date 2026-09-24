@@ -112,7 +112,7 @@ export class UserManageView extends BaseWebView {
 
   private async loadUsers(): Promise<void> {
     try {
-      const session = await this.deps.manager.connect(this.conn);
+      const session = await this.deps.manager.connectSql(this.conn);
       const users = await session.metadata.getUsers();
       // PG 授权必须带 schema，MySQL 可以不带（*.*）。多库方言下列出全部库
       // 供选择，单库方言只有连接自带的那一个。
@@ -135,7 +135,7 @@ export class UserManageView extends BaseWebView {
     const { name, host } = splitUser(msg.user);
     const database = msg.database || undefined;
     try {
-      const session = await this.deps.manager.connect(this.conn);
+      const session = await this.deps.manager.connectSql(this.conn);
       const grants = await session.metadata.getUserGrants(name, host, database);
       this.post({ type: 'grants', grants });
     } catch {
@@ -150,11 +150,11 @@ export class UserManageView extends BaseWebView {
    */
   private async mutate(
     action: string,
-    fn: (session: Awaited<ReturnType<Deps['manager']['connect']>>) => Promise<void>,
+    fn: (session: Awaited<ReturnType<Deps['manager']['connectSql']>>) => Promise<void>,
   ): Promise<void> {
     // 只读拦截 + 生产环境二次确认（用户/权限 DDL 属破坏性变更）。
     if (!(await confirmProductionWrite(this.conn, action))) return;
-    const session = await this.deps.manager.connect(this.conn);
+    const session = await this.deps.manager.connectSql(this.conn);
     if (!requireCapability(session, 'manageUsers')) return;
     await fn(session);
     AuditLogger.tryLog({

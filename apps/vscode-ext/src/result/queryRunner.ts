@@ -106,7 +106,7 @@ export class QueryRunner {
     // 仅回滚**本面板自己开的事务**：会话与 SQL 编辑器/其它面板共享，无条件 ROLLBACK
     // 会静默回滚他人未提交的事务（数据丢失）。
     if (this.table && this.openTransaction) {
-      const session = this.manager.peek(this.conn.id);
+      const session = this.manager.peekSql(this.conn.id);
       session?.query.query('ROLLBACK').catch(() => {});
       this.openTransaction = false;
     }
@@ -129,7 +129,7 @@ export class QueryRunner {
     try {
       if (!(await confirmSqlExecution(this.conn, sql, this.manager.scanOptionsFor?.(this.conn)))) return;
       this.post({ type: 'running' });
-      session = await this.manager.connect(this.conn);
+      session = await this.manager.connectSql(this.conn);
       const token: QueryCancelToken = {};
       this.runningToken = token;
       if (database && this.conn.dbType === DatabaseType.MYSQL) {
@@ -241,7 +241,7 @@ export class QueryRunner {
     try {
       if (!(await confirmSqlExecution(this.conn, sql, this.manager.scanOptionsFor?.(this.conn)))) return;
       this.post({ type: 'running' });
-      const session = await this.manager.connect(this.conn);
+      const session = await this.manager.connectSql(this.conn);
       const token: QueryCancelToken = {};
       this.runningToken = token;
       const database = this.database || this.conn.database;

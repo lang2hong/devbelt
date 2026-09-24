@@ -39,7 +39,7 @@ export class ERDiagramView extends BaseWebView {
       return;
     }
     try {
-      const session = await this.manager.connect(this.conn);
+      const session = await this.manager.connectSql(this.conn);
       const [tables, foreignKeys] = await Promise.all([
         session.metadata.getTables(this.database),
         session.metadata.getForeignKeys(this.database),

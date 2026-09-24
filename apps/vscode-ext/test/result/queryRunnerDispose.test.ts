@@ -8,29 +8,29 @@ const conn: any = { id: 'c1', database: 'test', dbType: 'MYSQL', host: 'h', name
 /**
  * dispose 路径的连接泄漏回归测试。
  *
- * 曾用 `manager.connect()` 只为发一条 ROLLBACK。视图 onDispose 的顺序是
+ * 曾用 `manager.connectSql()` 只为发一条 ROLLBACK。视图 onDispose 的顺序是
  * `runner.dispose()` → `manager.disposeConn()`，同步部分先释放会话，随后
- * microtask 里那个 connect 又建了一条无人持有的新连接（带 SSH 隧道一起漏），
+ * microtask 里那个 connectSql 又建了一条无人持有的新连接（带 SSH 隧道一起漏），
  * 每关一个表预览面板泄漏一条。修复后只对已存在会话发 ROLLBACK。
  */
 describe('QueryRunner.dispose 连接生命周期', () => {
-  it('不调用 connect（避免在会话释放后重建连接）', async () => {
-    const connect = vi.fn(async () => ({}));
-    const manager: any = { connect, peek: () => undefined, disposeConn: () => {} };
+  it('不调用 connectSql（避免在会话释放后重建连接）', async () => {
+    const connectSql = vi.fn(async () => ({}));
+    const manager: any = { connectSql, peekSql: () => undefined, disposeConn: () => {} };
     const runner = new QueryRunner(conn, manager, 'users', 'test', () => {});
 
     runner.dispose();
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(connect).not.toHaveBeenCalled();
+    expect(connectSql).not.toHaveBeenCalled();
   });
 
   it('未开启事务时 dispose 不回滚（保护共享会话中的他人事务）', () => {
     const query = vi.fn(async () => ({ rows: [], fields: [] }));
     const manager: any = {
-      connect: vi.fn(async () => ({})),
-      peek: () => ({ query: { query } }),
+      connectSql: vi.fn(async () => ({})),
+      peekSql: () => ({ query: { query } }),
       disposeConn: () => {},
     };
     const runner = new QueryRunner(conn, manager, 'users', 'test', () => {});
@@ -38,7 +38,7 @@ describe('QueryRunner.dispose 连接生命周期', () => {
     runner.dispose();
 
     expect(query).not.toHaveBeenCalled();
-    expect(manager.connect).not.toHaveBeenCalled();
+    expect(manager.connectSql).not.toHaveBeenCalled();
   });
 
   it('本面板开启事务后 dispose 才发送 ROLLBACK', async () => {
@@ -48,31 +48,31 @@ describe('QueryRunner.dispose 连接生命周期', () => {
       metadata: { getColumns: async () => [] },
     };
     const manager: any = {
-      connect: vi.fn(async () => session),
-      peek: () => session,
+      connectSql: vi.fn(async () => session),
+      peekSql: () => session,
       disposeConn: () => {},
     };
     const runner = new QueryRunner(conn, manager, 'users', 'test', () => {});
 
     await runner.execute('BEGIN');
     query.mockClear();
-    manager.connect.mockClear();
+    manager.connectSql.mockClear();
     runner.dispose();
 
     expect(query).toHaveBeenCalledWith('ROLLBACK');
-    expect(manager.connect).not.toHaveBeenCalled();
+    expect(manager.connectSql).not.toHaveBeenCalled();
   });
 
   it('无会话时静默跳过 ROLLBACK', () => {
-    const manager: any = { connect: vi.fn(), peek: () => undefined, disposeConn: () => {} };
+    const manager: any = { connectSql: vi.fn(), peekSql: () => undefined, disposeConn: () => {} };
     const runner = new QueryRunner(conn, manager, 'users', 'test', () => {});
     expect(() => runner.dispose()).not.toThrow();
   });
 
   it('ROLLBACK 失败不抛出（best-effort）', async () => {
     const manager: any = {
-      connect: vi.fn(),
-      peek: () => ({ query: { query: async () => { throw new Error('gone'); } } }),
+      connectSql: vi.fn(),
+      peekSql: () => ({ query: { query: async () => { throw new Error('gone'); } } }),
       disposeConn: () => {},
     };
     const runner = new QueryRunner(conn, manager, 'users', 'test', () => {});
@@ -80,24 +80,24 @@ describe('QueryRunner.dispose 连接生命周期', () => {
     await Promise.resolve();
   });
 
-  it('查询模式（无表）不发 ROLLBACK 也不 peek', () => {
-    const peek = vi.fn();
-    const manager: any = { connect: vi.fn(), peek, disposeConn: () => {} };
+  it('查询模式（无表）不发 ROLLBACK 也不 peekSql', () => {
+    const peekSql = vi.fn();
+    const manager: any = { connectSql: vi.fn(), peekSql, disposeConn: () => {} };
     const runner = new QueryRunner(conn, manager, undefined, 'test', () => {});
     runner.dispose();
-    expect(peek).not.toHaveBeenCalled();
+    expect(peekSql).not.toHaveBeenCalled();
   });
 
   it('dispose 后 execute 不再触达数据库', async () => {
-    const connect = vi.fn(async () => ({}));
-    const manager: any = { connect, peek: () => undefined, disposeConn: () => {} };
+    const connectSql = vi.fn(async () => ({}));
+    const manager: any = { connectSql, peekSql: () => undefined, disposeConn: () => {} };
     const posted: any[] = [];
     const runner = new QueryRunner(conn, manager, 'users', 'test', (m) => posted.push(m));
 
     runner.dispose();
     await runner.execute('SELECT 1');
 
-    expect(connect).not.toHaveBeenCalled();
+    expect(connectSql).not.toHaveBeenCalled();
     expect(posted).toHaveLength(0);
   });
 });

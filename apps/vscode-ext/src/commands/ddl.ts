@@ -29,7 +29,7 @@ export function registerDdlCommands(deps: Deps, sub: Sub): void {
   sub('devbelt.addIndex', async (node: DbTreeNode) => {
     const ctx = DbTreeNode.tableContext(node);
     if (!ctx?.conn || !ctx.table) return;
-    const session = await manager.connect(ctx.conn);
+    const session = await manager.connectSql(ctx.conn);
     if (!requireCapability(session, 'manageIndexes') || !ensureWritable(ctx.conn)) return;
     const cols = await session.metadata.getColumns(ctx.table, ctx.database);
     if (!cols.length) { vscode.window.showWarningMessage(l10n('ddl.noColumns')); return; }
@@ -68,7 +68,7 @@ export function registerDdlCommands(deps: Deps, sub: Sub): void {
   sub('devbelt.modifyIndex', async (node: DbTreeNode) => {
     const ctx = DbTreeNode.tableContext(node);
     if (!ctx?.conn || !ctx.table) return;
-    const session = await manager.connect(ctx.conn);
+    const session = await manager.connectSql(ctx.conn);
     if (!requireCapability(session, 'manageIndexes') || !ensureWritable(ctx.conn)) return;
     const indexes = await session.metadata.getIndexes(ctx.table, ctx.database);
     const current = indexes.find((i: any) => i.name === node.label);
@@ -123,7 +123,7 @@ export function registerDdlCommands(deps: Deps, sub: Sub): void {
     const ctx = DbTreeNode.tableContext(node);
     if (!ctx?.conn || !ctx.table) return;
     if (!(await confirm('ddl.dropIndexConfirm', 'common.delete', node.label))) return;
-    const session = await manager.connect(ctx.conn);
+    const session = await manager.connectSql(ctx.conn);
     if (!requireCapability(session, 'manageIndexes') || !ensureWritable(ctx.conn)) return;
     try {
       await session.table.dropIndex(node.label, ctx.table, ctx.database);
@@ -138,7 +138,7 @@ export function registerDdlCommands(deps: Deps, sub: Sub): void {
   sub('devbelt.viewTrigger', async (node: DbTreeNode) => {
     const ctx = DbTreeNode.tableContext(node);
     if (!ctx?.conn) return;
-    const session = await manager.connect(ctx.conn);
+    const session = await manager.connectSql(ctx.conn);
     const def = await session.metadata.getTriggerDefinition(node.label, ctx.database);
     await openSqlDoc(def || '-- No trigger definition found');
   });
@@ -148,7 +148,7 @@ export function registerDdlCommands(deps: Deps, sub: Sub): void {
     const ctx = DbTreeNode.tableContext(node);
     if (!ctx?.conn || !ctx.table) return;
     if (!(await confirm('ddl.dropTriggerConfirm', 'common.delete', node.label))) return;
-    const session = await manager.connect(ctx.conn);
+    const session = await manager.connectSql(ctx.conn);
     const sql = session.metadata.dropTriggerSql(node.label, ctx.table, ctx.database);
     if (!(await confirmSqlExecution(ctx.conn, sql, manager.scanOptionsFor?.(ctx.conn)))) return;
     await session.query.query(sql);
@@ -169,7 +169,7 @@ export function registerDdlCommands(deps: Deps, sub: Sub): void {
   sub('devbelt.modifyTrigger', async (node: DbTreeNode) => {
     const ctx = DbTreeNode.tableContext(node);
     if (!ctx?.conn) return;
-    const session = await manager.connect(ctx.conn);
+    const session = await manager.connectSql(ctx.conn);
     const def = await session.metadata.getTriggerDefinition(node.label, ctx.database);
     const useDb = ctx.database ? `USE ${wrapIdentForConn(ctx.conn, ctx.database)};\n\n` : '';
     const editor = await openSqlDocEditor(useDb + (def || '-- No definition found'));
@@ -187,7 +187,7 @@ export function registerDdlCommands(deps: Deps, sub: Sub): void {
   sub('devbelt.addForeignKey', async (node: DbTreeNode) => {
     const ctx = DbTreeNode.tableContext(node);
     if (!ctx?.conn || !ctx.table) return;
-    const session = await manager.connect(ctx.conn);
+    const session = await manager.connectSql(ctx.conn);
     if (!requireCapability(session, 'alterTable') || !ensureWritable(ctx.conn)) return;
     const cols = await session.metadata.getColumns(ctx.table, ctx.database);
     if (!cols.length) { vscode.window.showWarningMessage(l10n('ddl.noColumns')); return; }
@@ -245,7 +245,7 @@ export function registerDdlCommands(deps: Deps, sub: Sub): void {
     if (!node.constraintName) { vscode.window.showErrorMessage(l10n('ddl.fkNoConstraintName')); return; }
     if (!ensureWritable(ctx.conn)) return;
     if (!(await confirm('ddl.dropFkConfirm', 'common.delete', node.label))) return;
-    const session = await manager.connect(ctx.conn);
+    const session = await manager.connectSql(ctx.conn);
     try {
       await session.table.dropForeignKey(node.constraintName, ctx.table, ctx.database);
       refreshParent(node);

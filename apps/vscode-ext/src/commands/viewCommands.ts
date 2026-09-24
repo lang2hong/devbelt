@@ -39,7 +39,7 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     // 表设计视图
     vscode.commands.registerCommand('devbelt.designTable', async (node: any) => {
       if (node?.conn && node?.database) {
-        const session = await manager.connect(node.conn);
+        const session = await manager.connectSql(node.conn);
         if (!session.capabilities.operations.includes('getTableDefinition')) {
           vscode.window.showWarningMessage(l10n('design.unsupported'));
           return;
@@ -73,7 +73,7 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     // 数据对比
     vscode.commands.registerCommand('devbelt.compareData', async (node: any) => {
       if (!node?.conn || !node?.database) return;
-      const session = await manager.connect(node.conn);
+      const session = await manager.connectSql(node.conn);
       const targetDbs = (await session.metadata.getDatabases()).filter((d: string) => d !== node.database);
       if (!targetDbs.length) {
         vscode.window.showWarningMessage(l10n('compare.noOtherDatabases'));

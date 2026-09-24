@@ -99,7 +99,7 @@ export class BackupScheduler {
   private async executeBackup(entry: ScheduleEntry): Promise<void> {
     const conn = this.store.get(entry.connId);
     if (!conn) return;
-    const session = await this.manager.connect(conn);
+    const session = await this.manager.connectSql(conn);
     // 文件名带日期 + 时间：只到「日」时，同一天多次/每小时备份会互相覆盖，历史静默丢失。
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
     const fileName = backupFileName(entry.database, stamp);

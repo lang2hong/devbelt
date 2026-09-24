@@ -378,6 +378,12 @@ function decodeConnectionPayload(p: unknown): DecodedConnectionPayload {
   const dbTypeStr = strOf(obj, 'dbType');
   if (dbTypeStr === undefined) throw new Error('record payload.dbType is required');
   const dbType = databaseTypeFromEngine(dbTypeStr);
+  // P7：Redis 连接暂不进入同步（与 SQLite/ES 一致，fail-closed）。
+  // 注意：当前 `ENGINE_TO_DB_TYPE` 尚无 'redis'，实际拒绝点是上一行 `databaseTypeFromEngine`
+  // （抛 unknown database engine）；本判断是 'redis' 未来入表后的防线，避免被当作 SQL 形状解码。
+  if (dbType === DatabaseType.REDIS) {
+    throw new Error('redis connections are not supported by sync codec yet');
+  }
   rejectExtraKeys(obj, [...payloadFieldsFor(dbType), ...CONNECTION_PATH_FIELDS, 'type', 'groupId'], 'record payload');
 
   const name = strOf(obj, 'name');

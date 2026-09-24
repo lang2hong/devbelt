@@ -65,7 +65,7 @@ async function searchObjects(deps: Deps, connIds: string[], keyword: string): Pr
     const conn = deps.store.get(id);
     if (!conn) return [];
     try {
-      const session = await deps.manager.connect(conn);
+      const session = await deps.manager.connectSql(conn);
       const connName = conn.name || conn.host;
       let databases: string[];
       if (session.capabilities.multiDatabaseExplorer) {

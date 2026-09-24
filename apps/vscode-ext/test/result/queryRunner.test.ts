@@ -14,7 +14,7 @@ function makeRunner(manager: any): { runner: QueryRunner; posted: any[] } {
 describe('QueryRunner', () => {
   it('execute 发送 running → result → finished', async () => {
     const query = { query: async () => ({ rows: [{ id: 1 }], fields: [{ name: 'id' }] }), wrap: (id: string) => `\`${id}\``, cancel: () => true };
-    const manager: any = { connect: async () => ({ query, metadata: { getColumns: async () => [] } }), disposeConn: () => {} };
+    const manager: any = { connectSql: async () => ({ query, metadata: { getColumns: async () => [] } }), disposeConn: () => {} };
     const { runner, posted } = makeRunner(manager);
     await runner.execute('SELECT * FROM users');
     const types = posted.map((m) => m.type);
@@ -25,7 +25,7 @@ describe('QueryRunner', () => {
 
   it('查询模式（无表）发送 results 而非 result', async () => {
     const query = { query: async () => ({ rows: [{ n: 1 }], fields: [{ name: 'n' }] }), wrap: (id: string) => `\`${id}\``, cancel: () => true };
-    const manager: any = { connect: async () => ({ query, metadata: { getColumns: async () => [] } }), disposeConn: () => {} };
+    const manager: any = { connectSql: async () => ({ query, metadata: { getColumns: async () => [] } }), disposeConn: () => {} };
     const posted: any[] = [];
     const runner = new QueryRunner(conn, manager, undefined, 'test', (m) => posted.push(m));
     await runner.execute('SELECT 1');
@@ -34,7 +34,7 @@ describe('QueryRunner', () => {
   });
 
   it('buildSelect 反映分页/排序/筛选', () => {
-    const manager: any = { connect: async () => ({}), disposeConn: () => {} };
+    const manager: any = { connectSql: async () => ({}), disposeConn: () => {} };
     const { runner } = makeRunner(manager);
     runner.offset = 100;
     runner.sortCol = 'id';
@@ -61,7 +61,7 @@ describe('QueryRunner', () => {
       wrap: (id: string) => `\`${id}\``,
       cancel: () => true,
     };
-    const manager: any = { connect: async () => ({ query, metadata: { getColumns: async () => [] } }), disposeConn: () => {} };
+    const manager: any = { connectSql: async () => ({ query, metadata: { getColumns: async () => [] } }), disposeConn: () => {} };
     const { runner, posted } = makeRunner(manager);
     await runner.execute("UPDATE users SET name = 'x' WHERE id = 1");
 
@@ -80,7 +80,7 @@ describe('QueryRunner', () => {
       wrap: (id: string) => `\`${id}\``,
       cancel: () => true,
     };
-    const manager: any = { connect: async () => ({ query, metadata: { getColumns: async () => [{ name: 'id' }] } }), disposeConn: () => {} };
+    const manager: any = { connectSql: async () => ({ query, metadata: { getColumns: async () => [{ name: 'id' }] } }), disposeConn: () => {} };
     const { runner } = makeRunner(manager);
     await runner.execute('SELECT * FROM users');
     expect(runner.lastFields).toEqual(['id']);
@@ -89,7 +89,7 @@ describe('QueryRunner', () => {
   });
 
   it('cancel 在无运行查询时安全返回', () => {
-    const manager: any = { connect: async () => ({}), disposeConn: vi.fn() };
+    const manager: any = { connectSql: async () => ({}), disposeConn: vi.fn() };
     const { runner } = makeRunner(manager);
     expect(() => runner.cancel()).not.toThrow();
   });
@@ -108,8 +108,8 @@ describe('QueryRunner.dispose 事务隔离', () => {
       cancel: () => true,
     };
     const manager: any = {
-      connect: async () => ({ query, metadata: { getColumns: async () => [] } }),
-      peek: () => ({ query }),
+      connectSql: async () => ({ query, metadata: { getColumns: async () => [] } }),
+      peekSql: () => ({ query }),
       disposeConn: () => {},
     };
     const runner = new QueryRunner(conn, manager, 'users', 'test', () => {});
@@ -153,7 +153,7 @@ describe('QueryRunner 多结果集', () => {
       wrap: (id: string) => `\`${id}\``,
       cancel: () => true,
     };
-    const manager: any = { connect: async () => ({ query, metadata: { getColumns: async () => [] } }), disposeConn: () => {} };
+    const manager: any = { connectSql: async () => ({ query, metadata: { getColumns: async () => [] } }), disposeConn: () => {} };
     const { runner, posted } = makeRunner(manager);
 
     await runner.execute('SELECT 1; SELECT 2');

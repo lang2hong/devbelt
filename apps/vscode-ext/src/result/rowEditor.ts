@@ -35,7 +35,7 @@ export class RowEditor {
         return;
       }
       if (!(await confirmSqlExecution(this.conn, `UPDATE ${this.table} SET ${col} = ? WHERE ${pkColumns.join(', ')} = ?`, this.manager.scanOptionsFor?.(this.conn)))) return;
-      const session = await this.manager.connect(this.conn);
+      const session = await this.manager.connectSql(this.conn);
       const result = await session.data.updateCell(this.table, pkColumns, pkValues, col, val, this.database);
       this.post({ type: 'cellUpdated' });
       this.notify('update', result, `UPDATE ${this.table} SET ${col} WHERE ${pkColumns.join(', ')}`, 1);
@@ -54,7 +54,7 @@ export class RowEditor {
         return;
       }
       if (!(await confirmSqlExecution(this.conn, `DELETE FROM ${this.table} WHERE ${cols.join(', ')} = ?`, this.manager.scanOptionsFor?.(this.conn)))) return;
-      const session = await this.manager.connect(this.conn);
+      const session = await this.manager.connectSql(this.conn);
       const result = await session.data.deleteRows(
         this.table,
         cols,
@@ -72,7 +72,7 @@ export class RowEditor {
   async insertRow(columns: string[], values: (string | null)[]): Promise<void> {
     try {
       if (!(await confirmSqlExecution(this.conn, `INSERT INTO ${this.table} ...`, this.manager.scanOptionsFor?.(this.conn)))) return;
-      const session = await this.manager.connect(this.conn);
+      const session = await this.manager.connectSql(this.conn);
       const result = await session.data.insertRow(this.table, columns, values, this.database);
       this.notify('insert', result, `INSERT INTO ${this.table} (${columns.join(', ')})`, 1);
       await this.opts.refresh();

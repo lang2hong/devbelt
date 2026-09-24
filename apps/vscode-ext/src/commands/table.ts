@@ -43,7 +43,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (!node?.conn || !node?.database) return;
     if (!ensureWritable(node.conn)) return;
     if (!(await confirm('table.dropConfirm', 'table.delete', node.label))) return;
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     await session.table.dropTable(node.label, node.database);
     treeProvider.refresh();
   });
@@ -53,7 +53,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (!ensureWritable(node.conn)) return;
     const newName = await vscode.window.showInputBox({ prompt: l10n('table.renamePrompt'), value: node.label, valueSelection: [0, node.label.length] });
     if (!newName || newName === node.label) return;
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     if (!requireCapability(session, 'renameTable')) return;
     await session.table.renameTable(node.label, newName, node.database);
     treeProvider.refresh();
@@ -64,7 +64,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (!ensureWritable(node.conn)) return;
     const newName = await vscode.window.showInputBox({ prompt: l10n('view.renamePrompt'), value: node.label, valueSelection: [0, node.label.length] });
     if (!newName || newName === node.label) return;
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     if (!requireCapability(session, 'renameView')) return;
     await session.table.renameView(node.label, newName, node.database);
     treeProvider.refresh();
@@ -74,7 +74,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (!node?.conn || !node?.database) return;
     if (!ensureWritable(node.conn)) return;
     if (!(await confirm('table.truncateConfirm', 'table.truncate', node.label))) return;
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     if (!requireCapability(session, 'truncateTable')) return;
     await session.table.truncateTable(node.label, node.database);
   });
@@ -84,7 +84,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (!ensureWritable(node.conn)) return;
     const newName = await vscode.window.showInputBox({ prompt: l10n('table.dupPrompt', { name: node.label }), value: `${node.label}_copy` });
     if (!newName) return;
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     if (!requireCapability(session, 'duplicateTable')) return;
     await session.table.dupTable(node.label, newName, node.database);
     treeProvider.refresh();
@@ -98,7 +98,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
    */
   sub('devbelt.copyTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     if (!requireCapability(session, 'duplicateTable') || !ensureWritable(node.conn)) return;
     const isSqlite = node.conn.dbType === 'SQLITE';
     const scope = await vscode.window.showQuickPick(
@@ -134,7 +134,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
   sub('devbelt.viewTableStructure', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     connCtx.setLast(node.conn, node.database);
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     const columns = await session.metadata.getColumns(node.label, node.database);
     // 直接展示元数据，不再执行 `DESCRIBE`（MySQL 专有语句，PG/SQLite 会报语法错）
     executor.openStructure(node.conn, node.label, node.database, columns as any[]);
@@ -142,7 +142,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.viewTableSource', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     if (!requireCapability(session, 'getTableDefinition')) return;
     const ddl = await session.table.getCreateSql(node.label, node.database);
     await openSqlDoc(ddl || '-- No DDL found');
@@ -157,7 +157,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     });
     if (!input) return;
     const count = parseInt(input, 10);
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     const inserted = await session.table.generateMockData(node.label, node.database, count);
     await recordBulkHistory(
       deps, node.conn,
@@ -173,7 +173,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (!node?.conn || !node?.database) return;
     if (!ensureWritable(node.conn)) return;
     if (!(await confirm('view.deleteConfirm', 'view.delete', node.label))) return;
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     await session.table.dropView(node.label, node.database);
     treeProvider.refresh();
   });
@@ -190,7 +190,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
   sub('devbelt.modifyView', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     connCtx.setLast(node.conn, node.database);
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     // 拿「可编辑可执行」的 CREATE OR REPLACE VIEW 语句（SQLite 为 DROP+CREATE），
     // 用可编辑编辑器打开并绑定连接：用户改完 SELECT 直接 Run 重建视图。
     // 此前用 openSqlDoc 只读 + 原始定义（带 DEFINER、是 CREATE VIEW），既不能改也不能直接重跑。
@@ -201,7 +201,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.openRoutine', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     const def = await session.metadata.getRoutineDefinition(node.label, node.routineType || 'FUNCTION', node.database);
     await openSqlDoc(def || '-- No definition found');
   });
@@ -210,7 +210,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (!node?.conn || !node?.database) return;
     if (!ensureWritable(node.conn)) return;
     if (!(await confirm('routine.deleteConfirm', 'routine.delete', node.label))) return;
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     if (!requireCapability(session, 'manageRoutines')) return;
     await session.table.dropRoutine(node.label, node.routineType || 'FUNCTION', node.database);
     treeProvider.refresh();
@@ -218,7 +218,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.openEvent', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     const def = await session.metadata.getEventDefinition(node.label, node.database);
     await openSqlDoc(def || '-- No definition found');
   });
@@ -227,7 +227,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (!node?.conn || !node?.database) return;
     if (!ensureWritable(node.conn)) return;
     if (!(await confirm('event.deleteConfirm', 'event.delete', node.label))) return;
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     if (!requireCapability(session, 'manageEvents')) return;
     await session.table.dropEvent(node.label, node.database);
     treeProvider.refresh();
@@ -255,7 +255,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.modifyRoutine', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     const def = await session.metadata.getRoutineDefinition(node.label, node.routineType || 'FUNCTION', node.database);
     const useDb = `USE ${wrapIdentForConn(node.conn, node.database)};\n\n`;
     const editor = await openSqlDocEditor(useDb + (def || '-- No definition found'));
@@ -273,7 +273,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.modifyEvent', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     const def = await session.metadata.getEventDefinition(node.label, node.database);
     const useDb = `USE ${wrapIdentForConn(node.conn, node.database)};\n\n`;
     const editor = await openSqlDocEditor(useDb + (def || '-- No definition found'));
@@ -335,7 +335,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (!node?.conn || node.kind !== NodeKind.Column || !node.parent || !node.database) return;
     const table = node.parent.label;
     connCtx.setLast(node.conn, node.database);
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     // 预填当前定义：MySQL 从 DDL 解析全量定义（含 NOT NULL/DEFAULT/注释），
     // 否则改一次类型会把约束静默抹掉；非 MySQL 退回列元数据里的类型。
     let definition: string | undefined;
@@ -361,7 +361,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.renameColumn', async (node: DbTreeNode) => {
     if (!node?.conn || node.kind !== NodeKind.Column || !node.parent) return;
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     if (!requireCapability(session, 'alterTable') || !ensureWritable(node.conn)) return;
     const newName = await vscode.window.showInputBox({
       prompt: l10n('column.renamePrompt'),
@@ -387,7 +387,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
    */
   sub('devbelt.dropColumn', async (node: DbTreeNode) => {
     if (!node?.conn || node.kind !== NodeKind.Column || !node.parent) return;
-    const session = await manager.connect(node.conn);
+    const session = await manager.connectSql(node.conn);
     if (!requireCapability(session, 'alterTable') || !ensureWritable(node.conn)) return;
     if (!(await confirm('column.dropConfirm', 'common.delete', node.label))) return;
     try {

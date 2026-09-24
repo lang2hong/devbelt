@@ -81,7 +81,7 @@ export class DashboardView extends BaseWebView {
   private async collectAndSend(): Promise<void> {
     if (this.disposed) return;
     try {
-      const session = await this.manager.connect(this.conn);
+      const session = await this.manager.connectSql(this.conn);
       const [processList, statusVars, serverVars, summary] = await Promise.all([
         session.metadata.getProcessList(),
         session.metadata.getStatusVariables(),

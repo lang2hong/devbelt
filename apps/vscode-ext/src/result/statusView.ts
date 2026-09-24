@@ -48,7 +48,7 @@ export class StatusView extends BaseWebView {
       );
       if (confirmed !== l10n('status.kill')) return;
       try {
-        const session = await this.manager.connect(this.conn);
+        const session = await this.manager.connectSql(this.conn);
         const dbType = session.query.dialect.dbType;
         if (dbType === DatabaseType.PG) {
           await session.query.query(`SELECT pg_terminate_backend(${id}::int)`);
@@ -79,7 +79,7 @@ export class StatusView extends BaseWebView {
     }
     // 第二次 ready 来自 StatusView.vue 挂载：查询并推送数据
     try {
-      const session = await this.manager.connect(this.conn);
+      const session = await this.manager.connectSql(this.conn);
       const [processList, statusVars, serverVars, summary] = await Promise.all([
         session.metadata.getProcessList(),
         session.metadata.getStatusVariables(),

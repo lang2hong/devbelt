@@ -43,7 +43,7 @@ function fakeSession() {
 
 function managerFor(session: ReturnType<typeof fakeSession>) {
   return {
-    connect: vi.fn(async () => session),
+    connectSql: vi.fn(async () => session),
     isExplicit: () => true,
     disposeConn: vi.fn(),
     retain: vi.fn(),
@@ -82,7 +82,7 @@ describe('TableDesignView mutate gate', () => {
     const { view, session, manager } = await openView(conn({ environment: 'production' }));
     await view.handleMessage({ type: 'addColumn', column: 'age', spec: { type: 'INT' } });
     expect(confirmMock).toHaveBeenCalledTimes(1);
-    expect(manager.connect).not.toHaveBeenCalled();
+    expect(manager.connectSql).not.toHaveBeenCalled();
     expect(session.table.addColumn).not.toHaveBeenCalled();
   });
 
@@ -98,7 +98,7 @@ describe('TableDesignView mutate gate', () => {
     const { view, session, manager } = await openView(conn({ readOnly: true, environment: 'production' }));
     await view.handleMessage({ type: 'addColumn', column: 'age', spec: { type: 'INT' } });
     expect(confirmMock).not.toHaveBeenCalled();
-    expect(manager.connect).not.toHaveBeenCalled();
+    expect(manager.connectSql).not.toHaveBeenCalled();
     expect(session.table.addColumn).not.toHaveBeenCalled();
   });
 });
