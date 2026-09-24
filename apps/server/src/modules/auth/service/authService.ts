@@ -92,6 +92,10 @@ const CHANGE_PASSWORD_MAX = 10;
  * - 设备撤销与 session 撤销同一事务（§5.1）
  * - 登录的设备配额检查在用户行锁下序列化，并发不超额（§5.1）
  */
+/** refresh 重放宽限（见 reuse 处理）：同一客户端并发/重试重放刚轮换掉的旧 token 时，
+ * 只拒绝本次、不吊销整族，避免一次竞态把该设备登出。 */
+export const REFRESH_REUSE_GRACE_MS = 60_000;
+
 export class AuthService {
   constructor(
     private readonly userRepo: IUserRepo,
@@ -296,6 +300,7 @@ export class AuthService {
   }
 
   /** 刷新：事务内原子轮换 + device 绑定校验 + family 复用检测。 */
+/** 刷新：事务内原子轮换 + device 绑定校验 + family 复用检测（重放宽限见具体实现）。 */
   async refresh(refreshTokenStr: string, device: DeviceFields): Promise<RefreshResponse> {
     const tokenHash = this.tokenService.hashToken(refreshTokenStr);
     const pre = await this.refreshTokenRepo.findByHash(tokenHash);
@@ -305,7 +310,7 @@ export class AuthService {
     const preDeviceId = pre.deviceId;
 
     const outcome = await this.runner(
-      async (tx): Promise<{ kind: 'rotated'; accessToken: string; refreshToken: string } | { kind: 'reuse'; familyId: string }> => {
+      async (tx): Promise<{ kind: 'rotated'; accessToken: string; refreshToken: string } | { kind: 'reuse'; familyId: string; revokedTime: Date }> => {
         // 统一锁顺序 user -> device -> token（与 login / revokeDevice 一致，避免死锁）。
         const user = await this.userRepo.lockById(tx, preUserId);
         if (!user) throw new UnauthorizedError();
@@ -322,7 +327,7 @@ export class AuthService {
         const rt = await this.refreshTokenRepo.findByHashForUpdate(tx, tokenHash);
         if (!rt || rt.expiresTime <= now) throw new UnauthorizedError();
         if (rt.revokedTime) {
-          return { kind: 'reuse', familyId: rt.familyId };
+          return { kind: 'reuse', familyId: rt.familyId, revokedTime: rt.revokedTime };
         }
 
         await this.refreshTokenRepo.consume(tx, rt.id, now);
@@ -348,7 +353,13 @@ export class AuthService {
     );
 
     if (outcome.kind === 'reuse') {
-      // 复用检测：在**独立事务**里撤销整族（§5.1）。不能放进上面的轮换事务 ——
+      // 良性重放大赦：旧 token 是**最近**（≤宽限）才被撤销、且族内仍有活跃 token
+      // （说明新 token 已签发给合法客户端）。此时并发/重试重放只拒绝本次，不吊销整族；
+      // 陈旧客户端下次会从存储读到新 token 自愈。
+      const benign = Date.now() - outcome.revokedTime.getTime() <= REFRESH_REUSE_GRACE_MS
+        && (await this.refreshTokenRepo.hasActiveToken(outcome.familyId));
+      if (benign) throw new UnauthorizedError('refresh token already rotated');
+      // 真·复用检测：在**独立事务**里撤销整族（§5.1）。不能放进上面的轮换事务 ——
       // 那样 throw 会被 withTransaction 回滚，把撤销一起丢掉。
       await this.runner((tx) => this.refreshTokenRepo.revokeFamily(tx, outcome.familyId, new Date()));
       throw new UnauthorizedError('refresh token reuse detected');

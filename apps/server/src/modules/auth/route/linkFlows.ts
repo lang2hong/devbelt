@@ -48,11 +48,6 @@ function isJsonContentType(req: FastifyRequest): boolean {
 export async function linkFlowRoutes(app: FastifyInstance, opts: LinkFlowRouteOptions): Promise<void> {
   registerConsoleErrorHandler(app);
 
-  app.addHook('onSend', async (_req, reply, payload) => {
-    reply.header('Cache-Control', 'no-store');
-    return payload;
-  });
-
   function requireOrigin(req: FastifyRequest): boolean {
     return headerOf(req, 'origin') === opts.consoleOrigin;
   }

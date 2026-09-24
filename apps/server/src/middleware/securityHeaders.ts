@@ -31,18 +31,33 @@ export function securityHeaders(production = false): FastifyHelmetOptions {
 const API_CSP_HEADER = API_CSP;
 
 /**
- * 全局兜底安全头（§8 全响应类型覆盖）：Permissions-Policy + 对「未显式设 CSP」的
- * 响应（API 成功/错误、404/405、静态资源等）补 `default-src 'none'` CSP。HTML 页
- * 已在 consoleStatic 显式设 CSP，此处跳过不覆盖。
+ * 静态资源路径（auth-ui `/assets/`、db-ui `/db/assets/`、admin-ui `/admin/assets/`）。
+ *
+ * 静态资源**不补** `default-src 'none'`：页面/API 不受影响，但 **Worker 脚本的响应 CSP
+ * 会作用于该 Worker 环境**——db-ui 的 Argon2 Web Worker 若带上 `default-src 'none'`，
+ * `WebAssembly.compile` 会被拦截（P6-S5c）。
+ */
+const STATIC_ASSET_RE = /^\/(?:assets|db\/assets|admin\/assets)\//;
+
+/**
+ * 全局兜底安全头（§8 全响应类型覆盖）：Permissions-Policy + `/api/*` 的
+ * `Cache-Control: no-store` + 对「未显式设 CSP」的响应补 `default-src 'none'` CSP。
+ *
+ * 单一 onSend 钩子：**本应用只允许这一个 onSend**——Fastify 5.12 下同一实例挂 ≥2 个
+ * onSend 钩子会对响应触发 `ERR_HTTP_HEADERS_SENT`（表现为 `FST_ERR_REP_ALREADY_SENT`），
+ * 故原 consoleAuth/linkFlows/paymentCallback 的 per-route Cache-Control 钩子已并入此处。
  *
  * 注意：必须以**根实例直接调用**（`globalSecurityHeaders(app)` 而非 `app.register`）——
  * register 会把本插件的 onSend 包进子封装作用域，只对其自身（空）路由生效，漏掉
  * 根上的 API/404/405/静态路由。
  */
 export function globalSecurityHeaders(app: FastifyInstance): void {
-  app.addHook('onSend', async (_req, reply, payload) => {
+  app.addHook('onSend', async (req, reply, payload) => {
+    if (reply.raw.headersSent) return payload; // 已发送（如 204）时不再改 header
     reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
-    if (!reply.hasHeader('Content-Security-Policy')) {
+    const path = (req.url ?? '').split('?')[0];
+    if (path.startsWith('/api/')) reply.header('Cache-Control', 'no-store');
+    if (!STATIC_ASSET_RE.test(path) && !reply.hasHeader('Content-Security-Policy')) {
       reply.header('Content-Security-Policy', API_CSP_HEADER);
     }
     return payload;

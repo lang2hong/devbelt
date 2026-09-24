@@ -48,11 +48,6 @@ function headerOf(req: FastifyRequest, name: string): string | undefined {
 export async function paymentCallbackRoutes(app: FastifyInstance, opts: PaymentCallbackRouteOptions): Promise<void> {
   registerConsoleErrorHandler(app);
 
-  app.addHook('onSend', async (_req, reply, payload) => {
-    reply.header('Cache-Control', 'no-store');
-    return payload;
-  });
-
   // 保留原始请求字节：签名验证的是「恰如渠道发送」的字节，任何 JSON 重解析或逐 chunk
   // UTF-8 解码都会改变内容（多字节字符可能跨 chunk 边界产生替换字符）。此处用
   // Buffer[] + Buffer.concat 严格保留字节，验签输入为 Buffer。

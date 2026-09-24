@@ -8,6 +8,7 @@ import { RateLimitedError, UnauthorizedError, UserDisabledError, ValidationError
 import type { IUserRepo, IDeviceRepo, IRefreshTokenRepo } from '../../../repository/interfaces.js';
 import type { TxRunner, Queryable } from '../../../repository/mysql/db.js';
 import type { AuditWriter } from '../../../service/auditWriter.js';
+import { REFRESH_REUSE_GRACE_MS } from './authService.js';
 
 /** Web Console 设备槽位（§4.1：每用户最多一个 active web 设备，不计入 maxDevices）。 */
 const WEB_PLATFORM = 'web';
@@ -108,7 +109,7 @@ export class ConsoleAuthService {
     const preDeviceId = pre.deviceId;
 
     const outcome = await this.runner(async (tx): Promise<
-      { kind: 'rotated'; accessToken: string; refreshToken: string } | { kind: 'reuse'; familyId: string }
+      { kind: 'rotated'; accessToken: string; refreshToken: string } | { kind: 'reuse'; familyId: string; revokedTime: Date }
     > => {
       const user = await this.userRepo.lockById(tx, preUserId);
       if (!user) throw new UnauthorizedError();
@@ -123,7 +124,7 @@ export class ConsoleAuthService {
       const now = new Date();
       const rt = await this.refreshTokenRepo.findByHashForUpdate(tx, tokenHash);
       if (!rt || rt.expiresTime <= now) throw new UnauthorizedError();
-      if (rt.revokedTime) return { kind: 'reuse', familyId: rt.familyId };
+      if (rt.revokedTime) return { kind: 'reuse', familyId: rt.familyId, revokedTime: rt.revokedTime };
 
       await this.refreshTokenRepo.consume(tx, rt.id, now);
       const { token, hash, expiresAt } = this.tokenService.generateRefreshToken();
@@ -146,6 +147,11 @@ export class ConsoleAuthService {
     });
 
     if (outcome.kind === 'reuse') {
+      // 宽限（与扩展侧 authService 同口径）：最近才被撤销且族内仍有活跃 token →
+      // 良性重放，只拒绝本次，不吊销整族（不落审计）。
+      const benign = Date.now() - outcome.revokedTime.getTime() <= REFRESH_REUSE_GRACE_MS
+        && (await this.refreshTokenRepo.hasActiveToken(outcome.familyId));
+      if (benign) throw new UnauthorizedError('refresh token already rotated');
       await this.runner((tx) => this.refreshTokenRepo.revokeFamily(tx, outcome.familyId, new Date()));
       // refresh token 复用通常意味着令牌被盗/泄漏：作为安全事件落审计（不阻断撤销）。
       this.auditWriter?.write({

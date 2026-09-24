@@ -51,11 +51,6 @@ function isJsonContentType(req: FastifyRequest): boolean {
 export async function consoleAuthRoutes(app: FastifyInstance, opts: ConsoleAuthRouteOptions): Promise<void> {
   registerConsoleErrorHandler(app);
 
-  app.addHook('onSend', async (_req, reply, payload) => {
-    reply.header('Cache-Control', 'no-store');
-    return payload;
-  });
-
   const requireOrigin = (req: FastifyRequest): boolean => headerOf(req, 'origin') === opts.consoleOrigin;
 
   const anonymousCsrfOk = (req: FastifyRequest): boolean =>

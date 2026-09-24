@@ -86,9 +86,15 @@ describe.skipIf(!URL)('auth flow (real MySQL)', () => {
       const rotated = await auth.refresh(refreshToken, device());
       expect(rotated.refreshToken).not.toBe(refreshToken);
 
-      // 旧 token 复用 → 撤销 family → 两个 token 都失效
+      // 宽限内重放旧 token：仅拒绝本次，族未吊销 → 新 token 仍可刷新
       await expect(auth.refresh(refreshToken, device())).rejects.toBeInstanceOf(UnauthorizedError);
-      await expect(auth.refresh(rotated.refreshToken, device())).rejects.toBeInstanceOf(UnauthorizedError);
+      const again = await auth.refresh(rotated.refreshToken, device());
+      expect(again.refreshToken).toBeTruthy();
+
+      // 把已撤销行改成超宽限后再重放 → 真·复用 → 吊销整族 → 最新 token 失效
+      await db.query("UPDATE refresh_tokens SET revoked_time = DATE_SUB(NOW(3), INTERVAL 2 MINUTE) WHERE revoked_time IS NOT NULL");
+      await expect(auth.refresh(refreshToken, device())).rejects.toBeInstanceOf(UnauthorizedError);
+      await expect(auth.refresh(again.refreshToken, device())).rejects.toBeInstanceOf(UnauthorizedError);
 
       // 改密撤销全部会话
       const user = await userRepo.findByEmail(email);

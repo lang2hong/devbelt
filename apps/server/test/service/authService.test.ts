@@ -142,17 +142,25 @@ describe('AuthService', () => {
     await expect(f.auth.login('nope@example.com', 'wrong-password', device())).rejects.toBeInstanceOf(UnauthorizedError);
   });
 
-  it('refresh rotates and reuse on the old token revokes the family', async () => {
+  it('refresh 重放：宽限内仅拒绝本次；超宽限才吊销整族', async () => {
     await registerAndVerify(f, 'rt@example.com');
     const { refreshToken } = await f.auth.login('rt@example.com', PASSWORD, device());
     const rotated = await f.auth.refresh(refreshToken, device());
     expect(rotated.refreshToken).toBeTruthy();
     expect(rotated.refreshToken).not.toBe(refreshToken);
 
-    // 旧 token 已撤销，再次使用 → family 取消 → 401
+    // 宽限内重放旧 token：401，但族未吊销，刚轮换出的新 token 仍可继续刷新（客户端自愈）
     await expect(f.auth.refresh(refreshToken, device())).rejects.toBeInstanceOf(UnauthorizedError);
-    // 轮换出的新 token 也因 family 被撤销而失效
-    await expect(f.auth.refresh(rotated.refreshToken, device())).rejects.toBeInstanceOf(UnauthorizedError);
+    const again = await f.auth.refresh(rotated.refreshToken, device());
+    expect(again.refreshToken).toBeTruthy();
+
+    // 把已撤销行的时间改成超宽限，再重放旧 token → 判定为真·复用 → 吊销整族
+    for (const t of f.repos.refreshTokenRepo.store.values()) {
+      if (t.revokedTime) t.revokedTime = new Date(Date.now() - 120_000);
+    }
+    await expect(f.auth.refresh(refreshToken, device())).rejects.toBeInstanceOf(UnauthorizedError);
+    // 族被吊销 → 最新 token 也失效
+    await expect(f.auth.refresh(again.refreshToken, device())).rejects.toBeInstanceOf(UnauthorizedError);
   });
 
   it('changePassword revokes all refresh tokens', async () => {
