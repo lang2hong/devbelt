@@ -272,6 +272,8 @@ export async function createApp() {
     orderRepo,
     invoiceRepo,
     auditWriter,
+    syncStateRepo,
+    syncRecordService,
     rateLimiter,
   });
   const cursorService = new CursorService(deriveCursorKey());

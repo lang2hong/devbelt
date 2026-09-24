@@ -104,6 +104,8 @@ async function build(rateLimit = false) {
     orderRepo,
     invoiceRepo,
     auditWriter,
+    syncStateRepo: {} as never,
+    syncRecordService: {} as never,
   });
 
   await app.register(consoleAdminRoutes, {

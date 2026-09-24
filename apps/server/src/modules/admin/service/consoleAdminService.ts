@@ -9,6 +9,7 @@ import type {
   IInvoiceRepo,
   AdminUserRow,
   AuditFilter,
+  ISyncStateRepo,
 } from '../../../repository/interfaces.js';
 import type { Queryable } from '../../../repository/mysql/db.js';
 import type { AuditEvent, Plan, PlanFeatureDef, Order, Invoice } from '../../../domain/entities.js';
@@ -26,6 +27,7 @@ import { AuditWriter } from '../../../service/auditWriter.js';
 import { auditDto, toCsv } from '../../../service/auditSerialize.js';
 import { validateFeatureValue, FREE_PLAN_CODES } from '../../billing/service/planFeatureValidation.js';
 import type { RateLimitService } from '../../../service/rateLimitService.js';
+import type { SyncRecordService } from '../../db/service/syncRecordService.js';
 
 /** 平台审计导出单次上限（§6）。 */
 const MAX_EXPORT_ROWS = 10_000;
@@ -65,8 +67,19 @@ export interface ConsoleAdminDeps {
   orderRepo: IOrderRepo;
   invoiceRepo: IInvoiceRepo;
   auditWriter: AuditWriter;
+  /** P6：同步状态与记录读面（后台按类型元数据）。 */
+  syncStateRepo: ISyncStateRepo;
+  syncRecordService: SyncRecordService;
   /** 可选：用于受限读审计按 5min 窗口聚合（防高频读刷爆审计表）。 */
   rateLimiter?: RateLimitService;
+}
+
+/** P6：后台按明文类型展示的密文元数据行（不含明文）。 */
+export interface SyncKindOverviewRow {
+  entityKind: string | null;
+  count: number;
+  bytes: number;
+  lastActivityTime: Date | null;
 }
 
 export interface Page<T> {
@@ -89,6 +102,8 @@ export class ConsoleAdminService {
   private readonly orderRepo: IOrderRepo;
   private readonly invoiceRepo: IInvoiceRepo;
   private readonly auditWriter: AuditWriter;
+  private readonly syncStateRepo: ISyncStateRepo;
+  private readonly syncRecordService: SyncRecordService;
   private readonly rateLimiter?: RateLimitService;
 
   constructor(deps: ConsoleAdminDeps) {
@@ -101,6 +116,8 @@ export class ConsoleAdminService {
     this.orderRepo = deps.orderRepo;
     this.invoiceRepo = deps.invoiceRepo;
     this.auditWriter = deps.auditWriter;
+    this.syncStateRepo = deps.syncStateRepo;
+    this.syncRecordService = deps.syncRecordService;
     this.rateLimiter = deps.rateLimiter;
   }
 
@@ -139,6 +156,19 @@ export class ConsoleAdminService {
     const items = hasMore ? rows.slice(0, input.limit) : rows;
     await this.auditRestrictedRead(actorUserId, 'admin.users.read');
     return { items, nextId: hasMore ? items[items.length - 1].userId : null };
+  }
+
+  /**
+   * P6：后台按类型密文元数据（只读）。**仅统计条数/字节/最近更新时间**，绝不返回
+   * 密文或明文；受限读审计复用 `admin.users.read`（用户级读）。
+   */
+  async getSyncKindOverview(actorUserId: number, targetUserId: number): Promise<SyncKindOverviewRow[]> {
+    const user = await this.userRepo.findById(targetUserId);
+    if (!user) throw new EntityNotFoundError('user', targetUserId);
+    const state = await this.syncStateRepo.findByUserId(targetUserId);
+    const rows = state ? await this.syncRecordService.overviewByKind(targetUserId, state.keyEpoch) : [];
+    await this.auditRestrictedRead(actorUserId, 'admin.users.read');
+    return rows;
   }
 
   async resolvePlanInTx(tx: Queryable, planCode: string): Promise<Plan> {

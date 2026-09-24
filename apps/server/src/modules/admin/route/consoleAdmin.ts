@@ -185,6 +185,20 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
         });
       });
 
+      child.get('/api/admin/users/:userId/sync-overview', { schema: { params: adminUserIdParam } }, async (req, reply) => {
+        await readLimit(req);
+        const userId = Number((req.params as Record<string, unknown>).userId);
+        const rows = await svc.getSyncKindOverview(userIdOf(req), userId);
+        reply.send({
+          kinds: rows.map((r) => ({
+            entityKind: r.entityKind,
+            count: r.count,
+            bytes: r.bytes,
+            lastActivityTime: r.lastActivityTime ? r.lastActivityTime.toISOString() : null,
+          })),
+        });
+      });
+
       child.patch('/api/admin/users/:userId/status', { schema: { params: adminUserIdParam, body: adminUserStatusBody } }, async (req, reply) => {
         if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
         const actor = userIdOf(req);

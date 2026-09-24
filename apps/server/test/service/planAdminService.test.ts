@@ -31,6 +31,8 @@ function makeService() {
     orderRepo: {} as never,
     invoiceRepo: {} as never,
     auditWriter: new AuditWriter(new FakeAuditRepo()),
+    syncStateRepo: {} as never,
+    syncRecordService: {} as never,
   });
   return { svc, planRepo, featureDefRepo };
 }
