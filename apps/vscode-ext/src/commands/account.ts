@@ -61,7 +61,30 @@ export async function changeLoginPassword(deps: Deps): Promise<void> {
   void vscode.window.showInformationMessage(l10n('account.pwd.changed'));
 }
 
+/** 状态栏「账户」菜单：点击弹出登录/账户/同步/控制台/退出。 */
+async function openAccountMenu(deps: Deps): Promise<void> {
+  interface MenuItem extends vscode.QuickPickItem { cmd: string }
+  const items: MenuItem[] = [];
+  if (!deps.auth.isLoggedIn()) {
+    items.push({ label: `$(sign-in) ${l10n('cmd.login')}`, cmd: 'devbelt.login' });
+  } else {
+    items.push({ label: `$(account) ${l10n('account.title')}`, cmd: 'devbelt.account' });
+    items.push({ label: `$(sync) ${l10n('account.action.unlockOrInitialize')}`, cmd: 'devbelt.syncEntry' });
+    if (deps.syncFactory.current?.isUnlocked) {
+      items.push({ label: `$(sync) ${l10n('account.action.syncNow')}`, cmd: 'devbelt.syncNow' });
+    }
+    items.push({ label: `$(link-external) ${l10n('account.action.openConsole')}`, cmd: 'devbelt.openConsole' });
+    items.push({ label: `$(sign-out) ${l10n('account.action.logout')}`, cmd: 'devbelt.logout' });
+  }
+  const picked = await vscode.window.showQuickPick(items, { title: 'DB Client' });
+  if (picked?.cmd) await vscode.commands.executeCommand(picked.cmd);
+}
+
 export function registerAccountCommands(deps: Deps, sub: Sub): void {
+  sub('devbelt.accountMenu', () => {
+    void openAccountMenu(deps);
+  });
+
   sub('devbelt.login', () => {
     LoginFormView.open(deps.auth);
   });

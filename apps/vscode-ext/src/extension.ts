@@ -10,9 +10,11 @@ import { TableQueryView } from './result/tableQueryView';
 import { AuditLogger } from './utils/auditLogger';
 import { diagDispose, diagInfo, diagWarn, diagError } from './utils/diagnostics';
 import { purgeLegacyOrgCredentials } from './utils/legacyOrgCleanup';
+import { ToolsViewProvider } from './tools/toolsView';
 import { BackupScheduler } from './schedule/backupScheduler';
 import { registerViewCommands } from './commands/viewCommands';
 import { createSyncStatusBar } from './sync/syncStatusBar';
+import { createAuthStatusBar } from './sync/authStatusBar';
 import { HistoryStore } from './history/historyStore';
 import { AuthService, DEFAULT_SERVER_URL } from './sync/authService';
 import { PersonalSyncClient } from '@devbelt/db-host/sync/e2e/client';
@@ -144,6 +146,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   context.subscriptions.push(treeView, treeProvider);
 
+  // 侧边栏「工具」视图（竖向工具列表；首项 = 验证器）。
+  context.subscriptions.push(ToolsViewProvider.register());
+
   // 受控同步 session 工厂（阶段 A 无 UI）：activation/locked 态零请求，仅经工厂懒建。
   // 阶段 B 才接入初始化/解锁命令；此处只挂生命周期：logout → 丢弃 session，dispose → 清理。
   // ===== B2：状态栏 + 立即同步命令 + 窗口聚焦触发 =====
@@ -152,6 +157,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.workspace.getConfiguration().get<boolean>(SYNC_AUTO_SYNC_KEY, false);
 
   const syncStatusBar = createSyncStatusBar(context, auth, () => syncFactory.current, isAutoSyncEnabled);
+  const authStatusBar = createAuthStatusBar(context, auth);
 
   const syncFactory = new SyncSessionFactory({
     connectionStore: store,
@@ -181,6 +187,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const onAuthChange = eventBus.subscribe(AuthEvent, (e) => {
     if (e.kind === 'logout') syncFactory.invalidate();
     syncStatusBar.refresh();
+    authStatusBar.refresh();
     void syncLoggedInContext(auth);
   });
   context.subscriptions.push(onAuthChange);

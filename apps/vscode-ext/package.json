@@ -129,6 +129,11 @@
         "category": "DB Client"
       },
       {
+        "command": "devbelt.accountMenu",
+        "title": "%cmd.accountMenu%",
+        "category": "DB Client"
+      },
+      {
         "command": "devbelt.openConsole",
         "title": "%cmd.openConsole%",
         "category": "DB Client"
@@ -712,6 +717,10 @@
         },
         {
           "command": "devbelt.authenticator.export",
+          "when": "false"
+        },
+        {
+          "command": "devbelt.accountMenu",
           "when": "false"
         },
         {
@@ -1768,6 +1777,11 @@
         {
           "id": "devbelt.explorer",
           "name": "%view.explorer%"
+        },
+        {
+          "id": "devbelt.tools",
+          "name": "%view.tools%",
+          "type": "webview"
         }
       ]
     },

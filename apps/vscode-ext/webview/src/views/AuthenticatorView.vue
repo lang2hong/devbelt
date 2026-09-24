@@ -64,8 +64,6 @@ const MAX_DECODE_PIXELS = 40_000_000;
 /** 与主进程 qrDecode 的 base64 上限对齐（8MB），避免"有码却被判无效"。 */
 const HOST_MAX_BYTES = 8 * 1024 * 1024;
 
-const RING_CIRCUMFERENCE = 2 * Math.PI * 13;
-
 let off: (() => void) | undefined;
 let copiedTimer: ReturnType<typeof setTimeout> | undefined;
 let errTimer: ReturnType<typeof setTimeout> | undefined;
@@ -137,10 +135,9 @@ function nameOf(e: AuthenticatorSnapshotEntry): string { return e.issuer || e.ac
 function accountOf(e: AuthenticatorSnapshotEntry): string { return e.issuer && e.account ? e.account : ''; }
 function codeOf(e: AuthenticatorSnapshotEntry): string { return codes.value[e.id]?.code ?? '••••••'; }
 function secondsLeft(e: AuthenticatorSnapshotEntry): number { return codes.value[e.id]?.secondsLeft ?? 0; }
-function dashOffset(e: AuthenticatorSnapshotEntry): number {
+function pctLeft(e: AuthenticatorSnapshotEntry): number {
   const period = e.period || 30;
-  const frac = Math.max(0, Math.min(1, secondsLeft(e) / period));
-  return RING_CIRCUMFERENCE * (1 - frac);
+  return Math.max(0, Math.min(100, (secondsLeft(e) / period) * 100));
 }
 function tagOf(id: string): AuthenticatorTag | undefined { return tags.value.find((x) => x.id === id); }
 
@@ -410,9 +407,16 @@ onUnmounted(() => {
 
     <div class="toolbar">
       <input v-model="query" class="search" type="text" :placeholder="t('wv.authenticator.search')" />
-      <button class="btn" :title="t('wv.authenticator.add')" @click="requestAdd">＋</button>
-      <button class="btn" :title="t('wv.authenticator.image.button')" :aria-label="t('wv.authenticator.image.pasteHint')" :disabled="imgBusy" @click="pickImage">🖼</button>
-      <button class="btn" :title="t('wv.authenticator.export')" @click="requestExport">⭳</button>
+      <span class="spacer" />
+      <button class="iconbtn" :title="t('wv.authenticator.add')" @click="requestAdd">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 3v10M3 8h10" /></svg>
+      </button>
+      <button class="iconbtn" :title="t('wv.authenticator.image.button')" :aria-label="t('wv.authenticator.image.pasteHint')" :disabled="imgBusy" @click="pickImage">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2" y="3" width="12" height="10" rx="1.5" /><circle cx="6" cy="6.5" r="1" /><path d="M4 12l3.2-3 2 1.8L13 7" /></svg>
+      </button>
+      <button class="iconbtn" :title="t('wv.authenticator.export')" @click="requestExport">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2v8m0 0 3-3m-3 3L5 7M3 13h10" /></svg>
+      </button>
       <input ref="fileInput" class="hidden-file" type="file" accept="image/*" @change="onFileInput" />
     </div>
 
@@ -563,11 +567,11 @@ onUnmounted(() => {
             <div class="code-area">
               <span v-if="e.error === 'secretMissing'" class="missing-text">{{ t('wv.authenticator.secretMissing') }}</span>
               <template v-else>
-                <span class="code">{{ codeOf(e) }}</span>
-                <svg class="ring" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true">
-                  <circle class="ring-track" cx="16" cy="16" r="13" />
-                  <circle class="ring-progress" cx="16" cy="16" r="13" :stroke-dasharray="RING_CIRCUMFERENCE" :stroke-dashoffset="dashOffset(e)" />
-                </svg>
+                <div class="code-row">
+                  <span class="code">{{ codeOf(e) }}</span>
+                  <span class="secs">{{ secondsLeft(e) }}s</span>
+                </div>
+                <div class="meter"><span :style="{ width: pctLeft(e) + '%' }" /></div>
               </template>
             </div>
             <div class="card-menu">
@@ -587,21 +591,25 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.auth { padding: 8px; color: var(--vscode-foreground); font-size: 13px; }
+.auth { padding: 10px; color: var(--vscode-foreground); font-size: 13px; }
 .auth-err {
   margin-bottom: 8px; padding: 6px 8px; border-radius: 4px;
   background: var(--vscode-inputValidation-errorBackground, rgba(255, 0, 0, 0.1));
   color: var(--vscode-errorForeground);
 }
-.toolbar { display: flex; gap: 6px; margin-bottom: 6px; }
-.search { flex: 1; min-width: 0; }
+.toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+.toolbar .spacer { flex: 1; }
+.search { flex: 0 1 220px; min-width: 0; }
 .hidden-file { display: none; }
 input, select { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 3px; padding: 3px 6px; }
 .btn { background: var(--vscode-button-secondaryBackground, rgba(128,128,128,0.2)); color: var(--vscode-button-secondaryForeground, inherit); border: none; border-radius: 3px; padding: 3px 8px; cursor: pointer; }
 .btn:hover { background: var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.3)); }
 .btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
-.tagbar { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
-.tagchip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 1px 6px; border-radius: 10px; border: 1px solid transparent; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
+.iconbtn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: none; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.iconbtn:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2)); }
+.iconbtn:disabled { opacity: 0.5; cursor: default; }
+.tagbar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.tagchip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid transparent; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
 .tagchip.active { background: var(--vscode-list-activeSelectionBackground, rgba(128,128,128,0.3)); }
 .tagchip .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .tagchip .tag-x { opacity: 0.5; margin-left: 2px; }
@@ -617,23 +625,25 @@ input, select { background: var(--vscode-input-background); color: var(--vscode-
 .form-error { color: var(--vscode-errorForeground); font-size: 12px; margin-bottom: 6px; }
 .form-actions { display: flex; gap: 6px; }
 .auth-empty { padding: 16px 8px; opacity: 0.8; line-height: 1.5; }
-.groups { display: flex; flex-direction: column; gap: 10px; }
-.group-head { display: flex; align-items: center; gap: 6px; }
+.groups { display: flex; flex-direction: column; gap: 8px; }
+.group { border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.25)); border-radius: 6px; overflow: hidden; }
+.group-head { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--vscode-sideBarSectionHeader-background, rgba(128,128,128,0.12)); }
 .group-head .fold { background: none; border: none; cursor: pointer; color: inherit; padding: 0 2px; }
 .group-name { font-weight: 600; }
 .group-head .count { opacity: 0.6; font-size: 11px; }
 .group-actions { margin-left: auto; position: relative; display: flex; gap: 2px; }
 .icon { background: none; border: none; cursor: pointer; color: inherit; padding: 0 3px; opacity: 0.8; }
 .icon:hover { opacity: 1; }
-.auth-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.group-empty { opacity: 0.6; font-size: 12px; padding: 6px 4px; }
+/* 自适应多列：宽屏 2+ 列，窄屏自动回落 1 列 */
+.auth-list { list-style: none; margin: 0; padding: 8px; display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.group-empty { grid-column: 1 / -1; opacity: 0.6; font-size: 12px; padding: 4px; }
 .auth-card {
-  position: relative; display: flex; align-items: center; justify-content: space-between;
-  gap: 8px; padding: 8px 10px; border-radius: 6px; cursor: pointer;
-  background: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.08));
-  border: 1px solid var(--vscode-widget-border, transparent);
+  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+  gap: 8px; padding: 10px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.25));
+  user-select: none; -webkit-user-select: none;
 }
-.auth-card:hover { background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.16)); }
+.auth-card:hover { background: var(--vscode-list-hoverBackground, rgba(128,128,128,0.12)); }
 .auth-card:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 .auth-card.missing { opacity: 0.7; cursor: default; }
 .auth-card.warn .code { color: var(--vscode-errorForeground); }
@@ -643,13 +653,16 @@ input, select { background: var(--vscode-input-background); color: var(--vscode-
 .card-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
 .card-tag { font-size: 10px; opacity: 0.9; }
 .sync-flag { font-size: 10px; margin-top: 2px; color: var(--vscode-editorWarning-foreground, var(--vscode-errorForeground)); }
-.code-area { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.code { font-family: var(--vscode-editor-font-family, monospace); font-size: 20px; letter-spacing: 2px; }
-.missing-text { font-size: 11px; color: var(--vscode-errorForeground); max-width: 140px; }
-.ring { transform: rotate(-90deg); }
-.ring-track { fill: none; stroke: var(--vscode-foreground, #888); opacity: 0.2; stroke-width: 2.5; }
-.ring-progress { fill: none; stroke: var(--vscode-progressBar-background, #0a84ff); stroke-width: 2.5; stroke-linecap: round; transition: stroke-dashoffset 0.9s linear; }
-.card-menu { position: relative; flex-shrink: 0; }
+.code-area { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0; }
+.code-row { display: flex; align-items: baseline; gap: 10px; }
+.code { font-family: var(--vscode-editor-font-family, monospace); font-size: 19px; letter-spacing: 2px; font-variant-numeric: tabular-nums; }
+.meter { width: 128px; height: 3px; border-radius: 2px; background: var(--vscode-widget-border, rgba(128,128,128,0.4)); overflow: hidden; }
+.meter > span { display: block; height: 100%; background: var(--vscode-progressBar-background, #0a84ff); transition: width 0.9s linear; }
+.auth-card.warn .meter > span { background: var(--vscode-errorForeground); }
+.secs { font-size: 11px; opacity: 0.6; min-width: 30px; text-align: right; font-variant-numeric: tabular-nums; }
+.missing-text { font-size: 11px; color: var(--vscode-errorForeground); max-width: 140px; text-align: right; }
+.card-menu { position: absolute; top: 4px; right: 4px; opacity: 0; }
+.auth-card:hover .card-menu, .auth-card:focus-within .card-menu { opacity: 1; }
 .menu { position: absolute; right: 0; top: 100%; z-index: 10; background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border)); border-radius: 4px; padding: 2px; display: flex; flex-direction: column; }
 .menu-item { background: none; border: none; text-align: left; padding: 3px 10px; cursor: pointer; color: inherit; white-space: nowrap; }
 .menu-item:hover { background: var(--vscode-menu-selectionBackground, rgba(128,128,128,0.3)); }

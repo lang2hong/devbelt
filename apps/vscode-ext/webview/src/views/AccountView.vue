@@ -75,7 +75,18 @@ onUnmounted(() => { __offMsg?.(); });
   <div class="account-panel">
     <div class="err" v-if="errorMsg">{{ errorMsg }}</div>
     <div v-else-if="!loaded" class="loading">…</div>
-    <div v-else-if="!me" class="loading">{{ t('account.loginRequired') }}</div>
+    <template v-else-if="!me">
+      <div class="loading">{{ t('account.loginRequired') }}</div>
+      <section class="card">
+        <header class="card-head"><span class="dot"></span><div class="title">{{ t('account.card.accountOps') }}</div></header>
+        <div class="actions">
+          <button class="btn" @click="act('devbelt.sessions')">{{ t('account.action.sessions') }}</button>
+          <button class="btn" @click="act('devbelt.plans')">{{ t('account.action.plans') }}</button>
+          <button class="btn" @click="act('devbelt.openConsole')">{{ t('account.action.openConsole') }}</button>
+          <button class="btn danger" @click="act('devbelt.logout')">{{ t('account.action.logout') }}</button>
+        </div>
+      </section>
+    </template>
     <template v-else>
       <!-- 账户卡片 -->
       <section class="card">
@@ -155,10 +166,11 @@ onUnmounted(() => { __offMsg?.(); });
 </template>
 
 <style scoped>
-.account-panel { padding: 16px; box-sizing: border-box; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+.account-panel { padding: 16px; box-sizing: border-box; overflow-y: auto; display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); align-content: start; }
+.account-panel > .err, .account-panel > .loading { grid-column: 1 / -1; }
 .err { color: var(--vscode-errorForeground); }
 .loading { color: var(--vscode-descriptionForeground); }
-.card { border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.18)); border-radius: 8px; padding: 14px; background: var(--vscode-editor-background, #fff); }
+.card { border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.18)); border-radius: 8px; padding: 14px; }
 .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--vscode-descriptionForeground, #8c8c8c); flex-shrink: 0; }
 .dot.ok { background: #2ea043; }
@@ -167,13 +179,14 @@ onUnmounted(() => { __offMsg?.(); });
 .title { font-size: 14px; font-weight: 600; }
 .sub { font-size: 12px; color: var(--vscode-descriptionForeground); margin-top: 2px; }
 .kv { list-style: none; margin: 0 0 12px; padding: 0; font-size: 13px; }
-.kv li { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.12)); }
+.kv li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.12)); }
 .kv li:last-child { border-bottom: none; }
 .kv li span { color: var(--vscode-descriptionForeground); }
 .kv li b { font-weight: 600; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.btn { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; }
-.btn:hover { background: var(--vscode-button-hoverBackground); }
-.btn.primary { font-weight: 600; }
-.btn.danger { background: var(--vscode-errorForeground); color: #fff; }
+.btn { background: var(--vscode-button-secondaryBackground, rgba(128, 128, 128, 0.2)); color: var(--vscode-button-secondaryForeground, inherit); border: none; padding: 7px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+.btn:hover { background: var(--vscode-button-secondaryHoverBackground, rgba(128, 128, 128, 0.3)); }
+.btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); font-weight: 600; }
+.btn.danger { background: transparent; color: var(--vscode-errorForeground); border: 1px solid var(--vscode-errorForeground); }
+.btn.danger:hover { background: var(--vscode-errorForeground); color: #fff; }
 </style>

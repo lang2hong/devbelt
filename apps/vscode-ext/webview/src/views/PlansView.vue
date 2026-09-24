@@ -85,13 +85,13 @@ onUnmounted(() => { __offMsg?.(); });
 </template>
 
 <style scoped>
-.plans-panel { padding: 12px 4px; }
+.plans-panel { padding: 16px; }
 h2 { font-size: 18px; font-weight: 700; color: var(--vscode-foreground); margin: 0 0 4px; }
 .section { font-size: 14px; font-weight: 600; color: var(--vscode-foreground); margin: 20px 0 10px; }
 .intro { margin: 0 0 8px; }
 .note { margin: 0 0 10px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-.card { background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-panel-border, #444); border-radius: 6px; padding: 14px 16px; }
+.card { border: 1px solid var(--vscode-panel-border, #444); border-radius: 8px; padding: 14px 16px; }
 .card.current { border-color: var(--vscode-focusBorder); }
 .head { display: flex; align-items: center; justify-content: space-between; }
 .name { font-size: 15px; font-weight: 700; }

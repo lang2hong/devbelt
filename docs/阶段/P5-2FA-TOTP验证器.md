@@ -17,7 +17,7 @@ DevBelt，打开「验证器」面板就能看到此刻的 6 位口令，用来�
 就像 Microsoft Authenticator、腾讯身份验证器，但是长在 DevBelt 里。装好扩展、不用登录也
 能用；支持分组、标签、搜索、复制、导出。
 
-一句话：**DevBelt 里多一个「验证器」webview 面板——通过命令面板/命令打开，不占用活动栏图标。**
+一句话：**DevBelt 里多一个「验证器」工具——可从命令面板/命令打开面板，并已加入侧边栏「工具」视图列表首项（`devbelt.tools[0] = devbelt.authenticator`）。**
 
 ## 二、用户能做什么
 
@@ -113,7 +113,8 @@ DevBelt，打开「验证器」面板就能看到此刻的 6 位口令，用来�
   **不**实现任何 UI——S1 不向最终用户暴露任何 UI，只在 `out/extension.js` 里就绪算法和 store
   能力。这一切片**可单独 merge**，合入后不影响现有功能。
 - **S2 · webview 面板主框架**：以 `BaseWebView` 实现**验证器 webview 面板**（`viewType`
-  `devbelt.authenticator`）——**不新增活动栏图标 / `viewsContainers` / `views` 贡献**；仅注册
+  `devbelt.authenticator`）——**后续变更**：新增侧边栏「工具」webview 视图 `devbelt.tools`
+  （`views.devbelt` 第二项；首项工具 = 验证器）；仍复用同一面板逻辑。仅注册
   一个命令 `devbelt.authenticator`（打开/聚焦面板），**不**在 S2 注册 `devbelt.authenticator.add`
   / `.export`；面板内实现两阶段握手、每秒 tick（单条 tick 消息）、copy、错误边界、pending
   action 队列；webview 端 `AuthenticatorView.vue` 基础列表渲染（平铺 issuer/account/
@@ -172,7 +173,7 @@ package.json `contributes` 改动分两批：
 - `commands` 新增**一个**（category 继续用 `"DB Client"`，不新开分类）：
   - `devbelt.authenticator` — i18n `cmd.authenticator` = `"Authenticator"` / `"验证器"`，
     handler 打开/聚焦「验证器」webview 面板（`AuthenticatorView.open(store)`）。
-- **不新增** `viewsContainers` / `views` 贡献，**不新增活动栏图标**（用户明确要求 2FA 不占左侧图标）。
+- **后续变更**：新增 `views.devbelt` 的 `devbelt.tools`（webview，工具列表，首项 = 验证器）；容器与活动栏图标沿用既有 `devbelt`，未新增容器。
 - `menus.commandPalette`：`devbelt.authenticator` 直接可见。
 
 **S3 引入（增/导命令）：**
@@ -653,8 +654,8 @@ export type AuthenticatorEntry = {
 
 ### 活动栏图标
 
-**不需要**。验证器以 webview 面板打开，**不占用活动栏图标**（无 `resources/tools.svg`、无
-`viewsContainers` 贡献）。
+**不新增容器/图标**：沿用既有 `devbelt` 容器；新增的是容器内第二个视图 `devbelt.tools`
+（webview 工具列表，首项 = 验证器）。验证器本体仍以 webview 面板打开。
 
 ### 套餐 feature key 迁移
 

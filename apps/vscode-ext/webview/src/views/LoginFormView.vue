@@ -111,8 +111,11 @@ onUnmounted(() => { __offMsg?.(); });
           <input id="token" v-model="token" type="text" autocomplete="off" placeholder="token from email" />
         </div>
         <button class="btn" type="submit" :disabled="submitting || !token.trim()">{{ t('login.submitVerify') }}</button>
-        <button class="btn link" type="button" :disabled="submitting" @click="resend">{{ t('login.resend') }}</button>
-        <button class="btn link" type="button" @click="setMode('login')">{{ t('login.backToLogin') }}</button>
+        <div class="links">
+          <button class="btn link" type="button" :disabled="submitting" @click="resend">{{ t('login.resend') }}</button>
+          <span class="spacer" />
+          <button class="btn link" type="button" @click="setMode('login')">{{ t('login.backToLogin') }}</button>
+        </div>
         <div class="msg error" v-if="errorMsg">{{ errorMsg }}</div>
         <div class="msg success" v-if="successMsg">{{ successMsg }}</div>
       </form>
@@ -121,19 +124,21 @@ onUnmounted(() => { __offMsg?.(); });
 </template>
 
 <style scoped>
-.login-wrap { display: flex; justify-content: center; padding: 48px 20px; box-sizing: border-box; height: 100%; }
-.card { width: 320px; }
+.login-wrap { display: flex; justify-content: center; padding: 40px 20px; box-sizing: border-box; height: 100%; }
+.card { width: 340px; border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25)); border-radius: 8px; padding: 20px; }
 .tabs { display: flex; margin-bottom: 18px; border-bottom: 1px solid var(--vscode-panel-border); }
 .tab { flex: 1; padding: 8px; text-align: center; cursor: pointer; color: var(--vscode-descriptionForeground); font-size: 13px; user-select: none; }
-.tab.active { color: var(--vscode-foreground); border-bottom: 2px solid var(--vscode-focusBorder); }
+.tab.active { color: var(--vscode-foreground); border-bottom: 2px solid var(--vscode-focusBorder); font-weight: 600; }
 .notice { font-size: 12px; color: var(--vscode-descriptionForeground); margin-bottom: 14px; line-height: 1.5; }
 .field { margin-bottom: 12px; }
 label { display: block; font-size: 12px; margin-bottom: 4px; color: var(--vscode-descriptionForeground); }
-input { width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 13px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 3px; outline: none; }
+input { width: 100%; box-sizing: border-box; padding: 7px 9px; font-size: 13px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 4px; outline: none; }
 input:focus { border-color: var(--vscode-focusBorder); }
-.btn { width: 100%; padding: 7px; font-size: 13px; border: none; border-radius: 3px; cursor: pointer; background: var(--vscode-button-background); color: var(--vscode-button-foreground); margin-bottom: 8px; }
+.btn { width: 100%; padding: 7px 12px; font-size: 13px; border: none; border-radius: 4px; cursor: pointer; background: var(--vscode-button-background); color: var(--vscode-button-foreground); font-weight: 600; margin-bottom: 8px; }
 .btn:disabled { opacity: .5; cursor: default; }
-.btn.link { background: transparent; color: var(--vscode-textLink-foreground); margin-bottom: 0; }
+.btn.link { width: auto; background: transparent; color: var(--vscode-textLink-foreground); font-weight: 400; margin-bottom: 0; }
+.links { display: flex; align-items: center; gap: 8px; }
+.links .spacer { flex: 1; }
 .msg { font-size: 12px; margin-top: 10px; min-height: 16px; }
 .error { color: var(--vscode-errorForeground); }
 .success { color: var(--vscode-testing-iconPassed-color, #4ec9b0); }

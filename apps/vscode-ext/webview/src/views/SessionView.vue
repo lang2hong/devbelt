@@ -95,12 +95,12 @@ onUnmounted(() => { __offMsg?.(); });
 </template>
 
 <style scoped>
-.panel { padding: 24px; height: 100%; box-sizing: border-box; overflow-y: auto; }
+.panel { padding: 16px; height: 100%; box-sizing: border-box; overflow-y: auto; }
 .head { margin-bottom: 16px; }
 .title { font-size: 16px; font-weight: 600; }
 .sub { color: var(--vscode-descriptionForeground); font-size: 12px; margin-top: 3px; }
 
-.devices { display: flex; flex-direction: column; gap: 10px; }
+.devices { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
 .device {
   display: flex; align-items: center; gap: 14px;
   border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.18));
