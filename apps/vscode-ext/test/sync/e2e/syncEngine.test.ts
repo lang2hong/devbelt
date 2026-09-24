@@ -105,6 +105,8 @@ interface EngineOpts {
   store?: ReturnType<typeof makeStore>;
   setImpl?: (s: SyncStateSnapshot) => Promise<void>;
   signSeed?: () => Uint8Array;
+  onEntityPushed?: (ref: { type: string; localId: string }) => void | Promise<void>;
+  onQuotaRejected?: (ref: { type: string; localId: string }) => void | Promise<void>;
 }
 
 function engine(opts: EngineOpts) {
@@ -129,6 +131,8 @@ function engine(opts: EngineOpts) {
     signSeed,
     uniqueId: () => `c-new-${Math.random()}`,
     seedConflictCarrier: (recordId, ref, baseVersion) => mutator.rebasePut(recordId, ref, baseVersion),
+    onEntityPushed: opts.onEntityPushed,
+    onQuotaRejected: opts.onQuotaRejected,
   });
 }
 
@@ -179,6 +183,18 @@ describe('SyncEngine', () => {
     });
     expect(client.putRecord).not.toHaveBeenCalled();
     expect(outbox.list()).toHaveLength(0);
+  });
+
+  it('push 收到 SYNC_QUOTA_EXCEEDED → terminal 并回调 onQuotaRejected（P6 §六）', async () => {
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    const m = putMutation();
+    await outbox.put(m);
+    const client = clientWith({ putRecordSigned: vi.fn(async () => { throw new SyncApiError(409, 'SYNC_QUOTA_EXCEEDED'); }) });
+    const rejected: Array<{ type: string; localId: string }> = [];
+    const eng = engine({ client, snap: SNAP, mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox, onQuotaRejected: (ref) => { rejected.push(ref); } });
+    const r = await eng.sync();
+    expect(r.stage).toBe('terminal');
+    expect(rejected).toEqual([{ type: 'connection', localId: 'c-1' }]);
   });
 
   it('outbox 重放 409(terminal 码) → terminal，保留 outbox 项', async () => {
