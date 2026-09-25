@@ -6,7 +6,7 @@
  *  - sendCommand 切面：只读拦截（writeCMD + admin 写 denylist）+ 命令日志。
  * 有意不复制 ARDM 的 TLS 绕过（见 redisTls.ts）。
  */
-import Redis, { Cluster, type RedisOptions } from 'ioredis';
+import Redis, { Cluster, Command, type RedisOptions } from 'ioredis';
 import type { RedisCommandSource } from './redisOps.js';
 import { isWriteCommand } from './redisCommands.js';
 import type { RedisTlsOptions } from './redisTls.js';
@@ -70,12 +70,13 @@ export interface RedisClientLike extends RedisCommandSource {
   close(): Promise<void>;
   nodes(): RedisNodeLike[];
   on(event: string, listener: (...args: unknown[]) => void): void;
+  sendCommandBuffer(name: string, args?: (string | number | Buffer)[]): Promise<unknown>;
   readonly status: string;
 }
 
 /** RedisClient 依赖的最小 ioredis 形状（便于单测注入假实现）。 */
 export interface RedisConnectionLike {
-  sendCommand(command: { name: string; args: string[] }, stream?: unknown, node?: unknown): Promise<unknown>;
+  sendCommand(command: { name: string; args: (string | number | Buffer)[] }, stream?: unknown, node?: unknown): Promise<unknown>;
   call(command: string, ...args: (string | number)[]): Promise<unknown>;
   /** 仅 ioredis Cluster 有：按角色取节点。 */
   nodes?(role?: string): unknown[];
@@ -239,6 +240,17 @@ export class RedisClient {
     return this.run(name, args);
   }
 
+  /**
+   * 字节级命令（二进制安全）：以 `replyEncoding:null` 提交，回复为 Buffer。
+   *
+   * 经底层 `sendCommand` 提交，因此只读拦截/命令日志切面照常生效；写命令参数
+   * 可传 Buffer（如 SET 二进制值）。
+   */
+  async sendCommandBuffer(name: string, args: (string | number | Buffer)[] = []): Promise<unknown> {
+    const cmd = new Command(name, args, { replyEncoding: null });
+    return this.client.sendCommand(cmd as unknown as { name: string; args: (string | number | Buffer)[] });
+  }
+
   /** 连接模式。 */
   get mode(): 'standalone' | 'cluster' | 'sentinel' {
     if (this.isCluster) return 'cluster';
@@ -312,7 +324,10 @@ export class RedisClient {
     const original = this.client.sendCommand.bind(this.client);
     this.client.sendCommand = (command, stream) => {
       const name = String(command?.name ?? '').toUpperCase();
-      const args = Array.isArray(command?.args) ? command.args.map((a) => String(a)) : [];
+      // Buffer 参数按占位符归一：既供写判定，也避免二进制灌入命令日志。
+      const args = Array.isArray(command?.args)
+        ? command.args.map((a) => (Buffer.isBuffer(a) ? `<buffer:${a.length}>` : String(a)))
+        : [];
       if (this.readOnly && isWriteCommand(name, args)) {
         return Promise.reject(new RedisReadOnlyError(name));
       }

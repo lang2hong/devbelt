@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useI18n } from '../../composables/useI18n';
+import { base64ToBytes, bytesToBase64, bytesToHex, decodeUtf8, encodeUtf8, hexToBytes, hexToBytesLimited } from './bytes';
+import HexEditor from './HexEditor.vue';
 import type { ValueInfo } from './types';
 
 const { t } = useI18n();
@@ -9,6 +11,7 @@ const emit = defineEmits<{
   (e: 'refresh'): void;
   (e: 'load'): void;
   (e: 'saveString', key: string, value: string): void;
+  (e: 'saveStringBytes', key: string, base64: string): void;
   (e: 'appendString', key: string, value: string): void;
   (e: 'setTtl', key: string, seconds: number): void;
   (e: 'persist', key: string): void;
@@ -30,7 +33,9 @@ const emit = defineEmits<{
 const stringMode = ref<'text' | 'json' | 'hex'>('text');
 const stringText = ref('');
 const hexText = ref('');
+const rawBytes = ref<Uint8Array>(new Uint8Array());
 const jsonError = ref('');
+const hexError = ref('');
 const hashFilter = ref('');
 const newField = ref('');
 const newHashValue = ref('');
@@ -46,6 +51,13 @@ const ttlValue = ref('');
 const copied = ref(false);
 
 const key = computed(() => props.info?.key ?? '');
+const isBinaryString = computed(() => (props.info?.data?.kind === 'string' ? props.info.data.binary : false));
+/** hex 预览封顶（16KB ≈ 1024 行），避免大值全量 DOM + 每次键击全量解析。 */
+const HEX_PREVIEW_BYTES = 16 * 1024;
+const hexPreview = computed<{ bytes: Uint8Array; truncated: boolean }>(() => {
+  try { return hexToBytesLimited(hexText.value, HEX_PREVIEW_BYTES); }
+  catch { return { bytes: new Uint8Array(), truncated: false }; }
+});
 const ttlText = computed(() => {
   const ttl = props.info?.ttl ?? -2;
   if (ttl === -1) return t('wv.redis.value.forever');
@@ -56,44 +68,66 @@ const ttlText = computed(() => {
 watch(() => props.info, (info) => {
   stringMode.value = 'text';
   jsonError.value = '';
+  hexError.value = '';
   renameOpen.value = false;
   ttlOpen.value = false;
   copied.value = false;
   hashFilter.value = '';
   if (info?.data?.kind === 'string') {
     stringText.value = info.data.text;
-    hexText.value = toHex(info.data.text);
+    rawBytes.value = base64ToBytes(info.data.base64);
+    hexText.value = bytesToHex(rawBytes.value);
   } else {
     stringText.value = '';
+    rawBytes.value = new Uint8Array();
     hexText.value = '';
   }
 }, { immediate: true });
 
-function toHex(text: string): string {
-  return [...new TextEncoder().encode(text)].map((b) => b.toString(16).padStart(2, '0')).join(' ');
+/** 文本/JSON 编辑 → 字节（编辑 textarea 后切模式/保存时同步）。 */
+function syncFromText(): void {
+  rawBytes.value = encodeUtf8(stringText.value);
+  hexText.value = bytesToHex(rawBytes.value);
 }
-function fromHex(hex: string): string {
-  const bytes = hex.split(/\s+/).filter(Boolean).map((h) => parseInt(h, 16)).filter((n) => Number.isFinite(n));
-  return new TextDecoder().decode(new Uint8Array(bytes));
+/** hex 编辑 → 字节/文本；非法 hex 记录错误、不覆盖字节。 */
+function syncFromHex(): void {
+  try {
+    rawBytes.value = hexToBytes(hexText.value);
+    stringText.value = decodeUtf8(rawBytes.value);
+    hexError.value = '';
+  } catch (err) {
+    hexError.value = (err as Error).message;
+  }
 }
 
 function switchMode(mode: 'text' | 'json' | 'hex'): void {
+  if (mode === stringMode.value) return;
   jsonError.value = '';
+  hexError.value = '';
+  // 先把当前编辑器内容落回字节，避免切换时丢失编辑。
+  if (stringMode.value === 'hex') syncFromHex();
+  else syncFromText();
   if (mode === 'json') {
     try {
       stringText.value = JSON.stringify(JSON.parse(stringText.value || 'null'), null, 2);
+      syncFromText();
     } catch {
       jsonError.value = t('wv.redis.string.invalidJson');
     }
   }
-  if (mode === 'hex') hexText.value = toHex(stringText.value);
+  if (mode === 'hex') hexText.value = bytesToHex(rawBytes.value);
   stringMode.value = mode;
 }
 
 function saveString(): void {
   if (jsonError.value) return;
-  const value = stringMode.value === 'hex' ? fromHex(hexText.value) : stringText.value;
-  emit('saveString', key.value, value);
+  if (stringMode.value === 'hex') {
+    syncFromHex();
+    if (hexError.value) return;
+    emit('saveStringBytes', key.value, bytesToBase64(rawBytes.value));
+    return;
+  }
+  emit('saveString', key.value, stringText.value);
 }
 
 function copyKey(): void {
@@ -154,10 +188,15 @@ function submitTtl(): void {
           <button :class="{ active: stringMode === 'hex' }" @click="switchMode('hex')">{{ t('wv.redis.string.hex') }}</button>
         </div>
         <textarea v-if="stringMode !== 'hex'" v-model="stringText" :readonly="readOnly" />
-        <textarea v-else v-model="hexText" :readonly="readOnly" class="hex" />
+        <template v-else>
+          <textarea v-model="hexText" :readonly="readOnly" class="hex" />
+          <HexEditor :bytes="hexPreview.bytes" :truncated="hexPreview.truncated" />
+        </template>
+        <div v-if="isBinaryString && stringMode !== 'hex'" class="binary-warn">{{ t('wv.redis.string.binaryWarn') }}</div>
         <div v-if="jsonError" class="error">{{ jsonError }}</div>
+        <div v-if="hexError" class="error">{{ hexError }}</div>
         <div class="actions">
-          <button class="btn" :disabled="readOnly || !!jsonError" @click="saveString">{{ t('wv.redis.value.save') }}</button>
+          <button class="btn" :disabled="readOnly || !!jsonError || !!hexError" @click="saveString">{{ t('wv.redis.value.save') }}</button>
           <button class="btn" :disabled="readOnly || stringMode === 'hex'" @click="emit('appendString', key, stringText)">{{ t('wv.redis.value.append') }}</button>
         </div>
       </div>
@@ -257,6 +296,7 @@ td.idx { color: var(--vscode-descriptionForeground); width: 56px; }
 td.f { width: 30%; }
 .meta { color: var(--vscode-descriptionForeground); padding: 2px 0; }
 .error { color: var(--vscode-errorForeground); }
+.binary-warn { color: var(--vscode-editorWarning-foreground, #cca700); padding: 2px 0; }
 .too-large { display: flex; gap: 8px; align-items: center; padding: 12px; color: var(--vscode-descriptionForeground); }
 .btn { padding: 3px 8px; font-size: 12px; cursor: pointer; border: none; border-radius: 3px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
 .btn.tiny { padding: 1px 5px; }

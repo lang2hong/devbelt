@@ -19,10 +19,12 @@ class FakeRedis implements RedisConnectionLike {
   quitCalled = 0;
   disconnectCalled = 0;
   readonly calls: { name: string; args: string[] }[] = [];
+  readonly replyEncodings: unknown[] = [];
   private readonly listeners = new Map<string, Listener[]>();
 
   sendCommand = async (command: { name: string; args: string[] }): Promise<unknown> => {
     this.calls.push({ name: command.name, args: command.args });
+    this.replyEncodings.push((command as { replyEncoding?: unknown }).replyEncoding);
     if (this.error) throw this.error;
     return this.reply;
   };
@@ -324,5 +326,32 @@ describe('RedisClient 命令日志：多监听', () => {
     await client.sendCommand('GET', ['k']);
     expect(a).toHaveLength(1);
     expect(b).toHaveLength(2);
+  });
+});
+
+describe('RedisClient 字节级命令（sendCommandBuffer）', () => {
+  it('以 replyEncoding:null 提交并返回原始 Buffer，且走日志切面', async () => {
+    const logs: RedisCommandLog[] = [];
+    const { client, fake } = make({ onLog: (e) => logs.push(e) });
+    const bytes = Buffer.from([0x00, 0xff, 0x41]);
+    fake.reply = bytes;
+    await expect(client.sendCommandBuffer('GET', ['k'])).resolves.toEqual(bytes);
+    expect(fake.replyEncodings[0]).toBeNull();
+    expect(fake.calls[0].name).toBe('GET');
+    expect(logs).toHaveLength(1);
+    expect(logs[0].ok).toBe(true);
+  });
+
+  it('只读模式按命令名拦截 SET buffer', async () => {
+    const { client, fake } = make({ readOnly: true });
+    await expect(client.sendCommandBuffer('SET', ['k', Buffer.from([1])])).rejects.toBeInstanceOf(RedisReadOnlyError);
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('Buffer 参数在日志中归一为 <buffer:N>，不灌二进制', async () => {
+    const logs: RedisCommandLog[] = [];
+    const { client } = make({ onLog: (e) => logs.push(e) });
+    await client.sendCommandBuffer('SET', ['k', Buffer.from([0xff, 0x00])]);
+    expect(logs[0].args).toEqual(['k', '<buffer:2>']);
   });
 });

@@ -1,7 +1,8 @@
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import {
   isDangerousCommand, isWriteCommand, redactCommandArgs, splitRedisArgs,
-  redisType, redisScan, redisSelect, redisGet, redisStrlen, redisSet, redisAppend,
+  redisType, redisScan, redisSelect, redisGetBuffer, redisStrlen, redisSet, redisSetBuffer, redisAppend,
+  isValidUtf8, isBufferSource,
   redisUnlink, redisExists, redisRename, redisTtl, redisExpire, redisPersist, redisMemoryUsage,
   redisHScan, redisHSet, redisHDel, redisHLen,
   redisLRange, redisLLen, redisLPush, redisRPush, redisLSet, redisLRem, redisLTrim, redisLPop, redisRPop,
@@ -99,6 +100,7 @@ export class RedisView extends BaseWebView {
     if (msg.type === 'loadMoreKeys') { await this.enqueuePushKeys(false); return; }
     if (msg.type === 'selectKey') { await this.enqueuePushValue(String(msg.key ?? '')); return; }
     if (msg.type === 'saveString') { await this.edit('SET', String(msg.key), async (c) => { await redisSet(c, String(msg.key), String(msg.value ?? '')); }); return; }
+    if (msg.type === 'saveStringBytes') { await this.saveStringBytes(msg); return; }
     if (msg.type === 'appendString') { await this.edit('APPEND', String(msg.key), async (c) => { await redisAppend(c, String(msg.key), String(msg.value ?? '')); }); return; }
     if (msg.type === 'setTtl') { await this.edit('EXPIRE', String(msg.key), async (c) => { const s = Number(msg.seconds); if (s > 0) await redisExpire(c, String(msg.key), s); else await redisPersist(c, String(msg.key)); }); return; }
     if (msg.type === 'persistKey') { await this.edit('PERSIST', String(msg.key), async (c) => { await redisPersist(c, String(msg.key)); }); return; }
@@ -291,7 +293,16 @@ export class RedisView extends BaseWebView {
 
   private async loadValue(c: RedisCommandSource, key: string, keyType: string): Promise<RedisValueData | null> {
     switch (keyType) {
-      case 'string': return { kind: 'string', text: await redisGet(c, key) };
+      case 'string': {
+        const buf = await redisGetBuffer(c, key);
+        return {
+          kind: 'string',
+          text: buf ? buf.toString('utf8') : '',
+          base64: buf ? buf.toString('base64') : '',
+          binary: buf ? !isValidUtf8(buf) : false,
+          bytes: buf ? buf.length : 0,
+        };
+      }
       case 'hash': {
         // 分页兜底：MEMORY USAGE 不可用/大 key 时也不全量 HGETALL。
         const page = await redisHScan(c, key, 0, { count: HASH_SET_PAGE });
@@ -326,6 +337,16 @@ export class RedisView extends BaseWebView {
       } catch (err) {
         this.post({ type: 'keyAction', action, ok: false, error: (err as Error).message });
       }
+    });
+  }
+
+  /** 字节级保存 string（hex/二进制编辑）：base64 → Buffer，保留非 UTF-8 字节。 */
+  private async saveStringBytes(msg: any): Promise<void> {
+    const key = String(msg.key ?? '');
+    const base64 = String(msg.base64 ?? '');
+    await this.edit('SET', key, async (c) => {
+      if (!isBufferSource(c)) throw new Error('binary write unsupported by this connection');
+      await redisSetBuffer(c, key, Buffer.from(base64, 'base64'));
     });
   }
 

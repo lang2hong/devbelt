@@ -224,6 +224,7 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
             @refresh="value && post({ type: 'selectKey', key: value.key })"
             @load="value && post({ type: 'selectKey', key: value.key })"
             @save-string="(k, v) => post({ type: 'saveString', key: k, value: v })"
+            @save-string-bytes="(k, b) => post({ type: 'saveStringBytes', key: k, base64: b })"
             @append-string="(k, v) => post({ type: 'appendString', key: k, value: v })"
             @set-ttl="(k, s) => post({ type: 'setTtl', key: k, seconds: s })"
             @persist="(k) => post({ type: 'persistKey', key: k })"

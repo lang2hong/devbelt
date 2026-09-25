@@ -6,6 +6,7 @@ import {
   redisDel,
   redisExpire,
   redisGet,
+  redisGetBuffer,
   redisHGetAll,
   redisHSet,
   redisKeyspace,
@@ -15,6 +16,7 @@ import {
   redisSAdd,
   redisScan,
   redisSelect,
+  redisSetBuffer,
   redisSMembers,
   redisSet,
   redisStrlen,
@@ -98,6 +100,18 @@ describe.skipIf(!REDIS_URL)('Redis 真实实例（standalone）', () => {
     expect(await redisTtl(client, key)).toBe(-1);
     expect(await redisDel(client, [key])).toBe(1);
     expect(await redisGet(client, key)).toBe('');
+  });
+
+  it('二进制 string 往返：redisGetBuffer/redisSetBuffer 保留 0x00/0xff', async () => {
+    const key = `${prefix}bin`;
+    created.push(key);
+    const bytes = Buffer.from([0x00, 0xff, 0x80, 0x41, 0x0a, 0x7f]);
+    await redisSetBuffer(client, key, bytes);
+    const got = await redisGetBuffer(client, key);
+    expect(got).toEqual(bytes);
+    // 普通 redisGet 走 UTF-8 解码，仅用于文本显示；不应作为字节真值。
+    expect(await redisGet(client, key)).not.toBe('');
+    await redisDel(client, [key]);
   });
 
   it('SCAN 真实回包：游标为字符串，keys 命中', async () => {

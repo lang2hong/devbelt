@@ -6,12 +6,15 @@ import {
   redisExists,
   redisExpire,
   redisGet,
+  redisGetBuffer,
   redisHGetAll,
   redisHScan,
+  isValidUtf8,
   redisKeyspace,
   redisMemoryUsage,
   redisScan,
   redisSelect,
+  redisSetBuffer,
   redisTtl,
   redisType,
   redisZRange,
@@ -27,6 +30,22 @@ class FakeSource implements RedisCommandSource {
     this.calls.push({ name: name.toUpperCase(), args });
     if (this.failOn.has(name.toUpperCase())) throw new Error('ERR unknown command');
     return this.replies.has(name.toUpperCase()) ? this.replies.get(name.toUpperCase()) : 'OK';
+  }
+}
+
+/** 支持字节级命令的假源：reply 原样返回（模拟 ioredis replyEncoding:null）。 */
+class BufferSource implements RedisCommandSource {
+  readonly calls: { name: string; args: (string | number | Buffer)[]; buffer: boolean }[] = [];
+  reply: unknown = null;
+
+  async sendCommand(name: string, args: (string | number)[] = []): Promise<unknown> {
+    this.calls.push({ name: name.toUpperCase(), args, buffer: false });
+    return 'OK';
+  }
+
+  async sendCommandBuffer(name: string, args: (string | number | Buffer)[] = []): Promise<unknown> {
+    this.calls.push({ name: name.toUpperCase(), args, buffer: true });
+    return this.reply;
   }
 }
 
@@ -86,6 +105,37 @@ describe('redisOps：命令与归一化', () => {
     const src = new FakeSource();
     src.replies.set('GET', null);
     expect(await redisGet(src, 'k')).toBe('');
+  });
+
+  it('redisGetBuffer：有 sendCommandBuffer 时返回原始字节（二进制安全）', async () => {
+    const src = new BufferSource();
+    const bytes = Buffer.from([0x00, 0xff, 0x80, 0x41]);
+    src.reply = bytes;
+    expect(await redisGetBuffer(src, 'k')).toEqual(bytes);
+    expect(src.calls[0]).toEqual({ name: 'GET', args: ['k'], buffer: true });
+  });
+
+  it('redisGetBuffer：缺失返回 null；源不支持时按 UTF-8 退化', async () => {
+    const bufSrc = new BufferSource();
+    bufSrc.reply = null;
+    expect(await redisGetBuffer(bufSrc, 'k')).toBeNull();
+    const plain = new FakeSource();
+    plain.replies.set('GET', 'héllo');
+    expect(await redisGetBuffer(plain, 'k')).toEqual(Buffer.from('héllo', 'utf8'));
+  });
+
+  it('redisSetBuffer：以原始 Buffer 提交 SET', async () => {
+    const src = new BufferSource();
+    const bytes = Buffer.from([0x00, 0xfe]);
+    await redisSetBuffer(src, 'k', bytes);
+    expect(src.calls[0].name).toBe('SET');
+    expect(src.calls[0].args[0]).toBe('k');
+    expect(src.calls[0].args[1]).toEqual(bytes);
+  });
+
+  it('isValidUtf8：合法 UTF-8 为 true，孤立 0xff 为 false', () => {
+    expect(isValidUtf8(Buffer.from('中文abc', 'utf8'))).toBe(true);
+    expect(isValidUtf8(Buffer.from([0xff]))).toBe(false);
   });
 
   it('EXISTS 布尔归一化', async () => {

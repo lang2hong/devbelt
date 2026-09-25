@@ -27,14 +27,19 @@ import { RedisView, formatRedisReply, parseSlowlog, redisAuditLine } from '../..
 const conn: any = { id: 'c1', name: 'r', dbType: 'REDIS', host: 'h', port: 6379, redisDb: 3, readOnly: false };
 
 type Send = (name: string, args: string[]) => Promise<unknown>;
+type RawArg = string | number | Buffer;
 
 function makeView(handler?: Send, db?: number, tab: 'status' | 'console' | 'slowlog' = 'console') {
-  const sent: [string, string[]][] = [];
-  const send: Send = async (name, args) => {
+  const sent: [string, RawArg[]][] = [];
+  const record = (name: string, args: RawArg[]): unknown => {
     sent.push([name, args]);
-    return handler ? handler(name, args) : 'OK';
+    return handler ? handler(name, args.map(String)) : 'OK';
   };
-  const client = { sendCommand: send, info: async () => 'redis_version:7.0.0\r\n' };
+  const client = {
+    sendCommand: async (name: string, args: RawArg[] = []) => record(name, args),
+    sendCommandBuffer: async (name: string, args: RawArg[] = []) => record(name, args),
+    info: async () => 'redis_version:7.0.0\r\n',
+  };
   const manager: any = {
     retain: vi.fn(),
     release: vi.fn(),
@@ -200,8 +205,45 @@ describe('RedisView S3 键树/值/编辑', () => {
     await view.handleMessage({ type: 'selectKey', key: 'user:1' });
     const v = posts(view).find((m) => m.type === 'value');
     expect(v.keyType).toBe('string');
-    expect(v.data).toEqual({ kind: 'string', text: 'val' });
+    expect(v.data).toEqual({ kind: 'string', text: 'val', base64: Buffer.from('val').toString('base64'), binary: false, bytes: 3 });
     expect(v.ttl).toBe(-1);
+  });
+
+  it('selectKey 二进制 string：按原始字节下发 base64/binary/bytes', async () => {
+    const bin = Buffer.from([0x00, 0xff, 0x41]);
+    const binHandler: Send = async (name) => {
+      if (name === 'TYPE') return 'string';
+      if (name === 'TTL') return -1;
+      if (name === 'STRLEN') return bin.length;
+      if (name === 'GET') return bin;
+      return 'OK';
+    };
+    const { view } = makeView(binHandler, 0);
+    await mountDb(view);
+    await view.handleMessage({ type: 'selectKey', key: 'bin' });
+    const v = posts(view).find((m) => m.type === 'value');
+    expect(v.data).toEqual({
+      kind: 'string',
+      text: bin.toString('utf8'),
+      base64: bin.toString('base64'),
+      binary: true,
+      bytes: 3,
+    });
+  });
+
+  it('saveStringBytes：以原始字节 SET、审计 key（不含值）', async () => {
+    const { view, sent } = makeView(handler, 0);
+    await mountDb(view);
+    sent.length = 0;
+    const bytes = Buffer.from([0x00, 0xff, 0x80]);
+    await view.handleMessage({ type: 'saveStringBytes', key: 'k', base64: bytes.toString('base64') });
+    const set = sent.find(([n]) => n === 'SET');
+    expect(set?.[1][0]).toBe('k');
+    expect(Buffer.isBuffer(set?.[1][1])).toBe(true);
+    expect((set?.[1][1] as Buffer).equals(bytes)).toBe(true);
+    expect(posts(view).some((m) => m.type === 'keyAction' && m.ok)).toBe(true);
+    expect(h.audits[0].sql).toBe('SET k');
+    expect(JSON.stringify(h.audits)).not.toContain(bytes.toString('base64'));
   });
 
   it('saveString 发包、审计(不含值)、回 keyAction', async () => {

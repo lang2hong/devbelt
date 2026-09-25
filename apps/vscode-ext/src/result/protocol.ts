@@ -176,7 +176,7 @@ export interface RedisStreamEntry {
 }
 
 export type RedisValueData =
-  | { kind: 'string'; text: string }
+  | { kind: 'string'; text: string; base64: string; binary: boolean; bytes: number }
   | { kind: 'hash'; entries: [string, string][]; len: number }
   | { kind: 'list'; items: string[]; len: number }
   | { kind: 'set'; members: string[]; card: number }
@@ -203,6 +203,7 @@ export type RedisUpMessage =
   | { type: 'loadMoreKeys' }
   | { type: 'selectKey'; key: string }
   | { type: 'saveString'; key: string; value: string }
+  | { type: 'saveStringBytes'; key: string; base64: string }
   | { type: 'appendString'; key: string; value: string }
   | { type: 'setTtl'; key: string; seconds: number }
   | { type: 'persistKey'; key: string }

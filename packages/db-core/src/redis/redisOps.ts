@@ -19,6 +19,14 @@ export interface RedisNodeSource {
   call(command: string, ...args: (string | number)[]): Promise<unknown>;
 }
 
+/**
+ * 字节级命令源（RedisClient 满足）：返回原始 Buffer，二进制安全。
+ * 与 `RedisCommandSource` 分离，使假实现/只读测试源无需实现 buffer 方法。
+ */
+export interface RedisBufferSource {
+  sendCommandBuffer(name: string, args?: (string | number | Buffer)[]): Promise<unknown>;
+}
+
 export interface RedisScanResult {
   cursor: string;
   keys: string[];
@@ -122,12 +130,43 @@ export async function redisGet(src: RedisCommandSource, key: string): Promise<st
   return asString(await src.sendCommand('GET', [key]));
 }
 
+/**
+ * 读取 string 值为原始字节（二进制安全）。
+ *
+ * 优先走 `sendCommandBuffer`（ioredis `replyEncoding:null`）；源不支持时退化为
+ * UTF-8 编码（会损失非 UTF-8 字节，仅为兼容假实现/旧源）。
+ */
+export async function redisGetBuffer(src: RedisCommandSource, key: string): Promise<Buffer | null> {
+  if (isBufferSource(src)) {
+    const raw = await src.sendCommandBuffer('GET', [key]);
+    if (raw === null || raw === undefined) return null;
+    if (Buffer.isBuffer(raw)) return raw;
+    return Buffer.from(asString(raw), 'utf8');
+  }
+  const v = await src.sendCommand('GET', [key]);
+  return v === null || v === undefined ? null : Buffer.from(asString(v), 'utf8');
+}
+
+export function isBufferSource(src: RedisCommandSource): src is RedisCommandSource & RedisBufferSource {
+  return typeof (src as Partial<RedisBufferSource>).sendCommandBuffer === 'function';
+}
+
+/** 判断字节是否为合法 UTF-8（用于 webview 决定是否提示二进制）。 */
+export function isValidUtf8(buf: Buffer): boolean {
+  return Buffer.from(buf.toString('utf8'), 'utf8').equals(buf);
+}
+
 export async function redisStrlen(src: RedisCommandSource, key: string): Promise<number> {
   return asNumber(await src.sendCommand('STRLEN', [key]));
 }
 
 export async function redisSet(src: RedisCommandSource, key: string, value: string): Promise<void> {
   await src.sendCommand('SET', [key, value]);
+}
+
+/** 字节级写入 string 值（二进制安全）。 */
+export async function redisSetBuffer(src: RedisBufferSource, key: string, value: Buffer): Promise<void> {
+  await src.sendCommandBuffer('SET', [key, value]);
 }
 
 export async function redisAppend(src: RedisCommandSource, key: string, value: string): Promise<number> {
