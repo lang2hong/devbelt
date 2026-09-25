@@ -166,6 +166,31 @@ jobs:
           DEVBELT_DB_TEST_REDIS_TLS_CA: ${{ github.workspace }}/.ci-certs/ca.crt
         run: pnpm -C packages/db-core test
 
+      # Cluster：3 节点（host network，避免容器 IP 通告导致 natMap 不生效）。
+      - name: Start Redis Cluster (3 nodes)
+        run: |
+          for p in 7000 7001 7002; do
+            docker run -d --name redis-$p --network host redis:7 \
+              redis-server --port $p --cluster-enabled yes --cluster-config-file /data/nodes-$p.conf \
+              --cluster-node-timeout 5000 --appendonly no --save ""
+          done
+          for i in $(seq 1 30); do docker exec redis-7000 redis-cli -p 7000 ping 2>/dev/null | grep -q PONG && break; sleep 1; done
+          docker exec redis-7000 redis-cli --cluster create 127.0.0.1:7000 127.0.0.1:7001 127.0.0.1:7002 --cluster-yes
+
+      # Sentinel：监控既有 redis service（127.0.0.1:6379）。
+      - name: Start Redis Sentinel
+        run: |
+          printf 'port 26379\nsentinel monitor mymaster 127.0.0.1 6379 1\nsentinel down-after-milliseconds mymaster 5000\nsentinel failover-timeout mymaster 10000\n' > /tmp/sentinel.conf
+          docker run -d --name redis-sentinel --network host -v /tmp/sentinel.conf:/etc/sentinel.conf:ro redis:7 redis-server /etc/sentinel.conf --sentinel
+          for i in $(seq 1 30); do docker exec redis-sentinel redis-cli -p 26379 ping 2>/dev/null | grep -q PONG && break; sleep 1; done
+
+      # Cluster/Sentinel over SSH：进程内 ssh2 Server 转发到多节点，验证 natMap / master 发现。
+      - name: Integration tests (vscode-ext cluster/sentinel over SSH)
+        env:
+          DEVBELT_DB_TEST_REDIS_CLUSTER: 127.0.0.1:7000
+          DEVBELT_DB_TEST_REDIS_SENTINEL: 127.0.0.1:26379
+        run: pnpm -C apps/vscode-ext exec vitest run test/integration/redisTopologyOverSsh.test.ts
+
       # SSH 隧道：进程内 ssh2 Server（支持 direct-tcpip）+ 真实 Redis；验证 SshTunnel。
       - name: Integration tests (vscode-ext SSH tunnel)
         env:

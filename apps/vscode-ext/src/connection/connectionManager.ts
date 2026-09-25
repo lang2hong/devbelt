@@ -6,6 +6,7 @@ import { dialectScanOptions } from '../utils/sqlDialectOptions';
 import { QueryHistoryRecorder } from '../history/queryHistoryRecorder';
 import { SshTunnel } from './sshTunnel';
 import { validateConnectionPaths, type PathValidationResult } from './connectionPathValidator';
+import { discoverSentinelMasterOverSsh, setupClusterOverSsh } from './redisTunnel';
 import { requireSqlSession, type ConnectionSession, type RedisConnectionSession, type SqlConnectionSession } from './connectionSession';
 
 /** 建连前路径校验失败：阻断建连（不含完整路径内容）。 */
@@ -304,20 +305,36 @@ export class ConnectionManager {
       connectTimeout: conn.connectTimeout,
       readOnly: conn.readOnly === true,
     };
+    const auth = { username: conn.user || undefined, password: conn.password, sentinelPassword: conn.sentinelPassword, tls, connectTimeout: conn.connectTimeout };
+    let extraTunnelIds: string[] = [];
     let client: RedisClient;
     if (mode === 'cluster') {
-      // SSH + Cluster 需要多跳 NAT map（多隧道），随 S4 隧道扩展接入；先明确拒绝而非静默降级。
-      if (conn.sshHost) throw new Error('SSH + Redis Cluster 尚未支持（S4 隧道多跳待接入）');
-      const nodes = parseRedisNodes(conn.clusterNodes, host, port);
-      client = new RedisClient({ ...common, cluster: { nodes, slotsRefreshTimeout: conn.connectTimeout ?? 3000 } });
+      if (conn.sshHost) {
+        // 经种子隧道发现各 master 并逐节点建隧道 → NAT map（合成 conn id，回收见 close）。
+        const setup = await setupClusterOverSsh(conn, port, auth);
+        extraTunnelIds = setup.tunnelIds;
+        client = new RedisClient({
+          ...common,
+          cluster: { nodes: [{ host: '127.0.0.1', port }], natMap: setup.natMap, slotsRefreshTimeout: conn.connectTimeout ?? 3000 },
+        });
+      } else {
+        const nodes = parseRedisNodes(conn.clusterNodes, host, port);
+        client = new RedisClient({ ...common, cluster: { nodes, slotsRefreshTimeout: conn.connectTimeout ?? 3000 } });
+      }
     } else if (mode === 'sentinel') {
-      if (conn.sshHost) throw new Error('SSH + Redis Sentinel 尚未支持（S4 隧道多跳待接入）');
       if (!conn.sentinelName) throw new Error('Redis Sentinel master 名称未配置');
-      const sentinels = parseRedisNodes(conn.sentinelNodes, host, port);
-      client = new RedisClient({ ...common, sentinels, sentinelName: conn.sentinelName, sentinelPassword: conn.sentinelPassword });
+      if (conn.sshHost) {
+        const s = await discoverSentinelMasterOverSsh(conn, port, auth);
+        extraTunnelIds = [s.tunnelId];
+        client = new RedisClient({ ...common, host: '127.0.0.1', port: s.masterLocalPort });
+      } else {
+        const sentinels = parseRedisNodes(conn.sentinelNodes, host, port);
+        client = new RedisClient({ ...common, sentinels, sentinelName: conn.sentinelName, sentinelPassword: conn.sentinelPassword });
+      }
     } else {
       client = new RedisClient({ ...common, host, port, db: conn.redisDb });
     }
+    const closeExtraTunnels = (): void => { for (const id of extraTunnelIds) SshTunnel.close(id); };
 
     try {
       await client.connect();
@@ -325,12 +342,15 @@ export class ConnectionManager {
       await client.ping();
     } catch (err) {
       await client.close();
+      closeExtraTunnels();
       throw err;
     }
 
     // 建连期间用户关闭/删除该连接（或管理器整体销毁）：建成即销毁。
     if (this.disposing || this.generation(conn.id) !== generation) {
       await client.close();
+      // 建连期间被关闭：自毁时必须连同已建的合成隧道一起回收（否则 #nat*/#sentinel-master 泄漏）。
+      closeExtraTunnels();
       throw new Error('connection was closed before it could be established');
     }
 
@@ -338,7 +358,7 @@ export class ConnectionManager {
       kind: 'redis',
       client,
       db: client.isCluster ? 0 : (conn.redisDb ?? 0),
-      mode: client.mode,
+      mode,
       readOnly: conn.readOnly === true,
       isAlive: () => client.isAlive(),
       close: () => {
@@ -348,6 +368,7 @@ export class ConnectionManager {
         this.noBackslashEscapes.delete(conn.id);
         this.pgStdOff.delete(conn.id);
         if (conn.sshHost) SshTunnel.close(conn.id);
+        closeExtraTunnels();
       },
     };
     this.sessions.set(conn.id, session);
