@@ -229,8 +229,10 @@ db-core 目前是纯 SQL 形态（`QueryService/MetadataService/DataService/Tabl
   - 高层操作另置 `redisOps.ts`（S3）：`type/scan/dbsize/select/keyspace`、string/hash/list/set/zset 读写、
     `ttl/pttl/expire/persist/rename/del/memoryUsage`。放独立模块而非挂在 RedisClient，保持连接/切面/日志
     聚焦且纯函数可测。DB 选择用 `SELECT` 于会话共享 client，主机侧串行化（cluster 无 SELECT，S4 禁用）。
-    **已知限制（S4 处理）**：值与键名经 `String()` 归一，非 UTF-8 字节有损；string 的 hex 视图是 UTF-8
-    往返而非原始字节，随 S4「二进制 hex 编辑组件」一并改成 Byte 级。
+    **已知限制（S4 已部分处理）**：**string 值已字节级**——`redisGetBuffer/redisSetBuffer`
+    （ioredis `Command` + `replyEncoding:null`）读取/写入原始 Buffer，webview 以 base64 传输、
+    `HexEditor.vue`（offset/hex/ascii）渲染并回写，非 UTF-8 字节不再有损。**仍待 Stage B**：
+    hash/list/set/zset/stream 的 field/member/element 与键名仍经 `String()` 归一（非 UTF-8 有损）。
   - 统一配置（**原样复制 ARDM `getRedisOptions`**）：`stringNumbers: true`（避免 JS 数字精度丢失）、
     `enableReadyCheck: false`、`connectTimeout: 30000`、`family: 0`；`retryStrategy` 最多 3 次——
     `times=1→200ms`、`times=2→400ms`、`times>=3→放弃`（ARDM 为 `Math.min(times*200,1000)` +
