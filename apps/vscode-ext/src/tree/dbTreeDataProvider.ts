@@ -1,5 +1,6 @@
 import { Event, EventEmitter, TreeDataProvider, TreeItem, TreeItemCollapsibleState, ThemeIcon, ThemeColor, window } from 'vscode';
 import { DatabaseType, DialectRegistry, redisKeyspace } from '@devbelt/db-core';
+import { connectionColorToken } from '../utils/connectionColor';
 import { ConnectionStore, type SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { ConnectionPathOverrideStore } from '../connection/connectionPathOverrideStore';
@@ -501,7 +502,9 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         : conn.environment === 'staging'
           ? 'editorWarning.foreground'
           : 'gitDecoration.untrackedResourceForeground';
-      node.iconPath = new ThemeIcon(isRedis ? 'symbol-key' : 'server', new ThemeColor(envColor));
+      // 用户填写的连接颜色优先（hex → 主题色 token）；否则按环境着色。
+      const colorToken = connectionColorToken(conn.color);
+      node.iconPath = new ThemeIcon(isRedis ? 'symbol-key' : 'server', new ThemeColor(colorToken ?? envColor));
       if (hasPathIssues) {
         node.tooltip = this.pathTooltip(pathCheck.issues);
       }
