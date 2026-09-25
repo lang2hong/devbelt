@@ -5,10 +5,11 @@ import { useI18n } from '../composables/useI18n';
 import ServerStatus from '../components/redis/ServerStatus.vue';
 import KeyTree from '../components/redis/KeyTree.vue';
 import ValueViewer from '../components/redis/ValueViewer.vue';
+import StreamViewer from '../components/redis/StreamViewer.vue';
 import KeyNewDialog from '../components/redis/KeyNewDialog.vue';
 import CliConsole from '../components/redis/CliConsole.vue';
 import SlowLog from '../components/redis/SlowLog.vue';
-import { isKeyBrowser, type CommandResult, type RedisKeyFolder, type RedisNewKeyValue, type SlowlogEntry, type ValueInfo } from '../components/redis/types';
+import { computeStreamDone, isKeyBrowser, type CommandResult, type RedisKeyFolder, type RedisNewKeyValue, type SlowlogEntry, type ValueInfo } from '../components/redis/types';
 
 const { post, onMessage } = useVsCode();
 const { t } = useI18n();
@@ -38,6 +39,10 @@ const value = ref<ValueInfo | null>(null);
 const banner = ref('');
 const pendingDelete = ref<string[] | null>(null);
 const showNewKey = ref(false);
+const streamDetail = ref<any>(null);
+const streamDone = ref(true);
+const pendingOpDetail = ref<string | null>(null);
+let lastOp: any = null;
 
 const hasDb = computed(() => isKeyBrowser(db.value));
 let seq = 0;
@@ -66,6 +71,27 @@ function onCreate(key: string, val: RedisNewKeyValue, ttlSeconds: number | null)
   post({ type: 'createKey', key, value: val, ttlSeconds });
 }
 function run(line: string): void { post({ type: 'runCommand', id: nextId(), line }); }
+/** Stream/破坏性操作：记住原始 op，确认后带 confirmed 重发。 */
+function postOp(msg: any): void { lastOp = msg; post(msg); }
+function streamOps(): Record<string, (...a: any[]) => void> {
+  return {
+    add: (key, id, fields) => postOp({ type: 'streamAdd', key, id, fields }),
+    del: (key, ids) => postOp({ type: 'streamDel', key, ids }),
+    trim: (key, maxlen) => postOp({ type: 'streamTrim', key, maxlen }),
+    groupCreate: (key, group, id, mkstream) => postOp({ type: 'streamGroupCreate', key, group, id, mkstream }),
+    groupDestroy: (key, group) => postOp({ type: 'streamGroupDestroy', key, group }),
+    groupDelConsumer: (key, group, consumer) => postOp({ type: 'streamGroupDelConsumer', key, group, consumer }),
+    groupDetail: (key, group) => post({ type: 'streamGroupDetail', key, group }),
+    loadMore: (key, start) => post({ type: 'streamRange', key, start }),
+  };
+}
+const DESTRUCTIVE_OPS = new Set(['streamDel', 'streamTrim', 'streamGroupDestroy', 'streamGroupDelConsumer']);
+function confirmOp(accept: boolean): void {
+  const op = lastOp;
+  pendingOpDetail.value = null;
+  // 仅重发破坏性 op：确认模态只挡鼠标，期间键盘提交的普通 op（如 streamAdd）不得被 confirmed 重发。
+  if (accept && op && DESTRUCTIVE_OPS.has(op.type)) post({ ...op, confirmed: true });
+}
 function confirmDanger(id: string, accept: boolean): void {
   pendingConfirm.value = null;
   post({ type: 'confirmDanger', id, accept });
@@ -90,6 +116,9 @@ onMounted(() => {
       keysLoading.value = false;
     } else if (msg.type === 'value') {
       value.value = msg as ValueInfo;
+      streamDetail.value = null;
+      // done 由 entries 与 XLEN 精确判定（不能硬编码 true，否则恰满一页的 stream 无法续页）。
+      streamDone.value = computeStreamDone((msg as ValueInfo).data);
     } else if (msg.type === 'keyAction') {
       banner.value = msg.ok ? '' : String(msg.error ?? '');
     } else if (msg.type === 'info') {
@@ -100,6 +129,16 @@ onMounted(() => {
       results.value = [...results.value, msg as CommandResult].slice(-100);
     } else if (msg.type === 'confirmRequired') {
       pendingConfirm.value = { id: msg.id, command: msg.command };
+    } else if (msg.type === 'streamGroupDetail') {
+      streamDetail.value = msg;
+    } else if (msg.type === 'streamRangeResult') {
+      // 只把结果贴回它所属的 key（选中态可能已切到另一个 stream）。
+      if (value.value?.data?.kind === 'stream' && value.value.key === msg.key) {
+        value.value = { ...value.value, data: { ...value.value.data, entries: [...value.value.data.entries, ...(msg.entries ?? [])] } };
+        streamDone.value = !!msg.done;
+      }
+    } else if (msg.type === 'confirmOpRequired') {
+      pendingOpDetail.value = String(msg.detail ?? '');
     } else if (msg.type === 'error') {
       banner.value = String(msg.message ?? '');
     }
@@ -136,7 +175,23 @@ onUnmounted(() => { off?.(); });
       </aside>
       <section class="right">
         <div class="top">
+          <StreamViewer
+            v-if="value && value.keyType === 'stream' && value.data?.kind === 'stream'"
+            :info="value"
+            :detail="streamDetail"
+            :done="streamDone"
+            :read-only="readOnly"
+            @add="streamOps().add"
+            @del="streamOps().del"
+            @trim="streamOps().trim"
+            @group-create="streamOps().groupCreate"
+            @group-destroy="streamOps().groupDestroy"
+            @group-del-consumer="streamOps().groupDelConsumer"
+            @group-detail="streamOps().groupDetail"
+            @load-more="streamOps().loadMore"
+          />
           <ValueViewer
+            v-else
             :info="value"
             :read-only="readOnly"
             @refresh="value && post({ type: 'selectKey', key: value.key })"
@@ -182,6 +237,16 @@ onUnmounted(() => { off?.(); });
     <ServerStatus v-else :info="info" @refresh="post({ type: 'refreshInfo' })" />
 
     <KeyNewDialog :show="showNewKey" @create="onCreate" @cancel="showNewKey = false" />
+
+    <div v-if="pendingOpDetail !== null" class="mask">
+      <div class="confirm">
+        <p>{{ t('wv.redis.stream.confirm', { detail: pendingOpDetail }) }}</p>
+        <div class="actions">
+          <button class="btn danger" @click="confirmOp(true)">{{ t('wv.redis.confirm.run') }}</button>
+          <button class="btn" @click="confirmOp(false)">{{ t('wv.redis.confirm.cancel') }}</button>
+        </div>
+      </div>
+    </div>
 
     <div v-if="pendingDelete" class="mask">
       <div class="confirm">

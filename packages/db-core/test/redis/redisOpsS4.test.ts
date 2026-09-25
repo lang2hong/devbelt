@@ -9,6 +9,9 @@ import {
   redisXAdd,
   redisXGroupCreate,
   redisXRange,
+  parseXPending,
+  isValidStreamId,
+  compareStreamId,
   type RedisCommandSource,
   type RedisNodeSource,
 } from '../../src/redis/redisOps';
@@ -83,5 +86,31 @@ describe('redisOps Stream（S4）', () => {
 
   it('parseInfoEntries 扁平 → 对象', () => {
     expect(parseInfoEntries([['name', 'g', 'consumers', '2']])).toEqual([{ name: 'g', consumers: '2' }]);
+  });
+});
+
+describe('redisOps Stream XPENDING / ID 校验（S4）', () => {
+  it('parseXPending 归一化摘要；空回复安全', () => {
+    expect(parseXPending([2, '1-0', '3-0', [['c1', '2']]])).toEqual({
+      count: 2, minId: '1-0', maxId: '3-0', consumers: [['c1', '2']],
+    });
+    expect(parseXPending(null)).toEqual({ count: 0, minId: '', maxId: '', consumers: [] });
+    expect(parseXPending([0, null, null, []])).toEqual({ count: 0, minId: '', maxId: '', consumers: [] });
+  });
+
+  it('isValidStreamId：* 或 <ms>[-<seq>]', () => {
+    expect(isValidStreamId('*')).toBe(true);
+    expect(isValidStreamId('1700000000000')).toBe(true);
+    expect(isValidStreamId('1700000000000-3')).toBe(true);
+    expect(isValidStreamId('abc')).toBe(false);
+    expect(isValidStreamId('1-')).toBe(false);
+    expect(isValidStreamId('-1')).toBe(false);
+  });
+
+  it('compareStreamId 按 ms 再 seq', () => {
+    expect(compareStreamId('2-0', '1-9')).toBe(1);
+    expect(compareStreamId('1-2', '1-10')).toBe(-1);
+    expect(compareStreamId('1-0', '1')).toBe(0);
+    expect(compareStreamId('1', '1-0')).toBe(0);
   });
 });

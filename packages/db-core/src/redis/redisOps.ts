@@ -404,3 +404,45 @@ export async function redisXGroupDestroy(src: RedisCommandSource, key: string, g
 export async function redisXGroupDelConsumer(src: RedisCommandSource, key: string, group: string, consumer: string): Promise<number> {
   return asNumber(await src.sendCommand('XGROUP', ['DELCONSUMER', key, group, consumer]));
 }
+
+export interface RedisPendingSummary {
+  count: number;
+  minId: string;
+  maxId: string;
+  consumers: [string, string][];
+}
+
+/** XPENDING key group 摘要回复归一化：`[count, minId, maxId, [[consumer,count],…]]`。 */
+export function parseXPending(reply: unknown): RedisPendingSummary {
+  const empty: RedisPendingSummary = { count: 0, minId: '', maxId: '', consumers: [] };
+  if (!Array.isArray(reply) || reply.length < 4) return empty;
+  return {
+    count: asNumber(reply[0]),
+    minId: asString(reply[1]),
+    maxId: asString(reply[2]),
+    consumers: toPairs(reply[3]),
+  };
+}
+
+export async function redisXPending(src: RedisCommandSource, key: string, group: string): Promise<RedisPendingSummary> {
+  return parseXPending(await src.sendCommand('XPENDING', [key, group]));
+}
+
+/** 自填 XADD ID 合法性：`*` 或 `<ms>[-<seq>]`（纯数字）。 */
+export function isValidStreamId(id: string): boolean {
+  return id === '*' || /^\d+(-\d+)?$/.test(id);
+}
+
+function splitStreamId(id: string): [number, number] {
+  const [ms, seq] = id.split('-');
+  return [Number(ms) || 0, Number(seq) || 0];
+}
+
+/** 比较两个 stream ID 的先后（-1/0/1）；缺 seq 视为 0。 */
+export function compareStreamId(a: string, b: string): number {
+  const [am, as] = splitStreamId(a);
+  const [bm, bs] = splitStreamId(b);
+  if (am !== bm) return am < bm ? -1 : 1;
+  if (as !== bs) return as < bs ? -1 : 1;
+  return 0;
+}

@@ -357,3 +357,114 @@ describe('RedisView S4 cluster 键扫描', () => {
     expect(calls.some((c) => c.cmd === 'SELECT')).toBe(false);
   });
 });
+
+describe('RedisView S4 Stream 处理器', () => {
+  const replies: Record<string, unknown> = {
+    SCAN: ['0', []], INFO: '', SLOWLOG: [],
+    TYPE: 'stream', TTL: -1, MEMORY: 128,
+    XRANGE: [['1-0', ['f', 'v']]], XREVRANGE: [['5-0', ['f', 'v']]], XLEN: 1,
+    XINFO: [['name', 'g', 'consumers', '1', 'pending', '0', 'last-delivered-id', '1-0']],
+    XADD: '6-0', XDEL: 1, XTRIM: 1, XGROUP: 1,
+  };
+  const handler: Send = async (name) => (name in replies ? replies[name] : 'OK');
+
+  async function mount(view: any): Promise<void> {
+    (view.post as any).mockClear();
+    h.audits.length = 0;
+    await view.handleMessage({ type: 'ready' });
+    await view.handleMessage({ type: 'ready' });
+  }
+
+  it('selectKey 派发 stream 值（entries/len/groups）', async () => {
+    const { view } = makeView(handler, 0);
+    await mount(view);
+    await view.handleMessage({ type: 'selectKey', key: 's' });
+    const v = posts(view).find((m) => m.type === 'value');
+    expect(v.keyType).toBe('stream');
+    expect(v.data.kind).toBe('stream');
+    expect(v.data.entries).toEqual([{ id: '1-0', fields: [['f', 'v']] }]);
+    expect(v.data.groups.length).toBe(1);
+  });
+
+  it('streamAdd：非法 ID 拒绝且不发包', async () => {
+    const { view, sent } = makeView(handler, 0);
+    await mount(view);
+    sent.length = 0;
+    await view.handleMessage({ type: 'streamAdd', key: 's', id: 'abc', fields: [['f', 'v']] });
+    expect(sent.some(([n]) => n === 'XADD')).toBe(false);
+    const ka = posts(view).find((m) => m.type === 'keyAction');
+    expect(ka.ok).toBe(false);
+  });
+
+  it('streamAdd：ID 不大于末条拒绝', async () => {
+    const { view, sent } = makeView(handler, 0);
+    await mount(view);
+    sent.length = 0;
+    await view.handleMessage({ type: 'streamAdd', key: 's', id: '5-0', fields: [['f', 'v']] });
+    expect(sent.some(([n]) => n === 'XADD')).toBe(false);
+    expect(posts(view).find((m) => m.type === 'keyAction').ok).toBe(false);
+  });
+
+  it('streamAdd：* 正常执行并审计', async () => {
+    const { view, sent } = makeView(handler, 0);
+    await mount(view);
+    sent.length = 0;
+    await view.handleMessage({ type: 'streamAdd', key: 's', id: '*', fields: [['f', 'v']] });
+    expect(sent.some(([n]) => n === 'XADD')).toBe(true);
+    expect(h.audits[0].sql).toBe('XADD s');
+    expect(posts(view).some((m) => m.type === 'keyAction' && m.ok)).toBe(true);
+  });
+
+  it('批量 XDEL 需确认；确认后执行', async () => {
+    const { view, sent } = makeView(handler, 0);
+    await mount(view);
+    sent.length = 0;
+    await view.handleMessage({ type: 'streamDel', key: 's', ids: ['1-0', '2-0'] });
+    expect(sent.some(([n]) => n === 'XDEL')).toBe(false);
+    expect(posts(view).some((m) => m.type === 'confirmOpRequired')).toBe(true);
+    await view.handleMessage({ type: 'streamDel', key: 's', ids: ['1-0', '2-0'], confirmed: true });
+    expect(sent.some(([n]) => n === 'XDEL')).toBe(true);
+  });
+
+  it('XTRIM / XGROUP DESTROY 需确认', async () => {
+    const { view, sent } = makeView(handler, 0);
+    await mount(view);
+    sent.length = 0;
+    await view.handleMessage({ type: 'streamTrim', key: 's', maxlen: 100 });
+    await view.handleMessage({ type: 'streamGroupDestroy', key: 's', group: 'g' });
+    expect(sent.some(([n]) => n === 'XTRIM' || n === 'XGROUP')).toBe(false);
+    expect(posts(view).filter((m) => m.type === 'confirmOpRequired').length).toBe(2);
+  });
+
+  it('单条 XDEL 走普通管线（无确认）', async () => {
+    const { view, sent } = makeView(handler, 0);
+    await mount(view);
+    sent.length = 0;
+    await view.handleMessage({ type: 'streamDel', key: 's', ids: ['1-0'] });
+    expect(sent.some(([n]) => n === 'XDEL')).toBe(true);
+    expect(posts(view).some((m) => m.type === 'confirmOpRequired')).toBe(false);
+  });
+
+  it('只读拦截错误在 viewer 可见（keyAction.error）', async () => {
+    const { view } = makeView(async (n) => {
+      if (n === 'XADD') throw new Error('command blocked in read-only mode: XADD');
+      return n in replies ? replies[n] : 'OK';
+    }, 0);
+    await mount(view);
+    await view.handleMessage({ type: 'streamAdd', key: 's', id: '*', fields: [['f', 'v']] });
+    const ka = posts(view).find((m) => m.type === 'keyAction');
+    expect(ka.ok).toBe(false);
+    expect(ka.error).toMatch(/read-only/);
+  });
+
+  it('streamRange 用排他起点续页', async () => {
+    const { view } = makeView(handler, 0);
+    await mount(view);
+    (view.post as any).mockClear();
+    await view.handleMessage({ type: 'streamRange', key: 's', start: '1-0' });
+    const r = posts(view).find((m) => m.type === 'streamRangeResult');
+    expect(r).toBeTruthy();
+    // 排他起点由 host 拼成 `(1-0`；handler 里 XRANGE 回复固定，done 由页大小决定。
+    expect(r.done).toBe(true);
+  });
+});

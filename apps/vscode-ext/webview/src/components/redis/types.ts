@@ -43,3 +43,13 @@ export interface KeyRow {
 export function isKeyBrowser(db: number | null): boolean {
   return db !== null;
 }
+
+/**
+ * Stream 是否已加载完（可续页判定）。
+ * 精确判据：`entries.length >= XLEN(len)`；非 stream 数据恒为 done。
+ * 注意：XRANGE 的 COUNT 是硬上限，未满一页即区间耗尽。
+ */
+export function computeStreamDone(data: RedisValueData | null | undefined): boolean {
+  if (data?.kind !== 'stream') return true;
+  return data.entries.length >= data.len;
+}

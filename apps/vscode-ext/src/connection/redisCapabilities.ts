@@ -37,6 +37,6 @@ export const REDIS_CAPABILITIES: RedisCapabilities = {
   // S3：键树、五类型 viewer/editor
   keyBrowser: true,
   fiveTypes: true,
-  // Stream viewer 未交付（S4 项 3）：落地时再翻开。
-  stream: false,
+  // S4 项 3：Stream viewer/editor
+  stream: true,
 };

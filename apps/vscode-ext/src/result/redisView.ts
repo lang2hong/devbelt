@@ -7,6 +7,9 @@ import {
   redisLRange, redisLLen, redisLPush, redisRPush, redisLSet, redisLRem, redisLTrim, redisLPop, redisRPop,
   redisSMembers, redisSCard, redisSAdd, redisSRem,
   redisZRange, redisZCard, redisZAdd, redisZRem, allCommandNames, redisScanOnNode,
+  redisXRange, redisXRevRange, redisXAdd, redisXDel, redisXTrimMaxlen, redisXLen,
+  redisXInfoGroups, redisXInfoConsumers, redisXGroupCreate, redisXGroupDestroy, redisXGroupDelConsumer,
+  redisXPending, isValidStreamId, compareStreamId,
   type RedisCommandSource,
 } from '@devbelt/db-core';
 import type { RedisConnectionSession } from '../connection/connectionSession';
@@ -22,6 +25,8 @@ import type { RedisNewKeyValue, RedisSlowlogEntry, RedisTab, RedisValueData } fr
 const LARGE_KEY_BYTES = 1024 * 1024;
 /** SCAN 默认 COUNT。 */
 const DEFAULT_SCAN_COUNT = 200;
+/** Stream 单页条目数。 */
+const STREAM_PAGE = 100;
 
 /** Redis 面板：DB 键树 + 值查看/编辑 + CLI/SlowLog 三栏（P7 S2/S3）。 */
 export class RedisView extends BaseWebView {
@@ -105,6 +110,14 @@ export class RedisView extends BaseWebView {
     if (msg.type === 'setRem') { await this.edit('SREM', String(msg.key), async (c) => { await redisSRem(c, String(msg.key), strs(msg.members)); }); return; }
     if (msg.type === 'zsetAdd') { await this.edit('ZADD', String(msg.key), async (c) => { await redisZAdd(c, String(msg.key), String(msg.score ?? '0'), String(msg.member ?? '')); }); return; }
     if (msg.type === 'zsetRem') { await this.edit('ZREM', String(msg.key), async (c) => { await redisZRem(c, String(msg.key), strs(msg.members)); }); return; }
+    if (msg.type === 'streamAdd') { await this.streamAdd(msg); return; }
+    if (msg.type === 'streamDel') { await this.streamDelOp(msg); return; }
+    if (msg.type === 'streamTrim') { await this.streamTrimOp(msg); return; }
+    if (msg.type === 'streamGroupCreate') { await this.streamGroupCreateOp(msg); return; }
+    if (msg.type === 'streamGroupDestroy') { await this.streamGroupDestroyOp(msg); return; }
+    if (msg.type === 'streamGroupDelConsumer') { await this.streamGroupDelConsumerOp(msg); return; }
+    if (msg.type === 'streamGroupDetail') { await this.streamGroupDetailOp(msg); return; }
+    if (msg.type === 'streamRange') { await this.streamRangeOp(msg); return; }
   }
 
   protected onDispose(): void {
@@ -247,6 +260,12 @@ export class RedisView extends BaseWebView {
       case 'list': return { kind: 'list', items: await redisLRange(c, key, 0, 199), len: await redisLLen(c, key) };
       case 'set': return { kind: 'set', members: await redisSMembers(c, key), card: await redisSCard(c, key) };
       case 'zset': return { kind: 'zset', items: await redisZRange(c, key, 0, 199), card: await redisZCard(c, key) };
+      case 'stream': return {
+        kind: 'stream',
+        entries: await redisXRange(c, key, '-', '+', STREAM_PAGE),
+        len: await redisXLen(c, key),
+        groups: await redisXInfoGroups(c, key),
+      };
       default: return null;
     }
   }
@@ -368,6 +387,172 @@ export class RedisView extends BaseWebView {
     }
   }
 
+  // ────────────────────────── Stream（S4） ──────────────────────────
+
+  /** 破坏性操作：未带 confirmed 时先回确认请求，由 webview 二次下发。 */
+  private needConfirm(msg: any, kind: string, detail: string): boolean {
+    if (msg.confirmed === true) return false;
+    this.post({ type: 'confirmOpRequired', kind, detail });
+    return true;
+  }
+
+  private async streamAdd(msg: any): Promise<void> {
+    const key = String(msg.key ?? '');
+    const id = String(msg.id ?? '*');
+    const fields = pairsOf(msg.fields);
+    await this.enqueue(async () => {
+      try {
+        const session = await this.sessionForDb();
+        const c = session.client;
+        if (id !== '*') {
+          if (!isValidStreamId(id)) {
+            this.post({ type: 'keyAction', action: 'XADD', ok: false, error: l10n('cmd.redis.streamInvalidId') });
+            return;
+          }
+          const last = await redisXRevRange(c, key, '+', '-', 1);
+          const lastId = last[0]?.id;
+          if (lastId && compareStreamId(id, lastId) <= 0) {
+            this.post({ type: 'keyAction', action: 'XADD', ok: false, error: l10n('cmd.redis.streamIdNotGreater') });
+            return;
+          }
+        }
+        const started = Date.now();
+        await redisXAdd(c, key, fields, id);
+        this.audit('XADD', key, Date.now() - started);
+        this.post({ type: 'keyAction', action: 'XADD', ok: true, error: null });
+        await this.doPushValue(session, key);
+      } catch (err) {
+        this.post({ type: 'keyAction', action: 'XADD', ok: false, error: (err as Error).message });
+      }
+    });
+  }
+
+  private async streamDelOp(msg: any): Promise<void> {
+    const key = String(msg.key ?? '');
+    const ids = strs(msg.ids);
+    if (!ids.length) return;
+    // 单条走普通管线；批量走确认。
+    if (ids.length > 1 && this.needConfirm(msg, 'streamDel', `${ids.length} entries`)) return;
+    await this.enqueue(async () => {
+      try {
+        const session = await this.sessionForDb();
+        const started = Date.now();
+        await redisXDel(session.client, key, ids);
+        this.audit('XDEL', key, Date.now() - started);
+        this.post({ type: 'keyAction', action: 'XDEL', ok: true, error: null });
+        await this.doPushValue(session, key);
+      } catch (err) {
+        this.post({ type: 'keyAction', action: 'XDEL', ok: false, error: (err as Error).message });
+      }
+    });
+  }
+
+  private async streamTrimOp(msg: any): Promise<void> {
+    const key = String(msg.key ?? '');
+    const maxlen = Number(msg.maxlen);
+    if (!Number.isFinite(maxlen) || maxlen < 0) return;
+    if (this.needConfirm(msg, 'streamTrim', `MAXLEN ${maxlen}`)) return;
+    await this.enqueue(async () => {
+      try {
+        const session = await this.sessionForDb();
+        const started = Date.now();
+        await redisXTrimMaxlen(session.client, key, maxlen);
+        this.audit('XTRIM', key, Date.now() - started);
+        this.post({ type: 'keyAction', action: 'XTRIM', ok: true, error: null });
+        await this.doPushValue(session, key);
+      } catch (err) {
+        this.post({ type: 'keyAction', action: 'XTRIM', ok: false, error: (err as Error).message });
+      }
+    });
+  }
+
+  private async streamGroupCreateOp(msg: any): Promise<void> {
+    const key = String(msg.key ?? '');
+    const group = String(msg.group ?? '');
+    if (!group) return;
+    await this.enqueue(async () => {
+      try {
+        const session = await this.sessionForDb();
+        await redisXGroupCreate(session.client, key, group, String(msg.id ?? '$'), msg.mkstream !== false);
+        this.audit('XGROUP CREATE', `${key} ${group}`);
+        this.post({ type: 'keyAction', action: 'XGROUP', ok: true, error: null });
+        await this.doPushValue(session, key);
+      } catch (err) {
+        this.post({ type: 'keyAction', action: 'XGROUP', ok: false, error: (err as Error).message });
+      }
+    });
+  }
+
+  private async streamGroupDestroyOp(msg: any): Promise<void> {
+    const key = String(msg.key ?? '');
+    const group = String(msg.group ?? '');
+    if (!group) return;
+    if (this.needConfirm(msg, 'streamGroupDestroy', group)) return;
+    await this.enqueue(async () => {
+      try {
+        const session = await this.sessionForDb();
+        await redisXGroupDestroy(session.client, key, group);
+        this.audit('XGROUP DESTROY', `${key} ${group}`);
+        this.post({ type: 'keyAction', action: 'XGROUP', ok: true, error: null });
+        await this.doPushValue(session, key);
+      } catch (err) {
+        this.post({ type: 'keyAction', action: 'XGROUP', ok: false, error: (err as Error).message });
+      }
+    });
+  }
+
+  private async streamGroupDelConsumerOp(msg: any): Promise<void> {
+    const key = String(msg.key ?? '');
+    const group = String(msg.group ?? '');
+    const consumer = String(msg.consumer ?? '');
+    if (!group || !consumer) return;
+    if (this.needConfirm(msg, 'streamGroupDelConsumer', `${group}/${consumer}`)) return;
+    await this.enqueue(async () => {
+      try {
+        const session = await this.sessionForDb();
+        await redisXGroupDelConsumer(session.client, key, group, consumer);
+        this.audit('XGROUP DELCONSUMER', `${key} ${group} ${consumer}`);
+        this.post({ type: 'keyAction', action: 'XGROUP', ok: true, error: null });
+        await this.doPushValue(session, key);
+      } catch (err) {
+        this.post({ type: 'keyAction', action: 'XGROUP', ok: false, error: (err as Error).message });
+      }
+    });
+  }
+
+  private async streamGroupDetailOp(msg: any): Promise<void> {
+    const key = String(msg.key ?? '');
+    const group = String(msg.group ?? '');
+    if (!group) return;
+    await this.enqueue(async () => {
+      try {
+        const session = await this.sessionForDb();
+        const [consumers, pending] = await Promise.all([
+          redisXInfoConsumers(session.client, key, group),
+          redisXPending(session.client, key, group),
+        ]);
+        this.post({ type: 'streamGroupDetail', key, group, consumers, pending });
+      } catch (err) {
+        this.post({ type: 'error', message: (err as Error).message });
+      }
+    });
+  }
+
+  private async streamRangeOp(msg: any): Promise<void> {
+    const key = String(msg.key ?? '');
+    const start = String(msg.start ?? '-');
+    await this.enqueue(async () => {
+      try {
+        const session = await this.sessionForDb();
+        // 排他续页：起点用 `(<lastId>`，避免重复末条。
+        const entries = await redisXRange(session.client, key, start === '-' ? '-' : `(${start}`, '+', STREAM_PAGE);
+        this.post({ type: 'streamRangeResult', key, entries, done: entries.length < STREAM_PAGE });
+      } catch (err) {
+        this.post({ type: 'error', message: (err as Error).message });
+      }
+    });
+  }
+
   private audit(command: string, detail: string, costTime?: number): void {
     AuditLogger.tryLog({
       action: 'redis_command',
@@ -403,6 +588,12 @@ export class RedisView extends BaseWebView {
 
 function strs(v: unknown): string[] {
   return Array.isArray(v) ? v.map(String) : [];
+}
+
+/** `[[f,v],…]` 归一化。 */
+function pairsOf(v: unknown): [string, string][] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((e): e is unknown[] => Array.isArray(e) && e.length >= 2).map((e) => [String(e[0]), String(e[1])]);
 }
 
 /** 审计行文本（P7 §十：日志禁止明文密码）。 */

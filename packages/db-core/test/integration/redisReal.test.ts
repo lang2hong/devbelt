@@ -22,6 +22,15 @@ import {
   redisType,
   redisZAdd,
   redisZRange,
+  redisXAdd,
+  redisXRange,
+  redisXLen,
+  redisXInfoGroups,
+  redisXGroupCreate,
+  redisXGroupDestroy,
+  redisXDel,
+  redisXPending,
+  compareStreamId,
 } from '../../src/redis/redisOps';
 
 /**
@@ -238,5 +247,57 @@ describe.skipIf(!REDIS_TLS_URL || !REDIS_TLS_CA)('Redis 真实实例（TLS 自�
     } finally {
       await client.close();
     }
+  });
+});
+
+describe.skipIf(!REDIS_URL)('Redis Stream 真实回包（S4）', () => {
+  const key = `devbelt:it:stream:${Date.now()}`;
+  const group = 'g1';
+  let client: RedisClient;
+
+  beforeAll(async () => {
+    client = makeClient(REDIS_URL!);
+    await client.connect();
+  });
+  afterAll(async () => {
+    if (client) {
+      try { await redisXGroupDestroy(client, key, group); } catch { /* ignore */ }
+      try { await client.sendCommand('DEL', [key]); } catch { /* ignore */ }
+      await client.close();
+    }
+  });
+
+  it('XADD → XRANGE 形状 [[id,[f,v,…]]]', async () => {
+    const id1 = await redisXAdd(client, key, [['f', 'v']], '*');
+    expect(id1).toContain('-');
+    const entries = await redisXRange(client, key, '-', '+');
+    expect(entries).toHaveLength(1);
+    expect(entries[0].id).toBe(id1);
+    expect(entries[0].fields).toEqual([['f', 'v']]);
+    expect(await redisXLen(client, key)).toBe(1);
+
+    // 排他续页：以 id1 为起点应返回空（末条被排除）。
+    const after = await redisXRange(client, key, `(${id1}`, '+');
+    expect(after).toEqual([]);
+  });
+
+  it('XGROUP CREATE / XINFO GROUPS / XPENDING 形状', async () => {
+    await redisXGroupCreate(client, key, group, '$', true);
+    const groups = await redisXInfoGroups(client, key);
+    expect(groups.some((g) => g.name === group)).toBe(true);
+    const pending = await redisXPending(client, key, group);
+    expect(pending.count).toBe(0);
+    expect(typeof pending.minId).toBe('string');
+  });
+
+  it('自填 ID 大于末条时可追加', async () => {
+    const entries = await redisXRange(client, key, '-', '+');
+    const last = entries.at(-1)!.id;
+    const [ms, seq] = last.split('-').map(Number);
+    const next = `${ms}-${seq + 1}`;
+    expect(compareStreamId(next, last)).toBe(1);
+    const added = await redisXAdd(client, key, [['a', 'b']], next);
+    expect(added).toBe(next);
+    await redisXDel(client, key, [next]);
   });
 });

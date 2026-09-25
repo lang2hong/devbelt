@@ -151,17 +151,27 @@ export type RedisDownMessage =
   | { type: 'keys'; folders: RedisKeyFolder; cursor: string; done: boolean; scanned: number; match: string }
   | { type: 'value'; key: string; keyType: string; ttl: number; tooLarge: boolean; size: number | null; data: RedisValueData | null }
   | { type: 'keyAction'; action: string; ok: boolean; error: string | null }
+  | { type: 'confirmOpRequired'; kind: string; detail: string }
+  | { type: 'streamGroupDetail'; key: string; group: string; consumers: Record<string, string>[]; pending: { count: number; minId: string; maxId: string; consumers: [string, string][] } }
+  | { type: 'streamRangeResult'; key: string; entries: RedisStreamEntry[]; done: boolean }
   | { type: 'commandResult'; id: string; command: string; ok: boolean; result: string; costMs: number; error: string | null }
   | { type: 'confirmRequired'; id: string; command: string }
   | { type: 'error'; message: string };
 
 /** 绑定值数据（按 key 类型）。 */
+/** Stream 条目（结构与 db-core RedisStreamEntry 一致）。 */
+export interface RedisStreamEntry {
+  id: string;
+  fields: [string, string][];
+}
+
 export type RedisValueData =
   | { kind: 'string'; text: string }
   | { kind: 'hash'; entries: [string, string][]; len: number }
   | { kind: 'list'; items: string[]; len: number }
   | { kind: 'set'; members: string[]; card: number }
-  | { kind: 'zset'; items: [string, string][]; card: number };
+  | { kind: 'zset'; items: [string, string][]; card: number }
+  | { kind: 'stream'; entries: RedisStreamEntry[]; len: number; groups: Record<string, string>[] };
 
 /** 新建 key 的初值（按类型）。 */
 export type RedisNewKeyValue =
@@ -199,4 +209,13 @@ export type RedisUpMessage =
   | { type: 'setAdd'; key: string; members: string[] }
   | { type: 'setRem'; key: string; members: string[] }
   | { type: 'zsetAdd'; key: string; score: string; member: string }
-  | { type: 'zsetRem'; key: string; members: string[] };
+  | { type: 'zsetRem'; key: string; members: string[] }
+  // Stream（S4）：破坏性操作须 confirmed=true 才执行（host 先回 confirmOpRequired）。
+  | { type: 'streamAdd'; key: string; id: string; fields: [string, string][] }
+  | { type: 'streamDel'; key: string; ids: string[]; confirmed?: boolean }
+  | { type: 'streamTrim'; key: string; maxlen: number; confirmed?: boolean }
+  | { type: 'streamGroupCreate'; key: string; group: string; id: string; mkstream: boolean }
+  | { type: 'streamGroupDestroy'; key: string; group: string; confirmed?: boolean }
+  | { type: 'streamGroupDelConsumer'; key: string; group: string; consumer: string; confirmed?: boolean }
+  | { type: 'streamGroupDetail'; key: string; group: string }
+  | { type: 'streamRange'; key: string; start: string };
