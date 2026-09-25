@@ -226,6 +226,11 @@ db-core 目前是纯 SQL 形态（`QueryService/MetadataService/DataService/Tabl
     db/tls/connectTimeout/readOnly/onLog），**不依赖 `SavedConnection`**（db-host 类型）；`SavedConnection`→
     options 的映射放在 vscode-ext `ConnectionManager.buildRedisSession`。standalone/cluster/sentinel 的
     `getRedisOptions/getSentinelOptions/getClusterOptions` 分型构造随 S4 引入。
+  - 高层操作另置 `redisOps.ts`（S3）：`type/scan/dbsize/select/keyspace`、string/hash/list/set/zset 读写、
+    `ttl/pttl/expire/persist/rename/del/memoryUsage`。放独立模块而非挂在 RedisClient，保持连接/切面/日志
+    聚焦且纯函数可测。DB 选择用 `SELECT` 于会话共享 client，主机侧串行化（cluster 无 SELECT，S4 禁用）。
+    **已知限制（S4 处理）**：值与键名经 `String()` 归一，非 UTF-8 字节有损；string 的 hex 视图是 UTF-8
+    往返而非原始字节，随 S4「二进制 hex 编辑组件」一并改成 Byte 级。
   - 统一配置（**原样复制 ARDM `getRedisOptions`**）：`stringNumbers: true`（避免 JS 数字精度丢失）、
     `enableReadyCheck: false`、`connectTimeout: 30000`、`family: 0`；`retryStrategy` 最多 3 次——
     `times=1→200ms`、`times=2→400ms`、`times>=3→放弃`（ARDM 为 `Math.min(times*200,1000)` +
@@ -375,6 +380,7 @@ db-core 新增/修改：
 - `packages/db-core/src/redis/redisCommands.ts`（新）
 - `packages/db-core/src/redis/redisTls.ts`（新）
 - `packages/db-core/src/redis/redisSplitArgs.ts`（新，S2）
+- `packages/db-core/src/redis/redisOps.ts`（新，S3：SCAN/DB/TTL + 五类型类型化操作；实现口径见 §6.2）
 - `packages/db-core/src/index.ts`（导出 RedisClient、redisCommands 读写/危险判定工具）
 - `packages/db-core/package.json`（新增 `ioredis@^5` 依赖）
 - `packages/db-core/src/factory/connectionFactory.ts`（**不改**，仅 SQL）
