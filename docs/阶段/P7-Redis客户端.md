@@ -222,8 +222,10 @@ db-core 目前是纯 SQL 形态（`QueryService/MetadataService/DataService/Tabl
 `packages/db-core/package.json` 的 dependencies，vscode-ext/db-host 不直接依赖 ioredis）：
 
 - `redisClient.ts`：封装 ioredis。
-  - `createConnection(host, port, auth, config)`：按 standalone/cluster/sentinel 分别构造
-    （复用 ARDM `getRedisOptions/getSentinelOptions/getClusterOptions` 配置）。
+  - 实现口径（v3 对齐代码）：db-core 的 `RedisClient` 构造参数是纯 options（host/port/username/password/
+    db/tls/connectTimeout/readOnly/onLog），**不依赖 `SavedConnection`**（db-host 类型）；`SavedConnection`→
+    options 的映射放在 vscode-ext `ConnectionManager.buildRedisSession`。standalone/cluster/sentinel 的
+    `getRedisOptions/getSentinelOptions/getClusterOptions` 分型构造随 S4 引入。
   - 统一配置（**原样复制 ARDM `getRedisOptions`**）：`stringNumbers: true`（避免 JS 数字精度丢失）、
     `enableReadyCheck: false`、`connectTimeout: 30000`、`family: 0`；`retryStrategy` 最多 3 次——
     `times=1→200ms`、`times=2→400ms`、`times>=3→放弃`（ARDM 为 `Math.min(times*200,1000)` +
@@ -247,6 +249,9 @@ db-core 目前是纯 SQL 形态（`QueryService/MetadataService/DataService/Tabl
   - **修正上游分类错误**：ARDM 把 `BITOP`（会写 `destkey`）放在 `readCMD`，复制时须移入 `writeCMD`，
     否则只读模式会放行 BITOP；单测断言 `isWriteCommand('BITOP') === true`。
   - 命令表仅做基础分类，不做文档字符串。
+- `redisSplitArgs.ts`（S2 新增）：控制台命令行切分，移植 ARDM 使用的 `@qii404/redis-splitargs` v1.0.1
+  （MIT）用户可见语义（空白分隔 / 双引号转义含 hex / 单引号转义 / 未闭合抛错），零第三方依赖；
+  修正上游「数组 `+=` 退化为字符串」缺陷。切分在主机侧完成。
 - `redisTls.ts`：读 CA/cert/key 文件，产出 ioredis `tls` 参数对象（`{ca,key,cert,servername,rejectUnauthorized}`；
   ioredis 接受 options 对象，不必显式构造 SecureContext）。**有意不复制 ARDM 的 TLS 策略**：上游
   `getTLSOptions` 硬编码 `rejectUnauthorized:false` 且 `checkServerIdentity:()=>undefined`（跳过主机名校验）；
@@ -308,14 +313,14 @@ SSH 隧道与 Cluster/Sentinel NAT map 放在 vscode-ext（`apps/vscode-ext/src/
   sentinel master、sentinel 密码、TLS 开关与证书选择、SSH 段复用现有；`password` 字段复用为 Redis
   密码 / ACL 密码）。
 - `connectionForm.ts`：`defaultPort` 分支加 6379；`decodeConnection()` 白名单加 Redis 字段
-  （`redisDb`、`keySeparator`、`redisMode`、`sentinelMaster`、`sentinelPassword`、TLS 路径字段
+  （`redisDb`、`keySeparator`、`redisMode`、`sentinelName`、`sentinelPassword`、TLS 路径字段
   复用现有 `caPath/clientCertPath/clientKeyPath/rejectUnauthorized`——Redis 与 SQL 共用同一组
   TLS 字段名，连接表单根据引擎切换显示）；test connection 分支：Redis 走临时
   `RedisClient.createConnection + ping`（复用 SshTunnel 临时建连逻辑，测试完即关）。
 - `packages/db-host/src/connection/connectionStore.ts`：
   - `SENSITIVE_FIELDS` 现有 `['password', 'sshPassword', 'sshPassphrase']` 已覆盖 Redis 密码 / SSH 密码；
     新增 `sentinelPassword`（sentinel 节点密码敏感）。
-  - `SavedConnection` 扩可选字段：`redisDb?: number; keySeparator?: string; redisMode?: 'standalone' | 'cluster' | 'sentinel'; sentinelMaster?: string; sentinelPassword?: string; color?: string;`
+  - `SavedConnection` 扩可选字段：`redisDb?: number; keySeparator?: string; redisMode?: 'standalone' | 'cluster' | 'sentinel'; sentinelName?: string; sentinelPassword?: string; color?: string;`
     （`color?: string` 是连接颜色标签，所有引擎共用，SQL 侧同步显示）。
   - 证书/私钥路径复用现有字段，不敏感，落 memento。
 
@@ -369,6 +374,7 @@ db-core 新增/修改：
 - `packages/db-core/src/redis/redisClient.ts`（新）
 - `packages/db-core/src/redis/redisCommands.ts`（新）
 - `packages/db-core/src/redis/redisTls.ts`（新）
+- `packages/db-core/src/redis/redisSplitArgs.ts`（新，S2）
 - `packages/db-core/src/index.ts`（导出 RedisClient、redisCommands 读写/危险判定工具）
 - `packages/db-core/package.json`（新增 `ioredis@^5` 依赖）
 - `packages/db-core/src/factory/connectionFactory.ts`（**不改**，仅 SQL）
