@@ -31,6 +31,33 @@ function hostPort(addr: string): { host: string; port: number } {
   return { host, port: Number(port) };
 }
 
+/** 有界等待 cluster_state:ok（集群刚 create 完仍可能有短暂抖动）。 */
+async function waitClusterOk(client: { nodes(): { call(c: string, ...a: (string | number)[]): Promise<unknown> }[] }, timeoutMs = 15000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const info = String(await client.nodes()[0]?.call('CLUSTER', 'INFO') ?? '');
+    if (/cluster_state:ok/.test(info)) return;
+    if (Date.now() > deadline) throw new Error(`cluster_state 未就绪（${timeoutMs}ms）:\n${info}`);
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
+/** 有界重试瞬时重定向（SET/DEL 幂等）；非重定向错误立即抛出。 */
+async function withRedirectRetry<T>(fn: () => Promise<T>, attempts = 5): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const msg = String(err);
+      if (!/MOVED|ASK|CLUSTERDOWN|Too many Cluster redirections/i.test(msg)) throw err;
+      await new Promise((r) => setTimeout(r, 100 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 let server: Server;
 let sshPort = 0;
 const managers: ConnectionManager[] = [];
@@ -90,11 +117,18 @@ describe.skipIf(!CLUSTER_SEED)('Cluster over SSH（真实多节点 + natMap）',
     expect(session.mode).toBe('cluster');
     try {
       const c = session.client;
+      await waitClusterOk(c);
+      // 逐 master 探活：任一 natMap 隧道不可用则在此明确失败（而非运行期 MOVED 风暴）。
+      for (const n of c.nodes()) {
+        expect(await n.call('PING')).toBe('PONG');
+      }
       // 三个 key 大概率落到不同 slot，验证 natMap 路由可用。
       for (const k of ['topo:{1}', 'topo:{2}', 'topo:{3}']) {
-        await c.sendCommand('SET', [k, 'v']);
-        expect(String(await c.sendCommand('GET', [k]))).toBe('v');
-        await c.sendCommand('DEL', [k]);
+        await withRedirectRetry(async () => {
+          await c.sendCommand('SET', [k, 'v']);
+          expect(String(await c.sendCommand('GET', [k]))).toBe('v');
+          await c.sendCommand('DEL', [k]);
+        });
       }
     } finally {
       manager.disposeAll();
