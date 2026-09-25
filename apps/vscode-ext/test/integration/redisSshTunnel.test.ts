@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import * as os from 'os';
-import * as path from 'path';
+import * as net from 'node:net';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { Server, utils } from 'ssh2';
 
 vi.mock('vscode', () => ({
   window: { createOutputChannel: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), dispose: vi.fn() }) },
@@ -13,43 +15,67 @@ import type { SavedConnection } from '@devbelt/db-host/connection/connectionStor
 import { SshTunnel } from '../../src/connection/sshTunnel';
 
 /**
- * SSH 隧道真实集成（P7 gate）。env-gated：`DEVBELT_DB_TEST_REDIS_SSH` 为 sshd 连接 JSON，
- * `DEVBELT_DB_TEST_REDIS_URL` 为隧道目标 Redis。未设置时整体 skip。
- * host-key 用 TOFU gate（prompt 恒 true）——CI 的 sshd 是我们自己起的，可信。
+ * SSH 隧道真实集成（P7 gate）。env-gated：`DEVBELT_DB_TEST_REDIS_URL` 为转发目标 Redis。
+ *
+ * SSH 服务端用 **进程内 ssh2 `Server`**（支持 password 认证 + direct-tcpip 转发），
+ * 而非外部 sshd 容器——CI 的 linuxserver 镜像默认禁 TCP 转发且 services 不能挂配置。
+ * 端到端验证我们的 `SshTunnel`（host-key gate → forwardOut → 回收）。
+ * host-key 用 TOFU gate（prompt 恒 true）；服务端密钥为进程内临时生成。
  */
-const SSH_RAW = process.env.DEVBELT_DB_TEST_REDIS_SSH;
 const REDIS_URL = process.env.DEVBELT_DB_TEST_REDIS_URL;
+const SSH_USER = 'tunnel';
+const SSH_PASS = 'tunnel-pass';
 
-function parse(u: string): { host: string; port: number } {
-  const url = new URL(u);
-  return { host: url.hostname, port: Number(url.port || 6379) };
-}
-
-describe.skipIf(!SSH_RAW || !REDIS_URL)('Redis over SSH 隧道（真实）', () => {
+describe.skipIf(!REDIS_URL)('Redis over SSH 隧道（进程内 ssh2 server）', () => {
   const storeFile = path.join(os.tmpdir(), `devbelt-ssh-${Date.now()}-known_hosts`);
+  let server: Server;
+  let sshPort = 0;
+  let targetHost = '127.0.0.1';
+  let targetPort = 6379;
 
-  beforeAll(() => {
+  beforeAll(async () => {
+    const url = new URL(REDIS_URL!);
+    targetHost = url.hostname;
+    targetPort = Number(url.port || 6379);
+
+    const hostKey = utils.generateKeyPairSync('ed25519');
+    server = new Server({ hostKeys: [hostKey.private] }, (client) => {
+      client.on('authentication', (ctx) => {
+        if (ctx.method === 'password' && ctx.username === SSH_USER && ctx.password === SSH_PASS) ctx.accept();
+        else ctx.reject();
+      });
+      client.on('ready', () => {
+        client.on('tcpip', (accept, _reject, info) => {
+          const stream = accept();
+          const socket = net.connect(info.destPort, info.destIP, () => {
+            socket.pipe(stream);
+            stream.pipe(socket);
+          });
+          socket.on('error', () => stream.close());
+        });
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    sshPort = (server.address() as net.AddressInfo).port;
     SshTunnel.configureHostKeyGate({ policy: () => 'tofu', storeFile, prompt: async () => true });
   });
+
   afterAll(() => {
     SshTunnel.configureHostKeyGate(undefined);
+    server?.close();
   });
 
   it('建立隧道 → 经隧道路由 PING → 关闭回收', async () => {
-    const ssh = JSON.parse(SSH_RAW!) as { host: string; port: number; user: string; password: string; targetHost?: string; targetPort?: number };
-    // 注意：隧道目标由 **sshd 容器** 去拨号——CI 里应指向 service 网络别名 `redis`，
-    // 而不是 runner 的 127.0.0.1（容器 localhost 上没有 redis）。
-    const target = { host: ssh.targetHost ?? parse(REDIS_URL!).host, port: ssh.targetPort ?? parse(REDIS_URL!).port };
     const conn = {
       id: 'ci-ssh-redis',
       name: 'ci-ssh',
       dbType: 'REDIS',
-      host: target.host,
-      port: target.port,
-      sshHost: ssh.host,
-      sshPort: ssh.port,
-      sshUser: ssh.user,
-      sshPassword: ssh.password,
+      host: targetHost,
+      port: targetPort,
+      sshHost: '127.0.0.1',
+      sshPort,
+      sshUser: SSH_USER,
+      sshPassword: SSH_PASS,
     } as unknown as SavedConnection;
 
     const localPort = await SshTunnel.create(conn);

@@ -94,19 +94,6 @@ jobs:
           --health-timeout=5s
           --health-retries=20
 
-      # P7 gate：sshd，供 SSH 隧道集成测试（vscode-ext 侧）。
-      sshd:
-        image: linuxserver/openssh-server
-        env:
-          PUID: 1000
-          PGID: 1000
-          USER_NAME: tunnel
-          USER_PASSWORD: tunnel-pass
-          PASSWORD_ACCESS: "true"
-          SUDO_ACCESS: "false"
-        ports:
-          - 2222:2222
-
       # P7：Redis 真实实例（无密码 + requirepass 两例），供 db-core Redis 集成测试。
       # 未设 DEVBELT_DB_TEST_REDIS_* 时测试整体 skip，本地无 Redis 也能过。
       redis:
@@ -179,18 +166,10 @@ jobs:
           DEVBELT_DB_TEST_REDIS_TLS_CA: ${{ github.workspace }}/.ci-certs/ca.crt
         run: pnpm -C packages/db-core test
 
-      # SSH 隧道：sshd service + vscode-ext 集成测试（SshTunnel → RedisClient over localPort）。
-      - name: Wait for sshd
-        run: |
-          for i in $(seq 1 30); do
-            (echo > /dev/tcp/127.0.0.1/2222) 2>/dev/null && break
-            sleep 1
-          done
-
+      # SSH 隧道：进程内 ssh2 Server（支持 direct-tcpip）+ 真实 Redis；验证 SshTunnel。
       - name: Integration tests (vscode-ext SSH tunnel)
         env:
           DEVBELT_DB_TEST_REDIS_URL: redis://127.0.0.1:6379
-          DEVBELT_DB_TEST_REDIS_SSH: '{"host":"127.0.0.1","port":2222,"user":"tunnel","password":"tunnel-pass","targetHost":"redis","targetPort":6379}'
         run: pnpm -C apps/vscode-ext exec vitest run test/integration/redisSshTunnel.test.ts
 
       - name: Integration tests (server)
