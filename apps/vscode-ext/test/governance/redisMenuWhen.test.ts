@@ -24,6 +24,11 @@ describe('Redis 菜单 when 收紧（P7 S2）', () => {
     }
   });
 
+  it('连接表单 dbType 下拉含 Redis 选项（否则 Redis 表单段不可达）', () => {
+    const vue = readFileSync(join(process.cwd(), 'webview/src/views/ConnectionFormView.vue'), 'utf8');
+    expect(vue).toMatch(/<option value="REDIS"/);
+  });
+
   it('Redis 逻辑库节点有打开/刷新/复制菜单', () => {
     for (const cmd of ['devbelt.redis.console', 'devbelt.refreshNode', 'devbelt.copyNodeName']) {
       expect(menus.some((m) => m.command === cmd && m.when?.includes('redisDb.REDIS'))).toBe(true);

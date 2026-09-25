@@ -935,4 +935,16 @@ export const en: MessageCatalog = {
   'wv.redis.zset.add': 'Add',
   'cmd.redis.keyExists': 'Key already exists.',
   'cmd.redis.renameTargetExists': 'Target key already exists.',
+  // ── P7 S4：Redis form ──
+  'wv.form.redisMode': 'Redis mode',
+  'wv.form.redisDb': 'DB index',
+  'wv.form.clusterNodes': 'Cluster nodes',
+  'wv.form.clusterNodesHint': 'host:port, comma separated',
+  'wv.form.sentinelNodes': 'Sentinel nodes',
+  'wv.form.sentinelNodesHint': 'host:port, comma separated',
+  'wv.form.sentinelName': 'Master name',
+  'wv.form.sentinelPassword': 'Sentinel password',
+  'wv.form.keySeparator': 'Key separator',
+  'wv.form.color': 'Color',
+  'wv.form.colorHint': 'e.g. #e15759',
 };

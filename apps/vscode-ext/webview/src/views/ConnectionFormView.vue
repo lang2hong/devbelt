@@ -48,9 +48,19 @@ const defaultForm = {
   clearPassword: false,
   clearSshPassword: false,
   clearSshPassphrase: false,
+  // Redis（P7）
+  redisMode: 'standalone',
+  redisDb: '',
+  clusterNodes: '',
+  sentinelNodes: '',
+  sentinelName: '',
+  sentinelPassword: '',
+  keySeparator: ':',
+  color: '',
+  clearSentinelPassword: false,
 };
 
-const SECRET_KEYS = ['password', 'sshPassword', 'sshPassphrase'] as const;
+const SECRET_KEYS = ['password', 'sshPassword', 'sshPassphrase', 'sentinelPassword'] as const;
 type SecretKey = typeof SECRET_KEYS[number];
 
 function clearFlagKey(key: SecretKey): string {
@@ -61,14 +71,17 @@ const form = reactive({ ...defaultForm });
 const showPassword = ref(false);
 const showSshPassword = ref(false);
 const showSshPassphrase = ref(false);
+const showSentinelPassword = ref(false);
 
 const isSqlite = computed(() => form.dbType === 'SQLITE');
 const isPg = computed(() => form.dbType === 'PG');
+const isRedis = computed(() => form.dbType === 'REDIS');
 
 
 function syncType(): void {
   if (form.dbType === 'PG') form.port = '5432';
   else if (form.dbType === 'MYSQL') form.port = '3306';
+  else if (form.dbType === 'REDIS') form.port = '6379';
   if (isSqlite.value) form.host = '';
 }
 
@@ -153,6 +166,7 @@ function save(): void {
         <option value="MYSQL">MySQL</option>
         <option value="PG">PostgreSQL</option>
         <option value="SQLITE">SQLite</option>
+        <option value="REDIS">Redis</option>
       </select>
     </div>
 
@@ -198,7 +212,7 @@ function save(): void {
       </div>
     </div>
 
-    <div v-if="!isSqlite" class="row">
+    <div v-if="!isSqlite && !isRedis" class="row">
       <div class="field">
         <label>{{ t('wv.form.database') }}</label>
         <input v-model="form.database" :placeholder="t('wv.form.databasePlaceholder')">
@@ -208,6 +222,47 @@ function save(): void {
         <input v-model="form.schema" placeholder="public">
       </div>
     </div>
+
+    <template v-if="isRedis">
+      <div class="row">
+        <div class="field">
+          <label>{{ t('wv.form.redisMode') }}</label>
+          <select v-model="form.redisMode">
+            <option value="standalone">standalone</option>
+            <option value="cluster">cluster</option>
+            <option value="sentinel">sentinel</option>
+          </select>
+        </div>
+        <div v-if="form.redisMode !== 'cluster'" class="field"><label>{{ t('wv.form.redisDb') }}</label><input v-model="form.redisDb" type="number"></div>
+      </div>
+      <div v-if="form.redisMode === 'cluster'" class="field">
+        <label>{{ t('wv.form.clusterNodes') }}</label>
+        <input v-model="form.clusterNodes" :placeholder="t('wv.form.clusterNodesHint')">
+      </div>
+      <template v-if="form.redisMode === 'sentinel'">
+        <div class="field">
+          <label>{{ t('wv.form.sentinelNodes') }}</label>
+          <input v-model="form.sentinelNodes" :placeholder="t('wv.form.sentinelNodesHint')">
+        </div>
+        <div class="row">
+          <div class="field"><label>{{ t('wv.form.sentinelName') }}</label><input v-model="form.sentinelName"></div>
+          <div class="field">
+            <label>{{ t('wv.form.sentinelPassword') }}</label>
+            <div class="pw">
+              <input :type="showSentinelPassword ? 'text' : 'password'" v-model="form.sentinelPassword">
+              <button type="button" class="toggle" @click="showSentinelPassword = !showSentinelPassword">{{ showSentinelPassword ? t('wv.form.hide') : t('wv.form.show') }}</button>
+              <button v-if="editingId" type="button" class="toggle" @click="clearSecret('sentinelPassword')">{{ t('wv.form.clear') }}</button>
+            </div>
+            <p v-if="editingId && form.clearSentinelPassword" class="hint">{{ t('wv.form.willClear') }}</p>
+            <p v-else-if="editingId && !form.sentinelPassword" class="hint">{{ t('wv.form.secretSaved') }}</p>
+          </div>
+        </div>
+      </template>
+      <div class="row">
+        <div class="field"><label>{{ t('wv.form.keySeparator') }}</label><input v-model="form.keySeparator" maxlength="4"></div>
+        <div class="field"><label>{{ t('wv.form.color') }}</label><input v-model="form.color" :placeholder="t('wv.form.colorHint')"></div>
+      </div>
+    </template>
 
     <div v-if="isSqlite" class="field">
       <label>{{ t('wv.form.sqlitePath') }}</label>
@@ -245,7 +300,7 @@ function save(): void {
         </div>
         <div class="field"><label><input v-model="form.readOnly" type="checkbox" style="width:auto"> {{ t('wv.form.readOnly') }}</label></div>
       </div>
-      <div class="field"><label><input v-model="form.useConnectionString" type="checkbox" style="width:auto"> {{ t('wv.form.useConnUrl') }}</label><input v-model="form.connectionUrl" placeholder="mysql://user:password@host:3306/database"></div>
+      <div v-if="!isRedis" class="field"><label><input v-model="form.useConnectionString" type="checkbox" style="width:auto"> {{ t('wv.form.useConnUrl') }}</label><input v-model="form.connectionUrl" placeholder="mysql://user:password@host:3306/database"></div>
       <div class="field"><label><input v-model="form.useSSL" type="checkbox" style="width:auto"> {{ t('wv.form.useSsl') }}</label></div>
       <div class="field"><label>{{ t('wv.form.caCert') }}</label><input v-model="form.caPath"></div>
       <div class="row">

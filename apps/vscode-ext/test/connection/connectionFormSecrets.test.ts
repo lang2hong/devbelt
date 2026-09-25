@@ -6,7 +6,7 @@ vi.mock('vscode', () => ({
 }));
 
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
-import { mergeSecretsFromStored } from '../../src/connection/connectionForm';
+import { decodeConnection, mergeSecretsFromStored } from '../../src/connection/connectionForm';
 
 function conn(overrides: Partial<SavedConnection>): SavedConnection {
   return { id: 'c1', name: 'C', dbType: 'MYSQL' as SavedConnection['dbType'], host: 'h', port: 3306, user: 'u', database: 'd', ...overrides };
@@ -45,5 +45,35 @@ describe('mergeSecretsFromStored', () => {
     const stored = conn({ dbType: 'REDIS' as SavedConnection['dbType'], sentinelPassword: 'sentinel-secret' });
     const merged = mergeSecretsFromStored(conn({ name: 'Renamed' }), stored);
     expect(merged.sentinelPassword).toBe('sentinel-secret');
+  });
+});
+
+/**
+ * 回归：敏感字段的「显式清除」（''）必须在 decode 后存活，否则 db-host sanitize 的
+ * 删除分支收不到，清除静默无效。此前 sshPassword/sshPassphrase/sentinelPassword 用了
+ * `|| undefined` 把 '' 折叠掉（password 未折叠，故只有 password 的清除生效）。
+ */
+describe('decodeConnection 敏感字段三态', () => {
+  const payload = (over: Record<string, unknown>) => ({ dbType: 'REDIS', host: 'h', port: 6379, ...over });
+
+  it("显式清除（''）原样保留", () => {
+    const c = decodeConnection(payload({ password: '', sshPassword: '', sshPassphrase: '', sentinelPassword: '' }));
+    expect(c.password).toBe('');
+    expect(c.sshPassword).toBe('');
+    expect(c.sshPassphrase).toBe('');
+    expect(c.sentinelPassword).toBe('');
+  });
+
+  it('缺省（未提交）为 undefined，不产生误删', () => {
+    const c = decodeConnection(payload({}));
+    expect(c.password).toBeUndefined();
+    expect(c.sshPassword).toBeUndefined();
+    expect(c.sshPassphrase).toBeUndefined();
+    expect(c.sentinelPassword).toBeUndefined();
+  });
+
+  it('有值为原样', () => {
+    const c = decodeConnection(payload({ password: 'p', sshPassword: 's', sshPassphrase: 'k', sentinelPassword: 'sp' }));
+    expect([c.password, c.sshPassword, c.sshPassphrase, c.sentinelPassword]).toEqual(['p', 's', 'k', 'sp']);
   });
 });

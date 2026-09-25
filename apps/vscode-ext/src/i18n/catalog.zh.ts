@@ -913,4 +913,16 @@ export const zh: MessageCatalog = {
   'wv.redis.zset.add': '添加',
   'cmd.redis.keyExists': 'key 已存在。',
   'cmd.redis.renameTargetExists': '目标 key 已存在。',
+  // ── P7 S4：Redis 表单 ──
+  'wv.form.redisMode': 'Redis 模式',
+  'wv.form.redisDb': '库号（DB index）',
+  'wv.form.clusterNodes': 'Cluster 节点',
+  'wv.form.clusterNodesHint': 'host:port，逗号分隔',
+  'wv.form.sentinelNodes': 'Sentinel 节点',
+  'wv.form.sentinelNodesHint': 'host:port，逗号分隔',
+  'wv.form.sentinelName': 'Master 名称',
+  'wv.form.sentinelPassword': 'Sentinel 密码',
+  'wv.form.keySeparator': '键分隔符',
+  'wv.form.color': '颜色',
+  'wv.form.colorHint': '如 #e15759',
 };

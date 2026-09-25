@@ -224,8 +224,8 @@ export function mergeSecretsFromStored(decoded: SavedConnection, stored?: SavedC
   return out as unknown as SavedConnection;
 }
 
-/** 将 webview 表单负载解码为 SavedConnection */
-function decodeConnection(payload: any): SavedConnection {
+/** 将 webview 表单负载解码为 SavedConnection（导出供单测覆盖敏感字段三态） */
+export function decodeConnection(payload: any): SavedConnection {
   return {
     id: payload.id ?? '',
     name: payload.name,
@@ -254,16 +254,18 @@ function decodeConnection(payload: any): SavedConnection {
     sshHost: payload.sshHost || undefined,
     sshPort: payload.sshPort ? Number(payload.sshPort) : undefined,
     sshUser: payload.sshUser || undefined,
-    sshPassword: payload.sshPassword || undefined,
+    // 敏感字段原样透传：'' 表示「显式清除」，不能折叠成 undefined，否则 sanitize 的删除分支收不到。
+    sshPassword: payload.sshPassword,
     sshPrivateKeyPath: payload.sshPrivateKeyPath || undefined,
-    sshPassphrase: payload.sshPassphrase || undefined,
+    sshPassphrase: payload.sshPassphrase,
     // Redis（P7 S2）：ACL 用户名复用 user，密码复用 password；证书路径复用 caPath/clientCertPath/clientKeyPath。
     redisDb: payload.redisDb !== undefined && payload.redisDb !== '' && Number.isFinite(Number(payload.redisDb)) ? Number(payload.redisDb) : undefined,
     keySeparator: payload.keySeparator || undefined,
     redisMode: payload.redisMode || undefined,
     sentinelName: payload.sentinelName || undefined,
-    sentinelPassword: payload.sentinelPassword || undefined,
+    sentinelPassword: payload.sentinelPassword,
     clusterNodes: payload.clusterNodes || undefined,
     sentinelNodes: payload.sentinelNodes || undefined,
+    color: payload.color || undefined,
   };
 }
