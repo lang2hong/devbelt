@@ -444,6 +444,9 @@ db-host 最小改动：
   断言；i18n 键存在/中英一致/占位符；baseWebViewReload 补 elasticsearch mode；webview 组件单测
   （init/message 处理/tab 切换）。
 - 连接泄漏：面板 dispose 后 EsClient 的 Agent socket 全部 destroy。
+- **用户可达入口必须有机械断言**（源自 P7 教训：host 测试全绿但 webview 分支已断——ServerStatus 不可达 /
+  stream 初始 done / 表单 REDIS 选项丢失，三次都是补机械断言才守住）：断言下拉选项存在（引擎/方法/索引等）、
+  协议字段被消费（init/config/message 字段确有渲染或副作用）、分支/tab 可达（含空态与边界）。
 
 ### 手工验证矩阵（实施完回填 pass/fail）
 

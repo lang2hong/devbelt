@@ -503,6 +503,9 @@ db-host 最小改动：
   - Docker 手动验证矩阵：standalone（无密码/密码/ACL/TLS/SSH/只读）、3 节点 cluster（直连/SSH）、
     sentinel（1m+1s）。
 
+> 状态（收口）：**S1–S4 均已交付**。CI 覆盖与已知限制见 §十一；剩余不可自动化发布门禁
+> （表单端到端 UI 走查、状态/CLI/SlowLog UI 路径）见 `docs/剩余任务.md` 台账。
+
 ## 十、安全与隐私
 
 - 密码、SSH 口令、Sentinel 节点密码 **只落 VS Code SecretStorage**，不落 Memento、不下发 webview、
