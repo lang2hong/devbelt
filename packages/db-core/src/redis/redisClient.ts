@@ -138,7 +138,8 @@ export function redactCommandArgs(command: string, args: readonly string[]): str
  */
 export class RedisClient {
   private readonly client: RedisConnectionLike;
-  private readonly onLog?: (entry: RedisCommandLog) => void;
+  /** 命令日志监听者（可多个：审计、面板等）。 */
+  private readonly logListeners = new Set<(entry: RedisCommandLog) => void>();
   /** 只读模式：拦截写命令。 */
   readonly readOnly: boolean;
   private readonly sentinel: boolean;
@@ -148,7 +149,7 @@ export class RedisClient {
 
   constructor(options: RedisClientOptions, factory?: RedisConnectionFactory) {
     this.readOnly = options.readOnly === true;
-    this.onLog = options.onLog;
+    if (options.onLog) this.logListeners.add(options.onLog);
     const maxRetryTimes = options.maxRetryTimes ?? DEFAULT_RETRY_TIMES;
     // 与 ARDM 的上游方法 retryStragety（原拼写如此）一致：times >= maxRetryTimes 停止，退避 200→400。
     const retryStrategy = (times: number) => (times >= maxRetryTimes ? null : Math.min(times * 200, 1000));
@@ -268,6 +269,12 @@ export class RedisClient {
     this.client.on(event, listener);
   }
 
+  /** 订阅命令日志；返回取消订阅函数。 */
+  addLogListener(listener: (entry: RedisCommandLog) => void): () => void {
+    this.logListeners.add(listener);
+    return () => { this.logListeners.delete(listener); };
+  }
+
   isAlive(): boolean {
     return !this.closed && this.client.status === 'ready';
   }
@@ -325,17 +332,20 @@ export class RedisClient {
     ok: boolean,
     err?: unknown,
   ): void {
-    if (!this.onLog) return;
-    try {
-      this.onLog({
-        command,
-        args,
-        durationMs: Date.now() - started,
-        ok,
-        error: ok ? undefined : String(err),
-      });
-    } catch {
-      /* 日志是旁路设施，不阻断命令 */
+    if (!this.logListeners.size) return;
+    const entry: RedisCommandLog = {
+      command,
+      args,
+      durationMs: Date.now() - started,
+      ok,
+      error: ok ? undefined : String(err),
+    };
+    for (const listener of this.logListeners) {
+      try {
+        listener(entry);
+      } catch {
+        /* 日志是旁路设施，不阻断命令 */
+      }
     }
   }
 }

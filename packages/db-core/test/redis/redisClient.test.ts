@@ -309,3 +309,20 @@ describe('RedisClient close() 与状态', () => {
     ]);
   });
 });
+
+describe('RedisClient 命令日志：多监听', () => {
+  it('addLogListener 多监听与退订', async () => {
+    const { client } = make();
+    const a: RedisCommandLog[] = [];
+    const b: RedisCommandLog[] = [];
+    const offA = client.addLogListener((e) => a.push(e));
+    client.addLogListener((e) => b.push(e));
+    await client.sendCommand('GET', ['k']);
+    expect(a).toHaveLength(1);
+    expect(b).toHaveLength(1);
+    offA();
+    await client.sendCommand('GET', ['k']);
+    expect(a).toHaveLength(1);
+    expect(b).toHaveLength(2);
+  });
+});

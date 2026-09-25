@@ -20,6 +20,7 @@ export interface RedisCapabilities {
   keyBrowser: boolean;
   fiveTypes: boolean;
   stream: boolean;
+  commandLog: boolean;
 }
 
 /** 当前已交付能力集合（键树/五类型/cluster/sentinel；Stream viewer 未交付 → false）。 */
@@ -39,4 +40,6 @@ export const REDIS_CAPABILITIES: RedisCapabilities = {
   fiveTypes: true,
   // S4 项 3：Stream viewer/editor
   stream: true,
+  // S4：命令日志面板
+  commandLog: true,
 };

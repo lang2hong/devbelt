@@ -956,4 +956,10 @@ export const zh: MessageCatalog = {
   'wv.redis.stream.maxId': '最大 ID',
   'wv.redis.stream.empty': '暂无条目。',
   'wv.redis.stream.confirm': '确认操作：{detail}',
+  // ── P7 S4：命令日志 ──
+  'wv.redis.tab.commandLog': '命令日志',
+  'wv.redis.commandLog.empty': '暂无命令日志。',
+  'wv.redis.commandLog.command': '命令',
+  'wv.redis.commandLog.cost': '耗时',
+  'wv.redis.commandLog.time': '时间',
 };

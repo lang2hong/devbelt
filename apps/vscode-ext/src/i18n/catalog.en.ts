@@ -978,4 +978,10 @@ export const en: MessageCatalog = {
   'wv.redis.stream.maxId': 'Max ID',
   'wv.redis.stream.empty': 'No entries.',
   'wv.redis.stream.confirm': 'Confirm operation: {detail}',
+  // ── P7 S4：命令日志 ──
+  'wv.redis.tab.commandLog': 'Command Log',
+  'wv.redis.commandLog.empty': 'No commands logged yet.',
+  'wv.redis.commandLog.command': 'Command',
+  'wv.redis.commandLog.cost': 'Cost',
+  'wv.redis.commandLog.time': 'Time',
 };

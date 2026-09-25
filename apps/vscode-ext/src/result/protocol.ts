@@ -137,8 +137,16 @@ export interface RedisSlowlogEntry {
   clientName: string;
 }
 
+/** 命令日志条目（host → webview，逐条下发）。 */
+export interface RedisCommandLogEntry {
+  command: string;
+  args: string[];
+  durationMs: number;
+  ok: boolean;
+  error: string | null;
+}
 /** Redis 面板标签页。 */
-export type RedisTab = 'status' | 'console' | 'slowlog';
+export type RedisTab = 'status' | 'console' | 'slowlog' | 'commandLog';
 
 /** Extension Host → webview。 */
 export type RedisDownMessage =
@@ -152,6 +160,7 @@ export type RedisDownMessage =
   | { type: 'value'; key: string; keyType: string; ttl: number; tooLarge: boolean; size: number | null; data: RedisValueData | null }
   | { type: 'keyAction'; action: string; ok: boolean; error: string | null }
   | { type: 'confirmOpRequired'; kind: string; detail: string }
+  | { type: 'commandLog'; entry: RedisCommandLogEntry }
   | { type: 'streamGroupDetail'; key: string; group: string; consumers: Record<string, string>[]; pending: { count: number; minId: string; maxId: string; consumers: [string, string][] } }
   | { type: 'streamRangeResult'; key: string; entries: RedisStreamEntry[]; done: boolean }
   | { type: 'commandResult'; id: string; command: string; ok: boolean; result: string; costMs: number; error: string | null }

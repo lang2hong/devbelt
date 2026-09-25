@@ -24,7 +24,9 @@ const info = ref('');
 const entries = ref<SlowlogEntry[]>([]);
 const results = ref<CommandResult[]>([]);
 const pendingConfirm = ref<{ id: string; command: string } | null>(null);
-const tab = ref<'console' | 'slowlog'>('console');
+const tab = ref<'console' | 'slowlog' | 'commandLog'>('console');
+interface CommandLogEntry { command: string; args: string[]; durationMs: number; ok: boolean; error: string | null; at: number }
+const commandLog = ref<CommandLogEntry[]>([]);
 
 // 键树
 const emptyFolders: RedisKeyFolder = { name: '', path: '', count: 0, folders: [], keys: [] };
@@ -97,7 +99,26 @@ function confirmDanger(id: string, accept: boolean): void {
   post({ type: 'confirmDanger', id, accept });
 }
 
+/** 快捷键：Ctrl/Cmd+N 新建 key；Enter/Esc 操作模态（确认提交流程的键盘路径）。 */
+function onKeydown(e: KeyboardEvent): void {
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'n' || e.key === 'N')) {
+    if (hasDb.value && !readOnly.value) { e.preventDefault(); showNewKey.value = true; }
+    return;
+  }
+  if (e.key === 'Escape') {
+    if (pendingOpDetail.value !== null) { confirmOp(false); return; }
+    if (pendingDelete.value) { pendingDelete.value = null; return; }
+    if (showNewKey.value) { showNewKey.value = false; }
+    return;
+  }
+  if (e.key === 'Enter') {
+    if (pendingOpDetail.value !== null) { confirmOp(true); return; }
+    if (pendingDelete.value) { confirmDelete(); }
+  }
+}
+
 onMounted(() => {
+  window.addEventListener('keydown', onKeydown);
   post({ type: 'ready' });
   off = onMessage((msg: any) => {
     if (msg.type === 'config') {
@@ -137,6 +158,9 @@ onMounted(() => {
         value.value = { ...value.value, data: { ...value.value.data, entries: [...value.value.data.entries, ...(msg.entries ?? [])] } };
         streamDone.value = !!msg.done;
       }
+    } else if (msg.type === 'commandLog') {
+      const e = msg.entry ?? {};
+      commandLog.value = [...commandLog.value, { command: String(e.command ?? ''), args: e.args ?? [], durationMs: Number(e.durationMs ?? 0), ok: !!e.ok, error: e.error ?? null, at: Date.now() }].slice(-500);
     } else if (msg.type === 'confirmOpRequired') {
       pendingOpDetail.value = String(msg.detail ?? '');
     } else if (msg.type === 'error') {
@@ -144,7 +168,7 @@ onMounted(() => {
     }
   });
 });
-onUnmounted(() => { off?.(); });
+onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); });
 </script>
 
 <template>
@@ -219,6 +243,7 @@ onUnmounted(() => { off?.(); });
           <nav class="tabs">
             <button :class="{ active: tab === 'console' }" @click="tab = 'console'">{{ t('wv.redis.tab.console') }}</button>
             <button :class="{ active: tab === 'slowlog' }" @click="tab = 'slowlog'">{{ t('wv.redis.tab.slowlog') }}</button>
+            <button :class="{ active: tab === 'commandLog' }" @click="tab = 'commandLog'">{{ t('wv.redis.tab.commandLog') }}</button>
           </nav>
           <CliConsole
             v-if="tab === 'console'"
@@ -229,7 +254,24 @@ onUnmounted(() => { off?.(); });
             @run="run"
             @confirm="confirmDanger"
           />
-          <SlowLog v-else :entries="entries" @refresh="post({ type: 'refreshSlowlog' })" />
+          <SlowLog v-else-if="tab === 'slowlog'" :entries="entries" @refresh="post({ type: 'refreshSlowlog' })" />
+          <div v-else class="cmdlog">
+            <div v-if="!commandLog.length" class="empty">{{ t('wv.redis.commandLog.empty') }}</div>
+            <table v-else>
+              <thead><tr>
+                <th>{{ t('wv.redis.commandLog.time') }}</th>
+                <th>{{ t('wv.redis.commandLog.command') }}</th>
+                <th>{{ t('wv.redis.commandLog.cost') }}</th>
+              </tr></thead>
+              <tbody>
+                <tr v-for="(e, i) in commandLog" :key="i" :class="{ err: !e.ok }">
+                  <td>{{ new Date(e.at).toLocaleTimeString() }}</td>
+                  <td class="mono">{{ e.command }} {{ e.args.join(' ') }}</td>
+                  <td>{{ t('wv.redis.console.duration', { ms: e.durationMs }) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
     </div>
@@ -261,6 +303,12 @@ onUnmounted(() => { off?.(); });
 </template>
 
 <style scoped>
+.cmdlog { flex: 1; overflow: auto; font-size: 12px; }
+.cmdlog table { width: 100%; border-collapse: collapse; }
+.cmdlog th, .cmdlog td { text-align: left; padding: 2px 6px; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.12)); }
+.cmdlog .mono { font-family: var(--vscode-editor-font-family, monospace); word-break: break-all; }
+.cmdlog tr.err td { color: var(--vscode-errorForeground); }
+.cmdlog .empty { color: var(--vscode-descriptionForeground); padding: 12px; text-align: center; }
 .redis-panel { display: flex; flex-direction: column; height: 100vh; padding: 8px 10px; box-sizing: border-box; font-size: 12px; position: relative; }
 .header { display: flex; gap: 8px; align-items: center; }
 .conn { font-weight: 600; }

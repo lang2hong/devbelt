@@ -3,9 +3,9 @@ import {
   isDangerousCommand, isWriteCommand, redactCommandArgs, splitRedisArgs,
   redisType, redisScan, redisSelect, redisGet, redisStrlen, redisSet, redisAppend,
   redisUnlink, redisExists, redisRename, redisTtl, redisExpire, redisPersist, redisMemoryUsage,
-  redisHGetAll, redisHSet, redisHDel, redisHLen,
+  redisHScan, redisHSet, redisHDel, redisHLen,
   redisLRange, redisLLen, redisLPush, redisRPush, redisLSet, redisLRem, redisLTrim, redisLPop, redisRPop,
-  redisSMembers, redisSCard, redisSAdd, redisSRem,
+  redisSScan, redisSCard, redisSAdd, redisSRem,
   redisZRange, redisZCard, redisZAdd, redisZRem, allCommandNames, redisScanOnNode,
   redisXRange, redisXRevRange, redisXAdd, redisXDel, redisXTrimMaxlen, redisXLen,
   redisXInfoGroups, redisXInfoConsumers, redisXGroupCreate, redisXGroupDestroy, redisXGroupDelConsumer,
@@ -27,6 +27,8 @@ const LARGE_KEY_BYTES = 1024 * 1024;
 const DEFAULT_SCAN_COUNT = 200;
 /** Stream 单页条目数。 */
 const STREAM_PAGE = 100;
+/** hash/set 单页条目数（大集合分页兜底，避免全量 HGETALL/SMEMBERS）。 */
+const HASH_SET_PAGE = 200;
 
 /** Redis 面板：DB 键树 + 值查看/编辑 + CLI/SlowLog 三栏（P7 S2/S3）。 */
 export class RedisView extends BaseWebView {
@@ -44,6 +46,8 @@ export class RedisView extends BaseWebView {
   private opChain: Promise<unknown> = Promise.resolve();
   /** 服务器状态视图（无 DB 绑定）：不发键树，只推 INFO/SlowLog。 */
   private readonly statusOnly: boolean;
+  /** 命令日志订阅（会话 client 级；首次取会话时挂上）。 */
+  private logUnsub?: () => void;
 
   private constructor(
     private readonly conn: SavedConnection,
@@ -122,6 +126,8 @@ export class RedisView extends BaseWebView {
 
   protected onDispose(): void {
     super.onDispose();
+    this.logUnsub?.();
+    this.logUnsub = undefined;
     if (RedisView.current === this) RedisView.current = undefined;
     this.manager.release(this.conn.id);
   }
@@ -144,6 +150,15 @@ export class RedisView extends BaseWebView {
     if (!session.client.isCluster && target !== session.db) {
       await redisSelect(session.client, target);
       session.db = target;
+    }
+    // 首次取会话时订阅命令日志（所有命令，含非 CLI 路径），逐条下发给 CommandLog 面板。
+    if (!this.logUnsub && typeof session.client.addLogListener === 'function') {
+      this.logUnsub = session.client.addLogListener((entry) => {
+        this.post({
+          type: 'commandLog',
+          entry: { command: entry.command, args: entry.args, durationMs: entry.durationMs, ok: entry.ok, error: entry.error ?? null },
+        });
+      });
     }
     return session;
   }
@@ -256,9 +271,16 @@ export class RedisView extends BaseWebView {
   private async loadValue(c: RedisCommandSource, key: string, keyType: string): Promise<RedisValueData | null> {
     switch (keyType) {
       case 'string': return { kind: 'string', text: await redisGet(c, key) };
-      case 'hash': return { kind: 'hash', entries: await redisHGetAll(c, key), len: await redisHLen(c, key) };
+      case 'hash': {
+        // 分页兜底：MEMORY USAGE 不可用/大 key 时也不全量 HGETALL。
+        const page = await redisHScan(c, key, 0, { count: HASH_SET_PAGE });
+        return { kind: 'hash', entries: page.entries, len: await redisHLen(c, key) };
+      }
       case 'list': return { kind: 'list', items: await redisLRange(c, key, 0, 199), len: await redisLLen(c, key) };
-      case 'set': return { kind: 'set', members: await redisSMembers(c, key), card: await redisSCard(c, key) };
+      case 'set': {
+        const page = await redisSScan(c, key, 0, { count: HASH_SET_PAGE });
+        return { kind: 'set', members: page.keys, card: await redisSCard(c, key) };
+      }
       case 'zset': return { kind: 'zset', items: await redisZRange(c, key, 0, 199), card: await redisZCard(c, key) };
       case 'stream': return {
         kind: 'stream',

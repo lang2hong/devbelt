@@ -468,3 +468,80 @@ describe('RedisView S4 Stream 处理器', () => {
     expect(r.done).toBe(true);
   });
 });
+
+describe('RedisView S4 大集合分页兜底（HSCAN/SSCAN）', () => {
+  async function selectAndCapture(handler: Send): Promise<{ posts: any[]; calls: string[] }> {
+    const calls: string[] = [];
+    const wrapped: Send = async (n, a) => { calls.push(n); return handler(n, a); };
+    const { view } = makeView(wrapped, 0);
+    await view.handleMessage({ type: 'ready' });
+    await view.handleMessage({ type: 'ready' });
+    (view.post as any).mockClear();
+    calls.length = 0;
+    await view.handleMessage({ type: 'selectKey', key: 'big' });
+    return { posts: posts(view), calls };
+  }
+
+  it('hash：用 HSCAN 分页，不用 HGETALL', async () => {
+    const h: Send = async (n) => {
+      if (n === 'TYPE') return 'hash';
+      if (n === 'TTL') return -1;
+      if (n === 'MEMORY') return null; // 不可用也不影响（不再全量拉）
+      if (n === 'HSCAN') return ['0', ['f', 'v']];
+      if (n === 'HLEN') return 1;
+      if (n === 'SCAN') return ['0', []];
+      if (n === 'INFO') return '';
+      if (n === 'SLOWLOG') return [];
+      return 'OK';
+    };
+    const { posts: ps, calls } = await selectAndCapture(h);
+    const v = ps.find((m) => m.type === 'value');
+    expect(v.data).toEqual({ kind: 'hash', entries: [['f', 'v']], len: 1 });
+    expect(calls).toContain('HSCAN');
+    expect(calls).not.toContain('HGETALL');
+  });
+
+  it('set：用 SSCAN 分页，不用 SMEMBERS', async () => {
+    const h: Send = async (n) => {
+      if (n === 'TYPE') return 'set';
+      if (n === 'TTL') return -1;
+      if (n === 'MEMORY') return null;
+      if (n === 'SSCAN') return ['0', ['m1', 'm2']];
+      if (n === 'SCARD') return 2;
+      if (n === 'SCAN') return ['0', []];
+      if (n === 'INFO') return '';
+      if (n === 'SLOWLOG') return [];
+      return 'OK';
+    };
+    const { posts: ps, calls } = await selectAndCapture(h);
+    const v = ps.find((m) => m.type === 'value');
+    expect(v.data).toEqual({ kind: 'set', members: ['m1', 'm2'], card: 2 });
+    expect(calls).toContain('SSCAN');
+    expect(calls).not.toContain('SMEMBERS');
+  });
+});
+
+describe('RedisView S4 命令日志订阅', () => {
+  it('订阅 client 命令日志并逐条下发 commandLog', async () => {
+    let listener: ((e: any) => void) | null = null;
+    const client: any = {
+      isCluster: false, mode: 'standalone', db: 0,
+      sendCommand: async () => 'OK', info: async () => '',
+      addLogListener: (l: (e: any) => void) => { listener = l; return () => { listener = null; }; },
+    };
+    const manager: any = {
+      retain: vi.fn(), release: vi.fn(),
+      connect: async () => ({ kind: 'redis', client, db: 0, mode: 'standalone', readOnly: false, isAlive: () => true, close: () => {} }),
+    };
+    RedisView.open(conn, manager, 'console');
+    const view: any = (RedisView as any).current;
+    await view.handleMessage({ type: 'ready' });
+    await view.handleMessage({ type: 'ready' });
+    expect(listener).toBeTruthy();
+
+    (view.post as any).mockClear();
+    listener!({ command: 'SET', args: ['k', 'v'], durationMs: 3, ok: true, error: undefined });
+    const m = (view.post as any).mock.calls.map((c: any[]) => c[0]).find((x: any) => x.type === 'commandLog');
+    expect(m.entry).toEqual({ command: 'SET', args: ['k', 'v'], durationMs: 3, ok: true, error: null });
+  });
+});
