@@ -106,17 +106,6 @@ jobs:
           --health-timeout=5s
           --health-retries=20
 
-      redis-auth:
-        image: redis:7
-        ports:
-          - 6380:6379
-        options: >-
-          --requirepass ci-redis-pass
-          --health-cmd="redis-cli -a ci-redis-pass ping"
-          --health-interval=5s
-          --health-timeout=5s
-          --health-retries=20
-
     steps:
       - uses: actions/checkout@v5
 
@@ -137,6 +126,16 @@ jobs:
 
       # 两个 URL 就是这些测试的门禁开关（未设置则 skipIf 整体跳过）。
       # 密码里没有特殊字符，但格式上仍按测试要求做百分号编码约定。
+      # requirepass 实例不能用 services.options 传（`--requirepass` 会被当作 docker create
+      # 标志，exit 125）——它在 docker create 里没有 command 位。改为 step 里 docker run。
+      - name: Start Redis (requirepass)
+        run: |
+          docker run -d --name redis-auth -p 6380:6379 redis:7 redis-server --requirepass ci-redis-pass
+          for i in $(seq 1 30); do
+            docker exec redis-auth redis-cli -a ci-redis-pass ping 2>/dev/null | grep -q PONG && break
+            sleep 1
+          done
+
       - name: Integration tests (db-core)
         env:
           DEVBELT_DB_TEST_MYSQL_URL: mysql://root:ci-root-pass@127.0.0.1:3306
