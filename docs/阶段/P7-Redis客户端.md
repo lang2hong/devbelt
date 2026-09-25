@@ -528,10 +528,18 @@ db-host 最小改动：
   - SSH：`apps/vscode-ext/test/integration/redisSshTunnel.test.ts` 用**进程内 ssh2 `Server`**
     （password + direct-tcpip）端到端验证 `SshTunnel`（host-key gate → forwardOut → 回收）+ 真实 Redis。
     注：这是 SshTunnel 客户端全链路，**非 OpenSSH 互操作**（CI sshd 镜像默认禁 TCP 转发，故不走外部 sshd）。
-- **Cluster/Sentinel 暂无代码**，其真实矩阵随 S4 的 Docker 多节点 job 接入。状态/CLI/FLUSHALL 确认/
-  SlowLog 的 UI 路径仍属手工走查。
-  - 已执行：CI run `36089800559`（standalone/密码/只读，14 例）、`36110487818`（+TLS，16 例）、
-    `36113138072`（+SSH，integration 4m39s）全绿。
+- Cluster over SSH（**硬门禁**）：`redisTopologyOverSsh.test.ts` 经进程内 ssh2 `Server` 转发到 CI 起的
+    3 节点 cluster（host network），验证 `setupClusterOverSsh` 的 natMap 跨 slot 路由。CI 在 `--cluster create`
+    后轮询三节点 `cluster_state:ok` + 16384 slots 收敛；用例内有界等待 `cluster_state:ok`、逐 master PING
+    探活，并对 SET/GET/DEL 做 MOVED/ASK/CLUSTERDOWN 有界重试（防启动抖动）。
+  - Sentinel over SSH：**best-effort**（`continue-on-error`）。已知限制：SSH 路径为 standalone 连发现到的
+    master，不自动重发现。
+  - 状态/CLI/FLUSHALL 确认/SlowLog 的 UI 路径仍属手工走查。
+  - 已执行：`36089800559`（standalone/密码/只读，14 例）、`36110487818`（+TLS，16 例）、
+    `36113138072`（+SSH）全绿；S4 首次真机 `36148438669` 中 db-core 集成全绿、cluster-over-SSH 因环境
+    收敛抖动偶发 `Too many Cluster redirections`（已定位非代码回归：该用例在 `c27cb67`/`e348edf` 均通过，
+    且本批提交未触及路由）；加固后 `36150004849` 全 job 绿（cluster 硬门禁 + sentinel best-effort +
+    SSH tunnel + server）。
 - db-core：RedisClient standalone 单测（ping/info/scan/CRUD/hash/list/set/zset/TTL/sendCommand
   切面只读拦截/命令日志事件/重试策略）；splitargs 单测；命令表分类单测。
 - vscode-ext：commandRegistration 测试补 Redis 命令声明↔注册一致性；mechanicalGates 测试补
