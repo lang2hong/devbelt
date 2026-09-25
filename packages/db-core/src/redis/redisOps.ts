@@ -14,6 +14,11 @@ export interface RedisCommandSource {
   sendCommand(name: string, args?: (string | number)[]): Promise<unknown>;
 }
 
+/** 集群节点执行单元（ioredis Cluster 的各 master）。 */
+export interface RedisNodeSource {
+  call(command: string, ...args: (string | number)[]): Promise<unknown>;
+}
+
 export interface RedisScanResult {
   cursor: string;
   keys: string[];
@@ -298,4 +303,104 @@ export async function redisZRem(src: RedisCommandSource, key: string, members: s
 
 export async function redisZIncrBy(src: RedisCommandSource, key: string, increment: string | number, member: string): Promise<string> {
   return asString(await src.sendCommand('ZINCRBY', [key, String(increment), member]));
+}
+
+// ────────────────────────── 集群：按节点 ops（S4） ──────────────────────────
+// Cluster 无 SELECT，且 SCAN/INFO/SLOWLOG/DBSIZE 需逐 master 执行、主机侧合并游标。
+
+export async function redisScanOnNode(node: RedisNodeSource, cursor: string | number, opts: RedisScanOptions = {}): Promise<RedisScanResult> {
+  const args: (string | number)[] = [String(cursor)];
+  if (opts.match) args.push('MATCH', opts.match);
+  if (opts.count) args.push('COUNT', opts.count);
+  const reply = await node.call('SCAN', ...args);
+  if (!Array.isArray(reply)) return { cursor: '0', keys: [] };
+  return { cursor: asString(reply[0]), keys: asStringArray(reply[1]) };
+}
+
+export async function redisKeyspaceOnNode(node: RedisNodeSource): Promise<RedisDbStat[]> {
+  return parseKeyspace(asString(await node.call('INFO', 'keyspace')));
+}
+
+export async function redisDbsizeOnNode(node: RedisNodeSource): Promise<number> {
+  return asNumber(await node.call('DBSIZE'));
+}
+
+export async function redisSlowlogOnNode(node: RedisNodeSource, count = 128): Promise<unknown> {
+  return node.call('SLOWLOG', 'GET', count);
+}
+
+// ────────────────────────── Stream（S4） ──────────────────────────
+
+export interface RedisStreamEntry {
+  id: string;
+  fields: [string, string][];
+}
+
+/** XRANGE/XREVRANGE 回复归一化：`[[id,[f,v,...]],…]` → `{id, fields}`。 */
+export function parseStreamEntries(reply: unknown): RedisStreamEntry[] {
+  if (!Array.isArray(reply)) return [];
+  return reply
+    .filter((e): e is unknown[] => Array.isArray(e) && e.length >= 2)
+    .map((e) => ({ id: asString(e[0]), fields: toPairs(e[1]) }));
+}
+
+export async function redisXRange(src: RedisCommandSource, key: string, start = '-', end = '+', count?: number): Promise<RedisStreamEntry[]> {
+  const args: (string | number)[] = [key, start, end];
+  if (count) args.push('COUNT', count);
+  return parseStreamEntries(await src.sendCommand('XRANGE', args));
+}
+
+export async function redisXRevRange(src: RedisCommandSource, key: string, end = '+', start = '-', count?: number): Promise<RedisStreamEntry[]> {
+  const args: (string | number)[] = [key, end, start];
+  if (count) args.push('COUNT', count);
+  return parseStreamEntries(await src.sendCommand('XREVRANGE', args));
+}
+
+export async function redisXAdd(src: RedisCommandSource, key: string, fields: [string, string][], id = '*'): Promise<string> {
+  const args: (string | number)[] = [key, id];
+  for (const [f, v] of fields) args.push(f, v);
+  return asString(await src.sendCommand('XADD', args));
+}
+
+export async function redisXDel(src: RedisCommandSource, key: string, ids: string[]): Promise<number> {
+  if (!ids.length) return 0;
+  return asNumber(await src.sendCommand('XDEL', [key, ...ids]));
+}
+
+export async function redisXTrimMaxlen(src: RedisCommandSource, key: string, maxlen: number): Promise<number> {
+  return asNumber(await src.sendCommand('XTRIM', [key, 'MAXLEN', maxlen]));
+}
+
+export async function redisXLen(src: RedisCommandSource, key: string): Promise<number> {
+  return asNumber(await src.sendCommand('XLEN', [key]));
+}
+
+/** XINFO 类的扁平 [k,v,…] 回复 → 对象数组。 */
+export function parseInfoEntries(reply: unknown): Record<string, string>[] {
+  if (!Array.isArray(reply)) return [];
+  return reply
+    .filter((e): e is unknown[] => Array.isArray(e))
+    .map((e) => Object.fromEntries(toPairs(e)));
+}
+
+export async function redisXInfoGroups(src: RedisCommandSource, key: string): Promise<Record<string, string>[]> {
+  return parseInfoEntries(await src.sendCommand('XINFO', ['GROUPS', key]));
+}
+
+export async function redisXInfoConsumers(src: RedisCommandSource, key: string, group: string): Promise<Record<string, string>[]> {
+  return parseInfoEntries(await src.sendCommand('XINFO', ['CONSUMERS', key, group]));
+}
+
+export async function redisXGroupCreate(src: RedisCommandSource, key: string, group: string, id = '$', mkstream = true): Promise<void> {
+  const args: (string | number)[] = [key, group, id];
+  if (mkstream) args.push('MKSTREAM');
+  await src.sendCommand('XGROUP', ['CREATE', ...args]);
+}
+
+export async function redisXGroupDestroy(src: RedisCommandSource, key: string, group: string): Promise<number> {
+  return asNumber(await src.sendCommand('XGROUP', ['DESTROY', key, group]));
+}
+
+export async function redisXGroupDelConsumer(src: RedisCommandSource, key: string, group: string, consumer: string): Promise<number> {
+  return asNumber(await src.sendCommand('XGROUP', ['DELCONSUMER', key, group, consumer]));
 }

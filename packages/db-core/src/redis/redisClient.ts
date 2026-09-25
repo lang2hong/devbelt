@@ -6,7 +6,8 @@
  *  - sendCommand 切面：只读拦截（writeCMD + admin 写 denylist）+ 命令日志。
  * 有意不复制 ARDM 的 TLS 绕过（见 redisTls.ts）。
  */
-import Redis, { type RedisOptions } from 'ioredis';
+import Redis, { Cluster, type RedisOptions } from 'ioredis';
+import type { RedisCommandSource } from './redisOps.js';
 import { isWriteCommand } from './redisCommands.js';
 import type { RedisTlsOptions } from './redisTls.js';
 
@@ -28,8 +29,9 @@ export interface RedisCommandLog {
 }
 
 export interface RedisClientOptions {
-  host: string;
-  port: number;
+  /** standalone 主机（cluster/sentinel 模式可省略）。 */
+  host?: string;
+  port?: number;
   username?: string;
   password?: string;
   db?: number;
@@ -41,12 +43,42 @@ export interface RedisClientOptions {
   maxRetryTimes?: number;
   /** 命令日志回调（审计/控制台）。 */
   onLog?: (entry: RedisCommandLog) => void;
+  /** Sentinel 模式：sentinel 列表 + master 名 + sentinel 认证（ioredis 原生，自动故障切换）。 */
+  sentinels?: { host: string; port: number }[];
+  sentinelName?: string;
+  sentinelPassword?: string;
+  /** Cluster 模式：起始节点 + 可选 SSH NAT map + slots 刷新超时。 */
+  cluster?: {
+    nodes: { host: string; port: number }[];
+    natMap?: Record<string, { host: string; port: number }>;
+    slotsRefreshTimeout?: number;
+  };
+}
+
+/** 集群节点执行单元（按 key 路由或直接投递）。 */
+export interface RedisNodeLike {
+  call(command: string, ...args: (string | number)[]): Promise<unknown>;
+}
+
+/** RedisClient 的公开表面（供 redisOps 的 cluster-aware 分支使用）。 */
+export interface RedisClientLike extends RedisCommandSource {
+  readonly mode: 'standalone' | 'cluster' | 'sentinel';
+  readonly isCluster: boolean;
+  ping(): Promise<string>;
+  info(section?: string): Promise<string>;
+  isAlive(): boolean;
+  close(): Promise<void>;
+  nodes(): RedisNodeLike[];
+  on(event: string, listener: (...args: unknown[]) => void): void;
+  readonly status: string;
 }
 
 /** RedisClient 依赖的最小 ioredis 形状（便于单测注入假实现）。 */
 export interface RedisConnectionLike {
-  sendCommand(command: { name: string; args: string[] }, stream?: unknown): Promise<unknown>;
+  sendCommand(command: { name: string; args: string[] }, stream?: unknown, node?: unknown): Promise<unknown>;
   call(command: string, ...args: (string | number)[]): Promise<unknown>;
+  /** 仅 ioredis Cluster 有：按角色取节点。 */
+  nodes?(role?: string): unknown[];
   ping(): Promise<string>;
   info(section?: string): Promise<string>;
   quit(): Promise<unknown>;
@@ -109,29 +141,55 @@ export class RedisClient {
   private readonly onLog?: (entry: RedisCommandLog) => void;
   /** 只读模式：拦截写命令。 */
   readonly readOnly: boolean;
+  private readonly sentinel: boolean;
+  /** 是否 Redis Cluster。 */
+  readonly isCluster: boolean;
   private closed = false;
 
   constructor(options: RedisClientOptions, factory?: RedisConnectionFactory) {
     this.readOnly = options.readOnly === true;
     this.onLog = options.onLog;
     const maxRetryTimes = options.maxRetryTimes ?? DEFAULT_RETRY_TIMES;
-    const redisOptions: RedisOptions = {
-      host: options.host,
-      port: options.port,
+    // 与 ARDM 的上游方法 retryStragety（原拼写如此）一致：times >= maxRetryTimes 停止，退避 200→400。
+    const retryStrategy = (times: number) => (times >= maxRetryTimes ? null : Math.min(times * 200, 1000));
+    const common: RedisOptions = {
       username: options.username,
       password: options.password,
-      db: options.db,
       tls: options.tls,
       stringNumbers: true,
       enableReadyCheck: false,
       connectTimeout: options.connectTimeout ?? 30_000,
       family: 0,
-      // 与 ARDM 的上游方法 retryStragety（原拼写如此）一致：times >= maxRetryTimes 停止，退避 200→400。
-      retryStrategy: (times: number) => (times >= maxRetryTimes ? null : Math.min(times * 200, 1000)),
+      retryStrategy,
     };
-    const create: RedisConnectionFactory =
-      factory ?? ((o) => new Redis(o) as unknown as RedisConnectionLike);
-    this.client = create(redisOptions);
+    this.isCluster = !!options.cluster?.nodes?.length;
+    this.sentinel = !this.isCluster && !!options.sentinels?.length;
+
+    if (factory) {
+      this.client = factory(common);
+    } else if (this.isCluster) {
+      // Cluster 下无 SELECT：不传 db。
+      this.client = new Cluster(options.cluster!.nodes, {
+        natMap: options.cluster!.natMap,
+        slotsRefreshTimeout: options.cluster!.slotsRefreshTimeout ?? 2000,
+        redisOptions: common,
+      }) as unknown as RedisConnectionLike;
+    } else if (this.sentinel) {
+      this.client = new Redis({
+        ...common,
+        db: options.db,
+        sentinels: options.sentinels,
+        name: options.sentinelName,
+        sentinelPassword: options.sentinelPassword,
+      }) as unknown as RedisConnectionLike;
+    } else {
+      this.client = new Redis({
+        ...common,
+        host: options.host,
+        port: options.port,
+        db: options.db,
+      }) as unknown as RedisConnectionLike;
+    }
     // ioredis 的连接/命令错误会以 'error' 事件发出；EventEmitter 的 'error' 若无监听会抛出
     // 未捕获异常使宿主崩溃。连接失败已通过 connect()/命令 rejection 反馈调用方，这里兜底监听。
     this.client.on('error', () => { /* 由 connect()/命令路径反馈 */ });
@@ -178,6 +236,33 @@ export class RedisClient {
   /** 通用命名命令（控制台路径）。 */
   async sendCommand(name: string, args: (string | number)[] = []): Promise<unknown> {
     return this.run(name, args);
+  }
+
+  /** 连接模式。 */
+  get mode(): 'standalone' | 'cluster' | 'sentinel' {
+    if (this.isCluster) return 'cluster';
+    return this.sentinel ? 'sentinel' : 'standalone';
+  }
+
+  /** 通用命名命令（集群按 key 路由）。 */
+  async call(command: string, ...args: (string | number)[]): Promise<unknown> {
+    return this.run(command, args);
+  }
+
+  /**
+   * 节点执行单元：cluster 返回各 master（供按节点 SCAN/INFO/SLOWLOG/DBSIZE 聚合）；
+   * standalone/sentinel 返回自身。
+   */
+  nodes(): RedisNodeLike[] {
+    const nodeFn = (this.client as { nodes?: (role?: string) => unknown[] }).nodes;
+    if (!this.isCluster || typeof nodeFn !== 'function') return [this];
+    const masters = nodeFn.call(this.client, 'master') as { call(c: string, ...a: unknown[]): Promise<unknown> }[];
+    return masters.map((n) => ({ call: (c: string, ...a: (string | number)[]) => n.call(c, ...a) }));
+  }
+
+  /** 订阅底层事件（如 sentinel 故障切换、error）。 */
+  on(event: string, listener: (...args: unknown[]) => void): void {
+    this.client.on(event, listener);
   }
 
   isAlive(): boolean {
