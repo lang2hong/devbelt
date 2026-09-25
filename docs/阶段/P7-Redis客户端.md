@@ -522,6 +522,7 @@ db-host 最小改动：
   service container，跑 `packages/db-core/test/integration/redisReal.test.ts`——覆盖真实回包形状
   （SCAN 游标/`INFO keyspace`/`SELECT`/`SLOWLOG`/`HGETALL`/`ZRANGE WITHSCORES`）、五类型往返、
   只读拦截、密码认证。**TLS/SSH/Cluster/Sentinel 仍属手工矩阵**（见下）。
+  - 首次执行：CI run `36089800559` 绿（integration 4m26s；`redisReal.test.ts` 14 例全过）。
 - db-core：RedisClient standalone 单测（ping/info/scan/CRUD/hash/list/set/zset/TTL/sendCommand
   切面只读拦截/命令日志事件/重试策略）；splitargs 单测；命令表分类单测。
 - vscode-ext：commandRegistration 测试补 Redis 命令声明↔注册一致性；mechanicalGates 测试补
