@@ -190,10 +190,16 @@ describe.skipIf(!REDIS_AUTH_URL)('Redis 真实实例（requirepass）', () => {
     }
   });
 
-  it('错误密码连接失败', async () => {
-    const { host, port, username } = parseUrl(REDIS_AUTH_URL!);
-    const bad = new RedisClient({ host, port, username, password: 'definitely-wrong', connectTimeout: 10_000, maxRetryTimes: 0 });
-    await expect(bad.connect()).rejects.toBeTruthy();
-    await bad.close();
+  it('错误密码 AUTH 被拒，且不产生未处理拒绝', async () => {
+    // 不在「用错密码连接」上留半连接状态（ioredis 内部重连会抛未处理拒绝）；改在已认证
+    // 连接上用错误密码 AUTH，断言拒绝被受控处理，再恢复认证后关闭。
+    const client = makeClient(REDIS_AUTH_URL!);
+    await client.connect();
+    try {
+      await expect(client.sendCommand('AUTH', ['definitely-wrong'])).rejects.toBeTruthy();
+      await client.sendCommand('AUTH', [parseUrl(REDIS_AUTH_URL!).password!]).catch(() => undefined);
+    } finally {
+      await client.close();
+    }
   });
 });

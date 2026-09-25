@@ -132,6 +132,9 @@ export class RedisClient {
     const create: RedisConnectionFactory =
       factory ?? ((o) => new Redis(o) as unknown as RedisConnectionLike);
     this.client = create(redisOptions);
+    // ioredis 的连接/命令错误会以 'error' 事件发出；EventEmitter 的 'error' 若无监听会抛出
+    // 未捕获异常使宿主崩溃。连接失败已通过 connect()/命令 rejection 反馈调用方，这里兜底监听。
+    this.client.on('error', () => { /* 由 connect()/命令路径反馈 */ });
     this.installGuard();
   }
 
