@@ -36,8 +36,10 @@ describe.skipIf(!SSH_RAW || !REDIS_URL)('Redis over SSH 隧道（真实）', () 
   });
 
   it('建立隧道 → 经隧道路由 PING → 关闭回收', async () => {
-    const ssh = JSON.parse(SSH_RAW!) as { host: string; port: number; user: string; password: string };
-    const target = parse(REDIS_URL!);
+    const ssh = JSON.parse(SSH_RAW!) as { host: string; port: number; user: string; password: string; targetHost?: string; targetPort?: number };
+    // 注意：隧道目标由 **sshd 容器** 去拨号——CI 里应指向 service 网络别名 `redis`，
+    // 而不是 runner 的 127.0.0.1（容器 localhost 上没有 redis）。
+    const target = { host: ssh.targetHost ?? parse(REDIS_URL!).host, port: ssh.targetPort ?? parse(REDIS_URL!).port };
     const conn = {
       id: 'ci-ssh-redis',
       name: 'ci-ssh',

@@ -190,7 +190,7 @@ jobs:
       - name: Integration tests (vscode-ext SSH tunnel)
         env:
           DEVBELT_DB_TEST_REDIS_URL: redis://127.0.0.1:6379
-          DEVBELT_DB_TEST_REDIS_SSH: '{"host":"127.0.0.1","port":2222,"user":"tunnel","password":"tunnel-pass"}'
+          DEVBELT_DB_TEST_REDIS_SSH: '{"host":"127.0.0.1","port":2222,"user":"tunnel","password":"tunnel-pass","targetHost":"redis","targetPort":6379}'
         run: pnpm -C apps/vscode-ext exec vitest run test/integration/redisSshTunnel.test.ts
 
       - name: Integration tests (server)
