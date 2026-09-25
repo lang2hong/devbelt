@@ -1555,6 +1555,21 @@
           "group": "5_tools"
         },
         {
+          "command": "devbelt.redis.console",
+          "when": "view == devbelt.explorer && viewItem == redisDb.REDIS",
+          "group": "1_view"
+        },
+        {
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && viewItem == redisDb.REDIS",
+          "group": "0_refresh"
+        },
+        {
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem == redisDb.REDIS",
+          "group": "9_copy"
+        },
+        {
           "command": "devbelt.importData",
           "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
           "group": "4_data"

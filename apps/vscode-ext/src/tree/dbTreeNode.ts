@@ -17,6 +17,8 @@ export enum NodeKind {
   Index = 'index',
   Trigger = 'trigger',
   ForeignKey = 'foreignKey',
+  /** P7 S3：Redis 逻辑库节点（keys 在 webview 内分页加载，不在树里展开）。 */
+  RedisDb = 'redisDb',
 }
 
 /** 分类子类型 */
@@ -37,6 +39,7 @@ const ICON_MAP: Record<string, string> = {
   [NodeKind.Index]: 'list-selection',
   [NodeKind.Trigger]: 'zap',
   [NodeKind.ForeignKey]: 'link',
+  [NodeKind.RedisDb]: 'symbol-key',
 };
 
 /** 分类节点的图标 id（按 categoryType 区分） */
@@ -105,6 +108,9 @@ export class DbTreeNode extends TreeItem {
       this.iconPath = new ThemeIcon(iconId);
     }
   }
+
+  /** Redis 逻辑库序号（仅 RedisDb 节点，构造后赋值）。 */
+  public redisDbIndex?: number;
 
   /** 外键关联表（仅 ForeignKey 节点，构造后赋值） */
   public refTable?: string;

@@ -103,7 +103,7 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     }),
     // Redis 面板（P7 S2）：Status / CLI / SlowLog
     vscode.commands.registerCommand('devbelt.redis.console', (node: any) => {
-      if (node?.conn) RedisView.open(node.conn, manager, 'console');
+      if (node?.conn) RedisView.open(node.conn, manager, 'console', node.redisDbIndex);
     }),
     vscode.commands.registerCommand('devbelt.redis.serverStatus', (node: any) => {
       if (node?.conn) RedisView.open(node.conn, manager, 'status');

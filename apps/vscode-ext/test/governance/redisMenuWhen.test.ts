@@ -24,6 +24,12 @@ describe('Redis 菜单 when 收紧（P7 S2）', () => {
     }
   });
 
+  it('Redis 逻辑库节点有打开/刷新/复制菜单', () => {
+    for (const cmd of ['devbelt.redis.console', 'devbelt.refreshNode', 'devbelt.copyNodeName']) {
+      expect(menus.some((m) => m.command === cmd && m.when?.includes('redisDb.REDIS'))).toBe(true);
+    }
+  });
+
   it('通用连接命令（打开/关闭/刷新）对 REDIS 可见', () => {
     for (const cmd of ['devbelt.openConnection', 'devbelt.closeConnection', 'devbelt.refreshConnection']) {
       const entry = menus.find((m) => m.command === cmd && m.when?.includes('REDIS'));

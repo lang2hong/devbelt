@@ -1,10 +1,24 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useI18n } from '../../composables/useI18n';
 import type { CommandResult } from './types';
 
 const { t } = useI18n();
-defineProps<{ results: CommandResult[]; readOnly: boolean; pending: { id: string; command: string } | null }>();
+const props = defineProps<{
+  results: CommandResult[];
+  readOnly: boolean;
+  pending: { id: string; command: string } | null;
+  commands?: string[];
+}>();
+
+/** 补全候选：按当前输入的首个 token 前缀过滤（命令名由 host 下发，webview 不引 db-core）。 */
+const suggestions = computed<string[]>(() => {
+  const list = props.commands ?? [];
+  if (!list.length) return [];
+  const token = input.value.trim().split(/\s+/)[0]?.toUpperCase() ?? '';
+  if (!token) return [];
+  return list.filter((c) => c.startsWith(token)).slice(0, 50);
+});
 const emit = defineEmits<{
   (e: 'run', line: string): void;
   (e: 'confirm', id: string, accept: boolean): void;
@@ -43,7 +57,10 @@ function onKeydown(e: KeyboardEvent): void {
       <div v-if="!results.length" class="empty">{{ t('wv.redis.console.empty') }}</div>
     </div>
     <div class="input-row">
-      <input v-model="input" :placeholder="t('wv.redis.console.placeholder')" @keydown="onKeydown" />
+      <input v-model="input" list="redis-cmd-suggest" :placeholder="t('wv.redis.console.placeholder')" @keydown="onKeydown" />
+      <datalist id="redis-cmd-suggest">
+        <option v-for="c in suggestions" :key="c" :value="c" />
+      </datalist>
       <button class="btn" @click="submit">{{ t('wv.redis.console.run') }}</button>
     </div>
     <div v-if="pending" class="confirm-mask">

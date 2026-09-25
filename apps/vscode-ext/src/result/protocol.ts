@@ -5,6 +5,8 @@
  * 靠人记。这里集中声明已知消息与视图模式，App.vue 与扩展侧共用，避免漂移。
  */
 
+import type { RedisKeyFolder } from './redisKeyFold';
+export type { RedisKeyFolder };
 import type {
   AuthenticatorEntry,
   AuthenticatorGroup,
@@ -141,13 +143,33 @@ export type RedisTab = 'status' | 'console' | 'slowlog';
 /** Extension Host → webview。 */
 export type RedisDownMessage =
   | { type: 'init'; mode: 'redis'; isZh: boolean }
-  | { type: 'config'; connName: string; host: string; port: number; db: number;
-      readOnly: boolean; connMode: 'standalone' | 'cluster' | 'sentinel'; redisTab: RedisTab }
+  | { type: 'config'; connName: string; host: string; port: number; db: number | null;
+      readOnly: boolean; connMode: 'standalone' | 'cluster' | 'sentinel'; redisTab: RedisTab;
+      commands: string[] }
   | { type: 'info'; info: string }
   | { type: 'slowlog'; entries: RedisSlowlogEntry[] }
+  | { type: 'keys'; folders: RedisKeyFolder; cursor: string; done: boolean; scanned: number; match: string }
+  | { type: 'value'; key: string; keyType: string; ttl: number; tooLarge: boolean; size: number | null; data: RedisValueData | null }
+  | { type: 'keyAction'; action: string; ok: boolean; error: string | null }
   | { type: 'commandResult'; id: string; command: string; ok: boolean; result: string; costMs: number; error: string | null }
   | { type: 'confirmRequired'; id: string; command: string }
   | { type: 'error'; message: string };
+
+/** 绑定值数据（按 key 类型）。 */
+export type RedisValueData =
+  | { kind: 'string'; text: string }
+  | { kind: 'hash'; entries: [string, string][]; len: number }
+  | { kind: 'list'; items: string[]; len: number }
+  | { kind: 'set'; members: string[]; card: number }
+  | { kind: 'zset'; items: [string, string][]; card: number };
+
+/** 新建 key 的初值（按类型）。 */
+export type RedisNewKeyValue =
+  | { kind: 'string'; text: string }
+  | { kind: 'hash'; entries: [string, string][] }
+  | { kind: 'list'; items: string[] }
+  | { kind: 'set'; members: string[] }
+  | { kind: 'zset'; items: [string, string][] };
 
 /** webview → Extension Host。 */
 export type RedisUpMessage =
@@ -155,4 +177,26 @@ export type RedisUpMessage =
   | { type: 'runCommand'; id: string; line: string }
   | { type: 'confirmDanger'; id: string; accept: boolean }
   | { type: 'refreshInfo' }
-  | { type: 'refreshSlowlog' };
+  | { type: 'refreshSlowlog' }
+  // S3 键树 / 值 / CRUD
+  | { type: 'refreshKeys'; match?: string; count?: number }
+  | { type: 'loadMoreKeys' }
+  | { type: 'selectKey'; key: string }
+  | { type: 'saveString'; key: string; value: string }
+  | { type: 'appendString'; key: string; value: string }
+  | { type: 'setTtl'; key: string; seconds: number }
+  | { type: 'persistKey'; key: string }
+  | { type: 'renameKey'; key: string; newKey: string }
+  | { type: 'deleteKeys'; keys: string[] }
+  | { type: 'createKey'; key: string; value: RedisNewKeyValue; ttlSeconds: number | null }
+  | { type: 'hashSet'; key: string; field: string; value: string }
+  | { type: 'hashDel'; key: string; fields: string[] }
+  | { type: 'listPush'; key: string; side: 'left' | 'right'; values: string[] }
+  | { type: 'listSet'; key: string; index: number; value: string }
+  | { type: 'listRem'; key: string; count: number; value: string }
+  | { type: 'listTrim'; key: string; start: number; stop: number }
+  | { type: 'listPop'; key: string; side: 'left' | 'right' }
+  | { type: 'setAdd'; key: string; members: string[] }
+  | { type: 'setRem'; key: string; members: string[] }
+  | { type: 'zsetAdd'; key: string; score: string; member: string }
+  | { type: 'zsetRem'; key: string; members: string[] };

@@ -3,3 +3,4 @@ export * from './redisCommands.js';
 export * from './redisTls.js';
 export * from './redisClient.js';
 export * from './redisSplitArgs.js';
+export * from './redisOps.js';

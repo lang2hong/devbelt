@@ -44,10 +44,11 @@ function allContextValues(): Set<string> {
   // 分组节点没有连接
   mk(TreeItemCollapsibleState.Collapsed, NodeKind.Group, undefined);
 
-  // P7：Redis 连接节点（S2 尚无子节点，只有连接层 open/closed）。
+  // P7：Redis 连接节点 + 逻辑库节点（S3）。
   const redisConn: any = { id: 'r', host: 'h', dbType: 'REDIS' };
   mk(TreeItemCollapsibleState.None, NodeKind.Connection, redisConn);
   mk(TreeItemCollapsibleState.Collapsed, NodeKind.Connection, redisConn);
+  mk(TreeItemCollapsibleState.None, NodeKind.RedisDb, redisConn);
 
   for (const dbType of DB_TYPES) {
     const conn: any = { id: 'c', host: 'h', dbType };

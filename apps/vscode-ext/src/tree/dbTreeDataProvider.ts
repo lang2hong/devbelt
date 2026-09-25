@@ -1,5 +1,5 @@
 import { Event, EventEmitter, TreeDataProvider, TreeItem, TreeItemCollapsibleState, ThemeIcon, ThemeColor, window } from 'vscode';
-import { DatabaseType, DialectRegistry } from '@devbelt/db-core';
+import { DatabaseType, DialectRegistry, redisKeyspace } from '@devbelt/db-core';
 import { ConnectionStore, type SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { ConnectionPathOverrideStore } from '../connection/connectionPathOverrideStore';
@@ -148,8 +148,31 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   /** 连接节点子节点：数据库列表 */
   private async buildConnectionChildren(element: DbTreeNode): Promise<DbTreeNode[]> {
     if (!element.conn) return [];
-    // Redis（P7 S2）：不发 SQL 元数据查询；DB/键节点随 S3 接入。
-    if (element.conn.dbType === DatabaseType.REDIS) return [];
+    // Redis（P7 S3）：子节点为逻辑库（INFO keyspace）；键在 webview 内分页加载。
+    if (element.conn.dbType === DatabaseType.REDIS) {
+      const conn = element.conn;
+      const session = await this.manager.connect(conn);
+      if (session.kind !== 'redis') return [];
+      const stats = await redisKeyspace(session.client);
+      return stats.map((stat) => {
+        const label = `db${stat.index}`;
+        const node = new DbTreeNode(
+          label,
+          TreeItemCollapsibleState.None,
+          NodeKind.RedisDb,
+          conn,
+          undefined,
+          element,
+          undefined,
+          label,
+        );
+        node.redisDbIndex = stat.index;
+        node.description = String(stat.keys);
+        node.id = `${conn.id}:db${stat.index}`;
+        node.command = { command: 'devbelt.redis.console', title: 'Open', arguments: [node] };
+        return node;
+      });
+    }
     const session = await this.manager.connectSql(element.conn);
     if (!session.capabilities.multiDatabaseExplorer) {
       return [
@@ -180,6 +203,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   /** 数据库节点子节点：按方言能力过滤分类（表/视图始终显示） */
   private buildDatabaseChildren(element: DbTreeNode): DbTreeNode[] {
     if (!element.conn) return [];
+    // Redis 逻辑库无 SQL 分类子节点（键在 webview），且 DialectRegistry.get(REDIS) 会抛错。
+    if (element.conn.dbType === DatabaseType.REDIS) return [];
     const dialect = DialectRegistry.get(element.conn.dbType);
     if (!dialect) return [];
     const caps = dialect.capabilities;

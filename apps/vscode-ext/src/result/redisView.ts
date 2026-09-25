@@ -1,52 +1,79 @@
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
-import { isDangerousCommand, isWriteCommand, redactCommandArgs, splitRedisArgs } from '@devbelt/db-core';
+import {
+  isDangerousCommand, isWriteCommand, redactCommandArgs, splitRedisArgs,
+  redisType, redisScan, redisSelect, redisGet, redisStrlen, redisSet, redisAppend,
+  redisUnlink, redisExists, redisRename, redisTtl, redisExpire, redisPersist, redisMemoryUsage,
+  redisHGetAll, redisHSet, redisHDel, redisHLen,
+  redisLRange, redisLLen, redisLPush, redisRPush, redisLSet, redisLRem, redisLTrim, redisLPop, redisRPop,
+  redisSMembers, redisSCard, redisSAdd, redisSRem,
+  redisZRange, redisZCard, redisZAdd, redisZRem, allCommandNames,
+  type RedisCommandSource,
+} from '@devbelt/db-core';
 import type { RedisConnectionSession } from '../connection/connectionSession';
 import { ConnectionManager } from '../connection/connectionManager';
 import { REDIS_CAPABILITIES } from '../connection/redisCapabilities';
 import { BaseWebView } from './baseWebView';
+import { foldRedisKeys } from './redisKeyFold';
 import { AuditLogger } from '../utils/auditLogger';
 import { l10n } from '../i18n';
-import type { RedisSlowlogEntry, RedisTab } from './protocol';
+import type { RedisNewKeyValue, RedisSlowlogEntry, RedisTab, RedisValueData } from './protocol';
 
-/** Redis 面板（P7 S2）：Status / CLI / SlowLog 三个标签页。 */
+/** 大 key 门禁阈值（字节）。 */
+const LARGE_KEY_BYTES = 1024 * 1024;
+/** SCAN 默认 COUNT。 */
+const DEFAULT_SCAN_COUNT = 200;
+
+/** Redis 面板：DB 键树 + 值查看/编辑 + CLI/SlowLog 三栏（P7 S2/S3）。 */
 export class RedisView extends BaseWebView {
   private static current?: RedisView;
   private pendingConfirm?: { id: string; line: string; name: string; args: string[] };
+
+  // S3 键树状态
+  private cursor = '0';
+  private keys: string[] = [];
+  private match = '';
+  private scanCount = DEFAULT_SCAN_COUNT;
+  /** 串行化会话操作：SELECT 是连接级状态，避免 DB 切换与并发操作交叠。 */
+  private opChain: Promise<unknown> = Promise.resolve();
+  /** 服务器状态视图（无 DB 绑定）：不发键树，只推 INFO/SlowLog。 */
+  private readonly statusOnly: boolean;
 
   private constructor(
     private readonly conn: SavedConnection,
     private readonly manager: ConnectionManager,
     private readonly initialTab: RedisTab,
+    private readonly db?: number,
   ) {
     super('devbelt.redis', `Redis @ ${conn.name || conn.host}`);
+    this.statusOnly = initialTab === 'status' && db === undefined;
     this.manager.retain(conn.id);
   }
 
-  static open(conn: SavedConnection, manager: ConnectionManager, tab: RedisTab = 'status'): void {
+  static open(conn: SavedConnection, manager: ConnectionManager, tab: RedisTab = 'status', db?: number): void {
     if (RedisView.current) RedisView.current.dispose();
-    RedisView.current = new RedisView(conn, manager, tab);
+    RedisView.current = new RedisView(conn, manager, tab, db);
   }
 
   protected async handleMessage(msg: any): Promise<void> {
     if (msg?.type === 'ready') {
       if (!this.initSent) {
-        // 第一次 ready 来自 App.vue 默认 QueryView：只发 init 切到 redis 模式，
-        // 等 RedisView.vue 挂载后再推配置与数据，避免在监听器注册前发送丢失。
         this.initSent = true;
         this.post({ type: 'init', mode: 'redis' });
         return;
       }
-      // 第二次 ready 来自 RedisView.vue 挂载：先发连接配置，再推数据。
       this.post({
         type: 'config',
         connName: this.conn.name || this.conn.host,
         host: this.conn.host,
         port: this.conn.port,
-        db: this.conn.redisDb ?? 0,
+        db: this.statusOnly ? null : (this.db ?? this.conn.redisDb ?? 0),
         readOnly: this.conn.readOnly === true,
         connMode: 'standalone',
         redisTab: this.initialTab,
+        commands: allCommandNames(),
       });
+      // 键浏览器（含连接级 console，落 conn.redisDb，默认 db0）；状态视图只推 INFO/SlowLog。
+      if (!this.statusOnly) await this.enqueuePushKeys(true);
       await this.pushInfo();
       await this.pushSlowlog();
       return;
@@ -55,6 +82,27 @@ export class RedisView extends BaseWebView {
     if (msg.type === 'refreshSlowlog') { await this.pushSlowlog(); return; }
     if (msg.type === 'runCommand') { await this.runCommand(String(msg.id ?? ''), String(msg.line ?? '')); return; }
     if (msg.type === 'confirmDanger') { await this.resolveConfirm(String(msg.id ?? ''), msg.accept === true); return; }
+    if (msg.type === 'refreshKeys') { await this.refreshKeys(msg); return; }
+    if (msg.type === 'loadMoreKeys') { await this.enqueuePushKeys(false); return; }
+    if (msg.type === 'selectKey') { await this.enqueuePushValue(String(msg.key ?? '')); return; }
+    if (msg.type === 'saveString') { await this.edit('SET', String(msg.key), async (c) => { await redisSet(c, String(msg.key), String(msg.value ?? '')); }); return; }
+    if (msg.type === 'appendString') { await this.edit('APPEND', String(msg.key), async (c) => { await redisAppend(c, String(msg.key), String(msg.value ?? '')); }); return; }
+    if (msg.type === 'setTtl') { await this.edit('EXPIRE', String(msg.key), async (c) => { const s = Number(msg.seconds); if (s > 0) await redisExpire(c, String(msg.key), s); else await redisPersist(c, String(msg.key)); }); return; }
+    if (msg.type === 'persistKey') { await this.edit('PERSIST', String(msg.key), async (c) => { await redisPersist(c, String(msg.key)); }); return; }
+    if (msg.type === 'renameKey') { await this.renameKey(String(msg.key), String(msg.newKey ?? '')); return; }
+    if (msg.type === 'deleteKeys') { await this.deleteKeys(Array.isArray(msg.keys) ? msg.keys.map(String) : []); return; }
+    if (msg.type === 'createKey') { await this.createKey(msg); return; }
+    if (msg.type === 'hashSet') { await this.edit('HSET', String(msg.key), async (c) => { await redisHSet(c, String(msg.key), String(msg.field ?? ''), String(msg.value ?? '')); }); return; }
+    if (msg.type === 'hashDel') { await this.edit('HDEL', String(msg.key), async (c) => { await redisHDel(c, String(msg.key), strs(msg.fields)); }); return; }
+    if (msg.type === 'listPush') { await this.edit('LPUSH/RPUSH', String(msg.key), async (c) => { const v = strs(msg.values); if (msg.side === 'left') await redisLPush(c, String(msg.key), v); else await redisRPush(c, String(msg.key), v); }); return; }
+    if (msg.type === 'listSet') { await this.edit('LSET', String(msg.key), async (c) => { await redisLSet(c, String(msg.key), Number(msg.index), String(msg.value ?? '')); }); return; }
+    if (msg.type === 'listRem') { await this.edit('LREM', String(msg.key), async (c) => { await redisLRem(c, String(msg.key), Number(msg.count), String(msg.value ?? '')); }); return; }
+    if (msg.type === 'listTrim') { await this.edit('LTRIM', String(msg.key), async (c) => { await redisLTrim(c, String(msg.key), Number(msg.start), Number(msg.stop)); }); return; }
+    if (msg.type === 'listPop') { await this.edit('LPOP/RPOP', String(msg.key), async (c) => { if (msg.side === 'left') await redisLPop(c, String(msg.key)); else await redisRPop(c, String(msg.key)); }); return; }
+    if (msg.type === 'setAdd') { await this.edit('SADD', String(msg.key), async (c) => { await redisSAdd(c, String(msg.key), strs(msg.members)); }); return; }
+    if (msg.type === 'setRem') { await this.edit('SREM', String(msg.key), async (c) => { await redisSRem(c, String(msg.key), strs(msg.members)); }); return; }
+    if (msg.type === 'zsetAdd') { await this.edit('ZADD', String(msg.key), async (c) => { await redisZAdd(c, String(msg.key), String(msg.score ?? '0'), String(msg.member ?? '')); }); return; }
+    if (msg.type === 'zsetRem') { await this.edit('ZREM', String(msg.key), async (c) => { await redisZRem(c, String(msg.key), strs(msg.members)); }); return; }
   }
 
   protected onDispose(): void {
@@ -63,16 +111,31 @@ export class RedisView extends BaseWebView {
     this.manager.release(this.conn.id);
   }
 
-  /** 取活跃 Redis 会话（不存在或已死则重建）。 */
-  private async redisSession(): Promise<RedisConnectionSession> {
+  // ────────────────────────── 会话 ──────────────────────────
+
+  private enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.opChain.then(fn, fn);
+    this.opChain = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  private async sessionForDb(): Promise<RedisConnectionSession> {
     const session = await this.manager.connect(this.conn);
     if (session.kind !== 'redis') throw new Error('connection is not a Redis session');
+    // 无论本视图是否绑定 DB 节点，都把共享会话归一到确定目标：否则上一视图的
+    // SELECT 会泄漏到连接级面板（UI/审计写 db0，命令却落在旧库）。
+    const target = this.db ?? this.conn.redisDb ?? 0;
+    if (target !== session.db) {
+      await redisSelect(session.client, target);
+      session.db = target;
+    }
     return session;
   }
 
   private async pushInfo(): Promise<void> {
     try {
-      const session = await this.redisSession();
+      const session = await this.manager.connect(this.conn);
+      if (session.kind !== 'redis') throw new Error('connection is not a Redis session');
       this.post({ type: 'info', info: await session.client.info() });
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
@@ -81,7 +144,8 @@ export class RedisView extends BaseWebView {
 
   private async pushSlowlog(): Promise<void> {
     try {
-      const session = await this.redisSession();
+      const session = await this.manager.connect(this.conn);
+      if (session.kind !== 'redis') throw new Error('connection is not a Redis session');
       const raw = await session.client.sendCommand('SLOWLOG', ['GET', '128']);
       this.post({ type: 'slowlog', entries: parseSlowlog(raw) });
     } catch (err) {
@@ -89,7 +153,138 @@ export class RedisView extends BaseWebView {
     }
   }
 
-  /** 控制台执行：切分 → 危险命令确认 → 发送。只读拦截在 RedisClient 切面。 */
+  // ────────────────────────── 键树 ──────────────────────────
+
+  private async refreshKeys(msg: any): Promise<void> {
+    this.match = String(msg.match ?? '');
+    const count = Number(msg.count);
+    this.scanCount = Number.isFinite(count) && count > 0 ? count : DEFAULT_SCAN_COUNT;
+    await this.enqueuePushKeys(true);
+  }
+
+  private async enqueuePushKeys(reset: boolean): Promise<void> {
+    await this.enqueue(async () => {
+      const session = await this.sessionForDb();
+      await this.doPushKeys(session, reset);
+    }).catch((err) => this.post({ type: 'error', message: (err as Error).message }));
+  }
+
+  private async doPushKeys(session: RedisConnectionSession, reset: boolean): Promise<void> {
+    try {
+      if (reset) { this.cursor = '0'; this.keys = []; }
+      const result = await redisScan(session.client, this.cursor, {
+        match: this.match || undefined,
+        count: this.scanCount,
+      });
+      // SCAN 语义允许重复返回同一 key：累积去重，避免 scanned 虚高与内存增长。
+      this.keys = [...new Set([...this.keys, ...result.keys])];
+      this.cursor = result.cursor;
+      const folders = foldRedisKeys(this.keys, this.conn.keySeparator || ':');
+      this.post({ type: 'keys', folders, cursor: this.cursor, done: this.cursor === '0', scanned: this.keys.length, match: this.match });
+    } catch (err) {
+      this.post({ type: 'error', message: (err as Error).message });
+    }
+  }
+
+  // ────────────────────────── 值查看/编辑 ──────────────────────────
+
+  private async enqueuePushValue(key: string): Promise<void> {
+    await this.enqueue(async () => {
+      const session = await this.sessionForDb();
+      await this.doPushValue(session, key);
+    }).catch((err) => this.post({ type: 'error', message: (err as Error).message }));
+  }
+
+  private async doPushValue(session: RedisConnectionSession, key: string): Promise<void> {
+    try {
+      const c = session.client;
+      const keyType = await redisType(c, key);
+      const ttl = await redisTtl(c, key);
+      const size = keyType === 'string' ? await redisStrlen(c, key) : await redisMemoryUsage(c, key);
+      const tooLarge = size !== null && size > LARGE_KEY_BYTES;
+      const data = tooLarge ? null : await this.loadValue(c, key, keyType);
+      this.post({ type: 'value', key, keyType, ttl, tooLarge, size, data });
+    } catch (err) {
+      this.post({ type: 'error', message: (err as Error).message });
+    }
+  }
+
+  private async loadValue(c: RedisCommandSource, key: string, keyType: string): Promise<RedisValueData | null> {
+    switch (keyType) {
+      case 'string': return { kind: 'string', text: await redisGet(c, key) };
+      case 'hash': return { kind: 'hash', entries: await redisHGetAll(c, key), len: await redisHLen(c, key) };
+      case 'list': return { kind: 'list', items: await redisLRange(c, key, 0, 199), len: await redisLLen(c, key) };
+      case 'set': return { kind: 'set', members: await redisSMembers(c, key), card: await redisSCard(c, key) };
+      case 'zset': return { kind: 'zset', items: await redisZRange(c, key, 0, 199), card: await redisZCard(c, key) };
+      default: return null;
+    }
+  }
+
+  /** 执行一次键编辑并刷新值；失败回 keyAction error。 */
+  private async edit(action: string, key: string, fn: (c: RedisCommandSource) => Promise<void>): Promise<void> {
+    await this.enqueue(async () => {
+      try {
+        const session = await this.sessionForDb();
+        const started = Date.now();
+        await fn(session.client);
+        this.audit(action, key, Date.now() - started);
+        this.post({ type: 'keyAction', action, ok: true, error: null });
+        await this.doPushValue(session, key);
+      } catch (err) {
+        this.post({ type: 'keyAction', action, ok: false, error: (err as Error).message });
+      }
+    });
+  }
+
+  private async deleteKeys(keys: string[]): Promise<void> {
+    if (!keys.length) return;
+    await this.enqueue(async () => {
+      try {
+        const session = await this.sessionForDb();
+        const started = Date.now();
+        // UNLINK：异步回收，避免大集合删除阻塞 Redis 主线程。
+        await redisUnlink(session.client, keys);
+        this.audit('UNLINK', keys.join(' '), Date.now() - started);
+        this.post({ type: 'keyAction', action: 'UNLINK', ok: true, error: null });
+        await this.doPushKeys(session, true);
+      } catch (err) {
+        this.post({ type: 'keyAction', action: 'UNLINK', ok: false, error: (err as Error).message });
+      }
+    });
+  }
+
+  private async createKey(msg: any): Promise<void> {
+    const key = String(msg.key ?? '');
+    const value = msg.value as RedisNewKeyValue | undefined;
+    if (!key || !value) { this.post({ type: 'keyAction', action: 'CREATE', ok: false, error: l10n('cmd.redis.emptyCommand') }); return; }
+    await this.enqueue(async () => {
+      try {
+        const session = await this.sessionForDb();
+        const c = session.client;
+        if (await redisExists(c, key)) {
+          this.post({ type: 'keyAction', action: 'CREATE', ok: false, error: l10n('cmd.redis.keyExists') });
+          return;
+        }
+        const started = Date.now();
+        if (value.kind === 'string') await redisSet(c, key, value.text);
+        else if (value.kind === 'hash') { for (const [f, v] of value.entries) await redisHSet(c, key, f, v); }
+        else if (value.kind === 'list') { if (value.items.length) await redisRPush(c, key, value.items); }
+        else if (value.kind === 'set') { if (value.members.length) await redisSAdd(c, key, value.members); }
+        else if (value.kind === 'zset') { for (const [m, s] of value.items) await redisZAdd(c, key, s, m); }
+        const ttl = Number(msg.ttlSeconds);
+        if (Number.isFinite(ttl) && ttl > 0) await redisExpire(c, key, ttl);
+        this.audit('CREATE', key, Date.now() - started);
+        this.post({ type: 'keyAction', action: 'CREATE', ok: true, error: null });
+        await this.doPushKeys(session, true);
+        await this.doPushValue(session, key);
+      } catch (err) {
+        this.post({ type: 'keyAction', action: 'CREATE', ok: false, error: (err as Error).message });
+      }
+    });
+  }
+
+  // ────────────────────────── CLI（S2） ──────────────────────────
+
   private async runCommand(id: string, line: string): Promise<void> {
     if (!REDIS_CAPABILITIES.cli) {
       this.post({ type: 'commandResult', id, command: line, ok: false, result: '', costMs: 0, error: l10n('cmd.redis.cliUnsupported') });
@@ -130,33 +325,56 @@ export class RedisView extends BaseWebView {
   private async execute(id: string, line: string, name: string, args: string[]): Promise<void> {
     const started = Date.now();
     try {
-      const session = await this.redisSession();
+      const session = await this.sessionForDb();
       const raw = await session.client.sendCommand(name, args);
       const costMs = Date.now() - started;
-      // 审计只记写/危险命令（读命令会淹没审计），与 P7 §6.6 对齐；
-      // 参数经 redactCommandArgs 脱敏（P7 §十：日志禁止明文密码）。
       if (isWriteCommand(name, args) || isDangerousCommand(name, args)) {
-        AuditLogger.tryLog({
-          action: 'redis_command',
-          connName: this.conn.name || this.conn.host,
-          database: String(session.db),
-          sql: redisAuditLine(name, args),
-          costTime: costMs,
-        });
+        this.audit(name, redisAuditLine(name, args).slice(name.length).trim(), costMs);
       }
       this.post({ type: 'commandResult', id, command: line, ok: true, result: formatRedisReply(raw), costMs, error: null });
     } catch (err) {
       this.post({ type: 'commandResult', id, command: line, ok: false, result: '', costMs: Date.now() - started, error: (err as Error).message });
     }
   }
+
+  private audit(command: string, detail: string, costTime?: number): void {
+    AuditLogger.tryLog({
+      action: 'redis_command',
+      connName: this.conn.name || this.conn.host,
+      database: String(this.db ?? this.conn.redisDb ?? 0),
+      sql: `${command} ${detail}`.trim(),
+      costTime,
+    });
+  }
+
+  /** 重命名：目标已存在则拒绝（避免静默覆盖目标键）。 */
+  private async renameKey(key: string, newKey: string): Promise<void> {
+    if (!key || !newKey) return;
+    await this.enqueue(async () => {
+      try {
+        const session = await this.sessionForDb();
+        if (await redisExists(session.client, newKey)) {
+          this.post({ type: 'keyAction', action: 'RENAME', ok: false, error: l10n('cmd.redis.renameTargetExists') });
+          return;
+        }
+        const started = Date.now();
+        await redisRename(session.client, key, newKey);
+        this.audit('RENAME', key, Date.now() - started);
+        this.post({ type: 'keyAction', action: 'RENAME', ok: true, error: null });
+        await this.doPushKeys(session, true);
+        await this.doPushValue(session, newKey);
+      } catch (err) {
+        this.post({ type: 'keyAction', action: 'RENAME', ok: false, error: (err as Error).message });
+      }
+    });
+  }
 }
 
-/**
- * 审计行文本（P7 §十：日志禁止明文密码）。
- *
- * 复用 db-core 的 `redactCommandArgs`：AUTH 整段、CONFIG SET / ACL SETUSER 的值脱敏，
- * 其余参数截断。CLI 看到的原始命令仍由 `commandResult.command` 原样回显（仅 UI）。
- */
+function strs(v: unknown): string[] {
+  return Array.isArray(v) ? v.map(String) : [];
+}
+
+/** 审计行文本（P7 §十：日志禁止明文密码）。 */
 export function redisAuditLine(name: string, args: string[]): string {
   return [name, ...redactCommandArgs(name, args)].join(' ');
 }
