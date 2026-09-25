@@ -263,5 +263,7 @@ function decodeConnection(payload: any): SavedConnection {
     redisMode: payload.redisMode || undefined,
     sentinelName: payload.sentinelName || undefined,
     sentinelPassword: payload.sentinelPassword || undefined,
+    clusterNodes: payload.clusterNodes || undefined,
+    sentinelNodes: payload.sentinelNodes || undefined,
   };
 }

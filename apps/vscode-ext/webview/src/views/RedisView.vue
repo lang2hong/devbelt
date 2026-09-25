@@ -16,6 +16,7 @@ let off: (() => void) | undefined;
 
 const connName = ref('');
 const db = ref<number | null>(null);
+const connMode = ref<'standalone' | 'cluster' | 'sentinel'>('standalone');
 const readOnly = ref(false);
 const commands = ref<string[]>([]);
 const info = ref('');
@@ -76,6 +77,7 @@ onMounted(() => {
     if (msg.type === 'config') {
       connName.value = msg.connName ?? '';
       db.value = typeof msg.db === 'number' ? msg.db : null;
+      connMode.value = (msg.connMode as typeof connMode.value) ?? 'standalone';
       readOnly.value = !!msg.readOnly;
       commands.value = msg.commands ?? [];
       if (hasDb.value) keysLoading.value = true;
@@ -110,7 +112,7 @@ onUnmounted(() => { off?.(); });
   <div class="redis-panel">
     <header class="header">
       <span class="conn">{{ connName }}</span>
-      <span v-if="hasDb" class="db">db{{ db }}</span>
+      <span v-if="hasDb && connMode !== 'cluster'" class="db">db{{ db }}</span>
       <span v-if="readOnly" class="badge">{{ t('wv.redis.readOnly') }}</span>
       <button v-if="hasDb" class="btn" :disabled="readOnly" @click="showNewKey = true">＋ {{ t('wv.redis.newKey.title') }}</button>
     </header>

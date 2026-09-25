@@ -326,3 +326,34 @@ describe('RedisView S3 回归（提交前评审）', () => {
     expect(posts(view).find((m) => m.type === 'keyAction').ok).toBe(false);
   });
 });
+
+describe('RedisView S4 cluster 键扫描', () => {
+  it('逐 master SCAN 合并；cluster 不发 SELECT', async () => {
+    const calls: { cmd: string; args: (string | number)[] }[] = [];
+    const node = (keys: string[]) => ({
+      call: async (cmd: string, ...args: (string | number)[]) => { calls.push({ cmd, args }); return cmd === 'SCAN' ? ['0', keys] : 'OK'; },
+    });
+    const client: any = {
+      isCluster: true, mode: 'cluster', db: 0,
+      nodes: () => [node(['a:1']), node(['b:1'])],
+      sendCommand: async () => 'OK', info: async () => '', ping: async () => 'PONG', isAlive: () => true,
+    };
+    const manager: any = {
+      retain: vi.fn(), release: vi.fn(),
+      connect: async () => ({ kind: 'redis', client, db: 0, mode: 'cluster', readOnly: false, isAlive: () => true, close: () => {} }),
+    };
+    RedisView.open(conn, manager, 'console');
+    const view: any = (RedisView as any).current;
+    (view.post as any).mockClear();
+    await view.handleMessage({ type: 'ready' });
+    await view.handleMessage({ type: 'ready' });
+    const keys = (view.post as any).mock.calls.map((c: any[]) => c[0]).find((m: any) => m.type === 'keys');
+    expect(keys).toBeTruthy();
+    expect(keys.folders.folders.map((f: any) => f.name).sort()).toEqual(['a', 'b']);
+    expect(keys.folders.folders.flatMap((f: any) => f.keys).sort()).toEqual(['a:1', 'b:1']);
+    expect(keys.done).toBe(true);
+    // Cluster 无 SELECT，也应发给两个 master 各一次 SCAN。
+    expect(calls.filter((c) => c.cmd === 'SCAN').length).toBe(2);
+    expect(calls.some((c) => c.cmd === 'SELECT')).toBe(false);
+  });
+});

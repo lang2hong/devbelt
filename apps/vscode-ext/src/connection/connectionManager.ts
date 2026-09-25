@@ -16,6 +16,17 @@ export class ConnectionPathError extends Error {
   }
 }
 
+/** 解析 `host:port,host:port` 节点列表；缺省回退到 `defaultHost:defaultPort`。 */
+function parseRedisNodes(raw: string | undefined, defaultHost: string, defaultPort: number): { host: string; port: number }[] {
+  const items = (raw ?? '').split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+  if (!items.length) return [{ host: defaultHost, port: defaultPort }];
+  return items.map((item) => {
+    const idx = item.lastIndexOf(':');
+    if (idx < 0) return { host: item, port: defaultPort };
+    return { host: item.slice(0, idx), port: Number(item.slice(idx + 1)) || defaultPort };
+  });
+}
+
 export interface PoolConfig {
   maxConnections: number;
   idleTimeoutMs: number;
@@ -285,16 +296,28 @@ export class ConnectionManager {
           servername: conn.host,
         })
       : undefined;
-    const client = new RedisClient({
-      host,
-      port,
+    const mode = conn.redisMode ?? 'standalone';
+    const common = {
       username: conn.user || undefined,
       password: conn.password,
-      db: conn.redisDb,
       tls,
       connectTimeout: conn.connectTimeout,
       readOnly: conn.readOnly === true,
-    });
+    };
+    let client: RedisClient;
+    if (mode === 'cluster') {
+      // SSH + Cluster 需要多跳 NAT map（多隧道），随 S4 隧道扩展接入；先明确拒绝而非静默降级。
+      if (conn.sshHost) throw new Error('SSH + Redis Cluster 尚未支持（S4 隧道多跳待接入）');
+      const nodes = parseRedisNodes(conn.clusterNodes, host, port);
+      client = new RedisClient({ ...common, cluster: { nodes, slotsRefreshTimeout: conn.connectTimeout ?? 3000 } });
+    } else if (mode === 'sentinel') {
+      if (conn.sshHost) throw new Error('SSH + Redis Sentinel 尚未支持（S4 隧道多跳待接入）');
+      if (!conn.sentinelName) throw new Error('Redis Sentinel master 名称未配置');
+      const sentinels = parseRedisNodes(conn.sentinelNodes, host, port);
+      client = new RedisClient({ ...common, sentinels, sentinelName: conn.sentinelName, sentinelPassword: conn.sentinelPassword });
+    } else {
+      client = new RedisClient({ ...common, host, port, db: conn.redisDb });
+    }
 
     try {
       await client.connect();
@@ -314,8 +337,8 @@ export class ConnectionManager {
     const session: RedisConnectionSession = {
       kind: 'redis',
       client,
-      db: conn.redisDb ?? 0,
-      mode: 'standalone',
+      db: client.isCluster ? 0 : (conn.redisDb ?? 0),
+      mode: client.mode,
       readOnly: conn.readOnly === true,
       isAlive: () => client.isAlive(),
       close: () => {

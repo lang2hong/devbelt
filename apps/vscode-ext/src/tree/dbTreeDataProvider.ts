@@ -153,6 +153,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       const conn = element.conn;
       const session = await this.manager.connect(conn);
       if (session.kind !== 'redis') return [];
+      // Cluster 无逻辑库（无 SELECT）：不显示 DB 节点。
+      if (session.mode === 'cluster') return [];
       const stats = await redisKeyspace(session.client);
       return stats.map((stat) => {
         const label = `db${stat.index}`;

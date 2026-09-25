@@ -48,6 +48,10 @@ export interface SavedConnection extends ConnectionConfig {
   redisMode?: 'standalone' | 'cluster' | 'sentinel';
   /** Redis：Sentinel master 名称。 */
   sentinelName?: string;
+  /** Redis Cluster：起始节点，逗号/空白分隔的 host:port 列表。 */
+  clusterNodes?: string;
+  /** Redis Sentinel：sentinel 节点列表，逗号/空白分隔的 host:port 列表。 */
+  sentinelNodes?: string;
   /** Redis：Sentinel 认证密码（敏感字段，走 SecretStorage 持久化）。 */
   sentinelPassword?: string;
   /** 连接颜色标签（各引擎共用）。 */

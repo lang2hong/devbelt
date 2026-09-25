@@ -252,6 +252,9 @@ export class RedisClient {
   /**
    * 节点执行单元：cluster 返回各 master（供按节点 SCAN/INFO/SLOWLOG/DBSIZE 聚合）；
    * standalone/sentinel 返回自身。
+   *
+   * **仅限读命令**：节点级 `call` 直接投递到节点，**绕过 sendCommand 切面**（只读拦截
+   * 与命令日志不生效）。当前调用方只有 SCAN/INFO 等读操作；切勿经此发写命令。
    */
   nodes(): RedisNodeLike[] {
     const nodeFn = (this.client as { nodes?: (role?: string) => unknown[] }).nodes;

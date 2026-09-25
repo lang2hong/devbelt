@@ -6,7 +6,7 @@ import {
   redisHGetAll, redisHSet, redisHDel, redisHLen,
   redisLRange, redisLLen, redisLPush, redisRPush, redisLSet, redisLRem, redisLTrim, redisLPop, redisRPop,
   redisSMembers, redisSCard, redisSAdd, redisSRem,
-  redisZRange, redisZCard, redisZAdd, redisZRem, allCommandNames,
+  redisZRange, redisZCard, redisZAdd, redisZRem, allCommandNames, redisScanOnNode,
   type RedisCommandSource,
 } from '@devbelt/db-core';
 import type { RedisConnectionSession } from '../connection/connectionSession';
@@ -30,6 +30,8 @@ export class RedisView extends BaseWebView {
 
   // S3 键树状态
   private cursor = '0';
+  /** cluster：各 master 的 SCAN 游标。 */
+  private clusterCursors: string[] = [];
   private keys: string[] = [];
   private match = '';
   private scanCount = DEFAULT_SCAN_COUNT;
@@ -68,7 +70,7 @@ export class RedisView extends BaseWebView {
         port: this.conn.port,
         db: this.statusOnly ? null : (this.db ?? this.conn.redisDb ?? 0),
         readOnly: this.conn.readOnly === true,
-        connMode: 'standalone',
+        connMode: this.conn.redisMode ?? 'standalone',
         redisTab: this.initialTab,
         commands: allCommandNames(),
       });
@@ -124,8 +126,9 @@ export class RedisView extends BaseWebView {
     if (session.kind !== 'redis') throw new Error('connection is not a Redis session');
     // 无论本视图是否绑定 DB 节点，都把共享会话归一到确定目标：否则上一视图的
     // SELECT 会泄漏到连接级面板（UI/审计写 db0，命令却落在旧库）。
+    // Cluster 无 SELECT，跳过（键按 slot 路由）。
     const target = this.db ?? this.conn.redisDb ?? 0;
-    if (target !== session.db) {
+    if (!session.client.isCluster && target !== session.db) {
       await redisSelect(session.client, target);
       session.db = target;
     }
@@ -171,6 +174,35 @@ export class RedisView extends BaseWebView {
 
   private async doPushKeys(session: RedisConnectionSession, reset: boolean): Promise<void> {
     try {
+      const foldersOf = (): void => {
+        const folders = foldRedisKeys(this.keys, this.conn.keySeparator || ':');
+        const done = session.client.isCluster
+          ? this.clusterCursors.every((c) => c === '0')
+          : this.cursor === '0';
+        this.post({ type: 'keys', folders, cursor: done ? '0' : '1', done, scanned: this.keys.length, match: this.match });
+      };
+
+      // Cluster：逐 master SCAN（SCAN 无 key 无法路由），各自维护游标。
+      if (session.client.isCluster) {
+        const nodes = session.client.nodes();
+        if (reset || this.clusterCursors.length !== nodes.length) this.clusterCursors = nodes.map(() => '0');
+        if (reset) this.keys = [];
+        const next: string[] = [];
+        const batch: string[] = [];
+        for (let i = 0; i < nodes.length; i++) {
+          const page = await redisScanOnNode(nodes[i], this.clusterCursors[i] ?? '0', {
+            match: this.match || undefined,
+            count: this.scanCount,
+          });
+          next[i] = page.cursor;
+          batch.push(...page.keys);
+        }
+        this.clusterCursors = next;
+        this.keys = [...new Set([...this.keys, ...batch])];
+        foldersOf();
+        return;
+      }
+
       if (reset) { this.cursor = '0'; this.keys = []; }
       const result = await redisScan(session.client, this.cursor, {
         match: this.match || undefined,
@@ -179,8 +211,7 @@ export class RedisView extends BaseWebView {
       // SCAN 语义允许重复返回同一 key：累积去重，避免 scanned 虚高与内存增长。
       this.keys = [...new Set([...this.keys, ...result.keys])];
       this.cursor = result.cursor;
-      const folders = foldRedisKeys(this.keys, this.conn.keySeparator || ':');
-      this.post({ type: 'keys', folders, cursor: this.cursor, done: this.cursor === '0', scanned: this.keys.length, match: this.match });
+      foldersOf();
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
     }
