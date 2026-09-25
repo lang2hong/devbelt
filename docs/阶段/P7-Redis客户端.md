@@ -518,11 +518,18 @@ db-host 最小改动：
 ### 自动化（必须全绿）
 
 - `pnpm -r typecheck && pnpm -r lint && pnpm -r test`。
-- CI（`.github/workflows/ci.yml` `integration` job）：`redis:7` + `redis-auth:7`（requirepass）两个
-  service container，跑 `packages/db-core/test/integration/redisReal.test.ts`——覆盖真实回包形状
-  （SCAN 游标/`INFO keyspace`/`SELECT`/`SLOWLOG`/`HGETALL`/`ZRANGE WITHSCORES`）、五类型往返、
-  只读拦截、密码认证。**TLS/SSH/Cluster/Sentinel 仍属手工矩阵**（见下）。
-  - 首次执行：CI run `36089800559` 绿（integration 4m26s；`redisReal.test.ts` 14 例全过）。
+- CI（`.github/workflows/ci.yml` `integration` job）：
+  - `redis:7` service + step 起 requirepass 实例 + step 起自签 TLS 实例；跑
+    `packages/db-core/test/integration/redisReal.test.ts`——真实回包形状（SCAN 游标/`INFO keyspace`/
+    `SELECT`/`SLOWLOG`/`HGETALL`/`ZRANGE WITHSCORES`）、五类型往返、只读拦截、密码认证、TLS
+    （自签 CA+主机名校验 / 显式放行）。**16 例**。
+  - SSH：`apps/vscode-ext/test/integration/redisSshTunnel.test.ts` 用**进程内 ssh2 `Server`**
+    （password + direct-tcpip）端到端验证 `SshTunnel`（host-key gate → forwardOut → 回收）+ 真实 Redis。
+    注：这是 SshTunnel 客户端全链路，**非 OpenSSH 互操作**（CI sshd 镜像默认禁 TCP 转发，故不走外部 sshd）。
+- **Cluster/Sentinel 暂无代码**，其真实矩阵随 S4 的 Docker 多节点 job 接入。状态/CLI/FLUSHALL 确认/
+  SlowLog 的 UI 路径仍属手工走查。
+  - 已执行：CI run `36089800559`（standalone/密码/只读，14 例）、`36110487818`（+TLS，16 例）、
+    `36113138072`（+SSH，integration 4m39s）全绿。
 - db-core：RedisClient standalone 单测（ping/info/scan/CRUD/hash/list/set/zset/TTL/sendCommand
   切面只读拦截/命令日志事件/重试策略）；splitargs 单测；命令表分类单测。
 - vscode-ext：commandRegistration 测试补 Redis 命令声明↔注册一致性；mechanicalGates 测试补
