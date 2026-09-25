@@ -35,6 +35,7 @@ const actionLabels: Record<string, string> = {
   user_manage: 'User',
   import_data: 'Import',
   process_kill: 'Kill Process',
+  redis_command: 'Redis',
   export_data: 'Export',
 };
 

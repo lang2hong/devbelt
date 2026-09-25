@@ -32,7 +32,9 @@ export type WebviewMode =
   /** 账户中心：单面板 + 标签页（账户 / 设备 / 套餐）。 */
   | 'accountHub'
   /** P5：2FA/TOTP 验证器侧边栏视图。 */
-  | 'authenticator';
+  | 'authenticator'
+  /** P7：Redis 面板（Status / CLI / SlowLog）。 */
+  | 'redis';
 
 /** 账户中心标签。 */
 export type HubTab = 'account' | 'session' | 'plans';
@@ -119,3 +121,38 @@ export type AuthenticatorDownMessage =
   | { type: 'formError'; field?: string; message: string; source?: 'form' | 'external' }
   | { type: 'openAddForm' }
   | { type: 'error'; message: string };
+
+// ────────────────────────── P7：Redis 面板协议 ──────────────────────────
+// 与 RedisView.ts / RedisView.vue 共享。IPC 边界约定同上：缺失值一律用 `null`。
+
+/** SLOWLOG GET 单条（已归一化，供 webview 直接渲染）。 */
+export interface RedisSlowlogEntry {
+  id: number;
+  timestamp: number;
+  durationMicros: number;
+  command: string;
+  clientAddr: string;
+  clientName: string;
+}
+
+/** Redis 面板标签页。 */
+export type RedisTab = 'status' | 'console' | 'slowlog';
+
+/** Extension Host → webview。 */
+export type RedisDownMessage =
+  | { type: 'init'; mode: 'redis'; isZh: boolean }
+  | { type: 'config'; connName: string; host: string; port: number; db: number;
+      readOnly: boolean; connMode: 'standalone' | 'cluster' | 'sentinel'; redisTab: RedisTab }
+  | { type: 'info'; info: string }
+  | { type: 'slowlog'; entries: RedisSlowlogEntry[] }
+  | { type: 'commandResult'; id: string; command: string; ok: boolean; result: string; costMs: number; error: string | null }
+  | { type: 'confirmRequired'; id: string; command: string }
+  | { type: 'error'; message: string };
+
+/** webview → Extension Host。 */
+export type RedisUpMessage =
+  | { type: 'ready'; __load?: string }
+  | { type: 'runCommand'; id: string; line: string }
+  | { type: 'confirmDanger'; id: string; accept: boolean }
+  | { type: 'refreshInfo' }
+  | { type: 'refreshSlowlog' };

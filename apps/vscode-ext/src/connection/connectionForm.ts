@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { DatabaseType } from '@devbelt/db-core';
-import { ConnectionFactory } from '@devbelt/db-core';
+import { ConnectionFactory, RedisClient, buildRedisTlsOptions } from '@devbelt/db-core';
 import type { IConnection } from '@devbelt/db-core';
 import { ConnectionStore, stripSecrets, type SavedConnection, type ConnectionGroup } from '@devbelt/db-host/connection/connectionStore';
 import { SshTunnel } from './sshTunnel';
@@ -143,6 +143,36 @@ export class ConnectionForm extends BaseWebView {
         const localPort = await SshTunnel.create({ ...effective, id: testId });
         if (localPort) { host = '127.0.0.1'; port = localPort; }
       }
+      if (dbType === DatabaseType.REDIS) {
+        // Redis：临时客户端 + PING 探活；SSH 隧道由上面的 SshTunnel 临时建连提供，
+        // finally 统一关闭（与 SQL 分支同一套 testId 清理）。
+        const client = new RedisClient({
+          host,
+          port,
+          username: effective.user || undefined,
+          password: effective.password,
+          db: effective.redisDb,
+          tls: effective.useSSL
+            ? buildRedisTlsOptions({
+                caPath: effective.caPath,
+                clientCertPath: effective.clientCertPath,
+                clientKeyPath: effective.clientKeyPath,
+                rejectUnauthorized: effective.rejectUnauthorized,
+                servername: effective.host,
+              })
+            : undefined,
+          connectTimeout: effective.connectTimeout,
+          readOnly: true,
+        });
+        try {
+          await client.connect();
+          await client.ping();
+        } finally {
+          await client.close();
+        }
+        const cost = Date.now() - start;
+        return { ok: true, message: l10n('form.connected', { ms: cost }) };
+      }
       const { connection: conn1 } = ConnectionFactory.createWithDialect(dbType, {
         ...effective,
         host,
@@ -173,6 +203,7 @@ function defaultPort(dbType: DatabaseType): number {
   switch (dbType) {
     case DatabaseType.PG: return 5432;
     case DatabaseType.SQLITE: return 0;
+    case DatabaseType.REDIS: return 6379;
     default: return 3306;
   }
 }
@@ -226,5 +257,11 @@ function decodeConnection(payload: any): SavedConnection {
     sshPassword: payload.sshPassword || undefined,
     sshPrivateKeyPath: payload.sshPrivateKeyPath || undefined,
     sshPassphrase: payload.sshPassphrase || undefined,
+    // Redis（P7 S2）：ACL 用户名复用 user，密码复用 password；证书路径复用 caPath/clientCertPath/clientKeyPath。
+    redisDb: payload.redisDb !== undefined && payload.redisDb !== '' && Number.isFinite(Number(payload.redisDb)) ? Number(payload.redisDb) : undefined,
+    keySeparator: payload.keySeparator || undefined,
+    redisMode: payload.redisMode || undefined,
+    sentinelName: payload.sentinelName || undefined,
+    sentinelPassword: payload.sentinelPassword || undefined,
   };
 }

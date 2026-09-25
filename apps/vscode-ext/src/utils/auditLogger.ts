@@ -15,7 +15,9 @@ export type AuditAction =
   | 'user_manage'
   | 'import_data'
   | 'export_data'
-  | 'process_kill';
+  | 'process_kill'
+  /** P7：Redis 写/危险命令。 */
+  | 'redis_command';
 
 export interface AuditEntry {
   id: string;

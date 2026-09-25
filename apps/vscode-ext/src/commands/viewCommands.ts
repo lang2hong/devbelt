@@ -12,6 +12,7 @@ import { DataDiffView } from '../result/dataDiffView';
 import { DashboardView } from '../result/dashboardView';
 import { AuditLogView } from '../result/auditLogView';
 import { PoolStatusView } from '../result/poolStatusView';
+import { RedisView } from '../result/redisView';
 import { canUseErDiagram } from '@devbelt/db-host/sync/entitlementGate';
 import { configureBackupSchedule } from './backupWizard';
 import { l10n } from '../i18n';
@@ -99,6 +100,16 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     // 连接池状态
     vscode.commands.registerCommand('devbelt.showPoolStatus', () => {
       PoolStatusView.open(manager);
+    }),
+    // Redis 面板（P7 S2）：Status / CLI / SlowLog
+    vscode.commands.registerCommand('devbelt.redis.console', (node: any) => {
+      if (node?.conn) RedisView.open(node.conn, manager, 'console');
+    }),
+    vscode.commands.registerCommand('devbelt.redis.serverStatus', (node: any) => {
+      if (node?.conn) RedisView.open(node.conn, manager, 'status');
+    }),
+    vscode.commands.registerCommand('devbelt.redis.slowlog', (node: any) => {
+      if (node?.conn) RedisView.open(node.conn, manager, 'slowlog');
     }),
     // 定时备份
     vscode.commands.registerCommand('devbelt.scheduleBackup', async (node: any) => {

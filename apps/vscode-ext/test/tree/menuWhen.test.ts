@@ -44,6 +44,11 @@ function allContextValues(): Set<string> {
   // 分组节点没有连接
   mk(TreeItemCollapsibleState.Collapsed, NodeKind.Group, undefined);
 
+  // P7：Redis 连接节点（S2 尚无子节点，只有连接层 open/closed）。
+  const redisConn: any = { id: 'r', host: 'h', dbType: 'REDIS' };
+  mk(TreeItemCollapsibleState.None, NodeKind.Connection, redisConn);
+  mk(TreeItemCollapsibleState.Collapsed, NodeKind.Connection, redisConn);
+
   for (const dbType of DB_TYPES) {
     const conn: any = { id: 'c', host: 'h', dbType };
     // 连接节点：折叠态 = 未打开，展开态 = 已打开
@@ -121,7 +126,7 @@ describe('树右键菜单 when 表达式', () => {
 
   it('contextValue 一律形如 <base>.<DBTYPE>', () => {
     for (const value of allContextValues()) {
-      expect(value).toMatch(/^[A-Za-z_]+\.(MYSQL|PG|SQLITE|NONE)$/);
+      expect(value).toMatch(/^[A-Za-z_]+\.(MYSQL|PG|SQLITE|REDIS|NONE)$/);
     }
   });
 

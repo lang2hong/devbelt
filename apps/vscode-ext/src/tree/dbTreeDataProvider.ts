@@ -148,6 +148,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   /** 连接节点子节点：数据库列表 */
   private async buildConnectionChildren(element: DbTreeNode): Promise<DbTreeNode[]> {
     if (!element.conn) return [];
+    // Redis（P7 S2）：不发 SQL 元数据查询；DB/键节点随 S3 接入。
+    if (element.conn.dbType === DatabaseType.REDIS) return [];
     const session = await this.manager.connectSql(element.conn);
     if (!session.capabilities.multiDatabaseExplorer) {
       return [
@@ -440,8 +442,11 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   /** 创建连接节点：未打开时无箭头+双击触发打开；已打开时可展开 */
   private makeConnectionNode(conn: SavedConnection, parent?: DbTreeNode): DbTreeNode {
     const isOpen = this.openConns.has(conn.id);
+    const isRedis = conn.dbType === DatabaseType.REDIS;
     const node = new DbTreeNode(
       conn.name || conn.host,
+      // 折叠态同时编码「是否已打开」（见 DbTreeNode contextValue 规则）。
+      // Redis（S2）暂无子节点，由 buildConnectionChildren 返回 []；DB/键随 S3。
       isOpen ? TreeItemCollapsibleState.Collapsed : TreeItemCollapsibleState.None,
       NodeKind.Connection,
       conn,
@@ -469,7 +474,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         : conn.environment === 'staging'
           ? 'editorWarning.foreground'
           : 'gitDecoration.untrackedResourceForeground';
-      node.iconPath = new ThemeIcon('server', new ThemeColor(envColor));
+      node.iconPath = new ThemeIcon(isRedis ? 'symbol-key' : 'server', new ThemeColor(envColor));
       if (hasPathIssues) {
         node.tooltip = this.pathTooltip(pathCheck.issues);
       }

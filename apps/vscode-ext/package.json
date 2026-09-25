@@ -454,6 +454,21 @@
         "category": "DB Client"
       },
       {
+        "command": "devbelt.redis.serverStatus",
+        "title": "%cmd.redis.serverStatus%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.redis.console",
+        "title": "%cmd.redis.console%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.redis.slowlog",
+        "title": "%cmd.redis.slowlog%",
+        "category": "DB Client"
+      },
+      {
         "command": "devbelt.compareSchema",
         "title": "%cmd.compareSchema%",
         "category": "DB Client"
@@ -1291,7 +1306,7 @@
         },
         {
           "command": "devbelt.dashboard",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\./",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
           "group": "5_tools"
         },
         {
@@ -1471,17 +1486,17 @@
         },
         {
           "command": "devbelt.openConnection",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionClosed\\./",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionClosed\\.(MYSQL|PG|SQLITE|REDIS)$/",
           "group": "1_view"
         },
         {
           "command": "devbelt.closeConnection",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\./",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE|REDIS)$/",
           "group": "1_view"
         },
         {
           "command": "devbelt.refreshConnection",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\./",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE|REDIS)$/",
           "group": "0_refresh"
         },
         {
@@ -1506,32 +1521,47 @@
         },
         {
           "command": "devbelt.newQueryFromConn",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\./",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
           "group": "2_new"
         },
         {
           "command": "devbelt.createDatabase",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\./",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
           "group": "2_new"
         },
         {
           "command": "devbelt.openTerminal",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\./",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
           "group": "5_tools"
         },
         {
           "command": "devbelt.serverStatus",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\./",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
+          "group": "5_tools"
+        },
+        {
+          "command": "devbelt.redis.serverStatus",
+          "when": "view == devbelt.explorer && viewItem == connectionOpen.REDIS",
+          "group": "5_tools"
+        },
+        {
+          "command": "devbelt.redis.console",
+          "when": "view == devbelt.explorer && viewItem == connectionOpen.REDIS",
+          "group": "1_view"
+        },
+        {
+          "command": "devbelt.redis.slowlog",
+          "when": "view == devbelt.explorer && viewItem == connectionOpen.REDIS",
           "group": "5_tools"
         },
         {
           "command": "devbelt.importData",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\./",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
           "group": "4_data"
         },
         {
           "command": "devbelt.exportConnection",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\./",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
           "group": "4_data"
         },
         {

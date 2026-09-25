@@ -1,4 +1,4 @@
-import { ConnectionFactory, QueryService, MetadataService, DataService, TableService, DialectRegistry, DatabaseType } from '@devbelt/db-core';
+import { ConnectionFactory, QueryService, MetadataService, DataService, TableService, DialectRegistry, DatabaseType, RedisClient, buildRedisTlsOptions } from '@devbelt/db-core';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import type { HistoryStore } from '../history/historyStore';
 import { parseNoBackslashEscapes, parseStandardConformingStringsOff, type SqlScanOptions } from '@devbelt/db-core/sql';
@@ -6,7 +6,7 @@ import { dialectScanOptions } from '../utils/sqlDialectOptions';
 import { QueryHistoryRecorder } from '../history/queryHistoryRecorder';
 import { SshTunnel } from './sshTunnel';
 import { validateConnectionPaths, type PathValidationResult } from './connectionPathValidator';
-import { requireSqlSession, type ConnectionSession, type SqlConnectionSession } from './connectionSession';
+import { requireSqlSession, type ConnectionSession, type RedisConnectionSession, type SqlConnectionSession } from './connectionSession';
 
 /** 建连前路径校验失败：阻断建连（不含完整路径内容）。 */
 export class ConnectionPathError extends Error {
@@ -258,17 +258,84 @@ export class ConnectionManager {
     generation: number,
   ): Promise<ConnectionSession> {
     if (conn.dbType === DatabaseType.REDIS) {
-      return this.buildRedisSession(conn);
+      return this.buildRedisSession(conn, host, port, generation);
     }
     return this.buildSqlSession(conn, host, port, generation);
   }
 
   /**
-   * Redis 会话装配骨架（P7 S1）。
-   * 真实连接/TLS/只读切面接线在 S2 完成；此前 Redis 连接不可用。
+   * 装配 Redis 会话（P7 S2）。
+   *
+   * SSH 隧道已由 doConnect 统一建好（host/port 已是本地转发地址），本方法只构造
+   * RedisClient、等 ready、包成 RedisConnectionSession；任何失败抛错，由 doConnect
+   * 统一回收隧道（复用隧道清理路径），与 SQL 分支同构。
    */
-  private async buildRedisSession(conn: SavedConnection): Promise<ConnectionSession> {
-    throw new Error(`Redis session wiring is not implemented yet (P7 S2): ${conn.id}`);
+  private async buildRedisSession(
+    conn: SavedConnection,
+    host: string,
+    port: number,
+    generation: number,
+  ): Promise<RedisConnectionSession> {
+    const tls = conn.useSSL
+      ? buildRedisTlsOptions({
+          caPath: conn.caPath,
+          clientCertPath: conn.clientCertPath,
+          clientKeyPath: conn.clientKeyPath,
+          rejectUnauthorized: conn.rejectUnauthorized,
+          servername: conn.host,
+        })
+      : undefined;
+    const client = new RedisClient({
+      host,
+      port,
+      username: conn.user || undefined,
+      password: conn.password,
+      db: conn.redisDb,
+      tls,
+      connectTimeout: conn.connectTimeout,
+      readOnly: conn.readOnly === true,
+    });
+
+    try {
+      await client.connect();
+      // 探活：确认服务端可响应（只读模式下 PING 属读命令，不受影响）。
+      await client.ping();
+    } catch (err) {
+      await client.close();
+      throw err;
+    }
+
+    // 建连期间用户关闭/删除该连接（或管理器整体销毁）：建成即销毁。
+    if (this.disposing || this.generation(conn.id) !== generation) {
+      await client.close();
+      throw new Error('connection was closed before it could be established');
+    }
+
+    const session: RedisConnectionSession = {
+      kind: 'redis',
+      client,
+      db: conn.redisDb ?? 0,
+      mode: 'standalone',
+      readOnly: conn.readOnly === true,
+      isAlive: () => client.isAlive(),
+      close: () => {
+        void client.close();
+        this.sessions.delete(conn.id);
+        this.sessionEntries.delete(conn.id);
+        this.noBackslashEscapes.delete(conn.id);
+        this.pgStdOff.delete(conn.id);
+        if (conn.sshHost) SshTunnel.close(conn.id);
+      },
+    };
+    this.sessions.set(conn.id, session);
+    this.sessionEntries.set(conn.id, { session, lastUsed: Date.now(), connId: conn.id });
+    if (this.disposing) {
+      session.close();
+      throw new Error('ConnectionManager is disposing');
+    }
+    // 入池后再按上限淘汰，保护刚建好的会话（与 SQL 分支一致）。
+    this.evictIfNeeded(conn.id);
+    return session;
   }
 
   /** 装配 SQL 连接与四个服务；失败由 doConnect 统一清理隧道。 */

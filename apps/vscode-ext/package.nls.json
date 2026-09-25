@@ -123,5 +123,8 @@
   "cmd.compareData": "Compare Data",
   "cmd.showAuditLog": "Show Audit Log",
   "cmd.showPoolStatus": "Show Connection Pool Status",
-  "cmd.scheduleBackup": "Schedule Backup"
+  "cmd.scheduleBackup": "Schedule Backup",
+  "cmd.redis.serverStatus": "Redis Server Status",
+  "cmd.redis.console": "Redis Console",
+  "cmd.redis.slowlog": "Redis Slow Log"
 }

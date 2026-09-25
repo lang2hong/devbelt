@@ -42,6 +42,8 @@ export interface SavedConnection extends ConnectionConfig {
 
   /** Redis：默认库号（standalone；cluster 无 SELECT）。 */
   redisDb?: number;
+  /** Redis：键名分隔符（键树折叠用；缺省 ':'）。 */
+  keySeparator?: string;
   /** Redis：连接模式（缺省 standalone；cluster/sentinel 见 P7 S4）。 */
   redisMode?: 'standalone' | 'cluster' | 'sentinel';
   /** Redis：Sentinel master 名称。 */

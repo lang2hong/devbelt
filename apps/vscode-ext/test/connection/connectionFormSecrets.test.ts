@@ -40,4 +40,10 @@ describe('mergeSecretsFromStored', () => {
     const decoded = conn({ password: 'x' });
     expect(mergeSecretsFromStored(decoded, undefined).password).toBe('x');
   });
+
+  it('P7：Redis sentinelPassword 也在敏感字段回退之列', () => {
+    const stored = conn({ dbType: 'REDIS' as SavedConnection['dbType'], sentinelPassword: 'sentinel-secret' });
+    const merged = mergeSecretsFromStored(conn({ name: 'Renamed' }), stored);
+    expect(merged.sentinelPassword).toBe('sentinel-secret');
+  });
 });

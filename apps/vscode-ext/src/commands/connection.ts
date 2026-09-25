@@ -11,6 +11,7 @@ import { hasUrlCredentials, stripUrlCredentials } from '../utils/connectionUrl';
 import { diagWarn } from '../utils/diagnostics';
 import { chmod, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import type { RedisConnectionSession } from '../connection/connectionSession';
 import type { Deps, Sub } from './shared';
 import { confirm } from './shared';
 import {
@@ -19,6 +20,14 @@ import {
   maxSavedConnections,
   maxConcurrentConnections,
 } from '@devbelt/db-host/sync/entitlementGate';
+
+async function redisServerVersion(session: RedisConnectionSession): Promise<string> {
+  try {
+    const info = await session.client.info('server');
+    const m = /^redis_version:([^\r\n]+)/m.exec(info);
+    return m ? m[1].trim() : '';
+  } catch { return ''; }
+}
 
 async function queryServerVersion(session: any, dbType: string): Promise<string> {
   try {
@@ -105,9 +114,11 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     connCtx.setLast(conn);
     treeProvider.refresh();
     try {
-      const session = await manager.connectSql(conn);
+      const session = await manager.connect(conn);
       manager.markExplicit(conn.id);
-      const ver = await queryServerVersion(session, conn.dbType);
+      const ver = session.kind === 'redis'
+        ? await redisServerVersion(session)
+        : await queryServerVersion(session, conn.dbType);
       treeProvider.setConnVersion(conn.id, `${conn.dbType} ${ver}`.trim());
       treeProvider.refresh();
       AuditLogger.tryLog({ action: 'connection_open', connName: conn.name || conn.host, database: conn.database });

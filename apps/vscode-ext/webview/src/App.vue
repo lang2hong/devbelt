@@ -18,6 +18,8 @@ import AccountHubView from './views/AccountHubView.vue';
 
 // 验证器视图按需加载：单独分片，不把体积压到所有 panel 共用的 index.js 主 bundle。
 const AuthenticatorView = defineAsyncComponent(() => import('./views/AuthenticatorView.vue'));
+// Redis 面板（P7 S2）同样按需加载，单独分片。
+const RedisView = defineAsyncComponent(() => import('./views/RedisView.vue'));
 
 const { onMessage } = useVsCode();
 const mode = ref<WebviewMode>('query');
@@ -54,5 +56,6 @@ onUnmounted(() => cleanup?.());
       <LoginFormView v-else-if="mode === 'loginForm'" />
       <AccountHubView v-else-if="mode === 'accountHub'" :tab="hubTab" />
       <AuthenticatorView v-else-if="mode === 'authenticator'" />
+      <RedisView v-else-if="mode === 'redis'" />
       <ERDiagramView v-else />
 </template>

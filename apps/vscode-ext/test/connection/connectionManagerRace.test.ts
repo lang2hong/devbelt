@@ -29,9 +29,21 @@ vi.mock('@devbelt/db-core', async (importOriginal) => {
     isAlive(): boolean { return true; }
     query(): void { /* noop */ }
   }
+  class FakeRedisClient {
+    private alive = true;
+    constructor(_opts: unknown) { /* noop */ }
+    async connect(): Promise<void> { /* noop */ }
+    async ping(): Promise<string> { return 'PONG'; }
+    async close(): Promise<void> { this.alive = false; }
+    isAlive(): boolean { return this.alive; }
+    async sendCommand(): Promise<unknown> { return 'OK'; }
+    async info(): Promise<string> { return ''; }
+  }
   const dialect = { capabilities: { operations: [] }, wrap: (s: string) => s, dbType: 'MYSQL' };
   return {
     ...actual,
+    RedisClient: FakeRedisClient,
+    buildRedisTlsOptions: (input: unknown) => input,
     ConnectionFactory: { createWithDialect: () => ({ connection: new FakeConnection(), dialect }) },
     QueryService: class { constructor() { /* noop */ } },
     MetadataService: class { constructor() { /* noop */ } },
@@ -204,14 +216,19 @@ describe('ConnectionManager dispose/connect race', () => {
     expect(manager.activeConnections).toBe(1);
   });
 
-  it('REDIS 连接：connectSql 抛 not-implemented，且零会话/零隧道残留', async () => {
+  it('REDIS 连接：装配 kind:redis 会话；connectSql 对其抛 NotSqlSessionError', async () => {
     const manager = new ConnectionManager();
     managers.push(manager);
 
-    await expect(manager.connectSql(conn({ dbType: DatabaseType.REDIS }))).rejects.toThrow(/not implemented yet/);
+    const session = await manager.connect(conn({ dbType: DatabaseType.REDIS, port: 6379 }));
+    expect(session.kind).toBe('redis');
+    expect(manager.peek('c-1')?.kind).toBe('redis');
+    // SQL 访问器不得返回 Redis 会话；Redis 连接也不应误建隧道。
     expect(manager.peekSql('c-1')).toBeUndefined();
-    expect(manager.activeConnections).toBe(0);
-    expect(manager.openCount()).toBe(0);
+    expect(manager.openCount()).toBe(1);
     expect(tunnelClosed).toBe(0);
+
+    await expect(manager.connectSql(conn({ dbType: DatabaseType.REDIS, port: 6379 })))
+      .rejects.toThrow(/expected a SQL connection session/);
   });
 });
