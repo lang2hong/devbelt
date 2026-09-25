@@ -27,6 +27,7 @@ const pendingConfirm = ref<{ id: string; command: string } | null>(null);
 const tab = ref<'console' | 'slowlog' | 'commandLog'>('console');
 interface CommandLogEntry { command: string; args: string[]; durationMs: number; ok: boolean; error: string | null; at: number }
 const commandLog = ref<CommandLogEntry[]>([]);
+const connectionEvents = ref<{ event: string; detail: string | null; at: number }[]>([]);
 
 // 键树
 const emptyFolders: RedisKeyFolder = { name: '', path: '', count: 0, folders: [], keys: [] };
@@ -161,6 +162,8 @@ onMounted(() => {
     } else if (msg.type === 'commandLog') {
       const e = msg.entry ?? {};
       commandLog.value = [...commandLog.value, { command: String(e.command ?? ''), args: e.args ?? [], durationMs: Number(e.durationMs ?? 0), ok: !!e.ok, error: e.error ?? null, at: Date.now() }].slice(-500);
+    } else if (msg.type === 'connectionEvent') {
+      connectionEvents.value = [...connectionEvents.value, { event: String(msg.event ?? ''), detail: msg.detail ?? null, at: Number(msg.at ?? Date.now()) }].slice(-100);
     } else if (msg.type === 'confirmOpRequired') {
       pendingOpDetail.value = String(msg.detail ?? '');
     } else if (msg.type === 'error') {
@@ -256,6 +259,13 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
           />
           <SlowLog v-else-if="tab === 'slowlog'" :entries="entries" @refresh="post({ type: 'refreshSlowlog' })" />
           <div v-else class="cmdlog">
+            <div class="events">
+              <strong>{{ t('wv.redis.events.title') }}</strong>
+              <div v-if="!connectionEvents.length" class="empty">{{ t('wv.redis.events.empty') }}</div>
+              <div v-for="(e, i) in connectionEvents" :key="'e' + i" class="ev">
+                {{ new Date(e.at).toLocaleTimeString() }} · {{ e.event }}{{ e.detail ? ' ' + e.detail : '' }}
+              </div>
+            </div>
             <div v-if="!commandLog.length" class="empty">{{ t('wv.redis.commandLog.empty') }}</div>
             <table v-else>
               <thead><tr>
@@ -309,6 +319,8 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
 .cmdlog .mono { font-family: var(--vscode-editor-font-family, monospace); word-break: break-all; }
 .cmdlog tr.err td { color: var(--vscode-errorForeground); }
 .cmdlog .empty { color: var(--vscode-descriptionForeground); padding: 12px; text-align: center; }
+.cmdlog .events { padding: 2px 0 6px; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.12)); }
+.cmdlog .ev { color: var(--vscode-descriptionForeground); font-size: 11px; }
 .redis-panel { display: flex; flex-direction: column; height: 100vh; padding: 8px 10px; box-sizing: border-box; font-size: 12px; position: relative; }
 .header { display: flex; gap: 8px; align-items: center; }
 .conn { font-weight: 600; }

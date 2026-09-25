@@ -984,4 +984,6 @@ export const en: MessageCatalog = {
   'wv.redis.commandLog.command': 'Command',
   'wv.redis.commandLog.cost': 'Cost',
   'wv.redis.commandLog.time': 'Time',
+  'wv.redis.events.title': 'Connection events',
+  'wv.redis.events.empty': 'No connection events yet.',
 };

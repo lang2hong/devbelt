@@ -545,3 +545,36 @@ describe('RedisView S4 命令日志订阅', () => {
     expect(m.entry).toEqual({ command: 'SET', args: ['k', 'v'], durationMs: 3, ok: true, error: null });
   });
 });
+
+describe('RedisView S4 连接事件日志', () => {
+  it('订阅 client 事件 → 下发 connectionEvent；reconnecting/end 写审计', async () => {
+    const handlers = new Map<string, (...a: any[]) => void>();
+    const client: any = {
+      isCluster: false, mode: 'standalone', db: 0,
+      sendCommand: async () => 'OK', info: async () => '',
+      on: (ev: string, l: (...a: any[]) => void) => { handlers.set(ev, l); },
+      addLogListener: () => () => {},
+    };
+    const manager: any = {
+      retain: vi.fn(), release: vi.fn(),
+      connect: async () => ({ kind: 'redis', client, db: 0, mode: 'standalone', readOnly: false, isAlive: () => true, close: () => {} }),
+    };
+    RedisView.open(conn, manager, 'console');
+    const view: any = (RedisView as any).current;
+    await view.handleMessage({ type: 'ready' });
+    await view.handleMessage({ type: 'ready' });
+    expect(handlers.has('reconnecting')).toBe(true);
+
+    (view.post as any).mockClear();
+    h.audits.length = 0;
+    handlers.get('reconnecting')!(new Error('switch'));
+    const m = (view.post as any).mock.calls.map((c: any[]) => c[0]).find((x: any) => x.type === 'connectionEvent');
+    expect(m.event).toBe('reconnecting');
+    expect(m.detail).toContain('switch');
+    expect(h.audits.some((a) => a.sql === 'connection:reconnecting')).toBe(true);
+
+    (view.post as any).mockClear();
+    handlers.get('ready')!();
+    expect((view.post as any).mock.calls.some((c: any[]) => c[0].type === 'connectionEvent' && c[0].event === 'ready')).toBe(true);
+  });
+});

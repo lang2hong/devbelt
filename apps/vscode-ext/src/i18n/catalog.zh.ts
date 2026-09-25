@@ -962,4 +962,6 @@ export const zh: MessageCatalog = {
   'wv.redis.commandLog.command': '命令',
   'wv.redis.commandLog.cost': '耗时',
   'wv.redis.commandLog.time': '时间',
+  'wv.redis.events.title': '连接事件',
+  'wv.redis.events.empty': '暂无连接事件。',
 };

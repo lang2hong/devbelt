@@ -161,6 +161,7 @@ export type RedisDownMessage =
   | { type: 'keyAction'; action: string; ok: boolean; error: string | null }
   | { type: 'confirmOpRequired'; kind: string; detail: string }
   | { type: 'commandLog'; entry: RedisCommandLogEntry }
+  | { type: 'connectionEvent'; event: string; detail: string | null; at: number }
   | { type: 'streamGroupDetail'; key: string; group: string; consumers: Record<string, string>[]; pending: { count: number; minId: string; maxId: string; consumers: [string, string][] } }
   | { type: 'streamRangeResult'; key: string; entries: RedisStreamEntry[]; done: boolean }
   | { type: 'commandResult'; id: string; command: string; ok: boolean; result: string; costMs: number; error: string | null }

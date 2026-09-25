@@ -48,6 +48,8 @@ export class RedisView extends BaseWebView {
   private readonly statusOnly: boolean;
   /** 命令日志订阅（会话 client 级；首次取会话时挂上）。 */
   private logUnsub?: () => void;
+  /** 连接/故障切换事件是否已订阅（每会话一次）。 */
+  private eventsBound = false;
 
   private constructor(
     private readonly conn: SavedConnection,
@@ -151,6 +153,25 @@ export class RedisView extends BaseWebView {
       await redisSelect(session.client, target);
       session.db = target;
     }
+    // 订阅连接/故障切换事件（sentinel 切换会经历 reconnecting→ready；cluster 扩缩容同理）。
+    if (!this.eventsBound && typeof session.client.on === 'function') {
+      this.eventsBound = true;
+      for (const ev of ['connect', 'ready', 'reconnecting', 'end', 'close', 'error']) {
+        session.client.on(ev, (...args: unknown[]) => {
+          const detail = args.length && args[0] != null ? String(args[0]) : null;
+          this.post({ type: 'connectionEvent', event: ev, detail, at: Date.now() });
+          if (ev === 'reconnecting' || ev === 'end') {
+            AuditLogger.tryLog({
+              action: 'redis_command',
+              connName: this.conn.name || this.conn.host,
+              database: String(this.db ?? this.conn.redisDb ?? 0),
+              sql: `connection:${ev}`,
+            });
+          }
+        });
+      }
+    }
+
     // 首次取会话时订阅命令日志（所有命令，含非 CLI 路径），逐条下发给 CommandLog 面板。
     if (!this.logUnsub && typeof session.client.addLogListener === 'function') {
       this.logUnsub = session.client.addLogListener((entry) => {
