@@ -94,6 +94,29 @@ jobs:
           --health-timeout=5s
           --health-retries=20
 
+      # P7：Redis 真实实例（无密码 + requirepass 两例），供 db-core Redis 集成测试。
+      # 未设 DEVBELT_DB_TEST_REDIS_* 时测试整体 skip，本地无 Redis 也能过。
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+      redis-auth:
+        image: redis:7
+        ports:
+          - 6380:6379
+        options: >-
+          --requirepass ci-redis-pass
+          --health-cmd="redis-cli -a ci-redis-pass ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
     steps:
       - uses: actions/checkout@v5
 
@@ -120,6 +143,9 @@ jobs:
           # 服务容器建的库是 devbelt_db_verify；不设 DEVBELT_DB_TEST_MYSQL_DB 时测试默认 devbelt_db_verify → ER_BAD_DB_ERROR。
           DEVBELT_DB_TEST_MYSQL_DB: devbelt_db_verify
           DEVBELT_DB_TEST_PG_URL: postgres://postgres:ci-pg-pass@127.0.0.1:5432/devbelt_db_verify
+          # P7：真实 Redis（standalone / requirepass）。
+          DEVBELT_DB_TEST_REDIS_URL: redis://127.0.0.1:6379
+          DEVBELT_DB_TEST_REDIS_AUTH_URL: redis://:ci-redis-pass@127.0.0.1:6380
         run: pnpm -C packages/db-core test
 
       - name: Integration tests (server)

@@ -518,6 +518,10 @@ db-host 最小改动：
 ### 自动化（必须全绿）
 
 - `pnpm -r typecheck && pnpm -r lint && pnpm -r test`。
+- CI（`.github/workflows/ci.yml` `integration` job）：`redis:7` + `redis-auth:7`（requirepass）两个
+  service container，跑 `packages/db-core/test/integration/redisReal.test.ts`——覆盖真实回包形状
+  （SCAN 游标/`INFO keyspace`/`SELECT`/`SLOWLOG`/`HGETALL`/`ZRANGE WITHSCORES`）、五类型往返、
+  只读拦截、密码认证。**TLS/SSH/Cluster/Sentinel 仍属手工矩阵**（见下）。
 - db-core：RedisClient standalone 单测（ping/info/scan/CRUD/hash/list/set/zset/TTL/sendCommand
   切面只读拦截/命令日志事件/重试策略）；splitargs 单测；命令表分类单测。
 - vscode-ext：commandRegistration 测试补 Redis 命令声明↔注册一致性；mechanicalGates 测试补
