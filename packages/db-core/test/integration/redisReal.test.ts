@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { RedisClient, RedisReadOnlyError } from '../../src/redis/redisClient';
+import { buildRedisTlsOptions } from '../../src/redis/redisTls';
 import {
   redisDbsize,
   redisDel,
@@ -50,6 +51,8 @@ function makeClient(raw: string, readOnly = false): RedisClient {
 
 const REDIS_URL = process.env.DEVBELT_DB_TEST_REDIS_URL;
 const REDIS_AUTH_URL = process.env.DEVBELT_DB_TEST_REDIS_AUTH_URL;
+const REDIS_TLS_URL = process.env.DEVBELT_DB_TEST_REDIS_TLS_URL;
+const REDIS_TLS_CA = process.env.DEVBELT_DB_TEST_REDIS_TLS_CA;
 
 describe.skipIf(!REDIS_URL)('Redis 真实实例（standalone）', () => {
   let client: RedisClient;
@@ -198,6 +201,40 @@ describe.skipIf(!REDIS_AUTH_URL)('Redis 真实实例（requirepass）', () => {
     try {
       await expect(client.sendCommand('AUTH', ['definitely-wrong'])).rejects.toBeTruthy();
       await client.sendCommand('AUTH', [parseUrl(REDIS_AUTH_URL!).password!]).catch(() => undefined);
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+describe.skipIf(!REDIS_TLS_URL || !REDIS_TLS_CA)('Redis 真实实例（TLS 自签）', () => {
+  it('自签 CA + 主机名校验：可连（安全默认）', async () => {
+    const { host, port } = parseUrl(REDIS_TLS_URL!);
+    const client = new RedisClient({
+      host,
+      port,
+      connectTimeout: 10_000,
+      tls: buildRedisTlsOptions({ caPath: REDIS_TLS_CA!, rejectUnauthorized: true, servername: host }),
+    });
+    await client.connect();
+    try {
+      expect(await client.ping()).toBe('PONG');
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('显式放行自签（rejectUnauthorized:false）：可连', async () => {
+    const { host, port } = parseUrl(REDIS_TLS_URL!);
+    const client = new RedisClient({
+      host,
+      port,
+      connectTimeout: 10_000,
+      tls: buildRedisTlsOptions({ rejectUnauthorized: false, servername: host }),
+    });
+    await client.connect();
+    try {
+      expect(await client.ping()).toBe('PONG');
     } finally {
       await client.close();
     }

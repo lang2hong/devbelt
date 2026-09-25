@@ -136,15 +136,34 @@ jobs:
             sleep 1
           done
 
+      # TLS：自签 CA + 服务端证书（SAN IP=127.0.0.1），redis 仅开 tls-port。
+      - name: Start Redis (TLS)
+        run: |
+          mkdir -p .ci-certs
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout .ci-certs/ca.key -out .ci-certs/ca.crt -days 1 -subj "/CN=devbelt-ci-ca"
+          openssl req -newkey rsa:2048 -nodes -keyout .ci-certs/redis.key -out .ci-certs/redis.csr -subj "/CN=127.0.0.1"
+          openssl x509 -req -in .ci-certs/redis.csr -CA .ci-certs/ca.crt -CAkey .ci-certs/ca.key -CAcreateserial -out .ci-certs/redis.crt -days 1 -extfile <(printf "subjectAltName=IP:127.0.0.1")
+          chmod 644 .ci-certs/*
+          docker run -d --name redis-tls -p 6390:6390 -v "$PWD/.ci-certs:/tls:ro" redis:7 \
+            redis-server --port 0 --tls-port 6390 \
+            --tls-cert-file /tls/redis.crt --tls-key-file /tls/redis.key --tls-ca-cert-file /tls/ca.crt \
+            --tls-auth-clients no
+          for i in $(seq 1 30); do
+            docker exec redis-tls redis-cli --tls --cacert /tls/ca.crt -p 6390 ping 2>/dev/null | grep -q PONG && break
+            sleep 1
+          done
+
       - name: Integration tests (db-core)
         env:
           DEVBELT_DB_TEST_MYSQL_URL: mysql://root:ci-root-pass@127.0.0.1:3306
           # 服务容器建的库是 devbelt_db_verify；不设 DEVBELT_DB_TEST_MYSQL_DB 时测试默认 devbelt_db_verify → ER_BAD_DB_ERROR。
           DEVBELT_DB_TEST_MYSQL_DB: devbelt_db_verify
           DEVBELT_DB_TEST_PG_URL: postgres://postgres:ci-pg-pass@127.0.0.1:5432/devbelt_db_verify
-          # P7：真实 Redis（standalone / requirepass）。
+          # P7：真实 Redis（standalone / requirepass / TLS 自签）。
           DEVBELT_DB_TEST_REDIS_URL: redis://127.0.0.1:6379
           DEVBELT_DB_TEST_REDIS_AUTH_URL: redis://:ci-redis-pass@127.0.0.1:6380
+          DEVBELT_DB_TEST_REDIS_TLS_URL: rediss://127.0.0.1:6390
+          DEVBELT_DB_TEST_REDIS_TLS_CA: ${{ github.workspace }}/.ci-certs/ca.crt
         run: pnpm -C packages/db-core test
 
       - name: Integration tests (server)
