@@ -363,6 +363,11 @@ SSH 隧道与 Cluster/Sentinel NAT map 放在 vscode-ext（`apps/vscode-ext/src/
     搜索态该 db 子节点为**扁平结果**（`toRedisMatchPattern` → `SCAN MATCH`）。**硬上限**
     `REDIS_TREE_MAX=20000`：达上限停止续扫并给出提示节点（对齐 ARDM `treeNodesOverflow` 思路，
     但 VS Code TreeView 无虚拟化故取更低值）。
+  - **C-2 去重（导航单处）**：webview `keyBrowser` 退化为**纯值面板**——移除 `KeyTree`/`KeyNewDialog`
+    与键树协议（`keys`/`refreshKeys`/`loadMoreKeys`/`createKey`）；键导航/搜索/新建全在 explorer 树。
+    键节点点击 → 打开值面板并载值；无选中键时显示空态提示。单键重命名/TTL/删除/persist 仍在值面板。
+    **cluster 不退化**：连接下给合成「Keys」节点，`loadMoreRedisKeys` 逐 master SCAN（各游标 + 合并去重）
+    聚合，保留 S4 的 cluster 键浏览能力。
 - Vite 分包：`apps/vscode-ext/webview/vite.config.ts` 现有配置为单入口 `main.ts` + 自动 code
   splitting（`defineAsyncComponent` 会被 Vite 自动拆成独立 chunk，与 AuthenticatorView 模式一致），
   **不新增构建入口**、不改 rollupOptions。所有面板走现有共享 Vite 构建。
