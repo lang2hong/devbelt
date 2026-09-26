@@ -12,9 +12,9 @@ describe('deletePatternPrefill（B：按 pattern 删除预填）', () => {
     expect(deletePatternPrefill(undefined, 'user', '-')).toBe('user-*');
   });
 
-  it('db/其它 → *', () => {
-    expect(deletePatternPrefill()).toBe('*');
-    expect(deletePatternPrefill(undefined, '')).toBe('*');
+  it('db/其它 → 空串（逼用户显式输入，不预填删整库的 *）', () => {
+    expect(deletePatternPrefill()).toBe('');
+    expect(deletePatternPrefill(undefined, '')).toBe('');
   });
 });
 

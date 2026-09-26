@@ -72,12 +72,16 @@ it('S5-3 树内只读键导航：键节点有打开菜单 + 懒加载注册点',
     expect(menus.some((m) => m.command === 'devbelt.redis.deleteFolder' && m.when?.includes('redisKeyFolder.REDIS'))).toBe(true);
   });
 
-  it('C-3（B）按 pattern 删除：命令注册 + 菜单 + 计数预扫/审计', () => {
+  it('C-3（B）按 pattern 删除：命令注册 + 菜单 + 模块（cluster 逐 master/逐键）', () => {
     expect(viewCommands).toContain("registerCommand('devbelt.redis.deleteByPattern'");
     expect(menus.some((m) => m.command === 'devbelt.redis.deleteByPattern' && m.when?.includes('redisDb.REDIS'))).toBe(true);
     expect(menus.some((m) => m.command === 'devbelt.redis.deleteByPattern' && m.when?.includes('redisKeyFolder.REDIS'))).toBe(true);
-    // 计数预扫 + 审计记转义后 pattern。
-    expect(viewCommands).toContain('count += page.keys.length');
+    // 计数/删除走共享模块（cluster 逐 master）；审计记执行 pattern。
+    expect(viewCommands).toContain('countPatternKeys');
+    expect(viewCommands).toContain('runPatternDelete');
     expect(viewCommands).toContain('UNLINK ${pattern}');
+    const mod = readFileSync(join(process.cwd(), 'src/commands/redisPatternDelete.ts'), 'utf8');
+    expect(mod).toContain('redisScanOnNode');
+    expect(mod).toContain('redisUnlink(client, [key])');
   });
 });
