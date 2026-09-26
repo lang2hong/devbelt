@@ -130,6 +130,8 @@
   "cmd.redis.commandLog": "Redis Command Log",
   "cmd.redis.keyBrowser": "Open Key Browser",
   "cmd.redis.loadMoreKeys": "Load More Keys",
+  "cmd.redis.loadFolderKeys": "Load Full Folder",
+  "cmd.redis.loadAllKeys": "Load All Keys…",
   "cmd.redis.searchKeys": "Search Keys…",
   "cmd.redis.clearSearchKeys": "Clear Key Search",
   "cmd.redis.renameKey": "Rename Key…",

@@ -130,6 +130,8 @@
   "cmd.redis.commandLog": "Redis 命令日志",
   "cmd.redis.keyBrowser": "打开键浏览器",
   "cmd.redis.loadMoreKeys": "加载更多键",
+  "cmd.redis.loadFolderKeys": "加载完整文件夹",
+  "cmd.redis.loadAllKeys": "载入全部键…",
   "cmd.redis.searchKeys": "搜索键…",
   "cmd.redis.clearSearchKeys": "清除键搜索",
   "cmd.redis.renameKey": "重命名键…",

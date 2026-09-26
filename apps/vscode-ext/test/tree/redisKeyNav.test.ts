@@ -31,150 +31,290 @@ vi.mock('vscode', () => ({
 
 import { DbTreeDataProvider } from '../../src/tree/dbTreeDataProvider';
 import { DbTreeNode, NodeKind } from '../../src/tree/dbTreeNode';
+import { l10n } from '../../src/i18n';
 
 const conn: any = { id: 'c1', name: 'r', dbType: 'REDIS', host: 'h', port: 6379, keySeparator: ':' };
+const clusterConn: any = { id: 'cc', name: 'r', dbType: 'REDIS', host: 'h', port: 6379, keySeparator: ':', redisMode: 'cluster' };
 
-function pages(responses: Record<string, unknown>) {
-  const calls: [string, (string | number)[]][] = [];
-  const client = {
-    isCluster: false,
-    sendCommand: async (n: string, a: (string | number)[] = []) => {
-      calls.push([n, a]);
-      if (n === 'SCAN') {
-        const key = a.includes('MATCH') ? String(a[a.indexOf('MATCH') + 1]) : '';
-        return responses[key] ?? ['0', []];
-      }
-      return 'OK';
-    },
+type ScanReply = [string, string[]];
+
+/** 构造 mock redis client；`scan` 依据 SCAN 参数返回一页。 */
+function makeClient(
+  scan: (args: (string | number)[]) => ScanReply,
+  opts: { cluster?: boolean; nodes?: unknown[] } = {},
+) {
+  return {
+    isCluster: !!opts.cluster,
+    mode: opts.cluster ? 'cluster' : 'standalone',
+    db: 0,
+    nodes: () => opts.nodes ?? [],
+    sendCommand: async (n: string, a: (string | number)[] = []) => (n === 'SCAN' ? scan(a) : 'OK'),
     runExclusive: <T>(fn: () => Promise<T>): Promise<T> => fn(),
+    info: async () => '',
   };
-  const manager: any = { connect: async () => ({ kind: 'redis', client, db: 3, mode: 'standalone', readOnly: false, isAlive: () => true, close: () => {} }) };
-  const store: any = { get: () => undefined, list: () => [] };
-  return { provider: new DbTreeDataProvider(store, manager), calls };
 }
 
-function dbNode(): DbTreeNode {
-  const n = new DbTreeNode('db0', TreeItemCollapsibleState.Collapsed, NodeKind.RedisDb, conn);
+function makeProvider(client: any): DbTreeDataProvider {
+  const manager: any = {
+    connect: async () => ({ kind: 'redis', client, db: 0, mode: client.mode, readOnly: false, isAlive: () => true, close: () => {} }),
+  };
+  const store: any = { get: () => undefined, list: () => [] };
+  return new DbTreeDataProvider(store, manager);
+}
+
+function dbNode(c: any = conn): DbTreeNode {
+  const n = new DbTreeNode('db0', TreeItemCollapsibleState.Collapsed, NodeKind.RedisDb, c);
   n.redisDbIndex = 0;
   return n;
 }
 
-describe('S5-3 树内只读键导航（懒 SCAN + 折叠）', () => {
+const matchOf = (a: (string | number)[]): string | undefined =>
+  a.includes('MATCH') ? String(a[a.indexOf('MATCH') + 1]) : undefined;
 
-  it('DB 展开：根级 SCAN → 文件夹 + 叶子键', async () => {
-    const { provider, calls } = pages({ '': ['0', ['user:1', 'user:2', 'cache:a', 'standalone']] });
+describe('D* 键树（根扁平 SCAN + 客户端折叠）', () => {
+  it('DB 展开：根级单页 SCAN → 文件夹 + 叶子键', async () => {
+    const calls: (string | number)[][] = [];
+    const provider = makeProvider(makeClient((a) => { calls.push(a); return ['0', ['user:1', 'user:2', 'cache:a', 'standalone']]; }));
     const kids = await provider.getChildren(dbNode());
-    const folders = kids.filter((k) => k.kind === NodeKind.RedisKeyFolder).map((k) => k.label);
-    const keys = kids.filter((k) => k.kind === NodeKind.RedisKey).map((k) => k.label);
-    expect(folders).toEqual(['cache', 'user']);
-    expect(keys).toEqual(['standalone']);
-    expect(calls.some(([n]) => n === 'SELECT')).toBe(true);
-    expect(calls.some(([n, a]) => n === 'SCAN' && !a.includes('MATCH'))).toBe(true);
+    expect(kids.filter((k) => k.kind === NodeKind.RedisKeyFolder).map((k) => k.label)).toEqual(['cache', 'user']);
+    expect(kids.filter((k) => k.kind === NodeKind.RedisKey).map((k) => k.label)).toEqual(['standalone']);
+    expect(calls).toHaveLength(1);
   });
 
-  it('文件夹展开：前缀 SCAN MATCH <prefix>*', async () => {
-    const { provider, calls } = pages({
-      '': ['0', ['user:1', 'user:2']],
-      'user:*': ['0', ['user:1', 'user:2']],
-    });
+  it('文件夹展开：不再发 SCAN，直接由根扁平集折叠', async () => {
+    let scans = 0;
+    const provider = makeProvider(makeClient(() => { scans++; return ['0', ['user:1', 'user:2']]; }));
     const kids = await provider.getChildren(dbNode());
     const user = kids.find((k) => k.kind === NodeKind.RedisKeyFolder)!;
-    expect(user.redisKeyPrefix).toBe('user');
+    scans = 0;
     const leaves = await provider.getChildren(user);
+    expect(scans).toBe(0);
     expect(leaves.map((k) => k.label)).toEqual(['user:1', 'user:2']);
     expect(leaves.every((k) => k.command?.command === 'devbelt.redis.keyBrowser')).toBe(true);
-    expect(leaves.every((k) => k.redisKey === k.label)).toBe(true);
-    expect(calls.some(([n, a]) => n === 'SCAN' && a.includes('MATCH') && a.includes('user:*'))).toBe(true);
   });
 
-  it('游标非 0：追加「加载更多」哨兵（loadMoreKeys 命令）', async () => {
-    const { provider } = pages({ '': ['42', ['a:1', 'b:2']] });
+  it('游标非 0：根层追加唯一「加载更多」哨兵（loadMoreKeys 命令）', async () => {
+    const provider = makeProvider(makeClient(() => ['42', ['a:1', 'b:2']]));
     const kids = await provider.getChildren(dbNode());
-    const more = kids.find((k) => k.kind === NodeKind.RedisKeyLoadMore);
-    expect(more).toBeTruthy();
-    expect(more!.command?.command).toBe('devbelt.redis.loadMoreKeys');
+    const more = kids.filter((k) => k.kind === NodeKind.RedisKeyLoadMore);
+    expect(more).toHaveLength(1);
+    expect(more[0].command?.command).toBe('devbelt.redis.loadMoreKeys');
   });
 
-  it('cluster（无 DB 节点）不参与（DB 展开走 SELECT 跳过）', async () => {
-    const { provider, calls } = pages({ '': ['0', ['k1']] });
-    const node = dbNode();
-    await provider.getChildren(node);
-    // 本用例仅确认 standalone 路径会 SELECT；cluster 不经 DB 节点（buildConnectionChildren 返回 []）。
-    expect(calls.length).toBeGreaterThan(0);
+  it('根层扫完：不再出现「加载更多」', async () => {
+    const provider = makeProvider(makeClient(() => ['0', ['k1', 'k2']]));
+    const kids = await provider.getChildren(dbNode());
+    expect(kids.some((k) => k.kind === NodeKind.RedisKeyLoadMore)).toBe(false);
   });
 
   it('搜索态：扁平结果（不折叠）+ MATCH 前缀', async () => {
-    const { provider, calls } = pages({
-      '': ['0', ['user:1']],
-      '*user*': ['0', ['user:1', 'user:2', 'cache:user']],
-    });
+    const provider = makeProvider(makeClient((a) => (matchOf(a) ? ['0', ['user:1', 'user:2', 'cache:user']] : ['0', ['user:1']])));
     const db = dbNode();
     provider.setRedisMatch(db, '*user*');
     const kids = await provider.getChildren(db);
     expect(kids.every((k) => k.kind === NodeKind.RedisKey)).toBe(true);
     expect(kids.map((k) => k.label)).toEqual(['cache:user', 'user:1', 'user:2']);
-    expect(calls.some(([n, a]) => n === 'SCAN' && a.includes('MATCH') && a.includes('*user*'))).toBe(true);
   });
 
-  it('达上限：追加提示节点而非「加载更多」', async () => {
+  it('软上限：追加「载入全部」入口节点（而非加载更多）', async () => {
     const big = Array.from({ length: 20000 }, (_, i) => `k${i}`);
-    const { provider } = pages({ '': ['0', big] });
+    const provider = makeProvider(makeClient(() => ['9', big]));
     const kids = await provider.getChildren(dbNode());
-    const notices = kids.filter((k) => k.kind === NodeKind.RedisKeyLoadMore);
-    expect(notices).toHaveLength(1);
-    expect(notices[0].command).toBeUndefined();
-    expect(String(notices[0].label)).toContain('20000');
+    const nodes = kids.filter((k) => k.kind === NodeKind.RedisKeyLoadMore);
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].command?.command).toBe('devbelt.redis.loadAllKeys');
   });
 
-  it('文件夹前缀含 glob 元字符：展开 pattern 被转义（防错查/错删）', async () => {
-    const { provider, calls } = pages({
-      '': ['0', ['a[1]:x']],
-      'a\\[1\\]:*': ['0', ['a[1]:x']],
-    });
+  it('「加载完整文件夹」：按转义前缀 SCAN → 写快照 + 徽章', async () => {
+    const pages: ScanReply[] = [['9', ['a[1]:x']], ['0', ['a[1]:y']]];
+    const seen: string[] = [];
+    const provider = makeProvider(makeClient((a) => {
+      const m = matchOf(a);
+      if (m) { seen.push(m); return pages.shift() ?? ['0', []]; }
+      return ['0', ['a[1]:x']];
+    }));
     const kids = await provider.getChildren(dbNode());
     const folder = kids.find((k) => k.kind === NodeKind.RedisKeyFolder)!;
     expect(folder.redisKeyPrefix).toBe('a[1]');
-    const leaves = await provider.getChildren(folder);
-    expect(leaves.map((k) => k.label)).toEqual(['a[1]:x']);
-    expect(calls.some(([n, a]) => n === 'SCAN' && a.includes('MATCH') && a.includes('a\\[1\\]:*'))).toBe(true);
+    expect(folder.description).toBe('');
+
+    const complete = await provider.loadFullFolder(folder);
+    expect(complete).toBe(true);
+    expect(seen).toContain('a\\[1\\]:*'); // glob 已转义，防错查/错删
+
+    const rebuilt = (await provider.getChildren(dbNode())).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
+    expect(rebuilt.description).toBe(l10n('redis.tree.completeBadge'));
+    const leaves = await provider.getChildren(rebuilt);
+    expect(leaves.map((k) => k.label)).toEqual(['a[1]:x', 'a[1]:y']);
   });
 
-  it('cluster：合成 Keys 节点逐 master SCAN 合并（游标未归零 → 加载更多）', async () => {
+  it('「载入全部」：链页扫到游标归零', async () => {
+    const seq: ScanReply[] = [['1', ['a:1']], ['2', ['a:2']], ['0', ['a:3']]];
+    const provider = makeProvider(makeClient(() => seq.shift() ?? ['0', []]));
+    const res = await provider.loadAllRedisKeys(dbNode());
+    expect(res.done).toBe(true);
+    expect(res.scanned).toBe(3);
+    const db = dbNode();
+    const folder = (await provider.getChildren(db)).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
+    expect(folder.label).toBe('a');
+    expect((await provider.getChildren(folder)).map((k) => k.label)).toEqual(['a:1', 'a:2', 'a:3']);
+  });
+
+  it('「载入全部」：取消信号立即中断', async () => {
+    const provider = makeProvider(makeClient(() => ['1', ['a:1']]));
+    const res = await provider.loadAllRedisKeys(dbNode(), { isCancellationRequested: true } as any);
+    expect(res.done).toBe(false);
+    expect(res.scanned).toBe(0);
+  });
+
+  it('「载入全部」取消：保留已加载键（不重置覆盖）', async () => {
+    const seq: ScanReply[] = [['5', ['a:1']]];
+    const provider = makeProvider(makeClient(() => seq.shift() ?? ['0', []]));
+    const db = dbNode();
+    await provider.getChildren(db); // 首次展开加载一页 a:1，游标 '5'
+    const res = await provider.loadAllRedisKeys(db, { isCancellationRequested: true } as any);
+    expect(res.done).toBe(false);
+    expect(res.scanned).toBe(1);
+    const folder = (await provider.getChildren(db)).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
+    expect(folder.label).toBe('a');
+    expect((await provider.getChildren(folder)).map((k) => k.label)).toEqual(['a:1']);
+  });
+
+  it('「载入全部」：达硬上限停止并标记 capped', async () => {
+    let n = 0;
+    const provider = makeProvider(makeClient(() => ['1', Array.from({ length: 500 }, () => `k${n++}`)]));
+    const res = await provider.loadAllRedisKeys(dbNode());
+    expect(res.capped).toBe(true);
+    expect(res.done).toBe(false);
+    expect(res.scanned).toBe(100000);
+  });
+
+  it('「载入全部」：游标已归零（已扫完）直接返回，不再重扫', async () => {
+    const seq: ScanReply[] = [['0', ['a:1']]];
+    const provider = makeProvider(makeClient(() => seq.shift() ?? ['1', ['should_not_happen']]));
+    const db = dbNode();
+    await provider.getChildren(db); // 首次展开即扫完：cursor '0'
+    const res = await provider.loadAllRedisKeys(db);
+    expect(res.done).toBe(true);
+    expect(res.scanned).toBe(1);
+  });
+
+  it('「加载完整文件夹」达硬上限截断：返回 false 且不落快照', async () => {
+    let n = 0;
+    const provider = makeProvider(makeClient((a) => (matchOf(a) ? ['1', Array.from({ length: 500 }, () => `a:${n++}`)] : ['0', ['a:1']])));
+    const db = dbNode();
+    const folder = (await provider.getChildren(db)).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
+    const complete = await provider.loadFullFolder(folder);
+    expect(complete).toBe(false);
+    const rebuilt = (await provider.getChildren(db)).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
+    expect(rebuilt.description).toBe('');
+  });
+
+  it('cluster 载入全部：跳过已归零的 master', async () => {
     const scans: string[] = [];
-    const master = (name: string, reply: unknown) => ({
-      call: async (cmd: string) => { if (cmd === 'SCAN') scans.push(name); return reply; },
-    });
-    const client: any = {
-      isCluster: true, mode: 'cluster', db: 0,
-      nodes: () => [master('m1', ['5', ['k1']]), master('m2', ['0', ['k2']])],
-      sendCommand: async () => 'OK', runExclusive: (fn: any) => fn(), info: async () => '',
+    const m1 = { call: async (cmd: string) => { if (cmd === 'SCAN') scans.push('m1'); return ['0', ['k1']]; } };
+    let m2c = '5';
+    const m2 = {
+      call: async (cmd: string) => {
+        if (cmd !== 'SCAN') return [];
+        const r: ScanReply = [m2c, m2c === '5' ? ['k2'] : ['k3']];
+        m2c = '0';
+        return r;
+      },
     };
-    const manager: any = { connect: async () => ({ kind: 'redis', client, db: 0, mode: 'cluster', readOnly: false, isAlive: () => true, close: () => {} }) };
-    const store: any = { get: () => undefined, list: () => [] };
-    const provider = new DbTreeDataProvider(store, manager);
-    const clusterConn: any = { id: 'cc', name: 'r', dbType: 'REDIS', host: 'h', port: 6379, keySeparator: ':', redisMode: 'cluster' };
-    const n = new DbTreeNode('Keys', TreeItemCollapsibleState.Collapsed, NodeKind.RedisDb, clusterConn);
-    n.redisDbIndex = 0;
+    const provider = makeProvider(makeClient(() => ['0', []], { cluster: true, nodes: [m1, m2] }));
+    const db = dbNode(clusterConn);
+    await provider.getChildren(db); // m1→0（完成），m2→5
+    const m1Before = scans.filter((s) => s === 'm1').length;
+    const res = await provider.loadAllRedisKeys(db);
+    expect(res.done).toBe(true);
+    expect(scans.filter((s) => s === 'm1').length).toBe(m1Before); // 不再重扫 m1
+  });
+
+  it('「加载完整文件夹」取消：不写快照（回退根折叠、无徽章）', async () => {
+    const provider = makeProvider(makeClient((a) => (matchOf(a) ? ['5', ['a:1']] : ['0', ['a:1']])));
+    const db = dbNode();
+    const folder = (await provider.getChildren(db)).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
+    const complete = await provider.loadFullFolder(folder, { isCancellationRequested: true } as any);
+    expect(complete).toBe(false);
+    const rebuilt = (await provider.getChildren(db)).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
+    expect(rebuilt.description).toBe('');
+    expect((await provider.getChildren(rebuilt)).map((k) => k.label)).toEqual(['a:1']);
+  });
+
+  it('standalone 每页短锁：SELECT 与 SCAN 同锁内，多页仍正确', async () => {
+    const calls: string[] = [];
+    const seq: ScanReply[] = [['1', ['a:1']], ['0', ['a:2']]];
+    const client = makeClient(() => seq.shift() ?? ['0', []]);
+    const orig = client.sendCommand;
+    client.sendCommand = async (n: string, a: (string | number)[] = []) => { calls.push(n); return orig(n, a); };
+    const provider = makeProvider(client);
+    const db = new DbTreeNode('db3', TreeItemCollapsibleState.Collapsed, NodeKind.RedisDb, conn);
+    db.redisDbIndex = 3;
+    const res = await provider.loadAllRedisKeys(db);
+    expect(res.done).toBe(true);
+    expect(res.scanned).toBe(2);
+    expect(calls.filter((c) => c === 'SELECT')).toHaveLength(1);
+  });
+
+  it('写操作后：仅降级受影响祖先文件夹的完整性，其它完整快照保留', async () => {
+    const provider = makeProvider(makeClient((a) => {
+      const m = matchOf(a);
+      if (m === 'a:*') return ['0', ['a:1']];
+      if (m === 'b:*') return ['0', ['b:1']];
+      return ['0', ['a:1', 'b:1']];
+    }));
+    const db = dbNode();
+    const folders = (await provider.getChildren(db)).filter((k) => k.kind === NodeKind.RedisKeyFolder);
+    const a = folders.find((k) => k.label === 'a')!;
+    const b = folders.find((k) => k.label === 'b')!;
+    await provider.loadFullFolder(a);
+    await provider.loadFullFolder(b);
+
+    let rebuilt = (await provider.getChildren(db)).filter((k) => k.kind === NodeKind.RedisKeyFolder);
+    expect(rebuilt.find((k) => k.label === 'a')!.description).toBe(l10n('redis.tree.completeBadge'));
+    expect(rebuilt.find((k) => k.label === 'b')!.description).toBe(l10n('redis.tree.completeBadge'));
+
+    const affected = new DbTreeNode('a:1', TreeItemCollapsibleState.None, NodeKind.RedisKey, conn, undefined, db);
+    affected.redisDbIndex = 0;
+    affected.redisKey = 'a:1';
+    await provider.refreshRedisAfterMutation(affected);
+
+    rebuilt = (await provider.getChildren(db)).filter((k) => k.kind === NodeKind.RedisKeyFolder);
+    expect(rebuilt.find((k) => k.label === 'a')!.description).toBe(''); // 降级为「部分」
+    expect(rebuilt.find((k) => k.label === 'b')!.description).toBe(l10n('redis.tree.completeBadge'));
+  });
+
+  it('cluster：根层逐 master SCAN，per-master count 按 master 数均分', async () => {
+    const counts: number[] = [];
+    const master = (name: string) => ({
+      call: async (cmd: string, ...args: (string | number)[]) => {
+        if (cmd === 'SCAN') counts.push(Number(args[args.length - 1]));
+        return ['0', [name]];
+      },
+    });
+    const provider = makeProvider(makeClient(() => ['0', []], { cluster: true, nodes: [master('k1'), master('k2'), master('k3')] }));
+    const n = dbNode(clusterConn);
     const kids = await provider.getChildren(n);
-    expect(kids.filter((k) => k.kind === NodeKind.RedisKey).map((k) => k.label).sort()).toEqual(['k1', 'k2']);
-    expect(scans.sort()).toEqual(['m1', 'm2']);
-    // m1 游标 '5' → 未扫完 → 仍有「加载更多」。
+    expect(kids.filter((k) => k.kind === NodeKind.RedisKey).map((k) => k.label).sort()).toEqual(['k1', 'k2', 'k3']);
+    expect(counts).toEqual([167, 167, 167]); // ceil(500 / 3)
+  });
+
+  it('cluster：游标未归零 → 仍有「加载更多」', async () => {
+    const master = (name: string, cursor: string) => ({
+      call: async (cmd: string) => (cmd === 'SCAN' ? [cursor, [name]] : []),
+    });
+    const provider = makeProvider(makeClient(() => ['0', []], { cluster: true, nodes: [master('k1', '5'), master('k2', '0')] }));
+    const kids = await provider.getChildren(dbNode(clusterConn));
     expect(kids.some((k) => k.kind === NodeKind.RedisKeyLoadMore && !!k.command)).toBe(true);
   });
 
   it('cluster 连接展开出合成 Keys 节点（RedisDb）', async () => {
-    const client: any = {
-      isCluster: true, mode: 'cluster', db: 0, nodes: () => [],
-      sendCommand: async () => 'OK', runExclusive: (fn: any) => fn(), info: async () => '',
-    };
-    const manager: any = { connect: async () => ({ kind: 'redis', client, db: 0, mode: 'cluster', readOnly: false, isAlive: () => true, close: () => {} }) };
-    const store: any = { get: () => undefined, list: () => [] };
-    const provider = new DbTreeDataProvider(store, manager);
-    const clusterConn: any = { id: 'cc2', name: 'r', dbType: 'REDIS', host: 'h', port: 6379, redisMode: 'cluster' };
+    const provider = makeProvider(makeClient(() => ['0', []], { cluster: true, nodes: [] }));
     const connNode = new DbTreeNode('r', TreeItemCollapsibleState.Collapsed, NodeKind.Connection, clusterConn);
     const kids = await provider.getChildren(connNode);
     expect(kids).toHaveLength(1);
     expect(kids[0].kind).toBe(NodeKind.RedisDb);
-    expect(kids[0].label).toBe('Keys');
+    expect(kids[0].label).toBe(l10n('redis.tree.clusterKeys'));
   });
 });

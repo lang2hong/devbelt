@@ -57,6 +57,25 @@ it('S5-3 树内只读键导航：键节点有打开菜单 + 懒加载注册点',
     expect(viewCommands).toContain("manager, 'keyBrowser'");
   });
 
+  it('D* 键树：唯一 load more + 显式加载完整文件夹/载入全部（确认/进度/取消）', () => {
+    // 命令注册
+    expect(viewCommands).toContain("registerCommand('devbelt.redis.loadFolderKeys'");
+    expect(viewCommands).toContain("registerCommand('devbelt.redis.loadAllKeys'");
+    // 进度 + 取消 + 二次确认
+    expect(viewCommands).toContain('withProgress');
+    expect(viewCommands).toContain('cancellable: true');
+    expect(viewCommands).toContain('loadAllConfirm');
+    // 菜单入口：文件夹「加载完整文件夹」、DB「载入全部」
+    expect(menus.some((m) => m.command === 'devbelt.redis.loadFolderKeys' && m.when?.includes('redisKeyFolder.REDIS'))).toBe(true);
+    expect(menus.some((m) => m.command === 'devbelt.redis.loadAllKeys' && m.when?.includes('redisDb.REDIS'))).toBe(true);
+    // provider 侧：根扁平折叠 + 完整文件夹快照 + 定向失效
+    const tree = readFileSync(join(process.cwd(), 'src/tree/dbTreeDataProvider.ts'), 'utf8');
+    expect(tree).toContain('loadFullFolder');
+    expect(tree).toContain('loadAllRedisKeys');
+    expect(tree).toContain('groupRedisKeyChildren');
+    expect(tree).toContain('completeBadge');
+  });
+
   it('C-1 树内搜索/写操作：命令注册 + 菜单 when', () => {
     const cmds = [
       'devbelt.redis.searchKeys', 'devbelt.redis.clearSearchKeys', 'devbelt.redis.newKey',

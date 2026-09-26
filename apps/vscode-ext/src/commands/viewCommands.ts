@@ -4,7 +4,7 @@ import {
   redisSelect, redisSet, redisUnlink, redisZAdd,
 } from '@devbelt/db-core';
 import type { ConnectionManager } from '../connection/connectionManager';
-import type { DbTreeDataProvider } from '../tree/dbTreeDataProvider';
+import { REDIS_TREE_HARD_CAP, type DbTreeDataProvider } from '../tree/dbTreeDataProvider';
 import type { BackupScheduler } from '../schedule/backupScheduler';
 import type { AuthService } from '../sync/authService';
 import { AuditLogger } from '../utils/auditLogger';
@@ -183,7 +183,53 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     vscode.commands.registerCommand('devbelt.redis.loadMoreKeys', async (node: any) => {
       if (!node) return;
       await treeProvider.loadMoreRedisKeys(node);
-      treeProvider.refreshNode(node.parent ?? node);
+      treeProvider.refreshRedisDbNode(node);
+    }),
+    // D*：显式「加载完整文件夹」（按前缀独立 SCAN + 进度/取消）。
+    vscode.commands.registerCommand('devbelt.redis.loadFolderKeys', async (node: any) => {
+      if (!node?.conn) return;
+      const prefix = node.redisKeyPrefix ?? '';
+      if (!prefix) return;
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: l10n('redis.tree.loadingFolder', { prefix }),
+          cancellable: true,
+        },
+        async (progress, token) => {
+          const complete = await treeProvider.loadFullFolder(node, token, (loaded) => {
+            progress.report({ message: l10n('redis.tree.loadedCount', { count: String(loaded) }) });
+          });
+          treeProvider.refreshRedisDbNode(node);
+          if (complete) vscode.window.showInformationMessage(l10n('redis.tree.folderLoaded', { prefix }));
+        },
+      );
+    }),
+    // D*：根层「载入全部键」（modal 二次确认 + 进度 + 取消 + 硬上限）。
+    vscode.commands.registerCommand('devbelt.redis.loadAllKeys', async (node: any) => {
+      if (!node?.conn) return;
+      const pick = await vscode.window.showWarningMessage(
+        l10n('redis.tree.loadAllConfirm', { max: String(REDIS_TREE_HARD_CAP) }),
+        { modal: true },
+        l10n('redis.tree.loadAll'),
+      );
+      if (pick !== l10n('redis.tree.loadAll')) return;
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: l10n('redis.tree.loadingAll'),
+          cancellable: true,
+        },
+        async (progress, token) => {
+          const res = await treeProvider.loadAllRedisKeys(node, token, (loaded) => {
+            progress.report({ message: l10n('redis.tree.loadedCount', { count: String(loaded) }) });
+          });
+          treeProvider.refreshRedisDbNode(node);
+          if (res.capped) {
+            vscode.window.showWarningMessage(l10n('redis.tree.loadAllCapped', { max: String(REDIS_TREE_HARD_CAP) }));
+          }
+        },
+      );
     }),
     // ───── C-1：树内写操作/搜索（导航与编辑都收进 explorer） ─────
     vscode.commands.registerCommand('devbelt.redis.searchKeys', async (node: any) => {
@@ -247,7 +293,7 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
       const started = Date.now();
       try {
         // 转义后的 pattern 也用于审计（记实际执行的 pattern）。cluster 逐 master + 逐键 UNLINK。
-        // 注：全量循环在 runExclusive 内（不受 REDIS_TREE_MAX 树展示上限约束），正确性优先。
+        // 注：删除路径独立于键树加载集与软/硬上限（全量循环），正确性优先。
         await runPatternDelete(node.conn, node.redisDbIndex, pattern);
         auditRedis(node.conn, node.redisDbIndex, `UNLINK ${pattern}`, started);
         await afterRedisMutation(node);

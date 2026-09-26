@@ -484,6 +484,16 @@
         "category": "DB Client"
       },
       {
+        "command": "devbelt.redis.loadFolderKeys",
+        "title": "%cmd.redis.loadFolderKeys%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.redis.loadAllKeys",
+        "title": "%cmd.redis.loadAllKeys%",
+        "category": "DB Client"
+      },
+      {
         "command": "devbelt.redis.searchKeys",
         "title": "%cmd.redis.searchKeys%",
         "category": "DB Client"
@@ -1635,6 +1645,11 @@
           "group": "1_view"
         },
         {
+          "command": "devbelt.redis.loadAllKeys",
+          "when": "view == devbelt.explorer && viewItem == redisDb.REDIS",
+          "group": "1_view"
+        },
+        {
           "command": "devbelt.refreshNode",
           "when": "view == devbelt.explorer && viewItem == redisDb.REDIS",
           "group": "0_refresh"
@@ -1673,6 +1688,11 @@
           "command": "devbelt.redis.deleteFolder",
           "when": "view == devbelt.explorer && viewItem == redisKeyFolder.REDIS",
           "group": "5_del"
+        },
+        {
+          "command": "devbelt.redis.loadFolderKeys",
+          "when": "view == devbelt.explorer && viewItem == redisKeyFolder.REDIS",
+          "group": "1_view"
         },
         {
           "command": "devbelt.redis.deleteByPattern",
