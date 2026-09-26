@@ -49,6 +49,10 @@ function allContextValues(): Set<string> {
   mk(TreeItemCollapsibleState.None, NodeKind.Connection, redisConn);
   mk(TreeItemCollapsibleState.Collapsed, NodeKind.Connection, redisConn);
   mk(TreeItemCollapsibleState.None, NodeKind.RedisDb, redisConn);
+  // S5-3：只读键导航节点（文件夹/键/加载更多）。
+  mk(TreeItemCollapsibleState.Collapsed, NodeKind.RedisKeyFolder, redisConn);
+  mk(TreeItemCollapsibleState.None, NodeKind.RedisKey, redisConn);
+  mk(TreeItemCollapsibleState.None, NodeKind.RedisKeyLoadMore, redisConn);
 
   for (const dbType of DB_TYPES) {
     const conn: any = { id: 'c', host: 'h', dbType };

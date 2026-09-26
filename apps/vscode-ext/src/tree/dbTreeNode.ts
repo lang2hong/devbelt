@@ -17,8 +17,14 @@ export enum NodeKind {
   Index = 'index',
   Trigger = 'trigger',
   ForeignKey = 'foreignKey',
-  /** P7 S3：Redis 逻辑库节点（keys 在 webview 内分页加载，不在树里展开）。 */
+  /** P7 S3：Redis 逻辑库节点。S5-3：可展开为只读键导航。 */
   RedisDb = 'redisDb',
+  /** P7 S5-3：Redis 键导航——按分隔符折叠的文件夹（只读）。 */
+  RedisKeyFolder = 'redisKeyFolder',
+  /** P7 S5-3：Redis 键导航——具体键（只读，点击开值面板）。 */
+  RedisKey = 'redisKey',
+  /** P7 S5-3：Redis 键导航——「加载更多」哨兵（下一页 SCAN）。 */
+  RedisKeyLoadMore = 'redisKeyLoadMore',
 }
 
 /** 分类子类型 */
@@ -40,6 +46,9 @@ const ICON_MAP: Record<string, string> = {
   [NodeKind.Trigger]: 'zap',
   [NodeKind.ForeignKey]: 'link',
   [NodeKind.RedisDb]: 'symbol-key',
+  [NodeKind.RedisKeyFolder]: 'folder',
+  [NodeKind.RedisKey]: 'symbol-key',
+  [NodeKind.RedisKeyLoadMore]: 'ellipsis',
 };
 
 /** 分类节点的图标 id（按 categoryType 区分） */
@@ -111,6 +120,10 @@ export class DbTreeNode extends TreeItem {
 
   /** Redis 逻辑库序号（仅 RedisDb 节点，构造后赋值）。 */
   public redisDbIndex?: number;
+  /** Redis 键名（仅 RedisKey 节点）。 */
+  public redisKey?: string;
+  /** Redis 文件夹前缀（仅 RedisKeyFolder 节点，用于前缀 SCAN）。 */
+  public redisKeyPrefix?: string;
 
   /** 外键关联表（仅 ForeignKey 节点，构造后赋值） */
   public refTable?: string;

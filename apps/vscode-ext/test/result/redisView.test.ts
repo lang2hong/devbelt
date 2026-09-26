@@ -235,6 +235,64 @@ describe('RedisView S3 键树/值/编辑', () => {
     expect(sent.some(([n, a]) => n === 'SCAN' && a.includes('MATCH') && a.includes('*user*'))).toBe(true);
   });
 
+  it('S5-3：树点键打开（initialKey）→ 就绪后自动加载该键值', async () => {
+    const sent: [string, (string | number)[]][] = [];
+    const session: any = {
+      kind: 'redis', db: 0, mode: 'standalone', readOnly: false, isAlive: () => true, close: () => {},
+      client: {
+        sendCommand: async (n: string, a: (string | number)[] = []) => {
+          sent.push([n, a]);
+          if (n === 'SCAN') return ['0', []];
+          if (n === 'TYPE') return 'string';
+          if (n === 'TTL') return -1;
+          if (n === 'STRLEN') return 3;
+          if (n === 'GET') return 'val';
+          return 'OK';
+        },
+        runExclusive: <T>(fn: () => Promise<T>): Promise<T> => fn(),
+        info: async () => '',
+      },
+    };
+    const manager: any = { retain: vi.fn(), release: vi.fn(), connect: async () => session };
+    const view: any = RedisView.open(conn, manager, 'keyBrowser', 0, 'user:1');
+    await view.handleMessage({ type: 'ready' });
+    await view.handleMessage({ type: 'ready' });
+    const v = posts(view).find((m) => m.type === 'value');
+    expect(v.key).toBe('user:1');
+    expect(v.data).toEqual({ kind: 'string', text: 'val', base64: Buffer.from('val').toString('base64'), binary: false, bytes: 3 });
+  });
+
+  it('reloadKeys：树侧写操作后重扫键树并刷新当前值', async () => {
+    const sent: [string, (string | number)[]][] = [];
+    const session: any = {
+      kind: 'redis', db: 0, mode: 'standalone', readOnly: false, isAlive: () => true, close: () => {},
+      client: {
+        sendCommand: async (n: string, a: (string | number)[] = []) => {
+          sent.push([n, a]);
+          if (n === 'SCAN') return ['0', []];
+          if (n === 'TYPE') return 'string';
+          if (n === 'TTL') return -1;
+          if (n === 'STRLEN') return 3;
+          if (n === 'GET') return 'val';
+          return 'OK';
+        },
+        runExclusive: <T>(fn: () => Promise<T>): Promise<T> => fn(),
+        info: async () => '',
+      },
+    };
+    const manager: any = { retain: vi.fn(), release: vi.fn(), connect: async () => session };
+    const view: any = RedisView.open(conn, manager, 'keyBrowser', 0, 'user:1');
+    await view.handleMessage({ type: 'ready' });
+    await view.handleMessage({ type: 'ready' });
+    (view.post as any).mockClear();
+    sent.length = 0;
+    view.reloadKeys();
+    await vi.waitFor(() => {
+      expect(posts(view).some((m) => m.type === 'value' && m.key === 'user:1')).toBe(true);
+    });
+    expect(sent.some(([n]) => n === 'SCAN')).toBe(true);
+  });
+
   it('selectKey 拉取类型化值', async () => {
     const { view } = makeView(handler, 0);
     await mountDb(view);

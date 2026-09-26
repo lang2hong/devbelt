@@ -73,33 +73,43 @@ export class RedisView extends BaseWebView {
   private eventsBound = false;
   /** 注册表键 `${conn.id}:${panel}`，onDispose 清理。 */
   private readonly registryKey: string;
+  /** S5-3：树点键时带的首选键（就绪后自动加载其值）。 */
+  private initialKey?: string;
+  /** 最近一次查看的键（树侧写操作后据此刷新值）。 */
+  private lastKey?: string;
 
   private constructor(
     private readonly conn: SavedConnection,
     private readonly manager: ConnectionManager,
     private readonly panelType: RedisPanel,
     private db?: number,
+    initialKey?: string,
   ) {
     super(redisViewType(panelType), redisPanelTitle(panelType, conn, db));
+    this.initialKey = initialKey;
     this.manager.retain(conn.id);
     this.registryKey = `${conn.id}:${panelType}`;
   }
 
   /**
    * 打开面板。同 (conn,panel) 已存在则聚焦；keyBrowser 且 db 变化则切换并重载键树。
+   * `selectKey`（S5-3，树点键）会聚焦并加载该键的值。
    * 返回实例（便于测试/聚焦）。
    */
-  static open(conn: SavedConnection, manager: ConnectionManager, panel: RedisPanel, db?: number): RedisView {
+  static open(conn: SavedConnection, manager: ConnectionManager, panel: RedisPanel, db?: number, selectKey?: string): RedisView {
     const existing = RedisView.instances.get(`${conn.id}:${panel}`);
     if (existing) {
       if ((panel === 'keyBrowser' || panel === 'console') && db !== undefined && db !== existing.db) {
         existing.db = db;
+        existing.initialKey = selectKey;
         void existing.reconfigure();
+      } else if (selectKey) {
+        void existing.enqueuePushValue(selectKey);
       }
       existing.reveal();
       return existing;
     }
-    const view = new RedisView(conn, manager, panel, db);
+    const view = new RedisView(conn, manager, panel, db, selectKey);
     RedisView.instances.set(view.registryKey, view);
     return view;
   }
@@ -206,7 +216,13 @@ export class RedisView extends BaseWebView {
     if (session.kind !== 'redis') throw new Error('connection is not a Redis session');
     // 命令日志/连接事件订阅：任一面板打开即建立（断线审计依赖此）。
     this.ensureSubscriptions(session);
-    if (this.panelType === 'keyBrowser') { await this.enqueuePushKeys(true); return; }
+    if (this.panelType === 'keyBrowser') {
+      await this.enqueuePushKeys(true);
+      const k = this.initialKey;
+      this.initialKey = undefined;
+      if (k) await this.enqueuePushValue(k);
+      return;
+    }
     if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
     if (this.panelType === 'slowlog') { await this.pushSlowlog(); return; }
     if (this.panelType === 'console') {
@@ -225,7 +241,13 @@ export class RedisView extends BaseWebView {
     this.clusterCursors = [];
     this.match = '';
     this.postConfig();
-    if (this.panelType === 'keyBrowser') { await this.enqueuePushKeys(true); return; }
+    if (this.panelType === 'keyBrowser') {
+      await this.enqueuePushKeys(true);
+      const k = this.initialKey;
+      this.initialKey = undefined;
+      if (k) await this.enqueuePushValue(k);
+      return;
+    }
     if (this.panelType === 'console') { await this.enqueue(async () => { await this.sessionForDb(); }); return; }
   }
 
@@ -371,7 +393,17 @@ export class RedisView extends BaseWebView {
 
   // ────────────────────────── 值查看/编辑 ──────────────────────────
 
+  /** 外部（树侧写操作后）刷新键树与当前值。 */
+  reloadKeys(): void {
+    if (this.panelType !== 'keyBrowser') return;
+    void this.enqueuePushKeys(true).then(() => {
+      const k = this.lastKey;
+      if (k) void this.enqueuePushValue(k);
+    });
+  }
+
   private async enqueuePushValue(key: string): Promise<void> {
+    this.lastKey = key;
     await this.enqueue(async () => {
       const session = await this.sessionForDb();
       await this.doPushValue(session, key);

@@ -1,14 +1,21 @@
 import { Event, EventEmitter, TreeDataProvider, TreeItem, TreeItemCollapsibleState, ThemeIcon, ThemeColor, window } from 'vscode';
-import { DatabaseType, DialectRegistry, redisKeyspace } from '@devbelt/db-core';
+import { DatabaseType, DialectRegistry, redisKeyspace, redisScan, redisSelect } from '@devbelt/db-core';
 import { connectionColorToken } from '../utils/connectionColor';
 import { ConnectionStore, type SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { ConnectionPathOverrideStore } from '../connection/connectionPathOverrideStore';
 import { validateConnectionPaths, type PathValidationResult, type PathValidationIssue } from '../connection/connectionPathValidator';
 import { DbTreeNode, NodeKind, type CategoryType } from './dbTreeNode';
+import { groupRedisKeyChildren, redisPrefixPattern } from '../result/redisKeyFold';
 import { MetadataNodeBuilder } from './metadataNodeBuilder';
 import { l10n } from '../i18n';
 import { diagError } from '../utils/diagnostics';
+
+/** S5-3：Redis 键树每页 SCAN 数量（只读导航，限制单层节点数）。 */
+const REDIS_TREE_PAGE = 200;
+/** S5-3：单 db 最多加载的键节点数（超出以提示节点截断，防 TreeView 卡死；ARDM 同类上限 200k）。
+ *  仅约束**树展示**；删除路径（deleteFolder 全量循环）按用户意图走全量，不受此限。 */
+const REDIS_TREE_MAX = 20000;
 
 /**
  * 连接树数据提供者。
@@ -39,6 +46,13 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
 
   /** 有效配置的路径校验结果缓存（按 connId，异步填充，供同步渲染读）。 */
   private readonly pathIssues = new Map<string, PathValidationResult>();
+
+  /** S5-3：Redis 只读键导航懒加载状态（key = `${connId}:db${idx}:${prefix}`）。 */
+  private readonly redisKeys = new Map<string, string[]>();
+  private readonly redisCursors = new Map<string, string>();
+  private readonly redisScanned = new Set<string>();
+  /** S5-3：每 db 的搜索匹配（key = `${connId}:db${idx}`，值为 Redis MATCH pattern）。 */
+  private readonly redisMatches = new Map<string, string>();
 
   constructor(
     private readonly store: ConnectionStore,
@@ -103,6 +117,32 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   markClosed(connId: string): void {
     this.openConns.delete(connId);
     this.connVersions.delete(connId);
+    this.clearRedisKeyState(connId);
+  }
+
+  /** 清理某连接的 Redis 键树懒加载状态。 */
+  private clearRedisKeyState(connId: string): void {
+    const p = `${connId}:`;
+    for (const k of [...this.redisKeys.keys()]) if (k.startsWith(p)) this.redisKeys.delete(k);
+    for (const k of [...this.redisCursors.keys()]) if (k.startsWith(p)) this.redisCursors.delete(k);
+    for (const k of [...this.redisScanned]) if (k.startsWith(p)) this.redisScanned.delete(k);
+    for (const k of [...this.redisMatches.keys()]) if (k.startsWith(p)) this.redisMatches.delete(k);
+  }
+
+  /**
+   * 设置某 db 的搜索匹配并刷新（pattern 为空则清除）。
+   * 清空该 db 的懒加载缓存，使下次展开重新 SCAN。
+   */
+  setRedisMatch(node: DbTreeNode, pattern: string | undefined): void {
+    if (!node.conn || node.redisDbIndex === undefined) return;
+    const dbKey = `${node.conn.id}:db${node.redisDbIndex}`;
+    if (pattern) this.redisMatches.set(dbKey, pattern);
+    else this.redisMatches.delete(dbKey);
+    const p = `${dbKey}:`;
+    for (const k of [...this.redisKeys.keys()]) if (k.startsWith(p)) this.redisKeys.delete(k);
+    for (const k of [...this.redisCursors.keys()]) if (k.startsWith(p)) this.redisCursors.delete(k);
+    for (const k of [...this.redisScanned]) if (k.startsWith(p)) this.redisScanned.delete(k);
+    this.refreshNode(node);
   }
 
   /** 返回当前已打开连接的 id 列表（供全局对象搜索等使用） */
@@ -134,6 +174,11 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
           return this.buildQueryFolderChildren(element);
         case NodeKind.Table:
           return this.buildTableChildren(element);
+        // P7 S5-3：Redis 只读键导航（懒加载）。
+        case NodeKind.RedisDb:
+          return this.buildRedisKeyChildren(element, '');
+        case NodeKind.RedisKeyFolder:
+          return this.buildRedisKeyChildren(element, element.redisKeyPrefix ?? '');
         default:
           return [];
       }
@@ -161,7 +206,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         const label = `db${stat.index}`;
         const node = new DbTreeNode(
           label,
-          TreeItemCollapsibleState.None,
+          TreeItemCollapsibleState.Collapsed,
           NodeKind.RedisDb,
           conn,
           undefined,
@@ -233,6 +278,128 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
           element.label,
         ),
     );
+  }
+
+  // ────────────────── S5-3：Redis 只读键导航（懒加载） ──────────────────
+
+  /** 懒加载状态键：`${connId}:db${idx}:${prefix}`。 */
+  private redisStateKey(connId: string, dbIndex: number, prefix: string): string {
+    return `${connId}:db${dbIndex}:${prefix}`;
+  }
+
+  /** 加载某前缀下的一页键（首次即首页）；供展开与「加载更多」调用。 */
+  async loadMoreRedisKeys(node: DbTreeNode): Promise<void> {
+    const conn = node.conn;
+    if (!conn || node.redisDbIndex === undefined) return;
+    const prefix = node.redisKeyPrefix ?? '';
+    const stateKey = this.redisStateKey(conn.id, node.redisDbIndex, prefix);
+    // 已达上限：不再续扫（提示节点由 buildRedisKeyChildren 给出）。
+    if ((this.redisKeys.get(stateKey)?.length ?? 0) >= REDIS_TREE_MAX) {
+      this.redisScanned.add(stateKey);
+      return;
+    }
+    const cursor = this.redisCursors.get(stateKey) ?? '0';
+    const sep = conn.keySeparator || ':';
+    const dbKey = `${conn.id}:db${node.redisDbIndex}`;
+    // 搜索态（仅根级）优先用用户 match；否则文件夹用前缀 pattern。
+    const match = prefix === '' ? this.redisMatches.get(dbKey) : undefined;
+    const pattern = match ?? (prefix ? redisPrefixPattern(prefix, sep) : undefined);
+    try {
+      const session = await this.manager.connect(conn);
+      if (session.kind !== 'redis') return;
+      const client = session.client;
+      const dbIndex = node.redisDbIndex;
+      await client.runExclusive(async () => {
+        if (!client.isCluster && dbIndex !== session.db) {
+          await redisSelect(client, dbIndex);
+          session.db = dbIndex;
+        }
+        const page = await redisScan(client, cursor, { match: pattern, count: REDIS_TREE_PAGE });
+        const acc = this.redisKeys.get(stateKey) ?? [];
+        const merged = [...new Set([...acc, ...page.keys])];
+        this.redisKeys.set(stateKey, merged.slice(0, REDIS_TREE_MAX));
+        this.redisCursors.set(stateKey, page.cursor);
+      });
+      this.redisScanned.add(stateKey);
+    } catch (err) {
+      diagError('redis key tree scan failed', (err as Error).message);
+      this.redisScanned.add(stateKey);
+    }
+  }
+
+  /** 由已加载 key 生成子节点：搜索态为扁平结果，否则折叠文件夹；末尾「加载更多」/上限提示。 */
+  private async buildRedisKeyChildren(parent: DbTreeNode, prefix: string): Promise<DbTreeNode[]> {
+    const conn = parent.conn;
+    if (!conn || parent.redisDbIndex === undefined) return [];
+    const stateKey = this.redisStateKey(conn.id, parent.redisDbIndex, prefix);
+    if (!this.redisScanned.has(stateKey)) await this.loadMoreRedisKeys(parent);
+    const keys = this.redisKeys.get(stateKey) ?? [];
+    const searching = prefix === '' && this.redisMatches.has(`${conn.id}:db${parent.redisDbIndex}`);
+    const group = searching
+      ? { folders: [], keys: [...keys].sort() }
+      : groupRedisKeyChildren(keys, prefix, conn.keySeparator || ':');
+    const folderNodes = group.folders.map((f) => {
+      const n = new DbTreeNode(f.name, TreeItemCollapsibleState.Collapsed, NodeKind.RedisKeyFolder, conn, undefined, parent);
+      n.redisDbIndex = parent.redisDbIndex;
+      n.redisKeyPrefix = f.prefix;
+      n.id = `${conn.id}:db${parent.redisDbIndex}:f:${f.prefix}`;
+      return n;
+    });
+    const keyNodes = group.keys.map((k) => this.redisKeyNode(parent, k));
+    const out = [...folderNodes, ...keyNodes];
+    if (keys.length >= REDIS_TREE_MAX) {
+      out.push(this.redisNoticeNode(parent, l10n('redis.tree.capReached', { max: String(REDIS_TREE_MAX) })));
+    } else if ((this.redisCursors.get(stateKey) ?? '0') !== '0') {
+      out.push(this.redisLoadMoreNode(parent, prefix));
+    }
+    return out;
+  }
+
+  private redisKeyNode(parent: DbTreeNode, key: string): DbTreeNode {
+    const n = new DbTreeNode(key, TreeItemCollapsibleState.None, NodeKind.RedisKey, parent.conn, undefined, parent);
+    n.redisDbIndex = parent.redisDbIndex;
+    n.redisKey = key;
+    n.id = `${parent.conn!.id}:db${parent.redisDbIndex}:k:${key}`;
+    n.command = { command: 'devbelt.redis.keyBrowser', title: l10n('redis.tree.open'), arguments: [n] };
+    return n;
+  }
+
+  private redisLoadMoreNode(parent: DbTreeNode, prefix: string): DbTreeNode {
+    const n = new DbTreeNode(l10n('redis.tree.loadMore'), TreeItemCollapsibleState.None, NodeKind.RedisKeyLoadMore, parent.conn, undefined, parent);
+    n.redisDbIndex = parent.redisDbIndex;
+    n.redisKeyPrefix = prefix;
+    n.id = `${parent.conn!.id}:db${parent.redisDbIndex}:more:${prefix}`;
+    n.command = { command: 'devbelt.redis.loadMoreKeys', title: l10n('redis.tree.loadMore'), arguments: [n] };
+    return n;
+  }
+
+  /** 上限提示节点（无命令，仅展示）。 */
+  private redisNoticeNode(parent: DbTreeNode, label: string): DbTreeNode {
+    const n = new DbTreeNode(label, TreeItemCollapsibleState.None, NodeKind.RedisKeyLoadMore, parent.conn, undefined, parent);
+    n.redisDbIndex = parent.redisDbIndex;
+    n.id = `${parent.conn!.id}:db${parent.redisDbIndex}:notice`;
+    return n;
+  }
+
+  /** 向上找所属 RedisDb 节点。 */
+  private findRedisDb(node: DbTreeNode): DbTreeNode | undefined {
+    let n: DbTreeNode | undefined = node;
+    while (n) {
+      if (n.kind === NodeKind.RedisDb) return n;
+      n = n.parent;
+    }
+    return undefined;
+  }
+
+  /**
+   * 键变更（重命名/TTL/删除/新建）后重扫该 db 并保留当前搜索。
+   * 清空该 db 懒加载缓存以免陈旧，再 refresh db 节点。
+   */
+  async refreshRedisAfterMutation(node: DbTreeNode): Promise<void> {
+    const db = this.findRedisDb(node);
+    if (!db?.conn || db.redisDbIndex === undefined) return;
+    const dbKey = `${db.conn.id}:db${db.redisDbIndex}`;
+    this.setRedisMatch(db, this.redisMatches.get(dbKey));
   }
 
   /** 分类节点子节点：根据分类类型查询具体对象 */

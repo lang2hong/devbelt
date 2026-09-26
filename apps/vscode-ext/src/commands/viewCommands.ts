@@ -1,9 +1,13 @@
 import * as vscode from 'vscode';
+import {
+  redisExists, redisExpire, redisHSet, redisPersist, redisRename, redisRPush, redisSAdd,
+  redisScan, redisSelect, redisSet, redisUnlink, redisZAdd,
+} from '@devbelt/db-core';
 import type { ConnectionManager } from '../connection/connectionManager';
 import type { DbTreeDataProvider } from '../tree/dbTreeDataProvider';
 import type { BackupScheduler } from '../schedule/backupScheduler';
 import type { AuthService } from '../sync/authService';
-import type { AuditLogger } from '../utils/auditLogger';
+import { AuditLogger } from '../utils/auditLogger';
 import { TerminalService } from '../terminal/terminalService';
 import { TableDesignView } from '../result/tableDesignView';
 import { StatusView } from '../result/statusView';
@@ -13,6 +17,7 @@ import { DashboardView } from '../result/dashboardView';
 import { AuditLogView } from '../result/auditLogView';
 import { PoolStatusView } from '../result/poolStatusView';
 import { RedisView } from '../result/redisView';
+import { redisPrefixPattern, toRedisMatchPattern } from '../result/redisKeyFold';
 import { canUseErDiagram } from '@devbelt/db-host/sync/entitlementGate';
 import { configureBackupSchedule } from './backupWizard';
 import { l10n } from '../i18n';
@@ -31,6 +36,40 @@ export interface ViewCommandDeps {
  */
 export function registerViewCommands(deps: ViewCommandDeps): void {
   const { context, manager, treeProvider, auth, backupScheduler, auditLogger } = deps;
+
+  /** 在共享 session 上执行一段「SELECT 归一 + 命令」（互斥，cluster 跳过 SELECT）。 */
+  const withRedis = async (
+    conn: any,
+    dbIndex: number | undefined,
+    fn: (client: any) => Promise<void>,
+  ): Promise<void> => {
+    const session = await manager.connect(conn);
+    if (session.kind !== 'redis') throw new Error('connection is not a Redis session');
+    const client = session.client;
+    await client.runExclusive(async () => {
+      if (!client.isCluster && dbIndex !== undefined && dbIndex !== session.db) {
+        await redisSelect(client, dbIndex);
+        session.db = dbIndex;
+      }
+      await fn(client);
+    });
+  };
+
+  const auditRedis = (conn: any, dbIndex: number | undefined, sql: string, started?: number): void => {
+    AuditLogger.tryLog({
+      action: 'redis_command',
+      connName: conn?.name || conn?.host || '',
+      database: String(dbIndex ?? conn?.redisDb ?? 0),
+      sql,
+      costTime: started === undefined ? undefined : Date.now() - started,
+    });
+  };
+
+  /** 树侧写操作后：重扫树 + 同步已打开的 keyBrowser 面板（键树/当前值）。 */
+  const afterRedisMutation = async (node: any): Promise<void> => {
+    await treeProvider.refreshRedisAfterMutation(node);
+    if (node?.conn) RedisView.find(node.conn.id, 'keyBrowser')?.reloadKeys();
+  };
 
   context.subscriptions.push(
     // Terminal 集成
@@ -107,7 +146,7 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
       if (node?.conn) RedisView.open(node.conn, manager, 'console', node.redisDbIndex);
     }),
     vscode.commands.registerCommand('devbelt.redis.keyBrowser', (node: any) => {
-      if (node?.conn) RedisView.open(node.conn, manager, 'keyBrowser', node.redisDbIndex);
+      if (node?.conn) RedisView.open(node.conn, manager, 'keyBrowser', node.redisDbIndex, node.redisKey);
     }),
     vscode.commands.registerCommand('devbelt.redis.serverStatus', (node: any) => {
       if (node?.conn) RedisView.open(node.conn, manager, 'serverStatus');
@@ -117,6 +156,123 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     }),
     vscode.commands.registerCommand('devbelt.redis.commandLog', (node: any) => {
       if (node?.conn) RedisView.open(node.conn, manager, 'commandLog');
+    }),
+    // S5-3：键树「加载更多」哨兵（懒加载下一页 SCAN）。
+    vscode.commands.registerCommand('devbelt.redis.loadMoreKeys', async (node: any) => {
+      if (!node) return;
+      await treeProvider.loadMoreRedisKeys(node);
+      treeProvider.refreshNode(node.parent ?? node);
+    }),
+    // ───── C-1：树内写操作/搜索（导航与编辑都收进 explorer） ─────
+    vscode.commands.registerCommand('devbelt.redis.searchKeys', async (node: any) => {
+      if (!node?.conn) return;
+      const raw = await vscode.window.showInputBox({ prompt: l10n('redis.tree.searchPrompt') });
+      if (raw === undefined) return;
+      treeProvider.setRedisMatch(node, toRedisMatchPattern(raw));
+    }),
+    vscode.commands.registerCommand('devbelt.redis.clearSearchKeys', (node: any) => {
+      if (node?.conn) treeProvider.setRedisMatch(node, undefined);
+    }),
+    vscode.commands.registerCommand('devbelt.redis.renameKey', async (node: any) => {
+      if (!node?.conn || !node.redisKey) return;
+      const newKey = await vscode.window.showInputBox({ prompt: l10n('redis.tree.renamePrompt'), value: node.redisKey });
+      if (!newKey || newKey === node.redisKey) return;
+      const started = Date.now();
+      try {
+        await withRedis(node.conn, node.redisDbIndex, async (c) => {
+          if (await redisExists(c, newKey)) throw new Error(l10n('cmd.redis.renameTargetExists'));
+          await redisRename(c, node.redisKey, newKey);
+        });
+        auditRedis(node.conn, node.redisDbIndex, `RENAME ${node.redisKey}`, started);
+        await afterRedisMutation(node);
+      } catch (e) { vscode.window.showErrorMessage((e as Error).message); }
+    }),
+    vscode.commands.registerCommand('devbelt.redis.setKeyTtl', async (node: any) => {
+      if (!node?.conn || !node.redisKey) return;
+      const raw = await vscode.window.showInputBox({ prompt: l10n('redis.tree.ttlPrompt') });
+      if (raw === undefined) return;
+      const seconds = Number(raw);
+      if (!Number.isFinite(seconds) || seconds < 0) return;
+      try {
+        await withRedis(node.conn, node.redisDbIndex, async (c) => {
+          if (seconds > 0) await redisExpire(c, node.redisKey, seconds);
+          else await redisPersist(c, node.redisKey);
+        });
+        auditRedis(node.conn, node.redisDbIndex, seconds > 0 ? `EXPIRE ${node.redisKey} ${seconds}` : `PERSIST ${node.redisKey}`);
+        await afterRedisMutation(node);
+      } catch (e) { vscode.window.showErrorMessage((e as Error).message); }
+    }),
+    vscode.commands.registerCommand('devbelt.redis.deleteKey', async (node: any) => {
+      if (!node?.conn || !node.redisKey) return;
+      const pick = await vscode.window.showWarningMessage(
+        l10n('redis.tree.confirmDelete', { key: node.redisKey }), { modal: true }, l10n('common.delete'));
+      if (pick !== l10n('common.delete')) return;
+      const started = Date.now();
+      try {
+        await withRedis(node.conn, node.redisDbIndex, async (c) => { await redisUnlink(c, [node.redisKey]); });
+        auditRedis(node.conn, node.redisDbIndex, `UNLINK ${node.redisKey}`, started);
+        await afterRedisMutation(node);
+      } catch (e) { vscode.window.showErrorMessage((e as Error).message); }
+    }),
+    vscode.commands.registerCommand('devbelt.redis.deleteFolder', async (node: any) => {
+      if (!node?.conn) return;
+      const prefix = node.redisKeyPrefix ?? '';
+      if (!prefix) return;
+      const pick = await vscode.window.showWarningMessage(
+        l10n('redis.tree.confirmDeleteFolder', { prefix }), { modal: true }, l10n('common.delete'));
+      if (pick !== l10n('common.delete')) return;
+      const pattern = redisPrefixPattern(prefix, node.conn.keySeparator || ':');
+      const started = Date.now();
+      try {
+        // 转义后的 pattern 也用于审计（记实际执行的 pattern）。
+        // 注：该 db 全量循环在 runExclusive 内（不受 REDIS_TREE_MAX 树展示上限约束），
+        // 正确性优先；期间其它 Redis 命令排队等待。
+        await withRedis(node.conn, node.redisDbIndex, async (c) => {
+          let cursor = '0';
+          do {
+            const page = await redisScan(c, cursor, { match: pattern, count: 500 });
+            cursor = page.cursor;
+            if (page.keys.length) await redisUnlink(c, page.keys);
+          } while (cursor !== '0');
+        });
+        auditRedis(node.conn, node.redisDbIndex, `UNLINK ${pattern}`, started);
+        await afterRedisMutation(node);
+      } catch (e) { vscode.window.showErrorMessage((e as Error).message); }
+    }),
+    vscode.commands.registerCommand('devbelt.redis.newKey', async (node: any) => {
+      if (!node?.conn) return;
+      const name = await vscode.window.showInputBox({ prompt: l10n('redis.tree.newKeyName') });
+      if (!name) return;
+      const type = await vscode.window.showQuickPick(['string', 'hash', 'list', 'set', 'zset'], { placeHolder: l10n('redis.tree.newKeyType') });
+      if (!type) return;
+      let value = '';
+      let score = '0';
+      if (type !== 'string') {
+        const valuePrompt = type === 'hash' ? l10n('redis.tree.newKeyField')
+          : type === 'zset' ? l10n('redis.tree.newKeyMember')
+            : l10n('redis.tree.newKeyValue');
+        const v = await vscode.window.showInputBox({ prompt: valuePrompt });
+        if (v === undefined) return;
+        value = v;
+        if (type === 'zset') {
+          const s = await vscode.window.showInputBox({ prompt: l10n('redis.tree.newKeyScore'), value: '0' });
+          if (s === undefined) return;
+          score = s;
+        }
+      }
+      try {
+        await withRedis(node.conn, node.redisDbIndex, async (c) => {
+          if (await redisExists(c, name)) throw new Error(l10n('cmd.redis.keyExists'));
+          if (type === 'string') await redisSet(c, name, '');
+          else if (type === 'hash') await redisHSet(c, name, value, '');
+          else if (type === 'list') await redisRPush(c, name, [value]);
+          else if (type === 'set') await redisSAdd(c, name, [value]);
+          else await redisZAdd(c, name, score, value);
+        });
+        auditRedis(node.conn, node.redisDbIndex, `CREATE ${name}`);
+        await afterRedisMutation(node);
+        RedisView.open(node.conn, manager, 'keyBrowser', node.redisDbIndex, name);
+      } catch (e) { vscode.window.showErrorMessage((e as Error).message); }
     }),
     // 定时备份
     vscode.commands.registerCommand('devbelt.scheduleBackup', async (node: any) => {

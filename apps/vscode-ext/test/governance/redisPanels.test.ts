@@ -47,4 +47,26 @@ describe('Redis S5 面板可达性', () => {
     expect(menus.some((m) => m.command === 'devbelt.redis.console' && m.when?.includes('redisDb.REDIS'))).toBe(true);
     expect(menus.some((m) => m.command === 'devbelt.redis.keyBrowser' && m.when?.includes('redisDb.REDIS'))).toBe(true);
   });
+
+it('S5-3 树内只读键导航：键节点有打开菜单 + 懒加载注册点', () => {
+    expect(menus.some((m) => m.command === 'devbelt.redis.keyBrowser' && m.when?.includes('redisKey.REDIS'))).toBe(true);
+    expect(menus.some((m) => m.command === 'devbelt.copyNodeName' && m.when?.includes('redisKey.REDIS'))).toBe(true);
+    expect(viewCommands).toContain('devbelt.redis.loadMoreKeys');
+    expect(viewCommands).toContain("manager, 'keyBrowser'");
+  });
+
+  it('C-1 树内搜索/写操作：命令注册 + 菜单 when', () => {
+    const cmds = [
+      'devbelt.redis.searchKeys', 'devbelt.redis.clearSearchKeys', 'devbelt.redis.newKey',
+      'devbelt.redis.renameKey', 'devbelt.redis.setKeyTtl', 'devbelt.redis.deleteKey', 'devbelt.redis.deleteFolder',
+    ];
+    for (const c of cmds) expect(viewCommands, `缺注册: ${c}`).toContain(`registerCommand('${c}'`);
+    for (const c of ['devbelt.redis.searchKeys', 'devbelt.redis.clearSearchKeys', 'devbelt.redis.newKey']) {
+      expect(menus.some((m) => m.command === c && m.when?.includes('redisDb.REDIS')), `缺菜单: ${c}`).toBe(true);
+    }
+    for (const c of ['devbelt.redis.renameKey', 'devbelt.redis.setKeyTtl', 'devbelt.redis.deleteKey']) {
+      expect(menus.some((m) => m.command === c && m.when?.includes('redisKey.REDIS')), `缺菜单: ${c}`).toBe(true);
+    }
+    expect(menus.some((m) => m.command === 'devbelt.redis.deleteFolder' && m.when?.includes('redisKeyFolder.REDIS'))).toBe(true);
+  });
 });

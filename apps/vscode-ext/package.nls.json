@@ -128,5 +128,13 @@
   "cmd.redis.console": "Redis Console",
   "cmd.redis.slowlog": "Redis Slow Log",
   "cmd.redis.commandLog": "Redis Command Log",
-  "cmd.redis.keyBrowser": "Open Key Browser"
+  "cmd.redis.keyBrowser": "Open Key Browser",
+  "cmd.redis.loadMoreKeys": "Load More Keys",
+  "cmd.redis.searchKeys": "Search Keys…",
+  "cmd.redis.clearSearchKeys": "Clear Key Search",
+  "cmd.redis.renameKey": "Rename Key…",
+  "cmd.redis.setKeyTtl": "Set Key TTL…",
+  "cmd.redis.deleteKey": "Delete Key",
+  "cmd.redis.deleteFolder": "Delete Folder Keys",
+  "cmd.redis.newKey": "New Key…"
 }

@@ -12,6 +12,8 @@ const props = defineProps<{
   match: string;
   count: number;
   loading: boolean;
+  /** S5-3：树点键打开时高亮的目标键（webview 内尽力而为）。 */
+  activeKey?: string;
 }>();
 const emit = defineEmits<{
   (e: 'refresh', match: string, count: number): void;
@@ -87,7 +89,7 @@ function deleteSelected(): void {
         v-for="row in rows"
         :key="row.kind + ':' + row.path"
         class="row"
-        :class="{ folder: row.kind === 'folder', active: selected.has(row.path) }"
+        :class="{ folder: row.kind === 'folder', active: selected.has(row.path) || row.path === activeKey }"
         :style="{ paddingLeft: 6 + row.depth * 14 + 'px' }"
         @click="onClick(row, $event)"
       >

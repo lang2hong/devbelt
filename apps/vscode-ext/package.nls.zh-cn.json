@@ -128,5 +128,13 @@
   "cmd.redis.console": "Redis 控制台",
   "cmd.redis.slowlog": "Redis 慢日志",
   "cmd.redis.commandLog": "Redis 命令日志",
-  "cmd.redis.keyBrowser": "打开键浏览器"
+  "cmd.redis.keyBrowser": "打开键浏览器",
+  "cmd.redis.loadMoreKeys": "加载更多键",
+  "cmd.redis.searchKeys": "搜索键…",
+  "cmd.redis.clearSearchKeys": "清除键搜索",
+  "cmd.redis.renameKey": "重命名键…",
+  "cmd.redis.setKeyTtl": "设置键 TTL…",
+  "cmd.redis.deleteKey": "删除键",
+  "cmd.redis.deleteFolder": "删除文件夹键",
+  "cmd.redis.newKey": "新建键…"
 }

@@ -213,6 +213,7 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
           :match="match"
           :count="count"
           :loading="keysLoading"
+          :active-key="value?.key ?? ''"
           @refresh="onRefreshKeys"
           @load-more="onLoadMore"
           @select="onSelect"
