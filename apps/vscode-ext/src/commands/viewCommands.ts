@@ -18,7 +18,7 @@ import { AuditLogView } from '../result/auditLogView';
 import { PoolStatusView } from '../result/poolStatusView';
 import { RedisView } from '../result/redisView';
 import { deletePatternPrefill, redisPrefixPattern, toRedisMatchPattern } from '../result/redisKeyFold';
-import { deleteByPatternKeys, scanPatternKeys } from './redisPatternDelete';
+import { deleteByPatternKeys, PatternDeleteError, scanPatternKeys } from './redisPatternDelete';
 import { canUseErDiagram } from '@devbelt/db-host/sync/entitlementGate';
 import { configureBackupSchedule } from './backupWizard';
 import { l10n } from '../i18n';
@@ -72,7 +72,7 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     if (node?.conn) RedisView.find(node.conn.id, 'keyBrowser')?.reloadKeys();
   };
 
-  /** 按 pattern 全量删除（cluster 逐 master + 逐键 UNLINK），在 withRedis 内执行。 */
+  /** 按 pattern 全量删除（cluster 逐 master + 逐键分片并发），在 withRedis 内执行；返回实际删除数。 */
   const runPatternDelete = async (conn: any, dbIndex: number | undefined, pattern: string): Promise<number> => {
     let n = 0;
     await withRedis(conn, dbIndex, async (c) => { n = await deleteByPatternKeys(c, pattern); });
@@ -84,6 +84,13 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     let n = 0;
     await withRedis(conn, dbIndex, async (c) => { n = await scanPatternKeys(c, pattern); });
     return n;
+  };
+
+  /** 删除失败也落审计（记已删除数），避免部分删除无痕迹。 */
+  const reportPatternDeleteError = (node: any, pattern: string, err: unknown): void => {
+    const deleted = err instanceof PatternDeleteError ? err.deleted : 0;
+    auditRedis(node.conn, node.redisDbIndex, `UNLINK ${pattern} (partial:${deleted})`);
+    vscode.window.showErrorMessage(l10n('redis.tree.deletePartial', { message: (err as Error).message, count: deleted }));
   };
 
   context.subscriptions.push(
@@ -244,14 +251,18 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
         await runPatternDelete(node.conn, node.redisDbIndex, pattern);
         auditRedis(node.conn, node.redisDbIndex, `UNLINK ${pattern}`, started);
         await afterRedisMutation(node);
-      } catch (e) { vscode.window.showErrorMessage((e as Error).message); }
+      } catch (e) { reportPatternDeleteError(node, pattern, e); }
     }),
     // C-3（B 决策）：按 glob pattern 删除（不开全局多选）；预填 + 计数确认。
     vscode.commands.registerCommand('devbelt.redis.deleteByPattern', async (node: any) => {
       if (!node?.conn) return;
       const sep = node.conn.keySeparator || ':';
       const prefill = deletePatternPrefill(node.redisKey, node.redisKeyPrefix, sep);
-      const pattern = await vscode.window.showInputBox({ prompt: l10n('redis.tree.deletePatternPrompt'), value: prefill });
+      const pattern = await vscode.window.showInputBox({
+        prompt: l10n('redis.tree.deletePatternPrompt'),
+        placeHolder: l10n('redis.tree.deletePatternPlaceholder'),
+        value: prefill,
+      });
       if (!pattern) return;
       // 预扫计数（只读，cluster 逐 master），确认弹窗展示规模。
       let count = 0;
@@ -267,7 +278,7 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
         await runPatternDelete(node.conn, node.redisDbIndex, pattern);
         auditRedis(node.conn, node.redisDbIndex, `UNLINK ${pattern}`, started);
         await afterRedisMutation(node);
-      } catch (e) { vscode.window.showErrorMessage((e as Error).message); }
+      } catch (e) { reportPatternDeleteError(node, pattern, e); }
     }),
     vscode.commands.registerCommand('devbelt.redis.newKey', async (node: any) => {
       if (!node?.conn) return;

@@ -38,7 +38,7 @@ export function redisPrefixPattern(prefix: string, separator = ':'): string {
  */
 export function deletePatternPrefill(redisKey?: string, prefix?: string, separator = ':'): string {
   if (redisKey) return escapeRedisGlob(redisKey);
-  if (prefix) return `${escapeRedisGlob(prefix)}${separator}*`;
+  if (prefix) return redisPrefixPattern(prefix, separator);
   return '';
 }
 
