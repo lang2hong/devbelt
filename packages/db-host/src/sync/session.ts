@@ -206,14 +206,17 @@ export class PersonalSyncSession {
     } finally {
       signPair.seed.fill(0);
     }
+    const local = this.stateStore.getSnapshot();
+    // 解锁**不推进**本机 pull 游标：保留本机最后应用的 changeSequence，以便补拉「离线期间
+    // 他设备上传」的记录；全新设备（无本地快照）从 0 拉全量历史。服务端 changeSequence 是
+    // 用户级全局单调序列、永不重置（§7.3），故保留本机值不会回退、也不漏新记录。
     const snapshot: SyncStateSnapshot = {
       keyEpoch: state.keyEpoch,
       stateVersion: state.stateVersion,
-      changeSequence: state.changeSequence,
+      changeSequence: local?.changeSequence ?? '0',
     };
     const ownedDek = dek.slice();
     try {
-      const local = this.stateStore.getSnapshot();
       if (this.pendingCleanup) {
         await this.resumeEpochTransition(snapshot);
       } else if (local && BigInt(local.keyEpoch) < BigInt(state.keyEpoch)) {

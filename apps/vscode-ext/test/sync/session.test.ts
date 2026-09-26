@@ -175,8 +175,19 @@ describe('PersonalSyncSession', () => {
     const dek = dek32();
     await s.unlockFromState({ keyEpoch: '2', stateVersion: '3', changeSequence: '4', signPub: encodeBase64Url(deriveSyncSignKeyPair(dek).publicKey) } as StateDto, dek);
     expect(secrets.store).toHaveBeenCalledWith('devbelt.sync.dek.7.2', expect.any(String));
-    expect(s.getStateStore().getSnapshot()).toEqual({ keyEpoch: '2', stateVersion: '3', changeSequence: '4' });
+    // 新设备无本地快照 → pull 游标从 0 开始（拉全量历史），不采用远端 head。
+    expect(s.getStateStore().getSnapshot()).toEqual({ keyEpoch: '2', stateVersion: '3', changeSequence: '0' });
     expect(s.isUnlocked).toBe(true);
+  });
+
+  it('unlockFromState 保留本机已有 pull 游标（不采用远端 head，避免跳过离线增量）', async () => {
+    const { store } = makeDekStore();
+    const memento = makeMemento();
+    const s = new PersonalSyncSession('7', memento, store, makeStore().store, makeClient());
+    await s.getStateStore().setSnapshot({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' });
+    const dek = dek32();
+    await s.unlockFromState({ keyEpoch: '1', stateVersion: '9', changeSequence: '42', signPub: encodeBase64Url(deriveSyncSignKeyPair(dek).publicKey) } as StateDto, dek);
+    expect(s.getStateStore().getSnapshot()).toEqual({ keyEpoch: '1', stateVersion: '9', changeSequence: '5' });
   });
 
   it('unlockFromState 拒绝与 state.signPub 不一致的 DEK，且不落盘或解锁', async () => {
