@@ -29,6 +29,19 @@ export function redisPrefixPattern(prefix: string, separator = ':'): string {
   return `${escapeRedisGlob(prefix)}${separator}*`;
 }
 
+/**
+ * 「按 pattern 删除」输入框预填（B 决策）：
+ *  - 键节点 → 转义后的键名（精确）；
+ *  - 文件夹节点 → 转义的 prefix + sep + `*`（等价于删该文件夹）；
+ *  - 其它（db/连接）→ `*`（需用户收窄）。
+ * 预填仅转义字面部分，`*` 为有意保留的通配。
+ */
+export function deletePatternPrefill(redisKey?: string, prefix?: string, separator = ':'): string {
+  if (redisKey) return escapeRedisGlob(redisKey);
+  if (prefix) return `${escapeRedisGlob(prefix)}${separator}*`;
+  return '*';
+}
+
 export interface RedisKeyChildGroup {
   /** 直接子文件夹（相对名 + 绝对前缀）。 */
   folders: { name: string; prefix: string }[];

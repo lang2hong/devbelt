@@ -514,6 +514,11 @@
         "category": "DB Client"
       },
       {
+        "command": "devbelt.redis.deleteByPattern",
+        "title": "%cmd.redis.deleteByPattern%",
+        "category": "DB Client"
+      },
+      {
         "command": "devbelt.redis.newKey",
         "title": "%cmd.redis.newKey%",
         "category": "DB Client"
@@ -1640,6 +1645,11 @@
           "group": "9_copy"
         },
         {
+          "command": "devbelt.redis.deleteByPattern",
+          "when": "view == devbelt.explorer && viewItem == redisDb.REDIS",
+          "group": "5_del"
+        },
+        {
           "command": "devbelt.redis.keyBrowser",
           "when": "view == devbelt.explorer && viewItem == redisKey.REDIS",
           "group": "1_view"
@@ -1661,6 +1671,11 @@
         },
         {
           "command": "devbelt.redis.deleteFolder",
+          "when": "view == devbelt.explorer && viewItem == redisKeyFolder.REDIS",
+          "group": "5_del"
+        },
+        {
+          "command": "devbelt.redis.deleteByPattern",
           "when": "view == devbelt.explorer && viewItem == redisKeyFolder.REDIS",
           "group": "5_del"
         },

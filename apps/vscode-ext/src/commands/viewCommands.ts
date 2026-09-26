@@ -17,7 +17,7 @@ import { DashboardView } from '../result/dashboardView';
 import { AuditLogView } from '../result/auditLogView';
 import { PoolStatusView } from '../result/poolStatusView';
 import { RedisView } from '../result/redisView';
-import { redisPrefixPattern, toRedisMatchPattern } from '../result/redisKeyFold';
+import { deletePatternPrefill, redisPrefixPattern, toRedisMatchPattern } from '../result/redisKeyFold';
 import { canUseErDiagram } from '@devbelt/db-host/sync/entitlementGate';
 import { configureBackupSchedule } from './backupWizard';
 import { l10n } from '../i18n';
@@ -227,6 +227,43 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
         // 转义后的 pattern 也用于审计（记实际执行的 pattern）。
         // 注：该 db 全量循环在 runExclusive 内（不受 REDIS_TREE_MAX 树展示上限约束），
         // 正确性优先；期间其它 Redis 命令排队等待。
+        await withRedis(node.conn, node.redisDbIndex, async (c) => {
+          let cursor = '0';
+          do {
+            const page = await redisScan(c, cursor, { match: pattern, count: 500 });
+            cursor = page.cursor;
+            if (page.keys.length) await redisUnlink(c, page.keys);
+          } while (cursor !== '0');
+        });
+        auditRedis(node.conn, node.redisDbIndex, `UNLINK ${pattern}`, started);
+        await afterRedisMutation(node);
+      } catch (e) { vscode.window.showErrorMessage((e as Error).message); }
+    }),
+    // C-3（B 决策）：按 glob pattern 删除（不开全局多选）；预填 + 计数确认。
+    vscode.commands.registerCommand('devbelt.redis.deleteByPattern', async (node: any) => {
+      if (!node?.conn) return;
+      const sep = node.conn.keySeparator || ':';
+      const prefill = deletePatternPrefill(node.redisKey, node.redisKeyPrefix, sep);
+      const pattern = await vscode.window.showInputBox({ prompt: l10n('redis.tree.deletePatternPrompt'), value: prefill });
+      if (!pattern) return;
+      // 预扫计数（只读），确认弹窗展示规模。
+      let count = 0;
+      try {
+        await withRedis(node.conn, node.redisDbIndex, async (c) => {
+          let cursor = '0';
+          do {
+            const page = await redisScan(c, cursor, { match: pattern, count: 500 });
+            cursor = page.cursor;
+            count += page.keys.length;
+          } while (cursor !== '0');
+        });
+      } catch (e) { vscode.window.showErrorMessage((e as Error).message); return; }
+      if (count === 0) { vscode.window.showInformationMessage(l10n('redis.tree.noMatch', { pattern })); return; }
+      const pick = await vscode.window.showWarningMessage(
+        l10n('redis.tree.confirmDeletePattern', { count: String(count), pattern }), { modal: true }, l10n('common.delete'));
+      if (pick !== l10n('common.delete')) return;
+      const started = Date.now();
+      try {
         await withRedis(node.conn, node.redisDbIndex, async (c) => {
           let cursor = '0';
           do {

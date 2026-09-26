@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { escapeRedisGlob, groupRedisKeyChildren, redisPrefixPattern, toRedisMatchPattern } from '../../src/result/redisKeyFold';
+import { deletePatternPrefill, escapeRedisGlob, groupRedisKeyChildren, redisPrefixPattern, toRedisMatchPattern } from '../../src/result/redisKeyFold';
+
+describe('deletePatternPrefill（B：按 pattern 删除预填）', () => {
+  it('键节点 → 转义键名（精确）', () => {
+    expect(deletePatternPrefill('a[1]')).toBe('a\\[1\\]');
+    expect(deletePatternPrefill('user:1')).toBe('user:1');
+  });
+
+  it('文件夹节点 → 转义 prefix + sep + *', () => {
+    expect(deletePatternPrefill(undefined, 'a[1]')).toBe('a\\[1\\]:*');
+    expect(deletePatternPrefill(undefined, 'user', '-')).toBe('user-*');
+  });
+
+  it('db/其它 → *', () => {
+    expect(deletePatternPrefill()).toBe('*');
+    expect(deletePatternPrefill(undefined, '')).toBe('*');
+  });
+});
 
 describe('toRedisMatchPattern（模糊=包含）', () => {
   it('普通子串两侧包 *', () => {
