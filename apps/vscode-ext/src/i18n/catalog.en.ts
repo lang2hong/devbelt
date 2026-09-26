@@ -908,6 +908,8 @@ export const en: MessageCatalog = {
   'wv.redis.value.setTtl': 'Set TTL',
   'wv.redis.value.persist': 'Persist',
   'wv.redis.value.copyKey': 'Copy key',
+  'wv.redis.value.edit': 'Edit',
+  'wv.redis.value.copy': 'Copy value',
   'wv.redis.value.tooLarge': 'Value is {size} bytes. Load anyway?',
   'wv.redis.value.load': 'Load',
   'wv.redis.string.text': 'Text',

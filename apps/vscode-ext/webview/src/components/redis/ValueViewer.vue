@@ -49,6 +49,9 @@ const renameValue = ref('');
 const ttlOpen = ref(false);
 const ttlValue = ref('');
 const copied = ref(false);
+/** 行内编辑态（hash value / list 元素 / zset score）。 */
+interface EditState { kind: 'hash' | 'list' | 'zset'; id: string; draft: string }
+const editing = ref<EditState | null>(null);
 
 const key = computed(() => props.info?.key ?? '');
 const isBinaryString = computed(() => (props.info?.data?.kind === 'string' ? props.info.data.binary : false));
@@ -73,6 +76,7 @@ watch(() => props.info, (info) => {
   ttlOpen.value = false;
   copied.value = false;
   hashFilter.value = '';
+  editing.value = null;
   if (info?.data?.kind === 'string') {
     stringText.value = info.data.text;
     rawBytes.value = base64ToBytes(info.data.base64);
@@ -151,6 +155,33 @@ function submitTtl(): void {
   if (Number.isFinite(seconds) && seconds >= 0) emit('setTtl', key.value, seconds);
   ttlOpen.value = false;
 }
+
+/** zset 新增：score 必须是有限数字（空串 Number('')===0，须显式排除）。 */
+const canAddZset = computed(() => !!zsetMember.value && zsetScore.value.trim() !== '' && Number.isFinite(Number(zsetScore.value)));
+
+function startEdit(kind: EditState['kind'], id: string, draft: string): void {
+  if (props.readOnly) return;
+  editing.value = { kind, id, draft };
+}
+function saveEdit(): void {
+  const e = editing.value;
+  if (!e) return;
+  if (e.kind === 'hash') emit('hashSet', key.value, e.id, e.draft);
+  else if (e.kind === 'list') emit('listSet', key.value, Number(e.id), e.draft);
+  else emit('zsetAdd', key.value, e.draft, e.id); // zset：e.draft=score、e.id=member（与 startEdit('zset', member, score) 对应）
+  editing.value = null;
+}
+function isEditing(kind: EditState['kind'], id: string): boolean {
+  return editing.value?.kind === kind && editing.value.id === id;
+}
+/** 编辑草稿（模板 v-model 用；无编辑态时为空）。 */
+const draft = computed({
+  get: () => editing.value?.draft ?? '',
+  set: (v: string) => { if (editing.value) editing.value.draft = v; },
+});
+function copyValue(text: string): void {
+  void navigator.clipboard?.writeText(text);
+}
 </script>
 
 <template>
@@ -207,8 +238,21 @@ function submitTtl(): void {
         <table>
           <tr v-for="[f, v] in filteredHash()" :key="f">
             <td class="f">{{ f }}</td>
-            <td class="v">{{ v }}</td>
-            <td><button class="btn tiny" :disabled="readOnly" @click="emit('hashDel', key, [f])">✕</button></td>
+            <td class="v">
+              <input v-if="isEditing('hash', f)" v-model="draft" class="cell-input" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
+              <template v-else>{{ v }}</template>
+            </td>
+            <td class="row-actions">
+              <template v-if="isEditing('hash', f)">
+                <button class="btn tiny" @click="saveEdit">{{ t('wv.redis.value.save') }}</button>
+                <button class="btn tiny" @click="editing = null">{{ t('wv.redis.confirm.cancel') }}</button>
+              </template>
+              <template v-else>
+                <button class="btn tiny" :disabled="readOnly" :title="t('wv.redis.value.edit')" @click="startEdit('hash', f, v)">✎</button>
+                <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyValue(v)">⧉</button>
+                <button class="btn tiny" :disabled="readOnly" @click="emit('hashDel', key, [f])">✕</button>
+              </template>
+            </td>
           </tr>
         </table>
         <div class="inline">
@@ -232,10 +276,20 @@ function submitTtl(): void {
         <table>
           <tr v-for="(item, i) in info.data.items" :key="i">
             <td class="idx">{{ i }}</td>
-            <td class="v">{{ item }}</td>
-            <td>
-              <button class="btn tiny" :disabled="readOnly" @click="emit('listSet', key, i, item)">{{ t('wv.redis.value.save') }}</button>
-              <button class="btn tiny" :disabled="readOnly" @click="emit('listRem', key, 0, item)">✕</button>
+            <td class="v">
+              <input v-if="isEditing('list', String(i))" v-model="draft" class="cell-input" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
+              <template v-else>{{ item }}</template>
+            </td>
+            <td class="row-actions">
+              <template v-if="isEditing('list', String(i))">
+                <button class="btn tiny" @click="saveEdit">{{ t('wv.redis.value.save') }}</button>
+                <button class="btn tiny" @click="editing = null">{{ t('wv.redis.confirm.cancel') }}</button>
+              </template>
+              <template v-else>
+                <button class="btn tiny" :disabled="readOnly" :title="t('wv.redis.value.edit')" @click="startEdit('list', String(i), item)">✎</button>
+                <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyValue(item)">⧉</button>
+                <button class="btn tiny" :disabled="readOnly" @click="emit('listRem', key, 0, item)">✕</button>
+              </template>
             </td>
           </tr>
         </table>
@@ -250,7 +304,10 @@ function submitTtl(): void {
         <table>
           <tr v-for="m in info.data.members" :key="m">
             <td class="v">{{ m }}</td>
-            <td><button class="btn tiny" :disabled="readOnly" @click="emit('setRem', key, [m])">✕</button></td>
+            <td class="row-actions">
+              <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyValue(m)">⧉</button>
+              <button class="btn tiny" :disabled="readOnly" @click="emit('setRem', key, [m])">✕</button>
+            </td>
           </tr>
         </table>
       </div>
@@ -260,13 +317,26 @@ function submitTtl(): void {
         <div class="inline">
           <input v-model="zsetScore" class="score" :placeholder="t('wv.redis.zset.score')" />
           <input v-model="zsetMember" :placeholder="t('wv.redis.zset.member')" />
-          <button class="btn" :disabled="readOnly || !zsetMember" @click="emit('zsetAdd', key, zsetScore, zsetMember); zsetMember=''">{{ t('wv.redis.zset.add') }}</button>
+          <button class="btn" :disabled="readOnly || !canAddZset" @click="emit('zsetAdd', key, zsetScore, zsetMember); zsetMember=''">{{ t('wv.redis.zset.add') }}</button>
         </div>
         <table>
           <tr v-for="[m, s] in info.data.items" :key="m">
             <td class="v">{{ m }}</td>
-            <td class="idx">{{ s }}</td>
-            <td><button class="btn tiny" :disabled="readOnly" @click="emit('zsetRem', key, [m])">✕</button></td>
+            <td class="idx">
+              <input v-if="isEditing('zset', m)" v-model="draft" class="cell-input score" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
+              <template v-else>{{ s }}</template>
+            </td>
+            <td class="row-actions">
+              <template v-if="isEditing('zset', m)">
+                <button class="btn tiny" @click="saveEdit">{{ t('wv.redis.value.save') }}</button>
+                <button class="btn tiny" @click="editing = null">{{ t('wv.redis.confirm.cancel') }}</button>
+              </template>
+              <template v-else>
+                <button class="btn tiny" :disabled="readOnly" :title="t('wv.redis.value.edit')" @click="startEdit('zset', m, s)">✎</button>
+                <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyValue(m)">⧉</button>
+                <button class="btn tiny" :disabled="readOnly" @click="emit('zsetRem', key, [m])">✕</button>
+              </template>
+            </td>
           </tr>
         </table>
       </div>
@@ -295,6 +365,9 @@ table { width: 100%; border-collapse: collapse; }
 td { padding: 2px 6px; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.12)); word-break: break-all; }
 td.idx { color: var(--vscode-descriptionForeground); width: 56px; }
 td.f { width: 30%; }
+td.row-actions { white-space: nowrap; text-align: right; }
+.cell-input { width: 100%; box-sizing: border-box; }
+.cell-input.score { width: 72px; }
 .meta { color: var(--vscode-descriptionForeground); padding: 2px 0; }
 .error { color: var(--vscode-errorForeground); }
 .binary-warn { color: var(--vscode-editorWarning-foreground, #cca700); padding: 2px 0; }

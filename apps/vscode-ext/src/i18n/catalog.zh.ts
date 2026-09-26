@@ -886,6 +886,8 @@ export const zh: MessageCatalog = {
   'wv.redis.value.setTtl': '设置 TTL',
   'wv.redis.value.persist': '移除 TTL',
   'wv.redis.value.copyKey': '复制 key 名',
+  'wv.redis.value.edit': '编辑',
+  'wv.redis.value.copy': '复制值',
   'wv.redis.value.tooLarge': '值大小 {size} 字节，仍要加载？',
   'wv.redis.value.load': '加载',
   'wv.redis.string.text': '文本',
