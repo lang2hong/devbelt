@@ -284,8 +284,9 @@ function submitTtl(): void {
 .ttl { color: var(--vscode-descriptionForeground); }
 .inline { display: flex; gap: 6px; padding: 4px 0; }
 input, select, textarea { padding: 3px 5px; font-size: 12px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 3px; }
-textarea { flex: 1; min-height: 140px; resize: vertical; font-family: var(--vscode-editor-font-family, monospace); }
+textarea { flex: 1; min-height: 120px; resize: vertical; font-family: var(--vscode-editor-font-family, monospace); }
 textarea.hex { color: var(--vscode-descriptionForeground); }
+.string { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .tabs { display: flex; gap: 4px; padding-bottom: 4px; }
 .tabs button { padding: 2px 8px; font-size: 12px; cursor: pointer; border: none; background: transparent; color: var(--vscode-foreground); border-bottom: 2px solid transparent; }
 .tabs button.active { border-bottom-color: var(--vscode-focusBorder); font-weight: 600; }

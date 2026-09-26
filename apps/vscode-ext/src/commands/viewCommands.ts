@@ -104,7 +104,7 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     // Redis 面板（P7 S2 / S5 拆分）：连接节点 → Status/Console/SlowLog/CommandLog；
     // DB 节点 → KeyBrowser（同连接复用实例，db 变化时切换）。
     vscode.commands.registerCommand('devbelt.redis.console', (node: any) => {
-      if (node?.conn) RedisView.open(node.conn, manager, 'console');
+      if (node?.conn) RedisView.open(node.conn, manager, 'console', node.redisDbIndex);
     }),
     vscode.commands.registerCommand('devbelt.redis.keyBrowser', (node: any) => {
       if (node?.conn) RedisView.open(node.conn, manager, 'keyBrowser', node.redisDbIndex);

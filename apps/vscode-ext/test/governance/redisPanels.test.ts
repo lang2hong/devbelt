@@ -39,4 +39,12 @@ describe('Redis S5 面板可达性', () => {
       expect(vue, `缺少分支: ${p}`).toContain(`panel === '${p}'`);
     }
   });
+
+  it('DB 节点默认点击开键浏览器，且右击含控制台与键浏览器', () => {
+    const tree = readFileSync(join(process.cwd(), 'src/tree/dbTreeDataProvider.ts'), 'utf8');
+    expect(tree).toContain("node.command = { command: 'devbelt.redis.keyBrowser'");
+    expect(menus.some((m) => m.command === 'devbelt.redis.console' && m.when?.includes('connectionOpen.REDIS'))).toBe(true);
+    expect(menus.some((m) => m.command === 'devbelt.redis.console' && m.when?.includes('redisDb.REDIS'))).toBe(true);
+    expect(menus.some((m) => m.command === 'devbelt.redis.keyBrowser' && m.when?.includes('redisDb.REDIS'))).toBe(true);
+  });
 });

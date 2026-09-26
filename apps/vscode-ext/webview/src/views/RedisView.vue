@@ -197,7 +197,7 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
   <div class="redis-panel">
     <header class="header">
       <span class="conn">{{ connName }}</span>
-      <span v-if="isKeyBrowser && db !== null && connMode !== 'cluster'" class="db">db{{ db }}</span>
+      <span v-if="db !== null && connMode !== 'cluster'" class="db">db{{ db }}</span>
       <span v-if="readOnly" class="badge">{{ t('wv.redis.readOnly') }}</span>
       <button v-if="isKeyBrowser" class="btn" :disabled="readOnly" @click="showNewKey = true">＋ {{ t('wv.redis.newKey.title') }}</button>
     </header>

@@ -68,7 +68,8 @@ describe('Redis 命令表分类（移植 ARDM v1.1.1 + DevBelt 加强）', () =>
     expect(isDangerousCommand('FLUSHALL')).toBe(true);
     expect(isDangerousCommand('FLUSHDB')).toBe(true);
     expect(isDangerousCommand('SHUTDOWN')).toBe(true);
-    expect(isDangerousCommand('KEYS')).toBe(true);
+    expect(isDangerousCommand('KEYS', ['*'])).toBe(false);
+    expect(isDangerousCommand('KEYS')).toBe(false);
     expect(isDangerousCommand('CONFIG', ['SET', 'x', 'y'])).toBe(true);
     expect(isDangerousCommand('CONFIG', ['REWRITE'])).toBe(true);
     expect(isDangerousCommand('CONFIG', ['GET', 'x'])).toBe(false);

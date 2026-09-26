@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { foldRedisKeys } from '../../src/result/redisKeyFold';
+import { foldRedisKeys, toRedisMatchPattern } from '../../src/result/redisKeyFold';
 
 describe('foldRedisKeys', () => {
   it('无分隔符 key 作为根叶子', () => {
@@ -55,5 +55,26 @@ describe('foldRedisKeys', () => {
   it('排序稳定（文件夹与叶子各自升序）', () => {
     const tree = foldRedisKeys(['z:1', 'a:2', 'm:3']);
     expect(tree.folders.map((f) => f.name)).toEqual(['a', 'm', 'z']);
+  });
+});
+
+describe('toRedisMatchPattern（模糊=包含）', () => {
+  it('普通子串两侧包 *', () => {
+    expect(toRedisMatchPattern('user')).toBe('*user*');
+  });
+
+  it('glob 特殊字符被转义为字面', () => {
+    expect(toRedisMatchPattern('a*b')).toBe('*a\\*b*');
+    expect(toRedisMatchPattern('x?y')).toBe('*x\\?y*');
+    expect(toRedisMatchPattern('a[b]c')).toBe('*a\\[b\\]c*');
+  });
+
+  it('空/纯空白 → undefined', () => {
+    expect(toRedisMatchPattern('')).toBeUndefined();
+    expect(toRedisMatchPattern('   ')).toBeUndefined();
+  });
+
+  it('首尾空白被修剪', () => {
+    expect(toRedisMatchPattern('  user  ')).toBe('*user*');
   });
 });

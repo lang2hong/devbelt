@@ -312,12 +312,12 @@ export function isWriteCommand(name: string, args?: readonly unknown[]): boolean
 const DANGEROUS_CONFIG_SUBCOMMANDS: readonly string[] = ['SET', 'REWRITE', 'RESETSTAT'];
 
 /**
- * 危险命令（需二次确认）：FLUSHALL/FLUSHDB/SHUTDOWN/KEYS 通配/CONFIG SET|REWRITE|RESETSTAT。
- * 见 P7 §6.2。
+ * 危险命令（需二次确认）：破坏性删除/停机/配置锁定——FLUSHALL/FLUSHDB/SHUTDOWN/CONFIG SET|REWRITE|RESETSTAT。
+ * 见 P7 §6.2。`KEYS` 属只读扫描（虽大）不在此列：控制台不弹确认、直接出结果。
  */
 export function isDangerousCommand(name: string, args?: readonly unknown[]): boolean {
   const cmd = normalizeName(name);
-  if (cmd === 'FLUSHALL' || cmd === 'FLUSHDB' || cmd === 'SHUTDOWN' || cmd === 'KEYS') return true;
+  if (cmd === 'FLUSHALL' || cmd === 'FLUSHDB' || cmd === 'SHUTDOWN') return true;
   if (cmd === 'CONFIG') return DANGEROUS_CONFIG_SUBCOMMANDS.includes(argAt(args, 0));
   return false;
 }

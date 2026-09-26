@@ -66,3 +66,16 @@ export function foldRedisKeys(keys: readonly string[], separator = ':'): RedisKe
   finalize(root);
   return root;
 }
+
+/**
+ * 把用户搜索词转成 Redis `SCAN MATCH` 的包含模式（模糊搜索）。
+ *
+ * 转义 glob 特殊字符（`\ * ? [` `]`）使其按字面匹配，再两侧包 `*` → 子串包含。
+ * 空/纯空白 → undefined（不施加 match，等价全量）。
+ */
+export function toRedisMatchPattern(query: string): string | undefined {
+  const trimmed = query.trim();
+  if (!trimmed) return undefined;
+  const escaped = trimmed.replace(/[\\*?[\]^]/g, (ch) => `\\${ch}`);
+  return `*${escaped}*`;
+}

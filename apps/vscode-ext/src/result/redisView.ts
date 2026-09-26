@@ -17,7 +17,7 @@ import type { RedisConnectionSession } from '../connection/connectionSession';
 import { ConnectionManager } from '../connection/connectionManager';
 import { REDIS_CAPABILITIES } from '../connection/redisCapabilities';
 import { BaseWebView } from './baseWebView';
-import { foldRedisKeys } from './redisKeyFold';
+import { foldRedisKeys, toRedisMatchPattern } from './redisKeyFold';
 import { AuditLogger } from '../utils/auditLogger';
 import { l10n } from '../i18n';
 import type { RedisNewKeyValue, RedisPanel, RedisSlowlogEntry, RedisValueData } from './protocol';
@@ -92,7 +92,7 @@ export class RedisView extends BaseWebView {
   static open(conn: SavedConnection, manager: ConnectionManager, panel: RedisPanel, db?: number): RedisView {
     const existing = RedisView.instances.get(`${conn.id}:${panel}`);
     if (existing) {
-      if (panel === 'keyBrowser' && db !== undefined && db !== existing.db) {
+      if ((panel === 'keyBrowser' || panel === 'console') && db !== undefined && db !== existing.db) {
         existing.db = db;
         void existing.reconfigure();
       }
@@ -190,7 +190,9 @@ export class RedisView extends BaseWebView {
       connName: this.conn.name || this.conn.host,
       host: this.conn.host,
       port: this.conn.port,
-      db: this.panelType === 'keyBrowser' ? (this.db ?? this.conn.redisDb ?? 0) : null,
+      db: (this.panelType === 'keyBrowser' || this.panelType === 'console')
+        ? (this.db ?? this.conn.redisDb ?? 0)
+        : null,
       readOnly: this.conn.readOnly === true,
       connMode: this.conn.redisMode ?? 'standalone',
       panel: this.panelType,
@@ -216,14 +218,15 @@ export class RedisView extends BaseWebView {
     // commandLog 无需初始拉取（靠订阅推送）。
   }
 
-  /** keyBrowser 切换 db（同 conn 已有实例时）：清状态、重发 config、重载键树。 */
+  /** 切换 db（keyBrowser/console 已有实例时）：清状态、重发 config，按面板重载。 */
   private async reconfigure(): Promise<void> {
     this.keys = [];
     this.cursor = '0';
     this.clusterCursors = [];
     this.match = '';
     this.postConfig();
-    await this.enqueuePushKeys(true);
+    if (this.panelType === 'keyBrowser') { await this.enqueuePushKeys(true); return; }
+    if (this.panelType === 'console') { await this.enqueue(async () => { await this.sessionForDb(); }); return; }
   }
 
   /** 跨面板串行（SELECT + 命令原子）：走共享 client 的 runExclusive。 */
@@ -308,7 +311,7 @@ export class RedisView extends BaseWebView {
   // ────────────────────────── 键树 ──────────────────────────
 
   private async refreshKeys(msg: any): Promise<void> {
-    this.match = String(msg.match ?? '');
+    this.match = toRedisMatchPattern(String(msg.match ?? '')) ?? '';
     const count = Number(msg.count);
     this.scanCount = Number.isFinite(count) && count > 0 ? count : DEFAULT_SCAN_COUNT;
     await this.enqueuePushKeys(true);

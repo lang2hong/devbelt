@@ -175,6 +175,26 @@ describe('RedisView CLI 管线与审计', () => {
     expect(sent).toEqual([]);
     expect(posts(view).find((m) => m.type === 'commandResult').ok).toBe(false);
   });
+
+  it('KEYS */GET 只读命令直接出结果，不弹确认', async () => {
+    const { view, sent } = makeView(async (n) => (n === 'KEYS' ? ['a', 'b'] : n === 'GET' ? 'v' : 'OK'));
+    await mount(view, sent);
+
+    await view.handleMessage({ type: 'runCommand', id: '1', line: 'KEYS *' });
+    expect(posts(view).some((m) => m.type === 'confirmRequired')).toBe(false);
+    const r1 = posts(view).find((m) => m.type === 'commandResult');
+    expect(r1.ok).toBe(true);
+    expect(r1.result).toContain('a');
+    expect(sent).toContainEqual(['KEYS', ['*']]);
+
+    sent.length = 0;
+    await view.handleMessage({ type: 'runCommand', id: '2', line: 'GET k' });
+    expect(posts(view).some((m) => m.type === 'confirmRequired')).toBe(false);
+    const r2 = posts(view).find((m) => m.type === 'commandResult' && m.id === '2');
+    expect(r2.ok).toBe(true);
+    expect(r2.result).toBe('v');
+    expect(sent).toContainEqual(['GET', ['k']]);
+  });
 });
 
 describe('RedisView S3 键树/值/编辑', () => {
@@ -205,6 +225,14 @@ describe('RedisView S3 键树/值/编辑', () => {
     expect(keys).toBeTruthy();
     expect(keys.folders.folders.map((f: any) => f.name)).toEqual(['cache', 'user']);
     expect(keys.scanned).toBe(3);
+  });
+
+  it('搜索按包含（模糊）：refreshKeys 用 *query* 作 SCAN MATCH', async () => {
+    const { view, sent } = makeView(handler, 0);
+    await mountDb(view);
+    sent.length = 0;
+    await view.handleMessage({ type: 'refreshKeys', match: 'user' });
+    expect(sent.some(([n, a]) => n === 'SCAN' && a.includes('MATCH') && a.includes('*user*'))).toBe(true);
   });
 
   it('selectKey 拉取类型化值', async () => {
@@ -350,6 +378,27 @@ describe('RedisView S3 回归（提交前评审）', () => {
     await view.handleMessage({ type: 'ready' });
     expect(posts(view).some((m) => m.type === 'keys')).toBe(false);
     expect(posts(view).some((m) => m.type === 'info')).toBe(false);
+  });
+
+  it('console 带 db 打开：归一到该 db 且 config.db 反映它', async () => {
+    const sent: [string, string[]][] = [];
+    const session: any = {
+      kind: 'redis', db: 0, mode: 'standalone', readOnly: false, isAlive: () => true, close: () => {},
+      client: {
+        sendCommand: async (n: string, a: string[] = []) => { sent.push([n, a]); return 'OK'; },
+        runExclusive: <T>(fn: () => Promise<T>): Promise<T> => fn(),
+        info: async () => '',
+      },
+    };
+    const manager: any = { retain: vi.fn(), release: vi.fn(), connect: async () => session };
+    const dbConn: any = { id: 'c9', name: 'r', dbType: 'REDIS', host: 'h', port: 6379 };
+    const view: any = RedisView.open(dbConn, manager, 'console', 2);
+    await view.handleMessage({ type: 'ready' });
+    await view.handleMessage({ type: 'ready' });
+    expect(sent.some(([n, a]) => n === 'SELECT' && a.join() === '2')).toBe(true);
+    const cfg = posts(view).find((m) => m.type === 'config');
+    expect(cfg.db).toBe(2);
+    expect(cfg.panel).toBe('console');
   });
 
   it('createKey 已存在：拒绝且不覆盖', async () => {

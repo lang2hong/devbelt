@@ -172,7 +172,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         node.redisDbIndex = stat.index;
         node.description = String(stat.keys);
         node.id = `${conn.id}:db${stat.index}`;
-        node.command = { command: 'devbelt.redis.console', title: 'Open', arguments: [node] };
+        node.command = { command: 'devbelt.redis.keyBrowser', title: 'Open', arguments: [node] };
         return node;
       });
     }
