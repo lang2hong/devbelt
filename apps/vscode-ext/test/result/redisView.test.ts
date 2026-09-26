@@ -13,7 +13,8 @@ vi.mock('../../src/result/baseWebView', () => ({
     post = vi.fn();
     initSent = false;
     constructor(..._args: unknown[]) { /* noop */ }
-    dispose(): void { /* noop */ }
+    dispose(): void { this.onDispose(); }
+    reveal(): void { /* noop */ }
     onDispose(): void { /* noop */ }
   },
 }));
@@ -26,10 +27,13 @@ import { RedisView, formatRedisReply, parseSlowlog, redisAuditLine } from '../..
 
 const conn: any = { id: 'c1', name: 'r', dbType: 'REDIS', host: 'h', port: 6379, redisDb: 3, readOnly: false };
 
+beforeEach(() => { RedisView.closeAll(); h.audits.length = 0; });
+
 type Send = (name: string, args: string[]) => Promise<unknown>;
 type RawArg = string | number | Buffer;
+type PanelOrTab = 'keyBrowser' | 'serverStatus' | 'console' | 'slowlog';
 
-function makeView(handler?: Send, db?: number, tab: 'status' | 'console' | 'slowlog' = 'console') {
+function makeView(handler?: Send, db?: number, panelOrTab: PanelOrTab = 'console') {
   const sent: [string, RawArg[]][] = [];
   const record = (name: string, args: RawArg[]): unknown => {
     sent.push([name, args]);
@@ -38,6 +42,7 @@ function makeView(handler?: Send, db?: number, tab: 'status' | 'console' | 'slow
   const client = {
     sendCommand: async (name: string, args: RawArg[] = []) => record(name, args),
     sendCommandBuffer: async (name: string, args: RawArg[] = []) => record(name, args),
+    runExclusive: <T>(fn: () => Promise<T>): Promise<T> => fn(),
     info: async () => 'redis_version:7.0.0\r\n',
   };
   const manager: any = {
@@ -45,8 +50,11 @@ function makeView(handler?: Send, db?: number, tab: 'status' | 'console' | 'slow
     release: vi.fn(),
     connect: async () => ({ kind: 'redis', client, db: 3, mode: 'standalone', readOnly: false, isAlive: () => true, close: () => {} }),
   };
-  RedisView.open(conn, manager, tab, db);
-  const view: any = (RedisView as any).current;
+  // db 显式给出 → 键浏览器；否则按 panelOrTab（兼容旧 'status'→serverStatus）。
+  const panel = panelOrTab === 'keyBrowser' || db !== undefined
+    ? 'keyBrowser'
+    : (panelOrTab === 'serverStatus' ? 'serverStatus' : panelOrTab);
+  const view: any = RedisView.open(conn, manager, panel as any, db);
   return { view, sent, manager };
 }
 
@@ -301,14 +309,14 @@ describe('RedisView S3 回归（提交前评审）', () => {
           if (n === 'SLOWLOG') return [];
           return 'OK';
         },
+        runExclusive: <T>(fn: () => Promise<T>): Promise<T> => fn(),
         info: async () => '',
       },
     };
     const manager: any = { retain: vi.fn(), release: vi.fn(), connect: async () => session };
     const connNoDb: any = { id: 'c1', name: 'r', dbType: 'REDIS', host: 'h', port: 6379 };
 
-    RedisView.open(connNoDb, manager, 'console', 2);
-    const v1: any = (RedisView as any).current;
+    const v1: any = RedisView.open(connNoDb, manager, 'keyBrowser', 2);
     await v1.handleMessage({ type: 'ready' });
     await v1.handleMessage({ type: 'ready' });
     expect(sent.some(([n, a]) => n === 'SELECT' && a.join() === '2')).toBe(true);
@@ -316,8 +324,7 @@ describe('RedisView S3 回归（提交前评审）', () => {
 
     sent.length = 0;
     v1.dispose();
-    RedisView.open(connNoDb, manager, 'console');
-    const v2: any = (RedisView as any).current;
+    const v2: any = RedisView.open(connNoDb, manager, 'console');
     await v2.handleMessage({ type: 'ready' });
     await v2.handleMessage({ type: 'ready' });
     expect(sent.some(([n, a]) => n === 'SELECT' && a.join() === '0')).toBe(true);
@@ -325,22 +332,24 @@ describe('RedisView S3 回归（提交前评审）', () => {
   });
 
   it('status 视图：config.db=null 且只推 INFO（ServerStatus 可达）', async () => {
-    const { view } = makeView(async (n) => (n === 'INFO' ? 'redis_version:7' : n === 'SLOWLOG' ? [] : 'OK'), undefined, 'status');
+    const { view } = makeView(async (n) => (n === 'INFO' ? 'redis_version:7' : n === 'SLOWLOG' ? [] : 'OK'), undefined, 'serverStatus');
     (view.post as any).mockClear();
     await view.handleMessage({ type: 'ready' });
     await view.handleMessage({ type: 'ready' });
     const cfg = posts(view).find((m) => m.type === 'config');
     expect(cfg.db).toBeNull();
+    expect(cfg.panel).toBe('serverStatus');
     expect(posts(view).some((m) => m.type === 'info')).toBe(true);
     expect(posts(view).some((m) => m.type === 'keys')).toBe(false);
   });
 
-  it('连接级 console（无 db）仍加载键树（db0）', async () => {
+  it('console 单栏面板不加载键树（S5 拆分）', async () => {
     const { view } = makeView(async (n) => (n === 'SCAN' ? ['0', []] : n === 'INFO' ? '' : n === 'SLOWLOG' ? [] : 'OK'), undefined, 'console');
     (view.post as any).mockClear();
     await view.handleMessage({ type: 'ready' });
     await view.handleMessage({ type: 'ready' });
-    expect(posts(view).some((m) => m.type === 'keys')).toBe(true);
+    expect(posts(view).some((m) => m.type === 'keys')).toBe(false);
+    expect(posts(view).some((m) => m.type === 'info')).toBe(false);
   });
 
   it('createKey 已存在：拒绝且不覆盖', async () => {
@@ -378,14 +387,13 @@ describe('RedisView S4 cluster 键扫描', () => {
     const client: any = {
       isCluster: true, mode: 'cluster', db: 0,
       nodes: () => [node(['a:1']), node(['b:1'])],
-      sendCommand: async () => 'OK', info: async () => '', ping: async () => 'PONG', isAlive: () => true,
+      sendCommand: async () => 'OK', runExclusive: (fn: any) => fn(), info: async () => '', ping: async () => 'PONG', isAlive: () => true,
     };
     const manager: any = {
       retain: vi.fn(), release: vi.fn(),
       connect: async () => ({ kind: 'redis', client, db: 0, mode: 'cluster', readOnly: false, isAlive: () => true, close: () => {} }),
     };
-    RedisView.open(conn, manager, 'console');
-    const view: any = (RedisView as any).current;
+    const view: any = RedisView.open(conn, manager, 'keyBrowser', 0);
     (view.post as any).mockClear();
     await view.handleMessage({ type: 'ready' });
     await view.handleMessage({ type: 'ready' });
@@ -575,8 +583,7 @@ describe('RedisView S4 命令日志订阅', () => {
       retain: vi.fn(), release: vi.fn(),
       connect: async () => ({ kind: 'redis', client, db: 0, mode: 'standalone', readOnly: false, isAlive: () => true, close: () => {} }),
     };
-    RedisView.open(conn, manager, 'console');
-    const view: any = (RedisView as any).current;
+    const view: any = RedisView.open(conn, manager, 'commandLog');
     await view.handleMessage({ type: 'ready' });
     await view.handleMessage({ type: 'ready' });
     expect(listener).toBeTruthy();
@@ -601,8 +608,7 @@ describe('RedisView S4 连接事件日志', () => {
       retain: vi.fn(), release: vi.fn(),
       connect: async () => ({ kind: 'redis', client, db: 0, mode: 'standalone', readOnly: false, isAlive: () => true, close: () => {} }),
     };
-    RedisView.open(conn, manager, 'console');
-    const view: any = (RedisView as any).current;
+    const view: any = RedisView.open(conn, manager, 'commandLog');
     await view.handleMessage({ type: 'ready' });
     await view.handleMessage({ type: 'ready' });
     expect(handlers.has('reconnecting')).toBe(true);
@@ -618,5 +624,27 @@ describe('RedisView S4 连接事件日志', () => {
     (view.post as any).mockClear();
     handlers.get('ready')!();
     expect((view.post as any).mock.calls.some((c: any[]) => c[0].type === 'connectionEvent' && c[0].event === 'ready')).toBe(true);
+  });
+
+  it('同连接多面板仅一个实例写 connection:* 审计（去重）', async () => {
+    const listeners: Record<string, ((...a: any[]) => void)[]> = {};
+    const client: any = {
+      isCluster: false, mode: 'standalone', db: 0,
+      sendCommand: async () => 'OK', runExclusive: (fn: any) => fn(), info: async () => '',
+      on: (ev: string, l: (...a: any[]) => void) => { (listeners[ev] ??= []).push(l); },
+      addLogListener: () => () => {},
+    };
+    const manager: any = {
+      retain: vi.fn(), release: vi.fn(),
+      connect: async () => ({ kind: 'redis', client, db: 0, mode: 'standalone', readOnly: false, isAlive: () => true, close: () => {} }),
+    };
+    const a: any = RedisView.open(conn, manager, 'console');
+    const b: any = RedisView.open(conn, manager, 'commandLog');
+    for (const v of [a, b]) { await v.handleMessage({ type: 'ready' }); await v.handleMessage({ type: 'ready' }); }
+    expect(listeners['reconnecting']?.length).toBe(2);
+
+    h.audits.length = 0;
+    for (const l of listeners['reconnecting']) l(new Error('switch'));
+    expect(h.audits.filter((x) => x.sql === 'connection:reconnecting')).toHaveLength(1);
   });
 });

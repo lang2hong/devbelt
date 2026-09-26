@@ -101,15 +101,22 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     vscode.commands.registerCommand('devbelt.showPoolStatus', () => {
       PoolStatusView.open(manager);
     }),
-    // Redis 面板（P7 S2）：Status / CLI / SlowLog
+    // Redis 面板（P7 S2 / S5 拆分）：连接节点 → Status/Console/SlowLog/CommandLog；
+    // DB 节点 → KeyBrowser（同连接复用实例，db 变化时切换）。
     vscode.commands.registerCommand('devbelt.redis.console', (node: any) => {
-      if (node?.conn) RedisView.open(node.conn, manager, 'console', node.redisDbIndex);
+      if (node?.conn) RedisView.open(node.conn, manager, 'console');
+    }),
+    vscode.commands.registerCommand('devbelt.redis.keyBrowser', (node: any) => {
+      if (node?.conn) RedisView.open(node.conn, manager, 'keyBrowser', node.redisDbIndex);
     }),
     vscode.commands.registerCommand('devbelt.redis.serverStatus', (node: any) => {
-      if (node?.conn) RedisView.open(node.conn, manager, 'status');
+      if (node?.conn) RedisView.open(node.conn, manager, 'serverStatus');
     }),
     vscode.commands.registerCommand('devbelt.redis.slowlog', (node: any) => {
       if (node?.conn) RedisView.open(node.conn, manager, 'slowlog');
+    }),
+    vscode.commands.registerCommand('devbelt.redis.commandLog', (node: any) => {
+      if (node?.conn) RedisView.open(node.conn, manager, 'commandLog');
     }),
     // 定时备份
     vscode.commands.registerCommand('devbelt.scheduleBackup', async (node: any) => {

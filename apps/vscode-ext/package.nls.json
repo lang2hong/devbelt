@@ -126,5 +126,7 @@
   "cmd.scheduleBackup": "Schedule Backup",
   "cmd.redis.serverStatus": "Redis Server Status",
   "cmd.redis.console": "Redis Console",
-  "cmd.redis.slowlog": "Redis Slow Log"
+  "cmd.redis.slowlog": "Redis Slow Log",
+  "cmd.redis.commandLog": "Redis Command Log",
+  "cmd.redis.keyBrowser": "Open Key Browser"
 }

@@ -287,6 +287,20 @@ export class RedisClient {
     return () => { this.logListeners.delete(listener); };
   }
 
+  /**
+   * 串行化一段「SELECT 归一 + 命令」事务。
+   *
+   * 同一连接可能被多个 webview 面板共享（S5：键浏览器 + 控制台等），而 `SELECT`
+   * 是连接级状态；跨面板并发会在 SELECT 与命令之间交错。所有 RedisView 操作经此
+   * 排队，保证事务原子（单面板内的顺序也自然保持）。
+   */
+  private opChain: Promise<unknown> = Promise.resolve();
+  runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.opChain.then(fn, fn);
+    this.opChain = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
   isAlive(): boolean {
     return !this.closed && this.client.status === 'ready';
   }

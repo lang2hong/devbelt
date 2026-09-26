@@ -126,5 +126,7 @@
   "cmd.scheduleBackup": "定时备份",
   "cmd.redis.serverStatus": "Redis 服务器状态",
   "cmd.redis.console": "Redis 控制台",
-  "cmd.redis.slowlog": "Redis 慢日志"
+  "cmd.redis.slowlog": "Redis 慢日志",
+  "cmd.redis.commandLog": "Redis 命令日志",
+  "cmd.redis.keyBrowser": "打开键浏览器"
 }

@@ -329,6 +329,21 @@ describe('RedisClient 命令日志：多监听', () => {
   });
 });
 
+describe('RedisClient runExclusive（跨面板串行 SELECT+命令）', () => {
+  it('按调用顺序串行执行，慢事务不被打断', async () => {
+    const { client } = make();
+    const order: string[] = [];
+    const slow = client.runExclusive(async () => {
+      order.push('a-start');
+      await new Promise((r) => setTimeout(r, 20));
+      order.push('a-end');
+    });
+    const fast = client.runExclusive(async () => { order.push('b'); });
+    await Promise.all([slow, fast]);
+    expect(order).toEqual(['a-start', 'a-end', 'b']);
+  });
+});
+
 describe('RedisClient 字节级命令（sendCommandBuffer）', () => {
   it('以 replyEncoding:null 提交并返回原始 Buffer，且走日志切面', async () => {
     const logs: RedisCommandLog[] = [];

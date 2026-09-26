@@ -1,6 +1,6 @@
-import type { RedisKeyFolder, RedisNewKeyValue, RedisValueData } from '../../../../src/result/protocol';
+import type { RedisKeyFolder, RedisNewKeyValue, RedisPanel, RedisValueData } from '../../../../src/result/protocol';
 
-export type { RedisKeyFolder, RedisNewKeyValue, RedisValueData };
+export type { RedisKeyFolder, RedisNewKeyValue, RedisPanel, RedisValueData };
 
 export interface CommandResult {
   id: string;
@@ -39,9 +39,9 @@ export interface KeyRow {
   count?: number;
 }
 
-/** 是否渲染键浏览器（三栏）；db 为 null 表示服务器状态视图。 */
-export function isKeyBrowser(db: number | null): boolean {
-  return db !== null;
+/** 是否渲染键浏览器（左树 + 值区）；其余面板为单栏。 */
+export function isKeyBrowserPanel(panel: RedisPanel): boolean {
+  return panel === 'keyBrowser';
 }
 
 /**

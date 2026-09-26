@@ -9,7 +9,8 @@ import StreamViewer from '../components/redis/StreamViewer.vue';
 import KeyNewDialog from '../components/redis/KeyNewDialog.vue';
 import CliConsole from '../components/redis/CliConsole.vue';
 import SlowLog from '../components/redis/SlowLog.vue';
-import { computeStreamDone, isKeyBrowser, type CommandResult, type RedisKeyFolder, type RedisNewKeyValue, type SlowlogEntry, type ValueInfo } from '../components/redis/types';
+import CommandLog from '../components/redis/CommandLog.vue';
+import { computeStreamDone, isKeyBrowserPanel, type CommandResult, type RedisKeyFolder, type RedisNewKeyValue, type RedisPanel, type SlowlogEntry, type ValueInfo } from '../components/redis/types';
 
 const { post, onMessage } = useVsCode();
 const { t } = useI18n();
@@ -17,6 +18,7 @@ let off: (() => void) | undefined;
 
 const connName = ref('');
 const db = ref<number | null>(null);
+const panel = ref<RedisPanel>('keyBrowser');
 const connMode = ref<'standalone' | 'cluster' | 'sentinel'>('standalone');
 const readOnly = ref(false);
 const commands = ref<string[]>([]);
@@ -24,10 +26,11 @@ const info = ref('');
 const entries = ref<SlowlogEntry[]>([]);
 const results = ref<CommandResult[]>([]);
 const pendingConfirm = ref<{ id: string; command: string } | null>(null);
-const tab = ref<'console' | 'slowlog' | 'commandLog'>('console');
 interface CommandLogEntry { command: string; args: string[]; durationMs: number; ok: boolean; error: string | null; at: number }
 const commandLog = ref<CommandLogEntry[]>([]);
 const connectionEvents = ref<{ event: string; detail: string | null; at: number }[]>([]);
+/** 键浏览器左栏宽度（可拖拽，局部状态）。 */
+const leftWidth = ref(300);
 
 // 键树
 const emptyFolders: RedisKeyFolder = { name: '', path: '', count: 0, folders: [], keys: [] };
@@ -47,9 +50,20 @@ const streamDone = ref(true);
 const pendingOpDetail = ref<string | null>(null);
 let lastOp: any = null;
 
-const hasDb = computed(() => isKeyBrowser(db.value));
+const isKeyBrowser = computed(() => isKeyBrowserPanel(panel.value));
 let seq = 0;
 function nextId(): string { seq += 1; return `r${seq}`; }
+
+/** 左栏拖拽（键浏览器），clamp 180–600px。 */
+function startDrag(e: MouseEvent): void {
+  e.preventDefault();
+  const startX = e.clientX;
+  const startW = leftWidth.value;
+  const onMove = (ev: MouseEvent) => { leftWidth.value = Math.min(600, Math.max(180, startW + ev.clientX - startX)); };
+  const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+}
 
 function onRefreshKeys(m: string, c: number): void {
   keysLoading.value = true;
@@ -103,7 +117,7 @@ function confirmDanger(id: string, accept: boolean): void {
 /** 快捷键：Ctrl/Cmd+N 新建 key；Enter/Esc 操作模态（确认提交流程的键盘路径）。 */
 function onKeydown(e: KeyboardEvent): void {
   if ((e.ctrlKey || e.metaKey) && (e.key === 'n' || e.key === 'N')) {
-    if (hasDb.value && !readOnly.value) { e.preventDefault(); showNewKey.value = true; }
+    if (isKeyBrowser.value && !readOnly.value) { e.preventDefault(); showNewKey.value = true; }
     return;
   }
   if (e.key === 'Escape') {
@@ -125,10 +139,15 @@ onMounted(() => {
     if (msg.type === 'config') {
       connName.value = msg.connName ?? '';
       db.value = typeof msg.db === 'number' ? msg.db : null;
+      panel.value = (msg.panel as RedisPanel) ?? 'keyBrowser';
       connMode.value = (msg.connMode as typeof connMode.value) ?? 'standalone';
       readOnly.value = !!msg.readOnly;
       commands.value = msg.commands ?? [];
-      if (hasDb.value) keysLoading.value = true;
+      // 切换面板/DB 时重置视图态，避免旧值残留。
+      value.value = null;
+      banner.value = '';
+      folders.value = emptyFolders;
+      if (isKeyBrowser.value) keysLoading.value = true;
     } else if (msg.type === 'keys') {
       folders.value = msg.folders ?? emptyFolders;
       cursor.value = msg.cursor ?? '0';
@@ -178,14 +197,14 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
   <div class="redis-panel">
     <header class="header">
       <span class="conn">{{ connName }}</span>
-      <span v-if="hasDb && connMode !== 'cluster'" class="db">db{{ db }}</span>
+      <span v-if="isKeyBrowser && db !== null && connMode !== 'cluster'" class="db">db{{ db }}</span>
       <span v-if="readOnly" class="badge">{{ t('wv.redis.readOnly') }}</span>
-      <button v-if="hasDb" class="btn" :disabled="readOnly" @click="showNewKey = true">＋ {{ t('wv.redis.newKey.title') }}</button>
+      <button v-if="isKeyBrowser" class="btn" :disabled="readOnly" @click="showNewKey = true">＋ {{ t('wv.redis.newKey.title') }}</button>
     </header>
     <div v-if="banner" class="banner" @click="banner = ''">{{ banner }}</div>
 
-    <div v-if="hasDb" class="main">
-      <aside class="left">
+    <div v-if="isKeyBrowser" class="kb">
+      <aside class="left" :style="{ width: leftWidth + 'px' }">
         <KeyTree
           :folders="folders"
           :cursor="cursor"
@@ -200,8 +219,8 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
           @delete-selected="pendingDelete = $event"
         />
       </aside>
+      <div class="splitter" @mousedown="startDrag" />
       <section class="right">
-        <div class="top">
           <StreamViewer
             v-if="value && value.keyType === 'stream' && value.data?.kind === 'stream'"
             :info="value"
@@ -242,52 +261,32 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
             @zset-add="(k, s, m) => post({ type: 'zsetAdd', key: k, score: s, member: m })"
             @zset-rem="(k, m) => post({ type: 'zsetRem', key: k, members: m })"
           />
-        </div>
-        <div class="bottom">
-          <nav class="tabs">
-            <button :class="{ active: tab === 'console' }" @click="tab = 'console'">{{ t('wv.redis.tab.console') }}</button>
-            <button :class="{ active: tab === 'slowlog' }" @click="tab = 'slowlog'">{{ t('wv.redis.tab.slowlog') }}</button>
-            <button :class="{ active: tab === 'commandLog' }" @click="tab = 'commandLog'">{{ t('wv.redis.tab.commandLog') }}</button>
-          </nav>
-          <CliConsole
-            v-if="tab === 'console'"
-            :results="results"
-            :read-only="readOnly"
-            :pending="pendingConfirm"
-            :commands="commands"
-            @run="run"
-            @confirm="confirmDanger"
-          />
-          <SlowLog v-else-if="tab === 'slowlog'" :entries="entries" @refresh="post({ type: 'refreshSlowlog' })" />
-          <div v-else class="cmdlog">
-            <div class="events">
-              <strong>{{ t('wv.redis.events.title') }}</strong>
-              <div v-if="!connectionEvents.length" class="empty">{{ t('wv.redis.events.empty') }}</div>
-              <div v-for="(e, i) in connectionEvents" :key="'e' + i" class="ev">
-                {{ new Date(e.at).toLocaleTimeString() }} · {{ e.event }}{{ e.detail ? ' ' + e.detail : '' }}
-              </div>
-            </div>
-            <div v-if="!commandLog.length" class="empty">{{ t('wv.redis.commandLog.empty') }}</div>
-            <table v-else>
-              <thead><tr>
-                <th>{{ t('wv.redis.commandLog.time') }}</th>
-                <th>{{ t('wv.redis.commandLog.command') }}</th>
-                <th>{{ t('wv.redis.commandLog.cost') }}</th>
-              </tr></thead>
-              <tbody>
-                <tr v-for="(e, i) in commandLog" :key="i" :class="{ err: !e.ok }">
-                  <td>{{ new Date(e.at).toLocaleTimeString() }}</td>
-                  <td class="mono">{{ e.command }} {{ e.args.join(' ') }}</td>
-                  <td>{{ t('wv.redis.console.duration', { ms: e.durationMs }) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
+        </section>
     </div>
 
-    <ServerStatus v-else :info="info" @refresh="post({ type: 'refreshInfo' })" />
+    <CliConsole
+      v-else-if="panel === 'console'"
+      class="single"
+      :results="results"
+      :read-only="readOnly"
+      :pending="pendingConfirm"
+      :commands="commands"
+      @run="run"
+      @confirm="confirmDanger"
+    />
+    <SlowLog
+      v-else-if="panel === 'slowlog'"
+      class="single"
+      :entries="entries"
+      @refresh="post({ type: 'refreshSlowlog' })"
+    />
+    <CommandLog
+      v-else-if="panel === 'commandLog'"
+      class="single"
+      :entries="commandLog"
+      :events="connectionEvents"
+    />
+    <ServerStatus v-else-if="panel === 'serverStatus'" :info="info" @refresh="post({ type: 'refreshInfo' })" class="single" />
 
     <KeyNewDialog :show="showNewKey" @create="onCreate" @cancel="showNewKey = false" />
 
@@ -314,28 +313,20 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
 </template>
 
 <style scoped>
-.cmdlog { flex: 1; overflow: auto; font-size: 12px; }
-.cmdlog table { width: 100%; border-collapse: collapse; }
-.cmdlog th, .cmdlog td { text-align: left; padding: 2px 6px; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.12)); }
-.cmdlog .mono { font-family: var(--vscode-editor-font-family, monospace); word-break: break-all; }
-.cmdlog tr.err td { color: var(--vscode-errorForeground); }
-.cmdlog .empty { color: var(--vscode-descriptionForeground); padding: 12px; text-align: center; }
-.cmdlog .events { padding: 2px 0 6px; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.12)); }
-.cmdlog .ev { color: var(--vscode-descriptionForeground); font-size: 11px; }
 .redis-panel { display: flex; flex-direction: column; height: 100vh; padding: 8px 10px; box-sizing: border-box; font-size: 12px; position: relative; }
 .header { display: flex; gap: 8px; align-items: center; }
 .conn { font-weight: 600; }
 .db { color: var(--vscode-descriptionForeground); }
 .badge { padding: 1px 6px; border-radius: 3px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); font-size: 11px; }
 .banner { margin-top: 6px; padding: 4px 8px; border-radius: 3px; background: var(--vscode-inputValidation-errorBackground, #5a1d1d); color: var(--vscode-errorForeground, #f88); cursor: pointer; }
-.main { flex: 1; min-height: 0; display: flex; gap: 10px; margin-top: 8px; }
-.left { width: 300px; min-width: 220px; border-right: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); padding-right: 8px; overflow: hidden; }
-.right { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.top { flex: 1; min-height: 0; overflow: auto; }
-.bottom { border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); margin-top: 8px; padding-top: 6px; height: 38%; min-height: 120px; display: flex; flex-direction: column; }
-.tabs { display: flex; gap: 4px; margin-bottom: 4px; }
-.tabs button { padding: 3px 10px; font-size: 12px; cursor: pointer; border: none; background: transparent; color: var(--vscode-foreground); border-bottom: 2px solid transparent; }
-.tabs button.active { border-bottom-color: var(--vscode-focusBorder); font-weight: 600; }
+/* 键浏览器：左树（可拖拽）+ 右值区，撑满高度。 */
+.kb { flex: 1; min-height: 0; display: flex; margin-top: 8px; }
+.left { flex: 0 0 auto; min-width: 180px; max-width: 600px; border-right: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); padding-right: 8px; overflow: hidden; }
+.splitter { flex: 0 0 5px; cursor: col-resize; background: transparent; }
+.splitter:hover { background: var(--vscode-focusBorder, rgba(128,128,128,0.4)); }
+.right { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+/* 单栏面板（console/slowlog/commandLog/serverStatus）撑满。 */
+.single { flex: 1; min-height: 0; margin-top: 8px; }
 .mask { position: absolute; inset: 0; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; }
 .confirm { background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35)); border-radius: 6px; padding: 14px 16px; }
 .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }

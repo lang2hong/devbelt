@@ -469,6 +469,16 @@
         "category": "DB Client"
       },
       {
+        "command": "devbelt.redis.commandLog",
+        "title": "%cmd.redis.commandLog%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.redis.keyBrowser",
+        "title": "%cmd.redis.keyBrowser%",
+        "category": "DB Client"
+      },
+      {
         "command": "devbelt.compareSchema",
         "title": "%cmd.compareSchema%",
         "category": "DB Client"
@@ -1555,7 +1565,12 @@
           "group": "5_tools"
         },
         {
-          "command": "devbelt.redis.console",
+          "command": "devbelt.redis.commandLog",
+          "when": "view == devbelt.explorer && viewItem == connectionOpen.REDIS",
+          "group": "5_tools"
+        },
+        {
+          "command": "devbelt.redis.keyBrowser",
           "when": "view == devbelt.explorer && viewItem == redisDb.REDIS",
           "group": "1_view"
         },

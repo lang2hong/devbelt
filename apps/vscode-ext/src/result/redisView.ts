@@ -20,7 +20,7 @@ import { BaseWebView } from './baseWebView';
 import { foldRedisKeys } from './redisKeyFold';
 import { AuditLogger } from '../utils/auditLogger';
 import { l10n } from '../i18n';
-import type { RedisNewKeyValue, RedisSlowlogEntry, RedisTab, RedisValueData } from './protocol';
+import type { RedisNewKeyValue, RedisPanel, RedisSlowlogEntry, RedisValueData } from './protocol';
 
 /** 大 key 门禁阈值（字节）。 */
 const LARGE_KEY_BYTES = 1024 * 1024;
@@ -31,41 +31,89 @@ const STREAM_PAGE = 100;
 /** hash/set 单页条目数（大集合分页兜底，避免全量 HGETALL/SMEMBERS）。 */
 const HASH_SET_PAGE = 200;
 
-/** Redis 面板：DB 键树 + 值查看/编辑 + CLI/SlowLog 三栏（P7 S2/S3）。 */
+/** 面板对应的 webview viewType。 */
+function redisViewType(panel: RedisPanel): string {
+  return `devbelt.redis.${panel}`;
+}
+
+/** 面板标题（连接名 + 职责，键浏览器附 db）。 */
+function redisPanelTitle(panel: RedisPanel, conn: SavedConnection, db?: number): string {
+  const base = `Redis @ ${conn.name || conn.host}`;
+  switch (panel) {
+    case 'keyBrowser': return db === undefined ? base : `${base} · db${db}`;
+    case 'serverStatus': return `${base} · Status`;
+    case 'console': return `${base} · Console`;
+    case 'slowlog': return `${base} · Slow Log`;
+    case 'commandLog': return `${base} · Command Log`;
+  }
+}
+
+/**
+ * Redis 面板（S5：按职责拆分为独立 webview）。
+ *
+ * 每个 (conn.id, panel) 维护一个实例（注册表），不再单例顶替；同连接的多个面板
+ * 共享一条 session，`SELECT` 归一与命令经 `RedisClient.runExclusive` 串行（S5 并发隔离）。
+ */
 export class RedisView extends BaseWebView {
-  private static current?: RedisView;
+  private static readonly instances = new Map<string, RedisView>();
+  /** `connection:*` 审计责任面板：每连接仅一个实例负责写（避免多面板重复）。 */
+  private static readonly auditOwners = new Map<string, RedisView>();
   private pendingConfirm?: { id: string; line: string; name: string; args: string[] };
 
-  // S3 键树状态
+  // 键树状态（仅 keyBrowser）
   private cursor = '0';
   /** cluster：各 master 的 SCAN 游标。 */
   private clusterCursors: string[] = [];
   private keys: string[] = [];
   private match = '';
   private scanCount = DEFAULT_SCAN_COUNT;
-  /** 串行化会话操作：SELECT 是连接级状态，避免 DB 切换与并发操作交叠。 */
-  private opChain: Promise<unknown> = Promise.resolve();
-  /** 服务器状态视图（无 DB 绑定）：不发键树，只推 INFO/SlowLog。 */
-  private readonly statusOnly: boolean;
-  /** 命令日志订阅（会话 client 级；首次取会话时挂上）。 */
+  /** 命令日志订阅（会话 client 级；首次取会话/就绪时挂上）。 */
   private logUnsub?: () => void;
-  /** 连接/故障切换事件是否已订阅（每会话一次）。 */
+  /** 连接/故障切换事件是否已订阅（每实例一次）。 */
   private eventsBound = false;
+  /** 注册表键 `${conn.id}:${panel}`，onDispose 清理。 */
+  private readonly registryKey: string;
 
   private constructor(
     private readonly conn: SavedConnection,
     private readonly manager: ConnectionManager,
-    private readonly initialTab: RedisTab,
-    private readonly db?: number,
+    private readonly panelType: RedisPanel,
+    private db?: number,
   ) {
-    super('devbelt.redis', `Redis @ ${conn.name || conn.host}`);
-    this.statusOnly = initialTab === 'status' && db === undefined;
+    super(redisViewType(panelType), redisPanelTitle(panelType, conn, db));
     this.manager.retain(conn.id);
+    this.registryKey = `${conn.id}:${panelType}`;
   }
 
-  static open(conn: SavedConnection, manager: ConnectionManager, tab: RedisTab = 'status', db?: number): void {
-    if (RedisView.current) RedisView.current.dispose();
-    RedisView.current = new RedisView(conn, manager, tab, db);
+  /**
+   * 打开面板。同 (conn,panel) 已存在则聚焦；keyBrowser 且 db 变化则切换并重载键树。
+   * 返回实例（便于测试/聚焦）。
+   */
+  static open(conn: SavedConnection, manager: ConnectionManager, panel: RedisPanel, db?: number): RedisView {
+    const existing = RedisView.instances.get(`${conn.id}:${panel}`);
+    if (existing) {
+      if (panel === 'keyBrowser' && db !== undefined && db !== existing.db) {
+        existing.db = db;
+        void existing.reconfigure();
+      }
+      existing.reveal();
+      return existing;
+    }
+    const view = new RedisView(conn, manager, panel, db);
+    RedisView.instances.set(view.registryKey, view);
+    return view;
+  }
+
+  /** 按 (conn,panel) 查找实例（测试/复用）。 */
+  static find(connId: string, panel: RedisPanel): RedisView | undefined {
+    return RedisView.instances.get(`${connId}:${panel}`);
+  }
+
+  /** 关闭所有面板（测试隔离/扩展停用）。 */
+  static closeAll(): void {
+    for (const view of [...RedisView.instances.values()]) view.dispose();
+    RedisView.instances.clear();
+    RedisView.auditOwners.clear();
   }
 
   protected async handleMessage(msg: any): Promise<void> {
@@ -75,21 +123,8 @@ export class RedisView extends BaseWebView {
         this.post({ type: 'init', mode: 'redis' });
         return;
       }
-      this.post({
-        type: 'config',
-        connName: this.conn.name || this.conn.host,
-        host: this.conn.host,
-        port: this.conn.port,
-        db: this.statusOnly ? null : (this.db ?? this.conn.redisDb ?? 0),
-        readOnly: this.conn.readOnly === true,
-        connMode: this.conn.redisMode ?? 'standalone',
-        redisTab: this.initialTab,
-        commands: allCommandNames(),
-      });
-      // 键浏览器（含连接级 console，落 conn.redisDb，默认 db0）；状态视图只推 INFO/SlowLog。
-      if (!this.statusOnly) await this.enqueuePushKeys(true);
-      await this.pushInfo();
-      await this.pushSlowlog();
+      this.postConfig();
+      await this.onReady();
       return;
     }
     if (msg.type === 'refreshInfo') { await this.pushInfo(); return; }
@@ -132,16 +167,73 @@ export class RedisView extends BaseWebView {
     super.onDispose();
     this.logUnsub?.();
     this.logUnsub = undefined;
-    if (RedisView.current === this) RedisView.current = undefined;
+    RedisView.instances.delete(this.registryKey);
+    // 审计责任交接：若本实例是 owner，从剩余同连接实例中提升一位继承。
+    if (RedisView.auditOwners.get(this.conn.id) === this) {
+      RedisView.auditOwners.delete(this.conn.id);
+      for (const [key, other] of RedisView.instances) {
+        if (other !== this && key.startsWith(`${this.conn.id}:`)) {
+          RedisView.auditOwners.set(this.conn.id, other);
+          break;
+        }
+      }
+    }
     this.manager.release(this.conn.id);
   }
 
   // ────────────────────────── 会话 ──────────────────────────
 
+  /** 下发 config（按面板）。 */
+  private postConfig(): void {
+    this.post({
+      type: 'config',
+      connName: this.conn.name || this.conn.host,
+      host: this.conn.host,
+      port: this.conn.port,
+      db: this.panelType === 'keyBrowser' ? (this.db ?? this.conn.redisDb ?? 0) : null,
+      readOnly: this.conn.readOnly === true,
+      connMode: this.conn.redisMode ?? 'standalone',
+      panel: this.panelType,
+      commands: allCommandNames(),
+    });
+  }
+
+  /** 面板首次就绪后的初始拉取与订阅。 */
+  private async onReady(): Promise<void> {
+    const session = await this.manager.connect(this.conn);
+    if (session.kind !== 'redis') throw new Error('connection is not a Redis session');
+    // 命令日志/连接事件订阅：任一面板打开即建立（断线审计依赖此）。
+    this.ensureSubscriptions(session);
+    if (this.panelType === 'keyBrowser') { await this.enqueuePushKeys(true); return; }
+    if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
+    if (this.panelType === 'slowlog') { await this.pushSlowlog(); return; }
+    if (this.panelType === 'console') {
+      // 打开控制台即把共享会话归一到目标库（conn.redisDb），避免上一个键浏览器
+      // 的 SELECT 泄漏到后续 CLI 命令（命令执行前也会再归一，这里是即时性保障）。
+      await this.enqueue(async () => { await this.sessionForDb(); });
+      return;
+    }
+    // commandLog 无需初始拉取（靠订阅推送）。
+  }
+
+  /** keyBrowser 切换 db（同 conn 已有实例时）：清状态、重发 config、重载键树。 */
+  private async reconfigure(): Promise<void> {
+    this.keys = [];
+    this.cursor = '0';
+    this.clusterCursors = [];
+    this.match = '';
+    this.postConfig();
+    await this.enqueuePushKeys(true);
+  }
+
+  /** 跨面板串行（SELECT + 命令原子）：走共享 client 的 runExclusive。 */
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.opChain.then(fn, fn);
-    this.opChain = run.then(() => undefined, () => undefined);
-    return run;
+    // 互斥粒度是 client 实例：若 manager.connect 因故重建了会话（新 client 自带新
+    // opChain），在途旧 op 与新 op 不再互斥——但旧 op 必失败、实际无害，属已知豁口。
+    return this.manager.connect(this.conn).then((session) => {
+      if (session.kind !== 'redis') throw new Error('connection is not a Redis session');
+      return session.client.runExclusive(fn);
+    });
   }
 
   private async sessionForDb(): Promise<RedisConnectionSession> {
@@ -155,14 +247,22 @@ export class RedisView extends BaseWebView {
       await redisSelect(session.client, target);
       session.db = target;
     }
-    // 订阅连接/故障切换事件（sentinel 切换会经历 reconnecting→ready；cluster 扩缩容同理）。
+    // 订阅连接/故障切换事件 + 命令日志。
+    this.ensureSubscriptions(session);
+    return session;
+  }
+
+  /** 订阅命令日志与连接/故障切换事件（幂等，每实例一次）。 */
+  private ensureSubscriptions(session: RedisConnectionSession): void {
     if (!this.eventsBound && typeof session.client.on === 'function') {
       this.eventsBound = true;
+      // 审计责任：首绑者负责；每面板仍互发 connectionEvent（各自 banner 用）。
+      if (!RedisView.auditOwners.has(this.conn.id)) RedisView.auditOwners.set(this.conn.id, this);
       for (const ev of ['connect', 'ready', 'reconnecting', 'end', 'close', 'error']) {
         session.client.on(ev, (...args: unknown[]) => {
           const detail = args.length && args[0] != null ? String(args[0]) : null;
           this.post({ type: 'connectionEvent', event: ev, detail, at: Date.now() });
-          if (ev === 'reconnecting' || ev === 'end') {
+          if ((ev === 'reconnecting' || ev === 'end') && RedisView.auditOwners.get(this.conn.id) === this) {
             AuditLogger.tryLog({
               action: 'redis_command',
               connName: this.conn.name || this.conn.host,
@@ -173,9 +273,8 @@ export class RedisView extends BaseWebView {
         });
       }
     }
-
-    // 首次取会话时订阅命令日志（所有命令，含非 CLI 路径），逐条下发给 CommandLog 面板。
-    if (!this.logUnsub && typeof session.client.addLogListener === 'function') {
+    // 命令日志仅由 commandLog 面板订阅（其它面板不渲染它，避免 fan-out）。
+    if (!this.logUnsub && this.panelType === 'commandLog' && typeof session.client.addLogListener === 'function') {
       this.logUnsub = session.client.addLogListener((entry) => {
         this.post({
           type: 'commandLog',
@@ -183,7 +282,6 @@ export class RedisView extends BaseWebView {
         });
       });
     }
-    return session;
   }
 
   private async pushInfo(): Promise<void> {
@@ -437,18 +535,20 @@ export class RedisView extends BaseWebView {
   }
 
   private async execute(id: string, line: string, name: string, args: string[]): Promise<void> {
-    const started = Date.now();
-    try {
-      const session = await this.sessionForDb();
-      const raw = await session.client.sendCommand(name, args);
-      const costMs = Date.now() - started;
-      if (isWriteCommand(name, args) || isDangerousCommand(name, args)) {
-        this.audit(name, redisAuditLine(name, args).slice(name.length).trim(), costMs);
+    await this.enqueue(async () => {
+      const started = Date.now();
+      try {
+        const session = await this.sessionForDb();
+        const raw = await session.client.sendCommand(name, args);
+        const costMs = Date.now() - started;
+        if (isWriteCommand(name, args) || isDangerousCommand(name, args)) {
+          this.audit(name, redisAuditLine(name, args).slice(name.length).trim(), costMs);
+        }
+        this.post({ type: 'commandResult', id, command: line, ok: true, result: formatRedisReply(raw), costMs, error: null });
+      } catch (err) {
+        this.post({ type: 'commandResult', id, command: line, ok: false, result: '', costMs: Date.now() - started, error: (err as Error).message });
       }
-      this.post({ type: 'commandResult', id, command: line, ok: true, result: formatRedisReply(raw), costMs, error: null });
-    } catch (err) {
-      this.post({ type: 'commandResult', id, command: line, ok: false, result: '', costMs: Date.now() - started, error: (err as Error).message });
-    }
+    });
   }
 
   // ────────────────────────── Stream（S4） ──────────────────────────

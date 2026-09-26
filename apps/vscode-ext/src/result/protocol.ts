@@ -145,14 +145,14 @@ export interface RedisCommandLogEntry {
   ok: boolean;
   error: string | null;
 }
-/** Redis 面板标签页。 */
-export type RedisTab = 'status' | 'console' | 'slowlog' | 'commandLog';
+/** Redis 面板类型（S5：按职责拆分为独立 webview）。 */
+export type RedisPanel = 'keyBrowser' | 'serverStatus' | 'console' | 'slowlog' | 'commandLog';
 
 /** Extension Host → webview。 */
 export type RedisDownMessage =
   | { type: 'init'; mode: 'redis'; isZh: boolean }
   | { type: 'config'; connName: string; host: string; port: number; db: number | null;
-      readOnly: boolean; connMode: 'standalone' | 'cluster' | 'sentinel'; redisTab: RedisTab;
+      readOnly: boolean; connMode: 'standalone' | 'cluster' | 'sentinel'; panel: RedisPanel;
       commands: string[] }
   | { type: 'info'; info: string }
   | { type: 'slowlog'; entries: RedisSlowlogEntry[] }
