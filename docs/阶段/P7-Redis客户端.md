@@ -354,6 +354,15 @@ SSH 隧道与 Cluster/Sentinel NAT map 放在 vscode-ext（`apps/vscode-ext/src/
     键浏览器左树可拖拽、值区自适应（移除固定 300px/38%）；各面板共享一条 session，
     `RedisClient.runExclusive` 串行「SELECT + 命令」防跨面板竞态。DB 采用面板内切换（决策 4B：
     每连接单键浏览器，切换 db 而非并列多 webview）。
+  - **S5-3 树内只读键导航（中间态）**：standalone/sentinel 的逻辑库（`RedisDb`）节点可展开，
+    懒 `SCAN`（每层 `REDIS_TREE_PAGE=200` + 「加载更多」哨兵）后 `groupRedisKeyChildren` 折叠成
+    只读文件夹/键节点；点键 → 打开 keyBrowser webview 并加载该键值（`open(..., selectKey)`）。
+    写操作/值编辑仍全部在 webview，cluster 不在树里（无 DB 节点）。性能实测留待「全量迁移」评估。
+  - **C-1 树内搜索 + 写操作（ARDM 心智：导航单处）**：DB 右键「搜索键…/清除搜索/新建键」，
+    键右键「打开/重命名/TTL/删除/复制」，文件夹右键「按前缀删除」；均走 `runExclusive` + 审计。
+    搜索态该 db 子节点为**扁平结果**（`toRedisMatchPattern` → `SCAN MATCH`）。**硬上限**
+    `REDIS_TREE_MAX=20000`：达上限停止续扫并给出提示节点（对齐 ARDM `treeNodesOverflow` 思路，
+    但 VS Code TreeView 无虚拟化故取更低值）。
 - Vite 分包：`apps/vscode-ext/webview/vite.config.ts` 现有配置为单入口 `main.ts` + 自动 code
   splitting（`defineAsyncComponent` 会被 Vite 自动拆成独立 chunk，与 AuthenticatorView 模式一致），
   **不新增构建入口**、不改 rollupOptions。所有面板走现有共享 Vite 构建。
