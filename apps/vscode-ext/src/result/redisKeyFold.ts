@@ -52,6 +52,10 @@ export interface RedisKeyChildGroup {
 /**
  * 把某前缀下已加载的 key 归成「直接子文件夹 + 直接叶子键」（S5-3 树懒加载）。
  *
+ * **调用契约**：只处理真正属于该前缀的键——`prefix` 非空时，不以 `prefix+separator`
+ * 开头的键一律忽略。否则 D* 的根扁平集里「同前缀字符串但不同层」的键（如 `ab:y` 之于
+ * 前缀 `a`、`user` 之于前缀 `user`）会以完整键名被反复折叠成子文件夹，导致父↔子无限循环。
+ *
  * key 去掉 `prefix+separator` 后仍含分隔符 → 归入首个段为名的文件夹；否则为叶子。
  * 文件夹与叶子各自按名升序。纯函数，供树 provider 与单测复用。
  */
@@ -64,7 +68,8 @@ export function groupRedisKeyChildren(
   const folderMap = new Map<string, string>();
   const outKeys: string[] = [];
   for (const k of keys) {
-    const rel = base && k.startsWith(base) ? k.slice(base.length) : k;
+    if (base && !k.startsWith(base)) continue;
+    const rel = base ? k.slice(base.length) : k;
     const idx = separator ? rel.indexOf(separator) : -1;
     if (idx > 0) {
       const name = rel.slice(0, idx);

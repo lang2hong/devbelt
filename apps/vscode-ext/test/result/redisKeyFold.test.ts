@@ -71,6 +71,15 @@ describe('groupRedisKeyChildren（S5-3 树懒加载分组）', () => {
     expect(g.keys).toEqual(['a:e']);
   });
 
+  it('前缀下：忽略不属于该前缀的键（防父↔子循环/漏层）', () => {
+    // `ab:y`/`a` 不属于前缀 `a`（不同层/同前缀字符串），必须排除，否则会被折叠成
+    // 自引用子文件夹（`a`→…）或把兄弟叶子塞进 `a`。
+    const g = groupRedisKeyChildren(['a:x', 'ab:y', 'a', 'a:b:c'], 'a');
+    expect(g.folders.map((f) => f.name)).toEqual(['b']);
+    expect(g.folders[0].prefix).toBe('a:b');
+    expect(g.keys).toEqual(['a:x']);
+  });
+
   it('排序稳定；空输入为空', () => {
     const g = groupRedisKeyChildren(['z:1', 'a:2', 'm']);
     expect(g.folders.map((f) => f.name)).toEqual(['a', 'z']);

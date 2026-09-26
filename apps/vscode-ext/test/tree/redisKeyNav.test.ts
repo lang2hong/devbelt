@@ -93,6 +93,25 @@ describe('D* 键树（根扁平 SCAN + 客户端折叠）', () => {
     expect(leaves.every((k) => k.command?.command === 'devbelt.redis.keyBrowser')).toBe(true);
   });
 
+  it('前缀字符串重叠/兄弟叶子：不产生自引用子文件夹（无父↔子循环）', async () => {
+    const provider = makeProvider(makeClient(() => ['0', ['a:x', 'ab:y', 'user', 'user:1']]));
+    const db = dbNode();
+    const root = await provider.getChildren(db);
+    const folderA = root.find((k) => k.kind === NodeKind.RedisKeyFolder && k.label === 'a')!;
+    const folderAb = root.find((k) => k.kind === NodeKind.RedisKeyFolder && k.label === 'ab')!;
+    const folderUser = root.find((k) => k.kind === NodeKind.RedisKeyFolder && k.label === 'user')!;
+
+    // `ab:y` 不得钻入 `a`；`user`（无分隔的兄弟叶子）不得钻入 `user` 文件夹。
+    const kidsA = await provider.getChildren(folderA);
+    expect(kidsA.filter((k) => k.kind === NodeKind.RedisKeyFolder)).toHaveLength(0);
+    expect(kidsA.map((k) => k.label)).toEqual(['a:x']);
+
+    expect((await provider.getChildren(folderAb)).map((k) => k.label)).toEqual(['ab:y']);
+    expect((await provider.getChildren(folderUser)).map((k) => k.label)).toEqual(['user:1']);
+    // 根层 `user` 是无分隔叶子，应与 `user` 文件夹并存且互不嵌套。
+    expect(root.filter((k) => k.kind === NodeKind.RedisKey).map((k) => k.label)).toEqual(['user']);
+  });
+
   it('游标非 0：根层追加唯一「加载更多」哨兵（loadMoreKeys 命令）', async () => {
     const provider = makeProvider(makeClient(() => ['42', ['a:1', 'b:2']]));
     const kids = await provider.getChildren(dbNode());
