@@ -1,4 +1,6 @@
-import { DatabaseType } from '@devbelt/db-core';
+import { DatabaseType, databaseEngineOf } from '@devbelt/db-core';
+
+export { databaseEngineOf } from '@devbelt/db-core';
 /** 缓存的个人权益（personal_plans entitlement_snapshot，不含时间字段）。 */
 export interface CachedEntitlement {
   planCode: string;
@@ -33,26 +35,13 @@ export interface CachedEntitlement {
  * 本文件零 vscode 依赖，纯函数可单测。
  */
 
-export const DEFAULT_FREE_ENGINES: readonly string[] = ['mysql', 'sqlite'];
+export const DEFAULT_FREE_ENGINES: readonly string[] = ['mysql', 'sqlite', 'redis'];
 
 /** free 档本机可保存连接数上限（连接资产差异点）。 */
 export const DEFAULT_FREE_MAX_CONNECTIONS = 10;
 
 /** free 档可保存验证器条目上限（P5 新增）。 */
 export const DEFAULT_FREE_MAX_AUTH_ENTRIES = 10;
-
-const ENGINE_BY_DB_TYPE: Readonly<Partial<Record<DatabaseType, string>>> = {
-  [DatabaseType.MYSQL]: 'mysql',
-  [DatabaseType.PG]: 'postgresql',
-  [DatabaseType.SQLITE]: 'sqlite',
-};
-
-/** dbType → engine 字符串；未知枚举抛错（fail-closed）。 */
-export function databaseEngineOf(dbType: DatabaseType): string {
-  const engine = ENGINE_BY_DB_TYPE[dbType];
-  if (!engine) throw new Error(`unknown DatabaseType: ${String(dbType)}`);
-  return engine;
-}
 
 /** 当前允许的引擎集合：有缓存用缓存值，无缓存 fail-closed 到 Free。 */
 export function allowedEngines(entitlement?: CachedEntitlement | null): readonly string[] {

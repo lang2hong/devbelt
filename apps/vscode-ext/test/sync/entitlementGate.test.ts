@@ -17,10 +17,11 @@ const free = { planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite'], maxD
 const pro = { planCode: 'pro', allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 5, maxSavedConnections: 100, allowConnectionImport: true };
 
 describe('databaseEngineOf', () => {
-  it('三值映射正确', () => {
+  it('映射正确（含 redis）', () => {
     expect(databaseEngineOf(DatabaseType.MYSQL)).toBe('mysql');
     expect(databaseEngineOf(DatabaseType.PG)).toBe('postgresql');
     expect(databaseEngineOf(DatabaseType.SQLITE)).toBe('sqlite');
+    expect(databaseEngineOf(DatabaseType.REDIS)).toBe('redis');
   });
 
   it('未知 DatabaseType 抛错（fail-closed）', () => {

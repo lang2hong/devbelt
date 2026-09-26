@@ -22,7 +22,7 @@ const ORIGIN = 'http://localhost:5173';
 const PLAN: Plan = {
   id: 2, code: 'pro', kind: 'personal', name: 'Pro', priceCents: 9900, billingUnit: 'month', sortOrder: 0,
   status: 'active', version: 1,
-  features: { allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 0, maxConnectionMetas: 5000, syncStorageBytes: 268435456, maxSavedConnections: 100, allowConnectionImport: true },
+  features: { allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite', 'redis'], maxDevices: 0, maxConnectionMetas: 5000, syncStorageBytes: 268435456, maxSavedConnections: 100, allowConnectionImport: true },
   createTime: new Date(), updateTime: new Date(),
 };
 

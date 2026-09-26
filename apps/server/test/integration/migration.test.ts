@@ -59,7 +59,7 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
           WHERE p.code = 'free'`,
       )) as [Array<{ feature_key: string; value_json: unknown }>, unknown];
       const byKey = new Map(freeFeatures.map((r) => [r.feature_key, typeof r.value_json === 'string' ? JSON.parse(r.value_json) : r.value_json]));
-      expect(byKey.get('allowedDatabaseTypes')).toEqual(['mysql', 'sqlite']);
+      expect(byKey.get('allowedDatabaseTypes')).toEqual(['mysql', 'sqlite', 'redis']);
       expect(byKey.get('maxConnectionMetas')).toBe(500);
       expect(byKey.get('syncStorageBytes')).toBe(33554432);
     } finally {

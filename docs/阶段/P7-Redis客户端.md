@@ -171,7 +171,7 @@
 | D9 | 危险命令名单：FLUSHALL/FLUSHDB/SHUTDOWN/CONFIG SET/REWRITE/RESETSTAT/KEYS \*，modal 二次确认 | 与现有 SQL `confirmProductionWrite` 同级别强度 |
 | D10 | Cluster/Sentinel/SSH NAT map **本阶段完整交付**，不拆未来版本 | ARDM 已有可直接借鉴的实现模式，不留给用户残缺体验 |
 | D11 | 命令补全用内置命令模板表（移植 ARDM readCMD/writeCMD/adminCMD），不做 COMMAND DOCS 拉取 | 命令元数据量大且版本差异多；内置模板覆盖 v1 常用命令足够 |
-| D12 | 本阶段不接个人同步/权益（和 SQLite 一致：本地直连、不设引擎门禁），Redis 连接是否进入同步留给后续 P2 v2 增量切片 | 同步 codec 改面大、需要服务端种子迁移，和 Redis 客户端功能解耦 |
+| D12 | 本阶段先本地直连、不接个人同步/权益；**Redis 连接进入同步** 作为后续增量切片落地（见 §六.5 与 P2 v2）——与 SQLite/mysql 同口径，引擎映射统一到 db-core | 同步 codec/权益口径需要一起改，且服务端 plan 种子要加 redis，与 Redis 客户端功能解耦推进 |
 | D13 | 值 viewer 不引入第三方 JSON 高亮/图表库；JSON 用纯 `<pre>`+缩进+简易语法着色（复用现有 webview 样式体系）；不做 hex editor 组件以外的二进制可视化 | 控制 webview bundle 体积；后续有可视化需要再增量加 |
 
 ## 六、技术设计
@@ -470,11 +470,12 @@ db-host 最小改动：
 
 - `packages/db-host/src/connection/connectionStore.ts`（`SENSITIVE_FIELDS` 加 `sentinelPassword`；
   `SavedConnection` 加 Redis 可选字段 + `color?: string` 连接颜色标签，所有引擎共用）。
-- `packages/db-host/src/sync/entitlementGate.ts`（不改——本阶段不接权益/同步，`databaseEngineOf`
-  仅在同步入站路径调用，本地直连不触发）。
-- sync codec/applyRecords：本阶段不改，Redis 连接先本地直连；连接若被同步进 codec 会在
-  `databaseEngineOf` 抛错（fail-closed），因此同步通道不会误同步 Redis 连接。后续 P2 v2 增量
-  切片再补 codec。
+- `packages/db-host/src/sync/entitlementGate.ts`：引擎口径改为复用 `db-core` 的**唯一映射**
+  （`databaseEngineOf`），纳入 `redis`；free 默认引擎含 `mysql/sqlite/redis`。
+- sync codec/applyRecords：**Redis 连接已纳入同步**（后续增量切片落地）——`recordCodec` 增
+  `redis` 引擎 + `REDIS_PAYLOAD_FIELDS`（host/port/user/password/TLS/SSH/`redisMode`/`sentinel*`/
+  `clusterNodes`/`redisDb`/`keySeparator`/`sentinelPassword`/`color` 等），`payloadFieldsFor`/
+  编解码按 redis 分支处理；服务端 plan `ALL_ENGINES`（含 free）加 `redis`。未知引擎仍 fail-closed。
 
 文档：
 

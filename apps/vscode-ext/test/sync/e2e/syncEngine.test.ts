@@ -732,6 +732,45 @@ describe('SyncEngine · deferred（权益跳过的连接记录）', () => {
     };
   }
 
+  it('redis 连接（free 含 redis）经 pull 落地并可见', async () => {
+    const store = makeStore();
+    const memento = makeMemento();
+    const entities = new EntityStore(store);
+    const mapStore = new RecordMapStore(makeMemento(), '7', '1');
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    const unresolved = new UnresolvedRefStore(memento, '7', '1');
+    const deferred = new DeferredRecordStore(memento, '7', '1');
+    const dek = new Uint8Array(32);
+    const recordId = 'B'.repeat(22);
+    const nonce = new Uint8Array(12).fill(2);
+    const plaintext = Buffer.from(JSON.stringify({ type: 'connection', name: 'redis-1', dbType: 'redis', host: 'h', port: 6379, user: '', redisMode: 'standalone', redisDb: 1 }), 'utf8');
+    const box = sealRecord(dek, nonce, plaintext, { userId: '7', keyEpoch: '1', recordId, recordVersion: '1' });
+    const rec = {
+      recordId, version: '1', changeSequence: '5', deleteTime: null, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+      nonce: Buffer.from(nonce).toString('base64url'), ciphertext: Buffer.from(box.ciphertext).toString('base64url'), tag: Buffer.from(box.tag).toString('base64url'),
+    };
+    const entitlement = { planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite', 'redis'], maxDevices: 2, maxSavedConnections: 10, allowConnectionImport: false };
+    const engine = new SyncEngine({
+      userId: '7', keyEpoch: '1',
+      client: clientWith({
+        getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+        getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [rec] })),
+      }),
+      stateStore: makeStateStore(SNAP) as never,
+      mapStore, outbox, entities, unresolved, deferred,
+      dek: () => dek, signSeed: () => new Uint8Array(32), uniqueId: () => 'c-redis-1',
+      entitlement: () => entitlement,
+      seedConflictCarrier: seedConflictStub,
+    });
+    const r = await engine.sync();
+    expect(r.stage).toBe('ok');
+    expect(deferred.list()).toHaveLength(0);
+    const conns = store.listForSync().filter((c) => !(c as unknown as { deleted?: boolean }).deleted);
+    expect(conns).toHaveLength(1);
+    expect((conns[0] as unknown as { dbType: string }).dbType).toBe('REDIS');
+    expect((conns[0] as unknown as { redisDb?: number }).redisDb).toBe(1);
+  });
+
   it('free 用户 PG 连接入 deferred 且不落地；升级后下一轮 drain 落地', async () => {
     const store = makeStore();
     const memento = makeMemento();

@@ -28,7 +28,7 @@ const PLAN: Plan = {
   status: 'active',
   version: 1,
   features: {
-    allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'],
+    allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite', 'redis'],
     maxDevices: 0,
     maxConnectionMetas: 5000,
     syncStorageBytes: 268435456,
@@ -41,7 +41,7 @@ const PLAN: Plan = {
 
 const FREE: Plan = {
   id: 1, code: 'free', kind: 'personal', name: 'Free', priceCents: 0, billingUnit: 'month', sortOrder: 0, status: 'active', version: 1,
-  features: { allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 0, maxConnectionMetas: 500, syncStorageBytes: 33554432, maxSavedConnections: 10, allowConnectionImport: false },
+  features: { allowedDatabaseTypes: ['mysql', 'sqlite', 'redis'], maxDevices: 0, maxConnectionMetas: 500, syncStorageBytes: 33554432, maxSavedConnections: 10, allowConnectionImport: false },
   createTime: new Date(), updateTime: new Date(),
 };
 

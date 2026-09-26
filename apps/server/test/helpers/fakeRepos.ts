@@ -253,7 +253,7 @@ export class FakeEmailVerificationTokenRepo implements IEmailVerificationTokenRe
 
 export function makeFreePlan(id = nextId()): Plan {
   return makePlan({ id, code: 'free', kind: 'personal', name: 'Free', priceCents: 0, billingUnit: 'month', features: {
-    allowedDatabaseTypes: ['mysql', 'sqlite'],
+    allowedDatabaseTypes: ['mysql', 'sqlite', 'redis'],
     maxDevices: 0,
     maxConnectionMetas: 500,
     syncStorageBytes: 33554432,
@@ -264,7 +264,7 @@ export function makeFreePlan(id = nextId()): Plan {
 
 export function makeProPlan(id = nextId()): Plan {
   return makePlan({ id, code: 'pro', kind: 'personal', name: 'Pro', priceCents: 9900, billingUnit: 'month', sortOrder: 20, features: {
-    allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'],
+    allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite', 'redis'],
     maxDevices: 0,
     maxConnectionMetas: 5000,
     syncStorageBytes: 268435456,

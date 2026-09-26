@@ -58,7 +58,7 @@ describe('db-hostd RPC 分发', () => {
 
   it('权益门禁：无权益 fail-closed，Pro 放行 postgresql', async () => {
     await expect(call('entitlement.allowedEngines')).resolves.toMatchObject({
-      result: { engines: ['mysql', 'sqlite'], domain: 'devbelt/sync/v1' },
+      result: { engines: ['mysql', 'sqlite', 'redis'], domain: 'devbelt/sync/v1' },
     });
     const pro = { planCode: 'pro', allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 5, maxSavedConnections: 100, allowConnectionImport: true };
     const res = (await call('entitlement.allowedEngines', { entitlement: pro })) as { result: { engines: string[] } };

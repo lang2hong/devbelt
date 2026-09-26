@@ -78,7 +78,7 @@ describe('plans routes', () => {
     expect(free.billing).toEqual({ unit: 'month', priceCents: 0 });
     expect(pro.billing).toEqual({ unit: 'month', priceCents: 9900 });
 
-    expect(pro.features.find((f: any) => f.key === 'allowedDatabaseTypes')).toMatchObject({ type: 'stringList', value: ['mysql', 'postgresql', 'sqlite'] });
+    expect(pro.features.find((f: any) => f.key === 'allowedDatabaseTypes')).toMatchObject({ type: 'stringList', value: ['mysql', 'postgresql', 'sqlite', 'redis'] });
     expect(pro.features.find((f: any) => f.key === 'allowConnectionImport')).toMatchObject({ type: 'bool', value: true });
     expect(pro.features.find((f: any) => f.key === 'syncStorageBytes')).toMatchObject({ type: 'bytes', value: 268435456 });
 

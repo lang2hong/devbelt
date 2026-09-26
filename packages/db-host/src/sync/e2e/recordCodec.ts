@@ -1,7 +1,8 @@
 import { openAes256Gcm, sealAes256Gcm, type SealedBox } from '../crypto/aead.js';
 import { jcs } from '../crypto/jcs.js';
-import { DatabaseType } from '@devbelt/db-core';
-import { databaseEngineOf } from '../entitlementGate.js';
+import { DatabaseType, databaseEngineOf, databaseTypeFromEngine } from '@devbelt/db-core';
+
+export { databaseTypeFromEngine } from '@devbelt/db-core';
 import type { SavedConnection } from '../../connection/connectionStore.js';
 import type { ConnectionGroup } from '../../connection/connectionStore.js';
 import type { QueryFolder } from '../../connection/queryStore.js';
@@ -41,6 +42,15 @@ export const SQLITE_PAYLOAD_FIELDS = [
   'name', 'dbType', 'password', 'database', 'timezone', 'environment', 'readOnly',
 ] as const;
 
+/** Redis 引擎白名单字段（P7 字段 + 共用 TLS/SSH）。 */
+export const REDIS_PAYLOAD_FIELDS = [
+  'name', 'dbType', 'host', 'port', 'user', 'password',
+  'useSSL', 'rejectUnauthorized', 'redisDb', 'keySeparator', 'redisMode',
+  'sentinelName', 'clusterNodes', 'sentinelNodes', 'sentinelPassword',
+  'color', 'environment', 'readOnly',
+  'sshHost', 'sshPort', 'sshUser', 'sshPassword', 'sshPassphrase',
+] as const;
+
 /** D1：跨设备同步的路径/URL/命令字段（源配置；敏感，仅入密文）。 */
 export const CONNECTION_PATH_FIELDS = [
   'dbPath', 'caPath', 'clientCertPath', 'clientKeyPath', 'sshPrivateKeyPath',
@@ -56,7 +66,9 @@ const SQLITE_FORBIDDEN_FIELDS = [
 export const SQL_MAX_BYTES = 64 * 1024;
 
 function payloadFieldsFor(dbType: DatabaseType): readonly string[] {
-  return dbType === DatabaseType.SQLITE ? SQLITE_PAYLOAD_FIELDS : MYSQL_PG_PAYLOAD_FIELDS;
+  if (dbType === DatabaseType.SQLITE) return SQLITE_PAYLOAD_FIELDS;
+  if (dbType === DatabaseType.REDIS) return REDIS_PAYLOAD_FIELDS;
+  return MYSQL_PG_PAYLOAD_FIELDS;
 }
 
 /** 空值判据：undefined/空串/0/false 视为「未设置」，SQLite 引擎专属字段据此豁免。 */
@@ -203,19 +215,6 @@ export function encodeRecordPayload(conn: SavedConnection, resolveRef?: RefResol
   return encodeConnectionPayload(conn, resolveRef ?? (() => undefined));
 }
 
-const ENGINE_TO_DB_TYPE: Record<string, DatabaseType> = {
-  mysql: DatabaseType.MYSQL,
-  postgresql: DatabaseType.PG,
-  sqlite: DatabaseType.SQLITE,
-};
-
-/** payload 的 engine 字符串 → DatabaseType（未知引擎 fail-closed）。 */
-export function databaseTypeFromEngine(engine: string): DatabaseType {
-  const t = ENGINE_TO_DB_TYPE[engine];
-  if (!t) throw new Error(`unknown database engine: ${engine}`);
-  return t;
-}
-
 /** MySQL/PostgreSQL 解码结果：host/port/user 必需。 */
 export interface DecodedMysqlPgPayload {
   dbType: DatabaseType.MYSQL | DatabaseType.PG;
@@ -265,7 +264,41 @@ export interface DecodedSqlitePayload {
   groupId?: string;
 }
 
-export type DecodedConnectionPayload = DecodedMysqlPgPayload | DecodedSqlitePayload;
+/** Redis 解码结果：host/port 必需；cluster/sentinel 追加节点列表。 */
+export interface DecodedRedisPayload {
+  dbType: DatabaseType.REDIS;
+  name: string;
+  host: string;
+  port: number;
+  user?: string;
+  password?: string;
+  useSSL?: boolean;
+  rejectUnauthorized?: boolean;
+  redisDb?: number;
+  keySeparator?: string;
+  redisMode?: 'standalone' | 'cluster' | 'sentinel';
+  sentinelName?: string;
+  clusterNodes?: string;
+  sentinelNodes?: string;
+  sentinelPassword?: string;
+  color?: string;
+  environment?: 'development' | 'test' | 'staging' | 'production';
+  readOnly?: boolean;
+  sshHost?: string;
+  sshPort?: number;
+  sshUser?: string;
+  sshPassword?: string;
+  sshPassphrase?: string;
+  caPath?: string;
+  clientCertPath?: string;
+  clientKeyPath?: string;
+  sshPrivateKeyPath?: string;
+  socketPath?: string;
+  /** 引用的分组 sync recordId（应用层转本地 id）。 */
+  groupId?: string;
+}
+
+export type DecodedConnectionPayload = DecodedMysqlPgPayload | DecodedSqlitePayload | DecodedRedisPayload;
 
 /** 解码后的引用（recordId），应用层负责经 recordMap 转本地 id 并处理 unresolved。 */
 export interface DecodedGroupPayload {
@@ -378,12 +411,6 @@ function decodeConnectionPayload(p: unknown): DecodedConnectionPayload {
   const dbTypeStr = strOf(obj, 'dbType');
   if (dbTypeStr === undefined) throw new Error('record payload.dbType is required');
   const dbType = databaseTypeFromEngine(dbTypeStr);
-  // P7：Redis 连接暂不进入同步（与 SQLite/ES 一致，fail-closed）。
-  // 注意：当前 `ENGINE_TO_DB_TYPE` 尚无 'redis'，实际拒绝点是上一行 `databaseTypeFromEngine`
-  // （抛 unknown database engine）；本判断是 'redis' 未来入表后的防线，避免被当作 SQL 形状解码。
-  if (dbType === DatabaseType.REDIS) {
-    throw new Error('redis connections are not supported by sync codec yet');
-  }
   rejectExtraKeys(obj, [...payloadFieldsFor(dbType), ...CONNECTION_PATH_FIELDS, 'type', 'groupId'], 'record payload');
 
   const name = strOf(obj, 'name');
@@ -409,6 +436,45 @@ function decodeConnectionPayload(p: unknown): DecodedConnectionPayload {
       sqliteCommand: strOf(obj, 'sqliteCommand'),
       connectionUrl: strOf(obj, 'connectionUrl'),
       useConnectionString: boolOf(obj, 'useConnectionString'),
+      groupId,
+    };
+  }
+
+  if (dbType === DatabaseType.REDIS) {
+    const redisMode = strOf(obj, 'redisMode');
+    if (redisMode !== undefined && !['standalone', 'cluster', 'sentinel'].includes(redisMode)) {
+      throw new Error(`record payload.redisMode invalid: ${redisMode}`);
+    }
+    const redisHost = strOf(obj, 'host');
+    if (redisHost === undefined) throw new Error('record payload.host is required');
+    const redisPort = uint16Of(obj, 'port');
+    if (redisPort === undefined) throw new Error('record payload.port is required');
+    return {
+      dbType, name, host: redisHost, port: redisPort,
+      user: strOf(obj, 'user'),
+      password,
+      useSSL: boolOf(obj, 'useSSL'),
+      rejectUnauthorized: boolOf(obj, 'rejectUnauthorized'),
+      redisDb: nonNegIntOf(obj, 'redisDb'),
+      keySeparator: strOf(obj, 'keySeparator'),
+      redisMode: redisMode as DecodedRedisPayload['redisMode'],
+      sentinelName: strOf(obj, 'sentinelName'),
+      clusterNodes: strOf(obj, 'clusterNodes'),
+      sentinelNodes: strOf(obj, 'sentinelNodes'),
+      sentinelPassword: strOf(obj, 'sentinelPassword'),
+      color: strOf(obj, 'color'),
+      environment: env as DecodedRedisPayload['environment'],
+      readOnly,
+      sshHost: strOf(obj, 'sshHost'),
+      sshPort: uint16Of(obj, 'sshPort'),
+      sshUser: strOf(obj, 'sshUser'),
+      sshPassword: strOf(obj, 'sshPassword'),
+      sshPassphrase: strOf(obj, 'sshPassphrase'),
+      caPath: strOf(obj, 'caPath'),
+      clientCertPath: strOf(obj, 'clientCertPath'),
+      clientKeyPath: strOf(obj, 'clientKeyPath'),
+      sshPrivateKeyPath: strOf(obj, 'sshPrivateKeyPath'),
+      socketPath: strOf(obj, 'socketPath'),
       groupId,
     };
   }

@@ -129,7 +129,7 @@ describe('AuthService.refreshEntitlement', () => {
     expect(auth.getCachedEntitlement()?.maxAuthenticatorEntries).toBe(500);
   });
 
-  it('无订阅时降级到 Free（mysql/sqlite）', async () => {
+  it('无订阅时降级到 Free（mysql/sqlite/redis）', async () => {
     const secrets = makeSecrets();
     const memento = makeMemento();
     await secrets.store(ACCESS_KEY, 'A1');
@@ -139,7 +139,7 @@ describe('AuthService.refreshEntitlement', () => {
     await auth.init();
     await auth.refreshEntitlement();
 
-    expect(auth.getCachedEntitlement()).toEqual({ planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 0, maxSavedConnections: 10, allowConnectionImport: false, maxConcurrentConnections: 0, allowConnectionExport: true, allowErDiagram: true, allowDataSync: true, maxAuthenticatorEntries: 10 });
+    expect(auth.getCachedEntitlement()).toEqual({ planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite', 'redis'], maxDevices: 0, maxSavedConnections: 10, allowConnectionImport: false, maxConcurrentConnections: 0, allowConnectionExport: true, allowErDiagram: true, allowDataSync: true, maxAuthenticatorEntries: 10 });
   });
 
   it('getMe 失败静默降级：不抛、不写缓存', async () => {

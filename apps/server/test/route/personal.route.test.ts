@@ -70,7 +70,7 @@ describe('personal routes smoke', () => {
     const me = await t.app.inject({ method: 'GET', url: '/api/db/me', headers: t.auth(token) });
     expect(me.statusCode).toBe(200);
     expect(me.json().subscription.planCode).toBe('free');
-    expect(me.json().subscription.entitlement).toMatchObject({ allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 0 });
+    expect(me.json().subscription.entitlement).toMatchObject({ allowedDatabaseTypes: ['mysql', 'sqlite', 'redis'], maxDevices: 0 });
     expect(me.json().subscription.entitlement.maxDevices).toBe(0);
     expect(Object.keys(me.json().subscription).sort()).toEqual([
       'entitlement', 'periodEndTime', 'periodStartTime', 'planCode', 'status',
@@ -81,7 +81,7 @@ describe('personal routes smoke', () => {
     expect(sub.json()).toMatchObject({
       planCode: 'free',
       status: 'active',
-      entitlement: { allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 0 },
+      entitlement: { allowedDatabaseTypes: ['mysql', 'sqlite', 'redis'], maxDevices: 0 },
     });
     await t.close();
   });
