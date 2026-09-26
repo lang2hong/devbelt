@@ -349,6 +349,11 @@ SSH 隧道与 Cluster/Sentinel NAT map 放在 vscode-ext（`apps/vscode-ext/src/
     `HexEditor.vue`（简易 hex 表格：offset/hex/ascii）。
   - App.vue 加 `v-else-if="mode === 'redis'"` 分支；异步 `defineAsyncComponent` 单独 chunk 打包
     （对齐 AuthenticatorView 的分包模式，避免影响 SQL webview 首屏体积）。
+  - **S5 面板拆分（收口）**：由单面板三 tab 拆为独立 webview（viewType `devbelt.redis.<panel>`）——
+    连接节点右键 → Server Status / Console / Slow Log / Command Log，DB 节点右键 → Key Browser。
+    键浏览器左树可拖拽、值区自适应（移除固定 300px/38%）；各面板共享一条 session，
+    `RedisClient.runExclusive` 串行「SELECT + 命令」防跨面板竞态。DB 采用面板内切换（决策 4B：
+    每连接单键浏览器，切换 db 而非并列多 webview）。
 - Vite 分包：`apps/vscode-ext/webview/vite.config.ts` 现有配置为单入口 `main.ts` + 自动 code
   splitting（`defineAsyncComponent` 会被 Vite 自动拆成独立 chunk，与 AuthenticatorView 模式一致），
   **不新增构建入口**、不改 rollupOptions。所有面板走现有共享 Vite 构建。
