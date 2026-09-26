@@ -360,6 +360,11 @@ export async function redisKeyspaceOnNode(node: RedisNodeSource): Promise<RedisD
   return parseKeyspace(asString(await node.call('INFO', 'keyspace')));
 }
 
+/** 集群：逐 master 取完整 INFO（监控面板聚合用）。 */
+export async function redisInfoOnNode(node: RedisNodeSource): Promise<string> {
+  return asString(await node.call('INFO'));
+}
+
 export async function redisDbsizeOnNode(node: RedisNodeSource): Promise<number> {
   return asNumber(await node.call('DBSIZE'));
 }

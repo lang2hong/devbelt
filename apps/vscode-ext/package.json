@@ -459,6 +459,11 @@
         "category": "DB Client"
       },
       {
+        "command": "devbelt.redis.monitor",
+        "title": "%cmd.redis.monitor%",
+        "category": "DB Client"
+      },
+      {
         "command": "devbelt.redis.console",
         "title": "%cmd.redis.console%",
         "category": "DB Client"
@@ -1606,6 +1611,11 @@
         },
         {
           "command": "devbelt.redis.serverStatus",
+          "when": "view == devbelt.explorer && viewItem == connectionOpen.REDIS",
+          "group": "5_tools"
+        },
+        {
+          "command": "devbelt.redis.monitor",
           "when": "view == devbelt.explorer && viewItem == connectionOpen.REDIS",
           "group": "5_tools"
         },

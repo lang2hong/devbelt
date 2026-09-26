@@ -11,6 +11,7 @@ import {
   redisXRange, redisXRevRange, redisXAdd, redisXDel, redisXTrimMaxlen, redisXLen,
   redisXInfoGroups, redisXInfoConsumers, redisXGroupCreate, redisXGroupDestroy, redisXGroupDelConsumer,
   redisXPending, isValidStreamId, compareStreamId,
+  redisInfoOnNode,
   type RedisCommandSource,
 } from '@devbelt/db-core';
 import type { RedisConnectionSession } from '../connection/connectionSession';
@@ -20,6 +21,7 @@ import { BaseWebView } from './baseWebView';
 import { AuditLogger } from '../utils/auditLogger';
 import { l10n } from '../i18n';
 import type { RedisPanel, RedisSlowlogEntry, RedisValueData } from './protocol';
+import { parseRedisInfo, aggregateRedisInfo } from './redisInfoParse';
 
 /** 大 key 门禁阈值（字节）。 */
 const LARGE_KEY_BYTES = 1024 * 1024;
@@ -42,6 +44,7 @@ function redisPanelTitle(panel: RedisPanel, conn: SavedConnection, db?: number):
       return db === undefined ? `${base} · ${values}` : `${base} · ${values} · db${db}`;
     }
     case 'serverStatus': return `${base} · Status`;
+    case 'monitor': return `${base} · Monitor`;
     case 'console': return `${base} · Console`;
     case 'slowlog': return `${base} · Slow Log`;
     case 'commandLog': return `${base} · Command Log`;
@@ -131,6 +134,7 @@ export class RedisView extends BaseWebView {
       return;
     }
     if (msg.type === 'refreshInfo') { await this.pushInfo(); return; }
+    if (msg.type === 'sampleMonitor') { if (this.panelType === 'monitor') await this.pushMonitor(); return; }
     if (msg.type === 'refreshSlowlog') { await this.pushSlowlog(); return; }
     if (msg.type === 'runCommand') { await this.runCommand(String(msg.id ?? ''), String(msg.line ?? '')); return; }
     if (msg.type === 'confirmDanger') { await this.resolveConfirm(String(msg.id ?? ''), msg.accept === true); return; }
@@ -249,8 +253,7 @@ export class RedisView extends BaseWebView {
       if (k) await this.enqueuePushValue(k);
       return;
     }
-    if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
-    if (this.panelType === 'slowlog') { await this.pushSlowlog(); return; }
+if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
     if (this.panelType === 'console') {
       // 打开控制台即把共享会话归一到目标库（conn.redisDb），避免上一个键浏览器的
       // SELECT 泄漏到后续 CLI 命令（命令执行前也会再归一，这里是即时性保障）。
@@ -335,6 +338,21 @@ export class RedisView extends BaseWebView {
       const session = await this.manager.connect(this.conn);
       if (session.kind !== 'redis') throw new Error('connection is not a Redis session');
       this.post({ type: 'info', info: await session.client.info() });
+    } catch (err) {
+      this.post({ type: 'error', message: (err as Error).message });
+    }
+  }
+
+  /** 监控面板单次采样：INFO → 解析 → 回 monitorSample（cluster 逐 master 聚合）。 */
+  private async pushMonitor(): Promise<void> {
+    try {
+      const session = await this.manager.connect(this.conn);
+      if (session.kind !== 'redis') throw new Error('connection is not a Redis session');
+      const client = session.client;
+      const metrics = client.isCluster
+        ? aggregateRedisInfo(await Promise.all(client.nodes().map(async (n) => parseRedisInfo(await redisInfoOnNode(n)))))
+        : parseRedisInfo(await client.info());
+      this.post({ type: 'monitorSample', metrics });
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
     }

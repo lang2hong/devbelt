@@ -125,6 +125,7 @@
   "cmd.showPoolStatus": "Show Connection Pool Status",
   "cmd.scheduleBackup": "Schedule Backup",
   "cmd.redis.serverStatus": "Redis Server Status",
+  "cmd.redis.monitor": "Redis Monitor",
   "cmd.redis.console": "Redis Console",
   "cmd.redis.slowlog": "Redis Slow Log",
   "cmd.redis.commandLog": "Redis Command Log",

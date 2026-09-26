@@ -144,7 +144,7 @@ export interface RedisCommandLogEntry {
   error: string | null;
 }
 /** Redis 面板类型（S5：按职责拆分为独立 webview）。 */
-export type RedisPanel = 'keyBrowser' | 'serverStatus' | 'console' | 'slowlog' | 'commandLog';
+export type RedisPanel = 'keyBrowser' | 'serverStatus' | 'console' | 'slowlog' | 'commandLog' | 'monitor';
 
 /** Extension Host → webview。 */
 export type RedisDownMessage =
@@ -155,6 +155,7 @@ export type RedisDownMessage =
   | { type: 'info'; info: string }
   | { type: 'slowlog'; entries: RedisSlowlogEntry[] }
   | { type: 'value'; key: string; keyType: string; ttl: number; tooLarge: boolean; size: number | null; data: RedisValueData | null }
+  | { type: 'monitorSample'; metrics: RedisMonitorMetrics }
   | { type: 'keyAction'; action: string; ok: boolean; error: string | null }
   | { type: 'confirmOpRequired'; kind: string; detail: string }
   | { type: 'commandLog'; entry: RedisCommandLogEntry }
@@ -172,6 +173,30 @@ export interface RedisStreamEntry {
   fields: [string, string][];
 }
 
+/** 监控面板单次采样（INFO 解析结果）。 */
+export interface RedisMonitorMetrics {
+  ts: number;
+  version: string;
+  role: string;
+  uptimeSeconds: number;
+  connectedClients: number;
+  usedMemory: number;
+  usedMemoryHuman: string;
+  maxmemory: number;
+  fragmentationRatio: number;
+  instantaneousOpsPerSec: number;
+  instantaneousInputKbps: number;
+  instantaneousOutputKbps: number;
+  totalCommandsProcessed: number;
+  evictedKeys: number;
+  expiredKeys: number;
+  keyspaceHits: number;
+  keyspaceMisses: number;
+  /** 命中率 0..1；无读写（hits+misses=0）时为 null。 */
+  hitRate: number | null;
+  keyspace: { db: string; keys: number; expires: number }[];
+}
+
 export type RedisValueData =
   | { kind: 'string'; text: string; base64: string; binary: boolean; bytes: number }
   | { kind: 'hash'; entries: [string, string][]; len: number }
@@ -187,6 +212,7 @@ export type RedisUpMessage =
   | { type: 'confirmDanger'; id: string; accept: boolean }
   | { type: 'refreshInfo' }
   | { type: 'refreshSlowlog' }
+  | { type: 'sampleMonitor' }
   // 值 / CRUD（键导航在 explorer 树侧，见 S5-3/C-1）
   | { type: 'selectKey'; key: string }
   | { type: 'saveString'; key: string; value: string }

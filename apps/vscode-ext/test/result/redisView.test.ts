@@ -31,7 +31,7 @@ beforeEach(() => { RedisView.closeAll(); h.audits.length = 0; });
 
 type Send = (name: string, args: string[]) => Promise<unknown>;
 type RawArg = string | number | Buffer;
-type PanelOrTab = 'keyBrowser' | 'serverStatus' | 'console' | 'slowlog';
+type PanelOrTab = 'keyBrowser' | 'serverStatus' | 'console' | 'slowlog' | 'monitor';
 
 function makeView(handler?: Send, db?: number, panelOrTab: PanelOrTab = 'console') {
   const sent: [string, RawArg[]][] = [];
@@ -406,6 +406,25 @@ describe('RedisView S3 键树/值/编辑', () => {
     await view.handleMessage({ type: 'zsetAdd', key: 'z', score: '3', member: 'm2', oldMember: 'm2' });
     expect(sent.some(([n]) => n === 'ZADD')).toBe(true);
     expect(sent.some(([n]) => n === 'ZREM')).toBe(false);
+  });
+});
+
+describe('RedisView 监控面板', () => {
+  it('sampleMonitor（standalone）→ 回 monitorSample（INFO 解析）', async () => {
+    const { view } = makeView(async () => 'OK', undefined, 'monitor');
+    await mount(view);
+    await view.handleMessage({ type: 'sampleMonitor' });
+    const s = posts(view).find((m) => m.type === 'monitorSample');
+    expect(s).toBeTruthy();
+    expect(s.metrics.version).toBe('7.0.0');
+    expect(s.metrics.keyspace).toEqual([]);
+  });
+
+  it('非 monitor 面板的 sampleMonitor 被忽略', async () => {
+    const { view } = makeView(async (n) => (n === 'SLOWLOG' ? [] : 'OK'), undefined, 'console');
+    await mount(view);
+    await view.handleMessage({ type: 'sampleMonitor' });
+    expect(posts(view).some((m) => m.type === 'monitorSample')).toBe(false);
   });
 });
 

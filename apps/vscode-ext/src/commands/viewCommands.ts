@@ -173,6 +173,9 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     vscode.commands.registerCommand('devbelt.redis.serverStatus', (node: any) => {
       if (node?.conn) RedisView.open(node.conn, manager, 'serverStatus');
     }),
+    vscode.commands.registerCommand('devbelt.redis.monitor', (node: any) => {
+      if (node?.conn) RedisView.open(node.conn, manager, 'monitor');
+    }),
     vscode.commands.registerCommand('devbelt.redis.slowlog', (node: any) => {
       if (node?.conn) RedisView.open(node.conn, manager, 'slowlog');
     }),

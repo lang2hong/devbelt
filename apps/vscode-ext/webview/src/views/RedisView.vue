@@ -3,12 +3,13 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import { useI18n } from '../composables/useI18n';
 import ServerStatus from '../components/redis/ServerStatus.vue';
+import MonitorPanel from '../components/redis/MonitorPanel.vue';
 import ValueViewer from '../components/redis/ValueViewer.vue';
 import StreamViewer from '../components/redis/StreamViewer.vue';
 import CliConsole from '../components/redis/CliConsole.vue';
 import SlowLog from '../components/redis/SlowLog.vue';
 import CommandLog from '../components/redis/CommandLog.vue';
-import { computeStreamDone, isKeyBrowserPanel, type CommandResult, type RedisPanel, type SlowlogEntry, type ValueInfo } from '../components/redis/types';
+import { computeStreamDone, isKeyBrowserPanel, type CommandResult, type RedisMonitorMetrics, type RedisPanel, type SlowlogEntry, type ValueInfo } from '../components/redis/types';
 
 const { post, onMessage } = useVsCode();
 const { t } = useI18n();
@@ -21,6 +22,9 @@ const connMode = ref<'standalone' | 'cluster' | 'sentinel'>('standalone');
 const readOnly = ref(false);
 const commands = ref<string[]>([]);
 const info = ref('');
+/** 监控面板：最新采样 + 最近 60 点历史（趋势用）。 */
+const monitorMetrics = ref<RedisMonitorMetrics | null>(null);
+const monitorSamples = ref<RedisMonitorMetrics[]>([]);
 const entries = ref<SlowlogEntry[]>([]);
 const results = ref<CommandResult[]>([]);
 const pendingConfirm = ref<{ id: string; command: string } | null>(null);
@@ -100,6 +104,8 @@ onMounted(() => {
       // 切换面板/DB 时重置视图态，避免旧值残留。
       value.value = null;
       banner.value = '';
+      monitorMetrics.value = null;
+      monitorSamples.value = [];
     } else if (msg.type === 'value') {
       value.value = msg as ValueInfo;
       streamDetail.value = null;
@@ -109,6 +115,9 @@ onMounted(() => {
       banner.value = msg.ok ? '' : String(msg.error ?? '');
     } else if (msg.type === 'info') {
       info.value = msg.info ?? '';
+    } else if (msg.type === 'monitorSample') {
+      monitorMetrics.value = msg.metrics as RedisMonitorMetrics;
+      monitorSamples.value = [...monitorSamples.value, msg.metrics as RedisMonitorMetrics].slice(-60);
     } else if (msg.type === 'slowlog') {
       entries.value = msg.entries ?? [];
     } else if (msg.type === 'commandResult') {
@@ -215,6 +224,13 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
       :events="connectionEvents"
     />
     <ServerStatus v-else-if="panel === 'serverStatus'" :info="info" @refresh="post({ type: 'refreshInfo' })" class="single" />
+    <MonitorPanel
+      v-else-if="panel === 'monitor'"
+      class="single"
+      :metrics="monitorMetrics"
+      :samples="monitorSamples"
+      @sample="post({ type: 'sampleMonitor' })"
+    />
 
     <div v-if="pendingOpDetail !== null" class="mask">
       <div class="confirm">

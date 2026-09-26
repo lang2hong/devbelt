@@ -379,6 +379,12 @@ SSH 隧道与 Cluster/Sentinel NAT map 放在 vscode-ext（`apps/vscode-ext/src/
     **member + score**（改名 = `ZADD` 新 + `ZREM` 旧）；list 改元素值（`LSET`）；均在同一 host `edit` 内完成，
     单次审计 + 单次刷新；改名审计动作串为 `HSET+HDEL`/`ZADD+ZREM`，第二步失败仍落 partial 审计（非原子，
     改名目标已存在会覆盖其值——Redis 语义）。
+  - **监控面板（`monitor`）**：连接右键「监控」→ 独立 webview `devbelt.redis.monitor`。webview 定时（1/2/5s，可暂停）
+    `sampleMonitor` → host 执行一次 `INFO`，经 `parseRedisInfo`（纯函数）解析后回 `monitorSample`；webview 保留最近
+    60 点做趋势。折线：used_memory / ops-per-sec / clients / 出入流量 / 命中率；卡片：version/role/uptime/maxmemory/
+    碎片率/淘汰/过期/累计命令；keyspace(`dbN`)。**cluster 逐 master 取 INFO 并聚合**（计数/内存/ops/流量求和、
+    keyspace 按 db 合并、命中率用聚合 hits/misses 重算、uptime/碎片率取最大、role 标 `cluster`）。**纯只读**、
+    零新依赖（自绘 SVG sparkline）。
   - **C-2 去重（导航单处）**：webview `keyBrowser` 退化为**纯值面板**——移除 `KeyTree`/`KeyNewDialog`
     与键树协议（`keys`/`refreshKeys`/`loadMoreKeys`/`createKey`）；键导航/搜索/新建全在 explorer 树。
     键节点点击 → 打开值面板并载值；无选中键时显示空态提示。单键重命名/TTL/删除/persist 仍在值面板。

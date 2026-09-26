@@ -1,6 +1,6 @@
-import type { RedisPanel, RedisValueData } from '../../../../src/result/protocol';
+import type { RedisMonitorMetrics, RedisPanel, RedisValueData } from '../../../../src/result/protocol';
 
-export type { RedisPanel, RedisValueData };
+export type { RedisMonitorMetrics, RedisPanel, RedisValueData };
 
 export interface CommandResult {
   id: string;

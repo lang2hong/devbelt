@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const PANELS = ['keyBrowser', 'serverStatus', 'console', 'slowlog', 'commandLog'] as const;
+const PANELS = ['keyBrowser', 'serverStatus', 'console', 'slowlog', 'commandLog', 'monitor'] as const;
 const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'));
 const menus: Array<{ command: string; when?: string }> = pkg?.contributes?.menus?.['view/item/context'] ?? [];
 const viewCommands = readFileSync(join(process.cwd(), 'src/commands/viewCommands.ts'), 'utf8');
@@ -26,6 +26,7 @@ describe('Redis S5 面板可达性', () => {
       console: 'devbelt.redis.console',
       slowlog: 'devbelt.redis.slowlog',
       commandLog: 'devbelt.redis.commandLog',
+      monitor: 'devbelt.redis.monitor',
     };
     for (const p of PANELS) {
       const cmd = byPanel[p];
@@ -35,7 +36,7 @@ describe('Redis S5 面板可达性', () => {
 
   it('webview 对每个面板有渲染分支', () => {
     expect(vue).toContain('isKeyBrowserPanel(');
-    for (const p of ['serverStatus', 'console', 'slowlog', 'commandLog'] as const) {
+    for (const p of ['serverStatus', 'console', 'slowlog', 'commandLog', 'monitor'] as const) {
       expect(vue, `缺少分支: ${p}`).toContain(`panel === '${p}'`);
     }
   });
