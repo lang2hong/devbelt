@@ -5,8 +5,6 @@
  * 靠人记。这里集中声明已知消息与视图模式，App.vue 与扩展侧共用，避免漂移。
  */
 
-import type { RedisKeyFolder } from './redisKeyFold';
-export type { RedisKeyFolder };
 import type {
   AuthenticatorEntry,
   AuthenticatorGroup,
@@ -156,7 +154,6 @@ export type RedisDownMessage =
       commands: string[] }
   | { type: 'info'; info: string }
   | { type: 'slowlog'; entries: RedisSlowlogEntry[] }
-  | { type: 'keys'; folders: RedisKeyFolder; cursor: string; done: boolean; scanned: number; match: string }
   | { type: 'value'; key: string; keyType: string; ttl: number; tooLarge: boolean; size: number | null; data: RedisValueData | null }
   | { type: 'keyAction'; action: string; ok: boolean; error: string | null }
   | { type: 'confirmOpRequired'; kind: string; detail: string }
@@ -183,14 +180,6 @@ export type RedisValueData =
   | { kind: 'zset'; items: [string, string][]; card: number }
   | { kind: 'stream'; entries: RedisStreamEntry[]; len: number; groups: Record<string, string>[] };
 
-/** 新建 key 的初值（按类型）。 */
-export type RedisNewKeyValue =
-  | { kind: 'string'; text: string }
-  | { kind: 'hash'; entries: [string, string][] }
-  | { kind: 'list'; items: string[] }
-  | { kind: 'set'; members: string[] }
-  | { kind: 'zset'; items: [string, string][] };
-
 /** webview → Extension Host。 */
 export type RedisUpMessage =
   | { type: 'ready'; __load?: string }
@@ -198,9 +187,7 @@ export type RedisUpMessage =
   | { type: 'confirmDanger'; id: string; accept: boolean }
   | { type: 'refreshInfo' }
   | { type: 'refreshSlowlog' }
-  // S3 键树 / 值 / CRUD
-  | { type: 'refreshKeys'; match?: string; count?: number }
-  | { type: 'loadMoreKeys' }
+  // 值 / CRUD（键导航在 explorer 树侧，见 S5-3/C-1）
   | { type: 'selectKey'; key: string }
   | { type: 'saveString'; key: string; value: string }
   | { type: 'saveStringBytes'; key: string; base64: string }
@@ -209,7 +196,6 @@ export type RedisUpMessage =
   | { type: 'persistKey'; key: string }
   | { type: 'renameKey'; key: string; newKey: string }
   | { type: 'deleteKeys'; keys: string[] }
-  | { type: 'createKey'; key: string; value: RedisNewKeyValue; ttlSeconds: number | null }
   | { type: 'hashSet'; key: string; field: string; value: string }
   | { type: 'hashDel'; key: string; fields: string[] }
   | { type: 'listPush'; key: string; side: 'left' | 'right'; values: string[] }

@@ -40,12 +40,14 @@ describe('Redis S5 面板可达性', () => {
     }
   });
 
-  it('DB 节点默认点击开键浏览器，且右击含控制台与键浏览器', () => {
+  it('DB 节点：展开键树（无默认点击命令），右击含控制台/搜索/新建', () => {
     const tree = readFileSync(join(process.cwd(), 'src/tree/dbTreeDataProvider.ts'), 'utf8');
-    expect(tree).toContain("node.command = { command: 'devbelt.redis.keyBrowser'");
+    // C-2：DB 节点不再有默认点击命令（避免打开空值面板），点击即展开。
+    expect(tree).not.toContain("node.command = { command: 'devbelt.redis.keyBrowser'");
     expect(menus.some((m) => m.command === 'devbelt.redis.console' && m.when?.includes('connectionOpen.REDIS'))).toBe(true);
     expect(menus.some((m) => m.command === 'devbelt.redis.console' && m.when?.includes('redisDb.REDIS'))).toBe(true);
-    expect(menus.some((m) => m.command === 'devbelt.redis.keyBrowser' && m.when?.includes('redisDb.REDIS'))).toBe(true);
+    // 键浏览器菜单只应在键节点上（DB 节点不再有）。
+    expect(menus.some((m) => m.command === 'devbelt.redis.keyBrowser' && m.when?.includes('redisDb.REDIS'))).toBe(false);
   });
 
 it('S5-3 树内只读键导航：键节点有打开菜单 + 懒加载注册点', () => {

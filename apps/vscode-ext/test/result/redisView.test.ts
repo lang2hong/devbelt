@@ -218,23 +218,6 @@ describe('RedisView S3 键树/值/编辑', () => {
     await view.handleMessage({ type: 'ready' });
   }
 
-  it('挂载 db 后自动加载键树并按分隔符折叠', async () => {
-    const { view } = makeView(handler, 0);
-    await mountDb(view);
-    const keys = posts(view).find((m) => m.type === 'keys');
-    expect(keys).toBeTruthy();
-    expect(keys.folders.folders.map((f: any) => f.name)).toEqual(['cache', 'user']);
-    expect(keys.scanned).toBe(3);
-  });
-
-  it('搜索按包含（模糊）：refreshKeys 用 *query* 作 SCAN MATCH', async () => {
-    const { view, sent } = makeView(handler, 0);
-    await mountDb(view);
-    sent.length = 0;
-    await view.handleMessage({ type: 'refreshKeys', match: 'user' });
-    expect(sent.some(([n, a]) => n === 'SCAN' && a.includes('MATCH') && a.includes('*user*'))).toBe(true);
-  });
-
   it('S5-3：树点键打开（initialKey）→ 就绪后自动加载该键值', async () => {
     const sent: [string, (string | number)[]][] = [];
     const session: any = {
@@ -262,14 +245,13 @@ describe('RedisView S3 键树/值/编辑', () => {
     expect(v.data).toEqual({ kind: 'string', text: 'val', base64: Buffer.from('val').toString('base64'), binary: false, bytes: 3 });
   });
 
-  it('reloadKeys：树侧写操作后重扫键树并刷新当前值', async () => {
+  it('reloadKeys：树侧写操作后刷新当前值（键树已在 explorer）', async () => {
     const sent: [string, (string | number)[]][] = [];
     const session: any = {
       kind: 'redis', db: 0, mode: 'standalone', readOnly: false, isAlive: () => true, close: () => {},
       client: {
         sendCommand: async (n: string, a: (string | number)[] = []) => {
           sent.push([n, a]);
-          if (n === 'SCAN') return ['0', []];
           if (n === 'TYPE') return 'string';
           if (n === 'TTL') return -1;
           if (n === 'STRLEN') return 3;
@@ -290,7 +272,8 @@ describe('RedisView S3 键树/值/编辑', () => {
     await vi.waitFor(() => {
       expect(posts(view).some((m) => m.type === 'value' && m.key === 'user:1')).toBe(true);
     });
-    expect(sent.some(([n]) => n === 'SCAN')).toBe(true);
+    expect(sent.some(([n]) => n === 'GET')).toBe(true);
+    expect(sent.some(([n]) => n === 'SCAN')).toBe(false);
   });
 
   it('selectKey 拉取类型化值', async () => {
@@ -383,40 +366,6 @@ describe('RedisView S3 键树/值/编辑', () => {
 });
 
 describe('RedisView S3 回归（提交前评审）', () => {
-  it('SELECT 不泄漏：db 视图关闭后，连接级视图归一到 conn.redisDb', async () => {
-    const sent: [string, string[]][] = [];
-    const session: any = {
-      kind: 'redis', db: 0, mode: 'standalone', readOnly: false, isAlive: () => true, close: () => {},
-      client: {
-        sendCommand: async (n: string, a: string[] = []) => {
-          sent.push([n, a]);
-          if (n === 'SCAN') return ['0', []];
-          if (n === 'INFO') return '';
-          if (n === 'SLOWLOG') return [];
-          return 'OK';
-        },
-        runExclusive: <T>(fn: () => Promise<T>): Promise<T> => fn(),
-        info: async () => '',
-      },
-    };
-    const manager: any = { retain: vi.fn(), release: vi.fn(), connect: async () => session };
-    const connNoDb: any = { id: 'c1', name: 'r', dbType: 'REDIS', host: 'h', port: 6379 };
-
-    const v1: any = RedisView.open(connNoDb, manager, 'keyBrowser', 2);
-    await v1.handleMessage({ type: 'ready' });
-    await v1.handleMessage({ type: 'ready' });
-    expect(sent.some(([n, a]) => n === 'SELECT' && a.join() === '2')).toBe(true);
-    expect(session.db).toBe(2);
-
-    sent.length = 0;
-    v1.dispose();
-    const v2: any = RedisView.open(connNoDb, manager, 'console');
-    await v2.handleMessage({ type: 'ready' });
-    await v2.handleMessage({ type: 'ready' });
-    expect(sent.some(([n, a]) => n === 'SELECT' && a.join() === '0')).toBe(true);
-    expect(session.db).toBe(0);
-  });
-
   it('status 视图：config.db=null 且只推 INFO（ServerStatus 可达）', async () => {
     const { view } = makeView(async (n) => (n === 'INFO' ? 'redis_version:7' : n === 'SLOWLOG' ? [] : 'OK'), undefined, 'serverStatus');
     (view.post as any).mockClear();
@@ -459,19 +408,6 @@ describe('RedisView S3 回归（提交前评审）', () => {
     expect(cfg.panel).toBe('console');
   });
 
-  it('createKey 已存在：拒绝且不覆盖', async () => {
-    const { view, sent } = makeView(async (n) => (n === 'EXISTS' ? 1 : 'OK'), 0);
-    (view.post as any).mockClear();
-    await view.handleMessage({ type: 'ready' });
-    await view.handleMessage({ type: 'ready' });
-    sent.length = 0;
-    (view.post as any).mockClear();
-    await view.handleMessage({ type: 'createKey', key: 'user:1', value: { kind: 'string', text: 'x' }, ttlSeconds: null });
-    expect(sent.some(([n]) => n === 'SET')).toBe(false);
-    const ka = posts(view).find((m) => m.type === 'keyAction');
-    expect(ka.ok).toBe(false);
-  });
-
   it('renameKey 目标已存在：拒绝', async () => {
     const { view, sent } = makeView(async (n) => (n === 'EXISTS' ? 1 : 'OK'), 0);
     (view.post as any).mockClear();
@@ -482,36 +418,6 @@ describe('RedisView S3 回归（提交前评审）', () => {
     await view.handleMessage({ type: 'renameKey', key: 'a', newKey: 'b' });
     expect(sent.some(([n]) => n === 'RENAME')).toBe(false);
     expect(posts(view).find((m) => m.type === 'keyAction').ok).toBe(false);
-  });
-});
-
-describe('RedisView S4 cluster 键扫描', () => {
-  it('逐 master SCAN 合并；cluster 不发 SELECT', async () => {
-    const calls: { cmd: string; args: (string | number)[] }[] = [];
-    const node = (keys: string[]) => ({
-      call: async (cmd: string, ...args: (string | number)[]) => { calls.push({ cmd, args }); return cmd === 'SCAN' ? ['0', keys] : 'OK'; },
-    });
-    const client: any = {
-      isCluster: true, mode: 'cluster', db: 0,
-      nodes: () => [node(['a:1']), node(['b:1'])],
-      sendCommand: async () => 'OK', runExclusive: (fn: any) => fn(), info: async () => '', ping: async () => 'PONG', isAlive: () => true,
-    };
-    const manager: any = {
-      retain: vi.fn(), release: vi.fn(),
-      connect: async () => ({ kind: 'redis', client, db: 0, mode: 'cluster', readOnly: false, isAlive: () => true, close: () => {} }),
-    };
-    const view: any = RedisView.open(conn, manager, 'keyBrowser', 0);
-    (view.post as any).mockClear();
-    await view.handleMessage({ type: 'ready' });
-    await view.handleMessage({ type: 'ready' });
-    const keys = (view.post as any).mock.calls.map((c: any[]) => c[0]).find((m: any) => m.type === 'keys');
-    expect(keys).toBeTruthy();
-    expect(keys.folders.folders.map((f: any) => f.name).sort()).toEqual(['a', 'b']);
-    expect(keys.folders.folders.flatMap((f: any) => f.keys).sort()).toEqual(['a:1', 'b:1']);
-    expect(keys.done).toBe(true);
-    // Cluster 无 SELECT，也应发给两个 master 各一次 SCAN。
-    expect(calls.filter((c) => c.cmd === 'SCAN').length).toBe(2);
-    expect(calls.some((c) => c.cmd === 'SELECT')).toBe(false);
   });
 });
 

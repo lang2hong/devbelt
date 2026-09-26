@@ -3,14 +3,12 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import { useI18n } from '../composables/useI18n';
 import ServerStatus from '../components/redis/ServerStatus.vue';
-import KeyTree from '../components/redis/KeyTree.vue';
 import ValueViewer from '../components/redis/ValueViewer.vue';
 import StreamViewer from '../components/redis/StreamViewer.vue';
-import KeyNewDialog from '../components/redis/KeyNewDialog.vue';
 import CliConsole from '../components/redis/CliConsole.vue';
 import SlowLog from '../components/redis/SlowLog.vue';
 import CommandLog from '../components/redis/CommandLog.vue';
-import { computeStreamDone, isKeyBrowserPanel, type CommandResult, type RedisKeyFolder, type RedisNewKeyValue, type RedisPanel, type SlowlogEntry, type ValueInfo } from '../components/redis/types';
+import { computeStreamDone, isKeyBrowserPanel, type CommandResult, type RedisPanel, type SlowlogEntry, type ValueInfo } from '../components/redis/types';
 
 const { post, onMessage } = useVsCode();
 const { t } = useI18n();
@@ -29,63 +27,24 @@ const pendingConfirm = ref<{ id: string; command: string } | null>(null);
 interface CommandLogEntry { command: string; args: string[]; durationMs: number; ok: boolean; error: string | null; at: number }
 const commandLog = ref<CommandLogEntry[]>([]);
 const connectionEvents = ref<{ event: string; detail: string | null; at: number }[]>([]);
-/** 键浏览器左栏宽度（可拖拽，局部状态）。 */
-const leftWidth = ref(300);
 
-// 键树
-const emptyFolders: RedisKeyFolder = { name: '', path: '', count: 0, folders: [], keys: [] };
-const folders = ref<RedisKeyFolder>(emptyFolders);
-const cursor = ref('0');
-const done = ref(true);
-const scanned = ref(0);
-const match = ref('');
-const count = ref(200);
-const keysLoading = ref(false);
+/** keyBrowser 面板 = 纯值查看/编辑（键导航在 explorer 树侧，见 S5-3/C-1）。 */
 const value = ref<ValueInfo | null>(null);
 const banner = ref('');
 const pendingDelete = ref<string[] | null>(null);
-const showNewKey = ref(false);
 const streamDetail = ref<any>(null);
 const streamDone = ref(true);
 const pendingOpDetail = ref<string | null>(null);
 let lastOp: any = null;
 
-const isKeyBrowser = computed(() => isKeyBrowserPanel(panel.value));
+const isValuePanel = computed(() => isKeyBrowserPanel(panel.value));
 let seq = 0;
 function nextId(): string { seq += 1; return `r${seq}`; }
 
-/** 左栏拖拽（键浏览器），clamp 180–600px。 */
-function startDrag(e: MouseEvent): void {
-  e.preventDefault();
-  const startX = e.clientX;
-  const startW = leftWidth.value;
-  const onMove = (ev: MouseEvent) => { leftWidth.value = Math.min(600, Math.max(180, startW + ev.clientX - startX)); };
-  const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-  window.addEventListener('mousemove', onMove);
-  window.addEventListener('mouseup', onUp);
-}
-
-function onRefreshKeys(m: string, c: number): void {
-  keysLoading.value = true;
-  post({ type: 'refreshKeys', match: m, count: c });
-}
-function onLoadMore(): void {
-  if (done.value) return;
-  keysLoading.value = true;
-  post({ type: 'loadMoreKeys' });
-}
-function onSelect(key: string): void {
-  value.value = null;
-  post({ type: 'selectKey', key });
-}
 function confirmDelete(): void {
   const keys = pendingDelete.value;
   pendingDelete.value = null;
   if (keys?.length) post({ type: 'deleteKeys', keys });
-}
-function onCreate(key: string, val: RedisNewKeyValue, ttlSeconds: number | null): void {
-  showNewKey.value = false;
-  post({ type: 'createKey', key, value: val, ttlSeconds });
 }
 function run(line: string): void { post({ type: 'runCommand', id: nextId(), line }); }
 /** Stream/破坏性操作：记住原始 op，确认后带 confirmed 重发。 */
@@ -114,16 +73,11 @@ function confirmDanger(id: string, accept: boolean): void {
   post({ type: 'confirmDanger', id, accept });
 }
 
-/** 快捷键：Ctrl/Cmd+N 新建 key；Enter/Esc 操作模态（确认提交流程的键盘路径）。 */
+/** 快捷键：Enter/Esc 走确认模态（键新建已移至 explorer 树）。 */
 function onKeydown(e: KeyboardEvent): void {
-  if ((e.ctrlKey || e.metaKey) && (e.key === 'n' || e.key === 'N')) {
-    if (isKeyBrowser.value && !readOnly.value) { e.preventDefault(); showNewKey.value = true; }
-    return;
-  }
   if (e.key === 'Escape') {
     if (pendingOpDetail.value !== null) { confirmOp(false); return; }
-    if (pendingDelete.value) { pendingDelete.value = null; return; }
-    if (showNewKey.value) { showNewKey.value = false; }
+    if (pendingDelete.value) { pendingDelete.value = null; }
     return;
   }
   if (e.key === 'Enter') {
@@ -146,15 +100,6 @@ onMounted(() => {
       // 切换面板/DB 时重置视图态，避免旧值残留。
       value.value = null;
       banner.value = '';
-      folders.value = emptyFolders;
-      if (isKeyBrowser.value) keysLoading.value = true;
-    } else if (msg.type === 'keys') {
-      folders.value = msg.folders ?? emptyFolders;
-      cursor.value = msg.cursor ?? '0';
-      done.value = !!msg.done;
-      scanned.value = msg.scanned ?? 0;
-      match.value = msg.match ?? '';
-      keysLoading.value = false;
     } else if (msg.type === 'value') {
       value.value = msg as ValueInfo;
       streamDetail.value = null;
@@ -199,72 +144,54 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
       <span class="conn">{{ connName }}</span>
       <span v-if="db !== null && connMode !== 'cluster'" class="db">db{{ db }}</span>
       <span v-if="readOnly" class="badge">{{ t('wv.redis.readOnly') }}</span>
-      <button v-if="isKeyBrowser" class="btn" :disabled="readOnly" @click="showNewKey = true">＋ {{ t('wv.redis.newKey.title') }}</button>
     </header>
     <div v-if="banner" class="banner" @click="banner = ''">{{ banner }}</div>
 
-    <div v-if="isKeyBrowser" class="kb">
-      <aside class="left" :style="{ width: leftWidth + 'px' }">
-        <KeyTree
-          :folders="folders"
-          :cursor="cursor"
-          :done="done"
-          :scanned="scanned"
-          :match="match"
-          :count="count"
-          :loading="keysLoading"
-          :active-key="value?.key ?? ''"
-          @refresh="onRefreshKeys"
-          @load-more="onLoadMore"
-          @select="onSelect"
-          @delete-selected="pendingDelete = $event"
-        />
-      </aside>
-      <div class="splitter" @mousedown="startDrag" />
-      <section class="right">
-          <StreamViewer
-            v-if="value && value.keyType === 'stream' && value.data?.kind === 'stream'"
-            :info="value"
-            :detail="streamDetail"
-            :done="streamDone"
-            :read-only="readOnly"
-            @add="streamOps().add"
-            @del="streamOps().del"
-            @trim="streamOps().trim"
-            @group-create="streamOps().groupCreate"
-            @group-destroy="streamOps().groupDestroy"
-            @group-del-consumer="streamOps().groupDelConsumer"
-            @group-detail="streamOps().groupDetail"
-            @load-more="streamOps().loadMore"
-          />
-          <ValueViewer
-            v-else
-            :info="value"
-            :read-only="readOnly"
-            @refresh="value && post({ type: 'selectKey', key: value.key })"
-            @load="value && post({ type: 'selectKey', key: value.key })"
-            @save-string="(k, v) => post({ type: 'saveString', key: k, value: v })"
-            @save-string-bytes="(k, b) => post({ type: 'saveStringBytes', key: k, base64: b })"
-            @append-string="(k, v) => post({ type: 'appendString', key: k, value: v })"
-            @set-ttl="(k, s) => post({ type: 'setTtl', key: k, seconds: s })"
-            @persist="(k) => post({ type: 'persistKey', key: k })"
-            @rename="(k, n) => post({ type: 'renameKey', key: k, newKey: n })"
-            @remove="(k) => pendingDelete = [k]"
-            @copy-key="() => {}"
-            @hash-set="(k, f, v) => post({ type: 'hashSet', key: k, field: f, value: v })"
-            @hash-del="(k, f) => post({ type: 'hashDel', key: k, fields: f })"
-            @list-push="(k, s, v) => post({ type: 'listPush', key: k, side: s, values: v })"
-            @list-set="(k, i, v) => post({ type: 'listSet', key: k, index: i, value: v })"
-            @list-rem="(k, c, v) => post({ type: 'listRem', key: k, count: c, value: v })"
-            @list-pop="(k, s) => post({ type: 'listPop', key: k, side: s })"
-            @set-add="(k, m) => post({ type: 'setAdd', key: k, members: m })"
-            @set-rem="(k, m) => post({ type: 'setRem', key: k, members: m })"
-            @zset-add="(k, s, m) => post({ type: 'zsetAdd', key: k, score: s, member: m })"
-            @zset-rem="(k, m) => post({ type: 'zsetRem', key: k, members: m })"
-          />
-        </section>
-    </div>
-
+    <template v-if="isValuePanel">
+      <div v-if="!value" class="single empty-hint">{{ t('wv.redis.value.selectHint') }}</div>
+      <StreamViewer
+        v-else-if="value.keyType === 'stream' && value.data?.kind === 'stream'"
+        class="single"
+        :info="value"
+        :detail="streamDetail"
+        :done="streamDone"
+        :read-only="readOnly"
+        @add="streamOps().add"
+        @del="streamOps().del"
+        @trim="streamOps().trim"
+        @group-create="streamOps().groupCreate"
+        @group-destroy="streamOps().groupDestroy"
+        @group-del-consumer="streamOps().groupDelConsumer"
+        @group-detail="streamOps().groupDetail"
+        @load-more="streamOps().loadMore"
+      />
+      <ValueViewer
+        v-else
+        class="single"
+        :info="value"
+        :read-only="readOnly"
+        @refresh="value && post({ type: 'selectKey', key: value.key })"
+        @load="value && post({ type: 'selectKey', key: value.key })"
+        @save-string="(k, v) => post({ type: 'saveString', key: k, value: v })"
+        @save-string-bytes="(k, b) => post({ type: 'saveStringBytes', key: k, base64: b })"
+        @append-string="(k, v) => post({ type: 'appendString', key: k, value: v })"
+        @set-ttl="(k, s) => post({ type: 'setTtl', key: k, seconds: s })"
+        @persist="(k) => post({ type: 'persistKey', key: k })"
+        @rename="(k, n) => post({ type: 'renameKey', key: k, newKey: n })"
+        @remove="(k) => pendingDelete = [k]"
+        @copy-key="() => {}"
+        @hash-set="(k, f, v) => post({ type: 'hashSet', key: k, field: f, value: v })"
+        @hash-del="(k, f) => post({ type: 'hashDel', key: k, fields: f })"
+        @list-push="(k, s, v) => post({ type: 'listPush', key: k, side: s, values: v })"
+        @list-set="(k, i, v) => post({ type: 'listSet', key: k, index: i, value: v })"
+        @list-rem="(k, c, v) => post({ type: 'listRem', key: k, count: c, value: v })"
+        @list-pop="(k, s) => post({ type: 'listPop', key: k, side: s })"
+        @set-add="(k, m) => post({ type: 'setAdd', key: k, members: m })"
+        @set-rem="(k, m) => post({ type: 'setRem', key: k, members: m })"
+        @zset-add="(k, s, m) => post({ type: 'zsetAdd', key: k, score: s, member: m })"
+        @zset-rem="(k, m) => post({ type: 'zsetRem', key: k, members: m })"
+      />
+    </template>
     <CliConsole
       v-else-if="panel === 'console'"
       class="single"
@@ -289,8 +216,6 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
     />
     <ServerStatus v-else-if="panel === 'serverStatus'" :info="info" @refresh="post({ type: 'refreshInfo' })" class="single" />
 
-    <KeyNewDialog :show="showNewKey" @create="onCreate" @cancel="showNewKey = false" />
-
     <div v-if="pendingOpDetail !== null" class="mask">
       <div class="confirm">
         <p>{{ t('wv.redis.stream.confirm', { detail: pendingOpDetail }) }}</p>
@@ -303,7 +228,7 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
 
     <div v-if="pendingDelete" class="mask">
       <div class="confirm">
-        <p>{{ pendingDelete.length > 1 ? t('wv.redis.confirm.deleteKeys', { count: pendingDelete.length }) : t('wv.redis.confirm.deleteKey') }}</p>
+        <p>{{ t('wv.redis.confirm.deleteKey') }}</p>
         <div class="actions">
           <button class="btn danger" @click="confirmDelete">{{ t('wv.redis.value.delete') }}</button>
           <button class="btn" @click="pendingDelete = null">{{ t('wv.redis.confirm.cancel') }}</button>
@@ -320,14 +245,9 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
 .db { color: var(--vscode-descriptionForeground); }
 .badge { padding: 1px 6px; border-radius: 3px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); font-size: 11px; }
 .banner { margin-top: 6px; padding: 4px 8px; border-radius: 3px; background: var(--vscode-inputValidation-errorBackground, #5a1d1d); color: var(--vscode-errorForeground, #f88); cursor: pointer; }
-/* 键浏览器：左树（可拖拽）+ 右值区，撑满高度。 */
-.kb { flex: 1; min-height: 0; display: flex; margin-top: 8px; }
-.left { flex: 0 0 auto; min-width: 180px; max-width: 600px; border-right: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); padding-right: 8px; overflow: hidden; }
-.splitter { flex: 0 0 5px; cursor: col-resize; background: transparent; }
-.splitter:hover { background: var(--vscode-focusBorder, rgba(128,128,128,0.4)); }
-.right { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
-/* 单栏面板（console/slowlog/commandLog/serverStatus）撑满。 */
+/* 单栏面板（值/console/slowlog/commandLog/status）撑满。 */
 .single { flex: 1; min-height: 0; margin-top: 8px; }
+.empty-hint { display: flex; align-items: center; justify-content: center; color: var(--vscode-descriptionForeground); }
 .mask { position: absolute; inset: 0; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; }
 .confirm { background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35)); border-radius: 6px; padding: 14px 16px; }
 .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }

@@ -1,5 +1,5 @@
 import { Event, EventEmitter, TreeDataProvider, TreeItem, TreeItemCollapsibleState, ThemeIcon, ThemeColor, window } from 'vscode';
-import { DatabaseType, DialectRegistry, redisKeyspace, redisScan, redisSelect } from '@devbelt/db-core';
+import { DatabaseType, DialectRegistry, redisKeyspace, redisScan, redisScanOnNode, redisSelect } from '@devbelt/db-core';
 import { connectionColorToken } from '../utils/connectionColor';
 import { ConnectionStore, type SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
@@ -50,6 +50,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   /** S5-3：Redis 只读键导航懒加载状态（key = `${connId}:db${idx}:${prefix}`）。 */
   private readonly redisKeys = new Map<string, string[]>();
   private readonly redisCursors = new Map<string, string>();
+  /** cluster：各 master 的 SCAN 游标（key 同 stateKey）。 */
+  private readonly redisClusterCursors = new Map<string, string[]>();
   private readonly redisScanned = new Set<string>();
   /** S5-3：每 db 的搜索匹配（key = `${connId}:db${idx}`，值为 Redis MATCH pattern）。 */
   private readonly redisMatches = new Map<string, string>();
@@ -125,6 +127,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const p = `${connId}:`;
     for (const k of [...this.redisKeys.keys()]) if (k.startsWith(p)) this.redisKeys.delete(k);
     for (const k of [...this.redisCursors.keys()]) if (k.startsWith(p)) this.redisCursors.delete(k);
+    for (const k of [...this.redisClusterCursors.keys()]) if (k.startsWith(p)) this.redisClusterCursors.delete(k);
     for (const k of [...this.redisScanned]) if (k.startsWith(p)) this.redisScanned.delete(k);
     for (const k of [...this.redisMatches.keys()]) if (k.startsWith(p)) this.redisMatches.delete(k);
   }
@@ -141,6 +144,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const p = `${dbKey}:`;
     for (const k of [...this.redisKeys.keys()]) if (k.startsWith(p)) this.redisKeys.delete(k);
     for (const k of [...this.redisCursors.keys()]) if (k.startsWith(p)) this.redisCursors.delete(k);
+    for (const k of [...this.redisClusterCursors.keys()]) if (k.startsWith(p)) this.redisClusterCursors.delete(k);
     for (const k of [...this.redisScanned]) if (k.startsWith(p)) this.redisScanned.delete(k);
     this.refreshNode(node);
   }
@@ -199,8 +203,20 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       const conn = element.conn;
       const session = await this.manager.connect(conn);
       if (session.kind !== 'redis') return [];
-      // Cluster 无逻辑库（无 SELECT）：不显示 DB 节点。
-      if (session.mode === 'cluster') return [];
+      // Cluster 无逻辑库（无 SELECT）：给一个合成「Keys」节点（逐 master SCAN 聚合）。
+      if (session.mode === 'cluster') {
+        const node = new DbTreeNode(
+          l10n('redis.tree.clusterKeys'),
+          TreeItemCollapsibleState.Collapsed,
+          NodeKind.RedisDb,
+          conn,
+          undefined,
+          element,
+        );
+        node.redisDbIndex = 0;
+        node.id = `${conn.id}:cluster`;
+        return [node];
+      }
       const stats = await redisKeyspace(session.client);
       return stats.map((stat) => {
         const label = `db${stat.index}`;
@@ -217,7 +233,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         node.redisDbIndex = stat.index;
         node.description = String(stat.keys);
         node.id = `${conn.id}:db${stat.index}`;
-        node.command = { command: 'devbelt.redis.keyBrowser', title: 'Open', arguments: [node] };
+        // C-2：DB 节点仅展开键树（不再有默认点击命令）。
         return node;
       });
     }
@@ -298,7 +314,6 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       this.redisScanned.add(stateKey);
       return;
     }
-    const cursor = this.redisCursors.get(stateKey) ?? '0';
     const sep = conn.keySeparator || ':';
     const dbKey = `${conn.id}:db${node.redisDbIndex}`;
     // 搜索态（仅根级）优先用用户 match；否则文件夹用前缀 pattern。
@@ -310,10 +325,27 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       const client = session.client;
       const dbIndex = node.redisDbIndex;
       await client.runExclusive(async () => {
-        if (!client.isCluster && dbIndex !== session.db) {
+        // Cluster：无 SELECT，逐 master 各自游标 SCAN 后合并（对齐 S4 交付的键浏览）。
+        if (client.isCluster) {
+          const nodes = client.nodes();
+          const cursors = this.redisClusterCursors.get(stateKey) ?? nodes.map(() => '0');
+          const next = [...cursors];
+          const batch: string[] = [];
+          for (let i = 0; i < nodes.length; i++) {
+            const page = await redisScanOnNode(nodes[i], cursors[i] ?? '0', { match: pattern, count: REDIS_TREE_PAGE });
+            next[i] = page.cursor;
+            batch.push(...page.keys);
+          }
+          this.redisClusterCursors.set(stateKey, next);
+          const acc = this.redisKeys.get(stateKey) ?? [];
+          this.redisKeys.set(stateKey, [...new Set([...acc, ...batch])].slice(0, REDIS_TREE_MAX));
+          return;
+        }
+        if (dbIndex !== session.db) {
           await redisSelect(client, dbIndex);
           session.db = dbIndex;
         }
+        const cursor = this.redisCursors.get(stateKey) ?? '0';
         const page = await redisScan(client, cursor, { match: pattern, count: REDIS_TREE_PAGE });
         const acc = this.redisKeys.get(stateKey) ?? [];
         const merged = [...new Set([...acc, ...page.keys])];
@@ -325,6 +357,15 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       diagError('redis key tree scan failed', (err as Error).message);
       this.redisScanned.add(stateKey);
     }
+  }
+
+  /** 该前缀是否已扫完（standalone 单游标 / cluster 多游标全归零）。 */
+  private redisTreeDone(conn: SavedConnection, dbIndex: number, prefix: string): boolean {
+    const stateKey = this.redisStateKey(conn.id, dbIndex, prefix);
+    if (conn.redisMode === 'cluster') {
+      return (this.redisClusterCursors.get(stateKey) ?? []).every((c) => c === '0');
+    }
+    return (this.redisCursors.get(stateKey) ?? '0') === '0';
   }
 
   /** 由已加载 key 生成子节点：搜索态为扁平结果，否则折叠文件夹；末尾「加载更多」/上限提示。 */
@@ -349,7 +390,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const out = [...folderNodes, ...keyNodes];
     if (keys.length >= REDIS_TREE_MAX) {
       out.push(this.redisNoticeNode(parent, l10n('redis.tree.capReached', { max: String(REDIS_TREE_MAX) })));
-    } else if ((this.redisCursors.get(stateKey) ?? '0') !== '0') {
+    } else if (!this.redisTreeDone(conn, parent.redisDbIndex, prefix)) {
       out.push(this.redisLoadMoreNode(parent, prefix));
     }
     return out;

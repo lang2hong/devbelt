@@ -1,13 +1,13 @@
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import {
   isDangerousCommand, isWriteCommand, redactCommandArgs, splitRedisArgs,
-  redisType, redisScan, redisSelect, redisGetBuffer, redisStrlen, redisSet, redisSetBuffer, redisAppend,
+  redisType, redisSelect, redisGetBuffer, redisStrlen, redisSet, redisSetBuffer, redisAppend,
   isValidUtf8, isBufferSource,
   redisUnlink, redisExists, redisRename, redisTtl, redisExpire, redisPersist, redisMemoryUsage,
   redisHScan, redisHSet, redisHDel, redisHLen,
   redisLRange, redisLLen, redisLPush, redisRPush, redisLSet, redisLRem, redisLTrim, redisLPop, redisRPop,
   redisSScan, redisSCard, redisSAdd, redisSRem,
-  redisZRange, redisZCard, redisZAdd, redisZRem, allCommandNames, redisScanOnNode,
+  redisZRange, redisZCard, redisZAdd, redisZRem, allCommandNames,
   redisXRange, redisXRevRange, redisXAdd, redisXDel, redisXTrimMaxlen, redisXLen,
   redisXInfoGroups, redisXInfoConsumers, redisXGroupCreate, redisXGroupDestroy, redisXGroupDelConsumer,
   redisXPending, isValidStreamId, compareStreamId,
@@ -17,15 +17,12 @@ import type { RedisConnectionSession } from '../connection/connectionSession';
 import { ConnectionManager } from '../connection/connectionManager';
 import { REDIS_CAPABILITIES } from '../connection/redisCapabilities';
 import { BaseWebView } from './baseWebView';
-import { foldRedisKeys, toRedisMatchPattern } from './redisKeyFold';
 import { AuditLogger } from '../utils/auditLogger';
 import { l10n } from '../i18n';
-import type { RedisNewKeyValue, RedisPanel, RedisSlowlogEntry, RedisValueData } from './protocol';
+import type { RedisPanel, RedisSlowlogEntry, RedisValueData } from './protocol';
 
 /** 大 key 门禁阈值（字节）。 */
 const LARGE_KEY_BYTES = 1024 * 1024;
-/** SCAN 默认 COUNT。 */
-const DEFAULT_SCAN_COUNT = 200;
 /** Stream 单页条目数。 */
 const STREAM_PAGE = 100;
 /** hash/set 单页条目数（大集合分页兜底，避免全量 HGETALL/SMEMBERS）。 */
@@ -36,11 +33,14 @@ function redisViewType(panel: RedisPanel): string {
   return `devbelt.redis.${panel}`;
 }
 
-/** 面板标题（连接名 + 职责，键浏览器附 db）。 */
+/** 面板标题（连接名 + 职责，值面板附 db）。 */
 function redisPanelTitle(panel: RedisPanel, conn: SavedConnection, db?: number): string {
   const base = `Redis @ ${conn.name || conn.host}`;
   switch (panel) {
-    case 'keyBrowser': return db === undefined ? base : `${base} · db${db}`;
+    case 'keyBrowser': {
+      const values = l10n('redis.panel.values');
+      return db === undefined ? `${base} · ${values}` : `${base} · ${values} · db${db}`;
+    }
     case 'serverStatus': return `${base} · Status`;
     case 'console': return `${base} · Console`;
     case 'slowlog': return `${base} · Slow Log`;
@@ -60,13 +60,6 @@ export class RedisView extends BaseWebView {
   private static readonly auditOwners = new Map<string, RedisView>();
   private pendingConfirm?: { id: string; line: string; name: string; args: string[] };
 
-  // 键树状态（仅 keyBrowser）
-  private cursor = '0';
-  /** cluster：各 master 的 SCAN 游标。 */
-  private clusterCursors: string[] = [];
-  private keys: string[] = [];
-  private match = '';
-  private scanCount = DEFAULT_SCAN_COUNT;
   /** 命令日志订阅（会话 client 级；首次取会话/就绪时挂上）。 */
   private logUnsub?: () => void;
   /** 连接/故障切换事件是否已订阅（每实例一次）。 */
@@ -141,8 +134,6 @@ export class RedisView extends BaseWebView {
     if (msg.type === 'refreshSlowlog') { await this.pushSlowlog(); return; }
     if (msg.type === 'runCommand') { await this.runCommand(String(msg.id ?? ''), String(msg.line ?? '')); return; }
     if (msg.type === 'confirmDanger') { await this.resolveConfirm(String(msg.id ?? ''), msg.accept === true); return; }
-    if (msg.type === 'refreshKeys') { await this.refreshKeys(msg); return; }
-    if (msg.type === 'loadMoreKeys') { await this.enqueuePushKeys(false); return; }
     if (msg.type === 'selectKey') { await this.enqueuePushValue(String(msg.key ?? '')); return; }
     if (msg.type === 'saveString') { await this.edit('SET', String(msg.key), async (c) => { await redisSet(c, String(msg.key), String(msg.value ?? '')); }); return; }
     if (msg.type === 'saveStringBytes') { await this.saveStringBytes(msg); return; }
@@ -151,7 +142,6 @@ export class RedisView extends BaseWebView {
     if (msg.type === 'persistKey') { await this.edit('PERSIST', String(msg.key), async (c) => { await redisPersist(c, String(msg.key)); }); return; }
     if (msg.type === 'renameKey') { await this.renameKey(String(msg.key), String(msg.newKey ?? '')); return; }
     if (msg.type === 'deleteKeys') { await this.deleteKeys(Array.isArray(msg.keys) ? msg.keys.map(String) : []); return; }
-    if (msg.type === 'createKey') { await this.createKey(msg); return; }
     if (msg.type === 'hashSet') { await this.edit('HSET', String(msg.key), async (c) => { await redisHSet(c, String(msg.key), String(msg.field ?? ''), String(msg.value ?? '')); }); return; }
     if (msg.type === 'hashDel') { await this.edit('HDEL', String(msg.key), async (c) => { await redisHDel(c, String(msg.key), strs(msg.fields)); }); return; }
     if (msg.type === 'listPush') { await this.edit('LPUSH/RPUSH', String(msg.key), async (c) => { const v = strs(msg.values); if (msg.side === 'left') await redisLPush(c, String(msg.key), v); else await redisRPush(c, String(msg.key), v); }); return; }
@@ -217,7 +207,7 @@ export class RedisView extends BaseWebView {
     // 命令日志/连接事件订阅：任一面板打开即建立（断线审计依赖此）。
     this.ensureSubscriptions(session);
     if (this.panelType === 'keyBrowser') {
-      await this.enqueuePushKeys(true);
+      // 值面板：无键树，仅按 initialKey（树点键）加载值；否则空态等用户从树选键。
       const k = this.initialKey;
       this.initialKey = undefined;
       if (k) await this.enqueuePushValue(k);
@@ -226,23 +216,18 @@ export class RedisView extends BaseWebView {
     if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
     if (this.panelType === 'slowlog') { await this.pushSlowlog(); return; }
     if (this.panelType === 'console') {
-      // 打开控制台即把共享会话归一到目标库（conn.redisDb），避免上一个键浏览器
-      // 的 SELECT 泄漏到后续 CLI 命令（命令执行前也会再归一，这里是即时性保障）。
+      // 打开控制台即把共享会话归一到目标库（conn.redisDb），避免上一个键浏览器的
+      // SELECT 泄漏到后续 CLI 命令（命令执行前也会再归一，这里是即时性保障）。
       await this.enqueue(async () => { await this.sessionForDb(); });
       return;
     }
     // commandLog 无需初始拉取（靠订阅推送）。
   }
 
-  /** 切换 db（keyBrowser/console 已有实例时）：清状态、重发 config，按面板重载。 */
+  /** 切换 db（keyBrowser/console 已有实例时）：重发 config，按面板重载。 */
   private async reconfigure(): Promise<void> {
-    this.keys = [];
-    this.cursor = '0';
-    this.clusterCursors = [];
-    this.match = '';
     this.postConfig();
     if (this.panelType === 'keyBrowser') {
-      await this.enqueuePushKeys(true);
       const k = this.initialKey;
       this.initialKey = undefined;
       if (k) await this.enqueuePushValue(k);
@@ -330,76 +315,13 @@ export class RedisView extends BaseWebView {
     }
   }
 
-  // ────────────────────────── 键树 ──────────────────────────
-
-  private async refreshKeys(msg: any): Promise<void> {
-    this.match = toRedisMatchPattern(String(msg.match ?? '')) ?? '';
-    const count = Number(msg.count);
-    this.scanCount = Number.isFinite(count) && count > 0 ? count : DEFAULT_SCAN_COUNT;
-    await this.enqueuePushKeys(true);
-  }
-
-  private async enqueuePushKeys(reset: boolean): Promise<void> {
-    await this.enqueue(async () => {
-      const session = await this.sessionForDb();
-      await this.doPushKeys(session, reset);
-    }).catch((err) => this.post({ type: 'error', message: (err as Error).message }));
-  }
-
-  private async doPushKeys(session: RedisConnectionSession, reset: boolean): Promise<void> {
-    try {
-      const foldersOf = (): void => {
-        const folders = foldRedisKeys(this.keys, this.conn.keySeparator || ':');
-        const done = session.client.isCluster
-          ? this.clusterCursors.every((c) => c === '0')
-          : this.cursor === '0';
-        this.post({ type: 'keys', folders, cursor: done ? '0' : '1', done, scanned: this.keys.length, match: this.match });
-      };
-
-      // Cluster：逐 master SCAN（SCAN 无 key 无法路由），各自维护游标。
-      if (session.client.isCluster) {
-        const nodes = session.client.nodes();
-        if (reset || this.clusterCursors.length !== nodes.length) this.clusterCursors = nodes.map(() => '0');
-        if (reset) this.keys = [];
-        const next: string[] = [];
-        const batch: string[] = [];
-        for (let i = 0; i < nodes.length; i++) {
-          const page = await redisScanOnNode(nodes[i], this.clusterCursors[i] ?? '0', {
-            match: this.match || undefined,
-            count: this.scanCount,
-          });
-          next[i] = page.cursor;
-          batch.push(...page.keys);
-        }
-        this.clusterCursors = next;
-        this.keys = [...new Set([...this.keys, ...batch])];
-        foldersOf();
-        return;
-      }
-
-      if (reset) { this.cursor = '0'; this.keys = []; }
-      const result = await redisScan(session.client, this.cursor, {
-        match: this.match || undefined,
-        count: this.scanCount,
-      });
-      // SCAN 语义允许重复返回同一 key：累积去重，避免 scanned 虚高与内存增长。
-      this.keys = [...new Set([...this.keys, ...result.keys])];
-      this.cursor = result.cursor;
-      foldersOf();
-    } catch (err) {
-      this.post({ type: 'error', message: (err as Error).message });
-    }
-  }
-
   // ────────────────────────── 值查看/编辑 ──────────────────────────
 
-  /** 外部（树侧写操作后）刷新键树与当前值。 */
+  /** 外部（树侧写操作后）刷新当前值（键树已在 explorer）。 */
   reloadKeys(): void {
     if (this.panelType !== 'keyBrowser') return;
-    void this.enqueuePushKeys(true).then(() => {
-      const k = this.lastKey;
-      if (k) void this.enqueuePushValue(k);
-    });
+    const k = this.lastKey;
+    if (k) void this.enqueuePushValue(k);
   }
 
   private async enqueuePushValue(key: string): Promise<void> {
@@ -493,39 +415,10 @@ export class RedisView extends BaseWebView {
         await redisUnlink(session.client, keys);
         this.audit('UNLINK', keys.join(' '), Date.now() - started);
         this.post({ type: 'keyAction', action: 'UNLINK', ok: true, error: null });
-        await this.doPushKeys(session, true);
+        // 键树在 explorer；面板仅同步当前值（删的若是当前键则转为空态）。
+        if (this.lastKey && keys.includes(this.lastKey)) await this.doPushValue(session, this.lastKey);
       } catch (err) {
         this.post({ type: 'keyAction', action: 'UNLINK', ok: false, error: (err as Error).message });
-      }
-    });
-  }
-
-  private async createKey(msg: any): Promise<void> {
-    const key = String(msg.key ?? '');
-    const value = msg.value as RedisNewKeyValue | undefined;
-    if (!key || !value) { this.post({ type: 'keyAction', action: 'CREATE', ok: false, error: l10n('cmd.redis.emptyCommand') }); return; }
-    await this.enqueue(async () => {
-      try {
-        const session = await this.sessionForDb();
-        const c = session.client;
-        if (await redisExists(c, key)) {
-          this.post({ type: 'keyAction', action: 'CREATE', ok: false, error: l10n('cmd.redis.keyExists') });
-          return;
-        }
-        const started = Date.now();
-        if (value.kind === 'string') await redisSet(c, key, value.text);
-        else if (value.kind === 'hash') { for (const [f, v] of value.entries) await redisHSet(c, key, f, v); }
-        else if (value.kind === 'list') { if (value.items.length) await redisRPush(c, key, value.items); }
-        else if (value.kind === 'set') { if (value.members.length) await redisSAdd(c, key, value.members); }
-        else if (value.kind === 'zset') { for (const [m, s] of value.items) await redisZAdd(c, key, s, m); }
-        const ttl = Number(msg.ttlSeconds);
-        if (Number.isFinite(ttl) && ttl > 0) await redisExpire(c, key, ttl);
-        this.audit('CREATE', key, Date.now() - started);
-        this.post({ type: 'keyAction', action: 'CREATE', ok: true, error: null });
-        await this.doPushKeys(session, true);
-        await this.doPushValue(session, key);
-      } catch (err) {
-        this.post({ type: 'keyAction', action: 'CREATE', ok: false, error: (err as Error).message });
       }
     });
   }
@@ -776,8 +669,8 @@ export class RedisView extends BaseWebView {
         await redisRename(session.client, key, newKey);
         this.audit('RENAME', key, Date.now() - started);
         this.post({ type: 'keyAction', action: 'RENAME', ok: true, error: null });
-        await this.doPushKeys(session, true);
         await this.doPushValue(session, newKey);
+        this.lastKey = newKey;
       } catch (err) {
         this.post({ type: 'keyAction', action: 'RENAME', ok: false, error: (err as Error).message });
       }

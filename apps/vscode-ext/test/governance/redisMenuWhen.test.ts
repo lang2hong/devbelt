@@ -22,9 +22,9 @@ describe('Redis 菜单 when 收紧（P7 S2）', () => {
       expect(declared.has(cmd)).toBe(true);
       expect(menus.some((m) => m.command === cmd && m.when?.includes('connectionOpen.REDIS'))).toBe(true);
     }
-    // 键浏览器经 DB 节点入口（S5）。
+    // 键浏览器命令在键节点入口（C-2：DB 节点不再有该菜单）。
     expect(declared.has('devbelt.redis.keyBrowser')).toBe(true);
-    expect(menus.some((m) => m.command === 'devbelt.redis.keyBrowser' && m.when?.includes('redisDb.REDIS'))).toBe(true);
+    expect(menus.some((m) => m.command === 'devbelt.redis.keyBrowser' && m.when?.includes('redisKey.REDIS'))).toBe(true);
   });
 
   it('连接表单 dbType 下拉含 Redis 选项（否则 Redis 表单段不可达）', () => {
@@ -32,8 +32,8 @@ describe('Redis 菜单 when 收紧（P7 S2）', () => {
     expect(vue).toMatch(/<option value="REDIS"/);
   });
 
-  it('Redis 逻辑库节点有键浏览器/刷新/复制菜单', () => {
-    for (const cmd of ['devbelt.redis.keyBrowser', 'devbelt.refreshNode', 'devbelt.copyNodeName']) {
+  it('Redis 逻辑库节点有刷新/复制菜单', () => {
+    for (const cmd of ['devbelt.refreshNode', 'devbelt.copyNodeName']) {
       expect(menus.some((m) => m.command === cmd && m.when?.includes('redisDb.REDIS'))).toBe(true);
     }
   });

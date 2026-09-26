@@ -138,4 +138,43 @@ describe('S5-3 树内只读键导航（懒 SCAN + 折叠）', () => {
     expect(leaves.map((k) => k.label)).toEqual(['a[1]:x']);
     expect(calls.some(([n, a]) => n === 'SCAN' && a.includes('MATCH') && a.includes('a\\[1\\]:*'))).toBe(true);
   });
+
+  it('cluster：合成 Keys 节点逐 master SCAN 合并（游标未归零 → 加载更多）', async () => {
+    const scans: string[] = [];
+    const master = (name: string, reply: unknown) => ({
+      call: async (cmd: string) => { if (cmd === 'SCAN') scans.push(name); return reply; },
+    });
+    const client: any = {
+      isCluster: true, mode: 'cluster', db: 0,
+      nodes: () => [master('m1', ['5', ['k1']]), master('m2', ['0', ['k2']])],
+      sendCommand: async () => 'OK', runExclusive: (fn: any) => fn(), info: async () => '',
+    };
+    const manager: any = { connect: async () => ({ kind: 'redis', client, db: 0, mode: 'cluster', readOnly: false, isAlive: () => true, close: () => {} }) };
+    const store: any = { get: () => undefined, list: () => [] };
+    const provider = new DbTreeDataProvider(store, manager);
+    const clusterConn: any = { id: 'cc', name: 'r', dbType: 'REDIS', host: 'h', port: 6379, keySeparator: ':', redisMode: 'cluster' };
+    const n = new DbTreeNode('Keys', TreeItemCollapsibleState.Collapsed, NodeKind.RedisDb, clusterConn);
+    n.redisDbIndex = 0;
+    const kids = await provider.getChildren(n);
+    expect(kids.filter((k) => k.kind === NodeKind.RedisKey).map((k) => k.label).sort()).toEqual(['k1', 'k2']);
+    expect(scans.sort()).toEqual(['m1', 'm2']);
+    // m1 游标 '5' → 未扫完 → 仍有「加载更多」。
+    expect(kids.some((k) => k.kind === NodeKind.RedisKeyLoadMore && !!k.command)).toBe(true);
+  });
+
+  it('cluster 连接展开出合成 Keys 节点（RedisDb）', async () => {
+    const client: any = {
+      isCluster: true, mode: 'cluster', db: 0, nodes: () => [],
+      sendCommand: async () => 'OK', runExclusive: (fn: any) => fn(), info: async () => '',
+    };
+    const manager: any = { connect: async () => ({ kind: 'redis', client, db: 0, mode: 'cluster', readOnly: false, isAlive: () => true, close: () => {} }) };
+    const store: any = { get: () => undefined, list: () => [] };
+    const provider = new DbTreeDataProvider(store, manager);
+    const clusterConn: any = { id: 'cc2', name: 'r', dbType: 'REDIS', host: 'h', port: 6379, redisMode: 'cluster' };
+    const connNode = new DbTreeNode('r', TreeItemCollapsibleState.Collapsed, NodeKind.Connection, clusterConn);
+    const kids = await provider.getChildren(connNode);
+    expect(kids).toHaveLength(1);
+    expect(kids[0].kind).toBe(NodeKind.RedisDb);
+    expect(kids[0].label).toBe('Keys');
+  });
 });

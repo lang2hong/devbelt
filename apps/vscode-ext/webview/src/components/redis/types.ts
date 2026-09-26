@@ -1,6 +1,6 @@
-import type { RedisKeyFolder, RedisNewKeyValue, RedisPanel, RedisValueData } from '../../../../src/result/protocol';
+import type { RedisPanel, RedisValueData } from '../../../../src/result/protocol';
 
-export type { RedisKeyFolder, RedisNewKeyValue, RedisPanel, RedisValueData };
+export type { RedisPanel, RedisValueData };
 
 export interface CommandResult {
   id: string;
@@ -30,16 +30,7 @@ export interface ValueInfo {
   data: RedisValueData | null;
 }
 
-/** 扁平化后的键树行。 */
-export interface KeyRow {
-  kind: 'folder' | 'key';
-  name: string;
-  path: string;
-  depth: number;
-  count?: number;
-}
-
-/** 是否渲染键浏览器（左树 + 值区）；其余面板为单栏。 */
+/** keyBrowser 面板 = 纯值查看/编辑（键导航在 explorer 树侧）。 */
 export function isKeyBrowserPanel(panel: RedisPanel): boolean {
   return panel === 'keyBrowser';
 }
