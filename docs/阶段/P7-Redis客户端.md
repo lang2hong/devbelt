@@ -373,6 +373,9 @@ SSH 隧道与 Cluster/Sentinel NAT map 放在 vscode-ext（`apps/vscode-ext/src/
     先 count-only SCAN 预扫 → modal 显示「约 N 个 + pattern」→ `withRedis` 内全量 SCAN + 每页 `UNLINK` →
     审计记执行 pattern。**有意不开 `canSelectMany`**：它是整棵 explorer 树开关，会让 SQL 命令在多选时
     静默 no-op（与仓库 fail-closed 原则冲突）；树级批量 SQL 操作若要做，另立树 UX 改造切片。
+    **cluster 删除一致性**：`deleteFolder`/`deleteByPattern` 的扫描与计数均**逐 master**，删除**逐键经主
+    client `UNLINK`**（按 slot 路由 + 仍经只读切面；不可用节点级 `call`）。已知限制：cluster 下 `RENAME`
+    两键跨 slot 会被服务端拒（Redis Cluster 固有限制，树里报错可接受）。
 - Vite 分包：`apps/vscode-ext/webview/vite.config.ts` 现有配置为单入口 `main.ts` + 自动 code
   splitting（`defineAsyncComponent` 会被 Vite 自动拆成独立 chunk，与 AuthenticatorView 模式一致），
   **不新增构建入口**、不改 rollupOptions。所有面板走现有共享 Vite 构建。
