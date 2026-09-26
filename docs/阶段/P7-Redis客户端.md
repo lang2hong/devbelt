@@ -354,15 +354,27 @@ SSH 隧道与 Cluster/Sentinel NAT map 放在 vscode-ext（`apps/vscode-ext/src/
     键浏览器左树可拖拽、值区自适应（移除固定 300px/38%）；各面板共享一条 session，
     `RedisClient.runExclusive` 串行「SELECT + 命令」防跨面板竞态。DB 采用面板内切换（决策 4B：
     每连接单键浏览器，切换 db 而非并列多 webview）。
-  - **S5-3 树内只读键导航（中间态）**：standalone/sentinel 的逻辑库（`RedisDb`）节点可展开，
-    懒 `SCAN`（每层 `REDIS_TREE_PAGE=200` + 「加载更多」哨兵）后 `groupRedisKeyChildren` 折叠成
-    只读文件夹/键节点；点键 → 打开 keyBrowser webview 并加载该键值（`open(..., selectKey)`）。
-    写操作/值编辑仍全部在 webview，cluster 不在树里（无 DB 节点）。性能实测留待「全量迁移」评估。
+  - **S5-3 树内只读键导航（D\*：根扁平 + 客户端折叠）**：standalone/sentinel 的逻辑库（`RedisDb`）
+    与 cluster 合成「Keys」节点可展开。**根层**单页 `SCAN`（`REDIS_TREE_PAGE=500`，cluster 按 master
+    数均分 `max(10, ceil(500/n))`）→ `groupRedisKeyChildren` 把已加载扁平集折叠成只读文件夹/键节点；
+    **文件夹展开零 SCAN**（直接用根扁平集折叠，避免逐文件夹 drain 的重复扫描/长时占锁）；全树**唯一**
+    「加载更多」位于根层，游标归零即消失。点键 → 打开 keyBrowser webview 并加载该键值（`open(..., selectKey)`）。
+    写操作/值编辑仍在 webview。
   - **C-1 树内搜索 + 写操作（ARDM 心智：导航单处）**：DB 右键「搜索键…/清除搜索/新建键」，
-    键右键「打开/重命名/TTL/删除/复制」，文件夹右键「按前缀删除」；均走 `runExclusive` + 审计。
-    搜索态该 db 子节点为**扁平结果**（`toRedisMatchPattern` → `SCAN MATCH`）。**硬上限**
-    `REDIS_TREE_MAX=20000`：达上限停止续扫并给出提示节点（对齐 ARDM `treeNodesOverflow` 思路，
-    但 VS Code TreeView 无虚拟化故取更低值）。
+    键右键「打开/重命名/TTL/删除/复制」，文件夹右键「按前缀删除/加载完整文件夹」；均走 `runExclusive` + 审计。
+    搜索态该 db 子节点为**扁平结果**（`toRedisMatchPattern` → `SCAN MATCH`）。
+  - **D\* 完整性模型（对齐 ARDM/RedisInsight 共识）**：
+    - **软上限 `REDIS_TREE_SOFT_CAP=20000`**：根层「加载更多」累计到顶即停，并给出「载入全部」入口节点；
+    - **硬上限 `REDIS_TREE_HARD_CAP=100000`**：仅「载入全部」可达（modal 二次确认 + `withProgress`
+      进度 + 取消 + 每页 `setImmediate` 让出事件循环）；
+    - **「加载完整文件夹」**（文件夹右键）：按 `redisPrefixPattern`（已 glob 转义）独立 SCAN 到扫完/硬上限/取消，
+      结果存独立 `__full__` 快照；完成后该文件夹 `description` 标「已全部加载」；
+    - **默认不宣称完整**（SCAN 非快照 + 外部写入不可感知）：未显式加载的文件夹不显示一致性徽章，避免过度承诺与噪声；
+    - **写操作定向失效**：仅删除「前缀是该键祖先路径」的 `__full__` 快照（完整快照只存在于确实完整的文件夹），其余完整快照保留；
+    - **锁与正确性**：standalone 每页短锁 `SELECT+SCAN`（不整段持锁，避免冻结同连接其它面板）；cluster
+      无 SELECT，不进 `runExclusive`；删除/重命名/TTL 路径继续走独立 `redisPatternDelete`/`redisUnlink`，
+      **展示不全绝不等于删不全**；
+    - 已知限制：SCAN 非快照（并发写入下可能重复/漏）；写后受影响的完整文件夹快照被删除，需重新「加载完整文件夹」。
   - **C-2 去重（导航单处）**：webview `keyBrowser` 退化为**纯值面板**——移除 `KeyTree`/`KeyNewDialog`
     与键树协议（`keys`/`refreshKeys`/`loadMoreKeys`/`createKey`）；键导航/搜索/新建全在 explorer 树。
     键节点点击 → 打开值面板并载值；无选中键时显示空态提示。单键重命名/TTL/删除/persist 仍在值面板。
