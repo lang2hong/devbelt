@@ -363,6 +363,50 @@ describe('RedisView S3 键树/值/编辑', () => {
     expect(sent.some(([n]) => n === 'RENAME')).toBe(true);
     expect(h.audits[0].sql).toBe('RENAME user:1');
   });
+
+  it('hashSet 改名：HSET 新 field + HDEL 旧 field（动作串标 HSET+HDEL）', async () => {
+    const { view, sent } = makeView(handler, 0);
+    await mountDb(view);
+    sent.length = 0;
+    await view.handleMessage({ type: 'hashSet', key: 'h', field: 'new', value: 'v', oldField: 'old' });
+    expect(sent.find(([n]) => n === 'HSET')?.[1]).toEqual(['h', 'new', 'v']);
+    expect(sent.find(([n]) => n === 'HDEL')?.[1]).toEqual(['h', 'old']);
+    expect(h.audits).toHaveLength(1);
+    expect(h.audits[0].sql).toBe('HSET+HDEL h');
+  });
+
+  it('hashSet 改名：HDEL 失败仍留痕（partial 审计）', async () => {
+    const boom: Send = async (n) => { if (n === 'HDEL') throw new Error('boom'); return n in replies ? replies[n] : 'OK'; };
+    const { view } = makeView(boom, 0);
+    await mountDb(view);
+    h.audits.length = 0;
+    await view.handleMessage({ type: 'hashSet', key: 'h', field: 'new', value: 'v', oldField: 'old' });
+    expect(posts(view).some((m) => m.type === 'keyAction' && m.ok === false)).toBe(true);
+    expect(h.audits[0].sql).toContain('HDEL old failed');
+  });
+
+  it('hashSet 未改名：仅 HSET（无 HDEL）', async () => {
+    const { view, sent } = makeView(handler, 0);
+    await mountDb(view);
+    sent.length = 0;
+    await view.handleMessage({ type: 'hashSet', key: 'h', field: 'f', value: 'v', oldField: 'f' });
+    expect(sent.some(([n]) => n === 'HSET')).toBe(true);
+    expect(sent.some(([n]) => n === 'HDEL')).toBe(false);
+  });
+
+  it('zsetAdd 改名：ZADD 新 member + ZREM 旧 member；未改名仅 ZADD', async () => {
+    const { view, sent } = makeView(handler, 0);
+    await mountDb(view);
+    sent.length = 0;
+    await view.handleMessage({ type: 'zsetAdd', key: 'z', score: '2', member: 'm2', oldMember: 'm1' });
+    expect(sent.find(([n]) => n === 'ZADD')?.[1]).toEqual(['z', '2', 'm2']);
+    expect(sent.find(([n]) => n === 'ZREM')?.[1]).toEqual(['z', 'm1']);
+
+    sent.length = 0;
+    await view.handleMessage({ type: 'zsetAdd', key: 'z', score: '3', member: 'm2', oldMember: 'm2' });
+    expect(sent.some(([n]) => n === 'ZADD')).toBe(true);
+    expect(sent.some(([n]) => n === 'ZREM')).toBe(false);
+  });
 });
 
 describe('RedisView S3 回归（提交前评审）', () => {

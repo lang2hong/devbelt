@@ -18,7 +18,7 @@ const emit = defineEmits<{
   (e: 'rename', key: string, newKey: string): void;
   (e: 'remove', key: string): void;
   (e: 'copyKey', key: string): void;
-  (e: 'hashSet', key: string, field: string, value: string): void;
+  (e: 'hashSet', key: string, field: string, value: string, oldField?: string): void;
   (e: 'hashDel', key: string, fields: string[]): void;
   (e: 'listPush', key: string, side: 'left' | 'right', values: string[]): void;
   (e: 'listSet', key: string, index: number, value: string): void;
@@ -26,7 +26,7 @@ const emit = defineEmits<{
   (e: 'listPop', key: string, side: 'left' | 'right'): void;
   (e: 'setAdd', key: string, members: string[]): void;
   (e: 'setRem', key: string, members: string[]): void;
-  (e: 'zsetAdd', key: string, score: string, member: string): void;
+  (e: 'zsetAdd', key: string, score: string, member: string, oldMember?: string): void;
   (e: 'zsetRem', key: string, members: string[]): void;
 }>();
 
@@ -49,8 +49,8 @@ const renameValue = ref('');
 const ttlOpen = ref(false);
 const ttlValue = ref('');
 const copied = ref(false);
-/** 行内编辑态（hash value / list 元素 / zset score）。 */
-interface EditState { kind: 'hash' | 'list' | 'zset'; id: string; draft: string }
+/** 行内编辑态（hash field+value / list 元素 / zset member+score）；draftKey 仅 hash/zset 用。 */
+interface EditState { kind: 'hash' | 'list' | 'zset'; id: string; draft: string; draftKey?: string }
 const editing = ref<EditState | null>(null);
 
 const key = computed(() => props.info?.key ?? '');
@@ -161,14 +161,23 @@ const canAddZset = computed(() => !!zsetMember.value && zsetScore.value.trim() !
 
 function startEdit(kind: EditState['kind'], id: string, draft: string): void {
   if (props.readOnly) return;
-  editing.value = { kind, id, draft };
+  // hash/zset：draftKey 初值为原 field/member，允许改；list 无 key 维度。
+  editing.value = { kind, id, draft, draftKey: kind === 'list' ? undefined : id };
 }
 function saveEdit(): void {
   const e = editing.value;
   if (!e) return;
-  if (e.kind === 'hash') emit('hashSet', key.value, e.id, e.draft);
-  else if (e.kind === 'list') emit('listSet', key.value, Number(e.id), e.draft);
-  else emit('zsetAdd', key.value, e.draft, e.id); // zset：e.draft=score、e.id=member（与 startEdit('zset', member, score) 对应）
+  if (e.kind === 'hash') {
+    const field = (e.draftKey ?? e.id).trim();
+    if (!field) return;
+    emit('hashSet', key.value, field, e.draft, e.id);
+  } else if (e.kind === 'list') {
+    emit('listSet', key.value, Number(e.id), e.draft);
+  } else {
+    const member = (e.draftKey ?? e.id).trim();
+    if (!member) return;
+    emit('zsetAdd', key.value, e.draft, member, e.id); // zset：draft=score、id=oldMember、draftKey=member
+  }
   editing.value = null;
 }
 function isEditing(kind: EditState['kind'], id: string): boolean {
@@ -178,6 +187,11 @@ function isEditing(kind: EditState['kind'], id: string): boolean {
 const draft = computed({
   get: () => editing.value?.draft ?? '',
   set: (v: string) => { if (editing.value) editing.value.draft = v; },
+});
+/** 编辑草稿（field/member）。 */
+const draftKey = computed({
+  get: () => editing.value?.draftKey ?? '',
+  set: (v: string) => { if (editing.value) editing.value.draftKey = v; },
 });
 function copyValue(text: string): void {
   void navigator.clipboard?.writeText(text);
@@ -237,14 +251,17 @@ function copyValue(text: string): void {
         <input v-model="hashFilter" :placeholder="t('wv.redis.hash.field')" />
         <table>
           <tr v-for="[f, v] in filteredHash()" :key="f">
-            <td class="f">{{ f }}</td>
+            <td class="f">
+              <input v-if="isEditing('hash', f)" v-model="draftKey" class="cell-input" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
+              <template v-else>{{ f }}</template>
+            </td>
             <td class="v">
               <input v-if="isEditing('hash', f)" v-model="draft" class="cell-input" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
               <template v-else>{{ v }}</template>
             </td>
             <td class="row-actions">
               <template v-if="isEditing('hash', f)">
-                <button class="btn tiny" @click="saveEdit">{{ t('wv.redis.value.save') }}</button>
+                <button class="btn tiny" :disabled="!draftKey.trim()" @click="saveEdit">{{ t('wv.redis.value.save') }}</button>
                 <button class="btn tiny" @click="editing = null">{{ t('wv.redis.confirm.cancel') }}</button>
               </template>
               <template v-else>
@@ -321,14 +338,17 @@ function copyValue(text: string): void {
         </div>
         <table>
           <tr v-for="[m, s] in info.data.items" :key="m">
-            <td class="v">{{ m }}</td>
+            <td class="v">
+              <input v-if="isEditing('zset', m)" v-model="draftKey" class="cell-input" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
+              <template v-else>{{ m }}</template>
+            </td>
             <td class="idx">
               <input v-if="isEditing('zset', m)" v-model="draft" class="cell-input score" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
               <template v-else>{{ s }}</template>
             </td>
             <td class="row-actions">
               <template v-if="isEditing('zset', m)">
-                <button class="btn tiny" @click="saveEdit">{{ t('wv.redis.value.save') }}</button>
+                <button class="btn tiny" :disabled="!draftKey.trim()" @click="saveEdit">{{ t('wv.redis.value.save') }}</button>
                 <button class="btn tiny" @click="editing = null">{{ t('wv.redis.confirm.cancel') }}</button>
               </template>
               <template v-else>

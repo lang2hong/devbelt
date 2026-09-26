@@ -142,7 +142,25 @@ export class RedisView extends BaseWebView {
     if (msg.type === 'persistKey') { await this.edit('PERSIST', String(msg.key), async (c) => { await redisPersist(c, String(msg.key)); }); return; }
     if (msg.type === 'renameKey') { await this.renameKey(String(msg.key), String(msg.newKey ?? '')); return; }
     if (msg.type === 'deleteKeys') { await this.deleteKeys(Array.isArray(msg.keys) ? msg.keys.map(String) : []); return; }
-    if (msg.type === 'hashSet') { await this.edit('HSET', String(msg.key), async (c) => { await redisHSet(c, String(msg.key), String(msg.field ?? ''), String(msg.value ?? '')); }); return; }
+    if (msg.type === 'hashSet') {
+      const hkey = String(msg.key);
+      const field = String(msg.field ?? '');
+      const oldField = msg.oldField === undefined ? undefined : String(msg.oldField);
+      const renaming = !!oldField && oldField !== field;
+      await this.edit(renaming ? 'HSET+HDEL' : 'HSET', hkey, async (c) => {
+        await redisHSet(c, hkey, field, String(msg.value ?? ''));
+        // 非原子：HSET 已生效后 HDEL 失败会残留新旧两个 field（Redis 无原子改名）；失败也留痕。
+        if (renaming) {
+          try {
+            await redisHDel(c, hkey, [oldField!]);
+          } catch (err) {
+            this.audit(`HSET ${field} (HDEL ${oldField} failed)`, hkey);
+            throw err;
+          }
+        }
+      });
+      return;
+    }
     if (msg.type === 'hashDel') { await this.edit('HDEL', String(msg.key), async (c) => { await redisHDel(c, String(msg.key), strs(msg.fields)); }); return; }
     if (msg.type === 'listPush') { await this.edit('LPUSH/RPUSH', String(msg.key), async (c) => { const v = strs(msg.values); if (msg.side === 'left') await redisLPush(c, String(msg.key), v); else await redisRPush(c, String(msg.key), v); }); return; }
     if (msg.type === 'listSet') { await this.edit('LSET', String(msg.key), async (c) => { await redisLSet(c, String(msg.key), Number(msg.index), String(msg.value ?? '')); }); return; }
@@ -151,7 +169,25 @@ export class RedisView extends BaseWebView {
     if (msg.type === 'listPop') { await this.edit('LPOP/RPOP', String(msg.key), async (c) => { if (msg.side === 'left') await redisLPop(c, String(msg.key)); else await redisRPop(c, String(msg.key)); }); return; }
     if (msg.type === 'setAdd') { await this.edit('SADD', String(msg.key), async (c) => { await redisSAdd(c, String(msg.key), strs(msg.members)); }); return; }
     if (msg.type === 'setRem') { await this.edit('SREM', String(msg.key), async (c) => { await redisSRem(c, String(msg.key), strs(msg.members)); }); return; }
-    if (msg.type === 'zsetAdd') { await this.edit('ZADD', String(msg.key), async (c) => { await redisZAdd(c, String(msg.key), String(msg.score ?? '0'), String(msg.member ?? '')); }); return; }
+    if (msg.type === 'zsetAdd') {
+      const zkey = String(msg.key);
+      const member = String(msg.member ?? '');
+      const oldMember = msg.oldMember === undefined ? undefined : String(msg.oldMember);
+      const renaming = !!oldMember && oldMember !== member;
+      await this.edit(renaming ? 'ZADD+ZREM' : 'ZADD', zkey, async (c) => {
+        await redisZAdd(c, zkey, String(msg.score ?? '0'), member);
+        // 非原子：ZADD 已生效后 ZREM 失败会残留新旧两个 member（Redis 无原子改名）；失败也留痕。
+        if (renaming) {
+          try {
+            await redisZRem(c, zkey, [oldMember!]);
+          } catch (err) {
+            this.audit(`ZADD ${member} (ZREM ${oldMember} failed)`, zkey);
+            throw err;
+          }
+        }
+      });
+      return;
+    }
     if (msg.type === 'zsetRem') { await this.edit('ZREM', String(msg.key), async (c) => { await redisZRem(c, String(msg.key), strs(msg.members)); }); return; }
     if (msg.type === 'streamAdd') { await this.streamAdd(msg); return; }
     if (msg.type === 'streamDel') { await this.streamDelOp(msg); return; }

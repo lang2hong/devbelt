@@ -180,7 +180,7 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
         @rename="(k, n) => post({ type: 'renameKey', key: k, newKey: n })"
         @remove="(k) => pendingDelete = [k]"
         @copy-key="() => {}"
-        @hash-set="(k, f, v) => post({ type: 'hashSet', key: k, field: f, value: v })"
+        @hash-set="(k, f, v, old) => post({ type: 'hashSet', key: k, field: f, value: v, oldField: old })"
         @hash-del="(k, f) => post({ type: 'hashDel', key: k, fields: f })"
         @list-push="(k, s, v) => post({ type: 'listPush', key: k, side: s, values: v })"
         @list-set="(k, i, v) => post({ type: 'listSet', key: k, index: i, value: v })"
@@ -188,7 +188,7 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
         @list-pop="(k, s) => post({ type: 'listPop', key: k, side: s })"
         @set-add="(k, m) => post({ type: 'setAdd', key: k, members: m })"
         @set-rem="(k, m) => post({ type: 'setRem', key: k, members: m })"
-        @zset-add="(k, s, m) => post({ type: 'zsetAdd', key: k, score: s, member: m })"
+        @zset-add="(k, s, m, old) => post({ type: 'zsetAdd', key: k, score: s, member: m, oldMember: old })"
         @zset-rem="(k, m) => post({ type: 'zsetRem', key: k, members: m })"
       />
     </template>

@@ -196,7 +196,7 @@ export type RedisUpMessage =
   | { type: 'persistKey'; key: string }
   | { type: 'renameKey'; key: string; newKey: string }
   | { type: 'deleteKeys'; keys: string[] }
-  | { type: 'hashSet'; key: string; field: string; value: string }
+  | { type: 'hashSet'; key: string; field: string; value: string; oldField?: string }
   | { type: 'hashDel'; key: string; fields: string[] }
   | { type: 'listPush'; key: string; side: 'left' | 'right'; values: string[] }
   | { type: 'listSet'; key: string; index: number; value: string }
@@ -205,7 +205,7 @@ export type RedisUpMessage =
   | { type: 'listPop'; key: string; side: 'left' | 'right' }
   | { type: 'setAdd'; key: string; members: string[] }
   | { type: 'setRem'; key: string; members: string[] }
-  | { type: 'zsetAdd'; key: string; score: string; member: string }
+  | { type: 'zsetAdd'; key: string; score: string; member: string; oldMember?: string }
   | { type: 'zsetRem'; key: string; members: string[] }
   // Stream（S4）：破坏性操作须 confirmed=true 才执行（host 先回 confirmOpRequired）。
   | { type: 'streamAdd'; key: string; id: string; fields: [string, string][] }

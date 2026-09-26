@@ -375,6 +375,10 @@ SSH 隧道与 Cluster/Sentinel NAT map 放在 vscode-ext（`apps/vscode-ext/src/
       无 SELECT，不进 `runExclusive`；删除/重命名/TTL 路径继续走独立 `redisPatternDelete`/`redisUnlink`，
       **展示不全绝不等于删不全**；
     - 已知限制：SCAN 非快照（并发写入下可能重复/漏）；写后受影响的完整文件夹快照被删除，需重新「加载完整文件夹」。
+  - **值编辑器（keyBrowser）行内编辑**：hash 同时改 **field + value**（改名 = `HSET` 新 + `HDEL` 旧）；zset 同时改
+    **member + score**（改名 = `ZADD` 新 + `ZREM` 旧）；list 改元素值（`LSET`）；均在同一 host `edit` 内完成，
+    单次审计 + 单次刷新；改名审计动作串为 `HSET+HDEL`/`ZADD+ZREM`，第二步失败仍落 partial 审计（非原子，
+    改名目标已存在会覆盖其值——Redis 语义）。
   - **C-2 去重（导航单处）**：webview `keyBrowser` 退化为**纯值面板**——移除 `KeyTree`/`KeyNewDialog`
     与键树协议（`keys`/`refreshKeys`/`loadMoreKeys`/`createKey`）；键导航/搜索/新建全在 explorer 树。
     键节点点击 → 打开值面板并载值；无选中键时显示空态提示。单键重命名/TTL/删除/persist 仍在值面板。
