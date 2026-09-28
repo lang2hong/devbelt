@@ -87,7 +87,9 @@ export type AuthenticatorUpMessage =
       issuer: string; account?: string; secret: string;
       algorithm: TotpAlgorithm; digits: 6 | 8; period: 30 | 60;
       groupId: string | null; tags: string[];
-    } }
+    };
+    /** 预填表单（粘贴链接/扫码）：secret 由宿主按此一次性 id 补齐，entry.secret 可为空串。 */
+    prefillId?: string }
   | { type: 'update'; id: string; patch: {
       issuer?: string; account?: string; secret?: string;
       algorithm?: TotpAlgorithm; digits?: 6 | 8; period?: 30 | 60;
@@ -121,6 +123,10 @@ export type AuthenticatorDownMessage =
   | { type: 'formError'; field?: string; message: string; source?: 'form' | 'external' }
   | { type: 'openAddForm' }
   | { type: 'groupAdded'; id: string }
+  | { type: 'prefillAdd'; prefillId: string; entry: {
+      issuer: string; account?: string;
+      algorithm: TotpAlgorithm; digits: 6 | 8; period: 30 | 60;
+    } }
   | { type: 'error'; message: string };
 
 // ────────────────────────── P7：Redis 面板协议 ──────────────────────────

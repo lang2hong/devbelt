@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { uniqueId } from '@devbelt/db-host/utils/id';
 import { BaseWebView } from '../result/baseWebView';
 import { diagError } from '../utils/diagnostics';
 import { l10n } from '../i18n';
@@ -26,6 +27,8 @@ export class AuthenticatorView extends BaseWebView {
   private pendingAction?: 'openAddForm';
   /** 折叠态仅面板内存维护，决定 tick 时哪些组的 codes 需要下发。 */
   private readonly foldedGroups = new Set<string | null>();
+  /** 粘贴/扫码解析出的待入库 secret：只留宿主，表单补齐分组后按 prefillId 合并。 */
+  private pendingPrefill?: { id: string; secret: string };
 
   private constructor(private readonly store: AuthenticatorStore) {
     super('devbelt.authenticator', l10n('authenticator.title'));
@@ -122,12 +125,19 @@ export class AuthenticatorView extends BaseWebView {
 
   private async onAdd(msg: Extract<AuthenticatorUpMessage, { type: 'add' }>): Promise<void> {
     const e = msg.entry;
+    let secret = e.secret;
+    // 预填表单（粘贴链接/扫码）不带 secret：用宿主暂存的一次性 secret 补齐。
+    if (msg.prefillId !== undefined) {
+      const pending = this.pendingPrefill;
+      if (!pending || pending.id !== msg.prefillId) { this.postFormError('secret', 'authenticator.uri.invalid', 'external'); return; }
+      secret = pending.secret;
+    }
     const res = await this.store.addEntry({
-      issuer: e.issuer, account: e.account, secret: e.secret,
+      issuer: e.issuer, account: e.account, secret,
       algorithm: e.algorithm, digits: e.digits, period: e.period,
       groupId: this.normGroupId(e.groupId), tags: e.tags,
     });
-    if (res.ok) return;
+    if (res.ok) { if (msg.prefillId !== undefined) this.pendingPrefill = undefined; return; }
     if (res.reason === 'quota') { await promptAuthenticatorUpgrade(res.limit); return; }
     if (res.reason === 'invalidSecret') { this.postFormError(res.field ?? 'secret', 'authenticator.err.invalidSecret'); return; }
     if (res.reason === 'invalidField') { this.postFormError(res.field, 'authenticator.err.invalidField'); return; }
@@ -160,10 +170,15 @@ export class AuthenticatorView extends BaseWebView {
       return;
     }
     if (!uri) { this.postFormError(undefined, 'authenticator.image.notFound', 'external'); return; }
-    await this.addFromUri(uri, 'authenticator.image.invalid');
+    this.prefillFromUri(uri, 'authenticator.image.invalid');
   }
 
-  private async addFromUri(uri: string, invalidKey: string): Promise<void> {
+  /**
+   * 解析 otpauth URI 后**不直接入库**：secret 留在宿主，只下发非密文字段 + 一次性 prefillId，
+   * webview 打开预填表单、选好分组后再按 prefillId 合并 secret 入库（守住「secret 不下发」约束）。
+   * 直接入库的分支（配额/字段校验）随之移到 onAdd。
+   */
+  private prefillFromUri(uri: string, invalidKey: string): void {
     if (uri.startsWith('otpauth-migration://')) {
       this.postFormError(undefined, 'authenticator.uri.migrationUnsupported', 'external');
       return;
@@ -176,20 +191,20 @@ export class AuthenticatorView extends BaseWebView {
       this.postFormError(undefined, invalidKey, 'external');
       return;
     }
-    const res = await this.store.addEntry({
-      issuer: parsed.issuer, account: parsed.account, secret: parsed.secret,
-      algorithm: parsed.algorithm, digits: parsed.digits, period: parsed.period,
+    const id = uniqueId('ap');
+    this.pendingPrefill = { id, secret: parsed.secret };
+    this.post({
+      type: 'prefillAdd', prefillId: id,
+      entry: {
+        issuer: parsed.issuer, account: parsed.account,
+        algorithm: parsed.algorithm, digits: parsed.digits, period: parsed.period,
+      },
     });
-    if (res.ok) return;
-    if (res.reason === 'quota') { await promptAuthenticatorUpgrade(res.limit); return; }
-    if (res.reason === 'invalidSecret') { this.postFormError('secret', 'authenticator.err.invalidSecret', 'external'); return; }
-    if (res.reason === 'invalidField') { this.postFormError(res.field, 'authenticator.err.invalidField', 'external'); return; }
-    this.post({ type: 'error', message: l10n('authenticator.error.generic') });
   }
 
-  private async onAddUri(msg: Extract<AuthenticatorUpMessage, { type: 'addUri' }>): Promise<void> {
+  private onAddUri(msg: Extract<AuthenticatorUpMessage, { type: 'addUri' }>): void {
     if (typeof msg.uri !== 'string' || !msg.uri) { this.postFormError(undefined, 'authenticator.uri.invalid', 'external'); return; }
-    await this.addFromUri(msg.uri, 'authenticator.uri.invalid');
+    this.prefillFromUri(msg.uri, 'authenticator.uri.invalid');
   }
 
   private async onDelete(msg: Extract<AuthenticatorUpMessage, { type: 'delete' }>): Promise<void> {
@@ -301,6 +316,7 @@ export class AuthenticatorView extends BaseWebView {
     super.onDispose();
     this.clearTimer();
     this.foldedGroups.clear();
+    this.pendingPrefill = undefined;
     if (AuthenticatorView.current === this) AuthenticatorView.current = undefined;
   }
 }

@@ -165,6 +165,36 @@ describe('AuthenticatorView (panel)', () => {
     expect(p.posted.some((m) => m.type === 'formError' && /migrationUnsupported/.test(m.message))).toBe(true);
   });
 
+  it('addUri: parses into a prefill (no direct add), then add with prefillId merges host secret', async () => {
+    const p = makePanel();
+    const store = makeStore();
+    AuthenticatorView.open(store);
+    p.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    p.send({ type: 'addUri', uri: 'otpauth://totp/Acme:alice?secret=JBSWY3DPEHPK3PXP&issuer=Acme' });
+    await flush();
+    expect(store.addEntry).not.toHaveBeenCalled();
+    const prefill = p.posted.find((m) => m.type === 'prefillAdd');
+    expect(prefill).toBeTruthy();
+    expect(prefill.entry).toMatchObject({ issuer: 'Acme', account: 'alice' });
+    expect(prefill.entry).not.toHaveProperty('secret');
+    p.send({ type: 'add', entry: { issuer: 'Acme', account: 'alice', secret: '', algorithm: 'SHA1', digits: 6, period: 30, groupId: 'g', tags: [] }, prefillId: prefill.prefillId });
+    await flush();
+    expect(store.addEntry).toHaveBeenCalledWith(expect.objectContaining({ secret: 'JBSWY3DPEHPK3PXP', groupId: 'g' }));
+  });
+
+  it('add with unknown prefillId is rejected and never reaches store', async () => {
+    const p = makePanel();
+    const store = makeStore();
+    AuthenticatorView.open(store);
+    p.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    p.send({ type: 'add', entry: { issuer: 'A', secret: '', algorithm: 'SHA1', digits: 6, period: 30, groupId: 'g', tags: [] }, prefillId: 'nope' });
+    await flush();
+    expect(store.addEntry).not.toHaveBeenCalled();
+    expect(p.posted.some((m) => m.type === 'formError')).toBe(true);
+  });
+
   it('tick treats orphan groupId as ungrouped', async () => {
     const p = makePanel();
     const entries = [

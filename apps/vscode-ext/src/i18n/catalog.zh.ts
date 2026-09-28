@@ -825,6 +825,7 @@ export const zh: MessageCatalog = {
   'wv.authenticator.form.group': '分组',
   'wv.authenticator.form.groupPlaceholder': '请选择分组',
   'wv.authenticator.form.groupRequired': '请先选择或新建分组',
+  'wv.authenticator.form.prefillSecret': '密钥已从链接/图片读取（保留在宿主）',
   'wv.authenticator.form.tags': '标签',
   'wv.authenticator.form.noGroup': '未分组',
   'wv.authenticator.form.invalidSecret': '密钥必须是合法 base32。',

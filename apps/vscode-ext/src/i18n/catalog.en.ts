@@ -847,6 +847,7 @@ export const en: MessageCatalog = {
   'wv.authenticator.form.group': 'Group',
   'wv.authenticator.form.groupPlaceholder': 'Select a group',
   'wv.authenticator.form.groupRequired': 'Select or create a group first',
+  'wv.authenticator.form.prefillSecret': 'Secret read from link/image (kept in host)',
   'wv.authenticator.form.tags': 'Tags',
   'wv.authenticator.form.noGroup': 'Ungrouped',
   'wv.authenticator.form.invalidSecret': 'Secret must be valid base32.',

@@ -46,6 +46,8 @@ const form = reactive({
   period: 30 as 30 | 60,
   groupId: '' as string,
   tags: [] as string[],
+  /** 粘贴链接/扫码预填：secret 在宿主，提交时按此 id 合并。 */
+  prefillId: null as string | null,
 });
 
 const groupPrompt = ref<{ mode: 'new' | 'rename' | 'above' | 'below'; id?: string; beforeId?: string; afterId?: string; value: string } | null>(null);
@@ -172,6 +174,17 @@ function onMsg(msg: any): void {
   } else if (msg.type === 'groupAdded') {
     // 在添加表单里新建分组后自动选中它
     if (formOpen.value && typeof msg.id === 'string') form.groupId = msg.id;
+  } else if (msg.type === 'prefillAdd') {
+    // 粘贴链接/扫码：打开预填添加表单（无 secret，宿主持有），强制选/新建分组。
+    editingId.value = null;
+    formError.value = '';
+    pendingSubmit.value = false;
+    Object.assign(form, {
+      issuer: msg.entry?.issuer ?? '', account: msg.entry?.account ?? '', secret: '',
+      algorithm: msg.entry?.algorithm ?? 'SHA1', digits: msg.entry?.digits ?? 6, period: msg.entry?.period ?? 30,
+      groupId: '', tags: [], prefillId: msg.prefillId ?? null,
+    });
+    formOpen.value = true;
   } else if (msg.type === 'error') {
     errMsg.value = msg.message ?? '';
     if (errTimer) clearTimeout(errTimer);
@@ -188,7 +201,7 @@ function startAdd(): void {
   editingId.value = null;
   formError.value = '';
   pendingSubmit.value = false;
-  Object.assign(form, { issuer: '', account: '', secret: '', algorithm: 'SHA1', digits: 6, period: 30, groupId: '', tags: [] });
+  Object.assign(form, { issuer: '', account: '', secret: '', algorithm: 'SHA1', digits: 6, period: 30, groupId: '', tags: [], prefillId: null });
   formOpen.value = true;
 }
 function startEdit(e: AuthenticatorSnapshotEntry): void {
@@ -198,7 +211,7 @@ function startEdit(e: AuthenticatorSnapshotEntry): void {
   Object.assign(form, {
     issuer: e.issuer, account: e.account ?? '', secret: '',
     algorithm: e.algorithm, digits: e.digits, period: e.period,
-    groupId: e.groupId ?? '', tags: [...e.tags],
+    groupId: e.groupId ?? '', tags: [...e.tags], prefillId: null,
   });
   formOpen.value = true;
   menuFor.value = null;
@@ -209,6 +222,7 @@ function cancelForm(): void {
   formError.value = '';
   pendingSubmit.value = false;
   form.secret = '';
+  form.prefillId = null;
 }
 function toggleFormTag(id: string): void {
   const i = form.tags.indexOf(id);
@@ -217,8 +231,12 @@ function toggleFormTag(id: string): void {
 function submitForm(): void {
   formError.value = '';
   const secret = form.secret.trim();
-  if (editingId.value === null && !secret) { formError.value = t('wv.authenticator.form.invalidSecret'); return; }
-  if (secret && !isValidBase32(secret)) { formError.value = t('wv.authenticator.form.invalidSecret'); return; }
+  const isPrefill = !!form.prefillId;
+  // 预填表单的 secret 在宿主，webview 不做 base32 校验。
+  if (!isPrefill) {
+    if (editingId.value === null && !secret) { formError.value = t('wv.authenticator.form.invalidSecret'); return; }
+    if (secret && !isValidBase32(secret)) { formError.value = t('wv.authenticator.form.invalidSecret'); return; }
+  }
   // 无「未分组」：必须新建或选择分组
   if (!form.groupId) { formError.value = t('wv.authenticator.form.groupRequired'); return; }
   const groupId = form.groupId;
@@ -238,10 +256,11 @@ function submitForm(): void {
     post({
       type: 'add',
       entry: {
-        issuer: form.issuer, account: form.account || undefined, secret,
+        issuer: form.issuer, account: form.account || undefined, secret: isPrefill ? '' : secret,
         algorithm: form.algorithm, digits: form.digits, period: form.period,
         groupId, tags: [...form.tags],
       },
+      ...(isPrefill ? { prefillId: form.prefillId! } : {}),
     });
   }
 }
@@ -486,7 +505,9 @@ onUnmounted(() => {
       </div>
       <div class="form-row">
         <label>{{ t('wv.authenticator.form.secret') }}</label>
+        <span v-if="form.prefillId" class="prefill-note">{{ t('wv.authenticator.form.prefillSecret') }}</span>
         <input
+          v-else
           v-model="form.secret"
           class="inline-input"
           type="password"
@@ -646,6 +667,7 @@ input, select { background: var(--vscode-input-background); color: var(--vscode-
 .modal-title { font-weight: 600; }
 .modal-input { width: 100%; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.prefill-note { font-size: 12px; opacity: 0.8; }
 .form { border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.3)); border-radius: 6px; padding: 8px; margin-bottom: 8px; }
 .form-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
 .form-row label { font-size: 11px; opacity: 0.8; min-width: 52px; }
