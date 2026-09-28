@@ -11,10 +11,16 @@ import type { SavedConnection } from '@devbelt/db-host/connection/connectionStor
 import { SshTunnel } from './sshTunnel';
 import {
   buildNatMap,
+  parseClusterNodesAll,
   parseClusterNodesMasters,
   parseSentinelMasterAddr,
   type RedisHostPort,
 } from './redisTopology';
+
+/** 每次安装的隧道 id 非随机后缀：避免「过期建连完成时关掉新连接复用的同名隧道」。 */
+function tunnelNonce(): string {
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
 
 export interface RedisAuth {
   username?: string;
@@ -56,22 +62,26 @@ export async function setupClusterOverSsh(
   auth: RedisAuth,
 ): Promise<ClusterTunnelSetup> {
   const client = probe('127.0.0.1', seedLocalPort, auth);
-  let masters: RedisHostPort[];
+  let raw: unknown;
   try {
     await client.connect();
-    const raw = await client.sendCommand('CLUSTER', ['NODES']);
-    masters = parseClusterNodesMasters(String(raw));
+    raw = await client.sendCommand('CLUSTER', ['NODES']);
   } finally {
     await client.close();
   }
+  const text = String(raw);
+  const masters = parseClusterNodesMasters(text);
   if (!masters.length) throw new Error('CLUSTER NODES 未返回任何 master 节点');
+  // 隧道覆盖**全部非失败节点**（含副本/故障转移目标），避免绕过 SSH 直连内网地址。
+  const nodes = parseClusterNodesAll(text);
 
   const tunnelIds: string[] = [];
+  const nonce = tunnelNonce();
   const entries: { remoteHost: string; remotePort: number; localPort: number }[] = [];
   try {
-    for (let i = 0; i < masters.length; i++) {
-      const m = masters[i];
-      const id = `${conn.id}#nat${i}`;
+    for (let i = 0; i < nodes.length; i++) {
+      const m = nodes[i];
+      const id = `${conn.id}#nat${nonce}${i}`;
       const localPort = await SshTunnel.create({ ...conn, id, host: m.host, port: m.port });
       // 有 sshHost 时 create 失败应 fail-fast：漏一条隧道会让 natMap 缺项、运行期才报错，极难排障。
       if (!localPort) throw new Error(`无法为 cluster 节点建立 SSH 隧道：${m.host}:${m.port}`);
@@ -109,7 +119,7 @@ export async function discoverSentinelMasterOverSsh(
   }
   if (!master) throw new Error(`SENTINEL 未发现 master：${conn.sentinelName ?? ''}`);
 
-  const tunnelId = `${conn.id}#sentinel-master`;
+  const tunnelId = `${conn.id}#sentinel-master-${tunnelNonce()}`;
   const masterLocalPort = await SshTunnel.create({ ...conn, id: tunnelId, host: master.host, port: master.port });
   if (!masterLocalPort) throw new Error('无法为 Sentinel master 建立 SSH 隧道');
   return { master, masterLocalPort, tunnelId };

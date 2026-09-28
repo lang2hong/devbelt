@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildNatMap,
+  parseClusterNodesAll,
   parseClusterNodesMasters,
   parseSentinelMasterAddr,
 } from '../../src/connection/redisTopology';
@@ -25,6 +26,15 @@ describe('parseClusterNodesMasters', () => {
 
   it('畸形行安全跳过', () => {
     expect(parseClusterNodesMasters('garbage\n\n# comment')).toEqual([]);
+  });
+
+  it('parseClusterNodesAll：含副本、排除 fail、去重保序（SSH 隧道需覆盖全体）', () => {
+    expect(parseClusterNodesAll(CLUSTER_NODES)).toEqual([
+      { host: '127.0.0.1', port: 30004 },
+      { host: '127.0.0.1', port: 30002 },
+      { host: '127.0.0.1', port: 30003 },
+      { host: '127.0.0.1', port: 30006 },
+    ]);
   });
 });
 

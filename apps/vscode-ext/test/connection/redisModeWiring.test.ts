@@ -106,7 +106,10 @@ describe('buildRedisSession 按 redisMode 分派（S4）', () => {
     h.clusterResolvers.forEach((r) => r());
 
     await expect(pending).rejects.toThrow(/closed/i);
-    expect(h.closed.filter((id) => id.includes('#nat')).sort()).toEqual(['c#nat0', 'c#nat1', 'c#nat2']);
+    // 隧道 id 带每次安装的随机后缀（防跨安装误关），断言数量与前缀即可。
+    const natIds = h.closed.filter((id) => id.includes('#nat'));
+    expect(natIds).toHaveLength(3);
+    for (const id of natIds) expect(id.startsWith('c#nat')).toBe(true);
     m.disposeAll();
   });
 

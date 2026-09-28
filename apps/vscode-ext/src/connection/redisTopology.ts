@@ -55,6 +55,29 @@ export function parseClusterNodesMasters(text: string): RedisHostPort[] {
   return out;
 }
 
+/**
+ * `CLUSTER NODES` → **全部非失败节点**（master + replica）。
+ *
+ * 只映射 master 会让副本/故障转移后的新 master/MOVED 目标绕过 SSH：ioredis 直连内网地址并发送 AUTH。
+ * 所以隧道与 natMap 覆盖全部非失败节点（未知节点仍会回退真地址——已知用 object 形式时 ioredis 的
+ * 种子 `127.0.0.1` 依赖该回退，故此处不做"未知即抛"）。
+ */
+export function parseClusterNodesAll(text: string): RedisHostPort[] {
+  const out: RedisHostPort[] = [];
+  const seen = new Set<string>();
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim() || line.startsWith('#')) continue;
+    const node = parseClusterNodeLine(line);
+    if (!node) continue;
+    if (node.flags.some((f) => f.startsWith('fail'))) continue;
+    const key = `${node.host}:${node.port}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ host: node.host, port: node.port });
+  }
+  return out;
+}
+
 /** `SENTINEL get-master-addr-by-name` 回复 → `{host,port}`；无 master 返回 null。 */
 export function parseSentinelMasterAddr(reply: unknown): RedisHostPort | null {
   if (!Array.isArray(reply) || reply.length < 2) return null;
