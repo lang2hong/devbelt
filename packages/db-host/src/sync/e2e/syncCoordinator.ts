@@ -137,8 +137,10 @@ export class SyncCoordinator {
     let failure: unknown;
     const run = this.chain.then(async () => {
       try {
-        if (reconcile) await this.mutator.reconcile();
+        let skippedOutbound = 0;
+        if (reconcile) skippedOutbound = (await this.mutator.reconcile()).skipped?.length ?? 0;
         const result = await this.engine.syncPhase(phase);
+        if (skippedOutbound) result.skippedOutbound = skippedOutbound;
         this._lastRun = result;
         this.notify(result);
         this.maybeRetry(result);
@@ -193,8 +195,9 @@ export class SyncCoordinator {
     this._lastError = undefined;
     let last: SyncRunResult | undefined;
     for (let i = 0; i < SyncCoordinator.MAX_DRAIN_ROUNDS; i++) {
-      const { generated } = await this.mutator.reconcile();
+      const { generated, skipped } = await this.mutator.reconcile();
       const result = await this.engine.sync();
+      if (skipped?.length) result.skippedOutbound = skipped.length;
       this._lastRun = result;
       last = result;
       if (result.stage !== 'ok') return result;

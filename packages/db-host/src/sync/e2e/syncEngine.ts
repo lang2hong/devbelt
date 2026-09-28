@@ -62,6 +62,10 @@ export interface SyncRunResult {
   terminal?: SyncTerminalEntry;
   stalled?: SyncStalledEntry;
   applied: number;
+  /** 入站因权益（引擎不在套餐）被跳过、进 deferred 的记录数。 */
+  skippedEntitlement?: number;
+  /** 出站因编码失败/引擎不支持被跳过的本地变更数（由 coordinator 从 reconcile 结果补入）。 */
+  skippedOutbound?: number;
   changeSequence?: string;
   reason?: string; // 不含秘密
 }
@@ -340,6 +344,7 @@ export class SyncEngine {
 
     let cursor = local.changeSequence;
     let applied = 0;
+    let skippedEntitlement = 0;
 
     // 先重放上一轮被权益跳过的记录：升级后无需重拉即可落地。
     try {
@@ -388,6 +393,7 @@ export class SyncEngine {
             const disposition = await this.applyRemote(rec, this.deps.keyEpoch, ctx);
             // 权益跳过一律入 deferred（无论是否已映射）；版本重放的 'skipped' 不入队。
             if (disposition === 'skipped-entitlement' && this.deps.deferred) {
+              skippedEntitlement += 1;
               await this.deps.deferred.put({
                 recordId: rec.recordId,
                 version: rec.version,
@@ -449,7 +455,7 @@ export class SyncEngine {
 
     // C2：本轮收集到冲突（出站 version 冲突未在本轮 pull 命中远端时仍属冲突）→ 以 conflict 收尾，
     // 让 coordinator 进入 stalled，不再自动重放同一条冲突 mutation。
-    return { stage: conflicts.length > 0 ? 'conflict' : 'ok', conflicts, stalled, applied, changeSequence: lastCommitted };
+    return { stage: conflicts.length > 0 ? 'conflict' : 'ok', conflicts, stalled, applied, skippedEntitlement, changeSequence: lastCommitted };
   }
 
   private parseState(raw: unknown): RemoteState {

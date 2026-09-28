@@ -9,7 +9,7 @@ import type { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
 import { canUseDataSync } from '@devbelt/db-host/sync/entitlementGate';
 import { l10n } from '../i18n';
 
-type SyncRun = { stage: string } | undefined;
+type SyncRun = { stage: string; skippedEntitlement?: number; skippedOutbound?: number } | undefined;
 
 interface SyncSessionPort {
   readonly uid: string;
@@ -126,7 +126,12 @@ function reportInitialRun(ui: SyncUi, result: SyncRun, op: SyncOp): void {
   }
   // 按操作类型分别提示：pull / push / 立即同步 不再共用同一句，结果可区分。
   if (result?.stage === 'ok') {
-    ui.info(l10n(`sync.done.${op}`));
+    // 有跳过时不再谎报「已完成」：明确告知哪一类（入站套餐跳过 / 出站未能编码）及条数。
+    const parts: string[] = [];
+    if (result.skippedEntitlement) parts.push(l10n('sync.skippedEntitlement', { count: String(result.skippedEntitlement) }));
+    if (result.skippedOutbound) parts.push(l10n('sync.skippedOutbound', { count: String(result.skippedOutbound) }));
+    if (parts.length) ui.warn(l10n('sync.skipped', { detail: parts.join('；') }));
+    else ui.info(l10n(`sync.done.${op}`));
   } else {
     ui.warn(l10n(`sync.pending.${op}`));
   }

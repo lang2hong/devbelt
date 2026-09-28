@@ -125,6 +125,15 @@ describe('SyncCoordinator', () => {
     expect(coordinator.lastError).toBeUndefined();
   });
 
+  it('runNow：reconcile 有出站跳过时结果带 skippedOutbound（透明度）', async () => {
+    const store = { onChanged: () => ({ dispose: () => {} }) } as unknown as ConnectionStore;
+    const reconcile = vi.fn(async () => ({ generated: 1, pendingSkipped: [], skipped: [{ ref: 'connection:c-1', reason: 'unknown DatabaseType' }] }));
+    const sync = vi.fn(async () => ({ stage: 'ok' as const, conflicts: [], applied: 0 }));
+    const coordinator = new SyncCoordinator(store, { reconcile } as unknown as SyncMutator, { sync } as unknown as SyncEngine);
+
+    await expect(coordinator.runNow()).resolves.toMatchObject({ stage: 'ok', skippedOutbound: 1 });
+  });
+
   it('scheduleNow 跳过 debounce 立即同步', async () => {
     vi.useFakeTimers();
     const store = { onChanged: () => ({ dispose: () => {} }) } as unknown as ConnectionStore;

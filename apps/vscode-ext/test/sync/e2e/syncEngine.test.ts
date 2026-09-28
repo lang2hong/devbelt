@@ -799,6 +799,7 @@ describe('SyncEngine · deferred（权益跳过的连接记录）', () => {
     });
     const r1 = await build(client1).sync();
     expect(r1.stage).toBe('ok');
+    expect(r1.skippedEntitlement).toBe(1);
     expect(deferred.list()).toHaveLength(1);
     expect(store.listForSync().filter((c) => !(c as unknown as { deleted?: boolean }).deleted)).toHaveLength(0);
 
