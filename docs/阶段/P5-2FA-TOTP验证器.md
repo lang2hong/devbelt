@@ -28,10 +28,12 @@ DevBelt，打开「验证器」面板就能看到此刻的 6 位口令，用来�
   多个同站点账号时可能手动添加多次。
 - **查看**：「验证器」webview 面板，每个条目显示发行方、账号、6 位口令、倒计时圈；
   分组可折叠，顶部有搜索框和标签筛选。
-- **分组**：一级分组（不嵌套），可新建/重命名/删除/排序；**"未分组"不持久化为一条 group 记录**——
-  和 ConnectionStore 保持一致：`groupId` 为 `undefined`（或空串/找不到的孤儿 id）的条目在 UI
-  上聚合到一个固定的"未分组"折叠区（标题走 i18n，不可删/不可重命名/不占 sortOrder）；删分组时
-  组内条目批量把 `groupId` 设为 `undefined`，自动落到未分组。
+- **分组**：一级分组（不嵌套），可新建/重命名/删除/排序；**无"未分组"、无默认分组**——
+  每个验证码必须属于某个分组。新建分组用**模态对话框**（重命名/在上方/下方插入仍用内联输入条）；
+  工具栏「＋新增验证码」旁有「＋新建分组」，添加/编辑表单的分组选择为**必填**（未选保存禁用），
+  表单内可直接新建分组并自动选中。历史无分组或孤儿 `groupId` 的条目由 store `.init()` 自愈归入
+  **第一个分组**（一个分组都没有时留待建第一个分组时归入）。**删分组会级联删除组内验证码**
+  （含其 SecretStorage 密钥），二次确认显示将一并删除的条数。
 - **标签**：给条目打一个或多个彩色标签；标签是扁平的，不分组；面板顶部可以按标签筛选；
   标签颜色从**8 色固定调色板**里选，不做自定义色值。调色板 key 固定为：
   `blue / green / yellow / orange / red / purple / cyan / gray`（前端 Vue 样式和 Store 校验
@@ -50,7 +52,9 @@ DevBelt，打开「验证器」面板就能看到此刻的 6 位口令，用来�
   导出**（没有主口令）。
 - **导入**：粘贴单个 `otpauth://totp/...` 链接（UI 上一次加一个）；解析前先 `trim()` 并
   去除常见零宽字符（`\u200B\u200C\u200D\uFEFF`），避免从聊天工具复制来的链接解析失败；
-  不做批量文件导入。
+  不做批量文件导入。粘贴链接 / 导入二维码图片**不直接入库**：宿主解析后只下发非密文字段 +
+  一次性 `prefillId`，打开**预填添加表单**，选/新建分组后再按 `prefillId` 合并宿主暂存的 secret
+  入库（secret 始终不下发 webview）。
 
 不做：
 - 不做摄像头扫码（VS Code 无摄像头 API）、不做 `otpauth-migration` 批量二维码导入；单条二维码**图片**录入**已交付**（粘贴/拖拽/选择，见文末）。
@@ -99,8 +103,8 @@ DevBelt，打开「验证器」面板就能看到此刻的 6 位口令，用来�
 - **算法正确性**：RFC 6238 Appendix B 八组 8 位 SHA1 官方向量 + SHA256/SHA512 各一组向量（三
   算法种子长度不同，见测试章节）全绿；覆盖 6/8 位、30/60 秒组合；base32 解码正确处理空
   白/大小写/缺 padding，非法字母严格拒绝；otpauth URI 解析/生成 roundtrip 幂等。
-- **功能**：添加（粘贴/手动）、分组（增删改/折叠/条目回落未分组）、标签（多标签/筛选/选色）、
-  搜索、编辑、删除、复制、导出 URI——全部可用。
+- **功能**：添加（粘贴/手动/二维码图片，均经预填表单选分组）、分组（增删改/折叠/删组级联删验证码）、
+  标签（多标签/筛选/选色/删除）、搜索、编辑、删除、复制、导出 URI——全部可用；验证码必属分组。
 - **安全边界**：secret 只落 SecretStorage、不下发 webview、不进日志/错误消息。
 - **工程**：`pnpm typecheck && pnpm lint && pnpm test` 全绿；webview 构建通过；`pnpm -C apps/vscode-ext package` 打 VSIX 成功。
 - **国际化**：中/英双语（命令、按钮、空态、错误文案都走 i18n）。
@@ -124,8 +128,9 @@ DevBelt，打开「验证器」面板就能看到此刻的 6 位口令，用来�
   两个命令（供命令面板/快捷键；面板内也有「＋」「图片」「导出」按钮）；分组树折叠/增删改
   排序、条目增/编/删表单、标签添加/筛选/选色、顶部搜索框（debounce，任意结果集本地排序）、
   导出文件（CRLF、modal 警告、主进程 showSaveDialog+写文件）、二维码**图片**录入（粘贴/拖拽/
-  选择）、粘贴 otpauth 链接、超限预检（达上限直接弹升级不展开表单）、折叠/展开通过
-  toggleGroup 消息驱动（未分组用 `groupId: null`）、copyOk 反馈、formError 内联错误。
+  选择）、粘贴 otpauth 链接（**后续变更**：解析后走预填表单、secret 留宿主按 `prefillId` 合并；
+  **无未分组**、分组必填、删组级联、新建分组改用模态对话框）、超限预检（达上限直接弹升级不展开
+  表单）、折叠/展开通过 toggleGroup 消息驱动、copyOk 反馈、formError 内联错误。
 - **S4 · 收尾**：i18n 中/英（命令、按钮、空态、错误文案、升级提示都走 catalog，NLS key
   五个）、三种空态（未添加/搜索无结果/分组下无条目）、删除/导出的 modal/非 modal 确认、
   `pnpm -C apps/vscode-ext package` 打 VSIX 验证。
@@ -315,6 +320,9 @@ webview 发出的消息由 useVsCode.ts 自动附加 `__load`。
 主进程收到后在写入 Store 前规范化为 JavaScript 语义的 `undefined`（Store 持久化模型里
 `groupId?: string` 保持 optional），避免 postMessage 丢字段导致的歧义。snapshot 下发时
 也把 `undefined` 归一化为 `null`。
+（**后续变更**：验证器不再有「未分组」——新增/编辑必须带有效 `groupId`，`null`/`undefined` 仅作为
+历史过渡态由 store 自愈归入第一个分组；`moveEntry`/`toggleGroup` 的 `null` 已无实际用途。
+粘贴链接/扫码改为「宿主暂存 secret + 下发 `prefillAdd`，表单提交带 `prefillId`」。）
 
 **上行消息（Webview → Extension Host，主进程在 provider.handleMessage 里 switch 分发）：**
 
@@ -326,12 +334,12 @@ export type AuthenticatorUpMessage =
   | { type: 'add'; entry: {
       issuer: string; account?: string; secret: string;       // secret 是用户原始输入，主进程 canonicalize
       algorithm: TotpAlgorithm; digits: 6|8; period: 30|60;
-      groupId: string | null; tags: string[];               // null => 未分组
-    } }
+      groupId: string | null; tags: string[];               // 必填有效分组；历史 null 由 store 自愈
+    }; prefillId?: string }                                  // 预填表单：secret 由宿主按此 id 补齐
   | { type: 'update'; id: string; patch: {
       issuer?: string; account?: string; secret?: string;    // secret 缺省或空串 => 保留原 secret
       algorithm?: TotpAlgorithm; digits?: 6|8; period?: 30|60;
-      groupId?: string | null; tags?: string[];              // null => 未分组
+      groupId?: string | null; tags?: string[];              // 必填有效分组；历史 null 由 store 自愈
     } }
   | { type: 'delete'; id: string }
   // 分组
@@ -419,9 +427,9 @@ export const AUTHENTICATOR_TAG_COLORS = [
 ] as const;
 export type TagColorKey = typeof AUTHENTICATOR_TAG_COLORS[number];
 
-/** 用户自定义分组。注意：不存在"默认/未分组"持久化记录——Store 持久化模型里未分组 =
- *  groupId === undefined；IPC 边界用 null 表示未分组（见协议章节）；
- *  UI 在渲染时固定提供"未分组"折叠区（标题走 i18n，不可删/不可重命名）。 */
+/** 用户自定义分组。无"默认/未分组"分组：验证码必须属于某个分组，UI 不渲染未分组区；
+ *  历史无分组/孤儿 groupId 的条目由 store.init() 自愈归入第一个分组。
+ *  （持久化模型仍允许 groupId === undefined 作为过渡态；IPC 边界 null 由主进程规范化为 undefined。） */
 export type AuthenticatorGroup = {
   id: string;           // uniqueId('ag')
   name: string;
@@ -441,8 +449,8 @@ export type AuthenticatorEntry = {
   algorithm: TotpAlgorithm;
   digits: 6|8;
   period: 30|60;
-  groupId?: string;     // 指向 groups[].id；undefined/空串/找不到对应 group 时 UI 回落到「未分组」
-                        // （持久化模型用 undefined；IPC 边界 null 由主进程入站时规范化为 undefined）
+  groupId?: string;     // 指向 groups[].id；新增/编辑表单必填，UI 无「未分组」回落；
+                        // 历史 undefined/孤儿值由 store 自愈归入第一个分组
   tags: string[];       // tag id 数组
   createTime: number;
   updateTime: number;
@@ -508,11 +516,11 @@ export type AuthenticatorEntry = {
   cache 未初始化完成时抛 `new Error('store not initialized')`）/
   `addEntry(input)`/`updateEntry(id,patch)`/`deleteEntry(id)`（事务顺序见上；所有入站
   IPC 消息里的 `groupId: null` 在写入 Store 之前规范化为 `undefined`；groupId 为
-  空串 `''` 时也视为未分组）/
+  空串 `''` 时也视为无分组（历史过渡态，由 init/建组自愈归入第一个分组））/
   `addGroup(name,afterId?)`（新组 sortOrder = `Math.max(...groups.map(g => g.sortOrder), 0) + 10`，
   留空隙方便以后 drag 重排）/`renameGroup(id,name)`（空名视为非法，返回 formError）/
-  `deleteGroup(id)`（删 group 时把该 groupId 的 entry 批量 set `groupId = undefined`，
-  对齐 ConnectionStore.removeGroup 的处理，不制造合成默认组）/
+  `deleteGroup(id)`（**级联删除**组内 entry 及其 secret；secret 删除失败的条目不置墓碑、
+  清 groupId 交给自愈，避免 orphan secret）/
   `addTag(name,color)`（color 必须是 `AUTHENTICATOR_TAG_COLORS` 白名单值，非白名单值拒绝）/
   `renameTag/deleteTag`（删 tag 时从所有 entry.tags 里移除）/
   `reorderGroup(orderedGroupIds)`（按传入 id 顺序把 groups 的 sortOrder 重写为
@@ -618,7 +626,8 @@ export type AuthenticatorEntry = {
   - secret 写入/删除成功后 cache 同步更新；secrets.delete 失败时不修改 memento 与 cache（事务顺序）；
   - `secrets.onDidChange` 回调：非 `devbelt.authenticator.` 前缀的 key 忽略；合法前缀正确
     解析 id 并刷新 cache/缺失集合（不要用完整 SecretStorage key 作为 cache key）；
-  - 删除分组时条目 groupId 变为 undefined（落到未分组）；
+  - 删除分组时**级联删除**组内条目及其 secret（逐条 publish）；首次 init 与建第一个分组时
+    把无分组/孤儿条目自愈归入第一个分组；
   - 删除标签时从条目 tags 数组移除；
   - 未登录态 add 不限条数；登录态达上限返回 `{ ok:false, reason:'quota' }`；降级到 free 后已有
     条目保留且不自动删除；
@@ -645,8 +654,8 @@ export type AuthenticatorEntry = {
   Error 实例传进去**，避免 V8 某些版本在栈序列化时带上调用参数）。**绝对不**打 secret、
   不打 URI 原文（URI query 里含 secret）、不打 entry 对象完整序列化（entry 本身不含
   secret 但 issuer/account 组合属于用户隐私，不打整对象，只打 id）。
-- 用户侧错误消息文案走 i18n key，只说"无效的 otpauth 链接"、"解码失败"、"该分组非空，条目已
-  移到未分组"、"条目已达上限，请升级 Pro"等，不含敏感内容。用户输入错误（如 base32
+- 用户侧错误消息文案走 i18n key，只说"无效的 otpauth 链接"、"解码失败"、"请先选择或新建分组"、
+  "删除分组及 N 个验证码"、"条目已达上限，请升级 Pro"等，不含敏感内容。用户输入错误（如 base32
   非法、URI 解析失败）在表单内联显示，不打 diagError（不是程序错误）。
 - 导出时弹 `vscode.window.showWarningMessage` modal 确认，**必须**传 `{ modal: true }`
   并检查返回值是否为「导出」按钮，非 modal 通知容易被忽略，起不到明文风险提示作用。
