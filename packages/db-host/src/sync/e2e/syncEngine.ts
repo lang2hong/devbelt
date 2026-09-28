@@ -62,6 +62,12 @@ export interface SyncRunResult {
   terminal?: SyncTerminalEntry;
   stalled?: SyncStalledEntry;
   applied: number;
+  /** 入站真正落地（created/updated/deleted）的记录数——区别于 `applied`（处理的记录数）。 */
+  changes?: number;
+  /** 入站墓碑因本地无映射被忽略（`ignored-tombstone`）的记录数。 */
+  ignoredTombstone?: number;
+  /** 入站因远端版本不新而跳过（`skipped`，版本重放）的记录数。 */
+  skippedRemote?: number;
   /** 入站因权益（引擎不在套餐）被跳过、进 deferred 的记录数。 */
   skippedEntitlement?: number;
   /** 出站因编码失败/引擎不支持被跳过的本地变更数（由 coordinator 从 reconcile 结果补入）。 */
@@ -345,6 +351,10 @@ export class SyncEngine {
     let cursor = local.changeSequence;
     let applied = 0;
     let skippedEntitlement = 0;
+    // 落地/忽略/跳过计数：让 UI 与诊断能区分「真变更」与「处理了但没变」。
+    let changes = 0;
+    let ignoredTombstone = 0;
+    let skippedRemote = 0;
 
     // 先重放上一轮被权益跳过的记录：升级后无需重拉即可落地。
     try {
@@ -393,6 +403,9 @@ export class SyncEngine {
             const disposition = await this.applyRemote(rec, this.deps.keyEpoch, ctx);
             // 权益跳过一律入 deferred（无论是否已映射）；版本重放的 'skipped' 不入队。
             // 计数与 deferred 解耦：即便未注入 deferred，跳过也要计入透明度字段，避免静默吞掉。
+            if (disposition === 'created' || disposition === 'updated' || disposition === 'deleted') changes += 1;
+            else if (disposition === 'ignored-tombstone') ignoredTombstone += 1;
+            else if (disposition === 'skipped') skippedRemote += 1;
             if (disposition === 'skipped-entitlement') {
               skippedEntitlement += 1;
               if (this.deps.deferred) {
@@ -420,7 +433,7 @@ export class SyncEngine {
                 remoteVersion: rec.version,
               });
               await this.persistConflict(rec, err);
-              return { stage: 'conflict', conflicts, stalled, applied, changeSequence: lastCommitted };
+              return { stage: 'conflict', conflicts, stalled, applied, changes, ignoredTombstone, skippedRemote, skippedEntitlement, changeSequence: lastCommitted };
             }
             return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `apply failed: ${describe(err)}` };
           }
@@ -458,7 +471,7 @@ export class SyncEngine {
 
     // C2：本轮收集到冲突（出站 version 冲突未在本轮 pull 命中远端时仍属冲突）→ 以 conflict 收尾，
     // 让 coordinator 进入 stalled，不再自动重放同一条冲突 mutation。
-    return { stage: conflicts.length > 0 ? 'conflict' : 'ok', conflicts, stalled, applied, skippedEntitlement, changeSequence: lastCommitted };
+    return { stage: conflicts.length > 0 ? 'conflict' : 'ok', conflicts, stalled, applied, changes, ignoredTombstone, skippedRemote, skippedEntitlement, changeSequence: lastCommitted };
   }
 
   private parseState(raw: unknown): RemoteState {

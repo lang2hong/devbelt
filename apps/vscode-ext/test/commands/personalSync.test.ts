@@ -321,7 +321,11 @@ describe('personal sync B1 commands', () => {
   });
 
   it('pull/push: unlocked session invokes the matching phase and reports per-op', async () => {
-    const session = makeSession({ isUnlocked: true });
+    const session = makeSession({
+      isUnlocked: true,
+      syncPull: vi.fn(async () => ({ stage: 'ok', applied: 1 })),
+      syncPush: vi.fn(async () => ({ stage: 'ok', applied: 1 })),
+    });
     const { deps, info } = makeDeps(session, []);
     await pullPersonalSync(deps);
     await pushPersonalSync(deps);
@@ -332,8 +336,16 @@ describe('personal sync B1 commands', () => {
     expect(info).toHaveBeenCalledWith('Pushed local changes.');
   });
 
+  it('无落地变更时提示「已是最新」而非「Pulled remote changes」', async () => {
+    const session = makeSession({ isUnlocked: true }); // 默认 applied 缺省
+    const { deps, info } = makeDeps(session, []);
+    await pullPersonalSync(deps);
+    expect(info).toHaveBeenCalledWith('Already up to date; no changes.');
+    expect(info).not.toHaveBeenCalledWith('Pulled remote changes.');
+  });
+
   it('syncNow: explicit run waits and reports its own result', async () => {
-    const session = makeSession({ isUnlocked: true });
+    const session = makeSession({ isUnlocked: true, syncNow: vi.fn(async () => ({ stage: 'ok', applied: 1 })) });
     const { deps, info } = makeDeps(session, []);
     await syncNowPersonalSync(deps);
     expect(session.syncNow).toHaveBeenCalledTimes(1);

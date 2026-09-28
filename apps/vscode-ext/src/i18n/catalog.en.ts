@@ -100,6 +100,7 @@ export const en: MessageCatalog = {
   'sync.pending.pull': 'Pull incomplete; retry later.',
   'sync.pending.push': 'Push incomplete; retry later.',
   'sync.skipped': 'Sync finished with skips: {detail}',
+  'sync.upToDate': 'Already up to date; no changes.',
   'sync.skippedEntitlement': '{count} record(s) skipped by plan (auto-resumed after upgrade)',
   'sync.skippedOutbound': '{count} local change(s) not synced (engine unsupported or encode failed)',
   'sync.statusLabel': 'Sync',

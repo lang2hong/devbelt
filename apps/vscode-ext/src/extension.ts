@@ -182,6 +182,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       diagInfo('sync run', {
         stage: result?.stage,
         applied: result?.applied,
+        changes: result?.changes,
+        ignoredTombstone: result?.ignoredTombstone,
+        skippedRemote: result?.skippedRemote,
         skippedEntitlement: result?.skippedEntitlement,
         skippedOutbound: result?.skippedOutbound,
       });
