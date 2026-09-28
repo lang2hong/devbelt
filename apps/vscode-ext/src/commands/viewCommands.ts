@@ -185,8 +185,21 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     // S5-3：键树「加载更多」哨兵（懒加载下一页 SCAN）。
     vscode.commands.registerCommand('devbelt.redis.loadMoreKeys', async (node: any) => {
       if (!node) return;
-      await treeProvider.loadMoreRedisKeys(node);
+      const isSentinel = node.kind === 'redisKeyLoadMore';
+      // 哨兵节点：就地 spinner；DB 节点右键：状态栏轻提示（勿覆盖库节点上的键数 description）。
+      if (isSentinel) {
+        node.iconPath = new vscode.ThemeIcon('sync~spin');
+        node.description = l10n('redis.tree.loading');
+        treeProvider.refreshNode(node);
+      } else {
+        vscode.window.setStatusBarMessage(l10n('redis.tree.loading'), 4000);
+      }
+      const res = await treeProvider.loadMoreRedisKeys(node);
       treeProvider.refreshRedisDbNode(node);
+      if (res.error) vscode.window.showErrorMessage(l10n('redis.tree.loadFailed'));
+      else if (res.done && res.added === 0) {
+        vscode.window.showInformationMessage(l10n('redis.tree.loadedAll', { count: String(res.total) }));
+      }
     }),
     // D*：显式「加载完整文件夹」（按前缀独立 SCAN + 进度/取消）。
     vscode.commands.registerCommand('devbelt.redis.loadFolderKeys', async (node: any) => {

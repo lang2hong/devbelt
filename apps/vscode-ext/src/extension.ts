@@ -4,6 +4,7 @@ import { ConnectionManager } from './connection/connectionManager';
 import { ConnectionPathOverrideStore } from './connection/connectionPathOverrideStore';
 import { ConnectionContext } from './connection/connectionContext';
 import { DbTreeDataProvider } from './tree/dbTreeDataProvider';
+import { ConnectionDecorationProvider } from './tree/connectionDecorationProvider';
 import { QueryExecutor } from './result/queryExecutor';
 import { BaseWebView } from './result/baseWebView';
 import { TableQueryView } from './result/tableQueryView';
@@ -51,7 +52,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 不再依赖各命令自行调用 history.add（漏一个就少一段痕迹）。
   // resolveEffective 是建连/路径校验的单一有效配置入口（覆盖优先）。
   const manager = new ConnectionManager(undefined, history, (c) => overrideStore.applyOverrides(c));
-  const treeProvider = new DbTreeDataProvider(store, manager, overrideStore);
+  const treeProvider = new DbTreeDataProvider(store, manager, overrideStore, context.extensionUri);
+  // 连接节点装饰（环境/自定义色徽标）：图标已改用数据库类型 logo，颜色信号改由此承载。
+  const connDecoration = new ConnectionDecorationProvider(store);
+  context.subscriptions.push(connDecoration, vscode.window.registerFileDecorationProvider(connDecoration));
   const auditLogger = AuditLogger.init(context.globalState);
   const executor = new QueryExecutor(manager, history, auditLogger);
   const connCtx = new ConnectionContext(context, store);
@@ -145,6 +149,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     showCollapseAll: true,
   });
   context.subscriptions.push(treeView, treeProvider);
+  // 当前选中的连接（选中其子节点时归属该连接）显示绿点。
+  // 空选择（刷新/失焦引发的瞬时清空）不更新——否则绿点会一闪而过。
+  context.subscriptions.push(treeView.onDidChangeSelection((e) => {
+    const sel = e.selection[0];
+    if (!sel) return;
+    treeProvider.setActiveConnection(sel.conn?.id);
+  }));
 
   // 侧边栏「工具」视图（竖向工具列表；首项 = 验证器）。
   context.subscriptions.push(ToolsViewProvider.register());

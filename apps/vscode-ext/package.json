@@ -1660,6 +1660,11 @@
           "group": "1_view"
         },
         {
+          "command": "devbelt.redis.loadMoreKeys",
+          "when": "view == devbelt.explorer && viewItem == redisDb.REDIS",
+          "group": "1_view"
+        },
+        {
           "command": "devbelt.refreshNode",
           "when": "view == devbelt.explorer && viewItem == redisDb.REDIS",
           "group": "0_refresh"

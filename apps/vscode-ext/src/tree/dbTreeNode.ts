@@ -25,6 +25,8 @@ export enum NodeKind {
   RedisKey = 'redisKey',
   /** P7 S5-3：Redis 键导航——「加载更多」哨兵（下一页 SCAN）。 */
   RedisKeyLoadMore = 'redisKeyLoadMore',
+  /** P7 D*：Redis 键树根层扫完的「已全部加载」哨兵（不可点击）。 */
+  RedisKeysLoadedAll = 'redisKeysLoadedAll',
 }
 
 /** 分类子类型 */
@@ -45,10 +47,11 @@ const ICON_MAP: Record<string, string> = {
   [NodeKind.Index]: 'list-selection',
   [NodeKind.Trigger]: 'zap',
   [NodeKind.ForeignKey]: 'link',
-  [NodeKind.RedisDb]: 'symbol-key',
+  [NodeKind.RedisDb]: 'database',
   [NodeKind.RedisKeyFolder]: 'folder',
   [NodeKind.RedisKey]: 'symbol-key',
   [NodeKind.RedisKeyLoadMore]: 'ellipsis',
+  [NodeKind.RedisKeysLoadedAll]: 'check',
 };
 
 /** 分类节点的图标 id（按 categoryType 区分） */

@@ -18,13 +18,21 @@ vi.mock('vscode', () => ({
   },
   ThemeIcon: class { constructor(public id: string) { /* noop */ } },
   ThemeColor: class {},
+  Uri: {
+    parse: (s: string) => ({ toString: () => s, scheme: s.split('://')[0], authority: s.split('://')[1] ?? '' }),
+    joinPath: (base: { toString(): string }, ...parts: string[]) => ({ toString: () => [base.toString(), ...parts].join('/') }),
+  },
   EventEmitter: class {
     private readonly ls: ((x: unknown) => void)[] = [];
     event = (l: (x: unknown) => void) => { this.ls.push(l); return { dispose(): void { /* noop */ } }; };
     fire(x?: unknown): void { for (const l of this.ls) l(x); }
     dispose(): void { /* noop */ }
   },
-  window: { showErrorMessage: vi.fn(), showInformationMessage: vi.fn() },
+  window: {
+    showErrorMessage: vi.fn(),
+    showInformationMessage: vi.fn(),
+    createOutputChannel: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), dispose: vi.fn(), appendLine: vi.fn() }),
+  },
   workspace: { getConfiguration: () => ({ get: (_k: string, d: unknown) => d }) },
   env: { language: 'en' },
 }));
@@ -120,10 +128,37 @@ describe('D* 键树（根扁平 SCAN + 客户端折叠）', () => {
     expect(more[0].command?.command).toBe('devbelt.redis.loadMoreKeys');
   });
 
-  it('根层扫完：不再出现「加载更多」', async () => {
+  it('根层扫完：无「加载更多」，改显示不可点击的「已全部加载」哨兵', async () => {
     const provider = makeProvider(makeClient(() => ['0', ['k1', 'k2']]));
     const kids = await provider.getChildren(dbNode());
     expect(kids.some((k) => k.kind === NodeKind.RedisKeyLoadMore)).toBe(false);
+    const all = kids.filter((k) => k.kind === NodeKind.RedisKeysLoadedAll);
+    expect(all).toHaveLength(1);
+    expect(all[0].command).toBeUndefined();
+  });
+
+  it('「加载更多」带「已加载 N」；点击返回 added/total/done 并在扫完后出哨兵', async () => {
+    const pages: ScanReply[] = [['42', ['a:1', 'b:2']], ['0', ['c:3']]];
+    const provider = makeProvider(makeClient(() => pages.shift() ?? ['0', []]));
+    const db = dbNode();
+    const first = await provider.getChildren(db);
+    const more = first.find((k) => k.kind === NodeKind.RedisKeyLoadMore)!;
+    expect(more.description).toBe(l10n('redis.tree.loadedCount', { count: '2' }));
+
+    const res = await provider.loadMoreRedisKeys(more);
+    expect(res).toMatchObject({ added: 1, total: 3, done: true, error: false });
+
+    const after = await provider.getChildren(db);
+    expect(after.some((k) => k.kind === NodeKind.RedisKeyLoadMore)).toBe(false);
+    expect(after.some((k) => k.kind === NodeKind.RedisKeysLoadedAll)).toBe(true);
+  });
+
+  it('扫描失败：保留可点「加载更多」（不误判为扫完、不显示哨兵）', async () => {
+    const provider = makeProvider(makeClient(() => { throw new Error('boom'); }));
+    const kids = await provider.getChildren(dbNode());
+    const more = kids.find((k) => k.kind === NodeKind.RedisKeyLoadMore);
+    expect(more?.command?.command).toBe('devbelt.redis.loadMoreKeys');
+    expect(kids.some((k) => k.kind === NodeKind.RedisKeysLoadedAll)).toBe(false);
   });
 
   it('搜索态：扁平结果（不折叠）+ MATCH 前缀', async () => {

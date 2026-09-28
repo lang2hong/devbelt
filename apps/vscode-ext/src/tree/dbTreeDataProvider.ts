@@ -1,4 +1,4 @@
-import { Event, EventEmitter, TreeDataProvider, TreeItem, TreeItemCollapsibleState, ThemeIcon, ThemeColor, window } from 'vscode';
+import { Event, EventEmitter, TreeDataProvider, TreeItem, TreeItemCollapsibleState, ThemeIcon, ThemeColor, Uri, window } from 'vscode';
 import type { CancellationToken } from 'vscode';
 import { DatabaseType, DialectRegistry, redisKeyspace, redisScan, redisScanOnNode, redisSelect } from '@devbelt/db-core';
 import { connectionColorToken } from '../utils/connectionColor';
@@ -7,6 +7,8 @@ import { ConnectionManager } from '../connection/connectionManager';
 import { ConnectionPathOverrideStore } from '../connection/connectionPathOverrideStore';
 import { validateConnectionPaths, type PathValidationResult, type PathValidationIssue } from '../connection/connectionPathValidator';
 import { DbTreeNode, NodeKind, type CategoryType } from './dbTreeNode';
+import { dbTypeIconFile, type ConnIconState } from './dbTypeIcon';
+import { connectionResource } from './connectionDecoration';
 import { groupRedisKeyChildren, redisPrefixPattern } from '../result/redisKeyFold';
 import { MetadataNodeBuilder } from './metadataNodeBuilder';
 import { l10n } from '../i18n';
@@ -58,6 +60,12 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   /** 已打开连接的服务器类型+版本摘要（连接名右侧 description） */
   private readonly connVersions = new Map<string, string>();
 
+  /** 当前在资源管理器中选中的连接 id（含选中其子节点时归属的连接）；用于绿点。 */
+  private activeConnId?: string;
+
+  /** 各连接的连接节点引用（每次 makeConnectionNode 覆盖），供选中变化时定向刷新图标。 */
+  private readonly connNodes = new Map<string, DbTreeNode>();
+
   /** 有效配置的路径校验结果缓存（按 connId，异步填充，供同步渲染读）。 */
   private readonly pathIssues = new Map<string, PathValidationResult>();
 
@@ -67,6 +75,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   /** cluster：各 master 的 SCAN 游标（key 同根 stateKey）。 */
   private readonly redisClusterCursors = new Map<string, string[]>();
   private readonly redisScanned = new Set<string>();
+  /** 上次扫描失败的 db（key 同 stateKey）：失败不算扫完，保留「加载更多」可重试。 */
+  private readonly redisScanError = new Set<string>();
   /** S5-3：每 db 的搜索匹配（key = `${connId}:db${idx}`，值为 Redis MATCH pattern）。 */
   private readonly redisMatches = new Map<string, string>();
   /** D*：「已全部加载」文件夹快照（key = `${connId}:db${idx}:__full__:${prefix}`）。 */
@@ -76,6 +86,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     private readonly store: ConnectionStore,
     private readonly manager: ConnectionManager,
     private readonly overrideStore?: ConnectionPathOverrideStore,
+    /** 扩展根 Uri，用于拼 `resources/icons/*` 路径；缺省时连接节点回退 codicon。 */
+    private readonly extensionUri?: Uri,
   ) {}
 
   /** 刷新整棵树 */
@@ -131,6 +143,29 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     this.connVersions.set(connId, desc);
   }
 
+  /**
+   * 设置当前选中的连接（其子节点被选中时归属的连接）。
+   * **定向刷新**旧/新连接节点图标，不整树重渲染——否则所有已展开连接都会重查元数据。
+   */
+  setActiveConnection(connId: string | undefined): void {
+    if (this.activeConnId === connId) return;
+    const prev = this.activeConnId;
+    this.activeConnId = connId;
+    for (const id of [prev, connId]) if (id) this.refreshConnectionIcon(id);
+  }
+
+  /** 只重算并重渲染某连接节点的图标（路径异常时保持 warning 不改）。 */
+  private refreshConnectionIcon(connId: string): void {
+    const node = this.connNodes.get(connId);
+    if (!node?.conn) return;
+    const isOpen = this.openConns.has(connId);
+    const pathCheck = this.pathIssues.get(connId);
+    if (!isOpen && pathCheck && !pathCheck.valid) return;
+    const state: ConnIconState = !isOpen ? 'dim' : connId === this.activeConnId ? 'active' : 'open';
+    node.iconPath = this.dbTypeIcon(node.conn, state);
+    this.refreshNode(node);
+  }
+
   /** 标记连接已关闭（不可展开） */
   markClosed(connId: string): void {
     this.openConns.delete(connId);
@@ -145,6 +180,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     for (const k of [...this.redisCursors.keys()]) if (k.startsWith(p)) this.redisCursors.delete(k);
     for (const k of [...this.redisClusterCursors.keys()]) if (k.startsWith(p)) this.redisClusterCursors.delete(k);
     for (const k of [...this.redisScanned]) if (k.startsWith(p)) this.redisScanned.delete(k);
+    for (const k of [...this.redisScanError]) if (k.startsWith(p)) this.redisScanError.delete(k);
     for (const k of [...this.redisMatches.keys()]) if (k.startsWith(p)) this.redisMatches.delete(k);
     for (const k of [...this.redisFolderFull.keys()]) if (k.startsWith(p)) this.redisFolderFull.delete(k);
   }
@@ -163,6 +199,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     for (const k of [...this.redisCursors.keys()]) if (k.startsWith(p)) this.redisCursors.delete(k);
     for (const k of [...this.redisClusterCursors.keys()]) if (k.startsWith(p)) this.redisClusterCursors.delete(k);
     for (const k of [...this.redisScanned]) if (k.startsWith(p)) this.redisScanned.delete(k);
+    for (const k of [...this.redisScanError]) if (k.startsWith(p)) this.redisScanError.delete(k);
     this.refreshNode(node);
   }
 
@@ -336,19 +373,25 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
    * 加载根层一页（单页，无 drain）；供首次展开与「加载更多」调用。
    * standalone/sentinel：SELECT+SCAN 同锁内原子；cluster：无 SELECT，逐 master 各自游标后合并。
    */
-  async loadMoreRedisKeys(node: DbTreeNode): Promise<void> {
+  async loadMoreRedisKeys(node: DbTreeNode): Promise<{ added: number; total: number; done: boolean; error: boolean }> {
     const conn = node.conn;
-    if (!conn || node.redisDbIndex === undefined) return;
+    if (!conn || node.redisDbIndex === undefined) return { added: 0, total: 0, done: true, error: false };
     const dbIndex = node.redisDbIndex;
     const stateKey = this.redisRootKey(conn.id, dbIndex);
-    if ((this.redisKeys.get(stateKey)?.length ?? 0) >= REDIS_TREE_SOFT_CAP) {
+    const before = this.redisKeys.get(stateKey)?.length ?? 0;
+    if (before >= REDIS_TREE_SOFT_CAP) {
       this.redisScanned.add(stateKey);
-      return;
+      return { added: 0, total: before, done: this.redisTreeDone(conn, dbIndex), error: false };
     }
     const match = this.redisMatches.get(`${conn.id}:db${dbIndex}`);
     try {
       const session = await this.manager.connect(conn);
-      if (session.kind !== 'redis') return;
+      if (session.kind !== 'redis') {
+        // 非 redis 会话（不变式场景）：与 catch 对称，标记为未完成/可重试。
+        this.redisScanned.add(stateKey);
+        this.redisScanError.add(stateKey);
+        return { added: 0, total: before, done: false, error: true };
+      }
       const client = session.client;
       await client.runExclusive(async () => {
         if (client.isCluster) {
@@ -375,15 +418,22 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         this.mergeRedisKeys(stateKey, page.keys, REDIS_TREE_SOFT_CAP);
       });
       this.redisScanned.add(stateKey);
+      this.redisScanError.delete(stateKey);
+      const total = this.redisKeys.get(stateKey)?.length ?? 0;
+      return { added: Math.max(0, total - before), total, done: this.redisTreeDone(conn, dbIndex), error: false };
     } catch (err) {
       diagError('redis key tree scan failed', (err as Error).message);
+      // 出错不算扫完：保留「加载更多」可重试（redisScanned 只挡自动重扫，不当作完成）。
       this.redisScanned.add(stateKey);
+      this.redisScanError.add(stateKey);
+      return { added: 0, total: before, done: false, error: true };
     }
   }
 
   /** 根层是否已扫完（standalone 单游标 / cluster 多游标全归零）。 */
   private redisTreeDone(conn: SavedConnection, dbIndex: number): boolean {
     const stateKey = this.redisRootKey(conn.id, dbIndex);
+    if (this.redisScanError.has(stateKey)) return false; // 上次失败：未扫完，可重试
     if (conn.redisMode === 'cluster') {
       return (this.redisClusterCursors.get(stateKey) ?? []).every((c) => c === '0');
     }
@@ -561,7 +611,11 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const sep = conn.keySeparator || ':';
     if (prefix === '') {
       const stateKey = this.redisRootKey(conn.id, dbIndex);
-      if (!this.redisScanned.has(stateKey)) await this.loadMoreRedisKeys(parent);
+      if (!this.redisScanned.has(stateKey)) {
+        // 首次展开自动扫一页；失败也提示（否则只见空列表 + 可点「加载更多」却不知为何）。
+        const res = await this.loadMoreRedisKeys(parent);
+        if (res.error) window.showErrorMessage(l10n('redis.tree.loadFailed'));
+      }
       const keys = this.redisKeys.get(stateKey) ?? [];
       const searching = this.redisMatches.has(`${conn.id}:db${dbIndex}`);
       const group = searching
@@ -571,9 +625,11 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         ...group.folders.map((f) => this.redisFolderNode(parent, f.name, f.prefix)),
         ...group.keys.map((k) => this.redisKeyNode(parent, k)),
       ];
-      if (!searching && !this.redisTreeDone(conn, dbIndex)) {
-        // 仅未扫完时给 action：达软上限→「载入全部」，否则→「加载更多」；扫完则不加节点。
-        out.push(keys.length >= REDIS_TREE_SOFT_CAP ? this.redisLoadAllNode(parent) : this.redisLoadMoreNode(parent));
+      if (!searching) {
+        // 达软上限→「载入全部」；扫完→不可点击的「已全部加载」哨兵；否则→「加载更多」。
+        if (keys.length >= REDIS_TREE_SOFT_CAP) out.push(this.redisLoadAllNode(parent));
+        else if (this.redisTreeDone(conn, dbIndex)) out.push(this.redisLoadedAllNode(parent));
+        else out.push(this.redisLoadMoreNode(parent));
       }
       return out;
     }
@@ -613,7 +669,30 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const n = new DbTreeNode(l10n('redis.tree.loadMore'), TreeItemCollapsibleState.None, NodeKind.RedisKeyLoadMore, parent.conn, undefined, parent);
     n.redisDbIndex = parent.redisDbIndex;
     n.id = `${parent.conn!.id}:db${parent.redisDbIndex}:more`;
+    // 已加载数量：即使本页 0 新增，数字变化也让用户知道确实点了/还能继续。
+    n.description = l10n('redis.tree.loadedCount', { count: String(this.redisLoadedCount(parent)) });
     n.command = { command: 'devbelt.redis.loadMoreKeys', title: l10n('redis.tree.loadMore'), arguments: [n] };
+    return n;
+  }
+
+  /** 当前 db 根层已加载键数。 */
+  private redisLoadedCount(parent: DbTreeNode): number {
+    if (!parent.conn || parent.redisDbIndex === undefined) return 0;
+    return this.redisKeys.get(this.redisRootKey(parent.conn.id, parent.redisDbIndex))?.length ?? 0;
+  }
+
+  /** 根层扫完的「已全部加载」哨兵（不可点击），明确告知不会再有更多。 */
+  private redisLoadedAllNode(parent: DbTreeNode): DbTreeNode {
+    const n = new DbTreeNode(
+      l10n('redis.tree.loadedAll', { count: String(this.redisLoadedCount(parent)) }),
+      TreeItemCollapsibleState.None,
+      NodeKind.RedisKeysLoadedAll,
+      parent.conn,
+      undefined,
+      parent,
+    );
+    n.redisDbIndex = parent.redisDbIndex;
+    n.id = `${parent.conn!.id}:db${parent.redisDbIndex}:loadedall`;
     return n;
   }
 
@@ -909,7 +988,6 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   /** 创建连接节点：未打开时无箭头+双击触发打开；已打开时可展开 */
   private makeConnectionNode(conn: SavedConnection, parent?: DbTreeNode): DbTreeNode {
     const isOpen = this.openConns.has(conn.id);
-    const isRedis = conn.dbType === DatabaseType.REDIS;
     const node = new DbTreeNode(
       conn.name || conn.host,
       // 折叠态同时编码「是否已打开」（见 DbTreeNode contextValue 规则）。
@@ -920,6 +998,11 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       undefined,
       parent,
     );
+// 环境/自定义色信号改由 FileDecoration 徽标承载（见 connectionDecoration），
+    // 图标统一为数据库类型 logo；resourceUri 是装饰的挂载点。
+    node.resourceUri = Uri.parse(connectionResource(conn.id));
+    const state: ConnIconState = !isOpen ? 'dim' : conn.id === this.activeConnId ? 'active' : 'open';
+    const logo = this.dbTypeIcon(conn, state);
     const pathCheck = this.pathIssues.get(conn.id);
     const hasPathIssues = !!pathCheck && !pathCheck.valid;
     if (!isOpen) {
@@ -929,25 +1012,41 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         title: 'Open',
         arguments: [conn],
       };
+      // 路径异常优先于类型图标（连接不可用是更重要的信号）；tooltip 说明原因。
       if (hasPathIssues) {
         node.iconPath = new ThemeIcon('warning', new ThemeColor('editorWarning.foreground'));
         node.tooltip = this.pathTooltip(pathCheck.issues);
+      } else {
+        node.iconPath = logo;
       }
     } else {
       node.id = conn.id;
       node.description = this.connVersions.get(conn.id) || '';
+      node.iconPath = logo;
+      if (hasPathIssues) {
+        node.tooltip = this.pathTooltip(pathCheck.issues);
+      }
+    }
+    this.connNodes.set(conn.id, node);
+    return node;
+  }
+
+  /**
+   * 连接节点图标：注入 `extensionUri` 时用数据库类型 logo（浅/深同图，品牌彩色）；
+   * 缺省（测试/未接线）回退旧 codicon 行为，便于无 vscode 资源的场景。
+   */
+  private dbTypeIcon(conn: SavedConnection, state: ConnIconState): TreeItem['iconPath'] {
+    if (!this.extensionUri) {
+      const isRedis = conn.dbType === DatabaseType.REDIS;
       const envColor = conn.environment === 'production'
         ? 'errorForeground'
         : conn.environment === 'staging'
           ? 'editorWarning.foreground'
           : 'gitDecoration.untrackedResourceForeground';
-      // 用户填写的连接颜色优先（hex → 主题色 token）；否则按环境着色。
       const colorToken = connectionColorToken(conn.color);
-      node.iconPath = new ThemeIcon(isRedis ? 'symbol-key' : 'server', new ThemeColor(colorToken ?? envColor));
-      if (hasPathIssues) {
-        node.tooltip = this.pathTooltip(pathCheck.issues);
-      }
+      return new ThemeIcon(isRedis ? 'symbol-key' : 'server', new ThemeColor(colorToken ?? envColor));
     }
-    return node;
+    const uri = Uri.joinPath(this.extensionUri, 'resources', 'icons', dbTypeIconFile(conn.dbType, state));
+    return { light: uri, dark: uri };
   }
 }

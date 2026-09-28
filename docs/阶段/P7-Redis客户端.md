@@ -358,8 +358,11 @@ SSH 隧道与 Cluster/Sentinel NAT map 放在 vscode-ext（`apps/vscode-ext/src/
     与 cluster 合成「Keys」节点可展开。**根层**单页 `SCAN`（`REDIS_TREE_PAGE=500`，cluster 按 master
     数均分 `max(10, ceil(500/n))`）→ `groupRedisKeyChildren` 把已加载扁平集折叠成只读文件夹/键节点；
     **文件夹展开零 SCAN**（直接用根扁平集折叠，避免逐文件夹 drain 的重复扫描/长时占锁）；全树**唯一**
-    「加载更多」位于根层，游标归零即消失。点键 → 打开 keyBrowser webview 并加载该键值（`open(..., selectKey)`）。
-    写操作/值编辑仍在 webview。
+    「加载更多」位于根层。点键 → 打开 keyBrowser webview 并加载该键值（`open(..., selectKey)`）。
+    **加载反馈**：点击「加载更多」时该节点即时换 `sync~spin` + 「加载中…」；节点恒带 `已加载 N` 计数（0 新增也可见数字变化）；
+    根层扫完时换成**不可点击哨兵**「已全部加载（N 键）」（不再静默消失）；扫描失败弹错误并**保留可重试**的「加载更多」
+    （失败不置为完成，`redisScanError` 使 `redisTreeDone` 返回 false）。**DB 节点右键亦可「加载更多」**
+（键多时哨兵易滚出视野；DB 路径用状态栏轻提示，不覆盖库节点键数）。写操作/值编辑仍在 webview。
   - **C-1 树内搜索 + 写操作（ARDM 心智：导航单处）**：DB 右键「搜索键…/清除搜索/新建键」，
     键右键「打开/重命名/TTL/删除/复制」，文件夹右键「按前缀删除/加载完整文件夹」；均走 `runExclusive` + 审计。
     搜索态该 db 子节点为**扁平结果**（`toRedisMatchPattern` → `SCAN MATCH`）。
