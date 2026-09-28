@@ -201,7 +201,9 @@ export class AuthenticatorView extends BaseWebView {
     const res = msg.beforeId !== undefined
       ? await this.store.addGroupBefore(msg.name, msg.beforeId)
       : await this.store.addGroup(msg.name, msg.afterId);
-    if (!res.ok) this.postFormError('name', 'authenticator.err.invalidName');
+    if (!res.ok) { this.postFormError('name', 'authenticator.err.invalidName'); return; }
+    // 回传新分组 id：添加表单里「新建分组」后据此自动选中。
+    this.post({ type: 'groupAdded', id: res.group.id });
   }
 
   private async onUpdateGroup(msg: Extract<AuthenticatorUpMessage, { type: 'updateGroup' }>): Promise<void> {

@@ -120,6 +120,7 @@ export type AuthenticatorDownMessage =
   | { type: 'copyOk'; entryId: string }
   | { type: 'formError'; field?: string; message: string; source?: 'form' | 'external' }
   | { type: 'openAddForm' }
+  | { type: 'groupAdded'; id: string }
   | { type: 'error'; message: string };
 
 // ────────────────────────── P7：Redis 面板协议 ──────────────────────────

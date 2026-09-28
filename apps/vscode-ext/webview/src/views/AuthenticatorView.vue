@@ -109,18 +109,15 @@ const filteredEntries = computed(() => {
 const orderedGroupIds = computed(() =>
   groups.value.slice().sort((a, b) => a.sortOrder - b.sortOrder).map((g) => g.id));
 
-const sections = computed(() => {
-  const validGroupIds = new Set(groups.value.map((g) => g.id));
-  const named = groups.value
+// 无「未分组」语义：只渲染命名分组（历史无分组/孤儿条目由 store 自愈归入第一个分组）。
+const sections = computed(() =>
+  groups.value
     .slice()
     .sort((a, b) => a.sortOrder - b.sortOrder)
-    .map((g) => ({ key: g.id, name: g.name, groupId: g.id as string | null, entries: filteredEntries.value.filter((e) => e.groupId === g.id) }));
-  // 未分组 = 无 groupId，或 groupId 指向已不存在的分组（孤儿引用回落未分组，
-  // 否则该条目不会出现在任何 section，表现为“条目消失”）。
-  const ungrouped = filteredEntries.value.filter((e) => !e.groupId || !validGroupIds.has(e.groupId));
-  named.push({ key: '__ungrouped__', name: t('wv.authenticator.ungrouped'), groupId: null, entries: ungrouped });
-  return named;
-});
+    .map((g) => ({ key: g.id, name: g.name, groupId: g.id as string | null, entries: filteredEntries.value.filter((e) => e.groupId === g.id) })));
+
+/** 该分组下（当前筛选可见的）验证码条数，用于删除确认文案。 */
+function groupEntryCount(gid: string): number { return entries.value.filter((e) => e.groupId === gid).length; }
 
 function keyOf(gid: string | null): string { return gid ?? ''; }
 function isFolded(gid: string | null): boolean { return folded.value.has(keyOf(gid)); }
@@ -172,6 +169,9 @@ function onMsg(msg: any): void {
     else promptError.value = msg.message ?? '';
   } else if (msg.type === 'openAddForm') {
     startAdd();
+  } else if (msg.type === 'groupAdded') {
+    // 在添加表单里新建分组后自动选中它
+    if (formOpen.value && typeof msg.id === 'string') form.groupId = msg.id;
   } else if (msg.type === 'error') {
     errMsg.value = msg.message ?? '';
     if (errTimer) clearTimeout(errTimer);
@@ -219,7 +219,9 @@ function submitForm(): void {
   const secret = form.secret.trim();
   if (editingId.value === null && !secret) { formError.value = t('wv.authenticator.form.invalidSecret'); return; }
   if (secret && !isValidBase32(secret)) { formError.value = t('wv.authenticator.form.invalidSecret'); return; }
-  const groupId = form.groupId || null;
+  // 无「未分组」：必须新建或选择分组
+  if (!form.groupId) { formError.value = t('wv.authenticator.form.groupRequired'); return; }
+  const groupId = form.groupId;
   pendingSubmit.value = true;
   if (editingId.value) {
     post({
@@ -411,6 +413,9 @@ onUnmounted(() => {
       <button class="iconbtn" :title="t('wv.authenticator.add')" @click="requestAdd">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 3v10M3 8h10" /></svg>
       </button>
+      <button class="iconbtn" :title="t('wv.authenticator.group.new')" @click="openGroupPrompt('new')">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 5.5A1.5 1.5 0 0 1 3.5 4h2.3l1.2 1.4h4.5A1.5 1.5 0 0 1 13 6.9v4.6A1.5 1.5 0 0 1 11.5 13h-8A1.5 1.5 0 0 1 2 11.5z" /><path d="M7.5 8.2v3.6M5.7 10h3.6" /></svg>
+      </button>
       <button class="iconbtn" :title="t('wv.authenticator.image.button')" :aria-label="t('wv.authenticator.image.pasteHint')" :disabled="imgBusy" @click="pickImage">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2" y="3" width="12" height="10" rx="1.5" /><circle cx="6" cy="6.5" r="1" /><path d="M4 12l3.2-3 2 1.8L13 7" /></svg>
       </button>
@@ -447,10 +452,27 @@ onUnmounted(() => {
       <button class="btn" @click="tagPrompt = null">{{ t('wv.common.cancel') }}</button>
     </div>
 
-    <div v-if="groupPrompt" class="inline-prompt">
+    <div v-if="groupPrompt && groupPrompt.mode !== 'new'" class="inline-prompt">
       <input v-model="groupPrompt.value" class="inline-input" :placeholder="t('wv.authenticator.group.prompt')" @keydown.enter="submitGroupPrompt" />
       <button class="btn" @click="submitGroupPrompt">{{ t('wv.common.save') }}</button>
       <button class="btn" @click="groupPrompt = null">{{ t('wv.common.cancel') }}</button>
+    </div>
+
+    <!-- 新建分组：模态对话框（重命名/上方/下方插入仍用内联条） -->
+    <div v-if="groupPrompt && groupPrompt.mode === 'new'" class="modal-mask" @click.self="groupPrompt = null">
+      <div class="modal">
+        <div class="modal-title">{{ t('wv.authenticator.group.new') }}</div>
+        <input
+          v-model="groupPrompt.value"
+          class="inline-input modal-input"
+          :placeholder="t('wv.authenticator.group.prompt')"
+          @keydown.enter="submitGroupPrompt"
+        />
+        <div class="modal-actions">
+          <button class="btn primary" @click="submitGroupPrompt">{{ t('wv.common.save') }}</button>
+          <button class="btn" @click="groupPrompt = null">{{ t('wv.common.cancel') }}</button>
+        </div>
+      </div>
     </div>
 
     <div v-if="formOpen" class="form">
@@ -495,9 +517,10 @@ onUnmounted(() => {
       <div class="form-row">
         <label>{{ t('wv.authenticator.form.group') }}</label>
         <select v-model="form.groupId" class="inline-select">
-          <option value="">{{ t('wv.authenticator.form.noGroup') }}</option>
+          <option value="" disabled>{{ t('wv.authenticator.form.groupPlaceholder') }}</option>
           <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</option>
         </select>
+        <button class="btn" :title="t('wv.authenticator.group.new')" @click="openGroupPrompt('new')">＋{{ t('wv.authenticator.group.new') }}</button>
       </div>
       <div class="form-row tags-row">
         <label>{{ t('wv.authenticator.form.tags') }}</label>
@@ -514,7 +537,7 @@ onUnmounted(() => {
       </div>
       <div v-if="formError" class="form-error">{{ formError }}</div>
       <div class="form-actions">
-        <button class="btn primary" @click="submitForm">{{ t('wv.common.save') }}</button>
+        <button class="btn primary" :disabled="!form.groupId" @click="submitForm">{{ t('wv.common.save') }}</button>
         <button class="btn" @click="cancelForm">{{ t('wv.common.cancel') }}</button>
       </div>
     </div>
@@ -522,7 +545,7 @@ onUnmounted(() => {
     <div v-if="entries.length === 0" class="auth-empty">{{ t('wv.authenticator.empty') }}</div>
     <div v-else-if="filteredEntries.length === 0" class="auth-empty">{{ t('wv.authenticator.emptySearch') }}</div>
     <div v-else class="groups">
-      <section v-for="sec in sections" :key="sec.key" class="group">
+      <section v-for="sec in sections" :key="sec.key" class="group" :class="{ 'menu-open': groupMenuFor === sec.groupId }">
         <header class="group-head">
           <button class="fold" @click="toggleFold(sec.groupId)">{{ isFolded(sec.groupId) ? '▸' : '▾' }}</button>
           <span class="group-name">{{ sec.name }}</span>
@@ -537,7 +560,7 @@ onUnmounted(() => {
                 <button class="menu-item" @click="moveGroup(sec.groupId, 1)">{{ t('wv.authenticator.group.moveDown') }}</button>
                 <button class="menu-item" @click="openGroupPrompt('rename', { id: sec.groupId, name: sec.name })">{{ t('wv.authenticator.group.rename') }}</button>
                 <button v-if="confirmDeleteGroupId !== sec.groupId" class="menu-item danger" @click="confirmDeleteGroupId = sec.groupId">{{ t('wv.authenticator.group.delete') }}</button>
-                <button v-else class="menu-item danger" @click="requestDeleteGroup(sec.groupId)">✓ {{ t('wv.authenticator.group.delete') }}</button>
+                <button v-else class="menu-item danger" @click="requestDeleteGroup(sec.groupId)">✓ {{ t('wv.authenticator.group.deleteConfirm', { count: String(groupEntryCount(sec.groupId)) }) }}</button>
               </div>
             </template>
             <button v-else class="icon" :title="t('wv.authenticator.group.new')" @click="openGroupPrompt('new')">＋</button>
@@ -549,7 +572,7 @@ onUnmounted(() => {
             v-for="e in sec.entries"
             :key="e.id"
             class="auth-card"
-            :class="{ missing: e.error === 'secretMissing', warn: secondsLeft(e) <= 5 }"
+            :class="{ missing: e.error === 'secretMissing', warn: secondsLeft(e) <= 5, 'menu-open': menuFor === e.id }"
             role="button"
             tabindex="0"
             @click="copy(e)"
@@ -617,6 +640,12 @@ input, select { background: var(--vscode-input-background); color: var(--vscode-
 .inline-prompt { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
 .inline-input { flex: 1; min-width: 0; }
 .inline-select { max-width: 120px; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.modal-mask { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.4); }
+.modal { width: min(360px, 90vw); padding: 14px; border-radius: 8px; display: flex; flex-direction: column; gap: 10px; background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.3)); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3); }
+.modal-title { font-weight: 600; }
+.modal-input { width: 100%; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 6px; }
 .form { border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.3)); border-radius: 6px; padding: 8px; margin-bottom: 8px; }
 .form-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
 .form-row label { font-size: 11px; opacity: 0.8; min-width: 52px; }
@@ -626,8 +655,11 @@ input, select { background: var(--vscode-input-background); color: var(--vscode-
 .form-actions { display: flex; gap: 6px; }
 .auth-empty { padding: 16px 8px; opacity: 0.8; line-height: 1.5; }
 .groups { display: flex; flex-direction: column; gap: 8px; }
-.group { border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.25)); border-radius: 6px; overflow: hidden; }
-.group-head { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--vscode-sideBarSectionHeader-background, rgba(128,128,128,0.12)); }
+/* overflow:visible 让条目/分组下拉菜单可越出分组边界，不被裁切；圆角改由 group-head 维持。 */
+.group { position: relative; border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.25)); border-radius: 6px; overflow: visible; }
+/* 开菜单的分组抬到后续分组之上，避免下拉被下一个分组盖住。 */
+.group.menu-open { z-index: 30; }
+.group-head { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 5px 5px 0 0; background: var(--vscode-sideBarSectionHeader-background, rgba(128,128,128,0.12)); }
 .group-head .fold { background: none; border: none; cursor: pointer; color: inherit; padding: 0 2px; }
 .group-name { font-weight: 600; }
 .group-head .count { opacity: 0.6; font-size: 11px; }
@@ -639,10 +671,12 @@ input, select { background: var(--vscode-input-background); color: var(--vscode-
 .group-empty { grid-column: 1 / -1; opacity: 0.6; font-size: 12px; padding: 4px; }
 .auth-card {
   position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
-  gap: 8px; padding: 10px; border-radius: 6px; cursor: pointer;
+  gap: 8px; min-height: 64px; padding: 12px; border-radius: 6px; cursor: pointer;
   border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.25));
   user-select: none; -webkit-user-select: none;
 }
+/* 开菜单的卡片抬到同组其他卡片之上，保证下拉（含「删除」）完整可见。 */
+.auth-card.menu-open { z-index: 30; }
 .auth-card:hover { background: var(--vscode-list-hoverBackground, rgba(128,128,128,0.12)); }
 .auth-card:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 .auth-card.missing { opacity: 0.7; cursor: default; }
