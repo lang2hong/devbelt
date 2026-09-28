@@ -70,6 +70,7 @@ export interface RedisClientLike extends RedisCommandSource {
   close(): Promise<void>;
   nodes(): RedisNodeLike[];
   on(event: string, listener: (...args: unknown[]) => void): void;
+  off(event: string, listener: (...args: unknown[]) => void): void;
   sendCommandBuffer(name: string, args?: (string | number | Buffer)[]): Promise<unknown>;
   readonly status: string;
 }
@@ -283,6 +284,11 @@ export class RedisClient {
   /** 订阅底层事件（如 sentinel 故障切换、error）。 */
   on(event: string, listener: (...args: unknown[]) => void): void {
     this.client.on(event, listener);
+  }
+
+  /** 移除事件监听（面板 dispose 需要，否则监听器持续累积并 post）。 */
+  off(event: string, listener: (...args: unknown[]) => void): void {
+    this.client.removeListener(event, listener);
   }
 
   /** 订阅命令日志；返回取消订阅函数。 */

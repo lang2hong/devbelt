@@ -149,6 +149,18 @@ export async function redisGetBuffer(src: RedisCommandSource, key: string): Prom
   return v === null || v === undefined ? null : Buffer.from(asString(v), 'utf8');
 }
 
+/** GETRANGE 预览（字节）——大 key 强制加载时只取前 N 字节，避免宿主内存暴涨。 */
+export async function redisGetRangeBuffer(src: RedisCommandSource, key: string, start: number, end: number): Promise<Buffer> {
+  if (isBufferSource(src)) {
+    const raw = await src.sendCommandBuffer('GETRANGE', [key, start, end]);
+    if (raw === null || raw === undefined) return Buffer.alloc(0);
+    if (Buffer.isBuffer(raw)) return raw;
+    return Buffer.from(asString(raw), 'utf8');
+  }
+  const v = await src.sendCommand('GETRANGE', [key, start, end]);
+  return v === null || v === undefined ? Buffer.alloc(0) : Buffer.from(asString(v), 'utf8');
+}
+
 export function isBufferSource(src: RedisCommandSource): src is RedisCommandSource & RedisBufferSource {
   return typeof (src as Partial<RedisBufferSource>).sendCommandBuffer === 'function';
 }
@@ -341,6 +353,12 @@ export async function redisZCard(src: RedisCommandSource, key: string): Promise<
 
 export async function redisZAdd(src: RedisCommandSource, key: string, score: string | number, member: string): Promise<void> {
   await src.sendCommand('ZADD', [key, String(score), member]);
+}
+
+/** LINDEX：按下标取 list 元素（按下标编辑前比对，避免并发错删/错改）。 */
+export async function redisLIndex(src: RedisCommandSource, key: string, index: number): Promise<string | null> {
+  const v = await src.sendCommand('LINDEX', [key, index]);
+  return v === null || v === undefined ? null : String(v);
 }
 
 /** ZSCORE：返回 member 的 score；不存在返回 null（member 改名防覆盖用）。 */

@@ -382,6 +382,38 @@ describe('RedisView S3 键树/值/编辑', () => {
     expect(last.data).toBeTruthy();
   });
 
+  it('CLI 拒绝改变/阻塞连接状态的命令（RESET 等）', async () => {
+    const { view, sent } = makeView();
+    await mount(view, sent);
+    sent.length = 0;
+    await view.handleMessage({ type: 'runCommand', id: '9', line: 'RESET' });
+    expect(sent.some(([n]) => n === 'RESET')).toBe(false);
+    const res = posts(view).find((m) => m.type === 'commandResult' && m.id === '9');
+    expect(res.ok).toBe(false);
+  });
+
+  it('大 key 强制加载超 32MB → 只预览并标 truncated（GETRANGE）', async () => {
+    const big: Record<string, unknown> = { ...replies, STRLEN: 40 * 1024 * 1024, GETRANGE: 'preview' };
+    const sent: [string, unknown[]][] = [];
+    const { view } = makeView(async (n, a) => { sent.push([n, a ?? []]); return n in big ? big[n] : 'OK'; }, 0);
+    await mountDb(view);
+    await view.handleMessage({ type: 'load', key: 'user:1' });
+    const last = posts(view).filter((m) => m.type === 'value').pop();
+    expect(last.truncated).toBe(true);
+    expect(last.data.kind).toBe('string');
+    expect(sent.some(([n]) => n === 'GETRANGE')).toBe(true);
+    expect(sent.some(([n]) => n === 'GET')).toBe(false);
+  });
+
+  it('listRem 按下标删：下标当前值与旧值不符 → 拒绝（并发保护）', async () => {
+    const { view, sent } = makeView(async (n) => (n === 'LINDEX' ? 'changed' : n in replies ? replies[n] : 'OK'), 0);
+    await mountDb(view);
+    sent.length = 0;
+    await view.handleMessage({ type: 'listRem', key: 'k', index: 1, value: 'old' });
+    expect(sent.some(([n]) => n === 'LSET')).toBe(false);
+    expect(sent.some(([n]) => n === 'LREM')).toBe(false);
+  });
+
   it('renameKey 发包并审计', async () => {
     const { view, sent } = makeView(handler, 0);
     await mountDb(view);
@@ -735,6 +767,31 @@ describe('RedisView S4 连接事件日志', () => {
     (view.post as any).mockClear();
     handlers.get('ready')!();
     expect((view.post as any).mock.calls.some((c: any[]) => c[0].type === 'connectionEvent' && c[0].event === 'ready')).toBe(true);
+  });
+
+  it('dispose 移除 client 事件监听（面板关闭不再 post）', async () => {
+    const handlers = new Map<string, (...a: any[]) => void>();
+    const removed: string[] = [];
+    const client: any = {
+      isCluster: false, mode: 'standalone', db: 0,
+      sendCommand: async () => 'OK', runExclusive: (fn: any) => fn(), info: async () => '',
+      on: (ev: string, l: (...a: any[]) => void) => { handlers.set(ev, l); },
+      off: (ev: string, l: (...a: any[]) => void) => { if (handlers.get(ev) === l) handlers.delete(ev); removed.push(ev); },
+      addLogListener: () => () => {},
+    };
+    const manager: any = {
+      retain: vi.fn(), release: vi.fn(),
+      connect: async () => ({ kind: 'redis', client, db: 0, mode: 'standalone', readOnly: false, isAlive: () => true, close: () => {} }),
+    };
+    const view: any = RedisView.open(conn, manager, 'commandLog');
+    await view.handleMessage({ type: 'ready' });
+    await view.handleMessage({ type: 'ready' });
+    expect(handlers.size).toBe(6);
+
+    (view.post as any).mockClear();
+    view.dispose();
+    expect(removed).toHaveLength(6);
+    expect(handlers.size).toBe(0);
   });
 
   it('同连接多面板仅一个实例写 connection:* 审计（去重）', async () => {

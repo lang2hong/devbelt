@@ -337,8 +337,12 @@ const ADMIN_READ_SUBCOMMANDS: Record<string, readonly string[]> = {
 
 /** admin 命令是否为已知只读子命令（fail-closed）。 */
 export function isAdminReadCommand(name: string, args?: readonly unknown[]): boolean {
-  const subs = ADMIN_READ_SUBCOMMANDS[normalizeName(name)];
-  return !!subs && subs.includes(argAt(args, 0));
+  const cmd = normalizeName(name);
+  const sub = argAt(args, 0);
+  // ACL LOG 是只读，但 ACL LOG RESET 会清空日志（写）→ 特判拒绝。
+  if (cmd === 'ACL' && sub === 'LOG' && argAt(args, 1) === 'RESET') return false;
+  const subs = ADMIN_READ_SUBCOMMANDS[cmd];
+  return !!subs && subs.includes(sub);
 }
 
 /**

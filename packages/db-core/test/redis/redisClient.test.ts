@@ -239,6 +239,12 @@ describe('RedisClient 只读拦截', () => {
     await expect(client.sendCommand('SENTINEL', ['SET', 'm', 'a', 'b'])).rejects.toBeInstanceOf(RedisReadOnlyError);
   });
 
+  it('fail-closed：ACL LOG 放行、ACL LOG RESET 拦截', async () => {
+    const { client } = make({ readOnly: true });
+    await expect(client.sendCommand('ACL', ['LOG', '10'])).resolves.toBeDefined();
+    await expect(client.sendCommand('ACL', ['LOG', 'RESET'])).rejects.toBeInstanceOf(RedisReadOnlyError);
+  });
+
   it('Buffer 参数按原始值判定（<buffer:N> 占位符不再绕过子命令检查）', async () => {
     const { client, fake } = make({ readOnly: true });
     await expect(client.sendCommandBuffer('CONFIG', [Buffer.from('SET'), Buffer.from('a'), Buffer.from('b')]))

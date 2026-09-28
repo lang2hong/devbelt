@@ -1,11 +1,11 @@
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import {
   isDangerousCommand, isWriteCommand, redactCommandArgs, splitRedisArgs,
-  redisType, redisSelect, redisGetBuffer, redisStrlen, redisSet, redisSetBuffer, redisAppend,
+  redisType, redisSelect, redisGetBuffer, redisGetRangeBuffer, redisStrlen, redisSet, redisSetBuffer, redisAppend,
   isValidUtf8, isBufferSource,
   redisUnlink, redisExists, redisRename, redisTtl, redisExpire, redisPersist, redisMemoryUsage,
   redisHScan, redisHSet, redisHDel, redisHLen, redisHExists,
-  redisLRange, redisLLen, redisLPush, redisRPush, redisLSet, redisLRem, redisLTrim, redisLPop, redisRPop,
+  redisLRange, redisLLen, redisLPush, redisRPush, redisLSet, redisLRem, redisLTrim, redisLPop, redisRPop, redisLIndex,
   redisSScan, redisSCard, redisSAdd, redisSRem,
   redisZRange, redisZCard, redisZAdd, redisZRem, redisZScore, allCommandNames,
   redisXRange, redisXRevRange, redisXAdd, redisXDel, redisXTrimMaxlen, redisXLen,
@@ -25,6 +25,8 @@ import { parseRedisInfo, aggregateRedisInfo } from './redisInfoParse';
 
 /** 大 key 门禁阈值（字节）。 */
 const LARGE_KEY_BYTES = 1024 * 1024;
+/** 大 key「强制加载」的硬上限：string 超过只用 GETRANGE 预览，避免宿主内存暴涨。 */
+const FORCE_LOAD_MAX_BYTES = 32 * 1024 * 1024;
 /** Stream 单页条目数。 */
 const STREAM_PAGE = 100;
 /** hash/set 单页条目数（大集合分页兜底，避免全量 HGETALL/SMEMBERS）。 */
@@ -70,6 +72,8 @@ export class RedisView extends BaseWebView {
   /** 已绑定的会话 client 与事件处理器（dispose 时移除，避免面板关闭后仍 post）。 */
   private boundClient?: { on?(ev: string, h: (...a: unknown[]) => void): unknown; off?(ev: string, h: (...a: unknown[]) => void): unknown };
   private readonly boundEvents: { ev: string; handler: (...a: unknown[]) => void }[] = [];
+  /** dispose 后置位：作为 post 兜底，丢弃迟到的异步回调。 */
+  private disposed = false;
   /** 注册表键 `${conn.id}:${panel}`，onDispose 清理。 */
   private readonly registryKey: string;
   /** S5-3：树点键时带的首选键（就绪后自动加载其值）。 */
@@ -181,6 +185,9 @@ export class RedisView extends BaseWebView {
         const key = String(msg.key);
         const index = Number(msg.index);
         const original = String(msg.value ?? '');
+        // 并发保护：确认该下标的当前值与用户看到的旧值一致，否则拒绝（他端可能已改动使下标移动）。
+        const current = await redisLIndex(c, key, index);
+        if (current !== original) throw new Error(l10n('cmd.redis.listChanged'));
         const marker = `\u0000devbelt:del:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`;
         await redisLSet(c, key, index, marker);
         try {
@@ -230,6 +237,7 @@ export class RedisView extends BaseWebView {
 
   protected onDispose(): void {
     super.onDispose();
+    this.disposed = true;
     this.logUnsub?.();
     this.logUnsub = undefined;
     // 移除会话 client 上的连接/故障切换监听器：否则面板关闭后仍会持续 post 消息。
@@ -341,6 +349,7 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
       if (!RedisView.auditOwners.has(this.conn.id)) RedisView.auditOwners.set(this.conn.id, this);
       for (const ev of ['connect', 'ready', 'reconnecting', 'end', 'close', 'error']) {
         const handler = (...args: unknown[]): void => {
+          if (this.disposed) return;
           const detail = args.length && args[0] != null ? String(args[0]) : null;
           this.post({ type: 'connectionEvent', event: ev, detail, at: Date.now() });
           if ((ev === 'reconnecting' || ev === 'end') && RedisView.auditOwners.get(this.conn.id) === this) {
@@ -359,6 +368,7 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
     // 命令日志仅由 commandLog 面板订阅（其它面板不渲染它，避免 fan-out）。
     if (!this.logUnsub && this.panelType === 'commandLog' && typeof session.client.addLogListener === 'function') {
       this.logUnsub = session.client.addLogListener((entry) => {
+        if (this.disposed) return;
         this.post({
           type: 'commandLog',
           entry: { command: entry.command, args: entry.args, durationMs: entry.durationMs, ok: entry.ok, error: entry.error ?? null },
@@ -444,6 +454,19 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
         const keyType = await redisType(c, key);
         const ttl = await redisTtl(c, key);
         const size = keyType === 'string' ? await redisStrlen(c, key) : await redisMemoryUsage(c, key);
+        // string 超过硬上限：只取预览（GETRANGE），避免整值进内存并转 base64 导致宿主 OOM。
+        if (keyType === 'string' && size !== null && size > FORCE_LOAD_MAX_BYTES) {
+          const buf = await redisGetRangeBuffer(c, key, 0, FORCE_LOAD_MAX_BYTES - 1);
+          const data: RedisValueData = {
+            kind: 'string',
+            text: buf.toString('utf8'),
+            base64: buf.toString('base64'),
+            binary: !isValidUtf8(buf),
+            bytes: buf.length,
+          };
+          this.post({ type: 'value', key, keyType, ttl, tooLarge: false, size, data, truncated: true });
+          return;
+        }
         const data = await this.loadValue(c, key, keyType);
         this.post({ type: 'value', key, keyType, ttl, tooLarge: false, size, data });
       } catch (err) {
@@ -579,11 +602,17 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
           this.post({ type: 'commandResult', id, command: line, ok: false, result: '', costMs: Date.now() - started, error: l10n('cmd.redis.selectDisabled') });
           return;
         }
+        // 会改变/阻塞共享连接状态的命令一律拒绝：CLI 共享一条连接，这些会污染其它面板。
+        if (isCliBlocked(name, args)) {
+          this.post({ type: 'commandResult', id, command: line, ok: false, result: '', costMs: Date.now() - started, error: l10n('cmd.redis.connStateBlocked', { cmd: name.toUpperCase() }) });
+          return;
+        }
         const raw = await session.client.sendCommand(name, args);
         const costMs = Date.now() - started;
         if (isWriteCommand(name, args) || isDangerousCommand(name, args)) {
-          // 审计只记命令 + key（首参），**不记值**（避免把写入值/密钥写进审计）。
-          this.audit(name, String(args[0] ?? ''), costMs);
+          // 审计只记命令 + key（首参），**不记值**；EVAL 只记脚本长度（脚本文本可能含字面值）。
+          const detail = /^EVAL(_RO)?$/i.test(name) ? `len=${String(args[0] ?? '').length}` : String(args[0] ?? '');
+          this.audit(name, detail, costMs);
         }
         this.post({ type: 'commandResult', id, command: line, ok: true, result: formatRedisReply(raw), costMs, error: null });
       } catch (err) {
@@ -799,6 +828,20 @@ function strs(v: unknown): string[] {
 function pairsOf(v: unknown): [string, string][] {
   if (!Array.isArray(v)) return [];
   return v.filter((e): e is unknown[] => Array.isArray(e) && e.length >= 2).map((e) => [String(e[0]), String(e[1])]);
+}
+
+/** CLI 中会改变/阻塞共享连接状态的命令（阻止污染其它面板）。 */
+const CLI_BLOCKED_COMMANDS = new Set([
+  'RESET', 'QUIT', 'AUTH', 'HELLO', 'MULTI', 'EXEC', 'DISCARD', 'WATCH', 'UNWATCH',
+  'SUBSCRIBE', 'PSUBSCRIBE', 'SSUBSCRIBE', 'MONITOR',
+  'BLPOP', 'BRPOP', 'BLMOVE', 'BRPOPLPUSH', 'BZPOPMIN', 'BZPOPMAX', 'BZMPOP', 'BLMPOP',
+]);
+
+function isCliBlocked(name: string, args: readonly string[]): boolean {
+  const c = name.toUpperCase();
+  if (CLI_BLOCKED_COMMANDS.has(c)) return true;
+  if (c === 'CLIENT' && String(args[0] ?? '').toUpperCase() === 'PAUSE') return true;
+  return false;
 }
 
 /** 审计行文本（P7 §十：日志禁止明文密码）。 */

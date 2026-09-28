@@ -7,6 +7,9 @@ import type { ValueInfo } from './types';
 
 const { t } = useI18n();
 const props = defineProps<{ info: ValueInfo | null; readOnly: boolean }>();
+
+/** 与 host 的 FORCE_LOAD_MAX_BYTES 对齐（仅用于提示文案）。 */
+const FORCE_CAP_TEXT = '32 MB';
 const emit = defineEmits<{
   (e: 'refresh'): void;
   (e: 'load'): void;
@@ -55,6 +58,18 @@ const editing = ref<EditState | null>(null);
 
 const key = computed(() => props.info?.key ?? '');
 const isBinaryString = computed(() => (props.info?.data?.kind === 'string' ? props.info.data.binary : false));
+/** 大 key 强制加载的截断预览：只读，禁止保存（否则会用预览覆盖整值）。 */
+const truncated = computed(() => !!(props.info as { truncated?: boolean } | null)?.truncated);
+const locked = computed(() => props.readOnly || truncated.value);
+/** JSON 模式仅展示格式化（原文保存在 stringText，保存用原文）；二进制在 text 模式禁保存。 */
+const jsonPretty = ref('');
+const textLocked = computed(() => locked.value
+  || stringMode.value === 'json'
+  || (isBinaryString.value && stringMode.value === 'text'));
+const displayText = computed({
+  get: () => (stringMode.value === 'json' ? jsonPretty.value : stringText.value),
+  set: (v: string) => { if (stringMode.value === 'json') jsonPretty.value = v; else stringText.value = v; },
+});
 /** hex 预览封顶（16KB ≈ 1024 行），避免大值全量 DOM + 每次键击全量解析。 */
 const HEX_PREVIEW_BYTES = 16 * 1024;
 const hexPreview = computed<{ bytes: Uint8Array; truncated: boolean }>(() => {
@@ -69,7 +84,9 @@ const ttlText = computed(() => {
 });
 
 watch(() => props.info, (info) => {
-  stringMode.value = 'text';
+  // 二进制值默认进 hex 模式（文本模式保存会损坏字节）；JSON 展示缓存清空。
+  stringMode.value = info?.data?.kind === 'string' && info.data.binary ? 'hex' : 'text';
+  jsonPretty.value = '';
   jsonError.value = '';
   hexError.value = '';
   renameOpen.value = false;
@@ -112,9 +129,9 @@ function switchMode(mode: 'text' | 'json' | 'hex'): void {
   if (stringMode.value === 'hex') syncFromHex();
   else syncFromText();
   if (mode === 'json') {
+    // 只格式化到展示缓冲，**不改** stringText（保存用原文；大整数不因 parse 丢精度）。
     try {
-      stringText.value = JSON.stringify(JSON.parse(stringText.value || 'null'), null, 2);
-      syncFromText();
+      jsonPretty.value = JSON.stringify(JSON.parse(stringText.value || 'null'), null, 2);
     } catch {
       jsonError.value = t('wv.redis.string.invalidJson');
     }
@@ -227,22 +244,23 @@ function copyValue(text: string): void {
       </div>
 
       <div v-else-if="info.data?.kind === 'string'" class="string">
+        <div v-if="truncated" class="truncated">{{ t('wv.redis.value.truncated', { size: FORCE_CAP_TEXT }) }}</div>
         <div class="tabs">
           <button :class="{ active: stringMode === 'text' }" @click="switchMode('text')">{{ t('wv.redis.string.text') }}</button>
           <button :class="{ active: stringMode === 'json' }" @click="switchMode('json')">{{ t('wv.redis.string.json') }}</button>
           <button :class="{ active: stringMode === 'hex' }" @click="switchMode('hex')">{{ t('wv.redis.string.hex') }}</button>
         </div>
-        <textarea v-if="stringMode !== 'hex'" v-model="stringText" :readonly="readOnly" />
+        <textarea v-if="stringMode !== 'hex'" v-model="displayText" :readonly="textLocked" />
         <template v-else>
-          <textarea v-model="hexText" :readonly="readOnly" class="hex" />
+          <textarea v-model="hexText" :readonly="locked" class="hex" />
           <HexEditor :bytes="hexPreview.bytes" :truncated="hexPreview.truncated" />
         </template>
         <div v-if="isBinaryString && stringMode !== 'hex'" class="binary-warn">{{ t('wv.redis.string.binaryWarn') }}</div>
         <div v-if="jsonError" class="error">{{ jsonError }}</div>
         <div v-if="hexError" class="error">{{ hexError }}</div>
         <div class="actions">
-          <button class="btn" :disabled="readOnly || !!jsonError || !!hexError" @click="saveString">{{ t('wv.redis.value.save') }}</button>
-          <button class="btn" :disabled="readOnly || stringMode === 'hex'" @click="emit('appendString', key, stringText)">{{ t('wv.redis.value.append') }}</button>
+          <button class="btn" :disabled="textLocked || !!jsonError || !!hexError" @click="saveString">{{ t('wv.redis.value.save') }}</button>
+          <button class="btn" :disabled="textLocked || stringMode === 'hex'" @click="emit('appendString', key, stringText)">{{ t('wv.redis.value.append') }}</button>
         </div>
       </div>
 
