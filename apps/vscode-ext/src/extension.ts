@@ -40,6 +40,17 @@ import { AuthenticatorSyncBackend } from './authenticator/syncBackend';
 const SYNC_AUTO_SYNC_KEY = 'devbelt.sync.autoSync';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  try {
+    await activateImpl(context);
+  } catch (err) {
+    // 激活失败会让所有命令缺失（表现为 "command ... not found"）：把真实原因落诊断通道，
+    // 不再让它在扩展宿主日志里一闪而过。
+    diagError('extension activate failed', err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err));
+    throw err;
+  }
+}
+
+async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   const store = new ConnectionStore(context.globalState, context.secrets);
   context.subscriptions.push({ dispose: () => store.dispose() });
   await store.init();
@@ -143,19 +154,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     vscode.workspace.onDidCloseTextDocument((document) => connCtx.clearForDoc(document.uri.toString())),
   );
-
-  const treeView = vscode.window.createTreeView('devbelt.explorer', {
-    treeDataProvider: treeProvider,
-    showCollapseAll: true,
-  });
-  context.subscriptions.push(treeView, treeProvider);
-  // 当前选中的连接（选中其子节点时归属该连接）显示绿点。
-  // 空选择（刷新/失焦引发的瞬时清空）不更新——否则绿点会一闪而过。
-  context.subscriptions.push(treeView.onDidChangeSelection((e) => {
-    const sel = e.selection[0];
-    if (!sel) return;
-    treeProvider.setActiveConnection(sel.conn?.id);
-  }));
 
   // 侧边栏「工具」视图（竖向工具列表；首项 = 验证器）。
   context.subscriptions.push(ToolsViewProvider.register());
@@ -288,6 +286,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(treeProvider.onDidRefresh(() => completionProvider.invalidate()));
 
   registerCommands({ context, store, manager, treeProvider, overrideStore, executor, history, auth, connCtx, syncFactory, authStore });
+
+  // 树视图在**所有命令注册之后**才创建：树节点上的 command（如 devbelt.openConnection）
+  // 必须在视图可见前就已注册，否则点击节点会报 "command ... not found"。
+  const treeView = vscode.window.createTreeView('devbelt.explorer', {
+    treeDataProvider: treeProvider,
+    showCollapseAll: true,
+  });
+  context.subscriptions.push(treeView, treeProvider);
+  // 当前选中的连接（选中其子节点时归属该连接）显示绿点。
+  // 空选择（刷新/失焦引发的瞬时清空）不更新——否则绿点会一闪而过。
+  context.subscriptions.push(treeView.onDidChangeSelection((e) => {
+    const sel = e.selection[0];
+    if (!sel) return;
+    treeProvider.setActiveConnection(sel.conn?.id);
+  }));
 
   // 首次加载即异步重算路径 warning（仅本地 fs 校验，无同步/网络请求）。
   void treeProvider.refreshPathIssues();
