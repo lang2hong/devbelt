@@ -68,6 +68,8 @@ export interface SyncRunResult {
   ignoredTombstone?: number;
   /** 入站因远端版本不新而跳过（`skipped`，版本重放）的记录数。 */
   skippedRemote?: number;
+  /** 出站成功推送（confirm + 删除 outbox）的本地变更数（push 轮）。 */
+  pushed?: number;
   /** 入站因权益（引擎不在套餐）被跳过、进 deferred 的记录数。 */
   skippedEntitlement?: number;
   /** 出站因编码失败/引擎不支持被跳过的本地变更数（由 coordinator 从 reconcile 结果补入）。 */
@@ -242,6 +244,7 @@ export class SyncEngine {
     const conflicts: SyncConflictEntry[] = [];
     let stalled: SyncStalledEntry | undefined;
     let lastCommitted = local.changeSequence;
+    let pushed = 0;
     for (const m of (phase === 'pull' ? [] : this.deps.outbox.list())) {
       // C1：已标记冲突的 mutation 不得再 push（避免每轮重复 409）；把持久化冲突反馈给 UI。
       if (m.conflict) {
@@ -327,6 +330,7 @@ export class SyncEngine {
         return { stage: 'error', conflicts, applied: 0, reason: `confirm failed: ${describe(err)}` };
       }
       await this.deps.outbox.delete(m.mutationId);
+      pushed += 1;
       // 刻意不用 receipt.changeSequence 推进本地 cursor：本轮 pull 快照（remoteSnap）在
       // outbox 回放之前捕获，若存在并发 remote record 落于其上，直接提交回执序列会永久
       // 越过该记录（下轮 cursor 已越过其 seq，无法再拉）。cursor 仅由 pull 逐页提交推进，
@@ -335,7 +339,7 @@ export class SyncEngine {
 
     // push-only：出站重放完成即返回，不进入 feed 拉取。
     if (phase === 'push') {
-      return { stage: conflicts.length > 0 ? 'conflict' : 'ok', conflicts, stalled, applied: 0, changeSequence: lastCommitted };
+      return { stage: conflicts.length > 0 ? 'conflict' : 'ok', conflicts, stalled, applied: 0, pushed, changeSequence: lastCommitted };
     }
 
     // 3. 分页 feed + 解密 + 应用 + 逐页 cursor
@@ -471,7 +475,7 @@ export class SyncEngine {
 
     // C2：本轮收集到冲突（出站 version 冲突未在本轮 pull 命中远端时仍属冲突）→ 以 conflict 收尾，
     // 让 coordinator 进入 stalled，不再自动重放同一条冲突 mutation。
-    return { stage: conflicts.length > 0 ? 'conflict' : 'ok', conflicts, stalled, applied, changes, ignoredTombstone, skippedRemote, skippedEntitlement, changeSequence: lastCommitted };
+    return { stage: conflicts.length > 0 ? 'conflict' : 'ok', conflicts, stalled, applied, pushed, changes, ignoredTombstone, skippedRemote, skippedEntitlement, changeSequence: lastCommitted };
   }
 
   private parseState(raw: unknown): RemoteState {

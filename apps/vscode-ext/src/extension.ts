@@ -181,7 +181,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // 同步可观测：每轮结果落诊断通道，便于确认「是否真的同步了 / 结果如何」。
       diagInfo('sync run', {
         stage: result?.stage,
+        reason: result?.reason,
         applied: result?.applied,
+        pushed: result?.pushed,
         changes: result?.changes,
         ignoredTombstone: result?.ignoredTombstone,
         skippedRemote: result?.skippedRemote,

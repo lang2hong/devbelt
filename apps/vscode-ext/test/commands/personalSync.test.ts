@@ -324,7 +324,7 @@ describe('personal sync B1 commands', () => {
     const session = makeSession({
       isUnlocked: true,
       syncPull: vi.fn(async () => ({ stage: 'ok', applied: 1 })),
-      syncPush: vi.fn(async () => ({ stage: 'ok', applied: 1 })),
+      syncPush: vi.fn(async () => ({ stage: 'ok', pushed: 1 })),
     });
     const { deps, info } = makeDeps(session, []);
     await pullPersonalSync(deps);
@@ -332,16 +332,24 @@ describe('personal sync B1 commands', () => {
     expect(session.syncPull).toHaveBeenCalledTimes(1);
     expect(session.syncPush).toHaveBeenCalledTimes(1);
     // 分操作提示，不再共用同一句
-    expect(info).toHaveBeenCalledWith('Pulled remote changes.');
-    expect(info).toHaveBeenCalledWith('Pushed local changes.');
+    expect(info).toHaveBeenCalledWith('Pull succeeded.');
+    expect(info).toHaveBeenCalledWith('Push succeeded.');
   });
 
-  it('无落地变更时提示「已是最新」而非「Pulled remote changes」', async () => {
+  it('无落地变更时合并提示「拉取成功；已是最新，无变更」', async () => {
     const session = makeSession({ isUnlocked: true }); // 默认 applied 缺省
     const { deps, info } = makeDeps(session, []);
     await pullPersonalSync(deps);
-    expect(info).toHaveBeenCalledWith('Already up to date; no changes.');
-    expect(info).not.toHaveBeenCalledWith('Pulled remote changes.');
+    expect(info).toHaveBeenCalledWith('Pull succeeded; already up to date, no changes.');
+    expect(info).not.toHaveBeenCalledWith('Pull succeeded.');
+  });
+
+  it('push 无变更时合并提示「推送成功；已是最新，无变更」', async () => {
+    const session = makeSession({ isUnlocked: true }); // 默认 pushed 缺省
+    const { deps, info } = makeDeps(session, []);
+    await pushPersonalSync(deps);
+    expect(info).toHaveBeenCalledWith('Push succeeded; already up to date, no changes.');
+    expect(info).not.toHaveBeenCalledWith('Push succeeded.');
   });
 
   it('syncNow: explicit run waits and reports its own result', async () => {
@@ -349,7 +357,7 @@ describe('personal sync B1 commands', () => {
     const { deps, info } = makeDeps(session, []);
     await syncNowPersonalSync(deps);
     expect(session.syncNow).toHaveBeenCalledTimes(1);
-    expect(info).toHaveBeenCalledWith('Sync complete.');
+    expect(info).toHaveBeenCalledWith('Sync succeeded.');
   });
 
   it('pull/push: conflict opens the conflict resolver instead of a retry warning', async () => {

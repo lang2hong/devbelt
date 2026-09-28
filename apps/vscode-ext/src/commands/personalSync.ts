@@ -10,7 +10,7 @@ import { canUseDataSync } from '@devbelt/db-host/sync/entitlementGate';
 import { l10n } from '../i18n';
 import { diagInfo } from '../utils/diagnostics';
 
-type SyncRun = { stage: string; applied?: number; changes?: number; skippedEntitlement?: number; skippedOutbound?: number } | undefined;
+type SyncRun = { stage: string; applied?: number; pushed?: number; changes?: number; skippedEntitlement?: number; skippedOutbound?: number } | undefined;
 
 interface SyncSessionPort {
   readonly uid: string;
@@ -132,9 +132,10 @@ function reportInitialRun(ui: SyncUi, result: SyncRun, op: SyncOp): void {
     if (result.skippedEntitlement) parts.push(l10n('sync.skippedEntitlement', { count: String(result.skippedEntitlement) }));
     if (result.skippedOutbound) parts.push(l10n('sync.skippedOutbound', { count: String(result.skippedOutbound) }));
     if (parts.length) ui.warn(l10n('sync.skipped', { detail: parts.join('；') }));
-    // 无任何落地变更时不谎报「已拉取/已推送」：区分「真变更」与「处理了但没变」。
-    else if ((result.changes ?? result.applied ?? 0) === 0) ui.info(l10n('sync.upToDate'));
-    else ui.info(l10n(`sync.done.${op}`));
+    // 成功始终提示；无实际变更时合并「已是最新，无变更」（push 看 pushed，其余看 changes/applied）。
+    else if ((op === 'push' ? (result.pushed ?? 0) : (result.changes ?? result.applied ?? 0)) === 0) {
+      ui.info(l10n(`sync.doneUpToDate.${op}`));
+    } else ui.info(l10n(`sync.done.${op}`));
   } else {
     ui.warn(l10n(`sync.pending.${op}`));
   }
