@@ -127,7 +127,9 @@ function prefill(c: Record<string, any>): void {
       (form as any)[key] = defVal;
     }
   }
-  syncType();
+  // 不在 prefill 里调用 syncType()：否则编辑已有连接时端口会被重置为默认
+  // （cluster 的 7xxx 端口被改掉），且会误清真实的 Redis 用户名 "root"。
+  // 默认端口/默认用户只在用户切换类型（@change）时设置。
 }
 
 let cleanup: (() => void) | undefined;
