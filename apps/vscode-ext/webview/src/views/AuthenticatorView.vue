@@ -217,6 +217,8 @@ function startEdit(e: AuthenticatorSnapshotEntry): void {
   menuFor.value = null;
 }
 function cancelForm(): void {
+  // 预填表单的 secret 在宿主：取消时立即通知宿主释放，不让明文种子驻留到面板关闭。
+  if (form.prefillId) post({ type: 'cancelPrefill' });
   formOpen.value = false;
   editingId.value = null;
   formError.value = '';
@@ -386,7 +388,7 @@ function requestDeleteGroup(id: string): void {
   confirmDeleteGroupId.value = null;
   if (!groups.value.some((g) => g.id === id)) return;
   post({ type: 'deleteGroup', id });
-  // 不做乐观提示：删除结果由快照体现（条目回落到未分组），避免失败时误报。
+  // 不做乐观提示：删除结果由快照体现（组内条目随分组级联删除），避免失败时误报。
 }
 
 function openTagPrompt(): void { promptError.value = ''; tagPrompt.value = { name: '', color: 'blue' }; }

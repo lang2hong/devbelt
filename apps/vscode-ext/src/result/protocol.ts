@@ -107,6 +107,8 @@ export type AuthenticatorUpMessage =
   | { type: 'requestAddForm' }
   | { type: 'addUri'; uri: string }
   | { type: 'addImage'; dataUrl: string }
+  /** 取消预填表单：宿主立即释放暂存的 prefill secret（不提前释放等于长期驻留明文种子）。 */
+  | { type: 'cancelPrefill' }
   | { type: 'copy'; code: string; entryId: string }
   | { type: 'export' };
 

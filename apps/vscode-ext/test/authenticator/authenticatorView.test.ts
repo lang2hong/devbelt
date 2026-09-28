@@ -183,6 +183,23 @@ describe('AuthenticatorView (panel)', () => {
     expect(store.addEntry).toHaveBeenCalledWith(expect.objectContaining({ secret: 'JBSWY3DPEHPK3PXP', groupId: 'g' }));
   });
 
+  it('cancelPrefill releases the host-stashed secret (later add with that id is rejected)', async () => {
+    const p = makePanel();
+    const store = makeStore();
+    AuthenticatorView.open(store);
+    p.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    p.send({ type: 'addUri', uri: 'otpauth://totp/Acme:alice?secret=JBSWY3DPEHPK3PXP&issuer=Acme' });
+    await flush();
+    const prefill = p.posted.find((m) => m.type === 'prefillAdd');
+    p.send({ type: 'cancelPrefill' });
+    await flush();
+    p.send({ type: 'add', entry: { issuer: 'Acme', secret: '', algorithm: 'SHA1', digits: 6, period: 30, groupId: 'g', tags: [] }, prefillId: prefill.prefillId });
+    await flush();
+    expect(store.addEntry).not.toHaveBeenCalled();
+    expect(p.posted.some((m) => m.type === 'formError')).toBe(true);
+  });
+
   it('add with unknown prefillId is rejected and never reaches store', async () => {
     const p = makePanel();
     const store = makeStore();

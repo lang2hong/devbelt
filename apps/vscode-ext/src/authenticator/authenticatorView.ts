@@ -97,8 +97,9 @@ export class AuthenticatorView extends BaseWebView {
       case 'copy': await this.onCopy(msg); return;
       case 'toggleGroup': this.onToggleGroup(msg); return;
       case 'requestAddForm': this.requestAddForm(); return;
-      case 'addUri': await this.onAddUri(msg); return;
+      case 'addUri': this.onAddUri(msg); return;
       case 'addImage': await this.onAddImage(msg); return;
+      case 'cancelPrefill': this.pendingPrefill = undefined; return;
       case 'add': await this.onAdd(msg); return;
       case 'update': await this.onUpdate(msg); return;
       case 'delete': await this.onDelete(msg); return;

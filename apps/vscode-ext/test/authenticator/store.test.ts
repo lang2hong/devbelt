@@ -365,6 +365,22 @@ describe('AuthenticatorStore', () => {
     expect(store.listGroups()).toHaveLength(0);
   });
 
+  it('deleteGroup: secret delete failure keeps entry and re-homes it (no orphan secret)', async () => {
+    const g = await store.addGroup('Work');
+    const g2 = await store.addGroup('Other');
+    if (!g.ok || !g2.ok) return;
+    const add = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP', groupId: g.group.id });
+    if (!add.ok) return;
+    const spy = vi.spyOn(sec, 'delete').mockRejectedValueOnce(new Error('keychain busy'));
+    const dg = await store.deleteGroup(g.group.id);
+    spy.mockRestore();
+    expect(dg.ok).toBe(true);
+    const e = store.listEntries().find((x) => x.id === add.entry.id);
+    expect(e).toBeDefined();
+    expect(e!.groupId).toBe(g2.group.id);
+    expect(sec.map.has(`devbelt.authenticator.${add.entry.id}.secret`)).toBe(true);
+  });
+
   it('init heals ungrouped/orphan entries into the first group', async () => {
     (mem.map as Map<string, unknown>).set(GROUPS_KEY, [{ id: 'ag1', name: 'G1', sortOrder: 10 }]);
     (mem.map as Map<string, unknown>).set(ENTRIES_KEY, [
