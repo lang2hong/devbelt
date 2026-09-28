@@ -49,6 +49,9 @@ describe('escapeRedisGlob / redisPrefixPattern（glob 转义，防错查/错删�
     expect(redisPrefixPattern('a[1]')).toBe('a\\[1\\]:*');
     expect(redisPrefixPattern('a[1]', '-')).toBe('a\\[1\\]-*');
     expect(redisPrefixPattern('user')).toBe('user:*');
+    // separator 本身是 glob 元字符时也要转义，避免按前缀删除误删无关键
+    expect(redisPrefixPattern('a', '*')).toBe('a\\**');
+    expect(redisPrefixPattern('a', '[')).toBe('a\\[*');
   });
 
   it('含元字符前缀在 toRedisMatchPattern 中也被转义', () => {

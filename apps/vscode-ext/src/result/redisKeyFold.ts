@@ -26,7 +26,8 @@ export function toRedisMatchPattern(query: string): string | undefined {
  * 命中错误键集合（删除路径即数据丢失）。
  */
 export function redisPrefixPattern(prefix: string, separator = ':'): string {
-  return `${escapeRedisGlob(prefix)}${separator}*`;
+  // separator 也要转义：它可能被设成 glob 元字符（`* ? [`），否则按前缀删除会误伤无关键。
+  return `${escapeRedisGlob(prefix)}${escapeRedisGlob(separator)}*`;
 }
 
 /**

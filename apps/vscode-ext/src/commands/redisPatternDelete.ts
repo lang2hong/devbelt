@@ -72,8 +72,14 @@ export async function deleteByPatternKeys(client: RedisPatternClient, pattern: s
       if (client.isCluster) {
         for (let i = 0; i < keys.length; i += CLUSTER_UNLINK_CHUNK) {
           const chunk = keys.slice(i, i + CLUSTER_UNLINK_CHUNK);
-          const results = await Promise.all(chunk.map((key) => redisUnlink(client, [key])));
-          deleted += results.reduce((a, b) => a + b, 0);
+          // allSettled：并发但仍精确累计已删数；中途失败也先记下成功数再抛（避免悲观少算）。
+          const settled = await Promise.allSettled(chunk.map((key) => redisUnlink(client, [key])));
+          let firstErr: unknown;
+          for (const r of settled) {
+            if (r.status === 'fulfilled') deleted += r.value;
+            else if (firstErr === undefined) firstErr = r.reason;
+          }
+          if (firstErr !== undefined) throw firstErr;
         }
         return;
       }
