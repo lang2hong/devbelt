@@ -101,7 +101,9 @@ export async function redisDbsize(src: RedisCommandSource): Promise<number> {
 }
 
 export async function redisSelect(src: RedisCommandSource, db: number): Promise<void> {
-  await src.sendCommand('SELECT', [db]);
+  // 命令名必须小写：ioredis 仅在 `command.name === 'select'` 时记录当前库（Redis.js），
+// 大写会在重连时按旧库恢复、离线队列落到错库。
+  await src.sendCommand('select', [db]);
 }
 
 /** 解析 `INFO keyspace` 为 DB 列表。 */

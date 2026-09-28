@@ -183,6 +183,10 @@ export class RedisClient {
         sentinels: options.sentinels,
         name: options.sentinelName,
         sentinelPassword: options.sentinelPassword,
+        // Sentinel 模式下 ioredis 只有在这两项都设置时才用 TLS 连 sentinel；
+        // 否则即便勾了 TLS，AUTH/sentinelPassword/数据仍走明文。
+        enableTLSForSentinelMode: !!options.tls,
+        sentinelTLS: options.tls,
       }) as unknown as RedisConnectionLike;
     } else {
       this.client = new Redis({

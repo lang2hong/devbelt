@@ -59,10 +59,17 @@ describe('redisOps：命令与归一化', () => {
     expect(src.calls[1]).toEqual({ name: 'SCAN', args: ['0', 'MATCH', 'foo:*', 'COUNT', 100] });
   });
 
+  it('redisSelect 发小写 select（ioredis 仅小写才记录当前库）', async () => {
+    const names: string[] = [];
+    const raw = { sendCommand: async (name: string) => { names.push(name); return 'OK'; } };
+    await redisSelect(raw as never, 2);
+    expect(names).toEqual(['select']);
+  });
+
   it('SELECT/DEL 参数；空 DEL 不发包', async () => {
     const src = new FakeSource();
     await redisSelect(src, 3);
-    expect(src.calls[0]).toEqual({ name: 'SELECT', args: [3] });
+    expect(src.calls[0]).toEqual({ name: 'SELECT', args: [3] }); // FakeSource 记录时统一大写
     expect(await redisDel(src, ['a', 'b'])).toBe(0); // 'OK' -> Number('OK')=NaN -> 0
     expect(src.calls[1]).toEqual({ name: 'DEL', args: ['a', 'b'] });
     const before = src.calls.length;

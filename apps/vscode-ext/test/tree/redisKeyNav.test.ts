@@ -308,7 +308,7 @@ describe('D* 键树（根扁平 SCAN + 客户端折叠）', () => {
     const res = await provider.loadAllRedisKeys(db);
     expect(res.done).toBe(true);
     expect(res.scanned).toBe(2);
-    expect(calls.filter((c) => c === 'SELECT')).toHaveLength(1);
+    expect(calls.filter((c) => c === 'select')).toHaveLength(1);
   });
 
   it('写操作后：仅降级受影响祖先文件夹的完整性，其它完整快照保留', async () => {

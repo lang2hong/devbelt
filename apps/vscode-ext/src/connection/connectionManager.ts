@@ -326,10 +326,10 @@ export class ConnectionManager {
       if (conn.sshHost) {
         const s = await discoverSentinelMasterOverSsh(conn, port, auth);
         extraTunnelIds = [s.tunnelId];
-        client = new RedisClient({ ...common, host: '127.0.0.1', port: s.masterLocalPort });
+        client = new RedisClient({ ...common, host: '127.0.0.1', port: s.masterLocalPort, db: conn.redisDb });
       } else {
         const sentinels = parseRedisNodes(conn.sentinelNodes, host, port);
-        client = new RedisClient({ ...common, sentinels, sentinelName: conn.sentinelName, sentinelPassword: conn.sentinelPassword });
+        client = new RedisClient({ ...common, sentinels, sentinelName: conn.sentinelName, sentinelPassword: conn.sentinelPassword, db: conn.redisDb });
       }
     } else {
       client = new RedisClient({ ...common, host, port, db: conn.redisDb });

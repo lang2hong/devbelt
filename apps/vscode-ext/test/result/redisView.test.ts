@@ -465,7 +465,7 @@ describe('RedisView S3 回归（提交前评审）', () => {
     const view: any = RedisView.open(dbConn, manager, 'console', 2);
     await view.handleMessage({ type: 'ready' });
     await view.handleMessage({ type: 'ready' });
-    expect(sent.some(([n, a]) => n === 'SELECT' && a.join() === '2')).toBe(true);
+    expect(sent.some(([n, a]) => n === 'select' && a.join() === '2')).toBe(true);
     const cfg = posts(view).find((m) => m.type === 'config');
     expect(cfg.db).toBe(2);
     expect(cfg.panel).toBe('console');
