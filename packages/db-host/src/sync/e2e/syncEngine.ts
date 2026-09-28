@@ -392,19 +392,22 @@ export class SyncEngine {
           try {
             const disposition = await this.applyRemote(rec, this.deps.keyEpoch, ctx);
             // 权益跳过一律入 deferred（无论是否已映射）；版本重放的 'skipped' 不入队。
-            if (disposition === 'skipped-entitlement' && this.deps.deferred) {
+            // 计数与 deferred 解耦：即便未注入 deferred，跳过也要计入透明度字段，避免静默吞掉。
+            if (disposition === 'skipped-entitlement') {
               skippedEntitlement += 1;
-              await this.deps.deferred.put({
-                recordId: rec.recordId,
-                version: rec.version,
-                changeSequence: rec.changeSequence,
-                deleteTime: rec.deleteTime,
-                nonce: rec.nonce,
-                ciphertext: rec.ciphertext,
-                tag: rec.tag,
-              });
+              if (this.deps.deferred) {
+                await this.deps.deferred.put({
+                  recordId: rec.recordId,
+                  version: rec.version,
+                  changeSequence: rec.changeSequence,
+                  deleteTime: rec.deleteTime,
+                  nonce: rec.nonce,
+                  ciphertext: rec.ciphertext,
+                  tag: rec.tag,
+                });
+              }
             }
-            applied += 1;
+            applied += 1; // 注：applied 含 skipped-entitlement（版本重放的 skipped 不计）；UI 仅用 skipped* 计数。
           } catch (err) {
             if (err instanceof RecordConflictError) {
               // B4：携带远端密文进冲突条目，并补全 outbox 中对应 mutation 的冲突状态。

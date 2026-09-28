@@ -197,7 +197,7 @@ export class SyncCoordinator {
     for (let i = 0; i < SyncCoordinator.MAX_DRAIN_ROUNDS; i++) {
       const { generated, skipped } = await this.mutator.reconcile();
       const result = await this.engine.sync();
-      if (skipped?.length) result.skippedOutbound = skipped.length;
+      if (skipped?.length) result.skippedOutbound = skipped.length; // 各轮同批，覆盖即等于该批总数（未来跨轮去重再改累加）
       this._lastRun = result;
       last = result;
       if (result.stage !== 'ok') return result;
