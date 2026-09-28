@@ -67,8 +67,8 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
   };
 
   /** 树侧写操作后：重扫树 + 同步已打开的 keyBrowser 面板（键树/当前值）。 */
-  const afterRedisMutation = async (node: any): Promise<void> => {
-    await treeProvider.refreshRedisAfterMutation(node);
+  const afterRedisMutation = async (node: any, invalidateAllSnapshots = false): Promise<void> => {
+    await treeProvider.refreshRedisAfterMutation(node, invalidateAllSnapshots);
     if (node?.conn) RedisView.find(node.conn.id, 'keyBrowser')?.reloadKeys();
   };
 
@@ -339,7 +339,8 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
       try {
         await runPatternDelete(node.conn, node.redisDbIndex, pattern);
         auditRedis(node.conn, node.redisDbIndex, `UNLINK ${pattern}`, started);
-        await afterRedisMutation(node);
+        // 任意 glob pattern 可命中任意前缀 → 失效该 db 全部完整快照。
+        await afterRedisMutation(node, true);
       } catch (e) { reportPatternDeleteError(node, pattern, e); }
     }),
     vscode.commands.registerCommand('devbelt.redis.newKey', async (node: any) => {

@@ -169,6 +169,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.compareSchema', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (node.conn.dbType === DatabaseType.REDIS) return; // SQL 专用：禁止 Redis 进入
     const session = await manager.connectSql(node.conn);
     if (!requireCapability(session, 'schemaSync')) return;
     // PG 连接绑定单个数据库（无 USE），同一连接上的「另一个库」取不到其元数据：
@@ -199,13 +200,14 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.syncDatabase', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (node.conn.dbType === DatabaseType.REDIS) return; // SQL 专用：禁止 Redis 进入
     // 同 compareSchema：PG 无法在单连接上跨库同步结构（见上）。
     if (node.conn.dbType === DatabaseType.PG) {
       vscode.window.showWarningMessage(l10n('schema.pgCrossDbUnsupported'));
       return;
     }
 
-    const conns = deps.store.getVisibleTreeData().connections.filter((c) => c.id !== node.conn!.id);
+    const conns = deps.store.getVisibleTreeData().connections.filter((c) => c.id !== node.conn!.id && c.dbType !== DatabaseType.REDIS);
     if (!conns.length) {
       vscode.window.showWarningMessage(l10n('sync.noOtherConnections'));
       return;

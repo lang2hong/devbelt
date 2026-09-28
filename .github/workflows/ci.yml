@@ -200,8 +200,18 @@ jobs:
       - name: Start Redis Sentinel
         run: |
           printf 'port 26379\nsentinel monitor mymaster 127.0.0.1 6379 1\nsentinel down-after-milliseconds mymaster 5000\nsentinel failover-timeout mymaster 10000\n' > /tmp/sentinel.conf
-          docker run -d --name redis-sentinel --network host -v /tmp/sentinel.conf:/etc/sentinel.conf:ro redis:7 redis-server /etc/sentinel.conf --sentinel
-          for i in $(seq 1 30); do docker exec redis-sentinel redis-cli -p 26379 ping 2>/dev/null | grep -q PONG && break; sleep 1; done
+          # 必须可写挂载：Sentinel 会重写自己的配置文件（记录 myid/状态），:ro 会导致其无法启动。
+          docker run -d --name redis-sentinel --network host -v /tmp/sentinel.conf:/etc/sentinel.conf redis:7 redis-server /etc/sentinel.conf --sentinel
+          ok=0
+          for i in $(seq 1 30); do
+            if docker exec redis-sentinel redis-cli -p 26379 ping 2>/dev/null | grep -q PONG; then ok=1; break; fi
+            sleep 1
+          done
+          if [ "$ok" != "1" ]; then
+            echo "Redis Sentinel failed to start"
+            docker logs redis-sentinel || true
+            exit 1
+          fi
 
       # Cluster over SSH：硬门禁——真实验证 setupClusterOverSsh 的 natMap 路由（SSH+多节点才承重）。
       - name: Integration tests (vscode-ext cluster over SSH)

@@ -723,21 +723,22 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
    * 定向失效：仅删除「前缀是该键祖先路径」的 `__full__` 快照（完整快照只应存在于确实完整的文件夹），
    * 其余完整快照保留。
    */
-  async refreshRedisAfterMutation(node: DbTreeNode): Promise<void> {
+  async refreshRedisAfterMutation(node: DbTreeNode, invalidateAllSnapshots = false): Promise<void> {
     const db = this.findRedisDb(node);
     if (!db?.conn || db.redisDbIndex === undefined) return;
     const { conn } = db;
     const dbIndex = db.redisDbIndex;
-    const affected = node.redisKey;
-    if (affected) {
-      const sep = conn.keySeparator || ':';
-      const p = `${conn.id}:db${dbIndex}:__full__:`;
-      for (const k of [...this.redisFolderFull.keys()]) {
-        if (!k.startsWith(p)) continue;
-        const folderPrefix = k.slice(p.length);
-        if (affected === folderPrefix || affected.startsWith(`${folderPrefix}${sep}`)) {
-          this.redisFolderFull.delete(k);
-        }
+    const sep = conn.keySeparator || ':';
+    const p = `${conn.id}:db${dbIndex}:__full__:`;
+    // 受影响前缀：键用键名；文件夹用其前缀（此前只看 redisKey，导致删文件夹/按 pattern 删不失效快照）。
+    const affected = node.redisKey ?? (node.redisKeyPrefix !== undefined && node.redisKeyPrefix !== '' ? node.redisKeyPrefix : undefined);
+    for (const k of [...this.redisFolderFull.keys()]) {
+      if (!k.startsWith(p)) continue;
+      if (invalidateAllSnapshots || affected === undefined) { this.redisFolderFull.delete(k); continue; }
+      const folderPrefix = k.slice(p.length);
+      // 自身/祖先（改动落在其子树）或后代（被删前缀包含它）都要失效。
+      if (affected === folderPrefix || affected.startsWith(`${folderPrefix}${sep}`) || folderPrefix.startsWith(`${affected}${sep}`)) {
+        this.redisFolderFull.delete(k);
       }
     }
     this.setRedisMatch(db, this.redisMatches.get(`${conn.id}:db${dbIndex}`));

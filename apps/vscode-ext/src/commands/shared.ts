@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { DatabaseType } from '@devbelt/db-core';
 import { ConnectionStore } from '@devbelt/db-host/connection/connectionStore';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
@@ -122,7 +123,8 @@ export async function openQueryFile(deps: Deps, conn: SavedConnection, database:
 }
 
 export async function pickConnection(store: ConnectionStore): Promise<SavedConnection | undefined> {
-  const list = store.list();
+  // SQL 专用入口：排除 Redis（否则会建立一条 Redis 连接再抛内部错误）。
+  const list = store.list().filter((c) => c.dbType !== DatabaseType.REDIS);
   if (!list.length) {
     vscode.window.showInformationMessage(l10n('cmd.noConnection'));
     return undefined;
