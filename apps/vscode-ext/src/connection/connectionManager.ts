@@ -288,16 +288,18 @@ export class ConnectionManager {
     port: number,
     generation: number,
   ): Promise<RedisConnectionSession> {
+    const mode = conn.redisMode ?? 'standalone';
     const tls = conn.useSSL
       ? buildRedisTlsOptions({
           caPath: conn.caPath,
           clientCertPath: conn.clientCertPath,
           clientKeyPath: conn.clientKeyPath,
           rejectUnauthorized: conn.rejectUnauthorized,
-          servername: conn.host,
+          // sentinel 模式：ioredis 会把这份 tls 应用到解析出的 master；servername 若填 sentinel
+          // 主机名，master 的 SNI/证书校验会用错主机名导致连不上。留空让 tls 用 master 主机名。
+          servername: mode === 'sentinel' ? undefined : conn.host,
         })
       : undefined;
-    const mode = conn.redisMode ?? 'standalone';
     const common = {
       username: conn.user || undefined,
       password: conn.password,

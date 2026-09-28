@@ -116,6 +116,23 @@ export const readCMD: Record<string, RedisCommandSpec> = {
   ZREVRANK: 'ZREVRANK key member',
   ZSCAN: 'ZSCAN key cursor [MATCH pattern] [COUNT count]',
   ZSCORE: 'ZSCORE key member',
+  // fail-closed 下补全的常见只读命令（否则只读连接会误拦）。
+  QUIT: 'QUIT',
+  SUBSTR: 'SUBSTR key start end',
+  LCS: 'LCS key1 key2 [LEN] [IDX] [MINMATCHLEN len] [WITHMATCHLEN]',
+  EXPIRETIME: 'EXPIRETIME key',
+  PEXPIRETIME: 'PEXPIRETIME key',
+  HRANDFIELD: 'HRANDFIELD key [count [WITHVALUES]]',
+  LPOS: 'LPOS key element [RANK rank] [COUNT num-matches] [MAXLEN len]',
+  SINTERCARD: 'SINTERCARD numkeys key [key ...] [LIMIT limit]',
+  SMISMEMBER: 'SMISMEMBER key member [member ...]',
+  ZMSCORE: 'ZMSCORE key member [member ...]',
+  ZRANDMEMBER: 'ZRANDMEMBER key [count [WITHSCORES]]',
+  GEOSEARCH: 'GEOSEARCH key <FROMMEMBER member | FROMLONLAT longitude latitude> <BYRADIUS radius unit | BYBOX width height unit> [ASC|DESC] [COUNT count [ANY]] [WITHCOORD] [WITHDIST] [WITHHASH]',
+  SORT_RO: 'SORT_RO key [BY pattern] [LIMIT offset count] [GET pattern [GET pattern ...]] [ASC|DESC] [ALPHA]',
+  EVAL_RO: 'EVAL_RO script numkeys key [key ...] arg [arg ...]',
+  EVALSHA_RO: 'EVALSHA_RO sha1 numkeys key [key ...] arg [arg ...]',
+  FCALL_RO: 'FCALL_RO function numkeys key [key ...] arg [arg ...]',
   GEOHASH: 'GEOHASH key member [member ...]',
   GEOPOS: 'GEOPOS key member [member ...]',
   GEODIST: 'GEODIST key member1 member2 [unit]',
@@ -314,6 +331,8 @@ const ADMIN_READ_SUBCOMMANDS: Record<string, readonly string[]> = {
   MEMORY: ['DOCTOR', 'HELP', 'MALLOC-STATS', 'STATS', 'USAGE'],
   MODULE: ['LIST'],
   SLOWLOG: ['GET', 'LEN', 'HELP', 'COUNT'],
+  // sentinel-over-SSH 发现 master 需要它；fail-closed 漏了它会把整条 SSH sentinel 路径拦死。
+  SENTINEL: ['MASTERS', 'MASTER', 'GET-MASTER-ADDR-BY-NAME', 'REPLICAS', 'SLAVES', 'SENTINELS', 'CKQUORUM', 'MYID', 'INFO-CACHE', 'IS-MASTER-DOWN-BY-ADDR'],
 };
 
 /** admin 命令是否为已知只读子命令（fail-closed）。 */

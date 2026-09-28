@@ -867,6 +867,7 @@ export const en: MessageCatalog = {
   // ── P7：Redis 面板 ──
   'cmd.redis.cliUnsupported': 'Redis CLI is not supported in this build.',
   'cmd.redis.emptyCommand': 'Enter a command.',
+  'cmd.redis.selectDisabled': 'SELECT is not supported in the CLI; use the database switcher.',
   'cmd.redis.dangerCancelled': 'Command cancelled.',
   'redis.tree.open': 'Open',
   'redis.tree.loadMore': 'Load more…',

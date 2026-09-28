@@ -134,6 +134,17 @@ describe('RedisView CLI 管线与审计', () => {
     expect(JSON.stringify(h.audits)).not.toContain('hunter2');
   });
 
+  it('CLI 禁止 SELECT：不发包、返回错误（防错库）', async () => {
+    const { view, sent } = makeView();
+    await mount(view, sent);
+
+    await view.handleMessage({ type: 'runCommand', id: '1', line: 'SELECT 3' });
+    expect(sent.some(([n, a]) => n.toUpperCase() === 'SELECT' && a.join() === '3')).toBe(false);
+    const sel = posts(view).find((m) => m.type === 'commandResult');
+    expect(sel.ok).toBe(false);
+    expect(sel.error).toContain('SELECT');
+  });
+
   it('拒绝确认：不执行、不审计，回取消错误', async () => {
     const { view, sent } = makeView();
     await mount(view, sent);

@@ -521,13 +521,13 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
       const started = Date.now();
       try {
         const session = await this.sessionForDb();
-        const raw = await session.client.sendCommand(name, args);
-        // CLI 执行 SELECT 后同步 session.db，否则下一轮 sessionForDb 会因 target===session.db
-        // 跳过 SELECT，命令实际落在 CLI 选中的库（与面板/审计显示不一致）。
-        if (name.toLowerCase() === 'select' && !session.client.isCluster) {
-          const n = Number(args[0]);
-          if (Number.isInteger(n) && n >= 0) session.db = n;
+        // CLI 禁止 SELECT：面板/树/审计都按「本视图绑定的 db」工作，CLI 里换库会与它们分裂
+        // （下一条命令进 sessionForDb 又会 select 回原库，破坏性命令落到错库）。用 DB 切换器换库。
+        if (name.toLowerCase() === 'select') {
+          this.post({ type: 'commandResult', id, command: line, ok: false, result: '', costMs: Date.now() - started, error: l10n('cmd.redis.selectDisabled') });
+          return;
         }
+        const raw = await session.client.sendCommand(name, args);
         const costMs = Date.now() - started;
         if (isWriteCommand(name, args) || isDangerousCommand(name, args)) {
           this.audit(name, redisAuditLine(name, args).slice(name.length).trim(), costMs);

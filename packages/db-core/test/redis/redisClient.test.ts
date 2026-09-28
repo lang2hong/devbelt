@@ -231,6 +231,14 @@ describe('RedisClient 只读拦截', () => {
     }
   });
 
+  it('fail-closed：SENTINEL 只读子命令放行、写子命令拦截（sentinel-over-SSH 需要）', async () => {
+    const { client } = make({ readOnly: true });
+    await expect(client.sendCommand('SENTINEL', ['get-master-addr-by-name', 'm'])).resolves.toBeDefined();
+    await expect(client.sendCommand('SENTINEL', ['MASTERS'])).resolves.toBeDefined();
+    await expect(client.sendCommand('SENTINEL', ['RESET', 'm'])).rejects.toBeInstanceOf(RedisReadOnlyError);
+    await expect(client.sendCommand('SENTINEL', ['SET', 'm', 'a', 'b'])).rejects.toBeInstanceOf(RedisReadOnlyError);
+  });
+
   it('Buffer 参数按原始值判定（<buffer:N> 占位符不再绕过子命令检查）', async () => {
     const { client, fake } = make({ readOnly: true });
     await expect(client.sendCommandBuffer('CONFIG', [Buffer.from('SET'), Buffer.from('a'), Buffer.from('b')]))
