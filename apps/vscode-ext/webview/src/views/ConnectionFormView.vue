@@ -77,12 +77,18 @@ const isSqlite = computed(() => form.dbType === 'SQLITE');
 const isPg = computed(() => form.dbType === 'PG');
 const isRedis = computed(() => form.dbType === 'REDIS');
 
+/** 默认用户名：Redis 为空；SQL 为 root。 */
+function defaultUserFor(dbType: string): string {
+  return dbType === 'REDIS' ? '' : 'root';
+}
 
 function syncType(): void {
   if (form.dbType === 'PG') form.port = '5432';
   else if (form.dbType === 'MYSQL') form.port = '3306';
   else if (form.dbType === 'REDIS') form.port = '6379';
   if (isSqlite.value) form.host = '';
+  // Redis 默认空用户名：切换到 Redis 时，若仍是 SQL 的默认 root，清空。
+  if (form.dbType === 'REDIS' && form.user === 'root') form.user = '';
 }
 
 function collect(): Record<string, unknown> {
@@ -112,6 +118,9 @@ function prefill(c: Record<string, any>): void {
     const defVal = (defaultForm as any)[key];
     if (typeof defVal === 'boolean') {
       (form as any)[key] = !!val;
+    } else if (key === 'user') {
+      // 用户名按类型给默认：Redis 空，SQL root（空值不再回退成 root）。
+      (form as any)[key] = val !== undefined && val !== null && val !== '' ? val : defaultUserFor(form.dbType);
     } else if (val !== undefined && val !== null) {
       (form as any)[key] = val;
     } else {
