@@ -67,6 +67,38 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
     }
   });
 
+  it('006_redis_engine：存量库幂等补 redis（重复执行不重复追加）', async () => {
+    const pool = createTestPool();
+    const readFree = async (): Promise<unknown> => {
+      const [rows] = (await pool.query(
+        `SELECT v.value_json
+           FROM plans p
+           JOIN plan_feature_values v ON v.plan_id = p.id
+           JOIN plan_feature_defs d ON d.id = v.feature_def_id
+          WHERE p.code = 'free' AND d.feature_key = 'allowedDatabaseTypes'`,
+      )) as [Array<{ value_json: unknown }>, unknown];
+      const raw = rows[0]?.value_json;
+      return typeof raw === 'string' ? JSON.parse(raw) : raw;
+    };
+    try {
+      await dropAll(pool);
+      // 模拟「已跑过 001（无 redis）」的存量库。
+      const legacy = migrations.filter((m) => m.version !== '006_redis_engine');
+      await runMigrations(pool as any, [...legacy], LEGACY_MIGRATION_VERSIONS);
+      expect(await readFree()).toEqual(['mysql', 'sqlite']);
+
+      // 增量 006 补上 redis。
+      await runMigrations(pool as any, [...migrations], LEGACY_MIGRATION_VERSIONS);
+      expect(await readFree()).toEqual(['mysql', 'sqlite', 'redis']);
+
+      // 再跑一次：幂等，不重复追加。
+      await runMigrations(pool as any, [...migrations], LEGACY_MIGRATION_VERSIONS);
+      expect(await readFree()).toEqual(['mysql', 'sqlite', 'redis']);
+    } finally {
+      await pool.end();
+    }
+  });
+
   it('accepts a legacy ledger (001–024) and rebuilds via baseline', async () => {
     const pool = createTestPool();
     try {

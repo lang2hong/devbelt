@@ -508,7 +508,7 @@ export const baselineMigration: Migration = {
     }
 
     const values: ReadonlyArray<[string, string, unknown]> = [
-      ['free', 'allowedDatabaseTypes', ['mysql', 'sqlite', 'redis']],
+      ['free', 'allowedDatabaseTypes', ['mysql', 'sqlite']],
       ['free', 'maxSavedConnections', 10],
       ['free', 'maxConnectionMetas', 500],
       ['free', 'syncStorageBytes', 33554432],
