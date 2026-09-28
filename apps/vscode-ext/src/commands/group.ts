@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { DbTreeNode, NodeKind } from '../tree/dbTreeNode';
 import { l10n } from '../i18n';
+import { diagInfo } from '../utils/diagnostics';
 import { flattenGroups } from '../utils/groupTree';
 import type { Deps, Sub } from './shared';
 import { confirm, openQueryFile } from './shared';
@@ -118,6 +119,7 @@ export function registerGroupCommands(deps: Deps, sub: Sub): void {
       const confirmLabel = l10n('tree.deleteGroupConfirm');
       if ((await vscode.window.showWarningMessage(message, { modal: true }, confirmLabel)) !== confirmLabel) return;
       await store.removeGroup(node.groupId);
+      diagInfo('group remove', { id: node.groupId, cascadeConnections: 0 });
       treeProvider.refresh();
       return;
     }
@@ -132,9 +134,11 @@ export function registerGroupCommands(deps: Deps, sub: Sub): void {
     );
     if (picked === keep) {
       await store.removeGroup(node.groupId);
+      diagInfo('group remove', { id: node.groupId, cascadeConnections: 0 });
     } else if (picked === removeAll) {
       // 与 deleteConnection 一致：关闭被级联删除连接的运行时会话（连接池/SSH 隧道）。
       const deleted = await store.removeGroupWithConnections(node.groupId);
+      diagInfo('group remove', { id: node.groupId, cascadeConnections: deleted.length });
       for (const connId of deleted) manager.disposeConn(connId);
     } else {
       return; // 取消/关闭
@@ -154,6 +158,7 @@ export function registerGroupCommands(deps: Deps, sub: Sub): void {
     const picked = await vscode.window.showQuickPick(items, { placeHolder: l10n('tree.moveGroup') });
     if (!picked) return;
     await store.moveToGroup(node.conn.id, picked.target);
+    diagInfo('connection move', { id: node.conn.id, toGroup: picked.target ?? null });
     treeProvider.refresh();
   });
 }

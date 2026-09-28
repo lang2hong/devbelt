@@ -8,6 +8,7 @@ import { encodeBase64Url } from '@devbelt/db-host/sync/crypto/recoveryCode';
 import type { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
 import { canUseDataSync } from '@devbelt/db-host/sync/entitlementGate';
 import { l10n } from '../i18n';
+import { diagInfo } from '../utils/diagnostics';
 
 type SyncRun = { stage: string; skippedEntitlement?: number; skippedOutbound?: number } | undefined;
 
@@ -322,6 +323,7 @@ async function runExplicitSync(
     deps.ui.warn(l10n('sync.requiresUnlock'));
     return;
   }
+  diagInfo('sync trigger', { trigger: `manual-${op}`, autoSync: false });
   try {
     reportInitialRun(deps.ui, await run(session), op);
   } catch {

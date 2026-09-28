@@ -9,6 +9,9 @@ vi.mock('vscode', () => ({
   commands: { executeCommand: mocks.executeCommand },
 }));
 
+// 诊断日志依赖 vscode 输出通道；命令测试里 mock 掉，避免触发真实通道。
+vi.mock('../../src/utils/diagnostics', () => ({ diagInfo: vi.fn(), diagWarn: vi.fn(), diagError: vi.fn() }));
+
 import { initializePersonalSync, unlockPersonalSync, syncEntry, pullPersonalSync, pushPersonalSync, syncNowPersonalSync, resetLocalSync, type PersonalSyncCommandDeps, type SyncSessionPort, type SyncUi } from '../../src/commands/personalSync';
 import { SyncApiError } from '@devbelt/db-host/sync/e2e/client';
 import type { InitialSyncMaterial } from '@devbelt/db-host/sync/keyLifecycle';

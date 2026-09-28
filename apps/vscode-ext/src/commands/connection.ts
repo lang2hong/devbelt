@@ -8,7 +8,7 @@ import { l10n } from '../i18n';
 import { AuditLogger } from '../utils/auditLogger';
 import { flattenGroups } from '../utils/groupTree';
 import { hasUrlCredentials, stripUrlCredentials } from '../utils/connectionUrl';
-import { diagWarn } from '../utils/diagnostics';
+import { diagInfo, diagWarn } from '../utils/diagnostics';
 import { chmod, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import type { RedisConnectionSession } from '../connection/connectionSession';
@@ -97,6 +97,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     if (!node?.conn) return;
     if (!(await confirm('conn.deleteConfirm', 'table.delete', node.conn.name || node.conn.host))) return;
     await store.remove(node.conn.id);
+    diagInfo('connection remove', { id: node.conn.id });
     manager.disposeConn(node.conn.id);
     treeProvider.refresh();
   });

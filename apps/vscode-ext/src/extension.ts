@@ -178,6 +178,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     entitlement: () => auth.getCachedEntitlement(),
     autoSyncEnabled: isAutoSyncEnabled,
     onSyncResult: (result) => {
+      // 同步可观测：每轮结果落诊断通道，便于确认「是否真的同步了 / 结果如何」。
+      diagInfo('sync run', {
+        stage: result?.stage,
+        applied: result?.applied,
+        skippedEntitlement: result?.skippedEntitlement,
+        skippedOutbound: result?.skippedOutbound,
+      });
       // 入站 pull 应用了变更才刷树（避免每次空同步都整树刷新），并重算路径 warning；
       // 其余情况仅刷新状态栏。
       if (result && result.applied > 0) void treeProvider.refreshPathIssues();
@@ -202,12 +209,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     void syncLoggedInContext(auth);
   });
   context.subscriptions.push(onAuthChange);
+  // 同步可观测：本地用户改动（连接/分组/查询）后是否会自动排同步（取决于自动同步开关）。
+  context.subscriptions.push(store.onChanged((source) => {
+    if (source !== 'user') return;
+    diagInfo('sync trigger', { trigger: 'store-change', autoSync: isAutoSyncEnabled() });
+  }));
   // 窗口聚焦补同步（后台、无提示）。显式「立即同步」命令在 personalSync 注册并反馈结果。
   context.subscriptions.push(
     vscode.window.onDidChangeWindowState((e) => {
       if (!e.focused) return;
       // 自动同步关闭时不因切窗触发同步（手动命令仍可用）。
       if (!isAutoSyncEnabled()) return;
+      diagInfo('sync trigger', { trigger: 'focus', autoSync: true });
       const session = syncFactory.current;
       // stalled 后跳过自动聚焦同步，避免冲突/终止性错误在切窗时被反复自动重发；
       // 用户仍可通过 devbelt.syncNow 手动重试。
@@ -226,6 +239,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (!e.affectsConfiguration(SYNC_AUTO_SYNC_KEY)) return;
       syncStatusBar.refresh();
       if (!isAutoSyncEnabled()) return;
+      diagInfo('sync trigger', { trigger: 'config-enable', autoSync: true });
       const session = syncFactory.current;
       if (session?.isUnlocked && !session.stalled) session.scheduleNow();
     }),
