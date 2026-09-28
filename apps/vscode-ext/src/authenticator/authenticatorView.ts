@@ -242,7 +242,9 @@ export class AuthenticatorView extends BaseWebView {
 
   private async onAddTag(msg: Extract<AuthenticatorUpMessage, { type: 'addTag' }>): Promise<void> {
     const res = await this.store.addTag(msg.name, msg.color);
-    if (!res.ok) this.postFormError('name', res.reason === 'invalidName' ? 'authenticator.err.invalidName' : 'authenticator.err.invalidColor');
+    if (!res.ok) { this.postFormError('name', res.reason === 'invalidName' ? 'authenticator.err.invalidName' : 'authenticator.err.invalidColor'); return; }
+    // 回传新标签 id：添加/编辑表单里新建标签后据此自动勾选。
+    this.post({ type: 'tagAdded', id: res.tag.id });
   }
 
   private async onRemoveTag(msg: Extract<AuthenticatorUpMessage, { type: 'removeTag' }>): Promise<void> {

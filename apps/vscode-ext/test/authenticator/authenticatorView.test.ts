@@ -200,6 +200,18 @@ describe('AuthenticatorView (panel)', () => {
     expect(p.posted.some((m) => m.type === 'formError')).toBe(true);
   });
 
+  it('addTag 成功 → 回传 tagAdded(id)，供表单自动勾选', async () => {
+    const p = makePanel();
+    const store = makeStore();
+    AuthenticatorView.open(store);
+    p.send({ type: 'ready', __load: 'L1' });
+    await flush();
+    p.send({ type: 'addTag', name: 'work', color: 'blue' });
+    await flush();
+    expect(store.addTag).toHaveBeenCalledWith('work', 'blue');
+    expect(p.posted.some((m) => m.type === 'tagAdded' && m.id === 't')).toBe(true);
+  });
+
   it('add with unknown prefillId is rejected and never reaches store', async () => {
     const p = makePanel();
     const store = makeStore();

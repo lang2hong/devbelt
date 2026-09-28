@@ -55,7 +55,8 @@ const tagPrompt = ref<{ name: string; color: TagColorKey } | null>(null);
 const menuFor = ref<string | null>(null);
 const groupMenuFor = ref<string | null>(null);
 const confirmDeleteId = ref<string | null>(null);
-const confirmTagDeleteId = ref<string | null>(null);
+/** 待删除标签 id：点 × 打开确认弹框（取代旧的两步 ✓/×，避免误解）。 */
+const tagDeleteId = ref<string | null>(null);
 const confirmDeleteGroupId = ref<string | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const imgBusy = ref(false);
@@ -174,6 +175,9 @@ function onMsg(msg: any): void {
   } else if (msg.type === 'groupAdded') {
     // 在添加表单里新建分组后自动选中它
     if (formOpen.value && typeof msg.id === 'string') form.groupId = msg.id;
+  } else if (msg.type === 'tagAdded') {
+    // 在添加/编辑表单里新建标签后自动勾选它
+    if (formOpen.value && typeof msg.id === 'string' && !form.tags.includes(msg.id)) form.tags.push(msg.id);
   } else if (msg.type === 'prefillAdd') {
     // 粘贴链接/扫码：打开预填添加表单（无 secret，宿主持有），强制选/新建分组。
     editingId.value = null;
@@ -400,14 +404,15 @@ function submitTagPrompt(): void {
   promptError.value = '';
   if (name) post({ type: 'addTag', name, color: p.color });
 }
-function requestDeleteTag(id: string): void {
-  if (confirmTagDeleteId.value === id) {
-    post({ type: 'removeTag', id });
-    confirmTagDeleteId.value = null;
-    if (activeTag.value === id) activeTag.value = null;
-  } else {
-    confirmTagDeleteId.value = id;
-  }
+function tagNameOf(id: string): string { return tags.value.find((x) => x.id === id)?.name ?? ''; }
+function tagUsageCount(id: string): number { return entries.value.filter((e) => e.tags.includes(id)).length; }
+function requestDeleteTag(id: string): void { tagDeleteId.value = id; }
+function confirmDeleteTag(): void {
+  const id = tagDeleteId.value;
+  if (!id) return;
+  tagDeleteId.value = null;
+  post({ type: 'removeTag', id });
+  if (activeTag.value === id) activeTag.value = null;
 }
 
 onMounted(() => {
@@ -457,7 +462,7 @@ onUnmounted(() => {
         @click="activeTag = tg.id"
       >
         <span class="dot" :style="{ background: TAG_HEX[tg.color] }" />{{ tg.name }}
-        <span class="tag-x" :title="t('wv.authenticator.tag.delete')" @click.stop="requestDeleteTag(tg.id)">{{ confirmTagDeleteId === tg.id ? '✓' : '×' }}</span>
+        <span class="tag-x" :title="t('wv.authenticator.tag.delete')" @click.stop="requestDeleteTag(tg.id)">×</span>
       </button>
       <button class="tagchip add" @click="openTagPrompt">＋{{ t('wv.authenticator.tag.new') }}</button>
     </div>
@@ -477,6 +482,18 @@ onUnmounted(() => {
       <input v-model="groupPrompt.value" class="inline-input" :placeholder="t('wv.authenticator.group.prompt')" @keydown.enter="submitGroupPrompt" />
       <button class="btn" @click="submitGroupPrompt">{{ t('wv.common.save') }}</button>
       <button class="btn" @click="groupPrompt = null">{{ t('wv.common.cancel') }}</button>
+    </div>
+
+    <!-- 删除标签：点 × 直接确认（不再两步 ✓/×） -->
+    <div v-if="tagDeleteId" class="modal-mask" @click.self="tagDeleteId = null">
+      <div class="modal">
+        <div class="modal-title">{{ t('wv.authenticator.tag.delete') }}</div>
+        <div class="modal-msg">{{ t('wv.authenticator.tag.deleteConfirm', { name: tagNameOf(tagDeleteId), count: String(tagUsageCount(tagDeleteId)) }) }}</div>
+        <div class="modal-actions">
+          <button class="btn primary" @click="confirmDeleteTag">{{ t('wv.common.delete') }}</button>
+          <button class="btn" @click="tagDeleteId = null">{{ t('wv.common.cancel') }}</button>
+        </div>
+      </div>
     </div>
 
     <!-- 新建分组：模态对话框（重命名/上方/下方插入仍用内联条） -->
@@ -551,12 +568,14 @@ onUnmounted(() => {
           v-for="tg in tags"
           :key="tg.id"
           class="tagchip"
-          :class="{ active: form.tags.includes(tg.id) }"
+          :class="{ selected: form.tags.includes(tg.id) }"
           :style="{ borderColor: TAG_HEX[tg.color] }"
+          :aria-pressed="form.tags.includes(tg.id)"
           @click="toggleFormTag(tg.id)"
         >
-          <span class="dot" :style="{ background: TAG_HEX[tg.color] }" />{{ tg.name }}
+          <span v-if="form.tags.includes(tg.id)" class="tick">✓</span><span class="dot" :style="{ background: TAG_HEX[tg.color] }" />{{ tg.name }}
         </button>
+        <button class="tagchip add" @click="openTagPrompt">＋{{ t('wv.authenticator.tag.new') }}</button>
       </div>
       <div v-if="formError" class="form-error">{{ formError }}</div>
       <div class="form-actions">
@@ -656,7 +675,9 @@ input, select { background: var(--vscode-input-background); color: var(--vscode-
 .iconbtn:disabled { opacity: 0.5; cursor: default; }
 .tagbar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .tagchip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid transparent; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
-.tagchip.active { background: var(--vscode-list-activeSelectionBackground, rgba(128,128,128,0.3)); }
+.tagchip.active, .tagchip.selected { background: var(--vscode-list-activeSelectionBackground, rgba(128,128,128,0.3)); }
+.tagchip.selected { border-width: 2px; font-weight: 600; }
+.tagchip .tick { font-size: 10px; }
 .tagchip .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .tagchip .tag-x { opacity: 0.5; margin-left: 2px; }
 .tagchip .tag-x:hover { opacity: 1; }
@@ -667,6 +688,7 @@ input, select { background: var(--vscode-input-background); color: var(--vscode-
 .modal-mask { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.4); }
 .modal { width: min(360px, 90vw); padding: 14px; border-radius: 8px; display: flex; flex-direction: column; gap: 10px; background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.3)); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3); }
 .modal-title { font-weight: 600; }
+.modal-msg { font-size: 12px; opacity: 0.9; line-height: 1.5; }
 .modal-input { width: 100%; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 6px; }
 .prefill-note { font-size: 12px; opacity: 0.8; }

@@ -837,6 +837,7 @@ export const en: MessageCatalog = {
   'wv.authenticator.tag.all': 'All',
   'wv.authenticator.tag.new': 'New tag',
   'wv.authenticator.tag.delete': 'Delete tag',
+  'wv.authenticator.tag.deleteConfirm': 'Delete tag "{name}"? It will be removed from {count} code(s).',
   'wv.authenticator.form.issuer': 'Issuer',
   'wv.authenticator.form.account': 'Account',
   'wv.authenticator.form.secret': 'Secret (base32)',

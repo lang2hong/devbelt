@@ -125,6 +125,7 @@ export type AuthenticatorDownMessage =
   | { type: 'formError'; field?: string; message: string; source?: 'form' | 'external' }
   | { type: 'openAddForm' }
   | { type: 'groupAdded'; id: string }
+  | { type: 'tagAdded'; id: string }
   | { type: 'prefillAdd'; prefillId: string; entry: {
       issuer: string; account?: string;
       algorithm: TotpAlgorithm; digits: 6 | 8; period: 30 | 60;

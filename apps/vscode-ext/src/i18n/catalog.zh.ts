@@ -815,6 +815,7 @@ export const zh: MessageCatalog = {
   'wv.authenticator.tag.all': '全部',
   'wv.authenticator.tag.new': '新建标签',
   'wv.authenticator.tag.delete': '删除标签',
+  'wv.authenticator.tag.deleteConfirm': '删除标签「{name}」？将从 {count} 个验证码中移除。',
   'wv.authenticator.form.issuer': '发行方',
   'wv.authenticator.form.account': '账号',
   'wv.authenticator.form.secret': '密钥（base32）',
