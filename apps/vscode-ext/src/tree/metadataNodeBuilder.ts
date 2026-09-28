@@ -26,6 +26,15 @@ export interface MetadataSource {
 export class MetadataNodeBuilder {
   constructor(private readonly metadata: MetadataSource) {}
 
+  /**
+   * 稳定节点 id：父节点 id（分类节点）作基，退化为连接+库；确保整树 refresh 后展开态不丢。
+   * 同层按 `kind:name` 唯一（routine 名称在不同类型下可能重名，故带 kind）。
+   */
+  private idFor(parent: DbTreeNode, conn: SavedConnection, database: string, kind: string, name: string): string {
+    const base = parent.id || `${conn.id}:sqldb:${database}`;
+    return `${base}:${kind}:${name}`;
+  }
+
   /** 按分类类型构建对象节点列表。 */
   async build(categoryType: CategoryType, conn: SavedConnection, database: string, parent: DbTreeNode): Promise<DbTreeNode[]> {
     switch (categoryType) {
@@ -56,6 +65,7 @@ export class MetadataNodeBuilder {
       } else if (t.comment) {
         node.description = t.comment;
       }
+      node.id = this.idFor(parent, conn, database, 'tbl', t.name);
       node.tooltip = formatTableTooltip(t);
       node.command = { command: 'devbelt.previewTable', title: 'Preview', arguments: [node] };
       return node;
@@ -75,6 +85,7 @@ export class MetadataNodeBuilder {
         undefined,
         database,
       );
+      node.id = this.idFor(parent, conn, database, 'view', v.name);
       node.command = { command: 'devbelt.previewView', title: 'Preview', arguments: [node] };
       return node;
     });
@@ -94,6 +105,7 @@ export class MetadataNodeBuilder {
         database,
         r.type,
       );
+      node.id = this.idFor(parent, conn, database, r.type === 'PROCEDURE' ? 'proc' : 'fn', r.name);
       node.command = { command: 'devbelt.openRoutine', title: 'Open', arguments: [node] };
       return node;
     });
@@ -112,6 +124,7 @@ export class MetadataNodeBuilder {
         undefined,
         database,
       );
+      node.id = this.idFor(parent, conn, database, 'evt', e.name);
       node.command = { command: 'devbelt.openEvent', title: 'Open', arguments: [node] };
       return node;
     });

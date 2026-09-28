@@ -50,6 +50,17 @@ describe('MetadataNodeBuilder', () => {
     expect(nodes[0].collapsible).toBe(TreeItemCollapsibleState.Collapsed);
   });
 
+  it('对象节点带稳定 id（整树 refresh 后保展开态）', async () => {
+    expect((await builder.build('table', conn, 'test', parent)).map((n) => n.id)).toEqual([
+      'c1:sqldb:test:tbl:users',
+      'c1:sqldb:test:tbl:audit',
+      'c1:sqldb:test:tbl:empty',
+    ]);
+    expect((await builder.build('view', conn, 'test', parent))[0].id).toBe('c1:sqldb:test:view:v_active');
+    expect((await builder.build('function', conn, 'test', parent))[0].id).toBe('c1:sqldb:test:proc:proc_x');
+    expect((await builder.build('event', conn, 'test', parent))[0].id).toBe('c1:sqldb:test:evt:daily_job');
+  });
+
   it('view 节点可折叠为空 + previewView command', async () => {
     const nodes = await builder.build('view', conn, 'test', parent);
     expect(nodes).toHaveLength(1);

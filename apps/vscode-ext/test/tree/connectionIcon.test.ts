@@ -55,6 +55,18 @@ function iconOf(node: { iconPath?: unknown }): string {
 }
 
 describe('连接节点图标状态', () => {
+  it('分组与连接节点带稳定 id（整树 refresh 不折叠展开态）', async () => {
+    const store = {
+      getVisibleTreeData: () => ({ groups: [{ id: 'g1', name: 'G', parentId: undefined }], connections: [conn] }),
+      get: (id: string) => (id === 'c1' ? conn : undefined),
+      onChanged: () => ({ dispose() { /* noop */ } }),
+    };
+    const provider = new DbTreeDataProvider(store as never, {} as never, undefined, { toString: () => 'ext' } as never);
+    const root = await provider.getChildren();
+    expect(root.find((n) => n.kind === NodeKind.Group)?.id).toBe('group:g1');
+    expect(root.find((n) => n.kind === NodeKind.Connection)?.id).toBe('closed_c1');
+  });
+
   it('未打开=dim，打开=彩色，当前选中且已打开=active(绿点)', async () => {
     const provider = makeProvider();
     let node = (await provider.getChildren()).find((n) => n.kind === NodeKind.Connection)!;

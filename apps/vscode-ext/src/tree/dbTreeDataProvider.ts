@@ -291,31 +291,20 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         return node;
       });
     }
-    const session = await this.manager.connectSql(element.conn);
+    const conn = element.conn;
+    const session = await this.manager.connectSql(conn);
     if (!session.capabilities.multiDatabaseExplorer) {
-      return [
-        new DbTreeNode(
-          element.conn.database || (element.conn.dbType === DatabaseType.PG ? 'public' : 'main'),
-          TreeItemCollapsibleState.Collapsed,
-          NodeKind.Database,
-          element.conn,
-          undefined,
-          element,
-        ),
-      ];
+      const only = conn.database || (conn.dbType === DatabaseType.PG ? 'public' : 'main');
+      const n = new DbTreeNode(only, TreeItemCollapsibleState.Collapsed, NodeKind.Database, conn, undefined, element);
+      n.id = `${conn.id}:sqldb:${only}`;
+      return [n];
     }
     const dbs = await session.metadata.getDatabases();
-    return dbs.map(
-      (db) =>
-        new DbTreeNode(
-          db,
-          TreeItemCollapsibleState.Collapsed,
-          NodeKind.Database,
-          element.conn,
-          undefined,
-          element,
-        ),
-    );
+    return dbs.map((db) => {
+      const n = new DbTreeNode(db, TreeItemCollapsibleState.Collapsed, NodeKind.Database, conn, undefined, element);
+      n.id = `${conn.id}:sqldb:${db}`;
+      return n;
+    });
   }
 
   /** 数据库节点子节点：按方言能力过滤分类（表/视图始终显示） */
@@ -335,19 +324,20 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     categories.push({ type: 'query', label: l10n('cat.queries') });
     // 用户不是库级对象：`getUsers()` 与库无关，挂在库下会让 MySQL 的 20 个库
     // 各显示一份完全相同的用户列表。改为连接右键打开专门的用户管理面板。
-    return categories.map(
-      (c) =>
-        new DbTreeNode(
-          c.label,
-          TreeItemCollapsibleState.Collapsed,
-          NodeKind.Category,
-          element.conn,
-          undefined,
-          element,
-          c.type,
-          element.label,
-        ),
-    );
+    return categories.map((c) => {
+      const n = new DbTreeNode(
+        c.label,
+        TreeItemCollapsibleState.Collapsed,
+        NodeKind.Category,
+        element.conn,
+        undefined,
+        element,
+        c.type,
+        element.label,
+      );
+      n.id = `${element.id}:cat:${c.type}`;
+      return n;
+    });
   }
 
   // ───────────── D*：Redis 只读键导航（根扁平 SCAN + 客户端折叠） ─────────────
@@ -761,22 +751,23 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     if (!db || !conn || !catType) return [];
 
     if (catType === 'query') {
-      const folderNodes = this.store.getQueryFolders(conn.id).map(
-        (folder) =>
-          new DbTreeNode(
-            folder.name,
-            TreeItemCollapsibleState.Collapsed,
-            NodeKind.QueryFolder,
-            conn,
-            undefined,
-            element,
-            undefined,
-            db,
-            undefined,
-            undefined,
-            folder.id,
-          ),
-      );
+      const folderNodes = this.store.getQueryFolders(conn.id).map((folder) => {
+        const n = new DbTreeNode(
+          folder.name,
+          TreeItemCollapsibleState.Collapsed,
+          NodeKind.QueryFolder,
+          conn,
+          undefined,
+          element,
+          undefined,
+          db,
+          undefined,
+          undefined,
+          folder.id,
+        );
+        n.id = `${conn.id}:sqldb:${db}:qf:${folder.id}`;
+        return n;
+      });
       const queryNodes = this.store.getQueriesInFolder(conn.id, db).map(
         (q) => {
           const n = new DbTreeNode(
@@ -792,6 +783,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
             q.id,
           );
           n.command = { command: 'devbelt.openQuery', title: 'Open', arguments: [n] };
+          n.id = `${conn.id}:sqldb:${db}:q:${q.id}`;
           return n;
         },
       );
@@ -825,6 +817,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const indexes = await session.metadata.getIndexes(table, db);
     return indexes.map((idx: any) => {
       const node = new DbTreeNode(idx.name, TreeItemCollapsibleState.None, NodeKind.Index, conn, undefined, element, undefined, db);
+      node.id = `${element.id}:idx:${idx.name}`;
       node.description = [
         idx.columns?.join(', '),
         idx.isPrimary ? 'PK' : idx.isUnique ? 'UNIQUE' : '',
@@ -840,6 +833,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const triggers = await session.metadata.getTriggers(table, db);
     return triggers.map((t: any) => {
       const node = new DbTreeNode(t.name, TreeItemCollapsibleState.None, NodeKind.Trigger, conn, undefined, element, undefined, db);
+      node.id = `${element.id}:trg:${t.name}`;
       node.description = [t.timing, t.event].filter(Boolean).join(' ');
       node.command = { command: 'devbelt.viewTrigger', title: 'View', arguments: [node] };
       return node;
@@ -864,6 +858,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
           undefined,
           db,
         );
+        node.id = `${element.id}:fk:${f.constraintName ?? `${f.columnName}>${f.refTable}.${f.refColumn}`}`;
         node.refTable = f.refTable;
         node.refColumn = f.refColumn;
         node.constraintName = f.constraintName;
@@ -892,6 +887,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
           q.id,
         );
         n.command = { command: 'devbelt.openQuery', title: 'Open', arguments: [n] };
+        n.id = `${conn.id}:sqldb:${db}:q:${q.id}`;
         return n;
       },
     );
@@ -913,6 +909,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         undefined,
         element.database,
       );
+      node.id = `${element.id}:col:${col.name}`;
       node.description = `${col.simpleType || col.type}`;
       if (col.isPrimary) {
         node.iconPath = new ThemeIcon('key', new ThemeColor('charts.yellow'));
@@ -926,9 +923,13 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
 
     const caps = session.capabilities;
     const subCategories: DbTreeNode[] = [];
-    const mkCat = (type: CategoryType, label: string) => new DbTreeNode(
-      label, TreeItemCollapsibleState.Collapsed, NodeKind.Category, element.conn, undefined, element, type, element.database,
-    );
+    const mkCat = (type: CategoryType, label: string) => {
+      const n = new DbTreeNode(
+        label, TreeItemCollapsibleState.Collapsed, NodeKind.Category, element.conn, undefined, element, type, element.database,
+      );
+      n.id = `${element.id}:cat:${type}`;
+      return n;
+    };
     if (caps.operations.includes('manageIndexes')) {
       subCategories.push(mkCat('index', l10n('cat.indexes')));
       subCategories.push(mkCat('trigger', l10n('cat.triggers')));
@@ -945,14 +946,11 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const topGroups = data.groups.filter((g) => !g.parentId || !visibleGroupIds.has(g.parentId));
     const ungrouped = data.connections.filter((c) => !c.groupId || !visibleGroupIds.has(c.groupId));
     const gNodes = topGroups.map(
-      (g) =>
-        new DbTreeNode(
-          g.name,
-          TreeItemCollapsibleState.Collapsed,
-          NodeKind.Group,
-          undefined,
-          g.id,
-        ),
+      (g) => {
+        const n = new DbTreeNode(g.name, TreeItemCollapsibleState.Collapsed, NodeKind.Group, undefined, g.id);
+        n.id = `group:${g.id}`; // 稳定 id：整树 refresh 后保住展开态
+        return n;
+      },
     );
     const cNodes = ungrouped.map((c) => this.makeConnectionNode(this.withCredentials(c)));
     return [...gNodes, ...cNodes];
@@ -964,14 +962,11 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const childGroups = data.groups.filter((g) => g.parentId === groupId);
     const conns = data.connections.filter((c) => c.groupId === groupId);
     const gNodes = childGroups.map(
-      (g) =>
-        new DbTreeNode(
-          g.name,
-          TreeItemCollapsibleState.Collapsed,
-          NodeKind.Group,
-          undefined,
-          g.id,
-        ),
+      (g) => {
+        const n = new DbTreeNode(g.name, TreeItemCollapsibleState.Collapsed, NodeKind.Group, undefined, g.id);
+        n.id = `group:${g.id}`;
+        return n;
+      },
     );
     const cNodes = conns.map((c) => this.makeConnectionNode(this.withCredentials(c)));
     return [...gNodes, ...cNodes];
