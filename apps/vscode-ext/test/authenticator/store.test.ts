@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { AuthenticatorStore } from '../../src/authenticator/store';
-import { ENTRIES_KEY } from '../../src/authenticator/types';
+import { ENTRIES_KEY, GROUPS_KEY } from '../../src/authenticator/types';
 import { encodeBase32UpperCaseNoPadding } from '@devbelt/db-host/authenticator/base32';
 
 /** In-memory Memento stub (Map-backed, same shape as vscode.Memento). */
@@ -349,17 +349,44 @@ describe('AuthenticatorStore', () => {
     expect(store.isSecretMissing(add.entry.id)).toBe(true);
   });
 
-  it('deleteGroup sets entries groupId to undefined (no orphan default group)', async () => {
+  it('deleteGroup cascades: deletes member entries and their secrets (no ungrouped fallback)', async () => {
     const g = await store.addGroup('Work');
     expect(g.ok).toBe(true);
     if (!g.ok) return;
     const add = await store.addEntry({ issuer: 'A', account: 'a', secret: 'JBSWY3DPEHPK3PXP', groupId: g.group.id });
     expect(add.ok).toBe(true);
     if (!add.ok) return;
-    expect((store.listEntries().find((e) => e.id === add.entry.id)!).groupId).toBe(g.group.id);
+    expect(store.getSecret(add.entry.id)).toBeDefined();
     const dg = await store.deleteGroup(g.group.id);
     expect(dg.ok).toBe(true);
-    expect((store.listEntries().find((e) => e.id === add.entry.id)!).groupId).toBeUndefined();
+    expect(store.listEntries().find((e) => e.id === add.entry.id)).toBeUndefined();
+    expect(store.getSecret(add.entry.id)).toBeUndefined();
+    expect(sec.map.has(`devbelt.authenticator.${add.entry.id}.secret`)).toBe(false);
+    expect(store.listGroups()).toHaveLength(0);
+  });
+
+  it('init heals ungrouped/orphan entries into the first group', async () => {
+    (mem.map as Map<string, unknown>).set(GROUPS_KEY, [{ id: 'ag1', name: 'G1', sortOrder: 10 }]);
+    (mem.map as Map<string, unknown>).set(ENTRIES_KEY, [
+      { id: 'ae1', issuer: 'A', algorithm: 'SHA1', digits: 6, period: 30, tags: [], groupId: undefined, createTime: 1, updateTime: 1 },
+      { id: 'ae2', issuer: 'B', algorithm: 'SHA1', digits: 6, period: 30, tags: [], groupId: 'ghost', createTime: 1, updateTime: 1 },
+    ]);
+    store.dispose();
+    store = new AuthenticatorStore(mem, sec as never, auth(false));
+    await store.init();
+    expect(store.listEntries().find((e) => e.id === 'ae1')!.groupId).toBe('ag1');
+    expect(store.listEntries().find((e) => e.id === 'ae2')!.groupId).toBe('ag1');
+  });
+
+  it('creating the first group adopts pre-existing ungrouped entries', async () => {
+    const add = await store.addEntry({ issuer: 'A', secret: 'JBSWY3DPEHPK3PXP' });
+    expect(add.ok).toBe(true);
+    if (!add.ok) return;
+    expect(store.listEntries().find((e) => e.id === add.entry.id)!.groupId).toBeUndefined();
+    const g = await store.addGroup('First');
+    expect(g.ok).toBe(true);
+    if (!g.ok) return;
+    expect(store.listEntries().find((e) => e.id === add.entry.id)!.groupId).toBe(g.group.id);
   });
 
   it('deleteTag removes tag id from entries', async () => {

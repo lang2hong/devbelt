@@ -149,6 +149,8 @@ export class AuthenticatorStore implements VscodeDisposable {
     this.entries = this.memento.get<AuthenticatorEntry[]>(ENTRIES_KEY) ?? [];
     this.groups = this.memento.get<AuthenticatorGroup[]>(GROUPS_KEY) ?? [];
     this.tags = this.memento.get<AuthenticatorTag[]>(TAGS_KEY) ?? [];
+    // 无「未分组」语义：把历史无分组/孤儿 groupId 归入第一个分组（一个分组都没有时留待建组后自愈）。
+    if (this.healUngroupedEntries()) await this.saveEntries();
     this.secretCache.clear();
     this.missingSecrets.clear();
     await Promise.all(this.entries.filter((e) => !e.deleted).map(async (e) => {
@@ -217,6 +219,32 @@ export class AuthenticatorStore implements VscodeDisposable {
   listEntries(): readonly AuthenticatorEntry[] { this.assertInit(); return this.entries.filter((e) => !e.deleted); }
   listGroups(): readonly AuthenticatorGroup[] { this.assertInit(); return this.groups.filter((g) => !g.deleted); }
   listTags(): readonly AuthenticatorTag[] { this.assertInit(); return this.tags.filter((t) => !t.deleted); }
+
+  /** 第一个存活分组的 id（按 sortOrder）。无分组时返回 undefined。 */
+  private firstActiveGroupId(): string | undefined {
+    return this.groups.filter((g) => !g.deleted).sort((a, b) => a.sortOrder - b.sortOrder)[0]?.id;
+  }
+
+  /**
+   * 自愈：把无 groupId 或指向不存在分组的存活条目归入第一个分组。
+   * 无任何分组时不改动（保持隐藏），待用户建第一个分组时再归入。
+   * 返回是否发生变更。
+   */
+  private healUngroupedEntries(): boolean {
+    const first = this.firstActiveGroupId();
+    if (!first) return false;
+    const valid = new Set(this.groups.filter((g) => !g.deleted).map((g) => g.id));
+    let changed = false;
+    for (const e of this.entries) {
+      if (e.deleted) continue;
+      if (!e.groupId || !valid.has(e.groupId)) {
+        e.groupId = first;
+        e.updateTime = Date.now();
+        changed = true;
+      }
+    }
+    return changed;
+  }
 
   /** P6 同步读面：**含墓碑**（`deleted:true`），供出站对账识别 delete。 */
   listEntriesForSync(): readonly AuthenticatorEntry[] { this.assertInit(); return this.entries; }
@@ -587,8 +615,11 @@ export class AuthenticatorStore implements VscodeDisposable {
     const group: AuthenticatorGroup = { id: uniqueId('ag'), name: trimmed, sortOrder, updateTime: Date.now() };
     this.groups.push(group);
     this.groups.sort((a, b) => a.sortOrder - b.sortOrder);
-    await this.saveGroups();
+    // 建组后把此前无法归组的条目（历史无分组/孤儿）归入第一个分组。
+    const healed = this.healUngroupedEntries();
+    await Promise.all([this.saveGroups(), healed ? this.saveEntries() : Promise.resolve()]);
     this.publish('group', 'create', group.id);
+    if (healed) this.publish('entry', 'update', '*');
     return { ok: true, group };
   }
 
@@ -605,24 +636,38 @@ export class AuthenticatorStore implements VscodeDisposable {
     return { ok: true };
   }
 
-  /** 删分组时该组下条目 groupId 置 undefined（回落到未分组），不制造合成默认组。 */
+  /**
+   * 删分组：组内验证码一并删除（无「未分组」回落，也就没有默认分组）。
+   * - 先删条目 secret，成功才置墓碑；secret 删除失败的条目保留但清 groupId，
+   *   交由自愈归入其他分组（避免 orphan secret，也不制造悬挂引用）。
+   * - 每个被删条目单独 publish（供 P6 同步出站产 delete record）。
+   */
   async deleteGroup(id: string): Promise<{ ok: boolean }> {
     this.assertInit();
     const group = this.groups.find((g) => g.id === id && !g.deleted);
     if (!group) return { ok: false };
     group.deleted = true;
     group.updateTime = Date.now();
-    let changed = false;
-    for (const e of this.entries) {
-      if (!e.deleted && e.groupId === id) {
+    const members = this.entries.filter((e) => !e.deleted && e.groupId === id);
+    const deleted: string[] = [];
+    for (const e of members) {
+      try {
+        await this.secrets.delete(secretKey(e.id));
+        this.secretCache.delete(e.id);
+        this.missingSecrets.delete(e.id);
+        e.deleted = true;
+        e.updateTime = Date.now();
+        deleted.push(e.id);
+      } catch (err) {
+        this.log.warn('authenticator deleteGroup secret delete failed', e.id);
         e.groupId = undefined;
         e.updateTime = Date.now();
-        changed = true;
       }
     }
-    await Promise.all([this.saveGroups(), changed ? this.saveEntries() : Promise.resolve()]);
+    this.healUngroupedEntries();
+    await Promise.all([this.saveGroups(), this.saveEntries()]);
     this.publish('group', 'delete', id);
-    if (changed) this.publish('entry', 'update', '*');
+    for (const eid of deleted) this.publish('entry', 'delete', eid);
     return { ok: true };
   }
 
