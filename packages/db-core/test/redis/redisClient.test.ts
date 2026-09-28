@@ -201,6 +201,42 @@ describe('RedisClient 只读拦截', () => {
     }
     expect(fake.calls.map((c) => c.name)).toEqual(['SCAN', 'GET', 'TTL']);
   });
+
+  it('fail-closed：未收录命令/子命令一律拦截（FCALL/FUNCTION/CLUSTER RESET/PFADD/XREADGROUP）', async () => {
+    const { client, fake } = make({ readOnly: true });
+    for (const [name, args] of [
+      ['FCALL', ['f', '1', 'k']],
+      ['FUNCTION', ['LOAD']],
+      ['CLUSTER', ['RESET']],
+      ['CLUSTER', ['FAILOVER']],
+      ['MODULE', ['LOADEX', '/x.so']],
+      ['CONFIG', ['REWRITE']],
+      ['PFADD', ['hll', 'x']],
+      ['XREADGROUP', ['GROUP', 'g', 'c', 'STREAMS', 's', '>']],
+    ] as [string, string[]][]) {
+      await expect(client.sendCommand(name, args), `${name} ${args.join(' ')}`).rejects.toBeInstanceOf(RedisReadOnlyError);
+    }
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('fail-closed：已知只读 admin 子命令放行（CONFIG GET/CLUSTER INFO/SLOWLOG GET/MEMORY USAGE）', async () => {
+    const { client } = make({ readOnly: true });
+    for (const [name, args] of [
+      ['CONFIG', ['GET', 'maxmemory']],
+      ['CLUSTER', ['INFO']],
+      ['SLOWLOG', ['GET', '10']],
+      ['MEMORY', ['USAGE', 'k']],
+    ] as [string, string[]][]) {
+      await expect(client.sendCommand(name, args), `${name} ${args.join(' ')}`).resolves.toBeDefined();
+    }
+  });
+
+  it('Buffer 参数按原始值判定（<buffer:N> 占位符不再绕过子命令检查）', async () => {
+    const { client, fake } = make({ readOnly: true });
+    await expect(client.sendCommandBuffer('CONFIG', [Buffer.from('SET'), Buffer.from('a'), Buffer.from('b')]))
+      .rejects.toBeInstanceOf(RedisReadOnlyError);
+    expect(fake.calls).toHaveLength(0);
+  });
 });
 
 describe('RedisClient 命令日志与脱敏', () => {

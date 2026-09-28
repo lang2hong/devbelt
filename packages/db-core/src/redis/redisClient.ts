@@ -8,7 +8,7 @@
  */
 import Redis, { Cluster, Command, type RedisOptions } from 'ioredis';
 import type { RedisCommandSource } from './redisOps.js';
-import { isWriteCommand } from './redisCommands.js';
+import { isReadCommand } from './redisCommands.js';
 import type { RedisTlsOptions } from './redisTls.js';
 
 /** 只读模式下拦截写命令时抛出。 */
@@ -342,13 +342,15 @@ export class RedisClient {
     const original = this.client.sendCommand.bind(this.client);
     this.client.sendCommand = (command, stream) => {
       const name = String(command?.name ?? '').toUpperCase();
-      // Buffer 参数按占位符归一：既供写判定，也避免二进制灌入命令日志。
-      const args = Array.isArray(command?.args)
-        ? command.args.map((a) => (Buffer.isBuffer(a) ? `<buffer:${a.length}>` : String(a)))
-        : [];
-      if (this.readOnly && isWriteCommand(name, args)) {
+      const rawArgs = Array.isArray(command?.args) ? command.args : [];
+      // 判定用原始值（Buffer 按 latin1 还原，避免 <buffer:N> 占位符绕过子命令判定）。
+      const classifyArgs = rawArgs.map((a) => (Buffer.isBuffer(a) ? a.toString('latin1') : String(a)));
+      // 只读 fail-closed：不在只读 allowlist（readCMD / admin 只读子命令）内一律拦截。
+      if (this.readOnly && !isReadCommand(name, classifyArgs)) {
         return Promise.reject(new RedisReadOnlyError(name));
       }
+      // 日志参数把 Buffer 归一成占位符，避免二进制灌入命令日志。
+      const args = rawArgs.map((a) => (Buffer.isBuffer(a) ? `<buffer:${a.length}>` : String(a)));
       const loggedArgs = redactCommandArgs(name, args);
       const started = Date.now();
       return original(command, stream).then(

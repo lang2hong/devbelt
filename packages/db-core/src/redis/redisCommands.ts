@@ -126,7 +126,6 @@ export const readCMD: Record<string, RedisCommandSpec> = {
   XREVRANGE: 'XREVRANGE key end start [COUNT count]',
   XLEN: 'XLEN key',
   XREAD: 'XREAD [COUNT count] [BLOCK milliseconds] STREAMS key [key ...] ID [ID ...]',
-  XREADGROUP: 'XREADGROUP GROUP group consumer [COUNT count] [BLOCK milliseconds] [NOACK] STREAMS key [key ...] ID [ID ...]',
   XPENDING: 'XPENDING key group [start end count] [consumer]',
   VCARD: 'VCARD key',
   VDIM: 'VDIM key',
@@ -223,6 +222,8 @@ export const writeCMD: Record<string, RedisCommandSpec> = {
   SWAPDB: 'SWAPDB index1 index2',
   UNLINK: 'UNLINK key [key ...]',
   XADD: 'XADD key ID field string [field string ...]',
+  // XREADGROUP 会写 PEL（消费组状态），从 readCMD 移入 writeCMD：只读模式必须拦截。
+  XREADGROUP: 'XREADGROUP GROUP group consumer [COUNT count] [BLOCK milliseconds] [NOACK] STREAMS key [key ...] ID [ID ...]',
   XDEL: 'XDEL key ID [ID ...]',
   XGROUP: ['XGROUP CREATE key groupname id|$ [MKSTREAM]', 'XGROUP CREATECONSUMER key groupname consumername', 'XGROUP DELCONSUMER key groupname consumername', 'XGROUP DESTROY key groupname', 'XGROUP SETID key groupname id|$'],
   XTRIM: 'XTRIM key MAXLEN [~] count',
@@ -296,6 +297,39 @@ export function isAdminWriteCommand(name: string, args?: readonly unknown[]): bo
   if (ADMIN_WRITE_COMMANDS.has(cmd)) return true;
   const subs = ADMIN_WRITE_SUBCOMMANDS[cmd];
   return subs ? subs.includes(argAt(args, 0)) : false;
+}
+
+/**
+ * admin 命令的**只读子命令 allowlist**（fail-closed：不在列表内即视为写）。
+ * 上游按 "admin 写 denylist" 放行，会漏掉新写子命令（CLUSTER RESET/FAILOVER、MODULE LOADEX…）；
+ * 这里反转为只认已知只读子命令，未知一律拦截。
+ */
+const ADMIN_READ_SUBCOMMANDS: Record<string, readonly string[]> = {
+  ACL: ['CAT', 'DRYRUN', 'GENPASS', 'GETUSER', 'LIST', 'LOG', 'USERS', 'WHOAMI'],
+  CLIENT: ['LIST', 'GETNAME', 'ID', 'INFO'],
+  CLUSTER: ['INFO', 'NODES', 'SLOTS', 'SHARDS', 'MYID', 'LINKS', 'KEYSLOT', 'COUNTKEYSINSLOT', 'GETKEYSINSLOT', 'COUNT-FAILURE-REPORTS', 'REPLICAS', 'SLAVES'],
+  CONFIG: ['GET'],
+  DEBUG: ['OBJECT'],
+  LATENCY: ['DOCTOR', 'GRAPH', 'HISTOGRAM', 'HISTORY', 'LATEST'],
+  MEMORY: ['DOCTOR', 'HELP', 'MALLOC-STATS', 'STATS', 'USAGE'],
+  MODULE: ['LIST'],
+  SLOWLOG: ['GET', 'LEN', 'HELP', 'COUNT'],
+};
+
+/** admin 命令是否为已知只读子命令（fail-closed）。 */
+export function isAdminReadCommand(name: string, args?: readonly unknown[]): boolean {
+  const subs = ADMIN_READ_SUBCOMMANDS[normalizeName(name)];
+  return !!subs && subs.includes(argAt(args, 0));
+}
+
+/**
+ * 只读模式**放行**判定（fail-closed）：仅 readCMD 命中，或 admin 命令的已知只读子命令。
+ * 未收录的新命令/新子命令一律视为写（拦截），避免"漏列即放行"。
+ */
+export function isReadCommand(name: string, args?: readonly unknown[]): boolean {
+  const cmd = normalizeName(name);
+  if (Object.prototype.hasOwnProperty.call(readCMD, cmd)) return true;
+  return isAdminReadCommand(cmd, args);
 }
 
 /**
