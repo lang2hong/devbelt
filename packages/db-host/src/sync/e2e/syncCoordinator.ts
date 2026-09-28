@@ -152,8 +152,9 @@ export class SyncCoordinator {
         if (skippedOutbound) result.skippedOutbound = skippedOutbound;
         this._lastRun = result;
         this.notify(result);
-        // 显式 pull/push 是独立动作：失败不排后台重试，避免重试走 drain() 的 both 全量
-        // 而隐式触发对方动作（push 失败→后台 both→隐式 pull→LWW 覆盖，被感知为"偷偷 merge"）。
+        // 显式 pull/push 是独立动作：**只更新状态、不排后台重试**（避免重试走 drain() 的 both
+        // 全量而隐式触发对方动作）。成功清 stalled/退避、冲突置 stalled 仍要执行。
+        this.updateRunState(result);
       } catch (err) {
         failure = err;
         this._lastError = describe(err);
@@ -205,20 +206,39 @@ export class SyncCoordinator {
   private async drain(): Promise<SyncRunResult | undefined> {
     this._lastError = undefined;
     let last: SyncRunResult | undefined;
+    // 跨轮**累加**：第 1 轮推送、第 2 轮无 generated 时，若用第 2 轮结果覆盖，会把已推送/已落地数丢掉，
+    // 立即同步就误报「无变更」。
+    const acc = { applied: 0, pushed: 0, changes: 0, ignoredTombstone: 0, skippedRemote: 0, skippedEntitlement: 0 };
+    const merge = (r: SyncRunResult): SyncRunResult => ({
+      ...r,
+      applied: acc.applied,
+      pushed: acc.pushed,
+      changes: acc.changes,
+      ignoredTombstone: acc.ignoredTombstone,
+      skippedRemote: acc.skippedRemote,
+      skippedEntitlement: acc.skippedEntitlement,
+    });
     for (let i = 0; i < SyncCoordinator.MAX_DRAIN_ROUNDS; i++) {
       const { generated, skipped } = await this.mutator.reconcile();
       const result = await this.engine.sync();
       if (skipped?.length) result.skippedOutbound = skipped.length; // 各轮同批，覆盖即等于该批总数（未来跨轮去重再改累加）
-      this._lastRun = result;
-      last = result;
-      if (result.stage !== 'ok') return result;
-      if (generated === 0) return result;
+      acc.applied += result.applied ?? 0;
+      acc.pushed += result.pushed ?? 0;
+      acc.changes += result.changes ?? 0;
+      acc.ignoredTombstone += result.ignoredTombstone ?? 0;
+      acc.skippedRemote += result.skippedRemote ?? 0;
+      acc.skippedEntitlement += result.skippedEntitlement ?? 0;
+      const merged = merge(result);
+      this._lastRun = merged;
+      last = merged;
+      if (result.stage !== 'ok') return merged;
+      if (generated === 0) return merged;
     }
     return last;
   }
 
-  /** 据本轮结果决定退避/停止；成功复位退避并清 stalled。 */
-  private maybeRetry(result: SyncRunResult | undefined): void {
+  /** 仅更新状态：成功复位退避并清 stalled；冲突/终态置 stalled。不启动重试。 */
+  private updateRunState(result: SyncRunResult | undefined): void {
     if (!result) return;
     if (result.stage === 'ok') {
       this._stalled = false;
@@ -228,11 +248,16 @@ export class SyncCoordinator {
     }
     if (result.stage === 'error' && !result.stalled) {
       this._stalled = false;
-      this.armRetry();
       return;
     }
     this._stalled = true;
     this.clearRetry();
+  }
+
+  /** 后台轮：更新状态 + 按需启动退避重试（显式 pull/push 只用 updateRunState，不启动重试）。 */
+  private maybeRetry(result: SyncRunResult | undefined): void {
+    this.updateRunState(result);
+    if (result?.stage === 'error' && !result.stalled) this.armRetry();
   }
 
   private armRetry(): void {

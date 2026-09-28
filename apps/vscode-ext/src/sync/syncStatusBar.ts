@@ -60,7 +60,7 @@ export function createSyncStatusBar(
     // 进行中优先：转圈 + 阶段/条数，让用户感知到同步正在跑。
     if (syncing) {
       setReady(true);
-      setUnlocked(session?.isUnlocked ?? true);
+      setUnlocked(session?.isUnlocked ?? false);
       item.show();
       item.command = 'devbelt.syncNow';
       item.text = `$(sync~spin) ${l10n('sync.statusSyncing')}`;

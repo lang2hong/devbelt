@@ -323,7 +323,7 @@ describe('personal sync B1 commands', () => {
   it('pull/push: unlocked session invokes the matching phase and reports per-op', async () => {
     const session = makeSession({
       isUnlocked: true,
-      syncPull: vi.fn(async () => ({ stage: 'ok', applied: 1 })),
+      syncPull: vi.fn(async () => ({ stage: 'ok', changes: 1 })),
       syncPush: vi.fn(async () => ({ stage: 'ok', pushed: 1 })),
     });
     const { deps, info } = makeDeps(session, []);
@@ -353,7 +353,7 @@ describe('personal sync B1 commands', () => {
   });
 
   it('syncNow: explicit run waits and reports its own result', async () => {
-    const session = makeSession({ isUnlocked: true, syncNow: vi.fn(async () => ({ stage: 'ok', applied: 1 })) });
+    const session = makeSession({ isUnlocked: true, syncNow: vi.fn(async () => ({ stage: 'ok', changes: 1 })) });
     const { deps, info } = makeDeps(session, []);
     await syncNowPersonalSync(deps);
     expect(session.syncNow).toHaveBeenCalledTimes(1);

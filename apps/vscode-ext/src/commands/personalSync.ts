@@ -132,8 +132,9 @@ function reportInitialRun(ui: SyncUi, result: SyncRun, op: SyncOp): void {
     if (result.skippedEntitlement) parts.push(l10n('sync.skippedEntitlement', { count: String(result.skippedEntitlement) }));
     if (result.skippedOutbound) parts.push(l10n('sync.skippedOutbound', { count: String(result.skippedOutbound) }));
     if (parts.length) ui.warn(l10n('sync.skipped', { detail: parts.join('；') }));
-    // 成功始终提示；无实际变更时合并「已是最新，无变更」（push 看 pushed，其余看 changes/applied）。
-    else if ((op === 'push' ? (result.pushed ?? 0) : (result.changes ?? result.applied ?? 0)) === 0) {
+    // 成功始终提示；无实际变更时合并「已是最新，无变更」。
+    // 变更数 = 入站落地(changes) + 出站成功(pushed)；不能只看 changes（sync/push 会误报无变更）。
+    else if ((result.changes ?? 0) + (result.pushed ?? 0) === 0) {
       ui.info(l10n(`sync.doneUpToDate.${op}`));
     } else ui.info(l10n(`sync.done.${op}`));
   } else {

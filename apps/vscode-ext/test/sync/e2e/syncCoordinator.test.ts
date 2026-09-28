@@ -369,6 +369,20 @@ describe('SyncCoordinator', () => {
     expect(sync).not.toHaveBeenCalled();
   });
 
+  it('drain 跨轮累加 pushed/changes（第 2 轮不覆盖第 1 轮）', async () => {
+    const store = { onChanged: () => ({ dispose() { /* noop */ } }) } as unknown as ConnectionStore;
+    const reconcile = vi.fn()
+      .mockResolvedValueOnce({ generated: 1, pendingSkipped: [], skipped: [] })
+      .mockResolvedValueOnce({ generated: 0, pendingSkipped: [], skipped: [] });
+    const sync = vi.fn()
+      .mockResolvedValueOnce({ stage: 'ok' as const, conflicts: [], applied: 0, pushed: 2, changes: 0 })
+      .mockResolvedValueOnce({ stage: 'ok' as const, conflicts: [], applied: 0, pushed: 0, changes: 1 });
+    const coordinator = new SyncCoordinator(store, { reconcile } as unknown as SyncMutator, { sync } as unknown as SyncEngine);
+    const r = await coordinator.runNow();
+    expect(r?.pushed).toBe(2);
+    expect(r?.changes).toBe(1);
+  });
+
   it('显式 pull/push 触发 onSyncStart（状态栏"进行中"）', async () => {
     const store = { onChanged: () => ({ dispose() { /* noop */ } }) } as unknown as ConnectionStore;
     const reconcile = vi.fn(async () => ({ generated: 0, pendingSkipped: [], skipped: [] }));
