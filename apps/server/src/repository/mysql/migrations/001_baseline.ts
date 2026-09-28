@@ -49,7 +49,7 @@ const FEATURE_DEFS: readonly FeatureSeed[] = [
   { key: 'maxDevices', kind: 'personal', labelEn: 'Devices', labelZh: '设备数', valueType: 'number', unit: 'count', sortOrder: 60 },
 ];
 
-const ALL_ENGINES = ['mysql', 'postgresql', 'sqlite', 'redis'] as const;
+const ALL_ENGINES = ['mysql', 'postgresql', 'sqlite'] as const;
 
 export const baselineMigration: Migration = {
   version: '001_baseline',
