@@ -868,6 +868,8 @@ export const en: MessageCatalog = {
   'cmd.redis.cliUnsupported': 'Redis CLI is not supported in this build.',
   'cmd.redis.emptyCommand': 'Enter a command.',
   'cmd.redis.selectDisabled': 'SELECT is not supported in the CLI; use the database switcher.',
+  'cmd.redis.fieldExists': 'Target field already exists; renaming would overwrite it.',
+  'cmd.redis.memberExists': 'Target member already exists; renaming would overwrite it.',
   'cmd.redis.dangerCancelled': 'Command cancelled.',
   'redis.tree.open': 'Open',
   'redis.tree.loadMore': 'Load more…',

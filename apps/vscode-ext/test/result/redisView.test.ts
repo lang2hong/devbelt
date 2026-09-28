@@ -130,7 +130,8 @@ describe('RedisView CLI 管线与审计', () => {
     expect(res.command).toBe('CONFIG SET requirepass hunter2');
 
     expect(h.audits).toHaveLength(1);
-    expect(h.audits[0].sql).toContain('<redacted>');
+    // 审计只记命令 + key（首参），不记值：CONFIG 的 subcommand 作为首参，value 被丢弃。
+    expect(h.audits[0].sql).toBe('CONFIG SET');
     expect(JSON.stringify(h.audits)).not.toContain('hunter2');
   });
 
@@ -218,6 +219,9 @@ describe('RedisView S3 键树/值/编辑', () => {
     DEL: 1,
     INFO: 'redis_version:7.0.0\r\n# Keyspace\ndb0:keys=3,expires=0,avg_ttl=0\n',
     SLOWLOG: [],
+    // 改名防覆盖检查：目标不存在（null/0），否则改名会被拒。
+    ZSCORE: null,
+    HEXISTS: 0,
   };
   const handler: Send = async (name) => (name in replies ? replies[name] : 'OK');
 
@@ -366,6 +370,18 @@ describe('RedisView S3 键树/值/编辑', () => {
     expect(v.data).toBeNull();
   });
 
+  it('大 key「加载」：绕过门禁强制加载一次', async () => {
+    const big: Record<string, unknown> = { ...replies, STRLEN: 2 * 1024 * 1024 };
+    const { view } = makeView(async (n) => (n in big ? big[n] : 'OK'), 0);
+    await mountDb(view);
+    await view.handleMessage({ type: 'selectKey', key: 'user:1' });
+    await view.handleMessage({ type: 'load', key: 'user:1' });
+    const vals = posts(view).filter((m) => m.type === 'value');
+    const last = vals[vals.length - 1];
+    expect(last.tooLarge).toBe(false);
+    expect(last.data).toBeTruthy();
+  });
+
   it('renameKey 发包并审计', async () => {
     const { view, sent } = makeView(handler, 0);
     await mountDb(view);
@@ -417,6 +433,14 @@ describe('RedisView S3 键树/值/编辑', () => {
     await view.handleMessage({ type: 'zsetAdd', key: 'z', score: '3', member: 'm2', oldMember: 'm2' });
     expect(sent.some(([n]) => n === 'ZADD')).toBe(true);
     expect(sent.some(([n]) => n === 'ZREM')).toBe(false);
+  });
+
+  it('zsetAdd 改名目标已存在 → 拒绝（不静默覆盖）', async () => {
+    const { view, sent } = makeView(async (n) => (n === 'ZSCORE' ? '9' : n in replies ? replies[n] : 'OK'), 0);
+    await mountDb(view);
+    sent.length = 0;
+    await view.handleMessage({ type: 'zsetAdd', key: 'z', score: '2', member: 'm2', oldMember: 'm1' });
+    expect(sent.some(([n]) => n === 'ZADD')).toBe(false);
   });
 });
 

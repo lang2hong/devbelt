@@ -22,7 +22,7 @@ const emit = defineEmits<{
   (e: 'hashDel', key: string, fields: string[]): void;
   (e: 'listPush', key: string, side: 'left' | 'right', values: string[]): void;
   (e: 'listSet', key: string, index: number, value: string): void;
-  (e: 'listRem', key: string, count: number, value: string): void;
+  (e: 'listRem', key: string, index: number, value: string): void;
   (e: 'listPop', key: string, side: 'left' | 'right'): void;
   (e: 'setAdd', key: string, members: string[]): void;
   (e: 'setRem', key: string, members: string[]): void;
@@ -305,7 +305,7 @@ function copyValue(text: string): void {
               <template v-else>
                 <button class="btn tiny" :disabled="readOnly" :title="t('wv.redis.value.edit')" @click="startEdit('list', String(i), item)">✎</button>
                 <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyValue(item)">⧉</button>
-                <button class="btn tiny" :disabled="readOnly" @click="emit('listRem', key, 0, item)">✕</button>
+                <button class="btn tiny" :disabled="readOnly" @click="emit('listRem', key, i, item)">✕</button>
               </template>
             </td>
           </tr>

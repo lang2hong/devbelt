@@ -238,6 +238,11 @@ export async function redisHSet(src: RedisCommandSource, key: string, field: str
   await src.sendCommand('HSET', [key, field, value]);
 }
 
+/** HEXISTS：hash field 是否存在（改名防覆盖用）。 */
+export async function redisHExists(src: RedisCommandSource, key: string, field: string): Promise<boolean> {
+  return asNumber(await src.sendCommand('HEXISTS', [key, field])) === 1;
+}
+
 export async function redisHDel(src: RedisCommandSource, key: string, fields: string[]): Promise<number> {
   if (!fields.length) return 0;
   return asNumber(await src.sendCommand('HDEL', [key, ...fields]));
@@ -336,6 +341,12 @@ export async function redisZCard(src: RedisCommandSource, key: string): Promise<
 
 export async function redisZAdd(src: RedisCommandSource, key: string, score: string | number, member: string): Promise<void> {
   await src.sendCommand('ZADD', [key, String(score), member]);
+}
+
+/** ZSCORE：返回 member 的 score；不存在返回 null（member 改名防覆盖用）。 */
+export async function redisZScore(src: RedisCommandSource, key: string, member: string): Promise<string | null> {
+  const v = await src.sendCommand('ZSCORE', [key, member]);
+  return v === null || v === undefined ? null : String(v);
 }
 
 export async function redisZRem(src: RedisCommandSource, key: string, members: string[]): Promise<number> {

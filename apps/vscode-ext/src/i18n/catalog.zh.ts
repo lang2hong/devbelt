@@ -846,6 +846,8 @@ export const zh: MessageCatalog = {
   'cmd.redis.cliUnsupported': '当前构建不支持 Redis CLI。',
   'cmd.redis.emptyCommand': '请输入命令。',
   'cmd.redis.selectDisabled': 'CLI 不支持 SELECT，请用连接/库切换器切换数据库。',
+  'cmd.redis.fieldExists': '目标 field 已存在，改名会覆盖，请换个名字。',
+  'cmd.redis.memberExists': '目标 member 已存在，改名会覆盖，请换个名字。',
   'cmd.redis.dangerCancelled': '已取消命令。',
   'redis.tree.open': '打开',
   'redis.tree.loadMore': '加载更多…',

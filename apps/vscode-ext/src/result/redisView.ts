@@ -4,10 +4,10 @@ import {
   redisType, redisSelect, redisGetBuffer, redisStrlen, redisSet, redisSetBuffer, redisAppend,
   isValidUtf8, isBufferSource,
   redisUnlink, redisExists, redisRename, redisTtl, redisExpire, redisPersist, redisMemoryUsage,
-  redisHScan, redisHSet, redisHDel, redisHLen,
+  redisHScan, redisHSet, redisHDel, redisHLen, redisHExists,
   redisLRange, redisLLen, redisLPush, redisRPush, redisLSet, redisLRem, redisLTrim, redisLPop, redisRPop,
   redisSScan, redisSCard, redisSAdd, redisSRem,
-  redisZRange, redisZCard, redisZAdd, redisZRem, allCommandNames,
+  redisZRange, redisZCard, redisZAdd, redisZRem, redisZScore, allCommandNames,
   redisXRange, redisXRevRange, redisXAdd, redisXDel, redisXTrimMaxlen, redisXLen,
   redisXInfoGroups, redisXInfoConsumers, redisXGroupCreate, redisXGroupDestroy, redisXGroupDelConsumer,
   redisXPending, isValidStreamId, compareStreamId,
@@ -67,6 +67,9 @@ export class RedisView extends BaseWebView {
   private logUnsub?: () => void;
   /** 连接/故障切换事件是否已订阅（每实例一次）。 */
   private eventsBound = false;
+  /** 已绑定的会话 client 与事件处理器（dispose 时移除，避免面板关闭后仍 post）。 */
+  private boundClient?: { on?(ev: string, h: (...a: unknown[]) => void): unknown; off?(ev: string, h: (...a: unknown[]) => void): unknown };
+  private readonly boundEvents: { ev: string; handler: (...a: unknown[]) => void }[] = [];
   /** 注册表键 `${conn.id}:${panel}`，onDispose 清理。 */
   private readonly registryKey: string;
   /** S5-3：树点键时带的首选键（就绪后自动加载其值）。 */
@@ -139,6 +142,7 @@ export class RedisView extends BaseWebView {
     if (msg.type === 'runCommand') { await this.runCommand(String(msg.id ?? ''), String(msg.line ?? '')); return; }
     if (msg.type === 'confirmDanger') { await this.resolveConfirm(String(msg.id ?? ''), msg.accept === true); return; }
     if (msg.type === 'selectKey') { await this.enqueuePushValue(String(msg.key ?? '')); return; }
+    if (msg.type === 'load') { await this.forceLoadValue(String(msg.key ?? '')); return; }
     if (msg.type === 'saveString') { await this.edit('SET', String(msg.key), async (c) => { await redisSet(c, String(msg.key), String(msg.value ?? '')); }); return; }
     if (msg.type === 'saveStringBytes') { await this.saveStringBytes(msg); return; }
     if (msg.type === 'appendString') { await this.edit('APPEND', String(msg.key), async (c) => { await redisAppend(c, String(msg.key), String(msg.value ?? '')); }); return; }
@@ -152,6 +156,8 @@ export class RedisView extends BaseWebView {
       const oldField = msg.oldField === undefined ? undefined : String(msg.oldField);
       const renaming = !!oldField && oldField !== field;
       await this.edit(renaming ? 'HSET+HDEL' : 'HSET', hkey, async (c) => {
+        // 改名时目标 field 已存在则拒绝，避免静默覆盖（HSET 会直接覆盖值）。
+        if (renaming && await redisHExists(c, hkey, field)) throw new Error(l10n('cmd.redis.fieldExists'));
         await redisHSet(c, hkey, field, String(msg.value ?? ''));
         // 非原子：HSET 已生效后 HDEL 失败会残留新旧两个 field（Redis 无原子改名）；失败也留痕。
         if (renaming) {
@@ -168,7 +174,24 @@ export class RedisView extends BaseWebView {
     if (msg.type === 'hashDel') { await this.edit('HDEL', String(msg.key), async (c) => { await redisHDel(c, String(msg.key), strs(msg.fields)); }); return; }
     if (msg.type === 'listPush') { await this.edit('LPUSH/RPUSH', String(msg.key), async (c) => { const v = strs(msg.values); if (msg.side === 'left') await redisLPush(c, String(msg.key), v); else await redisRPush(c, String(msg.key), v); }); return; }
     if (msg.type === 'listSet') { await this.edit('LSET', String(msg.key), async (c) => { await redisLSet(c, String(msg.key), Number(msg.index), String(msg.value ?? '')); }); return; }
-    if (msg.type === 'listRem') { await this.edit('LREM', String(msg.key), async (c) => { await redisLRem(c, String(msg.key), Number(msg.count), String(msg.value ?? '')); }); return; }
+    if (msg.type === 'listRem') {
+      // 精确删「第 index 个元素」：LREM count=0 会删掉所有同值元素。用唯一标记替换该下标再 LREM 1，
+      // 失败则回滚标记（避免污染列表）。
+      await this.edit('LREM', String(msg.key), async (c) => {
+        const key = String(msg.key);
+        const index = Number(msg.index);
+        const original = String(msg.value ?? '');
+        const marker = `\u0000devbelt:del:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`;
+        await redisLSet(c, key, index, marker);
+        try {
+          await redisLRem(c, key, 1, marker);
+        } catch (err) {
+          try { await redisLSet(c, key, index, original); } catch { /* 标记残留可被下次编辑覆盖 */ }
+          throw err;
+        }
+      });
+      return;
+    }
     if (msg.type === 'listTrim') { await this.edit('LTRIM', String(msg.key), async (c) => { await redisLTrim(c, String(msg.key), Number(msg.start), Number(msg.stop)); }); return; }
     if (msg.type === 'listPop') { await this.edit('LPOP/RPOP', String(msg.key), async (c) => { if (msg.side === 'left') await redisLPop(c, String(msg.key)); else await redisRPop(c, String(msg.key)); }); return; }
     if (msg.type === 'setAdd') { await this.edit('SADD', String(msg.key), async (c) => { await redisSAdd(c, String(msg.key), strs(msg.members)); }); return; }
@@ -179,6 +202,8 @@ export class RedisView extends BaseWebView {
       const oldMember = msg.oldMember === undefined ? undefined : String(msg.oldMember);
       const renaming = !!oldMember && oldMember !== member;
       await this.edit(renaming ? 'ZADD+ZREM' : 'ZADD', zkey, async (c) => {
+        // 改名时目标 member 已存在则拒绝，避免静默覆盖。
+        if (renaming && await redisZScore(c, zkey, member) !== null) throw new Error(l10n('cmd.redis.memberExists'));
         await redisZAdd(c, zkey, String(msg.score ?? '0'), member);
         // 非原子：ZADD 已生效后 ZREM 失败会残留新旧两个 member（Redis 无原子改名）；失败也留痕。
         if (renaming) {
@@ -207,6 +232,12 @@ export class RedisView extends BaseWebView {
     super.onDispose();
     this.logUnsub?.();
     this.logUnsub = undefined;
+    // 移除会话 client 上的连接/故障切换监听器：否则面板关闭后仍会持续 post 消息。
+    if (this.boundClient?.off) {
+      for (const { ev, handler } of this.boundEvents) this.boundClient.off(ev, handler);
+    }
+    this.boundEvents.length = 0;
+    this.boundClient = undefined;
     RedisView.instances.delete(this.registryKey);
     // 审计责任交接：若本实例是 owner，从剩余同连接实例中提升一位继承。
     if (RedisView.auditOwners.get(this.conn.id) === this) {
@@ -305,10 +336,11 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
   private ensureSubscriptions(session: RedisConnectionSession): void {
     if (!this.eventsBound && typeof session.client.on === 'function') {
       this.eventsBound = true;
+      this.boundClient = session.client as unknown as RedisView['boundClient'];
       // 审计责任：首绑者负责；每面板仍互发 connectionEvent（各自 banner 用）。
       if (!RedisView.auditOwners.has(this.conn.id)) RedisView.auditOwners.set(this.conn.id, this);
       for (const ev of ['connect', 'ready', 'reconnecting', 'end', 'close', 'error']) {
-        session.client.on(ev, (...args: unknown[]) => {
+        const handler = (...args: unknown[]): void => {
           const detail = args.length && args[0] != null ? String(args[0]) : null;
           this.post({ type: 'connectionEvent', event: ev, detail, at: Date.now() });
           if ((ev === 'reconnecting' || ev === 'end') && RedisView.auditOwners.get(this.conn.id) === this) {
@@ -319,7 +351,9 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
               sql: `connection:${ev}`,
             });
           }
-        });
+        };
+        session.client.on(ev, handler);
+        this.boundEvents.push({ ev, handler });
       }
     }
     // 命令日志仅由 commandLog 面板订阅（其它面板不渲染它，避免 fan-out）。
@@ -398,6 +432,24 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
     }
+  }
+
+  /** 大 key「加载」：用户显式请求，绕过大小门禁强制加载一次。 */
+  private async forceLoadValue(key: string): Promise<void> {
+    if (!key) return;
+    await this.enqueue(async () => {
+      try {
+        const session = await this.sessionForDb();
+        const c = session.client;
+        const keyType = await redisType(c, key);
+        const ttl = await redisTtl(c, key);
+        const size = keyType === 'string' ? await redisStrlen(c, key) : await redisMemoryUsage(c, key);
+        const data = await this.loadValue(c, key, keyType);
+        this.post({ type: 'value', key, keyType, ttl, tooLarge: false, size, data });
+      } catch (err) {
+        this.post({ type: 'error', message: (err as Error).message });
+      }
+    });
   }
 
   private async loadValue(c: RedisCommandSource, key: string, keyType: string): Promise<RedisValueData | null> {
@@ -530,7 +582,8 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
         const raw = await session.client.sendCommand(name, args);
         const costMs = Date.now() - started;
         if (isWriteCommand(name, args) || isDangerousCommand(name, args)) {
-          this.audit(name, redisAuditLine(name, args).slice(name.length).trim(), costMs);
+          // 审计只记命令 + key（首参），**不记值**（避免把写入值/密钥写进审计）。
+          this.audit(name, String(args[0] ?? ''), costMs);
         }
         this.post({ type: 'commandResult', id, command: line, ok: true, result: formatRedisReply(raw), costMs, error: null });
       } catch (err) {
