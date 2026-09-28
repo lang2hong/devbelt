@@ -34,6 +34,19 @@ export type SyncRunStage = 'ok' | 'epoch-mismatch' | 'conflict' | 'error' | 'ter
 /** 同步分相：`both` 先 push 后 pull（默认）；`push` 仅出站；`pull` 仅入站。 */
 export type SyncPhase = 'both' | 'push' | 'pull';
 
+/** 同步进行中的进度快照（供状态栏显示"进行中 + 条数"；无百分比，feed 不含总量）。 */
+export interface SyncProgress {
+  phase: SyncPhase;
+  /** 入站已处理记录数。 */
+  applied: number;
+  /** 入站真实落地数（created/updated/deleted）。 */
+  changes: number;
+  /** 出站已成功推送数。 */
+  pushed: number;
+  /** 已拉取的 feed 页数。 */
+  pages: number;
+}
+
 export interface SyncConflictEntry {
   recordId: string;
   kind: 'version' | 'pending';
@@ -159,6 +172,8 @@ export interface SyncEngineDeps {
   onEntityPushed?: (ref: import('./syncEntity').SyncEntityRef) => void | Promise<void>;
   /** P6：按类型配额拒绝（终态）时回调该记录对应本地实体（用于标 localOnly/syncError）。 */
   onQuotaRejected?: (ref: import('./syncEntity').SyncEntityRef) => void | Promise<void>;
+  /** 进行中进度回调（状态栏用）；回调异常应自行吞掉，不得影响同步。 */
+  onProgress?: (p: SyncProgress) => void;
 }
 
 function describe(err: unknown): string {
@@ -181,6 +196,11 @@ export class SyncEngine {
   }
 
   /** 分相同步：`push` 仅重放出站 outbox；`pull` 仅拉取 feed；`both` 先 push 后 pull。 */
+  /** 进度回调（异常吞掉，绝不影响同步）。 */
+  private emitProgress(p: SyncProgress): void {
+    try { this.deps.onProgress?.(p); } catch { /* 进度回调异常不影响同步 */ }
+  }
+
   syncPhase(phase: SyncPhase): Promise<SyncRunResult> {
     if (this.inflight) return this.inflight;
     const p = this.run(phase);
@@ -313,9 +333,18 @@ export class SyncEngine {
             stalled = { mutationId: m.mutationId };
             break;
           }
-          return { stage: 'error', conflicts, applied: 0, reason: `push failed: ${describe(err)}` };
+          // 已收集到冲突时以 conflict 收尾（不被 push 错误盖掉），确保冲突面板弹出、不静默。
+          return {
+            stage: conflicts.length > 0 ? 'conflict' : 'error',
+            conflicts, applied: 0, pushed, changeSequence: lastCommitted,
+            reason: `push failed: ${describe(err)}`,
+          };
         }
-        return { stage: 'error', conflicts, applied: 0, reason: `push failed: ${describe(err)}` };
+        return {
+          stage: conflicts.length > 0 ? 'conflict' : 'error',
+          conflicts, applied: 0, pushed, changeSequence: lastCommitted,
+          reason: `push failed: ${describe(err)}`,
+        };
       }
 
       let confirmed: { version: string; changeSequence: string };
@@ -331,6 +360,7 @@ export class SyncEngine {
       }
       await this.deps.outbox.delete(m.mutationId);
       pushed += 1;
+      this.emitProgress({ phase, applied: 0, changes: 0, pushed, pages: 0 });
       // 刻意不用 receipt.changeSequence 推进本地 cursor：本轮 pull 快照（remoteSnap）在
       // outbox 回放之前捕获，若存在并发 remote record 落于其上，直接提交回执序列会永久
       // 越过该记录（下轮 cursor 已越过其 seq，无法再拉）。cursor 仅由 pull 逐页提交推进，
@@ -339,6 +369,7 @@ export class SyncEngine {
 
     // push-only：出站重放完成即返回，不进入 feed 拉取。
     if (phase === 'push') {
+      this.emitProgress({ phase, applied: 0, changes: 0, pushed, pages: 0 });
       return { stage: conflicts.length > 0 ? 'conflict' : 'ok', conflicts, stalled, applied: 0, pushed, changeSequence: lastCommitted };
     }
 
@@ -455,6 +486,7 @@ export class SyncEngine {
         } catch (err) {
           return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `cursor commit failed: ${describe(err)}` };
         }
+        this.emitProgress({ phase, applied, changes, pushed, pages: pages + 1 });
       }
 
       if (page.nextAfter === undefined) break;

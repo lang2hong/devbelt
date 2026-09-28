@@ -15,8 +15,17 @@ export interface SyncStatusSession {
   listConflicts(): unknown[];
 }
 
+/** 进行中进度（phase + 可选条数），用于状态栏"同步中…"。 */
+export interface SyncProgressInfo {
+  phase: 'pull' | 'push' | 'both';
+  applied?: number;
+  pushed?: number;
+}
+
 export interface SyncStatusBar {
   refresh(): void;
+  /** 设置/清除"进行中"（null 清除）；设置后状态栏显示转圈 + 阶段/条数。 */
+  setSyncing(info: SyncProgressInfo | null): void;
   dispose(): void;
 }
 
@@ -44,8 +53,26 @@ export function createSyncStatusBar(
     void vscode.commands.executeCommand('setContext', 'devbelt.sync.unlocked', unlocked);
   };
 
+  let syncing: SyncProgressInfo | null = null;
+
   function refresh(): void {
     const session = getSession();
+    // 进行中优先：转圈 + 阶段/条数，让用户感知到同步正在跑。
+    if (syncing) {
+      setReady(true);
+      setUnlocked(session?.isUnlocked ?? true);
+      item.show();
+      item.command = 'devbelt.syncNow';
+      item.text = `$(sync~spin) ${l10n('sync.statusSyncing')}`;
+      const phaseLabel = syncing.phase === 'pull'
+        ? l10n('sync.phasePull')
+        : syncing.phase === 'push' ? l10n('sync.phasePush') : l10n('sync.phaseSync');
+      const parts = [phaseLabel];
+      if (typeof syncing.applied === 'number') parts.push(l10n('sync.progressApplied', { count: String(syncing.applied) }));
+      if (typeof syncing.pushed === 'number') parts.push(l10n('sync.progressPushed', { count: String(syncing.pushed) }));
+      item.tooltip = parts.join(' · ');
+      return;
+    }
     const status = deriveSyncStatus({
       isUnlocked: session?.isUnlocked ?? false,
       stalled: session?.stalled ?? false,
@@ -109,5 +136,9 @@ export function createSyncStatusBar(
     }
   }
 
-  return { refresh, dispose: () => item.dispose() };
+  return {
+    refresh,
+    setSyncing: (info) => { syncing = info; refresh(); },
+    dispose: () => item.dispose(),
+  };
 }

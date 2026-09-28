@@ -175,7 +175,10 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     getUserId: async () => (auth.isLoggedIn() ? auth.getUserId() : undefined),
     entitlement: () => auth.getCachedEntitlement(),
     autoSyncEnabled: isAutoSyncEnabled,
+    onSyncStart: (phase) => syncStatusBar.setSyncing({ phase }),
+    onSyncProgress: (p) => syncStatusBar.setSyncing({ phase: p.phase, applied: p.applied, pushed: p.pushed }),
     onSyncResult: (result) => {
+      syncStatusBar.setSyncing(null);
       // 同步可观测：每轮结果落诊断通道，便于确认「是否真的同步了 / 结果如何」。
       diagInfo('sync run', {
         stage: result?.stage,

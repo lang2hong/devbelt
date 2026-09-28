@@ -63,6 +63,9 @@ export interface SyncSessionOptions {
   /** P6：推送成功 / 按类型配额拒绝回调（由扩展接线标记本地实体）。 */
   onEntityPushed?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
   onQuotaRejected?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
+  /** 同步进入 / 进行中进度（状态栏用）。 */
+  onSyncStart?: (phase: 'pull' | 'push' | 'both') => void;
+  onSyncProgress?: (p: import('./e2e/syncEngine.js').SyncProgress) => void;
 }
 
 export class PersonalSyncSession {
@@ -402,6 +405,8 @@ export class PersonalSyncSession {
         autoSyncEnabled: this.opts.autoSyncEnabled,
         onEntityPushed: this.opts.onEntityPushed,
         onQuotaRejected: this.opts.onQuotaRejected,
+        onSyncStart: this.opts.onSyncStart,
+        onSyncProgress: this.opts.onSyncProgress,
       });
       this.engine = runtime.engine;
       this.coordinator = runtime.coordinator;

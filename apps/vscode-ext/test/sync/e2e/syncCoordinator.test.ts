@@ -349,4 +349,39 @@ describe('SyncCoordinator', () => {
 
     coordinator.stop();
   });
+
+  it('显式 push 失败不排后台重试（不隐式触发 both/pull）', async () => {
+    vi.useFakeTimers();
+    const store = { onChanged: () => ({ dispose() { /* noop */ } }) } as unknown as ConnectionStore;
+    const reconcile = vi.fn(async () => ({ generated: 0, pendingSkipped: [], skipped: [] }));
+    const syncPhase = vi.fn(async () => ({ stage: 'error' as const, conflicts: [], applied: 0, reason: 'boom' }));
+    const sync = vi.fn(async () => ({ stage: 'ok' as const, conflicts: [], applied: 0 }));
+    const coordinator = new SyncCoordinator(
+      store,
+      { reconcile } as unknown as SyncMutator,
+      { syncPhase, sync } as unknown as SyncEngine,
+    );
+
+    await coordinator.pushNow();
+    await vi.advanceTimersByTimeAsync(10_000); // 旧行为：armRetry → enqueue → drain → engine.sync()
+
+    expect(syncPhase).toHaveBeenCalledTimes(1);
+    expect(sync).not.toHaveBeenCalled();
+  });
+
+  it('显式 pull/push 触发 onSyncStart（状态栏"进行中"）', async () => {
+    const store = { onChanged: () => ({ dispose() { /* noop */ } }) } as unknown as ConnectionStore;
+    const reconcile = vi.fn(async () => ({ generated: 0, pendingSkipped: [], skipped: [] }));
+    const syncPhase = vi.fn(async () => ({ stage: 'ok' as const, conflicts: [], applied: 1 }));
+    const starts: string[] = [];
+    const coordinator = new SyncCoordinator(
+      store,
+      { reconcile } as unknown as SyncMutator,
+      { syncPhase } as unknown as SyncEngine,
+      { onSyncStart: (p) => starts.push(p) },
+    );
+    await coordinator.pullNow();
+    await coordinator.pushNow();
+    expect(starts).toEqual(['pull', 'push']);
+  });
 });

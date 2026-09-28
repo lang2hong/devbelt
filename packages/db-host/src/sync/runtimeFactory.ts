@@ -42,6 +42,9 @@ export interface BuildSyncRuntimeDeps {
   /** P6：推送成功 / 配额拒绝回调（透传到 SyncEngine）。 */
   onEntityPushed?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
   onQuotaRejected?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
+  /** 同步进入 / 进行中进度（状态栏用）。 */
+  onSyncStart?: (phase: 'pull' | 'push' | 'both') => void;
+  onSyncProgress?: (p: import('./e2e/syncEngine.js').SyncProgress) => void;
 }
 
 /**
@@ -77,10 +80,12 @@ export function buildSyncRuntime(deps: BuildSyncRuntimeDeps): SyncRuntime {
     seedConflictCarrier: (recordId, ref, baseVersion) => mutator.rebasePut(recordId, ref, baseVersion),
     onEntityPushed: deps.onEntityPushed,
     onQuotaRejected: deps.onQuotaRejected,
+    onProgress: deps.onSyncProgress,
   });
   const coordinator = new SyncCoordinator(deps.store, mutator, engine, {
     onSettled: deps.onSettled,
     autoSyncEnabled: deps.autoSyncEnabled,
+    onSyncStart: deps.onSyncStart,
   });
   const resolver = new ConflictResolver({
     userId: deps.userId,

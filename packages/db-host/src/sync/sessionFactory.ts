@@ -37,6 +37,9 @@ export interface SyncSessionFactoryDeps {
   /** P6：推送成功 / 配额拒绝回调（扩展接线标 localOnly/syncError）。 */
   readonly onEntityPushed?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
   readonly onQuotaRejected?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
+  /** 同步进入 / 进行中进度（状态栏用）。 */
+  readonly onSyncStart?: (phase: 'pull' | 'push' | 'both') => void;
+  readonly onSyncProgress?: (p: import('./e2e/syncEngine.js').SyncProgress) => void;
 }
 
 export class SyncSessionFactory {
@@ -63,7 +66,7 @@ export class SyncSessionFactory {
       this.deps.dekStore,
       this.deps.connectionStore,
       this.deps.createClient(),
-      { entitlement: this.deps.entitlement, onSyncResult: this.deps.onSyncResult, onSessionState: this.deps.onSessionState, autoSyncEnabled: this.deps.autoSyncEnabled, authenticatorBackend: this.deps.authenticatorBackend, onEntityPushed: this.deps.onEntityPushed, onQuotaRejected: this.deps.onQuotaRejected },
+      { entitlement: this.deps.entitlement, onSyncResult: this.deps.onSyncResult, onSessionState: this.deps.onSessionState, autoSyncEnabled: this.deps.autoSyncEnabled, authenticatorBackend: this.deps.authenticatorBackend, onEntityPushed: this.deps.onEntityPushed, onQuotaRejected: this.deps.onQuotaRejected, onSyncStart: this.deps.onSyncStart, onSyncProgress: this.deps.onSyncProgress },
     );
     return this.session;
   }

@@ -25,6 +25,8 @@ export interface SyncCoordinatorOptions {
    * `scheduleNow`/`runNow`/分相仍可用。缺省视为开启（兼容既有调用方）。
    */
   autoSyncEnabled?: () => boolean;
+  /** 一轮同步进入时回调（含手动/后台）；供状态栏显示"进行中"。 */
+  onSyncStart?: (phase: 'pull' | 'push' | 'both') => void;
 }
 
 export class SyncCoordinator {
@@ -90,6 +92,11 @@ export class SyncCoordinator {
     return this.options.autoSyncEnabled ? this.options.autoSyncEnabled() : true;
   }
 
+  /** 同步进入回调（异常吞掉，绝不影响同步）。 */
+  private emitSyncStart(phase: 'pull' | 'push' | 'both'): void {
+    try { this.options.onSyncStart?.(phase); } catch { /* 状态回调异常不影响同步 */ }
+  }
+
   stop(): void {
     this.stopped = true;
     if (this.debounceTimer) {
@@ -104,8 +111,9 @@ export class SyncCoordinator {
   /** 用户显式请求的同步：复用同一串行链，避免和 debounce 轮次并发。失败返回调用方。 */
   async runNow(): Promise<SyncRunResult | undefined> {
     let failure: unknown;
-    const run = this.chain.then(() =>
-      this.drain()
+    const run = this.chain.then(async () => {
+      this.emitSyncStart('both');
+      return this.drain()
         .then((result) => {
           this.notify(result);
           this.maybeRetry(result);
@@ -114,8 +122,8 @@ export class SyncCoordinator {
           failure = err;
           this._lastError = describe(err);
           this.notify(undefined);
-        }),
-    );
+        });
+    });
     this.chain = run.catch(() => {});
     await run;
     if (failure) throw failure;
@@ -136,6 +144,7 @@ export class SyncCoordinator {
   private async runPhase(phase: 'pull' | 'push', reconcile = false): Promise<SyncRunResult | undefined> {
     let failure: unknown;
     const run = this.chain.then(async () => {
+      this.emitSyncStart(phase);
       try {
         let skippedOutbound = 0;
         if (reconcile) skippedOutbound = (await this.mutator.reconcile()).skipped?.length ?? 0;
@@ -143,7 +152,8 @@ export class SyncCoordinator {
         if (skippedOutbound) result.skippedOutbound = skippedOutbound;
         this._lastRun = result;
         this.notify(result);
-        this.maybeRetry(result);
+        // 显式 pull/push 是独立动作：失败不排后台重试，避免重试走 drain() 的 both 全量
+        // 而隐式触发对方动作（push 失败→后台 both→隐式 pull→LWW 覆盖，被感知为"偷偷 merge"）。
       } catch (err) {
         failure = err;
         this._lastError = describe(err);
@@ -179,6 +189,7 @@ export class SyncCoordinator {
 
   /** 后台轮：跑一轮 drain，永不拒绝（错误记录 + 退避）；结束统一 notify。 */
   private async run(): Promise<void> {
+    this.emitSyncStart('both');
     try {
       const result = await this.drain();
       this.notify(result);
