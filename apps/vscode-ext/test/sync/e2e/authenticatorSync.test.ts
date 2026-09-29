@@ -126,9 +126,11 @@ describe('P6 codec：验证器实体', () => {
     }
   });
 
-  it('解码拒绝多带字段（localOnly 非法）', () => {
+  it('解码忽略多带字段：localOnly 不被采纳（D14 向前兼容）', () => {
     const payload = encodeEntityPayload({ type: 'authenticatorEntry', entity: entryEntity }, () => undefined);
-    expect(() => decodeEntityPayload({ ...payload, localOnly: true })).toThrow(/unexpected key/);
+    const decoded = decodeEntityPayload({ ...payload, localOnly: true });
+    expect(decoded.type).toBe('authenticatorEntry');
+    expect((decoded.data as unknown as Record<string, unknown>).localOnly).toBeUndefined();
   });
 });
 

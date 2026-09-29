@@ -140,8 +140,10 @@ describe('decodeEntityPayload', () => {
     expect(() => decodeRecordPayload({ type: 'connection', name: 'n', dbType: 'oracle', host: 'h' })).toThrowError(/unknown database engine/);
   });
 
-  it('groupId 任意引擎出现即保留为引用，多余字段拒绝', () => {
-    expect(() => decodeRecordPayload({ type: 'connection', name: 'n', dbType: 'mysql', host: 'h', port: 3306, user: 'u', bogus: 1 })).toThrowError(/unexpected key/);
+  it('向前兼容（D14）：未知字段被忽略，不抛错', () => {
+    // 新版本给 payload 增字段时，旧客户端不得整页失败；未知字段在 AEAD 密文内、无法注入。
+    expect(decodeRecordPayload({ type: 'connection', name: 'n', dbType: 'mysql', host: 'h', port: 3306, user: 'u', futureField: 1 }))
+      .toMatchObject({ name: 'n', host: 'h' });
   });
 });
 

@@ -52,7 +52,8 @@ describe('recordCodec：Redis 连接可同步', () => {
     expect(c.clusterNodes).toBe('h1:6379,h2:6379');
   });
 
-  it('非法字段被白名单拒绝', () => {
-    expect(() => decodeEntityPayload({ type: 'connection', dbType: 'redis', name: 'r', host: 'h', port: 6379, bogus: 1 })).toThrow(/unexpected key/);
+  it('未知字段被忽略（D14 向前兼容），不抛错', () => {
+    expect(decodeEntityPayload({ type: 'connection', dbType: 'redis', name: 'r', host: 'h', port: 6379, bogus: 1 }))
+      .toMatchObject({ type: 'connection' });
   });
 });

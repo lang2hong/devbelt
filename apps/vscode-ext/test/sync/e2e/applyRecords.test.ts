@@ -161,9 +161,10 @@ describe('applyRecord（连接）', () => {
     expect(s.connections.size).toBe(0);
   });
 
-  it('未知 payload 字段拒绝（严格解码）', async () => {
+  it('未知 payload 字段被忽略、照常落地（D14 向前兼容）', async () => {
     const s = setup();
-    await expect(applyRecord({ recordId: 'A'.repeat(22), version: '1', tombstone: false, payload: { ...connPayload, extra: 1 } }, s)).rejects.toThrowError(/unexpected/);
+    expect(await applyRecord({ recordId: 'A'.repeat(22), version: '1', tombstone: false, payload: { ...connPayload, extra: 1 } }, s))
+      .toMatchObject({ disposition: 'created' });
   });
 
   it('SQLite payload 应用时不要求 host/port（兜底空值）', async () => {

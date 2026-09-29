@@ -351,9 +351,16 @@ export type DecodedEntityPayload =
   | { type: 'authenticatorTag'; data: DecodedAuthenticatorTagPayload }
   | { type: 'authenticatorEntry'; data: DecodedAuthenticatorEntryPayload };
 
-function rejectExtraKeys(obj: Record<string, unknown>, allowed: readonly string[], field: string): void {
+/**
+ * 向前兼容策略（D14）：**忽略未知字段**，只校验已知字段。
+ *
+ * 新版本给 payload 增字段时，旧客户端若严格拒绝就会整页失败、入站同步卡住（同 H3）。
+ * payload 在 AEAD 密文内且 AAD 绑定，未知字段无法在不知 DEK 的情况下注入，故忽略是安全的；
+ * 敏感字段仍只经加密通道、且由已知字段校验约束。已知字段的缺失/类型/取值仍 fail-closed。
+ */
+function ignoreUnknownKeys(obj: Record<string, unknown>, allowed: readonly string[]): void {
   for (const k of Object.keys(obj)) {
-    if (!allowed.includes(k)) throw new Error(`${field} has unexpected key "${k}"`);
+    if (!allowed.includes(k)) delete obj[k];
   }
 }
 
@@ -411,7 +418,7 @@ function decodeConnectionPayload(p: unknown): DecodedConnectionPayload {
   const dbTypeStr = strOf(obj, 'dbType');
   if (dbTypeStr === undefined) throw new Error('record payload.dbType is required');
   const dbType = databaseTypeFromEngine(dbTypeStr);
-  rejectExtraKeys(obj, [...payloadFieldsFor(dbType), ...CONNECTION_PATH_FIELDS, 'type', 'groupId'], 'record payload');
+  ignoreUnknownKeys(obj, [...payloadFieldsFor(dbType), ...CONNECTION_PATH_FIELDS, 'type', 'groupId']);
 
   const name = strOf(obj, 'name');
   if (name === undefined) throw new Error('record payload.name is required');
@@ -515,7 +522,7 @@ function decodeGroupPayload(p: unknown): DecodedGroupPayload {
   if (typeof p !== 'object' || p === null) throw new Error('record payload must be an object');
   const obj = p as Record<string, unknown>;
   if (obj.type !== 'group') throw new Error('record payload.type must be group');
-  rejectExtraKeys(obj, GROUP_PAYLOAD_FIELDS, 'record payload');
+  ignoreUnknownKeys(obj, GROUP_PAYLOAD_FIELDS);
   const name = strOf(obj, 'name');
   if (name === undefined) throw new Error('record payload.name is required');
   const parentId = strOf(obj, 'parentId');
@@ -527,7 +534,7 @@ function decodeQueryFolderPayload(p: unknown): DecodedQueryFolderPayload {
   if (typeof p !== 'object' || p === null) throw new Error('record payload must be an object');
   const obj = p as Record<string, unknown>;
   if (obj.type !== 'queryFolder') throw new Error('record payload.type must be queryFolder');
-  rejectExtraKeys(obj, FOLDER_PAYLOAD_FIELDS, 'record payload');
+  ignoreUnknownKeys(obj, FOLDER_PAYLOAD_FIELDS);
   const name = strOf(obj, 'name');
   if (name === undefined) throw new Error('record payload.name is required');
   const connId = strOf(obj, 'connId');
@@ -538,7 +545,7 @@ function decodeQueryPayload(p: unknown): DecodedQueryPayload {
   if (typeof p !== 'object' || p === null) throw new Error('record payload must be an object');
   const obj = p as Record<string, unknown>;
   if (obj.type !== 'query') throw new Error('record payload.type must be query');
-  rejectExtraKeys(obj, QUERY_PAYLOAD_FIELDS, 'record payload');
+  ignoreUnknownKeys(obj, QUERY_PAYLOAD_FIELDS);
   const name = strOf(obj, 'name');
   if (name === undefined) throw new Error('record payload.name is required');
   const sql = strOf(obj, 'sql');
@@ -560,7 +567,7 @@ function decodeAuthenticatorGroupPayload(p: unknown): DecodedAuthenticatorGroupP
   if (typeof p !== 'object' || p === null) throw new Error('record payload must be an object');
   const obj = p as Record<string, unknown>;
   if (obj.type !== 'authenticatorGroup') throw new Error('record payload.type must be authenticatorGroup');
-  rejectExtraKeys(obj, AUTH_GROUP_PAYLOAD_FIELDS, 'record payload');
+  ignoreUnknownKeys(obj, AUTH_GROUP_PAYLOAD_FIELDS);
   const name = strOf(obj, 'name');
   if (name === undefined) throw new Error('record payload.name is required');
   const sortOrder = nonNegIntOf(obj, 'sortOrder');
@@ -572,7 +579,7 @@ function decodeAuthenticatorTagPayload(p: unknown): DecodedAuthenticatorTagPaylo
   if (typeof p !== 'object' || p === null) throw new Error('record payload must be an object');
   const obj = p as Record<string, unknown>;
   if (obj.type !== 'authenticatorTag') throw new Error('record payload.type must be authenticatorTag');
-  rejectExtraKeys(obj, AUTH_TAG_PAYLOAD_FIELDS, 'record payload');
+  ignoreUnknownKeys(obj, AUTH_TAG_PAYLOAD_FIELDS);
   const name = strOf(obj, 'name');
   if (name === undefined) throw new Error('record payload.name is required');
   return { name, color: assertAuthenticatorTagColor(obj.color) };
@@ -582,7 +589,7 @@ function decodeAuthenticatorEntryPayload(p: unknown): DecodedAuthenticatorEntryP
   if (typeof p !== 'object' || p === null) throw new Error('record payload must be an object');
   const obj = p as Record<string, unknown>;
   if (obj.type !== 'authenticatorEntry') throw new Error('record payload.type must be authenticatorEntry');
-  rejectExtraKeys(obj, AUTH_ENTRY_PAYLOAD_FIELDS, 'record payload');
+  ignoreUnknownKeys(obj, AUTH_ENTRY_PAYLOAD_FIELDS);
   const issuer = strOf(obj, 'issuer');
   if (issuer === undefined) throw new Error('record payload.issuer is required');
   const createTime = nonNegIntOf(obj, 'createTime');
