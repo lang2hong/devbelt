@@ -79,6 +79,17 @@ describe('B1 Schema 层方言门控', () => {
     expect(queryCats).toHaveLength(1);
   });
 
+  it('跨 schema 同层节点 id 唯一（Schema 及其分类派生自父节点 id）', async () => {
+    const provider = makeProvider(async () => ['public', 'sales']);
+    const kids = await (provider as any).buildDatabaseChildren(dbNode('PG'));
+    const schemas = kids.filter((n: DbTreeNode) => n.kind === NodeKind.Schema);
+    expect(new Set(schemas.map((n: DbTreeNode) => n.id)).size).toBe(schemas.length);
+    expect(schemas.map((n: DbTreeNode) => n.id).join(',')).toContain(':schema:public');
+    // 两个 schema 的分类节点 id 不能相撞。
+    const cats = schemas.flatMap((s: DbTreeNode) => (provider as any).buildSchemaChildren(s));
+    expect(new Set(cats.map((c: DbTreeNode) => c.id)).size).toBe(cats.length);
+  });
+
   it('PG Schema 节点下不出现「查询」分类（避免跨 schema id 冲突）', async () => {
     const provider = makeProvider(async () => ['public']);
     const s = new DbTreeNode('sales', 1 as any, NodeKind.Schema, dbNode('PG').conn);

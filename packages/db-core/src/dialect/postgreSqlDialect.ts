@@ -145,7 +145,13 @@ export class PostgreSqlDialect implements SqlDialect {
 
   getViewDefinitionSql(name: string, _database?: string, schema?: string): string {
     validateIdent(name, 63);
-    return `SELECT pg_get_viewdef(${this.schemaExpr(schema)} || '.' || '${name}', true) AS definition`;
+    // 按 oid 取定义：旧的 `pg_get_viewdef('s' || '.' || 'V')` 把结果当**未加引号的名字**
+    // 解析，含大写/`-`/空格的视图名会找不到（`"s"."publicorders"`）；按 relname+relkind
+    // 过滤后传 `c.oid` 不经过名字解析。
+    return `SELECT pg_get_viewdef(c.oid, true) AS definition
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE c.relname = '${name}' AND c.relkind = 'v' AND n.nspname = ${this.schemaExpr(schema)}`;
   }
 
   /** pg_get_viewdef 返回纯 SELECT，包上 CREATE OR REPLACE VIEW 外壳。 */

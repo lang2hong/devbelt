@@ -104,7 +104,16 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (confirmed !== restoreBtn) return;
     const session = await manager.connectSql(node.conn, node.database);
     // 流式读取 + 增量切分：过去整文件读进内存再一次性切分，GB 级 dump 会 OOM。
-    const statements = streamSqlStatements(uri[0].fsPath, manager.scanOptionsFor?.(node.conn));
+    const rawStatements = streamSqlStatements(uri[0].fsPath, manager.scanOptionsFor?.(node.conn));
+    // PG 无 USE：dump 里不带 schema 的语句默认落到 search_path 的 schema。恢复事务由
+    // BackupService.restore 自己 BEGIN，故把 `SET LOCAL` 作为首个语句注入（事务内生效）。
+    const schema = pgSchemaFor(conn, node.schema);
+    const statements = conn.dbType === DatabaseType.PG && schema
+      ? (async function* () {
+          yield `SET LOCAL search_path TO ${wrapIdentForConn(conn, validateIdent(schema))}`;
+          yield* rawStatements;
+        })()
+      : rawStatements;
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'Restoring database...', cancellable: true },
       async (progress, token) => {

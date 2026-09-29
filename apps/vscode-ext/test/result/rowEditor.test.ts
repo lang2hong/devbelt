@@ -51,6 +51,26 @@ describe('RowEditor', () => {
     expect(posted).toContainEqual({ type: 'rowsDeleted', count: 2 });
     expect(refreshes.count).toBe(1);
   });
+
+  it('H1：PG 编辑把显式 schema 透传给 DataService（不从 database 推断）', async () => {
+    const pgConn: any = { id: 'p1', database: 'app', dbType: 'PG', host: 'h', name: 'n', readOnly: false, environment: 'development' };
+    const calls: any[][] = [];
+    const manager: any = { connectSql: async () => ({ data: { updateCell: async (...a: any[]) => { calls.push(a); } } }) };
+    const editor = new RowEditor(manager, pgConn, 'users', 'app', () => {}, { refresh: async () => {} }, 'sales');
+    await editor.updateCell(['id'], [5], 'name', 'x');
+    // 参数序：table, pkColumns, pkValues, col, val, database, schema
+    expect(calls[0][5]).toBe('app');
+    expect(calls[0][6]).toBe('sales');
+  });
+
+  it('H1：MySQL 的 schema 通道恒为 undefined', async () => {
+    const calls: any[][] = [];
+    const manager: any = { connectSql: async () => ({ data: { insertRow: async (...a: any[]) => { calls.push(a); } } }) };
+    const editor = new RowEditor(manager, conn, 'users', 'test', () => {}, { refresh: async () => {} }, 'sales');
+    await editor.insertRow(['name'], ['x']);
+    expect(calls[0][3]).toBe('test');
+    expect(calls[0][4]).toBeUndefined();
+  });
 });
 /**
  * 回归：数据编辑必须发 DataChangeEvent 并写审计。

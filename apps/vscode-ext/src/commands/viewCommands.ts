@@ -142,6 +142,12 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     // 数据对比
     vscode.commands.registerCommand('devbelt.compareData', async (node: any) => {
       if (!node?.conn || !node?.database) return;
+      // PG 连接绑定单个数据库（无 USE），同连接无法跨库读取目标库数据：对比会退化成
+      // 拿库和自己比。与 compareSchema/syncDatabase 同口径，明确拒绝而不是给误导结果。
+      if (node.conn.dbType === 'PG') {
+        vscode.window.showWarningMessage(l10n('schema.pgCrossDbUnsupported'));
+        return;
+      }
       const session = await manager.connectSql(node.conn, node.database);
       const targetDbs = (await session.metadata.getDatabases()).filter((d: string) => d !== node.database);
       if (!targetDbs.length) {
@@ -406,6 +412,10 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     // 定时备份
     vscode.commands.registerCommand('devbelt.scheduleBackup', async (node: any) => {
       if (!node?.conn || !node?.database) return;
+      // PG 多 schema：定时备份目前只覆盖默认 schema（见 P7.1 已知限制）。
+      if (node.conn.dbType === 'PG') {
+        vscode.window.showWarningMessage(l10n('backup.pgSchemaOnlyHint'));
+      }
       await configureBackupSchedule(backupScheduler, node.conn.id, node.database);
     }),
   );

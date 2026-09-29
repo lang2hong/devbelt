@@ -71,7 +71,7 @@ describe.skipIf(!URL)('db-core PostgreSQL dialect (real db)', () => {
     }
   });
 
-  it('缺陷证实：getViewDefinitionSql 对含大写视图名解析失败', async () => {
+  it('M1：getViewDefinitionSql 对含大写/特殊字符的视图名也能取到定义', async () => {
     const client = new Client({ connectionString: URL! });
     await client.connect();
     const schema = `ztest_${Date.now()}`;
@@ -79,13 +79,16 @@ describe.skipIf(!URL)('db-core PostgreSQL dialect (real db)', () => {
     try {
       await client.query(`SET search_path TO ${schema}`);
       await client.query(`CREATE TABLE base (id int)`);
-      await client.query(`CREATE VIEW "PublicOrders" AS SELECT id FROM base`);
+      await client.query(`CREATE VIEW "Public-Orders" AS SELECT id FROM base`);
 
-      // 方言 SQL: current_schema() || '.' || 'PublicOrders'
-      // current_schema() 已有值，拼接后带点号 → PG 把两侧当裸标识符小写化，
-      // 最终解析 "ztest_xxx.publicorders"，找不到大写视图 → 失败。
-      const sql = dialect.getViewDefinitionSql('PublicOrders');
-      await expect(client.query(sql)).rejects.toThrow(/does not exist/);
+      // 按 relkind + oid 取定义，不经名字解析 —— 大写/`-` 都能命中。
+      const sql = dialect.getViewDefinitionSql('Public-Orders', undefined, schema);
+      const res = await client.query(sql);
+      expect(res.rows).toHaveLength(1);
+      expect(String(res.rows[0].definition)).toContain('SELECT');
+      // 指定其它 schema 时应查不到。
+      const other = await client.query(dialect.getViewDefinitionSql('Public-Orders', undefined, 'public'));
+      expect(other.rows).toHaveLength(0);
     } finally {
       await client.query(`DROP SCHEMA ${schema} CASCADE`);
       await client.end();

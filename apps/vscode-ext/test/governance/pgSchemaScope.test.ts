@@ -2,6 +2,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import { pgSchemaFor } from '../../src/utils/sql';
+
 const SRC = join(process.cwd(), 'src');
 
 function tsFiles(dir: string): string[] {
@@ -33,6 +35,14 @@ describe('H1：pgSchemaFor 只接受显式 schema', () => {
     expect(src).toContain('SET LOCAL search_path TO');
     // 只在 PG 且拿到 schema 时设置，不能影响 MySQL/SQLite。
     expect(src).toMatch(/conn\.dbType === DatabaseType\.PG && schema/);
+  });
+
+  it('pgSchemaFor 只对 PG 返回 schema，其余恒 undefined', () => {
+    expect(pgSchemaFor({ dbType: 'PG' } as any, 'sales')).toBe('sales');
+    expect(pgSchemaFor({ dbType: 'PG' } as any, undefined)).toBeUndefined();
+    expect(pgSchemaFor({ dbType: 'PG' } as any, '  ')).toBeUndefined();
+    expect(pgSchemaFor({ dbType: 'MYSQL' } as any, 'x')).toBeUndefined();
+    expect(pgSchemaFor({ dbType: 'SQLITE' } as any, 'x')).toBeUndefined();
   });
 
   it('pgSchemaFor 的形参名是 schema 而非 database', () => {

@@ -784,6 +784,7 @@ export const zh: MessageCatalog = {
   'sync.progressTitle': '正在同步数据库…',
   'sync.doneErrors': '同步完成，但有 {errors} 个错误。已同步 {count} 张表。',
   'backup.scheduleSet': '"{database}" 将{interval}备份到 {dir}。',
+  'backup.pgSchemaOnlyHint': '定时备份目前只覆盖默认 schema（PG 多 schema 支持在计划中）。',
   'sql.reviewBeforeRun': '{detail}。继续前请检查 SQL。',
   'sql.runAction': '执行 SQL',
   'sql.productionWrite': '生产连接上的写操作',

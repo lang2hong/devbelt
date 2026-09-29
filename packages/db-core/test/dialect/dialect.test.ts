@@ -61,6 +61,16 @@ describe('方言策略（策略模式）', () => {
     expect(sql).toContain('datistemplate = false');
   });
 
+  it('M1：PG 视图定义按 relkind/oid（不拼接未加引号的名字）', () => {
+    const sql = new PostgreSqlDialect().getViewDefinitionSql('PublicOrders', undefined, 'sales');
+    expect(sql).toContain('pg_get_viewdef(c.oid, true)');
+    expect(sql).toContain("c.relkind = 'v'");
+    expect(sql).toContain("n.nspname = 'sales'");
+    // 旧写法会拼接 `'s' || '.' || 'V'`
+    expect(sql).not.toContain("|| '.' ||");
+    expect(() => new PostgreSqlDialect().getViewDefinitionSql('v', undefined, "x'; DROP")).toThrow();
+  });
+
   it('B1：PG 元数据 SQL 按 schema 限定，非法 schema 名被拒', () => {
     const pg = new PostgreSqlDialect();
     expect(pg.getTableListSql(undefined, 'myschema')).toContain("n.nspname = 'myschema'");
