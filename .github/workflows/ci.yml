@@ -197,11 +197,16 @@ jobs:
           fi
 
       # Sentinel：监控既有 redis service（127.0.0.1:6379）。
+      # 注意：官方 redis 镜像 entrypoint 会 gosu 到 redis(999) 运行；且 Redis 7 重写配置是
+      # 「临时文件 + rename」，rename 到单文件 bind mount 会 EBUSY。故必须挂载整个目录并放开权限。
+      # 该 start 失败不阻断后续硬门禁（sentinel 相关用例本身是 best-effort）。
       - name: Start Redis Sentinel
+        continue-on-error: true
         run: |
-          printf 'port 26379\nsentinel monitor mymaster 127.0.0.1 6379 1\nsentinel down-after-milliseconds mymaster 5000\nsentinel failover-timeout mymaster 10000\n' > /tmp/sentinel.conf
-          # 必须可写挂载：Sentinel 会重写自己的配置文件（记录 myid/状态），:ro 会导致其无法启动。
-          docker run -d --name redis-sentinel --network host -v /tmp/sentinel.conf:/etc/sentinel.conf redis:7 redis-server /etc/sentinel.conf --sentinel
+          mkdir -p /tmp/sentinel
+          printf 'port 26379\nsentinel monitor mymaster 127.0.0.1 6379 1\nsentinel down-after-milliseconds mymaster 5000\nsentinel failover-timeout mymaster 10000\n' > /tmp/sentinel/sentinel.conf
+          chmod -R 777 /tmp/sentinel
+          docker run -d --name redis-sentinel --network host -v /tmp/sentinel:/etc/redis-sentinel redis:7 redis-server /etc/redis-sentinel/sentinel.conf --sentinel
           ok=0
           for i in $(seq 1 30); do
             if docker exec redis-sentinel redis-cli -p 26379 ping 2>/dev/null | grep -q PONG; then ok=1; break; fi
