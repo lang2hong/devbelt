@@ -138,47 +138,59 @@ describe.skipIf(!CLUSTER_SEED)('Cluster over SSH（真实多节点 + natMap）',
 });
 
 describe.skipIf(!CLUSTER_SEED)('D20：未映射节点 → 命令在有限时间内失败（不挂起/不 Storm）', () => {
-  it('落在未映射节点的 slot：有界报错，绝不挂起', async () => {
+  it('未映射节点的 slot 有界报错，且其余节点仍可用', async () => {
     const seed = hostPort(CLUSTER_SEED!);
+    // 用与生产一致的重试配置（不传 maxRetryTimes → 走 DEFAULT_RETRY_TIMES=3）。
     const plain = new RedisClient({ host: seed.host, port: seed.port, cluster: { nodes: [seed], slotsRefreshTimeout: 3000 } });
     try {
       const seedAddr = `${seed.host}:${seed.port}`;
-      const slots = (await plain.sendCommand('CLUSTER', ['SLOTS'])) as unknown[];
-      // 选一个「非种子」master 的 slot 区间，确保测的是 slot 路由到未映射节点，而非种子不可达。
-      const range = (slots as any[][]).find((r) => Array.isArray(r) && r[2] && `${r[2][0]}:${r[2][1]}` !== seedAddr);
-      if (!range) throw new Error('no non-seed master range in CLUSTER SLOTS');
-      const start = Number(range[0]);
-      const end = Number(range[1]);
-      const nodeAddr = `${range[2][0]}:${range[2][1]}`;
+      const slots = (await plain.sendCommand('CLUSTER', ['SLOTS'])) as unknown[][];
+      const ranges = slots.filter((r) => Array.isArray(r) && r[2]) as any[][];
+      // 未映射目标：一个「非种子」master（确保测的是 slot 路由，而非种子不可达）。
+      const dropRange = ranges.find((r) => `${r[2][0]}:${r[2][1]}` !== seedAddr);
+      if (!dropRange) throw new Error('no non-seed master range in CLUSTER SLOTS');
+      const dropAddr = `${dropRange[2][0]}:${dropRange[2][1]}`;
+      // 正向对照：任选另一个「不在 dropAddr」的区间，其 key 必须仍能读写。
+      const okRange = ranges.find((r) => `${r[2][0]}:${r[2][1]}` !== dropAddr);
+      if (!okRange) throw new Error('no usable master range in CLUSTER SLOTS');
 
-      let key = '';
-      for (let i = 0; i < 20000; i++) {
-        const cand = `d20:{${i}}`;
-        const slot = Number(await plain.sendCommand('CLUSTER', ['KEYSLOT', cand]));
-        if (slot >= start && slot <= end) { key = cand; break; }
-      }
-      expect(key).not.toBe('');
+      const keyIn = async (start: number, end: number): Promise<string> => {
+        for (let i = 0; i < 20000; i++) {
+          const cand = `d20:{${i}}`;
+          const slot = Number(await plain.sendCommand('CLUSTER', ['KEYSLOT', cand]));
+          if (slot >= start && slot <= end) return cand;
+        }
+        throw new Error(`no key in slot range ${start}-${end}`);
+      };
+      const badKey = await keyIn(Number(dropRange[0]), Number(dropRange[1]));
+      const okKey = await keyIn(Number(okRange[0]), Number(okRange[1]));
 
-      // 该 master 映射到死端口（模拟「拓扑变化后未映射」），其余地址按原样。
-      const natMap = (address: string) => (address === nodeAddr ? { host: '127.0.0.1', port: 0 } : null);
-      const bad = new RedisClient({
-        host: seed.host, port: seed.port, maxRetryTimes: 1,
-        cluster: { nodes: [seed], natMap, slotsRefreshTimeout: 3000 },
-      });
+      // 该 master 映射到死端口（模拟「拓扑变化后未映射」），其余地址按原样（生产 buildNatMap 行为）。
+      const natMap = (address: string) => (address === dropAddr ? { host: '127.0.0.1', port: 0 } : null);
+      const client = new RedisClient({ host: seed.host, port: seed.port, cluster: { nodes: [seed], natMap, slotsRefreshTimeout: 3000 } });
       try {
+        // 正向对照先行：其余节点可用，证明失败只出在未映射节点。
+        expect(String(await client.sendCommand('SET', [okKey, 'v']))).toBe('OK');
+        expect(String(await client.sendCommand('GET', [okKey]))).toBe('v');
+        await client.sendCommand('DEL', [okKey]);
+
+        const started = Date.now();
         const outcome = await Promise.race([
-          bad.sendCommand('SET', [key, 'v']).then(() => 'ok' as const, () => 'error' as const),
+          client.sendCommand('SET', [badKey, 'v']).then(() => 'ok' as const, () => 'error' as const),
           new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 20000)),
         ]);
-        // 'timeout' = 挂起（不可接受）；'ok' = 根本没走到未映射节点。
+        const elapsedMs = Date.now() - started;
+        // 供 CI 日志抓取，写入 P7 §十一（决定 clusterRetryStrategy 优先级）。
+        console.log(`D20 unmapped-node failure latency: ${elapsedMs}ms`);
+        // 'timeout' = 挂起（阻塞发布）；'ok' = 没走到未映射节点。
         expect(outcome).toBe('error');
       } finally {
-        await bad.close();
+        await client.close();
       }
     } finally {
       await plain.close();
     }
-  }, 60_000);
+  }, 90_000);
 });
 
 describe.skipIf(!SENTINEL_ADDR)('Sentinel over SSH（发现 master 后 standalone 连）', () => {
