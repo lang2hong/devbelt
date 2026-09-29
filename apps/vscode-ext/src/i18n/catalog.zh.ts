@@ -506,6 +506,7 @@ export const zh: MessageCatalog = {
   // ── 2FA/TOTP 验证器（主进程）──
   'authenticator.title': '验证器',
   'authenticator.error.generic': '验证器操作失败。',
+  'authenticator.confirm.deleteGroup': '删除分组「{name}」？组内 {count} 个验证码会一并删除并同步到所有设备。',
   'authenticator.copy.invalid': '口令格式非法，已拒绝复制。',
   'authenticator.quota.upgrade': '升级 Pro',
   'authenticator.quota.reached': '免费套餐最多保存 {limit} 个验证器条目，升级到 Pro 可添加更多。',
@@ -852,6 +853,7 @@ export const zh: MessageCatalog = {
   'cmd.redis.binaryReadOnly': '该键名/字段/成员不是合法 UTF-8（二进制），为避免损坏数据，已设为只读。',
   'cmd.redis.deleteNoMatch': '没有匹配的键/字段/成员被删除（可能已不存在或名称含二进制字节）。',
   'cmd.redis.ttlInvalid': 'TTL 需为非负整数秒；空/小数无效（清空过期请用「持久化」）。',
+  'cmd.redis.dbChanged': '确认期间数据库已切换，已取消执行（避免破坏性命令落到其它库）。',
   'cmd.redis.fieldExists': '目标 field 已存在，改名会覆盖，请换个名字。',
   'cmd.redis.memberExists': '目标 member 已存在，改名会覆盖，请换个名字。',
   'cmd.redis.dangerCancelled': '已取消命令。',
@@ -940,6 +942,7 @@ export const zh: MessageCatalog = {
   'wv.redis.value.refresh': '刷新',
   'wv.redis.value.save': '保存',
   'wv.redis.value.append': '追加',
+  'wv.redis.value.appendHint': '要追加的内容',
   'wv.redis.value.rename': '重命名',
   'wv.redis.value.delete': '删除',
   'wv.redis.value.setTtl': '设置 TTL',

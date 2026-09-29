@@ -35,6 +35,8 @@ const emit = defineEmits<{
 
 const stringMode = ref<'text' | 'json' | 'hex'>('text');
 const stringText = ref('');
+/** 追加专用输入：避免把编辑框里的完整值再追加一遍（值重复）。 */
+const appendText = ref('');
 const hexText = ref('');
 const rawBytes = ref<Uint8Array>(new Uint8Array());
 const jsonError = ref('');
@@ -268,7 +270,8 @@ function copyValue(text: string): void {
         <div v-if="hexError" class="error">{{ hexError }}</div>
         <div class="actions">
           <button class="btn" :disabled="textLocked || !!jsonError || !!hexError" @click="saveString">{{ t('wv.redis.value.save') }}</button>
-          <button class="btn" :disabled="textLocked || stringMode === 'hex'" @click="emit('appendString', key, stringText)">{{ t('wv.redis.value.append') }}</button>
+          <input v-model="appendText" :disabled="textLocked" :placeholder="t('wv.redis.value.appendHint')" />
+          <button class="btn" :disabled="textLocked || stringMode === 'hex' || !appendText" @click="emit('appendString', key, appendText); appendText = ''">{{ t('wv.redis.value.append') }}</button>
         </div>
       </div>
 

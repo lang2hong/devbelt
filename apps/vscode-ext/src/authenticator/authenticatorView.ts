@@ -228,6 +228,17 @@ export class AuthenticatorView extends BaseWebView {
   }
 
   private async onDeleteGroup(msg: Extract<AuthenticatorUpMessage, { type: 'deleteGroup' }>): Promise<void> {
+    // 宿主侧模态确认：删组会级联删除组内全部 TOTP 密钥并同步到所有设备，
+    // 不能只依赖前端第二次点击（webview 可被脚本/误触绕过）。
+    const group = this.store.listGroups().find((g) => g.id === msg.id);
+    const count = this.store.listEntries().filter((e) => e.groupId === msg.id).length;
+    const action = l10n('common.delete');
+    const pick = await vscode.window.showWarningMessage(
+      l10n('authenticator.confirm.deleteGroup', { name: group?.name ?? '', count: String(count) }),
+      { modal: true },
+      action,
+    );
+    if (pick !== action) return;
     await this.store.deleteGroup(msg.id);
   }
 

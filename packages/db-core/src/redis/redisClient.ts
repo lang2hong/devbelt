@@ -50,7 +50,7 @@ export interface RedisClientOptions {
   /** Cluster 模式：起始节点 + 可选 SSH NAT map + slots 刷新超时。 */
   cluster?: {
     nodes: { host: string; port: number }[];
-    natMap?: Record<string, { host: string; port: number }>;
+    natMap?: Record<string, { host: string; port: number }> | ((address: string) => { host: string; port: number } | null);
     slotsRefreshTimeout?: number;
   };
 }

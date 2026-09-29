@@ -393,6 +393,20 @@ describe('RedisView S3 键树/值/编辑', () => {
     expect(res.ok).toBe(false);
   });
 
+  it('危险命令确认期间切换 db → 拒绝执行（防破坏错库）', async () => {
+    const { view, sent, manager } = makeView(handler);
+    await mount(view, sent);
+    sent.length = 0;
+    await view.handleMessage({ type: 'runCommand', id: '7', line: 'FLUSHDB' });
+    expect(sent.some(([n]) => n === 'FLUSHDB')).toBe(false);
+    // 确认前切库（同面板复用不同 db）→ reconfigure 作废待确认。
+    RedisView.open(conn, manager, 'console', 0);
+    await view.handleMessage({ type: 'confirmDanger', id: '7', accept: true });
+    expect(sent.some(([n]) => n === 'FLUSHDB')).toBe(false);
+    const res = posts(view).find((m) => m.type === 'commandResult' && m.id === '7');
+    expect(res.ok).toBe(false);
+  });
+
   it('大 key 强制加载超 32MB → 只预览并标 truncated（GETRANGE）', async () => {
     const big: Record<string, unknown> = { ...replies, STRLEN: 40 * 1024 * 1024, GETRANGE: 'preview' };
     const sent: [string, unknown[]][] = [];

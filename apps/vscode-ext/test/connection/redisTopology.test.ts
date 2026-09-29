@@ -48,9 +48,11 @@ describe('parseSentinelMasterAddr', () => {
 });
 
 describe('buildNatMap', () => {
-  it('远端地址映射到本地隧道端口', () => {
-    expect(buildNatMap([{ remoteHost: '10.0.0.2', remotePort: 6379, localPort: 41001 }])).toEqual({
-      '10.0.0.2:6379': { host: '127.0.0.1', port: 41001 },
-    });
+  it('远端地址映射到本地隧道端口；本地回环放行、未知内网地址抛错', () => {
+    const nat = buildNatMap([{ remoteHost: '10.0.0.2', remotePort: 6379, localPort: 41001 }]);
+    expect(nat('10.0.0.2:6379')).toEqual({ host: '127.0.0.1', port: 41001 });
+    expect(nat('127.0.0.1:6379')).toBeNull();
+    expect(nat('localhost:6379')).toBeNull();
+    expect(() => nat('10.9.9.9:6379')).toThrow(/unmapped/);
   });
 });

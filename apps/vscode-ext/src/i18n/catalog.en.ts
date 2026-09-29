@@ -528,6 +528,7 @@ export const en: MessageCatalog = {
   // ── 2FA/TOTP 验证器（主进程）──
   'authenticator.title': 'Authenticator',
   'authenticator.error.generic': 'Authenticator operation failed.',
+  'authenticator.confirm.deleteGroup': 'Delete group "{name}"? Its {count} authenticator entries will be deleted and synced to all devices.',
   'authenticator.copy.invalid': 'Refused to copy an invalid code.',
   'authenticator.quota.upgrade': 'Upgrade to Pro',
   'authenticator.quota.reached': 'Free plan allows {limit} authenticator entries. Upgrade to Pro to add more.',
@@ -874,6 +875,7 @@ export const en: MessageCatalog = {
   'cmd.redis.binaryReadOnly': 'This key/field/member is not valid UTF-8 (binary); set to read-only to avoid corrupting it.',
   'cmd.redis.deleteNoMatch': 'Nothing was deleted (it may no longer exist, or its name contains binary bytes).',
   'cmd.redis.ttlInvalid': 'TTL must be a non-negative integer (seconds); empty/decimal is invalid (use persist to clear expiry).',
+  'cmd.redis.dbChanged': 'The database changed during confirmation; execution cancelled to avoid running against another DB.',
   'cmd.redis.fieldExists': 'Target field already exists; renaming would overwrite it.',
   'cmd.redis.memberExists': 'Target member already exists; renaming would overwrite it.',
   'cmd.redis.dangerCancelled': 'Command cancelled.',
@@ -962,6 +964,7 @@ export const en: MessageCatalog = {
   'wv.redis.value.refresh': 'Refresh',
   'wv.redis.value.save': 'Save',
   'wv.redis.value.append': 'Append',
+  'wv.redis.value.appendHint': 'Text to append',
   'wv.redis.value.rename': 'Rename',
   'wv.redis.value.delete': 'Delete',
   'wv.redis.value.setTtl': 'Set TTL',

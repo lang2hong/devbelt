@@ -14,6 +14,7 @@ import {
   parseClusterNodesAll,
   parseClusterNodesMasters,
   parseSentinelMasterAddr,
+  type NatMapFn,
   type RedisHostPort,
 } from './redisTopology';
 
@@ -50,7 +51,7 @@ function probeSentinel(host: string, port: number, auth: RedisAuth): RedisClient
 
 export interface ClusterTunnelSetup {
   seedNodes: RedisHostPort[];
-  natMap: Record<string, RedisHostPort>;
+  natMap: NatMapFn;
   /** 合成隧道 id，close 时逐个回收。 */
   tunnelIds: string[];
 }

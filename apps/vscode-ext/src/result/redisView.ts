@@ -71,7 +71,7 @@ export class RedisView extends BaseWebView {
   private static readonly instances = new Map<string, RedisView>();
   /** `connection:*` 审计责任面板：每连接仅一个实例负责写（避免多面板重复）。 */
   private static readonly auditOwners = new Map<string, RedisView>();
-  private pendingConfirm?: { id: string; line: string; name: string; args: string[] };
+  private pendingConfirm?: { id: string; line: string; name: string; args: string[]; db: number };
 
   /** 命令日志订阅（会话 client 级；首次取会话/就绪时挂上）。 */
   private logUnsub?: () => void;
@@ -346,6 +346,8 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
 
   /** 切换 db（keyBrowser/console 已有实例时）：重发 config，按面板重载。 */
   private async reconfigure(): Promise<void> {
+    // 不在此吞掉 pendingConfirm：保留后在 resolveConfirm 里按 db 漂移拒绝并给出提示
+    // （直接清空会让用户点了确认却毫无反馈）。
     this.postConfig();
     if (this.panelType === 'keyBrowser') {
       const k = this.initialKey;
@@ -366,13 +368,17 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
     });
   }
 
+  private targetDb(): number {
+    return this.db ?? this.conn.redisDb ?? 0;
+  }
+
   private async sessionForDb(): Promise<RedisConnectionSession> {
     const session = await this.manager.connect(this.conn);
     if (session.kind !== 'redis') throw new Error('connection is not a Redis session');
     // 无论本视图是否绑定 DB 节点，都把共享会话归一到确定目标：否则上一视图的
     // SELECT 会泄漏到连接级面板（UI/审计写 db0，命令却落在旧库）。
     // Cluster 无 SELECT，跳过（键按 slot 路由）。
-    const target = this.db ?? this.conn.redisDb ?? 0;
+    const target = this.targetDb();
     if (!session.client.isCluster && target !== session.db) {
       await redisSelect(session.client, target);
       session.db = target;
@@ -645,7 +651,8 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
     const name = parts[0].toUpperCase();
     const args = parts.slice(1);
     if (isDangerousCommand(name, args)) {
-      this.pendingConfirm = { id, line, name, args };
+      // 记录确认时的目标 db：确认期间若切换了 db，破坏性命令不能落到新的库。
+      this.pendingConfirm = { id, line, name, args, db: this.targetDb() };
       this.post({ type: 'confirmRequired', id, command: line });
       return;
     }
@@ -658,6 +665,11 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
     if (!pending || pending.id !== id) return;
     if (!accept) {
       this.post({ type: 'commandResult', id, command: pending.line, ok: false, result: '', costMs: 0, error: l10n('cmd.redis.dangerCancelled') });
+      return;
+    }
+    if (this.targetDb() !== pending.db) {
+      // db 已切换：拒绝执行，避免「看到 db0 却删到 db3」。
+      this.post({ type: 'commandResult', id, command: pending.line, ok: false, result: '', costMs: 0, error: l10n('cmd.redis.dbChanged') });
       return;
     }
     await this.execute(pending.id, pending.line, pending.name, pending.args);
