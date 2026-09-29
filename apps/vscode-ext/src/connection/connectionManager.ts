@@ -44,7 +44,17 @@ interface SessionEntry {
   session: ConnectionSession;
   lastUsed: number;
   connId: string;
+  /** 会话键：主会话 = connId；PG 衍生库会话 = `${connId}\u0000${database}`。 */
+  key: string;
+  /** 该会话绑定的库（仅 PG 衍生会话；主会话为连接配置库/undefined）。 */
+  database?: string;
 }
+
+/** B2：单个连接最多可同时保留的**衍生库会话**数（不含主会话）。 */
+export const DERIVED_DB_SESSION_MAX = 4;
+
+/** 会话键里的连接/库分隔符（UUID 与库名都不会出现）。 */
+const SESSION_KEY_SEP = '\u0000';
 
 /**
  * 连接管理器：从已保存配置创建活动连接会话。
@@ -124,14 +134,23 @@ export class ConnectionManager {
    * 用于 dispose 路径：此时调用 connect() 会在会话被释放后又建一条无人持有的
    * 新连接（连同 SSH 隧道）而泄漏。
    */
-  peek(id: string): ConnectionSession | undefined {
-    return this.sessions.get(id);
+  peek(id: string, database?: string): ConnectionSession | undefined {
+    const key = database !== undefined ? this.findSessionKey(id, database) : id;
+    return this.sessions.get(key);
   }
 
   /** 取已缓存的 SQL 会话（非 SQL 会话返回 undefined）。 */
-  peekSql(id: string): SqlConnectionSession | undefined {
-    const session = this.sessions.get(id);
+  peekSql(id: string, database?: string): SqlConnectionSession | undefined {
+    const session = this.peek(id, database);
     return session && session.kind === 'sql' ? session : undefined;
+  }
+
+  /** 找到绑定该库的已缓存会话键（主会话或衍生），找不到回退衍生键。 */
+  private findSessionKey(connId: string, database: string): string {
+    for (const [key, entry] of this.sessionEntries) {
+      if (entry.connId === connId && entry.database === database) return key;
+    }
+    return `${connId}${SESSION_KEY_SEP}${database}`;
   }
 
   /** SQL 会话在途查询数；非 SQL 会话恒为 0。 */
@@ -149,7 +168,11 @@ export class ConnectionManager {
   openCount(): number {
     // 同一 id 在「已入池但 finally 尚未清 connecting」的微任务窗口会同时出现在两张表，
     // 按 id 并集计数，避免瞬时双计把并发门禁误判为超限。
-    const ids = new Set<string>([...this.sessions.keys(), ...this.connecting.keys()]);
+    // B2：PG 多库衍生会话共享同一逻辑连接，**不计**入并发连接数（按 connId 去重）。
+    const ids = new Set<string>();
+    for (const key of [...this.sessions.keys(), ...this.connecting.keys()]) {
+      ids.add(key.split(SESSION_KEY_SEP)[0]);
+    }
     return ids.size;
   }
 
@@ -178,25 +201,27 @@ export class ConnectionManager {
     return this.noBackslashEscapes.get(conn.id) === true;
   }
 
-  async connect(conn: SavedConnection): Promise<ConnectionSession> {
-    const existing = this.sessions.get(conn.id);
+  async connect(conn: SavedConnection, database?: string): Promise<ConnectionSession> {
+    // PG 多库：database 与连接配置不同 → 衍生库会话（键含库名）。其它引擎忽略。
+    const key = this.findSessionKeyOrPrimary(conn, database);
+    const existing = this.sessions.get(key);
     if (existing) {
-      this.touch(conn.id);
+      this.touch(key);
       if (existing.isAlive()) return existing;
       existing.close();
     }
 
-    const inflight = this.connecting.get(conn.id);
+    const inflight = this.connecting.get(key);
     if (inflight) return inflight;
 
     const generation = this.generation(conn.id);
-    const promise = this.doConnect(conn);
-    this.connecting.set(conn.id, promise);
+    const promise = this.doConnect(conn, key === conn.id ? undefined : database, key);
+    this.connecting.set(key, promise);
     try {
       const session = await promise;
       // disposeConn 可能发生在 await 期间：此时 buildSession 已自行回收，
       // 或会话已被关闭。两种情况下都不能把连接当作可用返回。
-      if (this.generation(conn.id) !== generation || this.sessions.get(conn.id) !== session) {
+      if (this.generation(conn.id) !== generation || this.sessions.get(key) !== session) {
         throw new Error('connection was closed while it was being established');
       }
       if (!this.healthCheckTimer) this.startHealthCheck();
@@ -204,16 +229,24 @@ export class ConnectionManager {
     } finally {
       // 只删除自己登记的那个 promise：disposeConn 会先清掉 connecting 允许立即重连，
       // 若此处无条件 delete，会把「重连后的新 promise」误删，导致后续并发建连绕过去重。
-      if (this.connecting.get(conn.id) === promise) this.connecting.delete(conn.id);
+      if (this.connecting.get(key) === promise) this.connecting.delete(key);
     }
+  }
+
+  /** 会话键：优先复用绑定该库的已有会话，否则按规则计算。 */
+  private findSessionKeyOrPrimary(conn: SavedConnection, database?: string): string {
+    if (conn.dbType !== DatabaseType.PG || !database || database === conn.database) return conn.id;
+    return this.findSessionKey(conn.id, database);
   }
 
   /**
    * 建立并返回 SQL 会话。Redis 等非 SQL 连接不适用（会抛 NotSqlSessionError）。
    * SQL 面板路径统一用本方法，避免每处调用点手动收窄。
+   *
+   * @param database PG 多库：目标库；省略则用连接配置库（主会话）。
    */
-  async connectSql(conn: SavedConnection): Promise<SqlConnectionSession> {
-    return requireSqlSession(await this.connect(conn));
+  async connectSql(conn: SavedConnection, database?: string): Promise<SqlConnectionSession> {
+    return requireSqlSession(await this.connect(conn, database));
   }
 
   /**
@@ -234,33 +267,36 @@ export class ConnectionManager {
    * 直接 throw）、`new QueryService` 等同步构造发生在 catch 之外，
    * 那些路径会泄漏隧道。这里统一用 try/catch 兜住建隧道之后的全部逻辑。
    */
-  private async doConnect(conn: SavedConnection): Promise<ConnectionSession> {
+  private async doConnect(conn: SavedConnection, database: string | undefined, key: string): Promise<ConnectionSession> {
     const generation = this.generation(conn.id);
     // 有效配置（本机覆盖优先）用作建连与路径校验的唯一依据。
     const effective = this.effective(conn);
+    // PG 衍生库会话：只覆盖 database，其余配置不变。
+    const target = database !== undefined ? { ...effective, database } : effective;
 
     // 建连前强制路径硬拒绝（阶段 A 附加）：已配置但缺失/不可读即拒建。
-    const pathCheck = await validateConnectionPaths(effective);
+    const pathCheck = await validateConnectionPaths(target);
     if (!pathCheck.valid) {
       throw new ConnectionPathError(pathCheck);
     }
 
-    let host = effective.host;
-    let port = effective.port;
-    let tunnelOpened = false;
-    if (effective.sshHost) {
-      const localPort = await SshTunnel.create(effective);
+    let host = target.host;
+    let port = target.port;
+    let tunnelAcquired = false;
+    if (target.sshHost) {
+      const localPort = await SshTunnel.create(target);
       if (localPort) {
         host = '127.0.0.1';
         port = localPort;
-        tunnelOpened = true;
+        tunnelAcquired = true;
       }
     }
 
     try {
-      return await this.buildSession(effective, host, port, generation);
+      return await this.buildSession(target, host, port, generation, key);
     } catch (err) {
-      if (tunnelOpened) SshTunnel.close(effective.id);
+      // 只释放本次引用：多库会话共享同一隧道，误用 close 会关掉主会话仍在用的隧道。
+      if (tunnelAcquired) SshTunnel.release(target.id);
       throw err;
     }
   }
@@ -274,11 +310,12 @@ export class ConnectionManager {
     host: string,
     port: number,
     generation: number,
+    key: string,
   ): Promise<ConnectionSession> {
     if (conn.dbType === DatabaseType.REDIS) {
-      return this.buildRedisSession(conn, host, port, generation);
+      return this.buildRedisSession(conn, host, port, generation, key);
     }
-    return this.buildSqlSession(conn, host, port, generation);
+    return this.buildSqlSession(conn, host, port, generation, key);
   }
 
   /**
@@ -293,6 +330,7 @@ export class ConnectionManager {
     host: string,
     port: number,
     generation: number,
+    key: string,
   ): Promise<RedisConnectionSession> {
     const mode = conn.redisMode ?? 'standalone';
     const tls = conn.useSSL
@@ -373,22 +411,22 @@ export class ConnectionManager {
       isAlive: () => client.isAlive(),
       close: () => {
         void client.close();
-        this.sessions.delete(conn.id);
-        this.sessionEntries.delete(conn.id);
+        this.sessions.delete(key);
+        this.sessionEntries.delete(key);
         this.noBackslashEscapes.delete(conn.id);
         this.pgStdOff.delete(conn.id);
-        if (conn.sshHost) SshTunnel.close(conn.id);
+        if (conn.sshHost) SshTunnel.release(conn.id);
         closeExtraTunnels();
       },
     };
-    this.sessions.set(conn.id, session);
-    this.sessionEntries.set(conn.id, { session, lastUsed: Date.now(), connId: conn.id });
+    this.sessions.set(key, session);
+    this.sessionEntries.set(key, { session, lastUsed: Date.now(), connId: conn.id, key });
     if (this.disposing) {
       session.close();
       throw new Error('ConnectionManager is disposing');
     }
     // 入池后再按上限淘汰，保护刚建好的会话（与 SQL 分支一致）。
-    this.evictIfNeeded(conn.id);
+    this.evictIfNeeded(key);
     return session;
   }
 
@@ -398,6 +436,7 @@ export class ConnectionManager {
     host: string,
     port: number,
     generation: number,
+    key: string,
   ): Promise<SqlConnectionSession> {
     const { connection, dialect } = ConnectionFactory.createWithDialect(
       conn.dbType as DatabaseType,
@@ -479,22 +518,40 @@ export class ConnectionManager {
       isAlive: () => connection.isAlive(),
       close: () => {
         connection.end();
-        this.sessions.delete(conn.id);
-        this.sessionEntries.delete(conn.id);
-        this.noBackslashEscapes.delete(conn.id);
-        this.pgStdOff.delete(conn.id);
-        if (conn.sshHost) SshTunnel.close(conn.id);
+        this.sessions.delete(key);
+        this.sessionEntries.delete(key);
+        // 仅当没有同连接其它会话时才清方言缓存（多库会话共享同连接配置）。
+        if (!this.hasSessionForConn(conn.id)) {
+          this.noBackslashEscapes.delete(conn.id);
+          this.pgStdOff.delete(conn.id);
+        }
+        // 只释放本次引用：同连接其它库会话可能仍在使用共享隧道。
+        if (conn.sshHost) SshTunnel.release(conn.id);
       },
     };
-    this.sessions.set(conn.id, session);
-    this.sessionEntries.set(conn.id, { session, lastUsed: Date.now(), connId: conn.id });
+    this.sessions.set(key, session);
+    this.sessionEntries.set(key, {
+      session,
+      lastUsed: Date.now(),
+      connId: conn.id,
+      key,
+      database: conn.dbType === DatabaseType.PG ? conn.database : undefined,
+    });
     if (this.disposing) {
       session.close();
       throw new Error('ConnectionManager is disposing');
     }
     // 入池后再按上限淘汰，保护刚建好的会话。
-    this.evictIfNeeded(conn.id);
+    this.evictIfNeeded(key);
     return session;
+  }
+
+  /** 该连接是否仍有已缓存会话（多库衍生场景）。 */
+  private hasSessionForConn(connId: string): boolean {
+    for (const entry of this.sessionEntries.values()) {
+      if (entry.connId === connId) return true;
+    }
+    return false;
   }
 
   /**
@@ -522,16 +579,17 @@ export class ConnectionManager {
     if (!this.explicit.has(id)) this.disposeConn(id);
   }
 
-  /** 关闭指定连接会话 */
+  /** 关闭指定连接会话（含该连接的全部 PG 衍生库会话） */
   disposeConn(id: string): void {
     this.retains.delete(id);
     // 递增代际：在途建连完成后会据此自毁，不会留下幽灵会话/隧道。
     this.generations.set(id, this.generation(id) + 1);
     this.explicit.delete(id);
-    this.connecting.delete(id);
-    const session = this.sessions.get(id);
-    if (session) {
-      session.close();
+    for (const key of [...this.connecting.keys()]) {
+      if (key.split(SESSION_KEY_SEP)[0] === id) this.connecting.delete(key);
+    }
+    for (const entry of [...this.sessionEntries.values()]) {
+      if (entry.connId === id) this.closeEntry(entry);
     }
     if (this.sessions.size === 0) {
       this.stopHealthCheck();
@@ -594,8 +652,8 @@ export class ConnectionManager {
     };
   }
 
-  private touch(connId: string): void {
-    const entry = this.sessionEntries.get(connId);
+  private touch(key: string): void {
+    const entry = this.sessionEntries.get(key);
     if (entry) entry.lastUsed = Date.now();
   }
 
@@ -606,25 +664,56 @@ export class ConnectionManager {
    * 被淘汰的会话白白断掉（抖动）。改为建连成功、新会话入池后再淘汰，并保护新会话本身，
    * 使失败路径不影响既有会话。
    */
-  private evictIfNeeded(protectId?: string): void {
+  private evictIfNeeded(protectKey?: string): void {
+    // 全局上限。
     while (this.sessions.size > this.config.maxConnections) {
-      const victim = this.findLruVictim(protectId);
+      const victim = this.findLruVictim(protectKey);
       if (!victim) break;
-      this.sessions.delete(victim.connId);
-      this.sessionEntries.delete(victim.connId);
-      victim.session.close();
+      this.closeEntry(victim);
+    }
+    // B2：单连接衍生库会话上限（4 + LRU）。
+    const byConn = new Map<string, SessionEntry[]>();
+    for (const entry of this.sessionEntries.values()) {
+      if (entry.key === entry.connId) continue; // 主会话不计
+      const list = byConn.get(entry.connId) ?? [];
+      list.push(entry);
+      byConn.set(entry.connId, list);
+    }
+    for (const list of byConn.values()) {
+      if (list.length <= DERIVED_DB_SESSION_MAX) continue;
+      let excess = list.length - DERIVED_DB_SESSION_MAX;
+      const evictable = list.filter((e) => this.isEvictable(e, protectKey)).sort((a, b) => a.lastUsed - b.lastUsed);
+      for (const entry of evictable) {
+        if (excess <= 0) break;
+        this.closeEntry(entry);
+        excess--;
+      }
     }
   }
 
-  private findLruVictim(protectId?: string): SessionEntry | undefined {
+  /** 关闭并移除一个会话条目（统一出口）。 */
+  private closeEntry(entry: SessionEntry): void {
+    this.sessions.delete(entry.key);
+    this.sessionEntries.delete(entry.key);
+    entry.session.close();
+  }
+
+  /**
+   * 是否可被淘汰。沿用既有豁免：新会话本身、显式打开、被视图/面板 retain、
+   * 有在途查询——保留「在用不误关」的不变量。
+   */
+  private isEvictable(entry: SessionEntry, protectKey?: string): boolean {
+    if (entry.key === protectKey) return false;
+    if (this.explicit.has(entry.connId)) return false;
+    if (this.retains.has(entry.connId)) return false;
+    if (this.sqlInFlight(entry.session) > 0) return false;
+    return true;
+  }
+
+  private findLruVictim(protectKey?: string): SessionEntry | undefined {
     let oldest: SessionEntry | undefined;
     for (const entry of this.sessionEntries.values()) {
-      if (entry.connId === protectId) continue;
-      if (this.explicit.has(entry.connId)) continue;
-      // 被视图/面板 retain 的连接不能淘汰：否则持有者仍在用，会话却被关掉。
-      if (this.retains.has(entry.connId)) continue;
-      // 跳过有在途查询的会话：淘汰会 end() 连接，使长查询中途失败并可能留下未定义事务。
-      if (this.sqlInFlight(entry.session) > 0) continue;
+      if (!this.isEvictable(entry, protectKey)) continue;
       if (!oldest || entry.lastUsed < oldest.lastUsed) {
         oldest = entry;
       }
@@ -643,20 +732,23 @@ export class ConnectionManager {
     this.healthCheckTimer = setInterval(() => {
       if (this.disposing) return;
       const now = Date.now();
-      const toDispose: string[] = [];
-      for (const [id, entry] of this.sessionEntries) {
+      const toDispose: SessionEntry[] = [];
+      for (const entry of this.sessionEntries.values()) {
         // 有在途查询的会话一律跳过：健康检查不应中断正在执行的语句。
         if (this.sqlInFlight(entry.session) > 0) continue;
         // 显式打开的连接与被持有（retain）的连接豁免「空闲超时」，但仍要检测存活：
         // SSH 断开/DB 掉线后过去会一直显示为已打开、反复失败，只能手动关闭。
+        const id = entry.connId;
         const idle = !this.explicit.has(id) && !this.retains.has(id) && now - entry.lastUsed > this.config.idleTimeoutMs;
         if (idle || !entry.session.isAlive()) {
-          toDispose.push(id);
+          toDispose.push(entry);
         }
       }
-      for (const id of toDispose) {
-        this.disposeConn(id);
+      // 只关这个会话条目（不牵连同连接其它库会话）；全部关完则停下定时器。
+      for (const entry of toDispose) {
+        this.closeEntry(entry);
       }
+      if (this.sessions.size === 0) this.stopHealthCheck();
     }, this.config.healthCheckIntervalMs);
   }
 }

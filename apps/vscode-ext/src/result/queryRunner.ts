@@ -3,7 +3,7 @@ import type { QueryCancelToken } from '@devbelt/db-core';
 import { sqlSkeleton } from '@devbelt/db-core/sql';
 import type { ConnectionManager } from '../connection/connectionManager';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
-import { splitSqlStatements } from '../utils/sql';
+import { splitSqlStatements, pgSchemaFor } from '../utils/sql';
 import { confirmSqlExecution } from '../utils/sqlSafety';
 import { classifyWriteKind } from '../utils/sqlRisk';
 import { buildCountSql, buildTableSelect, type ColumnTypeMap, type FilterCondition } from './tableQuerySql';
@@ -48,12 +48,19 @@ export class QueryRunner {
     private readonly conn: SavedConnection,
     private readonly manager: ConnectionManager,
     private readonly table: string | undefined,
-    private readonly database: string | undefined,
+    private database: string | undefined,
     private readonly post: (msg: any) => void,
+    /** PG 命名空间（显式 schema；绝不从 database 推断）。 */
+    private readonly schema?: string,
   ) {}
 
   get hasTable(): boolean {
     return !!this.table;
+  }
+
+  /** 切换当前库（复用的结果面板执行不同库的查询时，B2 多库路由）。 */
+  setDatabase(database?: string): void {
+    this.database = database;
   }
 
   buildSelect(): string {
@@ -62,13 +69,14 @@ export class QueryRunner {
     return buildTableSelect(
       this.conn.dbType, this.table, this.database, this.filterConditions,
       this.sortCol, this.sortDir, this.offset, this.limit, this.columnTypes, nbe,
+      pgSchemaFor(this.conn, this.schema),
     );
   }
 
   getCountSql(): string {
     if (!this.table) return '';
     const nbe = this.manager.noBackslashEscapesFor?.(this.conn) === true;
-    return buildCountSql(this.conn.dbType, this.table, this.database, this.filterConditions, this.columnTypes, nbe);
+    return buildCountSql(this.conn.dbType, this.table, this.database, this.filterConditions, this.columnTypes, nbe, pgSchemaFor(this.conn, this.schema));
   }
 
   execute(
@@ -106,7 +114,7 @@ export class QueryRunner {
     // 仅回滚**本面板自己开的事务**：会话与 SQL 编辑器/其它面板共享，无条件 ROLLBACK
     // 会静默回滚他人未提交的事务（数据丢失）。
     if (this.table && this.openTransaction) {
-      const session = this.manager.peekSql(this.conn.id);
+      const session = this.manager.peekSql(this.conn.id, this.database);
       session?.query.query('ROLLBACK').catch(() => {});
       this.openTransaction = false;
     }
@@ -129,7 +137,7 @@ export class QueryRunner {
     try {
       if (!(await confirmSqlExecution(this.conn, sql, this.manager.scanOptionsFor?.(this.conn)))) return;
       this.post({ type: 'running' });
-      session = await this.manager.connectSql(this.conn);
+      session = await this.manager.connectSql(this.conn, database);
       const token: QueryCancelToken = {};
       this.runningToken = token;
       if (database && this.conn.dbType === DatabaseType.MYSQL) {
@@ -173,7 +181,7 @@ export class QueryRunner {
       let cols: any[] = [];
       if (this.table && isResultSet) {
         try {
-          cols = await session.metadata.getColumns(this.table, this.database);
+          cols = await session.metadata.getColumns(this.table, this.database, pgSchemaFor(this.conn, this.schema));
           pkCols = cols.filter((c: any) => c.isPrimary).map((c: any) => c.name);
           if (pkCols.length === 0) pkCols = cols.map((c: any) => c.name);
           // 供后续筛选/计数决定值是否加引号；首屏查询无 WHERE，因此这里填充得
@@ -241,7 +249,7 @@ export class QueryRunner {
     try {
       if (!(await confirmSqlExecution(this.conn, sql, this.manager.scanOptionsFor?.(this.conn)))) return;
       this.post({ type: 'running' });
-      const session = await this.manager.connectSql(this.conn);
+      const session = await this.manager.connectSql(this.conn, this.database);
       const token: QueryCancelToken = {};
       this.runningToken = token;
       const database = this.database || this.conn.database;

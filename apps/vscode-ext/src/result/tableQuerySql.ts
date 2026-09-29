@@ -47,14 +47,16 @@ function isNumericColumn(columnType: string | undefined): boolean {
   return NUMERIC_TYPES.has(base) || NUMERIC_TYPES.has(base.split(/\s+/)[0]);
 }
 
-function qualifiedTable(dbType: DatabaseType, table: string, database?: string): string {
+function qualifiedTable(dbType: DatabaseType, table: string, database?: string, schema?: string): string {
   validateIdent(table);
   const tbl = wrapIdent(dbType, table);
-  if (database) validateIdent(database);
-  // PG 一个连接一个库：树把该库的对象按 **schema** 组织，故此处的 `database` 槽在 PG 下表示 schema，
-  // 限定为 `"schema"."table"`；为空则回退 search_path（默认 schema）。
-  if (dbType === DatabaseType.PG) return database ? `${wrapIdent(dbType, database)}.${tbl}` : tbl;
-  return qualifyTable(dbType, tbl, database ? wrapIdent(dbType, database) : undefined);
+  // PG 的限定只认 **schema**（`database` 是库名，不参与限定）；为空则回退 search_path。
+  if (dbType === DatabaseType.PG) {
+    if (schema) { validateIdent(schema); return `${wrapIdent(dbType, schema)}.${tbl}`; }
+    return tbl;
+  }
+  if (database) { validateIdent(database); return qualifyTable(dbType, tbl, wrapIdent(dbType, database)); }
+  return tbl;
 }
 
 /**
@@ -184,10 +186,11 @@ export function buildTableSelect(
   limit: number,
   columnTypes: ColumnTypeMap = {},
   noBackslashEscapes = false,
+  schema?: string,
 ): string {
   const safeOffset = Math.max(0, Math.min(offset, 1_000_000));
   const safeLimit = Math.max(1, Math.min(limit, 100_000));
-  let sql = `SELECT * FROM ${qualifiedTable(dbType, table, database)}`;
+  let sql = `SELECT * FROM ${qualifiedTable(dbType, table, database, schema)}`;
   const where = buildWhereAll(dbType, conditions, columnTypes, noBackslashEscapes);
   if (where) sql += ` WHERE ${where}`;
   if (sortCol && sortDir) {
@@ -209,8 +212,9 @@ export function buildCountSql(
   conditions: FilterCondition[],
   columnTypes: ColumnTypeMap = {},
   noBackslashEscapes = false,
+  schema?: string,
 ): string {
-  let sql = `SELECT COUNT(*) AS total FROM ${qualifiedTable(dbType, table, database)}`;
+  let sql = `SELECT COUNT(*) AS total FROM ${qualifiedTable(dbType, table, database, schema)}`;
   const where = buildWhereAll(dbType, conditions, columnTypes, noBackslashEscapes);
   if (where) sql += ` WHERE ${where}`;
   return sql;

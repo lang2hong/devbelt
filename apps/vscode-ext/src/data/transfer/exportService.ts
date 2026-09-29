@@ -23,8 +23,8 @@ export interface ExportProgress {
 
 export interface TableExportSource {
   query: Pick<QueryService, 'query' | 'dialect'>;
-  metadata: { getColumns(table: string, database?: string): Promise<ColumnMeta[]> };
-  table: { getCreateSql(table: string, database?: string): Promise<string> };
+  metadata: { getColumns(table: string, database?: string, schema?: string): Promise<ColumnMeta[]> };
+  table: { getCreateSql(table: string, database?: string, schema?: string): Promise<string> };
 }
 
 export interface ExportTableOptions {
@@ -32,6 +32,8 @@ export interface ExportTableOptions {
   format: TransferFormat;
   table: string;
   database?: string;
+  /** PG 命名空间限定（仅 PG 使用）。 */
+  schema?: string;
   includeStructure?: boolean;
   includeData?: boolean;
   /** Only export these columns; omit for all columns. */
@@ -50,6 +52,8 @@ export interface ExportRowsOptions {
   rows: Record<string, unknown>[];
   table?: string;
   database?: string;
+  /** PG 命名空间限定（仅 PG 使用）。 */
+  schema?: string;
   dialect?: QueryService['dialect'];
   /** SQL 格式：附加 dump 头 / DDL / 事务包裹，与表导出产物保持一致。 */
   sqlDump?: SqlDumpOptions;
@@ -86,7 +90,7 @@ export function isBinaryFormat(format: TransferFormat): boolean {
  * 运行时；现在两者都在包内实现，静态导入让缺失在编译期就暴露。
  */
 export function exportRows(options: ExportRowsOptions): string | Buffer {
-  const { format, columns, rows, table, database, dialect, sqlDump, withBom } = options;
+  const { format, columns, rows, table, database, schema, dialect, sqlDump, withBom } = options;
   const bom = withBom ? '\uFEFF' : '';
   if (format === 'csv') return bom + serializeCsv(columns, rows);
   if (format === 'txt') return bom + serializeTxt(columns, rows);
@@ -94,10 +98,15 @@ export function exportRows(options: ExportRowsOptions): string | Buffer {
   if (format === 'xlsx') return serializeXlsx(columns, rows);
   if (format === 'xml') return serializeXml(columns, rows);
   if (!table || !dialect) throw new Error('SQL export requires a target table and database dialect.');
-  const inserts = dialect.buildInsertSql(rows, columns, table, database);
+  const inserts = dialect.buildInsertSql(rows, columns, table, database, schema);
   if (!sqlDump) return inserts;
-  // PG 一个连接一个库：`database` 是库名而非 schema，限定会被当 schema 解析（见 qualifyTable）。
-  const qualified = qualifyTable(dialect.dbType, dialect.wrap(table), database ? dialect.wrap(database) : undefined);
+  // PG 的限定走 schema 通道（`database` 是库名，见 qualifyTable）。
+  const qualified = qualifyTable(
+    dialect.dbType,
+    dialect.wrap(table),
+    database ? dialect.wrap(database) : undefined,
+    schema ? dialect.wrap(schema) : undefined,
+  );
   return buildSqlDump({
     serverInfo: sqlDump.serverInfo,
     dialect,
@@ -158,12 +167,17 @@ export async function writeTableExport(
   options: ExportTableOptions,
   write: (chunk: string | Uint8Array) => void | Promise<void>,
 ): Promise<void> {
-  const { source, format, table, database, includeStructure = false, includeData = true, columns: selectedColumns, pageSize = 1000, onProgress, isCancelled, serverInfo, withBom = false } = options;
+  const { source, format, table, database, schema, includeStructure = false, includeData = true, columns: selectedColumns, pageSize = 1000, onProgress, isCancelled, serverInfo, withBom = false } = options;
   const dialect = source.query.dialect;
-  // PG 一个连接一个库：`database` 是库名而非 schema，限定会被当 schema 解析（见 qualifyTable）。
-  const qualified = qualifyTable(dialect.dbType, dialect.wrap(table), database ? dialect.wrap(database) : undefined);
+  // PG 的限定走 schema 通道（`database` 是库名，见 qualifyTable）。
+  const qualified = qualifyTable(
+    dialect.dbType,
+    dialect.wrap(table),
+    database ? dialect.wrap(database) : undefined,
+    schema ? dialect.wrap(schema) : undefined,
+  );
 
-  const columnMeta = includeData ? await source.metadata.getColumns(table, database) : [];
+  const columnMeta = includeData ? await source.metadata.getColumns(table, database, schema) : [];
   const allColumns = columnMeta.map((column) => column.name);
   const columns = includeData
     ? (selectedColumns && selectedColumns.length ? selectedColumns.filter((c) => allColumns.includes(c)) : allColumns)
@@ -244,7 +258,7 @@ export async function writeTableExport(
   const prelude = sqlPrelude(dialect.dbType);
   if (prelude) await write(prelude + '\n\n');
   if (includeStructure) {
-    const ddl = await source.table.getCreateSql(table, database);
+    const ddl = await source.table.getCreateSql(table, database, schema);
     await write(
       '-- ----------------------------\n'
       + `-- Table structure for ${sqlCommentSafe(table)}\n`
@@ -261,7 +275,7 @@ export async function writeTableExport(
       + 'BEGIN;\n',
     );
     await forEachPage(async (rows) => {
-      if (rows.length) await write(dialect.buildInsertSql(rows, columns, table, database).replace(/\n$/, '') + '\n');
+      if (rows.length) await write(dialect.buildInsertSql(rows, columns, table, database, schema).replace(/\n$/, '') + '\n');
     });
     await write('COMMIT;\n\n');
   }

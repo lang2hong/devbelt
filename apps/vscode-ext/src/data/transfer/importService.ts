@@ -36,6 +36,8 @@ export interface ImportRowsOptions {
   query: Pick<QueryService, 'query' | 'dialect'>;
   table: string;
   database?: string;
+  /** PG 命名空间限定（仅 PG 使用）。 */
+  schema?: string;
   rows: Record<string, unknown>[];
   mappings: FieldMapping[];
   onProgress?: (progress: ImportProgress) => void;
@@ -58,14 +60,14 @@ export interface ImportRowsOptions {
  * complete data set, preventing the partial writes common in one-row-at-a-time importers.
  */
 export async function importRows(options: ImportRowsOptions): Promise<ImportResult> {
-  const { query, table, database, rows, mappings, onProgress, isCancelled, batchWrites = false, rowOffset = 0 } = options;
+  const { query, table, database, schema, rows, mappings, onProgress, isCancelled, batchWrites = false, rowOffset = 0 } = options;
   const selected = validateMappings(mappings);
   const columns = selected.map((mapping) => mapping.target);
   if (!rows.length) return { imported: 0, rolledBack: false, errors: [] };
   if (batchWrites) {
     // 批处理路径要把整批拼成一条 SQL，无法逐行释放，仍需完整映射副本。
     const mapped = mapRows(rows, mappings);
-    return importRowsBatched({ query, table, database, mapped, onProgress, isCancelled, rowOffset });
+    return importRowsBatched({ query, table, database, schema, mapped, onProgress, isCancelled, rowOffset });
   }
   let started = false;
   let completed = 0;
@@ -81,7 +83,7 @@ export async function importRows(options: ImportRowsOptions): Promise<ImportResu
       lastLine = sourceLineOf(row);
       const mappedRow: Record<string, unknown> = {};
       for (const mapping of selected) mappedRow[mapping.target] = row[mapping.source];
-      const sql = query.dialect.buildInsertSql([mappedRow], columns, table, database);
+      const sql = query.dialect.buildInsertSql([mappedRow], columns, table, database, schema);
       await query.query(sql, undefined, SKIP);
       completed++;
       onProgress?.({ completed, total });
@@ -114,11 +116,11 @@ export async function importRows(options: ImportRowsOptions): Promise<ImportResu
 export async function importRowsStream(
   options: Omit<ImportRowsOptions, 'rows'> & { rows: AsyncIterable<Record<string, unknown>> },
 ): Promise<ImportResult> {
-  const { query, table, database, rows, mappings, onProgress, isCancelled, batchWrites = false, rowOffset = 0 } = options;
+  const { query, table, database, schema, rows, mappings, onProgress, isCancelled, batchWrites = false, rowOffset = 0 } = options;
   if (batchWrites) {
     // 边读边映射边拼批，不再先把整份源数据收集成数组（SQLite 单进程驱动要求单次
     // query 内完成事务，故仍须把语句拼成一条，但省掉源行与映射副本的双份驻留）。
-    return importRowsStreamBatched({ query, table, database, rows, mappings, onProgress, isCancelled, rowOffset });
+    return importRowsStreamBatched({ query, table, database, schema, rows, mappings, onProgress, isCancelled, rowOffset });
   }
 
   const selected = validateMappings(mappings);
@@ -134,7 +136,7 @@ export async function importRowsStream(
       lastLine = sourceLineOf(sourceRow);
       const mappedRow: Record<string, unknown> = {};
       for (const mapping of selected) mappedRow[mapping.target] = sourceRow[mapping.source];
-      const sql = query.dialect.buildInsertSql([mappedRow], columns, table, database);
+      const sql = query.dialect.buildInsertSql([mappedRow], columns, table, database, schema);
       await query.query(sql, undefined, SKIP);
       completed++;
       // 流式来源总数未知，按已完成数上报（与恢复流式一致）。
@@ -161,14 +163,14 @@ export async function importRowsStream(
  * 失败时在进程内追加 ROLLBACK 后重试一次，保证事务原子性。
  */
 async function importRowsBatched(
-  options: Pick<ImportRowsOptions, 'query' | 'table' | 'database' | 'onProgress' | 'isCancelled'> & { mapped: { columns: string[]; rows: Record<string, unknown>[] }; rowOffset?: number },
+  options: Pick<ImportRowsOptions, 'query' | 'table' | 'database' | 'schema' | 'onProgress' | 'isCancelled'> & { mapped: { columns: string[]; rows: Record<string, unknown>[] }; rowOffset?: number },
 ): Promise<ImportResult> {
-  const { query, table, database, mapped, onProgress, isCancelled, rowOffset = 0 } = options;
+  const { query, table, database, schema, mapped, onProgress, isCancelled, rowOffset = 0 } = options;
   if (isCancelled?.()) throw new TransferCancelledError();
   const { columns, rows: dataRows } = mapped;
   const statements: string[] = [];
   for (let i = 0; i < dataRows.length; i += BATCH_ROWS) {
-    statements.push(query.dialect.buildInsertSql(dataRows.slice(i, i + BATCH_ROWS), columns, table, database).trim());
+    statements.push(query.dialect.buildInsertSql(dataRows.slice(i, i + BATCH_ROWS), columns, table, database, schema).trim());
   }
   const sql = `BEGIN; ${statements.join('\n')} COMMIT;`;
   try {
@@ -200,7 +202,7 @@ const BATCH_ROWS = 200;
 async function importRowsStreamBatched(
   options: Omit<ImportRowsOptions, 'rows'> & { rows: AsyncIterable<Record<string, unknown>> },
 ): Promise<ImportResult> {
-  const { query, table, database, rows, mappings, onProgress, isCancelled, rowOffset = 0 } = options;
+  const { query, table, database, schema, rows, mappings, onProgress, isCancelled, rowOffset = 0 } = options;
   const selected = validateMappings(mappings);
   const columns = selected.map((mapping) => mapping.target);
   const statements: string[] = [];
@@ -209,7 +211,7 @@ async function importRowsStreamBatched(
   let firstLine: number | undefined;
   const flush = (): void => {
     if (!chunk.length) return;
-    statements.push(query.dialect.buildInsertSql(chunk, columns, table, database).trim());
+    statements.push(query.dialect.buildInsertSql(chunk, columns, table, database, schema).trim());
     completed += chunk.length;
     chunk = [];
   };

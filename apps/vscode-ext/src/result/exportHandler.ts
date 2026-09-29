@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { l10n } from '../i18n';
-import { ensureSchemaWritable } from '../utils/schemaScope';
+import { pgSchemaFor } from '../utils/sql';
 import type { ConnectionManager } from '../connection/connectionManager';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import {
@@ -27,6 +27,8 @@ export class ExportHandler {
     private readonly table: string | undefined,
     private readonly database: string | undefined,
     private readonly post: (msg: any) => void,
+    /** PG 命名空间（显式 schema；绝不从 database 推断）。 */
+    private readonly schema?: string,
   ) {}
 
   /** 是否给 CSV/TSV 前置 UTF-8 BOM：由 `devbelt.export.addUtf8Bom` 设置控制（默认关）。 */
@@ -36,7 +38,6 @@ export class ExportHandler {
   }
 
   async exportData(format: TransferFormat, columns: string[], rows: Record<string, any>[]): Promise<void> {
-    if (!ensureSchemaWritable(this.conn, this.database)) return;
     try {
       if (format === 'sql' && !this.table) {
         this.post({ type: 'error', message: 'SQL export requires a target table.' });
@@ -78,6 +79,7 @@ export class ExportHandler {
         rows: projectedRows,
         table: this.table,
         database: this.database,
+        schema: pgSchemaFor(this.conn, this.schema),
         dialect,
         sqlDump: format === 'sql' ? { serverInfo: this.serverInfo() } : undefined,
         withBom: this.withBom(format),
@@ -96,14 +98,14 @@ export class ExportHandler {
 
   /** 全表导出：分页读取，不受结果面板行数上限约束。 */
   private async exportEntireTable(format: TransferFormat): Promise<void> {
-    if (!ensureSchemaWritable(this.conn, this.database)) return;
     const table = this.table!;
-    const session = await this.manager.connectSql(this.conn);
+    const session = await this.manager.connectSql(this.conn, this.database);
     const [{ writeTableExport }, { writeChunksToFile }] = await Promise.all([
       import('../data/transfer/exportService'),
       import('../utils/writeChunks'),
     ]);
-    const allColumns = (await session.metadata.getColumns(table, this.database)).map((c: any) => c.name);
+    const schema = pgSchemaFor(this.conn, this.schema);
+    const allColumns = (await session.metadata.getColumns(table, this.database, schema)).map((c: any) => c.name);
     const picked = await vscode.window.showQuickPick(
       allColumns.map((c: string) => ({ label: c, picked: true })),
       { canPickMany: true, placeHolder: l10n('export.selectColumns') },
@@ -117,6 +119,7 @@ export class ExportHandler {
       format,
       table,
       database: this.database,
+      schema,
       columns: picked.map((p) => p.label),
       includeStructure: format === 'sql',
       serverInfo: this.serverInfo(),

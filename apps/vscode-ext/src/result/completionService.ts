@@ -4,6 +4,7 @@ import type { SavedConnection } from '@devbelt/db-host/connection/connectionStor
 import { buildCandidates, detectContext, extractFromTable, extractTableAliases, type SqlContext } from '../completion/sqlCompletionEngine';
 import { stripSqlComments } from '@devbelt/db-core/sql';
 import { diagWarn } from '../utils/diagnostics';
+import { pgSchemaFor } from '../utils/sql';
 
 /** 元数据缓存 TTL：DDL 改表后补全不应长期返回陈旧表/列。 */
 const CACHE_TTL_MS = 60_000;
@@ -30,6 +31,8 @@ export class CompletionService {
     private readonly conn: SavedConnection,
     private readonly database: string | undefined,
     private readonly post: (msg: any) => void,
+    /** PG 命名空间（显式 schema；绝不从 database 推断）。 */
+    private readonly schema?: string,
   ) {}
 
   /** 处理补全请求并向视图发送候选。 */
@@ -46,7 +49,7 @@ export class CompletionService {
       let columns: string[] = [];
 
       if (CONTEXTS_NEEDING_TABLES.includes(ctx) || CONTEXTS_NEEDING_COLUMNS.includes(ctx)) {
-        const session = await this.manager.connectSql(this.conn);
+        const session = await this.manager.connectSql(this.conn, this.database);
         if (CONTEXTS_NEEDING_TABLES.includes(ctx)) {
           tables = await this.getTables(session, db);
         }
@@ -77,7 +80,7 @@ export class CompletionService {
     if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.names;
     if (cached) this.tableCache.delete(key);
     try {
-      const tables = (await session.metadata.getTables(db)).map((t: any) => t.name);
+      const tables = (await session.metadata.getTables(db, pgSchemaFor(this.conn, this.schema))).map((t: any) => t.name);
       this.tableCache.set(key, { names: tables, at: Date.now() });
       return tables;
     } catch (err) {
@@ -92,7 +95,7 @@ export class CompletionService {
     if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.names;
     if (cached) this.columnCache.delete(key);
     try {
-      const columns = (await session.metadata.getColumns(table, db)).map((c: any) => c.name);
+      const columns = (await session.metadata.getColumns(table, db, pgSchemaFor(this.conn, this.schema))).map((c: any) => c.name);
       this.columnCache.set(key, { names: columns, at: Date.now() });
       return columns;
     } catch (err) {

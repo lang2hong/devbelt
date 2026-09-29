@@ -141,16 +141,18 @@ export class DbTreeNode extends TreeItem {
   public refTable?: string;
   /** 外键关联列（仅 ForeignKey 节点，构造后赋值） */
   public refColumn?: string;
+  /** 外键关联表所在 schema（仅 PG ForeignKey 节点，跨 schema 跳转用） */
+  public refSchema?: string;
   /** 外键约束名（仅 ForeignKey 节点，DROP FOREIGN KEY 需要） */
   public constraintName?: string;
 
   /**
    * 向上查找所属 Table 节点，返回表名/库/连接（供 Index/Trigger/FK 等表级子节点命令使用）。
    */
-  static tableContext(node: DbTreeNode): { table: string; database?: string; conn?: SavedConnection } | undefined {
+  static tableContext(node: DbTreeNode): { table: string; database?: string; schema?: string; conn?: SavedConnection } | undefined {
     let n: DbTreeNode | undefined = node;
     while (n) {
-      if (n.kind === NodeKind.Table) return { table: n.label, database: n.database, conn: n.conn };
+      if (n.kind === NodeKind.Table) return { table: n.label, database: n.database, schema: n.schema, conn: n.conn };
       n = n.parent;
     }
     return undefined;

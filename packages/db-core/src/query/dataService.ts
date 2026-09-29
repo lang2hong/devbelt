@@ -23,6 +23,7 @@ export class DataService {
     column: string,
     value: any,
     database?: string,
+    schema?: string,
   ): Promise<QueryResult> {
     if (!pkColumns.length) throw new Error('updateCell requires at least one primary key column.');
     if (pkValues.length < pkColumns.length) throw new Error('updateCell: pkValues length mismatch');
@@ -30,7 +31,12 @@ export class DataService {
     for (const pk of pkColumns) validateIdent(pk);
     validateIdent(column);
     const w = this.queryService.dialect.wrap.bind(this.queryService.dialect);
-    const qualified = qualifyTable(this.queryService.dialect.dbType, w(table), database ? w(validateIdent(database)) : undefined);
+    const qualified = qualifyTable(
+      this.queryService.dialect.dbType,
+      w(table),
+      database ? w(validateIdent(database)) : undefined,
+      schema ? w(validateIdent(schema)) : undefined,
+    );
     const setValue = value === null ? 'NULL' : this.esc(value);
     const where = pkColumns
       .map((pk, i) => {
@@ -51,12 +57,18 @@ export class DataService {
     pkColumns: string[],
     rows: any[][],
     database?: string,
+    schema?: string,
   ): Promise<QueryResult> {
     if (!rows.length) return this.queryService.query('SELECT 1 WHERE 1 = 0');
     validateIdent(table);
     for (const pk of pkColumns) validateIdent(pk);
     const w = this.queryService.dialect.wrap.bind(this.queryService.dialect);
-    const qualified = qualifyTable(this.queryService.dialect.dbType, w(table), database ? w(validateIdent(database)) : undefined);
+    const qualified = qualifyTable(
+      this.queryService.dialect.dbType,
+      w(table),
+      database ? w(validateIdent(database)) : undefined,
+      schema ? w(validateIdent(schema)) : undefined,
+    );
     const where = rows
       .map(
         (row) =>
@@ -82,12 +94,18 @@ export class DataService {
     columns: string[],
     values: unknown[],
     database?: string,
+    schema?: string,
   ): Promise<QueryResult> {
     if (!columns.length) throw new Error('At least one column is required to insert a row.');
     if (!values || values.length !== columns.length) throw new Error(`insertRow: columns/values length mismatch (${columns.length} vs ${values?.length ?? 0})`);
     validateIdent(table);
     const w = this.queryService.dialect.wrap.bind(this.queryService.dialect);
-    const qualified = qualifyTable(this.queryService.dialect.dbType, w(table), database ? w(validateIdent(database)) : undefined);
+    const qualified = qualifyTable(
+      this.queryService.dialect.dbType,
+      w(table),
+      database ? w(validateIdent(database)) : undefined,
+      schema ? w(validateIdent(schema)) : undefined,
+    );
     const cols = columns.map((c) => w(validateIdent(c))).join(', ');
     const vals = values.map((v) =>
       v === null || v === undefined ? 'NULL' : this.esc(v),

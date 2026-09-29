@@ -20,6 +20,7 @@
 | P5 | [2FA/TOTP 验证器](阶段/P5-2FA-TOTP验证器.md) |
 | P6 | [多设备同步与网页版](阶段/P6-多设备同步与网页版.md) |
 | P7 | [Redis 客户端](阶段/P7-Redis客户端.md) |
+| P7.1 | [PG 多 schema 与多库](阶段/P7.1-PG多schema与多库.md) |
 | P8 | [Elasticsearch 客户端](阶段/P8-Elasticsearch客户端.md) |
 
 ## 文档规则

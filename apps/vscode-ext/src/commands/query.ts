@@ -82,7 +82,7 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
   sub('devbelt.previewTable', (node: DbTreeNode) => {
     if (node?.conn && node?.database) {
       connCtx.setLast(node.conn, node.database);
-      TableQueryView.open(node.conn, node.label, node.database, manager, { objectType: 'table' });
+      TableQueryView.open(node.conn, node.label, node.database, manager, { objectType: 'table', schema: node.schema });
     }
   });
 
@@ -94,7 +94,7 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
     if (node?.conn && node?.database) {
       connCtx.setLast(node.conn, node.database);
       // 视图只读：objectType 'view' 会关闭单元格编辑、插入行与复制 INSERT
-      TableQueryView.open(node.conn, node.label, node.database, manager, { objectType: 'view' });
+      TableQueryView.open(node.conn, node.label, node.database, manager, { objectType: 'view', schema: node.schema });
     }
   });
 
@@ -145,15 +145,15 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
    */
   sub('devbelt.updateCell', async (args: {
     conn: import('@devbelt/db-host/connection/connectionStore').SavedConnection;
-    table: string; pkColumns: string[]; pkValues: any[]; column: string; value: any;
+    table: string; pkColumns: string[]; pkValues: any[]; column: string; value: any; schema?: string; database?: string;
   }) => {
     try {
       if (!args?.conn || !args.table || !args.pkColumns?.length) return;
       if (!ensureWritable(args.conn)) return;
       const preview = `UPDATE ${args.table} SET ${args.column} = ? WHERE ${args.pkColumns.join(', ')} = ?`;
       if (!(await confirmSqlExecution(args.conn, preview, manager.scanOptionsFor?.(args.conn)))) return;
-      const session = await manager.connectSql(args.conn);
-      await session.data.updateCell(args.table, args.pkColumns, args.pkValues, args.column, args.value);
+      const session = await manager.connectSql(args.conn, args.database);
+      await session.data.updateCell(args.table, args.pkColumns, args.pkValues, args.column, args.value, undefined, args.schema);
       vscode.window.showInformationMessage(l10n('cmd.updated', { table: args.table, column: args.column }));
     } catch (err) {
       vscode.window.showErrorMessage((err as Error).message);

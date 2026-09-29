@@ -1061,5 +1061,4 @@ export const en: MessageCatalog = {
   'wv.redis.commandLog.time': 'Time',
   'wv.redis.events.title': 'Connection events',
   'wv.redis.events.empty': 'No connection events yet.',
-  'pg.schemaWriteLocked': 'Schema "{schema}" is read-only for now (writes/DDL/export land in B1b). Use the default schema or wait for the next version.',
 };

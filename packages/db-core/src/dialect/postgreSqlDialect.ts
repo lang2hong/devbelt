@@ -44,7 +44,8 @@ export class PostgreSqlDialect implements SqlDialect {
     return `CREATE OR REPLACE FUNCTION ${name}()\nRETURNS void AS $$\nBEGIN\n  -- function body\nEND;\n$$ LANGUAGE plpgsql;`;
   }
   readonly capabilities: DatabaseCapabilities = {
-    multiDatabaseExplorer: false,
+    // B2：PG 可在树里浏览该连接可见的全部库（每库懒建会话）；库下再出 schema 层。
+    multiDatabaseExplorer: true,
     schemas: true,
     databases: true,
     views: true,
@@ -78,7 +79,11 @@ export class PostgreSqlDialect implements SqlDialect {
   }
 
   getDatabaseListSql(): string {
-    return `SELECT datname AS name FROM pg_database WHERE datistemplate = false AND datallowconn = true`;
+    // 只列**当前用户可 CONNECT** 的非模板库：列出连不上的库会让用户点进去必然失败。
+    return `SELECT datname AS name FROM pg_database
+      WHERE datistemplate = false AND datallowconn = true
+        AND has_database_privilege(datname, 'CONNECT')
+      ORDER BY datname`;
   }
 
   /** PG：列出非系统 schema（树在库下展示 schema 层）。 */
@@ -144,10 +149,17 @@ export class PostgreSqlDialect implements SqlDialect {
   }
 
   /** pg_get_viewdef 返回纯 SELECT，包上 CREATE OR REPLACE VIEW 外壳。 */
-  normalizeViewAlterSql(raw: string, name: string, database?: string): string {
+  normalizeViewAlterSql(raw: string, name: string, _database?: string, schema?: string): string {
     const select = (raw || '').replace(/;?\s*$/, '').trim();
-    const q = qualifyTable(DatabaseType.PG, this.wrap(validateIdent(name, 63)), database ? this.wrap(validateIdent(database, 63)) : undefined);
+    const q = this.qualified(validateIdent(name, 63), schema);
     return `CREATE OR REPLACE VIEW ${q} AS\n${select};`;
+  }
+
+  /** PG 限定名：给了 schema 用 `"schema"."name"`，否则只包裹名字（交 search_path）。 */
+  private qualified(name: string, schema?: string): string {
+    return schema
+      ? qualifyTable(DatabaseType.PG, this.wrap(name), undefined, this.wrap(validateIdent(schema, 63)))
+      : this.wrap(name);
   }
 
   getIndexListSql(table: string, _database?: string, schema?: string): string {
@@ -173,11 +185,17 @@ export class PostgreSqlDialect implements SqlDialect {
   }
 
   getForeignKeysSql(_database?: string, schema?: string): string {
+    // 约束名只在单个 schema 内唯一：必须连同 `constraint_schema` 关联，否则两个 schema
+    // 里的同名约束（如都叫 fk_user）会交叉错配，把外键指到别的表上。
+    // 同时返回 `refSchema`（被引用表所在 schema），供跳转按真实 schema 打开。
     return `SELECT tc.table_name AS "tableName", kcu.column_name AS "columnName",
-      ccu.table_name AS "refTable", ccu.column_name AS "refColumn", tc.constraint_name AS "constraintName"
+      ccu.table_name AS "refTable", ccu.column_name AS "refColumn", ccu.table_schema AS "refSchema",
+      tc.constraint_name AS "constraintName"
       FROM information_schema.table_constraints tc
-      JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
-      JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name
+      JOIN information_schema.key_column_usage kcu
+        ON tc.constraint_name = kcu.constraint_name AND tc.constraint_schema = kcu.constraint_schema
+      JOIN information_schema.constraint_column_usage ccu
+        ON tc.constraint_name = ccu.constraint_name AND tc.constraint_schema = ccu.constraint_schema
       WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = ${this.schemaExpr(schema)}`;
   }
 
@@ -190,35 +208,43 @@ export class PostgreSqlDialect implements SqlDialect {
       WHERE NOT t.tgisinternal AND c.relname = '${table}' AND n.nspname = ${this.schemaExpr(schema)}`;
   }
 
-  getTriggerDefinitionSql(name: string): string {
+  getTriggerDefinitionSql(name: string, _database?: string, schema?: string, table?: string): string {
     validateIdent(name, 63);
+    // 触发器名只在单张表内唯一：必须带 schema + 表名过滤，否则会打开另一张表的同名触发器。
+    const clauses = [`t.tgname = '${name}'`, 'NOT t.tgisinternal'];
+    if (table) { validateIdent(table, 63); clauses.push(`c.relname = '${table}'`); }
+    if (schema) clauses.push(`n.nspname = ${this.schemaExpr(schema)}`);
     return `SELECT pg_get_triggerdef(t.oid, true) AS definition
       FROM pg_trigger t
       JOIN pg_class c ON c.oid = t.tgrelid
-      WHERE t.tgname = '${name}'`;
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE ${clauses.join(' AND ')}`;
   }
 
-  createIndexSql(name: string, table: string, columns: string[], unique: boolean): string {
+  createIndexSql(name: string, table: string, columns: string[], unique: boolean, _database?: string, schema?: string): string {
     const cols = columns.map((c) => this.wrap(validateIdent(c, 63))).join(', ');
-    return `CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${this.wrap(validateIdent(name, 63))} ON ${this.wrap(validateIdent(table, 63))} (${cols})`;
+    return `CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${this.wrap(validateIdent(name, 63))} ON ${this.qualified(validateIdent(table, 63), schema)} (${cols})`;
   }
 
-  dropIndexSql(name: string, _table?: string, _database?: string): string {
-    return `DROP INDEX IF EXISTS ${this.wrap(validateIdent(name, 63))}`;
+  dropIndexSql(name: string, _table?: string, _database?: string, schema?: string): string {
+    // 索引与其表同命名空间：给 schema 时前缀限定，否则交 search_path。
+    return `DROP INDEX IF EXISTS ${this.qualified(validateIdent(name, 63), schema)}`;
   }
 
-  dropTriggerSql(name: string, table: string): string {
-    return `DROP TRIGGER IF EXISTS ${this.wrap(validateIdent(name, 63))} ON ${this.wrap(validateIdent(table, 63))}`;
+  dropTriggerSql(name: string, table: string, _database?: string, schema?: string): string {
+    return `DROP TRIGGER IF EXISTS ${this.wrap(validateIdent(name, 63))} ON ${this.qualified(validateIdent(table, 63), schema)}`;
   }
 
-  createForeignKeySql(name: string, table: string, columns: string[], refTable: string, refColumns: string[]): string {
+  createForeignKeySql(name: string, table: string, columns: string[], refTable: string, refColumns: string[], _database?: string, schema?: string, refSchema?: string): string {
     const cols = columns.map((c) => this.wrap(validateIdent(c, 63))).join(', ');
     const refCols = refColumns.map((c) => this.wrap(validateIdent(c, 63))).join(', ');
-    return `ALTER TABLE ${this.wrap(validateIdent(table, 63))} ADD CONSTRAINT ${this.wrap(validateIdent(name, 63))} FOREIGN KEY (${cols}) REFERENCES ${this.wrap(validateIdent(refTable, 63))} (${refCols})`;
+    // 被引用表可位于另一个 schema；未显式给 refSchema 时退回本表 schema（同 schema 常见情形）。
+    const target = refSchema ?? schema;
+    return `ALTER TABLE ${this.qualified(validateIdent(table, 63), schema)} ADD CONSTRAINT ${this.wrap(validateIdent(name, 63))} FOREIGN KEY (${cols}) REFERENCES ${this.qualified(validateIdent(refTable, 63), target)} (${refCols})`;
   }
 
-  dropForeignKeySql(name: string, table: string): string {
-    return `ALTER TABLE ${this.wrap(validateIdent(table, 63))} DROP CONSTRAINT ${this.wrap(validateIdent(name, 63))}`;
+  dropForeignKeySql(name: string, table: string, _database?: string, schema?: string): string {
+    return `ALTER TABLE ${this.qualified(validateIdent(table, 63), schema)} DROP CONSTRAINT ${this.wrap(validateIdent(name, 63))}`;
   }
 
   getProcessListSql(): string {
@@ -317,13 +343,14 @@ export class PostgreSqlDialect implements SqlDialect {
       columnName: row.columnName || row.column_name,
       refTable: row.refTable || row.reftable,
       refColumn: row.refColumn || row.refcolumn,
+      refSchema: row.refSchema || row.refschema || undefined,
       constraintName: row.constraintName || row.constraint_name,
     }));
   }
 
-  buildInsertSql(rows: Record<string, any>[], columns: string[], table: string, database?: string): string {
+  buildInsertSql(rows: Record<string, any>[], columns: string[], table: string, _database?: string, schema?: string): string {
     const validTable = validateIdent(table, 63);
-    const qualified = qualifyTable(DatabaseType.PG, this.wrap(validTable), database ? this.wrap(validateIdent(database, 63)) : undefined);
+    const qualified = this.qualified(validTable, schema);
     const colList = columns.map((c) => this.wrap(validateIdent(c, 63))).join(', ');
     let out = '';
     for (const row of rows) {

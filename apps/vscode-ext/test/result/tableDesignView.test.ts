@@ -74,7 +74,7 @@ describe('TableDesignView mutate gate', () => {
     const { view, session } = await openView(conn());
     await view.handleMessage({ type: 'addColumn', column: 'age', spec: { type: 'INT' } });
     expect(confirmMock).not.toHaveBeenCalled();
-    expect(session.table.addColumn).toHaveBeenCalledWith('t', 'age', { type: 'INT' }, 'db');
+    expect(session.table.addColumn).toHaveBeenCalledWith('t', 'age', { type: 'INT' }, 'db', undefined);
   });
 
   it('production: requires confirmation before running', async () => {
@@ -91,7 +91,7 @@ describe('TableDesignView mutate gate', () => {
     const { view, session } = await openView(conn({ environment: 'production' }));
     await view.handleMessage({ type: 'modifyColumn', column: 'age', spec: { type: 'BIGINT' } });
     expect(confirmMock).toHaveBeenCalledTimes(1);
-    expect(session.table.modifyColumn).toHaveBeenCalledWith('t', 'age', { type: 'BIGINT' }, 'db');
+    expect(session.table.modifyColumn).toHaveBeenCalledWith('t', 'age', { type: 'BIGINT' }, 'db', undefined);
   });
 
   it('read-only: blocked regardless of environment', async () => {

@@ -40,7 +40,8 @@ describe('方言策略（策略模式）', () => {
     expect(new MysqlDialect().capabilities.operations).toContain('schemaSync');
     expect(new PostgreSqlDialect().capabilities.operations).toContain('renameTable');
     expect(new PostgreSqlDialect().capabilities.operations).toContain('schemaSync');
-    expect(new PostgreSqlDialect().capabilities.multiDatabaseExplorer).toBe(false);
+    // B2：PG 也可浏览全部库（每库懒建会话）。
+    expect(new PostgreSqlDialect().capabilities.multiDatabaseExplorer).toBe(true);
     expect(new MysqlDialect().capabilities.multiDatabaseExplorer).toBe(true);
     expect(new SqliteDialect().capabilities.events).toBe(false);
     expect(new SqliteDialect().capabilities.operations).not.toContain('truncateTable');
@@ -52,6 +53,12 @@ describe('方言策略（策略模式）', () => {
     expect(new SqliteDialect().capabilities.schemas).toBe(false);
     expect(new PostgreSqlDialect().getSchemaListSql()).toContain('pg_namespace');
     expect(new MysqlDialect().getSchemaListSql).toBeUndefined();
+  });
+
+  it('B2：PG 库列表只含有 CONNECT 权限的非模板库', () => {
+    const sql = new PostgreSqlDialect().getDatabaseListSql();
+    expect(sql).toContain("has_database_privilege(datname, 'CONNECT')");
+    expect(sql).toContain('datistemplate = false');
   });
 
   it('B1：PG 元数据 SQL 按 schema 限定，非法 schema 名被拒', () => {
@@ -152,6 +159,31 @@ describe('方言策略（策略模式）', () => {
       expect(new MysqlDialect().getTriggerListSql('users', 'app')).toContain('TRIGGERS');
       expect(new PostgreSqlDialect().getTriggerListSql('users')).toContain('pg_trigger');
       expect(new SqliteDialect().getTriggerListSql('users')).toContain("type = 'trigger'");
+    });
+
+    it('B1b：PG 触发器定义按 schema + 表限定（避免同名触发器串表）', () => {
+      const d = new PostgreSqlDialect();
+      const sql = d.getTriggerDefinitionSql('trg', undefined, 'sales', 'orders');
+      expect(sql).toContain("n.nspname = 'sales'");
+      expect(sql).toContain("c.relname = 'orders'");
+      expect(sql).toContain('NOT t.tgisinternal');
+      expect(() => d.getTriggerDefinitionSql('trg', undefined, "x'; DROP", 'orders')).toThrow();
+    });
+
+    it('B1b：PG 外键查询按 constraint_schema 关联并返回 refSchema', () => {
+      const d = new PostgreSqlDialect();
+      const sql = d.getForeignKeysSql(undefined, 'sales');
+      expect(sql).toContain('tc.constraint_schema = kcu.constraint_schema');
+      expect(sql).toContain('tc.constraint_schema = ccu.constraint_schema');
+      expect(sql).toContain('ccu.table_schema AS "refSchema"');
+      expect(d.parseForeignKeys([{ refTable: 'dept', refSchema: 'sales' }])[0].refSchema).toBe('sales');
+    });
+
+    it('B1b：PG 创建外键可跨 schema 指向 refSchema', () => {
+      const d = new PostgreSqlDialect();
+      const sql = d.createForeignKeySql('fk', 'orders', ['dept_id'], 'dept', ['id'], undefined, 'sales', 'hr');
+      expect(sql).toContain('ALTER TABLE "sales"."orders"');
+      expect(sql).toContain('REFERENCES "hr"."dept"');
     });
 
     it('MySQL 表/视图列表带 ORDER BY TABLE_NAME（排序稳定）', () => {

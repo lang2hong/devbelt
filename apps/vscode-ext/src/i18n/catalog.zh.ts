@@ -1039,5 +1039,4 @@ export const zh: MessageCatalog = {
   'wv.redis.commandLog.time': '时间',
   'wv.redis.events.title': '连接事件',
   'wv.redis.events.empty': '暂无连接事件。',
-  'pg.schemaWriteLocked': '非默认 schema「{schema}」暂为只读（B1b 才支持写入/DDL/导出）。请切到默认 schema 或等待后续版本。',
 };

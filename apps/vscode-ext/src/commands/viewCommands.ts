@@ -22,7 +22,6 @@ import { deleteByPatternKeys, PatternDeleteError, scanPatternKeys } from './redi
 import { canUseErDiagram } from '@devbelt/db-host/sync/entitlementGate';
 import { configureBackupSchedule } from './backupWizard';
 import { confirmProductionWrite } from '../utils/sqlSafety';
-import { ensureSchemaWritable } from '../utils/schemaScope';
 import { l10n } from '../i18n';
 
 /** H5：解码含替换符（非 UTF-8）的键名/前缀不可按文本操作。 */
@@ -108,13 +107,13 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     // 表设计视图
     vscode.commands.registerCommand('devbelt.designTable', async (node: any) => {
       if (node?.conn && node?.database) {
-        const session = await manager.connectSql(node.conn);
+        const session = await manager.connectSql(node.conn, node.database);
         if (!session.capabilities.operations.includes('getTableDefinition')) {
           vscode.window.showWarningMessage(l10n('design.unsupported'));
           return;
         }
-        if (!ensureSchemaWritable(node.conn, node.schema)) return;
-        void TableDesignView.open(node.conn, node.label, node.database, manager, () => treeProvider.refreshNode(node));
+
+        void TableDesignView.open(node.conn, node.label, node.database, manager, () => treeProvider.refreshNode(node), node.schema);
       }
     }),
     // 新建表（webview 表单）：比丢一段 CREATE TABLE 模板到编辑器更直接，
@@ -122,8 +121,7 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     vscode.commands.registerCommand('devbelt.newTableDesigner', async (node: any) => {
       const database = node?.database ?? node?.conn?.database;
       if (!node?.conn || !database) return;
-      if (!ensureSchemaWritable(node.conn, node.schema)) return;
-      void TableDesignView.openNew(node.conn, database, manager, () => treeProvider.refreshNode(node));
+      void TableDesignView.openNew(node.conn, database, manager, () => treeProvider.refreshNode(node), node.schema);
     }),
     // Server 状态面板
     vscode.commands.registerCommand('devbelt.serverStatus', (node: any) => {
@@ -138,13 +136,13 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
         return;
       }
       if (node?.conn && node?.database) {
-        ERDiagramView.open(node.conn, node.database, manager);
+        ERDiagramView.open(node.conn, node.database, manager, node.schema);
       }
     }),
     // 数据对比
     vscode.commands.registerCommand('devbelt.compareData', async (node: any) => {
       if (!node?.conn || !node?.database) return;
-      const session = await manager.connectSql(node.conn);
+      const session = await manager.connectSql(node.conn, node.database);
       const targetDbs = (await session.metadata.getDatabases()).filter((d: string) => d !== node.database);
       if (!targetDbs.length) {
         vscode.window.showWarningMessage(l10n('compare.noOtherDatabases'));

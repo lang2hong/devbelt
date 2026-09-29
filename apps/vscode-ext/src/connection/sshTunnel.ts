@@ -49,6 +49,14 @@ export class SshTunnel {
   /** 主机密钥裁决器（扩展激活时注入）。未注入时回退严格判定。 */
   private static hostKeyGate?: SshHostKeyGate;
 
+  /**
+   * connId → 引用计数。
+   *
+   * B2：同一连接的多库会话复用同一条隧道。会话失败/关闭只能释放自己的引用，
+   * 计数归零才真正关隧道——否则衍生会话失败会把主会话仍在用的隧道关掉。
+   */
+  private static readonly refs = new Map<string, number>();
+
   static configureHostKeyGate(gate: SshHostKeyGate | undefined): void {
     this.hostKeyGate = gate;
   }
@@ -61,6 +69,7 @@ export class SshTunnel {
       tunnel.ssh.end();
     } catch {}
     this.tunnels.delete(connId);
+    this.refs.delete(connId);
   }
 
   /**
@@ -86,7 +95,10 @@ export class SshTunnel {
         existing.sshPassword === conn.sshPassword &&
         existing.sshPrivateKeyPath === conn.sshPrivateKeyPath &&
         existing.sshPassphrase === conn.sshPassphrase;
-      if (sameTarget) return existing.port;
+      if (sameTarget) {
+        this.refs.set(conn.id, (this.refs.get(conn.id) ?? 1) + 1);
+        return existing.port;
+      }
       this.closeTunnel(existing, conn.id);
     }
 
@@ -139,6 +151,7 @@ export class SshTunnel {
         const t = this.tunnels.get(conn.id);
         if (!t) return;
         this.tunnels.delete(conn.id);
+        this.refs.delete(conn.id);
         try { t.server.close(); } catch { /* already closed */ }
         try { t.ssh.end(); } catch { /* already ended */ }
       };
@@ -185,6 +198,7 @@ export class SshTunnel {
             sshUser: conn.sshUser, sshPassword: conn.sshPassword,
             sshPrivateKeyPath: conn.sshPrivateKeyPath, sshPassphrase: conn.sshPassphrase,
           });
+          this.refs.set(conn.id, 1);
           resolve(port);
         });
       });
@@ -248,8 +262,24 @@ export class SshTunnel {
     });
   }
 
-  /** 关闭指定连接的隧道 */
+  /**
+ * 释放一次隧道引用；计数归零才真正关闭。
+ *
+ * 会话关闭/建连失败走这里（而非 `close`），保证多库会话共享的隧道在仍有
+ * 其它引用时不被误关。
+ */
+  static release(connId: string): void {
+    const n = this.refs.get(connId);
+    if (n === undefined) return;
+    if (n > 1) { this.refs.set(connId, n - 1); return; }
+    const tunnel = this.tunnels.get(connId);
+    this.refs.delete(connId);
+    if (tunnel) this.closeTunnel(tunnel, connId);
+  }
+
+  /** 强制关闭指定连接的隧道（忽略引用计数；disposeAll / 连接彻底销毁用） */
   static close(connId: string): void {
+    this.refs.delete(connId);
     const tunnel = this.tunnels.get(connId);
     if (!tunnel) return;
     this.closeTunnel(tunnel, connId);

@@ -103,6 +103,8 @@ export interface ForeignKeyMeta {
   columnName: string;
   refTable: string;
   refColumn: string;
+  /** 被引用表所在 schema（仅 PG；跨 schema 外键跳转需要）。 */
+  refSchema?: string;
   /** 外键约束名（DROP FOREIGN KEY 需要） */
   constraintName?: string;
 }

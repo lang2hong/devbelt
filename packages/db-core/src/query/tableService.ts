@@ -33,7 +33,7 @@ export class TableService {
    *  - PG：类型换成 `SERIAL` / `BIGSERIAL`
    *  - SQLite：只能写成 `INTEGER PRIMARY KEY AUTOINCREMENT`（内联，且必须是唯一主键）
    */
-  async createTable(table: string, columns: NewColumnSpec[], database?: string): Promise<QueryResult> {
+  async createTable(table: string, columns: NewColumnSpec[], database?: string, schema?: string): Promise<QueryResult> {
     validateIdent(table);
     if (!columns.length) throw new Error('At least one column is required to create a table.');
     const dbType = this.queryService.dialect.dbType;
@@ -51,7 +51,7 @@ export class TableService {
     if (primary.length && !sqliteInlinePk) {
       defs.push(`PRIMARY KEY (${primary.map((c) => this.wrap(validateIdent(c))).join(', ')})`);
     }
-    return this.ddl(`CREATE TABLE ${this.wrapQualified(table, database)} (\n  ${defs.join(',\n  ')}\n)`);
+    return this.ddl(`CREATE TABLE ${this.wrapQualified(table, database, schema)} (\n  ${defs.join(',\n  ')}\n)`);
   }
 
   private columnDefinition(col: NewColumnSpec, dbType: string, sqliteInlinePk: boolean): string {
@@ -70,34 +70,35 @@ export class TableService {
   }
 
   /** 删除表（危险操作） */
-  async dropTable(table: string, database?: string): Promise<QueryResult> {
-    return this.ddl(`DROP TABLE ${this.wrapQualified(table, database)}`);
+  async dropTable(table: string, database?: string, schema?: string): Promise<QueryResult> {
+    return this.ddl(`DROP TABLE ${this.wrapQualified(table, database, schema)}`);
   }
 
   /** 重命名表 */
-  async renameTable(table: string, newName: string, database?: string): Promise<QueryResult> {
+  async renameTable(table: string, newName: string, database?: string, schema?: string): Promise<QueryResult> {
     this.require('renameTable');
     if (this.queryService.dialect.dbType === 'MYSQL') {
       return this.ddl(
-        `RENAME TABLE ${this.wrapQualified(table, database)} TO ${this.wrapQualified(newName, database)}`,
+        `RENAME TABLE ${this.wrapQualified(table, database, schema)} TO ${this.wrapQualified(newName, database, schema)}`,
       );
     }
-    return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} RENAME TO ${this.wrap(newName)}`);
+    // PG/SQLite：目标名与源同 schema（PG 的 RENAME TO 只接受新名，schema 由源表限定）。
+    return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database, schema)} RENAME TO ${this.wrap(newName)}`);
   }
 
   /** 重命名视图 */
-  async renameView(view: string, newName: string, database?: string): Promise<QueryResult> {
+  async renameView(view: string, newName: string, database?: string, schema?: string): Promise<QueryResult> {
     this.require('renameView');
     if (this.queryService.dialect.dbType === 'MYSQL') {
-      return this.ddl(`RENAME TABLE ${this.wrapQualified(view, database)} TO ${this.wrapQualified(newName, database)}`);
+      return this.ddl(`RENAME TABLE ${this.wrapQualified(view, database, schema)} TO ${this.wrapQualified(newName, database, schema)}`);
     }
-    return this.ddl(`ALTER VIEW ${this.wrapQualified(view, database)} RENAME TO ${this.wrap(newName)}`);
+    return this.ddl(`ALTER VIEW ${this.wrapQualified(view, database, schema)} RENAME TO ${this.wrap(newName)}`);
   }
 
   /** 清空表（危险操作） */
-  async truncateTable(table: string, database?: string): Promise<QueryResult> {
+  async truncateTable(table: string, database?: string, schema?: string): Promise<QueryResult> {
     this.require('truncateTable');
-    return this.ddl(`TRUNCATE TABLE ${this.wrapQualified(table, database)}`);
+    return this.ddl(`TRUNCATE TABLE ${this.wrapQualified(table, database, schema)}`);
   }
 
   /**
@@ -110,12 +111,12 @@ export class TableService {
    *
    * 注意：此前该方法注释写「含数据」，实际只发了 `LIKE`，一行数据都不会复制。
    */
-  async dupTable(table: string, newName: string, database?: string, includeData = false): Promise<QueryResult> {
+  async dupTable(table: string, newName: string, database?: string, includeData = false, schema?: string): Promise<QueryResult> {
     this.require('duplicateTable');
     validateIdent(table);
     validateIdent(newName);
-    const source = this.wrapQualified(table, database);
-    const target = this.wrapQualified(newName, database);
+    const source = this.wrapQualified(table, database, schema);
+    const target = this.wrapQualified(newName, database, schema);
     const dbType = this.queryService.dialect.dbType;
 
     if (dbType === 'SQLITE') {
@@ -132,9 +133,9 @@ export class TableService {
   }
 
   /** 查询建表语句（各方言实现不同，返回首行首列） */
-  async getCreateSql(table: string, database?: string): Promise<string> {
+  async getCreateSql(table: string, database?: string, schema?: string): Promise<string> {
     this.require('getTableDefinition');
-    const sql = this.getCreateSqlForDialect(table, database);
+    const sql = this.getCreateSqlForDialect(table, database, schema);
     const result = await this.queryService.query(sql);
     const row = result.rows[0] as Record<string, any> | undefined;
     if (!row) return '';
@@ -147,38 +148,38 @@ export class TableService {
   }
 
   /** 删除视图 */
-  async dropView(view: string, database?: string): Promise<QueryResult> {
-    return this.ddl(`DROP VIEW ${this.wrapQualified(view, database)}`);
+  async dropView(view: string, database?: string, schema?: string): Promise<QueryResult> {
+    return this.ddl(`DROP VIEW ${this.wrapQualified(view, database, schema)}`);
   }
 
   /** 删除函数/存储过程 */
-  async dropRoutine(name: string, routineType: string, database?: string): Promise<QueryResult> {
+  async dropRoutine(name: string, routineType: string, database?: string, schema?: string): Promise<QueryResult> {
     this.require('manageRoutines');
-    const qualified = this.wrapQualified(name, database);
+    const qualified = this.wrapQualified(name, database, schema);
     return this.ddl(`DROP ${routineType} IF EXISTS ${qualified}`);
   }
 
   /** 删除事件 */
-  async dropEvent(name: string, database?: string): Promise<QueryResult> {
+  async dropEvent(name: string, database?: string, schema?: string): Promise<QueryResult> {
     this.require('manageEvents');
-    const qualified = this.wrapQualified(name, database);
+    const qualified = this.wrapQualified(name, database, schema);
     return this.ddl(`DROP EVENT IF EXISTS ${qualified}`);
   }
 
   /** 删除索引（主键索引走 ALTER TABLE DROP PRIMARY KEY） */
-  async dropIndex(indexName: string, table: string, database?: string): Promise<QueryResult> {
+  async dropIndex(indexName: string, table: string, database?: string, schema?: string): Promise<QueryResult> {
     this.require('manageIndexes');
-    const qualifiedTable = this.wrapQualified(table, database);
+    const qualifiedTable = this.wrapQualified(table, database, schema);
     if (indexName.toUpperCase() === 'PRIMARY') {
       return this.ddl(`ALTER TABLE ${qualifiedTable} DROP PRIMARY KEY`);
     }
-    return this.ddl(this.queryService.dialect.dropIndexSql(indexName, table, database));
+    return this.ddl(this.queryService.dialect.dropIndexSql(indexName, table, database, schema));
   }
 
   /** 创建索引（主键走 ALTER TABLE ADD PRIMARY KEY） */
-  async createIndex(indexName: string, table: string, columns: string[], database?: string, isUnique = false): Promise<QueryResult> {
+  async createIndex(indexName: string, table: string, columns: string[], database?: string, isUnique = false, schema?: string): Promise<QueryResult> {
     this.require('manageIndexes');
-    const qualifiedTable = this.wrapQualified(table, database);
+    const qualifiedTable = this.wrapQualified(table, database, schema);
     const colList = columns.map((c) => this.wrap(c)).join(', ');
     if (indexName.toUpperCase() === 'PRIMARY') {
       return this.ddl(`ALTER TABLE ${qualifiedTable} ADD PRIMARY KEY (${colList})`);
@@ -187,7 +188,7 @@ export class TableService {
   }
 
   /** 重建主键（编辑主键索引时：DROP + ADD 单语句） */
-  async recreatePrimaryKey(table: string, columns: string[], database?: string): Promise<QueryResult> {
+  async recreatePrimaryKey(table: string, columns: string[], database?: string, schema?: string): Promise<QueryResult> {
     this.require('manageIndexes');
     // PG 需先按名 DROP 现有 PK 约束（名字可能自定义），SQLite 需整表重建；
     // 两者都无法用一条通用语句完成。过去无条件发 MySQL 语法 → PG/SQLite 上是非法 SQL。
@@ -196,42 +197,42 @@ export class TableService {
         `Recreating a primary key is not supported for ${this.queryService.dialect.dbType}; drop and re-add it with explicit SQL.`,
       );
     }
-    const qualifiedTable = this.wrapQualified(table, database);
+    const qualifiedTable = this.wrapQualified(table, database, schema);
     const colList = columns.map((c) => this.wrap(c)).join(', ');
     return this.ddl(`ALTER TABLE ${qualifiedTable} DROP PRIMARY KEY, ADD PRIMARY KEY (${colList})`);
   }
 
   /** 新增外键 */
-  async addForeignKey(table: string, name: string, columns: string[], refTable: string, refColumns: string[], database?: string): Promise<QueryResult> {
+  async addForeignKey(table: string, name: string, columns: string[], refTable: string, refColumns: string[], database?: string, schema?: string, refSchema?: string): Promise<QueryResult> {
     this.require('alterTable');
-    const sql = this.queryService.dialect.createForeignKeySql(name, table, columns, refTable, refColumns, database);
+    const sql = this.queryService.dialect.createForeignKeySql(name, table, columns, refTable, refColumns, database, schema, refSchema);
     if (!sql) throw new Error(`${this.queryService.dialect.dbType} does not support adding foreign keys.`);
     return this.ddl(sql);
   }
 
   /** 删除外键 */
-  async dropForeignKey(name: string, table: string, database?: string): Promise<QueryResult> {
+  async dropForeignKey(name: string, table: string, database?: string, schema?: string): Promise<QueryResult> {
     this.require('alterTable');
-    const sql = this.queryService.dialect.dropForeignKeySql(name, table, database);
+    const sql = this.queryService.dialect.dropForeignKeySql(name, table, database, schema);
     if (!sql) throw new Error(`${this.queryService.dialect.dbType} does not support dropping foreign keys.`);
     return this.ddl(sql);
   }
 
   /** 新增列。定义由结构化 spec 合成，类型经白名单校验、值与标识符经方言转义。 */
-  async addColumn(table: string, column: string, spec: ColumnSpec, database?: string): Promise<QueryResult> {
+  async addColumn(table: string, column: string, spec: ColumnSpec, database?: string, schema?: string): Promise<QueryResult> {
     this.require('alterTable');
     validateIdent(table);
     validateIdent(column);
     const def = this.columnAttributes(spec, this.queryService.dialect.dbType, false);
-    return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} ADD COLUMN ${this.wrap(column)} ${def}`);
+    return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database, schema)} ADD COLUMN ${this.wrap(column)} ${def}`);
   }
 
   /** 删除列（危险操作，需二次确认） */
-  async dropColumn(table: string, column: string, database?: string): Promise<QueryResult> {
+  async dropColumn(table: string, column: string, database?: string, schema?: string): Promise<QueryResult> {
     this.require('alterTable');
     validateIdent(table);
     validateIdent(column);
-    return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} DROP COLUMN ${this.wrap(column)}`);
+    return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database, schema)} DROP COLUMN ${this.wrap(column)}`);
   }
 
   /**
@@ -248,12 +249,13 @@ export class TableService {
     newName: string,
     spec: ColumnSpec,
     database?: string,
+    schema?: string,
   ): Promise<QueryResult> {
     this.require('alterTable');
     validateIdent(table);
     validateIdent(column);
     validateIdent(newName);
-    const qualified = this.wrapQualified(table, database);
+    const qualified = this.wrapQualified(table, database, schema);
     const dbType = this.queryService.dialect.dbType;
 
     if (dbType === 'MYSQL') {
@@ -272,33 +274,33 @@ export class TableService {
     if (newName === column) {
       throw new Error(`${dbType} does not support altering a column type.`);
     }
-    return this.renameColumn(table, column, newName, database);
+    return this.renameColumn(table, column, newName, database, schema);
   }
 
   /** 仅改列名（三家方言都支持 `RENAME COLUMN`，MySQL 8.0+ 亦可）。 */
-  async renameColumn(table: string, column: string, newName: string, database?: string): Promise<QueryResult> {
+  async renameColumn(table: string, column: string, newName: string, database?: string, schema?: string): Promise<QueryResult> {
     this.require('alterTable');
     validateIdent(table);
     validateIdent(column);
     validateIdent(newName);
     return this.ddl(
-      `ALTER TABLE ${this.wrapQualified(table, database)} RENAME COLUMN ${this.wrap(column)} TO ${this.wrap(newName)}`,
+      `ALTER TABLE ${this.wrapQualified(table, database, schema)} RENAME COLUMN ${this.wrap(column)} TO ${this.wrap(newName)}`,
     );
   }
 
   /** 修改列定义。MySQL 用 MODIFY COLUMN；PG 用 ALTER COLUMN TYPE；SQLite 不支持改类型 */
-  async modifyColumn(table: string, column: string, spec: ColumnSpec, database?: string): Promise<QueryResult> {
+  async modifyColumn(table: string, column: string, spec: ColumnSpec, database?: string, schema?: string): Promise<QueryResult> {
     this.require('alterTable');
     validateIdent(table);
     validateIdent(column);
     const dbType = this.queryService.dialect.dbType;
     if (dbType === 'MYSQL') {
       const def = this.columnAttributes(spec, 'MYSQL', false);
-      return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} MODIFY COLUMN ${this.wrap(column)} ${def}`);
+      return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database, schema)} MODIFY COLUMN ${this.wrap(column)} ${def}`);
     }
     if (dbType === 'PG') {
       const type = validateColumnType(spec.type);
-      const q = this.wrapQualified(table, database);
+      const q = this.wrapQualified(table, database, schema);
       const c = this.wrap(column);
       // 旧实现只改 TYPE，表单里的 NOT NULL / DEFAULT 被静默丢弃（用户以为已生效）。
       let result = await this.ddl(`ALTER TABLE ${q} ALTER COLUMN ${c} TYPE ${type}`);
@@ -314,7 +316,7 @@ export class TableService {
   }
 
   /** 调整列位置（仅 MySQL：CHANGE COLUMN ... AFTER/FIRST）。afterColumn 为 null 表示移到最前(FIRST)。 */
-  async reorderColumn(table: string, column: string, afterColumn: string | null, database?: string): Promise<QueryResult> {
+  async reorderColumn(table: string, column: string, afterColumn: string | null, database?: string, schema?: string): Promise<QueryResult> {
     this.require('alterTable');
     validateIdent(table);
     validateIdent(column);
@@ -322,11 +324,11 @@ export class TableService {
     if (dbType !== 'MYSQL') {
       throw new Error(`${dbType} does not support reordering columns.`);
     }
-    const def = await this.getFullColumnDef(table, column, database);
+    const def = await this.getFullColumnDef(table, column, database, schema);
     // def 来自**同库** SHOW CREATE TABLE 解析（相对可信，与跨库 information_schema 不同）；
     // 若将来允许自定义/跨库定义，须同 schemaDiffService 一样过 validateColumnType。
     const position = afterColumn ? ` AFTER ${this.wrap(afterColumn)}` : ' FIRST';
-    return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database)} CHANGE COLUMN ${this.wrap(column)} ${this.wrap(column)} ${def}${position}`);
+    return this.ddl(`ALTER TABLE ${this.wrapQualified(table, database, schema)} CHANGE COLUMN ${this.wrap(column)} ${this.wrap(column)} ${def}${position}`);
   }
 
   /**
@@ -335,18 +337,18 @@ export class TableService {
    * 供「改列」预填当前定义用：只给类型会把 NOT NULL / DEFAULT / 注释 / 自增
    * 全部抹掉，这在 `CHANGE COLUMN` 里是静默的数据/约束丢失。
    */
-  async getColumnDefinition(table: string, column: string, database?: string): Promise<string> {
+  async getColumnDefinition(table: string, column: string, database?: string, schema?: string): Promise<string> {
     validateIdent(table);
     validateIdent(column);
     if (this.queryService.dialect.dbType !== 'MYSQL') {
       throw new Error(`${this.queryService.dialect.dbType} does not expose a full column definition.`);
     }
-    return this.getFullColumnDef(table, column, database);
+    return this.getFullColumnDef(table, column, database, schema);
   }
 
   /** 从 SHOW CREATE TABLE 解析指定列的完整定义（含 NOT NULL/DEFAULT/charset/ON UPDATE 等所有属性）。 */
-  private async getFullColumnDef(table: string, column: string, database?: string): Promise<string> {
-    const ddl = await this.getCreateSql(table, database);
+  private async getFullColumnDef(table: string, column: string, database?: string, schema?: string): Promise<string> {
+    const ddl = await this.getCreateSql(table, database, schema);
     for (const raw of ddl.split('\n')) {
       const line = raw.trimEnd();
       const m = line.match(/^\s*`([^`]+)`\s+(.+?)\s*,?\s*$/);
@@ -429,20 +431,21 @@ export class TableService {
    * 导出表结构 + 数据（mysqldump 风格 SQL）。
    * 生成：DROP TABLE IF EXISTS + CREATE TABLE + INSERT 语句。
    */
-  async dumpSql(table: string, database?: string, includeData = true): Promise<string> {
+  async dumpSql(table: string, database?: string, includeData = true, schema?: string): Promise<string> {
     this.require('dumpTable');
     validateIdent(table);
     const parts: string[] = [];
-    const ddl = await this.getCreateSql(table, database);
-    parts.push(`-- Table: ${database ? database + '.' : ''}${table}`);
-    parts.push(`DROP TABLE IF EXISTS ${this.wrapQualified(table, database)};`);
+    const ddl = await this.getCreateSql(table, database, schema);
+    const scope = schema ?? database;
+    parts.push(`-- Table: ${scope ? scope + '.' : ''}${table}`);
+    parts.push(`DROP TABLE IF EXISTS ${this.wrapQualified(table, database, schema)};`);
     parts.push(ddl + ';');
     parts.push('');
     if (includeData) {
       const DUMP_BATCH = 1000;
       let offset = 0;
       let totalRows = 0;
-      const qualified = this.wrapQualified(table, database);
+      const qualified = this.wrapQualified(table, database, schema);
       // 无 ORDER BY 的 LIMIT/OFFSET 分页顺序不确定：服务端可返回任意顺序，翻页时行会
       // 漂移，导致导出丢行/重复。先探列，再按全部列排序，保证分页稳定。
       const probe = await this.queryService.query(`SELECT * FROM ${qualified} LIMIT 0`);
@@ -496,13 +499,14 @@ export class TableService {
     database: string | undefined,
     count: number,
     columns?: ColumnMeta[],
+    schema?: string,
   ): Promise<number> {
     let cols: ColumnMeta[];
     if (columns && columns.length > 0) {
       cols = columns;
     } else {
       const result = await this.queryService.query(
-        this.queryService.dialect.getColumnsSql(table, database),
+        this.queryService.dialect.getColumnsSql(table, database, schema),
       );
       cols = result.rows.map((r: any) => normalizeColumnMeta(r));
     }
@@ -519,7 +523,7 @@ export class TableService {
         const values = insertCols.map((c) => mockValue(c, batch * batchSize + i, (v) => this.esc(v))).join(', ');
         valuesList.push(`(${values})`);
       }
-      const sql = `INSERT INTO ${this.wrapQualified(table, database)} (${colList}) VALUES ${valuesList.join(', ')}`;
+      const sql = `INSERT INTO ${this.wrapQualified(table, database, schema)} (${colList}) VALUES ${valuesList.join(', ')}`;
       // 批量循环不逐条进历史，否则百万行 mock 会把上限 100 条的历史冲干；
       // 命令层会补一条汇总记录。
       await this.queryService.query(sql, undefined, { skipHistory: true });
@@ -589,21 +593,28 @@ export class TableService {
    * `validateIdent` 调用点，但恰好这条主干上的几个入口漏了 —— 漏一处就是一条
    * 以调用者权限执行任意 DDL 的路径。
    *
+   * PostgreSQL 的限定走 `schema` 形参（`database` 是库名而非 schema，见 qualifyTable）。
+   *
    * 威胁模型见 test/dialect/identEscape.test.ts 顶部：表名来自数据库自身的元数据
    * （树节点标签），不是用户输入，所以"用户不会输入引号"这个假设不成立。
    */
-  private wrapQualified(name: string, database?: string): string {
+  private wrapQualified(name: string, database?: string, schema?: string): string {
     validateIdent(name);
-    if (!database) return this.wrap(name);
-    validateIdent(database);
-    // PostgreSQL 无跨库限定名（`database` 是库名而非 schema，见 qualifyTable）。
-    return qualifyTable(this.queryService.dialect.dbType, this.wrap(name), this.wrap(database));
+    if (database) validateIdent(database);
+    if (schema) validateIdent(schema);
+    if (!database && !schema) return this.wrap(name);
+    return qualifyTable(
+      this.queryService.dialect.dbType,
+      this.wrap(name),
+      database ? this.wrap(database) : undefined,
+      schema ? this.wrap(schema) : undefined,
+    );
   }
 
   /** 按方言生成查询建表语句的 SQL */
-  private getCreateSqlForDialect(table: string, database?: string): string {
+  private getCreateSqlForDialect(table: string, database?: string, schema?: string): string {
     const dbType = this.queryService.dialect.dbType;
-    const qualified = this.wrapQualified(table, database);
+    const qualified = this.wrapQualified(table, database, schema);
     switch (dbType) {
       case 'MYSQL':
         return `SHOW CREATE TABLE ${qualified}`;
@@ -629,11 +640,12 @@ export class TableService {
          *    对象的列混在一起；而 string_agg 不保证输入顺序，不排序时生成的
          *    DDL 列顺序随机 —— 拿它去别处建表，按位置赋值的 INSERT 就错列。
          */
-        // 这里的 `database` 是库名（树节点），PG 里不是 schema —— 用它当 nspname
-        // 会查不到任何列，生成的建表语句为空。统一按连接的 current_schema() 解析。
-        const schema = 'current_schema()';
+        // B1b：显式 schema 用**字符串字面量**（validateIdent + 单引号转义）；未给回退
+        // current_schema()。注意不能复用 this.wrap(schema)：双引号是标识符语法，
+        // `quote_literal("x")` 会被解析成"名为 x 的列"，正是本节要修的缺陷。
+        const schemaExpr = schema ? `'${validateIdent(schema, 63).replace(/'/g, "''")}'` : 'current_schema()';
         return `SELECT
-            'CREATE TABLE ' || quote_ident(c.relname) || ' (' || chr(10) ||
+            'CREATE TABLE ' || quote_ident(n.nspname) || '.' || quote_ident(c.relname) || ' (' || chr(10) ||
             string_agg(
               '  ' || quote_ident(a.attname) || ' ' || format_type(a.atttypid, a.atttypmod)
                 || CASE WHEN a.attnotnull THEN ' NOT NULL' ELSE '' END
@@ -647,9 +659,9 @@ export class TableService {
           JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
           LEFT JOIN pg_attrdef ad ON ad.adrelid = c.oid AND ad.adnum = a.attnum
           WHERE c.relname = ${this.esc(table)}
-            AND n.nspname = ${schema}
+            AND n.nspname = ${schemaExpr}
             AND c.relkind IN ('r', 'p')
-          GROUP BY c.relname`;
+          GROUP BY n.nspname, c.relname`;
       }
       default:
         // 表名进的是字符串**字面量**而非标识符，`wrap` 的翻倍转义在这里不适用；

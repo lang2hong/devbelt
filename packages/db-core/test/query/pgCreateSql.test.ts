@@ -79,6 +79,18 @@ describe('PG getCreateSql', () => {
   });
 
   /**
+   * B1b：显式 schema（第 3 形参）走字符串字面量；库名（第 2 形参）仍不当作 nspname。
+   */
+  it('显式 schema 用字符串字面量限定 nspname', async () => {
+    const { con, table } = pgSvc();
+    await table.getCreateSql('t1', 'somedb', 'sales');
+    const sql = con.sqls[0];
+    expect(sql).toMatch(/n\.nspname\s*=\s*'sales'/);
+    expect(sql).not.toMatch(/'somedb'/);
+    expect(sql).not.toMatch(/quote_literal\s*\(\s*"/);
+  });
+
+  /**
    * 表名进的是字符串字面量位置，必须走方言的 escapeValue。
    * `validateIdent` 已经在前面兜了一层，但两道都上的成本是零。
    */
@@ -114,6 +126,18 @@ describe('PG getCreateSql', () => {
     const { con, table } = pgSvc();
     await table.getCreateSql('t1');
     expect(con.sqls[0]).toMatch(/ORDER\s+BY\s+a\.attnum/i);
+  });
+
+  /**
+   * B1b：导出的 DDL 必须带 schema 限定（`CREATE TABLE "schema"."t"`），
+   * 否则用这份导出恢复时会先把 schema 表删掉，再在 search_path 的 schema 里重建同名表。
+   */
+  it('建表 DDL 带 schema 限定（quote_ident(n.nspname)）', async () => {
+    const { con, table } = pgSvc();
+    await table.getCreateSql('t1', undefined, 'sales');
+    const sql = con.sqls[0];
+    expect(sql).toMatch(/quote_ident\(n\.nspname\)\s*\|\|\s*'\.'\s*\|\|\s*quote_ident\(c\.relname\)/);
+    expect(sql).toMatch(/GROUP BY n\.nspname, c\.relname/);
   });
 });
 

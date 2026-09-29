@@ -343,17 +343,21 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     if (element.conn.dbType === DatabaseType.REDIS) return [];
     const dialect = DialectRegistry.get(element.conn.dbType);
     if (!dialect) return [];
-    // B1：PG（capabilities.schemas）在库下先出 schema 层。
+    // B1：PG（capabilities.schemas）在库下先出 schema 层。B2：库节点 label 即目标库，取对应库会话。
     if (dialect.capabilities.schemas) {
-      const session = await this.manager.connectSql(element.conn);
+      const session = await this.manager.connectSql(element.conn, element.label);
       const schemas = await session.metadata.getSchemas();
       const ordered = schemas.includes('public') ? ['public', ...schemas.filter((s) => s !== 'public')] : schemas;
-      return ordered.map((name) => this.schemaNode(element, name));
+      const schemaNodes = ordered.map((name) => this.schemaNode(element, name));
+      // 「查询」分类挂在 **Database** 节点下：保存查询按库组织，若在每个 schema 下各挂一份，
+      // 其子节点 id 只含库名会跨 schema 冲突（且重复展示）。见 buildSchemaChildren(includeQuery=false)。
+      const queryCat = this.categoryNodes(element, element.label ?? '').find((n) => n.categoryType === 'query');
+      return queryCat ? [...schemaNodes, queryCat] : schemaNodes;
     }
     return this.categoryNodes(element, element.label ?? '');
   }
 
-  /** PG schema 节点（database 槽保留库名，schema 单独携带）。 */
+  /** PG schema 节点（database = 库名，schema 单独携带）。 */
   private schemaNode(parent: DbTreeNode, name: string): DbTreeNode {
     const conn = parent.conn!;
     const n = new DbTreeNode(name, TreeItemCollapsibleState.Collapsed, NodeKind.Schema, conn, undefined, parent, undefined, parent.label);
@@ -363,31 +367,36 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     return n;
   }
 
-  /** Schema 节点子节点：对象分类（database 槽给 schema，供元数据/限定名使用）。 */
+  /** Schema 节点子节点：对象分类（database 槽给 schema，供元数据/限定名使用）。查询分类不在此层。 */
   private buildSchemaChildren(element: DbTreeNode): DbTreeNode[] {
     const schema = element.schema ?? '';
-    return this.categoryNodes(element, schema);
+    return this.categoryNodes(element, schema, false);
   }
 
   /**
    * 分类节点工厂。`scope` 是对象作用域：MySQL 为库名；PG 为 schema 名。
-   * — 对象分类（table/view/function/event）的 database 槽 = scope，并带 schema=scope（PG）。
-   * — query 分类始终用库名（保存查询按库组织），PG 下用连接库名。
+   * — MySQL/SQLite：database = scope。
+   * — PG（B2）：database = **库名**（多库会话用），schema = scope（限定名用）。
+   * — query 分类挂在库节点：database = 库名。
    */
-  private categoryNodes(element: DbTreeNode, scope: string): DbTreeNode[] {
+  private categoryNodes(element: DbTreeNode, scope: string, includeQuery = true): DbTreeNode[] {
     if (!element.conn) return [];
     const dialect = DialectRegistry.get(element.conn.dbType);
     if (!dialect) return [];
     const caps = dialect.capabilities;
     const isPg = element.conn.dbType === DatabaseType.PG;
-    const dbForQuery = isPg ? (element.database ?? element.conn.database ?? '') : scope;
+    // PG 库名：Schema 节点继承库节点（element.database）；Database 节点用 label。
+    const pgDb = element.kind === NodeKind.Schema
+      ? (element.database ?? element.conn.database ?? '')
+      : (element.label ?? element.database ?? element.conn.database ?? '');
+    const database = isPg ? pgDb : scope;
     const categories: { type: CategoryType; label: string; database: string; schema?: string }[] = [
-      { type: 'table', label: l10n('cat.tables'), database: scope, schema: isPg ? scope : undefined },
-      { type: 'view', label: l10n('cat.views'), database: scope, schema: isPg ? scope : undefined },
+      { type: 'table', label: l10n('cat.tables'), database, schema: isPg ? scope : undefined },
+      { type: 'view', label: l10n('cat.views'), database, schema: isPg ? scope : undefined },
     ];
-    if (caps.routines) categories.push({ type: 'function', label: l10n('cat.functions'), database: scope, schema: isPg ? scope : undefined });
-    if (caps.events) categories.push({ type: 'event', label: l10n('cat.events'), database: scope, schema: isPg ? scope : undefined });
-    categories.push({ type: 'query', label: l10n('cat.queries'), database: dbForQuery });
+    if (caps.routines) categories.push({ type: 'function', label: l10n('cat.functions'), database, schema: isPg ? scope : undefined });
+    if (caps.events) categories.push({ type: 'event', label: l10n('cat.events'), database, schema: isPg ? scope : undefined });
+    if (includeQuery) categories.push({ type: 'query', label: l10n('cat.queries'), database });
     return categories.map((c) => {
       const n = new DbTreeNode(c.label, TreeItemCollapsibleState.Collapsed, NodeKind.Category, element.conn, undefined, element, c.type, c.database);
       if (c.schema) n.schema = c.schema;
@@ -862,7 +871,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       return [...folderNodes, ...queryNodes];
     }
 
-    const session = await this.manager.connectSql(conn);
+    const session = await this.manager.connectSql(conn, db);
     const builder = new MetadataNodeBuilder(session.metadata);
     const schema = element.schema;
 
@@ -937,6 +946,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         node.id = `${element.id}:fk:${f.constraintName ?? `${f.columnName}>${f.refTable}.${f.refColumn}`}`;
         node.refTable = f.refTable;
         node.refColumn = f.refColumn;
+        node.refSchema = f.refSchema;
         node.constraintName = f.constraintName;
         node.command = { command: 'devbelt.jumpToRefTable', title: 'Open', arguments: [node] };
         return node;
@@ -972,7 +982,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   /** 表节点子节点：列列表 + 索引/触发器/外键子分类 */
   private async buildTableChildren(element: DbTreeNode): Promise<DbTreeNode[]> {
     if (!element.conn) return [];
-    const session = await this.manager.connectSql(element.conn);
+    const session = await this.manager.connectSql(element.conn, element.database);
     const columns = await session.metadata.getColumns(element.label, element.database, element.schema);
     const colNodes = columns.map((col) => {
       const node = new DbTreeNode(

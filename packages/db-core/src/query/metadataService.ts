@@ -115,8 +115,8 @@ export class MetadataService {
   }
 
   /** 查询触发器定义 */
-  async getTriggerDefinition(name: string, database?: string, schema?: string): Promise<string> {
-    const sql = this.queryService.dialect.getTriggerDefinitionSql(name, database, schema);
+  async getTriggerDefinition(name: string, database?: string, schema?: string, table?: string): Promise<string> {
+    const sql = this.queryService.dialect.getTriggerDefinitionSql(name, database, schema, table);
     if (!sql) return '';
     const result = await this.queryService.queryAll(sql);
     const row = result.rows[0];
@@ -124,29 +124,29 @@ export class MetadataService {
     return row['SQL Original Statement'] || row.definition || row.Trigger || row.Create || '';
   }
 
-  /** 生成创建索引 SQL */
-  createIndexSql(name: string, table: string, columns: string[], unique: boolean, database?: string): string {
-    return this.queryService.dialect.createIndexSql(name, table, columns, unique, database);
+  /** 生成创建索引 SQL（`schema` 仅 PG 使用） */
+  createIndexSql(name: string, table: string, columns: string[], unique: boolean, database?: string, schema?: string): string {
+    return this.queryService.dialect.createIndexSql(name, table, columns, unique, database, schema);
   }
 
-  /** 生成删除索引 SQL */
-  dropIndexSql(name: string, table: string, database?: string): string {
-    return this.queryService.dialect.dropIndexSql(name, table, database);
+  /** 生成删除索引 SQL（`schema` 仅 PG 使用） */
+  dropIndexSql(name: string, table: string, database?: string, schema?: string): string {
+    return this.queryService.dialect.dropIndexSql(name, table, database, schema);
   }
 
-  /** 生成删除触发器 SQL */
-  dropTriggerSql(name: string, table: string, database?: string): string {
-    return this.queryService.dialect.dropTriggerSql(name, table, database);
+  /** 生成删除触发器 SQL（`schema` 仅 PG 使用） */
+  dropTriggerSql(name: string, table: string, database?: string, schema?: string): string {
+    return this.queryService.dialect.dropTriggerSql(name, table, database, schema);
   }
 
-  /** 生成创建外键 SQL */
-  createForeignKeySql(name: string, table: string, columns: string[], refTable: string, refColumns: string[], database?: string): string {
-    return this.queryService.dialect.createForeignKeySql(name, table, columns, refTable, refColumns, database);
+  /** 生成创建外键 SQL（`schema`/`refSchema` 仅 PG 使用） */
+  createForeignKeySql(name: string, table: string, columns: string[], refTable: string, refColumns: string[], database?: string, schema?: string, refSchema?: string): string {
+    return this.queryService.dialect.createForeignKeySql(name, table, columns, refTable, refColumns, database, schema, refSchema);
   }
 
-  /** 生成删除外键 SQL */
-  dropForeignKeySql(name: string, table: string, database?: string): string {
-    return this.queryService.dialect.dropForeignKeySql(name, table, database);
+  /** 生成删除外键 SQL（`schema` 仅 PG 使用） */
+  dropForeignKeySql(name: string, table: string, database?: string, schema?: string): string {
+    return this.queryService.dialect.dropForeignKeySql(name, table, database, schema);
   }
 
   /**
@@ -208,11 +208,11 @@ export class MetadataService {
    * 规范成 `CREATE OR REPLACE VIEW <name> AS <select>`（SQLite 用 DROP+CREATE），
    * 交给编辑器让用户改完直接执行重建视图。
    */
-  async getViewAlterSql(name: string, database?: string): Promise<string> {
+  async getViewAlterSql(name: string, database?: string, schema?: string): Promise<string> {
     const dialect = this.queryService.dialect;
-    const raw = await this.getViewDefinition(name, database);
+    const raw = await this.getViewDefinition(name, database, schema);
     if (!raw) return '';
-    return dialect.normalizeViewAlterSql(raw, name, database);
+    return dialect.normalizeViewAlterSql(raw, name, database, schema);
   }
 
   async getProcessList(): Promise<any[]> {

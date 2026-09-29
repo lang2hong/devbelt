@@ -97,8 +97,9 @@ export class QueryExecutor {
     table: string,
     database: string | undefined,
     columns: Record<string, unknown>[],
+    schema?: string,
   ): void {
-    TableQueryView.openForStructure(conn, this.manager, table, database, columns);
+    TableQueryView.openForStructure(conn, this.manager, table, database, columns, schema);
   }
 
   /**

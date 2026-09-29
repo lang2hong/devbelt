@@ -1,0 +1,161 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import pg, { Client } from 'pg';
+import { IConnection } from '../../src/connection/connection';
+import { QueryService } from '../../src/query/queryService';
+import { MetadataService } from '../../src/query/metadataService';
+import { DataService } from '../../src/query/dataService';
+import { TableService } from '../../src/query/tableService';
+import { PostgreSqlDialect } from '../../src/dialect/postgreSqlDialect';
+
+// 与生产 PostgreSqlConnection 一致：禁用 pg 对日期/JSON 的默认解析。
+pg.types.setTypeParser(1114, (val) => val);
+pg.types.setTypeParser(1184, (val) => val);
+pg.types.setTypeParser(1082, (val) => val);
+
+const URL = process.env.DEVBELT_DB_TEST_PG_URL;
+
+/** 把真实 pg.Client 适配成 db-core 的 IConnection（单连接、无参数绑定路径）。 */
+class PgClientConnection extends IConnection {
+  constructor(private readonly client: Client) { super({ host: '', port: 0, user: '' }); }
+  query(sql: string, callback: any): void;
+  query(sql: string, values: any, callback: any): void;
+  query(sql: string, values: any, callback?: any): void {
+    const cb = typeof values === 'function' ? values : callback;
+    const params = typeof values === 'function' ? undefined : values;
+    this.client.query(sql, params as any[], (err: any, res: any) => {
+      if (err) return cb(err);
+      const result = Array.isArray(res) ? res[res.length - 1] : res;
+      cb(null, { rows: result?.rows ?? [], rowCount: result?.rowCount ?? 0 }, (result?.fields ?? []).map((f: any) => ({ name: f.name })));
+    });
+  }
+  connect(cb: (e: any) => void): void { cb(null); }
+  beginTransaction(cb: (e: any) => void): void { cb(null); }
+  rollback(): void {}
+  commit(): void {}
+  end(): void {}
+  isAlive(): boolean { return true; }
+}
+
+/**
+ * D28：真实 PG 多 schema 集成门禁。
+ *
+ * B1 的缺陷全部落在「多个 schema 下存在同名对象」这类场景，单测难以覆盖：
+ * 两个 schema 各放同名表、同名外键约束、同名触发器，验证限定、隔离与往返。
+ * CI 由 DEVBELT_DB_TEST_PG_URL 开启；本地无 PG 时整体 skip。
+ */
+const stamp = Date.now();
+const S1 = `zms_a_${stamp}`;
+const S2 = `zms_b_${stamp}`;
+
+describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
+  const dialect = new PostgreSqlDialect();
+  let raw: Client;
+  let query: QueryService;
+  let meta: MetadataService;
+  let data: DataService;
+  let table: TableService;
+
+  beforeAll(async () => {
+    raw = new Client({ connectionString: URL! });
+    await raw.connect();
+    for (const s of [S1, S2]) {
+      await raw.query(`CREATE SCHEMA ${s}`);
+      await raw.query(`CREATE TABLE ${s}.dept (id int PRIMARY KEY, name text)`);
+      await raw.query(`CREATE TABLE ${s}.orders (id int PRIMARY KEY, dept_id int, note text)`);
+      await raw.query(`INSERT INTO ${s}.dept VALUES (10, 'd'), (20, 'e')`);
+      await raw.query(`INSERT INTO ${s}.orders VALUES (1, 10, 'a'), (2, 20, 'b')`);
+      // 两个 schema 里放**同名外键约束**（PG 约束名只在 schema 内唯一）。
+      await raw.query(`ALTER TABLE ${s}.orders ADD CONSTRAINT fk_dept FOREIGN KEY (dept_id) REFERENCES ${s}.dept(id)`);
+      // 两个 schema 里放**同名触发器**，但函数体不同，用于区分命中的是哪张表。
+      await raw.query(`CREATE FUNCTION ${s}.${s}_fn() RETURNS trigger AS $$ BEGIN NEW.note := NEW.note || '-${s}'; RETURN NEW; END; $$ LANGUAGE plpgsql`);
+      await raw.query(`CREATE TRIGGER trg_orders BEFORE INSERT ON ${s}.orders FOR EACH ROW EXECUTE FUNCTION ${s}.${s}_fn()`);
+    }
+    query = new QueryService(new PgClientConnection(raw), dialect);
+    meta = new MetadataService(query);
+    data = new DataService(query);
+    table = new TableService(query);
+  }, 30_000);
+
+  afterAll(async () => {
+    if (!raw) return;
+    for (const s of [S1, S2]) {
+      try { await raw.query(`DROP SCHEMA ${s} CASCADE`); } catch { /* noop */ }
+    }
+    await raw.end();
+  }, 30_000);
+
+  it('浏览：每个 schema 只返回自己的表', async () => {
+    const a = (await meta.getTables(undefined, S1)).map((t) => t.name).sort();
+    const b = (await meta.getTables(undefined, S2)).map((t) => t.name).sort();
+    expect(a).toEqual(['dept', 'orders']);
+    expect(b).toEqual(['dept', 'orders']);
+    // 列元数据按 schema 限定（两个 schema 同名表都存在，不能混淆）。
+    const cols = await meta.getColumns('orders', undefined, S2);
+    expect(cols.map((c) => c.name)).toEqual(['id', 'dept_id', 'note']);
+  });
+
+  it('编辑：写到目标 schema，另一个 schema 不受影响', async () => {
+    await data.updateCell('orders', ['id'], [1], 'note', 'edited', undefined, S1);
+    const s1 = await raw.query(`SELECT note FROM ${S1}.orders WHERE id = 1`);
+    const s2 = await raw.query(`SELECT note FROM ${S2}.orders WHERE id = 1`);
+    expect(s1.rows[0].note).toBe('edited');
+    expect(s2.rows[0].note).toBe('a');
+    // 归位
+    await data.updateCell('orders', ['id'], [1], 'note', 'a', undefined, S1);
+  });
+
+  it('导出→导入 round-trip：DDL/INSERT 都带 schema 限定，恢复落在原 schema', async () => {
+    const ddl = await table.getCreateSql('orders', undefined, S1);
+    expect(ddl).toContain(`"${S1}"`);
+    const rows = (await query.queryAll(`SELECT * FROM ${dialect.wrap(S1)}.${dialect.wrap('orders')}`)).rows;
+    const inserts = dialect.buildInsertSql(rows as any[], ['id', 'dept_id', 'note'], 'orders', undefined, S1);
+    expect(inserts).toContain(`INSERT INTO "${S1}"."orders"`);
+
+    await raw.query(`DROP TABLE ${S1}.orders`);
+    await raw.query(ddl);
+    await raw.query(inserts);
+    const back = await raw.query(`SELECT count(*)::int AS n FROM ${S1}.orders`);
+    expect(back.rows[0].n).toBe(2);
+    // 未被限定到 search_path（public）里。
+    const stray = await raw.query(`SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'orders'`);
+    expect(stray.rows[0].n).toBe(0);
+  });
+
+  it('外键：同名约束不跨 schema 错配，且带 refSchema', async () => {
+    const a = await meta.getForeignKeys(undefined, S1);
+    const b = await meta.getForeignKeys(undefined, S2);
+    expect(a).toHaveLength(1);
+    expect(b).toHaveLength(1);
+    expect(a[0]).toMatchObject({ tableName: 'orders', refTable: 'dept', constraintName: 'fk_dept', refSchema: S1 });
+    expect(b[0]).toMatchObject({ tableName: 'orders', refTable: 'dept', constraintName: 'fk_dept', refSchema: S2 });
+  });
+
+  it('触发器定义：同名触发器按 schema + 表定位到正确的对象', async () => {
+    const a = await meta.getTriggerDefinition('trg_orders', undefined, S1, 'orders');
+    const b = await meta.getTriggerDefinition('trg_orders', undefined, S2, 'orders');
+    expect(a).toContain(S1);
+    expect(b).toContain(S2);
+    expect(a).not.toBe(b);
+  });
+
+  it('多库（B2）：可见库列表含新建库；按库会话读到该库自己的对象', async () => {
+    const db2 = `zms_db_${stamp}`;
+    await raw.query(`CREATE DATABASE ${db2}`);
+    let client2: Client | undefined;
+    try {
+      const names = (await query.queryAll(dialect.getDatabaseListSql())).rows.map((r: any) => r.name);
+      expect(names).toContain(db2);
+
+      client2 = new Client({ connectionString: URL!.replace(/\/[^/?]+$/, `/${db2}`) });
+      await client2.connect();
+      await client2.query('CREATE SCHEMA s1');
+      await client2.query('CREATE TABLE s1.t (id int)');
+      const q2 = new QueryService(new PgClientConnection(client2), dialect);
+      const m2 = new MetadataService(q2);
+      expect((await m2.getTables(undefined, 's1')).map((t) => t.name)).toEqual(['t']);
+    } finally {
+      if (client2) await client2.end();
+      await raw.query(`DROP DATABASE ${db2} WITH (FORCE)`);
+    }
+  });
+}, 60_000);

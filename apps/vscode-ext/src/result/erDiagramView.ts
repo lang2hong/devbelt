@@ -1,5 +1,6 @@
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
+import { pgSchemaFor } from '../utils/sql';
 import { BaseWebView } from './baseWebView';
 
 export class ERDiagramView extends BaseWebView {
@@ -11,6 +12,8 @@ export class ERDiagramView extends BaseWebView {
     private readonly conn: SavedConnection,
     private readonly database: string,
     private readonly manager: ConnectionManager,
+    /** PG 命名空间（显式 schema；绝不从 database 推断）。 */
+    private readonly schema?: string,
   ) {
     super('devbelt.erDiagram', `ER Diagram @ ${database}`);
     this.manager.retain(conn.id);
@@ -18,9 +21,9 @@ export class ERDiagramView extends BaseWebView {
 
   static init(extensionUri: import('vscode').Uri): void { BaseWebView.init(extensionUri); }
 
-  static open(conn: SavedConnection, database: string, manager: ConnectionManager): void {
+  static open(conn: SavedConnection, database: string, manager: ConnectionManager, schema?: string): void {
     if (ERDiagramView.current) ERDiagramView.current.dispose();
-    const view = new ERDiagramView(conn, database, manager);
+    const view = new ERDiagramView(conn, database, manager, schema);
     ERDiagramView.current = view;
   }
 
@@ -39,15 +42,16 @@ export class ERDiagramView extends BaseWebView {
       return;
     }
     try {
-      const session = await this.manager.connectSql(this.conn);
+      const session = await this.manager.connectSql(this.conn, this.database);
+      const schema = pgSchemaFor(this.conn, this.schema);
       const [tables, foreignKeys] = await Promise.all([
-        session.metadata.getTables(this.database),
-        session.metadata.getForeignKeys(this.database),
+        session.metadata.getTables(this.database, schema),
+        session.metadata.getForeignKeys(this.database, schema),
       ]);
       const tableData = await Promise.all(
         tables.map(async (t) => ({
           name: t.name,
-          columns: (await session.metadata.getColumns(t.name, this.database)).map((c) => ({
+          columns: (await session.metadata.getColumns(t.name, this.database, schema)).map((c) => ({
             name: c.name,
             type: c.simpleType || c.type || '',
             isPK: c.isPrimary,

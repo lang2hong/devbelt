@@ -16,6 +16,8 @@ export interface TableQueryViewOptions {
   objectType?: ResultObjectType;
   /** 表结构清单面板：无 SQL 可跑，不提供 EXPLAIN / 图表 / 导出。 */
   structure?: boolean;
+  /** PG 命名空间（显式 schema；绝不从 database 推断）。 */
+  schema?: string;
 }
 
 /**
@@ -60,17 +62,18 @@ export class TableQueryView extends BaseWebView {
     // 引用计数：同一连接被多个视图共享，最后一个视图关闭时才释放连接。用管理器的
 // retain/release（而非各自维护的私有计数），这样其它视图/查询的持有同样被尊重。
     this.manager.retain(this.conn.id);
-    this.runner = new QueryRunner(conn, manager, table, database, (msg) => this.post(msg));
-    this.completionService = new CompletionService(manager, conn, database, (msg) => this.post(msg));
+    const schema = opts.schema;
+    this.runner = new QueryRunner(conn, manager, table, database, (msg) => this.post(msg), schema);
+    this.completionService = new CompletionService(manager, conn, database, (msg) => this.post(msg), schema);
     if (table) {
       // 视图不建 RowEditor：编辑入口在前端已隐藏，这里再断一次链路，
       // 保证即使消息被伪造也不会对视图发出 UPDATE/INSERT/DELETE。
       if (opts.objectType !== 'view') {
         this.rowEditor = new RowEditor(manager, conn, table, database, (msg) => this.post(msg), {
           refresh: () => this.runner.execute(this.runner.buildSelect()),
-        });
+        }, schema);
       }
-      this.exporter = new ExportHandler(conn, manager, table, database, (msg) => this.post(msg));
+      this.exporter = new ExportHandler(conn, manager, table, database, (msg) => this.post(msg), schema);
     }
   }
 
@@ -107,10 +110,11 @@ export class TableQueryView extends BaseWebView {
     table: string,
     database: string | undefined,
     rows: any[],
+    schema?: string,
   ): TableQueryView {
     const view = new TableQueryView(
       conn, manager, undefined, database, vscode.ViewColumn.Active,
-      { structure: true },
+      { structure: true, schema },
       `Structure: ${conn.name || conn.host} › ${database || ''} › ${table}`,
     );
     view.structurePayload = {
@@ -127,8 +131,9 @@ export class TableQueryView extends BaseWebView {
     database?: string,
     onExecuted?: (result: any, error?: Error) => void,
     mode: 'reuse' | 'new' = 'reuse',
+    schema?: string,
   ): Promise<TableQueryView> {
-    return TableQueryView.openWith(conn, manager, sql, database, onExecuted, mode, 'execute');
+    return TableQueryView.openWith(conn, manager, sql, database, onExecuted, mode, 'execute', schema);
   }
 
   /**
@@ -144,8 +149,9 @@ export class TableQueryView extends BaseWebView {
     sql: string,
     database?: string,
     mode: 'reuse' | 'new' = 'reuse',
+    schema?: string,
   ): Promise<TableQueryView> {
-    return TableQueryView.openWith(conn, manager, sql, database, undefined, mode, 'explain');
+    return TableQueryView.openWith(conn, manager, sql, database, undefined, mode, 'explain', schema);
   }
 
   private static async openWith(
@@ -156,6 +162,7 @@ export class TableQueryView extends BaseWebView {
     onExecuted: ((result: any, error?: Error) => void) | undefined,
     mode: 'reuse' | 'new',
     kind: 'execute' | 'explain',
+    schema?: string,
   ): Promise<TableQueryView> {
     const enqueue = (view: TableQueryView): void => {
       if (kind === 'explain') view.queueQueryExplain(sql, database);
@@ -169,7 +176,7 @@ export class TableQueryView extends BaseWebView {
     }
     // 结果面板放在 SQL 编辑器旁侧（右侧列）。不能用 splitEditorDown：那条命令会
     // 复制当前活动编辑器（SQL 文档），造成「同一份 SQL 文档出现两次」。
-    const view = new TableQueryView(conn, manager, undefined, database, vscode.ViewColumn.Beside);
+    const view = new TableQueryView(conn, manager, undefined, database, vscode.ViewColumn.Beside, { schema });
     TableQueryView.queryViews.set(conn.id, view);
     enqueue(view);
     return view;
@@ -337,6 +344,7 @@ export class TableQueryView extends BaseWebView {
       while (this.pendingQueries.length > 0) {
         const query = this.pendingQueries.shift()!;
         this.database = query.database;
+        this.runner.setDatabase(query.database);
         this.post({ type: 'querySql', sql: query.sql, dbName: query.database || '' });
         if (query.explain) {
           await this.runner.explain(query.sql);

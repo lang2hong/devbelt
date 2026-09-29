@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { SchemaDiffService, BackupService, DataTransferService, DatabaseType, validateIdent } from '@devbelt/db-core';
 import { DbTreeNode } from '../tree/dbTreeNode';
-import { wrapIdentForConn, splitSqlStatements, streamSqlStatements } from '../utils/sql';
+import { wrapIdentForConn, splitSqlStatements, streamSqlStatements, pgSchemaFor } from '../utils/sql';
 import { confirmSqlExecution, ensureWritable } from '../utils/sqlSafety';
 import { parseCsv, readCsvSample, streamCsvRows } from '../data/transfer/csv';
 import { readJsonSample, streamJsonRows } from '../data/transfer/json';
@@ -33,7 +33,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     const name = await vscode.window.showInputBox({ prompt: l10n('db.createPrompt') });
     if (!name) return;
     connCtx.setLast(node.conn);
-    const session = await manager.connectSql(node.conn);
+    const session = await manager.connectSql(node.conn, node.database);
     if (!requireCapability(session, 'createDatabase')) return;
     await session.query.query(`CREATE DATABASE ${wrapIdentForConn(node.conn, validateIdent(name))}`);
     treeProvider.refresh();
@@ -44,7 +44,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (!node?.conn) return;
     if (!ensureWritable(node.conn)) return;
     if (!(await confirm('db.dropConfirm', 'db.drop', node.label))) return;
-    const session = await manager.connectSql(node.conn);
+    const session = await manager.connectSql(node.conn, node.database);
     if (!requireCapability(session, 'dropDatabase')) return;
     await session.query.query(`DROP DATABASE ${wrapIdentForConn(node.conn, validateIdent(node.label))}`);
     manager.disposeConn(node.conn.id);
@@ -102,7 +102,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
       restoreBtn,
     );
     if (confirmed !== restoreBtn) return;
-    const session = await manager.connectSql(node.conn);
+    const session = await manager.connectSql(node.conn, node.database);
     // 流式读取 + 增量切分：过去整文件读进内存再一次性切分，GB 级 dump 会 OOM。
     const statements = streamSqlStatements(uri[0].fsPath, manager.scanOptionsFor?.(node.conn));
     await vscode.window.withProgress(
@@ -170,7 +170,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
   sub('devbelt.compareSchema', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     if (node.conn.dbType === DatabaseType.REDIS) return; // SQL 专用：禁止 Redis 进入
-    const session = await manager.connectSql(node.conn);
+    const session = await manager.connectSql(node.conn, node.database);
     if (!requireCapability(session, 'schemaSync')) return;
     // PG 连接绑定单个数据库（无 USE），同一连接上的「另一个库」取不到其元数据：
     // 对比会退化成拿库和自己比、恒输出无差异。明确拒绝，而不是给出误导结果。
@@ -238,7 +238,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
       syncBtn,
     );
     if (confirmed !== syncBtn) return;
-    const sourceSession = await manager.connectSql(node.conn);
+    const sourceSession = await manager.connectSql(node.conn, node.database);
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: l10n('sync.progressTitle'), cancellable: true },
       async (progress, token) => {
@@ -281,10 +281,13 @@ export async function runExportWizard(
   if (!node.conn) return;
   const format = await pickFormat('export');
   if (!format) return;
-  const session = await manager.connectSql(node.conn);
-  const database = await pickExportDatabase(node, session.metadata.getDatabases.bind(session.metadata));
+  const defaultSession = await manager.connectSql(node.conn);
+  const database = await pickExportDatabase(node, defaultSession.metadata.getDatabases.bind(defaultSession.metadata));
   if (database === undefined && node.conn.dbType === DatabaseType.MYSQL && !node.database) return;
-  const tables = fixedTable ? [fixedTable] : await pickTables(session.metadata.getTables.bind(session.metadata), database);
+  const schema = pgSchemaFor(node.conn, node.schema);
+  // B2：按选中的库取会话（PG 多库；其它引擎退化为同一主会话），元数据与导出都走它。
+  const session = await manager.connectSql(node.conn, database);
+  const tables = fixedTable ? [fixedTable] : await pickTables(session.metadata.getTables.bind(session.metadata), database, schema);
   if (!tables?.length) return;
   const exportContents = format === 'sql'
     ? (await vscode.window.showQuickPick(
@@ -328,6 +331,7 @@ export async function runExportWizard(
           format,
           table,
           database,
+          schema,
           includeStructure: exportContents.includeStructure,
           includeData: exportContents.includeData,
           serverInfo,
@@ -363,8 +367,9 @@ async function importSqlScript(
   const conn = node.conn;
   if (!conn) return;
   if (!(await confirmSqlExecution(conn, sql, manager.scanOptionsFor?.(conn)))) return;
-  const session = await manager.connectSql(conn);
+  const session = await manager.connectSql(conn, node.database);
   const database = node.database;
+  const schema = pgSchemaFor(conn, node.schema);
   connCtx.setLast(conn, database);
   if (database && conn.dbType === DatabaseType.MYSQL) {
     await session.query.query(`USE ${wrapIdentForConn(conn, validateIdent(database))}`);
@@ -381,6 +386,11 @@ async function importSqlScript(
   let hasAffectedInfo = false;
   try {
     if (transactional) await session.query.query('BEGIN');
+    // PG 无 USE：脚本里不带 schema 的 INSERT/CREATE 默认落到 search_path 的 schema。
+    // 在事务内 `SET LOCAL search_path` 把上下文定到目标 schema（事务结束自动还原）。
+    if (conn.dbType === DatabaseType.PG && schema) {
+      await session.query.query(`SET LOCAL search_path TO ${wrapIdentForConn(conn, validateIdent(schema))}`);
+    }
     await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: l10n('import.progress'), cancellable: true }, async (progress, token) => {
       for (const statement of statements) {
         if (token.isCancellationRequested) throw new TransferCancelledError();
@@ -482,15 +492,18 @@ async function importStructuredData(
     vscode.window.showWarningMessage(l10n('import.noRows'));
     return;
   }
-  const session = await manager.connectSql(conn);
-  const database = await pickImportDatabase(node, session.metadata.getDatabases.bind(session.metadata));
+  const defaultSession = await manager.connectSql(conn);
+  const database = await pickImportDatabase(node, defaultSession.metadata.getDatabases.bind(defaultSession.metadata));
   if (database === undefined && conn.dbType === DatabaseType.MYSQL && !node.database) return;
-  const tables = await session.metadata.getTables(database);
+  const schema = pgSchemaFor(conn, node.schema);
+  // B2：按选中的库取会话（PG 多库；其它引擎退化为同一主会话）。
+  const session = await manager.connectSql(conn, database);
+  const tables = await session.metadata.getTables(database, schema);
   const table = fixedTable
     ? { label: fixedTable }
     : await vscode.window.showQuickPick(tables.map((item) => ({ label: item.name })), { placeHolder: l10n('import.selectTable') });
   if (!table) return;
-  const mappings = await configureMappings(source.columns, (await session.metadata.getColumns(table.label, database)).map((column) => column.name));
+  const mappings = await configureMappings(source.columns, (await session.metadata.getColumns(table.label, database, schema)).map((column) => column.name));
   if (!mappings) return;
   const selected = mappings.filter((mapping) => mapping.target);
   if (!selected.length) return;
@@ -499,7 +512,7 @@ async function importStructuredData(
   if (run !== l10n('import.run')) return;
   const firstTarget = selected[0].target;
   if (!firstTarget) return;
-  const insertPreview = session.query.dialect.buildInsertSql([{ [firstTarget]: source.rows[0][selected[0].source] }], [firstTarget], table.label, database);
+  const insertPreview = session.query.dialect.buildInsertSql([{ [firstTarget]: source.rows[0][selected[0].source] }], [firstTarget], table.label, database, schema);
   if (!(await confirmSqlExecution(conn, insertPreview, manager.scanOptionsFor?.(conn)))) return;
   connCtx.setLast(conn, database);
   try {
@@ -508,6 +521,7 @@ async function importStructuredData(
         query: session.query,
         table: table.label,
         database,
+        schema,
         mappings,
         batchWrites: conn.dbType === DatabaseType.SQLITE,
         rowOffset,
@@ -575,8 +589,8 @@ async function pickExportDatabase(node: DbTreeNode, getDatabases: () => Promise<
   return vscode.window.showQuickPick(databases, { placeHolder: l10n('export.selectDatabase') });
 }
 
-async function pickTables(getTables: (database?: string) => Promise<{ name: string }[]>, database?: string): Promise<string[] | undefined> {
-  const tables = await getTables(database);
+async function pickTables(getTables: (database?: string, schema?: string) => Promise<{ name: string }[]>, database?: string, schema?: string): Promise<string[] | undefined> {
+  const tables = await getTables(database, schema);
   const chosen = await vscode.window.showQuickPick(tables.map((item) => ({ label: item.name, picked: true })), {
     canPickMany: true,
     placeHolder: l10n('export.selectTables'),

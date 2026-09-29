@@ -7,6 +7,7 @@ import { validateColumnType } from '@devbelt/db-core';
 import { DataChangeEvent, eventBus } from '@devbelt/db-host/utils/event';
 import { AuditLogger } from '../utils/auditLogger';
 import { confirmSqlExecution } from '../utils/sqlSafety';
+import { pgSchemaFor } from '../utils/sql';
 import { l10n } from '../i18n';
 
 /**
@@ -39,6 +40,8 @@ export class TableDesignView extends BaseWebView {
     private readonly database: string,
     private readonly manager: ConnectionManager,
     private readonly onMutate?: () => void,
+    /** PG 命名空间（显式 schema；绝不从 database 推断）。 */
+    private readonly schema?: string,
   ) {
     super(
       'devbelt.tableDesign',
@@ -52,9 +55,9 @@ export class TableDesignView extends BaseWebView {
 
   static init(extensionUri: import('vscode').Uri): void { BaseWebView.init(extensionUri); }
 
-  static async open(conn: SavedConnection, table: string, database: string, manager: ConnectionManager, onMutate?: () => void): Promise<void> {
+  static async open(conn: SavedConnection, table: string, database: string, manager: ConnectionManager, onMutate?: () => void, schema?: string): Promise<void> {
     if (TableDesignView.current) TableDesignView.current.dispose();
-    const view = new TableDesignView(conn, table, database, manager, onMutate);
+    const view = new TableDesignView(conn, table, database, manager, onMutate, schema);
     TableDesignView.current = view;
   }
 
@@ -62,9 +65,9 @@ export class TableDesignView extends BaseWebView {
    * 建表：用同一个设计器承载，而不是丢一段 `CREATE TABLE` 模板到编辑器里。
    * 建完立刻切换为该表的设计视图，可以接着加列/加索引。
    */
-  static async openNew(conn: SavedConnection, database: string, manager: ConnectionManager, onMutate?: () => void): Promise<void> {
+  static async openNew(conn: SavedConnection, database: string, manager: ConnectionManager, onMutate?: () => void, schema?: string): Promise<void> {
     if (TableDesignView.current) TableDesignView.current.dispose();
-    TableDesignView.current = new TableDesignView(conn, '', database, manager, onMutate);
+    TableDesignView.current = new TableDesignView(conn, '', database, manager, onMutate, schema);
   }
 
   /**
@@ -107,7 +110,7 @@ export class TableDesignView extends BaseWebView {
       this.validateDesignIdent(msg.column, 'column');
       await this.mutate(`ALTER TABLE ${this.table} ADD COLUMN ${msg.column}`, async () => {
         const session = await this.session();
-        await session.table.addColumn(this.table, msg.column, toColumnSpec(msg.spec), this.database);
+        await session.table.addColumn(this.table, msg.column, toColumnSpec(msg.spec), this.database, this.pgSchema);
       });
       return;
     }
@@ -115,7 +118,7 @@ export class TableDesignView extends BaseWebView {
       this.validateDesignIdent(msg.column, 'column');
       await this.mutate(`ALTER TABLE ${this.table} DROP COLUMN ${msg.column}`, async () => {
         const session = await this.session();
-        await session.table.dropColumn(this.table, msg.column, this.database);
+        await session.table.dropColumn(this.table, msg.column, this.database, this.pgSchema);
       });
       return;
     }
@@ -123,7 +126,7 @@ export class TableDesignView extends BaseWebView {
       this.validateDesignIdent(msg.column, 'column');
       await this.mutate(`ALTER TABLE ${this.table} MODIFY COLUMN ${msg.column}`, async () => {
         const session = await this.session();
-        await session.table.modifyColumn(this.table, msg.column, toColumnSpec(msg.spec), this.database);
+        await session.table.modifyColumn(this.table, msg.column, toColumnSpec(msg.spec), this.database, this.pgSchema);
       });
       return;
     }
@@ -131,7 +134,7 @@ export class TableDesignView extends BaseWebView {
       this.validateDesignIdent(msg.column, 'column');
       await this.mutate(`ALTER TABLE ${this.table} REORDER COLUMN ${msg.column}`, async () => {
         const session = await this.session();
-        await session.table.reorderColumn(this.table, msg.column, msg.afterColumn ?? null, this.database);
+        await session.table.reorderColumn(this.table, msg.column, msg.afterColumn ?? null, this.database, this.pgSchema);
       });
       return;
     }
@@ -139,7 +142,7 @@ export class TableDesignView extends BaseWebView {
       this.validateDesignIdent(msg.name, 'index');
       await this.mutate(`CREATE INDEX ${msg.name} ON ${this.table}`, async () => {
         const session = await this.session();
-        await session.table.createIndex(msg.name, this.table, Array.isArray(msg.columns) ? msg.columns : [], this.database, !!msg.isUnique);
+        await session.table.createIndex(msg.name, this.table, Array.isArray(msg.columns) ? msg.columns : [], this.database, !!msg.isUnique, this.pgSchema);
       });
       return;
     }
@@ -150,10 +153,10 @@ export class TableDesignView extends BaseWebView {
         const session = await this.session();
         const cols = Array.isArray(msg.columns) ? msg.columns : [];
         if (String(msg.oldName).toUpperCase() === 'PRIMARY') {
-          await session.table.recreatePrimaryKey(this.table, cols, this.database);
+          await session.table.recreatePrimaryKey(this.table, cols, this.database, this.pgSchema);
         } else {
-          await session.table.dropIndex(msg.oldName, this.table, this.database);
-          await session.table.createIndex(msg.name, this.table, cols, this.database, !!msg.isUnique);
+          await session.table.dropIndex(msg.oldName, this.table, this.database, this.pgSchema);
+          await session.table.createIndex(msg.name, this.table, cols, this.database, !!msg.isUnique, this.pgSchema);
         }
       });
       return;
@@ -162,7 +165,7 @@ export class TableDesignView extends BaseWebView {
       this.validateDesignIdent(msg.name, 'index');
       await this.mutate(`DROP INDEX ${msg.name} ON ${this.table}`, async () => {
         const session = await this.session();
-        await session.table.dropIndex(msg.name, this.table, this.database);
+        await session.table.dropIndex(msg.name, this.table, this.database, this.pgSchema);
       });
       return;
     }
@@ -195,7 +198,7 @@ export class TableDesignView extends BaseWebView {
     });
     await this.mutate(`CREATE TABLE ${name}`, async () => {
       const session = await this.session();
-      await session.table.createTable(name, spec, this.database);
+      await session.table.createTable(name, spec, this.database, this.pgSchema);
       this.table = name;
       this.panel.title = `Design: ${this.conn.name || this.conn.host} › ${this.database} › ${name}`;
       this.post({ type: 'created', tableName: name });
@@ -203,7 +206,12 @@ export class TableDesignView extends BaseWebView {
   }
 
   private async session() {
-    return this.manager.connectSql(this.conn);
+    return this.manager.connectSql(this.conn, this.database);
+  }
+
+  /** PG 命名空间限定：设计器作用域用**显式 schema**（不从 database 推断）。 */
+  private get pgSchema(): string | undefined {
+    return pgSchemaFor(this.conn, this.schema);
   }
 
   /** 取本连接方言的列类型候选；方言未注册时返回空列表（前端退化为纯文本输入）。 */
@@ -263,11 +271,11 @@ export class TableDesignView extends BaseWebView {
 
   private async loadData(): Promise<void> {
     try {
-      const session = await this.manager.connectSql(this.conn);
+      const session = await this.manager.connectSql(this.conn, this.database);
       const [columns, indexes, ddl] = await Promise.all([
-        session.metadata.getColumns(this.table, this.database),
-        session.metadata.getIndexes(this.table, this.database),
-        session.table.getCreateSql(this.table, this.database),
+        session.metadata.getColumns(this.table, this.database, this.pgSchema),
+        session.metadata.getIndexes(this.table, this.database, this.pgSchema),
+        session.table.getCreateSql(this.table, this.database, this.pgSchema),
       ]);
       this.post({ type: 'data', columns, indexes, ddl });
     } catch (err) {

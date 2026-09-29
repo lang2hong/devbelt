@@ -149,7 +149,7 @@ export interface SqlDialect {
    * OR REPLACE，用 `DROP VIEW IF EXISTS` + `CREATE VIEW`），交给编辑器让用户改完
    * 直接执行重建视图。
    */
-  normalizeViewAlterSql(raw: string, name: string, database?: string): string;
+  normalizeViewAlterSql(raw: string, name: string, database?: string, schema?: string): string;
 
   /** 查询表索引列表 SQL */
   getIndexListSql(table: string, database?: string, schema?: string): string;
@@ -157,23 +157,23 @@ export interface SqlDialect {
   /** 查询表触发器列表 SQL（空字符串表示不支持） */
   getTriggerListSql(table: string, database?: string, schema?: string): string;
 
-  /** 查询触发器定义 SQL（空字符串表示不支持） */
-  getTriggerDefinitionSql(name: string, database?: string, schema?: string): string;
+  /** 查询触发器定义 SQL（空字符串表示不支持）。`table` 供 PG 区分同名触发器。 */
+  getTriggerDefinitionSql(name: string, database?: string, schema?: string, table?: string): string;
 
-  /** 生成创建索引 SQL */
-  createIndexSql(name: string, table: string, columns: string[], unique: boolean, database?: string): string;
+  /** 生成创建索引 SQL。`schema` 仅 PG 使用（限定目标表所在命名空间）。 */
+  createIndexSql(name: string, table: string, columns: string[], unique: boolean, database?: string, schema?: string): string;
 
-  /** 生成删除索引 SQL */
-  dropIndexSql(name: string, table: string, database?: string): string;
+  /** 生成删除索引 SQL。`schema` 仅 PG 使用（索引与表同命名空间）。 */
+  dropIndexSql(name: string, table: string, database?: string, schema?: string): string;
 
-  /** 生成删除触发器 SQL */
-  dropTriggerSql(name: string, table: string, database?: string): string;
+  /** 生成删除触发器 SQL。`schema` 仅 PG 使用。 */
+  dropTriggerSql(name: string, table: string, database?: string, schema?: string): string;
 
-  /** 生成创建外键 SQL（空字符串表示不支持） */
-  createForeignKeySql(name: string, table: string, columns: string[], refTable: string, refColumns: string[], database?: string): string;
+  /** 生成创建外键 SQL（空字符串表示不支持）。`schema`/`refSchema` 仅 PG 使用。 */
+  createForeignKeySql(name: string, table: string, columns: string[], refTable: string, refColumns: string[], database?: string, schema?: string, refSchema?: string): string;
 
-  /** 生成删除外键 SQL（空字符串表示不支持） */
-  dropForeignKeySql(name: string, table: string, database?: string): string;
+  /** 生成删除外键 SQL（空字符串表示不支持）。`schema` 仅 PG 使用。 */
+  dropForeignKeySql(name: string, table: string, database?: string, schema?: string): string;
 
   /** 查询用户列表 SQL（空字符串表示不支持） */
   getUserListSql(): string;
@@ -249,7 +249,8 @@ export interface SqlDialect {
    * @param rows 数据行
    * @param columns 要导出的列名
    * @param table 目标表
-   * @param database 数据库/schema 限定（当且仅当该方言支持时才前置）
+   * @param database 数据库限定（MySQL/SQLite：库名；PG 忽略）
+   * @param schema PG 命名空间限定（仅 PG 使用）
    */
-  buildInsertSql(rows: Record<string, any>[], columns: string[], table: string, database?: string): string;
+  buildInsertSql(rows: Record<string, any>[], columns: string[], table: string, database?: string, schema?: string): string;
 }

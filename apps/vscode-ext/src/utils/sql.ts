@@ -22,6 +22,28 @@ export function wrapIdentForConn(conn: SavedConnection, name: string): string {
 }
 
 /**
+ * PG 对象限定用的 schema（**只接受显式 schema**，绝不从 `database` 推断）。
+ *
+ * 调用方必须传入真实 schema（`node.schema` / `node.refSchema` / 搜索结果携带的 schema）；
+ * 非 PG 或未提供 schema 时返回 `undefined`（回退 search_path）。`database` 是库名，
+ * 与 schema 是两条通道——把它当 schema 会在「库名恰好等于某个 schema 名」时静默写错对象。
+ */
+export function pgSchemaFor(conn: Pick<SavedConnection, 'dbType'>, schema?: string): string | undefined {
+  if (conn.dbType !== DatabaseType.PG) return undefined;
+  return schema && schema.trim() ? schema : undefined;
+}
+
+/**
+ * 供 SQL 模板使用的限定标识符：PG 给了 schema 时生成 `"schema"."name"`，
+ * 否则退化为普通包裹标识符（`wrapIdentForConn`）。
+ */
+export function qualifiedIdentForConn(conn: SavedConnection, name: string, schema?: string): string {
+  const wrapped = wrapIdentForConn(conn, name);
+  const pgSchema = pgSchemaFor(conn, schema);
+  return pgSchema ? `${wrapIdent(conn.dbType, pgSchema)}.${wrapped}` : wrapped;
+}
+
+/**
  * 转义 SQL 字符串字面量内容（不含外层引号，防注入）。
  *
  * 转义规则按方言分流：MySQL 默认开启反斜杠转义，`\` 需翻倍；

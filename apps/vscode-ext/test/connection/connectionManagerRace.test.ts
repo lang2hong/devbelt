@@ -13,6 +13,7 @@ vi.mock('../../src/connection/sshTunnel', () => ({
   SshTunnel: {
     create: async () => 12345,
     close: () => { tunnelClosed++; },
+    release: () => { tunnelClosed++; },
     closeAll: () => {},
   },
 }));

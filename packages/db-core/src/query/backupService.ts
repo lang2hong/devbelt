@@ -201,7 +201,7 @@ export class BackupService {
       for (const t of triggers) {
         if (isCancelled?.()) throw new Error('Backup cancelled.');
         try {
-          const raw = (await meta.getTriggerDefinition(t.name, database)).trim();
+          const raw = (await meta.getTriggerDefinition(t.name, database, undefined, table)).trim();
           if (!raw) continue;
           const body = stripTrailingSemicolon(removeDefiner(raw));
           const q = query.dialect.wrap(t.name);

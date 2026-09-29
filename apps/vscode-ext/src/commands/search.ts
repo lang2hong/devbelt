@@ -8,6 +8,8 @@ interface SearchHit {
   connId: string;
   connName: string;
   database: string;
+  /** PG 对象所在 schema（搜索遍历全部 schema；其它方言为 undefined）。 */
+  schema?: string;
   type: 'table' | 'view';
   name: string;
 }
@@ -40,7 +42,7 @@ export function registerSearchCommands(deps: Deps, sub: Sub): void {
     const items: SearchPickItem[] = capped.map((hit) => ({
       label: `${hit.type === 'table' ? '$(table)' : '$(eye)'} ${hit.name}`,
       description: hit.connName,
-      detail: hit.database,
+      detail: hit.schema ? `${hit.database}.${hit.schema}` : hit.database,
       hit,
     }));
 
@@ -55,6 +57,7 @@ export function registerSearchCommands(deps: Deps, sub: Sub): void {
     if (conn) {
       TableQueryView.open(conn, picked.hit.name, picked.hit.database, deps.manager, {
         objectType: picked.hit.type === 'view' ? 'view' : 'table',
+        schema: picked.hit.schema,
       });
     }
   });
@@ -67,30 +70,52 @@ async function searchObjects(deps: Deps, connIds: string[], keyword: string): Pr
     try {
       const session = await deps.manager.connectSql(conn);
       const connName = conn.name || conn.host;
-      let databases: string[];
-      if (session.capabilities.multiDatabaseExplorer) {
-        databases = await session.metadata.getDatabases();
+      // 搜索作用域：
+      //  - PG（B2）：先取可见库，再对**每个库**取 schema（每个库用自己的会话）。
+      //  - MySQL：逐库（一个会话可 USE 多库）。
+      //  - 其余：单库。
+      let scopes: { database: string; schema?: string }[];
+      if (session.capabilities.schemas) {
+        const dbs = session.capabilities.multiDatabaseExplorer
+          ? await session.metadata.getDatabases()
+          : [conn.database ?? ''];
+        const list = dbs.length ? dbs : [conn.database ?? ''];
+        scopes = [];
+        for (const db of list) {
+          try {
+            const dbSession = await deps.manager.connectSql(conn, db);
+            const schemas = await dbSession.metadata.getSchemas();
+            for (const schema of (schemas.length ? schemas : ['public'])) scopes.push({ database: db, schema });
+          } catch {
+            // 某库无权限/取不到 schema：跳过该库。
+          }
+        }
+      } else if (session.capabilities.multiDatabaseExplorer) {
+        scopes = (await session.metadata.getDatabases()).map((db) => ({ database: db }));
       } else {
-        databases = [conn.database || (conn.dbType === DatabaseType.PG ? 'public' : 'main')];
+        scopes = [{ database: conn.database || (conn.dbType === DatabaseType.PG ? 'public' : 'main') }];
       }
 
       const hits: SearchHit[] = [];
-      for (const db of databases) {
+      for (const scope of scopes) {
+        const { database: db, schema } = scope;
         try {
-          const tables = await session.metadata.getTables(db);
-          const views = await session.metadata.getViews(db);
+          // 每个作用域取对应库的会话（PG 多库；其它引擎退化为同一主会话）。
+          const sc = await deps.manager.connectSql(conn, db);
+          const tables = await sc.metadata.getTables(db, schema);
+          const views = await sc.metadata.getViews(db, schema);
           for (const t of tables) {
             if (t.name.toLowerCase().includes(keyword)) {
-              hits.push({ connId: id, connName, database: db, type: 'table', name: t.name });
+              hits.push({ connId: id, connName, database: db, schema, type: 'table', name: t.name });
             }
           }
           for (const v of views) {
             if (v.name.toLowerCase().includes(keyword)) {
-              hits.push({ connId: id, connName, database: db, type: 'view', name: v.name });
+              hits.push({ connId: id, connName, database: db, schema, type: 'view', name: v.name });
             }
           }
         } catch {
-          // 单库查询失败跳过
+          // 单 scope 查询失败跳过
         }
       }
       return hits;

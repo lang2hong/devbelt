@@ -10,12 +10,13 @@ describe('tableQuerySql', () => {
     );
   });
 
-  it('builds a paginated SELECT with PostgreSQL identifiers（B1：database 槽=schema，按 schema 限定）', () => {
-    expect(buildTableSelect(DatabaseType.PG, 'users', 'public', [], 'id', 'ASC', 0, 100)).toBe(
-      'SELECT * FROM "public"."users" ORDER BY "id" ASC LIMIT 100 OFFSET 0',
+  it('builds a paginated SELECT with PostgreSQL identifiers（H1：schema 走独立形参，database 不参与限定）', () => {
+    // schema 显式给出时按 schema 限定。
+    expect(buildTableSelect(DatabaseType.PG, 'users', undefined, [], 'id', 'ASC', 0, 100, {}, false, 'sales')).toBe(
+      'SELECT * FROM "sales"."users" ORDER BY "id" ASC LIMIT 100 OFFSET 0',
     );
-    // 未给 schema（未限定）时回退 search_path：不加限定。
-    expect(buildTableSelect(DatabaseType.PG, 'users', undefined, [], 'id', 'ASC', 0, 100)).toBe(
+    // 未给 schema 时回退 search_path：不加限定（库名不会污染进去）。
+    expect(buildTableSelect(DatabaseType.PG, 'users', 'mydb', [], 'id', 'ASC', 0, 100)).toBe(
       'SELECT * FROM "users" ORDER BY "id" ASC LIMIT 100 OFFSET 0',
     );
   });
