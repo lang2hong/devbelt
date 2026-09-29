@@ -58,7 +58,9 @@ export function splitRedisArgs(line: string): string[] {
             case 'x': {
               const hex = line.substr(pos + 1, 2);
               if (HEX_RE.test(hex)) {
-                current.push(Buffer.from(hex, 'hex').toString('utf8'));
+                // 单字节（按码点），而非 Buffer utf8 解码：`\xE4` 等 >=0x80 的字节
+                // 经 utf8 解码会变成 U+FFFD 替换符（D11）。
+                current.push(String.fromCharCode(parseInt(hex, 16)));
                 pos += 2;
               } else {
                 current.push('x');

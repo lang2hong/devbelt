@@ -176,6 +176,9 @@ export class RedisClient {
         natMap: options.cluster!.natMap,
         slotsRefreshTimeout: options.cluster!.slotsRefreshTimeout ?? 2000,
         redisOptions: common,
+        // Cluster 用独立的 `clusterRetryStrategy`（不读 redisOptions.retryStrategy）：
+        // 不配时 ioredis 默认无限重连，拓扑不可用会让 connect() 永久挂起（D11）。
+        clusterRetryStrategy: (times: number) => (times >= maxRetryTimes ? null : Math.min(times * 200, 1000)),
       }) as unknown as RedisConnectionLike;
     } else if (this.sentinel) {
       this.client = new Redis({
@@ -278,7 +281,18 @@ export class RedisClient {
     const nodeFn = (this.client as { nodes?: (role?: string) => unknown[] }).nodes;
     if (!this.isCluster || typeof nodeFn !== 'function') return [this];
     const masters = nodeFn.call(this.client, 'master') as { call(c: string, ...a: unknown[]): Promise<unknown> }[];
-    return masters.map((n) => ({ call: (c: string, ...a: (string | number)[]) => n.call(c, ...a) }));
+    // 节点级 call 直接投递、绕过 sendCommand 切面：这里在 API 层再补一道只读拦截，
+    // 防止经节点路径发出写命令（D11：nodes() 绕过只读切面）。
+    return masters.map((n) => ({
+      call: (c: string, ...a: (string | number)[]) => {
+        const name = String(c).toUpperCase();
+        const classifyArgs = a.map((x) => (Buffer.isBuffer(x) ? x.toString('latin1') : String(x)));
+        if (this.readOnly && !isReadCommand(name, classifyArgs)) {
+          return Promise.reject(new RedisReadOnlyError(name));
+        }
+        return n.call(c, ...a);
+      },
+    }));
   }
 
   /** 订阅底层事件（如 sentinel 故障切换、error）。 */
@@ -346,7 +360,8 @@ export class RedisClient {
 
   private installGuard(): void {
     const original = this.client.sendCommand.bind(this.client);
-    this.client.sendCommand = (command, stream) => {
+    // 透传全部实参：Cluster 的 sendCommand 可能带第三个 node 参数，旧包装只接两个会丢弃它。
+    this.client.sendCommand = (command, stream, ...rest) => {
       const name = String(command?.name ?? '').toUpperCase();
       const rawArgs = Array.isArray(command?.args) ? command.args : [];
       // 判定用原始值（Buffer 按 latin1 还原，避免 <buffer:N> 占位符绕过子命令判定）。
@@ -359,7 +374,7 @@ export class RedisClient {
       const args = rawArgs.map((a) => (Buffer.isBuffer(a) ? `<buffer:${a.length}>` : String(a)));
       const loggedArgs = redactCommandArgs(name, args);
       const started = Date.now();
-      return original(command, stream).then(
+      return (original as (...a: unknown[]) => Promise<unknown>)(command, stream, ...rest).then(
         (result) => { this.emitLog(name, loggedArgs, started, true); return result; },
         (err: unknown) => { this.emitLog(name, loggedArgs, started, false, err); throw err; },
       );

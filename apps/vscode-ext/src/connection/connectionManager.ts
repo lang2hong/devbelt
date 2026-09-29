@@ -353,46 +353,47 @@ export class ConnectionManager {
     };
     const auth = { username: conn.user || undefined, password: conn.password, sentinelPassword: conn.sentinelPassword, tls, connectTimeout: conn.connectTimeout };
     let extraTunnelIds: string[] = [];
-    let client: RedisClient;
-    if (mode === 'cluster') {
-      if (conn.sshHost) {
-        // 经种子隧道发现各 master 并逐节点建隧道 → NAT map（合成 conn id，回收见 close）。
-        const setup = await setupClusterOverSsh(conn, port, auth, {
-          onUnmapped: this.onRedisNodeUnmapped ? (address) => this.onRedisNodeUnmapped!(conn.id, address) : undefined,
-        });
-        extraTunnelIds = setup.tunnelIds;
-        client = new RedisClient({
-          ...common,
-          cluster: { nodes: [{ host: '127.0.0.1', port }], natMap: setup.natMap, slotsRefreshTimeout: conn.connectTimeout ?? 3000 },
-        });
-      } else {
-        const nodes = parseRedisNodes(conn.clusterNodes, host, port);
-        client = new RedisClient({ ...common, cluster: { nodes, slotsRefreshTimeout: conn.connectTimeout ?? 3000 } });
-      }
-    } else if (mode === 'sentinel') {
-      if (!conn.sentinelName) throw new Error('Redis Sentinel master 名称未配置');
-      if (conn.sshHost) {
-        const s = await discoverSentinelMasterOverSsh(conn, port, auth);
-        extraTunnelIds = [s.tunnelId];
-        client = new RedisClient({ ...common, host: '127.0.0.1', port: s.masterLocalPort, db: conn.redisDb });
-      } else {
-        const sentinels = parseRedisNodes(conn.sentinelNodes, host, port);
-        client = new RedisClient({ ...common, sentinels, sentinelName: conn.sentinelName, sentinelPassword: conn.sentinelPassword, db: conn.redisDb });
-      }
-    } else {
-      client = new RedisClient({ ...common, host, port, db: conn.redisDb });
-    }
     const closeExtraTunnels = (): void => { for (const id of extraTunnelIds) SshTunnel.close(id); };
-
+    let started: RedisClient | undefined;
     try {
-      await client.connect();
+      if (mode === 'cluster') {
+        if (conn.sshHost) {
+          // 经种子隧道发现各 master 并逐节点建隧道 → NAT map（合成 conn id，回收见 close）。
+          const setup = await setupClusterOverSsh(conn, port, auth, {
+            onUnmapped: this.onRedisNodeUnmapped ? (address) => this.onRedisNodeUnmapped!(conn.id, address) : undefined,
+          });
+          extraTunnelIds = setup.tunnelIds;
+          started = new RedisClient({
+            ...common,
+            cluster: { nodes: [{ host: '127.0.0.1', port }], natMap: setup.natMap, slotsRefreshTimeout: conn.connectTimeout ?? 3000 },
+          });
+        } else {
+          const nodes = parseRedisNodes(conn.clusterNodes, host, port);
+          started = new RedisClient({ ...common, cluster: { nodes, slotsRefreshTimeout: conn.connectTimeout ?? 3000 } });
+        }
+      } else if (mode === 'sentinel') {
+        if (!conn.sentinelName) throw new Error('Redis Sentinel master 名称未配置');
+        if (conn.sshHost) {
+          const s = await discoverSentinelMasterOverSsh(conn, port, auth);
+          extraTunnelIds = [s.tunnelId];
+          started = new RedisClient({ ...common, host: '127.0.0.1', port: s.masterLocalPort, db: conn.redisDb });
+        } else {
+          const sentinels = parseRedisNodes(conn.sentinelNodes, host, port);
+          started = new RedisClient({ ...common, sentinels, sentinelName: conn.sentinelName, sentinelPassword: conn.sentinelPassword, db: conn.redisDb });
+        }
+      } else {
+        started = new RedisClient({ ...common, host, port, db: conn.redisDb });
+      }
+      await started.connect();
       // 探活：确认服务端可响应（只读模式下 PING 属读命令，不受影响）。
-      await client.ping();
+      await started.ping();
     } catch (err) {
-      await client.close();
+      // 构造阶段抛错（如 opts 非法）时 started 可能仍未赋值：也要回收已建的合成隧道。
+      if (started) { try { await started.close(); } catch { /* 保留原始错误 */ } }
       closeExtraTunnels();
       throw err;
     }
+    const client = started;
 
     // 建连期间用户关闭/删除该连接（或管理器整体销毁）：建成即销毁。
     if (this.disposing || this.generation(conn.id) !== generation) {

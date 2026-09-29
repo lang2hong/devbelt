@@ -30,6 +30,12 @@ describe('splitRedisArgs（移植 ARDM splitargs 语义）', () => {
     expect(splitRedisArgs('SET k "\\xzz"')).toEqual(['SET', 'k', 'xzz']);
   });
 
+  it('\\xHH 单字节按码点解码（>=0x80 不再是替换符）', () => {
+    const [, , v] = splitRedisArgs('SET k "\\xE4"');
+    expect(v).toBe(String.fromCharCode(0xE4));
+    expect(v).not.toContain('\uFFFD');
+  });
+
   it("单引号内 \\' 为字面单引号", () => {
     expect(splitRedisArgs("SET k 'it\\'s'")).toEqual(['SET', 'k', "it's"]);
     expect(splitRedisArgs("SET k 'a b'")).toEqual(['SET', 'k', 'a b']);

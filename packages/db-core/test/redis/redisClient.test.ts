@@ -245,6 +245,23 @@ describe('RedisClient 只读拦截', () => {
     await expect(client.sendCommand('ACL', ['LOG', 'RESET'])).rejects.toBeInstanceOf(RedisReadOnlyError);
   });
 
+  it('D11：cluster 节点路径不绕过只读（nodes().call 写命令被拦截）', async () => {
+    class ClusterFake extends FakeRedis {
+      nodes(): { call: (c: string, ...a: (string | number)[]) => Promise<unknown> }[] {
+        return [{ call: (c, ...a) => this.call(c, ...a) }];
+      }
+    }
+    const fake = new ClusterFake();
+    const client = new RedisClient(
+      { host: 'h', port: 1, readOnly: true, cluster: { nodes: [{ host: '127.0.0.1', port: 6379 }] } },
+      () => fake,
+    );
+    const nodes = client.nodes();
+    expect(nodes).toHaveLength(1);
+    await expect(nodes[0].call('SET', 'k', 'v')).rejects.toBeInstanceOf(RedisReadOnlyError);
+    await expect(nodes[0].call('SCAN', 0)).resolves.toBeDefined();
+  });
+
   it('Buffer 参数按原始值判定（<buffer:N> 占位符不再绕过子命令检查）', async () => {
     const { client, fake } = make({ readOnly: true });
     await expect(client.sendCommandBuffer('CONFIG', [Buffer.from('SET'), Buffer.from('a'), Buffer.from('b')]))
