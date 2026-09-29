@@ -152,11 +152,23 @@ export class TableService {
     return this.ddl(`DROP VIEW ${this.wrapQualified(view, database, schema)}`);
   }
 
-  /** 删除函数/存储过程 */
-  async dropRoutine(name: string, routineType: string, database?: string, schema?: string): Promise<QueryResult> {
+  /** 删除函数/存储过程。PG 需带参数签名，否则重载函数无法删除。 */
+  async dropRoutine(name: string, routineType: string, database?: string, schema?: string, identityArgs?: string): Promise<QueryResult> {
     this.require('manageRoutines');
     const qualified = this.wrapQualified(name, database, schema);
+    if (this.queryService.dialect.dbType === 'PG') {
+      const args = this.safeRoutineArgs(identityArgs ?? '');
+      return this.ddl(`DROP ${routineType} IF EXISTS ${qualified}(${args})`);
+    }
     return this.ddl(`DROP ${routineType} IF EXISTS ${qualified}`);
+  }
+
+  /** 校验 PG 参数签名（来自 pg_get_function_identity_arguments）：拒绝注入形状。 */
+  private safeRoutineArgs(raw: string): string {
+    if (/[;'()]|--|\/\*/.test(raw)) {
+      throw new Error(`Invalid routine signature: "${raw}"`);
+    }
+    return raw;
   }
 
   /** 删除事件 */
@@ -405,6 +417,8 @@ export class TableService {
       // PG 里 `database` 是库名，与 schema 是两层（见 qualifyTable）：把库名当 schema
       // 会授权到不存在的 `"库名"` schema。`GRANT ... IN SCHEMA` 只接受标识符，
       // `current_schema()` 在这里是语法错误，故先查出当前 schema 名再内插。
+      // 注：这是**用户管理**入口（非从某个 schema 节点发起），作用于 current_schema()，
+      // 按连接默认 schema 授权；P7.1 多 schema 下若需逐 schema 授权属独立增强。
       const schema = await this.currentSchema();
       return this.ddl(`GRANT ${privilege} ON ALL TABLES IN SCHEMA ${this.wrap(validateIdent(schema))} TO ${this.wrap(validateIdent(name))}`);
     }

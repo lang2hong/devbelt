@@ -347,7 +347,11 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     if (dialect.capabilities.schemas) {
       const session = await this.manager.connectSql(element.conn, element.label);
       const schemas = await session.metadata.getSchemas();
-      const ordered = schemas.includes('public') ? ['public', ...schemas.filter((s) => s !== 'public')] : schemas;
+      // 连接配置的默认 schema（`conn.schema || 'public'`）置顶，而不是恒把 public 置顶。
+      const preferred = (element.conn.schema && element.conn.schema.trim()) || 'public';
+      const ordered = schemas.includes(preferred)
+        ? [preferred, ...schemas.filter((s) => s !== preferred)]
+        : schemas;
       const schemaNodes = ordered.map((name) => this.schemaNode(element, name));
       // 「查询」分类挂在 **Database** 节点下：保存查询按库组织，若在每个 schema 下各挂一份，
       // 其子节点 id 只含库名会跨 schema 冲突（且重复展示）。见 buildSchemaChildren(includeQuery=false)。

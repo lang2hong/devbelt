@@ -217,7 +217,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
     if (!(await confirm('routine.deleteConfirm', 'routine.delete', node.label))) return;
     const session = await manager.connectSql(node.conn, node.database);
     if (!requireCapability(session, 'manageRoutines')) return;
-    await session.table.dropRoutine(node.label, node.routineType || 'FUNCTION', node.database, node.schema);
+    await session.table.dropRoutine(node.label, node.routineType || 'FUNCTION', node.database, node.schema, node.routineArgs);
     treeProvider.refresh();
   });
 

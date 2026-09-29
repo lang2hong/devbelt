@@ -136,6 +136,8 @@ export class DbTreeNode extends TreeItem {
   public redisKeyPrefix?: string;
   /** B1：PG 命名空间（Schema 节点及其下对象节点携带，用于限定对象名）。 */
   public schema?: string;
+  /** PG 参数签名（仅 Routine 节点，DROP 重载函数需要）。 */
+  public routineArgs?: string;
 
   /** 外键关联表（仅 ForeignKey 节点，构造后赋值） */
   public refTable?: string;

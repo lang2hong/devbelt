@@ -102,6 +102,13 @@ describe('PG schema 限定的写/DDL（B1b）', () => {
       .toBe('INSERT INTO "sales"."t" ("a") VALUES (1);\n');
   });
 
+  it('A2：DROP FUNCTION 带参数签名（重载可删），注入形状被拒', async () => {
+    const { con, table } = pg();
+    await table.dropRoutine('f', 'FUNCTION', 'mydb', 'sales', 'integer, text');
+    expect(con.sqls[0]).toBe('DROP FUNCTION IF EXISTS "sales"."f"(integer, text)');
+    await expect(table.dropRoutine('f', 'FUNCTION', 'mydb', 'sales', 'int); DROP TABLE x; --')).rejects.toThrow();
+  });
+
   it('未给 schema 时保持旧行为（交 search_path）', async () => {
     const { con, table } = pg();
     await table.dropTable('users', 'mydb');

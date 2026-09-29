@@ -86,10 +86,18 @@ export class PostgreSqlDialect implements SqlDialect {
       ORDER BY datname`;
   }
 
-  /** PG：列出非系统 schema（树在库下展示 schema 层）。 */
+  /** PG：列出非系统、且**可操作**的 schema（树在库下展示 schema 层）。 */
   getSchemaListSql(): string {
+    // `left(nspname,3) <> 'pg_'` 而非 `NOT LIKE 'pg\_%'`：后者在
+    // standard_conforming_strings=off 时 `\_` 会被当转义，语义漂移。
+    // 过滤掉 validateIdent 不能操作的 schema（含空白/点/引号/括号/逗号/分号/--）：
+    // 它们若出现会列出却任何操作都失败。
+    const bad = "[[:space:].\"'(),;`]";
     return `SELECT nspname AS name FROM pg_namespace
-      WHERE nspname NOT IN ('information_schema') AND nspname NOT LIKE 'pg\_%'
+      WHERE nspname <> 'information_schema'
+        AND left(nspname, 3) <> 'pg_'
+        AND nspname !~ $re$${bad}$re$
+        AND nspname NOT LIKE '%--%'
       ORDER BY nspname`;
   }
 
@@ -120,6 +128,7 @@ export class PostgreSqlDialect implements SqlDialect {
 
   getFunctionListSql(_database?: string, schema?: string): string {
     return `SELECT p.proname AS name,
+        pg_get_function_identity_arguments(p.oid) AS identity_args,
         CASE p.prokind WHEN 'p' THEN 'PROCEDURE' WHEN 'f' THEN 'FUNCTION' ELSE 'FUNCTION' END AS type
       FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -309,6 +318,7 @@ export class PostgreSqlDialect implements SqlDialect {
       name: row.name,
       type: row.type || 'FUNCTION',
       comment: '',
+      identityArgs: row.identity_args ?? undefined,
     }));
   }
 

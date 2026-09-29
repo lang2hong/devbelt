@@ -11,7 +11,7 @@ import { DbTreeNode, NodeKind, type CategoryType } from './dbTreeNode';
 export interface MetadataSource {
   getTables(db: string, schema?: string): Promise<{ name: string; table_rows?: string; comment?: string; data_length?: string; index_length?: string; auto_increment?: string }[]>;
   getViews(db: string, schema?: string): Promise<{ name: string }[]>;
-  getFunctions(db: string, schema?: string): Promise<{ name: string; type?: string }[]>;
+  getFunctions(db: string, schema?: string): Promise<{ name: string; type?: string; identityArgs?: string }[]>;
   getEvents(db: string, schema?: string): Promise<{ name: string }[]>;
   getColumns(table: string, database?: string): Promise<{
     name: string;
@@ -109,6 +109,7 @@ export class MetadataNodeBuilder {
       );
       node.id = this.idFor(parent, conn, database, r.type === 'PROCEDURE' ? 'proc' : 'fn', r.name);
       if (schema) node.schema = schema;
+      if (r.identityArgs !== undefined) node.routineArgs = r.identityArgs;
       node.command = { command: 'devbelt.openRoutine', title: 'Open', arguments: [node] };
       return node;
     });

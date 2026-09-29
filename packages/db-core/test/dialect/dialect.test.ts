@@ -51,7 +51,13 @@ describe('方言策略（策略模式）', () => {
     expect(new PostgreSqlDialect().capabilities.schemas).toBe(true);
     expect(new MysqlDialect().capabilities.schemas).toBe(false);
     expect(new SqliteDialect().capabilities.schemas).toBe(false);
-    expect(new PostgreSqlDialect().getSchemaListSql()).toContain('pg_namespace');
+    const schemaSql = new PostgreSqlDialect().getSchemaListSql();
+    expect(schemaSql).toContain('pg_namespace');
+    // A2：不再用 `NOT LIKE 'pg\_%'`（scs=off 语义漂移），改用 left()。
+    expect(schemaSql).toContain("left(nspname, 3) <> 'pg_'");
+    expect(schemaSql).not.toContain('pg\\_%');
+    // A2：过滤不可操作 schema（空白/点/引号等）。
+    expect(schemaSql).toContain('!~');
     expect(new MysqlDialect().getSchemaListSql).toBeUndefined();
   });
 

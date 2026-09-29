@@ -61,6 +61,8 @@ export interface RoutineMeta {
   /** FUNCTION | PROCEDURE */
   type: string;
   comment?: string;
+  /** 参数签名（PG `pg_get_function_identity_arguments`；DROP 重载函数需要）。 */
+  identityArgs?: string;
 }
 
 /** 事件元信息（MySQL EVENT SCHEDULE） */
