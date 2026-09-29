@@ -7,6 +7,8 @@
   "cmd.addGroup": "New Group",
   "cmd.renameGroup": "Rename Group",
   "cmd.removeGroup": "Delete Group",
+  "cmd.moveConnectionUp": "Move Connection Up",
+  "cmd.moveConnectionDown": "Move Connection Down",
   "cmd.moveToGroup": "Move to Group",
   "cmd.login": "Login / Register",
   "cmd.accountMenu": "Account Menu",

@@ -294,6 +294,31 @@ describe('ConnectionStore.addGroupRaw（导入复活墓碑）', () => {
   });
 });
 
+describe('moveConnection（分组内本机排序）', () => {
+  it('同组内上移/下移交换相邻位置；到顶/到底 no-op；跨组不受影响', async () => {
+    const memento = createMemento({
+      groups: [],
+      connections: [
+        conn({ id: 'a', groupId: 'g1' }),
+        conn({ id: 'b', groupId: 'g1' }),
+        conn({ id: 'c', groupId: 'g1' }),
+        conn({ id: 'x', groupId: 'g2' }),
+      ],
+    });
+    const store = new ConnectionStore(memento, createSecrets() as any);
+
+    expect(await store.moveConnection('b', 'up')).toBe(true);
+    expect(store.getVisibleTreeData().connections.map((c) => c.id)).toEqual(['b', 'a', 'c', 'x']);
+
+    expect(await store.moveConnection('a', 'down')).toBe(true);
+    expect(store.getVisibleTreeData().connections.map((c) => c.id)).toEqual(['b', 'c', 'a', 'x']);
+
+    expect(await store.moveConnection('b', 'up')).toBe(false); // 已在顶
+    expect(await store.moveConnection('a', 'down')).toBe(false); // 已在底
+    expect(await store.moveConnection('x', 'down')).toBe(false); // g2 只有自己
+  });
+});
+
 describe('stripSecrets', () => {
   it('剥离 password/sshPassword/sshPassphrase，保留其余字段与原对象', () => {
     const c = conn({ password: 'p', sshHost: 'h', sshPassword: 'sp', sshPassphrase: 'pass' });

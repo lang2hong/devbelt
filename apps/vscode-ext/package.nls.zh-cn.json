@@ -7,6 +7,8 @@
   "cmd.addGroup": "新建分组",
   "cmd.renameGroup": "重命名分组",
   "cmd.removeGroup": "删除分组",
+  "cmd.moveConnectionUp": "连接上移",
+  "cmd.moveConnectionDown": "连接下移",
   "cmd.moveToGroup": "移动到分组",
   "cmd.login": "登录 / 注册",
   "cmd.accountMenu": "账户菜单",

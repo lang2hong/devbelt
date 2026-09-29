@@ -311,6 +311,32 @@ export class ConnectionStore {
     void eventBus.publish(new ConnectionChangedEvent('connection', 'move', connId));
   }
 
+  /**
+   * 分组内调整连接位置（与同组相邻连接交换数组位置）。
+   *
+   * 顺序是本机 `memento` 里的数组位置，**不进同步 payload**：故不修改 `updateTime`、
+   * 不产生同步 mutation、不跨设备同步。到顶/到底返回 false（no-op）。
+   */
+  async moveConnection(connId: string, dir: 'up' | 'down', source: ChangeSource = 'user'): Promise<boolean> {
+    const data = this.getTreeData();
+    const current = data.connections.find((c) => c.id === connId && !c.deleted);
+    if (!current) return false;
+    const groupKey = (c: SavedConnection): string | undefined => c.groupId;
+    const siblings = data.connections
+      .map((c, i) => ({ c, i }))
+      .filter(({ c }) => !c.deleted && groupKey(c) === groupKey(current));
+    const pos = siblings.findIndex(({ c }) => c.id === connId);
+    const target = dir === 'up' ? pos - 1 : pos + 1;
+    if (pos < 0 || target < 0 || target >= siblings.length) return false;
+    const a = siblings[pos].i;
+    const b = siblings[target].i;
+    [data.connections[a], data.connections[b]] = [data.connections[b], data.connections[a]];
+    await this.memento.update(ConnectionStore.KEY, data);
+    this.changedEmitter.fire(source);
+    void eventBus.publish(new ConnectionChangedEvent('connection', 'move', connId));
+    return true;
+  }
+
   /** 新建分组，返回其 id */
   async addGroup(name: string, parentId?: string, source: ChangeSource = 'user'): Promise<string> {
     const data = this.getTreeData();

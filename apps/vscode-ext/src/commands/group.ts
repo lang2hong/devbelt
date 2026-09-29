@@ -161,4 +161,13 @@ export function registerGroupCommands(deps: Deps, sub: Sub): void {
     diagInfo('connection move', { id: node.conn.id, toGroup: picked.target ?? null });
     treeProvider.refresh();
   });
+
+  // 分组内调整位置（本机顺序，不产生同步 mutation；到顶/到底为 no-op）。
+  const move = async (node: DbTreeNode, dir: 'up' | 'down'): Promise<void> => {
+    if (!node?.conn?.id) return;
+    const moved = await store.moveConnection(node.conn.id, dir);
+    if (moved) treeProvider.refresh();
+  };
+  sub('devbelt.moveConnectionUp', (node: DbTreeNode) => move(node, 'up'));
+  sub('devbelt.moveConnectionDown', (node: DbTreeNode) => move(node, 'down'));
 }

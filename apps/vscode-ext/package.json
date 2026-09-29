@@ -539,6 +539,16 @@
         "category": "DB Client"
       },
       {
+        "command": "devbelt.moveConnectionUp",
+        "title": "%cmd.moveConnectionUp%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.moveConnectionDown",
+        "title": "%cmd.moveConnectionDown%",
+        "category": "DB Client"
+      },
+      {
         "command": "devbelt.compareSchema",
         "title": "%cmd.compareSchema%",
         "category": "DB Client"
@@ -1568,6 +1578,16 @@
           "command": "devbelt.refreshConnection",
           "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE|REDIS)(\\.ro)?$/",
           "group": "0_refresh"
+        },
+        {
+          "command": "devbelt.moveConnectionUp",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
+          "group": "2_arrange@1"
+        },
+        {
+          "command": "devbelt.moveConnectionDown",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
+          "group": "2_arrange@2"
         },
         {
           "command": "devbelt.editConnection",
