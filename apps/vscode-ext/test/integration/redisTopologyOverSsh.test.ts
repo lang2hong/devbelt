@@ -186,6 +186,8 @@ describe.skipIf(!CLUSTER_SEED)('D20：未映射节点 → 命令在有限时间�
         // 'timeout' = 挂起（阻塞发布）；'ok' = 没走到未映射节点。
         expect(outcome).toBe('error');
       } finally {
+        // 未映射节点仍在后台重试；等其重试耗尽再 close，避免 close 与该连接竞争产生未处理拒绝。
+        await new Promise((r) => setTimeout(r, 3000));
         await client.close();
       }
     } finally {
