@@ -412,10 +412,6 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     // 定时备份
     vscode.commands.registerCommand('devbelt.scheduleBackup', async (node: any) => {
       if (!node?.conn || !node?.database) return;
-      // PG 多 schema：定时备份目前只覆盖默认 schema（见 P7.1 已知限制）。
-      if (node.conn.dbType === 'PG') {
-        vscode.window.showWarningMessage(l10n('backup.pgSchemaOnlyHint'));
-      }
       await configureBackupSchedule(backupScheduler, node.conn.id, node.database);
     }),
   );

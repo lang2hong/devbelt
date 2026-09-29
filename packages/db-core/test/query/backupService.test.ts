@@ -549,3 +549,32 @@ describe('BackupService.restore 流式输入', () => {
     expect(conn.executed.some((s) => /INSERT INTO a/.test(s))).toBe(true);
   });
 });
+
+describe('BackupService A3：PG 指定 schema 的 dump', () => {
+  it('带 schema：CREATE SCHEMA + 对象名限定；不带 schema：保持无前缀', async () => {
+    const conn = new FakeConnection();
+    const query = makeQueryService(conn, new PostgreSqlDialect());
+    const meta = {
+      getTables: async () => [{ name: 'users' }],
+      getColumns: async () => [],
+      getViews: async () => [],
+      getFunctions: async () => [],
+      getEvents: async () => [],
+      getTriggers: async () => [],
+    } as unknown as MetadataService;
+    const tableService = {
+      getCreateSql: async (_t: string, _db?: string, schema?: string) =>
+        schema ? `CREATE TABLE "${schema}"."users" (id int)` : 'CREATE TABLE "users" (id int)',
+    } as unknown as TableService;
+
+    const scoped = await BackupService.databaseDump(query, meta, tableService, 'app', { includeData: false, schema: 'sales' });
+    expect(scoped).toContain('CREATE SCHEMA IF NOT EXISTS "sales";');
+    expect(scoped).toContain('-- Schema: sales');
+    expect(scoped).toContain('DROP TABLE IF EXISTS "sales"."users";');
+    expect(scoped).toContain('CREATE TABLE "sales"."users"');
+
+    const plain = await BackupService.databaseDump(query, meta, tableService, 'app', { includeData: false });
+    expect(plain).not.toContain('CREATE SCHEMA IF NOT EXISTS');
+    expect(plain).toContain('DROP TABLE IF EXISTS "users";');
+  });
+});

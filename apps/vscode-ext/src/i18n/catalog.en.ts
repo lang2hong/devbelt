@@ -806,7 +806,6 @@ export const en: MessageCatalog = {
   'sync.progressTitle': 'Syncing database...',
   'sync.doneErrors': 'Sync complete with {errors} errors. {count} tables synced.',
   'backup.scheduleSet': '"{database}" will be backed up {interval} to {dir}.',
-  'backup.pgSchemaOnlyHint': 'Scheduled backup currently covers only the default schema (PG multi-schema is on the roadmap).',
   'sql.reviewBeforeRun': '{detail}. Review the SQL before continuing.',
   'sql.runAction': 'Run SQL',
   'sql.productionWrite': 'Write statement on a production connection',

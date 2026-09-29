@@ -23,6 +23,8 @@ export interface BackupOptions {
   tables?: string[];
   includeData?: boolean;
   pageSize?: number;
+  /** PG 命名空间：给定时 dump 该 schema（对象名带 schema 限定，可恢复到空白库）。 */
+  schema?: string;
   onProgress?: (progress: BackupProgress) => void;
   isCancelled?: () => boolean;
 }
@@ -78,17 +80,25 @@ export class BackupService {
     write: (chunk: string) => void | Promise<void>,
     options: BackupOptions = {},
   ): Promise<void> {
-    const { tables, includeData = true, pageSize = 1000, onProgress, isCancelled } = options;
-    const tableList = tables ?? (await meta.getTables(database)).map((t) => t.name);
+    const { tables, includeData = true, pageSize = 1000, onProgress, isCancelled, schema } = options;
+    const tableList = tables ?? (await meta.getTables(database, schema)).map((t) => t.name);
     const dbType = query.dialect.dbType;
+    // PG 指定 schema 时对象名带 schema 限定（`"schema"."t"`），恢复可落到新建/空白库；
+    // 不给 schema（MySQL/SQLite 或 PG 默认）保持不带前缀，dump 可在库之间迁移。
+    const scoped = dbType === DatabaseType.PG && !!schema;
+    const qualify = (name: string): string => scoped
+      ? `${query.dialect.wrap(schema!)}.${query.dialect.wrap(name)}`
+      : query.dialect.wrap(name);
 
     const header: string[] = [
       '-- DevBelt Dump',
       `-- Server Type: ${dbType}`,
       `-- Database: ${sqlCommentSafe(database)}`,
+      ...(scoped ? [`-- Schema: ${sqlCommentSafe(schema!)}`] : []),
       `-- Date: ${new Date().toISOString()}`,
       '',
     ];
+    if (scoped) header.push(`CREATE SCHEMA IF NOT EXISTS ${query.dialect.wrap(schema!)};`, '');
     const prelude = this.sqlPrelude(dbType);
     if (prelude) header.push(prelude + ';');
     await write(header.join('\n') + '\n');
@@ -98,15 +108,15 @@ export class BackupService {
       const table = tableList[i];
       onProgress?.({ table, completed: i, total: tableList.length });
 
-      const ddl = await tableService.getCreateSql(table, database);
+      const ddl = await tableService.getCreateSql(table, database, schema);
       // 不带库前缀：dump 过去把源库名写死（`"srcdb"."t"`），在目标库上恢复时会
       // 写回**源库**（且确认框显示的是目标库），是数据写错库。不限定即恢复到
       // 当前连接选中的库，dump 也因此可在库之间迁移。
-      const qualified = query.dialect.wrap(table);
+      const qualified = qualify(table);
       const block: string[] = ['', `DROP TABLE IF EXISTS ${qualified};`, ddl.replace(/;\s*$/, '') + ';'];
 
       if (includeData) {
-        const columnMeta = await meta.getColumns(table, database);
+        const columnMeta = await meta.getColumns(table, database, schema);
         const columns = columnMeta.map((c) => c.name);
         const colList = columns.map((c) => query.dialect.wrap(c)).join(', ');
         // 有主键 → keyset 深分页（不随页数线性变慢）；无主键回退 OFFSET。
@@ -140,16 +150,17 @@ export class BackupService {
     // 视图：整库备份过去只含基表（getTables 只返回 BASE TABLE），视图全部缺失。
     // 仅在**整库备份**（未指定 tables）时附带视图；只备份选定表时不应写入整库视图。
     try {
-      const views = options.tables ? [] : await meta.getViews(database);
+      const views = options.tables ? [] : await meta.getViews(database, schema);
       for (const v of views) {
         if (isCancelled?.()) throw new Error('Backup cancelled.');
         try {
           // 必须走方言 normalizeViewAlterSql：PG 的 getViewDefinition 只返回纯 SELECT，
           // 原样写出会先 DROP 再执行一个 SELECT —— 视图被删且永不重建。该方法同时
           // 为 MySQL 剥离绑定源账号的 ALGORITHM/DEFINER，并把 SQLite 转成 DROP+CREATE。
-          const raw = await meta.getViewDefinition(v.name, database);
-          const alter = query.dialect.normalizeViewAlterSql(raw, v.name);
-          const qualified = query.dialect.wrap(v.name);
+          const raw = await meta.getViewDefinition(v.name, database, schema);
+          // 不传 `database`：dump 保持不带库前缀（可跨库迁移）；仅 PG 指定 schema 时限定。
+          const alter = query.dialect.normalizeViewAlterSql(raw, v.name, undefined, schema);
+          const qualified = qualify(v.name);
           await write(`\nDROP VIEW IF EXISTS ${qualified};\n${alter}\n`);
         } catch { /* 单个视图定义取不到则跳过，不使整库 dump 失败 */ }
       }
@@ -159,10 +170,10 @@ export class BackupService {
     // 全部丢失，恢复后应用的业务逻辑缺失（静默）。方言已有定义查询能力，这里补上。
     if (!options.tables) {
       try {
-        for (const r of await meta.getFunctions(database)) {
+        for (const r of await meta.getFunctions(database, schema)) {
           if (isCancelled?.()) throw new Error('Backup cancelled.');
           try {
-            const raw = (await meta.getRoutineDefinition(r.name, r.type, database)).trim();
+            const raw = (await meta.getRoutineDefinition(r.name, r.type, database, schema)).trim();
             if (!raw) continue;
             const kind = /PROCEDURE/i.test(r.type) ? 'PROCEDURE' : 'FUNCTION';
             const body = stripTrailingSemicolon(removeDefiner(raw));
@@ -179,10 +190,10 @@ export class BackupService {
         }
       } catch { /* 例程列表取不到则跳过 */ }
       try {
-        for (const e of await meta.getEvents(database)) {
+        for (const e of await meta.getEvents(database, schema)) {
           if (isCancelled?.()) throw new Error('Backup cancelled.');
           try {
-            const raw = (await meta.getEventDefinition(e.name, database)).trim();
+            const raw = (await meta.getEventDefinition(e.name, database, schema)).trim();
             if (!raw) continue;
             const body = stripTrailingSemicolon(removeDefiner(raw));
             await write(`\nDROP EVENT IF EXISTS ${query.dialect.wrap(e.name)};\nDELIMITER $$\n${body}$$\nDELIMITER ;\n`);
@@ -196,18 +207,18 @@ export class BackupService {
       // 每张表单独取触发器列表：某张表失败（权限/视图/临时表）不应让其余表的触发器全部丢失。
       let triggers: Awaited<ReturnType<MetadataService['getTriggers']>>;
       try {
-        triggers = await meta.getTriggers(table, database);
+        triggers = await meta.getTriggers(table, database, schema);
       } catch { continue; }
       for (const t of triggers) {
         if (isCancelled?.()) throw new Error('Backup cancelled.');
         try {
-          const raw = (await meta.getTriggerDefinition(t.name, database, undefined, table)).trim();
+          const raw = (await meta.getTriggerDefinition(t.name, database, schema, table)).trim();
           if (!raw) continue;
           const body = stripTrailingSemicolon(removeDefiner(raw));
           const q = query.dialect.wrap(t.name);
           // PG 的 DROP TRIGGER 必须带 ON <table>；MySQL/SQLite 不带。
           const drop = dbType === DatabaseType.PG
-            ? `DROP TRIGGER IF EXISTS ${q} ON ${query.dialect.wrap(table)};`
+            ? `DROP TRIGGER IF EXISTS ${q} ON ${qualify(table)};`
             : `DROP TRIGGER IF EXISTS ${q};`;
           const wrapDelimiter = dbType === DatabaseType.MYSQL;
           await write(wrapDelimiter

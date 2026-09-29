@@ -99,7 +99,7 @@ export class BackupScheduler {
   private async executeBackup(entry: ScheduleEntry): Promise<void> {
     const conn = this.store.get(entry.connId);
     if (!conn) return;
-    const session = await this.manager.connectSql(conn);
+    const session = await this.manager.connectSql(conn, entry.database);
     // 文件名带日期 + 时间：只到「日」时，同一天多次/每小时备份会互相覆盖，历史静默丢失。
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
     const fileName = backupFileName(entry.database, stamp);
@@ -111,15 +111,24 @@ export class BackupScheduler {
     const tmpPath = `${uri.fsPath}.tmp`;
     const stream = createWriteStream(tmpPath, { encoding: 'utf8' });
     const streamError = new Promise<never>((_, reject) => stream.once('error', reject));
+    const write = async (chunk: string): Promise<void> => {
+      if (!stream.write(chunk)) await once(stream, 'drain');
+    };
     try {
+      // PG 多 schema：逐 schema dump（对象名带 schema 限定）；MySQL/SQLite 单次。
+      const schemas: (string | undefined)[] = conn.dbType === 'PG'
+        ? (await session.metadata.getSchemas())
+        : [undefined];
       await Promise.race([
-        BackupService.writeDatabaseDump(
-          session.query, session.metadata, session.table, entry.database,
-          async (chunk) => {
-            if (!stream.write(chunk)) await once(stream, 'drain');
-          },
-          { includeData: entry.includeData },
-        ),
+        (async () => {
+          for (const schema of schemas) {
+            await BackupService.writeDatabaseDump(
+              session.query, session.metadata, session.table, entry.database,
+              write,
+              { includeData: entry.includeData, schema },
+            );
+          }
+        })(),
         streamError,
       ]);
       await new Promise<void>((resolve, reject) => {
