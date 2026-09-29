@@ -1,7 +1,7 @@
 import type { SavedConnection, ConnectionGroup } from '../../connection/connectionStore.js';
 import type { QueryFolder } from '../../connection/queryStore.js';
 import type { SavedQuery } from '@devbelt/db-core';
-import { DatabaseType } from '@devbelt/db-core';
+import { DatabaseType, databaseTypeFromEngine } from '@devbelt/db-core';
 import { decodeEntityPayload, type DecodedEntityPayload } from './recordCodec.js';
 import { assertRecordId, assertU64Decimal } from './types.js';
 import { filterPersonalConnectionsByEntitlement } from '../entitlementGate.js';
@@ -29,7 +29,7 @@ import type { SyncAuthenticatorEntryValue, SyncAuthenticatorGroup, SyncAuthentic
  * - 写实体走 `source='sync'`；连接解密后先过引擎门禁（墓碑不走门禁）。
  */
 
-export type ApplyDisposition = 'skipped' | 'skipped-entitlement' | 'created' | 'updated' | 'deleted' | 'ignored-tombstone';
+export type ApplyDisposition = 'skipped' | 'skipped-entitlement' | 'skipped-unsupported' | 'created' | 'updated' | 'deleted' | 'ignored-tombstone';
 
 export interface ApplyRecordInput {
   recordId: string;
@@ -122,6 +122,26 @@ function hasUpdateTime(entity: unknown): boolean {
   return typeof (entity as { updateTime?: unknown })?.updateTime === 'number';
 }
 
+/**
+ * 连接 payload 是否使用了本客户端不认识的引擎（如未来新增的 ES）。
+ *
+ * 旧客户端拉到新引擎记录时，`decodeEntityPayload` 会因 `databaseTypeFromEngine` fail-closed
+ * 抛错，导致整页应用失败、游标不前进、入站同步永久卡住（H3）。此处提前判定，把未知引擎
+ * 当作 `skipped-unsupported` 入 deferred，保证向前兼容（游标前进，未来支持后可重放）。
+ */
+function connectionEngineUnsupported(payload: unknown): boolean {
+  if (typeof payload !== 'object' || payload === null) return false;
+  const p = payload as Record<string, unknown>;
+  if (p.type !== 'connection') return false;
+  if (typeof p.dbType !== 'string') return false;
+  try {
+    databaseTypeFromEngine(p.dbType);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 export async function applyRecord(input: ApplyRecordInput, ctx: ApplyContext): Promise<ApplyRecordResult> {
   assertRecordId(input.recordId);
   const version = assertU64Decimal(input.version, 'version');
@@ -133,6 +153,11 @@ export async function applyRecord(input: ApplyRecordInput, ctx: ApplyContext): P
 
   if (input.tombstone) {
     return applyTombstone(input.recordId, version, existing, ctx, input.force === true);
+  }
+
+  // 未知引擎：不抛错，跳过并入 deferred（向前兼容；否则旧客户端入站同步会永久卡住）。
+  if (connectionEngineUnsupported(input.payload)) {
+    return { recordId: input.recordId, disposition: 'skipped-unsupported' };
   }
 
   const decoded = decodeEntityPayload(input.payload);

@@ -95,6 +95,15 @@ describe('applyRecord（连接）', () => {
     expect(s.connections.size).toBe(1);
   });
 
+  it('未知引擎的连接记录 → skipped-unsupported（不抛错，向前兼容）', async () => {
+    const s = setup();
+    const id = 'E'.repeat(22);
+    const payload = { type: 'connection', name: 'es', dbType: 'elasticsearch', host: 'h', port: 9200 };
+    expect(await applyRecord({ recordId: id, version: '1', tombstone: false, payload }, s))
+      .toMatchObject({ disposition: 'skipped-unsupported' });
+    expect(s.connections.size).toBe(0);
+  });
+
   it('实体 save 未回报 updateTime 时抛错并回滚预留映射', async () => {
     const s = setup();
     const id = 'B'.repeat(22);

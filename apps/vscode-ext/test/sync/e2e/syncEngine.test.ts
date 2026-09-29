@@ -816,6 +816,49 @@ describe('SyncEngine · deferred（权益跳过的连接记录）', () => {
     expect(conns[0].name).toBe('pg');
   });
 
+  it('未知引擎记录跳过（skipped-unsupported）且不阻断同页其它记录', async () => {
+    const store = makeStore();
+    const memento = makeMemento();
+    const entities = new EntityStore(store);
+    const mapStore = new RecordMapStore(makeMemento(), '7', '1');
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    const unresolved = new UnresolvedRefStore(memento, '7', '1');
+    const deferred = new DeferredRecordStore(memento, '7', '1');
+    const dek = new Uint8Array(32);
+    const seal = (recordId: string, fill: number, payload: Record<string, unknown>) => {
+      const nonce = new Uint8Array(12).fill(fill);
+      const box = sealRecord(dek, nonce, Buffer.from(JSON.stringify(payload), 'utf8'), { userId: '7', keyEpoch: '1', recordId, recordVersion: '1' });
+      return {
+        recordId, version: '1', changeSequence: '5', deleteTime: null, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+        nonce: Buffer.from(nonce).toString('base64url'), ciphertext: Buffer.from(box.ciphertext).toString('base64url'), tag: Buffer.from(box.tag).toString('base64url'),
+      };
+    };
+    const unsupported = seal('E'.repeat(22), 3, { type: 'connection', name: 'es', dbType: 'elasticsearch', host: 'h', port: 9200 });
+    const supported = seal('F'.repeat(22), 4, { type: 'connection', name: 'redis-ok', dbType: 'redis', host: 'h', port: 6379, user: '', redisMode: 'standalone', redisDb: 0 });
+
+    const entitlement = { planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite', 'redis'], maxDevices: 2, maxSavedConnections: 10, allowConnectionImport: false };
+    const engine = new SyncEngine({
+      userId: '7', keyEpoch: '1',
+      client: clientWith({
+        getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+        getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [unsupported, supported] })),
+      }),
+      stateStore: makeStateStore(SNAP) as never,
+      mapStore, outbox, entities, unresolved, deferred,
+      dek: () => dek, signSeed: () => new Uint8Array(32), uniqueId: () => 'c-u-1',
+      entitlement: () => entitlement,
+      seedConflictCarrier: seedConflictStub,
+    });
+
+    const r = await engine.sync();
+    expect(r.stage).toBe('ok');
+    expect(r.skippedUnsupported).toBe(1);
+    expect(deferred.list()).toHaveLength(1);
+    const names = store.listForSync().filter((c) => !(c as unknown as { deleted?: boolean }).deleted).map((c) => c.name);
+    expect(names).toContain('redis-ok');
+    expect(names).not.toContain('es');
+  });
+
   it('已映射的 PG 连接在 free 下也入 deferred；升级后 drain 更新该连接', async () => {
     const store = makeStore([{ id: 'c-old', name: 'pg-old', dbType: 'postgresql' as never, host: 'h', port: 5432, user: 'u', updateTime: 100 } as SavedConnection]);
     const memento = makeMemento();

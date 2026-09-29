@@ -85,6 +85,8 @@ export interface SyncRunResult {
   pushed?: number;
   /** 入站因权益（引擎不在套餐）被跳过、进 deferred 的记录数。 */
   skippedEntitlement?: number;
+  /** 入站因引擎本客户端不支持（如未来新增引擎）被跳过、进 deferred 的记录数（H3 向前兼容）。 */
+  skippedUnsupported?: number;
   /** 出站因编码失败/引擎不支持被跳过的本地变更数（由 coordinator 从 reconcile 结果补入）。 */
   skippedOutbound?: number;
   changeSequence?: string;
@@ -386,6 +388,7 @@ export class SyncEngine {
     let cursor = local.changeSequence;
     let applied = 0;
     let skippedEntitlement = 0;
+    let skippedUnsupported = 0;
     // 落地/忽略/跳过计数：让 UI 与诊断能区分「真变更」与「处理了但没变」。
     let changes = 0;
     let ignoredTombstone = 0;
@@ -441,8 +444,10 @@ export class SyncEngine {
             if (disposition === 'created' || disposition === 'updated' || disposition === 'deleted') changes += 1;
             else if (disposition === 'ignored-tombstone') ignoredTombstone += 1;
             else if (disposition === 'skipped') skippedRemote += 1;
-            if (disposition === 'skipped-entitlement') {
-              skippedEntitlement += 1;
+            if (disposition === 'skipped-entitlement' || disposition === 'skipped-unsupported') {
+              if (disposition === 'skipped-entitlement') skippedEntitlement += 1;
+              else skippedUnsupported += 1;
+              // 未知引擎同样入 deferred：未来客户端支持后无需重拉即可重放。
               if (this.deps.deferred) {
                 await this.deps.deferred.put({
                   recordId: rec.recordId,
@@ -468,7 +473,7 @@ export class SyncEngine {
                 remoteVersion: rec.version,
               });
               await this.persistConflict(rec, err);
-              return { stage: 'conflict', conflicts, stalled, applied, changes, ignoredTombstone, skippedRemote, skippedEntitlement, changeSequence: lastCommitted };
+              return { stage: 'conflict', conflicts, stalled, applied, changes, ignoredTombstone, skippedRemote, skippedEntitlement, skippedUnsupported, changeSequence: lastCommitted };
             }
             return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `apply failed: ${describe(err)}` };
           }
@@ -507,7 +512,7 @@ export class SyncEngine {
 
     // C2：本轮收集到冲突（出站 version 冲突未在本轮 pull 命中远端时仍属冲突）→ 以 conflict 收尾，
     // 让 coordinator 进入 stalled，不再自动重放同一条冲突 mutation。
-    return { stage: conflicts.length > 0 ? 'conflict' : 'ok', conflicts, stalled, applied, pushed, changes, ignoredTombstone, skippedRemote, skippedEntitlement, changeSequence: lastCommitted };
+    return { stage: conflicts.length > 0 ? 'conflict' : 'ok', conflicts, stalled, applied, pushed, changes, ignoredTombstone, skippedRemote, skippedEntitlement, skippedUnsupported, changeSequence: lastCommitted };
   }
 
   private parseState(raw: unknown): RemoteState {
@@ -687,7 +692,8 @@ export class SyncEngine {
       };
       try {
         const disposition = await this.applyRemote(rec, this.deps.keyEpoch, ctx);
-        if (disposition === 'skipped-entitlement') continue; // 仍无权益：保留待下次
+        // 仍无权益 / 仍不支持该引擎：保留待下次（未来支持后可重放）。
+        if (disposition === 'skipped-entitlement' || disposition === 'skipped-unsupported') continue;
         await deferred.delete(entry.recordId);
         drained += 1;
       } catch (err) {
