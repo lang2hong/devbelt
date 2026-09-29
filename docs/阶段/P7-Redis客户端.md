@@ -590,8 +590,9 @@ db-host 最小改动：
     3 节点 cluster（host network），验证 `setupClusterOverSsh` 的 natMap 跨 slot 路由。CI 在 `--cluster create`
     后轮询三节点 `cluster_state:ok` + 16384 slots 收敛；用例内有界等待 `cluster_state:ok`、逐 master PING
     探活，并对 SET/GET/DEL 做 MOVED/ASK/CLUSTERDOWN 有界重试（防启动抖动）。
-  - **D20（发布门禁）**：同 job 内 `D20` 用例——把一个 master 的地址映射到死端口，向落在其 slot 的 key 发命令，
-    断言 20s 内**报错而非挂起**（`Promise.race` 出现 `timeout` 即失败）。
+  - **D20（发布门禁）**：同 job 内 `D20` 用例——把一个 master 的地址映射到死端口 `127.0.0.1:1`，向落在其 slot 的 key 发命令，
+    断言 20s 内**报错而非挂起**（`Promise.race` 出现 `timeout` 即失败），并含正向对照「其余节点 SET/GET 成功」。
+    用生产默认重试配置（`DEFAULT_RETRY_TIMES=3`）。run `36529389170` 通过，实测失败耗时 **638ms**。
   - Sentinel over SSH：**best-effort**（`continue-on-error`）。已知限制：SSH 路径为 standalone 连发现到的
     master，不自动重发现。**Sentinel 本体启动已实跑验证**：`36516352390` 中 `Start Redis Sentinel`
     步骤 PONG ✓，日志见 `Running mode=sentinel`、`Sentinel new configuration saved on disk`、
@@ -603,6 +604,7 @@ db-host 最小改动：
     且本批提交未触及路由）；加固后 `36150004849` 全 job 绿（cluster 硬门禁 + sentinel best-effort +
     SSH tunnel + server）。收口轮 `36516352390` 全 job 绿——此轮 `natMap` 已改为函数形式并去掉 loopback
     豁免，Cluster over SSH 硬门禁（`发现 master → natMap → 跨 slot SET/GET`）仍通过，Sentinel 启动 ✓。
+    发布门禁轮 `36529389170` 全 job 绿：Cluster over SSH + **D20**（失败耗时 638ms）+ Sentinel over SSH 均通过。
 - db-core：RedisClient standalone 单测（ping/info/scan/CRUD/hash/list/set/zset/TTL/sendCommand
   切面只读拦截/命令日志事件/重试策略）；splitargs 单测；命令表分类单测。
 - vscode-ext：commandRegistration 测试补 Redis 命令声明↔注册一致性；mechanicalGates 测试补
@@ -660,7 +662,7 @@ db-host 最小改动：
 - **`U+FFFD` 判定为二进制**：合法文本若本身含该字符会被设为只读（偏保守的 fail-closed，可接受）。
 - **stream 破坏性操作的 db 漂移未单独校验**：`XTRIM`/`XGROUP DESTROY` 的「确认期间切库」未加 `pendingConfirm` 式校验（CLI 危险命令已加）。
 - **拓扑变化后需手动重连**：cluster over SSH 建立后，若集群扩容/resharding 新增了未建隧道的节点，该节点地址会被映射到死端口 `127.0.0.1:1`（**不能用 0**：ioredis 会把 port 0 回退成默认 6379，命中本机其它进程）并记诊断/提示；**必须重新连接以刷新隧道**，不会自动重发现。
-- **未映射 slot 行为**：「落在未映射节点的 slot 上的命令，须在有限时间内报错、不反复重定向/挂起」——已加入 **D20 集成测试**（`redisTopologyOverSsh.test.ts`，随 Cluster over SSH job 运行，断言有界失败且绝不 `timeout`）。该断言在 CI 实跑通过前不作结论（见下方 run 记录）。
+- **未映射 slot 行为（已验证，有界失败）**：落在未映射节点 slot 上的命令会在有限时间内报错、不挂起——**D20 集成测试**（`redisTopologyOverSsh.test.ts`，随 Cluster over SSH job 运行）在 CI run `36529389170` 通过，实测失败耗时 **638ms**（正向对照「其余节点仍可用」同时通过）。据此（D25）：`clusterRetryStrategy` 保持排在**发布后第一批**（另一项「隧道竞态/泄漏」并列优先）。
 - **Sentinel over SSH 为 best-effort**：SSH 路径按 standalone 连发现到的 master，不自动重发现。**CI 中 Sentinel 本体启动已从「已知限制」转为「已验证」**（见下）。
 
 ### 同步向前兼容前提（D9/D15，务必随发布说明写明）
