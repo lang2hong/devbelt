@@ -297,7 +297,10 @@ describe('ConnectionStore.addGroupRaw（导入复活墓碑）', () => {
 describe('moveConnection（分组内本机排序）', () => {
   it('同组内上移/下移交换相邻位置；到顶/到底 no-op；跨组不受影响', async () => {
     const memento = createMemento({
-      groups: [],
+      groups: [
+        { id: 'g1', name: 'G1', deleted: false },
+        { id: 'g2', name: 'G2', deleted: false },
+      ],
       connections: [
         conn({ id: 'a', groupId: 'g1' }),
         conn({ id: 'b', groupId: 'g1' }),
@@ -316,6 +319,22 @@ describe('moveConnection（分组内本机排序）', () => {
     expect(await store.moveConnection('b', 'up')).toBe(false); // 已在顶
     expect(await store.moveConnection('a', 'down')).toBe(false); // 已在底
     expect(await store.moveConnection('x', 'down')).toBe(false); // g2 只有自己
+  });
+
+  it('孤儿连接（groupId 指向已删除分组）按未分组处理，与普通未分组相邻交换', async () => {
+    const memento = createMemento({
+      groups: [{ id: 'gone', name: 'Gone', deleted: true }],
+      connections: [
+        conn({ id: 'a' }),               // 未分组
+        conn({ id: 'orphan', groupId: 'gone' }), // 孤儿
+        conn({ id: 'b' }),               // 未分组
+      ],
+    });
+    const store = new ConnectionStore(memento, createSecrets() as any);
+
+    // b 上移应与孤儿交换（而非跳过），到 a 与 orphan 之间。
+    expect(await store.moveConnection('b', 'up')).toBe(true);
+    expect(store.getVisibleTreeData().connections.map((c) => c.id)).toEqual(['a', 'b', 'orphan']);
   });
 });
 

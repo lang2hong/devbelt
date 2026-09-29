@@ -224,7 +224,7 @@ jobs:
       - name: Integration tests (vscode-ext cluster over SSH)
         env:
           DEVBELT_DB_TEST_REDIS_CLUSTER: 127.0.0.1:7000
-        run: pnpm -C apps/vscode-ext exec vitest run test/integration/redisTopologyOverSsh.test.ts -t "Cluster over SSH"
+        run: pnpm -C apps/vscode-ext exec vitest run test/integration/redisTopologyOverSsh.test.ts -t "Cluster over SSH|D20"
 
       # Sentinel over SSH：best-effort（已知限制：SSH 路径为 standalone 连发现到的 master，
       # 不自动重发现）。失败不阻断（continue-on-error），结果记入 P7「已知限制」。

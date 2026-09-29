@@ -321,7 +321,11 @@ export class ConnectionStore {
     const data = this.getTreeData();
     const current = data.connections.find((c) => c.id === connId && !c.deleted);
     if (!current) return false;
-    const groupKey = (c: SavedConnection): string | undefined => c.groupId;
+    // 与树的归一规则一致：分组不可见（已删除/不存在）视为「未分组」，
+    // 否则孤儿连接与普通未分组连接会被当成不同组，上移时跳过彼此。
+    const visibleGroupIds = new Set(this.getGroups().map((g) => g.id));
+    const groupKey = (c: SavedConnection): string | undefined =>
+      c.groupId && visibleGroupIds.has(c.groupId) ? c.groupId : undefined;
     const siblings = data.connections
       .map((c, i) => ({ c, i }))
       .filter(({ c }) => !c.deleted && groupKey(c) === groupKey(current));

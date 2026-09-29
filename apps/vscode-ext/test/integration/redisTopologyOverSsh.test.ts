@@ -11,6 +11,7 @@ vi.mock('vscode', () => ({
 }));
 
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
+import { RedisClient } from '@devbelt/db-core';
 import { ConnectionManager } from '../../src/connection/connectionManager';
 import { SshTunnel } from '../../src/connection/sshTunnel';
 
@@ -132,6 +133,50 @@ describe.skipIf(!CLUSTER_SEED)('Cluster over SSH（真实多节点 + natMap）',
       }
     } finally {
       manager.disposeAll();
+    }
+  }, 60_000);
+});
+
+describe.skipIf(!CLUSTER_SEED)('D20：未映射节点 → 命令在有限时间内失败（不挂起/不 Storm）', () => {
+  it('落在未映射节点的 slot：有界报错，绝不挂起', async () => {
+    const seed = hostPort(CLUSTER_SEED!);
+    const plain = new RedisClient({ host: seed.host, port: seed.port, cluster: { nodes: [seed], slotsRefreshTimeout: 3000 } });
+    try {
+      const seedAddr = `${seed.host}:${seed.port}`;
+      const slots = (await plain.sendCommand('CLUSTER', ['SLOTS'])) as unknown[];
+      // 选一个「非种子」master 的 slot 区间，确保测的是 slot 路由到未映射节点，而非种子不可达。
+      const range = (slots as any[][]).find((r) => Array.isArray(r) && r[2] && `${r[2][0]}:${r[2][1]}` !== seedAddr);
+      if (!range) throw new Error('no non-seed master range in CLUSTER SLOTS');
+      const start = Number(range[0]);
+      const end = Number(range[1]);
+      const nodeAddr = `${range[2][0]}:${range[2][1]}`;
+
+      let key = '';
+      for (let i = 0; i < 20000; i++) {
+        const cand = `d20:{${i}}`;
+        const slot = Number(await plain.sendCommand('CLUSTER', ['KEYSLOT', cand]));
+        if (slot >= start && slot <= end) { key = cand; break; }
+      }
+      expect(key).not.toBe('');
+
+      // 该 master 映射到死端口（模拟「拓扑变化后未映射」），其余地址按原样。
+      const natMap = (address: string) => (address === nodeAddr ? { host: '127.0.0.1', port: 0 } : null);
+      const bad = new RedisClient({
+        host: seed.host, port: seed.port, maxRetryTimes: 1,
+        cluster: { nodes: [seed], natMap, slotsRefreshTimeout: 3000 },
+      });
+      try {
+        const outcome = await Promise.race([
+          bad.sendCommand('SET', [key, 'v']).then(() => 'ok' as const, () => 'error' as const),
+          new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 20000)),
+        ]);
+        // 'timeout' = 挂起（不可接受）；'ok' = 根本没走到未映射节点。
+        expect(outcome).toBe('error');
+      } finally {
+        await bad.close();
+      }
+    } finally {
+      await plain.close();
     }
   }, 60_000);
 });
