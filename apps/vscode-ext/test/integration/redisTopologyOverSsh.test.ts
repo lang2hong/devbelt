@@ -14,6 +14,7 @@ import type { SavedConnection } from '@devbelt/db-host/connection/connectionStor
 import { RedisClient } from '@devbelt/db-core';
 import { ConnectionManager } from '../../src/connection/connectionManager';
 import { SshTunnel } from '../../src/connection/sshTunnel';
+import { UNMAPPED_DEAD_PORT } from '../../src/connection/redisTopology';
 
 /**
  * Cluster / Sentinel over SSH 真实集成（P7 S4 项 1）。env-gated。
@@ -166,7 +167,7 @@ describe.skipIf(!CLUSTER_SEED)('D20：未映射节点 → 命令在有限时间�
       const okKey = await keyIn(Number(okRange[0]), Number(okRange[1]));
 
       // 该 master 映射到死端口（模拟「拓扑变化后未映射」），其余地址按原样（生产 buildNatMap 行为）。
-      const natMap = (address: string) => (address === dropAddr ? { host: '127.0.0.1', port: 0 } : null);
+      const natMap = (address: string) => (address === dropAddr ? { host: '127.0.0.1', port: UNMAPPED_DEAD_PORT } : null);
       const client = new RedisClient({ host: seed.host, port: seed.port, cluster: { nodes: [seed], natMap, slotsRefreshTimeout: 3000 } });
       try {
         // 正向对照先行：其余节点可用，证明失败只出在未映射节点。

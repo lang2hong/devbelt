@@ -659,7 +659,7 @@ db-host 最小改动：
 - **权益门控只在客户端，且出站方向未过滤**：服务端因端到端加密**看不到引擎类型**，Redis 是否在套餐内只能由客户端判断；当前**入站**有权益过滤（`filterPersonalConnectionsByEntitlement`，不在套餐的进 deferred），但**出站**方向没有等价的过滤/提示。
 - **`U+FFFD` 判定为二进制**：合法文本若本身含该字符会被设为只读（偏保守的 fail-closed，可接受）。
 - **stream 破坏性操作的 db 漂移未单独校验**：`XTRIM`/`XGROUP DESTROY` 的「确认期间切库」未加 `pendingConfirm` 式校验（CLI 危险命令已加）。
-- **拓扑变化后需手动重连**：cluster over SSH 建立后，若集群扩容/resharding 新增了未建隧道的节点，该节点地址会被映射到死端口 `127.0.0.1:0` 并记诊断/提示；**必须重新连接以刷新隧道**，不会自动重发现。
+- **拓扑变化后需手动重连**：cluster over SSH 建立后，若集群扩容/resharding 新增了未建隧道的节点，该节点地址会被映射到死端口 `127.0.0.1:1`（**不能用 0**：ioredis 会把 port 0 回退成默认 6379，命中本机其它进程）并记诊断/提示；**必须重新连接以刷新隧道**，不会自动重发现。
 - **未映射 slot 行为**：「落在未映射节点的 slot 上的命令，须在有限时间内报错、不反复重定向/挂起」——已加入 **D20 集成测试**（`redisTopologyOverSsh.test.ts`，随 Cluster over SSH job 运行，断言有界失败且绝不 `timeout`）。该断言在 CI 实跑通过前不作结论（见下方 run 记录）。
 - **Sentinel over SSH 为 best-effort**：SSH 路径按 standalone 连发现到的 master，不自动重发现。**CI 中 Sentinel 本体启动已从「已知限制」转为「已验证」**（见下）。
 

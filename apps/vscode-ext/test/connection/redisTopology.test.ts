@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  UNMAPPED_DEAD_PORT,
   buildNatMap,
   createUnmappedNodeReporter,
   parseClusterNodesAll,
@@ -54,9 +55,11 @@ describe('buildNatMap', () => {
     const nat = buildNatMap([{ remoteHost: '10.0.0.2', remotePort: 6379, localPort: 41001 }], { onUnmapped: (a) => unmapped.push(a) });
     expect(nat('10.0.0.2:6379')).toEqual({ host: '127.0.0.1', port: 41001 });
     // ioredis 的 startupNodes 不走 natMapper，故不豁免 loopback：未映射（含 127.0.0.1）一律死端口。
-    expect(nat('127.0.0.1:6379')).toEqual({ host: '127.0.0.1', port: 0 });
-    expect(nat('10.9.9.9:6379')).toEqual({ host: '127.0.0.1', port: 0 });
+    expect(nat('127.0.0.1:6379')).toEqual({ host: '127.0.0.1', port: UNMAPPED_DEAD_PORT });
+    expect(nat('10.9.9.9:6379')).toEqual({ host: '127.0.0.1', port: UNMAPPED_DEAD_PORT });
     expect(unmapped).toEqual(['127.0.0.1:6379', '10.9.9.9:6379']);
+    // 死端口不能是 0：ioredis 会把 port 0 回退成 6379，连到本机其它进程。
+    expect(UNMAPPED_DEAD_PORT).not.toBe(0);
   });
 
   it('createUnmappedNodeReporter：日志每次、提示每连接一次', () => {

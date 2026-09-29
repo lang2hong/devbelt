@@ -102,6 +102,15 @@ export interface NatMapOptions {
 }
 
 /**
+ * 未映射节点统一映射到的「死端口」。
+ *
+ * **不能用 0**：ioredis/Node 会把 `port: 0` 当作未设置并回退默认 6379，反而连到本机 6379 上的
+ * 其它进程（可能回成功，且会把 AUTH 发过去）——实测在 CI 上命中过本机 standalone Redis。
+ * 用 1（tcpmux，正常情况下永不监听）：连接立即 `ECONNREFUSED`，有界失败且不发往任何真服务。
+ */
+export const UNMAPPED_DEAD_PORT = 1;
+
+/**
  * 远端地址 → 本地隧道端口（**函数形式**）。
  *
  * 未知节点不能回退真地址——扩容/resharding 后的新内网节点会绕过隧道被 ioredis 直连并发 AUTH。
@@ -119,7 +128,7 @@ export function buildNatMap(entries: readonly NatMapEntry[], opts: NatMapOptions
     const hit = map.get(address);
     if (hit) return hit;
     opts.onUnmapped?.(address);
-    return { host: '127.0.0.1', port: 0 }; // 死端口：连接必败，绝不把 AUTH 发往任何真地址
+    return { host: '127.0.0.1', port: UNMAPPED_DEAD_PORT }; // 死端口：连接必败，绝不把 AUTH 发往任何真地址
   };
 }
 
