@@ -45,6 +45,7 @@ export class PostgreSqlDialect implements SqlDialect {
   }
   readonly capabilities: DatabaseCapabilities = {
     multiDatabaseExplorer: false,
+    schemas: true,
     databases: true,
     views: true,
     routines: true,
@@ -80,28 +81,44 @@ export class PostgreSqlDialect implements SqlDialect {
     return `SELECT datname AS name FROM pg_database WHERE datistemplate = false AND datallowconn = true`;
   }
 
-  getTableListSql(): string {
+  /** PG：列出非系统 schema（树在库下展示 schema 层）。 */
+  getSchemaListSql(): string {
+    return `SELECT nspname AS name FROM pg_namespace
+      WHERE nspname NOT IN ('information_schema') AND nspname NOT LIKE 'pg\_%'
+      ORDER BY nspname`;
+  }
+
+  /**
+   * schema 限定：给了 schema 用字面量（validateIdent + 单引号转义），否则 `current_schema()`。
+   * schema 值来自 pg_namespace/information_schema（系统来源），仍做标识符校验防注入。
+   */
+  private schemaExpr(schema?: string): string {
+    if (!schema) return 'current_schema()';
+    return `'${validateIdent(schema, 63).replace(/'/g, "''")}'`;
+  }
+
+  getTableListSql(_database?: string, schema?: string): string {
     return `SELECT c.relname AS name, obj_description(c.oid) AS comment
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE c.relkind = 'r' AND n.nspname = current_schema()
+      WHERE c.relkind = 'r' AND n.nspname = ${this.schemaExpr(schema)}
       ORDER BY c.relname`;
   }
 
-  getViewListSql(): string {
+  getViewListSql(_database?: string, schema?: string): string {
     return `SELECT c.relname AS name, obj_description(c.oid) AS comment
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE c.relkind = 'v' AND n.nspname = current_schema()
+      WHERE c.relkind = 'v' AND n.nspname = ${this.schemaExpr(schema)}
       ORDER BY c.relname`;
   }
 
-  getFunctionListSql(): string {
+  getFunctionListSql(_database?: string, schema?: string): string {
     return `SELECT p.proname AS name,
         CASE p.prokind WHEN 'p' THEN 'PROCEDURE' WHEN 'f' THEN 'FUNCTION' ELSE 'FUNCTION' END AS type
       FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
-      WHERE n.nspname = current_schema()
+      WHERE n.nspname = ${this.schemaExpr(schema)}
       ORDER BY p.proname`;
   }
 
@@ -109,21 +126,21 @@ export class PostgreSqlDialect implements SqlDialect {
     return '';
   }
 
-  getRoutineDefinitionSql(name: string, _routineType: string): string {
+  getRoutineDefinitionSql(name: string, _routineType: string, _database?: string, schema?: string): string {
     validateIdent(name, 63);
     return `SELECT pg_get_functiondef(p.oid) AS definition
       FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
-      WHERE p.proname = '${name}' AND n.nspname = current_schema()`;
+      WHERE p.proname = '${name}' AND n.nspname = ${this.schemaExpr(schema)}`;
   }
 
   getEventDefinitionSql(): string {
     return '';
   }
 
-  getViewDefinitionSql(name: string): string {
+  getViewDefinitionSql(name: string, _database?: string, schema?: string): string {
     validateIdent(name, 63);
-    return `SELECT pg_get_viewdef(current_schema() || '.' || '${name}', true) AS definition`;
+    return `SELECT pg_get_viewdef(${this.schemaExpr(schema)} || '.' || '${name}', true) AS definition`;
   }
 
   /** pg_get_viewdef 返回纯 SELECT，包上 CREATE OR REPLACE VIEW 外壳。 */
@@ -133,7 +150,7 @@ export class PostgreSqlDialect implements SqlDialect {
     return `CREATE OR REPLACE VIEW ${q} AS\n${select};`;
   }
 
-  getIndexListSql(table: string): string {
+  getIndexListSql(table: string, _database?: string, schema?: string): string {
     validateIdent(table, 63);
     // 主键判定必须用 pg_index.indisprimary，而不是猜 `<table>_pkey` 名字：
     // 自定义约束名下主键会被误判为普通唯一索引（编辑主键会生成非法 SQL）。
@@ -143,7 +160,7 @@ export class PostgreSqlDialect implements SqlDialect {
       JOIN pg_class c ON c.oid = i.indexrelid
       JOIN pg_class t ON t.oid = i.indrelid
       JOIN pg_namespace n ON n.oid = t.relnamespace
-      WHERE n.nspname = current_schema() AND t.relname = '${table}'`;
+      WHERE n.nspname = ${this.schemaExpr(schema)} AND t.relname = '${table}'`;
   }
 
   getUserListSql(): string {
@@ -155,21 +172,22 @@ export class PostgreSqlDialect implements SqlDialect {
     return `SELECT current_user AS ident`;
   }
 
-  getForeignKeysSql(): string {
+  getForeignKeysSql(_database?: string, schema?: string): string {
     return `SELECT tc.table_name AS "tableName", kcu.column_name AS "columnName",
       ccu.table_name AS "refTable", ccu.column_name AS "refColumn", tc.constraint_name AS "constraintName"
       FROM information_schema.table_constraints tc
       JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
       JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name
-      WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = current_schema()`;
+      WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = ${this.schemaExpr(schema)}`;
   }
 
-  getTriggerListSql(table: string): string {
+  getTriggerListSql(table: string, _database?: string, schema?: string): string {
     validateIdent(table, 63);
     return `SELECT t.tgname AS name, pg_get_triggerdef(t.oid, true) AS definition
       FROM pg_trigger t
       JOIN pg_class c ON c.oid = t.tgrelid
-      WHERE NOT t.tgisinternal AND c.relname = '${table}'`;
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE NOT t.tgisinternal AND c.relname = '${table}' AND n.nspname = ${this.schemaExpr(schema)}`;
   }
 
   getTriggerDefinitionSql(name: string): string {
@@ -211,7 +229,7 @@ export class PostgreSqlDialect implements SqlDialect {
     return 'SELECT name, setting, short_desc AS description FROM pg_settings ORDER BY name';
   }
 
-  getColumnsSql(table: string): string {
+  getColumnsSql(table: string, _database?: string, schema?: string): string {
     validateIdent(table, 63);
     // 主键经 table_constraints/key_column_usage 判定并输出 MySQL 风格的 key='PRI'：
     // 过去用 `'' AS key`，normalizeColumnMeta 因此对 PG 永远 isPrimary=false，
@@ -240,9 +258,9 @@ export class PostgreSqlDialect implements SqlDialect {
            AND tc.table_schema = kcu.table_schema
          WHERE tc.constraint_type = 'PRIMARY KEY'
            AND tc.table_name = '${table}'
-           AND tc.table_schema = current_schema()
+           AND tc.table_schema = ${this.schemaExpr(schema)}
       ) pk ON pk.column_name = c.column_name
-      WHERE c.table_name = '${table}' AND c.table_schema = current_schema()
+      WHERE c.table_name = '${table}' AND c.table_schema = ${this.schemaExpr(schema)}
       ORDER BY c.ordinal_position`;
   }
 

@@ -119,25 +119,25 @@ export interface SqlDialect {
   getDatabaseListSql(): string;
 
   /** 查询库内所有表（含表注释）的 SQL */
-  getTableListSql(database?: string): string;
+  getTableListSql(database?: string, schema?: string): string;
 
   /** 查询库内所有视图的 SQL */
-  getViewListSql(database?: string): string;
+  getViewListSql(database?: string, schema?: string): string;
 
   /** 查询库内所有函数/存储过程的 SQL（空字符串表示不支持） */
-  getFunctionListSql(database?: string): string;
+  getFunctionListSql(database?: string, schema?: string): string;
 
   /** 查询库内所有事件的 SQL（空字符串表示不支持） */
-  getEventListSql(database?: string): string;
+  getEventListSql(database?: string, schema?: string): string;
 
   /** 查询函数/存储过程定义的 SQL */
-  getRoutineDefinitionSql(name: string, routineType: string, database?: string): string;
+  getRoutineDefinitionSql(name: string, routineType: string, database?: string, schema?: string): string;
 
   /** 查询事件定义的 SQL */
-  getEventDefinitionSql(name: string, database?: string): string;
+  getEventDefinitionSql(name: string, database?: string, schema?: string): string;
 
   /** 查询视图定义的 SQL（空字符串表示不支持） */
-  getViewDefinitionSql(name: string, database?: string): string;
+  getViewDefinitionSql(name: string, database?: string, schema?: string): string;
 
   /**
    * 把原始视图定义规范化为「可编辑可执行」的修改语句。
@@ -152,13 +152,13 @@ export interface SqlDialect {
   normalizeViewAlterSql(raw: string, name: string, database?: string): string;
 
   /** 查询表索引列表 SQL */
-  getIndexListSql(table: string, database?: string): string;
+  getIndexListSql(table: string, database?: string, schema?: string): string;
 
   /** 查询表触发器列表 SQL（空字符串表示不支持） */
-  getTriggerListSql(table: string, database?: string): string;
+  getTriggerListSql(table: string, database?: string, schema?: string): string;
 
   /** 查询触发器定义 SQL（空字符串表示不支持） */
-  getTriggerDefinitionSql(name: string, database?: string): string;
+  getTriggerDefinitionSql(name: string, database?: string, schema?: string): string;
 
   /** 生成创建索引 SQL */
   createIndexSql(name: string, table: string, columns: string[], unique: boolean, database?: string): string;
@@ -202,10 +202,10 @@ export interface SqlDialect {
   parseGrants?(rows: any[], database?: string): string[];
 
   /** 查询外键关系 SQL（空字符串表示不支持） */
-  getForeignKeysSql(database?: string): string;
+  getForeignKeysSql(database?: string, schema?: string): string;
 
   /** 查询表的列元数据 SQL */
-  getColumnsSql(table: string, database?: string): string;
+  getColumnsSql(table: string, database?: string, schema?: string): string;
 
   /** 查询进程列表 SQL（空字符串表示不支持） */
   getProcessListSql(): string;
@@ -215,6 +215,9 @@ export interface SqlDialect {
 
   /** 查询服务器变量 SQL（空字符串表示不支持） */
   getServerVariablesSql(): string;
+
+  /** 列出 schema（PG 命名空间）；返回空字符串/不实现表示无 schema 层。 */
+  getSchemaListSql?(): string;
 
   /** 解析表列表查询结果行为对象 */
   parseTableList(rows: any[]): TableMeta[];

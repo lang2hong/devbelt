@@ -253,6 +253,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
           return this.buildConnectionChildren(element);
         case NodeKind.Database:
           return this.buildDatabaseChildren(element);
+        case NodeKind.Schema:
+          return this.buildSchemaChildren(element);
         case NodeKind.Category:
           return this.buildCategoryChildren(element);
         case NodeKind.QueryFolder:
@@ -334,34 +336,61 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     });
   }
 
-  /** 数据库节点子节点：按方言能力过滤分类（表/视图始终显示） */
-  private buildDatabaseChildren(element: DbTreeNode): DbTreeNode[] {
+  /** 数据库节点子节点：PG 先出 schema 层；其余按方言能力过滤分类（表/视图始终显示）。 */
+  private async buildDatabaseChildren(element: DbTreeNode): Promise<DbTreeNode[]> {
     if (!element.conn) return [];
     // Redis 逻辑库无 SQL 分类子节点（键在 webview），且 DialectRegistry.get(REDIS) 会抛错。
     if (element.conn.dbType === DatabaseType.REDIS) return [];
     const dialect = DialectRegistry.get(element.conn.dbType);
     if (!dialect) return [];
+    // B1：PG（capabilities.schemas）在库下先出 schema 层。
+    if (dialect.capabilities.schemas) {
+      const session = await this.manager.connectSql(element.conn);
+      const schemas = await session.metadata.getSchemas();
+      const ordered = schemas.includes('public') ? ['public', ...schemas.filter((s) => s !== 'public')] : schemas;
+      return ordered.map((name) => this.schemaNode(element, name));
+    }
+    return this.categoryNodes(element, element.label ?? '');
+  }
+
+  /** PG schema 节点（database 槽保留库名，schema 单独携带）。 */
+  private schemaNode(parent: DbTreeNode, name: string): DbTreeNode {
+    const conn = parent.conn!;
+    const n = new DbTreeNode(name, TreeItemCollapsibleState.Collapsed, NodeKind.Schema, conn, undefined, parent, undefined, parent.label);
+    n.schema = name;
+    n.id = `${parent.id}:schema:${name}`;
+    // 默认 schema 展开态与普通节点一致，无需额外标记。
+    return n;
+  }
+
+  /** Schema 节点子节点：对象分类（database 槽给 schema，供元数据/限定名使用）。 */
+  private buildSchemaChildren(element: DbTreeNode): DbTreeNode[] {
+    const schema = element.schema ?? '';
+    return this.categoryNodes(element, schema);
+  }
+
+  /**
+   * 分类节点工厂。`scope` 是对象作用域：MySQL 为库名；PG 为 schema 名。
+   * — 对象分类（table/view/function/event）的 database 槽 = scope，并带 schema=scope（PG）。
+   * — query 分类始终用库名（保存查询按库组织），PG 下用连接库名。
+   */
+  private categoryNodes(element: DbTreeNode, scope: string): DbTreeNode[] {
+    if (!element.conn) return [];
+    const dialect = DialectRegistry.get(element.conn.dbType);
+    if (!dialect) return [];
     const caps = dialect.capabilities;
-    const categories: { type: CategoryType; label: string }[] = [
-      { type: 'table', label: l10n('cat.tables') },
-      { type: 'view', label: l10n('cat.views') },
+    const isPg = element.conn.dbType === DatabaseType.PG;
+    const dbForQuery = isPg ? (element.database ?? element.conn.database ?? '') : scope;
+    const categories: { type: CategoryType; label: string; database: string; schema?: string }[] = [
+      { type: 'table', label: l10n('cat.tables'), database: scope, schema: isPg ? scope : undefined },
+      { type: 'view', label: l10n('cat.views'), database: scope, schema: isPg ? scope : undefined },
     ];
-    if (caps.routines) categories.push({ type: 'function', label: l10n('cat.functions') });
-    if (caps.events) categories.push({ type: 'event', label: l10n('cat.events') });
-    categories.push({ type: 'query', label: l10n('cat.queries') });
-    // 用户不是库级对象：`getUsers()` 与库无关，挂在库下会让 MySQL 的 20 个库
-    // 各显示一份完全相同的用户列表。改为连接右键打开专门的用户管理面板。
+    if (caps.routines) categories.push({ type: 'function', label: l10n('cat.functions'), database: scope, schema: isPg ? scope : undefined });
+    if (caps.events) categories.push({ type: 'event', label: l10n('cat.events'), database: scope, schema: isPg ? scope : undefined });
+    categories.push({ type: 'query', label: l10n('cat.queries'), database: dbForQuery });
     return categories.map((c) => {
-      const n = new DbTreeNode(
-        c.label,
-        TreeItemCollapsibleState.Collapsed,
-        NodeKind.Category,
-        element.conn,
-        undefined,
-        element,
-        c.type,
-        element.label,
-      );
+      const n = new DbTreeNode(c.label, TreeItemCollapsibleState.Collapsed, NodeKind.Category, element.conn, undefined, element, c.type, c.database);
+      if (c.schema) n.schema = c.schema;
       n.id = `${element.id}:cat:${c.type}`;
       return n;
     });
@@ -835,31 +864,33 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
 
     const session = await this.manager.connectSql(conn);
     const builder = new MetadataNodeBuilder(session.metadata);
+    const schema = element.schema;
 
     switch (catType) {
       case 'table':
       case 'view':
       case 'function':
       case 'event':
-        return builder.build(catType, conn, db, element);
+        return builder.build(catType, conn, db, element, schema);
       case 'index':
-        return this.buildIndexChildren(session, conn, db, element);
+        return this.buildIndexChildren(session, conn, db, element, schema);
       case 'trigger':
-        return this.buildTriggerChildren(session, conn, db, element);
+        return this.buildTriggerChildren(session, conn, db, element, schema);
       case 'foreignKey':
-        return this.buildForeignKeyChildren(session, conn, db, element);
+        return this.buildForeignKeyChildren(session, conn, db, element, schema);
       default:
         return [];
     }
   }
 
   /** 索引分类子节点 */
-  private async buildIndexChildren(session: any, conn: SavedConnection, db: string, element: DbTreeNode): Promise<DbTreeNode[]> {
+  private async buildIndexChildren(session: any, conn: SavedConnection, db: string, element: DbTreeNode, schema?: string): Promise<DbTreeNode[]> {
     const table = element.parent?.label;
     if (!table) return [];
-    const indexes = await session.metadata.getIndexes(table, db);
+    const indexes = await session.metadata.getIndexes(table, db, schema);
     return indexes.map((idx: any) => {
       const node = new DbTreeNode(idx.name, TreeItemCollapsibleState.None, NodeKind.Index, conn, undefined, element, undefined, db);
+      node.schema = schema;
       node.id = `${element.id}:idx:${idx.name}`;
       node.description = [
         idx.columns?.join(', '),
@@ -870,12 +901,13 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   }
 
   /** 触发器分类子节点 */
-  private async buildTriggerChildren(session: any, conn: SavedConnection, db: string, element: DbTreeNode): Promise<DbTreeNode[]> {
+  private async buildTriggerChildren(session: any, conn: SavedConnection, db: string, element: DbTreeNode, schema?: string): Promise<DbTreeNode[]> {
     const table = element.parent?.label;
     if (!table) return [];
-    const triggers = await session.metadata.getTriggers(table, db);
+    const triggers = await session.metadata.getTriggers(table, db, schema);
     return triggers.map((t: any) => {
       const node = new DbTreeNode(t.name, TreeItemCollapsibleState.None, NodeKind.Trigger, conn, undefined, element, undefined, db);
+      node.schema = schema;
       node.id = `${element.id}:trg:${t.name}`;
       node.description = [t.timing, t.event].filter(Boolean).join(' ');
       node.command = { command: 'devbelt.viewTrigger', title: 'View', arguments: [node] };
@@ -884,10 +916,10 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   }
 
   /** 外键分类子节点（只读展示，按当前表过滤） */
-  private async buildForeignKeyChildren(session: any, conn: SavedConnection, db: string, element: DbTreeNode): Promise<DbTreeNode[]> {
+  private async buildForeignKeyChildren(session: any, conn: SavedConnection, db: string, element: DbTreeNode, schema?: string): Promise<DbTreeNode[]> {
     const table = element.parent?.label;
     if (!table) return [];
-    const fks = await session.metadata.getForeignKeys(db);
+    const fks = await session.metadata.getForeignKeys(db, schema);
     return fks
       .filter((f: any) => f.tableName === table)
       .map((f: any) => {
@@ -901,6 +933,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
           undefined,
           db,
         );
+        node.schema = schema;
         node.id = `${element.id}:fk:${f.constraintName ?? `${f.columnName}>${f.refTable}.${f.refColumn}`}`;
         node.refTable = f.refTable;
         node.refColumn = f.refColumn;
@@ -940,7 +973,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   private async buildTableChildren(element: DbTreeNode): Promise<DbTreeNode[]> {
     if (!element.conn) return [];
     const session = await this.manager.connectSql(element.conn);
-    const columns = await session.metadata.getColumns(element.label, element.database);
+    const columns = await session.metadata.getColumns(element.label, element.database, element.schema);
     const colNodes = columns.map((col) => {
       const node = new DbTreeNode(
         col.name,
@@ -952,6 +985,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         undefined,
         element.database,
       );
+      node.schema = element.schema;
       node.id = `${element.id}:col:${col.name}`;
       node.description = `${col.simpleType || col.type}`;
       if (col.isPrimary) {
@@ -970,6 +1004,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       const n = new DbTreeNode(
         label, TreeItemCollapsibleState.Collapsed, NodeKind.Category, element.conn, undefined, element, type, element.database,
       );
+      n.schema = element.schema;
       n.id = `${element.id}:cat:${type}`;
       return n;
     };

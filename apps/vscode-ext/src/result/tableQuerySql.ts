@@ -51,7 +51,9 @@ function qualifiedTable(dbType: DatabaseType, table: string, database?: string):
   validateIdent(table);
   const tbl = wrapIdent(dbType, table);
   if (database) validateIdent(database);
-  // PG 一个连接一个库：`database` 是库名而非 schema，限定会被当成 schema（见 db-core qualifyTable）。
+  // PG 一个连接一个库：树把该库的对象按 **schema** 组织，故此处的 `database` 槽在 PG 下表示 schema，
+  // 限定为 `"schema"."table"`；为空则回退 search_path（默认 schema）。
+  if (dbType === DatabaseType.PG) return database ? `${wrapIdent(dbType, database)}.${tbl}` : tbl;
   return qualifyTable(dbType, tbl, database ? wrapIdent(dbType, database) : undefined);
 }
 

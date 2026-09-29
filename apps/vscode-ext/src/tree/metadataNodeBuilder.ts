@@ -9,10 +9,10 @@ import { DbTreeNode, NodeKind, type CategoryType } from './dbTreeNode';
  * 与树的结构（根/分组/连接/数据库）解耦，便于独立测试。
  */
 export interface MetadataSource {
-  getTables(db: string): Promise<{ name: string; table_rows?: string; comment?: string; data_length?: string; index_length?: string; auto_increment?: string }[]>;
-  getViews(db: string): Promise<{ name: string }[]>;
-  getFunctions(db: string): Promise<{ name: string; type?: string }[]>;
-  getEvents(db: string): Promise<{ name: string }[]>;
+  getTables(db: string, schema?: string): Promise<{ name: string; table_rows?: string; comment?: string; data_length?: string; index_length?: string; auto_increment?: string }[]>;
+  getViews(db: string, schema?: string): Promise<{ name: string }[]>;
+  getFunctions(db: string, schema?: string): Promise<{ name: string; type?: string }[]>;
+  getEvents(db: string, schema?: string): Promise<{ name: string }[]>;
   getColumns(table: string, database?: string): Promise<{
     name: string;
     type?: string;
@@ -36,18 +36,18 @@ export class MetadataNodeBuilder {
   }
 
   /** 按分类类型构建对象节点列表。 */
-  async build(categoryType: CategoryType, conn: SavedConnection, database: string, parent: DbTreeNode): Promise<DbTreeNode[]> {
+  async build(categoryType: CategoryType, conn: SavedConnection, database: string, parent: DbTreeNode, schema?: string): Promise<DbTreeNode[]> {
     switch (categoryType) {
-      case 'table': return this.buildTables(conn, database, parent);
-      case 'view': return this.buildViews(conn, database, parent);
-      case 'function': return this.buildFunctions(conn, database, parent);
-      case 'event': return this.buildEvents(conn, database, parent);
+      case 'table': return this.buildTables(conn, database, parent, schema);
+      case 'view': return this.buildViews(conn, database, parent, schema);
+      case 'function': return this.buildFunctions(conn, database, parent, schema);
+      case 'event': return this.buildEvents(conn, database, parent, schema);
       default: return [];
     }
   }
 
-  private async buildTables(conn: SavedConnection, database: string, parent: DbTreeNode): Promise<DbTreeNode[]> {
-    const tables = await this.metadata.getTables(database);
+  private async buildTables(conn: SavedConnection, database: string, parent: DbTreeNode, schema?: string): Promise<DbTreeNode[]> {
+    const tables = await this.metadata.getTables(database, schema);
     return tables.map((t) => {
       const node = new DbTreeNode(
         t.name,
@@ -66,14 +66,15 @@ export class MetadataNodeBuilder {
         node.description = t.comment;
       }
       node.id = this.idFor(parent, conn, database, 'tbl', t.name);
+      if (schema) node.schema = schema;
       node.tooltip = formatTableTooltip(t);
       node.command = { command: 'devbelt.previewTable', title: 'Preview', arguments: [node] };
       return node;
     });
   }
 
-  private async buildViews(conn: SavedConnection, database: string, parent: DbTreeNode): Promise<DbTreeNode[]> {
-    const views = await this.metadata.getViews(database);
+  private async buildViews(conn: SavedConnection, database: string, parent: DbTreeNode, schema?: string): Promise<DbTreeNode[]> {
+    const views = await this.metadata.getViews(database, schema);
     return views.map((v) => {
       const node = new DbTreeNode(
         v.name,
@@ -86,13 +87,14 @@ export class MetadataNodeBuilder {
         database,
       );
       node.id = this.idFor(parent, conn, database, 'view', v.name);
+      if (schema) node.schema = schema;
       node.command = { command: 'devbelt.previewView', title: 'Preview', arguments: [node] };
       return node;
     });
   }
 
-  private async buildFunctions(conn: SavedConnection, database: string, parent: DbTreeNode): Promise<DbTreeNode[]> {
-    const routines = await this.metadata.getFunctions(database);
+  private async buildFunctions(conn: SavedConnection, database: string, parent: DbTreeNode, schema?: string): Promise<DbTreeNode[]> {
+    const routines = await this.metadata.getFunctions(database, schema);
     return routines.map((r) => {
       const node = new DbTreeNode(
         r.name,
@@ -106,13 +108,14 @@ export class MetadataNodeBuilder {
         r.type,
       );
       node.id = this.idFor(parent, conn, database, r.type === 'PROCEDURE' ? 'proc' : 'fn', r.name);
+      if (schema) node.schema = schema;
       node.command = { command: 'devbelt.openRoutine', title: 'Open', arguments: [node] };
       return node;
     });
   }
 
-  private async buildEvents(conn: SavedConnection, database: string, parent: DbTreeNode): Promise<DbTreeNode[]> {
-    const events = await this.metadata.getEvents(database);
+  private async buildEvents(conn: SavedConnection, database: string, parent: DbTreeNode, schema?: string): Promise<DbTreeNode[]> {
+    const events = await this.metadata.getEvents(database, schema);
     return events.map((e) => {
       const node = new DbTreeNode(
         e.name,
@@ -125,6 +128,7 @@ export class MetadataNodeBuilder {
         database,
       );
       node.id = this.idFor(parent, conn, database, 'evt', e.name);
+      if (schema) node.schema = schema;
       node.command = { command: 'devbelt.openEvent', title: 'Open', arguments: [node] };
       return node;
     });

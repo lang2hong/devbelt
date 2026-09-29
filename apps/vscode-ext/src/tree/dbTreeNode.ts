@@ -28,6 +28,8 @@ export enum NodeKind {
   RedisKeyLoadMore = 'redisKeyLoadMore',
   /** P7 D*：Redis 键树根层扫完的「已全部加载」哨兵（不可点击）。 */
   RedisKeysLoadedAll = 'redisKeysLoadedAll',
+  /** B1：PostgreSQL 命名空间（schema）节点。 */
+  Schema = 'schema',
 }
 
 /** 分类子类型 */
@@ -53,6 +55,7 @@ const ICON_MAP: Record<string, string> = {
   [NodeKind.RedisKey]: 'symbol-key',
   [NodeKind.RedisKeyLoadMore]: 'ellipsis',
   [NodeKind.RedisKeysLoadedAll]: 'check',
+  [NodeKind.Schema]: 'symbol-namespace',
 };
 
 /** 分类节点的图标 id（按 categoryType 区分） */
@@ -131,6 +134,8 @@ export class DbTreeNode extends TreeItem {
   public redisKey?: string;
   /** Redis 文件夹前缀（仅 RedisKeyFolder 节点，用于前缀 SCAN）。 */
   public redisKeyPrefix?: string;
+  /** B1：PG 命名空间（Schema 节点及其下对象节点携带，用于限定对象名）。 */
+  public schema?: string;
 
   /** 外键关联表（仅 ForeignKey 节点，构造后赋值） */
   public refTable?: string;

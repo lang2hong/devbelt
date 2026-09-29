@@ -37,6 +37,7 @@ export class SqliteDialect implements SqlDialect {
   }
   readonly capabilities: DatabaseCapabilities = {
     multiDatabaseExplorer: false,
+    schemas: false,
     databases: false,
     views: true,
     routines: false,

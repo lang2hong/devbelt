@@ -46,6 +46,7 @@ export class MysqlDialect implements SqlDialect {
   }
   readonly capabilities: DatabaseCapabilities = {
     multiDatabaseExplorer: true,
+    schemas: false,
     databases: true,
     views: true,
     routines: true,

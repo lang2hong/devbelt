@@ -1565,6 +1565,16 @@
           "group": "8_danger"
         },
         {
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && viewItem =~ /^schema\\./",
+          "group": "0_refresh"
+        },
+        {
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^schema\\./",
+          "group": "9_copy"
+        },
+        {
           "command": "devbelt.openConnection",
           "when": "view == devbelt.explorer && viewItem =~ /^connectionClosed\\.(MYSQL|PG|SQLITE|REDIS)(\\.ro)?$/",
           "group": "1_view"

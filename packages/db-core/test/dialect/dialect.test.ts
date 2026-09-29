@@ -46,6 +46,23 @@ describe('方言策略（策略模式）', () => {
     expect(new SqliteDialect().capabilities.operations).not.toContain('truncateTable');
   });
 
+  it('B1：schema 层能力只有 PG 开启，且 PG 提供 getSchemaListSql', () => {
+    expect(new PostgreSqlDialect().capabilities.schemas).toBe(true);
+    expect(new MysqlDialect().capabilities.schemas).toBe(false);
+    expect(new SqliteDialect().capabilities.schemas).toBe(false);
+    expect(new PostgreSqlDialect().getSchemaListSql()).toContain('pg_namespace');
+    expect(new MysqlDialect().getSchemaListSql).toBeUndefined();
+  });
+
+  it('B1：PG 元数据 SQL 按 schema 限定，非法 schema 名被拒', () => {
+    const pg = new PostgreSqlDialect();
+    expect(pg.getTableListSql(undefined, 'myschema')).toContain("n.nspname = 'myschema'");
+    expect(pg.getTableListSql(undefined, undefined)).toContain('current_schema()');
+    expect(pg.getColumnsSql('t', undefined, 'myschema')).toContain("c.table_schema = 'myschema'");
+    // 注入尝试（含引号/分号）应被 validateIdent 拒绝。
+    expect(() => pg.getTableListSql(undefined, "x'; DROP TABLE t; --")).toThrow();
+  });
+
   it('解析表列表行为统一 TableMeta', () => {
     const meta = new MysqlDialect().parseTableList([
       { name: 'users', comment: '用户表', table_rows: '10' },

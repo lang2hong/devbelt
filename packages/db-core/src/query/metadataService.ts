@@ -23,39 +23,47 @@ export class MetadataService {
     return result.rows.map((row: any) => row.name ?? row.Database ?? row.datname);
   }
 
+  /** 查询 schema 列表（PG 命名空间；方言不支持则返回空） */
+  async getSchemas(): Promise<string[]> {
+    const sql = this.queryService.dialect.getSchemaListSql?.();
+    if (!sql) return [];
+    const result = await this.queryService.queryAll(sql);
+    return result.rows.map((row: any) => String(row.name ?? row.schema ?? row.nspname)).filter((x: string) => !!x);
+  }
+
   /** 查询表列表 */
-  async getTables(database?: string): Promise<TableMeta[]> {
-    const sql = this.queryService.dialect.getTableListSql(database);
+  async getTables(database?: string, schema?: string): Promise<TableMeta[]> {
+    const sql = this.queryService.dialect.getTableListSql(database, schema);
     const result = await this.queryService.queryAll(sql);
     return this.queryService.dialect.parseTableList(result.rows);
   }
 
   /** 查询视图列表 */
-  async getViews(database?: string): Promise<ViewMeta[]> {
-    const sql = this.queryService.dialect.getViewListSql(database);
+  async getViews(database?: string, schema?: string): Promise<ViewMeta[]> {
+    const sql = this.queryService.dialect.getViewListSql(database, schema);
     const result = await this.queryService.queryAll(sql);
     return this.queryService.dialect.parseViewList(result.rows);
   }
 
   /** 查询函数/存储过程列表 */
-  async getFunctions(database?: string): Promise<RoutineMeta[]> {
-    const sql = this.queryService.dialect.getFunctionListSql(database);
+  async getFunctions(database?: string, schema?: string): Promise<RoutineMeta[]> {
+    const sql = this.queryService.dialect.getFunctionListSql(database, schema);
     if (!sql) return [];
     const result = await this.queryService.queryAll(sql);
     return this.queryService.dialect.parseFunctionList(result.rows);
   }
 
   /** 查询事件列表 */
-  async getEvents(database?: string): Promise<EventMeta[]> {
-    const sql = this.queryService.dialect.getEventListSql(database);
+  async getEvents(database?: string, schema?: string): Promise<EventMeta[]> {
+    const sql = this.queryService.dialect.getEventListSql(database, schema);
     if (!sql) return [];
     const result = await this.queryService.queryAll(sql);
     return this.queryService.dialect.parseEventList(result.rows);
   }
 
   /** 查询函数/存储过程定义 */
-  async getRoutineDefinition(name: string, routineType: string, database?: string): Promise<string> {
-    const sql = this.queryService.dialect.getRoutineDefinitionSql(name, routineType, database);
+  async getRoutineDefinition(name: string, routineType: string, database?: string, schema?: string): Promise<string> {
+    const sql = this.queryService.dialect.getRoutineDefinitionSql(name, routineType, database, schema);
     if (!sql) return '';
     const result = await this.queryService.queryAll(sql);
     const row = result.rows[0];
@@ -64,8 +72,8 @@ export class MetadataService {
   }
 
   /** 查询事件定义 */
-  async getEventDefinition(name: string, database?: string): Promise<string> {
-    const sql = this.queryService.dialect.getEventDefinitionSql(name, database);
+  async getEventDefinition(name: string, database?: string, schema?: string): Promise<string> {
+    const sql = this.queryService.dialect.getEventDefinitionSql(name, database, schema);
     if (!sql) return '';
     const result = await this.queryService.queryAll(sql);
     const row = result.rows[0];
@@ -74,8 +82,8 @@ export class MetadataService {
   }
 
   /** 查询视图定义 */
-  async getViewDefinition(name: string, database?: string): Promise<string> {
-    const sql = this.queryService.dialect.getViewDefinitionSql(name, database);
+  async getViewDefinition(name: string, database?: string, schema?: string): Promise<string> {
+    const sql = this.queryService.dialect.getViewDefinitionSql(name, database, schema);
     if (!sql) return '';
     const result = await this.queryService.queryAll(sql);
     const row = result.rows[0];
@@ -84,31 +92,31 @@ export class MetadataService {
   }
 
   /** 查询表的列元数据 */
-  async getColumns(table: string, database?: string): Promise<ColumnMeta[]> {
-    const sql = this.queryService.dialect.getColumnsSql(table, database);
+  async getColumns(table: string, database?: string, schema?: string): Promise<ColumnMeta[]> {
+    const sql = this.queryService.dialect.getColumnsSql(table, database, schema);
     const result = await this.queryService.queryAll(sql);
     return result.rows.map((row: any) => normalizeColumnMeta(row));
   }
 
   /** 查询表索引列表 */
-  async getIndexes(table: string, database?: string): Promise<IndexMeta[]> {
-    const sql = this.queryService.dialect.getIndexListSql(table, database);
+  async getIndexes(table: string, database?: string, schema?: string): Promise<IndexMeta[]> {
+    const sql = this.queryService.dialect.getIndexListSql(table, database, schema);
     if (!sql) return [];
     const result = await this.queryService.queryAll(sql);
     return this.queryService.dialect.parseIndexList(result.rows);
   }
 
   /** 查询表触发器列表 */
-  async getTriggers(table: string, database?: string): Promise<TriggerMeta[]> {
-    const sql = this.queryService.dialect.getTriggerListSql(table, database);
+  async getTriggers(table: string, database?: string, schema?: string): Promise<TriggerMeta[]> {
+    const sql = this.queryService.dialect.getTriggerListSql(table, database, schema);
     if (!sql) return [];
     const result = await this.queryService.queryAll(sql);
     return this.queryService.dialect.parseTriggerList(result.rows);
   }
 
   /** 查询触发器定义 */
-  async getTriggerDefinition(name: string, database?: string): Promise<string> {
-    const sql = this.queryService.dialect.getTriggerDefinitionSql(name, database);
+  async getTriggerDefinition(name: string, database?: string, schema?: string): Promise<string> {
+    const sql = this.queryService.dialect.getTriggerDefinitionSql(name, database, schema);
     if (!sql) return '';
     const result = await this.queryService.queryAll(sql);
     const row = result.rows[0];
@@ -229,8 +237,8 @@ export class MetadataService {
   }
 
   /** 查询外键关系 */
-  async getForeignKeys(database?: string): Promise<ForeignKeyMeta[]> {
-    const sql = this.queryService.dialect.getForeignKeysSql(database);
+  async getForeignKeys(database?: string, schema?: string): Promise<ForeignKeyMeta[]> {
+    const sql = this.queryService.dialect.getForeignKeysSql(database, schema);
     if (!sql) return [];
     const result = await this.queryService.queryAll(sql);
     return this.queryService.dialect.parseForeignKeys(result.rows);

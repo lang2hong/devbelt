@@ -10,8 +10,12 @@ describe('tableQuerySql', () => {
     );
   });
 
-  it('builds a paginated SELECT with PostgreSQL identifiers (no db qualification)', () => {
+  it('builds a paginated SELECT with PostgreSQL identifiers（B1：database 槽=schema，按 schema 限定）', () => {
     expect(buildTableSelect(DatabaseType.PG, 'users', 'public', [], 'id', 'ASC', 0, 100)).toBe(
+      'SELECT * FROM "public"."users" ORDER BY "id" ASC LIMIT 100 OFFSET 0',
+    );
+    // 未给 schema（未限定）时回退 search_path：不加限定。
+    expect(buildTableSelect(DatabaseType.PG, 'users', undefined, [], 'id', 'ASC', 0, 100)).toBe(
       'SELECT * FROM "users" ORDER BY "id" ASC LIMIT 100 OFFSET 0',
     );
   });
