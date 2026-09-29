@@ -591,13 +591,16 @@ db-host 最小改动：
     后轮询三节点 `cluster_state:ok` + 16384 slots 收敛；用例内有界等待 `cluster_state:ok`、逐 master PING
     探活，并对 SET/GET/DEL 做 MOVED/ASK/CLUSTERDOWN 有界重试（防启动抖动）。
   - Sentinel over SSH：**best-effort**（`continue-on-error`）。已知限制：SSH 路径为 standalone 连发现到的
-    master，不自动重发现。
+    master，不自动重发现。**Sentinel 本体启动已实跑验证**：`36516352390` 中 `Start Redis Sentinel`
+    步骤 PONG ✓，日志见 `Running mode=sentinel`、`Sentinel new configuration saved on disk`、
+    `# +monitor master mymaster 127.0.0.1 6379 quorum 1`（配置目录挂载 + 权限修复生效）。
   - 状态/CLI/FLUSHALL 确认/SlowLog 的 UI 路径仍属手工走查。
   - 已执行：`36089800559`（standalone/密码/只读，14 例）、`36110487818`（+TLS，16 例）、
     `36113138072`（+SSH）全绿；S4 首次真机 `36148438669` 中 db-core 集成全绿、cluster-over-SSH 因环境
     收敛抖动偶发 `Too many Cluster redirections`（已定位非代码回归：该用例在 `c27cb67`/`e348edf` 均通过，
     且本批提交未触及路由）；加固后 `36150004849` 全 job 绿（cluster 硬门禁 + sentinel best-effort +
-    SSH tunnel + server）。
+    SSH tunnel + server）。收口轮 `36516352390` 全 job 绿——此轮 `natMap` 已改为函数形式并去掉 loopback
+    豁免，Cluster over SSH 硬门禁（`发现 master → natMap → 跨 slot SET/GET`）仍通过，Sentinel 启动 ✓。
 - db-core：RedisClient standalone 单测（ping/info/scan/CRUD/hash/list/set/zset/TTL/sendCommand
   切面只读拦截/命令日志事件/重试策略）；splitargs 单测；命令表分类单测。
 - vscode-ext：commandRegistration 测试补 Redis 命令声明↔注册一致性；mechanicalGates 测试补
@@ -642,6 +645,25 @@ db-host 最小改动：
 |  | webview 构建通过、bundle isolation 不引入 Redis 依赖到主线程 |
 |  | SQL 三引擎现有全流程（MySQL/PG/SQLite）零回归 |
 | i18n | 中英切换完整；无硬编码英文文案 |
+
+### 已知限制（2026-09-29 评审收口）
+
+以下为明确接受、暂不在 P7 内修复的限制；新增字段/协议变更见 `P2-个人同步-v2.md` 的向前兼容约定。
+
+- **集合只加载第一页**（hash/list/set/zset 约 200 条），无续页；过滤只在已加载页内。搜索态已有续页，但集合内翻页待发布后第一批。
+- **完整二进制安全未做**：当前只做到「解码含替换符（U+FFFD）的键名/字段/成员/元素设为只读 + 删除计数校验」。完整二进制安全（Buffer 全链路保留）延后。
+- **list「比对后再写」非原子**：`LSET` 前先 `LINDEX` 比对，已大幅缩小竞态窗口，但两条命令之间仍可能被其它客户端插入修改；严格保证需 Lua。
+- **SSH 路径的 TLS `servername` 未修正**：经 SSH 隧道时 TLS 主机名仍按连接配置，未按真实节点名；需真实环境再验证。
+- **客户端侧 Redis 权益门控未做**：Redis 是否在套餐内的判断仍在服务端/同步侧。
+- **`U+FFFD` 判定为二进制**：合法文本若本身含该字符会被设为只读（偏保守的 fail-closed，可接受）。
+- **stream 破坏性操作的 db 漂移未单独校验**：`XTRIM`/`XGROUP DESTROY` 的「确认期间切库」未加 `pendingConfirm` 式校验（CLI 危险命令已加）。
+- **未映射 slot 行为未手工验证**：cluster over SSH 后拓扑新增未映射节点会映射到死端口 `127.0.0.1:0`，失败可控；但「落在该 slot 的命令在有限时间内报错、不反复重定向/挂起」未手工确认（CI 拓扑正常走不到）。
+- **Sentinel over SSH 为 best-effort**：SSH 路径按 standalone 连发现到的 master，不自动重发现。**CI 中 Sentinel 本体启动已从「已知限制」转为「已验证」**（见下）。
+
+### 同步向前兼容前提（D9/D15，务必随发布说明写明）
+
+- 本版本按「**从未发布过启用同步的旧客户端**」处理，**未加服务端最低版本门禁**。若该前提被推翻，需回补服务端 `clientVersion` 门禁或先发客户端再开放 Redis 同步。
+- 未知引擎记录按 `skipped-unsupported` 入 deferred、游标照常前进（旧客户端不再卡死）；未来客户端支持后自动重放。
 
 ## 十二、测试命令
 
