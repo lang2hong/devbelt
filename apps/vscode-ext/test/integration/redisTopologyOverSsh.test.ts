@@ -186,8 +186,16 @@ describe.skipIf(!CLUSTER_SEED)('D20：未映射节点 → 命令在有限时间�
         // 'timeout' = 挂起（阻塞发布）；'ok' = 没走到未映射节点。
         expect(outcome).toBe('error');
       } finally {
-        // 未映射节点仍在后台重试；等其重试耗尽再 close，避免 close 与该连接竞争产生未处理拒绝。
-        await new Promise((r) => setTimeout(r, 3000));
+        // 等重试**真正耗尽**（clusterRetryStrategy 到上限 → 客户端进入终态 `end`/`close`）
+        // 再 close，而不是固定 sleep：固定等待既可能过早（close 与在途重连竞争产生
+        // "Connection is closed." 未处理拒绝），也可能过慢。
+        await new Promise<void>((resolve) => {
+          if (client.status === 'end' || client.status === 'close') return resolve();
+          const done = (): void => resolve();
+          client.on('end', done);
+          client.on('close', done);
+          setTimeout(done, 8000);
+        });
         await client.close();
       }
     } finally {

@@ -58,7 +58,7 @@ describe('方言策略（策略模式）', () => {
     expect(schemaSql).not.toContain('pg\\_%');
     // A2：过滤不可操作 schema（空白/点/引号等）。
     expect(schemaSql).toContain('!~');
-    expect(new MysqlDialect().getSchemaListSql).toBeUndefined();
+    expect((new MysqlDialect() as { getSchemaListSql?: unknown }).getSchemaListSql).toBeUndefined();
   });
 
   it('B2：PG 库列表只含有 CONNECT 权限的非模板库', () => {
