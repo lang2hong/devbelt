@@ -57,6 +57,9 @@ export class SshTunnel {
    */
   private static readonly refs = new Map<string, number>();
 
+  /** connId → 在途创建 Promise：同一连接并发 create 合并为一次（不各自建隧道）。 */
+  private static readonly creating = new Map<string, Promise<number>>();
+
   static configureHostKeyGate(gate: SshHostKeyGate | undefined): void {
     this.hostKeyGate = gate;
   }
@@ -102,6 +105,14 @@ export class SshTunnel {
       this.closeTunnel(existing, conn.id);
     }
 
+    // 已有同 id 的在途创建：合并到同一个请求，成功后各计一次引用。
+    const inflight = this.creating.get(conn.id);
+    if (inflight) {
+      const port = await inflight;
+      this.refs.set(conn.id, (this.refs.get(conn.id) ?? 1) + 1);
+      return port;
+    }
+
     // known_hosts 只读一次；校验在 hostVerifier 里同步比对。
     const knownHosts = loadKnownHosts();
 
@@ -114,7 +125,7 @@ export class SshTunnel {
       }
     }
 
-    return new Promise<number>((resolve, reject) => {
+    const promise = new Promise<number>((resolve, reject) => {
       const ssh = new Client();
       let settled = false;
       let hostKeyTrusted = false;
@@ -260,6 +271,12 @@ export class SshTunnel {
 
       ssh.connect(config);
     });
+    this.creating.set(conn.id, promise);
+    try {
+      return await promise;
+    } finally {
+      if (this.creating.get(conn.id) === promise) this.creating.delete(conn.id);
+    }
   }
 
   /**

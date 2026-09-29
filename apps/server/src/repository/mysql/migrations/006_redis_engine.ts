@@ -8,7 +8,21 @@ import type { Migration } from '../migrate.js';
  * 原始种子，并用一条增量迁移对**新库与存量库**统一补齐。
  *
  * 幂等：仅当值为 JSON 数组且不含 `'redis'` 时追加；重复执行是 no-op。
- * 回滚（结构变更，需手工 SQL）：`UPDATE plan_feature_values … JSON_REMOVE(...)` 移除 redis；
+ *
+ * 回滚（需手工 SQL，见 docs/迁移回滚.md）：
+ * ```sql
+ * UPDATE plan_feature_values v
+ *   JOIN plans p ON p.id = v.plan_id
+ *   JOIN plan_feature_defs d ON d.id = v.feature_def_id
+ *    SET v.value_json = JSON_REMOVE(
+ *          v.value_json,
+ *          JSON_UNQUOTE(JSON_SEARCH(v.value_json, 'one', 'redis'))
+ *        )
+ *  WHERE d.feature_key = 'allowedDatabaseTypes'
+ *    AND JSON_VALID(v.value_json)
+ *    AND JSON_TYPE(v.value_json) = 'ARRAY'
+ *    AND JSON_CONTAINS(v.value_json, JSON_QUOTE('redis'));
+ * ```
  * 通常不需要回滚（这是只增不减的权益放宽）。
  */
 export const redisEngineMigration: Migration = {

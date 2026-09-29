@@ -244,7 +244,7 @@ export class TableDesignView extends BaseWebView {
         });
         return;
       }
-      if (this.conn.environment === 'production' && !(await confirmSqlExecution(this.conn, op, this.manager.scanOptionsFor?.(this.conn)))) {
+      if (this.conn.environment === 'production' && !(await confirmSqlExecution(this.conn, op, this.manager.scanOptionsFor?.(this.conn), { database: this.database, schema: this.pgSchema }))) {
         return;
       }
       await fn();
@@ -252,9 +252,10 @@ export class TableDesignView extends BaseWebView {
         action: 'schema_change',
         connName: this.conn.name || this.conn.host,
         database: this.database,
+        schema: this.pgSchema,
         sql: op,
       });
-      void eventBus.publish(new DataChangeEvent(this.conn.id, this.database ?? '', this.table, 'ddl'));
+      void eventBus.publish(new DataChangeEvent(this.conn.id, this.database ?? '', this.table, 'ddl', this.pgSchema));
       await this.loadData();
       this.onMutate?.();
     } catch (err) {

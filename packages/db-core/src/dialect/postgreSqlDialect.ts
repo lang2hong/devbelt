@@ -228,7 +228,8 @@ export class PostgreSqlDialect implements SqlDialect {
     // 触发器名只在单张表内唯一：必须带 schema + 表名过滤，否则会打开另一张表的同名触发器。
     const clauses = [`t.tgname = '${name}'`, 'NOT t.tgisinternal'];
     if (table) { validateIdent(table, 63); clauses.push(`c.relname = '${table}'`); }
-    if (schema) clauses.push(`n.nspname = ${this.schemaExpr(schema)}`);
+    // 未传 schema 也要限定：回退 `current_schema()`（否则同名触发器会跨 schema 串到别的对象）。
+    clauses.push(`n.nspname = ${this.schemaExpr(schema)}`);
     return `SELECT pg_get_triggerdef(t.oid, true) AS definition
       FROM pg_trigger t
       JOIN pg_class c ON c.oid = t.tgrelid

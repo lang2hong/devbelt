@@ -57,6 +57,8 @@ export class DataChangeEvent extends AppEvent {
     readonly database: string,
     readonly table: string,
     readonly operation: 'insert' | 'update' | 'delete' | 'ddl',
+    /** PG 命名空间（多 schema 下区分写入目标）。 */
+    readonly schema?: string,
   ) {
     super('DataService');
   }

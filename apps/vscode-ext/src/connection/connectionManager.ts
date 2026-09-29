@@ -65,6 +65,8 @@ export class ConnectionManager {
   private readonly sessions = new Map<string, ConnectionSession>();
   /** 长生命周期持有者的引用计数（见 retain/release）。 */
   private readonly retains = new Map<string, number>();
+  /** 正在批量导入/导出/恢复的连接：期间不得被淘汰或空闲关闭。 */
+  private readonly busies = new Map<string, number>();
   private readonly sessionEntries = new Map<string, SessionEntry>();
   private readonly explicit = new Set<string>();
   private readonly connecting = new Map<string, Promise<ConnectionSession>>();
@@ -575,6 +577,22 @@ export class ConnectionManager {
     this.retains.set(id, (this.retains.get(id) ?? 0) + 1);
   }
 
+  /**
+ * 标记连接进入「批量操作」（导入/导出/恢复）：期间不被淘汰/空闲关闭；须在 finally 释放。
+ * 返回释放函数，便于 `try { ... } finally { unmark() }`。
+ */
+  markBusy(id: string): () => void {
+    this.busies.set(id, (this.busies.get(id) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const next = (this.busies.get(id) ?? 1) - 1;
+      if (next > 0) this.busies.set(id, next);
+      else this.busies.delete(id);
+    };
+  }
+
   /** 释放一次 retain；计数归零且非显式打开时关闭会话。 */
   release(id: string): void {
     const current = this.retains.get(id);
@@ -720,6 +738,8 @@ export class ConnectionManager {
     // 被视图/面板 retain、或有在途查询的会话不淘汰。
     if (this.retains.has(entry.connId)) return false;
     if (this.sqlInFlight(entry.session) > 0) return false;
+    // 正在批量导入/导出/恢复的连接不能淘汰（多语句之间有间隙，inFlight 覆盖不到）。
+    if ((this.busies.get(entry.connId) ?? 0) > 0) return false;
     // 有未结束事务的会话不能淘汰（否则静默回滚/丢未提交数据）。
     if (entry.session.kind === 'sql' && entry.session.query.inTransaction) return false;
     return true;
@@ -754,7 +774,7 @@ export class ConnectionManager {
         // 显式打开的连接与被持有（retain）的连接豁免「空闲超时」，但仍要检测存活：
         // SSH 断开/DB 掉线后过去会一直显示为已打开、反复失败，只能手动关闭。
         const id = entry.connId;
-        const idle = !this.explicit.has(id) && !this.retains.has(id) && now - entry.lastUsed > this.config.idleTimeoutMs;
+        const idle = !this.explicit.has(id) && !this.retains.has(id) && (this.busies.get(id) ?? 0) === 0 && now - entry.lastUsed > this.config.idleTimeoutMs;
         if (idle || !entry.session.isAlive()) {
           toDispose.push(entry);
         }

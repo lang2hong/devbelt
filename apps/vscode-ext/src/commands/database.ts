@@ -118,7 +118,9 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
           yield* rawStatements;
         })()
       : rawStatements;
-    await vscode.window.withProgress(
+    const unmarkBusy = manager.markBusy(conn.id);
+    try {
+      await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'Restoring database...', cancellable: true },
       async (progress, token) => {
         let completed = 0;
@@ -146,7 +148,10 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
           );
         }
       },
-    );
+      );
+    } finally {
+      unmarkBusy();
+    }
   });
 
   sub('devbelt.importTable', async (node: DbTreeNode) => {
@@ -328,6 +333,8 @@ export async function runExportWizard(
   const serverInfo = { name: conn.name, dbType: conn.dbType, host: conn.host, port: conn.port, version };
   const withBom = (format === 'csv' || format === 'txt')
     && vscode.workspace.getConfiguration('devbelt').get<boolean>('export.addUtf8Bom') === true;
+  // 批量导出期间标记 busy：会话不被淘汰/空闲关闭（多表之间有间隙，inFlight 覆盖不到）。
+  const unmarkBusy = manager.markBusy(node.conn.id);
   try {
     await vscode.window.withProgress({
       location: vscode.ProgressLocation.Notification,
@@ -368,6 +375,8 @@ export async function runExportWizard(
     } else {
       vscode.window.showErrorMessage(l10n('export.failed', { message: (error as Error).message }));
     }
+  } finally {
+    unmarkBusy();
   }
 }
 
@@ -387,7 +396,7 @@ async function importSqlScript(
   if (database && conn.dbType === DatabaseType.MYSQL) {
     await session.query.query(`USE ${wrapIdentForConn(conn, validateIdent(database))}`);
   }
-  const txControl = /^(BEGIN|START\s+TRANSACTION|COMMIT|ROLLBACK|END)\s*;?\s*$/i;
+  const txControl = /^(BEGIN|START\s+TRANSACTION|COMMIT(\s+WORK|\s+AND\s+(NO\s+)?CHAIN)?|END(\s+TRANSACTION)?|ABORT|ROLLBACK(\s+WORK|\s+AND\s+(NO\s+)?CHAIN)?)\s*;?\s*$/i;
   const statements = splitSqlStatements(sql, manager.scanOptionsFor?.(conn))
     .filter((st) => !txControl.test(st.trim()));
   // 脚本导入过去逐句直接执行，中途失败会留下半截数据。除 SQLite（CLI 驱动每句独立
@@ -397,6 +406,7 @@ async function importSqlScript(
   let done = 0;
   let insertedRows = 0;
   let hasAffectedInfo = false;
+  const unmarkBusy = manager.markBusy(conn.id);
   try {
     if (transactional) await session.query.query('BEGIN');
     // PG 无 USE：脚本里不带 schema 的 INSERT/CREATE 默认落到 search_path 的 schema。
@@ -437,6 +447,8 @@ async function importSqlScript(
     }
     if (error instanceof TransferCancelledError) vscode.window.showInformationMessage(l10n('transfer.cancelled'));
     else vscode.window.showErrorMessage(l10n('import.failedStatement', { count: done, message: (error as Error).message }));
+  } finally {
+    unmarkBusy();
   }
 }
 
@@ -528,6 +540,7 @@ async function importStructuredData(
   const insertPreview = session.query.dialect.buildInsertSql([{ [firstTarget]: source.rows[0][selected[0].source] }], [firstTarget], table.label, database, schema);
   if (!(await confirmSqlExecution(conn, insertPreview, manager.scanOptionsFor?.(conn)))) return;
   connCtx.setLast(conn, database);
+  const unmarkBusy = manager.markBusy(conn.id);
   try {
     const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: l10n('import.progress'), cancellable: true }, (progress, token) => {
       const common = {
@@ -568,6 +581,8 @@ async function importStructuredData(
   } catch (error) {
     if (error instanceof TransferCancelledError) vscode.window.showInformationMessage(l10n('transfer.cancelled'));
     else vscode.window.showErrorMessage(l10n('import.failed', { message: (error as Error).message }));
+  } finally {
+    unmarkBusy();
   }
 }
 

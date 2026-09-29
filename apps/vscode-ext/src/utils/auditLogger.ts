@@ -24,6 +24,8 @@ export interface AuditEntry {
   action: AuditAction;
   connName: string;
   database?: string;
+  /** PG 命名空间（多 schema 下区分同一库内的写入目标）。 */
+  schema?: string;
   sql?: string;
   rowCount?: number;
   costTime?: number;

@@ -57,13 +57,18 @@ export async function confirmSqlExecution(
   conn: SavedConnection,
   sql: string,
   scanOptions?: import('@devbelt/db-core/sql').SqlScanOptions,
+  /** 写入目标范围：文案里带上库/schema，用户确认时看得出写到哪。 */
+  scope?: { database?: string; schema?: string },
 ): Promise<boolean> {
   const risk = analyzeRiskConservative(conn, sql, scanOptions);
   if (!risk.isWrite) return true;
   if (!ensureWritable(conn)) return false;
   if (risk.level !== 'critical' && conn.environment !== 'production') return true;
 
-  const detail = risk.reason || l10n('sql.productionWrite');
+  const scopeLabel = scope
+    ? (scope.schema ? `${scope.database ?? ''}.${scope.schema}` : (scope.database ?? ''))
+    : '';
+  const detail = (risk.reason || l10n('sql.productionWrite')) + (scopeLabel ? ` — ${scopeLabel}` : '');
   const action = l10n('sql.runAction');
   return (await vscode.window.showWarningMessage(
     l10n('sql.reviewBeforeRun', { detail }),

@@ -37,7 +37,7 @@ export class RowEditor {
         this.post({ type: 'error', message: 'No identifying columns for this row.' });
         return;
       }
-      if (!(await confirmSqlExecution(this.conn, `UPDATE ${this.table} SET ${col} = ? WHERE ${pkColumns.join(', ')} = ?`, this.manager.scanOptionsFor?.(this.conn)))) return;
+      if (!(await confirmSqlExecution(this.conn, `UPDATE ${this.table} SET ${col} = ? WHERE ${pkColumns.join(', ')} = ?`, this.manager.scanOptionsFor?.(this.conn), { database: this.database, schema: pgSchemaFor(this.conn, this.schema) }))) return;
       const session = await this.manager.connectSql(this.conn, this.database);
       const result = await session.data.updateCell(this.table, pkColumns, pkValues, col, val, this.database, pgSchemaFor(this.conn, this.schema));
       this.post({ type: 'cellUpdated' });
@@ -56,7 +56,7 @@ export class RowEditor {
         this.post({ type: 'error', message: 'No identifying columns for row deletion.' });
         return;
       }
-      if (!(await confirmSqlExecution(this.conn, `DELETE FROM ${this.table} WHERE ${cols.join(', ')} = ?`, this.manager.scanOptionsFor?.(this.conn)))) return;
+      if (!(await confirmSqlExecution(this.conn, `DELETE FROM ${this.table} WHERE ${cols.join(', ')} = ?`, this.manager.scanOptionsFor?.(this.conn), { database: this.database, schema: pgSchemaFor(this.conn, this.schema) }))) return;
       const session = await this.manager.connectSql(this.conn, this.database);
       const result = await session.data.deleteRows(
         this.table,
@@ -75,7 +75,7 @@ export class RowEditor {
 
   async insertRow(columns: string[], values: (string | null)[]): Promise<void> {
     try {
-      if (!(await confirmSqlExecution(this.conn, `INSERT INTO ${this.table} ...`, this.manager.scanOptionsFor?.(this.conn)))) return;
+      if (!(await confirmSqlExecution(this.conn, `INSERT INTO ${this.table} ...`, this.manager.scanOptionsFor?.(this.conn), { database: this.database, schema: pgSchemaFor(this.conn, this.schema) }))) return;
       const session = await this.manager.connectSql(this.conn, this.database);
       const result = await session.data.insertRow(this.table, columns, values, this.database, pgSchemaFor(this.conn, this.schema));
       this.notify('insert', result, `INSERT INTO ${this.table} (${columns.join(', ')})`, 1);
@@ -104,11 +104,12 @@ export class RowEditor {
     rowCount: number,
   ): void {
     const sql = result?.sql || fallbackSql;
-    void eventBus.publish(new DataChangeEvent(this.conn.id, this.database ?? '', this.table, operation));
+    void eventBus.publish(new DataChangeEvent(this.conn.id, this.database ?? '', this.table, operation, pgSchemaFor(this.conn, this.schema)));
     AuditLogger.tryLog({
       action: operation === 'insert' ? 'data_insert' : operation === 'update' ? 'data_edit' : 'data_delete',
       connName: this.conn.name || this.conn.host,
       database: this.database,
+      schema: pgSchemaFor(this.conn, this.schema),
       sql,
       rowCount,
       costTime: result?.costTime,

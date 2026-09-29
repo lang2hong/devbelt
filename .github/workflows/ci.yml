@@ -1,9 +1,11 @@
 name: CI
 
 on:
-  # 专用 CI 分支：仅推送到 ci 触发；main 保持自身配置，其他分支/PR 不跑。
+  # 专用 CI 分支：推送到 ci 触发；针对 main 的 PR 也触发（合并前的门禁）。
   push:
     branches: [ci]
+  pull_request:
+    branches: [main]
 
 jobs:
   build:

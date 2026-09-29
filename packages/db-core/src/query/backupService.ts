@@ -253,7 +253,7 @@ export class BackupService {
     // 剥离 dump 自带的事务控制语句：恢复自身已用 BEGIN/COMMIT 包裹，dump 内再出现
     // COMMIT 会提前提交外层事务（回滚失效），BEGIN 则会嵌套。DDL 在 MySQL 会隐式
     // 提交，仍无法完全原子（已记入台账）。
-    const txControl = /^(BEGIN|START\s+TRANSACTION|COMMIT|ROLLBACK|END)\s*;?\s*$/i;
+    const txControl = /^(BEGIN|START\s+TRANSACTION|COMMIT(\s+WORK|\s+AND\s+(NO\s+)?CHAIN)?|END(\s+TRANSACTION)?|ABORT|ROLLBACK(\s+WORK|\s+AND\s+(NO\s+)?CHAIN)?)\s*;?\s*$/i;
     // 数组输入可预知总数（进度显示 N/M，旧行为）；流式输入（大文件不整读内存）
     // 只有在执行过程中才知道进度，总数按已完成数报。
     const isArray = Array.isArray(statements);
