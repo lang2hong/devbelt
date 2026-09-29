@@ -324,13 +324,14 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const session = await this.manager.connectSql(conn);
     if (!session.capabilities.multiDatabaseExplorer) {
       const only = conn.database || (conn.dbType === DatabaseType.PG ? 'public' : 'main');
-      const n = new DbTreeNode(only, TreeItemCollapsibleState.Collapsed, NodeKind.Database, conn, undefined, element);
+      const n = new DbTreeNode(only, TreeItemCollapsibleState.Collapsed, NodeKind.Database, conn, undefined, element, undefined, only);
       n.id = `${conn.id}:sqldb:${only}`;
       return [n];
     }
     const dbs = await session.metadata.getDatabases();
     return dbs.map((db) => {
-      const n = new DbTreeNode(db, TreeItemCollapsibleState.Collapsed, NodeKind.Database, conn, undefined, element);
+      // B4：Database 节点带 `database=库名`，恢复/导入/导出/定时备份/数据对比据此命中该库。
+      const n = new DbTreeNode(db, TreeItemCollapsibleState.Collapsed, NodeKind.Database, conn, undefined, element, undefined, db);
       n.id = `${conn.id}:sqldb:${db}`;
       return n;
     });

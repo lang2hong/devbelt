@@ -79,6 +79,21 @@ describe('B1 Schema 层方言门控', () => {
     expect(queryCats).toHaveLength(1);
   });
 
+  it('B4：PG Database 节点携带 database=库名（恢复/导入/导出/备份据此命中）', async () => {
+    const manager: any = {
+      connectSql: async () => ({
+        capabilities: { multiDatabaseExplorer: true, schemas: true, operations: [] },
+        metadata: { getDatabases: async () => ['app', 'other'] },
+      }),
+    };
+    const store: any = { get: () => undefined, list: () => [] };
+    const provider = new DbTreeDataProvider(store, manager);
+    const conn: any = { id: 'pg-1', name: 'p', dbType: 'PG', host: 'h', port: 5432, database: 'app' };
+    const el = new DbTreeNode('p', 1 as any, NodeKind.Connection, conn);
+    const kids = await (provider as any).buildConnectionChildren(el);
+    expect(kids.map((n: DbTreeNode) => [n.label, n.database])).toEqual([['app', 'app'], ['other', 'other']]);
+  });
+
   it('跨 schema 同层节点 id 唯一（Schema 及其分类派生自父节点 id）', async () => {
     const provider = makeProvider(async () => ['public', 'sales']);
     const kids = await (provider as any).buildDatabaseChildren(dbNode('PG'));

@@ -29,6 +29,7 @@ export { ConnectionFactory } from './factory/connectionFactory.js';
 // 工具
 export { validateIdent } from './utils/validate.js';
 export { qualifyTable } from './utils/qualify.js';
+export { withDatabaseInUrl } from './utils/connectionUrl.js';
 export { toBool } from './utils/coerce.js';
 export { columnTypesFor } from './dialect/typeCatalog.js';
 

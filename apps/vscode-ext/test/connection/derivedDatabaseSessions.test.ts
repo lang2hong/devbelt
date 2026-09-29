@@ -4,6 +4,8 @@ import { DatabaseType } from '@devbelt/db-core';
 
 /** 记录每次真正建连时使用的 database，用于验证 PG 多库衍生会话。 */
 const createdDatabases: (string | undefined)[] = [];
+/** 记录每次建连时的 connectionUrl（URL 配置的 PG 衍生会话须改写库名）。 */
+const createdUrls: (string | undefined)[] = [];
 let endCalled = 0;
 let tunnelCreated = 0;
 let tunnelReleased = 0;
@@ -41,8 +43,9 @@ vi.mock('@devbelt/db-core', async (importOriginal) => {
   return {
     ...actual,
     ConnectionFactory: {
-      createWithDialect: (_type: unknown, config: { database?: string }) => {
+      createWithDialect: (_type: unknown, config: { database?: string; connectionUrl?: string }) => {
         createdDatabases.push(config.database);
+        createdUrls.push(config.connectionUrl);
         return { connection: new FakeConnection(), dialect };
       },
     },
@@ -65,6 +68,7 @@ describe('B2：PG 多库衍生会话', () => {
   afterEach(() => {
     managers.forEach((m) => m.disposeAll());
     createdDatabases.length = 0;
+    createdUrls.length = 0;
     endCalled = 0;
     tunnelCreated = 0;
     tunnelReleased = 0;
@@ -86,6 +90,18 @@ describe('B2：PG 多库衍生会话', () => {
     expect(m.openCount()).toBe(1);
   });
 
+  it('B2：URL 配置的 PG 衍生会话改写 URL 库名（驱动实际连目标库）', async () => {
+    const m = new ConnectionManager();
+    managers.push(m);
+    await m.connectSql(
+      conn({ useConnectionString: true, connectionUrl: 'postgres://u:p@h:5432/app?sslmode=require' }),
+      'other',
+    );
+    expect(createdUrls.at(-1)).toContain('/other');
+    expect(createdUrls.at(-1)).toContain('sslmode=require');
+    expect(createdUrls.at(-1)).not.toContain('/app');
+  });
+
   it(`每连接最多 ${DERIVED_DB_SESSION_MAX} 个衍生库会话（LRU 淘汰）`, async () => {
     const m = new ConnectionManager();
     managers.push(m);
@@ -99,6 +115,19 @@ describe('B2：PG 多库衍生会话', () => {
     expect(m.peekSql('c-1', 'other')).toBeUndefined();
     expect(m.peekSql('c-1', 'd5')).toBeTruthy();
     expect(m.openCount()).toBe(1);
+  });
+
+  it('B3：markExplicit 只保护主会话，衍生库会话仍按上限淘汰', async () => {
+    const m = new ConnectionManager();
+    managers.push(m);
+    await m.connectSql(conn());
+    m.markExplicit('c-1');
+    await m.connectSql(conn(), 'other');
+    for (const db of ['d1', 'd2', 'd3', 'd4', 'd5']) await m.connectSql(conn(), db);
+    // 主会话不受上限影响；衍生仍被淘汰到上限。
+    expect(m.peekSql('c-1')).toBeTruthy();
+    expect(m.peekSql('c-1', 'other')).toBeUndefined();
+    expect(m.activeConnections).toBe(1 + DERIVED_DB_SESSION_MAX);
   });
 
   it('disposeConn 关闭全部衍生会话并释放隧道引用', async () => {

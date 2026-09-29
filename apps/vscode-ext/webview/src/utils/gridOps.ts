@@ -44,10 +44,13 @@ export function buildInsertStatement(
   columns: readonly string[],
   rows: ReadonlyArray<Record<string, unknown>>,
   dbType: string | undefined,
+  schema?: string,
 ): string {
   if (!table || rows.length === 0) return '';
   const q = (n: string) => identifierQuote(dbType, n);
-  const target = dbName ? `${q(dbName)}.${q(table)}` : q(table);
+  // PG 的限定是 **schema**（dbName 是库名，用它限定会被解析成 schema 而写错对象）；其它方言用库名。
+  const qualifier = dbType === 'PG' ? schema : dbName;
+  const target = qualifier ? `${q(qualifier)}.${q(table)}` : q(table);
   const colList = columns.map(q).join(', ');
   // 数字/布尔不加引号（否则复制出的 INSERT 在 PG 等严格类型下语义/类型不对）。
   const fmt = (v: unknown): string =>

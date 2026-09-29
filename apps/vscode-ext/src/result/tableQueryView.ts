@@ -7,6 +7,7 @@ import { CompletionService } from './completionService';
 import { RowEditor } from './rowEditor';
 import { QueryRunner } from './queryRunner';
 import { ExportHandler } from './exportHandler';
+import { pgSchemaFor } from '../utils/sql';
 
 /** 结果面板承载的数据库对象类型。视图（VIEW）不可写。 */
 export type ResultObjectType = 'table' | 'view';
@@ -301,6 +302,8 @@ export class TableQueryView extends BaseWebView {
       hasTable: this.hasTable,
       tableName: this.table || '',
       dbName: this.database || '',
+      // PG：限定「复制为 INSERT」用的 schema（dbName 是库名，不能当 schema 用）。
+      schemaName: pgSchemaFor(this.conn, this.opts.schema) || '',
       sortCol: this.runner.sortCol,
       sortDir: this.runner.sortDir,
       filterConditions: this.runner.filterConditions,

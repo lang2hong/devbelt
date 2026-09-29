@@ -127,6 +127,11 @@ export class QueryService {
   /** 在途查询的取消句柄（多槽，支持并发查询各自取消）。 */
   private readonly activeCancels = new Map<number, () => void>();
   private nextQueryId = 1;
+  /**
+   * 会话是否处于显式事务中（best-effort，按语句首关键字跟踪）。
+   * 供连接池淘汰判断：**有未结束事务的会话不能被淘汰**（会静默回滚/丢未提交数据）。
+   */
+  private txActive = false;
 
   constructor(
     private readonly connection: IConnection,
@@ -145,6 +150,20 @@ export class QueryService {
   /** 生效的查询超时：会话级覆盖优先，否则全局默认。 */
   private get timeoutMs(): number {
     return this.timeoutMsOverride ?? QueryService.queryTimeout;
+  }
+
+  /** 是否处于显式事务中（best-effort；连接池淘汰据此保护）。 */
+  get inTransaction(): boolean {
+    return this.txActive;
+  }
+
+  /** 按语句首关键字更新事务状态（近似：多语句脚本按整体首关键字判断）。 */
+  private trackTransaction(sql: string): void {
+    const head = sql.replace(/^\s*(?:--[^\n]*\n|\/\*[\s\S]*?\*\/\s*)*/, '').trimStart();
+    if (/^(BEGIN|START\s+TRANSACTION)\b/i.test(head)) this.txActive = true;
+    else if (/^(COMMIT|ROLLBACK|END|ABORT)\b/i.test(head)) this.txActive = false;
+    else if (/^SET\s+AUTOCOMMIT\s*=\s*0\b/i.test(head)) this.txActive = true;
+    else if (/^SET\s+AUTOCOMMIT\s*=\s*1\b/i.test(head)) this.txActive = false;
   }
 
   /**
@@ -185,6 +204,7 @@ export class QueryService {
     if (!sql || typeof sql !== 'string' || sql.trim().length === 0) {
       throw new QueryError('SQL statement cannot be empty');
     }
+    this.trackTransaction(sql);
     const start = Date.now();
     const id = this.nextQueryId++;
     return new Promise<QueryResult>((resolve, reject) => {

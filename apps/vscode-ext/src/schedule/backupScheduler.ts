@@ -102,45 +102,44 @@ export class BackupScheduler {
     const session = await this.manager.connectSql(conn, entry.database);
     // 文件名带日期 + 时间：只到「日」时，同一天多次/每小时备份会互相覆盖，历史静默丢失。
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-    const fileName = backupFileName(entry.database, stamp);
-    const uri = vscode.Uri.joinPath(vscode.Uri.file(entry.outputDir), fileName);
-
-    // 流式写盘：dump 不再整份驻留内存，内存占用只与单表数据量相关。
-    // 先写 .tmp 再原子改名：中途失败不会留下半截 dump 被当成有效备份。
     await mkdir(entry.outputDir, { recursive: true });
-    const tmpPath = `${uri.fsPath}.tmp`;
-    const stream = createWriteStream(tmpPath, { encoding: 'utf8' });
-    const streamError = new Promise<never>((_, reject) => stream.once('error', reject));
-    const write = async (chunk: string): Promise<void> => {
-      if (!stream.write(chunk)) await once(stream, 'drain');
-    };
-    try {
-      // PG 多 schema：逐 schema dump（对象名带 schema 限定）；MySQL/SQLite 单次。
-      const schemas: (string | undefined)[] = conn.dbType === 'PG'
-        ? (await session.metadata.getSchemas())
-        : [undefined];
-      await Promise.race([
-        (async () => {
-          for (const schema of schemas) {
-            await BackupService.writeDatabaseDump(
-              session.query, session.metadata, session.table, entry.database,
-              write,
-              { includeData: entry.includeData, schema },
-            );
-          }
-        })(),
-        streamError,
-      ]);
-      await new Promise<void>((resolve, reject) => {
-        stream.end(() => resolve());
-        stream.once('error', reject);
-      });
-      await rename(tmpPath, uri.fsPath);
-    } catch (err) {
-      stream.destroy();
-      await rm(tmpPath, { force: true }).catch(() => {});
-      throw err;
+    // PG 多 schema：**每个 schema 一个文件**（dump 目标相对，不含 schema 限定）——
+    // 这样一个文件可恢复到任意目标 schema（restore 设 search_path），不会把源 schema 写死。
+    const schemas: (string | undefined)[] = conn.dbType === 'PG'
+      ? (await session.metadata.getSchemas())
+      : [undefined];
+    const written: string[] = [];
+    for (const schema of schemas) {
+      const fileName = backupFileName(entry.database, stamp, schema);
+      const uri = vscode.Uri.joinPath(vscode.Uri.file(entry.outputDir), fileName);
+      // 流式写盘：dump 不再整份驻留内存；先写 .tmp 再原子改名，中途失败不留半截 dump。
+      const tmpPath = `${uri.fsPath}.tmp`;
+      const stream = createWriteStream(tmpPath, { encoding: 'utf8' });
+      const streamError = new Promise<never>((_, reject) => stream.once('error', reject));
+      const write = async (chunk: string): Promise<void> => {
+        if (!stream.write(chunk)) await once(stream, 'drain');
+      };
+      try {
+        await Promise.race([
+          BackupService.writeDatabaseDump(
+            session.query, session.metadata, session.table, entry.database,
+            write,
+            { includeData: entry.includeData, schema },
+          ),
+          streamError,
+        ]);
+        await new Promise<void>((resolve, reject) => {
+          stream.end(() => resolve());
+          stream.once('error', reject);
+        });
+        await rename(tmpPath, uri.fsPath);
+        written.push(fileName);
+      } catch (err) {
+        stream.destroy();
+        await rm(tmpPath, { force: true }).catch(() => {});
+        throw err;
+      }
     }
-    vscode.window.showInformationMessage(l10n('backup.complete', { name: fileName }));
+    vscode.window.showInformationMessage(l10n('backup.complete', { name: written.join(', ') }));
   }
 }

@@ -83,22 +83,19 @@ export class BackupService {
     const { tables, includeData = true, pageSize = 1000, onProgress, isCancelled, schema } = options;
     const tableList = tables ?? (await meta.getTables(database, schema)).map((t) => t.name);
     const dbType = query.dialect.dbType;
-    // PG 指定 schema 时对象名带 schema 限定（`"schema"."t"`），恢复可落到新建/空白库；
-    // 不给 schema（MySQL/SQLite 或 PG 默认）保持不带前缀，dump 可在库之间迁移。
-    const scoped = dbType === DatabaseType.PG && !!schema;
-    const qualify = (name: string): string => scoped
-      ? `${query.dialect.wrap(schema!)}.${query.dialect.wrap(name)}`
-      : query.dialect.wrap(name);
+    // B5：对象名**不带** schema/库前缀，dump 是「目标相对」的——恢复到哪个 schema/库，
+    // 由恢复侧的 search_path（或所选库）决定，而不是 dump 里写死的源 schema。
+    // `schema` 只用于**取对象清单**（决定 dump 哪些 schema 的对象）。
+    const qualify = (name: string): string => query.dialect.wrap(name);
 
     const header: string[] = [
       '-- DevBelt Dump',
       `-- Server Type: ${dbType}`,
       `-- Database: ${sqlCommentSafe(database)}`,
-      ...(scoped ? [`-- Schema: ${sqlCommentSafe(schema!)}`] : []),
+      ...(schema ? [`-- Schema: ${sqlCommentSafe(schema)}`] : []),
       `-- Date: ${new Date().toISOString()}`,
       '',
     ];
-    if (scoped) header.push(`CREATE SCHEMA IF NOT EXISTS ${query.dialect.wrap(schema!)};`, '');
     const prelude = this.sqlPrelude(dbType);
     if (prelude) header.push(prelude + ';');
     await write(header.join('\n') + '\n');
@@ -108,10 +105,9 @@ export class BackupService {
       const table = tableList[i];
       onProgress?.({ table, completed: i, total: tableList.length });
 
-      const ddl = await tableService.getCreateSql(table, database, schema);
-      // 不带库前缀：dump 过去把源库名写死（`"srcdb"."t"`），在目标库上恢复时会
-      // 写回**源库**（且确认框显示的是目标库），是数据写错库。不限定即恢复到
-      // 当前连接选中的库，dump 也因此可在库之间迁移。
+      // 不带 schema/库前缀：dump 恢复到**当前连接选中的库/schema**（restore 设 search_path），
+// 而不是 dump 里写死的源对象；dump 因此可在库/schema 之间迁移。
+      const ddl = await tableService.getCreateSql(table, database);
       const qualified = qualify(table);
       const block: string[] = ['', `DROP TABLE IF EXISTS ${qualified};`, ddl.replace(/;\s*$/, '') + ';'];
 
@@ -158,8 +154,8 @@ export class BackupService {
           // 原样写出会先 DROP 再执行一个 SELECT —— 视图被删且永不重建。该方法同时
           // 为 MySQL 剥离绑定源账号的 ALGORITHM/DEFINER，并把 SQLite 转成 DROP+CREATE。
           const raw = await meta.getViewDefinition(v.name, database, schema);
-          // 不传 `database`：dump 保持不带库前缀（可跨库迁移）；仅 PG 指定 schema 时限定。
-          const alter = query.dialect.normalizeViewAlterSql(raw, v.name, undefined, schema);
+          // 不传 database/schema：dump 保持不加前缀（目标相对，可跨库/schema 迁移）。
+          const alter = query.dialect.normalizeViewAlterSql(raw, v.name, undefined, undefined);
           const qualified = qualify(v.name);
           await write(`\nDROP VIEW IF EXISTS ${qualified};\n${alter}\n`);
         } catch { /* 单个视图定义取不到则跳过，不使整库 dump 失败 */ }

@@ -6,6 +6,7 @@ import { sanitizeFileName } from '../data/transfer/exportService';
  * 库名可包含 `/`、`..` 等字符；不清洗会拼出逃出 `outputDir` 的相对路径。
  * 独立成纯函数以便直接单测（不依赖 vscode）。
  */
-export function backupFileName(database: string, stamp: string): string {
-  return `${sanitizeFileName(database)}_${stamp}.sql`;
+export function backupFileName(database: string, stamp: string, schema?: string): string {
+  const base = schema ? `${database}.${schema}` : database;
+  return `${sanitizeFileName(base)}_${stamp}.sql`;
 }

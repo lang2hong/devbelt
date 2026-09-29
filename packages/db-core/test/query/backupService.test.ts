@@ -550,12 +550,13 @@ describe('BackupService.restore 流式输入', () => {
   });
 });
 
-describe('BackupService A3：PG 指定 schema 的 dump', () => {
-  it('带 schema：CREATE SCHEMA + 对象名限定；不带 schema：保持无前缀', async () => {
+describe('BackupService B5：schema dump 目标相对（不写死源 schema）', () => {
+  it('带 schema：只标注 -- Schema，对象名不加前缀、不 CREATE SCHEMA', async () => {
     const conn = new FakeConnection();
     const query = makeQueryService(conn, new PostgreSqlDialect());
+    const seenSchemas: (string | undefined)[] = [];
     const meta = {
-      getTables: async () => [{ name: 'users' }],
+      getTables: async (_db?: string, schema?: string) => { seenSchemas.push(schema); return [{ name: 'users' }]; },
       getColumns: async () => [],
       getViews: async () => [],
       getFunctions: async () => [],
@@ -563,18 +564,16 @@ describe('BackupService A3：PG 指定 schema 的 dump', () => {
       getTriggers: async () => [],
     } as unknown as MetadataService;
     const tableService = {
-      getCreateSql: async (_t: string, _db?: string, schema?: string) =>
-        schema ? `CREATE TABLE "${schema}"."users" (id int)` : 'CREATE TABLE "users" (id int)',
+      getCreateSql: async () => 'CREATE TABLE "users" (id int)',
     } as unknown as TableService;
 
-    const scoped = await BackupService.databaseDump(query, meta, tableService, 'app', { includeData: false, schema: 'sales' });
-    expect(scoped).toContain('CREATE SCHEMA IF NOT EXISTS "sales";');
-    expect(scoped).toContain('-- Schema: sales');
-    expect(scoped).toContain('DROP TABLE IF EXISTS "sales"."users";');
-    expect(scoped).toContain('CREATE TABLE "sales"."users"');
-
-    const plain = await BackupService.databaseDump(query, meta, tableService, 'app', { includeData: false });
-    expect(plain).not.toContain('CREATE SCHEMA IF NOT EXISTS');
-    expect(plain).toContain('DROP TABLE IF EXISTS "users";');
+    const dump = await BackupService.databaseDump(query, meta, tableService, 'app', { includeData: false, schema: 'sales' });
+    // schema 只用于取对象清单。
+    expect(seenSchemas).toContain('sales');
+    expect(dump).toContain('-- Schema: sales');
+    // 目标相对：不写死源 schema，也不建 schema。
+    expect(dump).not.toContain('CREATE SCHEMA');
+    expect(dump).toContain('DROP TABLE IF EXISTS "users";');
+    expect(dump).not.toContain('"sales"."users"');
   });
 });

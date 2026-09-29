@@ -46,6 +46,7 @@ const limit = ref(100);
 const total = ref<number | undefined>(undefined);
 const tableName = ref('');
 const dbName = ref('');
+const schemaName = ref('');
 const dbType = ref('');
 const running = ref(false);
 const viewMode = ref<'table' | 'chart'>('table');
@@ -128,6 +129,7 @@ onMounted(() => {
       canEdit.value = !!msg.canEdit;
       tableName.value = msg.tableName || '';
       dbName.value = msg.dbName || '';
+      schemaName.value = msg.schemaName || '';
       sortCol.value = msg.sortCol || '';
       sortDir.value = msg.sortDir || '';
       filterConditions.value = Array.isArray(msg.filterConditions) ? msg.filterConditions : [];
@@ -503,6 +505,7 @@ function onKeydown(e: KeyboardEvent) {
       :table-name="tableName"
       :db-type="dbType"
       :db-name="dbName"
+      :schema-name="schemaName"
       :hidden-columns="hiddenColumns"
       :can-edit="canEdit"
       :allow-export="viewKind !== 'structure'"

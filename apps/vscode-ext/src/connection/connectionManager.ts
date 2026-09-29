@@ -1,4 +1,4 @@
-import { ConnectionFactory, QueryService, MetadataService, DataService, TableService, DialectRegistry, DatabaseType, RedisClient, buildRedisTlsOptions } from '@devbelt/db-core';
+import { ConnectionFactory, QueryService, MetadataService, DataService, TableService, DialectRegistry, DatabaseType, RedisClient, buildRedisTlsOptions, withDatabaseInUrl } from '@devbelt/db-core';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import type { HistoryStore } from '../history/historyStore';
 import { parseNoBackslashEscapes, parseStandardConformingStringsOff, type SqlScanOptions } from '@devbelt/db-core/sql';
@@ -271,8 +271,17 @@ export class ConnectionManager {
     const generation = this.generation(conn.id);
     // 有效配置（本机覆盖优先）用作建连与路径校验的唯一依据。
     const effective = this.effective(conn);
-    // PG 衍生库会话：只覆盖 database，其余配置不变。
-    const target = database !== undefined ? { ...effective, database } : effective;
+    // PG 衍生库会话：覆盖 database；用 URL 配置时同步改写 URL 里的库名，
+    // 否则驱动仍会连 URL 指到的库（`database` 字段被忽略）。
+    const target = database !== undefined
+      ? {
+          ...effective,
+          database,
+          ...(effective.useConnectionString && effective.connectionUrl
+            ? { connectionUrl: withDatabaseInUrl(effective.connectionUrl, database) }
+            : {}),
+        }
+      : effective;
 
     // 建连前强制路径硬拒绝（阶段 A 附加）：已配置但缺失/不可读即拒建。
     const pathCheck = await validateConnectionPaths(target);
@@ -705,9 +714,14 @@ export class ConnectionManager {
    */
   private isEvictable(entry: SessionEntry, protectKey?: string): boolean {
     if (entry.key === protectKey) return false;
-    if (this.explicit.has(entry.connId)) return false;
+    const isPrimary = entry.key === entry.connId;
+    // 「显式打开」只保护**主会话**：PG 展开超过上限的衍生库会话仍按自身状态淘汰（B3）。
+    if (isPrimary && this.explicit.has(entry.connId)) return false;
+    // 被视图/面板 retain、或有在途查询的会话不淘汰。
     if (this.retains.has(entry.connId)) return false;
     if (this.sqlInFlight(entry.session) > 0) return false;
+    // 有未结束事务的会话不能淘汰（否则静默回滚/丢未提交数据）。
+    if (entry.session.kind === 'sql' && entry.session.query.inTransaction) return false;
     return true;
   }
 

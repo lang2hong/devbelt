@@ -6,6 +6,7 @@ import { MetadataService } from '../../src/query/metadataService';
 import { DataService } from '../../src/query/dataService';
 import { TableService } from '../../src/query/tableService';
 import { PostgreSqlDialect } from '../../src/dialect/postgreSqlDialect';
+import { withDatabaseInUrl } from '../../src/utils/connectionUrl';
 
 // 与生产 PostgreSqlConnection 一致：禁用 pg 对日期/JSON 的默认解析。
 pg.types.setTypeParser(1114, (val) => val);
@@ -105,20 +106,32 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
   });
 
   it('导出→导入 round-trip：DDL/INSERT 都带 schema 限定，恢复落在原 schema', async () => {
-    const ddl = await table.getCreateSql('orders', undefined, S1);
-    expect(ddl).toContain(`"${S1}"`);
-    const rows = (await query.queryAll(`SELECT * FROM ${dialect.wrap(S1)}.${dialect.wrap('orders')}`)).rows;
-    const inserts = dialect.buildInsertSql(rows as any[], ['id', 'dept_id', 'note'], 'orders', undefined, S1);
-    expect(inserts).toContain(`INSERT INTO "${S1}"."orders"`);
+    // 用**独立临时表**，避免动到既有 orders（其上有外键/触发器，且被其它用例依赖）。
+    const t = `rt_${stamp}`;
+    await raw.query(`CREATE TABLE ${S1}."${t}" (id int PRIMARY KEY, v text)`);
+    await raw.query(`INSERT INTO ${S1}."${t}" VALUES (1,'a'),(2,'b')`);
+    try {
+      const ddl = await table.getCreateSql(t, undefined, S1);
+      // quote_ident 对安全名字不加引号：正则允许引号可选。
+      expect(ddl).toMatch(new RegExp(`CREATE TABLE "?${S1}"?\\.("?${t}"?)`));
+      const rows = (await query.queryAll(`SELECT * FROM ${dialect.wrap(S1)}.${dialect.wrap(t)}`)).rows;
+      const inserts = dialect.buildInsertSql(rows as any[], ['id', 'v'], t, undefined, S1);
+      expect(inserts).toMatch(new RegExp(`INSERT INTO "${S1}"\\."${t}"`));
 
-    await raw.query(`DROP TABLE ${S1}.orders`);
-    await raw.query(ddl);
-    await raw.query(inserts);
-    const back = await raw.query(`SELECT count(*)::int AS n FROM ${S1}.orders`);
-    expect(back.rows[0].n).toBe(2);
-    // 未被限定到 search_path（public）里。
-    const stray = await raw.query(`SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'orders'`);
-    expect(stray.rows[0].n).toBe(0);
+      await raw.query(`DROP TABLE ${S1}."${t}"`);
+      await raw.query(ddl);
+      await raw.query(inserts);
+      const back = await raw.query(`SELECT count(*)::int AS n FROM ${S1}."${t}"`);
+      expect(back.rows[0].n).toBe(2);
+      // 未被限定到 search_path（public）里。
+      const stray = await raw.query(
+        `SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1`,
+        [t],
+      );
+      expect(stray.rows[0].n).toBe(0);
+    } finally {
+      await raw.query(`DROP TABLE IF EXISTS ${S1}."${t}"`);
+    }
   });
 
   it('外键：同名约束不跨 schema 错配，且带 refSchema', async () => {
@@ -138,6 +151,18 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
     expect(a).not.toBe(b);
   });
 
+  it('搜索覆盖：逐 schema 枚举可命中非默认 schema 的对象', async () => {
+    // 模拟全局搜索的遍历口径（库 × schema），确认两个 schema 的 orders 都能被搜到。
+    const schemas = await meta.getSchemas();
+    const found: { schema: string; name: string }[] = [];
+    for (const schema of schemas) {
+      for (const t of await meta.getTables(undefined, schema)) {
+        if (t.name.includes('orders')) found.push({ schema, name: t.name });
+      }
+    }
+    expect(new Set(found.map((f) => f.schema))).toEqual(new Set([S1, S2]));
+  });
+
   it('多库（B2）：可见库列表含新建库；按库会话读到该库自己的对象', async () => {
     const db2 = `zms_db_${stamp}`;
     await raw.query(`CREATE DATABASE ${db2}`);
@@ -146,7 +171,8 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
       const names = (await query.queryAll(dialect.getDatabaseListSql())).rows.map((r: any) => r.name);
       expect(names).toContain(db2);
 
-      client2 = new Client({ connectionString: URL!.replace(/\/[^/?]+$/, `/${db2}`) });
+      // 用 withDatabaseInUrl（兼容 `?sslmode=` 等 query），而非脆弱的尾部正则。
+      client2 = new Client({ connectionString: withDatabaseInUrl(URL!, db2) });
       await client2.connect();
       await client2.query('CREATE SCHEMA s1');
       await client2.query('CREATE TABLE s1.t (id int)');

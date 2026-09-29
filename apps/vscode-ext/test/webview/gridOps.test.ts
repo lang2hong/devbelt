@@ -43,7 +43,13 @@ describe('gridOps 插入列语义', () => {
 describe('gridOps 复制 INSERT', () => {
   it('按方言生成，且 NULL 用 NULL 字面量', () => {
     const sql = buildInsertStatement('users', 'db', ['id', 'name'], [{ id: 1, name: null }], 'PG');
-    expect(sql).toBe('INSERT INTO "db"."users" ("id", "name") VALUES (1, NULL);');
+    // B5：PG 限定用 schema，不用库名；未给 schema 时不限定。
+    expect(sql).toBe('INSERT INTO "users" ("id", "name") VALUES (1, NULL);');
+  });
+
+  it('B5：PG 用 schema 限定（不是库名）', () => {
+    const sql = buildInsertStatement('users', 'app', ['id'], [{ id: 1 }], 'PG', 'sales');
+    expect(sql).toBe('INSERT INTO "sales"."users" ("id") VALUES (1);');
   });
 
   it('MySQL 用反引号', () => {

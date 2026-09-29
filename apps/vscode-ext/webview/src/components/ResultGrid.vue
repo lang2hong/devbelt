@@ -26,6 +26,8 @@ const props = defineProps<{
   columnWidths?: Record<string, number>;
   tableName?: string;
   dbName?: string;
+  /** PG 命名空间（限定「复制为 INSERT」的目标；dbName 是库名，不能当 schema 用）。 */
+  schemaName?: string;
   /** 方言（MYSQL/PG/SQLITE）：决定复制 INSERT 时的标识符引用方式。 */
   dbType?: string;
   hiddenColumns?: string[];
@@ -512,7 +514,7 @@ function copyAsInsert() {
   if (!props.rows.length) return showToast(t('wv.grid.nothingToCopy'));
   const targets = selectedRows.value.length ? selectedRows.value : props.rows;
   const cols = visibleFields.value.map((f) => f.name);
-  const sql = buildInsertStatement(props.tableName, props.dbName, cols, targets, props.dbType);
+  const sql = buildInsertStatement(props.tableName, props.dbName, cols, targets, props.dbType, props.schemaName);
   void navigator.clipboard.writeText(sql).then(() => {
     showToast(t('wv.grid.copiedInserts', { count: targets.length }));
   });

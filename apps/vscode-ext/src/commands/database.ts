@@ -96,8 +96,12 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     // 恢复自身用事务包裹，但 MySQL 的 DDL 会隐式提交：中途失败无法回滚已执行的
     // CREATE/ALTER/DROP。确认框必须讲清楚，避免用户以为失败即「什么都没变」。
     const restoreBtn = l10n('restore.confirmAction');
+    // 显示**实际写入目标**（PG 含 schema；dump 目标相对，restore 会设 search_path）。
+    const targetLabel = node.schema
+      ? `${node.database ?? node.conn.database ?? ''}.${node.schema}`
+      : (node.database ?? node.conn.database ?? '');
     const confirmed = await vscode.window.showWarningMessage(
-      l10n('restore.confirm', { database: node.database ?? node.conn.database ?? '' }),
+      l10n('restore.confirm', { database: targetLabel }),
       { modal: true },
       restoreBtn,
     );
