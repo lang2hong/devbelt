@@ -28,6 +28,10 @@ export interface ValueInfo {
   tooLarge: boolean;
   size: number | null;
   data: RedisValueData | null;
+  /** H5：键名解码有损（非 UTF-8）→ 只读。 */
+  keyBinary?: boolean;
+  /** H5：值里解码有损的字段/成员/元素 → 这些项只读。 */
+  binaryFields?: string[];
 }
 
 /** keyBrowser 面板 = 纯值查看/编辑（键导航在 explorer 树侧）。 */

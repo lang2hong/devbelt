@@ -24,6 +24,11 @@ import { configureBackupSchedule } from './backupWizard';
 import { confirmProductionWrite } from '../utils/sqlSafety';
 import { l10n } from '../i18n';
 
+/** H5：解码含替换符（非 UTF-8）的键名/前缀不可按文本操作。 */
+function isBinaryName(s?: string): boolean {
+  return !!s && s.includes('\uFFFD');
+}
+
 export interface ViewCommandDeps {
   context: vscode.ExtensionContext;
   manager: ConnectionManager;
@@ -260,6 +265,7 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     }),
     vscode.commands.registerCommand('devbelt.redis.renameKey', async (node: any) => {
       if (!node?.conn || !node.redisKey) return;
+      if (isBinaryName(node.redisKey)) { vscode.window.showErrorMessage(l10n('cmd.redis.binaryReadOnly')); return; }
       if (!(await confirmProductionWrite(node.conn, `RENAME ${node.redisKey}`))) return;
       const newKey = await vscode.window.showInputBox({ prompt: l10n('redis.tree.renamePrompt'), value: node.redisKey });
       if (!newKey || newKey === node.redisKey) return;
@@ -276,11 +282,16 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     }),
     vscode.commands.registerCommand('devbelt.redis.setKeyTtl', async (node: any) => {
       if (!node?.conn || !node.redisKey) return;
+      if (isBinaryName(node.redisKey)) { vscode.window.showErrorMessage(l10n('cmd.redis.binaryReadOnly')); return; }
       if (!(await confirmProductionWrite(node.conn, `EXPIRE ${node.redisKey}`))) return;
-      const raw = await vscode.window.showInputBox({ prompt: l10n('redis.tree.ttlPrompt') });
+      const raw = await vscode.window.showInputBox({ prompt: l10n('redis.tree.ttlPrompt'), value: '0' });
       if (raw === undefined) return;
+      if (raw.trim() === '') return; // 空输入不静默当 PERSIST
       const seconds = Number(raw);
-      if (!Number.isFinite(seconds) || seconds < 0) return;
+      if (!Number.isInteger(seconds) || seconds < 0) {
+        vscode.window.showErrorMessage(l10n('cmd.redis.ttlInvalid'));
+        return;
+      }
       try {
         await withRedis(node.conn, node.redisDbIndex, async (c) => {
           if (seconds > 0) await redisExpire(c, node.redisKey, seconds);
@@ -292,13 +303,17 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     }),
     vscode.commands.registerCommand('devbelt.redis.deleteKey', async (node: any) => {
       if (!node?.conn || !node.redisKey) return;
+      if (isBinaryName(node.redisKey)) { vscode.window.showErrorMessage(l10n('cmd.redis.binaryReadOnly')); return; }
       if (!(await confirmProductionWrite(node.conn, `UNLINK ${node.redisKey}`))) return;
       const pick = await vscode.window.showWarningMessage(
         l10n('redis.tree.confirmDelete', { key: node.redisKey }), { modal: true }, l10n('common.delete'));
       if (pick !== l10n('common.delete')) return;
       const started = Date.now();
       try {
-        await withRedis(node.conn, node.redisDbIndex, async (c) => { await redisUnlink(c, [node.redisKey]); });
+        await withRedis(node.conn, node.redisDbIndex, async (c) => {
+          const n = await redisUnlink(c, [node.redisKey]);
+          if (!n) throw new Error(l10n('cmd.redis.deleteNoMatch'));
+        });
         auditRedis(node.conn, node.redisDbIndex, `UNLINK ${node.redisKey}`, started);
         await afterRedisMutation(node);
       } catch (e) { vscode.window.showErrorMessage((e as Error).message); }
@@ -307,6 +322,7 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
       if (!node?.conn) return;
       const prefix = node.redisKeyPrefix ?? '';
       if (!prefix) return;
+      if (isBinaryName(prefix)) { vscode.window.showErrorMessage(l10n('cmd.redis.binaryReadOnly')); return; }
       const pattern = redisPrefixPattern(prefix, node.conn.keySeparator || ':');
       if (!(await confirmProductionWrite(node.conn, `UNLINK ${pattern}`))) return;
       const pick = await vscode.window.showWarningMessage(

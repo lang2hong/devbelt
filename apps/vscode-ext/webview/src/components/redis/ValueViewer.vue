@@ -58,9 +58,13 @@ const editing = ref<EditState | null>(null);
 
 const key = computed(() => props.info?.key ?? '');
 const isBinaryString = computed(() => (props.info?.data?.kind === 'string' ? props.info.data.binary : false));
+/** H5：键名有损 → 整个值只读；单个字段/成员/元素有损 → 该项只读。 */
+const ro = computed(() => props.readOnly || !!props.info?.keyBinary);
+const binarySet = computed(() => new Set(props.info?.binaryFields ?? []));
+const isBin = (s: string): boolean => binarySet.value.has(s) || s.includes('\uFFFD');
 /** 大 key 强制加载的截断预览：只读，禁止保存（否则会用预览覆盖整值）。 */
 const truncated = computed(() => !!(props.info as { truncated?: boolean } | null)?.truncated);
-const locked = computed(() => props.readOnly || truncated.value);
+const locked = computed(() => props.readOnly || !!props.info?.keyBinary || truncated.value);
 /** JSON 模式仅展示格式化（原文保存在 stringText，保存用原文）；二进制在 text 模式禁保存。 */
 const jsonPretty = ref('');
 const textLocked = computed(() => locked.value
@@ -177,7 +181,7 @@ function submitTtl(): void {
 const canAddZset = computed(() => !!zsetMember.value && zsetScore.value.trim() !== '' && Number.isFinite(Number(zsetScore.value)));
 
 function startEdit(kind: EditState['kind'], id: string, draft: string): void {
-  if (props.readOnly) return;
+  if (props.readOnly || props.info?.keyBinary) return;
   // hash/zset：draftKey 初值为原 field/member，允许改；list 无 key 维度。
   editing.value = { kind, id, draft, draftKey: kind === 'list' ? undefined : id };
 }
@@ -227,11 +231,11 @@ function copyValue(text: string): void {
         <span class="type">{{ info.keyType }}</span>
         <span class="ttl">{{ t('wv.redis.value.ttl') }}: {{ ttlText }}</span>
         <button class="btn" @click="emit('refresh')">{{ t('wv.redis.value.refresh') }}</button>
-        <button class="btn" :disabled="readOnly" @click="renameOpen = true">{{ t('wv.redis.value.rename') }}</button>
-        <button class="btn" :disabled="readOnly" @click="ttlOpen = true">{{ t('wv.redis.value.setTtl') }}</button>
-        <button class="btn" :disabled="readOnly" @click="emit('persist', key)">{{ t('wv.redis.value.persist') }}</button>
+        <button class="btn" :disabled="ro" @click="renameOpen = true">{{ t('wv.redis.value.rename') }}</button>
+        <button class="btn" :disabled="ro" @click="ttlOpen = true">{{ t('wv.redis.value.setTtl') }}</button>
+        <button class="btn" :disabled="ro" @click="emit('persist', key)">{{ t('wv.redis.value.persist') }}</button>
         <button class="btn" @click="copyKey">{{ copied ? '✓' : t('wv.redis.value.copyKey') }}</button>
-        <button class="btn danger" :disabled="readOnly" @click="emit('remove', key)">{{ t('wv.redis.value.delete') }}</button>
+        <button class="btn danger" :disabled="ro" @click="emit('remove', key)">{{ t('wv.redis.value.delete') }}</button>
       </div>
       <div v-if="renameOpen" class="inline">
         <input v-model="renameValue" :placeholder="t('wv.redis.prompt.rename')" />
@@ -287,9 +291,9 @@ function copyValue(text: string): void {
                 <button class="btn tiny" @click="editing = null">{{ t('wv.redis.confirm.cancel') }}</button>
               </template>
               <template v-else>
-                <button class="btn tiny" :disabled="readOnly" :title="t('wv.redis.value.edit')" @click="startEdit('hash', f, v)">✎</button>
+                <button class="btn tiny" :disabled="ro || isBin(f)" :title="t('wv.redis.value.edit')" @click="startEdit('hash', f, v)">✎</button>
                 <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyValue(v)">⧉</button>
-                <button class="btn tiny" :disabled="readOnly" @click="emit('hashDel', key, [f])">✕</button>
+                <button class="btn tiny" :disabled="ro || isBin(f)" @click="emit('hashDel', key, [f])">✕</button>
               </template>
             </td>
           </tr>
@@ -297,7 +301,7 @@ function copyValue(text: string): void {
         <div class="inline">
           <input v-model="newField" :placeholder="t('wv.redis.hash.field')" />
           <input v-model="newHashValue" :placeholder="t('wv.redis.hash.value')" />
-          <button class="btn" :disabled="readOnly || !newField" @click="emit('hashSet', key, newField, newHashValue); newField=''; newHashValue=''">{{ t('wv.redis.hash.add') }}</button>
+          <button class="btn" :disabled="ro || !newField" @click="emit('hashSet', key, newField, newHashValue); newField=''; newHashValue=''">{{ t('wv.redis.hash.add') }}</button>
         </div>
       </div>
 
@@ -309,8 +313,8 @@ function copyValue(text: string): void {
             <option value="left">{{ t('wv.redis.list.pushLeft') }}</option>
             <option value="right">{{ t('wv.redis.list.pushRight') }}</option>
           </select>
-          <button class="btn" :disabled="readOnly || !listValue" @click="emit('listPush', key, listSide, [listValue]); listValue=''">{{ t('wv.redis.list.push') }}</button>
-          <button class="btn" :disabled="readOnly" @click="emit('listPop', key, listSide)">{{ t('wv.redis.list.pop') }}</button>
+          <button class="btn" :disabled="ro || !listValue" @click="emit('listPush', key, listSide, [listValue]); listValue=''">{{ t('wv.redis.list.push') }}</button>
+          <button class="btn" :disabled="ro" @click="emit('listPop', key, listSide)">{{ t('wv.redis.list.pop') }}</button>
         </div>
         <table>
           <tr v-for="(item, i) in info.data.items" :key="i">
@@ -325,9 +329,9 @@ function copyValue(text: string): void {
                 <button class="btn tiny" @click="editing = null">{{ t('wv.redis.confirm.cancel') }}</button>
               </template>
               <template v-else>
-                <button class="btn tiny" :disabled="readOnly" :title="t('wv.redis.value.edit')" @click="startEdit('list', String(i), item)">✎</button>
+                <button class="btn tiny" :disabled="ro || isBin(item)" :title="t('wv.redis.value.edit')" @click="startEdit('list', String(i), item)">✎</button>
                 <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyValue(item)">⧉</button>
-                <button class="btn tiny" :disabled="readOnly" @click="emit('listRem', key, i, item)">✕</button>
+                <button class="btn tiny" :disabled="ro || isBin(item)" @click="emit('listRem', key, i, item)">✕</button>
               </template>
             </td>
           </tr>
@@ -338,14 +342,14 @@ function copyValue(text: string): void {
         <div class="meta">{{ t('wv.redis.set.card', { count: info.data.card }) }}</div>
         <div class="inline">
           <input v-model="setMember" :placeholder="t('wv.redis.set.member')" />
-          <button class="btn" :disabled="readOnly || !setMember" @click="emit('setAdd', key, [setMember]); setMember=''">{{ t('wv.redis.set.add') }}</button>
+          <button class="btn" :disabled="ro || !setMember" @click="emit('setAdd', key, [setMember]); setMember=''">{{ t('wv.redis.set.add') }}</button>
         </div>
         <table>
           <tr v-for="m in info.data.members" :key="m">
             <td class="v">{{ m }}</td>
             <td class="row-actions">
               <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyValue(m)">⧉</button>
-              <button class="btn tiny" :disabled="readOnly" @click="emit('setRem', key, [m])">✕</button>
+              <button class="btn tiny" :disabled="ro || isBin(m)" @click="emit('setRem', key, [m])">✕</button>
             </td>
           </tr>
         </table>
@@ -356,7 +360,7 @@ function copyValue(text: string): void {
         <div class="inline">
           <input v-model="zsetScore" class="score" :placeholder="t('wv.redis.zset.score')" />
           <input v-model="zsetMember" :placeholder="t('wv.redis.zset.member')" />
-          <button class="btn" :disabled="readOnly || !canAddZset" @click="emit('zsetAdd', key, zsetScore, zsetMember); zsetMember=''">{{ t('wv.redis.zset.add') }}</button>
+          <button class="btn" :disabled="ro || !canAddZset" @click="emit('zsetAdd', key, zsetScore, zsetMember); zsetMember=''">{{ t('wv.redis.zset.add') }}</button>
         </div>
         <table>
           <tr v-for="[m, s] in info.data.items" :key="m">
@@ -374,9 +378,9 @@ function copyValue(text: string): void {
                 <button class="btn tiny" @click="editing = null">{{ t('wv.redis.confirm.cancel') }}</button>
               </template>
               <template v-else>
-                <button class="btn tiny" :disabled="readOnly" :title="t('wv.redis.value.edit')" @click="startEdit('zset', m, s)">✎</button>
+                <button class="btn tiny" :disabled="ro || isBin(m)" :title="t('wv.redis.value.edit')" @click="startEdit('zset', m, s)">✎</button>
                 <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyValue(m)">⧉</button>
-                <button class="btn tiny" :disabled="readOnly" @click="emit('zsetRem', key, [m])">✕</button>
+                <button class="btn tiny" :disabled="ro || isBin(m)" @click="emit('zsetRem', key, [m])">✕</button>
               </template>
             </td>
           </tr>

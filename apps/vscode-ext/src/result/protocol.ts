@@ -164,7 +164,7 @@ export type RedisDownMessage =
       commands: string[] }
   | { type: 'info'; info: string }
   | { type: 'slowlog'; entries: RedisSlowlogEntry[] }
-  | { type: 'value'; key: string; keyType: string; ttl: number; tooLarge: boolean; size: number | null; data: RedisValueData | null; truncated?: boolean }
+  | { type: 'value'; key: string; keyType: string; ttl: number; tooLarge: boolean; size: number | null; data: RedisValueData | null; truncated?: boolean; keyBinary?: boolean; binaryFields?: string[] }
   | { type: 'monitorSample'; metrics: RedisMonitorMetrics }
   | { type: 'keyAction'; action: string; ok: boolean; error: string | null }
   | { type: 'confirmOpRequired'; kind: string; detail: string }

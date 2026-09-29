@@ -217,6 +217,7 @@ describe('RedisView S3 键树/值/编辑', () => {
     STRLEN: 3,
     GET: 'val',
     DEL: 1,
+    UNLINK: 1,
     INFO: 'redis_version:7.0.0\r\n# Keyspace\ndb0:keys=3,expires=0,avg_ttl=0\n',
     SLOWLOG: [],
     // 改名防覆盖检查：目标不存在（null/0），否则改名会被拒。
@@ -453,6 +454,39 @@ describe('RedisView S3 键树/值/编辑', () => {
     await view.handleMessage({ type: 'load', key: 'user:1' });
     const gr = sent.find(([n]) => n === 'GETRANGE');
     expect(String(gr?.[1]?.[2])).toBe(String(1024 * 1024 - 1));
+  });
+
+  it('二进制键名（含替换符）写操作一律拒绝', async () => {
+    const { view, sent } = makeView(handler, 0);
+    await mountDb(view);
+    sent.length = 0;
+    await view.handleMessage({ type: 'saveString', key: 'bad\uFFFDkey', value: 'x' });
+    await view.handleMessage({ type: 'renameKey', key: 'bad\uFFFDkey', newKey: 'ok' });
+    expect(sent.some(([n]) => n === 'SET')).toBe(false);
+    expect(sent.some(([n]) => n === 'RENAME')).toBe(false);
+  });
+
+  it('删除类命令返回 0 → keyAction 报失败（不谎报成功）', async () => {
+    const { view } = makeView(async (n) => (n === 'HDEL' ? 0 : (n in replies ? replies[n] : 'OK')), 0);
+    await mountDb(view);
+    await view.handleMessage({ type: 'hashDel', key: 'h', fields: ['f'] });
+    const res = posts(view).filter((m) => m.type === 'keyAction').pop();
+    expect(res.ok).toBe(false);
+  });
+
+  it('非 UTF-8 字段/成员在 value 消息中标记 binaryFields', async () => {
+    const { view } = makeView(async (n) => {
+      if (n === 'TYPE') return 'hash';
+      if (n === 'HLEN') return 1;
+      if (n === 'HSCAN') return ['0', ['f\uFFFD', 'v']];
+      if (n === 'MEMORY') return 10;
+      return n in replies ? replies[n] : 'OK';
+    }, 0);
+    await mountDb(view);
+    await view.handleMessage({ type: 'selectKey', key: 'h' });
+    const v = posts(view).filter((m) => m.type === 'value').pop();
+    expect(v.keyBinary).toBe(false);
+    expect(v.binaryFields).toContain('f\uFFFD');
   });
 
   it('renameKey 发包并审计', async () => {

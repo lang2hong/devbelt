@@ -32,6 +32,14 @@ const STREAM_PAGE = 100;
 /** hash/set 单页条目数（大集合分页兜底，避免全量 HGETALL/SMEMBERS）。 */
 const HASH_SET_PAGE = 200;
 
+/**
+ * H5 最低要求：文本内容含替换符 U+FFFD，说明原始字节不是合法 UTF-8（ioredis 按文本解码有损）。
+ * 有损文本回写会破坏二进制数据，故这类键/字段/成员一律只读；完整二进制安全延后。
+ */
+function hasReplacement(s: string): boolean {
+  return s.includes('\uFFFD');
+}
+
 /** 面板对应的 webview viewType。 */
 function redisViewType(panel: RedisPanel): string {
   return `devbelt.redis.${panel}`;
@@ -80,6 +88,10 @@ export class RedisView extends BaseWebView {
   private initialKey?: string;
   /** 最近一次查看的键（树侧写操作后据此刷新值）。 */
   private lastKey?: string;
+  /** H5：当前键名解码含替换符（非 UTF-8）→ 只读。 */
+  private keyBinary = false;
+  /** H5：当前值里解码含替换符的字段/成员/元素 → 这些项只读（防有损回写）。 */
+  private binaryTokens = new Set<string>();
 
   private constructor(
     private readonly conn: SavedConnection,
@@ -147,11 +159,11 @@ export class RedisView extends BaseWebView {
     if (msg.type === 'confirmDanger') { await this.resolveConfirm(String(msg.id ?? ''), msg.accept === true); return; }
     if (msg.type === 'selectKey') { await this.enqueuePushValue(String(msg.key ?? '')); return; }
     if (msg.type === 'load') { await this.forceLoadValue(String(msg.key ?? '')); return; }
-    if (msg.type === 'saveString') { await this.edit('SET', String(msg.key), async (c) => { await redisSet(c, String(msg.key), String(msg.value ?? '')); }); return; }
+    if (msg.type === 'saveString') { await this.edit('SET', String(msg.key), async (c) => { this.assertBinaryFree(String(msg.key)); await redisSet(c, String(msg.key), String(msg.value ?? '')); }); return; }
     if (msg.type === 'saveStringBytes') { await this.saveStringBytes(msg); return; }
-    if (msg.type === 'appendString') { await this.edit('APPEND', String(msg.key), async (c) => { await redisAppend(c, String(msg.key), String(msg.value ?? '')); }); return; }
-    if (msg.type === 'setTtl') { await this.edit('EXPIRE', String(msg.key), async (c) => { const s = Number(msg.seconds); if (s > 0) await redisExpire(c, String(msg.key), s); else await redisPersist(c, String(msg.key)); }); return; }
-    if (msg.type === 'persistKey') { await this.edit('PERSIST', String(msg.key), async (c) => { await redisPersist(c, String(msg.key)); }); return; }
+    if (msg.type === 'appendString') { await this.edit('APPEND', String(msg.key), async (c) => { this.assertBinaryFree(String(msg.key)); await redisAppend(c, String(msg.key), String(msg.value ?? '')); }); return; }
+    if (msg.type === 'setTtl') { await this.edit('EXPIRE', String(msg.key), async (c) => { this.assertBinaryFree(String(msg.key)); const s = Number(msg.seconds); if (!Number.isInteger(s) || s <= 0) throw new Error(l10n('cmd.redis.ttlInvalid')); await redisExpire(c, String(msg.key), s); }); return; }
+    if (msg.type === 'persistKey') { await this.edit('PERSIST', String(msg.key), async (c) => { this.assertBinaryFree(String(msg.key)); await redisPersist(c, String(msg.key)); }); return; }
     if (msg.type === 'renameKey') { await this.renameKey(String(msg.key), String(msg.newKey ?? '')); return; }
     if (msg.type === 'deleteKeys') { await this.deleteKeys(Array.isArray(msg.keys) ? msg.keys.map(String) : []); return; }
     if (msg.type === 'hashSet') {
@@ -159,6 +171,7 @@ export class RedisView extends BaseWebView {
       const field = String(msg.field ?? '');
       const oldField = msg.oldField === undefined ? undefined : String(msg.oldField);
       const renaming = !!oldField && oldField !== field;
+      this.assertBinaryFree(hkey, oldField ? [field, oldField] : [field]);
       await this.edit(renaming ? 'HSET+HDEL' : 'HSET', hkey, async (c) => {
         // 改名时目标 field 已存在则拒绝，避免静默覆盖（HSET 会直接覆盖值）。
         if (renaming && await redisHExists(c, hkey, field)) throw new Error(l10n('cmd.redis.fieldExists'));
@@ -175,7 +188,12 @@ export class RedisView extends BaseWebView {
       });
       return;
     }
-    if (msg.type === 'hashDel') { await this.edit('HDEL', String(msg.key), async (c) => { await redisHDel(c, String(msg.key), strs(msg.fields)); }); return; }
+    if (msg.type === 'hashDel') {
+      const fields = strs(msg.fields);
+      this.assertBinaryFree(String(msg.key), fields);
+      await this.edit('HDEL', String(msg.key), async (c) => redisHDel(c, String(msg.key), fields));
+      return;
+    }
     if (msg.type === 'listPush') { await this.edit('LPUSH/RPUSH', String(msg.key), async (c) => { const v = strs(msg.values); if (msg.side === 'left') await redisLPush(c, String(msg.key), v); else await redisRPush(c, String(msg.key), v); }); return; }
     if (msg.type === 'listSet') {
       // 并发保护：确认该下标当前值与用户看到的旧值一致，否则拒绝（他端改动会使下标移动）。
@@ -183,6 +201,7 @@ export class RedisView extends BaseWebView {
         const key = String(msg.key);
         const index = Number(msg.index);
         const next = String(msg.value ?? '');
+        this.assertBinaryFree(key, [String(msg.original ?? '')]);
         const current = await redisLIndex(c, key, index);
         if (current !== String(msg.original ?? '')) throw new Error(l10n('cmd.redis.listChanged'));
         await redisLSet(c, key, index, next);
@@ -196,13 +215,14 @@ export class RedisView extends BaseWebView {
         const key = String(msg.key);
         const index = Number(msg.index);
         const original = String(msg.value ?? '');
+        this.assertBinaryFree(key, [original]);
         // 并发保护：确认该下标的当前值与用户看到的旧值一致，否则拒绝（他端可能已改动使下标移动）。
         const current = await redisLIndex(c, key, index);
         if (current !== original) throw new Error(l10n('cmd.redis.listChanged'));
         const marker = `\u0000devbelt:del:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`;
         await redisLSet(c, key, index, marker);
         try {
-          await redisLRem(c, key, 1, marker);
+          return await redisLRem(c, key, 1, marker);
         } catch (err) {
           try { await redisLSet(c, key, index, original); } catch { /* 标记残留可被下次编辑覆盖 */ }
           throw err;
@@ -213,12 +233,18 @@ export class RedisView extends BaseWebView {
     if (msg.type === 'listTrim') { await this.edit('LTRIM', String(msg.key), async (c) => { await redisLTrim(c, String(msg.key), Number(msg.start), Number(msg.stop)); }); return; }
     if (msg.type === 'listPop') { await this.edit('LPOP/RPOP', String(msg.key), async (c) => { if (msg.side === 'left') await redisLPop(c, String(msg.key)); else await redisRPop(c, String(msg.key)); }); return; }
     if (msg.type === 'setAdd') { await this.edit('SADD', String(msg.key), async (c) => { await redisSAdd(c, String(msg.key), strs(msg.members)); }); return; }
-    if (msg.type === 'setRem') { await this.edit('SREM', String(msg.key), async (c) => { await redisSRem(c, String(msg.key), strs(msg.members)); }); return; }
+    if (msg.type === 'setRem') {
+      const members = strs(msg.members);
+      this.assertBinaryFree(String(msg.key), members);
+      await this.edit('SREM', String(msg.key), async (c) => redisSRem(c, String(msg.key), members));
+      return;
+    }
     if (msg.type === 'zsetAdd') {
       const zkey = String(msg.key);
       const member = String(msg.member ?? '');
       const oldMember = msg.oldMember === undefined ? undefined : String(msg.oldMember);
       const renaming = !!oldMember && oldMember !== member;
+      this.assertBinaryFree(zkey, oldMember ? [member, oldMember] : [member]);
       await this.edit(renaming ? 'ZADD+ZREM' : 'ZADD', zkey, async (c) => {
         // 改名时目标 member 已存在则拒绝，避免静默覆盖。
         if (renaming && await redisZScore(c, zkey, member) !== null) throw new Error(l10n('cmd.redis.memberExists'));
@@ -235,7 +261,12 @@ export class RedisView extends BaseWebView {
       });
       return;
     }
-    if (msg.type === 'zsetRem') { await this.edit('ZREM', String(msg.key), async (c) => { await redisZRem(c, String(msg.key), strs(msg.members)); }); return; }
+    if (msg.type === 'zsetRem') {
+      const members = strs(msg.members);
+      this.assertBinaryFree(String(msg.key), members);
+      await this.edit('ZREM', String(msg.key), async (c) => redisZRem(c, String(msg.key), members));
+      return;
+    }
     if (msg.type === 'streamAdd') { await this.streamAdd(msg); return; }
     if (msg.type === 'streamDel') { await this.streamDelOp(msg); return; }
     if (msg.type === 'streamTrim') { await this.streamTrimOp(msg); return; }
@@ -449,10 +480,33 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
       const size = keyType === 'string' ? await redisStrlen(c, key) : await redisMemoryUsage(c, key);
       const tooLarge = size !== null && size > LARGE_KEY_BYTES;
       const data = tooLarge ? null : await this.loadValue(c, key, keyType);
-      this.post({ type: 'value', key, keyType, ttl, tooLarge, size, data });
+      this.recordBinary(key, data);
+      this.post({ type: 'value', key, keyType, ttl, tooLarge, size, data, keyBinary: this.keyBinary, binaryFields: [...this.binaryTokens] });
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
     }
+  }
+
+  /** 记录当前键/值中解码有损的部分（H5）：键名及 hash/set/zset/list 的字段/成员/元素。 */
+  private recordBinary(key: string, data: RedisValueData | null): void {
+    this.keyBinary = hasReplacement(key);
+    this.binaryTokens = new Set<string>();
+    if (!data) return;
+    if (data.kind === 'hash') {
+      for (const [f] of data.entries) if (hasReplacement(f)) this.binaryTokens.add(f);
+    } else if (data.kind === 'set') {
+      for (const m of data.members) if (hasReplacement(m)) this.binaryTokens.add(m);
+    } else if (data.kind === 'zset') {
+      for (const [m] of data.items) if (hasReplacement(m)) this.binaryTokens.add(m);
+    } else if (data.kind === 'list') {
+      for (const v of data.items) if (hasReplacement(v)) this.binaryTokens.add(v);
+    }
+  }
+
+  /** H5 fail-closed：二进制键/成员禁止任何写操作（有损文本回写会破坏数据）。 */
+  private assertBinaryFree(key: string, tokens: readonly string[] = []): void {
+    if (hasReplacement(key) || this.keyBinary) throw new Error(l10n('cmd.redis.binaryReadOnly'));
+    for (const t of tokens) if (hasReplacement(t) || this.binaryTokens.has(t)) throw new Error(l10n('cmd.redis.binaryReadOnly'));
   }
 
   /** 大 key「加载」：用户显式请求，绕过大小门禁强制加载一次。 */
@@ -475,11 +529,13 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
             binary: !isValidUtf8(buf),
             bytes: buf.length,
           };
-          this.post({ type: 'value', key, keyType, ttl, tooLarge: false, size, data, truncated: true });
+          this.recordBinary(key, data);
+          this.post({ type: 'value', key, keyType, ttl, tooLarge: false, size, data, truncated: true, keyBinary: this.keyBinary, binaryFields: [...this.binaryTokens] });
           return;
         }
         const data = await this.loadValue(c, key, keyType);
-        this.post({ type: 'value', key, keyType, ttl, tooLarge: false, size, data });
+        this.recordBinary(key, data);
+        this.post({ type: 'value', key, keyType, ttl, tooLarge: false, size, data, keyBinary: this.keyBinary, binaryFields: [...this.binaryTokens] });
       } catch (err) {
         this.post({ type: 'error', message: (err as Error).message });
       }
@@ -519,13 +575,15 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
     }
   }
 
-  /** 执行一次键编辑并刷新值；失败回 keyAction error。 */
-  private async edit(action: string, key: string, fn: (c: RedisCommandSource) => Promise<void>): Promise<void> {
+  /** 执行一次键编辑并刷新值；失败回 keyAction error。`fn` 返回删除计数时，为 0 视为失败。 */
+  private async edit(action: string, key: string, fn: (c: RedisCommandSource) => Promise<number | void>): Promise<void> {
     await this.enqueue(async () => {
       try {
         const session = await this.sessionForDb();
         const started = Date.now();
-        await fn(session.client);
+        const affected = await fn(session.client);
+        // H5：删除类命令返回 0 说明目标不存在（键名/成员有损或已被改动），不能谎报成功。
+        if (typeof affected === 'number' && affected === 0) throw new Error(l10n('cmd.redis.deleteNoMatch'));
         this.audit(action, key, Date.now() - started);
         this.post({ type: 'keyAction', action, ok: true, error: null });
         await this.doPushValue(session, key);
@@ -551,8 +609,11 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
       try {
         const session = await this.sessionForDb();
         const started = Date.now();
+        // H5：键名有损（非 UTF-8）时不能按文本删；返回 0 也不能谎报成功。
+        for (const k of keys) this.assertBinaryFree(k);
         // UNLINK：异步回收，避免大集合删除阻塞 Redis 主线程。
-        await redisUnlink(session.client, keys);
+        const unlinked = await redisUnlink(session.client, keys);
+        if (!unlinked) throw new Error(l10n('cmd.redis.deleteNoMatch'));
         this.audit('UNLINK', keys.join(' '), Date.now() - started);
         this.post({ type: 'keyAction', action: 'UNLINK', ok: true, error: null });
         // 键树在 explorer；面板仅同步当前值（删的若是当前键则转为空态）。
@@ -813,6 +874,7 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
     if (!key || !newKey) return;
     await this.enqueue(async () => {
       try {
+        this.assertBinaryFree(key, [newKey]);
         const session = await this.sessionForDb();
         if (await redisExists(session.client, newKey)) {
           this.post({ type: 'keyAction', action: 'RENAME', ok: false, error: l10n('cmd.redis.renameTargetExists') });
