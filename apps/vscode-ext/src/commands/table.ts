@@ -6,6 +6,7 @@ import { l10n } from '../i18n';
 import type { Deps, Sub } from './shared';
 import { confirm, openSqlDoc, openSqlDocEditor, recordBulkHistory, requireCapability } from './shared';
 import { ensureWritable } from '../utils/sqlSafety';
+import { ensureSchemaWritable } from '../utils/schemaScope';
 import { TableQueryView } from '../result/tableQueryView';
 import { TableDesignView } from '../result/tableDesignView';
 
@@ -23,6 +24,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
   // ── 表 ──
   sub('devbelt.newTable', async (node: DbTreeNode) => {
     if (!node?.conn) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     connCtx.setLast(node.conn, node.database);
     // 模板由方言给出：自增主键的写法三家不同，过去统一发 MySQL 语法，
     // PG/SQLite 用户拿到的模板直接执行会报错。
@@ -41,6 +43,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.dropTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     if (!ensureWritable(node.conn)) return;
     if (!(await confirm('table.dropConfirm', 'table.delete', node.label))) return;
     const session = await manager.connectSql(node.conn);
@@ -50,6 +53,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.renameTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     if (!ensureWritable(node.conn)) return;
     const newName = await vscode.window.showInputBox({ prompt: l10n('table.renamePrompt'), value: node.label, valueSelection: [0, node.label.length] });
     if (!newName || newName === node.label) return;
@@ -61,6 +65,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.renameView', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     if (!ensureWritable(node.conn)) return;
     const newName = await vscode.window.showInputBox({ prompt: l10n('view.renamePrompt'), value: node.label, valueSelection: [0, node.label.length] });
     if (!newName || newName === node.label) return;
@@ -72,6 +77,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.truncateTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     if (!ensureWritable(node.conn)) return;
     if (!(await confirm('table.truncateConfirm', 'table.truncate', node.label))) return;
     const session = await manager.connectSql(node.conn);
@@ -81,6 +87,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.dupTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     if (!ensureWritable(node.conn)) return;
     const newName = await vscode.window.showInputBox({ prompt: l10n('table.dupPrompt', { name: node.label }), value: `${node.label}_copy` });
     if (!newName) return;
@@ -98,6 +105,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
    */
   sub('devbelt.copyTable', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     const session = await manager.connectSql(node.conn);
     if (!requireCapability(session, 'duplicateTable') || !ensureWritable(node.conn)) return;
     const isSqlite = node.conn.dbType === 'SQLITE';
@@ -150,6 +158,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.mockData', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     if (!ensureWritable(node.conn)) return;
     const input = await vscode.window.showInputBox({
       prompt: l10n('mock.prompt'), value: '10',
@@ -171,6 +180,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
   // ── 视图/函数/事件 ──
   sub('devbelt.dropView', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     if (!ensureWritable(node.conn)) return;
     if (!(await confirm('view.deleteConfirm', 'view.delete', node.label))) return;
     const session = await manager.connectSql(node.conn);
@@ -180,6 +190,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.newView', async (node: DbTreeNode) => {
     if (!node?.conn) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     connCtx.setLast(node.conn, node.database);
     const useDb = node.database ? `USE ${wrapIdentForConn(node.conn, node.database)};\n\n` : '';
     const tpl = useDb + `CREATE VIEW new_view AS\n  SELECT * FROM some_table;`;
@@ -189,6 +200,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.modifyView', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     connCtx.setLast(node.conn, node.database);
     const session = await manager.connectSql(node.conn);
     // 拿「可编辑可执行」的 CREATE OR REPLACE VIEW 语句（SQLite 为 DROP+CREATE），
@@ -208,6 +220,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.dropRoutine', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     if (!ensureWritable(node.conn)) return;
     if (!(await confirm('routine.deleteConfirm', 'routine.delete', node.label))) return;
     const session = await manager.connectSql(node.conn);
@@ -225,6 +238,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.dropEvent', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     if (!ensureWritable(node.conn)) return;
     if (!(await confirm('event.deleteConfirm', 'event.delete', node.label))) return;
     const session = await manager.connectSql(node.conn);
@@ -236,6 +250,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
   // ── 函数/事件 新建与修改（SQL 编辑器模板，可编辑可运行） ──
   sub('devbelt.newRoutine', async (node: DbTreeNode) => {
     if (!node?.conn) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     connCtx.setLast(node.conn, node.database);
     // 例程模板由方言给出：`DELIMITER` 是 MySQL 客户端命令，PG 不认它，
     // 而 PG 需要 `$$ ... $$ LANGUAGE plpgsql`。
@@ -255,6 +270,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.modifyRoutine', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     const session = await manager.connectSql(node.conn);
     const def = await session.metadata.getRoutineDefinition(node.label, node.routineType || 'FUNCTION', node.database);
     const useDb = `USE ${wrapIdentForConn(node.conn, node.database)};\n\n`;
@@ -264,6 +280,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.newEvent', async (node: DbTreeNode) => {
     if (!node?.conn) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     connCtx.setLast(node.conn, node.database);
     const useDb = node.database ? `USE ${wrapIdentForConn(node.conn, node.database)};\n\n` : '';
     const tpl = useDb + `CREATE EVENT new_event\n  ON SCHEDULE EVERY 1 DAY\n  DO\n    -- event action`;
@@ -273,6 +290,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.modifyEvent', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     const session = await manager.connectSql(node.conn);
     const def = await session.metadata.getEventDefinition(node.label, node.database);
     const useDb = `USE ${wrapIdentForConn(node.conn, node.database)};\n\n`;
@@ -301,6 +319,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.addColumn', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     const table = columnTable(node);
     if (!table) return;
     if (!ensureWritable(node.conn)) return;
@@ -310,6 +329,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.addColumnSql', async (node: DbTreeNode) => {
     if (!node?.conn) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     const table = columnTable(node);
     if (!table) return;
     connCtx.setLast(node.conn, node.database);
@@ -327,12 +347,14 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.modifyColumn', async (node: DbTreeNode) => {
     if (!node?.conn || node.kind !== NodeKind.Column || !node.parent || !node.database) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     if (!ensureWritable(node.conn)) return;
     TableDesignView.open(node.conn, node.parent.label, node.database, manager, () => refreshColumnParent(node));
   });
 
   sub('devbelt.modifyColumnSql', async (node: DbTreeNode) => {
     if (!node?.conn || node.kind !== NodeKind.Column || !node.parent || !node.database) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     const table = node.parent.label;
     connCtx.setLast(node.conn, node.database);
     const session = await manager.connectSql(node.conn);
@@ -361,6 +383,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.renameColumn', async (node: DbTreeNode) => {
     if (!node?.conn || node.kind !== NodeKind.Column || !node.parent) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     const session = await manager.connectSql(node.conn);
     if (!requireCapability(session, 'alterTable') || !ensureWritable(node.conn)) return;
     const newName = await vscode.window.showInputBox({
@@ -387,6 +410,7 @@ export function registerTableCommands(deps: Deps, sub: Sub): void {
    */
   sub('devbelt.dropColumn', async (node: DbTreeNode) => {
     if (!node?.conn || node.kind !== NodeKind.Column || !node.parent) return;
+    if (!ensureSchemaWritable(node.conn, node.schema)) return;
     const session = await manager.connectSql(node.conn);
     if (!requireCapability(session, 'alterTable') || !ensureWritable(node.conn)) return;
     if (!(await confirm('column.dropConfirm', 'common.delete', node.label))) return;

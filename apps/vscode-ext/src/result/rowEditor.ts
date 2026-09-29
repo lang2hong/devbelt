@@ -2,6 +2,7 @@ import type { QueryResult } from '@devbelt/db-core';
 import type { ConnectionManager } from '../connection/connectionManager';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { confirmSqlExecution } from '../utils/sqlSafety';
+import { ensureSchemaWritable } from '../utils/schemaScope';
 import { DataChangeEvent, eventBus } from '@devbelt/db-host/utils/event';
 import { AuditLogger } from '../utils/auditLogger';
 
@@ -29,6 +30,7 @@ export class RowEditor {
   ) {}
 
   async updateCell(pkColumns: string[], pkValues: any[], col: string, val: string): Promise<void> {
+    if (!ensureSchemaWritable(this.conn, this.database)) return;
     try {
       if (!pkColumns.length) {
         this.post({ type: 'error', message: 'No identifying columns for this row.' });
@@ -46,6 +48,7 @@ export class RowEditor {
   }
 
   async deleteRows(rows: { pkColumns: string[]; pkValues: any[] }[]): Promise<void> {
+    if (!ensureSchemaWritable(this.conn, this.database)) return;
     try {
       if (!rows.length) return;
       const cols = rows[0].pkColumns;
@@ -70,6 +73,7 @@ export class RowEditor {
   }
 
   async insertRow(columns: string[], values: (string | null)[]): Promise<void> {
+    if (!ensureSchemaWritable(this.conn, this.database)) return;
     try {
       if (!(await confirmSqlExecution(this.conn, `INSERT INTO ${this.table} ...`, this.manager.scanOptionsFor?.(this.conn)))) return;
       const session = await this.manager.connectSql(this.conn);

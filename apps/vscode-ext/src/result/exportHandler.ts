@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { l10n } from '../i18n';
+import { ensureSchemaWritable } from '../utils/schemaScope';
 import type { ConnectionManager } from '../connection/connectionManager';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import {
@@ -35,6 +36,7 @@ export class ExportHandler {
   }
 
   async exportData(format: TransferFormat, columns: string[], rows: Record<string, any>[]): Promise<void> {
+    if (!ensureSchemaWritable(this.conn, this.database)) return;
     try {
       if (format === 'sql' && !this.table) {
         this.post({ type: 'error', message: 'SQL export requires a target table.' });
@@ -94,6 +96,7 @@ export class ExportHandler {
 
   /** 全表导出：分页读取，不受结果面板行数上限约束。 */
   private async exportEntireTable(format: TransferFormat): Promise<void> {
+    if (!ensureSchemaWritable(this.conn, this.database)) return;
     const table = this.table!;
     const session = await this.manager.connectSql(this.conn);
     const [{ writeTableExport }, { writeChunksToFile }] = await Promise.all([

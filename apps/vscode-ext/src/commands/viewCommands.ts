@@ -22,6 +22,7 @@ import { deleteByPatternKeys, PatternDeleteError, scanPatternKeys } from './redi
 import { canUseErDiagram } from '@devbelt/db-host/sync/entitlementGate';
 import { configureBackupSchedule } from './backupWizard';
 import { confirmProductionWrite } from '../utils/sqlSafety';
+import { ensureSchemaWritable } from '../utils/schemaScope';
 import { l10n } from '../i18n';
 
 /** H5：解码含替换符（非 UTF-8）的键名/前缀不可按文本操作。 */
@@ -112,6 +113,7 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
           vscode.window.showWarningMessage(l10n('design.unsupported'));
           return;
         }
+        if (!ensureSchemaWritable(node.conn, node.schema)) return;
         void TableDesignView.open(node.conn, node.label, node.database, manager, () => treeProvider.refreshNode(node));
       }
     }),
@@ -120,6 +122,7 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     vscode.commands.registerCommand('devbelt.newTableDesigner', async (node: any) => {
       const database = node?.database ?? node?.conn?.database;
       if (!node?.conn || !database) return;
+      if (!ensureSchemaWritable(node.conn, node.schema)) return;
       void TableDesignView.openNew(node.conn, database, manager, () => treeProvider.refreshNode(node));
     }),
     // Server 状态面板
