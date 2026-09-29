@@ -147,10 +147,13 @@ export class RedisClient {
   private readonly sentinel: boolean;
   /** 是否 Redis Cluster。 */
   readonly isCluster: boolean;
+  /** 建连超时（ms）：`connect()` 的兜底上限，防重试不停时永久挂起。 */
+  private readonly connectTimeoutMs: number;
   private closed = false;
 
   constructor(options: RedisClientOptions, factory?: RedisConnectionFactory) {
     this.readOnly = options.readOnly === true;
+    this.connectTimeoutMs = options.connectTimeout ?? 30_000;
     if (options.onLog) this.logListeners.add(options.onLog);
     const maxRetryTimes = options.maxRetryTimes ?? DEFAULT_RETRY_TIMES;
     // 与 ARDM 的上游方法 retryStragety（原拼写如此）一致：times >= maxRetryTimes 停止，退避 200→400。
@@ -177,8 +180,10 @@ export class RedisClient {
         slotsRefreshTimeout: options.cluster!.slotsRefreshTimeout ?? 2000,
         redisOptions: common,
         // Cluster 用独立的 `clusterRetryStrategy`（不读 redisOptions.retryStrategy）：
-        // 不配时 ioredis 默认无限重连，拓扑不可用会让 connect() 永久挂起（D11）。
-        clusterRetryStrategy: (times: number) => (times >= maxRetryTimes ? null : Math.min(times * 200, 1000)),
+        // 不配时 ioredis 默认无限重连。这里**不返回 null**（返回 null 会让 ioredis 关闭
+        // 节点内连接并以 "Connection is closed." 拒绝其内部 connect promise —— 无人接管
+        // 成为未处理拒绝）；改为：前几次 200→400，之后固定长退避，由 `connect()` 超时兜底。
+        clusterRetryStrategy: (times: number) => (times >= maxRetryTimes ? 30_000 : Math.min(times * 200, 1000)),
       }) as unknown as RedisConnectionLike;
     } else if (this.sentinel) {
       this.client = new Redis({
@@ -216,6 +221,14 @@ export class RedisClient {
     if (this.client.status === 'ready') return;
     if (this.client.status === 'end') throw new Error('redis connection has ended');
     await new Promise<void>((resolve, reject) => {
+      // 兜底超时：重试策略不再返回 null（见 clusterRetryStrategy），cluster 拓扑全不可达时
+      // ioredis 会一直重试；若无上限，`ready`/`end` 都不会来，Promise 永久挂起（D11）。
+      const timer = this.connectTimeoutMs > 0
+        ? setTimeout(() => {
+            cleanup();
+            reject(new Error(`redis connection timed out after ${this.connectTimeoutMs}ms`));
+          }, this.connectTimeoutMs)
+        : undefined;
       const onReady = () => { cleanup(); resolve(); };
       const onError = (err: unknown) => {
         cleanup();
@@ -223,6 +236,7 @@ export class RedisClient {
       };
       const onEnd = () => { cleanup(); reject(new Error('redis connection ended before ready')); };
       const cleanup = () => {
+        if (timer) clearTimeout(timer);
         this.client.removeListener('ready', onReady);
         this.client.removeListener('error', onError);
         this.client.removeListener('end', onEnd);

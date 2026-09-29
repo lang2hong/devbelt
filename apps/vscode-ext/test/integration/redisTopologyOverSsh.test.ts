@@ -186,16 +186,9 @@ describe.skipIf(!CLUSTER_SEED)('D20：未映射节点 → 命令在有限时间�
         // 'timeout' = 挂起（阻塞发布）；'ok' = 没走到未映射节点。
         expect(outcome).toBe('error');
       } finally {
-        // 等重试**真正耗尽**（clusterRetryStrategy 到上限 → 客户端进入终态 `end`/`close`）
-        // 再 close，而不是固定 sleep：固定等待既可能过早（close 与在途重连竞争产生
-        // "Connection is closed." 未处理拒绝），也可能过慢。
-        await new Promise<void>((resolve) => {
-          if (client.status === 'end' || client.status === 'close') return resolve();
-          const done = (): void => resolve();
-          client.on('end', done);
-          client.on('close', done);
-          setTimeout(done, 8000);
-        });
+        // 让未映射节点的重试先退避一拍再 close，避免与在途重连竞争；cluster 重试不再
+        // 返回 null（见 RedisClient.clusterRetryStrategy），故这里不会收到 `end`。
+        await new Promise((r) => setTimeout(r, 1500));
         await client.close();
       }
     } finally {
