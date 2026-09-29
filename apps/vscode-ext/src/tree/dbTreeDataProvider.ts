@@ -81,6 +81,22 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   private readonly redisMatches = new Map<string, string>();
   /** D*：「已全部加载」文件夹快照（key = `${connId}:db${idx}:__full__:${prefix}`）。 */
   private readonly redisFolderFull = new Map<string, { keys: string[]; complete: boolean }>();
+  /**
+   * 每个 db 的加载代际（key = `${connId}:db${idx}`）。搜索切换/关闭/失效会 +1；
+   * 在途 SCAN 结果写回前若代际已变则丢弃，避免旧页覆盖新状态（D7 竞态）。
+   */
+  private readonly redisGen = new Map<string, number>();
+
+  /** 读取某 db 的当前代际。 */
+  private redisGenOf(connId: string, dbIndex: number): number {
+    return this.redisGen.get(`${connId}:db${dbIndex}`) ?? 0;
+  }
+
+  /** 使某 db 的加载代际 +1（在途加载据此作废）。 */
+  private bumpRedisGen(connId: string, dbIndex: number): void {
+    const k = `${connId}:db${dbIndex}`;
+    this.redisGen.set(k, (this.redisGen.get(k) ?? 0) + 1);
+  }
 
   constructor(
     private readonly store: ConnectionStore,
@@ -183,6 +199,9 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     for (const k of [...this.redisScanError]) if (k.startsWith(p)) this.redisScanError.delete(k);
     for (const k of [...this.redisMatches.keys()]) if (k.startsWith(p)) this.redisMatches.delete(k);
     for (const k of [...this.redisFolderFull.keys()]) if (k.startsWith(p)) this.redisFolderFull.delete(k);
+    // 关闭：让在途加载作废。代际按连接下所有 db 递增（此处只有 connId）。
+    const gp = `${connId}:db`;
+    for (const k of [...this.redisGen.keys()]) if (k.startsWith(gp)) this.redisGen.set(k, (this.redisGen.get(k) ?? 0) + 1);
   }
 
   /**
@@ -200,6 +219,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     for (const k of [...this.redisClusterCursors.keys()]) if (k.startsWith(p)) this.redisClusterCursors.delete(k);
     for (const k of [...this.redisScanned]) if (k.startsWith(p)) this.redisScanned.delete(k);
     for (const k of [...this.redisScanError]) if (k.startsWith(p)) this.redisScanError.delete(k);
+    // 搜索切换/清除：作废在途加载，避免旧 MATCH 的结果写回。
+    this.bumpRedisGen(node.conn.id, node.redisDbIndex);
     this.refreshNode(node);
   }
 
@@ -375,6 +396,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       return { added: 0, total: before, done: this.redisTreeDone(conn, dbIndex), error: false };
     }
     const match = this.redisMatches.get(`${conn.id}:db${dbIndex}`);
+    const gen = this.redisGenOf(conn.id, dbIndex);
     try {
       const session = await this.manager.connect(conn);
       if (session.kind !== 'redis') {
@@ -395,6 +417,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
             next[i] = page.cursor;
             batch.push(...page.keys);
           }
+          if (this.redisGenOf(conn.id, dbIndex) !== gen) return; // 搜索/连接已变：丢弃本页
           this.redisClusterCursors.set(stateKey, next);
           this.mergeRedisKeys(stateKey, batch);
           return;
@@ -405,9 +428,13 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         }
         const cursor = this.redisCursors.get(stateKey) ?? '0';
         const page = await redisScan(client, cursor, { match, count: REDIS_TREE_PAGE });
+        if (this.redisGenOf(conn.id, dbIndex) !== gen) return; // 搜索/连接已变：丢弃本页
         this.redisCursors.set(stateKey, page.cursor);
         this.mergeRedisKeys(stateKey, page.keys);
       });
+      if (this.redisGenOf(conn.id, dbIndex) !== gen) {
+        return { added: 0, total: before, done: false, error: false };
+      }
       this.redisScanned.add(stateKey);
       this.redisScanError.delete(stateKey);
       const total = this.redisKeys.get(stateKey)?.length ?? 0;
@@ -448,6 +475,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const pattern = redisPrefixPattern(prefix, conn.keySeparator || ':');
     const acc: string[] = [];
     let complete = false;
+    const gen = this.redisGenOf(conn.id, dbIndex);
     try {
       const session = await this.manager.connect(conn);
       if (session.kind !== 'redis') return false;
@@ -495,6 +523,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       return false;
     }
     if (!complete) return false;
+    if (this.redisGenOf(conn.id, dbIndex) !== gen) return false; // 搜索/连接已变：不落旧快照
     this.redisFolderFull.set(this.redisFullFolderKey(conn.id, dbIndex, prefix), {
       keys: [...new Set(acc)].sort(),
       complete: true,
@@ -520,6 +549,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const count = (): number => this.redisKeys.get(stateKey)?.length ?? 0;
     let done = false;
     let capped = false;
+    const gen = this.redisGenOf(conn.id, dbIndex);
     try {
       const session = await this.manager.connect(conn);
       if (session.kind !== 'redis') return { scanned: count(), done: false, capped: false };
@@ -540,10 +570,12 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
             for (let i = 0; i < nodes.length; i++) {
               if (doneFlags[i]) continue;
               const page = await redisScanOnNode(nodes[i], cursors[i], { match, count: clusterPageSize(nodes.length) });
+              if (this.redisGenOf(conn.id, dbIndex) !== gen) break;
               cursors[i] = page.cursor;
               this.mergeRedisKeys(stateKey, page.keys);
               if (page.cursor === '0') doneFlags[i] = true;
             }
+            if (this.redisGenOf(conn.id, dbIndex) !== gen) break;
             this.redisClusterCursors.set(stateKey, cursors);
             onProgress?.(count());
             if (doneFlags.every(Boolean)) { done = true; break; }
@@ -571,6 +603,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
               }
               return redisScan(client, cur, { match, count: REDIS_TREE_PAGE });
             });
+            if (this.redisGenOf(conn.id, dbIndex) !== gen) break;
             cur = page.cursor;
             this.mergeRedisKeys(stateKey, page.keys);
             this.redisCursors.set(stateKey, cur);
@@ -586,6 +619,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     } catch (err) {
       diagError('redis load all keys failed', (err as Error).message);
     }
+    // 代际已变（搜索/关闭）：不把本次结果标为已扫，交由新一轮处理。
+    if (this.redisGenOf(conn.id, dbIndex) !== gen) return { scanned: count(), done: false, capped: false };
     this.redisScanned.add(stateKey);
     return { scanned: count(), done, capped };
   }
@@ -616,12 +651,11 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         ...group.folders.map((f) => this.redisFolderNode(parent, f.name, f.prefix)),
         ...group.keys.map((k) => this.redisKeyNode(parent, k)),
       ];
-      if (!searching) {
-        // 达软上限→「载入全部」；扫完→不可点击的「已全部加载」哨兵；否则→「加载更多」。
-        if (keys.length >= REDIS_TREE_SOFT_CAP) out.push(this.redisLoadAllNode(parent));
-        else if (this.redisTreeDone(conn, dbIndex)) out.push(this.redisLoadedAllNode(parent));
-        else out.push(this.redisLoadMoreNode(parent));
-      }
+      // 搜索也提供续页（MATCH 由 loadMoreRedisKeys 沿用），否则大结果集只能看到第一页。
+      // 达软上限→「载入全部」；扫完→不可点击的「已全部加载」哨兵；否则→「加载更多」。
+      if (keys.length >= REDIS_TREE_SOFT_CAP) out.push(this.redisLoadAllNode(parent));
+      else if (this.redisTreeDone(conn, dbIndex)) out.push(this.redisLoadedAllNode(parent));
+      else out.push(this.redisLoadMoreNode(parent));
       return out;
     }
     const full = this.redisFolderFull.get(this.redisFullFolderKey(conn.id, dbIndex, prefix));

@@ -165,8 +165,8 @@ describe('D* 键树（根扁平 SCAN + 客户端折叠）', () => {
     const provider = makeProvider(makeClient((a) => (matchOf(a) ? ['0', ['user:1', 'user:2', 'cache:user']] : ['0', ['user:1']])));
     const db = dbNode();
     provider.setRedisMatch(db, '*user*');
-    const kids = await provider.getChildren(db);
-    expect(kids.every((k) => k.kind === NodeKind.RedisKey)).toBe(true);
+    const kids = (await provider.getChildren(db)).filter((k) => k.kind === NodeKind.RedisKey);
+    // 搜索态不折叠（全部平铺为键节点）；续页入口由下方专门用例覆盖。
     expect(kids.map((k) => k.label)).toEqual(['cache:user', 'user:1', 'user:2']);
   });
 
@@ -392,6 +392,48 @@ describe('D* 键树（根扁平 SCAN + 客户端折叠）', () => {
     const rebuilt = (await provider.getChildren(db)).filter((k) => k.kind === NodeKind.RedisKeyFolder);
     expect(rebuilt.find((k) => k.label === 'a')!.description).toBe('');
     expect(rebuilt.find((k) => k.label === 'b')!.description).toBe('');
+  });
+
+  it('搜索：提供续页，「加载更多」按同一 MATCH 取下一页', async () => {
+    const matches: string[] = [];
+    let n = 0;
+    const provider = makeProvider(makeClient((a) => {
+      matches.push(matchOf(a) ?? '');
+      n += 1;
+      return n === 1 ? ['5', ['a:1']] : ['0', ['a:2']];
+    }));
+    const db = dbNode();
+    provider.setRedisMatch(db, 'a:*');
+    const first = await provider.getChildren(db);
+    expect(first.filter((k) => k.kind === NodeKind.RedisKey).map((k) => k.label)).toEqual(['a:1']);
+    expect(first.some((k) => k.kind === NodeKind.RedisKeyLoadMore)).toBe(true);
+
+    await provider.loadMoreRedisKeys(db);
+    const keys = (provider as any).redisKeys.get('c1:db0:') as string[];
+    expect(keys).toEqual(expect.arrayContaining(['a:1', 'a:2']));
+    expect(matches.every((m) => m === 'a:*')).toBe(true);
+  });
+
+  it('搜索切换使在途加载作废（generation，不写回旧页）', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let scanStarted!: () => void;
+    const started = new Promise<void>((r) => { scanStarted = r; });
+    const client = makeClient(() => ['0', ['k:1']]);
+    const orig = client.sendCommand;
+    client.sendCommand = async (n: string, a: (string | number)[] = []) => {
+      if (n === 'SCAN') { scanStarted(); await gate; }
+      return orig(n, a);
+    };
+    const provider = makeProvider(client);
+    const db = dbNode();
+    const p = provider.loadMoreRedisKeys(db);
+    await started;
+    provider.setRedisMatch(db, 'x:*');
+    release();
+    const res = await p;
+    expect(res.added).toBe(0);
+    expect(((provider as any).redisKeys.get('c1:db0:') ?? []).length).toBe(0);
   });
 
   it('合并不截断：单页超过软上限也全部保留', async () => {
