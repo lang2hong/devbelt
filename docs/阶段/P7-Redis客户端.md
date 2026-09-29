@@ -590,6 +590,8 @@ db-host 最小改动：
     3 节点 cluster（host network），验证 `setupClusterOverSsh` 的 natMap 跨 slot 路由。CI 在 `--cluster create`
     后轮询三节点 `cluster_state:ok` + 16384 slots 收敛；用例内有界等待 `cluster_state:ok`、逐 master PING
     探活，并对 SET/GET/DEL 做 MOVED/ASK/CLUSTERDOWN 有界重试（防启动抖动）。
+  - **D20（发布门禁）**：同 job 内 `D20` 用例——把一个 master 的地址映射到死端口，向落在其 slot 的 key 发命令，
+    断言 20s 内**报错而非挂起**（`Promise.race` 出现 `timeout` 即失败）。
   - Sentinel over SSH：**best-effort**（`continue-on-error`）。已知限制：SSH 路径为 standalone 连发现到的
     master，不自动重发现。**Sentinel 本体启动已实跑验证**：`36516352390` 中 `Start Redis Sentinel`
     步骤 PONG ✓，日志见 `Running mode=sentinel`、`Sentinel new configuration saved on disk`、
@@ -654,10 +656,11 @@ db-host 最小改动：
 - **完整二进制安全未做**：当前只做到「解码含替换符（U+FFFD）的键名/字段/成员/元素设为只读 + 删除计数校验」。完整二进制安全（Buffer 全链路保留）延后。
 - **list「比对后再写」非原子**：`LSET` 前先 `LINDEX` 比对，已大幅缩小竞态窗口，但两条命令之间仍可能被其它客户端插入修改；严格保证需 Lua。
 - **SSH 路径的 TLS `servername` 未修正**：经 SSH 隧道时 TLS 主机名仍按连接配置，未按真实节点名；需真实环境再验证。
-- **客户端侧 Redis 权益门控未做**：Redis 是否在套餐内的判断仍在服务端/同步侧。
+- **权益门控只在客户端，且出站方向未过滤**：服务端因端到端加密**看不到引擎类型**，Redis 是否在套餐内只能由客户端判断；当前**入站**有权益过滤（`filterPersonalConnectionsByEntitlement`，不在套餐的进 deferred），但**出站**方向没有等价的过滤/提示。
 - **`U+FFFD` 判定为二进制**：合法文本若本身含该字符会被设为只读（偏保守的 fail-closed，可接受）。
 - **stream 破坏性操作的 db 漂移未单独校验**：`XTRIM`/`XGROUP DESTROY` 的「确认期间切库」未加 `pendingConfirm` 式校验（CLI 危险命令已加）。
-- **未映射 slot 行为未手工验证**：cluster over SSH 后拓扑新增未映射节点会映射到死端口 `127.0.0.1:0`，失败可控；但「落在该 slot 的命令在有限时间内报错、不反复重定向/挂起」未手工确认（CI 拓扑正常走不到）。
+- **拓扑变化后需手动重连**：cluster over SSH 建立后，若集群扩容/resharding 新增了未建隧道的节点，该节点地址会被映射到死端口 `127.0.0.1:0` 并记诊断/提示；**必须重新连接以刷新隧道**，不会自动重发现。
+- **未映射 slot 行为**：「落在未映射节点的 slot 上的命令，须在有限时间内报错、不反复重定向/挂起」——已加入 **D20 集成测试**（`redisTopologyOverSsh.test.ts`，随 Cluster over SSH job 运行，断言有界失败且绝不 `timeout`）。该断言在 CI 实跑通过前不作结论（见下方 run 记录）。
 - **Sentinel over SSH 为 best-effort**：SSH 路径按 standalone 连发现到的 master，不自动重发现。**CI 中 Sentinel 本体启动已从「已知限制」转为「已验证」**（见下）。
 
 ### 同步向前兼容前提（D9/D15，务必随发布说明写明）
