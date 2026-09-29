@@ -177,7 +177,18 @@ export class RedisView extends BaseWebView {
     }
     if (msg.type === 'hashDel') { await this.edit('HDEL', String(msg.key), async (c) => { await redisHDel(c, String(msg.key), strs(msg.fields)); }); return; }
     if (msg.type === 'listPush') { await this.edit('LPUSH/RPUSH', String(msg.key), async (c) => { const v = strs(msg.values); if (msg.side === 'left') await redisLPush(c, String(msg.key), v); else await redisRPush(c, String(msg.key), v); }); return; }
-    if (msg.type === 'listSet') { await this.edit('LSET', String(msg.key), async (c) => { await redisLSet(c, String(msg.key), Number(msg.index), String(msg.value ?? '')); }); return; }
+    if (msg.type === 'listSet') {
+      // 并发保护：确认该下标当前值与用户看到的旧值一致，否则拒绝（他端改动会使下标移动）。
+      await this.edit('LSET', String(msg.key), async (c) => {
+        const key = String(msg.key);
+        const index = Number(msg.index);
+        const next = String(msg.value ?? '');
+        const current = await redisLIndex(c, key, index);
+        if (current !== String(msg.original ?? '')) throw new Error(l10n('cmd.redis.listChanged'));
+        await redisLSet(c, key, index, next);
+      });
+      return;
+    }
     if (msg.type === 'listRem') {
       // 精确删「第 index 个元素」：LREM count=0 会删掉所有同值元素。用唯一标记替换该下标再 LREM 1，
       // 失败则回滚标记（避免污染列表）。
@@ -454,9 +465,9 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
         const keyType = await redisType(c, key);
         const ttl = await redisTtl(c, key);
         const size = keyType === 'string' ? await redisStrlen(c, key) : await redisMemoryUsage(c, key);
-        // string 超过硬上限：只取预览（GETRANGE），避免整值进内存并转 base64 导致宿主 OOM。
+        // string 超过硬上限：只取 1MB 预览（GETRANGE），避免整值进内存并同时生成 text+base64 导致宿主/面板 OOM。
         if (keyType === 'string' && size !== null && size > FORCE_LOAD_MAX_BYTES) {
-          const buf = await redisGetRangeBuffer(c, key, 0, FORCE_LOAD_MAX_BYTES - 1);
+          const buf = await redisGetRangeBuffer(c, key, 0, LARGE_KEY_BYTES - 1);
           const data: RedisValueData = {
             kind: 'string',
             text: buf.toString('utf8'),
@@ -835,12 +846,23 @@ const CLI_BLOCKED_COMMANDS = new Set([
   'RESET', 'QUIT', 'AUTH', 'HELLO', 'MULTI', 'EXEC', 'DISCARD', 'WATCH', 'UNWATCH',
   'SUBSCRIBE', 'PSUBSCRIBE', 'SSUBSCRIBE', 'MONITOR',
   'BLPOP', 'BRPOP', 'BLMOVE', 'BRPOPLPUSH', 'BZPOPMIN', 'BZPOPMAX', 'BZMPOP', 'BLMPOP',
+  // 阻塞/改变共享连接状态或阻塞服务端：
+  'WAIT', 'WAITAOF', 'READONLY', 'READWRITE', 'SYNC', 'PSYNC',
 ]);
 
 function isCliBlocked(name: string, args: readonly string[]): boolean {
   const c = name.toUpperCase();
   if (CLI_BLOCKED_COMMANDS.has(c)) return true;
-  if (c === 'CLIENT' && String(args[0] ?? '').toUpperCase() === 'PAUSE') return true;
+  const upper = args.map((a) => a.toUpperCase());
+  if (c === 'CLIENT') {
+    const sub = upper[0] ?? '';
+    if (sub === 'PAUSE' || sub === 'TRACKING') return true;
+    // REPLY OFF/SKIP 会让服务端不再回复，共享连接上后续命令会永久挂起。
+    if (sub === 'REPLY' && (upper[1] === 'OFF' || upper[1] === 'SKIP')) return true;
+  }
+  // XREAD/XREADGROUP 带 BLOCK 会阻塞共享连接。
+  if ((c === 'XREAD' || c === 'XREADGROUP') && upper.includes('BLOCK')) return true;
+  if (c === 'DEBUG' && upper[0] === 'SLEEP') return true;
   return false;
 }
 

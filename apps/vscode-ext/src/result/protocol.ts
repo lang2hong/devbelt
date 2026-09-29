@@ -235,8 +235,8 @@ export type RedisUpMessage =
   | { type: 'hashSet'; key: string; field: string; value: string; oldField?: string }
   | { type: 'hashDel'; key: string; fields: string[] }
   | { type: 'listPush'; key: string; side: 'left' | 'right'; values: string[] }
-  | { type: 'listSet'; key: string; index: number; value: string }
-  | { type: 'listRem'; key: string; count: number; value: string }
+  | { type: 'listSet'; key: string; index: number; value: string; original: string }
+  | { type: 'listRem'; key: string; index: number; value: string }
   | { type: 'listTrim'; key: string; start: number; stop: number }
   | { type: 'listPop'; key: string; side: 'left' | 'right' }
   | { type: 'setAdd'; key: string; members: string[] }

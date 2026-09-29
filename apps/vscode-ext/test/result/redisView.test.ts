@@ -414,6 +414,47 @@ describe('RedisView S3 键树/值/编辑', () => {
     expect(sent.some(([n]) => n === 'LREM')).toBe(false);
   });
 
+  it('listSet 按下标编辑：下标当前值与旧值不符 → 拒绝（并发保护）', async () => {
+    const { view, sent } = makeView(async (n) => (n === 'LINDEX' ? 'changed' : n in replies ? replies[n] : 'OK'), 0);
+    await mountDb(view);
+    sent.length = 0;
+    await view.handleMessage({ type: 'listSet', key: 'k', index: 1, value: 'new', original: 'old' });
+    expect(sent.some(([n]) => n === 'LSET')).toBe(false);
+  });
+
+  it('listSet 按下标编辑：值一致 → 执行 LSET', async () => {
+    const { view, sent } = makeView(async (n) => (n === 'LINDEX' ? 'old' : n in replies ? replies[n] : 'OK'), 0);
+    await mountDb(view);
+    sent.length = 0;
+    await view.handleMessage({ type: 'listSet', key: 'k', index: 1, value: 'new', original: 'old' });
+    const lset = sent.find(([n]) => n === 'LSET');
+    expect(lset).toBeTruthy();
+  });
+
+  it('CLI 拒绝 CLIENT REPLY OFF / XREAD ... BLOCK', async () => {
+    const { view, sent } = makeView();
+    await mount(view, sent);
+    sent.length = 0;
+    await view.handleMessage({ type: 'runCommand', id: '10', line: 'CLIENT REPLY OFF' });
+    await view.handleMessage({ type: 'runCommand', id: '11', line: 'XREAD BLOCK 0 STREAMS s $' });
+    expect(sent.some(([n]) => n === 'CLIENT')).toBe(false);
+    expect(sent.some(([n]) => n === 'XREAD')).toBe(false);
+    const r10 = posts(view).find((m) => m.type === 'commandResult' && m.id === '10');
+    const r11 = posts(view).find((m) => m.type === 'commandResult' && m.id === '11');
+    expect(r10.ok).toBe(false);
+    expect(r11.ok).toBe(false);
+  });
+
+  it('大 key 预览只取 1MB（GETRANGE 结束下标 = LARGE_KEY_BYTES-1）', async () => {
+    const big: Record<string, unknown> = { ...replies, STRLEN: 40 * 1024 * 1024, GETRANGE: 'preview' };
+    const sent: [string, unknown[]][] = [];
+    const { view } = makeView(async (n, a) => { sent.push([n, a ?? []]); return n in big ? big[n] : 'OK'; }, 0);
+    await mountDb(view);
+    await view.handleMessage({ type: 'load', key: 'user:1' });
+    const gr = sent.find(([n]) => n === 'GETRANGE');
+    expect(String(gr?.[1]?.[2])).toBe(String(1024 * 1024 - 1));
+  });
+
   it('renameKey 发包并审计', async () => {
     const { view, sent } = makeView(handler, 0);
     await mountDb(view);

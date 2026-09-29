@@ -24,7 +24,7 @@ const emit = defineEmits<{
   (e: 'hashSet', key: string, field: string, value: string, oldField?: string): void;
   (e: 'hashDel', key: string, fields: string[]): void;
   (e: 'listPush', key: string, side: 'left' | 'right', values: string[]): void;
-  (e: 'listSet', key: string, index: number, value: string): void;
+  (e: 'listSet', key: string, index: number, value: string, original: string): void;
   (e: 'listRem', key: string, index: number, value: string): void;
   (e: 'listPop', key: string, side: 'left' | 'right'): void;
   (e: 'setAdd', key: string, members: string[]): void;
@@ -189,7 +189,8 @@ function saveEdit(): void {
     if (!field) return;
     emit('hashSet', key.value, field, e.draft, e.id);
   } else if (e.kind === 'list') {
-    emit('listSet', key.value, Number(e.id), e.draft);
+    const items = props.info?.data?.kind === 'list' ? props.info.data.items : [];
+    emit('listSet', key.value, Number(e.id), e.draft, items[Number(e.id)] ?? '');
   } else {
     const member = (e.draftKey ?? e.id).trim();
     if (!member) return;

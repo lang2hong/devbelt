@@ -371,4 +371,37 @@ describe('D* 键树（根扁平 SCAN + 客户端折叠）', () => {
     expect(kids[0].kind).toBe(NodeKind.RedisDb);
     expect(kids[0].label).toBe(l10n('redis.tree.clusterKeys'));
   });
+
+  it('改名到另一前缀：新旧前缀的完整快照都降级（extraAffected）', async () => {
+    const provider = makeProvider(makeClient((a) => {
+      const m = matchOf(a);
+      if (m === 'a:*') return ['0', ['a:1']];
+      if (m === 'b:*') return ['0', ['b:1']];
+      return ['0', ['a:1', 'b:1']];
+    }));
+    const db = dbNode();
+    const folders = (await provider.getChildren(db)).filter((k) => k.kind === NodeKind.RedisKeyFolder);
+    await provider.loadFullFolder(folders.find((k) => k.label === 'a')!);
+    await provider.loadFullFolder(folders.find((k) => k.label === 'b')!);
+
+    const affected = new DbTreeNode('a:1', TreeItemCollapsibleState.None, NodeKind.RedisKey, conn, undefined, db);
+    affected.redisDbIndex = 0;
+    affected.redisKey = 'a:1';
+    await provider.refreshRedisAfterMutation(affected, false, ['b:y']);
+
+    const rebuilt = (await provider.getChildren(db)).filter((k) => k.kind === NodeKind.RedisKeyFolder);
+    expect(rebuilt.find((k) => k.label === 'a')!.description).toBe('');
+    expect(rebuilt.find((k) => k.label === 'b')!.description).toBe('');
+  });
+
+  it('合并不截断：单页超过软上限也全部保留', async () => {
+    const total = 20001;
+    const page = Array.from({ length: total }, (_, i) => `k:${i}`);
+    const provider = makeProvider(makeClient((a) => {
+      const m = matchOf(a);
+      return m === undefined ? ['0', page] : ['0', []];
+    }));
+    const res = await provider.loadMoreRedisKeys(dbNode());
+    expect(res.total).toBe(total);
+  });
 });

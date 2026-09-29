@@ -352,11 +352,12 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     return `${connId}:db${dbIndex}:__full__:${prefix}`;
   }
 
-  /** 合并去重并截断到 cap。 */
-  private mergeRedisKeys(stateKey: string, batch: readonly string[], cap: number): void {
+  // 合并去重，不截断：SCAN 游标已越过整页，被截掉的键之后再也扫不到（软/硬 cap 只用于
+  // 「停止继续扫描」——调用方在 count() >= cap 时 break），允许略微超出一页。
+  private mergeRedisKeys(stateKey: string, batch: readonly string[]): void {
     if (!batch.length) return;
     const acc = this.redisKeys.get(stateKey) ?? [];
-    this.redisKeys.set(stateKey, [...new Set([...acc, ...batch])].slice(0, cap));
+    this.redisKeys.set(stateKey, [...new Set([...acc, ...batch])]);
   }
 
   /**
@@ -395,7 +396,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
             batch.push(...page.keys);
           }
           this.redisClusterCursors.set(stateKey, next);
-          this.mergeRedisKeys(stateKey, batch, REDIS_TREE_SOFT_CAP);
+          this.mergeRedisKeys(stateKey, batch);
           return;
         }
         if (dbIndex !== session.db) {
@@ -405,7 +406,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         const cursor = this.redisCursors.get(stateKey) ?? '0';
         const page = await redisScan(client, cursor, { match, count: REDIS_TREE_PAGE });
         this.redisCursors.set(stateKey, page.cursor);
-        this.mergeRedisKeys(stateKey, page.keys, REDIS_TREE_SOFT_CAP);
+        this.mergeRedisKeys(stateKey, page.keys);
       });
       this.redisScanned.add(stateKey);
       this.redisScanError.delete(stateKey);
@@ -540,7 +541,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
               if (doneFlags[i]) continue;
               const page = await redisScanOnNode(nodes[i], cursors[i], { match, count: clusterPageSize(nodes.length) });
               cursors[i] = page.cursor;
-              this.mergeRedisKeys(stateKey, page.keys, REDIS_TREE_HARD_CAP);
+              this.mergeRedisKeys(stateKey, page.keys);
               if (page.cursor === '0') doneFlags[i] = true;
             }
             this.redisClusterCursors.set(stateKey, cursors);
@@ -571,7 +572,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
               return redisScan(client, cur, { match, count: REDIS_TREE_PAGE });
             });
             cur = page.cursor;
-            this.mergeRedisKeys(stateKey, page.keys, REDIS_TREE_HARD_CAP);
+            this.mergeRedisKeys(stateKey, page.keys);
             this.redisCursors.set(stateKey, cur);
             onProgress?.(count());
             if (cur === '0') { done = true; break; }
@@ -723,7 +724,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
    * 定向失效：仅删除「前缀是该键祖先路径」的 `__full__` 快照（完整快照只应存在于确实完整的文件夹），
    * 其余完整快照保留。
    */
-  async refreshRedisAfterMutation(node: DbTreeNode, invalidateAllSnapshots = false): Promise<void> {
+  async refreshRedisAfterMutation(node: DbTreeNode, invalidateAllSnapshots = false, extraAffected: readonly string[] = []): Promise<void> {
     const db = this.findRedisDb(node);
     if (!db?.conn || db.redisDbIndex === undefined) return;
     const { conn } = db;
@@ -731,15 +732,16 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const sep = conn.keySeparator || ':';
     const p = `${conn.id}:db${dbIndex}:__full__:`;
     // 受影响前缀：键用键名；文件夹用其前缀（此前只看 redisKey，导致删文件夹/按 pattern 删不失效快照）。
-    const affected = node.redisKey ?? (node.redisKeyPrefix !== undefined && node.redisKeyPrefix !== '' ? node.redisKeyPrefix : undefined);
+    // extraAffected 用于改名/新建：目标键名所在前缀也要失效（旧节点只带旧键名/当前节点）。
+    const base = node.redisKey ?? (node.redisKeyPrefix !== undefined && node.redisKeyPrefix !== '' ? node.redisKeyPrefix : undefined);
+    const affectedList = [...(base !== undefined ? [base] : []), ...extraAffected];
     for (const k of [...this.redisFolderFull.keys()]) {
       if (!k.startsWith(p)) continue;
-      if (invalidateAllSnapshots || affected === undefined) { this.redisFolderFull.delete(k); continue; }
+      if (invalidateAllSnapshots || affectedList.length === 0) { this.redisFolderFull.delete(k); continue; }
       const folderPrefix = k.slice(p.length);
       // 自身/祖先（改动落在其子树）或后代（被删前缀包含它）都要失效。
-      if (affected === folderPrefix || affected.startsWith(`${folderPrefix}${sep}`) || folderPrefix.startsWith(`${affected}${sep}`)) {
-        this.redisFolderFull.delete(k);
-      }
+      const hit = affectedList.some((a) => a === folderPrefix || a.startsWith(`${folderPrefix}${sep}`) || folderPrefix.startsWith(`${a}${sep}`));
+      if (hit) this.redisFolderFull.delete(k);
     }
     this.setRedisMatch(db, this.redisMatches.get(`${conn.id}:db${dbIndex}`));
   }

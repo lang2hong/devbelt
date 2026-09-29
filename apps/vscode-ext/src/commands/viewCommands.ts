@@ -67,8 +67,8 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
   };
 
   /** 树侧写操作后：重扫树 + 同步已打开的 keyBrowser 面板（键树/当前值）。 */
-  const afterRedisMutation = async (node: any, invalidateAllSnapshots = false): Promise<void> => {
-    await treeProvider.refreshRedisAfterMutation(node, invalidateAllSnapshots);
+  const afterRedisMutation = async (node: any, invalidateAllSnapshots = false, extraAffected: readonly string[] = []): Promise<void> => {
+    await treeProvider.refreshRedisAfterMutation(node, invalidateAllSnapshots, extraAffected);
     if (node?.conn) RedisView.find(node.conn.id, 'keyBrowser')?.reloadKeys();
   };
 
@@ -268,7 +268,8 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
           await redisRename(c, node.redisKey, newKey);
         });
         auditRedis(node.conn, node.redisDbIndex, `RENAME ${node.redisKey}`, started);
-        await afterRedisMutation(node);
+        // 新键名所在前缀的完整快照也要失效（否则 b 文件夹缺 b:y）。
+        await afterRedisMutation(node, false, [newKey]);
       } catch (e) { vscode.window.showErrorMessage((e as Error).message); }
     }),
     vscode.commands.registerCommand('devbelt.redis.setKeyTtl', async (node: any) => {
@@ -374,7 +375,8 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
           else await redisZAdd(c, name, score, value);
         });
         auditRedis(node.conn, node.redisDbIndex, `CREATE ${name}`);
-        await afterRedisMutation(node);
+        // 新建键可能落在当前节点前缀之外（如在文件夹里建 a:x），其前缀快照也要失效。
+        await afterRedisMutation(node, false, [name]);
         RedisView.open(node.conn, manager, 'keyBrowser', node.redisDbIndex, name);
       } catch (e) { vscode.window.showErrorMessage((e as Error).message); }
     }),
