@@ -10,7 +10,7 @@ import { canUseDataSync } from '@devbelt/db-host/sync/entitlementGate';
 import { l10n } from '../i18n';
 import { diagInfo } from '../utils/diagnostics';
 
-type SyncRun = { stage: string; applied?: number; pushed?: number; changes?: number; skippedEntitlement?: number; skippedOutbound?: number } | undefined;
+type SyncRun = { stage: string; applied?: number; pushed?: number; changes?: number; skippedEntitlement?: number; skippedUnsupported?: number; skippedOutbound?: number } | undefined;
 
 interface SyncSessionPort {
   readonly uid: string;
@@ -130,6 +130,7 @@ function reportInitialRun(ui: SyncUi, result: SyncRun, op: SyncOp): void {
     // 有跳过时不再谎报「已完成」：明确告知哪一类（入站套餐跳过 / 出站未能编码）及条数。
     const parts: string[] = [];
     if (result.skippedEntitlement) parts.push(l10n('sync.skippedEntitlement', { count: String(result.skippedEntitlement) }));
+    if (result.skippedUnsupported) parts.push(l10n('sync.skippedUnsupported', { count: String(result.skippedUnsupported) }));
     if (result.skippedOutbound) parts.push(l10n('sync.skippedOutbound', { count: String(result.skippedOutbound) }));
     if (parts.length) ui.warn(l10n('sync.skipped', { detail: parts.join('；') }));
     // 成功始终提示；无实际变更时合并「已是最新，无变更」。

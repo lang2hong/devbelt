@@ -171,7 +171,7 @@ export class RedisView extends BaseWebView {
       const field = String(msg.field ?? '');
       const oldField = msg.oldField === undefined ? undefined : String(msg.oldField);
       const renaming = !!oldField && oldField !== field;
-      this.assertBinaryFree(hkey, oldField ? [field, oldField] : [field]);
+      this.assertBinaryFree(hkey, [...(oldField ? [field, oldField] : [field]), String(msg.value ?? '')]);
       await this.edit(renaming ? 'HSET+HDEL' : 'HSET', hkey, async (c) => {
         // 改名时目标 field 已存在则拒绝，避免静默覆盖（HSET 会直接覆盖值）。
         if (renaming && await redisHExists(c, hkey, field)) throw new Error(l10n('cmd.redis.fieldExists'));
@@ -499,7 +499,11 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
     this.binaryTokens = new Set<string>();
     if (!data) return;
     if (data.kind === 'hash') {
-      for (const [f] of data.entries) if (hasReplacement(f)) this.binaryTokens.add(f);
+      // field 与 value 都有损都进只读集：编辑草稿会带 U+FFFD，原样保存会用有损文本覆盖原值。
+      for (const [f, v] of data.entries) {
+        if (hasReplacement(f)) this.binaryTokens.add(f);
+        if (hasReplacement(v)) this.binaryTokens.add(v);
+      }
     } else if (data.kind === 'set') {
       for (const m of data.members) if (hasReplacement(m)) this.binaryTokens.add(m);
     } else if (data.kind === 'zset') {
@@ -511,7 +515,8 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
 
   /** H5 fail-closed：二进制键/成员禁止任何写操作（有损文本回写会破坏数据）。 */
   private assertBinaryFree(key: string, tokens: readonly string[] = []): void {
-    if (hasReplacement(key) || this.keyBinary) throw new Error(l10n('cmd.redis.binaryReadOnly'));
+    // 只按本次操作涉及的 key/成员判断（不能用面板级 this.keyBinary，否则会误拦其它键）。
+    if (hasReplacement(key)) throw new Error(l10n('cmd.redis.binaryReadOnly'));
     for (const t of tokens) if (hasReplacement(t) || this.binaryTokens.has(t)) throw new Error(l10n('cmd.redis.binaryReadOnly'));
   }
 

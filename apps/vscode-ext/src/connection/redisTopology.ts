@@ -98,13 +98,20 @@ export type NatMapFn = (address: string) => RedisHostPort | null;
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 
+export interface NatMapOptions {
+  /** 未映射地址回调（仅日志/提示，纯函数不在此抛错）。 */
+  onUnmapped?: (address: string) => void;
+}
+
 /**
  * 远端地址 → 本地隧道端口（**函数形式**）。
  *
  * 未知节点不能回退真地址——扩容/resharding 后的新内网节点会绕过隧道被 ioredis 直连并发 AUTH。
- * 故仅放行本地回环（种子节点已是 127.0.0.1，需按原样直连），其余未映射地址一律抛错 fail-closed。
+ * 也**绝不能抛错**：ioredis 在 CLUSTER SLOTS 回调与 MOVED/ASK 处理里调用 natMapper，抛错会变成
+ * 未捕获异常并让 slot 刷新永久卡住 / 命令永不 settle（N1）。故未知节点映射到一个必然被拒的
+ * 本地死端口（127.0.0.1:0），连接失败可控且可诊断；本地回环（种子）按原地址直连。
  */
-export function buildNatMap(entries: readonly NatMapEntry[]): NatMapFn {
+export function buildNatMap(entries: readonly NatMapEntry[], opts: NatMapOptions = {}): NatMapFn {
   const map = new Map<string, RedisHostPort>();
   for (const e of entries) {
     map.set(`${e.remoteHost}:${e.remotePort}`, { host: '127.0.0.1', port: e.localPort });
@@ -115,6 +122,7 @@ export function buildNatMap(entries: readonly NatMapEntry[]): NatMapFn {
     const idx = address.lastIndexOf(':');
     const host = idx >= 0 ? address.slice(0, idx) : address;
     if (LOOPBACK_HOSTS.has(host)) return null; // 种子/本地：按原地址直连
-    throw new Error(`unmapped redis cluster node (no SSH tunnel): ${address}`);
+    opts.onUnmapped?.(address);
+    return { host: '127.0.0.1', port: 0 }; // 死端口：连接必败，绝不把 AUTH 发往内网
   };
 }

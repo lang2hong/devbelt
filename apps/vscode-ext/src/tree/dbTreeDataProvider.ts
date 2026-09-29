@@ -82,20 +82,27 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   /** D*：「已全部加载」文件夹快照（key = `${connId}:db${idx}:__full__:${prefix}`）。 */
   private readonly redisFolderFull = new Map<string, { keys: string[]; complete: boolean }>();
   /**
-   * 每个 db 的加载代际（key = `${connId}:db${idx}`）。搜索切换/关闭/失效会 +1；
-   * 在途 SCAN 结果写回前若代际已变则丢弃，避免旧页覆盖新状态（D7 竞态）。
+   * 加载代际。`redisConnGen` 按连接计（关闭连接时**无条件** +1，即使该 db 从未搜索过）；
+   * `redisDbGen` 按 db 计（搜索切换/清除时 +1）。在途 SCAN 结果写回前校验二者组成的代际，
+   * 已变则丢弃，避免旧页覆盖新状态或残留在已关闭连接上（D7 竞态）。
    */
-  private readonly redisGen = new Map<string, number>();
+  private readonly redisConnGen = new Map<string, number>();
+  private readonly redisDbGen = new Map<string, number>();
 
-  /** 读取某 db 的当前代际。 */
-  private redisGenOf(connId: string, dbIndex: number): number {
-    return this.redisGen.get(`${connId}:db${dbIndex}`) ?? 0;
+  /** 读取某 db 的当前代际（连接代际:db 代际）。 */
+  private redisGenOf(connId: string, dbIndex: number): string {
+    return `${this.redisConnGen.get(connId) ?? 0}:${this.redisDbGen.get(`${connId}:db${dbIndex}`) ?? 0}`;
   }
 
-  /** 使某 db 的加载代际 +1（在途加载据此作废）。 */
+  /** 使某 db 的加载代际 +1（搜索切换/清除）。 */
   private bumpRedisGen(connId: string, dbIndex: number): void {
     const k = `${connId}:db${dbIndex}`;
-    this.redisGen.set(k, (this.redisGen.get(k) ?? 0) + 1);
+    this.redisDbGen.set(k, (this.redisDbGen.get(k) ?? 0) + 1);
+  }
+
+  /** 使某连接的加载代际 +1（关闭/清理；无条件，覆盖从未搜索过的 db）。 */
+  private bumpRedisConnGen(connId: string): void {
+    this.redisConnGen.set(connId, (this.redisConnGen.get(connId) ?? 0) + 1);
   }
 
   constructor(
@@ -199,9 +206,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     for (const k of [...this.redisScanError]) if (k.startsWith(p)) this.redisScanError.delete(k);
     for (const k of [...this.redisMatches.keys()]) if (k.startsWith(p)) this.redisMatches.delete(k);
     for (const k of [...this.redisFolderFull.keys()]) if (k.startsWith(p)) this.redisFolderFull.delete(k);
-    // 关闭：让在途加载作废。代际按连接下所有 db 递增（此处只有 connId）。
-    const gp = `${connId}:db`;
-    for (const k of [...this.redisGen.keys()]) if (k.startsWith(gp)) this.redisGen.set(k, (this.redisGen.get(k) ?? 0) + 1);
+    // 关闭：无条件递增连接代际，让在途加载作废（覆盖从未搜索过的 db）。
+    this.bumpRedisConnGen(connId);
   }
 
   /**

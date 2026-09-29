@@ -86,6 +86,7 @@ export const zh: MessageCatalog = {
   'sync.skipped': '同步完成，但有以下未同步：{detail}',
   'sync.upToDate': '已是最新，无变更。',
   'sync.skippedEntitlement': '{count} 条因套餐被跳过（升级后会自动补拉）',
+  'sync.skippedUnsupported': '{count} 条需要新版本客户端（当前版本尚不支持，升级后自动补拉）',
   'sync.skippedOutbound': '{count} 条本地变更未同步（引擎不支持或编码失败）',
   'sync.statusLabel': '同步',
   'sync.statusSyncing': '同步中…',

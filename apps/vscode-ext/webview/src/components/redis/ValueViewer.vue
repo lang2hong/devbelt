@@ -294,7 +294,7 @@ function copyValue(text: string): void {
                 <button class="btn tiny" @click="editing = null">{{ t('wv.redis.confirm.cancel') }}</button>
               </template>
               <template v-else>
-                <button class="btn tiny" :disabled="ro || isBin(f)" :title="t('wv.redis.value.edit')" @click="startEdit('hash', f, v)">✎</button>
+                <button class="btn tiny" :disabled="ro || isBin(f) || isBin(v)" :title="t('wv.redis.value.edit')" @click="startEdit('hash', f, v)">✎</button>
                 <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyValue(v)">⧉</button>
                 <button class="btn tiny" :disabled="ro || isBin(f)" @click="emit('hashDel', key, [f])">✕</button>
               </template>

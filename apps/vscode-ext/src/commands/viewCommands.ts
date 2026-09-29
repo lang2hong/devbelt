@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import {
-  redisExists, redisExpire, redisHSet, redisPersist, redisRename, redisRPush, redisSAdd,
+  redisExists, redisExpire, redisHSet, redisRename, redisRPush, redisSAdd,
   redisSelect, redisSet, redisUnlink, redisZAdd,
 } from '@devbelt/db-core';
 import type { ConnectionManager } from '../connection/connectionManager';
@@ -284,20 +284,19 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
       if (!node?.conn || !node.redisKey) return;
       if (isBinaryName(node.redisKey)) { vscode.window.showErrorMessage(l10n('cmd.redis.binaryReadOnly')); return; }
       if (!(await confirmProductionWrite(node.conn, `EXPIRE ${node.redisKey}`))) return;
-      const raw = await vscode.window.showInputBox({ prompt: l10n('redis.tree.ttlPrompt'), value: '0' });
+      const raw = await vscode.window.showInputBox({ prompt: l10n('redis.tree.ttlPrompt') });
       if (raw === undefined) return;
-      if (raw.trim() === '') return; // 空输入不静默当 PERSIST
       const seconds = Number(raw);
-      if (!Number.isInteger(seconds) || seconds < 0) {
+      // 0/空/非正整数一律无效：不再把 0 当 PERSIST（与面板侧口径一致，清过期用「持久化」）。
+      if (raw.trim() === '' || !Number.isInteger(seconds) || seconds <= 0) {
         vscode.window.showErrorMessage(l10n('cmd.redis.ttlInvalid'));
         return;
       }
       try {
         await withRedis(node.conn, node.redisDbIndex, async (c) => {
-          if (seconds > 0) await redisExpire(c, node.redisKey, seconds);
-          else await redisPersist(c, node.redisKey);
+          await redisExpire(c, node.redisKey, seconds);
         });
-        auditRedis(node.conn, node.redisDbIndex, seconds > 0 ? `EXPIRE ${node.redisKey} ${seconds}` : `PERSIST ${node.redisKey}`);
+        auditRedis(node.conn, node.redisDbIndex, `EXPIRE ${node.redisKey} ${seconds}`);
         await afterRedisMutation(node);
       } catch (e) { vscode.window.showErrorMessage((e as Error).message); }
     }),

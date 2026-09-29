@@ -1611,42 +1611,42 @@
         },
         {
           "command": "devbelt.redis.serverStatus",
-          "when": "view == devbelt.explorer && viewItem == connectionOpen.REDIS || viewItem == connectionOpen.REDIS.ro",
+          "when": "view == devbelt.explorer && (viewItem == connectionOpen.REDIS || viewItem == connectionOpen.REDIS.ro)",
           "group": "5_tools"
         },
         {
           "command": "devbelt.redis.monitor",
-          "when": "view == devbelt.explorer && viewItem == connectionOpen.REDIS || viewItem == connectionOpen.REDIS.ro",
+          "when": "view == devbelt.explorer && (viewItem == connectionOpen.REDIS || viewItem == connectionOpen.REDIS.ro)",
           "group": "5_tools"
         },
         {
           "command": "devbelt.redis.console",
-          "when": "view == devbelt.explorer && viewItem == connectionOpen.REDIS || viewItem == connectionOpen.REDIS.ro",
+          "when": "view == devbelt.explorer && (viewItem == connectionOpen.REDIS || viewItem == connectionOpen.REDIS.ro)",
           "group": "1_view"
         },
         {
           "command": "devbelt.redis.slowlog",
-          "when": "view == devbelt.explorer && viewItem == connectionOpen.REDIS || viewItem == connectionOpen.REDIS.ro",
+          "when": "view == devbelt.explorer && (viewItem == connectionOpen.REDIS || viewItem == connectionOpen.REDIS.ro)",
           "group": "5_tools"
         },
         {
           "command": "devbelt.redis.commandLog",
-          "when": "view == devbelt.explorer && viewItem == connectionOpen.REDIS || viewItem == connectionOpen.REDIS.ro",
+          "when": "view == devbelt.explorer && (viewItem == connectionOpen.REDIS || viewItem == connectionOpen.REDIS.ro)",
           "group": "5_tools"
         },
         {
           "command": "devbelt.redis.console",
-          "when": "view == devbelt.explorer && viewItem == redisDb.REDIS || viewItem == redisDb.REDIS.ro",
+          "when": "view == devbelt.explorer && (viewItem == redisDb.REDIS || viewItem == redisDb.REDIS.ro)",
           "group": "1_view"
         },
         {
           "command": "devbelt.redis.searchKeys",
-          "when": "view == devbelt.explorer && viewItem == redisDb.REDIS || viewItem == redisDb.REDIS.ro",
+          "when": "view == devbelt.explorer && (viewItem == redisDb.REDIS || viewItem == redisDb.REDIS.ro)",
           "group": "1_view"
         },
         {
           "command": "devbelt.redis.clearSearchKeys",
-          "when": "view == devbelt.explorer && viewItem == redisDb.REDIS || viewItem == redisDb.REDIS.ro",
+          "when": "view == devbelt.explorer && (viewItem == redisDb.REDIS || viewItem == redisDb.REDIS.ro)",
           "group": "1_view"
         },
         {
@@ -1656,22 +1656,22 @@
         },
         {
           "command": "devbelt.redis.loadAllKeys",
-          "when": "view == devbelt.explorer && viewItem == redisDb.REDIS || viewItem == redisDb.REDIS.ro",
+          "when": "view == devbelt.explorer && (viewItem == redisDb.REDIS || viewItem == redisDb.REDIS.ro)",
           "group": "1_view"
         },
         {
           "command": "devbelt.redis.loadMoreKeys",
-          "when": "view == devbelt.explorer && viewItem == redisDb.REDIS || viewItem == redisDb.REDIS.ro",
+          "when": "view == devbelt.explorer && (viewItem == redisDb.REDIS || viewItem == redisDb.REDIS.ro)",
           "group": "1_view"
         },
         {
           "command": "devbelt.refreshNode",
-          "when": "view == devbelt.explorer && viewItem == redisDb.REDIS || viewItem == redisDb.REDIS.ro",
+          "when": "view == devbelt.explorer && (viewItem == redisDb.REDIS || viewItem == redisDb.REDIS.ro)",
           "group": "0_refresh"
         },
         {
           "command": "devbelt.copyNodeName",
-          "when": "view == devbelt.explorer && viewItem == redisDb.REDIS || viewItem == redisDb.REDIS.ro",
+          "when": "view == devbelt.explorer && (viewItem == redisDb.REDIS || viewItem == redisDb.REDIS.ro)",
           "group": "9_copy"
         },
         {
@@ -1681,7 +1681,7 @@
         },
         {
           "command": "devbelt.redis.keyBrowser",
-          "when": "view == devbelt.explorer && viewItem == redisKey.REDIS || viewItem == redisKey.REDIS.ro",
+          "when": "view == devbelt.explorer && (viewItem == redisKey.REDIS || viewItem == redisKey.REDIS.ro)",
           "group": "1_view"
         },
         {
@@ -1706,7 +1706,7 @@
         },
         {
           "command": "devbelt.redis.loadFolderKeys",
-          "when": "view == devbelt.explorer && viewItem == redisKeyFolder.REDIS || viewItem == redisKeyFolder.REDIS.ro",
+          "when": "view == devbelt.explorer && (viewItem == redisKeyFolder.REDIS || viewItem == redisKeyFolder.REDIS.ro)",
           "group": "1_view"
         },
         {
@@ -1716,7 +1716,7 @@
         },
         {
           "command": "devbelt.copyNodeName",
-          "when": "view == devbelt.explorer && viewItem == redisKey.REDIS || viewItem == redisKey.REDIS.ro",
+          "when": "view == devbelt.explorer && (viewItem == redisKey.REDIS || viewItem == redisKey.REDIS.ro)",
           "group": "9_copy"
         },
         {

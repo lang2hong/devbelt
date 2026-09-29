@@ -94,7 +94,12 @@ export async function setupClusterOverSsh(
     for (const id of tunnelIds) SshTunnel.close(id);
     throw err;
   }
-  return { seedNodes: masters, natMap: buildNatMap(entries), tunnelIds };
+  return {
+    seedNodes: masters,
+    // 未知节点（扩容/resharding 新增）：不抛错（会卡死 ioredis），映射死端口，连接失败可控。
+    natMap: buildNatMap(entries),
+    tunnelIds,
+  };
 }
 
 export interface SentinelTunnelSetup {

@@ -816,6 +816,46 @@ describe('SyncEngine · deferred（权益跳过的连接记录）', () => {
     expect(conns[0].name).toBe('pg');
   });
 
+  it('deferred 中的记录收到远端墓碑 → 清除 deferred（不复活已删连接）', async () => {
+    const store = makeStore();
+    const memento = makeMemento();
+    const entities = new EntityStore(store);
+    const mapStore = new RecordMapStore(makeMemento(), '7', '1');
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    const unresolved = new UnresolvedRefStore(memento, '7', '1');
+    const deferred = new DeferredRecordStore(memento, '7', '1');
+    const dek = new Uint8Array(32);
+    const rec = remotePg();
+    const entitlement = FREE;
+    const build = (client: PersonalSyncClient) =>
+      new SyncEngine({
+        userId: '7', keyEpoch: '1', client,
+        stateStore: makeStateStore(SNAP) as never,
+        mapStore, outbox, entities, unresolved, deferred,
+        dek: () => dek, signSeed: () => new Uint8Array(32), uniqueId: () => 'c-new-1',
+        entitlement: () => entitlement,
+        seedConflictCarrier: seedConflictStub,
+      });
+
+    const r1 = await build(clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [rec] })),
+    })).sync();
+    expect(r1.skippedEntitlement).toBe(1);
+    expect(deferred.list()).toHaveLength(1);
+
+    const tomb = {
+      recordId: rec.recordId, version: '2', changeSequence: '6', deleteTime: 1700000000,
+      cipherSuite: 'AES-256-GCM', formatVersion: 1,
+    };
+    const r2 = await build(clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '6' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '6', records: [tomb] })),
+    })).sync();
+    expect(r2.stage, r2.reason).toBe('ok');
+    expect(deferred.list()).toHaveLength(0);
+  });
+
   it('未知引擎记录跳过（skipped-unsupported）且不阻断同页其它记录', async () => {
     const store = makeStore();
     const memento = makeMemento();

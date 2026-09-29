@@ -436,6 +436,28 @@ describe('D* 键树（根扁平 SCAN + 客户端折叠）', () => {
     expect(((provider as any).redisKeys.get('c1:db0:') ?? []).length).toBe(0);
   });
 
+  it('关闭连接使在途加载作废（覆盖从未搜索过的 db）', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let scanStarted!: () => void;
+    const started = new Promise<void>((r) => { scanStarted = r; });
+    const client = makeClient(() => ['0', ['k:1']]);
+    const orig = client.sendCommand;
+    client.sendCommand = async (n: string, a: (string | number)[] = []) => {
+      if (n === 'SCAN') { scanStarted(); await gate; }
+      return orig(n, a);
+    };
+    const provider = makeProvider(client);
+    const db = dbNode();
+    const p = provider.loadMoreRedisKeys(db);
+    await started;
+    provider.markClosed('c1'); // 该 db 从未 setRedisMatch：仍必须作废在途加载
+    release();
+    const res = await p;
+    expect(res.added).toBe(0);
+    expect((provider as any).redisKeys.get('c1:db0:')).toBeUndefined();
+  });
+
   it('合并不截断：单页超过软上限也全部保留', async () => {
     const total = 20001;
     const page = Array.from({ length: total }, (_, i) => `k:${i}`);
