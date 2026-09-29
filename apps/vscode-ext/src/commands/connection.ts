@@ -7,7 +7,7 @@ import type { SavedConnection } from '@devbelt/db-host/connection/connectionStor
 import { l10n } from '../i18n';
 import { AuditLogger } from '../utils/auditLogger';
 import { flattenGroups } from '../utils/groupTree';
-import { hasUrlCredentials, stripUrlCredentials } from '../utils/connectionUrl';
+import { sanitizeConnectionForExport } from '../utils/connectionExport';
 import { diagInfo, diagWarn } from '../utils/diagnostics';
 import { chmod, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -218,16 +218,9 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
       includeSecrets: includeSecrets.value,
       groups: store.getGroups(),
       connections: selected.map((c) => {
-        const out: Record<string, unknown> = { ...c };
-        if (!includeSecrets.value) {
-          delete out.password;
-          delete out.sshPassword;
-          delete out.sshPassphrase;
-          if (typeof out.connectionUrl === 'string' && hasUrlCredentials(out.connectionUrl)) {
-            out.connectionUrl = stripUrlCredentials(out.connectionUrl);
-            urlCredsStripped = true;
-          }
-        }
+        if (includeSecrets.value) return { ...c };
+        const { out, urlStripped } = sanitizeConnectionForExport(c);
+        if (urlStripped) urlCredsStripped = true;
         return out;
       }),
     };

@@ -80,16 +80,20 @@ function contextMenus(): MenuEntry[] {
   return pkg.contributes.menus['view/item/context'] as MenuEntry[];
 }
 
-/** 从 when 表达式中取出 viewItem 条件，编译成对 contextValue 的判定函数。 */
+/** 从 when 表达式中取出 viewItem 条件，编译成对 contextValue 的判定函数（支持 `||`）。 */
 function viewItemMatcher(when: string): ((value: string) => boolean) | undefined {
-  const eq = when.match(/viewItem\s*==\s*([\w.]+)/);
-  if (eq) return (value) => value === eq[1];
-  const re = when.match(/viewItem\s*=~\s*\/(.+?)\/(?=\s|$)/);
-  if (re) {
-    const rx = new RegExp(re[1]);
-    return (value) => rx.test(value);
-  }
-  return undefined;
+  const matchers = when.split('||').map((part): ((value: string) => boolean) | undefined => {
+    const eq = part.match(/viewItem\s*==\s*([\w.]+)/);
+    if (eq) return (value) => value === eq[1];
+    const re = part.match(/viewItem\s*=~\s*\/(.+?)\/(?=\s|$)/);
+    if (re) {
+      const rx = new RegExp(re[1]);
+      return (value) => rx.test(value);
+    }
+    return undefined;
+  }).filter((f): f is (value: string) => boolean => f !== undefined);
+  if (!matchers.length) return undefined;
+  return (value) => matchers.some((m) => m(value));
 }
 
 describe('树右键菜单 when 表达式', () => {
@@ -133,6 +137,25 @@ describe('树右键菜单 when 表达式', () => {
     for (const value of allContextValues()) {
       expect(value).toMatch(/^[A-Za-z_]+\.(MYSQL|PG|SQLITE|REDIS|NONE)$/);
     }
+  });
+
+  it('只读 Redis 连接：contextValue 带 .ro，写操作菜单不可见、读操作仍可见', () => {
+    const ro: any = { id: 'r', host: 'h', dbType: 'REDIS', readOnly: true };
+    const menus = contextMenus();
+    const whenOf = (cmd: string, base: string): string =>
+      menus.find((e) => e.command === cmd && (e.when || '').includes(base))!.when!;
+
+    const keyNode = new DbTreeNode('k', TreeItemCollapsibleState.None, NodeKind.RedisKey, ro);
+    expect(keyNode.contextValue).toBe('redisKey.REDIS.ro');
+    expect(viewItemMatcher(whenOf('devbelt.redis.renameKey', 'redisKey.REDIS'))!(keyNode.contextValue!)).toBe(false);
+    expect(viewItemMatcher(whenOf('devbelt.redis.keyBrowser', 'redisKey.REDIS'))!(keyNode.contextValue!)).toBe(true);
+
+    const dbNode = new DbTreeNode('db0', TreeItemCollapsibleState.Collapsed, NodeKind.RedisDb, ro);
+    expect(viewItemMatcher(whenOf('devbelt.redis.newKey', 'redisDb.REDIS'))!(dbNode.contextValue!)).toBe(false);
+
+    const folder = new DbTreeNode('a', TreeItemCollapsibleState.Collapsed, NodeKind.RedisKeyFolder, ro);
+    expect(viewItemMatcher(whenOf('devbelt.redis.deleteFolder', 'redisKeyFolder.REDIS'))!(folder.contextValue!)).toBe(false);
+    expect(viewItemMatcher(whenOf('devbelt.redis.loadFolderKeys', 'redisKeyFolder.REDIS'))!(folder.contextValue!)).toBe(true);
   });
 
   /** SQLite 无用户体系，用户相关命令不得在 SQLite 连接上出现。 */

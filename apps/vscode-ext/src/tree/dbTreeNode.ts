@@ -1,4 +1,5 @@
 import { TreeItem, TreeItemCollapsibleState, ThemeIcon } from 'vscode';
+import { DatabaseType } from '@devbelt/db-core';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 
 /** 树节点类型枚举 */
@@ -111,7 +112,10 @@ export class DbTreeNode extends TreeItem {
     // 在 SQLite 表上会看到 MySQL 专属命令，或该出现的命令反而不出现。
     // 菜单 when 只能读节点自身的 viewItem，所以类型必须随节点携带。
     // 分组节点没有连接，用 NONE 占位以保证格式统一（`<base>.<TYPE>`）。
-    this.contextValue = `${base}.${conn?.dbType ?? 'NONE'}`;
+    // 只读「Redis」连接追加 `.ro`，供菜单 when 隐藏写操作（写入仍由 RedisClient 只读切面兜底）。
+    // 仅限 Redis：SQL 侧菜单未做 `.ro` 容错，且其写入门禁在运行期由 sqlSafety 兜底。
+    const roSuffix = conn?.readOnly && conn.dbType === DatabaseType.REDIS ? '.ro' : '';
+    this.contextValue = `${base}.${conn?.dbType ?? 'NONE'}${roSuffix}`;
     // 图标：Category 按 categoryType 选，其余按 kind 选
     const iconId = kind === NodeKind.Category && categoryType
       ? CATEGORY_ICON[categoryType]

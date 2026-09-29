@@ -20,7 +20,7 @@ import { REDIS_CAPABILITIES } from '../connection/redisCapabilities';
 import { BaseWebView } from './baseWebView';
 import { AuditLogger } from '../utils/auditLogger';
 import { l10n } from '../i18n';
-import type { RedisPanel, RedisSlowlogEntry, RedisValueData } from './protocol';
+import type { RedisPanel, RedisSlowlogEntry, RedisValueData, RedisUpMessage } from './protocol';
 import { parseRedisInfo, aggregateRedisInfo } from './redisInfoParse';
 
 /** 大 key 门禁阈值（字节）。 */
@@ -129,7 +129,7 @@ export class RedisView extends BaseWebView {
     RedisView.auditOwners.clear();
   }
 
-  protected async handleMessage(msg: any): Promise<void> {
+  protected async handleMessage(msg: RedisUpMessage): Promise<void> {
     if (msg?.type === 'ready') {
       if (!this.initSent) {
         this.initSent = true;

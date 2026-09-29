@@ -225,6 +225,7 @@ export type RedisUpMessage =
   | { type: 'sampleMonitor' }
   // 值 / CRUD（键导航在 explorer 树侧，见 S5-3/C-1）
   | { type: 'selectKey'; key: string }
+  | { type: 'load'; key: string }
   | { type: 'saveString'; key: string; value: string }
   | { type: 'saveStringBytes'; key: string; base64: string }
   | { type: 'appendString'; key: string; value: string }

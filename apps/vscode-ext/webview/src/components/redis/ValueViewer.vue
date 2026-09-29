@@ -184,17 +184,20 @@ function startEdit(kind: EditState['kind'], id: string, draft: string): void {
 function saveEdit(): void {
   const e = editing.value;
   if (!e) return;
+  // 仅当字段/成员名真的被改动时才 trim 并带 oldField/oldMember；否则只更新值，
+  // 避免「只改值」被宿主误判为改名（曾把字段 ` a` 改成 `a` 或报「目标已存在」）。
+  const rename = e.draftKey !== undefined && e.draftKey !== e.id;
   if (e.kind === 'hash') {
-    const field = (e.draftKey ?? e.id).trim();
+    const field = rename ? e.draftKey!.trim() : e.id;
     if (!field) return;
-    emit('hashSet', key.value, field, e.draft, e.id);
+    emit('hashSet', key.value, field, e.draft, rename ? e.id : undefined);
   } else if (e.kind === 'list') {
     const items = props.info?.data?.kind === 'list' ? props.info.data.items : [];
     emit('listSet', key.value, Number(e.id), e.draft, items[Number(e.id)] ?? '');
   } else {
-    const member = (e.draftKey ?? e.id).trim();
+    const member = rename ? e.draftKey!.trim() : e.id;
     if (!member) return;
-    emit('zsetAdd', key.value, e.draft, member, e.id); // zset：draft=score、id=oldMember、draftKey=member
+    emit('zsetAdd', key.value, e.draft, member, rename ? e.id : undefined); // zset：draft=score、id=oldMember、draftKey=member
   }
   editing.value = null;
 }

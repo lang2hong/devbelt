@@ -21,6 +21,7 @@ import { deletePatternPrefill, redisPrefixPattern, toRedisMatchPattern } from '.
 import { deleteByPatternKeys, PatternDeleteError, scanPatternKeys } from './redisPatternDelete';
 import { canUseErDiagram } from '@devbelt/db-host/sync/entitlementGate';
 import { configureBackupSchedule } from './backupWizard';
+import { confirmProductionWrite } from '../utils/sqlSafety';
 import { l10n } from '../i18n';
 
 export interface ViewCommandDeps {
@@ -259,6 +260,7 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     }),
     vscode.commands.registerCommand('devbelt.redis.renameKey', async (node: any) => {
       if (!node?.conn || !node.redisKey) return;
+      if (!(await confirmProductionWrite(node.conn, `RENAME ${node.redisKey}`))) return;
       const newKey = await vscode.window.showInputBox({ prompt: l10n('redis.tree.renamePrompt'), value: node.redisKey });
       if (!newKey || newKey === node.redisKey) return;
       const started = Date.now();
@@ -274,6 +276,7 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     }),
     vscode.commands.registerCommand('devbelt.redis.setKeyTtl', async (node: any) => {
       if (!node?.conn || !node.redisKey) return;
+      if (!(await confirmProductionWrite(node.conn, `EXPIRE ${node.redisKey}`))) return;
       const raw = await vscode.window.showInputBox({ prompt: l10n('redis.tree.ttlPrompt') });
       if (raw === undefined) return;
       const seconds = Number(raw);
@@ -289,6 +292,7 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     }),
     vscode.commands.registerCommand('devbelt.redis.deleteKey', async (node: any) => {
       if (!node?.conn || !node.redisKey) return;
+      if (!(await confirmProductionWrite(node.conn, `UNLINK ${node.redisKey}`))) return;
       const pick = await vscode.window.showWarningMessage(
         l10n('redis.tree.confirmDelete', { key: node.redisKey }), { modal: true }, l10n('common.delete'));
       if (pick !== l10n('common.delete')) return;
@@ -303,10 +307,11 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
       if (!node?.conn) return;
       const prefix = node.redisKeyPrefix ?? '';
       if (!prefix) return;
+      const pattern = redisPrefixPattern(prefix, node.conn.keySeparator || ':');
+      if (!(await confirmProductionWrite(node.conn, `UNLINK ${pattern}`))) return;
       const pick = await vscode.window.showWarningMessage(
         l10n('redis.tree.confirmDeleteFolder', { prefix }), { modal: true }, l10n('common.delete'));
       if (pick !== l10n('common.delete')) return;
-      const pattern = redisPrefixPattern(prefix, node.conn.keySeparator || ':');
       const started = Date.now();
       try {
         // 转义后的 pattern 也用于审计（记实际执行的 pattern）。cluster 逐 master + 逐键 UNLINK。
@@ -327,6 +332,7 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
         value: prefill,
       });
       if (!pattern) return;
+      if (!(await confirmProductionWrite(node.conn, `UNLINK ${pattern}`))) return;
       // 预扫计数（只读，cluster 逐 master），确认弹窗展示规模。
       let count = 0;
       try {
@@ -348,6 +354,7 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
       if (!node?.conn) return;
       const name = await vscode.window.showInputBox({ prompt: l10n('redis.tree.newKeyName') });
       if (!name) return;
+      if (!(await confirmProductionWrite(node.conn, `CREATE ${name}`))) return;
       const type = await vscode.window.showQuickPick(['string', 'hash', 'list', 'set', 'zset'], { placeHolder: l10n('redis.tree.newKeyType') });
       if (!type) return;
       let value = '';
