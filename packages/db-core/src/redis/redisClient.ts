@@ -158,6 +158,10 @@ export class RedisClient {
     const maxRetryTimes = options.maxRetryTimes ?? DEFAULT_RETRY_TIMES;
     // 与 ARDM 的上游方法 retryStragety（原拼写如此）一致：times >= maxRetryTimes 停止，退避 200→400。
     const retryStrategy = (times: number) => (times >= maxRetryTimes ? null : Math.min(times * 200, 1000));
+    // Cluster 的**节点级**重试：同样不返回 null。返回 null 会让 ioredis 在重试耗尽后
+    // 关闭该节点连接并以 "Connection is closed." flush 队列（内部 promise 无人接管 →
+    // 未处理拒绝，CI 偶发红）。改为长退避，由整体 `connect()` 超时兜底。
+    const clusterNodeRetryStrategy = (times: number) => (times >= maxRetryTimes ? 30_000 : Math.min(times * 200, 1000));
     const common: RedisOptions = {
       username: options.username,
       password: options.password,
@@ -175,15 +179,15 @@ export class RedisClient {
       this.client = factory(common);
     } else if (this.isCluster) {
       // Cluster 下无 SELECT：不传 db。
+      // 节点级选项：不返回 null 的 retryStrategy（用变量传入，避免字面量剔除字段的 excess 检查）。
+      const clusterNodeOptions: RedisOptions = { ...common, retryStrategy: clusterNodeRetryStrategy };
       this.client = new Cluster(options.cluster!.nodes, {
         natMap: options.cluster!.natMap,
         slotsRefreshTimeout: options.cluster!.slotsRefreshTimeout ?? 2000,
-        redisOptions: common,
-        // Cluster 用独立的 `clusterRetryStrategy`（不读 redisOptions.retryStrategy）：
-        // 不配时 ioredis 默认无限重连。这里**不返回 null**（返回 null 会让 ioredis 关闭
-        // 节点内连接并以 "Connection is closed." 拒绝其内部 connect promise —— 无人接管
-        // 成为未处理拒绝）；改为：前几次 200→400，之后固定长退避，由 `connect()` 超时兜底。
-        clusterRetryStrategy: (times: number) => (times >= maxRetryTimes ? 30_000 : Math.min(times * 200, 1000)),
+        redisOptions: clusterNodeOptions,
+        // Cluster 用独立的 `clusterRetryStrategy`（不读 redisOptions.retryStrategy）；
+        // 同样不返回 null，理由同上。
+        clusterRetryStrategy: clusterNodeRetryStrategy,
       }) as unknown as RedisConnectionLike;
     } else if (this.sentinel) {
       this.client = new Redis({
