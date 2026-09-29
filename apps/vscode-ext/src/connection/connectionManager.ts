@@ -84,6 +84,8 @@ export class ConnectionManager {
   private readonly noBackslashEscapes = new Map<string, boolean>();
   /** PG 会话是否 standard_conforming_strings=off（按连接缓存，同上）。 */
   private readonly pgStdOff = new Map<string, boolean>();
+  /** PG 主会话实际所在库（`conn.database` 为空时由 `current_database()` 识别；避免重复建会话）。 */
+  private readonly primaryDb = new Map<string, string>();
   private readonly config: PoolConfig;
   private healthCheckTimer?: ReturnType<typeof setInterval>;
   private disposing = false;
@@ -110,6 +112,9 @@ export class ConnectionManager {
    * 用可选属性而非构造参数，避免改动既有构造调用与测试。
    */
   onRedisNodeUnmapped?: (connId: string, address: string) => void;
+
+  /** 连接被关闭时回调（重连前重置如未映射提示器等按连接状态）。 */
+  onConnectionClosed?: (connId: string) => void;
 
   private effective(conn: SavedConnection): SavedConnection {
     return this.resolveEffective ? this.resolveEffective(conn) : conn;
@@ -237,7 +242,9 @@ export class ConnectionManager {
 
   /** 会话键：优先复用绑定该库的已有会话，否则按规则计算。 */
   private findSessionKeyOrPrimary(conn: SavedConnection, database?: string): string {
-    if (conn.dbType !== DatabaseType.PG || !database || database === conn.database) return conn.id;
+    if (conn.dbType !== DatabaseType.PG || !database) return conn.id;
+    // 连接配置库，或主会话实际所在库（conn.database 为空时识别）→ 主会话。
+    if (database === conn.database || database === this.primaryDb.get(conn.id)) return conn.id;
     return this.findSessionKey(conn.id, database);
   }
 
@@ -518,6 +525,14 @@ export class ConnectionManager {
       } catch {
         /* 保持默认 */
       }
+      try {
+        // 记录主会话实际所在库：`conn.database` 为空时，树里该库节点按主会话键处理，避免重复建会话。
+        const r = await query.query('SELECT current_database() AS db');
+        const db = (r.rows?.[0] as { db?: unknown } | undefined)?.db;
+        if (db) this.primaryDb.set(conn.id, String(db));
+      } catch {
+        /* 保持未识别 */
+      }
     }
 
     const session: SqlConnectionSession = {
@@ -536,6 +551,7 @@ export class ConnectionManager {
         if (!this.hasSessionForConn(conn.id)) {
           this.noBackslashEscapes.delete(conn.id);
           this.pgStdOff.delete(conn.id);
+          this.primaryDb.delete(conn.id);
         }
         // 只释放本次引用：同连接其它库会话可能仍在使用共享隧道。
         if (conn.sshHost) SshTunnel.release(conn.id);
@@ -547,7 +563,7 @@ export class ConnectionManager {
       lastUsed: Date.now(),
       connId: conn.id,
       key,
-      database: conn.dbType === DatabaseType.PG ? conn.database : undefined,
+      database: conn.dbType === DatabaseType.PG ? (conn.database ?? this.primaryDb.get(conn.id)) : undefined,
     });
     if (this.disposing) {
       session.close();
@@ -622,6 +638,7 @@ export class ConnectionManager {
     if (this.sessions.size === 0) {
       this.stopHealthCheck();
     }
+    this.onConnectionClosed?.(id);
   }
 
   /** 关闭全部连接（扩展退出时调用） */

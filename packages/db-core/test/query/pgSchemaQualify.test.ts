@@ -102,11 +102,17 @@ describe('PG schema 限定的写/DDL（B1b）', () => {
       .toBe('INSERT INTO "sales"."t" ("a") VALUES (1);\n');
   });
 
-  it('A2：DROP FUNCTION 带参数签名（重载可删），注入形状被拒', async () => {
+  it('A2：DROP FUNCTION 带参数签名（重载可删），无签名不加括号，注入形状被拒', async () => {
     const { con, table } = pg();
     await table.dropRoutine('f', 'FUNCTION', 'mydb', 'sales', 'integer, text');
     expect(con.sqls[0]).toBe('DROP FUNCTION IF EXISTS "sales"."f"(integer, text)');
+    // identityArgs 为 undefined → 不加括号。
+    await table.dropRoutine('f', 'FUNCTION', 'mydb', 'sales');
+    expect(con.sqls[1]).toBe('DROP FUNCTION IF EXISTS "sales"."f"');
+    // 参数签名注入形状被拒。
     await expect(table.dropRoutine('f', 'FUNCTION', 'mydb', 'sales', 'int); DROP TABLE x; --')).rejects.toThrow();
+    // routineType 白名单。
+    await expect(table.dropRoutine('f', 'TRIGGER', 'mydb', 'sales')).rejects.toThrow(/Invalid routine type/);
   });
 
   it('未给 schema 时保持旧行为（交 search_path）', async () => {

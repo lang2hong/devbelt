@@ -90,14 +90,14 @@ export class PostgreSqlDialect implements SqlDialect {
   getSchemaListSql(): string {
     // `left(nspname,3) <> 'pg_'` 而非 `NOT LIKE 'pg\_%'`：后者在
     // standard_conforming_strings=off 时 `\_` 会被当转义，语义漂移。
-    // 过滤掉 validateIdent 不能操作的 schema（含空白/点/引号/括号/逗号/分号/--）：
-    // 它们若出现会列出却任何操作都失败。
-    const bad = "[[:space:].\"'(),;`]";
+    // 白名单与 `validateIdent` 一致（字母/数字/`_`/`$`/`-`，首字符非数字/`-`，且不含 `--`）：
+    // 不在白名单里的 schema 列出来也无法操作。另过滤**无 USAGE 权限**的 schema（点进去必失败）。
     return `SELECT nspname AS name FROM pg_namespace
       WHERE nspname <> 'information_schema'
         AND left(nspname, 3) <> 'pg_'
-        AND nspname !~ $re$${bad}$re$
+        AND nspname ~ $re$^[[:alpha:]_$][[:alnum:]_$-]*$$re$
         AND nspname NOT LIKE '%--%'
+        AND has_schema_privilege(nspname, 'USAGE')
       ORDER BY nspname`;
   }
 

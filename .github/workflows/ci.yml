@@ -133,10 +133,12 @@ jobs:
       - name: Start Redis (requirepass)
         run: |
           docker run -d --name redis-auth -p 6380:6379 redis:7 redis-server --requirepass ci-redis-pass
+          ok=0
           for i in $(seq 1 30); do
-            docker exec redis-auth redis-cli -a ci-redis-pass ping 2>/dev/null | grep -q PONG && break
+            if docker exec redis-auth redis-cli -a ci-redis-pass ping 2>/dev/null | grep -q PONG; then ok=1; break; fi
             sleep 1
           done
+          if [ "$ok" != "1" ]; then echo "redis requirepass failed to become ready"; exit 1; fi
 
       # TLS：自签 CA + 服务端证书（SAN IP=127.0.0.1），redis 仅开 tls-port。
       - name: Start Redis (TLS)
@@ -150,10 +152,12 @@ jobs:
             redis-server --port 0 --tls-port 6390 \
             --tls-cert-file /tls/redis.crt --tls-key-file /tls/redis.key --tls-ca-cert-file /tls/ca.crt \
             --tls-auth-clients no
+          ok=0
           for i in $(seq 1 30); do
-            docker exec redis-tls redis-cli --tls --cacert /tls/ca.crt -p 6390 ping 2>/dev/null | grep -q PONG && break
+            if docker exec redis-tls redis-cli --tls --cacert /tls/ca.crt -p 6390 ping 2>/dev/null | grep -q PONG; then ok=1; break; fi
             sleep 1
           done
+          if [ "$ok" != "1" ]; then echo "redis TLS failed to become ready"; exit 1; fi
 
       - name: Integration tests (db-core)
         env:
@@ -226,7 +230,13 @@ jobs:
       - name: Integration tests (vscode-ext cluster over SSH)
         env:
           DEVBELT_DB_TEST_REDIS_CLUSTER: 127.0.0.1:7000
-        run: pnpm -C apps/vscode-ext exec vitest run test/integration/redisTopologyOverSsh.test.ts -t "Cluster over SSH|D20"
+        run: |
+          set -o pipefail
+          pnpm -C apps/vscode-ext exec vitest run test/integration/redisTopologyOverSsh.test.ts -t "Cluster over SSH|D20" | tee /tmp/cluster-over-ssh.log
+          # 防 `-t` 过滤零匹配却显示“通过”：硬门禁必须确有通过用例。
+          if ! grep -Eq "[1-9][0-9]* passed" /tmp/cluster-over-ssh.log; then
+            echo "hard-gate -t filter matched zero passing tests (false pass)"; exit 1
+          fi
 
       # Sentinel over SSH：best-effort（已知限制：SSH 路径为 standalone 连发现到的 master，
       # 不自动重发现）。失败不阻断（continue-on-error），结果记入 P7「已知限制」。

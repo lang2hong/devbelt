@@ -328,13 +328,37 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       n.id = `${conn.id}:sqldb:${only}`;
       return [n];
     }
-    const dbs = await session.metadata.getDatabases();
+    // 枚举库失败时回退为**单个节点**（conn.database / PG 的 current_database），
+// 而不是让整棵树展开报错。
+    let dbs: string[] = [];
+    try {
+      dbs = await session.metadata.getDatabases();
+    } catch {
+      dbs = [];
+    }
+    if (!dbs.length) {
+      const only = conn.database
+        || (conn.dbType === DatabaseType.PG ? await this.currentDatabaseOf(session) : 'main');
+      const n = new DbTreeNode(only, TreeItemCollapsibleState.Collapsed, NodeKind.Database, conn, undefined, element, undefined, only);
+      n.id = `${conn.id}:sqldb:${only}`;
+      return [n];
+    }
     return dbs.map((db) => {
       // B4：Database 节点带 `database=库名`，恢复/导入/导出/定时备份/数据对比据此命中该库。
       const n = new DbTreeNode(db, TreeItemCollapsibleState.Collapsed, NodeKind.Database, conn, undefined, element, undefined, db);
       n.id = `${conn.id}:sqldb:${db}`;
       return n;
     });
+  }
+
+  /** PG 主会话实际所在库（枚举库失败/`conn.database` 为空时兜底显示）。 */
+  private async currentDatabaseOf(session: { query: { query(sql: string): Promise<{ rows: any[] }> } }): Promise<string> {
+    try {
+      const r = await session.query.query('SELECT current_database() AS db');
+      const db = r.rows?.[0]?.db;
+      if (db) return String(db);
+    } catch { /* fall through */ }
+    return 'public';
   }
 
   /** 数据库节点子节点：PG 先出 schema 层；其余按方言能力过滤分类（表/视图始终显示）。 */

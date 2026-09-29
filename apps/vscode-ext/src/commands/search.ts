@@ -63,6 +63,10 @@ export function registerSearchCommands(deps: Deps, sub: Sub): void {
   });
 }
 
+/** 搜索时最多枚举的库/每库 schema 数（每个库会开一个会话，防止大型实例开太多）。 */
+const SEARCH_MAX_DATABASES = 12;
+const SEARCH_MAX_SCHEMAS = 50;
+
 async function searchObjects(deps: Deps, connIds: string[], keyword: string): Promise<SearchHit[]> {
   const perConn = connIds.map(async (id): Promise<SearchHit[]> => {
     const conn = deps.store.get(id);
@@ -79,13 +83,14 @@ async function searchObjects(deps: Deps, connIds: string[], keyword: string): Pr
         const dbs = session.capabilities.multiDatabaseExplorer
           ? await session.metadata.getDatabases()
           : [conn.database ?? ''];
-        const list = dbs.length ? dbs : [conn.database ?? ''];
+        // 每个库会开一个会话：给库数/库内 schema 数加上限，避免大型 PG 实例一次开太多。
+        const list = (dbs.length ? dbs : [conn.database ?? '']).slice(0, SEARCH_MAX_DATABASES);
         scopes = [];
         for (const db of list) {
           try {
             const dbSession = await deps.manager.connectSql(conn, db);
             const schemas = await dbSession.metadata.getSchemas();
-            for (const schema of (schemas.length ? schemas : ['public'])) scopes.push({ database: db, schema });
+            for (const schema of (schemas.length ? schemas : ['public']).slice(0, SEARCH_MAX_SCHEMAS)) scopes.push({ database: db, schema });
           } catch {
             // 某库无权限/取不到 schema：跳过该库。
           }

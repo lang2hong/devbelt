@@ -56,8 +56,9 @@ describe('方言策略（策略模式）', () => {
     // A2：不再用 `NOT LIKE 'pg\_%'`（scs=off 语义漂移），改用 left()。
     expect(schemaSql).toContain("left(nspname, 3) <> 'pg_'");
     expect(schemaSql).not.toContain('pg\\_%');
-    // A2：过滤不可操作 schema（空白/点/引号等）。
-    expect(schemaSql).toContain('!~');
+    // A2/Batch3：白名单（与 validateIdent 一致）+ 仅列有 USAGE 权限的 schema。
+    expect(schemaSql).toContain('[[:alpha:]_$]');
+    expect(schemaSql).toContain("has_schema_privilege(nspname, 'USAGE')");
     expect((new MysqlDialect() as { getSchemaListSql?: unknown }).getSchemaListSql).toBeUndefined();
   });
 

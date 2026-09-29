@@ -155,12 +155,18 @@ export class TableService {
   /** 删除函数/存储过程。PG 需带参数签名，否则重载函数无法删除。 */
   async dropRoutine(name: string, routineType: string, database?: string, schema?: string, identityArgs?: string): Promise<QueryResult> {
     this.require('manageRoutines');
+    // routineType 直接内插进 SQL：白名单，且只允许 FUNCTION / PROCEDURE。
+    const rt = String(routineType || '').toUpperCase();
+    if (rt !== 'FUNCTION' && rt !== 'PROCEDURE') {
+      throw new Error(`Invalid routine type: "${routineType}"`);
+    }
     const qualified = this.wrapQualified(name, database, schema);
     if (this.queryService.dialect.dbType === 'PG') {
-      const args = this.safeRoutineArgs(identityArgs ?? '');
-      return this.ddl(`DROP ${routineType} IF EXISTS ${qualified}(${args})`);
+      // 有签名才加括号（重载可删）；没有签名就不加（不能凭空 `()`，否则删不到无参签名也可能误删）。
+      const suffix = identityArgs !== undefined ? `(${this.safeRoutineArgs(identityArgs)})` : '';
+      return this.ddl(`DROP ${rt} IF EXISTS ${qualified}${suffix}`);
     }
-    return this.ddl(`DROP ${routineType} IF EXISTS ${qualified}`);
+    return this.ddl(`DROP ${rt} IF EXISTS ${qualified}`);
   }
 
   /** 校验 PG 参数签名（来自 pg_get_function_identity_arguments）：拒绝注入形状。 */

@@ -78,6 +78,8 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     rep.log(address);
     rep.notifyOnce(address);
   };
+  // 连接关闭/重连时重置上报器：重连后拓扑可能已刷新，未映射提示与诊断限流应重新开始。
+  manager.onConnectionClosed = (connId) => { unmappedReporters.delete(connId); };
   const treeProvider = new DbTreeDataProvider(store, manager, overrideStore, context.extensionUri);
   // 连接节点装饰（环境/自定义色徽标）：图标已改用数据库类型 logo，颜色信号改由此承载。
   const connDecoration = new ConnectionDecorationProvider(store);

@@ -134,23 +134,29 @@ export function buildNatMap(entries: readonly NatMapEntry[], opts: NatMapOptions
 
 /** 未映射 node 的日志/提示回调。 */
 export interface UnmappedNodeReporter {
-  /** 记日志（每次未映射都调用，便于诊断重复刷新）。 */
+  /** 记日志（**按地址限流**：每个地址只记一次，避免每次 slot 刷新刷屏）。 */
   log: (address: string) => void;
   /** 提示用户（同一连接只调用一次，避免 slot 刷新刷屏）。 */
   notifyOnce: (address: string) => void;
 }
 
 /**
- * 构造去重上报器：`log` 每次调用；`notifyOnce` 每个连接只调一次。
+ * 构造去重上报器：`log` 按地址只记一次；`notifyOnce` 每个连接只调一次。
  * 纯逻辑、无 vscode 依赖，便于单测；由 `extension.ts` 注入真正的 diag/提示实现。
+ * 重连时由扩展丢弃旧 reporter 重建，限流随之重置。
  */
 export function createUnmappedNodeReporter(
   log: (address: string) => void,
   notify: (address: string) => void,
 ): UnmappedNodeReporter {
   let notified = false;
+  const logged = new Set<string>();
   return {
-    log,
+    log: (address: string) => {
+      if (logged.has(address)) return;
+      logged.add(address);
+      log(address);
+    },
     notifyOnce: (address: string) => {
       if (notified) return;
       notified = true;
