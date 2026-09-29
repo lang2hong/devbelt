@@ -61,6 +61,7 @@ export async function setupClusterOverSsh(
   conn: SavedConnection,
   seedLocalPort: number,
   auth: RedisAuth,
+  opts: { onUnmapped?: (address: string) => void } = {},
 ): Promise<ClusterTunnelSetup> {
   const client = probe('127.0.0.1', seedLocalPort, auth);
   let raw: unknown;
@@ -97,7 +98,7 @@ export async function setupClusterOverSsh(
   return {
     seedNodes: masters,
     // 未知节点（扩容/resharding 新增）：不抛错（会卡死 ioredis），映射死端口，连接失败可控。
-    natMap: buildNatMap(entries),
+    natMap: buildNatMap(entries, { onUnmapped: opts.onUnmapped }),
     tunnelIds,
   };
 }

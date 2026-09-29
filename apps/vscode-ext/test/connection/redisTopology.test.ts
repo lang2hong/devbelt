@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildNatMap,
+  createUnmappedNodeReporter,
   parseClusterNodesAll,
   parseClusterNodesMasters,
   parseSentinelMasterAddr,
@@ -48,14 +49,25 @@ describe('parseSentinelMasterAddr', () => {
 });
 
 describe('buildNatMap', () => {
-  it('远端地址映射到本地隧道端口；本地回环放行、未知内网地址映射死端口且不抛错', () => {
+  it('已映射→本地隧道端口；未映射（含 loopback）一律死端口且不抛错', () => {
     const unmapped: string[] = [];
     const nat = buildNatMap([{ remoteHost: '10.0.0.2', remotePort: 6379, localPort: 41001 }], { onUnmapped: (a) => unmapped.push(a) });
     expect(nat('10.0.0.2:6379')).toEqual({ host: '127.0.0.1', port: 41001 });
-    expect(nat('127.0.0.1:6379')).toBeNull();
-    expect(nat('localhost:6379')).toBeNull();
-    // 未知节点：绝不抛错（会卡死 ioredis），映射死端口并回调诊断。
+    // ioredis 的 startupNodes 不走 natMapper，故不豁免 loopback：未映射（含 127.0.0.1）一律死端口。
+    expect(nat('127.0.0.1:6379')).toEqual({ host: '127.0.0.1', port: 0 });
     expect(nat('10.9.9.9:6379')).toEqual({ host: '127.0.0.1', port: 0 });
-    expect(unmapped).toEqual(['10.9.9.9:6379']);
+    expect(unmapped).toEqual(['127.0.0.1:6379', '10.9.9.9:6379']);
+  });
+
+  it('createUnmappedNodeReporter：日志每次、提示每连接一次', () => {
+    const logs: string[] = [];
+    const notes: string[] = [];
+    const rep = createUnmappedNodeReporter((a) => logs.push(a), (a) => notes.push(a));
+    rep.log('a:1');
+    rep.notifyOnce('a:1');
+    rep.log('b:2');
+    rep.notifyOnce('b:2');
+    expect(logs).toEqual(['a:1', 'b:2']);
+    expect(notes).toEqual(['a:1']); // 同连接只提示一次
   });
 });

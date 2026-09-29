@@ -10,6 +10,7 @@ import { BaseWebView } from './result/baseWebView';
 import { TableQueryView } from './result/tableQueryView';
 import { AuditLogger } from './utils/auditLogger';
 import { diagDispose, diagInfo, diagWarn, diagError } from './utils/diagnostics';
+import { createUnmappedNodeReporter, type UnmappedNodeReporter } from './connection/redisTopology';
 import { purgeLegacyOrgCredentials } from './utils/legacyOrgCleanup';
 import { ToolsViewProvider } from './tools/toolsView';
 import { BackupScheduler } from './schedule/backupScheduler';
@@ -63,6 +64,20 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   // 不再依赖各命令自行调用 history.add（漏一个就少一段痕迹）。
   // resolveEffective 是建连/路径校验的单一有效配置入口（覆盖优先）。
   const manager = new ConnectionManager(undefined, history, (c) => overrideStore.applyOverrides(c));
+  // cluster over SSH 未映射节点（扩容/resharding 后拓扑变化）：记诊断，并**按连接只提示一次**。
+  const unmappedReporters = new Map<string, UnmappedNodeReporter>();
+  manager.onRedisNodeUnmapped = (connId, address) => {
+    let rep = unmappedReporters.get(connId);
+    if (!rep) {
+      rep = createUnmappedNodeReporter(
+        (a) => diagWarn('redis cluster node unmapped (topology changed? reconnect to refresh SSH tunnels)', a),
+        (a) => void vscode.window.showWarningMessage(l10n('redis.cluster.nodeUnmapped', { address: a })),
+      );
+      unmappedReporters.set(connId, rep);
+    }
+    rep.log(address);
+    rep.notifyOnce(address);
+  };
   const treeProvider = new DbTreeDataProvider(store, manager, overrideStore, context.extensionUri);
   // 连接节点装饰（环境/自定义色徽标）：图标已改用数据库类型 logo，颜色信号改由此承载。
   const connDecoration = new ConnectionDecorationProvider(store);

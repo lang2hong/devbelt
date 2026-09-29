@@ -217,6 +217,8 @@ jobs:
             docker logs redis-sentinel || true
             exit 1
           fi
+          # 成功也打印日志：便于审阅 sentinel 是否真的起来（此前只在失败时输出）。
+          docker logs redis-sentinel 2>&1 | tail -50 || true
 
       # Cluster over SSH：硬门禁——真实验证 setupClusterOverSsh 的 natMap 路由（SSH+多节点才承重）。
       - name: Integration tests (vscode-ext cluster over SSH)

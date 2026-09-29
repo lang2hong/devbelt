@@ -868,6 +868,7 @@ export const zh: MessageCatalog = {
   'redis.tree.loadedAll': '已全部加载（{count} 键）',
   'redis.tree.loading': '加载中…',
   'redis.tree.loadFailed': '加载键失败，请重试。',
+  'redis.cluster.nodeUnmapped': '集群拓扑已变化：节点 {address} 没有对应隧道，已拒绝直连其真实地址。请重新连接以刷新隧道。',
   'redis.tree.loadAllCapped': '已达上限 {max}，停止加载。',
   'redis.tree.completeBadge': '已全部加载',
   'redis.tree.loadingFolder': '正在加载 {prefix} …',

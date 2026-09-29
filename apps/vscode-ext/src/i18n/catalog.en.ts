@@ -890,6 +890,7 @@ export const en: MessageCatalog = {
   'redis.tree.loadedAll': 'All loaded ({count} keys)',
   'redis.tree.loading': 'Loading…',
   'redis.tree.loadFailed': 'Failed to load keys. Try again.',
+  'redis.cluster.nodeUnmapped': 'Cluster topology changed: node {address} has no SSH tunnel; direct connection to its real address was refused. Reconnect to refresh tunnels.',
   'redis.tree.loadAllCapped': 'Reached cap {max}; stopped.',
   'redis.tree.completeBadge': 'loaded fully',
   'redis.tree.loadingFolder': 'Loading {prefix}…',

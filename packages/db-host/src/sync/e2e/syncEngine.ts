@@ -461,11 +461,11 @@ export class SyncEngine {
               }
             }
             // 远端墓碑落地/忽略后，清掉 deferred 里同一 recordId 的旧密文：
-        // 否则升级/权益放开后会拿旧密文把已删除的记录重新 drain 回来（复活 bug）。
-        if (rec.deleteTime != null && (disposition === 'ignored-tombstone' || disposition === 'deleted')) {
-          try { await this.deps.deferred?.delete(rec.recordId); } catch { /* 清 deferred 失败不阻断本页 */ }
-        }
-        applied += 1; // 注：applied 含 skipped-entitlement（版本重放的 skipped 不计）；UI 仅用 skipped* 计数。
+            // 否则升级/权益放开后会拿旧密文把已删除的记录重新 drain 回来（复活 bug）。
+            if (rec.deleteTime != null && (disposition === 'ignored-tombstone' || disposition === 'deleted')) {
+              try { await this.deps.deferred?.delete(rec.recordId); } catch { /* 清 deferred 失败不阻断本页 */ }
+            }
+            applied += 1; // 注：applied 含 skipped-entitlement（版本重放的 skipped 不计）；UI 仅用 skipped* 计数。
           } catch (err) {
             if (err instanceof RecordConflictError) {
               // B4：携带远端密文进冲突条目，并补全 outbox 中对应 mutation 的冲突状态。

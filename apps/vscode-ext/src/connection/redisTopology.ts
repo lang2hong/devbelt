@@ -96,8 +96,6 @@ export interface NatMapEntry {
 /** ioredis Cluster `natMap`：`address → {host,port}`；返回 undefined 表示按原地址。 */
 export type NatMapFn = (address: string) => RedisHostPort | null;
 
-const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
-
 export interface NatMapOptions {
   /** 未映射地址回调（仅日志/提示，纯函数不在此抛错）。 */
   onUnmapped?: (address: string) => void;
@@ -108,8 +106,9 @@ export interface NatMapOptions {
  *
  * 未知节点不能回退真地址——扩容/resharding 后的新内网节点会绕过隧道被 ioredis 直连并发 AUTH。
  * 也**绝不能抛错**：ioredis 在 CLUSTER SLOTS 回调与 MOVED/ASK 处理里调用 natMapper，抛错会变成
- * 未捕获异常并让 slot 刷新永久卡住 / 命令永不 settle（N1）。故未知节点映射到一个必然被拒的
- * 本地死端口（127.0.0.1:0），连接失败可控且可诊断；本地回环（种子）按原地址直连。
+ * 未捕获异常并让 slot 刷新永久卡住 / 命令永不 settle（N1）。
+ * 且**不豁免 loopback**（ioredis 的 startupNodes 不走 natMapper，种子节点无需豁免）：一律映射到
+ * 必然被拒的本地死端口（127.0.0.1:0），连接失败可控且可诊断，绝不把 AUTH 发往本机其它进程。
  */
 export function buildNatMap(entries: readonly NatMapEntry[], opts: NatMapOptions = {}): NatMapFn {
   const map = new Map<string, RedisHostPort>();
@@ -119,10 +118,34 @@ export function buildNatMap(entries: readonly NatMapEntry[], opts: NatMapOptions
   return (address: string) => {
     const hit = map.get(address);
     if (hit) return hit;
-    const idx = address.lastIndexOf(':');
-    const host = idx >= 0 ? address.slice(0, idx) : address;
-    if (LOOPBACK_HOSTS.has(host)) return null; // 种子/本地：按原地址直连
     opts.onUnmapped?.(address);
-    return { host: '127.0.0.1', port: 0 }; // 死端口：连接必败，绝不把 AUTH 发往内网
+    return { host: '127.0.0.1', port: 0 }; // 死端口：连接必败，绝不把 AUTH 发往任何真地址
+  };
+}
+
+/** 未映射 node 的日志/提示回调。 */
+export interface UnmappedNodeReporter {
+  /** 记日志（每次未映射都调用，便于诊断重复刷新）。 */
+  log: (address: string) => void;
+  /** 提示用户（同一连接只调用一次，避免 slot 刷新刷屏）。 */
+  notifyOnce: (address: string) => void;
+}
+
+/**
+ * 构造去重上报器：`log` 每次调用；`notifyOnce` 每个连接只调一次。
+ * 纯逻辑、无 vscode 依赖，便于单测；由 `extension.ts` 注入真正的 diag/提示实现。
+ */
+export function createUnmappedNodeReporter(
+  log: (address: string) => void,
+  notify: (address: string) => void,
+): UnmappedNodeReporter {
+  let notified = false;
+  return {
+    log,
+    notifyOnce: (address: string) => {
+      if (notified) return;
+      notified = true;
+      notify(address);
+    },
   };
 }

@@ -93,6 +93,12 @@ export class ConnectionManager {
     this.startHealthCheck();
   }
 
+  /**
+   * cluster over SSH 出现未映射节点时的回调（由 extension 注入：诊断 + 一次性提示）。
+   * 用可选属性而非构造参数，避免改动既有构造调用与测试。
+   */
+  onRedisNodeUnmapped?: (connId: string, address: string) => void;
+
   private effective(conn: SavedConnection): SavedConnection {
     return this.resolveEffective ? this.resolveEffective(conn) : conn;
   }
@@ -313,7 +319,9 @@ export class ConnectionManager {
     if (mode === 'cluster') {
       if (conn.sshHost) {
         // 经种子隧道发现各 master 并逐节点建隧道 → NAT map（合成 conn id，回收见 close）。
-        const setup = await setupClusterOverSsh(conn, port, auth);
+        const setup = await setupClusterOverSsh(conn, port, auth, {
+          onUnmapped: this.onRedisNodeUnmapped ? (address) => this.onRedisNodeUnmapped!(conn.id, address) : undefined,
+        });
         extraTunnelIds = setup.tunnelIds;
         client = new RedisClient({
           ...common,
