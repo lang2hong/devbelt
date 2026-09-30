@@ -377,7 +377,9 @@ export class RedisClient {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    if (this.client.status !== 'ready') {
+    // cluster：直接 disconnect（不发 QUIT）。QUIT 会排进各节点队列，死节点在 close 时
+// flush 出 "Connection is closed." 未处理拒绝（节点级 connect promise 无人接管）。
+    if (this.isCluster || this.client.status !== 'ready') {
       this.client.disconnect(false);
       return;
     }
@@ -402,6 +404,8 @@ export class RedisClient {
         this.commandTimeoutMs,
       );
     });
+    // 落败方晚到的 rejection 若不挂处理，会成为未处理拒绝：这里补一个空 catch（不影响 race 结果）。
+    void p.catch(() => { /* race 已用另一分支结算 */ });
     return Promise.race([p, timeout]).finally(() => { if (timer) clearTimeout(timer); }) as Promise<T>;
   }
 
