@@ -135,7 +135,7 @@ export class QueryRunner {
     let transactionState: 'active' | 'committed' | 'rolledback' | undefined;
     let session: any = undefined;
     try {
-      if (!(await confirmSqlExecution(this.conn, sql, this.manager.scanOptionsFor?.(this.conn)))) return;
+      if (!(await confirmSqlExecution(this.conn, sql, this.manager.scanOptionsFor?.(this.conn), { database: this.database, schema: pgSchemaFor(this.conn, this.schema) }))) return;
       this.post({ type: 'running' });
       session = await this.manager.connectSql(this.conn, database);
       const token: QueryCancelToken = {};
@@ -247,7 +247,7 @@ export class QueryRunner {
   private async doExplain(sql: string): Promise<void> {
     if (this.disposed) return;
     try {
-      if (!(await confirmSqlExecution(this.conn, sql, this.manager.scanOptionsFor?.(this.conn)))) return;
+      if (!(await confirmSqlExecution(this.conn, sql, this.manager.scanOptionsFor?.(this.conn), { database: this.database, schema: pgSchemaFor(this.conn, this.schema) }))) return;
       this.post({ type: 'running' });
       const session = await this.manager.connectSql(this.conn, this.database);
       const token: QueryCancelToken = {};

@@ -365,6 +365,7 @@ export async function runExportWizard(
       action: 'export_data',
       connName: node.conn.name || node.conn.host,
       database,
+      schema,
       sql: `EXPORT ${format.toUpperCase()} ${tables.length} table(s): ${tables.join(', ')}`,
       rowCount: tables.length,
     });
@@ -388,7 +389,7 @@ async function importSqlScript(
   const { manager, treeProvider, connCtx } = deps;
   const conn = node.conn;
   if (!conn) return;
-  if (!(await confirmSqlExecution(conn, sql, manager.scanOptionsFor?.(conn)))) return;
+  if (!(await confirmSqlExecution(conn, sql, manager.scanOptionsFor?.(conn), { database: node.database, schema: pgSchemaFor(conn, node.schema) }))) return;
   const session = await manager.connectSql(conn, node.database);
   const database = node.database;
   const schema = pgSchemaFor(conn, node.schema);
@@ -538,7 +539,7 @@ async function importStructuredData(
   const firstTarget = selected[0].target;
   if (!firstTarget) return;
   const insertPreview = session.query.dialect.buildInsertSql([{ [firstTarget]: source.rows[0][selected[0].source] }], [firstTarget], table.label, database, schema);
-  if (!(await confirmSqlExecution(conn, insertPreview, manager.scanOptionsFor?.(conn)))) return;
+  if (!(await confirmSqlExecution(conn, insertPreview, manager.scanOptionsFor?.(conn), { database, schema }))) return;
   connCtx.setLast(conn, database);
   const unmarkBusy = manager.markBusy(conn.id);
   try {
@@ -568,6 +569,7 @@ async function importStructuredData(
       action: 'import_data',
       connName: conn.name || conn.host,
       database,
+      schema,
       sql: `IMPORT INTO ${table.label} (${result.imported} row(s))`,
       rowCount: result.imported,
     });

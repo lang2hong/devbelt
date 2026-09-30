@@ -52,7 +52,7 @@ export class DataDiffView extends BaseWebView {
         const session = await this.manager.connectSql(this.targetConn);
         const sql = DataDiffService.generateSyncSql(diff, this.targetDb, session.query);
         // 破坏性 DML：先经只读/生产/高危确认门禁，再执行并审计。
-        if (!(await confirmSqlExecution(this.targetConn, sql, this.manager.scanOptionsFor?.(this.targetConn)))) {
+        if (!(await confirmSqlExecution(this.targetConn, sql, this.manager.scanOptionsFor?.(this.targetConn), { database: this.targetDb }))) {
           this.post({ type: 'error', message: l10n('transfer.cancelled') });
           return;
         }
