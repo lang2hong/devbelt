@@ -5,6 +5,7 @@ import { BaseWebView } from './baseWebView';
 
 export class ERDiagramView extends BaseWebView {
   private static current?: ERDiagramView;
+  private releaseRetain?: () => void;
 
   /** 见 handleMessage 的两次-ready 协议 */
 
@@ -16,7 +17,7 @@ export class ERDiagramView extends BaseWebView {
     private readonly schema?: string,
   ) {
     super('devbelt.erDiagram', `ER Diagram @ ${database}`);
-    this.manager.retain(conn.id);
+    this.releaseRetain = this.manager.retainFor(conn, database);
   }
 
   static init(extensionUri: import('vscode').Uri): void { BaseWebView.init(extensionUri); }
@@ -67,6 +68,6 @@ export class ERDiagramView extends BaseWebView {
   protected onDispose(): void {
     super.onDispose();
     if (ERDiagramView.current === this) ERDiagramView.current = undefined;
-    this.manager.release(this.conn.id);
+    this.releaseRetain?.();
   }
 }

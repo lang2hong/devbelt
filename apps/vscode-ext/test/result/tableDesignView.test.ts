@@ -47,6 +47,7 @@ function managerFor(session: ReturnType<typeof fakeSession>) {
     isExplicit: () => true,
     disposeConn: vi.fn(),
     retain: vi.fn(),
+    retainFor: vi.fn(() => () => {}),
     release: vi.fn(),
   } as any;
 }

@@ -37,6 +37,8 @@ export class TableQueryView extends BaseWebView {
   private readonly completionService: CompletionService;
   private readonly rowEditor?: RowEditor;
   private readonly exporter?: ExportHandler;
+  /** 本视图的 retain 释放函数（按会话键，见 connectionManager.retainFor）。 */
+  private releaseRetain?: () => void;
   private pendingQueries: Array<{
     sql: string;
     database?: string;
@@ -62,7 +64,8 @@ export class TableQueryView extends BaseWebView {
     );
     // 引用计数：同一连接被多个视图共享，最后一个视图关闭时才释放连接。用管理器的
 // retain/release（而非各自维护的私有计数），这样其它视图/查询的持有同样被尊重。
-    this.manager.retain(this.conn.id);
+    // 按会话键持有：PG 面板持有的是「该库」的会话，不豁免同连接其它衍生会话（B3）。
+    this.releaseRetain = this.manager.retainFor(this.conn, this.database);
     const schema = opts.schema;
     this.runner = new QueryRunner(conn, manager, table, database, (msg) => this.post(msg), schema);
     this.completionService = new CompletionService(manager, conn, database, (msg) => this.post(msg), schema);
@@ -291,7 +294,8 @@ export class TableQueryView extends BaseWebView {
       TableQueryView.queryViews.delete(this.conn.id);
     }
     // 释放本视图的持有：计数归零且非显式打开时，管理器才真正关闭连接。
-    this.manager.release(this.conn.id);
+    this.releaseRetain?.();
+    this.releaseRetain = undefined;
   }
 
   private async sendInit(): Promise<void> {

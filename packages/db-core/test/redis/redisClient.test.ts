@@ -112,6 +112,14 @@ describe('RedisClient 配置', () => {
     expect(retry(4)).toBeNull();
   });
 
+  it('命令超时：命令永不 settle 时有界失败（集群宕机不挂起）', async () => {
+    class HangRedis extends FakeRedis {
+      sendCommand = (): Promise<unknown> => new Promise(() => { /* 永不 settle */ });
+    }
+    const client = new RedisClient({ host: 'h', port: 1, commandTimeout: 20 }, () => new HangRedis());
+    await expect(client.sendCommand('GET', ['k'])).rejects.toThrow(/timed out after 20ms/);
+  });
+
   it('TLS 选项透传给 ioredis', () => {
     const { captured } = make({ tls: { rejectUnauthorized: false, servername: 'r.example' } });
     expect(captured[0].tls).toEqual({ rejectUnauthorized: false, servername: 'r.example' });

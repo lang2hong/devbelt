@@ -130,6 +130,28 @@ describe('B2：PG 多库衍生会话', () => {
     expect(m.activeConnections).toBe(1 + DERIVED_DB_SESSION_MAX);
   });
 
+  it('B3：retain 按会话键——连接级 retain 不豁免衍生会话（上限仍生效）', async () => {
+    const m = new ConnectionManager();
+    managers.push(m);
+    await m.connectSql(conn());
+    m.retain('c-1'); // 连接级持有（仅主会话）
+    await m.connectSql(conn(), 'other');
+    for (const db of ['d1', 'd2', 'd3', 'd4', 'd5']) await m.connectSql(conn(), db);
+    expect(m.activeConnections).toBe(1 + DERIVED_DB_SESSION_MAX);
+    expect(m.peekSql('c-1', 'other')).toBeUndefined();
+  });
+
+  it('B3：retainFor 指定衍生键则保护该会话不被淘汰', async () => {
+    const m = new ConnectionManager();
+    managers.push(m);
+    await m.connectSql(conn());
+    const release = m.retainFor(conn(), 'other');
+    await m.connectSql(conn(), 'other');
+    for (const db of ['d1', 'd2', 'd3', 'd4', 'd5']) await m.connectSql(conn(), db);
+    expect(m.peekSql('c-1', 'other')).toBeTruthy();
+    release();
+  });
+
   it('disposeConn 关闭全部衍生会话并释放隧道引用', async () => {
     const m = new ConnectionManager({});
     managers.push(m);

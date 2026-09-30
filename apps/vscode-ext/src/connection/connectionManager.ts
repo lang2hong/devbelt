@@ -609,23 +609,42 @@ export class ConnectionManager {
     };
   }
 
-  /** 释放一次 retain；计数归零且非显式打开时关闭会话。 */
-  release(id: string): void {
-    const current = this.retains.get(id);
-    // 未持有或重复释放：忽略而不是从 0 减成负数（否则会误关别人仍持有的会话）。
+  /**
+ * 按**会话键**登记持有：主会话用连接 id，PG 衍生库会话用 `connId\u0000库名`。
+ * 返回释放函数。这样面板持有某个库的会话时，只保护那一个会话——不会被连接级持有
+ * 一并豁免（否则 4 个衍生会话上限失效，B3）。
+ */
+  retainFor(conn: SavedConnection, database?: string): () => void {
+    const derived = conn.dbType === DatabaseType.PG
+      && !!database
+      && database !== conn.database
+      && database !== this.primaryDb.get(conn.id);
+    const key = derived ? this.findSessionKey(conn.id, database!) : conn.id;
+    this.retains.set(key, (this.retains.get(key) ?? 0) + 1);
+    return () => this.releaseKey(key, conn.id);
+  }
+
+  /** 按会话键释放（key 为连接 id 或衍生键）。 */
+  private releaseKey(key: string, connId: string): void {
+    const current = this.retains.get(key);
     if (current === undefined || current <= 0) return;
     const next = current - 1;
-    if (next > 0) {
-      this.retains.set(id, next);
-      return;
-    }
-    this.retains.delete(id);
-    if (!this.explicit.has(id)) this.disposeConn(id);
+    if (next > 0) { this.retains.set(key, next); return; }
+    this.retains.delete(key);
+    if (!this.explicit.has(connId)) this.disposeConn(connId);
+  }
+
+  /** 释放一次 retain（连接级主会话）；计数归零且非显式打开时关闭会话。 */
+  release(id: string): void {
+    this.releaseKey(id, id);
   }
 
   /** 关闭指定连接会话（含该连接的全部 PG 衍生库会话） */
   disposeConn(id: string): void {
-    this.retains.delete(id);
+    // 清掉该连接的**全部**持有（主会话 + 各衍生库会话键）。
+    for (const key of [...this.retains.keys()]) {
+      if (key === id || key.startsWith(`${id}${SESSION_KEY_SEP}`)) this.retains.delete(key);
+    }
     // 递增代际：在途建连完成后会据此自毁，不会留下幽灵会话/隧道。
     this.generations.set(id, this.generation(id) + 1);
     this.explicit.delete(id);
@@ -752,8 +771,8 @@ export class ConnectionManager {
     const isPrimary = entry.key === entry.connId;
     // 「显式打开」只保护**主会话**：PG 展开超过上限的衍生库会话仍按自身状态淘汰（B3）。
     if (isPrimary && this.explicit.has(entry.connId)) return false;
-    // 被视图/面板 retain、或有在途查询的会话不淘汰。
-    if (this.retains.has(entry.connId)) return false;
+    // 被视图/面板 retain（**按会话键**）、或有在途查询的会话不淘汰。
+    if (this.retains.has(entry.key)) return false;
     if (this.sqlInFlight(entry.session) > 0) return false;
     // 正在批量导入/导出/恢复的连接不能淘汰（多语句之间有间隙，inFlight 覆盖不到）。
     if ((this.busies.get(entry.connId) ?? 0) > 0) return false;
@@ -791,7 +810,7 @@ export class ConnectionManager {
         // 显式打开的连接与被持有（retain）的连接豁免「空闲超时」，但仍要检测存活：
         // SSH 断开/DB 掉线后过去会一直显示为已打开、反复失败，只能手动关闭。
         const id = entry.connId;
-        const idle = !this.explicit.has(id) && !this.retains.has(id) && (this.busies.get(id) ?? 0) === 0 && now - entry.lastUsed > this.config.idleTimeoutMs;
+        const idle = !this.explicit.has(id) && !this.retains.has(entry.key) && (this.busies.get(id) ?? 0) === 0 && now - entry.lastUsed > this.config.idleTimeoutMs;
         if (idle || !entry.session.isAlive()) {
           toDispose.push(entry);
         }

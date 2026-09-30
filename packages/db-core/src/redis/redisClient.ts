@@ -37,6 +37,11 @@ export interface RedisClientOptions {
   db?: number;
   tls?: RedisTlsOptions;
   connectTimeout?: number;
+  /**
+   * 单条命令超时（ms，缺省 15000，0=不限）。连接建立后集群整体宕机时，命令会滞留在
+   * cluster 离线队列；重试永不终止 → 面板会长时间卡住（D11）。此超时保证命令有界失败。
+   */
+  commandTimeout?: number;
   /** 只读模式：拦截写命令。 */
   readOnly?: boolean;
   /** 重试上限（缺省 3），退避 Math.min(times*200,1000)。 */
@@ -149,11 +154,14 @@ export class RedisClient {
   readonly isCluster: boolean;
   /** 建连超时（ms）：`connect()` 的兜底上限，防重试不停时永久挂起。 */
   private readonly connectTimeoutMs: number;
+  /** 单条命令超时（ms，0=不限）。 */
+  private readonly commandTimeoutMs: number;
   private closed = false;
 
   constructor(options: RedisClientOptions, factory?: RedisConnectionFactory) {
     this.readOnly = options.readOnly === true;
     this.connectTimeoutMs = options.connectTimeout ?? 30_000;
+    this.commandTimeoutMs = options.commandTimeout ?? 15_000;
     if (options.onLog) this.logListeners.add(options.onLog);
     const maxRetryTimes = options.maxRetryTimes ?? DEFAULT_RETRY_TIMES;
     // 与 ARDM 的上游方法 retryStragety（原拼写如此）一致：times >= maxRetryTimes 停止，退避 200→400。
@@ -179,8 +187,13 @@ export class RedisClient {
       this.client = factory(common);
     } else if (this.isCluster) {
       // Cluster 下无 SELECT：不传 db。
-      // 节点级选项：不返回 null 的 retryStrategy（用变量传入，避免字面量剔除字段的 excess 检查）。
-      const clusterNodeOptions: RedisOptions = { ...common, retryStrategy: clusterNodeRetryStrategy };
+      // 节点级选项：retryStrategy 不返回 null（用变量传入，避免字面量剔除字段的 excess 检查）；
+      // 关闭离线队列：集群宕机时命令**快速失败**而不是无限滞留（配合 commandTimeout）。
+      const clusterNodeOptions: RedisOptions = {
+        ...common,
+        retryStrategy: clusterNodeRetryStrategy,
+        enableOfflineQueue: false,
+      };
       this.client = new Cluster(options.cluster!.nodes, {
         natMap: options.cluster!.natMap,
         slotsRefreshTimeout: options.cluster!.slotsRefreshTimeout ?? 2000,
@@ -274,7 +287,10 @@ export class RedisClient {
    */
   async sendCommandBuffer(name: string, args: (string | number | Buffer)[] = []): Promise<unknown> {
     const cmd = new Command(name, args, { replyEncoding: null });
-    return this.client.sendCommand(cmd as unknown as { name: string; args: (string | number | Buffer)[] });
+    return this.withTimeout(
+      this.client.sendCommand(cmd as unknown as { name: string; args: (string | number | Buffer)[] }),
+      name,
+    );
   }
 
   /** 连接模式。 */
@@ -373,7 +389,20 @@ export class RedisClient {
   }
 
   private run(name: string, args: (string | number)[]): Promise<unknown> {
-    return this.client.call(name, ...args);
+    return this.withTimeout(this.client.call(name, ...args), name);
+  }
+
+  /** 给命令加超时：连接建立后集群整体宕机时，命令有界失败而不是长时间挂起（D11）。 */
+  private withTimeout<T>(p: Promise<T>, name: string): Promise<T> {
+    if (this.commandTimeoutMs <= 0) return p;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`redis command timed out after ${this.commandTimeoutMs}ms: ${name}`)),
+        this.commandTimeoutMs,
+      );
+    });
+    return Promise.race([p, timeout]).finally(() => { if (timer) clearTimeout(timer); }) as Promise<T>;
   }
 
   private installGuard(): void {

@@ -30,6 +30,7 @@ function toColumnSpec(raw: unknown): ColumnSpec {
 
 export class TableDesignView extends BaseWebView {
   private static current?: TableDesignView;
+  private releaseRetain?: () => void;
 
   /** 待建表模式：table 为空，前端展示建表表单。 */
   private table: string;
@@ -50,7 +51,7 @@ export class TableDesignView extends BaseWebView {
         : `New Table: ${conn.name || conn.host} › ${database}`,
     );
     this.table = table;
-    this.manager.retain(conn.id);
+    this.releaseRetain = this.manager.retainFor(conn, database);
   }
 
   static init(extensionUri: import('vscode').Uri): void { BaseWebView.init(extensionUri); }
@@ -287,6 +288,6 @@ export class TableDesignView extends BaseWebView {
   protected onDispose(): void {
     super.onDispose();
     if (TableDesignView.current === this) TableDesignView.current = undefined;
-    this.manager.release(this.conn.id);
+    this.releaseRetain?.();
   }
 }
