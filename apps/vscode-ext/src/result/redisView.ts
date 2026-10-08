@@ -945,7 +945,8 @@ function isCliBlocked(name: string, args: readonly string[]): boolean {
   }
   // XREAD/XREADGROUP 带 BLOCK 会阻塞共享连接。
   if ((c === 'XREAD' || c === 'XREADGROUP') && upper.includes('BLOCK')) return true;
-  if (c === 'DEBUG' && upper[0] === 'SLEEP') return true;
+  // DEBUG 任一子命令都会改变服务端状态或阻塞/崩溃（SEGFAULT/SLEEP/…），共享连接上一律硬阻断。
+  if (c === 'DEBUG') return true;
   return false;
 }
 

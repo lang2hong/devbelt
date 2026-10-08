@@ -194,6 +194,18 @@ describe('QueryService 事务状态跟踪（连接池淘汰保护）', () => {
     expect(svc.inTransaction).toBe(false);
   });
 
+  it('H5：ROLLBACK TO SAVEPOINT 不清事务态（事务仍活跃）', async () => {
+    const svc = new QueryService(new FakeConnection(), new MysqlDialect());
+    await svc.query('BEGIN');
+    await svc.query('SAVEPOINT sp1');
+    await svc.query('ROLLBACK TO SAVEPOINT sp1');
+    expect(svc.inTransaction).toBe(true);
+    await svc.query('ROLLBACK TO sp1');
+    expect(svc.inTransaction).toBe(true);
+    await svc.query('ROLLBACK');
+    expect(svc.inTransaction).toBe(false);
+  });
+
   it('BEGIN 被取消也复位事务状态', async () => {
     const conn = new FakeConnection();
     conn.hang = true;

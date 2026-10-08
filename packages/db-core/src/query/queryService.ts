@@ -174,7 +174,8 @@ export class QueryService {
   private trackTransaction(sql: string): void {
     const head = this.statementHead(sql);
     if (/^(BEGIN|START\s+TRANSACTION)\b/i.test(head)) this.txActive = true;
-    else if (/^(COMMIT|ROLLBACK|END|ABORT)\b/i.test(head)) this.txActive = false;
+    // `ROLLBACK TO [SAVEPOINT]` 只回滚到保存点，事务仍活跃，不能当作事务结束（H5）。
+    else if (/^(COMMIT|END)\b/i.test(head) || (/^ROLLBACK\b/i.test(head) && !/^ROLLBACK\s+TO\b/i.test(head)) || /^ABORT\b/i.test(head)) this.txActive = false;
     else if (/^SET\s+AUTOCOMMIT\s*=\s*0\b/i.test(head)) this.txActive = true;
     else if (/^SET\s+AUTOCOMMIT\s*=\s*1\b/i.test(head)) this.txActive = false;
     else return;

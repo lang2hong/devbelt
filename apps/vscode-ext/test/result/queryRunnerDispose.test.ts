@@ -63,6 +63,24 @@ describe('QueryRunner.dispose 连接生命周期', () => {
     expect(manager.connectSql).not.toHaveBeenCalled();
   });
 
+  it('H2：MySQL 精确库键落空时回退主会话发送 ROLLBACK', async () => {
+    const query = vi.fn(async (_sql: string) => ({ rows: [], fields: [] }));
+    const primary: any = {
+      query: { query, wrap: (id: string) => `\`${id}\``, cancel: () => true },
+      metadata: { getColumns: async () => [] },
+    };
+    // 模拟真实 manager：MySQL 会话条目 database 恒为 undefined，按 'shop' 查落空，裸 id 命中主会话。
+    const peekSql = vi.fn((_id: string, db?: string) => (db === undefined ? primary : undefined));
+    const manager: any = { connectSql: vi.fn(async () => primary), peekSql, disposeConn: () => {} };
+    const runner = new QueryRunner(conn, manager, 'users', 'shop', () => {});
+
+    await runner.execute('BEGIN');
+    query.mockClear();
+    runner.dispose();
+
+    expect(query).toHaveBeenCalledWith('ROLLBACK');
+  });
+
   it('无会话时静默跳过 ROLLBACK', () => {
     const manager: any = { connectSql: vi.fn(), peekSql: () => undefined, disposeConn: () => {} };
     const runner = new QueryRunner(conn, manager, 'users', 'test', () => {});

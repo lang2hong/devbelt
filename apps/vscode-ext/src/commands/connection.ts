@@ -65,7 +65,18 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
   });
 
   sub('devbelt.editConnection', (node: DbTreeNode) => {
-    if (node?.conn) ConnectionForm.open(store, () => treeProvider.refresh(), undefined, node.conn, (c) => manager.effectiveConnection(c));
+    if (!node?.conn) return;
+    const id = node.conn.id;
+    // 编辑后连接配置可能变化（含 SSH 目标/认证）。已打开的会话与共享 SSH 隧道是按旧配置
+    // 建立的：主会话重连会 closeTunnel，导致同连接的派生库/schema 会话静默持有失效隧道（H6）。
+    // 统一在保存后关闭该连接的全部会话，下次使用按新配置重建。
+    ConnectionForm.open(store, () => {
+      if (manager.peek(id)) {
+        manager.disposeConn(id);
+        treeProvider.markClosed(id);
+      }
+      treeProvider.refresh();
+    }, undefined, node.conn, (c) => manager.effectiveConnection(c));
   });
 
   sub('devbelt.cloneConnection', (node: DbTreeNode) => {

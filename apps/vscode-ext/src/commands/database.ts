@@ -108,6 +108,11 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     );
     if (confirmed !== restoreBtn) return;
     const session = await manager.connectSql(node.conn, node.database);
+    // MySQL 无 schema 限定，dump 目标相对依赖「当前库」：共享会话的当前库未必是所选库，
+    // 不显式 USE 会把表建到/覆盖到错误库（H1）。与 importSqlScript 口径一致。
+    if (node.database && conn.dbType === DatabaseType.MYSQL) {
+      await session.query.query(`USE ${wrapIdentForConn(conn, validateIdent(node.database))}`);
+    }
     // 流式读取 + 增量切分：过去整文件读进内存再一次性切分，GB 级 dump 会 OOM。
     const rawStatements = streamSqlStatements(uri[0].fsPath, manager.scanOptionsFor?.(node.conn));
     // PG 无 USE：dump 里不带 schema 的语句默认落到 search_path 的 schema。恢复事务由

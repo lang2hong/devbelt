@@ -97,6 +97,19 @@ describe('BackupService', () => {
     expect(dump).toContain("'C:\\\\tmp'");
   });
 
+  it('C2：MySQL 读取按 database.table 限定（共享会话当前库不同也不抓错行）', async () => {
+    const conn = new FakeConnection();
+    conn.setResponses([{ rows: [{ id: 1, name: 'a' }] }]);
+    const query = makeQueryService(conn, new MysqlDialect());
+    const dump = await BackupService.databaseDump(query, makeMetadataService(), makeTableService(), 'shop', { includeData: true });
+    const selects = conn.executed.filter((s) => /SELECT \* FROM/i.test(s));
+    expect(selects.length).toBeGreaterThan(0);
+    // 读取必须限定到目标库；否则会从会话当前库（可能是别的库）抓行。
+    expect(selects.every((s) => s.includes('`shop`.`users`'))).toBe(true);
+    // dump 输出仍目标相对：INSERT/DDL 不带库前缀。
+    expect(dump).not.toContain('INSERT INTO `shop`.`users`');
+  });
+
   it('dump 头的库名无法逃出注释（换行 / 块注释结束符被中和）', async () => {
     const conn = new FakeConnection();
     conn.setResponses([{ rows: [] }]);

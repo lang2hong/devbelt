@@ -110,7 +110,12 @@ export class BackupService {
       const ddlRaw = await tableService.getCreateSql(table, database, schema);
       const ddl = this.stripTableSchema(ddlRaw, schema);
       const qualified = qualify(table);
-      const readQualified = schema ? `${query.dialect.wrap(schema)}.${query.dialect.wrap(table)}` : qualified;
+      // 读取限定：PG 用 schema；MySQL 用 database（无 schema，且共享会话的当前库未必是本库——
+      // 不限定会从错误库抓行，静默产出混合 dump）。SQLite 无跨库限定，保持裸名。
+      const readQualified =
+        schema ? `${query.dialect.wrap(schema)}.${query.dialect.wrap(table)}`
+        : dbType === DatabaseType.MYSQL && database ? `${query.dialect.wrap(database)}.${query.dialect.wrap(table)}`
+        : qualified;
       const block: string[] = ['', `DROP TABLE IF EXISTS ${qualified};`, ddl.replace(/;\s*$/, '') + ';'];
 
       if (includeData) {

@@ -8,7 +8,7 @@
  */
 import Redis, { Cluster, Command, type RedisOptions } from 'ioredis';
 import type { RedisCommandSource } from './redisOps.js';
-import { isReadCommand, isDangerousCommand } from './redisCommands.js';
+import { isReadCommand, isWriteCommand, isDangerousCommand } from './redisCommands.js';
 import type { RedisTlsOptions } from './redisTls.js';
 
 /** 只读模式下拦截写命令时抛出。 */
@@ -112,6 +112,22 @@ const REDACT_SUBCOMMANDS: Record<string, readonly string[]> = {
   ACL: ['SETUSER'],
 };
 
+/**
+ * 写命令的「值」起始下标：该下标起的参数一律 `<redacted>`（保留其前的 key/字段标识）。
+ * 用于命令日志与审计，避免 SET apiKey <secret> 之类把值写进日志/审计（P7 §十）。
+ */
+const REDACT_FROM_INDEX: Record<string, number> = {
+  SET: 1, SETNX: 1, SETEX: 1, PSETEX: 1, GETSET: 1, APPEND: 1, SETRANGE: 1, SETBIT: 1,
+  INCRBY: 1, DECRBY: 1, INCRBYFLOAT: 1,
+  HSET: 1, HMSET: 1, HSETNX: 1,
+  LPUSH: 1, RPUSH: 1, LPUSHX: 1, RPUSHX: 1, LSET: 1, LINSERT: 1,
+  ZADD: 1, ZINCRBY: 1,
+  SADD: 1, SREM: 1, SMOVE: 1, SPOP: 1, SRANDMEMBER: 1,
+  PUBLISH: 1, SPUBLISH: 1,
+  RESTORE: 1, PFADD: 1, PFMERGE: 1, GEOADD: 1, BITFIELD: 1,
+  XADD: 2, // key id field value ... → 从 field 起脱敏
+};
+
 /** 单条日志参数最大长度：防大 value / keyspace dump 灌爆日志（P7 §十）。 */
 const MAX_LOGGED_ARG_LEN = 128;
 
@@ -120,10 +136,12 @@ function truncateArg(value: string): string {
 }
 
 /**
- * 脱敏命令日志参数（P7 §十：错误/日志中禁止打印密码）。
+ * 脱敏命令日志参数（P7 §十：错误/日志中禁止打印密码/写入值）。
  * - AUTH：整段参数 → `<redacted>`；
  * - CONFIG SET / ACL SETUSER：保留子命令，其余 → `<redacted>`；
- * - 其余：逐项截断到 128 字符。
+ * - 写命令（SET/HSET/APPEND/…）：按值起始下标脱敏，值一律 `<redacted>`；
+ * - 其余未知写命令：只保留首个（key）参数，其余 `<redacted>`；
+ * - 读命令：逐项截断到 128 字符。
  *
  * 只影响日志入参；命令执行仍使用原始参数（见 installGuard）。
  */
@@ -133,6 +151,15 @@ export function redactCommandArgs(command: string, args: readonly string[]): str
   const subs = REDACT_SUBCOMMANDS[cmd];
   if (subs && subs.includes(String(args[0] ?? '').trim().toUpperCase())) {
     return [String(args[0]), ...args.slice(1).map(() => REDACTED)];
+  }
+  const from = REDACT_FROM_INDEX[cmd];
+  if (from !== undefined) {
+    return args.map((a, i) => (i >= from ? REDACTED : truncateArg(String(a))));
+  }
+  // 兜底：其它写命令默认只保留命令名与第一个（key）参数，其余一律脱敏——
+  // 无法穷举所有写命令的值参数位，宁可少记也不把值写进日志/审计（P7 §十）。
+  if (isWriteCommand(cmd, args)) {
+    return args.map((a, i) => (i >= 1 ? REDACTED : truncateArg(String(a))));
   }
   return args.map(truncateArg);
 }

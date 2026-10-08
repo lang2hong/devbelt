@@ -114,7 +114,11 @@ export class QueryRunner {
     // 仅回滚**本面板自己开的事务**：会话与 SQL 编辑器/其它面板共享，无条件 ROLLBACK
     // 会静默回滚他人未提交的事务（数据丢失）。
     if (this.table && this.openTransaction) {
-      const session = this.manager.peekSql(this.conn.id, this.database);
+      // MySQL/SQLite 的会话条目 database 恒为 undefined，按 database 精确匹配会落空；
+      // 回退到该连接的主会话，确保本面板开的事务真的被回滚（H2）。PG 有真实衍生会话，
+      // 不在此回退，避免误回滚主会话上他人的事务。
+      const session = this.manager.peekSql(this.conn.id, this.database)
+        ?? (this.conn.dbType === DatabaseType.PG ? undefined : this.manager.peekSql(this.conn.id));
       session?.query.query('ROLLBACK').catch(() => {});
       this.openTransaction = false;
     }

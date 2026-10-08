@@ -286,7 +286,8 @@ describe('RedisClient 命令日志与脱敏', () => {
     expect(fake.calls).toHaveLength(1);
     expect(logs).toHaveLength(1);
     expect(logs[0].command).toBe('SET');
-    expect(logs[0].args).toEqual(['k', 'v']);
+    // 值参数脱敏（P7 §十）：只保留 key。
+    expect(logs[0].args).toEqual(['k', '<redacted>']);
     expect(logs[0].ok).toBe(true);
     expect(logs[0].error).toBeUndefined();
     expect(logs[0].durationMs).toBeGreaterThanOrEqual(0);
@@ -313,11 +314,11 @@ describe('RedisClient 命令日志与脱敏', () => {
     expect(JSON.stringify(logs)).not.toContain('secretpass');
   });
 
-  it('普通命令参数逐项截断（防 keyspace dump）', async () => {
+  it('读命令参数逐项截断（防 keyspace dump）', async () => {
     const logs: RedisCommandLog[] = [];
     const { client } = make({ onLog: (entry) => logs.push(entry) });
     const long = 'x'.repeat(200);
-    await client.sendCommand('SET', ['k', long]);
+    await client.sendCommand('ECHO', ['k', long]);
     expect(logs[0].args[0]).toBe('k');
     expect(logs[0].args[1].length).toBeLessThan(200);
     expect(logs[0].args[1].endsWith('…')).toBe(true);
@@ -328,6 +329,15 @@ describe('RedisClient 命令日志与脱敏', () => {
     expect(redactCommandArgs('ACL', ['LIST'])).toEqual(['LIST']);
     expect(redactCommandArgs('GET', ['key'])).toEqual(['key']);
     expect(redactCommandArgs('auth', ['p'])).toEqual(['<redacted>']);
+  });
+
+  it('H3：写命令的值参数脱敏（SET/HSET/APPEND/XADD/未知写命令）', () => {
+    expect(redactCommandArgs('SET', ['apiKey', 's3cr3t'])).toEqual(['apiKey', '<redacted>']);
+    expect(redactCommandArgs('APPEND', ['buf', 'secret'])).toEqual(['buf', '<redacted>']);
+    expect(redactCommandArgs('HSET', ['h', 'field', 'val'])).toEqual(['h', '<redacted>', '<redacted>']);
+    expect(redactCommandArgs('XADD', ['st', '*', 'f', 'v'])).toEqual(['st', '*', '<redacted>', '<redacted>']);
+    // 未逐一列举的写命令：保留 key，其余脱敏。
+    expect(redactCommandArgs('DEL', ['k1', 'k2'])).toEqual(['k1', '<redacted>']);
   });
 
   it('命令失败也记录日志并抛出', async () => {
@@ -442,7 +452,7 @@ describe('RedisClient 字节级命令（sendCommandBuffer）', () => {
     const logs: RedisCommandLog[] = [];
     const { client } = make({ onLog: (e) => logs.push(e) });
     await client.sendCommandBuffer('SET', ['k', Buffer.from([0xff, 0x00])]);
-    expect(logs[0].args).toEqual(['k', '<buffer:2>']);
+    expect(logs[0].args).toEqual(['k', '<redacted>']);
   });
 });
 

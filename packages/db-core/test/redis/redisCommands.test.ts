@@ -76,6 +76,26 @@ describe('Redis 命令表分类（移植 ARDM v1.1.1 + DevBelt 加强）', () =>
     expect(isDangerousCommand('GET')).toBe(false);
   });
 
+  it('H4：危险命令扩展覆盖（停机/复制/脚本/调试/迁移等）', () => {
+    for (const c of [
+      'DEBUG', 'SAVE', 'BGSAVE', 'BGREWRITEAOF', 'SYNC', 'PSYNC',
+      'EVAL', 'EVALSHA', 'FAILOVER', 'REPLICAOF', 'SLAVEOF', 'MONITOR',
+      'MIGRATE', 'SWAPDB', 'RESTORE',
+    ]) {
+      expect(isDangerousCommand(c), c).toBe(true);
+    }
+    expect(isDangerousCommand('SCRIPT', ['KILL'])).toBe(true);
+    expect(isDangerousCommand('SCRIPT', ['FLUSH'])).toBe(true);
+    expect(isDangerousCommand('SCRIPT', ['EXISTS', 'a'])).toBe(false);
+    expect(isDangerousCommand('SCRIPT', ['LOAD', 'x'])).toBe(false);
+    expect(isDangerousCommand('FUNCTION', ['LOAD', 'x'])).toBe(true);
+    expect(isDangerousCommand('CLIENT', ['KILL', 'ID', '1'])).toBe(true);
+    expect(isDangerousCommand('ACL', ['SETUSER', 'u'])).toBe(true);
+    expect(isDangerousCommand('MODULE', ['LOAD', 'x'])).toBe(true);
+    // CLIENT PAUSE 属写命令
+    expect(isWriteCommand('CLIENT', ['PAUSE', '100'])).toBe(true);
+  });
+
   it('补全候选按前缀过滤、大小写不敏感', () => {
     const names = allCommandNames();
     expect(names).toContain('GET');
