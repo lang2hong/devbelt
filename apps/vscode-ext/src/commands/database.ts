@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { SchemaDiffService, BackupService, DataTransferService, DatabaseType, validateIdent } from '@devbelt/db-core';
 import { DbTreeNode } from '../tree/dbTreeNode';
 import { isTxControlStatement } from '@devbelt/db-core/sql';
-import { wrapIdentForConn, splitSqlStatements, streamSqlStatements, pgSchemaFor } from '../utils/sql';
+import { wrapIdentForConn, splitSqlStatements, streamSqlStatements, pgSchemaFor, mysqlUseStatement } from '../utils/sql';
 import { confirmSqlExecution, ensureWritable } from '../utils/sqlSafety';
 import { parseCsv, readCsvSample, streamCsvRows } from '../data/transfer/csv';
 import { readJsonSample, streamJsonRows } from '../data/transfer/json';
@@ -110,8 +110,9 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     const session = await manager.connectSql(node.conn, node.database);
     // MySQL 无 schema 限定，dump 目标相对依赖「当前库」：共享会话的当前库未必是所选库，
     // 不显式 USE 会把表建到/覆盖到错误库（H1）。与 importSqlScript 口径一致。
-    if (node.database && conn.dbType === DatabaseType.MYSQL) {
-      await session.query.query(`USE ${wrapIdentForConn(conn, validateIdent(node.database))}`);
+    const useStmt = mysqlUseStatement(conn, node.database);
+    if (useStmt) {
+      await session.query.query(useStmt);
     }
     // 流式读取 + 增量切分：过去整文件读进内存再一次性切分，GB 级 dump 会 OOM。
     const rawStatements = streamSqlStatements(uri[0].fsPath, manager.scanOptionsFor?.(node.conn));
@@ -408,8 +409,9 @@ async function importSqlScript(
   const database = node.database;
   const schema = pgSchemaFor(conn, node.schema);
   connCtx.setLast(conn, database);
-  if (database && conn.dbType === DatabaseType.MYSQL) {
-    await session.query.query(`USE ${wrapIdentForConn(conn, validateIdent(database))}`);
+  const useStmt = mysqlUseStatement(conn, database);
+  if (useStmt) {
+    await session.query.query(useStmt);
   }
   const statements = splitSqlStatements(sql, manager.scanOptionsFor?.(conn))
     .filter((st) => !isTxControlStatement(st));

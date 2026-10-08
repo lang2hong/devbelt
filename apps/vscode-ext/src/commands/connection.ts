@@ -8,6 +8,7 @@ import { l10n } from '../i18n';
 import { AuditLogger } from '../utils/auditLogger';
 import { flattenGroups } from '../utils/groupTree';
 import { sanitizeConnectionForExport } from '../utils/connectionExport';
+import { connectionTargetChanged } from '../utils/connectionTarget';
 import { diagInfo, diagWarn } from '../utils/diagnostics';
 import { chmod, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -20,23 +21,6 @@ import {
   maxSavedConnections,
   maxConcurrentConnections,
 } from '@devbelt/db-host/sync/entitlementGate';
-
-/**
- * 影响已建会话/SSH 隧道的连接字段（不含 name/group 及密钥类字段——后者比不出可靠差异）。
- * 仅当这些字段变化才需要关闭会话强制按新配置重连（H6）。
- */
-const CONNECTION_TARGET_FIELDS: readonly (keyof SavedConnection)[] = [
-  'dbType', 'host', 'port', 'user', 'database', 'schema', 'timezone', 'socketPath', 'dbPath',
-  'sqliteCommand', 'useConnectionString', 'connectionUrl', 'useSSL', 'rejectUnauthorized',
-  'caPath', 'clientCertPath', 'clientKeyPath',
-  'sshHost', 'sshPort', 'sshUser', 'sshPrivateKeyPath',
-  'redisDb', 'keySeparator', 'redisMode', 'sentinelName', 'clusterNodes', 'sentinelNodes',
-  'readOnly', 'environment', 'connectTimeout', 'requestTimeout',
-];
-
-function connectionTargetChanged(a: SavedConnection, b: SavedConnection): boolean {
-  return CONNECTION_TARGET_FIELDS.some((k) => a[k] !== b[k]);
-}
 
 async function redisServerVersion(session: RedisConnectionSession): Promise<string> {
   try {

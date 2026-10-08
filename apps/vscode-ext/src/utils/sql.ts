@@ -1,4 +1,4 @@
-import { DatabaseType } from '@devbelt/db-core';
+import { DatabaseType, validateIdent } from '@devbelt/db-core';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { splitSqlWithRanges, stripSqlComments, SqlScanner, StreamingStatementSplitter, escapeStringLiteralContent } from '@devbelt/db-core/sql';
 import { createReadStream } from 'node:fs';
@@ -41,6 +41,15 @@ export function qualifiedIdentForConn(conn: SavedConnection, name: string, schem
   const wrapped = wrapIdentForConn(conn, name);
   const pgSchema = pgSchemaFor(conn, schema);
   return pgSchema ? `${wrapIdent(conn.dbType, pgSchema)}.${wrapped}` : wrapped;
+}
+
+/**
+ * MySQL 的 `USE <db>`：恢复/脚本导入的目标相对语义依赖「当前库」，共享会话的当前库
+ * 未必是所选库（H1）。非 MySQL 或未给库名返回 `undefined`（PG 走 search_path，SQLite 单库）。
+ */
+export function mysqlUseStatement(conn: Pick<SavedConnection, 'dbType'>, database?: string): string | undefined {
+  if (conn.dbType !== DatabaseType.MYSQL || !database) return undefined;
+  return `USE ${wrapIdent(conn.dbType, validateIdent(database))}`;
 }
 
 /**

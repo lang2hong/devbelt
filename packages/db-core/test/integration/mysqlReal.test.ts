@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { createPool, createConnection } from 'mysql2/promise';
 import { MysqlDialect } from '../../src/dialect/mysqlDialect';
+import { MysqlConnection } from '../../src/connection/mysqlConnection';
+import { QueryService } from '../../src/query/queryService';
+import { MetadataService } from '../../src/query/metadataService';
+import { TableService } from '../../src/query/tableService';
+import { BackupService } from '../../src/query/backupService';
 import { parseNoBackslashEscapes } from '../../src/sql/index';
 import { resolveTestDb, parseMysqlUrl } from './testDb.js';
 
@@ -161,6 +166,36 @@ describe.skipIf(!URL)('db-core MySQL dialect (real db)', () => {
       await pool.end();
     }
   });
+it('C2：备份读取按 database.table 限定（会话当前库不同也不抓错行）', async () => {
+    const { host, port, user, password } = parseMysqlUrl(URL!);
+    const OTHER = `z_c2_other_${Date.now()}`;
+    const T = `z_c2_${Date.now()}`;
+    const admin = await createConnection({ host, port, user, password, database: DB });
+    await admin.query(`CREATE DATABASE \`${OTHER}\``);
+    // 目标库与会话当前库各放一张同名、不同数据的表。
+    await admin.query(`CREATE TABLE \`${DB}\`.\`${T}\` (id INT PRIMARY KEY, v VARCHAR(20))`);
+    await admin.query(`INSERT INTO \`${DB}\`.\`${T}\` VALUES (1, 'from-target')`);
+    await admin.query(`CREATE TABLE \`${OTHER}\`.\`${T}\` (id INT PRIMARY KEY, v VARCHAR(20))`);
+    await admin.query(`INSERT INTO \`${OTHER}\`.\`${T}\` VALUES (1, 'from-other')`);
+
+    // 会话连到 OTHER：修复前未限定的 SELECT * FROM `t` 会读到 from-other。
+    const con = new MysqlConnection({ host, port, user, password, database: OTHER, connectTimeout: 8000 });
+    await new Promise<void>((res, rej) => con.connect((e) => (e ? rej(e) : res())));
+    try {
+      const q = new QueryService(con, new MysqlDialect());
+      const dump = await BackupService.databaseDump(q, new MetadataService(q), new TableService(q), DB, {
+        tables: [T],
+        includeData: true,
+      });
+      expect(dump).toContain('from-target');
+      expect(dump).not.toContain('from-other');
+    } finally {
+      con.end();
+      await admin.query(`DROP TABLE IF EXISTS \`${DB}\`.\`${T}\``);
+      await admin.query(`DROP DATABASE IF EXISTS \`${OTHER}\``);
+      await admin.end();
+    }
+  }, 30_000);
 }, 30_000);
 
 /**

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DatabaseType } from '@devbelt/db-core';
-import { escapeSqlString, statementTextAt, streamSqlStatements, wrapIdent } from '../../src/utils/sql';
+import { escapeSqlString, mysqlUseStatement, statementTextAt, streamSqlStatements, wrapIdent } from '../../src/utils/sql';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,6 +20,20 @@ describe('wrapIdent', () => {
   it('内嵌引号按方言翻倍，逃不出标识符上下文', () => {
     expect(wrapIdent(DatabaseType.MYSQL, 'a`b')).toBe('`a``b`');
     expect(wrapIdent(DatabaseType.PG, 'a"b')).toBe('"a""b"');
+  });
+});
+
+describe('mysqlUseStatement（H1：恢复/导入前切换当前库）', () => {
+  it('MySQL + 库名 → USE `db`（库名走标识符校验与包裹）', () => {
+    expect(mysqlUseStatement({ dbType: DatabaseType.MYSQL }, 'shop')).toBe('USE `shop`');
+  });
+  it('非 MySQL 或未给库名 → undefined（PG 走 search_path，SQLite 单库）', () => {
+    expect(mysqlUseStatement({ dbType: DatabaseType.PG }, 'shop')).toBeUndefined();
+    expect(mysqlUseStatement({ dbType: DatabaseType.SQLITE }, 'main')).toBeUndefined();
+    expect(mysqlUseStatement({ dbType: DatabaseType.MYSQL }, undefined)).toBeUndefined();
+  });
+  it('非法库名拒绝（validateIdent fail-closed）', () => {
+    expect(() => mysqlUseStatement({ dbType: DatabaseType.MYSQL }, 'a;DROP')).toThrow();
   });
 });
 
