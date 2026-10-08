@@ -14,6 +14,7 @@ export type AuditAction =
   | 'connection_close'
   | 'user_manage'
   | 'import_data'
+  | 'restore_data'
   | 'export_data'
   | 'process_kill'
   /** P7：Redis 写/危险命令。 */

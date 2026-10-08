@@ -36,4 +36,14 @@ describe('isTxControlStatement（导入/恢复剥离 dump 自带事务控制，H
       expect(isTxControlStatement(s), s).toBe(false);
     }
   });
+
+  it('不误伤形似事务控制的真实语句（剥离会改变恢复语义）', () => {
+    for (const s of [
+      'ROLLBACK TO SAVEPOINT sp1', 'ROLLBACK TO sp1',
+      'END IF', 'END LOOP', 'END CASE', 'END WHILE',
+      'COMMIT PREPARED gid', 'ROLLBACK PREPARED gid',
+    ]) {
+      expect(isTxControlStatement(s), s).toBe(false);
+    }
+  });
 });

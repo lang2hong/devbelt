@@ -130,6 +130,9 @@ export class SshTunnel {
     let resolveInflight!: (v: SshTunnelLease) => void;
     let rejectInflight!: (e: Error) => void;
     const inflightPromise = new Promise<SshTunnelLease>((res, rej) => { resolveInflight = res; rejectInflight = rej; });
+    // 主调用方 await 的是内部 port promise，而非本 Promise；当无并发等待者时，失败对 inflightPromise
+    // 的 reject 无人接管 → 未处理拒绝（Node 默认 throw）。这里挂一个空 catch 保持被观察（不改变结果）。
+    void inflightPromise.catch(() => { /* 主调用方会收到同一错误 */ });
     this.creating.set(conn.id, inflightPromise);
 
     try {

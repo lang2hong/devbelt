@@ -141,7 +141,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
             node.database || node.conn!.database,
           );
           AuditLogger.tryLog({
-            action: 'import_data',
+            action: 'restore_data',
             connName: conn.name || conn.host,
             database: node.database || conn.database,
             schema,

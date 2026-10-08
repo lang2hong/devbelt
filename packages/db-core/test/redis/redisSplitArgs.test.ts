@@ -31,6 +31,12 @@ describe('splitRedisArgs（移植 ARDM splitargs 语义）', () => {
     expect(splitRedisArgs('SET k "\\xzz"')).toEqual(['SET', 'k', 'xzz']);
   });
 
+  it('字面量与 \\xHH 混合的 token：字节按序保留', () => {
+    const r = splitRedisArgs('SET k "abc\\xFFdef"');
+    expect(Buffer.isBuffer(r[2])).toBe(true);
+    expect(r[2] as Buffer).toEqual(Buffer.from([0x61, 0x62, 0x63, 0xff, 0x64, 0x65, 0x66]));
+  });
+
   it('\\xHH 单字节按原始字节（>=0x80 不再被 UTF-8 重编码为 C3 A4）', () => {
     const [, , v] = splitRedisArgs('SET k "\\xE4"');
     expect(Buffer.isBuffer(v)).toBe(true);

@@ -66,7 +66,7 @@ export function splitRedisArgs(line: string): (string | Buffer)[] {
             case 'r': pushChar('\r'); break;
             case 't': pushChar('\t'); break;
             case 'b': pushChar('\b'); break;
-            case 'a': pushByte(0x07); break;
+            case 'a': pushChar('\u0007'); break;
             case 'x': {
               const hex = line.substr(pos + 1, 2);
               if (HEX_RE.test(hex)) {
