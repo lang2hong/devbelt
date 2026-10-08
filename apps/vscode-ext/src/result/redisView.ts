@@ -53,11 +53,11 @@ function redisPanelTitle(panel: RedisPanel, conn: SavedConnection, db?: number):
       const values = l10n('redis.panel.values');
       return db === undefined ? `${base} · ${values}` : `${base} · ${values} · db${db}`;
     }
-    case 'serverStatus': return `${base} · Status`;
-    case 'monitor': return `${base} · Monitor`;
-    case 'console': return `${base} · Console`;
-    case 'slowlog': return `${base} · Slow Log`;
-    case 'commandLog': return `${base} · Command Log`;
+    case 'serverStatus': return `${base} · ${l10n('redis.panel.status')}`;
+    case 'monitor': return `${base} · ${l10n('redis.panel.monitor')}`;
+    case 'console': return `${base} · ${l10n('redis.panel.console')}`;
+    case 'slowlog': return `${base} · ${l10n('redis.panel.slowlog')}`;
+    case 'commandLog': return `${base} · ${l10n('redis.panel.commandLog')}`;
   }
 }
 
@@ -656,6 +656,11 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
     const name = String(parts[0]).toUpperCase();
     const args = parts.slice(1);
     if (isDangerousCommand(name, args)) {
+      // 只有单个确认槽：已有待确认命令时不再覆盖（覆盖会让第一条的确认结果丢失）。
+      if (this.pendingConfirm) {
+        this.post({ type: 'commandResult', id, command: line, ok: false, result: '', costMs: 0, error: l10n('cmd.redis.confirmPending') });
+        return;
+      }
       // 记录确认时的目标 db：确认期间若切换了 db，破坏性命令不能落到新的库。
       this.pendingConfirm = { id, line, name, args, db: this.targetDb() };
       this.post({ type: 'confirmRequired', id, command: line });

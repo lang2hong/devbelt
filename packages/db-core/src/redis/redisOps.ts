@@ -165,9 +165,16 @@ export function isBufferSource(src: RedisCommandSource): src is RedisCommandSour
   return typeof (src as Partial<RedisBufferSource>).sendCommandBuffer === 'function';
 }
 
-/** 判断字节是否为合法 UTF-8（用于 webview 决定是否提示二进制）。 */
+const utf8StrictDecoder = new TextDecoder('utf-8', { fatal: true });
+
+/** 判断字节是否为合法 UTF-8（用于 webview 决定是否提示二进制）。单次解码，无中间 Buffer。 */
 export function isValidUtf8(buf: Buffer): boolean {
-  return Buffer.from(buf.toString('utf8'), 'utf8').equals(buf);
+  try {
+    utf8StrictDecoder.decode(buf);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function redisStrlen(src: RedisCommandSource, key: string): Promise<number> {

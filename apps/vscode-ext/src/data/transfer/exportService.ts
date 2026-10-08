@@ -185,11 +185,16 @@ export async function writeTableExport(
   const pkColumns = columnMeta.filter((c) => c.isPrimary).map((c) => c.name);
   const keysetColumns = pkColumns.length > 0 && pkColumns.every((c) => columns.includes(c)) ? pkColumns : [];
   const selectCols = columns.map((c) => dialect.wrap(c)).join(', ') || '*';
+  // 无主键时 keyset 退化为 OFFSET 分页，若不加 ORDER BY，数据库可返回任意行序——导出会
+  // 静默丢行/重行。加全列排序得到稳定顺序（有主键时 keyset 已保证）。
+  const stableOrder = keysetColumns.length === 0 && columns.length > 0
+    ? ` ORDER BY ${columns.map((c) => dialect.wrap(c)).join(', ')}`
+    : '';
 
   const forEachPage = async (onRows: (rows: Record<string, unknown>[]) => void | Promise<void>): Promise<void> => {
     let seen = 0;
     for await (const rows of streamRowsByKeyset(
-      source.query, dialect, `SELECT ${selectCols} FROM ${qualified}`, keysetColumns, pageSize,
+      source.query, dialect, `SELECT ${selectCols} FROM ${qualified}${stableOrder}`, keysetColumns, pageSize,
       { isCancelled, cancelError: () => new TransferCancelledError() },
     )) {
       await onRows(rows);

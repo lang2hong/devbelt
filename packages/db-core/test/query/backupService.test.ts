@@ -110,6 +110,15 @@ describe('BackupService', () => {
     expect(dump).not.toContain('INSERT INTO `shop`.`users`');
   });
 
+  it('A1：无主键表 dump 的 OFFSET 分页带 ORDER BY（行序稳定）', async () => {
+    const conn = new FakeConnection();
+    conn.setResponses([{ rows: [{ id: 1, name: 'a' }] }]);
+    const query = makeQueryService(conn, new MysqlDialect());
+    await BackupService.databaseDump(query, makeMetadataService(), makeTableService(), 'test', { includeData: true });
+    const select = conn.executed.find((s) => /SELECT \* FROM/i.test(s));
+    expect(select).toMatch(/ORDER BY `id`, `name`/);
+  });
+
   it('dump 头的库名无法逃出注释（换行 / 块注释结束符被中和）', async () => {
     const conn = new FakeConnection();
     conn.setResponses([{ rows: [] }]);

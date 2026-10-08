@@ -73,9 +73,13 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     ConnectionForm.open(store, () => {
       // 无条件关闭：disposeConn/markClosed 对未打开连接是安全 no-op；仅判 peek(id) 会漏掉
       // 「主会话已被淘汰、仅剩派生库/schema 会话」的情况，那正是持有失效隧道的情形（H6）。
+      const open = manager.peek(id);
+      const hadTx = open?.kind === 'sql' && open.query.inTransaction;
       manager.disposeConn(id);
       treeProvider.markClosed(id);
       treeProvider.refresh();
+      // 关闭会回滚未提交事务：明确告知，避免用户以为改动不影响正在进行的编辑。
+      if (hadTx) vscode.window.showWarningMessage(l10n('conn.editClosedTx'));
     }, undefined, node.conn, (c) => manager.effectiveConnection(c));
   });
 

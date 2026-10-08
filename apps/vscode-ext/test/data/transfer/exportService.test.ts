@@ -263,6 +263,26 @@ describe('txt 导出（制表符分隔）', () => {
   });
 });
 
+it('A1：无主键导出的 OFFSET 分页带 ORDER BY（行序稳定）', async () => {
+    const executed: string[] = [];
+    const source = {
+      query: {
+        dialect: {
+          dbType: 'MYSQL' as const,
+          wrap: (n: string) => `\`${n}\``,
+          getPagedSql: (sql: string, offset: number, limit: number) => `${sql} LIMIT ${limit} OFFSET ${offset}`,
+          getKeysetSql: (sql: string) => sql,
+        },
+        query: async (sql: string) => { executed.push(sql); return { rows: [] }; },
+      },
+      metadata: { getColumns: async () => [{ name: 'id', isPrimary: false }, { name: 'name', isPrimary: false }] },
+      table: { getCreateSql: async () => 'CREATE TABLE `t` (`id` int)' },
+    } as never;
+    const { writeTableExport } = await import('../../../src/data/transfer/exportService');
+    await writeTableExport({ source, format: 'csv', table: 't', database: 'd', pageSize: 1 }, () => {});
+    expect(executed[0]).toMatch(/ORDER BY `id`, `name`/);
+  });
+
 describe('writeTableExport keyset 走真实方言（不 mock getKeysetSql）', () => {
   it('有主键时生成展开式标量比较 SQL（兼容 MySQL 复合主键）', async () => {
     const { MysqlDialect } = await import('@devbelt/db-core');

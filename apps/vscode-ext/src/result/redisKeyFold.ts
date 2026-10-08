@@ -72,7 +72,10 @@ export function groupRedisKeyChildren(
     if (base && !k.startsWith(base)) continue;
     const rel = base ? k.slice(base.length) : k;
     const idx = separator ? rel.indexOf(separator) : -1;
-    if (idx > 0) {
+    // 仅当分隔符**后还有内容**才算折叠成文件夹；`a:` 这类「以分隔符结尾」的键应作为叶子
+    // 显示，否则它既不做文件夹（子层为空）也不会成为叶子，直接消失。
+    const isFolder = idx > 0 && idx < rel.length - separator.length;
+    if (isFolder) {
       const name = rel.slice(0, idx);
       if (!folderMap.has(name)) folderMap.set(name, `${base}${name}`);
     } else if (rel) {

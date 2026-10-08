@@ -124,10 +124,14 @@ export class BackupService {
         const colList = columns.map((c) => query.dialect.wrap(c)).join(', ');
         // 有主键 → keyset 深分页（不随页数线性变慢）；无主键回退 OFFSET。
         const pkColumns = columnMeta.filter((c) => c.isPrimary).map((c) => c.name);
+        // 无主键时 keyset 退化为 OFFSET 分页；不加 ORDER BY 行序不定，dump 会静默丢行/重行。
+        const stableOrder = pkColumns.length === 0 && columns.length > 0
+          ? ` ORDER BY ${columns.map((c) => query.dialect.wrap(c)).join(', ')}`
+          : '';
 
         let hasData = false;
         for await (const rows of streamRowsByKeyset(
-          query, query.dialect, `SELECT * FROM ${readQualified}`, pkColumns, pageSize,
+          query, query.dialect, `SELECT * FROM ${readQualified}${stableOrder}`, pkColumns, pageSize,
           { isCancelled, cancelError: () => new Error('Backup cancelled.') },
         )) {
           if (!hasData && rows.length > 0) {

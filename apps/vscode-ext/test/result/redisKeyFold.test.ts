@@ -83,6 +83,12 @@ describe('groupRedisKeyChildren（S5-3 树懒加载分组）', () => {
     expect(g.keys).toEqual(['a:x']);
   });
 
+  it('A5：以分隔符结尾的键作为叶子（不再消失）', () => {
+    const g = groupRedisKeyChildren(['a:', 'a:b', 'plain']);
+    expect(g.folders.map((f) => f.name)).toEqual(['a']);
+    expect(g.keys).toEqual(['a:', 'plain']);
+  });
+
   it('排序稳定；空输入为空', () => {
     const g = groupRedisKeyChildren(['z:1', 'a:2', 'm']);
     expect(g.folders.map((f) => f.name)).toEqual(['a', 'z']);

@@ -323,7 +323,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const conn = element.conn;
     const session = await this.manager.connectSql(conn);
     if (!session.capabilities.multiDatabaseExplorer) {
-      const only = conn.database || (conn.dbType === DatabaseType.PG ? 'public' : 'main');
+      // 'public' 是 schema 名而非库名；单库引擎缺省用 SQLite 的 'main'。
+      const only = conn.database || 'main';
       const n = new DbTreeNode(only, TreeItemCollapsibleState.Collapsed, NodeKind.Database, conn, undefined, element, undefined, only);
       n.id = `${conn.id}:sqldb:${only}`;
       return [n];
@@ -333,12 +334,14 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     let dbs: string[] = [];
     try {
       dbs = await session.metadata.getDatabases();
-    } catch {
+    } catch (error) {
+      // 不再静默吞掉：记录诊断，便于排查「只显示一个库」的根因。
+      diagError('enumerate databases failed', (error as Error).message);
       dbs = [];
     }
     if (!dbs.length) {
-      const only = conn.database
-        || (conn.dbType === DatabaseType.PG ? await this.currentDatabaseOf(session) : 'main');
+      const pgDb = conn.dbType === DatabaseType.PG ? await this.currentDatabaseOf(session) : '';
+      const only = conn.database || pgDb || 'main';
       const n = new DbTreeNode(only, TreeItemCollapsibleState.Collapsed, NodeKind.Database, conn, undefined, element, undefined, only);
       n.id = `${conn.id}:sqldb:${only}`;
       return [n];
@@ -358,7 +361,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       const db = r.rows?.[0]?.db;
       if (db) return String(db);
     } catch { /* fall through */ }
-    return 'public';
+    return '';
   }
 
   /** 数据库节点子节点：PG 先出 schema 层；其余按方言能力过滤分类（表/视图始终显示）。 */
@@ -694,6 +697,8 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     }
     // 代际已变（搜索/关闭）：不把本次结果标为已扫，交由新一轮处理。
     if (this.redisGenOf(conn.id, dbIndex) !== gen) return { scanned: count(), done: false, capped: false };
+    // 扫完则清除上次的失败标记（否则残留哨兵会让该库一直显示「未扫完」）。
+    if (done) this.redisScanError.delete(stateKey);
     this.redisScanned.add(stateKey);
     return { scanned: count(), done, capped };
   }
@@ -972,7 +977,12 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
           db,
         );
         node.schema = schema;
-        node.id = `${element.id}:fk:${f.constraintName ?? `${f.columnName}>${f.refTable}.${f.refColumn}`}`;
+        // 复合外键每个列各一行、约束名相同：id 必须带 columnName，否则树节点 id 重复
+        // （VS Code 报 "already registered" 并丢节点）。
+        const fkKey = f.constraintName
+          ? `${f.constraintName}:${f.columnName}`
+          : `${f.columnName}>${f.refTable}.${f.refColumn}`;
+        node.id = `${element.id}:fk:${fkKey}`;
         node.refTable = f.refTable;
         node.refColumn = f.refColumn;
         node.refSchema = f.refSchema;

@@ -116,8 +116,8 @@ export class SqliteConnection extends IConnection {
    */
   beginTransaction(callback: (err: any) => void): void {
     callback(new Error(
-      'SQLite does not support multi-statement transactions through the CLI driver: '
-      + 'each query runs in its own process. Send the whole batch as a single '
+      'SQLite does not support multi-statement transactions through the CLI driver '
+      + '(one statement is sent per query call). Send the whole batch as a single '
       + '"BEGIN; ...; COMMIT;" statement instead.',
     ));
   }

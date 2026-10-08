@@ -175,7 +175,8 @@ function submitRename(): void {
 }
 function submitTtl(): void {
   const seconds = Number(ttlValue.value);
-  if (Number.isFinite(seconds) && seconds >= 0) emit('setTtl', key.value, seconds);
+  // 与 host 校验一致：TTL 必须是正整数秒（0/负数无效）。
+  if (Number.isInteger(seconds) && seconds > 0) emit('setTtl', key.value, seconds);
   ttlOpen.value = false;
 }
 

@@ -114,7 +114,8 @@ export class BackupScheduler {
       const uri = vscode.Uri.joinPath(vscode.Uri.file(entry.outputDir), fileName);
       // 流式写盘：dump 不再整份驻留内存；先写 .tmp 再原子改名，中途失败不留半截 dump。
       const tmpPath = `${uri.fsPath}.tmp`;
-      const stream = createWriteStream(tmpPath, { encoding: 'utf8' });
+      // 备份可能含敏感数据：.tmp 以 0600 创建（改名后权限保留）。
+      const stream = createWriteStream(tmpPath, { encoding: 'utf8', mode: 0o600 });
       const streamError = new Promise<never>((_, reject) => stream.once('error', reject));
       const write = async (chunk: string): Promise<void> => {
         if (!stream.write(chunk)) await once(stream, 'drain');

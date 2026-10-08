@@ -207,6 +207,11 @@ export class RedisClient {
       connectTimeout: options.connectTimeout ?? 30_000,
       family: 0,
       retryStrategy,
+      // 断连期间不排队 + 每命令最多重试 1 次：standalone/sentinel 过去用默认
+      // enableOfflineQueue=true，离线期间命令无限堆积占用内存。有界失败由整体
+      // commandTimeout 兜底（cluster 另有顶层开关，见下）。
+      enableOfflineQueue: false,
+      maxRetriesPerRequest: 1,
     };
     this.isCluster = !!options.cluster?.nodes?.length;
     this.sentinel = !this.isCluster && !!options.sentinels?.length;
@@ -219,8 +224,13 @@ export class RedisClient {
       // 与 `enableOfflineQueue: true`，再用 defaults（只填 undefined）合并 redisOptions ——
       // 所以放在 `redisOptions` 里的 retryStrategy/enableOfflineQueue 一律无效（H1）。
       // 正确旋钮：节点级重试用顶层 `clusterNodeRetryStrategy`；离线队列用顶层 `enableOfflineQueue`。
-      const { retryStrategy: nodeRetryStrategyForStandalone, ...clusterRedisOptions } = common;
+      const {
+        retryStrategy: nodeRetryStrategyForStandalone,
+        enableOfflineQueue: nodeOfflineQueueForStandalone,
+        ...clusterRedisOptions
+      } = common;
       void nodeRetryStrategyForStandalone;
+      void nodeOfflineQueueForStandalone;
       this.client = new Cluster(options.cluster!.nodes, {
         natMap: options.cluster!.natMap,
         slotsRefreshTimeout: options.cluster!.slotsRefreshTimeout ?? 2000,
