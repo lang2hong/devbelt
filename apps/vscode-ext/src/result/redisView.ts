@@ -88,6 +88,10 @@ export class RedisView extends BaseWebView {
   private initialKey?: string;
   /** 最近一次查看的键（树侧写操作后据此刷新值）。 */
   private lastKey?: string;
+  /** webview 已挂载（收到第二次 ready）：此前不 post value，避免 reload 竞态丢消息。 */
+  private webviewReady = false;
+  /** ready 前要推送的 value 消息（单槽，保留最新）。 */
+  private pendingValueMsg: unknown | null = null;
   /** H5：当前键名解码含替换符（非 UTF-8）→ 只读。 */
   private keyBinary = false;
   /** H5：当前值里解码含替换符的字段/成员/元素 → 这些项只读（防有损回写）。 */
@@ -148,8 +152,11 @@ export class RedisView extends BaseWebView {
         this.post({ type: 'init', mode: 'redis' });
         return;
       }
+      this.webviewReady = true;
       this.postConfig();
       await this.onReady();
+      // 补发 ready 前缓存的 value（reload 时值消息可能早于 handler 挂载）。
+      if (this.pendingValueMsg) { const p = this.pendingValueMsg; this.pendingValueMsg = null; this.post(p as never); }
       return;
     }
     if (msg.type === 'refreshInfo') { await this.pushInfo(); return; }
@@ -487,7 +494,10 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
       const tooLarge = size !== null && size > LARGE_KEY_BYTES;
       const data = tooLarge ? null : await this.loadValue(c, key, keyType);
       this.recordBinary(key, data);
-      this.post({ type: 'value', key, keyType, ttl, tooLarge, size, data, keyBinary: this.keyBinary, binaryFields: [...this.binaryTokens] });
+      const valueMsg = { type: 'value', key, keyType, ttl, tooLarge, size, data, keyBinary: this.keyBinary, binaryFields: [...this.binaryTokens] };
+      // webview 未挂载时缓存（否则 post 丢失，reload 后看不到值）。
+      if (!this.webviewReady) this.pendingValueMsg = valueMsg;
+      else this.post(valueMsg as never);
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });
     }
@@ -608,6 +618,10 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
   private async saveStringBytes(msg: any): Promise<void> {
     const key = String(msg.key ?? '');
     const base64 = String(msg.base64 ?? '');
+    // 校验 base64：旧版 webview 可能发来非法串，Buffer.from(...,'base64') 会**静默损坏字节**。
+    if (base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) {
+      throw new Error('invalid base64 payload');
+    }
     await this.edit('SET', key, async (c) => {
       if (!isBufferSource(c)) throw new Error('binary write unsupported by this connection');
       await redisSetBuffer(c, key, Buffer.from(base64, 'base64'));
@@ -950,8 +964,8 @@ function isCliBlocked(name: string, args: readonly string[]): boolean {
   }
   // XREAD/XREADGROUP 带 BLOCK 会阻塞共享连接。
   if ((c === 'XREAD' || c === 'XREADGROUP') && upper.includes('BLOCK')) return true;
-  // DEBUG 任一子命令都会改变服务端状态或阻塞/崩溃（SEGFAULT/SLEEP/…），共享连接上一律硬阻断。
-  if (c === 'DEBUG') return true;
+  // DEBUG 仅硬阻断会崩溃/阻塞/改状态的子命令；DEBUG OBJECT 等只读子命令放行。
+  if (c === 'DEBUG' && ['SEGFAULT', 'PANIC', 'OOM', 'SLEEP', 'CRASH-AND-RECOVER', 'JMAP'].includes(upper[0] ?? '')) return true;
   return false;
 }
 

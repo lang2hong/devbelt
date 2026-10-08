@@ -306,6 +306,10 @@ const ADMIN_WRITE_COMMANDS: ReadonlySet<string> = new Set([
   'SLAVEOF',
   'SAVE',
   'MONITOR',
+  // 复制/握手类：非只读，且会改变连接/服务端状态。
+  'SYNC',
+  'PSYNC',
+  'REPLCONF',
 ]);
 
 /** 该命令是否为 admin 写命令（DevBelt 相对 ARDM 的加强）。 */
@@ -373,10 +377,8 @@ const DANGEROUS_COMMANDS: ReadonlySet<string> = new Set([
   'FLUSHALL', 'FLUSHDB', 'SHUTDOWN',
   // 持久化/复制/阻塞服务端
   'SAVE', 'BGSAVE', 'BGREWRITEAOF', 'SYNC', 'PSYNC', 'FAILOVER', 'REPLICAOF', 'SLAVEOF', 'MONITOR',
-  // 可执行任意逻辑/落盘数据
-  'EVAL', 'EVALSHA', 'MIGRATE', 'SWAPDB', 'RESTORE',
-  // DEBUG SEGFAULT 会当场崩掉服务端；DEBUG * 一律确认
-  'DEBUG',
+  // 可执行任意逻辑 / 迁移 / 换库
+  'EVAL', 'EVALSHA', 'MIGRATE', 'SWAPDB',
 ]);
 
 /** 危险子命令（父命令 + 首参命中即危险）。 */
@@ -387,6 +389,8 @@ const DANGEROUS_SUBCOMMANDS: Record<string, readonly string[]> = {
   CLIENT: ['KILL', 'PAUSE', 'UNPAUSE', 'NO-EVICT', 'NO-TOUCH'],
   ACL: ['SETUSER', 'DELUSER', 'LOAD', 'SAVE'],
   MODULE: ['LOAD', 'UNLOAD'],
+  // DEBUG 只确认真正破坏/阻塞/崩溃的子命令（DEBUG OBJECT 等只读子命令不弹确认）。
+  DEBUG: ['SEGFAULT', 'PANIC', 'OOM', 'SLEEP', 'CRASH-AND-RECOVER', 'QUICKLIST-PACKED-THRESHOLD', 'SET-ACTIVE-EXPIRE', 'JMAP'],
 };
 
 /**

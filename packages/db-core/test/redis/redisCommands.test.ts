@@ -78,12 +78,17 @@ describe('Redis 命令表分类（移植 ARDM v1.1.1 + DevBelt 加强）', () =>
 
   it('H4：危险命令扩展覆盖（停机/复制/脚本/调试/迁移等）', () => {
     for (const c of [
-      'DEBUG', 'SAVE', 'BGSAVE', 'BGREWRITEAOF', 'SYNC', 'PSYNC',
+      'SAVE', 'BGSAVE', 'BGREWRITEAOF', 'SYNC', 'PSYNC',
       'EVAL', 'EVALSHA', 'FAILOVER', 'REPLICAOF', 'SLAVEOF', 'MONITOR',
-      'MIGRATE', 'SWAPDB', 'RESTORE',
+      'MIGRATE', 'SWAPDB',
     ]) {
       expect(isDangerousCommand(c), c).toBe(true);
     }
+    // DEBUG 只确认破坏/阻塞子命令；RESTORE 是正常数据恢复，不弹确认。
+    expect(isDangerousCommand('DEBUG', ['SEGFAULT'])).toBe(true);
+    expect(isDangerousCommand('DEBUG', ['SLEEP', '1'])).toBe(true);
+    expect(isDangerousCommand('DEBUG', ['OBJECT', 'k'])).toBe(false);
+    expect(isDangerousCommand('RESTORE', ['k', '0', 'x'])).toBe(false);
     expect(isDangerousCommand('SCRIPT', ['KILL'])).toBe(true);
     expect(isDangerousCommand('SCRIPT', ['FLUSH'])).toBe(true);
     expect(isDangerousCommand('SCRIPT', ['EXISTS', 'a'])).toBe(false);
@@ -94,6 +99,10 @@ describe('Redis 命令表分类（移植 ARDM v1.1.1 + DevBelt 加强）', () =>
     expect(isDangerousCommand('MODULE', ['LOAD', 'x'])).toBe(true);
     // CLIENT PAUSE 属写命令
     expect(isWriteCommand('CLIENT', ['PAUSE', '100'])).toBe(true);
+    // 复制/握手类归写（此前 isReadCommand 也 false，属分类缺口）
+    expect(isWriteCommand('SYNC')).toBe(true);
+    expect(isWriteCommand('PSYNC')).toBe(true);
+    expect(isWriteCommand('REPLCONF')).toBe(true);
   });
 
   it('补全候选按前缀过滤、大小写不敏感', () => {

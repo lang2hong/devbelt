@@ -21,6 +21,23 @@ import {
   maxConcurrentConnections,
 } from '@devbelt/db-host/sync/entitlementGate';
 
+/**
+ * 影响已建会话/SSH 隧道的连接字段（不含 name/group 及密钥类字段——后者比不出可靠差异）。
+ * 仅当这些字段变化才需要关闭会话强制按新配置重连（H6）。
+ */
+const CONNECTION_TARGET_FIELDS: readonly (keyof SavedConnection)[] = [
+  'dbType', 'host', 'port', 'user', 'database', 'schema', 'timezone', 'socketPath', 'dbPath',
+  'sqliteCommand', 'useConnectionString', 'connectionUrl', 'useSSL', 'rejectUnauthorized',
+  'caPath', 'clientCertPath', 'clientKeyPath',
+  'sshHost', 'sshPort', 'sshUser', 'sshPrivateKeyPath',
+  'redisDb', 'keySeparator', 'redisMode', 'sentinelName', 'clusterNodes', 'sentinelNodes',
+  'readOnly', 'environment', 'connectTimeout', 'requestTimeout',
+];
+
+function connectionTargetChanged(a: SavedConnection, b: SavedConnection): boolean {
+  return CONNECTION_TARGET_FIELDS.some((k) => a[k] !== b[k]);
+}
+
 async function redisServerVersion(session: RedisConnectionSession): Promise<string> {
   try {
     const info = await session.client.info('server');
@@ -70,16 +87,20 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     // 编辑后连接配置可能变化（含 SSH 目标/认证）。已打开的会话与共享 SSH 隧道是按旧配置
     // 建立的：主会话重连会 closeTunnel，导致同连接的派生库/schema 会话静默持有失效隧道（H6）。
     // 统一在保存后关闭该连接的全部会话，下次使用按新配置重建。
+    const before = node.conn;
     ConnectionForm.open(store, () => {
-      // 无条件关闭：disposeConn/markClosed 对未打开连接是安全 no-op；仅判 peek(id) 会漏掉
-      // 「主会话已被淘汰、仅剩派生库/schema 会话」的情况，那正是持有失效隧道的情形（H6）。
-      const open = manager.peek(id);
-      const hadTx = open?.kind === 'sql' && open.query.inTransaction;
-      manager.disposeConn(id);
-      treeProvider.markClosed(id);
+      // 仅当影响会话/SSH 的字段变化才关闭（改名/分组不该踢掉会话）；关闭覆盖派生会话，
+      // 避免其持有按旧配置建立的失效隧道（H6）。
+      const after = store.get(id);
+      if (after && connectionTargetChanged(before!, after)) {
+        const open = manager.peek(id);
+        const hadTx = open?.kind === 'sql' && open.query.inTransaction;
+        manager.disposeConn(id);
+        treeProvider.markClosed(id);
+        // 关闭会回滚未提交事务：明确告知。
+        if (hadTx) vscode.window.showWarningMessage(l10n('conn.editClosedTx'));
+      }
       treeProvider.refresh();
-      // 关闭会回滚未提交事务：明确告知，避免用户以为改动不影响正在进行的编辑。
-      if (hadTx) vscode.window.showWarningMessage(l10n('conn.editClosedTx'));
     }, undefined, node.conn, (c) => manager.effectiveConnection(c));
   });
 

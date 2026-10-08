@@ -128,6 +128,15 @@ const REDACT_FROM_INDEX: Record<string, number> = {
   XADD: 2, // key id field value ... → 从 field 起脱敏
 };
 
+/**
+ * 参数全部是 key（无值）的写命令：兜底时不脱敏，保留审计可读性
+ * （如 `DEL k1 k2` 应看到两个 key，而不是 `k1 <redacted>`）。
+ */
+const KEY_ONLY_COMMANDS: ReadonlySet<string> = new Set([
+  'DEL', 'UNLINK', 'EXPIRE', 'PEXPIRE', 'EXPIREAT', 'PEXPIREAT', 'PERSIST', 'TOUCH',
+  'RENAME', 'RENAMENX', 'MOVE', 'COPY', 'SELECT', 'INCR', 'DECR', 'GETDEL', 'GETEX',
+]);
+
 /** 单条日志参数最大长度：防大 value / keyspace dump 灌爆日志（P7 §十）。 */
 const MAX_LOGGED_ARG_LEN = 128;
 
@@ -159,7 +168,7 @@ export function redactCommandArgs(command: string, args: readonly string[]): str
   // 兜底：任何**非已知只读**的命令（含未收录的模块命令如 JSON.SET/FT.CREATE）一律
 // 只保留首个（key）参数，其余脱敏——isReadCommand 是 fail-closed allowlist，
 // 未知命令必落此分支；宁可少记也不把值写进日志/审计（P7 §十）。
-  if (!isReadCommand(cmd, args)) {
+  if (!isReadCommand(cmd, args) && !KEY_ONLY_COMMANDS.has(cmd)) {
     return args.map((a, i) => (i >= 1 ? REDACTED : truncateArg(String(a))));
   }
   return args.map(truncateArg);
@@ -207,11 +216,6 @@ export class RedisClient {
       connectTimeout: options.connectTimeout ?? 30_000,
       family: 0,
       retryStrategy,
-      // 断连期间不排队 + 每命令最多重试 1 次：standalone/sentinel 过去用默认
-      // enableOfflineQueue=true，离线期间命令无限堆积占用内存。有界失败由整体
-      // commandTimeout 兜底（cluster 另有顶层开关，见下）。
-      enableOfflineQueue: false,
-      maxRetriesPerRequest: 1,
     };
     this.isCluster = !!options.cluster?.nodes?.length;
     this.sentinel = !this.isCluster && !!options.sentinels?.length;
@@ -224,13 +228,8 @@ export class RedisClient {
       // 与 `enableOfflineQueue: true`，再用 defaults（只填 undefined）合并 redisOptions ——
       // 所以放在 `redisOptions` 里的 retryStrategy/enableOfflineQueue 一律无效（H1）。
       // 正确旋钮：节点级重试用顶层 `clusterNodeRetryStrategy`；离线队列用顶层 `enableOfflineQueue`。
-      const {
-        retryStrategy: nodeRetryStrategyForStandalone,
-        enableOfflineQueue: nodeOfflineQueueForStandalone,
-        ...clusterRedisOptions
-      } = common;
+      const { retryStrategy: nodeRetryStrategyForStandalone, ...clusterRedisOptions } = common;
       void nodeRetryStrategyForStandalone;
-      void nodeOfflineQueueForStandalone;
       this.client = new Cluster(options.cluster!.nodes, {
         natMap: options.cluster!.natMap,
         slotsRefreshTimeout: options.cluster!.slotsRefreshTimeout ?? 2000,

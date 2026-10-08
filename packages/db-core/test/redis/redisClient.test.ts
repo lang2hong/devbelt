@@ -336,8 +336,9 @@ describe('RedisClient 命令日志与脱敏', () => {
     expect(redactCommandArgs('APPEND', ['buf', 'secret'])).toEqual(['buf', '<redacted>']);
     expect(redactCommandArgs('HSET', ['h', 'field', 'val'])).toEqual(['h', '<redacted>', '<redacted>']);
     expect(redactCommandArgs('XADD', ['st', '*', 'f', 'v'])).toEqual(['st', '*', '<redacted>', '<redacted>']);
-    // 未逐一列举的写命令：保留 key，其余脱敏。
-    expect(redactCommandArgs('DEL', ['k1', 'k2'])).toEqual(['k1', '<redacted>']);
+    // 纯 key 写命令（DEL/EXPIRE…）不脱敏，保留审计可读性。
+    expect(redactCommandArgs('DEL', ['k1', 'k2'])).toEqual(['k1', 'k2']);
+    expect(redactCommandArgs('UNLINK', ['k1', 'k2'])).toEqual(['k1', 'k2']);
     // 未收录的模块命令（非已知只读）一律按写处理，值不进日志。
     expect(redactCommandArgs('JSON.SET', ['k', '$', 's3cr3t'])).toEqual(['k', '<redacted>', '<redacted>']);
     expect(redactCommandArgs('FT.CREATE', ['idx', 'ON', 'HASH'])).toEqual(['idx', '<redacted>', '<redacted>']);
