@@ -104,7 +104,7 @@ onUnmounted(() => { __offMsg?.(); });
 .action.schema_change { background: #f28e2b20; color: #f28e2b; }
 .action.data_edit, .action.data_delete, .action.data_insert { background: #e1575920; color: #e15759; }
 .action.connection_open, .action.connection_close { background: #59a14f20; color: #59a14f; }
-.action.import_data, .action.export_data { background: #b07aa120; color: #b07aa1; }
+.action.import_data, .action.restore_data, .action.export_data { background: #b07aa120; color: #b07aa1; }
 .conn { color: var(--vscode-foreground); }
 .meta { color: var(--vscode-descriptionForeground); font-size: 11px; }
 .empty { color: var(--vscode-descriptionForeground); padding: 16px; text-align: center; }

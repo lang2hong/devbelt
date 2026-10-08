@@ -72,13 +72,13 @@ describe('AuditLogger', () => {
     expect(AuditLogger.tryGet()).toBe(logger);
   });
 
-  /** 11 种动作全部可写入（曾只有 query_execute 有写入点）。 */
-  it('11 种 AuditAction 都能记录', () => {
+  /** 各类动作可写入（曾只有 query_execute 有写入点）。 */
+  it('AuditAction 都能记录', () => {
     const logger = AuditLogger.init(memento());
     const actions: AuditAction[] = [
       'query_execute', 'query_explain', 'data_edit', 'data_delete', 'data_insert',
       'schema_change', 'connection_open', 'connection_close', 'user_manage',
-      'import_data', 'export_data',
+      'import_data', 'restore_data', 'export_data',
     ];
     for (const action of actions) logger.log({ action, connName: 'a' });
 
