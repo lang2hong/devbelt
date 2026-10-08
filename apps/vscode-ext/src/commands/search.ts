@@ -97,7 +97,7 @@ async function searchObjects(deps: Deps, connIds: string[], keyword: string): Pr
       } else if (session.capabilities.multiDatabaseExplorer) {
         scopes = (await session.metadata.getDatabases()).map((db) => ({ database: db }));
       } else {
-        // 单库：用连接配置的库名；仅 SQLite 缺省为 'main'（'public' 是 schema 名而非库名）。
+        // 单库引擎：用连接配置的库名；缺失时退化为 'main'（SQLite 的无库名默认）。
         scopes = [{ database: conn.database || 'main' }];
       }
 

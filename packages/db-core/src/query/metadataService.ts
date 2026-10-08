@@ -62,8 +62,8 @@ export class MetadataService {
   }
 
   /** 查询函数/存储过程定义 */
-  async getRoutineDefinition(name: string, routineType: string, database?: string, schema?: string): Promise<string> {
-    const sql = this.queryService.dialect.getRoutineDefinitionSql(name, routineType, database, schema);
+  async getRoutineDefinition(name: string, routineType: string, database?: string, schema?: string, identityArgs?: string): Promise<string> {
+    const sql = this.queryService.dialect.getRoutineDefinitionSql(name, routineType, database, schema, identityArgs);
     if (!sql) return '';
     const result = await this.queryService.queryAll(sql);
     const row = result.rows[0];

@@ -140,12 +140,16 @@ export class PostgreSqlDialect implements SqlDialect {
     return '';
   }
 
-  getRoutineDefinitionSql(name: string, _routineType: string, _database?: string, schema?: string): string {
+  getRoutineDefinitionSql(name: string, _routineType: string, _database?: string, schema?: string, identityArgs?: string): string {
     validateIdent(name, 63);
+    // 重载函数同名：按 identity args 精确定位到某一个 oid，避免只取到第一个重载。
+    const argsFilter = identityArgs !== undefined
+      ? ` AND pg_get_function_identity_arguments(p.oid) = '${identityArgs.replace(/'/g, "''")}'`
+      : '';
     return `SELECT pg_get_functiondef(p.oid) AS definition
       FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
-      WHERE p.proname = '${name}' AND n.nspname = ${this.schemaExpr(schema)}`;
+      WHERE p.proname = '${name}' AND n.nspname = ${this.schemaExpr(schema)}${argsFilter}`;
   }
 
   getEventDefinitionSql(): string {

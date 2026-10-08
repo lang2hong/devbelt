@@ -11,6 +11,8 @@ class FakeConnection extends IConnection {
   public result: any = { rows: [{ id: 1 }] };
   public fields: any[] = [{ name: 'id' }];
   public error: Error | null = null;
+  /** true 时不回调（模拟挂起），用于超时/取消路径。 */
+  public hang = false;
 
   constructor() {
     super({ host: 'localhost', port: 3306, user: 'root', database: 'test' });
@@ -20,6 +22,7 @@ class FakeConnection extends IConnection {
   query(sql: string, values: any, callback?: QueryCallback): void;
   query(sql: string, values?: any, callback?: any): void {
     this.executed.push(sql);
+    if (this.hang) return;
     const cb = callback || values;
     cb(this.error, this.result, this.fields);
   }
@@ -179,6 +182,27 @@ describe('QueryService 事务状态跟踪（连接池淘汰保护）', () => {
     conn.error = new Error('already in a transaction');
     const svc = new QueryService(conn, new MysqlDialect());
     await expect(svc.query('BEGIN')).rejects.toThrow(/already in a transaction/);
+    expect(svc.inTransaction).toBe(false);
+  });
+
+  it('BEGIN 超时也复位事务状态', async () => {
+    const conn = new FakeConnection();
+    conn.hang = true;
+    // 第 4 个构造参数为会话级超时（ms）。
+    const svc = new QueryService(conn, new MysqlDialect(), undefined, 20);
+    await expect(svc.query('BEGIN')).rejects.toThrow(/timeout/i);
+    expect(svc.inTransaction).toBe(false);
+  });
+
+  it('BEGIN 被取消也复位事务状态', async () => {
+    const conn = new FakeConnection();
+    conn.hang = true;
+    const svc = new QueryService(conn, new MysqlDialect());
+    const p = svc.query('BEGIN');
+    await Promise.resolve();
+    expect(svc.inTransaction).toBe(true);
+    svc.cancel();
+    await expect(p).rejects.toThrow(/cancelled/i);
     expect(svc.inTransaction).toBe(false);
   });
 });

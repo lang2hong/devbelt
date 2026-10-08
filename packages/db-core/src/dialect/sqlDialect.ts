@@ -131,7 +131,7 @@ export interface SqlDialect {
   getEventListSql(database?: string, schema?: string): string;
 
   /** 查询函数/存储过程定义的 SQL */
-  getRoutineDefinitionSql(name: string, routineType: string, database?: string, schema?: string): string;
+  getRoutineDefinitionSql(name: string, routineType: string, database?: string, schema?: string, identityArgs?: string): string;
 
   /** 查询事件定义的 SQL */
   getEventDefinitionSql(name: string, database?: string, schema?: string): string;

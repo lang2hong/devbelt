@@ -774,6 +774,8 @@ export class ConnectionManager {
   private closeEntry(entry: SessionEntry): void {
     this.sessions.delete(entry.key);
     this.sessionEntries.delete(entry.key);
+    // 回收该会话键上的 retain：会话已关，陈旧持有（如视图 dispose 漏 release）不应再阻塞整连接释放。
+    this.retains.delete(entry.key);
     entry.session.close();
   }
 

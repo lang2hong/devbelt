@@ -132,6 +132,8 @@ export class QueryService {
    * 供连接池淘汰判断：**有未结束事务的会话不能被淘汰**（会静默回滚/丢未提交数据）。
    */
   private txActive = false;
+  /** 事务状态版本号：每次事务状态变化自增，用于失败回滚时避免覆盖并发语句的更新。 */
+  private txEpoch = 0;
 
   constructor(
     private readonly connection: IConnection,
@@ -175,6 +177,8 @@ export class QueryService {
     else if (/^(COMMIT|ROLLBACK|END|ABORT)\b/i.test(head)) this.txActive = false;
     else if (/^SET\s+AUTOCOMMIT\s*=\s*0\b/i.test(head)) this.txActive = true;
     else if (/^SET\s+AUTOCOMMIT\s*=\s*1\b/i.test(head)) this.txActive = false;
+    else return;
+    this.txEpoch++;
   }
 
   /**
@@ -218,6 +222,11 @@ export class QueryService {
     const txBefore = this.txActive;
     const opensTx = this.isTxOpeningStatement(sql);
     this.trackTransaction(sql);
+    const txEpochAfter = this.txEpoch;
+    // 失败时复位：仅当此后没有其它语句改过事务状态（epoch 未变），避免并发场景覆盖他人更新。
+    const restoreTx = (): void => {
+      if (opensTx && this.txEpoch === txEpochAfter) this.txActive = txBefore;
+    };
     const start = Date.now();
     const id = this.nextQueryId++;
     return new Promise<QueryResult>((resolve, reject) => {
@@ -236,7 +245,7 @@ export class QueryService {
         settled = true;
         finish();
         // BEGIN 未成功（取消/错误）→ 复位，否则该会话被误判为「事务中」而永不淘汰。
-        if (opensTx) this.txActive = txBefore;
+        restoreTx();
         reject(new QueryError('Query cancelled', sql, Date.now() - start));
       };
       // 单查询取消：仅当这次查询仍在活跃集合中才物理中止，避免陈旧 token 牵连他人。
@@ -257,7 +266,7 @@ export class QueryService {
               settled = true;
               finish();
               this.connection.abortQuery();
-              if (opensTx) this.txActive = txBefore;
+              restoreTx();
               reject(new QueryError(`Query timeout (${timeoutMs}ms)`, sql, Date.now() - start));
             }
           }, timeoutMs)
@@ -273,7 +282,7 @@ export class QueryService {
             options,
           );
           // BEGIN 报错（如已在事务中/连接错误）→ 事务状态复位到执行前，避免会话被永久保护。
-          if (opensTx) this.txActive = txBefore;
+          restoreTx();
           reject(new QueryError(err.message, sql, costTime));
           return;
         }

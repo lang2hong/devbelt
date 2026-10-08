@@ -291,6 +291,7 @@ export class RedisClient {
     return this.withTimeout(
       this.client.sendCommand(cmd as unknown as { name: string; args: (string | number | Buffer)[] }),
       name,
+      args,
     );
   }
 
@@ -326,7 +327,7 @@ export class RedisClient {
           return Promise.reject(new RedisReadOnlyError(name));
         }
         // 节点级 call 也加命令超时（SCAN/INFO 等在大集群/宕机时同样需要有界失败）。
-        return this.withTimeout(n.call(c, ...a), name);
+        return this.withTimeout(n.call(c, ...a), name, a);
       },
     }));
   }
@@ -393,16 +394,16 @@ export class RedisClient {
   }
 
   private run(name: string, args: (string | number)[]): Promise<unknown> {
-    return this.withTimeout(this.client.call(name, ...args), name);
+    return this.withTimeout(this.client.call(name, ...args), name, args);
   }
 
   /** 给命令加超时：连接建立后集群整体宕机时，命令有界失败而不是长时间挂起（D11）。 */
-  private withTimeout<T>(p: Promise<T>, name: string): Promise<T> {
+  private withTimeout<T>(p: Promise<T>, name: string, args?: readonly unknown[]): Promise<T> {
     if (this.commandTimeoutMs <= 0) return p;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       // 破坏性命令超时：服务端可能已执行，必须明确提示「结果未知」，避免用户直接重试造成二次破坏。
-      const suffix = isDangerousCommand(name) ? '（结果未知：破坏性命令可能已在服务端执行）' : '';
+      const suffix = isDangerousCommand(name, args) ? '（结果未知：破坏性命令可能已在服务端执行）' : '';
       timer = setTimeout(
         () => reject(new Error(`redis command timed out after ${this.commandTimeoutMs}ms: ${name}${suffix}`)),
         this.commandTimeoutMs,

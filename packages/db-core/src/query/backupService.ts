@@ -171,7 +171,7 @@ export class BackupService {
         for (const r of await meta.getFunctions(database, schema)) {
           if (isCancelled?.()) throw new Error('Backup cancelled.');
           try {
-            const raw = (await meta.getRoutineDefinition(r.name, r.type, database, schema)).trim();
+            const raw = (await meta.getRoutineDefinition(r.name, r.type, database, schema, r.identityArgs)).trim();
             if (!raw) continue;
             const kind = /PROCEDURE/i.test(r.type) ? 'PROCEDURE' : 'FUNCTION';
             const body = stripTrailingSemicolon(removeDefiner(raw));

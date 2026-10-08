@@ -666,7 +666,7 @@ db-host 最小改动：
 - **Sentinel over SSH 为 best-effort**：SSH 路径按 standalone 连发现到的 master，不自动重发现。**CI 中 Sentinel 本体启动已从「已知限制」转为「已验证」**（见下）。
 - **命令超时默认 15s，且需数据库可达**：命令级超时已支持按连接的 `requestTimeout` 覆盖，并覆盖 `nodes().call`（SCAN/INFO 等）；未配置时默认 15s。破坏性命令超时会明确提示「结果未知：可能已在服务端执行」，**不可直接重试**。集群整体宕机时，未配置 `requestTimeout` 的连接会在默认 15s 内有界失败。
 - **集群节点重试用长退避（30s），非常量重连**：为避免 ioredis 重试耗尽后关闭节点连接产生未处理拒绝（D20），节点级重试在达到上限后使用 **30s 长退避**而非放弃；由 `connect()` 的 `connectTimeout` 兜底整体失败。代价是拓扑长时间不可达时不会快速进入终态，而是保持有界重试。
-- **按 schema 备份的对象定义保留源 schema 限定**：选择某个 schema 备份时，表 DDL/INSERT 目标相对（恢复按 `search_path`），但**函数/触发器/视图定义中的对象引用仍带源 schema**（如 `EXECUTE FUNCTION <src>.<fn>()`）；恢复到**不同** schema 时需手工改写这些引用。此外**重载函数仅导出首个定义**（按函数名定位）。
+- **按 schema 备份的对象定义保留源 schema 限定**：选择某个 schema 备份时，表 DDL/INSERT 目标相对（恢复按 `search_path`），但**函数/触发器/视图定义中的对象引用仍带源 schema**（如 `EXECUTE FUNCTION <src>.<fn>()`）；恢复到**不同** schema 时需手工改写这些引用。（重载函数已按 identity args 逐个导出，不再是首个定义。）
 
 ### 同步向前兼容前提（D9/D15，务必随发布说明写明）
 

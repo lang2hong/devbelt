@@ -195,6 +195,20 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
     }
   });
 
+  it('重载函数：按 identity args 导出全部重载定义（不再只取第一个）', async () => {
+    await raw.query(`CREATE FUNCTION ${S2}.ovl(a int) RETURNS int AS $$ SELECT a $$ LANGUAGE sql`);
+    await raw.query(`CREATE FUNCTION ${S2}.ovl(a int, b int) RETURNS int AS $$ SELECT a + b $$ LANGUAGE sql`);
+    try {
+      const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
+      const dump = await BackupService.databaseDump(query, meta, table, dbName, { schema: S2 });
+      const defs = dump.match(/CREATE OR REPLACE FUNCTION[^\n]*?ovl/gi) ?? [];
+      expect(defs.length).toBe(2);
+    } finally {
+      await raw.query(`DROP FUNCTION IF EXISTS ${S2}.ovl(int)`);
+      await raw.query(`DROP FUNCTION IF EXISTS ${S2}.ovl(int, int)`);
+    }
+  });
+
   it('多库（B2）：可见库列表含新建库；按库会话读到该库自己的对象', async () => {
     const db2 = `zms_db_${stamp}`;
     await raw.query(`CREATE DATABASE ${db2}`);
