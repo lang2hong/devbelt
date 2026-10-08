@@ -10,6 +10,7 @@ class FakeConnection extends IConnection {
   public executed: string[] = [];
   public result: any = { rows: [{ id: 1 }] };
   public fields: any[] = [{ name: 'id' }];
+  public error: Error | null = null;
 
   constructor() {
     super({ host: 'localhost', port: 3306, user: 'root', database: 'test' });
@@ -20,7 +21,7 @@ class FakeConnection extends IConnection {
   query(sql: string, values?: any, callback?: any): void {
     this.executed.push(sql);
     const cb = callback || values;
-    cb(null, this.result, this.fields);
+    cb(this.error, this.result, this.fields);
   }
 
   connect(cb: (err: any) => void): void {
@@ -156,5 +157,28 @@ describe('QueryService 语句观察者', () => {
     const svc = new QueryService(conn, new MysqlDialect(), () => { throw new Error('history broken'); });
     const res = await svc.query('SELECT 1');
     expect(res.rows).toEqual([{ id: 1 }]);
+  });
+});
+
+describe('QueryService 事务状态跟踪（连接池淘汰保护）', () => {
+  it('BEGIN 成功后 inTransaction=true，COMMIT/ROLLBACK 后复位', async () => {
+    const svc = new QueryService(new FakeConnection(), new MysqlDialect());
+    expect(svc.inTransaction).toBe(false);
+    await svc.query('BEGIN');
+    expect(svc.inTransaction).toBe(true);
+    await svc.query('COMMIT');
+    expect(svc.inTransaction).toBe(false);
+    await svc.query('START TRANSACTION');
+    expect(svc.inTransaction).toBe(true);
+    await svc.query('ROLLBACK');
+    expect(svc.inTransaction).toBe(false);
+  });
+
+  it('BEGIN 失败不残留事务状态（否则该会话永不淘汰）', async () => {
+    const conn = new FakeConnection();
+    conn.error = new Error('already in a transaction');
+    const svc = new QueryService(conn, new MysqlDialect());
+    await expect(svc.query('BEGIN')).rejects.toThrow(/already in a transaction/);
+    expect(svc.inTransaction).toBe(false);
   });
 });

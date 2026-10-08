@@ -12,7 +12,7 @@ let tunnelReleased = 0;
 
 vi.mock('../../src/connection/sshTunnel', () => ({
   SshTunnel: {
-    create: async () => { tunnelCreated++; return 12345; },
+    create: async () => { tunnelCreated++; return { port: 12345, lease: `lease-${tunnelCreated}` }; },
     close: () => {},
     release: () => { tunnelReleased++; },
     closeAll: () => {},
@@ -164,6 +164,22 @@ describe('B2：PG 多库衍生会话', () => {
     expect(endCalled).toBeGreaterThanOrEqual(2);
     // 两个会话各释放一次引用（不误用 force close）。
     expect(tunnelReleased).toBe(2);
+  });
+
+  it('H3：释放某库 retain 不关闭整个连接（其它会话键仍持有）', async () => {
+    const m = new ConnectionManager();
+    managers.push(m);
+    await m.connectSql(conn());
+    await m.connectSql(conn(), 'other');
+    m.retain('c-1'); // 视图 A 持有主会话
+    const releaseOther = m.retainFor(conn(), 'other'); // 视图 B 持有 other 库
+    releaseOther(); // B 关闭：只释放 other 键
+    expect(m.activeConnections).toBe(2);
+    expect(m.peekSql('c-1')).toBeTruthy();
+    expect(m.peekSql('c-1', 'other')).toBeTruthy();
+
+    m.release('c-1'); // A 也关闭：已无任何持有 → 关闭连接
+    expect(m.activeConnections).toBe(0);
   });
 
   it('MySQL 忽略 database：始终主会话（回归）', async () => {

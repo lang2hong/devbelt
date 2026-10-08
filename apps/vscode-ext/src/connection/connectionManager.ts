@@ -300,21 +300,21 @@ export class ConnectionManager {
 
     let host = target.host;
     let port = target.port;
-    let tunnelAcquired = false;
+    let tunnelLease: string | undefined;
     if (target.sshHost) {
-      const localPort = await SshTunnel.create(target);
-      if (localPort) {
+      const acquired = await SshTunnel.create(target);
+      if (acquired) {
         host = '127.0.0.1';
-        port = localPort;
-        tunnelAcquired = true;
+        port = acquired.port;
+        tunnelLease = acquired.lease;
       }
     }
 
     try {
-      return await this.buildSession(target, host, port, generation, key);
+      return await this.buildSession(target, host, port, generation, key, tunnelLease);
     } catch (err) {
-      // 只释放本次引用：多库会话共享同一隧道，误用 close 会关掉主会话仍在用的隧道。
-      if (tunnelAcquired) SshTunnel.release(target.id);
+      // 只释放本次引用：多库会话共享同一隧道；带租约，避免关掉重建后的新隧道。
+      if (tunnelLease) SshTunnel.release(target.id, tunnelLease);
       throw err;
     }
   }
@@ -329,11 +329,12 @@ export class ConnectionManager {
     port: number,
     generation: number,
     key: string,
+    tunnelLease?: string,
   ): Promise<ConnectionSession> {
     if (conn.dbType === DatabaseType.REDIS) {
-      return this.buildRedisSession(conn, host, port, generation, key);
+      return this.buildRedisSession(conn, host, port, generation, key, tunnelLease);
     }
-    return this.buildSqlSession(conn, host, port, generation, key);
+    return this.buildSqlSession(conn, host, port, generation, key, tunnelLease);
   }
 
   /**
@@ -349,6 +350,7 @@ export class ConnectionManager {
     port: number,
     generation: number,
     key: string,
+    tunnelLease?: string,
   ): Promise<RedisConnectionSession> {
     const mode = conn.redisMode ?? 'standalone';
     const tls = conn.useSSL
@@ -367,6 +369,8 @@ export class ConnectionManager {
       password: conn.password,
       tls,
       connectTimeout: conn.connectTimeout,
+      // Redis 命令超时跟随连接的 requestTimeout（过去固定 15s，用户配置无效）。
+      commandTimeout: conn.requestTimeout,
       readOnly: conn.readOnly === true,
     };
     const auth = { username: conn.user || undefined, password: conn.password, sentinelPassword: conn.sentinelPassword, tls, connectTimeout: conn.connectTimeout };
@@ -434,7 +438,7 @@ export class ConnectionManager {
         this.sessionEntries.delete(key);
         this.noBackslashEscapes.delete(conn.id);
         this.pgStdOff.delete(conn.id);
-        if (conn.sshHost) SshTunnel.release(conn.id);
+        if (conn.sshHost) SshTunnel.release(conn.id, tunnelLease);
         closeExtraTunnels();
       },
     };
@@ -456,6 +460,7 @@ export class ConnectionManager {
     port: number,
     generation: number,
     key: string,
+    tunnelLease?: string,
   ): Promise<SqlConnectionSession> {
     const { connection, dialect } = ConnectionFactory.createWithDialect(
       conn.dbType as DatabaseType,
@@ -554,7 +559,7 @@ export class ConnectionManager {
           this.primaryDb.delete(conn.id);
         }
         // 只释放本次引用：同连接其它库会话可能仍在使用共享隧道。
-        if (conn.sshHost) SshTunnel.release(conn.id);
+        if (conn.sshHost) SshTunnel.release(conn.id, tunnelLease);
       },
     };
     this.sessions.set(key, session);
@@ -631,7 +636,17 @@ export class ConnectionManager {
     const next = current - 1;
     if (next > 0) { this.retains.set(key, next); return; }
     this.retains.delete(key);
-    if (!this.explicit.has(connId)) this.disposeConn(connId);
+    // 只有该连接下**所有**会话键都没人持有了，才关闭整个连接；否则仅释放本键，
+    // 不能因为关掉一个库的面板就把同连接其它库的会话也关掉（H3）。
+    if (!this.explicit.has(connId) && !this.hasRetainForConn(connId)) this.disposeConn(connId);
+  }
+
+  /** 该连接是否仍有任一持有（主会话键或衍生库会话键）。 */
+  private hasRetainForConn(connId: string): boolean {
+    for (const key of this.retains.keys()) {
+      if (key === connId || key.startsWith(`${connId}${SESSION_KEY_SEP}`)) return true;
+    }
+    return false;
   }
 
   /** 释放一次 retain（连接级主会话）；计数归零且非显式打开时关闭会话。 */
@@ -810,7 +825,10 @@ export class ConnectionManager {
         // 显式打开的连接与被持有（retain）的连接豁免「空闲超时」，但仍要检测存活：
         // SSH 断开/DB 掉线后过去会一直显示为已打开、反复失败，只能手动关闭。
         const id = entry.connId;
-        const idle = !this.explicit.has(id) && !this.retains.has(entry.key) && (this.busies.get(id) ?? 0) === 0 && now - entry.lastUsed > this.config.idleTimeoutMs;
+        const inTx = entry.session.kind === 'sql' && entry.session.query.inTransaction;
+        const idle = !this.explicit.has(id) && !this.retains.has(entry.key) && (this.busies.get(id) ?? 0) === 0
+          && !inTx && now - entry.lastUsed > this.config.idleTimeoutMs;
+        // 未结束事务的会话不因空闲关闭（会静默回滚未提交数据）；但已死连接仍回收。
         if (idle || !entry.session.isAlive()) {
           toDispose.push(entry);
         }

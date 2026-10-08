@@ -13,6 +13,8 @@
  *     后续 `push` 会失败；这里统一用数组累积。
  *  2. 上游 `case 'a': c = '\a'`——JS 无 `\a` 转义，实际产出字面 `a`；这里用 `\x07`（BEL），
  *     即上游本意。
+ *  3. **含 `\xHH` 的 token 返回 `Buffer`**：`\xE4` 是原始字节 0xE4，若返回 JS 字符串再走
+ *     ioredis（UTF-8 编码）会变成 C3 A4。返回 Buffer 后由调用方走 `sendCommandBuffer`。
  */
 
 const HEX_RE = /^[0-9a-fA-F]{2}$/;
@@ -23,8 +25,8 @@ function isSpace(ch: string | undefined): boolean {
 }
 
 /** 将一行命令切分为参数数组（不解析命令名语义）。空行返回 `[]`。 */
-export function splitRedisArgs(line: string): string[] {
-  const ret: string[] = [];
+export function splitRedisArgs(line: string): (string | Buffer)[] {
+  const ret: (string | Buffer)[] = [];
   if (typeof line !== 'string' || line.length === 0) return ret;
   const len = line.length;
   let pos = 0;
@@ -34,6 +36,16 @@ export function splitRedisArgs(line: string): string[] {
     if (pos >= len) break;
 
     const current: string[] = [];
+    /** 一旦出现 `\xHH` 就切到字节累积（初始为 null）。 */
+    let bytes: number[] | null = null;
+    const pushChar = (ch: string): void => {
+      if (bytes) bytes.push(...Buffer.from(ch, 'utf8'));
+      else current.push(ch);
+    };
+    const pushByte = (b: number): void => {
+      if (!bytes) { bytes = [...Buffer.from(current.join(''), 'utf8')]; current.length = 0; }
+      bytes.push(b);
+    };
     let inDouble = false;
     let inSingle = false;
     let done = false;
@@ -50,24 +62,23 @@ export function splitRedisArgs(line: string): string[] {
           pos += 1;
           const e = line[pos];
           switch (e) {
-            case 'n': current.push('\n'); break;
-            case 'r': current.push('\r'); break;
-            case 't': current.push('\t'); break;
-            case 'b': current.push('\b'); break;
-            case 'a': current.push('\x07'); break;
+            case 'n': pushChar('\n'); break;
+            case 'r': pushChar('\r'); break;
+            case 't': pushChar('\t'); break;
+            case 'b': pushChar('\b'); break;
+            case 'a': pushByte(0x07); break;
             case 'x': {
               const hex = line.substr(pos + 1, 2);
               if (HEX_RE.test(hex)) {
-                // 单字节（按码点），而非 Buffer utf8 解码：`\xE4` 等 >=0x80 的字节
-                // 经 utf8 解码会变成 U+FFFD 替换符（D11）。
-                current.push(String.fromCharCode(parseInt(hex, 16)));
+                // 单字节（按码点），而非 utf8 解码：`\xE4` 等 ≥0x80 的字节必须原样发出。
+                pushByte(parseInt(hex, 16));
                 pos += 2;
               } else {
-                current.push('x');
+                pushChar('x');
               }
               break;
             }
-            default: current.push(e); break;
+            default: pushChar(e); break;
           }
         } else if (c === '"') {
           if (pos + 1 < len && !isSpace(line[pos + 1])) {
@@ -75,19 +86,19 @@ export function splitRedisArgs(line: string): string[] {
           }
           done = true;
         } else {
-          current.push(c);
+          pushChar(c);
         }
       } else if (inSingle) {
         if (c === '\\' && line[pos + 1] === "'") {
           pos += 1;
-          current.push("'");
+          pushChar("'");
         } else if (c === "'") {
           if (pos + 1 < len && !isSpace(line[pos + 1])) {
             throw new Error(`Expect "'" followed by a space or nothing, got "${line[pos + 1]}".`);
           }
           done = true;
         } else {
-          current.push(c);
+          pushChar(c);
         }
       } else if (c === '"') {
         inDouble = true;
@@ -96,12 +107,12 @@ export function splitRedisArgs(line: string): string[] {
       } else if (isSpace(c)) {
         done = true;
       } else {
-        current.push(c);
+        pushChar(c);
       }
 
       if (pos < len) pos++;
     }
-    ret.push(current.join(''));
+    ret.push(bytes ? Buffer.from(bytes) : current.join(''));
   }
 
   return ret;

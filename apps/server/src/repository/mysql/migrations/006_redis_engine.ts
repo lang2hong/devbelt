@@ -19,6 +19,7 @@ import type { Migration } from '../migrate.js';
  *          JSON_UNQUOTE(JSON_SEARCH(v.value_json, 'one', 'redis'))
  *        )
  *  WHERE d.feature_key = 'allowedDatabaseTypes'
+ *    AND p.code IN ('free', 'pro')
  *    AND JSON_VALID(v.value_json)
  *    AND JSON_TYPE(v.value_json) = 'ARRAY'
  *    AND JSON_CONTAINS(v.value_json, JSON_QUOTE('redis'));

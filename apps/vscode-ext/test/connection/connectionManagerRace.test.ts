@@ -11,7 +11,7 @@ let tunnelClosed = 0;
 
 vi.mock('../../src/connection/sshTunnel', () => ({
   SshTunnel: {
-    create: async () => 12345,
+    create: async () => ({ port: 12345, lease: 'race-lease' }),
     close: () => { tunnelClosed++; },
     release: () => { tunnelClosed++; },
     closeAll: () => {},

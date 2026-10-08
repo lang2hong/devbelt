@@ -25,15 +25,18 @@ describe('splitRedisArgs（移植 ARDM splitargs 语义）', () => {
     expect(splitRedisArgs('SET k "a\\"b"')).toEqual(['SET', 'k', 'a"b']);
   });
 
-  it('双引号内 \\xHH hex', () => {
-    expect(splitRedisArgs('SET k "\\x41"')).toEqual(['SET', 'k', 'A']);
+  it('双引号内 \\xHH hex：含转义 token 返回 Buffer（原始字节）', () => {
+    expect(splitRedisArgs('SET k "\\x41"')).toEqual(['SET', 'k', Buffer.from([0x41])]);
+    // 非法 hex 不消耗字节，退化为字面 'x' + 后续字符（仍是字符串）。
     expect(splitRedisArgs('SET k "\\xzz"')).toEqual(['SET', 'k', 'xzz']);
   });
 
-  it('\\xHH 单字节按码点解码（>=0x80 不再是替换符）', () => {
+  it('\\xHH 单字节按原始字节（>=0x80 不再被 UTF-8 重编码为 C3 A4）', () => {
     const [, , v] = splitRedisArgs('SET k "\\xE4"');
-    expect(v).toBe(String.fromCharCode(0xE4));
-    expect(v).not.toContain('\uFFFD');
+    expect(Buffer.isBuffer(v)).toBe(true);
+    expect(v as Buffer).toEqual(Buffer.from([0xe4]));
+    // 回归：绝不能是 UTF-8 编码后的 C3 A4。
+    expect(v as Buffer).not.toEqual(Buffer.from([0xc3, 0xa4]));
   });
 
   it("单引号内 \\' 为字面单引号", () => {

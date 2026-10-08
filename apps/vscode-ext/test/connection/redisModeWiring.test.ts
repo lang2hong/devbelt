@@ -12,7 +12,7 @@ const h = vi.hoisted(() => ({
 
 vi.mock('../../src/connection/sshTunnel', () => ({
   SshTunnel: {
-    create: async (c: any) => { h.created.push(c.id); return ++h.portSeq; },
+    create: async (c: any) => { h.created.push(c.id); return { port: ++h.portSeq, lease: `l-${h.portSeq}` }; },
     close: (id: string) => { h.closed.push(id); },
     release: (id: string) => { h.closed.push(id); },
     closeAll: () => {},

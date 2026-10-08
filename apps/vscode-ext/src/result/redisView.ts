@@ -71,7 +71,7 @@ export class RedisView extends BaseWebView {
   private static readonly instances = new Map<string, RedisView>();
   /** `connection:*` 审计责任面板：每连接仅一个实例负责写（避免多面板重复）。 */
   private static readonly auditOwners = new Map<string, RedisView>();
-  private pendingConfirm?: { id: string; line: string; name: string; args: string[]; db: number };
+  private pendingConfirm?: { id: string; line: string; name: string; args: (string | Buffer)[]; db: number };
 
   /** 命令日志订阅（会话 client 级；首次取会话/就绪时挂上）。 */
   private logUnsub?: () => void;
@@ -642,7 +642,7 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
       this.post({ type: 'commandResult', id, command: line, ok: false, result: '', costMs: 0, error: l10n('cmd.redis.cliUnsupported') });
       return;
     }
-    let parts: string[];
+    let parts: (string | Buffer)[];
     try {
       parts = splitRedisArgs(line);
     } catch (err) {
@@ -653,7 +653,7 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
       this.post({ type: 'commandResult', id, command: line, ok: false, result: '', costMs: 0, error: l10n('cmd.redis.emptyCommand') });
       return;
     }
-    const name = parts[0].toUpperCase();
+    const name = String(parts[0]).toUpperCase();
     const args = parts.slice(1);
     if (isDangerousCommand(name, args)) {
       // 记录确认时的目标 db：确认期间若切换了 db，破坏性命令不能落到新的库。
@@ -680,7 +680,7 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
     await this.execute(pending.id, pending.line, pending.name, pending.args);
   }
 
-  private async execute(id: string, line: string, name: string, args: string[]): Promise<void> {
+  private async execute(id: string, line: string, name: string, args: (string | Buffer)[]): Promise<void> {
     await this.enqueue(async () => {
       const started = Date.now();
       try {
@@ -692,15 +692,19 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
           return;
         }
         // 会改变/阻塞共享连接状态的命令一律拒绝：CLI 共享一条连接，这些会污染其它面板。
-        if (isCliBlocked(name, args)) {
+        const argsStr = args.map((a) => (Buffer.isBuffer(a) ? a.toString('latin1') : a));
+        if (isCliBlocked(name, argsStr)) {
           this.post({ type: 'commandResult', id, command: line, ok: false, result: '', costMs: Date.now() - started, error: l10n('cmd.redis.connStateBlocked', { cmd: name.toUpperCase() }) });
           return;
         }
-        const raw = await session.client.sendCommand(name, args);
+        const hasBuffer = args.some((a) => Buffer.isBuffer(a));
+        const raw = hasBuffer
+          ? await session.client.sendCommandBuffer(name, args as (string | number | Buffer)[])
+          : await session.client.sendCommand(name, args as (string | number)[]);
         const costMs = Date.now() - started;
-        if (isWriteCommand(name, args) || isDangerousCommand(name, args)) {
+        if (isWriteCommand(name, argsStr) || isDangerousCommand(name, argsStr)) {
           // 审计只记命令 + key（首参），**不记值**；EVAL 只记脚本长度（脚本文本可能含字面值）。
-          const detail = /^EVAL(_RO)?$/i.test(name) ? `len=${String(args[0] ?? '').length}` : String(args[0] ?? '');
+          const detail = /^EVAL(_RO)?$/i.test(name) ? `len=${String(argsStr[0] ?? '').length}` : String(argsStr[0] ?? '');
           this.audit(name, detail, costMs);
         }
         this.post({ type: 'commandResult', id, command: line, ok: true, result: formatRedisReply(raw), costMs, error: null });

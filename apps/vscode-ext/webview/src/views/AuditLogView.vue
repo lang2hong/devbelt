@@ -13,6 +13,7 @@ interface AuditEntry {
   action: string;
   connName: string;
   database?: string;
+  schema?: string;
   sql?: string;
   rowCount?: number;
   costTime?: number;
@@ -75,7 +76,7 @@ onUnmounted(() => { __offMsg?.(); });
       >
         <span class="time">{{ formatDateTime(e.timestamp) }}</span>
         <span class="action" :class="e.action">{{ actionLabels[e.action] || e.action }}</span>
-        <span class="conn">{{ e.connName }}{{ e.database ? '/' + e.database : '' }}</span>
+        <span class="conn">{{ e.connName }}{{ e.database ? '/' + e.database : '' }}{{ e.schema ? '/' + e.schema : '' }}</span>
         <span class="meta" v-if="e.rowCount !== undefined">{{ e.rowCount }} rows</span>
         <span class="meta" v-if="e.costTime !== undefined">{{ e.costTime }}ms</span>
       </div>

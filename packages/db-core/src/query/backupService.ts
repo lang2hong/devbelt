@@ -3,7 +3,7 @@ import type { MetadataService } from './metadataService.js';
 import type { TableService } from './tableService.js';
 import type { QueryService, QueryOptions } from './queryService.js';
 import { streamRowsByKeyset } from './paging.js';
-import { sqlCommentSafe } from '../sql/index.js';
+import { sqlCommentSafe, isTxControlStatement } from '../sql/index.js';
 
 /**
  * 恢复过程中的每条语句都不进查询历史。
@@ -105,10 +105,12 @@ export class BackupService {
       const table = tableList[i];
       onProgress?.({ table, completed: i, total: tableList.length });
 
-      // 不带 schema/库前缀：dump 恢复到**当前连接选中的库/schema**（restore 设 search_path），
-// 而不是 dump 里写死的源对象；dump 因此可在库/schema 之间迁移。
-      const ddl = await tableService.getCreateSql(table, database);
+      // **读取**用带 schema 的限定名（否则会读到 search_path 里 public 的同名表——静默错误备份）；
+      // **写入 dump** 仍去前缀（目标相对，恢复按 search_path）。
+      const ddlRaw = await tableService.getCreateSql(table, database, schema);
+      const ddl = this.stripTableSchema(ddlRaw, schema);
       const qualified = qualify(table);
+      const readQualified = schema ? `${query.dialect.wrap(schema)}.${query.dialect.wrap(table)}` : qualified;
       const block: string[] = ['', `DROP TABLE IF EXISTS ${qualified};`, ddl.replace(/;\s*$/, '') + ';'];
 
       if (includeData) {
@@ -120,7 +122,7 @@ export class BackupService {
 
         let hasData = false;
         for await (const rows of streamRowsByKeyset(
-          query, query.dialect, `SELECT * FROM ${qualified}`, pkColumns, pageSize,
+          query, query.dialect, `SELECT * FROM ${readQualified}`, pkColumns, pageSize,
           { isCancelled, cancelError: () => new Error('Backup cancelled.') },
         )) {
           if (!hasData && rows.length > 0) {
@@ -230,6 +232,19 @@ export class BackupService {
     onProgress?.({ table: '', completed: tableList.length, total: tableList.length });
   }
 
+  /**
+   * 去掉 `CREATE TABLE <schema>.<table>` 的 schema 前缀（让 dump 目标相对）。
+   * 仅剥离 CREATE TABLE 后紧跟的第一个 schema 限定（引号可选）。
+   */
+  private static stripTableSchema(ddl: string, schema?: string): string {
+    if (!schema) return ddl;
+    const esc = schema.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return ddl.replace(
+      new RegExp(`(CREATE\\s+TABLE\\s+)(?:"${esc}"|${esc})\\.`, 'i'),
+      '$1',
+    );
+  }
+
   private static sqlPrelude(dbType: string): string {
     if (dbType === DatabaseType.MYSQL) return 'SET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS = 0';
     if (dbType === DatabaseType.PG) return "SET client_encoding = 'UTF8';\nSET session_replication_role = 'replica'";
@@ -253,12 +268,11 @@ export class BackupService {
     // 剥离 dump 自带的事务控制语句：恢复自身已用 BEGIN/COMMIT 包裹，dump 内再出现
     // COMMIT 会提前提交外层事务（回滚失效），BEGIN 则会嵌套。DDL 在 MySQL 会隐式
     // 提交，仍无法完全原子（已记入台账）。
-    const txControl = /^(BEGIN|START\s+TRANSACTION|COMMIT(\s+WORK|\s+AND\s+(NO\s+)?CHAIN)?|END(\s+TRANSACTION)?|ABORT|ROLLBACK(\s+WORK|\s+AND\s+(NO\s+)?CHAIN)?)\s*;?\s*$/i;
     // 数组输入可预知总数（进度显示 N/M，旧行为）；流式输入（大文件不整读内存）
     // 只有在执行过程中才知道进度，总数按已完成数报。
     const isArray = Array.isArray(statements);
     const source: Iterable<string> | AsyncIterable<string> = isArray
-      ? (statements as string[]).filter((s) => !txControl.test(s.trim()))
+      ? (statements as string[]).filter((s) => !isTxControlStatement(s))
       : statements;
     const knownTotal = isArray ? (source as string[]).length : -1;
 
@@ -268,7 +282,7 @@ export class BackupService {
         arr.push(...(source as string[]));
       } else {
         for await (const s of source as AsyncIterable<string>) {
-          if (!txControl.test(s.trim())) arr.push(s);
+          if (!isTxControlStatement(s)) arr.push(s);
         }
       }
       return BackupService.restoreAsSingleStatement(query, arr, options);
@@ -291,7 +305,7 @@ export class BackupService {
       for await (const stmt of source as AsyncIterable<string>) {
         if (isCancelled?.()) throw new Error('Restore cancelled.');
         const trimmed = stmt.trim();
-        if (!trimmed || txControl.test(trimmed)) continue;
+        if (!trimmed || isTxControlStatement(trimmed)) continue;
         try {
           await query.query(trimmed, undefined, SKIP);
           completed++;

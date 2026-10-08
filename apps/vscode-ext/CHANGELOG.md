@@ -6,16 +6,28 @@ All notable changes to this extension are documented in this file.
 
 ### Added
 
-- **Authenticator (2FA/TOTP)**: local dynamic codes in a webview panel (does not occupy the activity bar). Paste `otpauth://` links or add a single entry from a QR image; groups, colored tags, search, edit/delete, copy-to-clipboard, and plaintext export (modal warning, `0600`). Secrets are stored only in the OS keychain (VS Code `SecretStorage`) and never sent to the webview — only `code + secondsLeft` are pushed each tick.
+- **Redis client (P7)**: full Redis support alongside MySQL/PostgreSQL/SQLite — connect (standalone / Cluster / Sentinel, including over SSH with NAT-map tunnels), key browser and per-type editors, CLI console (history, completion, dangerous-command confirmation), server info/slowlog, read-only mode, audit logging, and per-connection `requestTimeout` for command timeouts. Binary-safe key/member handling and byte-level `\xHH` CLI arguments.
+- **PostgreSQL multi-schema (P7.1)**: browse and operate across all schemas (schema tree layer, schema-qualified write/DDL/export/data-edit, cross-schema foreign-key navigation, schema-aware backup/restore). Temporary host-side write protection for non-default schemas is lifted now that qualification is in place.
+- **PostgreSQL multi-database**: enumerate visible databases (CONNECT-filtered), lazily create derived per-database sessions (cap 4 + LRU), reuse a single SSH tunnel with reference counting, and "execute in that database".
+- **Authenticator (2FA/TOTP)**: local dynamic codes in a webview panel (does not occupy the activity bar). Paste `otpauth://` links or add a single entry from a QR image; groups, colored tags, search/edit/delete, copy-to-clipboard, and plaintext export (modal warning, `0600`). Secrets are stored only in the OS keychain (VS Code `SecretStorage`) and never sent to the webview — only `code + secondsLeft` are pushed each tick.
 
 ### Changed
 
 - Organization (team collaboration) feature fully removed across extension, console, and server.
 - Strict base32 / `otpauth` input validation (reject Unicode-confusable characters and invalid `digits`/`period`).
+- Audit log panel now shows the PostgreSQL schema alongside connection/database, and restore / SQL-script import are audited.
+- Idle health-check no longer closes a session with an open transaction; `BEGIN` failure resets transaction tracking so the session can be evicted.
+
+### Fixed
+
+- SSH tunnel acquisition now registers in-flight requests before any await and uses a lease token on release (no duplicate tunnels / no closing a rebuilt tunnel).
+- Redis Cluster node-level retry/offline-queue options are set on the top-level `Cluster` options (previously placed in `redisOptions`, where ioredis ignores them); command timeouts also cover `nodes().call` and destructive-command timeouts report "result unknown".
+- Scoped PostgreSQL backup reads the target schema's tables (previously could silently read a same-named `public` table).
 
 ### Notes
 
 - Personal connection sync (P2) and multi-device authenticator sync (P6) remain **in development** and are not part of this release.
+- Known limitations for the Redis/PG work are listed in `docs/阶段/P7-Redis客户端.md` §十一 (including 15s default command timeout, 30s cluster node backoff, and schema-scoped dumps retaining source-schema references in function/trigger/view definitions).
 
 ## [0.2.0] - 2026-08-12
 

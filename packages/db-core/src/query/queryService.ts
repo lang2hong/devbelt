@@ -157,9 +157,20 @@ export class QueryService {
     return this.txActive;
   }
 
+  /** 去掉前导注释后的语句首部（事务识别用）。 */
+  private statementHead(sql: string): string {
+    return sql.replace(/^\s*(?:--[^\n]*\n|\/\*[\s\S]*?\*\/\s*)*/, '').trimStart();
+  }
+
+  /** 该语句是否用于**开启**事务（BEGIN/START TRANSACTION 或 SET AUTOCOMMIT=0）。 */
+  private isTxOpeningStatement(sql: string): boolean {
+    const head = this.statementHead(sql);
+    return /^(BEGIN|START\s+TRANSACTION)\b/i.test(head) || /^SET\s+AUTOCOMMIT\s*=\s*0\b/i.test(head);
+  }
+
   /** 按语句首关键字更新事务状态（近似：多语句脚本按整体首关键字判断）。 */
   private trackTransaction(sql: string): void {
-    const head = sql.replace(/^\s*(?:--[^\n]*\n|\/\*[\s\S]*?\*\/\s*)*/, '').trimStart();
+    const head = this.statementHead(sql);
     if (/^(BEGIN|START\s+TRANSACTION)\b/i.test(head)) this.txActive = true;
     else if (/^(COMMIT|ROLLBACK|END|ABORT)\b/i.test(head)) this.txActive = false;
     else if (/^SET\s+AUTOCOMMIT\s*=\s*0\b/i.test(head)) this.txActive = true;
@@ -204,6 +215,8 @@ export class QueryService {
     if (!sql || typeof sql !== 'string' || sql.trim().length === 0) {
       throw new QueryError('SQL statement cannot be empty');
     }
+    const txBefore = this.txActive;
+    const opensTx = this.isTxOpeningStatement(sql);
     this.trackTransaction(sql);
     const start = Date.now();
     const id = this.nextQueryId++;
@@ -222,6 +235,8 @@ export class QueryService {
         if (settled) return;
         settled = true;
         finish();
+        // BEGIN 未成功（取消/错误）→ 复位，否则该会话被误判为「事务中」而永不淘汰。
+        if (opensTx) this.txActive = txBefore;
         reject(new QueryError('Query cancelled', sql, Date.now() - start));
       };
       // 单查询取消：仅当这次查询仍在活跃集合中才物理中止，避免陈旧 token 牵连他人。
@@ -242,6 +257,7 @@ export class QueryService {
               settled = true;
               finish();
               this.connection.abortQuery();
+              if (opensTx) this.txActive = txBefore;
               reject(new QueryError(`Query timeout (${timeoutMs}ms)`, sql, Date.now() - start));
             }
           }, timeoutMs)
@@ -256,6 +272,8 @@ export class QueryService {
             { sql: redactSql(sql)!, costTime, rowCount: 0, error: redactSql(err.message) },
             options,
           );
+          // BEGIN 报错（如已在事务中/连接错误）→ 事务状态复位到执行前，避免会话被永久保护。
+          if (opensTx) this.txActive = txBefore;
           reject(new QueryError(err.message, sql, costTime));
           return;
         }

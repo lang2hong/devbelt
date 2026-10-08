@@ -15,3 +15,4 @@ export { scanOptionsForDialect } from './scanOptions.js';
 export { parseNoBackslashEscapes } from './scanOptions.js';
 export { parseStandardConformingStringsOff } from './scanOptions.js';
 export { escapeStringLiteralContent } from './escapeLiteral.js';
+export { TX_CONTROL_SQL, isTxControlStatement } from './txControl.js';

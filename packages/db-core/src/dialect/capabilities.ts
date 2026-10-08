@@ -24,8 +24,11 @@ export type DatabaseOperation =
 export interface DatabaseCapabilities {
   /** The connection can enumerate and switch among databases in its explorer. */
   readonly multiDatabaseExplorer: boolean;
-  /** Explorer shows a schema layer (e.g. PostgreSQL namespaces) under the database. */
-  readonly schemas: boolean;
+  /**
+   * Explorer shows a schema layer (e.g. PostgreSQL namespaces) under the database.
+   * Optional for backwards compatibility with external dialect implementations; absent = false.
+   */
+  readonly schemas?: boolean;
   readonly databases: boolean;
   readonly views: boolean;
   readonly routines: boolean;

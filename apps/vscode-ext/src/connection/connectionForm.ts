@@ -140,8 +140,8 @@ export class ConnectionForm extends BaseWebView {
       let host = effective.host;
       let port = effective.port;
       if (effective.sshHost) {
-        const localPort = await SshTunnel.create({ ...effective, id: testId });
-        if (localPort) { host = '127.0.0.1'; port = localPort; }
+        const acquired = await SshTunnel.create({ ...effective, id: testId });
+        if (acquired) { host = '127.0.0.1'; port = acquired.port; }
       }
       if (dbType === DatabaseType.REDIS) {
         // Redis：临时客户端 + PING 探活；SSH 隧道由上面的 SshTunnel 临时建连提供，

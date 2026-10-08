@@ -84,7 +84,8 @@ export async function setupClusterOverSsh(
     for (let i = 0; i < nodes.length; i++) {
       const m = nodes[i];
       const id = `${conn.id}#nat${nonce}${i}`;
-      const localPort = await SshTunnel.create({ ...conn, id, host: m.host, port: m.port });
+      const acquired = await SshTunnel.create({ ...conn, id, host: m.host, port: m.port });
+      const localPort = acquired?.port;
       // 有 sshHost 时 create 失败应 fail-fast：漏一条隧道会让 natMap 缺项、运行期才报错，极难排障。
       if (!localPort) throw new Error(`无法为 cluster 节点建立 SSH 隧道：${m.host}:${m.port}`);
       tunnelIds.push(id);
@@ -127,7 +128,7 @@ export async function discoverSentinelMasterOverSsh(
   if (!master) throw new Error(`SENTINEL 未发现 master：${conn.sentinelName ?? ''}`);
 
   const tunnelId = `${conn.id}#sentinel-master-${tunnelNonce()}`;
-  const masterLocalPort = await SshTunnel.create({ ...conn, id: tunnelId, host: master.host, port: master.port });
+  const masterLocalPort = (await SshTunnel.create({ ...conn, id: tunnelId, host: master.host, port: master.port }))?.port;
   if (!masterLocalPort) throw new Error('无法为 Sentinel master 建立 SSH 隧道');
   return { master, masterLocalPort, tunnelId };
 }

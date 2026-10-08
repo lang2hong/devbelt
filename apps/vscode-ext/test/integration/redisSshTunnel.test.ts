@@ -78,11 +78,12 @@ describe.skipIf(!REDIS_URL)('Redis over SSH 隧道（进程内 ssh2 server）', 
       sshPassword: SSH_PASS,
     } as unknown as SavedConnection;
 
-    const localPort = await SshTunnel.create(conn);
-    expect(typeof localPort).toBe('number');
-    expect(localPort!).toBeGreaterThan(0);
+    const acquired = await SshTunnel.create(conn);
+    expect(acquired).toBeTruthy();
+    const localPort = acquired!.port;
+    expect(localPort).toBeGreaterThan(0);
 
-    const client = new RedisClient({ host: '127.0.0.1', port: localPort!, connectTimeout: 10_000 });
+    const client = new RedisClient({ host: '127.0.0.1', port: localPort, connectTimeout: 10_000 });
     try {
       await client.connect();
       expect(await client.ping()).toBe('PONG');

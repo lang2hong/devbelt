@@ -6,6 +6,7 @@ import { MetadataService } from '../../src/query/metadataService';
 import { DataService } from '../../src/query/dataService';
 import { TableService } from '../../src/query/tableService';
 import { PostgreSqlDialect } from '../../src/dialect/postgreSqlDialect';
+import { BackupService } from '../../src/query/backupService';
 import { withDatabaseInUrl } from '../../src/utils/connectionUrl';
 
 // 与生产 PostgreSqlConnection 一致：禁用 pg 对日期/JSON 的默认解析。
@@ -160,7 +161,38 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
         if (t.name.includes('orders')) found.push({ schema, name: t.name });
       }
     }
-    expect(new Set(found.map((f) => f.schema))).toEqual(new Set([S1, S2]));
+    // 只断言本测试创建的两个 schema（库里可能有残留 schema 的同名表）。
+    const ours = found.filter((f) => f.schema === S1 || f.schema === S2);
+    expect(new Set(ours.map((f) => f.schema))).toEqual(new Set([S1, S2]));
+  });
+
+  it('C1：按 schema 备份读取目标 schema 的表（public 同名表不干扰），并可 round-trip 恢复', async () => {
+    const t = `c1_rt_${stamp}`;
+    const S3 = `zms_c1_${stamp}`;
+    // public 放一张**同名但数据不同**的表：C1 缺陷下备份会静默读到它。
+    await raw.query(`CREATE TABLE public."${t}" (id int PRIMARY KEY, v text)`);
+    await raw.query(`INSERT INTO public."${t}" VALUES (1,'PUBLIC-ROW')`);
+    await raw.query(`CREATE TABLE ${S2}."${t}" (id int PRIMARY KEY, v text)`);
+    await raw.query(`INSERT INTO ${S2}."${t}" VALUES (1,'s2-1'),(2,'s2-2')`);
+    try {
+      const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
+      const dump = await BackupService.databaseDump(query, meta, table, dbName, { schema: S2, tables: [t] });
+      expect(dump).toContain('s2-1');
+      expect(dump).not.toContain('PUBLIC-ROW');
+
+      // dump 目标相对（不带 schema 前缀）→ 用 search_path 恢复到全新 schema。
+      await raw.query(`CREATE SCHEMA ${S3}`);
+      await raw.query(`SET search_path TO ${S3}`);
+      await raw.query(dump);
+      await raw.query('SET search_path TO public');
+      const back = await raw.query(`SELECT v FROM ${S3}."${t}" ORDER BY id`);
+      expect(back.rows.map((r) => r.v)).toEqual(['s2-1', 's2-2']);
+    } finally {
+      await raw.query('SET search_path TO public');
+      await raw.query(`DROP TABLE IF EXISTS ${S2}."${t}"`);
+      await raw.query(`DROP TABLE IF EXISTS public."${t}"`);
+      await raw.query(`DROP SCHEMA IF EXISTS ${S3} CASCADE`);
+    }
   });
 
   it('多库（B2）：可见库列表含新建库；按库会话读到该库自己的对象', async () => {

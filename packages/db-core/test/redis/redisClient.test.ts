@@ -445,3 +445,24 @@ describe('RedisClient 字节级命令（sendCommandBuffer）', () => {
     expect(logs[0].args).toEqual(['k', '<buffer:2>']);
   });
 });
+
+describe('RedisClient 命令超时（Medium：nodes().call 与破坏性提示）', () => {
+  it('nodes().call 也受命令超时保护（不再永久挂起）', async () => {
+    class SlowCluster extends FakeRedis {
+      nodes(): { call: (c: string, ...a: (string | number)[]) => Promise<unknown> }[] {
+        return [{ call: () => new Promise<never>(() => { /* never settles */ }) }];
+      }
+    }
+    const client = new RedisClient(
+      { host: 'h', port: 1, commandTimeout: 30, cluster: { nodes: [{ host: '127.0.0.1', port: 6379 }] } },
+      () => new SlowCluster(),
+    );
+    await expect(client.nodes()[0].call('SCAN', 0)).rejects.toThrow(/timed out/);
+  });
+
+  it('破坏性命令超时提示「结果未知」', async () => {
+    const { client, fake } = make({ commandTimeout: 30 });
+    fake.sendCommand = () => new Promise<never>(() => { /* never settles */ });
+    await expect(client.sendCommand('FLUSHALL', [])).rejects.toThrow(/结果未知/);
+  });
+});

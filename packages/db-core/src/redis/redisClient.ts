@@ -8,7 +8,7 @@
  */
 import Redis, { Cluster, Command, type RedisOptions } from 'ioredis';
 import type { RedisCommandSource } from './redisOps.js';
-import { isReadCommand } from './redisCommands.js';
+import { isReadCommand, isDangerousCommand } from './redisCommands.js';
 import type { RedisTlsOptions } from './redisTls.js';
 
 /** 只读模式下拦截写命令时抛出。 */
@@ -187,20 +187,21 @@ export class RedisClient {
       this.client = factory(common);
     } else if (this.isCluster) {
       // Cluster 下无 SELECT：不传 db。
-      // 节点级选项：retryStrategy 不返回 null（用变量传入，避免字面量剔除字段的 excess 检查）；
-      // 关闭离线队列：集群宕机时命令**快速失败**而不是无限滞留（配合 commandTimeout）。
-      const clusterNodeOptions: RedisOptions = {
-        ...common,
-        retryStrategy: clusterNodeRetryStrategy,
-        enableOfflineQueue: false,
-      };
+      // 注意 ioredis 的 ConnectionPool 会**先写死** `retryStrategy: clusterNodeRetryStrategy`
+      // 与 `enableOfflineQueue: true`，再用 defaults（只填 undefined）合并 redisOptions ——
+      // 所以放在 `redisOptions` 里的 retryStrategy/enableOfflineQueue 一律无效（H1）。
+      // 正确旋钮：节点级重试用顶层 `clusterNodeRetryStrategy`；离线队列用顶层 `enableOfflineQueue`。
+      const { retryStrategy: nodeRetryStrategyForStandalone, ...clusterRedisOptions } = common;
+      void nodeRetryStrategyForStandalone;
       this.client = new Cluster(options.cluster!.nodes, {
         natMap: options.cluster!.natMap,
         slotsRefreshTimeout: options.cluster!.slotsRefreshTimeout ?? 2000,
-        redisOptions: clusterNodeOptions,
-        // Cluster 用独立的 `clusterRetryStrategy`（不读 redisOptions.retryStrategy）；
-        // 同样不返回 null，理由同上。
+        // redisOptions 不含 retryStrategy（ConnectionPool 会忽略它并用顶层 clusterNodeRetryStrategy）。
+        redisOptions: clusterRedisOptions,
         clusterRetryStrategy: clusterNodeRetryStrategy,
+        clusterNodeRetryStrategy: clusterNodeRetryStrategy,
+        // 无 ready 节点时不排队、快速失败（配合 commandTimeout），避免集群宕机时命令滞留数分钟。
+        enableOfflineQueue: false,
       }) as unknown as RedisConnectionLike;
     } else if (this.sentinel) {
       this.client = new Redis({
@@ -324,7 +325,8 @@ export class RedisClient {
         if (this.readOnly && !isReadCommand(name, classifyArgs)) {
           return Promise.reject(new RedisReadOnlyError(name));
         }
-        return n.call(c, ...a);
+        // 节点级 call 也加命令超时（SCAN/INFO 等在大集群/宕机时同样需要有界失败）。
+        return this.withTimeout(n.call(c, ...a), name);
       },
     }));
   }
@@ -399,8 +401,10 @@ export class RedisClient {
     if (this.commandTimeoutMs <= 0) return p;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
+      // 破坏性命令超时：服务端可能已执行，必须明确提示「结果未知」，避免用户直接重试造成二次破坏。
+      const suffix = isDangerousCommand(name) ? '（结果未知：破坏性命令可能已在服务端执行）' : '';
       timer = setTimeout(
-        () => reject(new Error(`redis command timed out after ${this.commandTimeoutMs}ms: ${name}`)),
+        () => reject(new Error(`redis command timed out after ${this.commandTimeoutMs}ms: ${name}${suffix}`)),
         this.commandTimeoutMs,
       );
     });

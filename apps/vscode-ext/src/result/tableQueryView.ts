@@ -344,12 +344,26 @@ export class TableQueryView extends BaseWebView {
     }
   }
 
+  /**
+   * 视图切库时把 retain 从旧库会话键迁到新库会话键（先持有新键再释放旧键）。
+   *
+   * 面板复用同一视图执行「另一个库」的查询时，若仍持有旧库键，会：(a) 保护着一个
+   * 已不再使用的会话不被 LRU 淘汰；(b) 新库会话无人持有，可能被淘汰导致重连。H3。
+   */
+  private migrateRetain(newDb?: string): void {
+    if (newDb === this.database) return;
+    const releaseOld = this.releaseRetain;
+    this.releaseRetain = this.manager.retainFor(this.conn, newDb);
+    releaseOld?.();
+  }
+
   private async executePendingQueries(): Promise<void> {
     if (this.executingPendingQuery) return;
     this.executingPendingQuery = true;
     try {
       while (this.pendingQueries.length > 0) {
         const query = this.pendingQueries.shift()!;
+        this.migrateRetain(query.database);
         this.database = query.database;
         this.runner.setDatabase(query.database);
         this.post({ type: 'querySql', sql: query.sql, dbName: query.database || '' });

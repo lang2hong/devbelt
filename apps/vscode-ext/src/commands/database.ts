@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { SchemaDiffService, BackupService, DataTransferService, DatabaseType, validateIdent } from '@devbelt/db-core';
 import { DbTreeNode } from '../tree/dbTreeNode';
+import { isTxControlStatement } from '@devbelt/db-core/sql';
 import { wrapIdentForConn, splitSqlStatements, streamSqlStatements, pgSchemaFor } from '../utils/sql';
 import { confirmSqlExecution, ensureWritable } from '../utils/sqlSafety';
 import { parseCsv, readCsvSample, streamCsvRows } from '../data/transfer/csv';
@@ -139,6 +140,14 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
             l10n('history.restore', { count: completed }),
             node.database || node.conn!.database,
           );
+          AuditLogger.tryLog({
+            action: 'import_data',
+            connName: conn.name || conn.host,
+            database: node.database || conn.database,
+            schema,
+            sql: `RESTORE ${uri[0].fsPath} (${completed} statements)`,
+            rowCount: completed,
+          });
           vscode.window.showInformationMessage(l10n('restore.done', { count: completed }));
           treeProvider.refresh();
         } catch (err) {
@@ -397,9 +406,8 @@ async function importSqlScript(
   if (database && conn.dbType === DatabaseType.MYSQL) {
     await session.query.query(`USE ${wrapIdentForConn(conn, validateIdent(database))}`);
   }
-  const txControl = /^(BEGIN|START\s+TRANSACTION|COMMIT(\s+WORK|\s+AND\s+(NO\s+)?CHAIN)?|END(\s+TRANSACTION)?|ABORT|ROLLBACK(\s+WORK|\s+AND\s+(NO\s+)?CHAIN)?)\s*;?\s*$/i;
   const statements = splitSqlStatements(sql, manager.scanOptionsFor?.(conn))
-    .filter((st) => !txControl.test(st.trim()));
+    .filter((st) => !isTxControlStatement(st));
   // 脚本导入过去逐句直接执行，中途失败会留下半截数据。除 SQLite（CLI 驱动每句独立
   // 进程、无法跨语句事务）外，用事务包裹，失败整体回滚。MySQL 的 DDL 会隐式提交，
   // 仍无法完全原子，但 DML 脚本可回滚。
@@ -440,6 +448,14 @@ async function importSqlScript(
       l10n('history.importScript', { count: done }),
       database, importedCount,
     );
+    AuditLogger.tryLog({
+      action: 'import_data',
+      connName: conn.name || conn.host,
+      database,
+      schema,
+      sql: `IMPORT SCRIPT (${done} statements)`,
+      rowCount: importedCount,
+    });
     vscode.window.showInformationMessage(l10n('import.rowsDone', { count: importedCount }));
     treeProvider.refresh();
   } catch (error) {

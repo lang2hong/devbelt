@@ -77,7 +77,7 @@ export class AuditLogger {
     void this.state.update(STORAGE_KEY, entries).then(undefined, (e) => diagWarn('audit persist failed', String(e)));
   }
 
-  getEntries(limit = 100, action?: AuditAction): AuditEntry[] {
+  getEntries(limit = MAX_ENTRIES, action?: AuditAction): AuditEntry[] {
     const entries = this.state.get<AuditEntry[]>(STORAGE_KEY, []);
     if (action) return entries.filter((e) => e.action === action).slice(0, limit);
     return entries.slice(0, limit);

@@ -30,6 +30,12 @@ export interface SshHostKeyGate {
  *
  * 设计模式：单例 + 连接池（每个 SavedConnection 一个 SSH 连接）
  */
+/** SSH 隧道租约：本地端口 + 租约 token（释放时校验，防止旧会话关掉重建后的新隧道）。 */
+export interface SshTunnelLease {
+  port: number;
+  lease: string;
+}
+
 export class SshTunnel {
   /** connId → 隧道信息。记录建隧道时的目标，连接配置变更后须重建。 */
   private static readonly tunnels = new Map<string, {
@@ -44,7 +50,12 @@ export class SshTunnel {
     sshPassword?: string;
     sshPrivateKeyPath?: string;
     sshPassphrase?: string;
+    /** 租约 token：每次新建隧道生成；释放时校验，防止旧会话关掉重建后的新隧道。 */
+    lease: string;
   }>();
+
+  /** 租约序号（进程内单调，配合 connId 生成唯一 lease）。 */
+  private static leaseSeq = 0;
 
   /** 主机密钥裁决器（扩展激活时注入）。未注入时回退严格判定。 */
   private static hostKeyGate?: SshHostKeyGate;
@@ -58,7 +69,7 @@ export class SshTunnel {
   private static readonly refs = new Map<string, number>();
 
   /** connId → 在途创建 Promise：同一连接并发 create 合并为一次（不各自建隧道）。 */
-  private static readonly creating = new Map<string, Promise<number>>();
+  private static readonly creating = new Map<string, Promise<SshTunnelLease>>();
 
   static configureHostKeyGate(gate: SshHostKeyGate | undefined): void {
     this.hostKeyGate = gate;
@@ -76,10 +87,10 @@ export class SshTunnel {
   }
 
   /**
-   * 创建或复用 SSH 隧道，返回本地端口。
+   * 创建或复用 SSH 隧道，返回 `{ port, lease }`（lease 为租约 token，释放时校验）。
    * 如果连接无 SSH 配置，直接返回 undefined。
    */
-  static async create(conn: SavedConnection): Promise<number | undefined> {
+  static async create(conn: SavedConnection): Promise<SshTunnelLease | undefined> {
     if (!conn.sshHost) return undefined;
     const sshHost = conn.sshHost;
     const sshPort = conn.sshPort || 22;
@@ -100,7 +111,7 @@ export class SshTunnel {
         existing.sshPassphrase === conn.sshPassphrase;
       if (sameTarget) {
         this.refs.set(conn.id, (this.refs.get(conn.id) ?? 1) + 1);
-        return existing.port;
+        return { port: existing.port, lease: existing.lease };
       }
       this.closeTunnel(existing, conn.id);
     }
@@ -108,11 +119,20 @@ export class SshTunnel {
     // 已有同 id 的在途创建：合并到同一个请求，成功后各计一次引用。
     const inflight = this.creating.get(conn.id);
     if (inflight) {
-      const port = await inflight;
+      const acquired = await inflight;
       this.refs.set(conn.id, (this.refs.get(conn.id) ?? 1) + 1);
-      return port;
+      return acquired;
     }
 
+    // **在任何 await 之前同步登记**在途 Promise：否则并发请求会先各自 await 私钥读取，
+    // 都越过上面的检查再各建一条隧道（泄漏，且引用计数少算）；H4。
+    const lease = `${conn.id}#${++this.leaseSeq}`;
+    let resolveInflight!: (v: SshTunnelLease) => void;
+    let rejectInflight!: (e: Error) => void;
+    const inflightPromise = new Promise<SshTunnelLease>((res, rej) => { resolveInflight = res; rejectInflight = rej; });
+    this.creating.set(conn.id, inflightPromise);
+
+    try {
     // known_hosts 只读一次；校验在 hostVerifier 里同步比对。
     const knownHosts = loadKnownHosts();
 
@@ -125,7 +145,7 @@ export class SshTunnel {
       }
     }
 
-    const promise = new Promise<number>((resolve, reject) => {
+    const port = await new Promise<number>((resolve, reject) => {
       const ssh = new Client();
       let settled = false;
       let hostKeyTrusted = false;
@@ -208,6 +228,7 @@ export class SshTunnel {
             ssh, server, port, sshHost, sshPort, remoteHost: conn.host, remotePort: conn.port,
             sshUser: conn.sshUser, sshPassword: conn.sshPassword,
             sshPrivateKeyPath: conn.sshPrivateKeyPath, sshPassphrase: conn.sshPassphrase,
+            lease,
           });
           this.refs.set(conn.id, 1);
           resolve(port);
@@ -271,11 +292,14 @@ export class SshTunnel {
 
       ssh.connect(config);
     });
-    this.creating.set(conn.id, promise);
-    try {
-      return await promise;
+    const result: SshTunnelLease = { port, lease };
+    resolveInflight(result);
+    return result;
+    } catch (err) {
+      rejectInflight(err as Error);
+      throw err;
     } finally {
-      if (this.creating.get(conn.id) === promise) this.creating.delete(conn.id);
+      if (this.creating.get(conn.id) === inflightPromise) this.creating.delete(conn.id);
     }
   }
 
@@ -285,11 +309,13 @@ export class SshTunnel {
  * 会话关闭/建连失败走这里（而非 `close`），保证多库会话共享的隧道在仍有
  * 其它引用时不被误关。
  */
-  static release(connId: string): void {
+  static release(connId: string, lease?: string): void {
+    const tunnel = this.tunnels.get(connId);
+    // 租约不匹配（隧道已被配置变更重建）：旧会话的释放动作忽略，避免关掉新隧道。
+    if (lease && tunnel && tunnel.lease !== lease) return;
     const n = this.refs.get(connId);
     if (n === undefined) return;
     if (n > 1) { this.refs.set(connId, n - 1); return; }
-    const tunnel = this.tunnels.get(connId);
     this.refs.delete(connId);
     if (tunnel) this.closeTunnel(tunnel, connId);
   }

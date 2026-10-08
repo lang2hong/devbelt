@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { DatabaseType } from '@devbelt/db-core';
 import type { Deps, Sub } from './shared';
 import { l10n } from '../i18n';
 import { TableQueryView } from '../result/tableQueryView';
@@ -98,7 +97,8 @@ async function searchObjects(deps: Deps, connIds: string[], keyword: string): Pr
       } else if (session.capabilities.multiDatabaseExplorer) {
         scopes = (await session.metadata.getDatabases()).map((db) => ({ database: db }));
       } else {
-        scopes = [{ database: conn.database || (conn.dbType === DatabaseType.PG ? 'public' : 'main') }];
+        // 单库：用连接配置的库名；仅 SQLite 缺省为 'main'（'public' 是 schema 名而非库名）。
+        scopes = [{ database: conn.database || 'main' }];
       }
 
       const hits: SearchHit[] = [];
