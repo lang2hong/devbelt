@@ -81,6 +81,26 @@ describe('QueryRunner.dispose 连接生命周期', () => {
     expect(query).toHaveBeenCalledWith('ROLLBACK');
   });
 
+  it('H2：PG 精确库键命中衍生会话时不回退主会话', async () => {
+    const query = vi.fn(async (_sql: string) => ({ rows: [], fields: [] }));
+    const derived: any = {
+      query: { query, wrap: (id: string) => `"${id}"`, cancel: () => true },
+      metadata: { getColumns: async () => [] },
+    };
+    const pgConn: any = { ...conn, dbType: 'PG' };
+    const peekSql = vi.fn((_id: string, db?: string) => (db === 'other' ? derived : undefined));
+    const manager: any = { connectSql: vi.fn(async () => derived), peekSql, disposeConn: () => {} };
+    const runner = new QueryRunner(pgConn, manager, 'users', 'other', () => {});
+
+    await runner.execute('BEGIN');
+    query.mockClear();
+    runner.dispose();
+
+    expect(query).toHaveBeenCalledWith('ROLLBACK');
+    // 不回退裸 id：PG 主会话可能属于其它面板/编辑器，误回滚会丢他人事务。
+    expect(peekSql).not.toHaveBeenCalledWith('c1');
+  });
+
   it('无会话时静默跳过 ROLLBACK', () => {
     const manager: any = { connectSql: vi.fn(), peekSql: () => undefined, disposeConn: () => {} };
     const runner = new QueryRunner(conn, manager, 'users', 'test', () => {});

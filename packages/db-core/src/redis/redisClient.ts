@@ -8,7 +8,7 @@
  */
 import Redis, { Cluster, Command, type RedisOptions } from 'ioredis';
 import type { RedisCommandSource } from './redisOps.js';
-import { isReadCommand, isWriteCommand, isDangerousCommand } from './redisCommands.js';
+import { isReadCommand, isDangerousCommand } from './redisCommands.js';
 import type { RedisTlsOptions } from './redisTls.js';
 
 /** 只读模式下拦截写命令时抛出。 */
@@ -156,9 +156,10 @@ export function redactCommandArgs(command: string, args: readonly string[]): str
   if (from !== undefined) {
     return args.map((a, i) => (i >= from ? REDACTED : truncateArg(String(a))));
   }
-  // 兜底：其它写命令默认只保留命令名与第一个（key）参数，其余一律脱敏——
-  // 无法穷举所有写命令的值参数位，宁可少记也不把值写进日志/审计（P7 §十）。
-  if (isWriteCommand(cmd, args)) {
+  // 兜底：任何**非已知只读**的命令（含未收录的模块命令如 JSON.SET/FT.CREATE）一律
+// 只保留首个（key）参数，其余脱敏——isReadCommand 是 fail-closed allowlist，
+// 未知命令必落此分支；宁可少记也不把值写进日志/审计（P7 §十）。
+  if (!isReadCommand(cmd, args)) {
     return args.map((a, i) => (i >= 1 ? REDACTED : truncateArg(String(a))));
   }
   return args.map(truncateArg);

@@ -71,10 +71,10 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     // 建立的：主会话重连会 closeTunnel，导致同连接的派生库/schema 会话静默持有失效隧道（H6）。
     // 统一在保存后关闭该连接的全部会话，下次使用按新配置重建。
     ConnectionForm.open(store, () => {
-      if (manager.peek(id)) {
-        manager.disposeConn(id);
-        treeProvider.markClosed(id);
-      }
+      // 无条件关闭：disposeConn/markClosed 对未打开连接是安全 no-op；仅判 peek(id) 会漏掉
+      // 「主会话已被淘汰、仅剩派生库/schema 会话」的情况，那正是持有失效隧道的情形（H6）。
+      manager.disposeConn(id);
+      treeProvider.markClosed(id);
       treeProvider.refresh();
     }, undefined, node.conn, (c) => manager.effectiveConnection(c));
   });

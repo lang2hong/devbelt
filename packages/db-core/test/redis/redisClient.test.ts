@@ -338,6 +338,9 @@ describe('RedisClient 命令日志与脱敏', () => {
     expect(redactCommandArgs('XADD', ['st', '*', 'f', 'v'])).toEqual(['st', '*', '<redacted>', '<redacted>']);
     // 未逐一列举的写命令：保留 key，其余脱敏。
     expect(redactCommandArgs('DEL', ['k1', 'k2'])).toEqual(['k1', '<redacted>']);
+    // 未收录的模块命令（非已知只读）一律按写处理，值不进日志。
+    expect(redactCommandArgs('JSON.SET', ['k', '$', 's3cr3t'])).toEqual(['k', '<redacted>', '<redacted>']);
+    expect(redactCommandArgs('FT.CREATE', ['idx', 'ON', 'HASH'])).toEqual(['idx', '<redacted>', '<redacted>']);
   });
 
   it('命令失败也记录日志并抛出', async () => {
@@ -448,7 +451,7 @@ describe('RedisClient 字节级命令（sendCommandBuffer）', () => {
     expect(fake.calls).toHaveLength(0);
   });
 
-  it('Buffer 参数在日志中归一为 <buffer:N>，不灌二进制', async () => {
+  it('Buffer 参数在日志中脱敏（值不落日志）', async () => {
     const logs: RedisCommandLog[] = [];
     const { client } = make({ onLog: (e) => logs.push(e) });
     await client.sendCommandBuffer('SET', ['k', Buffer.from([0xff, 0x00])]);
