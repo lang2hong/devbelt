@@ -27,7 +27,7 @@ vi.mock('ioredis', () => {
 import { RedisClient } from '../../src/redis/redisClient';
 
 describe('RedisClient cluster 连接选项（H1：节点级旋钮必须放顶层）', () => {
-  it('clusterNodeRetryStrategy / enableOfflineQueue 在顶层，redisOptions 不含被忽略的无效旋钮', () => {
+  it('节点级重试用顶层 clusterNodeRetryStrategy；redisOptions 不含被忽略的 retryStrategy', () => {
     new RedisClient({
       host: 'h',
       port: 1,
@@ -36,10 +36,10 @@ describe('RedisClient cluster 连接选项（H1：节点级旋钮必须放顶层
     const opts = h.clusterOptions.at(-1)!;
     expect(typeof opts.clusterNodeRetryStrategy).toBe('function');
     expect(typeof opts.clusterRetryStrategy).toBe('function');
-    expect(opts.enableOfflineQueue).toBe(false);
+    // 不关闭离线队列：设 false 会让「构造后立刻发命令」直接 reject（CI D20 回归）。
+    expect(opts.enableOfflineQueue).toBeUndefined();
     const redisOptions = opts.redisOptions as Record<string, unknown> | undefined;
-    // ConnectionPool 会写死这两项并使用 defaults 合并，redisOptions 里的值一律无效。
+    // ConnectionPool 会写死 retryStrategy 并用 defaults 合并，redisOptions 里的值无效。
     expect(redisOptions?.retryStrategy).toBeUndefined();
-    expect(redisOptions?.enableOfflineQueue).toBeUndefined();
   });
 });

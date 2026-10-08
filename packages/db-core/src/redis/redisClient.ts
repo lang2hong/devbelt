@@ -227,7 +227,7 @@ export class RedisClient {
       // 注意 ioredis 的 ConnectionPool 会**先写死** `retryStrategy: clusterNodeRetryStrategy`
       // 与 `enableOfflineQueue: true`，再用 defaults（只填 undefined）合并 redisOptions ——
       // 所以放在 `redisOptions` 里的 retryStrategy/enableOfflineQueue 一律无效（H1）。
-      // 正确旋钮：节点级重试用顶层 `clusterNodeRetryStrategy`；离线队列用顶层 `enableOfflineQueue`。
+      // 节点级重试用顶层 `clusterNodeRetryStrategy`；离线队列保持默认（见下方注释，不关闭）。
       const { retryStrategy: nodeRetryStrategyForStandalone, ...clusterRedisOptions } = common;
       void nodeRetryStrategyForStandalone;
       this.client = new Cluster(options.cluster!.nodes, {
@@ -237,8 +237,10 @@ export class RedisClient {
         redisOptions: clusterRedisOptions,
         clusterRetryStrategy: clusterNodeRetryStrategy,
         clusterNodeRetryStrategy: clusterNodeRetryStrategy,
-        // 无 ready 节点时不排队、快速失败（配合 commandTimeout），避免集群宕机时命令滞留数分钟。
-        enableOfflineQueue: false,
+        // 注意：**不要**设 `enableOfflineQueue: false`。它虽能避免宕机期命令排队，但会让
+        // 「构造后立刻发命令」（等待 ready 的标准用法，如 CLUSTER SLOTS 探活）直接 reject
+        // "Cluster isn't ready and enableOfflineQueue options is false"。有界失败由命令超时 +
+        // 长退避兜底（见 withTimeout），保持默认排队语义（D11/D20 回归由 CI 钉住）。
       }) as unknown as RedisConnectionLike;
     } else if (this.sentinel) {
       this.client = new Redis({
