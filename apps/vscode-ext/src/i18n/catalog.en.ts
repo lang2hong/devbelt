@@ -823,7 +823,6 @@ export const en: MessageCatalog = {
   'backup.contentsPlaceholder': 'What should the dump contain?',
   'backup.schemaAndData': 'Schema and data',
   'backup.schemaOnly': 'Schema only',
-  'schema.pgCrossDbUnsupported': 'PostgreSQL connections are bound to a single database; cross-database schema compare/sync is not supported.',
 
   // ── 2FA/TOTP 验证器（webview）──
   'wv.authenticator.empty': 'No authenticator entries yet. Make sure your system clock is accurate — codes refresh every 30/60 seconds.',

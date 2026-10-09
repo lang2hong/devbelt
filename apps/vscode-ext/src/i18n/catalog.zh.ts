@@ -801,7 +801,6 @@ export const zh: MessageCatalog = {
   'backup.contentsPlaceholder': '导出内容包含什么？',
   'backup.schemaAndData': '结构与数据',
   'backup.schemaOnly': '仅结构',
-  'schema.pgCrossDbUnsupported': 'PostgreSQL 连接绑定单个数据库，暂不支持跨库结构对比/同步。',
 
   // ── 2FA/TOTP 验证器（webview）──
   'wv.authenticator.empty': '还没有验证器条目。请确保系统时钟准确——口令每 30/60 秒刷新一次。',
