@@ -251,7 +251,10 @@ export class PostgreSqlDialect implements SqlDialect {
       JOIN pg_class c ON c.oid = i.indexrelid
       JOIN pg_class t ON t.oid = i.indrelid
       JOIN pg_namespace n ON n.oid = t.relnamespace
-      WHERE n.nspname = ${this.schemaExpr(schema)} AND t.relname = '${table}'`;
+      WHERE n.nspname = ${this.schemaExpr(schema)} AND t.relname = '${table}'
+        -- H5：排除主键与约束（UNIQUE/EXCLUDE）自动生成的索引，避免与约束重复处理。
+        AND NOT i.indisprimary
+        AND NOT EXISTS (SELECT 1 FROM pg_constraint con WHERE con.conindid = i.indexrelid)`;
   }
 
   getUserListSql(): string {

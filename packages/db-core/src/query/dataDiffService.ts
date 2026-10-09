@@ -52,11 +52,12 @@ export class DataDiffService {
       // 排序/游标列必须是真实主键（NOT NULL 且唯一）；无主键时留空 → OFFSET 分页（完整）。
       // 行匹配键列则回退全列（无主键表的身份），但绝不拿它当 keyset 游标（可空列会静默丢行）。
       const orderColumns = await this.getPkColumns(sourceMeta, table, sourceDb, sourceSchema);
-      const keyColumns = orderColumns.length ? orderColumns : await this.getKeyColumns(sourceMeta, table, sourceDb, sourceSchema);
-      // 只比较两侧**都存在**的列：目标缺列时不再让 SELECT 抛原始 SQL 错误（P4）。
-      // 仅当调用方提供 targetMeta 时才取交集，避免对既有调用/测试引入额外查询。
       const sourceColumns = await this.getColumnNames(sourceMeta, table, sourceDb, sourceSchema);
       const targetColumns = targetMeta ? await this.getColumnNames(targetMeta, table, targetDb, targetSchema) : undefined;
+      // 目标缺主键列 → 跳过该表（否则会生成非法 WHERE / 全量增删误判）。
+      if (targetColumns && orderColumns.length && !orderColumns.every((k) => targetColumns.includes(k))) continue;
+      const keyBase = orderColumns.length ? orderColumns : await this.getKeyColumns(sourceMeta, table, sourceDb, sourceSchema);
+      const keyColumns = targetColumns ? keyBase.filter((k) => targetColumns.includes(k)) : keyBase;
       const columnNames = targetColumns ? sourceColumns.filter((c) => targetColumns.includes(c)) : sourceColumns;
       if (!keyColumns.length || !columnNames.length) continue;
       // 仅当主键列是数值型且两侧同方言时才做有序归并：文本主键的 ORDER BY 受 collation

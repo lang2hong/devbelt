@@ -642,7 +642,8 @@ describe('SchemaDiffService 索引 / schema 级对象（P3c）', () => {
     const tableService = { dbType: DatabaseType.PG, wrapIdentifier: (id: string) => pg.wrap(id), wrapSchemaIdentifier: (id: string) => pg.wrap(id), getCreateSql: async () => '', supports: () => true } as unknown as TableService;
     const sql = await SchemaDiffService.generateSyncSql(diffs, 'db', tableService, 'db', undefined, { sourceSchema: 'app', targetSchema: 'staging', dialect: pg });
     expect(sql).toContain('DROP INDEX IF EXISTS "staging"."idx_a";');
-    expect(sql).toContain('CREATE INDEX "idx_a" ON "staging"."t" ("a");');
+    // H4：索引按 pg_get_indexdef 原文生成（保留 USING/WHERE/表达式等），不再按列重建。
+    expect(sql).toContain('CREATE INDEX idx_a ON t (a);');
   });
 
   it('schema 级对象（序列/视图）差异与生成', async () => {

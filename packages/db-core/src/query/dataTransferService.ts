@@ -48,6 +48,7 @@ export class DataTransferService {
     const errors: string[] = [];
 
     const schemaDiffs = await SchemaDiffService.diff(sourceMeta, sourceDb, targetMeta, targetDb, sourceSchema, targetSchema);
+    const sourceSequences = sourceSchema ? await sourceMeta.getSequences(sourceSchema) : [];
     // 按表名索引，避免循环里对 schemaDiffs 反复线性查找（O(n²)）。
     const diffByName = new Map(schemaDiffs.map((d) => [d.tableName, d]));
     const tableList = tableFilter
@@ -75,7 +76,7 @@ export class DataTransferService {
             throw new Error('cross-database-type schema sync is not supported');
           }
           const syncSql = await SchemaDiffService.generateSyncSql(
-            [diff], targetDb, sourceTable, sourceDb, targetQuery.dialect, { sourceSchema, targetSchema, dialect: targetQuery.dialect },
+            [diff], targetDb, sourceTable, sourceDb, targetQuery.dialect, { sourceSchema, targetSchema, dialect: targetQuery.dialect, skipConstraints: true, sourceSequences },
           );
           const statements = splitExecutableStatements(syncSql, scanOptionsForDialect(targetQuery.dialect));
           for (const stmt of statements) {
@@ -109,16 +110,44 @@ export class DataTransferService {
       }
     }
 
-    // schema 级对象（PG）：序列/视图/函数/触发器。放在表/数据之后，依赖已就绪。
+    // 表级约束 + schema 级对象（PG）：放在全部表结构与数据之后。
+    // H6：外键/CHECK 在数据导入后再加，避免引用未建表或插入时违反约束。
     if (sourceSchema && targetSchema && sourceQuery.dialect.dbType === 'PG') {
       try {
+        const constrainSql = SchemaDiffService.generateConstraintsSql(schemaDiffs, sourceTable, { sourceSchema, targetSchema });
         const obj = await SchemaDiffService.diffSchemaObjects(sourceMeta, targetMeta, sourceSchema, targetSchema);
-        const sql = SchemaDiffService.generateSchemaObjectsSql(obj, targetQuery.dialect, { sourceSchema, targetSchema });
+        const objSql = SchemaDiffService.generateSchemaObjectsSql(obj, targetQuery.dialect, { sourceSchema, targetSchema });
+        const sql = [constrainSql, objSql].filter(Boolean).join('\n');
         const statements = splitExecutableStatements(sql, scanOptionsForDialect(targetQuery.dialect));
         for (const stmt of statements) {
           if (isCancelled?.()) throw new Error('Transfer cancelled.');
           const s = stmt.trim();
           if (s && !s.startsWith('--')) await targetQuery.query(s, undefined, SKIP);
+        }
+        // setval：只处理**本次参与同步的表**所拥有的序列；带下界、空表用 minv 且 is_called=false；
+        // 用唯一 `$devbelt_sync$` 标签避免与 schema 名里的 `$$` 冲突。
+        const targetLit = targetQuery.dialect.escapeValue(targetSchema);
+        const tableIn = [...new Set(uniqueTables)].map((t) => targetQuery.dialect.escapeValue(t)).join(', ');
+        if (tableIn) {
+          await targetQuery.query(`DO $devbelt_sync$
+DECLARE r record; mx bigint;
+BEGIN
+  FOR r IN
+    SELECT s.oid AS seq, n.nspname AS sch, t.relname AS tname, a.attname AS col, ps.seqmin::bigint AS minv
+      FROM pg_class s
+      JOIN pg_depend d ON d.objid = s.oid AND d.classid = 'pg_class'::regclass AND d.refclassid = 'pg_class'::regclass
+      JOIN pg_class t ON t.oid = d.refobjid
+      JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = d.refobjsubid
+      JOIN pg_namespace n ON n.oid = s.relnamespace
+      JOIN pg_sequence ps ON ps.seqrelid = s.oid
+     WHERE s.relkind = 'S' AND d.deptype IN ('a','i')
+       AND n.nspname = ${targetLit} AND t.relname IN (${tableIn})
+  LOOP
+    EXECUTE format('SELECT max(%I) FROM %I.%I', r.col, r.sch, r.tname) INTO mx;
+    IF mx IS NULL THEN PERFORM setval(r.seq, r.minv, false);
+    ELSE PERFORM setval(r.seq, GREATEST(mx, r.minv), true); END IF;
+  END LOOP;
+END $devbelt_sync$;`, undefined, SKIP);
         }
       } catch (err) {
         errors.push(`schema objects: ${(err as Error).message}`);

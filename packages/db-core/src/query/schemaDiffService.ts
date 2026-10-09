@@ -291,7 +291,7 @@ export class SchemaDiffService {
     sourceTableService: TableService,
     sourceDb: string,
     targetDialect?: SqlDialect,
-    opts: { sourceSchema?: string; targetSchema?: string; dialect?: SqlDialect } = {},
+    opts: { sourceSchema?: string; targetSchema?: string; dialect?: SqlDialect; skipConstraints?: boolean; sourceSequences?: SequenceMeta[] } = {},
   ): Promise<string> {
     if (!sourceTableService.supports('schemaSync')) {
       throw new Error('Schema sync SQL is not supported for this database');
@@ -375,6 +375,29 @@ export class SchemaDiffService {
       parts.push('-- No differences found. Schemas are in sync.');
     }
 
+    return parts.join('\n');
+  }
+
+  /**
+   * 生成表级约束 DDL（PK/UNIQUE/CHECK/FK）。同步路径应在**所有表结构与数据之后**调用，
+   * 避免外键引用尚未创建的表或插入时违反约束（H6）。
+   */
+  static generateConstraintsSql(diffs: TableDiff[], sourceTableService: TableService, opts: { sourceSchema?: string; targetSchema?: string } = {}): string {
+    const wrap = (id: string) => sourceTableService.wrapIdentifier(id);
+    const wrapSchema = (id: string) => sourceTableService.wrapSchemaIdentifier(id);
+    const target = opts.targetSchema;
+    const targetTable = (name: string): string => (target ? `${wrapSchema(target)}.${wrap(name)}` : wrap(name));
+    const rewrite = (text: unknown): string => rewritePgSchemaRefs(toCompareString(text), opts.sourceSchema, target);
+    const parts: string[] = [];
+    for (const d of diffs) {
+      if (!d.constraints?.length) continue;
+      const table = targetTable(d.tableName);
+      for (const c of d.constraints) {
+        const cn = wrap(validateIdent(c.name, 63));
+        parts.push(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${cn};`);
+        if (c.status !== 'removed') parts.push(`ALTER TABLE ${table} ADD CONSTRAINT ${cn} ${rewrite(c.definition ?? '')};`);
+      }
+    }
     return parts.join('\n');
   }
 
@@ -463,31 +486,38 @@ export class SchemaDiffService {
     const rw = (d?: string) => rewritePgSchemaRefs(String(d ?? ''), opts.sourceSchema, target).replace(/;\s*$/, '');
     const parts: string[] = ['-- Schema objects', ''];
 
+    // 序列：仅**新增**可执行（补建缺失序列）。删除/参数变更改为注释（避免破坏性 DROP 波及依赖）。
+    const commented: string[] = [];
     for (const s of obj.sequences) {
-      if (s.status === 'removed') { parts.push(`DROP SEQUENCE IF EXISTS ${wrapObjName(s.name)};`); continue; }
-      // 仅补建缺失序列；已存在但参数不同的 changed 不在此处理（避免 DROP 波及依赖）。
       if (s.status === 'added' && dialect.createSequenceSql && s.meta) parts.push(dialect.createSequenceSql(s.name, s.meta, target));
+      else if (s.status === 'removed') commented.push(`DROP SEQUENCE IF EXISTS ${wrapObjName(s.name)};`);
+      else if (s.status === 'changed') commented.push(`-- 序列参数变更未处理：${s.name}`);
     }
+    // 视图/函数/触发器：**只输出为注释、不在同步中执行**（依赖排序/扩展过滤/破坏性 DROP 把关尚不齐备）。
     for (const v of obj.views) {
-      if (v.status === 'removed') { parts.push(`DROP VIEW IF EXISTS ${wrapObjName(v.name)};`); continue; }
+      if (v.status === 'removed') { commented.push(`DROP VIEW IF EXISTS ${wrapObjName(v.name)};`); continue; }
       if (!v.definition) continue;
-      parts.push(`DROP VIEW IF EXISTS ${wrapObjName(v.name)};`);
-      parts.push(dialect.normalizeViewAlterSql(rw(v.definition), v.name, undefined, target));
+      commented.push(`DROP VIEW IF EXISTS ${wrapObjName(v.name)};`);
+      commented.push(dialect.normalizeViewAlterSql(rw(v.definition), v.name, undefined, target));
     }
     for (const r of obj.routines) {
       if (r.status === 'removed') {
         const kind = /PROCEDURE/i.test(r.routineType ?? '') ? 'PROCEDURE' : 'FUNCTION';
-        parts.push(`DROP ${kind} IF EXISTS ${wrapObjName(r.name)}${r.identityArgs ? `(${r.identityArgs})` : ''};`);
+        commented.push(`DROP ${kind} IF EXISTS ${wrapObjName(r.name)}${r.identityArgs ? `(${r.identityArgs})` : ''};`);
         continue;
       }
-      if (r.definition) parts.push(rw(r.definition) + ';');
+      if (r.definition) commented.push(rw(r.definition) + ';');
     }
     for (const t of obj.triggers) {
       if (!t.table) continue;
-      parts.push(`DROP TRIGGER IF EXISTS ${dialect.wrap(validateIdent(t.name, 63))} ON ${wrapObjName(t.table)};`);
-      if (t.status !== 'removed' && t.definition) parts.push(rw(t.definition) + ';');
+      commented.push(`DROP TRIGGER IF EXISTS ${dialect.wrap(validateIdent(t.name, 63))} ON ${wrapObjName(t.table)};`);
+      if (t.status !== 'removed' && t.definition) commented.push(rw(t.definition) + ';');
     }
-    if (parts.length <= 2) parts.push('-- No schema-object differences.');
+    if (commented.length) {
+      parts.push('-- 以下对象未执行，需人工审阅依赖顺序后再逐一执行（逐行注释，避免函数体含 */）：');
+      for (const line of commented) for (const l of line.split('\n')) parts.push(`-- ${l}`);
+    }
+    if (parts.length <= 2 && !commented.length) parts.push('-- No schema-object differences.');
     return parts.join('\n');
   }
 
@@ -503,7 +533,7 @@ export class SchemaDiffService {
     _targetDb: string,
     sourceTableService: TableService,
     sourceDb: string,
-    opts: { sourceSchema?: string; targetSchema?: string; dialect?: SqlDialect } = {},
+    opts: { sourceSchema?: string; targetSchema?: string; dialect?: SqlDialect; skipConstraints?: boolean; sourceSequences?: SequenceMeta[] } = {},
   ): Promise<string> {
     const wrap = (id: string) => sourceTableService.wrapIdentifier(id);
     const wrapSchema = (id: string) => sourceTableService.wrapSchemaIdentifier(id);
@@ -522,8 +552,13 @@ if (d.status === 'added') {
         // 表头直接生成到目标 schema（列仍按 sourceSchema 读取），不做脆弱的文本替换。
         const ddl = rewrite(await sourceTableService.getCreateSql(d.tableName, sourceDb, opts.sourceSchema, opts.targetSchema));
         parts.push(`-- Add table: ${d.tableName}`);
-        // N2：serial 默认值引用的目标序列不存在时 CREATE TABLE 会因 regclass 解析失败；先建序列。
-        for (const q of new Set(extractNextvalSequences(ddl))) parts.push(`CREATE SEQUENCE IF NOT EXISTS ${q};`);
+        // N2：#5 建表阶段就用**源序列元数据**生成目标序列（含参数），避免先建默认序列再被判「已存在」跳过。
+        for (const q of new Set(extractNextvalSequences(ddl))) {
+          const seqName = seqNameOf(q);
+          const src = opts.sourceSequences?.find((s) => s.name === seqName);
+          if (src && opts.dialect?.createSequenceSql) parts.push(opts.dialect.createSequenceSql(src.name, src, target));
+          else parts.push(`CREATE SEQUENCE IF NOT EXISTS ${q};`);
+        }
         parts.push(`DROP TABLE IF EXISTS ${table};`);
         parts.push(ddl.replace(/;\s*$/, '') + ';');
         // 把序列绑定到列（OWNED BY）：删除表/列时序列随之回收。
@@ -595,36 +630,23 @@ if (d.status === 'added') {
         }
       }
     }
-    // 表级约束（PK/UNIQUE/CHECK/FK）：表建好后再加；定义来自数据库规范化，源 schema 改写到目标。
-    for (const d of diffs) {
-      if (!d.constraints?.length) continue;
-      const table = targetTable(d.tableName);
-      const lines: string[] = [];
-      for (const c of d.constraints) {
-        const cn = wrap(validateIdent(c.name, 63));
-        if (c.status === 'removed') {
-          lines.push(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${cn};`);
-        } else {
-          lines.push(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${cn};`);
-          lines.push(`ALTER TABLE ${table} ADD CONSTRAINT ${cn} ${rewrite(c.definition ?? '')};`);
-        }
-      }
-      parts.push(`-- Constraints: ${d.tableName}`);
-      parts.push(...lines);
-      parts.push('');
+    // 表级约束：批量生成路径在此输出；同步路径由 transferDatabase 在全部表结构+数据之后统一生成（H6）。
+    if (!opts.skipConstraints) {
+      const csql = this.generateConstraintsSql(diffs, sourceTableService, opts);
+      if (csql) { parts.push('-- Constraints'); parts.push(csql); parts.push(''); }
     }
     // 索引：非主键；先 DROP（IF EXISTS）再建，兼容改名/定义变化。
-    if (opts.dialect?.createIndexSql && opts.dialect.dropIndexSql) {
+    if (opts.dialect) {
       for (const d of diffs) {
         if (!d.indexes?.length) continue;
         const lines: string[] = [];
         for (const ix of d.indexes) {
-          if (ix.status === 'removed') {
-            lines.push(opts.dialect.dropIndexSql(ix.name, d.tableName, undefined, target) + ';');
-          } else {
-            lines.push(opts.dialect.dropIndexSql(ix.name, d.tableName, undefined, target) + ';');
-            lines.push(opts.dialect.createIndexSql(ix.name, d.tableName, ix.columns ?? [], !!ix.unique, undefined, target) + ';');
-          }
+          const dropName = target
+            ? `${opts.dialect!.wrap(validateSchemaIdent(target))}.${opts.dialect!.wrap(validateIdent(ix.name, 63))}`
+            : opts.dialect!.wrap(validateIdent(ix.name, 63));
+          lines.push(`DROP INDEX IF EXISTS ${dropName};`);
+          // H4：直接用 pg_get_indexdef 原文（改写 schema），保留 USING/WHERE/DESC/opclass/INCLUDE/表达式。
+          if (ix.status !== 'removed' && ix.definition) lines.push(rewrite(ix.definition).replace(/;\s*$/, '') + ';');
         }
         parts.push(`-- Indexes: ${d.tableName}`);
         parts.push(...lines);
@@ -710,6 +732,12 @@ function extractNextvalSequences(text: string): string[] {
   const out: string[] = [];
   for (const m of text.matchAll(/nextval\('([^']+)'::regclass\)/g)) out.push(m[1]);
   return out;
+}
+
+/** 从 `nextval('<seq>'::regclass)` 的序列名（可能带 schema/引号）取末尾标识符（去掉引号）。 */
+function seqNameOf(q: string): string {
+  const last = q.slice(q.lastIndexOf('.') + 1);
+  return last.replace(/^"(.*)"$/, '$1').replace(/""/g, '"');
 }
 
 /** 从建表 DDL 解析「序列名 → 拥有它的列」映射（列行首为带引号的列名 + DEFAULT nextval）。 */

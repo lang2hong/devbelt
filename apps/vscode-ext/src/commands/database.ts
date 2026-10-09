@@ -210,32 +210,41 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (node.conn.dbType === DatabaseType.PG) {
       const sourceSchema = pgSchemaFor(node.conn, node.schema);
       if (!sourceSchema) { vscode.window.showWarningMessage(l10n('schema.pickSchemaNode')); return; }
-      const schemas = (await session.metadata.getSchemas()).filter((s) => s !== sourceSchema);
-      if (!schemas.length) {
-        vscode.window.showWarningMessage(l10n('compare.noOtherSchemas'));
-        return;
+      // 独立会话 + M1：目录信息（pg_get_constraintdef/viewdef/triggerdef/indexdef/pg_get_expr）
+      // 在 search_path 上可见的对象会输出不带 schema 的名字；置 search_path=pg_catalog 强制完全限定。
+      let iso: Awaited<ReturnType<typeof manager.openIsolatedSql>> | undefined;
+      try {
+        iso = await manager.openIsolatedSql(node.conn, node.database);
+        const pgSession = iso.session;
+        await pgSession.query.query('SET search_path = pg_catalog', undefined, { skipHistory: true });
+        const schemas = (await pgSession.metadata.getSchemas()).filter((s) => s !== sourceSchema);
+        if (!schemas.length) {
+          vscode.window.showWarningMessage(l10n('compare.noOtherSchemas'));
+          return;
+        }
+        const target = await vscode.window.showQuickPick(
+          schemas.map((s) => ({ label: s, value: s })),
+          { placeHolder: l10n('compare.chooseSchema', { schema: sourceSchema }) },
+        );
+        if (!target) return;
+        const sourceSequences = await pgSession.metadata.getSequences(sourceSchema);
+        const diffs = await SchemaDiffService.diff(
+          pgSession.metadata, node.database, pgSession.metadata, node.database, sourceSchema, target.value,
+        );
+        const syncSql = await SchemaDiffService.generateSyncSql(
+          diffs, node.database, pgSession.table, node.database, pgSession.query.dialect,
+          { sourceSchema, targetSchema: target.value, dialect: pgSession.query.dialect, sourceSequences },
+        );
+        const pgAdded = diffs.filter((d) => d.status === 'added').length;
+        const pgRemoved = diffs.filter((d) => d.status === 'removed').length;
+        const pgChanged = diffs.filter((d) => d.status === 'changed').length;
+        const pgHeader = `${l10n('compare.syncScopeNote')}\n\n-- Diff: ${sqlCommentSafe(sourceSchema)} -> ${sqlCommentSafe(target.value)} (${pgAdded} added, ${pgRemoved} removed, ${pgChanged} changed)\n\n`;
+        const objDiff = await SchemaDiffService.diffSchemaObjects(pgSession.metadata, pgSession.metadata, sourceSchema, target.value);
+        const objSql = SchemaDiffService.generateSchemaObjectsSql(objDiff, pgSession.query.dialect, { sourceSchema, targetSchema: target.value });
+        await openSqlDoc(`${pgHeader}${syncSql}\n\n${objSql}`);
+      } finally {
+        iso?.close();
       }
-      const target = await vscode.window.showQuickPick(
-        schemas.map((s) => ({ label: s, value: s })),
-        { placeHolder: l10n('compare.chooseSchema', { schema: sourceSchema }) },
-      );
-      if (!target) return;
-      // 源与目标在同一连接、同一库内，靠显式 sourceSchema/targetSchema 限定对象作用域。
-      const diffs = await SchemaDiffService.diff(
-        session.metadata, node.database, session.metadata, node.database, sourceSchema, target.value,
-      );
-      const syncSql = await SchemaDiffService.generateSyncSql(
-        diffs, node.database, session.table, node.database, session.query.dialect,
-        { sourceSchema, targetSchema: target.value, dialect: session.query.dialect },
-      );
-      const pgAdded = diffs.filter((d) => d.status === 'added').length;
-      const pgRemoved = diffs.filter((d) => d.status === 'removed').length;
-      const pgChanged = diffs.filter((d) => d.status === 'changed').length;
-      const pgHeader = `${l10n('compare.syncScopeNote')}\n\n-- Diff: ${sqlCommentSafe(sourceSchema)} -> ${sqlCommentSafe(target.value)} (${pgAdded} added, ${pgRemoved} removed, ${pgChanged} changed)\n\n`;
-      // 序列/视图/函数/触发器（schema 级对象）。
-      const objDiff = await SchemaDiffService.diffSchemaObjects(session.metadata, session.metadata, sourceSchema, target.value);
-      const objSql = SchemaDiffService.generateSchemaObjectsSql(objDiff, session.query.dialect, { sourceSchema, targetSchema: target.value });
-      await openSqlDoc(`${pgHeader}${syncSql}\n\n${objSql}`);
       return;
     }
     const targetDbs = (await session.metadata.getDatabases()).filter((d) => d !== node.database);
@@ -306,6 +315,8 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
             const q = sess.query;
             const m = sess.metadata;
             const tbl = sess.table;
+            // M1：目录信息按完全限定名输出（方法见 compareSchema）。
+            await q.query('SET search_path = pg_catalog', undefined, { skipHistory: true });
             await q.query('BEGIN', undefined, { skipHistory: true });
             let pgResult: Awaited<ReturnType<typeof DataTransferService.transferDatabase>>;
             try {
@@ -323,24 +334,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
               if (pgResult.errors.length) {
                 await q.query('ROLLBACK', undefined, { skipHistory: true });
               } else {
-                // N2：数据导入后把目标 schema 内「带 OWNED BY 的序列」推进到所属列的最大值，
-                // 避免后续 INSERT 主键冲突。按 schema 逐序列处理，无需逐表映射。
-                const targetLit = q.dialect.escapeValue(target.value);
-                await q.query(`DO $$
-DECLARE r record;
-BEGIN
-  FOR r IN
-    SELECT s.oid AS seq, ns.nspname AS ssch, s.relname AS sname, t.relname AS tname, a.attname AS col
-      FROM pg_class s
-      JOIN pg_depend d ON d.objid = s.oid AND d.deptype IN ('a','i')
-      JOIN pg_class t ON t.oid = d.refobjid
-      JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = d.refobjsubid
-      JOIN pg_namespace ns ON ns.oid = s.relnamespace
-     WHERE s.relkind = 'S' AND ns.nspname = ${targetLit}
-  LOOP
-    EXECUTE format('SELECT setval(%L, GREATEST((SELECT COALESCE(max(%I), 0) FROM %I.%I), 1), true)', r.seq, r.col, r.ssch, r.tname);
-  END LOOP;
-END $$;`, undefined, { skipHistory: true });
+                // setval 已移入 DataTransferService（限定本次同步的表），此处仅提交。
                 await q.query('COMMIT', undefined, { skipHistory: true });
               }
             } catch (err) {
@@ -375,6 +369,17 @@ END $$;`, undefined, { skipHistory: true });
             treeProvider.refresh();
           },
         );
+      } catch (err) {
+        // haltOnError 下错误直接抛出，errors.length 分支走不到；在此外层记录失败+回滚审计。
+        AuditLogger.tryLog({
+          action: 'schema_change',
+          connName: node.conn!.name || node.conn!.host,
+          database: node.database!,
+          schema: sourceSchema,
+          sql: `schema sync ${sourceSchema} -> ${target.value} failed [rolled back]: ${(err as Error).message}`,
+        });
+        vscode.window.showErrorMessage((err as Error).message);
+        return;
       } finally {
         iso?.close();
       }

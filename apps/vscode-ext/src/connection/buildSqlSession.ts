@@ -175,6 +175,7 @@ export async function openIsolatedSqlSession(
   });
   const query = new QueryService(connection, dialect, undefined, conn.requestTimeout);
   await refineDialect(query, conn);
+  let closed = false;
   const session: SqlConnectionSession = {
     kind: 'sql',
     capabilities: dialect.capabilities,
@@ -184,6 +185,9 @@ export async function openIsolatedSqlSession(
     table: new TableService(query),
     isAlive: () => connection.isAlive(),
     close: () => {
+      // 幂等：多次调用只释放一次（避免重复释放 SSH 租约误关他人隧道）。
+      if (closed) return;
+      closed = true;
       connection.end();
       if (conn.sshHost) SshTunnel.release(conn.id, tunnelLease);
     },
