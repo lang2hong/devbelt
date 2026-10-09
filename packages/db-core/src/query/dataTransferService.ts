@@ -124,31 +124,35 @@ export class DataTransferService {
           const s = stmt.trim();
           if (s && !s.startsWith('--')) await targetQuery.query(s, undefined, SKIP);
         }
-        // setval：只处理**本次参与同步的表**所拥有的序列；带下界、空表用 minv 且 is_called=false；
-        // 用唯一 `$devbelt_sync$` 标签避免与 schema 名里的 `$$` 冲突。
-        const targetLit = targetQuery.dialect.escapeValue(targetSchema);
-        const tableIn = [...new Set(uniqueTables)].map((t) => targetQuery.dialect.escapeValue(t)).join(', ');
-        if (tableIn) {
-          await targetQuery.query(`DO $devbelt_sync$
-DECLARE r record; mx bigint;
+// setval：只处理**本次参与同步的表**中、列默认值为 `nextval(...)` 的序列；带下界、
+          // 空表用 minv 且 is_called=false；用唯一 `$devbelt_sync$` 标签避免与 schema 名里的 `$$` 冲突。
+          // 按列默认值（pg_attrdef/pg_get_expr）发现序列，不依赖 OWNED BY 关联是否建立。
+          const targetLit = targetQuery.dialect.escapeValue(targetSchema);
+          const tableIn = [...new Set(uniqueTables)].map((t) => targetQuery.dialect.escapeValue(t)).join(', ');
+          if (tableIn) {
+            await targetQuery.query(`DO $devbelt_sync$
+DECLARE r record; mx bigint; minv bigint; sq regclass;
 BEGIN
   FOR r IN
-    SELECT s.oid AS seq, n.nspname AS sch, t.relname AS tname, a.attname AS col, ps.seqmin::bigint AS minv
-      FROM pg_class s
-      JOIN pg_depend d ON d.objid = s.oid AND d.classid = 'pg_class'::regclass AND d.refclassid = 'pg_class'::regclass
-      JOIN pg_class t ON t.oid = d.refobjid
-      JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = d.refobjsubid
-      JOIN pg_namespace n ON n.oid = s.relnamespace
-      JOIN pg_sequence ps ON ps.seqrelid = s.oid
-     WHERE s.relkind = 'S' AND d.deptype IN ('a','i')
-       AND n.nspname = ${targetLit} AND t.relname IN (${tableIn})
+    SELECT n.nspname AS sch, t.relname AS tname, a.attname AS col,
+           substring(pg_get_expr(ad.adbin, ad.adrelid)
+                     from 'nextval\\(''([^'']+)''::regclass\\)') AS seqname
+      FROM pg_attrdef ad
+      JOIN pg_class t ON t.oid = ad.adrelid
+      JOIN pg_namespace n ON n.oid = t.relnamespace
+      JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ad.adnum
+     WHERE n.nspname = ${targetLit} AND t.relname IN (${tableIn})
+       AND pg_get_expr(ad.adbin, ad.adrelid) LIKE 'nextval(%'
   LOOP
+    sq := (CASE WHEN position('.' in r.seqname) = 0
+                THEN format('%I.%I', r.sch, r.seqname) ELSE r.seqname END)::regclass;
+    SELECT ps.seqmin::bigint INTO minv FROM pg_sequence ps WHERE ps.seqrelid = sq;
     EXECUTE format('SELECT max(%I) FROM %I.%I', r.col, r.sch, r.tname) INTO mx;
-    IF mx IS NULL THEN PERFORM setval(r.seq, r.minv, false);
-    ELSE PERFORM setval(r.seq, GREATEST(mx, r.minv), true); END IF;
+    IF mx IS NULL THEN PERFORM setval(sq, minv, false);
+    ELSE PERFORM setval(sq, GREATEST(mx, minv), true); END IF;
   END LOOP;
 END $devbelt_sync$;`, undefined, SKIP);
-        }
+          }
       } catch (err) {
         errors.push(`schema objects: ${(err as Error).message}`);
         if (haltOnError) throw new Error(`schema objects: ${(err as Error).message}`);
