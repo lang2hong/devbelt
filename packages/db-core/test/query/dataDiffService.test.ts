@@ -358,4 +358,24 @@ describe('DataDiffService 分页策略（PG keyset 丢行回归）', () => {
     // v: null vs 缺失等价；t: Date(2024-01-01T00:00:00Z) 与 '2024-01-01 00:00:00' 归一后相等。
     expect(result.diffs[0].rows).toEqual([]);
   });
+
+  it('PG：sourceSchema/targetSchema 限定 SELECT 与同步 SQL（同连接跨 schema）', async () => {
+    const sourceConn = new FakeConnection();
+    sourceConn.setResponses([{ rows: [{ id: 1, name: 'A' }] }]);
+    const targetConn = new FakeConnection();
+    targetConn.setResponses([{ rows: [] }]);
+    const pg = new PostgreSqlDialect();
+    const result = await DataDiffService.diff(
+      new QueryService(sourceConn, pg), meta([{ name: 'id', isPrimary: true }, { name: 'name' }]), 'mydb',
+      new QueryService(targetConn, pg), 'mydb', ['users'],
+      { sourceSchema: 'sales', targetSchema: 'staging' },
+    );
+    // 源/目标 SELECT 各自限定到对应 schema。
+    expect(sourceConn.sqls.some((s) => s.includes('FROM "sales"."users"'))).toBe(true);
+    expect(targetConn.sqls.some((s) => s.includes('FROM "staging"."users"'))).toBe(true);
+
+    const sql = DataDiffService.generateSyncSql(result, 'mydb', new QueryService(targetConn, pg), 'staging');
+    expect(sql).toContain('INSERT INTO "staging"."users"');
+    expect(sql).not.toContain('"sales"."users"');
+  });
 });

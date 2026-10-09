@@ -258,9 +258,66 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
   sub('devbelt.syncDatabase', async (node: DbTreeNode) => {
     if (!node?.conn || !node?.database) return;
     if (node.conn.dbType === DatabaseType.REDIS) return; // SQL 专用：禁止 Redis 进入
-    // 同 compareSchema：PG 无法在单连接上跨库同步结构（见上）。
+    // PG 连接绑定单库：改为在同一连接上把一个 **schema** 的结构+数据同步到另一个 schema。
     if (node.conn.dbType === DatabaseType.PG) {
-      vscode.window.showWarningMessage(l10n('schema.pgCrossDbUnsupported'));
+      const pgSession = await manager.connectSql(node.conn, node.database);
+      const sourceSchema = pgSchemaFor(node.conn, node.schema)
+        ?? ((node.conn.schema && node.conn.schema.trim()) || 'public');
+      const schemas = (await pgSession.metadata.getSchemas()).filter((s) => s !== sourceSchema);
+      if (!schemas.length) {
+        vscode.window.showWarningMessage(l10n('compare.noOtherSchemas'));
+        return;
+      }
+      const target = await vscode.window.showQuickPick(
+        schemas.map((s) => ({ label: s, value: s })),
+        { placeHolder: l10n('sync.chooseSchema', { schema: sourceSchema }) },
+      );
+      if (!target) return;
+      // 目标即同一连接：只读标记查本连接。
+      if (!ensureWritable(node.conn)) return;
+      const pgSyncBtn = l10n('sync.confirmAction');
+      const pgConfirmed = await vscode.window.showWarningMessage(
+        l10n('sync.confirm', {
+          database: `${node.database}.${sourceSchema}`,
+          target: target.value,
+          conn: node.conn.name || node.conn.host,
+        }),
+        { modal: true },
+        pgSyncBtn,
+      );
+      if (pgConfirmed !== pgSyncBtn) return;
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: l10n('sync.progressTitle'), cancellable: true },
+        async (progress, token) => {
+          const pgResult = await DataTransferService.transferDatabase(
+            pgSession.query, pgSession.metadata, pgSession.table, node.database!,
+            pgSession.query, pgSession.metadata, node.database!,
+            {
+              onProgress: (p: { table: string; phase: string }) => progress.report({ message: `${p.table} (${p.phase})` }),
+              isCancelled: () => token.isCancellationRequested,
+              sourceSchema,
+              targetSchema: target.value,
+            },
+          );
+          if (pgResult.errors.length) {
+            vscode.window.showWarningMessage(
+              l10n('sync.doneErrors', { errors: pgResult.errors.length, count: pgResult.tablesSynced }),
+            );
+          } else {
+            vscode.window.showInformationMessage(l10n('sync.done', { count: pgResult.tablesSynced }));
+          }
+          await recordBulkHistory(
+            deps, node.conn!,
+            l10n('history.transfer', {
+              source: `${node.database}.${sourceSchema}`,
+              target: target.value,
+              count: pgResult.tablesSynced,
+            }),
+            node.database!,
+          );
+          treeProvider.refresh();
+        },
+      );
       return;
     }
 

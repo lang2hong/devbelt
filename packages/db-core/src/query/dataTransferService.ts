@@ -26,6 +26,9 @@ export interface TransferOptions {
   pageSize?: number;
   onProgress?: (progress: TransferProgress) => void;
   isCancelled?: () => boolean;
+  /** PG：源/目标 schema（同连接跨 schema 同步）。 */
+  sourceSchema?: string;
+  targetSchema?: string;
 }
 
 export class DataTransferService {
@@ -39,15 +42,15 @@ export class DataTransferService {
     targetDb: string,
     options: TransferOptions = {},
   ): Promise<{ tablesSynced: number; errors: string[] }> {
-    const { tables: tableFilter, includeData = true, pageSize = 1000, onProgress, isCancelled } = options;
+    const { tables: tableFilter, includeData = true, pageSize = 1000, onProgress, isCancelled, sourceSchema, targetSchema } = options;
     const errors: string[] = [];
 
-    const schemaDiffs = await SchemaDiffService.diff(sourceMeta, sourceDb, targetMeta, targetDb);
+    const schemaDiffs = await SchemaDiffService.diff(sourceMeta, sourceDb, targetMeta, targetDb, sourceSchema, targetSchema);
     // 按表名索引，避免循环里对 schemaDiffs 反复线性查找（O(n²)）。
     const diffByName = new Map(schemaDiffs.map((d) => [d.tableName, d]));
     const tableList = tableFilter
       ?? schemaDiffs.map((d) => d.tableName).concat(
-        (await sourceMeta.getTables(sourceDb)).map((t) => t.name).filter((n) => !diffByName.has(n)),
+        (await sourceMeta.getTables(sourceDb, sourceSchema)).map((t) => t.name).filter((n) => !diffByName.has(n)),
       );
 
     const uniqueTables = [...new Set(tableList)];
@@ -70,7 +73,7 @@ export class DataTransferService {
             throw new Error('cross-database-type schema sync is not supported');
           }
           const syncSql = await SchemaDiffService.generateSyncSql(
-            [diff], targetDb, sourceTable, sourceDb, targetQuery.dialect,
+            [diff], targetDb, sourceTable, sourceDb, targetQuery.dialect, { sourceSchema, targetSchema },
           );
           const statements = splitExecutableStatements(syncSql, scanOptionsForDialect(targetQuery.dialect));
           for (const stmt of statements) {
@@ -92,7 +95,7 @@ export class DataTransferService {
           await this.syncTableData(
             sourceQuery, sourceMeta, sourceDb, table,
             targetQuery, targetMeta, targetDb,
-            { pageSize, isCancelled },
+            { pageSize, isCancelled, sourceSchema, targetSchema },
           );
         } catch (err) {
           errors.push(`${table}: data sync failed - ${(err as Error).message}`);
@@ -113,17 +116,19 @@ export class DataTransferService {
     targetQuery: QueryService,
     _targetMeta: MetadataService,
     targetDb: string,
-    options: { pageSize?: number; isCancelled?: () => boolean },
+    options: { pageSize?: number; isCancelled?: () => boolean; sourceSchema?: string; targetSchema?: string },
   ): Promise<void> {
     const dataDiff = await DataDiffService.diff(
       sourceQuery, sourceMeta, sourceDb,
       targetQuery, targetDb,
       [table],
+      { sourceSchema: options.sourceSchema, targetSchema: options.targetSchema },
     );
     const syncSql = DataDiffService.generateSyncSql(
       { diffs: dataDiff.diffs, sourceDb, targetDb },
       targetDb,
       targetQuery,
+      options.targetSchema,
     );
     const statements = splitExecutableStatements(syncSql, scanOptionsForDialect(targetQuery.dialect));
     for (const stmt of statements) {

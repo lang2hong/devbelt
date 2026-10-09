@@ -22,6 +22,7 @@ import { deleteByPatternKeys, PatternDeleteError, scanPatternKeys } from './redi
 import { canUseErDiagram } from '@devbelt/db-host/sync/entitlementGate';
 import { configureBackupSchedule } from './backupWizard';
 import { confirmProductionWrite } from '../utils/sqlSafety';
+import { pgSchemaFor } from '../utils/sql';
 import { l10n } from '../i18n';
 
 /** H5：解码含替换符（非 UTF-8）的键名/前缀不可按文本操作。 */
@@ -142,10 +143,22 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     // 数据对比
     vscode.commands.registerCommand('devbelt.compareData', async (node: any) => {
       if (!node?.conn || !node?.database) return;
-      // PG 连接绑定单个数据库（无 USE），同连接无法跨库读取目标库数据：对比会退化成
-      // 拿库和自己比。与 compareSchema/syncDatabase 同口径，明确拒绝而不是给误导结果。
+      // PG 连接绑定单个数据库（无 USE）：改为在同一连接上对比两个 **schema** 的数据。
       if (node.conn.dbType === 'PG') {
-        vscode.window.showWarningMessage(l10n('schema.pgCrossDbUnsupported'));
+        const session = await manager.connectSql(node.conn, node.database);
+        const sourceSchema = pgSchemaFor(node.conn, node.schema)
+          ?? ((node.conn.schema && node.conn.schema.trim()) || 'public');
+        const schemas = (await session.metadata.getSchemas()).filter((s) => s !== sourceSchema);
+        if (!schemas.length) {
+          vscode.window.showWarningMessage(l10n('compare.noOtherSchemas'));
+          return;
+        }
+        const targetSchema = await vscode.window.showQuickPick(
+          schemas.map((s) => ({ label: s, value: s })),
+          { placeHolder: l10n('compare.chooseSchema', { schema: sourceSchema }) },
+        );
+        if (!targetSchema) return;
+        void DataDiffView.open(node.conn, node.database, node.conn, node.database, manager, sourceSchema, targetSchema.value);
         return;
       }
       const session = await manager.connectSql(node.conn, node.database);

@@ -1365,6 +1365,16 @@
           "group": "5_tools"
         },
         {
+          "command": "devbelt.compareData",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\.PG$/",
+          "group": "5_tools"
+        },
+        {
+          "command": "devbelt.compareData",
+          "when": "view == devbelt.explorer && viewItem =~ /^schema\\.PG$/",
+          "group": "5_tools"
+        },
+        {
           "command": "devbelt.importData",
           "when": "view == devbelt.explorer && viewItem =~ /^database\\./",
           "group": "4_data"
@@ -1382,6 +1392,16 @@
         {
           "command": "devbelt.syncDatabase",
           "when": "view == devbelt.explorer && viewItem == database.MYSQL",
+          "group": "4_data"
+        },
+        {
+          "command": "devbelt.syncDatabase",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\.PG$/",
+          "group": "4_data"
+        },
+        {
+          "command": "devbelt.syncDatabase",
+          "when": "view == devbelt.explorer && viewItem =~ /^schema\\.PG$/",
           "group": "4_data"
         },
         {

@@ -8,6 +8,7 @@ import { TableService } from '../../src/query/tableService';
 import { PostgreSqlDialect } from '../../src/dialect/postgreSqlDialect';
 import { BackupService } from '../../src/query/backupService';
 import { SchemaDiffService } from '../../src/query/schemaDiffService';
+import { DataDiffService } from '../../src/query/dataDiffService';
 import { withDatabaseInUrl } from '../../src/utils/connectionUrl';
 
 // 与生产 PostgreSqlConnection 一致：禁用 pg 对日期/JSON 的默认解析。
@@ -273,6 +274,29 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
     } finally {
       await raw.query(`ALTER TABLE IF EXISTS ${S2}.orders DROP COLUMN IF EXISTS extra`);
       await raw.query(`ALTER TABLE IF EXISTS ${S1}.orders DROP COLUMN IF EXISTS extra`);
+    }
+  });
+
+  it('4B：同连接跨 schema 数据对比（限定各 schema）并同步到目标 schema', async () => {
+    const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
+    // S1/S2 的 dept 初始相同；改 S1 一行制造差异。
+    await raw.query(`UPDATE ${S1}.dept SET name = 'changed' WHERE id = 10`);
+    try {
+      const r = await DataDiffService.diff(
+        query, meta, dbName, query, dbName, ['dept'],
+        { sourceSchema: S1, targetSchema: S2 },
+      );
+      const dept = r.diffs.find((d) => d.tableName === 'dept')!;
+      expect(dept.rows.some((row) => row.status === 'changed')).toBe(true);
+
+      const sql = DataDiffService.generateSyncSql(r, dbName, query, S2);
+      expect(sql).toContain(`"${S2}"."dept"`);
+      await raw.query(sql);
+      const back = await raw.query(`SELECT name FROM ${S2}.dept WHERE id = 10`);
+      expect(back.rows[0].name).toBe('changed');
+    } finally {
+      await raw.query(`UPDATE ${S2}.dept SET name = 'd' WHERE id = 10`);
+      await raw.query(`UPDATE ${S1}.dept SET name = 'd' WHERE id = 10`);
     }
   });
 }, 60_000);

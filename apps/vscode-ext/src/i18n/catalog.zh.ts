@@ -758,6 +758,7 @@ export const zh: MessageCatalog = {
   'sync.noOtherConnections': '没有其他连接可供同步。',
   'sync.chooseConnection': '将 "{database}" 同步到哪个连接？',
   'sync.chooseDatabase': '同步到哪个数据库？',
+  'sync.chooseSchema': '将 "{schema}" 同步到哪个 schema？',
   'restore.selectFile': '选择 SQL 导出文件',
   'restore.done': '恢复完成：已执行 {count} 条语句。',
   'sync.done': '同步完成：已同步 {count} 张表。',

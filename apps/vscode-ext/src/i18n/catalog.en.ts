@@ -780,6 +780,7 @@ export const en: MessageCatalog = {
   'sync.noOtherConnections': 'No other connections to sync to.',
   'sync.chooseConnection': 'Sync "{database}" to which connection?',
   'sync.chooseDatabase': 'Sync to which database?',
+  'sync.chooseSchema': 'Sync "{schema}" to which schema?',
   'restore.selectFile': 'Select SQL Dump File',
   'restore.done': 'Restore complete: {count} statements executed.',
   'sync.done': 'Sync complete: {count} tables synced.',

@@ -15,8 +15,12 @@ export class DataDiffView extends BaseWebView {
     private readonly targetConn: SavedConnection,
     private readonly targetDb: string,
     private readonly manager: ConnectionManager,
+    private readonly sourceSchema?: string,
+    private readonly targetSchema?: string,
   ) {
-    super('devbelt.dataDiff', `Data Diff: ${sourceDb} → ${targetDb}`);
+    const src = sourceSchema ? `${sourceDb}.${sourceSchema}` : sourceDb;
+    const tgt = targetSchema ? `${targetDb}.${targetSchema}` : targetDb;
+    super('devbelt.dataDiff', `Data Diff: ${src} → ${tgt}`);
     this.manager.retain(sourceConn.id);
     this.manager.retain(targetConn.id);
   }
@@ -29,9 +33,11 @@ export class DataDiffView extends BaseWebView {
     targetConn: SavedConnection,
     targetDb: string,
     manager: ConnectionManager,
+    sourceSchema?: string,
+    targetSchema?: string,
   ): Promise<void> {
     if (DataDiffView.current) DataDiffView.current.dispose();
-    const view = new DataDiffView(sourceConn, sourceDb, targetConn, targetDb, manager);
+    const view = new DataDiffView(sourceConn, sourceDb, targetConn, targetDb, manager, sourceSchema, targetSchema);
     DataDiffView.current = view;
   }
 
@@ -50,9 +56,9 @@ export class DataDiffView extends BaseWebView {
       try {
         const diff = await this.computeDiff();
         const session = await this.manager.connectSql(this.targetConn);
-        const sql = DataDiffService.generateSyncSql(diff, this.targetDb, session.query);
+        const sql = DataDiffService.generateSyncSql(diff, this.targetDb, session.query, this.targetSchema);
         // 破坏性 DML：先经只读/生产/高危确认门禁，再执行并审计。
-        if (!(await confirmSqlExecution(this.targetConn, sql, this.manager.scanOptionsFor?.(this.targetConn), { database: this.targetDb }))) {
+        if (!(await confirmSqlExecution(this.targetConn, sql, this.manager.scanOptionsFor?.(this.targetConn), { database: this.targetDb, schema: this.targetSchema }))) {
           this.post({ type: 'error', message: l10n('transfer.cancelled') });
           return;
         }
@@ -80,6 +86,8 @@ export class DataDiffView extends BaseWebView {
     return DataDiffService.diff(
       sourceSession.query, sourceSession.metadata, this.sourceDb,
       targetSession.query, this.targetDb,
+      undefined,
+      { sourceSchema: this.sourceSchema, targetSchema: this.targetSchema },
     );
   }
 

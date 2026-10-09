@@ -41,26 +41,28 @@ export class DataDiffService {
     targetQuery: QueryService,
     targetDb: string,
     tables?: string[],
+    opts: { sourceSchema?: string; targetSchema?: string } = {},
   ): Promise<DataDiffResult> {
-    const tableList = tables ?? (await sourceMeta.getTables(sourceDb)).map((t) => t.name);
+    const { sourceSchema, targetSchema } = opts;
+    const tableList = tables ?? (await sourceMeta.getTables(sourceDb, sourceSchema)).map((t) => t.name);
     const diffs: TableDataDiff[] = [];
 
     for (const table of tableList) {
       // 排序/游标列必须是真实主键（NOT NULL 且唯一）；无主键时留空 → OFFSET 分页（完整）。
       // 行匹配键列则回退全列（无主键表的身份），但绝不拿它当 keyset 游标（可空列会静默丢行）。
-      const orderColumns = await this.getPkColumns(sourceMeta, table, sourceDb);
-      const keyColumns = orderColumns.length ? orderColumns : await this.getKeyColumns(sourceMeta, table, sourceDb);
-      const columnNames = await this.getColumnNames(sourceMeta, table, sourceDb);
+      const orderColumns = await this.getPkColumns(sourceMeta, table, sourceDb, sourceSchema);
+      const keyColumns = orderColumns.length ? orderColumns : await this.getKeyColumns(sourceMeta, table, sourceDb, sourceSchema);
+      const columnNames = await this.getColumnNames(sourceMeta, table, sourceDb, sourceSchema);
       if (!keyColumns.length) continue;
       // 仅当主键列是数值型且两侧同方言时才做有序归并：文本主键的 ORDER BY 受 collation
       // 影响，JS 比较未必与 DB 一致，归并会错位。
       const mergeSafe = orderColumns.length > 0
         && sourceQuery.dialect.dbType === targetQuery.dialect.dbType
-        && await this.pkColumnsNumeric(sourceMeta, table, orderColumns, sourceDb);
+        && await this.pkColumnsNumeric(sourceMeta, table, orderColumns, sourceDb, sourceSchema);
 
       const diff = await this.diffTable(
         sourceQuery, table, sourceDb, orderColumns, keyColumns, columnNames,
-        targetQuery, targetDb, mergeSafe,
+        targetQuery, targetDb, mergeSafe, sourceSchema, targetSchema,
       );
       diffs.push(diff);
     }
@@ -69,9 +71,9 @@ export class DataDiffService {
   }
 
   /** 真实主键列（仅 isPrimary）；无则空数组。 */
-  private static async getPkColumns(meta: MetadataService, table: string, db?: string): Promise<string[]> {
+  private static async getPkColumns(meta: MetadataService, table: string, db?: string, schema?: string): Promise<string[]> {
     try {
-      const cols = await meta.getColumns(table, db);
+      const cols = await meta.getColumns(table, db, schema);
       return cols.filter((c) => c.isPrimary).map((c) => c.name);
     } catch {
       return [];
@@ -79,9 +81,9 @@ export class DataDiffService {
   }
 
   /** 主键列是否全为数值型（决定能否安全做 JS 有序归并）。 */
-  private static async pkColumnsNumeric(meta: MetadataService, table: string, pkColumns: string[], db?: string): Promise<boolean> {
+  private static async pkColumnsNumeric(meta: MetadataService, table: string, pkColumns: string[], db?: string, schema?: string): Promise<boolean> {
     try {
-      const cols = await meta.getColumns(table, db);
+      const cols = await meta.getColumns(table, db, schema);
       return pkColumns.every((name) => {
         const col = cols.find((c) => c.name === name);
         return !!col && NUMERIC_PK_RE.test(String(col.simpleType || col.type));
@@ -92,18 +94,18 @@ export class DataDiffService {
   }
 
   /** 行匹配键列：优先主键，无主键时回退全列（仅供建映射，不作游标）。 */
-  private static async getKeyColumns(meta: MetadataService, table: string, db?: string): Promise<string[]> {
+  private static async getKeyColumns(meta: MetadataService, table: string, db?: string, schema?: string): Promise<string[]> {
     try {
-      const cols = await meta.getColumns(table, db);
+      const cols = await meta.getColumns(table, db, schema);
       return cols.map((c) => c.name);
     } catch {
       return [];
     }
   }
 
-  private static async getColumnNames(meta: MetadataService, table: string, db?: string): Promise<string[]> {
+  private static async getColumnNames(meta: MetadataService, table: string, db?: string, schema?: string): Promise<string[]> {
     try {
-      const cols = await meta.getColumns(table, db);
+      const cols = await meta.getColumns(table, db, schema);
       return cols.map((c) => c.name);
     } catch {
       return [];
@@ -120,6 +122,8 @@ export class DataDiffService {
     targetQuery: QueryService,
     targetDb: string,
     mergeSafe = false,
+    sourceSchema?: string,
+    targetSchema?: string,
   ): Promise<TableDataDiff> {
     // 无键列会退化成 `ORDER BY `（语法错误）且所有行 key 都是空串而互相覆盖，
     // 必须显式拒绝，而不是生成无效 SQL。
@@ -128,8 +132,16 @@ export class DataDiffService {
     }
     const wrap = (id: string) => sourceQuery.dialect.wrap(id);
     const targetWrap = (id: string) => targetQuery.dialect.wrap(id);
-    const qualifiedSource = qualifyTable(sourceQuery.dialect.dbType, wrap(table), sourceDb ? wrap(sourceDb) : undefined);
-    const qualifiedTarget = qualifyTable(targetQuery.dialect.dbType, targetWrap(table), targetDb ? targetWrap(targetDb) : undefined);
+    const qualifiedSource = qualifyTable(
+      sourceQuery.dialect.dbType, wrap(table),
+      sourceDb ? wrap(sourceDb) : undefined,
+      sourceSchema ? wrap(sourceSchema) : undefined,
+    );
+    const qualifiedTarget = qualifyTable(
+      targetQuery.dialect.dbType, targetWrap(table),
+      targetDb ? targetWrap(targetDb) : undefined,
+      targetSchema ? targetWrap(targetSchema) : undefined,
+    );
 
     const colList = columnNames.map((c) => wrap(c)).join(', ');
     const targetColList = columnNames.map((c) => targetWrap(c)).join(', ');
@@ -319,7 +331,7 @@ export class DataDiffService {
     return new Date(ms - offsetMinutes * 60000).toISOString();
   }
 
-  static generateSyncSql(diffs: DataDiffResult, targetDb: string, targetQuery: QueryService): string {
+  static generateSyncSql(diffs: DataDiffResult, targetDb: string, targetQuery: QueryService, targetSchema?: string): string {
     const parts: string[] = [];
     parts.push(`-- Data sync: ${diffs.sourceDb} → ${diffs.targetDb}`);
     parts.push('');
@@ -331,7 +343,12 @@ export class DataDiffService {
       // 标识符引用规则以目标为准。此处曾用源方言（MySQL→PG 时往 PG 发反引号
       // + 反斜杠倍增，目标库拒绝或数据损坏）。
       const esc = (v: unknown) => targetQuery.dialect.escapeValue(v);
-      const qualifiedTarget = qualifyTable(targetQuery.dialect.dbType, wrap(td.tableName), targetDb ? wrap(targetDb) : undefined);
+      // PG：显式 targetSchema 时限定到目标 schema（同连接跨 schema 同步）；否则交 search_path。
+      const qualifiedTarget = qualifyTable(
+        targetQuery.dialect.dbType, wrap(td.tableName),
+        targetDb ? wrap(targetDb) : undefined,
+        targetSchema ? wrap(targetSchema) : undefined,
+      );
       const colList = td.columnNames.map(wrap).join(', ');
 
       const added = td.rows.filter((r) => r.status === 'added');
