@@ -196,7 +196,8 @@ export class PostgreSqlConnection extends IConnection {
       if (this.config.schema) {
         try {
           const wrapped = `"${validateSchemaIdent(this.config.schema).replace(/"/g, '""')}"`;
-          this.client.query(`SET search_path TO ${wrapped}`, (e: any) => callback(e ?? null));
+          // 保留 public：装在 public 下的扩展函数（uuid_generate_v4/pgcrypto 等）仍需可解析。
+          this.client.query(`SET search_path TO ${wrapped}, public`, (e: any) => callback(e ?? null));
           return;
         } catch { /* 非法 schema：退回服务端默认 search_path */ }
       }

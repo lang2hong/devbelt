@@ -55,6 +55,13 @@ export interface TableDiff {
   columns: ColumnDiff[];
 }
 
+/** 字段感知的跨 schema 比较归一化器（类型/默认值/注释分别处理）。 */
+interface ColumnNormalizers {
+  type(v: unknown): string;
+  default(v: unknown): string;
+  comment(v: unknown): string;
+}
+
 /**
  * 结构差异服务：比对两个数据库的表结构，生成同步 SQL。
  *
@@ -106,7 +113,7 @@ export class SchemaDiffService {
         sourceMeta.getColumns(t.name, sourceDb, sourceSchema),
         targetMeta.getColumns(t.name, targetDb, targetSchema),
       ]);
-      const colDiffs = this.diffColumns(sourceCols, targetCols, makeSchemaNormalizer(sourceSchema, targetSchema));
+      const colDiffs = this.diffColumns(sourceCols, targetCols, makeSchemaNormalizers(sourceSchema, targetSchema));
       result.push({
         tableName: t.name,
         status: colDiffs.some((c) => c.status !== 'unchanged') ? 'changed' : 'unchanged',
@@ -117,8 +124,8 @@ export class SchemaDiffService {
     return result;
   }
 
-  /** 比对列差异。`normalize` 用于跨 schema 比较：抹掉 schema 前缀，使两侧等价（如同名 serial 的 nextval）。 */
-  private static diffColumns(source: ColumnMeta[], target: ColumnMeta[], normalize: (v: unknown) => string = (v) => (v === undefined || v === null ? '' : String(v))): ColumnDiff[] {
+  /** 比对列差异。`norm` 用于跨 schema 比较：按字段定向抹掉 schema 前缀（不会误伤字面量/注释）。 */
+  private static diffColumns(source: ColumnMeta[], target: ColumnMeta[], norm: ColumnNormalizers = plainNormalizers()): ColumnDiff[] {
     const sourceMap = new Map(source.map((c) => [c.name, c]));
     const targetMap = new Map(target.map((c) => [c.name, c]));
     const diffs: ColumnDiff[] = [];
@@ -137,11 +144,11 @@ export class SchemaDiffService {
         // 变更判定：类型 / NOT NULL / 自增 / 默认值 / 注释（后三者此前未比较，
         // 只改默认值或注释会被误判 unchanged、永不同步）。
         const changed =
-          normalize(srcCol.type) !== normalize(tgtCol.type)
+          norm.type(srcCol.type) !== norm.type(tgtCol.type)
           || !!tgtCol.isNotNull !== notNull
           || !!srcCol.isAutoIncrement !== !!tgtCol.isAutoIncrement
-          || normDefault(normalize(srcCol.defaultValue)) !== normDefault(normalize(tgtCol.defaultValue))
-          || normComment(normalize(srcCol.comment)) !== normComment(normalize(tgtCol.comment));
+          || norm.default(srcCol.defaultValue) !== norm.default(tgtCol.defaultValue)
+          || norm.comment(srcCol.comment) !== norm.comment(tgtCol.comment);
         if (changed) {
           diffs.push({
             columnName: name,
@@ -290,11 +297,9 @@ export class SchemaDiffService {
     const targetTable = (name: string): string => (target ? `${wrapSchema(target)}.${wrap(name)}` : wrap(name));
     // 跨 schema：把默认表达式/类型名里的源 schema 前缀改写到目标 schema
     // （如 nextval('s1.x_seq') → nextval('s2.x_seq')）。
-    const rewrite = (text: unknown): string => rewriteSchemaPrefix(toCompareString(text), opts.sourceSchema, target);
+    const rewrite = (text: unknown): string => rewritePgSchemaRefs(toCompareString(text), opts.sourceSchema, target);
     const parts: string[] = [
       `-- Schema sync: ${sqlCommentSafe(sourceDb)} → ${target ? wrapSchema(target) : 'target'}`,
-      '-- NOTE: 仅生成表/列变更；不含主键/唯一/CHECK/外键/索引/视图/函数/序列。',
-      '--   新增 serial/自定义类型列不会自动在目标 schema 创建对应序列/类型，默认值可能失效。',
       '',
     ];
     for (const d of diffs) {
@@ -446,28 +451,79 @@ function toCompareString(v: unknown): string {
   return v === undefined || v === null ? '' : String(v);
 }
 
-/** 从文本移除给定 schema 的前缀（含 `"schema".` 形式），用于跨 schema 等价比较。 */
-function stripSchemaPrefixes(text: string, schemas: readonly (string | undefined)[]): string {
-  let s = text;
+/** 无 schema 时的普通归一化（行为与旧版一致：类型字符串化、默认值 trim、注释原样）。 */
+function plainNormalizers(): ColumnNormalizers {
+  return {
+    type: toCompareString,
+    default: (v) => normDefault(toCompareString(v)),
+    comment: (v) => normComment(toCompareString(v)),
+  };
+}
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** 字面量内 `schema.seq` / `"schema".seq` / `"schema"."seq"` → 去掉 schema 限定。 */
+function stripSchemaInLiteral(lit: string, schemas: readonly (string | undefined)[]): string {
   for (const sc of schemas) {
     if (!sc) continue;
-    const quoted = `"${sc.replace(/"/g, '""')}"`;
-    s = s.split(`${quoted}.`).join('').split(`${sc}.`).join('');
+    const q = `"${sc.replace(/"/g, '""')}"`;
+    if (lit.startsWith(`${q}.`)) return lit.slice(q.length + 1);
+    if (lit.startsWith(`${sc}.`)) return lit.slice(sc.length + 1);
+  }
+  return lit;
+}
+
+/** 只从 `nextval('<schema>.<seq>'::regclass)` 的字面量里剥掉 schema 前缀（不碰其它字面量）。 */
+function stripRegclassSchema(text: string, schemas: readonly (string | undefined)[]): string {
+  return text.replace(/nextval\('([^']*)'::regclass\)/g, (_m, lit: string) => `nextval('${stripSchemaInLiteral(lit, schemas)}'::regclass)`);
+}
+
+/**
+ * 仅去掉**标识符上下文**里的 schema 限定（类型名），前置字符不得是 `[\w$"']`，
+ * 从而跳过 `'app.example.com'` 之类字符串字面量与已带引号的标识符。
+ */
+function stripIdentifierSchema(text: string, schemas: readonly (string | undefined)[]): string {
+  let s = text;
+  const boundary = '(?<![\\w$"\'])';
+  for (const sc of schemas) {
+    if (!sc) continue;
+    const q = `"${sc.replace(/"/g, '""')}"`;
+    s = s.replace(new RegExp(`${boundary}${escapeRe(q)}\\.`, 'g'), '');
+    s = s.replace(new RegExp(`${boundary}${escapeRe(sc)}\\.`, 'g'), '');
   }
   return s;
 }
 
-/** 跨 schema 比较归一化器：抹掉源/目标 schema 前缀；无 schema 时退化为普通字符串化。 */
-function makeSchemaNormalizer(sourceSchema?: string, targetSchema?: string): (v: unknown) => string {
-  if (!sourceSchema && !targetSchema) return toCompareString;
+/** 字段感知的跨 schema 比较归一化器：类型抹标识符限定，默认值只抹 regclass 字面量，注释原样。 */
+function makeSchemaNormalizers(sourceSchema?: string, targetSchema?: string): ColumnNormalizers {
+  if (!sourceSchema && !targetSchema) return plainNormalizers();
   const schemas = [sourceSchema, targetSchema];
-  return (v: unknown) => stripSchemaPrefixes(toCompareString(v), schemas);
+  return {
+    type: (v) => stripIdentifierSchema(toCompareString(v), schemas),
+    default: (v) => normDefault(stripRegclassSchema(toCompareString(v), schemas)),
+    comment: (v) => normComment(toCompareString(v)),
+  };
 }
 
-/** 把文本里的源 schema 前缀改写为目标 schema（含 `"schema".` 形式）。 */
-function rewriteSchemaPrefix(text: string, from?: string, to?: string): string {
+/**
+ * 把已知形态里的源 schema 前缀改写为目标 schema：
+ * `nextval('<from>.<seq>'::regclass)` 字面量 + 标识符上下文的类型名限定。
+ * 不做无边界子串替换，避免误改 `'app.example.com'` 等字面量。
+ */
+function rewritePgSchemaRefs(text: string, from?: string, to?: string): string {
   if (!text || !from || !to || from === to) return text;
   const fromQ = `"${from.replace(/"/g, '""')}"`;
   const toQ = `"${to.replace(/"/g, '""')}"`;
-  return text.split(`${fromQ}.`).join(`${toQ}.`).split(`${from}.`).join(`${to}.`);
+  let s = text.replace(/nextval\('([^']*)'::regclass\)/g, (_m, lit: string) => {
+    let l = lit;
+    if (l.startsWith(`${fromQ}.`)) l = `${toQ}.${l.slice(fromQ.length + 1)}`;
+    else if (l.startsWith(`${from}.`)) l = `${to}.${l.slice(from.length + 1)}`;
+    return `nextval('${l}'::regclass)`;
+  });
+  const boundary = '(?<![\\w$"\'])';
+  s = s.replace(new RegExp(`${boundary}${escapeRe(fromQ)}\\.`, 'g'), `${toQ}.`);
+  s = s.replace(new RegExp(`${boundary}${escapeRe(from)}\\.`, 'g'), `${to}.`);
+  return s;
 }

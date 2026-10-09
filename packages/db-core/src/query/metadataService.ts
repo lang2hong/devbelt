@@ -28,7 +28,12 @@ export class MetadataService {
     const sql = this.queryService.dialect.getSchemaListSql?.();
     if (!sql) return [];
     const result = await this.queryService.queryAll(sql);
-    return result.rows.map((row: any) => String(row.name ?? row.schema ?? row.nspname)).filter((x: string) => !!x);
+    return result.rows
+      .map((row: any) => String(row.name ?? row.schema ?? row.nspname))
+      .filter((x: string) => !!x)
+      // 过滤含格式/分隔字符（零宽、双向、U+2028/2029）的 schema 名：列出也无法操作
+      // （validateSchemaIdent 会拒绝），避免「能列出、一展开就报错」。
+      .filter((x: string) => !/[\p{Cf}\u2028\u2029]/u.test(x));
   }
 
   /** 查询表列表 */

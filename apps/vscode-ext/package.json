@@ -2005,6 +2005,12 @@
           "default": false,
           "description": "Automatically sync personal connections/groups/queries when unlocked. When off, sync only runs on explicit Sync Now / Pull / Push.",
           "markdownDescription": "解锁后自动同步个人连接/分组/查询。关闭时仅在手动「立即同步 / 拉取 / 推送」时同步。"
+        },
+        "devbelt.pg.syncEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Temporarily OFF: PostgreSQL cross-schema data+structure sync (syncDatabase). The sync transaction currently runs on a shared session and serial/sequence handling is incomplete; enable only for testing.",
+          "markdownDescription": "临时关闭：PostgreSQL 跨 schema 数据+结构同步（syncDatabase）。当前同步事务跑在共享会话上、且 serial/序列处理不完整，仅测试时开启。"
         }
       }
     },

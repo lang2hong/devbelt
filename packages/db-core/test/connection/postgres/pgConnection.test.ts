@@ -211,7 +211,7 @@ describe('schema / socketPath / timezone', () => {
     // 连接成功后发 `SET search_path TO <带引号标识符>`。
     client.connect.mockImplementation((cb: any) => cb(null));
     c.connect(() => {});
-    expect(client.query).toHaveBeenCalledWith('SET search_path TO "myschema"', expect.any(Function));
+    expect(client.query).toHaveBeenCalledWith('SET search_path TO "myschema", public', expect.any(Function));
   });
 
   it('socketPath 已是目录时原样使用；特殊 schema 连接后 SET（带引号），控制字符 schema 忽略', () => {
@@ -227,7 +227,7 @@ describe('schema / socketPath / timezone', () => {
     expect(conf.options).toBeUndefined();
     client.connect.mockImplementation((cb: any) => cb(null));
     c1.connect(() => {});
-    expect(client.query).toHaveBeenCalledWith('SET search_path TO "bad name"', expect.any(Function));
+    expect(client.query).toHaveBeenCalledWith('SET search_path TO "bad name", public', expect.any(Function));
 
     // 控制字符 schema：忽略，不发 SET。
     const c2 = new PostgreSqlConnection({ ...base, schema: 'a\u0000b' } as any);

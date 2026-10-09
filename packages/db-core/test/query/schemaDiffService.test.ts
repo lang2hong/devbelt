@@ -517,7 +517,31 @@ describe('SchemaDiffService', () => {
     const sql = await SchemaDiffService.generateSyncSql(added, 'db', tableService, 'db', undefined, { sourceSchema: 's1', targetSchema: 's2' });
     expect(sql).toContain("nextval('s2.t_seq'::regclass)");
     expect(sql).not.toContain("nextval('s1.t_seq'::regclass)");
-    // 范围声明。
-    expect(sql).toContain('不含主键/唯一/CHECK/外键/索引/视图/函数/序列');
+  });
+
+  it('PG 跨 schema：改写只作用于 regclass 与类型名，不误伤字符串字面量', async () => {
+    const pg = new PostgreSqlDialect();
+    const tableService = {
+      dbType: DatabaseType.PG,
+      wrapIdentifier: (id: string) => pg.wrap(id),
+      wrapSchemaIdentifier: (id: string) => pg.wrap(id),
+      getCreateSql: async () => '',
+      supports: () => true,
+    } as unknown as TableService;
+    const diffs = [{
+      tableName: 't',
+      status: 'changed' as const,
+      columns: [
+        { columnName: 'url', status: 'added' as const, sourceType: 'text', sourceDefault: "'app.example.com'::text" },
+        { columnName: 'id', status: 'added' as const, sourceType: 'app.myenum', sourceDefault: "nextval('app.t_id_seq'::regclass)" },
+      ],
+    }];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'db', tableService, 'db', undefined, { sourceSchema: 'app', targetSchema: 'staging' });
+    // 字符串字面量里的 app. 不改。
+    expect(sql).toContain("'app.example.com'::text");
+    expect(sql).not.toContain("'staging.example.com'");
+    // regclass 与类型名（标识符上下文）改写。
+    expect(sql).toContain("nextval('staging.t_id_seq'::regclass)");
+    expect(sql).toContain('staging.myenum');
   });
 });

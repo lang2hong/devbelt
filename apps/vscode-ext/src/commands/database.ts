@@ -231,7 +231,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
       const pgAdded = diffs.filter((d) => d.status === 'added').length;
       const pgRemoved = diffs.filter((d) => d.status === 'removed').length;
       const pgChanged = diffs.filter((d) => d.status === 'changed').length;
-      const pgHeader = `-- Diff: ${sqlCommentSafe(sourceSchema)} -> ${sqlCommentSafe(target.value)} (${pgAdded} added, ${pgRemoved} removed, ${pgChanged} changed)\n\n`;
+      const pgHeader = `${l10n('compare.syncScopeNote')}\n\n-- Diff: ${sqlCommentSafe(sourceSchema)} -> ${sqlCommentSafe(target.value)} (${pgAdded} added, ${pgRemoved} removed, ${pgChanged} changed)\n\n`;
       await openSqlDoc(pgHeader + syncSql);
       return;
     }
@@ -251,7 +251,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     const added = diffs.filter((d) => d.status === 'added').length;
     const removed = diffs.filter((d) => d.status === 'removed').length;
     const changed = diffs.filter((d) => d.status === 'changed').length;
-    const header = `-- Diff: ${sqlCommentSafe(node.database)} -> ${sqlCommentSafe(target.value)} (${added} added, ${removed} removed, ${changed} changed)\n\n`;
+    const header = `${l10n('compare.syncScopeNote')}\n\n-- Diff: ${sqlCommentSafe(node.database)} -> ${sqlCommentSafe(target.value)} (${added} added, ${removed} removed, ${changed} changed)\n\n`;
     await openSqlDoc(header + syncSql);
   });
 
@@ -260,6 +260,11 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (node.conn.dbType === DatabaseType.REDIS) return; // SQL 专用：禁止 Redis 进入
     // PG 连接绑定单库：改为在同一连接上把一个 **schema** 的结构+数据同步到另一个 schema。
     if (node.conn.dbType === DatabaseType.PG) {
+      // 临时门禁：PG 跨 schema 同步的事务/序列处理未收敛（N1/N2/N3），默认关闭。
+      if (!vscode.workspace.getConfiguration('devbelt').get<boolean>('pg.syncEnabled', false)) {
+        vscode.window.showWarningMessage(l10n('sync.pgDisabled'));
+        return;
+      }
       const pgSession = await manager.connectSql(node.conn, node.database);
       const sourceSchema = pgSchemaFor(node.conn, node.schema);
       if (!sourceSchema) { vscode.window.showWarningMessage(l10n('schema.pickSchemaNode')); return; }
