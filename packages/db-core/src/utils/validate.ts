@@ -37,7 +37,7 @@ export function validateIdent(name: string, maxLen: number = MAX_LEN): string {
  * 注入安全由引用层保证：所有调用点必须把结果放进 `wrap(...)`（标识符）或
  * 单引号翻倍的字符串字面量，绝不能裸拼。
  */
-export function validateSchemaIdent(name: string, maxLen: number = MAX_LEN): string {
+export function validateSchemaIdent(name: string, maxLen: number = 63): string {
   // 拒绝控制/格式字符：C0+C1+DEL（\p{Cc}）、零宽/双向（\p{Cf}）、行/段分隔（U+2028/2029）——
   // 它们能伪装确认框/审计里显示的 schema 名，或破坏引用。
   if (!name || /[\p{Cc}\p{Cf}\u2028\u2029]/u.test(name)) {
