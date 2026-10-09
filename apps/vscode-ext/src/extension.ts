@@ -10,6 +10,7 @@ import { BaseWebView } from './result/baseWebView';
 import { TableQueryView } from './result/tableQueryView';
 import { AuditLogger } from './utils/auditLogger';
 import { diagDispose, diagInfo, diagWarn, diagError } from './utils/diagnostics';
+import { installUnhandledRejectionGuard } from './utils/unhandledRejectionGuard';
 import { createUnmappedNodeReporter, type UnmappedNodeReporter } from './connection/redisTopology';
 import { purgeLegacyOrgCredentials } from './utils/legacyOrgCleanup';
 import { ToolsViewProvider } from './tools/toolsView';
@@ -41,6 +42,8 @@ import { AuthenticatorSyncBackend } from './authenticator/syncBackend';
 const SYNC_AUTO_SYNC_KEY = 'devbelt.sync.autoSync';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  // 宿主级兜底：忽略已知库内部（ioredis 关闭类）未处理拒绝，其它记错误但不崩宿主。
+  installUnhandledRejectionGuard();
   try {
     await activateImpl(context);
   } catch (err) {

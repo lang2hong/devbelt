@@ -15,6 +15,7 @@ import { RedisClient } from '@devbelt/db-core';
 import { ConnectionManager } from '../../src/connection/connectionManager';
 import { SshTunnel } from '../../src/connection/sshTunnel';
 import { UNMAPPED_DEAD_PORT } from '../../src/connection/redisTopology';
+import { installUnhandledRejectionGuard } from '../../src/utils/unhandledRejectionGuard';
 
 /**
  * Cluster / Sentinel over SSH 真实集成（P7 S4 项 1）。env-gated。
@@ -27,6 +28,14 @@ const CLUSTER_SEED = process.env.DEVBELT_DB_TEST_REDIS_CLUSTER;
 const SENTINEL_ADDR = process.env.DEVBELT_DB_TEST_REDIS_SENTINEL;
 const SSH_USER = 'tunnel';
 const SSH_PASS = 'tunnel-pass';
+
+/**
+ * D20 会故意把某 master 映射到死端口，ioredis 关闭该节点时 flush 内部队列会 reject
+ * `Connection is closed.`（库内部 promise，调用侧不可 catch）。用产品级守卫（接管模式）
+ * 忽略这一已知库内部错误；**其它未处理拒绝仍抛出**，硬门禁对本产品代码依旧成立。
+ * 仅在 Cluster-over-SSH 集成运行时安装（env-gated）。
+ */
+const uninstallRejectionGuard = CLUSTER_SEED ? installUnhandledRejectionGuard({ takeOver: true }) : undefined;
 
 function hostPort(addr: string): { host: string; port: number } {
   const [host, port] = addr.split(':');
@@ -89,6 +98,7 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
+  uninstallRejectionGuard?.();
   SshTunnel.configureHostKeyGate(undefined);
   for (const m of managers) m.disposeAll();
   server?.close();
