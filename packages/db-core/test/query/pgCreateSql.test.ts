@@ -55,6 +55,20 @@ describe('PG getCreateSql', () => {
   });
 
   /**
+   * P1：serial/identity 的默认值改由 pg_depend 反查**完全限定**的序列名，
+   * 避免 `pg_get_expr` 随 search_path 输出不带 schema 的 `nextval('seq')`
+   * （跨 schema 同步会错误绑定到源序列）。
+   */
+  it('serial 默认值经 pg_depend 反查完全限定序列名', async () => {
+    const { con, table } = pgSvc();
+    await table.getCreateSql('t1');
+    const sql = con.sqls[0];
+    expect(sql).toContain('pg_depend');
+    expect(sql).toContain("'nextval('");
+    expect(sql).toContain('quote_ident(sn.nspname)');
+  });
+
+  /**
    * schema 过滤原本是 `quote_literal("dbname")`。
    *
    * `this.wrap(database)` 生成的是**双引号标识符** `"dbname"`，而 PG 里双引号

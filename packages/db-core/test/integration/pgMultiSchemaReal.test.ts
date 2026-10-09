@@ -277,6 +277,21 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
     }
   });
 
+  it('P1：新增含 serial 列的表，同步 SQL 的目标默认值指向目标 schema 序列（非源）', async () => {
+    const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
+    const t = `p1ser_${stamp}`;
+    await raw.query(`CREATE TABLE ${S1}."${t}" (id serial PRIMARY KEY, v text)`);
+    try {
+      const diffs = await SchemaDiffService.diff(meta, dbName, meta, dbName, S1, S2);
+      const sql = await SchemaDiffService.generateSyncSql(diffs, dbName, table, dbName, dialect, { sourceSchema: S1, targetSchema: S2 });
+      // 默认值经 pg_depend 完全限定后改写到目标 schema。
+      expect(sql).toContain(`nextval('${S2}.`);
+      expect(sql).not.toContain(`nextval('${S1}.`);
+    } finally {
+      await raw.query(`DROP TABLE IF EXISTS ${S1}."${t}"`);
+    }
+  });
+
   it('4B：同连接跨 schema 数据对比（限定各 schema）并同步到目标 schema', async () => {
     const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
     // S1/S2 的 dept 初始相同；改 S1 一行制造差异。

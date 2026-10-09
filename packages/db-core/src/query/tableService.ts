@@ -685,7 +685,14 @@ export class TableService {
               '  ' || quote_ident(a.attname) || ' ' || format_type(a.atttypid, a.atttypmod)
                 || CASE WHEN a.attnotnull THEN ' NOT NULL' ELSE '' END
                 || CASE WHEN ad.adbin IS NOT NULL
-                        THEN ' DEFAULT ' || pg_get_expr(ad.adbin, ad.adrelid)
+                        -- P1：serial/identity 的默认值改由 pg_depend 反查**完全限定**的序列名重建
+                        -- （pg_get_expr/column_default 会随 search_path 输出不带 schema 的名字，
+                        --  跨 schema 同步时会错误绑定到源序列）；非 serial 仍回退 pg_get_expr。
+                        THEN ' DEFAULT ' || COALESCE(
+                               CASE WHEN seq.qname IS NOT NULL
+                                    THEN 'nextval(' || quote_literal(seq.qname) || '::regclass)'
+                                    ELSE NULL END,
+                               pg_get_expr(ad.adbin, ad.adrelid))
                         ELSE '' END,
               ',' || chr(10) ORDER BY a.attnum
             ) || chr(10) || ');' AS create_sql
@@ -693,6 +700,14 @@ export class TableService {
           JOIN pg_namespace n ON n.oid = c.relnamespace
           JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
           LEFT JOIN pg_attrdef ad ON ad.adrelid = c.oid AND ad.adnum = a.attnum
+          LEFT JOIN LATERAL (
+            SELECT quote_ident(sn.nspname) || '.' || quote_ident(sc.relname) AS qname
+              FROM pg_depend d
+              JOIN pg_class sc ON sc.oid = d.objid AND sc.relkind = 'S'
+              JOIN pg_namespace sn ON sn.oid = sc.relnamespace
+             WHERE d.refobjid = c.oid AND d.refobjsubid = a.attnum AND d.deptype IN ('a', 'i')
+             LIMIT 1
+          ) seq ON true
           WHERE c.relname = ${this.esc(table)}
             AND n.nspname = ${schemaExpr}
             AND c.relkind IN ('r', 'p')
