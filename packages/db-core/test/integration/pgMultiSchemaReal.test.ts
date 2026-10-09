@@ -230,4 +230,24 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
       await raw.query(`DROP DATABASE ${db2} WITH (FORCE)`);
     }
   });
+
+  it('A6：含空格/双引号的合法 schema 可浏览、可操作（放松白名单后）', async () => {
+    const SS = `zms sp"ace_${stamp}`;
+    const ssQ = `"${SS.replace(/"/g, '""')}"`;
+    await raw.query(`CREATE SCHEMA ${ssQ}`);
+    await raw.query(`CREATE TABLE ${ssQ}."sp_tbl" (id int PRIMARY KEY, v text)`);
+    await raw.query(`INSERT INTO ${ssQ}."sp_tbl" VALUES (1, 'x')`);
+    try {
+      // 列表：放松白名单后应能看到（旧实现被字符正则过滤掉）。
+      expect(await meta.getSchemas()).toContain(SS);
+      // 浏览：按 schema 限定返回该表。
+      expect((await meta.getTables(undefined, SS)).map((t) => t.name)).toEqual(['sp_tbl']);
+      // 编辑：写到该 schema（schema 名作为双引号标识符安全引用）。
+      await data.updateCell('sp_tbl', ['id'], [1], 'v', 'edited', undefined, SS);
+      const r = await raw.query(`SELECT v FROM ${ssQ}."sp_tbl" WHERE id = 1`);
+      expect(r.rows[0].v).toBe('edited');
+    } finally {
+      await raw.query(`DROP SCHEMA IF EXISTS ${ssQ} CASCADE`);
+    }
+  });
 }, 60_000);

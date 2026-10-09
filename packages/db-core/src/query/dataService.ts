@@ -1,4 +1,4 @@
-import { validateIdent } from '../utils/validate.js';
+import { validateIdent, validateSchemaIdent } from '../utils/validate.js';
 import { qualifyTable } from '../utils/qualify.js';
 import { QueryService } from './queryService.js';
 import type { QueryResult } from '../types/query.js';
@@ -35,7 +35,7 @@ export class DataService {
       this.queryService.dialect.dbType,
       w(table),
       database ? w(validateIdent(database)) : undefined,
-      schema ? w(validateIdent(schema)) : undefined,
+      schema ? w(validateSchemaIdent(schema)) : undefined,
     );
     const setValue = value === null ? 'NULL' : this.esc(value);
     const where = pkColumns
@@ -67,7 +67,7 @@ export class DataService {
       this.queryService.dialect.dbType,
       w(table),
       database ? w(validateIdent(database)) : undefined,
-      schema ? w(validateIdent(schema)) : undefined,
+      schema ? w(validateSchemaIdent(schema)) : undefined,
     );
     const where = rows
       .map(
@@ -104,7 +104,7 @@ export class DataService {
       this.queryService.dialect.dbType,
       w(table),
       database ? w(validateIdent(database)) : undefined,
-      schema ? w(validateIdent(schema)) : undefined,
+      schema ? w(validateSchemaIdent(schema)) : undefined,
     );
     const cols = columns.map((c) => w(validateIdent(c))).join(', ');
     const vals = values.map((v) =>

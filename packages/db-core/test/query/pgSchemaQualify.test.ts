@@ -121,9 +121,17 @@ describe('PG schema 限定的写/DDL（B1b）', () => {
     expect(con.sqls[0]).toBe('DROP TABLE "users"');
   });
 
-  it('schema 名为注入形状时拒绝，不发任何 SQL', async () => {
+  it('schema 名经安全引用（含引号不逃出上下文），控制字符被拒', async () => {
     const { con, table } = pg();
-    await expect(table.dropTable('users', 'mydb', "sa'; DROP TABLE x; --")).rejects.toThrow();
+    // A6：含引号/分号的 schema 作为**双引号标识符**安全引用（双引号内单引号无特殊含义）。
+    await table.dropTable('users', 'mydb', "sa'; DROP TABLE x; --");
+    expect(con.sqls[0]).toBe("DROP TABLE \"sa'; DROP TABLE x; --\".\"users\"");
+    // 内嵌双引号必须翻倍，否则会闭合标识符逃出上下文。
+    await table.dropTable('users', 'mydb', 'we"ird');
+    expect(con.sqls[1]).toBe('DROP TABLE "we""ird"."users"');
+    con.sqls.length = 0;
+    // 控制字符 schema 仍拒绝，且不发任何 SQL。
+    await expect(table.dropTable('users', 'mydb', 'a\u0000b')).rejects.toThrow();
     expect(con.sqls).toEqual([]);
   });
 });

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { SchemaDiffService, BackupService, DataTransferService, DatabaseType, validateIdent } from '@devbelt/db-core';
+import { SchemaDiffService, BackupService, DataTransferService, DatabaseType, validateIdent, validateSchemaIdent } from '@devbelt/db-core';
 import { DbTreeNode } from '../tree/dbTreeNode';
 import { isTxControlStatement } from '@devbelt/db-core/sql';
 import { wrapIdentForConn, splitSqlStatements, streamSqlStatements, pgSchemaFor, mysqlUseStatement } from '../utils/sql';
@@ -121,7 +121,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     const schema = pgSchemaFor(conn, node.schema);
     const statements = conn.dbType === DatabaseType.PG && schema
       ? (async function* () {
-          yield `SET LOCAL search_path TO ${wrapIdentForConn(conn, validateIdent(schema))}`;
+          yield `SET LOCAL search_path TO ${wrapIdentForConn(conn, validateSchemaIdent(schema))}`;
           yield* rawStatements;
         })()
       : rawStatements;
@@ -428,7 +428,7 @@ async function importSqlScript(
     // PG 无 USE：脚本里不带 schema 的 INSERT/CREATE 默认落到 search_path 的 schema。
     // 在事务内 `SET LOCAL search_path` 把上下文定到目标 schema（事务结束自动还原）。
     if (conn.dbType === DatabaseType.PG && schema) {
-      await session.query.query(`SET LOCAL search_path TO ${wrapIdentForConn(conn, validateIdent(schema))}`);
+      await session.query.query(`SET LOCAL search_path TO ${wrapIdentForConn(conn, validateSchemaIdent(schema))}`);
     }
     await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: l10n('import.progress'), cancellable: true }, async (progress, token) => {
       for (const statement of statements) {

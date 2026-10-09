@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateIdent } from '../../src/utils/validate';
+import { validateIdent, validateSchemaIdent } from '../../src/utils/validate';
 
 describe('validateIdent — 放行', () => {
   it('接受 ASCII 标识符并原样返回', () => {
@@ -88,5 +88,30 @@ describe('validateIdent — 其他边界', () => {
 
   it('拒绝纯 emoji（不属于 \\p{L}）', () => {
     expect(() => validateIdent('🔥')).toThrow('Invalid SQL identifier');
+  });
+});
+
+describe('validateSchemaIdent — 放宽 schema 名（A6）', () => {
+  it('放行含空格/点/引号/连字符的合法 schema 名', () => {
+    expect(validateSchemaIdent('public')).toBe('public');
+    expect(validateSchemaIdent('my schema')).toBe('my schema');
+    expect(validateSchemaIdent('tenant.v2')).toBe('tenant.v2');
+    expect(validateSchemaIdent('we"ird')).toBe('we"ird');
+    expect(validateSchemaIdent("o'brien")).toBe("o'brien");
+    expect(validateSchemaIdent('happy-crewman')).toBe('happy-crewman');
+    expect(validateSchemaIdent('用户 schema')).toBe('用户 schema');
+  });
+
+  it('仍拒绝控制字符（引用层无法安全承载）', () => {
+    expect(() => validateSchemaIdent('')).toThrow('Invalid SQL schema identifier');
+    expect(() => validateSchemaIdent('a\u0000b')).toThrow('Invalid SQL schema identifier');
+    expect(() => validateSchemaIdent('a\nb')).toThrow('Invalid SQL schema identifier');
+    expect(() => validateSchemaIdent('a\tb')).toThrow('Invalid SQL schema identifier');
+  });
+
+  it('保留长度上限（PG 63）', () => {
+    expect(() => validateSchemaIdent('a'.repeat(64), 63)).toThrow('SQL schema identifier too long');
+    const exactly63 = 'a'.repeat(62) + ' ';
+    expect(validateSchemaIdent(exactly63, 63)).toBe(exactly63);
   });
 });

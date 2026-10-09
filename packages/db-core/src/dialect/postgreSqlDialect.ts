@@ -1,5 +1,5 @@
 import { DatabaseType } from '../types/connection.js';
-import { validateIdent } from '../utils/validate.js';
+import { validateIdent, validateSchemaIdent } from '../utils/validate.js';
 import { qualifyTable } from '../utils/qualify.js';
 import { toBool } from '../utils/coerce.js';
 import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta } from '../types/meta.js';
@@ -90,24 +90,23 @@ export class PostgreSqlDialect implements SqlDialect {
   getSchemaListSql(): string {
     // `left(nspname,3) <> 'pg_'` 而非 `NOT LIKE 'pg\_%'`：后者在
     // standard_conforming_strings=off 时 `\_` 会被当转义，语义漂移。
-    // 白名单与 `validateIdent` 一致（字母/数字/`_`/`$`/`-`，首字符非数字/`-`，且不含 `--`）：
-    // 不在白名单里的 schema 列出来也无法操作。另过滤**无 USAGE 权限**的 schema（点进去必失败）。
+    // schema 名一律经 `wrap`/字符串字面量安全引用（见 validateSchemaIdent），故这里
+    // **不再**用字符白名单预过滤——否则含空格/`.`/`"` 的合法 schema 永远列不出来、无法操作（A6）。
+    // 仅排除系统 schema 与**无 USAGE 权限**的 schema（点进去必失败）。
     return `SELECT nspname AS name FROM pg_namespace
       WHERE nspname <> 'information_schema'
         AND left(nspname, 3) <> 'pg_'
-        AND nspname ~ $re$^[[:alpha:]_$][[:alnum:]_$-]*$$re$
-        AND nspname NOT LIKE '%--%'
         AND has_schema_privilege(nspname, 'USAGE')
       ORDER BY nspname`;
   }
 
   /**
-   * schema 限定：给了 schema 用字面量（validateIdent + 单引号转义），否则 `current_schema()`。
-   * schema 值来自 pg_namespace/information_schema（系统来源），仍做标识符校验防注入。
+   * schema 限定：给了 schema 用字面量（validateSchemaIdent + 单引号转义），否则 `current_schema()`。
+   * schema 值来自 pg_namespace/information_schema（系统来源），引用层（字面量翻倍）防注入。
    */
   private schemaExpr(schema?: string): string {
     if (!schema) return 'current_schema()';
-    return `'${validateIdent(schema, 63).replace(/'/g, "''")}'`;
+    return `'${validateSchemaIdent(schema, 63).replace(/'/g, "''")}'`;
   }
 
   getTableListSql(_database?: string, schema?: string): string {
@@ -177,7 +176,7 @@ export class PostgreSqlDialect implements SqlDialect {
   /** PG 限定名：给了 schema 用 `"schema"."name"`，否则只包裹名字（交 search_path）。 */
   private qualified(name: string, schema?: string): string {
     return schema
-      ? qualifyTable(DatabaseType.PG, this.wrap(name), undefined, this.wrap(validateIdent(schema, 63)))
+      ? qualifyTable(DatabaseType.PG, this.wrap(name), undefined, this.wrap(validateSchemaIdent(schema, 63)))
       : this.wrap(name);
   }
 

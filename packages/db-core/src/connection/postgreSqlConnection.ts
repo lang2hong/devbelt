@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as pg from 'pg';
 import { IConnection } from './connection.js';
+import { validateSchemaIdent } from '../utils/validate.js';
 import type { ConnectionConfig } from '../types/connection.js';
 import type { QueryCallback } from '../types/query.js';
 
@@ -69,10 +70,15 @@ export class PostgreSqlConnection extends IConnection {
     }
 
     // PG 的 schema 通过启动参数 search_path 生效；旧实现完全忽略 config.schema，
-    // 用户在表单里设的 schema 从未起作用。仅接受简单标识符，避免拼接注入。
-    if (config.schema && /^[A-Za-z_][A-Za-z0-9_$]*$/.test(config.schema)) {
-      const opt = `-c search_path=${config.schema}`;
-      conf.options = conf.options ? `${conf.options} ${opt}` : opt;
+    // 用户在表单里设的 schema 从未起作用。
+    // schema 名经 validateSchemaIdent（拒绝控制字符）后按标识符规则加双引号
+    // （内嵌 `"` 翻倍），使含空格/`.`/`"` 的合法 schema 也能生效；校验失败则忽略、退回默认。
+    if (config.schema) {
+      try {
+        const quoted = `"${validateSchemaIdent(config.schema).replace(/"/g, '""')}"`;
+        const opt = `-c search_path=${quoted}`;
+        conf.options = conf.options ? `${conf.options} ${opt}` : opt;
+      } catch { /* 非法 schema（含控制字符）：忽略，退回服务端默认 search_path */ }
     }
 
     // 时区：pg 无独立字段，用启动参数 `-c TimeZone=`。旧实现忽略 config.timezone。

@@ -1,4 +1,4 @@
-import { validateIdent } from '../utils/validate.js';
+import { validateIdent, validateSchemaIdent } from '../utils/validate.js';
 import { qualifyTable } from '../utils/qualify.js';
 import { QueryService } from './queryService.js';
 import type { QueryOptions } from './queryService.js';
@@ -426,7 +426,7 @@ export class TableService {
       // 注：这是**用户管理**入口（非从某个 schema 节点发起），作用于 current_schema()，
       // 按连接默认 schema 授权；P7.1 多 schema 下若需逐 schema 授权属独立增强。
       const schema = await this.currentSchema();
-      return this.ddl(`GRANT ${privilege} ON ALL TABLES IN SCHEMA ${this.wrap(validateIdent(schema))} TO ${this.wrap(validateIdent(name))}`);
+      return this.ddl(`GRANT ${privilege} ON ALL TABLES IN SCHEMA ${this.wrap(validateSchemaIdent(schema))} TO ${this.wrap(validateIdent(name))}`);
     }
     const target = database ? `${this.wrap(validateIdent(database))}.*` : '*.*';
     return this.ddl(`GRANT ${privilege} ON ${target} TO ${this.esc(name)}@${this.esc(host)}`);
@@ -441,7 +441,7 @@ export class TableService {
     if (this.queryService.dialect.dbType === 'PG') {
       // 同 grantPrivilege：目标是 schema（当前 schema），不是库名。
       const schema = await this.currentSchema();
-      return this.ddl(`REVOKE ${privilege} ON ALL TABLES IN SCHEMA ${this.wrap(validateIdent(schema))} FROM ${this.wrap(validateIdent(name))}`);
+      return this.ddl(`REVOKE ${privilege} ON ALL TABLES IN SCHEMA ${this.wrap(validateSchemaIdent(schema))} FROM ${this.wrap(validateIdent(name))}`);
     }
     const target = database ? `${this.wrap(validateIdent(database))}.*` : '*.*';
     return this.ddl(`REVOKE ${privilege} ON ${target} FROM ${this.esc(name)}@${this.esc(host)}`);
@@ -621,7 +621,7 @@ export class TableService {
   private wrapQualified(name: string, database?: string, schema?: string): string {
     validateIdent(name);
     if (database) validateIdent(database);
-    if (schema) validateIdent(schema);
+    if (schema) validateSchemaIdent(schema);
     if (!database && !schema) return this.wrap(name);
     return qualifyTable(
       this.queryService.dialect.dbType,
@@ -663,7 +663,7 @@ export class TableService {
         // B1b：显式 schema 用**字符串字面量**（validateIdent + 单引号转义）；未给回退
         // current_schema()。注意不能复用 this.wrap(schema)：双引号是标识符语法，
         // `quote_literal("x")` 会被解析成"名为 x 的列"，正是本节要修的缺陷。
-        const schemaExpr = schema ? `'${validateIdent(schema, 63).replace(/'/g, "''")}'` : 'current_schema()';
+        const schemaExpr = schema ? `'${validateSchemaIdent(schema, 63).replace(/'/g, "''")}'` : 'current_schema()';
         // B5：未显式给 schema 时建表 DDL **不加** schema 限定（交 search_path），避免把
         // 当前 schema 名写死进 dump/「查看建表 SQL」，导致恢复到别的 schema 时写错目标。
         const tableExpr = schema

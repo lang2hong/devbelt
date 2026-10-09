@@ -205,11 +205,12 @@ describe('schema / socketPath / timezone', () => {
     } as any);
     const { conf } = created[0];
     expect(conf.host).toBe('/var/run/postgresql');
-    expect(conf.options).toContain('-c search_path=myschema');
+    // A6：schema 名按标识符规则加双引号（内嵌引号翻倍）后作为 search_path 生效。
+    expect(conf.options).toContain('-c search_path="myschema"');
     expect(conf.options).toContain('-c TimeZone=Asia/Shanghai');
   });
 
-  it('socketPath 已是目录时原样使用；非法标识符不被拼接', () => {
+  it('socketPath 已是目录时原样使用；特殊 schema 加引号，控制字符 schema 被忽略', () => {
     new PostgreSqlConnection({
       ...base,
       socketPath: '/var/run/postgresql',
@@ -218,6 +219,9 @@ describe('schema / socketPath / timezone', () => {
     } as any);
     const { conf } = created[0];
     expect(conf.host).toBe('/var/run/postgresql');
-    expect(conf.options).toBeUndefined();
+    // 含空格的合法 schema：加双引号后作为 search_path 生效。
+    expect(conf.options).toBe('-c search_path="bad name"');
+    // timezone 仍按安全字符白名单：含空格/分号被忽略。
+    expect(conf.options).not.toContain('TimeZone');
   });
 });

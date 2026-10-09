@@ -56,8 +56,10 @@ describe('方言策略（策略模式）', () => {
     // A2：不再用 `NOT LIKE 'pg\_%'`（scs=off 语义漂移），改用 left()。
     expect(schemaSql).toContain("left(nspname, 3) <> 'pg_'");
     expect(schemaSql).not.toContain('pg\\_%');
-    // A2/Batch3：白名单（与 validateIdent 一致）+ 仅列有 USAGE 权限的 schema。
-    expect(schemaSql).toContain('[[:alpha:]_$]');
+    // A6：不再做字符白名单预过滤（改用 validateSchemaIdent + 引用层防注入），
+    // 否则含空格/`.`/`"` 的合法 schema 列不出来、无法操作；仅保留系统/USAGE 过滤。
+    expect(schemaSql).not.toContain('[[:alpha:]_$]');
+    expect(schemaSql).not.toContain("NOT LIKE '%--%'");
     expect(schemaSql).toContain("has_schema_privilege(nspname, 'USAGE')");
     expect((new MysqlDialect() as { getSchemaListSql?: unknown }).getSchemaListSql).toBeUndefined();
   });
@@ -75,16 +77,19 @@ describe('方言策略（策略模式）', () => {
     expect(sql).toContain("n.nspname = 'sales'");
     // 旧写法会拼接 `'s' || '.' || 'V'`
     expect(sql).not.toContain("|| '.' ||");
-    expect(() => new PostgreSqlDialect().getViewDefinitionSql('v', undefined, "x'; DROP")).toThrow();
+    // A6：注入形状的 schema 不再被拒，而是作为**字符串字面量**安全转义（单引号翻倍），不逃出上下文。
+    expect(new PostgreSqlDialect().getViewDefinitionSql('v', undefined, "x'; DROP"))
+      .toContain("n.nspname = 'x''; DROP'");
   });
 
-  it('B1：PG 元数据 SQL 按 schema 限定，非法 schema 名被拒', () => {
+  it('B1：PG 元数据 SQL 按 schema 限定，注入形状被安全转义', () => {
     const pg = new PostgreSqlDialect();
     expect(pg.getTableListSql(undefined, 'myschema')).toContain("n.nspname = 'myschema'");
     expect(pg.getTableListSql(undefined, undefined)).toContain('current_schema()');
     expect(pg.getColumnsSql('t', undefined, 'myschema')).toContain("c.table_schema = 'myschema'");
-    // 注入尝试（含引号/分号）应被 validateIdent 拒绝。
-    expect(() => pg.getTableListSql(undefined, "x'; DROP TABLE t; --")).toThrow();
+    // A6：含引号/分号的 schema 作为字符串字面量安全转义（单引号翻倍），不再靠白名单拒绝。
+    expect(pg.getTableListSql(undefined, "x'; DROP TABLE t; --"))
+      .toContain("n.nspname = 'x''; DROP TABLE t; --'");
   });
 
   it('解析表列表行为统一 TableMeta', () => {
@@ -184,7 +189,9 @@ describe('方言策略（策略模式）', () => {
       expect(sql).toContain("n.nspname = 'sales'");
       expect(sql).toContain("c.relname = 'orders'");
       expect(sql).toContain('NOT t.tgisinternal');
-      expect(() => d.getTriggerDefinitionSql('trg', undefined, "x'; DROP", 'orders')).toThrow();
+      // A6：注入形状 schema 安全转义（字面量单引号翻倍）。
+      expect(d.getTriggerDefinitionSql('trg', undefined, "x'; DROP", 'orders'))
+        .toContain("n.nspname = 'x''; DROP'");
     });
 
     it('B1b：PG 外键查询按 constraint_schema 关联并返回 refSchema', () => {

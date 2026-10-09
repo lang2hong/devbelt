@@ -1,4 +1,4 @@
-import { DatabaseType, validateIdent, qualifyTable } from '@devbelt/db-core';
+import { DatabaseType, validateIdent, validateSchemaIdent, qualifyTable } from '@devbelt/db-core';
 import {
   BETWEEN, EQ, GTE, GT, IN, IS_NULL, IS_NOT_NULL, LIKE, LTE, LT, NE,
   NOT_BETWEEN, NOT_IN, NOT_LIKE,
@@ -52,7 +52,7 @@ function qualifiedTable(dbType: DatabaseType, table: string, database?: string, 
   const tbl = wrapIdent(dbType, table);
   // PG 的限定只认 **schema**（`database` 是库名，不参与限定）；为空则回退 search_path。
   if (dbType === DatabaseType.PG) {
-    if (schema) { validateIdent(schema); return `${wrapIdent(dbType, schema)}.${tbl}`; }
+    if (schema) { validateSchemaIdent(schema); return `${wrapIdent(dbType, schema)}.${tbl}`; }
     return tbl;
   }
   if (database) { validateIdent(database); return qualifyTable(dbType, tbl, wrapIdent(dbType, database)); }

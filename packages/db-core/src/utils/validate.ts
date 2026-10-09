@@ -25,3 +25,25 @@ export function validateIdent(name: string, maxLen: number = MAX_LEN): string {
   }
   return name;
 }
+
+/**
+ * **schema 名**验证（PG 放宽版）。
+ *
+ * 与 `validateIdent` 的字符白名单不同：schema 名总是经 `wrap`（双引号标识符，
+ * 内嵌引号翻倍）或字符串字面量（单引号翻倍）引用，因此含空格、`.`、`"`、`'`
+ * 等白名单外字符的**合法** PG schema 可以安全操作。这里只拒绝会破坏引用的
+ * 控制字符（NUL/换行等）并保留长度上限。
+ *
+ * 注入安全由引用层保证：所有调用点必须把结果放进 `wrap(...)`（标识符）或
+ * 单引号翻倍的字符串字面量，绝不能裸拼。
+ */
+export function validateSchemaIdent(name: string, maxLen: number = MAX_LEN): string {
+  // eslint-disable-next-line no-control-regex
+  if (!name || /[\u0000-\u001f\u007f]/.test(name)) {
+    throw new Error(`Invalid SQL schema identifier: "${String(name).slice(0, 20)}..."`);
+  }
+  if (name.length > maxLen) {
+    throw new Error(`SQL schema identifier too long (max ${maxLen}): "${name.slice(0, 20)}..."`);
+  }
+  return name;
+}
