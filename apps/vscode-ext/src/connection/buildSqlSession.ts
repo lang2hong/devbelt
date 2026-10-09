@@ -26,26 +26,7 @@ export async function buildSqlSession(
 ): Promise<SqlConnectionSession> {
   const { connection, dialect } = ConnectionFactory.createWithDialect(
     conn.dbType as DatabaseType,
-    {
-      host,
-      port,
-      user: conn.user,
-      password: conn.password,
-      database: conn.database,
-      schema: conn.schema,
-      timezone: conn.timezone,
-      connectTimeout: conn.connectTimeout,
-      requestTimeout: conn.requestTimeout,
-      dbPath: conn.dbPath,
-      useConnectionString: conn.useConnectionString,
-      connectionUrl: conn.connectionUrl,
-      useSSL: conn.useSSL,
-      rejectUnauthorized: conn.rejectUnauthorized,
-      caPath: conn.caPath,
-      clientCertPath: conn.clientCertPath,
-      clientKeyPath: conn.clientKeyPath,
-      socketPath: conn.socketPath,
-    },
+    sqlConnectionConfig(conn, host, port),
   );
 
   await new Promise<void>((resolve, reject) => {
@@ -130,4 +111,82 @@ export async function buildSqlSession(
     database: conn.dbType === DatabaseType.PG ? (conn.database ?? ctx.primaryDbOf(conn.id)) : undefined,
   });
   return session;
+}
+
+/** 组装方言连接工厂配置（buildSqlSession 与独立会话共用）。 */
+export function sqlConnectionConfig(conn: SavedConnection, host: string, port: number) {
+  return {
+    host,
+    port,
+    user: conn.user,
+    password: conn.password,
+    database: conn.database,
+    schema: conn.schema,
+    timezone: conn.timezone,
+    connectTimeout: conn.connectTimeout,
+    requestTimeout: conn.requestTimeout,
+    dbPath: conn.dbPath,
+    useConnectionString: conn.useConnectionString,
+    connectionUrl: conn.connectionUrl,
+    useSSL: conn.useSSL,
+    rejectUnauthorized: conn.rejectUnauthorized,
+    caPath: conn.caPath,
+    clientCertPath: conn.clientCertPath,
+    clientKeyPath: conn.clientKeyPath,
+    socketPath: conn.socketPath,
+  };
+}
+
+/** 读一次会话级方言开关（MySQL sql_mode / PG scs），失败不阻断。不写任何缓存。 */
+async function refineDialect(query: QueryService, conn: SavedConnection): Promise<void> {
+  if (query.dialect.dbType === 'MYSQL') {
+    try {
+      const r = await query.query('SELECT @@sql_mode AS mode');
+      const mode = String((r.rows?.[0] as { mode?: unknown } | undefined)?.mode ?? '');
+      query.setDialect(DialectRegistry.getFor(conn.dbType, { noBackslashEscapes: parseNoBackslashEscapes(mode) }));
+    } catch { /* 保持默认 */ }
+  }
+  if (query.dialect.dbType === 'PG') {
+    try {
+      const r = await query.query('SHOW standard_conforming_strings');
+      const raw = String((r.rows?.[0] as { standard_conforming_strings?: unknown } | undefined)?.standard_conforming_strings ?? '');
+      query.setDialect(DialectRegistry.getFor(conn.dbType, { standardConformingStrings: !parseStandardConformingStringsOff(raw) }));
+    } catch { /* 保持默认 */ }
+  }
+}
+
+/**
+ * 装配一个**独立**（不进入连接池、不与面板/树共享）的 SQL 会话，供跨 schema 同步等
+ * 需要独占连接的长事务使用，避免把其它面板的写入卷进同步事务（N1）。
+ * 隧道由调用方创建并传入 `tunnelLease`；`close()` 时释放。调用方负责 `close()`。
+ */
+export async function openIsolatedSqlSession(
+  conn: SavedConnection,
+  host: string,
+  port: number,
+  tunnelLease?: string,
+): Promise<{ session: SqlConnectionSession; close: () => void }> {
+  const { connection, dialect } = ConnectionFactory.createWithDialect(
+    conn.dbType as DatabaseType,
+    sqlConnectionConfig(conn, host, port),
+  );
+  await new Promise<void>((resolve, reject) => {
+    connection.connect((err) => (err ? reject(err) : resolve()));
+  });
+  const query = new QueryService(connection, dialect, undefined, conn.requestTimeout);
+  await refineDialect(query, conn);
+  const session: SqlConnectionSession = {
+    kind: 'sql',
+    capabilities: dialect.capabilities,
+    query,
+    metadata: new MetadataService(query),
+    data: new DataService(query),
+    table: new TableService(query),
+    isAlive: () => connection.isAlive(),
+    close: () => {
+      connection.end();
+      if (conn.sshHost) SshTunnel.release(conn.id, tunnelLease);
+    },
+  };
+  return { session, close: () => session.close() };
 }

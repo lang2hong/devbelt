@@ -88,7 +88,7 @@ export class DataDiffView extends BaseWebView {
       sourceSession.query, sourceSession.metadata, this.sourceDb,
       targetSession.query, this.targetDb,
       undefined,
-      { sourceSchema: this.sourceSchema, targetSchema: this.targetSchema },
+      { sourceSchema: this.sourceSchema, targetSchema: this.targetSchema, targetMeta: targetSession.metadata },
     );
   }
 

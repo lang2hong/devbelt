@@ -8,6 +8,7 @@ import { validateConnectionPaths, type PathValidationResult } from './connection
 import { requireSqlSession, type ConnectionSession, type SqlConnectionSession } from './connectionSession';
 import { buildRedisSession } from './buildRedisSession';
 import { buildSqlSession } from './buildSqlSession';
+import { openIsolatedSqlSession } from './buildSqlSession';
 import type { SessionBuildContext } from './sessionBuildContext';
 import { DEFAULT_POOL_CONFIG, DERIVED_DB_SESSION_MAX, SESSION_KEY_SEP, type PoolConfig, type SessionEntry } from './poolTypes';
 
@@ -224,6 +225,39 @@ export class ConnectionManager {
    */
   async connectSql(conn: SavedConnection, database?: string): Promise<SqlConnectionSession> {
     return requireSqlSession(await this.connect(conn, database));
+  }
+
+  /**
+   * 打开一个**独立**（不入池、不与面板/树共享）的 SQL 会话，供长事务（如跨 schema 同步）
+   * 使用，避免把其它面板的写入卷进该事务或一起回滚（N1）。调用方负责 `close()`；
+   * SSH 隧道按本次引用建/释放。
+   */
+  async openIsolatedSql(conn: SavedConnection, database?: string): Promise<{ session: SqlConnectionSession; close: () => void }> {
+    const effective = this.effective(conn);
+    const target = database !== undefined
+      ? {
+          ...effective,
+          database,
+          ...(effective.useConnectionString && effective.connectionUrl
+            ? { connectionUrl: withDatabaseInUrl(effective.connectionUrl, database) }
+            : {}),
+        }
+      : effective;
+    const pathCheck = await validateConnectionPaths(target);
+    if (!pathCheck.valid) throw new ConnectionPathError(pathCheck);
+    let host = target.host;
+    let port = target.port;
+    let tunnelLease: string | undefined;
+    if (target.sshHost) {
+      const acquired = await SshTunnel.create(target);
+      if (acquired) { host = '127.0.0.1'; port = acquired.port; tunnelLease = acquired.lease; }
+    }
+    try {
+      return await openIsolatedSqlSession(target, host, port, tunnelLease);
+    } catch (err) {
+      if (tunnelLease) SshTunnel.release(target.id, tunnelLease);
+      throw err;
+    }
   }
 
   /**

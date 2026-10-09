@@ -304,12 +304,15 @@ export class SchemaDiffService {
     ];
     for (const d of diffs) {
       const table = targetTable(d.tableName);
-      if (d.status === 'added') {
+if (d.status === 'added') {
         // 表头直接生成到目标 schema（列仍按 sourceSchema 读取），不做脆弱的文本替换。
-        const ddl = await sourceTableService.getCreateSql(d.tableName, sourceDb, opts.sourceSchema, opts.targetSchema);
+        const ddl = rewrite(await sourceTableService.getCreateSql(d.tableName, sourceDb, opts.sourceSchema, opts.targetSchema));
         parts.push(`-- Add table: ${d.tableName}`);
+        // N2（部分）：serial 默认值引用的目标序列不存在时 CREATE TABLE 会因 regclass 解析失败；
+        // 先建序列（空序列；值推进 setval 未处理，见范围说明）。
+        for (const q of new Set(extractNextvalSequences(ddl))) parts.push(`CREATE SEQUENCE IF NOT EXISTS ${q};`);
         parts.push(`DROP TABLE IF EXISTS ${table};`);
-        parts.push(rewrite(ddl).replace(/;\s*$/, '') + ';');
+        parts.push(ddl.replace(/;\s*$/, '') + ';');
         parts.push('');
       } else if (d.status === 'removed') {
         parts.push(`-- Drop table: ${d.tableName}`);
@@ -449,6 +452,13 @@ function hasNoDefault(spec: ColumnSpec): boolean {
 /** null/undefined → ''，其余 String()。 */
 function toCompareString(v: unknown): string {
   return v === undefined || v === null ? '' : String(v);
+}
+
+/** 提取 DDL 里 `nextval('<seq>'::regclass)` 的序列名（用于先生成 CREATE SEQUENCE）。 */
+function extractNextvalSequences(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(/nextval\('([^']+)'::regclass\)/g)) out.push(m[1]);
+  return out;
 }
 
 /** 无 schema 时的普通归一化（行为与旧版一致：类型字符串化、默认值 trim、注释原样）。 */

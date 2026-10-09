@@ -8,7 +8,7 @@ import type { SavedConnection } from '@devbelt/db-host/connection/connectionStor
 import { redactCommandArgs } from '@devbelt/db-core';
 import type { RedisConnectionSession } from '../connection/connectionSession';
 import { l10n } from '../i18n';
-import type { RedisPanel, RedisSlowlogEntry } from './protocol';
+import type { RedisDownMessage, RedisPanel, RedisSlowlogEntry } from './protocol';
 
 /**
  * 面板子逻辑（Stream 操作 / CLI 控制台）依赖的最小宿主面。
@@ -17,7 +17,7 @@ import type { RedisPanel, RedisSlowlogEntry } from './protocol';
 export interface RedisOpsHost {
   enqueue<T>(fn: () => Promise<T>): Promise<T>;
   sessionForDb(): Promise<RedisConnectionSession>;
-  post(msg: unknown): void;
+  post(msg: RedisDownMessage): void;
   audit(command: string, detail: string, costTime?: number): void;
   doPushValue(session: RedisConnectionSession, key: string): Promise<void>;
   targetDb(): number;

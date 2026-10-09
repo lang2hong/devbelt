@@ -265,10 +265,10 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
         vscode.window.showWarningMessage(l10n('sync.pgDisabled'));
         return;
       }
-      const pgSession = await manager.connectSql(node.conn, node.database);
+      const pgListSession = await manager.connectSql(node.conn, node.database);
       const sourceSchema = pgSchemaFor(node.conn, node.schema);
       if (!sourceSchema) { vscode.window.showWarningMessage(l10n('schema.pickSchemaNode')); return; }
-      const schemas = (await pgSession.metadata.getSchemas()).filter((s) => s !== sourceSchema);
+      const schemas = (await pgListSession.metadata.getSchemas()).filter((s) => s !== sourceSchema);
       if (!schemas.length) {
         vscode.window.showWarningMessage(l10n('compare.noOtherSchemas'));
         return;
@@ -291,60 +291,72 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
         pgSyncBtn,
       );
       if (pgConfirmed !== pgSyncBtn) return;
-      await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: l10n('sync.progressTitle'), cancellable: true },
-        async (progress, token) => {
-          // PG 支持事务性 DDL/DML：整次同步包在一个事务里，任一步失败则整体回滚，
-          // 避免中途失败/取消留下同步了一半的状态。
-          const q = pgSession.query;
-          await q.query('BEGIN', undefined, { skipHistory: true });
-          let pgResult: Awaited<ReturnType<typeof DataTransferService.transferDatabase>>;
-          try {
-            pgResult = await DataTransferService.transferDatabase(
-              q, pgSession.metadata, pgSession.table, node.database!,
-              q, pgSession.metadata, node.database!,
-              {
-                onProgress: (p: { table: string; phase: string }) => progress.report({ message: `${p.table} (${p.phase})` }),
-                isCancelled: () => token.isCancellationRequested,
-                sourceSchema,
-                targetSchema: target.value,
-              },
-            );
-            if (pgResult.errors.length) {
-              await q.query('ROLLBACK', undefined, { skipHistory: true });
-            } else {
-              await q.query('COMMIT', undefined, { skipHistory: true });
+      // N1：同步用**独占**连接（不入池、不与面板共享），避免把其它面板的写入卷进同步事务。
+      let iso: Awaited<ReturnType<typeof manager.openIsolatedSql>> | undefined;
+      try {
+        await vscode.window.withProgress(
+          { location: vscode.ProgressLocation.Notification, title: l10n('sync.progressTitle'), cancellable: true },
+          async (progress, token) => {
+            iso = await manager.openIsolatedSql(node.conn!, node.database);
+            const sess = iso.session;
+            // PG 支持事务性 DDL/DML：整次同步包在一个事务里，任一步失败则整体回滚。
+            const q = sess.query;
+            const m = sess.metadata;
+            const tbl = sess.table;
+            await q.query('BEGIN', undefined, { skipHistory: true });
+            let pgResult: Awaited<ReturnType<typeof DataTransferService.transferDatabase>>;
+            try {
+              pgResult = await DataTransferService.transferDatabase(
+                q, m, tbl, node.database!,
+                q, m, node.database!,
+                {
+                  onProgress: (p: { table: string; phase: string }) => progress.report({ message: `${p.table} (${p.phase})` }),
+                  isCancelled: () => token.isCancellationRequested,
+                  sourceSchema,
+                  targetSchema: target.value,
+                  haltOnError: true, // N3：首错即停，避免事务 aborted 后连带错误淹没首错。
+                },
+              );
+              if (pgResult.errors.length) {
+                await q.query('ROLLBACK', undefined, { skipHistory: true });
+              } else {
+                await q.query('COMMIT', undefined, { skipHistory: true });
+              }
+            } catch (err) {
+              try { await q.query('ROLLBACK', undefined, { skipHistory: true }); } catch { /* 已断开 */ }
+              throw err;
             }
-          } catch (err) {
-            try { await q.query('ROLLBACK', undefined, { skipHistory: true }); } catch { /* 已断开 */ }
-            throw err;
-          }
-          if (pgResult.errors.length) {
-            vscode.window.showWarningMessage(
-              l10n('sync.doneErrors', { errors: pgResult.errors.length, count: pgResult.tablesSynced }),
+            const rolledBack = pgResult.errors.length > 0;
+            if (rolledBack) {
+              vscode.window.showWarningMessage(
+                l10n('sync.doneErrors', { errors: pgResult.errors.length, count: pgResult.tablesSynced }),
+              );
+            } else {
+              vscode.window.showInformationMessage(l10n('sync.done', { count: pgResult.tablesSynced }));
+            }
+            await recordBulkHistory(
+              deps, node.conn!,
+              l10n('history.transfer', {
+                source: `${node.database}.${sourceSchema}`,
+                target: target.value,
+                count: pgResult.tablesSynced,
+              }),
+              node.database!,
             );
-          } else {
-            vscode.window.showInformationMessage(l10n('sync.done', { count: pgResult.tablesSynced }));
-          }
-          await recordBulkHistory(
-            deps, node.conn!,
-            l10n('history.transfer', {
-              source: `${node.database}.${sourceSchema}`,
-              target: target.value,
-              count: pgResult.tablesSynced,
-            }),
-            node.database!,
-          );
-          AuditLogger.tryLog({
-            action: 'schema_change',
-            connName: node.conn!.name || node.conn!.host,
-            database: node.database!,
-            schema: sourceSchema,
-            sql: `schema sync ${sourceSchema} -> ${target.value} (${pgResult.tablesSynced} tables, ${pgResult.errors.length} errors)`,
-          });
-          treeProvider.refresh();
-        },
-      );
+            AuditLogger.tryLog({
+              action: 'schema_change',
+              connName: node.conn!.name || node.conn!.host,
+              database: node.database!,
+              schema: sourceSchema,
+              // 回滚时明确标注，避免审计看不出「其实什么都没生效」。
+              sql: `schema sync ${sourceSchema} -> ${target.value} (${pgResult.tablesSynced} tables, ${pgResult.errors.length} errors)${rolledBack ? ' [rolled back]' : ''}`,
+            });
+            treeProvider.refresh();
+          },
+        );
+      } finally {
+        iso?.close();
+      }
       return;
     }
 

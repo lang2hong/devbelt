@@ -29,6 +29,8 @@ export interface TransferOptions {
   /** PG：源/目标 schema（同连接跨 schema 同步）。 */
   sourceSchema?: string;
   targetSchema?: string;
+  /** 事务模式：遇首个错误即抛出（由调用方回滚），避免事务 aborted 后连带错误淹没首错（N3）。 */
+  haltOnError?: boolean;
 }
 
 export class DataTransferService {
@@ -42,7 +44,7 @@ export class DataTransferService {
     targetDb: string,
     options: TransferOptions = {},
   ): Promise<{ tablesSynced: number; errors: string[] }> {
-    const { tables: tableFilter, includeData = true, pageSize = 1000, onProgress, isCancelled, sourceSchema, targetSchema } = options;
+    const { tables: tableFilter, includeData = true, pageSize = 1000, onProgress, isCancelled, sourceSchema, targetSchema, haltOnError = false } = options;
     const errors: string[] = [];
 
     const schemaDiffs = await SchemaDiffService.diff(sourceMeta, sourceDb, targetMeta, targetDb, sourceSchema, targetSchema);
@@ -84,6 +86,8 @@ export class DataTransferService {
           // 数据仍应同步；过去这里 continue 会让数据也一起没了）。
           errors.push(`${table}: schema sync failed - ${(err as Error).message}`);
           failedTables.add(table);
+          // 事务模式：首错即抛，避免事务进入 aborted 后后续语句全部连带报错（N3）。
+          if (haltOnError) throw new Error(`${table}: schema sync failed - ${(err as Error).message}`);
         }
       }
 
@@ -100,6 +104,7 @@ export class DataTransferService {
         } catch (err) {
           errors.push(`${table}: data sync failed - ${(err as Error).message}`);
           failedTables.add(table);
+          if (haltOnError) throw new Error(`${table}: data sync failed - ${(err as Error).message}`);
         }
       }
     }
@@ -114,7 +119,7 @@ export class DataTransferService {
     sourceDb: string,
     table: string,
     targetQuery: QueryService,
-    _targetMeta: MetadataService,
+    targetMeta: MetadataService,
     targetDb: string,
     options: { pageSize?: number; isCancelled?: () => boolean; sourceSchema?: string; targetSchema?: string },
   ): Promise<void> {
@@ -122,7 +127,7 @@ export class DataTransferService {
       sourceQuery, sourceMeta, sourceDb,
       targetQuery, targetDb,
       [table],
-      { sourceSchema: options.sourceSchema, targetSchema: options.targetSchema },
+      { sourceSchema: options.sourceSchema, targetSchema: options.targetSchema, targetMeta },
     );
     const syncSql = DataDiffService.generateSyncSql(
       { diffs: dataDiff.diffs, sourceDb, targetDb },

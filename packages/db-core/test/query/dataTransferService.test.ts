@@ -160,4 +160,20 @@ describe('DataTransferService.transferDatabase', () => {
       { tables: ['t'], isCancelled: () => true },
     )).rejects.toThrow('Transfer cancelled');
   });
+
+  it('N3：haltOnError 时首个错误即抛出（供调用方回滚）', async () => {
+    const sourceConn = new FakeConnection();
+    const targetConn = new FakeConnection();
+    const badTable = {
+      getCreateSql: async () => { throw new Error('boom'); },
+      supports: () => true,
+      dbType: DatabaseType.MYSQL,
+    } as unknown as TableService;
+
+    await expect(DataTransferService.transferDatabase(
+      new QueryService(sourceConn, new MysqlDialect()), meta(['t'], ['id']), badTable, 'src',
+      new QueryService(targetConn, new MysqlDialect()), meta([], ['id']), 'dst',
+      { tables: ['t'], haltOnError: true },
+    )).rejects.toThrow(/schema sync failed/);
+  });
 });

@@ -215,6 +215,26 @@ describe('DataDiffService', () => {
     expect(sql).toContain("'C:\\tmp'");
     expect(sql).not.toContain('`');
   });
+
+  it('P4：提供 targetMeta 时取列交集，目标缺列不再报原始 SQL 错误', async () => {
+    const sourceConn = new FakeConnection();
+    sourceConn.setResponses([{ rows: [{ id: 1, name: 'A', extra: 'x' }] }]);
+    const targetConn = new FakeConnection();
+    targetConn.setResponses([{ rows: [{ id: 1, name: 'A' }] }]);
+    const sourceMeta = mockMetadataService([{ name: 'id', isPrimary: true }, { name: 'name' }, { name: 'extra' }]);
+    const targetMeta = {
+      getTables: async () => [],
+      getColumns: async () => [{ name: 'id', isPrimary: true }, { name: 'name' }],
+    } as unknown as MetadataService;
+    const result = await DataDiffService.diff(
+      makeQueryService(sourceConn), sourceMeta, 's',
+      makeQueryService(targetConn), 't', ['users'],
+      { targetMeta },
+    );
+    // extra 被排除；id/name 两侧相等 → 无差异，且不抛错。
+    expect(result.diffs[0].columnNames).toEqual(['id', 'name']);
+    expect(result.diffs[0].rows).toEqual([]);
+  });
 });
 describe('DataDiffService 分页策略（PG keyset 丢行回归）', () => {
   function makeQueryService(conn: FakeConnection): QueryService {

@@ -776,7 +776,7 @@ export const en: MessageCatalog = {
   'compare.chooseDatabase': 'Compare "{database}" with which database?',
   'compare.noOtherSchemas': 'No other schemas to compare.',
   'compare.chooseSchema': 'Compare "{schema}" with which schema?',
-  'compare.syncScopeNote': '-- Note: comparison covers tables/columns only; not PK/unique/CHECK/FK/index/view/function/sequence; serial/custom types are not created in the target schema.',
+  'compare.syncScopeNote': '-- Note: comparison covers tables/columns only; not PK/unique/CHECK/FK/index/view/function; serial sequences are created but not advanced, custom types are not created.',
   'schema.pickSchemaNode': 'PostgreSQL: run this on a specific schema node (cross-schema compare/sync).',
   'compare.chooseData': 'Compare data of "{database}" with which database?',
   'sync.noOtherConnections': 'No other connections to sync to.',
