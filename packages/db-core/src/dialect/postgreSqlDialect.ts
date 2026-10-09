@@ -141,11 +141,6 @@ export class PostgreSqlDialect implements SqlDialect {
     return rows.map((r) => ({ tableName: String(r.table), name: String(r.name), type: r.type as ConstraintMeta['type'], definition: String(r.definition ?? '') }));
   }
 
-  /** 生成新增约束 SQL（definition 由数据库规范化，原样可用）。 */
-  addConstraintSql(table: string, constraintName: string, definition: string, schema?: string): string {
-    return `ALTER TABLE ${this.qualified(validateIdent(table, 63), schema)} ADD CONSTRAINT ${this.wrap(validateIdent(constraintName, 63))} ${definition};`;
-  }
-
   /** PG：列出非系统、且**可操作**的 schema（树在库下展示 schema 层）。 */
   getSchemaListSql(): string {
     // `left(nspname,3) <> 'pg_'` 而非 `NOT LIKE 'pg\_%'`：后者在

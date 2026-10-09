@@ -234,9 +234,6 @@ export interface SqlDialect {
   /** 解析约束列表结果。 */
   parseConstraintList?(rows: any[]): import('../types/meta.js').ConstraintMeta[];
 
-  /** 生成新增约束 SQL（定义由 pg_get_constraintdef 规范化给出）。 */
-  addConstraintSql?(table: string, constraintName: string, definition: string, schema?: string): string;
-
   /** 解析表列表查询结果行为对象 */
   parseTableList(rows: any[]): TableMeta[];
 

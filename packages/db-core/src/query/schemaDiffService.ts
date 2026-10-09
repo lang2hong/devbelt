@@ -145,11 +145,13 @@ export class SchemaDiffService {
     const sourceNames = new Set(sourceTables.map((t) => t.name));
     const targetNames = new Set(targetTables.map((t) => t.name));
     const schemas = [sourceSchema, targetSchema];
+    // 约束/索引的差异与生成仅在同连接跨 schema（PG）下有意义；非 schema（如 MySQL 跨库）不参与，避免“标记变更却无 SQL”。
+    const hasSchema = sourceSchema !== undefined || targetSchema !== undefined;
     const result: TableDiff[] = [];
 
     for (const t of sourceTables) {
-      const srcCons = typeof sourceMeta.getConstraints === 'function' ? await sourceMeta.getConstraints(t.name, sourceSchema) : [];
-      const srcIdx = typeof sourceMeta.getIndexes === 'function' ? await sourceMeta.getIndexes(t.name, sourceDb, sourceSchema) : [];
+      const srcCons = hasSchema && typeof sourceMeta.getConstraints === 'function' ? await sourceMeta.getConstraints(t.name, sourceSchema) : [];
+      const srcIdx = hasSchema && typeof sourceMeta.getIndexes === 'function' ? await sourceMeta.getIndexes(t.name, sourceDb, sourceSchema) : [];
       const srcIdxDiff = srcIdx.filter((i) => !i.isPrimary).map((i) => ({ name: i.name, status: 'added' as const, columns: i.columns, unique: i.isUnique, definition: i.type }));
       // 源库有、目标无 → added（连同其约束/索引一并带上）
       if (!targetNames.has(t.name)) {
@@ -168,9 +170,9 @@ export class SchemaDiffService {
         targetMeta.getColumns(t.name, targetDb, targetSchema),
       ]);
       const colDiffs = this.diffColumns(sourceCols, targetCols, makeSchemaNormalizers(sourceSchema, targetSchema));
-      const tgtCons = typeof targetMeta.getConstraints === 'function' ? await targetMeta.getConstraints(t.name, targetSchema) : [];
+      const tgtCons = hasSchema && typeof targetMeta.getConstraints === 'function' ? await targetMeta.getConstraints(t.name, targetSchema) : [];
       const constraints = this.diffConstraints(srcCons, tgtCons, schemas);
-      const tgtIdx = typeof targetMeta.getIndexes === 'function' ? await targetMeta.getIndexes(t.name, targetDb, targetSchema) : [];
+      const tgtIdx = hasSchema && typeof targetMeta.getIndexes === 'function' ? await targetMeta.getIndexes(t.name, targetDb, targetSchema) : [];
       const indexes = this.diffIndexes(srcIdx, tgtIdx, schemas);
       result.push({
         tableName: t.name,
@@ -393,7 +395,7 @@ export class SchemaDiffService {
       if (!d.constraints?.length) continue;
       const table = targetTable(d.tableName);
       for (const c of d.constraints) {
-        const cn = wrap(validateIdent(c.name, 63));
+        const cn = wrap(validateSchemaIdent(c.name, 63));
         parts.push(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${cn};`);
         if (c.status !== 'removed') parts.push(`ALTER TABLE ${table} ADD CONSTRAINT ${cn} ${rewrite(c.definition ?? '')};`);
       }
@@ -482,7 +484,7 @@ export class SchemaDiffService {
   /** 生成 schema 级对象的同步 SQL（PG 定义改写到目标 schema）。 */
   static generateSchemaObjectsSql(obj: SchemaObjectsDiff, dialect: SqlDialect, opts: { sourceSchema?: string; targetSchema?: string } = {}): string {
     const target = opts.targetSchema;
-    const wrapObjName = (name: string) => (target ? `${dialect.wrap(validateSchemaIdent(target))}.${dialect.wrap(validateIdent(name, 63))}` : dialect.wrap(validateIdent(name, 63)));
+    const wrapObjName = (name: string) => (target ? `${dialect.wrap(validateSchemaIdent(target))}.${dialect.wrap(validateSchemaIdent(name, 63))}` : dialect.wrap(validateSchemaIdent(name, 63)));
     const rw = (d?: string) => rewritePgSchemaRefs(String(d ?? ''), opts.sourceSchema, target).replace(/;\s*$/, '');
     const parts: string[] = ['-- Schema objects', ''];
 
@@ -510,7 +512,7 @@ export class SchemaDiffService {
     }
     for (const t of obj.triggers) {
       if (!t.table) continue;
-      commented.push(`DROP TRIGGER IF EXISTS ${dialect.wrap(validateIdent(t.name, 63))} ON ${wrapObjName(t.table)};`);
+      commented.push(`DROP TRIGGER IF EXISTS ${dialect.wrap(validateSchemaIdent(t.name, 63))} ON ${wrapObjName(t.table)};`);
       if (t.status !== 'removed' && t.definition) commented.push(rw(t.definition) + ';');
     }
     if (commented.length) {
@@ -642,8 +644,8 @@ if (d.status === 'added') {
         const lines: string[] = [];
         for (const ix of d.indexes) {
           const dropName = target
-            ? `${opts.dialect!.wrap(validateSchemaIdent(target))}.${opts.dialect!.wrap(validateIdent(ix.name, 63))}`
-            : opts.dialect!.wrap(validateIdent(ix.name, 63));
+            ? `${opts.dialect!.wrap(validateSchemaIdent(target))}.${opts.dialect!.wrap(validateSchemaIdent(ix.name, 63))}`
+            : opts.dialect!.wrap(validateSchemaIdent(ix.name, 63));
           lines.push(`DROP INDEX IF EXISTS ${dropName};`);
           // H4：直接用 pg_get_indexdef 原文（改写 schema），保留 USING/WHERE/DESC/opclass/INCLUDE/表达式。
           if (ix.status !== 'removed' && ix.definition) lines.push(rewrite(ix.definition).replace(/;\s*$/, '') + ';');
@@ -773,7 +775,40 @@ function rewriteOutsideLiterals(text: string, transform: (segment: string) => st
   let buf = '';
   let i = 0;
   while (i < text.length) {
-    if (text[i] === "'") {
+    const ch = text[i];
+    // 美元引用：$tag$ ... $tag$（含 $$）。$1 等参数不匹配，按普通字符处理。
+    if (ch === '$') {
+      const m = /^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/.exec(text.slice(i));
+      if (m) {
+        out += transform(buf);
+        buf = '';
+        const tag = m[0];
+        const end = text.indexOf(tag, i + tag.length);
+        const stop = end === -1 ? text.length : end + tag.length;
+        out += text.slice(i, stop);
+        i = stop;
+        continue;
+      }
+    }
+    // E'...' / e'...'：反斜杠转义（\' 不结束字面量）。
+    if ((ch === 'E' || ch === 'e') && text[i + 1] === "'") {
+      out += transform(buf);
+      buf = '';
+      let lit = text.slice(i, i + 2);
+      i += 2;
+      while (i < text.length) {
+        if (text[i] === '\\' && i + 1 < text.length) { lit += text[i] + text[i + 1]; i += 2; continue; }
+        if (text[i] === "'") {
+          if (text[i + 1] === "'") { lit += "''"; i += 2; continue; }
+          lit += "'"; i++;
+          break;
+        }
+        lit += text[i]; i++;
+      }
+      out += lit;
+      continue;
+    }
+    if (ch === "'") {
       out += transform(buf);
       buf = '';
       let lit = "'";
@@ -789,7 +824,7 @@ function rewriteOutsideLiterals(text: string, transform: (segment: string) => st
       out += lit;
       continue;
     }
-    buf += text[i]; i++;
+    buf += ch; i++;
   }
   return out + transform(buf);
 }

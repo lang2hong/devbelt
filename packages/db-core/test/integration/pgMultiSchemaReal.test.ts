@@ -384,4 +384,28 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
       await raw.query(`DROP TABLE IF EXISTS ${S1}."${T}"`);
     }
   });
+it('A6 真库：注入形状 schema 名被安全引用，执行不生效', async () => {
+    const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
+    const canary = `zms_canary_${stamp}`;
+    const evil = `zms_inj_${stamp};DROP TABLE ${S2}."${canary}";--`;
+    const evilQ = `"${evil.replace(/"/g, '""')}"`;
+    await raw.query(`CREATE TABLE ${S2}."${canary}" (id int)`);
+    await raw.query(`CREATE SCHEMA ${evilQ}`);
+    await raw.query(`CREATE TABLE ${S1}.src_evil (id int, v text)`);
+    try {
+      const diffs = await SchemaDiffService.diff(meta, dbName, meta, dbName, S1, evil);
+      const sql = await SchemaDiffService.generateSyncSql(diffs, dbName, table, dbName, dialect, { sourceSchema: S1, targetSchema: evil, dialect });
+      // H1：目标 schema 名一律带引号，不做裸拼接。
+      expect(sql).toContain(evilQ);
+      await raw.query(sql);
+      // 注入未生效：哨兵表仍在。
+      expect((await raw.query(`SELECT to_regclass($1) AS r`, [`${S2}."${canary}"`])).rows[0].r).not.toBeNull();
+      // 目标 schema 内表已建。
+      expect((await raw.query(`SELECT to_regclass($1) AS r`, [`${evilQ}.src_evil`])).rows[0].r).not.toBeNull();
+    } finally {
+      await raw.query(`DROP TABLE IF EXISTS ${S1}.src_evil`);
+      await raw.query(`DROP SCHEMA IF EXISTS ${evilQ} CASCADE`);
+      await raw.query(`DROP TABLE IF EXISTS ${S2}."${canary}"`);
+    }
+  });
 }, 60_000);

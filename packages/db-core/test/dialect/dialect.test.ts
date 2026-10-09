@@ -377,13 +377,11 @@ describe('PG 序列 / 约束（P3a）', () => {
     expect(s).toMatchObject({ name: 's', dataType: 'bigint', startValue: '1', minValue: null, maxValue: '9223372036854775807', incrementBy: '1', cycle: false, cacheSize: '1', lastValue: '5' });
   });
 
-  it('getConstraintListSql / addConstraintSql', () => {
+  it('getConstraintListSql', () => {
     const d = new PostgreSqlDialect();
     const list = d.getConstraintListSql!('orders', 'sales');
     expect(list).toContain('pg_constraint');
     expect(list).toContain("AND c.relname = 'orders'");
-    expect(d.addConstraintSql!('orders', 'orders_pkey', 'PRIMARY KEY (id)', 'sales'))
-      .toBe('ALTER TABLE "sales"."orders" ADD CONSTRAINT "orders_pkey" PRIMARY KEY (id);');
   });
 
   it('parseConstraintList 映射字段', () => {
