@@ -9,6 +9,7 @@ import { PostgreSqlDialect } from '../../src/dialect/postgreSqlDialect';
 import { BackupService } from '../../src/query/backupService';
 import { SchemaDiffService } from '../../src/query/schemaDiffService';
 import { DataDiffService } from '../../src/query/dataDiffService';
+import { DataTransferService } from '../../src/query/dataTransferService';
 import { withDatabaseInUrl } from '../../src/utils/connectionUrl';
 
 // 与生产 PostgreSqlConnection 一致：禁用 pg 对日期/JSON 的默认解析。
@@ -312,6 +313,75 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
     } finally {
       await raw.query(`UPDATE ${S2}.dept SET name = 'd' WHERE id = 10`);
       await raw.query(`UPDATE ${S1}.dept SET name = 'd' WHERE id = 10`);
+    }
+  });
+
+  it('P3 真库执行：transferDatabase 生成并执行脚本，校验结构/序列/setval', async () => {
+    const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
+    const A = `zms_p3a_${stamp}_t`;
+    const B = `zms_p3b_${stamp}_t`;
+    await raw.query(`CREATE TABLE ${S1}."${A}" (id bigserial PRIMARY KEY, name text UNIQUE, data jsonb)`);
+    await raw.query(`CREATE TABLE ${S1}."${B}" (id int PRIMARY KEY, a_id bigint REFERENCES ${S1}."${A}"(id))`);
+    await raw.query(`CREATE INDEX "${A}_lower" ON ${S1}."${A}" (lower(name))`);
+    await raw.query(`CREATE INDEX "${A}_gin" ON ${S1}."${A}" USING gin (data)`);
+    await raw.query(`INSERT INTO ${S1}."${A}" (name, data) VALUES ('a','{"k":1}'),('b','{"k":2}')`);
+    await raw.query(`INSERT INTO ${S1}."${B}" VALUES (1, 1)`);
+    try {
+      const res = await DataTransferService.transferDatabase(
+        query, meta, table, dbName,
+        query, meta, dbName,
+        { sourceSchema: S1, targetSchema: S2, haltOnError: true },
+      );
+      expect(res.errors).toEqual([]);
+      // 结构：列。
+      const cols = (await raw.query(
+        `SELECT column_name FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 ORDER BY ordinal_position`,
+        [S2, A],
+      )).rows.map((r) => r.column_name);
+      expect(cols).toEqual(['id', 'name', 'data']);
+      // 约束：PK + UNIQUE。
+      const contypes = (await raw.query(
+        `SELECT c.contype FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname=$1 AND t.relname=$2`,
+        [S2, A],
+      )).rows.map((r) => r.contype);
+      expect(contypes).toEqual(expect.arrayContaining(['p', 'u']));
+      // 索引：表达式 + GIN。
+      const idxdefs = (await raw.query(`SELECT indexdef FROM pg_indexes WHERE schemaname=$1 AND tablename=$2`, [S2, A])).rows.map((r) => r.indexdef).join('\n');
+      expect(idxdefs).toMatch(/lower\(/);
+      expect(idxdefs).toMatch(/USING gin/i);
+      // 外键（B→A）。
+      const fk = (await raw.query(
+        `SELECT 1 FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname=$1 AND t.relname=$2 AND c.contype='f'`,
+        [S2, B],
+      )).rowCount;
+      expect(fk).toBe(1);
+      // 数据导入 + 序列归属 S2 + setval 推进：插入一行不冲突。
+      expect((await raw.query(`SELECT count(*)::int AS n FROM ${S2}."${A}"`)).rows[0].n).toBe(2);
+      const seq = (await raw.query(`SELECT pg_get_serial_sequence($1,'id') AS s`, [`${S2}."${A}"`])).rows[0].s as string;
+      expect(seq).toContain(S2);
+      const ins = await raw.query(`INSERT INTO ${S2}."${A}" (name) VALUES ('c') RETURNING id`);
+      expect(Number(ins.rows[0].id)).toBe(3);
+    } finally {
+      await raw.query(`DROP TABLE IF EXISTS ${S1}."${B}"`);
+      await raw.query(`DROP TABLE IF EXISTS ${S1}."${A}"`);
+      await raw.query(`DROP TABLE IF EXISTS ${S2}."${B}"`);
+      await raw.query(`DROP TABLE IF EXISTS ${S2}."${A}"`);
+    }
+  });
+
+  it('H2 真库：dump 在源 schema 位于 search_path 时不写死源 schema 的 nextval', async () => {
+    const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
+    const T = `zms_h2_${stamp}_t`;
+    await raw.query(`CREATE TABLE ${S1}."${T}" (id bigserial PRIMARY KEY, v text)`);
+    const prev = (await raw.query('SHOW search_path')).rows[0].search_path as string;
+    try {
+      await raw.query(`SET search_path TO ${S1}, public`);
+      const dump = await BackupService.databaseDump(query, meta, table, dbName, { schema: S1, tables: [T] });
+      // H2：未传 targetSchema → pg_get_expr，不带源 schema 的 nextval。
+      expect(dump).not.toMatch(new RegExp(`nextval\\('"?${S1}`));
+    } finally {
+      await raw.query(`SET search_path TO ${prev}`);
+      await raw.query(`DROP TABLE IF EXISTS ${S1}."${T}"`);
     }
   });
 }, 60_000);
