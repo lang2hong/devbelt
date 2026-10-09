@@ -28,30 +28,6 @@ const SENTINEL_ADDR = process.env.DEVBELT_DB_TEST_REDIS_SENTINEL;
 const SSH_USER = 'tunnel';
 const SSH_PASS = 'tunnel-pass';
 
-/**
- * 仅在本 Cluster-over-SSH 集成运行时安装：D20 用例故意把某 master 映射到死端口，ioredis
- * 在该节点重试耗尽关闭时会 flush 内部命令队列并 reject "Connection is closed."——这是
- * **ioredis 内部 promise**（非本产品持有），无法在调用侧 catch，Vitest 会计为 unhandled
- * 使硬门禁转红。这里只在 env-gated 的集群集成里吞掉这一已知消息；其它任何未处理拒绝仍
- * 原样抛出、令测试失败（门禁对本产品代码依旧成立）。单元运行无此 env，不受影响。
- */
-let restoreUnhandled: (() => void) | undefined;
-if (CLUSTER_SEED) {
-  const KNOWN_IOREDIS_NOISE = /Connection is closed\.|MaxRetriesPerRequestError/;
-  const prior = process.listeners('unhandledRejection');
-  process.removeAllListeners('unhandledRejection');
-  const guard = (reason: unknown): void => {
-    const msg = reason instanceof Error ? reason.message : String(reason);
-    if (KNOWN_IOREDIS_NOISE.test(msg)) return;
-    throw reason instanceof Error ? reason : new Error(String(reason));
-  };
-  process.on('unhandledRejection', guard);
-  restoreUnhandled = () => {
-    process.removeListener('unhandledRejection', guard);
-    for (const l of prior) process.on('unhandledRejection', l as (...a: unknown[]) => void);
-  };
-}
-
 function hostPort(addr: string): { host: string; port: number } {
   const [host, port] = addr.split(':');
   return { host, port: Number(port) };
@@ -220,8 +196,6 @@ describe.skipIf(!CLUSTER_SEED)('D20：未映射节点 → 命令在有限时间�
     }
   }, 90_000);
 });
-
-afterAll(() => { restoreUnhandled?.(); });
 
 describe.skipIf(!SENTINEL_ADDR)('Sentinel over SSH（发现 master 后 standalone 连）', () => {
   it('发现 master → 隧道 → PING/SET/GET', async () => {

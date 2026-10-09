@@ -216,6 +216,9 @@ export class RedisClient {
       connectTimeout: options.connectTimeout ?? 30_000,
       family: 0,
       retryStrategy,
+      // ioredis 6 默认 RESP3；这里显式保持 RESP2 线上协议，避免 reply 形状突变
+      // （map/set/double、SCAN/HGETALL/CLUSTER SLOTS 等）。后续可单独立项切 RESP3。
+      protocol: 2,
     };
     this.isCluster = !!options.cluster?.nodes?.length;
     this.sentinel = !this.isCluster && !!options.sentinels?.length;
