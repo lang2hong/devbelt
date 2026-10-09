@@ -1350,6 +1350,16 @@
           "group": "5_tools"
         },
         {
+          "command": "devbelt.compareSchema",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\.(MYSQL|PG)$/",
+          "group": "5_tools"
+        },
+        {
+          "command": "devbelt.compareSchema",
+          "when": "view == devbelt.explorer && viewItem =~ /^schema\\.PG$/",
+          "group": "5_tools"
+        },
+        {
           "command": "devbelt.compareData",
           "when": "view == devbelt.explorer && viewItem == database.MYSQL",
           "group": "5_tools"

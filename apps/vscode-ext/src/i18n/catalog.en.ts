@@ -774,6 +774,8 @@ export const en: MessageCatalog = {
   'design.unsupported': 'Table design is not supported for this database yet.',
   'compare.noOtherDatabases': 'No other databases to compare.',
   'compare.chooseDatabase': 'Compare "{database}" with which database?',
+  'compare.noOtherSchemas': 'No other schemas to compare.',
+  'compare.chooseSchema': 'Compare "{schema}" with which schema?',
   'compare.chooseData': 'Compare data of "{database}" with which database?',
   'sync.noOtherConnections': 'No other connections to sync to.',
   'sync.chooseConnection': 'Sync "{database}" to which connection?',

@@ -449,4 +449,46 @@ describe('SchemaDiffService', () => {
     const nullable = normalizeColumnMeta({ name: 'n', type: 'TEXT', notnull: 0 } as any);
     expect(nullable.isNotNull).toBe(false);
   });
+
+  it('PG 跨 schema 对比：schema 透传给 getTables/getColumns（不再只比 current_schema）', async () => {
+    const calls: unknown[][] = [];
+    const src = {
+      getTables: async (db?: string, schema?: string) => { calls.push(['tables', db, schema]); return [{ name: 'users' }]; },
+      getColumns: async (t: string, db?: string, schema?: string) => { calls.push(['cols', t, db, schema]); return [{ name: 'id', type: 'integer' }]; },
+    } as unknown as MetadataService;
+    const tgt = {
+      getTables: async () => [{ name: 'users' }],
+      getColumns: async () => [{ name: 'id', type: 'integer' }],
+    } as unknown as MetadataService;
+    await SchemaDiffService.diff(src, 'mydb', tgt, 'mydb', 'sales', 'staging');
+    expect(calls).toEqual(expect.arrayContaining([
+      ['tables', 'mydb', 'sales'],
+      ['cols', 'users', 'mydb', 'sales'],
+    ]));
+  });
+
+  it('PG 同步 SQL：targetSchema 限定目标 schema，且把源 DDL 的限定名改写到目标', async () => {
+    const pg = new PostgreSqlDialect();
+    const tableService = {
+      dbType: DatabaseType.PG,
+      wrapIdentifier: (id: string) => pg.wrap(id),
+      getCreateSql: async (_t: string, _db?: string, schema?: string) =>
+        `CREATE TABLE ${pg.wrap(String(schema))}.${pg.wrap('orders')} (\n  "id" integer NOT NULL\n)`,
+      supports: () => true,
+    } as unknown as TableService;
+    const diffs = [
+      { tableName: 'orders', status: 'added' as const, columns: [] },
+      {
+        tableName: 'users',
+        status: 'changed' as const,
+        columns: [{ columnName: 'name', status: 'changed' as const, sourceType: 'text', targetType: 'text', sourceNotNull: true, targetNotNull: false }],
+      },
+    ];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'mydb', tableService, 'mydb', undefined, { sourceSchema: 'sales', targetSchema: 'staging' });
+    expect(sql).toContain('CREATE TABLE "staging"."orders"');
+    expect(sql).not.toContain('"sales"."orders"');
+    expect(sql).toContain('DROP TABLE IF EXISTS "staging"."orders"');
+    expect(sql).toContain('ALTER TABLE "staging"."users"');
+    expect(sql).toContain('ALTER COLUMN "name" SET NOT NULL');
+  });
 });

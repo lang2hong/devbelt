@@ -7,6 +7,7 @@ import { DataService } from '../../src/query/dataService';
 import { TableService } from '../../src/query/tableService';
 import { PostgreSqlDialect } from '../../src/dialect/postgreSqlDialect';
 import { BackupService } from '../../src/query/backupService';
+import { SchemaDiffService } from '../../src/query/schemaDiffService';
 import { withDatabaseInUrl } from '../../src/utils/connectionUrl';
 
 // 与生产 PostgreSqlConnection 一致：禁用 pg 对日期/JSON 的默认解析。
@@ -248,6 +249,30 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
       expect(r.rows[0].v).toBe('edited');
     } finally {
       await raw.query(`DROP SCHEMA IF EXISTS ${ssQ} CASCADE`);
+    }
+  });
+
+  it('4B：同连接跨 schema 结构对比 + 目标 schema 同步 SQL 可执行', async () => {
+    const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
+    // S1/S2 基础结构相同 → 给 S1.orders 加一列，制造差异。
+    await raw.query(`ALTER TABLE ${S1}.orders ADD COLUMN extra text`);
+    try {
+      const diffs = await SchemaDiffService.diff(meta, dbName, meta, dbName, S1, S2);
+      const orders = diffs.find((d) => d.tableName === 'orders')!;
+      expect(orders.status).toBe('changed');
+      expect(orders.columns.some((c) => c.columnName === 'extra' && c.status === 'added')).toBe(true);
+
+      const sql = await SchemaDiffService.generateSyncSql(diffs, dbName, table, dbName, dialect, { sourceSchema: S1, targetSchema: S2 });
+      // DDL 限定到目标 schema，绝不串到源 schema。
+      expect(sql).toContain(`"${S2}"."orders"`);
+      expect(sql).not.toContain(`"${S1}"."orders"`);
+
+      await raw.query(sql);
+      const cols = await meta.getColumns('orders', undefined, S2);
+      expect(cols.map((c) => c.name)).toContain('extra');
+    } finally {
+      await raw.query(`ALTER TABLE IF EXISTS ${S2}.orders DROP COLUMN IF EXISTS extra`);
+      await raw.query(`ALTER TABLE IF EXISTS ${S1}.orders DROP COLUMN IF EXISTS extra`);
     }
   });
 }, 60_000);

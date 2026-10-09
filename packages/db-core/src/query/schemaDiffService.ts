@@ -61,21 +61,25 @@ export interface TableDiff {
  */
 export class SchemaDiffService {
   /**
-   * 比对两个数据库的表结构差异。
+   * 比对两个数据库（MySQL/SQLite）或两个 schema（PG）的表结构差异。
    * @param sourceMeta 源库元数据服务
-   * @param sourceDb 源库名
+   * @param sourceDb 源库名（PG 下为库名，仅用于展示；对象作用域由 `sourceSchema` 决定）
    * @param targetMeta 目标库元数据服务
    * @param targetDb 目标库名
+   * @param sourceSchema PG：源 schema（同连接跨 schema 对比）
+   * @param targetSchema PG：目标 schema
    */
   static async diff(
     sourceMeta: MetadataService,
     sourceDb: string,
     targetMeta: MetadataService,
     targetDb: string,
+    sourceSchema?: string,
+    targetSchema?: string,
   ): Promise<TableDiff[]> {
     const [sourceTables, targetTables] = await Promise.all([
-      sourceMeta.getTables(sourceDb),
-      targetMeta.getTables(targetDb),
+      sourceMeta.getTables(sourceDb, sourceSchema),
+      targetMeta.getTables(targetDb, targetSchema),
     ]);
 
     const sourceNames = new Set(sourceTables.map((t) => t.name));
@@ -98,8 +102,8 @@ export class SchemaDiffService {
     for (const t of sourceTables) {
       if (!targetNames.has(t.name)) continue;
       const [sourceCols, targetCols] = await Promise.all([
-        sourceMeta.getColumns(t.name, sourceDb),
-        targetMeta.getColumns(t.name, targetDb),
+        sourceMeta.getColumns(t.name, sourceDb, sourceSchema),
+        targetMeta.getColumns(t.name, targetDb, targetSchema),
       ]);
       const colDiffs = this.diffColumns(sourceCols, targetCols);
       result.push({
@@ -166,9 +170,11 @@ export class SchemaDiffService {
   /**
    * 根据差异生成同步 SQL（将源库结构同步到目标库）。
    * @param diffs 差异列表
-   * @param targetDb 目标库名
+   * @param targetDb 目标库名（MySQL/SQLite 用作限定；PG 忽略，见 opts.targetSchema）
    * @param sourceTableService 源库表服务（用于获取新增表的 DDL）
    * @param sourceDb 源库名
+   * @param targetDialect 目标方言（MySQL NO_BACKSLASH_ESCAPES 时按目标模式转义）
+   * @param opts PG：`sourceSchema`/`targetSchema`（同连接跨 schema 对比/同步）
    */
   static async generateSyncSql(
     diffs: TableDiff[],
@@ -176,14 +182,15 @@ export class SchemaDiffService {
     sourceTableService: TableService,
     sourceDb: string,
     targetDialect?: SqlDialect,
+    opts: { sourceSchema?: string; targetSchema?: string } = {},
   ): Promise<string> {
     if (!sourceTableService.supports('schemaSync')) {
       throw new Error('Schema sync SQL is not supported for this database');
     }
-    // PG 走自己的 DDL 生成：标识符用双引号、不限定库名（走 search_path），
-    // 改列用 ALTER COLUMN TYPE / SET|DROP NOT NULL，而非 MySQL 的 MODIFY。
+    // PG 走自己的 DDL 生成：标识符用双引号；有 targetSchema 时限定目标 schema，
+    // 否则不限定库名、走 search_path。改列用 ALTER COLUMN TYPE / SET|DROP NOT NULL。
     if (sourceTableService.dbType === DatabaseType.PG) {
-      return this.generatePgSyncSql(diffs, targetDb, sourceTableService, sourceDb);
+      return this.generatePgSyncSql(diffs, targetDb, sourceTableService, sourceDb, opts);
     }
     if (sourceTableService.dbType === DatabaseType.SQLITE) {
       return this.generateSqliteSyncSql(diffs, sourceTableService, sourceDb);
@@ -265,21 +272,30 @@ export class SchemaDiffService {
   /**
    * 生成 PG 的 schema 同步 DDL。
    *
-   * 不限定库名（PG 的「库」不能跨库引用，目标由连接的 search_path 决定）；改列
-   * 分为「改类型」与「SET/DROP NOT NULL」两步，ADD/DROP 列同理。
+   * 无 `targetSchema` 时不限定库名（PG 的「库」不能跨库引用，目标由连接的 search_path 决定）；
+   * 有 `targetSchema` 时把 DDL 限定到目标 schema（同连接跨 schema 对比/同步）。
+   * 改列分为「改类型」与「SET/DROP NOT NULL」两步，ADD/DROP 列同理。
    */
   private static async generatePgSyncSql(
     diffs: TableDiff[],
     _targetDb: string,
     sourceTableService: TableService,
     sourceDb: string,
+    opts: { sourceSchema?: string; targetSchema?: string } = {},
   ): Promise<string> {
     const wrap = (id: string) => sourceTableService.wrapIdentifier(id);
-    const parts: string[] = [`-- Schema sync: ${sourceDb} → target`, ''];
+    const target = opts.targetSchema;
+    const targetTable = (name: string): string => (target ? `${wrap(target)}.${wrap(name)}` : wrap(name));
+    const parts: string[] = [`-- Schema sync: ${sourceDb} → ${target ? wrap(target) : 'target'}`, ''];
     for (const d of diffs) {
-      const table = wrap(d.tableName);
+      const table = targetTable(d.tableName);
       if (d.status === 'added') {
-        const ddl = await sourceTableService.getCreateSql(d.tableName, sourceDb);
+        const ddl = qualifyPgCreateDdl(
+          await sourceTableService.getCreateSql(d.tableName, sourceDb, opts.sourceSchema),
+          opts.sourceSchema,
+          wrap,
+          target,
+        );
         parts.push(`-- Add table: ${d.tableName}`);
         parts.push(`DROP TABLE IF EXISTS ${table};`);
         parts.push(ddl.replace(/;\s*$/, '') + ';');
@@ -415,4 +431,27 @@ export class SchemaDiffService {
 /** 列规格是否「没有默认值」（空串/null/undefined 都算无）。 */
 function hasNoDefault(spec: ColumnSpec): boolean {
   return spec.defaultValue === undefined || spec.defaultValue === null || spec.defaultValue === '';
+}
+
+/**
+ * 把 PG 建表 DDL 的首个限定名改写到目标 schema（供同连接跨 schema 同步）。
+ *
+ * - 源 DDL 带源 schema 限定（`"src"."t"`）：替换首个 `"src".` 为 `"target".`；
+ * - 源 DDL 未限定（`"t"`）：在 `CREATE TABLE` 后的首个标识符前加目标 schema；
+ * - 无 `targetSchema`：原样返回（沿用 search_path 语义）。
+ */
+function qualifyPgCreateDdl(
+  ddl: string,
+  sourceSchema: string | undefined,
+  wrap: (id: string) => string,
+  target: string | undefined,
+): string {
+  if (!target) return ddl;
+  if (sourceSchema && ddl.includes(`${wrap(sourceSchema)}.`)) {
+    return ddl.replace(`${wrap(sourceSchema)}.`, `${wrap(target)}.`);
+  }
+  return ddl.replace(
+    /^(\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?)("(?:[^"]|"")*")/i,
+    `$1${wrap(target)}.$2`,
+  );
 }

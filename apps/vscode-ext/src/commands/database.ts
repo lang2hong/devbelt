@@ -206,9 +206,33 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     const session = await manager.connectSql(node.conn, node.database);
     if (!requireCapability(session, 'schemaSync')) return;
     // PG 连接绑定单个数据库（无 USE），同一连接上的「另一个库」取不到其元数据：
-    // 对比会退化成拿库和自己比、恒输出无差异。明确拒绝，而不是给出误导结果。
+    // 改为在同一连接上对比两个 **schema**（PG 的等价维度），跨库对比仍不支持。
     if (node.conn.dbType === DatabaseType.PG) {
-      vscode.window.showWarningMessage(l10n('schema.pgCrossDbUnsupported'));
+      const sourceSchema = pgSchemaFor(node.conn, node.schema)
+        ?? ((node.conn.schema && node.conn.schema.trim()) || 'public');
+      const schemas = (await session.metadata.getSchemas()).filter((s) => s !== sourceSchema);
+      if (!schemas.length) {
+        vscode.window.showWarningMessage(l10n('compare.noOtherSchemas'));
+        return;
+      }
+      const target = await vscode.window.showQuickPick(
+        schemas.map((s) => ({ label: s, value: s })),
+        { placeHolder: l10n('compare.chooseSchema', { schema: sourceSchema }) },
+      );
+      if (!target) return;
+      // 源与目标在同一连接、同一库内，靠显式 sourceSchema/targetSchema 限定对象作用域。
+      const diffs = await SchemaDiffService.diff(
+        session.metadata, node.database, session.metadata, node.database, sourceSchema, target.value,
+      );
+      const syncSql = await SchemaDiffService.generateSyncSql(
+        diffs, node.database, session.table, node.database, session.query.dialect,
+        { sourceSchema, targetSchema: target.value },
+      );
+      const pgAdded = diffs.filter((d) => d.status === 'added').length;
+      const pgRemoved = diffs.filter((d) => d.status === 'removed').length;
+      const pgChanged = diffs.filter((d) => d.status === 'changed').length;
+      const pgHeader = `-- Diff: ${sourceSchema} -> ${target.value} (${pgAdded} added, ${pgRemoved} removed, ${pgChanged} changed)\n\n`;
+      await openSqlDoc(pgHeader + syncSql);
       return;
     }
     const targetDbs = (await session.metadata.getDatabases()).filter((d) => d !== node.database);
