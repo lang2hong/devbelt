@@ -75,7 +75,7 @@ export class DataTransferService {
             throw new Error('cross-database-type schema sync is not supported');
           }
           const syncSql = await SchemaDiffService.generateSyncSql(
-            [diff], targetDb, sourceTable, sourceDb, targetQuery.dialect, { sourceSchema, targetSchema },
+            [diff], targetDb, sourceTable, sourceDb, targetQuery.dialect, { sourceSchema, targetSchema, dialect: targetQuery.dialect },
           );
           const statements = splitExecutableStatements(syncSql, scanOptionsForDialect(targetQuery.dialect));
           for (const stmt of statements) {
@@ -106,6 +106,23 @@ export class DataTransferService {
           failedTables.add(table);
           if (haltOnError) throw new Error(`${table}: data sync failed - ${(err as Error).message}`);
         }
+      }
+    }
+
+    // schema 级对象（PG）：序列/视图/函数/触发器。放在表/数据之后，依赖已就绪。
+    if (sourceSchema && targetSchema && sourceQuery.dialect.dbType === 'PG') {
+      try {
+        const obj = await SchemaDiffService.diffSchemaObjects(sourceMeta, targetMeta, sourceSchema, targetSchema);
+        const sql = SchemaDiffService.generateSchemaObjectsSql(obj, targetQuery.dialect, { sourceSchema, targetSchema });
+        const statements = splitExecutableStatements(sql, scanOptionsForDialect(targetQuery.dialect));
+        for (const stmt of statements) {
+          if (isCancelled?.()) throw new Error('Transfer cancelled.');
+          const s = stmt.trim();
+          if (s && !s.startsWith('--')) await targetQuery.query(s, undefined, SKIP);
+        }
+      } catch (err) {
+        errors.push(`schema objects: ${(err as Error).message}`);
+        if (haltOnError) throw new Error(`schema objects: ${(err as Error).message}`);
       }
     }
 

@@ -226,13 +226,16 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
       );
       const syncSql = await SchemaDiffService.generateSyncSql(
         diffs, node.database, session.table, node.database, session.query.dialect,
-        { sourceSchema, targetSchema: target.value },
+        { sourceSchema, targetSchema: target.value, dialect: session.query.dialect },
       );
       const pgAdded = diffs.filter((d) => d.status === 'added').length;
       const pgRemoved = diffs.filter((d) => d.status === 'removed').length;
       const pgChanged = diffs.filter((d) => d.status === 'changed').length;
       const pgHeader = `${l10n('compare.syncScopeNote')}\n\n-- Diff: ${sqlCommentSafe(sourceSchema)} -> ${sqlCommentSafe(target.value)} (${pgAdded} added, ${pgRemoved} removed, ${pgChanged} changed)\n\n`;
-      await openSqlDoc(pgHeader + syncSql);
+      // 序列/视图/函数/触发器（schema 级对象）。
+      const objDiff = await SchemaDiffService.diffSchemaObjects(session.metadata, session.metadata, sourceSchema, target.value);
+      const objSql = SchemaDiffService.generateSchemaObjectsSql(objDiff, session.query.dialect, { sourceSchema, targetSchema: target.value });
+      await openSqlDoc(`${pgHeader}${syncSql}\n\n${objSql}`);
       return;
     }
     const targetDbs = (await session.metadata.getDatabases()).filter((d) => d !== node.database);

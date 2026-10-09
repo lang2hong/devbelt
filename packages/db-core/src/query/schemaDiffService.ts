@@ -1,8 +1,7 @@
 import type { MetadataService } from './metadataService.js';
 import type { TableService } from './tableService.js';
-import type { ColumnMeta } from '../types/meta.js';
-import type { ConstraintMeta } from '../types/meta.js';
-import { validateIdent } from '../utils/validate.js';
+import type { ColumnMeta, IndexMeta, SequenceMeta, ConstraintMeta } from '../types/meta.js';
+import { validateIdent, validateSchemaIdent } from '../utils/validate.js';
 import { validateColumnType } from './columnSpec.js';
 import type { ColumnSpec } from './columnSpec.js';
 import { renderColumnAttributes } from './columnSpec.js';
@@ -56,6 +55,47 @@ export interface TableDiff {
   columns: ColumnDiff[];
   /** 表级约束差异（PG：PK/UNIQUE/CHECK/FK）；不支持的方言为 undefined。 */
   constraints?: ConstraintDiff[];
+  /** 索引差异（非主键索引）。 */
+  indexes?: IndexDiff[];
+}
+
+/** 索引差异（主键索引不在此，由约束处理）。 */
+export interface IndexDiff {
+  name: string;
+  status: 'added' | 'removed' | 'changed';
+  columns?: string[];
+  unique?: boolean;
+  /** 源侧定义（PG 的 pg_get_indexdef），用于变更比较。 */
+  definition?: string;
+}
+
+/** schema 级对象差异（视图/函数/触发器）。 */
+export interface SchemaObjectDiff {
+  name: string;
+  status: 'added' | 'removed' | 'changed';
+  /** 源定义（added/changed 用于生成）。 */
+  definition?: string;
+  /** triggers：所属表。 */
+  table?: string;
+  /** routines：参数签名（DROP 需要）。 */
+  identityArgs?: string;
+  /** routines：FUNCTION/PROCEDURE。 */
+  routineType?: string;
+}
+
+/** 序列差异。 */
+export interface SequenceObjectDiff {
+  name: string;
+  status: 'added' | 'removed' | 'changed';
+  meta?: SequenceMeta;
+}
+
+/** schema 级对象集合差异。 */
+export interface SchemaObjectsDiff {
+  sequences: SequenceObjectDiff[];
+  views: SchemaObjectDiff[];
+  routines: SchemaObjectDiff[];
+  triggers: SchemaObjectDiff[];
 }
 
 /** 约束差异（按约束名比对，定义由数据库规范化）。 */
@@ -109,17 +149,20 @@ export class SchemaDiffService {
 
     for (const t of sourceTables) {
       const srcCons = typeof sourceMeta.getConstraints === 'function' ? await sourceMeta.getConstraints(t.name, sourceSchema) : [];
-      // 源库有、目标无 → added（连同其约束一并带上）
+      const srcIdx = typeof sourceMeta.getIndexes === 'function' ? await sourceMeta.getIndexes(t.name, sourceDb, sourceSchema) : [];
+      const srcIdxDiff = srcIdx.filter((i) => !i.isPrimary).map((i) => ({ name: i.name, status: 'added' as const, columns: i.columns, unique: i.isUnique, definition: i.type }));
+      // 源库有、目标无 → added（连同其约束/索引一并带上）
       if (!targetNames.has(t.name)) {
         result.push({
           tableName: t.name,
           status: 'added',
           columns: [],
           constraints: srcCons.map((c) => ({ name: c.name, type: c.type, status: 'added' as const, definition: c.definition })),
+          indexes: srcIdxDiff,
         });
         continue;
       }
-      // 都有 → 比较 columns + constraints
+      // 都有 → 比较 columns + constraints + indexes
       const [sourceCols, targetCols] = await Promise.all([
         sourceMeta.getColumns(t.name, sourceDb, sourceSchema),
         targetMeta.getColumns(t.name, targetDb, targetSchema),
@@ -127,11 +170,14 @@ export class SchemaDiffService {
       const colDiffs = this.diffColumns(sourceCols, targetCols, makeSchemaNormalizers(sourceSchema, targetSchema));
       const tgtCons = typeof targetMeta.getConstraints === 'function' ? await targetMeta.getConstraints(t.name, targetSchema) : [];
       const constraints = this.diffConstraints(srcCons, tgtCons, schemas);
+      const tgtIdx = typeof targetMeta.getIndexes === 'function' ? await targetMeta.getIndexes(t.name, targetDb, targetSchema) : [];
+      const indexes = this.diffIndexes(srcIdx, tgtIdx, schemas);
       result.push({
         tableName: t.name,
-        status: (colDiffs.some((c) => c.status !== 'unchanged') || constraints.length > 0) ? 'changed' : 'unchanged',
+        status: (colDiffs.some((c) => c.status !== 'unchanged') || constraints.length > 0 || indexes.length > 0) ? 'changed' : 'unchanged',
         columns: colDiffs,
         constraints,
+        indexes,
       });
     }
     // 目标有、源库无 → removed
@@ -156,6 +202,26 @@ export class SchemaDiffService {
     }
     const srcNames = new Set(src.map((c) => c.name));
     for (const t of tgt) if (!srcNames.has(t.name)) out.push({ name: t.name, type: t.type, status: 'removed' });
+    return out;
+  }
+
+  /** 按索引名比对（主键索引跳过，由约束处理）：定义/列/唯一性任一变化即 changed。 */
+  private static diffIndexes(src: IndexMeta[], tgt: IndexMeta[], schemas: readonly (string | undefined)[]): IndexDiff[] {
+    const norm = (s: string) => stripIdentifierSchema(s, schemas);
+    const srcList = src.filter((i) => !i.isPrimary);
+    const tgtList = tgt.filter((i) => !i.isPrimary);
+    const tgtMap = new Map(tgtList.map((i) => [i.name, i]));
+    const out: IndexDiff[] = [];
+    for (const s of srcList) {
+      const t = tgtMap.get(s.name);
+      const cols = (i: IndexMeta) => (i.columns ?? []).join(',');
+      if (!t) out.push({ name: s.name, status: 'added', columns: s.columns, unique: s.isUnique, definition: s.type });
+      else if (norm(String(s.type ?? '')) !== norm(String(t.type ?? '')) || cols(s) !== cols(t) || !!s.isUnique !== !!t.isUnique) {
+        out.push({ name: s.name, status: 'changed', columns: s.columns, unique: s.isUnique, definition: s.type });
+      }
+    }
+    const srcNames = new Set(srcList.map((i) => i.name));
+    for (const t of tgtList) if (!srcNames.has(t.name)) out.push({ name: t.name, status: 'removed' });
     return out;
   }
 
@@ -225,7 +291,7 @@ export class SchemaDiffService {
     sourceTableService: TableService,
     sourceDb: string,
     targetDialect?: SqlDialect,
-    opts: { sourceSchema?: string; targetSchema?: string } = {},
+    opts: { sourceSchema?: string; targetSchema?: string; dialect?: SqlDialect } = {},
   ): Promise<string> {
     if (!sourceTableService.supports('schemaSync')) {
       throw new Error('Schema sync SQL is not supported for this database');
@@ -313,6 +379,119 @@ export class SchemaDiffService {
   }
 
   /**
+   * 对比 schema 级对象（序列/视图/函数/触发器）。非 PG 方言这些元数据为空，集合即为空。
+   * 定义比对先做 schema 归一化（抹掉源/目标 schema 前缀）。
+   */
+  static async diffSchemaObjects(
+    sourceMeta: MetadataService,
+    targetMeta: MetadataService,
+    sourceSchema?: string,
+    targetSchema?: string,
+  ): Promise<SchemaObjectsDiff> {
+    const schemas = [sourceSchema, targetSchema];
+    const norm = (d?: string) => stripIdentifierSchema(String(d ?? ''), schemas);
+    const out: SchemaObjectsDiff = { sequences: [], views: [], routines: [], triggers: [] };
+
+    // 序列
+    const [srcSeq, tgtSeq] = await Promise.all([sourceMeta.getSequences(sourceSchema), targetMeta.getSequences(targetSchema)]);
+    const tgtSeqMap = new Map(tgtSeq.map((s) => [s.name, s]));
+    const seqKey = (s: SequenceMeta) => [s.dataType, s.incrementBy, s.minValue, s.maxValue, s.startValue, s.cacheSize, !!s.cycle].join('|');
+    for (const s of srcSeq) {
+      const t = tgtSeqMap.get(s.name);
+      if (!t) out.sequences.push({ name: s.name, status: 'added', meta: s });
+      else if (seqKey(s) !== seqKey(t)) out.sequences.push({ name: s.name, status: 'changed', meta: s });
+    }
+    const srcSeqNames = new Set(srcSeq.map((s) => s.name));
+    for (const t of tgtSeq) if (!srcSeqNames.has(t.name)) out.sequences.push({ name: t.name, status: 'removed' });
+
+    // 视图
+    const [srcViews, tgtViews] = await Promise.all([sourceMeta.getViews(undefined, sourceSchema), targetMeta.getViews(undefined, targetSchema)]);
+    const tgtViewMap = new Map(tgtViews.map((v) => [v.name, v]));
+    for (const v of srcViews) {
+      const def = await sourceMeta.getViewDefinition(v.name, undefined, sourceSchema);
+      const t = tgtViewMap.get(v.name);
+      if (!t) out.views.push({ name: v.name, status: 'added', definition: def });
+      else if (norm(def) !== norm(await targetMeta.getViewDefinition(t.name, undefined, targetSchema))) out.views.push({ name: v.name, status: 'changed', definition: def });
+    }
+    const srcViewNames = new Set(srcViews.map((v) => v.name));
+    for (const t of tgtViews) if (!srcViewNames.has(t.name)) out.views.push({ name: t.name, status: 'removed' });
+
+    // 函数/例程
+    const [srcRout, tgtRout] = await Promise.all([sourceMeta.getFunctions(undefined, sourceSchema), targetMeta.getFunctions(undefined, targetSchema)]);
+    const routKey = (r: { name: string; identityArgs?: string }) => `${r.name}|${r.identityArgs ?? ''}`;
+    const tgtRoutMap = new Map(tgtRout.map((r) => [routKey(r), r]));
+    for (const r of srcRout) {
+      const def = await sourceMeta.getRoutineDefinition(r.name, r.type, undefined, sourceSchema, r.identityArgs);
+      const t = tgtRoutMap.get(routKey(r));
+      if (!t) out.routines.push({ name: r.name, status: 'added', definition: def, identityArgs: r.identityArgs, routineType: r.type });
+      else if (norm(def) !== norm(await targetMeta.getRoutineDefinition(t.name, t.type, undefined, targetSchema, t.identityArgs))) {
+        out.routines.push({ name: r.name, status: 'changed', definition: def, identityArgs: r.identityArgs, routineType: r.type });
+      }
+    }
+    const srcRoutKeys = new Set(srcRout.map(routKey));
+    for (const t of tgtRout) if (!srcRoutKeys.has(routKey(t))) out.routines.push({ name: t.name, status: 'removed', identityArgs: t.identityArgs, routineType: t.type });
+
+    // 触发器（逐表）
+    const [srcTables, tgtTables] = await Promise.all([sourceMeta.getTables(undefined, sourceSchema), targetMeta.getTables(undefined, targetSchema)]);
+    const tgtTrig = new Map<string, string>();
+    for (const tb of tgtTables) {
+      try { for (const tg of await targetMeta.getTriggers(tb.name, undefined, targetSchema)) tgtTrig.set(`${tb.name}|${tg.name}`, await targetMeta.getTriggerDefinition(tg.name, undefined, targetSchema, tb.name)); } catch { /* skip */ }
+    }
+    const srcTrigKeys = new Set<string>();
+    for (const tb of srcTables) {
+      let tris: Awaited<ReturnType<MetadataService['getTriggers']>>;
+      try { tris = await sourceMeta.getTriggers(tb.name, undefined, sourceSchema); } catch { continue; }
+      for (const tg of tris) {
+        srcTrigKeys.add(`${tb.name}|${tg.name}`);
+        const def = await sourceMeta.getTriggerDefinition(tg.name, undefined, sourceSchema, tb.name);
+        const key = `${tb.name}|${tg.name}`;
+        if (!tgtTrig.has(key)) out.triggers.push({ name: tg.name, status: 'added', definition: def, table: tb.name });
+        else if (norm(def) !== norm(tgtTrig.get(key))) out.triggers.push({ name: tg.name, status: 'changed', definition: def, table: tb.name });
+      }
+    }
+    for (const tb of tgtTables) {
+      try { for (const tg of await targetMeta.getTriggers(tb.name, undefined, targetSchema)) if (!srcTrigKeys.has(`${tb.name}|${tg.name}`)) out.triggers.push({ name: tg.name, status: 'removed', table: tb.name }); } catch { /* skip */ }
+    }
+
+    return out;
+  }
+
+  /** 生成 schema 级对象的同步 SQL（PG 定义改写到目标 schema）。 */
+  static generateSchemaObjectsSql(obj: SchemaObjectsDiff, dialect: SqlDialect, opts: { sourceSchema?: string; targetSchema?: string } = {}): string {
+    const target = opts.targetSchema;
+    const wrapObjName = (name: string) => (target ? `${dialect.wrap(validateSchemaIdent(target))}.${dialect.wrap(validateIdent(name, 63))}` : dialect.wrap(validateIdent(name, 63)));
+    const rw = (d?: string) => rewritePgSchemaRefs(String(d ?? ''), opts.sourceSchema, target).replace(/;\s*$/, '');
+    const parts: string[] = ['-- Schema objects', ''];
+
+    for (const s of obj.sequences) {
+      if (s.status === 'removed') { parts.push(`DROP SEQUENCE IF EXISTS ${wrapObjName(s.name)};`); continue; }
+      // 仅补建缺失序列；已存在但参数不同的 changed 不在此处理（避免 DROP 波及依赖）。
+      if (s.status === 'added' && dialect.createSequenceSql && s.meta) parts.push(dialect.createSequenceSql(s.name, s.meta, target));
+    }
+    for (const v of obj.views) {
+      if (v.status === 'removed') { parts.push(`DROP VIEW IF EXISTS ${wrapObjName(v.name)};`); continue; }
+      if (!v.definition) continue;
+      parts.push(`DROP VIEW IF EXISTS ${wrapObjName(v.name)};`);
+      parts.push(dialect.normalizeViewAlterSql(rw(v.definition), v.name, undefined, target));
+    }
+    for (const r of obj.routines) {
+      if (r.status === 'removed') {
+        const kind = /PROCEDURE/i.test(r.routineType ?? '') ? 'PROCEDURE' : 'FUNCTION';
+        parts.push(`DROP ${kind} IF EXISTS ${wrapObjName(r.name)}${r.identityArgs ? `(${r.identityArgs})` : ''};`);
+        continue;
+      }
+      if (r.definition) parts.push(rw(r.definition) + ';');
+    }
+    for (const t of obj.triggers) {
+      if (!t.table) continue;
+      parts.push(`DROP TRIGGER IF EXISTS ${dialect.wrap(validateIdent(t.name, 63))} ON ${wrapObjName(t.table)};`);
+      if (t.status !== 'removed' && t.definition) parts.push(rw(t.definition) + ';');
+    }
+    if (parts.length <= 2) parts.push('-- No schema-object differences.');
+    return parts.join('\n');
+  }
+
+  /**
    * 生成 PG 的 schema 同步 DDL。
    *
    * 无 `targetSchema` 时不限定库名（PG 的「库」不能跨库引用，目标由连接的 search_path 决定）；
@@ -324,7 +503,7 @@ export class SchemaDiffService {
     _targetDb: string,
     sourceTableService: TableService,
     sourceDb: string,
-    opts: { sourceSchema?: string; targetSchema?: string } = {},
+    opts: { sourceSchema?: string; targetSchema?: string; dialect?: SqlDialect } = {},
   ): Promise<string> {
     const wrap = (id: string) => sourceTableService.wrapIdentifier(id);
     const wrapSchema = (id: string) => sourceTableService.wrapSchemaIdentifier(id);
@@ -433,6 +612,24 @@ if (d.status === 'added') {
       parts.push(`-- Constraints: ${d.tableName}`);
       parts.push(...lines);
       parts.push('');
+    }
+    // 索引：非主键；先 DROP（IF EXISTS）再建，兼容改名/定义变化。
+    if (opts.dialect?.createIndexSql && opts.dialect.dropIndexSql) {
+      for (const d of diffs) {
+        if (!d.indexes?.length) continue;
+        const lines: string[] = [];
+        for (const ix of d.indexes) {
+          if (ix.status === 'removed') {
+            lines.push(opts.dialect.dropIndexSql(ix.name, d.tableName, undefined, target) + ';');
+          } else {
+            lines.push(opts.dialect.dropIndexSql(ix.name, d.tableName, undefined, target) + ';');
+            lines.push(opts.dialect.createIndexSql(ix.name, d.tableName, ix.columns ?? [], !!ix.unique, undefined, target) + ';');
+          }
+        }
+        parts.push(`-- Indexes: ${d.tableName}`);
+        parts.push(...lines);
+        parts.push('');
+      }
     }
     if (parts.length <= 2) {
       parts.push('-- No differences found. Schemas are in sync.');

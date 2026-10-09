@@ -618,3 +618,55 @@ describe('SchemaDiffService 序列（P3b/N2）', () => {
     expect(sql).toContain('ALTER SEQUENCE staging.t_id_seq OWNED BY "staging"."t"."id";');
   });
 });
+
+describe('SchemaDiffService 索引 / schema 级对象（P3c）', () => {
+  it('索引差异与生成（DROP IF EXISTS + CREATE）', async () => {
+    const pg = new PostgreSqlDialect();
+    const source = {
+      getTables: async () => [{ name: 't' }],
+      getColumns: async () => [{ name: 'id', type: 'integer', isPrimary: true }],
+      getConstraints: async () => [],
+      getIndexes: async () => [{ name: 'idx_a', columns: ['a'], isUnique: false, type: 'CREATE INDEX idx_a ON t (a)' }],
+    } as unknown as MetadataService;
+    const target = {
+      getTables: async () => [{ name: 't' }],
+      getColumns: async () => [{ name: 'id', type: 'integer', isPrimary: true }],
+      getConstraints: async () => [],
+      getIndexes: async () => [],
+    } as unknown as MetadataService;
+    const diffs = await SchemaDiffService.diff(source, 'db', target, 'db', 'app', 'staging');
+    expect(diffs.find((d) => d.tableName === 't')!.indexes!.map((i) => [i.name, i.status])).toEqual([['idx_a', 'added']]);
+
+    const tableService = { dbType: DatabaseType.PG, wrapIdentifier: (id: string) => pg.wrap(id), wrapSchemaIdentifier: (id: string) => pg.wrap(id), getCreateSql: async () => '', supports: () => true } as unknown as TableService;
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'db', tableService, 'db', undefined, { sourceSchema: 'app', targetSchema: 'staging', dialect: pg });
+    expect(sql).toContain('DROP INDEX IF EXISTS "staging"."idx_a";');
+    expect(sql).toContain('CREATE INDEX "idx_a" ON "staging"."t" ("a");');
+  });
+
+  it('schema 级对象（序列/视图）差异与生成', async () => {
+    const pg = new PostgreSqlDialect();
+    const source = {
+      getSequences: async () => [{ name: 's1', dataType: 'bigint', incrementBy: 1, startValue: 1, minValue: 1, maxValue: null, cacheSize: 1, cycle: false }],
+      getViews: async () => [{ name: 'v1' }],
+      getViewDefinition: async () => 'SELECT 1',
+      getFunctions: async () => [],
+      getTables: async () => [],
+      getTriggers: async () => [],
+    } as unknown as MetadataService;
+    const target = {
+      getSequences: async () => [],
+      getViews: async () => [],
+      getFunctions: async () => [],
+      getTables: async () => [],
+      getTriggers: async () => [],
+    } as unknown as MetadataService;
+    const obj = await SchemaDiffService.diffSchemaObjects(source, target, 'app', 'staging');
+    expect(obj.sequences.map((s) => [s.name, s.status])).toEqual([['s1', 'added']]);
+    expect(obj.views.map((v) => [v.name, v.status])).toEqual([['v1', 'added']]);
+
+    const sql = SchemaDiffService.generateSchemaObjectsSql(obj, pg, { sourceSchema: 'app', targetSchema: 'staging' });
+    expect(sql).toContain('CREATE SEQUENCE IF NOT EXISTS "staging"."s1"');
+    expect(sql).toContain('DROP VIEW IF EXISTS "staging"."v1";');
+    expect(sql).toContain('CREATE OR REPLACE VIEW "staging"."v1" AS');
+  });
+});
