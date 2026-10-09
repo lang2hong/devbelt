@@ -679,20 +679,35 @@ export class TableService {
             ? `quote_ident(n.nspname) || '.' || quote_ident(c.relname)`
             : `quote_ident(c.relname)`;
         const groupBy = schema ? 'n.nspname, c.relname' : 'c.relname';
+        // H2：pg_depend 反查**仅在跨 schema 生成（targetSchema）时**启用；否则（备份/dump/导出/
+        // 查看建表/表设计器）保持 pg_get_expr 原样，维持 B5「dump 与 schema 无关」。
+        // M3：连接条件限定到该列的 pg_attrdef 行（classid='pg_attrdef' AND objid=ad.oid），
+        // 避免用序列默认值覆盖列的真实默认值。
+        const seqJoin = targetSchema
+          ? `LEFT JOIN LATERAL (
+            SELECT quote_ident(sn.nspname) || '.' || quote_ident(sc.relname) AS qname
+              FROM pg_depend d
+              JOIN pg_class sc ON sc.oid = d.objid AND sc.relkind = 'S'
+              JOIN pg_namespace sn ON sn.oid = sc.relnamespace
+             WHERE d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid
+               AND d.refobjid = c.oid AND d.refobjsubid = a.attnum AND d.deptype IN ('a', 'i')
+             LIMIT 1
+          ) seq ON true`
+          : '';
+        const defaultExpr = targetSchema
+          ? `COALESCE(
+                     CASE WHEN seq.qname IS NOT NULL
+                          THEN 'nextval(' || quote_literal(seq.qname) || '::regclass)'
+                          ELSE NULL END,
+                     pg_get_expr(ad.adbin, ad.adrelid))`
+          : `pg_get_expr(ad.adbin, ad.adrelid)`;
         return `SELECT
             'CREATE TABLE ' || ${tableExpr} || ' (' || chr(10) ||
             string_agg(
               '  ' || quote_ident(a.attname) || ' ' || format_type(a.atttypid, a.atttypmod)
                 || CASE WHEN a.attnotnull THEN ' NOT NULL' ELSE '' END
                 || CASE WHEN ad.adbin IS NOT NULL
-                        -- P1：serial/identity 的默认值改由 pg_depend 反查**完全限定**的序列名重建
-                        -- （pg_get_expr/column_default 会随 search_path 输出不带 schema 的名字，
-                        --  跨 schema 同步时会错误绑定到源序列）；非 serial 仍回退 pg_get_expr。
-                        THEN ' DEFAULT ' || COALESCE(
-                               CASE WHEN seq.qname IS NOT NULL
-                                    THEN 'nextval(' || quote_literal(seq.qname) || '::regclass)'
-                                    ELSE NULL END,
-                               pg_get_expr(ad.adbin, ad.adrelid))
+                        THEN ' DEFAULT ' || ${defaultExpr}
                         ELSE '' END,
               ',' || chr(10) ORDER BY a.attnum
             ) || chr(10) || ');' AS create_sql
@@ -700,14 +715,7 @@ export class TableService {
           JOIN pg_namespace n ON n.oid = c.relnamespace
           JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
           LEFT JOIN pg_attrdef ad ON ad.adrelid = c.oid AND ad.adnum = a.attnum
-          LEFT JOIN LATERAL (
-            SELECT quote_ident(sn.nspname) || '.' || quote_ident(sc.relname) AS qname
-              FROM pg_depend d
-              JOIN pg_class sc ON sc.oid = d.objid AND sc.relkind = 'S'
-              JOIN pg_namespace sn ON sn.oid = sc.relnamespace
-             WHERE d.refobjid = c.oid AND d.refobjsubid = a.attnum AND d.deptype IN ('a', 'i')
-             LIMIT 1
-          ) seq ON true
+          ${seqJoin}
           WHERE c.relname = ${this.esc(table)}
             AND n.nspname = ${schemaExpr}
             AND c.relkind IN ('r', 'p')

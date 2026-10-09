@@ -111,19 +111,19 @@ export interface ForeignKeyMeta {
   constraintName?: string;
 }
 
-/** 序列（PG）。 */
+/** 序列（PG）。数值以**字符串**保留（bigint 可超 JS number 精度）。 */
 export interface SequenceMeta {
   name: string;
   /** 数值类型（bigint/smallint/integer），缺省 bigint。 */
   dataType?: string;
-  startValue?: number | null;
-  minValue?: number | null;
-  maxValue?: number | null;
-  incrementBy?: number | null;
+  startValue?: string | null;
+  minValue?: string | null;
+  maxValue?: string | null;
+  incrementBy?: string | null;
   cycle?: boolean;
-  cacheSize?: number | null;
+  cacheSize?: string | null;
   /** 序列当前值（同步后 setval 用）。 */
-  lastValue?: number | null;
+  lastValue?: string | null;
 }
 
 /** 表级约束（PK/UNIQUE/CHECK/FK），定义由数据库规范化输出。 */

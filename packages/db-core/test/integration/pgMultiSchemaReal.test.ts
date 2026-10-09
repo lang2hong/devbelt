@@ -284,8 +284,8 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
     try {
       const diffs = await SchemaDiffService.diff(meta, dbName, meta, dbName, S1, S2);
       const sql = await SchemaDiffService.generateSyncSql(diffs, dbName, table, dbName, dialect, { sourceSchema: S1, targetSchema: S2 });
-      // 默认值经 pg_depend 完全限定后改写到目标 schema。
-      expect(sql).toContain(`nextval('${S2}.`);
+      // 默认值经 pg_depend 完全限定后改写到目标 schema（目标 schema 带引号，H1）。
+      expect(sql).toContain(`nextval('"${S2}".`);
       expect(sql).not.toContain(`nextval('${S1}.`);
     } finally {
       await raw.query(`DROP TABLE IF EXISTS ${S1}."${t}"`);

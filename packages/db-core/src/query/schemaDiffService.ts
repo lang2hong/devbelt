@@ -813,9 +813,12 @@ function makeSchemaNormalizers(sourceSchema?: string, targetSchema?: string): Co
 
 /**
  * 把已知形态里的源 schema 前缀改写为目标 schema：
- * - `nextval('<from>.<seq>'::regclass)` 字面量（带 schema → 改写；**未带 schema → 视为源 schema 对象，补目标 schema**）；
+ * - `nextval('<from>.<seq>'::regclass)` 字面量（带 schema → 改写）；
  * - 字符串字面量之外的标识符上下文类型名限定。
- * 不做无边界子串替换，避免误改 `'see app.example.com'` 等字面量。
+ * 目标 schema 一律以**带引号**形式（`toQ`）拼接，避免注入/大小写漂移。
+ *
+ * 未限定的 `nextval('seq')` 不再补目标 schema（M1 已用 `SET LOCAL search_path=pg_catalog`
+ * 保证目录输出总是限定；共用序列不会被悄悄另起计数器）。
  */
 function rewritePgSchemaRefs(text: string, from?: string, to?: string): string {
   if (!text || !from || !to || from === to) return text;
@@ -824,15 +827,14 @@ function rewritePgSchemaRefs(text: string, from?: string, to?: string): string {
   const s = text.replace(/nextval\('([^']*)'::regclass\)/g, (_m, lit: string) => {
     let l = lit;
     if (l.startsWith(`${fromQ}.`)) l = `${toQ}.${l.slice(fromQ.length + 1)}`;
-    else if (l.startsWith(`${from}.`)) l = `${to}.${l.slice(from.length + 1)}`;
-    else if (!l.includes('.')) l = `${to}.${l}`; // 未限定（源 schema 在 search_path 时的输出）→ 补目标 schema
+    else if (l.startsWith(`${from}.`)) l = `${toQ}.${l.slice(from.length + 1)}`;
     return `nextval('${l}'::regclass)`;
   });
   const boundary = '(?<![\\w$"\'])';
   const fromPats = [fromQ, from].map((p) => new RegExp(`${boundary}${escapeRe(p)}\\.`, 'g'));
   return rewriteOutsideLiterals(s, (seg) => {
     let out = seg;
-    fromPats.forEach((re, idx) => { out = out.replace(re, idx === 0 ? `${toQ}.` : `${to}.`); });
+    for (const re of fromPats) out = out.replace(re, `${toQ}.`);
     return out;
   });
 }

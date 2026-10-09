@@ -96,30 +96,32 @@ export class PostgreSqlDialect implements SqlDialect {
   }
 
   parseSequenceList(rows: any[]): SequenceMeta[] {
-    const num = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
+    // 数值一律按字符串保留：bigint 的 max/min 超过 JS number 精度，转 Number 会丢精度。
+    const s = (v: unknown): string | null => (v === null || v === undefined ? null : String(v));
     return rows.map((r) => ({
       name: String(r.name),
       dataType: r.data_type ?? undefined,
-      startValue: num(r.start_value),
-      minValue: num(r.min_value),
-      maxValue: num(r.max_value),
-      incrementBy: num(r.increment_by),
+      startValue: s(r.start_value),
+      minValue: s(r.min_value),
+      maxValue: s(r.max_value),
+      incrementBy: s(r.increment_by),
       cycle: r.cycle === true || r.cycle === 'true',
-      cacheSize: num(r.cache_size),
-      lastValue: num(r.last_value),
+      cacheSize: s(r.cache_size),
+      lastValue: s(r.last_value),
     }));
   }
 
-  /** 生成建序列 SQL（数值参数走 Number，类型白名单，防注入）。 */
+  /** 生成建序列 SQL（数值按 /^-?\d+$/ 校验后原样输出，类型白名单，防注入）。 */
   createSequenceSql(name: string, seq: SequenceMeta, schema?: string): string {
     const q = this.qualified(validateIdent(name, 63), schema);
+    const int = (v?: string | null): string | null => (v != null && /^-?\d+$/.test(String(v)) ? String(v) : null);
     const parts = [`CREATE SEQUENCE IF NOT EXISTS ${q}`];
     if (seq.dataType && ['bigint', 'integer', 'smallint'].includes(String(seq.dataType))) parts.push(`AS ${seq.dataType}`);
-    if (seq.incrementBy != null) parts.push(`INCREMENT BY ${Number(seq.incrementBy)}`);
-    if (seq.minValue != null) parts.push(`MINVALUE ${Number(seq.minValue)}`);
-    if (seq.maxValue != null) parts.push(`MAXVALUE ${Number(seq.maxValue)}`);
-    if (seq.startValue != null) parts.push(`START WITH ${Number(seq.startValue)}`);
-    if (seq.cacheSize != null) parts.push(`CACHE ${Number(seq.cacheSize)}`);
+    const inc = int(seq.incrementBy); if (inc !== null) parts.push(`INCREMENT BY ${inc}`);
+    const min = int(seq.minValue); if (min !== null) parts.push(`MINVALUE ${min}`);
+    const max = int(seq.maxValue); if (max !== null) parts.push(`MAXVALUE ${max}`);
+    const start = int(seq.startValue); if (start !== null) parts.push(`START WITH ${start}`);
+    const cache = int(seq.cacheSize); if (cache !== null) parts.push(`CACHE ${cache}`);
     if (seq.cycle) parts.push('CYCLE');
     return `${parts.join(' ')};`;
   }

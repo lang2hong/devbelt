@@ -28,8 +28,8 @@ export function validateColumnType(raw: string): string {
   const type = String(raw ?? '').trim();
   if (!type) throw new Error('Column type is required.');
   if (type.length > 64) throw new Error('Column type is too long (max 64 characters).');
-  if (!/^[A-Za-z]/.test(type)) throw new Error('Column type must start with a letter.');
-  if (!/^[A-Za-z0-9_ (),.'\[\]-]+$/.test(type)) {
+  if (!/^[A-Za-z"]/.test(type)) throw new Error('Column type must start with a letter.');
+  if (!/^[A-Za-z0-9_ (),.'"\[\]-]+$/.test(type)) {
     throw new Error('Column type contains invalid characters.');
   }
   if (/--/.test(type)) throw new Error('Column type contains invalid characters.');

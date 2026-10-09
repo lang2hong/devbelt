@@ -353,7 +353,8 @@ describe('validateColumnType / 结构化 addColumn / modifyColumn', () => {
   });
 
   it('拒绝注入形状：分隔符/注释/换行/引号逃逸', () => {
-    for (const t of ['INT; DROP TABLE users', 'INT -- x', 'INT # x', 'INT /* x */', 'INT\nDROP', 'INT`x', 'INT"x', 'INT\\x', "VARCHAR(10", "INT)", 'INT[', 'INT]']) {
+    // 注：`"` 现被接受（跨 schema 自定义类型需带引号标识符），但其本身不构成注入（无 `;`/注释/换行）。
+    for (const t of ['INT; DROP TABLE users', 'INT -- x', 'INT # x', 'INT /* x */', 'INT\nDROP', 'INT`x', 'INT\\x', "VARCHAR(10", "INT)", 'INT[', 'INT]']) {
       expect(() => validateColumnType(t)).toThrow();
     }
   });

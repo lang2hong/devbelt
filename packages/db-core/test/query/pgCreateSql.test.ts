@@ -59,13 +59,25 @@ describe('PG getCreateSql', () => {
    * 避免 `pg_get_expr` 随 search_path 输出不带 schema 的 `nextval('seq')`
    * （跨 schema 同步会错误绑定到源序列）。
    */
-  it('serial 默认值经 pg_depend 反查完全限定序列名', async () => {
+  it('serial 默认值经 pg_depend 反查完全限定序列名（仅跨 schema 生成时）', async () => {
     const { con, table } = pgSvc();
-    await table.getCreateSql('t1');
+    await table.getCreateSql('t1', undefined, undefined, 'staging');
     const sql = con.sqls[0];
     expect(sql).toContain('pg_depend');
     expect(sql).toContain("'nextval('");
     expect(sql).toContain('quote_ident(sn.nspname)');
+    // M3：连接条件限定到该列的 pg_attrdef 行。
+    expect(sql).toContain("d.classid = 'pg_attrdef'::regclass");
+    expect(sql).toContain('d.objid = ad.oid');
+  });
+
+  it('未传 targetSchema 时不启用 pg_depend（B5：dump 与 schema 无关）', async () => {
+    const { con, table } = pgSvc();
+    await table.getCreateSql('t1', 'somedb', 'sales');
+    const sql = con.sqls[0];
+    expect(sql).not.toContain('pg_depend');
+    expect(sql).not.toContain('seq.qname');
+    expect(sql).toMatch(/pg_get_expr\s*\(\s*ad\.adbin\s*,\s*ad\.adrelid\s*\)/);
   });
 
   /**

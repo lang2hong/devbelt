@@ -348,11 +348,11 @@ describe('PG 序列 / 约束（P3a）', () => {
     expect(sql).toContain("schemaname = 'sales'");
   });
 
-  it('createSequenceSql 生成参数并限定 schema（数值走 Number，不含 null 子句）', () => {
+  it('createSequenceSql 生成参数并限定 schema（数值原样，不含 null 子句）', () => {
     const d = new PostgreSqlDialect();
     const sql = d.createSequenceSql!('order_seq', {
-      name: 'order_seq', dataType: 'bigint', startValue: 1, minValue: 1,
-      maxValue: null, incrementBy: 1, cycle: false, cacheSize: 1,
+      name: 'order_seq', dataType: 'bigint', startValue: '1', minValue: '1',
+      maxValue: null, incrementBy: '1', cycle: false, cacheSize: '1',
     }, 'sales');
     expect(sql).toContain('CREATE SEQUENCE IF NOT EXISTS "sales"."order_seq"');
     expect(sql).toContain('AS bigint');
@@ -361,13 +361,20 @@ describe('PG 序列 / 约束（P3a）', () => {
     expect(sql).not.toContain('CYCLE');
   });
 
-  it('parseSequenceList 归一数值', () => {
+  it('createSequenceSql：bigint 边界值不丢精度（按字符串原样输出）', () => {
+    const d = new PostgreSqlDialect();
+    const sql = d.createSequenceSql!('s', { name: 's', maxValue: '9223372036854775807', minValue: '-9223372036854775808' }, 'sales');
+    expect(sql).toContain('MAXVALUE 9223372036854775807');
+    expect(sql).toContain('MINVALUE -9223372036854775808');
+  });
+
+  it('parseSequenceList 数值按字符串保留', () => {
     const d = new PostgreSqlDialect();
     const [s] = d.parseSequenceList!([{
-      name: 's', data_type: 'bigint', start_value: '1', min_value: null, max_value: null,
+      name: 's', data_type: 'bigint', start_value: '1', min_value: null, max_value: '9223372036854775807',
       increment_by: '1', cycle: false, cache_size: '1', last_value: '5',
     }]);
-    expect(s).toMatchObject({ name: 's', dataType: 'bigint', startValue: 1, minValue: null, maxValue: null, incrementBy: 1, cycle: false, cacheSize: 1, lastValue: 5 });
+    expect(s).toMatchObject({ name: 's', dataType: 'bigint', startValue: '1', minValue: null, maxValue: '9223372036854775807', incrementBy: '1', cycle: false, cacheSize: '1', lastValue: '5' });
   });
 
   it('getConstraintListSql / addConstraintSql', () => {

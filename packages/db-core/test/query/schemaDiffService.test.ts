@@ -515,7 +515,7 @@ describe('SchemaDiffService', () => {
       columns: [{ columnName: 'seq_col', status: 'added' as const, sourceType: 'integer', sourceDefault: "nextval('s1.t_seq'::regclass)" }],
     }];
     const sql = await SchemaDiffService.generateSyncSql(added, 'db', tableService, 'db', undefined, { sourceSchema: 's1', targetSchema: 's2' });
-    expect(sql).toContain("nextval('s2.t_seq'::regclass)");
+    expect(sql).toContain("nextval('\"s2\".t_seq'::regclass)");
     expect(sql).not.toContain("nextval('s1.t_seq'::regclass)");
   });
 
@@ -543,9 +543,11 @@ describe('SchemaDiffService', () => {
     expect(sql).toContain("'app.example.com'::text");
     expect(sql).toContain("'see app.example.com'::text");
     expect(sql).not.toContain("'staging.example.com'");
-    // regclass 与类型名（标识符上下文）改写；未限定的 nextval 视为源 schema 对象，补目标 schema。
-    expect(sql).toContain("nextval('staging.t_id_seq'::regclass)");
-    expect(sql).toContain('staging.myenum');
+    // regclass 与类型名（标识符上下文）改写，目标 schema 一律带引号（H1）。
+    expect(sql).toContain("nextval('\"staging\".t_id_seq'::regclass)");
+    expect(sql).toContain('"staging".myenum');
+    // 未限定的 nextval 不改写（M1：靠 SET LOCAL search_path=pg_catalog 保证目录输出限定）。
+    expect(sql).toContain("nextval('t_id_seq'::regclass)");
   });
 
   it('PG 跨 schema：仅差 schema 的 enum 默认值（::类型）判为 unchanged', async () => {
@@ -585,7 +587,7 @@ describe('SchemaDiffService 约束（P3b）', () => {
     } as unknown as TableService;
     const sql = await SchemaDiffService.generateSyncSql(diffs, 'db', tableService, 'db', undefined, { sourceSchema: 'app', targetSchema: 'staging' });
     expect(sql).toContain('ALTER TABLE "staging"."t" ADD CONSTRAINT "t_pkey" PRIMARY KEY (id);');
-    expect(sql).toContain('ALTER TABLE "staging"."t" ADD CONSTRAINT "t_fk" FOREIGN KEY (a) REFERENCES staging.u(id);');
+    expect(sql).toContain('ALTER TABLE "staging"."t" ADD CONSTRAINT "t_fk" FOREIGN KEY (a) REFERENCES "staging".u(id);');
   });
 
   it('约束在目标多出时判 removed 并生成 DROP', async () => {
