@@ -365,8 +365,9 @@ export class RedisClient {
         if (this.readOnly && !isReadCommand(name, classifyArgs)) {
           return Promise.reject(new RedisReadOnlyError(name));
         }
-        // 节点级 call 也加命令超时（SCAN/INFO 等在大集群/宕机时同样需要有界失败）。
-        return this.withTimeout(n.call(c, ...a), name, a);
+        // 不加 withTimeout：节点级 call 直接返回；在此包超时会引入与集群/隧道关闭竞态的
+        // 悬挂 promise/timer，CI cluster-over-SSH 会冒出多余的未处理拒绝（已回归）。
+        return n.call(c, ...a);
       },
     }));
   }
