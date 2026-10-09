@@ -111,6 +111,31 @@ export interface ForeignKeyMeta {
   constraintName?: string;
 }
 
+/** 序列（PG）。 */
+export interface SequenceMeta {
+  name: string;
+  /** 数值类型（bigint/smallint/integer），缺省 bigint。 */
+  dataType?: string;
+  startValue?: number | null;
+  minValue?: number | null;
+  maxValue?: number | null;
+  incrementBy?: number | null;
+  cycle?: boolean;
+  cacheSize?: number | null;
+  /** 序列当前值（同步后 setval 用）。 */
+  lastValue?: number | null;
+}
+
+/** 表级约束（PK/UNIQUE/CHECK/FK），定义由数据库规范化输出。 */
+export interface ConstraintMeta {
+  tableName: string;
+  name: string;
+  /** p=primary, u=unique, c=check, f=foreign。 */
+  type: 'p' | 'u' | 'c' | 'f';
+  /** 规范化定义（如 `PRIMARY KEY (id)` / `FOREIGN KEY (a) REFERENCES s.b(id)`）。 */
+  definition: string;
+}
+
 /** 本地保存的查询（Navicat Queries 分类的本地存储） */
 export interface SavedQuery {
   id: string;

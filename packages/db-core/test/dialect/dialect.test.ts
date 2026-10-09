@@ -340,3 +340,48 @@ describe('PG 主键探测 / keyset 游标 NULL 防护', () => {
     expect(() => d.getKeysetSql('SELECT * FROM `t`', ['id'], [undefined], 10)).toThrow(/null/);
   });
 });
+
+describe('PG 序列 / 约束（P3a）', () => {
+  it('getSequenceListSql 按 schema 限定', () => {
+    const sql = new PostgreSqlDialect().getSequenceListSql!('sales');
+    expect(sql).toContain('pg_sequences');
+    expect(sql).toContain("schemaname = 'sales'");
+  });
+
+  it('createSequenceSql 生成参数并限定 schema（数值走 Number，不含 null 子句）', () => {
+    const d = new PostgreSqlDialect();
+    const sql = d.createSequenceSql!('order_seq', {
+      name: 'order_seq', dataType: 'bigint', startValue: 1, minValue: 1,
+      maxValue: null, incrementBy: 1, cycle: false, cacheSize: 1,
+    }, 'sales');
+    expect(sql).toContain('CREATE SEQUENCE IF NOT EXISTS "sales"."order_seq"');
+    expect(sql).toContain('AS bigint');
+    expect(sql).toContain('INCREMENT BY 1');
+    expect(sql).not.toContain('MAXVALUE');
+    expect(sql).not.toContain('CYCLE');
+  });
+
+  it('parseSequenceList 归一数值', () => {
+    const d = new PostgreSqlDialect();
+    const [s] = d.parseSequenceList!([{
+      name: 's', data_type: 'bigint', start_value: '1', min_value: null, max_value: null,
+      increment_by: '1', cycle: false, cache_size: '1', last_value: '5',
+    }]);
+    expect(s).toMatchObject({ name: 's', dataType: 'bigint', startValue: 1, minValue: null, maxValue: null, incrementBy: 1, cycle: false, cacheSize: 1, lastValue: 5 });
+  });
+
+  it('getConstraintListSql / addConstraintSql', () => {
+    const d = new PostgreSqlDialect();
+    const list = d.getConstraintListSql!('orders', 'sales');
+    expect(list).toContain('pg_constraint');
+    expect(list).toContain("AND c.relname = 'orders'");
+    expect(d.addConstraintSql!('orders', 'orders_pkey', 'PRIMARY KEY (id)', 'sales'))
+      .toBe('ALTER TABLE "sales"."orders" ADD CONSTRAINT "orders_pkey" PRIMARY KEY (id);');
+  });
+
+  it('parseConstraintList 映射字段', () => {
+    const d = new PostgreSqlDialect();
+    expect(d.parseConstraintList!([{ name: 'ck', type: 'c', definition: 'CHECK (a > 0)', table: 't' }]))
+      .toEqual([{ tableName: 't', name: 'ck', type: 'c', definition: 'CHECK (a > 0)' }]);
+  });
+});

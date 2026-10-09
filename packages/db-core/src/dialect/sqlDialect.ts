@@ -219,6 +219,24 @@ export interface SqlDialect {
   /** 列出 schema（PG 命名空间）；返回空字符串/不实现表示无 schema 层。 */
   getSchemaListSql?(): string;
 
+  /** 列出序列（PG）；不实现表示无序列概念。 */
+  getSequenceListSql?(schema?: string): string;
+
+  /** 解析序列列表结果。 */
+  parseSequenceList?(rows: any[]): import('../types/meta.js').SequenceMeta[];
+
+  /** 生成建序列 SQL。 */
+  createSequenceSql?(name: string, seq: import('../types/meta.js').SequenceMeta, schema?: string): string;
+
+  /** 列出表级约束（PK/UNIQUE/CHECK/FK，PG）；不实现表示不支持。 */
+  getConstraintListSql?(table?: string, schema?: string): string;
+
+  /** 解析约束列表结果。 */
+  parseConstraintList?(rows: any[]): import('../types/meta.js').ConstraintMeta[];
+
+  /** 生成新增约束 SQL（定义由 pg_get_constraintdef 规范化给出）。 */
+  addConstraintSql?(table: string, constraintName: string, definition: string, schema?: string): string;
+
   /** 解析表列表查询结果行为对象 */
   parseTableList(rows: any[]): TableMeta[];
 

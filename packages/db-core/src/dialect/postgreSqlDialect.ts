@@ -2,7 +2,7 @@ import { DatabaseType } from '../types/connection.js';
 import { validateIdent, validateSchemaIdent } from '../utils/validate.js';
 import { qualifyTable } from '../utils/qualify.js';
 import { toBool } from '../utils/coerce.js';
-import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta } from '../types/meta.js';
+import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta, SequenceMeta, ConstraintMeta } from '../types/meta.js';
 import type { SqlDialect } from './sqlDialect.js';
 import type { DatabaseCapabilities } from './capabilities.js';
 import { columnTypesFor } from './typeCatalog.js';
@@ -84,6 +84,64 @@ export class PostgreSqlDialect implements SqlDialect {
       WHERE datistemplate = false AND datallowconn = true
         AND has_database_privilege(datname, 'CONNECT')
       ORDER BY datname`;
+  }
+
+  /** PG：列出序列及其参数（同步用）。pg_sequences 视图（PG 10+）。 */
+  getSequenceListSql(schema?: string): string {
+    return `SELECT sequencename AS name, data_type, start_value, min_value, max_value,
+        increment_by, cycle, cache_size, last_value
+      FROM pg_sequences
+      WHERE schemaname = ${this.schemaExpr(schema)}
+      ORDER BY sequencename`;
+  }
+
+  parseSequenceList(rows: any[]): SequenceMeta[] {
+    const num = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
+    return rows.map((r) => ({
+      name: String(r.name),
+      dataType: r.data_type ?? undefined,
+      startValue: num(r.start_value),
+      minValue: num(r.min_value),
+      maxValue: num(r.max_value),
+      incrementBy: num(r.increment_by),
+      cycle: r.cycle === true || r.cycle === 'true',
+      cacheSize: num(r.cache_size),
+      lastValue: num(r.last_value),
+    }));
+  }
+
+  /** 生成建序列 SQL（数值参数走 Number，类型白名单，防注入）。 */
+  createSequenceSql(name: string, seq: SequenceMeta, schema?: string): string {
+    const q = this.qualified(validateIdent(name, 63), schema);
+    const parts = [`CREATE SEQUENCE IF NOT EXISTS ${q}`];
+    if (seq.dataType && ['bigint', 'integer', 'smallint'].includes(String(seq.dataType))) parts.push(`AS ${seq.dataType}`);
+    if (seq.incrementBy != null) parts.push(`INCREMENT BY ${Number(seq.incrementBy)}`);
+    if (seq.minValue != null) parts.push(`MINVALUE ${Number(seq.minValue)}`);
+    if (seq.maxValue != null) parts.push(`MAXVALUE ${Number(seq.maxValue)}`);
+    if (seq.startValue != null) parts.push(`START WITH ${Number(seq.startValue)}`);
+    if (seq.cacheSize != null) parts.push(`CACHE ${Number(seq.cacheSize)}`);
+    if (seq.cycle) parts.push('CYCLE');
+    return `${parts.join(' ')};`;
+  }
+
+  /** PG：列出表级约束（PK/UNIQUE/CHECK/FK），定义由 pg_get_constraintdef 规范化。 */
+  getConstraintListSql(table?: string, schema?: string): string {
+    const tableFilter = table ? ` AND c.relname = ${this.escapeValue(validateIdent(table, 63))}` : '';
+    return `SELECT con.conname AS name, con.contype AS type, pg_get_constraintdef(con.oid, true) AS definition, c.relname AS "table"
+      FROM pg_constraint con
+      JOIN pg_class c ON c.oid = con.conrelid
+      JOIN pg_namespace n ON n.oid = con.connamespace
+      WHERE n.nspname = ${this.schemaExpr(schema)} AND con.contype IN ('p','u','c','f')${tableFilter}
+      ORDER BY c.relname, con.conname`;
+  }
+
+  parseConstraintList(rows: any[]): ConstraintMeta[] {
+    return rows.map((r) => ({ tableName: String(r.table), name: String(r.name), type: r.type as ConstraintMeta['type'], definition: String(r.definition ?? '') }));
+  }
+
+  /** 生成新增约束 SQL（definition 由数据库规范化，原样可用）。 */
+  addConstraintSql(table: string, constraintName: string, definition: string, schema?: string): string {
+    return `ALTER TABLE ${this.qualified(validateIdent(table, 63), schema)} ADD CONSTRAINT ${this.wrap(validateIdent(constraintName, 63))} ${definition};`;
   }
 
   /** PG：列出非系统、且**可操作**的 schema（树在库下展示 schema 层）。 */

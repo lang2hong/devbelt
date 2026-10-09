@@ -1,7 +1,7 @@
 import { QueryService } from './queryService.js';
 import { normalizeColumnMeta } from './normalize.js';
 import { SCHEMA_INVALID_CHARS_RE } from '../utils/validate.js';
-import type { ColumnMeta, TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta } from '../types/meta.js';
+import type { ColumnMeta, TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta, SequenceMeta, ConstraintMeta } from '../types/meta.js';
 
 /**
  * 元数据服务（复用查询服务 + 方言）。
@@ -248,5 +248,21 @@ export class MetadataService {
     if (!sql) return [];
     const result = await this.queryService.queryAll(sql);
     return this.queryService.dialect.parseForeignKeys(result.rows);
+  }
+
+  /** 查询序列列表（PG；方言不支持返回空）。 */
+  async getSequences(schema?: string): Promise<SequenceMeta[]> {
+    const sql = this.queryService.dialect.getSequenceListSql?.(schema);
+    if (!sql || !this.queryService.dialect.parseSequenceList) return [];
+    const result = await this.queryService.queryAll(sql);
+    return this.queryService.dialect.parseSequenceList(result.rows);
+  }
+
+  /** 查询表级约束（PK/UNIQUE/CHECK/FK，PG；方言不支持返回空）。 */
+  async getConstraints(table?: string, schema?: string): Promise<ConstraintMeta[]> {
+    const sql = this.queryService.dialect.getConstraintListSql?.(table, schema);
+    if (!sql || !this.queryService.dialect.parseConstraintList) return [];
+    const result = await this.queryService.queryAll(sql);
+    return this.queryService.dialect.parseConstraintList(result.rows);
   }
 }
