@@ -1,6 +1,5 @@
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import {
-  isDangerousCommand, isWriteCommand, redactCommandArgs, splitRedisArgs,
   redisType, redisSelect, redisGetBuffer, redisGetRangeBuffer, redisStrlen, redisSet, redisSetBuffer, redisAppend,
   isValidUtf8, isBufferSource,
   redisUnlink, redisExists, redisRename, redisTtl, redisExpire, redisPersist, redisMemoryUsage,
@@ -8,70 +7,42 @@ import {
   redisLRange, redisLLen, redisLPush, redisRPush, redisLSet, redisLRem, redisLTrim, redisLPop, redisRPop, redisLIndex,
   redisSScan, redisSCard, redisSAdd, redisSRem,
   redisZRange, redisZCard, redisZAdd, redisZRem, redisZScore, allCommandNames,
-  redisXRange, redisXRevRange, redisXAdd, redisXDel, redisXTrimMaxlen, redisXLen,
-  redisXInfoGroups, redisXInfoConsumers, redisXGroupCreate, redisXGroupDestroy, redisXGroupDelConsumer,
-  redisXPending, isValidStreamId, compareStreamId,
+  redisXRange, redisXLen, redisXInfoGroups,
   redisInfoOnNode,
   type RedisCommandSource,
 } from '@devbelt/db-core';
 import type { RedisConnectionSession } from '../connection/connectionSession';
 import { ConnectionManager } from '../connection/connectionManager';
-import { REDIS_CAPABILITIES } from '../connection/redisCapabilities';
 import { BaseWebView } from './baseWebView';
 import { AuditLogger } from '../utils/auditLogger';
 import { l10n } from '../i18n';
-import type { RedisPanel, RedisSlowlogEntry, RedisValueData, RedisUpMessage } from './protocol';
+import type { RedisPanel, RedisValueData, RedisUpMessage } from './protocol';
 import { parseRedisInfo, aggregateRedisInfo } from './redisInfoParse';
+import { RedisCliConsole } from './redisCliConsole';
+import { RedisStreamOps } from './redisStreamOps';
+import type { RedisOpsHost } from './redisViewSupport';
+import {
+  FORCE_LOAD_MAX_BYTES, HASH_SET_PAGE, LARGE_KEY_BYTES, STREAM_PAGE,
+  hasReplacement, strs, parseSlowlog,
+  redisPanelTitle, redisViewType,
+} from './redisViewSupport';
 
-/** 大 key 门禁阈值（字节）。 */
-const LARGE_KEY_BYTES = 1024 * 1024;
-/** 大 key「强制加载」的硬上限：string 超过只用 GETRANGE 预览，避免宿主内存暴涨。 */
-const FORCE_LOAD_MAX_BYTES = 32 * 1024 * 1024;
-/** Stream 单页条目数。 */
-const STREAM_PAGE = 100;
-/** hash/set 单页条目数（大集合分页兜底，避免全量 HGETALL/SMEMBERS）。 */
-const HASH_SET_PAGE = 200;
-
-/**
- * H5 最低要求：文本内容含替换符 U+FFFD，说明原始字节不是合法 UTF-8（ioredis 按文本解码有损）。
- * 有损文本回写会破坏二进制数据，故这类键/字段/成员一律只读；完整二进制安全延后。
- */
-function hasReplacement(s: string): boolean {
-  return s.includes('\uFFFD');
-}
-
-/** 面板对应的 webview viewType。 */
-function redisViewType(panel: RedisPanel): string {
-  return `devbelt.redis.${panel}`;
-}
-
-/** 面板标题（连接名 + 职责，值面板附 db）。 */
-function redisPanelTitle(panel: RedisPanel, conn: SavedConnection, db?: number): string {
-  const base = `Redis @ ${conn.name || conn.host}`;
-  switch (panel) {
-    case 'keyBrowser': {
-      const values = l10n('redis.panel.values');
-      return db === undefined ? `${base} · ${values}` : `${base} · ${values} · db${db}`;
-    }
-    case 'serverStatus': return `${base} · ${l10n('redis.panel.status')}`;
-    case 'monitor': return `${base} · ${l10n('redis.panel.monitor')}`;
-    case 'console': return `${base} · ${l10n('redis.panel.console')}`;
-    case 'slowlog': return `${base} · ${l10n('redis.panel.slowlog')}`;
-    case 'commandLog': return `${base} · ${l10n('redis.panel.commandLog')}`;
-  }
-}
+// 纯函数从支撑模块转发（保持既有导入路径：测试直接 import 这些名字）。
+export { formatRedisReply, parseSlowlog, redisAuditLine } from './redisViewSupport';
 
 /**
  * Redis 面板（S5：按职责拆分为独立 webview）。
  *
  * 每个 (conn.id, panel) 维护一个实例（注册表），不再单例顶替；同连接的多个面板
  * 共享一条 session，`SELECT` 归一与命令经 `RedisClient.runExclusive` 串行（S5 并发隔离）。
+ *
+ * Phase 2 拆分：CLI 控制台（`RedisCliConsole`）与 Stream 操作（`RedisStreamOps`）
+ * 经 `RedisOpsHost` 宿主面下沉到独立模块；本类保留会话/值查看编辑/消息编排。
  */
 export class RedisView extends BaseWebView {
   private static readonly instances = new Map<string, RedisView>();
   /** `connection:*` 审计责任面板：每连接仅一个实例负责写（避免多面板重复）。 */
   private static readonly auditOwners = new Map<string, RedisView>();
-  private pendingConfirm?: { id: string; line: string; name: string; args: (string | Buffer)[]; db: number };
 
   /** 命令日志订阅（会话 client 级；首次取会话/就绪时挂上）。 */
   private logUnsub?: () => void;
@@ -97,6 +68,11 @@ export class RedisView extends BaseWebView {
   /** H5：当前值里解码含替换符的字段/成员/元素 → 这些项只读（防有损回写）。 */
   private binaryTokens = new Set<string>();
 
+  /** CLI 控制台子逻辑（待确认状态在子模块内）。 */
+  private readonly cli: RedisCliConsole;
+  /** Stream 操作子逻辑。 */
+  private readonly streams: RedisStreamOps;
+
   private constructor(
     private readonly conn: SavedConnection,
     private readonly manager: ConnectionManager,
@@ -108,6 +84,16 @@ export class RedisView extends BaseWebView {
     this.initialKey = initialKey;
     this.manager.retain(conn.id);
     this.registryKey = `${conn.id}:${panelType}`;
+    const host: RedisOpsHost = {
+      enqueue: (fn) => this.enqueue(fn),
+      sessionForDb: () => this.sessionForDb(),
+      post: (msg) => this.post(msg as never),
+      audit: (command, detail, costTime) => this.audit(command, detail, costTime),
+      doPushValue: (session, key) => this.doPushValue(session, key),
+      targetDb: () => this.targetDb(),
+    };
+    this.cli = new RedisCliConsole(host);
+    this.streams = new RedisStreamOps(host);
   }
 
   /**
@@ -162,8 +148,8 @@ export class RedisView extends BaseWebView {
     if (msg.type === 'refreshInfo') { await this.pushInfo(); return; }
     if (msg.type === 'sampleMonitor') { if (this.panelType === 'monitor') await this.pushMonitor(); return; }
     if (msg.type === 'refreshSlowlog') { await this.pushSlowlog(); return; }
-    if (msg.type === 'runCommand') { await this.runCommand(String(msg.id ?? ''), String(msg.line ?? '')); return; }
-    if (msg.type === 'confirmDanger') { await this.resolveConfirm(String(msg.id ?? ''), msg.accept === true); return; }
+    if (msg.type === 'runCommand') { await this.cli.runCommand(String(msg.id ?? ''), String(msg.line ?? '')); return; }
+    if (msg.type === 'confirmDanger') { await this.cli.resolveConfirm(String(msg.id ?? ''), msg.accept === true); return; }
     if (msg.type === 'selectKey') { await this.enqueuePushValue(String(msg.key ?? '')); return; }
     if (msg.type === 'load') { await this.forceLoadValue(String(msg.key ?? '')); return; }
     if (msg.type === 'saveString') { await this.edit('SET', String(msg.key), async (c) => { this.assertBinaryFree(String(msg.key)); await redisSet(c, String(msg.key), String(msg.value ?? '')); }); return; }
@@ -274,14 +260,14 @@ export class RedisView extends BaseWebView {
       await this.edit('ZREM', String(msg.key), async (c) => redisZRem(c, String(msg.key), members));
       return;
     }
-    if (msg.type === 'streamAdd') { await this.streamAdd(msg); return; }
-    if (msg.type === 'streamDel') { await this.streamDelOp(msg); return; }
-    if (msg.type === 'streamTrim') { await this.streamTrimOp(msg); return; }
-    if (msg.type === 'streamGroupCreate') { await this.streamGroupCreateOp(msg); return; }
-    if (msg.type === 'streamGroupDestroy') { await this.streamGroupDestroyOp(msg); return; }
-    if (msg.type === 'streamGroupDelConsumer') { await this.streamGroupDelConsumerOp(msg); return; }
-    if (msg.type === 'streamGroupDetail') { await this.streamGroupDetailOp(msg); return; }
-    if (msg.type === 'streamRange') { await this.streamRangeOp(msg); return; }
+    if (msg.type === 'streamAdd') { await this.streams.streamAdd(msg); return; }
+    if (msg.type === 'streamDel') { await this.streams.streamDelOp(msg); return; }
+    if (msg.type === 'streamTrim') { await this.streams.streamTrimOp(msg); return; }
+    if (msg.type === 'streamGroupCreate') { await this.streams.streamGroupCreateOp(msg); return; }
+    if (msg.type === 'streamGroupDestroy') { await this.streams.streamGroupDestroyOp(msg); return; }
+    if (msg.type === 'streamGroupDelConsumer') { await this.streams.streamGroupDelConsumerOp(msg); return; }
+    if (msg.type === 'streamGroupDetail') { await this.streams.streamGroupDetailOp(msg); return; }
+    if (msg.type === 'streamRange') { await this.streams.streamRangeOp(msg); return; }
   }
 
   protected onDispose(): void {
@@ -649,256 +635,6 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
     });
   }
 
-  // ────────────────────────── CLI（S2） ──────────────────────────
-
-  private async runCommand(id: string, line: string): Promise<void> {
-    if (!REDIS_CAPABILITIES.cli) {
-      this.post({ type: 'commandResult', id, command: line, ok: false, result: '', costMs: 0, error: l10n('cmd.redis.cliUnsupported') });
-      return;
-    }
-    let parts: (string | Buffer)[];
-    try {
-      parts = splitRedisArgs(line);
-    } catch (err) {
-      this.post({ type: 'commandResult', id, command: line, ok: false, result: '', costMs: 0, error: (err as Error).message });
-      return;
-    }
-    if (!parts.length) {
-      this.post({ type: 'commandResult', id, command: line, ok: false, result: '', costMs: 0, error: l10n('cmd.redis.emptyCommand') });
-      return;
-    }
-    const name = String(parts[0]).toUpperCase();
-    const args = parts.slice(1);
-    if (isDangerousCommand(name, args)) {
-      // 只有单个确认槽：已有待确认命令时不再覆盖（覆盖会让第一条的确认结果丢失）。
-      if (this.pendingConfirm) {
-        this.post({ type: 'commandResult', id, command: line, ok: false, result: '', costMs: 0, error: l10n('cmd.redis.confirmPending') });
-        return;
-      }
-      // 记录确认时的目标 db：确认期间若切换了 db，破坏性命令不能落到新的库。
-      this.pendingConfirm = { id, line, name, args, db: this.targetDb() };
-      this.post({ type: 'confirmRequired', id, command: line });
-      return;
-    }
-    await this.execute(id, line, name, args);
-  }
-
-  private async resolveConfirm(id: string, accept: boolean): Promise<void> {
-    const pending = this.pendingConfirm;
-    this.pendingConfirm = undefined;
-    if (!pending || pending.id !== id) return;
-    if (!accept) {
-      this.post({ type: 'commandResult', id, command: pending.line, ok: false, result: '', costMs: 0, error: l10n('cmd.redis.dangerCancelled') });
-      return;
-    }
-    if (this.targetDb() !== pending.db) {
-      // db 已切换：拒绝执行，避免「看到 db0 却删到 db3」。
-      this.post({ type: 'commandResult', id, command: pending.line, ok: false, result: '', costMs: 0, error: l10n('cmd.redis.dbChanged') });
-      return;
-    }
-    await this.execute(pending.id, pending.line, pending.name, pending.args);
-  }
-
-  private async execute(id: string, line: string, name: string, args: (string | Buffer)[]): Promise<void> {
-    await this.enqueue(async () => {
-      const started = Date.now();
-      try {
-        const session = await this.sessionForDb();
-        // CLI 禁止 SELECT：面板/树/审计都按「本视图绑定的 db」工作，CLI 里换库会与它们分裂
-        // （下一条命令进 sessionForDb 又会 select 回原库，破坏性命令落到错库）。用 DB 切换器换库。
-        if (name.toLowerCase() === 'select') {
-          this.post({ type: 'commandResult', id, command: line, ok: false, result: '', costMs: Date.now() - started, error: l10n('cmd.redis.selectDisabled') });
-          return;
-        }
-        // 会改变/阻塞共享连接状态的命令一律拒绝：CLI 共享一条连接，这些会污染其它面板。
-        const argsStr = args.map((a) => (Buffer.isBuffer(a) ? a.toString('latin1') : a));
-        if (isCliBlocked(name, argsStr)) {
-          this.post({ type: 'commandResult', id, command: line, ok: false, result: '', costMs: Date.now() - started, error: l10n('cmd.redis.connStateBlocked', { cmd: name.toUpperCase() }) });
-          return;
-        }
-        const hasBuffer = args.some((a) => Buffer.isBuffer(a));
-        const raw = hasBuffer
-          ? await session.client.sendCommandBuffer(name, args as (string | number | Buffer)[])
-          : await session.client.sendCommand(name, args as (string | number)[]);
-        const costMs = Date.now() - started;
-        if (isWriteCommand(name, argsStr) || isDangerousCommand(name, argsStr)) {
-          // 审计只记命令 + key（首参），**不记值**；EVAL 只记脚本长度（脚本文本可能含字面值）。
-          const detail = /^EVAL(_RO)?$/i.test(name) ? `len=${String(argsStr[0] ?? '').length}` : String(argsStr[0] ?? '');
-          this.audit(name, detail, costMs);
-        }
-        this.post({ type: 'commandResult', id, command: line, ok: true, result: formatRedisReply(raw), costMs, error: null });
-      } catch (err) {
-        this.post({ type: 'commandResult', id, command: line, ok: false, result: '', costMs: Date.now() - started, error: (err as Error).message });
-      }
-    });
-  }
-
-  // ────────────────────────── Stream（S4） ──────────────────────────
-
-  /** 破坏性操作：未带 confirmed 时先回确认请求，由 webview 二次下发。 */
-  private needConfirm(msg: any, kind: string, detail: string): boolean {
-    if (msg.confirmed === true) return false;
-    this.post({ type: 'confirmOpRequired', kind, detail });
-    return true;
-  }
-
-  private async streamAdd(msg: any): Promise<void> {
-    const key = String(msg.key ?? '');
-    const id = String(msg.id ?? '*');
-    const fields = pairsOf(msg.fields);
-    await this.enqueue(async () => {
-      try {
-        const session = await this.sessionForDb();
-        const c = session.client;
-        if (id !== '*') {
-          if (!isValidStreamId(id)) {
-            this.post({ type: 'keyAction', action: 'XADD', ok: false, error: l10n('cmd.redis.streamInvalidId') });
-            return;
-          }
-          const last = await redisXRevRange(c, key, '+', '-', 1);
-          const lastId = last[0]?.id;
-          if (lastId && compareStreamId(id, lastId) <= 0) {
-            this.post({ type: 'keyAction', action: 'XADD', ok: false, error: l10n('cmd.redis.streamIdNotGreater') });
-            return;
-          }
-        }
-        const started = Date.now();
-        await redisXAdd(c, key, fields, id);
-        this.audit('XADD', key, Date.now() - started);
-        this.post({ type: 'keyAction', action: 'XADD', ok: true, error: null });
-        await this.doPushValue(session, key);
-      } catch (err) {
-        this.post({ type: 'keyAction', action: 'XADD', ok: false, error: (err as Error).message });
-      }
-    });
-  }
-
-  private async streamDelOp(msg: any): Promise<void> {
-    const key = String(msg.key ?? '');
-    const ids = strs(msg.ids);
-    if (!ids.length) return;
-    // 单条走普通管线；批量走确认。
-    if (ids.length > 1 && this.needConfirm(msg, 'streamDel', `${ids.length} entries`)) return;
-    await this.enqueue(async () => {
-      try {
-        const session = await this.sessionForDb();
-        const started = Date.now();
-        await redisXDel(session.client, key, ids);
-        this.audit('XDEL', key, Date.now() - started);
-        this.post({ type: 'keyAction', action: 'XDEL', ok: true, error: null });
-        await this.doPushValue(session, key);
-      } catch (err) {
-        this.post({ type: 'keyAction', action: 'XDEL', ok: false, error: (err as Error).message });
-      }
-    });
-  }
-
-  private async streamTrimOp(msg: any): Promise<void> {
-    const key = String(msg.key ?? '');
-    const maxlen = Number(msg.maxlen);
-    if (!Number.isFinite(maxlen) || maxlen < 0) return;
-    if (this.needConfirm(msg, 'streamTrim', `MAXLEN ${maxlen}`)) return;
-    await this.enqueue(async () => {
-      try {
-        const session = await this.sessionForDb();
-        const started = Date.now();
-        await redisXTrimMaxlen(session.client, key, maxlen);
-        this.audit('XTRIM', key, Date.now() - started);
-        this.post({ type: 'keyAction', action: 'XTRIM', ok: true, error: null });
-        await this.doPushValue(session, key);
-      } catch (err) {
-        this.post({ type: 'keyAction', action: 'XTRIM', ok: false, error: (err as Error).message });
-      }
-    });
-  }
-
-  private async streamGroupCreateOp(msg: any): Promise<void> {
-    const key = String(msg.key ?? '');
-    const group = String(msg.group ?? '');
-    if (!group) return;
-    await this.enqueue(async () => {
-      try {
-        const session = await this.sessionForDb();
-        await redisXGroupCreate(session.client, key, group, String(msg.id ?? '$'), msg.mkstream !== false);
-        this.audit('XGROUP CREATE', `${key} ${group}`);
-        this.post({ type: 'keyAction', action: 'XGROUP', ok: true, error: null });
-        await this.doPushValue(session, key);
-      } catch (err) {
-        this.post({ type: 'keyAction', action: 'XGROUP', ok: false, error: (err as Error).message });
-      }
-    });
-  }
-
-  private async streamGroupDestroyOp(msg: any): Promise<void> {
-    const key = String(msg.key ?? '');
-    const group = String(msg.group ?? '');
-    if (!group) return;
-    if (this.needConfirm(msg, 'streamGroupDestroy', group)) return;
-    await this.enqueue(async () => {
-      try {
-        const session = await this.sessionForDb();
-        await redisXGroupDestroy(session.client, key, group);
-        this.audit('XGROUP DESTROY', `${key} ${group}`);
-        this.post({ type: 'keyAction', action: 'XGROUP', ok: true, error: null });
-        await this.doPushValue(session, key);
-      } catch (err) {
-        this.post({ type: 'keyAction', action: 'XGROUP', ok: false, error: (err as Error).message });
-      }
-    });
-  }
-
-  private async streamGroupDelConsumerOp(msg: any): Promise<void> {
-    const key = String(msg.key ?? '');
-    const group = String(msg.group ?? '');
-    const consumer = String(msg.consumer ?? '');
-    if (!group || !consumer) return;
-    if (this.needConfirm(msg, 'streamGroupDelConsumer', `${group}/${consumer}`)) return;
-    await this.enqueue(async () => {
-      try {
-        const session = await this.sessionForDb();
-        await redisXGroupDelConsumer(session.client, key, group, consumer);
-        this.audit('XGROUP DELCONSUMER', `${key} ${group} ${consumer}`);
-        this.post({ type: 'keyAction', action: 'XGROUP', ok: true, error: null });
-        await this.doPushValue(session, key);
-      } catch (err) {
-        this.post({ type: 'keyAction', action: 'XGROUP', ok: false, error: (err as Error).message });
-      }
-    });
-  }
-
-  private async streamGroupDetailOp(msg: any): Promise<void> {
-    const key = String(msg.key ?? '');
-    const group = String(msg.group ?? '');
-    if (!group) return;
-    await this.enqueue(async () => {
-      try {
-        const session = await this.sessionForDb();
-        const [consumers, pending] = await Promise.all([
-          redisXInfoConsumers(session.client, key, group),
-          redisXPending(session.client, key, group),
-        ]);
-        this.post({ type: 'streamGroupDetail', key, group, consumers, pending });
-      } catch (err) {
-        this.post({ type: 'error', message: (err as Error).message });
-      }
-    });
-  }
-
-  private async streamRangeOp(msg: any): Promise<void> {
-    const key = String(msg.key ?? '');
-    const start = String(msg.start ?? '-');
-    await this.enqueue(async () => {
-      try {
-        const session = await this.sessionForDb();
-        // 排他续页：起点用 `(<lastId>`，避免重复末条。
-        const entries = await redisXRange(session.client, key, start === '-' ? '-' : `(${start}`, '+', STREAM_PAGE);
-        this.post({ type: 'streamRangeResult', key, entries, done: entries.length < STREAM_PAGE });
-      } catch (err) {
-        this.post({ type: 'error', message: (err as Error).message });
-      }
-    });
-  }
-
   private audit(command: string, detail: string, costTime?: number): void {
     AuditLogger.tryLog({
       action: 'redis_command',
@@ -931,67 +667,4 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
       }
     });
   }
-}
-
-function strs(v: unknown): string[] {
-  return Array.isArray(v) ? v.map(String) : [];
-}
-
-/** `[[f,v],…]` 归一化。 */
-function pairsOf(v: unknown): [string, string][] {
-  if (!Array.isArray(v)) return [];
-  return v.filter((e): e is unknown[] => Array.isArray(e) && e.length >= 2).map((e) => [String(e[0]), String(e[1])]);
-}
-
-/** CLI 中会改变/阻塞共享连接状态的命令（阻止污染其它面板）。 */
-const CLI_BLOCKED_COMMANDS = new Set([
-  'RESET', 'QUIT', 'AUTH', 'HELLO', 'MULTI', 'EXEC', 'DISCARD', 'WATCH', 'UNWATCH',
-  'SUBSCRIBE', 'PSUBSCRIBE', 'SSUBSCRIBE', 'MONITOR',
-  'BLPOP', 'BRPOP', 'BLMOVE', 'BRPOPLPUSH', 'BZPOPMIN', 'BZPOPMAX', 'BZMPOP', 'BLMPOP',
-  // 阻塞/改变共享连接状态或阻塞服务端：
-  'WAIT', 'WAITAOF', 'READONLY', 'READWRITE', 'SYNC', 'PSYNC',
-]);
-
-function isCliBlocked(name: string, args: readonly string[]): boolean {
-  const c = name.toUpperCase();
-  if (CLI_BLOCKED_COMMANDS.has(c)) return true;
-  const upper = args.map((a) => a.toUpperCase());
-  if (c === 'CLIENT') {
-    const sub = upper[0] ?? '';
-    if (sub === 'PAUSE' || sub === 'TRACKING') return true;
-    // REPLY OFF/SKIP 会让服务端不再回复，共享连接上后续命令会永久挂起。
-    if (sub === 'REPLY' && (upper[1] === 'OFF' || upper[1] === 'SKIP')) return true;
-  }
-  // XREAD/XREADGROUP 带 BLOCK 会阻塞共享连接。
-  if ((c === 'XREAD' || c === 'XREADGROUP') && upper.includes('BLOCK')) return true;
-  // DEBUG 仅硬阻断会崩溃/阻塞/改状态的子命令；DEBUG OBJECT 等只读子命令放行。
-  if (c === 'DEBUG' && ['SEGFAULT', 'PANIC', 'OOM', 'SLEEP', 'CRASH-AND-RECOVER', 'JMAP'].includes(upper[0] ?? '')) return true;
-  return false;
-}
-
-/** 审计行文本（P7 §十：日志禁止明文密码）。 */
-export function redisAuditLine(name: string, args: string[]): string {
-  return [name, ...redactCommandArgs(name, args)].join(' ');
-}
-
-/** SLOWLOG GET 原始回复 → 归一化条目。 */
-export function parseSlowlog(raw: unknown): RedisSlowlogEntry[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.filter((e): e is unknown[] => Array.isArray(e)).map((e) => ({
-    id: Number(e[0] ?? 0),
-    timestamp: Number(e[1] ?? 0),
-    durationMicros: Number(e[2] ?? 0),
-    command: Array.isArray(e[3]) ? e[3].map(String).join(' ') : String(e[3] ?? ''),
-    clientAddr: String(e[4] ?? ''),
-    clientName: String(e[5] ?? ''),
-  }));
-}
-
-/** 命令回复 → 可显示文本。 */
-export function formatRedisReply(raw: unknown): string {
-  if (raw === null || raw === undefined) return '(nil)';
-  if (Buffer.isBuffer(raw)) return raw.toString('utf8');
-  if (typeof raw === 'string') return raw;
-  if (typeof raw === 'number' || typeof raw === 'boolean') return String(raw);
-  try { return JSON.stringify(raw, null, 2); } catch { return String(raw); }
 }

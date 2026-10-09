@@ -1,13 +1,18 @@
-import { ConnectionFactory, QueryService, MetadataService, DataService, TableService, DialectRegistry, DatabaseType, RedisClient, buildRedisTlsOptions, withDatabaseInUrl } from '@devbelt/db-core';
+import { DatabaseType, withDatabaseInUrl } from '@devbelt/db-core';
+import type { SqlScanOptions } from '@devbelt/db-core/sql';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import type { HistoryStore } from '../history/historyStore';
-import { parseNoBackslashEscapes, parseStandardConformingStringsOff, type SqlScanOptions } from '@devbelt/db-core/sql';
 import { dialectScanOptions } from '../utils/sqlDialectOptions';
-import { QueryHistoryRecorder } from '../history/queryHistoryRecorder';
 import { SshTunnel } from './sshTunnel';
 import { validateConnectionPaths, type PathValidationResult } from './connectionPathValidator';
-import { discoverSentinelMasterOverSsh, setupClusterOverSsh } from './redisTunnel';
-import { requireSqlSession, type ConnectionSession, type RedisConnectionSession, type SqlConnectionSession } from './connectionSession';
+import { requireSqlSession, type ConnectionSession, type SqlConnectionSession } from './connectionSession';
+import { buildRedisSession } from './buildRedisSession';
+import { buildSqlSession } from './buildSqlSession';
+import type { SessionBuildContext } from './sessionBuildContext';
+import { DEFAULT_POOL_CONFIG, DERIVED_DB_SESSION_MAX, SESSION_KEY_SEP, type PoolConfig, type SessionEntry } from './poolTypes';
+
+// 派生会话上限转发（测试与命令侧从本模块导入）。
+export { DERIVED_DB_SESSION_MAX };
 
 /** 建连前路径校验失败：阻断建连（不含完整路径内容）。 */
 export class ConnectionPathError extends Error {
@@ -16,45 +21,6 @@ export class ConnectionPathError extends Error {
     this.name = 'ConnectionPathError';
   }
 }
-
-/** 解析 `host:port,host:port` 节点列表；缺省回退到 `defaultHost:defaultPort`。 */
-function parseRedisNodes(raw: string | undefined, defaultHost: string, defaultPort: number): { host: string; port: number }[] {
-  const items = (raw ?? '').split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
-  if (!items.length) return [{ host: defaultHost, port: defaultPort }];
-  return items.map((item) => {
-    const idx = item.lastIndexOf(':');
-    if (idx < 0) return { host: item, port: defaultPort };
-    return { host: item.slice(0, idx), port: Number(item.slice(idx + 1)) || defaultPort };
-  });
-}
-
-export interface PoolConfig {
-  maxConnections: number;
-  idleTimeoutMs: number;
-  healthCheckIntervalMs: number;
-}
-
-const DEFAULT_POOL_CONFIG: PoolConfig = {
-  maxConnections: 10,
-  idleTimeoutMs: 300_000,
-  healthCheckIntervalMs: 60_000,
-};
-
-interface SessionEntry {
-  session: ConnectionSession;
-  lastUsed: number;
-  connId: string;
-  /** 会话键：主会话 = connId；PG 衍生库会话 = `${connId}\u0000${database}`。 */
-  key: string;
-  /** 该会话绑定的库（仅 PG 衍生会话；主会话为连接配置库/undefined）。 */
-  database?: string;
-}
-
-/** B2：单个连接最多可同时保留的**衍生库会话**数（不含主会话）。 */
-export const DERIVED_DB_SESSION_MAX = 4;
-
-/** 会话键里的连接/库分隔符（UUID 与库名都不会出现）。 */
-const SESSION_KEY_SEP = '\u0000';
 
 /**
  * 连接管理器：从已保存配置创建活动连接会话。
@@ -321,7 +287,7 @@ export class ConnectionManager {
 
   /**
    * 按引擎分派会话装配；失败由 doConnect 统一清理隧道。
-   * SQL 走 buildSqlSession；Redis 本切片为骨架，S2 再接真连接。
+   * 装配逻辑下沉到 `buildSqlSession` / `buildRedisSession`，经 `SessionBuildContext` 回调本管理器。
    */
   private async buildSession(
     conn: SavedConnection,
@@ -331,252 +297,44 @@ export class ConnectionManager {
     key: string,
     tunnelLease?: string,
   ): Promise<ConnectionSession> {
+    const ctx = this.buildContext();
     if (conn.dbType === DatabaseType.REDIS) {
-      return this.buildRedisSession(conn, host, port, generation, key, tunnelLease);
+      return buildRedisSession(ctx, conn, host, port, generation, key, tunnelLease);
     }
-    return this.buildSqlSession(conn, host, port, generation, key, tunnelLease);
+    return buildSqlSession(ctx, conn, host, port, generation, key, tunnelLease);
   }
 
-  /**
-   * 装配 Redis 会话（P7 S2）。
-   *
-   * SSH 隧道已由 doConnect 统一建好（host/port 已是本地转发地址），本方法只构造
-   * RedisClient、等 ready、包成 RedisConnectionSession；任何失败抛错，由 doConnect
-   * 统一回收隧道（复用隧道清理路径），与 SQL 分支同构。
-   */
-  private async buildRedisSession(
-    conn: SavedConnection,
-    host: string,
-    port: number,
-    generation: number,
-    key: string,
-    tunnelLease?: string,
-  ): Promise<RedisConnectionSession> {
-    const mode = conn.redisMode ?? 'standalone';
-    const tls = conn.useSSL
-      ? buildRedisTlsOptions({
-          caPath: conn.caPath,
-          clientCertPath: conn.clientCertPath,
-          clientKeyPath: conn.clientKeyPath,
-          rejectUnauthorized: conn.rejectUnauthorized,
-          // sentinel 模式：ioredis 会把这份 tls 应用到解析出的 master；servername 若填 sentinel
-          // 主机名，master 的 SNI/证书校验会用错主机名导致连不上。留空让 tls 用 master 主机名。
-          servername: mode === 'sentinel' ? undefined : conn.host,
-        })
-      : undefined;
-    const common = {
-      username: conn.user || undefined,
-      password: conn.password,
-      tls,
-      connectTimeout: conn.connectTimeout,
-      // Redis 命令超时跟随连接的 requestTimeout（过去固定 15s，用户配置无效）。
-      commandTimeout: conn.requestTimeout,
-      readOnly: conn.readOnly === true,
+  /** 装配上下文：把管理器内部能力暴露给 session 装配模块（Phase 2 拆分）。 */
+  private buildContext(): SessionBuildContext {
+    const self = this;
+    return {
+      get disposing() { return self.disposing; },
+      generation: (id) => self.generation(id),
+      scanOptionsFor: (c) => self.scanOptionsFor(c),
+      history: self.history,
+      onRedisNodeUnmapped: (connId, address) => self.onRedisNodeUnmapped?.(connId, address),
+      registerSession: (key, session, entry) => self.registerSession(key, session, entry),
+      hasSessionForConn: (id) => self.hasSessionForConn(id),
+      forgetSession: (key) => { self.sessions.delete(key); self.sessionEntries.delete(key); },
+      clearDialectCaches: (id) => { self.noBackslashEscapes.delete(id); self.pgStdOff.delete(id); },
+      clearPrimaryDb: (id) => { self.primaryDb.delete(id); },
+      setNoBackslashEscapes: (id, value) => { self.noBackslashEscapes.set(id, value); },
+      setPgStdOff: (id, value) => { self.pgStdOff.set(id, value); },
+      setPrimaryDb: (id, value) => { self.primaryDb.set(id, value); },
+      primaryDbOf: (id) => self.primaryDb.get(id),
     };
-    const auth = { username: conn.user || undefined, password: conn.password, sentinelPassword: conn.sentinelPassword, tls, connectTimeout: conn.connectTimeout };
-    let extraTunnelIds: string[] = [];
-    const closeExtraTunnels = (): void => { for (const id of extraTunnelIds) SshTunnel.close(id); };
-    let started: RedisClient | undefined;
-    try {
-      if (mode === 'cluster') {
-        if (conn.sshHost) {
-          // 经种子隧道发现各 master 并逐节点建隧道 → NAT map（合成 conn id，回收见 close）。
-          const setup = await setupClusterOverSsh(conn, port, auth, {
-            onUnmapped: this.onRedisNodeUnmapped ? (address) => this.onRedisNodeUnmapped!(conn.id, address) : undefined,
-          });
-          extraTunnelIds = setup.tunnelIds;
-          started = new RedisClient({
-            ...common,
-            cluster: { nodes: [{ host: '127.0.0.1', port }], natMap: setup.natMap, slotsRefreshTimeout: conn.connectTimeout ?? 3000 },
-          });
-        } else {
-          const nodes = parseRedisNodes(conn.clusterNodes, host, port);
-          started = new RedisClient({ ...common, cluster: { nodes, slotsRefreshTimeout: conn.connectTimeout ?? 3000 } });
-        }
-      } else if (mode === 'sentinel') {
-        if (!conn.sentinelName) throw new Error('Redis Sentinel master 名称未配置');
-        if (conn.sshHost) {
-          const s = await discoverSentinelMasterOverSsh(conn, port, auth);
-          extraTunnelIds = [s.tunnelId];
-          started = new RedisClient({ ...common, host: '127.0.0.1', port: s.masterLocalPort, db: conn.redisDb });
-        } else {
-          const sentinels = parseRedisNodes(conn.sentinelNodes, host, port);
-          started = new RedisClient({ ...common, sentinels, sentinelName: conn.sentinelName, sentinelPassword: conn.sentinelPassword, db: conn.redisDb });
-        }
-      } else {
-        started = new RedisClient({ ...common, host, port, db: conn.redisDb });
-      }
-      await started.connect();
-      // 探活：确认服务端可响应（只读模式下 PING 属读命令，不受影响）。
-      await started.ping();
-    } catch (err) {
-      // 构造阶段抛错（如 opts 非法）时 started 可能仍未赋值：也要回收已建的合成隧道。
-      if (started) { try { await started.close(); } catch { /* 保留原始错误 */ } }
-      closeExtraTunnels();
-      throw err;
-    }
-    const client = started;
-
-    // 建连期间用户关闭/删除该连接（或管理器整体销毁）：建成即销毁。
-    if (this.disposing || this.generation(conn.id) !== generation) {
-      await client.close();
-      // 建连期间被关闭：自毁时必须连同已建的合成隧道一起回收（否则 #nat*/#sentinel-master 泄漏）。
-      closeExtraTunnels();
-      throw new Error('connection was closed before it could be established');
-    }
-
-    const session: RedisConnectionSession = {
-      kind: 'redis',
-      client,
-      db: client.isCluster ? 0 : (conn.redisDb ?? 0),
-      mode,
-      readOnly: conn.readOnly === true,
-      isAlive: () => client.isAlive(),
-      close: () => {
-        void client.close();
-        this.sessions.delete(key);
-        this.sessionEntries.delete(key);
-        this.noBackslashEscapes.delete(conn.id);
-        this.pgStdOff.delete(conn.id);
-        if (conn.sshHost) SshTunnel.release(conn.id, tunnelLease);
-        closeExtraTunnels();
-      },
-    };
-    this.sessions.set(key, session);
-    this.sessionEntries.set(key, { session, lastUsed: Date.now(), connId: conn.id, key });
-    if (this.disposing) {
-      session.close();
-      throw new Error('ConnectionManager is disposing');
-    }
-    // 入池后再按上限淘汰，保护刚建好的会话（与 SQL 分支一致）。
-    this.evictIfNeeded(key);
-    return session;
   }
 
-  /** 装配 SQL 连接与四个服务；失败由 doConnect 统一清理隧道。 */
-  private async buildSqlSession(
-    conn: SavedConnection,
-    host: string,
-    port: number,
-    generation: number,
-    key: string,
-    tunnelLease?: string,
-  ): Promise<SqlConnectionSession> {
-    const { connection, dialect } = ConnectionFactory.createWithDialect(
-      conn.dbType as DatabaseType,
-      {
-        host,
-        port,
-        user: conn.user,
-        password: conn.password,
-        database: conn.database,
-        schema: conn.schema,
-        timezone: conn.timezone,
-        connectTimeout: conn.connectTimeout,
-        requestTimeout: conn.requestTimeout,
-        dbPath: conn.dbPath,
-        useConnectionString: conn.useConnectionString,
-        connectionUrl: conn.connectionUrl,
-        useSSL: conn.useSSL,
-        rejectUnauthorized: conn.rejectUnauthorized,
-        caPath: conn.caPath,
-        clientCertPath: conn.clientCertPath,
-        clientKeyPath: conn.clientKeyPath,
-        socketPath: conn.socketPath,
-      },
-    );
-
-    await new Promise<void>((resolve, reject) => {
-      connection.connect((err) => (err ? reject(err) : resolve()));
-    });
-
-    // 建连期间用户关闭/删除该连接（或管理器整体销毁）：建成即销毁，
-    // 绝不写入 sessions、绝不留下无人持有的连接与隧道。隧道由 doConnect 的
-    // catch 统一关闭（此处只负责断开驱动连接）。
-    if (this.disposing || this.generation(conn.id) !== generation) {
-      connection.end();
-      throw new Error('connection was closed before it could be established');
-    }
-
-    // 观察者挂在 QueryService 上，于是这条会话上**任何**修改性语句都会进历史，
-    // 无论它来自编辑器、结果网格、表设计器还是树右键命令。
-    const recorder = this.history ? new QueryHistoryRecorder(conn, this.history, (c) => this.scanOptionsFor(c)) : undefined;
-    const query = new QueryService(connection, dialect, recorder?.observer(), conn.requestTimeout);
-
-    // MySQL：读一次 @@sql_mode。NO_BACKSLASH_ESCAPES 会反转字符串转义语义，
-    // 影响语句切分、只读判定与值转义；读失败不阻断建连，退回默认（反斜杠转义）。
-    if (dialect.dbType === 'MYSQL') {
-      try {
-        const r = await query.query('SELECT @@sql_mode AS mode');
-        const mode = String((r.rows?.[0] as { mode?: unknown } | undefined)?.mode ?? '');
-        const nbe = parseNoBackslashEscapes(mode);
-        this.noBackslashEscapes.set(conn.id, nbe);
-        // 值转义按连接换用方言变体：各服务层在调用点取 query.dialect，替换即全局生效。
-        query.setDialect(DialectRegistry.getFor(conn.dbType, { noBackslashEscapes: nbe }));
-      } catch {
-        /* 保持默认 */
-      }
-    }
-
-    // PG：读一次 standard_conforming_strings。off 时普通 `'...'` 串里反斜杠是转义字符，
-    // 影响语句切分与值转义；读失败不阻断建连，退回默认（on，PG 自 9.1 起默认）。
-    if (dialect.dbType === 'PG') {
-      try {
-        const r = await query.query('SHOW standard_conforming_strings');
-        const raw = String((r.rows?.[0] as { standard_conforming_strings?: unknown } | undefined)?.standard_conforming_strings ?? '');
-        const off = parseStandardConformingStringsOff(raw);
-        this.pgStdOff.set(conn.id, off);
-        query.setDialect(DialectRegistry.getFor(conn.dbType, { standardConformingStrings: !off }));
-      } catch {
-        /* 保持默认 */
-      }
-      try {
-        // 记录主会话实际所在库：`conn.database` 为空时，树里该库节点按主会话键处理，避免重复建会话。
-        const r = await query.query('SELECT current_database() AS db');
-        const db = (r.rows?.[0] as { db?: unknown } | undefined)?.db;
-        if (db) this.primaryDb.set(conn.id, String(db));
-      } catch {
-        /* 保持未识别 */
-      }
-    }
-
-    const session: SqlConnectionSession = {
-      kind: 'sql',
-      capabilities: dialect.capabilities,
-      query,
-      metadata: new MetadataService(query),
-      data: new DataService(query),
-      table: new TableService(query),
-      isAlive: () => connection.isAlive(),
-      close: () => {
-        connection.end();
-        this.sessions.delete(key);
-        this.sessionEntries.delete(key);
-        // 仅当没有同连接其它会话时才清方言缓存（多库会话共享同连接配置）。
-        if (!this.hasSessionForConn(conn.id)) {
-          this.noBackslashEscapes.delete(conn.id);
-          this.pgStdOff.delete(conn.id);
-          this.primaryDb.delete(conn.id);
-        }
-        // 只释放本次引用：同连接其它库会话可能仍在使用共享隧道。
-        if (conn.sshHost) SshTunnel.release(conn.id, tunnelLease);
-      },
-    };
+  /** 会话入池：写入 sessions/sessionEntries；期间管理器销毁则自毁；随后按上限淘汰。 */
+  private registerSession(key: string, session: ConnectionSession, entry: SessionEntry): void {
     this.sessions.set(key, session);
-    this.sessionEntries.set(key, {
-      session,
-      lastUsed: Date.now(),
-      connId: conn.id,
-      key,
-      database: conn.dbType === DatabaseType.PG ? (conn.database ?? this.primaryDb.get(conn.id)) : undefined,
-    });
+    this.sessionEntries.set(key, entry);
     if (this.disposing) {
       session.close();
       throw new Error('ConnectionManager is disposing');
     }
     // 入池后再按上限淘汰，保护刚建好的会话。
     this.evictIfNeeded(key);
-    return session;
   }
 
   /** 该连接是否仍有已缓存会话（多库衍生场景）。 */

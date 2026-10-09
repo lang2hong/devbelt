@@ -72,11 +72,12 @@ it('S5-3 树内只读键导航：键节点有打开菜单 + 懒加载注册点',
     // DB 右键也可续扫一页（键多时哨兵易滚出视野）
     expect(menus.some((m) => m.command === 'devbelt.redis.loadMoreKeys' && m.when?.includes('redisDb.REDIS'))).toBe(true);
     // provider 侧：根扁平折叠 + 完整文件夹快照 + 定向失效
-    const tree = readFileSync(join(process.cwd(), 'src/tree/dbTreeDataProvider.ts'), 'utf8');
-    expect(tree).toContain('loadFullFolder');
-    expect(tree).toContain('loadAllRedisKeys');
-    expect(tree).toContain('groupRedisKeyChildren');
-    expect(tree).toContain('completeBadge');
+    // （Phase 2 拆分后键树逻辑位于 redisKeyTreeState.ts，provider 仅保留委托门面）
+    const treeState = readFileSync(join(process.cwd(), 'src/tree/redisKeyTreeState.ts'), 'utf8');
+    expect(treeState).toContain('loadFullFolder');
+    expect(treeState).toContain('loadAllRedisKeys');
+    expect(treeState).toContain('groupRedisKeyChildren');
+    expect(treeState).toContain('completeBadge');
   });
 
   it('C-1 树内搜索/写操作：命令注册 + 菜单 when', () => {

@@ -409,7 +409,7 @@ describe('D* 键树（根扁平 SCAN + 客户端折叠）', () => {
     expect(first.some((k) => k.kind === NodeKind.RedisKeyLoadMore)).toBe(true);
 
     await provider.loadMoreRedisKeys(db);
-    const keys = (provider as any).redisKeys.get('c1:db0:') as string[];
+    const keys = (provider as any).redisTree.redisKeys.get('c1:db0:') as string[];
     expect(keys).toEqual(expect.arrayContaining(['a:1', 'a:2']));
     expect(matches.every((m) => m === 'a:*')).toBe(true);
   });
@@ -433,7 +433,7 @@ describe('D* 键树（根扁平 SCAN + 客户端折叠）', () => {
     release();
     const res = await p;
     expect(res.added).toBe(0);
-    expect(((provider as any).redisKeys.get('c1:db0:') ?? []).length).toBe(0);
+    expect(((provider as any).redisTree.redisKeys.get('c1:db0:') ?? []).length).toBe(0);
   });
 
   it('关闭连接使在途加载作废（覆盖从未搜索过的 db）', async () => {
@@ -455,7 +455,7 @@ describe('D* 键树（根扁平 SCAN + 客户端折叠）', () => {
     release();
     const res = await p;
     expect(res.added).toBe(0);
-    expect((provider as any).redisKeys.get('c1:db0:')).toBeUndefined();
+    expect((provider as any).redisTree.redisKeys.get('c1:db0:')).toBeUndefined();
   });
 
   it('合并不截断：单页超过软上限也全部保留', async () => {
