@@ -355,10 +355,18 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
         [S2, B],
       )).rowCount;
       expect(fk).toBe(1);
-      // 数据导入 + 序列归属 S2 + setval 推进：插入一行不冲突。
+      // 数据导入 + 序列属于目标 schema（列默认值限定到 S2）+ setval 推进：插入一行不冲突。
       expect((await raw.query(`SELECT count(*)::int AS n FROM ${S2}."${A}"`)).rows[0].n).toBe(2);
-      const seq = (await raw.query(`SELECT pg_get_serial_sequence($1,'id') AS s`, [`${S2}."${A}"`])).rows[0].s as string;
-      expect(seq).toContain(S2);
+      const def = (await raw.query(
+        `SELECT column_default FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 AND column_name='id'`,
+        [S2, A],
+      )).rows[0].column_default as string;
+      expect(def).toContain(S2);
+      const seqRow = await raw.query(
+        `SELECT 1 FROM pg_class s JOIN pg_namespace n ON n.oid=s.relnamespace WHERE s.relkind='S' AND n.nspname=$1 AND s.relname=$2`,
+        [S2, `${A}_id_seq`],
+      );
+      expect(seqRow.rowCount).toBe(1);
       const ins = await raw.query(`INSERT INTO ${S2}."${A}" (name) VALUES ('c') RETURNING id`);
       expect(Number(ins.rows[0].id)).toBe(3);
     } finally {
@@ -386,23 +394,29 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
   });
 it('A6 真库：注入形状 schema 名被安全引用，执行不生效', async () => {
     const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
-    const canary = `zms_canary_${stamp}`;
-    const evil = `zms_inj_${stamp};DROP TABLE ${S2}."${canary}";--`;
+    const canary = `c_${stamp}`;
+    // 目标 schema 名内嵌 `;DROP TABLE <哨兵>;--`（总长 < 63 字节，PG 标识符上限）。
+    const evil = `zms_inj_${stamp};DROP TABLE ${canary};--`;
     const evilQ = `"${evil.replace(/"/g, '""')}"`;
     await raw.query(`CREATE TABLE ${S2}."${canary}" (id int)`);
     await raw.query(`CREATE SCHEMA ${evilQ}`);
     await raw.query(`CREATE TABLE ${S1}.src_evil (id int, v text)`);
+    const prev = (await raw.query('SHOW search_path')).rows[0].search_path as string;
     try {
       const diffs = await SchemaDiffService.diff(meta, dbName, meta, dbName, S1, evil);
       const sql = await SchemaDiffService.generateSyncSql(diffs, dbName, table, dbName, dialect, { sourceSchema: S1, targetSchema: evil, dialect });
       // H1：目标 schema 名一律带引号，不做裸拼接。
       expect(sql).toContain(evilQ);
+      // 让未限定的 `DROP TABLE <哨兵>`（若注入生效）能命中 S2。
+      await raw.query(`SET search_path TO ${S2}, public`);
       await raw.query(sql);
+      await raw.query(`SET search_path TO ${prev}`);
       // 注入未生效：哨兵表仍在。
       expect((await raw.query(`SELECT to_regclass($1) AS r`, [`${S2}."${canary}"`])).rows[0].r).not.toBeNull();
       // 目标 schema 内表已建。
       expect((await raw.query(`SELECT to_regclass($1) AS r`, [`${evilQ}.src_evil`])).rows[0].r).not.toBeNull();
     } finally {
+      await raw.query(`SET search_path TO ${prev}`);
       await raw.query(`DROP TABLE IF EXISTS ${S1}.src_evil`);
       await raw.query(`DROP SCHEMA IF EXISTS ${evilQ} CASCADE`);
       await raw.query(`DROP TABLE IF EXISTS ${S2}."${canary}"`);

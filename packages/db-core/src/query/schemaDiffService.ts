@@ -152,7 +152,9 @@ export class SchemaDiffService {
     for (const t of sourceTables) {
       const srcCons = hasSchema && typeof sourceMeta.getConstraints === 'function' ? await sourceMeta.getConstraints(t.name, sourceSchema) : [];
       const srcIdx = hasSchema && typeof sourceMeta.getIndexes === 'function' ? await sourceMeta.getIndexes(t.name, sourceDb, sourceSchema) : [];
-      const srcIdxDiff = srcIdx.filter((i) => !i.isPrimary).map((i) => ({ name: i.name, status: 'added' as const, columns: i.columns, unique: i.isUnique, definition: i.type }));
+      const srcConsNames = new Set(srcCons.map((c) => c.name));
+      // 约束（PK/UNIQUE）会自动建同名索引，避免在 diff/生成里重复处理（H5）。
+      const srcIdxDiff = srcIdx.filter((i) => !i.isPrimary && !srcConsNames.has(i.name)).map((i) => ({ name: i.name, status: 'added' as const, columns: i.columns, unique: i.isUnique, definition: i.type }));
       // 源库有、目标无 → added（连同其约束/索引一并带上）
       if (!targetNames.has(t.name)) {
         result.push({
@@ -173,7 +175,8 @@ export class SchemaDiffService {
       const tgtCons = hasSchema && typeof targetMeta.getConstraints === 'function' ? await targetMeta.getConstraints(t.name, targetSchema) : [];
       const constraints = this.diffConstraints(srcCons, tgtCons, schemas);
       const tgtIdx = hasSchema && typeof targetMeta.getIndexes === 'function' ? await targetMeta.getIndexes(t.name, targetDb, targetSchema) : [];
-      const indexes = this.diffIndexes(srcIdx, tgtIdx, schemas);
+      const constNames = new Set([...srcConsNames, ...tgtCons.map((c) => c.name)]);
+      const indexes = this.diffIndexes(srcIdx, tgtIdx, schemas, constNames);
       result.push({
         tableName: t.name,
         status: (colDiffs.some((c) => c.status !== 'unchanged') || constraints.length > 0 || indexes.length > 0) ? 'changed' : 'unchanged',
@@ -207,11 +210,12 @@ export class SchemaDiffService {
     return out;
   }
 
-  /** 按索引名比对（主键索引跳过，由约束处理）：定义/列/唯一性任一变化即 changed。 */
-  private static diffIndexes(src: IndexMeta[], tgt: IndexMeta[], schemas: readonly (string | undefined)[]): IndexDiff[] {
+  /** 按索引名比对（主键索引与约束同名索引跳过，由约束处理）：定义/列/唯一性任一变化即 changed。 */
+  private static diffIndexes(src: IndexMeta[], tgt: IndexMeta[], schemas: readonly (string | undefined)[], constraintNames: ReadonlySet<string> = new Set()): IndexDiff[] {
     const norm = (s: string) => stripIdentifierSchema(s, schemas);
-    const srcList = src.filter((i) => !i.isPrimary);
-    const tgtList = tgt.filter((i) => !i.isPrimary);
+    const skip = (i: IndexMeta) => i.isPrimary || constraintNames.has(i.name);
+    const srcList = src.filter((i) => !skip(i));
+    const tgtList = tgt.filter((i) => !skip(i));
     const tgtMap = new Map(tgtList.map((i) => [i.name, i]));
     const out: IndexDiff[] = [];
     for (const s of srcList) {
