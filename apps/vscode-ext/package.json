@@ -1351,7 +1351,7 @@
         },
         {
           "command": "devbelt.compareSchema",
-          "when": "view == devbelt.explorer && viewItem =~ /^database\\.(MYSQL|PG)$/",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\.MYSQL$/",
           "group": "5_tools"
         },
         {
@@ -1362,11 +1362,6 @@
         {
           "command": "devbelt.compareData",
           "when": "view == devbelt.explorer && viewItem == database.MYSQL",
-          "group": "5_tools"
-        },
-        {
-          "command": "devbelt.compareData",
-          "when": "view == devbelt.explorer && viewItem =~ /^database\\.PG$/",
           "group": "5_tools"
         },
         {
@@ -1392,11 +1387,6 @@
         {
           "command": "devbelt.syncDatabase",
           "when": "view == devbelt.explorer && viewItem == database.MYSQL",
-          "group": "4_data"
-        },
-        {
-          "command": "devbelt.syncDatabase",
-          "when": "view == devbelt.explorer && viewItem =~ /^database\\.PG$/",
           "group": "4_data"
         },
         {

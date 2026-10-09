@@ -247,9 +247,11 @@ export class BackupService {
    */
   private static stripTableSchema(ddl: string, schema?: string): string {
     if (!schema) return ddl;
-    const esc = schema.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // quote_ident 对含 `"` 的 schema 生成 `"a""b"`：两种形式都要能匹配。
+    const quoted = esc('"' + schema.replace(/"/g, '""') + '"');
     return ddl.replace(
-      new RegExp(`(CREATE\\s+TABLE\\s+)(?:"${esc}"|${esc})\\.`, 'i'),
+      new RegExp(`(CREATE\\s+TABLE\\s+)(?:${quoted}|${esc(schema)})\\.`, 'i'),
       '$1',
     );
   }

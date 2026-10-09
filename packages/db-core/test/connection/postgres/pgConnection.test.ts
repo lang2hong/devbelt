@@ -195,33 +195,45 @@ describe('adaptResult (RETURNING 行不得丢失)', () => {
 });
 
 describe('schema / socketPath / timezone', () => {
-  it('schema 与 timezone 通过启动参数生效，socketPath 作为 host 目录', () => {
-    new PostgreSqlConnection({
+  it('schema 在连接成功后 SET search_path；timezone 走启动参数，socketPath 作为 host 目录', () => {
+    const c = new PostgreSqlConnection({
       ...base,
       host: 'ignored-by-socket',
       schema: 'myschema',
       timezone: 'Asia/Shanghai',
       socketPath: '/var/run/postgresql/.s.PGSQL.5432',
     } as any);
-    const { conf } = created[0];
+    const { conf, client } = created[0];
     expect(conf.host).toBe('/var/run/postgresql');
-    // A6：schema 名按标识符规则加双引号（内嵌引号翻倍）后作为 search_path 生效。
-    expect(conf.options).toContain('-c search_path="myschema"');
+    // A6-2：schema 不再进 options（libpq 不支持引号），timezone 仍走启动参数。
     expect(conf.options).toContain('-c TimeZone=Asia/Shanghai');
+    expect(conf.options).not.toContain('search_path');
+    // 连接成功后发 `SET search_path TO <带引号标识符>`。
+    client.connect.mockImplementation((cb: any) => cb(null));
+    c.connect(() => {});
+    expect(client.query).toHaveBeenCalledWith('SET search_path TO "myschema"', expect.any(Function));
   });
 
-  it('socketPath 已是目录时原样使用；特殊 schema 加引号，控制字符 schema 被忽略', () => {
-    new PostgreSqlConnection({
+  it('socketPath 已是目录时原样使用；特殊 schema 连接后 SET（带引号），控制字符 schema 忽略', () => {
+    const c1 = new PostgreSqlConnection({
       ...base,
       socketPath: '/var/run/postgresql',
       schema: 'bad name',
       timezone: 'Asia/Shanghai; DROP',
     } as any);
-    const { conf } = created[0];
+    const { conf, client } = created[0];
     expect(conf.host).toBe('/var/run/postgresql');
-    // 含空格的合法 schema：加双引号后作为 search_path 生效。
-    expect(conf.options).toBe('-c search_path="bad name"');
-    // timezone 仍按安全字符白名单：含空格/分号被忽略。
-    expect(conf.options).not.toContain('TimeZone');
+    // timezone 非法被忽略；schema 不进 options。
+    expect(conf.options).toBeUndefined();
+    client.connect.mockImplementation((cb: any) => cb(null));
+    c1.connect(() => {});
+    expect(client.query).toHaveBeenCalledWith('SET search_path TO "bad name"', expect.any(Function));
+
+    // 控制字符 schema：忽略，不发 SET。
+    const c2 = new PostgreSqlConnection({ ...base, schema: 'a\u0000b' } as any);
+    const client2 = created[1].client;
+    client2.connect.mockImplementation((cb: any) => cb(null));
+    c2.connect(() => {});
+    expect(client2.query).not.toHaveBeenCalled();
   });
 });

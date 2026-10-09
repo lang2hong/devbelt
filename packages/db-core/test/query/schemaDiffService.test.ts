@@ -472,8 +472,9 @@ describe('SchemaDiffService', () => {
     const tableService = {
       dbType: DatabaseType.PG,
       wrapIdentifier: (id: string) => pg.wrap(id),
-      getCreateSql: async (_t: string, _db?: string, schema?: string) =>
-        `CREATE TABLE ${pg.wrap(String(schema))}.${pg.wrap('orders')} (\n  "id" integer NOT NULL\n)`,
+      wrapSchemaIdentifier: (id: string) => pg.wrap(id),
+      getCreateSql: async (_t: string, _db?: string, schema?: string, targetSchema?: string) =>
+        `CREATE TABLE ${pg.wrap(String(targetSchema ?? schema))}.${pg.wrap('orders')} (\n  "id" integer NOT NULL\n)`,
       supports: () => true,
     } as unknown as TableService;
     const diffs = [
@@ -490,5 +491,33 @@ describe('SchemaDiffService', () => {
     expect(sql).toContain('DROP TABLE IF EXISTS "staging"."orders"');
     expect(sql).toContain('ALTER TABLE "staging"."users"');
     expect(sql).toContain('ALTER COLUMN "name" SET NOT NULL');
+  });
+
+  it('PG 跨 schema：同名 serial 默认值不误判 changed，且 nextval 改写为目标 schema', async () => {
+    const pg = new PostgreSqlDialect();
+    // 同名 serial 列：两侧默认值只差 schema 前缀 → 应判 unchanged。
+    const source = mockMetaService(['t'], { t: [{ name: 'id', type: 'integer', isPrimary: true, defaultValue: "nextval('s1.t_id_seq'::regclass)" } as any] });
+    const target = mockMetaService(['t'], { t: [{ name: 'id', type: 'integer', isPrimary: true, defaultValue: "nextval('s2.t_id_seq'::regclass)" } as any] });
+    const diffs = await SchemaDiffService.diff(source, 'db', target, 'db', 's1', 's2');
+    expect(diffs.find((d) => d.tableName === 't')!.status).toBe('unchanged');
+
+    // 生成 DDL 时把源 schema 前缀改写到目标 schema。
+    const tableService = {
+      dbType: DatabaseType.PG,
+      wrapIdentifier: (id: string) => pg.wrap(id),
+      wrapSchemaIdentifier: (id: string) => pg.wrap(id),
+      getCreateSql: async () => '',
+      supports: () => true,
+    } as unknown as TableService;
+    const added = [{
+      tableName: 't',
+      status: 'changed' as const,
+      columns: [{ columnName: 'seq_col', status: 'added' as const, sourceType: 'integer', sourceDefault: "nextval('s1.t_seq'::regclass)" }],
+    }];
+    const sql = await SchemaDiffService.generateSyncSql(added, 'db', tableService, 'db', undefined, { sourceSchema: 's1', targetSchema: 's2' });
+    expect(sql).toContain("nextval('s2.t_seq'::regclass)");
+    expect(sql).not.toContain("nextval('s1.t_seq'::regclass)");
+    // 范围声明。
+    expect(sql).toContain('不含主键/唯一/CHECK/外键/索引/视图/函数/序列');
   });
 });

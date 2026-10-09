@@ -101,12 +101,13 @@ export class PostgreSqlDialect implements SqlDialect {
   }
 
   /**
-   * schema 限定：给了 schema 用字面量（validateSchemaIdent + 单引号转义），否则 `current_schema()`。
-   * schema 值来自 pg_namespace/information_schema（系统来源），引用层（字面量翻倍）防注入。
+   * schema 限定：给了 schema 用字面量（validateSchemaIdent + 方言 escapeValue），否则 `current_schema()`。
+   * 必须走 `escapeValue`：schema 名放宽后可能含 `\`，在 standard_conforming_strings=off 时
+   * 手写「单引号翻倍」不足以阻止字符串逃逸。
    */
   private schemaExpr(schema?: string): string {
     if (!schema) return 'current_schema()';
-    return `'${validateSchemaIdent(schema, 63).replace(/'/g, "''")}'`;
+    return this.escapeValue(validateSchemaIdent(schema, 63));
   }
 
   getTableListSql(_database?: string, schema?: string): string {

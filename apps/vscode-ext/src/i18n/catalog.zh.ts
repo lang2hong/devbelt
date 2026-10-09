@@ -754,6 +754,7 @@ export const zh: MessageCatalog = {
   'compare.chooseDatabase': '将 "{database}" 与哪个数据库对比？',
   'compare.noOtherSchemas': '没有其他 schema 可供对比。',
   'compare.chooseSchema': '将 "{schema}" 与哪个 schema 对比？',
+  'schema.pickSchemaNode': 'PostgreSQL 请在具体 schema 节点上执行（跨 schema 对比/同步）。',
   'compare.chooseData': '将 "{database}" 的数据与哪个数据库对比？',
   'sync.noOtherConnections': '没有其他连接可供同步。',
   'sync.chooseConnection': '将 "{database}" 同步到哪个连接？',

@@ -2,6 +2,7 @@ import type { QueryService } from './queryService.js';
 import type { MetadataService } from './metadataService.js';
 import { streamRowsByKeyset } from './paging.js';
 import { qualifyTable } from '../utils/qualify.js';
+import { sqlCommentSafe } from '../sql/index.js';
 
 /**
  * 数值主键类型白名单（词边界匹配）。不能用 `/int/` 这种子串正则：`interval`/`point`
@@ -333,7 +334,7 @@ export class DataDiffService {
 
   static generateSyncSql(diffs: DataDiffResult, targetDb: string, targetQuery: QueryService, targetSchema?: string): string {
     const parts: string[] = [];
-    parts.push(`-- Data sync: ${diffs.sourceDb} → ${diffs.targetDb}`);
+    parts.push(`-- Data sync: ${sqlCommentSafe(diffs.sourceDb)} → ${sqlCommentSafe(diffs.targetDb)}`);
     parts.push('');
 
     for (const td of diffs.diffs) {

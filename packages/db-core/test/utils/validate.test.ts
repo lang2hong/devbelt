@@ -114,4 +114,16 @@ describe('validateSchemaIdent — 放宽 schema 名（A6）', () => {
     const exactly63 = 'a'.repeat(62) + ' ';
     expect(validateSchemaIdent(exactly63, 63)).toBe(exactly63);
   });
+
+  it('拒绝格式/分隔字符（\\p{Cf}、C1、U+2028/2029）', () => {
+    expect(() => validateSchemaIdent('a\u200Bb')).toThrow('Invalid SQL schema identifier'); // 零宽空格 (Cf)
+    expect(() => validateSchemaIdent('a\u0085b')).toThrow('Invalid SQL schema identifier'); // C1 NEL (Cc)
+    expect(() => validateSchemaIdent('a\u2028b')).toThrow('Invalid SQL schema identifier');
+    expect(() => validateSchemaIdent('a\u2029b')).toThrow('Invalid SQL schema identifier');
+  });
+
+  it('长度按 UTF-8 字节计（PG 63 字节）', () => {
+    expect(() => validateSchemaIdent('中'.repeat(30), 63)).toThrow('SQL schema identifier too long'); // 90 字节
+    expect(validateSchemaIdent('中'.repeat(20), 63)).toBe('中'.repeat(20)); // 60 字节
+  });
 });

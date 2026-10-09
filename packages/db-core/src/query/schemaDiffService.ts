@@ -9,6 +9,7 @@ import { DatabaseType } from '../types/connection.js';
 import { MysqlDialect } from '../dialect/mysqlDialect.js';
 import { PostgreSqlDialect } from '../dialect/postgreSqlDialect.js';
 import type { SqlDialect } from '../dialect/sqlDialect.js';
+import { sqlCommentSafe } from '../sql/index.js';
 
 const MYSQL_DIALECT = new MysqlDialect();
 const PG_DIALECT = new PostgreSqlDialect();
@@ -105,7 +106,7 @@ export class SchemaDiffService {
         sourceMeta.getColumns(t.name, sourceDb, sourceSchema),
         targetMeta.getColumns(t.name, targetDb, targetSchema),
       ]);
-      const colDiffs = this.diffColumns(sourceCols, targetCols);
+      const colDiffs = this.diffColumns(sourceCols, targetCols, makeSchemaNormalizer(sourceSchema, targetSchema));
       result.push({
         tableName: t.name,
         status: colDiffs.some((c) => c.status !== 'unchanged') ? 'changed' : 'unchanged',
@@ -116,8 +117,8 @@ export class SchemaDiffService {
     return result;
   }
 
-  /** 比对列差异 */
-  private static diffColumns(source: ColumnMeta[], target: ColumnMeta[]): ColumnDiff[] {
+  /** 比对列差异。`normalize` 用于跨 schema 比较：抹掉 schema 前缀，使两侧等价（如同名 serial 的 nextval）。 */
+  private static diffColumns(source: ColumnMeta[], target: ColumnMeta[], normalize: (v: unknown) => string = (v) => (v === undefined || v === null ? '' : String(v))): ColumnDiff[] {
     const sourceMap = new Map(source.map((c) => [c.name, c]));
     const targetMap = new Map(target.map((c) => [c.name, c]));
     const diffs: ColumnDiff[] = [];
@@ -136,11 +137,11 @@ export class SchemaDiffService {
         // 变更判定：类型 / NOT NULL / 自增 / 默认值 / 注释（后三者此前未比较，
         // 只改默认值或注释会被误判 unchanged、永不同步）。
         const changed =
-          String(srcCol.type) !== String(tgtCol.type)
+          normalize(srcCol.type) !== normalize(tgtCol.type)
           || !!tgtCol.isNotNull !== notNull
           || !!srcCol.isAutoIncrement !== !!tgtCol.isAutoIncrement
-          || normDefault(srcCol.defaultValue) !== normDefault(tgtCol.defaultValue)
-          || normComment(srcCol.comment) !== normComment(tgtCol.comment);
+          || normDefault(normalize(srcCol.defaultValue)) !== normDefault(normalize(tgtCol.defaultValue))
+          || normComment(normalize(srcCol.comment)) !== normComment(normalize(tgtCol.comment));
         if (changed) {
           diffs.push({
             columnName: name,
@@ -199,7 +200,7 @@ export class SchemaDiffService {
     // 目标 MySQL 若是 NO_BACKSLASH_ESCAPES，默认值/注释的字面量必须按该模式转义。
     const mysqlEsc = targetDialect ? (v: any) => targetDialect.escapeValue(v) : MYSQL_ESC;
     const parts: string[] = [];
-    parts.push(`-- Schema sync: ${sourceDb} → ${targetDb}`);
+    parts.push(`-- Schema sync: ${sqlCommentSafe(sourceDb)} → ${sqlCommentSafe(targetDb)}`);
     parts.push('');
 
     for (const d of diffs) {
@@ -284,21 +285,26 @@ export class SchemaDiffService {
     opts: { sourceSchema?: string; targetSchema?: string } = {},
   ): Promise<string> {
     const wrap = (id: string) => sourceTableService.wrapIdentifier(id);
+    const wrapSchema = (id: string) => sourceTableService.wrapSchemaIdentifier(id);
     const target = opts.targetSchema;
-    const targetTable = (name: string): string => (target ? `${wrap(target)}.${wrap(name)}` : wrap(name));
-    const parts: string[] = [`-- Schema sync: ${sourceDb} → ${target ? wrap(target) : 'target'}`, ''];
+    const targetTable = (name: string): string => (target ? `${wrapSchema(target)}.${wrap(name)}` : wrap(name));
+    // 跨 schema：把默认表达式/类型名里的源 schema 前缀改写到目标 schema
+    // （如 nextval('s1.x_seq') → nextval('s2.x_seq')）。
+    const rewrite = (text: unknown): string => rewriteSchemaPrefix(toCompareString(text), opts.sourceSchema, target);
+    const parts: string[] = [
+      `-- Schema sync: ${sqlCommentSafe(sourceDb)} → ${target ? wrapSchema(target) : 'target'}`,
+      '-- NOTE: 仅生成表/列变更；不含主键/唯一/CHECK/外键/索引/视图/函数/序列。',
+      '--   新增 serial/自定义类型列不会自动在目标 schema 创建对应序列/类型，默认值可能失效。',
+      '',
+    ];
     for (const d of diffs) {
       const table = targetTable(d.tableName);
       if (d.status === 'added') {
-        const ddl = qualifyPgCreateDdl(
-          await sourceTableService.getCreateSql(d.tableName, sourceDb, opts.sourceSchema),
-          opts.sourceSchema,
-          wrap,
-          target,
-        );
+        // 表头直接生成到目标 schema（列仍按 sourceSchema 读取），不做脆弱的文本替换。
+        const ddl = await sourceTableService.getCreateSql(d.tableName, sourceDb, opts.sourceSchema, opts.targetSchema);
         parts.push(`-- Add table: ${d.tableName}`);
         parts.push(`DROP TABLE IF EXISTS ${table};`);
-        parts.push(ddl.replace(/;\s*$/, '') + ';');
+        parts.push(rewrite(ddl).replace(/;\s*$/, '') + ';');
         parts.push('');
       } else if (d.status === 'removed') {
         parts.push(`-- Drop table: ${d.tableName}`);
@@ -310,13 +316,13 @@ export class SchemaDiffService {
         const extra: string[] = [];
         for (const c of d.columns) {
           const col = wrap(c.columnName);
-          const type = validateColumnType(c.sourceType || 'text');
+          const type = validateColumnType(rewrite(c.sourceType) || 'text');
           if (c.status === 'added') {
             const spec: ColumnSpec = {
-              type: c.sourceType || 'text',
+              type: rewrite(c.sourceType) || 'text',
               notNull: c.sourceNotNull,
               autoIncrement: c.sourceAutoIncrement,
-              defaultValue: c.sourceDefault,
+              defaultValue: rewrite(c.sourceDefault),
               comment: c.sourceComment,
             };
             // PG 在有数据的表上加 NOT NULL 且无默认值会直接失败。
@@ -329,24 +335,26 @@ export class SchemaDiffService {
           } else if (c.status === 'removed') {
             actions.push(`DROP COLUMN ${col}`);
           } else if (c.status === 'changed') {
+            const srcType = rewrite(c.sourceType);
+            const tgtType = rewrite(c.targetType);
             const normalize = (t?: string) => String(t || '').trim().toLowerCase();
             const base = (t?: string) => normalize(t).split('(')[0].trim();
             // 完整类型（含长度/精度）不同就必须改类型：仅 `varchar(100) → varchar(255)`
             // 这类差异此前被 base() 抹平，diffColumns 判了 changed 却不生成任何动作。
-            if (normalize(c.targetType) !== normalize(c.sourceType)) {
+            if (normalize(tgtType) !== normalize(srcType)) {
               actions.push(`ALTER COLUMN ${col} TYPE ${type}`);
               // 仅基础类型不同才提示可能需要 USING/数据清理；纯长度/精度变化一般可安全转换。
-              if (base(c.targetType) && base(c.sourceType) && base(c.targetType) !== base(c.sourceType)) {
-                warnings.push(`-- WARN: type of "${c.columnName}" changes ${c.targetType} → ${c.sourceType}; may require USING / data cleanup.`);
+              if (base(tgtType) && base(srcType) && base(tgtType) !== base(srcType)) {
+                warnings.push(`-- WARN: type of "${c.columnName}" changes ${tgtType} → ${srcType}; may require USING / data cleanup.`);
               }
             }
             if (!!c.sourceNotNull !== !!c.targetNotNull) {
               actions.push(`ALTER COLUMN ${col} ${c.sourceNotNull ? 'SET' : 'DROP'} NOT NULL`);
             }
-            // 默认值差异：源为 PG，表达式原样可用；无默认值则 DROP。
+            // 默认值差异：源为 PG，表达式改写到目标 schema；无默认值则 DROP。
             if (normDefault(c.sourceDefault) !== normDefault(c.targetDefault)) {
               actions.push(normDefault(c.sourceDefault) !== ''
-                ? `ALTER COLUMN ${col} SET DEFAULT ${String(c.sourceDefault)}`
+                ? `ALTER COLUMN ${col} SET DEFAULT ${rewrite(c.sourceDefault)}`
                 : `ALTER COLUMN ${col} DROP DEFAULT`);
             }
             // 注释是独立语句，不能并入 ALTER TABLE 子命令列表。
@@ -383,7 +391,7 @@ export class SchemaDiffService {
     sourceDb: string,
   ): Promise<string> {
     const wrap = (id: string) => sourceTableService.wrapIdentifier(id);
-    const parts: string[] = [`-- Schema sync: ${sourceDb} → target (SQLite)`, ''];
+    const parts: string[] = [`-- Schema sync: ${sqlCommentSafe(sourceDb)} → target (SQLite)`, ''];
     for (const d of diffs) {
       const table = wrap(d.tableName);
       if (d.status === 'added') {
@@ -433,25 +441,33 @@ function hasNoDefault(spec: ColumnSpec): boolean {
   return spec.defaultValue === undefined || spec.defaultValue === null || spec.defaultValue === '';
 }
 
-/**
- * 把 PG 建表 DDL 的首个限定名改写到目标 schema（供同连接跨 schema 同步）。
- *
- * - 源 DDL 带源 schema 限定（`"src"."t"`）：替换首个 `"src".` 为 `"target".`；
- * - 源 DDL 未限定（`"t"`）：在 `CREATE TABLE` 后的首个标识符前加目标 schema；
- * - 无 `targetSchema`：原样返回（沿用 search_path 语义）。
- */
-function qualifyPgCreateDdl(
-  ddl: string,
-  sourceSchema: string | undefined,
-  wrap: (id: string) => string,
-  target: string | undefined,
-): string {
-  if (!target) return ddl;
-  if (sourceSchema && ddl.includes(`${wrap(sourceSchema)}.`)) {
-    return ddl.replace(`${wrap(sourceSchema)}.`, `${wrap(target)}.`);
+/** null/undefined → ''，其余 String()。 */
+function toCompareString(v: unknown): string {
+  return v === undefined || v === null ? '' : String(v);
+}
+
+/** 从文本移除给定 schema 的前缀（含 `"schema".` 形式），用于跨 schema 等价比较。 */
+function stripSchemaPrefixes(text: string, schemas: readonly (string | undefined)[]): string {
+  let s = text;
+  for (const sc of schemas) {
+    if (!sc) continue;
+    const quoted = `"${sc.replace(/"/g, '""')}"`;
+    s = s.split(`${quoted}.`).join('').split(`${sc}.`).join('');
   }
-  return ddl.replace(
-    /^(\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?)("(?:[^"]|"")*")/i,
-    `$1${wrap(target)}.$2`,
-  );
+  return s;
+}
+
+/** 跨 schema 比较归一化器：抹掉源/目标 schema 前缀；无 schema 时退化为普通字符串化。 */
+function makeSchemaNormalizer(sourceSchema?: string, targetSchema?: string): (v: unknown) => string {
+  if (!sourceSchema && !targetSchema) return toCompareString;
+  const schemas = [sourceSchema, targetSchema];
+  return (v: unknown) => stripSchemaPrefixes(toCompareString(v), schemas);
+}
+
+/** 把文本里的源 schema 前缀改写为目标 schema（含 `"schema".` 形式）。 */
+function rewriteSchemaPrefix(text: string, from?: string, to?: string): string {
+  if (!text || !from || !to || from === to) return text;
+  const fromQ = `"${from.replace(/"/g, '""')}"`;
+  const toQ = `"${to.replace(/"/g, '""')}"`;
+  return text.split(`${fromQ}.`).join(`${toQ}.`).split(`${from}.`).join(`${to}.`);
 }

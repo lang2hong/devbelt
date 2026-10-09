@@ -132,10 +132,10 @@ export class TableService {
     return this.ddl(`INSERT INTO ${target} SELECT * FROM ${source}`);
   }
 
-  /** 查询建表语句（各方言实现不同，返回首行首列） */
-  async getCreateSql(table: string, database?: string, schema?: string): Promise<string> {
+  /** 查询建表语句（各方言实现不同，返回首行首列）。`targetSchema` 仅 PG：DDL 表头写到目标 schema（列仍读自 `schema`）。 */
+  async getCreateSql(table: string, database?: string, schema?: string, targetSchema?: string): Promise<string> {
     this.require('getTableDefinition');
-    const sql = this.getCreateSqlForDialect(table, database, schema);
+    const sql = this.getCreateSqlForDialect(table, database, schema, targetSchema);
     const result = await this.queryService.query(sql);
     const row = result.rows[0] as Record<string, any> | undefined;
     if (!row) return '';
@@ -594,6 +594,11 @@ export class TableService {
     return this.wrap(validateIdent(identifier));
   }
 
+  /** 包裹 **schema** 标识符：用放宽后的 `validateSchemaIdent`（允许空格/`.`/`"` 等），引用仍安全。 */
+  wrapSchemaIdentifier(identifier: string): string {
+    return this.wrap(validateSchemaIdent(identifier));
+  }
+
   private require(operation: DatabaseOperation): void {
     if (!this.supports(operation)) {
       throw new Error(unsupportedOperationMessage(this.queryService.dialect.dbType, operation));
@@ -632,7 +637,7 @@ export class TableService {
   }
 
   /** 按方言生成查询建表语句的 SQL */
-  private getCreateSqlForDialect(table: string, database?: string, schema?: string): string {
+  private getCreateSqlForDialect(table: string, database?: string, schema?: string, targetSchema?: string): string {
     const dbType = this.queryService.dialect.dbType;
     const qualified = this.wrapQualified(table, database, schema);
     switch (dbType) {
@@ -660,15 +665,19 @@ export class TableService {
          *    对象的列混在一起；而 string_agg 不保证输入顺序，不排序时生成的
          *    DDL 列顺序随机 —— 拿它去别处建表，按位置赋值的 INSERT 就错列。
          */
-        // B1b：显式 schema 用**字符串字面量**（validateIdent + 单引号转义）；未给回退
+        // B1b：显式 schema 用**字符串字面量**（方言 escapeValue，scs 安全）；未给回退
         // current_schema()。注意不能复用 this.wrap(schema)：双引号是标识符语法，
         // `quote_literal("x")` 会被解析成"名为 x 的列"，正是本节要修的缺陷。
-        const schemaExpr = schema ? `'${validateSchemaIdent(schema, 63).replace(/'/g, "''")}'` : 'current_schema()';
+        const schemaExpr = schema ? this.esc(validateSchemaIdent(schema, 63)) : 'current_schema()';
         // B5：未显式给 schema 时建表 DDL **不加** schema 限定（交 search_path），避免把
         // 当前 schema 名写死进 dump/「查看建表 SQL」，导致恢复到别的 schema 时写错目标。
-        const tableExpr = schema
-          ? `quote_ident(n.nspname) || '.' || quote_ident(c.relname)`
-          : `quote_ident(c.relname)`;
+        // 跨 schema 同步（targetSchema）：表头写成目标 schema（quote_ident 用字面量），
+        // 列仍按 `schema` 过滤读取；不做脆弱的 DDL 文本替换。
+        const tableExpr = targetSchema
+          ? `quote_ident(${this.esc(validateSchemaIdent(targetSchema, 63))}) || '.' || quote_ident(c.relname)`
+          : schema
+            ? `quote_ident(n.nspname) || '.' || quote_ident(c.relname)`
+            : `quote_ident(c.relname)`;
         const groupBy = schema ? 'n.nspname, c.relname' : 'c.relname';
         return `SELECT
             'CREATE TABLE ' || ${tableExpr} || ' (' || chr(10) ||

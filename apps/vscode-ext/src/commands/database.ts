@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { SchemaDiffService, BackupService, DataTransferService, DatabaseType, validateIdent, validateSchemaIdent } from '@devbelt/db-core';
 import { DbTreeNode } from '../tree/dbTreeNode';
-import { isTxControlStatement } from '@devbelt/db-core/sql';
+import { isTxControlStatement, sqlCommentSafe } from '@devbelt/db-core/sql';
 import { wrapIdentForConn, splitSqlStatements, streamSqlStatements, pgSchemaFor, mysqlUseStatement } from '../utils/sql';
 import { confirmSqlExecution, ensureWritable } from '../utils/sqlSafety';
 import { parseCsv, readCsvSample, streamCsvRows } from '../data/transfer/csv';
@@ -208,8 +208,8 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     // PG 连接绑定单个数据库（无 USE），同一连接上的「另一个库」取不到其元数据：
     // 改为在同一连接上对比两个 **schema**（PG 的等价维度），跨库对比仍不支持。
     if (node.conn.dbType === DatabaseType.PG) {
-      const sourceSchema = pgSchemaFor(node.conn, node.schema)
-        ?? ((node.conn.schema && node.conn.schema.trim()) || 'public');
+      const sourceSchema = pgSchemaFor(node.conn, node.schema);
+      if (!sourceSchema) { vscode.window.showWarningMessage(l10n('schema.pickSchemaNode')); return; }
       const schemas = (await session.metadata.getSchemas()).filter((s) => s !== sourceSchema);
       if (!schemas.length) {
         vscode.window.showWarningMessage(l10n('compare.noOtherSchemas'));
@@ -231,7 +231,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
       const pgAdded = diffs.filter((d) => d.status === 'added').length;
       const pgRemoved = diffs.filter((d) => d.status === 'removed').length;
       const pgChanged = diffs.filter((d) => d.status === 'changed').length;
-      const pgHeader = `-- Diff: ${sourceSchema} -> ${target.value} (${pgAdded} added, ${pgRemoved} removed, ${pgChanged} changed)\n\n`;
+      const pgHeader = `-- Diff: ${sqlCommentSafe(sourceSchema)} -> ${sqlCommentSafe(target.value)} (${pgAdded} added, ${pgRemoved} removed, ${pgChanged} changed)\n\n`;
       await openSqlDoc(pgHeader + syncSql);
       return;
     }
@@ -251,7 +251,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     const added = diffs.filter((d) => d.status === 'added').length;
     const removed = diffs.filter((d) => d.status === 'removed').length;
     const changed = diffs.filter((d) => d.status === 'changed').length;
-    const header = `-- Diff: ${node.database} -> ${target.value} (${added} added, ${removed} removed, ${changed} changed)\n\n`;
+    const header = `-- Diff: ${sqlCommentSafe(node.database)} -> ${sqlCommentSafe(target.value)} (${added} added, ${removed} removed, ${changed} changed)\n\n`;
     await openSqlDoc(header + syncSql);
   });
 
@@ -261,8 +261,8 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     // PG 连接绑定单库：改为在同一连接上把一个 **schema** 的结构+数据同步到另一个 schema。
     if (node.conn.dbType === DatabaseType.PG) {
       const pgSession = await manager.connectSql(node.conn, node.database);
-      const sourceSchema = pgSchemaFor(node.conn, node.schema)
-        ?? ((node.conn.schema && node.conn.schema.trim()) || 'public');
+      const sourceSchema = pgSchemaFor(node.conn, node.schema);
+      if (!sourceSchema) { vscode.window.showWarningMessage(l10n('schema.pickSchemaNode')); return; }
       const schemas = (await pgSession.metadata.getSchemas()).filter((s) => s !== sourceSchema);
       if (!schemas.length) {
         vscode.window.showWarningMessage(l10n('compare.noOtherSchemas'));
@@ -289,16 +289,31 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
       await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: l10n('sync.progressTitle'), cancellable: true },
         async (progress, token) => {
-          const pgResult = await DataTransferService.transferDatabase(
-            pgSession.query, pgSession.metadata, pgSession.table, node.database!,
-            pgSession.query, pgSession.metadata, node.database!,
-            {
-              onProgress: (p: { table: string; phase: string }) => progress.report({ message: `${p.table} (${p.phase})` }),
-              isCancelled: () => token.isCancellationRequested,
-              sourceSchema,
-              targetSchema: target.value,
-            },
-          );
+          // PG 支持事务性 DDL/DML：整次同步包在一个事务里，任一步失败则整体回滚，
+          // 避免中途失败/取消留下同步了一半的状态。
+          const q = pgSession.query;
+          await q.query('BEGIN', undefined, { skipHistory: true });
+          let pgResult: Awaited<ReturnType<typeof DataTransferService.transferDatabase>>;
+          try {
+            pgResult = await DataTransferService.transferDatabase(
+              q, pgSession.metadata, pgSession.table, node.database!,
+              q, pgSession.metadata, node.database!,
+              {
+                onProgress: (p: { table: string; phase: string }) => progress.report({ message: `${p.table} (${p.phase})` }),
+                isCancelled: () => token.isCancellationRequested,
+                sourceSchema,
+                targetSchema: target.value,
+              },
+            );
+            if (pgResult.errors.length) {
+              await q.query('ROLLBACK', undefined, { skipHistory: true });
+            } else {
+              await q.query('COMMIT', undefined, { skipHistory: true });
+            }
+          } catch (err) {
+            try { await q.query('ROLLBACK', undefined, { skipHistory: true }); } catch { /* 已断开 */ }
+            throw err;
+          }
           if (pgResult.errors.length) {
             vscode.window.showWarningMessage(
               l10n('sync.doneErrors', { errors: pgResult.errors.length, count: pgResult.tablesSynced }),
@@ -315,6 +330,13 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
             }),
             node.database!,
           );
+          AuditLogger.tryLog({
+            action: 'schema_change',
+            connName: node.conn!.name || node.conn!.host,
+            database: node.database!,
+            schema: sourceSchema,
+            sql: `schema sync ${sourceSchema} -> ${target.value} (${pgResult.tablesSynced} tables, ${pgResult.errors.length} errors)`,
+          });
           treeProvider.refresh();
         },
       );

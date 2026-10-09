@@ -146,8 +146,8 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
       // PG 连接绑定单个数据库（无 USE）：改为在同一连接上对比两个 **schema** 的数据。
       if (node.conn.dbType === 'PG') {
         const session = await manager.connectSql(node.conn, node.database);
-        const sourceSchema = pgSchemaFor(node.conn, node.schema)
-          ?? ((node.conn.schema && node.conn.schema.trim()) || 'public');
+        const sourceSchema = pgSchemaFor(node.conn, node.schema);
+        if (!sourceSchema) { vscode.window.showWarningMessage(l10n('schema.pickSchemaNode')); return; }
         const schemas = (await session.metadata.getSchemas()).filter((s) => s !== sourceSchema);
         if (!schemas.length) {
           vscode.window.showWarningMessage(l10n('compare.noOtherSchemas'));

@@ -69,17 +69,9 @@ export class PostgreSqlConnection extends IConnection {
         : config.socketPath;
     }
 
-    // PG 的 schema 通过启动参数 search_path 生效；旧实现完全忽略 config.schema，
-    // 用户在表单里设的 schema 从未起作用。
-    // schema 名经 validateSchemaIdent（拒绝控制字符）后按标识符规则加双引号
-    // （内嵌 `"` 翻倍），使含空格/`.`/`"` 的合法 schema 也能生效；校验失败则忽略、退回默认。
-    if (config.schema) {
-      try {
-        const quoted = `"${validateSchemaIdent(config.schema).replace(/"/g, '""')}"`;
-        const opt = `-c search_path=${quoted}`;
-        conf.options = conf.options ? `${conf.options} ${opt}` : opt;
-      } catch { /* 非法 schema（含控制字符）：忽略，退回服务端默认 search_path */ }
-    }
+    // PG 的 schema 不在启动参数里设置：`options="-c search_path=..."` 由服务端按空白
+    // 分词、只认反斜杠转义，双引号无意义，含空格的 schema 会让连接 FATAL，且可被注入
+    // 额外 `-c`。改为连接成功后执行 `SET search_path TO <带引号标识符>`（见 connect）。
 
     // 时区：pg 无独立字段，用启动参数 `-c TimeZone=`。旧实现忽略 config.timezone。
     // 只接受时区名安全字符，避免注入 options 串。
@@ -199,6 +191,15 @@ export class PostgreSqlConnection extends IConnection {
     this.client.connect((err: any) => {
       if (err) { callback(err); return; }
       this.connected = true;
+      // schema → `SET search_path TO <带引号标识符>`（标准标识符引用，scs 无关；
+      // 含空格/`.`/`"` 的合法 schema 也能生效）。非法 schema（控制字符）忽略，退回默认。
+      if (this.config.schema) {
+        try {
+          const wrapped = `"${validateSchemaIdent(this.config.schema).replace(/"/g, '""')}"`;
+          this.client.query(`SET search_path TO ${wrapped}`, (e: any) => callback(e ?? null));
+          return;
+        } catch { /* 非法 schema：退回服务端默认 search_path */ }
+      }
       callback(null);
     });
   }

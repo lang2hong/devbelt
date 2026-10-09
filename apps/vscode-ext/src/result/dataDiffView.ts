@@ -55,7 +55,7 @@ export class DataDiffView extends BaseWebView {
     if (msg.type === 'applySync') {
       try {
         const diff = await this.computeDiff();
-        const session = await this.manager.connectSql(this.targetConn);
+        const session = await this.manager.connectSql(this.targetConn, this.targetDb);
         const sql = DataDiffService.generateSyncSql(diff, this.targetDb, session.query, this.targetSchema);
         // 破坏性 DML：先经只读/生产/高危确认门禁，再执行并审计。
         if (!(await confirmSqlExecution(this.targetConn, sql, this.manager.scanOptionsFor?.(this.targetConn), { database: this.targetDb, schema: this.targetSchema }))) {
@@ -68,6 +68,7 @@ export class DataDiffView extends BaseWebView {
           action: 'data_sync',
           connName: this.targetConn.name || this.targetConn.host,
           database: this.targetDb,
+          schema: this.targetSchema,
           sql,
           costTime: Date.now() - started,
         });
@@ -81,8 +82,8 @@ export class DataDiffView extends BaseWebView {
   }
 
   private async computeDiff(): Promise<DataDiffResult> {
-    const sourceSession = await this.manager.connectSql(this.sourceConn);
-    const targetSession = await this.manager.connectSql(this.targetConn);
+    const sourceSession = await this.manager.connectSql(this.sourceConn, this.sourceDb);
+    const targetSession = await this.manager.connectSql(this.targetConn, this.targetDb);
     return DataDiffService.diff(
       sourceSession.query, sourceSession.metadata, this.sourceDb,
       targetSession.query, this.targetDb,
