@@ -16,6 +16,12 @@ const IDENT_RE = /^[\p{L}_$][\p{L}\p{N}_$\-]*$/u;
 /** 默认最大长度 64（MySQL 限制）；PostgreSQL 上限为 63（NAMEDATALEN-1）。 */
 const MAX_LEN = 64;
 
+/**
+ * schema 名不允许的字符：C0+C1+DEL（\p{Cc}）、零宽/双向（\p{Cf}）、行/段分隔（U+2028/2029）。
+ * 与 `getSchemas` 过滤共用，避免两处口径漂移。
+ */
+export const SCHEMA_INVALID_CHARS_RE = /[\p{Cc}\p{Cf}\u2028\u2029]/u;
+
 export function validateIdent(name: string, maxLen: number = MAX_LEN): string {
   if (!name || !IDENT_RE.test(name) || name.includes('--')) {
     throw new Error(`Invalid SQL identifier: "${name}"`);
@@ -38,9 +44,8 @@ export function validateIdent(name: string, maxLen: number = MAX_LEN): string {
  * 单引号翻倍的字符串字面量，绝不能裸拼。
  */
 export function validateSchemaIdent(name: string, maxLen: number = 63): string {
-  // 拒绝控制/格式字符：C0+C1+DEL（\p{Cc}）、零宽/双向（\p{Cf}）、行/段分隔（U+2028/2029）——
-  // 它们能伪装确认框/审计里显示的 schema 名，或破坏引用。
-  if (!name || /[\p{Cc}\p{Cf}\u2028\u2029]/u.test(name)) {
+  // 拒绝控制/格式字符（与 getSchemas 过滤共用同一正则）：C0+C1+DEL、零宽/双向、行/段分隔。
+  if (!name || SCHEMA_INVALID_CHARS_RE.test(name)) {
     throw new Error(`Invalid SQL schema identifier: "${String(name).slice(0, 20)}..."`);
   }
   // PG 的标识符上限是 **63 字节**（NAMEDATALEN-1），不是 63 个 UTF-16 码元。

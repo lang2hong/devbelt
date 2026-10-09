@@ -533,15 +533,25 @@ describe('SchemaDiffService', () => {
       status: 'changed' as const,
       columns: [
         { columnName: 'url', status: 'added' as const, sourceType: 'text', sourceDefault: "'app.example.com'::text" },
+        { columnName: 'note', status: 'added' as const, sourceType: 'text', sourceDefault: "'see app.example.com'::text" },
         { columnName: 'id', status: 'added' as const, sourceType: 'app.myenum', sourceDefault: "nextval('app.t_id_seq'::regclass)" },
+        { columnName: 'serial2', status: 'added' as const, sourceType: 'integer', sourceDefault: "nextval('t_id_seq'::regclass)" },
       ],
     }];
     const sql = await SchemaDiffService.generateSyncSql(diffs, 'db', tableService, 'db', undefined, { sourceSchema: 'app', targetSchema: 'staging' });
-    // 字符串字面量里的 app. 不改。
+    // 字符串字面量里的 app. 不改（含句中出现的）。
     expect(sql).toContain("'app.example.com'::text");
+    expect(sql).toContain("'see app.example.com'::text");
     expect(sql).not.toContain("'staging.example.com'");
-    // regclass 与类型名（标识符上下文）改写。
+    // regclass 与类型名（标识符上下文）改写；未限定的 nextval 视为源 schema 对象，补目标 schema。
     expect(sql).toContain("nextval('staging.t_id_seq'::regclass)");
     expect(sql).toContain('staging.myenum');
+  });
+
+  it('PG 跨 schema：仅差 schema 的 enum 默认值（::类型）判为 unchanged', async () => {
+    const source = mockMetaService(['t'], { t: [{ name: 'c', type: 'text', defaultValue: "'x'::app.myenum" } as any] });
+    const target = mockMetaService(['t'], { t: [{ name: 'c', type: 'text', defaultValue: "'x'::staging.myenum" } as any] });
+    const diffs = await SchemaDiffService.diff(source, 'db', target, 'db', 'app', 'staging');
+    expect(diffs.find((d) => d.tableName === 't')!.status).toBe('unchanged');
   });
 });

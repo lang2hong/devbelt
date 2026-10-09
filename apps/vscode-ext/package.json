@@ -1391,7 +1391,7 @@
         },
         {
           "command": "devbelt.syncDatabase",
-          "when": "view == devbelt.explorer && viewItem =~ /^schema\\.PG$/",
+          "when": "view == devbelt.explorer && viewItem =~ /^schema\\.PG$/ && config.devbelt.pg.syncEnabled",
           "group": "4_data"
         },
         {
@@ -2009,8 +2009,8 @@
         "devbelt.pg.syncEnabled": {
           "type": "boolean",
           "default": false,
-          "description": "Temporarily OFF: PostgreSQL cross-schema data+structure sync (syncDatabase). The sync transaction currently runs on a shared session and serial/sequence handling is incomplete; enable only for testing.",
-          "markdownDescription": "临时关闭：PostgreSQL 跨 schema 数据+结构同步（syncDatabase）。当前同步事务跑在共享会话上、且 serial/序列处理不完整，仅测试时开启。"
+          "description": "PostgreSQL cross-schema data + structure sync (syncDatabase). Experimental.",
+          "markdownDescription": "PostgreSQL 跨 schema 数据+结构同步（syncDatabase）。实验功能。"
         }
       }
     },

@@ -464,6 +464,36 @@ function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * 对字符串字面量（`'...'`，含 `''` 转义）**之外**的片段应用 `transform`，
+ * 字面量原样保留。用于避免把字面量内的 `app.` 当成 schema 限定改写。
+ */
+function rewriteOutsideLiterals(text: string, transform: (segment: string) => string): string {
+  let out = '';
+  let buf = '';
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === "'") {
+      out += transform(buf);
+      buf = '';
+      let lit = "'";
+      i++;
+      while (i < text.length) {
+        if (text[i] === "'") {
+          if (text[i + 1] === "'") { lit += "''"; i += 2; continue; }
+          lit += "'"; i++;
+          break;
+        }
+        lit += text[i]; i++;
+      }
+      out += lit;
+      continue;
+    }
+    buf += text[i]; i++;
+  }
+  return out + transform(buf);
+}
+
 /** 字面量内 `schema.seq` / `"schema".seq` / `"schema"."seq"` → 去掉 schema 限定。 */
 function stripSchemaInLiteral(lit: string, schemas: readonly (string | undefined)[]): string {
   for (const sc of schemas) {
@@ -481,49 +511,56 @@ function stripRegclassSchema(text: string, schemas: readonly (string | undefined
 }
 
 /**
- * 仅去掉**标识符上下文**里的 schema 限定（类型名），前置字符不得是 `[\w$"']`，
- * 从而跳过 `'app.example.com'` 之类字符串字面量与已带引号的标识符。
+ * 去掉**标识符上下文**里的 schema 限定（类型名如 `app.myenum`）：仅在字符串字面量之外，
+ * 且前置字符非 `[\w$"']` 时匹配。字面量内的 `app.` 完全不动。
  */
 function stripIdentifierSchema(text: string, schemas: readonly (string | undefined)[]): string {
-  let s = text;
   const boundary = '(?<![\\w$"\'])';
-  for (const sc of schemas) {
-    if (!sc) continue;
-    const q = `"${sc.replace(/"/g, '""')}"`;
-    s = s.replace(new RegExp(`${boundary}${escapeRe(q)}\\.`, 'g'), '');
-    s = s.replace(new RegExp(`${boundary}${escapeRe(sc)}\\.`, 'g'), '');
-  }
-  return s;
+  const patterns = schemas
+    .filter((sc): sc is string => !!sc)
+    .flatMap((sc) => [`"${sc.replace(/"/g, '""')}"`, sc])
+    .map((p) => new RegExp(`${boundary}${escapeRe(p)}\\.`, 'g'));
+  return rewriteOutsideLiterals(text, (seg) => {
+    let s = seg;
+    for (const re of patterns) s = s.replace(re, '');
+    return s;
+  });
 }
 
-/** 字段感知的跨 schema 比较归一化器：类型抹标识符限定，默认值只抹 regclass 字面量，注释原样。 */
+/** 字段感知的跨 schema 比较归一化器：类型/默认值按定向形态归一，注释原样。 */
 function makeSchemaNormalizers(sourceSchema?: string, targetSchema?: string): ColumnNormalizers {
   if (!sourceSchema && !targetSchema) return plainNormalizers();
   const schemas = [sourceSchema, targetSchema];
   return {
     type: (v) => stripIdentifierSchema(toCompareString(v), schemas),
-    default: (v) => normDefault(stripRegclassSchema(toCompareString(v), schemas)),
+    // 默认值：先剥 nextval 字面量里的 schema，再剥 `::类型` 的标识符限定（enum/domain 跨 schema 等价）。
+    default: (v) => normDefault(stripIdentifierSchema(stripRegclassSchema(toCompareString(v), schemas), schemas)),
     comment: (v) => normComment(toCompareString(v)),
   };
 }
 
 /**
  * 把已知形态里的源 schema 前缀改写为目标 schema：
- * `nextval('<from>.<seq>'::regclass)` 字面量 + 标识符上下文的类型名限定。
- * 不做无边界子串替换，避免误改 `'app.example.com'` 等字面量。
+ * - `nextval('<from>.<seq>'::regclass)` 字面量（带 schema → 改写；**未带 schema → 视为源 schema 对象，补目标 schema**）；
+ * - 字符串字面量之外的标识符上下文类型名限定。
+ * 不做无边界子串替换，避免误改 `'see app.example.com'` 等字面量。
  */
 function rewritePgSchemaRefs(text: string, from?: string, to?: string): string {
   if (!text || !from || !to || from === to) return text;
   const fromQ = `"${from.replace(/"/g, '""')}"`;
   const toQ = `"${to.replace(/"/g, '""')}"`;
-  let s = text.replace(/nextval\('([^']*)'::regclass\)/g, (_m, lit: string) => {
+  const s = text.replace(/nextval\('([^']*)'::regclass\)/g, (_m, lit: string) => {
     let l = lit;
     if (l.startsWith(`${fromQ}.`)) l = `${toQ}.${l.slice(fromQ.length + 1)}`;
     else if (l.startsWith(`${from}.`)) l = `${to}.${l.slice(from.length + 1)}`;
+    else if (!l.includes('.')) l = `${to}.${l}`; // 未限定（源 schema 在 search_path 时的输出）→ 补目标 schema
     return `nextval('${l}'::regclass)`;
   });
   const boundary = '(?<![\\w$"\'])';
-  s = s.replace(new RegExp(`${boundary}${escapeRe(fromQ)}\\.`, 'g'), `${toQ}.`);
-  s = s.replace(new RegExp(`${boundary}${escapeRe(from)}\\.`, 'g'), `${to}.`);
-  return s;
+  const fromPats = [fromQ, from].map((p) => new RegExp(`${boundary}${escapeRe(p)}\\.`, 'g'));
+  return rewriteOutsideLiterals(s, (seg) => {
+    let out = seg;
+    fromPats.forEach((re, idx) => { out = out.replace(re, idx === 0 ? `${toQ}.` : `${to}.`); });
+    return out;
+  });
 }

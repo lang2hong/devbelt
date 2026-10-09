@@ -251,7 +251,7 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     const added = diffs.filter((d) => d.status === 'added').length;
     const removed = diffs.filter((d) => d.status === 'removed').length;
     const changed = diffs.filter((d) => d.status === 'changed').length;
-    const header = `${l10n('compare.syncScopeNote')}\n\n-- Diff: ${sqlCommentSafe(node.database)} -> ${sqlCommentSafe(target.value)} (${added} added, ${removed} removed, ${changed} changed)\n\n`;
+    const header = `-- Diff: ${sqlCommentSafe(node.database)} -> ${sqlCommentSafe(target.value)} (${added} added, ${removed} removed, ${changed} changed)\n\n`;
     await openSqlDoc(header + syncSql);
   });
 

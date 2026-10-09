@@ -1,5 +1,6 @@
 import { QueryService } from './queryService.js';
 import { normalizeColumnMeta } from './normalize.js';
+import { SCHEMA_INVALID_CHARS_RE } from '../utils/validate.js';
 import type { ColumnMeta, TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta } from '../types/meta.js';
 
 /**
@@ -31,9 +32,9 @@ export class MetadataService {
     return result.rows
       .map((row: any) => String(row.name ?? row.schema ?? row.nspname))
       .filter((x: string) => !!x)
-      // 过滤含格式/分隔字符（零宽、双向、U+2028/2029）的 schema 名：列出也无法操作
-      // （validateSchemaIdent 会拒绝），避免「能列出、一展开就报错」。
-      .filter((x: string) => !/[\p{Cf}\u2028\u2029]/u.test(x));
+      // 过滤含控制/格式字符的 schema 名：列出也无法操作（validateSchemaIdent 会拒绝），
+      // 避免「能列出、一展开就报错」。正则与 validateSchemaIdent 共用。
+      .filter((x: string) => !SCHEMA_INVALID_CHARS_RE.test(x));
   }
 
   /** 查询表列表 */
