@@ -343,11 +343,12 @@ if (d.status === 'added') {
         // 表头直接生成到目标 schema（列仍按 sourceSchema 读取），不做脆弱的文本替换。
         const ddl = rewrite(await sourceTableService.getCreateSql(d.tableName, sourceDb, opts.sourceSchema, opts.targetSchema));
         parts.push(`-- Add table: ${d.tableName}`);
-        // N2（部分）：serial 默认值引用的目标序列不存在时 CREATE TABLE 会因 regclass 解析失败；
-        // 先建序列（空序列；值推进 setval 未处理，见范围说明）。
+        // N2：serial 默认值引用的目标序列不存在时 CREATE TABLE 会因 regclass 解析失败；先建序列。
         for (const q of new Set(extractNextvalSequences(ddl))) parts.push(`CREATE SEQUENCE IF NOT EXISTS ${q};`);
         parts.push(`DROP TABLE IF EXISTS ${table};`);
         parts.push(ddl.replace(/;\s*$/, '') + ';');
+        // 把序列绑定到列（OWNED BY）：删除表/列时序列随之回收。
+        for (const [q, col] of parseSequenceOwners(ddl)) parts.push(`ALTER SEQUENCE ${q} OWNED BY ${table}.${wrap(col)};`);
         parts.push('');
       } else if (d.status === 'removed') {
         parts.push(`-- Drop table: ${d.tableName}`);
@@ -511,6 +512,17 @@ function toCompareString(v: unknown): string {
 function extractNextvalSequences(text: string): string[] {
   const out: string[] = [];
   for (const m of text.matchAll(/nextval\('([^']+)'::regclass\)/g)) out.push(m[1]);
+  return out;
+}
+
+/** 从建表 DDL 解析「序列名 → 拥有它的列」映射（列行首为带引号的列名 + DEFAULT nextval）。 */
+function parseSequenceOwners(ddl: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const line of ddl.split('\n')) {
+    const col = /^\s*"((?:[^"]|"")*)"/.exec(line)?.[1];
+    const seq = /DEFAULT nextval\('([^']+)'::regclass\)/.exec(line)?.[1];
+    if (col && seq) out.set(seq, col.replace(/""/g, '"'));
+  }
   return out;
 }
 

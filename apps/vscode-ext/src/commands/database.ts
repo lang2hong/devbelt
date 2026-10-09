@@ -320,6 +320,24 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
               if (pgResult.errors.length) {
                 await q.query('ROLLBACK', undefined, { skipHistory: true });
               } else {
+                // N2：数据导入后把目标 schema 内「带 OWNED BY 的序列」推进到所属列的最大值，
+                // 避免后续 INSERT 主键冲突。按 schema 逐序列处理，无需逐表映射。
+                const targetLit = q.dialect.escapeValue(target.value);
+                await q.query(`DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN
+    SELECT s.oid AS seq, ns.nspname AS ssch, s.relname AS sname, t.relname AS tname, a.attname AS col
+      FROM pg_class s
+      JOIN pg_depend d ON d.objid = s.oid AND d.deptype IN ('a','i')
+      JOIN pg_class t ON t.oid = d.refobjid
+      JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = d.refobjsubid
+      JOIN pg_namespace ns ON ns.oid = s.relnamespace
+     WHERE s.relkind = 'S' AND ns.nspname = ${targetLit}
+  LOOP
+    EXECUTE format('SELECT setval(%L, GREATEST((SELECT COALESCE(max(%I), 0) FROM %I.%I), 1), true)', r.seq, r.col, r.ssch, r.tname);
+  END LOOP;
+END $$;`, undefined, { skipHistory: true });
                 await q.query('COMMIT', undefined, { skipHistory: true });
               }
             } catch (err) {

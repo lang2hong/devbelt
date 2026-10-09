@@ -754,7 +754,7 @@ export const zh: MessageCatalog = {
   'compare.chooseDatabase': '将 "{database}" 与哪个数据库对比？',
   'compare.noOtherSchemas': '没有其他 schema 可供对比。',
   'compare.chooseSchema': '将 "{schema}" 与哪个 schema 对比？',
-  'compare.syncScopeNote': '-- 说明：对比覆盖表/列/主键/唯一/CHECK/外键；不含索引/视图/函数/触发器；serial 序列会创建但不推进取值，自定义类型不创建。',
+  'compare.syncScopeNote': '-- 说明：覆盖 表/列/主键/唯一/CHECK/外键；不含 索引/视图/函数/触发器；serial 序列会创建并推进取值，自定义类型不创建。',
   'schema.pickSchemaNode': 'PostgreSQL 请在具体 schema 节点上执行（跨 schema 对比/同步）。',
   'compare.chooseData': '将 "{database}" 的数据与哪个数据库对比？',
   'sync.noOtherConnections': '没有其他连接可供同步。',

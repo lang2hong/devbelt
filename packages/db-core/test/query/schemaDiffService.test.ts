@@ -600,3 +600,21 @@ describe('SchemaDiffService 约束（P3b）', () => {
     expect(sql).toContain('ALTER TABLE "staging"."t" DROP CONSTRAINT IF EXISTS "old_ck";');
   });
 });
+
+describe('SchemaDiffService 序列（P3b/N2）', () => {
+  it('新增含 serial 列的表：生成 CREATE SEQUENCE + OWNED BY', async () => {
+    const pg = new PostgreSqlDialect();
+    const tableService = {
+      dbType: DatabaseType.PG,
+      wrapIdentifier: (id: string) => pg.wrap(id),
+      wrapSchemaIdentifier: (id: string) => pg.wrap(id),
+      getCreateSql: async (_t: string, _db?: string, _schema?: string, targetSchema?: string) =>
+        `CREATE TABLE ${pg.wrap(String(targetSchema))}.${pg.wrap('t')} (\n  "id" integer DEFAULT nextval('${String(targetSchema)}.t_id_seq'::regclass) NOT NULL\n)`,
+      supports: () => true,
+    } as unknown as TableService;
+    const diffs = [{ tableName: 't', status: 'added' as const, columns: [] }];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'db', tableService, 'db', undefined, { sourceSchema: 's', targetSchema: 'staging' });
+    expect(sql).toContain('CREATE SEQUENCE IF NOT EXISTS staging.t_id_seq;');
+    expect(sql).toContain('ALTER SEQUENCE staging.t_id_seq OWNED BY "staging"."t"."id";');
+  });
+});
