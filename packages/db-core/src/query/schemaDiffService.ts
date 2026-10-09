@@ -1,6 +1,7 @@
 import type { MetadataService } from './metadataService.js';
 import type { TableService } from './tableService.js';
 import type { ColumnMeta } from '../types/meta.js';
+import type { ConstraintMeta } from '../types/meta.js';
 import { validateIdent } from '../utils/validate.js';
 import { validateColumnType } from './columnSpec.js';
 import type { ColumnSpec } from './columnSpec.js';
@@ -53,6 +54,17 @@ export interface TableDiff {
   tableName: string;
   status: 'added' | 'removed' | 'changed' | 'unchanged';
   columns: ColumnDiff[];
+  /** 表级约束差异（PG：PK/UNIQUE/CHECK/FK）；不支持的方言为 undefined。 */
+  constraints?: ConstraintDiff[];
+}
+
+/** 约束差异（按约束名比对，定义由数据库规范化）。 */
+export interface ConstraintDiff {
+  name: string;
+  type: string;
+  status: 'added' | 'removed' | 'changed';
+  /** 源侧定义（added/changed 时用于生成 ADD CONSTRAINT）。 */
+  definition?: string;
 }
 
 /** 字段感知的跨 schema 比较归一化器（类型/默认值/注释分别处理）。 */
@@ -92,13 +104,35 @@ export class SchemaDiffService {
 
     const sourceNames = new Set(sourceTables.map((t) => t.name));
     const targetNames = new Set(targetTables.map((t) => t.name));
+    const schemas = [sourceSchema, targetSchema];
     const result: TableDiff[] = [];
 
-    // 源库有、目标无 → added
     for (const t of sourceTables) {
+      const srcCons = typeof sourceMeta.getConstraints === 'function' ? await sourceMeta.getConstraints(t.name, sourceSchema) : [];
+      // 源库有、目标无 → added（连同其约束一并带上）
       if (!targetNames.has(t.name)) {
-        result.push({ tableName: t.name, status: 'added', columns: [] });
+        result.push({
+          tableName: t.name,
+          status: 'added',
+          columns: [],
+          constraints: srcCons.map((c) => ({ name: c.name, type: c.type, status: 'added' as const, definition: c.definition })),
+        });
+        continue;
       }
+      // 都有 → 比较 columns + constraints
+      const [sourceCols, targetCols] = await Promise.all([
+        sourceMeta.getColumns(t.name, sourceDb, sourceSchema),
+        targetMeta.getColumns(t.name, targetDb, targetSchema),
+      ]);
+      const colDiffs = this.diffColumns(sourceCols, targetCols, makeSchemaNormalizers(sourceSchema, targetSchema));
+      const tgtCons = typeof targetMeta.getConstraints === 'function' ? await targetMeta.getConstraints(t.name, targetSchema) : [];
+      const constraints = this.diffConstraints(srcCons, tgtCons, schemas);
+      result.push({
+        tableName: t.name,
+        status: (colDiffs.some((c) => c.status !== 'unchanged') || constraints.length > 0) ? 'changed' : 'unchanged',
+        columns: colDiffs,
+        constraints,
+      });
     }
     // 目标有、源库无 → removed
     for (const t of targetTables) {
@@ -106,22 +140,23 @@ export class SchemaDiffService {
         result.push({ tableName: t.name, status: 'removed', columns: [] });
       }
     }
-    // 都有 → 比较 columns
-    for (const t of sourceTables) {
-      if (!targetNames.has(t.name)) continue;
-      const [sourceCols, targetCols] = await Promise.all([
-        sourceMeta.getColumns(t.name, sourceDb, sourceSchema),
-        targetMeta.getColumns(t.name, targetDb, targetSchema),
-      ]);
-      const colDiffs = this.diffColumns(sourceCols, targetCols, makeSchemaNormalizers(sourceSchema, targetSchema));
-      result.push({
-        tableName: t.name,
-        status: colDiffs.some((c) => c.status !== 'unchanged') ? 'changed' : 'unchanged',
-        columns: colDiffs,
-      });
-    }
 
     return result;
+  }
+
+  /** 按约束名比对：名缺失→added/removed，定义不同→changed（定义先做 schema 归一化）。 */
+  private static diffConstraints(src: ConstraintMeta[], tgt: ConstraintMeta[], schemas: readonly (string | undefined)[]): ConstraintDiff[] {
+    const norm = (d: string) => stripIdentifierSchema(d, schemas);
+    const out: ConstraintDiff[] = [];
+    const tgtMap = new Map(tgt.map((c) => [c.name, c]));
+    for (const s of src) {
+      const t = tgtMap.get(s.name);
+      if (!t) out.push({ name: s.name, type: s.type, status: 'added', definition: s.definition });
+      else if (norm(s.definition) !== norm(t.definition)) out.push({ name: s.name, type: s.type, status: 'changed', definition: s.definition });
+    }
+    const srcNames = new Set(src.map((c) => c.name));
+    for (const t of tgt) if (!srcNames.has(t.name)) out.push({ name: t.name, type: t.type, status: 'removed' });
+    return out;
   }
 
   /** 比对列差异。`norm` 用于跨 schema 比较：按字段定向抹掉 schema 前缀（不会误伤字面量/注释）。 */
@@ -379,6 +414,24 @@ if (d.status === 'added') {
           parts.push('');
         }
       }
+    }
+    // 表级约束（PK/UNIQUE/CHECK/FK）：表建好后再加；定义来自数据库规范化，源 schema 改写到目标。
+    for (const d of diffs) {
+      if (!d.constraints?.length) continue;
+      const table = targetTable(d.tableName);
+      const lines: string[] = [];
+      for (const c of d.constraints) {
+        const cn = wrap(validateIdent(c.name, 63));
+        if (c.status === 'removed') {
+          lines.push(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${cn};`);
+        } else {
+          lines.push(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${cn};`);
+          lines.push(`ALTER TABLE ${table} ADD CONSTRAINT ${cn} ${rewrite(c.definition ?? '')};`);
+        }
+      }
+      parts.push(`-- Constraints: ${d.tableName}`);
+      parts.push(...lines);
+      parts.push('');
     }
     if (parts.length <= 2) {
       parts.push('-- No differences found. Schemas are in sync.');

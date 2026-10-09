@@ -555,3 +555,48 @@ describe('SchemaDiffService', () => {
     expect(diffs.find((d) => d.tableName === 't')!.status).toBe('unchanged');
   });
 });
+describe('SchemaDiffService 约束（P3b）', () => {
+  it('约束差异与生成：added + 定义 schema 改写', async () => {
+    const pg = new PostgreSqlDialect();
+    const source = {
+      getTables: async () => [{ name: 't' }],
+      getColumns: async () => [{ name: 'id', type: 'integer', isPrimary: true }],
+      getConstraints: async () => [
+        { tableName: 't', name: 't_pkey', type: 'p', definition: 'PRIMARY KEY (id)' },
+        { tableName: 't', name: 't_fk', type: 'f', definition: 'FOREIGN KEY (a) REFERENCES app.u(id)' },
+      ],
+    } as unknown as MetadataService;
+    const target = {
+      getTables: async () => [{ name: 't' }],
+      getColumns: async () => [{ name: 'id', type: 'integer', isPrimary: true }],
+      getConstraints: async () => [],
+    } as unknown as MetadataService;
+    const diffs = await SchemaDiffService.diff(source, 'db', target, 'db', 'app', 'staging');
+    const t = diffs.find((d) => d.tableName === 't')!;
+    expect(t.status).toBe('changed');
+    expect(t.constraints!.map((c) => [c.name, c.status])).toEqual([['t_pkey', 'added'], ['t_fk', 'added']]);
+
+    const tableService = {
+      dbType: DatabaseType.PG,
+      wrapIdentifier: (id: string) => pg.wrap(id),
+      wrapSchemaIdentifier: (id: string) => pg.wrap(id),
+      getCreateSql: async () => '',
+      supports: () => true,
+    } as unknown as TableService;
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'db', tableService, 'db', undefined, { sourceSchema: 'app', targetSchema: 'staging' });
+    expect(sql).toContain('ALTER TABLE "staging"."t" ADD CONSTRAINT "t_pkey" PRIMARY KEY (id);');
+    expect(sql).toContain('ALTER TABLE "staging"."t" ADD CONSTRAINT "t_fk" FOREIGN KEY (a) REFERENCES staging.u(id);');
+  });
+
+  it('约束在目标多出时判 removed 并生成 DROP', async () => {
+    const pg = new PostgreSqlDialect();
+    const source = { getTables: async () => [{ name: 't' }], getColumns: async () => [{ name: 'id', type: 'integer', isPrimary: true }], getConstraints: async () => [] } as unknown as MetadataService;
+    const target = { getTables: async () => [{ name: 't' }], getColumns: async () => [{ name: 'id', type: 'integer', isPrimary: true }], getConstraints: async () => [{ tableName: 't', name: 'old_ck', type: 'c', definition: 'CHECK (a > 0)' }] } as unknown as MetadataService;
+    const diffs = await SchemaDiffService.diff(source, 'db', target, 'db', 'app', 'staging');
+    expect(diffs.find((d) => d.tableName === 't')!.constraints!.map((c) => c.status)).toEqual(['removed']);
+
+    const tableService = { dbType: DatabaseType.PG, wrapIdentifier: (id: string) => pg.wrap(id), wrapSchemaIdentifier: (id: string) => pg.wrap(id), getCreateSql: async () => '', supports: () => true } as unknown as TableService;
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'db', tableService, 'db', undefined, { sourceSchema: 'app', targetSchema: 'staging' });
+    expect(sql).toContain('ALTER TABLE "staging"."t" DROP CONSTRAINT IF EXISTS "old_ck";');
+  });
+});
