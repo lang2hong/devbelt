@@ -26,20 +26,22 @@ vi.mock('ioredis', () => {
 
 import { RedisClient } from '../../src/redis/redisClient';
 
-describe('RedisClient cluster 连接选项（H1：节点级旋钮必须放顶层）', () => {
-  it('节点级重试用顶层 clusterNodeRetryStrategy；redisOptions 不含被忽略的 retryStrategy', () => {
+describe('RedisClient cluster 连接选项（保持 CI 已验证的 f4def0f 形态）', () => {
+  it('节点级旋钮经 redisOptions 传入；cluster 级重试用 clusterRetryStrategy；不设顶层 offline queue', () => {
     new RedisClient({
       host: 'h',
       port: 1,
       cluster: { nodes: [{ host: '127.0.0.1', port: 6379 }] },
     });
     const opts = h.clusterOptions.at(-1)!;
-    expect(typeof opts.clusterNodeRetryStrategy).toBe('function');
+    // Cluster 级重试在顶层；节点级 retryStrategy 走 redisOptions（被 ConnectionPool 的内部默认
+    // 覆盖，依赖「重试耗尽即关节点」的默认来实现 D20 有界失败）。
     expect(typeof opts.clusterRetryStrategy).toBe('function');
-    // 不关闭离线队列：设 false 会让「构造后立刻发命令」直接 reject（CI D20 回归）。
+    // 不设顶层 clusterNodeRetryStrategy / enableOfflineQueue：设了会让未映射节点命令挂到
+    // 命令超时、并让「构造后立刻发命令」直接 reject（CI cluster-over-SSH D20 已钉住）。
+    expect(opts.clusterNodeRetryStrategy).toBeUndefined();
     expect(opts.enableOfflineQueue).toBeUndefined();
     const redisOptions = opts.redisOptions as Record<string, unknown> | undefined;
-    // ConnectionPool 会写死 retryStrategy 并用 defaults 合并，redisOptions 里的值无效。
-    expect(redisOptions?.retryStrategy).toBeUndefined();
+    expect(typeof redisOptions?.retryStrategy).toBe('function');
   });
 });

@@ -224,23 +224,23 @@ export class RedisClient {
       this.client = factory(common);
     } else if (this.isCluster) {
       // Cluster 下无 SELECT：不传 db。
-      // 注意 ioredis 的 ConnectionPool 会**先写死** `retryStrategy: clusterNodeRetryStrategy`
-      // 与 `enableOfflineQueue: true`，再用 defaults（只填 undefined）合并 redisOptions ——
-      // 所以放在 `redisOptions` 里的 retryStrategy/enableOfflineQueue 一律无效（H1）。
-      // 节点级重试用顶层 `clusterNodeRetryStrategy`；离线队列保持默认（见下方注释，不关闭）。
-      const { retryStrategy: nodeRetryStrategyForStandalone, ...clusterRedisOptions } = common;
-      void nodeRetryStrategyForStandalone;
+      // 节点级选项经 redisOptions 传入。注意 ioredis 的 ConnectionPool 会以自己的内部默认
+      // （节点 retryStrategy 取顶层 `clusterNodeRetryStrategy ?? null`，enableOfflineQueue 恒 true）
+      // 合并 redisOptions，故这里的 retryStrategy/enableOfflineQueue **实际被覆盖**。
+      // 依赖的正是这一默认：节点重试耗尽后**关闭该节点连接** → 落在未映射节点上的命令以
+      // "Connection is closed." 有界快速失败（D20：实测 ~0.6s，不挂起）。若改设顶层
+      // `clusterNodeRetryStrategy` 长退避，节点永不放弃，命令会一直排到命令超时反而变慢/转红
+      // （CI cluster-over-SSH D20 已钉住，勿改）。
+      const clusterNodeOptions: RedisOptions = {
+        ...common,
+        retryStrategy: clusterNodeRetryStrategy,
+        enableOfflineQueue: false,
+      };
       this.client = new Cluster(options.cluster!.nodes, {
         natMap: options.cluster!.natMap,
         slotsRefreshTimeout: options.cluster!.slotsRefreshTimeout ?? 2000,
-        // redisOptions 不含 retryStrategy（ConnectionPool 会忽略它并用顶层 clusterNodeRetryStrategy）。
-        redisOptions: clusterRedisOptions,
+        redisOptions: clusterNodeOptions,
         clusterRetryStrategy: clusterNodeRetryStrategy,
-        clusterNodeRetryStrategy: clusterNodeRetryStrategy,
-        // 注意：**不要**设 `enableOfflineQueue: false`。它虽能避免宕机期命令排队，但会让
-        // 「构造后立刻发命令」（等待 ready 的标准用法，如 CLUSTER SLOTS 探活）直接 reject
-        // "Cluster isn't ready and enableOfflineQueue options is false"。有界失败由命令超时 +
-        // 长退避兜底（见 withTimeout），保持默认排队语义（D11/D20 回归由 CI 钉住）。
       }) as unknown as RedisConnectionLike;
     } else if (this.sentinel) {
       this.client = new Redis({
