@@ -13,6 +13,8 @@ import { DEFAULT_POOL_CONFIG, DERIVED_DB_SESSION_MAX, SESSION_KEY_SEP, type Pool
 
 // 派生会话上限转发（测试与命令侧从本模块导入）。
 export { DERIVED_DB_SESSION_MAX };
+// 连接池构造参数类型（构造签名的一部分，供外部类型化配置）。
+export type { PoolConfig } from './poolTypes';
 
 /** 建连前路径校验失败：阻断建连（不含完整路径内容）。 */
 export class ConnectionPathError extends Error {
