@@ -317,7 +317,8 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
   it('4B-2b：结构化 FK（ON DELETE CASCADE + DEFERRABLE）与 CHECK 跨 schema 组合生成并可执行', async () => {
     const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
     await raw.query(`ALTER TABLE ${S1}.orders ADD CONSTRAINT fk_cascade FOREIGN KEY (dept_id) REFERENCES ${S1}.dept(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED`);
-    await raw.query(`ALTER TABLE ${S1}.orders ADD CONSTRAINT ck_note CHECK (length(note) > 1)`);
+    // 既有数据不满足该 CHECK（种子 note 长度 1）→ 源侧必须以 NOT VALID 添加（也覆盖 NOT VALID 保真路径）。
+      await raw.query(`ALTER TABLE ${S1}.orders ADD CONSTRAINT ck_note CHECK (length(note) > 1) NOT VALID`);
     try {
       const diffs = await SchemaDiffService.diff(meta, dbName, meta, dbName, S1, S2);
       const orders = diffs.find((d) => d.tableName === 'orders')!;
@@ -332,7 +333,8 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
       const sql = await SchemaDiffService.generateSyncSql(diffs, dbName, table, dbName, dialect, { sourceSchema: S1, targetSchema: S2 });
       // 4B-2b 修复：added 约束落到已存在表（S2 有数据）→ NOT VALID + WARN，避免验证型 CHECK 整批失败。
       expect(sql).toContain(`ADD CONSTRAINT "fk_cascade" FOREIGN KEY ("dept_id") REFERENCES "${S2}"."dept" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED NOT VALID;`);
-      expect(sql).toContain('-- WARN: added constraint "ck_note"');
+      expect(sql).toContain('ADD CONSTRAINT "ck_note" CHECK (length(note) > 1) NOT VALID;');
+      expect(sql).toContain('-- WARN: added constraint "fk_cascade"');
       await raw.query(sql);
 
       // 目标 schema 上约束真实存在且结构化属性一致。
