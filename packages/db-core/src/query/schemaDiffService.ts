@@ -380,7 +380,7 @@ export class SchemaDiffService {
     // PG 走自己的 DDL 生成：标识符用双引号；有 targetSchema 时限定目标 schema，
     // 否则不限定库名、走 search_path。改列用 ALTER COLUMN TYPE / SET|DROP NOT NULL。
     if (sourceTableService.dbType === DatabaseType.PG) {
-      return this.generatePgSyncSql(diffs, targetDb, sourceTableService, sourceDb, opts);
+      return this.generatePgSyncSql(diffs, targetDb, sourceTableService, sourceDb, opts, targetDialect);
     }
     if (sourceTableService.dbType === DatabaseType.SQLITE) {
       return this.generateSqliteSyncSql(diffs, sourceTableService, sourceDb);
@@ -496,6 +496,8 @@ export class SchemaDiffService {
         if (c.onDelete && c.onDelete !== 'NO ACTION') ddl += ` ON DELETE ${c.onDelete}`;
         if (c.onUpdate && c.onUpdate !== 'NO ACTION') ddl += ` ON UPDATE ${c.onUpdate}`;
         if (c.deferrable) ddl += c.initiallyDeferred ? ' DEFERRABLE INITIALLY DEFERRED' : ' DEFERRABLE';
+        // 评审 L1：FK 的 NOT VALID 保真（此前只对 CHECK 映射）。
+        if (c.notValid) ddl += ' NOT VALID';
         return ddl;
       }
       if (c.type === 'c' && c.expression) {
@@ -511,6 +513,9 @@ export class SchemaDiffService {
     for (const d of diffs) {
       if (!d.constraints?.length) continue;
       const table = targetTable(d.tableName);
+      // added 约束落到**已存在表**（有数据）时，源为验证型也无法预知目标数据是否满足；
+      // 直接 ADD 验证型可能整批失败 → 生成 NOT VALID + WARN，由用户核对数据后 VALIDATE。
+      const onExistingTable = d.status !== 'added';
       for (const c of d.constraints) {
         const cn = wrap(validateSchemaIdent(c.name, 63));
         // 破坏性 DROP 默认**只报告不执行**（避免删掉目标独有约束/被外键依赖时整批失败）；
@@ -521,7 +526,13 @@ export class SchemaDiffService {
         }
         parts.push(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${cn};`);
         if (c.status !== 'removed') {
-          parts.push(`ALTER TABLE ${table} ADD CONSTRAINT ${cn} ${structuredBody(c) ?? rewrite(c.definition ?? '')};`);
+          let body = structuredBody(c) ?? rewrite(c.definition ?? '');
+          const forcedNotValid = onExistingTable && !c.notValid && (c.type === 'f' || c.type === 'c') && !/NOT VALID/i.test(body);
+          if (forcedNotValid) {
+            body += ' NOT VALID';
+            parts.push(`-- WARN: added constraint "${c.name}" on existing table generated as NOT VALID; after verifying data run: ALTER TABLE ${table} VALIDATE CONSTRAINT ${cn};`);
+          }
+          parts.push(`ALTER TABLE ${table} ADD CONSTRAINT ${cn} ${body};`);
         }
       }
     }
@@ -670,18 +681,22 @@ export class SchemaDiffService {
     sourceTableService: TableService,
     sourceDb: string,
     opts: { sourceSchema?: string; targetSchema?: string; dialect?: SqlDialect; skipConstraints?: boolean; sourceSequences?: SequenceMeta[]; protectedNames?: ReadonlySet<string> } = {},
+    targetDialect?: SqlDialect,
   ): Promise<string> {
     const wrap = (id: string) => sourceTableService.wrapIdentifier(id);
     const wrapSchema = (id: string) => sourceTableService.wrapSchemaIdentifier(id);
     const target = opts.targetSchema;
+    // 4B-2a 修复：调用方（transferDatabase/命令/测试）把方言传在**位置参数**上，
+    // 而索引/序列段曾只认 dialect → 索引生成恒被跳过（伪 “No differences”）。
+    const dialect = opts.dialect ?? targetDialect;
     const targetTable = (name: string): string => (target ? `${wrapSchema(target)}.${wrap(name)}` : wrap(name));
     // #4：注释/默认值的转义必须按目标方言（scs=off 时反斜杠也要处理），不能固定用 scs=on 的实例。
-    const pgEsc = opts.dialect ? (v: any): string => opts.dialect!.escapeValue(v) : PG_ESC;
+    const pgEsc = dialect ? (v: any): string => dialect!.escapeValue(v) : PG_ESC;
     // 跨 schema：把默认表达式/类型名里的源 schema 前缀改写到目标 schema（统一经 pgPorter，4B-3）。
     const rewrite = SchemaDiffService.pgPorter(
       opts.sourceSchema,
       target,
-      opts.dialect ? (v) => opts.dialect!.escapeValue(v) : undefined,
+      dialect ? (v) => dialect!.escapeValue(v) : undefined,
       opts.protectedNames,
     );
     const parts: string[] = [
@@ -699,7 +714,7 @@ if (d.status === 'added') {
         for (const q of new Set(extractNextvalSequences(ddl))) {
           const seqName = seqNameOf(q);
           const src = opts.sourceSequences?.find((s) => s.name === seqName);
-          if (src && opts.dialect?.createSequenceSql) parts.push(opts.dialect.createSequenceSql(src.name, src, target));
+          if (src && dialect?.createSequenceSql) parts.push(dialect.createSequenceSql(src.name, src, target));
           else if (target) parts.push(`CREATE SEQUENCE IF NOT EXISTS ${wrapSchema(target)}.${wrap(seqName)};`);
           else parts.push(`CREATE SEQUENCE IF NOT EXISTS ${wrap(seqName)};`);
         }
@@ -730,7 +745,7 @@ if (d.status === 'added') {
             if (seqsDone.has(seqName)) continue;
             seqsDone.add(seqName);
             const src = opts.sourceSequences?.find((s) => s.name === seqName);
-            if (src && opts.dialect?.createSequenceSql) pre.push(opts.dialect.createSequenceSql(src.name, src, target));
+            if (src && dialect?.createSequenceSql) pre.push(dialect.createSequenceSql(src.name, src, target));
             else if (target) pre.push(`CREATE SEQUENCE IF NOT EXISTS ${wrapSchema(target)}.${wrap(seqName)};`);
             else pre.push(`CREATE SEQUENCE IF NOT EXISTS ${wrap(seqName)};`);
             // 仅新增列才建立归属；且必须等 **ADD COLUMN 之后**（列尚不存在时 OWNED BY 会报错）。
@@ -810,20 +825,20 @@ if (d.status === 'added') {
       if (csql) { parts.push('-- Constraints'); parts.push(csql); parts.push(''); }
     }
     // 索引：非主键；先 DROP（IF EXISTS）再建，兼容改名/定义变化。
-    if (opts.dialect) {
+    if (dialect) {
       for (const d of diffs) {
         if (!d.indexes?.length) continue;
         const lines: string[] = [];
         for (const ix of d.indexes) {
           const dropName = target
-            ? `${opts.dialect!.wrap(validateSchemaIdent(target))}.${opts.dialect!.wrap(validateSchemaIdent(ix.name, 63))}`
-            : opts.dialect!.wrap(validateSchemaIdent(ix.name, 63));
+            ? `${dialect!.wrap(validateSchemaIdent(target))}.${dialect!.wrap(validateSchemaIdent(ix.name, 63))}`
+            : dialect!.wrap(validateSchemaIdent(ix.name, 63));
           lines.push(`DROP INDEX IF EXISTS ${dropName};`);
           if (ix.status === 'removed') continue;
           // 4B-2a：有结构化部件时由方言组合生成（部件/谓词经移植层改写到目标 schema）；
           // 否则回退 H4 的 pg_get_indexdef 原文改写（保留 USING/WHERE/DESC/opclass/INCLUDE/表达式）。
           if (ix.keyParts?.length && ix.method) {
-            const ixName = opts.dialect!.wrap(validateSchemaIdent(ix.name, 63));
+            const ixName = dialect!.wrap(validateSchemaIdent(ix.name, 63));
             const keyDefs = ix.keyParts.filter((p) => p.isKey).map((p) => rewrite(p.def));
             const includeDefs = ix.keyParts.filter((p) => !p.isKey).map((p) => rewrite(p.def));
             const method = validateIdent(ix.method, 63);

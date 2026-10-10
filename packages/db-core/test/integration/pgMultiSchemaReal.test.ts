@@ -330,7 +330,9 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
       expect(ck?.expression).toContain('length');
 
       const sql = await SchemaDiffService.generateSyncSql(diffs, dbName, table, dbName, dialect, { sourceSchema: S1, targetSchema: S2 });
-      expect(sql).toContain(`ADD CONSTRAINT "fk_cascade" FOREIGN KEY ("dept_id") REFERENCES "${S2}"."dept" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;`);
+      // 4B-2b 修复：added 约束落到已存在表（S2 有数据）→ NOT VALID + WARN，避免验证型 CHECK 整批失败。
+      expect(sql).toContain(`ADD CONSTRAINT "fk_cascade" FOREIGN KEY ("dept_id") REFERENCES "${S2}"."dept" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED NOT VALID;`);
+      expect(sql).toContain('-- WARN: added constraint "ck_note"');
       await raw.query(sql);
 
       // 目标 schema 上约束真实存在且结构化属性一致。

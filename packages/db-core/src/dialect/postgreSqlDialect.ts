@@ -409,7 +409,19 @@ export class PostgreSqlDialect implements SqlDialect {
           WHEN c.data_type = 'numeric' AND c.numeric_precision IS NOT NULL
             THEN c.data_type || '(' || c.numeric_precision || ',' || COALESCE(c.numeric_scale, 0) || ')'
           WHEN c.data_type = 'USER-DEFINED' AND c.udt_name IS NOT NULL
-            THEN c.udt_name
+            THEN CASE
+              -- 4B-3 修复：enum/domain 等自定义类型必须带 schema 限定（不依赖 search_path），
+              -- 否则跨 schema 移植会生成裸类型名（目标 schema 无此类型时不可执行）。
+              -- 扩展自有类型（如 citext）保持裸名，由 search_path 解析（扩展装在 public 等）。
+              WHEN c.udt_schema = 'pg_catalog' THEN c.udt_name
+              WHEN EXISTS (
+                SELECT 1 FROM pg_type t
+                JOIN pg_depend dep ON dep.objid = t.oid AND dep.deptype = 'e'
+                JOIN pg_namespace n ON n.oid = t.typnamespace
+                WHERE n.nspname = c.udt_schema AND t.typname = c.udt_name
+              ) THEN c.udt_name
+              ELSE quote_ident(c.udt_schema) || '.' || c.udt_name
+            END
           ELSE c.data_type
         END AS type,
         COALESCE(c.column_default, '') AS default_value,

@@ -587,7 +587,7 @@ describe('SchemaDiffService 约束（P3b）', () => {
     } as unknown as TableService;
     const sql = await SchemaDiffService.generateSyncSql(diffs, 'db', tableService, 'db', undefined, { sourceSchema: 'app', targetSchema: 'staging' });
     expect(sql).toContain('ALTER TABLE "staging"."t" ADD CONSTRAINT "t_pkey" PRIMARY KEY (id);');
-    expect(sql).toContain('ALTER TABLE "staging"."t" ADD CONSTRAINT "t_fk" FOREIGN KEY (a) REFERENCES "staging".u(id);');
+    expect(sql).toContain('ALTER TABLE "staging"."t" ADD CONSTRAINT "t_fk" FOREIGN KEY (a) REFERENCES "staging".u(id) NOT VALID;');
   });
 
   it('约束在目标多出时判 removed；默认只报告（注释），allowDropConstraints 时才执行 DROP', async () => {
@@ -811,8 +811,9 @@ describe('SchemaDiffService 索引 / schema 级对象（P3c）', () => {
     const tableService = { dbType: DatabaseType.PG, wrapIdentifier: (id: string) => pg.wrap(id), wrapSchemaIdentifier: (id: string) => pg.wrap(id), getCreateSql: async () => '', supports: () => true } as unknown as TableService;
     const sql = SchemaDiffService.generateConstraintsSql(diffs, tableService, { sourceSchema: 'app', targetSchema: 'staging' });
     expect(sql).toContain(
-      'ALTER TABLE "staging"."t" ADD CONSTRAINT "fk_u" FOREIGN KEY ("a") REFERENCES "staging"."u" ("id") ON DELETE SET NULL ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED;',
+      'ALTER TABLE "staging"."t" ADD CONSTRAINT "fk_u" FOREIGN KEY ("a") REFERENCES "staging"."u" ("id") ON DELETE SET NULL ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED NOT VALID;',
     );
+    expect(sql).toContain('-- WARN: added constraint');
   });
 
   it('4B-2b：CHECK 结构化比较（表达式 schema 归一）与组合生成', async () => {
@@ -839,7 +840,7 @@ describe('SchemaDiffService 索引 / schema 级对象（P3c）', () => {
     diffs = await SchemaDiffService.diff(source, 'db', mk([]), 'db', 'app', 'staging');
     const tableService = { dbType: DatabaseType.PG, wrapIdentifier: (id: string) => pg.wrap(id), wrapSchemaIdentifier: (id: string) => pg.wrap(id), getCreateSql: async () => '', supports: () => true } as unknown as TableService;
     const sql = SchemaDiffService.generateConstraintsSql(diffs, tableService, { sourceSchema: 'app', targetSchema: 'staging' });
-    expect(sql).toContain('ALTER TABLE "staging"."t" ADD CONSTRAINT "ck_x" CHECK (("staging".myfn(id) > 0));');
+    expect(sql).toContain('ALTER TABLE "staging"."t" ADD CONSTRAINT "ck_x" CHECK (("staging".myfn(id) > 0)) NOT VALID;');
   });
 
   it('4B-3：列类型/默认值移植同一化（enum 限定与 nextval 在 ADD COLUMN 路径均改写）', async () => {
@@ -891,5 +892,80 @@ describe('SchemaDiffService 索引 / schema 级对象（P3c）', () => {
     expect(sql).toContain('CREATE SEQUENCE IF NOT EXISTS "staging"."s1"');
     expect(sql).toContain('DROP VIEW IF EXISTS "staging"."v1";');
     expect(sql).toContain('CREATE OR REPLACE VIEW "staging"."v1" AS');
+  });
+});
+
+describe('4B D28 回归（索引方言 gate / NOT VALID / 类型限定）', () => {
+  const pg = new PostgreSqlDialect();
+  const tableService = {
+    dbType: DatabaseType.PG,
+    wrapIdentifier: (id: string) => pg.wrap(id),
+    wrapSchemaIdentifier: (id: string) => `"${String(id).replace(/"/g, '""')}"`,
+    getCreateSql: async () => '',
+    supports: () => true,
+  } as unknown as TableService;
+
+  it('仅索引差异时生成 DROP/CREATE INDEX（方言经位置参数传入不再被跳过）', async () => {
+    const diffs = [{
+      tableName: 'orders',
+      status: 'changed' as const,
+      columns: [],
+      indexes: [{
+        name: 'idx_mix_real',
+        status: 'added' as const,
+        unique: true,
+        method: 'btree',
+        keyParts: [
+          { def: 'lower(note)', isKey: true },
+          { def: 'id DESC', isKey: true },
+          { def: 'dept_id', isKey: false },
+        ],
+        predicate: '(id > 0)',
+      }],
+    }];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'db', tableService, 'src', pg, { sourceSchema: 's1', targetSchema: 's2' });
+    expect(sql).toContain('DROP INDEX IF EXISTS "s2"."idx_mix_real";');
+    expect(sql).toContain('CREATE UNIQUE INDEX "idx_mix_real" ON "s2"."orders" USING btree (lower(note), id DESC) INCLUDE (dept_id) WHERE (id > 0);');
+    expect(sql).not.toContain('No differences found');
+  });
+
+  it('added 约束落到已存在表：CHECK/FK 生成 NOT VALID + WARN（含 refSchema 映射）', async () => {
+    const diffs = [{
+      tableName: 'orders',
+      status: 'changed' as const,
+      columns: [],
+      constraints: [
+        { name: 'fk_cascade', type: 'f' as const, status: 'added' as const, columns: ['dept_id'], refTable: 'dept', refColumns: ['id'], refSchema: 's1', onDelete: 'CASCADE' as const, deferrable: true, initiallyDeferred: true },
+        { name: 'ck_note', type: 'c' as const, status: 'added' as const, expression: 'length(note) > 1' },
+      ],
+    }];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'db', tableService, 'src', pg, { sourceSchema: 's1', targetSchema: 's2' });
+    expect(sql).toContain('ADD CONSTRAINT "fk_cascade" FOREIGN KEY ("dept_id") REFERENCES "s2"."dept" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED NOT VALID;');
+    expect(sql).toContain('ADD CONSTRAINT "ck_note" CHECK (length(note) > 1) NOT VALID;');
+    expect(sql).toContain('-- WARN: added constraint');
+    expect(sql).toContain('VALIDATE CONSTRAINT "ck_note"');
+  });
+
+  it('源为 NOT VALID 的约束保真（不重复追加、不误报 WARN）', async () => {
+    const diffs = [{
+      tableName: 'orders',
+      status: 'changed' as const,
+      columns: [],
+      constraints: [
+        { name: 'ck_old', type: 'c' as const, status: 'added' as const, expression: 'length(note) > 1', notValid: true },
+      ],
+    }];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'db', tableService, 'src', pg, { sourceSchema: 's1', targetSchema: 's2' });
+    expect(sql).toContain('ADD CONSTRAINT "ck_old" CHECK (length(note) > 1) NOT VALID;');
+    expect(sql).not.toContain('NOT VALID NOT VALID');
+    expect(sql).not.toContain('-- WARN: added constraint');
+  });
+
+  it('getColumnsSql：非扩展 USER-DEFINED 类型 schema 限定、扩展类型保持裸名', () => {
+    const sql = pg.getColumnsSql('orders', undefined, 's1');
+    expect(sql).toContain("quote_ident(c.udt_schema) || '.' || c.udt_name");
+    expect(sql).toContain("dep.deptype = 'e'");
+    // pg_catalog 与扩展分支仍返回裸类型名（不依赖 schema 限定）。
+    expect(sql).toContain("WHEN c.udt_schema = 'pg_catalog' THEN c.udt_name");
   });
 });
