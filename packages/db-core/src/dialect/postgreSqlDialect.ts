@@ -301,9 +301,9 @@ export class PostgreSqlDialect implements SqlDialect {
       am.amname AS method,
       pg_get_expr(i.indpred, i.indrelid) AS predicate,
       -- pg_get_indexdef(oid, n, true) 在 PG16 不含 DESC/NULLS（仅表达式/列名），
-      -- 这里用 indoption 位补方向；非默认 opclass/collation（结构化会丢属性）则整体置 NULL，
-      -- 让调用方回退 pg_get_indexdef 全文改写，保证保真。
-      (SELECT CASE WHEN bool_and(k.ord > i.indnkeyatts OR (op.opcdefault AND i.indcollation[k.ord - 1] = 0)) THEN
+      -- 这里用 indoption 位补方向；非默认 opclass 则整体置 NULL，回退 pg_get_indexdef 全文改写。
+      -- 注意：文本列默认排序规则也会让 indcollation 非 0，不能用作回退判据（索引继承列 collation）。
+      (SELECT CASE WHEN bool_and(k.ord > i.indnkeyatts OR op.opcdefault) THEN
          json_agg(json_build_object(
           'pos', k.ord,
           'def', pg_get_indexdef(i.indexrelid, k.ord, true)
