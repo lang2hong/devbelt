@@ -684,8 +684,9 @@ describe('SchemaDiffService 序列（P3b/N2）', () => {
     expect(sql).toContain('ALTER SEQUENCE "staging"."t_n_seq" OWNED BY "staging"."t"."n";');
     expect(sql).toContain('ALTER TABLE "staging"."t" ADD COLUMN "n"');
     expect(sql).toContain(`nextval('"staging"."t_n_seq"'::regclass)`);
-    // 序列生成必须在 ALTER TABLE 之前。
+    // 序列创建必须在 ALTER TABLE 之前；OWNED BY 必须在 ADD COLUMN 之后（列存在后才可归属）。
     expect(sql.indexOf('CREATE SEQUENCE')).toBeLessThan(sql.indexOf('ALTER TABLE "staging"."t"'));
+    expect(sql.indexOf('ALTER SEQUENCE "staging"."t_n_seq" OWNED BY')).toBeGreaterThan(sql.indexOf('ALTER TABLE "staging"."t"'));
   });
 });
 

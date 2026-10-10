@@ -603,6 +603,7 @@ if (d.status === 'added') {
         // #1：给已有表新增 serial 列 / 改默认值为 nextval 时，必须**先建目标序列**（复用新增表逻辑），
         // 否则 ALTER 引用的 nextval 在目标 schema 不存在，整条语句失败。
         const pre: string[] = [];
+        const post: string[] = [];
         const seqsDone = new Set<string>();
         const ensureSeq = (defaultText: unknown, ownerCol?: string): void => {
           for (const q of new Set(extractNextvalSequences(toCompareString(defaultText)))) {
@@ -613,10 +614,10 @@ if (d.status === 'added') {
             if (src && opts.dialect?.createSequenceSql) pre.push(opts.dialect.createSequenceSql(src.name, src, target));
             else if (target) pre.push(`CREATE SEQUENCE IF NOT EXISTS ${wrapSchema(target)}.${wrap(seqName)};`);
             else pre.push(`CREATE SEQUENCE IF NOT EXISTS ${wrap(seqName)};`);
-            // 仅新增列才建立归属；改默认值不夺取既有序列的所有权。
+            // 仅新增列才建立归属；且必须等 **ADD COLUMN 之后**（列尚不存在时 OWNED BY 会报错）。
             if (ownerCol) {
               const seqIdent = target ? `${wrapSchema(target)}.${wrap(seqName)}` : wrap(seqName);
-              pre.push(`ALTER SEQUENCE ${seqIdent} OWNED BY ${table}.${wrap(ownerCol)};`);
+              post.push(`ALTER SEQUENCE ${seqIdent} OWNED BY ${table}.${wrap(ownerCol)};`);
             }
           }
         };
@@ -678,6 +679,7 @@ if (d.status === 'added') {
           parts.push(...pre);
           parts.push(...warnings);
           if (actions.length) parts.push(`ALTER TABLE ${table} ${actions.join(', ')};`);
+          parts.push(...post);
           parts.push(...extra);
           parts.push('');
         }
