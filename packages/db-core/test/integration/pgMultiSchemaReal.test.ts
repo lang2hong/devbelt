@@ -438,8 +438,8 @@ it("A6/H1 真库：目标 schema 名含单引号时 nextval 字面量不逃逸",
       const sql = await SchemaDiffService.generateSyncSql(diffs, dbName, table, dbName, dialect, {
         sourceSchema: S1, targetSchema: evil, dialect, sourceSequences: await meta.getSequences(S1),
       });
-      // 字面量里的 ' 被翻倍（否则在 x' 处提前结束）。
-      expect(sql).toContain(`nextval('"zms_q_${stamp}'');DROP TABLE ${canary};--"."src_serial_id_seq"'::regclass)`);
+      // 字面量里的 ' 被翻倍（否则在 x' 处提前结束）；右侧序列名可能带/不带引号，故只断言转义后的 schema 前缀。
+      expect(sql).toContain(`nextval('"zms_q_${stamp}'');DROP TABLE ${canary};--"`);
       // 让注入里未限定的 DROP 若生效能命中 S2。
       await raw.query(`SET search_path TO ${S2}, public`);
       await raw.query(sql);
