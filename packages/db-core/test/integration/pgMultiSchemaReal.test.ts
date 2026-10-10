@@ -333,7 +333,8 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
       const sql = await SchemaDiffService.generateSyncSql(diffs, dbName, table, dbName, dialect, { sourceSchema: S1, targetSchema: S2 });
       // 4B-2b 修复：added 约束落到已存在表（S2 有数据）→ NOT VALID + WARN，避免验证型 CHECK 整批失败。
       expect(sql).toContain(`ADD CONSTRAINT "fk_cascade" FOREIGN KEY ("dept_id") REFERENCES "${S2}"."dept" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED NOT VALID;`);
-      expect(sql).toContain('ADD CONSTRAINT "ck_note" CHECK (length(note) > 1) NOT VALID;');
+      // 元数据表达式自带外层括号（pg_get_expr 归一），生成再包一层 → 双层括号。
+      expect(sql).toContain('ADD CONSTRAINT "ck_note" CHECK ((length(note) > 1)) NOT VALID;');
       expect(sql).toContain('-- WARN: added constraint "fk_cascade"');
       await raw.query(sql);
 
