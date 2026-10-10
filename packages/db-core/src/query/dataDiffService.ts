@@ -26,8 +26,17 @@ export interface TableDataDiff {
   rows: RowDiff[];
 }
 
+/** 无法安全对比/同步的表（例如目标缺少主键列）——必须显式呈现，不能静默当作“一致”。 */
+export interface SkippedTableDiff {
+  tableName: string;
+  reason: 'target-missing-pk' | 'no-key-or-columns';
+  missingColumns?: string[];
+}
+
 export interface DataDiffResult {
   diffs: TableDataDiff[];
+  /** 被跳过的表（原因见 reason）；UI 应逐条呈现。 */
+  skipped: SkippedTableDiff[];
   sourceDb: string;
   targetDb: string;
 }
@@ -47,6 +56,7 @@ export class DataDiffService {
     const { sourceSchema, targetSchema, targetMeta } = opts;
     const tableList = tables ?? (await sourceMeta.getTables(sourceDb, sourceSchema)).map((t) => t.name);
     const diffs: TableDataDiff[] = [];
+    const skipped: SkippedTableDiff[] = [];
 
     for (const table of tableList) {
       // 排序/游标列必须是真实主键（NOT NULL 且唯一）；无主键时留空 → OFFSET 分页（完整）。
@@ -54,12 +64,18 @@ export class DataDiffService {
       const orderColumns = await this.getPkColumns(sourceMeta, table, sourceDb, sourceSchema);
       const sourceColumns = await this.getColumnNames(sourceMeta, table, sourceDb, sourceSchema);
       const targetColumns = targetMeta ? await this.getColumnNames(targetMeta, table, targetDb, targetSchema) : undefined;
-      // 目标缺主键列 → 跳过该表（否则会生成非法 WHERE / 全量增删误判）。
-      if (targetColumns && orderColumns.length && !orderColumns.every((k) => targetColumns.includes(k))) continue;
+      // 目标缺主键列 → 跳过该表（否则会生成非法 WHERE / 全量增删误判）。显式记录，UI 必须呈现。
+      if (targetColumns && orderColumns.length && !orderColumns.every((k) => targetColumns.includes(k))) {
+        skipped.push({ tableName: table, reason: 'target-missing-pk', missingColumns: orderColumns.filter((k) => !targetColumns.includes(k)) });
+        continue;
+      }
       const keyBase = orderColumns.length ? orderColumns : await this.getKeyColumns(sourceMeta, table, sourceDb, sourceSchema);
       const keyColumns = targetColumns ? keyBase.filter((k) => targetColumns.includes(k)) : keyBase;
       const columnNames = targetColumns ? sourceColumns.filter((c) => targetColumns.includes(c)) : sourceColumns;
-      if (!keyColumns.length || !columnNames.length) continue;
+      if (!keyColumns.length || !columnNames.length) {
+        skipped.push({ tableName: table, reason: 'no-key-or-columns' });
+        continue;
+      }
       // 仅当主键列是数值型且两侧同方言时才做有序归并：文本主键的 ORDER BY 受 collation
       // 影响，JS 比较未必与 DB 一致，归并会错位。
       const mergeSafe = orderColumns.length > 0
@@ -73,7 +89,7 @@ export class DataDiffService {
       diffs.push(diff);
     }
 
-    return { diffs, sourceDb, targetDb };
+    return { diffs, skipped, sourceDb, targetDb };
   }
 
   /** 真实主键列（仅 isPrimary）；无则空数组。 */

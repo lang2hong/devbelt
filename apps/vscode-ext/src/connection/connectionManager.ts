@@ -37,6 +37,8 @@ export class ConnectionManager {
   /** 正在批量导入/导出/恢复的连接：期间不得被淘汰或空闲关闭。 */
   private readonly busies = new Map<string, number>();
   private readonly sessionEntries = new Map<string, SessionEntry>();
+  /** 独立（不入池）SQL 会话的关闭钩子：连接被 dispose 时一并关闭，避免泄漏。 */
+  private readonly isolatedClosers = new Set<{ connId: string; close: () => void }>();
   private readonly explicit = new Set<string>();
   private readonly connecting = new Map<string, Promise<ConnectionSession>>();
   /**
@@ -253,7 +255,21 @@ export class ConnectionManager {
       if (acquired) { host = '127.0.0.1'; port = acquired.port; tunnelLease = acquired.lease; }
     }
     try {
-      return await openIsolatedSqlSession(target, host, port, tunnelLease);
+      const { session, close } = await openIsolatedSqlSession(target, host, port, tunnelLease);
+      // M1：独立会话仅用于跨 schema 目录读取/生成；在 search_path 上可见的对象会让
+      // pg_get_* 输出不带 schema 的名字。统一在此置 pg_catalog，调用点无需各自记得设置。
+      if (target.dbType === DatabaseType.PG) {
+        try { await session.query.query('SET search_path = pg_catalog', undefined, { skipHistory: true }); }
+        catch { /* 非致命：退化为默认 search_path */ }
+      }
+      // 登记关闭钩子：连接被 dispose 时关闭在途独立会话（close 幂等）。
+      const connId = effective.id;
+      const closers = this.isolatedClosers;
+      let entry: { connId: string; close: () => void };
+      const wrapped = (): void => { closers.delete(entry); close(); };
+      entry = { connId, close: wrapped };
+      closers.add(entry);
+      return { session, close: wrapped };
     } catch (err) {
       if (tunnelLease) SshTunnel.release(target.id, tunnelLease);
       throw err;
@@ -463,6 +479,10 @@ export class ConnectionManager {
     for (const entry of [...this.sessionEntries.values()]) {
       if (entry.connId === id) this.closeEntry(entry);
     }
+    // 关闭该连接上仍开着的独立会话（close 幂等，且会从集合中移除自己）。
+    for (const e of [...this.isolatedClosers]) {
+      if (e.connId === id) e.close();
+    }
     if (this.sessions.size === 0) {
       this.stopHealthCheck();
     }
@@ -481,6 +501,8 @@ export class ConnectionManager {
     for (const session of all) {
       session.close();
     }
+    // 在途独立会话也一并关闭。
+    for (const e of [...this.isolatedClosers]) e.close();
     // 兜底：session.close() 会按 connId 关自己的隧道，但若某条隧道的会话
     // 从未装配成功（建连中途失败），它不在 sessions 里，只能靠这里清掉。
     SshTunnel.closeAll();

@@ -679,28 +679,11 @@ export class TableService {
             ? `quote_ident(n.nspname) || '.' || quote_ident(c.relname)`
             : `quote_ident(c.relname)`;
         const groupBy = schema ? 'n.nspname, c.relname' : 'c.relname';
-        // H2：pg_depend 反查**仅在跨 schema 生成（targetSchema）时**启用；否则（备份/dump/导出/
-        // 查看建表/表设计器）保持 pg_get_expr 原样，维持 B5「dump 与 schema 无关」。
-        // M3：连接条件限定到该列的 pg_attrdef 行（classid='pg_attrdef' AND objid=ad.oid），
-        // 避免用序列默认值覆盖列的真实默认值。
-        const seqJoin = targetSchema
-          ? `LEFT JOIN LATERAL (
-            SELECT quote_ident(sn.nspname) || '.' || quote_ident(sc.relname) AS qname
-              FROM pg_depend d
-              JOIN pg_class sc ON sc.oid = d.objid AND sc.relkind = 'S'
-              JOIN pg_namespace sn ON sn.oid = sc.relnamespace
-             WHERE d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid
-               AND d.refobjid = c.oid AND d.refobjsubid = a.attnum AND d.deptype IN ('a', 'i')
-             LIMIT 1
-          ) seq ON true`
-          : '';
-        const defaultExpr = targetSchema
-          ? `COALESCE(
-                     CASE WHEN seq.qname IS NOT NULL
-                          THEN 'nextval(' || quote_literal(seq.qname) || '::regclass)'
-                          ELSE NULL END,
-                     pg_get_expr(ad.adbin, ad.adrelid))`
-          : `pg_get_expr(ad.adbin, ad.adrelid)`;
+        // R1：默认值统一取 `pg_get_expr`。此前的 pg_depend 反查 JOIN 条件自相矛盾
+        // （sc.oid = d.objid 且 d.objid = ad.oid ⇒ sc.oid = ad.oid，永不成立）恒为空，
+        // 属死代码。跨 schema 生成的完全限定名由调用方在 `search_path = pg_catalog`
+        // 下读取保证（compare/sync 的独立会话已设置），不再依赖这里的反查。
+        const defaultExpr = `pg_get_expr(ad.adbin, ad.adrelid)`;
         return `SELECT
             'CREATE TABLE ' || ${tableExpr} || ' (' || chr(10) ||
             string_agg(
@@ -715,7 +698,6 @@ export class TableService {
           JOIN pg_namespace n ON n.oid = c.relnamespace
           JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
           LEFT JOIN pg_attrdef ad ON ad.adrelid = c.oid AND ad.adnum = a.attnum
-          ${seqJoin}
           WHERE c.relname = ${this.esc(table)}
             AND n.nspname = ${schemaExpr}
             AND c.relkind IN ('r', 'p')

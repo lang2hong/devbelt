@@ -55,20 +55,19 @@ describe('PG getCreateSql', () => {
   });
 
   /**
-   * P1：serial/identity 的默认值改由 pg_depend 反查**完全限定**的序列名，
-   * 避免 `pg_get_expr` 随 search_path 输出不带 schema 的 `nextval('seq')`
-   * （跨 schema 同步会错误绑定到源序列）。
+   * R1：原来的 pg_depend 反查 JOIN 条件自相矛盾（sc.oid = d.objid 且 d.objid = ad.oid），
+   * 恒为空，属死代码；现统一用 `pg_get_expr`，完全限定名由调用方在
+   * `search_path = pg_catalog` 下读取保证。
    */
-  it('serial 默认值经 pg_depend 反查完全限定序列名（仅跨 schema 生成时）', async () => {
+  it('R1：默认值统一 pg_get_expr，targetSchema 下也不再含 pg_depend 反查', async () => {
     const { con, table } = pgSvc();
     await table.getCreateSql('t1', undefined, undefined, 'staging');
     const sql = con.sqls[0];
-    expect(sql).toContain('pg_depend');
-    expect(sql).toContain("'nextval('");
-    expect(sql).toContain('quote_ident(sn.nspname)');
-    // M3：连接条件限定到该列的 pg_attrdef 行。
-    expect(sql).toContain("d.classid = 'pg_attrdef'::regclass");
-    expect(sql).toContain('d.objid = ad.oid');
+    expect(sql).not.toContain('pg_depend');
+    expect(sql).not.toContain('seq.qname');
+    expect(sql).toMatch(/pg_get_expr\s*\(\s*ad\.adbin\s*,\s*ad\.adrelid\s*\)/);
+    // 表头仍写到目标 schema。
+    expect(sql).toContain('quote_ident(');
   });
 
   it('未传 targetSchema 时不启用 pg_depend（B5：dump 与 schema 无关）', async () => {

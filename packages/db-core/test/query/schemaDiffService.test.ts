@@ -590,7 +590,7 @@ describe('SchemaDiffService 约束（P3b）', () => {
     expect(sql).toContain('ALTER TABLE "staging"."t" ADD CONSTRAINT "t_fk" FOREIGN KEY (a) REFERENCES "staging".u(id);');
   });
 
-  it('约束在目标多出时判 removed 并生成 DROP', async () => {
+  it('约束在目标多出时判 removed；默认只报告（注释），allowDropConstraints 时才执行 DROP', async () => {
     const pg = new PostgreSqlDialect();
     const source = { getTables: async () => [{ name: 't' }], getColumns: async () => [{ name: 'id', type: 'integer', isPrimary: true }], getConstraints: async () => [] } as unknown as MetadataService;
     const target = { getTables: async () => [{ name: 't' }], getColumns: async () => [{ name: 'id', type: 'integer', isPrimary: true }], getConstraints: async () => [{ tableName: 't', name: 'old_ck', type: 'c', definition: 'CHECK (a > 0)' }] } as unknown as MetadataService;
@@ -598,8 +598,13 @@ describe('SchemaDiffService 约束（P3b）', () => {
     expect(diffs.find((d) => d.tableName === 't')!.constraints!.map((c) => c.status)).toEqual(['removed']);
 
     const tableService = { dbType: DatabaseType.PG, wrapIdentifier: (id: string) => pg.wrap(id), wrapSchemaIdentifier: (id: string) => pg.wrap(id), getCreateSql: async () => '', supports: () => true } as unknown as TableService;
+    // 默认：只报告不执行（逐行注释）。
     const sql = await SchemaDiffService.generateSyncSql(diffs, 'db', tableService, 'db', undefined, { sourceSchema: 'app', targetSchema: 'staging' });
-    expect(sql).toContain('ALTER TABLE "staging"."t" DROP CONSTRAINT IF EXISTS "old_ck";');
+    expect(sql).toContain('-- ALTER TABLE "staging"."t" DROP CONSTRAINT IF EXISTS "old_ck";');
+    expect(sql).not.toMatch(/^ALTER TABLE "staging"\."t" DROP CONSTRAINT/m);
+    // 显式开启 allowDropConstraints 才生成可执行 DROP。
+    const sql2 = SchemaDiffService.generateConstraintsSql(diffs, tableService, { sourceSchema: 'app', targetSchema: 'staging', allowDropConstraints: true });
+    expect(sql2).toContain('ALTER TABLE "staging"."t" DROP CONSTRAINT IF EXISTS "old_ck";');
   });
 });
 
@@ -616,8 +621,27 @@ describe('SchemaDiffService 序列（P3b/N2）', () => {
     } as unknown as TableService;
     const diffs = [{ tableName: 't', status: 'added' as const, columns: [] }];
     const sql = await SchemaDiffService.generateSyncSql(diffs, 'db', tableService, 'db', undefined, { sourceSchema: 's', targetSchema: 'staging' });
-    expect(sql).toContain('CREATE SEQUENCE IF NOT EXISTS staging.t_id_seq;');
-    expect(sql).toContain('ALTER SEQUENCE staging.t_id_seq OWNED BY "staging"."t"."id";');
+    expect(sql).toContain('CREATE SEQUENCE IF NOT EXISTS "staging"."t_id_seq";');
+    expect(sql).toContain('ALTER SEQUENCE "staging"."t_id_seq" OWNED BY "staging"."t"."id";');
+  });
+
+  it('H1：含单引号的目标 schema 在 nextval 字面量中被正确转义（不提前结束字面量）', async () => {
+    const pg = new PostgreSqlDialect();
+    const target = `x'); DROP TABLE t; --`;
+    const tableService = {
+      dbType: DatabaseType.PG,
+      wrapIdentifier: (id: string) => pg.wrap(id),
+      wrapSchemaIdentifier: (id: string) => pg.wrap(id),
+      getCreateSql: async () => `CREATE TABLE "s"."t" (\n  "id" integer DEFAULT nextval('"s"."t_id_seq"'::regclass) NOT NULL\n)`,
+      supports: () => true,
+    } as unknown as TableService;
+    const diffs = [{ tableName: 't', status: 'added' as const, columns: [] }];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'db', tableService, 'db', pg, { sourceSchema: 's', targetSchema: target });
+    // 字面量里的 ' 被翻倍
+    expect(sql).toContain(`nextval('"x''); DROP TABLE t; --"."t_id_seq"'::regclass)`);
+    // 序列名作为标识符、schema 名作为字符串字面量均被安全引用
+    expect(sql).toContain(`CREATE SEQUENCE IF NOT EXISTS ${pg.wrap(target)}.${pg.wrap('t_id_seq')};`);
+    expect(sql).toContain(`ALTER SEQUENCE ${pg.wrap(target)}.${pg.wrap('t_id_seq')} OWNED BY ${pg.wrap(target)}.${pg.wrap('t')}."id";`);
   });
 });
 

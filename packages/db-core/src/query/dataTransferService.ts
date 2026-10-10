@@ -43,9 +43,10 @@ export class DataTransferService {
     targetMeta: MetadataService,
     targetDb: string,
     options: TransferOptions = {},
-  ): Promise<{ tablesSynced: number; errors: string[] }> {
+  ): Promise<{ tablesSynced: number; errors: string[]; warnings: string[] }> {
     const { tables: tableFilter, includeData = true, pageSize = 1000, onProgress, isCancelled, sourceSchema, targetSchema, haltOnError = false } = options;
     const errors: string[] = [];
+    const warnings: string[] = [];
 
     const schemaDiffs = await SchemaDiffService.diff(sourceMeta, sourceDb, targetMeta, targetDb, sourceSchema, targetSchema);
     const sourceSequences = sourceSchema ? await sourceMeta.getSequences(sourceSchema) : [];
@@ -100,7 +101,7 @@ export class DataTransferService {
           await this.syncTableData(
             sourceQuery, sourceMeta, sourceDb, table,
             targetQuery, targetMeta, targetDb,
-            { pageSize, isCancelled, sourceSchema, targetSchema },
+            { pageSize, isCancelled, sourceSchema, targetSchema, warnings },
           );
         } catch (err) {
           errors.push(`${table}: data sync failed - ${(err as Error).message}`);
@@ -124,32 +125,39 @@ export class DataTransferService {
           const s = stmt.trim();
           if (s && !s.startsWith('--')) await targetQuery.query(s, undefined, SKIP);
         }
-// setval：只处理**本次参与同步的表**中、列默认值为 `nextval(...)` 的序列；带下界、
-          // 空表用 minv 且 is_called=false；用唯一 `$devbelt_sync$` 标签避免与 schema 名里的 `$$` 冲突。
-          // 按列默认值（pg_attrdef/pg_get_expr）发现序列，不依赖 OWNED BY 关联是否建立。
+// setval：只处理**本次参与同步的表**中、由列**拥有**的序列（pg_get_serial_sequence，
+// 决定于 OWNED BY）。带下界、且**不低于序列当前值**（避免把共享/已发号序列往回拨）。
+// 目标 schema 之外的序列、降序序列一律跳过。用唯一 `$devbelt_sync$` 标签避免与 schema 名里的 `$$` 冲突。
           const targetLit = targetQuery.dialect.escapeValue(targetSchema);
           const tableIn = [...new Set(uniqueTables)].map((t) => targetQuery.dialect.escapeValue(t)).join(', ');
           if (tableIn) {
             await targetQuery.query(`DO $devbelt_sync$
-DECLARE r record; mx bigint; minv bigint; sq regclass;
+DECLARE r record; mx bigint; minv bigint; cur bigint; inc bigint; seqsch text;
 BEGIN
   FOR r IN
     SELECT n.nspname AS sch, t.relname AS tname, a.attname AS col,
-           substring(pg_get_expr(ad.adbin, ad.adrelid)
-                     from 'nextval\\(''([^'']+)''::regclass\\)') AS seqname
-      FROM pg_attrdef ad
-      JOIN pg_class t ON t.oid = ad.adrelid
+           pg_get_serial_sequence(format('%I.%I', n.nspname, t.relname), a.attname) AS seqtext
+      FROM pg_class t
       JOIN pg_namespace n ON n.oid = t.relnamespace
-      JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ad.adnum
+      JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum > 0 AND NOT a.attisdropped
      WHERE n.nspname = ${targetLit} AND t.relname IN (${tableIn})
-       AND pg_get_expr(ad.adbin, ad.adrelid) LIKE 'nextval(%'
   LOOP
-    sq := (CASE WHEN position('.' in r.seqname) = 0
-                THEN format('%I.%I', r.sch, r.seqname) ELSE r.seqname END)::regclass;
-    SELECT ps.seqmin::bigint INTO minv FROM pg_sequence ps WHERE ps.seqrelid = sq;
+    CONTINUE WHEN r.seqtext IS NULL;
+    SELECT sn.nspname, ps.seqmin::bigint, ps.seqincrement::bigint
+      INTO seqsch, minv, inc
+      FROM pg_class s
+      JOIN pg_namespace sn ON sn.oid = s.relnamespace
+      JOIN pg_sequence ps ON ps.seqrelid = s.oid
+     WHERE s.oid = r.seqtext::regclass;
+    CONTINUE WHEN seqsch <> ${targetLit};   -- 目标 schema 之外的序列不动
+    CONTINUE WHEN inc < 0;                   -- 降序序列跳过
     EXECUTE format('SELECT max(%I) FROM %I.%I', r.col, r.sch, r.tname) INTO mx;
-    IF mx IS NULL THEN PERFORM setval(sq, minv, false);
-    ELSE PERFORM setval(sq, GREATEST(mx, minv), true); END IF;
+    cur := pg_sequence_last_value(r.seqtext::regclass);
+    IF mx IS NULL THEN
+      PERFORM setval(r.seqtext::regclass, GREATEST(minv, COALESCE(cur, minv)), cur IS NOT NULL);
+    ELSE
+      PERFORM setval(r.seqtext::regclass, GREATEST(mx, minv, COALESCE(cur, minv)), true);
+    END IF;
   END LOOP;
 END $devbelt_sync$;`, undefined, SKIP);
           }
@@ -160,7 +168,7 @@ END $devbelt_sync$;`, undefined, SKIP);
     }
 
     onProgress?.({ table: '', phase: 'data', completed: total, total });
-    return { tablesSynced: total - failedTables.size, errors };
+    return { tablesSynced: total - failedTables.size, errors, warnings };
   }
 
   private static async syncTableData(
@@ -171,7 +179,7 @@ END $devbelt_sync$;`, undefined, SKIP);
     targetQuery: QueryService,
     targetMeta: MetadataService,
     targetDb: string,
-    options: { pageSize?: number; isCancelled?: () => boolean; sourceSchema?: string; targetSchema?: string },
+    options: { pageSize?: number; isCancelled?: () => boolean; sourceSchema?: string; targetSchema?: string; warnings?: string[] },
   ): Promise<void> {
     const dataDiff = await DataDiffService.diff(
       sourceQuery, sourceMeta, sourceDb,
@@ -179,8 +187,16 @@ END $devbelt_sync$;`, undefined, SKIP);
       [table],
       { sourceSchema: options.sourceSchema, targetSchema: options.targetSchema, targetMeta },
     );
+    // 目标缺主键列等 → 无法安全同步数据；显式记录为警告（不静默）。
+    for (const s of dataDiff.skipped) {
+      options.warnings?.push(
+        s.reason === 'target-missing-pk'
+          ? `${s.tableName}: data not synced (target missing primary-key column(s): ${(s.missingColumns ?? []).join(', ')})`
+          : `${s.tableName}: data not synced (no usable match key/columns)`,
+      );
+    }
     const syncSql = DataDiffService.generateSyncSql(
-      { diffs: dataDiff.diffs, sourceDb, targetDb },
+      dataDiff,
       targetDb,
       targetQuery,
       options.targetSchema,

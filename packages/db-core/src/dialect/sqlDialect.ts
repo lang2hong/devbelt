@@ -225,6 +225,12 @@ export interface SqlDialect {
   /** 解析序列列表结果。 */
   parseSequenceList?(rows: any[]): import('../types/meta.js').SequenceMeta[];
 
+  /** 列出用户自定义类型名（PG；用于跨 schema 同步前检出目标缺失类型）。 */
+  getTypeListSql?(schema?: string): string;
+
+  /** 解析类型列表结果。 */
+  parseTypeList?(rows: any[]): string[];
+
   /** 生成建序列 SQL。 */
   createSequenceSql?(name: string, seq: import('../types/meta.js').SequenceMeta, schema?: string): string;
 

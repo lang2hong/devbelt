@@ -95,6 +95,21 @@ export class PostgreSqlDialect implements SqlDialect {
       ORDER BY sequencename`;
   }
 
+  /** PG：列出用户自定义类型（enum/domain/独立 composite）——用于跨 schema 同步前检出目标缺失类型。 */
+  getTypeListSql(schema?: string): string {
+    return `SELECT t.typname AS name FROM pg_type t
+      JOIN pg_namespace n ON n.oid = t.typnamespace
+      WHERE n.nspname = ${this.schemaExpr(schema)}
+        AND (t.typtype IN ('e', 'd')
+             OR (t.typtype = 'c' AND t.typrelid <> 0
+                 AND EXISTS (SELECT 1 FROM pg_class c WHERE c.oid = t.typrelid AND c.relkind = 'c')))
+      ORDER BY t.typname`;
+  }
+
+  parseTypeList(rows: any[]): string[] {
+    return rows.map((r) => String(r.name));
+  }
+
   parseSequenceList(rows: any[]): SequenceMeta[] {
     // 数值一律按字符串保留：bigint 的 max/min 超过 JS number 精度，转 Number 会丢精度。
     const s = (v: unknown): string | null => (v === null || v === undefined ? null : String(v));

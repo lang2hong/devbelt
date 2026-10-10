@@ -265,4 +265,12 @@ export class MetadataService {
     const result = await this.queryService.queryAll(sql);
     return this.queryService.dialect.parseConstraintList(result.rows);
   }
+
+  /** 查询用户自定义类型名（PG；方言不支持返回空）。 */
+  async getTypes(schema?: string): Promise<string[]> {
+    const sql = this.queryService.dialect.getTypeListSql?.(schema);
+    if (!sql || !this.queryService.dialect.parseTypeList) return [];
+    const result = await this.queryService.queryAll(sql);
+    return this.queryService.dialect.parseTypeList(result.rows);
+  }
 }

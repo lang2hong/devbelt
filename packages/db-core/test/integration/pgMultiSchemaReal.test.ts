@@ -285,7 +285,7 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
     try {
       const diffs = await SchemaDiffService.diff(meta, dbName, meta, dbName, S1, S2);
       const sql = await SchemaDiffService.generateSyncSql(diffs, dbName, table, dbName, dialect, { sourceSchema: S1, targetSchema: S2 });
-      // 默认值经 pg_depend 完全限定后改写到目标 schema（目标 schema 带引号，H1）。
+      // 默认值（pg_get_expr，因 S1 不在 search_path 已完全限定）改写到目标 schema（目标带引号，H1）。
       expect(sql).toContain(`nextval('"${S2}".`);
       expect(sql).not.toContain(`nextval('${S1}.`);
     } finally {
@@ -420,6 +420,100 @@ it('A6 真库：注入形状 schema 名被安全引用，执行不生效', async
       await raw.query(`DROP TABLE IF EXISTS ${S1}.src_evil`);
       await raw.query(`DROP SCHEMA IF EXISTS ${evilQ} CASCADE`);
       await raw.query(`DROP TABLE IF EXISTS ${S2}."${canary}"`);
+    }
+  });
+it("A6/H1 真库：目标 schema 名含单引号时 nextval 字面量不逃逸", async () => {
+    const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
+    const canary = `q_${stamp}`;
+    // 名字含 ' ; ) -- ，能通过 validateSchemaIdent（无控制字符），长度 < 63 字节。
+    const evil = `zms_q_${stamp}');DROP TABLE ${canary};--`;
+    const evilQ = `"${evil.replace(/"/g, '""')}"`;
+    await raw.query(`CREATE TABLE ${S2}."${canary}" (id int)`);
+    await raw.query(`CREATE SCHEMA ${evilQ}`);
+    await raw.query(`CREATE TABLE ${S1}.src_serial (id bigserial PRIMARY KEY, v text)`);
+    await raw.query(`INSERT INTO ${S1}.src_serial (v) VALUES ('a')`);
+    const prev = (await raw.query('SHOW search_path')).rows[0].search_path as string;
+    try {
+      const diffs = await SchemaDiffService.diff(meta, dbName, meta, dbName, S1, evil);
+      const sql = await SchemaDiffService.generateSyncSql(diffs, dbName, table, dbName, dialect, {
+        sourceSchema: S1, targetSchema: evil, dialect, sourceSequences: await meta.getSequences(S1),
+      });
+      // 字面量里的 ' 被翻倍（否则在 x' 处提前结束）。
+      expect(sql).toContain(`nextval('"zms_q_${stamp}'');DROP TABLE ${canary};--"."src_serial_id_seq"'::regclass)`);
+      // 让注入里未限定的 DROP 若生效能命中 S2。
+      await raw.query(`SET search_path TO ${S2}, public`);
+      await raw.query(sql);
+      await raw.query(`SET search_path TO ${prev}`);
+      // 哨兵存活 + 目标 schema 内表已建。
+      expect((await raw.query(`SELECT to_regclass($1) AS r`, [`${S2}."${canary}"`])).rows[0].r).not.toBeNull();
+      expect((await raw.query(`SELECT to_regclass($1) AS r`, [`${evilQ}.src_serial`])).rows[0].r).not.toBeNull();
+    } finally {
+      await raw.query(`SET search_path TO ${prev}`);
+      await raw.query(`DROP TABLE IF EXISTS ${S1}.src_serial`);
+      await raw.query(`DROP SCHEMA IF EXISTS ${evilQ} CASCADE`);
+      await raw.query(`DROP TABLE IF EXISTS ${S2}."${canary}"`);
+    }
+  });
+it('setval：不低于当前值 / 目标 schema 外的共享序列不动 / 降序序列跳过', async () => {
+    const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
+    const A = `zms_sv_${stamp}_t`;
+    const D = `zms_dsc_${stamp}_t`;
+    const shared = `zms_sh_${stamp}`;
+    const dseq = `zms_dsc_${stamp}_seq`;
+    await raw.query(`CREATE SEQUENCE public."${shared}"`);
+    await raw.query(`CREATE TABLE ${S1}."${A}" (id bigserial PRIMARY KEY, sid bigint DEFAULT nextval('public."${shared}"'), v text)`);
+    await raw.query(`INSERT INTO ${S1}."${A}" (v) VALUES ('a'), ('b')`);
+    await raw.query(`CREATE SEQUENCE ${S1}."${dseq}" INCREMENT BY -1`);
+    await raw.query(`CREATE TABLE ${S1}."${D}" (id bigint DEFAULT nextval('${S1}."${dseq}"'), v text)`);
+    await raw.query(`ALTER SEQUENCE ${S1}."${dseq}" OWNED BY ${S1}."${D}".id`);
+    try {
+      const sharedBefore = Number((await raw.query(`SELECT last_value FROM public."${shared}"`)).rows[0].last_value);
+      await DataTransferService.transferDatabase(query, meta, table, dbName, query, meta, dbName, { sourceSchema: S1, targetSchema: S2, haltOnError: true });
+      // 拥有序列推进到 max(id)=2。
+      expect(Number((await raw.query(`SELECT last_value FROM ${S2}."${A}_id_seq"`)).rows[0].last_value)).toBe(2);
+      // 目标 schema 外的共享序列未被改动。
+      expect(Number((await raw.query(`SELECT last_value FROM public."${shared}"`)).rows[0].last_value)).toBe(sharedBefore);
+      // 再跑一次：不把已发号的拥有序列往回拨。
+      await raw.query(`SELECT setval('${S2}."${A}_id_seq"', 50000, true)`);
+      await DataTransferService.transferDatabase(query, meta, table, dbName, query, meta, dbName, { sourceSchema: S1, targetSchema: S2, haltOnError: true });
+      expect(Number((await raw.query(`SELECT last_value FROM ${S2}."${A}_id_seq"`)).rows[0].last_value)).toBe(50000);
+      // 降序序列被跳过（INCREMENT 保持 -1，未被 setval 拨动）。
+      expect(Number((await raw.query(`SELECT increment_by FROM pg_sequences WHERE schemaname=$1 AND sequencename=$2`, [S2, dseq])).rows[0].increment_by)).toBe(-1);
+    } finally {
+      await raw.query(`DROP TABLE IF EXISTS ${S1}."${A}"`);
+      await raw.query(`DROP TABLE IF EXISTS ${S1}."${D}"`);
+      await raw.query(`DROP SEQUENCE IF EXISTS ${S1}."${dseq}"`);
+      await raw.query(`DROP TABLE IF EXISTS ${S2}."${A}"`);
+      await raw.query(`DROP TABLE IF EXISTS ${S2}."${D}"`);
+      await raw.query(`DROP SEQUENCE IF EXISTS ${S2}."${dseq}"`);
+      await raw.query(`DROP SEQUENCE IF EXISTS public."${shared}"`);
+    }
+  });
+it('M1 真库：public 作源 schema，序列默认值限定并改写到目标', async () => {
+    const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
+    const T = `zms_pub_${stamp}`;
+    await raw.query(`CREATE TABLE public."${T}" (id bigserial PRIMARY KEY, v text)`);
+    const prev = (await raw.query('SHOW search_path')).rows[0].search_path as string;
+    try {
+      // 模拟 compare/sync 的独立会话：目录读取在 pg_catalog 下（完全限定）。
+      await raw.query('SET search_path = pg_catalog');
+      const diffs = (await SchemaDiffService.diff(meta, dbName, meta, dbName, 'public', S2)).filter((d) => d.tableName === T);
+      const sql = await SchemaDiffService.generateSyncSql(diffs, dbName, table, dbName, dialect, {
+        sourceSchema: 'public', targetSchema: S2, dialect, sourceSequences: await meta.getSequences('public'),
+      });
+      await raw.query(`SET search_path TO ${prev}`);
+      expect(sql).toContain(`nextval('"${S2}".`);
+      expect(sql).not.toContain(`nextval('"public".`);
+      await raw.query(sql);
+      const def = (await raw.query(
+        `SELECT column_default FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 AND column_name='id'`,
+        [S2, T],
+      )).rows[0].column_default as string;
+      expect(def).toContain(S2);
+    } finally {
+      await raw.query(`SET search_path TO ${prev}`);
+      await raw.query(`DROP TABLE IF EXISTS public."${T}"`);
+      await raw.query(`DROP TABLE IF EXISTS ${S2}."${T}"`);
     }
   });
 }, 60_000);

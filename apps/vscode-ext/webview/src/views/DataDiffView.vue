@@ -20,8 +20,15 @@ interface TableDataDiff {
   rows: RowDiff[];
 }
 
+interface SkippedTable {
+  tableName: string;
+  reason: 'target-missing-pk' | 'no-key-or-columns';
+  missingColumns?: string[];
+}
+
 interface DiffResult {
   diffs: TableDataDiff[];
+  skipped?: SkippedTable[];
   sourceDb: string;
   targetDb: string;
 }
@@ -90,6 +97,17 @@ function statusClass(status: string) {
       </div>
     </div>
     <div v-if="error" class="error">{{ error }}</div>
+    <div v-if="diff && diff.skipped && diff.skipped.length" class="diff-skipped">
+      <div class="skipped-title">{{ t('wv.dataDiff.skippedTitle') }}</div>
+      <div v-for="s in diff.skipped" :key="s.tableName" class="skipped-row">
+        <span class="table-name">{{ s.tableName }}</span>
+        <span class="skipped-reason">
+          {{ s.reason === 'target-missing-pk'
+            ? t('wv.dataDiff.skippedTargetMissing', { cols: (s.missingColumns || []).join(', ') })
+            : t('wv.dataDiff.skippedNoKey') }}
+        </span>
+      </div>
+    </div>
     <div v-if="diff" class="diff-tables">
       <div v-for="td in diff.diffs" :key="td.tableName" class="diff-table">
         <div class="table-header" @click="toggleTable(td.tableName)">
@@ -132,4 +150,8 @@ function statusClass(status: string) {
 .diff-row { display: flex; gap: 8px; padding: 3px 24px; font-size: 12px; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.08)); }
 .row-status { font-weight: 600; min-width: 70px; }
 .row-pk { color: var(--vscode-descriptionForeground, #808080); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diff-skipped { margin-bottom: 8px; padding: 8px 10px; border: 1px solid var(--vscode-inputValidation-warningBorder, #b89500); border-radius: 3px; background: var(--vscode-inputValidation-warningBackground, rgba(184,149,0,0.1)); }
+.skipped-title { font-size: 12px; font-weight: 600; color: var(--vscode-editorWarning-foreground, #e2b74b); margin-bottom: 4px; }
+.skipped-row { display: flex; gap: 8px; font-size: 12px; }
+.skipped-reason { color: var(--vscode-descriptionForeground, #808080); }
 </style>

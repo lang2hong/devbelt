@@ -210,23 +210,24 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (node.conn.dbType === DatabaseType.PG) {
       const sourceSchema = pgSchemaFor(node.conn, node.schema);
       if (!sourceSchema) { vscode.window.showWarningMessage(l10n('schema.pickSchemaNode')); return; }
+      // 先在**池内会话**上列出 schema 让用户选；选定后才开独立会话（避免 QuickPick 等待期间
+      // 一直占着独立连接/SSH 隧道，也少建一个用不上的会话）。
+      const schemas = (await session.metadata.getSchemas()).filter((s) => s !== sourceSchema);
+      if (!schemas.length) {
+        vscode.window.showWarningMessage(l10n('compare.noOtherSchemas'));
+        return;
+      }
+      const target = await vscode.window.showQuickPick(
+        schemas.map((s) => ({ label: s, value: s })),
+        { placeHolder: l10n('compare.chooseSchema', { schema: sourceSchema }) },
+      );
+      if (!target) return;
       // 独立会话 + M1：目录信息（pg_get_constraintdef/viewdef/triggerdef/indexdef/pg_get_expr）
       // 在 search_path 上可见的对象会输出不带 schema 的名字；置 search_path=pg_catalog 强制完全限定。
       let iso: Awaited<ReturnType<typeof manager.openIsolatedSql>> | undefined;
       try {
         iso = await manager.openIsolatedSql(node.conn, node.database);
         const pgSession = iso.session;
-        await pgSession.query.query('SET search_path = pg_catalog', undefined, { skipHistory: true });
-        const schemas = (await pgSession.metadata.getSchemas()).filter((s) => s !== sourceSchema);
-        if (!schemas.length) {
-          vscode.window.showWarningMessage(l10n('compare.noOtherSchemas'));
-          return;
-        }
-        const target = await vscode.window.showQuickPick(
-          schemas.map((s) => ({ label: s, value: s })),
-          { placeHolder: l10n('compare.chooseSchema', { schema: sourceSchema }) },
-        );
-        if (!target) return;
         const sourceSequences = await pgSession.metadata.getSequences(sourceSchema);
         const diffs = await SchemaDiffService.diff(
           pgSession.metadata, node.database, pgSession.metadata, node.database, sourceSchema, target.value,
@@ -238,10 +239,29 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
         const pgAdded = diffs.filter((d) => d.status === 'added').length;
         const pgRemoved = diffs.filter((d) => d.status === 'removed').length;
         const pgChanged = diffs.filter((d) => d.status === 'changed').length;
-        const pgHeader = `${l10n('compare.syncScopeNote')}\n\n-- Diff: ${sqlCommentSafe(sourceSchema)} -> ${sqlCommentSafe(target.value)} (${pgAdded} added, ${pgRemoved} removed, ${pgChanged} changed)\n\n`;
         const objDiff = await SchemaDiffService.diffSchemaObjects(pgSession.metadata, pgSession.metadata, sourceSchema, target.value);
         const objSql = SchemaDiffService.generateSchemaObjectsSql(objDiff, pgSession.query.dialect, { sourceSchema, targetSchema: target.value });
+        // #7/#13：对象级差异（视图/函数/触发器/序列参数）也必须显式呈现，否则 compare 会误报“已同步”。
+        const objCount = objDiff.views.length + objDiff.routines.length + objDiff.triggers.length + objDiff.sequences.length;
+        // #9：源 schema 使用、目标缺失的自定义类型（enum/domain/composite）——DDL 会在执行时失败并回滚，
+        // 这里预先检出并告警，避免 compare 显示“已同步”。
+        const srcTypes = await pgSession.metadata.getTypes(sourceSchema);
+        const tgtTypeSet = new Set(await pgSession.metadata.getTypes(target.value));
+        const missingTypes = srcTypes.filter((ty) => !tgtTypeSet.has(ty));
+        const typeLine = missingTypes.length
+          ? `-- WARN: custom type(s) missing in target schema: ${missingTypes.map((t) => sqlCommentSafe(t)).join(', ')}\n\n`
+          : '';
+        const objLine = objCount
+          ? `-- Schema objects differing (NOT executed; see commented section below): views ${objDiff.views.length}, functions/procedures ${objDiff.routines.length}, triggers ${objDiff.triggers.length}, sequences ${objDiff.sequences.length}\n\n`
+          : '-- Schema objects: none differing.\n\n';
+        const pgHeader = `${l10n('compare.syncScopeNote')}\n\n-- Diff: ${sqlCommentSafe(sourceSchema)} -> ${sqlCommentSafe(target.value)} (${pgAdded} added, ${pgRemoved} removed, ${pgChanged} changed)\n${objLine}${typeLine}`;
         await openSqlDoc(`${pgHeader}${syncSql}\n\n${objSql}`);
+        if (objCount) {
+          vscode.window.showWarningMessage(l10n('compare.objectsDiffer', { count: objCount, target: target.value }));
+        }
+        if (missingTypes.length) {
+          vscode.window.showWarningMessage(l10n('compare.typesMissing', { types: missingTypes.join(', '), target: target.value }));
+        }
       } finally {
         iso?.close();
       }
@@ -315,8 +335,14 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
             const q = sess.query;
             const m = sess.metadata;
             const tbl = sess.table;
-            // M1：目录信息按完全限定名输出（方法见 compareSchema）。
-            await q.query('SET search_path = pg_catalog', undefined, { skipHistory: true });
+            // #9：目标缺失的自定义类型会导致 DDL 失败并整体回滚；先检出提示。
+            const srcTypes = await m.getTypes(sourceSchema);
+            const tgtTypeSet = new Set(await m.getTypes(target.value));
+            const missingTypes = srcTypes.filter((ty) => !tgtTypeSet.has(ty));
+            if (missingTypes.length) {
+              vscode.window.showWarningMessage(l10n('compare.typesMissing', { types: missingTypes.join(', '), target: target.value }));
+            }
+            // M1 已在 openIsolatedSql 内统一置 search_path=pg_catalog（独立会话）。
             await q.query('BEGIN', undefined, { skipHistory: true });
             let pgResult: Awaited<ReturnType<typeof DataTransferService.transferDatabase>>;
             try {
@@ -348,6 +374,10 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
               );
             } else {
               vscode.window.showInformationMessage(l10n('sync.done', { count: pgResult.tablesSynced }));
+            }
+            // 无法对比/同步的表（如目标缺主键列）必须显式提示，不能静默当成功。
+            if (pgResult.warnings?.length) {
+              vscode.window.showWarningMessage(l10n('sync.doneWarnings', { detail: pgResult.warnings.join('; ') }));
             }
             await recordBulkHistory(
               deps, node.conn!,

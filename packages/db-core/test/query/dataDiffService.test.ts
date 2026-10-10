@@ -235,6 +235,22 @@ describe('DataDiffService', () => {
     expect(result.diffs[0].columnNames).toEqual(['id', 'name']);
     expect(result.diffs[0].rows).toEqual([]);
   });
+
+  it('目标缺主键列 → 记录为 skipped（不静默当作一致）', async () => {
+    const sourceConn = new FakeConnection();
+    sourceConn.setResponses([{ rows: [{ id: 1, name: 'A' }] }]);
+    const targetConn = new FakeConnection();
+    targetConn.setResponses([{ rows: [] }]);
+    const sourceMeta = mockMetadataService([{ name: 'id', isPrimary: true }, { name: 'name' }]);
+    const targetMeta = { getTables: async () => [], getColumns: async () => [{ name: 'name' }] } as unknown as MetadataService;
+    const result = await DataDiffService.diff(
+      makeQueryService(sourceConn), sourceMeta, 's',
+      makeQueryService(targetConn), 't', ['users'],
+      { targetMeta },
+    );
+    expect(result.diffs).toEqual([]);
+    expect(result.skipped).toEqual([{ tableName: 'users', reason: 'target-missing-pk', missingColumns: ['id'] }]);
+  });
 });
 describe('DataDiffService 分页策略（PG keyset 丢行回归）', () => {
   function makeQueryService(conn: FakeConnection): QueryService {

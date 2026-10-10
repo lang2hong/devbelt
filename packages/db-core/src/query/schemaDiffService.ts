@@ -388,21 +388,32 @@ export class SchemaDiffService {
    * 生成表级约束 DDL（PK/UNIQUE/CHECK/FK）。同步路径应在**所有表结构与数据之后**调用，
    * 避免外键引用尚未创建的表或插入时违反约束（H6）。
    */
-  static generateConstraintsSql(diffs: TableDiff[], sourceTableService: TableService, opts: { sourceSchema?: string; targetSchema?: string } = {}): string {
+  static generateConstraintsSql(diffs: TableDiff[], sourceTableService: TableService, opts: { sourceSchema?: string; targetSchema?: string; allowDropConstraints?: boolean } = {}): string {
     const wrap = (id: string) => sourceTableService.wrapIdentifier(id);
     const wrapSchema = (id: string) => sourceTableService.wrapSchemaIdentifier(id);
     const target = opts.targetSchema;
     const targetTable = (name: string): string => (target ? `${wrapSchema(target)}.${wrap(name)}` : wrap(name));
     const rewrite = (text: unknown): string => rewritePgSchemaRefs(toCompareString(text), opts.sourceSchema, target);
     const parts: string[] = [];
+    const commented: string[] = [];
     for (const d of diffs) {
       if (!d.constraints?.length) continue;
       const table = targetTable(d.tableName);
       for (const c of d.constraints) {
         const cn = wrap(validateSchemaIdent(c.name, 63));
+        // 破坏性 DROP 默认**只报告不执行**（避免删掉目标独有约束/被外键依赖时整批失败）；
+        // 需要收敛语义时显式开启 allowDropConstraints。
+        if (c.status === 'removed' && !opts.allowDropConstraints) {
+          commented.push(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${cn};`);
+          continue;
+        }
         parts.push(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${cn};`);
         if (c.status !== 'removed') parts.push(`ALTER TABLE ${table} ADD CONSTRAINT ${cn} ${rewrite(c.definition ?? '')};`);
       }
+    }
+    if (commented.length) {
+      parts.push('-- 目标独有约束默认不删除（如确需删除请显式开启 allowDropConstraints）：');
+      for (const line of commented) parts.push(`-- ${line}`);
     }
     return parts.join('\n');
   }
@@ -489,7 +500,7 @@ export class SchemaDiffService {
   static generateSchemaObjectsSql(obj: SchemaObjectsDiff, dialect: SqlDialect, opts: { sourceSchema?: string; targetSchema?: string } = {}): string {
     const target = opts.targetSchema;
     const wrapObjName = (name: string) => (target ? `${dialect.wrap(validateSchemaIdent(target))}.${dialect.wrap(validateSchemaIdent(name, 63))}` : dialect.wrap(validateSchemaIdent(name, 63)));
-    const rw = (d?: string) => rewritePgSchemaRefs(String(d ?? ''), opts.sourceSchema, target).replace(/;\s*$/, '');
+    const rw = (d?: string) => rewritePgSchemaRefs(String(d ?? ''), opts.sourceSchema, target, (v) => dialect.escapeValue(v)).replace(/;\s*$/, '');
     const parts: string[] = ['-- Schema objects', ''];
 
     // 序列：仅**新增**可执行（补建缺失序列）。删除/参数变更改为注释（避免破坏性 DROP 波及依赖）。
@@ -547,7 +558,10 @@ export class SchemaDiffService {
     const targetTable = (name: string): string => (target ? `${wrapSchema(target)}.${wrap(name)}` : wrap(name));
     // 跨 schema：把默认表达式/类型名里的源 schema 前缀改写到目标 schema
     // （如 nextval('s1.x_seq') → nextval('s2.x_seq')）。
-    const rewrite = (text: unknown): string => rewritePgSchemaRefs(toCompareString(text), opts.sourceSchema, target);
+    const rewrite = (text: unknown): string => rewritePgSchemaRefs(
+      toCompareString(text), opts.sourceSchema, target,
+      opts.dialect ? (v) => opts.dialect!.escapeValue(v) : undefined,
+    );
     const parts: string[] = [
       `-- Schema sync: ${sqlCommentSafe(sourceDb)} → ${target ? wrapSchema(target) : 'target'}`,
       '',
@@ -559,16 +573,21 @@ if (d.status === 'added') {
         const ddl = rewrite(await sourceTableService.getCreateSql(d.tableName, sourceDb, opts.sourceSchema, opts.targetSchema));
         parts.push(`-- Add table: ${d.tableName}`);
         // N2：#5 建表阶段就用**源序列元数据**生成目标序列（含参数），避免先建默认序列再被判「已存在」跳过。
+        // 序列名由 schema/名称**分别 wrap** 后拼接（不把 nextval 字面量文本当标识符，防注入）。
         for (const q of new Set(extractNextvalSequences(ddl))) {
           const seqName = seqNameOf(q);
           const src = opts.sourceSequences?.find((s) => s.name === seqName);
           if (src && opts.dialect?.createSequenceSql) parts.push(opts.dialect.createSequenceSql(src.name, src, target));
-          else parts.push(`CREATE SEQUENCE IF NOT EXISTS ${q};`);
+          else if (target) parts.push(`CREATE SEQUENCE IF NOT EXISTS ${wrapSchema(target)}.${wrap(seqName)};`);
+          else parts.push(`CREATE SEQUENCE IF NOT EXISTS ${wrap(seqName)};`);
         }
         parts.push(`DROP TABLE IF EXISTS ${table};`);
         parts.push(ddl.replace(/;\s*$/, '') + ';');
         // 把序列绑定到列（OWNED BY）：删除表/列时序列随之回收。
-        for (const [q, col] of parseSequenceOwners(ddl)) parts.push(`ALTER SEQUENCE ${q} OWNED BY ${table}.${wrap(col)};`);
+        for (const [q, col] of parseSequenceOwners(ddl)) {
+          const seqIdent = target ? `${wrapSchema(target)}.${wrap(seqNameOf(q))}` : q;
+          parts.push(`ALTER SEQUENCE ${seqIdent} OWNED BY ${table}.${wrap(col)};`);
+        }
         parts.push('');
       } else if (d.status === 'removed') {
         parts.push(`-- Drop table: ${d.tableName}`);
@@ -733,26 +752,69 @@ function toCompareString(v: unknown): string {
   return v === undefined || v === null ? '' : String(v);
 }
 
-/** 提取 DDL 里 `nextval('<seq>'::regclass)` 的序列名（用于先生成 CREATE SEQUENCE）。 */
-function extractNextvalSequences(text: string): string[] {
-  const out: string[] = [];
-  for (const m of text.matchAll(/nextval\('([^']+)'::regclass\)/g)) out.push(m[1]);
+/**
+ * 解析文本里所有 `nextval('<literal>'::regclass)`，返回**解码后**的 regclass 标识符文本与整体位置。
+ * 正确处理字面量里的 `''` 转义（序列/schema 名可能含 `'`），避免正则 `[^']+` 被截断。
+ */
+function iterNextval(text: string): { start: number; end: number; ref: string }[] {
+  const out: { start: number; end: number; ref: string }[] = [];
+  const re = /nextval\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    let i = m.index + m[0].length;
+    if (text[i] !== "'") continue;
+    let j = i + 1;
+    let lit = '';
+    let closed = false;
+    while (j < text.length) {
+      if (text[j] === "'") {
+        if (text[j + 1] === "'") { lit += "'"; j += 2; continue; }
+        closed = true;
+        break;
+      }
+      lit += text[j]; j++;
+    }
+    if (!closed) continue;
+    const tail = text.slice(j + 1, j + 1 + '::regclass)'.length);
+    if (tail !== '::regclass)') continue;
+    const end = j + 1 + '::regclass)'.length;
+    out.push({ start: m.index, end, ref: lit });
+    re.lastIndex = end;
+  }
   return out;
 }
 
-/** 从 `nextval('<seq>'::regclass)` 的序列名（可能带 schema/引号）取末尾标识符（去掉引号）。 */
-function seqNameOf(q: string): string {
-  const last = q.slice(q.lastIndexOf('.') + 1);
-  return last.replace(/^"(.*)"$/, '$1').replace(/""/g, '"');
+/** 提取 DDL 里 `nextval('<seq>'::regclass)` 的 regclass 文本（用于先生成 CREATE SEQUENCE）。 */
+function extractNextvalSequences(text: string): string[] {
+  return iterNextval(text).map((m) => m.ref);
 }
 
-/** 从建表 DDL 解析「序列名 → 拥有它的列」映射（列行首为带引号的列名 + DEFAULT nextval）。 */
+/** 从 `nextval('<seq>'::regclass)` 的 regclass 文本取末尾标识符（去掉引号，支持名字里含 `.`）。 */
+function seqNameOf(q: string): string {
+  let inQuote = false;
+  let cut = -1;
+  for (let i = 0; i < q.length; i++) {
+    const c = q[i];
+    if (c === '"') {
+      if (inQuote && q[i + 1] === '"') { i++; continue; }
+      inQuote = !inQuote;
+    } else if (c === '.' && !inQuote) {
+      cut = i;
+    }
+  }
+  const seg = cut >= 0 ? q.slice(cut + 1) : q;
+  return seg.startsWith('"') && seg.endsWith('"') ? seg.slice(1, -1).replace(/""/g, '"') : seg;
+}
+
+/** 从建表 DDL 解析「序列 regclass 文本 → 拥有它的列」映射（列行首为列名，可能带引号或无引号）。 */
 function parseSequenceOwners(ddl: string): Map<string, string> {
   const out = new Map<string, string>();
   for (const line of ddl.split('\n')) {
-    const col = /^\s*"((?:[^"]|"")*)"/.exec(line)?.[1];
-    const seq = /DEFAULT nextval\('([^']+)'::regclass\)/.exec(line)?.[1];
-    if (col && seq) out.set(seq, col.replace(/""/g, '"'));
+    const colMatch = /^\s*("(?:[^"]|"")*"|\S+)/.exec(line)?.[1];
+    const seq = iterNextval(line)[0]?.ref;
+    if (!colMatch || !seq) continue;
+    const col = colMatch.startsWith('"') ? colMatch.slice(1, -1).replace(/""/g, '"') : colMatch;
+    out.set(seq, col);
   }
   return out;
 }
@@ -846,7 +908,15 @@ function stripSchemaInLiteral(lit: string, schemas: readonly (string | undefined
 
 /** 只从 `nextval('<schema>.<seq>'::regclass)` 的字面量里剥掉 schema 前缀（不碰其它字面量）。 */
 function stripRegclassSchema(text: string, schemas: readonly (string | undefined)[]): string {
-  return text.replace(/nextval\('([^']*)'::regclass\)/g, (_m, lit: string) => `nextval('${stripSchemaInLiteral(lit, schemas)}'::regclass)`);
+  const matches = iterNextval(text);
+  if (!matches.length) return text;
+  let out = '';
+  let pos = 0;
+  for (const m of matches) {
+    out += text.slice(pos, m.start) + `nextval(${stripSchemaInLiteral(m.ref, schemas)})`;
+    pos = m.end;
+  }
+  return out + text.slice(pos);
 }
 
 /**
@@ -887,19 +957,30 @@ function makeSchemaNormalizers(sourceSchema?: string, targetSchema?: string): Co
  * 未限定的 `nextval('seq')` 不再补目标 schema（M1 已用 `SET LOCAL search_path=pg_catalog`
  * 保证目录输出总是限定；共用序列不会被悄悄另起计数器）。
  */
-function rewritePgSchemaRefs(text: string, from?: string, to?: string): string {
+function rewritePgSchemaRefs(text: string, from?: string, to?: string, escape?: (v: string) => string): string {
   if (!text || !from || !to || from === to) return text;
   const fromQ = `"${from.replace(/"/g, '""')}"`;
   const toQ = `"${to.replace(/"/g, '""')}"`;
-  const s = text.replace(/nextval\('([^']*)'::regclass\)/g, (_m, lit: string) => {
-    let l = lit;
-    if (l.startsWith(`${fromQ}.`)) l = `${toQ}.${l.slice(fromQ.length + 1)}`;
-    else if (l.startsWith(`${from}.`)) l = `${toQ}.${l.slice(from.length + 1)}`;
-    return `nextval('${l}'::regclass)`;
-  });
+  // 目标 schema 名可能含 `'`；放进 nextval('…'::regclass) 的**字符串字面量**必须按方言转义
+  // （escapeValue 同时处理 `'` 与 scs=off 的反斜杠），否则含 `'` 的 schema 会提前结束字面量形成注入。
+  const esc = escape ?? ((v: string) => `'${v.replace(/'/g, "''")}'`);
+  const matches = iterNextval(text);
+  if (matches.length) {
+    let out = '';
+    let pos = 0;
+    for (const m of matches) {
+      out += text.slice(pos, m.start);
+      let ref = m.ref;
+      if (ref.startsWith(`${fromQ}.`)) ref = `${toQ}.${ref.slice(fromQ.length + 1)}`;
+      else if (ref.startsWith(`${from}.`)) ref = `${toQ}.${ref.slice(from.length + 1)}`;
+      out += `nextval(${esc(ref)}::regclass)`;
+      pos = m.end;
+    }
+    text = out + text.slice(pos);
+  }
   const boundary = '(?<![\\w$"\'])';
   const fromPats = [fromQ, from].map((p) => new RegExp(`${boundary}${escapeRe(p)}\\.`, 'g'));
-  return rewriteOutsideLiterals(s, (seg) => {
+  return rewriteOutsideLiterals(text, (seg) => {
     let out = seg;
     for (const re of fromPats) out = out.replace(re, `${toQ}.`);
     return out;
