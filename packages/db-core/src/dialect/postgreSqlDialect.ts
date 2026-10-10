@@ -110,6 +110,28 @@ export class PostgreSqlDialect implements SqlDialect {
     return rows.map((r) => String(r.name));
   }
 
+  /**
+   * PG：列出**扩展所属**的对象名（类型/函数，pg_depend.deptype='e'）。
+   * 跨 schema 改写时必须排除它们：例如 public 是源时 `public.citext` / `public.uuid_generate_v4()`
+   * 属于扩展、在目标 schema 并不存在，改写成 `"tgt".citext` 会直接失败。
+   */
+  getExtensionObjectListSql(schema?: string): string {
+    const sch = this.schemaExpr(schema);
+    return `SELECT DISTINCT t.typname AS name FROM pg_type t
+      JOIN pg_namespace n ON n.oid = t.typnamespace
+      JOIN pg_depend d ON d.objid = t.oid AND d.classid = 'pg_type'::regclass AND d.deptype = 'e'
+      WHERE n.nspname = ${sch}
+      UNION
+      SELECT DISTINCT p.proname AS name FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      JOIN pg_depend d ON d.objid = p.oid AND d.classid = 'pg_proc'::regclass AND d.deptype = 'e'
+      WHERE n.nspname = ${sch}`;
+  }
+
+  parseExtensionObjectList(rows: any[]): string[] {
+    return rows.map((r) => String(r.name));
+  }
+
   parseSequenceList(rows: any[]): SequenceMeta[] {
     // 数值一律按字符串保留：bigint 的 max/min 超过 JS number 精度，转 Number 会丢精度。
     const s = (v: unknown): string | null => (v === null || v === undefined ? null : String(v));

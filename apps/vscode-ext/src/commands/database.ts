@@ -229,18 +229,20 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
         iso = await manager.openIsolatedSql(node.conn, node.database);
         const pgSession = iso.session;
         const sourceSequences = await pgSession.metadata.getSequences(sourceSchema);
+        // #2：扩展所属对象（如 public.citext / public.uuid_generate_v4）不参与 schema 改写。
+        const protectedNames = new Set(await pgSession.metadata.getExtensionObjects(sourceSchema));
         const diffs = await SchemaDiffService.diff(
           pgSession.metadata, node.database, pgSession.metadata, node.database, sourceSchema, target.value,
         );
         const syncSql = await SchemaDiffService.generateSyncSql(
           diffs, node.database, pgSession.table, node.database, pgSession.query.dialect,
-          { sourceSchema, targetSchema: target.value, dialect: pgSession.query.dialect, sourceSequences },
+          { sourceSchema, targetSchema: target.value, dialect: pgSession.query.dialect, sourceSequences, protectedNames },
         );
         const pgAdded = diffs.filter((d) => d.status === 'added').length;
         const pgRemoved = diffs.filter((d) => d.status === 'removed').length;
         const pgChanged = diffs.filter((d) => d.status === 'changed').length;
         const objDiff = await SchemaDiffService.diffSchemaObjects(pgSession.metadata, pgSession.metadata, sourceSchema, target.value);
-        const objSql = SchemaDiffService.generateSchemaObjectsSql(objDiff, pgSession.query.dialect, { sourceSchema, targetSchema: target.value });
+        const objSql = SchemaDiffService.generateSchemaObjectsSql(objDiff, pgSession.query.dialect, { sourceSchema, targetSchema: target.value, protectedNames });
         // #7/#13：对象级差异（视图/函数/触发器/序列参数）也必须显式呈现，否则 compare 会误报“已同步”。
         const objCount = objDiff.views.length + objDiff.routines.length + objDiff.triggers.length + objDiff.sequences.length;
         // #9：源 schema 使用、目标缺失的自定义类型（enum/domain/composite）——DDL 会在执行时失败并回滚，

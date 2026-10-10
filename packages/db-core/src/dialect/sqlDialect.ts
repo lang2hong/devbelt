@@ -231,6 +231,12 @@ export interface SqlDialect {
   /** 解析类型列表结果。 */
   parseTypeList?(rows: any[]): string[];
 
+  /** 列出扩展所属对象名（PG；跨 schema 改写时排除，避免把 `public.citext` 之类改成目标 schema）。 */
+  getExtensionObjectListSql?(schema?: string): string;
+
+  /** 解析扩展对象列表结果。 */
+  parseExtensionObjectList?(rows: any[]): string[];
+
   /** 生成建序列 SQL。 */
   createSequenceSql?(name: string, seq: import('../types/meta.js').SequenceMeta, schema?: string): string;
 

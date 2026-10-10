@@ -50,6 +50,8 @@ export class DataTransferService {
 
     const schemaDiffs = await SchemaDiffService.diff(sourceMeta, sourceDb, targetMeta, targetDb, sourceSchema, targetSchema);
     const sourceSequences = sourceSchema ? await sourceMeta.getSequences(sourceSchema) : [];
+    // #2：扩展所属对象（如 public.citext / public.uuid_generate_v4）属于扩展而非源 schema，改写时排除。
+    const protectedNames = sourceSchema ? new Set(await sourceMeta.getExtensionObjects(sourceSchema)) : undefined;
     // 按表名索引，避免循环里对 schemaDiffs 反复线性查找（O(n²)）。
     const diffByName = new Map(schemaDiffs.map((d) => [d.tableName, d]));
     const tableList = tableFilter
@@ -77,7 +79,7 @@ export class DataTransferService {
             throw new Error('cross-database-type schema sync is not supported');
           }
           const syncSql = await SchemaDiffService.generateSyncSql(
-            [diff], targetDb, sourceTable, sourceDb, targetQuery.dialect, { sourceSchema, targetSchema, dialect: targetQuery.dialect, skipConstraints: true, sourceSequences },
+            [diff], targetDb, sourceTable, sourceDb, targetQuery.dialect, { sourceSchema, targetSchema, dialect: targetQuery.dialect, skipConstraints: true, sourceSequences, protectedNames },
           );
           const statements = splitExecutableStatements(syncSql, scanOptionsForDialect(targetQuery.dialect));
           for (const stmt of statements) {
@@ -115,9 +117,9 @@ export class DataTransferService {
     // H6：外键/CHECK 在数据导入后再加，避免引用未建表或插入时违反约束。
     if (sourceSchema && targetSchema && sourceQuery.dialect.dbType === 'PG') {
       try {
-        const constrainSql = SchemaDiffService.generateConstraintsSql(schemaDiffs, sourceTable, { sourceSchema, targetSchema });
+        const constrainSql = SchemaDiffService.generateConstraintsSql(schemaDiffs, sourceTable, { sourceSchema, targetSchema, protectedNames });
         const obj = await SchemaDiffService.diffSchemaObjects(sourceMeta, targetMeta, sourceSchema, targetSchema);
-        const objSql = SchemaDiffService.generateSchemaObjectsSql(obj, targetQuery.dialect, { sourceSchema, targetSchema });
+        const objSql = SchemaDiffService.generateSchemaObjectsSql(obj, targetQuery.dialect, { sourceSchema, targetSchema, protectedNames });
         const sql = [constrainSql, objSql].filter(Boolean).join('\n');
         const statements = splitExecutableStatements(sql, scanOptionsForDialect(targetQuery.dialect));
         for (const stmt of statements) {

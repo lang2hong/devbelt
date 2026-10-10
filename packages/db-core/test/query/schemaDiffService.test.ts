@@ -643,6 +643,50 @@ describe('SchemaDiffService 序列（P3b/N2）', () => {
     expect(sql).toContain(`CREATE SEQUENCE IF NOT EXISTS ${pg.wrap(target)}.${pg.wrap('t_id_seq')};`);
     expect(sql).toContain(`ALTER SEQUENCE ${pg.wrap(target)}.${pg.wrap('t_id_seq')} OWNED BY ${pg.wrap(target)}.${pg.wrap('t')}."id";`);
   });
+
+  it('#2：protectedNames（扩展所属对象）不被改写', async () => {
+    const pg = new PostgreSqlDialect();
+    const tableService = {
+      dbType: DatabaseType.PG,
+      wrapIdentifier: (id: string) => pg.wrap(id),
+      wrapSchemaIdentifier: (id: string) => pg.wrap(id),
+      getCreateSql: async () => `CREATE TABLE "public"."t" (\n  "c" public.citext,\n  "d" text DEFAULT public.uuid_generate_v4()\n)`,
+      supports: () => true,
+    } as unknown as TableService;
+    const sql = await SchemaDiffService.generateSyncSql(
+      [{ tableName: 't', status: 'added' as const, columns: [] }], 'db', tableService, 'db', pg,
+      { sourceSchema: 'public', targetSchema: 'staging', dialect: pg, protectedNames: new Set(['citext', 'uuid_generate_v4']) },
+    );
+    expect(sql).toContain('public.citext');
+    expect(sql).toContain('public.uuid_generate_v4()');
+    expect(sql).not.toContain('"staging".citext');
+    expect(sql).not.toContain('"staging".uuid_generate_v4');
+  });
+
+  it('#1：已有表新增 serial 列时先生成目标序列 + OWNED BY', async () => {
+    const pg = new PostgreSqlDialect();
+    const tableService = {
+      dbType: DatabaseType.PG,
+      wrapIdentifier: (id: string) => pg.wrap(id),
+      wrapSchemaIdentifier: (id: string) => pg.wrap(id),
+      getCreateSql: async () => '',
+      supports: () => true,
+    } as unknown as TableService;
+    const diffs = [{
+      tableName: 't',
+      status: 'changed' as const,
+      columns: [{ columnName: 'n', status: 'added' as const, sourceType: 'bigint', sourceNotNull: false, sourceDefault: `nextval('"s"."t_n_seq"'::regclass)` }],
+    }];
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'db', tableService, 'db', pg, {
+      sourceSchema: 's', targetSchema: 'staging', dialect: pg, sourceSequences: [{ name: 't_n_seq', dataType: 'bigint' }],
+    });
+    expect(sql).toContain('CREATE SEQUENCE IF NOT EXISTS "staging"."t_n_seq"');
+    expect(sql).toContain('ALTER SEQUENCE "staging"."t_n_seq" OWNED BY "staging"."t"."n";');
+    expect(sql).toContain('ALTER TABLE "staging"."t" ADD COLUMN "n"');
+    expect(sql).toContain(`nextval('"staging"."t_n_seq"'::regclass)`);
+    // 序列生成必须在 ALTER TABLE 之前。
+    expect(sql.indexOf('CREATE SEQUENCE')).toBeLessThan(sql.indexOf('ALTER TABLE "staging"."t"'));
+  });
 });
 
 describe('SchemaDiffService 索引 / schema 级对象（P3c）', () => {

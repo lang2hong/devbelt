@@ -516,4 +516,60 @@ it('M1 真库：public 作源 schema，序列默认值限定并改写到目标',
       await raw.query(`DROP TABLE IF EXISTS ${S2}."${T}"`);
     }
   });
+it('#1 真库：已有表新增 serial 列时创建目标序列并可插入', async () => {
+    const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
+    const T = `zms_add_${stamp}`;
+    await raw.query(`CREATE TABLE ${S1}."${T}" (id int PRIMARY KEY)`);
+    await raw.query(`CREATE TABLE ${S2}."${T}" (id int PRIMARY KEY)`);
+    try {
+      await raw.query(`ALTER TABLE ${S1}."${T}" ADD COLUMN n bigserial`);
+      const res = await DataTransferService.transferDatabase(query, meta, table, dbName, query, meta, dbName, { sourceSchema: S1, targetSchema: S2, haltOnError: true });
+      expect(res.errors).toEqual([]);
+      const seqRow = await raw.query(
+        `SELECT 1 FROM pg_class s JOIN pg_namespace n ON n.oid = s.relnamespace WHERE s.relkind='S' AND n.nspname=$1 AND s.relname=$2`,
+        [S2, `${T}_n_seq`],
+      );
+      expect(seqRow.rowCount).toBe(1);
+      const def = (await raw.query(
+        `SELECT column_default FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 AND column_name='n'`,
+        [S2, T],
+      )).rows[0].column_default as string;
+      expect(def).toContain(S2);
+      const ins = await raw.query(`INSERT INTO ${S2}."${T}" (id) VALUES (1) RETURNING n`);
+      expect(Number(ins.rows[0].n)).toBe(1);
+    } finally {
+      await raw.query(`DROP TABLE IF EXISTS ${S1}."${T}"`);
+      await raw.query(`DROP TABLE IF EXISTS ${S2}."${T}"`);
+    }
+  });
+
+  it('#2 真库：源 schema 为 public 时扩展类型不被改写到目标 schema', async () => {
+    try { await raw.query('CREATE EXTENSION IF NOT EXISTS citext'); } catch { return; }
+    const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
+    const T = `zms_cit_${stamp}`;
+    await raw.query(`CREATE TABLE public."${T}" (id int PRIMARY KEY, c citext)`);
+    const prev = (await raw.query('SHOW search_path')).rows[0].search_path as string;
+    try {
+      await raw.query('SET search_path = pg_catalog');
+      const protectedNames = new Set(await meta.getExtensionObjects('public'));
+      expect(protectedNames.has('citext')).toBe(true);
+      const diffs = (await SchemaDiffService.diff(meta, dbName, meta, dbName, 'public', S2)).filter((d) => d.tableName === T);
+      const sql = await SchemaDiffService.generateSyncSql(diffs, dbName, table, dbName, dialect, {
+        sourceSchema: 'public', targetSchema: S2, dialect, protectedNames, sourceSequences: await meta.getSequences('public'),
+      });
+      await raw.query(`SET search_path TO ${prev}`);
+      expect(sql).toContain('public.citext');
+      expect(sql).not.toContain(`"${S2}".citext`);
+      await raw.query(sql);
+      const ty = (await raw.query(
+        `SELECT udt_name FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 AND column_name='c'`,
+        [S2, T],
+      )).rows[0].udt_name as string;
+      expect(ty).toBe('citext');
+    } finally {
+      await raw.query(`SET search_path TO ${prev}`);
+      await raw.query(`DROP TABLE IF EXISTS public."${T}"`);
+      await raw.query(`DROP TABLE IF EXISTS ${S2}."${T}"`);
+    }
+  });
 }, 60_000);

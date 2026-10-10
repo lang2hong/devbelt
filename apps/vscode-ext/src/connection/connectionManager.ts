@@ -254,26 +254,30 @@ export class ConnectionManager {
       const acquired = await SshTunnel.create(target);
       if (acquired) { host = '127.0.0.1'; port = acquired.port; tunnelLease = acquired.lease; }
     }
+    let opened: Awaited<ReturnType<typeof openIsolatedSqlSession>> | undefined;
     try {
-      const { session, close } = await openIsolatedSqlSession(target, host, port, tunnelLease);
+      opened = await openIsolatedSqlSession(target, host, port, tunnelLease);
       // M1：独立会话仅用于跨 schema 目录读取/生成；在 search_path 上可见的对象会让
       // pg_get_* 输出不带 schema 的名字。统一在此置 pg_catalog，调用点无需各自记得设置。
+      // 失败必须直接抛错（否则 R1：新表会悄悄绑回源 schema 的序列），并关闭已建会话。
       if (target.dbType === DatabaseType.PG) {
-        try { await session.query.query('SET search_path = pg_catalog', undefined, { skipHistory: true }); }
-        catch { /* 非致命：退化为默认 search_path */ }
+        await opened.session.query.query('SET search_path = pg_catalog', undefined, { skipHistory: true });
       }
-      // 登记关闭钩子：连接被 dispose 时关闭在途独立会话（close 幂等）。
-      const connId = effective.id;
-      const closers = this.isolatedClosers;
-      let entry: { connId: string; close: () => void };
-      const wrapped = (): void => { closers.delete(entry); close(); };
-      entry = { connId, close: wrapped };
-      closers.add(entry);
-      return { session, close: wrapped };
     } catch (err) {
-      if (tunnelLease) SshTunnel.release(target.id, tunnelLease);
+      if (opened) opened.close();
+      else if (tunnelLease) SshTunnel.release(target.id, tunnelLease);
       throw err;
     }
+    const session = opened.session;
+    const close = opened.close;
+    // 登记关闭钩子：连接被 dispose 时关闭在途独立会话（close 幂等）。
+    const connId = effective.id;
+    const closers = this.isolatedClosers;
+    let entry: { connId: string; close: () => void };
+    const wrapped = (): void => { closers.delete(entry); close(); };
+    entry = { connId, close: wrapped };
+    closers.add(entry);
+    return { session, close: wrapped };
   }
 
   /**

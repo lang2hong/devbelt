@@ -297,7 +297,7 @@ export class SchemaDiffService {
     sourceTableService: TableService,
     sourceDb: string,
     targetDialect?: SqlDialect,
-    opts: { sourceSchema?: string; targetSchema?: string; dialect?: SqlDialect; skipConstraints?: boolean; sourceSequences?: SequenceMeta[] } = {},
+    opts: { sourceSchema?: string; targetSchema?: string; dialect?: SqlDialect; skipConstraints?: boolean; sourceSequences?: SequenceMeta[]; protectedNames?: ReadonlySet<string> } = {},
   ): Promise<string> {
     if (!sourceTableService.supports('schemaSync')) {
       throw new Error('Schema sync SQL is not supported for this database');
@@ -388,12 +388,12 @@ export class SchemaDiffService {
    * 生成表级约束 DDL（PK/UNIQUE/CHECK/FK）。同步路径应在**所有表结构与数据之后**调用，
    * 避免外键引用尚未创建的表或插入时违反约束（H6）。
    */
-  static generateConstraintsSql(diffs: TableDiff[], sourceTableService: TableService, opts: { sourceSchema?: string; targetSchema?: string; allowDropConstraints?: boolean } = {}): string {
+  static generateConstraintsSql(diffs: TableDiff[], sourceTableService: TableService, opts: { sourceSchema?: string; targetSchema?: string; allowDropConstraints?: boolean; protectedNames?: ReadonlySet<string> } = {}): string {
     const wrap = (id: string) => sourceTableService.wrapIdentifier(id);
     const wrapSchema = (id: string) => sourceTableService.wrapSchemaIdentifier(id);
     const target = opts.targetSchema;
     const targetTable = (name: string): string => (target ? `${wrapSchema(target)}.${wrap(name)}` : wrap(name));
-    const rewrite = (text: unknown): string => rewritePgSchemaRefs(toCompareString(text), opts.sourceSchema, target);
+    const rewrite = (text: unknown): string => rewritePgSchemaRefs(toCompareString(text), opts.sourceSchema, target, undefined, opts.protectedNames);
     const parts: string[] = [];
     const commented: string[] = [];
     for (const d of diffs) {
@@ -497,10 +497,10 @@ export class SchemaDiffService {
   }
 
   /** 生成 schema 级对象的同步 SQL（PG 定义改写到目标 schema）。 */
-  static generateSchemaObjectsSql(obj: SchemaObjectsDiff, dialect: SqlDialect, opts: { sourceSchema?: string; targetSchema?: string } = {}): string {
+  static generateSchemaObjectsSql(obj: SchemaObjectsDiff, dialect: SqlDialect, opts: { sourceSchema?: string; targetSchema?: string; protectedNames?: ReadonlySet<string> } = {}): string {
     const target = opts.targetSchema;
     const wrapObjName = (name: string) => (target ? `${dialect.wrap(validateSchemaIdent(target))}.${dialect.wrap(validateSchemaIdent(name, 63))}` : dialect.wrap(validateSchemaIdent(name, 63)));
-    const rw = (d?: string) => rewritePgSchemaRefs(String(d ?? ''), opts.sourceSchema, target, (v) => dialect.escapeValue(v)).replace(/;\s*$/, '');
+    const rw = (d?: string) => rewritePgSchemaRefs(String(d ?? ''), opts.sourceSchema, target, (v) => dialect.escapeValue(v), opts.protectedNames).replace(/;\s*$/, '');
     const parts: string[] = ['-- Schema objects', ''];
 
     // 序列：仅**新增**可执行（补建缺失序列）。删除/参数变更改为注释（避免破坏性 DROP 波及依赖）。
@@ -550,17 +550,20 @@ export class SchemaDiffService {
     _targetDb: string,
     sourceTableService: TableService,
     sourceDb: string,
-    opts: { sourceSchema?: string; targetSchema?: string; dialect?: SqlDialect; skipConstraints?: boolean; sourceSequences?: SequenceMeta[] } = {},
+    opts: { sourceSchema?: string; targetSchema?: string; dialect?: SqlDialect; skipConstraints?: boolean; sourceSequences?: SequenceMeta[]; protectedNames?: ReadonlySet<string> } = {},
   ): Promise<string> {
     const wrap = (id: string) => sourceTableService.wrapIdentifier(id);
     const wrapSchema = (id: string) => sourceTableService.wrapSchemaIdentifier(id);
     const target = opts.targetSchema;
     const targetTable = (name: string): string => (target ? `${wrapSchema(target)}.${wrap(name)}` : wrap(name));
+    // #4：注释/默认值的转义必须按目标方言（scs=off 时反斜杠也要处理），不能固定用 scs=on 的实例。
+    const pgEsc = opts.dialect ? (v: any): string => opts.dialect!.escapeValue(v) : PG_ESC;
     // 跨 schema：把默认表达式/类型名里的源 schema 前缀改写到目标 schema
     // （如 nextval('s1.x_seq') → nextval('s2.x_seq')）。
     const rewrite = (text: unknown): string => rewritePgSchemaRefs(
       toCompareString(text), opts.sourceSchema, target,
       opts.dialect ? (v) => opts.dialect!.escapeValue(v) : undefined,
+      opts.protectedNames,
     );
     const parts: string[] = [
       `-- Schema sync: ${sqlCommentSafe(sourceDb)} → ${target ? wrapSchema(target) : 'target'}`,
@@ -597,6 +600,26 @@ if (d.status === 'added') {
         const actions: string[] = [];
         const warnings: string[] = [];
         const extra: string[] = [];
+        // #1：给已有表新增 serial 列 / 改默认值为 nextval 时，必须**先建目标序列**（复用新增表逻辑），
+        // 否则 ALTER 引用的 nextval 在目标 schema 不存在，整条语句失败。
+        const pre: string[] = [];
+        const seqsDone = new Set<string>();
+        const ensureSeq = (defaultText: unknown, ownerCol?: string): void => {
+          for (const q of new Set(extractNextvalSequences(toCompareString(defaultText)))) {
+            const seqName = seqNameOf(q);
+            if (seqsDone.has(seqName)) continue;
+            seqsDone.add(seqName);
+            const src = opts.sourceSequences?.find((s) => s.name === seqName);
+            if (src && opts.dialect?.createSequenceSql) pre.push(opts.dialect.createSequenceSql(src.name, src, target));
+            else if (target) pre.push(`CREATE SEQUENCE IF NOT EXISTS ${wrapSchema(target)}.${wrap(seqName)};`);
+            else pre.push(`CREATE SEQUENCE IF NOT EXISTS ${wrap(seqName)};`);
+            // 仅新增列才建立归属；改默认值不夺取既有序列的所有权。
+            if (ownerCol) {
+              const seqIdent = target ? `${wrapSchema(target)}.${wrap(seqName)}` : wrap(seqName);
+              pre.push(`ALTER SEQUENCE ${seqIdent} OWNED BY ${table}.${wrap(ownerCol)};`);
+            }
+          }
+        };
         for (const c of d.columns) {
           const col = wrap(c.columnName);
           const type = validateColumnType(rewrite(c.sourceType) || 'text');
@@ -608,12 +631,13 @@ if (d.status === 'added') {
               defaultValue: rewrite(c.sourceDefault),
               comment: c.sourceComment,
             };
+            ensureSeq(spec.defaultValue, c.columnName);
             // PG 在有数据的表上加 NOT NULL 且无默认值会直接失败。
             if (spec.notNull && hasNoDefault(spec) && !spec.autoIncrement) {
-              actions.push(`ADD COLUMN ${col} ${renderColumnAttributes({ ...spec, notNull: false }, DatabaseType.PG, PG_ESC, false, true)}`);
+              actions.push(`ADD COLUMN ${col} ${renderColumnAttributes({ ...spec, notNull: false }, DatabaseType.PG, pgEsc, false, true)}`);
               warnings.push(`-- WARN: "${c.columnName}" is NOT NULL on the source but has no default; add a DEFAULT or backfill values, then enforce NOT NULL.`);
             } else {
-              actions.push(`ADD COLUMN ${col} ${renderColumnAttributes(spec, DatabaseType.PG, PG_ESC, false, true)}`);
+              actions.push(`ADD COLUMN ${col} ${renderColumnAttributes(spec, DatabaseType.PG, pgEsc, false, true)}`);
             }
           } else if (c.status === 'removed') {
             actions.push(`DROP COLUMN ${col}`);
@@ -636,18 +660,22 @@ if (d.status === 'added') {
             }
             // 默认值差异：源为 PG，表达式改写到目标 schema；无默认值则 DROP。
             if (normDefault(c.sourceDefault) !== normDefault(c.targetDefault)) {
-              actions.push(normDefault(c.sourceDefault) !== ''
-                ? `ALTER COLUMN ${col} SET DEFAULT ${rewrite(c.sourceDefault)}`
-                : `ALTER COLUMN ${col} DROP DEFAULT`);
+              if (normDefault(c.sourceDefault) !== '') {
+                ensureSeq(rewrite(c.sourceDefault));
+                actions.push(`ALTER COLUMN ${col} SET DEFAULT ${rewrite(c.sourceDefault)}`);
+              } else {
+                actions.push(`ALTER COLUMN ${col} DROP DEFAULT`);
+              }
             }
             // 注释是独立语句，不能并入 ALTER TABLE 子命令列表。
             if (normComment(c.sourceComment) !== normComment(c.targetComment)) {
-              extra.push(`COMMENT ON COLUMN ${table}.${col} IS ${normComment(c.sourceComment) !== '' ? PG_ESC(c.sourceComment) : 'NULL'};`);
+              extra.push(`COMMENT ON COLUMN ${table}.${col} IS ${normComment(c.sourceComment) !== '' ? pgEsc(c.sourceComment) : 'NULL'};`);
             }
           }
         }
         if (actions.length || extra.length) {
           parts.push(`-- Alter table: ${d.tableName}`);
+          parts.push(...pre);
           parts.push(...warnings);
           if (actions.length) parts.push(`ALTER TABLE ${table} ${actions.join(', ')};`);
           parts.push(...extra);
@@ -956,8 +984,11 @@ function makeSchemaNormalizers(sourceSchema?: string, targetSchema?: string): Co
  *
  * 未限定的 `nextval('seq')` 不再补目标 schema（M1 已用 `SET LOCAL search_path=pg_catalog`
  * 保证目录输出总是限定；共用序列不会被悄悄另起计数器）。
+ *
+ * `protectedNames`：**扩展所属**对象名（类型/函数）——它们属于扩展而非源 schema，
+ * 改写成目标 schema 会指向不存在的对象（如 `public.citext` → `"tgt".citext`），必须原样保留。
  */
-function rewritePgSchemaRefs(text: string, from?: string, to?: string, escape?: (v: string) => string): string {
+function rewritePgSchemaRefs(text: string, from?: string, to?: string, escape?: (v: string) => string, protectedNames?: ReadonlySet<string>): string {
   if (!text || !from || !to || from === to) return text;
   const fromQ = `"${from.replace(/"/g, '""')}"`;
   const toQ = `"${to.replace(/"/g, '""')}"`;
@@ -982,7 +1013,32 @@ function rewritePgSchemaRefs(text: string, from?: string, to?: string, escape?: 
   const fromPats = [fromQ, from].map((p) => new RegExp(`${boundary}${escapeRe(p)}\\.`, 'g'));
   return rewriteOutsideLiterals(text, (seg) => {
     let out = seg;
-    for (const re of fromPats) out = out.replace(re, `${toQ}.`);
+    for (const re of fromPats) {
+      out = out.replace(re, (m, off: number, whole: string) => {
+        const id = matchIdentAt(whole.slice(off + m.length));
+        if (id && protectedNames?.has(id)) return m;
+        return `${toQ}.`;
+      });
+    }
     return out;
   });
+}
+
+/** 读取字符串开头的（可能带引号的）标识符；无则返回 undefined。 */
+function matchIdentAt(s: string): string | undefined {
+  if (!s) return undefined;
+  if (s[0] === '"') {
+    let j = 1;
+    let out = '';
+    while (j < s.length) {
+      if (s[j] === '"') {
+        if (s[j + 1] === '"') { out += '"'; j += 2; continue; }
+        return out;
+      }
+      out += s[j]; j++;
+    }
+    return undefined;
+  }
+  const m = /^[\p{L}\p{N}_$]+/u.exec(s);
+  return m?.[0];
 }

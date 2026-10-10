@@ -273,4 +273,12 @@ export class MetadataService {
     const result = await this.queryService.queryAll(sql);
     return this.queryService.dialect.parseTypeList(result.rows);
   }
+
+  /** 查询扩展所属对象名（PG；跨 schema 改写时排除）。 */
+  async getExtensionObjects(schema?: string): Promise<string[]> {
+    const sql = this.queryService.dialect.getExtensionObjectListSql?.(schema);
+    if (!sql || !this.queryService.dialect.parseExtensionObjectList) return [];
+    const result = await this.queryService.queryAll(sql);
+    return this.queryService.dialect.parseExtensionObjectList(result.rows);
+  }
 }
