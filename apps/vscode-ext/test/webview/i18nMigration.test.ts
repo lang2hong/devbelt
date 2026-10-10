@@ -63,7 +63,7 @@ describe('webview i18n 迁移完整性', () => {
       for (const m of template.matchAll(pattern)) {
         const word = m[1].trim();
         // 产品名与技术缩写保留原文
-        if (/^(MySQL|PostgreSQL|SQLite|Redis|SQL|DDL|JSON|CSV|XML|Excel|PNG|ER|X|Y)$/.test(word)) continue;
+        if (/^(MySQL|PostgreSQL|SQLite|Redis|Elasticsearch|SQL|DDL|JSON|CSV|XML|Excel|PNG|ER|X|Y|OR|AND)$/.test(word)) continue;
         offenders.push(`${path.basename(file)}: "${word}"`);
       }
     }

@@ -58,9 +58,18 @@ const defaultForm = {
   keySeparator: ':',
   color: '',
   clearSentinelPassword: false,
+  // Elasticsearch（P8 S2）
+  esProtocol: 'http',
+  esPathPrefix: '',
+  esAuth: 'basic',
+  esUser: 'elastic',
+  esPassword: '',
+  esApiKey: '',
+  clearEsPassword: false,
+  clearEsApiKey: false,
 };
 
-const SECRET_KEYS = ['password', 'sshPassword', 'sshPassphrase', 'sentinelPassword'] as const;
+const SECRET_KEYS = ['password', 'sshPassword', 'sshPassphrase', 'sentinelPassword', 'esPassword', 'esApiKey'] as const;
 type SecretKey = typeof SECRET_KEYS[number];
 
 function clearFlagKey(key: SecretKey): string {
@@ -72,23 +81,29 @@ const showPassword = ref(false);
 const showSshPassword = ref(false);
 const showSshPassphrase = ref(false);
 const showSentinelPassword = ref(false);
+const showEsPassword = ref(false);
+const showEsApiKey = ref(false);
 
 const isSqlite = computed(() => form.dbType === 'SQLITE');
 const isPg = computed(() => form.dbType === 'PG');
 const isRedis = computed(() => form.dbType === 'REDIS');
+const isEs = computed(() => form.dbType === 'ELASTICSEARCH');
 
-/** 默认用户名：Redis 为空；SQL 为 root。 */
+/** 默认用户名：Redis/ES 为空；SQL 为 root。 */
 function defaultUserFor(dbType: string): string {
-  return dbType === 'REDIS' ? '' : 'root';
+  return dbType === 'REDIS' || dbType === 'ELASTICSEARCH' ? '' : 'root';
 }
 
 function syncType(): void {
   if (form.dbType === 'PG') form.port = '5432';
   else if (form.dbType === 'MYSQL') form.port = '3306';
   else if (form.dbType === 'REDIS') form.port = '6379';
+  else if (form.dbType === 'ELASTICSEARCH') form.port = '9200';
+  // ES 默认 Basic + elastic（官方默认管理员）；用户可切无认证/API Key。
+  if (form.dbType === 'ELASTICSEARCH' && !form.esUser) form.esUser = 'elastic';
   if (isSqlite.value) form.host = '';
-  // Redis 默认空用户名：切换到 Redis 时，若仍是 SQL 的默认 root，清空。
-  if (form.dbType === 'REDIS' && form.user === 'root') form.user = '';
+  // Redis/ES 默认空用户名：切换到该类时，若仍是 SQL 的默认 root，清空。
+  if ((form.dbType === 'REDIS' || form.dbType === 'ELASTICSEARCH') && form.user === 'root') form.user = '';
 }
 
 function collect(): Record<string, unknown> {
@@ -97,11 +112,21 @@ function collect(): Record<string, unknown> {
     if (key.startsWith('clear')) continue;
     result[key] = (form as any)[key];
   }
+  // ES 认证：表单 kind 字符串 → 存储对象（username 随 basic）。
+  result.esAuth = form.esAuth === 'basic'
+    ? { kind: 'basic', username: form.esUser }
+    : form.esAuth === 'apiKey'
+      ? { kind: 'apiKey' }
+      : { kind: 'none' };
+  delete result.esUser;
   // 敏感字段：编辑时留空 = 保留已存密钥（不发送），只有点「清除」才发空串触发删除。
   for (const key of SECRET_KEYS) {
     if ((form as any)[clearFlagKey(key)]) result[key] = '';
     else if (result[key] === '') delete result[key];
   }
+  // ES：认证方式切换后，旧方式的密钥显式清除（避免残留无用密钥）。
+  if (form.esAuth !== 'basic') result.esPassword = '';
+  if (form.esAuth !== 'apiKey') result.esApiKey = '';
   return result;
 }
 
@@ -116,10 +141,18 @@ function prefill(c: Record<string, any>): void {
   for (const key of Object.keys(form)) {
     const val = c[key];
     const defVal = (defaultForm as any)[key];
-    if (typeof defVal === 'boolean') {
+    if (key === 'esAuth') {
+      // 存储是对象（{kind,username?}）；表单是 kind 字符串 + esUser 独立字段。
+      const kind = val?.kind;
+      (form as any).esAuth = kind === 'basic' || kind === 'apiKey' ? kind : 'none';
+      // 历史连接可能存了 basic+空用户名（旧版会发出 `Basic ":"` 触发误导性 401）：回填默认管理员名。
+      form.esUser = val?.username && String(val.username).trim()
+        ? val.username
+        : ((form as any).esAuth === 'basic' ? 'elastic' : '');
+    } else if (typeof defVal === 'boolean') {
       (form as any)[key] = !!val;
     } else if (key === 'user') {
-      // 用户名按类型给默认：Redis 空，SQL root（空值不再回退成 root）。
+      // 用户名按类型给默认：Redis/ES 空，SQL root（空值不再回退成 root）。
       (form as any)[key] = val !== undefined && val !== null && val !== '' ? val : defaultUserFor(form.dbType);
     } else if (val !== undefined && val !== null) {
       (form as any)[key] = val;
@@ -178,6 +211,7 @@ function save(): void {
         <option value="PG">PostgreSQL</option>
         <option value="SQLITE">SQLite</option>
         <option value="REDIS">Redis</option>
+        <option value="ELASTICSEARCH">Elasticsearch</option>
       </select>
     </div>
 
@@ -206,7 +240,58 @@ function save(): void {
       </div>
     </div>
 
-    <div v-if="!isSqlite" class="row">
+    <template v-if="isEs">
+      <div class="row">
+        <div class="field">
+          <label>{{ t('wv.form.esProtocol') }}</label>
+          <select v-model="form.esProtocol">
+            <option value="http">http</option>
+            <option value="https">https</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>{{ t('wv.form.esPathPrefix') }}</label>
+          <input v-model="form.esPathPrefix" :placeholder="t('wv.form.esPathPrefixHint')">
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>{{ t('wv.form.esAuth') }}</label>
+          <select v-model="form.esAuth">
+            <option value="none">{{ t('wv.form.esAuthNone') }}</option>
+            <option value="basic">{{ t('wv.form.esAuthBasic') }}</option>
+            <option value="apiKey">{{ t('wv.form.esAuthApiKey') }}</option>
+          </select>
+        </div>
+        <div v-if="form.esAuth === 'basic'" class="field">
+          <label>{{ t('wv.form.esUser') }}</label>
+          <input v-model="form.esUser" placeholder="elastic">
+        </div>
+      </div>
+      <div v-if="form.esAuth === 'basic'" class="field">
+        <label>{{ t('wv.form.esPassword') }}</label>
+        <div class="pw">
+          <input :type="showEsPassword ? 'text' : 'password'" v-model="form.esPassword">
+          <button type="button" class="toggle" @click="showEsPassword = !showEsPassword">{{ showEsPassword ? t('wv.form.hide') : t('wv.form.show') }}</button>
+          <button v-if="editingId" type="button" class="toggle" @click="clearSecret('esPassword')">{{ t('wv.form.clear') }}</button>
+        </div>
+        <p v-if="editingId && form.clearEsPassword" class="hint">{{ t('wv.form.willClear') }}</p>
+        <p v-else-if="editingId && !form.esPassword" class="hint">{{ t('wv.form.secretSaved') }}</p>
+      </div>
+      <div v-if="form.esAuth === 'apiKey'" class="field">
+        <label>{{ t('wv.form.esApiKey') }}</label>
+        <div class="pw">
+          <input :type="showEsApiKey ? 'text' : 'password'" v-model="form.esApiKey">
+          <button type="button" class="toggle" @click="showEsApiKey = !showEsApiKey">{{ showEsApiKey ? t('wv.form.hide') : t('wv.form.show') }}</button>
+          <button v-if="editingId" type="button" class="toggle" @click="clearSecret('esApiKey')">{{ t('wv.form.clear') }}</button>
+        </div>
+        <p v-if="editingId && form.clearEsApiKey" class="hint">{{ t('wv.form.willClear') }}</p>
+        <p v-else-if="editingId && !form.esApiKey" class="hint">{{ t('wv.form.secretSaved') }}</p>
+      </div>
+      <p class="hint">{{ t('wv.form.esHint') }}</p>
+    </template>
+
+    <div v-if="!isSqlite && !isEs" class="row">
       <div class="field">
         <label>{{ t('wv.form.user') }}</label>
         <input v-model="form.user">

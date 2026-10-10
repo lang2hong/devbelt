@@ -46,6 +46,20 @@ describe('mergeSecretsFromStored', () => {
     const merged = mergeSecretsFromStored(conn({ name: 'Renamed' }), stored);
     expect(merged.sentinelPassword).toBe('sentinel-secret');
   });
+
+  it('P8：ES esPassword / esApiKey 也在敏感字段回退之列', () => {
+    const stored = conn({ dbType: 'ELASTICSEARCH' as SavedConnection['dbType'], esPassword: 'es-secret', esApiKey: 'api-key' });
+    const merged = mergeSecretsFromStored(conn({ name: 'Renamed' }), stored);
+    expect(merged.esPassword).toBe('es-secret');
+    expect(merged.esApiKey).toBe('api-key');
+  });
+
+  it('P8：ES 显式清除（空串）不被已保存值覆盖', () => {
+    const stored = conn({ dbType: 'ELASTICSEARCH' as SavedConnection['dbType'], esPassword: 'old', esApiKey: 'old-key' });
+    const merged = mergeSecretsFromStored(conn({ esPassword: '', esApiKey: '' }), stored);
+    expect(merged.esPassword).toBe('');
+    expect(merged.esApiKey).toBe('');
+  });
 });
 
 /**
@@ -75,5 +89,42 @@ describe('decodeConnection 敏感字段三态', () => {
   it('有值为原样', () => {
     const c = decodeConnection(payload({ password: 'p', sshPassword: 's', sshPassphrase: 'k', sentinelPassword: 'sp' }));
     expect([c.password, c.sshPassword, c.sshPassphrase, c.sentinelPassword]).toEqual(['p', 's', 'k', 'sp']);
+  });
+});
+
+/**
+ * P8 S2：ES 连接字段解码。
+ * - `esProtocol` 白名单（http/https，其余 → undefined 走默认 http）；
+ * - `esAuth` 对象白名单（none/basic/apiKey，非法 → undefined 按 none）；
+ * - esPassword/esApiKey 三态（与其它敏感字段同构）。
+ */
+describe('decodeConnection ES 字段', () => {
+  const payload = (over: Record<string, unknown>) => ({ dbType: 'ELASTICSEARCH', host: 'h', port: 9200, ...over });
+
+  it('esProtocol 白名单：https 保留，非法值丢弃', () => {
+    expect(decodeConnection(payload({ esProtocol: 'https' })).esProtocol).toBe('https');
+    expect(decodeConnection(payload({ esProtocol: 'http' })).esProtocol).toBe('http');
+    expect(decodeConnection(payload({ esProtocol: 'ftp' })).esProtocol).toBeUndefined();
+    expect(decodeConnection(payload({})).esProtocol).toBeUndefined();
+  });
+
+  it('esPathPrefix 空串折叠为 undefined', () => {
+    expect(decodeConnection(payload({ esPathPrefix: '/es' })).esPathPrefix).toBe('/es');
+    expect(decodeConnection(payload({ esPathPrefix: '' })).esPathPrefix).toBeUndefined();
+  });
+
+  it('esAuth 白名单解码（none/basic/apiKey；缺 username 兜底空串）', () => {
+    expect(decodeConnection(payload({ esAuth: { kind: 'none' } })).esAuth).toEqual({ kind: 'none' });
+    expect(decodeConnection(payload({ esAuth: { kind: 'basic', username: 'elastic' } })).esAuth).toEqual({ kind: 'basic', username: 'elastic' });
+    expect(decodeConnection(payload({ esAuth: { kind: 'basic' } })).esAuth).toEqual({ kind: 'basic', username: '' });
+    expect(decodeConnection(payload({ esAuth: { kind: 'apiKey' } })).esAuth).toEqual({ kind: 'apiKey' });
+    expect(decodeConnection(payload({ esAuth: { kind: 'weird' } })).esAuth).toBeUndefined();
+    expect(decodeConnection(payload({ esAuth: 'nope' })).esAuth).toBeUndefined();
+  });
+
+  it('esPassword / esApiKey 三态（缺省 undefined / 空串清除 / 有值原样）', () => {
+    expect(decodeConnection(payload({})).esPassword).toBeUndefined();
+    expect(decodeConnection(payload({ esPassword: '', esApiKey: '' })).esPassword).toBe('');
+    expect(decodeConnection(payload({ esPassword: 'p', esApiKey: 'k' })).esApiKey).toBe('k');
   });
 });

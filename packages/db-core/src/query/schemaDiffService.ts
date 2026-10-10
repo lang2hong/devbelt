@@ -1,6 +1,6 @@
 import type { MetadataService } from './metadataService.js';
 import type { TableService } from './tableService.js';
-import type { ColumnMeta, IndexMeta, SequenceMeta, ConstraintMeta } from '../types/meta.js';
+import type { ColumnMeta, IndexMeta, SequenceMeta, ConstraintMeta, ConstraintShape } from '../types/meta.js';
 import { validateIdent, validateSchemaIdent } from '../utils/validate.js';
 import { validateColumnType } from './columnSpec.js';
 import type { ColumnSpec } from './columnSpec.js';
@@ -9,6 +9,7 @@ import { DatabaseType } from '../types/connection.js';
 import { MysqlDialect } from '../dialect/mysqlDialect.js';
 import { PostgreSqlDialect } from '../dialect/postgreSqlDialect.js';
 import type { SqlDialect } from '../dialect/sqlDialect.js';
+import { iterNextvalRefs, rewritePgSchemaRefs, stripIdentifierSchema, stripPgSchemaRefs } from '../dialect/pgExprPort.js';
 import { sqlCommentSafe } from '../sql/index.js';
 
 const MYSQL_DIALECT = new MysqlDialect();
@@ -65,8 +66,12 @@ export interface IndexDiff {
   status: 'added' | 'removed' | 'changed';
   columns?: string[];
   unique?: boolean;
-  /** 源侧定义（PG 的 pg_get_indexdef），用于变更比较。 */
+  /** 源侧定义（PG 的 pg_get_indexdef），用于变更比较与回退生成。 */
   definition?: string;
+  /** PG（4B-2a）：结构化部件——存在时 diff 按部件比较、DDL 组合生成。 */
+  method?: string;
+  predicate?: string;
+  keyParts?: { def: string; isKey: boolean }[];
 }
 
 /** schema 级对象差异（视图/函数/触发器）。 */
@@ -98,12 +103,13 @@ export interface SchemaObjectsDiff {
   triggers: SchemaObjectDiff[];
 }
 
-/** 约束差异（按约束名比对，定义由数据库规范化）。 */
-export interface ConstraintDiff {
+/** 约束差异（按约束名比对，定义由数据库规范化）。
+ *  4B-2b：FK/CHECK 结构化字段存在时按结构比较/组合生成（PK/UNIQUE 保留文本路径）。 */
+export interface ConstraintDiff extends ConstraintShape {
   name: string;
   type: string;
   status: 'added' | 'removed' | 'changed';
-  /** 源侧定义（added/changed 时用于生成 ADD CONSTRAINT）。 */
+  /** 源侧定义（added/changed 时用于生成 ADD CONSTRAINT；结构化缺失时回退使用）。 */
   definition?: string;
 }
 
@@ -195,22 +201,63 @@ export class SchemaDiffService {
     return result;
   }
 
-  /** 按约束名比对：名缺失→added/removed，定义不同→changed（定义先做 schema 归一化）。 */
+  /** 按约束名比对：名缺失→added/removed，定义不同→changed（定义先做 schema 归一化）。
+   *  4B-2b：FK/CHECK 双方结构化字段齐备时按结构比较（refSchema 以源/目标等价归一）；否则文本归一。 */
   private static diffConstraints(src: ConstraintMeta[], tgt: ConstraintMeta[], schemas: readonly (string | undefined)[]): ConstraintDiff[] {
     const norm = (d: string) => stripIdentifierSchema(d, schemas);
     const out: ConstraintDiff[] = [];
     const tgtMap = new Map(tgt.map((c) => [c.name, c]));
+    /** 结构化字段透传到差异（生成 DDL 时优先组合生成）。 */
+    const shapeOf = (c: ConstraintMeta): ConstraintShape => ({
+      ...(c.columns ? { columns: [...c.columns] } : {}),
+      ...(c.refSchema ? { refSchema: c.refSchema } : {}),
+      ...(c.refTable ? { refTable: c.refTable } : {}),
+      ...(c.refColumns ? { refColumns: [...c.refColumns] } : {}),
+      ...(c.onUpdate ? { onUpdate: c.onUpdate } : {}),
+      ...(c.onDelete ? { onDelete: c.onDelete } : {}),
+      ...(c.match ? { match: c.match } : {}),
+      ...(c.deferrable !== undefined ? { deferrable: c.deferrable } : {}),
+      ...(c.initiallyDeferred !== undefined ? { initiallyDeferred: c.initiallyDeferred } : {}),
+      ...(c.expression ? { expression: c.expression } : {}),
+      ...(c.notValid !== undefined ? { notValid: c.notValid } : {}),
+      ...(c.noInherit !== undefined ? { noInherit: c.noInherit } : {}),
+    });
+    /** 结构化比较；不适用（类型不符/字段缺失）返回 undefined → 回退文本。 */
+    const structuredChanged = (s: ConstraintMeta, t: ConstraintMeta): boolean | undefined => {
+      if (s.type === 'f' && t.type === 'f' && s.refTable && t.refTable && s.columns?.length && t.columns?.length) {
+        // refSchema：源 schema 与目标 schema 视为等价（空），其它 schema 原样比较。
+        const schemaKey = (c: ConstraintMeta) => (!c.refSchema || schemas.includes(c.refSchema) ? '' : c.refSchema);
+        const key = (c: ConstraintMeta) => JSON.stringify([
+          c.columns, c.refTable, c.refColumns ?? [], c.onUpdate ?? '', c.onDelete ?? '', c.match ?? '',
+          !!c.deferrable, !!c.initiallyDeferred, schemaKey(c),
+        ]);
+        return key(s) !== key(t);
+      }
+      if (s.type === 'c' && t.type === 'c' && s.expression && t.expression) {
+        return norm(String(s.expression)) !== norm(String(t.expression))
+          || !!s.notValid !== !!t.notValid
+          || !!s.noInherit !== !!t.noInherit;
+      }
+      return undefined;
+    };
     for (const s of src) {
       const t = tgtMap.get(s.name);
-      if (!t) out.push({ name: s.name, type: s.type, status: 'added', definition: s.definition });
-      else if (norm(s.definition) !== norm(t.definition)) out.push({ name: s.name, type: s.type, status: 'changed', definition: s.definition });
+      if (!t) {
+        out.push({ name: s.name, type: s.type, status: 'added', definition: s.definition, ...shapeOf(s) });
+      } else {
+        const structured = structuredChanged(s, t);
+        const changed = structured !== undefined ? structured : norm(s.definition) !== norm(t.definition);
+        if (changed) out.push({ name: s.name, type: s.type, status: 'changed', definition: s.definition, ...shapeOf(s) });
+      }
     }
     const srcNames = new Set(src.map((c) => c.name));
     for (const t of tgt) if (!srcNames.has(t.name)) out.push({ name: t.name, type: t.type, status: 'removed' });
     return out;
   }
 
-  /** 按索引名比对（主键索引与约束同名索引跳过，由约束处理）：定义/列/唯一性任一变化即 changed。 */
+  /** 按索引名比对（主键索引与约束同名索引跳过，由约束处理）。
+   *  4B-2a：双方均有结构化部件（PG）时按部件/方法/谓词比较（表达式经 `stripIdentifierSchema` 归一）；
+   *  否则回退整串定义比较（其它方言与旧路径行为不变）。 */
   private static diffIndexes(src: IndexMeta[], tgt: IndexMeta[], schemas: readonly (string | undefined)[], constraintNames: ReadonlySet<string> = new Set()): IndexDiff[] {
     const norm = (s: string) => stripIdentifierSchema(s, schemas);
     const skip = (i: IndexMeta) => i.isPrimary || constraintNames.has(i.name);
@@ -218,17 +265,45 @@ export class SchemaDiffService {
     const tgtList = tgt.filter((i) => !skip(i));
     const tgtMap = new Map(tgtList.map((i) => [i.name, i]));
     const out: IndexDiff[] = [];
+    /** 结构化字段透传到差异（生成 DDL 时优先组合生成）。 */
+    const structuredOf = (i: IndexMeta): Pick<IndexDiff, 'method' | 'predicate' | 'keyParts'> => ({
+      ...(i.method ? { method: i.method } : {}),
+      ...(i.predicate ? { predicate: i.predicate } : {}),
+      ...(i.keyParts?.length ? { keyParts: i.keyParts.map((p) => ({ def: p.def, isKey: p.isKey })) } : {}),
+    });
     for (const s of srcList) {
       const t = tgtMap.get(s.name);
       const cols = (i: IndexMeta) => (i.columns ?? []).join(',');
-      if (!t) out.push({ name: s.name, status: 'added', columns: s.columns, unique: s.isUnique, definition: s.type });
-      else if (norm(String(s.type ?? '')) !== norm(String(t.type ?? '')) || cols(s) !== cols(t) || !!s.isUnique !== !!t.isUnique) {
-        out.push({ name: s.name, status: 'changed', columns: s.columns, unique: s.isUnique, definition: s.type });
+      if (!t) {
+        out.push({ name: s.name, status: 'added', columns: s.columns, unique: s.isUnique, definition: s.type, ...structuredOf(s) });
+      } else {
+        const bothStructured = !!(s.keyParts?.length && t.keyParts?.length);
+        const changed = bothStructured
+          ? !SchemaDiffService.sameIndexShape(s, t, norm)
+          : norm(String(s.type ?? '')) !== norm(String(t.type ?? '')) || cols(s) !== cols(t) || !!s.isUnique !== !!t.isUnique;
+        if (changed) {
+          out.push({ name: s.name, status: 'changed', columns: s.columns, unique: s.isUnique, definition: s.type, ...structuredOf(s) });
+        }
       }
     }
     const srcNames = new Set(srcList.map((i) => i.name));
     for (const t of tgtList) if (!srcNames.has(t.name)) out.push({ name: t.name, status: 'removed' });
     return out;
+  }
+
+  /** 结构化索引形状比较：唯一性、访问方法、谓词、部件顺序/键性与部件文本（schema 归一后）。 */
+  private static sameIndexShape(a: IndexMeta, b: IndexMeta, norm: (s: string) => string): boolean {
+    if (!!a.isUnique !== !!b.isUnique) return false;
+    if (String(a.method ?? '') !== String(b.method ?? '')) return false;
+    if (norm(String(a.predicate ?? '')) !== norm(String(b.predicate ?? ''))) return false;
+    const pa = a.keyParts ?? [];
+    const pb = b.keyParts ?? [];
+    if (pa.length !== pb.length) return false;
+    for (let i = 0; i < pa.length; i++) {
+      if (!!pa[i].isKey !== !!pb[i].isKey) return false;
+      if (norm(pa[i].def) !== norm(pb[i].def)) return false;
+    }
+    return true;
   }
 
   /** 比对列差异。`norm` 用于跨 schema 比较：按字段定向抹掉 schema 前缀（不会误伤字面量/注释）。 */
@@ -385,6 +460,19 @@ export class SchemaDiffService {
   }
 
   /**
+   * 4B-3：PG 表达式/类型移植的统一入口——表内 DDL 用目标方言转义，约束/schema 对象用默认转义；
+   * 三处调用点（表同步/约束/schema 对象）共用同一实现，避免各写一份 `rewrite` 闭包漂移。
+   */
+  private static pgPorter(
+    sourceSchema: string | undefined,
+    targetSchema: string | undefined,
+    escape: ((v: string) => string) | undefined,
+    protectedNames: ReadonlySet<string> | undefined,
+  ): (text: unknown) => string {
+    return (text) => rewritePgSchemaRefs(toCompareString(text), sourceSchema, targetSchema, escape, protectedNames);
+  }
+
+  /**
    * 生成表级约束 DDL（PK/UNIQUE/CHECK/FK）。同步路径应在**所有表结构与数据之后**调用，
    * 避免外键引用尚未创建的表或插入时违反约束（H6）。
    */
@@ -393,7 +481,31 @@ export class SchemaDiffService {
     const wrapSchema = (id: string) => sourceTableService.wrapSchemaIdentifier(id);
     const target = opts.targetSchema;
     const targetTable = (name: string): string => (target ? `${wrapSchema(target)}.${wrap(name)}` : wrap(name));
-    const rewrite = (text: unknown): string => rewritePgSchemaRefs(toCompareString(text), opts.sourceSchema, target, undefined, opts.protectedNames);
+    const rewrite = SchemaDiffService.pgPorter(opts.sourceSchema, target, undefined, opts.protectedNames);
+    /** 4B-2b：FK/CHECK 结构化字段齐备时组合生成（refSchema 为源/目标时映射到目标 schema）。 */
+    const structuredBody = (c: ConstraintDiff): string | undefined => {
+      if (c.type === 'f' && c.columns?.length && c.refTable) {
+        const cols = c.columns.map((x) => wrap(validateIdent(x, 63))).join(', ');
+        const refSchemaName = !c.refSchema || c.refSchema === opts.sourceSchema ? target : c.refSchema;
+        const refTable = refSchemaName
+          ? `${wrapSchema(validateSchemaIdent(refSchemaName))}.${wrap(validateIdent(c.refTable, 63))}`
+          : wrap(validateIdent(c.refTable, 63));
+        const refCols = c.refColumns?.length ? ` (${c.refColumns.map((x) => wrap(validateIdent(x, 63))).join(', ')})` : '';
+        let ddl = `FOREIGN KEY (${cols}) REFERENCES ${refTable}${refCols}`;
+        if (c.match && c.match !== 'SIMPLE') ddl += ` MATCH ${c.match}`;
+        if (c.onDelete && c.onDelete !== 'NO ACTION') ddl += ` ON DELETE ${c.onDelete}`;
+        if (c.onUpdate && c.onUpdate !== 'NO ACTION') ddl += ` ON UPDATE ${c.onUpdate}`;
+        if (c.deferrable) ddl += c.initiallyDeferred ? ' DEFERRABLE INITIALLY DEFERRED' : ' DEFERRABLE';
+        return ddl;
+      }
+      if (c.type === 'c' && c.expression) {
+        let ddl = `CHECK (${rewrite(c.expression)})`;
+        if (c.noInherit) ddl += ' NO INHERIT';
+        if (c.notValid) ddl += ' NOT VALID';
+        return ddl;
+      }
+      return undefined;
+    };
     const parts: string[] = [];
     const commented: string[] = [];
     for (const d of diffs) {
@@ -408,7 +520,9 @@ export class SchemaDiffService {
           continue;
         }
         parts.push(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${cn};`);
-        if (c.status !== 'removed') parts.push(`ALTER TABLE ${table} ADD CONSTRAINT ${cn} ${rewrite(c.definition ?? '')};`);
+        if (c.status !== 'removed') {
+          parts.push(`ALTER TABLE ${table} ADD CONSTRAINT ${cn} ${structuredBody(c) ?? rewrite(c.definition ?? '')};`);
+        }
       }
     }
     if (commented.length) {
@@ -500,7 +614,12 @@ export class SchemaDiffService {
   static generateSchemaObjectsSql(obj: SchemaObjectsDiff, dialect: SqlDialect, opts: { sourceSchema?: string; targetSchema?: string; protectedNames?: ReadonlySet<string> } = {}): string {
     const target = opts.targetSchema;
     const wrapObjName = (name: string) => (target ? `${dialect.wrap(validateSchemaIdent(target))}.${dialect.wrap(validateSchemaIdent(name, 63))}` : dialect.wrap(validateSchemaIdent(name, 63)));
-    const rw = (d?: string) => rewritePgSchemaRefs(String(d ?? ''), opts.sourceSchema, target, (v) => dialect.escapeValue(v), opts.protectedNames).replace(/;\s*$/, '');
+    const rw = (d?: string) => SchemaDiffService.pgPorter(
+      opts.sourceSchema,
+      target,
+      (v) => dialect.escapeValue(v),
+      opts.protectedNames,
+    )(d).replace(/;\s*$/, '');
     const parts: string[] = ['-- Schema objects', ''];
 
     // 序列：仅**新增**可执行（补建缺失序列）。删除/参数变更改为注释（避免破坏性 DROP 波及依赖）。
@@ -558,10 +677,10 @@ export class SchemaDiffService {
     const targetTable = (name: string): string => (target ? `${wrapSchema(target)}.${wrap(name)}` : wrap(name));
     // #4：注释/默认值的转义必须按目标方言（scs=off 时反斜杠也要处理），不能固定用 scs=on 的实例。
     const pgEsc = opts.dialect ? (v: any): string => opts.dialect!.escapeValue(v) : PG_ESC;
-    // 跨 schema：把默认表达式/类型名里的源 schema 前缀改写到目标 schema
-    // （如 nextval('s1.x_seq') → nextval('s2.x_seq')）。
-    const rewrite = (text: unknown): string => rewritePgSchemaRefs(
-      toCompareString(text), opts.sourceSchema, target,
+    // 跨 schema：把默认表达式/类型名里的源 schema 前缀改写到目标 schema（统一经 pgPorter，4B-3）。
+    const rewrite = SchemaDiffService.pgPorter(
+      opts.sourceSchema,
+      target,
       opts.dialect ? (v) => opts.dialect!.escapeValue(v) : undefined,
       opts.protectedNames,
     );
@@ -700,8 +819,21 @@ if (d.status === 'added') {
             ? `${opts.dialect!.wrap(validateSchemaIdent(target))}.${opts.dialect!.wrap(validateSchemaIdent(ix.name, 63))}`
             : opts.dialect!.wrap(validateSchemaIdent(ix.name, 63));
           lines.push(`DROP INDEX IF EXISTS ${dropName};`);
-          // H4：直接用 pg_get_indexdef 原文（改写 schema），保留 USING/WHERE/DESC/opclass/INCLUDE/表达式。
-          if (ix.status !== 'removed' && ix.definition) lines.push(rewrite(ix.definition).replace(/;\s*$/, '') + ';');
+          if (ix.status === 'removed') continue;
+          // 4B-2a：有结构化部件时由方言组合生成（部件/谓词经移植层改写到目标 schema）；
+          // 否则回退 H4 的 pg_get_indexdef 原文改写（保留 USING/WHERE/DESC/opclass/INCLUDE/表达式）。
+          if (ix.keyParts?.length && ix.method) {
+            const ixName = opts.dialect!.wrap(validateSchemaIdent(ix.name, 63));
+            const keyDefs = ix.keyParts.filter((p) => p.isKey).map((p) => rewrite(p.def));
+            const includeDefs = ix.keyParts.filter((p) => !p.isKey).map((p) => rewrite(p.def));
+            const method = validateIdent(ix.method, 63);
+            let createSql = `CREATE ${ix.unique ? 'UNIQUE ' : ''}INDEX ${ixName} ON ${targetTable(d.tableName)} USING ${method} (${keyDefs.join(', ')})`;
+            if (includeDefs.length) createSql += ` INCLUDE (${includeDefs.join(', ')})`;
+            if (ix.predicate) createSql += ` WHERE ${rewrite(ix.predicate)}`;
+            lines.push(createSql + ';');
+          } else if (ix.definition) {
+            lines.push(rewrite(ix.definition).replace(/;\s*$/, '') + ';');
+          }
         }
         parts.push(`-- Indexes: ${d.tableName}`);
         parts.push(...lines);
@@ -782,41 +914,9 @@ function toCompareString(v: unknown): string {
   return v === undefined || v === null ? '' : String(v);
 }
 
-/**
- * 解析文本里所有 `nextval('<literal>'::regclass)`，返回**解码后**的 regclass 标识符文本与整体位置。
- * 正确处理字面量里的 `''` 转义（序列/schema 名可能含 `'`），避免正则 `[^']+` 被截断。
- */
-function iterNextval(text: string): { start: number; end: number; ref: string }[] {
-  const out: { start: number; end: number; ref: string }[] = [];
-  const re = /nextval\(/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text))) {
-    let i = m.index + m[0].length;
-    if (text[i] !== "'") continue;
-    let j = i + 1;
-    let lit = '';
-    let closed = false;
-    while (j < text.length) {
-      if (text[j] === "'") {
-        if (text[j + 1] === "'") { lit += "'"; j += 2; continue; }
-        closed = true;
-        break;
-      }
-      lit += text[j]; j++;
-    }
-    if (!closed) continue;
-    const tail = text.slice(j + 1, j + 1 + '::regclass)'.length);
-    if (tail !== '::regclass)') continue;
-    const end = j + 1 + '::regclass)'.length;
-    out.push({ start: m.index, end, ref: lit });
-    re.lastIndex = end;
-  }
-  return out;
-}
-
 /** 提取 DDL 里 `nextval('<seq>'::regclass)` 的 regclass 文本（用于先生成 CREATE SEQUENCE）。 */
 function extractNextvalSequences(text: string): string[] {
-  return iterNextval(text).map((m) => m.ref);
+  return iterNextvalRefs(text).map((m) => m.ref);
 }
 
 /** 从 `nextval('<seq>'::regclass)` 的 regclass 文本取末尾标识符（去掉引号，支持名字里含 `.`）。 */
@@ -841,7 +941,7 @@ function parseSequenceOwners(ddl: string): Map<string, string> {
   const out = new Map<string, string>();
   for (const line of ddl.split('\n')) {
     const colMatch = /^\s*("(?:[^"]|"")*"|\S+)/.exec(line)?.[1];
-    const seq = iterNextval(line)[0]?.ref;
+    const seq = iterNextvalRefs(line)[0]?.ref;
     if (!colMatch || !seq) continue;
     const col = colMatch.startsWith('"') ? colMatch.slice(1, -1).replace(/""/g, '"') : colMatch;
     out.set(seq, col);
@@ -858,114 +958,6 @@ function plainNormalizers(): ColumnNormalizers {
   };
 }
 
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * 对字符串字面量（`'...'`，含 `''` 转义）**之外**的片段应用 `transform`，
- * 字面量原样保留。用于避免把字面量内的 `app.` 当成 schema 限定改写。
- */
-function rewriteOutsideLiterals(text: string, transform: (segment: string) => string): string {
-  let out = '';
-  let buf = '';
-  let i = 0;
-  while (i < text.length) {
-    const ch = text[i];
-    // 美元引用：$tag$ ... $tag$（含 $$）。$1 等参数不匹配，按普通字符处理。
-    if (ch === '$') {
-      const m = /^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/.exec(text.slice(i));
-      if (m) {
-        out += transform(buf);
-        buf = '';
-        const tag = m[0];
-        const end = text.indexOf(tag, i + tag.length);
-        const stop = end === -1 ? text.length : end + tag.length;
-        out += text.slice(i, stop);
-        i = stop;
-        continue;
-      }
-    }
-    // E'...' / e'...'：反斜杠转义（\' 不结束字面量）。
-    if ((ch === 'E' || ch === 'e') && text[i + 1] === "'") {
-      out += transform(buf);
-      buf = '';
-      let lit = text.slice(i, i + 2);
-      i += 2;
-      while (i < text.length) {
-        if (text[i] === '\\' && i + 1 < text.length) { lit += text[i] + text[i + 1]; i += 2; continue; }
-        if (text[i] === "'") {
-          if (text[i + 1] === "'") { lit += "''"; i += 2; continue; }
-          lit += "'"; i++;
-          break;
-        }
-        lit += text[i]; i++;
-      }
-      out += lit;
-      continue;
-    }
-    if (ch === "'") {
-      out += transform(buf);
-      buf = '';
-      let lit = "'";
-      i++;
-      while (i < text.length) {
-        if (text[i] === "'") {
-          if (text[i + 1] === "'") { lit += "''"; i += 2; continue; }
-          lit += "'"; i++;
-          break;
-        }
-        lit += text[i]; i++;
-      }
-      out += lit;
-      continue;
-    }
-    buf += ch; i++;
-  }
-  return out + transform(buf);
-}
-
-/** 字面量内 `schema.seq` / `"schema".seq` / `"schema"."seq"` → 去掉 schema 限定。 */
-function stripSchemaInLiteral(lit: string, schemas: readonly (string | undefined)[]): string {
-  for (const sc of schemas) {
-    if (!sc) continue;
-    const q = `"${sc.replace(/"/g, '""')}"`;
-    if (lit.startsWith(`${q}.`)) return lit.slice(q.length + 1);
-    if (lit.startsWith(`${sc}.`)) return lit.slice(sc.length + 1);
-  }
-  return lit;
-}
-
-/** 只从 `nextval('<schema>.<seq>'::regclass)` 的字面量里剥掉 schema 前缀（不碰其它字面量）。 */
-function stripRegclassSchema(text: string, schemas: readonly (string | undefined)[]): string {
-  const matches = iterNextval(text);
-  if (!matches.length) return text;
-  let out = '';
-  let pos = 0;
-  for (const m of matches) {
-    out += text.slice(pos, m.start) + `nextval(${stripSchemaInLiteral(m.ref, schemas)})`;
-    pos = m.end;
-  }
-  return out + text.slice(pos);
-}
-
-/**
- * 去掉**标识符上下文**里的 schema 限定（类型名如 `app.myenum`）：仅在字符串字面量之外，
- * 且前置字符非 `[\w$"']` 时匹配。字面量内的 `app.` 完全不动。
- */
-function stripIdentifierSchema(text: string, schemas: readonly (string | undefined)[]): string {
-  const boundary = '(?<![\\w$"\'])';
-  const patterns = schemas
-    .filter((sc): sc is string => !!sc)
-    .flatMap((sc) => [`"${sc.replace(/"/g, '""')}"`, sc])
-    .map((p) => new RegExp(`${boundary}${escapeRe(p)}\\.`, 'g'));
-  return rewriteOutsideLiterals(text, (seg) => {
-    let s = seg;
-    for (const re of patterns) s = s.replace(re, '');
-    return s;
-  });
-}
-
 /** 字段感知的跨 schema 比较归一化器：类型/默认值按定向形态归一，注释原样。 */
 function makeSchemaNormalizers(sourceSchema?: string, targetSchema?: string): ColumnNormalizers {
   if (!sourceSchema && !targetSchema) return plainNormalizers();
@@ -973,74 +965,7 @@ function makeSchemaNormalizers(sourceSchema?: string, targetSchema?: string): Co
   return {
     type: (v) => stripIdentifierSchema(toCompareString(v), schemas),
     // 默认值：先剥 nextval 字面量里的 schema，再剥 `::类型` 的标识符限定（enum/domain 跨 schema 等价）。
-    default: (v) => normDefault(stripIdentifierSchema(stripRegclassSchema(toCompareString(v), schemas), schemas)),
+    default: (v) => normDefault(stripPgSchemaRefs(toCompareString(v), schemas)),
     comment: (v) => normComment(toCompareString(v)),
   };
-}
-
-/**
- * 把已知形态里的源 schema 前缀改写为目标 schema：
- * - `nextval('<from>.<seq>'::regclass)` 字面量（带 schema → 改写）；
- * - 字符串字面量之外的标识符上下文类型名限定。
- * 目标 schema 一律以**带引号**形式（`toQ`）拼接，避免注入/大小写漂移。
- *
- * 未限定的 `nextval('seq')` 不再补目标 schema（M1 已用 `SET LOCAL search_path=pg_catalog`
- * 保证目录输出总是限定；共用序列不会被悄悄另起计数器）。
- *
- * `protectedNames`：**扩展所属**对象名（类型/函数）——它们属于扩展而非源 schema，
- * 改写成目标 schema 会指向不存在的对象（如 `public.citext` → `"tgt".citext`），必须原样保留。
- */
-function rewritePgSchemaRefs(text: string, from?: string, to?: string, escape?: (v: string) => string, protectedNames?: ReadonlySet<string>): string {
-  if (!text || !from || !to || from === to) return text;
-  const fromQ = `"${from.replace(/"/g, '""')}"`;
-  const toQ = `"${to.replace(/"/g, '""')}"`;
-  // 目标 schema 名可能含 `'`；放进 nextval('…'::regclass) 的**字符串字面量**必须按方言转义
-  // （escapeValue 同时处理 `'` 与 scs=off 的反斜杠），否则含 `'` 的 schema 会提前结束字面量形成注入。
-  const esc = escape ?? ((v: string) => `'${v.replace(/'/g, "''")}'`);
-  const matches = iterNextval(text);
-  if (matches.length) {
-    let out = '';
-    let pos = 0;
-    for (const m of matches) {
-      out += text.slice(pos, m.start);
-      let ref = m.ref;
-      if (ref.startsWith(`${fromQ}.`)) ref = `${toQ}.${ref.slice(fromQ.length + 1)}`;
-      else if (ref.startsWith(`${from}.`)) ref = `${toQ}.${ref.slice(from.length + 1)}`;
-      out += `nextval(${esc(ref)}::regclass)`;
-      pos = m.end;
-    }
-    text = out + text.slice(pos);
-  }
-  const boundary = '(?<![\\w$"\'])';
-  const fromPats = [fromQ, from].map((p) => new RegExp(`${boundary}${escapeRe(p)}\\.`, 'g'));
-  return rewriteOutsideLiterals(text, (seg) => {
-    let out = seg;
-    for (const re of fromPats) {
-      out = out.replace(re, (m, off: number, whole: string) => {
-        const id = matchIdentAt(whole.slice(off + m.length));
-        if (id && protectedNames?.has(id)) return m;
-        return `${toQ}.`;
-      });
-    }
-    return out;
-  });
-}
-
-/** 读取字符串开头的（可能带引号的）标识符；无则返回 undefined。 */
-function matchIdentAt(s: string): string | undefined {
-  if (!s) return undefined;
-  if (s[0] === '"') {
-    let j = 1;
-    let out = '';
-    while (j < s.length) {
-      if (s[j] === '"') {
-        if (s[j + 1] === '"') { out += '"'; j += 2; continue; }
-        return out;
-      }
-      out += s[j]; j++;
-    }
-    return undefined;
-  }
-  const m = /^[\p{L}\p{N}_$]+/u.exec(s);
-  return m?.[0];
 }

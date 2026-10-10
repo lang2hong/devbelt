@@ -106,6 +106,10 @@ function assertSqlSize(sql: string): void {
  * 返回带 `type:'connection'` 的判别对象。
  */
 export function encodeConnectionPayload(conn: SavedConnection, resolveRef: RefResolver): Record<string, unknown> {
+  // P8：ES 连接尚未接入同步 codec —— 显式 fail-closed，避免按 SQL 字段白名单静默编码（字段丢失）。
+  if (conn.dbType === DatabaseType.ELASTICSEARCH) {
+    throw new Error('elasticsearch connections are not syncable yet');
+  }
   const src = conn as unknown as Record<string, unknown>;
   const out: Record<string, unknown> = { type: 'connection', dbType: databaseEngineOf(conn.dbType) };
 
@@ -418,6 +422,10 @@ function decodeConnectionPayload(p: unknown): DecodedConnectionPayload {
   const dbTypeStr = strOf(obj, 'dbType');
   if (dbTypeStr === undefined) throw new Error('record payload.dbType is required');
   const dbType = databaseTypeFromEngine(dbTypeStr);
+  // P8：ES 连接尚未接入同步 codec —— 显式 fail-closed（入站由 applyRecords 视作 skipped-unsupported）。
+  if (dbType === DatabaseType.ELASTICSEARCH) {
+    throw new Error('elasticsearch connections are not syncable yet');
+  }
   ignoreUnknownKeys(obj, [...payloadFieldsFor(dbType), ...CONNECTION_PATH_FIELDS, 'type', 'groupId']);
 
   const name = strOf(obj, 'name');

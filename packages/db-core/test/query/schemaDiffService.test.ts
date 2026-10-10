@@ -715,6 +715,157 @@ describe('SchemaDiffService 索引 / schema 级对象（P3c）', () => {
     expect(sql).toContain('CREATE INDEX idx_a ON t (a);');
   });
 
+  it('4B-2a：结构化部件比较与组合生成（DESC/INCLUDE/WHERE/表达式 schema 改写）', async () => {
+    const pg = new PostgreSqlDialect();
+    const baseCols = [{ name: 'id', type: 'integer', isPrimary: true }];
+    const srcIx = {
+      name: 'idx_mix',
+      columns: ['myfn(email)', 'createdAt', 'x'],
+      isUnique: true,
+      method: 'btree',
+      predicate: '(status > 0)',
+      keyParts: [
+        { def: 'app.myfn(email)', isKey: true },
+        { def: '"createdAt" DESC NULLS LAST', isKey: true },
+        { def: 'x', isKey: false },
+      ],
+      type: 'CREATE UNIQUE INDEX idx_mix ON app.t USING btree (app.myfn(email), "createdAt" DESC NULLS LAST) INCLUDE (x) WHERE (status > 0)',
+    };
+    const source = {
+      getTables: async () => [{ name: 't' }],
+      getColumns: async () => baseCols,
+      getConstraints: async () => [],
+      getIndexes: async () => [srcIx],
+    } as unknown as MetadataService;
+
+    // 目标：仅 schema 不同 → 结构化归一后 unchanged（不再依赖整串文本）。
+    const sameShape = {
+      getTables: async () => [{ name: 't' }],
+      getColumns: async () => baseCols,
+      getConstraints: async () => [],
+      getIndexes: async () => [{
+        ...srcIx,
+        keyParts: [
+          { def: 'staging.myfn(email)', isKey: true },
+          { def: '"createdAt" DESC NULLS LAST', isKey: true },
+          { def: 'x', isKey: false },
+        ],
+      }],
+    } as unknown as MetadataService;
+    let diffs = await SchemaDiffService.diff(source, 'db', sameShape, 'db', 'app', 'staging');
+    expect(diffs.find((d) => d.tableName === 't')!.indexes).toEqual([]);
+
+    // 谓词不同 → changed。
+    const changedPredicate = {
+      getTables: async () => [{ name: 't' }],
+      getColumns: async () => baseCols,
+      getConstraints: async () => [],
+      getIndexes: async () => [{ ...srcIx, predicate: '(status > 1)' }],
+    } as unknown as MetadataService;
+    diffs = await SchemaDiffService.diff(source, 'db', changedPredicate, 'db', 'app', 'staging');
+    expect(diffs.find((d) => d.tableName === 't')!.indexes!.map((i) => [i.name, i.status])).toEqual([['idx_mix', 'changed']]);
+
+    // 目标缺失 → added；组合生成（部件/谓词经 pgExprPort 改写到目标 schema）。
+    const empty = {
+      getTables: async () => [{ name: 't' }],
+      getColumns: async () => baseCols,
+      getConstraints: async () => [],
+      getIndexes: async () => [],
+    } as unknown as MetadataService;
+    diffs = await SchemaDiffService.diff(source, 'db', empty, 'db', 'app', 'staging');
+    const tableService = { dbType: DatabaseType.PG, wrapIdentifier: (id: string) => pg.wrap(id), wrapSchemaIdentifier: (id: string) => pg.wrap(id), getCreateSql: async () => '', supports: () => true } as unknown as TableService;
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'db', tableService, 'db', undefined, { sourceSchema: 'app', targetSchema: 'staging', dialect: pg });
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "idx_mix" ON "staging"."t" USING btree ("staging".myfn(email), "createdAt" DESC NULLS LAST) INCLUDE (x) WHERE (status > 0);',
+    );
+  });
+
+  it('4B-2b：FK 结构化比较（refSchema 归一/动作差异）与组合生成', async () => {
+    const pg = new PostgreSqlDialect();
+    const baseCols = [{ name: 'id', type: 'integer', isPrimary: true }];
+    const srcFk = {
+      tableName: 't', name: 'fk_u', type: 'f' as const,
+      definition: 'FOREIGN KEY (a) REFERENCES app.u(id) ON UPDATE CASCADE ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED',
+      columns: ['a'], refSchema: 'app', refTable: 'u', refColumns: ['id'],
+      onUpdate: 'CASCADE' as const, onDelete: 'SET NULL' as const, match: 'SIMPLE' as const,
+      deferrable: true, initiallyDeferred: true,
+    };
+    const mk = (constraints: unknown[]) => ({
+      getTables: async () => [{ name: 't' }],
+      getColumns: async () => baseCols,
+      getConstraints: async () => constraints,
+      getIndexes: async () => [],
+    } as unknown as MetadataService);
+    const source = mk([srcFk]);
+
+    // 仅 refSchema 不同（staging vs app）→ 结构化归一后 unchanged。
+    let diffs = await SchemaDiffService.diff(source, 'db', mk([{ ...srcFk, refSchema: 'staging' }]), 'db', 'app', 'staging');
+    expect(diffs.find((d) => d.tableName === 't')!.constraints).toEqual([]);
+
+    // 动作差异 → changed。
+    diffs = await SchemaDiffService.diff(source, 'db', mk([{ ...srcFk, refSchema: 'staging', onDelete: 'CASCADE' }]), 'db', 'app', 'staging');
+    expect(diffs.find((d) => d.tableName === 't')!.constraints!.map((c) => [c.name, c.status])).toEqual([['fk_u', 'changed']]);
+
+    // 目标缺失 → added；组合生成（refSchema 映射到目标，动作/延迟性按文档序）。
+    diffs = await SchemaDiffService.diff(source, 'db', mk([]), 'db', 'app', 'staging');
+    const tableService = { dbType: DatabaseType.PG, wrapIdentifier: (id: string) => pg.wrap(id), wrapSchemaIdentifier: (id: string) => pg.wrap(id), getCreateSql: async () => '', supports: () => true } as unknown as TableService;
+    const sql = SchemaDiffService.generateConstraintsSql(diffs, tableService, { sourceSchema: 'app', targetSchema: 'staging' });
+    expect(sql).toContain(
+      'ALTER TABLE "staging"."t" ADD CONSTRAINT "fk_u" FOREIGN KEY ("a") REFERENCES "staging"."u" ("id") ON DELETE SET NULL ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED;',
+    );
+  });
+
+  it('4B-2b：CHECK 结构化比较（表达式 schema 归一）与组合生成', async () => {
+    const pg = new PostgreSqlDialect();
+    const baseCols = [{ name: 'id', type: 'integer', isPrimary: true }];
+    const srcCk = {
+      tableName: 't', name: 'ck_x', type: 'c' as const,
+      definition: 'CHECK ((app.myfn(id) > 0))',
+      expression: '(app.myfn(id) > 0)', notValid: false, noInherit: false,
+    };
+    const mk = (constraints: unknown[]) => ({
+      getTables: async () => [{ name: 't' }],
+      getColumns: async () => baseCols,
+      getConstraints: async () => constraints,
+      getIndexes: async () => [],
+    } as unknown as MetadataService);
+    const source = mk([srcCk]);
+
+    // 表达式仅 schema 不同 → unchanged。
+    let diffs = await SchemaDiffService.diff(source, 'db', mk([{ ...srcCk, expression: '(staging.myfn(id) > 0)' }]), 'db', 'app', 'staging');
+    expect(diffs.find((d) => d.tableName === 't')!.constraints).toEqual([]);
+
+    // 目标缺失 → added；表达式按目标 schema 改写。
+    diffs = await SchemaDiffService.diff(source, 'db', mk([]), 'db', 'app', 'staging');
+    const tableService = { dbType: DatabaseType.PG, wrapIdentifier: (id: string) => pg.wrap(id), wrapSchemaIdentifier: (id: string) => pg.wrap(id), getCreateSql: async () => '', supports: () => true } as unknown as TableService;
+    const sql = SchemaDiffService.generateConstraintsSql(diffs, tableService, { sourceSchema: 'app', targetSchema: 'staging' });
+    expect(sql).toContain('ALTER TABLE "staging"."t" ADD CONSTRAINT "ck_x" CHECK (("staging".myfn(id) > 0));');
+  });
+
+  it('4B-3：列类型/默认值移植同一化（enum 限定与 nextval 在 ADD COLUMN 路径均改写）', async () => {
+    const pg = new PostgreSqlDialect();
+    const source = {
+      getTables: async () => [{ name: 't' }],
+      getColumns: async () => [
+        { name: 'id', type: 'integer', isPrimary: true },
+        { name: 'mood', type: 'app.myenum', defaultValue: `nextval('app.t_id_seq'::regclass)`, isNotNull: false },
+      ],
+      getConstraints: async () => [],
+      getIndexes: async () => [],
+    } as unknown as MetadataService;
+    const target = {
+      getTables: async () => [{ name: 't' }],
+      getColumns: async () => [{ name: 'id', type: 'integer', isPrimary: true }],
+      getConstraints: async () => [],
+      getIndexes: async () => [],
+    } as unknown as MetadataService;
+    const diffs = await SchemaDiffService.diff(source, 'db', target, 'db', 'app', 'staging');
+    const tableService = { dbType: DatabaseType.PG, wrapIdentifier: (id: string) => pg.wrap(id), wrapSchemaIdentifier: (id: string) => pg.wrap(id), getCreateSql: async () => '', supports: () => true } as unknown as TableService;
+    const sql = await SchemaDiffService.generateSyncSql(diffs, 'db', tableService, 'db', undefined, { sourceSchema: 'app', targetSchema: 'staging', dialect: pg });
+    expect(sql).toContain('ADD COLUMN "mood" "staging".myenum');
+    expect(sql).toContain(`DEFAULT nextval('"staging".t_id_seq'::regclass)`);
+  });
+
   it('schema 级对象（序列/视图）差异与生成', async () => {
     const pg = new PostgreSqlDialect();
     const source = {

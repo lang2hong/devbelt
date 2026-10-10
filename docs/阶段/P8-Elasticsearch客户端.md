@@ -463,7 +463,7 @@ db-host 最小改动：
 |  | nodes 表格显示负载信息 |
 | 索引 | 索引列表加载、排序、搜索 |
 |  | health 颜色标（green/yellow/red） |
-|  | open/close/refresh/flush/forcemerge 操作带确认 |
+|  | close/forcemerge 含确认；open/refresh/flush 直接执行；delete index 强确认 |
 |  | DELETE index 要求输入索引名确认 |
 | 详情 | mapping 折叠 JSON 树展示 |
 |  | settings 折叠展示 |

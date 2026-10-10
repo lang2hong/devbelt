@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useI18n } from '../../composables/useI18n';
+import { base64ToBytes, bytesToHex } from './bytes';
 import type { ValueInfo } from './types';
 
 const { t } = useI18n();
@@ -47,6 +48,25 @@ function delSelected(): void { if (selected.value.size) emit('del', key.value, [
 function delOne(id: string): void { emit('del', key.value, [id]); }
 function trim(): void { const n = Number(maxlen.value); if (Number.isFinite(n) && n >= 0) emit('trim', key.value, n); }
 function lastId(): string { return data.value?.entries.at(-1)?.id ?? '-'; }
+
+/** Stage B（3C-1）读侧：二进制 field/value 以 hex 预览展示（fieldBytes 为并行 base64）。 */
+const ITEM_HEX_PREVIEW_BYTES = 32;
+function hexPreview(b64: string): string {
+  const bytes = base64ToBytes(b64);
+  const head = bytes.subarray(0, ITEM_HEX_PREVIEW_BYTES);
+  return bytesToHex(head) + (bytes.length > ITEM_HEX_PREVIEW_BYTES ? ' …' : '');
+}
+function isLossy(text: string): boolean { return text.includes('\uFFFD'); }
+function displayFields(e: { fields: [string, string][]; fieldBytes?: [string, string][] }): string {
+  return e.fields
+    .map(([f, v], i) => {
+      const b = e.fieldBytes?.[i];
+      const ff = isLossy(f) && b ? hexPreview(b[0]) : f;
+      const vv = isLossy(v) && b ? hexPreview(b[1]) : v;
+      return `${ff}=${vv}`;
+    })
+    .join(', ');
+}
 </script>
 
 <template>
@@ -78,7 +98,7 @@ function lastId(): string { return data.value?.entries.at(-1)?.id ?? '-'; }
         <tr v-for="e in data?.entries ?? []" :key="e.id">
           <td><input type="checkbox" :checked="selected.has(e.id)" @change="toggle(e.id)" /></td>
           <td class="mono">{{ e.id }}</td>
-          <td class="mono">{{ e.fields.map(([f, v]) => f + '=' + v).join(', ') }}</td>
+          <td class="mono">{{ displayFields(e) }}</td>
           <td><button class="btn tiny" :disabled="readOnly" @click="delOne(e.id)">✕</button></td>
         </tr>
       </tbody>

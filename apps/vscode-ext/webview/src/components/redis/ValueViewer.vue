@@ -21,16 +21,17 @@ const emit = defineEmits<{
   (e: 'rename', key: string, newKey: string): void;
   (e: 'remove', key: string): void;
   (e: 'copyKey', key: string): void;
-  (e: 'hashSet', key: string, field: string, value: string, oldField?: string): void;
-  (e: 'hashDel', key: string, fields: string[]): void;
+  (e: 'hashSet', key: string, field: string, value: string, oldField?: string, fieldBase64?: string, valueBase64?: string): void;
+  (e: 'hashDel', key: string, fields: string[], fieldsBase64?: string[]): void;
   (e: 'listPush', key: string, side: 'left' | 'right', values: string[]): void;
-  (e: 'listSet', key: string, index: number, value: string, original: string): void;
-  (e: 'listRem', key: string, index: number, value: string): void;
+  (e: 'listSet', key: string, index: number, value: string, original: string, valueBase64?: string, originalBase64?: string): void;
+  (e: 'listRem', key: string, index: number, value: string, valueBase64?: string): void;
   (e: 'listPop', key: string, side: 'left' | 'right'): void;
   (e: 'setAdd', key: string, members: string[]): void;
-  (e: 'setRem', key: string, members: string[]): void;
-  (e: 'zsetAdd', key: string, score: string, member: string, oldMember?: string): void;
-  (e: 'zsetRem', key: string, members: string[]): void;
+  (e: 'setRem', key: string, members: string[], membersBase64?: string[]): void;
+  (e: 'zsetAdd', key: string, score: string, member: string, oldMember?: string, memberBase64?: string): void;
+  (e: 'zsetRem', key: string, members: string[], membersBase64?: string[]): void;
+  (e: 'loadMore'): void;
 }>();
 
 const stringMode = ref<'text' | 'json' | 'hex'>('text');
@@ -55,7 +56,7 @@ const ttlOpen = ref(false);
 const ttlValue = ref('');
 const copied = ref(false);
 /** 行内编辑态（hash field+value / list 元素 / zset member+score）；draftKey 仅 hash/zset 用。 */
-interface EditState { kind: 'hash' | 'list' | 'zset'; id: string; draft: string; draftKey?: string }
+interface EditState { kind: 'hash' | 'list' | 'zset'; id: string; draft: string; draftKey?: string; idx?: number; hex?: boolean; draftHex?: string }
 const editing = ref<EditState | null>(null);
 
 const key = computed(() => props.info?.key ?? '');
@@ -162,11 +163,87 @@ function copyKey(): void {
   copied.value = true;
 }
 
-function filteredHash(): [string, string][] {
+function filteredHash(): { f: string; v: string; i: number }[] {
   const data = props.info?.data;
   if (data?.kind !== 'hash') return [];
+  const rows = data.entries.map(([f, v], i) => ({ f, v, i }));
   const q = hashFilter.value.toLowerCase();
-  return q ? data.entries.filter(([f]) => f.toLowerCase().includes(q)) : data.entries;
+  return q ? rows.filter(({ f }) => f.toLowerCase().includes(q)) : rows;
+}
+
+/** Stage B（3C-1）：有损文本（U+FFFD）配合并行 base64 展示/复制/删除原始字节。 */
+function isLossy(text: string): boolean {
+  return text.includes('\uFFFD');
+}
+function bytesOfHash(i: number, which: 0 | 1): string | undefined {
+  const d = props.info?.data;
+  return d?.kind === 'hash' && d.entryBytes ? d.entryBytes[i]?.[which] : undefined;
+}
+function bytesOfList(i: number): string | undefined {
+  const d = props.info?.data;
+  return d?.kind === 'list' && d.itemBytes ? d.itemBytes[i] : undefined;
+}
+function bytesOfSet(i: number): string | undefined {
+  const d = props.info?.data;
+  return d?.kind === 'set' && d.memberBytes ? d.memberBytes[i] : undefined;
+}
+function bytesOfZset(i: number): string | undefined {
+  const d = props.info?.data;
+  return d?.kind === 'zset' && d.itemBytes ? d.itemBytes[i]?.[0] : undefined;
+}
+/** 二进制项内联 hex 预览（截断 32 字节）。 */
+const ITEM_HEX_PREVIEW_BYTES = 32;
+function itemHexPreview(b64: string): string {
+  const bytes = base64ToBytes(b64);
+  const head = bytes.subarray(0, ITEM_HEX_PREVIEW_BYTES);
+  return bytesToHex(head) + (bytes.length > ITEM_HEX_PREVIEW_BYTES ? ' …' : '');
+}
+/** 二进制项复制为完整 hex（与 string hex 模式口径一致）。 */
+function copyBytes(b64: string): void {
+  void navigator.clipboard?.writeText(bytesToHex(base64ToBytes(b64)));
+}
+/** 展示：有损文本且有精确字节 → hex 预览；否则原文。 */
+function displayHash(i: number, which: 0 | 1, text: string): string {
+  const b64 = bytesOfHash(i, which);
+  return isLossy(text) && b64 ? itemHexPreview(b64) : text;
+}
+function displayList(i: number, text: string): string {
+  const b64 = bytesOfList(i);
+  return isLossy(text) && b64 ? itemHexPreview(b64) : text;
+}
+function displaySet(i: number, text: string): string {
+  const b64 = bytesOfSet(i);
+  return isLossy(text) && b64 ? itemHexPreview(b64) : text;
+}
+function displayZset(i: number, text: string): string {
+  const b64 = bytesOfZset(i);
+  return isLossy(text) && b64 ? itemHexPreview(b64) : text;
+}
+/** 复制：有损项复制完整 hex；否则复制原文。 */
+function copyItem(b64: string | undefined, text: string): void {
+  if (b64 && isLossy(text)) copyBytes(b64);
+  else copyValue(text);
+}
+/** 删除请求：有损项必须带精确字节（有损文本无法在服务端命中）。 */
+function delHash(i: number, f: string): void {
+  const b64 = bytesOfHash(i, 0);
+  if (b64 && isLossy(f)) emit('hashDel', key.value, [f], [b64]);
+  else emit('hashDel', key.value, [f]);
+}
+function delList(i: number, item: string): void {
+  const b64 = bytesOfList(i);
+  if (b64 && isLossy(item)) emit('listRem', key.value, i, item, b64);
+  else emit('listRem', key.value, i, item);
+}
+function delSet(i: number, m: string): void {
+  const b64 = bytesOfSet(i);
+  if (b64 && isLossy(m)) emit('setRem', key.value, [m], [b64]);
+  else emit('setRem', key.value, [m]);
+}
+function delZset(i: number, m: string): void {
+  const b64 = bytesOfZset(i);
+  if (b64 && isLossy(m)) emit('zsetRem', key.value, [m], [b64]);
+  else emit('zsetRem', key.value, [m]);
 }
 
 function submitRename(): void {
@@ -183,14 +260,46 @@ function submitTtl(): void {
 /** zset 新增：score 必须是有限数字（空串 Number('')===0，须显式排除）。 */
 const canAddZset = computed(() => !!zsetMember.value && zsetScore.value.trim() !== '' && Number.isFinite(Number(zsetScore.value)));
 
-function startEdit(kind: EditState['kind'], id: string, draft: string): void {
+function startEdit(kind: EditState['kind'], id: string, draft: string, idx?: number): void {
   if (props.readOnly || props.info?.keyBinary) return;
-  // hash/zset：draftKey 初值为原 field/member，允许改；list 无 key 维度。
-  editing.value = { kind, id, draft, draftKey: kind === 'list' ? undefined : id };
+  // Stage B（3C-2）：有损值/元素走 hex 编辑；zset 的 draft 是 score（文本），恒不 hex。
+  const hex = kind !== 'zset' && isLossy(draft);
+  const sourceB64 = kind === 'hash' ? bytesOfHash(idx ?? -1, 1) : kind === 'list' ? bytesOfList(idx ?? -1) : undefined;
+  editing.value = {
+    kind,
+    id,
+    draft,
+    // hash/zset：draftKey 初值为原 field/member，允许改；list 无 key 维度。
+    draftKey: kind === 'list' ? undefined : id,
+    idx,
+    hex,
+    draftHex: hex && sourceB64 ? bytesToHex(base64ToBytes(sourceB64)) : undefined,
+  };
+  hexError.value = '';
 }
 function saveEdit(): void {
   const e = editing.value;
   if (!e) return;
+  // Stage B（3C-2）：hex 编辑（有损值/元素）→ 校验后按精确字节提交（hash 二进制 field 禁改名）。
+  if (e.hex) {
+    let bytes: Uint8Array;
+    try {
+      bytes = hexToBytes(e.draftHex ?? '');
+    } catch (err) {
+      hexError.value = (err as Error).message;
+      return;
+    }
+    hexError.value = '';
+    const newB64 = bytesToBase64(bytes);
+    if (e.kind === 'hash') {
+      const fieldB64 = isLossy(e.id) ? bytesOfHash(e.idx ?? -1, 0) : undefined;
+      emit('hashSet', key.value, e.id, e.draft, undefined, fieldB64, newB64);
+    } else {
+      emit('listSet', key.value, Number(e.id), e.draft, e.draft, newB64, bytesOfList(e.idx ?? -1));
+    }
+    editing.value = null;
+    return;
+  }
   // 仅当字段/成员名真的被改动时才 trim 并带 oldField/oldMember；否则只更新值，
   // 避免「只改值」被宿主误判为改名（曾把字段 ` a` 改成 `a` 或报「目标已存在」）。
   const rename = e.draftKey !== undefined && e.draftKey !== e.id;
@@ -202,9 +311,12 @@ function saveEdit(): void {
     const items = props.info?.data?.kind === 'list' ? props.info.data.items : [];
     emit('listSet', key.value, Number(e.id), e.draft, items[Number(e.id)] ?? '');
   } else {
-    const member = rename ? e.draftKey!.trim() : e.id;
+    // 有损 member 不可改名：只改 score，并按精确字节提交 member。
+    const memberLossy = isLossy(e.id);
+    const canRename = !memberLossy && e.draftKey !== undefined && e.draftKey !== e.id;
+    const member = canRename ? e.draftKey!.trim() : e.id;
     if (!member) return;
-    emit('zsetAdd', key.value, e.draft, member, rename ? e.id : undefined); // zset：draft=score、id=oldMember、draftKey=member
+    emit('zsetAdd', key.value, e.draft, member, canRename ? e.id : undefined, memberLossy ? bytesOfZset(e.idx ?? -1) : undefined);
   }
   editing.value = null;
 }
@@ -220,6 +332,11 @@ const draft = computed({
 const draftKey = computed({
   get: () => editing.value?.draftKey ?? '',
   set: (v: string) => { if (editing.value) editing.value.draftKey = v; },
+});
+/** 编辑草稿（hex 模式：有损值/元素）。 */
+const draftHex = computed({
+  get: () => editing.value?.draftHex ?? '',
+  set: (v: string) => { if (editing.value) editing.value.draftHex = v; },
 });
 function copyValue(text: string): void {
   void navigator.clipboard?.writeText(text);
@@ -248,6 +365,9 @@ function copyValue(text: string): void {
         <input v-model="ttlValue" :placeholder="t('wv.redis.prompt.ttl')" />
         <button class="btn" @click="submitTtl">{{ t('wv.redis.value.setTtl') }}</button>
       </div>
+
+      <!-- Stage B（3C-2）：集合 hex 编辑错误（string 区自带错误行）。 -->
+      <div v-if="hexError && info.data?.kind !== 'string'" class="error">{{ hexError }}</div>
 
       <div v-if="info.tooLarge" class="too-large">
         <span>{{ t('wv.redis.value.tooLarge', { size: info.size ?? 0 }) }}</span>
@@ -280,24 +400,25 @@ function copyValue(text: string): void {
         <div class="meta">{{ t('wv.redis.hash.field') }} / {{ t('wv.redis.hash.value') }}</div>
         <input v-model="hashFilter" :placeholder="t('wv.redis.hash.field')" />
         <table>
-          <tr v-for="[f, v] in filteredHash()" :key="f">
+          <tr v-for="row in filteredHash()" :key="row.i">
             <td class="f">
-              <input v-if="isEditing('hash', f)" v-model="draftKey" class="cell-input" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
-              <template v-else>{{ f }}</template>
+              <input v-if="isEditing('hash', row.f) && !editing?.hex && !isLossy(row.f)" v-model="draftKey" class="cell-input" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
+              <template v-else>{{ displayHash(row.i, 0, row.f) }}</template>
             </td>
             <td class="v">
-              <input v-if="isEditing('hash', f)" v-model="draft" class="cell-input" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
-              <template v-else>{{ v }}</template>
+              <textarea v-if="isEditing('hash', row.f) && editing?.hex" v-model="draftHex" class="cell-input hex-area" @keydown.enter.prevent="saveEdit" @keydown.esc="editing = null" />
+              <input v-else-if="isEditing('hash', row.f)" v-model="draft" class="cell-input" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
+              <template v-else>{{ displayHash(row.i, 1, row.v) }}</template>
             </td>
             <td class="row-actions">
-              <template v-if="isEditing('hash', f)">
+              <template v-if="isEditing('hash', row.f)">
                 <button class="btn tiny" :disabled="!draftKey.trim()" @click="saveEdit">{{ t('wv.redis.value.save') }}</button>
                 <button class="btn tiny" @click="editing = null">{{ t('wv.redis.confirm.cancel') }}</button>
               </template>
               <template v-else>
-                <button class="btn tiny" :disabled="ro || isBin(f) || isBin(v)" :title="t('wv.redis.value.edit')" @click="startEdit('hash', f, v)">✎</button>
-                <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyValue(v)">⧉</button>
-                <button class="btn tiny" :disabled="ro || isBin(f)" @click="emit('hashDel', key, [f])">✕</button>
+                <button class="btn tiny" :disabled="ro" :title="t('wv.redis.value.edit')" @click="startEdit('hash', row.f, row.v, row.i)">✎</button>
+                <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyItem(bytesOfHash(row.i, 1), row.v)">⧉</button>
+                <button class="btn tiny" :disabled="ro" @click="delHash(row.i, row.f)">✕</button>
               </template>
             </td>
           </tr>
@@ -307,6 +428,7 @@ function copyValue(text: string): void {
           <input v-model="newHashValue" :placeholder="t('wv.redis.hash.value')" />
           <button class="btn" :disabled="ro || !newField" @click="emit('hashSet', key, newField, newHashValue); newField=''; newHashValue=''">{{ t('wv.redis.hash.add') }}</button>
         </div>
+        <button v-if="info.more && !info.more.done" class="btn more" @click="emit('loadMore')">{{ t('wv.redis.collection.loadMore') }}</button>
       </div>
 
       <div v-else-if="info.data?.kind === 'list'" class="list">
@@ -324,8 +446,9 @@ function copyValue(text: string): void {
           <tr v-for="(item, i) in info.data.items" :key="i">
             <td class="idx">{{ i }}</td>
             <td class="v">
-              <input v-if="isEditing('list', String(i))" v-model="draft" class="cell-input" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
-              <template v-else>{{ item }}</template>
+              <textarea v-if="isEditing('list', String(i)) && editing?.hex" v-model="draftHex" class="cell-input hex-area" @keydown.enter.prevent="saveEdit" @keydown.esc="editing = null" />
+              <input v-else-if="isEditing('list', String(i))" v-model="draft" class="cell-input" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
+              <template v-else>{{ displayList(i, item) }}</template>
             </td>
             <td class="row-actions">
               <template v-if="isEditing('list', String(i))">
@@ -333,13 +456,14 @@ function copyValue(text: string): void {
                 <button class="btn tiny" @click="editing = null">{{ t('wv.redis.confirm.cancel') }}</button>
               </template>
               <template v-else>
-                <button class="btn tiny" :disabled="ro || isBin(item)" :title="t('wv.redis.value.edit')" @click="startEdit('list', String(i), item)">✎</button>
-                <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyValue(item)">⧉</button>
-                <button class="btn tiny" :disabled="ro || isBin(item)" @click="emit('listRem', key, i, item)">✕</button>
+                <button class="btn tiny" :disabled="ro" :title="t('wv.redis.value.edit')" @click="startEdit('list', String(i), item, i)">✎</button>
+                <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyItem(bytesOfList(i), item)">⧉</button>
+                <button class="btn tiny" :disabled="ro" @click="delList(i, item)">✕</button>
               </template>
             </td>
           </tr>
         </table>
+        <button v-if="info.more && !info.more.done" class="btn more" @click="emit('loadMore')">{{ t('wv.redis.collection.loadMore') }}</button>
       </div>
 
       <div v-else-if="info.data?.kind === 'set'" class="set">
@@ -349,14 +473,15 @@ function copyValue(text: string): void {
           <button class="btn" :disabled="ro || !setMember" @click="emit('setAdd', key, [setMember]); setMember=''">{{ t('wv.redis.set.add') }}</button>
         </div>
         <table>
-          <tr v-for="m in info.data.members" :key="m">
-            <td class="v">{{ m }}</td>
+          <tr v-for="(m, i) in info.data.members" :key="i">
+            <td class="v">{{ displaySet(i, m) }}</td>
             <td class="row-actions">
-              <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyValue(m)">⧉</button>
-              <button class="btn tiny" :disabled="ro || isBin(m)" @click="emit('setRem', key, [m])">✕</button>
+              <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyItem(bytesOfSet(i), m)">⧉</button>
+              <button class="btn tiny" :disabled="ro" @click="delSet(i, m)">✕</button>
             </td>
           </tr>
         </table>
+        <button v-if="info.more && !info.more.done" class="btn more" @click="emit('loadMore')">{{ t('wv.redis.collection.loadMore') }}</button>
       </div>
 
       <div v-else-if="info.data?.kind === 'zset'" class="zset">
@@ -367,10 +492,10 @@ function copyValue(text: string): void {
           <button class="btn" :disabled="ro || !canAddZset" @click="emit('zsetAdd', key, zsetScore, zsetMember); zsetMember=''">{{ t('wv.redis.zset.add') }}</button>
         </div>
         <table>
-          <tr v-for="[m, s] in info.data.items" :key="m">
+          <tr v-for="([m, s], i) in info.data.items" :key="i">
             <td class="v">
-              <input v-if="isEditing('zset', m)" v-model="draftKey" class="cell-input" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
-              <template v-else>{{ m }}</template>
+              <input v-if="isEditing('zset', m) && !isLossy(m)" v-model="draftKey" class="cell-input" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
+              <template v-else>{{ displayZset(i, m) }}</template>
             </td>
             <td class="idx">
               <input v-if="isEditing('zset', m)" v-model="draft" class="cell-input score" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
@@ -382,13 +507,14 @@ function copyValue(text: string): void {
                 <button class="btn tiny" @click="editing = null">{{ t('wv.redis.confirm.cancel') }}</button>
               </template>
               <template v-else>
-                <button class="btn tiny" :disabled="ro || isBin(m)" :title="t('wv.redis.value.edit')" @click="startEdit('zset', m, s)">✎</button>
-                <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyValue(m)">⧉</button>
-                <button class="btn tiny" :disabled="ro || isBin(m)" @click="emit('zsetRem', key, [m])">✕</button>
+                <button class="btn tiny" :disabled="ro" :title="t('wv.redis.value.edit')" @click="startEdit('zset', m, s, i)">✎</button>
+                <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyItem(bytesOfZset(i), m)">⧉</button>
+                <button class="btn tiny" :disabled="ro" @click="delZset(i, m)">✕</button>
               </template>
             </td>
           </tr>
         </table>
+        <button v-if="info.more && !info.more.done" class="btn more" @click="emit('loadMore')">{{ t('wv.redis.collection.loadMore') }}</button>
       </div>
 
       <div v-else class="empty">{{ t('wv.redis.value.none') }}</div>
@@ -418,6 +544,8 @@ td.f { width: 30%; }
 td.row-actions { white-space: nowrap; text-align: right; }
 .cell-input { width: 100%; box-sizing: border-box; }
 .cell-input.score { width: 72px; }
+/* Stage B（3C-2）：二进制项 hex 编辑（等宽、可换行）。 */
+.hex-area { font-family: var(--vscode-editor-font-family, monospace); min-height: 44px; white-space: pre-wrap; word-break: break-all; }
 .meta { color: var(--vscode-descriptionForeground); padding: 2px 0; }
 .error { color: var(--vscode-errorForeground); }
 .binary-warn { color: var(--vscode-editorWarning-foreground, #cca700); padding: 2px 0; }

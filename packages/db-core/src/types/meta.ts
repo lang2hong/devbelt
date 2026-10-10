@@ -80,6 +80,15 @@ export interface IndexMeta {
   isUnique: boolean;
   isPrimary: boolean;
   type?: string;
+  /** PG（4B-2a）：访问方法（btree/hash/gin…）。 */
+  method?: string;
+  /** PG（4B-2a）：部分索引 WHERE 表达式（`pg_get_expr(indpred)`）；无则 undefined。 */
+  predicate?: string;
+  /**
+   * PG（4B-2a）：逐部件定义（`pg_get_indexdef(oid, pos, true)`，含 opclass/DESC/NULLS）；
+   * `isKey=false` 为 INCLUDE 列。其它方言不填，回退整串定义比较/生成。
+   */
+  keyParts?: { def: string; isKey: boolean }[];
 }
 
 /** 触发器元信息 */
@@ -127,7 +136,31 @@ export interface SequenceMeta {
 }
 
 /** 表级约束（PK/UNIQUE/CHECK/FK），定义由数据库规范化输出。 */
-export interface ConstraintMeta {
+/**
+ * PG（4B-2b）：约束的结构化形状（FK 与 CHECK；存在时按结构比较/组合生成，缺失回退整串定义）。
+ * PK/UNIQUE 不在此（含 INCLUDE/NULLS NOT DISTINCT 等版本相关细节，保留文本路径）。
+ */
+export interface ConstraintShape {
+  /** FK：本表列（conkey 顺序）。 */
+  columns?: string[];
+  /** FK：被引用 schema/表/列。 */
+  refSchema?: string;
+  refTable?: string;
+  refColumns?: string[];
+  /** FK：a=NO ACTION / r=RESTRICT / c=CASCADE / n=SET NULL / d=SET DEFAULT。 */
+  onUpdate?: 'NO ACTION' | 'RESTRICT' | 'CASCADE' | 'SET NULL' | 'SET DEFAULT';
+  onDelete?: 'NO ACTION' | 'RESTRICT' | 'CASCADE' | 'SET NULL' | 'SET DEFAULT';
+  /** FK：FULL / PARTIAL / SIMPLE。 */
+  match?: 'FULL' | 'PARTIAL' | 'SIMPLE';
+  deferrable?: boolean;
+  initiallyDeferred?: boolean;
+  /** CHECK：表达式（pg_get_expr(conbin, conrelid)）。 */
+  expression?: string;
+  notValid?: boolean;
+  noInherit?: boolean;
+}
+
+export interface ConstraintMeta extends ConstraintShape {
   tableName: string;
   name: string;
   /** p=primary, u=unique, c=check, f=foreign。 */

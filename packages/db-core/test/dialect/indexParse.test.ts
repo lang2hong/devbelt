@@ -109,6 +109,99 @@ describe('PG parseIndexList 列名提取', () => {
   });
 });
 
+describe('PG parseIndexList 结构化部件（4B-2a）', () => {
+  const pg = new PostgreSqlDialect();
+
+  it('解析 method/predicate/keyParts（对象与 JSON 字符串两种形态）', () => {
+    const row = {
+      name: 'idx_x',
+      definition: 'CREATE INDEX idx_x ON t USING btree (lower(a), b DESC) INCLUDE (c) WHERE (d > 0)',
+      is_unique: false,
+      is_primary: false,
+      method: 'btree',
+      predicate: '(d > 0)',
+      parts: [
+        { pos: 1, def: 'lower(a)', isKey: true },
+        { pos: 2, def: 'b DESC', isKey: true },
+        { pos: 3, def: 'c', isKey: false },
+      ],
+    };
+    const parsed = pg.parseIndexList([row])[0];
+    expect(parsed.method).toBe('btree');
+    expect(parsed.predicate).toBe('(d > 0)');
+    expect(parsed.keyParts).toEqual([
+      { def: 'lower(a)', isKey: true },
+      { def: 'b DESC', isKey: true },
+      { def: 'c', isKey: false },
+    ]);
+    // 驱动差异：JSON 字符串形态等价。
+    const asString = pg.parseIndexList([{ ...row, parts: JSON.stringify(row.parts) }])[0];
+    expect(asString.keyParts).toEqual(parsed.keyParts);
+  });
+
+  it('缺新列/畸形 parts → 不填结构化字段（回退旧行为）', () => {
+    const plain = pg.parseIndexList([{ name: 'i', definition: 'CREATE INDEX i ON t (a)' }])[0];
+    expect(plain.method).toBeUndefined();
+    expect(plain.predicate).toBeUndefined();
+    expect(plain.keyParts).toBeUndefined();
+    const bad = pg.parseIndexList([{ name: 'i', definition: 'x', parts: 'not-json' }])[0];
+    expect(bad.keyParts).toBeUndefined();
+  });
+});
+
+describe('PG parseConstraintList 结构化（4B-2b）', () => {
+  const pg = new PostgreSqlDialect();
+
+  it('FK：列/引用/动作/match/延迟性结构化（数组两形态）', () => {
+    const row = {
+      name: 'fk_dept', type: 'f', table: 'orders',
+      definition: 'FOREIGN KEY (dept_id, x) REFERENCES app.dept(id, y) ON UPDATE CASCADE ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED',
+      columns: ['dept_id', 'x'], refSchema: 'app', refTable: 'dept', refColumns: ['id', 'y'],
+      onUpdateCode: 'c', onDeleteCode: 'n', matchCode: 'f',
+      condeferrable: true, condeferred: true,
+    };
+    const c = pg.parseConstraintList([row])[0];
+    expect(c.columns).toEqual(['dept_id', 'x']);
+    expect(c.refSchema).toBe('app');
+    expect(c.refTable).toBe('dept');
+    expect(c.refColumns).toEqual(['id', 'y']);
+    expect(c.onUpdate).toBe('CASCADE');
+    expect(c.onDelete).toBe('SET NULL');
+    expect(c.match).toBe('FULL');
+    expect(c.deferrable).toBe(true);
+    expect(c.initiallyDeferred).toBe(true);
+
+    // `{a,b}` 字面量形态（部分驱动）
+    const asLiteral = pg.parseConstraintList([{ ...row, columns: '{dept_id,x}', refColumns: '{id,y}' }])[0];
+    expect(asLiteral.columns).toEqual(['dept_id', 'x']);
+    expect(asLiteral.refColumns).toEqual(['id', 'y']);
+  });
+
+  it('CHECK：表达式 + NOT VALID/NO INHERIT；PK/UNIQUE 不填结构化（保留文本路径）', () => {
+    const ck = pg.parseConstraintList([{
+      name: 'ck', type: 'c', table: 't', definition: 'CHECK ((a > 0))',
+      convalidated: false, connoinherit: true, expression: '(a > 0)',
+    }])[0];
+    expect(ck.expression).toBe('(a > 0)');
+    expect(ck.notValid).toBe(true);
+    expect(ck.noInherit).toBe(true);
+
+    const pk = pg.parseConstraintList([{
+      name: 't_pkey', type: 'p', table: 't', definition: 'PRIMARY KEY (id)',
+      columns: ['id'], condeferrable: false, condeferred: false,
+    }])[0];
+    expect(pk.columns).toBeUndefined();
+    expect(pk.expression).toBeUndefined();
+  });
+
+  it('缺结构化列（旧驱动/其它来源）→ 不填字段（回退文本）', () => {
+    const c = pg.parseConstraintList([{ name: 'fk', type: 'f', table: 't', definition: 'FOREIGN KEY (a) REFERENCES b(id)' }])[0];
+    expect(c.columns).toBeUndefined();
+    expect(c.refTable).toBeUndefined();
+    expect(c.expression).toBeUndefined();
+  });
+});
+
 describe('normalizeColumnMeta 布尔归一化', () => {
   it('MySQL SHOW FULL COLUMNS 形态', () => {
     const col = normalizeColumnMeta({

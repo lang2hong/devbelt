@@ -54,6 +54,15 @@ function allContextValues(): Set<string> {
   mk(TreeItemCollapsibleState.None, NodeKind.RedisKey, redisConn);
   mk(TreeItemCollapsibleState.None, NodeKind.RedisKeyLoadMore, redisConn);
 
+  // P8：Elasticsearch 连接节点（含只读 `.ro`）与集群/索引节点。
+  const esConn: any = { id: 'es', host: 'h', dbType: 'ELASTICSEARCH' };
+  mk(TreeItemCollapsibleState.None, NodeKind.Connection, esConn);
+  mk(TreeItemCollapsibleState.Collapsed, NodeKind.Connection, esConn);
+  mk(TreeItemCollapsibleState.Collapsed, NodeKind.Connection, { ...esConn, readOnly: true });
+  mk(TreeItemCollapsibleState.None, NodeKind.EsClusterInfo, esConn);
+  mk(TreeItemCollapsibleState.Collapsed, NodeKind.EsIndexCategory, esConn);
+  mk(TreeItemCollapsibleState.None, NodeKind.EsIndex, esConn);
+
   for (const dbType of DB_TYPES) {
     const conn: any = { id: 'c', host: 'h', dbType };
     // 连接节点：折叠态 = 未打开，展开态 = 已打开
@@ -135,7 +144,7 @@ describe('树右键菜单 when 表达式', () => {
 
   it('contextValue 一律形如 <base>.<DBTYPE>', () => {
     for (const value of allContextValues()) {
-      expect(value).toMatch(/^[A-Za-z_]+\.(MYSQL|PG|SQLITE|REDIS|NONE)$/);
+      expect(value).toMatch(/^[A-Za-z_]+\.(MYSQL|PG|SQLITE|REDIS|ELASTICSEARCH|NONE)(\.ro)?$/);
     }
   });
 
@@ -155,7 +164,7 @@ describe('树右键菜单 when 表达式', () => {
 
     const folder = new DbTreeNode('a', TreeItemCollapsibleState.Collapsed, NodeKind.RedisKeyFolder, ro);
     expect(viewItemMatcher(whenOf('devbelt.redis.deleteFolder', 'redisKeyFolder.REDIS'))!(folder.contextValue!)).toBe(false);
-    expect(viewItemMatcher(whenOf('devbelt.redis.loadFolderKeys', 'redisKeyFolder.REDIS'))!(folder.contextValue!)).toBe(true);
+    expect(viewItemMatcher(whenOf('devbelt.redis.loadAllFolderKeys', 'redisKeyFolder.REDIS'))!(folder.contextValue!)).toBe(true);
   });
 
   /** SQLite 无用户体系，用户相关命令不得在 SQLite 连接上出现。 */
@@ -168,6 +177,36 @@ describe('树右键菜单 when 表达式', () => {
       if (!match) continue;
       expect(sqliteValues.filter(match), `${entry.command} 在 SQLite 上可见`).toEqual([]);
     }
+  });
+
+  /**
+   * P8：Elasticsearch 连接菜单。
+   * - 集群总览 / REST 控制台在普通与只读连接上都可见（写操作门禁在请求层）；
+   * - closeConnection / refreshConnection / openConnection 均覆盖 ELASTICSEARCH（含 `.ro`）。
+   */
+  it('ES 连接：集群/REST 菜单可见，面板命令覆盖只读变体', () => {
+    const menus = contextMenus();
+    const whenOf = (cmd: string): string => menus.find((e) => e.command === cmd)!.when!;
+    const plain: any = { id: 'es', host: 'h', dbType: 'ELASTICSEARCH' };
+    const ro: any = { ...plain, readOnly: true };
+
+    const plainNode = new DbTreeNode('es', TreeItemCollapsibleState.Collapsed, NodeKind.Connection, plain);
+    const roNode = new DbTreeNode('es', TreeItemCollapsibleState.Collapsed, NodeKind.Connection, ro);
+    expect(plainNode.contextValue).toBe('connectionOpen.ELASTICSEARCH');
+    expect(roNode.contextValue).toBe('connectionOpen.ELASTICSEARCH.ro');
+
+    for (const cmd of ['devbelt.es.cluster', 'devbelt.es.rest']) {
+      const match = viewItemMatcher(whenOf(cmd))!;
+      expect(match(plainNode.contextValue!), `${cmd} 普通连接不可见`).toBe(true);
+      expect(match(roNode.contextValue!), `${cmd} 只读连接不可见`).toBe(true);
+    }
+    for (const cmd of ['devbelt.closeConnection', 'devbelt.refreshConnection']) {
+      const match = viewItemMatcher(whenOf(cmd))!;
+      expect(match(roNode.contextValue!), `${cmd} 未覆盖只读 ES`).toBe(true);
+    }
+    const closedRo = new DbTreeNode('es', TreeItemCollapsibleState.None, NodeKind.Connection, ro);
+    expect(closedRo.contextValue).toBe('connectionClosed.ELASTICSEARCH.ro');
+    expect(viewItemMatcher(whenOf('devbelt.openConnection'))!(closedRo.contextValue!)).toBe(true);
   });
 
   /**

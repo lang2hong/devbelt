@@ -3,11 +3,15 @@ import {
   redisType, redisSelect, redisGetBuffer, redisGetRangeBuffer, redisStrlen, redisSet, redisSetBuffer, redisAppend,
   isValidUtf8, isBufferSource,
   redisUnlink, redisExists, redisRename, redisTtl, redisExpire, redisPersist, redisMemoryUsage,
-  redisHScan, redisHSet, redisHDel, redisHLen, redisHExists,
-  redisLRange, redisLLen, redisLPush, redisRPush, redisLSet, redisLRem, redisLTrim, redisLPop, redisRPop, redisLIndex,
-  redisSScan, redisSCard, redisSAdd, redisSRem,
-  redisZRange, redisZCard, redisZAdd, redisZRem, redisZScore, allCommandNames,
-  redisXRange, redisXLen, redisXInfoGroups,
+  redisHSet, redisHDel, redisHLen, redisHExists, redisHScanBuffer, redisHDelBuffer, redisHSetBuffer,
+  redisLLen, redisLPush, redisRPush, redisLSet, redisLRem, redisLTrim, redisLPop, redisRPop, redisLIndex,
+  redisLRangeBuffer, redisLIndexBuffer, redisLSetBuffer,
+  redisSCard, redisSAdd, redisSRem,
+  redisSScanBuffer, redisSRemBuffer,
+  redisZCard, redisZAdd, redisZRem, redisZScore, allCommandNames,
+  redisZRangeBuffer, redisZRemBuffer, redisZAddBuffer,
+  redisXLen, redisXInfoGroups,
+  redisXRangeBuffer,
   redisInfoOnNode,
   type RedisCommandSource,
 } from '@devbelt/db-core';
@@ -16,7 +20,7 @@ import { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from './baseWebView';
 import { AuditLogger } from '../utils/auditLogger';
 import { l10n } from '../i18n';
-import type { RedisPanel, RedisValueData, RedisUpMessage } from './protocol';
+import type { RedisPanel, RedisValueData, RedisUpMessage, RedisMoreToken, RedisCollectionKind } from './protocol';
 import { parseRedisInfo, aggregateRedisInfo } from './redisInfoParse';
 import { RedisCliConsole } from './redisCliConsole';
 import { RedisStreamOps } from './redisStreamOps';
@@ -29,6 +33,19 @@ import {
 
 // 纯函数从支撑模块转发（保持既有导入路径：测试直接 import 这些名字）。
 export { formatRedisReply, parseSlowlog, redisAuditLine } from './redisViewSupport';
+
+/** list/zset 单页条数（offset 续页；与 hash/set 的 HASH_SET_PAGE 同量级）。 */
+const LIST_ZSET_PAGE = 200;
+
+/** Stage B（3C-1）：字节项 → 文本（有损显示）+ base64（精确字节）+ 是否有损。 */
+function bytesItemOf(buf: Buffer): { text: string; b64: string; binary: boolean } {
+  return { text: buf.toString('utf8'), b64: buf.toString('base64'), binary: !isValidUtf8(buf) };
+}
+
+/** 可选 base64 数组归一（与文本数组并行等长时使用）。 */
+function bytesArrayOf(v: unknown): string[] | undefined {
+  return Array.isArray(v) ? v.map(String) : undefined;
+}
 
 /**
  * Redis 面板（S5：按职责拆分为独立 webview）。
@@ -162,8 +179,22 @@ export class RedisView extends BaseWebView {
     if (msg.type === 'hashSet') {
       const hkey = String(msg.key);
       const field = String(msg.field ?? '');
+      const valueBase64 = typeof msg.valueBase64 === 'string' ? msg.valueBase64 : undefined;
+      const fieldBase64 = typeof msg.fieldBase64 === 'string' ? msg.fieldBase64 : undefined;
       const oldField = msg.oldField === undefined ? undefined : String(msg.oldField);
       const renaming = !!oldField && oldField !== field;
+      // Stage B（3C-2）：值按精确字节写入（field 可文本或字节）；二进制 field 的改名不在支持面（fail-closed）。
+      if (valueBase64 !== undefined) {
+        if (renaming) {
+          this.post({ type: 'keyAction', action: 'HSET', ok: false, error: l10n('cmd.redis.binaryReadOnly') });
+          return;
+        }
+        await this.edit('HSET', hkey, async (c) => {
+          const fieldBuf = fieldBase64 !== undefined ? Buffer.from(fieldBase64, 'base64') : Buffer.from(field, 'utf8');
+          await redisHSetBuffer(c, hkey, fieldBuf, Buffer.from(valueBase64, 'base64'));
+        });
+        return;
+      }
       this.assertBinaryFree(hkey, [...(oldField ? [field, oldField] : [field]), String(msg.value ?? '')]);
       await this.edit(renaming ? 'HSET+HDEL' : 'HSET', hkey, async (c) => {
         // 改名时目标 field 已存在则拒绝，避免静默覆盖（HSET 会直接覆盖值）。
@@ -183,6 +214,13 @@ export class RedisView extends BaseWebView {
     }
     if (msg.type === 'hashDel') {
       const fields = strs(msg.fields);
+      // Stage B：webview 提供精确字节（与 fields 并行等长）时按字节删除；否则保持文本路径。
+      const fieldsBase64 = bytesArrayOf(msg.fieldsBase64);
+      if (fieldsBase64 && fieldsBase64.length === fields.length) {
+        const bufs = fieldsBase64.map((b) => Buffer.from(b, 'base64'));
+        await this.edit('HDEL', String(msg.key), async (c) => redisHDelBuffer(c, String(msg.key), bufs));
+        return;
+      }
       this.assertBinaryFree(String(msg.key), fields);
       await this.edit('HDEL', String(msg.key), async (c) => redisHDel(c, String(msg.key), fields));
       return;
@@ -193,6 +231,16 @@ export class RedisView extends BaseWebView {
       await this.edit('LSET', String(msg.key), async (c) => {
         const key = String(msg.key);
         const index = Number(msg.index);
+        const valueBase64 = typeof msg.valueBase64 === 'string' ? msg.valueBase64 : undefined;
+        const originalBase64 = typeof msg.originalBase64 === 'string' ? msg.originalBase64 : undefined;
+        // Stage B（3C-2）：二进制元素按精确字节比对 + 回写（缺任一侧则回退文本路径）。
+        if (valueBase64 !== undefined && originalBase64 !== undefined) {
+          const expected = Buffer.from(originalBase64, 'base64');
+          const current = await redisLIndexBuffer(c, key, index);
+          if (!current || !current.equals(expected)) throw new Error(l10n('cmd.redis.listChanged'));
+          await redisLSetBuffer(c, key, index, Buffer.from(valueBase64, 'base64'));
+          return;
+        }
         const next = String(msg.value ?? '');
         this.assertBinaryFree(key, [String(msg.original ?? '')]);
         const current = await redisLIndex(c, key, index);
@@ -202,6 +250,26 @@ export class RedisView extends BaseWebView {
       return;
     }
     if (msg.type === 'listRem') {
+      const valueBase64 = typeof msg.valueBase64 === 'string' ? msg.valueBase64 : undefined;
+      // Stage B：二进制元素按精确字节比对/删除（标记法保留并发保护；回滚回原始字节）。
+      if (valueBase64 !== undefined) {
+        await this.edit('LREM', String(msg.key), async (c) => {
+          const key = String(msg.key);
+          const index = Number(msg.index);
+          const expected = Buffer.from(valueBase64, 'base64');
+          const current = await redisLIndexBuffer(c, key, index);
+          if (!current || !current.equals(expected)) throw new Error(l10n('cmd.redis.listChanged'));
+          const marker = `\u0000devbelt:del:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`;
+          await redisLSet(c, key, index, marker);
+          try {
+            return await redisLRem(c, key, 1, marker);
+          } catch (err) {
+            try { await redisLSetBuffer(c, key, index, expected); } catch { /* 标记残留可被下次编辑覆盖 */ }
+            throw err;
+          }
+        });
+        return;
+      }
       // 精确删「第 index 个元素」：LREM count=0 会删掉所有同值元素。用唯一标记替换该下标再 LREM 1，
       // 失败则回滚标记（避免污染列表）。
       await this.edit('LREM', String(msg.key), async (c) => {
@@ -228,6 +296,12 @@ export class RedisView extends BaseWebView {
     if (msg.type === 'setAdd') { await this.edit('SADD', String(msg.key), async (c) => { await redisSAdd(c, String(msg.key), strs(msg.members)); }); return; }
     if (msg.type === 'setRem') {
       const members = strs(msg.members);
+      const membersBase64 = bytesArrayOf(msg.membersBase64);
+      if (membersBase64 && membersBase64.length === members.length) {
+        const bufs = membersBase64.map((b) => Buffer.from(b, 'base64'));
+        await this.edit('SREM', String(msg.key), async (c) => redisSRemBuffer(c, String(msg.key), bufs));
+        return;
+      }
       this.assertBinaryFree(String(msg.key), members);
       await this.edit('SREM', String(msg.key), async (c) => redisSRem(c, String(msg.key), members));
       return;
@@ -235,8 +309,20 @@ export class RedisView extends BaseWebView {
     if (msg.type === 'zsetAdd') {
       const zkey = String(msg.key);
       const member = String(msg.member ?? '');
+      const memberBase64 = typeof msg.memberBase64 === 'string' ? msg.memberBase64 : undefined;
       const oldMember = msg.oldMember === undefined ? undefined : String(msg.oldMember);
       const renaming = !!oldMember && oldMember !== member;
+      // Stage B（3C-2）：二进制 member 按精确字节改 score；改名不在支持面（fail-closed）。
+      if (memberBase64 !== undefined) {
+        if (renaming) {
+          this.post({ type: 'keyAction', action: 'ZADD', ok: false, error: l10n('cmd.redis.binaryReadOnly') });
+          return;
+        }
+        await this.edit('ZADD', zkey, async (c) => {
+          await redisZAddBuffer(c, zkey, String(msg.score ?? '0'), Buffer.from(memberBase64, 'base64'));
+        });
+        return;
+      }
       this.assertBinaryFree(zkey, oldMember ? [member, oldMember] : [member]);
       await this.edit(renaming ? 'ZADD+ZREM' : 'ZADD', zkey, async (c) => {
         // 改名时目标 member 已存在则拒绝，避免静默覆盖。
@@ -256,6 +342,12 @@ export class RedisView extends BaseWebView {
     }
     if (msg.type === 'zsetRem') {
       const members = strs(msg.members);
+      const membersBase64 = bytesArrayOf(msg.membersBase64);
+      if (membersBase64 && membersBase64.length === members.length) {
+        const bufs = membersBase64.map((b) => Buffer.from(b, 'base64'));
+        await this.edit('ZREM', String(msg.key), async (c) => redisZRemBuffer(c, String(msg.key), bufs));
+        return;
+      }
       this.assertBinaryFree(String(msg.key), members);
       await this.edit('ZREM', String(msg.key), async (c) => redisZRem(c, String(msg.key), members));
       return;
@@ -268,6 +360,7 @@ export class RedisView extends BaseWebView {
     if (msg.type === 'streamGroupDelConsumer') { await this.streams.streamGroupDelConsumerOp(msg); return; }
     if (msg.type === 'streamGroupDetail') { await this.streams.streamGroupDetailOp(msg); return; }
     if (msg.type === 'streamRange') { await this.streams.streamRangeOp(msg); return; }
+    if (msg.type === 'collectionMore') { await this.collectionMoreOp(msg); return; }
   }
 
   protected onDispose(): void {
@@ -478,9 +571,11 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
       const ttl = await redisTtl(c, key);
       const size = keyType === 'string' ? await redisStrlen(c, key) : await redisMemoryUsage(c, key);
       const tooLarge = size !== null && size > LARGE_KEY_BYTES;
-      const data = tooLarge ? null : await this.loadValue(c, key, keyType);
-      this.recordBinary(key, data);
-      const valueMsg = { type: 'value', key, keyType, ttl, tooLarge, size, data, keyBinary: this.keyBinary, binaryFields: [...this.binaryTokens] };
+      const loaded: { data: RedisValueData | null; more?: RedisMoreToken } = tooLarge
+        ? { data: null }
+        : await this.loadValue(c, key, keyType);
+      this.recordBinary(key, loaded.data);
+      const valueMsg = { type: 'value', key, keyType, ttl, tooLarge, size, data: loaded.data, more: loaded.more, keyBinary: this.keyBinary, binaryFields: [...this.binaryTokens] };
       // webview 未挂载时缓存（否则 post 丢失，reload 后看不到值）。
       if (!this.webviewReady) this.pendingValueMsg = valueMsg;
       else this.post(valueMsg as never);
@@ -540,46 +635,168 @@ if (this.panelType === 'serverStatus') { await this.pushInfo(); return; }
           this.post({ type: 'value', key, keyType, ttl, tooLarge: false, size, data, truncated: true, keyBinary: this.keyBinary, binaryFields: [...this.binaryTokens] });
           return;
         }
-        const data = await this.loadValue(c, key, keyType);
-        this.recordBinary(key, data);
-        this.post({ type: 'value', key, keyType, ttl, tooLarge: false, size, data, keyBinary: this.keyBinary, binaryFields: [...this.binaryTokens] });
+        const loaded = await this.loadValue(c, key, keyType);
+        this.recordBinary(key, loaded.data);
+        this.post({ type: 'value', key, keyType, ttl, tooLarge: false, size, data: loaded.data, more: loaded.more, keyBinary: this.keyBinary, binaryFields: [...this.binaryTokens] });
       } catch (err) {
         this.post({ type: 'error', message: (err as Error).message });
       }
     });
   }
 
-  private async loadValue(c: RedisCommandSource, key: string, keyType: string): Promise<RedisValueData | null> {
+  private async loadValue(c: RedisCommandSource, key: string, keyType: string): Promise<{ data: RedisValueData | null; more?: RedisMoreToken }> {
     switch (keyType) {
       case 'string': {
         const buf = await redisGetBuffer(c, key);
         return {
-          kind: 'string',
-          text: buf ? buf.toString('utf8') : '',
-          base64: buf ? buf.toString('base64') : '',
-          binary: buf ? !isValidUtf8(buf) : false,
-          bytes: buf ? buf.length : 0,
+          data: {
+            kind: 'string',
+            text: buf ? buf.toString('utf8') : '',
+            base64: buf ? buf.toString('base64') : '',
+            binary: buf ? !isValidUtf8(buf) : false,
+            bytes: buf ? buf.length : 0,
+          },
         };
       }
       case 'hash': {
-        // 分页兜底：MEMORY USAGE 不可用/大 key 时也不全量 HGETALL。
-        const page = await redisHScan(c, key, 0, { count: HASH_SET_PAGE });
-        return { kind: 'hash', entries: page.entries, len: await redisHLen(c, key) };
+        // 分页兜底：MEMORY USAGE 不可用/大 key 时也不全量 HGETALL；cursor 供续页。
+        // Stage B：字节级读取；存在二进制项时附并行 base64（webview 精确展示/删除）。
+        const page = await redisHScanBuffer(c, key, 0, { count: HASH_SET_PAGE });
+        const len = await redisHLen(c, key);
+        const items = page.entries.map(([f, v]) => ({ f: bytesItemOf(f), v: bytesItemOf(v) }));
+        const binary = items.some((x) => x.f.binary || x.v.binary);
+        return {
+          data: {
+            kind: 'hash',
+            entries: items.map((x) => [x.f.text, x.v.text] as [string, string]),
+            len,
+            ...(binary ? { entryBytes: items.map((x) => [x.f.b64, x.v.b64] as [string, string]) } : {}),
+          },
+          more: { cursor: page.cursor, done: page.cursor === '0' },
+        };
       }
-      case 'list': return { kind: 'list', items: await redisLRange(c, key, 0, 199), len: await redisLLen(c, key) };
+      case 'list': {
+        const bufs = await redisLRangeBuffer(c, key, 0, LIST_ZSET_PAGE - 1);
+        const items = bufs.map(bytesItemOf);
+        const binary = items.some((x) => x.binary);
+        return {
+          data: {
+            kind: 'list',
+            items: items.map((x) => x.text),
+            len: await redisLLen(c, key),
+            ...(binary ? { itemBytes: items.map((x) => x.b64) } : {}),
+          },
+          more: { offset: items.length, done: items.length < LIST_ZSET_PAGE },
+        };
+      }
       case 'set': {
-        const page = await redisSScan(c, key, 0, { count: HASH_SET_PAGE });
-        return { kind: 'set', members: page.keys, card: await redisSCard(c, key) };
+        const page = await redisSScanBuffer(c, key, 0, { count: HASH_SET_PAGE });
+        const items = page.keys.map(bytesItemOf);
+        const binary = items.some((x) => x.binary);
+        return {
+          data: {
+            kind: 'set',
+            members: items.map((x) => x.text),
+            card: await redisSCard(c, key),
+            ...(binary ? { memberBytes: items.map((x) => x.b64) } : {}),
+          },
+          more: { cursor: page.cursor, done: page.cursor === '0' },
+        };
       }
-      case 'zset': return { kind: 'zset', items: await redisZRange(c, key, 0, 199), card: await redisZCard(c, key) };
-      case 'stream': return {
-        kind: 'stream',
-        entries: await redisXRange(c, key, '-', '+', STREAM_PAGE),
-        len: await redisXLen(c, key),
-        groups: await redisXInfoGroups(c, key),
-      };
-      default: return null;
+      case 'zset': {
+        const bufs = await redisZRangeBuffer(c, key, 0, LIST_ZSET_PAGE - 1);
+        const items = bufs.map(({ member, score }) => ({ m: bytesItemOf(member), score }));
+        const binary = items.some((x) => x.m.binary);
+        return {
+          data: {
+            kind: 'zset',
+            items: items.map((x) => [x.m.text, x.score] as [string, string]),
+            card: await redisZCard(c, key),
+            ...(binary ? { itemBytes: items.map((x) => [x.m.b64, x.score] as [string, string]) } : {}),
+          },
+          more: { offset: items.length, done: items.length < LIST_ZSET_PAGE },
+        };
+      }
+      case 'stream': {
+        // Stage B：字节级 XRANGE；存在二进制 field/value 时按条附并行 base64。
+        const entries = (await redisXRangeBuffer(c, key, '-', '+', STREAM_PAGE)).map((e) => {
+          const fields = e.fields.map(([f, v]) => ({ f: bytesItemOf(f), v: bytesItemOf(v) }));
+          const binary = fields.some((x) => x.f.binary || x.v.binary);
+          return {
+            id: e.id,
+            fields: fields.map((x) => [x.f.text, x.v.text] as [string, string]),
+            ...(binary ? { fieldBytes: fields.map((x) => [x.f.b64, x.v.b64] as [string, string]) } : {}),
+          };
+        });
+        return {
+          data: {
+            kind: 'stream',
+            entries,
+            len: await redisXLen(c, key),
+            groups: await redisXInfoGroups(c, key),
+          },
+        };
+      }
+      default: return { data: null };
     }
+  }
+
+  /** 集合续页（hash/set 按 SCAN 游标；list/zset 按 offset）。只读，不写审计。 */
+  private async collectionMoreOp(msg: { key?: unknown; kind?: unknown; cursor?: unknown; offset?: unknown }): Promise<void> {
+    const key = String(msg.key ?? '');
+    const kind = String(msg.kind ?? '') as RedisCollectionKind;
+    if (!key || !['hash', 'list', 'set', 'zset'].includes(kind)) return;
+    await this.enqueue(async () => {
+      try {
+        const session = await this.sessionForDb();
+        const c = session.client;
+        if (kind === 'hash') {
+          const page = await redisHScanBuffer(c, key, String(msg.cursor ?? '0'), { count: HASH_SET_PAGE });
+          const items = page.entries.map(([f, v]) => ({ f: bytesItemOf(f), v: bytesItemOf(v) }));
+          const binary = items.some((x) => x.f.binary || x.v.binary);
+          this.post({
+            type: 'collectionMoreResult', key, kind,
+            entries: items.map((x) => [x.f.text, x.v.text] as [string, string]),
+            ...(binary ? { entryBytes: items.map((x) => [x.f.b64, x.v.b64] as [string, string]) } : {}),
+            more: { cursor: page.cursor, done: page.cursor === '0' },
+          });
+        } else if (kind === 'set') {
+          const page = await redisSScanBuffer(c, key, String(msg.cursor ?? '0'), { count: HASH_SET_PAGE });
+          const items = page.keys.map(bytesItemOf);
+          const binary = items.some((x) => x.binary);
+          this.post({
+            type: 'collectionMoreResult', key, kind,
+            members: items.map((x) => x.text),
+            ...(binary ? { memberBytes: items.map((x) => x.b64) } : {}),
+            more: { cursor: page.cursor, done: page.cursor === '0' },
+          });
+        } else if (kind === 'list') {
+          const offset = Math.max(0, Number(msg.offset ?? 0) || 0);
+          const bufs = await redisLRangeBuffer(c, key, offset, offset + LIST_ZSET_PAGE - 1);
+          const items = bufs.map(bytesItemOf);
+          const binary = items.some((x) => x.binary);
+          this.post({
+            type: 'collectionMoreResult', key, kind,
+            items: items.map((x) => x.text),
+            ...(binary ? { itemBytes: items.map((x) => x.b64) } : {}),
+            more: { offset: offset + items.length, done: items.length < LIST_ZSET_PAGE },
+          });
+        } else {
+          const offset = Math.max(0, Number(msg.offset ?? 0) || 0);
+          const bufs = await redisZRangeBuffer(c, key, offset, offset + LIST_ZSET_PAGE - 1);
+          const items = bufs.map(({ member, score }) => ({ m: bytesItemOf(member), score }));
+          const binary = items.some((x) => x.m.binary);
+          this.post({
+            type: 'collectionMoreResult', key, kind,
+            items: items.map((x) => [x.m.text, x.score] as [string, string]),
+            ...(binary ? { itemBytes: items.map((x) => [x.m.b64, x.score] as [string, string]) } : {}),
+            more: { offset: offset + items.length, done: items.length < LIST_ZSET_PAGE },
+          });
+        }
+      } catch (err) {
+        this.post({ type: 'error', message: (err as Error).message });
+      }
+    });
   }
 
   /** 执行一次键编辑并刷新值；失败回 keyAction error。`fn` 返回删除计数时，为 0 视为失败。 */

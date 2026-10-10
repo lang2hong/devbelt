@@ -49,6 +49,27 @@ describe('IdempotencyService.run', () => {
     expect(runs).toBe(1);
   });
 
+  it('replays an empty persisted body as null instead of throwing', async () => {
+    const repo = new FakeIdempotencyReceiptRepo();
+    const svc = makeService(repo);
+    // 业务返回 undefined body 时 complete 存的是空串（canonicalJson(undefined)）；
+    // 重放必须把它还原为 null，而不是 JSON.parse('') 抛错。
+    const input = {
+      ...key(),
+      requestBody: { a: 1 },
+      business: async () => ({ status: 204, body: undefined as unknown }),
+    };
+
+    const first = await svc.run(input);
+    expect(first.replayed).toBe(false);
+    expect(first.body).toBeUndefined();
+
+    const second = await svc.run(input);
+    expect(second.replayed).toBe(true);
+    expect(second.status).toBe(204);
+    expect(second.body).toBeNull();
+  });
+
   it('same key with a different digest throws IDEMPOTENCY_KEY_REUSED', async () => {
     const repo = new FakeIdempotencyReceiptRepo();
     const svc = makeService(repo);

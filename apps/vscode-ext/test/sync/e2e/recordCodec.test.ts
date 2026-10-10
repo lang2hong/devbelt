@@ -67,6 +67,13 @@ describe('encodeEntityPayload 按引擎白名单 + type 判别', () => {
     expect(() => encodeRecordPayload(conn)).not.toThrow();
   });
 
+  it('P8：ES 连接编/解码显式 fail-closed（同步 codec 未支持）', () => {
+    const conn = { id: 'c-es', name: 'es', dbType: DatabaseType.ELASTICSEARCH, host: 'h', port: 9200, user: '', createTime: 1, updateTime: 2, deleted: false } as any;
+    expect(() => encodeRecordPayload(conn)).toThrowError(/elasticsearch connections are not syncable yet/);
+    expect(() => decodeEntityPayload({ type: 'connection', dbType: 'elasticsearch', name: 'es', host: 'h', port: 9200, user: '' }))
+      .toThrowError(/elasticsearch connections are not syncable yet/);
+  });
+
   it('groupId 经 resolver 转 recordId 引用', () => {
     const conn = { id: 'c-5', name: 'n', dbType: DatabaseType.MYSQL, host: 'h', port: 3306, user: 'u', groupId: 'g-1' } as any;
     const out = encodeRecordPayload(conn, (_type, localId) => (localId === 'g-1' ? 'R'.repeat(22) : undefined));

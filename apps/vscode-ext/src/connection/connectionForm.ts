@@ -1,14 +1,77 @@
 import * as vscode from 'vscode';
 import { DatabaseType } from '@devbelt/db-core';
-import { ConnectionFactory, RedisClient, buildRedisTlsOptions } from '@devbelt/db-core';
-import type { IConnection } from '@devbelt/db-core';
+import { ConnectionFactory, EsClient, RedisClient, buildRedisTlsOptions, parseEsError } from '@devbelt/db-core';
+import type { IConnection, RedisClientOptions } from '@devbelt/db-core';
 import { ConnectionStore, stripSecrets, type SavedConnection, type ConnectionGroup } from '@devbelt/db-host/connection/connectionStore';
 import { SshTunnel } from './sshTunnel';
+import { parseRedisNodes } from './buildRedisSession';
+import { discoverSentinelMasterOverSsh, setupClusterOverSsh, type RedisAuth } from './redisTunnel';
+import { esAuthMissingMessage, esAuthOf, esProtocolOf, esTlsOf } from './esAuth';
 import { validateConnectionPaths } from './connectionPathValidator';
 import { l10n } from '../i18n';
 import { uniqueId } from '@devbelt/db-host/utils/id';
 import { flattenGroups } from '../utils/groupTree';
 import { BaseWebView } from '../result/baseWebView';
+
+/**
+ * 测试连接的公共 Redis 选项与隧道探测认证（与运行时会话装配 buildRedisSession 同源语义）。
+ * `readOnly` 恒 true（测试只做 PING 探活，不写）。
+ */
+function redisTestCommon(conn: SavedConnection): { common: Omit<RedisClientOptions, 'host' | 'port' | 'db' | 'cluster' | 'sentinels' | 'sentinelName' | 'sentinelPassword'>; auth: RedisAuth } {
+  const mode = conn.redisMode ?? 'standalone';
+  const tls = conn.useSSL
+    ? buildRedisTlsOptions({
+        caPath: conn.caPath,
+        clientCertPath: conn.clientCertPath,
+        clientKeyPath: conn.clientKeyPath,
+        rejectUnauthorized: conn.rejectUnauthorized,
+        // sentinel 模式：ioredis 会把 tls 应用到解析出的 master，servername 留空避免用 sentinel 主机名校验 master。
+        servername: mode === 'sentinel' ? undefined : conn.host,
+      })
+    : undefined;
+  const common = {
+    username: conn.user || undefined,
+    password: conn.password,
+    tls,
+    connectTimeout: conn.connectTimeout,
+    commandTimeout: conn.requestTimeout,
+    readOnly: true,
+  };
+  const auth: RedisAuth = {
+    username: conn.user || undefined,
+    password: conn.password,
+    sentinelPassword: conn.sentinelPassword,
+    tls,
+    connectTimeout: conn.connectTimeout,
+  };
+  return { common, auth };
+}
+
+/**
+ * 测试连接的 Redis 选项（按模式分派；仅非 SSH 场景；SSH 分支在 testConnection 中叠加隧道）。
+ * 与 buildRedisSession 的部署语义一致：cluster 用 clusterNodes、sentinel 用 sentinelNodes + master 名。
+ */
+export function redisTestClientOptions(conn: SavedConnection, host: string, port: number): RedisClientOptions {
+  const { common } = redisTestCommon(conn);
+  const mode = conn.redisMode ?? 'standalone';
+  if (mode === 'cluster') {
+    return {
+      ...common,
+      cluster: { nodes: parseRedisNodes(conn.clusterNodes, host, port), slotsRefreshTimeout: conn.connectTimeout ?? 3000 },
+    };
+  }
+  if (mode === 'sentinel') {
+    if (!conn.sentinelName) throw new Error('Redis Sentinel master 名称未配置');
+    return {
+      ...common,
+      sentinels: parseRedisNodes(conn.sentinelNodes, host, port),
+      sentinelName: conn.sentinelName,
+      sentinelPassword: conn.sentinelPassword,
+      db: conn.redisDb,
+    };
+  }
+  return { ...common, host, port, db: conn.redisDb };
+}
 
 /**
  * 连接表单 webview（Vue 3 模式）。
@@ -143,32 +206,62 @@ export class ConnectionForm extends BaseWebView {
         const acquired = await SshTunnel.create({ ...effective, id: testId });
         if (acquired) { host = '127.0.0.1'; port = acquired.port; }
       }
-      if (dbType === DatabaseType.REDIS) {
-        // Redis：临时客户端 + PING 探活；SSH 隧道由上面的 SshTunnel 临时建连提供，
-        // finally 统一关闭（与 SQL 分支同一套 testId 清理）。
-        const client = new RedisClient({
+      if (dbType === DatabaseType.ELASTICSEARCH) {
+        // ES：临时客户端 + GET / 探活（认证/证书/路径前缀都按有效配置）；SSH 隧道由上面的临时建连提供。
+        const client = new EsClient({
+          protocol: esProtocolOf(effective),
           host,
           port,
-          username: effective.user || undefined,
-          password: effective.password,
-          db: effective.redisDb,
-          tls: effective.useSSL
-            ? buildRedisTlsOptions({
-                caPath: effective.caPath,
-                clientCertPath: effective.clientCertPath,
-                clientKeyPath: effective.clientKeyPath,
-                rejectUnauthorized: effective.rejectUnauthorized,
-                servername: effective.host,
-              })
-            : undefined,
-          connectTimeout: effective.connectTimeout,
+          pathPrefix: effective.esPathPrefix,
+          auth: esAuthOf(effective),
+          tls: esTlsOf(effective),
+          timeoutMs: effective.requestTimeout,
           readOnly: true,
         });
         try {
-          await client.connect();
-          await client.ping();
+          const res = await client.ping();
+          if (res.status >= 400) {
+            const base = parseEsError(res.body)?.reason ?? `${l10n('conn.es.testFailed')} (HTTP ${res.status})`;
+            const hint = esAuthMissingMessage(base, esAuthOf(effective).kind) ? `\n${l10n('conn.es.authRequired')}` : '';
+            throw new Error(base + hint);
+          }
         } finally {
-          await client.close();
+          client.close();
+        }
+        const cost = Date.now() - start;
+        return { ok: true, message: l10n('form.connected', { ms: cost }) };
+      }
+      if (dbType === DatabaseType.REDIS) {
+        // Redis 三分派（D11）：standalone / cluster / sentinel。SSH 场景复用运行时隧道编排，
+        // 以 testId 克隆 conn 合成隧道 id，finally 逐个回收，避免与正式会话的隧道冲突。
+        const mode = effective.redisMode ?? 'standalone';
+        const { common, auth } = redisTestCommon(effective);
+        let client: RedisClient;
+        let closeExtraTunnels: () => void = () => { /* 无 */ };
+        try {
+          if (mode === 'cluster' && effective.sshHost) {
+            const setup = await setupClusterOverSsh({ ...effective, id: testId }, port, auth);
+            closeExtraTunnels = () => { for (const id of setup.tunnelIds) SshTunnel.close(id); };
+            client = new RedisClient({
+              ...common,
+              cluster: { nodes: [{ host: '127.0.0.1', port }], natMap: setup.natMap, slotsRefreshTimeout: effective.connectTimeout ?? 3000 },
+            });
+          } else if (mode === 'sentinel' && effective.sshHost) {
+            if (!effective.sentinelName) throw new Error('Redis Sentinel master 名称未配置');
+            const setup = await discoverSentinelMasterOverSsh({ ...effective, id: testId }, port, auth);
+            closeExtraTunnels = () => SshTunnel.close(setup.tunnelId);
+            client = new RedisClient({ ...common, host: '127.0.0.1', port: setup.masterLocalPort, db: effective.redisDb });
+          } else {
+            client = new RedisClient(redisTestClientOptions(effective, host, port));
+          }
+          try {
+            await client.connect();
+            await client.ping();
+          } finally {
+            await client.close();
+          }
+        } finally {
+          closeExtraTunnels();
         }
         const cost = Date.now() - start;
         return { ok: true, message: l10n('form.connected', { ms: cost }) };
@@ -204,6 +297,7 @@ function defaultPort(dbType: DatabaseType): number {
     case DatabaseType.PG: return 5432;
     case DatabaseType.SQLITE: return 0;
     case DatabaseType.REDIS: return 6379;
+    case DatabaseType.ELASTICSEARCH: return 9200;
     default: return 3306;
   }
 }
@@ -266,6 +360,22 @@ export function decodeConnection(payload: any): SavedConnection {
     sentinelPassword: payload.sentinelPassword,
     clusterNodes: payload.clusterNodes || undefined,
     sentinelNodes: payload.sentinelNodes || undefined,
+    // Elasticsearch（P8 S2）：协议/路径前缀/认证方式；密码与 API Key 为敏感字段（'' 显式清除）。
+    esProtocol: payload.esProtocol === 'https' ? 'https' : payload.esProtocol === 'http' ? 'http' : undefined,
+    esPathPrefix: payload.esPathPrefix || undefined,
+    esAuth: decodeEsAuth(payload.esAuth),
+    esPassword: payload.esPassword,
+    esApiKey: payload.esApiKey,
     color: payload.color || undefined,
   };
+}
+
+/** 认证对象白名单解码（缺省/非法 → undefined，按 none 处理）。 */
+function decodeEsAuth(v: unknown): SavedConnection['esAuth'] {
+  if (!v || typeof v !== 'object') return undefined;
+  const kind = (v as { kind?: unknown }).kind;
+  if (kind === 'none') return { kind: 'none' };
+  if (kind === 'basic') return { kind: 'basic', username: String((v as { username?: unknown }).username ?? '') };
+  if (kind === 'apiKey') return { kind: 'apiKey' };
+  return undefined;
 }

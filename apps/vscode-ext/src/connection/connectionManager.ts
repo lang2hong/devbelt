@@ -7,6 +7,7 @@ import { SshTunnel } from './sshTunnel';
 import { validateConnectionPaths, type PathValidationResult } from './connectionPathValidator';
 import { requireSqlSession, type ConnectionSession, type SqlConnectionSession } from './connectionSession';
 import { buildRedisSession } from './buildRedisSession';
+import { buildEsSession } from './buildEsSession';
 import { buildSqlSession } from './buildSqlSession';
 import { openIsolatedSqlSession } from './buildSqlSession';
 import type { SessionBuildContext } from './sessionBuildContext';
@@ -356,6 +357,9 @@ export class ConnectionManager {
     const ctx = this.buildContext();
     if (conn.dbType === DatabaseType.REDIS) {
       return buildRedisSession(ctx, conn, host, port, generation, key, tunnelLease);
+    }
+    if (conn.dbType === DatabaseType.ELASTICSEARCH) {
+      return buildEsSession(ctx, conn, host, port, generation, key, tunnelLease);
     }
     return buildSqlSession(ctx, conn, host, port, generation, key, tunnelLease);
   }

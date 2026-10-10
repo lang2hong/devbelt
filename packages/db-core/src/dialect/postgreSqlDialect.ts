@@ -2,7 +2,7 @@ import { DatabaseType } from '../types/connection.js';
 import { validateIdent, validateSchemaIdent } from '../utils/validate.js';
 import { qualifyTable } from '../utils/qualify.js';
 import { toBool } from '../utils/coerce.js';
-import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta, SequenceMeta, ConstraintMeta } from '../types/meta.js';
+import type { TableMeta, ViewMeta, RoutineMeta, EventMeta, IndexMeta, UserMeta, ForeignKeyMeta, TriggerMeta, SequenceMeta, ConstraintMeta, ConstraintShape } from '../types/meta.js';
 import type { SqlDialect } from './sqlDialect.js';
 import type { DatabaseCapabilities } from './capabilities.js';
 import { columnTypesFor } from './typeCatalog.js';
@@ -163,19 +163,36 @@ export class PostgreSqlDialect implements SqlDialect {
     return `${parts.join(' ')};`;
   }
 
-  /** PG：列出表级约束（PK/UNIQUE/CHECK/FK），定义由 pg_get_constraintdef 规范化。 */
+  /** PG：列出表级约束（PK/UNIQUE/CHECK/FK），定义由 pg_get_constraintdef 规范化。
+   *  4B-2b：FK/CHECK 附带结构化字段（列/引用/动作/延迟性；CHECK 表达式），供结构化比较与组合生成。 */
   getConstraintListSql(table?: string, schema?: string): string {
     const tableFilter = table ? ` AND c.relname = ${this.escapeValue(validateIdent(table, 63))}` : '';
-    return `SELECT con.conname AS name, con.contype AS type, pg_get_constraintdef(con.oid, true) AS definition, c.relname AS "table"
+    return `SELECT con.conname AS name, con.contype AS type, pg_get_constraintdef(con.oid, true) AS definition, c.relname AS "table",
+      (SELECT array_agg(a.attname ORDER BY k.ord)
+         FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
+         JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS columns,
+      rn.nspname AS "refSchema", rc.relname AS "refTable",
+      (SELECT array_agg(a.attname ORDER BY k.ord)
+         FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord)
+         JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum) AS "refColumns",
+      con.confupdtype AS "onUpdateCode", con.confdeltype AS "onDeleteCode", con.confmatchtype AS "matchCode",
+      con.condeferrable, con.condeferred, con.convalidated, con.connoinherit,
+      pg_get_expr(con.conbin, con.conrelid) AS expression
       FROM pg_constraint con
       JOIN pg_class c ON c.oid = con.conrelid
       JOIN pg_namespace n ON n.oid = con.connamespace
+      LEFT JOIN pg_class rc ON rc.oid = con.confrelid
+      LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace
       WHERE n.nspname = ${this.schemaExpr(schema)} AND con.contype IN ('p','u','c','f')${tableFilter}
       ORDER BY c.relname, con.conname`;
   }
 
   parseConstraintList(rows: any[]): ConstraintMeta[] {
-    return rows.map((r) => ({ tableName: String(r.table), name: String(r.name), type: r.type as ConstraintMeta['type'], definition: String(r.definition ?? '') }));
+    return rows.map((r) => {
+      const type = r.type as ConstraintMeta['type'];
+      const shape = parseConstraintShape(r, type);
+      return { tableName: String(r.table), name: String(r.name), type, definition: String(r.definition ?? ''), ...shape };
+    });
   }
 
   /** PG：列出非系统、且**可操作**的 schema（树在库下展示 schema 层）。 */
@@ -277,12 +294,23 @@ export class PostgreSqlDialect implements SqlDialect {
     validateIdent(table, 63);
     // 主键判定必须用 pg_index.indisprimary，而不是猜 `<table>_pkey` 名字：
     // 自定义约束名下主键会被误判为普通唯一索引（编辑主键会生成非法 SQL）。
+    // 4B-2a：附带结构化元数据——访问方法、部分索引谓词、逐部件定义（pg_get_indexdef(oid, pos, true)
+    // 含 opclass/DESC/NULLS；pos > indnkeyatts 为 INCLUDE 列），供 diff 结构化比较与 DDL 组合生成。
     return `SELECT c.relname AS name, pg_get_indexdef(i.indexrelid) AS definition,
-      i.indisunique AS is_unique, i.indisprimary AS is_primary
+      i.indisunique AS is_unique, i.indisprimary AS is_primary,
+      am.amname AS method,
+      pg_get_expr(i.indpred, i.indrelid) AS predicate,
+      (SELECT json_agg(json_build_object(
+          'pos', k.ord,
+          'def', pg_get_indexdef(i.indexrelid, k.ord, true),
+          'isKey', (k.ord <= i.indnkeyatts)
+        ) ORDER BY k.ord)
+       FROM generate_series(1, i.indnatts) AS k(ord)) AS parts
       FROM pg_index i
       JOIN pg_class c ON c.oid = i.indexrelid
       JOIN pg_class t ON t.oid = i.indrelid
       JOIN pg_namespace n ON n.oid = t.relnamespace
+      JOIN pg_am am ON am.oid = c.relam
       WHERE n.nspname = ${this.schemaExpr(schema)} AND t.relname = '${table}'
       ORDER BY c.relname`;
   }
@@ -427,15 +455,22 @@ export class PostgreSqlDialect implements SqlDialect {
   /**
    * 解析索引列表。列名从 `pg_get_indexdef` 的定义串中提取——PG 的
    * `pg_indexes` 不直接给列清单，此前返回空数组导致索引编辑弹窗勾选项全空。
+   * 4B-2a：可选解析结构化字段（method/predicate/keyParts）；缺列时保持旧行为。
    */
   parseIndexList(rows: any[]): IndexMeta[] {
-    return rows.map((row) => ({
-      name: row.name,
-      columns: parseIndexDefColumns(row.definition),
-      isUnique: toBool(row.is_unique) || /\bCREATE\s+UNIQUE\s+INDEX\b/i.test(String(row.definition ?? '')),
-      isPrimary: toBool(row.is_primary),
-      type: row.definition || '',
-    }));
+    return rows.map((row) => {
+      const keyParts = parseIndexParts(row.parts);
+      return {
+        name: row.name,
+        columns: parseIndexDefColumns(row.definition),
+        isUnique: toBool(row.is_unique) || /\bCREATE\s+UNIQUE\s+INDEX\b/i.test(String(row.definition ?? '')),
+        isPrimary: toBool(row.is_primary),
+        type: row.definition || '',
+        ...(row.method ? { method: String(row.method) } : {}),
+        ...(row.predicate ? { predicate: String(row.predicate) } : {}),
+        ...(keyParts.length ? { keyParts } : {}),
+      };
+    });
   }
 
   parseTriggerList(rows: any[]): TriggerMeta[] {
@@ -532,4 +567,71 @@ function parseIndexDefColumns(definition: unknown): string[] {
       .trim()
       .replace(/^"(.*)"$/, '$1'))
     .filter((part) => part.length > 0);
+}
+
+/**
+ * 4B-2a：解析 `parts` 列（json_agg 的逐部件定义）。pg 驱动给对象数组，
+ * 个别驱动/测试可能给 JSON 字符串；缺列/畸形一律返回空数组（回退整串路径）。
+ */
+function parseIndexParts(raw: unknown): { def: string; isKey: boolean }[] {
+  let arr: unknown = raw;
+  if (typeof raw === 'string') {
+    try { arr = JSON.parse(raw); } catch { return []; }
+  }
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .filter((p): p is Record<string, unknown> => !!p && typeof p === 'object')
+    .map((p) => ({ def: String(p.def ?? ''), isKey: p.isKey !== false }))
+    .filter((p) => p.def !== '');
+}
+
+/** PG FK 动作码 → 文本（pg_constraint.confupdtype/confdeltype）。 */
+const PG_FK_ACTION: Record<string, 'NO ACTION' | 'RESTRICT' | 'CASCADE' | 'SET NULL' | 'SET DEFAULT'> = {
+  a: 'NO ACTION', r: 'RESTRICT', c: 'CASCADE', n: 'SET NULL', d: 'SET DEFAULT',
+};
+/** PG FK 匹配码 → 文本（confmatchtype）。 */
+const PG_FK_MATCH: Record<string, 'FULL' | 'PARTIAL' | 'SIMPLE'> = { f: 'FULL', p: 'PARTIAL', s: 'SIMPLE' };
+
+/** PG 数组列归一：JS 数组或 `{a,b}` 字面量；缺省/畸形 → undefined。 */
+function parsePgArray(v: unknown): string[] | undefined {
+  if (Array.isArray(v)) return v.map(String);
+  if (typeof v === 'string') {
+    const inner = v.replace(/^\{/, '').replace(/\}$/, '');
+    if (inner === '') return [];
+    return inner.split(',').map((s) => s.replace(/^"/, '').replace(/"$/, '').replace(/""/g, '"'));
+  }
+  return undefined;
+}
+
+/**
+ * 4B-2b：按约束类型提取结构化形状（FK/CHECK）。
+ * 其余类型（PK/UNIQUE，含 INCLUDE/NULLS NOT DISTINCT 等版本相关细节）返回空 → 保留文本路径。
+ */
+function parseConstraintShape(r: Record<string, any>, type: string): Partial<ConstraintShape> {
+  if (type === 'f') {
+    const columns = parsePgArray(r.columns);
+    const refColumns = parsePgArray(r.refColumns);
+    const onUpdate = PG_FK_ACTION[String(r.onUpdateCode ?? '')];
+    const onDelete = PG_FK_ACTION[String(r.onDeleteCode ?? '')];
+    const match = PG_FK_MATCH[String(r.matchCode ?? '')];
+    return {
+      ...(columns?.length ? { columns } : {}),
+      ...(r.refSchema ? { refSchema: String(r.refSchema) } : {}),
+      ...(r.refTable ? { refTable: String(r.refTable) } : {}),
+      ...(refColumns?.length ? { refColumns } : {}),
+      ...(onUpdate ? { onUpdate } : {}),
+      ...(onDelete ? { onDelete } : {}),
+      ...(match ? { match } : {}),
+      ...(r.condeferrable !== undefined ? { deferrable: toBool(r.condeferrable) } : {}),
+      ...(r.condeferred !== undefined ? { initiallyDeferred: toBool(r.condeferred) } : {}),
+    };
+  }
+  if (type === 'c') {
+    return {
+      ...(r.expression ? { expression: String(r.expression) } : {}),
+      ...(r.convalidated !== undefined ? { notValid: !toBool(r.convalidated) } : {}),
+      ...(r.connoinherit !== undefined ? { noInherit: toBool(r.connoinherit) } : {}),
+    };
+  }
+  return {};
 }

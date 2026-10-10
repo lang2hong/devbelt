@@ -17,6 +17,7 @@ const ICON_BASE: Record<DatabaseType, string> = {
   [DatabaseType.PG]: 'db-postgresql',
   [DatabaseType.SQLITE]: 'db-sqlite',
   [DatabaseType.REDIS]: 'db-redis',
+  [DatabaseType.ELASTICSEARCH]: 'db-elasticsearch',
 };
 
 /** 图标文件名；未知/缺失类型回退通用 `connection.svg`（无 dim/active 变体）。 */

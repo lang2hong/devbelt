@@ -9,6 +9,9 @@ import { QueryExecutor } from './result/queryExecutor';
 import { BaseWebView } from './result/baseWebView';
 import { TableQueryView } from './result/tableQueryView';
 import { AuditLogger } from './utils/auditLogger';
+import { ElasticsearchView } from './result/elasticsearchView';
+import { clearEsRequestLog } from './result/esRequestLogStore';
+import { EsDslStore } from './result/esDslStore';
 import { diagDispose, diagInfo, diagWarn, diagError } from './utils/diagnostics';
 import { installUnhandledRejectionGuard } from './utils/unhandledRejectionGuard';
 import { createUnmappedNodeReporter, type UnmappedNodeReporter } from './connection/redisTopology';
@@ -82,12 +85,17 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     rep.notifyOnce(address);
   };
   // 连接关闭/重连时重置上报器：重连后拓扑可能已刷新，未映射提示与诊断限流应重新开始。
-  manager.onConnectionClosed = (connId) => { unmappedReporters.delete(connId); };
+  manager.onConnectionClosed = (connId) => {
+    unmappedReporters.delete(connId);
+    clearEsRequestLog(connId); // M2：连接关闭后回收 ES 请求日志缓冲。
+  };
   const treeProvider = new DbTreeDataProvider(store, manager, overrideStore, context.extensionUri);
   // 连接节点装饰（环境/自定义色徽标）：图标已改用数据库类型 logo，颜色信号改由此承载。
   const connDecoration = new ConnectionDecorationProvider(store);
   context.subscriptions.push(connDecoration, vscode.window.registerFileDecorationProvider(connDecoration));
   const auditLogger = AuditLogger.init(context.globalState);
+  // P8 S4：ES DSL 保存查询（Memento；不进同步数据）。
+  ElasticsearchView.configureDslStore(new EsDslStore(context.globalState));
   const executor = new QueryExecutor(manager, history, auditLogger);
   const connCtx = new ConnectionContext(context, store);
 

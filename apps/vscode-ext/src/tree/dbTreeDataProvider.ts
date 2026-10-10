@@ -1,6 +1,6 @@
 import { Event, EventEmitter, TreeDataProvider, TreeItem, TreeItemCollapsibleState, ThemeIcon, ThemeColor, Uri, window } from 'vscode';
 import type { CancellationToken } from 'vscode';
-import { DatabaseType, DialectRegistry, redisKeyspace } from '@devbelt/db-core';
+import { DatabaseType, DialectRegistry, parseCatIndices, redisDatabases, redisKeyspace, sortIndexSummaries } from '@devbelt/db-core';
 import { connectionColorToken } from '../utils/connectionColor';
 import { ConnectionStore, type SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
@@ -11,6 +11,7 @@ import { dbTypeIconFile, type ConnIconState } from './dbTypeIcon';
 import { connectionResource } from './connectionDecoration';
 import { MetadataNodeBuilder } from './metadataNodeBuilder';
 import { RedisKeyTreeState } from './redisKeyTreeState';
+import { mergeRedisDbIndexes } from './redisDbList';
 import { l10n } from '../i18n';
 import { diagError } from '../utils/diagnostics';
 
@@ -196,6 +197,9 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
           return this.redisTree.buildRedisKeyChildren(element, '');
         case NodeKind.RedisKeyFolder:
           return this.redisTree.buildRedisKeyChildren(element, element.redisKeyPrefix ?? '');
+        // P8 S3：ES 索引类别 → 索引列表（cat/indices 懒加载）。
+        case NodeKind.EsIndexCategory:
+          return this.buildEsIndexChildren(element);
         default:
           return [];
       }
@@ -208,9 +212,79 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     }
   }
 
+  /**
+   * P8 S3：ES 索引类别子节点（`_cat/indices` 懒加载）。
+   *
+   * health 色标：green/yellow/red → charts.{green,yellow,red}；description 展示
+   * 健康 + 文档数，便于不展开面板时一眼分辨。
+   */
+  private async buildEsIndexChildren(element: DbTreeNode): Promise<DbTreeNode[]> {
+    const conn = element.conn;
+    if (!conn) return [];
+    const session = await this.manager.connect(conn);
+    if (session.kind !== 'elasticsearch') return [];
+    const res = await session.es.request('GET', '/_cat/indices', undefined, {
+      format: 'json',
+      h: 'index,health,status,pri,rep,docs.count,store.size',
+      s: 'index',
+    });
+    if (res.status >= 400) {
+      // M3：静默空列表无可诊断性——记录原因（面板/REST 控制台仍可进一步排查）。
+      diagError('ES indices load failed', `HTTP ${res.status} (conn ${conn.id})`);
+      return [];
+    }
+    const items = sortIndexSummaries(parseCatIndices(res.body), 'name');
+    return items.map((item) => {
+      const node = new DbTreeNode(
+        item.name,
+        TreeItemCollapsibleState.None,
+        NodeKind.EsIndex,
+        conn,
+        undefined,
+        element,
+      );
+      node.id = `${conn.id}:es:index:${item.name}`;
+      node.esIndexName = item.name;
+      node.description = [item.health, item.docsCount === null ? undefined : `${item.docsCount} docs`]
+        .filter((s): s is string => !!s)
+        .join(' · ');
+      const color = item.health === 'green' ? 'charts.green' : item.health === 'yellow' ? 'charts.yellow' : item.health === 'red' ? 'charts.red' : undefined;
+      if (color) node.iconPath = new ThemeIcon('database', new ThemeColor(color));
+      node.command = { command: 'devbelt.es.index', title: l10n('tree.es.openIndex'), arguments: [node] };
+      return node;
+    });
+  }
+
   /** 连接节点子节点：数据库列表 */
   private async buildConnectionChildren(element: DbTreeNode): Promise<DbTreeNode[]> {
     if (!element.conn) return [];
+    // Elasticsearch（P8 S2/S3）：子节点为「集群」+「索引」类别；索引懒加载。
+    if (element.conn.dbType === DatabaseType.ELASTICSEARCH) {
+      const conn = element.conn;
+      const session = await this.manager.connect(conn);
+      if (session.kind !== 'elasticsearch') return [];
+      const clusterNode = new DbTreeNode(
+        l10n('tree.es.cluster'),
+        TreeItemCollapsibleState.None,
+        NodeKind.EsClusterInfo,
+        conn,
+        undefined,
+        element,
+      );
+      clusterNode.id = `${conn.id}:es:cluster`;
+      clusterNode.command = { command: 'devbelt.es.cluster', title: l10n('tree.es.openCluster'), arguments: [clusterNode] };
+      const indexNode = new DbTreeNode(
+        l10n('tree.es.indices'),
+        TreeItemCollapsibleState.Collapsed,
+        NodeKind.EsIndexCategory,
+        conn,
+        undefined,
+        element,
+      );
+      indexNode.id = `${conn.id}:es:indices`;
+      indexNode.command = { command: 'devbelt.es.indices', title: l10n('tree.es.openIndices'), arguments: [indexNode] };
+      return [clusterNode, indexNode];
+    }
     // Redis（P7 S3）：子节点为逻辑库（INFO keyspace）；键在 webview 内分页加载。
     if (element.conn.dbType === DatabaseType.REDIS) {
       const conn = element.conn;
@@ -230,9 +304,13 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         node.id = `${conn.id}:cluster`;
         return [node];
       }
+      // D11「DB 列表来源」：CONFIG GET databases（可用时全列，含空库）∪ keyspace ∪ 默认库；
+      // 空库无 keyspace 计数（无 description），仍可达（搜索/新建键）。
       const stats = await redisKeyspace(session.client);
-      return stats.map((stat) => {
-        const label = `db${stat.index}`;
+      const byIndex = new Map(stats.map((s) => [s.index, s]));
+      const indexes = mergeRedisDbIndexes(stats.map((s) => s.index), await redisDatabases(session.client), conn.redisDb ?? 0);
+      return indexes.map((index) => {
+        const label = `db${index}`;
         const node = new DbTreeNode(
           label,
           TreeItemCollapsibleState.Collapsed,
@@ -243,9 +321,10 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
           undefined,
           label,
         );
-        node.redisDbIndex = stat.index;
-        node.description = String(stat.keys);
-        node.id = `${conn.id}:db${stat.index}`;
+        node.redisDbIndex = index;
+        const stat = byIndex.get(index);
+        if (stat) node.description = String(stat.keys);
+        node.id = `${conn.id}:db${index}`;
         // C-2：DB 节点仅展开键树（不再有默认点击命令）。
         return node;
       });
@@ -372,6 +451,11 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
   /** 加载根层一页（首次展开 / 「加载更多」）。 */
   async loadMoreRedisKeys(node: DbTreeNode): Promise<{ added: number; total: number; done: boolean; error: boolean }> {
     return this.redisTree.loadMoreRedisKeys(node);
+  }
+
+  /** S5-2：文件夹前缀增量「加载更多」（每前缀游标，不触发全量）。 */
+  async loadMoreFolderKeys(node: DbTreeNode): Promise<{ added: number; total: number; done: boolean; capped: boolean; error: boolean }> {
+    return this.redisTree.loadMoreFolderKeys(node);
   }
 
   /** 显式「加载完整文件夹」（按前缀独立 SCAN + 进度/取消）。 */

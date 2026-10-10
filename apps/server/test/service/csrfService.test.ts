@@ -41,4 +41,16 @@ describe('CsrfService (HMAC signed double-submit)', () => {
     expect(svc.verify(undefined, 'x')).toBe(false);
     expect(svc.verify('x', undefined)).toBe(false);
   });
+
+  it('boundSession exposes the binding only for a valid bound token', () => {
+    const svc = new CsrfService(key);
+    expect(svc.boundSession(svc.issue('session-1'))).toBe('session-1');
+    expect(svc.boundSession(svc.issue())).toBeUndefined();
+    expect(svc.boundSession(undefined)).toBeUndefined();
+    expect(svc.boundSession('not-a-token')).toBeUndefined();
+
+    const token = svc.issue('session-1');
+    const tampered = `${token.slice(0, token.lastIndexOf('.') + 1)}${'0'.repeat(43)}`;
+    expect(svc.boundSession(tampered)).toBeUndefined();
+  });
 });

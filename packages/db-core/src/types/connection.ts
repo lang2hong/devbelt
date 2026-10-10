@@ -7,6 +7,7 @@ export enum DatabaseType {
   PG = 'PG',
   SQLITE = 'SQLITE',
   REDIS = 'REDIS',
+  ELASTICSEARCH = 'ELASTICSEARCH',
 }
 
 /**
@@ -18,6 +19,7 @@ export const ENGINE_OF_DATABASE_TYPE: Record<DatabaseType, string> = {
   [DatabaseType.PG]: 'postgresql',
   [DatabaseType.SQLITE]: 'sqlite',
   [DatabaseType.REDIS]: 'redis',
+  [DatabaseType.ELASTICSEARCH]: 'elasticsearch',
 };
 
 const DATABASE_TYPE_OF_ENGINE: Record<string, DatabaseType> = {
@@ -25,6 +27,8 @@ const DATABASE_TYPE_OF_ENGINE: Record<string, DatabaseType> = {
   postgresql: DatabaseType.PG,
   sqlite: DatabaseType.SQLITE,
   redis: DatabaseType.REDIS,
+  // ES 已接入引擎枚举，但同步 codec 尚未支持：编/解码侧显式 fail-closed（见 recordCodec）。
+  elasticsearch: DatabaseType.ELASTICSEARCH,
 };
 
 /** `DatabaseType` → 引擎字符串；未知枚举 fail-closed。 */

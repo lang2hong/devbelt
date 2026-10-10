@@ -8,6 +8,8 @@ import {
   redisGet,
   redisGetBuffer,
   redisHGetAll,
+  redisHScanBuffer,
+  redisHDelBuffer,
   redisHSet,
   redisKeyspace,
   redisLRange,
@@ -26,6 +28,7 @@ import {
   redisZRange,
   redisXAdd,
   redisXRange,
+  redisXRangeBuffer,
   redisXLen,
   redisXInfoGroups,
   redisXGroupCreate,
@@ -111,6 +114,32 @@ describe.skipIf(!REDIS_URL)('Redis 真实实例（standalone）', () => {
     expect(got).toEqual(bytes);
     // 普通 redisGet 走 UTF-8 解码，仅用于文本显示；不应作为字节真值。
     expect(await redisGet(client, key)).not.toBe('');
+    await redisDel(client, [key]);
+  });
+
+  it('二进制 hash field/value 往返：HSCAN buffer 读取 + HDEL buffer 精确删除', async () => {
+    const key = `${prefix}binhash`;
+    created.push(key);
+    const field = Buffer.from([0x00, 0xff, 0x61]);
+    const value = Buffer.from([0xfe, 0x00]);
+    await client.sendCommandBuffer('HSET', [key, field, value]);
+    const page = await redisHScanBuffer(client, key, 0, { count: 100 });
+    expect(page.entries.some(([f, v]) => f.equals(field) && v.equals(value))).toBe(true);
+    // 精确字节命中删除（有损文本路径会替成 U+FFFD，无法命中）。
+    expect(await redisHDelBuffer(client, key, [field])).toBe(1);
+    expect(await redisDel(client, [key])).toBe(0);
+  });
+
+  it('二进制 stream field 往返：XADD buffer → XRANGE buffer', async () => {
+    const key = `${prefix}binstream`;
+    created.push(key);
+    const field = Buffer.from([0xff, 0x00]);
+    const value = Buffer.from([0x01, 0xfe]);
+    await client.sendCommandBuffer('XADD', [key, '*', field, value]);
+    const entries = await redisXRangeBuffer(client, key, '-', '+', 10);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].fields[0][0].equals(field)).toBe(true);
+    expect(entries[0].fields[0][1].equals(value)).toBe(true);
     await redisDel(client, [key]);
   });
 

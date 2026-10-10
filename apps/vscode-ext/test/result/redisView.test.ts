@@ -803,6 +803,138 @@ describe('RedisView S4 大集合分页兜底（HSCAN/SSCAN）', () => {
   });
 });
 
+describe('RedisView 集合续页（hash/list/set/zset）', () => {
+  type Send2 = (name: string, args: string[]) => Promise<unknown>;
+
+  /** 打开键浏览器并加载一个键的首屏，返回 value 消息与驱动句柄。 */
+  async function firstPage(handler: Send2, key = 'big'): Promise<{ view: any; first: any }> {
+    const { view } = makeView(handler as Send, 0);
+    await view.handleMessage({ type: 'ready' });
+    await view.handleMessage({ type: 'ready' });
+    (view.post as any).mockClear();
+    await view.handleMessage({ type: 'selectKey', key });
+    const first = posts(view).find((m) => m.type === 'value');
+    return { view, first };
+  }
+
+  it('hash：首屏带 SCAN 游标；collectionMore 按游标续页并回 done', async () => {
+    const h: Send2 = async (n, a) => {
+      if (n === 'TYPE') return 'hash';
+      if (n === 'TTL') return -1;
+      if (n === 'MEMORY') return null;
+      if (n === 'HSCAN') return a[1] === '0' ? ['17', ['f1', 'v1']] : ['0', ['f2', 'v2']];
+      if (n === 'HLEN') return 2;
+      if (n === 'SCAN') return ['0', []];
+      if (n === 'INFO') return '';
+      if (n === 'SLOWLOG') return [];
+      return 'OK';
+    };
+    const { view, first } = await firstPage(h);
+    expect(first.data).toEqual({ kind: 'hash', entries: [['f1', 'v1']], len: 2 });
+    expect(first.more).toEqual({ cursor: '17', done: false });
+
+    (view.post as any).mockClear();
+    await view.handleMessage({ type: 'collectionMore', key: 'big', kind: 'hash', cursor: '17' });
+    const more = posts(view).find((m) => m.type === 'collectionMoreResult');
+    expect(more.entries).toEqual([['f2', 'v2']]);
+    expect(more.more).toEqual({ cursor: '0', done: true });
+  });
+
+  it('list：首屏带 offset；续页用 offset 翻页，短页判 done', async () => {
+    const h: Send2 = async (n, a) => {
+      if (n === 'TYPE') return 'list';
+      if (n === 'TTL') return -1;
+      if (n === 'MEMORY') return null;
+      // 首屏满页（200）→ 可续；续页短页（1）→ done。
+      if (n === 'LRANGE') return a[1] === '0' ? Array.from({ length: 200 }, (_, i) => `i${i}`) : ['c'];
+      if (n === 'LLEN') return 201;
+      if (n === 'SCAN') return ['0', []];
+      if (n === 'INFO') return '';
+      if (n === 'SLOWLOG') return [];
+      return 'OK';
+    };
+    const { view, first } = await firstPage(h);
+    expect(first.data.kind).toBe('list');
+    expect(first.data.items).toHaveLength(200);
+    expect(first.data.len).toBe(201);
+    expect(first.more).toEqual({ offset: 200, done: false });
+
+    (view.post as any).mockClear();
+    await view.handleMessage({ type: 'collectionMore', key: 'big', kind: 'list', offset: 200 });
+    const more = posts(view).find((m) => m.type === 'collectionMoreResult');
+    expect(more.items).toEqual(['c']);
+    expect(more.more).toEqual({ offset: 201, done: true });
+  });
+
+  it('set：SSCAN 游标续页', async () => {
+    const h: Send2 = async (n, a) => {
+      if (n === 'TYPE') return 'set';
+      if (n === 'TTL') return -1;
+      if (n === 'MEMORY') return null;
+      if (n === 'SSCAN') return a[1] === '0' ? ['9', ['m1']] : ['0', ['m2']];
+      if (n === 'SCARD') return 2;
+      if (n === 'SCAN') return ['0', []];
+      if (n === 'INFO') return '';
+      if (n === 'SLOWLOG') return [];
+      return 'OK';
+    };
+    const { view, first } = await firstPage(h);
+    expect(first.more).toEqual({ cursor: '9', done: false });
+
+    (view.post as any).mockClear();
+    await view.handleMessage({ type: 'collectionMore', key: 'big', kind: 'set', cursor: '9' });
+    const more = posts(view).find((m) => m.type === 'collectionMoreResult');
+    expect(more.members).toEqual(['m2']);
+    expect(more.more).toEqual({ cursor: '0', done: true });
+  });
+
+  it('zset：ZRANGE offset 续页', async () => {
+    const h: Send2 = async (n, a) => {
+      if (n === 'TYPE') return 'zset';
+      if (n === 'TTL') return -1;
+      if (n === 'MEMORY') return null;
+      // 首屏满页（200）→ 可续；续页短页（1）→ done。
+      if (n === 'ZRANGE') return a[1] === '0'
+        ? Array.from({ length: 200 }, (_, i) => [`m${i}`, String(i)])
+        : ['m200', '200'];
+      if (n === 'ZCARD') return 201;
+      if (n === 'SCAN') return ['0', []];
+      if (n === 'INFO') return '';
+      if (n === 'SLOWLOG') return [];
+      return 'OK';
+    };
+    const { view, first } = await firstPage(h);
+    expect(first.data.kind).toBe('zset');
+    expect(first.data.items).toHaveLength(200);
+    expect(first.data.card).toBe(201);
+    expect(first.more).toEqual({ offset: 200, done: false });
+
+    (view.post as any).mockClear();
+    await view.handleMessage({ type: 'collectionMore', key: 'big', kind: 'zset', offset: 200 });
+    const more = posts(view).find((m) => m.type === 'collectionMoreResult');
+    expect(more.items).toEqual([['m200', '200']]);
+    expect(more.more).toEqual({ offset: 201, done: true });
+  });
+
+  it('非法 kind：忽略，不回 collectionMoreResult', async () => {
+    const h: Send2 = async (n) => {
+      if (n === 'TYPE') return 'hash';
+      if (n === 'TTL') return -1;
+      if (n === 'MEMORY') return null;
+      if (n === 'HSCAN') return ['0', ['f', 'v']];
+      if (n === 'HLEN') return 1;
+      if (n === 'SCAN') return ['0', []];
+      if (n === 'INFO') return '';
+      if (n === 'SLOWLOG') return [];
+      return 'OK';
+    };
+    const { view } = await firstPage(h);
+    (view.post as any).mockClear();
+    await view.handleMessage({ type: 'collectionMore', key: 'big', kind: 'stream', cursor: '0' });
+    expect(posts(view).some((m) => m.type === 'collectionMoreResult')).toBe(false);
+  });
+});
+
 describe('RedisView S4 命令日志订阅', () => {
   it('订阅 client 命令日志并逐条下发 commandLog', async () => {
     let listener: ((e: any) => void) | null = null;
@@ -903,5 +1035,246 @@ describe('RedisView S4 连接事件日志', () => {
     h.audits.length = 0;
     for (const l of listeners['reconnecting']) l(new Error('switch'));
     expect(h.audits.filter((x) => x.sql === 'connection:reconnecting')).toHaveLength(1);
+  });
+});
+
+describe('Stage B 二进制集合（3C-1）', () => {
+  /** 打开键浏览器并加载一个键的首屏 value（含二进制回复）。 */
+  async function openValue(handler: Send, key = 'h'): Promise<{ view: any; sent: [string, RawArg[]][] }> {
+    const { view, sent } = makeView(handler, 0);
+    await view.handleMessage({ type: 'ready' });
+    await view.handleMessage({ type: 'ready' });
+    (view.post as any).mockClear();
+    sent.length = 0;
+    await view.handleMessage({ type: 'selectKey', key });
+    return { view, sent };
+  }
+
+  it('二进制 hash：value 携带 entryBytes（精确 base64）', async () => {
+    const field = Buffer.from([0xff, 0x61]);
+    const value = Buffer.from([0x00, 0xfe]);
+    const { view } = await openValue(async (n) => {
+      if (n === 'TYPE') return 'hash';
+      if (n === 'TTL') return -1;
+      if (n === 'MEMORY') return null;
+      if (n === 'HSCAN') return ['0', [field, value]];
+      if (n === 'HLEN') return 1;
+      return 'OK';
+    });
+    const v = posts(view).filter((m) => m.type === 'value').pop();
+    expect(v.data.kind).toBe('hash');
+    expect(v.data.entryBytes).toEqual([[field.toString('base64'), value.toString('base64')]]);
+  });
+
+  it('二进制 hash 删除：按精确字节 HDEL（Buffer 参数），计数 0 仍报错', async () => {
+    const field = Buffer.from([0xff, 0x61]);
+    let deleted = 1;
+    const { view, sent } = await openValue(async (n) => {
+      if (n === 'TYPE') return 'hash';
+      if (n === 'TTL') return -1;
+      if (n === 'MEMORY') return null;
+      if (n === 'HSCAN') return ['0', [field, Buffer.from('v')]];
+      if (n === 'HLEN') return 1;
+      if (n === 'HDEL') return deleted;
+      return 'OK';
+    });
+    sent.length = 0;
+    await view.handleMessage({ type: 'hashDel', key: 'h', fields: ['\uFFFD'], fieldsBase64: [field.toString('base64')] });
+    const hdel = sent.find(([n]) => n === 'HDEL');
+    expect(hdel).toBeTruthy();
+    expect(Buffer.isBuffer(hdel![1][1])).toBe(true);
+    expect((hdel![1][1] as Buffer).equals(field)).toBe(true);
+    expect(posts(view).some((m) => m.type === 'keyAction' && m.ok)).toBe(true);
+
+    // 计数 0（未命中）→ 失败，不谎报成功。
+    deleted = 0;
+    (view.post as any).mockClear();
+    await view.handleMessage({ type: 'hashDel', key: 'h', fields: ['\uFFFD'], fieldsBase64: [field.toString('base64')] });
+    expect(posts(view).some((m) => m.type === 'keyAction' && m.ok === false)).toBe(true);
+  });
+
+  it('二进制 set / zset 成员删除：Buffer 参数精确命中', async () => {
+    const member = Buffer.from([0x00, 0xff]);
+    const setView = await openValue(async (n) => {
+      if (n === 'TYPE') return 'set';
+      if (n === 'TTL') return -1;
+      if (n === 'MEMORY') return null;
+      if (n === 'SSCAN') return ['0', [member]];
+      if (n === 'SCARD') return 1;
+      if (n === 'SREM') return 1;
+      return 'OK';
+    }, 's');
+    setView.sent.length = 0;
+    await setView.view.handleMessage({ type: 'setRem', key: 's', members: ['\uFFFD'], membersBase64: [member.toString('base64')] });
+    const srem = setView.sent.find(([n]) => n === 'SREM');
+    expect(Buffer.isBuffer(srem![1][1])).toBe(true);
+    expect((srem![1][1] as Buffer).equals(member)).toBe(true);
+
+    // 换键/换类型：关闭既有面板实例（RedisView 按 conn:panel 注册，直接 open 会复用旧 handler）。
+    RedisView.closeAll();
+    const zsetView = await openValue(async (n) => {
+      if (n === 'TYPE') return 'zset';
+      if (n === 'TTL') return -1;
+      if (n === 'MEMORY') return null;
+      if (n === 'ZRANGE') return [member, Buffer.from('1')];
+      if (n === 'ZCARD') return 1;
+      if (n === 'ZREM') return 1;
+      return 'OK';
+    }, 'z');
+    zsetView.sent.length = 0;
+    await zsetView.view.handleMessage({ type: 'zsetRem', key: 'z', members: ['\uFFFD'], membersBase64: [member.toString('base64')] });
+    const zrem = zsetView.sent.find(([n]) => n === 'ZREM');
+    expect(Buffer.isBuffer(zrem![1][1])).toBe(true);
+    expect((zrem![1][1] as Buffer).equals(member)).toBe(true);
+  });
+
+  it('二进制 list 元素删除：LINDEX 精确比对 + 标记删除；不匹配拒绝', async () => {
+    const original = Buffer.from([0xff, 0x00]);
+    let current: Buffer | null = original;
+    const { view, sent } = await openValue(async (n) => {
+      if (n === 'TYPE') return 'list';
+      if (n === 'TTL') return -1;
+      if (n === 'MEMORY') return null;
+      if (n === 'LRANGE') return [original];
+      if (n === 'LLEN') return 1;
+      if (n === 'LINDEX') return current;
+      if (n === 'LREM') return 1;
+      return 'OK';
+    }, 'l');
+    sent.length = 0;
+    await view.handleMessage({ type: 'listRem', key: 'l', index: 0, value: '\uFFFD', valueBase64: original.toString('base64') });
+    expect(sent.some(([n]) => n === 'LSET')).toBe(true);
+    expect(sent.some(([n]) => n === 'LREM')).toBe(true);
+    expect(posts(view).some((m) => m.type === 'keyAction' && m.ok)).toBe(true);
+
+    // 并发改动（当前字节不一致）→ 拒绝删除，不执行 LSET/LREM。
+    current = Buffer.from([0x01]);
+    (view.post as any).mockClear();
+    sent.length = 0;
+    await view.handleMessage({ type: 'listRem', key: 'l', index: 0, value: '\uFFFD', valueBase64: original.toString('base64') });
+    expect(sent.some(([n]) => n === 'LSET')).toBe(false);
+    const failed = posts(view).find((m) => m.type === 'keyAction');
+    expect(failed.ok).toBe(false);
+  });
+
+  it('续页结果携带并行 base64（hash）', async () => {
+    const field = Buffer.from([0xfe]);
+    const { view } = await openValue(async (n, a) => {
+      if (n === 'TYPE') return 'hash';
+      if (n === 'TTL') return -1;
+      if (n === 'MEMORY') return null;
+      if (n === 'HSCAN') return a[1] === '0' ? ['5', [Buffer.from('f'), Buffer.from('v')]] : ['0', [field, Buffer.from('v2')]];
+      if (n === 'HLEN') return 2;
+      return 'OK';
+    });
+    (view.post as any).mockClear();
+    await view.handleMessage({ type: 'collectionMore', key: 'h', kind: 'hash', cursor: '5' });
+    const more = posts(view).find((m) => m.type === 'collectionMoreResult');
+    expect(more.entries).toEqual([['\uFFFD', 'v2']]);
+    expect(more.entryBytes).toEqual([[field.toString('base64'), Buffer.from('v2').toString('base64')]]);
+  });
+
+  it('3C-2：二进制 hash 值编辑走 HSET Buffer（field 支持精确字节）', async () => {
+    const field = Buffer.from([0xff, 0x61]);
+    const value = Buffer.from([0x00, 0xfe]);
+    const { view, sent } = await openValue(async (n) => {
+      if (n === 'TYPE') return 'hash';
+      if (n === 'TTL') return -1;
+      if (n === 'MEMORY') return null;
+      if (n === 'HSCAN') return ['0', [field, Buffer.from('v')]];
+      if (n === 'HLEN') return 1;
+      return 'OK';
+    });
+    sent.length = 0;
+    await view.handleMessage({
+      type: 'hashSet', key: 'h', field: '\uFFFDa', value: 'v',
+      fieldBase64: field.toString('base64'), valueBase64: value.toString('base64'),
+    });
+    const hset = sent.find(([n]) => n === 'HSET');
+    expect(hset).toBeTruthy();
+    expect(Buffer.isBuffer(hset![1][1])).toBe(true);
+    expect((hset![1][1] as Buffer).equals(field)).toBe(true);
+    expect((hset![1][2] as Buffer).equals(value)).toBe(true);
+    expect(posts(view).some((m) => m.type === 'keyAction' && m.ok)).toBe(true);
+  });
+
+  it('3C-2：二进制 field 改名被拒绝（fail-closed，不发 HSET）', async () => {
+    const { view, sent } = await openValue(async (n) => {
+      if (n === 'TYPE') return 'hash';
+      if (n === 'TTL') return -1;
+      if (n === 'MEMORY') return null;
+      if (n === 'HSCAN') return ['0', [Buffer.from([0xff]), Buffer.from('v')]];
+      if (n === 'HLEN') return 1;
+      return 'OK';
+    });
+    sent.length = 0;
+    (view.post as any).mockClear();
+    await view.handleMessage({
+      type: 'hashSet', key: 'h', field: 'new', value: 'v',
+      oldField: '\uFFFD', valueBase64: Buffer.from('x').toString('base64'),
+    });
+    expect(sent.some(([n]) => n === 'HSET')).toBe(false);
+    expect(posts(view).find((m) => m.type === 'keyAction').ok).toBe(false);
+  });
+
+  it('3C-2：二进制 list 元素编辑走 LINDEX 比对 + LSET Buffer；不匹配拒绝', async () => {
+    const original = Buffer.from([0xff, 0x00]);
+    let current: Buffer | null = original;
+    const { view, sent } = await openValue(async (n) => {
+      if (n === 'TYPE') return 'list';
+      if (n === 'TTL') return -1;
+      if (n === 'MEMORY') return null;
+      if (n === 'LRANGE') return [original];
+      if (n === 'LLEN') return 1;
+      if (n === 'LINDEX') return current;
+      return 'OK';
+    }, 'l');
+    sent.length = 0;
+    const next = Buffer.from([0x01, 0x02]);
+    await view.handleMessage({
+      type: 'listSet', key: 'l', index: 0, value: '\uFFFD', original: '\uFFFD',
+      valueBase64: next.toString('base64'), originalBase64: original.toString('base64'),
+    });
+    const lset = sent.find(([n]) => n === 'LSET');
+    expect(lset).toBeTruthy();
+    expect(Buffer.isBuffer(lset![1][2])).toBe(true);
+    expect((lset![1][2] as Buffer).equals(next)).toBe(true);
+    expect(posts(view).some((m) => m.type === 'keyAction' && m.ok)).toBe(true);
+
+    // 并发不匹配 → 拒绝，不发 LSET。
+    current = Buffer.from([0x09]);
+    sent.length = 0;
+    (view.post as any).mockClear();
+    await view.handleMessage({
+      type: 'listSet', key: 'l', index: 0, value: '\uFFFD', original: '\uFFFD',
+      valueBase64: next.toString('base64'), originalBase64: original.toString('base64'),
+    });
+    expect(sent.some(([n]) => n === 'LSET')).toBe(false);
+    expect(posts(view).find((m) => m.type === 'keyAction').ok).toBe(false);
+  });
+
+  it('3C-2：二进制 zset member 改 score 走 ZADD Buffer；改名拒绝', async () => {
+    const member = Buffer.from([0x00, 0xff]);
+    const { view, sent } = await openValue(async (n) => {
+      if (n === 'TYPE') return 'zset';
+      if (n === 'TTL') return -1;
+      if (n === 'MEMORY') return null;
+      if (n === 'ZRANGE') return [member, Buffer.from('1')];
+      if (n === 'ZCARD') return 1;
+      return 'OK';
+    }, 'z');
+    sent.length = 0;
+    await view.handleMessage({ type: 'zsetAdd', key: 'z', score: '2', member: '\uFFFD', memberBase64: member.toString('base64') });
+    const zadd = sent.find(([n]) => n === 'ZADD');
+    expect(zadd).toBeTruthy();
+    expect(Buffer.isBuffer(zadd![1][2])).toBe(true);
+    expect((zadd![1][2] as Buffer).equals(member)).toBe(true);
+
+    // 改名（oldMember 与 member 不同）→ 拒绝，不发 ZADD。
+    sent.length = 0;
+    (view.post as any).mockClear();
+    await view.handleMessage({ type: 'zsetAdd', key: 'z', score: '2', member: 'new', oldMember: '\uFFFD', memberBase64: member.toString('base64') });
+    expect(sent.some(([n]) => n === 'ZADD')).toBe(false);
+    expect(posts(view).find((m) => m.type === 'keyAction').ok).toBe(false);
   });
 });

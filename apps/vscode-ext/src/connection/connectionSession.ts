@@ -12,6 +12,8 @@
 import type {
   DatabaseCapabilities,
   DataService,
+  EsCapabilities,
+  EsClient,
   MetadataService,
   QueryService,
   RedisClient,
@@ -44,8 +46,18 @@ export interface RedisConnectionSession {
   close: () => void;
 }
 
+/** Elasticsearch 会话（P8 S1：类型接缝；S2 接线会话装配与 UI）。 */
+export interface ElasticsearchConnectionSession {
+  kind: 'elasticsearch';
+  capabilities: EsCapabilities;
+  es: EsClient;
+  connId: string;
+  isAlive: () => boolean;
+  close: () => void;
+}
+
 /** 连接会话判别联合。 */
-export type ConnectionSession = SqlConnectionSession | RedisConnectionSession;
+export type ConnectionSession = SqlConnectionSession | RedisConnectionSession | ElasticsearchConnectionSession;
 
 /** 期望 SQL 会话但拿到其它引擎时抛出。 */
 export class NotSqlSessionError extends Error {

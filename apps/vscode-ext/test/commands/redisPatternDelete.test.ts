@@ -91,3 +91,67 @@ describe('redisPatternDelete（cluster 逐 master + 逐键 UNLINK）', () => {
     expect(scans.length).toBe(2);
   });
 });
+
+describe('redisPatternDelete 分页加锁（D11）', () => {
+  it('standalone：每页一次 withLock；锁内先 select，SCAN/UNLINK 均在锁内', async () => {
+    const { client } = fakeClient({
+      cluster: false,
+      pageFor: (_n, cursor) => (cursor === '0' ? ['7', ['a', 'b']] : cursor === '7' ? ['0', ['c']] : undefined),
+    });
+    const order: string[] = [];
+    const unlinkLocked: boolean[] = [];
+    let active = 0;
+    const orig = client.sendCommand;
+    client.sendCommand = async (cmd: string, args: (string | number)[] = []) => {
+      if (cmd === 'UNLINK') unlinkLocked.push(active > 0);
+      return orig(cmd, args);
+    };
+    const n = await deleteByPatternKeys(client, 'x*', {
+      withLock: async <T>(fn: () => Promise<T>): Promise<T> => {
+        active += 1;
+        order.push('lock');
+        try { return await fn(); } finally { active -= 1; }
+      },
+      select: async () => { order.push('select'); },
+    });
+    expect(n).toBe(3);
+    // 两页 → 两次加锁；每页锁内第一动作是 SELECT 归一（锁 → select → SCAN/UNLINK）。
+    expect(order.filter((x) => x === 'lock')).toHaveLength(2);
+    expect(order.filter((x) => x === 'select')).toHaveLength(2);
+    expect(order.slice(0, 2)).toEqual(['lock', 'select']);
+    expect(unlinkLocked).toEqual([true, true]);
+  });
+
+  it('cluster：逐 master 逐页加锁；调用方不注入 select（无逻辑库）', async () => {
+    const { client } = fakeClient({
+      cluster: true,
+      pageFor: (node) => (node === 'm1' ? ['0', ['a']] : node === 'm2' ? ['0', []] : undefined),
+    });
+    let locks = 0;
+    await deleteByPatternKeys(client, 'x*', {
+      withLock: async <T>(fn: () => Promise<T>): Promise<T> => { locks += 1; return fn(); },
+    });
+    expect(locks).toBe(2);
+  });
+
+  it('无 hooks：行为与旧调用一致（整段调用方持锁）', async () => {
+    const { client, unlinks } = fakeClient({
+      cluster: false,
+      pageFor: (_n, cursor) => (cursor === '0' ? ['0', ['a']] : undefined),
+    });
+    const n = await deleteByPatternKeys(client, 'x*');
+    expect(n).toBe(1);
+    expect(unlinks).toEqual([['a']]);
+  });
+
+  it('加锁路径失败语义不变：PatternDeleteError 携带已删除数', async () => {
+    const { client } = fakeClient({
+      cluster: true,
+      pageFor: (node) => (node === 'm1' ? ['0', ['a']] : node === 'm2' ? ['0', ['fail']] : undefined),
+      failOn: 'fail',
+    });
+    await expect(deleteByPatternKeys(client, 'x*', {
+      withLock: async <T>(fn: () => Promise<T>): Promise<T> => fn(),
+    })).rejects.toMatchObject({ name: 'PatternDeleteError', deleted: 1 });
+  });
+});

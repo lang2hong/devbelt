@@ -180,6 +180,38 @@ describe('console auth routes', () => {
     await app.close();
   });
 
+  it('csrf bootstrap does not downgrade an existing bound token when refresh is missing or invalid', async () => {
+    const { app } = await buildApp();
+    const csrfRes = await app.inject({ method: 'GET', url: '/api/console/auth/csrf' });
+    const anonCsrf = cookieValue(csrfRes, csrfCookieName())!;
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/console/auth/login',
+      headers: { origin: ORIGIN, 'content-type': 'application/json', accept: 'application/json', 'x-csrf-token': anonCsrf, cookie: `${csrfCookieName()}=${anonCsrf}` },
+      payload: { email: 'user@b.com', password: PASSWORD, deviceKey: DEVICE_KEY, devicePlatform: 'web', deviceName: 'Web Console', clientVersion: '1.0.0' },
+    });
+    const sessionCsrf = cookieValue(login, csrfCookieName())!;
+
+    // 无 refresh cookie：已绑定的 csrf 不得被匿名 token 覆盖 → 204 且不下发 Set-Cookie。
+    const noRefresh = await app.inject({
+      method: 'GET',
+      url: '/api/console/auth/csrf',
+      headers: { cookie: `${csrfCookieName()}=${sessionCsrf}` },
+    });
+    expect(noRefresh.statusCode).toBe(204);
+    expect(setCookies(noRefresh)).toHaveLength(0);
+
+    // refresh 无效（解析不出会话）：同样保持已绑定 token，不降级。
+    const invalidRefresh = await app.inject({
+      method: 'GET',
+      url: '/api/console/auth/csrf',
+      headers: { cookie: `${refreshCookieName()}=invalid-refresh; ${csrfCookieName()}=${sessionCsrf}` },
+    });
+    expect(invalidRefresh.statusCode).toBe(204);
+    expect(setCookies(invalidRefresh)).toHaveLength(0);
+    await app.close();
+  });
+
   it('logout clears the refresh and csrf cookies', async () => {
     const { app } = await buildApp();
     const csrfRes = await app.inject({ method: 'GET', url: '/api/console/auth/csrf' });

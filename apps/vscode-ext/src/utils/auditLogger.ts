@@ -18,7 +18,9 @@ export type AuditAction =
   | 'export_data'
   | 'process_kill'
   /** P7：Redis 写/危险命令。 */
-  | 'redis_command';
+  | 'redis_command'
+  /** P8：Elasticsearch REST 写请求（method/path，不含 body）。 */
+  | 'es_rest';
 
 export interface AuditEntry {
   id: string;

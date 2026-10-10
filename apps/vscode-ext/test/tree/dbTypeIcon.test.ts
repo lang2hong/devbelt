@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { DatabaseType } from '@devbelt/db-core';
 import { dbTypeIconFile } from '../../src/tree/dbTypeIcon';
 
@@ -8,6 +10,16 @@ describe('dbTypeIcon', () => {
     expect(dbTypeIconFile(DatabaseType.PG)).toBe('db-postgresql.svg');
     expect(dbTypeIconFile(DatabaseType.SQLITE)).toBe('db-sqlite.svg');
     expect(dbTypeIconFile(DatabaseType.REDIS)).toBe('db-redis.svg');
+    expect(dbTypeIconFile(DatabaseType.ELASTICSEARCH)).toBe('db-elasticsearch.svg');
+  });
+
+  it('P8：ES 三态图标资产齐全（tree 用 extensionUri 拼路径）', () => {
+    const dir = join(__dirname, '../../resources/icons');
+    for (const f of ['db-elasticsearch.svg', 'db-elasticsearch-dim.svg', 'db-elasticsearch-active.svg']) {
+      expect(existsSync(join(dir, f)), f).toBe(true);
+    }
+    expect(dbTypeIconFile(DatabaseType.ELASTICSEARCH, 'dim')).toBe('db-elasticsearch-dim.svg');
+    expect(dbTypeIconFile(DatabaseType.ELASTICSEARCH, 'active')).toBe('db-elasticsearch-active.svg');
   });
 
   it('按状态返回 dim/open/active 变体（open 为默认）', () => {

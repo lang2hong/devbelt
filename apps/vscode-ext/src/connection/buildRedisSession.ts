@@ -13,7 +13,7 @@ import type { RedisConnectionSession } from './connectionSession';
 import type { SessionBuildContext } from './sessionBuildContext';
 
 /** 解析 `host:port,host:port` 节点列表；缺省回退到 `defaultHost:defaultPort`。 */
-function parseRedisNodes(raw: string | undefined, defaultHost: string, defaultPort: number): { host: string; port: number }[] {
+export function parseRedisNodes(raw: string | undefined, defaultHost: string, defaultPort: number): { host: string; port: number }[] {
   const items = (raw ?? '').split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
   if (!items.length) return [{ host: defaultHost, port: defaultPort }];
   return items.map((item) => {

@@ -31,18 +31,37 @@ export class CsrfService {
 
   /** 仅校验 token 签名（+可选会话绑定），不要求双提交（供已有匿名/其它路径复用）。 */
   verifySigned(tokenValue: string, binding?: string): boolean {
-    const sep = tokenValue.lastIndexOf('.');
-    if (sep <= 0) return false;
-    const payload = tokenValue.slice(0, sep);
-    const mac = tokenValue.slice(sep + 1);
-    const expected = this.mac(payload);
-    if (mac.length !== expected.length) return false;
-    if (!timingSafeEqual(Buffer.from(mac), Buffer.from(expected))) return false;
+    const payload = this.verifiedPayload(tokenValue);
+    if (payload === undefined) return false;
     if (binding !== undefined) {
       const bound = payload.slice(0, payload.indexOf('.'));
       if (bound !== binding) return false;
     }
     return true;
+  }
+
+  /**
+   * 验签通过且带会话绑定时返回 binding；匿名 token（无 binding）/验签失败/未提供返回 undefined。
+   * 供 CSRF bootstrap 判定「现有 cookie 是否已绑定」，避免用匿名 token 把它降级覆盖。
+   */
+  boundSession(tokenValue: string | undefined): string | undefined {
+    if (!tokenValue) return undefined;
+    const payload = this.verifiedPayload(tokenValue);
+    if (payload === undefined) return undefined;
+    const dot = payload.indexOf('.');
+    return dot > 0 ? payload.slice(0, dot) : undefined;
+  }
+
+  /** 验签通过时返回 payload（`[binding.]nonce`），失败返回 undefined。 */
+  private verifiedPayload(tokenValue: string): string | undefined {
+    const sep = tokenValue.lastIndexOf('.');
+    if (sep <= 0) return undefined;
+    const payload = tokenValue.slice(0, sep);
+    const mac = tokenValue.slice(sep + 1);
+    const expected = this.mac(payload);
+    if (mac.length !== expected.length) return undefined;
+    if (!timingSafeEqual(Buffer.from(mac), Buffer.from(expected))) return undefined;
+    return payload;
   }
 
   private mac(payload: string): string {

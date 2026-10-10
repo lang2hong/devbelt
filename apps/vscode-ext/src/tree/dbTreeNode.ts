@@ -30,6 +30,12 @@ export enum NodeKind {
   RedisKeysLoadedAll = 'redisKeysLoadedAll',
   /** B1：PostgreSQL 命名空间（schema）节点。 */
   Schema = 'schema',
+  /** P8 S2：Elasticsearch「集群」节点（点击打开面板 cluster tab）。 */
+  EsClusterInfo = 'esClusterInfo',
+  /** P8 S3：Elasticsearch「索引」类别节点（展开懒加载索引列表）。 */
+  EsIndexCategory = 'esIndexCategory',
+  /** P8 S3：Elasticsearch 索引节点（点击打开索引详情面板）。 */
+  EsIndex = 'esIndex',
 }
 
 /** 分类子类型 */
@@ -56,6 +62,9 @@ const ICON_MAP: Record<string, string> = {
   [NodeKind.RedisKeyLoadMore]: 'ellipsis',
   [NodeKind.RedisKeysLoadedAll]: 'check',
   [NodeKind.Schema]: 'symbol-namespace',
+  [NodeKind.EsClusterInfo]: 'server-process',
+  [NodeKind.EsIndexCategory]: 'list-unordered',
+  [NodeKind.EsIndex]: 'database',
 };
 
 /** 分类节点的图标 id（按 categoryType 区分） */
@@ -115,9 +124,10 @@ export class DbTreeNode extends TreeItem {
     // 在 SQLite 表上会看到 MySQL 专属命令，或该出现的命令反而不出现。
     // 菜单 when 只能读节点自身的 viewItem，所以类型必须随节点携带。
     // 分组节点没有连接，用 NONE 占位以保证格式统一（`<base>.<TYPE>`）。
-    // 只读「Redis」连接追加 `.ro`，供菜单 when 隐藏写操作（写入仍由 RedisClient 只读切面兜底）。
-    // 仅限 Redis：SQL 侧菜单未做 `.ro` 容错，且其写入门禁在运行期由 sqlSafety 兜底。
-    const roSuffix = conn?.readOnly && conn.dbType === DatabaseType.REDIS ? '.ro' : '';
+    // 只读「Redis / Elasticsearch」连接追加 `.ro`，供菜单 when 隐藏写操作
+    // （写入仍由 RedisClient/EsClient 只读切面兜底）。
+    // 仅限 Redis/ES：SQL 侧菜单未做 `.ro` 容错，且其写入门禁在运行期由 sqlSafety 兜底。
+    const roSuffix = conn?.readOnly && (conn.dbType === DatabaseType.REDIS || conn.dbType === DatabaseType.ELASTICSEARCH) ? '.ro' : '';
     this.contextValue = `${base}.${conn?.dbType ?? 'NONE'}${roSuffix}`;
     // 图标：Category 按 categoryType 选，其余按 kind 选
     const iconId = kind === NodeKind.Category && categoryType
@@ -134,6 +144,8 @@ export class DbTreeNode extends TreeItem {
   public redisKey?: string;
   /** Redis 文件夹前缀（仅 RedisKeyFolder 节点，用于前缀 SCAN）。 */
   public redisKeyPrefix?: string;
+  /** P8 S3：Elasticsearch 索引名（仅 EsIndex 节点）。 */
+  public esIndexName?: string;
   /** B1：PG 命名空间（Schema 节点及其下对象节点携带，用于限定对象名）。 */
   public schema?: string;
   /** PG 参数签名（仅 Routine 节点，DROP 重载函数需要）。 */

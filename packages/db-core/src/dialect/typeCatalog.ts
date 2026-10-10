@@ -63,6 +63,8 @@ const CATALOG: Record<DatabaseType, readonly string[]> = {
   [DatabaseType.SQLITE]: SQLITE_TYPES,
   // Redis 是 KV/数据结构引擎，无 SQL 列类型概念。
   [DatabaseType.REDIS]: [],
+  // Elasticsearch 是文档/搜索引擎，无 SQL 列类型概念（mapping 由 ES 管理）。
+  [DatabaseType.ELASTICSEARCH]: [],
 };
 
 /** 取指定方言的列类型候选；未知类型回退 MySQL 集合。 */

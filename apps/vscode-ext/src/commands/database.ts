@@ -294,8 +294,9 @@ export function registerDatabaseCommands(deps: Deps, sub: Sub): void {
     if (node.conn.dbType === DatabaseType.REDIS) return; // SQL 专用：禁止 Redis 进入
     // PG 连接绑定单库：改为在同一连接上把一个 **schema** 的结构+数据同步到另一个 schema。
     if (node.conn.dbType === DatabaseType.PG) {
-      // 临时门禁：PG 跨 schema 同步的事务/序列处理未收敛（N1/N2/N3），默认关闭。
-      if (!vscode.workspace.getConfiguration('devbelt').get<boolean>('pg.syncEnabled', false)) {
+// 门禁：PG 跨 schema 同步默认关闭（fail-closed）。启用前置=表达式移植层/结构 diff 重构（4B）
+    // 完成且 D28 真库回归全绿；在此之前仅可显式开启 devbelt.pg.syncEnabled 试用。
+    if (!vscode.workspace.getConfiguration('devbelt').get<boolean>('pg.syncEnabled', false)) {
         vscode.window.showWarningMessage(l10n('sync.pgDisabled'));
         return;
       }

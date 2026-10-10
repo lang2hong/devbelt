@@ -67,6 +67,14 @@ function isDuplicateKey(e: unknown): boolean {
 }
 
 /**
+ * 重放已持久化的响应体。空串是 `canonicalJson(undefined)` 的规范形（业务返回 undefined body），
+ * 与 NULL 一样还原为 null；直接 `JSON.parse('')` 会在重放时抛错。
+ */
+function parseStoredBody(raw: string | null): unknown {
+  return raw == null || raw === '' ? null : JSON.parse(raw);
+}
+
+/**
  * 幂等原语（P3 §6.1）。
  *
  * 同键同摘要 → 重放首次响应（不重跑业务、不重复审计）；同键异摘要 → 409 IDEMPOTENCY_KEY_REUSED；
@@ -136,7 +144,7 @@ export class IdempotencyService {
     // 摘要不同 → 立即冲突（即使仍在 processing，§6.1 要求立即 409 KEY_REUSED）。
     if (!receipt.requestDigest.equals(digest)) throw new IdempotencyKeyReusedError();
     if (receipt.status === 'completed') {
-      const body = receipt.responseBody == null ? null : JSON.parse(receipt.responseBody);
+      const body = parseStoredBody(receipt.responseBody);
       return { status: receipt.httpStatus ?? 200, body, replayed: true };
     }
     // processing：仅同摘要才允许有界等待。
@@ -146,7 +154,7 @@ export class IdempotencyService {
       const latest = await this.receiptRepo.findByKey(key.actorUserId, key.sessionId, key.method, key.normalizedPath, key.idempotencyKey);
       if (!latest) break;
       if (latest.requestDigest.equals(digest) && latest.status === 'completed') {
-        const body = latest.responseBody == null ? null : JSON.parse(latest.responseBody);
+        const body = parseStoredBody(latest.responseBody);
         return { status: latest.httpStatus ?? 200, body, replayed: true };
       }
     }

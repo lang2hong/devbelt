@@ -459,6 +459,41 @@
         "category": "DB Client"
       },
       {
+        "command": "devbelt.es.cluster",
+        "title": "%cmd.es.cluster%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.es.rest",
+        "title": "%cmd.es.rest%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.es.indices",
+        "title": "%cmd.es.indices%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.es.index",
+        "title": "%cmd.es.index%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.es.documents",
+        "title": "%cmd.es.documents%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.es.dsl",
+        "title": "%cmd.es.dsl%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.es.nodes",
+        "title": "%cmd.es.nodes%",
+        "category": "DB Client"
+      },
+      {
         "command": "devbelt.redis.monitor",
         "title": "%cmd.redis.monitor%",
         "category": "DB Client"
@@ -489,8 +524,13 @@
         "category": "DB Client"
       },
       {
-        "command": "devbelt.redis.loadFolderKeys",
-        "title": "%cmd.redis.loadFolderKeys%",
+        "command": "devbelt.redis.loadMoreFolderKeys",
+        "title": "%cmd.redis.loadMoreFolderKeys%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.redis.loadAllFolderKeys",
+        "title": "%cmd.redis.loadAllFolderKeys%",
         "category": "DB Client"
       },
       {
@@ -536,7 +576,8 @@
       {
         "command": "devbelt.redis.newKey",
         "title": "%cmd.redis.newKey%",
-        "category": "DB Client"
+        "category": "DB Client",
+        "icon": "$(add)"
       },
       {
         "command": "devbelt.moveConnectionUp",
@@ -1596,17 +1637,17 @@
         },
         {
           "command": "devbelt.openConnection",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionClosed\\.(MYSQL|PG|SQLITE|REDIS)(\\.ro)?$/",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionClosed\\.(MYSQL|PG|SQLITE|REDIS|ELASTICSEARCH)(\\.ro)?$/",
           "group": "1_view"
         },
         {
           "command": "devbelt.closeConnection",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE|REDIS)(\\.ro)?$/",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE|REDIS|ELASTICSEARCH)(\\.ro)?$/",
           "group": "1_view"
         },
         {
           "command": "devbelt.refreshConnection",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE|REDIS)(\\.ro)?$/",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE|REDIS|ELASTICSEARCH)(\\.ro)?$/",
           "group": "0_refresh"
         },
         {
@@ -1685,6 +1726,51 @@
           "group": "5_tools"
         },
         {
+          "command": "devbelt.es.cluster",
+          "when": "view == devbelt.explorer && (viewItem == connectionOpen.ELASTICSEARCH || viewItem == connectionOpen.ELASTICSEARCH.ro)",
+          "group": "1_view"
+        },
+        {
+          "command": "devbelt.es.rest",
+          "when": "view == devbelt.explorer && (viewItem == connectionOpen.ELASTICSEARCH || viewItem == connectionOpen.ELASTICSEARCH.ro)",
+          "group": "1_view"
+        },
+        {
+          "command": "devbelt.es.indices",
+          "when": "view == devbelt.explorer && (viewItem == connectionOpen.ELASTICSEARCH || viewItem == connectionOpen.ELASTICSEARCH.ro || viewItem == esIndexCategory.ELASTICSEARCH || viewItem == esIndexCategory.ELASTICSEARCH.ro)",
+          "group": "1_view"
+        },
+        {
+          "command": "devbelt.es.index",
+          "when": "view == devbelt.explorer && (viewItem == esIndex.ELASTICSEARCH || viewItem == esIndex.ELASTICSEARCH.ro)",
+          "group": "1_view"
+        },
+        {
+          "command": "devbelt.es.documents",
+          "when": "view == devbelt.explorer && (viewItem == esIndex.ELASTICSEARCH || viewItem == esIndex.ELASTICSEARCH.ro)",
+          "group": "1_view"
+        },
+        {
+          "command": "devbelt.es.dsl",
+          "when": "view == devbelt.explorer && (viewItem == esIndex.ELASTICSEARCH || viewItem == esIndex.ELASTICSEARCH.ro)",
+          "group": "1_view"
+        },
+        {
+          "command": "devbelt.es.nodes",
+          "when": "view == devbelt.explorer && (viewItem == connectionOpen.ELASTICSEARCH || viewItem == connectionOpen.ELASTICSEARCH.ro)",
+          "group": "5_tools"
+        },
+        {
+          "command": "devbelt.refreshNode",
+          "when": "view == devbelt.explorer && (viewItem == esIndexCategory.ELASTICSEARCH || viewItem == esIndexCategory.ELASTICSEARCH.ro)",
+          "group": "0_refresh"
+        },
+        {
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && (viewItem == esIndexCategory.ELASTICSEARCH || viewItem == esIndexCategory.ELASTICSEARCH.ro || viewItem == esIndex.ELASTICSEARCH || viewItem == esIndex.ELASTICSEARCH.ro)",
+          "group": "9_copy"
+        },
+        {
           "command": "devbelt.redis.console",
           "when": "view == devbelt.explorer && (viewItem == redisDb.REDIS || viewItem == redisDb.REDIS.ro)",
           "group": "1_view"
@@ -1698,6 +1784,11 @@
           "command": "devbelt.redis.clearSearchKeys",
           "when": "view == devbelt.explorer && (viewItem == redisDb.REDIS || viewItem == redisDb.REDIS.ro)",
           "group": "1_view"
+        },
+        {
+          "command": "devbelt.redis.newKey",
+          "when": "view == devbelt.explorer && viewItem == redisDb.REDIS",
+          "group": "inline"
         },
         {
           "command": "devbelt.redis.newKey",
@@ -1755,7 +1846,7 @@
           "group": "5_del"
         },
         {
-          "command": "devbelt.redis.loadFolderKeys",
+          "command": "devbelt.redis.loadAllFolderKeys",
           "when": "view == devbelt.explorer && (viewItem == redisKeyFolder.REDIS || viewItem == redisKeyFolder.REDIS.ro)",
           "group": "1_view"
         },

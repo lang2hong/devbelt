@@ -12,7 +12,8 @@ import { connectionTargetChanged } from '../utils/connectionTarget';
 import { diagInfo, diagWarn } from '../utils/diagnostics';
 import { chmod, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import type { RedisConnectionSession } from '../connection/connectionSession';
+import type { ElasticsearchConnectionSession, RedisConnectionSession } from '../connection/connectionSession';
+import { esAuthMissingMessage, esAuthOf } from '../connection/esAuth';
 import type { Deps, Sub } from './shared';
 import { confirm } from './shared';
 import {
@@ -27,6 +28,15 @@ async function redisServerVersion(session: RedisConnectionSession): Promise<stri
     const info = await session.client.info('server');
     const m = /^redis_version:([^\r\n]+)/m.exec(info);
     return m ? m[1].trim() : '';
+  } catch { return ''; }
+}
+
+/** ES：GET / 取 version.number（打开连接时展示；失败留空）。 */
+async function esServerVersion(session: ElasticsearchConnectionSession): Promise<string> {
+  try {
+    const res = await session.es.ping();
+    const body = res.body as { version?: { number?: string } } | null;
+    return body?.version?.number ?? '';
   } catch { return ''; }
 }
 
@@ -139,7 +149,9 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
       manager.markExplicit(conn.id);
       const ver = session.kind === 'redis'
         ? await redisServerVersion(session)
-        : await queryServerVersion(session, conn.dbType);
+        : session.kind === 'elasticsearch'
+          ? await esServerVersion(session)
+          : await queryServerVersion(session, conn.dbType);
       treeProvider.setConnVersion(conn.id, `${conn.dbType} ${ver}`.trim());
       treeProvider.refresh();
       AuditLogger.tryLog({ action: 'connection_open', connName: conn.name || conn.host, database: conn.database });
@@ -154,7 +166,12 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
           await vscode.commands.executeCommand('devbelt.fixConnectionPaths', conn);
         }
       } else {
-        vscode.window.showErrorMessage(l10n('conn.openFailed', { message: (err as Error).message }));
+        const message = (err as Error).message;
+        // ES 未配置认证且服务端要求认证：补「去编辑连接」的可操作指引（原文对普通用户不可读）。
+        const hint = conn.dbType === DatabaseType.ELASTICSEARCH && esAuthMissingMessage(message, esAuthOf(conn).kind)
+          ? `\n${l10n('conn.es.authRequired')}`
+          : '';
+        vscode.window.showErrorMessage(l10n('conn.openFailed', { message: message + hint }));
       }
     }
   });

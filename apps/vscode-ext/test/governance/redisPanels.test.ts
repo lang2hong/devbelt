@@ -4,7 +4,8 @@ import { describe, expect, it } from 'vitest';
 
 const PANELS = ['keyBrowser', 'serverStatus', 'console', 'slowlog', 'commandLog', 'monitor'] as const;
 const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'));
-const menus: Array<{ command: string; when?: string }> = pkg?.contributes?.menus?.['view/item/context'] ?? [];
+const menus: Array<{ command: string; when?: string; group?: string }> = pkg?.contributes?.menus?.['view/item/context'] ?? [];
+const commands: Array<{ command: string; icon?: string }> = pkg?.contributes?.commands ?? [];
 const viewCommands = readFileSync(join(process.cwd(), 'src/commands/viewCommands.ts'), 'utf8');
 const vue = readFileSync(join(process.cwd(), 'webview/src/views/RedisView.vue'), 'utf8');
 
@@ -60,14 +61,19 @@ it('S5-3 树内只读键导航：键节点有打开菜单 + 懒加载注册点',
 
   it('D* 键树：唯一 load more + 显式加载完整文件夹/载入全部（确认/进度/取消）', () => {
     // 命令注册
-    expect(viewCommands).toContain("registerCommand('devbelt.redis.loadFolderKeys'");
+    expect(viewCommands).toContain("registerCommand('devbelt.redis.loadAllFolderKeys'");
     expect(viewCommands).toContain("registerCommand('devbelt.redis.loadAllKeys'");
     // 进度 + 取消 + 二次确认
     expect(viewCommands).toContain('withProgress');
     expect(viewCommands).toContain('cancellable: true');
     expect(viewCommands).toContain('loadAllConfirm');
     // 菜单入口：文件夹「加载完整文件夹」、DB「载入全部」
-    expect(menus.some((m) => m.command === 'devbelt.redis.loadFolderKeys' && m.when?.includes('redisKeyFolder.REDIS'))).toBe(true);
+    expect(menus.some((m) => m.command === 'devbelt.redis.loadAllFolderKeys' && m.when?.includes('redisKeyFolder.REDIS'))).toBe(true);
+    // 职责拆分：文件夹增量哨兵绑定独立命令；根层命令不再承担前缀分派。
+    expect(viewCommands).toContain("registerCommand('devbelt.redis.loadMoreFolderKeys'");
+    expect(viewCommands).toContain("registerCommand('devbelt.redis.loadAllFolderKeys'");
+    expect(commands.some((c) => c.command === 'devbelt.redis.loadMoreFolderKeys')).toBe(true);
+    expect(commands.some((c) => c.command === 'devbelt.redis.loadAllFolderKeys')).toBe(true);
     expect(menus.some((m) => m.command === 'devbelt.redis.loadAllKeys' && m.when?.includes('redisDb.REDIS'))).toBe(true);
     // DB 右键也可续扫一页（键多时哨兵易滚出视野）
     expect(menus.some((m) => m.command === 'devbelt.redis.loadMoreKeys' && m.when?.includes('redisDb.REDIS'))).toBe(true);
@@ -89,6 +95,10 @@ it('S5-3 树内只读键导航：键节点有打开菜单 + 懒加载注册点',
     for (const c of ['devbelt.redis.searchKeys', 'devbelt.redis.clearSearchKeys', 'devbelt.redis.newKey']) {
       expect(menus.some((m) => m.command === c && m.when?.includes('redisDb.REDIS')), `缺菜单: ${c}`).toBe(true);
     }
+    // DB 节点 hover 内联「新建 Key」（对齐 addGroup 的 inline 交互）+ 图标；只读连接不显示。
+    expect(menus.some((m) => m.command === 'devbelt.redis.newKey' && m.group === 'inline' && m.when === 'view == devbelt.explorer && viewItem == redisDb.REDIS')).toBe(true);
+    const newKeyCmd = commands.find((c) => c.command === 'devbelt.redis.newKey');
+    expect(newKeyCmd?.icon).toBe('$(add)');
     for (const c of ['devbelt.redis.renameKey', 'devbelt.redis.setKeyTtl', 'devbelt.redis.deleteKey']) {
       expect(menus.some((m) => m.command === c && m.when?.includes('redisKey.REDIS')), `缺菜单: ${c}`).toBe(true);
     }

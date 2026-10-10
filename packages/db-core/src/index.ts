@@ -54,3 +54,6 @@ export type { TransferOptions, TransferProgress } from './query/dataTransferServ
 
 // Redis 客户端（P7）
 export * from './redis/index.js';
+
+// Elasticsearch 客户端（P8 S1）
+export * from './elasticsearch/index.js';

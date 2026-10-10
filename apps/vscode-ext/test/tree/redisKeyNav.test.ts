@@ -231,7 +231,7 @@ describe('D* 键树（根扁平 SCAN + 客户端折叠）', () => {
     expect(res.scanned).toBe(1);
     const folder = (await provider.getChildren(db)).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
     expect(folder.label).toBe('a');
-    expect((await provider.getChildren(folder)).map((k) => k.label)).toEqual(['a:1']);
+    expect((await provider.getChildren(folder)).filter((k) => k.kind === NodeKind.RedisKey).map((k) => k.label)).toEqual(['a:1']);
   });
 
   it('「载入全部」：达硬上限停止并标记 capped', async () => {
@@ -467,5 +467,118 @@ describe('D* 键树（根扁平 SCAN + 客户端折叠）', () => {
     }));
     const res = await provider.loadMoreRedisKeys(dbNode());
     expect(res.total).toBe(total);
+  });
+});
+
+describe('S5-2 文件夹前缀增量「加载更多」（每前缀游标 + glob 转义）', () => {
+  it('根未扫完：文件夹出带前缀的增量哨兵；根扫完则无', async () => {
+    const partial = makeProvider(makeClient(() => ['42', ['user:1', 'user:2']]));
+    const folder = (await partial.getChildren(dbNode())).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
+    const more = (await partial.getChildren(folder)).find((k) => k.kind === NodeKind.RedisKeyLoadMore)!;
+    expect(more.redisKeyPrefix).toBe('user');
+    expect(more.command?.command).toBe('devbelt.redis.loadMoreFolderKeys');
+    expect(more.description).toBe(l10n('redis.tree.loadedCount', { count: '2' }));
+
+    const done = makeProvider(makeClient(() => ['0', ['user:1']]));
+    const folder2 = (await done.getChildren(dbNode())).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
+    expect((await done.getChildren(folder2)).some((k) => k.kind === NodeKind.RedisKeyLoadMore)).toBe(false);
+  });
+
+  it('点击增量哨兵：按前缀 MATCH 游标推进、合并，扫完后哨兵消失', async () => {
+    const seen: string[] = [];
+    const seq: ScanReply[] = [['7', ['user:3']], ['0', ['user:4']]];
+    const provider = makeProvider(makeClient((a) => {
+      const m = matchOf(a);
+      if (m) { seen.push(m); return seq.shift() ?? ['0', []]; }
+      return ['42', ['user:1', 'user:2']];
+    }));
+    const db = dbNode();
+    const folder = (await provider.getChildren(db)).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
+    const more = (await provider.getChildren(folder)).find((k) => k.kind === NodeKind.RedisKeyLoadMore)!;
+
+    const first = await provider.loadMoreFolderKeys(more);
+    // 有界拉取：首页有新增即停（游标 '7' 未归零）。
+    expect(first).toMatchObject({ added: 1, done: false, error: false });
+    expect(seen).toEqual(['user:*']);
+
+    const folder2 = (await provider.getChildren(db)).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
+    const more2 = (await provider.getChildren(folder2)).find((k) => k.kind === NodeKind.RedisKeyLoadMore)!;
+    const second = await provider.loadMoreFolderKeys(more2);
+    expect(second).toMatchObject({ added: 1, done: true, error: false });
+
+    const folder3 = (await provider.getChildren(db)).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
+    expect((await provider.getChildren(folder3)).map((k) => k.label)).toEqual(['user:1', 'user:2', 'user:3', 'user:4']);
+  });
+
+  it('glob 转义：前缀 `a[1]` 的 MATCH 为 `a\\[1\\]:*`', async () => {
+    const seen: string[] = [];
+    const provider = makeProvider(makeClient((a) => {
+      const m = matchOf(a);
+      if (m) { seen.push(m); return ['0', []]; }
+      return ['9', ['a[1]:x']];
+    }));
+    const folder = (await provider.getChildren(dbNode())).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
+    const more = (await provider.getChildren(folder)).find((k) => k.kind === NodeKind.RedisKeyLoadMore)!;
+    await provider.loadMoreFolderKeys(more);
+    expect(seen).toEqual(['a\\[1\\]:*']);
+  });
+
+  it('cluster：逐 master 游标推进；全归零后哨兵消失', async () => {
+    let rootPhase = true;
+    const m1 = {
+      call: async (cmd: string) => {
+        if (cmd !== 'SCAN') return [];
+        return ['0', rootPhase ? ['user:1'] : []];
+      },
+    };
+    let m2c = '5';
+    const m2 = {
+      call: async (cmd: string) => {
+        if (cmd !== 'SCAN') return [];
+        const r: ScanReply = [m2c, rootPhase ? ['user:2'] : []];
+        m2c = '0';
+        return r;
+      },
+    };
+    const provider = makeProvider(makeClient(() => ['0', []], { cluster: true, nodes: [m1, m2] }));
+    const db = dbNode(clusterConn);
+    const folder = (await provider.getChildren(db)).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
+    const more = (await provider.getChildren(folder)).find((k) => k.kind === NodeKind.RedisKeyLoadMore)!;
+    expect(more).toBeTruthy();
+
+    rootPhase = false;
+    const res = await provider.loadMoreFolderKeys(more);
+    expect(res).toMatchObject({ done: true, error: false });
+    const folder2 = (await provider.getChildren(db)).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
+    expect((await provider.getChildren(folder2)).some((k) => k.kind === NodeKind.RedisKeyLoadMore)).toBe(false);
+  });
+
+  it('关闭连接清 folder 游标：重开后哨兵回归（游标重置）', async () => {
+    const pages: ScanReply[] = [['7', ['user:3']], ['0', ['user:4']]];
+    const provider = makeProvider(makeClient((a) => {
+      const m = matchOf(a);
+      if (m) return pages.shift() ?? ['0', []];
+      return ['42', ['user:1', 'user:2']];
+    }));
+    const db = dbNode();
+    const folder = (await provider.getChildren(db)).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
+    const more = (await provider.getChildren(folder)).find((k) => k.kind === NodeKind.RedisKeyLoadMore)!;
+    await provider.loadMoreFolderKeys(more);
+    await provider.loadMoreFolderKeys(more);
+    const closed = (await provider.getChildren(db)).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
+    expect((await provider.getChildren(closed)).some((k) => k.kind === NodeKind.RedisKeyLoadMore)).toBe(false);
+
+    provider.markClosed('c1');
+    const folder3 = (await provider.getChildren(dbNode())).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
+    expect((await provider.getChildren(folder3)).some((k) => k.kind === NodeKind.RedisKeyLoadMore)).toBe(true);
+  });
+
+  it('硬上限：根已满上限时增量标记 capped', async () => {
+    const big = Array.from({ length: 100000 }, (_, i) => `k:${i}`);
+    const provider = makeProvider(makeClient((a) => (matchOf(a) ? ['0', []] : ['42', big])));
+    const folder = (await provider.getChildren(dbNode())).find((k) => k.kind === NodeKind.RedisKeyFolder)!;
+    const more = (await provider.getChildren(folder)).find((k) => k.kind === NodeKind.RedisKeyLoadMore)!;
+    const res = await provider.loadMoreFolderKeys(more);
+    expect(res.capped).toBe(true);
   });
 });

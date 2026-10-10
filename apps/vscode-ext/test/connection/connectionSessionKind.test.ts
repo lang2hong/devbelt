@@ -62,9 +62,23 @@ describe('ConnectionSession 判别联合（P7 S1）', () => {
   it('kind 收窄后可安全访问引擎专属字段', () => {
     // 经 ConnectionSession 形参传入，避免初始化处的字面量窄化（否则 TS 认为 kind 恒为 redis）。
     const session: ConnectionSession = widen(redisSession);
-    if (session.kind === 'sql') throw new Error('expected redis, got sql');
+    if (session.kind !== 'redis') throw new Error('expected redis');
     expect(session.db).toBe(0);
     expect(session.mode).toBe('standalone');
     expect(session.readOnly).toBe(false);
+  });
+
+  it('P8：ES 会话带 kind=elasticsearch，可按 kind 收窄且 SQL 断言拒绝', () => {
+    const es: ConnectionSession = widen({
+      kind: 'elasticsearch',
+      capabilities: {} as never,
+      es: {} as never,
+      connId: 'c1',
+      isAlive: () => true,
+      close: () => {},
+    });
+    if (es.kind !== 'elasticsearch') throw new Error('expected elasticsearch');
+    expect(es.connId).toBe('c1');
+    expect(() => assertSqlSession(es)).toThrow(/got 'elasticsearch'/);
   });
 });

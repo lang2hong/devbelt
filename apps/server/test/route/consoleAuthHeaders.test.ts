@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { securityHeaders, globalSecurityHeaders } from '../../src/middleware/securityHeaders.js';
 import { consoleAuthRoutes } from '../../src/modules/auth/route/consoleAuth.js';
 const stubs = {
-  csrfService: { issue: () => 't', verify: () => true } as any,
+  csrfService: { issue: () => 't', verify: () => true, boundSession: () => undefined } as any,
   rateLimiter: { hit: async () => undefined } as any,
   consoleAuthService: { sessionIdOf: async () => undefined } as any,
   consoleOrigin: 'https://x', auditWriter: { write: () => undefined } as any,

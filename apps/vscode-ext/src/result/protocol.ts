@@ -34,7 +34,9 @@ export type WebviewMode =
   /** P5：2FA/TOTP 验证器侧边栏视图。 */
   | 'authenticator'
   /** P7：Redis 面板（Status / CLI / SlowLog）。 */
-  | 'redis';
+  | 'redis'
+  /** P8：Elasticsearch 面板（Cluster / REST 控制台；S3/S4 增更多 tab）。 */
+  | 'elasticsearch';
 
 /** 账户中心标签。 */
 export type HubTab = 'account' | 'session' | 'plans';
@@ -164,7 +166,9 @@ export type RedisDownMessage =
       commands: string[] }
   | { type: 'info'; info: string }
   | { type: 'slowlog'; entries: RedisSlowlogEntry[] }
-  | { type: 'value'; key: string; keyType: string; ttl: number; tooLarge: boolean; size: number | null; data: RedisValueData | null; truncated?: boolean; keyBinary?: boolean; binaryFields?: string[] }
+  | { type: 'value'; key: string; keyType: string; ttl: number; tooLarge: boolean; size: number | null; data: RedisValueData | null; truncated?: boolean; keyBinary?: boolean; binaryFields?: string[]; more?: RedisMoreToken }
+  // items/itemBytes 形状随 kind：list → string[]；zset → [member, score][]（与 value 消息一致）。
+  | { type: 'collectionMoreResult'; key: string; kind: RedisCollectionKind; entries?: [string, string][]; entryBytes?: [string, string][]; items?: string[] | [string, string][]; itemBytes?: string[] | [string, string][]; members?: string[]; memberBytes?: string[]; more: RedisMoreToken }
   | { type: 'monitorSample'; metrics: RedisMonitorMetrics }
   | { type: 'keyAction'; action: string; ok: boolean; error: string | null }
   | { type: 'confirmOpRequired'; kind: string; detail: string }
@@ -177,10 +181,25 @@ export type RedisDownMessage =
   | { type: 'error'; message: string };
 
 /** 绑定值数据（按 key 类型）。 */
+/** 集合续页 token：hash/set 用 SCAN `cursor`，list/zset 用 `offset`；`done` 为终态。 */
+export interface RedisMoreToken {
+  cursor?: string;
+  offset?: number;
+  done: boolean;
+}
+
+/** 支持续页的集合类型（stream 有独立的续页通道）。 */
+export type RedisCollectionKind = 'hash' | 'list' | 'set' | 'zset';
+
+/** Stage B（3C-1）：集合二进制项的并行 base64 约定（与文本数组同序同长，仅在存在二进制项时携带）。 */
+export type RedisBytes = string;
+
 /** Stream 条目（结构与 db-core RedisStreamEntry 一致）。 */
 export interface RedisStreamEntry {
   id: string;
   fields: [string, string][];
+  /** Stage B：本页存在二进制 field/value 时的并行 base64（与 fields 同序同长）。 */
+  fieldBytes?: [string, string][];
 }
 
 /** 监控面板单次采样（INFO 解析结果）。 */
@@ -209,10 +228,10 @@ export interface RedisMonitorMetrics {
 
 export type RedisValueData =
   | { kind: 'string'; text: string; base64: string; binary: boolean; bytes: number }
-  | { kind: 'hash'; entries: [string, string][]; len: number }
-  | { kind: 'list'; items: string[]; len: number }
-  | { kind: 'set'; members: string[]; card: number }
-  | { kind: 'zset'; items: [string, string][]; card: number }
+  | { kind: 'hash'; entries: [string, string][]; len: number; entryBytes?: [RedisBytes, RedisBytes][] }
+  | { kind: 'list'; items: string[]; len: number; itemBytes?: RedisBytes[] }
+  | { kind: 'set'; members: string[]; card: number; memberBytes?: RedisBytes[] }
+  | { kind: 'zset'; items: [string, string][]; card: number; itemBytes?: [RedisBytes, string][] }
   | { kind: 'stream'; entries: RedisStreamEntry[]; len: number; groups: Record<string, string>[] };
 
 /** webview → Extension Host。 */
@@ -233,17 +252,19 @@ export type RedisUpMessage =
   | { type: 'persistKey'; key: string }
   | { type: 'renameKey'; key: string; newKey: string }
   | { type: 'deleteKeys'; keys: string[] }
-  | { type: 'hashSet'; key: string; field: string; value: string; oldField?: string }
-  | { type: 'hashDel'; key: string; fields: string[] }
+  | { type: 'hashSet'; key: string; field: string; value: string; oldField?: string; fieldBase64?: RedisBytes; valueBase64?: RedisBytes }
+  | { type: 'hashDel'; key: string; fields: string[]; fieldsBase64?: RedisBytes[] }
   | { type: 'listPush'; key: string; side: 'left' | 'right'; values: string[] }
-  | { type: 'listSet'; key: string; index: number; value: string; original: string }
-  | { type: 'listRem'; key: string; index: number; value: string }
+  | { type: 'listSet'; key: string; index: number; value: string; original: string; valueBase64?: RedisBytes; originalBase64?: RedisBytes }
+  | { type: 'listRem'; key: string; index: number; value: string; valueBase64?: RedisBytes }
   | { type: 'listTrim'; key: string; start: number; stop: number }
   | { type: 'listPop'; key: string; side: 'left' | 'right' }
   | { type: 'setAdd'; key: string; members: string[] }
-  | { type: 'setRem'; key: string; members: string[] }
-  | { type: 'zsetAdd'; key: string; score: string; member: string; oldMember?: string }
-  | { type: 'zsetRem'; key: string; members: string[] }
+  | { type: 'setRem'; key: string; members: string[]; membersBase64?: RedisBytes[] }
+  | { type: 'zsetAdd'; key: string; score: string; member: string; oldMember?: string; memberBase64?: RedisBytes }
+  | { type: 'zsetRem'; key: string; members: string[]; membersBase64?: RedisBytes[] }
+  // 集合续页（hash/list/set/zset）：token 回显自 value.more / 上一次 collectionMoreResult。
+  | { type: 'collectionMore'; key: string; kind: RedisCollectionKind; cursor?: string; offset?: number }
   // Stream（S4）：破坏性操作须 confirmed=true 才执行（host 先回 confirmOpRequired）。
   | { type: 'streamAdd'; key: string; id: string; fields: [string, string][] }
   | { type: 'streamDel'; key: string; ids: string[]; confirmed?: boolean }
@@ -253,3 +274,132 @@ export type RedisUpMessage =
   | { type: 'streamGroupDelConsumer'; key: string; group: string; consumer: string; confirmed?: boolean }
   | { type: 'streamGroupDetail'; key: string; group: string }
   | { type: 'streamRange'; key: string; start: string };
+
+// ────────────────────────── P8：Elasticsearch 协议（S2） ──────────────────────────
+// 与 ElasticsearchView / ElasticsearchView.vue 共享的强类型契约；字段用 null 不用 undefined。
+
+/** ES 面板 tab（S2：Cluster/REST；S3：Indices/Index；S4：Documents/DSL/Nodes/Log）。 */
+export type EsPanelTab = 'cluster' | 'rest' | 'indices' | 'index' | 'documents' | 'dsl' | 'nodes' | 'log';
+
+/** 索引摘要（结构化自 `_cat/indices`；字段与 db-core EsIndexSummary 对齐）。 */
+export interface EsIndexSummary {
+  name: string;
+  health: 'green' | 'yellow' | 'red' | null;
+  status: string | null;
+  primaryShards: number | null;
+  replicas: number | null;
+  docsCount: string | null;
+  storeSize: string | null;
+}
+
+/** 索引详情内容（原始 JSON；超限截断）。 */
+export interface EsIndexTruncated {
+  mapping: boolean;
+  settings: boolean;
+  aliases: boolean;
+  stats: boolean;
+}
+
+/** 集群总览数据（原始 JSON 子集，UI 容错渲染）。 */
+export interface EsClusterSnapshot {
+  version: string | null;
+  clusterName: string | null;
+  health: Record<string, unknown> | null;
+  info: Record<string, unknown> | null;
+  /** 索引总数（`_cat/indices` 行数；失败为 null）。 */
+  indicesCount: number | null;
+}
+
+/** 一条文档命中（source 原始 JSON）。 */
+export interface EsDocHit {
+  index: string | null;
+  id: string;
+  score: number | null;
+  source: unknown;
+  sort: unknown[] | null;
+  /** 乐观并发版本（N2：编辑保存经 if_seq_no/if_primary_term 回传）。 */
+  seqNo: number | null;
+  primaryTerm: number | null;
+}
+
+/** mapping 自动提取的字段（点路径 + 类型）。 */
+export interface EsFieldInfo {
+  path: string;
+  type: string;
+}
+
+/** `_cat/nodes` 行（归一后）。 */
+export interface EsNodeSummary {
+  name: string;
+  ip: string | null;
+  heapPercent: number | null;
+  ramPercent: number | null;
+  cpu: number | null;
+  load1m: number | null;
+  role: string | null;
+  master: string | null;
+}
+
+/** 已保存的 DSL 查询（Memento，per 连接）。 */
+export interface SavedEsQueryView {
+  id: string;
+  name: string;
+  index: string;
+  body: string;
+  at: number;
+}
+
+/** ES 请求日志条目（命令日志面板）。 */
+export interface EsLogEntryView {
+  method: string;
+  path: string;
+  status: number;
+  tookMs: number;
+  time: number;
+  error?: string;
+}
+
+/** 结构性错误（DSL/文档失败时用；rootCause 保留原始 cause 列表的 reason 文本）。 */
+export interface EsErrorInfo {
+  message: string;
+  type: string | null;
+  reason: string | null;
+  rootCause: string[];
+}
+
+/** 扩展 → webview（P8 S2/S3/S4）。 */
+export type EsDownMessage =
+  | { type: 'esConfig'; connName: string; host: string; port: number; protocol: 'http' | 'https'; pathPrefix: string | null; readOnly: boolean; tab: EsPanelTab; indexName?: string | null; color: string | null }
+  | { type: 'esCluster'; snapshot: EsClusterSnapshot }
+  | { type: 'esTab'; tab: EsPanelTab; indexName?: string | null }
+  | { type: 'esRestResult'; id: string; status: number; tookMs: number; headers: Record<string, string | string[]>; body: unknown; truncated: boolean }
+  | { type: 'esConfirmRequired'; id: string; kind: 'dangerous' | 'readonly'; reason: string; detail: string; typedIndexName: string | null }
+  | { type: 'esIndices'; items: EsIndexSummary[] }
+  | { type: 'esIndexData'; id: string; name: string; mapping: unknown; settings: unknown; aliases: unknown; stats: unknown; truncated: EsIndexTruncated }
+  | { type: 'esIndexError'; id: string; name: string; message: string }
+  | { type: 'esDocs'; id: string; index: string; hits: EsDocHit[]; total: number | null; searchAfter: unknown[] | null; truncated: boolean; fields: EsFieldInfo[] }
+  | { type: 'esDoc'; id: string; index: string; docId: string; found: boolean; source: unknown; seqNo: number | null; primaryTerm: number | null }
+  | { type: 'esDocsError'; id: string; index: string; error: EsErrorInfo }
+  | { type: 'esDslResult'; id: string; index: string; took: number | null; timedOut: boolean | null; total: number | null; hits: EsDocHit[]; aggregations: unknown; raw: unknown; truncated: boolean }
+  | { type: 'esDslError'; id: string; index: string; error: EsErrorInfo }
+  | { type: 'esNodes'; items: EsNodeSummary[] }
+  | { type: 'esNodesError'; error: EsErrorInfo }
+  | { type: 'esSavedDsl'; items: SavedEsQueryView[] }
+  | { type: 'esLog'; items: EsLogEntryView[] }
+  | { type: 'esLogEntry'; entry: EsLogEntryView };
+
+/** webview → extension host（P8 S2/S3/S4）。 */
+export type EsUpMessage =
+  | { type: 'esRefreshCluster' }
+  | { type: 'esRest'; id: string; method: string; path: string; body: string | null; confirmedDanger?: boolean; force?: boolean }
+  | { type: 'esConfirm'; id: string; accept: boolean; typedName?: string | null }
+  | { type: 'esLoadIndices' }
+  | { type: 'esLoadIndex'; id: string; name: string }
+  | { type: 'esLoadDocs'; id: string; index: string; searchAfter: unknown[] | null; size?: number; query?: string | null; queryMode?: 'text' | 'dsl'; defaultOperator?: 'OR' | 'AND' }
+  | { type: 'esGetDoc'; id: string; index: string; docId: string }
+  | { type: 'esRunDsl'; id: string; index: string; body: string; size?: number }
+  | { type: 'esLoadNodes' }
+  | { type: 'esLoadSavedDsl' }
+  | { type: 'esSaveDsl'; name: string; index: string; body: string }
+  | { type: 'esDeleteDsl'; id: string }
+  | { type: 'esLoadLog' };

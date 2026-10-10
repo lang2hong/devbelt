@@ -126,6 +126,21 @@ export async function redisKeyspace(src: RedisCommandSource): Promise<RedisDbSta
   return parseKeyspace(await src.sendCommand('INFO', ['keyspace']).then(asString));
 }
 
+/**
+ * 配置的逻辑库数量（`CONFIG GET databases`），用于键空间之外的 DB 列表来源（空库也能被列出）。
+ * 托管环境常禁用 CONFIG（NOPERM/unknown command）：畸形回复或命令失败时降级返回 null，不抛。
+ */
+export async function redisDatabases(src: RedisCommandSource): Promise<number | null> {
+  try {
+    const reply = await src.sendCommand('CONFIG', ['GET', 'databases']);
+    if (!Array.isArray(reply) || reply.length < 2) return null;
+    const n = Number(asString(reply[1]));
+    return Number.isInteger(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 // ────────────────────────── string ──────────────────────────
 
 export async function redisGet(src: RedisCommandSource, key: string): Promise<string> {
@@ -527,4 +542,170 @@ export function compareStreamId(a: string, b: string): number {
   if (am !== bm) return am < bm ? -1 : 1;
   if (as !== bs) return as < bs ? -1 : 1;
   return 0;
+}
+
+// ────────────────────────── 字节级集合 ops（Stage B / 3C-1） ──────────────────────────
+// 二进制安全：经 `sendCommandBuffer`（ioredis replyEncoding:null）读取原始字节；
+// 源不支持 buffer 命令时降级为字符串结果转 UTF-8 Buffer（有损但行为可用，与 redisGetBuffer 同口径）。
+
+/** 字节级命令源判定后，把任意回复元素归一为 Buffer。 */
+function toBuffer(v: unknown): Buffer {
+  if (Buffer.isBuffer(v)) return v;
+  if (v === null || v === undefined) return Buffer.alloc(0);
+  return Buffer.from(String(v), 'utf8');
+}
+
+/** `[f1,v1,f2,v2,…]`（元素 Buffer/字符串）两两成对；已是 `[[k,v],…]` 原样归一。 */
+function toBufferPairs(reply: unknown): [Buffer, Buffer][] {
+  if (!Array.isArray(reply)) return [];
+  if (reply.length && Array.isArray(reply[0])) {
+    return (reply as unknown[][]).map((p) => [toBuffer(p[0]), toBuffer(p[1])]);
+  }
+  const out: [Buffer, Buffer][] = [];
+  for (let i = 0; i + 1 < reply.length; i += 2) out.push([toBuffer(reply[i]), toBuffer(reply[i + 1])]);
+  return out;
+}
+
+function bufferScanArgs(key: string, cursor: string | number, opts: RedisScanOptions): (string | number)[] {
+  const args: (string | number)[] = [key, String(cursor)];
+  if (opts.match) args.push('MATCH', opts.match);
+  if (opts.count) args.push('COUNT', opts.count);
+  return args;
+}
+
+/** 字节级 HSCAN（cursor 为文本；field/value 为原始字节）。 */
+export async function redisHScanBuffer(src: RedisCommandSource, key: string, cursor: string | number, opts: RedisScanOptions = {}): Promise<{ cursor: string; entries: [Buffer, Buffer][] }> {
+  if (isBufferSource(src)) {
+    const reply = await src.sendCommandBuffer('HSCAN', bufferScanArgs(key, cursor, opts));
+    if (!Array.isArray(reply)) return { cursor: '0', entries: [] };
+    return { cursor: asString(reply[0]), entries: toBufferPairs(reply[1]) };
+  }
+  const page = await redisHScan(src, key, cursor, opts);
+  return { cursor: page.cursor, entries: page.entries.map(([f, v]) => [Buffer.from(f, 'utf8'), Buffer.from(v, 'utf8')]) };
+}
+
+/** 字节级 SSCAN（cursor 为文本；members 为原始字节）。 */
+export async function redisSScanBuffer(src: RedisCommandSource, key: string, cursor: string | number, opts: RedisScanOptions = {}): Promise<{ cursor: string; keys: Buffer[] }> {
+  if (isBufferSource(src)) {
+    const reply = await src.sendCommandBuffer('SSCAN', bufferScanArgs(key, cursor, opts));
+    if (!Array.isArray(reply)) return { cursor: '0', keys: [] };
+    const raw = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+    return { cursor: asString(reply[0]), keys: raw.map(toBuffer) };
+  }
+  const page = await redisSScan(src, key, cursor, opts);
+  return { cursor: page.cursor, keys: page.keys.map((k) => Buffer.from(k, 'utf8')) };
+}
+
+/** 字节级 LRANGE。 */
+export async function redisLRangeBuffer(src: RedisCommandSource, key: string, start: number, stop: number): Promise<Buffer[]> {
+  if (isBufferSource(src)) {
+    const reply = await src.sendCommandBuffer('LRANGE', [key, start, stop]);
+    return Array.isArray(reply) ? reply.map(toBuffer) : [];
+  }
+  return (await redisLRange(src, key, start, stop)).map((v) => Buffer.from(v, 'utf8'));
+}
+
+/** 字节级 ZRANGE（WITHSCORES；member 为原始字节，score 为文本）。 */
+export async function redisZRangeBuffer(src: RedisCommandSource, key: string, start: number, stop: number, opts: { rev?: boolean } = {}): Promise<{ member: Buffer; score: string }[]> {
+  if (isBufferSource(src)) {
+    const args: (string | number)[] = [key, start, stop];
+    if (opts.rev) args.push('REV');
+    args.push('WITHSCORES');
+    const reply = await src.sendCommandBuffer('ZRANGE', args);
+    if (!Array.isArray(reply)) return [];
+    // 兼容 `[[member,score],…]`（测试/降级形态）与扁平的 `[member,score,…]`（ioredis WITHSCORES）。
+    if (reply.length && Array.isArray(reply[0])) {
+      return (reply as unknown[][]).map((p) => ({ member: toBuffer(p[0]), score: asString(p[1]) }));
+    }
+    const out: { member: Buffer; score: string }[] = [];
+    for (let i = 0; i + 1 < reply.length; i += 2) out.push({ member: toBuffer(reply[i]), score: asString(reply[i + 1]) });
+    return out;
+  }
+  const pairs = await redisZRange(src, key, start, stop, { rev: opts.rev });
+  return pairs.map(([m, s]) => ({ member: Buffer.from(m, 'utf8'), score: s }));
+}
+
+/** 字节级 LINDEX（不存在返回 null）。 */
+export async function redisLIndexBuffer(src: RedisCommandSource, key: string, index: number): Promise<Buffer | null> {
+  if (isBufferSource(src)) {
+    const raw = await src.sendCommandBuffer('LINDEX', [key, index]);
+    return raw === null || raw === undefined ? null : toBuffer(raw);
+  }
+  const v = await redisLIndex(src, key, index);
+  return v === null ? null : Buffer.from(v, 'utf8');
+}
+
+/** 字节级 LSET（二进制值回写/回滚用）。 */
+export async function redisLSetBuffer(src: RedisCommandSource, key: string, index: number, value: Buffer): Promise<void> {
+  if (isBufferSource(src)) {
+    await src.sendCommandBuffer('LSET', [key, index, value]);
+    return;
+  }
+  await redisLSet(src, key, index, value.toString('utf8'));
+}
+
+/** 字节级 XRANGE 条目。 */
+export interface RedisStreamBufferEntry {
+  id: string;
+  fields: [Buffer, Buffer][];
+}
+
+/** 字节级 XRANGE（field/value 为原始字节）。 */
+export async function redisXRangeBuffer(src: RedisCommandSource, key: string, start = '-', end = '+', count?: number): Promise<RedisStreamBufferEntry[]> {
+  if (isBufferSource(src)) {
+    const args: (string | number)[] = [key, start, end];
+    if (count) args.push('COUNT', count);
+    const reply = await src.sendCommandBuffer('XRANGE', args);
+    if (!Array.isArray(reply)) return [];
+    return (reply as unknown[][])
+      .filter((e): e is unknown[] => Array.isArray(e) && e.length >= 2)
+      .map((e) => ({ id: asString(e[0]), fields: toBufferPairs(e[1]) }));
+  }
+  const entries = await redisXRange(src, key, start, end, count);
+  return entries.map((e) => ({
+    id: e.id,
+    fields: e.fields.map(([f, v]) => [Buffer.from(f, 'utf8'), Buffer.from(v, 'utf8')] as [Buffer, Buffer]),
+  }));
+}
+
+/** 字节级删除：HDEL / SREM / ZREM（字段/成员按原始字节命中）。 */
+export async function redisHDelBuffer(src: RedisCommandSource, key: string, fields: Buffer[]): Promise<number> {
+  if (!fields.length) return 0;
+  if (isBufferSource(src)) return asNumber(await src.sendCommandBuffer('HDEL', [key, ...fields]));
+  return redisHDel(src, key, fields.map((b) => b.toString('utf8')));
+}
+
+export async function redisSRemBuffer(src: RedisCommandSource, key: string, members: Buffer[]): Promise<number> {
+  if (!members.length) return 0;
+  if (isBufferSource(src)) return asNumber(await src.sendCommandBuffer('SREM', [key, ...members]));
+  return redisSRem(src, key, members.map((b) => b.toString('utf8')));
+}
+
+export async function redisZRemBuffer(src: RedisCommandSource, key: string, members: Buffer[]): Promise<number> {
+  if (!members.length) return 0;
+  if (isBufferSource(src)) return asNumber(await src.sendCommandBuffer('ZREM', [key, ...members]));
+  return redisZRem(src, key, members.map((b) => b.toString('utf8')));
+}
+
+export async function redisLRemBuffer(src: RedisCommandSource, key: string, count: number, value: Buffer): Promise<number> {
+  if (isBufferSource(src)) return asNumber(await src.sendCommandBuffer('LREM', [key, count, value]));
+  return redisLRem(src, key, count, value.toString('utf8'));
+}
+
+/** 字节级 HSET（field/value 均原始字节）。 */
+export async function redisHSetBuffer(src: RedisCommandSource, key: string, field: Buffer, value: Buffer): Promise<void> {
+  if (isBufferSource(src)) {
+    await src.sendCommandBuffer('HSET', [key, field, value]);
+    return;
+  }
+  await redisHSet(src, key, field.toString('utf8'), value.toString('utf8'));
+}
+
+/** 字节级 ZADD（member 原始字节；score 文本）。 */
+export async function redisZAddBuffer(src: RedisCommandSource, key: string, score: string | number, member: Buffer): Promise<void> {
+  if (isBufferSource(src)) {
+    await src.sendCommandBuffer('ZADD', [key, String(score), member]);
+    return;
+  }
+  await redisZAdd(src, key, score, member.toString('utf8'));
 }

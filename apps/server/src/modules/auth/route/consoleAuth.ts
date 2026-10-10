@@ -78,6 +78,11 @@ export async function consoleAuthRoutes(app: FastifyInstance, opts: ConsoleAuthR
     if (refreshToken) {
       binding = await opts.consoleAuthService.sessionIdOf(refreshToken);
     }
+    // 防降级：refresh 解析不出会话、但现有 CSRF cookie 仍是合法绑定 token 时保持不动，
+    // 不得用匿名 token 覆盖（否则会话内写请求会因绑定不匹配 403）。
+    if (!binding && opts.csrfService.boundSession(readCookie(req, csrfCookieName()))) {
+      return reply.code(204).send();
+    }
     const token = opts.csrfService.issue(binding);
     reply.header('Set-Cookie', serializeCookie(csrfCookieName(), token, { httpOnly: false, maxAgeSeconds: 3600 }));
     reply.code(204).send();

@@ -9,7 +9,7 @@ import StreamViewer from '../components/redis/StreamViewer.vue';
 import CliConsole from '../components/redis/CliConsole.vue';
 import SlowLog from '../components/redis/SlowLog.vue';
 import CommandLog from '../components/redis/CommandLog.vue';
-import { computeStreamDone, isKeyBrowserPanel, type CommandResult, type RedisMonitorMetrics, type RedisPanel, type SlowlogEntry, type ValueInfo } from '../components/redis/types';
+import { appendCollectionPage, computeStreamDone, isKeyBrowserPanel, type CommandResult, type RedisMonitorMetrics, type RedisPanel, type SlowlogEntry, type ValueInfo } from '../components/redis/types';
 
 const { post, onMessage } = useVsCode();
 const { t } = useI18n();
@@ -65,6 +65,16 @@ function streamOps(): Record<string, (...a: any[]) => void> {
     loadMore: (key, start) => post({ type: 'streamRange', key, start }),
   };
 }
+/** 集合续页（hash/list/set/zset）：token 带回自 value.more，host 按 token 取下一页。 */
+function loadMoreCollections(): void {
+  const v = value.value;
+  const d = v?.data;
+  if (!v || !d) return;
+  const kind = d.kind;
+  if (kind !== 'hash' && kind !== 'list' && kind !== 'set' && kind !== 'zset') return;
+  post({ type: 'collectionMore', key: v.key, kind, cursor: v.more?.cursor, offset: v.more?.offset });
+}
+
 const DESTRUCTIVE_OPS = new Set(['streamDel', 'streamTrim', 'streamGroupDestroy', 'streamGroupDelConsumer']);
 function confirmOp(accept: boolean): void {
   const op = lastOp;
@@ -132,6 +142,12 @@ onMounted(() => {
         value.value = { ...value.value, data: { ...value.value.data, entries: [...value.value.data.entries, ...(msg.entries ?? [])] } };
         streamDone.value = !!msg.done;
       }
+    } else if (msg.type === 'collectionMoreResult') {
+      // 只把结果贴回它所属的 key/类型（选中态可能已切换）；R1：并行 base64 同序同长合并。
+      const d = value.value?.data;
+      if (value.value && value.value.key === msg.key && d?.kind === msg.kind) {
+        value.value = { ...value.value, data: appendCollectionPage(d, msg), more: msg.more };
+      }
     } else if (msg.type === 'commandLog') {
       const e = msg.entry ?? {};
       commandLog.value = [...commandLog.value, { command: String(e.command ?? ''), args: e.args ?? [], durationMs: Number(e.durationMs ?? 0), ok: !!e.ok, error: e.error ?? null, at: Date.now() }].slice(-500);
@@ -189,16 +205,17 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
         @rename="(k, n) => post({ type: 'renameKey', key: k, newKey: n })"
         @remove="(k) => pendingDelete = [k]"
         @copy-key="() => {}"
-        @hash-set="(k, f, v, old) => post({ type: 'hashSet', key: k, field: f, value: v, oldField: old })"
-        @hash-del="(k, f) => post({ type: 'hashDel', key: k, fields: f })"
+        @hash-set="(k, f, v, old, fb64, vb64) => post({ type: 'hashSet', key: k, field: f, value: v, oldField: old, fieldBase64: fb64, valueBase64: vb64 })"
+        @hash-del="(k, f, b64) => post({ type: 'hashDel', key: k, fields: f, fieldsBase64: b64 })"
         @list-push="(k, s, v) => post({ type: 'listPush', key: k, side: s, values: v })"
-        @list-set="(k, i, v, o) => post({ type: 'listSet', key: k, index: i, value: v, original: o })"
-        @list-rem="(k, i, v) => post({ type: 'listRem', key: k, index: i, value: v })"
+        @list-set="(k, i, v, o, vb64, ob64) => post({ type: 'listSet', key: k, index: i, value: v, original: o, valueBase64: vb64, originalBase64: ob64 })"
+        @list-rem="(k, i, v, b64) => post({ type: 'listRem', key: k, index: i, value: v, valueBase64: b64 })"
         @list-pop="(k, s) => post({ type: 'listPop', key: k, side: s })"
         @set-add="(k, m) => post({ type: 'setAdd', key: k, members: m })"
-        @set-rem="(k, m) => post({ type: 'setRem', key: k, members: m })"
-        @zset-add="(k, s, m, old) => post({ type: 'zsetAdd', key: k, score: s, member: m, oldMember: old })"
-        @zset-rem="(k, m) => post({ type: 'zsetRem', key: k, members: m })"
+        @set-rem="(k, m, b64) => post({ type: 'setRem', key: k, members: m, membersBase64: b64 })"
+        @zset-add="(k, s, m, old, mb64) => post({ type: 'zsetAdd', key: k, score: s, member: m, oldMember: old, memberBase64: mb64 })"
+        @zset-rem="(k, m, b64) => post({ type: 'zsetRem', key: k, members: m, membersBase64: b64 })"
+        @load-more="loadMoreCollections"
       />
     </template>
     <CliConsole

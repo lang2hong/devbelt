@@ -278,6 +278,106 @@ describe.skipIf(!URL)('db-core PG 多 schema（real db）', () => {
     }
   });
 
+  it('4B-2a：结构化索引（DESC/表达式/INCLUDE/WHERE）跨 schema 组合生成并可执行', async () => {
+    const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
+    // S1.orders 加一个复杂索引；S2 缺失 → added；组合生成应保留全部属性并落到目标 schema。
+    await raw.query(`CREATE UNIQUE INDEX idx_mix_real ON ${S1}.orders USING btree (lower(note), id DESC) INCLUDE (dept_id) WHERE (id > 0)`);
+    try {
+      const diffs = await SchemaDiffService.diff(meta, dbName, meta, dbName, S1, S2);
+      const orders = diffs.find((d) => d.tableName === 'orders')!;
+      const added = (orders.indexes ?? []).find((i) => i.name === 'idx_mix_real' && i.status === 'added');
+      expect(added).toBeTruthy();
+      expect(added!.method).toBe('btree');
+      expect(added!.keyParts?.length).toBe(3); // 2 键 + 1 INCLUDE
+      expect(added!.predicate).toBeTruthy();
+
+      const sql = await SchemaDiffService.generateSyncSql(diffs, dbName, table, dbName, dialect, { sourceSchema: S1, targetSchema: S2 });
+      expect(sql).toContain(`CREATE UNIQUE INDEX "idx_mix_real" ON "${S2}"."orders" USING btree (`);
+      expect(sql).toContain('lower(note)');
+      expect(sql).toContain('id DESC');
+      expect(sql).toContain('INCLUDE (dept_id)');
+      expect(sql).toContain('WHERE (id > 0)');
+
+      await raw.query(sql);
+      const row = (await raw.query(
+        `SELECT pg_get_indexdef(i.indexrelid) AS def FROM pg_index i
+          JOIN pg_class c ON c.oid = i.indexrelid
+          WHERE c.relname = 'idx_mix_real' AND c.relnamespace = '${S2}'::regnamespace`,
+      )).rows[0];
+      expect(String(row?.def)).toContain('lower(note)');
+      expect(String(row?.def)).toContain('DESC');
+      expect(String(row?.def)).toContain('INCLUDE (dept_id)');
+      expect(String(row?.def)).toContain('WHERE (id > 0)');
+    } finally {
+      await raw.query(`DROP INDEX IF EXISTS ${S2}.idx_mix_real`);
+      await raw.query(`DROP INDEX IF EXISTS ${S1}.idx_mix_real`);
+    }
+  });
+
+  it('4B-2b：结构化 FK（ON DELETE CASCADE + DEFERRABLE）与 CHECK 跨 schema 组合生成并可执行', async () => {
+    const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
+    await raw.query(`ALTER TABLE ${S1}.orders ADD CONSTRAINT fk_cascade FOREIGN KEY (dept_id) REFERENCES ${S1}.dept(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED`);
+    await raw.query(`ALTER TABLE ${S1}.orders ADD CONSTRAINT ck_note CHECK (length(note) > 1)`);
+    try {
+      const diffs = await SchemaDiffService.diff(meta, dbName, meta, dbName, S1, S2);
+      const orders = diffs.find((d) => d.tableName === 'orders')!;
+      const fk = (orders.constraints ?? []).find((c) => c.name === 'fk_cascade');
+      expect(fk?.status).toBe('added');
+      expect(fk?.onDelete).toBe('CASCADE');
+      expect(fk?.deferrable).toBe(true);
+      expect(fk?.initiallyDeferred).toBe(true);
+      const ck = (orders.constraints ?? []).find((c) => c.name === 'ck_note');
+      expect(ck?.expression).toContain('length');
+
+      const sql = await SchemaDiffService.generateSyncSql(diffs, dbName, table, dbName, dialect, { sourceSchema: S1, targetSchema: S2 });
+      expect(sql).toContain(`ADD CONSTRAINT "fk_cascade" FOREIGN KEY ("dept_id") REFERENCES "${S2}"."dept" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;`);
+      await raw.query(sql);
+
+      // 目标 schema 上约束真实存在且结构化属性一致。
+      const cons = await meta.getConstraints('orders', S2);
+      const fk2 = cons.find((c) => c.name === 'fk_cascade');
+      expect(fk2?.onDelete).toBe('CASCADE');
+      expect(!!fk2?.deferrable).toBe(true);
+      expect(!!fk2?.initiallyDeferred).toBe(true);
+      expect(cons.find((c) => c.name === 'ck_note')?.expression).toContain('length');
+    } finally {
+      for (const s of [S1, S2]) {
+        await raw.query(`ALTER TABLE IF EXISTS ${s}.orders DROP CONSTRAINT IF EXISTS fk_cascade`);
+        await raw.query(`ALTER TABLE IF EXISTS ${s}.orders DROP CONSTRAINT IF EXISTS ck_note`);
+      }
+    }
+  });
+
+  it('4B-3：enum 列类型跨 schema 移植（ADD COLUMN 限定到目标 schema 的类型）', async () => {
+    const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
+    await raw.query(`CREATE TYPE ${S1}.etype AS ENUM ('a','b')`);
+    await raw.query(`CREATE TYPE ${S2}.etype AS ENUM ('a','b')`);
+    await raw.query(`ALTER TABLE ${S1}.orders ADD COLUMN et ${S1}.etype`);
+    try {
+      const diffs = await SchemaDiffService.diff(meta, dbName, meta, dbName, S1, S2);
+      const sql = await SchemaDiffService.generateSyncSql(diffs, dbName, table, dbName, dialect, { sourceSchema: S1, targetSchema: S2 });
+      // 类型名（源 schema 限定）改写到目标 schema 的同名类型。
+      expect(sql).toContain(`ADD COLUMN "et" "${S2}".etype`);
+
+      await raw.query(sql);
+      // 目标列的类型命名空间必须是目标 schema（不是源 schema 的 enum）。
+      const row = (await raw.query(
+        `SELECT tn.nspname AS ns FROM pg_attribute a
+          JOIN pg_class c ON c.oid = a.attrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          JOIN pg_type ty ON ty.oid = a.atttypid
+          JOIN pg_namespace tn ON tn.oid = ty.typnamespace
+          WHERE n.nspname = '${S2}' AND c.relname = 'orders' AND a.attname = 'et'`,
+      )).rows[0];
+      expect(row?.ns).toBe(S2);
+    } finally {
+      await raw.query(`ALTER TABLE IF EXISTS ${S2}.orders DROP COLUMN IF EXISTS et`);
+      await raw.query(`ALTER TABLE IF EXISTS ${S1}.orders DROP COLUMN IF EXISTS et`);
+      await raw.query(`DROP TYPE IF EXISTS ${S2}.etype`);
+      await raw.query(`DROP TYPE IF EXISTS ${S1}.etype`);
+    }
+  });
+
   it('P1：新增含 serial 列的表，同步 SQL 的目标默认值指向目标 schema 序列（非源）', async () => {
     const dbName = (await raw.query('SELECT current_database() AS d')).rows[0].d as string;
     const t = `p1ser_${stamp}`;

@@ -20,6 +20,8 @@ import AccountHubView from './views/AccountHubView.vue';
 const AuthenticatorView = defineAsyncComponent(() => import('./views/AuthenticatorView.vue'));
 // Redis 面板（P7 S2）同样按需加载，单独分片。
 const RedisView = defineAsyncComponent(() => import('./views/RedisView.vue'));
+// Elasticsearch 面板（P8 S2）同样按需加载，单独分片。
+const ElasticsearchView = defineAsyncComponent(() => import('./views/ElasticsearchView.vue'));
 
 const { onMessage } = useVsCode();
 const mode = ref<WebviewMode>('query');
@@ -57,5 +59,6 @@ onUnmounted(() => cleanup?.());
       <AccountHubView v-else-if="mode === 'accountHub'" :tab="hubTab" />
       <AuthenticatorView v-else-if="mode === 'authenticator'" />
       <RedisView v-else-if="mode === 'redis'" />
+      <ElasticsearchView v-else-if="mode === 'elasticsearch'" />
       <ERDiagramView v-else />
 </template>

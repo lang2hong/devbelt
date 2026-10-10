@@ -54,6 +54,16 @@ export interface SavedConnection extends ConnectionConfig {
   sentinelNodes?: string;
   /** Redis：Sentinel 认证密码（敏感字段，走 SecretStorage 持久化）。 */
   sentinelPassword?: string;
+  /** Elasticsearch：协议（缺省 http）。 */
+  esProtocol?: 'http' | 'https';
+  /** Elasticsearch：反代路径前缀（如 `/es`）。 */
+  esPathPrefix?: string;
+  /** Elasticsearch：认证方式（缺省 none；密码/API Key 在敏感字段）。 */
+  esAuth?: { kind: 'none' } | { kind: 'basic'; username: string } | { kind: 'apiKey' };
+  /** Elasticsearch：Basic 密码（敏感字段，走 SecretStorage）。 */
+  esPassword?: string;
+  /** Elasticsearch：API Key（`id:api_key` 或已编码 token；敏感字段，走 SecretStorage）。 */
+  esApiKey?: string;
   /** 连接颜色标签（各引擎共用）。 */
   color?: string;
   /** 创建时间戳（ms） */
@@ -128,7 +138,7 @@ export class ConnectionStore {
   private hostEvents?: { dispose(): void };
   /** QueryStore 变更转发订阅句柄（连接 store 销毁时释放）。 */
   private queryStoreEvents?: { dispose(): void };
-  static readonly SENSITIVE_FIELDS = ['password', 'sshPassword', 'sshPassphrase', 'sentinelPassword'] as const;
+  static readonly SENSITIVE_FIELDS = ['password', 'sshPassword', 'sshPassphrase', 'sentinelPassword', 'esPassword', 'esApiKey'] as const;
   private readonly secretCache = new Map<string, string>();
   private readonly queryStore: QueryStore;
   private readonly changedEmitter = new EventEmitter<ChangeSource>();
