@@ -51,7 +51,8 @@ export class ElasticsearchView extends BaseWebView {
   /** 「两次 ready」后的 webview 已挂载（此前不发 config/数据）。 */
   private webviewReady = false;
   private pending?: PendingConfirm;
-  private inflight?: AbortController;
+  /** 在途 REST 请求（每请求独立；dispose 时统一 abort，请求之间互不取消）。 */
+  private readonly inflight = new Set<AbortController>();
   /** S4：请求日志订阅取消函数。 */
   private logUnsub?: () => void;
   /** S4.5：字段建议缓存（mapping 提取，per index）。 */
@@ -130,8 +131,8 @@ export class ElasticsearchView extends BaseWebView {
 
   protected onDispose(): void {
     super.onDispose();
-    this.inflight?.abort();
-    this.inflight = undefined;
+    for (const ac of this.inflight) ac.abort();
+    this.inflight.clear();
     this.logUnsub?.();
     this.logUnsub = undefined;
     ElasticsearchView.instances.delete(this.conn.id);
@@ -430,7 +431,7 @@ export class ElasticsearchView extends BaseWebView {
     // 原始输入（含 query/fragment）用于审计与确认展示；实际请求用拆出的 path/query。
     const rawInput = String(msg.path ?? '').trim();
     if (!rawInput) {
-      this.postResult(msg.id, { status: 0, headers: {}, body: { error: { type: 'validation', reason: 'path is required' } }, tookMs: 0 });
+      this.postResult(msg.id, { status: 0, headers: {}, body: { error: { type: 'validation', reason: l10n('wv.es.pathRequired') } }, tookMs: 0 });
       return;
     }
     const parsedBody = this.parseBody(msg.body);
@@ -441,7 +442,7 @@ export class ElasticsearchView extends BaseWebView {
     // H1：`?v/?pretty` 等参数经 EsQuery 通道透传（此前被静默丢弃）；`#` 片段丢弃。
     const { path, query } = splitEsPathQuery(rawInput);
     if (!path) {
-      this.postResult(msg.id, { status: 0, headers: {}, body: { error: { type: 'validation', reason: 'path is required' } }, tookMs: 0 });
+      this.postResult(msg.id, { status: 0, headers: {}, body: { error: { type: 'validation', reason: l10n('wv.es.pathRequired') } }, tookMs: 0 });
       return;
     }
 
@@ -460,16 +461,20 @@ export class ElasticsearchView extends BaseWebView {
       return;
     }
 
-    // 2) 执行（只读 force 解锁经 force 参数）。
+    // 2) 执行（只读 force 解锁经 force 参数）。每请求独立 AbortController：
+    //    索引操作与 REST 控制台可并发；同为 REST 的连续请求也不再互相取消。
     let res: EsResponse;
+    const ac = new AbortController();
+    this.inflight.add(ac);
     try {
-      this.inflight?.abort();
-      this.inflight = new AbortController();
-      res = await session.es.request(method, path, parsedBody as unknown, query, { force: msg.force === true, signal: this.inflight.signal });
+      res = await session.es.request(method, path, parsedBody as unknown, query, { force: msg.force === true, signal: ac.signal });
     } catch (err) {
+      if (ac.signal.aborted) return; // dispose 中止：面板已关闭，不再回写结果
       const message = (err as Error).message ?? String(err);
       this.postResult(msg.id, { status: 0, headers: {}, body: { error: { type: 'network_error', reason: message } }, tookMs: 0 });
       return;
+    } finally {
+      this.inflight.delete(ac);
     }
     // 3) 只读拦截（仅切面伪造的 403 哨兵；真实 ES 权限 403 不误弹解锁）。
     if (res.status === 403 && msg.force !== true && this.conn.readOnly === true && isReadOnlyGateResponse(res)) {
@@ -504,7 +509,7 @@ export class ElasticsearchView extends BaseWebView {
     this.pending = undefined;
     if (!pending || pending.msg.id !== msg.id) return;
     if (!msg.accept) {
-      this.postResult(msg.id, { status: 0, headers: {}, body: { error: { type: 'cancelled', reason: 'cancelled by user' } }, tookMs: 0 });
+      this.postResult(msg.id, { status: 0, headers: {}, body: { error: { type: 'cancelled', reason: l10n('wv.es.cancelled') } }, tookMs: 0 });
       return;
     }
     if (pending.kind === 'dangerous' && pending.typedIndexName !== undefined) {

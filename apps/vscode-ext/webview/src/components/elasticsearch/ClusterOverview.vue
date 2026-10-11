@@ -43,10 +43,10 @@ const statusClass = computed(() => {
       </div>
     </div>
     <div v-if="health" class="es-health-row">
-      <span>nodes: {{ health.numberOfNodes ?? '—' }}</span>
-      <span>data nodes: {{ health.numberOfDataNodes ?? '—' }}</span>
-      <span>active shards: {{ health.activeShards ?? '—' }}</span>
-      <span>unassigned: {{ health.unassignedShards ?? '—' }}</span>
+      <span>{{ t('wv.es.cluster.nodes') }} {{ health.numberOfNodes ?? '—' }}</span>
+      <span>{{ t('wv.es.cluster.dataNodes') }} {{ health.numberOfDataNodes ?? '—' }}</span>
+      <span>{{ t('wv.es.cluster.activeShards') }} {{ health.activeShards ?? '—' }}</span>
+      <span>{{ t('wv.es.cluster.unassignedShards') }} {{ health.unassignedShards ?? '—' }}</span>
     </div>
     <pre v-if="snapshot?.info" class="es-info-json">{{ JSON.stringify(snapshot.info, null, 2) }}</pre>
     <div v-else class="es-empty">{{ t('wv.es.cluster.empty') }}</div>

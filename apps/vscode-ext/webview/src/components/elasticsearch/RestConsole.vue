@@ -37,6 +37,7 @@ const methods = ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'PATCH'];
 const bodyDisabled = computed(() => !bodyAllowedFor(method.value));
 
 function send(): void {
+  if (props.running) return; // 在途请求期间 Enter/历史双击不再绕过按钮 disabled 重复提交
   const p = path.value.trim();
   if (!p) return;
   const raw = bodyDisabled.value ? '' : body.value;
@@ -93,7 +94,8 @@ const statusClass = computed(() => {
         <div v-if="result" class="es-result-meta">
           <span class="es-status" :class="statusClass">{{ result.status }}</span>
           <span>{{ t('wv.es.response.took') }} {{ result.tookMs }} ms</span>
-          <button class="es-link" @click="showHeaders = !showHeaders">{{ result.truncated ? t('wv.es.response.truncated') : 'headers' }}</button>
+          <button class="es-link" @click="showHeaders = !showHeaders">{{ t('wv.es.response.headers') }}</button>
+          <span v-if="result.truncated" class="es-truncated">{{ t('wv.es.response.truncated') }}</span>
         </div>
         <table v-if="showHeaders && headerRows.length" class="es-headers">
           <tr v-for="[k, v] in headerRows" :key="k"><td>{{ k }}</td><td>{{ v }}</td></tr>
@@ -142,4 +144,5 @@ const statusClass = computed(() => {
 .es-history-method { font-weight: 600; margin-right: 6px; }
 .es-empty { opacity: .7; font-size: 12px; }
 .es-link { background: none; border: none; color: var(--vscode-textLink-foreground); cursor: pointer; font-size: 11px; padding: 0; }
+.es-truncated { font-size: 11px; color: var(--vscode-editorWarning-foreground, #d29922); }
 </style>

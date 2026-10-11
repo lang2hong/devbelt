@@ -265,7 +265,7 @@ onMounted(() => {
       docsNext = null;
       docs.value = msg.found
         ? { hits: [{ index: msg.index, id: msg.docId, score: null, source: msg.source, sort: null, seqNo: msg.seqNo ?? null, primaryTerm: msg.primaryTerm ?? null }], total: 1, truncated: false, error: null }
-        : { hits: [], total: null, truncated: false, error: { message: `${msg.docId}: not found`, type: 'not_found', reason: null, rootCause: [] } };
+        : { hits: [], total: null, truncated: false, error: { message: t('wv.es.docs.notFound', { id: msg.docId }), type: 'not_found', reason: null, rootCause: [] } };
     } else if (msg.type === 'esDocsError') {
       docs.value = { ...docs.value, hits: [], error: msg.error };
     } else if (msg.type === 'esDslResult') {

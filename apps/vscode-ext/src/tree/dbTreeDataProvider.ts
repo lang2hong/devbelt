@@ -245,7 +245,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       );
       node.id = `${conn.id}:es:index:${item.name}`;
       node.esIndexName = item.name;
-      node.description = [item.health, item.docsCount === null ? undefined : `${item.docsCount} docs`]
+      node.description = [item.health, item.docsCount === null ? undefined : l10n('tree.es.docsCount', { count: item.docsCount })]
         .filter((s): s is string => !!s)
         .join(' · ');
       const color = item.health === 'green' ? 'charts.green' : item.health === 'yellow' ? 'charts.yellow' : item.health === 'red' ? 'charts.red' : undefined;

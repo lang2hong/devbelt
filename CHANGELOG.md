@@ -17,6 +17,14 @@
 - 定时备份：PG 逐 schema 备份（目标相对，可恢复到任意目标 schema）；导入 SQL 脚本/恢复按目标 schema 设 `search_path`。
 - 不支持：PG 跨库结构/数据对比（明确拒绝）。
 
+### P8 — Elasticsearch 客户端
+
+- 新引擎：Elasticsearch（http/https、Basic/ApiKey、TLS、SSH 隧道、只读）；`ConnectionSession` 判别联合扩第三种，SQL/Redis 路径零行为改动。
+- db-core：`EsClient` 零依赖（Node 内置 http/https）统一请求封装 + 请求日志 + 只读切面（fail-closed）+ 危险判定。
+- 面板：集群总览、索引列表/详情（mapping/settings/aliases 只读）、文档 `search_after` 分页 + CRUD、DSL 查询控制台、REST 控制台（任意 method/path/body）、节点、请求日志。
+- 安全：只读切面 fail-closed（GET/HEAD 恒放行；非 GET 仅 POST 且命中读路径白名单；`/_nodes` 管理端点、`_bulk` 等 403，可单条解锁）；危险操作 host 侧确认（DELETE index 需输入索引名）；写请求落审计。
+- 修复（复核）：并发 REST 请求不再互相取消（每请求独立 AbortController + 面板关闭统一 abort）；REST 控制台 Enter/历史双击不再绕过在途守卫；面板销毁后不再回写消息；ES 相关文案全部入 i18n。
+
 ### 同步前提（D15）
 
 - 本版按「**从未发布过启用同步的旧客户端**」处理，**未加服务端最低版本门禁**。若该前提被推翻，需回补服务端版本门禁。

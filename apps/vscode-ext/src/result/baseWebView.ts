@@ -20,6 +20,8 @@ export abstract class BaseWebView {
   /** 「两次 ready」协议状态；面板重载时按 webview 加载轮次重置。 */
   protected initSent = false;
   private currentLoad?: string;
+  /** 面板已销毁：之后 post 一律短路（postMessage 到已销毁 webview 无意义且会噪声报错）。 */
+  private panelDisposed = false;
 
   constructor(
     viewType: string,
@@ -67,6 +69,7 @@ export abstract class BaseWebView {
    * 子类若已显式给出 isZh 则保留其值。
    */
   protected post(msg: WebviewMessage | WebviewInitMessage): void {
+    if (this.panelDisposed) return;
     const payload = msg && msg.type === 'init' && (msg as WebviewInitMessage).isZh === undefined
       ? { ...msg, isZh: isZh() }
       : msg;
@@ -85,6 +88,7 @@ export abstract class BaseWebView {
 
   /** 面板销毁回调（子类可 override 做清理） */
   protected onDispose(): void {
+    this.panelDisposed = true;
     this.msgDisp.dispose();
     this.panelDisp.dispose();
   }

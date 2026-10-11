@@ -102,6 +102,36 @@ describe('EsClient：请求封装', () => {
     expect(s.seen[3].url).toBe('/idx/_doc/1');
   });
 
+  it('getSettings/getAliases：路径编码 + `_alias` 端点', async () => {
+    const s = await startServer((_req, res) => json(res, 200, { ok: true }));
+    servers.push(s);
+    const client = makeClient(s);
+    await client.getSettings('my idx');
+    expect(s.seen[0].method).toBe('GET');
+    expect(s.seen[0].url).toBe('/my%20idx/_settings');
+
+    await client.getAliases('my idx');
+    expect(s.seen[1].method).toBe('GET');
+    expect(s.seen[1].url).toBe('/my%20idx/_alias');
+  });
+
+  it('bulkDelete：NDJSON 序列化 + content-type；空 ids 短路不发请求', async () => {
+    const s = await startServer((_req, res) => json(res, 200, { errors: false, items: [] }));
+    servers.push(s);
+    const client = makeClient(s);
+
+    const empty = await client.bulkDelete('idx', []);
+    expect(empty.status).toBe(200);
+    expect((empty.body as any).items).toEqual([]);
+    expect(s.seen).toHaveLength(0);
+
+    await client.bulkDelete('my idx', ['a', 'b']);
+    expect(s.seen[0].method).toBe('POST');
+    expect(s.seen[0].url).toBe('/_bulk');
+    expect(s.seen[0].headers['content-type']).toBe('application/json');
+    expect(s.seen[0].body).toBe('{"delete":{"_index":"my idx","_id":"a"}}\n{"delete":{"_index":"my idx","_id":"b"}}\n');
+  });
+
   it('4xx/5xx 不抛错：返回结构化 body', async () => {
     const s = await startServer((_req, res) => json(res, 404, {
       error: { type: 'index_not_found_exception', reason: 'no such index [nope]', root_cause: [{ type: 'index_not_found_exception', reason: 'no such index [nope]', index: 'nope' }] },
@@ -149,7 +179,25 @@ describe('EsClient：认证与只读切面', () => {
     expect(s.seen[2].method).toBe('DELETE');
   });
 
-  it('isReadEsRequest：GET/HEAD 恒真；读路径段/前缀白名单', () => {
+  it('N1 回归：只读下 `/_nodes` 管理端点与 `_bulk` 被 403 拦（fail-closed）；force 解锁可放行', async () => {
+    const s = await startServer((_req, res) => json(res, 200, { ok: true }));
+    servers.push(s);
+    const client = makeClient(s, { readOnly: true });
+
+    for (const path of ['/_nodes/reload_secure_settings', '/_nodes/n1/shutdown', '/_nodes/stats']) {
+      const blocked = await client.request('POST', path);
+      expect(blocked.status).toBe(403);
+      expect((blocked.body as any).error.reason).toBe('read-only mode');
+    }
+    const bulk = await client.bulkDelete('idx', ['a']);
+    expect(bulk.status).toBe(403);
+    expect(s.seen).toHaveLength(0); // 全部未发请求
+
+    await client.request('POST', '/_nodes/reload_secure_settings', undefined, undefined, { force: true });
+    expect(s.seen.map((x) => `${x.method} ${x.url}`)).toEqual(['POST /_nodes/reload_secure_settings']);
+  });
+
+  it('isReadEsRequest：GET/HEAD 恒真；非 GET 仅 POST 且命中读白名单', () => {
     expect(isReadEsRequest('GET', '/idx/_doc/1')).toBe(true);
     expect(isReadEsRequest('HEAD', '/')).toBe(true);
     expect(isReadEsRequest('POST', '/idx/_search')).toBe(true);
@@ -164,6 +212,15 @@ describe('EsClient：认证与只读切面', () => {
     expect(isReadEsRequest('POST', '/_aliases')).toBe(false);
     expect(isReadEsRequest('GET', '/idx/_mapping')).toBe(true);
     expect(isReadEsRequest('GET', '/_aliases')).toBe(true);
+    // 回归 N1：`/_nodes` 非 GET 是管理端点（reload_secure_settings/shutdown），
+    // 前缀白名单已移除该命名空间；POST 之外的写方法一律拦（含 DELETE scroll 清理）。
+    expect(isReadEsRequest('GET', '/_nodes/stats')).toBe(true);
+    expect(isReadEsRequest('POST', '/_nodes/stats')).toBe(false);
+    expect(isReadEsRequest('POST', '/_nodes/reload_secure_settings')).toBe(false);
+    expect(isReadEsRequest('POST', '/_nodes/n1/shutdown')).toBe(false);
+    expect(isReadEsRequest('POST', '/_nodes/n1/_shutdown')).toBe(false);
+    expect(isReadEsRequest('DELETE', '/_search/scroll')).toBe(false);
+    expect(isReadEsRequest('PATCH', '/idx/_search')).toBe(false);
   });
 
   it('path 拒绝绝对 URL 与换行（防注入到 host 拼接）', async () => {

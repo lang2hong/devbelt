@@ -163,7 +163,7 @@ Vue3+TS 轻量 ES 管理工具）的**核心体验子集**。
 | D5 | 文档/索引操作只做"常用可安全回退"的集：CRUD 文档、增删 aliases；mapping/settings 编辑走 REST 控制台 | 避免误改 mapping 导致数据不可回退 |
 | D6 | Webview CSP 不开放 connect-src；所有 HTTP 请求走 extension host | 安全边界保持一致 |
 | D7 | API Key、password 走 SecretStorage；CA/cert/key 路径落 Memento | 对齐 SQL/Redis 凭据模型 |
-| D8 | 只读模式在 EsClient request 层拦截（method 白名单 GET/HEAD + 读路径前缀白名单），与 Redis 在 sendCommand 切面拦截同样的强度 | 漏 UI 判断也不会写出 |
+| D8 | 只读模式在 EsClient request 层拦截（GET/HEAD 恒放行；非 GET 仅 POST 且命中读路径前缀/段白名单；`/_nodes` 管理端点与 `_bulk` 等一律 403），与 Redis 在 sendCommand 切面拦截同样的强度 | 漏 UI 判断也不会写出；非 GET fail-closed（复核 N1：`reload_secure_settings`/`shutdown` 曾被 `/_nodes` 前缀白名单误放行） |
 | D9 | 危险操作确认：DELETE /*、DELETE _all、DELETE <index>、/_cluster/settings、match_all 删文档、/_security/* | 对齐 SQL/Redis 的 confirm 强度 |
 | D10 | 本阶段不接个人同步/权益（与 SQLite/Redis 一致）；ES 连接本地直连不设引擎门禁 | 同步 codec 改面大，和 ES 功能解耦 |
 | D11 | JSON 展示用 `<pre>`+缩进+简易语法着色；不引 monaco/highlight.js | es-client 用 Monaco + highlight.js，REST 控制台是 Monaco 版 HTTP 文件编辑器（`src/components/RestClientEditor/*`）；本阶段**有意简化为 method+path+body 表单**以控体积，后续可增量升级 |
@@ -305,8 +305,9 @@ close 走现有 `SshTunnel.close(connId)`。
 
 ### 6.6 只读与危险确认
 
-- 只读：EsClient request 层拦截，UI 层按钮灰 + 危险方法默认禁用；用户可临时单条解锁（弹 modal
-  说明并确认）。
+- 只读：EsClient request 层拦截（fail-closed：GET/HEAD 恒放行；非 GET 仅 POST 且命中读路径白名单，
+  `/_nodes/reload_secure_settings`、`/_nodes/*/shutdown`、`_bulk` 等写/管理端点一律 403），UI 层
+  按钮灰 + 危险方法默认禁用；用户可临时单条解锁（弹 modal 说明并确认）。
 - 危险操作：主机侧收到请求先判断 `isDangerousRequest(method, path, body)`，是则先 post confirm
   请求，等用户确认再发。DELETE index 要求用户输入索引名确认（对齐现 SQL `dropTable` 强度）。
 - 审计：写请求/危险请求走 AuditLogger。

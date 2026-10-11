@@ -631,3 +631,61 @@ describe('评审修复 C1/H1/H2', () => {
     expect(confirms.map((m) => m.kind)).toEqual(['dangerous', 'readonly']);
   });
 });
+
+// ────────────────────────── 复核修复 N1（inflight 并发/dispose） ──────────────────────────
+
+describe('复核修复 N1（inflight）', () => {
+  it('N1：并发 REST 请求互不取消（每请求独立 AbortController）', async () => {
+    const { view, es } = makeView();
+    await mount(view);
+    const signals: (AbortSignal | undefined)[] = [];
+    const started = [false, false];
+    let allStarted!: () => void;
+    const bothStarted = new Promise<void>((r) => { allStarted = r; });
+    const gates = [0, 1].map(() => {
+      let release!: () => void;
+      const promise = new Promise<void>((r) => { release = r; });
+      return { promise, release };
+    });
+    es.request.mockImplementation(async (_m: string, _p: string, _b: unknown, _q: unknown, o: any) => {
+      const idx = signals.length;
+      signals.push(o?.signal);
+      started[idx] = true;
+      if (started[0] && started[1]) allStarted();
+      await gates[idx].promise;
+      return ok(200, { idx });
+    });
+    const p1 = view.handleMessage({ type: 'esRest', id: 'r1', method: 'GET', path: '/a', body: null });
+    const p2 = view.handleMessage({ type: 'esRest', id: 'r2', method: 'GET', path: '/b', body: null });
+    await bothStarted;
+    // 旧实现：第二个请求会 abort 第一个（共享 inflight）；现在两者独立。
+    expect(signals[0]?.aborted).toBe(false);
+    expect(signals[1]?.aborted).toBe(false);
+    gates[0].release();
+    gates[1].release();
+    await Promise.all([p1, p2]);
+    const ids = posts(view).filter((m) => m.type === 'esRestResult').map((m) => m.id).sort();
+    expect(ids).toEqual(['r1', 'r2']);
+  });
+
+  it('N1：dispose 统一 abort 全部在途请求，且不再回写结果', async () => {
+    const { view, es } = makeView();
+    await mount(view);
+    const signals: AbortSignal[] = [];
+    let startedResolve!: () => void;
+    const startedP = new Promise<void>((r) => { startedResolve = r; });
+    let started = false;
+    es.request.mockImplementation((_m: string, _p: string, _b: unknown, _q: unknown, o: any) =>
+      new Promise((_resolve, reject) => {
+        signals.push(o?.signal);
+        if (!started) { started = true; startedResolve(); }
+        o?.signal?.addEventListener('abort', () => reject(new Error('ES request aborted')));
+      }));
+    const pending = view.handleMessage({ type: 'esRest', id: 'r1', method: 'GET', path: '/slow', body: null });
+    await startedP;
+    view.dispose();
+    expect(signals[0].aborted).toBe(true);
+    await pending;
+    expect(posts(view).filter((m) => m.type === 'esRestResult')).toHaveLength(0);
+  });
+});

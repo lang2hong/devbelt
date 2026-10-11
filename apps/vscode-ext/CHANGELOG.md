@@ -10,6 +10,7 @@ All notable changes to this extension are documented in this file.
 - **PostgreSQL multi-schema (P7.1)**: browse and operate across all schemas (schema tree layer, schema-qualified write/DDL/export/data-edit, cross-schema foreign-key navigation, schema-aware backup/restore). Temporary host-side write protection for non-default schemas is lifted now that qualification is in place.
 - **PostgreSQL multi-database**: enumerate visible databases (CONNECT-filtered), lazily create derived per-database sessions (cap 4 + LRU), reuse a single SSH tunnel with reference counting, and "execute in that database".
 - **Authenticator (2FA/TOTP)**: local dynamic codes in a webview panel (does not occupy the activity bar). Paste `otpauth://` links or add a single entry from a QR image; groups, colored tags, search/edit/delete, copy-to-clipboard, and plaintext export (modal warning, `0600`). Secrets are stored only in the OS keychain (VS Code `SecretStorage`) and never sent to the webview — only `code + secondsLeft` are pushed each tick.
+- **Elasticsearch client (P8)**: connect over http/https with Basic/API-key auth, TLS (self-signed toggle), SSH tunnels, and read-only mode. Cluster overview and node list; index browser with read-only mapping/settings/aliases; document browsing with `search_after` paging plus CRUD; DSL query console; and an arbitrary-request REST console (status/took/headers/truncation). Read-only enforcement is fail-closed in the client layer (admin endpoints such as `/_nodes/reload_secure_settings` and `/_bulk` are blocked and can only be unlocked per request), and write requests go through host-side confirmation and audit logging.
 
 ### Changed
 
@@ -21,6 +22,8 @@ All notable changes to this extension are documented in this file.
 ### Fixed
 
 - SSH tunnel acquisition now registers in-flight requests before any await and uses a lease token on release (no duplicate tunnels / no closing a rebuilt tunnel).
+- Elasticsearch panel: concurrent requests no longer cancel each other (per-request abort controllers; closing the panel aborts all in-flight requests and suppresses their result write-back).
+- Elasticsearch REST console: the in-flight guard can no longer be bypassed via Enter or double-clicking history, and the truncation notice no longer replaces the headers toggle label.
 - Redis Cluster node-level retry/offline-queue options are set on the top-level `Cluster` options (previously placed in `redisOptions`, where ioredis ignores them); command timeouts also cover `nodes().call` and destructive-command timeouts report "result unknown".
 - Scoped PostgreSQL backup reads the target schema's tables (previously could silently read a same-named `public` table).
 

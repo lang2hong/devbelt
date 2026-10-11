@@ -73,8 +73,12 @@ export interface EsRequestOptions {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-/** 读路径白名单（决策 D8）：readOnly 下 POST/GET 这些路径仍放行。 */
-const READ_PATH_PREFIXES = ['/_cat', '/_cluster/health', '/_cluster/stats', '/_nodes', '/_resolve/index', '/_resolve/cluster'] as const;
+/**
+ * 读路径白名单（决策 D8）：readOnly 下 POST 这些路径仍放行（GET/HEAD 恒放行）。
+ * 不含 `/_nodes`：该命名空间的非 GET 形态是管理端点（`reload_secure_settings`、
+ * `shutdown`），属配置修改类，必须 403 拦截后走 host 单条解锁。
+ */
+const READ_PATH_PREFIXES = ['/_cat', '/_cluster/health', '/_cluster/stats', '/_resolve/index', '/_resolve/cluster'] as const;
 // 注意：_mapping/_settings/_aliases 的非 GET 形态是写端点（PUT/POST），不得列入读白名单；
 // 其读形态一律走 GET/HEAD（恒放行）。只读下这些写请求由切面 403 拦截 → host 单条解锁确认。
 const READ_PATH_SEGMENTS = ['_search', '_count', '_mget', '_msearch', '_field_caps', '_explain', '_validate'] as const;
@@ -87,10 +91,16 @@ function normalizePath(path: string): string {
   return raw.startsWith('/') ? raw : `/${raw}`;
 }
 
-/** 是否只读请求：GET/HEAD 恒真；其余按读路径前缀/段白名单（`<index>/_search` 等）。 */
+/**
+ * 是否只读请求：GET/HEAD 恒真；其余仅 POST 且命中读路径前缀/段白名单（`<index>/_search` 等）。
+ *
+ * fail-closed：非 POST 的写方法（PUT/DELETE/PATCH）与不在白名单的 POST（`_bulk`、
+ * `/_nodes/reload_secure_settings` 等）一律视为写请求，由切面 403 拦截。
+ */
 export function isReadEsRequest(method: string, path: string): boolean {
   const m = String(method ?? '').toUpperCase();
   if (m === 'GET' || m === 'HEAD') return true;
+  if (m !== 'POST') return false;
   const p = normalizePath(path);
   if (READ_PATH_PREFIXES.some((pre) => p === pre || p.startsWith(`${pre}/`))) return true;
   const segs = p.split('/').filter(Boolean);
