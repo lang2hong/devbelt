@@ -46,6 +46,7 @@ const emit = defineEmits<{
   setApiKey: [];
   clearApiKey: [];
   testConnection: [];
+  requestContextDetail: [];
 }>();
 
 const { t } = useI18n();
@@ -99,7 +100,9 @@ function onSelect(event: Event): void {
         <option value="">{{ t('wv.ai.connect') }}</option>
         <option v-for="conn in props.connections" :key="conn.id" :value="conn.id">{{ conn.name }}</option>
       </select>
-      <span class="ai-context-summary">{{ contextLabel }}</span>
+      <button class="ai-context-summary ai-context-link" :title="t('wv.ai.context.detail')" @click="emit('requestContextDetail')">
+        {{ contextLabel }}
+      </button>
     </div>
     <div class="ai-context-row">
       <span class="ai-context-summary">{{ quotaLabel }}</span>
@@ -137,6 +140,15 @@ function onSelect(event: Event): void {
 .ai-model,
 .ai-context-summary {
   color: var(--vscode-descriptionForeground);
+}
+.ai-context-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  text-decoration: underline dotted;
 }
 .ai-hint {
   color: var(--vscode-editorWarning-foreground, #cca700);

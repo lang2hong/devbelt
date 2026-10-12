@@ -23,13 +23,21 @@ export interface AiConfig {
   model: string;
   includeColumnComments: boolean;
   temperature: number;
+  /** schema 注入模式（S4）：current-db 默认；recent-only 暂按 current-db 行为；off 不注入。 */
+  schemaContextMode: 'current-db' | 'recent-only' | 'off';
+  /** 数据问答样本行数（S4）：默认 10，上限 50。 */
+  dataSampleRows: number;
 }
 
 const DEFAULT_TEMPERATURE = 0.2;
+const DEFAULT_SAMPLE_ROWS = 10;
+const MAX_SAMPLE_ROWS = 50;
 
 export function readAiConfig(): AiConfig {
   const config = vscode.workspace.getConfiguration('devbelt');
   const temperature = config.get<number>('ai.temperature', DEFAULT_TEMPERATURE);
+  const rawMode = config.get<string>('ai.schemaContextMode');
+  const sampleRows = config.get<number>('ai.dataSampleRows', DEFAULT_SAMPLE_ROWS);
   return {
     provider: config.get<string>('ai.provider') === 'openai-compatible' ? 'openai-compatible' : 'server-proxy',
     baseUrl: (config.get<string>('ai.baseUrl') ?? '').trim(),
@@ -39,6 +47,12 @@ export function readAiConfig(): AiConfig {
       typeof temperature === 'number' && Number.isFinite(temperature) && temperature >= 0 && temperature <= 2
         ? temperature
         : DEFAULT_TEMPERATURE,
+    schemaContextMode:
+      rawMode === 'off' || rawMode === 'recent-only' ? rawMode : 'current-db',
+    dataSampleRows:
+      typeof sampleRows === 'number' && Number.isFinite(sampleRows)
+        ? Math.min(MAX_SAMPLE_ROWS, Math.max(1, Math.floor(sampleRows)))
+        : DEFAULT_SAMPLE_ROWS,
   };
 }
 

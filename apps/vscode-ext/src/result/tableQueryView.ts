@@ -8,6 +8,11 @@ import { RowEditor } from './rowEditor';
 import { QueryRunner } from './queryRunner';
 import { ExportHandler } from './exportHandler';
 import { pgSchemaFor } from '../utils/sql';
+import { buildDataQaMessages, buildDiagnoseMessages, formatRowSample } from '@devbelt/ai-core';
+import { AiBridge } from '../ai/aiBridge';
+import { readAiConfig } from '../ai/aiService';
+import { containsSecretSql, SECRET_SQL } from '../utils/sqlSecret';
+import { l10n } from '../i18n';
 
 /** 结果面板承载的数据库对象类型。视图（VIEW）不可写。 */
 export type ResultObjectType = 'table' | 'view';
@@ -45,6 +50,17 @@ export class TableQueryView extends BaseWebView {
     onExecuted?: (result: any, error?: Error) => void;
     explain?: boolean;
   }> = [];
+  /**
+   * P9 S4：最后一次单结果集快照（数据问答 / 0 行诊断素材）。
+   * 行数截断到 50 做内存上界；样本发送前必过 `formatRowSample`（打码/截断）。
+   */
+  private lastResultSnapshot?: {
+    sql: string;
+    dbType?: string;
+    fields: string[];
+    rows: Array<Record<string, unknown>>;
+    total?: number;
+  };
 
   private constructor(
     private readonly conn: SavedConnection,
@@ -67,7 +83,7 @@ export class TableQueryView extends BaseWebView {
     // 按会话键持有：PG 面板持有的是「该库」的会话，不豁免同连接其它衍生会话（B3）。
     this.releaseRetain = this.manager.retainFor(this.conn, this.database);
     const schema = opts.schema;
-    this.runner = new QueryRunner(conn, manager, table, database, (msg) => this.post(msg), schema);
+    this.runner = new QueryRunner(conn, manager, table, database, (msg) => this.postRunnerMessage(msg), schema);
     this.completionService = new CompletionService(manager, conn, database, (msg) => this.post(msg), schema);
     if (table) {
       // 视图不建 RowEditor：编辑入口在前端已隐藏，这里再断一次链路，
@@ -186,6 +202,104 @@ export class TableQueryView extends BaseWebView {
     return view;
   }
 
+  /** 观察 runner 输出：留住最后快照后原样转发（其它消息零改动）。 */
+  private postRunnerMessage(msg: any): void {
+    if (msg && msg.type === 'result' && typeof msg.sql === 'string' && Array.isArray(msg.result?.rows)) {
+      this.lastResultSnapshot = {
+        sql: msg.sql,
+        ...(typeof msg.dbType === 'string' ? { dbType: msg.dbType } : {}),
+        fields: Array.isArray(msg.result.fields)
+          ? msg.result.fields.map((f: any) => String(f?.name ?? f)).filter(Boolean)
+          : [],
+        rows: (msg.result.rows as Array<Record<string, unknown>>).slice(0, 50),
+        ...(typeof msg.total === 'number' ? { total: msg.total } : {}),
+      };
+    }
+    this.post(msg);
+  }
+
+  /** AI 桥未初始化（AI 未启用）时给一次明确提示，而不是点了没反应。 */
+  private requireAiBridge(): AiBridge | undefined {
+    const bridge = AiBridge.tryGet();
+    if (!bridge) void vscode.window.showInformationMessage(l10n('ai.notEnabled'));
+    return bridge;
+  }
+
+  /** 数据问答（§6.11.3）：样本默认不发；勾选后按设置行数 + 打码 + 截断。 */
+  private handleAiAskData(msg: any): void {
+    const bridge = this.requireAiBridge();
+    if (!bridge) return;
+    const question = String(msg?.question ?? '').trim();
+    if (!question) return;
+    const snapshot = this.lastResultSnapshot;
+    let sampleText: string | undefined;
+    if (msg?.includeSample === true && snapshot) {
+      const sample = formatRowSample(snapshot.fields, snapshot.rows, {
+        maxRows: readAiConfig().dataSampleRows,
+      });
+      sampleText = sample.lines.join('\n');
+    }
+    bridge.requestChat({
+      feature: 'data-qa',
+      messages: buildDataQaMessages({
+        question,
+        ...(snapshot ? { sql: snapshot.sql } : {}),
+        ...(snapshot && snapshot.fields.length > 0 ? { columns: snapshot.fields } : {}),
+        ...(sampleText ? { sampleText } : {}),
+        ...(snapshot && snapshot.total !== undefined ? { totalRows: snapshot.total } : {}),
+        ...(snapshot?.dbType ? { dbType: snapshot.dbType } : {}),
+      }),
+      title: l10n('ai.scenario.dataQa'),
+      connName: this.conn.name || this.conn.host,
+      connId: this.conn.id,
+      ...(this.database ? { database: this.database } : {}),
+    });
+  }
+
+  /** 错误诊断（§6.11.2）：host 侧二次扫描 —— 即便 webview 已确认，命中口令模式仍剔除。 */
+  private handleAiDiagnose(msg: any): void {
+    const bridge = this.requireAiBridge();
+    if (!bridge) return;
+    const rawMessage = String(msg?.message ?? '');
+    const errorText = containsSecretSql(rawMessage)
+      ? rawMessage.replace(new RegExp(SECRET_SQL.source, 'gi'), '[REDACTED]')
+      : rawMessage;
+    const candidateSql =
+      typeof msg?.sql === 'string' && msg.sql.trim() && !containsSecretSql(msg.sql) ? msg.sql : undefined;
+    bridge.requestChat({
+      feature: 'error-diagnose',
+      messages: buildDiagnoseMessages({
+        error: errorText,
+        ...(candidateSql ? { sql: candidateSql } : {}),
+        ...(typeof msg?.dbType === 'string' ? { dbType: msg.dbType } : {}),
+      }),
+      title: l10n('ai.scenario.diagnose'),
+      connName: this.conn.name || this.conn.host,
+      ...(this.database ? { database: this.database } : {}),
+    });
+  }
+
+  /** 0 行诊断辅助（§6.7.1 C）：带入 SQL + 空结果到 Chat 排查。 */
+  private handleAiWhyEmpty(): void {
+    const bridge = this.requireAiBridge();
+    if (!bridge) return;
+    const snapshot = this.lastResultSnapshot;
+    bridge.requestChat({
+      feature: 'data-qa',
+      messages: buildDataQaMessages({
+        question: l10n('ai.whyEmpty.prompt'),
+        ...(snapshot ? { sql: snapshot.sql } : {}),
+        ...(snapshot && snapshot.fields.length > 0 ? { columns: snapshot.fields } : {}),
+        totalRows: 0,
+        ...(snapshot?.dbType ? { dbType: snapshot.dbType } : {}),
+      }),
+      title: l10n('ai.scenario.whyEmpty'),
+      connName: this.conn.name || this.conn.host,
+      connId: this.conn.id,
+      ...(this.database ? { database: this.database } : {}),
+    });
+  }
+
   protected async handleMessage(msg: any): Promise<void> {
     switch (msg.type) {
       case 'ready':
@@ -282,6 +396,16 @@ export class TableQueryView extends BaseWebView {
         break;
       case 'completion':
         await this.completionService.handle(String(msg.before || ''), String(msg.text || ''));
+        break;
+      // P9 S4：AI 场景入口（错误诊断 / 数据问答 / 0 行诊断）。
+      case 'aiDiagnose':
+        this.handleAiDiagnose(msg);
+        break;
+      case 'aiAskData':
+        this.handleAiAskData(msg);
+        break;
+      case 'aiWhyEmpty':
+        this.handleAiWhyEmpty();
         break;
     }
   }

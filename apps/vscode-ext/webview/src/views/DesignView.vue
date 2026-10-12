@@ -18,6 +18,9 @@ const dbType = ref('');
 const creating = ref(false);
 const tableName = ref('');
 const dbName = ref('');
+/** P9 S4：AI 生成输入行（webview 无 window.prompt，用内联输入）。 */
+const showAiGenerate = ref(false);
+const aiGenerateInput = ref('');
 
 /**
  * 表单校验提示。
@@ -318,6 +321,20 @@ function truthy(v: unknown): boolean {
       <button :class="{ active: tab === 'cols' }" @click="tab = 'cols'">{{ t('wv.design.tabColumns') }}</button>
       <button :class="{ active: tab === 'idx' }" @click="tab = 'idx'">{{ t('wv.design.tabIndexes') }}</button>
       <button :class="{ active: tab === 'ddl' }" @click="tab = 'ddl'">{{ t('wv.design.tabDdl') }}</button>
+      <span class="flex-spacer"></span>
+      <button class="btn ai-btn-inline" @click="showAiGenerate = !showAiGenerate">{{ t('wv.ai.design.generate') }}</button>
+      <button class="btn ai-btn-inline" @click="post({ type: 'aiReviewTable' })">{{ t('wv.ai.design.review') }}</button>
+    </div>
+    <div v-if="showAiGenerate && !creating" class="ai-design-row">
+      <input
+        v-model="aiGenerateInput"
+        class="input ai-design-input"
+        :placeholder="t('wv.ai.design.placeholder')"
+        @keydown.enter.prevent="post({ type: 'aiSuggestColumns', request: aiGenerateInput }); aiGenerateInput = ''; showAiGenerate = false"
+      />
+      <button class="btn primary" @click="post({ type: 'aiSuggestColumns', request: aiGenerateInput }); aiGenerateInput = ''; showAiGenerate = false">
+        {{ t('wv.ai.send') }}
+      </button>
     </div>
     <div class="error" v-if="error">{{ error }}</div>
     <div class="content" v-else>
@@ -528,6 +545,9 @@ function truthy(v: unknown): boolean {
 .tabs button.active { border-bottom-color: var(--vscode-focusBorder, #007fd4); color: var(--vscode-textLink-foreground, #4daafc); }
 .content { flex: 1; overflow: auto; padding: 8px; }
 .toolbar { margin-bottom: 8px; }
+.flex-spacer { flex: 1; }
+.ai-design-row { display: flex; gap: 6px; padding: 4px 8px; }
+.ai-design-input { flex: 1; }
 .btn { padding: 3px 10px; font-size: 12px; cursor: pointer; border: none; border-radius: 3px;
   background: var(--vscode-button-secondaryBackground, #3a3d41); color: var(--vscode-button-secondaryForeground, #ffffff); }
 .btn.sm { padding: 2px 6px; }

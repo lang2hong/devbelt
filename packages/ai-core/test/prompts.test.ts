@@ -40,6 +40,41 @@ describe('prompts', () => {
     expect(content).not.toContain('Schema:');
   });
 
+  it('nl2sql：v5 契约（schema-linking/ENUM 严格映射/意图复述/Assumptions/输出顺序）', () => {
+    const content = userContent(buildNl2SqlMessages({ request: '统计每日 GMV', schemaText: '# Database: MYSQL' }));
+    expect(content).toContain('schema linking');
+    expect(content).toContain('Do NOT guess enum values from world knowledge');
+    expect(content).toContain('**意图理解：**');
+    expect(content).toContain('Assumptions: none');
+    expect(content).toContain('at most 3 bullet points');
+  });
+
+  it('nl2sql：引用表/库 schema 绑定/域上下文/业务规则（仅显式提供时出现）', () => {
+    const bare = userContent(buildNl2SqlMessages({ request: 'x' }));
+    expect(bare).not.toContain('explicitly referenced');
+    expect(bare).not.toContain('Connected scope:');
+    expect(bare).not.toContain('domain context');
+    expect(bare).not.toContain('business rules');
+
+    const rich = userContent(
+      buildNl2SqlMessages({
+        request: 'x',
+        database: 'myapp',
+        schema: 'public',
+        referencedTables: ['orders', 'users'],
+        domainContext: 'GMV=已完成订单总额',
+        defaultDirectives: '排除软删除',
+      }),
+    );
+    expect(rich).toContain('explicitly referenced these tables: orders, users');
+    expect(rich).toContain('database "myapp"');
+    expect(rich).toContain('schema "public"');
+    expect(rich).toContain('Do not guess tables from other databases or schemas');
+    expect(rich).toContain('GMV=已完成订单总额');
+    expect(rich).toContain('排除软删除');
+    expect(rich).toContain('apply ONLY when the tables/columns they mention exist');
+  });
+
   it('explain：SQL 以代码块包装', () => {
     const content = userContent(buildExplainMessages({ sql: 'SELECT 1', dbType: 'SQLITE' }));
     expect(content).toContain('```sql\nSELECT 1\n```');

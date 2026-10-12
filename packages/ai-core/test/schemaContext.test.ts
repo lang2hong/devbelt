@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanColumnComment, serializeSchema, type AiSchemaInput } from '../src/schemaContext.js';
+import { cleanColumnComment, extractDictFragment, serializeSchema, type AiSchemaInput } from '../src/schemaContext.js';
 
 describe('serializeSchema', () => {
   it('空库：只输出头部', () => {
@@ -170,5 +170,47 @@ describe('serializeSchema · 列注释（S3 基础渲染）', () => {
     expect(result.text).not.toContain('--');
     expect(result.text).not.toContain('untrusted');
     expect(result.commentCount).toBe(0);
+  });
+});
+
+describe('状态列字典片段（D19）', () => {
+  it('extractDictFragment：status/type 类列名 + 键值注释 → 字典值拼接', () => {
+    expect(extractDictFragment('status', '订单状态；0=待支付 1=已支付 2=已取消')).toBe(
+      '字典值：0=待支付,1=已支付,2=已取消',
+    );
+    expect(extractDictFragment('order_status', 'pending:待支付, paid:已支付')).toBe('字典值：pending:待支付,paid:已支付');
+    expect(extractDictFragment('biz_type', '类型 A-正常 B-禁用')).toBe('字典值：A-正常,B-禁用');
+  });
+
+  it('非状态列名不提取；无可识别键值也不提取', () => {
+    expect(extractDictFragment('nickname', '0=禁用 1=正常')).toBe('');
+    expect(extractDictFragment('status', '就是状态')).toBe('');
+  });
+
+  it('去重 + 整体 500 字符上限', () => {
+    expect(extractDictFragment('status', '0=a 0=a 1=b')).toBe('字典值：0=a,1=b');
+    const long = Array.from({ length: 80 }, (_, i) => `k${i}=v${i}`).join(' ');
+    const fragment = extractDictFragment('state', long);
+    expect(fragment.length).toBe(500);
+  });
+
+  it('serializeSchema：字典片段追加在清洗注释后，且不受 120 字截断', () => {
+    const result = serializeSchema(
+      {
+        dbType: 'MYSQL',
+        tables: [
+          {
+            name: 'orders',
+            columns: [
+              { name: 'status', type: 'TINYINT', comment: '订单状态；0=待支付,1=已支付,2=已发货,3=已完成,4=已取消' },
+            ],
+          },
+        ],
+      },
+      { includeComments: true },
+    );
+    expect(result.text).toContain('字典值：0=待支付,1=已支付,2=已发货,3=已完成,4=已取消');
+    expect(result.text).toContain('-- 订单状态；');
+    expect(result.commentCount).toBe(1);
   });
 });

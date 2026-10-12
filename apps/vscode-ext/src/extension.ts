@@ -23,8 +23,13 @@ import { AiKeyStore } from './ai/aiKeyStore';
 import { AiContextStore } from './ai/aiContextStore';
 import { AiSessionStore } from './ai/aiSessionStore';
 import { AiService } from './ai/aiService';
-import { AiChatView } from './result/aiChatView';
+import { AiChatView, type AiChatViewDeps } from './result/aiChatView';
 import { registerAiCommands } from './commands/aiChat';
+import { registerAiEditorCommands } from './commands/aiEditor';
+import { AiSchemaContextBuilder } from './ai/schemaContext';
+import { AiStatusBar } from './ai/aiStatusBar';
+import { AiSqlRegistry } from './ai/aiSqlRegistry';
+import { AiBridge } from './ai/aiBridge';
 import { createSyncStatusBar } from './sync/syncStatusBar';
 import { createAuthStatusBar } from './sync/authStatusBar';
 import { HistoryStore } from './history/historyStore';
@@ -327,7 +332,34 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   const aiContextStore = new AiContextStore(context.globalState);
   const aiSessions = new AiSessionStore(context.globalState);
   const aiService = new AiService({ keyStore: aiKeyStore, auth, serverUrl, audit: auditLogger });
-  context.subscriptions.push(aiKeyStore, { dispose: () => AiChatView.closeAll() });
+  const aiSchemaBuilder = new AiSchemaContextBuilder();
+  AiSqlRegistry.init();
+  const aiStatusBar = new AiStatusBar();
+  const aiChatDeps: AiChatViewDeps = {
+    service: aiService,
+    sessions: aiSessions,
+    contextStore: aiContextStore,
+    keyStore: aiKeyStore,
+    manager,
+    connectionStore: store,
+    memento: context.globalState,
+    auth,
+    executor,
+    schemaBuilder: aiSchemaBuilder,
+  };
+  // 叶子视图（结果面板/表设计器）经桥发起 Chat 请求；未初始化时调用方给明确提示。
+  AiBridge.init({
+    requestChat: (request) => {
+      void AiChatView.open(aiChatDeps).requestExternal(request);
+    },
+  });
+  context.subscriptions.push(
+    aiKeyStore,
+    aiStatusBar,
+    { dispose: () => AiChatView.closeAll() },
+    { dispose: () => AiBridge.reset() },
+    { dispose: () => AiSqlRegistry.reset() },
+  );
   registerAiCommands({
     context,
     connectionStore: store,
@@ -335,16 +367,22 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     keyStore: aiKeyStore,
     service: aiService,
     openChat: () => {
-      AiChatView.open({
-        service: aiService,
-        sessions: aiSessions,
-        contextStore: aiContextStore,
-        keyStore: aiKeyStore,
-        manager,
-        connectionStore: store,
-        memento: context.globalState,
-        auth,
-      });
+      AiChatView.open(aiChatDeps);
+    },
+  });
+  registerAiEditorCommands({
+    context,
+    connCtx,
+    manager,
+    service: aiService,
+    contextStore: aiContextStore,
+    schemaBuilder: aiSchemaBuilder,
+    statusBar: aiStatusBar,
+    requestChat: (request) => {
+      void AiChatView.open(aiChatDeps).requestExternal(request);
+    },
+    openChatRefine: (payload) => {
+      AiChatView.openRefine(aiChatDeps, payload);
     },
   });
 

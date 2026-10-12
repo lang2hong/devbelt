@@ -15,13 +15,27 @@ function copy(): void {
     copied.value = false;
   }, 1500);
 }
+
+/** P9 S4：应用到编辑器（活动 SQL 编辑器插入/替换；否则新 untitled 文档）。 */
+function apply(): void {
+  post({ type: 'applyCode', text: props.code });
+}
+
+/** P9 S4：执行（host 复用现有确认/只读/生产门禁；AI 永不自动执行）。 */
+function execute(): void {
+  post({ type: 'executeSql', text: props.code });
+}
 </script>
 
 <template>
   <div class="ai-code">
     <div class="ai-code-head">
       <span class="ai-code-lang">{{ lang || 'code' }}</span>
-      <button class="ai-btn ai-code-copy" @click="copy">{{ copied ? t('wv.ai.copied') : t('wv.ai.copy') }}</button>
+      <div class="ai-code-actions">
+        <button class="ai-btn ai-code-copy" @click="copy">{{ copied ? t('wv.ai.copied') : t('wv.ai.copy') }}</button>
+        <button class="ai-btn" @click="apply">{{ t('wv.ai.insert') }}</button>
+        <button class="ai-btn" @click="execute">{{ t('wv.ai.execute') }}</button>
+      </div>
     </div>
     <pre class="ai-code-body"><code>{{ code }}</code></pre>
   </div>
@@ -34,6 +48,10 @@ function copy(): void {
   margin: 4px 0;
   overflow: hidden;
   background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12));
+}
+.ai-code-actions {
+  display: flex;
+  gap: 4px;
 }
 .ai-code-head {
   display: flex;

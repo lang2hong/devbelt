@@ -6,6 +6,7 @@ import MessageList from '../components/ai/MessageList.vue';
 import ChatInput from '../components/ai/ChatInput.vue';
 import ConversationDrawer from '../components/ai/ConversationDrawer.vue';
 import ContextBar from '../components/ai/ContextBar.vue';
+import ContextDetailDrawer, { type ContextDetailState } from '../components/ai/ContextDetailDrawer.vue';
 
 interface SessionSummary {
   id: string;
@@ -44,6 +45,9 @@ const selectedConnId = ref<string | undefined>(undefined);
 const input = ref('');
 const showSessions = ref(false);
 const includeColumnComments = ref(true);
+/** P9 S4：Context 抽屉明细（schema/域上下文/默认指令原文，只读）。 */
+const showContextDetail = ref(false);
+const contextDetail = ref<ContextDetailState | null>(null);
 
 const generating = computed(() => streaming.value !== null);
 
@@ -99,6 +103,20 @@ onMounted(() => {
       case 'contextChanged':
         context.value = msg.context ?? null;
         break;
+      case 'contextDetail':
+        contextDetail.value = {
+          schemaText: String(msg.schemaText ?? ''),
+          domainContext: String(msg.domainContext ?? ''),
+          defaultDirectives: String(msg.defaultDirectives ?? ''),
+          commentCount: Number(msg.context?.commentCount ?? 0),
+          tableCount: Number(msg.context?.tableCount ?? 0),
+          totalTables: Number(msg.context?.totalTables ?? 0),
+        };
+        showContextDetail.value = true;
+        break;
+      case 'prefillInput':
+        if (typeof msg.text === 'string') input.value = msg.text;
+        break;
       default:
         break;
     }
@@ -145,6 +163,13 @@ function selectConnection(id: string | null): void {
   selectedConnId.value = id ?? undefined;
   post({ type: 'selectConnection', connId: id });
 }
+
+/** P9 S4：打开 Context 明细抽屉（按需向 host 拉 schema/域上下文原文）。 */
+function openContextDetail(): void {
+  showContextDetail.value = true;
+  contextDetail.value = null;
+  post({ type: 'requestContextDetail' });
+}
 </script>
 
 <template>
@@ -161,6 +186,7 @@ function selectConnection(id: string | null): void {
       @set-api-key="post({ type: 'setApiKey' })"
       @clear-api-key="post({ type: 'clearApiKey' })"
       @test-connection="post({ type: 'testConnection' })"
+      @request-context-detail="openContextDetail"
     />
     <div class="ai-toolbar">
       <button class="ai-btn" @click="newChat">{{ t('wv.ai.newChat') }}</button>
@@ -169,6 +195,11 @@ function selectConnection(id: string | null): void {
       <button v-if="generating" class="ai-btn" @click="stop">{{ t('wv.ai.stop') }}</button>
     </div>
     <div class="ai-body">
+      <ContextDetailDrawer
+        v-if="showContextDetail"
+        :detail="contextDetail"
+        @close="showContextDetail = false"
+      />
       <ConversationDrawer
         v-if="showSessions"
         :sessions="sessions"

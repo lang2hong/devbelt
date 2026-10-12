@@ -9,6 +9,8 @@ import { classifyWriteKind } from '../utils/sqlRisk';
 import { buildCountSql, buildTableSelect, type ColumnTypeMap, type FilterCondition } from './tableQuerySql';
 import { diagError } from '../utils/diagnostics';
 import { l10n } from '../i18n';
+import { containsSecretSql } from '../utils/sqlSecret';
+import { AiSqlRegistry } from '../ai/aiSqlRegistry';
 
 /**
  * 查询执行器：持有表/查询的查询状态（分页、排序、筛选、运行句柄），
@@ -136,6 +138,7 @@ export class QueryRunner {
     database = this.database || this.conn.database,
   ): Promise<void> {
     if (this.disposed) return;
+    const startedAt = Date.now();
     let transactionState: 'active' | 'committed' | 'rolledback' | undefined;
     let session: any = undefined;
     try {
@@ -222,6 +225,7 @@ export class QueryRunner {
         });
         this.post({
           type: 'result', result: { ...result, fields: fieldsWithType }, pkColumns: pkCols, total, sql, dbType: this.conn.dbType,
+          aiGenerated: AiSqlRegistry.tryGet()?.isAiSql(sql) ?? false,
         });
       } else {
         // 写语句/DDL：交给多结果分支展示受影响行数，并保留上一次的列布局
@@ -229,12 +233,25 @@ export class QueryRunner {
         if (!this.table) this.lastFields = (result?.fields || []).map((f: any) => f.name);
         this.post({
           type: 'results', results, sql, transactionState, dbType: this.conn.dbType,
+          aiGenerated: AiSqlRegistry.tryGet()?.isAiSql(sql) ?? false,
         });
       }
       onExecuted?.(result);
     } catch (err) {
       diagError('query failed', (err as Error).message);
-      this.post({ type: 'error', message: (err as Error).message });
+      // P9 S4：错误诊断附加字段（结构增量，旧渲染忽略）。message+sql 双扫描：
+      // 命中口令字面量时 sqlForAi 置 null，webview 默认阻断发送并要求显式确认。
+      const message = (err as Error).message;
+      const secretRisk = containsSecretSql(message) || containsSecretSql(sql);
+      this.post({
+        type: 'error',
+        message,
+        sqlForAi: secretRisk ? null : sql,
+        dbType: this.conn.dbType,
+        costTime: Date.now() - startedAt,
+        askAi: true,
+        secretRisk,
+      });
       onExecuted?.(undefined, err as Error);
       if (transactionState === 'active' && session) {
         try {

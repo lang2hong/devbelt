@@ -397,6 +397,32 @@
         "category": "DB Client"
       },
       {
+        "command": "devbelt.ai.explainSql",
+        "title": "%cmd.ai.explainSql%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.ai.optimizeSql",
+        "title": "%cmd.ai.optimizeSql%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.ai.nl2sqlGhost",
+        "title": "%cmd.ai.nl2sqlGhost%",
+        "category": "DB Client",
+        "icon": "$(wand)"
+      },
+      {
+        "command": "devbelt.ai.nl2sqlDetails",
+        "title": "%cmd.ai.nl2sqlDetails%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.ai.openChatRefine",
+        "title": "%cmd.ai.openChatRefine%",
+        "category": "DB Client"
+      },
+      {
         "command": "devbelt.authenticator",
         "title": "%cmd.authenticator%",
         "category": "DB Client",
@@ -841,6 +867,23 @@
       }
     ],
     "menus": {
+      "editor/context": [
+        {
+          "command": "devbelt.ai.nl2sqlGhost",
+          "when": "editorLangId == sql",
+          "group": "ai@1"
+        },
+        {
+          "command": "devbelt.ai.explainSql",
+          "when": "editorLangId == sql",
+          "group": "ai@2"
+        },
+        {
+          "command": "devbelt.ai.optimizeSql",
+          "when": "editorLangId == sql",
+          "group": "ai@3"
+        }
+      ],
       "view/title": [
         {
           "command": "devbelt.addConnection",
@@ -1228,6 +1271,16 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "devbelt.ai.domainContext",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection(Open|Closed)\\./",
+          "group": "ai@1"
+        },
+        {
+          "command": "devbelt.ai.defaultDirectives",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection(Open|Closed)\\./",
+          "group": "ai@2"
+        },
         {
           "command": "devbelt.previewTable",
           "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
@@ -2169,6 +2222,25 @@
           "maximum": 2,
           "description": "Sampling temperature for AI requests.",
           "markdownDescription": "AI 请求采样温度（默认 0.2，SQL 生成偏确定性）。"
+        },
+        "devbelt.ai.schemaContextMode": {
+          "type": "string",
+          "enum": [
+            "current-db",
+            "recent-only",
+            "off"
+          ],
+          "default": "current-db",
+          "description": "How much schema context to inject: current-db (default), recent-only (reserved, currently behaves as current-db), off (no schema).",
+          "markdownDescription": "schema 注入模式：`current-db` 当前库（默认）；`recent-only` 预留（v1 暂等同 current-db）；`off` 不注入。"
+        },
+        "devbelt.ai.dataSampleRows": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Number of sample rows attached to data-QA questions after explicit confirmation.",
+          "markdownDescription": "数据问答在用户单次确认后附加的样本行数（默认 10，上限 50；敏感列打码）。"
         }
       }
     },
@@ -2195,6 +2267,11 @@
       ]
     },
     "keybindings": [
+      {
+        "command": "devbelt.ai.nl2sqlGhost",
+        "key": "alt+a",
+        "when": "editorLangId == sql"
+      },
       {
         "command": "devbelt.runQuery",
         "key": "ctrl+enter",

@@ -52,21 +52,24 @@ describe('AiSchemaContextBuilder（扩展侧薄封装）', () => {
     expect(snapshot!.text).not.toContain('-- 0=禁用');
   });
 
-  it('60s TTL 缓存：重复 build 不重复抓元数据；invalidate 后重抓', async () => {
+  it('60s TTL 缓存按元数据键（conn+db+schema）：includeComments/userText 变化不重抓；invalidate 后重抓', async () => {
     const { session, getTables } = makeSession();
     const builder = new AiSchemaContextBuilder();
     await builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: true });
     await builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: true });
     expect(getTables).toHaveBeenCalledTimes(1);
 
+    // 序列化参数变化（注释开关/预筛文本）只影响序列化，不重抓元数据。
+    await builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: false, userText: '订单' });
+    expect(getTables).toHaveBeenCalledTimes(1);
+
     builder.invalidate('c1');
     await builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: true });
     expect(getTables).toHaveBeenCalledTimes(2);
 
-    // 不同连接/不同 includeComments 各占独立缓存键。
+    // 不同连接独立缓存。
     await builder.build(session, { connId: 'c2', dbType: 'MYSQL', includeComments: true });
-    await builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: false });
-    expect(getTables).toHaveBeenCalledTimes(4);
+    expect(getTables).toHaveBeenCalledTimes(3);
   });
 
   it('元数据失败 → null（聊天降级为无 schema，不抛错）', async () => {
@@ -75,12 +78,54 @@ describe('AiSchemaContextBuilder（扩展侧薄封装）', () => {
     await expect(builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: true })).resolves.toBeNull();
   });
 
-  it('大库：S3 上限 50 表（S4 换批量查询+预筛），totalTables 反映真实数量', async () => {
-    const { session } = makeSession({ tables: 60 });
+  it('大库：>200 表截断（totalTables 反映真实数量）', async () => {
+    const { session } = makeSession({ tables: 260 });
     const builder = new AiSchemaContextBuilder();
     const snapshot = await builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: false });
-    expect(snapshot!.tableCount).toBe(50);
-    expect(snapshot!.totalTables).toBe(60);
+    expect(snapshot!.tableCount).toBe(200);
+    expect(snapshot!.totalTables).toBe(260);
     expect(snapshot!.truncated).toBe(true);
+  });
+
+  it('大库预筛：@引用置顶（截断时保留），关键词命中表置顶', async () => {
+    const { session } = makeSession({ tables: 260 });
+    const builder = new AiSchemaContextBuilder();
+    const snapshot = await builder.build(session, {
+      connId: 'c1',
+      dbType: 'MYSQL',
+      includeComments: false,
+      referencedTables: ['t259'],
+      userText: '查询 t250 的数据',
+    });
+    expect(snapshot!.text).toContain('## Table: t259');
+    expect(snapshot!.text).toContain('## Table: t250');
+    expect(snapshot!.tableCount).toBe(200);
+  });
+
+  it('MySQL 批量列查询：单条 information_schema（含 ENUM/注释），不再逐表 getColumns', async () => {
+    const getColumns = vi.fn(async () => []);
+    const query = vi.fn(async () => ({
+      rows: [
+        { TABLE_NAME: 'orders', COLUMN_NAME: 'id', COLUMN_TYPE: 'BIGINT', IS_NULLABLE: 'NO', COLUMN_DEFAULT: null, COLUMN_KEY: 'PRI', COLUMN_COMMENT: '' },
+        { TABLE_NAME: 'orders', COLUMN_NAME: 'status', COLUMN_TYPE: "ENUM('pending','paid')", IS_NULLABLE: 'NO', COLUMN_DEFAULT: 'pending', COLUMN_KEY: '', COLUMN_COMMENT: '订单状态；pending=待支付,paid=已支付' },
+      ],
+    }));
+    const session = {
+      metadata: {
+        getTables: vi.fn(async () => [{ name: 'orders', comment: '' }]),
+        getColumns,
+        getForeignKeys: vi.fn(async () => []),
+      },
+      query: { query },
+    } as unknown as SqlConnectionSession;
+
+    const builder = new AiSchemaContextBuilder();
+    const snapshot = await builder.build(session, { connId: 'c1', dbType: 'mysql', includeComments: true, database: 'app' });
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(String((query.mock.calls[0] as unknown[])[0])).toContain('information_schema.COLUMNS');
+    expect(getColumns).not.toHaveBeenCalled();
+    expect(snapshot!.text).toContain("- status ENUM('pending','paid') NOT NULL DEFAULT pending");
+    expect(snapshot!.text).toContain('字典值：pending=待支付,paid=已支付');
+    expect(snapshot!.commentCount).toBe(1);
   });
 });

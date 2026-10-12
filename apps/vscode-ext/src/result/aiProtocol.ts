@@ -97,6 +97,21 @@ export interface AiSessionLoadedDown {
   session: AiChatSession;
 }
 
+/** 预填输入框（外部入口/refine 追问句式）。 */
+export interface AiPrefillInputDown {
+  type: 'prefillInput';
+  text: string;
+}
+
+/** Context 抽屉明细（只读展示本次注入的 schema/域上下文/默认指令原文）。 */
+export interface AiContextDetailDown {
+  type: 'contextDetail';
+  context: AiContextState;
+  schemaText: string;
+  domainContext: string;
+  defaultDirectives: string;
+}
+
 export type AiDownMessage =
   | AiInitDown
   | AiChunkDown
@@ -104,7 +119,9 @@ export type AiDownMessage =
   | AiQuotaUpdateDown
   | AiContextChangedDown
   | AiSessionListDown
-  | AiSessionLoadedDown;
+  | AiSessionLoadedDown
+  | AiPrefillInputDown
+  | AiContextDetailDown;
 
 // ── Up（webview → host）──
 
@@ -133,7 +150,10 @@ export type AiUpMessage =
   | { type: 'setApiKey' }
   | { type: 'clearApiKey' }
   | { type: 'testConnection' }
-  | { type: 'copyCode'; text: string };
+  | { type: 'copyCode'; text: string }
+  | { type: 'applyCode'; text: string }
+  | { type: 'executeSql'; text: string }
+  | { type: 'requestContextDetail' };
 
 /** 会话消息类型在协议层再导出，webview 侧从 ai-protocol 单点取。 */
 export type { AiChatMessage, AiChatSession };

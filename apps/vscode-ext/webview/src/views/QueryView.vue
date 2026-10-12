@@ -34,6 +34,12 @@ const activeResultIndex = ref(0);
 const transactionState = ref<'active' | 'committed' | 'rolledback' | ''>('');
 const pkColumns = ref<string[]>([]);
 const error = ref('');
+/** P9 S4：错误诊断附加信息（askAi/secretRisk 由 host 组装；旧消息无这些字段则不显示按钮）。 */
+const errorAi = ref<{ sqlForAi: string | null; dbType?: string; secretRisk: boolean; askAi: boolean } | null>(null);
+/** 敏感信息确认闸（webview 不支持 window.confirm，用内联确认行）。 */
+const aiConfirmPending = ref(false);
+/** P9 S4：最近结果是否来自 AI 生成 SQL（0 行诊断按钮显示条件）。 */
+const resultAiGenerated = ref(false);
 const meta = ref('');
 const sortCol = ref('');
 const sortDir = ref('');
@@ -155,6 +161,7 @@ onMounted(() => {
       syncLimitFromSql(msg.sql);
       error.value = '';
       if (msg.dbType) dbType.value = msg.dbType;
+      resultAiGenerated.value = !!msg.aiGenerated;
       meta.value = describeResult(msg.result);
     } else if (msg.type === 'results') {
       const list = msg.results || [];
@@ -199,6 +206,10 @@ onMounted(() => {
       showCompletion.value = filteredCandidates.value.length > 0;
     } else if (msg.type === 'error') {
       error.value = msg.message;
+      errorAi.value = msg.askAi
+        ? { sqlForAi: msg.sqlForAi ?? null, dbType: msg.dbType, secretRisk: !!msg.secretRisk, askAi: true }
+        : null;
+      aiConfirmPending.value = false;
       rows.value = [];
       fields.value = [];
       total.value = undefined;
@@ -219,10 +230,29 @@ onUnmounted(() => cleanup?.());
 
 function run() {
   error.value = '';
+  errorAi.value = null;
+  aiConfirmPending.value = false;
   sortCol.value = '';
   sortDir.value = '';
   offset.value = 0;
   post({ type: 'run', sql: sql.value });
+}
+
+/** P9 S4：错误诊断（含敏感信息确认闸）。 */
+function aiDiagnose() {
+  const info = errorAi.value;
+  if (!info) return;
+  if (info.secretRisk && !aiConfirmPending.value) {
+    aiConfirmPending.value = true;
+    return;
+  }
+  post({ type: 'aiDiagnose', sql: info.sqlForAi, message: error.value, dbType: info.dbType });
+  aiConfirmPending.value = false;
+}
+
+/** P9 S4：0 行结果 → "问 AI 为什么查不到"（带入 SQL + 空结果）。 */
+function aiWhyEmpty() {
+  post({ type: 'aiWhyEmpty' });
 }
 
 function selectResult(index: number) {
@@ -486,7 +516,24 @@ function onKeydown(e: KeyboardEvent) {
         <span class="tab-close" @click.stop="closeResult(i)">×</span>
       </button>
     </div>
-    <div class="error" v-if="error">{{ error }}</div>
+    <div class="error" v-if="error">
+      {{ error }}
+      <div v-if="errorAi" class="ai-error-actions">
+        <template v-if="aiConfirmPending">
+          <span class="ai-secret-warn">{{ t('wv.ai.diagnose.secretConfirm') }}</span>
+          <button class="btn" @click="aiDiagnose">{{ t('wv.ai.diagnose.continue') }}</button>
+          <button class="btn" @click="aiConfirmPending = false">{{ t('wv.ai.cancel') }}</button>
+        </template>
+        <template v-else>
+          <button class="btn" @click="aiDiagnose">
+            {{ errorAi.secretRisk ? t('wv.ai.diagnose.secretRisk') : t('wv.ai.diagnose.button') }}
+          </button>
+        </template>
+      </div>
+    </div>
+    <div v-if="resultAiGenerated && !error && rows.length === 0 && fields.length > 0" class="ai-why-empty">
+      <button class="btn" @click="aiWhyEmpty">{{ t('wv.ai.whyEmpty.button') }}</button>
+    </div>
     <div v-if="rows.length > 0 && viewKind !== 'structure'" class="view-toggle">
       <button class="btn" :class="{ active: viewMode === 'table' }" @click="viewMode = 'table'">{{ t('wv.query.tabTable') }}</button>
       <button class="btn" :class="{ active: viewMode === 'chart' }" @click="viewMode = 'chart'">{{ t('wv.query.tabChart') }}</button>
@@ -571,4 +618,7 @@ function onKeydown(e: KeyboardEvent) {
 .result-info { width: 100%; border-collapse: collapse; }
 .result-info td { padding: 8px 12px; font-size: 12px; color: var(--vscode-foreground, #cccccc);
   border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); background: var(--vscode-editor-background, #1e1e1e); }
+.ai-error-actions { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.ai-secret-warn { color: var(--vscode-editorWarning-foreground, #cca700); font-size: 12px; }
+.ai-why-empty { padding: 6px 8px; }
 </style>

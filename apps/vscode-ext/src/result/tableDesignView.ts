@@ -9,6 +9,8 @@ import { AuditLogger } from '../utils/auditLogger';
 import { confirmSqlExecution } from '../utils/sqlSafety';
 import { pgSchemaFor } from '../utils/sql';
 import { l10n } from '../i18n';
+import { buildSchemaDesignMessages } from '@devbelt/ai-core';
+import { AiBridge } from '../ai/aiBridge';
 
 /**
  * 把来自 webview 的 `msg.spec` 规整为 ColumnSpec。
@@ -34,6 +36,8 @@ export class TableDesignView extends BaseWebView {
 
   /** 待建表模式：table 为空，前端展示建表表单。 */
   private table: string;
+  /** 最近一次 loadData 的结构快照（AI 审阅/生成的结构文本素材）。 */
+  private lastData?: { columns: any[]; indexes: any[]; ddl?: string };
 
   private constructor(
     private readonly conn: SavedConnection,
@@ -103,6 +107,17 @@ export class TableDesignView extends BaseWebView {
     }
     if (msg.type === 'createTable') {
       await this.createTable(msg);
+      return;
+    }
+    // P9 S4：AI 生成/审阅（建表模式也可用 generate）。结果回 Chat 展示
+    // （DDL 代码块可"插入编辑器"）；表内 diff 逐条应用为后续增量。
+    if (msg.type === 'aiSuggestColumns') {
+      this.handleAiDesign('generate', String(msg.request ?? ''));
+      return;
+    }
+    if (msg.type === 'aiReviewTable') {
+      if (!this.table) return;
+      this.handleAiDesign('review');
       return;
     }
     // 建表未完成前不接受任何针对表的 DDL（表还不存在）
@@ -271,6 +286,45 @@ export class TableDesignView extends BaseWebView {
     validateIdent(name);
   }
 
+  /** AI 表设计场景：结构文本 → Chat（schema-design feature）。 */
+  private handleAiDesign(mode: 'generate' | 'review', request = ''): void {
+    const bridge = AiBridge.tryGet();
+    if (!bridge) {
+      this.post({ type: 'error', message: l10n('ai.notEnabled') });
+      return;
+    }
+    bridge.requestChat({
+      feature: 'schema-design',
+      messages: buildSchemaDesignMessages({
+        mode,
+        ...(mode === 'generate' && request ? { request } : {}),
+        ...(mode === 'review' && this.table ? { tableName: this.table } : {}),
+        ...(this.structureText() ? { schemaText: this.structureText() } : {}),
+        dbType: this.conn.dbType,
+      }),
+      title: mode === 'generate' ? l10n('ai.scenario.designGenerate') : l10n('ai.scenario.designReview'),
+      connName: this.conn.name || this.conn.host,
+      ...(this.database ? { database: this.database } : {}),
+    });
+  }
+
+  /** 当前结构 → 紧凑文本（列/索引/注释；注释按 120 字截断，与 schema 注入同口径）。 */
+  private structureText(): string | undefined {
+    if (!this.lastData) return undefined;
+    const lines: string[] = [`Table: ${this.table || '(new table)'}`];
+    for (const c of this.lastData.columns ?? []) {
+      const parts = [String(c.name ?? ''), String(c.type ?? c.simpleType ?? '')];
+      if (c.isNotNull) parts.push('NOT NULL');
+      if (c.isPrimary) parts.push('PRIMARY KEY');
+      if (c.comment) parts.push(`-- ${String(c.comment).replace(/\s+/g, ' ').slice(0, 120)}`);
+      lines.push(`- ${parts.join(' ')}`);
+    }
+    for (const i of this.lastData.indexes ?? []) {
+      lines.push(`- ${i.isUnique ? 'UNIQUE ' : ''}INDEX ${String(i.name ?? '')} (${(i.columns ?? []).join(', ')})`);
+    }
+    return lines.join('\n');
+  }
+
   private async loadData(): Promise<void> {
     try {
       const session = await this.manager.connectSql(this.conn, this.database);
@@ -279,6 +333,7 @@ export class TableDesignView extends BaseWebView {
         session.metadata.getIndexes(this.table, this.database, this.pgSchema),
         session.table.getCreateSql(this.table, this.database, this.pgSchema),
       ]);
+      this.lastData = { columns, indexes, ddl };
       this.post({ type: 'data', columns, indexes, ddl });
     } catch (err) {
       this.post({ type: 'error', message: (err as Error).message });

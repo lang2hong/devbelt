@@ -4,13 +4,17 @@ import type { SavedConnection } from '@devbelt/db-host/connection/connectionStor
 import { DatabaseType } from '@devbelt/db-core';
 import { BaseWebView } from './baseWebView.js';
 import { getAiChatHtml } from '../webview/html.js';
-import { AiService, readAiConfig, type AiMutableStream } from '../ai/aiService.js';
+import { AiService, readAiConfig, type AiMutableStream, type AiRequestMeta } from '../ai/aiService.js';
 import { AiSessionStore, type AiChatSession } from '../ai/aiSessionStore.js';
 import { AiContextStore } from '../ai/aiContextStore.js';
 import { AiKeyStore } from '../ai/aiKeyStore.js';
 import { AiSchemaContextBuilder } from '../ai/schemaContext.js';
 import type { ConnectionManager } from '../connection/connectionManager.js';
 import type { ConnectionStore } from '@devbelt/db-host/connection/connectionStore';
+import { AiSqlRegistry } from '../ai/aiSqlRegistry.js';
+import { injectBusinessRules, type RefinePayload } from '../ai/nl2sqlRunner.js';
+import type { ExternalAiRequest } from '../ai/aiBridge.js';
+import type { QueryExecutor } from './queryExecutor.js';
 import type {
   AiContextState,
   AiDownMessage,
@@ -34,6 +38,8 @@ export interface AiChatViewDeps {
   memento: vscode.Memento;
   /** 登录态（init payload 的 isLoggedIn 字段；服务端代理"去登录"引导）。 */
   auth: { isLoggedIn(): boolean };
+  /** Chat 代码块"执行"复用现有执行路径/门禁（QueryExecutor → TableQueryView runner）。 */
+  executor: QueryExecutor;
   schemaBuilder?: AiSchemaContextBuilder;
 }
 
@@ -70,6 +76,13 @@ export class AiChatView extends BaseWebView {
     }
     AiChatView.current = new AiChatView(deps);
     return AiChatView.current;
+  }
+
+  /** 打开 Chat 并进入"细化"模式（Alt+A 状态条回路）：新建会话 + 上下文卡片。 */
+  static openRefine(deps: AiChatViewDeps, payload: RefinePayload): AiChatView {
+    const view = AiChatView.open(deps);
+    view.applyRefine(payload);
+    return view;
   }
 
   static currentInstance(): AiChatView | undefined {
@@ -135,6 +148,17 @@ export class AiChatView extends BaseWebView {
       case 'requestQuotaRefresh':
         await this.refreshQuota();
         return;
+      case 'applyCode': {
+        if (typeof msg.text === 'string' && msg.text.trim()) await this.applyCodeToEditor(msg.text);
+        return;
+      }
+      case 'executeSql': {
+        if (typeof msg.text === 'string' && msg.text.trim()) await this.executeAiSql(msg.text);
+        return;
+      }
+      case 'requestContextDetail':
+        await this.pushContextDetail();
+        return;
       case 'openSettings':
         await vscode.commands.executeCommand('workbench.action.openSettings', 'devbelt.ai');
         return;
@@ -174,25 +198,32 @@ export class AiChatView extends BaseWebView {
     if (this.selectedConnId) session.connId = this.selectedConnId;
     this.saveSession(session);
 
-    this.abortStream();
-    const streamId = ++this.streamSeq;
-
     const { schemaText } = await this.buildContext();
-    const config = readAiConfig();
     const messages = this.composeMessages(session, schemaText);
     const conn = this.selectedConnection();
+    await this.runRequest(session, messages, {
+      feature: 'chat',
+      ...(conn ? { connName: conn.name } : {}),
+      ...(session.connId && conn?.database ? { database: conn.database } : {}),
+    });
+  }
+
+  /**
+   * 流式请求核心（send / 外部入口共用）：abort 在途流 → streamChat → post chunk/finish →
+   * 会话落盘 → 配额刷新。`messages` 为完整请求消息（已含历史与系统上下文）。
+   */
+  private async runRequest(session: AiChatSession, messages: ChatMessage[], meta: AiRequestMeta): Promise<void> {
+    this.abortStream();
+    const streamId = ++this.streamSeq;
+    const config = readAiConfig();
     const stream = this.deps.service.streamChat(
       {
         model: config.model || 'default',
         messages,
         temperature: config.temperature,
-        feature: 'chat',
+        feature: meta.feature,
       },
-      {
-        feature: 'chat',
-        ...(conn ? { connName: conn.name } : {}),
-        ...(session.connId && conn?.database ? { database: conn.database } : {}),
-      },
+      meta,
     );
     this.activeStream = stream;
 
@@ -231,6 +262,97 @@ export class AiChatView extends BaseWebView {
       if (this.streamSeq === streamId) this.activeStream = undefined;
     }
     void this.refreshQuota();
+  }
+
+  /**
+   * 外部入口请求（错误诊断/数据问答/0 行/解释优化，经 AiBridge）：新建会话并直接流式。
+   * data-qa 场景按连接注入业务规则 user-role 区块（与 chat/nl2sql 同口径）。
+   */
+  async requestExternal(request: ExternalAiRequest): Promise<void> {
+    const connId = request.connId ?? this.selectedConnId;
+    if (request.connId && this.deps.connectionStore.get(request.connId)) {
+      this.selectedConnId = request.connId;
+      void this.deps.memento.update(LAST_CONN_KEY, request.connId);
+      void this.pushContext();
+    }
+    const session = this.deps.sessions.create(connId);
+    session.title = request.title;
+    this.activeSessionId = session.id;
+    this.saveSession(session);
+    this.pushActiveSession();
+    const messages = injectBusinessRules(request.messages, this.deps.contextStore, connId, request.feature);
+    if (request.prefillInput) this.post({ type: 'prefillInput', text: request.prefillInput } as never);
+    await this.runRequest(session, messages, {
+      feature: request.feature,
+      ...(request.connName ? { connName: request.connName } : {}),
+      ...(request.database ? { database: request.database } : {}),
+    });
+  }
+
+  /** Alt+A "在 Chat 中细化"：新建会话 + 上下文卡片（用户直接改述，下一条消息即带上下文）。 */
+  private applyRefine(payload: RefinePayload): void {
+    if (payload.connId && this.deps.connectionStore.get(payload.connId)) {
+      this.selectedConnId = payload.connId;
+      void this.deps.memento.update(LAST_CONN_KEY, payload.connId);
+    }
+    void this.pushContext();
+    const session = this.deps.sessions.create(this.selectedConnId);
+    session.title = l10n('ai.refine.title');
+    const parts = [
+      '[Refine context]',
+      `Original request: ${payload.request}`,
+      payload.paraphrase ? `Intent paraphrase: ${payload.paraphrase}` : '',
+      payload.assumptions.length > 0
+        ? `Assumptions:\n${payload.assumptions.map((a) => `- ${a}`).join('\n')}`
+        : '',
+      payload.sql ? `Generated SQL:\n\`\`\`sql\n${payload.sql}\n\`\`\`` : '',
+      'The user will now restate or refine the request; adjust the SQL accordingly.',
+    ].filter(Boolean);
+    session.messages.push({ role: 'user', content: parts.join('\n\n') });
+    this.activeSessionId = session.id;
+    this.saveSession(session);
+    this.pushActiveSession();
+  }
+
+  /** 代码块"应用到编辑器"：活动 SQL 编辑器插入/替换；否则打开新 untitled SQL 文档。 */
+  private async applyCodeToEditor(text: string): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (editor && editor.document.languageId === 'sql') {
+      await editor.edit((builder) => {
+        if (editor.selection.isEmpty) builder.insert(editor.selection.active, text);
+        else builder.replace(editor.selection, text);
+      });
+      return;
+    }
+    const doc = await vscode.workspace.openTextDocument({ language: 'sql', content: text });
+    await vscode.window.showTextDocument(doc, { preview: false });
+  }
+
+  /**
+   * 代码块"执行"：标记 AI 归因（0 行诊断）后走 QueryExecutor 复用现有执行路径
+   * （确认门禁/只读/生产 gate 全部照旧；AI 永不自动执行）。
+   */
+  private async executeAiSql(text: string): Promise<void> {
+    const conn = this.selectedConnection();
+    if (!conn) {
+      void vscode.window.showInformationMessage(l10n('ai.execute.noConnection'));
+      return;
+    }
+    AiSqlRegistry.tryGet()?.mark(text);
+    await this.deps.executor.run(conn, text, conn.database, 'reuse');
+  }
+
+  /** Context 抽屉明细：schema 文本 + 域上下文/默认指令原文（只读展示）。 */
+  private async pushContextDetail(): Promise<void> {
+    const { state, schemaText } = await this.buildContext();
+    const conn = this.selectedConnection();
+    this.post({
+      type: 'contextDetail',
+      context: state,
+      schemaText: schemaText ?? '',
+      domainContext: conn ? this.deps.contextStore.getDomainContext(conn.id) : '',
+      defaultDirectives: conn ? this.deps.contextStore.getDefaultDirectives(conn.id) : '',
+    } as never);
   }
 
   private abortStream(): void {

@@ -66,6 +66,9 @@ const DEFAULT_MAX_COLUMNS_PER_TABLE = 50;
 /** 列注释单行截断上限（D19：防任意长度文本注入通道）。 */
 const COMMENT_MAX_CHARS = 120;
 
+/** 状态列字典片段的整体上限（D19；超出即截断，防注释成为任意长度注入通道）。 */
+const DICT_FRAGMENT_MAX_CHARS = 500;
+
 /** 清洗列注释：控制字符/换行 → 空格，压缩空白，截断 120 字符。 */
 export function cleanColumnComment(raw: string): string {
   const single = raw
@@ -73,6 +76,27 @@ export function cleanColumnComment(raw: string): string {
     .replace(/\s+/g, ' ')
     .trim();
   return single.length > COMMENT_MAX_CHARS ? `${single.slice(0, COMMENT_MAX_CHARS - 1)}…` : single;
+}
+
+/**
+ * 状态列字典片段提取（D19）：列名含 `status|state|type|kind|code` 且注释含
+ * `键[:=-]值` 形态时，提取键值对拼成 `字典值：k1=v1,k2=v2`（去重、整体 ≤500 字符、
+ * 去换行/控制字符；仍属注释文本、不做脱敏——字典值正是消歧所需）。
+ */
+export function extractDictFragment(columnName: string, rawComment: string): string {
+  if (!/status|state|type|kind|code/i.test(columnName)) return '';
+  const cleaned = rawComment.replace(/[\u0000-\u001f\u007f]+/g, ' ');
+  const pairs: string[] = [];
+  const seen = new Set<string>();
+  for (const match of cleaned.matchAll(/([A-Za-z0-9_\u4e00-\u9fff]+\s*[:\-=]\s*[^,;；\s]+)/g)) {
+    const pair = match[1].replace(/\s+/g, '');
+    if (seen.has(pair)) continue;
+    seen.add(pair);
+    pairs.push(pair);
+  }
+  if (pairs.length === 0) return '';
+  const joined = `字典值：${pairs.join(',')}`;
+  return joined.length > DICT_FRAGMENT_MAX_CHARS ? joined.slice(0, DICT_FRAGMENT_MAX_CHARS) : joined;
 }
 
 /**
@@ -146,8 +170,10 @@ function formatColumn(
   let commentRendered = false;
   if (includeComments && column.comment) {
     const cleaned = cleanColumnComment(column.comment);
-    if (cleaned) {
-      line += ` -- ${cleaned}`;
+    const dict = extractDictFragment(column.name, column.comment);
+    const text = dict ? (cleaned ? `${cleaned}；${dict}` : dict) : cleaned;
+    if (text) {
+      line += ` -- ${text}`;
       commentRendered = true;
     }
   }

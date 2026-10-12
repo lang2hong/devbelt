@@ -33,6 +33,8 @@ function config(overrides: Partial<AiConfig> = {}): AiConfig {
     model: 'm1',
     includeColumnComments: true,
     temperature: 0.2,
+    schemaContextMode: 'current-db',
+    dataSampleRows: 10,
     ...overrides,
   };
 }
