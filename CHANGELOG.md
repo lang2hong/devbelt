@@ -25,6 +25,15 @@
   （completed/failed/aborted/chunk_parse_failed，reason 仅元数据 JSON）。ai-core 增量：`./sse`
   子路径导出 + `ChatRequest.streamOptions` 透传。验证：ai-core 58 单测、server 585 通过/34 跳过
   （4 条 `aiQuota` 真库并发/下溢集成待真库环境或 CI）、全仓 typecheck/lint 全绿。
+- **S3 已交付（2026-10-12，客户端）**：独立 `devbelt.ai` WebviewPanel（`aiChat.html` 独立
+  vite 入口 + 独立 `aiProtocol`，不走 WebviewMode）+ `apps/vscode-ext/src/ai/`（AiKeyStore
+  SecretStorage 缓存/多窗口失效；AiService 双 provider 路由 + 每请求独立 AbortController + 审计；
+  ServerProxyProvider `/api/ai/chat` SSE + `/api/ai/usage` + 409 配额/401/429/503 映射；连接级
+  域上下文/默认指令/会话历史三组 Memento；schema 薄封装 50 表 + 60s TTL，失败降级）；命令 6 条 +
+  工具视图入口 + 设置 5 项（provider/baseUrl/model/includeColumnComments/temperature）+ 中英词条/NLS；
+  ai-core 列注释基础渲染（S3 所需，ENUM/字典/预筛随 S4）；db-host `maxAiTokensMonthly` 类型/helper。
+  验证：vscode-ext 1587 通过/4 跳过（含 48 条 AI 单测）、ai-core 62、db-host 19、server 585 回归、
+  vite 多入口产出名不回归、esbuild bundle 成功、全仓 typecheck/lint 全绿；F5 真机上游客栈留发布硬门禁。
 - **P9 v1 不做加油包**：多档位 SKU / 一次性购买 / 管理后台手工建单 / 退款 / 双段 FIFO 计量移至
   **P9.1**（独立切片评审）。v1 配额条仅展示月额度已用/剩余/重置时间。
 - 面板：活动栏 AI 图标 + `devbelt.ai` **独立 WebviewPanel**（对齐 Redis/ES，不走 QueryView 的

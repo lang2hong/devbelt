@@ -14,7 +14,7 @@
 - Redis：单机/Cluster/Sentinel、键浏览与五类型 CRUD、Stream、字节级 hex、CLI 控制台、命令日志
 - Elasticsearch：集群总览、索引/mapping/文档 CRUD、DSL 查询、REST 控制台、只读切面 fail-closed
 - 账号注册/登录、邮箱验证、令牌自动轮换、设备会话管理
-- AI 能力（P9 开发中：S1 核心 + S2 服务端代理/月额度已交付）：NL2SQL（五路信号+ENUM/字典映射+意图复述+Assumptions+大库预筛+一键 Chat 回路+0 行诊断）、SQL 解释/优化、AI Chat 面板（独立 WebviewPanel）、错误诊断、数据问答、Schema 设计建议、智能补全；**加油包（多档位购买+管理后台建单）移 P9.1**；P9 v1 单段月额度（Free/Pro，服务端代理已上线 parse-and-forward + `GET /api/ai/usage`），双通道（自带 Key + 服务端代理）。（详见 [P9 阶段文档](docs/阶段/P9-AI.md)）
+- AI 能力（P9 开发中：S1 核心 + S2 服务端代理/月额度 + S3 Chat 面板骨架已交付）：NL2SQL（五路信号+ENUM/字典映射+意图复述+Assumptions+大库预筛+一键 Chat 回路+0 行诊断）、SQL 解释/优化、AI Chat 面板（独立 WebviewPanel，流式/会话历史/schema 上下文）、错误诊断、数据问答、Schema 设计建议、智能补全；**加油包（多档位购买+管理后台建单）移 P9.1**；P9 v1 单段月额度（Free/Pro，服务端代理 parse-and-forward + `GET /api/ai/usage`），双通道（自带 Key + 服务端代理）。（详见 [P9 阶段文档](docs/阶段/P9-AI.md)）
 - 中英双语
 
 **个人连接同步**：底层密码学、协议与端到端运行时/UI 均已实现（`devbelt.syncNow` 已注册）；待**双设备安装版验证**（B6 矩阵）。v2 目标为**连接 + 分组 + 保存查询 + 查询文件夹全量同步**，树内容跨设备一致；本机路径字段随 E2EE 密文同步。详见[P2 v2 阶段文档](docs/阶段/P2-个人同步-v2.md)。

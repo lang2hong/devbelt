@@ -1114,10 +1114,11 @@ Vue 组件：
     prompts 基础 6 场景模板（占位符齐全，不含 NL2SQL v5 新契约——schema-linking/ENUM/复述/
     Assumptions/默认指令）/ ChatRequest-ChatStreamChunk 基础类型 + 错误类型；package.json
     exports 含 `./sse` 子路径；56 单测 + db-core 回归全绿。
-  - **S1 增量补丁（随 S4 场景接线一并交付，不单独切片）**：`nl2sqlOutput.ts`（parseSqlAnswer 提取
-    sql/intentParaphrase/assumptions）；schemaContext 扩展（ENUM 值注入、列注释清洗、状态列
-    字典片段正则提取+500 字上限、大库关键词预筛排序、information_schema 批量取数缓存、
-    serializeSchema 列 `-- comment` 渲染）；sensitive 白名单（状态列字典片段不打码）；nl2sql
+  - **S1 增量补丁（随 S4 场景接线一并交付，不单独切片；其中"列注释 120 字清洗 + `--` 渲染 +
+    计数"已提前随 S3 交付——S3 状态条需要发送条数）**：`nl2sqlOutput.ts`（parseSqlAnswer 提取
+    sql/intentParaphrase/assumptions）；schemaContext 扩展（ENUM 值注入、状态列
+    字典片段正则提取+500 字上限、大库关键词预筛排序、information_schema 批量取数缓存）；sensitive
+    白名单（状态列字典片段不打码）；nl2sql
     prompt 契约扩展（schema-linking/ENUM 严格映射/意图复述/Assumptions/引用表优先/默认
     业务指令区块）；ChatRequest.streamOptions 字段；OpenAICompatibleProvider 透传 streamOptions。
     ——这些是 NL2SQL 意图增强的纯函数依赖，全部不涉及 vscode/server，可以放在 ai-core 内随 S4
@@ -1140,7 +1141,7 @@ Vue 组件：
     （delta 拼接/finish_reason/usage 与直连等价，单 chunk JSON.parse 失败不中断流）、
   - **v1 不做匿名 Free 代理**：未登录请求返 401 AiLoginRequiredError。
 
-- **S3 · 客户端 AiService + AiKeyStore + AI Chat 面板（对话骨架）**
+- **S3 · 客户端 AiService + AiKeyStore + AI Chat 面板（对话骨架）（已交付，2026-10-12；偏差：init 协议增 `connections` 连接选择器数据源、会话存储独立 `aiSessionStore.ts`、注释基础渲染提前自 S1 补丁）**
   - db-host：`CachedEntitlement` 加 `maxAiTokensMonthly?` + fail-closed helper（0 = 拒绝）+
     `SyncClient.getMe` 类型补全（自 S2 移入；服务端 `/api/db/me` 已透传该特性，此前无客户端消费方）；
   - `aiKeyStore.ts`（SecretStorage `devbelt.ai.openai.apiKey`，镜像 AuthService）；
