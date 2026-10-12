@@ -1453,3 +1453,22 @@ docker exec ollama ollama pull qwen2.5-coder:7b
 - 全量：ai-core 96、vscode-ext 1672 通过/4 跳过、typecheck 全绿；服务端/db-core 零改动。
 - 真机走查（待执行）：MySQL 6 库选库出 schema；PG 异库衍生会话；Redis 选库生成 + 只读命令执行；
   ES 选索引生成 DSL + 执行。
+
+### 14.5 S7d：大库 400 修复 + 三级作用域 + 字号（2026-10-12）
+
+- **根因**：`serializeSchema` 只按表数（≤200）截断，无字符预算；服务端 `aiProxyService`
+  校验单条消息 ≤60K / 总 ≤120K 字符 → 宽表库（200×50 列）构造的 schema 块超限，
+  客户端表现为 `AI request failed (HTTP 400): messages[1].content exceeds 60000 characters`。
+- **修复**：`SerializeSchemaOptions.maxChars`（ext 传 `MAX_SCHEMA_CHARS = 40_000`，留
+  system/历史余量）；超预算停止追加表、首表超预算按剩余预算裁列；`truncated` 置位 +
+  `size budget` NOTE（ContextBar 已有"schema 已截断"文案）。历史消息总量（120K）为同类
+  风险，未在本次范围。
+- **三级作用域**：连接 → 库 → **表（多选）**。表选择抽屉（`TablePickerDrawer`）数据源
+  `metadata.getTables(作用域)`（host 侧 ≤3000，PG 异库经与 buildContext 相同的衍生会话解析）；
+  持久化 `devbelt.ai.selectedTables.<connId>.<scope>`；勾选即 `onlyReferenced`（exclusive，
+  引用顺序 = 勾选顺序；勾选表全部失效时回退自动）；未勾选 = 自动模式
+  （@引用→关键词→原序 ≤200，受 40K 预算保护）。协议：up `requestTableOptions`/`selectTables`，
+  down `tableOptions`，`AiContextState.selectedTables`。
+- **字号**：AI 面板全部组件改随 VS Code 主题字号——正文 `var(--vscode-font-size, 13px)`、
+  次级 `calc(-1px/-2px)`、代码块/预格式 `var(--vscode-editor-font-size, 12px)`；
+  其余 webview 面板仍为写死字号（不在本切片范围，如需可另行机械替换）。

@@ -66,6 +66,12 @@
   （仅 401、仅重试一次；续期失败/同 token 不重试；`getUsage` 同语义）+ AiService 注入。
   修复前 access token（15m TTL）过期会直接报 "AI proxy authentication failed (HTTP 401)"。
   测试 +6；仅扩展侧改动，无需服务端重部署。
+- **S7d 大库 400 修复 + 三级作用域 + 字号（2026-10-12）**：① 修复大库上下文超服务端
+  单条 60K 字符上限的 HTTP 400——`serializeSchema` 增 `maxChars`（40K）超预算截断 + 标注；
+  ② "连接 → 库 → 表（多选）"三级作用域：表选择抽屉（搜索/复选/全选/清空），持久化
+  `devbelt.ai.selectedTables.<connId>.<库>`，勾选即仅注入所选表（exclusive），未勾选 = 自动模式；
+  ③ AI 面板字号跟随 VS Code 主题字号（`--vscode-font-size` / `--vscode-editor-font-size`）。
+  测试 +8（ai-core 99 / vscode-ext 1675 全绿）。
 - **S7c ES DSL 生成与执行（2026-10-12）**：选中 ES 连接时 Chat 面板切换为 ES 专用
   system prompt（意图复述 + ```json 块契约 = `POST /<index>/_search` 请求体；禁索引名/路径/
   破坏性 DSL）；上下文注入选中索引 mapping（≤200 字段、递归 3 层、截断标注）。代码块「执行」
