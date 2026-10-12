@@ -5,7 +5,7 @@ import { useI18n } from '../../composables/useI18n';
 
 const props = defineProps<{ code: string; lang?: string }>();
 const isSql = (): boolean => !props.lang || props.lang === 'sql';
-const canExecute = (): boolean => isSql() || props.lang === 'redis';
+const canExecute = (): boolean => isSql() || props.lang === 'redis' || props.lang === 'json';
 const { post } = useVsCode();
 const { t } = useI18n();
 const copied = ref(false);
@@ -27,6 +27,10 @@ function apply(): void {
 function execute(): void {
   if (props.lang === 'redis') {
     post({ type: 'runRedis', text: props.code });
+    return;
+  }
+  if (props.lang === 'json') {
+    post({ type: 'runEsDsl', text: props.code });
     return;
   }
   post({ type: 'executeSql', text: props.code });

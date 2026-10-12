@@ -162,6 +162,12 @@ export interface AiRunRedisUp {
   text: string;
 }
 
+/** S7c：执行 AI 生成的 ES DSL（代码块按钮，用户显式触发）。 */
+export interface AiRunEsDslUp {
+  type: 'runEsDsl';
+  text: string;
+}
+
 export type AiUpMessage =
   | { type: 'ready' }
   | AiSendUp
@@ -173,6 +179,7 @@ export type AiUpMessage =
   | AiSelectConnectionUp
   | AiSelectScopeUp
   | AiRunRedisUp
+  | AiRunEsDslUp
   | { type: 'requestQuotaRefresh' }
   | { type: 'openSettings' }
   | { type: 'setApiKey' }

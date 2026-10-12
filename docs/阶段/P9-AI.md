@@ -1396,3 +1396,60 @@ docker exec ollama ollama pull qwen2.5-coder:7b
 - 图像/多模态（结果集截图/ER 图发给多模态模型）。
 - 浏览器侧匿名 Free 额度代理（需要更严格的 IP 限流 + CAPTCHA，防止滥用）。
 - 个人同步：AI 会话历史跨设备同步（需要先解决敏感数据 E2EE 加密同步的产品决策）。
+
+## 十四、S7 多引擎 AI 增补（2026-10-12）
+
+> 触发：真机验证暴露"无默认库连接 → Schema unavailable"；用户明确四条需求——
+> 正确解法（非改连接配置的临时法）、一个连接支持多库（单选切换）、连接可以没有默认库、
+> 支持 ES/PG/Redis（全量：上下文 + 生成 + 执行）。本节记录 S7a–S7c 的增补设计，
+> 覆盖原 §六 的"SQL 单引擎 + 固定连接默认库"口径（PG SQL 方言原已支持）。
+
+### 14.1 跨引擎"作用域"（选库）语义
+
+| 引擎 | 作用域列表 | 选中动作 | 默认顺序 |
+|---|---|---|---|
+| MySQL | `metadata.getDatabases()`（滤 `information_schema/mysql/performance_schema/sys`） | 仅作元数据/生成/执行参数（不建新会话，不隐式 `USE`） | 上次选择 → 连接默认库/`DATABASE()` → 第一项 |
+| PG | 同上（滤 `template0/1`） | 配置库 → 主会话；异库 → **显式选择才**打开衍生会话（等价树双击；失败 `db-unreachable`，不回退主会话防串库） | 同上（当前库用 `current_database()`） |
+| Redis | 逻辑库：`INFO keyspace` 非空 ∪ `CONFIG GET databases` 上限 ∪ 当前/配置库；cluster 恒 db0 | 仅记录目标（执行桥 SELECT 归一） | 同上（默认 = 会话当前 `db`） |
+| ES | `_cat/indices`（滤 `.` 系统索引） | 仅记录索引名（上下文/生成/执行作用域） | 同上 |
+| SQLite | 无（隐藏选择器） | — | — |
+
+**决策**：
+- D23：作用域是"用户显式选择"，持久化 `devbelt.ai.lastScope.<connId>`（Memento，不进同步）；
+  单选切换（同一时刻一个作用域进上下文，token 可控）。
+- D24：上下文解析**仍然不隐式建连**；PG 异库的衍生会话由下拉选择这一显式动作触发
+  （与树双击同机制，可复用、可被其它面板使用）。
+- D25：生成契约与执行桥全部按引擎分流，**红线不变**——AI 永不自动执行，执行必须用户点击
+  代码块按钮；写/危险操作 host 侧确认；SELECT/连接态命令阻断；审计照旧。
+
+### 14.2 无默认库正确解（原 Schema unavailable 根因）
+
+- 根因链（真机 + RDS 探针实测）：MySQL 无库时 `information_schema` 无过滤横跨所有可见库
+  （4 库 75 表）→ 批量列查询 `COALESCE(?, DATABASE())` 得 0 行 → 逐表回退
+  `SHOW FULL COLUMNS FROM t`（无库）→ `ER_NO_DB_ERROR` → 整包 null。
+- 正确解：① builder 对 MySQL 无库直接返回 null（不给跨库错上下文）；② 单表元数据失败
+  **跳过并标 partial**（不再整包归零）；③ 作用域选择器保证 database 恒存在；
+  ④ 另修复 `'MYSQL'`/`'mysql'` 大小写错位——批量列路径此前从未生效（全部回退逐表）。
+
+### 14.3 Redis / ES 生成与执行（S7b/S7c）
+
+- **Redis**：`REDIS_SYSTEM_PROMPT`（意图复述 + ```redis 块契约；禁止 SELECT/连接态命令、
+  禁止编造 key）+ `parseRedisAnswer`；上下文 = 选中逻辑库 keyspace 概览（INFO keyspace +
+  DBSIZE + `SCAN COUNT 200` 采样 + TYPE 直方图 + 前缀分组，`runExclusive` 串行且只读连接不切库）；
+  执行桥 `ai/redisExec.ts`：整批 `runExclusive`（SELECT 归一 + 原子）、`isCliBlocked`/SELECT
+  阻断、`isWriteCommand`/`isDangerousCommand` 模态确认、只读客户端切面兜底、写命令逐条审计
+  （沿用 CLI：命令 + 首参 key；EVAL 只记长度）。
+- **ES**：`ES_DSL_SYSTEM_PROMPT`（```json 块 = `POST /<index>/_search` 请求体；禁索引名/路径/
+  方法/破坏性 DSL）+ `parseEsDslAnswer`；上下文 = 选中索引 mapping（≤200 字段、递归 3 层、截断标注）；
+  执行桥 `ai/esExec.ts`：JSON 校验 → 固定 `/{index}/_search`（读路径，只读连接不受影响）→
+  total/took/前 3 条 `_source` 预览 + 聚合存在性；无破坏面（不接 `_bulk`/`_delete_by_query`）。
+- 面板按选中连接引擎切换 system prompt 与上下文块；结果以 `toolResult` 回帖（单条 2,000 字符截断）。
+
+### 14.4 切片与验证
+
+- **S7a**（60f9a1f）：选择器 + 无默认库正确解 + partial + 大小写修复；测试 +15。
+- **S7b**（57d99b1）：Redis 契约/上下文/执行桥/审计；测试 +10。
+- **S7c**：ES 契约/上下文/执行桥；测试 +8。
+- 全量：ai-core 96、vscode-ext 1672 通过/4 跳过、typecheck 全绿；服务端/db-core 零改动。
+- 真机走查（待执行）：MySQL 6 库选库出 schema；PG 异库衍生会话；Redis 选库生成 + 只读命令执行；
+  ES 选索引生成 DSL + 执行。

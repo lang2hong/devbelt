@@ -66,6 +66,11 @@
   （仅 401、仅重试一次；续期失败/同 token 不重试；`getUsage` 同语义）+ AiService 注入。
   修复前 access token（15m TTL）过期会直接报 "AI proxy authentication failed (HTTP 401)"。
   测试 +6；仅扩展侧改动，无需服务端重部署。
+- **S7c ES DSL 生成与执行（2026-10-12）**：选中 ES 连接时 Chat 面板切换为 ES 专用
+  system prompt（意图复述 + ```json 块契约 = `POST /<index>/_search` 请求体；禁索引名/路径/
+  破坏性 DSL）；上下文注入选中索引 mapping（≤200 字段、递归 3 层、截断标注）。代码块「执行」
+  走 `ai/esExec.ts`：JSON 校验 → 固定只读 `_search` 路径（只读连接不受影响）→ total/took/
+  前 3 条 _source 预览 + 聚合存在性提示；结果 toolResult 回帖。测试 +8；spec 增补 §十四。
 - **S7b Redis 生成与执行（2026-10-12）**：选中 Redis 连接时 Chat 面板切换为 Redis 专用
   system prompt（意图复述 + ```redis 块契约；禁止 SELECT/连接态命令、禁止编造 key）；上下文注入
   选中逻辑库 keyspace 概览（INFO keyspace + DBSIZE + SCAN 采样 + TYPE 直方图 + 前缀分组）。
