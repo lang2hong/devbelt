@@ -34,6 +34,17 @@
   ai-core 列注释基础渲染（S3 所需，ENUM/字典/预筛随 S4）；db-host `maxAiTokensMonthly` 类型/helper。
   验证：vscode-ext 1587 通过/4 跳过（含 48 条 AI 单测）、ai-core 62、db-host 19、server 585 回归、
   vite 多入口产出名不回归、esbuild bundle 成功、全仓 typecheck/lint 全绿；F5 真机上游客栈留发布硬门禁。
+- **S4 已交付（2026-10-12，场景接线 + 意图增强）**：ai-core `parseSqlAnswer`（三字段布局容错解析）+
+  nl2sql v5 契约（schema-linking / ENUM 严格映射 / 意图复述 / Assumptions / 引用表优先 / 库-schema 绑定 /
+  域上下文与业务规则 user-role 区块）+ 状态列字典片段提取（500 字上限）；五路信号组装与
+  `devbelt.ai.explainSql/.optimizeSql/.nl2sqlGhost`（Alt+A 直插 + 假设/复述状态条 + "在 Chat 中细化"回路）
+  + 错误诊断（`sqlForAi/secretRisk/askAi` 附加字段、双扫描阻断、内联确认闸、host 二次脱敏）+ 数据问答
+  （默认不发样本、确认后打码截断、按设置行数）+ 0 行诊断（AI SQL 归因 + "问 AI 为什么查不到"）+
+  Chat 代码块"插入编辑器/执行"（复用现有执行 gate）+ Context 明细抽屉 + 表设计器 AI 生成/审阅（结果回 Chat）+
+  schema 注入升级（MySQL 批量列 + 关键词预筛 + @ 引用优先 + 200 表）+ 设置 2 项 + 菜单/键位/NLS。
+  验证：ai-core 77、vscode-ext 1605 通过/4 跳过（+18 条 S4 测试）、server 585 回归、全仓
+  typecheck/lint 全绿。偏差：表设计器"表内 diff→逐条应用"留后续增量；Alt+A 真 ghost 随 S5；
+  `recent-only` 暂等同 current-db。
 - **P9 v1 不做加油包**：多档位 SKU / 一次性购买 / 管理后台手工建单 / 退款 / 双段 FIFO 计量移至
   **P9.1**（独立切片评审）。v1 配额条仅展示月额度已用/剩余/重置时间。
 - 面板：活动栏 AI 图标 + `devbelt.ai` **独立 WebviewPanel**（对齐 Redis/ES，不走 QueryView 的

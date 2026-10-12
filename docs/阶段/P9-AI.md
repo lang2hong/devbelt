@@ -948,6 +948,8 @@ Vue 组件：
 - 建议以 diff 风格渲染（列新增/修改/索引新增/外键新增），用户逐条勾选"应用"或"全部应用"，
   应用时填到 `TableDesignView` 表单字段后，用户再点"保存"走 `mutate()` 组 SQL +
   `confirmSqlExecution`/`ensureWritable` 统一 gate（只读/生产/审计），不直接落库。
+  > 已交付版本（S4）：AI 生成/审阅**结果回 Chat**（DDL 代码块可"插入编辑器"，结构化文本由设计器当前列/索引生成）；
+  > 表内 diff→逐条勾选→填表单为后续增量（可选 S4b），不阻塞 S4 其余交付。
 
 #### 6.11.5 Inline 补全
 
@@ -1114,8 +1116,8 @@ Vue 组件：
     prompts 基础 6 场景模板（占位符齐全，不含 NL2SQL v5 新契约——schema-linking/ENUM/复述/
     Assumptions/默认指令）/ ChatRequest-ChatStreamChunk 基础类型 + 错误类型；package.json
     exports 含 `./sse` 子路径；56 单测 + db-core 回归全绿。
-  - **S1 增量补丁（随 S4 场景接线一并交付，不单独切片；其中"列注释 120 字清洗 + `--` 渲染 +
-    计数"已提前随 S3 交付——S3 状态条需要发送条数）**：`nl2sqlOutput.ts`（parseSqlAnswer 提取
+  - **S1 增量补丁（已交付，随 S2/S3/S4 分批落地：streamOptions/`./sse` 随 S2，注释 120 字渲染+
+    计数随 S3，其余随 S4）**：`nl2sqlOutput.ts`（parseSqlAnswer 提取
     sql/intentParaphrase/assumptions）；schemaContext 扩展（ENUM 值注入、状态列
     字典片段正则提取+500 字上限、大库关键词预筛排序、information_schema 批量取数缓存）；sensitive
     白名单（状态列字典片段不打码）；nl2sql
@@ -1157,7 +1159,7 @@ Vue 组件：
   - 命令 `devbelt.ai.chat` 注册 + 活动栏图标；
   - **能跑通**：配自带 Key → 打开 Chat → 发消息 → 看到流式回复 → 能新建/切换/删除会话。
 
-- **S4 · 场景接线（NL2SQL / Explain / Optimize / 诊断 / 数据问答 / Schema 设计）**
+- **S4 · 场景接线（NL2SQL / Explain / Optimize / 诊断 / 数据问答 / Schema 设计）（已交付，2026-10-12；偏差：表设计器"表内 diff→逐条应用"留后续增量，已交付版本为"结果回 Chat"）**
   - 代码块"应用到编辑器"/"执行"按钮（执行复用确认 gate）；
   - SQL 编辑器右键命令（explain/optimize/nl2sqlGhost 菜单与命令）；
   - **意图识别增强（§6.7.1）**：五路信号结构化携带（入口 feature / 连接+库+schema+dialect /
