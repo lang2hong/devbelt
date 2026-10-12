@@ -4,6 +4,8 @@ import { useVsCode } from '../../composables/useVsCode';
 import { useI18n } from '../../composables/useI18n';
 
 const props = defineProps<{ code: string; lang?: string }>();
+const isSql = (): boolean => !props.lang || props.lang === 'sql';
+const canExecute = (): boolean => isSql() || props.lang === 'redis';
 const { post } = useVsCode();
 const { t } = useI18n();
 const copied = ref(false);
@@ -21,8 +23,12 @@ function apply(): void {
   post({ type: 'applyCode', text: props.code });
 }
 
-/** P9 S4：执行（host 复用现有确认/只读/生产门禁；AI 永不自动执行）。 */
+/** P9 S4/S7b：执行（host 复用现有确认/只读/生产门禁；AI 永不自动执行）。 */
 function execute(): void {
+  if (props.lang === 'redis') {
+    post({ type: 'runRedis', text: props.code });
+    return;
+  }
   post({ type: 'executeSql', text: props.code });
 }
 </script>
@@ -33,8 +39,8 @@ function execute(): void {
       <span class="ai-code-lang">{{ lang || 'code' }}</span>
       <div class="ai-code-actions">
         <button class="ai-btn ai-code-copy" @click="copy">{{ copied ? t('wv.ai.copied') : t('wv.ai.copy') }}</button>
-        <button class="ai-btn" @click="apply">{{ t('wv.ai.insert') }}</button>
-        <button class="ai-btn" @click="execute">{{ t('wv.ai.execute') }}</button>
+        <button v-if="isSql()" class="ai-btn" @click="apply">{{ t('wv.ai.insert') }}</button>
+        <button v-if="canExecute()" class="ai-btn" @click="execute">{{ t('wv.ai.execute') }}</button>
       </div>
     </div>
     <pre class="ai-code-body"><code>{{ code }}</code></pre>

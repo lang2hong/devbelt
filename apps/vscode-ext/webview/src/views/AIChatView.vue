@@ -28,7 +28,8 @@ interface ChatMessage {
  *   up: ready | send | abort | newChat | renameChat | deleteChat | loadHistory |
  *       selectConnection | selectScope | requestQuotaRefresh | openSettings | setApiKey |
  *       clearApiKey | testConnection | copyCode
- *   down: init | chunk | finish | quotaUpdate | contextChanged | sessionList | sessionLoaded
+ *   down: init | chunk | finish | quotaUpdate | contextChanged | sessionList | sessionLoaded |
+ *         contextDetail | prefillInput | toolResult
  */
 const { post, onMessage } = useVsCode();
 const { t } = useI18n();
@@ -116,6 +117,13 @@ onMounted(() => {
         break;
       case 'prefillInput':
         if (typeof msg.text === 'string') input.value = msg.text;
+        break;
+      case 'toolResult':
+        messages.value.push({
+          role: 'assistant',
+          content: `${String(msg.title ?? '')}\n\n\`\`\`\n${String(msg.content ?? '')}\n\`\`\``,
+          error: !!msg.isError,
+        });
         break;
       default:
         break;

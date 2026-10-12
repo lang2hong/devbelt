@@ -53,7 +53,7 @@ function stripEmphasis(value: string): string {
  * 意图复述：支持 `**意图理解：**复述` / `意图理解: 复述` / `Intent: ...`。
  * 只取标签后同一行的剩余文本（复述契约是一行）。
  */
-function extractParaphrase(text: string): string {
+export function extractParaphrase(text: string): string {
   const regex = /(?:意图理解|意图复述|Intent(?:\s+paraphrase)?)\s*[:：]\s*\**\s*(.*)/i;
   const match = regex.exec(text);
   if (!match) return '';
@@ -66,7 +66,7 @@ function extractParaphrase(text: string): string {
  * 的 bullet 行；无 bullet 时取标签同行剩余文本（单行形态）。
  * "none"/"无"/"（无）" 视为无假设。
  */
-function extractAssumptions(text: string): string[] {
+export function extractAssumptions(text: string): string[] {
   const label = /(?:Assumptions?|假设)\s*[:：][ \t]*/i.exec(text);
   if (!label || label.index === undefined) return [];
   const after = text.slice(label.index + label[0].length);

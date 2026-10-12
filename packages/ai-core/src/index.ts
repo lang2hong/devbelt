@@ -8,4 +8,5 @@ export * from './schemaContext.js';
 export * from './sqlSafety.js';
 export * from './sensitive.js';
 export * from './nl2sqlOutput.js';
+export * from './redisOutput.js';
 export * from './prompts/index.js';

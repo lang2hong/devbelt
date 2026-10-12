@@ -66,6 +66,11 @@
   （仅 401、仅重试一次；续期失败/同 token 不重试；`getUsage` 同语义）+ AiService 注入。
   修复前 access token（15m TTL）过期会直接报 "AI proxy authentication failed (HTTP 401)"。
   测试 +6；仅扩展侧改动，无需服务端重部署。
+- **S7b Redis 生成与执行（2026-10-12）**：选中 Redis 连接时 Chat 面板切换为 Redis 专用
+  system prompt（意图复述 + ```redis 块契约；禁止 SELECT/连接态命令、禁止编造 key）；上下文注入
+  选中逻辑库 keyspace 概览（INFO keyspace + DBSIZE + SCAN 采样 + TYPE 直方图 + 前缀分组）。
+  代码块「执行」走 host 执行桥：runExclusive 串行（SELECT 归一 + 整批原子）、SELECT/连接态命令
+  阻断、写/危险命令模态确认、只读连接客户端兜底、写命令逐条审计；结果以 toolResult 回帖。测试 +10。
 - **S7a 跨引擎作用域选择器（2026-10-12）**：AI 面板支持"选库"（单选切换，持久化
   `devbelt.ai.lastScope.<connId>`）——MySQL/PG 列数据库（过滤系统库）、Redis 列逻辑库
   （INFO keyspace ∪ CONFIG databases ∪ 当前库；cluster 恒 db0）、ES 列索引（_cat/indices）、

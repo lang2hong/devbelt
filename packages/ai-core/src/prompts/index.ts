@@ -7,3 +7,4 @@ export { buildDiagnoseMessages, type DiagnoseErrorInput } from './diagnoseError.
 export { buildDataQaMessages, type DataQaInput } from './dataQa.js';
 export { buildSchemaDesignMessages, type SchemaDesignInput } from './schemaDesign.js';
 export { buildInlineCompletionMessages, INLINE_NONE, type InlineCompletionInput } from './inline.js';
+export { REDIS_SYSTEM_PROMPT, redisContextBlock } from './redis.js';

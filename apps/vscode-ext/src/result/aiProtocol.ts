@@ -118,6 +118,13 @@ export interface AiContextDetailDown {
   defaultDirectives: string;
 }
 
+export interface AiToolResultDown {
+  type: 'toolResult';
+  title: string;
+  content: string;
+  isError?: boolean;
+}
+
 export type AiDownMessage =
   | AiInitDown
   | AiChunkDown
@@ -127,7 +134,8 @@ export type AiDownMessage =
   | AiSessionListDown
   | AiSessionLoadedDown
   | AiPrefillInputDown
-  | AiContextDetailDown;
+  | AiContextDetailDown
+  | AiToolResultDown;
 
 // ── Up（webview → host）──
 
@@ -148,6 +156,12 @@ export interface AiSelectScopeUp {
   value: string;
 }
 
+/** S7b：执行 AI 生成的 Redis 命令（代码块按钮，用户显式触发）。 */
+export interface AiRunRedisUp {
+  type: 'runRedis';
+  text: string;
+}
+
 export type AiUpMessage =
   | { type: 'ready' }
   | AiSendUp
@@ -158,6 +172,7 @@ export type AiUpMessage =
   | { type: 'loadHistory'; sessionId: string }
   | AiSelectConnectionUp
   | AiSelectScopeUp
+  | AiRunRedisUp
   | { type: 'requestQuotaRefresh' }
   | { type: 'openSettings' }
   | { type: 'setApiKey' }
