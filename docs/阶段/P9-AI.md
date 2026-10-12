@@ -967,6 +967,9 @@ Vue 组件：
      词末。
 - 快捷键 **`Alt+/`**（当 `enableInlineCompletion` 为 true 时）触发；也提供命令
   `devbelt.ai.inlineComplete` 可手动绑键，命令面板兜底。
+  > 已交付实现（S5）：provider 仅响应 `triggerKind === Invoke`（即 Alt+/ / 命令经
+  > `editor.action.inlineSuggest.trigger` 进入），普通打字（Automatic）立即返回且不发请求；
+  > 无打开会话时仅省略 schema（不隐式建连）；光标前文本含口令字面量时不发送。
 
 ### 6.12 i18n
 
@@ -1183,7 +1186,7 @@ Vue 组件：
   - Context 抽屉（"本次发送给 AI 的内容"明细：表/列/注释条数/是否含样本/默认业务指令/域上下文）；
   - i18n 所有场景词条补全。
 
-- **S5 · Inline 补全增强**
+- **S5 · Inline 补全增强（已交付，2026-10-12；说明：仅 Invoke 触发（Alt+/ / 命令），普通打字不发请求；ghost 依赖 VS Code 内置 inline suggest；inline 固定 temperature:0/maxTokens:128）**
   - `aiInlineProvider.ts` 实现 `InlineCompletionItemProvider`；
   - 全局开关 `devbelt.ai.enableInlineCompletion`（默认 false）；
   - 快捷键 `Alt+/`；debounce 300ms；超时 5s；abort；

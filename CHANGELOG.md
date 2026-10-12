@@ -45,6 +45,13 @@
   验证：ai-core 77、vscode-ext 1605 通过/4 跳过（+18 条 S4 测试）、server 585 回归、全仓
   typecheck/lint 全绿。偏差：表设计器"表内 diff→逐条应用"留后续增量；Alt+A 真 ghost 随 S5；
   `recent-only` 暂等同 current-db。
+- **S5 已交付（2026-10-12，Inline 补全）**：ai-core `buildInlineCompletionMessages`（续写文本契约 +
+  `<none>` 哨兵）；`aiInlineContext`（引用表提取复用词法器、外键一跳邻接、light schema 1.5K 预算裁剪、
+  无会话降级不建连）；`aiInlineProvider`（**仅 Alt+/ / 命令触发**，普通打字零请求；300ms debounce、
+  5s 超时、打字取消 abort；口令字面量阻断；输出卫生）；命令 `devbelt.ai.inlineComplete` +
+  `alt+/` 键位（when `config.devbelt.ai.enableInlineCompletion`）+ 设置 `enableInlineCompletion`
+  （默认 false）；`AiService.chat` 增可选 AbortSignal。验证：ai-core 78、vscode-ext 1622 通过/4 跳过
+  （+17 条 S5 测试）、server 585 回归、全仓 typecheck/lint 全绿；F5 真机走查留发布硬门禁。
 - **P9 v1 不做加油包**：多档位 SKU / 一次性购买 / 管理后台手工建单 / 退款 / 双段 FIFO 计量移至
   **P9.1**（独立切片评审）。v1 配额条仅展示月额度已用/剩余/重置时间。
 - 面板：活动栏 AI 图标 + `devbelt.ai` **独立 WebviewPanel**（对齐 Redis/ES，不走 QueryView 的
