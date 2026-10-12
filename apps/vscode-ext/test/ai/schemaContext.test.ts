@@ -189,6 +189,63 @@ describe('AiSchemaContextBuilder（扩展侧薄封装）', () => {
     expect(getTables).not.toHaveBeenCalled();
   });
 
+  it('onlyReferenced：仅注入勾选表（引用顺序），未知引用被过滤', async () => {
+    const { session } = makeSession();
+    const builder = new AiSchemaContextBuilder();
+    const snapshot = await builder.build(session, {
+      connId: 'c1',
+      dbType: 'MYSQL',
+      includeComments: false,
+      database: 'app',
+      referencedTables: ['t2', 't0', 'nope'],
+      onlyReferenced: true,
+    });
+    expect(snapshot!.tableCount).toBe(2);
+    expect(snapshot!.text).toContain('## Table: t2');
+    expect(snapshot!.text).toContain('## Table: t0');
+    expect(snapshot!.text).not.toContain('## Table: t1');
+
+    // 未勾选（onlyReferenced 但空引用）→ 回退自动模式
+    builder.invalidate('c1');
+    const auto = await builder.build(session, {
+      connId: 'c1',
+      dbType: 'MYSQL',
+      includeComments: false,
+      database: 'app',
+      onlyReferenced: true,
+    });
+    expect(auto!.tableCount).toBe(3);
+  });
+
+  it('字符预算：宽表库不再无限膨胀（≤40K + NOTE 余量，truncated 置位）', async () => {
+    const tableCount = 80;
+    const columns = 50;
+    const session = {
+      metadata: {
+        getTables: vi.fn(async () =>
+          Array.from({ length: tableCount }, (_, i) => ({ name: `wide_table_${i}`, comment: '' })),
+        ),
+        getColumns: vi.fn(async () =>
+          Array.from({ length: columns }, (_, c) => ({
+            name: `some_long_column_name_${c}`,
+            type: 'VARCHAR(255)',
+            isNotNull: true,
+            isPrimary: false,
+            isUnique: false,
+            comment: '',
+          })),
+        ),
+        getForeignKeys: vi.fn(async () => []),
+      },
+    } as unknown as SqlConnectionSession;
+    const builder = new AiSchemaContextBuilder();
+    const snapshot = await builder.build(session, { connId: 'wide', dbType: 'MYSQL', includeComments: false, database: 'app' });
+    expect(snapshot).not.toBeNull();
+    expect(snapshot!.truncated).toBe(true);
+    expect(snapshot!.text).toContain('size budget');
+    expect(snapshot!.text.length).toBeLessThanOrEqual(40_000 + 500);
+  });
+
   it('单表列元数据失败 → 跳过该表并标记 partial（不再整包失败）', async () => {
     const session = {
       metadata: {

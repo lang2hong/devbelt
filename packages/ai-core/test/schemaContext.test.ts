@@ -214,3 +214,35 @@ describe('状态列字典片段（D19）', () => {
     expect(result.commentCount).toBe(1);
   });
 });
+describe('serializeSchema 字符预算（maxChars，真机 400 事故修复）', () => {
+  const makeInput = (tables: number, columns: number) => ({
+    dbType: 'MYSQL',
+    database: 'app',
+    tables: Array.from({ length: tables }, (_, t) => ({
+      name: `table_${t}`,
+      columns: Array.from({ length: columns }, (_, c) => ({ name: `column_${c}`, type: 'VARCHAR(255)' })),
+    })),
+  });
+
+  it('超预算停止追加表：truncated 置位 + size budget NOTE', () => {
+    const result = serializeSchema(makeInput(5, 5), { maxChars: 150 });
+    expect(result.truncated).toBe(true);
+    expect(result.tableCount).toBeLessThan(5);
+    expect(result.text).toContain('size budget');
+    expect(result.text.length).toBeLessThan(400); // 150 + 两条 NOTE 余量
+  });
+
+  it('首表即超预算：按剩余预算裁列，至少保留表头', () => {
+    const result = serializeSchema(makeInput(1, 30), { maxChars: 80 });
+    expect(result.truncated).toBe(true);
+    expect(result.text).toContain('## Table: table_0');
+    expect(result.text).toContain('column_0');
+    expect(result.text.length).toBeLessThan(250);
+  });
+
+  it('未设 maxChars：行为与旧版一致（不因预算截断）', () => {
+    const result = serializeSchema(makeInput(5, 5));
+    expect(result.truncated).toBe(false);
+    expect(result.tableCount).toBe(5);
+  });
+});

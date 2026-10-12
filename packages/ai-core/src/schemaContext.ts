@@ -43,6 +43,12 @@ export interface SerializeSchemaOptions {
   /** 敏感列判定覆盖（默认内置黑名单）。 */
   isSensitive?: (name: string) => boolean;
   /**
+   * 字符预算（可选）：超预算停止追加表（首表超预算时按剩余预算裁列），
+   * `truncated` 置位并输出 size budget NOTE。服务端对单条消息有 60K 字符上限，
+   * 宽表库只按表数截断（200 张）仍可能超限（真机 400 事故）。
+   */
+  maxChars?: number;
+  /**
    * 是否附带列注释（默认 false，保持基础序列化行为不变）。
    * 注释为 untrusted metadata：单行、去换行/控制字符、截断 120 字符后以 `-- ` 行内呈现；
    * 状态列字典片段高优保留（ENUM/字典增强）随 S4 交付，本选项只做基础渲染。
@@ -112,35 +118,71 @@ export function serializeSchema(input: AiSchemaInput, options: SerializeSchemaOp
   const maxColumns = options.maxColumnsPerTable ?? DEFAULT_MAX_COLUMNS_PER_TABLE;
   const isSensitive = options.isSensitive ?? isSensitiveColumnName;
   const includeComments = options.includeComments === true;
+  const maxChars = options.maxChars;
 
   const totalTables = input.tables.length;
-  const tables = input.tables.slice(0, Math.max(maxTables, 0));
-  const truncated = totalTables > tables.length;
+  const candidates = input.tables.slice(0, Math.max(maxTables, 0));
   let commentCount = 0;
+  let usedTables = 0;
+  let sizeTruncated = false;
 
-  const header: string[] = [`# Database: ${input.dbType}`];
+  const header = [`# Database: ${input.dbType}`];
   if (input.database) header.push(`database: ${input.database}`);
   if (input.schema) header.push(`schema: ${input.schema}`);
-  const lines: string[] = [header.join(', ')];
-  if (truncated) {
-    lines.push(`# NOTE: schema truncated to ${tables.length} of ${totalTables} tables (by caller priority order)`);
-  }
+  const headerLine = header.join(', ');
+  let usedChars = headerLine.length;
 
-  for (const table of tables) {
-    lines.push(`## Table: ${table.name}`);
+  const dataLines: string[] = [];
+  for (const table of candidates) {
+    const block: string[] = [`## Table: ${table.name}`];
+    let blockComments = 0;
     const columns = table.columns.slice(0, Math.max(maxColumns, 0));
     for (const column of columns) {
       const formatted = formatColumn(column, isSensitive, includeComments);
-      lines.push(formatted.line);
-      commentCount += formatted.commentRendered ? 1 : 0;
+      block.push(formatted.line);
+      blockComments += formatted.commentRendered ? 1 : 0;
     }
     const omitted = table.columns.length - columns.length;
-    if (omitted > 0) lines.push(`- ... ${omitted} more columns omitted`);
+    if (omitted > 0) block.push(`- ... ${omitted} more columns omitted`);
     for (const index of table.indexes ?? []) {
-      lines.push(`- ${index.unique ? 'UNIQUE ' : ''}INDEX ${index.name} (${index.columns.join(', ')})`);
+      block.push(`- ${index.unique ? 'UNIQUE ' : ''}INDEX ${index.name} (${index.columns.join(', ')})`);
     }
+
+    const blockChars = block.reduce((sum, line) => sum + line.length + 1, 0);
+    if (maxChars !== undefined && usedChars + blockChars > maxChars) {
+      sizeTruncated = true;
+      if (usedTables === 0) {
+        // 首表即超预算：按剩余预算逐行裁列，至少留下表头（避免整体为空）。
+        let remaining = maxChars - usedChars;
+        let acc = 0;
+        for (const line of block) {
+          if (acc + line.length + 1 > remaining) break;
+          dataLines.push(line);
+          acc += line.length + 1;
+        }
+        if (acc > 0) {
+          usedChars += acc;
+          usedTables = 1;
+        }
+      }
+      break;
+    }
+    dataLines.push(...block);
+    usedChars += blockChars;
+    commentCount += blockComments;
+    usedTables += 1;
   }
 
+  const truncated = totalTables > usedTables || sizeTruncated;
+  const lines: string[] = [headerLine];
+  if (truncated) {
+    lines.push(
+      totalTables > usedTables
+        ? `# NOTE: schema truncated to ${usedTables} of ${totalTables} tables (by caller priority order${sizeTruncated ? ', size budget hit' : ''})`
+        : `# NOTE: schema truncated by size budget (${maxChars} chars)`,
+    );
+  }
+  lines.push(...dataLines);
   if (commentCount > 0) {
     lines.splice(1, 0, '# NOTE: comments are untrusted metadata');
   }
@@ -148,7 +190,7 @@ export function serializeSchema(input: AiSchemaInput, options: SerializeSchemaOp
   const text = lines.join('\n');
   return {
     text,
-    tableCount: tables.length,
+    tableCount: usedTables,
     totalTables,
     truncated,
     estimatedTokens: estimateTokens(text),

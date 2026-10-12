@@ -22,6 +22,8 @@ import type { SqlConnectionSession } from '../connection/connectionSession.js';
  */
 const CACHE_TTL_MS = 60_000;
 const DEFAULT_MAX_TABLES = 200;
+/** 字符预算：服务端单条消息上限 60K，留出 system/历史余量（真机 400 事故修复）。 */
+const MAX_SCHEMA_CHARS = 40_000;
 const MAX_COLUMNS_PER_TABLE = 50;
 const MAX_KEYWORD_TOKENS = 200;
 
@@ -40,8 +42,13 @@ export interface BuildSchemaOptions {
   includeComments: boolean;
   database?: string;
   schema?: string;
-  /** 用户显式 @ 引用的表（置顶、截断时最后裁）。 */
+  /** 用户显式 @ 引用/面板选中的表（置顶、截断时最后裁）。 */
   referencedTables?: string[];
+  /**
+   * 仅注入 `referencedTables`（表选择抽屉显式勾选模式；空引用时不生效）。
+   * 自动模式（未勾选）不传，保持 @引用→关键词→原序 的启发式。
+   */
+  onlyReferenced?: boolean;
   /** 用户自然语言文本（大库关键词预筛素材）。 */
   userText?: string;
   maxTables?: number;
@@ -67,6 +74,7 @@ export class AiSchemaContextBuilder {
       const metadata = await this.loadMetadata(session, opts);
       const selected = selectTables(metadata.tables, metadata.columnMap, {
         referencedTables: opts.referencedTables,
+        onlyReferenced: opts.onlyReferenced === true,
         userText: opts.userText,
         maxTables,
       });
@@ -82,12 +90,13 @@ export class AiSchemaContextBuilder {
         maxTables,
         maxColumnsPerTable: MAX_COLUMNS_PER_TABLE,
         includeComments: opts.includeComments,
+        maxChars: MAX_SCHEMA_CHARS,
       });
       return {
         ...serialized,
-        // serializer 的统计基于传入子集；对外反映真实总量与截断状态。
+        // serializer 的统计基于传入子集；对外反映真实总量与截断状态（表数截断 ∪ 字符预算截断）。
         totalTables: metadata.tables.length,
-        truncated: metadata.tables.length > tables.length,
+        truncated: serialized.truncated || metadata.tables.length > tables.length,
         connId: opts.connId,
         ...(opts.database ? { database: opts.database } : {}),
         ...(opts.schema ? { schema: opts.schema } : {}),
@@ -214,6 +223,7 @@ async function loadBatchColumns(
 
 interface SelectOptions {
   referencedTables?: string[];
+  onlyReferenced?: boolean;
   userText?: string;
   maxTables: number;
 }
@@ -224,8 +234,6 @@ function selectTables(
   columnMap: Map<string, ColumnMeta[]>,
   options: SelectOptions,
 ): TableMeta[] {
-  if (tables.length <= options.maxTables) return tables;
-
   const byName = new Map(tables.map((t) => [t.name.toLowerCase(), t]));
   const chosen: TableMeta[] = [];
   const seen = new Set<string>();
@@ -235,6 +243,19 @@ function selectTables(
     seen.add(table.name);
     chosen.push(table);
   };
+
+  // 显式表选择模式：仅注入勾选的表（引用顺序即用户勾选顺序），忽略启发式；
+  // 勾选表全部失效（改名/删除）时回退自动模式，避免上下文为空。
+  if (options.onlyReferenced && (options.referencedTables?.length ?? 0) > 0) {
+    for (const ref of options.referencedTables ?? []) {
+      take(byName.get(ref.toLowerCase()) ?? byName.get(ref.split('.').pop()!.toLowerCase()));
+    }
+    if (chosen.length > 0) return chosen.slice(0, options.maxTables);
+    seen.clear();
+    chosen.length = 0;
+  }
+
+  if (tables.length <= options.maxTables) return tables;
 
   for (const ref of options.referencedTables ?? []) {
     take(byName.get(ref.toLowerCase()) ?? byName.get(ref.split('.').pop()!.toLowerCase()));
