@@ -423,6 +423,12 @@
         "category": "DB Client"
       },
       {
+        "command": "devbelt.ai.inlineComplete",
+        "title": "%cmd.ai.inlineComplete%",
+        "category": "DB Client",
+        "icon": "$(sparkle)"
+      },
+      {
         "command": "devbelt.authenticator",
         "title": "%cmd.authenticator%",
         "category": "DB Client",
@@ -2241,6 +2247,12 @@
           "maximum": 50,
           "description": "Number of sample rows attached to data-QA questions after explicit confirmation.",
           "markdownDescription": "数据问答在用户单次确认后附加的样本行数（默认 10，上限 50；敏感列打码）。"
+        },
+        "devbelt.ai.enableInlineCompletion": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable AI inline completion (ghost text) in .sql files. Trigger manually with Alt+/ — it never fires on every keystroke.",
+          "markdownDescription": "在 `.sql` 文件中启用 AI 内联补全（Ghost-Text）。用 `Alt+/` 手动触发，**不会**在每次按键时自动请求。"
         }
       }
     },
@@ -2271,6 +2283,11 @@
         "command": "devbelt.ai.nl2sqlGhost",
         "key": "alt+a",
         "when": "editorLangId == sql"
+      },
+      {
+        "command": "devbelt.ai.inlineComplete",
+        "key": "alt+/",
+        "when": "editorLangId == sql && config.devbelt.ai.enableInlineCompletion"
       },
       {
         "command": "devbelt.runQuery",

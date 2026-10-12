@@ -1287,4 +1287,5 @@ export const zh: MessageCatalog = {
   'wv.ai.design.generate': 'AI 生成',
   'wv.ai.design.review': 'AI 审阅',
   'wv.ai.design.placeholder': '描述你想要的表（如：订单表，含状态与时间字段）',
+  'ai.inline.disabled': '智能补全未开启，请先在设置中打开 devbelt.ai.enableInlineCompletion。',
 };

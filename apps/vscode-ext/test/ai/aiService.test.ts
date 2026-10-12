@@ -153,6 +153,27 @@ describe('AiService（双 provider 路由）', () => {
     await expect(run()).rejects.toBeInstanceOf(AiAbortError);
   });
 
+  it('chat() 支持外部 AbortSignal（取消在途请求）', async () => {
+    const fetchImpl = (async (_input: unknown, init?: RequestInit) => {
+      const signal = init?.signal as AbortSignal;
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      });
+    }) as typeof fetch;
+    const service = new AiService({
+      keyStore: keyStoreWith(),
+      auth: authLike({ loggedIn: true }),
+      serverUrl: 's',
+      getConfig: () => config(),
+      fetchImpl,
+    });
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 5);
+    await expect(
+      service.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }, { feature: 'chat' }, controller.signal),
+    ).rejects.toBeInstanceOf(AiAbortError);
+  });
+
   it('describeProvider：登录缺失 / API Key 缺失 / 未配置 三类 reason', async () => {
     const proxy = new AiService({
       keyStore: keyStoreWith(),

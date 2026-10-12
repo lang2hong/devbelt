@@ -4,9 +4,11 @@ import {
   buildDataQaMessages,
   buildDiagnoseMessages,
   buildExplainMessages,
+  buildInlineCompletionMessages,
   buildNl2SqlMessages,
   buildOptimizeMessages,
   buildSchemaDesignMessages,
+  INLINE_NONE,
 } from '../src/index.js';
 import type { ChatMessage } from '../src/chat.js';
 
@@ -133,5 +135,23 @@ describe('prompts', () => {
     expect(review).toContain('review the current table structure');
     expect(review).toContain('Table: orders');
     expect(review).toContain('## Table: orders');
+  });
+
+  it('inline：before/after/schema + 只输出续写文本与 <none> 哨兵契约', () => {
+    const content = userContent(
+      buildInlineCompletionMessages({ before: 'SELECT * FROM orders WHERE ', after: ';', schemaText: '# Database: MYSQL', dbType: 'MYSQL' }),
+    );
+    expect(content).toContain('SQL before cursor:');
+    expect(content).toContain('SQL before cursor:\nSELECT * FROM orders WHERE');
+    expect(content).toContain('SQL after cursor:');
+    expect(content).toContain('# Database: MYSQL');
+    expect(content).toContain('Dialect: MYSQL');
+    expect(content).toContain('no markdown fences');
+    expect(content).toContain(INLINE_NONE);
+
+    const bare = userContent(buildInlineCompletionMessages({ before: 'SELECT 1' }));
+    expect(bare).not.toContain('SQL after cursor:');
+    expect(bare).not.toContain('Schema:');
+    expect(bare).not.toContain('Dialect:');
   });
 });

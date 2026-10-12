@@ -1309,4 +1309,5 @@ export const en: MessageCatalog = {
   'wv.ai.design.generate': 'AI generate',
   'wv.ai.design.review': 'AI review',
   'wv.ai.design.placeholder': 'Describe the table you want (e.g. orders with status and timestamps)',
+  'ai.inline.disabled': 'Inline completion is disabled. Enable devbelt.ai.enableInlineCompletion first.',
 };

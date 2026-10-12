@@ -167,12 +167,12 @@ export class AiService {
     };
   }
 
-  /** 非流式对话（聚合流式结果；用于后续短请求场景，如 Inline 补全）。 */
-  async chat(request: ChatRequest, meta: AiRequestMeta): Promise<ChatResponse> {
+  /** 非流式对话（聚合流式结果；用于 Inline 补全等短请求）。支持外部 AbortSignal。 */
+  async chat(request: ChatRequest, meta: AiRequestMeta, signal?: AbortSignal): Promise<ChatResponse> {
     const startedAt = Date.now();
     try {
       const provider = await this.pickProvider();
-      const result = await provider.chat(request, undefined);
+      const result = await provider.chat(request, signal);
       this.writeAudit(meta, Date.now() - startedAt);
       return result;
     } catch (err) {

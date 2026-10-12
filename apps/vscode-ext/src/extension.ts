@@ -30,6 +30,7 @@ import { AiSchemaContextBuilder } from './ai/schemaContext';
 import { AiStatusBar } from './ai/aiStatusBar';
 import { AiSqlRegistry } from './ai/aiSqlRegistry';
 import { AiBridge } from './ai/aiBridge';
+import { registerAiInlineProvider } from './completion/aiInlineProvider';
 import { createSyncStatusBar } from './sync/syncStatusBar';
 import { createAuthStatusBar } from './sync/authStatusBar';
 import { HistoryStore } from './history/historyStore';
@@ -359,6 +360,8 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     { dispose: () => AiChatView.closeAll() },
     { dispose: () => AiBridge.reset() },
     { dispose: () => AiSqlRegistry.reset() },
+    // P9 S5：Inline 补全（默认关；配置变更即时重建 provider）。
+    registerAiInlineProvider({ service: aiService, manager, connCtx }),
   );
   registerAiCommands({
     context,

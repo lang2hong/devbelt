@@ -18,6 +18,7 @@ import {
   resolveEditorContext,
   type RefinePayload,
 } from '../ai/nl2sqlRunner.js';
+import { triggerInlineCompletion } from '../completion/aiInlineProvider.js';
 import type { ConnectionContext } from '../connection/connectionContext.js';
 import type { ConnectionManager } from '../connection/connectionManager.js';
 
@@ -134,6 +135,10 @@ export function registerAiEditorCommands(deps: AiEditorDeps): void {
       const message = err instanceof Error ? err.message : String(err);
       void vscode.window.showWarningMessage(l10n('ai.editor.failed', { msg: message }));
     }
+  });
+
+  sub('devbelt.ai.inlineComplete', async () => {
+    await triggerInlineCompletion();
   });
 
   sub('devbelt.ai.nl2sqlDetails', async () => {

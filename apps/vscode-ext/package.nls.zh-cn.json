@@ -31,6 +31,7 @@
   "cmd.ai.nl2sqlGhost": "AI: 按选区生成 SQL",
   "cmd.ai.nl2sqlDetails": "AI: 查看意图详情",
   "cmd.ai.openChatRefine": "AI: 在 Chat 中细化",
+  "cmd.ai.inlineComplete": "AI: 光标处补全",
   "cmd.authenticator.add": "添加验证器条目",
   "cmd.authenticator.export": "导出验证器条目",
   "cmd.searchObjects": "搜索对象",

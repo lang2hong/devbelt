@@ -6,3 +6,4 @@ export { buildOptimizeMessages, type OptimizeSqlInput } from './optimizeSql.js';
 export { buildDiagnoseMessages, type DiagnoseErrorInput } from './diagnoseError.js';
 export { buildDataQaMessages, type DataQaInput } from './dataQa.js';
 export { buildSchemaDesignMessages, type SchemaDesignInput } from './schemaDesign.js';
+export { buildInlineCompletionMessages, INLINE_NONE, type InlineCompletionInput } from './inline.js';
