@@ -47,6 +47,12 @@ const ALLOWED_EVENT_TYPES = [
   'payment.callback.failed',
   'invoice.requested',
   'console.auth.refresh.reuse',
+  // P9 AI 代理（§6.8）：reason 存元数据 JSON（provider/model/feature/tokens/latencyMs/
+  // usageEstimated），不含 prompt/回复明文；sse chunk 解析失败单列告警事件。
+  'ai.chat.completed',
+  'ai.chat.failed',
+  'ai.chat.aborted',
+  'ai.sse.chunk_parse_failed',
 ] as const;
 
 export type AuditEventType = (typeof ALLOWED_EVENT_TYPES)[number];

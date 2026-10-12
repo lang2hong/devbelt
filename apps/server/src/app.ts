@@ -77,6 +77,11 @@ import { CursorService, deriveCursorKey } from './service/cursor.js';
 import { requestId } from './middleware/requestId.js';
 import { readCookie, refreshCookieName } from './middleware/cookies.js';
 import { registerConsoleStatic } from './consoleStatic.js';
+import { resolveAiUpstreamConfig } from './modules/ai/aiConfig.js';
+import { MysqlAiUsageRepo } from './modules/ai/repository/aiUsageRepo.js';
+import { AiQuotaService } from './modules/ai/service/aiQuotaService.js';
+import { AiProxyService } from './modules/ai/service/aiProxyService.js';
+import { aiRoutes } from './modules/ai/module.js';
 
 /**
  * 组合根（composition root）：组装 Fastify 实例 + 依赖注入。
@@ -280,6 +285,28 @@ export async function createApp() {
 
   const invoiceService = new InvoiceService({ invoiceRepo, orderRepo, auditWriter });
 
+  // AI 服务端代理（P9 §6.8）：单段月额度（ai_token_usage）+ parse-and-forward。
+  const aiUsageRepo = new MysqlAiUsageRepo(getMysql);
+  const aiQuotaService = new AiQuotaService(
+    aiUsageRepo,
+    personalSubscriptionRepo,
+    planRepo,
+    (fn) => withTransaction(app.mysql, fn),
+  );
+  const aiUpstreamConfig = resolveAiUpstreamConfig(process.env);
+  if (!aiUpstreamConfig.configured) {
+    app.log.warn(
+      'AI upstream is not configured: /api/ai/chat will return 503 ' +
+        '(set DEVBELT_AI_UPSTREAM_BASE_URL / DEVBELT_AI_UPSTREAM_MODEL)',
+    );
+  }
+  const aiProxyService = new AiProxyService({
+    config: aiUpstreamConfig,
+    quota: aiQuotaService,
+    audit: auditWriter,
+    log: (msg, data) => app.log.warn({ data }, msg),
+  });
+
   const orderService = new OrderService({
     orderRepo,
     paymentRepo,
@@ -340,6 +367,14 @@ export async function createApp() {
   app.register(authRoutes, { authService, tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin: config.consoleOrigin });
   app.register(meRoutes, { tokenService, getUser, getSessionActive, userRepo, personalSubscriptionRepo, planRepo });
   app.register(plansRoutes, { tokenService, getUser, getSessionActive, planRepo, featureDefRepo });
+  app.register(aiRoutes, {
+    tokenService,
+    getUser,
+    getSessionActive,
+    rateLimiter,
+    proxy: aiProxyService,
+    quota: aiQuotaService,
+  });
   app.register(personalRoutes, { tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin: config.consoleOrigin, deviceRepo, idempotencyService, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId), revokeDeviceInTx: (tx, userId, deviceId) => authService.revokeDeviceInTx(tx, userId, deviceId) });
   app.register(syncRoutes, { tokenService, getUser, getSessionActive, syncState: syncStateService, syncRecord: syncRecordService, syncReset: syncResetService, rateLimiter, verifyAccountRecoveryPassword: (userId, password) => authService.verifyPasswordStepUp(userId, password), auditWriter, emailSender, userRepo });
   app.register(consoleAuthRoutes, {

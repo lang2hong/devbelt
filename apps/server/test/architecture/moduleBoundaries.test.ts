@@ -3,19 +3,23 @@ import { readFileSync, readdirSync, statSync } from 'fs';
 import path from 'path';
 
 const SRC = path.resolve(__dirname, '../../src');
-const MODULES = ['auth', 'db', 'billing', 'admin'];
+const MODULES = ['auth', 'db', 'billing', 'admin', 'ai'];
 
 /**
  * 允许的跨模块依赖方向（值 = 可被该模块 import 的模块）。
  *
  * 现状记录（待收敛）：单体后端中少量服务仍跨模块直连（注册发权益、链接流读同步）。
  * 新增跨模块依赖必须先在此登记，避免边界无声腐化。
+ *
+ * P9：`ai` → `billing` 仅用于复用 `deriveEntitlement` 权益派生单出口（aiQuotaService
+ * 的月额度；不得自读订阅/套餐特性复制到期逻辑）。
  */
 const ALLOWED: Record<string, string[]> = {
   auth: ['billing', 'db'],
   billing: [],
   db: ['auth', 'billing'],
   admin: ['auth', 'db', 'billing'],
+  ai: ['billing'],
 };
 
 /** 组合根：允许 import 任意模块（装配各模块依赖）。 */

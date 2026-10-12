@@ -25,6 +25,7 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
         'users', 'plans', 'plan_feature_defs', 'plan_feature_values',
         'personal_subscriptions',
         'orders', 'payments', 'invoices', 'audit_events', 'personal_sync_state',
+        'ai_token_usage',
       ]) {
         expect(names).toContain(t);
       }
@@ -42,13 +43,13 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
       )) as [Array<{ COLUMN_NAME: string }>, unknown];
       expect(cols).toHaveLength(0);
 
-      // 种子：2 套餐 + 特性定义/取值（baseline 6/12 + 002 扩展 4/8 + 004 扩展 1/2）。
+      // 种子：2 套餐 + 特性定义/取值（baseline 6/12 + 002 扩展 4/8 + 004 扩展 1/2 + 008 扩展 1/2）。
       const [planCount] = (await pool.query('SELECT COUNT(*) AS c FROM plans')) as [Array<{ c: number }>, unknown];
       expect(Number(planCount[0].c)).toBe(2);
       const [defCount] = (await pool.query('SELECT COUNT(*) AS c FROM plan_feature_defs')) as [Array<{ c: number }>, unknown];
-      expect(Number(defCount[0].c)).toBe(11);
+      expect(Number(defCount[0].c)).toBe(12);
       const [valCount] = (await pool.query('SELECT COUNT(*) AS c FROM plan_feature_values')) as [Array<{ c: number }>, unknown];
-      expect(Number(valCount[0].c)).toBe(22);
+      expect(Number(valCount[0].c)).toBe(24);
 
       // free 的引擎/配额经 EAV 派生正确（数量类型为 number）。
       const [freeFeatures] = (await pool.query(
@@ -117,7 +118,7 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
       expect(tableNames).toContain('plans');
 
       const [ledger] = (await pool.query('SELECT version FROM schema_migrations')) as [Array<{ version: string }>, unknown];
-      expect(ledger.map((r) => r.version)).toEqual(['001_baseline', '002_plan_features_v2', '003_plan_ordering', '004_authenticator_quota', '005_sync_entity_kind', '006_redis_engine', '007_audit_query_indexes']);
+      expect(ledger.map((r) => r.version)).toEqual(['001_baseline', '002_plan_features_v2', '003_plan_ordering', '004_authenticator_quota', '005_sync_entity_kind', '006_redis_engine', '007_audit_query_indexes', '008_ai_quota']);
     } finally {
       await pool.end();
     }

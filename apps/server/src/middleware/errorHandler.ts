@@ -156,6 +156,16 @@ export function errorStatus(code: string): number {
       return 429;
     case 'FEATURE_TEMPORARILY_DISABLED':
       return 503;
+    // AI（P9 §6.8）：额度不足 → 409（资源状态，非限流/支付语义）；
+    // 上游认证错 → 401；上游限流 → 429；上游 5xx/网络/未配置 → 503。
+    case 'AI_QUOTA_EXCEEDED':
+      return 409;
+    case 'AI_PROVIDER_AUTH_ERROR':
+      return 401;
+    case 'AI_RATE_LIMITED':
+      return 429;
+    case 'AI_PROVIDER_ERROR':
+      return 503;
     default:
       return 400;
   }

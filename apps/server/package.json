@@ -8,7 +8,7 @@
     "build": "node build.cjs",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "lint": "tsc --noEmit -p tsconfig.test.json",
-    "test": "node build.cjs && pnpm -C ../../packages/db-core build && vitest run",
+    "test": "pnpm -C ../../packages/ai-core build && node build.cjs && pnpm -C ../../packages/db-core build && vitest run",
     "start": "node dist/index.cjs",
     "dev": "node dev.cjs",
     "admin:promote": "node dist/promoteAdmin.cjs",
@@ -28,6 +28,7 @@
     "nodemailer": "^9.0.5"
   },
   "devDependencies": {
+    "@devbelt/ai-core": "workspace:*",
     "@devbelt/db-core": "workspace:*",
     "@types/node": "^20.0.0",
     "@types/nodemailer": "^8.0.1",
