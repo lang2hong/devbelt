@@ -21,7 +21,11 @@ export interface ContextState {
   commentCount: number;
   estimatedTokens: number;
   truncated?: boolean;
-  note?: 'no-connection' | 'no-session' | 'schema-failed';
+  scopeKind?: 'database' | 'redis-db' | 'index';
+  scope?: string;
+  scopeOptions?: string[];
+  partial?: boolean;
+  note?: 'no-connection' | 'no-session' | 'schema-failed' | 'no-database' | 'db-unreachable';
 }
 
 export interface QuotaState {
@@ -42,6 +46,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   selectConnection: [id: string | null];
+  selectScope: [value: string];
   openSettings: [];
   setApiKey: [];
   clearApiKey: [];
@@ -68,13 +73,32 @@ const contextLabel = computed(() => {
   if (!ctx || ctx.note === 'no-connection') return t('wv.ai.context.noConnection');
   if (ctx.note === 'no-session') return t('wv.ai.context.noSession');
   if (ctx.note === 'schema-failed') return t('wv.ai.context.schemaFailed');
+  if (ctx.note === 'no-database') return t('wv.ai.context.noDatabase');
+  if (ctx.note === 'db-unreachable') return t('wv.ai.context.dbUnreachable');
+  if (ctx.scopeKind === 'redis-db') {
+    return t('wv.ai.context.redisSummary', { db: ctx.scope ?? '?', tokens: ctx.estimatedTokens });
+  }
+  if (ctx.scopeKind === 'index') {
+    return t('wv.ai.context.indexSummary', { index: ctx.scope ?? '?', tokens: ctx.estimatedTokens });
+  }
   const summary = t('wv.ai.context.summary', {
     tables: ctx.totalTables > ctx.tableCount ? `${ctx.tableCount}/${ctx.totalTables}` : ctx.tableCount,
     comments: ctx.commentCount,
     tokens: ctx.estimatedTokens,
   });
-  return ctx.truncated ? `${summary} · ${t('wv.ai.context.truncated')}` : summary;
+  const parts = [summary];
+  if (ctx.truncated) parts.push(t('wv.ai.context.truncated'));
+  if (ctx.partial) parts.push(t('wv.ai.context.partial'));
+  return parts.join(' · ');
 });
+
+const scopeOptions = computed(() => props.context?.scopeOptions ?? []);
+const showScopeSelect = computed(() => !!props.context?.scopeKind && scopeOptions.value.length > 0);
+
+function onSelectScope(event: Event): void {
+  const value = (event.target as HTMLSelectElement).value;
+  if (value) emit('selectScope', value);
+}
 
 const quotaLabel = computed(() => {
   const quota = props.quota;
@@ -99,6 +123,15 @@ function onSelect(event: Event): void {
       <select class="ai-conn-select" :value="props.selectedConnId ?? ''" @change="onSelect">
         <option value="">{{ t('wv.ai.connect') }}</option>
         <option v-for="conn in props.connections" :key="conn.id" :value="conn.id">{{ conn.name }}</option>
+      </select>
+      <select
+        v-if="showScopeSelect"
+        class="ai-conn-select"
+        :title="t('wv.ai.scope.title')"
+        :value="props.context?.scope ?? ''"
+        @change="onSelectScope"
+      >
+        <option v-for="option in scopeOptions" :key="option" :value="option">{{ option }}</option>
       </select>
       <button class="ai-context-summary ai-context-link" :title="t('wv.ai.context.detail')" @click="emit('requestContextDetail')">
         {{ contextLabel }}

@@ -26,8 +26,8 @@ interface ChatMessage {
  *
  * 消息协议见 `src/result/aiProtocol.ts`：
  *   up: ready | send | abort | newChat | renameChat | deleteChat | loadHistory |
- *       selectConnection | requestQuotaRefresh | openSettings | setApiKey | clearApiKey |
- *       testConnection | copyCode
+ *       selectConnection | selectScope | requestQuotaRefresh | openSettings | setApiKey |
+ *       clearApiKey | testConnection | copyCode
  *   down: init | chunk | finish | quotaUpdate | contextChanged | sessionList | sessionLoaded
  */
 const { post, onMessage } = useVsCode();
@@ -164,6 +164,11 @@ function selectConnection(id: string | null): void {
   post({ type: 'selectConnection', connId: id });
 }
 
+/** S7a：切换作用域（库/逻辑库/索引，单选）。 */
+function selectScope(value: string): void {
+  post({ type: 'selectScope', value });
+}
+
 /** P9 S4：打开 Context 明细抽屉（按需向 host 拉 schema/域上下文原文）。 */
 function openContextDetail(): void {
   showContextDetail.value = true;
@@ -182,6 +187,7 @@ function openContextDetail(): void {
       :selected-conn-id="selectedConnId"
       :include-column-comments="includeColumnComments"
       @select-connection="selectConnection"
+      @select-scope="selectScope"
       @open-settings="post({ type: 'openSettings' })"
       @set-api-key="post({ type: 'setApiKey' })"
       @clear-api-key="post({ type: 'clearApiKey' })"
