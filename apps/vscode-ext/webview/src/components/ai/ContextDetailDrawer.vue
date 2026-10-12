@@ -50,15 +50,15 @@ const { t } = useI18n();
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 12px;
+  font-size: calc(var(--vscode-font-size, 13px) - 1px);
   color: var(--vscode-descriptionForeground);
 }
 .ai-ctx-meta {
-  font-size: 11px;
+  font-size: calc(var(--vscode-font-size, 13px) - 2px);
   color: var(--vscode-descriptionForeground);
 }
 .ai-ctx-label {
-  font-size: 11px;
+  font-size: calc(var(--vscode-font-size, 13px) - 2px);
   color: var(--vscode-descriptionForeground);
   margin-top: 4px;
 }
@@ -69,12 +69,12 @@ const { t } = useI18n();
   min-height: 60px;
   background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12));
   padding: 6px;
-  font-size: 11px;
+  font-size: calc(var(--vscode-font-size, 13px) - 2px);
   font-family: var(--vscode-editor-font-family, monospace);
   white-space: pre-wrap;
 }
 .ai-ctx-empty {
   color: var(--vscode-descriptionForeground);
-  font-size: 12px;
+  font-size: calc(var(--vscode-font-size, 13px) - 1px);
 }
 </style>

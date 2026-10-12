@@ -14,7 +14,7 @@ body {
   border-radius: 3px;
   padding: 2px 8px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(var(--vscode-font-size, 13px) - 1px);
   font-family: inherit;
 }
 

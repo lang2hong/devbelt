@@ -68,7 +68,7 @@ function segments(text: string): AiInlineSegment[] {
   padding: 0 3px;
   border-radius: 3px;
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 12px;
+  font-size: var(--vscode-editor-font-size, 12px);
 }
 .ai-cursor {
   animation: ai-blink 1s steps(2, start) infinite;

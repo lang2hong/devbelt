@@ -50,7 +50,7 @@ function onKeydown(event: KeyboardEvent): void {
   border-radius: 4px;
   padding: 6px 8px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--vscode-font-size, 13px);
 }
 .ai-input-actions {
   display: flex;

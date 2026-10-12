@@ -101,7 +101,7 @@ function onDelete(session: ConversationSummary): void {
   align-items: center;
   padding: 6px 8px;
   border-bottom: 1px solid var(--vscode-panel-border);
-  font-size: 12px;
+  font-size: calc(var(--vscode-font-size, 13px) - 1px);
   color: var(--vscode-descriptionForeground);
 }
 .ai-drawer-list {
@@ -133,7 +133,7 @@ function onDelete(session: ConversationSummary): void {
   white-space: nowrap;
   cursor: pointer;
   padding: 3px 2px;
-  font-size: 12px;
+  font-size: calc(var(--vscode-font-size, 13px) - 1px);
 }
 .ai-drawer-ops {
   display: flex;
@@ -144,6 +144,6 @@ function onDelete(session: ConversationSummary): void {
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-focusBorder);
-  font-size: 12px;
+  font-size: calc(var(--vscode-font-size, 13px) - 1px);
 }
 </style>

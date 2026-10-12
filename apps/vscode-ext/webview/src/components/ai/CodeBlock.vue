@@ -68,7 +68,7 @@ function execute(): void {
   justify-content: space-between;
   align-items: center;
   padding: 2px 8px;
-  font-size: 11px;
+  font-size: calc(var(--vscode-font-size, 13px) - 2px);
   color: var(--vscode-descriptionForeground);
   border-bottom: 1px solid var(--vscode-panel-border);
 }
@@ -77,7 +77,7 @@ function execute(): void {
   padding: 8px;
   overflow-x: auto;
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 12px;
+  font-size: var(--vscode-editor-font-size, 12px);
   white-space: pre;
 }
 </style>
