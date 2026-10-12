@@ -28,6 +28,11 @@ export interface ServerProxyOptions {
   serverUrl: string;
   /** 动态读取 access token（AuthService 会随刷新/登出变化）。 */
   getAccessToken: () => string | undefined;
+  /**
+   * 401 时的静默续期（返回新 access token；失败/缺省则按授权错误处理）。
+   * 用于 token 过期后自动重试一次（对齐 SyncClient 既有语义；refresh 单飞由 AuthService 保证）。
+   */
+  onAuthFailure?: () => Promise<string | undefined>;
   /** 请求超时（毫秒），默认 60s（与服务端上游超时同量级）。 */
   timeoutMs?: number;
   /** 测试注入；生产用全局 fetch。 */
@@ -93,14 +98,13 @@ export class ServerProxyProvider implements AiProvider {
     };
 
     try {
-      let response: Response;
-      try {
-        response = await this.fetchImpl(`${this.serverUrl}/api/ai/chat`, {
+      const open = (accessToken: string): Promise<Response> =>
+        this.fetchImpl(`${this.serverUrl}/api/ai/chat`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Accept: 'text/event-stream',
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${accessToken}`,
           },
           body: JSON.stringify({
             model: request.model,
@@ -111,15 +115,15 @@ export class ServerProxyProvider implements AiProvider {
           }),
           signal: controller.signal,
         });
-      } catch (err) {
-        if (isAbortLike(err)) {
-          throw timedOut
-            ? new AiTimeoutError(`AI request timed out after ${this.timeoutMs}ms`)
-            : new AiAbortError('AI request aborted');
-        }
-        throw new AiNetworkError(`AI request failed: ${errorMessage(err)}`, undefined, err);
-      }
 
+      let response = await open(token);
+      // 401（access token 过期/被撤销）→ 静默续期一次后重试；只重试一次，失败路径与原行为一致。
+      if (response.status === 401 && this.opts.onAuthFailure) {
+        const refreshed = await this.opts.onAuthFailure().catch(() => undefined);
+        if (refreshed && refreshed !== token && !controller.signal.aborted) {
+          response = await open(refreshed);
+        }
+      }
       if (!response.ok) throw await this.toHttpError(response);
       clearTimeout(timer);
       if (!response.body) throw new AiProtocolError('AI proxy response has no body');
@@ -167,10 +171,16 @@ export class ServerProxyProvider implements AiProvider {
     const token = this.opts.getAccessToken();
     if (!token) return undefined;
     try {
-      const response = await this.fetchImpl(`${this.serverUrl}/api/ai/usage`, {
-        method: 'GET',
-        headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
-      });
+      const open = (accessToken: string): Promise<Response> =>
+        this.fetchImpl(`${this.serverUrl}/api/ai/usage`, {
+          method: 'GET',
+          headers: { Accept: 'application/json', Authorization: `Bearer ${accessToken}` },
+        });
+      let response = await open(token);
+      if (response.status === 401 && this.opts.onAuthFailure) {
+        const refreshed = await this.opts.onAuthFailure().catch(() => undefined);
+        if (refreshed && refreshed !== token) response = await open(refreshed);
+      }
       if (!response.ok) return undefined;
       const body = (await response.json()) as Partial<AiUsageSnapshot>;
       if (typeof body.limit !== 'number' || typeof body.used !== 'number') return undefined;

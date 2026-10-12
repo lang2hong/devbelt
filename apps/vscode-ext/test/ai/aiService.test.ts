@@ -18,11 +18,17 @@ function keyStoreWith(key?: string): AiKeyStore {
   } as unknown as AiKeyStore;
 }
 
-function authLike(opts: { loggedIn: boolean; entitlement?: unknown; token?: string }): AiAuthLike {
+function authLike(opts: {
+  loggedIn: boolean;
+  entitlement?: unknown;
+  token?: string;
+  refreshAccessToken?: () => Promise<string | undefined>;
+}): AiAuthLike {
   return {
     isLoggedIn: () => opts.loggedIn,
     getAccessToken: () => opts.token ?? (opts.loggedIn ? 'tok' : undefined),
     getCachedEntitlement: () => opts.entitlement as never,
+    ...(opts.refreshAccessToken ? { refreshAccessToken: opts.refreshAccessToken } : {}),
   };
 }
 
@@ -265,5 +271,22 @@ describe('AiService（双 provider 路由）', () => {
   it('estimatePromptTokens：CJK 与英文粗估', () => {
     expect(AiService.estimatePromptTokens([{ content: '你好' }])).toBe(2);
     expect(AiService.estimatePromptTokens([{ content: 'hello world' }])).toBe(3);
+  });
+
+  it('server-proxy：401 自动续期并重试一次（AuthService.refreshAccessToken 注入）', async () => {
+    let n = 0;
+    const fetchImpl = (async () =>
+      (n += 1) === 1 ? new Response('unauthorized', { status: 401 }) : sseResponse(['[DONE]'])) as typeof fetch;
+    const refresh = vi.fn(async () => 'tok-2');
+    const service = new AiService({
+      keyStore: keyStoreWith(),
+      auth: authLike({ loggedIn: true, refreshAccessToken: refresh }),
+      serverUrl: 's',
+      getConfig: () => config(),
+      fetchImpl,
+    });
+    await collect(service.streamChat({ model: 'm', messages: [] }, { feature: 'chat' }));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(n).toBe(2);
   });
 });

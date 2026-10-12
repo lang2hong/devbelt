@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   AiAbortError,
   AiAuthError,
@@ -30,10 +30,15 @@ function recordingFetch(response: Response | (() => Promise<Response> | Response
   return { calls, fetchImpl };
 }
 
-function provider(fetchImpl: typeof fetch, token: string | null = 'tok-1') {
+function provider(
+  fetchImpl: typeof fetch,
+  token: string | null = 'tok-1',
+  onAuthFailure?: () => Promise<string | undefined>,
+) {
   return new ServerProxyProvider({
     serverUrl: 'https://server.test/',
     getAccessToken: () => token ?? undefined,
+    ...(onAuthFailure ? { onAuthFailure } : {}),
     fetchImpl,
   });
 }
@@ -197,5 +202,56 @@ describe('ServerProxyProvider', () => {
     const unauthorized = recordingFetch(new Response('', { status: 401 }));
     await expect(provider(unauthorized.fetchImpl).getUsage()).resolves.toBeUndefined();
     await expect(provider((async () => { throw new Error('net'); }) as typeof fetch).getUsage()).resolves.toBeUndefined();
+  });
+
+  it('401 → 静默续期后重试一次成功（换新 token）', async () => {
+    const responses = [
+      new Response('unauthorized', { status: 401 }),
+      new Response(sseText(['{"choices":[{"delta":{"content":"ok"}}]}', '[DONE]']), { status: 200 }),
+    ];
+    const { calls, fetchImpl } = recordingFetch(() => responses.shift()!);
+    const refresh = vi.fn(async () => 'tok-2');
+    const chunks = [];
+    for await (const chunk of provider(fetchImpl, 'tok-1', refresh).chatStream({ model: 'm', messages: [] })) {
+      chunks.push(chunk);
+    }
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(2);
+    expect((calls[0].init.headers as Record<string, string>).Authorization).toBe('Bearer tok-1');
+    expect((calls[1].init.headers as Record<string, string>).Authorization).toBe('Bearer tok-2');
+    expect(chunks[0]).toMatchObject({ delta: 'ok' });
+  });
+
+  it('401 → 续期失败（undefined）→ AiAuthError，仅一次请求', async () => {
+    const { calls, fetchImpl } = recordingFetch(new Response('unauthorized', { status: 401 }));
+    const refresh = vi.fn(async () => undefined);
+    const err = await first(provider(fetchImpl, 'tok-1', refresh).chatStream({ model: 'm', messages: [] })).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(AiAuthError);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('401 → 续期返回同一 token → 不重试（防死循环）', async () => {
+    const { calls, fetchImpl } = recordingFetch(new Response('unauthorized', { status: 401 }));
+    const refresh = vi.fn(async () => 'tok-1');
+    const err = await first(provider(fetchImpl, 'tok-1', refresh).chatStream({ model: 'm', messages: [] })).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(AiAuthError);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('getUsage：401 → 续期 → 200 快照', async () => {
+    const responses = [
+      new Response('unauthorized', { status: 401 }),
+      new Response(JSON.stringify({ limit: 100, used: 1, remaining: 99 }), { status: 200 }),
+    ];
+    const { calls, fetchImpl } = recordingFetch(() => responses.shift()!);
+    const refresh = vi.fn(async () => 'tok-2');
+    await expect(provider(fetchImpl, 'tok-1', refresh).getUsage()).resolves.toMatchObject({ limit: 100, remaining: 99 });
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(2);
   });
 });

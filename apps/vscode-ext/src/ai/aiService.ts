@@ -61,6 +61,8 @@ export interface AiAuthLike {
   isLoggedIn(): boolean;
   getAccessToken(): string | undefined;
   getCachedEntitlement(): CachedEntitlement | undefined;
+  /** 401 时静默续期（SyncClient 单飞刷新）；缺省则不重试，直接报授权错误。 */
+  refreshAccessToken?: () => Promise<string | undefined>;
 }
 
 export interface AiServiceOptions {
@@ -188,6 +190,7 @@ export class AiService {
     const provider = new ServerProxyProvider({
       serverUrl: this.opts.serverUrl,
       getAccessToken: () => this.opts.auth.getAccessToken(),
+      ...(this.opts.auth.refreshAccessToken ? { onAuthFailure: () => this.opts.auth.refreshAccessToken!() } : {}),
       ...(this.fetchImpl ? { fetchImpl: this.fetchImpl } : {}),
     });
     return provider.getUsage();
@@ -221,6 +224,7 @@ export class AiService {
     return new ServerProxyProvider({
       serverUrl: this.opts.serverUrl,
       getAccessToken: () => this.opts.auth.getAccessToken(),
+      ...(this.opts.auth.refreshAccessToken ? { onAuthFailure: () => this.opts.auth.refreshAccessToken!() } : {}),
       ...(this.fetchImpl ? { fetchImpl: this.fetchImpl } : {}),
     });
   }

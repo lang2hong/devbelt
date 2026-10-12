@@ -262,6 +262,21 @@ export class AuthService {
     return this.accessToken;
   }
 
+  /**
+   * 用 refresh token 换新 access（P9 修复：AI 请求 401 时自动续期一次）。
+   * 复用 `SyncClient.refresh` 的单飞/轮换/`onTokensRefreshed` 回存语义
+   * （refresh token 一次性，并发只能有一个刷新在飞）；失败返回 undefined，
+   * 调用方按"需重新登录"处理。
+   */
+  async refreshAccessToken(): Promise<string | undefined> {
+    try {
+      const result = await this.client.refresh();
+      return result.accessToken;
+    } catch {
+      return undefined;
+    }
+  }
+
   /** 注册并登录 */
   async register(email: string, password: string): Promise<{ ok: boolean }> {
     return this.client.register(email, password);

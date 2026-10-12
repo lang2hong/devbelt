@@ -255,4 +255,14 @@ describe('AuthService.refreshEntitlement', () => {
     expect(auth.getCachedEntitlement()).toBeUndefined();
     expect(memento.values.get(ENTITLEMENT_KEY)).toBeUndefined();
   });
+
+  it('refreshAccessToken：成功回传新 access；失败返回 undefined（不抛）', async () => {
+    const secrets = makeSecrets();
+    const memento = makeMemento();
+    const auth = new AuthService(secrets as any, 'http://localhost:3000', memento as any);
+    const stub = vi.spyOn(auth.client, 'refresh').mockResolvedValue({ accessToken: 'A2', refreshToken: 'R2' });
+    await expect(auth.refreshAccessToken()).resolves.toBe('A2');
+    stub.mockRejectedValueOnce(new Error('no refresh token'));
+    await expect(auth.refreshAccessToken()).resolves.toBeUndefined();
+  });
 });
