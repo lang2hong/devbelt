@@ -11,7 +11,7 @@ import { pgSchemaFor } from '../utils/sql';
 import { buildDataQaMessages, buildDiagnoseMessages, formatRowSample } from '@devbelt/ai-core';
 import { AiBridge } from '../ai/aiBridge';
 import { readAiConfig } from '../ai/aiService';
-import { containsSecretSql, SECRET_SQL } from '../utils/sqlSecret';
+import { sanitizeDiagnosePayload } from '../ai/diagnosePayload';
 import { l10n } from '../i18n';
 
 /** 结果面板承载的数据库对象类型。视图（VIEW）不可写。 */
@@ -256,22 +256,17 @@ export class TableQueryView extends BaseWebView {
     });
   }
 
-  /** 错误诊断（§6.11.2）：host 侧二次扫描 —— 即便 webview 已确认，命中口令模式仍剔除。 */
+  /** 错误诊断（§6.11.2）：host 侧二次脱敏（sanitizeDiagnosePayload，纯函数可测）。 */
   private handleAiDiagnose(msg: any): void {
     const bridge = this.requireAiBridge();
     if (!bridge) return;
-    const rawMessage = String(msg?.message ?? '');
-    const errorText = containsSecretSql(rawMessage)
-      ? rawMessage.replace(new RegExp(SECRET_SQL.source, 'gi'), '[REDACTED]')
-      : rawMessage;
-    const candidateSql =
-      typeof msg?.sql === 'string' && msg.sql.trim() && !containsSecretSql(msg.sql) ? msg.sql : undefined;
+    const payload = sanitizeDiagnosePayload({ message: msg?.message, sql: msg?.sql, dbType: msg?.dbType });
     bridge.requestChat({
       feature: 'error-diagnose',
       messages: buildDiagnoseMessages({
-        error: errorText,
-        ...(candidateSql ? { sql: candidateSql } : {}),
-        ...(typeof msg?.dbType === 'string' ? { dbType: msg.dbType } : {}),
+        error: payload.error,
+        ...(payload.sql ? { sql: payload.sql } : {}),
+        ...(payload.dbType ? { dbType: payload.dbType } : {}),
       }),
       title: l10n('ai.scenario.diagnose'),
       connName: this.conn.name || this.conn.host,

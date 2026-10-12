@@ -102,6 +102,54 @@ describe('AiSchemaContextBuilder（扩展侧薄封装）', () => {
     expect(snapshot!.tableCount).toBe(200);
   });
 
+  it('大库预筛：英文关键词命中表名/表注释；无命中保持原序', async () => {
+    const tableCount = 260;
+    const getTables = vi.fn(async () =>
+      Array.from({ length: tableCount }, (_, i) => ({
+        name: i === 255 ? 'orders_archive' : `t${i}`,
+        comment: i === 250 ? 'customer orders archive' : '',
+      })),
+    );
+    const session = {
+      metadata: {
+        getTables,
+        getColumns: async () => [{ name: 'id', type: 'INT', isNotNull: true, isPrimary: true, isUnique: false, comment: '' }],
+        getForeignKeys: async () => [],
+      },
+    } as unknown as SqlConnectionSession;
+
+    const builder = new AiSchemaContextBuilder();
+    // 表名命中（orders_archive）
+    const byName = await builder.build(session, {
+      connId: 'c1',
+      dbType: 'MYSQL',
+      includeComments: false,
+      userText: 'show me recent orders',
+    });
+    expect(byName!.text).toContain('## Table: orders_archive');
+
+    // 表注释命中（customer orders archive）
+    builder.invalidate('c1');
+    const byComment = await builder.build(session, {
+      connId: 'c1',
+      dbType: 'MYSQL',
+      includeComments: false,
+      userText: 'customer orders',
+    });
+    expect(byComment!.text).toContain('## Table: t250');
+
+    // 无命中 → 保持原序（前 200 张，不含尾部表）
+    builder.invalidate('c1');
+    const noMatch = await builder.build(session, {
+      connId: 'c1',
+      dbType: 'MYSQL',
+      includeComments: false,
+      userText: 'zzzzqqqq',
+    });
+    expect(noMatch!.text).toContain('## Table: t0');
+    expect(noMatch!.text).not.toContain('## Table: t259');
+  });
+
   it('MySQL 批量列查询：单条 information_schema（含 ENUM/注释），不再逐表 getColumns', async () => {
     const getColumns = vi.fn(async () => []);
     const query = vi.fn(async () => ({
