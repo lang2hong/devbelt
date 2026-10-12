@@ -1,0 +1,41 @@
+{
+  "name": "@devbelt/ai-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Provider-agnostic AI transport core (no vscode dependency)",
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./sse": {
+      "types": "./dist/sse.d.ts",
+      "import": "./dist/sse.js",
+      "default": "./dist/sse.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "lint": "tsc --noEmit -p tsconfig.test.json",
+    "test": "pnpm -C ../db-core build && vitest run"
+  },
+  "dependencies": {
+    "@devbelt/db-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}
