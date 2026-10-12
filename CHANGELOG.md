@@ -52,6 +52,15 @@
   `alt+/` 键位（when `config.devbelt.ai.enableInlineCompletion`）+ 设置 `enableInlineCompletion`
   （默认 false）；`AiService.chat` 增可选 AbortSignal。验证：ai-core 78、vscode-ext 1622 通过/4 跳过
   （+17 条 S5 测试）、server 585 回归、全仓 typecheck/lint 全绿；F5 真机走查留发布硬门禁。
+- **S6 已交付（2026-10-12，加固与文档回填）**：prompt 注入防御测试（system 固定不插值、
+  schema 注释注入折叠为单行、域上下文只落 user 区块）；AbortController 隔离回归；错误码契约冻结；
+  敏感列机械断言（黑名单全集 + 无辜对照 + 字典片段不打码）；AI 机械门禁（apiKey 无 Memento 读写/
+  无日志泄露、协议无 apiKey 载荷、审计仅元数据、setting 默认值与读取点、bridge 未初始化不阻塞）；
+  sqlRisk shim 同一引用 + 同输入同输出；大库预筛英文/注释命中补测；诊断载荷二次脱敏抽为纯函数
+  （message 命中整段 [REDACTED]、sql 命中剔除）；文档回填 `docs/架构.md`（ai-core/双通道/服务端 AI
+  路由与月额度/权益矩阵）与 `docs/产品介绍.md`。验证：ai-core 88、vscode-ext 1636 通过/4 跳过
+  （+14 条 S6）、server 585 回归、全仓 typecheck/lint 全绿。多模型手工矩阵/F5 真机走查/真机大库
+  预筛留发布硬门禁（未执行）。
 - **P9 v1 不做加油包**：多档位 SKU / 一次性购买 / 管理后台手工建单 / 退款 / 双段 FIFO 计量移至
   **P9.1**（独立切片评审）。v1 配额条仅展示月额度已用/剩余/重置时间。
 - 面板：活动栏 AI 图标 + `devbelt.ai` **独立 WebviewPanel**（对齐 Redis/ES，不走 QueryView 的
