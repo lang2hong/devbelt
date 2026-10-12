@@ -22,6 +22,7 @@
 | P7 | [Redis 客户端](阶段/P7-Redis客户端.md) |
 | P7.1 | [PG 多 schema 与多库](阶段/P7.1-PG多schema与多库.md) |
 | P8 | [Elasticsearch 客户端](阶段/P8-Elasticsearch客户端.md) |
+| P9 | [AI 能力（NL2SQL / Chat / 解释 / 诊断 / 补全）](阶段/P9-AI.md) |
 
 ## 文档规则
 
