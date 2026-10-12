@@ -3,6 +3,7 @@ import { DatabaseType } from '@devbelt/db-core';
 import { buildInlineCompletionMessages, INLINE_NONE } from '@devbelt/ai-core';
 import { readAiConfig, type AiService } from '../ai/aiService.js';
 import { containsSecretSql } from '../utils/sqlSecret.js';
+import { peekSqlForConnection } from '../ai/sessionLookup.js';
 import { l10n } from '../i18n';
 import {
   INLINE_AFTER_MAX,
@@ -75,10 +76,10 @@ export class AiInlineProvider implements vscode.InlineCompletionItemProvider {
       let schemaText: string | undefined;
       if (bound) {
         const refs = collectReferenceTables(before);
-        if (refs.length > 0) {
+        const session = peekSqlForConnection(this.deps.manager, bound.conn, bound.db);
+        if (session && refs.length > 0) {
           const light = await loadLightSchema({
-            manager: this.deps.manager,
-            connId: bound.conn.id,
+            session,
             dbType: String(bound.conn.dbType),
             ...(bound.db ? { database: bound.db } : {}),
             ...(bound.conn.dbType === DatabaseType.PG && bound.conn.schema ? { schema: bound.conn.schema } : {}),

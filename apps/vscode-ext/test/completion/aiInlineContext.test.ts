@@ -80,26 +80,32 @@ describe('buildLightSchema（1.5K 预算裁剪）', () => {
   });
 });
 
-describe('loadLightSchema（会话与元数据）', () => {
-  function fakeManager(overrides: { session?: unknown } = {}): any {
-    const session = overrides.session ?? {
+describe('loadLightSchema（已解析会话 + 元数据）', () => {
+  function fakeSession(overrides: { fail?: boolean; empty?: boolean } = {}): any {
+    return {
       metadata: {
-        getForeignKeys: async () => [
-          { tableName: 'order_items', columnName: 'order_id', refTable: 'orders', refColumn: 'id' },
-        ],
-        getColumns: async (name: string) => [
-          { name: 'id', type: 'BIGINT', isNotNull: true, isPrimary: true, comment: '' },
-          ...(name === 'orders' ? [{ name: 'status', type: 'TINYINT', isNotNull: true, isPrimary: false, comment: '0=禁用 1=正常' }] : []),
-        ],
+        getForeignKeys: async () => {
+          if (overrides.fail) throw new Error('down');
+          return [{ tableName: 'order_items', columnName: 'order_id', refTable: 'orders', refColumn: 'id' }];
+        },
+        getColumns: async (name: string) => {
+          if (overrides.fail) throw new Error('down');
+          return overrides.empty
+            ? []
+            : [
+                { name: 'id', type: 'BIGINT', isNotNull: true, isPrimary: true, comment: '' },
+                ...(name === 'orders'
+                  ? [{ name: 'status', type: 'TINYINT', isNotNull: true, isPrimary: false, comment: '0=禁用 1=正常' }]
+                  : []),
+              ];
+        },
       },
     };
-    return { peekSql: () => session };
   }
 
   it('装载引用表 + 邻接表；注释透传', async () => {
     const light = await loadLightSchema({
-      manager: fakeManager(),
-      connId: 'c1',
+      session: fakeSession(),
       dbType: 'MYSQL',
       database: 'app',
       refs: collectReferenceTables('SELECT * FROM order_items WHERE'),
@@ -111,21 +117,10 @@ describe('loadLightSchema（会话与元数据）', () => {
     expect(light!.text).toContain('0=禁用 1=正常');
   });
 
-  it('无打开会话 / 无引用表 / 元数据失败 → null（不隐式建连）', async () => {
+  it('无引用表 / 元数据失败 / 空列 → null（不抛）', async () => {
     await expect(
       loadLightSchema({
-        manager: { peekSql: () => undefined } as never,
-        connId: 'c1',
-        dbType: 'MYSQL',
-        refs: collectReferenceTables('SELECT * FROM orders'),
-        includeComments: false,
-      }),
-    ).resolves.toBeNull();
-
-    await expect(
-      loadLightSchema({
-        manager: fakeManager(),
-        connId: 'c1',
+        session: fakeSession(),
         dbType: 'MYSQL',
         refs: [],
         includeComments: false,
@@ -134,17 +129,16 @@ describe('loadLightSchema（会话与元数据）', () => {
 
     await expect(
       loadLightSchema({
-        manager: fakeManager({
-          session: {
-            metadata: {
-              getForeignKeys: async () => {
-                throw new Error('down');
-              },
-              getColumns: async () => [],
-            },
-          },
-        }),
-        connId: 'c1',
+        session: fakeSession({ fail: true }),
+        dbType: 'MYSQL',
+        refs: collectReferenceTables('SELECT * FROM orders'),
+        includeComments: false,
+      }),
+    ).resolves.toBeNull();
+
+    await expect(
+      loadLightSchema({
+        session: fakeSession({ empty: true }),
         dbType: 'MYSQL',
         refs: collectReferenceTables('SELECT * FROM orders'),
         includeComments: false,

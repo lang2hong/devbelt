@@ -9,6 +9,7 @@ import type { SavedConnection } from '@devbelt/db-host/connection/connectionStor
 import type { ConnectionManager } from '../connection/connectionManager.js';
 import type { ConnectionContext } from '../connection/connectionContext.js';
 import { readAiConfig } from './aiService.js';
+import { peekSqlForConnection } from './sessionLookup.js';
 import type { AiSchemaContextBuilder, AiSchemaSnapshot } from './schemaContext.js';
 import type { AiContextStore } from './aiContextStore.js';
 
@@ -78,7 +79,7 @@ export async function resolveEditorContext(
   };
   if (config.schemaContextMode === 'off') return { ...base, note: 'disabled' };
 
-  const session = deps.manager.peekSql(bound.conn.id, bound.db);
+  const session = peekSqlForConnection(deps.manager, bound.conn, bound.db);
   if (!session) return { ...base, note: 'no-session' };
 
   const snapshot: AiSchemaSnapshot | null = await deps.schemaBuilder.build(session, {

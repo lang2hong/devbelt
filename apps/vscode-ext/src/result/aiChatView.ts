@@ -13,6 +13,7 @@ import type { ConnectionManager } from '../connection/connectionManager.js';
 import type { ConnectionStore } from '@devbelt/db-host/connection/connectionStore';
 import { AiSqlRegistry } from '../ai/aiSqlRegistry.js';
 import { injectBusinessRules, type RefinePayload } from '../ai/nl2sqlRunner.js';
+import { peekSqlForConnection } from '../ai/sessionLookup.js';
 import type { ExternalAiRequest } from '../ai/aiBridge.js';
 import type { QueryExecutor } from './queryExecutor.js';
 import type {
@@ -461,7 +462,7 @@ export class AiChatView extends BaseWebView {
       ...(conn.database ? { database: conn.database } : {}),
       ...(conn.dbType === DatabaseType.PG && conn.schema ? { schema: conn.schema } : {}),
     };
-    const session = this.deps.manager.peekSql(conn.id, conn.database);
+    const session = peekSqlForConnection(this.deps.manager, conn, conn.database);
     if (!session) {
       return {
         state: { ...base, tableCount: 0, totalTables: 0, commentCount: 0, estimatedTokens: 0, note: 'no-session' },

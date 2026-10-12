@@ -6,8 +6,8 @@ import {
   type AiSchemaTable,
 } from '@devbelt/ai-core';
 import type { ColumnMeta, ForeignKeyMeta } from '@devbelt/db-core';
+import type { SqlConnectionSession } from '../connection/connectionSession.js';
 import { extractFromTable, extractTableAliases } from './sqlCompletionEngine.js';
-import type { ConnectionManager } from '../connection/connectionManager.js';
 
 /**
  * Inline 补全的轻量上下文（P9 S5，§6.11.5）：
@@ -108,8 +108,8 @@ export function buildLightSchema(
 }
 
 export interface LoadLightSchemaArgs {
-  manager: ConnectionManager;
-  connId: string;
+  /** 已解析的**已打开**会话（由调用方经 peekSqlForConnection 定位；缺失即不注入 schema）。 */
+  session: SqlConnectionSession;
   dbType: string;
   database?: string;
   schema?: string;
@@ -118,13 +118,12 @@ export interface LoadLightSchemaArgs {
 }
 
 /**
- * 从已打开会话装载轻量 schema（**无打开会话 / 元数据失败 → null**，不隐式建连、不阻塞补全）。
+ * 从已打开会话装载轻量 schema（元数据失败 → null；会话由调用方解析，不隐式建连）。
  * 邻接表来自一次 `getForeignKeys`；列元数据只查入选的表（≤6）。
  */
 export async function loadLightSchema(args: LoadLightSchemaArgs): Promise<LightSchema | null> {
   if (args.refs.length === 0) return null;
-  const session = args.manager.peekSql(args.connId, args.database);
-  if (!session) return null;
+  const session = args.session;
   try {
     const fks = await session.metadata.getForeignKeys(args.database, args.schema).catch(() => []);
     const expanded = expandAdjacency(args.refs, fks);

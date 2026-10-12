@@ -66,6 +66,10 @@
   （仅 401、仅重试一次；续期失败/同 token 不重试；`getUsage` 同语义）+ AiService 注入。
   修复前 access token（15m TTL）过期会直接报 "AI proxy authentication failed (HTTP 401)"。
   测试 +6；仅扩展侧改动，无需服务端重部署。
+- **真机复核修复 2（2026-10-12）**：AI 上下文会话定位对齐连接键规则 —— 新增
+  `peekSqlForConnection`（非 PG/配置库 → 主会话；PG 异库 → 衍生会话且缺失不回退，防串库），
+  修复"配置了默认库的 MySQL/SQLite 连接在 AI 面板误报『连接未打开』"（Alt+A / Inline 的
+  schema 注入同因受益）；`loadLightSchema` 改为接收已解析会话。单测 +5；仅扩展侧改动。
 - **P9 v1 不做加油包**：多档位 SKU / 一次性购买 / 管理后台手工建单 / 退款 / 双段 FIFO 计量移至
   **P9.1**（独立切片评审）。v1 配额条仅展示月额度已用/剩余/重置时间。
 - 面板：活动栏 AI 图标 + `devbelt.ai` **独立 WebviewPanel**（对齐 Redis/ES，不走 QueryView 的
