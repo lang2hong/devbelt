@@ -20,6 +20,11 @@ export interface CachedEntitlement {
   allowDataSync?: boolean;
   /** 可保存验证器条目上限；0 = 不限。缺省 fail-closed 到 DEFAULT_FREE_MAX_AUTH_ENTRIES。 */
   maxAuthenticatorEntries?: number;
+  /**
+   * AI 月额度（tokens，P9）。**0 不表示不限**——AI 没有"不限"档；
+   * 缺省/非正值一律 fail-closed 为 0（客户端只做展示性预检，硬闸门以服务端 409 为准）。
+   */
+  maxAiTokensMonthly?: number;
 }
 
 /**
@@ -127,4 +132,14 @@ export function canUseDataSync(entitlement?: CachedEntitlement | null): boolean 
 export function maxAuthenticatorEntries(entitlement?: CachedEntitlement | null): number {
   const v = entitlement?.maxAuthenticatorEntries;
   return typeof v === 'number' && v >= 0 ? v : DEFAULT_FREE_MAX_AUTH_ENTRIES;
+}
+
+/**
+ * AI 月额度（tokens）。fail-closed：无缓存/字段缺失/非正值 → 0（拒绝）。
+ * 与其他配额不同，0 **不**表示"不限"：AI 月额度没有不限档（与服务端 `withinAiQuota` 同口径）。
+ * 仅用于客户端展示性预检与提示，硬闸门以服务端 409 为准。
+ */
+export function maxAiTokensMonthly(entitlement?: CachedEntitlement | null): number {
+  const v = entitlement?.maxAiTokensMonthly;
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
 }

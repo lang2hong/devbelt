@@ -20,7 +20,9 @@ export type AuditAction =
   /** P7：Redis 写/危险命令。 */
   | 'redis_command'
   /** P8：Elasticsearch REST 写请求（method/path，不含 body）。 */
-  | 'es_rest';
+  | 'es_rest'
+  /** P9：AI Chat 请求（只记连接/耗时元数据，不含 prompt/回复明文）。 */
+  | 'ai_chat';
 
 export interface AuditEntry {
   id: string;

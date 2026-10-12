@@ -1,0 +1,37 @@
+/**
+ * AI Chat 面板全局样式（P9 S3）：按钮基类 + 面板 reset。
+ * 组件内样式走 scoped，跨组件复用的 .ai-btn 收在这里（由 ai-main.ts 引入）。
+ */
+body {
+  margin: 0;
+  padding: 0;
+}
+
+.ai-btn {
+  background: var(--vscode-button-secondaryBackground, transparent);
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 3px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.ai-btn:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground, rgba(128, 128, 128, 0.15));
+}
+
+.ai-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ai-btn-primary {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+
+.ai-btn-primary:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground);
+}

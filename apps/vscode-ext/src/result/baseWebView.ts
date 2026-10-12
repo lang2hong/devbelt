@@ -28,12 +28,17 @@ export abstract class BaseWebView {
     title: string,
     viewColumn: vscode.ViewColumn = vscode.ViewColumn.Active,
     options?: vscode.WebviewOptions,
+    /**
+     * HTML 生成器（可选）。缺省 = 共享 `index.js` 入口；独立入口面板
+     * （如 AI Chat `aiChat.js`）传 `getAiChatHtml`，不影响存量面板行为。
+     */
+    htmlBuilder: (webview: vscode.Webview, extensionUri: vscode.Uri) => string = getWebviewHtml,
   ) {
     this.panel = vscode.window.createWebviewPanel(
       viewType, title, viewColumn,
       { enableScripts: true, retainContextWhenHidden: true, ...options },
     );
-    this.panel.webview.html = getWebviewHtml(this.panel.webview, BaseWebView._extensionUri);
+    this.panel.webview.html = htmlBuilder(this.panel.webview, BaseWebView._extensionUri);
     this.msgDisp = this.panel.webview.onDidReceiveMessage((msg) => {
       // 新一轮 webview 加载（面板重载）：重置两次 ready 状态，否则扩展会把重载后的
       // 第一个 ready 当成「第二次」，给尚未挂载的目标视图推数据 → 消息丢失、面板卡死。

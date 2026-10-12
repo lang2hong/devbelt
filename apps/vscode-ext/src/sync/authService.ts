@@ -154,6 +154,8 @@ export class AuthService {
       allowErDiagram: sub?.entitlement?.allowErDiagram !== false,
       allowDataSync: sub?.entitlement?.allowDataSync !== false,
       maxAuthenticatorEntries: sub?.entitlement?.maxAuthenticatorEntries ?? DEFAULT_FREE_MAX_AUTH_ENTRIES,
+      // P9：AI 月额度（0 = 拒绝，无"不限"档）；缺省 fail-closed 0。
+      maxAiTokensMonthly: sub?.entitlement?.maxAiTokensMonthly ?? 0,
     });
     this.cachedUserId = me.user.userId;
     return me;

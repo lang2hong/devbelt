@@ -19,6 +19,12 @@ import { purgeLegacyOrgCredentials } from './utils/legacyOrgCleanup';
 import { ToolsViewProvider } from './tools/toolsView';
 import { BackupScheduler } from './schedule/backupScheduler';
 import { registerViewCommands } from './commands/viewCommands';
+import { AiKeyStore } from './ai/aiKeyStore';
+import { AiContextStore } from './ai/aiContextStore';
+import { AiSessionStore } from './ai/aiSessionStore';
+import { AiService } from './ai/aiService';
+import { AiChatView } from './result/aiChatView';
+import { registerAiCommands } from './commands/aiChat';
 import { createSyncStatusBar } from './sync/syncStatusBar';
 import { createAuthStatusBar } from './sync/authStatusBar';
 import { HistoryStore } from './history/historyStore';
@@ -313,6 +319,34 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   );
 
   registerViewCommands({ context, manager, treeProvider, auth, backupScheduler, auditLogger });
+
+  // ===== P9 S3：AI 能力（Chat 面板骨架）=====
+  // 独立 WebviewPanel（devbelt.ai + aiChat.html），不走 QueryView/DesignView 的 WebviewMode；
+  // apiKey 只落 SecretStorage；面板单例由 AiChatView 管理（关闭即释放，在途流 abort）。
+  const aiKeyStore = new AiKeyStore(context.secrets);
+  const aiContextStore = new AiContextStore(context.globalState);
+  const aiSessions = new AiSessionStore(context.globalState);
+  const aiService = new AiService({ keyStore: aiKeyStore, auth, serverUrl, audit: auditLogger });
+  context.subscriptions.push(aiKeyStore, { dispose: () => AiChatView.closeAll() });
+  registerAiCommands({
+    context,
+    connectionStore: store,
+    contextStore: aiContextStore,
+    keyStore: aiKeyStore,
+    service: aiService,
+    openChat: () => {
+      AiChatView.open({
+        service: aiService,
+        sessions: aiSessions,
+        contextStore: aiContextStore,
+        keyStore: aiKeyStore,
+        manager,
+        connectionStore: store,
+        memento: context.globalState,
+        auth,
+      });
+    },
+  });
 
   // 表结构变更时清除补全缓存（事件订阅，替代对 treeProvider.refresh 的猴补丁）。
   context.subscriptions.push(treeProvider.onDidRefresh(() => completionProvider.invalidate()));

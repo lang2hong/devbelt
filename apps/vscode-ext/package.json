@@ -366,6 +366,37 @@
         "icon": "$(kebab-horizontal)"
       },
       {
+        "command": "devbelt.ai.chat",
+        "title": "%cmd.ai.chat%",
+        "category": "DB Client",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "devbelt.ai.setApiKey",
+        "title": "%cmd.ai.setApiKey%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.ai.clearApiKey",
+        "title": "%cmd.ai.clearApiKey%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.ai.testConnection",
+        "title": "%cmd.ai.testConnection%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.ai.domainContext",
+        "title": "%cmd.ai.domainContext%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.ai.defaultDirectives",
+        "title": "%cmd.ai.defaultDirectives%",
+        "category": "DB Client"
+      },
+      {
         "command": "devbelt.authenticator",
         "title": "%cmd.authenticator%",
         "category": "DB Client",
@@ -2102,6 +2133,42 @@
           "default": false,
           "description": "PostgreSQL cross-schema data + structure sync (syncDatabase). Experimental.",
           "markdownDescription": "PostgreSQL 跨 schema 数据+结构同步（syncDatabase）。实验功能。"
+        },
+        "devbelt.ai.provider": {
+          "type": "string",
+          "enum": [
+            "server-proxy",
+            "openai-compatible"
+          ],
+          "default": "server-proxy",
+          "description": "AI provider mode. server-proxy: use the DevBelt server (login required). openai-compatible: use your own API key stored in SecretStorage.",
+          "markdownDescription": "AI 接入模式。`server-proxy`：走 DevBelt 服务端（需登录）；`openai-compatible`：自带 Key（存 SecretStorage，不落设置文件）。"
+        },
+        "devbelt.ai.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "OpenAI-compatible base URL (e.g. https://api.openai.com/v1 or https://dashscope.aliyuncs.com/compatible-mode/v1). Used when provider is openai-compatible.",
+          "markdownDescription": "OpenAI 兼容端点根地址（如 `https://api.openai.com/v1`、百炼 `https://dashscope.aliyuncs.com/compatible-mode/v1`）。仅自带 Key 模式使用。"
+        },
+        "devbelt.ai.model": {
+          "type": "string",
+          "default": "",
+          "description": "Model name (e.g. gpt-4o-mini, qwen-plus, deepseek-chat).",
+          "markdownDescription": "模型名（如 `gpt-4o-mini`、`qwen-plus`、`deepseek-chat`）。"
+        },
+        "devbelt.ai.includeColumnComments": {
+          "type": "boolean",
+          "default": true,
+          "description": "Send column comments as schema context (improves NL2SQL accuracy for Chinese databases; comments are treated as untrusted metadata).",
+          "markdownDescription": "列注释参与 schema 上下文（中文库 NL2SQL 准确率关键；注释按不可信元数据处理）。AI 面板状态条显示发送条数。"
+        },
+        "devbelt.ai.temperature": {
+          "type": "number",
+          "default": 0.2,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Sampling temperature for AI requests.",
+          "markdownDescription": "AI 请求采样温度（默认 0.2，SQL 生成偏确定性）。"
         }
       }
     },
@@ -2172,7 +2239,7 @@
     "dev:webview": "cd webview && npx vite build --watch",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "lint": "tsc --noEmit -p tsconfig.test.json",
-    "test": "pnpm -C ../../packages/db-core build && pnpm -C ../../packages/db-host build && cd webview && npx vite build && cd .. && node esbuild.js && vitest run",
+    "test": "pnpm -C ../../packages/ai-core build && pnpm -C ../../packages/db-core build && pnpm -C ../../packages/db-host build && cd webview && npx vite build && cd .. && node esbuild.js && vitest run",
     "package": "vsce package --no-dependencies",
     "vsix:smoke": "node scripts/vsix-smoke.mjs"
   },
@@ -2184,6 +2251,7 @@
     "ssh2": "^1.16.1"
   },
   "devDependencies": {
+    "@devbelt/ai-core": "workspace:*",
     "@devbelt/db-core": "workspace:*",
     "@types/node": "^20.0.0",
     "@types/pngjs": "^6.0.5",

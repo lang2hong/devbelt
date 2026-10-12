@@ -43,3 +43,38 @@ export function getWebviewHtml(
 export function getNonce(): string {
   return randomBytes(16).toString('base64');
 }
+
+/**
+ * AI Chat 面板独立 HTML（P9 S3）：加载 `out/webview/aiChat.js`。
+ *
+ * 与 `getWebviewHtml`（共享 index.js + 视图 mode switch）并列：AI 面板按
+ * §6.10 走独立入口，不进入 WebviewMode 分支。样式仍复用构建产出的 style.css
+ * （cssCodeSplit=false 单文件）。
+ */
+export function getAiChatHtml(
+  webview: vscode.Webview,
+  extensionUri: vscode.Uri,
+): string {
+  const scriptUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'aiChat.js'),
+  );
+  const styleUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'style.css'),
+  );
+  const nonce = getNonce();
+  const csp = webview.cspSource;
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+  content="default-src 'none'; style-src 'unsafe-inline' ${csp}; script-src 'nonce-${nonce}' ${csp}; font-src ${csp};">
+<link rel="stylesheet" href="${styleUri}">
+</head>
+<body>
+<div id="app"></div>
+<script nonce="${nonce}" type="module" src="${scriptUri}"></script>
+</body>
+</html>`;
+}

@@ -107,7 +107,7 @@ describe('AuthService.refreshEntitlement', () => {
     await auth.init();
     await auth.refreshEntitlement();
 
-    const expected = { planCode: 'pro', allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 5, maxSavedConnections: 100, allowConnectionImport: true, maxConcurrentConnections: 0, allowConnectionExport: true, allowErDiagram: true, allowDataSync: true, maxAuthenticatorEntries: 10 };
+    const expected = { planCode: 'pro', allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 5, maxSavedConnections: 100, allowConnectionImport: true, maxConcurrentConnections: 0, allowConnectionExport: true, allowErDiagram: true, allowDataSync: true, maxAuthenticatorEntries: 10, maxAiTokensMonthly: 0 };
     expect(auth.getCachedEntitlement()).toEqual(expected);
     expect(memento.values.get(ENTITLEMENT_KEY)).toEqual(expected);
   });
@@ -129,6 +129,23 @@ describe('AuthService.refreshEntitlement', () => {
     expect(auth.getCachedEntitlement()?.maxAuthenticatorEntries).toBe(500);
   });
 
+  it('服务端提供的 maxAiTokensMonthly 被透传；缺省 fail-closed 0（0 不表示不限）', async () => {
+    const secrets = makeSecrets();
+    const memento = makeMemento();
+    await secrets.store(ACCESS_KEY, 'A1');
+    const subWithAi = {
+      ...proSub,
+      entitlement: { ...proSub.entitlement, maxAiTokensMonthly: 2_000_000 },
+    };
+    installFetch(() => ({ status: 200, body: meResponse(subWithAi as typeof proSub) }));
+
+    const auth = new AuthService(secrets as any, 'http://localhost:3000', memento as any);
+    await auth.init();
+    await auth.refreshEntitlement();
+
+    expect(auth.getCachedEntitlement()?.maxAiTokensMonthly).toBe(2_000_000);
+  });
+
   it('无订阅时降级到 Free（mysql/sqlite/redis）', async () => {
     const secrets = makeSecrets();
     const memento = makeMemento();
@@ -139,7 +156,7 @@ describe('AuthService.refreshEntitlement', () => {
     await auth.init();
     await auth.refreshEntitlement();
 
-    expect(auth.getCachedEntitlement()).toEqual({ planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite', 'redis'], maxDevices: 0, maxSavedConnections: 10, allowConnectionImport: false, maxConcurrentConnections: 0, allowConnectionExport: true, allowErDiagram: true, allowDataSync: true, maxAuthenticatorEntries: 10 });
+    expect(auth.getCachedEntitlement()).toEqual({ planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite', 'redis'], maxDevices: 0, maxSavedConnections: 10, allowConnectionImport: false, maxConcurrentConnections: 0, allowConnectionExport: true, allowErDiagram: true, allowDataSync: true, maxAuthenticatorEntries: 10, maxAiTokensMonthly: 0 });
   });
 
   it('getMe 失败静默降级：不抛、不写缓存', async () => {
@@ -185,7 +202,7 @@ describe('AuthService.refreshEntitlement', () => {
     const auth = new AuthService(secrets as any, 'http://localhost:3000', memento as any);
     await auth.init();
     await vi.waitFor(() => {
-      expect(auth.getCachedEntitlement()).toEqual({ planCode: 'pro', allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 5, maxSavedConnections: 100, allowConnectionImport: true, maxConcurrentConnections: 0, allowConnectionExport: true, allowErDiagram: true, allowDataSync: true, maxAuthenticatorEntries: 10 });
+      expect(auth.getCachedEntitlement()).toEqual({ planCode: 'pro', allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 5, maxSavedConnections: 100, allowConnectionImport: true, maxConcurrentConnections: 0, allowConnectionExport: true, allowErDiagram: true, allowDataSync: true, maxAuthenticatorEntries: 10, maxAiTokensMonthly: 0 });
     });
     // init 后台刷新只应触发一次 /api/db/me（无需调用方再显式刷新）
     expect(fetchCalls.filter((u) => u.endsWith('/api/db/me'))).toHaveLength(1);

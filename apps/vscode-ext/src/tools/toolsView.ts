@@ -5,11 +5,12 @@ import { l10n } from '../i18n';
 /**
  * 侧边栏「工具」视图（`devbelt.tools`）：竖向工具列表。
  *
- * 目前仅一项：验证器（`devbelt.authenticator`）——点击执行其命令（打开现有面板）。
+ * 目前两项：验证器（`devbelt.authenticator`）、AI Chat（`devbelt.ai.chat`）——点击执行其命令（打开现有面板）。
  * 工具清单以 `TOOLS` 数组维护；新增工具只加数组项 + i18n。
  */
 const TOOLS: ReadonlyArray<{ command: string; labelKey: string }> = [
   { command: 'devbelt.authenticator', labelKey: 'authenticator.title' },
+  { command: 'devbelt.ai.chat', labelKey: 'ai.title' },
 ];
 
 export class ToolsViewProvider implements vscode.WebviewViewProvider {

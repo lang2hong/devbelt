@@ -16,9 +16,13 @@ export default defineConfig({
     emptyOutDir: true,
     cssCodeSplit: false,
     rollupOptions: {
-      input: resolve(__dirname, 'src/main.ts'),
+      // 双入口：index（共享 App.vue mode switch）+ aiChat（P9 AI 面板独立入口）。
+      input: {
+        index: resolve(__dirname, 'src/main.ts'),
+        aiChat: resolve(__dirname, 'src/ai-main.ts'),
+      },
       output: {
-        entryFileNames: 'index.js',
+        entryFileNames: '[name].js',
         assetFileNames: '[name][extname]',
         chunkFileNames: 'chunks/[name].js',
       },

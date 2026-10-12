@@ -64,6 +64,8 @@ export interface PersonalEntitlement {
   allowDataSync?: boolean;
   /** 可保存验证器条目上限；0 = 不限。缺省 fail-closed 到 free 默认。 */
   maxAuthenticatorEntries?: number;
+  /** AI 月额度（tokens，P9）；0 不表示不限，缺省 fail-closed 为 0。 */
+  maxAiTokensMonthly?: number;
 }
 
 export interface MeResponse {
