@@ -24,6 +24,7 @@ export interface ContextState {
   scopeKind?: 'database' | 'redis-db' | 'index';
   scope?: string;
   scopeOptions?: string[];
+  selectedTables?: string[];
   partial?: boolean;
   note?: 'no-connection' | 'no-session' | 'schema-failed' | 'no-database' | 'db-unreachable';
 }
@@ -47,6 +48,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   selectConnection: [id: string | null];
   selectScope: [value: string];
+  openTablePicker: [];
   openSettings: [];
   setApiKey: [];
   clearApiKey: [];
@@ -95,6 +97,13 @@ const contextLabel = computed(() => {
 const scopeOptions = computed(() => props.context?.scopeOptions ?? []);
 const showScopeSelect = computed(() => !!props.context?.scopeKind && scopeOptions.value.length > 0);
 
+/** S7d：表选择按钮（仅 SQL 引擎的库作用域）。 */
+const showTablePicker = computed(() => props.context?.scopeKind === 'database' && !!props.context?.scope);
+const tablesLabel = computed(() => {
+  const count = props.context?.selectedTables?.length ?? 0;
+  return count > 0 ? t('wv.ai.tables.count', { n: count }) : t('wv.ai.tables.auto');
+});
+
 function onSelectScope(event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
   if (value) emit('selectScope', value);
@@ -133,6 +142,9 @@ function onSelect(event: Event): void {
       >
         <option v-for="option in scopeOptions" :key="option" :value="option">{{ option }}</option>
       </select>
+      <button v-if="showTablePicker" class="ai-btn" :title="t('wv.ai.tables.title')" @click="emit('openTablePicker')">
+        {{ tablesLabel }}
+      </button>
       <button class="ai-context-summary ai-context-link" :title="t('wv.ai.context.detail')" @click="emit('requestContextDetail')">
         {{ contextLabel }}
       </button>
@@ -155,7 +167,7 @@ function onSelect(event: Event): void {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 12px;
+  font-size: calc(var(--vscode-font-size, 13px) - 1px);
 }
 .ai-context-row {
   display: flex;
@@ -168,7 +180,7 @@ function onSelect(event: Event): void {
   color: var(--vscode-badge-foreground);
   border-radius: 3px;
   padding: 0 5px;
-  font-size: 11px;
+  font-size: calc(var(--vscode-font-size, 13px) - 2px);
 }
 .ai-model,
 .ai-context-summary {
@@ -179,7 +191,7 @@ function onSelect(event: Event): void {
   border: none;
   padding: 0;
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(var(--vscode-font-size, 13px) - 1px);
   font-family: inherit;
   text-decoration: underline dotted;
 }
@@ -190,7 +202,7 @@ function onSelect(event: Event): void {
   background: var(--vscode-dropdown-background, var(--vscode-input-background));
   color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
   border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, transparent));
-  font-size: 12px;
+  font-size: calc(var(--vscode-font-size, 13px) - 1px);
   max-width: 220px;
 }
 .ai-spacer {

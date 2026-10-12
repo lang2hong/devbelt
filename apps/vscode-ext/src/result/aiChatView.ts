@@ -23,6 +23,7 @@ import { buildEsContext } from '../ai/esContext.js';
 import { defaultConfirm, executeRedisCommands } from '../ai/redisExec.js';
 import { executeEsDsl } from '../ai/esExec.js';
 import type { ConnectionManager } from '../connection/connectionManager.js';
+import type { SqlConnectionSession } from '../connection/connectionSession.js';
 import type { ConnectionStore } from '@devbelt/db-host/connection/connectionStore';
 import { AiSqlRegistry } from '../ai/aiSqlRegistry.js';
 import { injectBusinessRules, type RefinePayload } from '../ai/nl2sqlRunner.js';
@@ -160,6 +161,19 @@ export class AiChatView extends BaseWebView {
           ? this.deps.contextStore.getLastScope(this.selectedConnId)?.value
           : undefined;
         this.pushSessionList();
+        await this.pushContext();
+        return;
+      }
+      case 'requestTableOptions': {
+        await this.pushTableOptions();
+        return;
+      }
+      case 'selectTables': {
+        const conn = this.selectedConnection();
+        const scope = this.selectedScope;
+        if (!conn || !scope || !Array.isArray(msg.tables)) return;
+        const tables = msg.tables.filter((name): name is string => typeof name === 'string' && name.trim().length > 0);
+        await this.deps.contextStore.setSelectedTables(conn.id, scope, tables);
         await this.pushContext();
         return;
       }
@@ -593,24 +607,23 @@ export class AiChatView extends BaseWebView {
 
     if (kind === 'database') {
       if (session.kind !== 'sql') return { state: { ...scopeBase, ...empty, note: 'no-session' } };
-      let sqlSession = session;
-      // PG 多库：选中的是配置库 → 主会话；否则用衍生会话（用户显式选择 = 允许打开，
-      // 等价树上双击库节点；失败 → 'db-unreachable'，绝不静默串库）。
-      if (conn.dbType === DatabaseType.PG && scope !== conn.database) {
-        const derived = this.deps.manager.peekSql(conn.id, scope)
-          ?? (await this.deps.manager.connectSql(conn, scope).catch(() => undefined));
-        if (!derived) return { state: { ...scopeBase, ...empty, note: 'db-unreachable' } };
-        sqlSession = derived;
-      }
+      const sqlSession = await this.resolveScopedSqlSession(conn, session, scope);
+      if (!sqlSession) return { state: { ...scopeBase, ...empty, note: 'db-unreachable' } };
+      // 表选择抽屉勾选（空 = 自动启发式模式）。
+      const selected = this.deps.contextStore.getSelectedTables(conn.id, scope);
       const snapshot = await this.schemaBuilder.build(sqlSession, {
         connId: conn.id,
         dbType: String(conn.dbType),
         includeComments: readAiConfig().includeColumnComments,
         database: scope,
         ...(conn.dbType === DatabaseType.PG && conn.schema ? { schema: conn.schema } : {}),
+        ...(selected.length > 0 ? { referencedTables: selected, onlyReferenced: true } : {}),
       });
       if (!snapshot) return { state: { ...scopeBase, ...empty, note: 'schema-failed' } };
-      return this.sqlContextState(scopeBase, snapshot);
+      return this.sqlContextState(
+        { ...scopeBase, ...(selected.length > 0 ? { selectedTables: selected } : {}) },
+        snapshot,
+      );
     }
 
     if (kind === 'redis-db') {
@@ -624,6 +637,44 @@ export class AiChatView extends BaseWebView {
     const ctx = await buildEsContext(session, scope);
     if (!ctx) return { state: { ...scopeBase, ...empty, note: 'schema-failed' } };
     return { state: { ...scopeBase, ...empty, estimatedTokens: ctx.estimatedTokens }, schemaText: ctx.text };
+  }
+
+  /**
+   * PG 多库：选中的是配置库 → 主会话；否则用衍生会话（用户显式选择 = 允许打开，
+   * 等价树上双击库节点；失败 → undefined，绝不静默串库）。其余引擎恒主会话。
+   */
+  private async resolveScopedSqlSession(
+    conn: SavedConnection,
+    session: SqlConnectionSession,
+    scope: string,
+  ): Promise<SqlConnectionSession | undefined> {
+    if (conn.dbType === DatabaseType.PG && scope !== conn.database) {
+      return (
+        this.deps.manager.peekSql(conn.id, scope)
+        ?? (await this.deps.manager.connectSql(conn, scope).catch(() => undefined))
+      );
+    }
+    return session;
+  }
+
+  /** 表选择抽屉数据源：当前作用域的表清单（上限 3000，防超大库拖垮 webview；搜索在端内做）。 */
+  private async pushTableOptions(): Promise<void> {
+    const conn = this.selectedConnection();
+    const session = conn ? this.deps.manager.peek(conn.id) : undefined;
+    const scope = this.selectedScope;
+    if (!conn || !session || session.kind !== 'sql' || !scope) {
+      this.post({ type: 'tableOptions', tables: [], ...(scope ? { scope } : {}) } as never);
+      return;
+    }
+    let tables: string[] = [];
+    try {
+      const scoped = (await this.resolveScopedSqlSession(conn, session, scope)) ?? session;
+      const metas = await scoped.metadata.getTables(scope, conn.dbType === DatabaseType.PG ? conn.schema : undefined);
+      tables = metas.map((meta) => meta.name).sort((a, b) => a.localeCompare(b));
+    } catch {
+      tables = [];
+    }
+    this.post({ type: 'tableOptions', tables: tables.slice(0, 3000), scope } as never);
   }
 
   private sqlContextState(

@@ -15,6 +15,7 @@ const MAX_TEXT_CHARS = 2000;
 export const DOMAIN_CONTEXT_PREFIX = 'devbelt.ai.domainContext.';
 export const DEFAULT_DIRECTIVES_PREFIX = 'devbelt.ai.defaultDirectives.';
 export const LAST_SCOPE_PREFIX = 'devbelt.ai.lastScope.';
+export const SELECTED_TABLES_PREFIX = 'devbelt.ai.selectedTables.';
 
 /** 连接级"上次选择的作用域"（P9 S7a：库/逻辑库/索引；单选切换）。 */
 export interface AiScopeRef {
@@ -57,10 +58,25 @@ export class AiContextStore {
     await this.memento.update(`${LAST_SCOPE_PREFIX}${connId}`, scope);
   }
 
-  /** 连接被删除时清理三条键（幂等）。 */
+  /** 连接 + 作用域级"上次勾选的表"（表选择抽屉；空数组 = 自动模式）。 */
+  getSelectedTables(connId: string, scope: string): string[] {
+    const raw = this.memento.get<string[]>(`${SELECTED_TABLES_PREFIX}${connId}.${scope}`);
+    return Array.isArray(raw) ? raw.filter((name): name is string => typeof name === 'string' && name.length > 0) : [];
+  }
+
+  async setSelectedTables(connId: string, scope: string, tables: string[]): Promise<void> {
+    await this.memento.update(`${SELECTED_TABLES_PREFIX}${connId}.${scope}`, tables.length > 0 ? tables : undefined);
+  }
+
+  /** 连接被删除时清理全部连接级键（含每个作用域的表选择），幂等。 */
   async clearForConnection(connId: string): Promise<void> {
     await this.memento.update(`${DOMAIN_CONTEXT_PREFIX}${connId}`, undefined);
     await this.memento.update(`${DEFAULT_DIRECTIVES_PREFIX}${connId}`, undefined);
     await this.memento.update(`${LAST_SCOPE_PREFIX}${connId}`, undefined);
+    for (const key of this.memento.keys()) {
+      if (key.startsWith(`${SELECTED_TABLES_PREFIX}${connId}.`)) {
+        await this.memento.update(key, undefined);
+      }
+    }
   }
 }

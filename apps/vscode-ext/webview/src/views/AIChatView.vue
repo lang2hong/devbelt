@@ -7,6 +7,7 @@ import ChatInput from '../components/ai/ChatInput.vue';
 import ConversationDrawer from '../components/ai/ConversationDrawer.vue';
 import ContextBar from '../components/ai/ContextBar.vue';
 import ContextDetailDrawer, { type ContextDetailState } from '../components/ai/ContextDetailDrawer.vue';
+import TablePickerDrawer from '../components/ai/TablePickerDrawer.vue';
 
 interface SessionSummary {
   id: string;
@@ -26,10 +27,10 @@ interface ChatMessage {
  *
  * 消息协议见 `src/result/aiProtocol.ts`：
  *   up: ready | send | abort | newChat | renameChat | deleteChat | loadHistory |
- *       selectConnection | selectScope | requestQuotaRefresh | openSettings | setApiKey |
- *       clearApiKey | testConnection | copyCode
+ *       selectConnection | selectScope | requestTableOptions | selectTables | requestQuotaRefresh |
+ *       openSettings | setApiKey | clearApiKey | testConnection | copyCode
  *   down: init | chunk | finish | quotaUpdate | contextChanged | sessionList | sessionLoaded |
- *         contextDetail | prefillInput | toolResult
+ *         contextDetail | prefillInput | toolResult | tableOptions
  */
 const { post, onMessage } = useVsCode();
 const { t } = useI18n();
@@ -49,6 +50,10 @@ const includeColumnComments = ref(true);
 /** P9 S4：Context 抽屉明细（schema/域上下文/默认指令原文，只读）。 */
 const showContextDetail = ref(false);
 const contextDetail = ref<ContextDetailState | null>(null);
+/** P9 S7d：表选择抽屉（连接 → 库 → 表 第三级）。 */
+const showTablePicker = ref(false);
+const tableOptions = ref<string[]>([]);
+const tableOptionsLoading = ref(false);
 
 const generating = computed(() => streaming.value !== null);
 
@@ -118,6 +123,14 @@ onMounted(() => {
       case 'prefillInput':
         if (typeof msg.text === 'string') input.value = msg.text;
         break;
+      case 'tableOptions':
+        tableOptions.value = Array.isArray(msg.tables) ? msg.tables : [];
+        tableOptionsLoading.value = false;
+        if (showTablePicker.value && msg.scope !== undefined && context.value?.scope && msg.scope !== context.value.scope) {
+          // 响应跨作用域（用户已切库）→ 丢弃，等新一轮
+          tableOptions.value = [];
+        }
+        break;
       case 'toolResult':
         messages.value.push({
           role: 'assistant',
@@ -177,6 +190,18 @@ function selectScope(value: string): void {
   post({ type: 'selectScope', value });
 }
 
+function openTablePicker(): void {
+  showTablePicker.value = true;
+  tableOptions.value = [];
+  tableOptionsLoading.value = true;
+  post({ type: 'requestTableOptions' });
+}
+
+function applyTableSelection(tables: string[]): void {
+  showTablePicker.value = false;
+  post({ type: 'selectTables', tables });
+}
+
 /** P9 S4：打开 Context 明细抽屉（按需向 host 拉 schema/域上下文原文）。 */
 function openContextDetail(): void {
   showContextDetail.value = true;
@@ -196,6 +221,7 @@ function openContextDetail(): void {
       :include-column-comments="includeColumnComments"
       @select-connection="selectConnection"
       @select-scope="selectScope"
+      @open-table-picker="openTablePicker"
       @open-settings="post({ type: 'openSettings' })"
       @set-api-key="post({ type: 'setApiKey' })"
       @clear-api-key="post({ type: 'clearApiKey' })"
@@ -213,6 +239,14 @@ function openContextDetail(): void {
         v-if="showContextDetail"
         :detail="contextDetail"
         @close="showContextDetail = false"
+      />
+      <TablePickerDrawer
+        v-if="showTablePicker"
+        :tables="tableOptions"
+        :selected="context?.selectedTables ?? []"
+        :loading="tableOptionsLoading"
+        @close="showTablePicker = false"
+        @apply="applyTableSelection"
       />
       <ConversationDrawer
         v-if="showSessions"
@@ -239,7 +273,7 @@ function openContextDetail(): void {
   height: 100vh;
   color: var(--vscode-foreground);
   font-family: var(--vscode-font-family);
-  font-size: 13px;
+  font-size: var(--vscode-font-size, 13px);
 }
 .ai-toolbar {
   display: flex;

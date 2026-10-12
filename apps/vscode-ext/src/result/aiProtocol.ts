@@ -23,6 +23,8 @@ export interface AiContextState {
   scopeKind?: 'database' | 'redis-db' | 'index';
   scope?: string;
   scopeOptions?: string[];
+  /** 表选择抽屉：当前勾选的表（空/缺省 = 自动模式）。 */
+  selectedTables?: string[];
   /** schema 部分表元数据失败时跳过（不再整包失败）。 */
   partial?: boolean;
   /** 无可用连接/会话/作用域时的说明（UI 提示"未选择连接"等）。 */
@@ -118,6 +120,13 @@ export interface AiContextDetailDown {
   defaultDirectives: string;
 }
 
+export interface AiTableOptionsDown {
+  type: 'tableOptions';
+  tables: string[];
+  /** 列表对应作用域（响应乱序保护）。 */
+  scope?: string;
+}
+
 export interface AiToolResultDown {
   type: 'toolResult';
   title: string;
@@ -135,7 +144,8 @@ export type AiDownMessage =
   | AiSessionLoadedDown
   | AiPrefillInputDown
   | AiContextDetailDown
-  | AiToolResultDown;
+  | AiToolResultDown
+  | AiTableOptionsDown;
 
 // ── Up（webview → host）──
 
@@ -168,6 +178,17 @@ export interface AiRunEsDslUp {
   text: string;
 }
 
+/** 表选择：拉取当前作用域的表清单（抽屉打开时）。 */
+export interface AiRequestTableOptionsUp {
+  type: 'requestTableOptions';
+}
+
+/** 表选择：应用勾选（空数组 = 恢复自动模式）。 */
+export interface AiSelectTablesUp {
+  type: 'selectTables';
+  tables: string[];
+}
+
 export type AiUpMessage =
   | { type: 'ready' }
   | AiSendUp
@@ -180,6 +201,8 @@ export type AiUpMessage =
   | AiSelectScopeUp
   | AiRunRedisUp
   | AiRunEsDslUp
+  | AiRequestTableOptionsUp
+  | AiSelectTablesUp
   | { type: 'requestQuotaRefresh' }
   | { type: 'openSettings' }
   | { type: 'setApiKey' }

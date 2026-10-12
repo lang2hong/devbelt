@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('vscode', () => ({}));
 
-import { AiContextStore, DOMAIN_CONTEXT_PREFIX, DEFAULT_DIRECTIVES_PREFIX, LAST_SCOPE_PREFIX } from '../../src/ai/aiContextStore';
+import { AiContextStore, DOMAIN_CONTEXT_PREFIX, DEFAULT_DIRECTIVES_PREFIX, LAST_SCOPE_PREFIX, SELECTED_TABLES_PREFIX } from '../../src/ai/aiContextStore';
 
 function makeMemento(): { memento: any; data: Map<string, unknown> } {
   const data = new Map<string, unknown>();
@@ -13,6 +13,9 @@ function makeMemento(): { memento: any; data: Map<string, unknown> } {
     async update(key: string, value: unknown): Promise<void> {
       if (value === undefined) data.delete(key);
       else data.set(key, value);
+    },
+    keys(): readonly string[] {
+      return [...data.keys()];
     },
   };
   return { memento, data };
@@ -76,5 +79,27 @@ describe('AiContextStore（连接级域上下文/默认指令）', () => {
     await store.setLastScope('c3', { kind: 'redis-db', value: '3' });
     await store.clearForConnection('c3');
     expect(store.getLastScope('c3')).toBeUndefined();
+  });
+
+  it('S7d selectedTables：按连接+作用域存读；空选删键；clearForConnection 清所有作用域键', async () => {
+    const { memento, data } = makeMemento();
+    const store = new AiContextStore(memento);
+
+    await store.setSelectedTables('c1', 'app', ['orders', 'users']);
+    expect(data.get(`${SELECTED_TABLES_PREFIX}c1.app`)).toEqual(['orders', 'users']);
+    expect(store.getSelectedTables('c1', 'app')).toEqual(['orders', 'users']);
+    expect(store.getSelectedTables('c1', 'other_db')).toEqual([]);
+
+    await store.setSelectedTables('c1', 'app', []);
+    expect(data.has(`${SELECTED_TABLES_PREFIX}c1.app`)).toBe(false);
+
+    data.set(`${SELECTED_TABLES_PREFIX}c2.db`, ['ok', 5, '']);
+    expect(store.getSelectedTables('c2', 'db')).toEqual(['ok']);
+
+    await store.setSelectedTables('c3', 'a', ['t1']);
+    await store.setSelectedTables('c3', 'b', ['t2']);
+    await store.clearForConnection('c3');
+    expect(data.has(`${SELECTED_TABLES_PREFIX}c3.a`)).toBe(false);
+    expect(data.has(`${SELECTED_TABLES_PREFIX}c3.b`)).toBe(false);
   });
 });
