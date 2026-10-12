@@ -66,6 +66,13 @@
   （仅 401、仅重试一次；续期失败/同 token 不重试；`getUsage` 同语义）+ AiService 注入。
   修复前 access token（15m TTL）过期会直接报 "AI proxy authentication failed (HTTP 401)"。
   测试 +6；仅扩展侧改动，无需服务端重部署。
+- **S7a 跨引擎作用域选择器（2026-10-12）**：AI 面板支持"选库"（单选切换，持久化
+  `devbelt.ai.lastScope.<connId>`）——MySQL/PG 列数据库（过滤系统库）、Redis 列逻辑库
+  （INFO keyspace ∪ CONFIG databases ∪ 当前库；cluster 恒 db0）、ES 列索引（_cat/indices）、
+  SQLite 隐藏；**连接可以没有默认库**（默认顺序：上次选择 → 连接默认库/当前库 → 第一项）；
+  PG 异库由显式选择打开衍生会话；根治无默认库时的 "Schema unavailable"（MySQL 无库不再走
+  会报 ER_NO_DB_ERROR 的逐表 `SHOW FULL COLUMNS`；单表失败跳过并标 partial）；修复
+  `'MYSQL'`/`'mysql'` 大小写错位导致批量列路径从未生效的潜伏缺陷。测试 +15。
 - **真机复核修复 2（2026-10-12）**：AI 上下文会话定位对齐连接键规则 —— 新增
   `peekSqlForConnection`（非 PG/配置库 → 主会话；PG 异库 → 衍生会话且缺失不回退，防串库），
   修复"配置了默认库的 MySQL/SQLite 连接在 AI 面板误报『连接未打开』"（Alt+A / Inline 的

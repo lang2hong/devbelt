@@ -29,6 +29,8 @@ export interface AiSchemaSnapshot extends SerializedSchema {
   connId: string;
   database?: string;
   schema?: string;
+  /** S7a：有表因元数据失败被跳过（部分加载，不再整包失败）。 */
+  partial?: boolean;
 }
 
 export interface BuildSchemaOptions {
@@ -58,6 +60,9 @@ export class AiSchemaContextBuilder {
 
   async build(session: SqlConnectionSession, opts: BuildSchemaOptions): Promise<AiSchemaSnapshot | null> {
     const maxTables = opts.maxTables ?? DEFAULT_MAX_TABLES;
+    // MySQL 无库时 `information_schema.tables` 无过滤会横跨所有可见库（探针实测 4 库 75 表）：
+    // 宁可无上下文，不给跨库错上下文（正确解法由作用域选择器保证 database 总存在）。
+    if (opts.dbType.toLowerCase() === 'mysql' && !opts.database) return null;
     try {
       const metadata = await this.loadMetadata(session, opts);
       const selected = selectTables(metadata.tables, metadata.columnMap, {
@@ -65,7 +70,7 @@ export class AiSchemaContextBuilder {
         userText: opts.userText,
         maxTables,
       });
-      const tables = await this.toSchemaTables(session, metadata, selected, opts);
+      const { tables, partial } = await this.toSchemaTables(session, metadata, selected, opts);
 
       const input: AiSchemaInput = {
         dbType: opts.dbType,
@@ -86,6 +91,7 @@ export class AiSchemaContextBuilder {
         connId: opts.connId,
         ...(opts.database ? { database: opts.database } : {}),
         ...(opts.schema ? { schema: opts.schema } : {}),
+        ...(partial ? { partial: true } : {}),
       };
     } catch {
       return null;
@@ -123,20 +129,27 @@ export class AiSchemaContextBuilder {
     metadata: CachedMetadata,
     selected: TableMeta[],
     opts: BuildSchemaOptions,
-  ): Promise<AiSchemaTable[]> {
+  ): Promise<{ tables: AiSchemaTable[]; partial: boolean }> {
     const out: AiSchemaTable[] = [];
+    let partial = false;
     for (const table of selected) {
       let columns = metadata.columnMap.get(table.name);
       if (!columns) {
         // 非 MySQL（或批量查询失败）回退：只对选中的表逐表取列（已受 maxTables 约束）。
-        columns = await session.metadata.getColumns(table.name, opts.database, opts.schema);
+        // S7a：单表失败跳过并标记 partial——过去一张表失败让整个上下文归零（"Schema unavailable"）。
+        try {
+          columns = await session.metadata.getColumns(table.name, opts.database, opts.schema);
+        } catch {
+          partial = true;
+          continue;
+        }
       }
       out.push({
         name: table.name,
         columns: columns.map((column) => toAiColumn(column, metadata.fkMap.get(`${table.name}.${column.name}`))),
       });
     }
-    return out;
+    return { tables: out, partial };
   }
 }
 
@@ -158,7 +171,9 @@ async function loadBatchColumns(
   opts: BuildSchemaOptions,
 ): Promise<Map<string, ColumnMeta[]>> {
   const map = new Map<string, ColumnMeta[]>();
-  if (opts.dbType !== 'mysql') return map;
+  // 大小写归一：调用方沿传 `'MYSQL'`（DatabaseType 枚举值），历史判断写死 `'mysql'`
+  // 导致批量路径从未生效、全部回退逐表（无默认库时逐表必炸）。统一小写比较。
+  if (opts.dbType.toLowerCase() !== 'mysql') return map;
   try {
     const result = await session.query.query(
       `SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_KEY, COLUMN_COMMENT

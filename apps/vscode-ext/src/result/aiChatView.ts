@@ -8,12 +8,14 @@ import { AiService, readAiConfig, type AiMutableStream, type AiRequestMeta } fro
 import { AiSessionStore, type AiChatSession } from '../ai/aiSessionStore.js';
 import { AiContextStore } from '../ai/aiContextStore.js';
 import { AiKeyStore } from '../ai/aiKeyStore.js';
-import { AiSchemaContextBuilder } from '../ai/schemaContext.js';
+import { AiSchemaContextBuilder, type AiSchemaSnapshot } from '../ai/schemaContext.js';
+import { currentDatabase, listScopes, pickScope, scopeKindOf } from '../ai/scopeOptions.js';
+import { buildRedisContext } from '../ai/redisContext.js';
+import { buildEsContext } from '../ai/esContext.js';
 import type { ConnectionManager } from '../connection/connectionManager.js';
 import type { ConnectionStore } from '@devbelt/db-host/connection/connectionStore';
 import { AiSqlRegistry } from '../ai/aiSqlRegistry.js';
 import { injectBusinessRules, type RefinePayload } from '../ai/nl2sqlRunner.js';
-import { peekSqlForConnection } from '../ai/sessionLookup.js';
 import type { ExternalAiRequest } from '../ai/aiBridge.js';
 import type { QueryExecutor } from './queryExecutor.js';
 import type {
@@ -57,6 +59,8 @@ export class AiChatView extends BaseWebView {
 
   private readonly schemaBuilder: AiSchemaContextBuilder;
   private selectedConnId?: string;
+  /** S7a：选中作用域（库/逻辑库/索引，单选；随 buildContext 解析并持久化）。 */
+  private selectedScope?: string;
   private activeSessionId?: string;
   private activeStream?: AiMutableStream<ChatStreamChunk>;
   /** 流序号：新请求/中止后旧流的迟到 chunk 一律丢弃。 */
@@ -142,7 +146,22 @@ export class AiChatView extends BaseWebView {
       case 'selectConnection': {
         this.selectedConnId = msg.connId ?? undefined;
         await this.deps.memento.update(LAST_CONN_KEY, this.selectedConnId);
+        this.selectedScope = this.selectedConnId
+          ? this.deps.contextStore.getLastScope(this.selectedConnId)?.value
+          : undefined;
         this.pushSessionList();
+        await this.pushContext();
+        return;
+      }
+      case 'selectScope': {
+        const conn = this.selectedConnection();
+        if (!conn || typeof msg.value !== 'string' || !msg.value) return;
+        this.selectedScope = msg.value;
+        const kind = scopeKindOf(conn.dbType);
+        await this.deps.contextStore.setLastScope(
+          conn.id,
+          kind === 'none' ? undefined : { kind, value: msg.value },
+        );
         await this.pushContext();
         return;
       }
@@ -202,10 +221,11 @@ export class AiChatView extends BaseWebView {
     const { schemaText } = await this.buildContext();
     const messages = this.composeMessages(session, schemaText);
     const conn = this.selectedConnection();
+    const database = this.selectedScope ?? conn?.database;
     await this.runRequest(session, messages, {
       feature: 'chat',
       ...(conn ? { connName: conn.name } : {}),
-      ...(session.connId && conn?.database ? { database: conn.database } : {}),
+      ...(database ? { database } : {}),
     });
   }
 
@@ -340,7 +360,7 @@ export class AiChatView extends BaseWebView {
       return;
     }
     AiSqlRegistry.tryGet()?.mark(text);
-    await this.deps.executor.run(conn, text, conn.database, 'reuse');
+    await this.deps.executor.run(conn, text, this.selectedScope ?? conn.database, 'reuse');
   }
 
   /** Context 抽屉明细：schema 文本 + 域上下文/默认指令原文（只读展示）。 */
@@ -455,31 +475,94 @@ export class AiChatView extends BaseWebView {
     if (!conn) {
       return { state: { tableCount: 0, totalTables: 0, commentCount: 0, estimatedTokens: 0, note: 'no-connection' } };
     }
-    const base: Omit<AiContextState, 'tableCount' | 'totalTables' | 'commentCount' | 'estimatedTokens'> = {
+    const empty = { tableCount: 0, totalTables: 0, commentCount: 0, estimatedTokens: 0 };
+    const base = {
       connId: conn.id,
       connName: conn.name,
       dbType: String(conn.dbType),
-      ...(conn.database ? { database: conn.database } : {}),
       ...(conn.dbType === DatabaseType.PG && conn.schema ? { schema: conn.schema } : {}),
     };
-    const session = peekSqlForConnection(this.deps.manager, conn, conn.database);
+    const session = this.deps.manager.peek(conn.id);
     if (!session) {
-      return {
-        state: { ...base, tableCount: 0, totalTables: 0, commentCount: 0, estimatedTokens: 0, note: 'no-session' },
-      };
+      return { state: { ...base, ...empty, note: 'no-session' } };
     }
-    const snapshot = await this.schemaBuilder.build(session, {
-      connId: conn.id,
-      dbType: String(conn.dbType),
-      includeComments: readAiConfig().includeColumnComments,
-      ...(conn.database ? { database: conn.database } : {}),
-      ...(conn.dbType === DatabaseType.PG && conn.schema ? { schema: conn.schema } : {}),
-    });
-    if (!snapshot) {
-      return {
-        state: { ...base, tableCount: 0, totalTables: 0, commentCount: 0, estimatedTokens: 0, note: 'schema-failed' },
-      };
+
+    const { kind, options } = await listScopes(conn, session);
+
+    // SQLite：单文件无作用域，直接用连接配置库（可空）组上下文。
+    if (kind === 'none') {
+      if (session.kind !== 'sql') return { state: { ...base, ...empty, note: 'no-session' } };
+      const snapshot = await this.schemaBuilder.build(session, {
+        connId: conn.id,
+        dbType: String(conn.dbType),
+        includeComments: readAiConfig().includeColumnComments,
+        ...(conn.database ? { database: conn.database } : {}),
+      });
+      if (!snapshot) return { state: { ...base, ...empty, note: 'schema-failed' } };
+      return this.sqlContextState(base, snapshot);
     }
+
+    // 作用域解析：上次选择 → 连接默认库/当前库 → 第一项；连接可以没有默认库。
+    const saved = this.deps.contextStore.getLastScope(conn.id)?.value;
+    let preferred = conn.database;
+    if (conn.dbType === DatabaseType.REDIS) {
+      preferred = String(session.kind === 'redis' ? session.db : (conn.redisDb ?? 0));
+    }
+    let scope = pickScope(options, saved, preferred);
+    if (!scope && kind === 'database' && session.kind === 'sql') {
+      scope = await currentDatabase(session, String(conn.dbType));
+      if (scope && !options.includes(scope)) scope = undefined;
+    }
+    const scopeBase = {
+      ...base,
+      scopeKind: kind,
+      scopeOptions: options,
+      ...(scope ? { scope } : {}),
+    };
+    this.selectedScope = scope;
+    if (!scope) {
+      return { state: { ...scopeBase, ...empty, note: 'no-database' } };
+    }
+
+    if (kind === 'database') {
+      if (session.kind !== 'sql') return { state: { ...scopeBase, ...empty, note: 'no-session' } };
+      let sqlSession = session;
+      // PG 多库：选中的是配置库 → 主会话；否则用衍生会话（用户显式选择 = 允许打开，
+      // 等价树上双击库节点；失败 → 'db-unreachable'，绝不静默串库）。
+      if (conn.dbType === DatabaseType.PG && scope !== conn.database) {
+        const derived = this.deps.manager.peekSql(conn.id, scope)
+          ?? (await this.deps.manager.connectSql(conn, scope).catch(() => undefined));
+        if (!derived) return { state: { ...scopeBase, ...empty, note: 'db-unreachable' } };
+        sqlSession = derived;
+      }
+      const snapshot = await this.schemaBuilder.build(sqlSession, {
+        connId: conn.id,
+        dbType: String(conn.dbType),
+        includeComments: readAiConfig().includeColumnComments,
+        database: scope,
+        ...(conn.dbType === DatabaseType.PG && conn.schema ? { schema: conn.schema } : {}),
+      });
+      if (!snapshot) return { state: { ...scopeBase, ...empty, note: 'schema-failed' } };
+      return this.sqlContextState(scopeBase, snapshot);
+    }
+
+    if (kind === 'redis-db') {
+      if (session.kind !== 'redis') return { state: { ...scopeBase, ...empty, note: 'no-session' } };
+      const ctx = await buildRedisContext(session, Number(scope));
+      if (!ctx) return { state: { ...scopeBase, ...empty, note: 'schema-failed' } };
+      return { state: { ...scopeBase, ...empty, estimatedTokens: ctx.estimatedTokens }, schemaText: ctx.text };
+    }
+
+    if (session.kind !== 'elasticsearch') return { state: { ...scopeBase, ...empty, note: 'no-session' } };
+    const ctx = await buildEsContext(session, scope);
+    if (!ctx) return { state: { ...scopeBase, ...empty, note: 'schema-failed' } };
+    return { state: { ...scopeBase, ...empty, estimatedTokens: ctx.estimatedTokens }, schemaText: ctx.text };
+  }
+
+  private sqlContextState(
+    base: Omit<AiContextState, 'tableCount' | 'totalTables' | 'commentCount' | 'estimatedTokens'>,
+    snapshot: AiSchemaSnapshot,
+  ): { state: AiContextState; schemaText?: string } {
     return {
       state: {
         ...base,
@@ -488,6 +571,7 @@ export class AiChatView extends BaseWebView {
         commentCount: snapshot.commentCount,
         estimatedTokens: snapshot.estimatedTokens,
         ...(snapshot.truncated ? { truncated: true } : {}),
+        ...(snapshot.partial ? { partial: true } : {}),
       },
       schemaText: snapshot.text,
     };

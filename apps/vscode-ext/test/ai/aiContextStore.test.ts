@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('vscode', () => ({}));
 
-import { AiContextStore, DOMAIN_CONTEXT_PREFIX, DEFAULT_DIRECTIVES_PREFIX } from '../../src/ai/aiContextStore';
+import { AiContextStore, DOMAIN_CONTEXT_PREFIX, DEFAULT_DIRECTIVES_PREFIX, LAST_SCOPE_PREFIX } from '../../src/ai/aiContextStore';
 
 function makeMemento(): { memento: any; data: Map<string, unknown> } {
   const data = new Map<string, unknown>();
@@ -57,5 +57,24 @@ describe('AiContextStore（连接级域上下文/默认指令）', () => {
     const store = new AiContextStore(memento);
     expect(store.getDomainContext('none')).toBe('');
     expect(store.getDefaultDirectives('none')).toBe('');
+  });
+
+  it('S7a lastScope：读写命中约定键，脏数据/空值 → undefined，清除后无残留', async () => {
+    const { memento, data } = makeMemento();
+    const store = new AiContextStore(memento);
+
+    await store.setLastScope('c1', { kind: 'database', value: 'app' });
+    expect(data.get(`${LAST_SCOPE_PREFIX}c1`)).toEqual({ kind: 'database', value: 'app' });
+    expect(store.getLastScope('c1')).toEqual({ kind: 'database', value: 'app' });
+
+    data.set(`${LAST_SCOPE_PREFIX}c2`, { kind: 'index', value: '' });
+    expect(store.getLastScope('c2')).toBeUndefined();
+
+    await store.setLastScope('c1', undefined);
+    expect(store.getLastScope('c1')).toBeUndefined();
+
+    await store.setLastScope('c3', { kind: 'redis-db', value: '3' });
+    await store.clearForConnection('c3');
+    expect(store.getLastScope('c3')).toBeUndefined();
   });
 });

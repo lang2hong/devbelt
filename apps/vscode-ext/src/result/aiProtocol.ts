@@ -19,8 +19,14 @@ export interface AiContextState {
   commentCount: number;
   estimatedTokens: number;
   truncated?: boolean;
-  /** 无可用连接/会话时的说明（UI 提示"未选择连接"等）。 */
-  note?: 'no-connection' | 'no-session' | 'schema-failed';
+  /** S7a：作用域（库/逻辑库/索引）单选状态与候选。 */
+  scopeKind?: 'database' | 'redis-db' | 'index';
+  scope?: string;
+  scopeOptions?: string[];
+  /** schema 部分表元数据失败时跳过（不再整包失败）。 */
+  partial?: boolean;
+  /** 无可用连接/会话/作用域时的说明（UI 提示"未选择连接"等）。 */
+  note?: 'no-connection' | 'no-session' | 'schema-failed' | 'no-database' | 'db-unreachable';
 }
 
 export interface AiQuotaState {
@@ -136,6 +142,12 @@ export interface AiSelectConnectionUp {
   connId: string | null;
 }
 
+/** S7a：切换作用域（库/逻辑库/索引，单选）。 */
+export interface AiSelectScopeUp {
+  type: 'selectScope';
+  value: string;
+}
+
 export type AiUpMessage =
   | { type: 'ready' }
   | AiSendUp
@@ -145,6 +157,7 @@ export type AiUpMessage =
   | { type: 'deleteChat'; sessionId: string }
   | { type: 'loadHistory'; sessionId: string }
   | AiSelectConnectionUp
+  | AiSelectScopeUp
   | { type: 'requestQuotaRefresh' }
   | { type: 'openSettings' }
   | { type: 'setApiKey' }

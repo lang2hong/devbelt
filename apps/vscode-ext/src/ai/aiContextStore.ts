@@ -14,6 +14,13 @@ const MAX_TEXT_CHARS = 2000;
 
 export const DOMAIN_CONTEXT_PREFIX = 'devbelt.ai.domainContext.';
 export const DEFAULT_DIRECTIVES_PREFIX = 'devbelt.ai.defaultDirectives.';
+export const LAST_SCOPE_PREFIX = 'devbelt.ai.lastScope.';
+
+/** 连接级"上次选择的作用域"（P9 S7a：库/逻辑库/索引；单选切换）。 */
+export interface AiScopeRef {
+  kind: 'database' | 'redis-db' | 'index';
+  value: string;
+}
 
 function normalize(raw: string | undefined | null): string {
   if (!raw) return '';
@@ -40,9 +47,20 @@ export class AiContextStore {
     await this.memento.update(`${DEFAULT_DIRECTIVES_PREFIX}${connId}`, normalize(text) || undefined);
   }
 
-  /** 连接被删除时清理两条键（幂等）。 */
+  getLastScope(connId: string): AiScopeRef | undefined {
+    const raw = this.memento.get<AiScopeRef>(`${LAST_SCOPE_PREFIX}${connId}`);
+    if (raw && typeof raw.value === 'string' && raw.value) return raw;
+    return undefined;
+  }
+
+  async setLastScope(connId: string, scope: AiScopeRef | undefined): Promise<void> {
+    await this.memento.update(`${LAST_SCOPE_PREFIX}${connId}`, scope);
+  }
+
+  /** 连接被删除时清理三条键（幂等）。 */
   async clearForConnection(connId: string): Promise<void> {
     await this.memento.update(`${DOMAIN_CONTEXT_PREFIX}${connId}`, undefined);
     await this.memento.update(`${DEFAULT_DIRECTIVES_PREFIX}${connId}`, undefined);
+    await this.memento.update(`${LAST_SCOPE_PREFIX}${connId}`, undefined);
   }
 }

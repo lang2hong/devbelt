@@ -47,7 +47,7 @@ describe('AiSchemaContextBuilder（扩展侧薄封装）', () => {
   it('includeComments=false → commentCount 0 且不渲染注释', async () => {
     const { session } = makeSession();
     const builder = new AiSchemaContextBuilder();
-    const snapshot = await builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: false });
+    const snapshot = await builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: false, database: 'app' });
     expect(snapshot!.commentCount).toBe(0);
     expect(snapshot!.text).not.toContain('-- 0=禁用');
   });
@@ -55,33 +55,33 @@ describe('AiSchemaContextBuilder（扩展侧薄封装）', () => {
   it('60s TTL 缓存按元数据键（conn+db+schema）：includeComments/userText 变化不重抓；invalidate 后重抓', async () => {
     const { session, getTables } = makeSession();
     const builder = new AiSchemaContextBuilder();
-    await builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: true });
-    await builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: true });
+    await builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: true, database: 'app' });
+    await builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: true, database: 'app' });
     expect(getTables).toHaveBeenCalledTimes(1);
 
     // 序列化参数变化（注释开关/预筛文本）只影响序列化，不重抓元数据。
-    await builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: false, userText: '订单' });
+    await builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: false, userText: '订单', database: 'app' });
     expect(getTables).toHaveBeenCalledTimes(1);
 
     builder.invalidate('c1');
-    await builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: true });
+    await builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: true, database: 'app' });
     expect(getTables).toHaveBeenCalledTimes(2);
 
     // 不同连接独立缓存。
-    await builder.build(session, { connId: 'c2', dbType: 'MYSQL', includeComments: true });
+    await builder.build(session, { connId: 'c2', dbType: 'MYSQL', includeComments: true, database: 'app' });
     expect(getTables).toHaveBeenCalledTimes(3);
   });
 
   it('元数据失败 → null（聊天降级为无 schema，不抛错）', async () => {
     const { session } = makeSession({ fail: true });
     const builder = new AiSchemaContextBuilder();
-    await expect(builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: true })).resolves.toBeNull();
+    await expect(builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: true, database: 'app' })).resolves.toBeNull();
   });
 
   it('大库：>200 表截断（totalTables 反映真实数量）', async () => {
     const { session } = makeSession({ tables: 260 });
     const builder = new AiSchemaContextBuilder();
-    const snapshot = await builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: false });
+    const snapshot = await builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: false, database: 'app' });
     expect(snapshot!.tableCount).toBe(200);
     expect(snapshot!.totalTables).toBe(260);
     expect(snapshot!.truncated).toBe(true);
@@ -96,6 +96,7 @@ describe('AiSchemaContextBuilder（扩展侧薄封装）', () => {
       includeComments: false,
       referencedTables: ['t259'],
       userText: '查询 t250 的数据',
+      database: 'app',
     });
     expect(snapshot!.text).toContain('## Table: t259');
     expect(snapshot!.text).toContain('## Table: t250');
@@ -125,6 +126,7 @@ describe('AiSchemaContextBuilder（扩展侧薄封装）', () => {
       dbType: 'MYSQL',
       includeComments: false,
       userText: 'show me recent orders',
+      database: 'app',
     });
     expect(byName!.text).toContain('## Table: orders_archive');
 
@@ -135,6 +137,7 @@ describe('AiSchemaContextBuilder（扩展侧薄封装）', () => {
       dbType: 'MYSQL',
       includeComments: false,
       userText: 'customer orders',
+      database: 'app',
     });
     expect(byComment!.text).toContain('## Table: t250');
 
@@ -145,6 +148,7 @@ describe('AiSchemaContextBuilder（扩展侧薄封装）', () => {
       dbType: 'MYSQL',
       includeComments: false,
       userText: 'zzzzqqqq',
+      database: 'app',
     });
     expect(noMatch!.text).toContain('## Table: t0');
     expect(noMatch!.text).not.toContain('## Table: t259');
@@ -175,5 +179,37 @@ describe('AiSchemaContextBuilder（扩展侧薄封装）', () => {
     expect(snapshot!.text).toContain("- status ENUM('pending','paid') NOT NULL DEFAULT pending");
     expect(snapshot!.text).toContain('字典值：pending=待支付,paid=已支付');
     expect(snapshot!.commentCount).toBe(1);
+  });
+
+  it('MySQL 无库 → null（禁止跨库错上下文；探针实测无过滤会横跨 4 库 75 表）', async () => {
+    const { session, getTables } = makeSession();
+    const builder = new AiSchemaContextBuilder();
+    await expect(builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: true })).resolves.toBeNull();
+    await expect(builder.build(session, { connId: 'c1', dbType: 'mysql', includeComments: true })).resolves.toBeNull();
+    expect(getTables).not.toHaveBeenCalled();
+  });
+
+  it('单表列元数据失败 → 跳过该表并标记 partial（不再整包失败）', async () => {
+    const session = {
+      metadata: {
+        getTables: vi.fn(async () => [
+          { name: 't0', comment: '' },
+          { name: 't1', comment: '' },
+        ]),
+        getColumns: vi.fn(async (name: string) => {
+          if (name === 't1') throw new Error('ER_NO_DB_ERROR');
+          return [{ name: 'id', type: 'INT', isNotNull: true, isPrimary: true, isUnique: false, comment: '' }];
+        }),
+        getForeignKeys: vi.fn(async () => []),
+      },
+    } as unknown as SqlConnectionSession;
+    const builder = new AiSchemaContextBuilder();
+    const snapshot = await builder.build(session, { connId: 'c1', dbType: 'MYSQL', includeComments: false, database: 'app' });
+    expect(snapshot).not.toBeNull();
+    expect(snapshot!.partial).toBe(true);
+    expect(snapshot!.text).toContain('## Table: t0');
+    expect(snapshot!.text).not.toContain('## Table: t1');
+    expect(snapshot!.tableCount).toBe(1);
+    expect(snapshot!.totalTables).toBe(2);
   });
 });
