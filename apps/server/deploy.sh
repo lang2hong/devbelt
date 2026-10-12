@@ -9,6 +9,8 @@
 # 用法：
 #   1. 填好下方「部署目标」里的变量（REMOTE 是 ssh config 里的 Host 别名）；
 #   2. 确保 apps/server/.env.production 已就绪（会被推成服务器上的 .env）；
+#      AI 上游 Key 从本机环境变量 DEVBELT_AI_UPSTREAM_API_KEY（或 DASHSCOPE_API_KEY）取，
+#      写服务器 DEPLOY_DIR/ai.env（600，systemd EnvironmentFile 注入；不随部署覆盖）；
 #   3. 运行：./deploy.sh
 #
 # 回滚（部署前已把服务器上的 dist 备份到 $DEPLOY_DIR/backups/）：
@@ -105,6 +107,14 @@ ssh "$REMOTE" "cd '$ADMIN_DIR' \
   && mv .dist.staging/dist dist \
   && rm -rf dist.old .dist.staging"
 
+echo "==> [4d/6] AI 上游 Key -> ${REMOTE}:${DEPLOY_DIR}/ai.env（仅服务器本地 600；不写 .env/不进仓库）"
+AI_KEY_SRC="${DEVBELT_AI_UPSTREAM_API_KEY:-${DASHSCOPE_API_KEY:-}}"
+if [[ -n "$AI_KEY_SRC" ]]; then
+  printf 'DEVBELT_AI_UPSTREAM_API_KEY=%s\n' "$AI_KEY_SRC" | ssh "$REMOTE" "umask 077 && cat > '$DEPLOY_DIR/ai.env'"
+else
+  echo "    本机未找到 AI Key（DEVBELT_AI_UPSTREAM_API_KEY / DASHSCOPE_API_KEY）：保留服务器现有 ai.env（若不存在则 /api/ai/* 返回 503）"
+fi
+
 echo "==> [5/6] 写 systemd 服务"
 # bundle 自包含全部依赖，服务器无需 npm install（不再推 package.json / 装 node_modules）。
 # 只需定位 node 可执行文件用于 systemd ExecStart。
@@ -126,6 +136,8 @@ After=network.target
 Type=simple
 WorkingDirectory=${DEPLOY_DIR}
 ExecStart=${NODE_BIN} dist/index.cjs
+# AI 上游 Key 只存服务器本地 ai.env（600，不随部署覆盖；dash 前缀表示文件缺失可容忍）
+EnvironmentFile=-${DEPLOY_DIR}/ai.env
 Restart=on-failure
 RestartSec=3
 Environment=NODE_ENV=production
