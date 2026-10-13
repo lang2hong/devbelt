@@ -1512,3 +1512,12 @@ docker exec ollama ollama pull qwen2.5-coder:7b
   - **服务端**：`ENTITY_KINDS` 白名单新增 `'schemaNotes'`——**必须重新部署服务端后同步才生效**
     （未部署前推送会被 400 拒绝对账 skipped，本地数据不受影响）。
   - 测试：ext +10（codec/apply/unresolved/墓碑/旧格式迁移/聚合）；全量 ext 1688 / db-host 19 / server 585 全绿。
+
+### 14.8 S7g：面板精简（2026-10-13，按真机反馈）
+
+- **移除「选择注入的表」面板**（TablePickerDrawer 删除）：表选择交互与「实际注入的表」重复、且拥挤；
+  自动模式（相关度 ≤200 + 40K 预算）成为唯一注入模式。host 侧 `requestTableOptions/selectTables`
+  能力保留（休眠，未来需要可恢复 UI）。
+- **「实际注入的表」= 唯一编辑入口**：点表名 → 打开「表/列说明」编辑器；术语表/默认规则
+  不再展示原文（命令面板配置，`AI: 业务术语表` / `AI: 默认业务规则`）。
+- 侧栏最终形态三个视图：**注入的表 / 表说明 / 会话**。
