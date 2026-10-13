@@ -449,12 +449,12 @@ export class AiChatView extends BaseWebView {
 
   /** Context 抽屉明细：schema 文本 + 域上下文/默认指令原文（只读展示）。 */
   private async pushContextDetail(): Promise<void> {
-    const { state, schemaText, tables } = await this.buildContext();
+    // schema 原文不再下发（排障走 Diagnostics）；仅状态摘要 + 注入表清单 + 两段自由文本。
+    const { state, tables } = await this.buildContext();
     const conn = this.selectedConnection();
     this.post({
       type: 'contextDetail',
       context: state,
-      schemaText: schemaText ?? '',
       domainContext: conn ? this.deps.contextStore.getDomainContext(conn.id) : '',
       defaultDirectives: conn ? this.deps.contextStore.getDefaultDirectives(conn.id) : '',
       ...(tables ? { tables } : {}),

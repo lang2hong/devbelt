@@ -1234,6 +1234,7 @@ export const zh: MessageCatalog = {
   'wv.ai.context.noConnection': '未选择连接',
   'wv.ai.context.noSession': '连接未打开',
   'wv.ai.context.schemaFailed': 'schema 获取失败',
+  'wv.ai.tables.panelTitle': '表选择',
   'wv.ai.notes.title': '表/列说明',
   'wv.ai.notes.edit': '说明',
   'wv.ai.notes.tableNote': '表说明',

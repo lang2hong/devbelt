@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { useI18n } from '../../composables/useI18n';
 
 /**
- * 表选择抽屉（P9 S7d，连接 → 库 → 表 第三级）。
+ * 表选择（P9 S7d，连接 → 库 → 表 第三级；嵌入 AI 侧栏折叠面板）。
  *
  * 多选（复选框）；搜索在端内过滤。应用于「仅注入所选表」（exclusive），
  * 空选择 = 恢复自动模式。数据源由 host `tableOptions` 下发（≤3000）。
@@ -13,7 +13,7 @@ const props = defineProps<{
   selected: string[];
   loading: boolean;
 }>();
-const emit = defineEmits<{ close: []; apply: [tables: string[]]; editNote: [table: string] }>();
+const emit = defineEmits<{ apply: [tables: string[]]; editNote: [table: string] }>();
 
 const { t } = useI18n();
 const search = ref('');
@@ -55,11 +55,7 @@ function apply(): void {
 </script>
 
 <template>
-  <div class="ai-table-picker">
-    <div class="ai-tp-head">
-      <span>{{ t('wv.ai.tables.title') }}</span>
-      <button class="ai-btn" @click="emit('close')">✕</button>
-    </div>
+  <div class="ai-tp-pane">
     <div class="ai-tp-hint">{{ t('wv.ai.tables.hint') }}</div>
     <input v-model="search" class="ai-tp-search" :placeholder="t('wv.ai.tables.search')" />
     <div class="ai-tp-actions">
@@ -87,20 +83,11 @@ function apply(): void {
 </template>
 
 <style scoped>
-.ai-table-picker {
-  border-right: 1px solid var(--vscode-panel-border);
-  width: 280px;
+.ai-tp-pane {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  padding: 6px 8px;
   gap: 4px;
-}
-.ai-tp-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  color: var(--vscode-descriptionForeground);
+  min-height: 0;
 }
 .ai-tp-hint {
   color: var(--vscode-descriptionForeground);
@@ -110,7 +97,9 @@ function apply(): void {
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-input-border, transparent);
-  padding: 2px 6px;
+  padding: 4px 8px;
+  min-height: 26px;
+  font-size: var(--vscode-font-size, 13px);
 }
 .ai-tp-actions {
   display: flex;
@@ -122,15 +111,16 @@ function apply(): void {
   color: var(--vscode-descriptionForeground);
 }
 .ai-tp-list {
-  flex: 1;
+  max-height: 320px;
   overflow: auto;
-  min-height: 80px;
+  display: flex;
+  flex-direction: column;
 }
 .ai-tp-item {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 1px 2px;
+  padding: 2px 2px;
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;

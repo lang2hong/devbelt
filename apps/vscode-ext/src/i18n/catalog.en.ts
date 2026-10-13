@@ -1256,6 +1256,7 @@ export const en: MessageCatalog = {
   'wv.ai.context.noConnection': 'No connection selected',
   'wv.ai.context.noSession': 'Connection not open',
   'wv.ai.context.schemaFailed': 'Schema unavailable',
+  'wv.ai.tables.panelTitle': 'Tables',
   'wv.ai.notes.title': 'Table & column notes',
   'wv.ai.notes.edit': 'Notes',
   'wv.ai.notes.tableNote': 'Table note',

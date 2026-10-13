@@ -3,7 +3,7 @@ import { reactive, ref, watch } from 'vue';
 import { useI18n } from '../../composables/useI18n';
 
 /**
- * 表/列说明编辑器（P9 S7e）。
+ * 表/列说明编辑器（P9 S7e；嵌入 AI 侧栏折叠面板，头部由容器提供）。
  *
  * 数据源：host `tableNote`（列元数据 + 现有注记）；保存走 `saveTableNote`（整表覆盖）；
  * 「抓取」按列触发只读样例查询（host 侧限 10 行/敏感列拒绝），结果经 `sampleFill` 回填。
@@ -26,7 +26,6 @@ const props = defineProps<{
   sampleFill?: { column: string; text: string; seq: number } | null;
 }>();
 const emit = defineEmits<{
-  close: [];
   save: [payload: { table: string; note: string; columns: Array<{ name: string; note: string; sample: string }> }];
   fetchSample: [column: string];
 }>();
@@ -74,10 +73,7 @@ function save(): void {
 
 <template>
   <div class="ai-note-editor">
-    <div class="ai-nt-head">
-      <span class="ai-nt-title">{{ t('wv.ai.notes.title') }} · {{ props.table }}</span>
-      <button class="ai-btn" @click="emit('close')">✕</button>
-    </div>
+    <div class="ai-nt-current">{{ props.table }}</div>
     <div v-if="props.loading" class="ai-nt-empty">{{ t('wv.ai.tables.loading') }}</div>
     <template v-else>
       <label class="ai-nt-label">{{ t('wv.ai.notes.tableNote') }}</label>
@@ -127,21 +123,14 @@ function save(): void {
 
 <style scoped>
 .ai-note-editor {
-  border-right: 1px solid var(--vscode-panel-border);
-  width: 340px;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  padding: 6px 8px;
   gap: 4px;
+  min-height: 0;
 }
-.ai-nt-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.ai-nt-current {
   color: var(--vscode-descriptionForeground);
-}
-.ai-nt-title {
+  font-family: var(--vscode-editor-font-family, monospace);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -164,9 +153,9 @@ function save(): void {
   opacity: 0.85;
 }
 .ai-nt-list {
-  flex: 1;
+  max-height: 360px;
   overflow: auto;
-  min-height: 80px;
+  min-height: 60px;
   display: flex;
   flex-direction: column;
   gap: 6px;

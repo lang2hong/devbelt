@@ -202,8 +202,10 @@ function onSelect(event: Event): void {
   background: var(--vscode-dropdown-background, var(--vscode-input-background));
   color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
   border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, transparent));
-  font-size: calc(var(--vscode-font-size, 13px) - 1px);
-  max-width: 220px;
+  font-size: var(--vscode-font-size, 13px);
+  padding: 4px 8px;
+  min-height: 26px;
+  max-width: 240px;
 }
 .ai-spacer {
   flex: 1;

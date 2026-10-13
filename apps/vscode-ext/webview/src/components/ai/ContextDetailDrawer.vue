@@ -3,7 +3,6 @@ import { reactive } from 'vue';
 import { useI18n } from '../../composables/useI18n';
 
 export interface ContextDetailState {
-  schemaText: string;
   domainContext: string;
   defaultDirectives: string;
   commentCount: number;
@@ -14,11 +13,11 @@ export interface ContextDetailState {
 }
 
 const props = defineProps<{ detail: ContextDetailState | null }>();
-const emit = defineEmits<{ close: [] }>();
+const emit = defineEmits<{ editTable: [table: string] }>();
 const { t } = useI18n();
 
 /** 折叠面板（VSCode 视图风格）：表清单默认展开，其余默认折叠。 */
-const open = reactive({ tables: true, schema: false, domain: false, directives: false });
+const open = reactive({ tables: true, domain: false, directives: false });
 type SectionKey = keyof typeof open;
 function toggle(key: SectionKey): void {
   open[key] = !open[key];
@@ -27,10 +26,6 @@ function toggle(key: SectionKey): void {
 
 <template>
   <div class="ai-ctx-drawer">
-    <div class="ai-ctx-head">
-      <span>{{ t('wv.ai.context.detail') }}</span>
-      <button class="ai-btn" @click="emit('close')">✕</button>
-    </div>
     <div v-if="!props.detail" class="ai-ctx-empty">{{ t('wv.ai.context.loading') }}</div>
     <template v-else>
       <div class="ai-ctx-meta">
@@ -44,17 +39,15 @@ function toggle(key: SectionKey): void {
           <span class="ai-ctx-count">{{ props.detail.tables?.length ?? 0 }}</span>
         </button>
         <div v-show="open.tables" class="ai-ctx-scroll ai-ctx-list">
-          <div v-for="name in props.detail.tables ?? []" :key="name" class="ai-ctx-item">{{ name }}</div>
+          <button
+            v-for="name in props.detail.tables ?? []"
+            :key="name"
+            class="ai-ctx-item"
+            :title="t('wv.ai.notes.edit')"
+            @click="emit('editTable', name)"
+          >{{ name }}</button>
           <div v-if="!(props.detail.tables?.length)" class="ai-ctx-empty">{{ t('wv.ai.context.empty') }}</div>
         </div>
-      </div>
-
-      <div class="ai-ctx-section">
-        <button class="ai-ctx-toggle" @click="toggle('schema')">
-          <span class="ai-ctx-chevron">{{ open.schema ? '▾' : '▸' }}</span>
-          <span>{{ t('wv.ai.context.schema') }}</span>
-        </button>
-        <pre v-show="open.schema" class="ai-ctx-pre">{{ props.detail.schemaText || t('wv.ai.context.empty') }}</pre>
       </div>
 
       <div class="ai-ctx-section">
@@ -78,20 +71,10 @@ function toggle(key: SectionKey): void {
 
 <style scoped>
 .ai-ctx-drawer {
-  border-right: 1px solid var(--vscode-panel-border);
-  width: 320px;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  padding: 6px 8px;
   gap: 4px;
-}
-.ai-ctx-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: calc(var(--vscode-font-size, 13px) - 1px);
-  color: var(--vscode-descriptionForeground);
+  min-height: 0;
 }
 .ai-ctx-meta {
   font-size: calc(var(--vscode-font-size, 13px) - 2px);
@@ -138,11 +121,22 @@ function toggle(key: SectionKey): void {
   padding: 4px 6px;
 }
 .ai-ctx-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: 1px 2px;
+  cursor: pointer;
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: var(--vscode-editor-font-size, 12px);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.ai-ctx-item:hover {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12));
 }
 .ai-ctx-pre {
   margin: 0;

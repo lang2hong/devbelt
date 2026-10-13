@@ -9,6 +9,7 @@ export interface ConversationSummary {
   messageCount: number;
 }
 
+/** 会话记录（嵌入 AI 侧栏的折叠面板；头部由容器提供）。 */
 const props = defineProps<{
   sessions: ConversationSummary[];
   activeSessionId?: string;
@@ -18,7 +19,6 @@ const emit = defineEmits<{
   load: [id: string];
   rename: [id: string, title: string];
   delete: [id: string];
-  close: [];
 }>();
 
 const { t } = useI18n();
@@ -47,13 +47,9 @@ function onDelete(session: ConversationSummary): void {
 </script>
 
 <template>
-  <div class="ai-drawer">
-    <div class="ai-drawer-head">
-      <span>{{ t('wv.ai.sessions') }}</span>
-      <div>
-        <button class="ai-btn" @click="emit('newChat')">{{ t('wv.ai.newChat') }}</button>
-        <button class="ai-btn" @click="emit('close')">✕</button>
-      </div>
+  <div class="ai-drawer-pane">
+    <div class="ai-drawer-actions">
+      <button class="ai-btn" @click="emit('newChat')">{{ t('wv.ai.newChat') }}</button>
     </div>
     <ul class="ai-drawer-list">
       <li
@@ -88,28 +84,21 @@ function onDelete(session: ConversationSummary): void {
 </template>
 
 <style scoped>
-.ai-drawer {
-  border-right: 1px solid var(--vscode-panel-border);
-  width: 220px;
+.ai-drawer-pane {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  gap: 4px;
+  min-height: 0;
 }
-.ai-drawer-head {
+.ai-drawer-actions {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--vscode-panel-border);
-  font-size: calc(var(--vscode-font-size, 13px) - 1px);
-  color: var(--vscode-descriptionForeground);
 }
 .ai-drawer-list {
   list-style: none;
   margin: 0;
   padding: 0;
+  max-height: 320px;
   overflow-y: auto;
-  flex: 1;
 }
 .ai-drawer-item {
   display: flex;
