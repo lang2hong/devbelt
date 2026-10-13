@@ -118,6 +118,8 @@ export interface AiContextDetailDown {
   schemaText: string;
   domainContext: string;
   defaultDirectives: string;
+  /** 本次实际注入的表清单（SQL 引擎；抽屉"注入表清单"折叠区）。 */
+  tables?: string[];
 }
 
 export interface AiTableOptionsDown {

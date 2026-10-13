@@ -117,6 +117,7 @@ onMounted(() => {
           commentCount: Number(msg.context?.commentCount ?? 0),
           tableCount: Number(msg.context?.tableCount ?? 0),
           totalTables: Number(msg.context?.totalTables ?? 0),
+          tables: Array.isArray(msg.tables) ? msg.tables : [],
         };
         showContextDetail.value = true;
         break;

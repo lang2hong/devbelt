@@ -1234,6 +1234,7 @@ export const zh: MessageCatalog = {
   'wv.ai.context.noConnection': '未选择连接',
   'wv.ai.context.noSession': '连接未打开',
   'wv.ai.context.schemaFailed': 'schema 获取失败',
+  'wv.ai.context.tablesTitle': '注入表清单',
   'wv.ai.tables.auto': '表：自动',
   'wv.ai.tables.count': '表：{n} 张',
   'wv.ai.tables.title': '选择表（仅选中的表注入上下文）',

@@ -434,7 +434,7 @@ export class AiChatView extends BaseWebView {
 
   /** Context 抽屉明细：schema 文本 + 域上下文/默认指令原文（只读展示）。 */
   private async pushContextDetail(): Promise<void> {
-    const { state, schemaText } = await this.buildContext();
+    const { state, schemaText, tables } = await this.buildContext();
     const conn = this.selectedConnection();
     this.post({
       type: 'contextDetail',
@@ -442,6 +442,7 @@ export class AiChatView extends BaseWebView {
       schemaText: schemaText ?? '',
       domainContext: conn ? this.deps.contextStore.getDomainContext(conn.id) : '',
       defaultDirectives: conn ? this.deps.contextStore.getDefaultDirectives(conn.id) : '',
+      ...(tables ? { tables } : {}),
     } as never);
   }
 
@@ -551,7 +552,7 @@ export class AiChatView extends BaseWebView {
     return this.selectedConnId ? this.deps.connectionStore.get(this.selectedConnId) : undefined;
   }
 
-  private async buildContext(): Promise<{ state: AiContextState; schemaText?: string }> {
+  private async buildContext(): Promise<{ state: AiContextState; schemaText?: string; tables?: string[] }> {
     const conn = this.selectedConnection();
     if (!conn) {
       return { state: { tableCount: 0, totalTables: 0, commentCount: 0, estimatedTokens: 0, note: 'no-connection' } };
@@ -680,8 +681,9 @@ export class AiChatView extends BaseWebView {
   private sqlContextState(
     base: Omit<AiContextState, 'tableCount' | 'totalTables' | 'commentCount' | 'estimatedTokens'>,
     snapshot: AiSchemaSnapshot,
-  ): { state: AiContextState; schemaText?: string } {
+  ): { state: AiContextState; schemaText?: string; tables?: string[] } {
     return {
+      tables: snapshot.tableNames ?? [],
       state: {
         ...base,
         tableCount: snapshot.tableCount,

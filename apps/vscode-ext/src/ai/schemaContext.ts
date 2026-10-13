@@ -33,6 +33,8 @@ export interface AiSchemaSnapshot extends SerializedSchema {
   schema?: string;
   /** S7a：有表因元数据失败被跳过（部分加载，不再整包失败）。 */
   partial?: boolean;
+  /** S7e：本次实际注入的表清单（抽屉展示；与 text 中一致，含预算/预筛结果）。 */
+  tableNames?: string[];
 }
 
 export interface BuildSchemaOptions {
@@ -97,6 +99,7 @@ export class AiSchemaContextBuilder {
         // serializer 的统计基于传入子集；对外反映真实总量与截断状态（表数截断 ∪ 字符预算截断）。
         totalTables: metadata.tables.length,
         truncated: serialized.truncated || metadata.tables.length > tables.length,
+        tableNames: tables.map((table) => table.name),
         connId: opts.connId,
         ...(opts.database ? { database: opts.database } : {}),
         ...(opts.schema ? { schema: opts.schema } : {}),

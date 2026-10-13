@@ -1256,6 +1256,7 @@ export const en: MessageCatalog = {
   'wv.ai.context.noConnection': 'No connection selected',
   'wv.ai.context.noSession': 'Connection not open',
   'wv.ai.context.schemaFailed': 'Schema unavailable',
+  'wv.ai.context.tablesTitle': 'Tables in this request',
   'wv.ai.tables.auto': 'Tables: auto',
   'wv.ai.tables.count': 'Tables: {n}',
   'wv.ai.tables.title': 'Select tables (only selected ones are injected)',
