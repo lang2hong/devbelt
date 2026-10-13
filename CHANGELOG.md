@@ -66,6 +66,11 @@
   （仅 401、仅重试一次；续期失败/同 token 不重试；`getUsage` 同语义）+ AiService 注入。
   修复前 access token（15m TTL）过期会直接报 "AI proxy authentication failed (HTTP 401)"。
   测试 +6；仅扩展侧改动，无需服务端重部署。
+- **修复：F5 调试态同步解锁/账号恢复误报"口令不一致"（2026-10-13）**：Argon2id 派生 worker
+  默认继承父进程 `execArgv`，调试态扩展宿主带 `--inspect-brk`，worker 停在等调试器永不回消息 →
+  30s 超时被 catch 压成口令错误。修复：`defaultSpawn` 显式 `execArgv: []` + 回归测试；同时解锁
+  失败弹窗/Diagnostics 携带真实错误（此前多类失败被压成同一文案）。云端材料与口令经离线复演
+  实测健康。
 - **S7d 大库 400 修复 + 三级作用域 + 字号（2026-10-12）**：① 修复大库上下文超服务端
   单条 60K 字符上限的 HTTP 400——`serializeSchema` 增 `maxChars`（40K）超预算截断 + 标注；
   ② "连接 → 库 → 表（多选）"三级作用域：表选择抽屉（搜索/复选/全选/清空），持久化

@@ -46,7 +46,11 @@ function resolveWorkerPath(): string {
 }
 
 function defaultSpawn(): WorkerLike {
-  return new Worker(resolveWorkerPath()) as unknown as WorkerLike;
+  // execArgv 必须清空：worker 默认继承父进程 execArgv，而 F5/调试态扩展宿主带
+  // `--inspect-brk=<port>`（普通态也可能带 `--inspect*`）。继承后 worker 会停在
+  // 等调试器（或调试端口冲突）而永不回消息 → 派生静默挂起 → 30s 超时
+  // （真机事故：解锁/账号恢复全被误报成"同步口令不一致"）。
+  return new Worker(resolveWorkerPath(), { execArgv: [] }) as unknown as WorkerLike;
 }
 
 export async function deriveKekSmpInWorker(smp: string, params: SmpKdfParams, deps?: SmpKdfWorkerDeps): Promise<Uint8Array> {
