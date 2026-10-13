@@ -48,7 +48,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   selectConnection: [id: string | null];
   selectScope: [value: string];
-  openTablePicker: [];
   openSettings: [];
   setApiKey: [];
   clearApiKey: [];
@@ -97,12 +96,6 @@ const contextLabel = computed(() => {
 const scopeOptions = computed(() => props.context?.scopeOptions ?? []);
 const showScopeSelect = computed(() => !!props.context?.scopeKind && scopeOptions.value.length > 0);
 
-/** S7d：表选择按钮（仅 SQL 引擎的库作用域）。 */
-const showTablePicker = computed(() => props.context?.scopeKind === 'database' && !!props.context?.scope);
-const tablesLabel = computed(() => {
-  const count = props.context?.selectedTables?.length ?? 0;
-  return count > 0 ? t('wv.ai.tables.count', { n: count }) : t('wv.ai.tables.auto');
-});
 
 function onSelectScope(event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
@@ -142,9 +135,6 @@ function onSelect(event: Event): void {
       >
         <option v-for="option in scopeOptions" :key="option" :value="option">{{ option }}</option>
       </select>
-      <button v-if="showTablePicker" class="ai-btn" :title="t('wv.ai.tables.title')" @click="emit('openTablePicker')">
-        {{ tablesLabel }}
-      </button>
       <button class="ai-context-summary ai-context-link" :title="t('wv.ai.context.detail')" @click="emit('requestContextDetail')">
         {{ contextLabel }}
       </button>

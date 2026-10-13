@@ -1257,7 +1257,7 @@ export const en: MessageCatalog = {
   'wv.ai.context.noSession': 'Connection not open',
   'wv.ai.context.schemaFailed': 'Schema unavailable',
   'wv.ai.notes.updatedAt': 'Last modified: {time}',
-  'wv.ai.context.tablesHint': 'Final result after the 40K budget & prefiltering; adjust scope in \"Select tables\".',
+  'wv.ai.context.tablesHint': 'Final result after the 40K budget & prefiltering; click a table to edit its notes.',
   'wv.ai.tables.panelTitle': 'Select tables',
   'wv.ai.notes.title': 'Table & column notes',
   'wv.ai.notes.edit': 'Notes',

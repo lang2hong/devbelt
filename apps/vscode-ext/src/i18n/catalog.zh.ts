@@ -1235,7 +1235,7 @@ export const zh: MessageCatalog = {
   'wv.ai.context.noSession': '连接未打开',
   'wv.ai.context.schemaFailed': 'schema 获取失败',
   'wv.ai.notes.updatedAt': '最后修改：{time}',
-  'wv.ai.context.tablesHint': '受 40K 预算与预筛影响的最终结果；调整范围请在「选择注入的表」',
+  'wv.ai.context.tablesHint': '受 40K 预算与预筛影响的最终结果；点击表名可编辑说明',
   'wv.ai.tables.panelTitle': '选择注入的表',
   'wv.ai.notes.title': '表/列说明',
   'wv.ai.notes.edit': '说明',

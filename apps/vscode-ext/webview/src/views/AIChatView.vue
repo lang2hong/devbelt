@@ -7,7 +7,6 @@ import ChatInput from '../components/ai/ChatInput.vue';
 import ConversationDrawer from '../components/ai/ConversationDrawer.vue';
 import ContextBar from '../components/ai/ContextBar.vue';
 import ContextDetailDrawer, { type ContextDetailState } from '../components/ai/ContextDetailDrawer.vue';
-import TablePickerDrawer from '../components/ai/TablePickerDrawer.vue';
 import TableNoteEditor, { type TableNoteColumn } from '../components/ai/TableNoteEditor.vue';
 
 interface SessionSummary {
@@ -28,11 +27,11 @@ interface ChatMessage {
  *
  * 消息协议见 `src/result/aiProtocol.ts`：
  *   up: ready | send | abort | newChat | renameChat | deleteChat | loadHistory |
- *       selectConnection | selectScope | requestTableOptions | selectTables | requestTableNote |
+ *       selectConnection | selectScope | requestTableNote |
  *       saveTableNote | fetchColumnSample | requestQuotaRefresh | openSettings | setApiKey |
  *       clearApiKey | testConnection | copyCode
  *   down: init | chunk | finish | quotaUpdate | contextChanged | sessionList | sessionLoaded |
- *         contextDetail | prefillInput | toolResult | tableOptions | tableNote | columnSample
+ *         contextDetail | prefillInput | toolResult | tableNote | columnSample
  */
 const { post, onMessage } = useVsCode();
 const { t } = useI18n();
@@ -50,17 +49,14 @@ const input = ref('');
 const includeColumnComments = ref(true);
 /**
  * 侧栏折叠视图组（VSCode 侧栏风格：上下堆叠、各自 ▸/▾，可同时展开）：
- * 上下文明细 / 表选择 / 表说明 / 会话记录。
+ * 注入的表（本次实际注入，点表名编辑说明）/ 表说明 / 会话记录。
  */
-const sidebarOpen = reactive({ context: false, tables: false, notes: false, sessions: false });
+const sidebarOpen = reactive({ context: false, notes: false, sessions: false });
 function toggleSection(key: keyof typeof sidebarOpen): void {
   sidebarOpen[key] = !sidebarOpen[key];
 }
-/** P9 S4：上下文明细（域上下文/默认指令/注入表清单，只读）。 */
+/** P9 S4/S7g：「实际注入的表」清单（只读快照；点表名进编辑器）。 */
 const contextDetail = ref<ContextDetailState | null>(null);
-/** P9 S7d：表选择（连接 → 库 → 表 第三级）。 */
-const tableOptions = ref<string[]>([]);
-const tableOptionsLoading = ref(false);
 /** P9 S7e：表/列说明编辑器。 */
 const tableNoteTable = ref('');
 const tableNoteData = ref<{ note?: string; updatedAt?: number; columns: TableNoteColumn[] } | null>(null);
@@ -137,14 +133,6 @@ onMounted(() => {
         break;
       case 'prefillInput':
         if (typeof msg.text === 'string') input.value = msg.text;
-        break;
-      case 'tableOptions':
-        tableOptions.value = Array.isArray(msg.tables) ? msg.tables : [];
-        tableOptionsLoading.value = false;
-        if (sidebarOpen.tables && msg.scope !== undefined && context.value?.scope && msg.scope !== context.value.scope) {
-          // 响应跨作用域（用户已切库）→ 丢弃，等新一轮
-          tableOptions.value = [];
-        }
         break;
       case 'tableNote':
         tableNoteTable.value = String(msg.table ?? '');
@@ -225,17 +213,6 @@ function selectScope(value: string): void {
   post({ type: 'selectScope', value });
 }
 
-function openTablePicker(): void {
-  sidebarOpen.tables = true;
-  tableOptions.value = [];
-  tableOptionsLoading.value = true;
-  post({ type: 'requestTableOptions' });
-}
-
-function applyTableSelection(tables: string[]): void {
-  post({ type: 'selectTables', tables });
-}
-
 /** P9 S7e：打开表/列说明编辑器（向 host 拉列元数据 + 现有注记）。 */
 function editTableNote(table: string): void {
   sidebarOpen.notes = true;
@@ -276,7 +253,6 @@ function openContextDetail(): void {
       :include-column-comments="includeColumnComments"
       @select-connection="selectConnection"
       @select-scope="selectScope"
-      @open-table-picker="openTablePicker"
       @open-settings="post({ type: 'openSettings' })"
       @set-api-key="post({ type: 'setApiKey' })"
       @clear-api-key="post({ type: 'clearApiKey' })"
@@ -294,26 +270,11 @@ function openContextDetail(): void {
         <div class="ai-side-section">
           <button class="ai-side-head" @click="toggleSection('context')">
             <span class="ai-side-chevron">{{ sidebarOpen.context ? '▾' : '▸' }}</span>
-            <span>{{ t('wv.ai.context.detail') }}</span>
+            <span>{{ t('wv.ai.context.tablesTitle') }}</span>
+            <span class="ai-side-count">{{ contextDetail?.tableCount ?? context?.tableCount ?? 0 }}</span>
           </button>
           <div v-show="sidebarOpen.context" class="ai-side-content">
             <ContextDetailDrawer :detail="contextDetail" @edit-table="editTableNote" />
-          </div>
-        </div>
-        <div class="ai-side-section">
-          <button class="ai-side-head" @click="toggleSection('tables')">
-            <span class="ai-side-chevron">{{ sidebarOpen.tables ? '▾' : '▸' }}</span>
-            <span>{{ t('wv.ai.tables.panelTitle') }}</span>
-            <span class="ai-side-count">{{ context?.selectedTables?.length ?? 0 }}</span>
-          </button>
-          <div v-show="sidebarOpen.tables" class="ai-side-content">
-            <TablePickerDrawer
-              :tables="tableOptions"
-              :selected="context?.selectedTables ?? []"
-              :loading="tableOptionsLoading"
-              @apply="applyTableSelection"
-              @edit-note="editTableNote"
-            />
           </div>
         </div>
         <div class="ai-side-section">
