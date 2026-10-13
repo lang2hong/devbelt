@@ -63,7 +63,7 @@ const tableOptions = ref<string[]>([]);
 const tableOptionsLoading = ref(false);
 /** P9 S7e：表/列说明编辑器。 */
 const tableNoteTable = ref('');
-const tableNoteData = ref<{ note?: string; columns: TableNoteColumn[] } | null>(null);
+const tableNoteData = ref<{ note?: string; updatedAt?: number; columns: TableNoteColumn[] } | null>(null);
 const tableNoteLoading = ref(false);
 const samplingColumn = ref<string | null>(null);
 const sampleErrors = ref<Record<string, string>>({});
@@ -150,6 +150,7 @@ onMounted(() => {
         tableNoteTable.value = String(msg.table ?? '');
         tableNoteData.value = {
           ...(typeof msg.note === 'string' && msg.note ? { note: msg.note } : {}),
+          ...(typeof msg.updatedAt === 'number' ? { updatedAt: msg.updatedAt } : {}),
           columns: Array.isArray(msg.columns) ? msg.columns : [],
         };
         tableNoteLoading.value = false;
@@ -325,6 +326,7 @@ function openContextDetail(): void {
             <TableNoteEditor
               :table="tableNoteTable"
               :note="tableNoteData?.note"
+              :updated-at="tableNoteData?.updatedAt"
               :columns="tableNoteData?.columns ?? []"
               :loading="tableNoteLoading"
               :sampling-column="samplingColumn"

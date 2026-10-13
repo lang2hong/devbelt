@@ -705,6 +705,9 @@ export class AiChatView extends BaseWebView {
       return;
     }
     const entry = findTableNote(this.deps.contextStore.getSchemaNotes(conn.id, scope), table);
+    const record = this.deps.contextStore
+      .listSchemaNoteRecords()
+      .find((item) => !item.deleted && item.connId === conn.id && item.scope === scope);
     let columns: Array<{ name: string; type: string; comment?: string; note?: string; sample?: string }> = [];
     try {
       const scoped = (await this.resolveScopedSqlSession(conn, session, scope)) ?? session;
@@ -722,7 +725,13 @@ export class AiChatView extends BaseWebView {
     } catch {
       columns = [];
     }
-    this.post({ type: 'tableNote', table, ...(entry?.note ? { note: entry.note } : {}), columns } as never);
+    this.post({
+      type: 'tableNote',
+      table,
+      ...(entry?.note ? { note: entry.note } : {}),
+      ...(record ? { updatedAt: record.updateTime } : {}),
+      columns,
+    } as never);
   }
 
   /** S7e：保存表注记（整表覆盖；超上限提示；成功后刷新上下文并回显）。 */

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { useI18n } from '../../composables/useI18n';
 
 /**
@@ -19,6 +19,8 @@ export interface TableNoteColumn {
 const props = defineProps<{
   table: string;
   note?: string;
+  /** 最后修改时间（同步实体 updateTime；缺省不显示）。 */
+  updatedAt?: number;
   columns: TableNoteColumn[];
   loading: boolean;
   samplingColumn?: string | null;
@@ -31,6 +33,7 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+const updatedLabel = computed(() => (props.updatedAt ? new Date(props.updatedAt).toLocaleString() : ''));
 const tableNote = ref('');
 const columnNotes = reactive<Record<string, { note: string; sample: string }>>({});
 let initializedFor = '';
@@ -74,6 +77,7 @@ function save(): void {
 <template>
   <div class="ai-note-editor">
     <div class="ai-nt-current">{{ props.table }}</div>
+    <div v-if="updatedLabel" class="ai-nt-updated">{{ t('wv.ai.notes.updatedAt', { time: updatedLabel }) }}</div>
     <div v-if="props.loading" class="ai-nt-empty">{{ t('wv.ai.tables.loading') }}</div>
     <template v-else>
       <label class="ai-nt-label">{{ t('wv.ai.notes.tableNote') }}</label>
@@ -127,6 +131,10 @@ function save(): void {
   flex-direction: column;
   gap: 4px;
   min-height: 0;
+}
+.ai-nt-updated {
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.85;
 }
 .ai-nt-current {
   color: var(--vscode-descriptionForeground);

@@ -132,6 +132,8 @@ export interface AiTableNoteDown {
   type: 'tableNote';
   table: string;
   note?: string;
+  /** 注记记录最后修改时间（同步实体 updateTime；无注记时缺省）。 */
+  updatedAt?: number;
   columns: Array<{ name: string; type: string; comment?: string; note?: string; sample?: string }>;
 }
 
