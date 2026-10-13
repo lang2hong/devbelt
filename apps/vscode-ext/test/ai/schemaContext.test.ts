@@ -246,6 +246,35 @@ describe('AiSchemaContextBuilder（扩展侧薄封装）', () => {
     expect(snapshot!.text.length).toBeLessThanOrEqual(40_000 + 500);
   });
 
+  it('S7e 注记合并：表/列说明与样例注入文本（表/列名大小写不敏感）', async () => {
+    const { session } = makeSession();
+    const builder = new AiSchemaContextBuilder();
+    const notes = {
+      tables: { T0: { note: '核心表', columns: { ID: { note: '主键标识', sample: '1, 2' } } } },
+    };
+    const snapshot = await builder.build(session, {
+      connId: 'notes-1',
+      dbType: 'MYSQL',
+      includeComments: false,
+      database: 'app',
+      notes,
+    });
+    expect(snapshot!.text).toContain('## Table: t0 — 核心表');
+    expect(snapshot!.text).toContain('说明: 主键标识');
+    expect(snapshot!.text).toContain('样例: 1, 2');
+
+    // 保存注记后同一缓存立即生效（序列化期合并，不失效元数据缓存）
+    const updated = await builder.build(session, {
+      connId: 'notes-1',
+      dbType: 'MYSQL',
+      includeComments: false,
+      database: 'app',
+      notes: { tables: { t1: { note: '新说明' } } },
+    });
+    expect(updated!.text).toContain('## Table: t1 — 新说明');
+    expect(updated!.text).not.toContain('核心表');
+  });
+
   it('单表列元数据失败 → 跳过该表并标记 partial（不再整包失败）', async () => {
     const session = {
       metadata: {

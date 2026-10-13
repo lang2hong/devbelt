@@ -4,6 +4,10 @@ import { isSensitiveColumnName } from './sensitive.js';
 export interface AiSchemaColumn {
   name: string;
   type: string;
+  /** 用户临时说明（S7e：面板"表/列说明"；不受 includeComments 开关影响）。 */
+  note?: string;
+  /** 用户提供/抓取的样例值（S7e；同样始终渲染）。 */
+  sample?: string;
   nullable?: boolean;
   defaultValue?: string;
   primaryKey?: boolean;
@@ -24,6 +28,8 @@ export interface AiSchemaTable {
   name: string;
   columns: AiSchemaColumn[];
   indexes?: AiSchemaIndex[];
+  /** 用户表级说明（S7e）。 */
+  note?: string;
 }
 
 export interface AiSchemaInput {
@@ -71,6 +77,10 @@ const DEFAULT_MAX_COLUMNS_PER_TABLE = 50;
 
 /** 列注释单行截断上限（D19：防任意长度文本注入通道）。 */
 const COMMENT_MAX_CHARS = 120;
+/** S7e 用户注记上限（表说明/列说明/样例；与 Memento 存储层同口径）。 */
+const TABLE_NOTE_MAX_CHARS = 200;
+const COLUMN_NOTE_MAX_CHARS = 120;
+const SAMPLE_MAX_CHARS = 200;
 
 /** 状态列字典片段的整体上限（D19；超出即截断，防注释成为任意长度注入通道）。 */
 const DICT_FRAGMENT_MAX_CHARS = 500;
@@ -134,7 +144,8 @@ export function serializeSchema(input: AiSchemaInput, options: SerializeSchemaOp
 
   const dataLines: string[] = [];
   for (const table of candidates) {
-    const block: string[] = [`## Table: ${table.name}`];
+    const tableNote = table.note ? cleanUserNote(table.note, TABLE_NOTE_MAX_CHARS) : '';
+    const block: string[] = [`## Table: ${table.name}${tableNote ? ` — ${tableNote}` : ''}`];
     let blockComments = 0;
     const columns = table.columns.slice(0, Math.max(maxColumns, 0));
     for (const column of columns) {
@@ -209,16 +220,36 @@ function formatColumn(
   else if (column.unique) line += ' UNIQUE';
   if (column.defaultValue !== undefined) line += ` DEFAULT ${column.defaultValue}`;
   if (column.references) line += ` FOREIGN KEY -> ${column.references}`;
+  // 注记段：DB 注释（受开关控制，untreated metadata）与用户说明/样例（始终渲染）合并为一个 ` -- `。
+  const annotations: string[] = [];
   let commentRendered = false;
   if (includeComments && column.comment) {
     const cleaned = cleanColumnComment(column.comment);
     const dict = extractDictFragment(column.name, column.comment);
     const text = dict ? (cleaned ? `${cleaned}；${dict}` : dict) : cleaned;
     if (text) {
-      line += ` -- ${text}`;
+      annotations.push(text);
       commentRendered = true;
     }
   }
+  if (column.note) {
+    const note = cleanUserNote(column.note, COLUMN_NOTE_MAX_CHARS);
+    if (note) annotations.push(`说明: ${note}`);
+  }
+  if (column.sample) {
+    const sample = cleanUserNote(column.sample, SAMPLE_MAX_CHARS);
+    if (sample) annotations.push(`样例: ${sample}`);
+  }
+  if (annotations.length > 0) line += ` -- ${annotations.join('；')}`;
   if (isSensitive(column.name)) line += ' [SENSITIVE]';
   return { line, commentRendered };
+}
+
+/** 用户注记清洗：单行化、去控制字符、按上限截断（用户输入可信度高于 DB 注释，但仍设界）。 */
+export function cleanUserNote(raw: string, maxChars: number): string {
+  const single = raw
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return single.length > maxChars ? `${single.slice(0, maxChars - 1)}…` : single;
 }

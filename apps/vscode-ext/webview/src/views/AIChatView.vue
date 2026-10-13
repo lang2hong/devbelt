@@ -8,6 +8,7 @@ import ConversationDrawer from '../components/ai/ConversationDrawer.vue';
 import ContextBar from '../components/ai/ContextBar.vue';
 import ContextDetailDrawer, { type ContextDetailState } from '../components/ai/ContextDetailDrawer.vue';
 import TablePickerDrawer from '../components/ai/TablePickerDrawer.vue';
+import TableNoteEditor, { type TableNoteColumn } from '../components/ai/TableNoteEditor.vue';
 
 interface SessionSummary {
   id: string;
@@ -27,10 +28,11 @@ interface ChatMessage {
  *
  * 消息协议见 `src/result/aiProtocol.ts`：
  *   up: ready | send | abort | newChat | renameChat | deleteChat | loadHistory |
- *       selectConnection | selectScope | requestTableOptions | selectTables | requestQuotaRefresh |
- *       openSettings | setApiKey | clearApiKey | testConnection | copyCode
+ *       selectConnection | selectScope | requestTableOptions | selectTables | requestTableNote |
+ *       saveTableNote | fetchColumnSample | requestQuotaRefresh | openSettings | setApiKey |
+ *       clearApiKey | testConnection | copyCode
  *   down: init | chunk | finish | quotaUpdate | contextChanged | sessionList | sessionLoaded |
- *         contextDetail | prefillInput | toolResult | tableOptions
+ *         contextDetail | prefillInput | toolResult | tableOptions | tableNote | columnSample
  */
 const { post, onMessage } = useVsCode();
 const { t } = useI18n();
@@ -54,6 +56,15 @@ const contextDetail = ref<ContextDetailState | null>(null);
 const showTablePicker = ref(false);
 const tableOptions = ref<string[]>([]);
 const tableOptionsLoading = ref(false);
+/** P9 S7e：表/列说明编辑器。 */
+const showTableNotes = ref(false);
+const tableNoteTable = ref('');
+const tableNoteData = ref<{ note?: string; columns: TableNoteColumn[] } | null>(null);
+const tableNoteLoading = ref(false);
+const samplingColumn = ref<string | null>(null);
+const sampleErrors = ref<Record<string, string>>({});
+const sampleFill = ref<{ column: string; text: string; seq: number } | null>(null);
+let sampleSeq = 0;
 
 const generating = computed(() => streaming.value !== null);
 
@@ -132,6 +143,27 @@ onMounted(() => {
           tableOptions.value = [];
         }
         break;
+      case 'tableNote':
+        tableNoteTable.value = String(msg.table ?? '');
+        tableNoteData.value = {
+          ...(typeof msg.note === 'string' && msg.note ? { note: msg.note } : {}),
+          columns: Array.isArray(msg.columns) ? msg.columns : [],
+        };
+        tableNoteLoading.value = false;
+        samplingColumn.value = null;
+        break;
+      case 'columnSample': {
+        const column = String(msg.column ?? '');
+        samplingColumn.value = null;
+        if (Array.isArray(msg.values)) {
+          sampleErrors.value = { ...sampleErrors.value, [column]: '' };
+          sampleSeq += 1;
+          sampleFill.value = { column, text: msg.values.join(', '), seq: sampleSeq };
+        } else if (msg.error) {
+          sampleErrors.value = { ...sampleErrors.value, [column]: String(msg.error) };
+        }
+        break;
+      }
       case 'toolResult':
         messages.value.push({
           role: 'assistant',
@@ -203,6 +235,27 @@ function applyTableSelection(tables: string[]): void {
   post({ type: 'selectTables', tables });
 }
 
+/** P9 S7e：打开表/列说明编辑器（向 host 拉列元数据 + 现有注记）。 */
+function editTableNote(table: string): void {
+  showTableNotes.value = true;
+  tableNoteTable.value = table;
+  tableNoteData.value = null;
+  tableNoteLoading.value = true;
+  samplingColumn.value = null;
+  sampleErrors.value = {};
+  sampleFill.value = null;
+  post({ type: 'requestTableNote', table });
+}
+
+function saveTableNote(payload: { table: string; note: string; columns: Array<{ name: string; note: string; sample: string }> }): void {
+  post({ type: 'saveTableNote', ...payload });
+}
+
+function fetchColumnSample(column: string): void {
+  samplingColumn.value = column;
+  post({ type: 'fetchColumnSample', table: tableNoteTable.value, column });
+}
+
 /** P9 S4：打开 Context 明细抽屉（按需向 host 拉 schema/域上下文原文）。 */
 function openContextDetail(): void {
   showContextDetail.value = true;
@@ -248,6 +301,20 @@ function openContextDetail(): void {
         :loading="tableOptionsLoading"
         @close="showTablePicker = false"
         @apply="applyTableSelection"
+        @edit-note="editTableNote"
+      />
+      <TableNoteEditor
+        v-if="showTableNotes"
+        :table="tableNoteTable"
+        :note="tableNoteData?.note"
+        :columns="tableNoteData?.columns ?? []"
+        :loading="tableNoteLoading"
+        :sampling-column="samplingColumn"
+        :sample-errors="sampleErrors"
+        :sample-fill="sampleFill"
+        @close="showTableNotes = false"
+        @save="saveTableNote"
+        @fetch-sample="fetchColumnSample"
       />
       <ConversationDrawer
         v-if="showSessions"

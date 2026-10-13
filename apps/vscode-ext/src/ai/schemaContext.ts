@@ -7,6 +7,7 @@ import {
 } from '@devbelt/ai-core';
 import type { ColumnMeta, TableMeta } from '@devbelt/db-core';
 import type { SqlConnectionSession } from '../connection/connectionSession.js';
+import { findColumnNote, findTableNote, type SchemaNotes } from './aiContextStore.js';
 
 /**
  * 扩展侧 schema 上下文（P9 S4 升级，替换 S3 的基础版）：
@@ -54,6 +55,8 @@ export interface BuildSchemaOptions {
   /** 用户自然语言文本（大库关键词预筛素材）。 */
   userText?: string;
   maxTables?: number;
+  /** S7e 表/列临时说明与样例（序列化期合并；改完立即生效，不失效元数据缓存）。 */
+  notes?: SchemaNotes;
 }
 
 interface CachedMetadata {
@@ -81,12 +84,13 @@ export class AiSchemaContextBuilder {
         maxTables,
       });
       const { tables, partial } = await this.toSchemaTables(session, metadata, selected, opts);
+      const noted = applySchemaNotes(tables, opts.notes);
 
       const input: AiSchemaInput = {
         dbType: opts.dbType,
         ...(opts.database ? { database: opts.database } : {}),
         ...(opts.schema ? { schema: opts.schema } : {}),
-        tables,
+        tables: noted,
       };
       const serialized = serializeSchema(input, {
         maxTables,
@@ -99,7 +103,7 @@ export class AiSchemaContextBuilder {
         // serializer 的统计基于传入子集；对外反映真实总量与截断状态（表数截断 ∪ 字符预算截断）。
         totalTables: metadata.tables.length,
         truncated: serialized.truncated || metadata.tables.length > tables.length,
-        tableNames: tables.map((table) => table.name),
+        tableNames: noted.map((table) => table.name),
         connId: opts.connId,
         ...(opts.database ? { database: opts.database } : {}),
         ...(opts.schema ? { schema: opts.schema } : {}),
@@ -163,6 +167,25 @@ export class AiSchemaContextBuilder {
     }
     return { tables: out, partial };
   }
+}
+
+/** 合并用户注记（表/列名精确 → 大小写不敏感兜底）；无注记时原样返回（不复制）。 */
+function applySchemaNotes(tables: AiSchemaTable[], notes?: SchemaNotes): AiSchemaTable[] {
+  if (!notes || Object.keys(notes.tables).length === 0) return tables;
+  return tables.map((table) => {
+    const entry = findTableNote(notes, table.name);
+    if (!entry) return table;
+    const columns = table.columns.map((column) => {
+      const columnNote = findColumnNote(entry, column.name);
+      if (!columnNote) return column;
+      return {
+        ...column,
+        ...(columnNote.note ? { note: columnNote.note } : {}),
+        ...(columnNote.sample ? { sample: columnNote.sample } : {}),
+      };
+    });
+    return { ...table, ...(entry.note ? { note: entry.note } : {}), columns };
+  });
 }
 
 async function loadForeignKeys(session: SqlConnectionSession, opts: BuildSchemaOptions): Promise<Map<string, string>> {

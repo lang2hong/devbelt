@@ -129,6 +129,21 @@ export interface AiTableOptionsDown {
   scope?: string;
 }
 
+export interface AiTableNoteDown {
+  type: 'tableNote';
+  table: string;
+  note?: string;
+  columns: Array<{ name: string; type: string; comment?: string; note?: string; sample?: string }>;
+}
+
+export interface AiColumnSampleDown {
+  type: 'columnSample';
+  table: string;
+  column: string;
+  values?: string[];
+  error?: string;
+}
+
 export interface AiToolResultDown {
   type: 'toolResult';
   title: string;
@@ -147,7 +162,9 @@ export type AiDownMessage =
   | AiPrefillInputDown
   | AiContextDetailDown
   | AiToolResultDown
-  | AiTableOptionsDown;
+  | AiTableOptionsDown
+  | AiTableNoteDown
+  | AiColumnSampleDown;
 
 // ── Up（webview → host）──
 
@@ -191,6 +208,27 @@ export interface AiSelectTablesUp {
   tables: string[];
 }
 
+/** S7e：拉取某表的列元数据 + 现有注记（打开说明编辑器）。 */
+export interface AiRequestTableNoteUp {
+  type: 'requestTableNote';
+  table: string;
+}
+
+/** S7e：保存某表的注记（整表覆盖式；空内容即删除）。 */
+export interface AiSaveTableNoteUp {
+  type: 'saveTableNote';
+  table: string;
+  note?: string;
+  columns: Array<{ name: string; note?: string; sample?: string }>;
+}
+
+/** S7e：抓取某列样例值（用户点击；只读 LIMIT 10；敏感列拒绝）。 */
+export interface AiFetchColumnSampleUp {
+  type: 'fetchColumnSample';
+  table: string;
+  column: string;
+}
+
 export type AiUpMessage =
   | { type: 'ready' }
   | AiSendUp
@@ -205,6 +243,9 @@ export type AiUpMessage =
   | AiRunEsDslUp
   | AiRequestTableOptionsUp
   | AiSelectTablesUp
+  | AiRequestTableNoteUp
+  | AiSaveTableNoteUp
+  | AiFetchColumnSampleUp
   | { type: 'requestQuotaRefresh' }
   | { type: 'openSettings' }
   | { type: 'setApiKey' }

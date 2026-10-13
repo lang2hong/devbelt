@@ -2,7 +2,16 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('vscode', () => ({}));
 
-import { AiContextStore, DOMAIN_CONTEXT_PREFIX, DEFAULT_DIRECTIVES_PREFIX, LAST_SCOPE_PREFIX, SELECTED_TABLES_PREFIX } from '../../src/ai/aiContextStore';
+import {
+  AiContextStore,
+  DOMAIN_CONTEXT_PREFIX,
+  DEFAULT_DIRECTIVES_PREFIX,
+  LAST_SCOPE_PREFIX,
+  SCHEMA_NOTES_PREFIX,
+  SELECTED_TABLES_PREFIX,
+  findColumnNote,
+  findTableNote,
+} from '../../src/ai/aiContextStore';
 
 function makeMemento(): { memento: any; data: Map<string, unknown> } {
   const data = new Map<string, unknown>();
@@ -101,5 +110,43 @@ describe('AiContextStore（连接级域上下文/默认指令）', () => {
     await store.clearForConnection('c3');
     expect(data.has(`${SELECTED_TABLES_PREFIX}c3.a`)).toBe(false);
     expect(data.has(`${SELECTED_TABLES_PREFIX}c3.b`)).toBe(false);
+  });
+
+  it('S7e schemaNotes：保存/读回/大小写兜底/空删/上限拒绝/连接清理', async () => {
+    const { memento, data } = makeMemento();
+    const store = new AiContextStore(memento);
+
+    const ok = await store.saveTableNote('c1', 'app', 'orders', {
+      note: '订单主表',
+      columns: [{ name: 'status', note: '0=待支付', sample: '0,1' }],
+    });
+    expect(ok).toEqual({ ok: true });
+    const notes = store.getSchemaNotes('c1', 'app');
+    expect(notes.tables['orders']?.note).toBe('订单主表');
+    expect(findTableNote(notes, 'ORDERS')?.note).toBe('订单主表');
+    expect(findColumnNote(findTableNote(notes, 'orders'), 'STATUS')?.note).toBe('0=待支付');
+
+    // 整表覆盖为空 → 删除条目、清理存储键
+    await store.saveTableNote('c1', 'app', 'orders', { note: '', columns: [] });
+    expect(store.getSchemaNotes('c1', 'app').tables['orders']).toBeUndefined();
+    expect(data.has(`${SCHEMA_NOTES_PREFIX}c1.app`)).toBe(false);
+
+    // 脏数据归一化：非字符串丢弃、超长截断到上限
+    data.set(`${SCHEMA_NOTES_PREFIX}c2.db`, { tables: { t: { note: 123, columns: { a: { note: 'x'.repeat(300), sample: 7 } } } } });
+    const dirty = store.getSchemaNotes('c2', 'db');
+    expect(dirty.tables['t']?.note).toBeUndefined();
+    expect(dirty.tables['t']?.columns?.a?.note).toHaveLength(120);
+    expect(dirty.tables['t']?.columns?.a?.sample).toBeUndefined();
+
+    // 上限：501 列条目拒绝（不落盘）
+    const many = Array.from({ length: 501 }, (_, i) => ({ name: `c${i}`, note: 'n' }));
+    const rejected = await store.saveTableNote('c3', 'db', 't', { columns: many });
+    expect(rejected).toEqual({ ok: false, reason: 'limit' });
+    expect(store.getSchemaNotes('c3', 'db').tables['t']).toBeUndefined();
+
+    // clearForConnection 清理注记键
+    await store.saveTableNote('c4', 'a', 't', { columns: [{ name: 'c', note: 'n' }] });
+    await store.clearForConnection('c4');
+    expect(store.getSchemaNotes('c4', 'a').tables).toEqual({});
   });
 });

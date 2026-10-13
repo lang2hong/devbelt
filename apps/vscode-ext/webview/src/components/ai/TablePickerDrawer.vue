@@ -13,7 +13,7 @@ const props = defineProps<{
   selected: string[];
   loading: boolean;
 }>();
-const emit = defineEmits<{ close: []; apply: [tables: string[]] }>();
+const emit = defineEmits<{ close: []; apply: [tables: string[]]; editNote: [table: string] }>();
 
 const { t } = useI18n();
 const search = ref('');
@@ -73,6 +73,11 @@ function apply(): void {
       <label v-for="name in filtered" :key="name" class="ai-tp-item">
         <input type="checkbox" :checked="checked.has(name)" @change="toggle(name)" />
         <span class="ai-tp-name">{{ name }}</span>
+        <button
+          class="ai-btn ai-tp-edit"
+          :title="t('wv.ai.notes.edit')"
+          @click.prevent.stop="emit('editNote', name)"
+        >✎</button>
       </label>
     </div>
     <div class="ai-tp-actions">
@@ -136,6 +141,15 @@ function apply(): void {
 .ai-tp-name {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.ai-tp-edit {
+  margin-left: auto;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0.6;
+}
+.ai-tp-item:hover .ai-tp-edit {
+  opacity: 1;
 }
 .ai-tp-empty {
   color: var(--vscode-descriptionForeground);

@@ -246,3 +246,45 @@ describe('serializeSchema 字符预算（maxChars，真机 400 事故修复）',
     expect(result.tableCount).toBe(5);
   });
 });
+
+describe('用户注记渲染（S7e：表/列说明 + 样例）', () => {
+  const input = {
+    dbType: 'MYSQL',
+    database: 'app',
+    tables: [
+      {
+        name: 'orders',
+        note: '订单主表，一行一单',
+        columns: [
+          { name: 'status', type: 'INT', comment: '状态字段', note: '0=待支付 1=已支付', sample: '0, 1' },
+          { name: 'amount', type: 'INT', note: '单位：分' },
+        ],
+      },
+    ],
+  };
+
+  it('表说明/列说明/样例渲染；关闭 includeComments 时用户注记仍渲染', () => {
+    const withComments = serializeSchema(input, { includeComments: true });
+    expect(withComments.text).toContain('## Table: orders — 订单主表，一行一单');
+    expect(withComments.text).toContain('状态字段；说明: 0=待支付 1=已支付；样例: 0, 1');
+    expect(withComments.text).toContain('说明: 单位：分');
+
+    const withoutComments = serializeSchema(input, { includeComments: false });
+    expect(withoutComments.text).toContain('说明: 0=待支付 1=已支付');
+    expect(withoutComments.text).toContain('样例: 0, 1');
+    expect(withoutComments.text).not.toContain('状态字段');
+    expect(withoutComments.commentCount).toBe(0);
+  });
+
+  it('注记清洗与截断：控制字符单行化、超长按上限截断', () => {
+    const result = serializeSchema(
+      { dbType: 'MYSQL', tables: [{ name: 't', columns: [{ name: 'c', type: 'INT', note: `a\nb\tc${'x'.repeat(300)}` }] }] },
+      {},
+    );
+    const match = /说明: (.*)/.exec(result.text);
+    expect(match).not.toBeNull();
+    expect(match![1]).toContain('a b c');
+    expect(match![1].length).toBeLessThanOrEqual(120);
+    expect(result.text).toContain('…');
+  });
+});

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import {
+  isSensitiveColumnName,
   ES_DSL_SYSTEM_PROMPT,
   esContextBlock,
   REDIS_SYSTEM_PROMPT,
@@ -9,12 +10,12 @@ import {
   type ChatStreamChunk,
 } from '@devbelt/ai-core';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
-import { DatabaseType } from '@devbelt/db-core';
+import { DatabaseType, validateIdent, validateSchemaIdent } from '@devbelt/db-core';
 import { BaseWebView } from './baseWebView.js';
 import { getAiChatHtml } from '../webview/html.js';
 import { AiService, readAiConfig, type AiMutableStream, type AiRequestMeta } from '../ai/aiService.js';
 import { AiSessionStore, type AiChatSession } from '../ai/aiSessionStore.js';
-import { AiContextStore } from '../ai/aiContextStore.js';
+import { AiContextStore, findColumnNote, findTableNote } from '../ai/aiContextStore.js';
 import { AiKeyStore } from '../ai/aiKeyStore.js';
 import { AiSchemaContextBuilder, type AiSchemaSnapshot } from '../ai/schemaContext.js';
 import { currentDatabase, listScopes, pickScope, scopeKindOf } from '../ai/scopeOptions.js';
@@ -175,6 +176,20 @@ export class AiChatView extends BaseWebView {
         const tables = msg.tables.filter((name): name is string => typeof name === 'string' && name.trim().length > 0);
         await this.deps.contextStore.setSelectedTables(conn.id, scope, tables);
         await this.pushContext();
+        return;
+      }
+      case 'requestTableNote': {
+        if (typeof msg.table === 'string' && msg.table) await this.pushTableNote(msg.table);
+        return;
+      }
+      case 'saveTableNote': {
+        await this.saveTableNote(msg);
+        return;
+      }
+      case 'fetchColumnSample': {
+        if (typeof msg.table === 'string' && typeof msg.column === 'string' && msg.table && msg.column) {
+          await this.fetchColumnSample(msg.table, msg.column);
+        }
         return;
       }
       case 'selectScope': {
@@ -610,8 +625,9 @@ export class AiChatView extends BaseWebView {
       if (session.kind !== 'sql') return { state: { ...scopeBase, ...empty, note: 'no-session' } };
       const sqlSession = await this.resolveScopedSqlSession(conn, session, scope);
       if (!sqlSession) return { state: { ...scopeBase, ...empty, note: 'db-unreachable' } };
-      // 表选择抽屉勾选（空 = 自动启发式模式）。
+      // 表选择抽屉勾选（空 = 自动启发式模式）；表/列注记在序列化期合并。
       const selected = this.deps.contextStore.getSelectedTables(conn.id, scope);
+      const notes = this.deps.contextStore.getSchemaNotes(conn.id, scope);
       const snapshot = await this.schemaBuilder.build(sqlSession, {
         connId: conn.id,
         dbType: String(conn.dbType),
@@ -619,6 +635,7 @@ export class AiChatView extends BaseWebView {
         database: scope,
         ...(conn.dbType === DatabaseType.PG && conn.schema ? { schema: conn.schema } : {}),
         ...(selected.length > 0 ? { referencedTables: selected, onlyReferenced: true } : {}),
+        ...(Object.keys(notes.tables).length > 0 ? { notes } : {}),
       });
       if (!snapshot) return { state: { ...scopeBase, ...empty, note: 'schema-failed' } };
       return this.sqlContextState(
@@ -676,6 +693,103 @@ export class AiChatView extends BaseWebView {
       tables = [];
     }
     this.post({ type: 'tableOptions', tables: tables.slice(0, 3000), scope } as never);
+  }
+
+  /** S7e：下发某表的列元数据 + 现有注记（说明编辑器数据源）。 */
+  private async pushTableNote(table: string): Promise<void> {
+    const conn = this.selectedConnection();
+    const scope = this.selectedScope;
+    const session = conn ? this.deps.manager.peek(conn.id) : undefined;
+    if (!conn || !scope || !session || session.kind !== 'sql') {
+      this.post({ type: 'tableNote', table, columns: [] } as never);
+      return;
+    }
+    const entry = findTableNote(this.deps.contextStore.getSchemaNotes(conn.id, scope), table);
+    let columns: Array<{ name: string; type: string; comment?: string; note?: string; sample?: string }> = [];
+    try {
+      const scoped = (await this.resolveScopedSqlSession(conn, session, scope)) ?? session;
+      const metas = await scoped.metadata.getColumns(table, scope, conn.dbType === DatabaseType.PG ? conn.schema : undefined);
+      columns = metas.map((meta) => {
+        const columnNote = findColumnNote(entry, meta.name);
+        return {
+          name: meta.name,
+          type: meta.type || meta.simpleType || '',
+          ...(meta.comment ? { comment: meta.comment } : {}),
+          ...(columnNote?.note ? { note: columnNote.note } : {}),
+          ...(columnNote?.sample ? { sample: columnNote.sample } : {}),
+        };
+      });
+    } catch {
+      columns = [];
+    }
+    this.post({ type: 'tableNote', table, ...(entry?.note ? { note: entry.note } : {}), columns } as never);
+  }
+
+  /** S7e：保存表注记（整表覆盖；超上限提示；成功后刷新上下文并回显）。 */
+  private async saveTableNote(msg: { table: string; note?: string; columns?: Array<{ name: string; note?: string; sample?: string }> }): Promise<void> {
+    const conn = this.selectedConnection();
+    const scope = this.selectedScope;
+    if (!conn || !scope || typeof msg.table !== 'string' || !msg.table) return;
+    const columns = Array.isArray(msg.columns)
+      ? msg.columns.filter((c) => c && typeof c.name === 'string' && c.name.length > 0)
+      : [];
+    const result = await this.deps.contextStore.saveTableNote(conn.id, scope, msg.table, {
+      ...(typeof msg.note === 'string' ? { note: msg.note } : {}),
+      columns,
+    });
+    if (!result.ok) {
+      void vscode.window.showWarningMessage(l10n('ai.notes.limitExceeded'));
+      return;
+    }
+    await this.pushContext();
+    await this.pushTableNote(msg.table);
+  }
+
+  /**
+   * S7e：抓取列样例值——用户点击才执行、只读 LIMIT 10、敏感列拒绝；
+   * 标识符经 `validateIdent`/`validateSchemaIdent` + 方言 `wrap` 引用（注入安全）。
+   */
+  private async fetchColumnSample(table: string, column: string): Promise<void> {
+    const fail = (error: string): void => {
+      this.post({ type: 'columnSample', table, column, error } as never);
+    };
+    const conn = this.selectedConnection();
+    const scope = this.selectedScope;
+    const session = conn ? this.deps.manager.peek(conn.id) : undefined;
+    if (!conn || !scope || !session || session.kind !== 'sql') {
+      fail(l10n('ai.notes.noSession'));
+      return;
+    }
+    if (isSensitiveColumnName(column)) {
+      fail(l10n('ai.notes.sensitiveColumn'));
+      return;
+    }
+    try {
+      const scoped = (await this.resolveScopedSqlSession(conn, session, scope)) ?? session;
+      const dialect = scoped.query.dialect;
+      const columnRef = dialect.wrap(validateIdent(column));
+      const target =
+        conn.dbType === DatabaseType.MYSQL
+          ? `${dialect.wrap(validateSchemaIdent(scope))}.${dialect.wrap(validateIdent(table))}`
+          : conn.dbType === DatabaseType.PG && conn.schema
+            ? `${dialect.wrap(validateSchemaIdent(conn.schema))}.${dialect.wrap(validateIdent(table))}`
+            : dialect.wrap(validateIdent(table));
+      const result = await scoped.query.query(
+        `SELECT DISTINCT ${columnRef} AS v FROM ${target} WHERE ${columnRef} IS NOT NULL LIMIT 10`,
+      );
+      const values: string[] = [];
+      for (const row of (result?.rows ?? []) as Array<Record<string, unknown>>) {
+        const raw = row.v ?? Object.values(row)[0];
+        if (raw === undefined || raw === null) continue;
+        const text = String(raw).replace(/\s+/g, ' ').trim();
+        if (!text) continue;
+        values.push(text.length > 40 ? `${text.slice(0, 39)}…` : text);
+        if (values.length >= 10) break;
+      }
+      this.post({ type: 'columnSample', table, column, values } as never);
+    } catch (err) {
+      fail((err as Error).message);
+    }
   }
 
   private sqlContextState(
