@@ -38,6 +38,7 @@ function toggle(key: SectionKey): void {
           <span>{{ t('wv.ai.context.tablesTitle') }}</span>
           <span class="ai-ctx-count">{{ props.detail.tables?.length ?? 0 }}</span>
         </button>
+        <div v-show="open.tables" class="ai-ctx-hint">{{ t('wv.ai.context.tablesHint') }}</div>
         <div v-show="open.tables" class="ai-ctx-scroll ai-ctx-list">
           <button
             v-for="name in props.detail.tables ?? []"
@@ -109,6 +110,11 @@ function toggle(key: SectionKey): void {
 .ai-ctx-count {
   margin-left: auto;
   color: var(--vscode-descriptionForeground);
+}
+.ai-ctx-hint {
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.85;
+  padding: 2px 0;
 }
 .ai-ctx-scroll {
   overflow: auto;
