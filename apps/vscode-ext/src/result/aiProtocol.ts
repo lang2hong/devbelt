@@ -115,9 +115,7 @@ export interface AiPrefillInputDown {
 export interface AiContextDetailDown {
   type: 'contextDetail';
   context: AiContextState;
-  domainContext: string;
-  defaultDirectives: string;
-  /** 本次实际注入的表清单（SQL 引擎；"注入表清单"折叠区，可点击编辑说明）。 */
+  /** 本次实际注入的表清单（SQL 引擎；可点击进入表/列说明编辑器）。 */
   tables?: string[];
 }
 

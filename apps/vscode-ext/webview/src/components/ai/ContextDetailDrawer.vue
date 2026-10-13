@@ -2,8 +2,6 @@
 import { useI18n } from '../../composables/useI18n';
 
 export interface ContextDetailState {
-  domainContext: string;
-  defaultDirectives: string;
   commentCount: number;
   tableCount: number;
   totalTables: number;

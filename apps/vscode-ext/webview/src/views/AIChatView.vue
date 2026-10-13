@@ -8,6 +8,7 @@ import ConversationDrawer from '../components/ai/ConversationDrawer.vue';
 import ContextBar from '../components/ai/ContextBar.vue';
 import ContextDetailDrawer, { type ContextDetailState } from '../components/ai/ContextDetailDrawer.vue';
 import TableNoteEditor, { type TableNoteColumn } from '../components/ai/TableNoteEditor.vue';
+import TableScopeDialog from '../components/ai/TableScopeDialog.vue';
 
 interface SessionSummary {
   id: string;
@@ -27,11 +28,11 @@ interface ChatMessage {
  *
  * 消息协议见 `src/result/aiProtocol.ts`：
  *   up: ready | send | abort | newChat | renameChat | deleteChat | loadHistory |
- *       selectConnection | selectScope | requestTableNote |
+ *       selectConnection | selectScope | requestTableOptions | selectTables | requestTableNote |
  *       saveTableNote | fetchColumnSample | requestQuotaRefresh | openSettings | setApiKey |
  *       clearApiKey | testConnection | copyCode
  *   down: init | chunk | finish | quotaUpdate | contextChanged | sessionList | sessionLoaded |
- *         contextDetail | prefillInput | toolResult | tableNote | columnSample
+ *         contextDetail | prefillInput | toolResult | tableOptions | tableNote | columnSample
  */
 const { post, onMessage } = useVsCode();
 const { t } = useI18n();
@@ -57,6 +58,10 @@ function toggleSection(key: keyof typeof sidebarOpen): void {
 }
 /** P9 S4/S7g：「实际注入的表」清单（只读快照；点表名进编辑器）。 */
 const contextDetail = ref<ContextDetailState | null>(null);
+/** 方案 A：注入范围弹层（选择表能力收敛为弹层，不占侧栏视图）。 */
+const showScopeDialog = ref(false);
+const tableOptions = ref<string[]>([]);
+const tableOptionsLoading = ref(false);
 /** P9 S7e：表/列说明编辑器。 */
 const tableNoteTable = ref('');
 const tableNoteData = ref<{ note?: string; updatedAt?: number; columns: TableNoteColumn[] } | null>(null);
@@ -122,8 +127,6 @@ onMounted(() => {
         break;
       case 'contextDetail':
         contextDetail.value = {
-          domainContext: String(msg.domainContext ?? ''),
-          defaultDirectives: String(msg.defaultDirectives ?? ''),
           commentCount: Number(msg.context?.commentCount ?? 0),
           tableCount: Number(msg.context?.tableCount ?? 0),
           totalTables: Number(msg.context?.totalTables ?? 0),
@@ -133,6 +136,14 @@ onMounted(() => {
         break;
       case 'prefillInput':
         if (typeof msg.text === 'string') input.value = msg.text;
+        break;
+      case 'tableOptions':
+        tableOptions.value = Array.isArray(msg.tables) ? msg.tables : [];
+        tableOptionsLoading.value = false;
+        if (showScopeDialog.value && msg.scope !== undefined && context.value?.scope && msg.scope !== context.value.scope) {
+          // 响应跨作用域（用户已切库）→ 丢弃，等新一轮
+          tableOptions.value = [];
+        }
         break;
       case 'tableNote':
         tableNoteTable.value = String(msg.table ?? '');
@@ -213,6 +224,23 @@ function selectScope(value: string): void {
   post({ type: 'selectScope', value });
 }
 
+const scopeLabel = computed(() => {
+  const count = context.value?.selectedTables?.length ?? 0;
+  return count > 0 ? t('wv.ai.tables.scopeCustom', { n: count }) : t('wv.ai.tables.scopeAuto');
+});
+
+function openScopeDialog(): void {
+  showScopeDialog.value = true;
+  tableOptions.value = [];
+  tableOptionsLoading.value = true;
+  post({ type: 'requestTableOptions' });
+}
+
+function applyScopeSelection(tables: string[]): void {
+  showScopeDialog.value = false;
+  post({ type: 'selectTables', tables });
+}
+
 /** P9 S7e：打开表/列说明编辑器（向 host 拉列元数据 + 现有注记）。 */
 function editTableNote(table: string): void {
   sidebarOpen.notes = true;
@@ -274,6 +302,10 @@ function openContextDetail(): void {
             <span class="ai-side-count">{{ contextDetail?.tableCount ?? context?.tableCount ?? 0 }}</span>
           </button>
           <div v-show="sidebarOpen.context" class="ai-side-content">
+            <div v-if="context?.scopeKind === 'database'" class="ai-scope-row">
+              <span class="ai-scope-label">{{ t('wv.ai.tables.scopeLabel') }}</span>
+              <button class="ai-btn" @click="openScopeDialog">{{ scopeLabel }}</button>
+            </div>
             <ContextDetailDrawer :detail="contextDetail" @edit-table="editTableNote" />
           </div>
         </div>
@@ -320,6 +352,14 @@ function openContextDetail(): void {
         <ChatInput v-model="input" :generating="generating" @send="send" />
       </div>
     </div>
+    <TableScopeDialog
+      v-if="showScopeDialog"
+      :tables="tableOptions"
+      :selected="context?.selectedTables ?? []"
+      :loading="tableOptionsLoading"
+      @apply="applyScopeSelection"
+      @close="showScopeDialog = false"
+    />
   </div>
 </template>
 
@@ -387,6 +427,15 @@ function openContextDetail(): void {
 }
 .ai-side-content {
   padding: 2px 8px 8px;
+}
+.ai-scope-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0 4px;
+}
+.ai-scope-label {
+  color: var(--vscode-descriptionForeground);
 }
 .ai-main {
   flex: 1;
