@@ -7,7 +7,7 @@ import ChatInput from '../components/ai/ChatInput.vue';
 import ConversationDrawer from '../components/ai/ConversationDrawer.vue';
 import ContextBar from '../components/ai/ContextBar.vue';
 import ContextDetailDrawer, { type ContextDetailState } from '../components/ai/ContextDetailDrawer.vue';
-import TableNoteEditor, { type TableNoteColumn } from '../components/ai/TableNoteEditor.vue';
+import TableNoteDialog, { type TableNoteColumn } from '../components/ai/TableNoteDialog.vue';
 import TableScopeDialog from '../components/ai/TableScopeDialog.vue';
 
 interface SessionSummary {
@@ -50,9 +50,9 @@ const input = ref('');
 const includeColumnComments = ref(true);
 /**
  * 侧栏折叠视图组（VSCode 侧栏风格：上下堆叠、各自 ▸/▾，可同时展开）：
- * 注入的表（本次实际注入，点表名编辑说明）/ 表说明 / 会话记录。
+ * 注入的表（点表名打开说明弹层）/ 会话记录。
  */
-const sidebarOpen = reactive({ context: false, notes: false, sessions: false });
+const sidebarOpen = reactive({ context: false, sessions: false });
 function toggleSection(key: keyof typeof sidebarOpen): void {
   sidebarOpen[key] = !sidebarOpen[key];
 }
@@ -62,7 +62,8 @@ const contextDetail = ref<ContextDetailState | null>(null);
 const showScopeDialog = ref(false);
 const tableOptions = ref<string[]>([]);
 const tableOptionsLoading = ref(false);
-/** P9 S7e：表/列说明编辑器。 */
+/** S7h：表/列说明弹层。 */
+const showNoteDialog = ref(false);
 const tableNoteTable = ref('');
 const tableNoteData = ref<{ note?: string; updatedAt?: number; columns: TableNoteColumn[] } | null>(null);
 const tableNoteLoading = ref(false);
@@ -241,9 +242,9 @@ function applyScopeSelection(tables: string[]): void {
   post({ type: 'selectTables', tables });
 }
 
-/** P9 S7e：打开表/列说明编辑器（向 host 拉列元数据 + 现有注记）。 */
+/** S7h：打开表/列说明弹层（向 host 拉列元数据 + 现有注记）。 */
 function editTableNote(table: string): void {
-  sidebarOpen.notes = true;
+  showNoteDialog.value = true;
   tableNoteTable.value = table;
   tableNoteData.value = null;
   tableNoteLoading.value = true;
@@ -310,27 +311,6 @@ function openContextDetail(): void {
           </div>
         </div>
         <div class="ai-side-section">
-          <button class="ai-side-head" @click="toggleSection('notes')">
-            <span class="ai-side-chevron">{{ sidebarOpen.notes ? '▾' : '▸' }}</span>
-            <span>{{ t('wv.ai.notes.title') }}</span>
-            <span class="ai-side-count">{{ tableNoteTable }}</span>
-          </button>
-          <div v-show="sidebarOpen.notes" class="ai-side-content">
-            <TableNoteEditor
-              :table="tableNoteTable"
-              :note="tableNoteData?.note"
-              :updated-at="tableNoteData?.updatedAt"
-              :columns="tableNoteData?.columns ?? []"
-              :loading="tableNoteLoading"
-              :sampling-column="samplingColumn"
-              :sample-errors="sampleErrors"
-              :sample-fill="sampleFill"
-              @save="saveTableNote"
-              @fetch-sample="fetchColumnSample"
-            />
-          </div>
-        </div>
-        <div class="ai-side-section">
           <button class="ai-side-head" @click="toggleSection('sessions')">
             <span class="ai-side-chevron">{{ sidebarOpen.sessions ? '▾' : '▸' }}</span>
             <span>{{ t('wv.ai.sessions') }}</span>
@@ -352,6 +332,20 @@ function openContextDetail(): void {
         <ChatInput v-model="input" :generating="generating" @send="send" />
       </div>
     </div>
+    <TableNoteDialog
+      v-if="showNoteDialog"
+      :table="tableNoteTable"
+      :note="tableNoteData?.note"
+      :updated-at="tableNoteData?.updatedAt"
+      :columns="tableNoteData?.columns ?? []"
+      :loading="tableNoteLoading"
+      :sampling-column="samplingColumn"
+      :sample-errors="sampleErrors"
+      :sample-fill="sampleFill"
+      @close="showNoteDialog = false"
+      @save="saveTableNote"
+      @fetch-sample="fetchColumnSample"
+    />
     <TableScopeDialog
       v-if="showScopeDialog"
       :tables="tableOptions"
