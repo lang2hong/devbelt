@@ -1472,3 +1472,22 @@ docker exec ollama ollama pull qwen2.5-coder:7b
 - **字号**：AI 面板全部组件改随 VS Code 主题字号——正文 `var(--vscode-font-size, 13px)`、
   次级 `calc(-1px/-2px)`、代码块/预格式 `var(--vscode-editor-font-size, 12px)`；
   其余 webview 面板仍为写死字号（不在本切片范围，如需可另行机械替换）。
+
+### 14.6 S7e：抽屉可读性 + 表/列注记与样例（2026-10-13）
+
+- **抽屉可读性**：ContextDetailDrawer 三段改 VSCode 风格折叠（表清单默认展开，Schema 原文/
+  术语/规则默认折叠）；新增「注入表清单」= 本次实际进入 prompt 的表（含预算/预筛结果，来自
+  `snapshot.tableNames`，`contextDetail` 协议下发 `tables`）。
+- **表/列注记（临时映射）**：无注释表/列可由用户补说明——存储
+  `devbelt.ai.schemaNotes.<connId>.<库>`（Memento：`{tables:{[表]:{note,columns:{[列]:{note,sample}}}}}`
+  ，表 ≤200/列 ≤120/样例 ≤200 字符，单库 ≤500 列条目，超限拒存并提示）。
+  注入在 **序列化期合并**（元数据 60s 缓存不动 → 保存即生效）；表/列名精确 → 大小写不敏感兜底；
+  **用户注记不受 `includeComments` 开关影响**（DB 注释仍受控），同段落 ` -- ` 合并渲染
+  （`…；说明: …；样例: …`），统一纳入 40K 字符预算。
+- **样例值抓取**：用户逐列点击触发，只读 `SELECT DISTINCT … LIMIT 10`（标识符经
+  `validateIdent/validateSchemaIdent` + 方言 `wrap`；值 ≤10 条、单值 ≤40 字符）；
+  **敏感列名（`isSensitiveColumnName`）拒绝抓取**，手填自担。
+- **UI**：表选择抽屉每表「✎」→ `TableNoteEditor`（表说明 + 列说明/样例输入 + 抓取按钮）；
+  协议 up `requestTableNote/saveTableNote/fetchColumnSample`、down `tableNote/columnSample`。
+- 测试：ai-core +2（渲染/清洗截断）、ext +5（store 归一/上限/清理、builder 合并与缓存生效）；
+  ai-core 101 / vscode-ext 1678 全绿。

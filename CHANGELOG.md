@@ -66,6 +66,10 @@
   （仅 401、仅重试一次；续期失败/同 token 不重试；`getUsage` 同语义）+ AiService 注入。
   修复前 access token（15m TTL）过期会直接报 "AI proxy authentication failed (HTTP 401)"。
   测试 +6；仅扩展侧改动，无需服务端重部署。
+- **S7e 上下文抽屉可读性 + 表/列注记与样例（2026-10-13）**：上下文抽屉四段改 VSCode 风格
+  折叠并新增「注入表清单」；无注释的表/列可补临时说明与样例值（`devbelt.ai.schemaNotes.<connId>.<库>`，
+  序列化期合并、保存即生效；用户注记不受列注释开关影响，纳入 40K 预算）；样例值用户逐列点击
+  抓取（只读 `SELECT DISTINCT … LIMIT 10`、敏感列拒绝）。测试 +7（ai-core 101 / ext 1678 全绿）。
 - **修复：F5 调试态同步解锁/账号恢复误报"口令不一致"（2026-10-13）**：Argon2id 派生 worker
   默认继承父进程 `execArgv`，调试态扩展宿主带 `--inspect-brk`，worker 停在等调试器永不回消息 →
   30s 超时被 catch 压成口令错误。修复：`defaultSpawn` 显式 `execArgv: []` + 回归测试；同时解锁
