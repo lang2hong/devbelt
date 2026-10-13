@@ -191,9 +191,11 @@ describe('personal sync B1 commands', () => {
     const second = makeDeps(encrypted, ['wrong secret']);
     second.deps.unlockDek = vi.fn(async () => { throw new Error('GCM authentication failed'); });
     await unlockPersonalSync(second.deps);
-    expect(second.errorAction).toHaveBeenCalledWith('Sync passphrase mismatch. It may have been changed on another device.', [
-      'Re-enter', 'Use Recovery Code', 'Use Account', 'Reset Sync', 'Reset Local Sync',
-    ]);
+    // 诊断补丁：弹窗文案附加真实错误原因（括号内），便于区分"口令错"与"落盘/其它故障"。
+    expect(second.errorAction).toHaveBeenCalledWith(
+      'Sync passphrase mismatch. It may have been changed on another device.\n(GCM authentication failed)',
+      ['Re-enter', 'Use Recovery Code', 'Use Account', 'Reset Sync', 'Reset Local Sync'],
+    );
     expect(encrypted.unlockFromState).not.toHaveBeenCalled();
     expect(encrypted.syncNow).not.toHaveBeenCalled();
   });
@@ -274,7 +276,7 @@ describe('personal sync B1 commands', () => {
 
     await unlockPersonalSync(deps);
 
-    expect(errorAction).toHaveBeenCalledWith('Sync passphrase mismatch. It may have been changed on another device.', [
+    expect(errorAction).toHaveBeenCalledWith('Sync passphrase mismatch. It may have been changed on another device.\n(gcm)', [
       'Re-enter', 'Use Recovery Code', 'Use Account', 'Reset Sync', 'Reset Local Sync',
     ]);
     expect(mocks.executeCommand).toHaveBeenCalledWith('devbelt.recoverSync');

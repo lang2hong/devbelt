@@ -8,7 +8,7 @@ import { encodeBase64Url } from '@devbelt/db-host/sync/crypto/recoveryCode';
 import type { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
 import { canUseDataSync } from '@devbelt/db-host/sync/entitlementGate';
 import { l10n } from '../i18n';
-import { diagInfo } from '../utils/diagnostics';
+import { diagError, diagInfo } from '../utils/diagnostics';
 
 type SyncRun = { stage: string; applied?: number; pushed?: number; changes?: number; skippedEntitlement?: number; skippedUnsupported?: number; skippedOutbound?: number } | undefined;
 
@@ -252,7 +252,11 @@ export async function unlockPersonalSync(deps: PersonalSyncCommandDeps): Promise
     dek = await (deps.unlockDek ?? ((uid, epoch, passphrase, remote) => unlockDek(uid, epoch, passphrase, remote.smpKdf, remote.envelopeSmp)))(session.uid, state.keyEpoch, smp, state);
     await session.unlockFromState(state, dek);
     if (hadPendingCleanup) deps.ui.info(l10n('sync.cleanupResumed'));
-  } catch {
+  } catch (err) {
+    // 诊断（真机排查）：catch 把「解封/落盘（Secrets/Memento）」多类失败压成同一文案，
+    // 真实原因必须同时落日志与弹窗，否则"口令不一致"会掩盖非口令故障。
+    const detail = err instanceof Error ? err.message : String(err);
+    diagError(`sync unlock failed: ${detail}`);
     // 解锁失败分两类：
     //  - epoch 前进（他设备 destroy/reset）：旧口令对应旧数据，恢复码/账号也救不回，只能重置同步。
     //  - 口令不一致/输错（epoch 未变）：给出口令不一致 + 重新输入/恢复码/账号/重置四个动作。
@@ -266,7 +270,7 @@ export async function unlockPersonalSync(deps: PersonalSyncCommandDeps): Promise
         if (act === l10n('sync.resetLocalAction')) void vscode.commands.executeCommand('devbelt.resetLocalSync');
         else if (act) void vscode.commands.executeCommand('devbelt.resetSync');
       } else {
-        const act = await deps.ui.errorAction(l10n('sync.unlockPassphraseMismatch'), [
+        const act = await deps.ui.errorAction(`${l10n('sync.unlockPassphraseMismatch')}\n(${detail})`, [
           l10n('sync.retryEnter'), l10n('sync.useRecoveryCode'), l10n('sync.useAccount'),
           l10n('sync.resetSyncAction'), l10n('sync.resetLocalAction'),
         ]);
@@ -277,7 +281,7 @@ export async function unlockPersonalSync(deps: PersonalSyncCommandDeps): Promise
         else if (act === l10n('sync.resetSyncAction')) void vscode.commands.executeCommand('devbelt.resetSync');
       }
     } else {
-      deps.ui.error(staleHint ? l10n('sync.unlockEpochStale') : l10n('sync.unlockFailed'));
+      deps.ui.error(staleHint ? l10n('sync.unlockEpochStale') : `${l10n('sync.unlockFailed')}\n(${detail})`);
     }
     return;
   } finally {
