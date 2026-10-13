@@ -1491,3 +1491,24 @@ docker exec ollama ollama pull qwen2.5-coder:7b
   协议 up `requestTableNote/saveTableNote/fetchColumnSample`、down `tableNote/columnSample`。
 - 测试：ai-core +2（渲染/清洗截断）、ext +5（store 归一/上限/清理、builder 合并与缓存生效）；
   ai-core 101 / vscode-ext 1678 全绿。
+
+### 14.7 S7f：schemaNotes 同步实体 + 面板概念理顺（2026-10-13）
+
+- **命名理顺（消除"两个 tables"歧义）**：
+  - 「选择注入的表」（原表选择）= **输入/配置**：勾选则仅注入所选；未勾选 = 自动模式（相关度 ≤200 张）。
+  - 「实际注入的表」（原 Tables in this request）= **输出/快照**：本次请求真正进入 prompt 的表
+    （受 40K 预算截断、大库预筛影响，可能少于勾选）；两处互相指路提示。
+  - 「发送给 AI 的上下文」（原 Context details）= 本次请求的全景只读快照（实际注入表 + 术语表 + 默认规则）。
+- **注记最后修改时间**：编辑器显示同步实体 `updateTime`（保存后即时刷新）。
+- **schemaNotes 同步实体（A1 规范路线）**：表/列注记从"仅本地"升级为 E2EE 同步实体：
+  - 粒度：一个「连接 + 库」一条记录（`SyncEntityType='schemaNotes'`，localId 前缀 `sn`）。
+  - 接入面（镜像上一版验证器实体模式）：db-host `syncEntity/entityStore/recordCodec/applyRecords/
+    syncMutator/syncEngine/session/sessionFactory`；宿主 `SchemaNotesSyncBackend`（本地真身 =
+    AiContextStore 记录式存储：`devbelt.ai.schemaNotes.rec.<localId>`，含 updateTime 与墓碑；
+    旧 `schemaNotes.<connId>.<库>` 格式可读、保存时自动迁移）。
+  - 语义：`connId` 以 **recordId 引用**传输（未映射 → unresolved，连接到达后收敛；跨设备 id 重映射安全）；
+    payload 128 KiB fail-closed；清空注记 → 墓碑（删除跨设备传播）；连接删除 → 注记墓碑。
+    本地编辑在下一次同步周期（聚焦/立即同步/自动同步）随对账出站。
+  - **服务端**：`ENTITY_KINDS` 白名单新增 `'schemaNotes'`——**必须重新部署服务端后同步才生效**
+    （未部署前推送会被 400 拒绝对账 skipped，本地数据不受影响）。
+  - 测试：ext +10（codec/apply/unresolved/墓碑/旧格式迁移/聚合）；全量 ext 1688 / db-host 19 / server 585 全绿。
