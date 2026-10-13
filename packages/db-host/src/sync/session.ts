@@ -27,6 +27,7 @@ const LOCAL_ID_PREFIX: Record<SyncEntityType, string> = {
   authenticatorEntry: 'ae',
   authenticatorGroup: 'ag',
   authenticatorTag: 'at',
+  schemaNotes: 'sn',
 };
 
 /**
@@ -60,6 +61,8 @@ export interface SyncSessionOptions {
   autoSyncEnabled?: () => boolean;
   /** P6：验证器同步实体后端（S3 由扩展注入）；缺省时验证器类型不可同步。 */
   authenticatorBackend?: EntityBackend;
+  /** S7f：表/列注记实体后端（宿主注入，底层 AiContextStore）。 */
+  schemaNotesBackend?: EntityBackend;
   /** P6：推送成功 / 按类型配额拒绝回调（由扩展接线标记本地实体）。 */
   onEntityPushed?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
   onQuotaRejected?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
@@ -93,7 +96,7 @@ export class PersonalSyncSession {
     private readonly opts: SyncSessionOptions = {},
   ) {
     this.stateStore = new StateStore(memento, userId);
-    this.entities = new EntityStore(store, opts.authenticatorBackend);
+    this.entities = new EntityStore(store, opts.authenticatorBackend, opts.schemaNotesBackend);
     this.epochTx = new EpochTransitionCoordinator({
       memento,
       userId,

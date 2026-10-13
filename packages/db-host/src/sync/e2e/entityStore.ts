@@ -3,6 +3,7 @@ import type { ConnectionStore, SavedConnection, ConnectionGroup } from '../../co
 import type { QueryFolder, ChangeSource } from '../../connection/queryStore.js';
 import { SYNC_ENTITY_TYPES, type SyncEntityRef, type SyncEntityType } from './syncEntity.js';
 import type { SyncAuthenticatorGroup, SyncAuthenticatorTag, SyncAuthenticatorEntryValue } from './authenticatorTypes.js';
+import type { SyncSchemaNotesValue } from './schemaNotesTypes.js';
 import { assertU64Decimal } from './types.js';
 import type { MementoLike } from './stateStore.js';
 
@@ -30,7 +31,8 @@ export interface EntitySyncRecord {
 
 export type EntityValue =
   | SavedConnection | ConnectionGroup | SavedQuery | QueryFolder
-  | SyncAuthenticatorGroup | SyncAuthenticatorTag | SyncAuthenticatorEntryValue;
+  | SyncAuthenticatorGroup | SyncAuthenticatorTag | SyncAuthenticatorEntryValue
+  | SyncSchemaNotesValue;
 
 /**
  * 同步实体后端（P6）：把一类实体的读写收敛到同一端口，供 EntityStore 按类型分派。
@@ -118,7 +120,11 @@ class PersonalEntityBackend implements EntityBackend {
 export class EntityStore {
   private readonly personal: EntityBackend;
 
-  constructor(store: ConnectionStore, private readonly authenticator?: EntityBackend) {
+  constructor(
+    store: ConnectionStore,
+    private readonly authenticator?: EntityBackend,
+    private readonly schemaNotes?: EntityBackend,
+  ) {
     this.personal = new PersonalEntityBackend(store);
   }
 
@@ -134,6 +140,9 @@ export class EntityStore {
       case 'authenticatorTag':
         if (!this.authenticator) throw new Error(`no sync backend for entity type ${type}`);
         return this.authenticator;
+      case 'schemaNotes':
+        if (!this.schemaNotes) throw new Error(`no sync backend for entity type ${type}`);
+        return this.schemaNotes;
     }
   }
 
@@ -142,6 +151,7 @@ export class EntityStore {
     return [
       ...this.personal.listForSync(),
       ...(this.authenticator ? this.authenticator.listForSync() : []),
+      ...(this.schemaNotes ? this.schemaNotes.listForSync() : []),
     ];
   }
 
@@ -174,6 +184,8 @@ export function applyOrder(type: SyncEntityType): number {
     case 'authenticatorGroup': return 0;
     case 'authenticatorTag': return 0;
     case 'authenticatorEntry': return 1;
+    // S7f：注记引用连接（connId），连接（1）之后应用即可。
+    case 'schemaNotes': return 4;
   }
 }
 

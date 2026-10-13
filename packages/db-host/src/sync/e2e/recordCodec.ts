@@ -14,6 +14,7 @@ import {
   type AuthenticatorAlgorithm, type AuthenticatorTagColor,
   type SyncAuthenticatorEntryValue, type SyncAuthenticatorGroup, type SyncAuthenticatorTag,
 } from './authenticatorTypes.js';
+import { assertSchemaNotesScope, assertSchemaNotesTables, type SyncSchemaNotesValue } from './schemaNotesTypes.js';
 
 /**
  * record 密文编解码（A2：四类型 discriminated payload + 引用转 recordId）。
@@ -93,7 +94,8 @@ export type CodecEntityInput =
   | { type: 'query'; entity: SavedQuery }
   | { type: 'authenticatorGroup'; entity: SyncAuthenticatorGroup }
   | { type: 'authenticatorTag'; entity: SyncAuthenticatorTag }
-  | { type: 'authenticatorEntry'; entity: SyncAuthenticatorEntryValue };
+  | { type: 'authenticatorEntry'; entity: SyncAuthenticatorEntryValue }
+  | { type: 'schemaNotes'; entity: SyncSchemaNotesValue };
 
 function assertSqlSize(sql: string): void {
   if (new TextEncoder().encode(sql).length > SQL_MAX_BYTES) {
@@ -208,7 +210,37 @@ export function encodeEntityPayload(input: CodecEntityInput, resolveRef: RefReso
     case 'authenticatorGroup': return encodeAuthenticatorGroupPayload(input.entity);
     case 'authenticatorTag': return encodeAuthenticatorTagPayload(input.entity);
     case 'authenticatorEntry': return encodeAuthenticatorEntryPayload(input.entity, resolveRef);
+    case 'schemaNotes': return encodeSchemaNotesPayload(input.entity, resolveRef);
   }
+}
+
+/** S7f 编码：connId 本地 id → recordId（unresolved 时省略字段，后续轮收敛）。 */
+export function encodeSchemaNotesPayload(entity: SyncSchemaNotesValue, resolveRef: RefResolver): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    type: 'schemaNotes',
+    scope: assertSchemaNotesScope(entity.scope),
+    tables: assertSchemaNotesTables(entity.tables),
+  };
+  const connRecordId = resolveRef('connection', entity.connId);
+  if (connRecordId !== undefined) out.connId = connRecordId;
+  return out;
+}
+
+/** S7f 解码：connId（recordId）可选（unresolved）；scope/tables 必填并校验。 */
+export interface DecodedSchemaNotesPayload {
+  connId?: string;
+  scope: string;
+  tables: Record<string, unknown>;
+}
+
+export function decodeSchemaNotesPayload(p: Record<string, unknown>): DecodedSchemaNotesPayload {
+  const connId = p.connId;
+  if (connId !== undefined && typeof connId !== 'string') throw new Error('schemaNotes.connId must be a string');
+  return {
+    ...(typeof connId === 'string' && connId ? { connId } : {}),
+    scope: assertSchemaNotesScope(p.scope),
+    tables: assertSchemaNotesTables(p.tables),
+  };
 }
 
 /**
@@ -353,7 +385,8 @@ export type DecodedEntityPayload =
   | { type: 'query'; data: DecodedQueryPayload }
   | { type: 'authenticatorGroup'; data: DecodedAuthenticatorGroupPayload }
   | { type: 'authenticatorTag'; data: DecodedAuthenticatorTagPayload }
-  | { type: 'authenticatorEntry'; data: DecodedAuthenticatorEntryPayload };
+  | { type: 'authenticatorEntry'; data: DecodedAuthenticatorEntryPayload }
+  | { type: 'schemaNotes'; data: DecodedSchemaNotesPayload };
 
 /**
  * 向前兼容策略（D14）：**忽略未知字段**，只校验已知字段。
@@ -634,6 +667,7 @@ export function decodeEntityPayload(p: unknown): DecodedEntityPayload {
     case 'authenticatorGroup': return { type: 'authenticatorGroup', data: decodeAuthenticatorGroupPayload(p) };
     case 'authenticatorTag': return { type: 'authenticatorTag', data: decodeAuthenticatorTagPayload(p) };
     case 'authenticatorEntry': return { type: 'authenticatorEntry', data: decodeAuthenticatorEntryPayload(p) };
+    case 'schemaNotes': return { type: 'schemaNotes', data: decodeSchemaNotesPayload(p as Record<string, unknown>) };
   }
 }
 

@@ -78,6 +78,7 @@ function setup() {
   const prefix: Record<SyncEntityType, string> = {
     connection: 'c', group: 'g', queryFolder: 'qf', query: 'q',
     authenticatorEntry: 'ae', authenticatorGroup: 'ag', authenticatorTag: 'at',
+    schemaNotes: 'sn',
   };
   const uniqueId = (type: SyncEntityType) => `${prefix[type]}-${++counter}`;
   return { ...auth, entities, mapStore, unresolved, uniqueId };

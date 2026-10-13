@@ -8,6 +8,8 @@
 export const ENTITY_KINDS = [
   'connection', 'group', 'queryFolder', 'query',
   'authenticatorEntry', 'authenticatorGroup', 'authenticatorTag',
+  // S7f：AI 表/列注记（每连接+库一条）。
+  'schemaNotes',
 ] as const;
 
 export type EntityKind = (typeof ENTITY_KINDS)[number];

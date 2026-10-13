@@ -52,6 +52,7 @@ import { AuthenticatorStore } from './authenticator/store';
 import { AuthenticatorView } from './authenticator/authenticatorView';
 import { AuthenticatorChangedEvent } from './authenticator/events';
 import { AuthenticatorSyncBackend } from './authenticator/syncBackend';
+import { SchemaNotesSyncBackend } from './ai/schemaNotesSyncBackend';
 
 /** 自动同步开关（按机器）：默认关闭，仅显式开启后才自动同步。 */
 const SYNC_AUTO_SYNC_KEY = 'devbelt.sync.autoSync';
@@ -208,6 +209,9 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   const syncStatusBar = createSyncStatusBar(context, auth, () => syncFactory.current, isAutoSyncEnabled);
   const authStatusBar = createAuthStatusBar(context, auth);
 
+  // P9 S7f：AI 上下文的连接级存储在同步工厂之前建好（schemaNotes 实体后端与 AI 面板共用同一实例）。
+  const aiContextStore = new AiContextStore(context.globalState);
+
   const syncFactory = new SyncSessionFactory({
     connectionStore: store,
     dekStore: new DekStore(context.secrets),
@@ -240,6 +244,7 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     onSessionState: () => syncStatusBar.refresh(),
     createClient: () => new PersonalSyncClient(auth.client),
     authenticatorBackend: new AuthenticatorSyncBackend(authStore),
+    schemaNotesBackend: new SchemaNotesSyncBackend(aiContextStore),
     // P6 §六：按类型配额拒绝 → 标 localOnly/quota；推送成功 → 清除标记。
     onQuotaRejected: async (ref) => {
       if (ref.type === 'authenticatorEntry') await authStore.markSyncError(ref.localId, 'quota');
@@ -330,7 +335,6 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   // 独立 WebviewPanel（devbelt.ai + aiChat.html），不走 QueryView/DesignView 的 WebviewMode；
   // apiKey 只落 SecretStorage；面板单例由 AiChatView 管理（关闭即释放，在途流 abort）。
   const aiKeyStore = new AiKeyStore(context.secrets);
-  const aiContextStore = new AiContextStore(context.globalState);
   const aiSessions = new AiSessionStore(context.globalState);
   const aiService = new AiService({ keyStore: aiKeyStore, auth, serverUrl, audit: auditLogger });
   const aiSchemaBuilder = new AiSchemaContextBuilder();

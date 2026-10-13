@@ -11,6 +11,7 @@ import type { RecordMapStore, RecordMapEntry } from './recordMapStore.js';
 import { EntityStore, UnresolvedRefStore } from './entityStore.js';
 import type { SyncEntityType, SyncEntityRef } from './syncEntity.js';
 import type { SyncAuthenticatorEntryValue, SyncAuthenticatorGroup, SyncAuthenticatorTag } from './authenticatorTypes.js';
+import type { SyncSchemaNotesValue } from './schemaNotesTypes.js';
 
 /**
  * 远端 record 的本地应用（A3：四类型 + 拓扑序 + 引用解析 + 环检测 + 级联）。
@@ -263,6 +264,7 @@ async function restoreEntity(ref: SyncEntityRef, original: unknown, ctx: ApplyCo
     case 'authenticatorGroup': return ctx.entities.save(ref, original as SyncAuthenticatorGroup, 'sync');
     case 'authenticatorTag': return ctx.entities.save(ref, original as SyncAuthenticatorTag, 'sync');
     case 'authenticatorEntry': return ctx.entities.save(ref, original as SyncAuthenticatorEntryValue, 'sync');
+    case 'schemaNotes': return ctx.entities.save(ref, original as SyncSchemaNotesValue, 'sync');
   }
 }
 
@@ -333,6 +335,16 @@ async function writeEntity(ref: SyncEntityRef, decoded: DecodedEntityPayload, ct
       await ctx.entities.save(ref, buildAuthenticatorEntryFromPayload(decoded.data, ref.localId, groupLocalId, tagLocalIds), 'sync');
       return;
     }
+    case 'schemaNotes': {
+      // connId（recordId）未映射 → 记 unresolved（field 'connId'），实体先以空 connId 落地，
+      // 连接到达后由 reconcileUnresolved 把引用改写为 localId（与 query/queryFolder 同机制）。
+      const connLocalId = resolveLocalId(ctx.mapStore, 'connection', decoded.data.connId);
+      if (decoded.data.connId && connLocalId === undefined) {
+        await ctx.unresolved.add({ targetRecordId: decoded.data.connId, type: ref.type, localId: ref.localId, field: 'connId' });
+      }
+      await ctx.entities.save(ref, buildSchemaNotesFromPayload(decoded.data, ref.localId, connLocalId), 'sync');
+      return;
+    }
   }
 }
 
@@ -372,6 +384,14 @@ function buildQueryFromPayload(p: Extract<DecodedEntityPayload, { type: 'query' 
     database: p.database,
     folderId,
   } as SavedQuery;
+}
+
+function buildSchemaNotesFromPayload(
+  p: Extract<DecodedEntityPayload, { type: 'schemaNotes' }>['data'],
+  id: string,
+  connId: string | undefined,
+): SyncSchemaNotesValue {
+  return { id, connId: connId ?? '', scope: p.scope, tables: p.tables, updateTime: 0 };
 }
 
 function buildAuthenticatorGroupFromPayload(p: Extract<DecodedEntityPayload, { type: 'authenticatorGroup' }>['data'], id: string): SyncAuthenticatorGroup {

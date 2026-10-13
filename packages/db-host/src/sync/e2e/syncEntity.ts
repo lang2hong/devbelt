@@ -9,11 +9,13 @@
 
 export type SyncEntityType =
   | 'connection' | 'group' | 'queryFolder' | 'query'
-  | 'authenticatorEntry' | 'authenticatorGroup' | 'authenticatorTag';
+  | 'authenticatorEntry' | 'authenticatorGroup' | 'authenticatorTag'
+  | 'schemaNotes';
 
 export const SYNC_ENTITY_TYPES: readonly SyncEntityType[] = [
   'connection', 'group', 'queryFolder', 'query',
   'authenticatorEntry', 'authenticatorGroup', 'authenticatorTag',
+  'schemaNotes',
 ];
 
 export interface SyncEntityRef {

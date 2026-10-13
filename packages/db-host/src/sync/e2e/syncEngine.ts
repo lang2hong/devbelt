@@ -652,7 +652,8 @@ export class SyncEngine {
     );
     const payload = JSON.parse(Buffer.from(plaintext).toString('utf8')) as { type?: unknown };
     if (payload.type === 'connection' || payload.type === 'group' || payload.type === 'queryFolder' || payload.type === 'query'
-      || payload.type === 'authenticatorEntry' || payload.type === 'authenticatorGroup' || payload.type === 'authenticatorTag') {
+      || payload.type === 'authenticatorEntry' || payload.type === 'authenticatorGroup' || payload.type === 'authenticatorTag'
+      || payload.type === 'schemaNotes') {
       return payload.type;
     }
     throw new FeedProtocolError('record payload missing valid type');

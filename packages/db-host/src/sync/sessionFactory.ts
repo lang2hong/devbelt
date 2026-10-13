@@ -34,6 +34,8 @@ export interface SyncSessionFactoryDeps {
   readonly createClient: () => PersonalSyncClient;
   /** P6：验证器同步实体后端（S3 由扩展注入）；缺省时验证器类型不可同步。 */
   readonly authenticatorBackend?: EntityBackend;
+  /** S7f：表/列注记实体后端（宿主注入）。 */
+  readonly schemaNotesBackend?: EntityBackend;
   /** P6：推送成功 / 配额拒绝回调（扩展接线标 localOnly/syncError）。 */
   readonly onEntityPushed?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
   readonly onQuotaRejected?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
