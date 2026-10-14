@@ -243,6 +243,14 @@ onMounted(() => {
     } else if (msg.type === 'esTab') {
       if (msg.indexName) indexName.value = msg.indexName;
       tab.value = (msg.tab as EsPanelTab) ?? 'cluster';
+    } else if (msg.type === 'esInjectDsl') {
+      // AI Chat「在面板运行」注入：预填 DSL 编辑器并立即执行。
+      const idx = String(msg.index ?? '');
+      const body = String(msg.body ?? '');
+      if (idx) indexName.value = idx;
+      dslSeed.value = { body, index: indexName.value, at: Date.now() };
+      tab.value = 'dsl';
+      runDsl({ index: indexName.value, body });
     } else if (msg.type === 'esCluster') {
       snapshot.value = msg.snapshot ?? null;
     } else if (msg.type === 'esIndices') {

@@ -8,7 +8,8 @@
 
 export type AiMessageBlock =
   | { type: 'text'; content: string }
-  | { type: 'code'; lang: string; content: string };
+  | { type: 'code'; lang: string; content: string }
+  | { type: 'table'; header: string[]; rows: string[][]; summary?: string };
 
 export type AiInlineSegment = { type: 'text' | 'code'; content: string };
 
@@ -23,7 +24,7 @@ export function parseMessageBlocks(text: string): AiMessageBlock[] {
   const flushText = (): void => {
     const content = trimBlankEdges(textLines).join('\n');
     textLines = [];
-    if (content) blocks.push({ type: 'text', content });
+    if (content) blocks.push(...splitTables(content));
   };
   const flushCode = (): void => {
     if (codeLines && codeLines.length > 0) {
@@ -54,7 +55,25 @@ export function parseMessageBlocks(text: string): AiMessageBlock[] {
   // 未闭合围栏（流式进行中/模型漏写结束围栏）：按代码块呈现，避免整段吞掉。
   if (codeLines !== null) flushCode();
   else flushText();
-  return blocks;
+  return mergeTableSummaries(blocks);
+}
+
+/**
+ * 单行文本块 + 紧邻表格块 → 合并为带 `summary` 的表格块（折叠头即该标题行）。
+ * 多行文本不合并（可能是段落而非标题）；表格前的空行已由 trimBlankEdges 处理。
+ */
+function mergeTableSummaries(blocks: AiMessageBlock[]): AiMessageBlock[] {
+  const out: AiMessageBlock[] = [];
+  for (const block of blocks) {
+    const prev = out[out.length - 1];
+    if (block.type === 'table' && prev && prev.type === 'text' && !prev.content.includes('\n')) {
+      out.pop();
+      out.push({ ...block, summary: prev.content });
+      continue;
+    }
+    out.push(block);
+  }
+  return out;
 }
 
 /** 文本块的行内 `code` 切分（不解析加粗/斜体等；S4 再扩展完整 Markdown）。 */
@@ -78,4 +97,69 @@ function trimBlankEdges(lines: string[]): string[] {
   while (start < end && lines[start].trim() === '') start += 1;
   while (end > start && lines[end - 1].trim() === '') end -= 1;
   return lines.slice(start, end);
+}
+
+/**
+ * 文本块内切出 Markdown 表格（管道行 + 分隔行 `---`；仅识别完整表格，
+ * 流式未闭合的表格按纯文本渲染）。单元格 `\|` 还原为字面管道。
+ */
+function splitTables(content: string): AiMessageBlock[] {
+  const lines = content.split('\n');
+  const out: AiMessageBlock[] = [];
+  let text: string[] = [];
+  const flush = (): void => {
+    const joined = trimBlankEdges(text).join('\n');
+    text = [];
+    if (joined) out.push({ type: 'text', content: joined });
+  };
+  let i = 0;
+  while (i < lines.length) {
+    const table = parseTable(lines, i);
+    if (table) {
+      flush();
+      out.push({ type: 'table', header: table.header, rows: table.rows });
+      i = table.next;
+      continue;
+    }
+    text.push(lines[i]);
+    i += 1;
+  }
+  flush();
+  return out;
+}
+
+function parseTable(lines: string[], start: number): { header: string[]; rows: string[][]; next: number } | null {
+  const headerLine = lines[start];
+  const separatorLine = lines[start + 1];
+  if (headerLine === undefined || separatorLine === undefined) return null;
+  if (!isPipeRow(headerLine) || !isSeparatorRow(separatorLine)) return null;
+  const header = parseRow(headerLine);
+  if (header.length === 0) return null;
+  const rows: string[][] = [];
+  let i = start + 2;
+  while (i < lines.length && isPipeRow(lines[i])) {
+    const cells = parseRow(lines[i]);
+    if (cells.length !== header.length) break;
+    rows.push(cells);
+    i += 1;
+  }
+  return { header, rows, next: i };
+}
+
+function isPipeRow(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.length > 2 && trimmed.startsWith('|') && trimmed.endsWith('|');
+}
+
+function isSeparatorRow(line: string): boolean {
+  if (!isPipeRow(line)) return false;
+  const cells = parseRow(line);
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function parseRow(line: string): string[] {
+  const body = line.trim().slice(1, -1);
+  return body
+    .split(/(?<!\\)\|/)
+    .map((cell) => cell.replace(/\\\|/g, '|').replace(/\\\\/g, '\\').trim());
 }

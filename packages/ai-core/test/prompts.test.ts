@@ -28,6 +28,12 @@ describe('prompts', () => {
     expect(SYSTEM_PROMPT).toContain('```sql');
   });
 
+  it('system prompt 包含最小满足规则（只做用户所求，最多一个回退变体）', () => {
+    expect(SYSTEM_PROMPT).toContain('Answer only what the user asked for');
+    expect(SYSTEM_PROMPT).toContain('at most one alternative variant');
+    expect(SYSTEM_PROMPT).toContain('LIMIT 10');
+  });
+
   it('nl2sql：携带 request / schema / dialect', () => {
     const content = userContent(
       buildNl2SqlMessages({ request: 'top users by spend', schemaText: '# Database: MYSQL', dbType: 'MYSQL' }),
@@ -49,6 +55,7 @@ describe('prompts', () => {
     expect(content).toContain('**意图理解：**');
     expect(content).toContain('Assumptions: none');
     expect(content).toContain('at most 3 bullet points');
+    expect(content).toContain('LIMIT 10');
   });
 
   it('nl2sql：引用表/库 schema 绑定/域上下文/业务规则（仅显式提供时出现）', () => {

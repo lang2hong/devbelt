@@ -3,9 +3,15 @@ import { ref } from 'vue';
 import { useVsCode } from '../../composables/useVsCode';
 import { useI18n } from '../../composables/useI18n';
 
-const props = defineProps<{ code: string; lang?: string }>();
+const props = defineProps<{ code: string; lang?: string; dbType?: string }>();
 const isSql = (): boolean => !props.lang || props.lang === 'sql';
-const canExecute = (): boolean => isSql() || props.lang === 'redis' || props.lang === 'json';
+const engine = (): string => String(props.dbType ?? '').toUpperCase();
+/** 运行按钮仅在与当前连接引擎匹配时显示（sql/无标 → 关系引擎；redis → REDIS；json → ES）。 */
+const canExecute = (): boolean => {
+  if (props.lang === 'redis') return engine() === 'REDIS';
+  if (props.lang === 'json') return engine() === 'ELASTICSEARCH';
+  return engine() === '' || ['MYSQL', 'PG', 'SQLITE'].includes(engine());
+};
 const { post } = useVsCode();
 const { t } = useI18n();
 const copied = ref(false);
@@ -23,8 +29,21 @@ function apply(): void {
   post({ type: 'applyCode', text: props.code });
 }
 
-/** P9 S4/S7b：执行（host 复用现有确认/只读/生产门禁；AI 永不自动执行）。 */
-function execute(): void {
+/** 在引擎面板执行（SQL=结果面板 / Redis=控制台 / ES=DSL tab；确认/只读/生产门禁照旧）。 */
+function runInPanel(): void {
+  if (props.lang === 'redis') {
+    post({ type: 'runRedisInPanel', text: props.code });
+    return;
+  }
+  if (props.lang === 'json') {
+    post({ type: 'runEsDslInPanel', text: props.code });
+    return;
+  }
+  post({ type: 'executeSql', text: props.code });
+}
+
+/** 在对话中执行（结果回帖到消息流；AI 永不自动执行）。 */
+function runInChat(): void {
   if (props.lang === 'redis') {
     post({ type: 'runRedis', text: props.code });
     return;
@@ -33,7 +52,7 @@ function execute(): void {
     post({ type: 'runEsDsl', text: props.code });
     return;
   }
-  post({ type: 'executeSql', text: props.code });
+  post({ type: 'executeSqlInChat', text: props.code });
 }
 </script>
 
@@ -44,7 +63,8 @@ function execute(): void {
       <div class="ai-code-actions">
         <button class="ai-btn ai-code-copy" @click="copy">{{ copied ? t('wv.ai.copied') : t('wv.ai.copy') }}</button>
         <button v-if="isSql()" class="ai-btn" @click="apply">{{ t('wv.ai.insert') }}</button>
-        <button v-if="canExecute()" class="ai-btn" @click="execute">{{ t('wv.ai.execute') }}</button>
+        <button v-if="canExecute()" class="ai-btn" @click="runInPanel">{{ t('wv.ai.runPanel') }}</button>
+        <button v-if="canExecute()" class="ai-btn" @click="runInChat">{{ t('wv.ai.runChat') }}</button>
       </div>
     </div>
     <pre class="ai-code-body"><code>{{ code }}</code></pre>

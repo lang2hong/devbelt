@@ -23,6 +23,12 @@ import { buildRedisContext } from '../ai/redisContext.js';
 import { buildEsContext } from '../ai/esContext.js';
 import { defaultConfirm, executeRedisCommands } from '../ai/redisExec.js';
 import { executeEsDsl } from '../ai/esExec.js';
+import { formatSqlChatResult } from '../ai/sqlChatResult.js';
+import { ensureSelectRowLimit, AI_SELECT_ROW_LIMIT } from '../ai/rowLimit.js';
+import { dialectScanOptions } from '../utils/sqlDialectOptions.js';
+import { splitSqlStatements } from '../utils/sql.js';
+import { RedisView } from './redisView.js';
+import { ElasticsearchView } from './elasticsearchView.js';
 import type { ConnectionManager } from '../connection/connectionManager.js';
 import type { SqlConnectionSession } from '../connection/connectionSession.js';
 import type { ConnectionStore } from '@devbelt/db-host/connection/connectionStore';
@@ -161,6 +167,10 @@ export class AiChatView extends BaseWebView {
         this.selectedScope = this.selectedConnId
           ? this.deps.contextStore.getLastScope(this.selectedConnId)?.value
           : undefined;
+        const conn = this.selectedConnection();
+        if (conn && !this.deps.manager.peek(conn.id)) {
+          await vscode.commands.executeCommand('devbelt.openConnection', conn).then(undefined, () => {});
+        }
         this.pushSessionList();
         await this.pushContext();
         return;
@@ -215,12 +225,24 @@ export class AiChatView extends BaseWebView {
         if (typeof msg.text === 'string' && msg.text.trim()) await this.executeAiSql(msg.text);
         return;
       }
+      case 'executeSqlInChat': {
+        if (typeof msg.text === 'string' && msg.text.trim()) await this.executeSqlInChat(msg.text);
+        return;
+      }
       case 'runRedis': {
         if (typeof msg.text === 'string' && msg.text.trim()) await this.runRedisCommands(msg.text);
         return;
       }
+      case 'runRedisInPanel': {
+        if (typeof msg.text === 'string' && msg.text.trim()) this.runRedisInPanel(msg.text);
+        return;
+      }
       case 'runEsDsl': {
         if (typeof msg.text === 'string' && msg.text.trim()) await this.runEsDsl(msg.text);
+        return;
+      }
+      case 'runEsDslInPanel': {
+        if (typeof msg.text === 'string' && msg.text.trim()) this.runEsDslInPanel(msg.text);
         return;
       }
       case 'requestContextDetail':
@@ -406,8 +428,65 @@ export class AiChatView extends BaseWebView {
       void vscode.window.showInformationMessage(l10n('ai.execute.noConnection'));
       return;
     }
-    AiSqlRegistry.tryGet()?.mark(text);
-    await this.deps.executor.run(conn, text, this.selectedScope ?? conn.database, 'reuse');
+    const sql = ensureSelectRowLimit(text, this.deps.manager.scanOptionsFor?.(conn) ?? dialectScanOptions(conn.dbType));
+    AiSqlRegistry.tryGet()?.mark(sql);
+    await this.deps.executor.run(
+      conn,
+      sql,
+      this.selectedScope ?? conn.database,
+      'reuse',
+      this.panel.viewColumn ?? vscode.ViewColumn.Active,
+    );
+  }
+
+  /** S7i：在对话中执行 SQL 代码块（无面板；结果以 Markdown 表格回帖）。 */
+  private async executeSqlInChat(text: string): Promise<void> {
+    const conn = this.selectedConnection();
+    if (!conn) {
+      void vscode.window.showInformationMessage(l10n('ai.execute.noConnection'));
+      return;
+    }
+    const sql = ensureSelectRowLimit(text, this.deps.manager.scanOptionsFor?.(conn) ?? dialectScanOptions(conn.dbType));
+    AiSqlRegistry.tryGet()?.mark(sql);
+    const outcome = await this.deps.executor.runHeadless(conn, sql, this.selectedScope ?? conn.database);
+    if (outcome.canceled) return;
+    const formatted = formatSqlChatResult(outcome);
+    if (!formatted.isError) {
+      if (sql !== text) {
+        formatted.title = `${formatted.title} ${l10n('ai.sql.limitNote', { n: AI_SELECT_ROW_LIMIT })}`;
+      }
+      if (splitSqlStatements(sql, this.deps.manager.scanOptionsFor?.(conn) ?? dialectScanOptions(conn.dbType)).length > 1) {
+        formatted.title = `${formatted.title} ${l10n('ai.sql.multiStmtNote')}`;
+      }
+    }
+    this.post({ type: 'toolResult', ...formatted } as never);
+  }
+
+  /** S7i：在 Redis 控制台面板执行代码块（注入执行；确认/只读/审计门禁照旧）。 */
+  private runRedisInPanel(text: string): void {
+    const conn = this.selectedConnection();
+    if (!conn || conn.dbType !== DatabaseType.REDIS) {
+      void vscode.window.showInformationMessage(l10n('ai.redis.notRedis'));
+      return;
+    }
+    const db = Number(this.selectedScope ?? conn.redisDb ?? 0) || 0;
+    const view = RedisView.open(conn, this.deps.manager, 'console', db);
+    view.runConsoleLines(text.split(/\r?\n/));
+  }
+
+  /** S7i：在 ES DSL 面板执行代码块（注入 index/body 并执行）。 */
+  private runEsDslInPanel(text: string): void {
+    const conn = this.selectedConnection();
+    if (!conn || conn.dbType !== DatabaseType.ELASTICSEARCH) {
+      void vscode.window.showInformationMessage(l10n('ai.es.notEs'));
+      return;
+    }
+    if (!this.selectedScope) {
+      void vscode.window.showInformationMessage(l10n('ai.es.noIndex'));
+      return;
+    }
+    const view = ElasticsearchView.open(conn, this.deps.manager, 'dsl', this.selectedScope);
+    view.injectDsl(this.selectedScope, text);
   }
 
   /** S7b：执行 Redis 代码块（host 侧确认/只读/审计门禁；执行结果回帖为 toolResult）。 */
@@ -424,7 +503,7 @@ export class AiChatView extends BaseWebView {
     }
     const db = Number(this.selectedScope ?? session.db ?? conn.redisDb ?? 0) || 0;
     const result = await executeRedisCommands(conn, session, text.split(/\r?\n/), db, { confirm: defaultConfirm });
-    this.post({ type: 'toolResult', title: result.title, content: result.content, isError: result.isError } as never);
+    this.post({ type: 'toolResult', title: result.title, content: result.content, isError: result.isError, lang: 'redis-result' } as never);
   }
 
   /** S7c：执行 ES DSL 代码块（固定 POST /<index>/_search 只读路径；结果摘要回帖）。 */
@@ -444,19 +523,25 @@ export class AiChatView extends BaseWebView {
       return;
     }
     const result = await executeEsDsl(session, this.selectedScope, text);
-    this.post({ type: 'toolResult', title: result.title, content: result.content, isError: result.isError } as never);
+    this.post({ type: 'toolResult', title: result.title, content: result.content, isError: result.isError, lang: 'es-result' } as never);
   }
 
   /** Context 抽屉明细：schema 文本 + 域上下文/默认指令原文（只读展示）。 */
   private async pushContextDetail(): Promise<void> {
     // 快照只含"实际注入的表 + 统计"：schema 原文/术语/规则原文均不再下发（排障走 Diagnostics，
     // 术语/规则配置走命令面板）。
-    const { state, tables } = await this.buildContext();
-    this.post({
-      type: 'contextDetail',
-      context: state,
-      ...(tables ? { tables } : {}),
-    } as never);
+    try {
+      const { state, tables } = await this.buildContext();
+      this.post({
+        type: 'contextDetail',
+        context: state,
+        ...(tables ? { tables } : {}),
+      } as never);
+    } catch (err) {
+      // 失败也要回发，让 webview 的懒加载 pending 标志复位（否则永久卡在"加载中"）。
+      this.post({ type: 'contextDetail', context: null, error: true } as never);
+      void err;
+    }
   }
 
   private abortStream(): void {

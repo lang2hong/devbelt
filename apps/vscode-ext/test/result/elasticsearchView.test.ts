@@ -89,6 +89,21 @@ describe('ElasticsearchView（P8 S2）', () => {
     expect(sent.find((m) => m.type === 'esCluster')?.snapshot).toMatchObject({ version: '8.13.0', clusterName: 'c1' });
   });
 
+  it('injectDsl：未就绪缓存、两次 ready 后补发 esInjectDsl；已就绪立即发', async () => {
+    const { view } = makeView();
+    view.injectDsl('orders', '{"query":{"match_all":{}}}');
+    expect(posts(view)).toEqual([]);
+    await view.handleMessage({ type: 'ready' });
+    await view.handleMessage({ type: 'ready' });
+    const inject = posts(view).find((m: any) => m.type === 'esInjectDsl');
+    expect(inject).toEqual({ type: 'esInjectDsl', index: 'orders', body: '{"query":{"match_all":{}}}' });
+
+    await mount(view);
+    view.injectDsl('logs-2026', '{"size":1}');
+    expect((view as any).tab).toBe('dsl');
+    expect(posts(view)).toEqual([{ type: 'esInjectDsl', index: 'logs-2026', body: '{"size":1}' }]);
+  });
+
   it('GET 成功：直接回 esRestResult，不落审计', async () => {
     const { view, requests } = makeView();
     await mount(view);

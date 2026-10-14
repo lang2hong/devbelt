@@ -141,6 +141,7 @@ function apply(): void {
   flex-direction: column;
 }
 .ai-scope-item {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 6px;

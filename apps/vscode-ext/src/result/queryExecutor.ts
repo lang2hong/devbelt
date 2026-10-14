@@ -1,6 +1,8 @@
+import * as vscode from 'vscode';
 import { ConnectionManager } from '../connection/connectionManager';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { TableQueryView } from './tableQueryView';
+import { QueryRunner } from './queryRunner';
 import { HistoryStore } from '../history/historyStore';
 import type { AuditLogger } from '../utils/auditLogger';
 import { QueryExecutedEvent, DataChangeEvent, eventBus } from '@devbelt/db-host/utils/event';
@@ -36,6 +38,7 @@ export class QueryExecutor {
     sql: string,
     database?: string,
     mode: QueryExecutionMode = 'reuse',
+    viewColumn?: vscode.ViewColumn,
   ): Promise<void> {
     const start = Date.now();
     // 含明文口令的语句绝不落历史/审计（与 QueryHistoryRecorder 共用同一判定）。
@@ -83,7 +86,69 @@ export class QueryExecutor {
         }
         void eventBus.publish(new QueryExecutedEvent(conn.id, sql, costTime, 0, error.message));
       }
-    }, mode);
+    }, mode, undefined, viewColumn);
+  }
+
+  /**
+   * 无面板执行（AI Chat「在对话中运行」）：复用 QueryRunner 的确认/只读/生产门禁
+   * 与拆分执行语义，但不创建结果面板；历史/审计/DDL 事件与 `run` 同口径。
+   */
+  async runHeadless(
+    conn: SavedConnection,
+    sql: string,
+    database?: string,
+  ): Promise<{ result?: any; error?: Error; canceled?: boolean; costTime: number }> {
+    const start = Date.now();
+    const secret = containsSecretSql(sql);
+    let called = false;
+    let captured: { result?: any; error?: Error } = {};
+    const runner = new QueryRunner(conn, this.manager, undefined, database, () => {});
+    await runner.execute(sql, (result, error) => {
+      called = true;
+      captured = { ...(result !== undefined ? { result } : {}), ...(error ? { error } : {}) };
+    });
+    const costTime = Date.now() - start;
+    if (!called) {
+      // 确认门禁未通过（用户取消）：无结果、无历史/审计。
+      return { canceled: true, costTime };
+    }
+    if (captured.result) {
+      const rowCount = captured.result.rows?.length ?? 0;
+      if (!secret) {
+        await this.history?.add({
+          sql,
+          connection: conn.name || conn.host,
+          connectionId: conn.id,
+          database,
+          costTime,
+          rowCount,
+        });
+        this.audit?.log({
+          action: 'query_execute',
+          connName: conn.name || conn.host,
+          database,
+          sql: sql.length > AUDIT_SQL_MAX ? `${sql.slice(0, AUDIT_SQL_MAX)}…` : sql,
+          rowCount,
+          costTime,
+        });
+      }
+      if (classifyWriteKind(sql, this.manager.scanOptionsFor?.(conn) ?? dialectScanOptions(conn.dbType)) === 'ddl') {
+        void eventBus.publish(new DataChangeEvent(conn.id, database ?? '', '', 'ddl'));
+      }
+      void eventBus.publish(new QueryExecutedEvent(conn.id, sql, costTime, rowCount));
+    } else if (captured.error) {
+      if (!secret) {
+        await this.history?.add({
+          sql,
+          connection: conn.name || conn.host,
+          connectionId: conn.id,
+          database,
+          costTime,
+        });
+      }
+      void eventBus.publish(new QueryExecutedEvent(conn.id, sql, costTime, 0, captured.error.message));
+    }
+    return { ...captured, costTime };
   }
 
   /**

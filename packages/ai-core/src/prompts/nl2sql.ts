@@ -70,7 +70,7 @@ export function buildNl2SqlMessages(input: Nl2SqlInput): ChatMessage[] {
       ENUM_MAPPING,
       'Output format (strict order):\n' +
         '1. A single line starting with "**意图理解：**" (intent paraphrase: restate the metric scope, filters and key assumptions in one plain-language sentence, same language as the user);\n' +
-        '2. The SQL in a ```sql code block (keep the block clean);\n' +
+        '2. The SQL in a ```sql code block (keep the block clean; append `LIMIT 10` to SELECTs unless the user asks for all rows or a specific count);\n' +
         '3. An optional "Assumptions:" section with at most 3 bullet points (which ambiguous words you mapped, the basis, remaining uncertainty). If there are no assumptions, output "Assumptions: none".\n' +
         'If the schema is missing something needed, say so in the Assumptions section instead of guessing.',
     ]),

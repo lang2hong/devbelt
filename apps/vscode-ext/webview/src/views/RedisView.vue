@@ -51,6 +51,17 @@ function confirmDelete(): void {
   if (keys?.length) post({ type: 'deleteKeys', keys });
 }
 function run(line: string): void { post({ type: 'runCommand', id: nextId(), line }); }
+
+/** 注入队列：逐条串行，危险命令确认完再继续下一条（避免单确认槽相互挤占）。 */
+const injectQueue: string[] = [];
+let injectBusy = false;
+function drainInject(): void {
+  if (injectBusy) return;
+  const line = injectQueue.shift();
+  if (!line) return;
+  injectBusy = true;
+  run(line);
+}
 /** Stream/破坏性操作：记住原始 op，确认后带 confirmed 重发。 */
 function postOp(msg: any): void { lastOp = msg; post(msg); }
 function streamOps(): Record<string, (...a: any[]) => void> {
@@ -85,6 +96,11 @@ function confirmOp(accept: boolean): void {
 function confirmDanger(id: string, accept: boolean): void {
   pendingConfirm.value = null;
   post({ type: 'confirmDanger', id, accept });
+  if (!accept) {
+    // 取消当前危险命令 → 继续下一条注入。
+    injectBusy = false;
+    drainInject();
+  }
 }
 
 /** 快捷键：Enter/Esc 走确认模态（键新建已移至 explorer 树）。 */
@@ -132,6 +148,8 @@ onMounted(() => {
       entries.value = msg.entries ?? [];
     } else if (msg.type === 'commandResult') {
       results.value = [...results.value, msg as CommandResult].slice(-100);
+      injectBusy = false;
+      drainInject();
     } else if (msg.type === 'confirmRequired') {
       pendingConfirm.value = { id: msg.id, command: msg.command };
     } else if (msg.type === 'streamGroupDetail') {
@@ -155,6 +173,10 @@ onMounted(() => {
       connectionEvents.value = [...connectionEvents.value, { event: String(msg.event ?? ''), detail: msg.detail ?? null, at: Number(msg.at ?? Date.now()) }].slice(-100);
     } else if (msg.type === 'confirmOpRequired') {
       pendingOpDetail.value = String(msg.detail ?? '');
+    } else if (msg.type === 'cliInject') {
+      // AI Chat「在面板运行」注入：入队后逐条串行执行（确认/只读门禁照旧；危险命令确认后继续下一条）。
+      injectQueue.push(...(Array.isArray(msg.lines) ? msg.lines : []).map(String).filter((l) => l.length > 0));
+      drainInject();
     } else if (msg.type === 'error') {
       banner.value = String(msg.message ?? '');
     }

@@ -148,6 +148,10 @@ export interface AiToolResultDown {
   title: string;
   content: string;
   isError?: boolean;
+  /** 回帖渲染：缺省 = 围栏代码块（`lang` 缺省为空）；markdown = 直接拼 Markdown 文本（如 SQL 结果表格）。 */
+  format?: 'text' | 'markdown';
+  /** 围栏语言标记（redis-result / es-result 等）；仅 format=text 时有意义。 */
+  lang?: string;
 }
 
 export type AiDownMessage =
@@ -253,6 +257,9 @@ export type AiUpMessage =
   | { type: 'copyCode'; text: string }
   | { type: 'applyCode'; text: string }
   | { type: 'executeSql'; text: string }
+  | { type: 'executeSqlInChat'; text: string }
+  | { type: 'runRedisInPanel'; text: string }
+  | { type: 'runEsDslInPanel'; text: string }
   | { type: 'requestContextDetail' };
 
 /** 会话消息类型在协议层再导出，webview 侧从 ai-protocol 单点取。 */

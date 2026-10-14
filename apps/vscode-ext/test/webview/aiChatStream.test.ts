@@ -41,6 +41,43 @@ describe('parseMessageBlocks（围栏代码块 + 文本）', () => {
   });
 });
 
+describe('parseMessageBlocks（Markdown 表格）', () => {
+  it('完整表格 → table 块（单元格去空白、\\| 还原、空单元格保留；单行标题合并为 summary）', () => {
+    const text = '结果：\n| id | name |\n| --- | --- |\n| 1 | a\\|b |\n| 2 |  |\n完';
+    expect(parseMessageBlocks(text)).toEqual([
+      { type: 'table', summary: '结果：', header: ['id', 'name'], rows: [['1', 'a|b'], ['2', '']] },
+      { type: 'text', content: '完' },
+    ]);
+  });
+
+  it('无标题表格：summary 缺省；多行文本不与表格合并', () => {
+    expect(parseMessageBlocks('| a |\n| --- |\n| 1 |')).toEqual([
+      { type: 'table', header: ['a'], rows: [['1']] },
+    ]);
+    const blocks = parseMessageBlocks('第一行\n第二行\n| a |\n| --- |\n| 1 |');
+    expect(blocks[0]).toEqual({ type: 'text', content: '第一行\n第二行' });
+    expect(blocks[1]).toMatchObject({ type: 'table' });
+    expect((blocks[1] as { summary?: string }).summary).toBeUndefined();
+  });
+
+  it('缺分隔行 → 不是表格（流式未闭合按文本）', () => {
+    expect(parseMessageBlocks('| a | b |\n| c | d |')).toEqual([{ type: 'text', content: '| a | b |\n| c | d |' }]);
+    expect(parseMessageBlocks('| a | b |')).toEqual([{ type: 'text', content: '| a | b |' }]);
+  });
+
+  it('非管道分隔行（纯横线/非管道）不误判为表格', () => {
+    expect(parseMessageBlocks('| a | b |\n-----\n| 1 | 2 |')).toEqual([
+      { type: 'text', content: '| a | b |\n-----\n| 1 | 2 |' },
+    ]);
+    expect(parseMessageBlocks('| a |\nx---x\n| 1 |')).toEqual([{ type: 'text', content: '| a |\nx---x\n| 1 |' }]);
+  });
+
+  it('代码块内的管道行不解析为表格', () => {
+    const blocks = parseMessageBlocks('```\n| a | b |\n| --- | --- |\n| 1 | 2 |\n```');
+    expect(blocks).toEqual([{ type: 'code', lang: '', content: '| a | b |\n| --- | --- |\n| 1 | 2 |' }]);
+  });
+});
+
 describe('parseInlineSegments（行内 code）', () => {
   it('无行内 code → 单个文本段', () => {
     expect(parseInlineSegments('普通文本')).toEqual([{ type: 'text', content: '普通文本' }]);

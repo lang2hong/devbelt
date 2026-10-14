@@ -6,6 +6,8 @@ import { useI18n } from '../../composables/useI18n';
 const props = defineProps<{
   messages: Array<{ role: 'user' | 'assistant'; content: string; error?: boolean }>;
   streaming: { content: string } | null;
+  /** 当前连接引擎（用于代码块按引擎决定是否显示运行按钮）。 */
+  dbType?: string;
 }>();
 
 const { t } = useI18n();
@@ -24,10 +26,11 @@ watch(
 <template>
   <div ref="scroller" class="ai-messages">
     <p v-if="messages.length === 0 && !streaming" class="ai-empty">{{ t('wv.ai.empty') }}</p>
-    <MessageBubble v-for="(message, index) in messages" :key="index" :message="message" />
+    <MessageBubble v-for="(message, index) in messages" :key="index" :message="message" :db-type="props.dbType" />
     <MessageBubble
       v-if="streaming"
       :message="{ role: 'assistant', content: streaming.content }"
+      :db-type="props.dbType"
       streaming
     />
   </div>

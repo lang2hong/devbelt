@@ -80,6 +80,8 @@ export class RedisView extends BaseWebView {
   private webviewReady = false;
   /** ready 前要推送的 value 消息（单槽，保留最新）。 */
   private pendingValueMsg: unknown | null = null;
+  /** ready 前缓存的「外部注入控制台命令」（如 AI Chat 面板运行）。 */
+  private pendingConsoleLines: string[] = [];
   /** H5：当前键名解码含替换符（非 UTF-8）→ 只读。 */
   private keyBinary = false;
   /** H5：当前值里解码含替换符的字段/成员/元素 → 这些项只读（防有损回写）。 */
@@ -141,6 +143,17 @@ export class RedisView extends BaseWebView {
     return RedisView.instances.get(`${connId}:${panel}`);
   }
 
+  /** S7i：外部（AI Chat「在面板运行」）注入控制台命令；webview 未就绪时缓存、就绪后补发。 */
+  runConsoleLines(lines: string[]): void {
+    const cleaned = lines.map((line) => line.trim()).filter((line) => line.length > 0);
+    if (cleaned.length === 0) return;
+    if (this.webviewReady) {
+      this.post({ type: 'cliInject', lines: cleaned } as never);
+      return;
+    }
+    this.pendingConsoleLines.push(...cleaned);
+  }
+
   /** 关闭所有面板（测试隔离/扩展停用）。 */
   static closeAll(): void {
     for (const view of [...RedisView.instances.values()]) view.dispose();
@@ -160,6 +173,10 @@ export class RedisView extends BaseWebView {
       await this.onReady();
       // 补发 ready 前缓存的 value（reload 时值消息可能早于 handler 挂载）。
       if (this.pendingValueMsg) { const p = this.pendingValueMsg; this.pendingValueMsg = null; this.post(p as never); }
+      if (this.pendingConsoleLines.length > 0) {
+        const lines = this.pendingConsoleLines.splice(0);
+        this.post({ type: 'cliInject', lines } as never);
+      }
       return;
     }
     if (msg.type === 'refreshInfo') { await this.pushInfo(); return; }

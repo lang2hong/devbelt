@@ -70,6 +70,28 @@ async function mount(view: any, sent: unknown[] = []): Promise<void> {
   sent.length = 0;
 }
 
+describe('runConsoleLines（AI「在面板运行」注入）', () => {
+  it('未就绪：缓存行，第二次 ready 后补发 cliInject（空行过滤/trim）', async () => {
+    const { view } = makeView();
+    view.runConsoleLines(['  GET k ', '', 'SET a b']);
+    expect(posts(view)).toEqual([]);
+    await view.handleMessage({ type: 'ready' });
+    await view.handleMessage({ type: 'ready' });
+    const inject = posts(view).find((m: any) => m.type === 'cliInject');
+    expect(inject?.lines).toEqual(['GET k', 'SET a b']);
+  });
+
+  it('已就绪：立即 post；全空白不发送', async () => {
+    const { view } = makeView();
+    await mount(view);
+    view.runConsoleLines(['PING']);
+    expect(posts(view)).toEqual([{ type: 'cliInject', lines: ['PING'] }]);
+    (view.post as any).mockClear();
+    view.runConsoleLines([' ', '']);
+    expect(posts(view)).toEqual([]);
+  });
+});
+
 describe('parseSlowlog', () => {
   it('归一化 SLOWLOG GET 回复', () => {
     const raw = [[1, 1700000000, 1500, ['SET', 'k', 'v'], '127.0.0.1:5555', 'app']];

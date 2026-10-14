@@ -52,12 +52,19 @@ const includeColumnComments = ref(true);
  * 侧栏折叠视图组（VSCode 侧栏风格：上下堆叠、各自 ▸/▾，可同时展开）：
  * 注入的表（点表名打开说明弹层）/ 会话记录。
  */
-const sidebarOpen = reactive({ context: false, sessions: false });
+const sidebarOpen = reactive({ context: false, sessions: true });
 function toggleSection(key: keyof typeof sidebarOpen): void {
   sidebarOpen[key] = !sidebarOpen[key];
+  if (key === 'context' && sidebarOpen.context) requestContextDetailIfNeeded();
 }
 /** P9 S4/S7g：「实际注入的表」清单（只读快照；点表名进编辑器）。 */
 const contextDetail = ref<ContextDetailState | null>(null);
+let contextDetailPending = false;
+function requestContextDetailIfNeeded(): void {
+  if (contextDetailPending || contextDetail.value) return;
+  contextDetailPending = true;
+  post({ type: 'requestContextDetail' });
+}
 /** 方案 A：注入范围弹层（选择表能力收敛为弹层，不占侧栏视图）。 */
 const showScopeDialog = ref(false);
 const tableOptions = ref<string[]>([]);
@@ -123,10 +130,22 @@ onMounted(() => {
       case 'quotaUpdate':
         quota.value = msg.quota ?? null;
         break;
-      case 'contextChanged':
+      case 'contextChanged': {
+        const nextConnId = String(msg.context?.connId ?? '');
+        const prevConnId = String(context.value?.connId ?? '');
         context.value = msg.context ?? null;
+        if (nextConnId !== prevConnId) {
+          contextDetail.value = null;
+          contextDetailPending = false;
+        }
         break;
+      }
       case 'contextDetail':
+        contextDetailPending = false;
+        if (msg.error) {
+          contextDetail.value = null;
+          break;
+        }
         contextDetail.value = {
           commentCount: Number(msg.context?.commentCount ?? 0),
           tableCount: Number(msg.context?.tableCount ?? 0),
@@ -168,13 +187,18 @@ onMounted(() => {
         }
         break;
       }
-      case 'toolResult':
-        messages.value.push({
-          role: 'assistant',
-          content: `${String(msg.title ?? '')}\n\n\`\`\`\n${String(msg.content ?? '')}\n\`\`\``,
-          error: !!msg.isError,
-        });
+      case 'toolResult': {
+        const title = String(msg.title ?? '');
+        const body = String(msg.content ?? '');
+        const content =
+          msg.format === 'markdown'
+            ? body
+              ? `${title}\n\n${body}`
+              : title
+            : `${title}\n\n\`\`\`${typeof msg.lang === 'string' ? msg.lang : ''}\n${body}\n\`\`\``;
+        messages.value.push({ role: 'assistant', content, error: !!msg.isError });
         break;
+      }
       default:
         break;
     }
@@ -230,6 +254,13 @@ const scopeLabel = computed(() => {
   return count > 0 ? t('wv.ai.tables.scopeCustom', { n: count }) : t('wv.ai.tables.scopeAuto');
 });
 
+/** 「实际注入的表」仅对关系引擎有意义（Redis/ES 的上下文不是表；连接未定时默认显示）。 */
+const RELATIONAL_DB_TYPES = new Set(['MYSQL', 'PG', 'SQLITE']);
+const showTablesSection = computed(() => {
+  const dbType = String(context.value?.dbType ?? '').toUpperCase();
+  return dbType === '' || RELATIONAL_DB_TYPES.has(dbType);
+});
+
 function openScopeDialog(): void {
   showScopeDialog.value = true;
   tableOptions.value = [];
@@ -267,6 +298,7 @@ function fetchColumnSample(column: string): void {
 function openContextDetail(): void {
   sidebarOpen.context = true;
   contextDetail.value = null;
+  contextDetailPending = true;
   post({ type: 'requestContextDetail' });
 }
 </script>
@@ -296,7 +328,7 @@ function openContextDetail(): void {
     </div>
     <div class="ai-body">
       <div class="ai-side">
-        <div class="ai-side-section">
+        <div v-if="showTablesSection" class="ai-side-section">
           <button class="ai-side-head" @click="toggleSection('context')">
             <span class="ai-side-chevron">{{ sidebarOpen.context ? '▾' : '▸' }}</span>
             <span>{{ t('wv.ai.context.tablesTitle') }}</span>
@@ -328,7 +360,7 @@ function openContextDetail(): void {
         </div>
       </div>
       <div class="ai-main">
-        <MessageList :messages="messages" :streaming="streaming" />
+        <MessageList :messages="messages" :streaming="streaming" :db-type="context?.dbType" />
         <ChatInput v-model="input" :generating="generating" @send="send" />
       </div>
     </div>

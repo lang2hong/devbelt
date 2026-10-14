@@ -50,6 +50,8 @@ export class ElasticsearchView extends BaseWebView {
   private indexName: string | null;
   /** 「两次 ready」后的 webview 已挂载（此前不发 config/数据）。 */
   private webviewReady = false;
+  /** ready 前缓存的「外部注入 DSL 执行」（如 AI Chat 面板运行）。 */
+  private pendingDslInject: { type: 'esInjectDsl'; index: string; body: string } | null = null;
   private pending?: PendingConfirm;
   /** 在途 REST 请求（每请求独立；dispose 时统一 abort，请求之间互不取消）。 */
   private readonly inflight = new Set<AbortController>();
@@ -91,6 +93,18 @@ export class ElasticsearchView extends BaseWebView {
     return view;
   }
 
+  /** S7i：外部（AI Chat「在面板运行」）注入 DSL 并执行；webview 未就绪时缓存、就绪后补发。 */
+  injectDsl(index: string, body: string): void {
+    this.tab = 'dsl';
+    this.indexName = index;
+    const payload = { type: 'esInjectDsl' as const, index, body };
+    if (this.webviewReady) {
+      this.post(payload as never);
+      return;
+    }
+    this.pendingDslInject = payload;
+  }
+
   static find(connId: string): ElasticsearchView | undefined {
     return ElasticsearchView.instances.get(connId);
   }
@@ -111,6 +125,11 @@ export class ElasticsearchView extends BaseWebView {
       this.webviewReady = true;
       await this.pushConfig();
       await this.pushCluster();
+      if (this.pendingDslInject) {
+        const pending = this.pendingDslInject;
+        this.pendingDslInject = null;
+        this.post(pending as never);
+      }
       return;
     }
     if (msg?.type === 'esRefreshCluster') { await this.pushCluster(); return; }

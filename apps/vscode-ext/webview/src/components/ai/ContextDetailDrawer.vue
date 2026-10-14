@@ -68,6 +68,7 @@ const { t } = useI18n();
   padding: 4px 6px;
 }
 .ai-ctx-item {
+  flex: 0 0 auto;
   display: block;
   width: 100%;
   text-align: left;
