@@ -337,6 +337,7 @@ export class AuthService {
     await this.secrets.store(AuthService.ACCESS_TOKEN_KEY, result.accessToken);
     await this.secrets.store(AuthService.REFRESH_TOKEN_KEY, result.refreshToken);
     await this.secrets.store(AuthService.USER_EMAIL_KEY, email);
+    void this.refreshEntitlement();
     void eventBus.publish(new AuthEvent('login'));
   }
 }

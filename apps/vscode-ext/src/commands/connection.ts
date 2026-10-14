@@ -65,9 +65,14 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     const cap = connectionCap();
     return cap > 0 && activeConnectionCount() >= cap;
   };
+  const atConnectionCapRefreshed = async () => {
+    if (!atConnectionCap()) return false;
+    await auth.refreshEntitlement();
+    return atConnectionCap();
+  };
 
-  sub('devbelt.addConnection', (node?: DbTreeNode) => {
-    if (atConnectionCap()) {
+  sub('devbelt.addConnection', async (node?: DbTreeNode) => {
+    if (await atConnectionCapRefreshed()) {
       void vscode.window.showWarningMessage(l10n('conn.capReached', { count: connectionCap() }));
       return;
     }
@@ -98,9 +103,9 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     }, undefined, node.conn, (c) => manager.effectiveConnection(c));
   });
 
-  sub('devbelt.cloneConnection', (node: DbTreeNode) => {
+  sub('devbelt.cloneConnection', async (node: DbTreeNode) => {
     if (!node?.conn) return;
-    if (atConnectionCap()) {
+    if (await atConnectionCapRefreshed()) {
       void vscode.window.showWarningMessage(l10n('conn.capReached', { count: connectionCap() }));
       return;
     }
@@ -279,6 +284,9 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
 
   sub('devbelt.importConnections', async () => {
     if (!canImportConnections(auth.getCachedEntitlement())) {
+      await auth.refreshEntitlement();
+    }
+    if (!canImportConnections(auth.getCachedEntitlement())) {
       void vscode.window.showWarningMessage(l10n('conn.importUpgrade'));
       return;
     }
@@ -311,6 +319,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
       }
     }
     // 导入同样受「本机保存连接数」门禁：add/clone 都校验，导入不校验即可无限落库。
+    if (atConnectionCap()) await auth.refreshEntitlement();
     const cap = connectionCap();
     const usedIds = new Set(store.list().map((c) => c.id));
     let created = 0;
