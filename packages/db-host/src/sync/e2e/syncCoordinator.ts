@@ -1,6 +1,6 @@
 import type { Disposable } from '../../utils/event.js';
 import type { ConnectionStore } from '../../connection/connectionStore.js';
-import type { SyncEngine, SyncRunResult } from './syncEngine.js';
+import type { SyncEngine, SyncRunResult, LocalRepairResult, FindingsReport } from './syncEngine.js';
 import type { SyncMutator } from './syncMutator.js';
 
 /**
@@ -140,6 +140,29 @@ export class SyncCoordinator {
     return this.runPhase('push', true);
   }
 
+  /** 本地缺失计数（同步内存读；测试替身缺该能力时按 0 处理）。 */
+  private countLocalMissing(): number {
+    try {
+      return this.engine.inspectLocalIntegrity().missingTotal;
+    } catch {
+      return 0;
+    }
+  }
+
+  /** 体检检测（只读，零写入）：逐条列出本地与云端的不一致。经串行链执行，避免与同步并发读写映射。 */
+  async findingsNow(): Promise<FindingsReport> {
+    const run = this.chain.then(() => this.engine.inspectFindings());
+    this.chain = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  /** 修复用户选择的不一致项（缺省全部）。经串行链执行。 */
+  async repairFindingsNow(ids?: string[]): Promise<LocalRepairResult> {
+    const run = this.chain.then(() => this.engine.repairFindings(ids));
+    this.chain = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
   /** 分相执行：串行入链（避免与 debounce 轮次并发），通知/退避与 runNow 一致。 */
   private async runPhase(phase: 'pull' | 'push', reconcile = false): Promise<SyncRunResult | undefined> {
     let failure: unknown;
@@ -147,9 +170,18 @@ export class SyncCoordinator {
       this.emitSyncStart(phase);
       try {
         let skippedOutbound = 0;
-        if (reconcile) skippedOutbound = (await this.mutator.reconcile()).skipped?.length ?? 0;
+        let skippedOutboundReason: string | undefined;
+        if (reconcile) {
+          const reconciled = await this.mutator.reconcile();
+          skippedOutbound = reconciled.skipped?.length ?? 0;
+          skippedOutboundReason = reconciled.skipped?.[0]?.reason;
+        }
         const result = await this.engine.syncPhase(phase);
-        if (skippedOutbound) result.skippedOutbound = skippedOutbound;
+        result.localMissing = this.countLocalMissing();
+        if (skippedOutbound) {
+          result.skippedOutbound = skippedOutbound;
+          if (skippedOutboundReason) result.skippedOutboundReason = skippedOutboundReason;
+        }
         this._lastRun = result;
         this.notify(result);
         // 显式 pull/push 是独立动作：**只更新状态、不排后台重试**（避免重试走 drain() 的 both
@@ -222,7 +254,13 @@ export class SyncCoordinator {
     for (let i = 0; i < SyncCoordinator.MAX_DRAIN_ROUNDS; i++) {
       const { generated, skipped } = await this.mutator.reconcile();
       const result = await this.engine.sync();
-      if (skipped?.length) result.skippedOutbound = skipped.length; // 各轮同批，覆盖即等于该批总数（未来跨轮去重再改累加）
+      result.localMissing = this.countLocalMissing();
+      if (skipped?.length) {
+        // 各轮同批，覆盖即等于该批总数（未来跨轮去重再改累加）
+        result.skippedOutbound = skipped.length;
+        const reason = skipped[0]?.reason;
+        if (reason) result.skippedOutboundReason = reason;
+      }
       acc.applied += result.applied ?? 0;
       acc.pushed += result.pushed ?? 0;
       acc.changes += result.changes ?? 0;

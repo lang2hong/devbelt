@@ -52,6 +52,8 @@ function makeSession(over: Partial<SyncSessionPort> = {}): SyncSessionPort {
     syncNow: vi.fn(async () => ({ stage: 'ok' })),
     syncPull: vi.fn(async () => ({ stage: 'ok' })),
     syncPush: vi.fn(async () => ({ stage: 'ok' })),
+    inspectFindings: vi.fn(async () => ({ findings: [], incomplete: false })),
+    listConflicts: vi.fn(() => []),
     lock: vi.fn(),
     clearLocalState: vi.fn(async () => {}),
     ...over,
@@ -63,10 +65,11 @@ function makeDeps(session: SyncSessionPort, inputs: Array<string | undefined> = 
   const warn = vi.fn();
   const error = vi.fn();
   const errorAction = vi.fn();
+  const warnAction = vi.fn();
   const ui: SyncUi = {
     promptSmp: vi.fn(async () => inputs.shift()),
     confirmRecoveryCode: vi.fn(async () => true),
-    info, warn, error, errorAction,
+    info, warn, error, errorAction, warnAction,
   };
   const deps: PersonalSyncCommandDeps = {
     auth: { isLoggedIn: () => true, refreshEntitlement: vi.fn(async () => {}), getCachedEntitlement: () => undefined },
@@ -75,7 +78,7 @@ function makeDeps(session: SyncSessionPort, inputs: Array<string | undefined> = 
     createMaterial: vi.fn(async () => makeMaterial()),
     unlockDek: vi.fn(async () => makeMaterial().dek),
   };
-  return { deps, ui, info, warn, error, errorAction };
+  return { deps, ui, info, warn, error, errorAction, warnAction };
 }
 
 describe('personal sync B1 commands', () => {
@@ -152,6 +155,30 @@ describe('personal sync B1 commands', () => {
     await unlockPersonalSync(deps);
     expect(deps.ui.promptSmp).not.toHaveBeenCalled();
     expect(info).toHaveBeenCalledWith('Personal sync unlocked automatically (no passphrase needed).');
+  });
+
+  it('unlock 检出不一致：通知用户去面板处理（带「查看」按钮）', async () => {
+    const session = makeSession({
+      tryRestoreUnlock: vi.fn(async () => true),
+      inspectFindings: vi.fn(async () => ({
+        findings: [
+          { id: 'nameDrift:authenticatorGroup:ag1', kind: 'nameDrift' as const, type: 'authenticatorGroup' as const, localId: 'ag1', localValue: '亿贝安', remoteValue: '天九-数科' },
+          { id: 'refDrift:authenticatorEntry:e1', kind: 'refDrift' as const, type: 'authenticatorEntry' as const, localId: 'e1' },
+        ],
+        incomplete: false,
+      })),
+    });
+    const { deps, warnAction } = makeDeps(session, []);
+    await unlockPersonalSync(deps);
+    expect(warnAction).toHaveBeenCalledWith(expect.stringContaining('2'), 'View');
+  });
+
+  it('unlock 数据一致：不打扰（无通知）', async () => {
+    const session = makeSession({ tryRestoreUnlock: vi.fn(async () => true) });
+    const { deps, warnAction, warn } = makeDeps(session, []);
+    await unlockPersonalSync(deps);
+    expect(warnAction).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('unlocks only after a valid state and DEK are available', async () => {
@@ -362,7 +389,67 @@ describe('personal sync B1 commands', () => {
     expect(info).toHaveBeenCalledWith('Sync succeeded.');
   });
 
-  it('pull/push: conflict opens the conflict resolver instead of a retry warning', async () => {
+  it('syncNow 出站跳过：提示带原因（ES 连接 → 可读文案；未知原因 → reason unknown）', async () => {
+    const esSession = makeSession({
+      isUnlocked: true,
+      syncNow: vi.fn(async () => ({
+        stage: 'ok',
+        skippedOutbound: 1,
+        skippedOutboundReason: 'elasticsearch connections are not syncable yet',
+      })),
+    });
+    const { deps: esDeps, warn: esWarn } = makeDeps(esSession, []);
+    await syncNowPersonalSync(esDeps);
+    expect(esWarn).toHaveBeenCalledWith(
+      'Sync finished with skips: 1 local change(s) not synced (Elasticsearch connections are not syncable yet)',
+    );
+
+    const unknownSession = makeSession({
+      isUnlocked: true,
+      syncNow: vi.fn(async () => ({ stage: 'ok', skippedOutbound: 1, skippedOutboundReason: 'boom' })),
+    });
+    const { deps: unknownDeps, warn: unknownWarn } = makeDeps(unknownSession, []);
+    await syncNowPersonalSync(unknownDeps);
+    expect(unknownWarn).toHaveBeenCalledWith(
+      'Sync finished with skips: 1 local change(s) not synced (reason unknown)',
+    );
+  });
+
+  it('syncNow 检出不一致：通知用户去面板处理（带「查看」按钮）', async () => {
+    const session = makeSession({
+      isUnlocked: true,
+      syncNow: vi.fn(async () => ({ stage: 'ok' })),
+      inspectFindings: vi.fn(async () => ({
+        findings: [{ id: 'nameDrift:group:g1', kind: 'nameDrift' as const, type: 'group' as const, localId: 'g1', localValue: 'A', remoteValue: 'B' }],
+        incomplete: false,
+      })),
+    });
+    const { deps, warnAction } = makeDeps(session, []);
+    await syncNowPersonalSync(deps);
+    expect(warnAction).toHaveBeenCalledWith(expect.stringContaining('1'), 'View');
+  });
+
+  it('syncNow 检出不一致 + 冲突：合并计数提示', async () => {
+    const session = makeSession({
+      isUnlocked: true,
+      syncNow: vi.fn(async () => ({ stage: 'ok' })),
+      inspectFindings: vi.fn(async () => ({ findings: [], incomplete: false })),
+      listConflicts: vi.fn(() => [{ recordId: 'X'.repeat(22) }]),
+    });
+    const { deps, warnAction } = makeDeps(session, []);
+    await syncNowPersonalSync(deps);
+    expect(warnAction).toHaveBeenCalledWith(expect.stringContaining('1'), 'View');
+  });
+
+  it('syncNow 数据一致：无通知', async () => {
+    const session = makeSession({ isUnlocked: true, syncNow: vi.fn(async () => ({ stage: 'ok' })) });
+    const { deps, warn, warnAction } = makeDeps(session, []);
+    await syncNowPersonalSync(deps);
+    expect(warnAction).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('pull/push: conflict opens the data-check panel instead of a retry warning', async () => {
     const session = makeSession({
       isUnlocked: true,
       syncPull: vi.fn(async () => ({ stage: 'conflict' })),
@@ -375,7 +462,7 @@ describe('personal sync B1 commands', () => {
     await pushPersonalSync(deps);
 
     expect(mocks.executeCommand).toHaveBeenCalledTimes(2);
-    expect(mocks.executeCommand).toHaveBeenCalledWith('devbelt.resolveConflicts');
+    expect(mocks.executeCommand).toHaveBeenCalledWith('devbelt.syncDoctor');
     expect(warn).not.toHaveBeenCalled();
   });
 

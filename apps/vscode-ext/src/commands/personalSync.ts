@@ -7,10 +7,12 @@ import { createInitialMaterial, newRecoveryCode, unlockDek } from '@devbelt/db-h
 import { encodeBase64Url } from '@devbelt/db-host/sync/crypto/recoveryCode';
 import type { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
 import { canUseDataSync } from '@devbelt/db-host/sync/entitlementGate';
+import { ES_CONNECTIONS_NOT_SYNCABLE } from '@devbelt/db-host/sync/e2e/recordCodec';
+import type { FindingsReport } from '@devbelt/db-host/sync/e2e/syncEngine';
 import { l10n } from '../i18n';
 import { diagError, diagInfo } from '../utils/diagnostics';
 
-type SyncRun = { stage: string; applied?: number; pushed?: number; changes?: number; skippedEntitlement?: number; skippedUnsupported?: number; skippedOutbound?: number } | undefined;
+type SyncRun = { stage: string; applied?: number; pushed?: number; changes?: number; skippedEntitlement?: number; skippedUnsupported?: number; skippedOutbound?: number; skippedOutboundReason?: string; localMissing?: number } | undefined;
 
 interface SyncSessionPort {
   readonly uid: string;
@@ -25,6 +27,10 @@ interface SyncSessionPort {
   syncNow(): Promise<SyncRun>;
   syncPull(): Promise<SyncRun>;
   syncPush(): Promise<SyncRun>;
+  /** 体检检测（只读，零写入）：逐条列出本地与云端的不一致。 */
+  inspectFindings(): Promise<FindingsReport>;
+  /** 当前未解决冲突数（体检通知合并计数用）。 */
+  listConflicts(): Array<{ recordId: string }>;
   lock(): void;
   /** 纯本地重置：清空本机同步数据与 DEK，不发起任何 sync API 请求。 */
   clearLocalState(): Promise<void>;
@@ -39,6 +45,8 @@ interface SyncUi {
   confirmRecoveryCode(code: string): PromiseLike<boolean>;
   info(message: string): void;
   warn(message: string): void;
+  /** 带单个动作按钮的警告；按钮内部动作固定为「同步体检」（不暴露命令细节给命令层）。 */
+  warnAction?(message: string, action: string): void;
   error(message: string): void;
   /** 带多个动作按钮的错误提示；返回用户点中的按钮 label（未点返回 undefined）。 */
   errorAction?(message: string, actions: string[]): PromiseLike<string | undefined>;
@@ -118,11 +126,16 @@ async function existingState(session: SyncSessionPort): Promise<StateDto | undef
 
 type SyncOp = 'sync' | 'pull' | 'push';
 
+/** 出站跳过原因 → 可读文案（ES 连接是当前唯一已知的稳定原因；其余归入未知）。 */
+function skipReasonLabel(reason: string | undefined): string {
+  if (reason === ES_CONNECTIONS_NOT_SYNCABLE) return l10n('sync.skipEsConnection');
+  return l10n('sync.skipReasonUnknown');
+}
+
 function reportInitialRun(ui: SyncUi, result: SyncRun, op: SyncOp): void {
   if (result?.stage === 'conflict') {
-    // 显式同步遇冲突：直接打开冲突解决面板（保留本地/合并/使用远端 + 批量），
-    // 而不是笼统的「需要重试」，避免隐藏冲突或让用户误以为重试即可。
-    void vscode.commands.executeCommand('devbelt.resolveConflicts');
+    // 显式同步遇冲突：打开「数据体检」面板（冲突逐条选择保留本地/使用云端/合并）。
+    void vscode.commands.executeCommand('devbelt.syncDoctor');
     return;
   }
   // 按操作类型分别提示：pull / push / 立即同步 不再共用同一句，结果可区分。
@@ -131,11 +144,17 @@ function reportInitialRun(ui: SyncUi, result: SyncRun, op: SyncOp): void {
     const parts: string[] = [];
     if (result.skippedEntitlement) parts.push(l10n('sync.skippedEntitlement', { count: String(result.skippedEntitlement) }));
     if (result.skippedUnsupported) parts.push(l10n('sync.skippedUnsupported', { count: String(result.skippedUnsupported) }));
-    if (result.skippedOutbound) parts.push(l10n('sync.skippedOutbound', { count: String(result.skippedOutbound) }));
-    if (parts.length) ui.warn(l10n('sync.skipped', { detail: parts.join('；') }));
-    // 成功始终提示；无实际变更时合并「已是最新，无变更」。
-    // 变更数 = 入站落地(changes) + 出站成功(pushed)；不能只看 changes（sync/push 会误报无变更）。
-    else if ((result.changes ?? 0) + (result.pushed ?? 0) === 0) {
+    if (result.skippedOutbound) {
+      parts.push(l10n('sync.skippedOutbound', {
+        count: String(result.skippedOutbound),
+        reason: skipReasonLabel(result.skippedOutboundReason),
+      }));
+    }
+    if (parts.length) {
+      ui.warn(l10n('sync.skipped', { detail: parts.join('；') }));
+      return;
+    }
+    if ((result.changes ?? 0) + (result.pushed ?? 0) === 0) {
       ui.info(l10n(`sync.doneUpToDate.${op}`));
     } else ui.info(l10n(`sync.done.${op}`));
   } else {
@@ -230,6 +249,7 @@ export async function unlockPersonalSync(deps: PersonalSyncCommandDeps): Promise
   // 方案 B：先尝试从本地安全存储自动解锁（重启后免输口令）；失败再走口令解锁。
   if (await session.tryRestoreUnlock()) {
     deps.ui.info(l10n('sync.autoUnlocked'));
+    await notifyFindings(deps, session);
     return;
   }
   let state: StateDto | undefined;
@@ -288,7 +308,33 @@ export async function unlockPersonalSync(deps: PersonalSyncCommandDeps): Promise
     dek?.fill(0);
   }
   // 解锁是纯解锁：不自动同步。是否/何时同步由自动同步开关（聚焦/本地变更）或显式命令决定。
+  await notifyFindings(deps, session);
   deps.ui.info(l10n('sync.unlocked'));
+}
+
+/**
+ * 体检检测（只读，零写入）：发现或冲突 > 0 时通知用户去面板逐条选择处理；一致不打扰
+ * （同步结果消息已明确反馈）。检测失败静默（诊断日志可见）。
+ */
+async function notifyFindings(deps: PersonalSyncCommandDeps, session: SyncSessionPort): Promise<void> {
+  try {
+    const report = await session.inspectFindings();
+    const conflicts = session.listConflicts();
+    const count = report.findings.length + conflicts.length;
+    diagInfo('sync findings', {
+      count,
+      conflicts: conflicts.length,
+      incomplete: report.incomplete,
+      kinds: report.findings.map((f) => f.kind),
+    });
+    if (count <= 0 || report.incomplete) return;
+    const message = l10n('sync.doctorNotify', { count: String(count) });
+    const action = l10n('sync.doctorOpen');
+    if (deps.ui.warnAction) deps.ui.warnAction(message, action);
+    else deps.ui.warn(message);
+  } catch {
+    /* 检测失败不阻塞解锁/同步 */
+  }
 }
 
 /**
@@ -334,7 +380,12 @@ async function runExplicitSync(
   }
   diagInfo('sync trigger', { trigger: `manual-${op}`, autoSync: false });
   try {
-    reportInitialRun(deps.ui, await run(session), op);
+    const result = await run(session);
+    reportInitialRun(deps.ui, result, op);
+    // 同步结果反馈后做一次体检检测：发现不一致 → 通知用户去面板逐条选择处理。
+    if (result?.stage === 'ok') {
+      await notifyFindings(deps, session);
+    }
   } catch {
     deps.ui.warn(l10n(`sync.pending.${op}`));
   }
@@ -384,6 +435,11 @@ function vscodeUi(): SyncUi {
     },
     info: (message) => { void vscode.window.showInformationMessage(message); },
     warn: (message) => { void vscode.window.showWarningMessage(message); },
+    warnAction: (message, action) => {
+      void vscode.window.showWarningMessage(message, action).then((picked) => {
+        if (picked === action) void vscode.commands.executeCommand('devbelt.syncDoctor');
+      });
+    },
     error: (message) => { void vscode.window.showErrorMessage(message); },
     errorAction: (message, actions) => vscode.window.showErrorMessage(message, ...actions),
   };

@@ -107,7 +107,8 @@ export function createSyncStatusBar(
     item.command = 'devbelt.syncNow';
     switch (status) {
       case 'conflict':
-        item.command = 'devbelt.resolveConflicts';
+        // S7k.8：冲突与发现统一进「数据体检」面板（状态栏仅作入口）。
+        item.command = 'devbelt.syncDoctor';
         item.text = `$(warning) ${l10n('sync.statusConflict', { count: session!.listConflicts().length })}`;
         item.tooltip = `${l10n('sync.statusConflictTooltip')}\n${autoNote}`;
         break;

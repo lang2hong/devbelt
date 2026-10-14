@@ -171,3 +171,21 @@ describe('S7f 本地存储：记录式 + 旧格式迁移 + 同步面', () => {
     expect(after[0]?.deleted).toBe(true);
   });
 });
+describe('S7f 生命周期：注记 清空→重新填写（删除→重新添加，S7k.2a）', () => {
+  it('删除（墓碑）→ 重新填：旧记录墓碑、新记录映射独立且可读', async () => {
+    const s = setup();
+    await s.mapStore.put(CONN_REC, { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 1, status: 'confirmed' });
+    const first = RID('S');
+    await applyRecord({ recordId: first, version: '1', tombstone: false, payload: { type: 'schemaNotes', connId: CONN_REC, scope: 'app', tables: { orders: { note: 'A' } } } }, s);
+    expect(s.store.getSchemaNotes('c-1', 'app').tables['orders']?.note).toBe('A');
+
+    await applyRecord({ recordId: first, version: '2', tombstone: true }, s);
+    expect(s.store.getSchemaNotes('c-1', 'app').tables).toEqual({});
+    expect(s.mapStore.getByRecordId(first)).toBeUndefined();
+
+    const second = RID('T');
+    await applyRecord({ recordId: second, version: '1', tombstone: false, payload: { type: 'schemaNotes', connId: CONN_REC, scope: 'app', tables: { orders: { note: 'B' } } } }, s);
+    expect(s.store.getSchemaNotes('c-1', 'app').tables['orders']?.note).toBe('B');
+    expect(s.mapStore.getByRecordId(second)?.type).toBe('schemaNotes');
+  });
+});

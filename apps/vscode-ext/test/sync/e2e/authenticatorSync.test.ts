@@ -177,3 +177,27 @@ describe('P6 apply：验证器实体（拓扑/引用/未决）', () => {
     expect(refs).toEqual(['authenticatorEntry', 'authenticatorGroup', 'authenticatorTag']);
   });
 });
+
+describe('P6 生命周期：验证器 删除→重新添加（S7k.2a）', () => {
+  it('entry 删除（墓碑）→ 重新添加：旧映射清除、新条目存活、分组引用正确', async () => {
+    const s = setup();
+    const gRid = RID('G');
+    await applyRecord({ recordId: gRid, version: '1', tombstone: false, payload: { type: 'authenticatorGroup', name: 'G', sortOrder: 10 } }, s);
+    const eRid = RID('E');
+    await applyRecord({ recordId: eRid, version: '1', tombstone: false, payload: { type: 'authenticatorEntry', issuer: 'Acme', account: 'alice', algorithm: 'SHA1', digits: 6, period: 30, secret: SECRET, groupId: gRid, tags: [], createTime: 1, updateTime: 2 } }, s);
+    const groupLocalId = s.mapStore.getByRecordId(gRid)!.localId;
+    const appliedFirst = [...s.entries.values()];
+    expect(appliedFirst).toHaveLength(1);
+    expect(appliedFirst[0].groupId).toBe(groupLocalId);
+
+    await applyRecord({ recordId: eRid, version: '2', tombstone: true }, s);
+    expect(s.mapStore.getByRecordId(eRid)).toBeUndefined();
+    expect([...s.entries.values()]).toHaveLength(0);
+
+    const eRid2 = RID('F');
+    await applyRecord({ recordId: eRid2, version: '1', tombstone: false, payload: { type: 'authenticatorEntry', issuer: 'Acme2', account: 'bob', algorithm: 'SHA256', digits: 8, period: 30, secret: SECRET, groupId: gRid, tags: [], createTime: 3, updateTime: 4 } }, s);
+    const entries = [...s.entries.values()];
+    expect(entries).toHaveLength(1);
+    expect(entries[0].groupId).toBe(groupLocalId);
+  });
+});

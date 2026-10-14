@@ -45,7 +45,7 @@ import { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
 import { DekStore } from '@devbelt/db-host/sync/crypto/keyStore';
 
 import { registerPersonalSyncCommands } from './commands/personalSync';
-import { registerConflictCommands } from './commands/syncConflicts';
+import { SyncDoctorView } from './sync/syncDoctorView';
 import { registerSyncLifecycleCommands, registerSyncResetUriHandler } from './commands/syncLifecycle';
 import { SshTunnel } from './connection/sshTunnel';
 import { AuthenticatorStore } from './authenticator/store';
@@ -235,6 +235,7 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
         skippedEntitlement: result?.skippedEntitlement,
         skippedUnsupported: result?.skippedUnsupported,
         skippedOutbound: result?.skippedOutbound,
+        localMissing: result?.localMissing,
       });
       // 入站 pull 应用了变更才刷树（避免每次空同步都整树刷新），并重算路径 warning；
       // 其余情况仅刷新状态栏。
@@ -298,8 +299,8 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   );
   // B1 是用户显式入口；注册本身不建 session，命令执行前才刷新权益并懒建。
   registerPersonalSyncCommands(context, auth, syncFactory);
-  // B4 冲突面板。
-  registerConflictCommands(context, syncFactory);
+  // S7k.8「数据体检」面板（发现 → 用户选择修复；conflict 阶段与通知按钮都进这个面板）。
+  SyncDoctorView.register(context, syncFactory);
   // B5 生命周期：换钥 / 恢复 / 销毁 / 重置。
   registerSyncLifecycleCommands(context, auth, syncFactory);
   // 切片 5：sync-reset 深链 UriHandler（浏览器 handoff → 扩展最终 reset）。

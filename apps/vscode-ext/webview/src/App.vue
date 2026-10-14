@@ -22,6 +22,8 @@ const AuthenticatorView = defineAsyncComponent(() => import('./views/Authenticat
 const RedisView = defineAsyncComponent(() => import('./views/RedisView.vue'));
 // Elasticsearch 面板（P8 S2）同样按需加载，单独分片。
 const ElasticsearchView = defineAsyncComponent(() => import('./views/ElasticsearchView.vue'));
+// 数据体检面板（S7k.8）同样按需加载，单独分片。
+const SyncDoctorView = defineAsyncComponent(() => import('./views/SyncDoctorView.vue'));
 
 const { onMessage } = useVsCode();
 const mode = ref<WebviewMode>('query');
@@ -60,5 +62,6 @@ onUnmounted(() => cleanup?.());
       <AuthenticatorView v-else-if="mode === 'authenticator'" />
       <RedisView v-else-if="mode === 'redis'" />
       <ElasticsearchView v-else-if="mode === 'elasticsearch'" />
+      <SyncDoctorView v-else-if="mode === 'syncDoctor'" />
       <ERDiagramView v-else />
 </template>

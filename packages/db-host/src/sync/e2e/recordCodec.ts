@@ -3,6 +3,9 @@ import { jcs } from '../crypto/jcs.js';
 import { DatabaseType, databaseEngineOf, databaseTypeFromEngine } from '@devbelt/db-core';
 
 export { databaseTypeFromEngine } from '@devbelt/db-core';
+
+/** ES 连接未接入同步 codec 的 fail-closed 原因（上层用于把出站跳过原因映射为可读文案）。 */
+export const ES_CONNECTIONS_NOT_SYNCABLE = 'elasticsearch connections are not syncable yet';
 import type { SavedConnection } from '../../connection/connectionStore.js';
 import type { ConnectionGroup } from '../../connection/connectionStore.js';
 import type { QueryFolder } from '../../connection/queryStore.js';
@@ -110,7 +113,7 @@ function assertSqlSize(sql: string): void {
 export function encodeConnectionPayload(conn: SavedConnection, resolveRef: RefResolver): Record<string, unknown> {
   // P8：ES 连接尚未接入同步 codec —— 显式 fail-closed，避免按 SQL 字段白名单静默编码（字段丢失）。
   if (conn.dbType === DatabaseType.ELASTICSEARCH) {
-    throw new Error('elasticsearch connections are not syncable yet');
+    throw new Error(ES_CONNECTIONS_NOT_SYNCABLE);
   }
   const src = conn as unknown as Record<string, unknown>;
   const out: Record<string, unknown> = { type: 'connection', dbType: databaseEngineOf(conn.dbType) };
@@ -457,7 +460,7 @@ function decodeConnectionPayload(p: unknown): DecodedConnectionPayload {
   const dbType = databaseTypeFromEngine(dbTypeStr);
   // P8：ES 连接尚未接入同步 codec —— 显式 fail-closed（入站由 applyRecords 视作 skipped-unsupported）。
   if (dbType === DatabaseType.ELASTICSEARCH) {
-    throw new Error('elasticsearch connections are not syncable yet');
+    throw new Error(ES_CONNECTIONS_NOT_SYNCABLE);
   }
   ignoreUnknownKeys(obj, [...payloadFieldsFor(dbType), ...CONNECTION_PATH_FIELDS, 'type', 'groupId']);
 

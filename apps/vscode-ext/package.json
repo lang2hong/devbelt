@@ -184,11 +184,6 @@
         "category": "DB Client"
       },
       {
-        "command": "devbelt.resolveConflicts",
-        "title": "%cmd.resolveConflicts%",
-        "category": "DB Client"
-      },
-      {
         "command": "devbelt.changeSyncPassword",
         "title": "%cmd.changeSyncPassword%",
         "category": "DB Client"
@@ -221,6 +216,11 @@
       {
         "command": "devbelt.toggleAutoSync",
         "title": "%cmd.toggleAutoSync%",
+        "category": "DB Client"
+      },
+      {
+        "command": "devbelt.syncDoctor",
+        "title": "%cmd.syncDoctor%",
         "category": "DB Client"
       },
       {
@@ -996,16 +996,16 @@
           "when": "devbelt.sync.unlocked"
         },
         {
+          "command": "devbelt.syncDoctor",
+          "when": "devbelt.sync.ready"
+        },
+        {
           "command": "devbelt.fixConnectionPaths",
           "when": "false"
         },
         {
           "command": "devbelt.removeConnectionPathOverrides",
           "when": "false"
-        },
-        {
-          "command": "devbelt.resolveConflicts",
-          "when": "devbelt.sync.ready"
         },
         {
           "command": "devbelt.changeSyncPassword",

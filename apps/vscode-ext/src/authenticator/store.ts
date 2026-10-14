@@ -636,6 +636,17 @@ export class AuthenticatorStore implements VscodeDisposable {
     return { ok: true };
   }
 
+  /** 外部（同步体检）触发一次孤儿条目自愈归组；返回是否发生变更。 */
+  async healNow(): Promise<boolean> {
+    this.assertInit();
+    const healed = this.healUngroupedEntries();
+    if (healed) {
+      await this.saveEntries();
+      this.publish('entry', 'update', '*');
+    }
+    return healed;
+  }
+
   /**
    * 删分组：组内验证码一并删除（无「未分组」回落，也就没有默认分组）。
    * - 先删条目 secret，成功才置墓碑；secret 删除失败的条目保留但清 groupId，

@@ -279,6 +279,18 @@ export class PersonalSyncSession {
     return this.coordinator.pushNow();
   }
 
+  /** 体检检测（只读，零写入；需解锁）：逐条列出本地与云端的不一致（面板展示用）。 */
+  async inspectFindings() {
+    if (!this.coordinator) throw new Error('sync session is locked');
+    return this.coordinator.findingsNow();
+  }
+
+  /** 修复用户选择的不一致项（缺省全部；需解锁）。写入仅由体检面板用户选择触发。 */
+  async repairFindings(ids?: string[]) {
+    if (!this.coordinator) throw new Error('sync session is locked');
+    return this.coordinator.repairFindingsNow(ids);
+  }
+
   /** 立即排一次后台同步（不 await、不抛错）；供命令/窗口聚焦使用。 */
   scheduleNow(): void {
     if (!this.coordinator) throw new Error('sync session is locked');

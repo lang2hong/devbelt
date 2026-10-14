@@ -36,7 +36,9 @@ export type WebviewMode =
   /** P7：Redis 面板（Status / CLI / SlowLog）。 */
   | 'redis'
   /** P8：Elasticsearch 面板（Cluster / REST 控制台；S3/S4 增更多 tab）。 */
-  | 'elasticsearch';
+  | 'elasticsearch'
+  /** S7k.8：数据体检面板（发现本地与云端不一致 → 用户选择修复）。 */
+  | 'syncDoctor';
 
 /** 账户中心标签。 */
 export type HubTab = 'account' | 'session' | 'plans';
@@ -71,6 +73,55 @@ export interface WebviewReadyMessage extends WebviewMessage {
 export interface WebviewErrorMessage extends WebviewMessage {
   type: 'error';
   message: string;
+}
+
+// ────────────────────────── S7k.8：同步体检（数据体检）面板 ──────────────────────────
+// 与 SyncDoctorView provider / SyncDoctorView.vue 共享的强类型契约。
+// 面板只做「发现 → 用户选择」：扩展下发发现列表与冲突列表，用户逐条点按钮，写入全部由用户触发。
+
+/** 体检发现项（展示值已由引擎解析：名字或引用目标显示名）。 */
+export interface SyncFindingView {
+  id: string;
+  kind: 'missing' | 'nameDrift' | 'refDrift' | 'orphanDelete' | 'remoteDeleted' | 'orphanGroup';
+  /** 实体类型（视图用 `sync.entity.<type>` 翻译）。 */
+  type: string;
+  localValue?: string;
+  remoteValue?: string;
+  /** 引用漂移明细（视图用 `sync.field.<field>` 翻译字段名）。 */
+  ref?: { field: string; local?: string; remote?: string };
+}
+
+/** 真版本冲突项（本地与云端都改过；由用户三选一）。 */
+export interface SyncConflictView {
+  recordId: string;
+  type: string;
+  remoteVersion: string;
+}
+
+/** webview → Extension Host。 */
+export type SyncDoctorUpMessage =
+  | { type: 'ready'; __load?: string }
+  | { type: 'syncDoctorRefresh' }
+  | { type: 'syncDoctorRepair'; ids?: string[] }
+  | { type: 'syncDoctorResolveConflict'; recordId: string; decision: 'local' | 'merge' | 'remote' };
+
+/** Extension Host → webview。 */
+export interface SyncDoctorSnapshotMessage extends WebviewMessage {
+  type: 'syncDoctorSnapshot';
+  checking: boolean;
+  /** 会话未解锁：面板显示先解锁提示。 */
+  locked?: boolean;
+  lastCheckAt?: number;
+  findings: SyncFindingView[];
+  conflicts: SyncConflictView[];
+  incomplete: boolean;
+}
+
+/** 修复完成回执（面板显示「已修复 N 项」并随即收到新快照）。 */
+export interface SyncDoctorResultMessage extends WebviewMessage {
+  type: 'syncDoctorResult';
+  repaired: number;
+  failed: number;
 }
 
 // ────────────────────────── P5：2FA/TOTP 验证器协议 ──────────────────────────
