@@ -9,9 +9,9 @@ vi.mock('@devbelt/auth-client', () => ({
 
 import { openCipherRecord, importTotpKey, totpCodeForKey, totpSecondsLeft } from '@devbelt/auth-client';
 import {
-  collectAuthenticatorRows, createTotpCache, decodeDekCache, encodeDekCache, refreshCodes, toAuthenticatorRow, toEnvelopeDto, toSmpKdfDto,
+  collectAuthenticator, collectAuthenticatorRows, createTotpCache, decodeDekCache, encodeDekCache, groupAuthenticator, refreshCodes, tagNameMap, toAuthenticatorGroup, toAuthenticatorRow, toAuthenticatorTag, toEnvelopeDto, toSmpKdfDto,
   DEK_CACHE_TTL_MS,
-  type AuthenticatorRow,
+  type AuthenticatorGroup, type AuthenticatorRow,
 } from './authenticatorView';
 
 const rec = (recordId: string) => ({ recordId, version: '1', changeSequence: recordId, deleteTime: null });
@@ -175,5 +175,62 @@ describe('DEK 缓存编解码', () => {
     expect(decodeDekCache(JSON.stringify({ v: 1, dek: 'AA', userId: '1', keyEpoch: '2', exp: 9 }), 0, '1')).toBeUndefined(); // 长度不足
     expect(decodeDekCache(null, 0, '1')).toBeUndefined();
     expect(DEK_CACHE_TTL_MS).toBe(30 * 24 * 60 * 60 * 1000);
+  });
+});
+
+describe('toAuthenticatorGroup / toAuthenticatorTag', () => {
+  it('maps group payload（身份 = recordId）', () => {
+    expect(toAuthenticatorGroup('g1', { type: 'authenticatorGroup', name: 'G', sortOrder: 3 })).toEqual({ recordId: 'g1', name: 'G', sortOrder: 3 });
+    expect(toAuthenticatorGroup('g1', { type: 'authenticatorEntry' })).toBeUndefined();
+    expect(toAuthenticatorGroup('g1', { type: 'authenticatorGroup', sortOrder: 1 })).toBeUndefined();
+  });
+
+  it('maps tag payload', () => {
+    expect(toAuthenticatorTag('t1', { type: 'authenticatorTag', name: 'prod' })).toEqual({ recordId: 't1', name: 'prod' });
+    expect(toAuthenticatorTag('t1', { type: 'authenticatorTag' })).toBeUndefined();
+  });
+});
+
+describe('toAuthenticatorRow 引用字段', () => {
+  it('carries groupId / tags recordId 引用（过滤非字符串 tag）', () => {
+    const r = toAuthenticatorRow('r', { type: 'authenticatorEntry', issuer: 'A', algorithm: 'SHA1', digits: 6, period: 30, secret: 'A', groupId: 'g1', tags: ['t1', 5] });
+    expect(r?.groupId).toBe('g1');
+    expect(r?.tags).toEqual(['t1']);
+  });
+});
+
+describe('collectAuthenticator / groupAuthenticator / tagNameMap', () => {
+  it('collects entries + groups + tags，并正确分区、残留标签名', async () => {
+    const payloads: Record<string, unknown> = {
+      e: { type: 'authenticatorEntry', issuer: 'A', algorithm: 'SHA1', digits: 6, period: 30, secret: 'A', groupId: 'g1', tags: ['t1'] },
+      g: { type: 'authenticatorGroup', name: 'G', sortOrder: 1 },
+      t: { type: 'authenticatorTag', name: 'prod' },
+    };
+    vi.mocked(openCipherRecord).mockImplementation(async (_d, r) => payloads[r.recordId]);
+    const col = await collectAuthenticator(dek, ctx, async () => ({ records: [rec('e'), rec('g'), rec('t')] }));
+    expect(col.rows).toHaveLength(1);
+    expect(col.groups).toEqual([{ recordId: 'g', name: 'G', sortOrder: 1 }]);
+    expect(col.tags).toEqual([{ recordId: 't', name: 'prod' }]);
+
+    const sections = groupAuthenticator(col.rows, col.groups);
+    expect(sections).toHaveLength(1);
+    expect(sections[0].group?.name).toBe('G');
+    expect(sections[0].rows[0].recordId).toBe('e');
+    expect(tagNameMap(col.tags).get('t')).toBe('prod');
+  });
+
+  it('孤儿归入首个分组（按 sortOrder）；无分组时拍平', () => {
+    const groups: AuthenticatorGroup[] = [
+      { recordId: 'g1', name: 'A', sortOrder: 2 },
+      { recordId: 'g2', name: 'B', sortOrder: 1 },
+    ];
+    const rows: AuthenticatorRow[] = [
+      { recordId: 'r1', issuer: '', algorithm: 'SHA1', digits: 6, period: 30, secret: 'A', code: '', secondsLeft: 0, groupId: 'g2' },
+      { recordId: 'r2', issuer: '', algorithm: 'SHA1', digits: 6, period: 30, secret: 'A', code: '', secondsLeft: 0 },
+    ];
+    const sections = groupAuthenticator(rows, groups);
+    expect(sections.map((s) => s.group?.name)).toEqual(['B', 'A']);
+    expect(sections[0].rows.map((r) => r.recordId)).toEqual(['r1', 'r2']);
+    expect(groupAuthenticator(rows, [])).toEqual([{ rows }]);
   });
 });

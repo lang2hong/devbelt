@@ -3,9 +3,9 @@ import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { unlockDekBrowser, DekSession, type SmpKdfParams } from '@devbelt/auth-client';
 import { getE2eeParams, getSyncRecords } from '../api/sync';
 import {
-  collectAuthenticatorRows, createTotpCache, decodeDekCache, encodeDekCache, refreshCodes, toEnvelopeDto, toSmpKdfDto,
+  collectAuthenticator, createTotpCache, decodeDekCache, encodeDekCache, groupAuthenticator, refreshCodes, tagNameMap, toEnvelopeDto, toSmpKdfDto,
   DEK_CACHE_KEY, DEK_CACHE_TTL_MS,
-  type AuthenticatorRow, type FeedPage, type TotpCache,
+  type AuthenticatorRow, type AuthenticatorSection, type AuthenticatorTag, type FeedPage, type TotpCache,
 } from '../lib/authenticatorView';
 
 /**
@@ -22,6 +22,9 @@ const err = ref('');
 const unlocked = ref(false);
 const rows = ref<AuthenticatorRow[]>([]);
 const truncated = ref(false);
+const tags = ref<AuthenticatorTag[]>([]);
+const tagNames = ref<Map<string, string>>(new Map());
+const sections = ref<AuthenticatorSection[]>([]);
 const copiedId = ref('');
 const remember = ref(true);
 const session = new DekSession();
@@ -100,12 +103,11 @@ async function unlock(): Promise<void> {
     if (remember.value) saveCachedDek(key, v.keyEpoch);
     unlocked.value = true;
     loading.value = true;
-    const { rows: loaded, truncated: cut } = await collectAuthenticatorRows(
+    const col = await collectAuthenticator(
       key, { userId: user.userId, keyEpoch: v.keyEpoch }, fetchPage,
     );
     if (disposed || attempt !== unlockAttempt) { lock(); return; }
-    rows.value = loaded;
-    truncated.value = cut;
+    applyCollection(col);
     loading.value = false;
     await tick();
     if (disposed || attempt !== unlockAttempt) { lock(); return; }
@@ -118,6 +120,9 @@ async function unlock(): Promise<void> {
       loading.value = false;
       rows.value = [];
       truncated.value = false;
+      tags.value = [];
+      tagNames.value = new Map();
+      sections.value = [];
       err.value = e instanceof Error ? e.message : String(e);
     }
   } finally {
@@ -161,7 +166,19 @@ function resetState(): void {
   unlocked.value = false;
   rows.value = [];
   truncated.value = false;
+  tags.value = [];
+  tagNames.value = new Map();
+  sections.value = [];
   smp.value = '';
+}
+
+/** 把采集结果落到展示态：区块分组 + 标签名映射。 */
+function applyCollection(col: { rows: AuthenticatorRow[]; groups: { recordId: string; name: string; sortOrder: number }[]; tags: AuthenticatorTag[]; truncated: boolean }): void {
+  rows.value = col.rows;
+  truncated.value = col.truncated;
+  tags.value = col.tags;
+  tagNames.value = tagNameMap(col.tags);
+  sections.value = groupAuthenticator(col.rows, col.groups);
 }
 
 /** 主动锁定 / 登出：内存态与本地缓存一并清除。 */
@@ -201,12 +218,11 @@ async function restoreFromCache(): Promise<void> {
     if (!key) throw new Error('未解锁');
     unlocked.value = true;
     loading.value = true;
-    const { rows: loaded, truncated: cut } = await collectAuthenticatorRows(
+    const col = await collectAuthenticator(
       key, { userId: user.userId, keyEpoch: cached.keyEpoch }, fetchPage,
     );
     if (disposed || attempt !== unlockAttempt) { resetState(); return; }
-    rows.value = loaded;
-    truncated.value = cut;
+    applyCollection(col);
     loading.value = false;
     await tick();
     if (disposed || attempt !== unlockAttempt) { resetState(); return; }
@@ -252,31 +268,41 @@ onUnmounted(() => { disposed = true; resetState(); }); // 离开页面保留缓�
         <button class="btn secondary small" @click="lock">锁定</button>
       </div>
       <p v-if="truncated" class="muted">条目较多，当前仅显示前 {{ rows.length }} 条。</p>
-      <ul v-if="rows.length" class="grid">
-        <li
-          v-for="r in rows"
-          :key="r.recordId"
-          class="card"
-          :class="{ warn: r.secondsLeft > 0 && r.secondsLeft <= 5 }"
-          role="button"
-          tabindex="0"
-          @click="copy(r)"
-          @keydown.enter.self.prevent="copy(r)"
-        >
-          <div class="meta">
-            <div class="issuer">{{ r.issuer || '—' }}</div>
-            <div v-if="r.account" class="account">{{ r.account }}</div>
-          </div>
-          <div class="code-area">
-            <div class="code-row">
-              <span class="code">{{ r.code }}</span>
-              <span class="secs">{{ r.secondsLeft }}s</span>
-            </div>
-            <div class="meter"><span :style="{ width: pctLeft(r) + '%' }" /></div>
-          </div>
-          <span v-if="copiedId === r.recordId" class="copied">已复制</span>
-        </li>
-      </ul>
+      <template v-if="rows.length">
+        <div v-for="section in sections" :key="section.group?.recordId ?? 'flat'" class="group-block">
+          <h3 v-if="section.group" class="group-head">
+            {{ section.group.name }} <span class="muted">({{ section.rows.length }})</span>
+          </h3>
+          <ul class="grid">
+            <li
+              v-for="r in section.rows"
+              :key="r.recordId"
+              class="card"
+              :class="{ warn: r.secondsLeft > 0 && r.secondsLeft <= 5 }"
+              role="button"
+              tabindex="0"
+              @click="copy(r)"
+              @keydown.enter.self.prevent="copy(r)"
+            >
+              <div class="meta">
+                <div class="issuer">{{ r.issuer || '—' }}</div>
+                <div v-if="r.account" class="account">{{ r.account }}</div>
+                <div v-if="r.tags?.length" class="tags">
+                  <span v-for="t in r.tags" :key="t" class="badge">{{ tagNames.get(t) ?? '#' }}</span>
+                </div>
+              </div>
+              <div class="code-area">
+                <div class="code-row">
+                  <span class="code">{{ r.code }}</span>
+                  <span class="secs">{{ r.secondsLeft }}s</span>
+                </div>
+                <div class="meter"><span :style="{ width: pctLeft(r) + '%' }" /></div>
+              </div>
+              <span v-if="copiedId === r.recordId" class="copied">已复制</span>
+            </li>
+          </ul>
+        </div>
+      </template>
       <p v-else-if="loading" class="muted">正在解密…</p>
       <p v-else class="muted">暂无验证器条目。</p>
     </template>
@@ -301,6 +327,10 @@ input { box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--c-bor
 .meta { min-width: 0; display: flex; flex-direction: column; }
 .issuer { font-weight: 600; color: var(--c-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account { font-size: 12px; color: var(--c-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-block { margin: 14px 0 0; }
+.group-head { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: var(--c-text); }
+.tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.badge { font-size: 11px; color: var(--c-text-muted); border: 1px solid var(--c-border-strong); border-radius: 4px; padding: 0 5px; }
 .code-area { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0; }
 .code-row { display: flex; align-items: baseline; gap: 10px; }
 .code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 19px; letter-spacing: 2px; font-variant-numeric: tabular-nums; color: var(--c-text); }

@@ -23,6 +23,27 @@ export interface AuthenticatorRow {
   secret: string;
   code: string;
   secondsLeft: number;
+  /** 所属分组（sync recordId 引用；无则缺省）。 */
+  groupId?: string;
+  /** 标签（sync recordId 引用数组；无则缺省）。 */
+  tags?: string[];
+}
+
+export interface AuthenticatorGroup {
+  recordId: string;
+  name: string;
+  sortOrder: number;
+}
+
+export interface AuthenticatorTag {
+  recordId: string;
+  name: string;
+}
+
+/** 分组区块：有分组时按组展示；无分组时单个区块拍平展示全部条目。 */
+export interface AuthenticatorSection {
+  group?: AuthenticatorGroup;
+  rows: AuthenticatorRow[];
 }
 
 export interface FeedPage {
@@ -63,7 +84,49 @@ export function toAuthenticatorRow(recordId: string, payload: unknown): Authenti
   if (typeof p.secret !== 'string' || p.secret.length === 0) return undefined;
   const issuer = typeof p.issuer === 'string' ? p.issuer : '';
   const account = typeof p.account === 'string' ? p.account : undefined;
-  return { recordId, issuer, account, algorithm, digits, period, secret: p.secret, code: '', secondsLeft: 0 };
+  const tags = Array.isArray(p.tags) ? p.tags.filter((t): t is string => typeof t === 'string') : undefined;
+  return {
+    recordId, issuer, account, algorithm, digits, period, secret: p.secret, code: '', secondsLeft: 0,
+    ...(typeof p.groupId === 'string' && p.groupId ? { groupId: p.groupId } : {}),
+    ...(tags && tags.length ? { tags } : {}),
+  };
+}
+
+/** 解密后的 payload → 分组行（非 `authenticatorGroup` 或非法字段返回 undefined）。 */
+export function toAuthenticatorGroup(recordId: string, payload: unknown): AuthenticatorGroup | undefined {
+  if (typeof payload !== 'object' || payload === null) return undefined;
+  const p = payload as Record<string, unknown>;
+  if (p.type !== 'authenticatorGroup') return undefined;
+  if (typeof p.name !== 'string' || p.name.length === 0) return undefined;
+  return { recordId, name: p.name, sortOrder: typeof p.sortOrder === 'number' ? p.sortOrder : 0 };
+}
+
+/** 解密后的 payload → 标签行（非 `authenticatorTag` 或非法字段返回 undefined）。 */
+export function toAuthenticatorTag(recordId: string, payload: unknown): AuthenticatorTag | undefined {
+  if (typeof payload !== 'object' || payload === null) return undefined;
+  const p = payload as Record<string, unknown>;
+  if (p.type !== 'authenticatorTag') return undefined;
+  if (typeof p.name !== 'string' || p.name.length === 0) return undefined;
+  return { recordId, name: p.name };
+}
+
+/** 把条目按分组聚合为区块；孤儿归入第一个分组（与服务端自愈口径一致）；无分组则拍平。 */
+export function groupAuthenticator(rows: AuthenticatorRow[], groups: AuthenticatorGroup[]): AuthenticatorSection[] {
+  if (groups.length === 0) return [{ rows }];
+  const sorted = [...groups].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+  const byId = new Map(sorted.map((g) => [g.recordId, g]));
+  const buckets = new Map<AuthenticatorGroup, AuthenticatorRow[]>(sorted.map((g) => [g, []]));
+  const first = sorted[0];
+  for (const row of rows) {
+    const target = (row.groupId ? byId.get(row.groupId) : undefined) ?? first;
+    buckets.get(target)!.push(row);
+  }
+  return sorted.map((g) => ({ group: g, rows: buckets.get(g)! }));
+}
+
+/** 标签 recordId → 名称映射（渲染徽标用）。 */
+export function tagNameMap(tags: AuthenticatorTag[]): Map<string, string> {
+  return new Map(tags.map((t) => [t.recordId, t.name]));
 }
 
 /** 服务端 `smpKdf`（unknown）→ 严格 DTO；非法即抛错（fail-closed）。范围/盐长仍由 unlockDekBrowser 兜底。 */
@@ -92,18 +155,27 @@ export function toEnvelopeDto(raw: unknown): EnvelopeDto {
 }
 
 /**
- * 逐页拉取 feed 并解密，收集验证器条目（跳过墓碑与其它 entity kind）。
+ * 逐页拉取 feed 并解密，收集验证器条目 + 分组 + 标签（跳过墓碑与其它 entity kind）。
  * `truncated=true` 表示到达 `maxPages` 上限时仍有后续页，UI 应提示「仅显示部分」。
  */
-export async function collectAuthenticatorRows(
+export interface AuthenticatorCollection {
+  rows: AuthenticatorRow[];
+  groups: AuthenticatorGroup[];
+  tags: AuthenticatorTag[];
+  truncated: boolean;
+}
+
+export async function collectAuthenticator(
   dek: Uint8Array,
   ctx: { userId: string; keyEpoch: string },
   fetchPage: FetchFeedPage,
   opts: { pageSize?: number; maxPages?: number } = {},
-): Promise<{ rows: AuthenticatorRow[]; truncated: boolean }> {
+): Promise<AuthenticatorCollection> {
   const pageSize = opts.pageSize ?? DEFAULT_PAGE_SIZE;
   const maxPages = opts.maxPages ?? DEFAULT_MAX_PAGES;
   const rows: AuthenticatorRow[] = [];
+  const groups: AuthenticatorGroup[] = [];
+  const tags: AuthenticatorTag[] = [];
   let after = '0';
   for (let page = 0; page < maxPages; page++) {
     const { records, nextAfter } = await fetchPage(after, pageSize);
@@ -111,11 +183,26 @@ export async function collectAuthenticatorRows(
       const payload = await openCipherRecord(dek, rec, ctx);
       const row = toAuthenticatorRow(rec.recordId, payload);
       if (row) rows.push(row);
+      const group = toAuthenticatorGroup(rec.recordId, payload);
+      if (group) groups.push(group);
+      const tag = toAuthenticatorTag(rec.recordId, payload);
+      if (tag) tags.push(tag);
     }
-    if (!nextAfter) return { rows, truncated: false };
+    if (!nextAfter) return { rows, groups, tags, truncated: false };
     after = nextAfter;
   }
-  return { rows, truncated: true };
+  return { rows, groups, tags, truncated: true };
+}
+
+/** 兼容旧导出（仅收集条目），供无分组诉求的调用方使用。 */
+export async function collectAuthenticatorRows(
+  dek: Uint8Array,
+  ctx: { userId: string; keyEpoch: string },
+  fetchPage: FetchFeedPage,
+  opts: { pageSize?: number; maxPages?: number } = {},
+): Promise<{ rows: AuthenticatorRow[]; truncated: boolean }> {
+  const { rows, truncated } = await collectAuthenticator(dek, ctx, fetchPage, opts);
+  return { rows, truncated };
 }
 
 /** 每条记录的 TOTP 缓存：secret 变化（条目被更新）即失效重导，counter 未变则复用 code。 */
