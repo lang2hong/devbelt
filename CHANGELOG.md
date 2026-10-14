@@ -66,6 +66,34 @@
   （仅 401、仅重试一次；续期失败/同 token 不重试；`getUsage` 同语义）+ AiService 注入。
   修复前 access token（15m TTL）过期会直接报 "AI proxy authentication failed (HTTP 401)"。
   测试 +6；仅扩展侧改动，无需服务端重部署。
+- **S7k 同步体检/修复（2026-10-14）**：本地实体丢失但同步游标已到最新时自动同步不会重拉（真机：
+  验证器条目丢失而云端完好）。新增引擎 `inspectLocalIntegrity`/`repairLocalMissing`——对「远端
+  存活 + 本地实体缺失 + 无未决出站变更」的映射**强制重放**（force 绕过版本不新跳过；复用
+  applyRecord/unresolved 收敛，分页只读拉取、不动游标）；命令面板「同步体检（完整性检查与修复）」
+  （`devbelt.syncDoctor`，`devbelt.sync.ready` 可见）：只读报告→确认→修复→验证器孤儿条目自愈
+  归组；手动同步结果新增「本地缺少 N 条云端记录」提示（自动同步仅落诊断日志）；同步结果带
+  `localMissing` 计数。**S7k.1**：候选涵盖「本地墓碑（deleted=true）但云端存活」（修复复活），
+  云端墓碑侧 force 应用墓碑并删映射（向删除收敛）。**S7k.2**：全同步实体「删除→重新添加」生命周期
+  e2e（连接/分组/查询/文件夹 + 验证器三类 + schemaNotes）+ 评审整改（rowLimit 写语句排除 + 行尾
+  注释安全、esExec size 钳制、doctor 错误封装、repair 快照漂移校验 + notFound 计数、单元格反斜杠
+  转义、runHeadless 单测）。**S7k.3（第二轮评审整改）**：较新本地墓碑（updateTime>revision）视为删除意图、不复活；修复补远端 epoch 对账；同 recordId 取最新版去重 + 早停（修复计数不再虚高）；esExec 结果截断 + suggest/空聚合/size 归一；LIMIT 跳过 FETCH FIRST/TOP 并对对话内执行标注"已自动限制 N 行"；contextDetail 懒加载错误复位 + 切连接重置；recordCodec encode 复用常量。**继续整改**：结果表格外包滚动容器（修 `display:block`/`border-collapse` 冲突）、折叠状态随内容复位、分隔行校验管道行、`sqlChatResult` 先截断后转义 + 截断注记 + 无列名 JSON 回退、医生结果展示 skipped。**三批整改**：代码块运行按钮按引擎上下文显隐（dbType 透传）；Redis 注入逐条串行 + 危险命令确认后继续下一条；多语句回帖标注；`LocalRepairResult` 加 `incomplete`（区分 notFound 来源）+ 补 epoch 变更/快照漂移边界用例。**S7k.4 关系校准**：Sync Doctor 修复时对本地存活实体校验引用（connection.groupId/group.parentId/query.connId+folderId/authenticatorEntry.groupId+tags/schemaNotes.connId），与云端不符则 force 重放校正，`LocalRepairResult.relinked` 回显——修"条目被自愈归错分组"的问题。vscode-ext 1732 / db-host 23 全绿。spec §十四.12 回填。（SQL 重名列按位置渲染未做：rows 为对象键式，需改数据形态。）
+- **S7k.5 对账收敛重构 + 一致性检测 + 不变量测试（2026-10-14）**：按「正确与应该」重做客户端对账——`classifyReconcilePlan` 把每条 confirmed 映射归入唯一动作（pending/localDelete/missing/revive/relink），`convergeToCloud` 单一循环 force 收敛到云端（三不变量：幂等/隔离/单写写入 JSDoc 与测试）；`LocalRepairResult` 计为 materialized/relinked/converged；解锁后自动体检告警 + 一键跳同步体检；手动/自动同步发现本地缺失也带一键修复（自动去重 10 分钟）；不变量测试（幂等、隔离、分组名漂移）；**db-ui 网页验证器补全分组 + 标签**（与扩展对齐：`collectAuthenticator`/`groupAuthenticator`/`tagNameMap` + 分组区块/标签徽标渲染）。vscode-ext 1736 / db-host 23 / db-ui 124 全绿。spec §十四.12 回填。
+- **S7k.6 一致性干跑校验 + 漂移修复入口（2026-10-14）**：修根因——名字/引用漂移属 `relink` 类，而 `inspectLocalIntegrity` 只计缺失（missing/revive），体检在 `missingTotal=0` 时直接判健康返回，唯一能按云端校准漂移的 `repairLocalMissing` 永不执行（真机表现：分组名漂移 + 条目归错组，长期无提示无人修）。新增 `verifyDrift()` 零写入干跑（与 repair 共用 `classifyReconcilePlan` + 分页扫描，判定一致，`incomplete` fail-open）；`syncDoctor` 门槛改为「缺失 或 漂移」并分别展示明细，仅漂移也进入确认与修复；解锁（无缺失时）与手动 pull/push/立即同步自动干跑校验，检出真实漂移弹「发现 N 处本地与云端不一致」+ 一键修复（不自动改数据）。**跟进补修**：验证器分组/标签此前不在校准目标集内、命名比对仅对连接分组生效——`REF_CARRYING_TYPES` 纳入 `authenticatorGroup`/`authenticatorTag`，命名比对泛化为「载荷带 name 即比对」（验证器条目无 name 自动不适用），修「修复后验证器分组名仍不正确」。vscode-ext 1747 / db-host 23 / db-ui 124 全绿。
+- **S7k.7 孤儿墓碑 + 空组清理（2026-10-14）**：`classifyReconcilePlan` 把「较新本地删除且无待推出站」从静默吞掉改为 `orphanDelete` 动作（pull 不生成出站 → 孤儿墓碑=损坏，交给对账收敛）；孤儿空分组（无映射+无出站+无引用+非新建 60s）清理计 `swept`；`LocalIntegrityReport` 暴露 `localDelete`。vscode-ext 1747 / db-host 23 全绿。
+- **S7k.8 数据体检面板：发现 → 用户选择（2026-10-14，同步 UX 复盘）**：推倒「提示堆」——此前累计 8+ 条术语化弹窗（映射/漂移/校准/收敛），用户不可读。重做为**决策面板**：引擎 `inspectFindings()` 逐条列出不一致（缺失/命名漂移含「本机 X → 云端 Y」对照/归属漂移含字段对照/本机已删云端仍在/云端已删本机仍在/孤儿空分组/真冲突），`repairFindings(ids)` 只修用户点选的条目（幂等、云端为准、尊重待推出站与真实删除意图）；新增 webview 面板（`SyncDoctorView.vue` + provider，逐条按钮 + 冲突三选一 + 全部按云端修复 + 重新检查）；解锁/手动同步后检测到不一致仅一条白话通知「发现 N 项（查看）」打开面板。**删除**：旧 syncDoctor 弹窗流、syncConflicts QuickPick（文件+命令+词条）、unlock/手动/自动三类提示、doctor 计数长句——提示堆归零；文案全部白话化（`sync.find.*`），字段名经 `sync.field.*` 翻译。vscode-ext 1739 / db-host 23 全绿。
+- **S7j AI 生成 SQL 行数上限（LIMIT 10，2026-10-13）**：提示词双入口约束（`SYSTEM_PROMPT` 规则 10 +
+  nl2sql 输出契约）——生成的 SELECT 一律附 `LIMIT 10`（用户明确要全量/指定条数时除外）；执行侧机械
+  兜底 `ensureSelectRowLimit`（单语句 + SELECT/WITH 开头 + 无 LIMIT/SELECT INTO/行锁 → 追加，
+  保守不误改），接入 AI Chat 两条执行路径（面板/对话），防止大结果集全量缓冲导致卡顿/崩溃。
+  测试 +5（ai-core 102、vscode-ext 1703 全绿）。spec §十四.11 回填。
+- **S7i AI Chat 双 Run + 回帖格式适配（2026-10-13）**：sql/redis/json 代码块统一两个执行入口——
+  「在面板运行」（SQL 复用查询面板并改为 AI 面板**平级 tab**；Redis 打开控制台注入执行；ES 打开
+  DSL tab 注入 index/body 执行）与「在对话中运行」（结果回帖到消息流）：SQL → **Markdown 表格**
+  （≤50 行，单元格单行化/转义/截断；写语句=完成+耗时；错误=错误信息）；ES → **按结果类型的
+  pretty JSON**（hits/aggregations/suggest/原始 body；错误 `{status,type,reason,rootCause}`）；
+  Redis 维持 CLI 文本；toolResult 协议新增 `format`/`lang`（结果 fence 不出现误触执行按钮）。SQL
+  对话内执行走 `QueryExecutor.runHeadless`（无面板；确认/只读/生产门禁与历史/审计/DDL 事件同口径）。
+  测试 +11（vscode-ext 1699 全绿）。spec §十四.10 回填。
 - **S7h 表/列编辑器升级为宽弹层（方案 A，2026-10-13）**：TableNoteDialog（640px）替代侧栏窄编辑器——
   列搜索 + 过滤（全部/未填写/已填写含计数）、DB 注释可展开、说明/样例两栏、每列抓取样例；
   脏数据保护（保存/放弃/取消）、保存按钮仅脏时可用、保存回执 + 最后修改刷新、✎/# 已填徽标；

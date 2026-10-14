@@ -1538,3 +1538,81 @@ docker exec ollama ollama pull qwen2.5-coder:7b
   - 保存按钮仅脏时可用；保存回显「已保存」轻提示 + 最后修改时间刷新；列上显示 ✎/# 徽标（已填状态）。
 - **侧栏最终两视图**：注入的表 / 会话；点表名 → 弹层编辑（唯一编辑入口）。
 - **死代码清理**：删除 `TableNoteEditor.vue`（侧栏版）与 sidebar notes 视图状态。
+
+### 14.10 S7i：AI Chat 双 Run + 回帖格式适配（2026-10-13）
+
+统一四引擎（MySQL/PG/SQLite/Redis/ES）在 AI Chat 中的执行语义：**每个代码块两个入口**。
+
+- **双按钮**（`CodeBlock.vue`）：`Run in panel`（在引擎面板执行）/ `Run in chat`（结果回帖消息流）。
+  - SQL 面板：复用 TableQueryView，且由 `ViewColumn.Beside` 改为 **AI 面板平级 tab**
+    （`QueryExecutor.run`/`TableQueryView.openForQuery` 增加 `viewColumn` 透传，其他调用方默认仍 Beside）；
+  - Redis 面板：打开控制台面板并注入执行（host `RedisView.runConsoleLines` → down `cliInject`，
+    webview 走既有 `runCommand` 入口——确认/只读/审计门禁照旧；未就绪先缓存、第二次 ready 补发）；
+  - ES 面板：打开 DSL tab、注入 index/body 自动执行（host `ElasticsearchView.injectDsl` → down
+    `esInjectDsl`；同样带未就绪缓存）。
+- **回帖格式**（`toolResult` 协议新增 `format`/`lang`）：
+  - SQL（含 SQLite）→ **Markdown 表格**：列头 + 前 50 行（单元格单行化、`|` 转义、80 字截断；
+    null 留空）；写语句（无结果集）=「执行完成 · N ms」；错误 =「执行失败 · N ms」+ 错误信息。
+    执行走 `QueryExecutor.runHeadless`（QueryRunner 无面板执行）：`confirmSqlExecution` 确认门禁、
+    历史/审计（含明文口令 SQL 排除）、DDL 事件、`QueryExecutedEvent` 与 `run` 同口径。
+  - ES → **按结果类型的 pretty JSON**：hits → `{index,took,total,hits[]}`（≤20 条，仅 `_id/_score/_source`）；
+    aggregations → `{index,took,total,aggregations}`；suggest → `{index,took,suggest}`；其余 → 原始 body；
+    错误 → `{status,type,reason,rootCause}`。
+  - Redis → 维持 CLI 文本；结果 fence 使用不可执行语言标记（`redis-result`/`es-result`），
+    避免结果文本上出现误触的 Run 按钮。
+- **消息渲染**：`aiChatStream.parseMessageBlocks` 新增 **table 块**（完整表格 = 管道行 + `---` 分隔行；
+  流式未闭合按文本；代码块内不解析；`\|` 还原），`MessageBubble` 渲染为真表格。
+- **测试**：esExec JSON 适配/聚合、sqlChatResult 表格格式化（截断/写语句/错误/转义）、
+  aiChatStream 表格块、Redis/ES 注入就绪缓存；vscode-ext **1699 全绿**（+11）。
+
+### 14.11 S7j：AI 生成 SQL 行数上限 LIMIT 10（2026-10-13）
+
+真机反馈：复合条件下数据量大时，无 LIMIT 的生成 SQL 会大结果集全量缓冲（mysql2 默认整包缓冲），
+造成卡顿甚至崩溃。双层防护：
+
+- **提示词约束**：`SYSTEM_PROMPT` 规则 10——生成的 SELECT 一律附 `LIMIT 10`，仅当用户明确要求
+  全量或指定条数时省略；nl2sql 输出契约（Alt+A/编辑器路径）同步该要求。
+- **执行兜底**：`ensureSelectRowLimit`（vscode-ext `src/ai/rowLimit.ts`）——仅在**单语句 +
+  `SELECT`/`WITH` 开头 + 无 LIMIT / SELECT INTO / FOR UPDATE|FOR SHARE|LOCK IN SHARE MODE**
+  时追加 ` LIMIT 10`（其余原样，保守不误改；词法判定复用 db-core `sqlSkeleton`/`splitSqlStatements`），
+  接入 AI Chat 两条执行路径（`executeAiSql` 面板 / `executeSqlInChat` 对话；AI 归因标记与执行
+  用同一份改写后的 SQL）。正常 SQL 编辑器/REST/表浏览路径不受影响。
+- **测试**：rowLimit 单测（追加/已有 LIMIT（含子查询）/非 SELECT/多语句/WITH/注释开头/SELECT INTO/
+  行锁）+ prompts 规则断言；ai-core 102、vscode-ext **1703 全绿**（+5）。
+
+### 14.12 S7k：同步体检/修复（2026-10-14）
+
+真机缺口：本地实体丢失（如验证器条目）但同步游标已到最新（`after=snapshotSequence`）时，
+同步引擎认为"无新记录"，不会重拉——数据显示"空了"且永不自愈。云端数据完好（只读解密核实）。
+
+- **引擎**（db-host `syncEngine`）：
+  - `inspectLocalIntegrity()`：只读内存统计——映射总数 / 本地实体缺失（可修复）分类计数 /
+    有未决出站变更（不修复，等出站收敛）；
+  - `repairLocalMissing()`：对「远端存活 + 本地实体缺失 + 无未决出站」的映射，分页只读拉全量
+    存活记录（不动游标），按 `applyOrder` 排序后 **`force` 重放**（绕过「版本不新」跳过；复用
+    `applyRecord`/unresolved 收敛，恢复实体与引用映射）。
+- **协调器/会话**：`inspectNow`/`repairNow` 经串行链执行（不与同步并发）；同步结果新增
+  `localMissing` 计数（drain/runPhase 补入）。
+- **命令**：`devbelt.syncDoctor`「同步体检（完整性检查与修复）」（`devbelt.sync.ready` 可见）——
+  只读报告（写 Diagnostics）→ 有缺失时确认 → 修复 → 验证器孤儿条目自愈归组（`healNow`）→
+  结果提示；手动同步摘要附「本地缺少 {count} 条云端记录（可执行「同步体检」修复）」，
+  自动同步仅落诊断日志（不打扰）。
+- **测试**：引擎（force 重放恢复/未决出站跳过/云端无记录不报错）、协调器（串行链委托）、
+  命令（健康/确认修复/取消/未解锁）；vscode-ext **1713 全绿**（+10）、db-host 19。
+- **S7k.1 墓碑双向收敛（2026-10-14，真机跟进）**：候选判定改用 `entities.listForSync()` 归一摘要
+  （各后端 `get` 对墓碑处理不一致）——「本地实体不存在 **或本地墓碑 `deleted=true`**」且无未决
+  出站变更均为候选；修复时远端存活 → force 重放复活，远端墓碑 → force 应用墓碑并删映射
+  （向云端删除收敛）。测试 +2（vscode-ext 1715 全绿）。
+- **S7k.2 生命周期覆盖 + 评审整改（2026-10-14）**：
+  - 全同步实体「删除→重新添加」端到端回归：个人四类（连接/分组/查询/文件夹，`deleteReadd.test.ts`
+    —— delete mutation 生成→确认清映射→重加 mint 新 recordId，再到另一端用原密文重放 verify 收敛）、
+    验证器三类、schemaNotes（各 e2e 文件补生命周期用例）；
+  - 评审整改：`ensureSelectRowLimit` 排除写语句（CTE 写）+ 新行追加（行尾 `--` 注释安全）；`esExec`
+    `size` 钳制；`syncDoctor` 端口调用错误封装；`repairLocalMissing` 快照漂移校验 + `notFound` 计数；
+    `sqlChatResult` 单元格反斜杠转义；`QueryExecutor.runHeadless` 单测（成功/取消/错误/写语句）。
+  - 验证：vscode-ext 1723、db-host 23 全绿。
+- **S7k.3 第二轮评审整改（2026-10-14）**：`collectRepairCandidates` 对较新本地墓碑（updateTime>revision）视为用户删除意图、不复活；`repairLocalMissing` 补远端 epoch 对账 + 同 recordId 取最新版去重/集齐早停；`esExec` 结果加字符预算（`_source` 2000 字、整体 20K）并修正 suggest/空聚合/size 归一分支；`ensureSelectRowLimit` 跳过 `FETCH FIRST/NEXT`/`TOP`，对话内执行标注「已自动限制 N 行」；`contextDetail` 懒加载错误复位 + 切连接重置（host 失败也回发）；`recordCodec` encode 复用常量。验证 vscode-ext 1727、db-host 23 全绿。
+- **S7k.4 关系校准（2026-10-14）**：真机"修复后条目被自愈归错分组"——`repairLocalMissing` 增加 re-link 阶段：对（映射 confirmed + 本地存活 + 无未决出站）的带引用实体，解密 payload 并把 recordId 引用经 mapStore 解析为本地 id，与本地字段比对（connection.groupId / group.parentId / queryFolder.connId / query.connId+folderId / authenticatorEntry.groupId+tags / schemaNotes.connId），不一致则 `force` 重放（仅改该条，不整体覆盖）；`LocalRepairResult.relinked` 计数并回显。测试 +2（错位校正 / 一致不重放）。vscode-ext 1732、db-host 23 全绿。
+- **S7k.5 对账收敛重构 + 一致性检测 + 不变量测试（2026-10-14）**：把缺失/复活/校准三者收敛为「单一对账」——`classifyReconcilePlan`（每条 confirmed 映射归入唯一动作 pending/localDelete/missing/revive/relink）+ `convergeToCloud`（单循环 force 收敛；不变量写入实现与测试：幂等 / 隔离 / 单写；`LocalRepairResult` 计为 materialized/relinked/converged）；解锁后自动体检（`inspectLocalIntegrity`）告警并一键跳同步体检；**db-ui（网页端验证器）补全分组 + 标签**（`collectAuthenticator`/`groupAuthenticator`/`tagNameMap` + 分组区块与标签徽标渲染，与扩展对齐）。vscode-ext 1735、db-host 23、db-ui 124 全绿。
+- **S7k.6 一致性干跑校验 + 漂移修复入口（2026-10-14）**：修根因——名字/引用漂移属 `relink` 类而体检只认缺失，`missingTotal=0` 时直接判健康返回，`repairLocalMissing`（唯一按云端校准漂移的路径）永不执行（真机：分组名漂移 + 条目归错组，无提示无人修）。新增 `verifyDrift()` 零写入干跑（与 repair 共用 `classifyReconcilePlan` + 分页扫描，判定一致；`incomplete` fail-open 不提示不处置）；`syncDoctor` 门槛改「缺失 或 漂移」并分别展示明细（`sync.doctorIssues`），仅漂移也进入确认与修复；解锁（无缺失时）与手动 pull/push/立即同步自动干跑校验，检出真实漂移弹「发现 N 处不一致」+ 一键修复（`sync.driftFound`，不自动改数据）；`repairLocalMissing` 抽取共用 `scanReconcileRecords`。测试：verifyDrift 检出名字/归属漂移且零写入、快照漂移 incomplete、doctor 仅漂移路径、解锁/手动同步漂移提示；跟进补修：`REF_CARRYING_TYPES` 纳入 `authenticatorGroup`/`authenticatorTag` + 命名比对泛化（载荷带 name 即比对），修「验证器分组名漂移不被校准」。vscode-ext 1747、db-host 23、db-ui 124 全绿。
+- **S7k.8 数据体检面板：发现 → 用户选择（2026-10-14，同步 UX 复盘）**：删提示堆（8+ 条术语弹窗）重做为决策面板——引擎 `inspectFindings()`（逐条：缺失/命名（本机↔云端对照）/归属（字段对照）/本机已删云端仍在/云端已删本机仍在/孤儿空分组，`detect` 内核与修复共用「看到什么就修什么」）+ `repairFindings(ids)`（只修点选项，幂等）；webview 面板 `SyncDoctorView.vue` + provider（逐条按钮/冲突三选一/全部按云端修复/重新检查）；解锁与手动同步后仅一条白话通知进面板；删除旧 syncDoctor 弹窗流、syncConflicts QuickPick、unlock/手动/自动三类提示与计数长句（含命令注册与 nls）；S7k.7 的孤儿墓碑/空组清理并入面板发现项。文案白话化 `sync.find.*`/`sync.field.*`。vscode-ext 1739、db-host 23 全绿。
