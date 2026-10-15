@@ -187,6 +187,9 @@ export class AiChatView extends BaseWebView {
         const tables = msg.tables.filter((name): name is string => typeof name === 'string' && name.trim().length > 0);
         await this.deps.contextStore.setSelectedTables(conn.id, scope, tables);
         await this.pushContext();
+        // 选表后「实际注入的表」快照同步刷新（contextChanged 不带表清单；快照只随明细
+        // 请求/换连接失效——同连接改选表会停留在旧清单，Apply 后侧栏不刷新的根因）。
+        await this.pushContextDetail();
         return;
       }
       case 'requestTableNote': {
