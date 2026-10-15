@@ -1372,9 +1372,11 @@ docker exec ollama ollama pull qwen2.5-coder:7b
 ## 十三、后续扩展（不在本阶段）
 
 - **【P9.1 交付】加油包（一次性配额 + 多档位 SKU + 管理后台建单/退款 + 双段 FIFO 计量）**：
-  独立切片评审/merge，不阻塞 P9 v1 AI 能力交付。**进度：P9.1a 服务端核心已落地（2026-10-15，
-  迁移 009 + aiTopupRepo/aiTopupService + aiQuotaService 双段 FIFO + `GET /api/ai/skus` +
-  409 扩 topupRemaining；P9.1b 管理后台 / P9.1c 客户端购买入口与两段配额条待做）。**
+  独立切片评审/merge，不阻塞 P9 v1 AI 能力交付。**进度：P9.1a 服务端核心（2026-10-15，迁移 009 +
+  aiTopupRepo/aiTopupService + aiQuotaService 双段 FIFO + `GET /api/ai/skus` + 409 扩 topupRemaining）
+  与 P9.1b 管理后台（2026-10-15，`consoleAiTopup` 路由：SKU 管理/手工建单金额二次确认/履行/退款/
+  用户配额查询 + 审计同事务；admin-ui「AI 加油包」页；通用订单退款拒绝 topup 订单）均已落地；
+  P9.1c 客户端购买入口（P4 收银台接线）与两段配额条显示待做。**
   数据模型：新增 `ai_topup_skus`（多档位 SKU，
   code/tokens/price_cents/valid_days/status/sort_order）+ `ai_quota_grants`（用户额度账本，
   order_id 唯一键幂等）两张表，orders 扩 purpose/sku_code、plan_code 放宽 NULL、channel 扩

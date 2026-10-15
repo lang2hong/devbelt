@@ -61,6 +61,17 @@
   路由与月额度/权益矩阵）与 `docs/产品介绍.md`。验证：ai-core 88、vscode-ext 1636 通过/4 跳过
   （+14 条 S6）、server 585 回归、全仓 typecheck/lint 全绿。多模型手工矩阵/F5 真机走查/真机大库
   预筛留发布硬门禁（未执行）。
+- **P9.1b 已交付（2026-10-15，管理后台）**：加油包运营闭环——新增 `consoleAiTopup` 路由
+  （console-only + requireAdmin + CSRF + 幂等回执 + 限流）：`GET /api/admin/ai/skus`（全量）、
+  `PATCH /api/admin/ai/skus/:code`（改价/停启用，reason 必填）、`POST /api/admin/ai/topup-orders`
+  （手工建单，**金额二次确认** expectedAmountCents≠当前价 → 422 AMOUNT_MISMATCH）、
+  `/:orderNo/fulfill`（paid→fulfilled 幂等重试）、`/:orderNo/refund`（撤销额度）、
+  `GET /api/admin/ai/users/:userId/quota`（双段快照 + grants 明细）；审计 6 类事件随业务同事务
+  （admin.ai.*）。`AiTopupService` 拆 `*InTx` 变体并入调用方事务；`Order` 实体补
+  purpose/skuCode、planCode 放宽 NULL、channel 扩 manual；**通用订单退款拒绝 topup 订单**
+  （防「订单已退款+额度仍活」矛盾账）；admin-ui 新增「AI 加油包」页（四段：档位目录/手工建单/
+  加油包订单/配额查询），订单页增用途过滤与 manual 渠道。admin→ai 模块依赖经接口登记。
+  验证：server 610（+11）/admin-ui 36（+5）/db-host 23/vscode-ext 1750 全绿 + tsc 干净。
 - **P9.1a 已交付（2026-10-15，服务端核心）**：加油包账本落地——迁移 009（`ai_topup_skus`
   预置 3 档 topup_500k/2m/10m + `ai_quota_grants`（`uq_grants_order` 唯一键=入账幂等锚点）+
   `orders` 扩 purpose/sku_code、plan_code 放宽 NULL、channel 扩 'manual'）；`aiTopupService`
