@@ -7,12 +7,13 @@ import { syncEntityKindMigration } from './005_sync_entity_kind.js';
 import { redisEngineMigration } from './006_redis_engine.js';
 import { auditQueryIndexesMigration } from './007_audit_query_indexes.js';
 import { aiQuotaMigration } from './008_ai_quota.js';
+import { aiTopupMigration } from './009_ai_topup.js';
 
 /**
  * 迁移集合（开发阶段 squash：原 001–024 已合并为单一基线）。
  * 新库/旧库均由基线重建；旧库的历史版本由 LEGACY_MIGRATION_VERSIONS 识别并放行。
  */
-export const migrations: readonly Migration[] = [baselineMigration, planFeaturesV2Migration, planOrderingMigration, authenticatorQuotaMigration, syncEntityKindMigration, redisEngineMigration, auditQueryIndexesMigration, aiQuotaMigration];
+export const migrations: readonly Migration[] = [baselineMigration, planFeaturesV2Migration, planOrderingMigration, authenticatorQuotaMigration, syncEntityKindMigration, redisEngineMigration, auditQueryIndexesMigration, aiQuotaMigration, aiTopupMigration];
 
 /**
  * squash 前的历史版本登记（001–024）。基线会重建这些表；

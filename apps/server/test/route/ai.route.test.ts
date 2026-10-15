@@ -12,6 +12,8 @@ import { AiQuotaService, monthKey } from '../../src/modules/ai/service/aiQuotaSe
 import { AiProxyService } from '../../src/modules/ai/service/aiProxyService.js';
 import { AuditWriter } from '../../src/service/auditWriter.js';
 import { MemoryAiUsageRepo } from '../helpers/fakeAiUsageRepo.js';
+import { MemoryAiTopupRepo } from '../helpers/fakeAiTopupRepo.js';
+import { AiTopupService } from '../../src/modules/ai/service/aiTopupService.js';
 import { FakeAuditRepo } from '../helpers/linkFlowFakes.js';
 import {
   FakePlanRepo,
@@ -40,6 +42,7 @@ async function buildApp(opts: BuildOptions): Promise<{
   token: string;
   userId: number;
   usageRepo: MemoryAiUsageRepo;
+  topupRepo: MemoryAiTopupRepo;
   settleReservedCleared: () => boolean;
 }> {
   const app = Fastify({ logger: false });
@@ -59,7 +62,9 @@ async function buildApp(opts: BuildOptions): Promise<{
     free.features = { ...free.features, maxAiTokensMonthly: opts.limit };
   }
   const usageRepo = new MemoryAiUsageRepo();
-  const quota = new AiQuotaService(usageRepo, new FakePersonalSubscriptionRepo(), plans, usageRepo.runner());
+  const topupRepo = new MemoryAiTopupRepo();
+  const quota = new AiQuotaService(usageRepo, topupRepo, new FakePersonalSubscriptionRepo(), plans, usageRepo.runner());
+  const topup = new AiTopupService(topupRepo, usageRepo.runner());
   const proxy = new AiProxyService({
     config: {
       configured: opts.configured ?? true,
@@ -80,6 +85,7 @@ async function buildApp(opts: BuildOptions): Promise<{
     rateLimiter: new RateLimitService(new FakeRateLimitRepo(), true),
     proxy,
     quota,
+    topup,
     rateLimitPerMinute: opts.rateLimitPerMinute,
   });
   await app.ready();
@@ -96,6 +102,7 @@ async function buildApp(opts: BuildOptions): Promise<{
     token,
     userId: user.id,
     usageRepo,
+    topupRepo,
     settleReservedCleared: () => {
       const row = usageRepo.get(user.id, monthKey(new Date()));
       return !!row && row.reservedPromptTokens === 0 && row.reservedCompletionTokens === 0;
@@ -217,6 +224,23 @@ describe('POST /api/ai/chat（SSE 端到端）', () => {
 });
 
 describe('GET /api/ai/usage', () => {
+  it('GET /api/ai/skus 返回上架档位（P9.1）', async () => {
+    const { app, token, topupRepo } = await buildApp({});
+    topupRepo.seedSku({ code: 'sk_a', tokens: 5000, priceCents: 900 });
+    topupRepo.seedSku({ code: 'sk_b', tokens: 20000, priceCents: 2900, sortOrder: 1 });
+    topupRepo.seedSku({ code: 'sk_off', tokens: 1, priceCents: 1, status: 'disabled' });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/ai/skus',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { items: Array<{ code: string; tokens: number; priceCents: number }> };
+    expect(body.items.map((i) => i.code)).toEqual(['sk_a', 'sk_b']);
+    expect(body.items[0]).toMatchObject({ tokens: 5000, priceCents: 900 });
+  });
+
   it('未登录 401；登录返回当月快照', async () => {
     const { app, token } = await buildApp({
       fetchImpl: (async () => new Response('')) as typeof fetch,

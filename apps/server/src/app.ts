@@ -80,6 +80,8 @@ import { registerConsoleStatic } from './consoleStatic.js';
 import { resolveAiUpstreamConfig } from './modules/ai/aiConfig.js';
 import { MysqlAiUsageRepo } from './modules/ai/repository/aiUsageRepo.js';
 import { AiQuotaService } from './modules/ai/service/aiQuotaService.js';
+import { MysqlAiTopupRepo } from './modules/ai/repository/aiTopupRepo.js';
+import { AiTopupService } from './modules/ai/service/aiTopupService.js';
 import { AiProxyService } from './modules/ai/service/aiProxyService.js';
 import { aiRoutes } from './modules/ai/module.js';
 
@@ -285,14 +287,17 @@ export async function createApp() {
 
   const invoiceService = new InvoiceService({ invoiceRepo, orderRepo, auditWriter });
 
-  // AI 服务端代理（P9 §6.8）：单段月额度（ai_token_usage）+ parse-and-forward。
+  // AI 服务端代理（P9 §6.8）：双段配额（月额度 ai_token_usage + 加油包 grants FIFO，P9.1）+ parse-and-forward。
   const aiUsageRepo = new MysqlAiUsageRepo(getMysql);
+  const aiTopupRepo = new MysqlAiTopupRepo(getMysql);
   const aiQuotaService = new AiQuotaService(
     aiUsageRepo,
+    aiTopupRepo,
     personalSubscriptionRepo,
     planRepo,
     (fn) => withTransaction(app.mysql, fn),
   );
+  const aiTopupService = new AiTopupService(aiTopupRepo, (fn) => withTransaction(app.mysql, fn));
   const aiUpstreamConfig = resolveAiUpstreamConfig(process.env);
   if (!aiUpstreamConfig.configured) {
     app.log.warn(
@@ -374,6 +379,7 @@ export async function createApp() {
     rateLimiter,
     proxy: aiProxyService,
     quota: aiQuotaService,
+    topup: aiTopupService,
   });
   app.register(personalRoutes, { tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin: config.consoleOrigin, deviceRepo, idempotencyService, revokeDevice: (userId, deviceId) => authService.revokeDevice(userId, deviceId), revokeDeviceInTx: (tx, userId, deviceId) => authService.revokeDeviceInTx(tx, userId, deviceId) });
   app.register(syncRoutes, { tokenService, getUser, getSessionActive, syncState: syncStateService, syncRecord: syncRecordService, syncReset: syncResetService, rateLimiter, verifyAccountRecoveryPassword: (userId, password) => authService.verifyPasswordStepUp(userId, password), auditWriter, emailSender, userRepo });

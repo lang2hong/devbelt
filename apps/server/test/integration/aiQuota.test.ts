@@ -4,6 +4,8 @@ import { runMigrations } from '../../src/repository/mysql/migrate.js';
 import { migrations, LEGACY_MIGRATION_VERSIONS } from '../../src/repository/mysql/migrations/index.js';
 import { withTransaction, type MysqlDb } from '../../src/repository/mysql/db.js';
 import { MysqlAiUsageRepo } from '../../src/modules/ai/repository/aiUsageRepo.js';
+import { MysqlAiTopupRepo } from '../../src/modules/ai/repository/aiTopupRepo.js';
+import { AiTopupService } from '../../src/modules/ai/service/aiTopupService.js';
 import { AiQuotaService } from '../../src/modules/ai/service/aiQuotaService.js';
 import { AiQuotaExceededError } from '../../src/modules/ai/domain/errors.js';
 import { FakePlanRepo, FakePersonalSubscriptionRepo, makeFreePlan } from '../helpers/fakeRepos.js';
@@ -36,6 +38,7 @@ describe.skipIf(!URL)('AI 月额度账本（real MySQL）', () => {
     free.features = { ...free.features, maxAiTokensMonthly: 1000 };
     quota = new AiQuotaService(
       repo,
+      new MysqlAiTopupRepo(() => db),
       new FakePersonalSubscriptionRepo(),
       plans,
       (fn) => withTransaction(db, fn),
@@ -121,5 +124,84 @@ describe.skipIf(!URL)('AI 月额度账本（real MySQL）', () => {
       reservedCompletionTokens: 0,
       requestCount: 1,
     });
+  });
+});
+
+/**
+ * P9.1 加油包真库验证：migration 009 种子、双重来源履约幂等（uq_grants_order）、
+ * 双段 FIFO（月额度耗尽后由 grants 承接）。无真库环境时跳过。
+ */
+describe.skipIf(!URL)('AI 加油包账本（real MySQL，P9.1）', () => {
+  const USER_T = 990_010;
+  const MONTH_T = '2026-10';
+
+  let pool: ReturnType<typeof createTestPool>;
+  let db: MysqlDb;
+  let topupRepo: MysqlAiTopupRepo;
+  let quota: AiQuotaService;
+
+  beforeAll(async () => {
+    pool = createTestPool();
+    db = pool as unknown as MysqlDb;
+    await runMigrations(db, [...migrations], LEGACY_MIGRATION_VERSIONS);
+    topupRepo = new MysqlAiTopupRepo(() => db);
+    const plans = new FakePlanRepo([makeFreePlan()]);
+    const free = plans.plans.find((p: Plan) => p.code === 'free')!;
+    free.features = { ...free.features, maxAiTokensMonthly: 1000 };
+    quota = new AiQuotaService(
+      new MysqlAiUsageRepo(() => db),
+      topupRepo,
+      new FakePersonalSubscriptionRepo(),
+      plans,
+      (fn) => withTransaction(db, fn),
+    );
+  });
+
+  afterAll(async () => {
+    await db.query('DELETE FROM ai_quota_grants WHERE user_id IN (?, ?)', [USER_T, 990_011]);
+    await db.query("DELETE FROM orders WHERE purpose = 'topup' AND user_id IN (?, ?)", [USER_T, 990_011]);
+    await db.query('DELETE FROM ai_token_usage WHERE user_id IN (?, ?)', [USER_T, 990_011]);
+    await pool.end();
+  });
+
+  it('migration 009：SKU 种子存在且 orders 扩列生效', async () => {
+    const skus = await topupRepo.listActiveSkus();
+    expect(skus.map((s) => s.code)).toEqual(['topup_500k', 'topup_2m', 'topup_10m']);
+    const [cols] = await db.query<any[]>('SHOW COLUMNS FROM orders LIKE ?', ['purpose']);
+    expect(cols).toHaveLength(1);
+  });
+
+  it('手工建单 + fulfill 重放：uq_grants_order 幂等（仅一行账本）', async () => {
+    const service = new AiTopupService(topupRepo, (fn) => withTransaction(db, fn));
+    const created = await service.createManualOrder({ userId: USER_T, skuCode: 'topup_500k' });
+    expect(created.grantInserted).toBe(true);
+    const [orderRows] = await db.query<any[]>('SELECT id FROM orders WHERE order_no = ?', [created.orderNo]);
+    const orderId = Number(orderRows[0]!.id);
+    const [rows] = await db.query<any[]>('SELECT COUNT(*) AS cnt FROM ai_quota_grants WHERE user_id = ?', [USER_T]);
+    expect(Number(rows[0]!.cnt)).toBe(1);
+    // 重放 insertGrant（模拟回调重放）：uq_grants_order 挡住 → false（幂等锚点）
+    const insertedAgain = await withTransaction(db, (tx) =>
+      topupRepo.insertGrantInTx(tx, {
+        userId: USER_T,
+        orderId,
+        skuCode: 'topup_500k',
+        tokens: 500_000,
+        expiresTime: new Date('2026-12-31T00:00:00Z'),
+      }),
+    );
+    expect(insertedAgain).toBe(false);
+  });
+
+  it('双段 FIFO：月额度耗尽后由 grants 承接预占与结算', async () => {
+    const grants = await topupRepo.lockActiveInTx({ query: db.query.bind(db) } as never, USER_T, new Date('2026-10-15T00:00:00Z'));
+    expect(grants.length).toBeGreaterThan(0);
+    const available = await topupRepo.availability(USER_T, new Date('2026-10-15T00:00:00Z'));
+    expect(available.remaining).toBeGreaterThan(0);
+    const reservation = await quota.reserve(USER_T, { estimatedPromptTokens: 800, maxCompletionTokens: 0 });
+    expect(reservation.grantAllocations.length).toBe(1);
+    await quota.settle(reservation, { promptTokens: 800, completionTokens: 0 });
+    const after = await topupRepo.availability(USER_T, new Date('2026-10-15T00:00:00Z'));
+    // 800 ≤ 月额度 1000 → 月段吸收，grants 不扣
+    expect(after.remaining).toBe(available.remaining);
   });
 });

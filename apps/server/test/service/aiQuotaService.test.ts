@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { AiQuotaService, monthKey, resetAtIso } from '../../src/modules/ai/service/aiQuotaService.js';
 import { AiQuotaExceededError } from '../../src/modules/ai/domain/errors.js';
 import { MemoryAiUsageRepo } from '../helpers/fakeAiUsageRepo.js';
+import { MemoryAiTopupRepo } from '../helpers/fakeAiTopupRepo.js';
 import {
   FakePlanRepo,
   FakePersonalSubscriptionRepo,
@@ -15,14 +16,16 @@ const MONTH = '2026-10';
 function build(now: Date = new Date('2026-10-15T00:00:00Z')): {
   quota: AiQuotaService;
   repo: MemoryAiUsageRepo;
+  grants: MemoryAiTopupRepo;
   plans: FakePlanRepo;
   subs: FakePersonalSubscriptionRepo;
 } {
   const repo = new MemoryAiUsageRepo();
+  const grants = new MemoryAiTopupRepo();
   const plans = new FakePlanRepo([makeFreePlan(), makeProPlan()]);
   const subs = new FakePersonalSubscriptionRepo();
-  const quota = new AiQuotaService(repo, subs, plans, repo.runner(), () => now);
-  return { quota, repo, plans, subs };
+  const quota = new AiQuotaService(repo, grants, subs, plans, repo.runner(), () => now);
+  return { quota, repo, grants, plans, subs };
 }
 
 function setLimit(plans: FakePlanRepo, code: string, limit: number): void {
@@ -58,6 +61,7 @@ describe('AiQuotaService.reserve', () => {
       limit: 1000,
       used: 900,
       reserved: 100,
+      topupRemaining: 0,
       resetAt: '2026-11-01T00:00:00.000Z',
     });
   });
@@ -161,5 +165,107 @@ describe('月份工具', () => {
   it('resetAtIso 为下月 1 日 00:00 UTC（跨年正确）', () => {
     expect(resetAtIso('2026-10')).toBe('2026-11-01T00:00:00.000Z');
     expect(resetAtIso('2026-12')).toBe('2027-01-01T00:00:00.000Z');
+  });
+});
+
+describe('AiQuotaService 双段（月额度 + 加油包 grants FIFO，P9.1）', () => {
+  const AFTER = new Date('2026-11-01T00:00:00Z');
+  const BEFORE = new Date('2026-10-20T00:00:00Z');
+
+  it('月额度耗尽 → 加油包承接预占（分配进 grants，可越过月限）', async () => {
+    const { quota, plans, repo, grants } = build();
+    setLimit(plans, 'free', 1000);
+    repo.seed(1, MONTH, { promptTokens: 1000 });
+    const grantId = grants.seedGrant({ userId: 1, tokens: 5000, expiresTime: AFTER });
+
+    const reservation = await quota.reserve(1, { estimatedPromptTokens: 500, maxCompletionTokens: 100 });
+    expect(reservation.reservedPromptTokens).toBe(0);
+    expect(reservation.reservedCompletionTokens).toBe(0);
+    expect(reservation.grantAllocations).toEqual([{ grantId, tokens: 600 }]);
+    expect(grants.grants.get(grantId)?.tokensReserved).toBe(600);
+  });
+
+  it('FIFO：先到期的 grant 先扣（多条时按 expires_time 升序吃满）', async () => {
+    const { quota, plans, repo, grants } = build();
+    setLimit(plans, 'free', 0);
+    const g1 = grants.seedGrant({ userId: 1, tokens: 300, expiresTime: BEFORE });
+    const g2 = grants.seedGrant({ userId: 1, tokens: 1000, expiresTime: AFTER });
+
+    const reservation = await quota.reserve(1, { estimatedPromptTokens: 500, maxCompletionTokens: 100 });
+    expect(reservation.grantAllocations).toEqual([
+      { grantId: g1, tokens: 300 },
+      { grantId: g2, tokens: 300 },
+    ]);
+  });
+
+  it('结算：月段优先吸收，grants 最多吃满其分配（超出分配部分由月段吸收）', async () => {
+    const { quota, plans, repo, grants } = build();
+    setLimit(plans, 'free', 1000);
+    const g1 = grants.seedGrant({ userId: 1, tokens: 1000, expiresTime: AFTER });
+
+    const reservation = await quota.reserve(1, { estimatedPromptTokens: 1500, maxCompletionTokens: 100 });
+    expect(reservation.reservedPromptTokens).toBe(1000);
+    expect(reservation.reservedCompletionTokens).toBe(0);
+    expect(reservation.grantAllocations).toEqual([{ grantId: g1, tokens: 600 }]);
+
+    await quota.settle(reservation, { promptTokens: 1700, completionTokens: 0 });
+    const usage = repo.get(1, MONTH)!;
+    expect(usage.promptTokens).toBe(1700); // 月段吸收全部实际
+    expect(usage.reservedPromptTokens).toBe(0);
+    const grant = grants.grants.get(g1)!;
+    expect(grant.tokensUsed).toBe(600); // 超出月段分配(1000)的 700 中，最多吃满分配 600
+    expect(grant.tokensReserved).toBe(0);
+  });
+
+  it('结算 under-run：实际远低于预占 → grants 全额释放不扣', async () => {
+    const { quota, plans, grants } = build();
+    setLimit(plans, 'free', 100);
+    const g1 = grants.seedGrant({ userId: 1, tokens: 1000, expiresTime: AFTER });
+
+    const reservation = await quota.reserve(1, { estimatedPromptTokens: 500, maxCompletionTokens: 100 });
+    expect(reservation.grantAllocations).toEqual([{ grantId: g1, tokens: 500 }]);
+
+    await quota.settle(reservation, { promptTokens: 20, completionTokens: 10 });
+    const grant = grants.grants.get(g1)!;
+    expect(grant.tokensUsed).toBe(0);
+    expect(grant.tokensReserved).toBe(0);
+  });
+
+  it('双段都空 → 409 且 topupRemaining=0', async () => {
+    const { quota, plans, repo, grants } = build();
+    setLimit(plans, 'free', 1000);
+    repo.seed(1, MONTH, { promptTokens: 1000 });
+    grants.seedGrant({ userId: 1, tokens: 500, expiresTime: new Date('2026-10-01T00:00:00Z') }); // 已过期
+
+    const err = await quota
+      .reserve(1, { estimatedPromptTokens: 10, maxCompletionTokens: 10 })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AiQuotaExceededError);
+    expect((err as AiQuotaExceededError).quota.topupRemaining).toBe(0);
+  });
+
+  it('过期 grant 不参与可用（惰性翻状态 + 快照排除）', async () => {
+    const { quota, plans, grants } = build();
+    setLimit(plans, 'free', 0);
+    const stale = grants.seedGrant({ userId: 1, tokens: 999, expiresTime: new Date('2026-10-01T00:00:00Z') });
+    grants.seedGrant({ userId: 1, tokens: 100, expiresTime: AFTER });
+
+    const snapshot = await quota.getUsage(1);
+    expect(snapshot.topupRemaining).toBe(100);
+    const reservation = await quota.reserve(1, { estimatedPromptTokens: 50, maxCompletionTokens: 0 });
+    expect(reservation.grantAllocations).toHaveLength(1);
+    expect(grants.grants.get(stale)?.status).toBe('expired');
+  });
+
+  it('快照：remaining = 月段剩余 + 加油包余额', async () => {
+    const { quota, plans, repo, grants } = build();
+    setLimit(plans, 'free', 1000);
+    repo.seed(1, MONTH, { promptTokens: 400 });
+    grants.seedGrant({ userId: 1, tokens: 700, expiresTime: AFTER });
+
+    const snapshot = await quota.getUsage(1);
+    expect(snapshot.monthlyRemaining).toBe(600);
+    expect(snapshot.topupRemaining).toBe(700);
+    expect(snapshot.remaining).toBe(1300);
   });
 });

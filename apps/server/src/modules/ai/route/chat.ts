@@ -52,6 +52,7 @@ export async function aiChatRoutes(app: FastifyInstance, opts: AiChatRouteOption
                 limit: e.quota.limit,
                 used: e.quota.used,
                 reserved: e.quota.reserved,
+                topupRemaining: e.quota.topupRemaining,
                 resetAt: e.quota.resetAt,
               });
               return null;

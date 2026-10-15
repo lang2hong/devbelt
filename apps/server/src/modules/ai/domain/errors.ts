@@ -9,10 +9,10 @@ import { DomainError } from '../../../domain/errors.js';
  *   → 503。一律不透传上游原始错误体（防 Key/账号信息泄漏给客户端）。
  */
 
-/** 月额度不足（限流之外的资源状态）→ 409 AI_QUOTA_EXCEEDED。 */
+/** 月额度+加油包合计不足（限流之外的资源状态）→ 409 AI_QUOTA_EXCEEDED。 */
 export class AiQuotaExceededError extends DomainError {
   constructor(
-    public readonly quota: { limit: number; used: number; reserved: number; resetAt: string },
+    public readonly quota: { limit: number; used: number; reserved: number; topupRemaining: number; resetAt: string },
   ) {
     super('AI monthly token quota exceeded', 'AI_QUOTA_EXCEEDED');
     this.name = 'AiQuotaExceededError';
@@ -40,5 +40,29 @@ export class AiProviderError extends DomainError {
   constructor(message = 'AI provider error') {
     super(message, 'AI_PROVIDER_ERROR');
     this.name = 'AiProviderError';
+  }
+}
+
+/** 加油包 SKU 不存在或已停用（下单用）→ 404 TOPUP_SKU_NOT_FOUND。 */
+export class TopupSkuNotFoundError extends DomainError {
+  constructor(public readonly skuCode: string) {
+    super('topup sku not found', 'TOPUP_SKU_NOT_FOUND');
+    this.name = 'TopupSkuNotFoundError';
+  }
+}
+
+/** 加油包订单不存在 → 404 TOPUP_ORDER_NOT_FOUND。 */
+export class TopupOrderNotFoundError extends DomainError {
+  constructor(public readonly orderNo: string) {
+    super('topup order not found', 'TOPUP_ORDER_NOT_FOUND');
+    this.name = 'TopupOrderNotFoundError';
+  }
+}
+
+/** 加油包订单状态不允许该操作（如非 fulfilled 退款、已退款入账）→ 409 TOPUP_ORDER_STATE。 */
+export class TopupOrderStateError extends DomainError {
+  constructor(public readonly orderNo: string, message: string) {
+    super(message, 'TOPUP_ORDER_STATE');
+    this.name = 'TopupOrderStateError';
   }
 }
