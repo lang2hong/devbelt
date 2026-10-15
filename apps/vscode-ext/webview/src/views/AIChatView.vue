@@ -244,6 +244,11 @@ function selectConnection(id: string | null): void {
   post({ type: 'selectConnection', connId: id });
 }
 
+/** 「连接未打开」点击重试：复用 selectConnection 上行（宿主对无会话连接会执行 openConnection）。 */
+function reopenConnection(): void {
+  if (selectedConnId.value) selectConnection(selectedConnId.value);
+}
+
 /** S7a：切换作用域（库/逻辑库/索引，单选）。 */
 function selectScope(value: string): void {
   post({ type: 'selectScope', value });
@@ -313,6 +318,7 @@ function openContextDetail(): void {
       :selected-conn-id="selectedConnId"
       :include-column-comments="includeColumnComments"
       @select-connection="selectConnection"
+      @open-connection="reopenConnection"
       @select-scope="selectScope"
       @open-settings="post({ type: 'openSettings' })"
       @set-api-key="post({ type: 'setApiKey' })"

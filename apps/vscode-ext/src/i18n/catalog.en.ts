@@ -1294,6 +1294,7 @@ export const en: MessageCatalog = {
   'wv.ai.context.label': 'Context',
   'wv.ai.context.noConnection': 'No connection selected',
   'wv.ai.context.noSession': 'Connection not open',
+  'wv.ai.context.openHint': 'Click to open this connection',
   'wv.ai.context.schemaFailed': 'Schema unavailable',
   'wv.ai.notes.searchColumns': 'Search columns/comments',
   'wv.ai.notes.filterAll': 'All',

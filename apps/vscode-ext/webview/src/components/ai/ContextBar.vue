@@ -47,6 +47,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   selectConnection: [id: string | null];
+  openConnection: [];
   selectScope: [value: string];
   openSettings: [];
   setApiKey: [];
@@ -96,6 +97,14 @@ const contextLabel = computed(() => {
 const scopeOptions = computed(() => props.context?.scopeOptions ?? []);
 const showScopeSelect = computed(() => !!props.context?.scopeKind && scopeOptions.value.length > 0);
 
+/** 「连接未打开」时点击摘要按钮 = 重试打开连接（抽屉无会话时毫无内容，只会困住用户）。 */
+const connectionNotOpen = computed(() => props.context?.note === 'no-session');
+
+function onSummaryClick(): void {
+  if (connectionNotOpen.value) emit('openConnection');
+  else emit('requestContextDetail');
+}
+
 
 function onSelectScope(event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
@@ -135,7 +144,11 @@ function onSelect(event: Event): void {
       >
         <option v-for="option in scopeOptions" :key="option" :value="option">{{ option }}</option>
       </select>
-      <button class="ai-context-summary ai-context-link" :title="t('wv.ai.context.detail')" @click="emit('requestContextDetail')">
+      <button
+        class="ai-context-summary ai-context-link"
+        :title="connectionNotOpen ? t('wv.ai.context.openHint') : t('wv.ai.context.detail')"
+        @click="onSummaryClick"
+      >
         {{ contextLabel }}
       </button>
     </div>

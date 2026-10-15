@@ -1272,6 +1272,7 @@ export const zh: MessageCatalog = {
   'wv.ai.context.label': '上下文',
   'wv.ai.context.noConnection': '未选择连接',
   'wv.ai.context.noSession': '连接未打开',
+  'wv.ai.context.openHint': '点击打开连接',
   'wv.ai.context.schemaFailed': 'schema 获取失败',
   'wv.ai.notes.searchColumns': '搜索列名/注释',
   'wv.ai.notes.filterAll': '全部',
