@@ -1,5 +1,11 @@
 import { PersonalSyncClient, SyncApiError } from './client.js';
-import { openRecord } from './recordCodec.js';
+import { openRecord, encodeEntityPayload } from './recordCodec.js';
+import { mergeRecordPayload } from './conflictResolver.js';
+import {
+  classifyActions, findingsFromScan, cloudOnlyFindings, orphanGroupCandidates,
+  resolveOpName, findingOrder, displayValue,
+  type ReconcileCtx, type RepairDirection, type SyncFinding, type FindingsReport,
+} from './reconcileFindings.js';
 import { applyRecord, reconcileUnresolved, type ApplyContext, type ApplyDisposition } from './applyRecords.js';
 import { RecordConflictError } from './errors.js';
 import type { RecordMapStore } from './recordMapStore.js';
@@ -9,7 +15,7 @@ import type { StateStore } from './stateStore.js';
 import { EntityStore, UnresolvedRefStore, applyOrder } from './entityStore.js';
 import type { CachedEntitlement } from '../entitlementGate.js';
 import { assertRecordId, assertBase64UrlNoPad, assertBase64UrlRange, assertU64Decimal, rejectExtraKeys, validateSyncState } from './types.js';
-import { refKey, type SyncEntityType } from './syncEntity.js';
+import type { SyncEntityType } from './syncEntity.js';
 
 /**
  * 个人同步运行循环（SyncEngine）。
@@ -92,130 +98,30 @@ export interface SyncRunResult {
   skippedOutbound?: number;
   /** 出站跳过原因（取首个；用于把提示映射为可读文案）。 */
   skippedOutboundReason?: string;
-  /** 本地缺失的映射数（远端存活但本地实体不在；由 coordinator 从 inspect 补入）。 */
-  localMissing?: number;
   changeSequence?: string;
   reason?: string; // 不含秘密
 }
 
-/** 本地完整性报告（只读；「同步体检」命令与同步结果提示用）。 */
-export interface LocalIntegrityReport {
-  /** 映射总数（含 pending）。 */
-  mappings: number;
-  /** 本地实体缺失（可修复）分类计数。 */
-  missing: Array<{ type: SyncEntityType; count: number }>;
-  missingTotal: number;
-  /** 本地缺失但有未决出站变更（不修复，等出站收敛）。 */
-  pendingLocal: number;
-  /** 孤儿本地墓碑计数（较新删除且无待推出站→交给对账收敛；可见性补丁）。 */
-  localDelete: number;
-}
+// ── S7k.11 对账域：类型与规则唯一事实源在 reconcileFindings.ts（矩阵模块）──
+export type { SyncFinding, FindingsReport, FindingKind, RepairDirection, ReconcileAction, EntitySummary, ReconcileCtx } from './reconcileFindings.js';
 
 /**
- * 体检发现的单项不一致（只读检测，零写入）。「同步体检」面板逐条展示，由**用户选择**修复。
- * 与 `LocalIntegrityReport`（本地缺失，纯本地判定）互补：发现判定需拉云端载荷比对。
+ * 修复结果（用户可读的按方向计数）：面板横幅/日志直接消费。
+ * - cloud：按云端修复（恢复/更正/收敛删除）条数；
+ * - local：使用本机并**已定向推送**到云端的条数；
+ * - merged：合并（字段并集落地 + 推送）条数；
+ * - swept：清理的本机孤儿空分组数；
+ * - pending：入了出站但定向推送失败（留在出站等完整同步）条数；
+ * - notFound：检测后到修复间云端记录消失的条数（可重试）。
  */
-export interface SyncFinding {
-  /** 稳定选择键（面板勾选/逐条修复回传；`${kind}:${type}:${localId}`）。 */
-  id: string;
-  kind: 'missing' | 'nameDrift' | 'refDrift' | 'orphanDelete' | 'remoteDeleted' | 'orphanGroup';
-  type: SyncEntityType;
-  /** 云端 recordId（orphanGroup 无云端记录）。 */
-  recordId?: string;
-  localId: string;
-  /** 展示值：本机侧（名字或引用目标显示名；缺失类为空）。 */
-  localValue?: string;
-  /** 展示值：云端侧。 */
-  remoteValue?: string;
-  /** 引用漂移明细（字段名 + 两侧展示值；视图负责翻译字段名）。 */
-  ref?: { field: string; local?: string; remote?: string };
-}
-
-/** 检测结果：发现列表 + 扫描完整性。 */
-export interface FindingsReport {
-  findings: SyncFinding[];
-  /** 扫描提前中断（分页截断等）：发现可能未穷尽，面板应提示重试。 */
-  incomplete: boolean;
-}
-
-/** 本地缺失修复结果。 */
-export interface LocalRepairResult {
-  /** 需要材料化/复活的记录数（缺失、陈旧墓碑或孤儿墓碑）。 */
-  candidates: number;
-  /** 成功材料化/复活的条数。 */
-  materialized: number;
-  /** 关系/名称漂移校准写入的条数。 */
-  relinked: number;
-  /** 云端墓碑收敛删除的条数。 */
-  converged: number;
-  /** 清理的本地孤儿空分组数（无映射+无出站+无条目引用，永不同步的残留）。 */
+export interface RepairOutcome {
+  cloud: number;
+  local: number;
+  merged: number;
   swept: number;
   failed: number;
-  skipped: number;
-  /** 需要物化但 feed 未返回（分页截断/漂移等）——无法判断，与失败区分展示。 */
   notFound: number;
-  /** 扫描提前中断（快照漂移/分页错误/停滞），notFound 里可能含"未遍历到"。 */
-  incomplete: boolean;
-}
-
-/**
- * 对账单条动作。
- * - orphanDelete：本地墓碑较新且**无待推出站**——真实删除意图会在下一次 reconcile 生成出站
- *   （有出站则被 pending 保护）；无出站的孤儿墓碑永远不会被推送，也不可见，必须交给对账
- *   收敛（云端存活→复活；云端已删→收敛删除）。
- */
-type ReconcileActionKind = 'missing' | 'revive' | 'relink' | 'orphanDelete';
-
-interface ReconcileAction {
-  recordId: string;
-  type: SyncEntityType;
-  localId: string;
-  kind: ReconcileActionKind;
-}
-
-/** 对账校准目标（relink）：带交叉引用或命名的实体类型；relink 仅在检测到引用/命名漂移时才写。 */
-const REF_CARRYING_TYPES: ReadonlySet<SyncEntityType> = new Set<SyncEntityType>([
-  'connection', 'group', 'queryFolder', 'query',
-  'authenticatorEntry', 'authenticatorGroup', 'authenticatorTag',
-  'schemaNotes',
-]);
-
-/** 提取 payload 里的交叉引用字段（值= sync recordId；未映射时由调用方跳过）。 */
-function referenceFields(type: SyncEntityType, payload: Record<string, unknown>): Array<{ field: string; targetType: SyncEntityType; recordId: string }> {
-  const out: Array<{ field: string; targetType: SyncEntityType; recordId: string }> = [];
-  const push = (field: string, targetType: SyncEntityType, value: unknown): void => {
-    if (typeof value === 'string' && value.length > 0) out.push({ field, targetType, recordId: value });
-  };
-  switch (type) {
-    case 'connection': push('groupId', 'group', payload.groupId); break;
-    case 'group': push('parentId', 'group', payload.parentId); break;
-    case 'queryFolder': push('connId', 'connection', payload.connId); break;
-    case 'query':
-      push('connId', 'connection', payload.connId);
-      push('folderId', 'queryFolder', payload.folderId);
-      break;
-    case 'schemaNotes': push('connId', 'connection', payload.connId); break;
-    case 'authenticatorEntry':
-      push('groupId', 'authenticatorGroup', payload.groupId);
-      if (Array.isArray(payload.tags)) {
-        for (const tag of payload.tags) push('tags', 'authenticatorTag', tag);
-      }
-      break;
-    default: break;
-  }
-  return out;
-}
-
-/** 展示值：实体名（条目用 issuer( account)，其余类型用 name）。 */
-function displayValue(type: SyncEntityType, entity: unknown): string | undefined {
-  if (!entity || typeof entity !== 'object') return undefined;
-  const e = entity as Record<string, unknown>;
-  if (type === 'authenticatorEntry') {
-    const issuer = typeof e.issuer === 'string' ? e.issuer : '';
-    const account = typeof e.account === 'string' && e.account ? ` (${e.account})` : '';
-    return `${issuer}${account}` || undefined;
-  }
-  return typeof e.name === 'string' && e.name ? e.name : undefined;
+  pending: number;
 }
 
 interface RemoteState {
@@ -224,7 +130,7 @@ interface RemoteState {
   changeSequence: string;
 }
 
-interface RemoteRecord {
+export interface RemoteRecord {
   recordId: string;
   version: string;
   changeSequence: string;
@@ -292,6 +198,12 @@ export interface SyncEngineDeps {
   signSeed: () => Uint8Array;
   /** B4 pending 冲突：无既有 outbox 条目时，用它构造一个 conflict carrier（复用 rebase 签名）。 */
   seedConflictCarrier: (recordId: string, ref: import('./syncEntity').SyncEntityRef, baseVersion: string) => PendingMutation;
+  /** S7k.9 本地方向修复：用本机实体以 baseVersion 覆盖云端（put；缺省未接线→本地方向跳过）。 */
+  buildLocalPut?: (recordId: string, ref: import('./syncEntity').SyncEntityRef, baseVersion: string) => PendingMutation;
+  /** S7k.9 本地方向修复：把本机删除意图以 baseVersion 推上云端（delete；缺省未接线→跳过）。 */
+  buildLocalDelete?: (recordId: string, ref: import('./syncEntity').SyncEntityRef, baseVersion: string) => PendingMutation;
+  /** S7k.12：删除云端记录（「云端有、本机没有」的使用本机方向；本机无实体/映射）。 */
+  buildCloudDelete?: (recordId: string, type: import('./syncEntity').SyncEntityType, baseVersion: string) => PendingMutation;
   uniqueId: (type: import('./syncEntity').SyncEntityType) => string;
   entitlement?: () => CachedEntitlement | undefined;
   feedPageLimit?: number;
@@ -344,89 +256,21 @@ export class SyncEngine {
   }
 
   /**
-   * 本地完整性（只读，不触网）：映射总数 / 本地实体缺失（材料化/复活需要）/ 未决出站 / 本地删除意图。
-   * 同步内存读；供「同步体检」命令与同步结果提示使用。
-   */
-  inspectLocalIntegrity(): LocalIntegrityReport {
-    const { mappings, actions, pendingLocal, localDelete } = this.classifyReconcilePlan();
-    const byType = new Map<SyncEntityType, number>();
-    for (const action of actions) {
-      if (action.kind !== 'missing' && action.kind !== 'revive') continue;
-      byType.set(action.type, (byType.get(action.type) ?? 0) + 1);
-    }
-    return {
-      mappings,
-      missing: [...byType.entries()].map(([type, count]) => ({ type, count })),
-      missingTotal: actions.filter((a) => a.kind === 'missing' || a.kind === 'revive').length,
-      pendingLocal,
-      localDelete,
-    };
-  }
-
-  /**
-   * 把每条 confirmed 映射归入且仅归入一个动作（不变量 I2/I3 的判定基础）：
-   *  - pending      有未决出站变更 → 不碰；
-   *  - localDelete  本地墓碑且 updateTime > revision → 尊重本地删除意图，不碰；
-   *  - missing      本地实体硬缺失 → 材料化；
-   *  - revive       本地陈旧墓碑（updateTime ≤ revision）→ 复活；
-   *  - relink       本地存活 + 引用/名称可能漂移 → 收敛时比对后决定；
-   *  - ok           其余 → 无动作。
-   * 判定走 `listForSync()` 归一摘要（各后端 get 对墓碑处理不一致，不可依赖）。
-   */
-  private classifyReconcilePlan(): {
-    mappings: number;
-    actions: ReconcileAction[];
-    pendingLocal: number;
-    localDelete: number;
-  } {
-    const list = this.deps.mapStore.list();
-    const pendingRefs = new Set(this.deps.outbox.list().map((m) => refKey({ type: m.type, localId: m.localId })));
-    const localSummaries = new Map(this.deps.entities.listForSync().map((r) => [refKey(r.ref), r]));
-    const actions: ReconcileAction[] = [];
-    let pendingLocal = 0;
-    let localDelete = 0;
-    for (const entry of list) {
-      if (entry.status !== 'confirmed') continue;
-      const key = refKey({ type: entry.type, localId: entry.localId });
-      const summary = localSummaries.get(key);
-      if (pendingRefs.has(key)) {
-        pendingLocal += 1;
-        continue;
-      }
-      if (!summary) {
-        actions.push({ recordId: entry.recordId, type: entry.type, localId: entry.localId, kind: 'missing' });
-        continue;
-      }
-      if (!summary.deleted) {
-        if (REF_CARRYING_TYPES.has(entry.type)) {
-          actions.push({ recordId: entry.recordId, type: entry.type, localId: entry.localId, kind: 'relink' });
-        }
-        continue;
-      }
-      if (summary.updateTime > entry.revision) {
-        // 孤儿墓碑：较新本地删除且无待推出站（有待推的已在 pendingRefs 分支被保护）。
-        // 真实删除意图会在下一次 mutator.reconcile() 生成出站（push/sync 前置）；无出站意味着
-        // 删除永远不会被推送（历史损坏产物），此前它被静默吞掉——不可见且永不收敛，现在
-        // 交给对账：云端存活→复活，云端已删→收敛删除。
-        localDelete += 1;
-        actions.push({ recordId: entry.recordId, type: entry.type, localId: entry.localId, kind: 'orphanDelete' });
-        continue;
-      }
-      actions.push({ recordId: entry.recordId, type: entry.type, localId: entry.localId, kind: 'revive' });
-    }
-    return { mappings: list.length, actions, pendingLocal, localDelete };
-  }
-
-  /**
    * 拉取动作涉及的云端记录（只读；从序列 0 起，命中动作 recordId 即收；墓碑也收，用于向删除收敛）。
    * 同 recordId 只保留 changeSequence 最新版（changelog 每版本一条，避免按版本重复计数）。
    * 供 `detect`（检测内核：inspectFindings 展示 / repairFindings 修复）共用，保证「看到什么就修什么」。
    */
+  /**
+   * 拉取云端记录（只读；从序列 0 起；墓碑也收，用于向删除收敛）。同 recordId 只保留
+   * changeSequence 最新版。`recordIds` 给定 → 命中即收、集齐早停（修复定向重放用）；
+   * **缺省 = 全量扫描**（S7k.12：收集 feed 里所有记录的最新版，供「云端有、本机没有」
+   * 的全量对账——检测只看映射过的记录会漏掉整条云端实体，面板因此谎报「一致」）。
+   */
   private async scanReconcileRecords(
-    actions: ReconcileAction[],
+    recordIds: string[] | undefined,
     changeSequence: string,
   ): Promise<{ latestByRecord: Map<string, RemoteRecord>; scanComplete: boolean }> {
-    const wanted = new Set(actions.map((a) => a.recordId));
+    const wanted = recordIds ? new Set(recordIds) : undefined;
     const limit = this.deps.feedPageLimit ?? 256;
     const latestByRecord = new Map<string, RemoteRecord>();
     const matched = new Set<string>();
@@ -446,12 +290,13 @@ export class SyncEngine {
         break;
       }
       for (const rec of page.records) {
-        if (!wanted.has(rec.recordId)) continue;
-        matched.add(rec.recordId);
+        if (wanted && !wanted.has(rec.recordId)) continue;
+        if (!wanted) matched.add(rec.recordId);
+        else matched.add(rec.recordId);
         const prev = latestByRecord.get(rec.recordId);
         if (!prev || BigInt(rec.changeSequence) > BigInt(prev.changeSequence)) latestByRecord.set(rec.recordId, rec);
       }
-      if (matched.size === wanted.size) break;
+      if (wanted && matched.size === wanted.size) break;
       if (page.nextAfter === undefined) break;
       let next: string;
       try {
@@ -487,185 +332,64 @@ export class SyncEngine {
     if (!local || BigInt(local.keyEpoch) !== BigInt(this.deps.keyEpoch)) return empty;
     if (BigInt(remoteState.keyEpoch) !== BigInt(local.keyEpoch)) return empty;
 
-    const detected = await this.detect(remoteState);
+    const detected = await this.collectFindings(remoteState);
     return { findings: detected.findings, incomplete: !detected.scanComplete };
   }
 
   /**
-   * 检测内核（供 inspectFindings 与 repairFindings 共用，保证「看到什么就修什么」一致）：
-   * 分类 + 云端扫描 + 差异明细。返回发现列表与命中的云端记录（供修复直接重放，避免二次扫描）。
+   * 检测内核（inspectFindings 展示与 repairFindings 修复共用，保证「看到什么就修什么」）：
+   * 分类（矩阵模块）→ 云端扫描 → 发现构建 → 缺失目标二次扫描补名。
    */
-  private async detect(remoteState: RemoteState): Promise<{
+  /**
+   * 检测内核（inspectFindings 展示与 repairFindings 修复共用，保证「看到什么就修什么」）：
+   * **全量云端扫描**（S7k.12——不再只看映射过的记录）→ 动作驱动的差异发现 +
+   * 「云端有、本机没有」的全量对账兜底 + 孤儿空分组（纯本地）。
+   */
+  private async collectFindings(remoteState: RemoteState): Promise<{
     findings: SyncFinding[];
     latestByRecord: Map<string, RemoteRecord>;
     scanComplete: boolean;
   }> {
-    const plan = this.classifyReconcilePlan();
-    const findings: SyncFinding[] = [];
+    const summaries = this.deps.entities.listForSync();
+    const { actions } = classifyActions(this.deps.mapStore.list(), this.deps.outbox.list(), summaries);
+    const ctx: ReconcileCtx = { entities: this.deps.entities, mapStore: this.deps.mapStore };
+    const openPayload = (rec: RemoteRecord): Record<string, unknown> | undefined =>
+      this.tryOpenPayload(rec) as Record<string, unknown> | undefined;
 
     // 孤儿空分组（纯本地判定，无云端记录）。
-    for (const localId of this.orphanGroupCandidates()) {
-      const group = this.deps.entities.get({ type: 'authenticatorGroup', localId });
-      findings.push({
-        id: `orphanGroup:authenticatorGroup:${localId}`,
-        kind: 'orphanGroup',
-        type: 'authenticatorGroup',
-        localId,
-        localValue: displayValue('authenticatorGroup', group),
-      });
-    }
+    const findings: SyncFinding[] = orphanGroupCandidates(
+      summaries, this.deps.mapStore.list(), this.deps.outbox.list(), this.deps.entities,
+    ).map((localId) => ({
+      id: `orphanGroup:authenticatorGroup:${localId}`,
+      kind: 'orphanGroup' as const,
+      type: 'authenticatorGroup' as SyncEntityType,
+      localId,
+      localValue: displayValue('authenticatorGroup', ctx.entities.get({ type: 'authenticatorGroup', localId })),
+    }));
 
-    if (plan.actions.length === 0) {
-      return { findings, latestByRecord: new Map(), scanComplete: true };
-    }
-
-    const { latestByRecord, scanComplete } = await this.scanReconcileRecords(plan.actions, remoteState.changeSequence);
-    const ctx: ApplyContext = {
-      entities: this.deps.entities,
-      mapStore: this.deps.mapStore,
-      unresolved: this.deps.unresolved,
-      entitlement: this.deps.entitlement?.(),
-      uniqueId: this.deps.uniqueId,
-    };
-
-    for (const action of plan.actions) {
-      const rec = latestByRecord.get(action.recordId);
-      if (!rec) continue; // 云端查无（feed 截断/漂移）：无法判定，不入发现
-      const localEntity = ctx.entities.get({ type: action.type, localId: action.localId });
-      if (rec.deleteTime != null) {
-        // 云端已删：本机还在（或映射残留）→ 收敛删除。放行让用户确认。
-        findings.push({
-          id: `remoteDeleted:${action.type}:${action.localId}`,
-          kind: 'remoteDeleted',
-          type: action.type,
-          recordId: action.recordId,
-          localId: action.localId,
-          localValue: displayValue(action.type, localEntity),
-        });
-        continue;
-      }
-      if (action.kind === 'missing' || action.kind === 'revive') {
-        findings.push({
-          id: `missing:${action.type}:${action.localId}`,
-          kind: 'missing',
-          type: action.type,
-          recordId: action.recordId,
-          localId: action.localId,
-          remoteValue: displayValue(action.type, this.tryOpenPayload(rec)),
-        });
-        continue;
-      }
-      if (action.kind === 'orphanDelete') {
-        findings.push({
-          id: `orphanDelete:${action.type}:${action.localId}`,
-          kind: 'orphanDelete',
-          type: action.type,
-          recordId: action.recordId,
-          localId: action.localId,
-          localValue: displayValue(action.type, localEntity),
-          remoteValue: displayValue(action.type, this.tryOpenPayload(rec)),
-        });
-        continue;
-      }
-      // relink：命名/引用差异（无差异不产生发现）。
-      const diff = this.reconcileDiff(action, rec, ctx);
-      if (diff?.name) {
-        findings.push({
-          id: `nameDrift:${action.type}:${action.localId}`,
-          kind: 'nameDrift',
-          type: action.type,
-          recordId: action.recordId,
-          localId: action.localId,
-          localValue: diff.name.local,
-          remoteValue: diff.name.remote,
-        });
-      }
-      if (diff?.refs?.length) {
-        const first = diff.refs[0];
-        findings.push({
-          id: `refDrift:${action.type}:${action.localId}`,
-          kind: 'refDrift',
-          type: action.type,
-          recordId: action.recordId,
-          localId: action.localId,
-          localValue: displayValue(action.type, localEntity),
-          ref: { field: first.field, local: first.local, remote: first.remote },
-        });
-      }
-    }
+    // 全量扫描：动作差异 + 云端独有记录一次拿全。
+    const scan = await this.scanReconcileRecords(undefined, remoteState.changeSequence);
+    const latestByRecord = scan.latestByRecord;
+    const scanComplete = scan.scanComplete;
+    const built = findingsFromScan(actions, latestByRecord, openPayload, ctx);
+    findings.push(...built.findings);
+    findings.push(...cloudOnlyFindings(latestByRecord, this.deps.mapStore.list(), this.deps.outbox.list(), this.deps.entities, openPayload, findings));
     return { findings, latestByRecord, scanComplete };
   }
 
-  /** relink 干跑比对：命名/引用差异明细（无差异返回 undefined）。 */
-  private reconcileDiff(
-    action: ReconcileAction,
-    rec: RemoteRecord,
-    ctx: ApplyContext,
-  ): { name?: { local?: string; remote: string }; refs?: Array<{ field: string; local?: string; remote?: string }> } | undefined {
-    let payload: unknown;
-    try {
-      payload = this.openRemotePayload(rec, this.deps.keyEpoch);
-    } catch {
-      return undefined;
-    }
-    const obj = payload as Record<string, unknown>;
-    const local = ctx.entities.get({ type: action.type, localId: action.localId }) as Record<string, unknown> | undefined;
-    const diff: { name?: { local?: string; remote: string }; refs?: Array<{ field: string; local?: string; remote?: string }> } = {};
-
-    // 命名漂移：云端载荷带 name 的实体（连接/分组/验证器分组与标签等）一律比对；
-    // 验证器条目载荷无 name（issuer 派生），自动不适用。
-    if (typeof obj.name === 'string') {
-      const localName = typeof local?.name === 'string' ? local.name : undefined;
-      if (obj.name !== localName) diff.name = { local: localName, remote: obj.name };
-    }
-
-    const refs = referenceFields(action.type, obj);
-    const refDiffs: Array<{ field: string; local?: string; remote?: string }> = [];
-    for (const ref of refs) {
-      const mappedLocalId = ctx.mapStore.getByRecordId(ref.recordId)?.localId;
-      if (!mappedLocalId) continue; // 未映射目标跳过（不据此重放）
-      const remoteDisplay = displayValue(ref.targetType, ctx.entities.get({ type: ref.targetType, localId: mappedLocalId }));
-      if (ref.field === 'tags') {
-        const current = Array.isArray(local?.tags) ? (local.tags as string[]) : [];
-        if (!current.includes(mappedLocalId)) {
-          refDiffs.push({ field: 'tags', remote: remoteDisplay ?? mappedLocalId });
-        }
-      } else {
-        const localRefId = typeof local?.[ref.field] === 'string' ? (local[ref.field] as string) : undefined;
-        if (localRefId !== mappedLocalId) {
-          const localDisplay = localRefId
-            ? displayValue(ref.targetType, ctx.entities.get({ type: ref.targetType, localId: localRefId }))
-            : undefined;
-          refDiffs.push({ field: ref.field, local: localDisplay ?? localRefId, remote: remoteDisplay ?? mappedLocalId });
-        }
-      }
-    }
-    if (refDiffs.length) diff.refs = refDiffs;
-    return diff.name || diff.refs ? diff : undefined;
-  }
-
-  /** 解不开密文（epoch/损坏）时返回 undefined 而不是抛错（发现检测失败≠整体失败）。 */
-  private tryOpenPayload(rec: RemoteRecord): unknown {
-    try {
-      return this.openRemotePayload(rec, this.deps.keyEpoch);
-    } catch {
-      return undefined;
-    }
-  }
-
   /**
-   * 修复用户选择的不一致项（`ids` 缺省 = 全部发现）。先重新检测（新鲜判定，「看到什么就修什么」），
-   * 再逐条按云端收敛：
-   *  - 有云端记录的发现 → `applyRecord` force（存活→恢复/更正；云端已删→收敛删除）；
-   *  - 孤儿空分组 → 本地移除（无映射 = 永不同步的残留）。
-   * 不变量：
-   *  - I1 幂等：修复一次与两次等价（重检测后已收敛项不再出现）；
-   *  - I2 隔离：仅重放目标 record 自身，绝不改其它实体；
-   *  - I3 单写：每 record 一次迭代最多写一次（失败可重入，writeEntity 自带回滚）。
-   * 需已解锁（DEK 可解）；分页只读拉取不改动游标；**写入动作全部由用户在体检面板选择触发**。
+   * 修复用户选择的不一致项（`ids` 缺省 = 全部发现）。方向由用户选择；每条发现经状态矩阵
+   * （reconcileFindings.resolveOpName）解析为唯一原语，此处只执行机制：
+   * - applyCloudPut / applyCloudTombstone：按云端 force 重放覆盖本机；
+   * - pushPut / pushDelete：以云端当前版本为 base 构建 rebase 出站并**定向推送**（只发本次
+   *   创建的 mutation，不动 outbox 其它积压——用户点哪条就只执行哪条）；
+   * - mergeThenPush：字段并集落地本机（复用冲突解决 mergeRecordPayload），再定向推送；
+   * - sweepLocal：清理本机孤儿残留。
+   * 不变量：I1 幂等（重检测后已收敛项不再出现）/ I2 隔离（仅目标 record 自身）/ I3 单写
+   * （失败可重入，writeEntity 自带回滚）。写入全部由用户在体检面板选择触发。
    */
-  async repairFindings(ids?: string[]): Promise<LocalRepairResult> {
-    const empty: LocalRepairResult = { candidates: 0, materialized: 0, converged: 0, failed: 0, skipped: 0, notFound: 0, incomplete: false, relinked: 0, swept: 0 };
+  async repairFindings(ids?: string[], direction: RepairDirection = 'cloud'): Promise<RepairOutcome> {
+    const empty: RepairOutcome = { cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0 };
     let remoteState: RemoteState;
     try {
       remoteState = this.parseState(await this.deps.client.getState());
@@ -677,10 +401,10 @@ export class SyncEngine {
     // 远端 epoch 对账：epoch 前进后旧密钥解不开新 epoch 记录 → 空结果（不误报 failed）。
     if (BigInt(remoteState.keyEpoch) !== BigInt(local.keyEpoch)) return empty;
 
-    const detected = await this.detect(remoteState);
-    const selected = ids ? detected.findings.filter((f) => ids.includes(f.id)) : detected.findings;
-    const candidates = selected.length;
-
+    const detected = await this.collectFindings(remoteState);
+    const selected = (ids ? detected.findings.filter((f) => ids.includes(f.id)) : detected.findings)
+      .slice()
+      .sort(findingOrder);
     const ctx: ApplyContext = {
       entities: this.deps.entities,
       mapStore: this.deps.mapStore,
@@ -688,92 +412,96 @@ export class SyncEngine {
       entitlement: this.deps.entitlement?.(),
       uniqueId: this.deps.uniqueId,
     };
+    const resolveRef = (type: SyncEntityType, localId: string | undefined): string | undefined => {
+      if (localId === undefined || localId === '') return undefined;
+      return this.deps.mapStore.getByRef({ type, localId })?.recordId;
+    };
 
-    let materialized = 0;
-    let relinked = 0;
-    let converged = 0;
+    let cloud = 0;
+    let merged = 0;
     let swept = 0;
     let failed = 0;
-    let skipped = 0;
     let notFound = 0;
+    const created: string[] = [];
 
-    // 先本地清理（孤儿空分组），再按类型顺序重放云端记录（引用目标先落地）。
     for (const finding of selected) {
-      if (finding.recordId || finding.kind !== 'orphanGroup') continue;
-      try {
-        await this.deps.entities.remove({ type: finding.type, localId: finding.localId }, 'sync');
-        swept += 1;
-      } catch {
-        failed += 1;
-      }
-    }
-
-    const recordFindings = selected
-      .filter((f) => f.recordId)
-      .sort((a, b) => applyOrder(a.type) - applyOrder(b.type));
-    for (const finding of recordFindings) {
-      const rec = detected.latestByRecord.get(finding.recordId!);
-      if (!rec) {
-        notFound += 1;
+      const op = resolveOpName(finding.kind, direction);
+      const ref = { type: finding.type, localId: finding.localId };
+      const needsRec = op !== 'sweepLocal' && op !== 'skip';
+      const rec = finding.recordId ? detected.latestByRecord.get(finding.recordId) : undefined;
+      if (needsRec && !rec) {
+        notFound += 1; // 检测后到修复间云端记录消失（可重试）
         continue;
       }
       try {
-        const disposition = rec.deleteTime != null
-          ? (await applyRecord({ recordId: rec.recordId, version: rec.version, tombstone: true, force: true }, ctx)).disposition
-          : (await applyRecord(
-              { recordId: rec.recordId, version: rec.version, tombstone: false, payload: this.openRemotePayload(rec, this.deps.keyEpoch), force: true },
+        switch (op) {
+          case 'applyCloudPut': {
+            await applyRecord(
+              { recordId: finding.recordId!, version: rec!.version, tombstone: false, payload: this.openRemotePayload(rec!, this.deps.keyEpoch), force: true },
               ctx,
-            )).disposition;
-        if (disposition === 'created' || disposition === 'updated' || disposition === 'deleted') {
-          if (rec.deleteTime != null) converged += 1;
-          else if (finding.kind === 'nameDrift' || finding.kind === 'refDrift') relinked += 1;
-          else materialized += 1;
-        } else {
-          skipped += 1;
+            );
+            cloud += 1;
+            break;
+          }
+          case 'applyCloudTombstone': {
+            await applyRecord({ recordId: finding.recordId!, version: rec!.version, tombstone: true, force: true }, ctx);
+            cloud += 1;
+            break;
+          }
+          case 'pushPut':
+          case 'pushDelete': {
+            // missing 的「使用本机」= 本机侧为空 → 删除云端记录（无需本机实体）。
+            const mutation = op === 'pushDelete'
+              ? (finding.kind === 'missing'
+                ? this.deps.buildCloudDelete?.(finding.recordId!, finding.type, rec!.version)
+                : this.deps.buildLocalDelete?.(finding.recordId!, ref, rec!.version))
+              : this.deps.buildLocalPut?.(finding.recordId!, ref, rec!.version);
+            if (!mutation) {
+              failed += 1; // rebase 未接线（旧调用方/测试替身）
+              break;
+            }
+            await this.deps.outbox.put(mutation);
+            created.push(mutation.mutationId);
+            break;
+          }
+          case 'mergeThenPush': {
+            const localEntity = ctx.entities.get(ref);
+            const remotePayload = this.openRemotePayload(rec!, this.deps.keyEpoch) as Record<string, unknown>;
+            const localPayload = encodeEntityPayload({ type: finding.type, entity: localEntity } as never, resolveRef);
+            const mergedPayload = mergeRecordPayload(remotePayload, localPayload);
+            await applyRecord(
+              { recordId: finding.recordId!, version: rec!.version, tombstone: false, payload: mergedPayload, force: true },
+              ctx,
+            );
+            const mutation = this.deps.buildLocalPut?.(finding.recordId!, ref, rec!.version);
+            if (mutation) {
+              await this.deps.outbox.put(mutation);
+              created.push(mutation.mutationId);
+            }
+            merged += 1;
+            break;
+          }
+          case 'sweepLocal': {
+            await this.deps.entities.remove(ref, 'sync');
+            swept += 1;
+            break;
+          }
+          case 'skip':
+            break;
         }
       } catch {
         failed += 1;
       }
     }
 
+    // 定向推送：只发本次创建的 mutation（用户点选的「使用本机/合并」），其它积压不动。
+    const pushed = created.length > 0 ? await this.pushMutationsNow(created) : 0;
     try {
       await reconcileUnresolved(ctx);
     } catch {
       /* 引用收敛失败不判修复失败：下次同步仍会收敛 */
     }
-    return { candidates, materialized, relinked, converged, failed, skipped, notFound, incomplete: !detected.scanComplete, swept };
-  }
-
-  /**
-   * 孤儿验证器空分组候选（纯本地判定）：无映射（=永不同步）+ 无待推出站 + 无存活条目引用 +
-   * 非新建（60s 防御，可能只是尚未同步的新组）。「无映射空组」是历史损坏残留；被引用或
-   * 有映射的一律不算。
-   */
-  private orphanGroupCandidates(): string[] {
-    const summaries = this.deps.entities.listForSync();
-    const mapped = new Set(
-      this.deps.mapStore.list().map((e) => refKey({ type: e.type, localId: e.localId })),
-    );
-    const outboxRefs = new Set(
-      this.deps.outbox.list().map((m) => refKey({ type: m.type, localId: m.localId })),
-    );
-    const referencedGroups = new Set<string>();
-    for (const e of summaries) {
-      if (e.ref.type !== 'authenticatorEntry' || e.deleted) continue;
-      const entry = this.deps.entities.get(e.ref) as { groupId?: string } | undefined;
-      if (entry?.groupId) referencedGroups.add(entry.groupId);
-    }
-    const now = Date.now();
-    const out: string[] = [];
-    for (const g of summaries) {
-      if (g.ref.type !== 'authenticatorGroup' || g.deleted) continue;
-      const key = refKey(g.ref);
-      if (mapped.has(key) || outboxRefs.has(key)) continue;
-      if (referencedGroups.has(g.ref.localId)) continue;
-      if (now - g.updateTime < 60_000) continue;
-      out.push(g.ref.localId);
-    }
-    return out;
+    return { cloud, local: pushed, merged, swept, failed, notFound, pending: created.length - pushed };
   }
 
   private async run(phase: SyncPhase = 'both'): Promise<SyncRunResult> {
@@ -1140,6 +868,38 @@ export class SyncEngine {
     if (typeof v !== 'string') throw new FeedProtocolError(`${key} must be a string`);
     assertBase64UrlRange(v, min, max, key);
     return v;
+  }
+
+  /**
+   * S7k.10 定向推送：只发送指定 mutation（用户逐条选择的「使用本机/合并」），**不动 outbox
+   * 其它积压**（其余等显式同步）。失败/冲突的条目保留在出站，交给完整同步的既有流程
+   * （退避重试/冲突补全）处理；签名与确认链路（receipt → confirmOutbound → 删条目）与
+   * 常规推送逐字一致。
+   */
+  /** 解不开密文（epoch/损坏）时返回 undefined 而不是抛错（发现检测失败≠整体失败）。 */
+  private tryOpenPayload(rec: RemoteRecord): unknown {
+    try {
+      return this.openRemotePayload(rec, this.deps.keyEpoch);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async pushMutationsNow(mutationIds: string[]): Promise<number> {
+    let pushed = 0;
+    for (const id of mutationIds) {
+      const m = this.deps.outbox.list().find((x) => x.mutationId === id);
+      if (!m || m.conflict) continue;
+      try {
+        const confirmed = this.parseReceipt(await this.pushMutation(m));
+        await this.confirmOutbound(m, confirmed.version);
+        await this.deps.outbox.delete(m.mutationId);
+        pushed += 1;
+      } catch {
+        /* 失败/冲突：留在出站，由完整同步收敛 */
+      }
+    }
+    return pushed;
   }
 
   private async pushMutation(m: PendingMutation): Promise<unknown> {

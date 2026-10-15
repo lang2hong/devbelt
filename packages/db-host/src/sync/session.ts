@@ -285,10 +285,10 @@ export class PersonalSyncSession {
     return this.coordinator.findingsNow();
   }
 
-  /** 修复用户选择的不一致项（缺省全部；需解锁）。写入仅由体检面板用户选择触发。 */
-  async repairFindings(ids?: string[]) {
+  /** 修复用户选择的不一致项（缺省全部；方向 cloud=按云端 / local=用本机覆盖云端；需解锁）。写入仅由体检面板用户选择触发。 */
+  async repairFindings(ids?: string[], direction?: 'cloud' | 'local' | 'merge') {
     if (!this.coordinator) throw new Error('sync session is locked');
-    return this.coordinator.repairFindingsNow(ids);
+    return this.coordinator.repairFindingsNow(ids, direction);
   }
 
   /** 立即排一次后台同步（不 await、不抛错）；供命令/窗口聚焦使用。 */

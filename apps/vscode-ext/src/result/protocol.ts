@@ -87,8 +87,8 @@ export interface SyncFindingView {
   type: string;
   localValue?: string;
   remoteValue?: string;
-  /** 引用漂移明细（视图用 `sync.field.<field>` 翻译字段名）。 */
-  ref?: { field: string; local?: string; remote?: string };
+  /** 引用漂移明细（视图用 `sync.field.<field>` 翻译字段名；remoteMissing=云端目标本机缺失）。 */
+  ref?: { field: string; local?: string; remote?: string; remoteMissing?: boolean };
 }
 
 /** 真版本冲突项（本地与云端都改过；由用户三选一）。 */
@@ -102,7 +102,7 @@ export interface SyncConflictView {
 export type SyncDoctorUpMessage =
   | { type: 'ready'; __load?: string }
   | { type: 'syncDoctorRefresh' }
-  | { type: 'syncDoctorRepair'; ids?: string[] }
+  | { type: 'syncDoctorRepair'; ids?: string[]; direction?: 'cloud' | 'local' | 'merge' }
   | { type: 'syncDoctorResolveConflict'; recordId: string; decision: 'local' | 'merge' | 'remote' };
 
 /** Extension Host → webview。 */
@@ -117,11 +117,13 @@ export interface SyncDoctorSnapshotMessage extends WebviewMessage {
   incomplete: boolean;
 }
 
-/** 修复完成回执（面板显示「已修复 N 项」并随即收到新快照）。 */
+/** 修复完成回执：repaired=按云端修复+合并+清理数；pushed=已定向推送到云端的「使用本机/合并」数；pending=入出站但推送失败（留待同步）数。 */
 export interface SyncDoctorResultMessage extends WebviewMessage {
   type: 'syncDoctorResult';
   repaired: number;
   failed: number;
+  pushed?: number;
+  pending?: number;
 }
 
 // ────────────────────────── P5：2FA/TOTP 验证器协议 ──────────────────────────

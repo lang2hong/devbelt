@@ -141,7 +141,7 @@ describe('SyncCoordinator', () => {
   it('findingsNow/repairFindingsNow：经串行链执行并返回引擎结果（S7k）', async () => {
     const store = { onChanged: () => ({ dispose: () => {} }) } as unknown as ConnectionStore;
     const inspectFindings = vi.fn(async () => ({ findings: [{ id: 'missing:connection:c-1', kind: 'missing', type: 'connection', localId: 'c-1' }], incomplete: false }));
-    const repairFindings = vi.fn(async () => ({ candidates: 1, materialized: 1, failed: 0, skipped: 0 }));
+    const repairFindings = vi.fn(async () => ({ cloud: 1, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0 }));
     const coordinator = new SyncCoordinator(
       store,
       { reconcile: vi.fn() } as unknown as SyncMutator,
@@ -149,7 +149,7 @@ describe('SyncCoordinator', () => {
     );
 
     await expect(coordinator.findingsNow()).resolves.toMatchObject({ findings: [{ kind: 'missing', localId: 'c-1' }] });
-    await expect(coordinator.repairFindingsNow()).resolves.toMatchObject({ materialized: 1 });
+    await expect(coordinator.repairFindingsNow()).resolves.toMatchObject({ cloud: 1 });
     expect(repairFindings).toHaveBeenCalledTimes(1);
   });
 

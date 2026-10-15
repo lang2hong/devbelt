@@ -389,19 +389,19 @@ describe('personal sync B1 commands', () => {
     expect(info).toHaveBeenCalledWith('Sync succeeded.');
   });
 
-  it('syncNow 出站跳过：提示带原因（ES 连接 → 可读文案；未知原因 → reason unknown）', async () => {
+  it('syncNow 出站跳过：如实显示原因（S7l.1 后 ES 已接入，跳过只剩真实编码错误）', async () => {
     const esSession = makeSession({
       isUnlocked: true,
       syncNow: vi.fn(async () => ({
         stage: 'ok',
         skippedOutbound: 1,
-        skippedOutboundReason: 'elasticsearch connections are not syncable yet',
+        skippedOutboundReason: 'record payload.sql exceeds 64 KiB limit',
       })),
     });
     const { deps: esDeps, warn: esWarn } = makeDeps(esSession, []);
     await syncNowPersonalSync(esDeps);
     expect(esWarn).toHaveBeenCalledWith(
-      'Sync finished with skips: 1 local change(s) not synced (Elasticsearch connections are not syncable yet)',
+      'Sync finished with skips: 1 local change(s) not synced (record payload.sql exceeds 64 KiB limit)',
     );
 
     const unknownSession = makeSession({
@@ -410,8 +410,9 @@ describe('personal sync B1 commands', () => {
     });
     const { deps: unknownDeps, warn: unknownWarn } = makeDeps(unknownSession, []);
     await syncNowPersonalSync(unknownDeps);
+    // S7l.1：无已知跳过原因，有原因如实显示原文。
     expect(unknownWarn).toHaveBeenCalledWith(
-      'Sync finished with skips: 1 local change(s) not synced (reason unknown)',
+      'Sync finished with skips: 1 local change(s) not synced (boom)',
     );
   });
 

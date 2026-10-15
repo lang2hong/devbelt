@@ -1,6 +1,6 @@
 import type { Disposable } from '../../utils/event.js';
 import type { ConnectionStore } from '../../connection/connectionStore.js';
-import type { SyncEngine, SyncRunResult, LocalRepairResult, FindingsReport } from './syncEngine.js';
+import type { SyncEngine, SyncRunResult, RepairOutcome, FindingsReport } from './syncEngine.js';
 import type { SyncMutator } from './syncMutator.js';
 
 /**
@@ -140,15 +140,6 @@ export class SyncCoordinator {
     return this.runPhase('push', true);
   }
 
-  /** 本地缺失计数（同步内存读；测试替身缺该能力时按 0 处理）。 */
-  private countLocalMissing(): number {
-    try {
-      return this.engine.inspectLocalIntegrity().missingTotal;
-    } catch {
-      return 0;
-    }
-  }
-
   /** 体检检测（只读，零写入）：逐条列出本地与云端的不一致。经串行链执行，避免与同步并发读写映射。 */
   async findingsNow(): Promise<FindingsReport> {
     const run = this.chain.then(() => this.engine.inspectFindings());
@@ -156,9 +147,9 @@ export class SyncCoordinator {
     return run;
   }
 
-  /** 修复用户选择的不一致项（缺省全部）。经串行链执行。 */
-  async repairFindingsNow(ids?: string[]): Promise<LocalRepairResult> {
-    const run = this.chain.then(() => this.engine.repairFindings(ids));
+  /** 修复用户选择的不一致项（缺省全部；方向由用户选择：cloud=按云端，local=用本机覆盖云端）。经串行链执行。 */
+  async repairFindingsNow(ids?: string[], direction?: 'cloud' | 'local' | 'merge'): Promise<RepairOutcome> {
+    const run = this.chain.then(() => this.engine.repairFindings(ids, direction));
     this.chain = run.then(() => undefined, () => undefined);
     return run;
   }
@@ -177,7 +168,6 @@ export class SyncCoordinator {
           skippedOutboundReason = reconciled.skipped?.[0]?.reason;
         }
         const result = await this.engine.syncPhase(phase);
-        result.localMissing = this.countLocalMissing();
         if (skippedOutbound) {
           result.skippedOutbound = skippedOutbound;
           if (skippedOutboundReason) result.skippedOutboundReason = skippedOutboundReason;
@@ -254,7 +244,6 @@ export class SyncCoordinator {
     for (let i = 0; i < SyncCoordinator.MAX_DRAIN_ROUNDS; i++) {
       const { generated, skipped } = await this.mutator.reconcile();
       const result = await this.engine.sync();
-      result.localMissing = this.countLocalMissing();
       if (skipped?.length) {
         // 各轮同批，覆盖即等于该批总数（未来跨轮去重再改累加）
         result.skippedOutbound = skipped.length;

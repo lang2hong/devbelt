@@ -6,6 +6,7 @@ import { encodeBase64Url } from '../crypto/recoveryCode.js';
 import type { RecordMapStore } from './recordMapStore.js';
 import { PendingMutationStore, type PendingDeleteMutation, type PendingPutMutation } from './pendingMutationStore.js';
 import { EntityStore, applyOrder, type EntityValue } from './entityStore.js';
+import type { SyncEntityType } from './syncEntity.js';
 import { refKey, type SyncEntityRef } from './syncEntity.js';
 import type { SavedConnection } from '../../connection/connectionStore.js';
 import type { SyncAuthenticatorEntryValue, SyncAuthenticatorGroup, SyncAuthenticatorTag } from './authenticatorTypes.js';
@@ -211,6 +212,14 @@ export class SyncMutator {
       case 'authenticatorEntry': return encodeEntityPayload({ type: 'authenticatorEntry', entity: entity as SyncAuthenticatorEntryValue }, resolveRef);
       case 'schemaNotes': return encodeEntityPayload({ type: 'schemaNotes', entity: entity as SyncSchemaNotesValue }, resolveRef);
     }
+  }
+
+  /**
+   * S7k.12：删除云端记录（「云端有、本机没有」发现的**使用本机**方向——本机侧为空=云端删除）。
+   * 本机无实体/映射也可构建（localId 以 recordId 占位；确认时 deleteByRef 自然为 no-op）。
+   */
+  buildCloudDelete(recordId: string, type: SyncEntityType, baseVersion: string): PendingDeleteMutation {
+    return this.buildDelete(recordId, { type, localId: recordId }, baseVersion, 0);
   }
 
   private buildDelete(recordId: string, ref: SyncEntityRef, baseVersion: string, revision: number): PendingDeleteMutation {

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
 import type { PersonalSyncSession } from '@devbelt/db-host/sync/session';
-import type { FindingsReport, SyncFinding } from '@devbelt/db-host/sync/e2e/syncEngine';
+import type { FindingsReport, RepairOutcome } from '@devbelt/db-host/sync/e2e/syncEngine';
 import { BaseWebView } from '../result/baseWebView';
 import { l10n } from '../i18n';
 import { diagError, diagInfo } from '../utils/diagnostics';
@@ -64,7 +64,7 @@ export class SyncDoctorView extends BaseWebView {
         await this.check();
         return;
       case 'syncDoctorRepair':
-        await this.repair(msg.ids);
+        await this.repair(msg.ids, msg.direction);
         return;
       case 'syncDoctorResolveConflict':
         await this.resolveConflict(msg.recordId, msg.decision);
@@ -136,14 +136,21 @@ export class SyncDoctorView extends BaseWebView {
     }
   }
 
-  private async repair(ids?: string[]): Promise<void> {
+  private async repair(ids?: string[], direction?: 'cloud' | 'local' | 'merge'): Promise<void> {
     const session = await this.session();
     if (!session?.isUnlocked) return;
     try {
-      const result = await session.repairFindings(ids);
-      diagInfo('sync doctor repair', { ids: ids ?? '(all)', ...result });
-      const repaired = result.materialized + result.relinked + result.converged + result.swept;
-      this.post({ type: 'syncDoctorResult', repaired, failed: result.failed });
+      const result: RepairOutcome = await session.repairFindings(ids, direction);
+      diagInfo('sync doctor repair', { ids: ids ?? '(all)', direction: direction ?? 'cloud', ...result });
+      const repaired = result.cloud + result.merged + result.swept;
+      this.post({
+        type: 'syncDoctorResult',
+        repaired,
+        failed: result.failed,
+        pushed: result.local,
+        pending: result.pending,
+      });
+      // 定向推送在引擎内完成（只发本次点选的 mutation，不动 outbox 其它积压）。
     } catch (err) {
       diagError('sync doctor repair failed', String(err));
       this.post({ type: 'syncDoctorResult', repaired: 0, failed: 1 });
@@ -164,14 +171,3 @@ export class SyncDoctorView extends BaseWebView {
   }
 }
 
-/** 发现项的视图模型映射（findings 直传 + 面板按 kind 渲染按钮）。 */
-export function toFindingViews(findings: SyncFinding[]): SyncFindingView[] {
-  return findings.map((f) => ({
-    id: f.id,
-    kind: f.kind,
-    type: f.type,
-    localValue: f.localValue,
-    remoteValue: f.remoteValue,
-    ref: f.ref,
-  }));
-}

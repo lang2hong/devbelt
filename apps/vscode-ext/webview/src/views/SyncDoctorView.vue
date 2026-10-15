@@ -37,9 +37,17 @@ onMounted(() => {
       lastCheckAt.value = snap.lastCheckAt;
     } else if (msg?.type === 'syncDoctorResult') {
       const r = msg as SyncDoctorResultMessage;
-      resultBanner.value = r.failed > 0
-        ? t('sync.doctorResultPartial', { repaired: r.repaired, failed: r.failed })
-        : t('sync.doctorResult', { repaired: r.repaired });
+      if ((r.pushed ?? 0) > 0) {
+        resultBanner.value = (r.repaired > 0)
+          ? `${t('sync.doctorResult', { repaired: r.repaired })} ${t('sync.doctorPushed', { count: r.pushed })}`
+          : t('sync.doctorPushed', { count: r.pushed });
+      } else if ((r.pending ?? 0) > 0) {
+        resultBanner.value = t('sync.doctorQueued', { count: r.pending });
+      } else if (r.failed > 0) {
+        resultBanner.value = t('sync.doctorResultPartial', { repaired: r.repaired, failed: r.failed });
+      } else {
+        resultBanner.value = t('sync.doctorResult', { repaired: r.repaired });
+      }
     }
   });
   post({ type: 'ready' });
@@ -71,10 +79,11 @@ function findingTitle(f: SyncFindingView): string {
 function findingDetail(f: SyncFindingView): string | undefined {
   if (f.kind === 'nameDrift') return t('sync.find.nameDetail', { local: f.localValue ?? '—', remote: f.remoteValue ?? '—' });
   if (f.kind === 'refDrift' && f.ref) {
+    const remote = f.ref.remoteMissing ? t('sync.find.missingTarget') : (f.ref.remote ?? '—');
     return t('sync.find.refDetail', {
       field: t(`sync.field.${f.ref.field}`),
       local: f.ref.local ?? '—',
-      remote: f.ref.remote ?? '—',
+      remote,
     });
   }
   if (f.kind === 'missing' && f.remoteValue) return t('sync.find.nameDetail', { local: '—', remote: f.remoteValue });
@@ -82,16 +91,30 @@ function findingDetail(f: SyncFindingView): string | undefined {
   return undefined;
 }
 
-/** 各类发现对应的修复按钮文案。 */
-function repairLabel(kind: SyncFindingView['kind']): string {
-  switch (kind) {
-    case 'missing': return t('sync.find.restore');
-    case 'nameDrift':
-    case 'refDrift': return t('sync.find.useCloud');
-    case 'orphanDelete': return t('sync.find.restoreItem');
-    case 'remoteDeleted': return t('sync.find.deleteLocal');
-    case 'orphanGroup': return t('sync.find.deleteGroup');
-  }
+/** 统一三操作（谁赢）：使用云端 / 使用本机 / 合并；孤儿空分组只有「删除本机」。 */
+function repairLabel(kind: SyncFindingView['kind'], direction: 'cloud' | 'local' | 'merge'): string {
+  if (direction === 'merge') return t('sync.find.merge');
+  if (direction === 'local') return t('sync.find.useLocal');
+  if (kind === 'orphanGroup') return t('sync.find.deleteGroup');
+  return t('sync.find.useCloud');
+}
+
+/** 按钮流向说明（title 提示，消除「哪边覆盖哪边」歧义）。 */
+function repairHint(kind: SyncFindingView['kind'], direction: 'cloud' | 'local' | 'merge'): string {
+  if (direction === 'merge') return t('sync.find.mergeHint');
+  if (direction === 'local') return t('sync.find.useLocalHint');
+  if (kind === 'orphanGroup') return t('sync.find.deleteGroupHint');
+  return t('sync.find.useCloudHint');
+}
+
+/** 该类发现是否有「使用本机」方向（missing=删除云端这条；orphanGroup 仅本机残留无云端对应）。 */
+function hasLocalDirection(kind: SyncFindingView['kind']): boolean {
+  return kind !== 'orphanGroup';
+}
+
+/** 该类发现是否有「合并」（仅两侧都存活、多字段可并集的漂移类）。 */
+function hasMerge(kind: SyncFindingView['kind']): boolean {
+  return kind === 'nameDrift' || kind === 'refDrift';
 }
 
 function refresh(): void {
@@ -99,9 +122,9 @@ function refresh(): void {
   post({ type: 'syncDoctorRefresh' });
 }
 
-function repairOne(f: SyncFindingView): void {
+function repairOne(f: SyncFindingView, direction: 'cloud' | 'local' | 'merge'): void {
   resultBanner.value = undefined;
-  post({ type: 'syncDoctorRepair', ids: [f.id] });
+  post({ type: 'syncDoctorRepair', ids: [f.id], direction });
 }
 
 function repairAll(): void {
@@ -140,7 +163,9 @@ function formatCheckTime(at?: number): string {
           <div v-if="findingDetail(f)" class="item-detail">{{ findingDetail(f) }}</div>
         </div>
         <div class="item-actions">
-          <button class="btn primary" @click="repairOne(f)">{{ repairLabel(f.kind) }}</button>
+          <button class="btn primary" :title="repairHint(f.kind, 'cloud')" @click="repairOne(f, 'cloud')">{{ repairLabel(f.kind, 'cloud') }}</button>
+          <button v-if="hasLocalDirection(f.kind)" class="btn" :title="repairHint(f.kind, 'local')" @click="repairOne(f, 'local')">{{ repairLabel(f.kind, 'local') }}</button>
+          <button v-if="hasMerge(f.kind)" class="btn" :title="repairHint(f.kind, 'merge')" @click="repairOne(f, 'merge')">{{ repairLabel(f.kind, 'merge') }}</button>
         </div>
       </div>
     </section>

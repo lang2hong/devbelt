@@ -133,6 +133,9 @@ function engine(opts: EngineOpts) {
     signSeed,
     uniqueId: () => `c-new-${Math.random()}`,
     seedConflictCarrier: (recordId, ref, baseVersion) => mutator.rebasePut(recordId, ref, baseVersion),
+    buildLocalPut: (recordId, ref, baseVersion) => mutator.rebasePut(recordId, ref, baseVersion),
+    buildLocalDelete: (recordId, ref, baseVersion) => mutator.rebaseDelete(recordId, ref, baseVersion),
+    buildCloudDelete: (recordId, type, baseVersion) => mutator.buildCloudDelete(recordId, type, baseVersion),
     onEntityPushed: opts.onEntityPushed,
     onQuotaRejected: opts.onQuotaRejected,
   });
@@ -875,7 +878,7 @@ describe('SyncEngine · deferred（权益跳过的连接记录）', () => {
         nonce: Buffer.from(nonce).toString('base64url'), ciphertext: Buffer.from(box.ciphertext).toString('base64url'), tag: Buffer.from(box.tag).toString('base64url'),
       };
     };
-    const unsupported = seal('E'.repeat(22), 3, { type: 'connection', name: 'es', dbType: 'elasticsearch', host: 'h', port: 9200 });
+    const unsupported = seal('E'.repeat(22), 3, { type: 'connection', name: 'x', dbType: 'graphdb', host: 'h', port: 9200 });
     const supported = seal('F'.repeat(22), 4, { type: 'connection', name: 'redis-ok', dbType: 'redis', host: 'h', port: 6379, user: '', redisMode: 'standalone', redisDb: 0 });
 
     const entitlement = { planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite', 'redis'], maxDevices: 2, maxSavedConnections: 10, allowConnectionImport: false };
@@ -1004,13 +1007,14 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     });
     const eng = engine({ client, snap: SNAP, mapStore, outbox: new PendingMutationStore(makeMemento(), '7', '1'), store: makeStore() });
 
-    const before = eng.inspectLocalIntegrity();
-    expect(before.missingTotal).toBe(1);
-    expect(before.missing).toEqual([{ type: 'connection', count: 1 }]);
+    const before = await eng.inspectFindings();
+    expect(before.findings).toEqual([
+      { id: 'missing:connection:c-lost', kind: 'missing', type: 'connection', recordId: id, localId: 'c-lost', remoteValue: 'lost' },
+    ]);
 
     const r = await eng.repairFindings();
-    expect(r).toMatchObject({ candidates: 1, materialized: 1, failed: 0, skipped: 0 });
-    expect(eng.inspectLocalIntegrity().missingTotal).toBe(0);
+    expect(r).toMatchObject({ cloud: 1, failed: 0 });
+    expect((await eng.inspectFindings()).findings).toEqual([]);
   });
 
   it('repairFindings：有未决出站变更 → 归入 pendingLocal，不修复也不拉取', async () => {
@@ -1022,13 +1026,13 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     const client = clientWith();
     const eng = engine({ client, snap: SNAP, mapStore, outbox, store: makeStore() });
 
-    const report = eng.inspectLocalIntegrity();
-    expect(report.missingTotal).toBe(0);
-    expect(report.pendingLocal).toBe(1);
+    const report = await eng.inspectFindings();
+    expect(report.findings).toEqual([]); // 有待推出站 → 尊重意图，不产生发现
 
     const r = await eng.repairFindings();
-    expect(r).toEqual({ candidates: 0, materialized: 0, converged: 0, failed: 0, skipped: 0, notFound: 0, incomplete: false, relinked: 0, swept: 0 });
-    expect(client.getRecords).not.toHaveBeenCalled();
+    expect(r).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0 });
+    expect(client.putRecordSigned).not.toHaveBeenCalled();
+    expect(client.deleteRecordSigned).not.toHaveBeenCalled();
   });
 
   it('inspectFindings：云端查无该记录 → 不产生发现（无法判定，不当 notFound 虚报）', async () => {
@@ -1045,7 +1049,7 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     expect(report.findings).toEqual([]);
     expect(report.incomplete).toBe(false);
     const r = await eng.repairFindings();
-    expect(r).toEqual({ candidates: 0, materialized: 0, converged: 0, failed: 0, skipped: 0, notFound: 0, incomplete: false, relinked: 0, swept: 0 });
+    expect(r).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0 });
   });
 
   it('repairLocalMissing：本地墓碑 + 云端存活 → 复活（清 deleted）', async () => {
@@ -1061,10 +1065,10 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     });
     const eng = engine({ client, snap: SNAP, mapStore, outbox: new PendingMutationStore(makeMemento(), '7', '1'), store });
 
-    expect(eng.inspectLocalIntegrity().missingTotal).toBe(1);
+    expect((await eng.inspectFindings()).findings).toHaveLength(1);
     const r = await eng.repairFindings();
-    expect(r).toMatchObject({ candidates: 1, materialized: 1, failed: 0, skipped: 0 });
-    expect(eng.inspectLocalIntegrity().missingTotal).toBe(0);
+    expect(r).toMatchObject({ cloud: 1, failed: 0 });
+    expect((await eng.inspectFindings()).findings).toEqual([]);
     expect((store.get('c-lost') as unknown as { deleted?: boolean } | undefined)?.deleted).toBeFalsy();
   });
 
@@ -1085,9 +1089,9 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     const eng = engine({ client, snap: SNAP, mapStore, outbox: new PendingMutationStore(makeMemento(), '7', '1'), store });
 
     const r = await eng.repairFindings();
-    expect(r).toMatchObject({ candidates: 1, converged: 1, failed: 0, skipped: 0 });
+    expect(r).toMatchObject({ cloud: 1, failed: 0 });
     expect(mapStore.getByRecordId(id)).toBeUndefined();
-    expect(eng.inspectLocalIntegrity().missingTotal).toBe(0);
+    expect((await eng.inspectFindings()).findings).toEqual([]);
   });
 
   it('孤儿墓碑（较新本地删除且无待推出站）：检出 orphanDelete；修复以云端为准复活；幂等', async () => {
@@ -1103,17 +1107,15 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     });
     const eng = engine({ client, snap: SNAP, mapStore, outbox: new PendingMutationStore(makeMemento(), '7', '1'), store });
 
-    expect(eng.inspectLocalIntegrity().missingTotal).toBe(0);
-    expect(eng.inspectLocalIntegrity().localDelete).toBe(1);
     const report = await eng.inspectFindings();
     expect(report.findings).toEqual([
       { id: `orphanDelete:connection:c-lost`, kind: 'orphanDelete', type: 'connection', recordId: id, localId: 'c-lost', localValue: 'gone', remoteValue: 'lost' },
     ]);
     const r = await eng.repairFindings();
-    expect(r.materialized).toBe(1);
+    expect(r.cloud).toBe(1);
     expect((store.get('c-lost') as unknown as { deleted?: boolean } | undefined)?.deleted).toBeFalsy();
     const again = await eng.repairFindings();
-    expect(again).toEqual({ candidates: 0, materialized: 0, converged: 0, failed: 0, skipped: 0, notFound: 0, incomplete: false, relinked: 0, swept: 0 });
+    expect(again).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0 });
   });
 
   it('孤儿墓碑有待推出站（真实删除意图）→ 尊重意图：不检出、不修复也不拉取', async () => {
@@ -1131,8 +1133,9 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     const report = await eng.inspectFindings();
     expect(report.findings).toEqual([]);
     const r = await eng.repairFindings();
-    expect(r).toEqual({ candidates: 0, materialized: 0, converged: 0, failed: 0, skipped: 0, notFound: 0, incomplete: false, relinked: 0, swept: 0 });
-    expect(client.getRecords).not.toHaveBeenCalled();
+    expect(r).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0 });
+    expect(client.putRecordSigned).not.toHaveBeenCalled();
+    expect(client.deleteRecordSigned).not.toHaveBeenCalled();
     expect((store.get('c-lost') as unknown as { deleted?: boolean } | undefined)?.deleted).toBe(true);
   });
 
@@ -1146,7 +1149,7 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     const eng = engine({ client, snap: SNAP, mapStore, outbox: new PendingMutationStore(makeMemento(), '7', '1'), store: makeStore() });
 
     const r = await eng.repairFindings();
-    expect(r).toEqual({ candidates: 0, materialized: 0, converged: 0, failed: 0, skipped: 0, notFound: 0, incomplete: false, relinked: 0, swept: 0 });
+    expect(r).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0 });
     expect(client.getRecords).not.toHaveBeenCalled();
   });
 
@@ -1164,7 +1167,7 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     expect(report.incomplete).toBe(true);
     expect(report.findings).toEqual([]);
     const r = await eng.repairFindings();
-    expect(r).toEqual({ candidates: 0, materialized: 0, converged: 0, failed: 0, skipped: 0, notFound: 0, incomplete: true, relinked: 0, swept: 0 });
+    expect(r).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0 });
   });
 
   function relinkStore(conn: SavedConnection, groups: Array<{ id: string; name: string }>) {
@@ -1221,8 +1224,7 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     const eng = engine({ client, snap: SNAP, mapStore, outbox: new PendingMutationStore(makeMemento(), '7', '1'), store } as never);
 
     const r = await eng.repairFindings();
-    expect(r.relinked).toBe(1);
-    expect(r.materialized).toBe(0);
+    expect(r.cloud).toBe(1); // 归属校正计入 cloud（恢复/更正/收敛删除统一计数）
     expect((store.get('c-1') as unknown as { groupId?: string } | undefined)?.groupId).toBe('g2');
   });
 
@@ -1239,8 +1241,8 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     const eng = engine({ client, snap: SNAP, mapStore, outbox: new PendingMutationStore(makeMemento(), '7', '1'), store } as never);
 
     const r = await eng.repairFindings();
-    expect(r.relinked).toBe(0);
-    expect(r.materialized).toBe(0);
+    expect(r.cloud).toBe(0);
+    expect(r.cloud).toBe(0);
   });
 
 
@@ -1268,11 +1270,11 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     const eng = engine({ client, snap: SNAP, mapStore, outbox: new PendingMutationStore(makeMemento(), '7', '1'), store } as never);
 
     const first = await eng.repairFindings();
-    expect(first.relinked).toBe(1);
+    expect(first.cloud).toBe(1);
     const second = await eng.repairFindings();
-    expect(second.materialized).toBe(0);
-    expect(second.relinked).toBe(0);
-    expect(second.converged).toBe(0);
+    expect(second.cloud).toBe(0);
+    expect(second.cloud).toBe(0);
+    expect(second.cloud).toBe(0);
     expect((store.get('c-1') as unknown as { groupId?: string } | undefined)?.groupId).toBe('g2');
   });
 
@@ -1324,7 +1326,7 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     const eng = engine({ client, snap: SNAP, mapStore, outbox: new PendingMutationStore(makeMemento(), '7', '1'), store } as never);
 
     const r = await eng.repairFindings();
-    expect(r.relinked).toBe(1); // 仅 c-1 漂移（g1 → g2）
+    expect(r.cloud).toBe(1); // 仅 c-1 漂移（g1 → g2）
     expect((store.get('c-1') as unknown as { groupId?: string } | undefined)?.groupId).toBe('g2');
     expect((store.get('c-2') as unknown as { groupId?: string; name?: string } | undefined)?.groupId).toBe('g2');
     expect((store.get('c-2') as unknown as { name?: string } | undefined)?.name).toBe('two');
@@ -1347,10 +1349,10 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     const eng = engine({ client, snap: SNAP, mapStore, outbox: new PendingMutationStore(makeMemento(), '7', '1'), store } as never);
 
     const first = await eng.repairFindings();
-    expect(first.relinked).toBe(1);
+    expect(first.cloud).toBe(1);
     expect((store.getGroupById('g1') as unknown as { name?: string } | undefined)?.name).toBe('天九-数科');
     const second = await eng.repairFindings();
-    expect(second.relinked).toBe(0);
+    expect(second.cloud).toBe(0);
   });
 
   it('inspectFindings：分组名漂移 → 逐条发现（本机/云端对照），零写入', async () => {
@@ -1466,10 +1468,10 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     expect(groups.get('ag1')?.name).toBe('亿贝安');
 
     const r = await eng.repairFindings();
-    expect(r.relinked).toBe(1);
+    expect(r.cloud).toBe(1);
     expect(groups.get('ag1')?.name).toBe('天九-数科');
     const again = await eng.repairFindings();
-    expect(again.relinked).toBe(0);
+    expect(again.cloud).toBe(0);
   });
 
   it('孤儿空分组（无映射、无引用、非新建）：检出 orphanGroup；修复清理（swept=1），被引用的不清', async () => {
@@ -1537,8 +1539,8 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
 
     // 只修验证器分组名这一条。
     const r = await eng.repairFindings([`nameDrift:authenticatorGroup:ag1`]);
-    expect(r.relinked).toBe(1);
-    expect(r.candidates).toBe(1);
+    expect(r.cloud).toBe(1);
+    expect(r.cloud).toBe(1);
     expect(groups.get('ag1')?.name).toBe('天九-数科');
     // 未选中的连接名漂移保持原样。
     expect((store.get('c-1') as unknown as { name?: string } | undefined)?.name).toBe('本地改过的名');
@@ -1569,7 +1571,287 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
       { id: 'nameDrift:connection:c-1', kind: 'nameDrift', type: 'connection', recordId: cRid, localId: 'c-1', localValue: '本地改过的名', remoteValue: 'c' },
     ]);
     const r = await eng.repairFindings();
-    expect(r.relinked).toBe(1);
+    expect(r.cloud).toBe(1);
     expect((store.get('c-1') as unknown as { name?: string } | undefined)?.name).toBe('c');
+  });
+
+  it('本地方向（用本机覆盖云端）：命名漂移 → 出站 put（版本=云端+1），不改本地、不直发', async () => {
+    const cRid = 'R'.repeat(22);
+    const mapStore = new RecordMapStore(makeMemento(), '7', '1');
+    await mapStore.put('G'.repeat(22), { type: 'group', localId: 'g1', recordVersion: '1', revision: 1, status: 'confirmed' });
+    await mapStore.put(cRid, { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 1, status: 'confirmed' });
+    const store = relinkStore(
+      { id: 'c-1', name: '本地名', dbType: 'MYSQL', host: 'h', port: 3306, user: 'u', groupId: 'g1', updateTime: 1 } as unknown as SavedConnection,
+      [{ id: 'g1', name: 'G1' }],
+    );
+    const client = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [sealAlive(cRid, '1', '5', { type: 'connection', name: '云端名', dbType: 'mysql', host: 'h', port: 3306, user: 'u', groupId: 'G'.repeat(22) })] })),
+    });
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    const eng = engine({ client, snap: SNAP, mapStore, outbox, store } as never);
+
+    const r = await eng.repairFindings([`nameDrift:connection:c-1`], 'local');
+    expect(r.pending).toBe(0);
+    expect(r.local).toBe(1); // 定向推送：只发本条
+    expect(r.cloud).toBe(0); // 使用本机不改本机数据
+    // 定向推送走签名出站（与常规推送同链路），推完确认并清出出站。
+    expect(client.putRecordSigned).toHaveBeenCalledTimes(1);
+    expect(outbox.list()).toHaveLength(0);
+    // 本机保持原样（使用本机 = 推内容上云，不改本机）；未走未签名通道。
+    expect((store.get('c-1') as unknown as { name?: string } | undefined)?.name).toBe('本地名');
+    expect(client.putRecord).not.toHaveBeenCalled();
+  });
+
+  it('本地方向：本机已删云端仍在 → 出站 delete 并定向推送（保持删除意图）', async () => {
+    const id = 'S'.repeat(22);
+    const mapStore = new RecordMapStore(makeMemento(), '7', '1');
+    await mapStore.put(id, { type: 'connection', localId: 'c-lost', recordVersion: '1', revision: 0, status: 'confirmed' });
+    const store = makeStore([
+      { id: 'c-lost', name: 'gone', dbType: 'MYSQL', host: 'h', port: 3306, deleted: true, updateTime: 999999 } as unknown as SavedConnection,
+    ]);
+    const client = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [aliveConnectionRecord(id, '3', '5')] })),
+    });
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    const eng = engine({ client, snap: SNAP, mapStore, outbox, store });
+
+    const r = await eng.repairFindings([`orphanDelete:connection:c-lost`], 'local');
+    expect(r.pending).toBe(0);
+    expect(r.local).toBe(1);
+    expect(client.deleteRecordSigned).toHaveBeenCalledTimes(1);
+    expect(outbox.list()).toHaveLength(0); // 推送确认后清出
+    expect((store.get('c-lost') as unknown as { deleted?: boolean } | undefined)?.deleted).toBe(true);
+  });
+
+  it('定向推送隔离：出站已有积压时，点选一条只推该条（积压不动，等显式同步）', async () => {
+    const cRid = 'V'.repeat(22);
+    const mapStore = new RecordMapStore(makeMemento(), '7', '1');
+    await mapStore.put('G'.repeat(22), { type: 'group', localId: 'g1', recordVersion: '1', revision: 1, status: 'confirmed' });
+    await mapStore.put(cRid, { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 1, status: 'confirmed' });
+    const store = relinkStore(
+      { id: 'c-1', name: '本地名', dbType: 'MYSQL', host: 'h', port: 3306, user: 'u', groupId: 'g1', updateTime: 1 } as unknown as SavedConnection,
+      [{ id: 'g1', name: 'G1' }],
+    );
+    const client = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [sealAlive(cRid, '1', '5', { type: 'connection', name: '云端名', dbType: 'mysql', host: 'h', port: 3306, user: 'u', groupId: 'G'.repeat(22) })] })),
+    });
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    // 出站先有一条无关积压（历史遗留，未被用户点选）。
+    const stale = { ...putMutation(), recordId: 'W'.repeat(22), localId: 'c-stale' };
+    await outbox.put(stale);
+    const eng = engine({ client, snap: SNAP, mapStore, outbox, store } as never);
+
+    const r = await eng.repairFindings([`nameDrift:connection:c-1`], 'local');
+    expect(r.local).toBe(1);
+    // 只发用户点选的那条；积压原样留在出站（不会被顺手冲出去）。
+    expect(client.putRecordSigned).toHaveBeenCalledTimes(1);
+    const rest = outbox.list();
+    expect(rest).toHaveLength(1);
+    expect(rest[0].mutationId).toBe(stale.mutationId);
+  });
+
+  it('合并方向：字段级并集（本机字段优先）落地本地 + 定向推送', async () => {
+    const cRid = 'X'.repeat(22);
+    const mapStore = new RecordMapStore(makeMemento(), '7', '1');
+    await mapStore.put('G'.repeat(22), { type: 'group', localId: 'g1', recordVersion: '1', revision: 1, status: 'confirmed' });
+    await mapStore.put(cRid, { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 1, status: 'confirmed' });
+    const store = relinkStore(
+      { id: 'c-1', name: '本地名', dbType: 'MYSQL', host: 'h', port: 3306, user: 'u', groupId: 'g1', updateTime: 1 } as unknown as SavedConnection,
+      [{ id: 'g1', name: 'G1' }],
+    );
+    const client = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [sealAlive(cRid, '1', '5', { type: 'connection', name: '云端名', dbType: 'mysql', host: 'h', port: 3306, user: 'u', groupId: 'G'.repeat(22) })] })),
+    });
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    const eng = engine({ client, snap: SNAP, mapStore, outbox, store } as never);
+
+    const r = await eng.repairFindings([`nameDrift:connection:c-1`], 'merge');
+    expect(r.merged).toBe(1);
+    expect(r.local).toBe(1);
+    // 合并语义（与冲突解决一致）：远端为基、本机字段覆盖 → 名字取本机。
+    expect((store.get('c-1') as unknown as { name?: string } | undefined)?.name).toBe('本地名');
+    expect(client.putRecordSigned).toHaveBeenCalledTimes(1);
+    expect(outbox.list()).toHaveLength(0);
+  });
+
+  it('合并方向退化：云端已删 → 按云端收敛（应用墓碑，不入出站）', async () => {
+    const id = 'Y'.repeat(22);
+    const mapStore = new RecordMapStore(makeMemento(), '7', '1');
+    await mapStore.put(id, { type: 'group', localId: 'g1', recordVersion: '1', revision: 1, status: 'confirmed' });
+    const store = relinkStore(
+      { id: 'c-0', name: 'c', dbType: 'MYSQL', host: 'h', port: 3306, user: 'u', updateTime: 1 } as unknown as SavedConnection,
+      [{ id: 'g1', name: 'G1' }],
+    );
+    // 协议：墓碑记录不得携带 nonce/ciphertext/tag（parsePage 严格校验）。
+    const deadRecord = { recordId: id, version: '2', changeSequence: '5', deleteTime: '2026-10-14T00:00:00.000Z' };
+    const client = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [deadRecord] })),
+    });
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    const eng = engine({ client, snap: SNAP, mapStore, outbox, store } as never);
+
+    const r = await eng.repairFindings([`remoteDeleted:group:g1`], 'merge');
+    expect(r.cloud).toBe(1); // 云端已删 → 合并退化为按云端收敛
+    expect(r.pending).toBe(0);
+    expect(r.local).toBe(0);
+    expect(outbox.list()).toHaveLength(0);
+  });
+
+  it('本地方向：missing 使用本机=删除云端这条（定向推送，S7k.12 语义）', async () => {
+    const id = 'A'.repeat(22);
+    const mapStore = new RecordMapStore(makeMemento(), '7', '1');
+    await mapStore.put(id, { type: 'connection', localId: 'c-lost', recordVersion: '1', revision: 0, status: 'confirmed' });
+    const client = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [aliveConnectionRecord(id, '1', '5')] })),
+    });
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    const eng = engine({ client, snap: SNAP, mapStore, outbox, store: makeStore() });
+
+    const r = await eng.repairFindings([`missing:connection:c-lost`], 'local');
+    expect(r.local).toBe(1); // 本机侧为空 → 云端删除该记录
+    expect(r.pending).toBe(0);
+    expect(client.deleteRecordSigned).toHaveBeenCalledTimes(1);
+    expect(outbox.list()).toHaveLength(0);
+  });
+
+  it('归属漂移的目标分组本机缺失（pending 映射被 classify 静默跳过）：兜底产出缺失发现并补云端名；按云端修复先恢复分组再归位', async () => {
+    const cRid = 'T'.repeat(22);
+    const gRid = 'U'.repeat(22);
+    const mapStore = new RecordMapStore(makeMemento(), '7', '1');
+    await mapStore.put(cRid, { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 1, status: 'confirmed' });
+    // 目标分组映射 pending + 本机实体缺失：classify 不产动作（旧盲区），由 refDrift 目标兜底。
+    await mapStore.put(gRid, { type: 'group', localId: 'g-x', recordVersion: '1', revision: 0, status: 'pending' });
+    const conns = new Map<string, SavedConnection>([
+      ['c-1', { id: 'c-1', name: 'c', dbType: 'MYSQL', host: 'h', port: 3306, user: 'u', groupId: 'g1', updateTime: 1 } as unknown as SavedConnection],
+    ]);
+    const gs = new Map<string, { id: string; name: string; deleted?: boolean; updateTime?: number }>([['g1', { id: 'g1', name: 'G1' }]]);
+    const store = {
+      get: (id: string) => conns.get(id),
+      save: async (c: SavedConnection) => { conns.set(c.id, { ...c, updateTime: (c as { updateTime?: number }).updateTime ?? Date.now() }); },
+      remove: async (id: string) => { const c = conns.get(id); if (c) conns.set(id, { ...c, deleted: true }); },
+      listForSync: () => [...conns.values()],
+      listGroupsForSync: () => [...gs.values()].map((g) => ({ ...g, deleted: !!g.deleted, updateTime: g.updateTime ?? 1 })),
+      listFoldersForSync: () => [],
+      listQueriesForSync: () => [],
+      getGroupById: (id: string) => gs.get(id),
+      getFolderById: () => undefined,
+      getQueryById: () => undefined,
+      upsertGroup: async (g: { id: string; name: string }) => {
+        const e = gs.get(g.id);
+        if (e) { e.name = g.name; e.updateTime = Date.now(); }
+        else { gs.set(g.id, { id: g.id, name: g.name, deleted: false, updateTime: Date.now() }); }
+      },
+      upsertFolder: async () => {},
+      upsertQuery: async () => {},
+      removeGroup: async () => {},
+      removeQueryFolder: async () => {},
+      removeQuery: async () => {},
+    } as unknown as ConnectionStore;
+    const client = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '6' })),
+      getRecords: vi.fn(async () => ({
+        snapshotSequence: '6',
+        records: [
+          sealAlive(cRid, '1', '5', { type: 'connection', name: 'c', dbType: 'mysql', host: 'h', port: 3306, user: 'u', groupId: gRid }),
+          sealAlive(gRid, '2', '6', { type: 'group', name: 'G-cloud' }),
+        ],
+      })),
+    });
+    const eng = engine({ client, snap: SNAP, mapStore, outbox: new PendingMutationStore(makeMemento(), '7', '1'), store } as never);
+
+    const v = await eng.inspectFindings();
+    expect(v.findings).toEqual([
+      {
+        id: 'refDrift:connection:c-1', kind: 'refDrift', type: 'connection', recordId: cRid, localId: 'c-1',
+        localValue: 'c', ref: { field: 'groupId', local: 'G1', remote: undefined, remoteMissing: true },
+      },
+      {
+        id: 'missing:group:g-x', kind: 'missing', type: 'group', recordId: gRid, localId: 'g-x',
+        remoteValue: 'G-cloud',
+      },
+    ]);
+
+    const r = await eng.repairFindings();
+    expect(r.cloud).toBe(2); // 恢复缺失分组（pending 映射 force 确认）+ 条目按云端归位
+    const newGroup = (store.get('c-1') as unknown as { groupId?: string } | undefined)?.groupId;
+    expect(newGroup).toBeTruthy(); // 材料化 mint 新 localId 并重指映射（applyActive 既有行为）
+    expect((store.getGroupById(newGroup!) as unknown as { name?: string } | undefined)?.name).toBe('G-cloud');
+    expect((store.get('c-1') as unknown as { groupId?: string } | undefined)?.groupId).toBe(newGroup);
+    const after = await eng.inspectFindings();
+    expect(after.findings).toEqual([]);
+  });
+  it('云端独有记录（无本地映射）：全量对账产出 missing（带云端名）；使用本机=删除云端这条', async () => {
+    const gRid = 'Z'.repeat(22);
+    const mapStore = new RecordMapStore(makeMemento(), '7', '1'); // 无任何映射
+    const store = relinkStore(
+      { id: 'c-0', name: 'c', dbType: 'MYSQL', host: 'h', port: 3306, user: 'u', updateTime: 1 } as unknown as SavedConnection,
+      [], // 本机没有任何分组
+    );
+    const client = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [sealAlive(gRid, '1', '5', { type: 'authenticatorGroup', name: '云端孤儿组', sortOrder: 0 })] })),
+    });
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    const eng = engine({ client, snap: SNAP, mapStore, outbox, store, authenticatorBackend: authGroupBackend(new Map()) } as never);
+
+    // 全量对账：无映射的云端存活记录 → 「云端有，本机没有」。
+    const v = await eng.inspectFindings();
+    expect(v.findings).toEqual([
+      { id: `missing:authenticatorGroup:${gRid}`, kind: 'missing', type: 'authenticatorGroup', recordId: gRid, localId: '', remoteValue: '云端孤儿组' },
+    ]);
+
+    // 使用本机（本机侧为空）→ 构建云端删除并定向推送（确认后清出出站）。
+    const r = await eng.repairFindings([`missing:authenticatorGroup:${gRid}`], 'local');
+    expect(r.local).toBe(1);
+    expect(r.pending).toBe(0);
+    expect(client.deleteRecordSigned).toHaveBeenCalledTimes(1);
+    expect(outbox.list()).toHaveLength(0);
+  });
+
+  it('云端独有记录：使用云端=恢复到本机（mint 新实体+映射）', async () => {
+    const gRid = 'a'.repeat(22);
+    const mapStore = new RecordMapStore(makeMemento(), '7', '1');
+    const groups = new Map<string, { id: string; name: string; sortOrder?: number; deleted?: boolean; updateTime?: number }>();
+    const client = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [sealAlive(gRid, '1', '5', { type: 'authenticatorGroup', name: '云端组', sortOrder: 0 })] })),
+    });
+    const eng = engine({ client, snap: SNAP, mapStore, outbox: new PendingMutationStore(makeMemento(), '7', '1'), store: relinkStore({ id: 'c-0', name: 'c', dbType: 'MYSQL', host: 'h', port: 3306, user: 'u', updateTime: 1 } as unknown as SavedConnection, []), authenticatorBackend: authGroupBackend(groups) } as never);
+
+    const r = await eng.repairFindings([`missing:authenticatorGroup:${gRid}`], 'cloud');
+    expect(r.cloud).toBe(1);
+    expect(groups.size).toBe(1);
+    expect([...groups.values()][0]?.name).toBe('云端组');
+    const after = await eng.inspectFindings();
+    expect(after.findings).toEqual([]);
+  });
+
+  it('反向引用漂移：本机有分组、云端无 → 也算不一致（对称比较）', async () => {
+    const cRid = 'b'.repeat(22);
+    const gRid = 'c'.repeat(22);
+    const mapStore = new RecordMapStore(makeMemento(), '7', '1');
+    await mapStore.put(gRid, { type: 'group', localId: 'g1', recordVersion: '1', revision: 1, status: 'confirmed' });
+    await mapStore.put(cRid, { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 1, status: 'confirmed' });
+    const store = relinkStore(
+      { id: 'c-1', name: 'c', dbType: 'MYSQL', host: 'h', port: 3306, user: 'u', groupId: 'g1', updateTime: 1 } as unknown as SavedConnection,
+      [{ id: 'g1', name: 'G1' }],
+    );
+    // 云端 payload 无 groupId（被覆盖丢失归属）——本机有 → 漂移。
+    const client = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [sealAlive(cRid, '1', '5', { type: 'connection', name: 'c', dbType: 'mysql', host: 'h', port: 3306, user: 'u' })] })),
+    });
+    const eng = engine({ client, snap: SNAP, mapStore, outbox: new PendingMutationStore(makeMemento(), '7', '1'), store } as never);
+
+    const v = await eng.inspectFindings();
+    expect(v.findings).toEqual([
+      { id: `refDrift:connection:c-1`, kind: 'refDrift', type: 'connection', recordId: cRid, localId: 'c-1', localValue: 'c', ref: { field: 'groupId', local: 'G1', remote: undefined } },
+    ]);
   });
 });

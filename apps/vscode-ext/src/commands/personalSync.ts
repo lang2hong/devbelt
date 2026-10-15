@@ -7,12 +7,11 @@ import { createInitialMaterial, newRecoveryCode, unlockDek } from '@devbelt/db-h
 import { encodeBase64Url } from '@devbelt/db-host/sync/crypto/recoveryCode';
 import type { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
 import { canUseDataSync } from '@devbelt/db-host/sync/entitlementGate';
-import { ES_CONNECTIONS_NOT_SYNCABLE } from '@devbelt/db-host/sync/e2e/recordCodec';
 import type { FindingsReport } from '@devbelt/db-host/sync/e2e/syncEngine';
 import { l10n } from '../i18n';
 import { diagError, diagInfo } from '../utils/diagnostics';
 
-type SyncRun = { stage: string; applied?: number; pushed?: number; changes?: number; skippedEntitlement?: number; skippedUnsupported?: number; skippedOutbound?: number; skippedOutboundReason?: string; localMissing?: number } | undefined;
+type SyncRun = { stage: string; applied?: number; pushed?: number; changes?: number; skippedEntitlement?: number; skippedUnsupported?: number; skippedOutbound?: number; skippedOutboundReason?: string } | undefined;
 
 interface SyncSessionPort {
   readonly uid: string;
@@ -126,10 +125,9 @@ async function existingState(session: SyncSessionPort): Promise<StateDto | undef
 
 type SyncOp = 'sync' | 'pull' | 'push';
 
-/** 出站跳过原因 → 可读文案（ES 连接是当前唯一已知的稳定原因；其余归入未知）。 */
+/** 出站跳过原因 → 展示文案。S7l.1 后已无已知跳过原因（ES 已接入同步）；有原因如实显示，避免谎报 unknown。 */
 function skipReasonLabel(reason: string | undefined): string {
-  if (reason === ES_CONNECTIONS_NOT_SYNCABLE) return l10n('sync.skipEsConnection');
-  return l10n('sync.skipReasonUnknown');
+  return reason || l10n('sync.skipReasonUnknown');
 }
 
 function reportInitialRun(ui: SyncUi, result: SyncRun, op: SyncOp): void {

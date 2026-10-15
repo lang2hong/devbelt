@@ -235,7 +235,6 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
         skippedEntitlement: result?.skippedEntitlement,
         skippedUnsupported: result?.skippedUnsupported,
         skippedOutbound: result?.skippedOutbound,
-        localMissing: result?.localMissing,
       });
       // 入站 pull 应用了变更才刷树（避免每次空同步都整树刷新），并重算路径 warning；
       // 其余情况仅刷新状态栏。
