@@ -136,8 +136,9 @@ function connectionEngineUnsupported(payload: unknown): boolean {
   if (p.type !== 'connection') return false;
   if (typeof p.dbType !== 'string') return false;
   try {
-    // P8：ES 已接入引擎枚举但尚未接入同步 codec —— 视作未支持引擎（skipped-unsupported，游标前进）。
-    return databaseTypeFromEngine(p.dbType) === DatabaseType.ELASTICSEARCH;
+    // S7l.1：ES 已接入同步 codec——能解析的引擎一律支持；此处只兜真正未知的引擎（H3 前向兼容）。
+    databaseTypeFromEngine(p.dbType);
+    return false;
   } catch {
     return true;
   }

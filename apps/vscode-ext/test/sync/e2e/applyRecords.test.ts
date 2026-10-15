@@ -98,7 +98,7 @@ describe('applyRecord（连接）', () => {
   it('未知引擎的连接记录 → skipped-unsupported（不抛错，向前兼容）', async () => {
     const s = setup();
     const id = 'E'.repeat(22);
-    const payload = { type: 'connection', name: 'es', dbType: 'elasticsearch', host: 'h', port: 9200 };
+    const payload = { type: 'connection', name: 'x', dbType: 'graphdb', host: 'h', port: 9200 };
     expect(await applyRecord({ recordId: id, version: '1', tombstone: false, payload }, s))
       .toMatchObject({ disposition: 'skipped-unsupported' });
     expect(s.connections.size).toBe(0);

@@ -4,8 +4,6 @@ import { DatabaseType, databaseEngineOf, databaseTypeFromEngine } from '@devbelt
 
 export { databaseTypeFromEngine } from '@devbelt/db-core';
 
-/** ES 连接未接入同步 codec 的 fail-closed 原因（上层用于把出站跳过原因映射为可读文案）。 */
-export const ES_CONNECTIONS_NOT_SYNCABLE = 'elasticsearch connections are not syncable yet';
 import type { SavedConnection } from '../../connection/connectionStore.js';
 import type { ConnectionGroup } from '../../connection/connectionStore.js';
 import type { QueryFolder } from '../../connection/queryStore.js';
@@ -55,6 +53,15 @@ export const REDIS_PAYLOAD_FIELDS = [
   'sshHost', 'sshPort', 'sshUser', 'sshPassword', 'sshPassphrase',
 ] as const;
 
+/** Elasticsearch 引擎白名单字段（S7l.1 接入同步；认证/TLS 与共用 SSH 字段同 MySQL/Redis 模式）。 */
+export const ES_PAYLOAD_FIELDS = [
+  'name', 'dbType', 'host', 'port',
+  'esProtocol', 'esPathPrefix', 'esAuth', 'esPassword', 'esApiKey',
+  'useSSL', 'rejectUnauthorized', 'requestTimeout',
+  'color', 'environment', 'readOnly',
+  'sshHost', 'sshPort', 'sshUser', 'sshPassword', 'sshPassphrase',
+] as const;
+
 /** D1：跨设备同步的路径/URL/命令字段（源配置；敏感，仅入密文）。 */
 export const CONNECTION_PATH_FIELDS = [
   'dbPath', 'caPath', 'clientCertPath', 'clientKeyPath', 'sshPrivateKeyPath',
@@ -72,6 +79,7 @@ export const SQL_MAX_BYTES = 64 * 1024;
 function payloadFieldsFor(dbType: DatabaseType): readonly string[] {
   if (dbType === DatabaseType.SQLITE) return SQLITE_PAYLOAD_FIELDS;
   if (dbType === DatabaseType.REDIS) return REDIS_PAYLOAD_FIELDS;
+  if (dbType === DatabaseType.ELASTICSEARCH) return ES_PAYLOAD_FIELDS;
   return MYSQL_PG_PAYLOAD_FIELDS;
 }
 
@@ -111,10 +119,6 @@ function assertSqlSize(sql: string): void {
  * 返回带 `type:'connection'` 的判别对象。
  */
 export function encodeConnectionPayload(conn: SavedConnection, resolveRef: RefResolver): Record<string, unknown> {
-  // P8：ES 连接尚未接入同步 codec —— 显式 fail-closed，避免按 SQL 字段白名单静默编码（字段丢失）。
-  if (conn.dbType === DatabaseType.ELASTICSEARCH) {
-    throw new Error(ES_CONNECTIONS_NOT_SYNCABLE);
-  }
   const src = conn as unknown as Record<string, unknown>;
   const out: Record<string, unknown> = { type: 'connection', dbType: databaseEngineOf(conn.dbType) };
 
@@ -337,7 +341,36 @@ export interface DecodedRedisPayload {
   groupId?: string;
 }
 
-export type DecodedConnectionPayload = DecodedMysqlPgPayload | DecodedSqlitePayload | DecodedRedisPayload;
+export type DecodedConnectionPayload = DecodedMysqlPgPayload | DecodedSqlitePayload | DecodedRedisPayload | DecodedEsPayload;
+
+/** ES 解码结果（S7l.1）：host/port 必需；认证对象 esAuth 严格校验 kind。 */
+export interface DecodedEsPayload {
+  dbType: DatabaseType.ELASTICSEARCH;
+  name: string;
+  host: string;
+  port: number;
+  esProtocol?: 'http' | 'https';
+  esPathPrefix?: string;
+  esAuth?: { kind: 'none' } | { kind: 'basic'; username: string } | { kind: 'apiKey' };
+  esPassword?: string;
+  esApiKey?: string;
+  useSSL?: boolean;
+  rejectUnauthorized?: boolean;
+  requestTimeout?: number;
+  color?: string;
+  environment?: 'development' | 'test' | 'staging' | 'production';
+  readOnly?: boolean;
+  sshHost?: string;
+  sshPort?: number;
+  sshUser?: string;
+  sshPassword?: string;
+  sshPassphrase?: string;
+  caPath?: string;
+  clientCertPath?: string;
+  clientKeyPath?: string;
+  sshPrivateKeyPath?: string;
+  groupId?: string;
+}
 
 /** 解码后的引用（recordId），应用层负责经 recordMap 转本地 id 并处理 unresolved。 */
 export interface DecodedGroupPayload {
@@ -458,10 +491,6 @@ function decodeConnectionPayload(p: unknown): DecodedConnectionPayload {
   const dbTypeStr = strOf(obj, 'dbType');
   if (dbTypeStr === undefined) throw new Error('record payload.dbType is required');
   const dbType = databaseTypeFromEngine(dbTypeStr);
-  // P8：ES 连接尚未接入同步 codec —— 显式 fail-closed（入站由 applyRecords 视作 skipped-unsupported）。
-  if (dbType === DatabaseType.ELASTICSEARCH) {
-    throw new Error(ES_CONNECTIONS_NOT_SYNCABLE);
-  }
   ignoreUnknownKeys(obj, [...payloadFieldsFor(dbType), ...CONNECTION_PATH_FIELDS, 'type', 'groupId']);
 
   const name = strOf(obj, 'name');
@@ -487,6 +516,58 @@ function decodeConnectionPayload(p: unknown): DecodedConnectionPayload {
       sqliteCommand: strOf(obj, 'sqliteCommand'),
       connectionUrl: strOf(obj, 'connectionUrl'),
       useConnectionString: boolOf(obj, 'useConnectionString'),
+      groupId,
+    };
+  }
+
+  if (dbType === DatabaseType.ELASTICSEARCH) {
+    const esHost = strOf(obj, 'host');
+    if (esHost === undefined) throw new Error('record payload.host is required');
+    const esPort = uint16Of(obj, 'port');
+    if (esPort === undefined) throw new Error('record payload.port is required');
+    const esProtocol = strOf(obj, 'esProtocol');
+    if (esProtocol !== undefined && esProtocol !== 'http' && esProtocol !== 'https') {
+      throw new Error(`record payload.esProtocol invalid: ${esProtocol}`);
+    }
+    const rawAuth = obj.esAuth;
+    let esAuth: DecodedEsPayload['esAuth'];
+    if (rawAuth !== undefined) {
+      if (typeof rawAuth !== 'object' || rawAuth === null) throw new Error('record payload.esAuth invalid');
+      const a = rawAuth as Record<string, unknown>;
+      if (a.kind === 'none') esAuth = { kind: 'none' };
+      else if (a.kind === 'basic') {
+        const username = typeof a.username === 'string' ? a.username : undefined;
+        if (username === undefined) throw new Error('record payload.esAuth.username is required');
+        esAuth = { kind: 'basic', username };
+      } else if (a.kind === 'apiKey') esAuth = { kind: 'apiKey' };
+      else throw new Error(`record payload.esAuth.kind invalid: ${String(a.kind)}`);
+    }
+    const requestTimeout = nonNegIntOf(obj, 'requestTimeout');
+    if (requestTimeout !== undefined && requestTimeout > 600_000) {
+      throw new Error(`record payload.requestTimeout out of range: ${requestTimeout}`);
+    }
+    return {
+      dbType, name, host: esHost, port: esPort,
+      esProtocol: esProtocol as DecodedEsPayload['esProtocol'],
+      esPathPrefix: strOf(obj, 'esPathPrefix'),
+      esAuth,
+      esPassword: strOf(obj, 'esPassword'),
+      esApiKey: strOf(obj, 'esApiKey'),
+      useSSL: boolOf(obj, 'useSSL'),
+      rejectUnauthorized: boolOf(obj, 'rejectUnauthorized'),
+      requestTimeout,
+      color: strOf(obj, 'color'),
+      environment: env as DecodedEsPayload['environment'],
+      readOnly,
+      sshHost: strOf(obj, 'sshHost'),
+      sshPort: uint16Of(obj, 'sshPort'),
+      sshUser: strOf(obj, 'sshUser'),
+      sshPassword: strOf(obj, 'sshPassword'),
+      sshPassphrase: strOf(obj, 'sshPassphrase'),
+      caPath: strOf(obj, 'caPath'),
+      clientCertPath: strOf(obj, 'clientCertPath'),
+      clientKeyPath: strOf(obj, 'clientKeyPath'),
+      sshPrivateKeyPath: strOf(obj, 'sshPrivateKeyPath'),
       groupId,
     };
   }

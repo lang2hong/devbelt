@@ -67,11 +67,39 @@ describe('encodeEntityPayload 按引擎白名单 + type 判别', () => {
     expect(() => encodeRecordPayload(conn)).not.toThrow();
   });
 
-  it('P8：ES 连接编/解码显式 fail-closed（同步 codec 未支持）', () => {
-    const conn = { id: 'c-es', name: 'es', dbType: DatabaseType.ELASTICSEARCH, host: 'h', port: 9200, user: '', createTime: 1, updateTime: 2, deleted: false } as any;
-    expect(() => encodeRecordPayload(conn)).toThrowError(/elasticsearch connections are not syncable yet/);
-    expect(() => decodeEntityPayload({ type: 'connection', dbType: 'elasticsearch', name: 'es', host: 'h', port: 9200, user: '' }))
-      .toThrowError(/elasticsearch connections are not syncable yet/);
+  it('S7l.1：ES 连接编/解码 round-trip（协议/路径前缀/认证/密钥/TLS/SSH）', () => {
+    const conn = {
+      id: 'c-es', name: 'es', dbType: DatabaseType.ELASTICSEARCH,
+      host: 'h', port: 9200, user: '',
+      esProtocol: 'https', esPathPrefix: '/es',
+      esAuth: { kind: 'basic', username: 'esuser' }, esPassword: 'pw', esApiKey: 'id:key',
+      useSSL: true, rejectUnauthorized: false, requestTimeout: 30000,
+      environment: 'production', readOnly: true, color: '#abc',
+      sshHost: 'jump', sshPort: 22, sshUser: 'u', sshPassword: 'spw', sshPassphrase: 'ph',
+      caPath: '/ca', clientCertPath: '/cert', clientKeyPath: '/key', sshPrivateKeyPath: '/pk',
+      createTime: 1, updateTime: 2, deleted: false,
+    } as any;
+    const out = encodeRecordPayload(conn);
+    expect(out.dbType).toBe('elasticsearch');
+    expect(out.esProtocol).toBe('https');
+    expect(out.esAuth).toEqual({ kind: 'basic', username: 'esuser' });
+    expect(out.esPassword).toBe('pw');
+    expect(out.requestTimeout).toBe(30000);
+    expect(out.sshHost).toBe('jump');
+    const decoded = decodeEntityPayload({ ...out, groupId: 'G'.repeat(22) });
+    expect(decoded.type).toBe('connection');
+    const connData = decoded.type === 'connection' ? decoded.data : undefined;
+    expect(connData?.dbType).toBe(DatabaseType.ELASTICSEARCH);
+    expect(connData).toMatchObject({ host: 'h', port: 9200, esProtocol: 'https', esPathPrefix: '/es', esAuth: { kind: 'basic', username: 'esuser' }, esPassword: 'pw', esApiKey: 'id:key', useSSL: true, requestTimeout: 30000, sshHost: 'jump' });
+  });
+
+  it('S7l.1：ES 解码校验（esProtocol 非法 / esAuth 缺 username / requestTimeout 超界）', () => {
+    expect(() => decodeEntityPayload({ type: 'connection', dbType: 'elasticsearch', name: 'es', host: 'h', port: 9200, esProtocol: 'ftp' }))
+      .toThrowError(/esProtocol/);
+    expect(() => decodeEntityPayload({ type: 'connection', dbType: 'elasticsearch', name: 'es', host: 'h', port: 9200, esAuth: { kind: 'basic' } }))
+      .toThrowError(/esAuth/);
+    expect(() => decodeEntityPayload({ type: 'connection', dbType: 'elasticsearch', name: 'es', host: 'h', port: 9200, requestTimeout: 999999 }))
+      .toThrowError(/requestTimeout/);
   });
 
   it('groupId 经 resolver 转 recordId 引用', () => {
