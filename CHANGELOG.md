@@ -61,6 +61,16 @@
   路由与月额度/权益矩阵）与 `docs/产品介绍.md`。验证：ai-core 88、vscode-ext 1636 通过/4 跳过
   （+14 条 S6）、server 585 回归、全仓 typecheck/lint 全绿。多模型手工矩阵/F5 真机走查/真机大库
   预筛留发布硬门禁（未执行）。
+- **P9.1c 已交付（2026-10-15，客户端购买闭环；P9.1 全量收口）**：用户侧下单
+  `POST /api/ai/topup-orders`（console + CSRF + 限流 10/h + 支付开关/渠道 fail-closed 503；
+  同人同 SKU 同渠道 pending 复用 P1b 语义；金额以库内 SKU 为准）；支付回调在 paid 推进后
+  **按 `order.purpose` 分发**（topup → `AiTopupService.fulfillInTx` grants 入账 + paid→fulfilled
+  同事务；plan 路径逐字不变，billing 经组合根注入不破模块边界）；db-ui 新增「AI 加油包」购买页
+  （`/ai-topup`：档位卡片 + 微信扫码/支付宝跳转 + 轮询至入账）+ 账户页 AI 双段配额卡片与购买入口
+  + 订单页用途显示；扩展 Chat 配额条双段文案（`wv.ai.quota.dual`）+「购买加油包」按钮
+  （openConsole 白名单 `/db/ai-topup` → openExternal）；`serverProxyProvider` 快照透传双段字段
+  （旧服务端回退兼容）。验证：server 617（+7）/db-ui 128（+4）/vscode-ext 1750/db-host 23
+  全绿 + tsc 干净。
 - **P9.1b 已交付（2026-10-15，管理后台）**：加油包运营闭环——新增 `consoleAiTopup` 路由
   （console-only + requireAdmin + CSRF + 幂等回执 + 限流）：`GET /api/admin/ai/skus`（全量）、
   `PATCH /api/admin/ai/skus/:code`（改价/停启用，reason 必填）、`POST /api/admin/ai/topup-orders`
