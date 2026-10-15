@@ -49,6 +49,12 @@ export interface OrderServiceDeps {
   gatewayFor: (channel: PaymentChannel) => PaymentGateway;
   /** 可选：回调 nonce 持久化去重（重放防护）。 */
   nonceRepo?: IPaymentCallbackNonceRepo;
+  /**
+   * 可选：加油包订单履约（P9.1c）——组合根注入 `AiTopupService.fulfillInTx`
+   * （grants 入账 + paid→fulfilled 同事务）。billing 不 import ai 模块，
+   * 回调按 `order.purpose` 分发：topup 走此注入，plan 走既有权益路径。
+   */
+  fulfillTopupInTx?: (tx: Queryable, orderNo: string) => Promise<void>;
 }
 
 /**
@@ -67,6 +73,7 @@ export class OrderService {
   private readonly runner: TxRunner;
   private readonly gatewayFor: (channel: PaymentChannel) => PaymentGateway;
   private readonly nonceRepo?: IPaymentCallbackNonceRepo;
+  private readonly fulfillTopupInTx?: (tx: Queryable, orderNo: string) => Promise<void>
 
   constructor(deps: OrderServiceDeps) {
     this.orderRepo = deps.orderRepo;
@@ -77,6 +84,7 @@ export class OrderService {
     this.runner = deps.runner;
     this.gatewayFor = deps.gatewayFor;
     this.nonceRepo = deps.nonceRepo;
+    this.fulfillTopupInTx = deps.fulfillTopupInTx;
   }
 
   /** 下单：优先复用同 (user, plan, channel) 未过期 pending 订单，否则建新订单并预下单。 */
@@ -257,17 +265,24 @@ export class OrderService {
         targetId: order.orderNo,
       });
 
-      await this.applyEntitlementInTx(tx, order);
+      // P9.1c：按 purpose 分发履约——topup 走注入的 AiTopupService.fulfillInTx
+      // （grants 入账 + paid→fulfilled 同事务，自身幂等）；plan 走既有权益路径。
+      if (order.purpose === 'topup') {
+        if (!this.fulfillTopupInTx) throw new OrderInvalidStateError('topup fulfillment is not wired');
+        await this.fulfillTopupInTx(tx, order.orderNo);
+      } else {
+        await this.applyEntitlementInTx(tx, order);
 
-      // paid → fulfilled（同一事务）。
-      const fulfilled = await this.orderRepo.advance(tx, {
-        id: order.id,
-        expectedStatus: 'paid',
-        status: 'fulfilled',
-        channelTradeNo: null,
-        paidTime: null,
-      });
-      if (!fulfilled) throw new OrderInvalidStateError();
+        // paid → fulfilled（同一事务）。
+        const fulfilled = await this.orderRepo.advance(tx, {
+          id: order.id,
+          expectedStatus: 'paid',
+          status: 'fulfilled',
+          channelTradeNo: null,
+          paidTime: null,
+        });
+        if (!fulfilled) throw new OrderInvalidStateError();
+      }
 
       this.auditWriter.writeInTx(tx, {
         eventType: 'payment.order.fulfilled',

@@ -99,6 +99,11 @@ export interface IAiTopupRepo extends IAiGrantRepo {
   ): Promise<AiTopupOrder>;
   /** 事务内按订单号锁行（入账/退款序列化）。 */
   lockOrderByNoInTx(exec: Queryable, orderNo: string): Promise<AiTopupOrder | undefined>;
+  /**
+   * 同人同 SKU 同渠道的未过期 pending 订单（下单复用，P1b 语义；P9.1c）。
+   * 防双击/重试重复付款；复用剩余寿命校验由调用方执行（不足 1m 不复用）。
+   */
+  findPendingByUserAndSku(userId: number, skuCode: string, channel: 'wechat' | 'alipay'): Promise<AiTopupOrder | undefined>;
   /** 订单状态推进（幂等由调用方在行锁内判定；返回是否命中期望前态）。 */
   setOrderStatusInTx(
     exec: Queryable,
@@ -266,6 +271,16 @@ export class MysqlAiTopupRepo implements IAiTopupRepo {
     const row = rows[0];
     if (!row) throw new Error('topup order insert failed');
     return mapOrder(row);
+  }
+
+  async findPendingByUserAndSku(userId: number, skuCode: string, channel: 'wechat' | 'alipay'): Promise<AiTopupOrder | undefined> {
+    const [rows] = await this.db().query<any[]>(
+      `SELECT ${ORDER_COLS} FROM orders
+        WHERE user_id = ? AND purpose = 'topup' AND sku_code = ? AND channel = ? AND status = 'pending' AND expires_time > UTC_TIMESTAMP(3)
+        ORDER BY id DESC LIMIT 1`,
+      [userId, skuCode, channel],
+    );
+    return rows[0] ? mapOrder(rows[0]) : undefined;
   }
 
   async lockOrderByNoInTx(exec: Queryable, orderNo: string): Promise<AiTopupOrder | undefined> {

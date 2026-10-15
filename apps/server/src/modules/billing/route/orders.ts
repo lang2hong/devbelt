@@ -42,7 +42,9 @@ function userIdOf(req: FastifyRequest): number {
 function orderDto(order: Order) {
   return {
     orderNo: order.orderNo,
+    purpose: order.purpose,
     planCode: order.planCode,
+    skuCode: order.skuCode ?? null,
     amountCents: order.amountCents,
     channel: order.channel,
     status: order.status,

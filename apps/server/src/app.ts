@@ -65,6 +65,7 @@ import { consoleMeRoutes } from './modules/auth/route/consoleMe.js';
 import { consoleDataRoutes } from './modules/db/route/consoleData.js';
 import { consoleAdminRoutes } from './modules/admin/route/consoleAdmin.js';
 import { consoleAiTopupRoutes } from './modules/admin/route/consoleAiTopup.js';
+import { aiTopupOrderRoutes } from './modules/ai/route/topup.js';
 import { registerPaymentRoutes } from './modules/billing/route/paymentRoutes.js';
 import { invoiceRoutes } from './modules/billing/route/invoices.js';
 import { InvoiceService } from './modules/billing/service/invoiceService.js';
@@ -322,6 +323,10 @@ export async function createApp() {
     runner: (fn) => withTransaction(app.mysql, fn),
     gatewayFor: (channel) => resolvePaymentGateway(channel),
     nonceRepo: paymentNonceRepo,
+    // P9.1c：回调按 purpose 分发——topup 订单履约走加油包入账（grants + fulfilled 同事务）。
+    fulfillTopupInTx: async (tx, orderNo) => {
+      await aiTopupService.fulfillInTx(tx, orderNo);
+    },
   });
   const featureFlags = resolveFeatureFlags();
   // opt-in：凭据齐全 + 显式 DEVBELT_DB_FEATURE_PAYMENT=true 才注册真支付路由，否则仅注册只读订单路由。
@@ -436,6 +441,21 @@ export async function createApp() {
     planRepo,
     serverVersion: '1.0.0',
     consoleApiVersion: '1',
+  });
+  // P9.1c：用户侧加油包下单（console + CSRF，复用 P4 收银台；支付开关 fail-closed 503）。
+  app.register(aiTopupOrderRoutes, {
+    tokenService,
+    getUser,
+    getSessionActive,
+    csrfService,
+    consoleOrigin: config.consoleOrigin,
+    rateLimiter,
+    topup: aiTopupService,
+    auditWriter,
+    paymentFeatureEnabled: () => featureFlags.enabled('payment'),
+    channelConfigured: (ch) => isChannelConfigured(ch),
+    gatewayFor: (ch) => resolvePaymentGateway(ch),
+    exec: getMysql(),
   });
   // P9.1b：AI 加油包运营（SKU 管理/手工建单/履行/退款/配额查询）。
   app.register(consoleAiTopupRoutes, {

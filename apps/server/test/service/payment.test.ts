@@ -12,6 +12,7 @@ import { AuditWriter } from '../../src/service/auditWriter.js';
 import { MemoryPaymentGateway, signMemoryCallback } from '../../src/modules/billing/service/paymentChannel.js';
 import type { PaymentGateway, PaymentCallback } from '../../src/modules/billing/service/paymentChannel.js';
 import {
+  OrderInvalidStateError,
   PaymentSignatureInvalidError,
   UnknownPlanError,
 } from '../../src/domain/errors.js';
@@ -131,7 +132,10 @@ class FakeSubsRepo implements IPersonalSubscriptionRepo {
   }
 }
 
-function makeService(nonceRepo?: { insertIfAbsent(exec: Queryable, channel: string, nonceHash: string, expiresTime: Date): Promise<boolean>; purgeExpired(exec: Queryable): Promise<number> }) {
+function makeService(
+  nonceRepo?: { insertIfAbsent(exec: Queryable, channel: string, nonceHash: string, expiresTime: Date): Promise<boolean>; purgeExpired(exec: Queryable): Promise<number> },
+  fulfillTopupInTx?: (tx: Queryable, orderNo: string) => Promise<void>,
+) {
   const orderRepo = new FakeOrderRepo();
   const paymentRepo = new FakePaymentRepo();
   const planRepo = new FakePlanRepo();
@@ -146,8 +150,21 @@ function makeService(nonceRepo?: { insertIfAbsent(exec: Queryable, channel: stri
     runner: async (fn) => fn({} as Queryable),
     gatewayFor: (channel) => new MemoryPaymentGateway(channel),
     nonceRepo,
+    fulfillTopupInTx,
   });
   return { svc, orderRepo, paymentRepo, subsRepo, planRepo };
+}
+
+/** 直插一条 topup 订单（P9.1c：回调按 purpose 分发）。 */
+function seedTopupOrder(orderRepo: FakeOrderRepo, overrides: Partial<Order> = {}): Order {
+  const o: Order = {
+    id: 9001, orderNo: 'tp-cb-1', userId: 1, purpose: 'topup', planCode: null, planVersion: 0, skuCode: 'topup_500k',
+    amountCents: 900, channel: 'wechat', status: 'pending', channelTradeNo: null, paidTime: null,
+    expiresTime: new Date(Date.now() + 30 * 60 * 1000), createTime: new Date(), updateTime: new Date(),
+    ...overrides,
+  };
+  orderRepo.store.set(o.orderNo, o);
+  return o;
 }
 
 const SUCCESS_CALLBACK = (orderNo: string, channelTradeNo: string, amountCents: number) => {
@@ -232,6 +249,37 @@ describe('OrderService.createOrder plan guards', () => {
 });
 
 describe('OrderService.handleCallback', () => {
+  it('topup 订单：paid 后按 purpose 分发给注入的 fulfillTopupInTx（不动订阅）', async () => {
+    const fulfillments: string[] = [];
+    const advanceToFulfilled = async (orderRepo: FakeOrderRepo, orderNo: string) => {
+      const o = orderRepo.store.get(orderNo)!;
+      o.status = 'fulfilled';
+    };
+    const { svc, orderRepo, subsRepo } = makeService(undefined, async (_tx, orderNo) => {
+      fulfillments.push(orderNo);
+      await advanceToFulfilled(orderRepo, orderNo);
+    });
+    await subsRepo.create({ userId: 1, planId: 1, status: 'active', periodStartTime: new Date(), periodEndTime: null });
+    const order = seedTopupOrder(orderRepo);
+
+    const cb = SUCCESS_CALLBACK(order.orderNo, 'wx-topup-1', order.amountCents);
+    const outcome = await svc.handleCallback('wechat', cb.raw, cb.headers);
+
+    expect(outcome.kind).toBe('fulfilled');
+    expect(fulfillments).toEqual([order.orderNo]);
+    expect(orderRepo.store.get(order.orderNo)!.status).toBe('fulfilled');
+    // topup 不改订阅：仍指向原 plan（权益派生不变）。
+    expect((await subsRepo.findByUserId(1))!.planId).toBe(1);
+  });
+
+  it('topup 订单未接线（fulfillTopupInTx 缺失）→ 拒绝并保持 paid 不履约', async () => {
+    const { svc, orderRepo } = makeService();
+    const order = seedTopupOrder(orderRepo);
+    const cb = SUCCESS_CALLBACK(order.orderNo, 'wx-topup-2', order.amountCents);
+    await expect(svc.handleCallback('wechat', cb.raw, cb.headers)).rejects.toBeInstanceOf(OrderInvalidStateError);
+    expect(orderRepo.store.get(order.orderNo)!.status).toBe('paid');
+  });
+
   it('fulfills: pending → paid → fulfilled and rewrites the subscription', async () => {
     const { svc, orderRepo, subsRepo, planRepo } = makeService();
     await subsRepo.create({ userId: 1, planId: 1, status: 'active', periodStartTime: new Date(), periodEndTime: null });

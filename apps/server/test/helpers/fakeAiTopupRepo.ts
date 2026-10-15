@@ -121,6 +121,12 @@ export class MemoryAiTopupRepo implements IAiTopupRepo {
     return o ? { ...o } : undefined;
   }
 
+  async findPendingByUserAndSku(userId: number, skuCode: string, channel: 'wechat' | 'alipay'): Promise<AiTopupOrder | undefined> {
+    return [...this.orders.values()]
+      .filter((o) => o.userId === userId && o.skuCode === skuCode && o.channel === channel && o.status === 'pending' && o.expiresTime.getTime() > Date.now())
+      .sort((a, b) => b.id - a.id)[0];
+  }
+
   async setOrderStatusInTx(
     _exec: Queryable,
     orderId: number,

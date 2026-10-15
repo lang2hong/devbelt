@@ -1,7 +1,9 @@
 import { randomBytes } from 'crypto';
 import type { Queryable, TxRunner } from '../../../repository/mysql/db.js';
-import type { AiGrantDetail, IAiTopupRepo, AiGrantAvailability, AiTopupSku } from '../repository/aiTopupRepo.js';
+import type { AiGrantDetail, IAiTopupRepo, AiGrantAvailability, AiTopupOrder, AiTopupSku } from '../repository/aiTopupRepo.js';
 import { TopupOrderNotFoundError, TopupOrderStateError, TopupSkuNotFoundError } from '../domain/errors.js';
+import type { PrepayParams, PaymentGateway } from '../../billing/service/paymentChannel.js';
+import type { PaymentChannel } from '../../../domain/enums.js';
 
 /**
  * AI 加油包服务（P9.1）：SKU 目录 + 订单入账 + 退款撤销 + 余额查询。
@@ -91,6 +93,63 @@ export class AiTopupService {
   /** 用户加油包可用余额（配额快照/409 上下文/购买页展示用）。 */
   async grantBalance(userId: number): Promise<AiGrantAvailability> {
     return this.repo.availability(userId, this.now());
+  }
+
+  /**
+   * 用户侧渠道下单（P9.1c，复用 P4 收银台语义）：
+   * - 价格以库内 SKU 为准（不接受前端金额）；
+   * - 同人同 SKU 同渠道未过期 pending 直接复用（剩余寿命 ≥1m 才复用，P1b），
+   *   防双击/重试重复付款；
+   * - prepay 是事务外副作用，故本方法**不落回执事务**（对齐 OrderService.createOrder 决策）；
+   * - 多渠道并行不互相作废：旧渠道订单自然过期，合法回调一律履约。
+   */
+  async createChannelOrder(
+    input: { userId: number; skuCode: string; channel: PaymentChannel; mode?: 'qr' | 'redirect' },
+    deps: {
+      /** 非事务执行器（连接池直写：单条 INSERT，无需事务包裹）。 */
+      exec: Queryable;
+      gatewayFor: (channel: PaymentChannel) => PaymentGateway;
+      /** 订单寿命（对齐 P4 的 30m）。 */
+      expiresMs: number;
+      /** pending 复用的最小剩余寿命（对齐 P4 的 1m）。 */
+      minLifetimeMs: number;
+      auditWrite: (orderNo: string, amountCents: number) => void;
+    },
+  ): Promise<{ order: AiTopupOrder; payParams: PrepayParams }> {
+    const sku = await this.repo.findSkuByCode(input.skuCode);
+    if (!sku || sku.status !== 'active' || sku.priceCents <= 0) throw new TopupSkuNotFoundError(input.skuCode);
+    const gateway = deps.gatewayFor(input.channel);
+
+    const existing = await this.repo.findPendingByUserAndSku(input.userId, sku.code, input.channel);
+    if (existing && existing.expiresTime.getTime() - Date.now() >= deps.minLifetimeMs) {
+      const payParams = await gateway.createPayment({
+        orderNo: existing.orderNo,
+        amountCents: existing.amountCents,
+        expiresTime: existing.expiresTime,
+        mode: input.mode,
+      });
+      return { order: existing, payParams };
+    }
+
+    const orderNo = mintOrderNo();
+    const expiresTime = new Date(Date.now() + deps.expiresMs);
+    const order = await this.repo.insertTopupOrderInTx(deps.exec, {
+      orderNo,
+      userId: input.userId,
+      skuCode: sku.code,
+      amountCents: sku.priceCents,
+      channel: input.channel,
+      status: 'pending',
+      expiresTime,
+    });
+    const payParams = await gateway.createPayment({
+      orderNo,
+      amountCents: sku.priceCents,
+      expiresTime,
+      mode: input.mode,
+    });
+    deps.auditWrite(orderNo, sku.priceCents);
+    return { order, payParams };
   }
 
   // ── InTx 核心（并入调用方事务；管理后台幂等回执/渠道回调用）──
