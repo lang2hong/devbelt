@@ -61,6 +61,14 @@
   路由与月额度/权益矩阵）与 `docs/产品介绍.md`。验证：ai-core 88、vscode-ext 1636 通过/4 跳过
   （+14 条 S6）、server 585 回归、全仓 typecheck/lint 全绿。多模型手工矩阵/F5 真机走查/真机大库
   预筛留发布硬门禁（未执行）。
+- **P9.1a 已交付（2026-10-15，服务端核心）**：加油包账本落地——迁移 009（`ai_topup_skus`
+  预置 3 档 topup_500k/2m/10m + `ai_quota_grants`（`uq_grants_order` 唯一键=入账幂等锚点）+
+  `orders` 扩 purpose/sku_code、plan_code 放宽 NULL、channel 扩 'manual'）；`aiTopupService`
+  （listSkus/createManualOrder/fulfill/refund/grantBalance，订单 fulfilled 与 grants 入账同事务，
+  重放幂等）；`aiQuotaService` 升级**双段 FIFO**（月额度优先、不足按 `expires_time` 升序扣 grants，
+  settle 时月段吸收超出分配、grants ≤ 分配扣减）；`GET /api/ai/skus` 上架档位；
+  409 配额错误扩 `topupRemaining`。验证：server 599 通过（+14 双段/加油包用例）/tsc 干净；
+  真库集成用例（SKU 种子/幂等/FIFO）已备（CI 无库时跳过）。P9.1b（管理后台）/P9.1c（客户端）待做。
 - **真机复核修复（2026-10-12）**：AI 请求 401 自动续期并重试一次 —— 新增
   `AuthService.refreshAccessToken`（复用 SyncClient 单飞刷新）+ `ServerProxyProvider.onAuthFailure`
   （仅 401、仅重试一次；续期失败/同 token 不重试；`getUsage` 同语义）+ AiService 注入。
