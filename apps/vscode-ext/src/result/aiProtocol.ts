@@ -36,6 +36,10 @@ export interface AiQuotaState {
   used: number;
   reserved: number;
   remaining: number;
+  /** 月段剩余（P9.1 双段配额条；旧数据缺失时回退 remaining）。 */
+  monthlyRemaining: number;
+  /** 加油包可用余额（P9.1；缺失时为 0）。 */
+  topupRemaining: number;
   resetAt: string;
 }
 
@@ -250,6 +254,7 @@ export type AiUpMessage =
   | AiSaveTableNoteUp
   | AiFetchColumnSampleUp
   | { type: 'requestQuotaRefresh' }
+  | { type: 'openConsole'; path: string }
   | { type: 'openSettings' }
   | { type: 'setApiKey' }
   | { type: 'clearApiKey' }

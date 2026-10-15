@@ -249,6 +249,11 @@ function reopenConnection(): void {
   if (selectedConnId.value) selectConnection(selectedConnId.value);
 }
 
+/** 购买加油包（P9.1c）：跳浏览器控制台购买页（宿主白名单 openConsole）。 */
+function buyTopup(): void {
+  post({ type: 'openConsole', path: '/db/ai-topup' });
+}
+
 /** S7a：切换作用域（库/逻辑库/索引，单选）。 */
 function selectScope(value: string): void {
   post({ type: 'selectScope', value });
@@ -320,6 +325,7 @@ function openContextDetail(): void {
       @select-connection="selectConnection"
       @open-connection="reopenConnection"
       @select-scope="selectScope"
+      @open-console="buyTopup"
       @open-settings="post({ type: 'openSettings' })"
       @set-api-key="post({ type: 'setApiKey' })"
       @clear-api-key="post({ type: 'clearApiKey' })"

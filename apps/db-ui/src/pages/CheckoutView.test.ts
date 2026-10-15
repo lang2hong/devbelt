@@ -25,7 +25,9 @@ const KEY = 'devbelt.console.pendingOrder';
 function order(status: string, no = 'o1') {
   return {
     orderNo: no,
+    purpose: 'plan' as const,
     planCode: 'pro',
+    skuCode: null,
     amountCents: 9900,
     channel: 'wechat',
     status,

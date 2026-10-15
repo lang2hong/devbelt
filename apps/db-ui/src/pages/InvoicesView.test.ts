@@ -39,7 +39,7 @@ function seed() {
   vi.mocked(listOrders).mockResolvedValue({
     kind: 'ok',
     value: {
-      items: [{ orderNo: 'o1', planCode: 'pro', amountCents: 9900, channel: 'wechat', status: 'fulfilled', paidTime: null, expiresTime: '2026-01-01T00:00:00.000Z', createTime: '2026-01-01T00:00:00.000Z' }],
+      items: [{ orderNo: 'o1', purpose: 'plan' as const, planCode: 'pro', skuCode: null, amountCents: 9900, channel: 'wechat', status: 'fulfilled', paidTime: null, expiresTime: '2026-01-01T00:00:00.000Z', createTime: '2026-01-01T00:00:00.000Z' }],
       nextCursor: null,
     },
   });

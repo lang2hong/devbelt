@@ -9,7 +9,9 @@ import { readServerError } from '@devbelt/auth-client';
 
 export interface ConsoleOrder {
   orderNo: string;
-  planCode: string;
+  purpose: 'plan' | 'topup';
+  planCode: string | null;
+  skuCode?: string | null;
   amountCents: number;
   channel: string;
   status: string;

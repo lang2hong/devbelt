@@ -18,6 +18,7 @@ import { AiSessionStore, type AiChatSession } from '../ai/aiSessionStore.js';
 import { AiContextStore, findColumnNote, findTableNote } from '../ai/aiContextStore.js';
 import { AiKeyStore } from '../ai/aiKeyStore.js';
 import { AiSchemaContextBuilder, type AiSchemaSnapshot } from '../ai/schemaContext.js';
+import { DEFAULT_SERVER_URL } from '../sync/authService.js';
 import { currentDatabase, listScopes, pickScope, scopeKindOf } from '../ai/scopeOptions.js';
 import { buildRedisContext } from '../ai/redisContext.js';
 import { buildEsContext } from '../ai/esContext.js';
@@ -217,6 +218,14 @@ export class AiChatView extends BaseWebView {
       case 'requestQuotaRefresh':
         await this.refreshQuota();
         return;
+      case 'openConsole': {
+        // 白名单（P9.1c）：Chat 配额条「购买加油包」跳浏览器控制台购买页。
+        const AI_CONSOLE_PATHS = new Set(['/db/ai-topup']);
+        if (typeof msg.path === 'string' && AI_CONSOLE_PATHS.has(msg.path)) {
+          await vscode.env.openExternal(vscode.Uri.parse(`${DEFAULT_SERVER_URL}${msg.path}`));
+        }
+        return;
+      }
       case 'applyCode': {
         if (typeof msg.text === 'string' && msg.text.trim()) await this.applyCodeToEditor(msg.text);
         return;
@@ -640,6 +649,8 @@ export class AiChatView extends BaseWebView {
       used: usage.used,
       reserved: usage.reserved,
       remaining: usage.remaining,
+      monthlyRemaining: usage.monthlyRemaining ?? usage.remaining,
+      topupRemaining: usage.topupRemaining ?? 0,
       resetAt: usage.resetAt,
     };
   }

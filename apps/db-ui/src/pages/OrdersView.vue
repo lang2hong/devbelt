@@ -96,7 +96,7 @@ onMounted(() => load());
       <li v-for="o in visible" :key="o.orderNo" class="item">
         <button class="row" :aria-expanded="expandedOrderNo === o.orderNo" @click="toggle(o)">
           <span class="meta">
-            <strong>{{ o.planCode === 'pro' ? 'Pro' : o.planCode }}</strong>
+            <strong>{{ o.purpose === 'topup' ? `加油包 ${o.skuCode ?? ''}`.trim() : (o.planCode === 'pro' ? 'Pro' : (o.planCode ?? '')) }}</strong>
             <span class="badge" :class="displayStatus(o)">{{ STATUS_LABEL[displayStatus(o)] ?? displayStatus(o) }}</span>
           </span>
           <span class="muted">¥{{ fmtCents(o.amountCents) }} · {{ channelLabel(o.channel) }} · {{ formatDateTime(o.createTime) }}</span>

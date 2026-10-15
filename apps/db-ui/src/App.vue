@@ -11,6 +11,7 @@ import SyncView from './pages/SyncView.vue';
 import OrdersView from './pages/OrdersView.vue';
 import InvoicesView from './pages/InvoicesView.vue';
 import CheckoutView from './pages/CheckoutView.vue';
+import AiTopupView from './pages/AiTopupView.vue';
 import PlansView from './pages/PlansView.vue';
 import StatusPage from './pages/StatusPage.vue';
 import AuthenticatorView from './pages/AuthenticatorView.vue';
@@ -24,6 +25,7 @@ const ROUTES: RouteConfig[] = [
   { pattern: '/orders', name: 'orders' },
   { pattern: '/invoices', name: 'invoices' },
   { pattern: '/checkout', name: 'checkout' },
+  { pattern: '/ai-topup', name: 'ai-topup' },
 
 
 
@@ -57,6 +59,8 @@ const view = computed<{ comp: Component; props: Record<string, unknown> }>(() =>
       return { comp: InvoicesView, props: {} };
     case 'checkout':
       return { comp: CheckoutView, props: { user: me_.value?.user ?? null, subscription: me_.value?.subscription ?? null } };
+    case 'ai-topup':
+      return { comp: AiTopupView, props: {} };
     default:
       return { comp: StatusPage, props: { code: 404 } };
   }

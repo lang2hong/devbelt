@@ -34,6 +34,10 @@ export interface QuotaState {
   used: number;
   reserved: number;
   remaining: number;
+  /** 月段剩余（P9.1 双段；缺失回退 remaining）。 */
+  monthlyRemaining: number;
+  /** 加油包可用余额（P9.1；缺失为 0）。 */
+  topupRemaining: number;
   resetAt: string;
 }
 
@@ -49,6 +53,7 @@ const emit = defineEmits<{
   selectConnection: [id: string | null];
   openConnection: [];
   selectScope: [value: string];
+  openConsole: [path: string];
   openSettings: [];
   setApiKey: [];
   clearApiKey: [];
@@ -114,6 +119,14 @@ function onSelectScope(event: Event): void {
 const quotaLabel = computed(() => {
   const quota = props.quota;
   if (!quota) return t('wv.ai.quota.none');
+  if (quota.topupRemaining > 0) {
+    return t('wv.ai.quota.dual', {
+      used: quota.used,
+      limit: quota.limit,
+      monthly: quota.monthlyRemaining ?? quota.remaining,
+      topup: quota.topupRemaining,
+    });
+  }
   return t('wv.ai.quota.value', { used: quota.used, limit: quota.limit, remaining: quota.remaining });
 });
 
@@ -154,6 +167,12 @@ function onSelect(event: Event): void {
     </div>
     <div class="ai-context-row">
       <span class="ai-context-summary">{{ quotaLabel }}</span>
+      <button
+        v-if="quota"
+        class="ai-btn ai-quota-buy"
+        :title="t('wv.ai.quota.buy.title')"
+        @click="emit('openConsole', '/db/ai-topup')"
+      >{{ t('wv.ai.quota.buy') }}</button>
       <span class="ai-spacer"></span>
       <button class="ai-btn" @click="emit('testConnection')">{{ t('wv.ai.testConnection') }}</button>
       <button class="ai-btn" @click="emit('setApiKey')">{{ t('wv.ai.setApiKey') }}</button>

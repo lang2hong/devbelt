@@ -26,8 +26,8 @@ describe('OrdersView', () => {
       kind: 'ok',
       value: {
         items: [
-          { orderNo: 'o1', planCode: 'pro', amountCents: 9900, channel: 'wechat', status: 'fulfilled', paidTime: null, expiresTime: '2026-01-01T00:00:00.000Z', createTime: '2026-01-01T00:00:00.000Z' },
-          { orderNo: 'o2', planCode: 'pro', amountCents: 9900, channel: 'alipay', status: 'pending', paidTime: null, expiresTime: '2026-01-01T00:00:00.000Z', createTime: '2026-01-01T00:00:00.000Z' },
+          { orderNo: 'o1', purpose: 'plan' as const, planCode: 'pro', skuCode: null, amountCents: 9900, channel: 'wechat', status: 'fulfilled', paidTime: null, expiresTime: '2026-01-01T00:00:00.000Z', createTime: '2026-01-01T00:00:00.000Z' },
+          { orderNo: 'o2', purpose: 'plan' as const, planCode: 'pro', skuCode: null, amountCents: 9900, channel: 'alipay', status: 'pending', paidTime: null, expiresTime: '2026-01-01T00:00:00.000Z', createTime: '2026-01-01T00:00:00.000Z' },
         ],
         nextCursor: null,
       },
@@ -55,7 +55,7 @@ describe('OrdersView', () => {
 
   function order(overrides: Partial<ConsoleOrder>): ConsoleOrder {
     return {
-      orderNo: 'o1', planCode: 'pro', amountCents: 9900, channel: 'alipay', status: 'pending',
+      orderNo: 'o1', purpose: 'plan' as const, planCode: 'pro', skuCode: null, amountCents: 9900, channel: 'alipay', status: 'pending',
       paidTime: null, expiresTime: new Date(Date.now() + 3_600_000).toISOString(),
       createTime: '2026-01-01T00:00:00.000Z', ...overrides,
     };

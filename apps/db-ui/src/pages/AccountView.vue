@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 import { ensureCsrf, setAccessToken } from '@devbelt/auth-client';
 import { updateDisplayName, changePassword, type ConsoleMeUser } from '../api/me';
+import { getAiUsage, type AiUsageSnapshot } from '../api/ai';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { navigate, withBase } from '../lib/router';
 import { formatDateTime } from '../lib/formatTime';
@@ -21,6 +22,28 @@ const pwSubmitting = ref(false);
 const showPassword = ref(false);
 
 const nameWrite = useIdempotencyKey();
+
+// AI 双段配额（P9.1c）：月额度 + 加油包。
+const aiUsage = ref<AiUsageSnapshot | null>(null);
+const aiUsageState = ref<'loading' | 'ready' | 'error'>('loading');
+
+function fmtTokens(n: number): string {
+  return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n.toLocaleString();
+}
+
+async function loadAiUsage(): Promise<void> {
+  aiUsageState.value = 'loading';
+  const r = await getAiUsage();
+  if (r.kind === 'ok') {
+    aiUsage.value = r.value;
+    aiUsageState.value = 'ready';
+  } else {
+    aiUsageState.value = 'error';
+    aiUsage.value = null;
+  }
+}
+
+void loadAiUsage();
 
 function forceRelogin(): void {
   setAccessToken(null);
@@ -108,6 +131,19 @@ async function submitPassword(): Promise<void> {
       <div class="actions" v-if="subscription?.planCode !== 'pro'"><button class="btn accent" @click="navigate('/checkout')">升级 Pro</button></div>
     </div>
 
+    <div class="card">
+      <h3>AI 配额</h3>
+      <template v-if="aiUsageState === 'ready' && aiUsage">
+        <div class="kv"><span class="k">月额度剩余</span><span class="v"><strong>{{ fmtTokens(aiUsage.monthlyRemaining) }}</strong> tokens<span class="muted small">（{{ formatDateTime(aiUsage.resetAt) }} 重置）</span></span></div>
+        <div class="kv"><span class="k">加油包剩余</span><span class="v"><strong>{{ fmtTokens(aiUsage.topupRemaining) }}</strong> tokens</span></div>
+        <div class="kv"><span class="k">本月已用</span><span class="v">{{ fmtTokens(aiUsage.used) }} / {{ fmtTokens(aiUsage.limit) }} tokens</span></div>
+        <p class="muted small">扣减顺序：月额度优先，不足部分按到期先后扣加油包。</p>
+      </template>
+      <p class="muted" v-else-if="aiUsageState === 'loading'">加载中…</p>
+      <p class="muted" v-else>配额加载失败。<button class="link" @click="loadAiUsage">重试</button></p>
+      <div class="actions"><button class="btn accent" @click="navigate('/ai-topup')">购买加油包</button></div>
+    </div>
+
     </div>
 
     <div class="card">
@@ -160,4 +196,5 @@ input { width: 100%; box-sizing: border-box; }
 .ok { color: var(--c-success-text); font-size: 13px; }
 .muted { color: var(--c-text-muted); font-size: 13px; }
 .small { font-size: 12px; }
+.link { border: none; background: none; color: var(--c-accent); cursor: pointer; font-size: 13px; padding: 0; }
 </style>

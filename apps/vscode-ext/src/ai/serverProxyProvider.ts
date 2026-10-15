@@ -18,6 +18,11 @@ export interface AiUsageSnapshot {
   limit: number;
   used: number;
   reserved: number;
+  /** 月段剩余（P9.1；旧服务端缺失时回退 remaining）。 */
+  monthlyRemaining: number;
+  /** 加油包可用余额（P9.1；旧服务端缺失时为 0）。 */
+  topupRemaining: number;
+  /** 合计可用 = monthlyRemaining + topupRemaining。 */
   remaining: number;
   requestCount: number;
   resetAt: string;
@@ -184,12 +189,16 @@ export class ServerProxyProvider implements AiProvider {
       if (!response.ok) return undefined;
       const body = (await response.json()) as Partial<AiUsageSnapshot>;
       if (typeof body.limit !== 'number' || typeof body.used !== 'number') return undefined;
+      const remaining = typeof body.remaining === 'number' ? body.remaining : Math.max(0, body.limit - body.used);
       return {
         usageMonth: typeof body.usageMonth === 'string' ? body.usageMonth : '',
         limit: body.limit,
         used: body.used,
         reserved: typeof body.reserved === 'number' ? body.reserved : 0,
-        remaining: typeof body.remaining === 'number' ? body.remaining : Math.max(0, body.limit - body.used),
+        // 旧服务端（P9.1 前）无双段字段：月段回退合计、加油包记 0。
+        monthlyRemaining: typeof body.monthlyRemaining === 'number' ? body.monthlyRemaining : remaining,
+        topupRemaining: typeof body.topupRemaining === 'number' ? body.topupRemaining : 0,
+        remaining,
         requestCount: typeof body.requestCount === 'number' ? body.requestCount : 0,
         resetAt: typeof body.resetAt === 'string' ? body.resetAt : '',
       };
