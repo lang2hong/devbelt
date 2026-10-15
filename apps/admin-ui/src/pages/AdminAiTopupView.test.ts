@@ -25,6 +25,7 @@ vi.mock('../api/admin', () => ({
   refundAdminAiTopupOrder: vi.fn(),
   getAdminAiQuota: vi.fn(),
   listAdminOrders: vi.fn(),
+  listUsers: vi.fn(),
 }));
 
 vi.mock('@devbelt/auth-client', async (importOriginal) => ({
@@ -33,7 +34,7 @@ vi.mock('@devbelt/auth-client', async (importOriginal) => ({
   setAccessToken: vi.fn(),
 }));
 
-import { listAdminAiSkus, listAdminOrders, createAdminAiTopupOrder, getAdminAiQuota, refundAdminAiTopupOrder } from '../api/admin';
+import { listAdminAiSkus, listAdminOrders, createAdminAiTopupOrder, getAdminAiQuota, refundAdminAiTopupOrder, listUsers } from '../api/admin';
 import AdminAiTopupView from './AdminAiTopupView.vue';
 
 const SKU = {
@@ -48,6 +49,8 @@ beforeEach(() => {
   vi.mocked(createAdminAiTopupOrder).mockReset();
   vi.mocked(getAdminAiQuota).mockReset();
   vi.mocked(refundAdminAiTopupOrder).mockReset();
+  vi.mocked(listUsers).mockReset();
+  vi.mocked(listUsers).mockResolvedValue({ kind: 'ok', value: { items: [], nextCursor: null } });
 });
 
 describe('AdminAiTopupView', () => {
@@ -72,10 +75,13 @@ describe('AdminAiTopupView', () => {
 
     docButton('手工建单')!.click();
     await flushPromises();
-    expect(document.querySelector('input[placeholder="用户ID（正整数）"]')).not.toBeNull();
+    expect(document.querySelector('input[placeholder="用户邮箱或用户ID"]')).not.toBeNull();
 
-    docInput('用户ID（正整数）').value = '7';
-    docInput('用户ID（正整数）').dispatchEvent(new Event('input'));
+    docInput('用户邮箱或用户ID').value = '7';
+    docInput('用户邮箱或用户ID').dispatchEvent(new Event('input'));
+    docButton('查找')!.click();
+    await flushPromises();
+    expect(document.querySelector('.resolved')?.textContent).toContain('7');
     docInput('确认金额（元，须与当前价一致）').value = '9';
     docInput('确认金额（元，须与当前价一致）').dispatchEvent(new Event('input'));
     docInput('建单原因（必填，进审计）').value = '客服补发';
@@ -100,8 +106,10 @@ describe('AdminAiTopupView', () => {
 
     docButton('手工建单')!.click();
     await flushPromises();
-    docInput('用户ID（正整数）').value = '7';
-    docInput('用户ID（正整数）').dispatchEvent(new Event('input'));
+    docInput('用户邮箱或用户ID').value = '7';
+    docInput('用户邮箱或用户ID').dispatchEvent(new Event('input'));
+    docButton('查找')!.click();
+    await flushPromises();
     docInput('确认金额（元，须与当前价一致）').value = '99'; // 与当前价 ¥9 不一致
     docInput('确认金额（元，须与当前价一致）').dispatchEvent(new Event('input'));
     docInput('建单原因（必填，进审计）').value = '误填';
@@ -112,6 +120,76 @@ describe('AdminAiTopupView', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('金额与当前价不一致');
+    wrapper.unmount();
+  });
+
+  it('手工建单：邮箱查找解析用户（回显邮箱+ID，提交用解析出的 userId）', async () => {
+    vi.mocked(listUsers).mockResolvedValue({
+      kind: 'ok',
+      value: { items: [{ userId: '7', email: 'buyer@b.com' } as never], nextCursor: null },
+    });
+    vi.mocked(createAdminAiTopupOrder).mockResolvedValue({
+      kind: 'ok',
+      value: { order: { orderNo: 'tp-e1', userId: 7, skuCode: 'topup_500k', tokens: 500_000, amountCents: 900, status: 'fulfilled', grantInserted: true } },
+    });
+    const wrapper = await mountView();
+
+    docButton('手工建单')!.click();
+    await flushPromises();
+    docInput('用户邮箱或用户ID').value = 'buyer@b.com';
+    docInput('用户邮箱或用户ID').dispatchEvent(new Event('input'));
+    docButton('查找')!.click();
+    await flushPromises();
+
+    expect(listUsers).toHaveBeenCalledWith({ emailExact: 'buyer@b.com' });
+    const resolved = document.querySelector('.resolved');
+    expect(resolved?.textContent).toContain('buyer@b.com');
+    expect(resolved?.textContent).toContain('7');
+    docInput('确认金额（元，须与当前价一致）').value = '9';
+    docInput('确认金额（元，须与当前价一致）').dispatchEvent(new Event('input'));
+    docInput('建单原因（必填，进审计）').value = '客服补发';
+    docInput('建单原因（必填，进审计）').dispatchEvent(new Event('input'));
+    await flushPromises();
+
+    docButton('确认建单')!.click();
+    await flushPromises();
+    expect(createAdminAiTopupOrder).toHaveBeenCalledWith(
+      { userId: 7, skuCode: 'topup_500k', expectedAmountCents: 900, reason: '客服补发' },
+      expect.any(String),
+      'csrf',
+    );
+    wrapper.unmount();
+  });
+
+  it('手工建单：邮箱查无此人 → 就地提示且确认按钮禁用', async () => {
+    vi.mocked(listUsers).mockResolvedValue({ kind: 'ok', value: { items: [], nextCursor: null } });
+    const wrapper = await mountView();
+
+    docButton('手工建单')!.click();
+    await flushPromises();
+    docInput('用户邮箱或用户ID').value = 'ghost@b.com';
+    docInput('用户邮箱或用户ID').dispatchEvent(new Event('input'));
+    docButton('查找')!.click();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('未找到该邮箱对应的用户');
+    expect(docButton('确认建单')!.disabled).toBe(true);
+    expect(createAdminAiTopupOrder).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('手工建单：数字 ID 直填不调用户接口（查找即解析）', async () => {
+    const wrapper = await mountView();
+    docButton('手工建单')!.click();
+    await flushPromises();
+
+    docInput('用户邮箱或用户ID').value = '42';
+    docInput('用户邮箱或用户ID').dispatchEvent(new Event('input'));
+    docButton('查找')!.click();
+    await flushPromises();
+
+    expect(listUsers).not.toHaveBeenCalled();
+    expect(document.querySelector('.resolved')?.textContent).toContain('42');
     wrapper.unmount();
   });
 

@@ -6,6 +6,7 @@ import {
   getAdminAiQuota,
   listAdminAiSkus,
   listAdminOrders,
+  listUsers,
   refundAdminAiTopupOrder,
   updateAdminAiSku,
   type AdminAiQuota,
@@ -157,11 +158,54 @@ async function toggleSkuStatus(s: AdminAiTopupSku): Promise<void> {
 
 // ── 手工建单（金额二次确认）──
 
-const manualForm = ref<{ userId: string; skuCode: string; amount: string; reason: string } | null>(null);
+/** 手工建单：输入用户邮箱或数字 ID（邮箱需先「查找」解析成 userId 才可提交）。 */
+const manualForm = ref<{ userInput: string; skuCode: string; amount: string; reason: string } | null>(null);
+const resolvedUser = ref<{ userId: number; email: string | null } | null>(null);
+const resolving = ref(false);
 
 function openManual(): void {
-  manualForm.value = { userId: '', skuCode: skus.value.find((s) => s.status === 'active')?.code ?? '', amount: '', reason: '' };
+  manualForm.value = { userInput: '', skuCode: skus.value.find((s) => s.status === 'active')?.code ?? '', amount: '', reason: '' };
+  resolvedUser.value = null;
   error.value = '';
+}
+
+function onUserInput(): void {
+  // 输入变化即失效已解析用户，防「改了邮箱仍按旧 userId 下单」。
+  resolvedUser.value = null;
+}
+
+async function resolveUser(): Promise<void> {
+  if (!manualForm.value || resolving.value) return;
+  const raw = manualForm.value.userInput.trim();
+  resolvedUser.value = null;
+  error.value = '';
+  if (/^[0-9]+$/.test(raw)) {
+    const uid = Number(raw);
+    if (Number.isSafeInteger(uid) && uid > 0) resolvedUser.value = { userId: uid, email: null };
+    else error.value = '用户 ID 必须为正整数。';
+    return;
+  }
+  if (!/^[^\s@]+@[^\s@]+$/.test(raw)) {
+    error.value = '请输入用户邮箱或数字用户 ID。';
+    return;
+  }
+  resolving.value = true;
+  try {
+    const r = await listUsers({ emailExact: raw });
+    if (r.kind === 'ok') {
+      if (r.value.items.length === 1) {
+        resolvedUser.value = { userId: Number(r.value.items[0].userId), email: r.value.items[0].email };
+      } else {
+        error.value = '未找到该邮箱对应的用户，请核对后重试。';
+      }
+    } else if (r.kind === 'unauthorized') {
+      relogin();
+    } else {
+      error.value = '用户查找失败，请重试。';
+    }
+  } finally {
+    resolving.value = false;
+  }
 }
 
 function closeManual(): void {
@@ -173,11 +217,11 @@ const manualSku = computed(() => skus.value.find((s) => s.code === manualForm.va
 
 async function confirmManual(): Promise<void> {
   if (!manualForm.value || busy.value) return;
-  const uid = Number(manualForm.value.userId.trim());
-  if (!/^[0-9]+$/.test(manualForm.value.userId.trim()) || !Number.isSafeInteger(uid) || uid <= 0) {
-    error.value = '用户 ID 必须为正整数。';
+  if (!resolvedUser.value) {
+    error.value = '请先「查找」确认目标用户。';
     return;
   }
+  const uid = resolvedUser.value.userId;
   if (!manualForm.value.skuCode) {
     error.value = '请选择档位。';
     return;
@@ -474,7 +518,13 @@ const GRANT_STATUS_LABEL: Record<string, string> = {
 
     <!-- 手工建单 Modal -->
     <Modal v-if="manualForm" title="手工建单（立即生效）" :closable="!busy" @close="closeManual">
-      <input v-model="manualForm.userId" type="text" placeholder="用户ID（正整数）" />
+      <div class="user-row">
+        <input v-model="manualForm.userInput" type="text" placeholder="用户邮箱或用户ID" @input="onUserInput" @keyup.enter="resolveUser" />
+        <button class="btn secondary" :disabled="resolving || busy" @click="resolveUser">{{ resolving ? '查找中…' : '查找' }}</button>
+      </div>
+      <p class="resolved" v-if="resolvedUser">
+        目标用户：<strong>{{ resolvedUser.email ?? '（仅 ID）' }}</strong> · 用户ID <span class="mono">{{ resolvedUser.userId }}</span>
+      </p>
       <select v-model="manualForm.skuCode">
         <option v-for="s in skus.filter((x) => x.status === 'active')" :key="s.code" :value="s.code">
           {{ s.code }} · {{ s.label.zh }} · {{ fmtTokens(s.tokens) }} tokens · ¥{{ fmtCents(s.priceCents) }}
@@ -485,7 +535,7 @@ const GRANT_STATUS_LABEL: Record<string, string> = {
       <input v-model="manualForm.reason" type="text" maxlength="500" placeholder="建单原因（必填，进审计）" />
       <p v-if="error" class="error">{{ error }}</p>
       <div class="modal-actions">
-        <button class="btn danger" :disabled="busy" @click="confirmManual">确认建单</button>
+        <button class="btn danger" :disabled="busy || !resolvedUser" @click="confirmManual">确认建单</button>
         <button class="btn secondary" :disabled="busy" @click="closeManual">取消</button>
       </div>
     </Modal>
@@ -536,4 +586,7 @@ th { white-space: nowrap; color: var(--c-text-muted); font-weight: 600; }
 .head h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
 .sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
 .quota-summary p { margin: 8px 0; font-size: 13px; }
+.user-row { display: flex; gap: 8px; }
+.user-row input { flex: 1; }
+.resolved { color: var(--c-success-text); font-size: 13px; margin: 6px 0; }
 </style>
