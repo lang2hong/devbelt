@@ -280,8 +280,10 @@ export class OrderService {
     });
   }
 
-  /** 支付成功后重写订阅权益（同一事务内，锁订阅行 + 乐观版本 CAS）。 */
+  /** 支付成功后重写订阅权益（同一事务内，锁订阅行 + 乐观版本 CAS）。仅 plan 订单调用（P9.1 topup 不走此路径）。 */
   private async applyEntitlementInTx(tx: Queryable, order: Order): Promise<void> {
+    // P9.1：topup 订单无套餐（planCode=null），不进入权益派生；由 AiTopupService 入账 grants。
+    if (order.purpose === 'topup' || order.planCode === null) throw new OrderInvalidStateError('topup orders must be fulfilled via AiTopupService, not entitlement apply');
     const plan = await this.planRepo.findByCodeInTx(tx, order.planCode);
     if (!plan || plan.kind !== 'personal' || plan.status !== 'active') throw new UnknownPlanError();
     const sub = await this.personalSubscriptionRepo.findByUserIdForUpdate(tx, order.userId);

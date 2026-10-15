@@ -64,6 +64,7 @@ import { consoleAuthRoutes } from './modules/auth/route/consoleAuth.js';
 import { consoleMeRoutes } from './modules/auth/route/consoleMe.js';
 import { consoleDataRoutes } from './modules/db/route/consoleData.js';
 import { consoleAdminRoutes } from './modules/admin/route/consoleAdmin.js';
+import { consoleAiTopupRoutes } from './modules/admin/route/consoleAiTopup.js';
 import { registerPaymentRoutes } from './modules/billing/route/paymentRoutes.js';
 import { invoiceRoutes } from './modules/billing/route/invoices.js';
 import { InvoiceService } from './modules/billing/service/invoiceService.js';
@@ -435,6 +436,19 @@ export async function createApp() {
     planRepo,
     serverVersion: '1.0.0',
     consoleApiVersion: '1',
+  });
+  // P9.1b：AI 加油包运营（SKU 管理/手工建单/履行/退款/配额查询）。
+  app.register(consoleAiTopupRoutes, {
+    tokenService,
+    getUser,
+    getSessionActive,
+    csrfService,
+    consoleOrigin: config.consoleOrigin,
+    rateLimiter,
+    idempotencyService,
+    topup: aiTopupService,
+    quota: aiQuotaService,
+    auditWriter,
   });
   app.register(linkFlowRoutes, {
     linkFlowService,

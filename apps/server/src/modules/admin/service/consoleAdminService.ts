@@ -339,6 +339,7 @@ export class ConsoleAdminService {
     userId?: number;
     status?: Order['status'];
     channel?: Order['channel'];
+    purpose?: Order['purpose'];
     planCode?: string;
     createdFrom?: Date;
     createdTo?: Date;
@@ -370,6 +371,11 @@ export class ConsoleAdminService {
     if (!order) throw new EntityNotFoundError('order', orderNo);
     if (order.status !== 'paid' && order.status !== 'fulfilled') {
       throw new OrderInvalidStateError('only paid or fulfilled orders can be refunded');
+    }
+    // P9.1：加油包订单必须走 /api/admin/ai/topup-orders/:orderNo/refund——该路径会在同事务
+    // 撤销 grants 额度；通用退款只改订单状态，会留下「订单已退款 + 额度仍活」的矛盾账。
+    if (order.purpose === 'topup') {
+      throw new OrderInvalidStateError('topup orders must be refunded via the AI topup refund endpoint');
     }
     // 已开具(issued)发票的订单不得直接退款：否则形成「订单已退款 + 发票已开具」的矛盾账。
     // 业务上需先冲红/作废发票（当前不实现，直接拒绝并提示运营人工处理）。

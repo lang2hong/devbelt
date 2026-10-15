@@ -40,6 +40,8 @@ export interface AdminOrderFilter {
   userId?: number;
   status?: Order['status'];
   channel?: Order['channel'];
+  /** 订单用途（P9.1）：plan / topup。 */
+  purpose?: Order['purpose'];
   planCode?: string;
   createdFrom?: Date;
   createdTo?: Date;

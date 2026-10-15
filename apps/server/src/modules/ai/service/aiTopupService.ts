@@ -1,6 +1,6 @@
 import { randomBytes } from 'crypto';
-import type { TxRunner } from '../../../repository/mysql/db.js';
-import type { IAiTopupRepo, AiGrantAvailability, AiTopupSku } from '../repository/aiTopupRepo.js';
+import type { Queryable, TxRunner } from '../../../repository/mysql/db.js';
+import type { AiGrantDetail, IAiTopupRepo, AiGrantAvailability, AiTopupSku } from '../repository/aiTopupRepo.js';
 import { TopupOrderNotFoundError, TopupOrderStateError, TopupSkuNotFoundError } from '../domain/errors.js';
 
 /**
@@ -12,6 +12,9 @@ import { TopupOrderNotFoundError, TopupOrderStateError, TopupSkuNotFoundError } 
  *   订单状态机在行锁内判定（pending/paid → fulfilled；fulfilled → 幂等返回）；
  * - **manual 退款只撤销额度**（grants 剩余作废、used 保留审计），不发起渠道退款；
  * - 过期基线：`now + sku.validDays`（入账时刻起算）。
+ *
+ * 事务形态（P9.1b）：核心操作以 `*InTx` 暴露（并入调用方事务——管理后台写走幂等回执
+ * business tx，渠道回调走回调事务）；自持 runner 的公开方法仅作薄壳（扩展侧路由/内部调用）。
  */
 
 export interface TopupOrderResult {
@@ -37,43 +40,36 @@ export class AiTopupService {
     return this.repo.listActiveSkus();
   }
 
+  /** 全量 SKU（含停用；管理后台 SKU 管理，P9.1b）。 */
+  async listAllSkus(): Promise<AiTopupSku[]> {
+    return this.repo.listSkusAll();
+  }
+
+  /** 用户全部 grants（含历史状态；管理后台配额明细，P9.1b）。 */
+  async listGrants(userId: number, limit = 50): Promise<AiGrantDetail[]> {
+    return this.repo.listGrantsByUser(userId, limit);
+  }
+
+  /** 事务内按 code 查 SKU（幂等回执 business 内的当前价读取，P9.1b）。 */
+  async findSkuInTx(tx: Queryable, code: string): Promise<AiTopupSku | undefined> {
+    return this.repo.findSkuByCodeInTx(tx, code);
+  }
+
+  /** 事务内更新 SKU（价格/状态/文案/有效期/排序；管理后台，P9.1b）。审计由 admin 路由层落。 */
+  async updateSkuInTx(
+    tx: Queryable,
+    code: string,
+    patch: { priceCents?: number; status?: 'active' | 'disabled'; label?: { en: string; zh: string }; validDays?: number; sortOrder?: number },
+  ): Promise<boolean> {
+    return this.repo.updateSkuInTx(tx, code, patch);
+  }
+
   /**
    * 管理后台手工建单（channel='manual'）：建单即 fulfilled 并同事务入账。
    * 审计（actor/reason）由 admin 路由层落 audit_events（P9.1b）。
    */
   async createManualOrder(input: { userId: number; skuCode: string }): Promise<TopupOrderResult> {
-    const sku = await this.repo.findSkuByCode(input.skuCode);
-    if (!sku || sku.status !== 'active') throw new TopupSkuNotFoundError(input.skuCode);
-    const now = this.now();
-    const expiresTime = grantExpiry(now, sku.validDays);
-    const orderNo = mintOrderNo();
-    return this.runner(async (tx) => {
-      const order = await this.repo.insertTopupOrderInTx(tx, {
-        orderNo,
-        userId: input.userId,
-        skuCode: sku.code,
-        amountCents: sku.priceCents,
-        channel: 'manual',
-        status: 'fulfilled',
-        expiresTime,
-      });
-      const grantInserted = await this.repo.insertGrantInTx(tx, {
-        userId: input.userId,
-        orderId: order.id,
-        skuCode: sku.code,
-        tokens: sku.tokens,
-        expiresTime,
-      });
-      return {
-        orderNo,
-        userId: input.userId,
-        skuCode: sku.code,
-        tokens: sku.tokens,
-        amountCents: sku.priceCents,
-        status: 'fulfilled' as const,
-        grantInserted,
-      };
-    });
+    return this.runner((tx) => this.createManualOrderInTx(tx, input));
   }
 
   /**
@@ -81,29 +77,7 @@ export class AiTopupService {
    * 幂等：已 fulfilled 直接返回（grantInserted=false）；已 refunded 抛状态错（防退款后重放入账）。
    */
   async fulfill(orderNo: string): Promise<TopupOrderResult> {
-    return this.runner(async (tx) => {
-      const order = await this.repo.lockOrderByNoInTx(tx, orderNo);
-      if (!order) throw new TopupOrderNotFoundError(orderNo);
-      const sku = await this.repo.findSkuByCode(order.skuCode);
-      if (!sku) throw new TopupSkuNotFoundError(order.skuCode);
-
-      if (order.status === 'fulfilled') {
-        return { ...toResult(order, sku.tokens), grantInserted: false };
-      }
-      if (order.status !== 'paid') {
-        throw new TopupOrderStateError(orderNo, `order is ${order.status}; fulfill requires paid`);
-      }
-      const expiresTime = grantExpiry(this.now(), sku.validDays);
-      const grantInserted = await this.repo.insertGrantInTx(tx, {
-        userId: order.userId,
-        orderId: order.id,
-        skuCode: order.skuCode,
-        tokens: sku.tokens,
-        expiresTime,
-      });
-      await this.repo.setOrderStatusInTx(tx, order.id, 'paid', 'fulfilled');
-      return { ...toResult(order, sku.tokens), status: 'fulfilled' as const, grantInserted };
-    });
+    return this.runner((tx) => this.fulfillInTx(tx, orderNo));
   }
 
   /**
@@ -111,26 +85,87 @@ export class AiTopupService {
    * 不发起渠道退款。仅 fulfilled 可退；重复调用幂等。
    */
   async refund(orderNo: string): Promise<TopupOrderResult> {
-    return this.runner(async (tx) => {
-      const order = await this.repo.lockOrderByNoInTx(tx, orderNo);
-      if (!order) throw new TopupOrderNotFoundError(orderNo);
-      const sku = await this.repo.findSkuByCode(order.skuCode);
-      const tokens = sku?.tokens ?? 0;
-      if (order.status === 'refunded') {
-        return { ...toResult(order, tokens), grantInserted: false };
-      }
-      if (order.status !== 'fulfilled') {
-        throw new TopupOrderStateError(orderNo, `order is ${order.status}; refund requires fulfilled`);
-      }
-      await this.repo.refundGrantByOrderInTx(tx, order.id);
-      await this.repo.setOrderStatusInTx(tx, order.id, 'fulfilled', 'refunded');
-      return { ...toResult(order, tokens), status: 'refunded' as const, grantInserted: false };
-    });
+    return this.runner((tx) => this.refundInTx(tx, orderNo));
   }
 
   /** 用户加油包可用余额（配额快照/409 上下文/购买页展示用）。 */
   async grantBalance(userId: number): Promise<AiGrantAvailability> {
     return this.repo.availability(userId, this.now());
+  }
+
+  // ── InTx 核心（并入调用方事务；管理后台幂等回执/渠道回调用）──
+
+  async createManualOrderInTx(tx: Queryable, input: { userId: number; skuCode: string }): Promise<TopupOrderResult> {
+    const sku = await this.repo.findSkuByCode(input.skuCode);
+    if (!sku || sku.status !== 'active') throw new TopupSkuNotFoundError(input.skuCode);
+    const now = this.now();
+    const expiresTime = grantExpiry(now, sku.validDays);
+    const orderNo = mintOrderNo();
+    const order = await this.repo.insertTopupOrderInTx(tx, {
+      orderNo,
+      userId: input.userId,
+      skuCode: sku.code,
+      amountCents: sku.priceCents,
+      channel: 'manual',
+      status: 'fulfilled',
+      expiresTime,
+    });
+    const grantInserted = await this.repo.insertGrantInTx(tx, {
+      userId: input.userId,
+      orderId: order.id,
+      skuCode: sku.code,
+      tokens: sku.tokens,
+      expiresTime,
+    });
+    return {
+      orderNo,
+      userId: input.userId,
+      skuCode: sku.code,
+      tokens: sku.tokens,
+      amountCents: sku.priceCents,
+      status: 'fulfilled' as const,
+      grantInserted,
+    };
+  }
+
+  async fulfillInTx(tx: Queryable, orderNo: string): Promise<TopupOrderResult> {
+    const order = await this.repo.lockOrderByNoInTx(tx, orderNo);
+    if (!order) throw new TopupOrderNotFoundError(orderNo);
+    const sku = await this.repo.findSkuByCode(order.skuCode);
+    if (!sku) throw new TopupSkuNotFoundError(order.skuCode);
+
+    if (order.status === 'fulfilled') {
+      return { ...toResult(order, sku.tokens), grantInserted: false };
+    }
+    if (order.status !== 'paid') {
+      throw new TopupOrderStateError(orderNo, `order is ${order.status}; fulfill requires paid`);
+    }
+    const expiresTime = grantExpiry(this.now(), sku.validDays);
+    const grantInserted = await this.repo.insertGrantInTx(tx, {
+      userId: order.userId,
+      orderId: order.id,
+      skuCode: order.skuCode,
+      tokens: sku.tokens,
+      expiresTime,
+    });
+    await this.repo.setOrderStatusInTx(tx, order.id, 'paid', 'fulfilled');
+    return { ...toResult(order, sku.tokens), status: 'fulfilled' as const, grantInserted };
+  }
+
+  async refundInTx(tx: Queryable, orderNo: string): Promise<TopupOrderResult> {
+    const order = await this.repo.lockOrderByNoInTx(tx, orderNo);
+    if (!order) throw new TopupOrderNotFoundError(orderNo);
+    const sku = await this.repo.findSkuByCode(order.skuCode);
+    const tokens = sku?.tokens ?? 0;
+    if (order.status === 'refunded') {
+      return { ...toResult(order, tokens), grantInserted: false };
+    }
+    if (order.status !== 'fulfilled') {
+      throw new TopupOrderStateError(orderNo, `order is ${order.status}; refund requires fulfilled`);
+    }
+    await this.repo.refundGrantByOrderInTx(tx, order.id);
+    await this.repo.setOrderStatusInTx(tx, order.id, 'fulfilled', 'refunded');
+    return { ...toResult(order, tokens), status: 'refunded' as const, grantInserted: false };
   }
 }
 

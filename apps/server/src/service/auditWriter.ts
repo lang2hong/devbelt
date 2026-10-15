@@ -36,6 +36,13 @@ const ALLOWED_EVENT_TYPES = [
   'admin.invoice.rejected',
   'admin.invoice.failed',
   'admin.role.granted',
+  // P9.1b 加油包运营（§十三）：SKU 管理/手工建单/履行/退款/配额查询。
+  'admin.ai.skus.read',
+  'admin.ai.sku.updated',
+  'admin.ai.quota.read',
+  'admin.ai.topup.manual_created',
+  'admin.ai.topup.fulfilled',
+  'admin.ai.topup.refunded',
   'sync.reset.handoff.created',
   'sync.reset.handoff.consumed',
   'sync.reset.handoff.failed',

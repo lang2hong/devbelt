@@ -13,12 +13,14 @@ const MODULES = ['auth', 'db', 'billing', 'admin', 'ai'];
  *
  * P9：`ai` → `billing` 仅用于复用 `deriveEntitlement` 权益派生单出口（aiQuotaService
  * 的月额度；不得自读订阅/套餐特性复制到期逻辑）。
+ * P9.1b：`admin` → `ai` 仅限运营路由经 `AiTopupService` / `AiQuotaService` 接口编排
+ * 加油包操作（不直读 ai 表、不复制账本逻辑）。
  */
 const ALLOWED: Record<string, string[]> = {
   auth: ['billing', 'db'],
   billing: [],
   db: ['auth', 'billing'],
-  admin: ['auth', 'db', 'billing'],
+  admin: ['auth', 'db', 'billing', 'ai'],
   ai: ['billing'],
 };
 

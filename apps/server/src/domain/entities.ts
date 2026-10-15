@@ -330,11 +330,17 @@ export interface Order {
   /** 对外订单号（base64url opaque，避免自增 id 被枚举）。 */
   orderNo: string;
   userId: number;
-  planCode: string;
+  /** 订单用途（P9.1）：plan=套餐购买，topup=AI 加油包。 */
+  purpose: 'plan' | 'topup';
+  /** 套餐码（plan 订单必填；topup 订单为 null）。 */
+  planCode: string | null;
   /** 购买时套餐版本（套餐可编辑；金额另由 amountCents 冻结）。 */
   planVersion: number;
+  /** 加油包 SKU code（topup 订单必填；plan 订单为 null）。 */
+  skuCode: string | null;
   amountCents: number;
-  channel: PaymentChannel;
+  /** 下单渠道；manual 仅管理后台手工建单（不进 PAYMENT_CHANNELS，用户侧不可造）。 */
+  channel: PaymentChannel | 'manual';
   status: OrderStatus;
   /** 支付平台交易号；回调到达后写入。 */
   channelTradeNo: string | null;

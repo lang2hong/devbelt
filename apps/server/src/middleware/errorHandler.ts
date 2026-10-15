@@ -160,6 +160,12 @@ export function errorStatus(code: string): number {
     // 上游认证错 → 401；上游限流 → 429；上游 5xx/网络/未配置 → 503。
     case 'AI_QUOTA_EXCEEDED':
       return 409;
+    // P9.1 加油包：SKU/订单不存在 → 404；状态机拒绝（退款/入账）→ 409。
+    case 'TOPUP_SKU_NOT_FOUND':
+    case 'TOPUP_ORDER_NOT_FOUND':
+      return 404;
+    case 'TOPUP_ORDER_STATE':
+      return 409;
     case 'AI_PROVIDER_AUTH_ERROR':
       return 401;
     case 'AI_RATE_LIMITED':

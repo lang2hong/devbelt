@@ -1,5 +1,6 @@
 import type {
   AiGrantAvailability,
+  AiGrantDetail,
   AiGrantRow,
   AiTopupOrder,
   AiTopupSku,
@@ -51,6 +52,46 @@ export class MemoryAiTopupRepo implements IAiTopupRepo {
     return [...this.skus.values()]
       .filter((s) => s.status === 'active')
       .sort((a, b) => a.sortOrder - b.sortOrder || a.code.localeCompare(b.code));
+  }
+
+  async listSkusAll(): Promise<AiTopupSku[]> {
+    return [...this.skus.values()].sort((a, b) => a.sortOrder - b.sortOrder || a.code.localeCompare(b.code));
+  }
+
+  async findSkuByCodeInTx(_exec: Queryable, code: string): Promise<AiTopupSku | undefined> {
+    return this.skus.get(code);
+  }
+
+  async updateSkuInTx(
+    _exec: Queryable,
+    code: string,
+    patch: { priceCents?: number; status?: 'active' | 'disabled'; label?: { en: string; zh: string }; validDays?: number; sortOrder?: number },
+  ): Promise<boolean> {
+    const sku = this.skus.get(code);
+    if (!sku) return false;
+    if (patch.priceCents !== undefined) sku.priceCents = patch.priceCents;
+    if (patch.status !== undefined) sku.status = patch.status;
+    if (patch.label !== undefined) sku.label = patch.label;
+    if (patch.validDays !== undefined) sku.validDays = patch.validDays;
+    if (patch.sortOrder !== undefined) sku.sortOrder = patch.sortOrder;
+    return true;
+  }
+
+  async listGrantsByUser(userId: number, limit: number): Promise<AiGrantDetail[]> {
+    return [...this.grants.values()]
+      .filter((g) => g.userId === userId)
+      .sort((a, b) => a.expiresTime.getTime() - b.expiresTime.getTime() || a.id - b.id)
+      .slice(0, Math.max(1, Math.min(limit, 200)))
+      .map((g) => ({
+        id: g.id,
+        orderId: g.orderId,
+        skuCode: g.skuCode,
+        status: g.status as AiGrantDetail['status'],
+        tokensTotal: g.tokensTotal,
+        tokensUsed: g.tokensUsed,
+        tokensReserved: g.tokensReserved,
+        expiresTime: g.expiresTime,
+      }));
   }
 
   async findSkuByCode(code: string): Promise<AiTopupSku | undefined> {

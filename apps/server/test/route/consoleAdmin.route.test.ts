@@ -60,7 +60,16 @@ async function build(rateLimit = false) {
       return true;
     },
     listByUser: async () => [],
-    listAll: async () => [],
+    listAll: async (input) => {
+      let items = [...orders.values()];
+      if (input.userId !== undefined) items = items.filter((o) => o.userId === input.userId);
+      if (input.status !== undefined) items = items.filter((o) => o.status === input.status);
+      if (input.channel !== undefined) items = items.filter((o) => o.channel === input.channel);
+      if (input.purpose !== undefined) items = items.filter((o) => o.purpose === input.purpose);
+      if (input.planCode !== undefined) items = items.filter((o) => o.planCode === input.planCode);
+      if (input.cursor !== undefined) items = items.filter((o) => o.id < input.cursor!);
+      return items.slice(0, input.limit);
+    },
     findPendingByUserAndPlan: async () => undefined,
     expirePending: async () => 0,
   };
@@ -162,8 +171,10 @@ function makeOrder(overrides: Partial<Order> = {}): Order {
     id: 1,
     orderNo: 'ord-1',
     userId: 99,
+    purpose: 'plan',
     planCode: 'pro',
     planVersion: 1,
+    skuCode: null,
     amountCents: 9900,
     channel: 'wechat',
     status: 'paid',
@@ -674,6 +685,48 @@ describe('console admin routes', () => {
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe('ORDER_INVALID_STATE');
     expect(b.invoices[0].status).toBe('requested');
+    await b.app.close();
+  });
+
+  it('orders: topup 订单 DTO 带 purpose/skuCode（P9.1）', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    b.orders.set('ord-t1', makeOrder({ id: 9, orderNo: 'ord-t1', purpose: 'topup', planCode: null, skuCode: 'topup_500k', channel: 'manual', status: 'fulfilled' }));
+    b.orders.set('ord-p1', makeOrder({ id: 8, orderNo: 'ord-p1', status: 'paid' }));
+    const res = await b.app.inject({
+      method: 'GET',
+      url: '/api/admin/orders',
+      headers: { authorization: `Bearer ${await b.consoleToken(admin.id)}`, accept: 'application/json' },
+    });
+    expect(res.statusCode).toBe(200);
+    const items = (res.json() as { items: Array<{ orderNo: string; purpose: string; skuCode: string | null; planCode: string | null; channel: string }> }).items;
+    const topup = items.find((i) => i.orderNo === 'ord-t1')!;
+    expect(topup).toMatchObject({ purpose: 'topup', skuCode: 'topup_500k', planCode: null, channel: 'manual' });
+    expect(items.find((i) => i.orderNo === 'ord-p1')).toMatchObject({ purpose: 'plan', skuCode: null });
+
+    // purpose 过滤
+    const filtered = await b.app.inject({
+      method: 'GET',
+      url: '/api/admin/orders?purpose=topup',
+      headers: { authorization: `Bearer ${await b.consoleToken(admin.id)}`, accept: 'application/json' },
+    });
+    const filteredItems = (filtered.json() as { items: Array<{ orderNo: string }> }).items;
+    expect(filteredItems.map((i) => i.orderNo)).toEqual(['ord-t1']);
+    await b.app.close();
+  });
+
+  it('refund: topup 订单拒绝通用退款（须走加油包退款路径，P9.1）', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    b.orders.set('ord-t2', makeOrder({ id: 10, orderNo: 'ord-t2', purpose: 'topup', planCode: null, skuCode: 'topup_2m', channel: 'manual', status: 'fulfilled' }));
+    const res = await b.app.inject({
+      method: 'PATCH',
+      url: '/api/admin/orders/ord-t2/refund',
+      headers: await b.writeHeaders(admin.id),
+      payload: { reason: 'wrong path' },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(b.orders.get('ord-t2')?.status).toBe('fulfilled'); // 未被改动
     await b.app.close();
   });
 

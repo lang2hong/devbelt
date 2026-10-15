@@ -48,6 +48,13 @@ export interface AiGrantAvailability {
   count: number;
 }
 
+/** 管理视图的 grant 明细行（含状态与订单关联，P9.1b 用户配额查询）。 */
+export interface AiGrantDetail extends AiGrantRow {
+  skuCode: string;
+  status: 'active' | 'exhausted' | 'expired' | 'refunded';
+  orderId: number;
+}
+
 export interface IAiGrantRepo {
   /** 惰性过期翻转（active 且 expires_time ≤ now → 'expired'），先于任何可读/锁查询。 */
   expireStaleInTx(exec: Queryable, userId: number, now: Date): Promise<void>;
@@ -70,8 +77,20 @@ export interface IAiGrantRepo {
 export interface IAiTopupRepo extends IAiGrantRepo {
   /** 上架 SKU（status='active'，按 sort_order ASC, id ASC）。 */
   listActiveSkus(): Promise<AiTopupSku[]>;
+  /** 全量 SKU（含 disabled；管理后台 SKU 管理，P9.1b）。 */
+  listSkusAll(): Promise<AiTopupSku[]>;
   /** 按 code 查 SKU（含 disabled；下单校验用）。 */
   findSkuByCode(code: string): Promise<AiTopupSku | undefined>;
+  /** 事务内按 code 查 SKU（幂等回执 business 内的当前价读取，P9.1b）。 */
+  findSkuByCodeInTx(exec: Queryable, code: string): Promise<AiTopupSku | undefined>;
+  /** 事务内更新 SKU（价格/状态/文案/有效期/排序；管理后台，P9.1b）。返回是否命中。 */
+  updateSkuInTx(
+    exec: Queryable,
+    code: string,
+    patch: { priceCents?: number; status?: 'active' | 'disabled'; label?: { en: string; zh: string }; validDays?: number; sortOrder?: number },
+  ): Promise<boolean>;
+  /** 用户全部 grants（含 exhausted/expired/refunded；管理后台配额明细，P9.1b）。 */
+  listGrantsByUser(userId: number, limit: number): Promise<AiGrantDetail[]>;
 
   /** 新建加油包订单（channel/purpose='topup' 存档；同一事务内不入账）。返回订单行。 */
   insertTopupOrderInTx(
@@ -162,6 +181,73 @@ export class MysqlAiTopupRepo implements IAiTopupRepo {
       [code],
     );
     return rows[0] ? mapSku(rows[0]) : undefined;
+  }
+
+  async findSkuByCodeInTx(exec: Queryable, code: string): Promise<AiTopupSku | undefined> {
+    const [rows] = await exec.query<any[]>(
+      `SELECT ${SKU_COLS} FROM ai_topup_skus WHERE code = ?`,
+      [code],
+    );
+    return rows[0] ? mapSku(rows[0]) : undefined;
+  }
+
+  async listSkusAll(): Promise<AiTopupSku[]> {
+    const [rows] = await this.db().query<any[]>(
+      `SELECT ${SKU_COLS} FROM ai_topup_skus ORDER BY sort_order ASC, id ASC`,
+    );
+    return rows.map(mapSku);
+  }
+
+  async updateSkuInTx(
+    exec: Queryable,
+    code: string,
+    patch: { priceCents?: number; status?: 'active' | 'disabled'; label?: { en: string; zh: string }; validDays?: number; sortOrder?: number },
+  ): Promise<boolean> {
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    if (patch.priceCents !== undefined) {
+      sets.push('price_cents = ?');
+      params.push(patch.priceCents);
+    }
+    if (patch.status !== undefined) {
+      sets.push('status = ?');
+      params.push(patch.status);
+    }
+    if (patch.label !== undefined) {
+      sets.push('label_json = ?');
+      params.push(JSON.stringify(patch.label));
+    }
+    if (patch.validDays !== undefined) {
+      sets.push('valid_days = ?');
+      params.push(patch.validDays);
+    }
+    if (patch.sortOrder !== undefined) {
+      sets.push('sort_order = ?');
+      params.push(patch.sortOrder);
+    }
+    if (sets.length === 0) return true;
+    const [result] = await exec.query<any>(
+      `UPDATE ai_topup_skus SET ${sets.join(', ')} WHERE code = ?`,
+      [...params, code],
+    );
+    return Number(result?.affectedRows ?? 0) > 0;
+  }
+
+  async listGrantsByUser(userId: number, limit: number): Promise<AiGrantDetail[]> {
+    const [rows] = await this.db().query<any[]>(
+      `SELECT id, order_id, sku_code, tokens_total, tokens_used, tokens_reserved, expires_time, status
+         FROM ai_quota_grants
+        WHERE user_id = ?
+        ORDER BY expires_time ASC, id ASC
+        LIMIT ${Math.max(1, Math.min(Math.floor(limit), 200))}`,
+      [userId],
+    );
+    return rows.map((r: Record<string, unknown>) => ({
+      ...mapGrant(r),
+      orderId: Number(r.order_id),
+      skuCode: String(r.sku_code ?? ''),
+      status: String(r.status) as AiGrantDetail['status'],
+    }));
   }
 
   async insertTopupOrderInTx(

@@ -90,6 +90,10 @@ export class MysqlOrderRepo implements IOrderRepo {
       where.push('o.plan_code = ?');
       params.push(input.planCode);
     }
+    if (input.purpose !== undefined) {
+      where.push('o.purpose = ?');
+      params.push(input.purpose);
+    }
     if (input.createdFrom) {
       where.push('o.create_time >= ?');
       params.push(input.createdFrom);
@@ -146,8 +150,10 @@ function mapOrder(r: any): Order {
     id: r.id,
     orderNo: r.order_no,
     userId: r.user_id,
-    planCode: r.plan_code,
+    purpose: (r.purpose ?? 'plan') as Order['purpose'],
+    planCode: r.plan_code ?? null,
     planVersion: Number(r.plan_version ?? 0),
+    skuCode: r.sku_code ?? null,
     amountCents: Number(r.amount_cents),
     channel: r.channel as PaymentChannel,
     status: r.status as OrderStatus,

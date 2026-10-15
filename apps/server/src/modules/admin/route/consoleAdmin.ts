@@ -108,7 +108,9 @@ function adminOrderDto(o: Order & { userEmail?: string | null; userDisplayName?:
     userId: String(o.userId),
     userEmail: o.userEmail ?? null,
     userDisplayName: o.userDisplayName ?? null,
+    purpose: o.purpose,
     planCode: o.planCode,
+    skuCode: o.skuCode ?? null,
     amountCents: o.amountCents,
     channel: o.channel,
     status: o.status,
@@ -265,10 +267,13 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
           }
           filterUserId = n;
         }
+        const purpose = q.purpose !== undefined && q.purpose !== '' ? String(q.purpose) : undefined;
+        const ADMIN_CHANNELS: readonly string[] = [...PAYMENT_CHANNELS, 'manual'];
         const page = await svc.listOrders(userIdOf(req), {
           userId: filterUserId,
           status: status && (ORDER_STATUSES as readonly string[]).includes(status) ? (status as Order['status']) : undefined,
-          channel: channel && (PAYMENT_CHANNELS as readonly string[]).includes(channel) ? (channel as Order['channel']) : undefined,
+          channel: channel && (ADMIN_CHANNELS as readonly string[]).includes(channel) ? (channel as Order['channel']) : undefined,
+          purpose: purpose && (['plan', 'topup'] as readonly string[]).includes(purpose) ? (purpose as Order['purpose']) : undefined,
           planCode: q.planCode ? String(q.planCode) : undefined,
           createdFrom: parseDate(q.createdFrom),
           createdTo: parseDate(q.createdTo),
