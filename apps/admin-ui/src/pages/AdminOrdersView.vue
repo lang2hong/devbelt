@@ -12,6 +12,7 @@ const state = ref<'loading' | 'ready' | 'error'>('loading');
 const userId = ref('');
 const status = ref('');
 const channel = ref('');
+const purpose = ref('');
 const planCode = ref('');
 const nextCursor = ref<string | null>(null);
 
@@ -46,7 +47,11 @@ let loadSeq = 0;
 let paging = false;
 
 function channelLabel(ch: string): string {
-  return ch === 'wechat' ? '微信' : '支付宝';
+  return ch === 'wechat' ? '微信' : ch === 'alipay' ? '支付宝' : '手工';
+}
+
+function purposeLabel(p: string): string {
+  return p === 'topup' ? '加油包' : '套餐';
 }
 
 async function load(reset = true): Promise<void> {
@@ -70,6 +75,7 @@ async function load(reset = true): Promise<void> {
       userId: rawUserId || undefined,
       status: status.value || undefined,
       channel: channel.value || undefined,
+      purpose: purpose.value || undefined,
       planCode: planCode.value || undefined,
       cursor: reset ? undefined : (nextCursor.value ?? undefined),
     });
@@ -157,6 +163,12 @@ async function confirmRefund(): Promise<void> {
         <option value="">全部渠道</option>
         <option value="wechat">微信</option>
         <option value="alipay">支付宝</option>
+        <option value="manual">手工</option>
+      </select>
+      <select v-model="purpose">
+        <option value="">全部用途</option>
+        <option value="plan">套餐</option>
+        <option value="topup">加油包</option>
       </select>
       <input v-model="planCode" type="text" placeholder="套餐" @keyup.enter="search" />
       <button class="btn" @click="search">查询</button>
@@ -168,14 +180,15 @@ async function confirmRefund(): Promise<void> {
 
     <table v-if="state === 'ready'" class="table">
       <thead>
-        <tr><th>订单号</th><th>支付人</th><th>用户ID</th><th>套餐</th><th>金额</th><th>渠道</th><th>状态</th><th>渠道单号</th><th>创建时间</th><th>过期时间</th><th>支付时间</th><th></th></tr>
+        <tr><th>订单号</th><th>支付人</th><th>用户ID</th><th>用途</th><th>套餐/SKU</th><th>金额</th><th>渠道</th><th>状态</th><th>渠道单号</th><th>创建时间</th><th>过期时间</th><th>支付时间</th><th></th></tr>
       </thead>
       <tbody>
         <tr v-for="o in orders" :key="o.orderNo">
           <td class="mono">{{ o.orderNo }}</td>
           <td>{{ o.userDisplayName || '—' }}<br /><span class="muted mono">{{ o.userEmail || '—' }}</span></td>
           <td class="mono">{{ o.userId }}</td>
-          <td>{{ o.planCode }}</td>
+          <td>{{ purposeLabel(o.purpose) }}</td>
+          <td>{{ o.planCode ?? o.skuCode ?? '—' }}</td>
           <td>¥{{ fmtCents(o.amountCents) }}</td>
           <td>{{ channelLabel(o.channel) }}</td>
           <td><span class="badge" :class="o.status">{{ STATUS_LABEL[o.status] ?? o.status }}</span></td>
@@ -184,10 +197,11 @@ async function confirmRefund(): Promise<void> {
           <td>{{ formatDateTime(o.expiresTime) }}</td>
           <td>{{ formatDateTime(o.paidTime) }}</td>
           <td class="actions">
-            <button v-if="o.status === 'paid' || o.status === 'fulfilled'" class="btn small danger" :disabled="busy" @click="openRefund(o)">退款</button>
+            <button v-if="(o.status === 'paid' || o.status === 'fulfilled') && o.purpose !== 'topup'" class="btn small danger" :disabled="busy" @click="openRefund(o)">退款</button>
+            <span v-if="o.purpose === 'topup'" class="muted">加油包订单请在「AI 加油包」页操作</span>
           </td>
         </tr>
-        <tr v-if="orders.length === 0"><td colspan="12" class="muted">无匹配订单。</td></tr>
+        <tr v-if="orders.length === 0"><td colspan="13" class="muted">无匹配订单。</td></tr>
       </tbody>
     </table>
 

@@ -25,7 +25,7 @@ beforeEach(() => {
 describe('AdminOrdersView', () => {
   it('renders paid orders with a refund action', async () => {
     const order = {
-      orderNo: 'o1', userId: '9', planCode: 'pro', userEmail: 'u9@b.com', userDisplayName: 'User Nine', amountCents: 9900, channel: 'wechat',
+      orderNo: 'o1', userId: '9', purpose: 'plan' as const, planCode: 'pro', skuCode: null, userEmail: 'u9@b.com', userDisplayName: 'User Nine', amountCents: 9900, channel: 'wechat',
       status: 'paid', channelTradeNo: null, paidTime: '2026-01-01T00:00:00.000Z',
       expiresTime: '2026-01-01T00:00:00.000Z', createTime: '2026-01-01T00:00:00.000Z', updateTime: '2026-01-01T00:00:00.000Z',
     };
@@ -55,7 +55,7 @@ describe('AdminOrdersView', () => {
 
   it('refunding without a reason does not submit and shows the error in the modal', async () => {
     const order = {
-      orderNo: 'o1', userId: '9', planCode: 'pro', userEmail: 'u9@b.com', userDisplayName: 'User Nine', amountCents: 9900, channel: 'wechat',
+      orderNo: 'o1', userId: '9', purpose: 'plan' as const, planCode: 'pro', skuCode: null, userEmail: 'u9@b.com', userDisplayName: 'User Nine', amountCents: 9900, channel: 'wechat',
       status: 'paid', channelTradeNo: null, paidTime: '2026-01-01T00:00:00.000Z',
       expiresTime: '2026-01-01T00:00:00.000Z', createTime: '2026-01-01T00:00:00.000Z', updateTime: '2026-01-01T00:00:00.000Z',
     };

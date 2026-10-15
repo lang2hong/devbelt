@@ -7,6 +7,7 @@ const links = [
   { name: 'admin-invoices', path: '/invoices', label: '发票' },
   { name: 'admin-audit', path: '/audit', label: '审计' },
   { name: 'admin-plans', path: '/plans', label: '套餐' },
+  { name: 'admin-ai-topup', path: '/ai-topup', label: 'AI 加油包' },
   { name: 'admin-version', path: '/version', label: '系统状态' },
 ];
 </script>

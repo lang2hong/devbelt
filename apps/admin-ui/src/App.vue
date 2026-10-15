@@ -11,6 +11,7 @@ import AdminOrdersView from './pages/AdminOrdersView.vue';
 import AdminInvoicesView from './pages/AdminInvoicesView.vue';
 import AdminAuditView from './pages/AdminAuditView.vue';
 import AdminPlansView from './pages/AdminPlansView.vue';
+import AdminAiTopupView from './pages/AdminAiTopupView.vue';
 import AdminVersionView from './pages/AdminVersionView.vue';
 
 installRouter(ADMIN_ROUTES);
@@ -29,6 +30,7 @@ const view = computed<{ comp: Component | null; props: Record<string, unknown> }
     case 'admin-invoices': return { comp: AdminInvoicesView, props: {} };
     case 'admin-audit': return { comp: AdminAuditView, props: {} };
     case 'admin-plans': return { comp: AdminPlansView, props: {} };
+    case 'admin-ai-topup': return { comp: AdminAiTopupView, props: {} };
     case 'admin-version': return { comp: AdminVersionView, props: {} };
     default: return { comp: null, props: {} };
   }

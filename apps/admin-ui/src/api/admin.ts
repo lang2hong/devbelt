@@ -279,7 +279,9 @@ export interface AdminOrder {
   userId: string;
   userEmail: string | null;
   userDisplayName: string | null;
-  planCode: string;
+  purpose: 'plan' | 'topup';
+  planCode: string | null;
+  skuCode: string | null;
   amountCents: number;
   channel: string;
   status: string;
@@ -294,6 +296,7 @@ export interface OrderFilters {
   userId?: string;
   status?: string;
   channel?: string;
+  purpose?: string;
   planCode?: string;
   createdFrom?: string;
   createdTo?: string;
@@ -496,3 +499,172 @@ export async function upsertFeatureDef(
     return { kind: 'failure' };
   }
 }
+
+// ── AI 加油包（P9.1b）──
+
+export interface AdminAiTopupSku {
+  code: string;
+  label: { en: string; zh: string };
+  tokens: number;
+  priceCents: number;
+  validDays: number;
+  status: 'active' | 'disabled';
+  sortOrder: number;
+}
+
+export interface AdminAiGrant {
+  grantId: number;
+  orderId: number;
+  skuCode: string;
+  status: 'active' | 'exhausted' | 'expired' | 'refunded';
+  tokensTotal: number;
+  tokensUsed: number;
+  tokensReserved: number;
+  expiresTime: string;
+}
+
+export interface AdminAiQuota {
+  snapshot: {
+    used: number;
+    reserved: number;
+    monthlyRemaining: number;
+    topupRemaining: number;
+    remaining: number;
+    resetAt: string | null;
+  };
+  grants: AdminAiGrant[];
+}
+
+export interface AdminAiTopupOrderResult {
+  orderNo: string;
+  userId: number;
+  skuCode: string;
+  tokens: number;
+  amountCents: number;
+  status: string;
+  grantInserted: boolean;
+}
+
+/** 全量 SKU（含停用；管理视图）。 */
+export async function listAdminAiSkus(
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ items: AdminAiTopupSku[] }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch('/api/admin/ai/skus', { headers: auth(token) }, fetchImpl);
+    if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+/** 更新 SKU（改价/停启用/文案/有效期/排序；reason 必填）。 */
+export async function updateAdminAiSku(
+  code: string,
+  patch: { priceCents?: number; status?: 'active' | 'disabled'; label?: { en: string; zh: string }; validDays?: number; sortOrder?: number },
+  reason: string,
+  idempotencyKey: string,
+  csrfToken: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ sku: AdminAiTopupSku | null }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(
+      `/api/admin/ai/skus/${encodeURIComponent(code)}`,
+      { method: 'PATCH', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify({ ...patch, reason }) },
+      fetchImpl,
+    );
+    if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+/** 手工建单（金额二次确认：expectedAmountCents 必须等于当前价）。 */
+export async function createAdminAiTopupOrder(
+  input: { userId: number; skuCode: string; expectedAmountCents: number; reason: string },
+  idempotencyKey: string,
+  csrfToken: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ order: AdminAiTopupOrderResult }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(
+      '/api/admin/ai/topup-orders',
+      { method: 'POST', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify(input) },
+      fetchImpl,
+    );
+    if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+/** 履行（paid → fulfilled；重放幂等；reason 必填）。 */
+export async function fulfillAdminAiTopupOrder(
+  orderNo: string,
+  reason: string,
+  idempotencyKey: string,
+  csrfToken: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ order: AdminAiTopupOrderResult }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(
+      `/api/admin/ai/topup-orders/${encodeURIComponent(orderNo)}/fulfill`,
+      { method: 'POST', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify({ reason }) },
+      fetchImpl,
+    );
+    if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+/** 退款（manual 语义：仅撤销额度，不发起渠道退款；reason 必填）。 */
+export async function refundAdminAiTopupOrder(
+  orderNo: string,
+  reason: string,
+  idempotencyKey: string,
+  csrfToken: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ order: AdminAiTopupOrderResult }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(
+      `/api/admin/ai/topup-orders/${encodeURIComponent(orderNo)}/refund`,
+      { method: 'POST', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify({ reason }) },
+      fetchImpl,
+    );
+    if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+/** 用户配额查询（双段快照 + grants 明细）。 */
+export async function getAdminAiQuota(
+  userId: number,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<AdminAiQuota>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(`/api/admin/ai/users/${userId}/quota`, { headers: auth(token) }, fetchImpl);
+    if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
