@@ -10,6 +10,7 @@ import type {
   IPlanFeatureDefRepo,
   ISyncStateRepo,
   ISyncRecordRepo,
+  SyncRecordMetadataRow,
   ISyncNonceRepo,
   ISyncMutationRepo,
   ISyncResetTokenRepo,
@@ -761,6 +762,26 @@ export class FakeSyncRecordRepo implements ISyncRecordRepo {
       acc.set(k, cur);
     }
     return [...acc.values()];
+  }
+
+  async listMetadataByKind(_exec: Queryable, userId: number, keyEpoch: string, opts: { kind?: string; afterId?: number; limit: number }): Promise<{ items: SyncRecordMetadataRow[]; nextId: number | null }> {
+    const rows = [...this.store.values()]
+      .filter((m) => m.userId === userId && m.keyEpoch === keyEpoch && !m.deleteTime)
+      .filter((m) => (opts.kind ? m.entityKind === opts.kind : true))
+      .filter((m) => (opts.afterId != null ? m.id < opts.afterId : true))
+      .sort((a, b) => (a.id > b.id ? -1 : a.id < b.id ? 1 : 0));
+    const hasMore = rows.length > opts.limit;
+    const items = (hasMore ? rows.slice(0, opts.limit) : rows).map((m) => ({
+      id: m.id,
+      recordIdHex: m.recordId.toString('hex'),
+      entityKind: m.entityKind ?? null,
+      version: m.version,
+      changeSequence: m.changeSequence,
+      bytes: (m.ciphertext?.length ?? 0) + (m.tag?.length ?? 0) + (m.nonce?.length ?? 0),
+      createTime: m.updateTime,
+      updateTime: m.updateTime,
+    }));
+    return { items, nextId: hasMore ? items[items.length - 1].id : null };
   }
 
   async countActiveByKind(_exec: Queryable, userId: number, keyEpoch: string, entityKind: string): Promise<number> {

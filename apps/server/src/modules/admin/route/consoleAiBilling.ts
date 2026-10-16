@@ -13,12 +13,26 @@ import type { AiModelPricing } from '../../ai/repository/aiBillingRepo.js';
 import { ValidationError } from '../../../domain/errors.js';
 
 const ADMIN_RETENTION_MS = 30 * 24 * 3600 * 1000;
+
+function parseCursor(cursorService: import('../../../service/cursor.js').CursorService, raw: unknown): number | null {
+  if (raw === undefined || raw === '' || raw === null) return null;
+  const decoded = cursorService.decode(String(raw));
+  if (decoded === null || !/^[0-9]+$/.test(decoded)) return null;
+  return Number(decoded);
+}
+
+function parseLimit(raw: unknown): number {
+  const n = typeof raw === 'string' ? Number(raw) : 50;
+  if (!Number.isInteger(n) || n <= 0) return 50;
+  return Math.min(n, 100);
+}
 const RATE_READ_WINDOW_S = 60;
 const RATE_READ_MAX = 60;
 const RATE_WRITE_WINDOW_S = 60;
 const RATE_WRITE_MAX = 30;
 
 export interface ConsoleAiBillingRouteOptions {
+  cursorService: import('../../../service/cursor.js').CursorService;
   tokenService: TokenService;
   getUser: GetAuthUser;
   getSessionActive: (sessionId: string) => Promise<boolean>;
@@ -50,6 +64,7 @@ function pricingDto(p: AiModelPricing) {
     inputCentsPerM: p.inputCentsPerM,
     outputCentsPerM: p.outputCentsPerM,
     weightOverride: p.weightOverride,
+    multiplierOverride: p.multiplierOverride,
     status: p.status,
   };
 }
@@ -64,6 +79,7 @@ const pricingBody = {
     inputCentsPerM: { type: 'integer', minimum: 0, maximum: 1000000 },
     outputCentsPerM: { type: 'integer', minimum: 0, maximum: 1000000 },
     weightOverride: { type: ['number', 'null'], minimum: 0.01, maximum: 100 },
+    multiplierOverride: { type: ['number', 'null'], minimum: 0.01, maximum: 100 },
     status: { type: 'string', enum: ['active', 'disabled'] },
     reason: { type: 'string', maxLength: 500 },
   },
@@ -77,6 +93,7 @@ const pricingPatchBody = {
     inputCentsPerM: { type: 'integer', minimum: 0, maximum: 1000000 },
     outputCentsPerM: { type: 'integer', minimum: 0, maximum: 1000000 },
     weightOverride: { type: ['number', 'null'], minimum: 0.01, maximum: 100 },
+    multiplierOverride: { type: ['number', 'null'], minimum: 0.01, maximum: 100 },
     status: { type: 'string', enum: ['active', 'disabled'] },
     reason: { type: 'string', maxLength: 500 },
   },
@@ -92,6 +109,7 @@ const settingsBody = {
     upstreamApiKey: { type: 'string', maxLength: 512 },
     clearUpstreamApiKey: { type: 'boolean' },
     globalMultiplier: { type: 'number', minimum: 0.01, maximum: 100 },
+    typicalOutputRatio: { type: 'number', exclusiveMinimum: 0, exclusiveMaximum: 1 },
     reason: { type: 'string', maxLength: 500 },
   },
 };
@@ -176,7 +194,7 @@ export async function consoleAiBillingRoutes(app: FastifyInstance, opts: Console
           retentionMs: ADMIN_RETENTION_MS,
           beforeWrite: (tx: Queryable) => writeLimitInTx(tx, req),
           business: async (tx: Queryable) => {
-            const created = await opts.billing.createPricingInTx(tx, { model: body.model, providerCode: body.providerCode, inputCentsPerM: body.inputCentsPerM, outputCentsPerM: body.outputCentsPerM, weightOverride: body.weightOverride });
+            const created = await opts.billing.createPricingInTx(tx, { model: body.model, providerCode: body.providerCode, inputCentsPerM: body.inputCentsPerM, outputCentsPerM: body.outputCentsPerM, weightOverride: body.weightOverride, multiplierOverride: body.multiplierOverride });
             if (!created) return { status: 409, body: { error: { code: 'CONFLICT', message: 'model pricing already exists' } } };
             audit(tx, 'admin.ai.model_pricing.created', req, created.model, reason);
             return { status: 201, body: { pricing: pricingDto(created) } };
@@ -200,7 +218,7 @@ export async function consoleAiBillingRoutes(app: FastifyInstance, opts: Console
           retentionMs: ADMIN_RETENTION_MS,
           beforeWrite: (tx: Queryable) => writeLimitInTx(tx, req),
           business: async (tx: Queryable) => {
-            const updated = await opts.billing.updatePricingInTx(tx, model, { providerCode: body.providerCode, inputCentsPerM: body.inputCentsPerM, outputCentsPerM: body.outputCentsPerM, weightOverride: body.weightOverride, status: body.status });
+            const updated = await opts.billing.updatePricingInTx(tx, model, { providerCode: body.providerCode, inputCentsPerM: body.inputCentsPerM, outputCentsPerM: body.outputCentsPerM, weightOverride: body.weightOverride, multiplierOverride: body.multiplierOverride, status: body.status });
             if (!updated) return { status: 404, body: { error: { code: 'NOT_FOUND', message: 'model pricing not found' } } };
             audit(tx, 'admin.ai.model_pricing.updated', req, model, reason);
             return { status: 200, body: { pricing: pricingDto(updated) } };
@@ -218,6 +236,57 @@ export async function consoleAiBillingRoutes(app: FastifyInstance, opts: Console
           reply.send(await opts.billing.finance(month));
         } catch (err) {
           if (err instanceof ValidationError) return rejectConsole(reply, 422, 'VALIDATION_FAILED', 'invalid month');
+          throw err;
+        }
+      });
+
+      // ── 区间毛利统计（近 N 月合计 + 逐月 + 每模型；成本取请求流水当时值，历史精确）──
+      child.get('/api/admin/ai/finance/summary', async (req, reply) => {
+        await readLimit(req);
+        const q = req.query as Record<string, unknown>;
+        const from = String(q.from ?? '');
+        const to = String(q.to ?? '');
+        opts.auditWriter.write({ eventType: 'admin.ai.finance.read', result: 'success', actorUserId: userIdOf(req), actorRole: 'platform_admin' });
+        try {
+          reply.send(await opts.billing.financeSummary(from, to));
+        } catch (err) {
+          if (err instanceof ValidationError) return rejectConsole(reply, 422, 'VALIDATION_FAILED', 'invalid range');
+          throw err;
+        }
+      });
+
+      // ── 用户请求流水（计量/积分/当时成本；id 倒序 keyset）──
+      child.get('/api/admin/ai/users/:userId/requests', async (req, reply) => {
+        await readLimit(req);
+        const userId = Number((req.params as Record<string, unknown>).userId);
+        const q = req.query as Record<string, unknown>;
+        const cursor = parseCursor(opts.cursorService, q.cursor);
+        if (q.cursor !== undefined && q.cursor !== '' && cursor === null) {
+          return rejectConsole(reply, 422, 'INVALID_CURSOR', 'invalid cursor');
+        }
+        const limit = parseLimit(q.limit);
+        try {
+          const page = await opts.billing.userRequests(userId, { afterId: cursor ?? undefined, limit });
+          opts.auditWriter.write({ eventType: 'admin.ai.quota.read', result: 'success', actorUserId: userIdOf(req), actorRole: 'platform_admin' });
+          reply.send({
+            items: page.items.map((r) => ({
+              requestId: r.requestId,
+              model: r.model,
+              usageMonth: r.usageMonth,
+              status: r.status,
+              rawPromptTokens: r.rawPromptTokens,
+              rawCompletionTokens: r.rawCompletionTokens,
+              billingPromptTokens: r.billingPromptTokens,
+              billingCompletionTokens: r.billingCompletionTokens,
+              costCents: r.costCents,
+              usageEstimated: r.usageEstimated,
+              latencyMs: r.latencyMs,
+              createTime: r.createTime.toISOString(),
+            })),
+            nextCursor: page.nextId != null ? opts.cursorService.encode(String(page.nextId)) : null,
+          });
+        } catch (err) {
+          if (err instanceof ValidationError) return rejectConsole(reply, 422, 'VALIDATION_FAILED', 'invalid userId');
           throw err;
         }
       });

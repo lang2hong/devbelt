@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { AiQuotaService, monthKey, resetAtIso } from '../../src/modules/ai/service/aiQuotaService.js';
 import { AiQuotaExceededError } from '../../src/modules/ai/domain/errors.js';
 import { MemoryAiUsageRepo } from '../helpers/fakeAiUsageRepo.js';
+import { MemoryAiRequestLogRepo } from '../helpers/fakeAiBillingRepo.js';
 import { MemoryAiTopupRepo } from '../helpers/fakeAiTopupRepo.js';
 import {
   FakePlanRepo,
@@ -19,13 +20,15 @@ function build(now: Date = new Date('2026-10-15T00:00:00Z')): {
   grants: MemoryAiTopupRepo;
   plans: FakePlanRepo;
   subs: FakePersonalSubscriptionRepo;
+  logRepo: MemoryAiRequestLogRepo;
 } {
   const repo = new MemoryAiUsageRepo();
   const grants = new MemoryAiTopupRepo();
   const plans = new FakePlanRepo([makeFreePlan(), makeProPlan()]);
   const subs = new FakePersonalSubscriptionRepo();
-  const quota = new AiQuotaService(repo, grants, subs, plans, repo.runner(), () => now);
-  return { quota, repo, grants, plans, subs };
+  const logRepo = new MemoryAiRequestLogRepo();
+  const quota = new AiQuotaService(repo, grants, subs, plans, repo.runner(), () => now, logRepo);
+  return { quota, repo, grants, plans, subs, logRepo };
 }
 
 function setLimit(plans: FakePlanRepo, code: string, limit: number): void {
@@ -268,4 +271,35 @@ describe('AiQuotaService 双段（月额度 + 加油包 grants FIFO，P9.1）', 
     expect(snapshot.topupRemaining).toBe(700);
     expect(snapshot.remaining).toBe(1300);
   });
+
+describe('AiQuotaService · 请求流水（012）', () => {
+  it('settle 带 meta：同事务写 ai_request_log，月账本累计原始与计费两套口径', async () => {
+    const { quota, repo, logRepo, plans } = build();
+    setLimit(plans, 'free', 100_000);
+    const r = await quota.reserve(7, { estimatedPromptTokens: 500, maxCompletionTokens: 200 });
+    await quota.settle(
+      r,
+      { promptTokens: 220, completionTokens: 55 },
+      { model: 'm-a', rawPromptTokens: 200, rawCompletionTokens: 20, weight: 2.5, multiplier: 1.1, costCents: 12, status: 'completed', usageEstimated: false, latencyMs: 42 },
+    );
+    const row = repo.get(7, '2026-10')!;
+    expect(row.promptTokens).toBe(220); // 计费（= 积分池）
+    expect(row.completionTokens).toBe(55);
+    expect(row.rawPromptTokens).toBe(200); // 原始
+    expect(row.rawCompletionTokens).toBe(20);
+    expect(logRepo.rows).toHaveLength(1);
+    expect(logRepo.rows[0]).toMatchObject({
+      userId: 7, model: 'm-a', rawPromptTokens: 200, billingPromptTokens: 220, billingCompletionTokens: 55, costCents: 12, status: 'completed',
+    });
+  });
+
+  it('settle 不带 meta：不写流水、raw 回退为计费口径（兼容旧调用）', async () => {
+    const { quota, repo, logRepo, plans } = build();
+    setLimit(plans, 'free', 100_000);
+    const r = await quota.reserve(7, { estimatedPromptTokens: 100, maxCompletionTokens: 50 });
+    await quota.settle(r, { promptTokens: 100, completionTokens: 10 });
+    expect(logRepo.rows).toHaveLength(0);
+    expect(repo.get(7, '2026-10')!.rawPromptTokens).toBe(100);
+  });
+});
 });

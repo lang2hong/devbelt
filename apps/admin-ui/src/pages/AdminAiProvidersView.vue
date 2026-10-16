@@ -10,6 +10,7 @@ import { ensureCsrf, setAccessToken } from '@devbelt/auth-client';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { formatModelLines, parseModelLines } from '../lib/providerModels';
 import Modal from '../components/Modal.vue';
+import FormField from '../components/FormField.vue';
 
 /**
  * AI 模型厂商目录（自带 Key 预设）：运营维护厂商 / baseUrl / 模型列表；
@@ -171,8 +172,11 @@ async function toggleStatus(p: AdminAiProvider): Promise<void> {
 <template>
   <section class="page">
     <header class="head">
-      <h2>AI 模型厂商</h2>
-      <p class="sub">自带 Key 模式的厂商预设：用户在扩展里选厂商后只需填写 API Key。地址须为 https（用户 Key 会发往该地址）。</p>
+      <div>
+        <h2>AI 模型厂商</h2>
+        <p class="sub">维护预设的模型厂商列表：用户在客户端选好厂商后，只需填自己的 API Key 即可使用。</p>
+      </div>
+      <div class="head-actions"><button class="btn" :disabled="busy" @click="openCreate">新增厂商</button></div>
     </header>
 
     <p v-if="notice" class="notice">{{ notice }}</p>
@@ -182,7 +186,7 @@ async function toggleStatus(p: AdminAiProvider): Promise<void> {
     <p class="error" v-if="state === 'error'">加载失败。</p>
     <table v-if="state === 'ready'" class="table">
       <thead>
-        <tr><th>Code</th><th>名称</th><th>Base URL</th><th>模型</th><th>状态</th><th>排序</th><th></th></tr>
+        <tr><th>标识</th><th>名称</th><th>接口地址</th><th>可用模型</th><th>状态</th><th>排序</th><th></th></tr>
       </thead>
       <tbody>
         <tr v-for="p in providers" :key="p.code">
@@ -200,16 +204,29 @@ async function toggleStatus(p: AdminAiProvider): Promise<void> {
         <tr v-if="providers.length === 0"><td colspan="7" class="muted">暂无厂商。</td></tr>
       </tbody>
     </table>
-    <p class="bar"><button class="btn" :disabled="busy" @click="openCreate">新增厂商</button></p>
 
     <Modal v-if="form" :title="form.mode === 'create' ? '新增厂商' : `编辑厂商 · ${form.code}`" :closable="!busy" @close="closeForm">
-      <input v-if="form.mode === 'create'" v-model="form.code" type="text" maxlength="32" placeholder="Code（小写字母开头，如 acme）" />
-      <input v-model="form.nameZh" type="text" maxlength="64" placeholder="中文名称" />
-      <input v-model="form.nameEn" type="text" maxlength="64" placeholder="英文名称" />
-      <input v-model="form.baseUrl" type="text" maxlength="255" placeholder="Base URL（https://…/v1）" />
-      <textarea v-model="form.modelsText" rows="6" placeholder="模型（一行一个；*前缀=默认；可写 id | 显示名）"></textarea>
-      <input v-model="form.sortOrder" type="text" placeholder="排序（整数，越小越靠前）" />
-      <input v-model="form.reason" type="text" maxlength="500" placeholder="变更原因（必填，进审计）" />
+      <FormField v-if="form.mode === 'create'" label="厂商标识" required hint="小写字母开头，创建后不可改，如 acme。">
+        <input v-model="form.code" type="text" maxlength="32" placeholder="acme" />
+      </FormField>
+      <FormField label="中文名称" required>
+        <input v-model="form.nameZh" type="text" maxlength="64" placeholder="如 Acme 云" />
+      </FormField>
+      <FormField label="英文名称">
+        <input v-model="form.nameEn" type="text" maxlength="64" placeholder="Acme Cloud" />
+      </FormField>
+      <FormField label="接口地址" required hint="必须以 https 开头——用户的 API Key 会发往这个地址。">
+        <input v-model="form.baseUrl" type="text" maxlength="255" placeholder="https://api.acme.com/v1" />
+      </FormField>
+      <FormField label="可用模型" required hint="一行一个。可在行首加 * 标记默认模型；也可以写「模型 ID | 显示名」。">
+        <textarea v-model="form.modelsText" rows="6" placeholder="*gpt-5&#10;gpt-5-mini | Mini"></textarea>
+      </FormField>
+      <FormField label="排序" hint="整数，数字越小排越前。">
+        <input v-model="form.sortOrder" type="text" placeholder="如 100" />
+      </FormField>
+      <FormField label="变更原因" required hint="必填，会记录到审计日志。">
+        <input v-model="form.reason" type="text" maxlength="500" placeholder="例如：新增官方厂商目录" />
+      </FormField>
       <p v-if="error" class="error">{{ error }}</p>
       <div class="modal-actions">
         <button class="btn" :disabled="busy" @click="submit">保存</button>
@@ -220,6 +237,8 @@ async function toggleStatus(p: AdminAiProvider): Promise<void> {
 </template>
 
 <style scoped>
+.head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: var(--sp-4); }
+.head-actions { display: flex; gap: 8px; }
 .page { max-width: 1040px; margin: 0 auto; }
 input, select, textarea { box-sizing: border-box; width: 100%; padding: 8px 10px; border: 1px solid var(--c-border-strong); border-radius: 6px; font-size: 14px; margin-bottom: 8px; font-family: inherit; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }

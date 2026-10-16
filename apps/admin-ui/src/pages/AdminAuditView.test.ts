@@ -54,7 +54,8 @@ describe('AdminAuditView 检索竞态', () => {
     });
     await flushPromises();
 
-    expect(wrapper.text()).not.toContain('auth.login.success');
+    const tbody = wrapper.find('tbody');
+    expect(tbody.exists() ? tbody.text() : '').not.toContain('auth.login.success');
     wrapper.unmount();
   });
 });

@@ -44,6 +44,8 @@ export interface RetentionCleanupOptions {
   refreshTokenRetentionMs?: number;
   /** 验证 / reset token 终结后的保留期（毫秒）。默认 24 小时。 */
   tokenRetentionMs?: number;
+  /** AI 请求流水的保留期（毫秒）。默认 180 天（012：计量对账窗口）。 */
+  aiRequestLogRetentionMs?: number;
 }
 
 export interface RetentionCleanupDeps {
@@ -55,6 +57,8 @@ export interface RetentionCleanupDeps {
   mailFlowRepo: IMailFlowRepo;
   idempotencyReceiptRepo: IIdempotencyReceiptRepo;
   orderRepo: IOrderRepo;
+  /** AI 请求流水清理（012）；缺省不清理。结构化类型，避免 shared→module 依赖。 */
+  aiRequestLogRepo?: { prune(before: Date, batchSize: number): Promise<number> };
   /** 回执删除的系统审计摘要（§6.1「删除本身写系统审计摘要」）。可选；写失败不阻断清理。 */
   auditWriter?: AuditWriter;
   /** 无状态仓储（sync 两张表 + mail_flows）需要显式连接来源。 */
@@ -69,6 +73,7 @@ export function startRetentionCleanup(
   const batchSize = opts.batchSize ?? 1000;
   const refreshRetentionMs = opts.refreshTokenRetentionMs ?? 7 * 86_400_000;
   const tokenRetentionMs = opts.tokenRetentionMs ?? 86_400_000;
+  const aiRequestLogRetentionMs = opts.aiRequestLogRetentionMs ?? 180 * 86_400_000;
 
   /** 逐表清理；任一表失败不影响其余表。 */
   const runCleanup = async (): Promise<void> => {
@@ -115,6 +120,12 @@ export function startRetentionCleanup(
       ],
       // 过期 pending 订单 → expired（状态推进，非删除；未支付订单超时收口）。
       ['orders', () => deps.orderRepo.expirePending(nowDate, batchSize)],
+      ...(deps.aiRequestLogRepo
+        ? [[
+            'ai_request_log',
+            () => deps.aiRequestLogRepo!.prune(new Date(now - aiRequestLogRetentionMs), batchSize),
+          ] as [string, () => Promise<number>]]
+        : []),
     ];
 
     for (const [table, run] of tasks) {

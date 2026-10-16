@@ -5,8 +5,12 @@ import type { MysqlDb, Queryable } from '../../../repository/mysql/db.js';
  * `reserved_*` 为请求期预占：请求开始累加、结算时释放（LEAST 防无符号下溢）。
  */
 export interface AiUsageRow {
+  /** 计费 token（= 额度池口径：输入×倍率、输出×k×倍率）。 */
   promptTokens: number;
   completionTokens: number;
+  /** 原始 token（上游真实 usage；012 起与计费并列记账）。 */
+  rawPromptTokens: number;
+  rawCompletionTokens: number;
   reservedPromptTokens: number;
   reservedCompletionTokens: number;
   requestCount: number;
@@ -16,9 +20,12 @@ export interface AiSettlement {
   /** 释放的预占量（请求开始时 reserve 的量）。 */
   releaseReservedPromptTokens: number;
   releaseReservedCompletionTokens: number;
-  /** 实际入账用量（finish usage 权威；缺失时为估算值）。 */
+  /** 实际入账用量（计费 token 口径：额度池扣减）。 */
   promptTokens: number;
   completionTokens: number;
+  /** 原始 token（上游真实 usage；缺省回退 = 计费口径，历史调用兼容）。 */
+  rawPromptTokens?: number;
+  rawCompletionTokens?: number;
 }
 
 export interface IAiUsageRepo {
@@ -47,7 +54,7 @@ export interface IAiUsageRepo {
 }
 
 const ROW_COLS =
-  'prompt_tokens, completion_tokens, reserved_prompt_tokens, reserved_completion_tokens, request_count';
+  'prompt_tokens, completion_tokens, raw_prompt_tokens, raw_completion_tokens, reserved_prompt_tokens, reserved_completion_tokens, request_count';
 
 function toCount(value: unknown): number {
   const n = Number(value);
@@ -58,6 +65,8 @@ function mapRow(r: Record<string, unknown>): AiUsageRow {
   return {
     promptTokens: toCount(r.prompt_tokens),
     completionTokens: toCount(r.completion_tokens),
+    rawPromptTokens: toCount(r.raw_prompt_tokens),
+    rawCompletionTokens: toCount(r.raw_completion_tokens),
     reservedPromptTokens: toCount(r.reserved_prompt_tokens),
     reservedCompletionTokens: toCount(r.reserved_completion_tokens),
     requestCount: toCount(r.request_count),
@@ -110,6 +119,8 @@ export class MysqlAiUsageRepo implements IAiUsageRepo {
               reserved_completion_tokens = reserved_completion_tokens - LEAST(reserved_completion_tokens, ?),
               prompt_tokens = prompt_tokens + ?,
               completion_tokens = completion_tokens + ?,
+              raw_prompt_tokens = raw_prompt_tokens + ?,
+              raw_completion_tokens = raw_completion_tokens + ?,
               request_count = request_count + 1
         WHERE user_id = ? AND usage_month = ?`,
       [
@@ -117,6 +128,8 @@ export class MysqlAiUsageRepo implements IAiUsageRepo {
         s.releaseReservedCompletionTokens,
         s.promptTokens,
         s.completionTokens,
+        s.rawPromptTokens ?? s.promptTokens,
+        s.rawCompletionTokens ?? s.completionTokens,
         userId,
         usageMonth,
       ],
@@ -125,7 +138,7 @@ export class MysqlAiUsageRepo implements IAiUsageRepo {
 
   async listMonthlyByUser(userId: number, months: number): Promise<Array<AiUsageRow & { usageMonth: string }>> {
     const [rows] = await this.db().query<any[]>(
-      `SELECT usage_month, prompt_tokens, completion_tokens, reserved_prompt_tokens, reserved_completion_tokens, request_count
+      `SELECT usage_month, prompt_tokens, completion_tokens, raw_prompt_tokens, raw_completion_tokens, reserved_prompt_tokens, reserved_completion_tokens, request_count
          FROM ai_token_usage
         WHERE user_id = ?
         ORDER BY usage_month DESC

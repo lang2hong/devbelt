@@ -3,13 +3,11 @@ import { computed, onMounted, ref } from 'vue';
 import {
   createAdminAiTopupOrder,
   fulfillAdminAiTopupOrder,
-  getAdminAiQuota,
   listAdminAiSkus,
   listAdminOrders,
   listUsers,
   refundAdminAiTopupOrder,
   updateAdminAiSku,
-  type AdminAiQuota,
   type AdminAiTopupSku,
   type AdminOrder,
 } from '../api/admin';
@@ -17,8 +15,13 @@ import { ensureCsrf, setAccessToken } from '@devbelt/auth-client';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { formatDateTime } from '../lib/formatTime';
 import Modal from '../components/Modal.vue';
+import Tabs from '../components/Tabs.vue';
+import { fmtCredits } from '../lib/credits';
 
-/** AI 加油包运营（P9.1b）：SKU 管理 / 手工建单（金额二次确认）/ 订单履行与退款 / 用户配额查询。 */
+/** AI 积分运营：充值档位管理、手工建单、充值订单入账与退款。用户余额请到用户详情页查看。 */
+
+type TopupTab = 'skus' | 'orders';
+const tab = ref<TopupTab>('skus');
 
 const skus = ref<AdminAiTopupSku[]>([]);
 const skuState = ref<'loading' | 'ready' | 'error'>('loading');
@@ -29,7 +32,6 @@ const error = ref('');
 const notice = ref('');
 const skuWrite = useIdempotencyKey();
 const orderWrite = useIdempotencyKey();
-const quotaWrite = useIdempotencyKey();
 
 function relogin(): void {
   setAccessToken(null);
@@ -249,9 +251,8 @@ async function confirmManual(): Promise<void> {
     if (r.kind === 'ok') {
       orderWrite.reset(tag);
       manualForm.value = null;
-      notice.value = `建单成功：${r.value.order.orderNo}（已生效 +${fmtTokens(r.value.order.tokens)} tokens）。`;
+      notice.value = `建单成功：${r.value.order.orderNo}（已到账 ${fmtCredits(r.value.order.tokens)} 积分）。`;
       await loadOrders();
-      if (quotaUserId.value.trim() === String(uid)) await loadQuota();
     } else if (r.kind === 'unauthorized') {
       orderWrite.reset(tag);
       relogin();
@@ -266,7 +267,7 @@ async function confirmManual(): Promise<void> {
   }
 }
 
-// ── 加油包订单（purpose=topup；履行/退款）──
+// ── 充值订单（purpose=topup；履行/退款）──
 
 const orders = ref<AdminOrder[]>([]);
 const orderState = ref<'loading' | 'ready' | 'error'>('loading');
@@ -363,31 +364,6 @@ async function confirmAction(): Promise<void> {
   }
 }
 
-// ── 用户配额查询 ──
-
-const quotaUserId = ref('');
-const quota = ref<AdminAiQuota | null>(null);
-const quotaState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle');
-
-async function loadQuota(): Promise<void> {
-  const raw = quotaUserId.value.trim();
-  const uid = Number(raw);
-  if (!/^[0-9]+$/.test(raw) || !Number.isSafeInteger(uid) || uid <= 0) {
-    quotaState.value = 'error';
-    return;
-  }
-  quotaState.value = 'loading';
-  const r = await getAdminAiQuota(uid);
-  if (r.kind === 'ok') {
-    quota.value = r.value;
-    quotaState.value = 'ready';
-  } else if (r.kind === 'unauthorized') relogin();
-  else {
-    quotaState.value = 'error';
-    quota.value = null;
-  }
-}
-
 const GRANT_STATUS_LABEL: Record<string, string> = {
   active: '生效中',
   exhausted: '已用尽',
@@ -399,26 +375,30 @@ const GRANT_STATUS_LABEL: Record<string, string> = {
 <template>
   <section class="page">
     <header class="head">
-      <h2>AI 加油包</h2>
-      <p class="sub">档位管理、手工建单、订单履行/退款与用户配额查询（P9.1）。</p>
+      <div>
+        <h2>AI 积分</h2>
+        <p class="sub">充值档位、手工建单与充值订单管理。查看单个用户的积分余额与请求明细，请到 用户列表 → 详情 → AI 积分。</p>
+      </div>
+      <div class="head-actions"><button class="btn" :disabled="busy" @click="openManual">手工建单</button></div>
     </header>
 
     <p v-if="notice" class="notice">{{ notice }}</p>
     <p v-if="error" class="error">{{ error }}</p>
+    <Tabs v-model="tab" :tabs="[{ key: 'skus', label: '充值档位' }, { key: 'orders', label: '充值订单' }]" />
 
     <!-- ── SKU 目录 ── -->
-    <h3>档位目录</h3>
+    <template v-if="tab === 'skus'">
     <p class="muted" v-if="skuState === 'loading'">加载中…</p>
     <p class="error" v-if="skuState === 'error'">{{ skuError || '加载失败。' }}</p>
     <table v-if="skuState === 'ready'" class="table">
       <thead>
-        <tr><th>档位</th><th>名称</th><th>Tokens</th><th>价格</th><th>有效期</th><th>状态</th><th>排序</th><th></th></tr>
+        <tr><th>档位</th><th>名称</th><th>积分</th><th>价格</th><th>有效期</th><th>状态</th><th>排序</th><th></th></tr>
       </thead>
       <tbody>
         <tr v-for="s in skus" :key="s.code">
           <td class="mono">{{ s.code }}</td>
           <td>{{ s.label.zh }}</td>
-          <td>{{ fmtTokens(s.tokens) }}</td>
+          <td>{{ fmtCredits(s.tokens) }}</td>
           <td>¥{{ fmtCents(s.priceCents) }}</td>
           <td>{{ s.validDays }} 天</td>
           <td><span class="badge" :class="s.status">{{ s.status === 'active' ? '上架' : '停用' }}</span></td>
@@ -431,12 +411,9 @@ const GRANT_STATUS_LABEL: Record<string, string> = {
         <tr v-if="skus.length === 0"><td colspan="8" class="muted">无档位。</td></tr>
       </tbody>
     </table>
-    <p class="bar">
-      <button class="btn" :disabled="busy" @click="openManual">手工建单</button>
-    </p>
-
-    <!-- ── 加油包订单 ── -->
-    <h3>加油包订单</h3>
+    </template>
+    <!-- ── 充值订单 ── -->
+    <template v-else>
     <div class="bar">
       <select v-model="orderStatus" @change="loadOrders(true)">
         <option value="">全部状态</option>
@@ -463,44 +440,11 @@ const GRANT_STATUS_LABEL: Record<string, string> = {
             <button v-if="o.status === 'fulfilled'" class="btn small danger" :disabled="busy" @click="openAction(o, 'refund')">退款</button>
           </td>
         </tr>
-        <tr v-if="orders.length === 0"><td colspan="8" class="muted">无加油包订单。</td></tr>
+        <tr v-if="orders.length === 0"><td colspan="8" class="muted">无充值订单。</td></tr>
       </tbody>
     </table>
     <p v-if="orderNextCursor" class="load-more"><button class="btn secondary" @click="loadOrders(false)">加载更多</button></p>
 
-    <!-- ── 用户配额查询 ── -->
-    <h3>用户配额查询</h3>
-    <div class="bar">
-      <input v-model="quotaUserId" type="text" placeholder="用户ID" @keyup.enter="loadQuota" />
-      <button class="btn" @click="loadQuota">查询</button>
-    </div>
-    <p class="muted" v-if="quotaState === 'loading'">查询中…</p>
-    <p class="error" v-if="quotaState === 'error' && !quota">查询失败：用户 ID 必须为正整数。</p>
-    <template v-if="quotaState === 'ready' && quota">
-      <div class="quota-summary">
-        <p>月额度剩余：<strong>{{ fmtTokens(quota.snapshot.monthlyRemaining) }}</strong> tokens ·
-           加油包剩余：<strong>{{ fmtTokens(quota.snapshot.topupRemaining) }}</strong> tokens ·
-           已用 {{ fmtTokens(quota.snapshot.used) }} / 预占 {{ fmtTokens(quota.snapshot.reserved) }} ·
-           月重置 {{ quota.snapshot.resetAt ? formatDateTime(quota.snapshot.resetAt) : '—' }}</p>
-      </div>
-      <table class="table">
-        <thead>
-          <tr><th>Grant</th><th>订单ID</th><th>档位</th><th>状态</th><th>总量</th><th>已用</th><th>预占</th><th>过期时间</th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="g in quota.grants" :key="g.grantId">
-            <td class="mono">{{ g.grantId }}</td>
-            <td class="mono">{{ g.orderId }}</td>
-            <td class="mono">{{ g.skuCode }}</td>
-            <td><span class="badge" :class="g.status">{{ GRANT_STATUS_LABEL[g.status] ?? g.status }}</span></td>
-            <td>{{ fmtTokens(g.tokensTotal) }}</td>
-            <td>{{ fmtTokens(g.tokensUsed) }}</td>
-            <td>{{ fmtTokens(g.tokensReserved) }}</td>
-            <td>{{ formatDateTime(g.expiresTime) }}</td>
-          </tr>
-          <tr v-if="quota.grants.length === 0"><td colspan="8" class="muted">无加油包记录。</td></tr>
-        </tbody>
-      </table>
     </template>
 
     <!-- SKU 编辑 Modal -->
@@ -527,7 +471,7 @@ const GRANT_STATUS_LABEL: Record<string, string> = {
       </p>
       <select v-model="manualForm.skuCode">
         <option v-for="s in skus.filter((x) => x.status === 'active')" :key="s.code" :value="s.code">
-          {{ s.code }} · {{ s.label.zh }} · {{ fmtTokens(s.tokens) }} tokens · ¥{{ fmtCents(s.priceCents) }}
+          {{ s.code }} · {{ s.label.zh }} · {{ fmtCredits(s.tokens) }} 积分 · ¥{{ fmtCents(s.priceCents) }}
         </option>
       </select>
       <p class="muted" v-if="manualSku">当前价：<strong>¥{{ fmtCents(manualSku.priceCents) }}</strong> —— 请在下方回填同一金额作二次确认。</p>
@@ -541,9 +485,9 @@ const GRANT_STATUS_LABEL: Record<string, string> = {
     </Modal>
 
     <!-- 订单操作 Modal -->
-    <Modal v-if="actionForm" :title="actionForm.action === 'fulfill' ? '入账' : '退款（撤销额度）'" :closable="!busy" @close="closeAction">
+    <Modal v-if="actionForm" :title="actionForm.action === 'fulfill' ? '入账' : '退款（撤销积分）'" :closable="!busy" @close="closeAction">
       <p class="muted">{{ actionForm.order.orderNo }} · {{ actionForm.order.skuCode }} · ¥{{ fmtCents(actionForm.order.amountCents) }} · {{ actionForm.order.status }}</p>
-      <p class="muted" v-if="actionForm.action === 'refund'">退款只撤销加油包剩余额度（已用部分保留审计），不发起支付渠道退款。</p>
+      <p class="muted" v-if="actionForm.action === 'refund'">退款只撤销该充值的剩余积分（已消耗部分保留审计），不发起支付渠道退款。</p>
       <input v-model="actionReason" type="text" maxlength="500" placeholder="操作原因（必填，进审计）" />
       <p v-if="error" class="error">{{ error }}</p>
       <div class="modal-actions">

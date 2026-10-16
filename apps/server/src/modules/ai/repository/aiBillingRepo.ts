@@ -14,6 +14,8 @@ export interface AiModelPricing {
   inputCentsPerM: number;
   outputCentsPerM: number;
   weightOverride: number | null;
+  /** 每模型计费倍率（012）；NULL = 用全局 global_multiplier。 */
+  multiplierOverride: number | null;
   status: 'active' | 'disabled';
 }
 
@@ -22,12 +24,17 @@ export interface AiBillingSettingsRaw {
   upstreamBaseUrl: string | null;
   upstreamApiKey: string | null;
   globalMultiplier: number;
+  /** 成本测算的典型输出占比（0-1，默认 0.2；仅测算展示，不参与扣费）。 */
+  typicalOutputRatio: number;
 }
 
+/** 月度用量聚合：raw_* 为原始 token（上游真实 usage）；billing_*（prompt_tokens/completion_tokens 列）为计费 token。 */
 export interface AiMonthlyUsage {
   usageMonth: string;
   promptTokens: number;
   completionTokens: number;
+  billingPromptTokens: number;
+  billingCompletionTokens: number;
   requestCount: number;
 }
 
@@ -48,7 +55,7 @@ export interface IAiBillingRepo {
   monthlyRevenue(usageMonth: string): Promise<AiMonthlyRevenue>;
 }
 
-const PRICING_COLS = 'model, provider_code, input_cents_per_m, output_cents_per_m, weight_override, status';
+const PRICING_COLS = 'model, provider_code, input_cents_per_m, output_cents_per_m, weight_override, multiplier_override, status';
 
 function mapPricing(r: Record<string, unknown>): AiModelPricing {
   return {
@@ -57,6 +64,7 @@ function mapPricing(r: Record<string, unknown>): AiModelPricing {
     inputCentsPerM: Number(r.input_cents_per_m ?? 0),
     outputCentsPerM: Number(r.output_cents_per_m ?? 0),
     weightOverride: r.weight_override === null || r.weight_override === undefined ? null : Number(r.weight_override),
+    multiplierOverride: r.multiplier_override === null || r.multiplier_override === undefined ? null : Number(r.multiplier_override),
     status: r.status === 'disabled' ? 'disabled' : 'active',
   };
 }
@@ -83,10 +91,10 @@ export class MysqlAiBillingRepo implements IAiBillingRepo {
 
   async insertPricingInTx(tx: Queryable, row: AiModelPricing): Promise<boolean> {
     const [result] = await tx.query<any>(
-      `INSERT INTO ai_model_pricing (model, provider_code, input_cents_per_m, output_cents_per_m, weight_override, status)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO ai_model_pricing (model, provider_code, input_cents_per_m, output_cents_per_m, weight_override, multiplier_override, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE model = model`,
-      [row.model, row.providerCode, row.inputCentsPerM, row.outputCentsPerM, row.weightOverride, row.status],
+      [row.model, row.providerCode, row.inputCentsPerM, row.outputCentsPerM, row.weightOverride, row.multiplierOverride, row.status],
     );
     return Number(result?.affectedRows ?? 0) === 1;
   }
@@ -110,6 +118,10 @@ export class MysqlAiBillingRepo implements IAiBillingRepo {
       sets.push('weight_override = ?');
       params.push(patch.weightOverride);
     }
+    if (patch.multiplierOverride !== undefined) {
+      sets.push('multiplier_override = ?');
+      params.push(patch.multiplierOverride);
+    }
     if (patch.status !== undefined) {
       sets.push('status = ?');
       params.push(patch.status);
@@ -121,7 +133,7 @@ export class MysqlAiBillingRepo implements IAiBillingRepo {
 
   async getRawSettings(): Promise<AiBillingSettingsRaw | undefined> {
     const [rows] = await this.db().query<any[]>(
-      'SELECT active_model, upstream_base_url, upstream_api_key, global_multiplier FROM ai_billing_settings WHERE id = 1',
+      'SELECT active_model, upstream_base_url, upstream_api_key, global_multiplier, typical_output_ratio FROM ai_billing_settings WHERE id = 1',
     );
     const r = rows[0];
     if (!r) return undefined;
@@ -130,6 +142,7 @@ export class MysqlAiBillingRepo implements IAiBillingRepo {
       upstreamBaseUrl: r.upstream_base_url === null || r.upstream_base_url === undefined ? null : String(r.upstream_base_url),
       upstreamApiKey: r.upstream_api_key === null || r.upstream_api_key === undefined ? null : String(r.upstream_api_key),
       globalMultiplier: Number(r.global_multiplier ?? 1),
+      typicalOutputRatio: Number(r.typical_output_ratio ?? 0.2),
     };
   }
 
@@ -140,22 +153,26 @@ export class MysqlAiBillingRepo implements IAiBillingRepo {
       upstreamBaseUrl: patch.upstreamBaseUrl !== undefined ? patch.upstreamBaseUrl : (current?.upstreamBaseUrl ?? null),
       upstreamApiKey: patch.upstreamApiKey !== undefined ? patch.upstreamApiKey : (current?.upstreamApiKey ?? null),
       globalMultiplier: patch.globalMultiplier !== undefined ? patch.globalMultiplier : (current?.globalMultiplier ?? 1),
+      typicalOutputRatio: patch.typicalOutputRatio !== undefined ? patch.typicalOutputRatio : (current?.typicalOutputRatio ?? 0.2),
     };
     await tx.query<any>(
-      `INSERT INTO ai_billing_settings (id, active_model, upstream_base_url, upstream_api_key, global_multiplier)
-       VALUES (1, ?, ?, ?, ?)
+      `INSERT INTO ai_billing_settings (id, active_model, upstream_base_url, upstream_api_key, global_multiplier, typical_output_ratio)
+       VALUES (1, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
          active_model = VALUES(active_model),
          upstream_base_url = VALUES(upstream_base_url),
          upstream_api_key = VALUES(upstream_api_key),
-         global_multiplier = VALUES(global_multiplier)`,
-      [next.activeModel, next.upstreamBaseUrl, next.upstreamApiKey, next.globalMultiplier],
+         global_multiplier = VALUES(global_multiplier),
+         typical_output_ratio = VALUES(typical_output_ratio)`,
+      [next.activeModel, next.upstreamBaseUrl, next.upstreamApiKey, next.globalMultiplier, next.typicalOutputRatio],
     );
   }
 
   async monthlyUsage(usageMonth: string): Promise<AiMonthlyUsage> {
     const [rows] = await this.db().query<any[]>(
-      `SELECT COALESCE(SUM(prompt_tokens), 0) AS p, COALESCE(SUM(completion_tokens), 0) AS c, COALESCE(SUM(request_count), 0) AS n
+      `SELECT COALESCE(SUM(raw_prompt_tokens), 0) AS p, COALESCE(SUM(raw_completion_tokens), 0) AS c,
+              COALESCE(SUM(prompt_tokens), 0) AS bp, COALESCE(SUM(completion_tokens), 0) AS bc,
+              COALESCE(SUM(request_count), 0) AS n
          FROM ai_token_usage WHERE usage_month = ?`,
       [usageMonth],
     );
@@ -164,6 +181,8 @@ export class MysqlAiBillingRepo implements IAiBillingRepo {
       usageMonth,
       promptTokens: Number(r.p ?? 0),
       completionTokens: Number(r.c ?? 0),
+      billingPromptTokens: Number(r.bp ?? 0),
+      billingCompletionTokens: Number(r.bc ?? 0),
       requestCount: Number(r.n ?? 0),
     };
   }

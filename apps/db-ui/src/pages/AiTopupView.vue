@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtCredits } from '../lib/credits';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { withBase } from '../lib/router';
 import { ensureCsrf } from '@devbelt/auth-client';
@@ -9,7 +10,7 @@ import { createAiTopupOrder, listAiSkus, type AiTopupSku } from '../api/ai';
 import { getOrder, type PayParams } from '../api/orders';
 
 /**
- * AI 加油包购买页（P9.1c）：档位卡片 → 选渠道下单 → 收银台（扫码/跳转）→
+ * AI 积分充值页：档位卡片 → 选渠道下单 → 收银台（扫码/跳转）→
  * 轮询订单状态直至入账。支付参数与订单号只暂存内存/sessionStorage（同 CheckoutView 口径）。
  */
 
@@ -181,7 +182,7 @@ async function submit(mode?: 'qr' | 'redirect'): Promise<void> {
   }
 }
 
-/** 轮询订单直到 fulfilled（加油包入账），成功后提示并引导回账户页。 */
+/** 轮询订单直到 fulfilled（积分到账），成功后提示并引导回账户页。 */
 function startPolling(no: string, gen: number): void {
   stopPolling();
   pollStatus.value = 'pending';
@@ -202,7 +203,7 @@ function startPolling(no: string, gen: number): void {
     if (status === 'fulfilled') {
       stopPolling();
       clearPendingOrder();
-      success.value = '加油包已生效，额度已入账。';
+      success.value = '充值已生效，积分已到账。';
       return;
     }
     if (status === 'paid') {
@@ -231,7 +232,7 @@ async function manualCheck(): Promise<void> {
   if (r.kind !== 'ok') return;
   pollStatus.value = r.value.status;
   if (TERMINAL_STATUSES.has(r.value.status)) clearPendingOrder();
-  if (r.value.status === 'fulfilled') success.value = '加油包已生效，额度已入账。';
+  if (r.value.status === 'fulfilled') success.value = '充值已生效，积分已到账。';
 }
 
 function statusLabel(s: string | null): string {
@@ -246,8 +247,8 @@ function goAccount(): void {
 <template>
   <section class="page">
     <header class="head">
-      <h2>AI 加油包</h2>
-      <p class="sub">一次性额度包，购买即入账（月额度优先扣，加油包按到期先后扣）。</p>
+      <h2>AI 积分充值</h2>
+      <p class="sub">1 积分 = 1000 计费 token（输出按折算倍数加权）。本月赠送优先扣，充值积分按到期先后扣。</p>
     </header>
 
     <p v-if="error" class="error">{{ error }}</p>
@@ -266,7 +267,7 @@ function goAccount(): void {
         @click="selected = s.code"
       >
         <span class="sku-name">{{ s.label.zh }}</span>
-        <span class="sku-tokens">{{ fmtTokens(s.tokens) }} tokens</span>
+        <span class="sku-tokens">{{ fmtCredits(s.tokens) }} 积分</span>
         <span class="sku-price">¥{{ fmtCents(s.priceCents) }}</span>
         <span class="sku-valid">有效期 {{ s.validDays }} 天</span>
       </button>

@@ -1,6 +1,7 @@
 import { ValidationError } from '../../../domain/errors.js';
 import type { Queryable } from '../../../repository/mysql/db.js';
 import type { AiModelPricing, AiBillingSettingsRaw, IAiBillingRepo } from '../repository/aiBillingRepo.js';
+import type { IAiRequestLogRepo, AiRequestLogRow } from '../repository/aiRequestLogRepo.js';
 import type { AiUpstreamConfig } from '../aiConfig.js';
 
 /**
@@ -74,6 +75,8 @@ export interface BillingSettingsView {
   upstreamApiKeyConfigured: boolean;
   upstreamApiKeyHint: string | null;
   globalMultiplier: number;
+  /** 成本测算的典型输出占比（0-1）。 */
+  typicalOutputRatio: number;
   /** env 回退值（展示当前兜底，便于对照）。 */
   env: { model: string; baseUrl: string | null; apiKeyConfigured: boolean };
 }
@@ -85,6 +88,8 @@ export class AiBillingService {
     private readonly repo: IAiBillingRepo,
     private readonly envConfig: AiUpstreamConfig,
     private readonly now: () => number = Date.now,
+    /** 请求流水仓储（012；缺省时 summary/用户流水返回空——测试装配兼容）。 */
+    private readonly requestLogRepo?: IAiRequestLogRepo,
   ) {}
 
   /** 后台写后失效（下一请求即时生效，不等 TTL）。 */
@@ -106,7 +111,14 @@ export class AiBillingService {
       baseUrl,
       ...(apiKey ? { apiKey } : {}),
       weight: deriveWeight(pricing),
-      multiplier: settings ? clampNum(settings.globalMultiplier, 0.01, 100, 'multiplier') : 1,
+      // 每模型倍率优先（012）；缺省回退全局。
+      multiplier: settings
+        ? clampNum(
+            pricing && pricing.multiplierOverride !== null && pricing.multiplierOverride !== undefined
+              ? pricing.multiplierOverride
+              : settings.globalMultiplier,
+            0.01, 100, 'multiplier')
+        : 1,
       pricing,
     };
     this.cache = { at: this.now(), value };
@@ -122,6 +134,7 @@ export class AiBillingService {
       upstreamApiKeyConfigured: Boolean(settings?.upstreamApiKey?.trim()),
       upstreamApiKeyHint: settings?.upstreamApiKey ? `…${settings.upstreamApiKey.slice(-4)}` : null,
       globalMultiplier: settings?.globalMultiplier ?? 1,
+      typicalOutputRatio: settings?.typicalOutputRatio ?? 0.2,
       env: {
         model: this.envConfig.model,
         baseUrl: this.envConfig.baseUrl ?? null,
@@ -133,7 +146,7 @@ export class AiBillingService {
   /** 更新设置（空串 = 清除该项回退 env；apiKey 仅此处接收明文）。 */
   async updateSettingsInTx(
     tx: Queryable,
-    input: { activeModel?: unknown; upstreamBaseUrl?: unknown; upstreamApiKey?: unknown; clearUpstreamApiKey?: boolean; globalMultiplier?: unknown },
+    input: { activeModel?: unknown; upstreamBaseUrl?: unknown; upstreamApiKey?: unknown; clearUpstreamApiKey?: boolean; globalMultiplier?: unknown; typicalOutputRatio?: unknown },
   ): Promise<void> {
     const patch: Partial<AiBillingSettingsRaw> = {};
     if (input.activeModel !== undefined) {
@@ -169,6 +182,10 @@ export class AiBillingService {
       const n = Number(input.globalMultiplier);
       patch.globalMultiplier = clampNum(n, 0.01, 100, 'globalMultiplier');
     }
+    if (input.typicalOutputRatio !== undefined) {
+      const n = Number(input.typicalOutputRatio);
+      patch.typicalOutputRatio = clampNum(n, 0.0001, 0.9999, 'typicalOutputRatio');
+    }
     await this.repo.upsertSettingsInTx(tx, patch);
     this.invalidate();
   }
@@ -182,7 +199,7 @@ export class AiBillingService {
   }
 
   /** 新增计价行；model 重复返回 undefined（路由 409）。 */
-  async createPricingInTx(tx: Queryable, input: { model: unknown; providerCode?: unknown; inputCentsPerM?: unknown; outputCentsPerM?: unknown; weightOverride?: unknown }): Promise<AiModelPricing | undefined> {
+  async createPricingInTx(tx: Queryable, input: { model: unknown; providerCode?: unknown; inputCentsPerM?: unknown; outputCentsPerM?: unknown; weightOverride?: unknown; multiplierOverride?: unknown }): Promise<AiModelPricing | undefined> {
     const model = str(input.model, 'model', 128, false);
     if (!MODEL_RE.test(model)) throw new ValidationError('invalid model');
     const row: AiModelPricing = {
@@ -191,6 +208,7 @@ export class AiBillingService {
       inputCentsPerM: parseCents(input.inputCentsPerM, 'inputCentsPerM'),
       outputCentsPerM: parseCents(input.outputCentsPerM, 'outputCentsPerM'),
       weightOverride: parseWeight(input.weightOverride),
+      multiplierOverride: parseWeight(input.multiplierOverride),
       status: 'active',
     };
     const inserted = await this.repo.insertPricingInTx(tx, row);
@@ -198,12 +216,13 @@ export class AiBillingService {
     return inserted ? row : undefined;
   }
 
-  async updatePricingInTx(tx: Queryable, model: string, input: { providerCode?: unknown; inputCentsPerM?: unknown; outputCentsPerM?: unknown; weightOverride?: unknown; status?: unknown }): Promise<AiModelPricing | undefined> {
+  async updatePricingInTx(tx: Queryable, model: string, input: { providerCode?: unknown; inputCentsPerM?: unknown; outputCentsPerM?: unknown; weightOverride?: unknown; multiplierOverride?: unknown; status?: unknown }): Promise<AiModelPricing | undefined> {
     const patch: Partial<AiModelPricing> = {};
     if (input.providerCode !== undefined) patch.providerCode = parseProviderCode(input.providerCode);
     if (input.inputCentsPerM !== undefined) patch.inputCentsPerM = parseCents(input.inputCentsPerM, 'inputCentsPerM');
     if (input.outputCentsPerM !== undefined) patch.outputCentsPerM = parseCents(input.outputCentsPerM, 'outputCentsPerM');
     if (input.weightOverride !== undefined) patch.weightOverride = parseWeight(input.weightOverride);
+    if (input.multiplierOverride !== undefined) patch.multiplierOverride = parseWeight(input.multiplierOverride);
     if (input.status !== undefined) {
       if (input.status !== 'active' && input.status !== 'disabled') throw new ValidationError('invalid status');
       patch.status = input.status;
@@ -232,8 +251,10 @@ export class AiBillingService {
       this.repo.monthlyRevenue(usageMonth),
       this.upstream(),
     ]);
-    const billingRaw = billingTokens(usage.promptTokens, usage.completionTokens, upstream.weight, upstream.multiplier);
-    const billing = { promptTokens: billingRaw.prompt, completionTokens: billingRaw.completion };
+    // 012 修复：usage 月账本 raw_* 列为原始 token、prompt/completion 列为计费 token——
+    // 不再对计费 token 二次加权；成本按原始 token × 单价（此前把计费 token 当原始用，
+    // 输出部分被多乘 k，成本高估）。
+    const billing = { promptTokens: usage.billingPromptTokens, completionTokens: usage.billingCompletionTokens };
     const cost = costCents(usage.promptTokens, usage.completionTokens, upstream.pricing);
     return {
       usageMonth,
@@ -247,6 +268,126 @@ export class AiBillingService {
       marginCents: cost === null ? null : revenue.topupCents + revenue.planCents - cost,
     };
   }
+
+  /**
+   * 区间毛利统计（from/to 形如 YYYY-MM，跨度 ≤ 12 个月；from ≤ to）。
+   * 成本/用量从 `ai_request_log` 流水聚合——按请求当时计价，历史精确；
+   * 收入按订单精确；流水上线前的月份不在统计内（单月近似口径见 finance）。
+   */
+  async financeSummary(from: string, to: string): Promise<{
+    from: string;
+    to: string;
+    total: {
+      requestCount: number;
+      rawPromptTokens: number;
+      rawCompletionTokens: number;
+      billingPromptTokens: number;
+      billingCompletionTokens: number;
+      costCents: number | null;
+      topupCents: number;
+      planCents: number;
+      marginCents: number | null;
+    };
+    months: Array<{
+      usageMonth: string;
+      requestCount: number;
+      rawPromptTokens: number;
+      rawCompletionTokens: number;
+      billingPromptTokens: number;
+      billingCompletionTokens: number;
+      costCents: number | null;
+      topupCents: number;
+      planCents: number;
+      marginCents: number | null;
+    }>;
+    models: Array<{
+      model: string;
+      requestCount: number;
+      rawPromptTokens: number;
+      rawCompletionTokens: number;
+      billingPromptTokens: number;
+      billingCompletionTokens: number;
+      costCents: number | null;
+    }>;
+  }> {
+    this.assertMonthKey(from, 'from');
+    this.assertMonthKey(to, 'to');
+    if (from > to) throw new ValidationError('from must be <= to');
+    if (monthSpan(from, to) > 12) throw new ValidationError('range too large (max 12 months)');
+    const monthsList = monthKeysBetween(from, to);
+    const [byMonth, byModel, revenues] = await Promise.all([
+      this.requestLogRepo ? this.requestLogRepo.summaryByMonth(from, to) : Promise.resolve([]),
+      this.requestLogRepo ? this.requestLogRepo.summaryByModel(from, to) : Promise.resolve([]),
+      Promise.all(monthsList.map((m) => this.repo.monthlyRevenue(m))),
+    ]);
+    const revenueByMonth = new Map(monthsList.map((m, i) => [m, revenues[i]!]));
+    const months = monthsList.map((m) => {
+      const row = byMonth.find((r) => r.usageMonth === m);
+      const revenue = revenueByMonth.get(m) ?? { topupCents: 0, planCents: 0 };
+      const cost = row?.costCents ?? null;
+      return {
+        usageMonth: m,
+        requestCount: row?.requestCount ?? 0,
+        rawPromptTokens: row?.rawPromptTokens ?? 0,
+        rawCompletionTokens: row?.rawCompletionTokens ?? 0,
+        billingPromptTokens: row?.billingPromptTokens ?? 0,
+        billingCompletionTokens: row?.billingCompletionTokens ?? 0,
+        costCents: cost,
+        topupCents: revenue.topupCents,
+        planCents: revenue.planCents,
+        marginCents: cost === null ? null : revenue.topupCents + revenue.planCents - cost,
+      };
+    });
+    const hasCost = months.some((m) => m.costCents !== null);
+    const totalCost = hasCost ? months.reduce((n, m) => n + (m.costCents ?? 0), 0) : null;
+    const topupCents = months.reduce((n, m) => n + m.topupCents, 0);
+    const planCents = months.reduce((n, m) => n + m.planCents, 0);
+    return {
+      from, to,
+      total: {
+        requestCount: months.reduce((n, m) => n + m.requestCount, 0),
+        rawPromptTokens: months.reduce((n, m) => n + m.rawPromptTokens, 0),
+        rawCompletionTokens: months.reduce((n, m) => n + m.rawCompletionTokens, 0),
+        billingPromptTokens: months.reduce((n, m) => n + m.billingPromptTokens, 0),
+        billingCompletionTokens: months.reduce((n, m) => n + m.billingCompletionTokens, 0),
+        costCents: totalCost,
+        topupCents,
+        planCents,
+        marginCents: totalCost === null ? null : topupCents + planCents - totalCost,
+      },
+      months,
+      models: byModel,
+    };
+  }
+
+  /** 用户请求流水（管理视图；id 倒序 keyset）。 */
+  async userRequests(userId: number, opts: { afterId?: number; limit: number }): Promise<{ items: AiRequestLogRow[]; nextId: number | null }> {
+    if (!Number.isSafeInteger(userId) || userId <= 0) throw new ValidationError('invalid userId');
+    if (!this.requestLogRepo) return { items: [], nextId: null };
+    return this.requestLogRepo.listByUser(userId, opts);
+  }
+
+  private assertMonthKey(v: string, field: string): void {
+    if (!/^[0-9]{4}-(0[1-9]|1[0-2])$/.test(v)) throw new ValidationError(`invalid ${field}`);
+  }
+}
+
+function monthSpan(from: string, to: string): number {
+  const [fy, fm] = from.split('-').map(Number);
+  const [ty, tm] = to.split('-').map(Number);
+  return (ty - fy) * 12 + (tm - fm);
+}
+
+function monthKeysBetween(from: string, to: string): string[] {
+  const keys: string[] = [];
+  let [y, m] = from.split('-').map(Number);
+  const [ty, tm] = to.split('-').map(Number);
+  while (y < ty || (y === ty && m <= tm)) {
+    keys.push(`${y}-${String(m).padStart(2, '0')}`);
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+  }
+  return keys;
 }
 
 function parseProviderCode(raw: unknown): string | null {

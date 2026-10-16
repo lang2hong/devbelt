@@ -6,11 +6,12 @@ import { requestId } from '../../src/middleware/requestId.js';
 import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
 import { TokenService, type SigningKeys } from '../../src/service/tokenService.js';
 import { CsrfService } from '../../src/service/csrfService.js';
+import { CursorService } from '../../src/service/cursor.js';
 import { AuditWriter } from '../../src/service/auditWriter.js';
 import { IdempotencyService } from '../../src/service/idempotencyService.js';
 import { RateLimitService } from '../../src/service/rateLimitService.js';
 import { AiBillingService } from '../../src/modules/ai/service/aiBillingService.js';
-import { MemoryAiBillingRepo } from '../helpers/fakeAiBillingRepo.js';
+import { MemoryAiBillingRepo, MemoryAiRequestLogRepo } from '../helpers/fakeAiBillingRepo.js';
 import { csrfCookieName } from '../../src/middleware/cookies.js';
 import { CONSOLE_SCOPES } from '../../src/domain/enums.js';
 import { FakeUserRepo, FakeRateLimitRepo, FakeIdempotencyReceiptRepo } from '../helpers/fakeRepos.js';
@@ -27,12 +28,14 @@ async function build() {
   const userRepo = new FakeUserRepo();
   const auditRepo = new FakeAuditRepo();
   const repo = new MemoryAiBillingRepo();
+  const logRepo = new MemoryAiRequestLogRepo();
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   const keys: SigningKeys = { kid: 'test', privateKey, publicKeys: new Map([['test', publicKey]]) };
   const tokenService = new TokenService(keys, '15m', 30 * 24 * 3600 * 1000);
   const csrfService = new CsrfService(Buffer.alloc(32, 11));
   const runner: TxRunner = (fn) => fn({} as Queryable);
   await app.register(consoleAiBillingRoutes, {
+    cursorService: new CursorService(Buffer.alloc(32, 7)),
     tokenService,
     getUser: async (id) => userRepo.findById(id),
     getSessionActive: async () => true,
@@ -40,7 +43,7 @@ async function build() {
     consoleOrigin: ORIGIN,
     rateLimiter: new RateLimitService(new FakeRateLimitRepo(), false),
     idempotencyService: new IdempotencyService(new FakeIdempotencyReceiptRepo(), runner),
-    billing: new AiBillingService(repo, ENV),
+    billing: new AiBillingService(repo, ENV, Date.now, logRepo),
     auditWriter: new AuditWriter(auditRepo),
   });
   await app.ready();
@@ -62,7 +65,7 @@ async function build() {
       accept: 'application/json',
     };
   };
-  return { app, userRepo, auditRepo, repo, makeAdmin, writeHeaders, token };
+  return { app, userRepo, auditRepo, repo, logRepo, makeAdmin, writeHeaders, token };
 }
 
 describe('console AI billing routes（计费引擎）', () => {
@@ -174,5 +177,114 @@ describe('console AI billing routes（计费引擎）', () => {
     expect(bad.statusCode).toBe(422);
     expect(b.auditRepo.events.some((e) => e.eventType === 'admin.ai.finance.read')).toBe(true);
     await b.app.close();
+  });
+
+  it('计价 CRUD 透传 multiplierOverride（012 每模型倍率）', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    const create = await b.app.inject({
+      method: 'POST', url: '/api/admin/ai/model-pricing',
+      headers: await b.writeHeaders(admin.id),
+      payload: { model: 'm-ov', inputCentsPerM: 80, outputCentsPerM: 200, multiplierOverride: 1.5, reason: 'r' },
+    });
+    expect(create.statusCode).toBe(201);
+    expect(create.json().pricing).toMatchObject({ model: 'm-ov', multiplierOverride: 1.5 });
+
+    const patch = await b.app.inject({
+      method: 'PATCH', url: '/api/admin/ai/model-pricing/m-ov',
+      headers: await b.writeHeaders(admin.id),
+      payload: { multiplierOverride: null, reason: '回全局' },
+    });
+    expect(patch.statusCode).toBe(200);
+    expect(patch.json().pricing).toMatchObject({ multiplierOverride: null });
+  });
+
+  it('设置 typicalOutputRatio：合法写入、非法 422（012 测算占比）', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    const ok = await b.app.inject({
+      method: 'PATCH', url: '/api/admin/ai/billing-settings',
+      headers: await b.writeHeaders(admin.id),
+      payload: { typicalOutputRatio: 0.3, reason: 'r' },
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().typicalOutputRatio).toBeCloseTo(0.3, 2);
+    const bad = await b.app.inject({
+      method: 'PATCH', url: '/api/admin/ai/billing-settings',
+      headers: await b.writeHeaders(admin.id),
+      payload: { typicalOutputRatio: 1.2, reason: 'r' },
+    });
+    expect(bad.statusCode).toBe(422);
+  });
+
+  it('区间毛利统计：合计/逐月/每模型 + 审计（012）', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    await b.logRepo.insertInTx({} as never, {
+      userId: 7, usageMonth: '2026-10', model: 'm-a', requestId: 'req-1',
+      rawPromptTokens: 1_000_000, rawCompletionTokens: 200_000,
+      billingPromptTokens: 1_100_000, billingCompletionTokens: 550_000,
+      weight: 2.5, multiplier: 1.1, costCents: 120, status: 'completed', usageEstimated: false, latencyMs: 100,
+    });
+    b.repo.revenueByMonth.set('2026-10', { topupCents: 9900, planCents: 0 });
+
+    const res = await b.app.inject({
+      method: 'GET', url: '/api/admin/ai/finance/summary?from=2026-10&to=2026-10',
+      headers: { authorization: `Bearer ${await b.token(admin.id)}`, accept: 'application/json' },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.total).toMatchObject({ requestCount: 1, costCents: 120, topupCents: 9900, marginCents: 9900 - 120 });
+    expect(body.months[0]).toMatchObject({ usageMonth: '2026-10', requestCount: 1, costCents: 120 });
+    expect(body.models[0]).toMatchObject({ model: 'm-a', requestCount: 1, costCents: 120 });
+    expect(b.auditRepo.events.some((e) => e.eventType === 'admin.ai.finance.read')).toBe(true);
+
+    expect((await b.app.inject({
+      method: 'GET', url: '/api/admin/ai/finance/summary?from=bad&to=2026-10',
+      headers: { authorization: `Bearer ${await b.token(admin.id)}`, accept: 'application/json' },
+    })).statusCode).toBe(422);
+    expect((await b.app.inject({
+      method: 'GET', url: '/api/admin/ai/finance/summary?from=2024-01&to=2026-12',
+      headers: { authorization: `Bearer ${await b.token(admin.id)}`, accept: 'application/json' },
+    })).statusCode).toBe(422);
+  });
+
+  it('用户请求流水：分页 + DTO 字段（不含明文）+ 审计 + 坏游标 422（012）', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    for (let i = 1; i <= 3; i++) {
+      await b.logRepo.insertInTx({} as never, {
+        userId: 7, usageMonth: '2026-10', model: 'm-a', requestId: `req-${i}`,
+        rawPromptTokens: 100 * i, rawCompletionTokens: 10 * i,
+        billingPromptTokens: 110 * i, billingCompletionTokens: 25 * i,
+        weight: 2.5, multiplier: 1.1, costCents: 1 * i, status: 'completed', usageEstimated: false, latencyMs: i,
+      });
+    }
+    const page1 = await b.app.inject({
+      method: 'GET', url: '/api/admin/ai/users/7/requests?limit=2',
+      headers: { authorization: `Bearer ${await b.token(admin.id)}`, accept: 'application/json' },
+    });
+    expect(page1.statusCode).toBe(200);
+    const p1 = page1.json();
+    expect(p1.items).toHaveLength(2);
+    // id 倒序：最新在前（req-3）。
+    expect(p1.items[0]).toMatchObject({ model: 'm-a', rawPromptTokens: 300, billingCompletionTokens: 75, costCents: 3, status: 'completed' });
+    expect(p1.items.some((i: Record<string, unknown>) => i.messages !== undefined)).toBe(false);
+    expect(p1.nextCursor).toBeTruthy();
+    const page2 = await b.app.inject({
+      method: 'GET', url: `/api/admin/ai/users/7/requests?limit=2&cursor=${p1.nextCursor}`,
+      headers: { authorization: `Bearer ${await b.token(admin.id)}`, accept: 'application/json' },
+    });
+    expect(page2.json().items).toHaveLength(1);
+    expect(page2.json().nextCursor).toBeNull();
+    expect(b.auditRepo.events.some((e) => e.eventType === 'admin.ai.quota.read')).toBe(true);
+    expect((await b.app.inject({
+      method: 'GET', url: '/api/admin/ai/users/7/requests?cursor=tampered.sig',
+      headers: { authorization: `Bearer ${await b.token(admin.id)}`, accept: 'application/json' },
+    })).statusCode).toBe(422);
+    expect((await b.app.inject({
+      method: 'GET', url: '/api/admin/ai/users/0/requests',
+      headers: { authorization: `Bearer ${await b.token(admin.id)}`, accept: 'application/json' },
+    })).statusCode).toBe(422);
   });
 });

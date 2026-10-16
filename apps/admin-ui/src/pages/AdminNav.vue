@@ -10,7 +10,7 @@ const groups = [
   ] },
   { title: '商业化', links: [
     { name: 'admin-plans', path: '/plans', label: '套餐' },
-    { name: 'admin-ai-topup', path: '/ai-topup', label: 'AI 加油包' },
+    { name: 'admin-ai-topup', path: '/ai-topup', label: 'AI 积分' },
   ] },
   { title: 'AI', links: [
     { name: 'admin-ai-providers', path: '/ai-providers', label: '模型厂商' },

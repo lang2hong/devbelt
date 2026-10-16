@@ -28,6 +28,7 @@ import { auditDto, toCsv } from '../../../service/auditSerialize.js';
 import { validateFeatureValue, FREE_PLAN_CODES } from '../../billing/service/planFeatureValidation.js';
 import type { RateLimitService } from '../../../service/rateLimitService.js';
 import type { SyncRecordService } from '../../db/service/syncRecordService.js';
+import type { SyncRecordMetadataRow } from '../../../repository/interfaces.js';
 
 /** 平台审计导出单次上限（§6）。 */
 const MAX_EXPORT_ROWS = 10_000;
@@ -169,6 +170,37 @@ export class ConsoleAdminService {
     const rows = state ? await this.syncRecordService.overviewByKind(targetUserId, state.keyEpoch) : [];
     await this.auditRestrictedRead(actorUserId, 'admin.users.read');
     return rows;
+  }
+
+  /**
+   * 后台受限读：同步记录元数据明细（active only，id 倒序 keyset 分页）。
+   * 绝不返回密文/nonce/tag；无同步态（用户从未启用同步）返回 null 状态与空列表。
+   * 受限读审计复用 `admin.users.read`（用户级读，同 sync-overview）。
+   */
+  async getSyncRecords(actorUserId: number, targetUserId: number, opts: { kind?: string; afterId?: number; limit: number }): Promise<{
+    state: { keyEpoch: string; stateVersion: string; changeSequence: string; protocolVersion: number; cipherSuite: string; formatVersion: number } | null;
+    items: SyncRecordMetadataRow[];
+    nextId: number | null;
+  }> {
+    const user = await this.userRepo.findById(targetUserId);
+    if (!user) throw new EntityNotFoundError('user', targetUserId);
+    const state = await this.syncStateRepo.findByUserId(targetUserId);
+    const rows = state
+      ? await this.syncRecordService.listMetadataByKind(targetUserId, state.keyEpoch, opts)
+      : { items: [], nextId: null };
+    await this.auditRestrictedRead(actorUserId, 'admin.users.read');
+    return {
+      state: state ? {
+        keyEpoch: state.keyEpoch,
+        stateVersion: state.stateVersion,
+        changeSequence: state.changeSequence,
+        protocolVersion: state.protocolVersion,
+        cipherSuite: state.cipherSuite,
+        formatVersion: state.formatVersion,
+      } : null,
+      items: rows.items,
+      nextId: rows.nextId,
+    };
   }
 
   async resolvePlanInTx(tx: Queryable, planCode: string): Promise<Plan> {

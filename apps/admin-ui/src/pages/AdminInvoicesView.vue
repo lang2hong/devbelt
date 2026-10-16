@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { withBase } from '../lib/router';
+import { withBase, navigate } from '../lib/router';
 import { listAdminInvoices, setInvoiceStatus, type AdminInvoice } from '../api/admin';
 import { ensureCsrf, setAccessToken } from '@devbelt/auth-client';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { formatDateTime } from '../lib/formatTime';
 import Modal from '../components/Modal.vue';
+import FormField from '../components/FormField.vue';
 
 const invoices = ref<AdminInvoice[]>([]);
 const state = ref<'loading' | 'ready' | 'error'>('loading');
@@ -82,6 +83,10 @@ function search(): void {
   void load(true);
 }
 
+function goUser(uid: string): void {
+  navigate(`/users/${uid}`);
+}
+
 function openProcess(inv: AdminInvoice): void {
   processForm.value = inv;
   processStatus.value = 'issued';
@@ -131,7 +136,7 @@ async function confirm(): Promise<void> {
   <section class="page">
     <header class="head">
       <h2>发票</h2>
-      <p class="sub">平台发票处理。</p>
+      <p class="sub">处理用户提交的开票申请：确认后标记已开票，无法开票时填写原因拒绝。</p>
     </header>
 
     <div class="bar">
@@ -154,7 +159,7 @@ async function confirm(): Promise<void> {
       <tbody>
         <tr v-for="i in invoices" :key="i.invoiceId">
           <td class="mono">{{ i.invoiceId }}</td>
-          <td class="mono">{{ i.userId }}</td>
+          <td class="mono"><a class="user-link" :href="withBase(`/users/${i.userId}`)" @click.prevent="goUser(i.userId)">{{ i.userId }}</a></td>
           <td>{{ i.title }}</td>
           <td>¥{{ fmtCents(i.amountCents) }}</td>
           <td>{{ i.email }}</td>
@@ -178,7 +183,9 @@ async function confirm(): Promise<void> {
         <option v-for="s in PROCESS_OPTIONS" :key="s" :value="s">{{ STATUS_LABEL[s] }}</option>
       </select>
       <label v-if="processStatus === 'rejected' || processStatus === 'failed'">原因（必填）</label>
-      <input v-if="processStatus === 'rejected' || processStatus === 'failed'" v-model="processReason" type="text" maxlength="500" placeholder="原因（必填）" />
+      <FormField v-if="processStatus === 'rejected' || processStatus === 'failed'" label="原因" required hint="必填，会记录到审计日志。">
+        <input v-model="processReason" type="text" maxlength="500" placeholder="例如：抬头信息不全" />
+      </FormField>
       <p v-if="error" class="error">{{ error }}</p>
       <div class="modal-actions">
         <button class="btn" :disabled="busy" @click="confirm">确认</button>
@@ -189,6 +196,8 @@ async function confirm(): Promise<void> {
 </template>
 
 <style scoped>
+.user-link { color: var(--c-accent); text-decoration: none; }
+.user-link:hover { text-decoration: underline; }
 label { display: block; font-size: 13px; color: var(--c-text-muted); margin: 8px 0 4px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
 .badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; background: var(--c-accent-bg); color: var(--c-accent); }

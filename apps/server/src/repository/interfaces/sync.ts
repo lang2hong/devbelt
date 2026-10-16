@@ -70,6 +70,23 @@ export interface ISyncRecordRepo {
   countActiveByKind(exec: Queryable, userId: number, keyEpoch: string, entityKind: string): Promise<number>;
   /** P6：按明文类型聚合 active 记录的条数/密文字节/最近更新时间（后台只读元数据，不含明文）。 */
   overviewByKind(exec: Queryable, userId: number, keyEpoch: string): Promise<Array<{ entityKind: string | null; count: number; bytes: number; lastActivityTime: Date | null }>>;
+  /** 后台受限读：按类型列记录元数据（active only，按 id 倒序 keyset 分页）。绝不返回密文本体。 */
+  listMetadataByKind(exec: Queryable, userId: number, keyEpoch: string, opts: { kind?: string; afterId?: number; limit: number }): Promise<{ items: SyncRecordMetadataRow[]; nextId: number | null }>;
+}
+
+/** 后台受限读的记录元数据行（不含密文/nonce/tag 二进制本体）。 */
+export interface SyncRecordMetadataRow {
+  /** 自增 id（keyset 分页游标位）。 */
+  id: number;
+  /** record_id 的十六进制（小写）。 */
+  recordIdHex: string;
+  entityKind: string | null;
+  version: string;
+  changeSequence: string;
+  /** 密文字节数（ciphertext+tag+nonce 长度和；与配额口径一致）。 */
+  bytes: number;
+  createTime: Date;
+  updateTime: Date;
 }
 
 export interface ISyncNonceRepo {

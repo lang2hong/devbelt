@@ -6,7 +6,7 @@ import {
   deriveWeight,
 } from '../../src/modules/ai/service/aiBillingService.js';
 import type { AiModelPricing } from '../../src/modules/ai/repository/aiBillingRepo.js';
-import { MemoryAiBillingRepo } from '../helpers/fakeAiBillingRepo.js';
+import { MemoryAiBillingRepo , MemoryAiRequestLogRepo } from '../helpers/fakeAiBillingRepo.js';
 import type { Queryable } from '../../src/repository/mysql/db.js';
 
 const ENV = { configured: true, baseUrl: 'https://env.example.com/v1', apiKey: 'env-key', model: 'env-model' };
@@ -95,21 +95,90 @@ describe('AiBillingService · 计价表 CRUD 校验', () => {
 });
 
 describe('AiBillingService · 财务月报', () => {
-  it('月度聚合：原始/计费 token、成本、实收、毛利；非法月份拒绝', async () => {
+  it('月度聚合（012 口径）：原始/计费分列、成本按原始 × 单价、实收、毛利；非法月份拒绝', async () => {
     const repo = new MemoryAiBillingRepo();
-    repo.usageByMonth.set('2026-10', { usageMonth: '2026-10', promptTokens: 2_000_000, completionTokens: 400_000, requestCount: 100 });
+    // 012：raw_* = 原始；billing_* = 计费（k=2.5、倍率 1.1 → 2M×1.1 / 400k×2.5×1.1）。
+    repo.usageByMonth.set('2026-10', {
+      usageMonth: '2026-10',
+      promptTokens: 2_000_000, completionTokens: 400_000,
+      billingPromptTokens: 2_200_000, billingCompletionTokens: 1_100_000,
+      requestCount: 100,
+    });
     repo.revenueByMonth.set('2026-10', { topupCents: 9900, planCents: 5900 });
     const svc = new AiBillingService(repo, ENV);
     await svc.createPricingInTx(tx, { model: 'env-model', inputCentsPerM: 80, outputCentsPerM: 200 });
     await svc.updateSettingsInTx(tx, { activeModel: 'env-model', globalMultiplier: 1 });
     const f = await svc.finance('2026-10');
     expect(f.usage).toEqual({ promptTokens: 2_000_000, completionTokens: 400_000, requestCount: 100 });
-    // k = 200/80 = 2.5 → billing completion = 400k × 2.5 = 1M
-    expect(f.billing).toEqual({ promptTokens: 2_000_000, completionTokens: 1_000_000 });
+    // 不再二次加权：billing 直接来自月账本的计费列。
+    expect(f.billing).toEqual({ promptTokens: 2_200_000, completionTokens: 1_100_000 });
+    // 成本按原始 token × 单价（修复前把计费 token 当原始，输出被多乘 k）。
     expect(f.costCents).toBe(2_000_000 / 1e6 * 80 + 400_000 / 1e6 * 200);
     expect(f.marginCents).toBe(9900 + 5900 - f.costCents!);
     expect(f.revenue).toEqual({ topupCents: 9900, planCents: 5900 });
     await expect(svc.finance('2026-13')).rejects.toThrow();
     await expect(svc.finance('bad')).rejects.toThrow();
+  });
+
+  it('每模型倍率优先于全局；未配置回退全局（012）', async () => {
+    const repo = new MemoryAiBillingRepo();
+    const svc = new AiBillingService(repo, ENV);
+    await svc.createPricingInTx(tx, { model: 'm-ov', inputCentsPerM: 80, outputCentsPerM: 200, multiplierOverride: 1.5 });
+    await svc.createPricingInTx(tx, { model: 'm-g', inputCentsPerM: 80, outputCentsPerM: 200 });
+    await svc.updateSettingsInTx(tx, { activeModel: 'm-ov', globalMultiplier: 2 });
+    let up = await svc.upstream();
+    expect(up.multiplier).toBe(1.5); // 模型覆盖优先
+    await svc.updateSettingsInTx(tx, { activeModel: 'm-g' });
+    up = await svc.upstream();
+    expect(up.multiplier).toBe(2); // 未覆盖 → 全局
+    await svc.updatePricingInTx(tx, 'm-ov', { multiplierOverride: null });
+    await svc.updateSettingsInTx(tx, { activeModel: 'm-ov' });
+    up = await svc.upstream();
+    expect(up.multiplier).toBe(2); // 清除覆盖 → 回全局
+  });
+
+  it('设置读写 typicalOutputRatio（0-1 校验）', async () => {
+    const repo = new MemoryAiBillingRepo();
+    const svc = new AiBillingService(repo, ENV);
+    expect((await svc.settingsView()).typicalOutputRatio).toBe(0.2);
+    await svc.updateSettingsInTx(tx, { typicalOutputRatio: 0.3 });
+    expect((await svc.settingsView()).typicalOutputRatio).toBe(0.3);
+    await expect(svc.updateSettingsInTx(tx, { typicalOutputRatio: 1 })).rejects.toThrow();
+    await expect(svc.updateSettingsInTx(tx, { typicalOutputRatio: 0 })).rejects.toThrow();
+  });
+
+  it('区间统计：流水聚合（逐月/每模型/合计），收入精确、成本取当时值（012）', async () => {
+    const repo = new MemoryAiBillingRepo();
+    const logRepo = new MemoryAiRequestLogRepo();
+    const svc = new AiBillingService(repo, ENV, Date.now, logRepo);
+    await logRepo.insertInTx(tx, {
+      userId: 7, usageMonth: '2026-09', model: 'm-a', requestId: null,
+      rawPromptTokens: 1_000_000, rawCompletionTokens: 200_000,
+      billingPromptTokens: 1_100_000, billingCompletionTokens: 550_000,
+      weight: 2.5, multiplier: 1.1, costCents: 120, status: 'completed', usageEstimated: false, latencyMs: 100,
+    });
+    await logRepo.insertInTx(tx, {
+      userId: 8, usageMonth: '2026-10', model: 'm-b', requestId: null,
+      rawPromptTokens: 2_000_000, rawCompletionTokens: 400_000,
+      billingPromptTokens: 2_000_000, billingCompletionTokens: 400_000,
+      weight: 1, multiplier: 1, costCents: 80, status: 'completed', usageEstimated: false, latencyMs: 50,
+    });
+    repo.revenueByMonth.set('2026-09', { topupCents: 9900, planCents: 0 });
+    repo.revenueByMonth.set('2026-10', { topupCents: 0, planCents: 5900 });
+    const sum = await svc.financeSummary('2026-09', '2026-10');
+    expect(sum.total.requestCount).toBe(2);
+    expect(sum.total.costCents).toBe(200);
+    expect(sum.total.topupCents).toBe(9900);
+    expect(sum.total.planCents).toBe(5900);
+    expect(sum.total.marginCents).toBe(9900 + 5900 - 200);
+    expect(sum.months).toHaveLength(2);
+    expect(sum.months[0]).toMatchObject({ usageMonth: '2026-09', requestCount: 1, costCents: 120, marginCents: 9900 - 120 });
+    expect(sum.months[1]).toMatchObject({ usageMonth: '2026-10', requestCount: 1, costCents: 80, marginCents: 5900 - 80 });
+    expect(sum.models).toHaveLength(2);
+    expect(sum.models.map((m) => m.model).sort()).toEqual(['m-a', 'm-b']);
+    expect(await svc.userRequests(7, { limit: 10 })).toMatchObject({ items: [{ model: 'm-a', userId: 7 }], nextId: null });
+    await expect(svc.financeSummary('2026-11', '2026-09')).rejects.toThrow();
+    await expect(svc.financeSummary('2024-01', '2026-12')).rejects.toThrow();
+    await expect(svc.financeSummary('bad', '2026-10')).rejects.toThrow();
   });
 });

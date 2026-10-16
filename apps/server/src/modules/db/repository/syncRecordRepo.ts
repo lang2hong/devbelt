@@ -1,4 +1,4 @@
-import type { ISyncRecordRepo } from '../../../repository/interfaces.js';
+import type { ISyncRecordRepo, SyncRecordMetadataRow } from '../../../repository/interfaces.js';
 import type { PersonalConnectionMeta } from '../../../domain/entities.js';
 import type { Queryable } from '../../../repository/mysql/db.js';
 
@@ -165,6 +165,36 @@ export class MysqlSyncRecordRepo implements ISyncRecordRepo {
       [userId, keyEpoch, entityKind],
     );
     return Number(rows[0]?.cnt ?? 0);
+  }
+
+  async listMetadataByKind(exec: Queryable, userId: number, keyEpoch: string, opts: { kind?: string; afterId?: number; limit: number }): Promise<{ items: SyncRecordMetadataRow[]; nextId: number | null }> {
+    const conds = ['user_id = ?', 'key_epoch = ?', 'delete_time IS NULL'];
+    const args: unknown[] = [userId, keyEpoch];
+    if (opts.kind) { conds.push('entity_kind = ?'); args.push(opts.kind); }
+    if (opts.afterId != null) { conds.push('id < ?'); args.push(opts.afterId); }
+    args.push(opts.limit + 1);
+    const [rows] = await exec.query<any[]>(
+      `SELECT id, HEX(record_id) AS record_id_hex, entity_kind,
+              CAST(version AS CHAR) AS version, CAST(change_sequence AS CHAR) AS change_sequence,
+              (OCTET_LENGTH(ciphertext) + OCTET_LENGTH(tag) + OCTET_LENGTH(nonce)) AS bytes,
+              create_time, update_time
+         FROM personal_connection_meta
+        WHERE ${conds.join(' AND ')}
+        ORDER BY id DESC LIMIT ?`,
+      args,
+    );
+    const hasMore = rows.length > opts.limit;
+    const items = (hasMore ? rows.slice(0, opts.limit) : rows).map((r: any) => ({
+      id: Number(r.id),
+      recordIdHex: String(r.record_id_hex ?? '').toLowerCase(),
+      entityKind: r.entity_kind ?? null,
+      version: String(r.version),
+      changeSequence: String(r.change_sequence),
+      bytes: Number(r.bytes ?? 0),
+      createTime: new Date(r.create_time),
+      updateTime: new Date(r.update_time),
+    }));
+    return { items, nextId: hasMore ? items[items.length - 1].id : null };
   }
 
   async overviewByKind(exec: Queryable, userId: number, keyEpoch: string): Promise<Array<{ entityKind: string | null; count: number; bytes: number; lastActivityTime: Date | null }>> {

@@ -115,18 +115,25 @@ function onSelectScope(event: Event): void {
   if (value) emit('selectScope', value);
 }
 
+/** 积分换算：1 积分 = 1000 计费 token（额度池口径 ÷1000 展示）。 */
+function toCredits(tokens: number): string {
+  const credits = tokens / 1000;
+  if (credits >= 100) return Math.round(credits).toLocaleString();
+  return String(Number(credits.toFixed(1)));
+}
+
 const quotaLabel = computed(() => {
   const quota = props.quota;
   if (!quota) return t('wv.ai.quota.none');
   if (quota.topupRemaining > 0) {
     return t('wv.ai.quota.dual', {
-      used: quota.used,
-      limit: quota.limit,
-      monthly: quota.monthlyRemaining ?? quota.remaining,
-      topup: quota.topupRemaining,
+      used: toCredits(quota.used),
+      limit: toCredits(quota.limit),
+      monthly: toCredits(quota.monthlyRemaining ?? quota.remaining),
+      topup: toCredits(quota.topupRemaining),
     });
   }
-  return t('wv.ai.quota.value', { used: quota.used, limit: quota.limit, remaining: quota.remaining });
+  return t('wv.ai.quota.value', { used: toCredits(quota.used), limit: toCredits(quota.limit), remaining: toCredits(quota.remaining) });
 });
 
 function onSelect(event: Event): void {

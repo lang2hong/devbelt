@@ -10,6 +10,7 @@ import type { RouteConfig } from './lib/router';
 export const ADMIN_ROUTES: RouteConfig[] = [
   { pattern: '/', name: 'admin-users' },
   { pattern: '/users', name: 'admin-users' },
+  { pattern: '/users/:id', name: 'admin-user-detail' },
   { pattern: '/orders', name: 'admin-orders' },
   { pattern: '/invoices', name: 'admin-invoices' },
   { pattern: '/audit', name: 'admin-audit' },

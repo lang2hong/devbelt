@@ -201,6 +201,32 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
         });
       });
 
+      // 后台受限读：同步记录元数据明细（E2E 加密，仅元数据；id 倒序 keyset 分页）。
+      child.get('/api/admin/users/:userId/sync-records', { schema: { params: adminUserIdParam } }, async (req, reply) => {
+        await readLimit(req);
+        const userId = Number((req.params as Record<string, unknown>).userId);
+        const q = req.query as Record<string, unknown>;
+        const cursor = parseCursor(opts.cursorService, q.cursor);
+        if (q.cursor !== undefined && q.cursor !== '' && cursor === null) {
+          return rejectConsole(reply, 422, 'INVALID_CURSOR', 'invalid cursor');
+        }
+        const kind = q.kind ? String(q.kind) : undefined;
+        const page = await svc.getSyncRecords(userIdOf(req), userId, { kind, afterId: cursor ?? undefined, limit: parseLimit(q.limit) });
+        reply.send({
+          state: page.state,
+          items: page.items.map((r) => ({
+            recordId: r.recordIdHex,
+            entityKind: r.entityKind,
+            version: r.version,
+            changeSequence: r.changeSequence,
+            bytes: r.bytes,
+            createTime: r.createTime.toISOString(),
+            updateTime: r.updateTime.toISOString(),
+          })),
+          nextCursor: page.nextId != null ? opts.cursorService.encode(String(page.nextId)) : null,
+        });
+      });
+
       child.patch('/api/admin/users/:userId/status', { schema: { params: adminUserIdParam, body: adminUserStatusBody } }, async (req, reply) => {
         if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
         const actor = userIdOf(req);

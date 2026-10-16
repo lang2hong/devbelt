@@ -66,12 +66,12 @@ describe('AdminAiProvidersView', () => {
       el.value = v;
       el.dispatchEvent(new Event('input'));
     };
-    set(docInput('Code'), 'acme');
-    set(docInput('中文名称'), '甲');
-    set(docInput('英文名称'), 'Acme');
-    set(docInput('Base URL'), 'http://insecure.example.com/v1');
+    set(docInput('acme'), 'acme');
+    set(docInput('如 Acme 云'), '甲');
+    set(docInput('Acme Cloud'), 'Acme');
+    set(docInput('https://api.acme.com/v1'), 'http://insecure.example.com/v1');
     set(document.querySelector('textarea')!, '*m1');
-    set(docInput('变更原因'), '新增');
+    set(docInput('例如：新增官方厂商目录'), '新增');
     docButton('保存')!.click();
     await flushPromises();
     expect(createAdminAiProvider).not.toHaveBeenCalled();

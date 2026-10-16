@@ -203,6 +203,39 @@ export interface AdminSyncKindOverview {
 }
 
 /** GET /api/admin/users/:userId/sync-overview：按类型密文元数据（条数/字节/最近更新）。 */
+/** 同步记录元数据明细（E2E 加密：仅元数据，绝无密文）。 */
+export interface AdminSyncRecord {
+  recordId: string;
+  entityKind: string | null;
+  version: string;
+  changeSequence: string;
+  bytes: number;
+  createTime: string;
+  updateTime: string;
+}
+
+export interface AdminSyncRecordsPage {
+  state: { keyEpoch: string; stateVersion: string; changeSequence: string; protocolVersion: number; cipherSuite: string; formatVersion: number } | null;
+  items: AdminSyncRecord[];
+  nextCursor: string | null;
+}
+
+export async function listSyncRecords(
+  userId: string,
+  opts: { kind?: string; cursor?: string; limit?: number } = {},
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<AdminSyncRecordsPage>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(`/api/admin/users/${userId}/sync-records${qs(opts)}`, { headers: auth(token) }, fetchImpl);
+    if (res.ok) return { kind: 'ok', value: (await res.json()) as AdminSyncRecordsPage };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
 export async function getSyncOverview(
   userId: string,
   token: string | null = getAccessToken(),
@@ -759,6 +792,8 @@ export interface AdminAiModelPricing {
   inputCentsPerM: number;
   outputCentsPerM: number;
   weightOverride: number | null;
+  /** 每模型计费倍率（012）；null = 用全局。 */
+  multiplierOverride: number | null;
   status: 'active' | 'disabled';
 }
 
@@ -768,6 +803,8 @@ export interface AdminAiBillingSettings {
   upstreamApiKeyConfigured: boolean;
   upstreamApiKeyHint: string | null;
   globalMultiplier: number;
+  /** 成本测算的典型输出占比（0-1）。 */
+  typicalOutputRatio: number;
   env: { model: string; baseUrl: string | null; apiKeyConfigured: boolean };
 }
 
@@ -798,7 +835,7 @@ export async function getAdminAiBillingSettings(
 }
 
 export async function updateAdminAiBillingSettings(
-  input: { activeModel?: string | null; upstreamBaseUrl?: string | null; upstreamApiKey?: string; clearUpstreamApiKey?: boolean; globalMultiplier?: number },
+  input: { activeModel?: string | null; upstreamBaseUrl?: string | null; upstreamApiKey?: string; clearUpstreamApiKey?: boolean; globalMultiplier?: number; typicalOutputRatio?: number },
   reason: string,
   idempotencyKey: string,
   csrfToken: string,
@@ -834,7 +871,7 @@ export async function listAdminAiModelPricing(
 }
 
 export async function createAdminAiModelPricing(
-  input: { model: string; providerCode?: string | null; inputCentsPerM?: number; outputCentsPerM?: number; weightOverride?: number | null },
+  input: { model: string; providerCode?: string | null; inputCentsPerM?: number; outputCentsPerM?: number; weightOverride?: number | null; multiplierOverride?: number | null },
   reason: string,
   idempotencyKey: string,
   csrfToken: string,
@@ -857,7 +894,7 @@ export async function createAdminAiModelPricing(
 
 export async function updateAdminAiModelPricing(
   model: string,
-  patch: { providerCode?: string | null; inputCentsPerM?: number; outputCentsPerM?: number; weightOverride?: number | null; status?: 'active' | 'disabled' },
+  patch: { providerCode?: string | null; inputCentsPerM?: number; outputCentsPerM?: number; weightOverride?: number | null; multiplierOverride?: number | null; status?: 'active' | 'disabled' },
   reason: string,
   idempotencyKey: string,
   csrfToken: string,
@@ -872,6 +909,92 @@ export async function updateAdminAiModelPricing(
       fetchImpl,
     );
     if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+/** 区间毛利统计（012：流水口径，成本取请求当时值）。 */
+export interface AdminAiFinanceSummary {
+  from: string;
+  to: string;
+  total: {
+    requestCount: number;
+    rawPromptTokens: number;
+    rawCompletionTokens: number;
+    billingPromptTokens: number;
+    billingCompletionTokens: number;
+    costCents: number | null;
+    topupCents: number;
+    planCents: number;
+    marginCents: number | null;
+  };
+  months: Array<{
+    usageMonth: string;
+    requestCount: number;
+    rawPromptTokens: number;
+    rawCompletionTokens: number;
+    billingPromptTokens: number;
+    billingCompletionTokens: number;
+    costCents: number | null;
+    topupCents: number;
+    planCents: number;
+    marginCents: number | null;
+  }>;
+  models: Array<{
+    model: string;
+    requestCount: number;
+    rawPromptTokens: number;
+    rawCompletionTokens: number;
+    billingPromptTokens: number;
+    billingCompletionTokens: number;
+    costCents: number | null;
+  }>;
+}
+
+export async function getAdminAiFinanceSummary(
+  from: string,
+  to: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<AdminAiFinanceSummary>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(`/api/admin/ai/finance/summary?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { headers: auth(token) }, fetchImpl);
+    if (res.ok) return { kind: 'ok', value: (await res.json()) as AdminAiFinanceSummary };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+/** 用户 AI 请求流水（012：计量/积分/当时成本）。 */
+export interface AdminAiRequestLog {
+  requestId: string | null;
+  model: string;
+  usageMonth: string;
+  status: 'completed' | 'failed' | 'aborted';
+  rawPromptTokens: number;
+  rawCompletionTokens: number;
+  billingPromptTokens: number;
+  billingCompletionTokens: number;
+  costCents: number | null;
+  usageEstimated: boolean;
+  latencyMs: number;
+  createTime: string;
+}
+
+export async function listAdminUserAiRequests(
+  userId: string,
+  opts: { cursor?: string; limit?: number } = {},
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ items: AdminAiRequestLog[]; nextCursor: string | null }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(`/api/admin/ai/users/${userId}/requests${qs(opts)}`, { headers: auth(token) }, fetchImpl);
+    if (res.ok) return { kind: 'ok', value: (await res.json()) as { items: AdminAiRequestLog[]; nextCursor: string | null } };
     return failure(res);
   } catch {
     return { kind: 'failure' };

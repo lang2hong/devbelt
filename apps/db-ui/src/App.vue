@@ -46,7 +46,7 @@ const NAV = [
     { name: 'plans', path: '/plans', label: '套餐' },
     { name: 'orders', path: '/orders', label: '订单' },
     { name: 'invoices', path: '/invoices', label: '发票' },
-    { name: 'ai-topup', path: '/ai-topup', label: 'AI 加油包' },
+    { name: 'ai-topup', path: '/ai-topup', label: 'AI 积分' },
   ] },
 ];
 const activeGroup = computed(() => NAV.find((g) => g.names.includes(router.name ?? '')) ?? null);

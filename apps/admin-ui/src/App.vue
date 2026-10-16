@@ -7,6 +7,7 @@ import { refreshSession, getAccessToken, logout } from '@devbelt/auth-client';
 import { me, type ConsoleMe } from './api/me';
 import AdminNav from './pages/AdminNav.vue';
 import AdminUsersView from './pages/AdminUsersView.vue';
+import AdminUserDetailView from './pages/AdminUserDetailView.vue';
 import AdminOrdersView from './pages/AdminOrdersView.vue';
 import AdminInvoicesView from './pages/AdminInvoicesView.vue';
 import AdminAuditView from './pages/AdminAuditView.vue';
@@ -28,6 +29,7 @@ const logoutError = ref(false);
 const view = computed<{ comp: Component | null; props: Record<string, unknown> }>(() => {
   switch (router.name) {
     case 'admin-users': return { comp: AdminUsersView, props: {} };
+    case 'admin-user-detail': return { comp: AdminUserDetailView, props: { userId: router.params.id ?? '' } };
     case 'admin-orders': return { comp: AdminOrdersView, props: {} };
     case 'admin-invoices': return { comp: AdminInvoicesView, props: {} };
     case 'admin-audit': return { comp: AdminAuditView, props: {} };

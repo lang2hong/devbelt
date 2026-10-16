@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { withBase } from '../lib/router';
+import { withBase, navigate } from '../lib/router';
 import { queryAudit, exportAudit, type AdminAuditEvent } from '../api/admin';
 import { ensureCsrf, setAccessToken } from '@devbelt/auth-client';
 import { useIdempotencyKey } from '../lib/idempotentWrite';
 import { formatDateTime } from '../lib/formatTime';
 import { toFromIso, toInclusiveEndIso } from '../lib/dateRange';
+import { auditEventLabel, auditTargetLabel } from '../lib/auditLabels';
 
 const events = ref<AdminAuditEvent[]>([]);
 const state = ref<'loading' | 'ready' | 'error'>('loading');
@@ -34,6 +35,10 @@ const exportWrite = useIdempotencyKey();
 
 let loadSeq = 0;
 let paging = false;
+
+function goUser(uid: string | null): void {
+  if (uid) navigate(`/users/${uid}`);
+}
 
 function relogin(): void {
   setAccessToken(null);
@@ -113,20 +118,23 @@ async function doExport(format: 'csv' | 'json'): Promise<void> {
   <section class="page">
     <header class="head">
       <h2>审计日志</h2>
-      <p class="sub">平台操作审计记录。</p>
+      <p class="sub">平台与用户的关键操作记录，用于追溯「谁在什么时候做了什么」。</p>
     </header>
 
     <div class="bar">
-      <input v-model="fromTime" type="datetime-local" />
-      <input v-model="toTime" type="datetime-local" />
-      <input v-model="eventType" type="text" placeholder="eventType" list="event-type-suggestions" />
+      <label class="range">时间
+        <input v-model="fromTime" type="datetime-local" />
+        至
+        <input v-model="toTime" type="datetime-local" />
+      </label>
+      <input v-model="eventType" type="text" placeholder="操作类型（可输入提示）" list="event-type-suggestions" />
       <datalist id="event-type-suggestions">
-        <option v-for="et in EVENT_TYPE_SUGGESTIONS" :key="et" :value="et" />
+        <option v-for="et in EVENT_TYPE_SUGGESTIONS" :key="et" :value="et">{{ auditEventLabel(et) }}</option>
       </datalist>
-      <input v-model="actorUserId" type="text" placeholder="actorUserId" />
-      <input v-model="targetType" type="text" placeholder="targetType" list="target-type-suggestions" />
+      <input v-model="actorUserId" type="text" placeholder="操作者用户ID" @keyup.enter="search" />
+      <input v-model="targetType" type="text" placeholder="对象类型（如 user/order）" list="target-type-suggestions" />
       <datalist id="target-type-suggestions">
-        <option v-for="tt in TARGET_TYPE_SUGGESTIONS" :key="tt" :value="tt" />
+        <option v-for="tt in TARGET_TYPE_SUGGESTIONS" :key="tt" :value="tt">{{ auditTargetLabel(tt) }}</option>
       </datalist>
       <button class="btn" @click="search">查询</button>
       <button class="btn secondary" @click="doExport('json')">导出 JSON</button>
@@ -139,15 +147,18 @@ async function doExport(format: 'csv' | 'json'): Promise<void> {
 
     <table v-if="state === 'ready'" class="table">
       <thead>
-        <tr><th>时间</th><th>actor</th><th>eventType</th><th>target</th><th>result</th></tr>
+        <tr><th>时间</th><th>操作者</th><th>操作</th><th>对象</th><th>结果</th></tr>
       </thead>
       <tbody>
         <tr v-for="e in events" :key="e.eventId">
           <td>{{ formatDateTime(e.eventTime) }}</td>
-          <td>{{ e.actorRole ?? '-' }}#{{ e.actorUserId ?? '-' }}</td>
-          <td>{{ e.eventType }}</td>
-          <td>{{ e.targetType ?? '' }}:{{ e.targetId ?? '' }}</td>
-          <td>{{ e.result }}</td>
+          <td>
+            <a v-if="e.actorUserId" class="user-link" :href="withBase(`/users/${e.actorUserId}`)" @click.prevent="goUser(e.actorUserId)">{{ e.actorUserId }}</a>
+            <span v-else class="muted">系统</span>
+          </td>
+          <td :title="e.eventType">{{ auditEventLabel(e.eventType) }}</td>
+          <td>{{ e.targetType ? `${auditTargetLabel(e.targetType)} #${e.targetId ?? '—'}` : '—' }}</td>
+          <td><span class="badge" :class="e.result === 'success' ? 'ok' : 'danger'">{{ e.result === 'success' ? '成功' : '失败' }}</span></td>
         </tr>
         <tr v-if="events.length === 0"><td colspan="5" class="muted">无匹配记录。</td></tr>
       </tbody>
@@ -158,5 +169,7 @@ async function doExport(format: 'csv' | 'json'): Promise<void> {
 </template>
 
 <style scoped>
-input { box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--c-border-strong); border-radius: 6px; font-size: 14px; }
+.range { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--c-text-muted); }
+.user-link { color: var(--c-accent); text-decoration: none; }
+.user-link:hover { text-decoration: underline; }
 </style>

@@ -93,7 +93,7 @@ describe('AiTopupView（P9.1c）', () => {
     await new Promise((r) => setTimeout(r, 3100)); // 等第一轮轮询（3s 间隔）
     await flushPromises();
 
-    expect(wrapper.text()).toContain('加油包已生效');
+    expect(wrapper.text()).toContain('充值已生效');
     expect(sessionStorage.getItem('devbelt.console.aiTopupPendingOrder')).toBeNull();
     wrapper.unmount();
   });

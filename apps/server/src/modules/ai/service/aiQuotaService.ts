@@ -4,6 +4,7 @@ import { deriveEntitlement } from '../../billing/service/entitlement.js';
 import { AiQuotaExceededError } from '../domain/errors.js';
 import type { IAiUsageRepo } from '../repository/aiUsageRepo.js';
 import type { IAiGrantRepo } from '../repository/aiTopupRepo.js';
+import type { IAiRequestLogRepo } from '../repository/aiRequestLogRepo.js';
 
 /** 配额快照（GET /api/ai/usage 与客户端配额条展示用；P9.1 后 `remaining` = 月额度剩余 + 加油包余额）。 */
 export interface AiQuotaSnapshot {
@@ -55,6 +56,20 @@ export interface AiReservation {
  *   理论超发上限 ≈ 单次 completion 封顶 + prompt 估算偏差）。
  * - 并发模型不变：同用户同月/同 grants 行被行锁串行化；超限后下一次请求立即 409。
  */
+/** 结算元数据（写 ai_request_log；由转发层提供——含原始 token 与当时计价快照）。 */
+export interface AiSettleMeta {
+  model: string;
+  requestId?: string | null;
+  rawPromptTokens: number;
+  rawCompletionTokens: number;
+  weight: number;
+  multiplier: number;
+  costCents: number | null;
+  status: 'completed' | 'failed' | 'aborted';
+  usageEstimated: boolean;
+  latencyMs: number;
+}
+
 export class AiQuotaService {
   constructor(
     private readonly usageRepo: IAiUsageRepo,
@@ -63,6 +78,8 @@ export class AiQuotaService {
     private readonly planRepo: IPlanRepo,
     private readonly runner: TxRunner,
     private readonly now: () => Date = () => new Date(),
+    /** 请求流水仓储（012；缺省不记流水——测试装配/旧部署兼容）。 */
+    private readonly requestLogRepo?: IAiRequestLogRepo,
   ) {}
 
   /**
@@ -144,9 +161,12 @@ export class AiQuotaService {
   async settle(
     reservation: AiReservation,
     charge: { promptTokens: number; completionTokens: number },
+    meta?: AiSettleMeta,
   ): Promise<void> {
     const promptTokens = Math.max(0, Math.floor(charge.promptTokens));
     const completionTokens = Math.max(0, Math.floor(charge.completionTokens));
+    const rawPromptTokens = Math.max(0, Math.floor(meta?.rawPromptTokens ?? promptTokens));
+    const rawCompletionTokens = Math.max(0, Math.floor(meta?.rawCompletionTokens ?? completionTokens));
     await this.runner(async (tx) => {
       // grants 入账：超出月段分配的合计部分，按分配 FIFO 吃满。
       const total = promptTokens + completionTokens;
@@ -165,7 +185,28 @@ export class AiQuotaService {
         releaseReservedCompletionTokens: reservation.reservedCompletionTokens,
         promptTokens,
         completionTokens,
+        rawPromptTokens,
+        rawCompletionTokens,
       });
+      // 请求流水与配额扣减同事务：同生共死，不漏账不重复（012）。
+      if (meta && this.requestLogRepo) {
+        await this.requestLogRepo.insertInTx(tx, {
+          userId: reservation.userId,
+          usageMonth: reservation.usageMonth,
+          model: meta.model,
+          requestId: meta.requestId ?? null,
+          rawPromptTokens,
+          rawCompletionTokens,
+          billingPromptTokens: promptTokens,
+          billingCompletionTokens: completionTokens,
+          weight: meta.weight,
+          multiplier: meta.multiplier,
+          costCents: meta.costCents,
+          status: meta.status,
+          usageEstimated: meta.usageEstimated,
+          latencyMs: meta.latencyMs,
+        });
+      }
     });
   }
 

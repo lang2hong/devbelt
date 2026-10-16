@@ -42,6 +42,7 @@ const SKU = {
 };
 
 beforeEach(() => {
+  document.body.innerHTML = '';
   vi.mocked(listAdminAiSkus).mockReset();
   vi.mocked(listAdminAiSkus).mockResolvedValue({ kind: 'ok', value: { items: [SKU] } });
   vi.mocked(listAdminOrders).mockReset();
@@ -54,15 +55,19 @@ beforeEach(() => {
 });
 
 describe('AdminAiTopupView', () => {
-  it('渲染 SKU 目录与四段结构', async () => {
+  it('渲染档位页签与页签切换（订单在第二页签）', async () => {
     const wrapper = await mountView();
 
     expect(listAdminAiSkus).toHaveBeenCalledTimes(1);
     expect(listAdminOrders).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'topup' }));
     expect(wrapper.text()).toContain('topup_500k');
-    expect(wrapper.text()).toContain('档位目录');
-    expect(wrapper.text()).toContain('加油包订单');
-    expect(wrapper.text()).toContain('用户配额查询');
+    expect(wrapper.text()).toContain('手工建单');
+    expect(wrapper.text()).not.toContain('订单号'); // 订单表在另一页签，未渲染
+    const tabBtn = Array.from(document.querySelectorAll('[role="tab"]')).find((b) => b.textContent?.trim() === '充值订单');
+    (tabBtn as HTMLElement).click();
+    await flushPromises();
+    expect(wrapper.text()).toContain('充值订单');
+    expect(wrapper.text()).toContain('请到 用户列表');
     wrapper.unmount();
   });
 
@@ -193,29 +198,7 @@ describe('AdminAiTopupView', () => {
     wrapper.unmount();
   });
 
-  it('配额查询：渲染双段快照与 grants 明细', async () => {
-    vi.mocked(getAdminAiQuota).mockResolvedValue({
-      kind: 'ok',
-      value: {
-        snapshot: { used: 1000, reserved: 0, monthlyRemaining: 99_000, topupRemaining: 500_000, remaining: 599_000, resetAt: '2026-11-01T00:00:00.000Z' },
-        grants: [{ grantId: 3, orderId: 11, skuCode: 'topup_500k', status: 'active', tokensTotal: 500_000, tokensUsed: 0, tokensReserved: 0, expiresTime: '2026-11-15T00:00:00.000Z' }],
-      },
-    });
-    const wrapper = await mountView();
-
-    await wrapper.find('input[placeholder="用户ID"]').setValue('7');
-    await wrapper.findAll('button').find((b) => b.text().trim() === '查询')!.trigger('click');
-    await flushPromises();
-
-    expect(getAdminAiQuota).toHaveBeenCalledWith(7);
-    expect(wrapper.text()).toContain('月额度剩余');
-    expect(wrapper.text()).toContain('500,000');
-    expect(wrapper.text()).toContain('topup_500k');
-    expect(wrapper.text()).toContain('生效中');
-    wrapper.unmount();
-  });
-
-  it('加油包订单：fulfilled 行有退款按钮，点击走加油包退款 API', async () => {
+  it('充值订单：fulfilled 行有退款按钮，点击走充值退款 API', async () => {
     vi.mocked(listAdminOrders).mockResolvedValue({
       kind: 'ok',
       value: {
@@ -232,6 +215,9 @@ describe('AdminAiTopupView', () => {
       value: { order: { orderNo: 'tp-9', userId: 7, skuCode: 'topup_500k', tokens: 500_000, amountCents: 900, status: 'refunded', grantInserted: false } },
     });
     const wrapper = await mountView();
+    const tabBtn = Array.from(document.querySelectorAll('[role="tab"]')).find((b) => b.textContent?.trim() === '充值订单');
+    (tabBtn as HTMLElement).click();
+    await flushPromises();
 
     expect(wrapper.text()).toContain('手工');
     await wrapper.findAll('button').find((b) => b.text().trim() === '退款')!.trigger('click');

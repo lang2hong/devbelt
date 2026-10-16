@@ -299,7 +299,22 @@ export class AiProxyService {
       const charge = { prompt: weighted.prompt, completion: weighted.completion };
 
       try {
-        await this.opts.quota.settle(reservation, { promptTokens: charge.prompt, completionTokens: charge.completion });
+        await this.opts.quota.settle(
+          reservation,
+          { promptTokens: charge.prompt, completionTokens: charge.completion },
+          {
+            model: upstreamConf.model,
+            requestId: requestId ?? null,
+            rawPromptTokens: raw.promptTokens,
+            rawCompletionTokens: raw.completionTokens,
+            weight: upstreamConf.weight,
+            multiplier: upstreamConf.multiplier,
+            costCents: costCents(raw.promptTokens, raw.completionTokens, upstreamConf.pricing),
+            status: clientAborted ? 'aborted' : failure ? 'failed' : 'completed',
+            usageEstimated,
+            latencyMs: Date.now() - startedAt,
+          },
+        );
       } catch (err) {
         // 响应已发出；结算失败只告警（额度可能滞留预占，运维可见）。
         this.opts.log('ai quota settle failed', { userId, err: String(err) });

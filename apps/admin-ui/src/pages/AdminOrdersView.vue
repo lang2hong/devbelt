@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { withBase } from '../lib/router';
+import { withBase, navigate } from '../lib/router';
 import { listAdminOrders, refundAdminOrder, type AdminOrder } from '../api/admin';
 import { ensureCsrf, setAccessToken } from '@devbelt/auth-client';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { formatDateTime } from '../lib/formatTime';
 import Modal from '../components/Modal.vue';
+import FormField from '../components/FormField.vue';
 
 const orders = ref<AdminOrder[]>([]);
 const state = ref<'loading' | 'ready' | 'error'>('loading');
@@ -22,6 +23,7 @@ const busy = ref(false);
 const refundWrite = useIdempotencyKey();
 const refundForm = ref<AdminOrder | null>(null);
 const refundReason = ref('');
+const detailForm = ref<AdminOrder | null>(null);
 
 const STATUS_LABEL: Record<string, string> = {
   pending: '待支付',
@@ -51,7 +53,11 @@ function channelLabel(ch: string): string {
 }
 
 function purposeLabel(p: string): string {
-  return p === 'topup' ? '加油包' : '套餐';
+  return p === 'topup' ? '积分充值' : '套餐';
+}
+
+function goUser(uid: string): void {
+  navigate(`/users/${uid}`);
 }
 
 async function load(reset = true): Promise<void> {
@@ -180,36 +186,52 @@ async function confirmRefund(): Promise<void> {
 
     <table v-if="state === 'ready'" class="table">
       <thead>
-        <tr><th>订单号</th><th>支付人</th><th>用户ID</th><th>用途</th><th>套餐/SKU</th><th>金额</th><th>渠道</th><th>状态</th><th>渠道单号</th><th>创建时间</th><th>过期时间</th><th>支付时间</th><th></th></tr>
+        <tr><th>订单号</th><th>用户</th><th>商品</th><th>金额</th><th>状态</th><th>创建时间</th><th></th></tr>
       </thead>
       <tbody>
         <tr v-for="o in orders" :key="o.orderNo">
           <td class="mono">{{ o.orderNo }}</td>
-          <td>{{ o.userDisplayName || '—' }}<br /><span class="muted mono">{{ o.userEmail || '—' }}</span></td>
-          <td class="mono">{{ o.userId }}</td>
-          <td>{{ purposeLabel(o.purpose) }}</td>
-          <td>{{ o.planCode ?? o.skuCode ?? '—' }}</td>
+          <td><a class="user-link" :href="withBase(`/users/${o.userId}`)" :title="o.userEmail ?? o.userId" @click.prevent="goUser(o.userId)">{{ o.userId }}</a></td>
+          <td>{{ purposeLabel(o.purpose) }} · {{ o.planCode ?? o.skuCode ?? '—' }}</td>
           <td>¥{{ fmtCents(o.amountCents) }}</td>
-          <td>{{ channelLabel(o.channel) }}</td>
           <td><span class="badge" :class="o.status">{{ STATUS_LABEL[o.status] ?? o.status }}</span></td>
-          <td class="mono">{{ o.channelTradeNo ?? '—' }}</td>
           <td>{{ formatDateTime(o.createTime) }}</td>
-          <td>{{ formatDateTime(o.expiresTime) }}</td>
-          <td>{{ formatDateTime(o.paidTime) }}</td>
           <td class="actions">
+            <button class="btn small secondary" :disabled="busy" @click="detailForm = o">详情</button>
             <button v-if="(o.status === 'paid' || o.status === 'fulfilled') && o.purpose !== 'topup'" class="btn small danger" :disabled="busy" @click="openRefund(o)">退款</button>
-            <span v-if="o.purpose === 'topup'" class="muted">加油包订单请在「AI 加油包」页操作</span>
           </td>
         </tr>
-        <tr v-if="orders.length === 0"><td colspan="13" class="muted">无匹配订单。</td></tr>
+        <tr v-if="orders.length === 0"><td colspan="7" class="muted">无匹配订单。</td></tr>
       </tbody>
     </table>
 
     <p v-if="nextCursor" class="load-more"><button class="btn secondary" @click="load(false)">加载更多</button></p>
 
+    <Modal v-if="detailForm" :title="`订单详情 · ${detailForm.orderNo}`" :closable="!busy" @close="detailForm = null">
+      <table class="kv">
+        <tbody>
+          <tr><th>订单号</th><td class="mono">{{ detailForm.orderNo }}</td></tr>
+          <tr><th>用户</th><td>{{ detailForm.userEmail ?? '—' }}<span class="muted">（ID {{ detailForm.userId }}，{{ detailForm.userDisplayName ?? '未设置昵称' }}）</span></td></tr>
+          <tr><th>商品</th><td>{{ purposeLabel(detailForm.purpose) }} · {{ detailForm.planCode ?? detailForm.skuCode ?? '—' }}</td></tr>
+          <tr><th>金额</th><td>¥{{ fmtCents(detailForm.amountCents) }}</td></tr>
+          <tr><th>支付渠道</th><td>{{ channelLabel(detailForm.channel) }}<span v-if="detailForm.channelTradeNo" class="muted"> · 渠道单号 {{ detailForm.channelTradeNo }}</span></td></tr>
+          <tr><th>状态</th><td><span class="badge" :class="detailForm.status">{{ STATUS_LABEL[detailForm.status] ?? detailForm.status }}</span></td></tr>
+          <tr><th>创建时间</th><td>{{ formatDateTime(detailForm.createTime) }}</td></tr>
+          <tr><th>过期时间</th><td>{{ formatDateTime(detailForm.expiresTime) }}</td></tr>
+          <tr><th>支付时间</th><td>{{ formatDateTime(detailForm.paidTime) }}</td></tr>
+        </tbody>
+      </table>
+      <p class="muted" v-if="detailForm.purpose === 'topup'">积分充值订单的入账/退款请到「AI 积分 → 订单」页操作。</p>
+      <div class="modal-actions">
+        <button class="btn secondary" :disabled="busy" @click="detailForm = null">关闭</button>
+      </div>
+    </Modal>
+
     <Modal v-if="refundForm" title="退款登记" :closable="!busy" @close="closeRefund">
       <p class="muted">{{ refundForm.orderNo }} · ¥{{ fmtCents(refundForm.amountCents) }}</p>
-      <input v-model="refundReason" type="text" maxlength="500" placeholder="退款原因（必填）" />
+      <FormField label="退款原因" required hint="必填，会记录到审计日志。">
+        <input v-model="refundReason" type="text" maxlength="500" placeholder="例如：用户误购，客服处理" />
+      </FormField>
       <p v-if="error" class="error">{{ error }}</p>
       <div class="modal-actions">
         <button class="btn danger" :disabled="busy" @click="confirmRefund">确认退款</button>
@@ -220,6 +242,11 @@ async function confirmRefund(): Promise<void> {
 </template>
 
 <style scoped>
+.user-link { color: var(--c-accent); text-decoration: none; }
+.user-link:hover { text-decoration: underline; }
+.kv { border-collapse: collapse; }
+.kv th { width: 100px; text-align: left; padding: 8px 12px; color: var(--c-text-muted); font-weight: 500; font-size: 13px; vertical-align: top; white-space: nowrap; }
+.kv td { padding: 8px 12px; font-size: 13.5px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
 .badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; }
 .badge.pending { background: var(--c-warn-bg); color: var(--c-warn-text); }

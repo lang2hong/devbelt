@@ -69,6 +69,7 @@ import { consoleAiProvidersRoutes } from './modules/admin/route/consoleAiProvide
 import { consoleAiBillingRoutes } from './modules/admin/route/consoleAiBilling.js';
 import { MysqlAiBillingRepo } from './modules/ai/repository/aiBillingRepo.js';
 import { AiBillingService } from './modules/ai/service/aiBillingService.js';
+import { MysqlAiRequestLogRepo } from './modules/ai/repository/aiRequestLogRepo.js';
 import { aiProvidersRoutes } from './modules/ai/route/providers.js';
 import { MysqlAiProviderRepo } from './modules/ai/repository/aiProviderRepo.js';
 import { AiProviderService } from './modules/ai/service/aiProviderService.js';
@@ -299,12 +300,15 @@ export async function createApp() {
   // AI 服务端代理（P9 §6.8）：双段配额（月额度 ai_token_usage + 加油包 grants FIFO，P9.1）+ parse-and-forward。
   const aiUsageRepo = new MysqlAiUsageRepo(getMysql);
   const aiTopupRepo = new MysqlAiTopupRepo(getMysql);
+  const aiRequestLogRepo = new MysqlAiRequestLogRepo(getMysql);
   const aiQuotaService = new AiQuotaService(
     aiUsageRepo,
     aiTopupRepo,
     personalSubscriptionRepo,
     planRepo,
     (fn) => withTransaction(app.mysql, fn),
+    () => new Date(),
+    aiRequestLogRepo,
   );
   const aiTopupService = new AiTopupService(aiTopupRepo, (fn) => withTransaction(app.mysql, fn));
   const aiProviderService = new AiProviderService(new MysqlAiProviderRepo(getMysql));
@@ -316,7 +320,7 @@ export async function createApp() {
     );
   }
   // AI 计费引擎：模型计价 + 计费设置（管理后台可配置；60s 缓存，写后即时失效）；env 回退。
-  const aiBillingService = new AiBillingService(new MysqlAiBillingRepo(getMysql), aiUpstreamConfig);
+  const aiBillingService = new AiBillingService(new MysqlAiBillingRepo(getMysql), aiUpstreamConfig, Date.now, aiRequestLogRepo);
   const aiProxyService = new AiProxyService({
     billing: aiBillingService,
     config: aiUpstreamConfig,
@@ -359,6 +363,7 @@ export async function createApp() {
       mailFlowRepo,
       idempotencyReceiptRepo,
       orderRepo,
+      aiRequestLogRepo,
       auditWriter,
       exec: () => app.mysql,
     }),
@@ -485,6 +490,7 @@ export async function createApp() {
   app.register(aiProvidersRoutes, { rateLimiter, providers: aiProviderService });
   // AI 计费引擎：计价表/计费设置/财务月报（console + CSRF + 幂等 + 审计；Key 只写不读）。
   app.register(consoleAiBillingRoutes, {
+    cursorService,
     tokenService,
     getUser,
     getSessionActive,

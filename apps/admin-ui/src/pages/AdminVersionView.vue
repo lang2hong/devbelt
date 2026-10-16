@@ -26,7 +26,7 @@ onMounted(async () => {
   <section class="page">
     <header class="head">
       <h2>系统状态</h2>
-      <p class="sub">版本与运行状态。</p>
+      <p class="sub">当前部署的服务版本与各依赖组件的运行状态。</p>
     </header>
     <p class="muted" v-if="state === 'loading'">加载中…</p>
     <p class="error" v-if="state === 'error'">加载失败，请刷新重试。</p>

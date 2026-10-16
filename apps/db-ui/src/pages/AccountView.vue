@@ -23,7 +23,7 @@ const showPassword = ref(false);
 
 const nameWrite = useIdempotencyKey();
 
-// AI 双段配额（P9.1c）：月额度 + 加油包。
+// AI 双段积分（月度赠送 + 充值）。
 const aiUsage = ref<AiUsageSnapshot | null>(null);
 const aiUsageState = ref<'loading' | 'ready' | 'error'>('loading');
 
@@ -134,14 +134,14 @@ async function submitPassword(): Promise<void> {
     <div class="card">
       <h3>AI 配额</h3>
       <template v-if="aiUsageState === 'ready' && aiUsage">
-        <div class="kv"><span class="k">月额度剩余</span><span class="v"><strong>{{ fmtTokens(aiUsage.monthlyRemaining) }}</strong> tokens<span class="muted small">（{{ formatDateTime(aiUsage.resetAt) }} 重置）</span></span></div>
-        <div class="kv"><span class="k">加油包剩余</span><span class="v"><strong>{{ fmtTokens(aiUsage.topupRemaining) }}</strong> tokens</span></div>
-        <div class="kv"><span class="k">本月已用</span><span class="v">{{ fmtTokens(aiUsage.used) }} / {{ fmtTokens(aiUsage.limit) }} tokens</span></div>
-        <p class="muted small">扣减顺序：月额度优先，不足部分按到期先后扣加油包。</p>
+        <div class="kv"><span class="k">本月赠送剩余</span><span class="v"><strong>{{ fmtCredits(aiUsage.monthlyRemaining) }}</strong> 积分<span class="muted small">（{{ formatDateTime(aiUsage.resetAt) }} 重置）</span></span></div>
+        <div class="kv"><span class="k">充值余额</span><span class="v"><strong>{{ fmtCredits(aiUsage.topupRemaining) }}</strong> 积分</span></div>
+        <div class="kv"><span class="k">本月已用</span><span class="v">{{ fmtCredits(aiUsage.used) }} / {{ fmtCredits(aiUsage.limit) }} 积分</span></div>
+        <p class="muted small">1 积分 = 1000 计费 token（输出按折算倍数加权）；本月赠送优先扣，不足部分按到期先后扣充值积分。</p>
       </template>
       <p class="muted" v-else-if="aiUsageState === 'loading'">加载中…</p>
       <p class="muted" v-else>配额加载失败。<button class="link" @click="loadAiUsage">重试</button></p>
-      <div class="actions"><button class="btn accent" @click="navigate('/ai-topup')">购买加油包</button></div>
+      <div class="actions"><button class="btn accent" @click="navigate('/ai-topup')">充值积分</button></div>
     </div>
 
     </div>

@@ -208,7 +208,7 @@ describe('AiProxyService.forward（parse-and-forward）', () => {
     for (const e of events) expect(body).toContain(`data: ${e}\n\n`);
     expect(body.endsWith('data: [DONE]\n\n')).toBe(true);
 
-    expect(settle).toHaveBeenCalledWith(RESERVATION, { promptTokens: 120, completionTokens: 8 });
+    expect(settle).toHaveBeenCalledWith(RESERVATION, { promptTokens: 120, completionTokens: 8 }, expect.objectContaining({ model: 'qwen-test', rawPromptTokens: 120, rawCompletionTokens: 8, usageEstimated: false, status: 'completed' }));
     const completed = auditRepo.events.find((e) => e.eventType === 'ai.chat.completed');
     expect(completed).toBeDefined();
     expect(JSON.parse(String(completed?.reason))).toMatchObject({
@@ -232,7 +232,7 @@ describe('AiProxyService.forward（parse-and-forward）', () => {
 
     await service.forward({ userId: 7, body: BODY, reservation: RESERVATION, res: res.asServerResponse() });
 
-    expect(settle).toHaveBeenCalledWith(RESERVATION, { promptTokens: 100, completionTokens: 4 });
+    expect(settle).toHaveBeenCalledWith(RESERVATION, { promptTokens: 100, completionTokens: 4 }, expect.objectContaining({ model: 'qwen-test', usageEstimated: true, status: 'completed' }));
     const completed = auditRepo.events.find((e) => e.eventType === 'ai.chat.completed');
     expect(JSON.parse(String(completed?.reason))).toMatchObject({ usageEstimated: true, completionTokens: 4 });
   });
@@ -254,7 +254,7 @@ describe('AiProxyService.forward（parse-and-forward）', () => {
     expect(body).toContain('data: {oops\n\n');
     expect(body).toContain('data: {"choices":[{"delta":{"content":"b"}}]}\n\n');
     expect(auditRepo.events.some((e) => e.eventType === 'ai.sse.chunk_parse_failed')).toBe(true);
-    expect(settle).toHaveBeenCalledWith(RESERVATION, { promptTokens: 100, completionTokens: 2 });
+    expect(settle).toHaveBeenCalledWith(RESERVATION, { promptTokens: 100, completionTokens: 2 }, expect.objectContaining({ model: 'qwen-test', status: expect.any(String) }));
   });
 
   it('客户端断开：abort 上游、按已下发 delta 估算结算、审计 aborted', async () => {
@@ -287,7 +287,7 @@ describe('AiProxyService.forward（parse-and-forward）', () => {
     await service.forward({ userId: 7, body: BODY, reservation: RESERVATION, res: res.asServerResponse() });
 
     expect(aborted).toBe(true);
-    expect(settle).toHaveBeenCalledWith(RESERVATION, { promptTokens: 100, completionTokens: 2 });
+    expect(settle).toHaveBeenCalledWith(RESERVATION, { promptTokens: 100, completionTokens: 2 }, expect.objectContaining({ model: 'qwen-test', status: expect.any(String) }));
     const abortedEvent = auditRepo.events.find((e) => e.eventType === 'ai.chat.aborted');
     expect(abortedEvent).toBeDefined();
     expect(abortedEvent?.failureCode).toBe('AI_ABORTED');
@@ -306,7 +306,7 @@ describe('AiProxyService.forward（parse-and-forward）', () => {
       message: expect.any(String),
       code: 'AI_PROVIDER_AUTH_ERROR',
     });
-    expect(settle).toHaveBeenCalledWith(RESERVATION, { promptTokens: 0, completionTokens: 0 });
+    expect(settle).toHaveBeenCalledWith(RESERVATION, { promptTokens: 0, completionTokens: 0 }, expect.objectContaining({ model: 'qwen-test', status: 'failed' }));
     const failed = auditRepo.events.find((e) => e.eventType === 'ai.chat.failed');
     expect(failed?.failureCode).toBe('AI_PROVIDER_AUTH_ERROR');
   });

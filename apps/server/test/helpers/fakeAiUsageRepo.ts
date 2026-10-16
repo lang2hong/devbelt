@@ -6,6 +6,7 @@ import type { Queryable, TxRunner } from '../../src/repository/mysql/db.js';
  * 真库并发语义由 `test/integration/aiQuota.test.ts` 用 MySQL 验证。
  */
 export class MemoryAiUsageRepo implements IAiUsageRepo {
+  // 行结构：AiUsageRow + raw（012）。
   private readonly rows = new Map<string, AiUsageRow>();
   private lock: Promise<unknown> = Promise.resolve();
 
@@ -70,10 +71,12 @@ export class MemoryAiUsageRepo implements IAiUsageRepo {
   async settleInTx(_exec: Queryable, userId: number, usageMonth: string, s: AiSettlement): Promise<void> {
     const row = this.get(userId, usageMonth);
     if (!row) throw new Error('row missing');
-    row.reservedPromptTokens = Math.max(0, row.reservedPromptTokens - s.releaseReservedPromptTokens);
-    row.reservedCompletionTokens = Math.max(0, row.reservedCompletionTokens - s.releaseReservedCompletionTokens);
+    row.reservedPromptTokens = Math.max(0, row.reservedPromptTokens - Math.min(row.reservedPromptTokens, s.releaseReservedPromptTokens));
+    row.reservedCompletionTokens = Math.max(0, row.reservedCompletionTokens - Math.min(row.reservedCompletionTokens, s.releaseReservedCompletionTokens));
     row.promptTokens += s.promptTokens;
     row.completionTokens += s.completionTokens;
+    row.rawPromptTokens = (row.rawPromptTokens ?? 0) + (s.rawPromptTokens ?? s.promptTokens);
+    row.rawCompletionTokens = (row.rawCompletionTokens ?? 0) + (s.rawCompletionTokens ?? s.completionTokens);
     row.requestCount += 1;
   }
 
